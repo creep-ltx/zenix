@@ -27,10 +27,10 @@ $(BUILD)/%.o: kernel/%.c $(wildcard kernel/*.h) | $(BUILD)
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
-	$(CC) $(CFLAGS) -nostartfiles -T link/kernel.ld -Wl,--build-id=none \
+	$(CC) $(CFLAGS) -nostartfiles -T link/kernel.ld -Wl,--build-id=none -Wl,-q \
 	    $(KOBJS) $(LIBGCC) -o $@
-$(BUILD)/kernel.bin: $(BUILD)/kernel.elf
-	$(OBJCOPY) -O binary $< $@
+$(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py
+	tools/mkzexe.py $< $@
 
 $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@

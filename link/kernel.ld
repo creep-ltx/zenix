@@ -2,8 +2,8 @@ OUTPUT_ARCH(m68k)
 ENTRY(_start)
 SECTIONS
 {
-    /* M0: the bootblock puts the kernel at 0x40000 in chip RAM */
-    . = 0x40000;
+    /* ZEXE: linked at 0, relocated by the loader (see tools/mkzexe.py) */
+    . = 0;
     .text : {
         KEEP(*(.text.start))
         *(.text*)
