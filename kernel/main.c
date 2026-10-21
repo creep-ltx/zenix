@@ -76,6 +76,27 @@ static void timer_init(void)
     CIAA(CIA_CRA) = 0x11;               /* start, continuous */
 }
 
+static void mem_selftest(void)
+{
+    u32 c0, f0, c1, f1;
+    mem_stats(&c0, &f0);
+    kprintf("mem: %u KB chip, %u KB fast free\n", c0 / 1024, f0 / 1024);
+    void *a = mem_alloc(100, 0, 1), *b = mem_alloc(40000, 0, 1);
+    void *c = mem_alloc(5000, MEM_CHIP, 2), *d = mem_alloc(300, 0, 1);
+    if (!a || !b || !c || !d)
+        panic("mem selftest: alloc failed");
+    if ((u32)c >= 0x200000 || (f0 && (u32)a < 0x200000))
+        panic("mem selftest: wrong pool");
+    mem_free(b);
+    mem_free(a);
+    u32 got = mem_free_owner(1);        /* d only */
+    mem_free(c);
+    mem_stats(&c1, &f1);
+    if (got < 300 || c1 != c0 || f1 != f0)
+        panic("mem selftest: memory not fully returned");
+    kprintf("mem: self-test ok (alloc, free, merge, owner free)\n");
+}
+
 static const char *cpu_name(u16 attn)
 {
     if (attn & 0x80)  return "68060";
@@ -99,6 +120,8 @@ void kmain(struct bootinfo *bi)
     }
 
     vectors_init();
+    mem_init(bi, bi->kernel_pa, *(u32 *)(bi->kernel_pa + 12));
+    mem_selftest();
     cache_enable();
     kprintf("cache: instruction cache on\n");
 

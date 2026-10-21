@@ -46,3 +46,14 @@ void cpu_idle(void);
 void cache_enable(void);
 void exc_common(void);
 void irq2_entry(void);
+
+/* mem.c */
+#define MEM_CHIP     1u         /* must be chip RAM (DMA: graphics, audio, disk) */
+#define MEM_FASTONLY 2u         /* fast RAM only, fail rather than use chip */
+void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
+void *mem_alloc(u32 n, u32 flags, u32 owner);
+void mem_free(void *p);
+u32 mem_free_owner(u32 owner);
+void mem_stats(u32 *chip_free, u32 *fast_free);
+void *kmalloc(u32 n);
+void kfree(void *p);
