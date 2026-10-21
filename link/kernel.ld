@@ -2,14 +2,13 @@ OUTPUT_ARCH(m68k)
 ENTRY(_start)
 SECTIONS
 {
-    . = 0x80000000;
+    /* M0: the bootblock puts the kernel at 0x40000 in chip RAM */
+    . = 0x40000;
     .text : {
         KEEP(*(.text.start))
         *(.text*)
     }
     .rodata : { *(.rodata*) }
-    . = ALIGN(4096);
-    __ro_end = .;
     .data : { *(.data*) }
     . = ALIGN(4);
     __bss_start = .;

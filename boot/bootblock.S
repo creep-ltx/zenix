@@ -94,6 +94,9 @@ rloop:
 rnext:
     dbf     %d3,rloop
 nofast:
+    /* M0: the kernel is linked at 0x40000 (chip), always load it there.
+     * Fast-RAM homes need a relocating kernel (later milestone). */
+    move.l  #0x40000,%d4
     move.l  %d4,0x1004              /* bootinfo kernel_pa */
 
     jsr     -150(%a6)               /* SuperState: supervisor from here on */

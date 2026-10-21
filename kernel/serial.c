@@ -76,14 +76,14 @@ void serial_rx_isr(void)
     while (INTREQR & INTF_RBF) {
         u8 c = SERDATR & 0xFF;
         INTREQ = INTF_RBF;
-        con_input_push(c);
+        (void)c;                 /* input path comes with the console */
     }
 }
 
 void serial_puts(const char *s)
 {
     while (*s)
-        con_putc(*s++);
+        serial_putc(*s++);
 }
 
 static void putnum(u32 v, u32 base, int sign)
@@ -91,7 +91,7 @@ static void putnum(u32 v, u32 base, int sign)
     char buf[12];
     int i = 0;
     if (sign && (s32)v < 0) {
-        con_putc('-');
+        serial_putc('-');
         v = (u32)-(s32)v;
     }
     do {
@@ -100,7 +100,7 @@ static void putnum(u32 v, u32 base, int sign)
         v /= base;
     } while (v);
     while (i--)
-        con_putc(buf[i]);
+        serial_putc(buf[i]);
 }
 
 void kprintf(const char *fmt, ...)
@@ -109,18 +109,18 @@ void kprintf(const char *fmt, ...)
     va_start(ap, fmt);
     for (; *fmt; fmt++) {
         if (*fmt != '%') {
-            con_putc(*fmt);
+            serial_putc(*fmt);
             continue;
         }
         switch (*++fmt) {
-        case 'c': con_putc((char)va_arg(ap, int)); break;
+        case 'c': serial_putc((char)va_arg(ap, int)); break;
         case 's': serial_puts(va_arg(ap, const char *)); break;
         case 'p': serial_puts("0x"); /* fall through */
         case 'x': putnum(va_arg(ap, u32), 16, 0); break;
         case 'u': putnum(va_arg(ap, u32), 10, 0); break;
         case 'd': putnum(va_arg(ap, u32), 10, 1); break;
-        case '%': con_putc('%'); break;
-        default:  con_putc('?'); break;
+        case '%': serial_putc('%'); break;
+        default:  serial_putc('?'); break;
         }
     }
     va_end(ap);
