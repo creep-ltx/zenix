@@ -54,3 +54,25 @@
 
 /* PAL E-clock ~709379 Hz; 100 Hz scheduler tick */
 #define CIA_TICKS_100HZ 7094
+
+/* more custom-chip registers: display, blitter */
+#define DMACONR REG16(0xDFF002)
+#define BPL1PTH REG16(0xDFF0E0)
+#define BPL2PTH REG16(0xDFF0E4)
+#define BPL2MOD REG16(0xDFF10A)
+#define COLOR02 REG16(0xDFF184)
+#define COLOR03 REG16(0xDFF186)
+#define BLTCON0 REG16(0xDFF040)
+#define BLTCON1 REG16(0xDFF042)
+#define BLTAFWM REG16(0xDFF044)
+#define BLTALWM REG16(0xDFF046)
+#define BLTAPTH REG16(0xDFF050)
+#define BLTAPTL REG16(0xDFF052)
+#define BLTDPTH REG16(0xDFF054)
+#define BLTDPTL REG16(0xDFF056)
+#define BLTSIZE REG16(0xDFF058)
+#define BLTAMOD REG16(0xDFF064)
+#define BLTDMOD REG16(0xDFF066)
+#define DMAF_BLTEN 0x0040
+#define DMAB_BLTBUSY 0x4000
+#define INTF_VERTB 0x0020       /* vertical blank, level 3 */

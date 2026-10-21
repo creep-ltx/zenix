@@ -1,116 +1,160 @@
 #include "kernel.h"
 
-/* Serial console with a line discipline: echo, backspace, ^U, ^C
- * (kills the foreground process), ^D (end of file). Reads return one
- * line at a time. */
+/* One tty per workspace. Line discipline: echo, backspace, ^U, ^C
+ * (kills the tty's foreground process), ^D (end of file). Reads return
+ * one line at a time. Input (serial or Amiga keyboard) always goes to
+ * the focused workspace's tty; output goes to that tty's terminal and,
+ * for the focused one, is mirrored to the serial port. */
 
+#define NTTY 10
 #define QSZ 1024
 #define LSZ 256
-static u8 q[QSZ];
-static u16 qhead, qtail;
-static u8 line[LSZ];
-static u16 llen;
-static int eof_pending;
-int tty_fg;
 
-void tty_init(void)
+struct tty {
+    u8 q[QSZ];
+    u16 qhead, qtail;
+    u8 line[LSZ];
+    u16 llen;
+    int eof_pending;
+    int fg;
+};
+static struct tty *tt[NTTY];
+
+static struct tty *get(int i)
 {
-    qhead = qtail = llen = 0;
-    eof_pending = 0;
-    tty_fg = 0;
+    if (i < 1 || i >= NTTY)
+        i = 1;
+    if (!tt[i]) {
+        tt[i] = kmalloc(sizeof *tt[i]);
+        if (!tt[i])
+            panic("tty: out of memory");
+        memset(tt[i], 0, sizeof *tt[i]);
+    }
+    return tt[i];
 }
 
-static void commit(u8 c)
+void tty_init(void) { }
+
+int tty_of(const struct proc *p)
 {
-    q[qhead] = c;
-    qhead = (u16)((qhead + 1) % QSZ);
-    if (qhead == qtail)
-        qtail = (u16)((qtail + 1) % QSZ);   /* overflow: drop oldest */
+    return (p->fd[0] && p->fd[0]->type == FT_TTY) ? (int)p->fd[0]->off : 1;
 }
 
-/* called from the serial receive interrupt */
+void tty_setfg(int tty, int pid) { get(tty)->fg = pid; }
+int tty_getfg(int tty) { return get(tty)->fg; }
+
+static void out(int i, char c)
+{
+    term_putc(i, c);
+    if (i == ws_cur)
+        serial_putc(c);
+}
+
+long tty_write(int i, const void *buf, u32 n)
+{
+    const char *s = buf;
+    for (u32 k = 0; k < n; k++)
+        out(i, s[k]);
+    return (long)n;
+}
+
+static void commit(struct tty *t, u8 c)
+{
+    t->q[t->qhead] = c;
+    t->qhead = (u16)((t->qhead + 1) % QSZ);
+    if (t->qhead == t->qtail)
+        t->qtail = (u16)((t->qtail + 1) % QSZ);     /* overflow: drop oldest */
+}
+
+static void erase1(int i)
+{
+    out(i, '\b'); out(i, ' '); out(i, '\b');
+}
+
+/* from the serial receive interrupt or the keyboard */
 void tty_input(u8 c)
 {
+    int i = ws_cur;
+    struct tty *t = get(i);
     if (c == '\r')
         c = '\n';
     if (c == 3) {                           /* ^C */
-        serial_putc('^');
-        serial_putc('C');
-        serial_putc('\n');
-        llen = 0;
-        struct proc *p = tty_fg ? proc_by_pid(tty_fg) : 0;
+        out(i, '^'); out(i, 'C'); out(i, '\n');
+        t->llen = 0;
+        struct proc *p = t->fg ? proc_by_pid(t->fg) : 0;
         if (p)
             proc_kill(p);
         wake_io();
         return;
     }
     if (c == 4) {                           /* ^D */
-        if (llen == 0)
-            eof_pending = 1;
+        if (t->llen == 0)
+            t->eof_pending = 1;
         else {
-            for (u16 i = 0; i < llen; i++)
-                commit(line[i]);
-            llen = 0;
+            for (u16 k = 0; k < t->llen; k++)
+                commit(t, t->line[k]);
+            t->llen = 0;
         }
         wake_io();
         return;
     }
     if (c == 8 || c == 127) {               /* backspace */
-        if (llen) {
-            llen--;
-            serial_putc('\b'); serial_putc(' '); serial_putc('\b');
+        if (t->llen) {
+            t->llen--;
+            erase1(i);
         }
         return;
     }
     if (c == 21) {                          /* ^U */
-        while (llen) {
-            llen--;
-            serial_putc('\b'); serial_putc(' '); serial_putc('\b');
+        while (t->llen) {
+            t->llen--;
+            erase1(i);
         }
         return;
     }
     if (c == '\n') {
-        serial_putc('\n');
-        for (u16 i = 0; i < llen; i++)
-            commit(line[i]);
-        commit('\n');
-        llen = 0;
+        out(i, '\n');
+        for (u16 k = 0; k < t->llen; k++)
+            commit(t, t->line[k]);
+        commit(t, '\n');
+        t->llen = 0;
         wake_io();
         return;
     }
-    if (c >= 32 && c < 127 && llen < LSZ - 1) {
-        line[llen++] = c;
-        serial_putc((char)c);
+    if (c >= 32 && t->llen < LSZ - 1) {
+        t->line[t->llen++] = c;
+        out(i, (char)c);
     }
 }
 
-static int have_line(void)
+static int have_line(struct tty *t)
 {
-    for (u16 i = qtail; i != qhead; i = (u16)((i + 1) % QSZ))
-        if (q[i] == '\n')
+    for (u16 k = t->qtail; k != t->qhead; k = (u16)((k + 1) % QSZ))
+        if (t->q[k] == '\n')
             return 1;
     return 0;
 }
 
-long tty_read(void *buf, u32 n)
+long tty_read(int i, void *buf, u32 n)
 {
+    struct tty *t = get(i);
     u8 *d = buf;
     for (;;) {
         if (current->killed)
             return -1;
-        if (have_line()) {
+        if (have_line(t)) {
             u32 got = 0;
-            while (got < n && qtail != qhead) {
-                u8 c = q[qtail];
-                qtail = (u16)((qtail + 1) % QSZ);
+            while (got < n && t->qtail != t->qhead) {
+                u8 c = t->q[t->qtail];
+                t->qtail = (u16)((t->qtail + 1) % QSZ);
                 d[got++] = c;
                 if (c == '\n')
                     break;
             }
             return (long)got;
         }
-        if (eof_pending) {
-            eof_pending = 0;
+        if (t->eof_pending) {
+            t->eof_pending = 0;
             return 0;
         }
         block_io();

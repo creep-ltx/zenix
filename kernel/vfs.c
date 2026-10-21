@@ -136,7 +136,7 @@ long vfs_read(struct file *f, void *buf, u32 n)
 {
     switch (f->type) {
     case FT_TTY:
-        return tty_read(buf, n);
+        return tty_read((int)f->off, buf, n);
     case FT_PIPE_R:
         return pipe_read(f, buf, n);
     case FT_INODE: {
@@ -154,12 +154,8 @@ long vfs_read(struct file *f, void *buf, u32 n)
 long vfs_write(struct file *f, const void *buf, u32 n)
 {
     switch (f->type) {
-    case FT_TTY: {
-        const char *s = buf;
-        for (u32 i = 0; i < n; i++)
-            serial_putc(s[i]);
-        return (long)n;
-    }
+    case FT_TTY:
+        return tty_write((int)f->off, buf, n);
     case FT_PIPE_W:
         return pipe_write(f, buf, n);
     }

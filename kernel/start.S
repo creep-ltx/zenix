@@ -66,6 +66,14 @@ irq2_entry:
     movem.l (%sp)+,%d0-%d1/%a0-%a1
     rte
 
+/* Level 3 autovector: vertical blank (applies Copper-list scroll updates) */
+    .globl  irq3_entry
+irq3_entry:
+    movem.l %d0-%d1/%a0-%a1,-(%sp)
+    jsr     irq3_c
+    movem.l (%sp)+,%d0-%d1/%a0-%a1
+    rte
+
 /* Level 5 autovector: Paula serial receive */
     .globl  irq5_entry
 irq5_entry:

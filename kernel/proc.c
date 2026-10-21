@@ -46,7 +46,7 @@ struct proc *proc_by_pid(int pid)
  * memory. stdio[i] (parent's fd numbers, -1 = same number) picks the
  * child's fds 0-2; the child gets no other fds. */
 int proc_spawn(const char *path, char *const *argv, int argc,
-               struct proc *parent, const int *stdio)
+               struct proc *parent, const int *stdio, int tty)
 {
     struct inode in;
     u32 cwd = parent ? parent->cwd_ino : 2;
@@ -163,6 +163,7 @@ int proc_spawn(const char *path, char *const *argv, int argc,
         }
     } else {
         struct file *t = file_new(FT_TTY);
+        t->off = (u32)tty;
         for (int i = 0; i < 3; i++)
             p->fd[i] = i == 0 ? t : file_dup(t);
     }
@@ -234,8 +235,8 @@ void proc_exit(int code)
             file_close(p->fd[i]);
             p->fd[i] = 0;
         }
-    if (tty_fg == p->pid)
-        tty_fg = 0;
+    if (tty_getfg(tty_of(p)) == p->pid)
+        tty_setfg(tty_of(p), 0);
     p->exit_code = code;
     p->state = P_ZOMBIE;
     struct proc *par = proc_by_pid(p->ppid);

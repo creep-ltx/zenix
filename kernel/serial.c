@@ -73,9 +73,22 @@ void serial_flush(void)
  * avoid overrun. */
 void serial_rx_isr(void)
 {
+    static int hot;
     while (INTREQR & INTF_RBF) {
         u8 c = SERDATR & 0xFF;
         INTREQ = INTF_RBF;
+        if (hot) {                  /* test/remote control: 0x1d then 1-9 or Return */
+            hot = 0;
+            if (c >= '1' && c <= '9')
+                ws_switch(c - '0');
+            else if (c == '\r' || c == '\n')
+                ws_request_shell(ws_cur);
+            continue;
+        }
+        if (c == 0x1d) {
+            hot = 1;
+            continue;
+        }
         tty_input(c);
     }
 }

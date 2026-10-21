@@ -35,6 +35,7 @@ void kprintf(const char *fmt, ...);
 void panic(const char *why) __attribute__((noreturn));
 void *memset(void *d, int c, unsigned long n);
 void *memcpy(void *d, const void *s, unsigned long n);
+void *memmove(void *d, const void *s, unsigned long n);
 extern volatile u32 ticks;      /* 100 Hz, CIA-A timer A */
 
 /* start.S */
@@ -59,6 +60,28 @@ u32 mem_free_owner(u32 owner);
 void mem_stats(u32 *chip_free, u32 *fast_free);
 void *kmalloc(u32 n);
 void kfree(void *p);
+
+/* gfx.c, term.c: display, workspaces, bar */
+#define COLS  80
+#define TROWS 31
+int gfx_font_init(u32 gfxbase);
+int gfx_init(void);
+int gfx_up(void);
+void gfx_cell(int row, int col, u8 ch, u8 fg, u8 bg);
+void gfx_bar_cell(int col, u8 ch, u8 fg, u8 bg);
+void gfx_scroll(void);
+void gfx_clear_text(void);
+void gfx_vblank(void);
+void term_putc(int ws, char c);
+void bar_draw(void);
+void ws_switch(int w);
+void ws_request_shell(int w);
+int ws_in_use(int w);
+extern int ws_cur;
+extern int ws_spawn_pending[10];
+void kbd_isr(void);
+void irq3_entry(void);
+void irq3_c(void);
 
 /* ide.c */
 int ide_init(void);
@@ -148,7 +171,7 @@ extern struct proc procs[NPROC];
 extern struct proc *current;
 void proc_init(void);
 int proc_spawn(const char *path, char *const *argv, int argc,
-               struct proc *parent, const int *stdio);
+               struct proc *parent, const int *stdio, int tty);
 void schedule(void);
 void proc_exit(int code) __attribute__((noreturn));
 int proc_wait(int pid);
@@ -175,9 +198,12 @@ void vfs_chdir_text(char *cwd, const char *path);
 
 /* tty.c */
 void tty_init(void);
-void tty_input(u8 c);
-long tty_read(void *buf, u32 n);
-extern int tty_fg;
+void tty_input(u8 c);                   /* to the focused workspace's tty */
+long tty_read(int tty, void *buf, u32 n);
+long tty_write(int tty, const void *buf, u32 n);
+void tty_setfg(int tty, int pid);
+int tty_getfg(int tty);
+int tty_of(const struct proc *p);
 
 /* syscalls: TRAP #0, number in d0, args d1-d3, result in d0 */
 #define SYS_exit    1

@@ -25,6 +25,7 @@ struct mblk {
 struct range { u32 lo, hi; int chip; };
 static struct range ranges[16];
 static int nranges;
+static u32 freeb[2];                    /* free block bytes: [0] fast, [1] chip */
 
 #define SZ(b)   ((b)->size & ~1u)
 #define USED(b) ((b)->size & 1u)
@@ -47,6 +48,7 @@ static void add_range(u32 lo, u32 hi, int chip)
     b->owner = 0;
     b->magic = MAGIC;
     ranges[nranges++] = (struct range){ lo, hi, chip };
+    freeb[chip] += hi - lo;
 }
 
 /* Add [lo,hi) minus up to two excluded spans */
@@ -84,10 +86,12 @@ static void *alloc_in(struct range *r, u32 need, u32 owner)
         u32 left = SZ(b) - need;
         struct mblk *use = b, *nx;
         if (left < 2 * HDR) {                   /* too small to split */
+            freeb[r->chip] -= SZ(b);
             b->size |= 1;
             b->owner = owner;
             return b + 1;
         }
+        freeb[r->chip] -= need;
         if (need >= BIG) {                      /* big: cut from the high end */
             use = (struct mblk *)((u32)b + left);
             b->size = left;
@@ -150,6 +154,7 @@ static struct range *range_of(u32 a)
 /* free a block, merge with free neighbours; returns the merged block */
 static struct mblk *free_blk(struct range *r, struct mblk *b)
 {
+    freeb[r->chip] += SZ(b);
     b->size &= ~1u;
     b->owner = 0;
     struct mblk *nx = next_of(r, b);
@@ -204,17 +209,8 @@ u32 mem_free_owner(u32 owner)
 
 void mem_stats(u32 *chip_free, u32 *fast_free)
 {
-    u32 c = 0, f = 0;
-    for (int i = 0; i < nranges; i++) {
-        struct range *r = &ranges[i];
-        for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b))
-            if (!USED(b)) {
-                if (r->chip) c += SZ(b) - HDR;
-                else f += SZ(b) - HDR;
-            }
-    }
-    *chip_free = c;
-    *fast_free = f;
+    *chip_free = freeb[1];
+    *fast_free = freeb[0];
 }
 
 void *kmalloc(u32 n) { return mem_alloc(n, 0, 0); }

@@ -55,6 +55,12 @@ void exc_c(u32 *rb)
     panic("unhandled exception");
 }
 
+void irq3_c(void)
+{
+    INTREQ = INTF_VERTB;
+    gfx_vblank();
+}
+
 void irq5_c(void)
 {
     serial_rx_isr();
@@ -64,8 +70,12 @@ void irq2_c(u32 sr)
 {
     u8 icr = CIAA(CIA_ICR);             /* read acknowledges the CIA */
     INTREQ = INTF_PORTS;
+    if (icr & 8)
+        kbd_isr();
     if (icr & 1) {
         ticks++;
+        if (ticks % 100 == 0)
+            bar_draw();
         sched_tick((u16)sr);
     }
 }
@@ -75,6 +85,7 @@ static void vectors_init(void)
     for (int i = 0; i < 256; i++)
         vector_table[i] = (u32)exc_common;
     vector_table[26] = (u32)irq2_entry;     /* level 2: CIA-A tick */
+    vector_table[27] = (u32)irq3_entry;     /* level 3: vertical blank */
     vector_table[29] = (u32)irq5_entry;     /* level 5: serial receive */
     vector_table[32] = (u32)trap0_entry;    /* TRAP #0: system calls */
     set_vbr(vector_table);
@@ -136,18 +147,24 @@ void kmain(struct bootinfo *bi)
                 (r->attrs & MEMF_CHIP) ? "chip" : "?");
     }
 
+    int font_ok = gfx_font_init(bi->font) == 0;     /* before mem_init: OS leftovers */
     vectors_init();
     mem_init(bi, bi->kernel_pa, *(u32 *)(bi->kernel_pa + 12));
     mem_selftest();
     cache_enable();
     kprintf("cache: instruction cache on\n");
+    if (font_ok && gfx_init() == 0)
+        kprintf("display: 640x256, 2 bitplanes, Copper split bar + text, ROM Topaz 8\n");
+    else
+        kprintf("display: not available (%s), serial only\n",
+                font_ok ? "out of chip RAM" : "no ROM font");
 
     if (ext2_mount())
         panic("cannot mount the root filesystem");
     proc_init();
     tty_init();
     char *iargv[] = { "/bin/init", 0 };
-    int pid = proc_spawn("/bin/init", iargv, 1, 0, 0);
+    int pid = proc_spawn("/bin/init", iargv, 1, 0, 0, 1);
     if (pid < 0) {
         kprintf("cannot start init (%d)\n", pid);
         panic("no init");
@@ -156,11 +173,35 @@ void kmain(struct bootinfo *bi)
 
     timer_init();
     ints_on();
+    bar_draw();
     for (;;) {
         proc_reap_orphans();
+        for (int w = 1; w <= 9; w++)
+            if (ws_spawn_pending[w]) {
+                ws_spawn_pending[w] = 0;
+                char *a[] = { "/bin/sh", 0 };
+                proc_spawn("/bin/sh", a, 1, 0, 0, w);
+                bar_draw();
+            }
         schedule();             /* run anything ready; returns when idle */
         serial_tx_drain();
         if (!serial_tx_pending())
             cpu_idle();
     }
+}
+
+void *memmove(void *d, const void *s, unsigned long n)
+{
+    u8 *p = d;
+    const u8 *q = s;
+    if (p < q) {
+        while (n--)
+            *p++ = *q++;
+    } else {
+        p += n;
+        q += n;
+        while (n--)
+            *--p = *--q;
+    }
+    return d;
 }

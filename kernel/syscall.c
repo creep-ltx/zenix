@@ -56,7 +56,7 @@ static long do_spawn(u32 upath, u32 uargv, u32 ustdio)
             fds[i] = (int)((const u32 *)ustdio)[i];
         stdio = fds;
     }
-    return proc_spawn(path, argv, argc, current, stdio);
+    return proc_spawn(path, argv, argc, current, stdio, 0);
 }
 
 /* TRAP #0 handler. rb[0..7] = d0-d7, rb[8..14] = a0-a6. d0 = number,
@@ -218,7 +218,7 @@ void syscall_c(u32 *rb)
         }
         break;
     case SYS_setfg:
-        tty_fg = (int)a1;
+        tty_setfg(tty_of(current), (int)a1);
         r = 0;
         break;
     case SYS_kill: {

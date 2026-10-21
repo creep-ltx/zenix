@@ -41,7 +41,16 @@ Bootblock, serial console, kmalloc, Gayle IDE, RDB partitions, FAT16 (optional m
 syscall idea, build and FS-UAE setup. **Rewritten:** process switching (shared memory map), loader
 (relocatable), exception handling. **Dropped:** 68030 MMU, per-process address spaces, mandatory FPU.
 
-## Milestones
+## Where the decisions stand (2026-10-22)
+D1 messages: **not done** - the kernel is still one program; drivers are not separate tasks yet.
+D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
+D3 relocating loader, no fork: done (ZEXE format, tools/mkzexe.py); shared libraries not started.
+D4 planar display server: the kernel draws text through Copper + blitter; a client API is not designed.
+D5 ext2: read-only driver (rev 0/1, 128+ byte inodes) done; writing not done; RDB partitions done.
+D6 scheduler: preemptive round robin on a 100 Hz tick; no priorities yet.
+D7 boot/test: FS-UAE done; test Amigas and the shared A1200 not yet.
+
+## Milestones (all three first ones done, see README)
 0. Boots in FS-UAE as an A1200 (68EC020, no MMU) and prints to the serial port.
 1. Memory manager, task switcher, system calls, first program from disk.
 2. Filesystem, tty, shell: the first "it is a Unix" moment. Tested on a real A1200.
