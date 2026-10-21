@@ -57,6 +57,10 @@ $(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py
 $(BUILD)/zenix.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
 	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)"
 
+# the same disk wrapped in an RDB, as a real hard disk or CF card has it
+$(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
+	python3 tools/mkrdb.py $< $@
+
 run: all
 	fs-uae fsuae/a1200-020.fs-uae
 
