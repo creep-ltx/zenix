@@ -4,24 +4,40 @@
 A Unix-like system (processes, `/` filesystem, pipes, signals, a shell) for the Amiga that is fast and uses
 the Amiga hardware: blitter, copper, Paula, chip/fast RAM. Not Linux, not AmigaOS-based.
 
-## Decisions
-- **CPU: 68020 or better, 32-bit flat.** No 68000. No MMU required (the target machines have none).
-  If an MMU is present it may be used later for optional protection.
-- **No MMU, so no `fork`.** `vfork` and `posix_spawn` only. Programs are relocatable and the loader places
-  them anywhere in RAM, so there is no fixed-address fragmentation.
-- **Crashes are contained, not prevented.** The kernel catches bus error, address error, illegal
-  instruction and divide by zero, kills only that process and frees everything it owned (per-process memory
-  tracking). Guard words around stacks and allocations; `CHK2` stack checks on 68020+. A wild write through
-  a bad pointer can still corrupt another process. This is the cost of having no MMU.
-- **Message passing at the core.** Pipes, sockets and signals are built on fast message ports.
-- **Chip RAM and fast RAM are separate pools** in the allocator.
-- **Boot:** bootblock takes over the machine from Kickstart and never returns to AmigaOS.
-- **Toolchain:** m68k-elf-gcc (`~/opt/m68k-elf`), newlib later, FS-UAE for tests, then the test Amigas.
-- **Graphics (later):** a display server on the blitter and copper; workspaces with an i3-style bar
-  (a workspace is listed only if it is current or has a program running); one file view (Ahiru-style).
+## Decisions (all proposed until tested; D = decision)
+D1. **Messages at the core.** Small kernel: scheduling, memory, interrupts, message ports, buffer cache.
+    Filesystems and drivers are separate tasks reached by message ports (pointers, no copies), loaded only
+    when used. Hot paths (cached reads) stay inside the kernel.
+D2. **Programs run in user mode**, enter the kernel with TRAP. Anything that needs no kernel (memcpy,
+    strings, clock from a shared page) stays in the C library. Measure the 68020 TRAP cost early.
+D3. **Relocated at load, no MMU.** Loader places programs anywhere in RAM using a relocation table. Static
+    linking first; the file format must leave room for position-independent shared libraries later. Fixed
+    stack size declared in the program; per-process memory lists freed on exit; big blocks from one end of
+    RAM and small ones from the other; slab allocator for kernel objects. No `fork`: `vfork`/`posix_spawn`.
+D4. **Graphics: planar is native.** A display server owns the screen and draws (fill, blit, text, scroll)
+    with the blitter and copper. Programs draw through it; no raw chunky framebuffer except a slow
+    separate mode. Small fixed set of OCS/ECS/AGA modes.
+D5. **Filesystem: ext2** behind a VFS layer. Standard little-endian format (swap on read, metadata only),
+    128-byte inodes, no extents or 64-bit, old revision flags, readable by Linux. Host `e2fsck` for now.
+    ext3 clean volumes may be read; a journal can come later. Timestamps unsigned (good to 2106).
+    Kernel lives in a raw area or boot partition found through the RDB. Written from the public spec,
+    not from Linux's GPL code. FAT is only an optional module. Buffer cache always.
+D6. **Scheduler:** preemptive, priority-based, round-robin within a priority, event-driven wake-ups;
+    interactive tasks (terminal, display server) high priority; lazy FPU save only if an FPU exists.
+D7. **Boot/test:** FS-UAE (68EC020, no MMU) first, then the test Amigas, then the shared A1200 (Emu68
+    behaviour unverified; read demoscene/friendly-takeover.md first).
+
+## Basics
+- CPU: 68020 or better, 32-bit flat, no MMU required; an MMU may be used later for optional protection.
+- Crashes are contained, not prevented: the kernel catches bus error, address error, illegal instruction
+  and divide by zero, kills only that process and frees what it owned; guard words around stacks and
+  allocations. A wild write can still corrupt another process; that is the cost of having no MMU.
+- Toolchain: m68k-elf-gcc (`~/opt/m68k-elf`), newlib later.
+- Desktop later: workspaces with an i3-style bar (listed only if current or occupied), one Ahiru-style
+  file view.
 
 ## Reused from zenix-old
-Bootblock, serial console, kmalloc, Gayle IDE, RDB partitions, FAT16, ELF loader, signals, keyboard,
+Bootblock, serial console, kmalloc, Gayle IDE, RDB partitions, FAT16 (optional module only), ELF loader, signals, keyboard,
 syscall idea, build and FS-UAE setup. **Rewritten:** process switching (shared memory map), loader
 (relocatable), exception handling. **Dropped:** 68030 MMU, per-process address spaces, mandatory FPU.
 
