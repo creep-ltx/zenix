@@ -8,9 +8,9 @@ CFLAGS  := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
 ASFLAGS := -mcpu=68020 -x assembler-with-cpp -c
 LIBGCC  := $(shell $(CC) $(CFLAGS) -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/proc.o $(BUILD)/syscall.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/ext2.o $(BUILD)/vfs.o $(BUILD)/tty.o
 
-UAPPS := init hello badptr crash spin
+UAPPS := init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
@@ -43,16 +43,19 @@ $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
-$(BUILD)/%.uo: user/%.c user/usys.h | $(BUILD)
+$(BUILD)/libz.uo: user/libz.c user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@
-$(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/crt0.o link/user.ld
+$(BUILD)/%.uo: user/%.c user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
-	    $(BUILD)/crt0.o $< $(LIBGCC) -o $@
+	    $(BUILD)/crt0.o $< $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py
 	tools/mkzexe.py $< $@ 16384
 
-$(BUILD)/zenix.hdf: $(USERZX) tools/mkdisk.py
-	python3 tools/mkdisk.py $@ $(USERZX)
+# root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
+$(BUILD)/zenix.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
+	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)"
 
 run: all
 	fs-uae fsuae/a1200-020.fs-uae

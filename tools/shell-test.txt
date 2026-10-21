@@ -1,0 +1,43 @@
+sleep 20
+send help\r
+sleep 1
+send ls -l /\r
+sleep 1
+send ls /bin\r
+sleep 1
+send cd /home\r
+sleep 1
+send pwd\r
+sleep 1
+send cat readme.txt\r
+sleep 1
+send cat /etc/motd | grep Unix\r
+sleep 1
+send cat /etc/motd | wc\r
+sleep 1
+send ps\r
+sleep 1
+send free\r
+sleep 1
+send hello 2\r
+sleep 3
+send badptr\r
+sleep 1
+send crash\r
+sleep 1
+send spin 2 & hello 1\r
+sleep 4
+send nonexistent\r
+sleep 1
+send echo "quoted   text" done\r
+sleep 1
+send wc < /etc/motd\r
+sleep 1
+send spin 100\r
+sleep 2
+send \x03
+sleep 1
+send ps\r
+sleep 1
+send exit\r
+sleep 3

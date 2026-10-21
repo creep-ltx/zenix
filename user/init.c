@@ -1,24 +1,20 @@
-#include "usys.h"
+#include "libz.h"
 
-static void run(const char *name)
-{
-    puts_("init: starting "); puts_(name); puts_("\n");
-    int pid = sys_spawn(name);
-    if (pid < 0) { puts_("init: spawn failed\n"); return; }
-    int code = sys_wait(pid);
-    puts_("init: "); puts_(name); puts_(" (pid "); putnum(pid);
-    puts_(") exited with "); putnum(code); puts_("\n");
-}
-
+/* pid 1: print the banner, run the shell, run it again when it exits */
 int main(void)
 {
-    puts_("init: pid "); putnum(sys_getpid()); puts_(" running in user mode\n");
-    run("hello");
-    run("badptr");
-    int sp = sys_spawn("spin");          /* runs alongside, preempted */
-    run("crash");
-    puts_("init: spin survived the crash, waiting for it\n");
-    putnum(sys_wait(sp)); puts_(" <- spin exit\n");
-    puts_("init: all done\n");
-    return 0;
+    char *sh[] = { "/bin/sh", 0 };
+    int fd = sys_open("/etc/motd", 0);
+    if (fd >= 0) {
+        char b[256]; int n;
+        while ((n = sys_read(fd, b, sizeof b)) > 0) sys_write(1, b, (u32)n);
+        sys_close(fd);
+    }
+    for (;;) {
+        int pid = sys_spawn("/bin/sh", sh, 0);
+        if (pid < 0) { printf("init: cannot start /bin/sh\n"); sys_sleep(500); continue; }
+        sys_setfg(0);
+        sys_wait(pid);
+        printf("init: shell exited, starting another\n");
+    }
 }

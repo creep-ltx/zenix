@@ -1,8 +1,9 @@
-#include "usys.h"
-int main(void)
+#include "libz.h"
+int main(int argc, char **argv)
 {
-    for (int i = 0; i < 3; i++) {
-        puts_("hello from pid "); putnum(sys_getpid()); puts_(" round "); putnum(i); puts_("\n");
+    int n = argc > 1 ? atoi(argv[1]) : 3;
+    for (int i = 0; i < n; i++) {
+        printf("hello from pid %d, round %d\n", sys_getpid(), i);
         sys_sleep(20);
     }
     return 7;

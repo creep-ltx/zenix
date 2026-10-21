@@ -1,27 +1,82 @@
 #include "kernel.h"
 
-int proc_wait(int pid);
+/* copy a NUL-terminated string from user memory, bounds-checked */
+static int copy_str(char *dst, u32 uptr, u32 max)
+{
+    for (u32 i = 0; i < max; i++) {
+        if (!user_ok(current, uptr + i, 1))
+            return -1;
+        dst[i] = ((const char *)uptr)[i];
+        if (!dst[i])
+            return 0;
+    }
+    return -1;
+}
+
+static struct file *getfd(u32 fd)
+{
+    return fd < NFD ? current->fd[fd] : 0;
+}
+
+static long do_spawn(u32 upath, u32 uargv, u32 ustdio)
+{
+    char path[64], strs[512], *argv[17];
+    int argc = 0, fds[3], *stdio = 0;
+    u32 used = 0;
+    if (copy_str(path, upath, sizeof path))
+        return -1;
+    if (uargv) {
+        for (;;) {
+            u32 ap;
+            if (!user_ok(current, uargv + (u32)argc * 4, 4))
+                return -1;
+            ap = ((const u32 *)uargv)[argc];
+            if (!ap)
+                break;
+            if (argc == 16 || used >= sizeof strs - 1)
+                return -1;
+            argv[argc] = strs + used;
+            if (copy_str(strs + used, ap, sizeof strs - used))
+                return -1;
+            while (strs[used])
+                used++;
+            used++;
+            argc++;
+        }
+    }
+    if (argc == 0) {
+        argv[0] = path;
+        argc = 1;
+    }
+    argv[argc] = 0;
+    if (ustdio) {
+        if (!user_ok(current, ustdio, 12))
+            return -1;
+        for (int i = 0; i < 3; i++)
+            fds[i] = (int)((const u32 *)ustdio)[i];
+        stdio = fds;
+    }
+    return proc_spawn(path, argv, argc, current, stdio);
+}
 
 /* TRAP #0 handler. rb[0..7] = d0-d7, rb[8..14] = a0-a6. d0 = number,
  * d1-d3 = arguments; the result goes back into rb[0]. */
 void syscall_c(u32 *rb)
 {
-    u32 a1 = rb[1], a2 = rb[2];
+    u32 a1 = rb[1], a2 = rb[2], a3 = rb[3];
     s32 r = -1;
+    struct file *f;
 
     switch (rb[0]) {
     case SYS_exit:
         proc_exit((int)a1);
     case SYS_write:
-        if (a1 == 1 || a1 == 2) {
-            u32 n = rb[3];
-            if (!user_ok(current, a2, n))
-                break;                  /* bad pointer: -1, process lives */
-            const char *s = (const char *)a2;
-            for (u32 i = 0; i < n; i++)
-                serial_putc(s[i]);
-            r = (s32)n;
-        }
+        if ((f = getfd(a1)) && user_ok(current, a2, a3))
+            r = (s32)vfs_write(f, (const void *)a2, a3);
+        break;
+    case SYS_read:
+        if ((f = getfd(a1)) && user_ok(current, a2, a3))
+            r = (s32)vfs_read(f, (void *)a2, a3);
         break;
     case SYS_yield:
         schedule();
@@ -30,20 +85,9 @@ void syscall_c(u32 *rb)
     case SYS_getpid:
         r = current->pid;
         break;
-    case SYS_spawn: {
-        char name[20];
-        int i = 0;
-        if (!user_ok(current, a1, 1))
-            break;
-        while (i < 19 && user_ok(current, a1 + (u32)i, 1) &&
-               ((const char *)a1)[i]) {
-            name[i] = ((const char *)a1)[i];
-            i++;
-        }
-        name[i] = 0;
-        r = proc_spawn(name, current->pid);
+    case SYS_spawn:
+        r = (s32)do_spawn(a1, a2, a3);
         break;
-    }
     case SYS_wait:
         r = proc_wait((int)a1);
         break;
@@ -53,6 +97,140 @@ void syscall_c(u32 *rb)
         schedule();
         r = 0;
         break;
+    case SYS_open: {
+        char path[64];
+        if (!copy_str(path, a1, sizeof path))
+            r = (s32)vfs_open(path, (int)a2);
+        break;
+    }
+    case SYS_close:
+        if ((f = getfd(a1))) {
+            current->fd[a1] = 0;
+            file_close(f);
+            r = 0;
+        }
+        break;
+    case SYS_lseek:
+        if ((f = getfd(a1)) && f->type == FT_INODE) {
+            s32 off = (s32)a2;
+            s32 np = a3 == 0 ? off : a3 == 1 ? (s32)f->off + off
+                                             : (s32)f->in.size + off;
+            if (np >= 0) {
+                f->off = (u32)np;
+                r = np;
+            }
+        }
+        break;
+    case SYS_readdir:
+        if ((f = getfd(a1)) && user_ok(current, a2, sizeof(struct udirent)))
+            r = (s32)vfs_readdir(f, (struct udirent *)a2);
+        break;
+    case SYS_stat: {
+        char path[64];
+        struct inode in;
+        if (!copy_str(path, a1, sizeof path) &&
+            user_ok(current, a2, sizeof(struct ustat)) &&
+            !ext2_namei(path, current->cwd_ino, &in, 0)) {
+            vfs_stat_inode(&in, (struct ustat *)a2);
+            r = 0;
+        }
+        break;
+    }
+    case SYS_fstat:
+        if ((f = getfd(a1)) && f->type == FT_INODE &&
+            user_ok(current, a2, sizeof(struct ustat))) {
+            vfs_stat_inode(&f->in, (struct ustat *)a2);
+            r = 0;
+        }
+        break;
+    case SYS_chdir: {
+        char path[64];
+        struct inode in;
+        if (!copy_str(path, a1, sizeof path) &&
+            !ext2_namei(path, current->cwd_ino, &in, 0) && S_ISDIR(in.mode)) {
+            current->cwd_ino = in.ino;
+            vfs_chdir_text(current->cwd, path);
+            r = 0;
+        }
+        break;
+    }
+    case SYS_getcwd: {
+        u32 n = 0;
+        while (current->cwd[n])
+            n++;
+        if (n + 1 <= a2 && user_ok(current, a1, n + 1)) {
+            memcpy((void *)a1, current->cwd, n + 1);
+            r = (s32)n;
+        }
+        break;
+    }
+    case SYS_pipe:
+        if (user_ok(current, a1, 8)) {
+            int fds[2];
+            if (vfs_pipe(fds) == 0) {
+                ((u32 *)a1)[0] = (u32)fds[0];
+                ((u32 *)a1)[1] = (u32)fds[1];
+                r = 0;
+            }
+        }
+        break;
+    case SYS_memalloc:
+        for (int i = 0; i < NREG; i++)
+            if (!current->reg[i].base) {
+                void *m = mem_alloc(a1, 0, (u32)current->pid);
+                if (m) {
+                    current->reg[i].base = (u32)m;
+                    current->reg[i].size = a1;
+                    r = (s32)m;
+                }
+                break;
+            }
+        break;
+    case SYS_memfree:
+        for (int i = 0; i < NREG; i++)
+            if (current->reg[i].base == a1 && a1) {
+                mem_free((void *)a1);
+                current->reg[i].base = 0;
+                r = 0;
+                break;
+            }
+        break;
+    case SYS_ticks:
+        r = (s32)ticks;
+        break;
+    case SYS_procinfo:
+        if (a1 < NPROC && user_ok(current, a2, sizeof(struct uproc))) {
+            struct proc *p = &procs[a1];
+            struct uproc *u = (struct uproc *)a2;
+            u->pid = (u32)p->pid;
+            u->ppid = (u32)p->ppid;
+            u->state = (u32)p->state;
+            u->mem = p->span;
+            memcpy(u->name, p->name, 16);
+            r = 0;
+        }
+        break;
+    case SYS_meminfo:
+        if (user_ok(current, a1, 16)) {
+            mem_stats(&((u32 *)a1)[0], &((u32 *)a1)[1]);
+            ((u32 *)a1)[2] = ((u32 *)a1)[3] = 0;
+            r = 0;
+        }
+        break;
+    case SYS_setfg:
+        tty_fg = (int)a1;
+        r = 0;
+        break;
+    case SYS_kill: {
+        struct proc *p = proc_by_pid((int)a1);
+        if (p && p->pid != 0) {
+            proc_kill(p);
+            r = 0;
+        }
+        break;
+    }
     }
     rb[0] = (u32)r;
+    if (current->killed)
+        proc_exit(130);
 }

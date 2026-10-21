@@ -55,6 +55,11 @@ void exc_c(u32 *rb)
     panic("unhandled exception");
 }
 
+void irq5_c(void)
+{
+    serial_rx_isr();
+}
+
 void irq2_c(u32 sr)
 {
     u8 icr = CIAA(CIA_ICR);             /* read acknowledges the CIA */
@@ -70,6 +75,7 @@ static void vectors_init(void)
     for (int i = 0; i < 256; i++)
         vector_table[i] = (u32)exc_common;
     vector_table[26] = (u32)irq2_entry;     /* level 2: CIA-A tick */
+    vector_table[29] = (u32)irq5_entry;     /* level 5: serial receive */
     vector_table[32] = (u32)trap0_entry;    /* TRAP #0: system calls */
     set_vbr(vector_table);
 }
@@ -83,7 +89,7 @@ static void timer_init(void)
     CIAA(CIA_TAHI) = CIA_TICKS_100HZ >> 8;
     CIAA(CIA_ICR) = 0x81;               /* timer A interrupt only */
     INTREQ = INTF_PORTS;
-    INTENA = INTF_SETCLR | INTF_INTEN | INTF_PORTS;
+    INTENA = INTF_SETCLR | INTF_INTEN | INTF_PORTS | INTF_RBF;
     CIAA(CIA_CRA) = 0x11;               /* start, continuous */
 }
 
@@ -136,10 +142,12 @@ void kmain(struct bootinfo *bi)
     cache_enable();
     kprintf("cache: instruction cache on\n");
 
-    if (bootdisk_init())
-        panic("no boot disk (ZDIR table missing)");
+    if (ext2_mount())
+        panic("cannot mount the root filesystem");
     proc_init();
-    int pid = proc_spawn("init", 0);
+    tty_init();
+    char *iargv[] = { "/bin/init", 0 };
+    int pid = proc_spawn("/bin/init", iargv, 1, 0, 0);
     if (pid < 0) {
         kprintf("cannot start init (%d)\n", pid);
         panic("no init");

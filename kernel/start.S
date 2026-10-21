@@ -66,6 +66,14 @@ irq2_entry:
     movem.l (%sp)+,%d0-%d1/%a0-%a1
     rte
 
+/* Level 5 autovector: Paula serial receive */
+    .globl  irq5_entry
+irq5_entry:
+    movem.l %d0-%d1/%a0-%a1,-(%sp)
+    jsr     irq5_c
+    movem.l (%sp)+,%d0-%d1/%a0-%a1
+    rte
+
 /* System call gate: TRAP #0. Block = d0-d7/a0-a6 ascending; the C
  * handler writes the result into the saved d0. */
     .globl  trap0_entry
@@ -125,6 +133,22 @@ irq_restore:
     move.l  4(%sp),%d0
     move.w  %d0,%sr
     rts
+
+/* u16 irq_save2(void): mask interrupt levels 1-2 only (CIAs, Gayle IDE)
+ * but leave the serial receive interrupt (level 5) running; never
+ * lowers an existing mask. Returns the previous SR. */
+    .globl  irq_save2
+irq_save2:
+    move.w  %sr,%d0
+    move.w  %d0,%d1
+    and.w   #0x0700,%d1
+    cmp.w   #0x0200,%d1
+    bcc.s   1f
+    move.w  %d0,%d1
+    and.w   #0xF8FF,%d1
+    or.w    #0x0200,%d1
+    move.w  %d1,%sr
+1:  rts
 
     .globl  ints_on
 ints_on:

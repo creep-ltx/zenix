@@ -102,12 +102,13 @@ int ide_init(void)
     return 0;
 }
 
-/* One sector. Interrupts are masked from the command to the Gayle
+/* One sector. Levels 1-2 are masked from the command to the Gayle
  * acknowledge: the drive's INT2 would otherwise storm into the level 2
- * handler (it shares the line with the CIAs). */
+ * handler (it shares the line with the CIAs). The serial receive
+ * interrupt (level 5) stays live so no characters are lost. */
 static int ide_sector(u32 lba, u16 *p, int write)
 {
-    u16 sv = irq_save();
+    u16 sv = irq_save2();
     int rc = -1;
     if (ide_wait(ST_BSY, 0))
         goto out;

@@ -76,7 +76,7 @@ void serial_rx_isr(void)
     while (INTREQR & INTF_RBF) {
         u8 c = SERDATR & 0xFF;
         INTREQ = INTF_RBF;
-        (void)c;                 /* input path comes with the console */
+        tty_input(c);
     }
 }
 

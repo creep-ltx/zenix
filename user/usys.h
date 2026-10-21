@@ -12,21 +12,37 @@ static inline int sys3(int n, u32 a, u32 b, u32 c)
     return d0;
 }
 
+struct udirent { u32 ino, type; char name[64]; };
+struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
+struct uproc { u32 pid, ppid, state, mem; char name[16]; };
+
+#define S_IFMT  0170000
+#define S_IFDIR 0040000
+#define S_IFREG 0100000
+#define S_IFLNK 0120000
+
 static inline void sys_exit(int c) { sys3(1, (u32)c, 0, 0); for (;;); }
 static inline int sys_write(int fd, const void *p, u32 n) { return sys3(2, (u32)fd, (u32)p, n); }
 static inline void sys_yield(void) { sys3(3, 0, 0, 0); }
 static inline int sys_getpid(void) { return sys3(4, 0, 0, 0); }
-static inline int sys_spawn(const char *name) { return sys3(5, (u32)name, 0, 0); }
+static inline int sys_spawn(const char *path, char *const *argv, const int *stdio)
+{ return sys3(5, (u32)path, (u32)argv, (u32)stdio); }
 static inline int sys_wait(int pid) { return sys3(6, (u32)pid, 0, 0); }
 static inline void sys_sleep(u32 ticks) { sys3(7, ticks, 0, 0); }
-
-static inline u32 slen(const char *s) { u32 n = 0; while (s[n]) n++; return n; }
-static inline void puts_(const char *s) { sys_write(1, s, slen(s)); }
-static inline void putnum(int v)
-{
-    char b[12]; int i = 12, neg = v < 0;
-    unsigned u = neg ? -(unsigned)v : (unsigned)v;
-    do { b[--i] = (char)('0' + u % 10); u /= 10; } while (u);
-    if (neg) b[--i] = '-';
-    sys_write(1, b + i, (u32)(12 - i));
-}
+static inline int sys_open(const char *p, int fl) { return sys3(8, (u32)p, (u32)fl, 0); }
+static inline int sys_close(int fd) { return sys3(9, (u32)fd, 0, 0); }
+static inline int sys_read(int fd, void *p, u32 n) { return sys3(10, (u32)fd, (u32)p, n); }
+static inline int sys_lseek(int fd, int off, int whence) { return sys3(11, (u32)fd, (u32)off, (u32)whence); }
+static inline int sys_readdir(int fd, struct udirent *d) { return sys3(12, (u32)fd, (u32)d, 0); }
+static inline int sys_stat(const char *p, struct ustat *s) { return sys3(13, (u32)p, (u32)s, 0); }
+static inline int sys_fstat(int fd, struct ustat *s) { return sys3(14, (u32)fd, (u32)s, 0); }
+static inline int sys_chdir(const char *p) { return sys3(15, (u32)p, 0, 0); }
+static inline int sys_getcwd(char *b, u32 n) { return sys3(16, (u32)b, n, 0); }
+static inline int sys_pipe(int fds[2]) { return sys3(17, (u32)fds, 0, 0); }
+static inline void *sys_memalloc(u32 n) { return (void *)sys3(18, n, 0, 0); }
+static inline int sys_memfree(void *p) { return sys3(19, (u32)p, 0, 0); }
+static inline u32 sys_ticks(void) { return (u32)sys3(20, 0, 0, 0); }
+static inline int sys_procinfo(u32 i, struct uproc *p) { return sys3(21, i, (u32)p, 0); }
+static inline int sys_meminfo(u32 out[4]) { return sys3(22, (u32)out, 0, 0); }
+static inline int sys_setfg(int pid) { return sys3(23, (u32)pid, 0, 0); }
+static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }
