@@ -1,0 +1,14 @@
+# Negative test: 68030+MMU but NO FPU — kmain's probe must panic with a
+# clear "no FPU found" message.
+[fs-uae]
+amiga_model = A3000
+kickstart_file = /home/creep/UAE/ROM/kicka3000.rom
+chip_memory = 2048
+fast_memory = 8192
+uae_cpu_model = 68030
+uae_mmu_model = 68030
+uae_fpu_model = 0
+floppy_drive_0 = ../build/zenix.adf
+floppy_drive_speed = 0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true

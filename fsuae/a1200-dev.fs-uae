@@ -1,0 +1,25 @@
+# Zenix on an A1200-class machine (Gayle IDE at 0xDA0000): the config
+# a real accelerated A1200 would correspond to. CPU forced to
+# 68030 + MMU + 68882 (i.e. a Blizzard-style accelerator).
+[fs-uae]
+# Speed target: Blizzard-class 50MHz 68030 (the real-hardware goal).
+# The A1200 model defaults to cycle-exact 14MHz and UAE's MMU emulation
+# ignores the cycle-exact frequency knobs, so: approximate mode plus
+# throttle. Throttle is tenths of a percent — 2520 ≈ 3.5x ≈ 50MHz,
+# verified via the kernel's "cpu: ~N MHz effective" E-clock probe.
+accuracy = 0
+amiga_model = A1200
+kickstart_file = /home/creep/UAE/ROM/kicka1200.rom
+chip_memory = 2048
+fast_memory = 8192
+uae_cpu_model = 68030
+uae_mmu_model = 68030
+uae_fpu_model = 68882
+uae_cpu_speed = real
+uae_cpu_throttle = 2520
+floppy_drive_0 = ../build/zenix.adf
+floppy_drive_speed = 0
+hard_drive_0 = ../build/zenix.hdf
+hard_drive_0_controller = ide0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true

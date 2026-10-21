@@ -1,0 +1,16 @@
+# Zenix primary dev machine (M2+): A4000-class for Gayle IDE, CPU forced
+# to 68030 + MMU + 68882, 2MB chip + 8MB fast, IDE hardfile on ide0.
+[fs-uae]
+amiga_model = A4000
+kickstart_file = /home/creep/UAE/ROM/kicka4000.rom
+chip_memory = 2048
+fast_memory = 8192
+uae_cpu_model = 68030
+uae_mmu_model = 68030
+uae_fpu_model = 68882
+floppy_drive_0 = ../build/zenix.adf
+floppy_drive_speed = 0
+hard_drive_0 = ../build/zenix.hdf
+hard_drive_0_controller = ide0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true

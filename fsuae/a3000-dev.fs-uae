@@ -1,0 +1,15 @@
+# zenix development machine: A3000-class, 68030 + MMU + 68882,
+# 2MB chip + 8MB Zorro II fast RAM.
+[fs-uae]
+amiga_model = A3000
+kickstart_file = /home/creep/UAE/ROM/kicka3000.rom
+chip_memory = 2048
+fast_memory = 8192
+uae_cpu_model = 68030
+uae_mmu_model = 68030
+uae_fpu_model = 68882
+floppy_drive_0 = ../build/zenix.adf
+floppy_drive_speed = 0
+# serial output from the guest: PTY created by tools/serial-tap.py
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true

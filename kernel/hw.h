@@ -1,0 +1,56 @@
+#pragma once
+#include "kernel.h"
+
+#define REG16(a) (*(volatile u16 *)(a))
+#define REG8(a)  (*(volatile u8 *)(a))
+
+/* custom chips */
+#define SERDATR REG16(0xDFF018)
+#define INTENAR REG16(0xDFF01C)
+#define INTREQR REG16(0xDFF01E)
+#define SERDAT  REG16(0xDFF030)
+#define SERPER  REG16(0xDFF032)
+#define DMACON  REG16(0xDFF096)
+#define INTENA  REG16(0xDFF09A)
+#define INTREQ  REG16(0xDFF09C)
+#define COLOR00 REG16(0xDFF180)
+
+#define INTF_SETCLR 0x8000
+#define INTF_INTEN  0x4000
+#define INTF_RBF    0x0800      /* serial receive buffer full, level 5 */
+#define INTF_PORTS  0x0008      /* CIA-A, level 2 */
+#define INTF_TBE    0x0001      /* serial transmit buffer empty, level 1 */
+
+/* display */
+#define COP1LCH REG16(0xDFF080)
+#define COP1LCL REG16(0xDFF082)
+#define COPJMP1 REG16(0xDFF088)
+#define DIWSTRT REG16(0xDFF08E)
+#define DIWSTOP REG16(0xDFF090)
+#define DDFSTRT REG16(0xDFF092)
+#define DDFSTOP REG16(0xDFF094)
+#define BPL1PTH REG16(0xDFF0E0)
+#define BPL1PTL REG16(0xDFF0E2)
+#define BPLCON0 REG16(0xDFF100)
+#define BPLCON1 REG16(0xDFF102)
+#define BPLCON2 REG16(0xDFF104)
+#define BPL1MOD REG16(0xDFF108)
+#define COLOR01 REG16(0xDFF182)
+#define DMAF_SETCLR 0x8000
+#define DMAF_COPEN  0x0080
+#define DMAF_BPLEN  0x0100
+#define DMAF_MASTER 0x0200
+
+/* CIA-A: odd byte addresses, register stride 0x100 */
+#define CIAA(r) REG8(0xBFE001 + ((u32)(r) << 8))
+#define CIA_TALO 4
+#define CIA_TAHI 5
+#define CIA_TBLO 6
+#define CIA_TBHI 7
+#define CIA_SDR  12
+#define CIA_ICR  13
+#define CIA_CRA  14
+#define CIA_CRB  15
+
+/* PAL E-clock ~709379 Hz; 100 Hz scheduler tick */
+#define CIA_TICKS_100HZ 7094

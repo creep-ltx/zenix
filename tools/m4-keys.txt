@@ -1,0 +1,9 @@
+sleep 12
+send ls\r
+sleep 3
+send hello\r
+sleep 4
+send crash\r
+sleep 3
+send echo still alive\r
+sleep 3

@@ -1,0 +1,11 @@
+sleep 12
+send segv\r
+sleep 3
+send crash\r
+sleep 3
+send spin\r
+sleep 3
+send \x03
+sleep 2
+send echo done\r
+sleep 3
