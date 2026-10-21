@@ -57,3 +57,62 @@ u32 mem_free_owner(u32 owner);
 void mem_stats(u32 *chip_free, u32 *fast_free);
 void *kmalloc(u32 n);
 void kfree(void *p);
+
+/* ide.c */
+int ide_init(void);
+int ide_read(u32 lba, u32 count, void *buf);
+int ide_write(u32 lba, u32 count, const void *buf);
+
+/* ZEXE header, see tools/mkzexe.py */
+struct zexe {
+    u16 bra, bra_disp;
+    u32 magic;                  /* 'ZEXE' */
+    u32 image_size, mem_size, nreloc, reloc_off, stack_size, reserved;
+};
+#define ZEXE_MAGIC 0x5a455845u
+
+/* proc.c */
+#define NPROC 16
+#define SLICE 5                 /* ticks (100 Hz) */
+enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_ZOMBIE };
+struct proc {                   /* start.S relies on the first three: */
+    u32 *ksp;                   /*   offset 0 */
+    u32 usp;                    /*   offset 4 */
+    u32 entry;                  /*   offset 8 */
+    int state;
+    int pid, ppid;
+    int exit_code;
+    int wait_for;               /* P_WAIT: child pid, -1 = any */
+    u32 wake;                   /* P_SLEEP: tick to wake at */
+    u32 base, span;             /* the process's own memory (image+bss+stack) */
+    char name[16];
+};
+extern struct proc procs[NPROC];
+extern struct proc *current;
+void proc_init(void);
+int proc_spawn(const char *name, int ppid);
+void schedule(void);
+void proc_exit(int code) __attribute__((noreturn));
+void proc_reap_orphans(void);
+void sched_tick(u16 sr);
+int user_ok(const struct proc *p, u32 ptr, u32 len);
+
+/* boot disk table (raw, until the filesystem arrives): sector 0 */
+struct zdirent { char name[20]; u32 lba, bytes; };
+struct zdir { u32 magic, count; struct zdirent e[15]; u8 pad[512 - 8 - 15 * 28]; };
+#define ZDIR_MAGIC 0x5a444952u  /* "ZDIR" */
+int bootdisk_init(void);
+void *bootdisk_load(const char *name, u32 *bytes);   /* kmalloc'd, caller frees */
+
+/* syscalls: TRAP #0, number in d0, args d1-d3, result in d0 */
+#define SYS_exit   1
+#define SYS_write  2
+#define SYS_yield  3
+#define SYS_getpid 4
+#define SYS_spawn  5
+#define SYS_wait   6
+#define SYS_sleep  7
+void syscall_c(u32 *rb);
+void trap0_entry(void);
+void switch_to(struct proc *old, struct proc *next);
+void user_first_entry(void);

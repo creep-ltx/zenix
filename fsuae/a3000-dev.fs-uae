@@ -13,3 +13,5 @@ floppy_drive_speed = 0
 # serial output from the guest: PTY created by tools/serial-tap.py
 serial_port = /tmp/zenix-serial
 uae_serial_direct = true
+hard_drive_0 = ../build/zenix.hdf
+hard_drive_0_controller = ide0

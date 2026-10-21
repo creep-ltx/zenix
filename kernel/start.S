@@ -52,12 +52,57 @@ exc_common:
     jsr     exc_c
 6:  bra.s   6b                      /* exc_c does not return in M0 */
 
-/* Level 2 autovector: CIA-A (timer tick) */
+/* Level 2 autovector: CIA-A (timer tick). Passes the interrupted SR so
+ * the scheduler only preempts user-mode code. After the 4 saved
+ * registers the CPU frame is at 16(%sp): sr.w, pc.l, fmt.w. */
     .globl  irq2_entry
 irq2_entry:
     movem.l %d0-%d1/%a0-%a1,-(%sp)
+    moveq   #0,%d0
+    move.w  16(%sp),%d0
+    move.l  %d0,-(%sp)
     jsr     irq2_c
+    addq.l  #4,%sp
     movem.l (%sp)+,%d0-%d1/%a0-%a1
+    rte
+
+/* System call gate: TRAP #0. Block = d0-d7/a0-a6 ascending; the C
+ * handler writes the result into the saved d0. */
+    .globl  trap0_entry
+trap0_entry:
+    movem.l %d0-%d7/%a0-%a6,-(%sp)
+    move.l  %sp,-(%sp)
+    jsr     syscall_c
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d0-%d7/%a0-%a6
+    rte
+
+/* void switch_to(struct proc *old, struct proc *next)
+ * struct proc: +0 ksp, +4 usp, +8 entry. Callee-saved registers go on
+ * the old kernel stack; the new process resumes where it last switched
+ * (or in user_first_entry). */
+    .globl  switch_to
+switch_to:
+    move.l  4(%sp),%a0
+    move.l  8(%sp),%a1
+    movem.l %d2-%d7/%a2-%a6,-(%sp)
+    move.l  %usp,%a2
+    move.l  %a2,4(%a0)
+    move.l  %sp,(%a0)
+    move.l  4(%a1),%a2
+    move.l  %a2,%usp
+    move.l  (%a1),%sp
+    movem.l (%sp)+,%d2-%d7/%a2-%a6
+    rts
+
+/* First run of a new process: build a format-0 exception frame (user
+ * mode, interrupts on, pc = entry) and drop to user mode. */
+    .globl  user_first_entry
+user_first_entry:
+    move.l  current,%a0
+    move.w  #0,-(%sp)               /* format 0, vector 0 */
+    move.l  8(%a0),-(%sp)           /* pc = current->entry */
+    move.w  #0,-(%sp)               /* sr: user mode, mask 0 */
     rte
 
 /* void set_vbr(void *table) */

@@ -41,18 +41,28 @@ void exc_c(u32 *rb)
     u16 vec = (u16)((fv & 0xFFF) >> 2);
     u16 fmt = (u16)(fv >> 12);
 
-    kprintf("\n*** exception: vector %u sr=%x pc=%p", vec, sr, pc);
+    u32 faddr = (fmt == 0xA || fmt == 0xB) ? *(u32 *)(frame + 16) : 0;
+
+    if (!(sr & 0x2000) && current->pid != 0) {
+        /* user-mode fault: kill just this process, free what it owned */
+        kprintf("\n[kernel] pid %d (%s) killed: vector %u pc=%p addr=%p\n",
+                current->pid, current->name, vec, pc, faddr);
+        proc_exit(139);
+    }
+    kprintf("\n*** exception in the kernel: vector %u sr=%x pc=%p", vec, sr, pc);
     if (fmt == 0xA || fmt == 0xB)
-        kprintf(" fault-addr=%p", *(u32 *)(frame + 16));
+        kprintf(" fault-addr=%p", faddr);
     panic("unhandled exception");
 }
 
-void irq2_c(void)
+void irq2_c(u32 sr)
 {
     u8 icr = CIAA(CIA_ICR);             /* read acknowledges the CIA */
     INTREQ = INTF_PORTS;
-    if (icr & 1)
+    if (icr & 1) {
         ticks++;
+        sched_tick((u16)sr);
+    }
 }
 
 static void vectors_init(void)
@@ -60,6 +70,7 @@ static void vectors_init(void)
     for (int i = 0; i < 256; i++)
         vector_table[i] = (u32)exc_common;
     vector_table[26] = (u32)irq2_entry;     /* level 2: CIA-A tick */
+    vector_table[32] = (u32)trap0_entry;    /* TRAP #0: system calls */
     set_vbr(vector_table);
 }
 
@@ -109,7 +120,7 @@ static const char *cpu_name(u16 attn)
 void kmain(struct bootinfo *bi)
 {
     serial_init();
-    kprintf("\nZenix M0 - 68020+, flat, no MMU\n");
+    kprintf("\nZenix - 68020+, flat, no MMU\n");
     kprintf("cpu: %s (attnflags %x)\n", cpu_name(bi->attn), bi->attn);
     kprintf("kernel: %u bytes at %p\n", bi->kernel_size, bi->kernel_pa);
     for (int i = 0; i < bi->nregions; i++) {
@@ -125,14 +136,23 @@ void kmain(struct bootinfo *bi)
     cache_enable();
     kprintf("cache: instruction cache on\n");
 
+    if (bootdisk_init())
+        panic("no boot disk (ZDIR table missing)");
+    proc_init();
+    int pid = proc_spawn("init", 0);
+    if (pid < 0) {
+        kprintf("cannot start init (%d)\n", pid);
+        panic("no init");
+    }
+    kprintf("proc: init is pid %d\n", pid);
+
     timer_init();
     ints_on();
-    u32 t0 = ticks;
-    while (ticks - t0 < 100)
-        cpu_idle();
-    kprintf("timer: 100 ticks counted, interrupts work\n");
-    kprintf("M0 ok\n");
-    serial_flush();
-    for (;;)
-        cpu_idle();
+    for (;;) {
+        proc_reap_orphans();
+        schedule();             /* run anything ready; returns when idle */
+        serial_tx_drain();
+        if (!serial_tx_pending())
+            cpu_idle();
+    }
 }
