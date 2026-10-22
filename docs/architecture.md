@@ -172,7 +172,7 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 ### diskd - the disk server (`user/diskd.c`, port `disk`)
 Owns the hardware through privileged raw-sector syscalls (`blk_read/blk_write/blk_size/blk_ram`, only for
 processes flagged `priv`). Reads the Amiga **RDB** partition table (`RDSK`/`PART` blocks, DosEnvec geometry) and
-serves named devices: `ide0` (whole disk), `ide0p1`, `ide0p2`..., and `ram0` for the boot RAM disk. Handles are
+serves named devices: `ide0` (the whole disk - IDE or the Pi SD card), `ide0p1`, `ide0p2`... (the partitions of an RDB, else of a PC MBR: type 0x83 = ext2, type 0x76 = an RDB inside, others listed and never mounted), and `ram0` for the boot RAM disk. Handles are
 confined to their partition (LBAs are partition-relative). A device opened `DISK_MOUNT` has exactly one writer -
 the filesystem server; tools (`fdisk`, `mkfs.ext2`, `fsck.ext2`) open `DISK_RAW`, which is refused while mounted.
 Protocol: `kernel/diskproto.h`.

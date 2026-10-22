@@ -69,6 +69,17 @@ static unsigned total_cyls(void)
     return d.sectors / RDB_CYL;
 }
 
+/* does sector 0 look like a PC partition table (MBR)? Such a disk (an Emu68 SD card, say) holds boot files
+ * that init would wipe, so init needs a second -y there. */
+static int has_mbr(void)
+{
+    static unsigned char sec[512];
+    if (rd(0, sec) || sec[510] != 0x55 || sec[511] != 0xAA) return 0;
+    for (int i = 0; i < 4; i++)
+        if (sec[446 + 16 * i + 4] != 0 && (sec[446 + 16 * i] == 0 || sec[446 + 16 * i] == 0x80)) return 1;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) { printf("usage: fdisk list|init|add|del|boot ...\n"); return 2; }
@@ -89,7 +100,15 @@ int main(int argc, char **argv)
 
     if (!strcmp(argv[1], "init")) {
         if (argc < 4 || strcmp(argv[3], "-y")) { printf("fdisk: init destroys the partition table: add -y\n"); return 1; }
+        if (have != 1 && has_mbr() && (argc < 5 || strcmp(argv[4], "-y"))) {
+            printf("fdisk: %s has a PC partition table (MBR) and boot files; init would destroy them.\n"
+                   "       If you really mean it: fdisk init %s -y -y\n", argv[2], argv[2]);
+            return 1;
+        }
         r.nparts = 0;
+    } else if (have != 1 && has_mbr()) {
+        printf("fdisk: %s has a PC partition table (MBR); fdisk edits Amiga tables (RDB) only.\n", argv[2]);
+        return 1;
     } else if (have != 1) {
         printf("fdisk: no partition table on %s (use: fdisk init %s -y)\n", argv[2], argv[2]);
         return 1;

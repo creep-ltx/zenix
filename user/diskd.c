@@ -3,8 +3,8 @@
 #include "rdb.h"
 typedef unsigned char u8;
 
-/* The disk server: owns the IDE disk (through the kernel's raw-sector calls,
- * which only this process may use), reads the Amiga partition table (RDB)
+/* The disk server: owns the raw disk (IDE or SD card, through the kernel's raw-sector calls,
+ * which only this process may use), reads its partition table - an Amiga RDB, else a PC MBR -
  * and serves the whole disk and each partition as a named device.
  * Rules: a device a filesystem server has mounted can only be written by that
  * server; tools open devices with DISK_RAW, which is refused while mounted;
@@ -27,26 +27,78 @@ static void add(const char *name, const char *label, u32 start, u32 sectors, u32
     d->start = start; d->sectors = sectors; d->dostype = dostype; d->flags = flags;
 }
 
-static int disk_rd(unsigned lba, void *buf) { return sys_blk_read(lba, 1, buf); }
+static u32 rd_base;                     /* first sector of the table being read (0, or an MBR partition) */
+static int disk_rd(unsigned lba, void *buf) { return sys_blk_read(rd_base + lba, 1, buf); }
+
+static void part_name(char *name, int n)
+{
+    strcpy(name, "ide0p");
+    if (n >= 10) { name[5] = (char)('0' + n / 10); name[6] = (char)('0' + n % 10); name[7] = 0; }
+    else { name[5] = (char)('0' + n); name[6] = 0; }
+}
+
+/* the partitions of an RDB that starts at sector "base"; returns 1 if there was one */
+static int add_rdb(u32 base, int *count)
+{
+    struct rdb r;
+    rd_base = base;
+    int rc = rdb_read(disk_rd, &r);
+    rd_base = 0;
+    if (rc != 1) return 0;
+    for (int i = 0; i < r.nparts; i++) {
+        char name[16];
+        part_name(name, ++*count);
+        u32 cyl = r.part[i].heads * r.part[i].secs;          /* sectors per cylinder, as the table says */
+        u32 start = base + r.part[i].lowcyl * cyl;
+        add(name, r.part[i].label, start, (r.part[i].highcyl - r.part[i].lowcyl + 1) * cyl,
+            r.part[i].dostype, r.part[i].bootable);
+    }
+    return 1;
+}
+
+#define DT_RDB_IN_MBR 0x52444200u       /* 'RDB\0': MBR type 0x76, an Amiga RDB inside (Emu68's convention) */
+#define DT_MBR        0x4D425200u       /* 'MBR' + type byte: a partition of a kind we do not use */
+static u32 le32(const u8 *p) { return p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
+
+/* A PC partition table (MBR) at sector 0: four primary entries. Type 0x83 (Linux) is ext2 for us; type 0x76
+ * holds an Amiga RDB of its own (the partitions inside are listed too); the rest (FAT boot partitions, ...) are
+ * listed but never mounted. Returns 1 if sector 0 really is a partition table: every entry has a plausible
+ * status and lies inside the disk (a bare FAT volume also ends in 55 AA but has boot code where the table is). */
+static int add_mbr(int *count)
+{
+    static u8 sec[512];
+    if (disk_rd(0, sec) || sec[510] != 0x55 || sec[511] != 0xAA) return 0;
+    u32 st[4], len[4], ty[4], used = 0;
+    for (int i = 0; i < 4; i++) {
+        const u8 *e = sec + 446 + 16 * i;
+        if (e[0] != 0 && e[0] != 0x80) return 0;
+        ty[i] = e[4]; st[i] = le32(e + 8); len[i] = le32(e + 12);
+        if (ty[i] == 0 || len[i] == 0) continue;
+        if (st[i] == 0 || st[i] + len[i] < st[i] || st[i] + len[i] > disk_sectors) return 0;
+        used++;
+    }
+    if (!used) return 0;
+    for (int i = 0; i < 4; i++) {
+        if (ty[i] == 0 || len[i] == 0) continue;
+        char name[16];
+        part_name(name, ++*count);
+        u32 dt = ty[i] == 0x83 ? DT_EXT2 : ty[i] == 0x76 ? DT_RDB_IN_MBR : DT_MBR | ty[i];
+        add(name, "", st[i], len[i], dt, sec[446 + 16 * i] == 0x80);
+        if (ty[i] == 0x76) add_rdb(st[i], count);
+    }
+    return 1;
+}
 
 static void scan(void)
 {
-    struct rdb r;
     u32 keep[MAXDEV];
     for (int i = 0; i < ndev; i++) keep[i] = dev[i].mounted;
     int oldn = ndev;
     ndev = 0;
     if (disk_sectors) add("ide0", "", 0, disk_sectors, 0, 0);
     if (ram_sectors) add("ram0", "", 0, ram_sectors, 0, 0);
-    if (disk_sectors && rdb_read(disk_rd, &r) == 1)
-        for (int i = 0; i < r.nparts; i++) {
-            char name[16] = "ide0p";
-            name[5] = (char)('1' + i); name[6] = 0;
-            u32 cyl = r.part[i].heads * r.part[i].secs;          /* sectors per cylinder, as the table says */
-            u32 start = r.part[i].lowcyl * cyl;
-            add(name, r.part[i].label, start, (r.part[i].highcyl - r.part[i].lowcyl + 1) * cyl,
-                r.part[i].dostype, r.part[i].bootable);
-        }
+    int count = 0;
+    if (disk_sectors && !add_rdb(0, &count)) add_mbr(&count);
     for (int i = 0; i < ndev && i < oldn; i++) dev[i].mounted = keep[i];   /* mounts survive a rescan */
 }
 

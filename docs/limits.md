@@ -21,10 +21,10 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Disk access on the user's own A1200 (a PiStorm): its disk is the Pi's SD card behind Emu68's drivers, which
   die when Zenix kills AmigaOS. Done in code (`kernel/emmc.c`, stage0 device-tree handover; see architecture.md
   section 3) but **never run on a real Pi**: the SD controller is modelled from the SD Host Controller and SD
-  Physical Layer specifications, so clocks, the mailbox calls and card-detect are unverified. Not done: partition
-  tables other than an RDB at sector 0 (the Emu68 boot card is MBR/FAT: it shows as one disk with no partitions;
-  never write to it blindly - it holds Emu68 and the Kickstart ROM), the 50 MHz high-speed mode, eMMC. Until
-  then: RAM-disk root from the floppy.
+  Physical Layer specifications, so clocks, the mailbox calls and card-detect are unverified.
+  Partition tables: an RDB or a PC MBR (primary entries; verified in FS-UAE with disk images). The Emu68 boot card
+  holds Emu68 and the Kickstart ROM in its FAT partition: never write to it without a plan. Not done: extended
+  partitions, GPT, the 50 MHz high-speed mode, eMMC. Until then: RAM-disk root from the floppy.
 - Signals and handlers, process groups, `/proc`; supplementary groups; a shadow password file; one login session at a
   time (workspaces are not separate sessions); user and group ids are 16 bits.
 - Shared libraries; only static programs.

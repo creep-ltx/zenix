@@ -1,0 +1,11 @@
+sleep 24
+send fdisk list\r
+sleep 3
+send df\r
+sleep 2
+send ls /\r
+sleep 2
+send fdisk init ide0 -y\r
+sleep 3
+send fdisk add ide0 x 1\r
+sleep 3

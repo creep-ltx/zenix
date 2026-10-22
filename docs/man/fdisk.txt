@@ -18,6 +18,10 @@ DESCRIPTION
     that no filesystem has mounted (the disk the system runs from is mounted,
     so use a second disk or a scratch image).
 
+    A disk with a PC partition table (MBR, e.g. an Emu68 SD card) is listed
+    by "list" but not edited: add, del and boot say so, and "init" refuses
+    unless -y is given twice (it would wipe the MBR and the boot files).
+
 COMMANDS
     list [disk]    show disks and partitions (all disks if none is named)
     init disk -y   write an empty table, DESTROYING the old one; "-y" is
