@@ -32,8 +32,11 @@ _entry:
     bne.s   1b
     /* The relocation loop wrote into code. Nothing below may run from a stale instruction cache (or a stale Emu68
      * translation): flush, then reach the next instruction through a register jump so the pipeline / the JIT
-     * fetches the patched bytes. CPU type from bootinfo (0x1000, AttnFlags): the bootblock filled it. */
+     * fetches the patched bytes. CPU type from bootinfo (0x1000, AttnFlags): the bootblock filled it. A 68000 has
+     * no cache and no CACR: skip (it is refused below, after the BSS clear). */
     move.w  0x1000,%d0
+    and.w   #0x008E,%d0             /* 68020 or better? */
+    beq.s   2f
     and.w   #0x0088,%d0             /* 68040 or 68060? */
     bne.s   11f
     movec   %cacr,%d0
