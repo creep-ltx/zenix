@@ -114,49 +114,21 @@ static int bwrite_copy(u32 blk, u32 off, const void *src, u32 len)
 
 static u32 rd32(const u8 *p) { return le32(*(const u32 *)p); }
 
-/* ---- partition table: find the ext2 partition (RDB), else sector 0 ---- */
+/* ---- the device is a partition (or a bare disk) opened through the disk
+ * server: sector 0 of it is where the filesystem starts ---- */
 
-static int ext2_at(u32 lba)
+int ext2_probe(void)
 {
     u8 sec[512];
-    if (fs_blk_read(lba + 2, 1, sec))      /* byte 1024: superblock */
+    if (fs_blk_read(2, 1, sec))         /* byte 1024: superblock */
         return 0;
     return le16(*(u16 *)(sec + 56)) == 0xEF53;
-}
-
-static u32 find_partition(void)
-{
-    u32 sec[128];
-    for (u32 i = 0; i < 16; i++) {
-        if (fs_blk_read(i, 1, sec))
-            return 0xFFFFFFFF;
-        if (sec[0] != 0x5244534b)       /* 'RDSK' */
-            continue;
-        u32 next = sec[7];              /* rdb_PartitionList */
-        for (int guard = 0; next != 0xFFFFFFFF && guard < 16; guard++) {
-            if (fs_blk_read(next, 1, sec))
-                break;
-            if (sec[0] != 0x50415254)   /* 'PART' */
-                break;
-            u32 *env = &sec[32];        /* DosEnvec at byte 128 */
-            u32 surf = env[3], bpt = env[5], low = env[9];
-            u32 lba = low * surf * bpt;
-            if (ext2_at(lba))
-                return lba;
-            next = sec[4];              /* pb_Next */
-        }
-    }
-    return ext2_at(0) ? 0 : 0xFFFFFFFF; /* no RDB: bare filesystem */
 }
 
 int ext2_mount(void)
 {
     u8 sb[1024];
-    part_lba = find_partition();
-    if (part_lba == 0xFFFFFFFF) {
-        fs_log("ext2: no ext2 partition found\n");
-        return -1;
-    }
+    part_lba = 0;
     if (fs_blk_read(part_lba + 2, 2, sb))
         return -1;
     u32 logbs = rd32(sb + 24);
@@ -176,8 +148,8 @@ int ext2_mount(void)
     inode_size = rd32(sb + 76) == 0 ? 128 : le16(*(u16 *)(sb + 88));
     gd_blk = (bsize == 1024) ? 2 : 1;
     mounted = 1;
-    fs_log("ext2: partition at sector %u, %u KB blocks, %u blocks, %u inodes\n",
-            part_lba, bsize / 1024, total_blocks, ninodes);
+    fs_log("ext2: %u KB blocks, %u blocks, %u inodes\n",
+            bsize / 1024, total_blocks, ninodes);
     return 0;
 }
 

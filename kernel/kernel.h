@@ -88,6 +88,7 @@ void irq3_c(void);
 
 /* ide.c */
 int ide_init(void);
+u32 ide_sectors(void);
 int ide_read(u32 lba, u32 count, void *buf);
 int ide_write(u32 lba, u32 count, const void *buf);
 
@@ -268,6 +269,7 @@ int tty_of(const struct proc *p);
 #define SYS_hrtime      36   /* E-clock ticks (709379 Hz PAL) since boot */
 #define SYS_wsreq       39   /* session manager: wait for a shell-on-workspace request */
 #define SYS_spawn_tty   40   /* spawn a program with its stdio on a workspace tty */
+#define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */
 #define SYS_ttymirror   37   /* 0 = stop copying screen output to the serial port */
 void syscall_c(u32 *rb);

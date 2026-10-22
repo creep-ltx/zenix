@@ -163,6 +163,10 @@ void syscall_c(u32 *rb)
             }
         }
         break;
+    case SYS_blk_size:
+        if (current->priv)
+            r = (s32)ide_sectors();
+        break;
     case SYS_hrtime:
         r = (s32)hr_time();
         break;
@@ -203,8 +207,9 @@ void syscall_c(u32 *rb)
         break;
     }
     case SYS_blk_read: case SYS_blk_write:
-        /* raw disk: only the filesystem server */
-        if (current->priv && user_ok(current, a3, a2 * 512))
+        /* raw disk: only the disk server (trusted; the buffer is a client's, so
+         * it is not checked against this process's own memory) */
+        if (current->priv)
             r = rb[0] == SYS_blk_read ? ide_read(a1, a2, (void *)a3)
                                       : ide_write(a1, a2, (const void *)a3);
         break;

@@ -1,12 +1,45 @@
 #include "fsenv.h"
 #include "../kernel/fsproto.h"
+#include "../kernel/diskproto.h"
 
 /* The filesystem server: kernel/ext2.c in user mode behind the "fs" port.
  * Embedded in the kernel image (the kernel needs it before any disk is
  * readable); the kernel's VFS layer talks to it with messages. */
 
-int fs_blk_read(u32 lba, u32 count, void *buf) { return sys_blk_read(lba, count, buf); }
-int fs_blk_write(u32 lba, u32 count, const void *buf) { return sys_blk_write(lba, count, buf); }
+static int disk_port, fs_dev = -1;
+
+static int disk_rw(u32 op, u32 lba, u32 count, const void *buf)
+{
+    struct umsg m;
+    m.type = op; m.a[0] = (u32)fs_dev; m.a[1] = lba; m.a[2] = count; m.a[3] = (u32)buf;
+    return sys_call(disk_port, &m);
+}
+int fs_blk_read(u32 lba, u32 count, void *buf) { return disk_rw(DISK_READ, lba, count, buf); }
+int fs_blk_write(u32 lba, u32 count, const void *buf) { return disk_rw(DISK_WRITE, lba, count, buf); }
+
+static int disk_open(const char *name)
+{
+    struct umsg m;
+    m.type = DISK_OPEN; m.a[0] = (u32)name;
+    return sys_call(disk_port, &m);
+}
+
+/* the root filesystem: the first partition that holds ext2, else the bare disk */
+static int find_root(void)
+{
+    struct diskinfo di;
+    for (u32 i = 0; i < 16; i++) {
+        struct umsg m;
+        m.type = DISK_LIST; m.a[0] = i; m.a[1] = (u32)&di;
+        if (sys_call(disk_port, &m) < 0) break;
+        if (di.dostype == 0 && i != 0) continue;
+        if (i == 0) continue;                         /* try the partitions first */
+        fs_dev = disk_open(di.name);
+        if (fs_dev >= 0 && ext2_probe()) return 0;
+    }
+    fs_dev = disk_open("ide0");
+    return (fs_dev >= 0 && ext2_probe()) ? 0 : -1;
+}
 
 static void fill_stat(const struct inode *in, struct ustat *st)
 {
@@ -83,7 +116,12 @@ static int handle(struct umsg *m)
 
 int main(void)
 {
-    if (ext2_mount()) { printf("fsd: no ext2 filesystem\n"); return 1; }
+    int tries = 0;
+    while ((disk_port = sys_port_find("disk")) < 0) {
+        if (++tries > 600) { printf("fsd: no disk server\n"); return 1; }
+        sys_sleep(5);
+    }
+    if (find_root() || ext2_mount()) { printf("fsd: no ext2 filesystem\n"); return 1; }
     int port = sys_port_create("fs");
     if (port < 0) { printf("fsd: cannot create the fs port\n"); return 1; }
     struct umsg *m = sys_recv(port, 1);

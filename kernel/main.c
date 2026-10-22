@@ -185,7 +185,7 @@ void kmain(struct bootinfo *bi)
     cache_enable((bi->attn & 0x88) != 0);       /* 68040 or 68060 */
     kprintf("cache: instruction cache on (data cache off: no MMU to keep DMA coherent)\n");
     if (font_ok && gfx_init() == 0)
-        kprintf("display: 640x256, 2 bitplanes, Copper split bar + text, ROM Topaz 8\n");
+        kprintf("display: 640x256, 1 bitplane, Copper split bar + text, ROM Topaz 8\n");
     else
         kprintf("display: not available (%s), serial only\n",
                 font_ok ? "out of chip RAM" : "no ROM font");
@@ -195,12 +195,14 @@ void kmain(struct bootinfo *bi)
     proc_init();
     tty_init();
     /* the filesystem server and the starter are built into the kernel */
-    extern const char fsd_blob[], fsd_blob_end[], boot_blob[], boot_blob_end[];
-    int fpid = proc_spawn_image(fsd_blob, (u32)(fsd_blob_end - fsd_blob), "fsd", 1, 1);
+    extern const char fsd_blob[], fsd_blob_end[], boot_blob[], boot_blob_end[],
+                      diskd_blob[], diskd_blob_end[];
+    int dpid = proc_spawn_image(diskd_blob, (u32)(diskd_blob_end - diskd_blob), "diskd", 1, 1);
+    int fpid = proc_spawn_image(fsd_blob, (u32)(fsd_blob_end - fsd_blob), "fsd", 1, 0);
     int pid = proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), "boot", 1, 1);
-    if (fpid < 0 || pid < 0)
+    if (dpid < 0 || fpid < 0 || pid < 0)
         panic("cannot start the filesystem server");
-    kprintf("proc: fsd is pid %d, boot is pid %d (it starts /bin/init)\n", fpid, pid);
+    kprintf("proc: diskd %d, fsd %d, boot %d (it starts /bin/init)\n", dpid, fpid, pid);
 
     timer_init();
     ints_on();

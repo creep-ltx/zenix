@@ -1,0 +1,16 @@
+# Zenix on a stock A1200: 68EC020 at 14 MHz, no MMU, no FPU, 2 MB chip.
+[fs-uae]
+accuracy = 1
+amiga_model = A1200
+kickstart_file = /home/creep/UAE/ROM/kicka1200.rom
+chip_memory = 2048
+fast_memory = 0
+floppy_drive_0 = ../../build/zenix.adf
+floppy_drive_speed = 0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true
+hard_drive_0 = ../../build/zenix-rdb.hdf
+hard_drive_0_controller = ide0
+window_width = 960
+window_height = 768
+zoom = full

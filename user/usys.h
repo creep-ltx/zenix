@@ -72,3 +72,4 @@ static inline int sys_ttymirror(int on) { return sys3(37, (u32)on, 0, 0); }
 static inline struct umsg *sys_replyrecv(struct umsg *m, int result, int port) { return (struct umsg *)sys3(38, (u32)m, (u32)result, (u32)port); }
 static inline int sys_wsreq(void) { return sys3(39, 0, 0, 0); }
 static inline int sys_spawn_tty(const char *path, char *const *argv, int tty) { return sys3(40, (u32)path, (u32)argv, (u32)tty); }
+static inline int sys_blk_size(void) { return sys3(41, 0, 0, 0); }

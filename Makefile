@@ -12,7 +12,7 @@ LIBGCC  := $(shell $(CC) $(CFLAGS) -print-libgcc-file-name 2>/dev/null)
 
 KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/embed.o
 
-UAPPS := init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
+UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch pingd ping bench
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
@@ -51,7 +51,7 @@ $(BUILD)/fsd.uelf: $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)
 	    $(BUILD)/crt0.o $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py
 	tools/mkzexe.py $< $@ 16384
-$(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx | $(BUILD)
+$(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----

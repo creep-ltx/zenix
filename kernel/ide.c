@@ -147,6 +147,11 @@ static int ide_rw(u32 lba, u32 count, void *buf, int write)
     return 0;
 }
 
+u32 ide_sectors(void)
+{
+    return nsectors;
+}
+
 int ide_read(u32 lba, u32 count, void *buf)
 {
     return ide_rw(lba, count, buf, 0);

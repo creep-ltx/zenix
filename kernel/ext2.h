@@ -24,6 +24,7 @@ struct ustat {                  /* returned by SYS_stat / SYS_fstat */
     u32 uid, gid, links;
 };
 #endif
+int ext2_probe(void);        /* does the open device hold an ext2 filesystem? */
 int ext2_mount(void);        /* needs fs_blk_read/fs_blk_write from the environment */
 int ext2_iget(u32 ino, struct inode *out);
 u32 ext2_bmap(const struct inode *in, u32 n);
