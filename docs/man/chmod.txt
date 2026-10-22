@@ -1,0 +1,34 @@
+CHMOD(1)			Zenix manual
+
+NAME
+    chmod - change permission bits
+
+SYNOPSIS
+    chmod mode file...
+
+DESCRIPTION
+    Sets the permission bits of each file. The mode is either an octal
+    number (755, 0644) or a symbolic list separated by commas:
+
+        [ugoa]...  +|-|=  [rwxX]...
+
+    u user (owner), g group, o others, a all (the default); + adds, - removes,
+    = sets exactly; r read, w write, x execute, X execute only for
+    directories or files that are already executable by someone.
+
+    The special bits (setuid, sticky) can only be set with an octal mode.
+
+EXAMPLES
+    chmod 755 script
+    chmod u+x,go-w file
+    chmod a=r notes
+
+NOTES
+    Zenix does not check permissions yet (there are no users; see DESIGN.md,
+    D8), so the bits are stored on disk for Linux and for the future.
+
+EXIT STATUS
+    0, 1 if a file is not found or cannot be changed, 2 invalid mode.
+
+SEE ALSO
+    ls(1), stat(1)

@@ -1,0 +1,15 @@
+DF(1)			Zenix manual
+
+NAME
+    df - show free disk space
+
+SYNOPSIS
+    df
+
+DESCRIPTION
+    Prints the size, used and available space of the root filesystem in 1 KB
+    blocks, the percentage used, and the number of inodes (free inodes in
+    brackets). Only the root filesystem is shown; there are no options.
+
+SEE ALSO
+    du(1), free(1)

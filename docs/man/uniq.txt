@@ -1,0 +1,32 @@
+UNIQ(1)			Zenix manual
+
+NAME
+    uniq - collapse repeated lines
+
+SYNOPSIS
+    uniq [-cdui] [input [output]]
+
+DESCRIPTION
+    Reads the input (standard input if none) and prints each run of identical
+    adjacent lines once. The input should be sorted first, since only
+    neighbours are compared.
+
+OPTIONS
+    -c    put the number of repeats before each line
+    -d    print only lines that were repeated
+    -u    print only lines that were not repeated
+    -i    ignore case when comparing
+
+EXAMPLES
+    sort file | uniq
+    sort file | uniq -c | sort -rn
+
+EXIT STATUS
+    0, 1 if the input cannot be opened, 2 unknown option.
+
+NOTES
+    The optional second file name ("output") is accepted but ignored: the
+    result always goes to the standard output. Use ">" instead.
+
+SEE ALSO
+    sort(1)

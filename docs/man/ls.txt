@@ -1,0 +1,55 @@
+LS(1)			Zenix manual
+
+NAME
+    ls - list files and directories
+
+SYNOPSIS
+    ls [-aAldRFhtrSs1] [file...]
+
+DESCRIPTION
+    Lists the named files and directories (the current directory if none is
+    given). Operands that are not directories are listed first, together and
+    sorted; then each directory in turn, with a "name:" heading when there is
+    more than one or when -R is used. Names are sorted by name unless -t or -S
+    says otherwise. On a terminal the names are put in columns (80 wide); when
+    the output goes to a pipe or file, or with -1, there is one name per line.
+    A symbolic link that points to a directory is listed as that directory
+    unless -l or -d is given.
+
+OPTIONS
+    -a    include names starting with "." (including . and ..)
+    -A    like -a but leave out . and ..
+    -l    long format: mode, link count, owner, group, size, date, name
+          (a symbolic link shows "name -> target")
+    -d    list a directory itself, not what is in it
+    -R    recurse into subdirectories
+    -F    mark names: / directory, * executable, @ symbolic link
+    -h    with -l, sizes as 1.5K, 2M ...
+    -t    sort by modification time, newest first
+    -S    sort by size, largest first
+    -r    reverse the sort order
+    -1    one name per line even on a terminal
+    -s    accepted and ignored
+
+    Options can be combined (ls -laR). "--" ends the options.
+
+LONG FORMAT
+    -rwxr-xr-x 1 root root 5120 Oct 22 12:51 sh
+    The date shows the time of day for recent files and the year for files
+    older than about six months. Owner and group are always shown as "root"
+    (Zenix has no users yet).
+
+EXAMPLES
+    ls -l /bin             long list of the programs
+    ls -lt | head -n 5     the five most recently changed files
+    ls -d */               only the directories here
+
+NOTES
+    At most 400 names per directory are listed.
+
+EXIT STATUS
+    0 success, 1 a file or directory could not be found or opened,
+    2 unknown option.
+
+SEE ALSO
+    stat(1), find(1), du(1), sh(1)

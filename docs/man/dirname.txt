@@ -1,0 +1,18 @@
+DIRNAME(1)			Zenix manual
+
+NAME
+    dirname - strip the last component from a path
+
+SYNOPSIS
+    dirname path
+
+DESCRIPTION
+    Prints path without its last component: the directory part. A path with
+    no slash gives ".", and a file in the root gives "/".
+
+EXAMPLES
+    dirname /usr/man/ls.txt           prints /usr/man
+    dirname ls.txt                    prints .
+
+SEE ALSO
+    basename(1)

@@ -1,0 +1,29 @@
+LN(1)			Zenix manual
+
+NAME
+    ln - make links
+
+SYNOPSIS
+    ln [-sf] target link_name
+    ln [-sf] target... directory
+
+DESCRIPTION
+    Makes link_name another name for target. Without -s it is a hard link
+    (the same file under two names; both must be on the same filesystem);
+    with -s it is a symbolic link holding the path of the target. When
+    several targets are given, or the last name is an existing directory, a
+    link named like each target is made inside that directory.
+
+OPTIONS
+    -s    symbolic link
+    -f    remove an existing link_name first
+
+EXAMPLES
+    ln -s /bin/less /bin/more
+    ln data data.old
+
+EXIT STATUS
+    0, 1 if a link could not be made, 2 usage error.
+
+SEE ALSO
+    readlink(1), ls(1)

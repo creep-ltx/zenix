@@ -1,0 +1,19 @@
+HEXDUMP(1)			Zenix manual
+
+NAME
+    hexdump - show a file in hexadecimal
+
+SYNOPSIS
+    hexdump [-C] [file]
+
+DESCRIPTION
+    Prints the file (or the standard input) as the canonical hex dump: the
+    offset, sixteen bytes in hexadecimal, and the same bytes as characters
+    between bars (non-printable bytes as "."). The final line shows the
+    total length. -C is accepted but is the only format.
+
+EXAMPLE
+    00000000  5a 45 58 45 ...                                  |ZEXE....|
+
+SEE ALSO
+    cat(1), cmp(1), less(1)

@@ -1,0 +1,33 @@
+CUT(1)			Zenix manual
+
+NAME
+    cut - select columns or fields from lines
+
+SYNOPSIS
+    cut -f list [-d char] [-s] [file...]
+    cut -c list [file...]
+    cut -b list [file...]
+
+DESCRIPTION
+    Prints the chosen parts of each line. A list is made of numbers and
+    ranges separated by commas: 3, 2-5, 4- (from 4 to the end), -3 (up to 3),
+    1,3,5-.
+
+OPTIONS
+    -f list   select fields (parts separated by the delimiter)
+    -d char   the delimiter for -f (default: tab)
+    -s        with -f, drop lines that contain no delimiter (otherwise such
+              lines are passed through unchanged)
+    -c list   select character positions
+    -b list   same as -c (bytes and characters are the same here)
+
+EXAMPLES
+    cut -d: -f1 /etc/passwd
+    ls -l | cut -c1-10
+    echo a,b,c | cut -d, -f2,3
+
+EXIT STATUS
+    0, 1 if a file cannot be opened, 2 usage error.
+
+SEE ALSO
+    tr(1), sort(1), sed(1)

@@ -1,0 +1,15 @@
+WHOAMI(1)			Zenix manual
+
+NAME
+    whoami - print the user name
+
+SYNOPSIS
+    whoami
+
+DESCRIPTION
+    Prints the value of $USER, or "root" if it is not set. Zenix does not
+    have users yet: every program runs with full rights, so this is only a
+    name (see DESIGN.md, D8, for the plan).
+
+SEE ALSO
+    id(1)

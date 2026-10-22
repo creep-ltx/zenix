@@ -1,0 +1,15 @@
+HELLO(1)			Zenix manual
+
+NAME
+    hello - test program
+
+SYNOPSIS
+    hello [count]
+
+DESCRIPTION
+    Prints "hello from pid N, round I" count times (default 3), sleeping
+    0.2 seconds between lines, then exits with status 7. Used by the test
+    scripts to check that programs start, run and return an exit status.
+
+SEE ALSO
+    sleep(1)

@@ -1,0 +1,43 @@
+TAR(1)			Zenix manual
+
+NAME
+    tar - make, list and unpack archives
+
+SYNOPSIS
+    tar c [v] [f archive] [-C dir] file...
+    tar x [v] [f archive] [-C dir]
+    tar t [v] [f archive]
+
+DESCRIPTION
+    Writes or reads "ustar" tape archives: regular files, directories and
+    symbolic links with their names, permissions and times. The first
+    argument holds single-letter modes; the leading "-" is optional.
+    Without "f archive" (or with "f -") the archive is written to the standard
+    output and read from the standard input, so tar works in pipes. To make a
+    compressed archive pipe it through gzip.
+
+MODES
+    c    create an archive of the named files and directories (recursively)
+    x    extract everything, creating directories as needed
+    t    list the names in the archive
+
+OPTIONS
+    v      verbose: show each name as it is processed
+    f file the archive is this file
+    -C dir change to dir first (before archiving, or to extract into it)
+
+EXAMPLES
+    tar cvf docs.tar docs
+    tar tf docs.tar
+    tar c src | gzip > src.tgz
+    zcat src.tgz | tar x -C /tmp
+
+NOTES
+    Hard links are stored as separate files. Device files and sparse files
+    are not supported. Owners are recorded as numbers.
+
+EXIT STATUS
+    0, 1 on error, 2 usage error.
+
+SEE ALSO
+    gzip(1), cp(1)

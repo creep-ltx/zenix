@@ -1,0 +1,18 @@
+BASENAME(1)			Zenix manual
+
+NAME
+    basename - strip the directory (and a suffix) from a path
+
+SYNOPSIS
+    basename path [suffix]
+
+DESCRIPTION
+    Prints the last component of path. If suffix is given and the name ends
+    with it (and is longer than it), that is removed too.
+
+EXAMPLES
+    basename /usr/man/ls.txt          prints ls.txt
+    basename /usr/man/ls.txt .txt     prints ls
+
+SEE ALSO
+    dirname(1)

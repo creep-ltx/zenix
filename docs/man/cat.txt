@@ -1,0 +1,32 @@
+CAT(1)			Zenix manual
+
+NAME
+    cat - copy files to the standard output
+
+SYNOPSIS
+    cat [-nbsE] [file...]
+
+DESCRIPTION
+    Writes each file to the standard output, one after the other. With no
+    file, or with the name "-", it reads the standard input. Without options
+    the data is passed through untouched in blocks; with any option it is
+    handled line by line.
+
+OPTIONS
+    -n    number all output lines (6-digit number, then a tab)
+    -b    number only non-empty lines (overrides -n)
+    -s    squeeze runs of empty lines into one
+    -E    show a "$" at the end of each line
+
+EXAMPLES
+    cat notes                   show a file
+    cat a b > ab                join two files
+    echo hello | cat -n         number lines read from a pipe
+    cat -E file                 find trailing blanks
+
+EXIT STATUS
+    0 success, 1 a file could not be opened (the others are still shown),
+    2 unknown option.
+
+SEE ALSO
+    less(1), head(1), tail(1), tee(1)

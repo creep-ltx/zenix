@@ -1,0 +1,29 @@
+WC(1)			Zenix manual
+
+NAME
+    wc - count lines, words and bytes
+
+SYNOPSIS
+    wc [-lwc] [file...]
+
+DESCRIPTION
+    Counts the lines (newline characters), words (runs of characters that are
+    not blank, tab, newline or return) and bytes in each file, or in the
+    standard input if no file is given. With more than one file a "total"
+    line is added. When exactly one kind of count is requested only the bare
+    number is printed (no padding); otherwise each count is 7 wide.
+
+OPTIONS
+    -l    lines        -w    words        -c    bytes
+    Without options all three are shown, in the order lines, words, bytes.
+
+EXAMPLES
+    wc -l notes              number of lines
+    ls | wc -l               how many files here
+    cat a b | wc -w
+
+EXIT STATUS
+    0, or 1 if a file could not be opened.
+
+SEE ALSO
+    grep(1), sort(1), uniq(1)

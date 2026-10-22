@@ -1,0 +1,26 @@
+HEAD(1)			Zenix manual
+
+NAME
+    head - show the first lines of files
+
+SYNOPSIS
+    head [-n count | -count] [-c bytes] [file...]
+
+DESCRIPTION
+    Prints the first 10 lines of each file, or of the standard input. With
+    more than one file each is preceded by a "==> name <==" header.
+
+OPTIONS
+    -n count   print the first count lines (also written -count, e.g. -3)
+    -c bytes   print the first bytes characters instead of lines
+
+EXAMPLES
+    head -n 3 notes
+    ls -l | head -5
+    head -c 100 /bin/ls | hexdump
+
+EXIT STATUS
+    0, 1 if a file cannot be opened, 2 unknown option.
+
+SEE ALSO
+    tail(1), cat(1), less(1)

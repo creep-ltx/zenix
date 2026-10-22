@@ -1,0 +1,17 @@
+TERMTEST(1)			Zenix manual
+
+NAME
+    termtest - terminal feature test
+
+SYNOPSIS
+    termtest
+
+DESCRIPTION
+    Draws a test page: bold, underline and inverse text, a box with cursor
+    addressing, a scroll region, line erase, and line insertion. It then
+    switches the terminal to raw mode and shows each key you press as the
+    escape code or byte received (arrows, function keys, Delete). Press q to
+    quit. A development tool.
+
+SEE ALSO
+    clear(1), edit(1)

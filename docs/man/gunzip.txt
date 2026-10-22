@@ -1,0 +1,13 @@
+GUNZIP(1)			Zenix manual
+
+NAME
+    gunzip - decompress gzip files
+
+SYNOPSIS
+    gunzip [-ck] [file...]
+
+DESCRIPTION
+    Another name for "gzip -d". See gzip(1).
+
+SEE ALSO
+    gzip(1), zcat(1)

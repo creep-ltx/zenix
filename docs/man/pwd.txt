@@ -1,0 +1,17 @@
+PWD(1)			Zenix manual
+
+NAME
+    pwd - print the current directory
+
+SYNOPSIS
+    pwd
+
+DESCRIPTION
+    Prints the absolute path of the current directory, as kept by the system
+    for this process. There are no options. The shell has a built-in pwd too.
+
+EXIT STATUS
+    0, or 1 if the directory cannot be found.
+
+SEE ALSO
+    sh(1)

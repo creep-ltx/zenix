@@ -6,6 +6,7 @@
 | [how-it-works.md](how-it-works.md) | Walk-throughs: from power-on to a shell prompt, what happens inside `cat file | grep x`, what happens when a program crashes. |
 | [vs-amigaos.md](vs-amigaos.md) | Zenix next to AmigaOS: what is the same, what is different, what Zenix gives up and gains. |
 | [vs-unix-linux.md](vs-unix-linux.md) | Zenix next to Unix and Linux (and no-MMU Linux, Fuzix, Minix 3, QNX): where it behaves like a Unix and where it cannot. |
+| [commands.md](commands.md) | Reference for every command: what it does, how to use it, its options (manual pages in `man/`, ready for `man`). |
 | [limits.md](limits.md) | What is missing, what is unmeasured, and the honest no-MMU limit. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
 | [zenfs.md](zenfs.md) | The proposed native filesystem (nothing built). |

@@ -1,0 +1,10 @@
+MORE(1)			Zenix manual
+
+NAME
+    more - show text a page at a time
+
+DESCRIPTION
+    Another name for less(1) (a link to it). See less(1).
+
+SEE ALSO
+    less(1)

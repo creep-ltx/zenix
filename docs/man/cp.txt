@@ -1,0 +1,33 @@
+CP(1)			Zenix manual
+
+NAME
+    cp - copy files and directories
+
+SYNOPSIS
+    cp [-rfpv] source... destination
+
+DESCRIPTION
+    With two names, copies the first to the second. With more than two, the
+    last must be a directory and all sources are copied into it under their
+    own names. If the destination is an existing directory the source is
+    copied into it. An existing destination file is overwritten.
+
+OPTIONS
+    -r, -R  copy directories and their contents
+    -p      keep the permission bits and the modification time
+    -f      accepted (no effect)
+    -v      print "'source' -> 'destination'" for each file
+
+EXAMPLES
+    cp a b                copy a to b
+    cp -r src backup      copy a tree
+    cp -p x y /tmp        copy two files into /tmp, keeping times
+
+EXIT STATUS
+    0, 1 on any failure, 2 usage error or an unknown option.
+
+NOTES
+    Symbolic links are followed (the file they point to is copied).
+
+SEE ALSO
+    mv(1), rm(1), tar(1)

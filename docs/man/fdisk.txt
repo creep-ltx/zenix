@@ -1,0 +1,47 @@
+FDISK(1)			Zenix manual
+
+NAME
+    fdisk - edit the Amiga partition table (RDB) of a disk
+
+SYNOPSIS
+    fdisk list [disk]
+    fdisk init disk -y
+    fdisk add disk label size [ext2|zenfs]
+    fdisk del disk n
+    fdisk boot disk n [on|off]
+
+DESCRIPTION
+    Shows and changes the Rigid Disk Block, the partition table that Amiga
+    disks use. Disks are named by the disk server: "ide0" is the whole IDE
+    disk, "ide0p1", "ide0p2" ... its partitions. Changes are written at once
+    and the disk server re-reads the table. The disk must be a whole disk
+    that no filesystem has mounted (the disk the system runs from is mounted,
+    so use a second disk or a scratch image).
+
+COMMANDS
+    list [disk]    show disks and partitions (all disks if none is named)
+    init disk -y   write an empty table, DESTROYING the old one; "-y" is
+                   required to confirm
+    add disk label size [type]
+                   new partition named label. Size is in megabytes, or the
+                   word "rest" for all the remaining space. Type is ext2
+                   (default) or zenfs (reserved for the future filesystem).
+    del disk n     delete partition number n (numbers start at 1; later ones
+                   move up)
+    boot disk n    mark partition n bootable; "off" clears the mark
+
+EXAMPLES
+    fdisk list
+    fdisk init ide1 -y
+    fdisk add ide1 DH0 100
+    fdisk add ide1 DH1 rest
+    mkfs.ext2 ide1p1
+
+EXIT STATUS
+    0, 1 on an error (not a whole disk, mounted, no such partition), 2 usage.
+
+NOTES
+    Always back up first. No undo.
+
+SEE ALSO
+    mkfs.ext2(1), fsck.ext2(1), df(1)

@@ -1,0 +1,26 @@
+DU(1)			Zenix manual
+
+NAME
+    du - show disk usage
+
+SYNOPSIS
+    du [-sahk] [path...]
+
+DESCRIPTION
+    Prints, for each directory below the paths (default: the current
+    directory), the space used by it and its contents, in 1 KB units. File
+    sizes are rounded up to whole kilobytes and each directory counts as 1 KB
+    itself; this is an estimate, not the exact number of disk blocks.
+
+OPTIONS
+    -s    only the total for each path argument
+    -a    also show every file, not just directories
+    -h    human readable: 12K, 1.5M
+    -k    accepted (1 KB units are always used)
+
+EXAMPLES
+    du -sh /bin
+    du -a rootfs | sort -n | tail
+
+SEE ALSO
+    df(1), ls(1), find(1)

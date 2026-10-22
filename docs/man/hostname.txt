@@ -1,0 +1,14 @@
+HOSTNAME(1)			Zenix manual
+
+NAME
+    hostname - print the computer's name
+
+SYNOPSIS
+    hostname
+
+DESCRIPTION
+    Prints $HOSTNAME, or "zenix" if it is not set. The name cannot be changed
+    with this command.
+
+SEE ALSO
+    uname(1)

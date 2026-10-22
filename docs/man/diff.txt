@@ -1,0 +1,44 @@
+DIFF(1)			Zenix manual
+
+NAME
+    diff - compare files line by line
+
+SYNOPSIS
+    diff [-uqiwr] [-U lines] file1 file2
+
+DESCRIPTION
+    Shows how to turn file1 into file2: the lines that were removed or added.
+    If both names are directories, the files with the same name in both are
+    compared, and entries that exist on one side only are reported as "Only
+    in dir: name". One of the files may be "-" for the standard input.
+
+    The default (normal) output lists changes like "3c3", "5,6d4", "2a3,4"
+    followed by the lines, "<" for file1 and ">" for file2.
+    With -u the unified format is used: "--- file1", "+++ file2" and hunks
+    starting with "@@ -a,b +c,d @@" where removed lines begin with "-", added
+    with "+", and context lines with a space.
+
+OPTIONS
+    -u        unified output, 3 lines of context
+    -U n      unified output with n lines of context
+    -q        only say whether the files differ
+    -i        ignore case
+    -w        ignore blanks and tabs
+    -r        with directories, compare subdirectories too (otherwise they
+              are listed as "Common subdirectories")
+
+EXAMPLES
+    diff old new
+    diff -u a.c b.c > fix.patch
+    diff -rq dir1 dir2
+
+NOTES
+    The comparison is exact (longest common subsequence) for files up to
+    about 3 million line pairs; larger differing middles are shown as one
+    block replaced.
+
+EXIT STATUS
+    0 identical, 1 different, 2 trouble.
+
+SEE ALSO
+    cmp(1), sed(1)

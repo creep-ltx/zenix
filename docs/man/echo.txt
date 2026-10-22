@@ -1,0 +1,26 @@
+ECHO(1)			Zenix manual
+
+NAME
+    echo - print its arguments
+
+SYNOPSIS
+    echo [argument...]
+
+DESCRIPTION
+    Writes the arguments to the standard output separated by single spaces,
+    followed by a newline.
+
+    This program has no options: "-n" is printed like any other word. The
+    shell has its own built-in echo that does understand -n (no newline) and
+    -e (backslash escapes); inside sh, "echo -ne 'a\n'" uses that one. See
+    sh(1).
+
+EXAMPLES
+    echo hello world
+    echo $HOME > where
+
+EXIT STATUS
+    Always 0.
+
+SEE ALSO
+    sh(1), printenv(1)

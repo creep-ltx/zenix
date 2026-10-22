@@ -1,0 +1,30 @@
+TAIL(1)			Zenix manual
+
+NAME
+    tail - show the last lines of files
+
+SYNOPSIS
+    tail [-n count | -count | -n +count] [-c bytes] [file...]
+
+DESCRIPTION
+    Prints the last 10 lines of each file, or of the standard input. With
+    more than one file each is preceded by a "==> name <==" header. The
+    whole input is read, so tail also works in a pipe.
+
+OPTIONS
+    -n count    the last count lines (also -count)
+    -n +count   everything starting from line number count
+    -c bytes    the last bytes characters
+
+    There is no -f (follow).
+
+EXAMPLES
+    tail -n 20 log
+    tail -n +2 table          skip the header line
+    ps | tail -3
+
+EXIT STATUS
+    0, 1 if a file cannot be opened, 2 unknown option.
+
+SEE ALSO
+    head(1), less(1)

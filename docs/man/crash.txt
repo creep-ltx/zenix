@@ -1,0 +1,15 @@
+CRASH(1)			Zenix manual
+
+NAME
+    crash - test that a crash is contained
+
+SYNOPSIS
+    crash
+
+DESCRIPTION
+    Executes an illegal instruction. The kernel must report
+    "pid N (crash) killed: vector 4 ..." and kill only this program; the rest
+    of the system keeps running. A test program.
+
+SEE ALSO
+    spin(1), badptr(1)

@@ -1,0 +1,17 @@
+RMDIR(1)			Zenix manual
+
+NAME
+    rmdir - remove empty directories
+
+SYNOPSIS
+    rmdir directory...
+
+DESCRIPTION
+    Removes each named directory, which must be empty. There are no options.
+    To remove a directory with its contents use "rm -r".
+
+EXIT STATUS
+    0, 1 if a directory is not empty or cannot be removed, 2 usage error.
+
+SEE ALSO
+    mkdir(1), rm(1)

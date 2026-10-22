@@ -1,0 +1,41 @@
+EXPR(1)			Zenix manual
+
+NAME
+    expr - evaluate an expression
+
+SYNOPSIS
+    expr argument...
+
+DESCRIPTION
+    Evaluates the arguments as one expression and prints the result. Every
+    operator and operand is a separate argument, so there must be spaces
+    around them, and characters the shell treats specially must be quoted.
+    Operators, from tightest to loosest binding:
+
+        length STRING          the number of characters
+        *  /  %                multiply, divide, remainder (whole numbers)
+        +  -                   add, subtract
+        =  !=  <  >  <=  >=    compare; numbers numerically, otherwise as
+                               text; the result is 1 or 0
+        &                      1st value if both are non-zero/non-empty,
+                               otherwise 0
+        |                      1st value if it is non-zero/non-empty,
+                               otherwise the 2nd
+        ( )                    grouping
+
+EXAMPLES
+    expr 2 + 3 '*' 4            prints 14
+    expr length hello           prints 5
+    n=$(expr $n + 1)
+
+    The shell can also calculate by itself: echo $((2 + 3 * 4)).
+
+EXIT STATUS
+    0 if the result is neither empty nor 0, 1 if it is, 2 on an error
+    (division by zero, non-numeric operand).
+
+NOTES
+    There is no regular-expression ":" operator.
+
+SEE ALSO
+    sh(1), test (built into sh)

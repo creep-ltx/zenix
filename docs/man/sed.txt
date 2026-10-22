@@ -1,0 +1,67 @@
+SED(1)			Zenix manual
+
+NAME
+    sed - stream editor: edit text as it flows past
+
+SYNOPSIS
+    sed [-nEri] [-e script] [-f scriptfile] [script] [file...]
+
+DESCRIPTION
+    Reads the files (or the standard input) a line at a time, applies the
+    script's commands to each line, and prints the result. If no -e or -f is
+    given, the first non-option argument is the script. Several -e options
+    are joined, one command per line. Commands are separated by newlines or
+    semicolons; "#" starts a comment.
+
+    A command may be preceded by an address that says which lines it applies
+    to:
+        N          line number N          $         the last line
+        /re/       lines matching the regular expression
+        N,M        a range of lines       /re1/,/re2/   a range by pattern
+        addr!      all lines NOT selected by addr
+    No address means every line. Commands can be grouped: addr{ cmd; cmd }.
+
+COMMANDS
+    s/re/text/flags  replace the first match of re by text. In text, & is the
+                     whole match, \1..\9 the groups, \n a newline. Any
+                     character can replace "/" as delimiter. Flags: g every
+                     match, p print the line if replaced, i ignore case,
+                     a number N replace only the Nth match.
+    d                delete the line (no further commands run for it)
+    p                print the line (it is also printed at the end unless -n)
+    q                stop after this line
+    n                print the line (unless -n) and read the next one
+    N                append the next line to this one, with a newline between
+    =                print the line number
+    a text           print text after this line      (also "a\" then text)
+    i text           print text before this line
+    c text           replace the line with text (a range: once, at its end)
+    y/abc/xyz/       translate characters one by one
+    { }              group commands
+
+OPTIONS
+    -n    do not print lines automatically; only "p" prints
+    -E, -r  use extended regular expressions (no backslash needed for
+          ( ) { } | + ?). The default is basic expressions, where those
+          need a backslash.
+    -e s  add a script       -f file   read a script from a file
+    -i    edit the files in place (written to a temporary file, then renamed)
+    -s    accepted
+
+EXAMPLES
+    sed 's/cat/dog/g' file
+    sed -n '2,4p' file                  print lines 2 to 4
+    sed '/^#/d' file                    remove comment lines
+    sed -E 's/([a-z]+)@([a-z]+)/\2 at \1/' file
+    sed -i 's/old/new/g' a.txt b.txt
+    sed '$a The end' file
+
+NOTES
+    There is no hold space (h, g, x), no w, r or b commands, and a script
+    holds at most 200 commands. Regular expressions have no back-references.
+
+EXIT STATUS
+    0, 2 for a bad script or an unreadable file.
+
+SEE ALSO
+    grep(1), tr(1), cut(1), edit(1)

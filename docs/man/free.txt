@@ -1,0 +1,19 @@
+FREE(1)			Zenix manual
+
+NAME
+    free - show free memory
+
+SYNOPSIS
+    free
+
+DESCRIPTION
+    Prints the free memory in kilobytes, separately for chip RAM (reachable
+    by the Amiga custom chips: screen, sound, disk) and fast RAM (CPU only).
+    There are no options. On a machine without fast RAM the fast line shows 0.
+
+EXAMPLE (the numbers will differ)
+    chip RAM free: 1210 KB
+    fast RAM free: 0 KB
+
+SEE ALSO
+    ps(1), df(1)

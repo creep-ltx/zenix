@@ -1,0 +1,29 @@
+MAN(1)			Zenix manual
+
+NAME
+    man - show manual pages
+
+SYNOPSIS
+    man name...
+    man -k word
+
+DESCRIPTION
+    Shows the manual page for each name from /usr/man/name.txt in the pager
+    (less). Press q to leave the page. "man -k word" lists the pages whose
+    first lines (the name and summary) mention the word, one per line with
+    its summary.
+
+    Each page is a plain text file. The pages for most programs are made
+    when the system disk is built, from the comment at the top of the
+    program's source; pages written by hand (sh, edit, less and others in
+    the rootfs/usr/man directory) replace those.
+
+EXAMPLES
+    man ls
+    man -k sort
+
+EXIT STATUS
+    0, 1 if there is no page for a name.
+
+SEE ALSO
+    less(1), sh(1)

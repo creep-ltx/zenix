@@ -1,0 +1,20 @@
+CMP(1)			Zenix manual
+
+NAME
+    cmp - compare two files byte by byte
+
+SYNOPSIS
+    cmp file1 file2
+
+DESCRIPTION
+    Compares the two files (either may be "-" for the standard input) and
+    reports the first difference as "file1 file2 differ: byte N, line L".
+    If one file is a prefix of the other it reports "EOF on file after byte
+    N". Nothing is printed when the files are identical. There are no
+    options.
+
+EXIT STATUS
+    0 identical, 1 different, 2 a file cannot be opened or usage error.
+
+SEE ALSO
+    diff(1)

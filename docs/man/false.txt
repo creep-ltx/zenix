@@ -1,0 +1,14 @@
+FALSE(1)			Zenix manual
+
+NAME
+    false - do nothing, unsuccessfully
+
+SYNOPSIS
+    false
+
+DESCRIPTION
+    Exits with status 1. Handy in scripts: "while true; do ...; done" and
+    tests of error handling. The shell has a built-in false too.
+
+SEE ALSO
+    true(1), sh(1)

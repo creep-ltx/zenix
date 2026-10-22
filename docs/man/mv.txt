@@ -1,0 +1,28 @@
+MV(1)			Zenix manual
+
+NAME
+    mv - move or rename files
+
+SYNOPSIS
+    mv [-fv] source... destination
+
+DESCRIPTION
+    Renames the source to the destination. With more than two names the last
+    must be a directory and everything is moved into it. If the destination
+    is an existing directory the source is moved into it. If a plain rename
+    is not possible (for example a directory to another parent), mv copies
+    the tree and removes the original.
+
+OPTIONS
+    -v    print "'source' -> 'destination'" for each move
+    -f    accepted (no effect)
+
+EXAMPLES
+    mv old new
+    mv *.txt docs
+
+EXIT STATUS
+    0, 1 if something could not be moved, 2 usage error.
+
+SEE ALSO
+    cp(1), rm(1)

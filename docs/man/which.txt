@@ -1,0 +1,19 @@
+WHICH(1)			Zenix manual
+
+NAME
+    which - show where a program is
+
+SYNOPSIS
+    which name...
+
+DESCRIPTION
+    For each name, searches the directories in $PATH (default /bin) and
+    prints the full path of the first regular file found. A name containing
+    a slash is checked as it is. Shell built-ins and aliases are not
+    shown: use the shell's own "type" for those.
+
+EXIT STATUS
+    0 if all names were found, 1 if any was not.
+
+SEE ALSO
+    sh(1) (type)

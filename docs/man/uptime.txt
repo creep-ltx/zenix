@@ -1,0 +1,14 @@
+UPTIME(1)			Zenix manual
+
+NAME
+    uptime - how long the system has been running
+
+SYNOPSIS
+    uptime
+
+DESCRIPTION
+    Prints "up h:mm:ss", counted from the 100 Hz timer tick since the kernel
+    started. There is no load average.
+
+SEE ALSO
+    date(1)

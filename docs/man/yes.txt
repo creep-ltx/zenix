@@ -1,0 +1,18 @@
+YES(1)			Zenix manual
+
+NAME
+    yes - print a line forever
+
+SYNOPSIS
+    yes [string]
+
+DESCRIPTION
+    Repeats the string (default "y") one per line until the reader closes
+    the pipe or the user presses Ctrl+C. When the reader is gone yes ends
+    with status 141.
+
+EXAMPLE
+    yes | head -n 3
+
+SEE ALSO
+    head(1), seq(1)

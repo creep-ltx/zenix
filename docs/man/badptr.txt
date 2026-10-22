@@ -1,0 +1,15 @@
+BADPTR(1)			Zenix manual
+
+NAME
+    badptr - test pointer checking
+
+SYNOPSIS
+    badptr
+
+DESCRIPTION
+    Hands the kernel two pointers that are not the program's own memory in a
+    write() call. The kernel must answer -1 (an error) instead of crashing.
+    Exits 0 if both calls failed as they should. A test program.
+
+SEE ALSO
+    crash(1)

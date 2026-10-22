@@ -1,0 +1,36 @@
+PS(1)			Zenix manual
+
+NAME
+    ps - list the running processes
+
+SYNOPSIS
+    ps
+
+DESCRIPTION
+    Prints one line for every process: its id, its parent's id, its state,
+    the memory it owns in kilobytes, and its program name. There are no
+    options and no filtering.
+
+    PID   process id
+    PPID  parent process id (0 for the programs started by the kernel)
+    STATE ready    can run, waiting for its turn
+          sleep    waiting for a timer (sleep)
+          wait     waiting for a child to end (wait)
+          io       waiting for input, output or a pipe
+          msg      waiting for a server's answer, or (a server) for a request
+          zombie   ended, not yet collected by its parent
+    MEM(K) all memory the process owns (program, stack, extra blocks)
+    NAME  the file name of the program (first 15 characters)
+
+EXAMPLE (the numbers will differ)
+      PID  PPID STATE    MEM(K)  NAME
+        1     0 msg          36  diskd
+        2     0 msg          44  fsd
+        ...
+
+NOTES
+    Zenix has room for 16 processes in all, so ps shows at most 16 lines.
+    The idle process (pid 0) is not listed.
+
+SEE ALSO
+    free(1), sh(1) (jobs, kill)

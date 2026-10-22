@@ -1,0 +1,22 @@
+SEQ(1)			Zenix manual
+
+NAME
+    seq - print a sequence of numbers
+
+SYNOPSIS
+    seq last
+    seq first last
+    seq first step last
+
+DESCRIPTION
+    Prints whole numbers one per line from first (default 1) to last,
+    stepping by step (default 1). A negative step counts down. A step of
+    zero prints nothing and returns status 2. Fractions are not supported.
+
+EXAMPLES
+    seq 5
+    seq 10 -2 0
+    for i in $(seq 3); do echo round $i; done
+
+SEE ALSO
+    sh(1), yes(1)

@@ -1,0 +1,16 @@
+SPIN(1)			Zenix manual
+
+NAME
+    spin - test preemption
+
+SYNOPSIS
+    spin [rounds]
+
+DESCRIPTION
+    Runs a busy loop that never gives up the processor, printing a line after
+    each round (default 3), then exits with status 3. Other programs keep
+    running during it only because the kernel preempts (every 50 ms). Press
+    Ctrl+C to stop it. A test program.
+
+SEE ALSO
+    crash(1), ps(1)

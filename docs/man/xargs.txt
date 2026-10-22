@@ -1,0 +1,34 @@
+XARGS(1)			Zenix manual
+
+NAME
+    xargs - build and run commands from standard input
+
+SYNOPSIS
+    xargs [-n count] [-I string] [command [argument...]]
+
+DESCRIPTION
+    Reads words from the standard input (separated by blanks or newlines;
+    single or double quotes keep blanks inside a word) and runs the command
+    with those words added after the given arguments. The default command is
+    echo. A command without a slash is looked for in /bin.
+
+OPTIONS
+    -n count   use at most count words per run of the command
+    -I string  run the command once per input LINE, replacing string in the
+               arguments with that line (words are then separated by newlines
+               only)
+
+EXAMPLES
+    find . -name '*.tmp' | xargs rm
+    ls | xargs -n 1 wc -l
+    ls *.c | xargs -I X cp X backup/X
+
+NOTES
+    At most 256 words are collected per run when -n is not given.
+
+EXIT STATUS
+    0 if every run succeeded, 123 if a command exited non-zero, 127 if it
+    could not be started, 2 unknown option.
+
+SEE ALSO
+    find(1), sh(1)

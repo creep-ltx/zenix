@@ -1,0 +1,37 @@
+DATE(1)			Zenix manual
+
+NAME
+    date - show or set the date and time
+
+SYNOPSIS
+    date [+format]
+    date -s "YYYY-MM-DD HH:MM:SS"
+
+DESCRIPTION
+    Prints the current date and time in UTC (Zenix has no time zones). The
+    clock starts from the Amiga's battery clock if one is present; otherwise
+    it starts at 1970 and must be set. With -s the clock is set (for this
+    session; it is not written back to the battery clock). The date can be
+    followed by a time, or the letter T may replace the space.
+
+    The default output looks like "Thu Oct 22 12:51:22 UTC 2026". A format
+    starting with + selects other output.
+
+FORMAT
+    %Y year   %y two-digit year   %m month 01-12   %d day 01-31   %e day,
+    space padded   %H hour   %M minute   %S second   %s seconds since 1970
+    %a short weekday   %A weekday   %b short month   %B month   %j day of the
+    year   %F same as %Y-%m-%d   %T same as %H:%M:%S   %D same as %m/%d/%y
+    %Z the letters UTC   %n newline   %% a percent sign
+
+EXAMPLES
+    date +%F
+    date -s "2026-10-22 13:00:00"
+    date +%s
+
+NOTES
+    Dates before 1970 and after 2106 cannot be represented. Setting
+    the clock is not restricted (there are no users yet).
+
+SEE ALSO
+    uptime(1), touch(1)

@@ -1,0 +1,19 @@
+STAT(1)			Zenix manual
+
+NAME
+    stat - show information about files
+
+SYNOPSIS
+    stat file...
+
+DESCRIPTION
+    For each file prints its name, size in bytes, type (regular file,
+    directory or symbolic link), inode number, link count, permission bits in
+    octal, owner and group numbers, and the modification time as a number of
+    seconds. Symbolic links are followed. There are no options.
+
+EXIT STATUS
+    0, 1 if a file is not found.
+
+SEE ALSO
+    ls(1), chmod(1), date(1)

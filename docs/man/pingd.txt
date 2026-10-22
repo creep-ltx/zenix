@@ -1,0 +1,18 @@
+PINGD(1)			Zenix manual
+
+NAME
+    pingd - test message server
+
+SYNOPSIS
+    pingd [count]
+
+DESCRIPTION
+    Creates a message port named "ping" and answers the requests of ping(1):
+    type 1 adds two numbers, type 2 converts a string to upper case IN PLACE
+    in the client's memory (showing that messages pass pointers, not
+    copies), type 9 ends the server. It also ends after serving count
+    requests if given. Start it in the background:  pingd &
+    A development tool; see docs/architecture.md, "Ports and messages".
+
+SEE ALSO
+    ping(1), bench(1)

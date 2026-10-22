@@ -1,0 +1,46 @@
+FIND(1)			Zenix manual
+
+NAME
+    find - search for files in a directory tree
+
+SYNOPSIS
+    find [path...] [expression]
+
+DESCRIPTION
+    Walks each path (default: the current directory) and everything below it,
+    and prints the path of each entry that satisfies all the tests. If no
+    action is given, the path is printed. Tests are combined with "and"; there
+    is no -o or -not.
+
+TESTS
+    -name pattern    the file name (not the whole path) matches pattern;
+                     * ? and [a-z] [!a] work, quote the pattern in the shell
+    -iname pattern   same, ignoring case
+    -type f          regular files        -type d    directories
+    -maxdepth n      go down at most n levels (0 = only the paths given)
+    -mindepth n      do not report entries above level n
+
+ACTIONS
+    -print           print the path (the default)
+    -exec cmd args ; run the command for each match; {} in the arguments is
+                     replaced by the path. The command is looked up in /bin
+                     unless it contains a slash. The ";" must reach find as
+                     a separate argument: write \; or ';' in the shell.
+    -delete          remove the matches (files, and directories as the walk
+                     leaves them); implies no printing
+
+EXAMPLES
+    find . -name '*.c'
+    find /usr -type d -maxdepth 2
+    find . -name '*.bak' -delete
+    find . -type f -exec wc -l {} ';'
+
+NOTES
+    At most 256 entries per directory are examined, and paths are limited to
+    255 characters.
+
+EXIT STATUS
+    0, 1 if a starting path does not exist, 2 unknown expression.
+
+SEE ALSO
+    ls(1), grep(1), xargs(1), du(1)

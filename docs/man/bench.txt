@@ -1,0 +1,21 @@
+BENCH(1)			Zenix manual
+
+NAME
+    bench - measure how fast Zenix is
+
+SYNOPSIS
+    bench
+
+DESCRIPTION
+    Times a set of operations with the CIA E-clock (709,379 Hz on PAL, far
+    finer than the 100 Hz tick) and prints microseconds per operation:
+    a null system call, stat through the filesystem server, a message round
+    trip, cached and uncached file reads, creating and deleting 50 small
+    files, listing /bin, and printing 300 lines with scrolling. It is a
+    development tool and is not meant for everyday use.
+
+    Numbers taken in an emulator are NOT hardware numbers. Run it on the real
+    Amiga and write the result down with the date.
+
+SEE ALSO
+    ping(1), uptime(1)

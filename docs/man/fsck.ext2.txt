@@ -1,0 +1,32 @@
+FSCK.EXT2(1)			Zenix manual
+
+NAME
+    fsck.ext2 - check and repair an ext2 filesystem
+
+SYNOPSIS
+    fsck.ext2 [-y] [-n] device
+
+DESCRIPTION
+    Checks an UNMOUNTED ext2 filesystem the way e2fsck does, in five passes,
+    and reports what is wrong. With -y it repairs what it safely can:
+    block and inode bitmaps, free counts, link counts, directory entries
+    pointing at unused inodes, ".." entries, and orphaned inodes (moved to
+    /lost+found as #inode). It cannot repair duplicate or out-of-range block
+    pointers: it reports them. By default (or with -n) it only reports.
+    A device that the system has mounted is refused by the disk server; to
+    check the root disk, boot from other media.
+
+OPTIONS
+    -y    repair what can be repaired
+    -n    report only (default)
+
+EXIT STATUS
+    0 clean, 1 repaired, 4 errors remain, 8 operational error (cannot open,
+    not ext2), 2 usage error.
+
+NOTES
+    Block sizes up to 4096 are supported. Tested against deliberate damage
+    and against the host's e2fsck.
+
+SEE ALSO
+    mkfs.ext2(1), fdisk(1), df(1)

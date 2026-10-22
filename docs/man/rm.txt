@@ -1,0 +1,32 @@
+RM(1)			Zenix manual
+
+NAME
+    rm - remove files and directories
+
+SYNOPSIS
+    rm [-frv] file...
+
+DESCRIPTION
+    Removes the named files. Zenix has no trash can and no undo: removed
+    files are gone. A directory is only removed with -r.
+
+OPTIONS
+    -r, -R  remove directories and everything in them
+    -f      do not complain about files that do not exist, and give no
+            usage message when called with no files
+    -v      print a line for each file or directory removed
+    --      end of options (for names starting with "-")
+
+EXAMPLES
+    rm old.txt
+    rm -rv build
+
+NOTES
+    Unlinking a file that is still open by another process frees its data at
+    once (a known limit of the filesystem server).
+
+EXIT STATUS
+    0, 1 on any failure, 2 usage error.
+
+SEE ALSO
+    rmdir(1), mv(1), cp(1)

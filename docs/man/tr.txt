@@ -1,0 +1,34 @@
+TR(1)			Zenix manual
+
+NAME
+    tr - translate, delete or squeeze characters
+
+SYNOPSIS
+    tr [-ds] set1 [set2]
+
+DESCRIPTION
+    Reads the standard input and writes it to the standard output, changing
+    characters. Each character in set1 is replaced by the character in the
+    same position in set2 (if set2 is shorter its last character is used for
+    the rest). tr only works on the standard input: use "<" or a pipe.
+
+    A set is written as characters, ranges (a-z), the classes [:upper:]
+    [:lower:] [:digit:] [:alpha:] [:alnum:] [:space:], and the escapes \n \t
+    \r \\.
+
+OPTIONS
+    -d    delete the characters in set1 (no set2)
+    -s    squeeze: a run of the same output character from the set becomes
+          one (with set2 it squeezes set2's characters; without, set1's)
+
+EXAMPLES
+    tr a-z A-Z < file               upper case
+    tr -d '\r' < dos.txt            remove carriage returns
+    tr -s ' ' < file                collapse runs of spaces
+    echo hello | tr '[:lower:]' '[:upper:]'
+
+EXIT STATUS
+    0, 2 usage error.
+
+SEE ALSO
+    sed(1), cut(1)

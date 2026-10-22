@@ -1,0 +1,36 @@
+SORT(1)			Zenix manual
+
+NAME
+    sort - sort lines of text
+
+SYNOPSIS
+    sort [-rnufb] [-k field] [-t char] [-o file] [file...]
+
+DESCRIPTION
+    Reads all the lines of the files (or the standard input), sorts them and
+    writes the result. The sort is stable: lines that compare equal stay in
+    their original order. The whole input is held in memory.
+    Lines are compared as plain bytes unless an option says otherwise.
+
+OPTIONS
+    -r       reverse the order
+    -n       compare the leading number of the key, not the text
+    -f       ignore case
+    -u       print only the first of lines that compare equal
+    -b       ignore leading blanks
+    -k n     sort on field n (and what follows it) instead of the whole line.
+             Fields are separated by blanks, or by the -t character.
+    -t char  field separator for -k
+    -o file  write the result to the file (may be an input file)
+
+EXAMPLES
+    sort names
+    sort -n -r sizes | head -3          the three largest numbers
+    sort -t: -k3 -n /etc/passwd
+    sort words | uniq -c | sort -rn     word frequency
+
+EXIT STATUS
+    0, 2 on an unreadable file or bad option.
+
+SEE ALSO
+    uniq(1), cut(1), head(1)

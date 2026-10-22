@@ -1,0 +1,14 @@
+ZCAT(1)			Zenix manual
+
+NAME
+    zcat - show a gzip file uncompressed
+
+SYNOPSIS
+    zcat [file...]
+
+DESCRIPTION
+    Another name for "gzip -dc": decompresses to the standard output and
+    leaves the files alone. See gzip(1).
+
+SEE ALSO
+    gzip(1), gunzip(1)

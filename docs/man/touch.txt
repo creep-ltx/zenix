@@ -1,0 +1,20 @@
+TOUCH(1)			Zenix manual
+
+NAME
+    touch - create files or update their time
+
+SYNOPSIS
+    touch [-c] file...
+
+DESCRIPTION
+    Sets the modification time of each file to the current time. A file
+    that does not exist is created empty, unless -c is given.
+
+OPTIONS
+    -c    do not create files that do not exist
+
+EXIT STATUS
+    0, 1 if a file could not be created.
+
+SEE ALSO
+    date(1), ls(1)

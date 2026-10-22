@@ -1,0 +1,40 @@
+GZIP(1)			Zenix manual
+
+NAME
+    gzip, gunzip, zcat - compress and decompress files
+
+SYNOPSIS
+    gzip [-dckf1..9] [file...]
+    gunzip [-ck] [file...]          same as gzip -d
+    zcat [file...]                  same as gzip -dc
+
+DESCRIPTION
+    Compresses files with the deflate method in the standard gzip format
+    (RFC 1951/1952), so the results work with gzip on any other system, and
+    the reverse. A file "name" becomes "name.gz" and the original is removed;
+    when decompressing, "name.gz" becomes "name" (a ".tgz" file becomes
+    ".tar"). With no file names the standard input is read and the result is
+    written to the standard output. Concatenated gzip members are handled.
+    The crc and the length are checked when decompressing.
+
+OPTIONS
+    -d      decompress           -c   write to the standard output, keep files
+    -k      keep the original file
+    -1..-9  compression level: 1 is fastest, 9 is best
+    -f -v -q  accepted and ignored
+
+EXAMPLES
+    gzip notes                  makes notes.gz
+    gunzip notes.gz
+    tar c docs | gzip > docs.tgz
+    zcat docs.tgz | tar t
+
+NOTES
+    The whole file is read into memory first, so very large files need free
+    RAM about as big as the file. The program asks for a 32 KB stack.
+
+EXIT STATUS
+    0, 1 on a problem with a file, 2 unknown option.
+
+SEE ALSO
+    tar(1), cat(1)

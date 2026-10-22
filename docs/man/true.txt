@@ -1,0 +1,14 @@
+TRUE(1)			Zenix manual
+
+NAME
+    true - do nothing, successfully
+
+SYNOPSIS
+    true
+
+DESCRIPTION
+    Exits with status 0. The shell has a built-in true; this is the program
+    version. See also false(1).
+
+SEE ALSO
+    false(1), sh(1)

@@ -1,0 +1,20 @@
+DISKD(8)			Zenix manual
+
+NAME
+    diskd - the disk server
+
+SYNOPSIS
+    built into the kernel image; not run by hand
+
+DESCRIPTION
+    Owns the disk hardware through privileged system calls and offers the
+    port "disk". It reads the Amiga partition table (RDB) and serves named
+    devices: ide0 (the whole IDE disk), ide0p1, ide0p2 ... (partitions) and
+    ram0 (the RAM disk loaded by the bootblock, when there is one). Access
+    through a partition is limited to that partition. A device can be
+    mounted by one filesystem server, which is then its only writer; tools
+    such as fdisk, mkfs.ext2 and fsck.ext2 open devices raw, which is refused
+    while mounted. Protocol: kernel/diskproto.h.
+
+SEE ALSO
+    fdisk(1), mkfs.ext2(1), fsck.ext2(1), docs/architecture.md

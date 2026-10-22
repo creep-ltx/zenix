@@ -1,0 +1,15 @@
+CLEAR(1)			Zenix manual
+
+NAME
+    clear - clear the screen
+
+SYNOPSIS
+    clear
+
+DESCRIPTION
+    Sends the terminal escape codes ESC[2J ESC[H: erase the whole screen and
+    put the cursor at the top left. Scrollback is kept. Ctrl+L in the shell
+    does the same.
+
+SEE ALSO
+    sh(1)

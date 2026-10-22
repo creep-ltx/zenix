@@ -1,0 +1,55 @@
+GREP(1)			Zenix manual
+
+NAME
+    grep - print the lines that match a pattern
+
+SYNOPSIS
+    grep [-ivnclLoqhHrEFwxs] [-A n] [-B n] [-C n] [-e pattern]
+         pattern [file...]
+
+DESCRIPTION
+    Reads each file (or the standard input) and prints the lines that match
+    the pattern. The pattern is a POSIX extended regular expression, as in
+    "grep -E": . [abc] [^a-z] * + ? {n,m} | ( ) ^ $. The longest match is
+    used. With -F the pattern is a plain string instead. When several files
+    are searched (or -r or -H is used) every line is preceded by the file
+    name and a colon.
+
+OPTIONS
+    -i       ignore case
+    -v       print the lines that do NOT match
+    -n       put the line number before each line
+    -c       print only a count of matching lines per file
+    -l       print only the names of files that have a match
+    -L       print only the names of files that have no match
+    -o       print only the matching part of the line, one per line
+    -q       print nothing; stop at the first match and exit 0
+    -h       never print file names        -H   always print file names
+    -r, -R   search directories recursively (current directory if no file)
+    -E       accepted; extended expressions are always used
+    -F       the pattern is a fixed string, not an expression
+    -w       the match must be a whole word
+    -x       the match must be the whole line
+    -s       do not complain about missing or unreadable files
+    -e pat   use pat as the pattern (lets a pattern start with "-")
+    -A n     also print n lines after each match
+    -B n     also print n lines before each match (at most 16)
+    -C n     both: n lines before and after
+    Context lines use "-" after the name/number instead of ":".
+
+EXAMPLES
+    grep -n zenix README         matches with line numbers
+    grep -ri 'todo|fixme' .      search a tree, any case
+    ps | grep -v grep
+    grep -c '^$' file            count empty lines
+    grep -F 'a.b' file           the dot is a plain dot
+
+EXIT STATUS
+    0 if at least one line matched, 1 if none, 2 on a bad option or pattern.
+
+NOTES
+    Back-references (\1) are not supported. The pattern engine does not
+    backtrack, so a hard pattern cannot hang.
+
+SEE ALSO
+    sed(1), find(1), sort(1)

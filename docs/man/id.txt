@@ -1,0 +1,14 @@
+ID(1)			Zenix manual
+
+NAME
+    id - print user and group identity
+
+SYNOPSIS
+    id
+
+DESCRIPTION
+    Prints "uid=0(name) gid=0(name)" where name is $USER (default root). The
+    numbers are always 0: there are no real users or groups yet.
+
+SEE ALSO
+    whoami(1)

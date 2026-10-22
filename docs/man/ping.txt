@@ -1,0 +1,16 @@
+PING(1)			Zenix manual
+
+NAME
+    ping - test message client
+
+SYNOPSIS
+    ping [rounds]
+
+DESCRIPTION
+    Talks to pingd(1) through its message port: calls it to add 40+2, has it
+    edit a string in this program's own memory, then times rounds message
+    round trips (default 1000) in 100 Hz ticks, and finally tells the server
+    to quit. This is NOT the network ping; Zenix has no network yet.
+
+SEE ALSO
+    pingd(1), bench(1)

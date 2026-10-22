@@ -1,0 +1,21 @@
+TEE(1)			Zenix manual
+
+NAME
+    tee - copy input to the output and to files
+
+SYNOPSIS
+    tee [-a] [file...]
+
+DESCRIPTION
+    Copies the standard input to the standard output and also to each file
+    (at most 8). Useful to keep a copy of what flows through a pipe.
+
+OPTIONS
+    -a    append to the files instead of replacing them
+
+EXAMPLES
+    make 2>&1 | tee build.log
+    ls | tee list | wc -l
+
+SEE ALSO
+    cat(1)

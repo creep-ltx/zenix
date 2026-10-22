@@ -1,0 +1,18 @@
+SLEEP(1)			Zenix manual
+
+NAME
+    sleep - wait for a while
+
+SYNOPSIS
+    sleep seconds
+
+DESCRIPTION
+    Waits for the given time. Whole seconds, or a fraction rounded down to
+    hundredths of a second (the system clock ticks 100 times a second):
+    "sleep 0.5". Suffixes like "m" or "h" are not understood.
+
+EXAMPLE
+    sleep 2; echo done
+
+SEE ALSO
+    sh(1), date(1)
