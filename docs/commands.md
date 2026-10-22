@@ -33,7 +33,7 @@ where a command is smaller than its Unix namesake.
 | [sort](man/sort.txt), [uniq](man/uniq.txt), [cut](man/cut.txt), [tr](man/tr.txt), [tee](man/tee.txt) | filters |
 | [head](man/head.txt), [tail](man/tail.txt), [wc](man/wc.txt) | parts and counts |
 | [diff](man/diff.txt), [cmp](man/cmp.txt), [hexdump](man/hexdump.txt) | compare, dump |
-| [echo](man/echo.txt), [seq](man/seq.txt), [yes](man/yes.txt), [expr](man/expr.txt) | generate and calculate |
+| [echo](man/echo.txt), [printf](man/printf.txt), [seq](man/seq.txt), [yes](man/yes.txt), [expr](man/expr.txt) | generate and calculate |
 | [less](man/less.txt) / [more](man/more.txt), [edit](man/edit.txt) | pager and editor |
 | [man](man/man.txt) | these manuals |
 

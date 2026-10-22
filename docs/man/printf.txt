@@ -1,0 +1,34 @@
+PRINTF(1)		Zenix manual
+
+NAME
+    printf - formatted output
+
+SYNOPSIS
+    printf format [argument...]
+
+DESCRIPTION
+    Writes the format to standard output, replacing each conversion with the
+    next argument. The format is used again while arguments are left. Escapes
+    in the format: \\ \a \b \f \n \r \t \v \NNN (octal) \xHH. Conversions:
+
+        %d %i      decimal number (signed)
+        %u %x %X %o  unsigned decimal, hexadecimal, octal
+        %c         first character of the argument
+        %s         the argument as text
+        %b         the argument with its backslash escapes expanded
+        %%         a percent sign
+
+    A conversion may have flags (- + space # 0), a width and a precision,
+    as numbers or * (taken from the next argument): %-8s %05d %.3s %*d.
+    A number argument may be decimal, 0x hexadecimal or 0 octal; 'c gives
+    the character code of c. Missing arguments count as empty or zero.
+
+NOTES
+    Numbers are 32 bits. No floating point, no %q.
+
+EXIT STATUS
+    0, 1 if an argument is not a number or a conversion is unknown, 2 if no
+    format is given.
+
+SEE ALSO
+    echo(1)

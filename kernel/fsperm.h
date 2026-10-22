@@ -37,7 +37,7 @@ static inline int fsp_access(unsigned uid, unsigned gid, unsigned mode, unsigned
     if (uid == 0)
         return !(want & FSP_X) || (mode & FSP_IFMT) == FSP_IFDIR || (mode & 0111);
     int sh = uid == owner_uid ? 6 : gid == owner_gid ? 3 : 0;
-    return (((mode >> sh) & 7) & want) == want;
+    return (int)(((mode >> sh) & 7) & (unsigned)want) == want;
 }
 
 static inline int fsp_is_root(unsigned uid) { return uid == 0; }

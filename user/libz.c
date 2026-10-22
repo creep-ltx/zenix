@@ -78,67 +78,137 @@ void *malloc(u32 n)
 }
 void free(void *p) { if (p) sys_memfree(p); }
 
-static int emit(char *b, int n, char c) { if (n < 255) b[n] = c; return n + 1; }
+/* ---------------------------------------------------------------- formatted output
+ * One formatter feeds a "sink": a file descriptor (written in chunks), the buffered standard output, or a memory
+ * buffer of limited size. It counts every character it is given, so snprintf returns the full length as C says.
+ * Supported: %d %i %u %x %X %o %c %s %p %%, flags - 0 + space #, width and precision as numbers or *, and the
+ * length letters h l z t (all the same size here: everything is 32 bits). */
+struct sink { int kind, fd; char *buf; u32 max, n, tn; char tmp[512]; };
+enum { SK_FD, SK_MEM, SK_OUT };
 
-static int fmtnum(char *b, int n, u32 v, u32 base, int neg, int width, int zero, int left_adj)
+static void sink_flush(struct sink *k)
 {
-    char t[12]; int i = 0;
-    do { u32 d = v % base; t[i++] = (char)(d < 10 ? '0' + d : 'a' + d - 10); v /= base; } while (v);
-    if (neg) t[i++] = '-';
-    int pad = width > i ? width - i : 0;
-    if (!left_adj && !zero) while (pad--) n = emit(b, n, ' ');
-    else if (!left_adj) { if (neg) { n = emit(b, n, '-'); i--; } while (pad--) n = emit(b, n, '0'); }
-    while (i--) n = emit(b, n, t[i]);
-    if (left_adj) while (pad--) n = emit(b, n, ' ');
-    return n;
+    if (!k->tn) return;
+    if (k->kind == SK_FD) sys_write(k->fd, k->tmp, k->tn);
+    else oputn(k->tmp, k->tn);
+    k->tn = 0;
+}
+static void put(struct sink *k, char c)
+{
+    k->n++;
+    if (k->kind == SK_MEM) { if (k->max && k->n < k->max) k->buf[k->n - 1] = c; return; }
+    k->tmp[k->tn++] = c;
+    if (k->tn == sizeof k->tmp) sink_flush(k);
+}
+static void pad(struct sink *k, char c, int n) { while (n-- > 0) put(k, c); }
+
+static void fmt_num(struct sink *k, u32 v, u32 base, int neg, int upper, int width, int prec, int zero, int left, int sign, int space, int alt)
+{
+    char t[34]; int i = 0;
+    if (!(v == 0 && prec == 0)) do { u32 d = v % base; t[i++] = (char)(d < 10 ? '0' + d : (upper ? 'A' : 'a') + d - 10); v /= base; } while (v);
+    int digits = i; if (prec > digits) digits = prec;
+    char pre[3]; int pl = 0;
+    if (neg) pre[pl++] = '-'; else if (sign) pre[pl++] = '+'; else if (space) pre[pl++] = ' ';
+    if (alt && base == 16 && i) { pre[pl++] = '0'; pre[pl++] = upper ? 'X' : 'x'; }
+    int extra0 = (alt && base == 8 && digits == i && i) ? 1 : 0;
+    int total = pl + digits + extra0;
+    if (!left && !(zero && prec < 0)) pad(k, ' ', width - total);
+    for (int j = 0; j < pl; j++) put(k, pre[j]);
+    if (!left && zero && prec < 0) pad(k, '0', width - total);
+    pad(k, '0', digits - i + extra0);
+    while (i--) put(k, t[i]);
+    if (left) pad(k, ' ', width - total);
 }
 
-static int vfmt(char *b, const char *f, va_list ap)
+static void vfmt(struct sink *k, const char *f, va_list ap)
 {
-    int n = 0;
     for (; *f; f++) {
-        if (*f != '%') { n = emit(b, n, *f); continue; }
+        if (*f != '%') { put(k, *f); continue; }
         f++;
-        int zero = 0, left_adj = 0, width = 0;
-        if (*f == '-') { left_adj = 1; f++; }
-        if (*f == '0') { zero = 1; f++; }
-        while (*f >= '0' && *f <= '9') width = width * 10 + (*f++ - '0');
+        int zero = 0, left = 0, sign = 0, space = 0, alt = 0, width = 0, prec = -1;
+        for (;; f++) {
+            if (*f == '-') left = 1; else if (*f == '0') zero = 1; else if (*f == '+') sign = 1;
+            else if (*f == ' ') space = 1; else if (*f == '#') alt = 1; else break;
+        }
+        if (*f == '*') { width = va_arg(ap, int); if (width < 0) { left = 1; width = -width; } f++; }
+        else while (*f >= '0' && *f <= '9') width = width * 10 + (*f++ - '0');
+        if (*f == '.') {
+            f++; prec = 0;
+            if (*f == '*') { prec = va_arg(ap, int); f++; }
+            else while (*f >= '0' && *f <= '9') prec = prec * 10 + (*f++ - '0');
+        }
+        while (*f == 'l' || *f == 'h' || *f == 'z' || *f == 't') f++;
         switch (*f) {
-        case 'd': { int v = va_arg(ap, int);
-            n = fmtnum(b, n, v < 0 ? -(u32)v : (u32)v, 10, v < 0, width, zero, left_adj); break; }
-        case 'u': n = fmtnum(b, n, va_arg(ap, u32), 10, 0, width, zero, left_adj); break;
-        case 'x': n = fmtnum(b, n, va_arg(ap, u32), 16, 0, width, zero, left_adj); break;
-        case 'c': n = emit(b, n, (char)va_arg(ap, int)); break;
+        case 'd': case 'i': { int v = va_arg(ap, int);
+            fmt_num(k, v < 0 ? -(u32)v : (u32)v, 10, v < 0, 0, width, prec, zero, left, sign, space, 0); break; }
+        case 'u': fmt_num(k, va_arg(ap, u32), 10, 0, 0, width, prec, zero, left, 0, 0, 0); break;
+        case 'x': fmt_num(k, va_arg(ap, u32), 16, 0, 0, width, prec, zero, left, 0, 0, alt); break;
+        case 'X': fmt_num(k, va_arg(ap, u32), 16, 0, 1, width, prec, zero, left, 0, 0, alt); break;
+        case 'o': fmt_num(k, va_arg(ap, u32), 8, 0, 0, width, prec, zero, left, 0, 0, alt); break;
+        case 'p': fmt_num(k, va_arg(ap, u32), 16, 0, 0, width, prec, zero, left, 0, 0, 1); break;
+        case 'c': if (!left) pad(k, ' ', width - 1); put(k, (char)va_arg(ap, int)); if (left) pad(k, ' ', width - 1); break;
         case 's': { const char *s = va_arg(ap, const char *); if (!s) s = "(null)";
-            int l = (int)strlen(s), pad = width > l ? width - l : 0;
-            if (!left_adj) while (pad--) n = emit(b, n, ' ');
-            while (*s) n = emit(b, n, *s++);
-            if (left_adj) while (pad--) n = emit(b, n, ' ');
+            int l = 0; while (s[l] && (prec < 0 || l < prec)) l++;
+            if (!left) pad(k, ' ', width - l);
+            for (int j = 0; j < l; j++) put(k, s[j]);
+            if (left) pad(k, ' ', width - l);
             break; }
-        case '%': n = emit(b, n, '%'); break;
-        default: n = emit(b, n, '?'); break;
+        case '%': put(k, '%'); break;
+        case 0: return;
+        default: put(k, '?'); break;
         }
     }
-    return n;
 }
 
+int vfprintf(int fd, const char *fmt, va_list ap)
+{
+    struct sink k; k.kind = SK_FD; k.fd = fd; k.n = k.tn = 0;
+    vfmt(&k, fmt, ap); sink_flush(&k);
+    return (int)k.n;
+}
+int vsnprintf(char *buf, u32 max, const char *fmt, va_list ap)
+{
+    struct sink k; k.kind = SK_MEM; k.buf = buf; k.max = max; k.n = 0; k.tn = 0;
+    vfmt(&k, fmt, ap);
+    if (max) buf[k.n < max ? k.n : max - 1] = 0;
+    return (int)k.n;
+}
 int fprintf(int fd, const char *fmt, ...)
 {
-    char b[256]; va_list ap;
-    va_start(ap, fmt);
-    int n = vfmt(b, fmt, ap);
+    va_list ap; va_start(ap, fmt);
+    int n = vfprintf(fd, fmt, ap);
     va_end(ap);
-    if (n > 255) n = 255;
-    return sys_write(fd, b, (u32)n);
+    return n;
 }
 int printf(const char *fmt, ...)
 {
-    char b[256]; va_list ap;
-    va_start(ap, fmt);
-    int n = vfmt(b, fmt, ap);
+    va_list ap; va_start(ap, fmt);
+    int n = vfprintf(1, fmt, ap);
     va_end(ap);
-    if (n > 255) n = 255;
-    return sys_write(1, b, (u32)n);
+    return n;
+}
+int snprintf(char *buf, u32 max, const char *fmt, ...)
+{
+    va_list ap; va_start(ap, fmt);
+    int n = vsnprintf(buf, max, fmt, ap);
+    va_end(ap);
+    return n;
+}
+int sprintf(char *buf, const char *fmt, ...)
+{
+    va_list ap; va_start(ap, fmt);
+    int n = vsnprintf(buf, 0x7fffffff, fmt, ap);
+    va_end(ap);
+    return n;
+}
+int oprintf(const char *fmt, ...)
+{
+    struct sink k; k.kind = SK_OUT; k.n = k.tn = 0;
+    va_list ap; va_start(ap, fmt);
+    vfmt(&k, fmt, ap);
+    va_end(ap);
+    sink_flush(&k);
+    return (int)k.n;
 }
 
 /* ---------------------------------------------------------------- more of the C library */
@@ -197,17 +267,6 @@ void qsort(void *base, u32 n, u32 size, int (*cmp)(const void *, const void *))
             while (j >= gap && cmp(b + (j - gap) * size, tmp) > 0) { memcpy(b + j * size, b + (j - gap) * size, size); j -= gap; }
             memcpy(b + j * size, tmp, size);
         }
-}
-
-int snprintf(char *buf, u32 max, const char *fmt, ...)
-{
-    char b[256]; va_list ap;
-    va_start(ap, fmt);
-    int n = vfmt(b, fmt, ap);
-    va_end(ap);
-    if (n > 255) n = 255;
-    if (max) { u32 c = (u32)n < max - 1 ? (u32)n : max - 1; memcpy(buf, b, c); buf[c] = 0; }
-    return n;
 }
 
 /* ---------------------------------------------------------------- the environment
@@ -306,16 +365,6 @@ void oputn(const char *s, u32 n)
 }
 void oputs(const char *s) { oputn(s, strlen(s)); }
 void oputc(int c) { char b = (char)c; oputn(&b, 1); }
-int oprintf(const char *fmt, ...)
-{
-    char b[256]; va_list ap;
-    va_start(ap, fmt);
-    int n = vfmt(b, fmt, ap);
-    va_end(ap);
-    if (n > 255) n = 255;
-    oputn(b, (u32)n);
-    return n;
-}
 void _zexit(int status) { oflush(); sys_exit(status); for (;;); }
 
 /* realloc: the small allocator cannot grow in place, so allocate, copy and let the old one go. The old size is

@@ -247,7 +247,9 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 ## 12. User space
 
 `user/libz.c` is a tiny freestanding C library (`printf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
-environment, buffered line reader, a regex engine from the CUtils project). About 77 programs: a full shell (`sh`:
+environment, buffered line reader, a regex engine from the CUtils project). `printf`, `snprintf`, `sprintf`, `fprintf`
+and `oprintf` share one formatter with no length limit: `%d %i %u %x %X %o %c %s %p %%`, flags `- 0 + space #`, width and
+precision as numbers or `*`; no floating point, no 64-bit numbers. About 77 programs: a full shell (`sh`:
 line editor, history, completion, variables, quoting, wildcards, pipes, redirects incl. here-documents,
 `if/while/for`, functions, aliases, arithmetic, command substitution, job control), file tools, text tools
 (`grep sed sort diff cut tr ...`), `gzip`/`tar`, a pager (`less`), an editor (`edit`), `man`, disk tools (`fdisk
