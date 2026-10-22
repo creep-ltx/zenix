@@ -211,4 +211,4 @@ outputs (`tools/cmds-test.sh`).
   A4000, and an A600 that must refuse cleanly). Filesystem work is checked with the host's `e2fsck`.
 - Source layout: `boot/` bootblock, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
   `link/` linker script, `tools/` build and test scripts, `rootfs/` files copied to the root disk, `fsuae/` emulator
-  configs, `later/` and `old-mmu/` code kept from the earlier MMU-based Zenix (reference, not built).
+  configs, `archive/later/` and `archive/old-mmu/` code kept from the earlier MMU-based Zenix (reference, not built).

@@ -1,0 +1,23 @@
+LESS(1)			Zenix manual
+
+NAME
+    less, more - show text a page at a time
+
+SYNOPSIS
+    less file...
+    command | less
+
+KEYS
+    Space, f         next page            b          previous page
+    Enter, j, Down   next line            k, Up      previous line
+    d, u             half a page          g, Home    top
+    G, End           bottom
+    /pattern         search forward       ?pattern   search backward
+    n, N             next / previous match (a regular expression)
+    h                help                 q          quit
+
+    A short text is just printed. When the output is not a terminal, less
+    acts like cat.
+
+SEE ALSO
+    man(1), edit(1)

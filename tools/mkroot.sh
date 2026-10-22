@@ -12,6 +12,7 @@ for p in $PROGS; do
     chmod 755 "$T/bin/$name"
 done
 mkdir -p "$T/usr/man"
+cp "$(dirname "$0")/../docs/man/"*.txt "$T/usr/man/"      # the manual pages live in docs/man
 python3 "$(dirname "$0")/mkman.py" "$T/usr/man.gen" $PROGS
 for f in "$T"/usr/man.gen/*.txt; do b=$(basename "$f"); [ -e "$T/usr/man/$b" ] || cp "$f" "$T/usr/man/$b"; done
 rm -rf "$T/usr/man.gen"

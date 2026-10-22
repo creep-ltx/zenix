@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Make a manual page for each program from the comment at the top of its source file (user/NAME.c).
-A hand-written page in rootfs/usr/man/ wins: it is copied in afterwards and replaces the generated one.
+A hand-written page in docs/man/ wins: it is copied in afterwards and replaces the generated one.
 usage: mkman.py OUTDIR program..."""
 import os
 import re

@@ -21,7 +21,7 @@ where a command is smaller than its Unix namesake.
 | [mkdir](man/mkdir.txt), [rmdir](man/rmdir.txt), [touch](man/touch.txt) | make/remove directories, create files |
 | [ln](man/ln.txt), [readlink](man/readlink.txt) | hard and symbolic links |
 | [chmod](man/chmod.txt), [stat](man/stat.txt) | permission bits, file information |
-| [find](man/find.txt), [du](man/du.txt), [df](man/df.txt) | search a tree, space used, space free |
+| [find](man/find.txt), [xargs](man/xargs.txt), [du](man/du.txt), [df](man/df.txt) | search a tree, space used, space free |
 | [pwd](man/pwd.txt), [basename](man/basename.txt), [dirname](man/dirname.txt) | paths |
 | [tar](man/tar.txt), [gzip](man/gzip.txt) ([gunzip](man/gunzip.txt), [zcat](man/zcat.txt)) | archives and compression |
 
@@ -34,13 +34,13 @@ where a command is smaller than its Unix namesake.
 | [head](man/head.txt), [tail](man/tail.txt), [wc](man/wc.txt) | parts and counts |
 | [diff](man/diff.txt), [cmp](man/cmp.txt), [hexdump](man/hexdump.txt) | compare, dump |
 | [echo](man/echo.txt), [seq](man/seq.txt), [yes](man/yes.txt), [expr](man/expr.txt) | generate and calculate |
-| `less` / [more](man/more.txt), `edit` | pager and editor (pages in `rootfs/usr/man`) |
+| [less](man/less.txt) / [more](man/more.txt), [edit](man/edit.txt) | pager and editor |
 | [man](man/man.txt) | these manuals |
 
 ## The system
 | Command | Summary |
 |---|---|
-| `sh` | the shell (page in `rootfs/usr/man`) |
+| [sh](man/sh.txt) | the shell |
 | [ps](man/ps.txt), [free](man/free.txt), [uptime](man/uptime.txt), [uname](man/uname.txt), [date](man/date.txt), [sleep](man/sleep.txt) | system state and time |
 | [env](man/env.txt), [printenv](man/printenv.txt), [which](man/which.txt), [whoami](man/whoami.txt), [id](man/id.txt), [hostname](man/hostname.txt), [clear](man/clear.txt), [true](man/true.txt), [false](man/false.txt) | small utilities |
 | [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [sync](man/sync.txt) | disks |
@@ -50,9 +50,11 @@ where a command is smaller than its Unix namesake.
 [hello](man/hello.txt), [spin](man/spin.txt), [crash](man/crash.txt), [badptr](man/badptr.txt),
 [ping](man/ping.txt), [pingd](man/pingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt).
 
-## Using these as the system's manual pages
-`tools/mkman.py` builds a page from the comment at the top of each program's source, and a hand-written
-`rootfs/usr/man/NAME.txt` replaces the generated one. To install these pages, copy `docs/man/*.txt` to
-`rootfs/usr/man/`. Two cautions: the RAM-disk test image (`build/zenix-ram.adf`) is only 640 KB with 128 inodes,
-and these pages are about 51 KB in 72 files, which uses most of the 128 inodes with the existing files, so check before adding them there; and `man -k` reads only the
-first 2 KB of each page.
+## How the pages get onto the system
+`docs/man/` is the one place for manual pages. `tools/mkroot.sh` copies every `docs/man/*.txt` to `/usr/man` on the
+root disk it builds; for a program that has no page there, `tools/mkman.py` still makes a minimal one from the
+comment at the top of the program's source. `man -k` reads only the first 2 KB of each page.
+
+## Keeping this in step with the code
+Adding or changing a command means changing its page in the same commit. The rule and the check
+(`tools/docs-check.sh`) are described in `../CLAUDE.md`.
