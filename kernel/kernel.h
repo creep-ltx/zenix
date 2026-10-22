@@ -164,7 +164,7 @@ struct uproc {                  /* returned by SYS_procinfo */
 #define SLICE 5                 /* ticks (100 Hz) */
 #define NREG  8                 /* extra memory regions per process */
 #define ENVMAX 1024
-enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE, P_MSG };
+enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE, P_MSG, P_STOP };
 struct proc {                   /* start.S relies on the first three: */
     u32 *ksp;                   /*   offset 0 */
     u32 usp;                    /*   offset 4 */
@@ -180,6 +180,7 @@ struct proc {                   /* start.S relies on the first three: */
     char cwd[96];
     struct file *fd[NFD];
     int killed;
+    u8 stop_req, stop_rep;      /* stop asked for (acted on when the process next runs); the parent has been told it is stopped */
     int priv;                   /* may use the raw disk (the filesystem server) */
     u16 uid, ruid, gid, umask;  /* effective and real user id, group id (inherited; a set-user-id program changes only uid); the filesystem server enforces the permissions */
     char env[ENVMAX];           /* environment: NAME=value NUL ... NUL NUL; inherited by children */
@@ -198,7 +199,12 @@ int proc_spawn(const char *path, char *const *argv, int argc,
 int proc_spawn_image(const void *img, u32 len, const char *name, int tty, int priv);
 void schedule(void);
 void proc_exit(int code) __attribute__((noreturn));
-int proc_wait(int pid, int nohang);    /* nohang: -2 if children exist but none has exited */
+#define WAIT_NOHANG   1       /* proc_wait flag: -2 if children exist but none has exited */
+#define WAIT_UNTRACED 2       /* proc_wait flag: also report a child that has stopped, once (as ST_STOPPED) */
+#define ST_STOPPED    0x114   /* proc_wait result for a stopped child (0x100 + 20, the SIGTSTP number) */
+int proc_wait(int pid, int flags);
+void proc_stop(struct proc *p);       /* Ctrl-Z / jobctl: stop it when it next runs */
+void proc_cont(struct proc *p);
 void proc_reap_orphans(void);
 void sched_tick(u16 sr);
 int user_ok(const struct proc *p, u32 ptr, u32 len);
@@ -243,6 +249,9 @@ long vfs_read(struct file *f, void *buf, u32 n);
 long vfs_write(struct file *f, const void *buf, u32 n);
 long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
 struct ustat;
+struct exec_src { int m; long ino; struct ustat st; };
+long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x);
+long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n);
 long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size, struct ustat *st);
 long vfs_open(const char *path, int flags);
 long vfs_stat(const char *path, struct ustat *st);
@@ -348,6 +357,7 @@ int tty_of(const struct proc *p);
 #define SYS_session     68   /* root: this is the logged-in session: its ids and environment are given to new workspace shells */
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
+#define SYS_jobctl      75   /* pid, op: 0 = stop, 1 = continue (own processes, or root) */
 #define SYS_mount       69   /* struct umountreq*: put a running filesystem server on a directory */
 #define SYS_umount      70   /* path: tell the server to quit and remove the mount */
 #define SYS_mountinfo   71   /* index, struct umountinfo*: 0, or -1 past the end */

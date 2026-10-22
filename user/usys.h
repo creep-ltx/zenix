@@ -33,6 +33,9 @@ static inline int sys_spawn(const char *path, char *const *argv, const int *stdi
 { return sys3(5, (u32)path, (u32)argv, (u32)stdio); }
 static inline int sys_wait(int pid) { return sys3(6, (u32)pid, 0, 0); }
 static inline int sys_waitnb(int pid) { return sys3(6, (u32)pid, 1, 0); }   /* -2: not yet */
+#define ST_STOPPED 0x114        /* sys_waitu result: the child was stopped (Ctrl-Z) */
+static inline int sys_waitu(int pid) { return sys3(6, (u32)pid, 2, 0); }    /* like wait, but also returns ST_STOPPED once for a stopped child */
+static inline int sys_jobctl(int pid, int op) { return sys3(75, (u32)pid, (u32)op, 0); }   /* op 0 = stop, 1 = continue */
 static inline void sys_sleep(u32 ticks) { sys3(7, ticks, 0, 0); }
 static inline int sys_open(const char *p, int fl) { return sys3(8, (u32)p, (u32)fl, 0); }
 static inline int sys_close(int fd) { return sys3(9, (u32)fd, 0, 0); }

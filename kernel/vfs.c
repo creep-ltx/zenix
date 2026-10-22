@@ -249,6 +249,36 @@ long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
     return fs_call_on(0, type, a0, a1, a2, a3);
 }
 
+/* Open a program for loading without reading it into a buffer first: the loader reads the header, allocates the
+ * process's memory and then reads the image straight into it (fs_exec_read). */
+long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x)
+{
+    char rb[PATHMAX]; const char *rel; u32 cwd;
+    int m = route(path, parent ? parent->cwd : "/", parent ? parent->cwd_ino : 2, rb, &rel, &cwd);
+    if (m < 0)
+        return -1;
+    long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY | O_EXEC, (u32)&x->st);
+    if (ino < 0)
+        return ino == -13 ? -13 : -1;
+    if (!S_ISREG(x->st.mode) || x->st.size > 256u * 1024)
+        return -2;
+    x->m = m;
+    x->ino = ino;
+    return 0;
+}
+
+long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
+{
+    u32 got = 0;
+    while (got < n) {
+        long r = fs_call_on(x->m, FS_READ, (u32)x->ino, off + got, (u32)((u8 *)dst + got), n - got);
+        if (r <= 0)
+            return -1;
+        got += (u32)r;
+    }
+    return 0;
+}
+
 long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size, struct ustat *stout)
 {
     struct ustat st;

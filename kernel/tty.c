@@ -145,6 +145,16 @@ void tty_input(u8 c)
         wake_io();
         return;
     }
+    if (c == 26) {                          /* ^Z: stop the foreground program (the shell offers it as a job) */
+        struct proc *p = t->fg ? proc_by_pid(t->fg) : 0;
+        if (p) {
+            out(i, '^'); out(i, 'Z'); out(i, '\n');
+            t->llen = 0;
+            proc_stop(p);
+        }
+        wake_io();
+        return;
+    }
     if (c == 4) {                           /* ^D */
         if (t->llen == 0)
             t->eof_pending = 1;

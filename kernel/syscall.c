@@ -96,13 +96,17 @@ void syscall_c(u32 *rb)
     case SYS_wait:
         r = proc_wait((int)a1, (int)a2);
         break;
-    case SYS_sleep:
-        current->wake = ticks + a1;
-        current->state = P_SLEEP;
-        nsleep++;
-        schedule();
+    case SYS_sleep: {
+        u32 until = ticks + a1;
+        while ((s32)(ticks - until) < 0 && !current->killed) {    /* a stop and continue in between wakes it early */
+            current->wake = until;
+            current->state = P_SLEEP;
+            nsleep++;
+            schedule();
+        }
         r = 0;
         break;
+    }
     case SYS_open: {
         char path[64];
         if (!copy_str(path, a1, sizeof path))
@@ -442,6 +446,14 @@ void syscall_c(u32 *rb)
         tty_setfg(tty_of(current), (int)a1);
         r = 0;
         break;
+    case SYS_jobctl: {
+        struct proc *p = proc_by_pid((int)a1);
+        if (p && p->pid != 0 && (current->uid == 0 || p->uid == current->uid || p->ppid == current->pid)) {
+            if (a2 == 0) proc_stop(p); else proc_cont(p);
+            r = 0;
+        }
+        break;
+    }
     case SYS_kill: {
         struct proc *p = proc_by_pid((int)a1);
         if (p && p->pid != 0) {

@@ -19,6 +19,7 @@ DESCRIPTION
           io       waiting for input, output or a pipe
           msg      waiting for a server's answer, or (a server) for a request
           zombie   ended, not yet collected by its parent
+          stopped  stopped by Ctrl-Z or a job-control request (fg, bg go on)
     MEM(K) all memory the process owns (program, stack, extra blocks)
     NAME  the file name of the program (first 15 characters)
 

@@ -95,11 +95,15 @@ No MMU means no per-process virtual addresses, so a program must run wherever it
 ...image...   then nreloc big-endian offsets of 32-bit words that hold link-time addresses
 ```
 
-The loader (`proc_load` in `kernel/proc.c`) copies the image, zeroes the BSS, and adds the load address to every
-word in the relocation table. Only `R_68K_32` relocations are needed (PC-relative code stays valid), and
+The loader (`proc_load` in `kernel/proc.c`) allocates the process's memory, **reads the image straight from the file
+system into it** (`fs_exec_open` / `fs_exec_read`: no buffer holding the whole file, so a spawn needs only the
+process's own memory plus the few-KB relocation table), zeroes the BSS, and adds the load address to every
+word in the relocation table. Reading can block (messages to the file system server), so the process slot is chosen
+only after the image is in place and nothing blocks after that; two programs may be loading at the same time (the two
+stages of a pipeline). Only `R_68K_32` relocations are needed (PC-relative code stays valid), and
 debug-section relocations must be skipped (their offsets are not addresses). The kernel itself uses the same
 format and the same loop (in `start.S`). Programs declare their stack size in the header (default 16 KB; `sh`
-asks for 40 KB). There is no shared-library format yet; programs are linked statically against `user/libz.c`.
+asks for 24 KB, but the `STACK_*` Makefile values are not applied yet - audit B6 - so every program gets 16 KB). There is no shared-library format yet; programs are linked statically against `user/libz.c`.
 
 ## 5. Memory (`kernel/mem.c`)
 
@@ -147,7 +151,13 @@ pointer makes the call return -1; the process lives. Strings are copied into ker
 
 Identity: `getuid getgid geteuid setuid setgid umask chown session` (see section 14).
 
-`kill` today means "terminate" (`proc->killed`); Unix-style signal handlers do not exist yet.
+`kill` today means "terminate" (`proc->killed`); Unix-style signal handlers do not exist yet. There is one more
+thing a process can be told: **stop and continue** (job control). Ctrl-Z on a terminal (`kernel/tty.c`) or `SYS_jobctl`
+(pid, 0 = stop, 1 = continue) calls `proc_stop`, which sets `stop_req` and wakes the process if it is blocked; at its
+next return from `schedule()` it turns itself into `P_STOP`, tells a waiting parent, and is not scheduled again until
+`proc_cont`. `SYS_wait` with flag 2 (`WAIT_UNTRACED`) reports a stopped child once, as `ST_STOPPED` (0x114). A client
+inside a call to a server is never stopped until the reply arrives (the server holds pointers into its memory).
+`sleep` loops until its time, so a stop and continue does not cut it short.
 
 ## 8. Ports and messages (`kernel/ipc.c`)
 

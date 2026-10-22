@@ -74,24 +74,43 @@ struct proc *proc_by_pid(int pid)
 /* Create a process from a ZEXE image in memory. `argv` points to kernel
  * memory. stdio[i] (parent's fd numbers, -1 = same number) picks the
  * child's fds 0-2; the child gets no other fds. */
-static int suid_override = -1;        /* set by proc_spawn for a set-user-id program */
-
-static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *argv,
-                     int argc, struct proc *parent, const int *stdio, int tty, int priv)
+/* put the image into the process's memory at base and relocate it: from a program built into the kernel ... */
+typedef int (*fillfn)(const void *ctx, u8 *base, const struct zexe *h);
+static int fill_mem(const void *ctx, u8 *base, const struct zexe *h)
 {
-    const struct zexe *h = (const struct zexe *)file;
+    const u8 *file = ctx;
+    memcpy(base, file, h->image_size);
+    const u32 *rel = (const u32 *)(file + h->reloc_off);
+    for (u32 i = 0; i < h->nreloc; i++)
+        *(u32 *)(base + rel[i]) += (u32)base;
+    return 0;
+}
+/* ... or straight from the file system: no buffer holding the whole file, so a spawn needs only the process's own
+ * memory (plus the relocation table, a few KB) */
+static int fill_fs(const void *ctx, u8 *base, const struct zexe *h)
+{
+    const struct exec_src *x = ctx;
+    if (fs_exec_read(x, 0, base, h->image_size))
+        return -1;
+    u32 rsz = h->nreloc * 4;
+    u32 *rel = kmalloc(rsz ? rsz : 4);
+    if (!rel || (rsz && fs_exec_read(x, h->reloc_off, rel, rsz))) {
+        if (rel)
+            kfree(rel);
+        return -1;
+    }
+    for (u32 i = 0; i < h->nreloc; i++)
+        *(u32 *)(base + rel[i]) += (u32)base;
+    kfree(rel);
+    return 0;
+}
+
+static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *fillctx, const char *path, char *const *argv,
+                     int argc, struct proc *parent, const int *stdio, int tty, int priv, int suid)
+{
     if (fsize < sizeof *h || h->magic != ZEXE_MAGIC || h->image_size > fsize ||
         h->mem_size < h->image_size || h->reloc_off + h->nreloc * 4 > fsize)
         return -5;
-
-    struct proc *p = 0;
-    for (int i = 1; i < NPROC; i++)
-        if (procs[i].state == P_FREE) {
-            p = &procs[i];
-            break;
-        }
-    if (!p)
-        return -6;
 
     u32 strsz = 0;
     for (int i = 0; i < argc; i++) {
@@ -110,11 +129,23 @@ static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *a
         mem_free_owner((u32)pid);
         return -7;
     }
-    memcpy(base, file, h->image_size);
+    /* Reading the image can block (messages to the filesystem server), and another process may spawn meanwhile: so the
+     * process slot is chosen only afterwards, and nothing below blocks. */
+    if (fill(fillctx, base, h)) {
+        mem_free_owner((u32)pid);
+        return -4;
+    }
     memset(base + h->image_size, 0, span - h->image_size);
-    const u32 *rel = (const u32 *)(file + h->reloc_off);
-    for (u32 i = 0; i < h->nreloc; i++)
-        *(u32 *)(base + rel[i]) += (u32)base;
+    struct proc *p = 0;
+    for (int i = 1; i < NPROC; i++)
+        if (procs[i].state == P_FREE) {
+            p = &procs[i];
+            break;
+        }
+    if (!p) {
+        mem_free_owner((u32)pid);
+        return -6;
+    }
 
     /* arguments at the top of the stack: usp -> argc, argv, argv[]..., strings */
     u8 *top = base + span;
@@ -151,7 +182,7 @@ static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *a
     p->ruid = parent ? parent->ruid : 0;
     p->gid = parent ? parent->gid : 0;
     p->umask = parent ? parent->umask : 022;
-    if (suid_override >= 0) p->uid = (u16)suid_override;
+    if (suid >= 0) p->uid = (u16)suid;                 /* set-user-id program: runs as its owner */
     if (parent) {
         memcpy(p->env, parent->env, parent->envlen);
         p->envlen = parent->envlen;
@@ -207,24 +238,22 @@ static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *a
 int proc_spawn(const char *path, char *const *argv, int argc,
                struct proc *parent, const int *stdio, int tty)
 {
-    u8 *file;
-    u32 size;
-    struct ustat st;
-    long r = fs_read_file(path, parent, &file, &size, &st);
+    struct exec_src x;
+    struct zexe h;
+    long r = fs_exec_open(path, parent, &x);
     if (r < 0)
         return (int)r;
-    suid_override = (st.mode & 04000) ? (int)st.uid : -1;   /* set-user-id: the program runs as its owner (su, passwd) */
-    int pid = proc_load(file, size, path, argv, argc, parent, stdio, tty, 0);
-    suid_override = -1;
-    kfree(file);
-    return pid;
+    if (fs_exec_read(&x, 0, &h, sizeof h))
+        return -4;
+    return proc_load(&h, x.st.size, fill_fs, &x, path, argv, argc, parent, stdio, tty, 0,
+                     (x.st.mode & 04000) ? (int)x.st.uid : -1);       /* set-user-id: runs as its owner (su, passwd) */
 }
 
 /* a program built into the kernel image (no filesystem needed) */
 int proc_spawn_image(const void *img, u32 len, const char *name, int tty, int priv)
 {
     char *argv[] = { (char *)name, 0 };
-    return proc_load(img, len, name, argv, 1, 0, 0, tty, priv);
+    return proc_load(img, len, fill_mem, img, name, argv, 1, 0, 0, tty, priv, -1);
 }
 
 void schedule(void)
@@ -256,6 +285,16 @@ void schedule(void)
     /* a process that was killed while blocked or preempted dies here */
     if (current->killed && current->state == P_READY && current->pid != 0)
         proc_exit(130);
+    if (current->stop_req && current->state == P_READY && current->pid != 0 && !current->wait_msg) {
+        struct proc *p = current;                       /* stopped: not runnable until proc_cont */
+        p->stop_req = 0;
+        p->stop_rep = 0;
+        p->state = P_STOP;
+        struct proc *par = proc_by_pid(p->ppid);
+        if (par && par->state == P_WAIT && (par->wait_for == -1 || par->wait_for == p->pid))
+            ready(par);
+        schedule();
+    }
 }
 
 void sched_tick(u16 sr)
@@ -282,10 +321,27 @@ void block_io(void)
     schedule();
 }
 
+void proc_stop(struct proc *p)
+{
+    if (p->pid == 0 || p->priv || p->state == P_ZOMBIE || p->state == P_FREE || p->state == P_STOP)
+        return;
+    p->stop_req = 1;
+    if (p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
+        (p->state == P_MSG && !p->wait_msg))            /* wake it so that it notices */
+        ready(p);
+}
+
+void proc_cont(struct proc *p)
+{
+    p->stop_req = 0;
+    if (p->state == P_STOP)
+        ready(p);
+}
+
 void proc_kill(struct proc *p)
 {
     p->killed = 1;
-    if (p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
+    if (p->state == P_STOP || p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
         (p->state == P_MSG && !p->wait_msg))        /* a server in recv, not a client in call */
         ready(p);
 }
@@ -316,8 +372,9 @@ void proc_exit(int code)
 }
 
 /* wait for a child; returns its exit code and releases it, -1 if none */
-int proc_wait(int pid, int nohang)
+int proc_wait(int pid, int flags)
 {
+    int nohang = flags & WAIT_NOHANG;
     for (;;) {
         int have = 0;
         for (int i = 1; i < NPROC; i++) {
@@ -326,6 +383,10 @@ int proc_wait(int pid, int nohang)
                 (pid != -1 && c->pid != pid))
                 continue;
             have = 1;
+            if (c->state == P_STOP && (flags & WAIT_UNTRACED) && !c->stop_rep) {
+                c->stop_rep = 1;
+                return ST_STOPPED;
+            }
             if (c->state == P_ZOMBIE) {
                 int code = c->exit_code;
                 mem_free_owner((u32)c->pid);
