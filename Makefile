@@ -3,12 +3,16 @@ CC      := $(TOOLPREFIX)gcc
 OBJCOPY := $(TOOLPREFIX)objcopy
 BUILD   := build
 
-CFLAGS  := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
+# -m68020-60: code that runs on every CPU from the 68020 to the 68060 (no 64-bit mulu.l/divu.l, which a 68060 lacks and
+# nothing emulates under Zenix); tools/check-68020-60.sh proves it on every kernel, stage0 and program
+CFLAGS  := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 DIWV    ?= 0x2C
 CFLAGS  += -DDIW_V=$(DIWV)
-ASFLAGS := -mcpu=68020 -x assembler-with-cpp -c
-LIBGCC  := $(shell $(CC) $(CFLAGS) -print-libgcc-file-name 2>/dev/null)
+ASFLAGS := -m68020-60 -x assembler-with-cpp -c
+# libgcc's 64-bit helpers (__udivdi3, __muldi3) in the default multilib use the 64-bit mulu.l/divu.l themselves; the
+# 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
+LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
 KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/embed.o
 
@@ -18,7 +22,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
-UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
+UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 # programs that need more than the default 16 KB stack
 STACK_sh := 24576
@@ -41,12 +45,13 @@ $(BUILD)/bootblock.bin: $(BUILD)/bootblock.elf
 # stage0: reads the Pi's hardware addresses from Emu68's device tree while AmigaOS is alive. Position
 # independent (-mpcrel), no data, no relocations; embedded in the kernel image (start.S) and called by the bootblock.
 $(BUILD)/stage0.o: boot/stage0.c kernel/hwinfo.h boot/dtapi_amiga.h | $(BUILD)
-	$(CC) -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib -Os -Wall -Wextra -mpcrel \
+	$(CC) -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib -Os -Wall -Wextra -mpcrel \
 	    -fno-asynchronous-unwind-tables -c $< -o $@
 	@test -z "$$($(TOOLPREFIX)readelf -r $@ | grep -E "R_68K_(32|16|8|GOT|PLT)")" || { echo "stage0 must have no absolute relocations"; exit 1; }
 $(BUILD)/stage0.elf: $(BUILD)/stage0.o link/stage0.ld
 	$(CC) -nostartfiles -nostdlib -T link/stage0.ld -Wl,--build-id=none $< $(LIBGCC) -o $@
-$(BUILD)/stage0.bin: $(BUILD)/stage0.elf
+$(BUILD)/stage0.bin: $(BUILD)/stage0.elf tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	$(OBJCOPY) -O binary $< $@
 
 $(BUILD)/start.o: kernel/start.S $(BUILD)/stage0.bin | $(BUILD)
@@ -58,7 +63,8 @@ $(BUILD)/%.o: kernel/%.S | $(BUILD)
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 	$(CC) $(CFLAGS) -nostartfiles -T link/kernel.ld -Wl,--build-id=none -Wl,-q \
 	    $(KOBJS) $(LIBGCC) -o $@
-$(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py
+$(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@
 
 # the standard floppy carries only the bootblock and the kernel (the root filesystem is on the disk)
@@ -139,7 +145,8 @@ $(BUILD)/fsck_ext2.uelf: $(BUILD)/fsck_ext2.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt
 $(BUILD)/fsd.uelf: $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
 	    $(BUILD)/crt0.o $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py
+$(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ 16384
 # the same server as a program: `mount -t ext2` starts /bin/mount.ext2 DEVICE PORT
 $(BUILD)/mount.ext2.zx: $(BUILD)/fsd.zx
@@ -158,7 +165,8 @@ $(BUILD)/zenixfsd.uo: user/zenixfsd.c user/rootpick.h user/rdb.h kernel/fsperm.h
 $(BUILD)/zenixfsd.uelf: $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
 	    $(BUILD)/crt0.o $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/mount.zenixfs.zx: $(BUILD)/zenixfsd.uelf tools/mkzexe.py
+$(BUILD)/mount.zenixfs.zx: $(BUILD)/zenixfsd.uelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ 32768
 $(BUILD)/mkfs_zenixfs.uelf: $(BUILD)/mkfs_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
@@ -166,7 +174,8 @@ $(BUILD)/mkfs_zenixfs.uelf: $(BUILD)/mkfs_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/cr
 $(BUILD)/fsck_zenixfs.uelf: $(BUILD)/fsck_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
 	    $(BUILD)/crt0.o $(BUILD)/fsck_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/mkfs_zenixfs.zx $(BUILD)/fsck_zenixfs.zx: %.zx: %.uelf tools/mkzexe.py
+$(BUILD)/mkfs_zenixfs.zx $(BUILD)/fsck_zenixfs.zx: %.zx: %.uelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ 32768
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
@@ -179,7 +188,8 @@ $(BUILD)/%.uo: user/%.c user/libz.h user/usys.h | $(BUILD)
 $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
 	    $(BUILD)/crt0.o $< $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py
+$(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ 16384
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
@@ -207,4 +217,5 @@ clean:
 	rm -rf $(BUILD)
 
 .SECONDARY:
+.DELETE_ON_ERROR:           # a recipe that fails leaves no half-written target behind for the next make to trust
 .PHONY: all run test clean

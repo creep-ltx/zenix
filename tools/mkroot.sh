@@ -4,6 +4,11 @@
 set -e
 OUT="$1"; B="$2"; PROGS="$3"; SIZE="${4:-8M}"; INODES="${5:-512}"
 T=$(mktemp -d)
+# the image is built as a temporary file next to the output and moved into place only when mke2fs and e2fsck
+# succeeded: a failure (the programs no longer fit, say) must not leave a half-written image that the next make
+# takes for up to date. Any failure also removes the staging directory.
+TMPOUT="$OUT.tmp.$$"
+trap 'rm -rf "$T" "$TMPOUT"' EXIT
 cp -r "$(dirname "$0")/../rootfs/." "$T/"
 [ -n "$NOTESTS" ] && rm -rf "$T/tests"      # NOTESTS=1: leave the test scripts out (the small RAM-disk image)
 mkdir -p "$T/bin" "$T/tmp"
@@ -21,7 +26,7 @@ if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small i
 fi
 ln -s less "$T/bin/more"
 ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"; ln -s pgrep "$T/bin/pkill"            # more is less
-rm -f "$OUT"
+rm -f "$TMPOUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features
 # ownership and modes under fakeroot, so the image holds uid 0 (not whoever runs the build): root owns everything,
 # /tmp is sticky and open to all, a normal user has a home, su and passwd are set-user-id root
@@ -34,6 +39,7 @@ fakeroot sh -c '
     chmod 4755 "$1/bin/su" "$1/bin/passwd"
     chmod 644 "$1/etc/passwd" "$1/etc/group"
     mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$2" -d "$1" -F "$3" "$4"
-' sh "$T" "$INODES" "$OUT" "$SIZE"
-rm -rf "$T"
-e2fsck -fn "$OUT" >/dev/null && echo "$OUT: ext2 root, $(echo $PROGS | wc -w) programs"
+' sh "$T" "$INODES" "$TMPOUT" "$SIZE"
+e2fsck -fn "$TMPOUT" >/dev/null
+mv -f "$TMPOUT" "$OUT"
+echo "$OUT: ext2 root, $(echo $PROGS | wc -w) programs"
