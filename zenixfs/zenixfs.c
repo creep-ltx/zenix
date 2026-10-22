@@ -734,6 +734,12 @@ int zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_
 }
 int zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_blocks, uint32_t bm_pages)
 {
+    struct zenixfs_mount_opts o = { cache_blocks, bm_pages, 0, 0 };
+    return zenixfs_mount_opts(out, dev, &o);
+}
+int zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const struct zenixfs_mount_opts *mo)
+{
+    u32 cache_blocks = mo->cache_blocks, bm_pages = mo->bm_pages, skip = mo->skip_commits;
     u32 B = 1u << dev->bshift;
     if (cache_blocks < 32) cache_blocks = 32;
     u8 *buf = ZENIXFS_MALLOC(B);
@@ -764,12 +770,12 @@ int zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cac
     for (u32 i = 0; i < fs->cap; i++) { fs->cbs[i].data = ZENIXFS_MALLOC(B); if (!fs->cbs[i].data) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; } }
     for (u32 i = 0; i < fs->nbmp; i++) { fs->bmp[i].data = ZENIXFS_MALLOC(fs->bmbytes); if (!fs->bmp[i].data) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; } }
     /* commit records, newest valid first */
-    u64 gens[RING]; u8 *recs = ZENIXFS_MALLOC((size_t)RING * B);
+    u64 gens[RING], maxg = 0; u8 *recs = ZENIXFS_MALLOC((size_t)RING * B);
     if (!recs) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; }
     for (u32 s = 0; s < RING; s++) {
         gens[s] = 0;
         if (dev->read(dev->ctx, 1 + s, recs + (size_t)s * B) < 0) continue;
-        if (verify(recs + (size_t)s * B, B, T_COMMIT, 1 + s)) gens[s] = rd64(recs + (size_t)s * B + 16);
+        if (verify(recs + (size_t)s * B, B, T_COMMIT, 1 + s)) { gens[s] = rd64(recs + (size_t)s * B + 16); if (gens[s] > maxg) maxg = gens[s]; }
         else {                                              /* never written slots are all zero; anything else that fails is damage
                                                              * (or an interrupted write of the newest commit) */
             const u8 *q = recs + (size_t)s * B;
@@ -784,23 +790,24 @@ int zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cac
         for (u32 s = 0; s < RING; s++) if (gens[s] && (bs < 0 || gens[s] > gens[bs])) bs = s;
         if (bs < 0) break;
         u8 *r = recs + (size_t)bs * B; u64 g = gens[bs]; gens[bs] = 0;
+        if (skip) { skip--; continue; }                           /* recovery: ignore the newest commits on request */
         if (rd32(r + 56) != fs->nb) { fs->st.mount_damage++; continue; }
         int good = 1;
         for (u32 i = 0; i < fs->nb && good; i++) {                /* which copy of each bitmap page is current; checked now on volumes up to 4 MB of map */
             u32 sel = (r[60 + i / 8] >> (i % 8)) & 1, blk = BMBLK(i, sel);
             fs->bmsel[i] = sel;
-            if (fs->nb <= 1024 && (dev->read(dev->ctx, blk, buf) < 0 || !verify(buf, B, T_BITMAP, blk))) { good = 0; break; }
+            if (fs->nb <= 1024 && !(mo->flags & ZENIXFS_MNT_NOBITMAPCHECK) && (dev->read(dev->ctx, blk, buf) < 0 || !verify(buf, B, T_BITMAP, blk))) { good = 0; break; }
         }
         if (!good) { fs->st.mount_damage++; continue; }
         u32 root = rd32(r + 32);
         if (root >= fs->nblocks || dev->read(dev->ctx, root, buf) < 0 || !verify_tree(buf, B, root)) { fs->st.mount_damage++; continue; }
         fs->root = root; fs->height = rd32(r + 36); fs->free_blocks = rd32(r + 40); fs->next_ino = rd32(r + 44);
-        fs->now = rd64(r + 48); fs->gen = (u32)g + 1; ok = 1;
+        fs->now = rd64(r + 48); fs->gen = (u32)maxg + 1; (void)g; ok = 1;     /* above every valid record: after a rollback ours is the newest */
     }
     ZENIXFS_FREE(recs); ZENIXFS_FREE(buf);
     if (!ok) { fs_free(fs); return ZENIXFS_ECORRUPT; }
     fs->meta_hint = fs->dstart; fs->data_hint = fs->dstart + fs->nblocks / 32;
-    int e = orphans_free(fs);
+    int e = (mo->flags & ZENIXFS_MNT_READONLYISH) ? 0 : orphans_free(fs);          /* a recovery mount does not change anything by itself */
     if (e) { fs_free(fs); return e; }
     *out = fs;
     return 0;
@@ -1612,4 +1619,94 @@ int zenixfs_fsck(struct zenixfs *fs, void (*log)(void *, const char *), void *lc
     if (freecnt != fs->free_blocks) fprob(&c, "free block count is % but bitmap says #", freecnt, fs->free_blocks);
     ZENIXFS_FREE(c.used); ZENIXFS_FREE(c.tab);
     return c.problems;
+}
+
+
+/* ---------- recovery ---------- */
+/* a bitmap page from scratch, without reading it (its stored copy is damaged) */
+static struct bmpage *bm_blank(struct zenixfs *fs, u32 i)
+{
+    struct bmpage *v = NULL;
+    for (u32 k = 0; k < fs->nbmp; k++) {
+        struct bmpage *p = &fs->bmp[k];
+        if (p->valid && p->idx == i) { v = p; break; }
+        if (!v || (v->valid && (!p->valid || p->lru < v->lru))) v = p;
+    }
+    if (v->valid && v->idx != i && v->dirty && bm_stage(fs, v)) return NULL;
+    memset(v->data, 0, fs->bmbytes);
+    v->idx = i; v->valid = 1; v->dirty = 1; v->lru = ++fs->bmclock;
+    return v;
+}
+int zenixfs_rebuild_bitmap(struct zenixfs *fs)
+{
+    struct fctx c; memset(&c, 0, sizeof c);
+    c.fs = fs;
+    c.used = ZENIXFS_MALLOC(((size_t)fs->nb * fs->bmbytes) + 8);
+    if (!c.used) return ZENIXFS_EIO;
+    memset(c.used, 0, ((size_t)fs->nb * fs->bmbytes) + 8);
+    for (u32 b = 0; b < fs->dstart; b++) bit_set(c.used, b);
+    fwalk(&c, fs->root, fs->height - 1);                       /* every block the tree reaches */
+    int changed = 0; u32 freecnt = 0;
+    fs->npend = 0; fs->pend_blocks = 0;                         /* whatever was waiting to be freed is decided by the tree now */
+    for (u32 i = 0; i < fs->nb; i++) {
+        struct bmpage *pg = bm_get(fs, i);
+        int fresh = 0;
+        if (!pg) { pg = bm_blank(fs, i); fresh = 1; if (!pg) { ZENIXFS_FREE(c.used); ZENIXFS_FREE(c.tab); return ZENIXFS_EIO; } }
+        for (u32 j = 0; j < fs->bpb; j++) {
+            u32 b = i * fs->bpb + j;
+            int want = b >= fs->nblocks ? 1 : bit_get(c.used, b);
+            if (bit_get(pg->data, j) != want) { changed++; if (want) bit_set(pg->data, j); else bit_clr(pg->data, j); pg->dirty = 1; }
+            if (!want) freecnt++;
+        }
+        if (fresh) pg->dirty = 1;
+        fs->bmfull[i] = 0;
+    }
+    fs->free_blocks = freecnt;
+    fs->txn_dirty = 1;
+    ZENIXFS_FREE(c.used); ZENIXFS_FREE(c.tab);
+    int e = commit(fs);
+    return e ? e : changed;
+}
+
+int zenixfs_rewrite_super(struct zenixfs_dev *dev, const char *label, uint32_t reserve, uint32_t charset, uint64_t now)
+{
+    u32 B = 1u << dev->bshift, n = dev->nblocks;
+    if (dev->bshift < 10 || dev->bshift > 12) return ZENIXFS_EINVAL;
+    u32 nb = geometry_nb(n, B);
+    if (!reserve) { reserve = n / 50; if (reserve < 32) reserve = 32; }
+    u8 *buf = ZENIXFS_MALLOC(B);
+    if (!buf) return ZENIXFS_EIO;
+    memset(buf, 0, B);
+    hdr_set(buf, T_SUPER, 0, 0);
+    wr32(buf + 32, SBMAGIC); wr32(buf + 36, 1); wr32(buf + 40, dev->bshift); wr32(buf + 44, n); wr32(buf + 48, nb);
+    wr32(buf + 52, reserve); wr64(buf + 84, now);
+    if (label) strncpy((char *)buf + 92, label, 31);
+    wr32(buf + 124, charset);
+    seal(buf, B, 0);
+    int e = dev->write(dev->ctx, 0, buf) < 0 || dev->flush(dev->ctx) < 0 ? ZENIXFS_EIO : 0;
+    ZENIXFS_FREE(buf);
+    return e;
+}
+
+/* how many blocks of the file are mapped by extents (the walker compares with size / block size to notice lost extents) */
+int zenixfs_mapped_blocks(struct zenixfs *fs, uint32_t ino, uint64_t *mapped)
+{
+    struct zenixfs_inode in;
+    int e = ino_load(fs, ino, &in);
+    if (e) return e;
+    *mapped = 0;
+    if (in.flags & IFL_INLINE) return 1;                       /* stored inside the tree: no extents */
+    u32 off = 0;
+    for (;;) {
+        u8 key[KEYLEN], k2[KEYLEN], val[VMAX]; int vl;
+        mkkey(key, ino, K_EXTENT, off);
+        e = t_search(fs, key, S_CEIL, k2, val, &vl);
+        if (e == ZENIXFS_ENOENT) break;
+        if (e) return e;
+        if (rd32(k2) != ino || k2[4] != K_EXTENT || vl != 8) break;
+        *mapped += rd32(val + 4);
+        off = rd32(k2 + 8) + 1;
+        if (off == 0) break;
+    }
+    return 0;
 }

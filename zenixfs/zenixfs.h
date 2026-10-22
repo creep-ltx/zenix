@@ -62,6 +62,13 @@ int  zenixfs_mkfs(struct zenixfs_dev *dev, const char *label, uint32_t reserve, 
 int  zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_blocks);
 /* like zenixfs_mount; bm_pages = how many pages of the free-space map are kept in RAM (0 = 8; one page covers 8 * (blocksize - 32) blocks) */
 int  zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_blocks, uint32_t bm_pages);
+/* mount with options, for recovery: flags ZENIXFS_MNT_NOBITMAPCHECK (do not insist on a good free-space map at mount),
+ * ZENIXFS_MNT_READONLYISH (do not clean up orphans at mount); skip_commits = ignore that many of the newest commit records
+ * (mount an older state of the volume). */
+#define ZENIXFS_MNT_NOBITMAPCHECK 1
+#define ZENIXFS_MNT_READONLYISH   2
+struct zenixfs_mount_opts { uint32_t cache_blocks, bm_pages, flags, skip_commits; };
+int  zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const struct zenixfs_mount_opts *o);
 int  zenixfs_unmount(struct zenixfs *fs);                    /* commits */
 int  zenixfs_sync(struct zenixfs *fs);                       /* commit everything now */
 void zenixfs_set_time(struct zenixfs *fs, uint64_t now);
@@ -89,6 +96,14 @@ int  zenixfs_truncate(struct zenixfs *fs, uint32_t ino, uint64_t size);
  * zenixfs_orphan_done when the last close happens (frees it). zenixfs_unlink never frees an orphan-flagged inode. */
 int  zenixfs_orphan_add(struct zenixfs *fs, uint32_t ino);
 int  zenixfs_orphan_done(struct zenixfs *fs, uint32_t ino);
+
+/* Recovery. zenixfs_rebuild_bitmap: recompute the free-space map from the tree (every block the tree reaches is used, the rest is free)
+ * and commit it; returns the number of blocks whose state changed, or negative. zenixfs_rewrite_super: write a new superblock for a
+ * volume whose block 0 was destroyed (the geometry comes from the device). */
+int  zenixfs_rebuild_bitmap(struct zenixfs *fs);
+/* number of blocks of a file that extents map (*mapped); returns 1 if the file is stored inline (no extents), 0 otherwise, or negative */
+int  zenixfs_mapped_blocks(struct zenixfs *fs, uint32_t ino, uint64_t *mapped);
+int  zenixfs_rewrite_super(struct zenixfs_dev *dev, const char *label, uint32_t reserve, uint32_t charset, uint64_t now);
 
 /* check the whole volume: prints problems through log (may be NULL); returns the number of problems. */
 int  zenixfs_fsck(struct zenixfs *fs, void (*log)(void *ctx, const char *msg), void *ctx);

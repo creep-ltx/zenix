@@ -26,6 +26,40 @@ Commands: `mkfs info fsck ls stat cat put get mkdir rm rmdir mv ln` (options alw
 and commits on close, `fsync`, when the cache fills and at unmount. `make fuse-test` copies trees through the mount, and kills the filesystem process with `kill -9` in the middle of a
 big copy eight times: every image must still pass `fsck`. *Verified* on 2026-10-22 (fuse3 3.18.3). Speed through FUSE says little about ZenixFS itself.
 
+## 0b. Recovery from damage (host tool, 2026-10-22)
+A crash never damages a ZenixFS volume (the power-cut tests), but a bad disk, a bad cable or a bug can. `zenixfs-tool` has these recovery commands; they work
+on image files and on a partition copied out to a file. Nothing here has been run on a real damaged disk, only on damage made on purpose in the lab.
+```
+zenixfs-tool fsck IMAGE                  find the damage (reports only)
+zenixfs-tool salvage IMAGE OUTDIR        copy out everything that can still be read; if the tree is damaged it then carves the raw blocks
+                                         (--old-copies also reads blocks the filesystem had replaced but not yet reused; --commit K reads K commits back)
+zenixfs-tool repair IMAGE                rewrite a destroyed superblock, rebuild the free-space map from the tree, then fsck
+zenixfs-tool repair IMAGE --rollback K   go back K commits (the newest K commit records are ignored, the older state becomes the newest)
+zenixfs-tool rescue IMAGE NEW SIZE_MB    salvage + make a fresh clean image NEW from it (the way out when the tree itself is damaged)
+```
+How it works: *salvage* mounts without insisting on a good free-space map and walks the tree, skipping what cannot be read; a file whose data is not whole is
+saved as `name.partial`. If anything failed, or the volume cannot be mounted at all, it *carves*: it ignores the superblock, the commit records and the upper tree, finds every
+block on the volume that is a valid leaf (right magic, own block number, correct checksum), and rebuilds directories and files from the items in them. Files whose directory is
+lost go to `lost+found/dir<N>` and `lost+found/file<N>`; a file whose inode is lost is saved as `name.nosize` (its length is unknown, the last block may have extra zeros).
+Names that already exist in the output are never overwritten, so the carved files only fill the gaps of the walk.
+
+What the corruption lab (`make -C zenixfs lab`) found, on a 160 MB volume with 380 files and 8 commits in the ring (*verified* 2026-10-22; "at its place/anywhere" counts files whose content came back intact):
+| damage to a copy of the volume | plain tools | after salvage | after repair |
+|---|---|---|---|
+| newest commit record bit-flipped or zeroed, or the two newest destroyed | mounts from the older commit (warns); loses the files of the last commits | all but the last commit's files | clean, same |
+| root block or an inner tree node destroyed | falls back to the older commit | same | clean |
+| **all 8 commit records destroyed** | cannot mount | **all 380 files** (carved) | needs salvage |
+| **superblock destroyed** | cannot mount | **all 380** | **clean, all 380 readable** |
+| one or both copies of a free-space map page destroyed | cannot mount / warns | all 380 | **clean, all 380** |
+| 1 MB of garbage in the middle, or the last quarter of the volume lost | usually unaffected | all 380 | clean / needs salvage |
+| one leaf of the tree destroyed (bit flips, zeros, garbage) | `fsck` finds it; a plain copy stops at the first error | 339-372 of 380; the rest were in that leaf | tree damage: not repairable, use salvage/rescue |
+| ten leaves destroyed | most of the tree unreadable | 225 intact, 65 more saved but flagged `.partial`/`.nosize` | same |
+| 200 random bit flips anywhere | 4 files readable | 370; 8 flagged; **2 files with wrong content, not flagged** | |
+| 64 KB of garbage at the start (superblock, commit ring, first map pages) | cannot mount | 270 intact + 10 flagged | needs salvage |
+**The one silent kind of error: bits flipped inside file data.** Only metadata is checksummed (the data checksums of the plan are reserved in the format but not built), so a flipped bit in a file's data
+comes back unnoticed; every other kind of damage is either repaired or flagged. The library never repairs the tree itself: if a leaf of the tree is destroyed, `rescue` makes a clean new image from what survives.
+The recovery commands were run under AddressSanitizer on the lab and on 40 randomly damaged images (0 reports). `make test` runs the part of the lab that must always succeed.
+
 ## 1. Goal and the machine it is for
 A filesystem that is **safe** (no check after a crash, no replay, silent damage is noticed), **fast on slow
 hardware** and **small**: 68020/030 at 14-50 MHz, a few MB of RAM (cache = tens to hundreds of KB, no MMU),
