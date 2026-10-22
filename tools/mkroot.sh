@@ -7,8 +7,9 @@ T=$(mktemp -d)
 cp -r "$(dirname "$0")/../rootfs/." "$T/"
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
-    cp "$B/$p.zx" "$T/bin/$p"
-    chmod 755 "$T/bin/$p"
+    name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2
+    cp "$B/$p.zx" "$T/bin/$name"
+    chmod 755 "$T/bin/$name"
 done
 rm -f "$OUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features

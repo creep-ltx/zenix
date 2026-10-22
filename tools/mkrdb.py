@@ -6,7 +6,7 @@ import sys
 
 fs, out = sys.argv[1:3]
 data = open(fs, "rb").read()
-HEADS, SECS = 16, 32
+HEADS, SECS = 16, 63
 CYL = HEADS * SECS * 512
 lowcyl = 1
 ncyl = lowcyl + (len(data) + CYL - 1) // CYL

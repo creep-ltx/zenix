@@ -13,6 +13,7 @@ struct rdb_part {
     unsigned lowcyl, highcyl;       /* inclusive */
     unsigned dostype;
     unsigned bootable;
+    unsigned heads, secs;           /* the partition's own geometry (from the table) */
 };
 struct rdb {
     unsigned cylinders;             /* of the whole disk */
@@ -46,6 +47,7 @@ static int rdb_read(rdb_io rd, struct rdb *r)
             p->label[l] = 0;
             unsigned *env = &sec[32];
             p->lowcyl = env[9]; p->highcyl = env[10]; p->dostype = env[16];
+            p->heads = env[3]; p->secs = env[5];
             p->bootable = sec[5] & 1;
             next = sec[4];
         }

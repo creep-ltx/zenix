@@ -42,8 +42,9 @@ static void scan(void)
         for (int i = 0; i < r.nparts; i++) {
             char name[16] = "ide0p";
             name[5] = (char)('1' + i); name[6] = 0;
-            u32 start = r.part[i].lowcyl * RDB_CYL;
-            add(name, r.part[i].label, start, (r.part[i].highcyl - r.part[i].lowcyl + 1) * RDB_CYL,
+            u32 cyl = r.part[i].heads * r.part[i].secs;          /* sectors per cylinder, as the table says */
+            u32 start = r.part[i].lowcyl * cyl;
+            add(name, r.part[i].label, start, (r.part[i].highcyl - r.part[i].lowcyl + 1) * cyl,
                 r.part[i].dostype, r.part[i].bootable);
         }
     for (int i = 0; i < ndev && i < oldn; i++) dev[i].mounted = keep[i];   /* mounts survive a rescan */
