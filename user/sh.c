@@ -1850,8 +1850,14 @@ static void interactive_loop(void)
 
 int main(int argc, char **argv)
 {
-    u32 asize = ARENA;                              /* a machine short of memory gets a smaller arena, but never less than 128 KB (below that the shell refuses cleanly) */
-    while (!(arena = sys_memalloc(asize)) && asize > 131072) asize /= 2;
+    /* The arena holds the parsed commands of one input line or script; the long scripts of the tests peak near
+     * 180 KB, an interactive session needs a few KB. Take an eighth of the free memory (the arena goes to fast RAM
+     * when there is any), between 64 and 256 KB, so a small machine keeps room for a second shell. */
+    u32 mi[4]; sys_meminfo(mi);
+    u32 asize = (mi[1] ? mi[1] : mi[0]) / 8;
+    if (asize > ARENA) asize = ARENA;
+    if (asize < 65536) asize = 65536;
+    while (!(arena = sys_memalloc(asize)) && asize > 32768) asize /= 2;
     if (!arena) { errm("no memory", 0); return 2; }
     abrk = arena; aend = arena + asize;
     shell_pid = sys_getpid();
