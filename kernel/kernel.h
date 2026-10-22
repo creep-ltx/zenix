@@ -110,6 +110,11 @@ int blk_read(u32 lba, u32 count, void *buf);
 int blk_write(u32 lba, u32 count, const void *buf);
 int blk_flush(void);
 
+/* input.c: mouse (port 1) and joystick (port 2), polled from the 100 Hz tick */
+void input_init(void);
+void input_poll(void);
+void input_read(s32 *out);
+
 /* audio.c: Paula beep (the terminal bell) */
 void beep(u32 hz, u32 ms);
 void audio_tick(void);                  /* from the 100 Hz tick */
@@ -354,6 +359,7 @@ int tty_of(const struct proc *p);
 #define SYS_chown       66   /* path, uid, gid (-1 keeps one): root only */
 #define SYS_geteuid     67
 #define SYS_session     68   /* root: this is the logged-in session: its ids and environment are given to new workspace shells */
+#define SYS_input       74   /* s32[4] <- mouse dx, dy (since the last call), mouse buttons, joystick bits */
 #define SYS_klog        73   /* offset, buffer, length -> characters of the kernel log copied (0 = nothing more) */
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */

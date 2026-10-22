@@ -91,6 +91,13 @@ enable) and stops it from the 100 Hz tick. The terminal calls it for BEL (0x07).
 no sample playback, no mixing. The first beep logs whether channel 0 raised its end-of-sample flag (it can be
 checked without hearing it).
 
+### Mouse and joystick (`kernel/input.c`)
+
+Polled from the 100 Hz tick: JOY0DAT's two 8-bit counters give mouse movement (accumulated until read, so nothing is
+lost between reads), CIA-A port A bits 6 and 7 the left button and the joystick fire button, POTGOR the right and
+middle buttons; a joystick in port 2 is decoded from JOY1DAT. `SYS_input` (74) copies out
+{dx, dy, buttons, joystick} and clears the movement; `input` prints it. No pointer, no events yet.
+
 ### SD card driver (`kernel/emmc.c`)
 
 The Pi 4/CM4 SD slot is a standard SDHCI controller (EMMC2) at `hwinfo.emmc`. Registers are little-endian

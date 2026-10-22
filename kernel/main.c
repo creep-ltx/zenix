@@ -93,6 +93,7 @@ void irq2_c(u32 sr)
     if (icr & 1) {
         ticks++;
         audio_tick();
+        input_poll();
         if (ticks % 100 == 0)
             bar_draw();
         sched_tick((u16)sr);
@@ -228,6 +229,7 @@ void kmain(struct bootinfo *bi)
         panic("cannot start the filesystem server");
     kprintf("proc: diskd %d, fsd %d, boot %d (it starts /bin/init)\n", dpid, fpid, pid);
 
+    input_init();
     klog_mirror_off();                          /* from here the screen belongs to the programs */
     timer_init();
     ints_on();

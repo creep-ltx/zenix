@@ -1,0 +1,31 @@
+INPUT(1)			Zenix manual
+
+NAME
+    input - show the mouse and joystick state
+
+SYNOPSIS
+    input
+    input -w SECONDS
+
+DESCRIPTION
+    Reads the two controller ports. A mouse in port 1 (the left port) gives
+    movement and buttons: "mouse dx 3 dy -2 buttons L-M" means it moved 3
+    counts right and 2 up since the last read, with the left and middle
+    buttons down (R is the right button). A joystick in port 2 shows as
+    "joystick U-L-F": U up, D down, L left, R right, F fire.
+    Without options it prints the state once. With -w it watches for that
+    many seconds and prints a line whenever something changes.
+    The kernel polls the ports 100 times a second and adds up the mouse
+    movement until a program reads it (system call 74), so a movement is
+    not lost between two reads; the read clears the counts.
+
+EXIT STATUS
+    Always 0.
+
+NOTES
+    Not done: a mouse pointer, events and a /dev/mouse file, a mouse in
+    port 2 or a joystick in port 1 (the port 2 mouse counters are read but
+    only shown as joystick directions), the scroll wheel, analog sticks.
+
+SEE ALSO
+    beep(1), docs/architecture.md
