@@ -75,7 +75,7 @@ MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sy
 $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" 768K 128
 
-$(BUILD)/root-mount.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
+$(BUILD)/root-mount.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
 	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" 768K 128
 
 $(BUILD)/zenix-mount.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-mount.img tools/mkadf.py
