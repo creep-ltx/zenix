@@ -1,4 +1,5 @@
 #include "kernel.h"
+#include "fsproto.h"
 
 static struct file files[NFILE];
 
@@ -116,27 +117,61 @@ long vfs_pipe(int fds[2])
     return 0;
 }
 
+/* ---- the filesystem lives in a server process; see fsproto.h ---- */
+
+static int fs_port = -1;
+
+long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
+{
+    struct umsg m;                      /* on this process's kernel stack: the server reads it in place */
+    if (current->pid == 0)
+        return -1;
+    if (fs_port < 0 && (fs_port = port_find("fs")) < 0)
+        return -1;
+    m.type = type;
+    m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
+    long r = ipc_call(fs_port, &m);
+    if (r == -5)
+        fs_port = -1;                   /* the server is gone */
+    return r;
+}
+
+long fs_read_file(const char *path, u32 cwd, u8 **buf, u32 *size)
+{
+    struct ustat st;
+    long ino = fs_call(FS_OPEN, (u32)path, cwd, O_RDONLY, (u32)&st);
+    if (ino < 0)
+        return -1;
+    if (!S_ISREG(st.mode) || st.size > 256u * 1024)
+        return -2;
+    u8 *b = kmalloc(st.size ? st.size : 1);
+    if (!b)
+        return -3;
+    u32 got = 0;
+    while (got < st.size) {
+        long r = fs_call(FS_READ, (u32)ino, got, (u32)(b + got), st.size - got);
+        if (r <= 0) {
+            kfree(b);
+            return -4;
+        }
+        got += (u32)r;
+    }
+    *buf = b;
+    *size = st.size;
+    return 0;
+}
+
 long vfs_open(const char *path, int flags)
 {
-    struct inode in;
-    int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
-    if (ext2_namei(path, current->cwd_ino, &in, 0)) {
-        struct inode dir;
-        char name[64];
-        if (!(flags & O_CREAT) ||
-            ext2_namei_parent(path, current->cwd_ino, &dir, name) ||
-            ext2_create(&dir, name, &in))
-            return -1;
-    } else if (writing) {
-        if (!S_ISREG(in.mode))
-            return -1;
-        if ((flags & O_TRUNC) && ext2_truncate(&in))
-            return -1;
-    }
+    struct ustat st;
+    long ino = fs_call(FS_OPEN, (u32)path, current->cwd_ino, (u32)flags, (u32)&st);
+    if (ino < 0)
+        return -1;
     struct file *f = file_new(FT_INODE);
     if (!f)
         return -1;
-    f->in = in;
+    f->ino = (u32)ino;
+    f->mode = st.mode;
     f->flags = (u16)flags;
     int fd = fd_install(current, f);
     if (fd < 0)
@@ -144,51 +179,65 @@ long vfs_open(const char *path, int flags)
     return fd;
 }
 
-/* other opens may have changed the file: always work on a fresh inode */
-static int refresh(struct file *f)
+long vfs_stat(const char *path, struct ustat *st)
 {
-    return ext2_iget(f->in.ino, &f->in);
+    return fs_call(FS_STAT, (u32)path, current->cwd_ino, (u32)st, 0);
 }
 
-static int parent_of(const char *path, struct inode *dir, char *name)
+long vfs_fstat(struct file *f, struct ustat *st)
 {
-    return ext2_namei_parent(path, current->cwd_ino, dir, name);
+    if (f->type != FT_INODE)
+        return -1;
+    return fs_call(FS_FSTAT, f->ino, (u32)st, 0, 0);
+}
+
+long vfs_chdir(const char *path)
+{
+    long ino = fs_call(FS_CHDIR, (u32)path, current->cwd_ino, 0, 0);
+    if (ino < 0)
+        return -1;
+    current->cwd_ino = (u32)ino;
+    vfs_chdir_text(current->cwd, path);
+    return 0;
+}
+
+long vfs_lseek(struct file *f, s32 off, u32 whence)
+{
+    s32 np;
+    if (whence == 0)
+        np = off;
+    else if (whence == 1)
+        np = (s32)f->off + off;
+    else {
+        struct ustat st;
+        if (fs_call(FS_FSTAT, f->ino, (u32)&st, 0, 0) < 0)
+            return -1;
+        np = (s32)st.size + off;
+    }
+    if (np < 0)
+        return -1;
+    f->off = (u32)np;
+    return np;
 }
 
 long vfs_mkdir(const char *path)
 {
-    struct inode dir;
-    char name[64];
-    if (parent_of(path, &dir, name))
-        return -1;
-    return ext2_mkdir(&dir, name);
+    return fs_call(FS_MKDIR, (u32)path, current->cwd_ino, 0, 0);
 }
 
 long vfs_unlink(const char *path)
 {
-    struct inode dir;
-    char name[64];
-    if (parent_of(path, &dir, name))
-        return -1;
-    return ext2_unlink(&dir, name);
+    return fs_call(FS_UNLINK, (u32)path, current->cwd_ino, 0, 0);
 }
 
 long vfs_rmdir(const char *path)
 {
-    struct inode dir;
-    char name[64];
-    if (parent_of(path, &dir, name))
-        return -1;
-    return ext2_rmdir(&dir, name);
+    return fs_call(FS_RMDIR, (u32)path, current->cwd_ino, 0, 0);
 }
 
 long vfs_rename(const char *from, const char *to)
 {
-    struct inode od, nd;
-    char on[64], nn[64];
-    if (parent_of(from, &od, on) || parent_of(to, &nd, nn))
-        return -1;
-    return ext2_rename(&od, on, &nd, nn);
+    return fs_call(FS_RENAME, (u32)from, (u32)to, current->cwd_ino, 0);
 }
 
 long vfs_read(struct file *f, void *buf, u32 n)
@@ -199,9 +248,9 @@ long vfs_read(struct file *f, void *buf, u32 n)
     case FT_PIPE_R:
         return pipe_read(f, buf, n);
     case FT_INODE: {
-        if (S_ISDIR(f->in.mode) || (f->flags & O_WRONLY) || refresh(f))
+        if (S_ISDIR(f->mode) || (f->flags & O_WRONLY))
             return -1;
-        int r = ext2_read(&f->in, f->off, buf, n);
+        long r = fs_call(FS_READ, f->ino, f->off, (u32)buf, n);
         if (r > 0)
             f->off += (u32)r;
         return r;
@@ -218,11 +267,15 @@ long vfs_write(struct file *f, const void *buf, u32 n)
     case FT_PIPE_W:
         return pipe_write(f, buf, n);
     case FT_INODE: {
-        if (!(f->flags & (O_WRONLY | O_RDWR)) || refresh(f))
+        if (!(f->flags & (O_WRONLY | O_RDWR)))
             return -1;
-        if (f->flags & O_APPEND)
-            f->off = f->in.size;
-        int r = ext2_write(&f->in, f->off, buf, n);
+        if (f->flags & O_APPEND) {
+            struct ustat st;
+            if (fs_call(FS_FSTAT, f->ino, (u32)&st, 0, 0) < 0)
+                return -1;
+            f->off = st.size;
+        }
+        long r = fs_call(FS_WRITE, f->ino, f->off, (u32)buf, n);
         if (r > 0)
             f->off += (u32)r;
         return r;
@@ -233,20 +286,13 @@ long vfs_write(struct file *f, const void *buf, u32 n)
 
 long vfs_readdir(struct file *f, struct udirent *out)
 {
-    if (f->type != FT_INODE || !S_ISDIR(f->in.mode))
+    u32 cookie = f->off;
+    if (f->type != FT_INODE || !S_ISDIR(f->mode))
         return -1;
-    return ext2_readdir(&f->in, &f->off, out);
-}
-
-void vfs_stat_inode(const struct inode *in, struct ustat *st)
-{
-    st->ino = in->ino;
-    st->mode = in->mode;
-    st->size = in->size;
-    st->mtime = in->mtime;
-    st->uid = in->uid;
-    st->gid = in->gid;
-    st->links = in->links;
+    long r = fs_call(FS_READDIR, f->ino, f->off, (u32)out, (u32)&cookie);
+    if (r >= 0)
+        f->off = cookie;
+    return r;
 }
 
 /* join and normalise a path textually: handles "." and ".." */

@@ -1,4 +1,8 @@
+#ifdef FSD
+#include "../user/fsenv.h"      /* running as the filesystem server (user mode) */
+#else
 #include "kernel.h"
+#endif
 
 /* Read-only ext2 (revision 0/1, 128-byte or larger inodes, no extents),
  * written from the public format description. On-disk numbers are
@@ -53,13 +57,11 @@ static int bfind(u32 blk)
         }
     }
     if (!buf[victim].data) {
-        buf[victim].data = mem_alloc(bsize, MEM_FASTONLY, 0);
-        if (!buf[victim].data)
-            buf[victim].data = mem_alloc(bsize, 0, 0);
+        buf[victim].data = fs_alloc(bsize);
         if (!buf[victim].data)
             return -1;
     }
-    if (ide_read(part_lba + blk * sectors_per_block, sectors_per_block,
+    if (fs_blk_read(part_lba + blk * sectors_per_block, sectors_per_block,
                  buf[victim].data))
         return -1;
     buf[victim].blk = blk;
@@ -83,7 +85,7 @@ static int bwrite_copy(u32 blk, u32 off, const void *src, u32 len)
     if (i < 0)
         return -1;
     memcpy(buf[i].data + off, src, len);
-    return ide_write(part_lba + blk * sectors_per_block, sectors_per_block,
+    return fs_blk_write(part_lba + blk * sectors_per_block, sectors_per_block,
                      buf[i].data);
 }
 
@@ -94,7 +96,7 @@ static u32 rd32(const u8 *p) { return le32(*(const u32 *)p); }
 static int ext2_at(u32 lba)
 {
     u8 sec[512];
-    if (ide_read(lba + 2, 1, sec))      /* byte 1024: superblock */
+    if (fs_blk_read(lba + 2, 1, sec))      /* byte 1024: superblock */
         return 0;
     return le16(*(u16 *)(sec + 56)) == 0xEF53;
 }
@@ -103,13 +105,13 @@ static u32 find_partition(void)
 {
     u32 sec[128];
     for (u32 i = 0; i < 16; i++) {
-        if (ide_read(i, 1, sec))
+        if (fs_blk_read(i, 1, sec))
             return 0xFFFFFFFF;
         if (sec[0] != 0x5244534b)       /* 'RDSK' */
             continue;
         u32 next = sec[7];              /* rdb_PartitionList */
         for (int guard = 0; next != 0xFFFFFFFF && guard < 16; guard++) {
-            if (ide_read(next, 1, sec))
+            if (fs_blk_read(next, 1, sec))
                 break;
             if (sec[0] != 0x50415254)   /* 'PART' */
                 break;
@@ -127,19 +129,17 @@ static u32 find_partition(void)
 int ext2_mount(void)
 {
     u8 sb[1024];
-    if (ide_init())
-        return -1;
     part_lba = find_partition();
     if (part_lba == 0xFFFFFFFF) {
-        kprintf("ext2: no ext2 partition found\n");
+        fs_log("ext2: no ext2 partition found\n");
         return -1;
     }
-    if (ide_read(part_lba + 2, 2, sb))
+    if (fs_blk_read(part_lba + 2, 2, sb))
         return -1;
     u32 logbs = rd32(sb + 24);
     bsize = 1024u << logbs;
     if (logbs > 2) {
-        kprintf("ext2: block size %u not supported\n", bsize);
+        fs_log("ext2: block size %u not supported\n", bsize);
         return -1;
     }
     sectors_per_block = bsize / 512;
@@ -153,7 +153,7 @@ int ext2_mount(void)
     inode_size = rd32(sb + 76) == 0 ? 128 : le16(*(u16 *)(sb + 88));
     gd_blk = (bsize == 1024) ? 2 : 1;
     mounted = 1;
-    kprintf("ext2: partition at sector %u, %u KB blocks, %u blocks, %u inodes\n",
+    fs_log("ext2: partition at sector %u, %u KB blocks, %u blocks, %u inodes\n",
             part_lba, bsize / 1024, total_blocks, ninodes);
     return 0;
 }
@@ -337,7 +337,7 @@ static inline void wr16(u8 *p, u16 v) { *(u16 *)p = le16(v); }
 
 static u32 fs_now(void)
 {
-    return boot_time + ticks / 100;
+    return boot_time + fs_ticks() / 100;
 }
 
 /* group descriptor field helpers: field at byte `f` of descriptor g */

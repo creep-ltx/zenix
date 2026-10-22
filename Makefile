@@ -10,9 +10,9 @@ CFLAGS  += -DDIW_V=$(DIWV)
 ASFLAGS := -mcpu=68020 -x assembler-with-cpp -c
 LIBGCC  := $(shell $(CC) $(CFLAGS) -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/ext2.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/embed.o
 
-UAPPS := init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr \
+UAPPS := init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch pingd ping
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
@@ -42,6 +42,17 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py
 
 $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@
+
+# ---- servers built into the kernel image ----
+$(BUILD)/ext2_fsd.uo: kernel/ext2.c kernel/ext2.h user/fsenv.h user/libz.h | $(BUILD)
+	$(CC) $(UCFLAGS) -DFSD -c $< -o $@
+$(BUILD)/fsd.uelf: $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	    $(BUILD)/crt0.o $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py
+	tools/mkzexe.py $< $@ 16384
+$(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx | $(BUILD)
+	$(CC) $(ASFLAGS) $< -o $@
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)

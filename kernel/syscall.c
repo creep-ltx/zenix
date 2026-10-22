@@ -146,15 +146,8 @@ void syscall_c(u32 *rb)
         }
         break;
     case SYS_lseek:
-        if ((f = getfd(a1)) && f->type == FT_INODE) {
-            s32 off = (s32)a2;
-            s32 np = a3 == 0 ? off : a3 == 1 ? (s32)f->off + off
-                                             : (s32)f->in.size + off;
-            if (np >= 0) {
-                f->off = (u32)np;
-                r = np;
-            }
-        }
+        if ((f = getfd(a1)) && f->type == FT_INODE)
+            r = (s32)vfs_lseek(f, (s32)a2, a3);
         break;
     case SYS_readdir:
         if ((f = getfd(a1)) && user_ok(current, a2, sizeof(struct udirent)))
@@ -162,33 +155,27 @@ void syscall_c(u32 *rb)
         break;
     case SYS_stat: {
         char path[64];
-        struct inode in;
         if (!copy_str(path, a1, sizeof path) &&
-            user_ok(current, a2, sizeof(struct ustat)) &&
-            !ext2_namei(path, current->cwd_ino, &in, 0)) {
-            vfs_stat_inode(&in, (struct ustat *)a2);
-            r = 0;
-        }
+            user_ok(current, a2, sizeof(struct ustat)))
+            r = (s32)vfs_stat(path, (struct ustat *)a2);
         break;
     }
     case SYS_fstat:
-        if ((f = getfd(a1)) && f->type == FT_INODE &&
-            user_ok(current, a2, sizeof(struct ustat))) {
-            vfs_stat_inode(&f->in, (struct ustat *)a2);
-            r = 0;
-        }
+        if ((f = getfd(a1)) && user_ok(current, a2, sizeof(struct ustat)))
+            r = (s32)vfs_fstat(f, (struct ustat *)a2);
         break;
     case SYS_chdir: {
         char path[64];
-        struct inode in;
-        if (!copy_str(path, a1, sizeof path) &&
-            !ext2_namei(path, current->cwd_ino, &in, 0) && S_ISDIR(in.mode)) {
-            current->cwd_ino = in.ino;
-            vfs_chdir_text(current->cwd, path);
-            r = 0;
-        }
+        if (!copy_str(path, a1, sizeof path))
+            r = (s32)vfs_chdir(path);
         break;
     }
+    case SYS_blk_read: case SYS_blk_write:
+        /* raw disk: only the filesystem server */
+        if (current->priv && user_ok(current, a3, a2 * 512))
+            r = rb[0] == SYS_blk_read ? ide_read(a1, a2, (void *)a3)
+                                      : ide_write(a1, a2, (const void *)a3);
+        break;
     case SYS_getcwd: {
         u32 n = 0;
         while (current->cwd[n])

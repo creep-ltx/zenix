@@ -42,31 +42,16 @@ struct proc *proc_by_pid(int pid)
     return 0;
 }
 
-/* Load a ZEXE from the filesystem and start it. `argv` points to kernel
+/* Create a process from a ZEXE image in memory. `argv` points to kernel
  * memory. stdio[i] (parent's fd numbers, -1 = same number) picks the
  * child's fds 0-2; the child gets no other fds. */
-int proc_spawn(const char *path, char *const *argv, int argc,
-               struct proc *parent, const int *stdio, int tty)
+static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *argv,
+                     int argc, struct proc *parent, const int *stdio, int tty, int priv)
 {
-    struct inode in;
-    u32 cwd = parent ? parent->cwd_ino : 2;
-    if (ext2_namei(path, cwd, &in, 0))
-        return -1;
-    if (!S_ISREG(in.mode) || in.size < sizeof(struct zexe) || in.size > FILE_MAX)
-        return -2;
-    u8 *file = kmalloc(in.size);
-    if (!file)
-        return -3;
-    if (ext2_read(&in, 0, file, in.size) != (int)in.size) {
-        kfree(file);
-        return -4;
-    }
-    struct zexe *h = (struct zexe *)file;
-    if (h->magic != ZEXE_MAGIC || h->image_size > in.size ||
-        h->mem_size < h->image_size || h->reloc_off + h->nreloc * 4 > in.size) {
-        kfree(file);
+    const struct zexe *h = (const struct zexe *)file;
+    if (fsize < sizeof *h || h->magic != ZEXE_MAGIC || h->image_size > fsize ||
+        h->mem_size < h->image_size || h->reloc_off + h->nreloc * 4 > fsize)
         return -5;
-    }
 
     struct proc *p = 0;
     for (int i = 1; i < NPROC; i++)
@@ -74,10 +59,8 @@ int proc_spawn(const char *path, char *const *argv, int argc,
             p = &procs[i];
             break;
         }
-    if (!p) {
-        kfree(file);
+    if (!p)
         return -6;
-    }
 
     u32 strsz = 0;
     for (int i = 0; i < argc; i++) {
@@ -94,7 +77,6 @@ int proc_spawn(const char *path, char *const *argv, int argc,
     u32 *ks = mem_alloc(KSTACK, 0, (u32)pid);
     if (!base || !ks) {
         mem_free_owner((u32)pid);
-        kfree(file);
         return -7;
     }
     memcpy(base, file, h->image_size);
@@ -102,7 +84,6 @@ int proc_spawn(const char *path, char *const *argv, int argc,
     const u32 *rel = (const u32 *)(file + h->reloc_off);
     for (u32 i = 0; i < h->nreloc; i++)
         *(u32 *)(base + rel[i]) += (u32)base;
-    kfree(file);
 
     /* arguments at the top of the stack: usp -> argc, argv, argv[]..., strings */
     u8 *top = base + span;
@@ -167,8 +148,29 @@ int proc_spawn(const char *path, char *const *argv, int argc,
         for (int i = 0; i < 3; i++)
             p->fd[i] = i == 0 ? t : file_dup(t);
     }
+    p->priv = priv;
     p->state = P_READY;
     return pid;
+}
+
+int proc_spawn(const char *path, char *const *argv, int argc,
+               struct proc *parent, const int *stdio, int tty)
+{
+    u8 *file;
+    u32 size;
+    long r = fs_read_file(path, parent ? parent->cwd_ino : 2, &file, &size);
+    if (r < 0)
+        return (int)r;
+    int pid = proc_load(file, size, path, argv, argc, parent, stdio, tty, 0);
+    kfree(file);
+    return pid;
+}
+
+/* a program built into the kernel image (no filesystem needed) */
+int proc_spawn_image(const void *img, u32 len, const char *name, int tty, int priv)
+{
+    char *argv[] = { (char *)name, 0 };
+    return proc_load(img, len, name, argv, 1, 0, 0, tty, priv);
 }
 
 void schedule(void)
@@ -282,7 +284,7 @@ void proc_reap_orphans(void)
 {
     for (int i = 1; i < NPROC; i++) {
         struct proc *c = &procs[i];
-        if (c->state == P_ZOMBIE && !proc_by_pid(c->ppid)) {
+        if (c->state == P_ZOMBIE && (c->ppid == 0 || !proc_by_pid(c->ppid))) {
             mem_free_owner((u32)c->pid);
             c->state = P_FREE;
         }

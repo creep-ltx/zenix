@@ -159,17 +159,17 @@ void kmain(struct bootinfo *bi)
         kprintf("display: not available (%s), serial only\n",
                 font_ok ? "out of chip RAM" : "no ROM font");
 
-    if (ext2_mount())
-        panic("cannot mount the root filesystem");
+    if (ide_init())
+        panic("no disk");
     proc_init();
     tty_init();
-    char *iargv[] = { "/bin/init", 0 };
-    int pid = proc_spawn("/bin/init", iargv, 1, 0, 0, 1);
-    if (pid < 0) {
-        kprintf("cannot start init (%d)\n", pid);
-        panic("no init");
-    }
-    kprintf("proc: init is pid %d\n", pid);
+    /* the filesystem server and the starter are built into the kernel */
+    extern const char fsd_blob[], fsd_blob_end[], boot_blob[], boot_blob_end[];
+    int fpid = proc_spawn_image(fsd_blob, (u32)(fsd_blob_end - fsd_blob), "fsd", 1, 1);
+    int pid = proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), "boot", 1, 0);
+    if (fpid < 0 || pid < 0)
+        panic("cannot start the filesystem server");
+    kprintf("proc: fsd is pid %d, boot is pid %d (it starts /bin/init)\n", fpid, pid);
 
     timer_init();
     ints_on();

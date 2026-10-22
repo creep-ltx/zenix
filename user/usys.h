@@ -12,6 +12,7 @@ static inline int sys3(int n, u32 a, u32 b, u32 c)
     return d0;
 }
 
+#define USYS_STRUCTS
 struct udirent { u32 ino, type; char name[64]; };
 struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
 struct uproc { u32 pid, ppid, state, mem; char name[16]; };
@@ -64,3 +65,5 @@ static inline int sys_port_find(const char *n) { return sys3(30, (u32)n, 0, 0); 
 static inline int sys_call(int port, struct umsg *m) { return sys3(31, (u32)port, (u32)m, 0); }
 static inline struct umsg *sys_recv(int port, int wait) { return (struct umsg *)sys3(32, (u32)port, (u32)wait, 0); }
 static inline int sys_reply(struct umsg *m, int result) { return sys3(33, (u32)m, (u32)result, 0); }
+static inline int sys_blk_read(u32 lba, u32 n, void *buf) { return sys3(34, lba, n, (u32)buf); }
+static inline int sys_blk_write(u32 lba, u32 n, const void *buf) { return sys3(35, lba, n, (u32)buf); }

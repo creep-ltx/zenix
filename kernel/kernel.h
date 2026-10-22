@@ -88,43 +88,7 @@ int ide_init(void);
 int ide_read(u32 lba, u32 count, void *buf);
 int ide_write(u32 lba, u32 count, const void *buf);
 
-/* ext2.c */
-#define S_IFMT  0170000
-#define S_IFDIR 0040000
-#define S_IFREG 0100000
-#define S_IFLNK 0120000
-#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
-#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
-#define S_ISLNK(m) (((m) & S_IFMT) == S_IFLNK)
-struct inode {
-    u32 ino, size, mtime, nblocks, block[15];
-    u16 mode, uid, gid, links;
-};
-struct udirent {                /* returned by SYS_readdir */
-    u32 ino;
-    u32 type;
-    char name[64];
-};
-struct ustat {                  /* returned by SYS_stat / SYS_fstat */
-    u32 ino, mode, size, mtime;
-    u32 uid, gid, links;
-};
-int ext2_mount(void);
-int ext2_iget(u32 ino, struct inode *out);
-u32 ext2_bmap(const struct inode *in, u32 n);
-int ext2_read(const struct inode *in, u32 off, void *dst, u32 n);
-int ext2_readdir(const struct inode *dir, u32 *cookie, struct udirent *out);
-int ext2_lookup(const struct inode *dir, const char *name, u32 len, u32 *ino);
-int ext2_namei(const char *path, u32 cwd, struct inode *out, int depth);
-int ext2_iput(const struct inode *in);
-int ext2_write(struct inode *in, u32 off, const void *src, u32 n);
-int ext2_truncate(struct inode *in);
-int ext2_namei_parent(const char *path, u32 cwd, struct inode *dir, char *name);
-int ext2_create(struct inode *dir, const char *name, struct inode *out);
-int ext2_mkdir(struct inode *dir, const char *name);
-int ext2_unlink(struct inode *dir, const char *name);
-int ext2_rmdir(struct inode *dir, const char *name);
-int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *nn);
+#include "ext2.h"
 
 /* ZEXE header, see tools/mkzexe.py */
 struct zexe {
@@ -153,8 +117,8 @@ struct file {
     u8 type, refs;
     u16 flags;
     struct pipe *pipe;
-    u32 off;
-    struct inode in;
+    u32 off;                    /* position (FT_TTY: the tty number) */
+    u32 ino, mode;              /* FT_INODE: inode number and mode at open */
 };
 struct uproc {                  /* returned by SYS_procinfo */
     u32 pid, ppid, state, mem;
@@ -181,6 +145,7 @@ struct proc {                   /* start.S relies on the first three: */
     char cwd[96];
     struct file *fd[NFD];
     int killed;
+    int priv;                   /* may use the raw disk (the filesystem server) */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
     int wait_port;              /* P_MSG as a server: port being listened on */
     char name[16];
@@ -190,6 +155,7 @@ extern struct proc *current;
 void proc_init(void);
 int proc_spawn(const char *path, char *const *argv, int argc,
                struct proc *parent, const int *stdio, int tty);
+int proc_spawn_image(const void *img, u32 len, const char *name, int tty, int priv);
 void schedule(void);
 void proc_exit(int code) __attribute__((noreturn));
 int proc_wait(int pid);
@@ -230,13 +196,18 @@ void file_close(struct file *f);
 int fd_install(struct proc *p, struct file *f);
 long vfs_read(struct file *f, void *buf, u32 n);
 long vfs_write(struct file *f, const void *buf, u32 n);
+long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
+long fs_read_file(const char *path, u32 cwd, u8 **buf, u32 *size);
 long vfs_open(const char *path, int flags);
+long vfs_stat(const char *path, struct ustat *st);
+long vfs_fstat(struct file *f, struct ustat *st);
+long vfs_chdir(const char *path);
+long vfs_lseek(struct file *f, s32 off, u32 whence);
 long vfs_mkdir(const char *path);
 long vfs_unlink(const char *path);
 long vfs_rmdir(const char *path);
 long vfs_rename(const char *from, const char *to);
 long vfs_readdir(struct file *f, struct udirent *out);
-void vfs_stat_inode(const struct inode *in, struct ustat *st);
 long vfs_pipe(int fds[2]);
 void vfs_chdir_text(char *cwd, const char *path);
 
@@ -283,6 +254,8 @@ int tty_of(const struct proc *p);
 #define SYS_call        31
 #define SYS_recv        32
 #define SYS_reply       33
+#define SYS_blk_read    34
+#define SYS_blk_write   35
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);
