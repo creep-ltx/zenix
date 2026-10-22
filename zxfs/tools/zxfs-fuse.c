@@ -152,7 +152,7 @@ static int z_fsync(const char *path, int datasync, struct fuse_file_info *fi) { 
 static int z_flush(const char *path, struct fuse_file_info *fi) { (void)path; (void)fi; return zxfs_sync(fs); }
 static void *z_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
 {
-    (void)conn; cfg->use_ino = 1; cfg->kernel_cache = 0; cfg->entry_timeout = 1; cfg->attr_timeout = 1; return NULL;
+    (void)conn; cfg->use_ino = 1; cfg->kernel_cache = 0; cfg->entry_timeout = 0; cfg->attr_timeout = 0;   /* always current: a link count or size changed by another path must show at once */ return NULL;
 }
 static void z_destroy(void *p) { (void)p; zxfs_unmount(fs); zfile_close(&img); }
 
