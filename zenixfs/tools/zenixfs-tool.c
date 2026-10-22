@@ -6,6 +6,7 @@
  *   zenixfs-tool put IMAGE HOSTFILE PATH      put IMAGE -r HOSTDIR PATH   (copy a directory tree in)
  *   zenixfs-tool get IMAGE PATH [HOSTFILE]    get IMAGE -r PATH HOSTDIR  (copy a tree out; without HOSTFILE a file goes to stdout)
  *   zenixfs-tool mkdir|rm|rmdir IMAGE PATH    mv IMAGE FROM TO
+ *   zenixfs-tool chmod IMAGE OCTALMODE PATH   chown IMAGE UID GID PATH
  *   zenixfs-tool ln IMAGE TARGET LINKPATH     (symbolic link)       ln IMAGE -h EXISTING NEWPATH   (hard link)
  * Options always come after IMAGE.
  * Paths inside the image start with / . Block size by default: under 16 MB 1 KB, under 256 MB 2 KB, else 4 KB. */
@@ -204,6 +205,16 @@ int main(int argc, char **argv)
         else if (!strcmp(cmd, "rm")) r = zenixfs_unlink(fs, dir, nm, nl);
         else r = zenixfs_rmdir(fs, dir, nm, nl);
         if (r) die(argv[3], r);
+    } else if (!strcmp(cmd, "chmod") && argc > 4) {
+        uint32_t ino; must_resolve(argv[4], &ino);
+        struct zenixfs_inode in; int r = zenixfs_getattr(fs, ino, &in); if (r) die("chmod", r);
+        in.mode = (in.mode & ZENIXFS_S_IFMT) | ((uint32_t)strtoul(argv[3], NULL, 8) & 07777);
+        r = zenixfs_setattr(fs, ino, &in); if (r) die("chmod", r);
+    } else if (!strcmp(cmd, "chown") && argc > 5) {
+        uint32_t ino; must_resolve(argv[5], &ino);
+        struct zenixfs_inode in; int r = zenixfs_getattr(fs, ino, &in); if (r) die("chown", r);
+        in.uid = (uint32_t)strtoul(argv[3], NULL, 10); in.gid = (uint32_t)strtoul(argv[4], NULL, 10);
+        r = zenixfs_setattr(fs, ino, &in); if (r) die("chown", r);
     } else if (!strcmp(cmd, "mv") && argc > 4) {
         uint32_t d1, d2; const char *n1, *n2; int l1, l2; int r = resolve(argv[3], 1, &d1, &n1, &l1); if (r) die(argv[3], r);
         r = resolve(argv[4], 1, &d2, &n2, &l2); if (r) die(argv[4], r);

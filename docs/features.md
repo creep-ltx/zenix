@@ -52,7 +52,9 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Disks with a PC partition table (MBR; primary entries): ext2 type 0x83, RDB inside type 0x76, FAT etc. listed and never mounted | verified in FS-UAE (`tools/mbr-test.sh`) | man/diskd.txt |
 | Extended partitions, GPT | not done | limits.md |
 | Mounting more than the root filesystem (`mount`, `umount`, nested mounts, ext2 servers per device) | verified in FS-UAE | man/mount.txt, architecture.md section 9 |
-| ZenixFS on Zenix: `mkfs.zenixfs`, `mount` (type from the partition table), `fsck.zenixfs`; atomic commits, checksums | see the ZenixFS status in zenixfs.md | man/mount.zenixfs.txt, man/mkfs.zenixfs.txt |
+| ZenixFS on Zenix: `mkfs.zenixfs`, `mount` (type from the partition table), `fsck.zenixfs`; atomic commits, checksums | verified in FS-UAE | man/mount.zenixfs.txt, man/mkfs.zenixfs.txt |
+| ZenixFS as the root filesystem (a second root server in the kernel, chosen by the partition type) | built; test tools/zroot-test.sh written, not yet run | man/mount.zenixfs.txt |
+| `/etc/fstab` and `mount -a` at boot | built; test tools/zroot-test.sh written, not yet run | man/mount.txt, man/init.txt |
 | Disk flush request (ATA FLUSH CACHE) and device capabilities in the disk protocol | verified (IDE in FS-UAE; not on real drives) | man/diskd.txt |
 | Unlink of an open file, directory moves between parents, triple-indirect | not done | limits.md |
 

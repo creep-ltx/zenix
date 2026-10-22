@@ -20,6 +20,19 @@ int zdisk_open(const char *name, unsigned flags)
     return 0;
 }
 
+int zdisk_probe(const char *name)
+{
+    static unsigned char sec[512];
+    struct umsg m;
+    if (dport < 0 && (dport = sys_port_find("disk")) < 0) return 0;
+    m.type = DISK_OPEN; m.a[0] = (u32)name; m.a[1] = 0;
+    int h = sys_call(dport, &m);
+    if (h < 0) return 0;
+    m.type = DISK_READ; m.a[0] = (u32)h; m.a[1] = 0; m.a[2] = 1; m.a[3] = (u32)sec;
+    if (sys_call(dport, &m) < 0) return 0;
+    return sec[4] == 0x5A && sec[5] == 0x42 && sec[6] == 1 && sec[32] == 'Z' && sec[33] == 'N' && sec[34] == 'F' && sec[35] == 'S';
+}
+
 void zdisk_close(void)
 {
     struct umsg m;

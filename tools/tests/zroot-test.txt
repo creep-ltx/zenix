@@ -1,0 +1,17 @@
+sleep 26
+send mount\r
+sleep 3
+send df\r
+sleep 3
+send echo persist-me > /persist.txt; mkdir /pdir; echo inner > /pdir/f.txt; ln -s persist.txt /plink\r
+sleep 6
+send seq 1 5000 > /big.txt; wc /big.txt\r
+sleep 15
+send echo data-persist > /data/d.txt; cat /data/d.txt\r
+sleep 3
+send ls -l /persist.txt /pdir /plink\r
+sleep 4
+send cat /plink\r
+sleep 3
+send sync; echo SYNC-DONE\r
+sleep 8

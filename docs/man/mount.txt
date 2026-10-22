@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     mount
     mount [-t type] device dir
+    mount -a
 
 DESCRIPTION
     Without arguments, lists the mounted filesystems: device, mount point,
@@ -20,22 +21,30 @@ DESCRIPTION
     The type is ext2 or zenixfs. Without -t it is read from the partition's
     type in the partition table (fdisk add ... ext2|zenixfs).
 
+    mount -a mounts everything listed in /etc/fstab; init runs it at boot.
+    Each line is "device dir type options" (fields separated by spaces or
+    tabs): type is ext2, zenixfs or auto (read from the partition type);
+    options is defaults, or a comma list in which "noauto" leaves the line
+    out of mount -a. Lines starting with # and empty lines are ignored.
+    A line that fails is reported and the others are still mounted.
+
 EXAMPLES
     mkdir /mnt
     mount ide0p1 /mnt
     mount -t ext2 ide0p2 /mnt/sub
     mount
+    echo 'ide0p2 /data auto defaults' >> /etc/fstab
 
 EXIT STATUS
     0, 1 on an error (no such device, already in use, not that filesystem,
-    directory missing), 2 usage.
+    directory missing; for mount -a, any line failed), 2 usage.
 
 NOTES
     Once something is mounted, paths are resolved as text for the mount
     table: "." and ".." are removed from the path before it is looked up, so
     a working directory reached through a symbolic link behaves as its text
     says. Hard links and renames across two mounts fail. Only the first 8
-    mounts fit. A mount does not survive a reboot; there is no fstab yet.
+    mounts fit. A mount does not survive a reboot unless it is in /etc/fstab.
 
 SEE ALSO
     umount(8), fdisk(1), df(1), mkfs.ext2(1)

@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     started by mount(8): mount.zenixfs device portname
+    built into the kernel image, started at boot: mount.zenixfs (no arguments)
 
 DESCRIPTION
     Opens the device through the disk server (becoming its only writer),
@@ -18,6 +19,15 @@ DESCRIPTION
     flushes again, so a power cut leaves the volume as it was at the last
     commit, never half changed. It checks the same permissions as the ext2
     server.
+
+    Without arguments it is the root filesystem server. A copy is built into
+    the kernel image next to the ext2 server (fsd); both start at boot and
+    apply the same rule to find out who serves the root: a RAM disk from the
+    boot floppy (ext2) wins; else the partition marked bootable (fdisk boot);
+    else the first partition of type ext2 or zenixfs; with no partition table
+    the bare disk. The one whose type it is serves the root on port "fs", the
+    other leaves quietly. So a disk whose first partition is ZenixFS
+    (fdisk add disk root rest zenixfs) boots with ZenixFS as its root.
 
 NOTES
     Names longer than 63 bytes (possible on a volume written elsewhere) are

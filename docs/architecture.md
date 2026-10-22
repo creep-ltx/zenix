@@ -189,7 +189,10 @@ by **inode number**; the kernel's open-file table stores the inode, offset and f
 about open files. Chooses its root: a RAM-disk image from the boot floppy if present, else the first RDB
 partition that probes as ext2, else the bare disk. Started with `fsd DEVICE PORTNAME` (as `/bin/mount.ext2`, by `mount`)
 it serves that device on its own port instead; it answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
-(umount: sync, release the device, exit).
+(umount: sync, release the device, exit). Two root servers are built into the kernel image, `fsd` (ext2) and `mount.zenixfs`
+started without arguments (`zfsd`); both run at boot and apply `user/rootpick.h`: a RAM disk is the root; else the bootable
+ext2/zenixfs partition; else the first one of those; else the bare disk. The one whose type it is serves port `fs`, the other
+exits. `init` runs `mount -a` (from `/etc/fstab`) before login.
 
 ### mount.zenixfs - the ZenixFS server (`user/zenixfsd.c` + `zenixfs/zenixfs.c`, port chosen by `mount`)
 The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the

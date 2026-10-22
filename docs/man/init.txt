@@ -7,11 +7,13 @@ SYNOPSIS
     started by boot; not run by hand
 
 DESCRIPTION
-    /bin/init is process 1. It prints /etc/motd, starts /bin/login with the
+    /bin/init is process 1. It prints /etc/motd, runs "mount -a" if there is
+    an /etc/fstab (so the filesystems listed there are mounted before anyone
+    can log in), starts /bin/login with the
     terminal as its input and output, makes it the foreground program, and
     waits. When the session ends, init says so, tells the kernel that
     nobody is logged in and starts login again, so the console is never
     left without one.
 
 SEE ALSO
-    boot(8), login(1)
+    boot(8), login(1), mount(8)

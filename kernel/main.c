@@ -211,12 +211,15 @@ void kmain(struct bootinfo *bi)
     tty_init();
     /* the filesystem server and the starter are built into the kernel */
     extern const char fsd_blob[], fsd_blob_end[], boot_blob[], boot_blob_end[],
-                      diskd_blob[], diskd_blob_end[];
+                      diskd_blob[], diskd_blob_end[], zfsd_blob[], zfsd_blob_end[];
     int dpid = proc_spawn_image(diskd_blob, (u32)(diskd_blob_end - diskd_blob), "diskd", 1, 1);
     int fpid = proc_spawn_image(fsd_blob, (u32)(fsd_blob_end - fsd_blob), "fsd", 1, 0);
     int pid = proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), "boot", 1, 1);
     if (dpid < 0 || fpid < 0 || pid < 0)
         panic("cannot start the filesystem server");
+    /* the second root server: it serves the root if the root is ZenixFS and leaves at once otherwise (user/rootpick.h). Started last
+     * so that the process numbers above stay as they were. If it cannot be started the ext2 root still works. */
+    proc_spawn_image(zfsd_blob, (u32)(zfsd_blob_end - zfsd_blob), "zfsd", 1, 0);
     kprintf("proc: diskd %d, fsd %d, boot %d (it starts /bin/init)\n", dpid, fpid, pid);
 
     timer_init();
