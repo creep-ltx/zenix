@@ -35,6 +35,11 @@ manager, scheduler; disk server (RDB partitions), filesystem server (ext2, read 
 pipes, shell and 20 commands; hires display with a Copper-split bar, workspaces, Amiga keyboard; a setup matrix
 of 13 emulated A1200 variants; a benchmark using the CIA's E-clock.
 
+## Feature halt (2026-10-22)
+The owner halted all new features on 2026-10-22. Until the owner lifts it, work is only the fixes listed in
+`audit-2026-10-22.md` (batches A-E), the tests that check them, documentation corrections and merging the branches
+built before the halt. The phases below resume after that.
+
 ## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 
 **Phase 1 - Disk tools.** `fdisk` (the RDB partition table), `mkfs.ext2`, `fsck.ext2`, `df`, `sync`; the disk

@@ -11,7 +11,12 @@ current work list), then `docs/architecture.md` for the part you touch.
   on. Nothing has run on it yet; real-hardware time is scarce, so every build sent there must be ready for it.
 
 ## Current focus (2026-10-22): hardening, then the first real boot
-Features are paused until the audit's batches A and B are done. Then C, D, E, then features again.
+**FEATURE HALT (decided by the owner, 2026-10-22): no new features - no new commands, system calls, drivers,
+options or programs.** Only fixes from `docs/audit-2026-10-22.md`, tests that check them, and documentation
+corrections. Merging work that was already built before the halt (the `drivers`, `zenixfs` and `floppy` branches) is
+allowed. Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
+parked (e.g. the uncommitted `user/awk.c`). Order of the fixes: batches A and B, then the first PiStorm boot, then C,
+D and E.
 1. **Batch A** - first-boot blockers (cache flushes, `cpusha`, `-m68020-60`, keyboard timing, Amiga Swedish keymap,
    the RAM-disk image, bootinfo/Gayle/floppy motor). Without these the PiStorm boot fails.
 2. **Batch B** - memory foundations (libz `malloc`/`free`, `mem_alloc` overflow, interrupts only queue input, the
