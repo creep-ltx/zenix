@@ -1,0 +1,19 @@
+# Mount tests: boots the RAM-disk floppy (root on ram0) with a blank scratch disk on the IDE port,
+# so several filesystems can be mounted next to the root.
+[fs-uae]
+accuracy = 1
+amiga_model = A1200
+kickstart_file = /home/creep/UAE/ROM/kicka1200.rom
+chip_memory = 2048
+fast_memory = 4096
+floppy_drive_0 = ../build/zenix-ram.adf
+floppy_drive_speed = 0
+hard_drive_0 = ../build/scratch.hdf
+hard_drive_0_controller = ide0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true
+window_width = 960
+window_height = 768
+zoom = full
+joystick_port_0 = none
+joystick_port_1 = none

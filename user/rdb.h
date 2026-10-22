@@ -22,7 +22,7 @@ struct rdb {
 };
 
 #define DT_EXT2  0x4C4E5800u        /* 'LNX\0': ext2 */
-#define DT_ZENFS 0x5A454E01u        /* 'ZEN\1': reserved for ZenFS */
+#define DT_ZENIXFS 0x5A4E4601u      /* 'ZNF\1': ZenixFS */
 
 /* rd/wr: read or write one 512-byte sector; return 0 on success */
 typedef int (*rdb_io)(unsigned lba, void *buf);

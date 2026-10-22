@@ -7,6 +7,8 @@
  * readable); the kernel's VFS layer talks to it with messages. */
 
 static int disk_port, fs_dev = -1;
+static char devname[16];
+static int quitting;
 
 static int disk_rw(u32 op, u32 lba, u32 count, const void *buf)
 {
@@ -23,7 +25,7 @@ static int disk_open(const char *name, u32 flags)
     m.type = DISK_OPEN; m.a[0] = (u32)name; m.a[1] = flags;
     return sys_call(disk_port, &m);
 }
-static __attribute__((unused)) void disk_unmount(int h)
+static void disk_unmount(int h)
 {
     struct umsg m;
     m.type = DISK_UNMOUNT; m.a[0] = (u32)h;
@@ -40,6 +42,7 @@ static int try_mount(const char *name)
     int h = disk_open(name, DISK_MOUNT);
     if (h < 0) return -1;
     fs_dev = h;
+    strncpy(devname, name, sizeof devname - 1);
     return 0;
 }
 
@@ -136,6 +139,15 @@ static int handle(struct umsg *m)
     case FS_READLINK:
         if (ext2_namei_ex((const char *)m->a[0], m->a[1], &in, 0, 0) || !S_ISLNK(in.mode)) return -1;
         return ext2_readlink(&in, (char *)m->a[2], m->a[3]);
+    case FS_ROOT: {
+        struct fsinfo *fi = (struct fsinfo *)m->a[0];
+        strncpy(fi->dev, devname, sizeof fi->dev - 1);
+        strcpy(fi->type, "ext2");
+        return 2;                                     /* EXT2_ROOT_INO */
+    }
+    case FS_QUIT:
+        quitting = 1;
+        return 0;
     case FS_CHDIR:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0) || !S_ISDIR(in.mode)) return -1;
         return (int)in.ino;
@@ -156,18 +168,31 @@ static int handle(struct umsg *m)
     return -1;
 }
 
-int main(void)
+/* fsd                      the root filesystem server (built into the kernel): finds the root device, port "fs"
+ * fsd DEVICE PORTNAME       a second ext2 filesystem on DEVICE, served on port PORTNAME (started by mount) */
+int main(int argc, char **argv)
 {
+    const char *pname = "fs";
     int tries = 0;
     while ((disk_port = sys_port_find("disk")) < 0) {
         if (++tries > 600) { printf("fsd: no disk server\n"); return 1; }
         sys_sleep(5);
     }
-    if (find_root() || ext2_mount()) { printf("fsd: no ext2 filesystem\n"); return 1; }
-    int port = sys_port_create("fs");
-    if (port < 0) { printf("fsd: cannot create the fs port\n"); return 1; }
+    if (argc >= 3) {
+        pname = argv[2];
+        if (try_mount(argv[1]) || ext2_mount()) { printf("mount.ext2: %s is not an ext2 filesystem, or is in use\n", argv[1]); return 1; }
+    } else if (find_root() || ext2_mount()) { printf("fsd: no ext2 filesystem\n"); return 1; }
+    int port = sys_port_create(pname);
+    if (port < 0) { printf("fsd: cannot create the port %s\n", pname); return 1; }
     struct umsg *m = sys_recv(port, 1);
-    while ((int)m != -1)
-        m = sys_replyrecv(m, handle(m), port);     /* reply and wait in one trap */
+    while ((int)m != -1) {
+        int r = handle(m);
+        if (quitting) {                                 /* umount: answer first, then let go of the device */
+            sys_reply(m, r);
+            disk_unmount(fs_dev);
+            return 0;
+        }
+        m = sys_replyrecv(m, r, port);                  /* reply and wait in one trap */
+    }
     return 1;
 }

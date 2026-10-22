@@ -1,0 +1,41 @@
+MOUNT(8)			Zenix manual
+
+NAME
+    mount - list mounted filesystems, or mount one
+
+SYNOPSIS
+    mount
+    mount [-t type] device dir
+
+DESCRIPTION
+    Without arguments, lists the mounted filesystems: device, mount point,
+    type, size and free space in KB. The first line is the root filesystem.
+
+    With a device and a directory, starts the filesystem server for the
+    device (/bin/mount.TYPE) and puts it on the directory. The directory
+    must exist; what was in it is hidden until the unmount. Devices are the
+    names the disk server gives: ide0p1, ide0p2 ... (see fdisk). Filesystems
+    can be mounted inside each other (/mnt, then /mnt/sub).
+
+    The type is ext2 or zenixfs. Without -t it is read from the partition's
+    type in the partition table (fdisk add ... ext2|zenixfs).
+
+EXAMPLES
+    mkdir /mnt
+    mount ide0p1 /mnt
+    mount -t ext2 ide0p2 /mnt/sub
+    mount
+
+EXIT STATUS
+    0, 1 on an error (no such device, already in use, not that filesystem,
+    directory missing), 2 usage.
+
+NOTES
+    Once something is mounted, paths are resolved as text for the mount
+    table: "." and ".." are removed from the path before it is looked up, so
+    a working directory reached through a symbolic link behaves as its text
+    says. Hard links and renames across two mounts fail. Only the first 8
+    mounts fit. A mount does not survive a reboot; there is no fstab yet.
+
+SEE ALSO
+    umount(8), fdisk(1), df(1), mkfs.ext2(1)

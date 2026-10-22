@@ -32,3 +32,10 @@ int blk_write(u32 lba, u32 count, const void *buf)
 {
     return use_emmc ? emmc_write(lba, count, buf) : ide_write(lba, count, buf);
 }
+
+/* make every earlier write durable. The SD card driver writes block by block and waits for the card, so there is no
+ * cache of ours to flush; the IDE drive has one. */
+int blk_flush(void)
+{
+    return use_emmc ? emmc_flush() : ide_flush();
+}

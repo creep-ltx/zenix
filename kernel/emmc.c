@@ -446,3 +446,9 @@ static int rw(u32 lba, u32 count, void *buf, int write)
 
 int emmc_read(u32 lba, u32 count, void *buf) { return rw(lba, count, buf, 0); }
 int emmc_write(u32 lba, u32 count, const void *buf) { return rw(lba, count, (void *)buf, 1); }
+
+/* emmc_write returns after the card has taken the block; there is no write cache in the driver to flush. */
+int emmc_flush(void)
+{
+    return 0;
+}

@@ -161,3 +161,26 @@ int ide_write(u32 lba, u32 count, const void *buf)
 {
     return ide_rw(lba, count, (void *)buf, 1);
 }
+
+/* ATA FLUSH CACHE (E7h): returns when the drive has written its cache. A drive may take seconds. */
+int ide_flush(void)
+{
+    u16 sv = irq_save2();
+    int rc = -1;
+    if (ide_wait(ST_BSY, 0))
+        goto out;
+    IDE_REG(6) = 0xE0;
+    IDE_REG(7) = 0xE7;
+    for (u32 i = 0; i < 40; i++) {                  /* up to ~40 x the poll limit of ide_wait */
+        u8 st = IDE_REG(7);
+        if (!(st & ST_BSY)) {
+            rc = (st & ST_ERR) ? -1 : 0;
+            break;
+        }
+        (void)ide_wait(ST_BSY, 0);
+    }
+out:
+    ide_ack();
+    irq_restore(sv);
+    return rc;
+}

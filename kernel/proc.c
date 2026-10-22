@@ -202,7 +202,7 @@ int proc_spawn(const char *path, char *const *argv, int argc,
 {
     u8 *file;
     u32 size;
-    long r = fs_read_file(path, parent ? parent->cwd_ino : 2, &file, &size);
+    long r = fs_read_file(path, parent, &file, &size);
     if (r < 0)
         return (int)r;
     int pid = proc_load(file, size, path, argv, argc, parent, stdio, tty, 0);

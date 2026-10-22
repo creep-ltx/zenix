@@ -136,7 +136,8 @@ second block. Both are owned by the pid and freed together.
 lseek readdir stat fstat lstat chdir getcwd mkdir unlink rmdir rename link symlink readlink chmod utimes dup dup2
 pipe`), processes (`spawn wait exit yield sleep kill procinfo`), memory (`memalloc memfree meminfo`), time
 (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr isatty setfg`), environment (`envset envget`),
-messages (`port_create port_find call recv reply replyrecv`), and a few privileged ones for the servers.
+messages (`port_create port_find call recv reply replyrecv`), mounts (`mount umount mountinfo`; `statfs` takes a
+mount index), and a few privileged ones for the servers (`blk_read blk_write blk_flush blk_size blk_ram`).
 
 **Every user pointer is validated** (`user_ok`) against the process's own span and its `memalloc` regions. A bad
 pointer makes the call return -1; the process lives. Strings are copied into kernel buffers with bounds.
@@ -173,14 +174,26 @@ processes flagged `priv`). Reads the Amiga **RDB** partition table (`RDSK`/`PART
 serves named devices: `ide0` (whole disk), `ide0p1`, `ide0p2`..., and `ram0` for the boot RAM disk. Handles are
 confined to their partition (LBAs are partition-relative). A device opened `DISK_MOUNT` has exactly one writer -
 the filesystem server; tools (`fdisk`, `mkfs.ext2`, `fsck.ext2`) open `DISK_RAW`, which is refused while mounted.
-Protocol: `kernel/diskproto.h`.
+`DISK_FLUSH` makes earlier writes durable (ATA FLUSH CACHE through `blk_flush`; the SD driver has no write cache of its own);
+`struct diskinfo` carries capability bits and the largest transfer. Protocol: `kernel/diskproto.h`.
 
 ### fsd - the filesystem server (`user/fsd.c` + `kernel/ext2.c`, port `fs`)
 The ext2 code compiled to run in user mode (`user/fsenv.h` supplies its environment), speaking the protocol in
 `kernel/fsproto.h` (`FS_OPEN, FS_READ, FS_WRITE, FS_STAT, FS_READDIR, FS_MKDIR, FS_RENAME, ...`). Files are named
 by **inode number**; the kernel's open-file table stores the inode, offset and flags, the server is stateless
 about open files. Chooses its root: a RAM-disk image from the boot floppy if present, else the first RDB
-partition that probes as ext2, else the bare disk.
+partition that probes as ext2, else the bare disk. Started with `fsd DEVICE PORTNAME` (as `/bin/mount.ext2`, by `mount`)
+it serves that device on its own port instead; it answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
+(umount: sync, release the device, exit).
+
+### The mount table (`kernel/vfs.c`)
+Entry 0 is the root (port `fs`); `SYS_mount` puts a running server's port on a directory (up to 8 mounts). With only the
+root mounted, paths go to its server untouched. Otherwise the kernel makes every path absolute and normalised as text
+(working-directory text + path, `.` and `..` removed), picks the longest mount point that prefixes it and hands the server
+the rest as a path inside that filesystem together with that filesystem's root inode as the working directory. Each
+open file remembers its mount. `link` and `rename` across two mounts fail. `umount` is refused while a process has its
+working directory or an open file inside, or another mount lies below. Caveat: because `..` is resolved on the text, a
+working directory reached through a symbolic link behaves as its text says once a second filesystem is mounted.
 
 ### boot - the session manager (`user/boot.c`)
 Waits for the `fs` port, spawns `/bin/init`, and then sleeps in `SYS_wsreq`, spawning a shell on a new
@@ -196,7 +209,7 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 - Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair) and `fdisk` (RDB).
 - Not done: freeing a file that is still open (it frees at once), moving directories between parents,
   triple-indirect files, a journal.
-- Planned: a multi-filesystem VFS with mount table, and **ZenixFS** (atomic commit, checksummed metadata, extents),
+- Several filesystems can be mounted (`mount`, see section 9). Planned: **ZenixFS** (atomic commit, checksummed metadata, extents),
   see `zenixfs.md`.
 
 ## 11. Pipes, tty, terminal, display

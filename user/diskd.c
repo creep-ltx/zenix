@@ -25,6 +25,8 @@ static void add(const char *name, const char *label, u32 start, u32 sectors, u32
     strcpy(d->name, name);
     strcpy(d->label, label);
     d->start = start; d->sectors = sectors; d->dostype = dostype; d->flags = flags;
+    d->maxsect = 256;
+    if (strcmp(name, "ram0")) d->caps = DISKCAP_FLUSH; else d->caps = DISKCAP_RAM;
 }
 
 static int disk_rd(unsigned lba, void *buf) { return sys_blk_read(lba, 1, buf); }
@@ -104,6 +106,10 @@ static int handle(struct umsg *m)
         if (m->a[0] >= (u32)ndev) return -1;
         memcpy((void *)m->a[1], &dev[m->a[0]], sizeof(struct diskinfo));
         return 0;
+    case DISK_FLUSH:
+        if (m->a[0] >= (u32)ndev) return -1;
+        if (!strcmp(dev[m->a[0]].name, "ram0")) return 0;            /* nothing to flush */
+        return sys_blk_flush();
     case DISK_RESCAN:
         scan();
         return ndev;

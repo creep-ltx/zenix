@@ -22,4 +22,7 @@
 #define FS_READLINK 17 /* a0 path, a1 cwd ino, a2 buffer, a3 max -> length */
 #define FS_UTIMES  18  /* a0 path, a1 cwd ino, a2 modification time */
 #define FS_LSTAT   19  /* like FS_STAT but a final symbolic link is not followed */
+#define FS_ROOT    20  /* a0 struct fsinfo* (the server fills in its device and type) -> inode number of its root directory */
+#define FS_QUIT    21  /* sync, release the device, reply 0, exit: sent by umount */
+struct fsinfo { char dev[16]; char type[8]; };
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

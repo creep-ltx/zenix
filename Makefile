@@ -16,7 +16,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
           head tail sort uniq cut tr tee seq basename dirname yes sleep true false env printenv which clear \
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
-          sed diff chmod ln readlink date less edit man gzip tar
+          sed diff chmod ln readlink date less edit man gzip tar mount umount mount.ext2
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 # programs that need more than the default 16 KB stack
@@ -113,6 +113,9 @@ $(BUILD)/fsd.uelf: $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)
 	    $(BUILD)/crt0.o $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py
 	tools/mkzexe.py $< $@ 16384
+# the same server as a program: `mount -t ext2` starts /bin/mount.ext2 DEVICE PORT
+$(BUILD)/mount.ext2.zx: $(BUILD)/fsd.zx
+	cp $< $@
 $(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 

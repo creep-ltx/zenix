@@ -77,6 +77,7 @@ static inline int sys_blk_size(void) { return sys3(41, 0, 0, 0); }
 static inline int sys_blk_ram(u32 out[2]) { return sys3(42, (u32)out, 0, 0); }
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };
 static inline int sys_statfs(struct ustatfs *f) { return sys3(43, (u32)f, 0, 0); }
+static inline int sys_statfs_mount(struct ustatfs *f, u32 mount) { return sys3(43, (u32)f, mount, 0); }
 static inline int sys_sync(void) { return sys3(44, 0, 0, 0); }
 #define TTY_RAW   1
 #define TTY_NOSIG 2
@@ -96,3 +97,9 @@ static inline int sys_lstat(const char *p, struct ustat *st) { return sys3(57, (
 static inline u32 sys_time(void) { return (u32)sys3(58, 0, 0, 0); }
 static inline int sys_settime(u32 t) { return sys3(59, t, 0, 0); }
 static inline int sys_isatty(int fd) { return sys3(60, (u32)fd, 0, 0); }
+struct umountreq { const char *path, *port, *dev, *type; };
+struct umountinfo { char path[48], port[16], dev[16], type[8]; };
+static inline int sys_mount(const struct umountreq *r) { return sys3(61, (u32)r, 0, 0); }
+static inline int sys_umount(const char *path) { return sys3(62, (u32)path, 0, 0); }
+static inline int sys_mountinfo(u32 index, struct umountinfo *out) { return sys3(63, index, (u32)out, 0); }
+static inline int sys_blk_flush(void) { return sys3(64, 0, 0, 0); }

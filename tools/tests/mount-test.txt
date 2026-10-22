@@ -1,0 +1,67 @@
+sleep 22
+send fdisk init ide0 -y\r
+sleep 3
+send fdisk add ide0 one 6\r
+sleep 3
+send fdisk add ide0 two rest\r
+sleep 3
+send mkfs.ext2 ide0p1\r
+sleep 8
+send mkfs.ext2 ide0p2\r
+sleep 8
+send mkdir /mnt\r
+sleep 1
+send mount\r
+sleep 2
+send mount ide0p1 /mnt\r
+sleep 4
+send echo hello-one > /mnt/a.txt\r
+sleep 2
+send mkdir /mnt/sub\r
+sleep 2
+send mount ide0p2 /mnt/sub\r
+sleep 4
+send echo hello-two > /mnt/sub/b.txt\r
+sleep 2
+send mount\r
+sleep 2
+send cat /mnt/a.txt /mnt/sub/b.txt\r
+sleep 2
+send cd /mnt/sub\r
+sleep 1
+send pwd\r
+sleep 1
+send ls ..\r
+sleep 2
+send cd /\r
+sleep 1
+send umount /mnt\r
+sleep 2
+send echo END-OF-BUSY-TEST\r
+sleep 1
+send umount /mnt/sub\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount\r
+sleep 2
+send ls /mnt\r
+sleep 2
+send mount ide0p1 /mnt\r
+sleep 4
+send cat /mnt/a.txt\r
+sleep 2
+send mount ide0p2 /mnt/sub\r
+sleep 4
+send cat /mnt/sub/b.txt\r
+sleep 2
+send rm /mnt/sub/b.txt\r
+sleep 2
+send umount /mnt/sub\r
+sleep 2
+send umount /mnt\r
+sleep 3
+send mount\r
+sleep 2
+send sync\r
+sleep 3
