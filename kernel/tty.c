@@ -19,6 +19,7 @@ struct tty {
     int fg;
 };
 static struct tty *tt[NTTY];
+int tty_mirror = 1;                     /* copy the focused screen to the serial port */
 
 static struct tty *get(int i)
 {
@@ -46,15 +47,17 @@ int tty_getfg(int tty) { return get(tty)->fg; }
 static void out(int i, char c)
 {
     term_putc(i, c);
-    if (i == ws_cur)
+    if (i == ws_cur && tty_mirror)
         serial_putc(c);
 }
 
 long tty_write(int i, const void *buf, u32 n)
 {
     const char *s = buf;
-    for (u32 k = 0; k < n; k++)
-        out(i, s[k]);
+    term_write(i, s, n);                    /* the screen: cursor handled once per batch */
+    if (i == ws_cur && tty_mirror)
+        for (u32 k = 0; k < n; k++)
+            serial_putc(s[k]);
     return (long)n;
 }
 

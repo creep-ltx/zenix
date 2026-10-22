@@ -18,7 +18,7 @@ static struct file *getfd(u32 fd)
     return fd < NFD ? current->fd[fd] : 0;
 }
 
-static long do_spawn(u32 upath, u32 uargv, u32 ustdio)
+static long do_spawn(u32 upath, u32 uargv, u32 ustdio, int tty)
 {
     char path[64], strs[512], *argv[17];
     int argc = 0, fds[3], *stdio = 0;
@@ -56,7 +56,7 @@ static long do_spawn(u32 upath, u32 uargv, u32 ustdio)
             fds[i] = (int)((const u32 *)ustdio)[i];
         stdio = fds;
     }
-    return proc_spawn(path, argv, argc, current, stdio, 0);
+    return proc_spawn(path, argv, argc, current, stdio, tty);
 }
 
 /* TRAP #0 handler. rb[0..7] = d0-d7, rb[8..14] = a0-a6. d0 = number,
@@ -86,7 +86,7 @@ void syscall_c(u32 *rb)
         r = current->pid;
         break;
     case SYS_spawn:
-        r = (s32)do_spawn(a1, a2, a3);
+        r = (s32)do_spawn(a1, a2, a3, 0);
         break;
     case SYS_wait:
         r = proc_wait((int)a1);
@@ -94,6 +94,7 @@ void syscall_c(u32 *rb)
     case SYS_sleep:
         current->wake = ticks + a1;
         current->state = P_SLEEP;
+        nsleep++;
         schedule();
         r = 0;
         break;
@@ -137,6 +138,37 @@ void syscall_c(u32 *rb)
         break;
     case SYS_reply:
         r = (s32)ipc_reply((struct umsg *)a1, (s32)a2);
+        break;
+    case SYS_replyrecv:
+        r = (s32)ipc_replyrecv((struct umsg *)a1, (s32)a2, (int)a3);
+        break;
+    case SYS_spawn_tty:                 /* only the session manager (priv) */
+        if (current->priv)
+            r = (s32)do_spawn(a1, a2, 0, (int)a3);
+        break;
+    case SYS_wsreq:
+        if (current->priv) {
+            for (;;) {
+                if (current->killed)
+                    break;
+                for (int w = 1; w <= 9; w++)
+                    if (ws_spawn_pending[w]) {
+                        ws_spawn_pending[w] = 0;
+                        r = w;
+                        break;
+                    }
+                if (r > 0)
+                    break;
+                block_io();
+            }
+        }
+        break;
+    case SYS_hrtime:
+        r = (s32)hr_time();
+        break;
+    case SYS_ttymirror:
+        tty_mirror = (int)a1;
+        r = 0;
         break;
     case SYS_close:
         if ((f = getfd(a1))) {

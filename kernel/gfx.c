@@ -1,10 +1,13 @@
 #include "kernel.h"
 #include "hw.h"
 
-/* Display: 640x256 hires, 2 bitplanes (4 colours), planes interleaved
- * line by line (stride 160 bytes: plane 0 then plane 1). A two-part
- * Copper list splits the screen: an 8-line bar on top (its own small
- * buffer) and 31 text rows below (a buffer twice the screen's height).
+/* Display: 640x256 hires, ONE bitplane: half the chip-bus DMA of two
+ * planes, which matters on a stock A1200 where the CPU shares chip RAM
+ * with the display. The two colours come from the Copper: a two-part
+ * list switches the palette at the split between the 8-line bar on top
+ * (white on blue; its own small buffer) and the 31 text rows below
+ * (grey on black; a buffer twice the screen's height). An inverted cell
+ * (blue on white in the bar) is just the glyph bits inverted.
  * Scrolling the text is a pointer bump in the Copper list, applied at
  * vertical blank; only when the window reaches the end of the buffer
  * does the blitter copy the visible rows back to the top (the copy
@@ -17,7 +20,7 @@
 #ifndef DIW_V
 #define DIW_V 0x2C
 #endif
-#define STRIDE  160
+#define STRIDE  80
 #define BUFL    (2 * TROWS * 8)
 #define BARL    8
 
@@ -129,13 +132,13 @@ static void blit_clear(void *dst, u32 words)
 static void put_glyph(u8 *line0, int col, u8 ch, u8 fg, u8 bg)
 {
     const u8 *g = glyphs[(ch < 32 ? '?' : ch) - 32];
-    for (int y = 0; y < 8; y++) {
-        u8 b = g[y];
-        u8 p0 = (u8)(((fg & 1) ? b : 0) | ((bg & 1) ? ~b : 0));
-        u8 p1 = (u8)(((fg & 2) ? b : 0) | ((bg & 2) ? ~b : 0));
-        line0[y * STRIDE + col] = p0;
-        line0[y * STRIDE + 80 + col] = p1;
-    }
+    (void)bg;                           /* one plane: fg 1 = glyph, 0 = inverted */
+    if (fg & 1)
+        for (int y = 0; y < 8; y++)
+            line0[y * STRIDE + col] = g[y];
+    else
+        for (int y = 0; y < 8; y++)
+            line0[y * STRIDE + col] = (u8)~g[y];
 }
 
 void gfx_cell(int row, int col, u8 ch, u8 fg, u8 bg)
@@ -150,12 +153,14 @@ void gfx_bar_cell(int col, u8 ch, u8 fg, u8 bg)
         put_glyph(bbuf, col, ch, fg, bg);
 }
 
+/* Copper list layout (words):  0-3 bar colours, 4-7 bar pointer, 8-9 WAIT,
+ * 10-13 text colours, 14-17 text pointer (15 and 17 are the scroll words) */
+#define CTXT 14
+
 static void cop_point(int idx, const u8 *p0)
 {
     cop[idx + 1] = (u16)((u32)p0 >> 16);
     cop[idx + 3] = (u16)(u32)p0;
-    cop[idx + 5] = (u16)((u32)(p0 + 80) >> 16);
-    cop[idx + 7] = (u16)((u32)(p0 + 80));
 }
 
 /* vertical-blank interrupt: apply a scroll */
@@ -163,11 +168,7 @@ void gfx_vblank(void)
 {
     int o = off;
     if (up && o != hw_off) {
-        const u8 *p = tbuf + (u32)o * STRIDE;
-        cop[11] = (u16)((u32)p >> 16);
-        cop[13] = (u16)(u32)p;
-        cop[15] = (u16)((u32)(p + 80) >> 16);
-        cop[17] = (u16)((u32)(p + 80));
+        cop_point(CTXT, tbuf + (u32)o * STRIDE);
         hw_off = o;
     }
 }
@@ -207,28 +208,27 @@ int gfx_init(void)
         return -1;
     memset(tbuf, 0, (u32)BUFL * STRIDE);
     memset(bbuf, 0, BARL * STRIDE);
-    cop[0] = 0x00E0; cop[2] = 0x00E2; cop[4] = 0x00E4; cop[6] = 0x00E6;
-    cop_point(0, bbuf);
+    cop[0] = 0x0180; cop[1] = 0x135;    /* bar: blue background */
+    cop[2] = 0x0182; cop[3] = 0xFFF;    /*      white text */
+    cop[4] = 0x00E0; cop[6] = 0x00E2;   /* BPL1PTH/L */
+    cop_point(4, bbuf);
     cop[8] = (u16)(((DIW_V + BARL - 1) << 8) | 0xDF); cop[9] = 0xFFFE;  /* end of the last bar line */
-    cop[10] = 0x00E0; cop[12] = 0x00E2; cop[14] = 0x00E4; cop[16] = 0x00E6;
-    cop_point(10, tbuf);
+    cop[10] = 0x0180; cop[11] = 0x000;  /* text: black */
+    cop[12] = 0x0182; cop[13] = 0xBBB;  /*       grey */
+    cop[14] = 0x00E0; cop[16] = 0x00E2;
+    cop_point(CTXT, tbuf);
     cop[18] = 0xFFFF; cop[19] = 0xFFFE;
     off = 0;
     hw_off = 0;
 
-    BPLCON0 = 0xA200;                   /* hires, 2 bitplanes, colour burst */
+    BPLCON0 = 0x9200;                   /* hires, 1 bitplane, colour burst */
     BPLCON1 = 0;
     BPLCON2 = 0;
-    BPL1MOD = 80;                       /* skip the other plane's line */
-    BPL2MOD = 80;
+    BPL1MOD = 0;
     DDFSTRT = 0x3C;
     DDFSTOP = 0xD4;
     DIWSTRT = (u16)((DIW_V << 8) | 0x81);
     DIWSTOP = (u16)(((DIW_V & 0xFF) << 8) | 0xC1);    /* +256 lines */
-    COLOR00 = 0x000;                    /* black */
-    COLOR01 = 0xBBB;                    /* text grey */
-    COLOR02 = 0x135;                    /* bar blue */
-    COLOR03 = 0xFFF;                    /* white */
     COP1LCH = (u16)((u32)cop >> 16);
     COP1LCL = (u16)(u32)cop;
     COPJMP1 = 0;

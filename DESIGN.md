@@ -42,13 +42,20 @@ syscall idea, build and FS-UAE setup. **Rewritten:** process switching (shared m
 (relocatable), exception handling. **Dropped:** 68030 MMU, per-process address spaces, mandatory FPU.
 
 ## Where the decisions stand (2026-10-22)
-D1 messages: **not done** - the kernel is still one program; drivers are not separate tasks yet.
+D1 messages: ports + synchronous zero-copy calls done; the filesystem is a server (fsd, built into the kernel image, user mode, raw-disk syscalls only for it). tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
 D3 relocating loader, no fork: done (ZEXE format, tools/mkzexe.py); shared libraries not started.
 D4 planar display server: the kernel draws text through Copper + blitter; a client API is not designed.
 D5 ext2: rev 0/1, 128+ byte inodes, read and write (write-through, e2fsck-clean) done; RDB partitions done; no journal.
 D6 scheduler: preemptive round robin on a 100 Hz tick; no priorities yet.
 D7 boot/test: FS-UAE done; test Amigas and the shared A1200 not yet.
+
+## Planned servers
+- **index server ("find")**: keeps a FuzzyFind-style catalogue of the filesystem in memory, answers search messages
+  for `locate`, `fzf` and tab completion, and is told about every create/delete/rename by the filesystem server so
+  it is never stale. May also cache directory listings. Decide after the benchmark (tools/bench) shows where directory
+  reads really spend their time. Reuses ~/Projects/FuzzyFind's index layout and matcher.
+- **display server**: the console/bar/workspaces now inside the kernel, moved behind a port with a drawing API (D4).
 
 ## Milestones (all three first ones done, see README)
 0. Boots in FS-UAE as an A1200 (68EC020, no MMU) and prints to the serial port.

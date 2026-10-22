@@ -27,6 +27,11 @@ char *strstr(const char *h, const char *n)
 void *memcpy(void *d, const void *s, unsigned long n)
 {
     char *p = d; const char *q = s;
+    if (n >= 8 && !(((unsigned long)p | (unsigned long)q) & 3)) {      /* aligned: longwords */
+        u32 *pl = (u32 *)p; const u32 *ql = (const u32 *)q;
+        for (unsigned long k = n >> 2; k; k--) *pl++ = *ql++;
+        p = (char *)pl; q = (const char *)ql; n &= 3;
+    }
     while (n--) *p++ = *q++;
     return d;
 }
@@ -40,6 +45,11 @@ void *memmove(void *d, const void *s, unsigned long n)
 void *memset(void *d, int c, unsigned long n)
 {
     char *p = d;
+    if (n >= 8 && !((unsigned long)p & 3)) {
+        u32 v = (u32)(unsigned char)c * 0x01010101u, *pl = (u32 *)p;
+        for (unsigned long k = n >> 2; k; k--) *pl++ = v;
+        p = (char *)pl; n &= 3;
+    }
     while (n--) *p++ = (char)c;
     return d;
 }

@@ -23,6 +23,7 @@ for n in $CONFS; do
     grep -q 'hello from pid' $OUT/$n.log || ok=0
     grep -q 'killed' $OUT/$n.log || ok=0
     grep -q 'Zenix 0.2' $OUT/$n.log || ok=0
+    grep -q '^ws2ok$' $OUT/$n.log || ok=0        # a shell on a second workspace
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"
 done

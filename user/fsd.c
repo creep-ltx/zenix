@@ -86,9 +86,8 @@ int main(void)
     if (ext2_mount()) { printf("fsd: no ext2 filesystem\n"); return 1; }
     int port = sys_port_create("fs");
     if (port < 0) { printf("fsd: cannot create the fs port\n"); return 1; }
-    for (;;) {
-        struct umsg *m = sys_recv(port, 1);
-        if ((int)m == -1) return 1;
-        sys_reply(m, handle(m));
-    }
+    struct umsg *m = sys_recv(port, 1);
+    while ((int)m != -1)
+        m = sys_replyrecv(m, handle(m), port);     /* reply and wait in one trap */
+    return 1;
 }

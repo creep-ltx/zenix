@@ -75,14 +75,10 @@ static void clear_screen(struct term *t, int vis)
     }
 }
 
-void term_putc(int w, char c)
+/* one character; the caller hides and redraws the cursor around a batch */
+static void put1(struct term *t, int vis, char c)
 {
-    struct term *t = get(w);
-    int vis = (w == ws_cur) && gfx_up();
-    if (vis)
-        cursor(t, 0);
     u8 ch = (u8)c;
-
     if (t->esc == 1) {                  /* after ESC */
         t->esc = (ch == '[') ? 2 : 0;
         t->arg = 0;
@@ -117,8 +113,23 @@ void term_putc(int w, char c)
         if (++t->cx == COLS)
             newline(t, vis);
     }
+}
+
+void term_write(int w, const char *s, u32 n)
+{
+    struct term *t = get(w);
+    int vis = (w == ws_cur) && gfx_up();
+    if (vis)
+        cursor(t, 0);
+    for (u32 i = 0; i < n; i++)
+        put1(t, vis, s[i]);
     if (vis)
         cursor(t, 1);
+}
+
+void term_putc(int w, char c)
+{
+    term_write(w, &c, 1);
 }
 
 /* ---- bar ---- */
@@ -179,7 +190,7 @@ void bar_draw(void)
     m = put_u(r, m, s % 60, 2); r[m++] = ' ';
     memcpy(b + COLS - m, r, (u32)m);
     for (int i = 0; i < COLS; i++)
-        gfx_bar_cell(i, (u8)b[i], inv[i] ? 2 : 3, inv[i] ? 3 : 2);
+        gfx_bar_cell(i, (u8)b[i], inv[i] ? 0 : 1, inv[i] ? 1 : 0);
 }
 
 void ws_switch(int w)
@@ -194,6 +205,8 @@ void ws_switch(int w)
 
 void ws_request_shell(int w)
 {
-    if (w >= 1 && w <= NWS && !in_use(w))
+    if (w >= 1 && w <= NWS && !in_use(w)) {
         ws_spawn_pending[w] = 1;
+        wake_io();                      /* the session manager waits for this */
+    }
 }

@@ -7,6 +7,13 @@ volatile u32 ticks;
 void *memset(void *d, int c, unsigned long n)
 {
     u8 *p = d;
+    if (n >= 8 && !((u32)p & 3)) {
+        u32 v = (u32)(u8)c * 0x01010101u, *pl = (u32 *)p;
+        for (unsigned long k = n >> 2; k; k--)
+            *pl++ = v;
+        p = (u8 *)pl;
+        n &= 3;
+    }
     while (n--)
         *p++ = (u8)c;
     return d;
@@ -16,6 +23,15 @@ void *memcpy(void *d, const void *s, unsigned long n)
 {
     u8 *p = d;
     const u8 *q = s;
+    if (n >= 8 && !(((u32)p | (u32)q) & 3)) {
+        u32 *pl = (u32 *)p;
+        const u32 *ql = (const u32 *)q;
+        for (unsigned long k = n >> 2; k; k--)
+            *pl++ = *ql++;
+        p = (u8 *)pl;
+        q = (const u8 *)ql;
+        n &= 3;
+    }
     while (n--)
         *p++ = *q++;
     return d;
@@ -78,6 +94,21 @@ void irq2_c(u32 sr)
             bar_draw();
         sched_tick((u16)sr);
     }
+}
+
+/* Time in E-clock ticks (709379 Hz on PAL), the CIA's own clock: the 100 Hz
+ * tick count plus how far timer A has counted into the current tick. */
+u32 hr_time(void)
+{
+    u32 t1, t2, hi, lo, hi2;
+    do {
+        t1 = ticks;
+        hi = CIAA(CIA_TAHI);
+        lo = CIAA(CIA_TALO);
+        hi2 = CIAA(CIA_TAHI);
+        t2 = ticks;
+    } while (t1 != t2 || hi != hi2);
+    return t1 * (CIA_TICKS_100HZ + 1) + (CIA_TICKS_100HZ - ((hi << 8) | lo));
 }
 
 static void vectors_init(void)
@@ -166,7 +197,7 @@ void kmain(struct bootinfo *bi)
     /* the filesystem server and the starter are built into the kernel */
     extern const char fsd_blob[], fsd_blob_end[], boot_blob[], boot_blob_end[];
     int fpid = proc_spawn_image(fsd_blob, (u32)(fsd_blob_end - fsd_blob), "fsd", 1, 1);
-    int pid = proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), "boot", 1, 0);
+    int pid = proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), "boot", 1, 1);
     if (fpid < 0 || pid < 0)
         panic("cannot start the filesystem server");
     kprintf("proc: fsd is pid %d, boot is pid %d (it starts /bin/init)\n", fpid, pid);
@@ -176,13 +207,6 @@ void kmain(struct bootinfo *bi)
     bar_draw();
     for (;;) {
         proc_reap_orphans();
-        for (int w = 1; w <= 9; w++)
-            if (ws_spawn_pending[w]) {
-                ws_spawn_pending[w] = 0;
-                char *a[] = { "/bin/sh", 0 };
-                proc_spawn("/bin/sh", a, 1, 0, 0, w);
-                bar_draw();
-            }
         schedule();             /* run anything ready; returns when idle */
         serial_tx_drain();
         if (!serial_tx_pending())

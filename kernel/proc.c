@@ -7,6 +7,35 @@
 struct proc procs[NPROC];
 struct proc *current;
 static int next_pid = 1;
+static struct proc *rq_head, *rq_tail;  /* runnable processes, round robin */
+int nsleep, nio;                        /* how many are in P_SLEEP / P_IO */
+
+static void rq_push(struct proc *p)
+{
+    p->rnext = 0;
+    p->queued = 1;
+    if (rq_tail)
+        rq_tail->rnext = p;
+    else
+        rq_head = p;
+    rq_tail = p;
+}
+
+/* make a blocked process runnable (never call this on the running one) */
+void ready(struct proc *p)
+{
+    u16 s = irq_save();                 /* interrupts wake processes too */
+    if (p->state != P_READY && p->state != P_FREE && p->state != P_ZOMBIE) {
+        if (p->state == P_SLEEP)
+            nsleep--;
+        else if (p->state == P_IO)
+            nio--;
+        p->state = P_READY;
+        if (p->pid != 0 && !p->queued)
+            rq_push(p);
+    }
+    irq_restore(s);
+}
 static int slice;
 #define KSTACK 4096u
 #define USTACK_DEFAULT 16384u
@@ -134,7 +163,13 @@ static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *a
     }
 
     /* file descriptors */
-    if (parent) {
+    if (parent && tty > 0) {
+        /* started on a workspace (by the session manager): own tty, parent cwd */
+        struct file *t = file_new(FT_TTY);
+        t->off = (u32)tty;
+        for (int i = 0; i < 3; i++)
+            p->fd[i] = i == 0 ? t : file_dup(t);
+    } else if (parent) {
         /* only fds 0-2 are passed on (so a pipe's write end cannot leak
          * into a reader and keep it from seeing end-of-file) */
         for (int i = 0; i < 3; i++) {
@@ -150,6 +185,11 @@ static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *a
     }
     p->priv = priv;
     p->state = P_READY;
+    {
+        u16 s = irq_save();
+        rq_push(p);
+        irq_restore(s);
+    }
     return pid;
 }
 
@@ -176,21 +216,23 @@ int proc_spawn_image(const void *img, u32 len, const char *name, int tty, int pr
 void schedule(void)
 {
     u16 s = irq_save();
-    struct proc *old = current, *n = 0;
-    int oi = (int)(old - procs);
+    struct proc *old = current, *n;
 
-    for (int i = 1; i < NPROC; i++)
-        if (procs[i].state == P_SLEEP && (s32)(ticks - procs[i].wake) >= 0)
-            procs[i].state = P_READY;
-    for (int k = 1; k <= NPROC; k++) {
-        struct proc *p = &procs[(oi + k) % NPROC];
-        if (p->state == P_READY && p->pid != 0) {
-            n = p;
-            break;
-        }
+    if (old->state == P_READY && old->pid != 0 && !old->queued)
+        rq_push(old);                   /* yielded or preempted: back of the line */
+    if (nsleep)
+        for (int i = 1; i < NPROC; i++)
+            if (procs[i].state == P_SLEEP && (s32)(ticks - procs[i].wake) >= 0)
+                ready(&procs[i]);
+    n = rq_head;
+    if (n) {
+        rq_head = n->rnext;
+        if (!rq_head)
+            rq_tail = 0;
+        n->queued = 0;
+    } else {
+        n = &procs[0];                  /* nothing to run: idle */
     }
-    if (!n)
-        n = &procs[0];
     slice = SLICE;
     if (n != old) {
         current = n;
@@ -210,14 +252,19 @@ void sched_tick(u16 sr)
 
 void wake_io(void)
 {
+    if (!nio)
+        return;
     for (int i = 1; i < NPROC; i++)
         if (procs[i].state == P_IO)
-            procs[i].state = P_READY;
+            ready(&procs[i]);
 }
 
 void block_io(void)
 {
+    u16 s = irq_save();                 /* state and count change together */
     current->state = P_IO;
+    nio++;
+    irq_restore(s);
     schedule();
 }
 
@@ -226,7 +273,7 @@ void proc_kill(struct proc *p)
     p->killed = 1;
     if (p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
         (p->state == P_MSG && !p->wait_msg))        /* a server in recv, not a client in call */
-        p->state = P_READY;
+        ready(p);
 }
 
 void proc_exit(int code)
@@ -245,7 +292,7 @@ void proc_exit(int code)
     struct proc *par = proc_by_pid(p->ppid);
     if (par && par->state == P_WAIT &&
         (par->wait_for == -1 || par->wait_for == p->pid))
-        par->state = P_READY;
+        ready(par);
     ipc_proc_exit(p->pid);
     wake_io();
     schedule();

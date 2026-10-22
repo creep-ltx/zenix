@@ -37,16 +37,31 @@ static u32 sectors_per_block, total_blocks, ninodes;
 static u32 gd_blk;                      /* first block of the group descriptor table */
 static int mounted;
 
-/* returns the cache slot holding block blk (loading it), or -1 */
+/* returns the cache slot holding block blk (loading it), or -1.
+ * Fast paths first: the last slot used, then a small hash of block
+ * numbers; only a miss scans the whole cache for a victim. */
+static int last_slot;
+static u8 hashslot[64];                 /* blk & 63 -> slot that probably holds it */
+
 static int bfind(u32 blk)
 {
     int victim = 0;
     u32 oldest = 0xFFFFFFFF;
     stamp++;
+    if (buf[last_slot].data && buf[last_slot].blk == blk) {
+        buf[last_slot].stamp = stamp;
+        return last_slot;
+    }
+    int h = hashslot[blk & 63];
+    if (buf[h].data && buf[h].blk == blk) {
+        buf[h].stamp = stamp;
+        return last_slot = h;
+    }
     for (int i = 0; i < NBUF; i++) {
         if (buf[i].data && buf[i].blk == blk) {
             buf[i].stamp = stamp;
-            return i;
+            hashslot[blk & 63] = (u8)i;
+            return last_slot = i;
         }
         if (!buf[i].data) {
             victim = i;
@@ -62,11 +77,19 @@ static int bfind(u32 blk)
             return -1;
     }
     if (fs_blk_read(part_lba + blk * sectors_per_block, sectors_per_block,
-                 buf[victim].data))
+                    buf[victim].data))
         return -1;
     buf[victim].blk = blk;
     buf[victim].stamp = stamp;
-    return victim;
+    hashslot[blk & 63] = (u8)victim;
+    return last_slot = victim;
+}
+
+/* pointer to the cached block: valid only until the next bfind/bread/bwrite */
+static const u8 *bptr(u32 blk)
+{
+    int i = bfind(blk);
+    return i < 0 ? 0 : buf[i].data;
 }
 
 static int bread_copy(u32 blk, u32 off, void *dst, u32 len)
@@ -234,29 +257,33 @@ int ext2_read(const struct inode *in, u32 off, void *dst, u32 n)
     return (int)n;
 }
 
-/* directory entry number `idx` (counting from 0); returns 1, 0 at the end, -1 on error */
+/* next live directory entry at/after byte offset *cookie, parsed in place in
+ * the cache (one block lookup per call, not per field); returns 1, 0 at the
+ * end, -1 on error */
 int ext2_readdir(const struct inode *dir, u32 *cookie, struct udirent *out)
 {
     u32 off = *cookie;
-    while (off + 8 <= dir->size) {
-        u8 h[8];
-        if (ext2_read(dir, off, h, 8) != 8)
+    while (off < dir->size) {
+        u32 blk = ext2_bmap(dir, off / bsize);
+        const u8 *p = blk ? bptr(blk) : 0;
+        if (!p)
             return -1;
-        u32 ino = rd32(h);
-        u32 reclen = le16(*(u16 *)(h + 4));
-        u32 nlen = h[6];
-        if (reclen < 8)
+        u32 end = bsize - off % bsize;          /* bytes left in this block */
+        const u8 *e = p + off % bsize;
+        u32 rl = le16(*(const u16 *)(e + 4));
+        if (rl < 8 || rl > end)
             return -1;
-        off += reclen;
+        off += rl;
+        u32 ino = rd32(e);
         if (ino == 0)
             continue;
-        if (nlen > sizeof out->name - 1)
-            nlen = sizeof out->name - 1;
-        if (ext2_read(dir, off - reclen + 8, out->name, nlen) != (int)nlen)
-            return -1;
-        out->name[nlen] = 0;
+        u32 nl = e[6];
+        if (nl > sizeof out->name - 1)
+            nl = sizeof out->name - 1;
+        memcpy(out->name, e + 8, nl);
+        out->name[nl] = 0;
         out->ino = ino;
-        out->type = h[7];
+        out->type = e[7];
         *cookie = off;
         return 1;
     }
@@ -268,16 +295,25 @@ int ext2_lookup(const struct inode *dir, const char *name, u32 len, u32 *ino)
 {
     if (!S_ISDIR(dir->mode))
         return -1;
-    u32 cookie = 0;
-    struct udirent e;
-    int r;
-    while ((r = ext2_readdir(dir, &cookie, &e)) > 0) {
-        u32 i = 0;
-        while (i < len && e.name[i] == name[i])
-            i++;
-        if (i == len && e.name[len] == 0) {
-            *ino = e.ino;
-            return 0;
+    for (u32 b = 0; b * bsize < dir->size; b++) {
+        u32 blk = ext2_bmap(dir, b);
+        const u8 *p = blk ? bptr(blk) : 0;
+        if (!p)
+            return -1;
+        for (u32 o = 0; o + 8 <= bsize;) {
+            u32 rl = le16(*(const u16 *)(p + o + 4));
+            if (rl < 8 || o + rl > bsize)
+                return -1;
+            if (p[o + 6] == len && rd32(p + o) != 0) {
+                u32 i = 0;
+                while (i < len && p[o + 8 + i] == (u8)name[i])
+                    i++;
+                if (i == len) {
+                    *ino = rd32(p + o);
+                    return 0;
+                }
+            }
+            o += rl;
         }
     }
     return -1;

@@ -36,7 +36,9 @@ void panic(const char *why) __attribute__((noreturn));
 void *memset(void *d, int c, unsigned long n);
 void *memcpy(void *d, const void *s, unsigned long n);
 void *memmove(void *d, const void *s, unsigned long n);
-extern volatile u32 ticks;      /* 100 Hz, CIA-A timer A */
+extern volatile u32 ticks;
+u32 hr_time(void);
+extern int tty_mirror;      /* 100 Hz, CIA-A timer A */
 
 /* start.S */
 void set_vbr(void *table);
@@ -73,6 +75,7 @@ void gfx_scroll(void);
 void gfx_clear_text(void);
 void gfx_vblank(void);
 void term_putc(int ws, char c);
+void term_write(int ws, const char *s, u32 n);
 void bar_draw(void);
 void ws_switch(int w);
 void ws_request_shell(int w);
@@ -146,6 +149,8 @@ struct proc {                   /* start.S relies on the first three: */
     struct file *fd[NFD];
     int killed;
     int priv;                   /* may use the raw disk (the filesystem server) */
+    struct proc *rnext;         /* run queue link */
+    int queued;                 /* on the run queue */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
     int wait_port;              /* P_MSG as a server: port being listened on */
     char name[16];
@@ -163,6 +168,8 @@ void proc_reap_orphans(void);
 void sched_tick(u16 sr);
 int user_ok(const struct proc *p, u32 ptr, u32 len);
 void wake_io(void);
+void ready(struct proc *p);         /* make a blocked process runnable */
+extern int nsleep;
 void block_io(void);
 void proc_kill(struct proc *p);
 struct proc *proc_by_pid(int pid);
@@ -181,11 +188,13 @@ struct umsg {
     s32 result;                 /* set by the server's reply */
     u32 type;
     u32 a[4];                   /* arguments, free use */
+    struct proc *client;        /* kernel: who is waiting for the reply */
 };
 int port_create(const char *name, int owner);
 int port_find(const char *name);
 long ipc_call(int port, struct umsg *m);
 struct umsg *ipc_recv(int port, int wait);
+struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port);
 long ipc_reply(struct umsg *m, s32 result);
 void ipc_proc_exit(int pid);
 
@@ -256,6 +265,11 @@ int tty_of(const struct proc *p);
 #define SYS_reply       33
 #define SYS_blk_read    34
 #define SYS_blk_write   35
+#define SYS_hrtime      36   /* E-clock ticks (709379 Hz PAL) since boot */
+#define SYS_wsreq       39   /* session manager: wait for a shell-on-workspace request */
+#define SYS_spawn_tty   40   /* spawn a program with its stdio on a workspace tty */
+#define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */
+#define SYS_ttymirror   37   /* 0 = stop copying screen output to the serial port */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

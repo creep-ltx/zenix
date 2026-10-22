@@ -54,9 +54,9 @@ static void finish(struct umsg *m, s32 result)
 {
     m->result = result;
     m->state = MSG_DONE;
-    struct proc *c = proc_by_pid(m->from);
+    struct proc *c = m->client;
     if (c && c->state == P_MSG && c->wait_msg == m)
-        c->state = P_READY;
+        ready(c);
 }
 
 long ipc_call(int port, struct umsg *m)
@@ -66,6 +66,7 @@ long ipc_call(int port, struct umsg *m)
     struct port *p = &ports[port];
     m->next = 0;
     m->from = current->pid;
+    m->client = current;
     m->server = 0;
     m->state = MSG_QUEUED;
     m->result = 0;
@@ -77,7 +78,7 @@ long ipc_call(int port, struct umsg *m)
     current->wait_msg = m;
     current->state = P_MSG;
     if (p->waiter) {                            /* wake the server */
-        p->waiter->state = P_READY;
+        ready(p->waiter);
         p->waiter = 0;
     }
     while (m->state != MSG_DONE) {
@@ -116,7 +117,7 @@ struct umsg *ipc_recv(int port, int wait)
 
 long ipc_reply(struct umsg *m, s32 result)
 {
-    struct proc *c = proc_by_pid(m ? m->from : 0);
+    struct proc *c = m ? m->client : 0;
     if (!c || c->state != P_MSG || c->wait_msg != m ||
         m->state != MSG_SERVING || m->server != current->pid)
         return -1;
@@ -136,7 +137,7 @@ void ipc_proc_exit(int pid)
             finish(m, EIO_);
         }
         if (ports[i].waiter)
-            ports[i].waiter->state = P_READY;
+            ready(ports[i].waiter);
         ports[i].used = 0;
     }
     for (int i = 1; i < NPROC; i++) {
@@ -145,4 +146,12 @@ void ipc_proc_exit(int pid)
             c->wait_msg->server == pid)
             finish(c->wait_msg, EIO_);
     }
+}
+
+/* reply to m (if any), then wait for the next message: one trap instead of two */
+struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port)
+{
+    if (m)
+        ipc_reply(m, result);
+    return ipc_recv(port, 1);
 }

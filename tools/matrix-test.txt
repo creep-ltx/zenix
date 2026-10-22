@@ -13,3 +13,11 @@ send crash\r
 sleep 2
 send uname\r
 sleep 2
+send \x1d2
+sleep 1
+send \x1d\r
+sleep 4
+send echo ws2ok\r
+sleep 2
+send \x1d1
+sleep 2
