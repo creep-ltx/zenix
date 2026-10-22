@@ -1,0 +1,7 @@
+# /etc/fstab - filesystems that "mount -a" mounts at boot (init runs it before the login prompt).
+# DEVICE   DIR     TYPE     OPTIONS
+# the device names come from the disk server (fdisk list): ide0p1, ide0p2 ...
+# TYPE is ext2, zenixfs or auto (read from the partition type); OPTIONS "noauto" leaves a line out of mount -a.
+# The mount point must exist. Examples:
+#ide0p2    /data   auto     defaults
+#ide0p3    /usb    ext2     noauto

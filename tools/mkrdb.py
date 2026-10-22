@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Wrap a filesystem image in an Amiga RDB (one partition), as a real
-hard disk or CF card has. usage: mkrdb.py fs.img out.hdf"""
+hard disk or CF card has. usage: mkrdb.py fs.img out.hdf [ext2|zenixfs]"""
 import struct
 import sys
 
 fs, out = sys.argv[1:3]
+DOSTYPE = {"ext2": 0x4C4E5800, "zenixfs": 0x5A4E4601}[sys.argv[3] if len(sys.argv) > 3 else "ext2"]
 data = open(fs, "rb").read()
 HEADS, SECS = 16, 63
 CYL = HEADS * SECS * 512
@@ -26,7 +27,7 @@ rdb += [0, 2, lowcyl, ncyl - 1, HEADS * SECS, 0, 1]
 part = [0x50415254, 64, 0, 7, 0xFFFFFFFF, 1] + [0] * 2 + [0] * 1
 name = b"\x03ZX0" + b"\0" * 28
 part = part[:9] + list(struct.unpack(">8L", name)) + [0] * 15
-part += [16, 128, 0, HEADS, 1, SECS, 2, 0, 0, lowcyl, ncyl - 1, 30, 0, 0x7FFFFFFF, 0xFFFFFFFE, 0, 0x4C4E5800]
+part += [16, 128, 0, HEADS, 1, SECS, 2, 0, 0, lowcyl, ncyl - 1, 30, 0, 0x7FFFFFFF, 0xFFFFFFFE, 0, DOSTYPE]
 img = block(rdb) + block(part)
 img += b"\0" * (lowcyl * CYL - len(img))
 img += data

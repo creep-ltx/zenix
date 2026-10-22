@@ -6,7 +6,10 @@
 
 /* mount                      list the mounted filesystems
  * mount [-t TYPE] DEVICE DIR  start the filesystem server /bin/mount.TYPE on DEVICE and put it on DIR
- * TYPE is ext2 or zenixfs; without -t it is read from the partition's type in the RDB. */
+ * mount -a                   mount everything listed in /etc/fstab (init does this at boot)
+ * TYPE is ext2 or zenixfs; without -t it is read from the partition's type in the RDB.
+ * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs or auto (from the partition type), OPTIONS =
+ * "defaults" or a comma list; "noauto" leaves the line out of mount -a. Lines starting with # and blank lines are ignored. */
 
 static int disk_info(const char *dev, struct diskinfo *di)
 {
@@ -33,17 +36,9 @@ static void list(void)
     }
 }
 
-int main(int argc, char **argv)
+/* mount DEV on DIR; type 0 = from the partition. Returns 0, or 1 after printing why not. */
+static int mount_one(const char *dev, const char *dir, const char *type)
 {
-    const char *type = 0, *dev = 0, *dir = 0;
-    for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-t") && i + 1 < argc) type = argv[++i];
-        else if (!dev) dev = argv[i];
-        else if (!dir) dir = argv[i];
-        else dev = 0;
-    }
-    if (argc == 1) { list(); return 0; }
-    if (!dev || !dir) { printf("usage: mount [-t ext2|zenixfs] DEVICE DIR     mount (list)\n"); return 2; }
     struct diskinfo di;
     if (disk_info(dev, &di) < 0) { printf("mount: no such device: %s\n", dev); return 1; }
     if (di.mounted) { printf("mount: %s is already in use\n", dev); return 1; }
@@ -67,10 +62,63 @@ int main(int argc, char **argv)
     if (port < 0) { printf("mount: %s did not start\n", prog); sys_kill(pid); return 1; }
     struct umountreq rq = { dir, pname, dev, type };
     if (sys_mount(&rq) < 0) {
-        printf("mount: cannot mount %s on %s (is it an existing directory, not already a mount point?)\n", dev, dir);
+        printf("mount: cannot mount %s on %s (is it an existing directory, not already a mount point? are you root?)\n", dev, dir);
         struct umsg m; m.type = FS_QUIT;
         sys_call(port, &m);
         return 1;
     }
     return 0;
+}
+
+/* mount -a: the lines of /etc/fstab */
+static int mount_all(void)
+{
+    static char buf[2048];
+    int fd = sys_open("/etc/fstab", O_RDONLY);
+    if (fd < 0) return 0;                                  /* no fstab: nothing to do */
+    int n = sys_read(fd, buf, sizeof buf - 1);
+    sys_close(fd);
+    if (n <= 0) return 0;
+    buf[n] = 0;
+    int bad = 0;
+    for (char *line = buf; *line; ) {
+        char *eol = line;
+        while (*eol && *eol != '\n') eol++;
+        char save = *eol; *eol = 0;
+        char *f[4] = { 0, 0, 0, 0 }; int nf = 0;
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p && *p != '#') {
+            while (*p && nf < 4) {
+                f[nf++] = p;
+                while (*p && *p != ' ' && *p != '\t') p++;
+                if (*p) *p++ = 0;
+                while (*p == ' ' || *p == '\t') p++;
+            }
+            if (nf >= 2 && !(f[3] && strstr(f[3], "noauto"))) {
+                const char *type = (nf >= 3 && strcmp(f[2], "auto")) ? f[2] : 0;
+                if (mount_one(f[0], f[1], type)) bad = 1;
+            } else if (nf < 2) { printf("mount: bad line in /etc/fstab: %s\n", line); bad = 1; }
+        }
+        *eol = save;
+        line = *eol ? eol + 1 : eol;
+    }
+    return bad;
+}
+
+int main(int argc, char **argv)
+{
+    const char *type = 0, *dev = 0, *dir = 0;
+    int all = 0;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-a")) all = 1;
+        else if (!strcmp(argv[i], "-t") && i + 1 < argc) type = argv[++i];
+        else if (!dev) dev = argv[i];
+        else if (!dir) dir = argv[i];
+        else dev = 0;
+    }
+    if (all) return mount_all();
+    if (argc == 1) { list(); return 0; }
+    if (!dev || !dir) { printf("usage: mount [-t ext2|zenixfs] DEVICE DIR     mount -a     mount (list)\n"); return 2; }
+    return mount_one(dev, dir, type);
 }

@@ -1,6 +1,8 @@
 #include "fsenv.h"
 #include "../kernel/fsproto.h"
 #include "../kernel/diskproto.h"
+#include "rdb.h"
+#include "rootpick.h"
 
 /* The filesystem server: kernel/ext2.c in user mode behind the "fs" port.
  * Embedded in the kernel image (the kernel needs it before any disk is
@@ -215,7 +217,12 @@ int main(int argc, char **argv)
     if (argc >= 3) {
         pname = argv[2];
         if (try_mount(argv[1]) || ext2_mount()) { printf("mount.ext2: %s is not an ext2 filesystem, or is in use\n", argv[1]); return 1; }
-    } else if (find_root() || ext2_mount()) { printf("fsd: no ext2 filesystem\n"); return 1; }
+    } else {
+        struct rootpick rp;
+        rootpick(disk_port, &rp);
+        if (!rp.have_ram && rp.found && rp.dostype == DT_ZENIXFS) return 0;   /* the root is ZenixFS: mount.zenixfs serves it */
+        if (find_root() || ext2_mount()) { printf("fsd: no ext2 filesystem\n"); return 1; }
+    }
     int port = sys_port_create(pname);
     if (port < 0) { printf("fsd: cannot create the port %s\n", pname); return 1; }
     struct umsg *m = sys_recv(port, 1);

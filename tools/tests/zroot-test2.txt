@@ -1,0 +1,5 @@
+sleep 26
+send cat /persist.txt /pdir/f.txt\r
+sleep 3
+send cat /data/d.txt; cat /plink; wc /big.txt\r
+sleep 8

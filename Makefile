@@ -77,10 +77,10 @@ MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sy
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.
 $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
-	NOMAN=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" 768K 128
+	NOMAN=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" 704K 128
 
 $(BUILD)/root-mount.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
-	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" 768K 128
+	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" 704K 128
 
 $(BUILD)/zenix-mount.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-mount.img tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-mount.img
@@ -144,17 +144,19 @@ $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py
 # the same server as a program: `mount -t ext2` starts /bin/mount.ext2 DEVICE PORT
 $(BUILD)/mount.ext2.zx: $(BUILD)/fsd.zx
 	cp $< $@
-$(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx | $(BUILD)
+$(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx $(BUILD)/mount.zenixfs.zx | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 
 # ---- ZenixFS: the library (zenixfs/zenixfs.c, also built for the host) as a Zenix program part, its tools and server ----
 $(BUILD)/zenixfs_lib.uo: zenixfs/zenixfs.c zenixfs/zenixfs.h user/zenixfs_env.h | $(BUILD)
-	$(CC) $(UCFLAGS) -DZENIXFS_FREESTANDING -Iuser -c $< -o $@
+	$(CC) $(UCFLAGS) -Os -ffunction-sections -fdata-sections -DZENIXFS_FREESTANDING -Iuser -c $< -o $@
 ZENIXFS_OBJS := $(BUILD)/zenixfs_lib.uo $(BUILD)/zenixfs_disk.uo
 $(BUILD)/zenixfs_disk.uo: user/zenixfs_disk.c user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
-	$(CC) $(UCFLAGS) -c $< -o $@
+	$(CC) $(UCFLAGS) -Os -ffunction-sections -c $< -o $@
+$(BUILD)/zenixfsd.uo: user/zenixfsd.c user/rootpick.h user/rdb.h kernel/fsperm.h kernel/fsproto.h user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -ffunction-sections -c $< -o $@
 $(BUILD)/zenixfsd.uelf: $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
 	    $(BUILD)/crt0.o $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/mount.zenixfs.zx: $(BUILD)/zenixfsd.uelf tools/mkzexe.py
 	tools/mkzexe.py $< $@ 32768
@@ -187,6 +189,11 @@ $(BUILD)/zenix.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh tools
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
 $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
 	python3 tools/mkrdb.py $< $@
+
+# the same root disk with ZenixFS as the root filesystem instead of ext2 (needs the host tool: make -C zenixfs build/zenixfs-tool)
+$(BUILD)/zenix-zroot.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot-zenixfs.sh tools/mkrdb.py tools/mkman.py $(wildcard zenixfs/*.c zenixfs/*.h zenixfs/tools/*.c)
+	make -s -C zenixfs build/zenixfs-tool
+	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS)" 8
 
 run: all
 	fs-uae fsuae/a1200-020.fs-uae

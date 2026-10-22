@@ -6,7 +6,11 @@
  *   zenixfs-tool put IMAGE HOSTFILE PATH      put IMAGE -r HOSTDIR PATH   (copy a directory tree in)
  *   zenixfs-tool get IMAGE PATH [HOSTFILE]    get IMAGE -r PATH HOSTDIR  (copy a tree out; without HOSTFILE a file goes to stdout)
  *   zenixfs-tool mkdir|rm|rmdir IMAGE PATH    mv IMAGE FROM TO
+ *   zenixfs-tool chmod IMAGE OCTALMODE PATH   chown IMAGE UID GID PATH
  *   zenixfs-tool ln IMAGE TARGET LINKPATH     (symbolic link)       ln IMAGE -h EXISTING NEWPATH   (hard link)
+ *   zenixfs-tool salvage IMAGE OUTDIR [--commit K] [--no-carve] [--old-copies]   copy out everything that can still be read, skipping damage
+ *   zenixfs-tool rescue IMAGE NEWIMAGE SIZE_MB [--old-copies]   salvage into a temporary folder, then make a fresh clean image from it
+ *   zenixfs-tool repair IMAGE [--rollback K]   rebuild a damaged superblock and free-space map; --rollback K goes back K commits
  * Options always come after IMAGE.
  * Paths inside the image start with / . Block size by default: under 16 MB 1 KB, under 256 MB 2 KB, else 4 KB. */
 #include <stdio.h>
@@ -19,6 +23,7 @@
 #include <sys/stat.h>
 #include "../zenixfs.h"
 #include "../host/zdev.h"
+#include "zenixfs-carve.h"
 
 static struct zfile img;
 static struct zenixfs *fs;
@@ -142,6 +147,128 @@ static void get_tree(uint32_t ino, const char *host)
     } else { FILE *f = fopen(host, "wb"); if (!f) { perror(host); return; } get_file(ino, f); fclose(f); }
 }
 
+
+/* ---------- recovery ---------- */
+struct salv { unsigned files, partial, dirs, links, unreadable_dirs, unreadable_entries; };
+
+static void salv_note(const char *what, const char *path, int err)
+{
+    fprintf(stderr, "salvage: %s: %s (error %d)\n", what, path, err);
+}
+static void salv_dir(uint32_t dir, const char *host, struct salv *sv, int depth)
+{
+    uint64_t cookie = 0; char name[300]; uint32_t ino; uint8_t type;
+    if (depth > 100) return;
+    for (;;) {
+        int r = zenixfs_readdir(fs, dir, &cookie, name, &ino, &type);
+        if (r < 0) { salv_note("directory cut short", host, r); sv->unreadable_dirs++; return; }
+        if (r == 0) return;
+        if (!strcmp(name, ".") || !strcmp(name, "..")) continue;
+        char path[4096]; snprintf(path, sizeof path, "%s/%s", host, name);
+        struct zenixfs_inode in;
+        if ((r = zenixfs_getattr(fs, ino, &in)) < 0) { salv_note("entry has no readable inode", path, r); sv->unreadable_entries++; continue; }
+        if ((in.mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFDIR) {
+            mkdir(path, 0755);
+            sv->dirs++;
+            salv_dir(ino, path, sv, depth + 1);
+        } else if ((in.mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFLNK) {
+            char tg[4096]; int l = zenixfs_readlink(fs, ino, tg, sizeof tg - 1);
+            if (l >= 0) { tg[l] = 0; symlink(tg, path); sv->links++; } else { salv_note("link target unreadable", path, l); sv->unreadable_entries++; }
+        } else {
+            FILE *f = fopen(path, "wb");
+            if (!f) continue;
+            uint8_t *buf = malloc(1 << 16); uint64_t off = 0; int bad = 0;
+            while (off < in.size) {
+                int n = zenixfs_read(fs, ino, off, buf, 1 << 16);
+                if (n <= 0) { bad = n < 0 ? n : -1; break; }
+                fwrite(buf, 1, n, f); off += n;
+            }
+            free(buf);
+            fclose(f);
+            if (!bad) {                                      /* no read error, but were all the blocks there? (a lost extent reads as a hole of zeros) */
+                uint64_t mapped = 0;
+                struct zenixfs_statfs sf; zenixfs_statfs(fs, &sf);
+                if (zenixfs_mapped_blocks(fs, ino, &mapped) == 0 && in.size && mapped < (in.size + sf.bsize - 1) / sf.bsize)
+                    bad = -2;                                  /* (a genuinely sparse file is flagged too: the name says "partial", the data is not lost) */
+            }
+            if (bad) {                                       /* keep what was read, but not under the real name: the carve pass may have the whole file */
+                char part[4200]; snprintf(part, sizeof part, "%s.partial", path);
+                rename(path, part);
+                salv_note("file data unreadable after some bytes", path, bad);
+                sv->partial++;
+            } else sv->files++;
+            chmod(path, in.mode & 0777);
+        }
+    }
+}
+
+static int cmd_salvage(const char *image, const char *outdir, int skip, int carve, int old)
+{
+    struct salv sv; memset(&sv, 0, sizeof sv);
+    mkdir(outdir, 0755);
+    int mounted = 0;
+    for (uint32_t bs = 10; bs <= 12 && !mounted; bs++) {
+        if (zfile_open(&img, image, bs, 0) < 0) { perror(image); return 1; }
+        struct zenixfs_mount_opts mo = { 512, 0, ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH, (uint32_t)skip };
+        if (zenixfs_mount_opts(&fs, &img.dev, &mo) == 0) mounted = 1; else zfile_close(&img);
+    }
+    int problems = 0;
+    if (mounted) {
+        struct zenixfs_stats ms; zenixfs_get_stats(fs, &ms);
+        if (ms.mount_damage) printf("salvage: %u commit record(s) were unreadable; reading the last good commit\n", ms.mount_damage);
+        salv_dir(ZENIXFS_ROOT_INO, outdir, &sv, 0);
+        problems = sv.partial + sv.unreadable_dirs + sv.unreadable_entries;
+        printf("salvage: walked the tree: %u files, %u directories, %u links copied; %u partial files, %u directories cut short, %u entries unreadable\n",
+               sv.files, sv.dirs, sv.links, sv.partial, sv.unreadable_dirs, sv.unreadable_entries);
+        zenixfs_unmount(fs); zfile_close(&img);                /* nothing was changed: READONLYISH mount, and the unmount commits nothing */
+    } else printf("salvage: the volume cannot be mounted (superblock, commit records or free-space map damaged)\n");
+    if (carve && (!mounted || problems)) {
+        struct carve_stats cs;
+        int r = zenixfs_carve(image, outdir, &cs, 0, old);
+        if (r < 0) { printf("salvage: carving found nothing usable (%d)\n", r); return mounted ? 0 : 1; }
+        printf("salvage: carved from the raw blocks (block size %d, %u valid leaves%s): %u files, %u directories, %u links added; %u in lost+found; %u files marked .partial, %u marked .nosize\n",
+               cs.bshift, cs.leaves, cs.live_filter ? (old ? ", old copies included" : ", only blocks in use") : ", no usable free-space map: old copies included", cs.files, cs.dirs, cs.links, cs.lost_dirs + cs.lost_files, cs.partial, cs.no_inode);
+    }
+    printf("salvage: done\n");
+    return 0;
+}
+
+static int cmd_repair(const char *image, int rollback)
+{
+    int bs;
+    for (bs = 10; bs <= 12; bs++) {                           /* is the superblock fine? */
+        if (zfile_open(&img, image, (uint32_t)bs, 0) < 0) { perror(image); return 1; }
+        struct zenixfs_mount_opts mo = { 128, 0, ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH, (uint32_t)rollback };
+        if (zenixfs_mount_opts(&fs, &img.dev, &mo) == 0) break;
+        zfile_close(&img);
+    }
+    if (bs > 12) {                                            /* no: rewrite it from what the volume itself says about its size */
+        int g = zenixfs_guess_bshift(image);
+        if (g < 0) { printf("repair: nothing in %s looks like ZenixFS\n", image); return 1; }
+        if (zfile_open(&img, image, (uint32_t)g, 0) < 0) { perror(image); return 1; }
+        int r = zenixfs_rewrite_super(&img.dev, "recovered", 0, ZENIXFS_CHARSET_LATIN1, (uint64_t)time(NULL));
+        printf("repair: superblock rewritten (block size %d bytes, label \"recovered\", reserve default)%s\n", 1 << g, r ? " FAILED" : "");
+        zfile_close(&img);
+        bs = g;
+        if (zfile_open(&img, image, (uint32_t)bs, 0) < 0) return 1;
+        struct zenixfs_mount_opts mo = { 128, 0, ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH, (uint32_t)rollback };
+        if (zenixfs_mount_opts(&fs, &img.dev, &mo) != 0) {
+            printf("repair: still cannot mount: no usable commit record or root block. Use: zenixfs-tool salvage %s OUTDIR\n", image);
+            return 1;
+        }
+    }
+    struct zenixfs_stats ms; zenixfs_get_stats(fs, &ms);
+    if (ms.mount_damage) printf("repair: %u commit record(s) or root(s) were unreadable; working from the last good commit\n", ms.mount_damage);
+    if (rollback) printf("repair: rolled back %d commit(s)\n", rollback);
+    int changed = zenixfs_rebuild_bitmap(fs);
+    if (changed < 0) { printf("repair: rebuilding the free-space map failed (%d)\n", changed); return 1; }
+    printf("repair: free-space map rebuilt from the tree (%d block(s) changed)\n", changed);
+    int n = zenixfs_fsck(fs, fsck_log, NULL);
+    zenixfs_unmount(fs); zfile_close(&img);
+    printf(n ? "repair: %d problem(s) remain (the tree itself is damaged; use salvage to copy out what can be read)\n" : "repair: clean\n", n);
+    return n ? 1 : 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 3) usage();
@@ -164,6 +291,34 @@ int main(int argc, char **argv)
         struct zenixfs_statfs st; zenixfs_statfs(fs, &st);
         printf("%s: ZenixFS, %u blocks of %u bytes, %.1f MB usable, names %s\n", path, st.blocks, st.bsize, (double)st.bfree * st.bsize / 1048576.0, cs == ZENIXFS_CHARSET_UTF8 ? "UTF-8" : "Latin-1");
         return zenixfs_unmount(fs) ? 1 : 0;
+    }
+    if (!strcmp(cmd, "salvage") && argc > 3) {
+        int skip = 0, carve = 1, old = 0;
+        for (int i = 4; i < argc; i++) {
+            if (!strcmp(argv[i], "--commit") && i + 1 < argc) skip = atoi(argv[++i]);
+            else if (!strcmp(argv[i], "--no-carve")) carve = 0;
+            else if (!strcmp(argv[i], "--old-copies")) old = 1;
+        }
+        return cmd_salvage(path, argv[3], skip, carve, old);
+    }
+    if (!strcmp(cmd, "rescue") && argc > 4) {
+        char tmpl[] = "/tmp/zenixfs-rescue-XXXXXX";
+        if (!mkdtemp(tmpl)) { perror("mkdtemp"); return 1; }
+        char cmdline[8192];
+        int old = argc > 5 && !strcmp(argv[5], "--old-copies");
+        int r = cmd_salvage(path, tmpl, 0, 1, old);
+        if (r) return r;
+        snprintf(cmdline, sizeof cmdline, "\"%s\" mkfs \"%s\" %s -l rescued && \"%s\" put \"%s\" -r \"%s\" / && \"%s\" fsck \"%s\"",
+                 argv[0], argv[3], argv[4], argv[0], argv[3], tmpl, argv[0], argv[3]);
+        r = system(cmdline);
+        printf(r == 0 ? "rescue: %s is a fresh, clean image with everything that could be recovered (the folder %s has the same files)\n"
+                      : "rescue: making the new image failed; the recovered files are in %s\n", r == 0 ? argv[3] : tmpl, tmpl);
+        return r != 0;
+    }
+    if (!strcmp(cmd, "repair")) {
+        int rb = 0;
+        for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--rollback") && i + 1 < argc) rb = atoi(argv[++i]);
+        return cmd_repair(path, rb);
     }
     if (open_image(path) < 0) { fprintf(stderr, "zenixfs-tool: %s is not a ZenixFS image (or its superblock and commit records are damaged)\n", path); return 1; }
     zenixfs_set_time(fs, (uint64_t)time(NULL));
@@ -204,6 +359,16 @@ int main(int argc, char **argv)
         else if (!strcmp(cmd, "rm")) r = zenixfs_unlink(fs, dir, nm, nl);
         else r = zenixfs_rmdir(fs, dir, nm, nl);
         if (r) die(argv[3], r);
+    } else if (!strcmp(cmd, "chmod") && argc > 4) {
+        uint32_t ino; must_resolve(argv[4], &ino);
+        struct zenixfs_inode in; int r = zenixfs_getattr(fs, ino, &in); if (r) die("chmod", r);
+        in.mode = (in.mode & ZENIXFS_S_IFMT) | ((uint32_t)strtoul(argv[3], NULL, 8) & 07777);
+        r = zenixfs_setattr(fs, ino, &in); if (r) die("chmod", r);
+    } else if (!strcmp(cmd, "chown") && argc > 5) {
+        uint32_t ino; must_resolve(argv[5], &ino);
+        struct zenixfs_inode in; int r = zenixfs_getattr(fs, ino, &in); if (r) die("chown", r);
+        in.uid = (uint32_t)strtoul(argv[3], NULL, 10); in.gid = (uint32_t)strtoul(argv[4], NULL, 10);
+        r = zenixfs_setattr(fs, ino, &in); if (r) die("chown", r);
     } else if (!strcmp(cmd, "mv") && argc > 4) {
         uint32_t d1, d2; const char *n1, *n2; int l1, l2; int r = resolve(argv[3], 1, &d1, &n1, &l1); if (r) die(argv[3], r);
         r = resolve(argv[4], 1, &d2, &n2, &l2); if (r) die(argv[4], r);

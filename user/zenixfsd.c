@@ -3,9 +3,13 @@
 #include "../kernel/fsproto.h"
 #include "../kernel/diskproto.h"
 #include "../kernel/fsperm.h"
+#include "rdb.h"
+#include "rootpick.h"
 #include "zenixfs_disk.h"
 
-/* mount.zenixfs DEVICE PORTNAME: the ZenixFS filesystem server (docs/zenixfs.md). Speaks the same protocol as the ext2
+/* mount.zenixfs DEVICE PORTNAME: the ZenixFS filesystem server (docs/zenixfs.md).
+ * mount.zenixfs            with no arguments (built into the kernel image, started at boot): serves the ROOT filesystem on port "fs"
+ *                          if the root is ZenixFS (user/rootpick.h decides), else leaves quietly. Speaks the same protocol as the ext2
  * server (kernel/fsproto.h) on port PORTNAME; started by mount(8). Files are named by ZenixFS inode number.
  * The library keeps changes in memory and commits them atomically: here every 3 seconds after the first change, on
  * sync(8), and at umount. A power cut loses at most the last few seconds and never leaves a damaged volume.
@@ -289,21 +293,38 @@ static int try_mount(const char *name)
     return -1;
 }
 
+/* the root device, if the root is ZenixFS: 0 and mounted, -1 if it is not ours (or cannot be mounted) */
+static int find_root(int disk_port)
+{
+    struct rootpick rp;
+    rootpick(disk_port, &rp);
+    if (rp.have_ram) return zdisk_probe("ram0") ? try_mount("ram0") : -1;       /* a RAM-disk root is ext2 today */
+    if (rp.found) {
+        if (rp.dostype != DT_ZENIXFS) return -1;
+        if (try_mount(rp.name)) { printf("mount.zenixfs: cannot mount the root %s\n", rp.name); return -1; }
+        return 0;
+    }
+    return zdisk_probe("ide0") ? try_mount("ide0") : -1;                       /* no partition table: a bare disk */
+}
+
 int main(int argc, char **argv)
 {
-    if (argc < 3) { printf("usage: mount.zenixfs device portname   (started by mount)\n"); return 2; }
-    int tries = 0;
-    while (sys_port_find("disk") < 0) {
-        if (++tries > 600) { printf("mount.zenixfs: no disk server\n"); return 1; }
+    const char *pname = "fs";
+    int tries = 0, disk_port;
+    while ((disk_port = sys_port_find("disk")) < 0) {
+        if (++tries > 600) { if (argc >= 3) printf("mount.zenixfs: no disk server\n"); return 1; }
         sys_sleep(5);
     }
-    if (try_mount(argv[1])) { printf("mount.zenixfs: %s is not a ZenixFS volume, or is in use\n", argv[1]); return 1; }
+    if (argc >= 3) {
+        pname = argv[2];
+        if (try_mount(argv[1])) { printf("mount.zenixfs: %s is not a ZenixFS volume, or is in use\n", argv[1]); return 1; }
+    } else if (find_root(disk_port)) return 0;                 /* the root is not ours */
     struct zenixfs_stats st;
     zenixfs_get_stats(fs, &st);
     if (st.mount_damage)
-        printf("mount.zenixfs: %s: %u commit record(s) were unreadable; mounted from the last good commit\n", argv[1], st.mount_damage);
-    int port = sys_port_create(argv[2]);
-    if (port < 0) { printf("mount.zenixfs: cannot create the port %s\n", argv[2]); return 1; }
+        printf("mount.zenixfs: %s: %u commit record(s) were unreadable; mounted from the last good commit\n", devname, st.mount_damage);
+    int port = sys_port_create(pname);
+    if (port < 0) { printf("mount.zenixfs: cannot create the port %s\n", pname); return 1; }
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {
         int r = handle(m);
