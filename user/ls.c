@@ -1,6 +1,6 @@
 #include "libz.h"
 /* ls [-aAldRFht rSs1] [file...]: list files. In a terminal the names come in columns; -l is the long form. */
-static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty;
+static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty, printed_any;
 struct ent { char name[64]; struct ustat st; char link[64]; int islink; };
 #define MAXE 400
 static const char *const mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
@@ -96,7 +96,9 @@ static int list(const char *path, int top)
     if (!isdir || o_d) {
         struct ent *e = malloc(sizeof *e); strncpy(e->name, path, 63); e->name[63] = 0; fill(e, path); show(e, 1); free(e); return 0;
     }
-    if (multi || o_R) { if (!top) oputc('\n'); oprintf("%s:\n", path); }
+    if (multi || o_R) { if (printed_any) oputc('\n'); oprintf("%s:\n", path); }
+    printed_any = 1;
+    (void)top;
     int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "ls: %s: cannot open\n", path); return 1; }
     struct ent *v = malloc(MAXE * sizeof(struct ent)); int n = 0; struct udirent d;
     while (sys_readdir(fd, &d) > 0 && n < MAXE) {
@@ -131,8 +133,22 @@ int main(int argc, char **argv)
     }
     tty = sys_isatty(1);
     int n = argc - i; multi = n > 1;
-    if (!n) return list(".", 1);
-    for (int k = 0; k < n; k++) { rc |= list(argv[i + k], k == 0); }
+    if (!n) { rc = list(".", 1); oflush(); return rc; }
+    /* operands: everything that is not a directory is listed together first, sorted; then each directory */
+    struct ent *files = malloc((u32)n * sizeof(struct ent)); int nf = 0;
+    struct ent *dirs = malloc((u32)n * sizeof(struct ent)); int nd = 0;
+    for (int k = 0; k < n; k++) {
+        const char *a = argv[i + k];
+        struct ustat st;
+        if (sys_lstat(a, &st) < 0) { fprintf(2, "ls: %s: not found\n", a); rc = 1; continue; }
+        int isdir = (st.mode & S_IFMT) == S_IFDIR;
+        if ((st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(a, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) isdir = 1; }
+        struct ent *e = (isdir && !o_d) ? &dirs[nd++] : &files[nf++];
+        strncpy(e->name, a, 63); e->name[63] = 0; fill(e, a);
+    }
+    if (nf) { show(files, nf); printed_any = 1; }
+    qsort(dirs, (u32)nd, sizeof(struct ent), cmp);
+    for (int k = 0; k < nd; k++) rc |= list(dirs[k].name, k == 0 && !nf);
     oflush();
     return rc;
 }

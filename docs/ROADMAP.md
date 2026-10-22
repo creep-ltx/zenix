@@ -75,6 +75,10 @@ Ahiru-style file view; mouse. Index server (FuzzyFind) for `locate` / `fzf`.
 
 **Phase 7 - Polish and release.** Documentation, licence decisions, public repository, release images.
 
+## Ideas parked for later
+- Virtual consoles: ten clean ttys (no bar) switched with Amiga+F1..F10 (plain F-keys stay free for programs); the bar
+  and workspaces move to the desktop. Same mechanism as today's workspaces (a tty each). After the terminal is comfortable.
+
 ## Open questions
 
 - ZenFS name: a Western Digital project already uses "ZenFS" (RocksDB on zoned SSDs); decide if that matters.

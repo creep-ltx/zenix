@@ -36,7 +36,7 @@ t sed4;      sed '2i\inserted' colon.txt; sed '2a appended' colon.txt; sed '/^1/
 t diff;      cp fruit.txt /tmp/f2.txt; echo extra >> /tmp/f2.txt; diff fruit.txt /tmp/f2.txt; echo "rc=$?"; diff fruit.txt fruit.txt; echo "rc=$?"
 t diff2;     sed 's/apple/APPLE/' fruit.txt > /tmp/f3.txt; diff fruit.txt /tmp/f3.txt; diff -u fruit.txt /tmp/f3.txt | tail -n +3; diff -q fruit.txt /tmp/f3.txt | sed 's#/tmp/##'
 t diff3;     diff colon.txt text.txt | head -n 8
-t chmod;     cp fruit.txt /tmp/m1; chmod 755 /tmp/m1; [ -x /tmp/m1 ] && echo x-set; chmod u-x,g-x,o-x /tmp/m1; [ -x /tmp/m1 ] || echo x-clear; chmod a+x /tmp/m1; [ -x /tmp/m1 ] && echo x-again; chmod 444 /tmp/m1; [ -w /tmp/m1 ] || echo not-writable
+t chmod;     rm -f /tmp/m1 /tmp/hard; cp fruit.txt /tmp/m1; chmod 755 /tmp/m1; [ -x /tmp/m1 ] && echo x-set; chmod u-x,g-x,o-x /tmp/m1; [ -x /tmp/m1 ] || echo x-clear; chmod a+x /tmp/m1; [ -x /tmp/m1 ] && echo x-again; chmod 444 /tmp/m1; [ -w /tmp/m1 ] || echo not-writable
 t ln;        rm -f /tmp/lnk /tmp/hard; ln -s $D/fruit.txt /tmp/lnk; readlink /tmp/lnk | grep -c fruit.txt; head -n 1 /tmp/lnk; [ -L /tmp/lnk ] && echo islink; ln /tmp/m1 /tmp/hard; cmp /tmp/m1 /tmp/hard; echo "rc=$?"
 t ls;        ls; ls -a . | head -n 4; ls -1 sub; ls -F; ls -d sub; ls -r fruit.txt text.txt; ls -S fruit.txt text.txt colon.txt
 t ls-R;      ls -R sub | head -n 6; ls sub fruit.txt
