@@ -33,7 +33,7 @@ D7. **Boot/test:** FS-UAE (68EC020, no MMU) first, then the test Amigas, then th
   and divide by zero, kills only that process and frees what it owned; guard words around stacks and
   allocations. A wild write can still corrupt another process; that is the cost of having no MMU.
 - Toolchain: m68k-elf-gcc (`~/opt/m68k-elf`), newlib later.
-- Desktop later: workspaces with an i3-style bar (listed only if current or occupied), one Ahiru-style
+- Desktop later (workspaces, the bar and the file view are *desktop* features, not terminal features): workspaces with an i3-style bar (listed only if current or occupied), one Ahiru-style
   file view.
 
 ## Reused from zenix-old
@@ -52,7 +52,8 @@ against a program written to cheat (the same trust level as AmigaOS). The docs m
   r/w/x on lookup, open, create, unlink, rename, chdir and exec; root bypasses. New files get the caller's ids and
   mode & ~umask. ext2 already stores uid, gid and mode.
 - /etc/passwd, /etc/group (plain text, no shadow file until there is something to protect), `login`, `su`, `id`,
-  `whoami`, `chown`, `chgrp`, `umask`, `passwd`; a home directory per user; each workspace may hold a different login.
+  `whoami`, `chown`, `chgrp`, `umask`, `passwd`; a home directory per user. One login session at a time (switch user with
+  `su` or by logging in again); workspaces are a desktop feature and have nothing to do with users.
 - The shell prompt shows `$` for a normal user and `#` for root (it already does, from $USER).
 
 ## Where the decisions stand (2026-10-22)

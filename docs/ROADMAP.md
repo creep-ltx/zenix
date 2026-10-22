@@ -65,7 +65,8 @@ so this uses `zenix-ram.adf` until an SD driver exists.)
 directories, self-healing; needs the multi-filesystem VFS (mount table, several filesystem servers). ext2 stays
 for Linux compatibility.
 
-**Phase 5 - The desktop.** Move the display out of the kernel into a display server with a drawing API
+**Phase 5 - The desktop.** (The workspaces and the i3-style bar are desktop features: today the kernel console carries them as scaffolding
+so several terminals can be tested; they move into the display server here. The terminal itself never depends on them.) Move the display out of the kernel into a display server with a drawing API
 (planar, blitter and Copper); a client library; a terminal program as the first client; the workspace bar;
 Ahiru-style file view; mouse. Index server (FuzzyFind) for `locate` / `fzf`.
 
