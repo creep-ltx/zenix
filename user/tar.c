@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include "libz.h"
 
 /* tar c|x|t [v] [f archive] [-C dir] [file...]   (ustar; archive defaults to standard output/input; use a pipe
