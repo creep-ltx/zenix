@@ -15,8 +15,16 @@ build/ztest: tests/ztest.c $(LIB) zxfs.h host/zdev.h | build
 build/zxfs-tool: tools/zxfs-tool.c $(LIB) zxfs.h host/zdev.h | build
 	$(CC) $(CFLAGS) $(SAN) -o $@ tools/zxfs-tool.c $(LIB)
 
-test: build/ztest
+test: build/ztest build/zxfs-tool
 	build/ztest
+	bash tests/tool-test.sh build/zxfs-tool
+
+# a 32 MB example image holding the Zenix docs, to look at with build/zxfs-tool
+image: build/zxfs-tool
+	rm -f build/example.zxfs
+	build/zxfs-tool mkfs build/example.zxfs 32 -l zxfs-example
+	build/zxfs-tool put build/example.zxfs -r ../docs /docs
+	build/zxfs-tool ls build/example.zxfs -l /docs
 
 build/zbench: tests/zbench.c $(LIB) zxfs.h host/zdev.h | build
 	$(CC) $(CFLAGS) -o $@ tests/zbench.c $(LIB)
@@ -32,4 +40,4 @@ asan:
 
 clean:
 	rm -rf build
-.PHONY: all test bench asan clean
+.PHONY: all test bench image asan clean

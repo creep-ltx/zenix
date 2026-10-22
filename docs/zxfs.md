@@ -13,6 +13,18 @@ is reported in `zxfs_stats.mount_damage` and the caller must tell the user.
 Status of every statement: **proposed**. Numbers marked "estimate" are not measured; measure on a real
 A1200 (030 or 020, IDE or CF-in-IDE) before believing them. Background and sources: `Knowledge/amiga/zenix-filesystems-research.md`.
 
+## 0. Try it on Linux (host tool, 2026-10-22)
+```
+cd zxfs && make test        # the library tests and the tool round trip
+make image                  # builds build/example.zxfs (32 MB) holding a copy of these docs
+build/zxfs-tool mkfs disk.zxfs 64 -l mydisk     # new 64 MB image (block size by size, -b 10|11|12, -c utf8)
+build/zxfs-tool put disk.zxfs -r ~/some/folder /stuff
+build/zxfs-tool ls disk.zxfs -l /stuff ; build/zxfs-tool cat disk.zxfs /stuff/file.txt
+build/zxfs-tool get disk.zxfs -r /stuff ~/copy ; build/zxfs-tool fsck disk.zxfs
+```
+Commands: `mkfs info fsck ls stat cat put get mkdir rm rmdir mv ln` (options always after the image name; see the top of `zxfs/tools/zxfs-tool.c`).
+It is an image-file tool, not a mount: the image cannot yet be opened as a folder in Linux (that needs FUSE, not built).
+
 ## 1. Goal and the machine it is for
 A filesystem that is **safe** (no check after a crash, no replay, silent damage is noticed), **fast on slow
 hardware** and **small**: 68020/030 at 14-50 MHz, a few MB of RAM (cache = tens to hundreds of KB, no MMU),
