@@ -39,7 +39,10 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
   from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek), or the
   **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - written and host-tested,
   **not yet run on a real Pi**). `kernel/blk.c` picks the raw disk: IDE first, else the SD card. Either one is
-  served by `diskd` under the name `ide0`.
+  served by `diskd` under the name `ide0`. On an **Amiga 3000** (no IDE) `kernel/a3000.c` drives the on-board SCSI:
+  WD33C93A chip behind the DMAC at `0xDD0000`, one "select with ATN and transfer" command per SCSI command, polling
+  (levels 1-2 masked while a command runs), data by DMA through a 64 KB chip-RAM bounce buffer, first direct-access
+  device found on targets 0-6, 512-byte blocks only; verified on the host against a model of the chip.
 
 ## 3. Boot (summary; the full walk-through is in how-it-works.md)
 
@@ -241,7 +244,7 @@ outputs (`tools/cmds-test.sh`).
 - Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
   device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
   emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,
-  `tools/emmc-fake.h`). They show the logic matches the specifications; they cannot show the real chip behaves the same.
+  `tools/emmc-fake.h`) and `tools/a3000-test.sh` (the A3000 SCSI driver against a WD33C93A + DMAC model). They show the logic matches the specifications; they cannot show the real chip behaves the same.
 - Test rig: FS-UAE (headless, serial script) via `tools/run-test.sh`, `tools/serial-tap.py`, `tools/shot.py`.
   `tools/matrix.sh` boots 13 emulated machine variants (A1200 stock and with fast RAM, chip-only, NTSC, 030/040/060,
   A4000, and an A600 that must refuse cleanly). Filesystem work is checked with the host's `e2fsck`.

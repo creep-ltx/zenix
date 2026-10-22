@@ -47,6 +47,7 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Pipes (2 KB) | verified | |
 | `fdisk` (RDB), `mkfs.ext2`, `fsck.ext2` (check and repair) | verified | man/fdisk.txt, man/mkfs.ext2.txt, man/fsck.ext2.txt |
 | SD card of a Raspberry Pi 4 / CM4 under Emu68 (PiStorm): polling SDHCI driver, 25 MHz 4-bit | built, host-tested, **not run on a Pi** | architecture.md section 3, `kernel/emmc.c` |
+| Amiga 3000 on-board SCSI (WD33C93A + DMAC): a disk on targets 0-6, polled, DMA via a bounce buffer | built; host model test; see status in limits.md | architecture.md section 2 |
 | Pi hardware table from Emu68's device tree (stage0, read before AmigaOS is killed) | built; tested on the host and in a CPU emulator against the real CM4 tree, boots in FS-UAE (empty table) | architecture.md section 3 |
 | Disks with a PC partition table (MBR; primary entries): ext2 type 0x83, RDB inside type 0x76, FAT etc. listed and never mounted | verified in FS-UAE (`tools/mbr-test.sh`) | man/diskd.txt |
 | Extended partitions, GPT | not done | limits.md |
