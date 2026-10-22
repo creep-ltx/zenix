@@ -25,6 +25,7 @@ struct mblk {
 struct range { u32 lo, hi; int chip; };
 static struct range ranges[16];
 static int nranges;
+u32 boot_ram_pa, boot_ram_size;
 static u32 freeb[2];                    /* free block bytes: [0] fast, [1] chip */
 
 #define SZ(b)   ((b)->size & ~1u)
@@ -70,11 +71,15 @@ static void add_minus(u32 lo, u32 hi, int chip, const u32 ex[][2], int nex)
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
 {
     /* low chip RAM (vectors, bootinfo, bootblock scratch) and the kernel */
-    u32 ex[2][2] = { { 0, 0x2000 }, { kernel_pa, kernel_pa + kernel_mem } };
+    u32 ex[3][2] = { { 0, 0x2000 }, { kernel_pa, kernel_pa + kernel_mem },
+                     { bi->ram_pa, bi->ram_pa + bi->ram_size } };
+    int nex = bi->ram_size ? 3 : 2;
+    boot_ram_pa = bi->ram_pa;
+    boot_ram_size = bi->ram_size;
     for (int i = 0; i < bi->nregions; i++) {
         const struct bootregion *r = &bi->r[i];
         if (r->attrs & (MEMF_CHIP | MEMF_FAST))
-            add_minus(r->lower, r->upper, (r->attrs & MEMF_CHIP) != 0, ex, 2);
+            add_minus(r->lower, r->upper, (r->attrs & MEMF_CHIP) != 0, ex, nex);
     }
 }
 

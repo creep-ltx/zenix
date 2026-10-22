@@ -10,6 +10,8 @@ typedef unsigned char u8;
 static struct diskinfo dev[MAXDEV];
 static int ndev;
 static u32 disk_sectors;
+static u8 *ram_base;                    /* the boot ramdisk, if any */
+static u32 ram_sectors;
 
 static void add(const char *name, const char *label, u32 start, u32 sectors, u32 dostype, u32 flags)
 {
@@ -25,7 +27,12 @@ static void scan(void)
 {
     static u32 sec[128];
     ndev = 0;
-    add("ide0", "", 0, disk_sectors, 0, 0);
+    if (disk_sectors)
+        add("ide0", "", 0, disk_sectors, 0, 0);
+    if (ram_sectors)
+        add("ram0", "", 0, ram_sectors, 0, 0);
+    if (!disk_sectors)
+        return;
     for (u32 i = 0; i < 16; i++) {
         if (sys_blk_read(i, 1, sec)) return;
         if (sec[0] != 0x5244534b) continue;                 /* 'RDSK' */
@@ -40,7 +47,7 @@ static void scan(void)
             u32 l = nm[0] < 31 ? nm[0] : 31;
             memcpy(label, nm + 1, l); label[l] = 0;
             char name[16] = "ide0p";
-            name[5] = (char)('1' + (ndev - 1)); name[6] = 0;
+            name[5] = (char)('1' + (ndev - 1 - (ram_sectors ? 1 : 0))); name[6] = 0;
             add(name, label, start, size, env[16], sec[5] & 1);
             next = sec[4];
         }
@@ -62,6 +69,11 @@ static int handle(struct umsg *m)
     case DISK_READ: case DISK_WRITE: {
         u32 h = m->a[0], lba = m->a[1], n = m->a[2];
         if (h >= (u32)ndev || n == 0 || lba + n < lba || lba + n > dev[h].sectors) return -1;
+        if (!strcmp(dev[h].name, "ram0")) {              /* plain memory */
+            if (m->type == DISK_READ) memcpy((void *)m->a[3], ram_base + lba * 512, n * 512);
+            else memcpy(ram_base + lba * 512, (const void *)m->a[3], n * 512);
+            return 0;
+        }
         lba += dev[h].start;
         return m->type == DISK_READ ? sys_blk_read(lba, n, (void *)m->a[3])
                                     : sys_blk_write(lba, n, (const void *)m->a[3]);
@@ -84,8 +96,10 @@ static int handle(struct umsg *m)
 int main(void)
 {
     int n = sys_blk_size();
-    if (n <= 0) { printf("diskd: no disk\n"); return 1; }
-    disk_sectors = (u32)n;
+    disk_sectors = n > 0 ? (u32)n : 0;
+    u32 ram[2];
+    if (sys_blk_ram(ram) == 0 && ram[1]) { ram_base = (u8 *)ram[0]; ram_sectors = ram[1] / 512; }
+    if (!disk_sectors && !ram_sectors) { printf("diskd: no disk\n"); return 1; }
     scan();
     int port = sys_port_create("disk");
     if (port < 0) return 1;

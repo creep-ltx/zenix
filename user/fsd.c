@@ -38,6 +38,8 @@ static int find_root(void)
         if (fs_dev >= 0 && ext2_probe()) return 0;
     }
     fs_dev = disk_open("ide0");
+    if (fs_dev >= 0 && ext2_probe()) return 0;
+    fs_dev = disk_open("ram0");                      /* the floppy-loaded root */
     return (fs_dev >= 0 && ext2_probe()) ? 0 : -1;
 }
 

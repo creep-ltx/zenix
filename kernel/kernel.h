@@ -18,6 +18,7 @@ struct bootinfo {
     u32 kernel_size;
     u32 font;                   /* unused for now */
     struct bootregion r[8];
+    u32 ram_pa, ram_size;       /* ramdisk loaded by the bootblock, 0 if none */
 };
 
 /* serial.c */
@@ -56,6 +57,7 @@ void irq2_entry(void);
 #define MEM_CHIP     1u         /* must be chip RAM (DMA: graphics, audio, disk) */
 #define MEM_FASTONLY 2u         /* fast RAM only, fail rather than use chip */
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
+extern u32 boot_ram_pa, boot_ram_size;
 void *mem_alloc(u32 n, u32 flags, u32 owner);
 void mem_free(void *p);
 u32 mem_free_owner(u32 owner);
@@ -269,6 +271,7 @@ int tty_of(const struct proc *p);
 #define SYS_hrtime      36   /* E-clock ticks (709379 Hz PAL) since boot */
 #define SYS_wsreq       39   /* session manager: wait for a shell-on-workspace request */
 #define SYS_spawn_tty   40   /* spawn a program with its stdio on a workspace tty */
+#define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */
 #define SYS_ttymirror   37   /* 0 = stop copying screen output to the serial port */

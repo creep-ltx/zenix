@@ -1,0 +1,15 @@
+# A1200 with no hard disk at all: the floppy carries the kernel and a small root
+# filesystem that the bootblock loads into RAM (the path a Gotek/GoDrive boot uses).
+[fs-uae]
+accuracy = 1
+amiga_model = A1200
+kickstart_file = /home/creep/UAE/ROM/kicka1200.rom
+chip_memory = 2048
+fast_memory = 4096
+floppy_drive_0 = ../../build/zenix.adf
+floppy_drive_speed = 0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true
+window_width = 960
+window_height = 768
+zoom = full

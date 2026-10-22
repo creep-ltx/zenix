@@ -10,7 +10,8 @@ import sys
 
 ADF_SIZE = 901120          # 80 cyl * 2 heads * 11 sectors * 512 bytes
 BB_SIZE = 1024
-HDR = 12                   # 'DOS\0' + checksum + kernel size
+HDR = 12                   # 'DOS\0' + checksum + kernel size; the code starts at 12 (Kickstart's entry)
+RD_OFF = 1020              # ramdisk size, last long of the bootblock
 
 
 def carry_sum(data: bytes) -> int:
@@ -24,19 +25,22 @@ def carry_sum(data: bytes) -> int:
 
 def main() -> None:
     bootcode_path, kernel_path, out_path = sys.argv[1:4]
+    ramdisk = open(sys.argv[4], "rb").read() if len(sys.argv) > 4 else b""
     bootcode = open(bootcode_path, "rb").read()
     kernel = open(kernel_path, "rb").read()
 
-    if len(bootcode) > BB_SIZE - HDR:
-        sys.exit(f"bootblock code too big: {len(bootcode)} > {BB_SIZE - HDR}")
+    if len(bootcode) > RD_OFF - HDR:
+        sys.exit(f"bootblock code too big: {len(bootcode)} > {RD_OFF - HDR}")
 
     ksize = (len(kernel) + 511) & ~511
-    if BB_SIZE + ksize > ADF_SIZE:
-        sys.exit(f"kernel too big for floppy: {ksize}")
+    rsize = (len(ramdisk) + 511) & ~511
+    if BB_SIZE + ksize + rsize > ADF_SIZE:
+        sys.exit(f"kernel + ramdisk too big for a floppy: {ksize} + {rsize}")
 
     bb = bytearray(BB_SIZE)
     bb[0:4] = b"DOS\0"
     bb[8:12] = struct.pack(">I", ksize)
+    bb[RD_OFF:RD_OFF + 4] = struct.pack(">I", rsize)
     bb[HDR:HDR + len(bootcode)] = bootcode
     # checksum: full 1024-byte carry-wrapping sum must equal 0xFFFFFFFF
     bb[4:8] = struct.pack(">I", 0xFFFFFFFF - carry_sum(bytes(bb)))
@@ -45,9 +49,10 @@ def main() -> None:
     adf = bytearray(ADF_SIZE)
     adf[0:BB_SIZE] = bb
     adf[BB_SIZE:BB_SIZE + len(kernel)] = kernel
+    adf[BB_SIZE + ksize:BB_SIZE + ksize + len(ramdisk)] = ramdisk
     open(out_path, "wb").write(adf)
     print(f"{out_path}: bootblock {len(bootcode) + HDR}B, "
-          f"kernel {len(kernel)}B ({ksize}B on disk)")
+          f"kernel {len(kernel)}B ({ksize}B on disk), ramdisk {len(ramdisk)}B")
 
 
 if __name__ == "__main__":

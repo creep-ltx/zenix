@@ -73,3 +73,4 @@ static inline struct umsg *sys_replyrecv(struct umsg *m, int result, int port) {
 static inline int sys_wsreq(void) { return sys3(39, 0, 0, 0); }
 static inline int sys_spawn_tty(const char *path, char *const *argv, int tty) { return sys3(40, (u32)path, (u32)argv, (u32)tty); }
 static inline int sys_blk_size(void) { return sys3(41, 0, 0, 0); }
+static inline int sys_blk_ram(u32 out[2]) { return sys3(42, (u32)out, 0, 0); }

@@ -14,16 +14,22 @@
  *   +12 u32 DefaultFont (ROM Topaz TextFont*, 0 if unavailable)
  *   +16 {u32 attrs, u32 lower, u32 upper}[8]
  *
- * The long at bootblock offset 8 is patched by tools/mkadf.py with the
- * kernel size (rounded up to a 512-byte multiple).
+ * The longs at bootblock offsets 8 and 1020 are patched by tools/mkadf.py with
+ * the kernel size and the ramdisk size (Kickstart jumps to offset 12, so the
+ * code starts there) (both multiples of 512; the ramdisk
+ * image follows the kernel on the disk and is loaded with it; bootinfo
+ * +112 = its address, +116 = its size, 0 if there is none).
  */
     .text
     .globl  _start
 _start:
     move.l  %a1,%a5                 /* trackdisk ioreq */
     move.l  _start-4(%pc),%d7       /* kernel size (bootblock offset 8) */
+    move.l  _start+1008(%pc),0x1074 /* ramdisk size (last long of the block, offset 1020; 0 = none) */
+    clr.l   0x1070
 
     move.l  %d7,%d0
+    add.l   0x1074,%d0              /* kernel + ramdisk are loaded together */
     moveq   #2,%d1                  /* MEMF_CHIP */
     jsr     -198(%a6)               /* AllocMem */
     tst.l   %d0
@@ -31,13 +37,20 @@ _start:
     move.l  %d0,%a4                 /* load buffer */
 
     move.w  #2,28(%a5)              /* io_Command = CMD_READ */
-    move.l  %d7,36(%a5)             /* io_Length */
+    move.l  %d7,%d0
+    add.l   0x1074,%d0
+    move.l  %d0,36(%a5)             /* io_Length */
     move.l  %a4,40(%a5)             /* io_Data */
     move.l  #1024,44(%a5)           /* io_Offset */
     move.l  %a5,%a1
     jsr     -456(%a6)               /* DoIO */
     tst.l   %d0
     bne     fail
+
+    /* the ramdisk stays in the load buffer, right behind the kernel image */
+    move.l  %a4,%d0
+    add.l   %d7,%d0
+    move.l  %d0,0x1070
 
     /* ---- harvest bootinfo ---- */
     move.w  296(%a6),0x1000         /* AttnFlags */

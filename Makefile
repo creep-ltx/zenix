@@ -40,8 +40,13 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py
 	tools/mkzexe.py $< $@
 
-$(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
-	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@
+# the floppy also carries a small root filesystem that the bootblock loads into RAM:
+# this is how Zenix boots on a machine without an IDE disk (e.g. from a Gotek)
+$(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
+	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)" 640K 128
+
+$(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-ram.img tools/mkadf.py
+	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-ram.img
 
 # ---- servers built into the kernel image ----
 $(BUILD)/ext2_fsd.uo: kernel/ext2.c kernel/ext2.h user/fsenv.h user/libz.h | $(BUILD)

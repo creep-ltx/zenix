@@ -190,8 +190,8 @@ void kmain(struct bootinfo *bi)
         kprintf("display: not available (%s), serial only\n",
                 font_ok ? "out of chip RAM" : "no ROM font");
 
-    if (ide_init())
-        panic("no disk");
+    if (ide_init() && !bi->ram_size)
+        panic("no disk and no ramdisk");
     proc_init();
     tty_init();
     /* the filesystem server and the starter are built into the kernel */

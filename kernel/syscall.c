@@ -163,6 +163,13 @@ void syscall_c(u32 *rb)
             }
         }
         break;
+    case SYS_blk_ram:
+        if (current->priv && user_ok(current, a1, 8)) {
+            ((u32 *)a1)[0] = boot_ram_pa;
+            ((u32 *)a1)[1] = boot_ram_size;
+            r = 0;
+        }
+        break;
     case SYS_blk_size:
         if (current->priv)
             r = (s32)ide_sectors();
