@@ -45,3 +45,5 @@ t cpmv;      rm -rf /tmp/w; mkdir -p /tmp/w/a/b; cp -r sub /tmp/w/s; cat /tmp/w/
 t touch;     rm -f /tmp/tt1; touch /tmp/tt1; ls /tmp | grep -c '^tt1$'; touch -c /tmp/nothere-zz; ls /tmp | grep -c nothere-zz
 t gzip;      rm -f /tmp/gz1 /tmp/gz1.gz; cp text.txt /tmp/gz1; gzip /tmp/gz1; [ -f /tmp/gz1 ] || echo orig-gone; gunzip /tmp/gz1.gz; cmp /tmp/gz1 text.txt; echo "rc=$?"
 t gzip2;     gzip -c fruit.txt | gzip -dc | cmp - fruit.txt; echo "rc=$?"; gzip -c fruit.txt | zcat | wc -l; gzip -9 -c text.txt | gunzip | cmp - text.txt; echo "rc=$?"
+t tar;       rm -rf /tmp/tx /tmp/ty /tmp/t1.tar; mkdir /tmp/tx; cp -r sub fruit.txt text.txt /tmp/tx/; ln -s fruit.txt /tmp/tx/lnk; (cd /tmp && tar cf /tmp/t1.tar tx); tar tf /tmp/t1.tar | sort; mkdir /tmp/ty; tar xf /tmp/t1.tar -C /tmp/ty; cmp /tmp/tx/fruit.txt /tmp/ty/tx/fruit.txt; echo "rc=$?"; cat /tmp/ty/tx/sub/deep.txt; readlink /tmp/ty/tx/lnk
+t tar2;      tar cf - fruit.txt colon.txt | gzip -c | gunzip | tar tf -; tar cf - fruit.txt | tar xf - -C /tmp/ty; cmp fruit.txt /tmp/ty/fruit.txt; echo "rc=$?"
