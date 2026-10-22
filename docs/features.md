@@ -32,7 +32,9 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Servers: disk (`diskd`), filesystem (`fsd`), session manager (`boot`) | verified | architecture.md section 9 |
 | Environment variables inherited by children | verified | |
 | Priorities, signals with handlers, process groups | planned | |
-| Users, groups, permission checks | planned | DESIGN.md D8 |
+| Users and groups: uid/gid on every process (real and effective), `setuid`/`setgid`, `umask`, `chown` | verified | architecture.md section 14 |
+| Permission checks (r/w/x for owner, group, other; directory search; sticky bit; set-user-id programs) in the filesystem server | verified | architecture.md section 14 |
+| `/etc/passwd`, `/etc/group`, `login` (also autologin), `su`, `passwd` (salted SHA-256), `id`, `chown`/`chgrp` | verified | man pages |
 | Shared libraries | planned | |
 
 ## Filesystem and disks

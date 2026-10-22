@@ -1,2 +1,17 @@
-#include "libz.h"
-int main(void) { const char *u = getenv("USER"); if (!u) u = "root"; printf("uid=0(%s) gid=0(%s)\n", u, u); return 0; }
+// SPDX-License-Identifier: GPL-2.0-only
+#include "pw.h"
+/* id [user]: uid, gid and groups */
+int main(int argc, char **argv)
+{
+    u32 uid = (u32)sys_getuid(), gid = (u32)sys_getgid();
+    char b[1];
+    if (argc > 1) {
+        struct pw p;
+        if (pw_byname(argv[1], &p)) { fprintf(2, "id: %s: no such user\n", argv[1]); return 1; }
+        uid = p.uid; gid = p.gid;
+    }
+    printf("uid=%u(%s) gid=%u(%s)", uid, pw_name(uid, b), gid, gr_name(gid, b));
+    if (argc == 1 && (u32)sys_geteuid() != uid) printf(" euid=%u(%s)", (u32)sys_geteuid(), pw_name((u32)sys_geteuid(), b));
+    printf("\n");
+    return 0;
+}

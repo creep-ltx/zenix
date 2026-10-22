@@ -19,9 +19,20 @@ if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small i
     rm -rf "$T/usr/man.gen"
 fi
 ln -s less "$T/bin/more"
-ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"            # more is less
+ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"            # more is less
 rm -f "$OUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features
-mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$INODES" -d "$T" -F "$OUT" "$SIZE"
+# ownership and modes under fakeroot, so the image holds uid 0 (not whoever runs the build): root owns everything,
+# /tmp is sticky and open to all, a normal user has a home, su and passwd are set-user-id root
+mkdir -p "$T/home/user" "$T/home/guest"
+fakeroot sh -c '
+    chown -R 0:0 "$1"
+    chown 1000:100 "$1/home/user"
+    chown 1001:100 "$1/home/guest"
+    chmod 1777 "$1/tmp"
+    chmod 4755 "$1/bin/su" "$1/bin/passwd"
+    chmod 644 "$1/etc/passwd" "$1/etc/group"
+    mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$2" -d "$1" -F "$3" "$4"
+' sh "$T" "$INODES" "$OUT" "$SIZE"
 rm -rf "$T"
 e2fsck -fn "$OUT" >/dev/null && echo "$OUT: ext2 root, $(echo $PROGS | wc -w) programs"

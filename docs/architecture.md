@@ -141,6 +141,8 @@ messages (`port_create port_find call recv reply replyrecv`), and a few privileg
 **Every user pointer is validated** (`user_ok`) against the process's own span and its `memalloc` regions. A bad
 pointer makes the call return -1; the process lives. Strings are copied into kernel buffers with bounds.
 
+Identity: `getuid getgid geteuid setuid setgid umask chown session` (see section 14).
+
 `kill` today means "terminate" (`proc->killed`); Unix-style signal handlers do not exist yet.
 
 ## 8. Ports and messages (`kernel/ipc.c`)
@@ -148,7 +150,7 @@ pointer makes the call return -1; the process lives. Strings are copied into ker
 The central mechanism (DESIGN D1). A **port** is a named queue owned by one process. A client calls
 
 ```
-struct umsg { next, from, server, state, result, type, a[4], client }
+struct umsg { next, from, server, state, result, type, a[4], uid, gid, umask, client }
 sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 ```
 
@@ -246,3 +248,26 @@ outputs (`tools/cmds-test.sh`).
 - Source layout: `boot/` bootblock, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
   `link/` linker script, `tools/` build and test scripts, `rootfs/` files copied to the root disk, `fsuae/` emulator
   configs, `archive/later/` and `archive/old-mmu/` code kept from the earlier MMU-based Zenix (reference, not built).
+
+## 14. Users and permissions (D8)
+
+- Every process has an **effective uid** (`uid`, what permission checks use), a **real uid** (`ruid`, who started
+  it), a gid and a umask; all are inherited by `spawn`. `setuid(n)`: root becomes anyone (real and effective); others
+  can only return to their real id. `setgid`: root, or the same gid. `chown`: root only.
+- A program file with the **set-user-id bit** (mode 04000) runs with its owner's effective uid (`proc_spawn`): this
+  is how `su` and `passwd` work for ordinary users.
+- `ipc_call` stamps every message with the caller's uid, gid and umask (`struct umsg`), so the **filesystem server
+  decides**: `ext2_access` checks r/w/x (owner, then group, then other; root passes, except that executing needs
+  at least one x bit); `ext2_namei` demands x on every directory searched; creating, removing, renaming and linking
+  need w+x on the directory; opening needs r and/or w (and x with `O_EXEC`, which the kernel adds when it loads
+  a program); `chmod` is for the owner and root; `chown` for root; a **sticky** directory (`/tmp`, 1777) only lets
+  the owner of the file or of the directory remove or rename entries. New files belong to the caller and get
+  `0666 & ~umask` (directories `0777 & ~umask`). A refusal returns -13 to the caller.
+- `login` (run by `init`) authenticates against `/etc/passwd`, drops root and starts the shell; it calls `SYS_session`
+  first, so the kernel remembers the ids and environment of the session and gives them to workspace shells that
+  the session manager starts (`SYS_spawn_tty`). `init` clears the session when it ends. One session at a time.
+- `mkroot.sh` builds the image under `fakeroot` so files belong to root; `/tmp` is 1777; `su` and `passwd` are 4755.
+- The kernel's own file loading and the servers run as root. Kernel-side calls such as `fs_read_file` use the
+  identity of the process that asked for the spawn.
+- What this is not: with no MMU a program can still read any memory and call the disk server directly, so this is
+  accounting and protection against honest mistakes (limits.md).

@@ -74,6 +74,8 @@ struct proc *proc_by_pid(int pid)
 /* Create a process from a ZEXE image in memory. `argv` points to kernel
  * memory. stdio[i] (parent's fd numbers, -1 = same number) picks the
  * child's fds 0-2; the child gets no other fds. */
+static int suid_override = -1;        /* set by proc_spawn for a set-user-id program */
+
 static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *argv,
                      int argc, struct proc *parent, const int *stdio, int tty, int priv)
 {
@@ -145,6 +147,11 @@ static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *a
     p->base = (u32)base;
     p->span = span;
     p->cwd_ino = parent ? parent->cwd_ino : 2;
+    p->uid = parent ? parent->uid : 0;
+    p->ruid = parent ? parent->ruid : 0;
+    p->gid = parent ? parent->gid : 0;
+    p->umask = parent ? parent->umask : 022;
+    if (suid_override >= 0) p->uid = (u16)suid_override;
     if (parent) {
         memcpy(p->env, parent->env, parent->envlen);
         p->envlen = parent->envlen;
@@ -202,10 +209,13 @@ int proc_spawn(const char *path, char *const *argv, int argc,
 {
     u8 *file;
     u32 size;
-    long r = fs_read_file(path, parent ? parent->cwd_ino : 2, &file, &size);
+    struct ustat st;
+    long r = fs_read_file(path, parent ? parent->cwd_ino : 2, &file, &size, &st);
     if (r < 0)
         return (int)r;
+    suid_override = (st.mode & 04000) ? (int)st.uid : -1;   /* set-user-id: the program runs as its owner (su, passwd) */
     int pid = proc_load(file, size, path, argv, argc, parent, stdio, tty, 0);
+    suid_override = -1;
     kfree(file);
     return pid;
 }

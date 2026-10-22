@@ -20,6 +20,8 @@ OPTIONS
     -a    include names starting with "." (including . and ..)
     -A    like -a but leave out . and ..
     -l    long format: mode, link count, owner, group, size, date, name
+          (owner and group by name from /etc/passwd and /etc/group; s and t
+          in the mode show set-user-id/set-group-id and sticky)
           (a symbolic link shows "name -> target")
     -d    list a directory itself, not what is in it
     -R    recurse into subdirectories

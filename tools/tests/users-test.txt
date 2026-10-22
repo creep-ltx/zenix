@@ -1,0 +1,61 @@
+sleep 24
+send id; whoami; umask\r
+sleep 2
+send ls -l /bin/su /tmp /home\r
+sleep 3
+send su user\r
+sleep 3
+send id; whoami; cd /; echo no > /nofile; echo $?\r
+sleep 3
+send echo mine > /tmp/u1; ls -l /tmp/u1; umask 077; echo x > /tmp/u2; ls -l /tmp/u2; umask\r
+sleep 3
+send rm /etc/motd; echo rm=$?; cat /etc/motd | head -n 1\r
+sleep 3
+send exit\r
+sleep 3
+send echo root-sees > /tmp/r1; chmod 600 /tmp/r1; su user\r
+sleep 3
+send cat /tmp/r1; echo cat=$?; rm /tmp/r1; echo rm=$?; touch /tmp/mine2; exit\r
+sleep 3
+send ls -l /tmp/r1 /tmp/mine2\r
+sleep 3
+send passwd guest\r
+sleep 2
+send xyz\r
+sleep 1
+send xyz\r
+sleep 3
+send grep guest /etc/passwd | cut -c1-12\r
+sleep 3
+send su user\r
+sleep 3
+send su guest\r
+sleep 3
+send nope\r
+sleep 4
+send su guest\r
+sleep 3
+send xyz\r
+sleep 4
+send id; exit\r
+sleep 3
+send exit\r
+sleep 3
+send chown guest:users /tmp/u1; ls -l /tmp/u1; chgrp users /tmp/u2; ls -l /tmp/u2; sha256sum /etc/group\r
+sleep 4
+send echo user > /etc/autologin; exit\r
+sleep 8
+send id\r
+sleep 2
+send \x1d2
+sleep 1
+send \x1d\r
+sleep 6
+send id; whoami; echo $HOME; pwd\r
+sleep 3
+send \x1d1
+sleep 2
+send su\r
+sleep 3
+send echo root > /etc/autologin; exit\r
+sleep 2

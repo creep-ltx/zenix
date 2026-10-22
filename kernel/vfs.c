@@ -141,10 +141,10 @@ long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
     return r;
 }
 
-long fs_read_file(const char *path, u32 cwd, u8 **buf, u32 *size)
+long fs_read_file(const char *path, u32 cwd, u8 **buf, u32 *size, struct ustat *stout)
 {
     struct ustat st;
-    long ino = fs_call(FS_OPEN, (u32)path, cwd, O_RDONLY, (u32)&st);
+    long ino = fs_call(FS_OPEN, (u32)path, cwd, O_RDONLY | O_EXEC, (u32)&st);
     if (ino < 0)
         return -1;
     if (!S_ISREG(st.mode) || st.size > 256u * 1024)
@@ -163,6 +163,7 @@ long fs_read_file(const char *path, u32 cwd, u8 **buf, u32 *size)
     }
     *buf = b;
     *size = st.size;
+    if (stout) *stout = st;
     return 0;
 }
 
@@ -263,9 +264,7 @@ long vfs_statfs(void *out)
 
 long vfs_path1(u32 op, const char *p, u32 a2, u32 a3)
 {
-    if (op == FS_READLINK)
-        return fs_call(op, (u32)p, current->cwd_ino, a2, a3);
-    return fs_call(op, (u32)p, current->cwd_ino, a2, 0);
+    return fs_call(op, (u32)p, current->cwd_ino, a2, a3);
 }
 
 long vfs_link(u32 op, const char *a, const char *b)

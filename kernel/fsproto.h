@@ -21,5 +21,7 @@
 #define FS_SYMLINK 16  /* a0 target text, a1 link path, a2 cwd ino */
 #define FS_READLINK 17 /* a0 path, a1 cwd ino, a2 buffer, a3 max -> length */
 #define FS_UTIMES  18  /* a0 path, a1 cwd ino, a2 modification time */
+#define FS_CHOWN   20  /* a0 path, a1 cwd ino, a2 uid, a3 gid (-1 = keep): root only */
+#define O_EXEC     0x8000  /* FS_OPEN flag: the caller wants to execute the file (needs an x bit) */
 #define FS_LSTAT   19  /* like FS_STAT but a final symbolic link is not followed */
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

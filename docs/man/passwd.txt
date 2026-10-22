@@ -1,0 +1,23 @@
+PASSWD(1)	Zenix manual
+
+NAME
+    passwd - change a password
+
+SYNOPSIS
+    passwd [user]
+
+DESCRIPTION
+    Asks for a new password twice (not echoed) and stores its hash in
+    /etc/passwd. A user changes their own password and gives the old one
+    first; root changes anyone's. An empty new password removes the password.
+    passwd is installed set-user-id root.
+
+    The hash is "salt$hex": SHA-256 over salt and password, repeated 100
+    times (see sha256sum(1) for the plain function).
+
+NOTES
+    /etc/passwd is readable by everyone, as in early Unix; there is no
+    shadow file yet. The file is replaced through /etc/passwd.new.
+
+SEE ALSO
+    login(1), su(1)

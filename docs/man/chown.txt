@@ -1,0 +1,21 @@
+CHOWN(1)	Zenix manual
+
+NAME
+    chown, chgrp - change the owner or the group of files
+
+SYNOPSIS
+    chown [-R] owner[:group] file...
+    chown [-R] :group file...
+    chgrp [-R] group file...
+
+DESCRIPTION
+    Sets the owner and/or group of each file. Names come from /etc/passwd and
+    /etc/group; numbers are accepted. -R goes through directories. Only root
+    may change owners. Changing the owner clears the set-user-id and
+    set-group-id bits.
+
+EXIT STATUS
+    0, 1 if a name or file is wrong or the caller is not root, 2 usage.
+
+SEE ALSO
+    chmod(1), ls(1), id(1)
