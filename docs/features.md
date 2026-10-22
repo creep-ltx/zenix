@@ -44,6 +44,9 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | `/dev/null`, `/dev/zero`, `/dev/tty` | verified | |
 | Pipes (2 KB) | verified | |
 | `fdisk` (RDB), `mkfs.ext2`, `fsck.ext2` (check and repair) | verified | man/fdisk.txt, man/mkfs.ext2.txt, man/fsck.ext2.txt |
+| SD card of a Raspberry Pi 4 / CM4 under Emu68 (PiStorm): polling SDHCI driver, 25 MHz 4-bit | built, host-tested, **not run on a Pi** | architecture.md section 3, `kernel/emmc.c` |
+| Pi hardware table from Emu68's device tree (stage0, read before AmigaOS is killed) | built; tested on the host and in a CPU emulator against the real CM4 tree, boots in FS-UAE (empty table) | architecture.md section 3 |
+| SD card with an MBR partition table (the Emu68 boot card) | not done | limits.md |
 | Mounting more than the root filesystem | planned | ROADMAP.md phase 4 |
 | ZenFS | planned | zenfs.md |
 | Unlink of an open file, directory moves between parents, triple-indirect | not done | limits.md |

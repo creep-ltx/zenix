@@ -36,7 +36,10 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
   level 3 vertical blank (display/scrolling), level 5 serial receive. Gayle IDE shares level 2 with the CIAs, so
   disk transfers mask only levels 1-2.
 - Storage: Gayle IDE (A600/A1200/A4000) with an RDB partition table, or a **RAM disk** that the bootblock reads
-  from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek).
+  from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek), or the
+  **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - written and host-tested,
+  **not yet run on a real Pi**). `kernel/blk.c` picks the raw disk: IDE first, else the SD card. Either one is
+  served by `diskd` under the name `ide0`.
 
 ## 3. Boot (summary; the full walk-through is in how-it-works.md)
 
@@ -44,12 +47,39 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
 2. The bootblock reads the kernel (and optionally a RAM-disk image) with `trackdisk.device`, builds a
    **bootinfo** block at `0x1000` (CPU flags, RAM regions with chip/fast attributes, kernel address, ramdisk
    address, the ROM Topaz font pointer), picks the largest fast region as the kernel's home, kills the OS, copies
-   the kernel there and jumps into it.
+   the kernel there and jumps into it. If the kernel header (ZEXE +28) names a **stage0** routine, the
+   bootblock first calls it (while AmigaOS is still alive; skipped on a 68000): it reads Emu68's
+   `devicetree.resource` and fills the **hardware table** at `0x1100` (see "Pi hardware table" below).
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
    `kmain()`.
 4. `kmain` starts the serial port, vector table, memory manager, caches, display, clock and disk, then creates
    three built-in processes: `diskd`, `fsd`, `boot`. `boot` waits for the `fs` port and starts `/bin/init`, which
    prints `/etc/motd` and runs `/bin/sh`.
+
+### Pi hardware table (stage0, `boot/stage0.c`, `kernel/hwinfo.h`)
+
+Under Emu68 the Pi's peripherals appear in the 68k address space, but not at fixed addresses: Emu68 rewrites
+the `ranges` of the device-tree nodes `/soc` and `/scb` so each window gets the next 2 MB-aligned slot from
+`0xF2000000`. The only place that knows the addresses is the device tree, which is AmigaOS memory
+(`devicetree.resource`), so the bootblock calls stage0 before the OS is killed. stage0 is position-independent
+68020 code (built with `-mpcrel`, no data, no absolute relocations) embedded in the kernel image; it keeps `a6`
+(the compiler's frame pointer) intact around every OS call. It translates each node's `reg` through the
+rewritten `ranges` and stores, in `struct hwinfo` at `0x1100`: flags (`HW_DT` under Emu68, `HW_BCM2711` on a
+Pi 4/CM4, `HW_RANGEOPS` if Emu68 has the cache range opcodes), the peripheral base, mailbox, EMMC2 (SD), GPIO,
+GENET Ethernet (registers, two GIC interrupt numbers, PHY address, MAC), GIC-400 distributor and CPU interface,
+and the graphics memory Emu68 reserved. On a machine without Emu68 (or FS-UAE) the table is present with
+`flags == 0` and all addresses 0; `kmain` prints it (`pi: ...`).
+
+### SD card driver (`kernel/emmc.c`)
+
+The Pi 4/CM4 SD slot is a standard SDHCI controller (EMMC2) at `hwinfo.emmc`. Registers are little-endian
+32-bit and always accessed whole; the data port is read and written raw (no byte swap). The driver polls (no
+interrupts, no DMA): power-cycles the card and sets the controller clock through the VideoCore mailbox, resets
+the controller, runs the SD initialisation (CMD0, 8, ACMD41, 2, 3, 9, 7, ACMD6 for the 4-bit bus), reads the
+card size from the CSD, and transfers 512-byte blocks by PIO (CMD17/18/24/25, automatic CMD12; 25 MHz).
+Every stage logs with `kprintf`. Only SD cards (CM4 Lite) are handled, not eMMC. The mailbox message is the one
+DMA-like access (the VideoCore reads it from RAM), so its cache line is cleaned and dropped with the 68040
+`cpushl`/`cinvl` that Emu68 translates.
 
 ## 4. Executables: ZEXE and relocation
 
@@ -206,6 +236,10 @@ outputs (`tools/cmds-test.sh`).
 - Toolchain: `m68k-elf-gcc` in `~/opt/m68k-elf`; `make` produces `build/zenix.adf` (bootblock + kernel only),
   `build/zenix.hdf` (ext2 root disk) and, as a separate dev/test build, `build/zenix-ram.adf` (the same plus a RAM
   root image).
+- Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
+  device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
+  emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,
+  `tools/emmc-fake.h`). They show the logic matches the specifications; they cannot show the real chip behaves the same.
 - Test rig: FS-UAE (headless, serial script) via `tools/run-test.sh`, `tools/serial-tap.py`, `tools/shot.py`.
   `tools/matrix.sh` boots 13 emulated machine variants (A1200 stock and with fast RAM, chip-only, NTSC, 030/040/060,
   A4000, and an A600 that must refuse cleanly). Filesystem work is checked with the host's `e2fsck`.

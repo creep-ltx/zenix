@@ -19,9 +19,12 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Real hardware. Everything is verified in FS-UAE only. Emulator timing is not CPU timing, so **no speed claim is
   made**; the TRAP cost, message cost and cache effects are unmeasured on a real 68020+.
 - Disk access on the user's own A1200 (a PiStorm): its disk is the Pi's SD card behind Emu68's drivers, which
-  die when Zenix kills AmigaOS. Options: RAM-disk root from the floppy (works now), a raw SD driver (in progress on
-  the `drivers` branch: the bootblock is being extended to read the device tree from `devicetree.resource` and
-  hand Pi hardware addresses to the kernel), or returning to AmigaOS.
+  die when Zenix kills AmigaOS. Done in code (`kernel/emmc.c`, stage0 device-tree handover; see architecture.md
+  section 3) but **never run on a real Pi**: the SD controller is modelled from the SD Host Controller and SD
+  Physical Layer specifications, so clocks, the mailbox calls and card-detect are unverified. Not done: partition
+  tables other than an RDB at sector 0 (the Emu68 boot card is MBR/FAT: it shows as one disk with no partitions;
+  never write to it blindly - it holds Emu68 and the Kickstart ROM), the 50 MHz high-speed mode, eMMC. Until
+  then: RAM-disk root from the floppy.
 - Users and permissions (D8), signals and handlers, process groups, `/proc`.
 - Shared libraries; only static programs.
 - A graphical programs API, mouse, sound, network, USB, floppy driver, RTG.
