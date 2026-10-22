@@ -1,0 +1,21 @@
+sleep 26
+send fdisk list\r
+sleep 8
+send dd if=df0 of=/tmp/a count=200\r
+sleep 15
+send sha256sum /tmp/a\r
+sleep 4
+send dd if=df1 of=/tmp/b\r
+sleep 40
+send sha256sum /tmp/b\r
+sleep 4
+send dd if=/tmp/a of=df1 seek=500 count=100\r
+sleep 40
+send dd if=df1 of=/tmp/c skip=500 count=100\r
+sleep 20
+send sha256sum /tmp/c\r
+sleep 4
+send fdisk list\r
+sleep 6
+send sync\r
+sleep 2

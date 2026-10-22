@@ -98,6 +98,19 @@ lost between reads), CIA-A port A bits 6 and 7 the left button and the joystick 
 middle buttons; a joystick in port 2 is decoded from JOY1DAT. `SYS_input` (74) copies out
 {dx, dy, buttons, joystick} and clears the movement; `input` prints it. No pointer, no events yet.
 
+### Floppy driver (`kernel/floppy.c`, `kernel/mfm.h`) - experimental
+
+The internal and external drives df0-df3: CIA-B port B selects, steps and starts the motor, CIA-A port A reports
+ready, track 0, write protect and disk change; Paula reads and writes whole tracks by DMA (sync word 0x4489,
+WORDSYNC on read, precompensation from cylinder 40 on write) into a chip-RAM buffer of 6656 words. `mfm.h` codes
+and decodes AmigaDOS tracks (11 sectors of 512 bytes, odd/even bit blocks, XOR checksums); one decoded track is
+kept as a cache. A write reads the track, replaces the sectors, writes the track and reads it back to verify.
+Waits use a clock that never runs backwards (`hr_time()` can read about 10 ms early around a tick). The 100 Hz
+tick turns idle motors off after 3 s. System calls 76 `SYS_fd_info` and 77 `SYS_fd_rw`, for the disk server only:
+`diskd` offers the drives as `df0`-`df3` (df0 probed at start, the others on first use); `dd` copies to and from
+them. Tests: `tools/mfm-test.sh` (host), `tools/floppy-test.sh` (FS-UAE, two drives). **Known bug (2026-10-22):**
+a whole-disk read of df1 in FS-UAE has once come back with a wrong SHA-256 and no error; not found yet.
+
 ### SD card driver (`kernel/emmc.c`)
 
 The Pi 4/CM4 SD slot is a standard SDHCI controller (EMMC2) at `hwinfo.emmc`. Registers are little-endian

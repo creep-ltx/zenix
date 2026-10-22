@@ -1,0 +1,32 @@
+DD(1)				Zenix manual
+
+NAME
+    dd - copy blocks between files and disks
+
+SYNOPSIS
+    dd if=SOURCE of=DEST [bs=N] [count=N] [skip=N] [seek=N]
+
+DESCRIPTION
+    Copies blocks of bs bytes (default 512) from SOURCE to DEST, then prints
+    how many full and partial blocks were read and written. SOURCE and DEST
+    are files, or devices of the disk server: a name without a slash that
+    the disk server knows (df0 the first floppy drive, ide0 the whole disk,
+    ide0p1 its first partition, ram0 the boot RAM disk; see fdisk list).
+    On a device the block size must be a multiple of 512, and a device that
+    is mounted cannot be opened. count limits the blocks copied, skip starts
+    that many blocks into SOURCE, seek that many blocks into DEST (DEST is
+    not emptied first when seek is given).
+    A floppy is read and written as a plain run of 512-byte sectors, 1760 of
+    them on a standard 880 KB disk: dd if=df0 of=/disk.adf makes an image
+    file, dd if=/disk.adf of=df0 writes one back.
+
+EXIT STATUS
+    0 on success, 1 on a read, write or open error, 2 on a usage error.
+
+NOTES
+    Not done: conv=, ibs/obs, status output on a signal, devices opened for
+    a size that is not a whole number of sectors (a short last block of a
+    file is written as it is).
+
+SEE ALSO
+    fdisk(1), mkfs.ext2(1), docs/architecture.md

@@ -110,6 +110,11 @@ int blk_read(u32 lba, u32 count, void *buf);
 int blk_write(u32 lba, u32 count, const void *buf);
 int blk_flush(void);
 
+/* floppy.c: Amiga floppy drives df0..df3 (880 KB, MFM), polled; see the file header */
+int fd_info(u32 drive);                  /* bit 0 drive, bit 1 disk, bit 2 write protected; sectors << 8 */
+int fd_rw(u32 drive, u32 lba, u32 count, void *buf, int write);
+void fd_tick(void);                     /* from the 100 Hz tick: motors off when idle */
+
 /* input.c: mouse (port 1) and joystick (port 2), polled from the 100 Hz tick */
 void input_init(void);
 void input_poll(void);
@@ -368,6 +373,8 @@ int tty_of(const struct proc *p);
 #define SYS_chown       66   /* path, uid, gid (-1 keeps one): root only */
 #define SYS_geteuid     67
 #define SYS_session     68   /* root: this is the logged-in session: its ids and environment are given to new workspace shells */
+#define SYS_fd_info     76   /* drive -> bit 0 drive present, 1 disk inserted, 2 write protected; sectors << 8 (disk server only) */
+#define SYS_fd_rw       77   /* lba | drive << 28 | write << 27, count, buffer -> 0 or -1 (disk server only) */
 #define SYS_input       74   /* s32[4] <- mouse dx, dy (since the last call), mouse buttons, joystick bits */
 #define SYS_klog        73   /* offset, buffer, length -> characters of the kernel log copied (0 = nothing more) */
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */

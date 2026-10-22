@@ -48,7 +48,7 @@ where a command is smaller than its Unix namesake.
 | [kill](man/kill.txt), [pgrep](man/pgrep.txt) ([pkill](man/pkill.txt)), [time](man/time.txt), [timeout](man/timeout.txt), [watch](man/watch.txt), [cal](man/cal.txt), [mktemp](man/mktemp.txt), [realpath](man/realpath.txt) | processes, timing, calendar, temporary files, real paths |
 | [env](man/env.txt), [printenv](man/printenv.txt), [which](man/which.txt), [whoami](man/whoami.txt), [id](man/id.txt), [hostname](man/hostname.txt), [clear](man/clear.txt), [true](man/true.txt), [false](man/false.txt) | small utilities |
 | [login](man/login.txt), [su](man/su.txt), [passwd](man/passwd.txt), [sha256sum](man/sha256sum.txt) | users: sessions, switching user, passwords, checksums |
-| [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [mkfs.zenixfs](man/mkfs.zenixfs.txt), [fsck.zenixfs](man/fsck.zenixfs.txt), [sync](man/sync.txt) | disks |
+| [dd](man/dd.txt), [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [mkfs.zenixfs](man/mkfs.zenixfs.txt), [fsck.zenixfs](man/fsck.zenixfs.txt), [sync](man/sync.txt) | disks |
 | [mount](man/mount.txt), [umount](man/umount.txt), [mount.ext2](man/mount.ext2.txt), [mount.zenixfs](man/mount.zenixfs.txt) | mounting more than the root filesystem |
 
 ## Internals and test programs
