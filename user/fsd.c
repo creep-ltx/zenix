@@ -70,24 +70,20 @@ static int parent(const char *path, u32 cwd, struct inode *dir, char *name)
 }
 
 /* permission helpers: the caller is in ext2_uid/ext2_gid (set per request in handle) */
+static int deny(void) { ext2_denied = 1; return 0; }
 static int dir_may(const struct inode *dir)                /* add or remove entries: w and x */
 {
-    return ext2_access(dir, 3);
+    return !ext2_enforce || fsp_dir_modify(ext2_uid, ext2_gid, dir->mode, dir->uid, dir->gid) || deny();
 }
 static int owner_only(const struct inode *in)
 {
-    if (!ext2_enforce || ext2_uid == 0 || ext2_uid == in->uid) return 1;
-    ext2_denied = 1;
-    return 0;
+    return !ext2_enforce || fsp_owner_or_root(ext2_uid, in->uid) || deny();
 }
 static int sticky_ok(const struct inode *dir, const char *name)  /* in a sticky directory only owners may remove */
 {
-    if (!ext2_enforce || ext2_uid == 0 || !(dir->mode & 01000) || ext2_uid == dir->uid) return 1;
     u32 ino; struct inode t;
-    if (ext2_lookup(dir, name, strlen(name), &ino) || ext2_iget(ino, &t)) return 1;
-    if (t.uid == ext2_uid) return 1;
-    ext2_denied = 1;
-    return 0;
+    if (!ext2_enforce || ext2_lookup(dir, name, strlen(name), &ino) || ext2_iget(ino, &t)) return 1;
+    return fsp_sticky_ok(ext2_uid, dir->mode, dir->uid, t.uid) || deny();
 }
 
 static int handle1(struct umsg *m)
@@ -104,8 +100,7 @@ static int handle1(struct umsg *m)
                 !dir_may(&dir) || ext2_create(&dir, name, &in))
                 return -1;
         } else {
-            int want = ((flags & O_WRONLY) ? 2 : (flags & O_RDWR) ? 6 : 4) | ((flags & O_EXEC) ? 1 : 0);
-            if (!ext2_access(&in, want)) return -1;
+            if (!ext2_access(&in, fsp_open_want(flags))) return -1;
             if (writing) {
                 if (!S_ISREG(in.mode)) return -1;
                 if ((flags & O_TRUNC) && ext2_truncate(&in)) return -1;
@@ -146,7 +141,7 @@ static int handle1(struct umsg *m)
         return ext2_chmod(in.ino, m->a[2]);
     case FS_CHOWN:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
-        if (ext2_enforce && ext2_uid != 0) { ext2_denied = 1; return -1; }
+        if (ext2_enforce && !fsp_is_root(ext2_uid)) { ext2_denied = 1; return -1; }
         return ext2_chown(in.ino, m->a[2], m->a[3]);
     case FS_UTIMES:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
