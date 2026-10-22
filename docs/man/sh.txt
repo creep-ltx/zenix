@@ -51,7 +51,7 @@ BUILTINS
     alias [name=value]  unalias name  history [-c]  source file (or . file)
     read [-p prompt] name...  shift [n]  return  break  continue  jobs
     wait [pid|%n]  kill pid|%n  type name  test expr (or [ expr ])
-    true false :  echo [-ne]  pwd  eval  local  help
+    true false :  echo [-ne]  pwd  eval  local  help  umask
     test: -e -f -d -r -w -x -s -z -n -L, = != -eq -ne -lt -le -gt -ge,
           ! -a -o ( )
 

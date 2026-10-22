@@ -1,4 +1,4 @@
-#include "libz.h"
+#include "pw.h"
 /* ls [-aAldRFht rSs1] [file...]: list files. In a terminal the names come in columns; -l is the long form. */
 static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty, printed_any;
 struct ent { char name[64]; struct ustat st; char link[64]; int islink; };
@@ -21,6 +21,9 @@ static void modestr(u32 m, char *s)
     u32 t = m & S_IFMT;
     s[0] = t == S_IFDIR ? 'd' : t == S_IFLNK ? 'l' : '-';
     for (int i = 0; i < 9; i++) s[1 + i] = (m & (0400u >> i)) ? "rwxrwxrwx"[i] : '-';
+    if (m & 04000) s[3] = s[3] == 'x' ? 's' : 'S';              /* set-user-id */
+    if (m & 02000) s[6] = s[6] == 'x' ? 's' : 'S';              /* set-group-id */
+    if (m & 01000) s[9] = s[9] == 'x' ? 't' : 'T';              /* sticky */
     s[10] = 0;
 }
 static void sizestr(u32 sz, char *out)
@@ -50,16 +53,21 @@ static void show(struct ent *v, int n)
 {
     qsort(v, (u32)n, sizeof(struct ent), cmp);
     if (o_l) {
-        u32 wl = 1, ws = 1;
+        u32 wl = 1, ws = 1, wu = 1, wg = 1;
         for (int i = 0; i < n; i++) {
-            char b[16];
+            char b[16], nb[1];
+            if (strlen(pw_name(v[i].st.uid, nb)) > wu) wu = strlen(pw_name(v[i].st.uid, nb));
+            if (strlen(gr_name(v[i].st.gid, nb)) > wg) wg = strlen(gr_name(v[i].st.gid, nb));
             snprintf(b, 16, "%u", v[i].st.links); if (strlen(b) > wl) wl = strlen(b);
             sizestr(v[i].st.size, b); if (strlen(b) > ws) ws = strlen(b);
         }
         for (int i = 0; i < n; i++) {
             char ms[11], dt[20], sz[16], ln[16];
             modestr(v[i].st.mode, ms); when(v[i].st.mtime, dt); sizestr(v[i].st.size, sz); snprintf(ln, 16, "%u", v[i].st.links);
-            oprintf("%s ", ms); for (u32 k = strlen(ln); k < wl; k++) oputc(' '); oprintf("%s root root ", ln);
+            oprintf("%s ", ms); for (u32 k = strlen(ln); k < wl; k++) oputc(' '); oprintf("%s ", ln);
+            { char nb[1], un[32], gn[32]; strcpy(un, pw_name(v[i].st.uid, nb)); strcpy(gn, gr_name(v[i].st.gid, nb));
+              oprintf("%s", un); for (u32 k = strlen(un); k < wu; k++) oputc(' '); oputc(' ');
+              oprintf("%s", gn); for (u32 k = strlen(gn); k < wg; k++) oputc(' '); oputc(' '); }
             for (u32 k = strlen(sz); k < ws; k++) oputc(' '); oprintf("%s %s %s", sz, dt, v[i].name);
             char sf = suffix(&v[i]); if (sf && !v[i].islink) oputc(sf);
             if (v[i].islink) { oputs(" -> "); oputs(v[i].link); }

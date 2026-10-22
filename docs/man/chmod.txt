@@ -16,7 +16,9 @@ DESCRIPTION
     = sets exactly; r read, w write, x execute, X execute only for
     directories or files that are already executable by someone.
 
-    The special bits (setuid, sticky) can only be set with an octal mode.
+    The special bits (setuid, setgid, sticky) can only be set with an octal
+    mode. Set-user-id makes a program run as its owner (su, passwd); sticky on
+    a directory (/tmp) lets only a file's owner remove it.
 
 EXAMPLES
     chmod 755 script
@@ -24,8 +26,9 @@ EXAMPLES
     chmod a=r notes
 
 NOTES
-    Zenix does not check permissions yet (there are no users; see DESIGN.md,
-    D8), so the bits are stored on disk for Linux and for the future.
+    Only the owner of a file and root may change its mode. The bits are
+    enforced by the filesystem server (see architecture.md, users); root
+    passes every check except executing a file without any x bit.
 
 EXIT STATUS
     0, 1 if a file is not found or cannot be changed, 2 invalid mode.

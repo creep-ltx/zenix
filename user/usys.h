@@ -60,7 +60,7 @@ static inline int sys_unlink(const char *p) { return sys3(26, (u32)p, 0, 0); }
 static inline int sys_rmdir(const char *p) { return sys3(27, (u32)p, 0, 0); }
 static inline int sys_rename(const char *a, const char *b) { return sys3(28, (u32)a, (u32)b, 0); }
 
-struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; u32 client_; };
+struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, pad; u32 client_; };
 static inline int sys_port_create(const char *n) { return sys3(29, (u32)n, 0, 0); }
 static inline int sys_port_find(const char *n) { return sys3(30, (u32)n, 0, 0); }
 static inline int sys_call(int port, struct umsg *m) { return sys3(31, (u32)port, (u32)m, 0); }
@@ -97,9 +97,17 @@ static inline int sys_lstat(const char *p, struct ustat *st) { return sys3(57, (
 static inline u32 sys_time(void) { return (u32)sys3(58, 0, 0, 0); }
 static inline int sys_settime(u32 t) { return sys3(59, t, 0, 0); }
 static inline int sys_isatty(int fd) { return sys3(60, (u32)fd, 0, 0); }
+static inline int sys_getuid(void) { return sys3(61, 0, 0, 0); }
+static inline int sys_getgid(void) { return sys3(62, 0, 0, 0); }
+static inline int sys_setuid(u32 id) { return sys3(63, id, 0, 0); }
+static inline int sys_setgid(u32 id) { return sys3(64, id, 0, 0); }
+static inline int sys_umask(u32 mask) { return sys3(65, mask, 0, 0); }
+static inline int sys_chown(const char *p, u32 uid, u32 gid) { return sys3(66, (u32)p, uid, gid); }
+static inline int sys_geteuid(void) { return sys3(67, 0, 0, 0); }
+static inline int sys_session(u32 uid, u32 gid) { return sys3(68, uid, gid, 0); }
 struct umountreq { const char *path, *port, *dev, *type; };
 struct umountinfo { char path[48], port[16], dev[16], type[8]; };
-static inline int sys_mount(const struct umountreq *r) { return sys3(61, (u32)r, 0, 0); }
-static inline int sys_umount(const char *path) { return sys3(62, (u32)path, 0, 0); }
-static inline int sys_mountinfo(u32 index, struct umountinfo *out) { return sys3(63, index, (u32)out, 0); }
-static inline int sys_blk_flush(void) { return sys3(64, 0, 0, 0); }
+static inline int sys_mount(const struct umountreq *r) { return sys3(69, (u32)r, 0, 0); }
+static inline int sys_umount(const char *path) { return sys3(70, (u32)path, 0, 0); }
+static inline int sys_mountinfo(u32 index, struct umountinfo *out) { return sys3(71, index, (u32)out, 0); }
+static inline int sys_blk_flush(void) { return sys3(72, 0, 0, 0); }

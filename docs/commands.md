@@ -20,7 +20,7 @@ where a command is smaller than its Unix namesake.
 | [cp](man/cp.txt), [mv](man/mv.txt), [rm](man/rm.txt) | copy, move, remove |
 | [mkdir](man/mkdir.txt), [rmdir](man/rmdir.txt), [touch](man/touch.txt) | make/remove directories, create files |
 | [ln](man/ln.txt), [readlink](man/readlink.txt) | hard and symbolic links |
-| [chmod](man/chmod.txt), [stat](man/stat.txt) | permission bits, file information |
+| [chmod](man/chmod.txt), [chown](man/chown.txt) ([chgrp](man/chgrp.txt)), [stat](man/stat.txt) | permission bits, owner and group, file information |
 | [find](man/find.txt), [xargs](man/xargs.txt), [du](man/du.txt), [df](man/df.txt) | search a tree, space used, space free |
 | [pwd](man/pwd.txt), [basename](man/basename.txt), [dirname](man/dirname.txt) | paths |
 | [tar](man/tar.txt), [gzip](man/gzip.txt) ([gunzip](man/gunzip.txt), [zcat](man/zcat.txt)) | archives and compression |
@@ -43,6 +43,7 @@ where a command is smaller than its Unix namesake.
 | [sh](man/sh.txt) | the shell |
 | [ps](man/ps.txt), [free](man/free.txt), [uptime](man/uptime.txt), [uname](man/uname.txt), [date](man/date.txt), [sleep](man/sleep.txt) | system state and time |
 | [env](man/env.txt), [printenv](man/printenv.txt), [which](man/which.txt), [whoami](man/whoami.txt), [id](man/id.txt), [hostname](man/hostname.txt), [clear](man/clear.txt), [true](man/true.txt), [false](man/false.txt) | small utilities |
+| [login](man/login.txt), [su](man/su.txt), [passwd](man/passwd.txt), [sha256sum](man/sha256sum.txt) | users: sessions, switching user, passwords, checksums |
 | [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [sync](man/sync.txt) | disks |
 | [mount](man/mount.txt), [umount](man/umount.txt), [mount.ext2](man/mount.ext2.txt) | mounting more than the root filesystem |
 

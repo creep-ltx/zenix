@@ -1,0 +1,36 @@
+LOGIN(1)	Zenix manual
+
+NAME
+    login - start a session
+
+SYNOPSIS
+    login [-f] [user]
+
+DESCRIPTION
+    init runs login whenever no session is open. login asks for a user name
+    and a password (typing is not echoed), checks them against /etc/passwd,
+    sets USER, LOGNAME, HOME, SHELL and PATH, goes to the home directory and
+    runs the user's shell as that user. When the shell ends, login ends and
+    init starts it again.
+
+    A user whose password field is empty is not asked for a password. With -f
+    (or a user named in /etc/autologin) the password is not asked at all; the
+    images that Zenix ships contain /etc/autologin with "root", so they start
+    straight in a root shell. Remove that file to get a login prompt.
+
+    There is one session at a time: workspace shells (Amiga+Return) run as the
+    user who is logged in. The environment of the session is what new
+    workspace shells start with.
+
+FILES
+    /etc/passwd   name:hash:uid:gid:comment:home:shell
+    /etc/group    name::gid:members
+    /etc/autologin
+
+NOTES
+    Five wrong tries end the program (init starts it again). With no MMU
+    any program can still read any memory, so login is accounting and
+    protection against honest mistakes, not a security boundary.
+
+SEE ALSO
+    su(1), passwd(1), id(1)

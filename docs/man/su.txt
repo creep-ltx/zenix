@@ -1,0 +1,17 @@
+SU(1)	Zenix manual
+
+NAME
+    su - run a shell as another user
+
+SYNOPSIS
+    su [-] [user]
+
+DESCRIPTION
+    Starts the user's shell (root by default) and waits for it. Root is not
+    asked for a password; everyone else gives the target user's password
+    (an account with an empty password needs none, a locked one "*" cannot
+    be reached). With "-" the shell gets the target's HOME and starts there.
+    su is installed set-user-id root.
+
+SEE ALSO
+    login(1), passwd(1), id(1)

@@ -8,7 +8,7 @@ Any program can read or write any memory and touch the hardware. Zenix **contain
 kill only the faulting process; its memory is freed; the kernel validates every pointer passed to a system call;
 guard words and block magic catch kernel-side overruns). It does **not** isolate programs from each other. A buggy
 program that writes through a valid-looking pointer can corrupt another process, a server or the kernel and
-bring the system down. Users, groups and file permissions (planned, DESIGN D8) will give accounting and
+bring the system down. Users, groups and file permissions (DESIGN D8, built) give accounting and
 protection against honest mistakes, not against a program written to cheat - the same trust level as AmigaOS.
 The documentation must keep saying this.
 
@@ -25,7 +25,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   tables other than an RDB at sector 0 (the Emu68 boot card is MBR/FAT: it shows as one disk with no partitions;
   never write to it blindly - it holds Emu68 and the Kickstart ROM), the 50 MHz high-speed mode, eMMC. Until
   then: RAM-disk root from the floppy.
-- Users and permissions (D8), signals and handlers, process groups, `/proc`.
+- Signals and handlers, process groups, `/proc`; supplementary groups; a shadow password file; one login session at a
+  time (workspaces are not separate sessions); user and group ids are 16 bits.
 - Shared libraries; only static programs.
 - A graphical programs API, mouse, sound, network, USB, floppy driver, RTG.
 - Display server (the terminal and workspaces are inside the kernel), index server for `locate`/`fzf`.

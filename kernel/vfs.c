@@ -249,14 +249,14 @@ long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
     return fs_call_on(0, type, a0, a1, a2, a3);
 }
 
-long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size)
+long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size, struct ustat *stout)
 {
     struct ustat st;
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = route(path, parent ? parent->cwd : "/", parent ? parent->cwd_ino : 2, rb, &rel, &cwd);
     if (m < 0)
         return -1;
-    long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY, (u32)&st);
+    long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY | O_EXEC, (u32)&st);
     if (ino < 0)
         return -1;
     if (!S_ISREG(st.mode) || st.size > 256u * 1024)
@@ -275,6 +275,7 @@ long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *si
     }
     *buf = b;
     *size = st.size;
+    if (stout) *stout = st;
     return 0;
 }
 
@@ -392,9 +393,7 @@ long vfs_path1(u32 op, const char *p, u32 a2, u32 a3)
     int m = ROUTE(p, rb, rel, cwd);
     if (m < 0)
         return -1;
-    if (op == FS_READLINK)
-        return fs_call_on(m, op, (u32)rel, cwd, a2, a3);
-    return fs_call_on(m, op, (u32)rel, cwd, a2, 0);
+    return fs_call_on(m, op, (u32)rel, cwd, a2, a3);
 }
 
 long vfs_link(u32 op, const char *a, const char *b)

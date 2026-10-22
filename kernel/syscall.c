@@ -19,6 +19,10 @@ static struct file *getfd(u32 fd)
     return fd < NFD ? current->fd[fd] : 0;
 }
 
+/* the logged-in session (set by login): workspace shells started by the session manager run as this user */
+static u16 sess_uid, sess_gid, sess_envlen;
+static char sess_env[ENVMAX];
+
 static long do_spawn(u32 upath, u32 uargv, u32 ustdio, int tty)
 {
     char path[64], strs[512], *argv[17];
@@ -143,9 +147,24 @@ void syscall_c(u32 *rb)
     case SYS_replyrecv:
         r = (s32)ipc_replyrecv((struct umsg *)a1, (s32)a2, (int)a3);
         break;
-    case SYS_spawn_tty:                 /* only the session manager (priv) */
-        if (current->priv)
+    case SYS_spawn_tty:                 /* only the session manager (priv): the new shell belongs to the logged-in user */
+        if (current->priv) {
+            u16 u = current->uid, ru = current->ruid, g = current->gid, um = current->umask, el = current->envlen;
+            static char saved_env[ENVMAX];
+            memcpy(saved_env, current->env, ENVMAX);
+            current->uid = current->ruid = sess_uid; current->gid = sess_gid; current->umask = 022;
+            memcpy(current->env, sess_env, ENVMAX); current->envlen = sess_envlen;
             r = (s32)do_spawn(a1, a2, 0, (int)a3);
+            current->uid = u; current->ruid = ru; current->gid = g; current->umask = um;
+            memcpy(current->env, saved_env, ENVMAX); current->envlen = el;
+        }
+        break;
+    case SYS_session:                   /* login: remember who is logged in (ids + environment) for workspace shells */
+        if (current->uid == 0) {
+            sess_uid = (u16)a1; sess_gid = (u16)a2;
+            memcpy(sess_env, current->env, ENVMAX); sess_envlen = current->envlen;
+            r = 0;
+        } else r = -1;
         break;
     case SYS_wsreq:
         if (current->priv) {
@@ -168,9 +187,10 @@ void syscall_c(u32 *rb)
         if (user_ok(current, a1, 20))
             r = (s32)vfs_statfs((void *)a1, a2);       /* a2 = mount index, 0 = the root */
         break;
-    case SYS_mount: {
+    case SYS_mount: {                   /* root only */
         struct umountreq rq;
         char path[64], port[16], dev[16], type[8];
+        if (current->uid != 0) { r = -13; break; }
         if (user_ok(current, a1, sizeof rq)) {
             rq = *(const struct umountreq *)a1;
             if (!copy_str(path, (u32)rq.path, sizeof path) && !copy_str(port, (u32)rq.port, sizeof port) &&
@@ -183,6 +203,7 @@ void syscall_c(u32 *rb)
     }
     case SYS_umount: {
         char path[64];
+        if (current->uid != 0) { r = -13; break; }
         if (!copy_str(path, a1, sizeof path))
             r = (s32)vfs_umount(path);
         break;
@@ -286,6 +307,25 @@ void syscall_c(u32 *rb)
         time_base = a1 - ticks / 100;
         r = 0;
         break;
+    case SYS_getuid: r = current->ruid; break;
+    case SYS_geteuid: r = current->uid; break;
+    case SYS_getgid: r = current->gid; break;
+    case SYS_setuid:                    /* effective root: becomes anyone (real and effective); others: only back to their real id */
+        if (current->uid == 0) { current->uid = current->ruid = (u16)a1; r = 0; }
+        else if (a1 == current->ruid) { current->uid = (u16)a1; r = 0; }
+        else r = -1;
+        break;
+    case SYS_setgid:
+        if (current->uid == 0 || a1 == current->gid) { current->gid = (u16)a1; r = 0; }
+        else r = -1;
+        break;
+    case SYS_umask: r = current->umask; current->umask = (u16)(a1 & 0777); break;
+    case SYS_chown: {
+        char path[64];
+        if (current->uid != 0) { r = -13; break; }
+        if (!copy_str(path, a1, sizeof path)) r = (s32)vfs_path1(FS_CHOWN, path, a2, a3);
+        break;
+    }
     case SYS_isatty:
         r = (f = getfd(a1)) && f->type == FT_TTY;
         break;

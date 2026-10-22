@@ -310,6 +310,27 @@ int ext2_readlink(const struct inode *in, char *buf, u32 max)
 }
 
 /* resolve a path; cwd is the starting inode; follow_last: a final symbolic link is followed */
+/* Who is asking. The filesystem server sets these for each request and turns enforcement on; mkfs and fsck leave
+ * it off. Root passes every check except "execute" on a file that has no x bit at all. */
+u32 ext2_uid, ext2_gid, ext2_umask = 022;
+int ext2_enforce, ext2_denied;          /* ext2_denied: the last failure was a permission failure */
+
+int ext2_access(const struct inode *in, int want)       /* want: 4 read, 2 write, 1 execute */
+{
+    if (!ext2_enforce)
+        return 1;
+    int ok;
+    if (ext2_uid == 0) {
+        ok = !(want & 1) || S_ISDIR(in->mode) || (in->mode & 0111);
+    } else {
+        int sh = ext2_uid == in->uid ? 6 : ext2_gid == in->gid ? 3 : 0;
+        ok = (((in->mode >> sh) & 7) & want) == want;
+    }
+    if (!ok)
+        ext2_denied = 1;
+    return ok;
+}
+
 int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int follow_last)
 {
     u32 cur = (path[0] == '/') ? 2 : cwd;
@@ -327,6 +348,8 @@ int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int f
         while (*e && *e != '/')
             e++;
         u32 next;
+        if (!ext2_access(&in, 1))               /* searching a directory needs x */
+            return -13;
         if (ext2_lookup(&in, path, (u32)(e - path), &next))
             return -1;
         struct inode nin;
@@ -764,13 +787,15 @@ static int new_inode(struct inode *out, u32 mode, int is_dir)
     out->mode = (u16)mode;
     out->links = is_dir ? 2 : 1;
     out->mtime = fs_now();
+    out->uid = (u16)ext2_uid;                   /* the creator owns it (0 outside the server) */
+    out->gid = (u16)ext2_gid;
     return 0;
 }
 
 /* create an empty regular file in dir */
 int ext2_create(struct inode *dir, const char *name, struct inode *out)
 {
-    if (new_inode(out, S_IFREG | 0644, 0))
+    if (new_inode(out, S_IFREG | (0666 & ~ext2_umask & 07777), 0))
         return -1;
     if (ext2_iput(out) || dir_add(dir, name, strlen_(name), out->ino)) {
         free_inode(out->ino, 0);
@@ -786,7 +811,7 @@ int ext2_mkdir(struct inode *dir, const char *name)
     u32 tmp;
     if (ext2_lookup(dir, name, len, &tmp) == 0)
         return -2;                      /* exists */
-    if (new_inode(&d, S_IFDIR | 0755, 1))
+    if (new_inode(&d, S_IFDIR | (0777 & ~ext2_umask & 07777), 1))
         return -1;
     u32 blk = bmap_alloc(&d, 0);
     if (!blk) {
@@ -861,6 +886,17 @@ int ext2_chmod(u32 ino, u32 mode)
     if (ext2_iget(ino, &in))
         return -1;
     in.mode = (u16)((in.mode & S_IFMT) | (mode & 07777));
+    return ext2_iput(&in);
+}
+
+int ext2_chown(u32 ino, u32 uid, u32 gid)
+{
+    struct inode in;
+    if (ext2_iget(ino, &in))
+        return -1;
+    if (uid != 0xFFFFFFFFu) in.uid = (u16)uid;
+    if (gid != 0xFFFFFFFFu) in.gid = (u16)gid;
+    in.mode &= (u16)~06000;                     /* changing the owner clears set-user-id / set-group-id */
     return ext2_iput(&in);
 }
 

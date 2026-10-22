@@ -1,0 +1,13 @@
+CHGRP(1)	Zenix manual
+
+NAME
+    chgrp - change the group of files
+
+SYNOPSIS
+    chgrp [-R] group file...
+
+DESCRIPTION
+    Same program as chown(1) (it is a link to it): see that page.
+
+SEE ALSO
+    chown(1)

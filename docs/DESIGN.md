@@ -41,7 +41,7 @@ Bootblock, serial console, kmalloc, Gayle IDE, RDB partitions, FAT16 (optional m
 syscall idea, build and FS-UAE setup. **Rewritten:** process switching (shared memory map), loader
 (relocatable), exception handling. **Dropped:** 68030 MMU, per-process address spaces, mandatory FPU.
 
-## D8. Multi-user (decided 2026-10-22, to be built right after the terminal command batch)
+## D8. Multi-user (decided 2026-10-22, built 2026-10-22: see architecture.md section 14)
 Zenix is multi-user from the start of the terminal phase, as a Unix expects, with one honest limit: **no MMU means no
 security boundary** - any program can read or write any memory and touch the hardware. Users, groups and permissions
 therefore give accounting, separation of home directories and protection against honest mistakes, not protection

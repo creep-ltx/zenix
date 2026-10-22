@@ -16,7 +16,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
           head tail sort uniq cut tr tee seq basename dirname yes sleep true false env printenv which clear \
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
-          sed diff chmod ln readlink date less edit man gzip tar mount umount mount.ext2
+          sed diff chmod ln readlink date less edit man gzip tar login su passwd chown sha256sum mount umount mount.ext2
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 # programs that need more than the default 16 KB stack
@@ -64,10 +64,13 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py
 $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@
 
+# the floppy has room for about 790 KB of root filesystem: the archive tools stay off the RAM image
+RAMAPPS := $(filter-out gzip tar sha256sum,$(UAPPS))
+
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.
 $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
-	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS)" 768K 128
+	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" 768K 128
 
 $(BUILD)/zenix-ram.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-ram.img tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-ram.img
@@ -99,6 +102,18 @@ $(BUILD)/gzip.uo: user/gzip.c user/libz.h | $(BUILD)
 $(BUILD)/gzip.uelf: $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
 	    $(BUILD)/crt0.o $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+
+# programs that look up users and groups (/etc/passwd, /etc/group), and those that also check passwords
+PWAPPS := ls id whoami chown
+AUTHAPPS := login su passwd sha256sum
+$(PWAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	    $(BUILD)/crt0.o $< $(BUILD)/pw.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(AUTHAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	    $(BUILD)/crt0.o $< $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/pw.uo $(BUILD)/sha.uo: $(BUILD)/%.uo: user/%.c user/pw.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -c $< -o $@
 
 $(BUILD)/grep.uelf: $(BUILD)/grep.uo $(BUILD)/regex.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \

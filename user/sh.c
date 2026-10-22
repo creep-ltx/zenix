@@ -1489,7 +1489,7 @@ static int run_string(const char *text)
 static const char *const bnames[] = {
     "cd", "exit", "export", "unset", "set", "alias", "unalias", "history", "source", ".", "read", "shift",
     "return", "break", "continue", "jobs", "wait", "kill", "type", "test", "[", "true", "false", ":", "echo",
-    "pwd", "help", "local", "eval", 0 };
+    "pwd", "help", "local", "eval", "umask", 0 };
 static int is_builtin(const char *n) { for (int i = 0; bnames[i]; i++) if (!strcmp(bnames[i], n)) return 1; return 0; }
 static int builtin_names(const char **out, int max) { int n = 0; while (bnames[n] && n < max) { out[n] = bnames[n]; n++; } return n; }
 
@@ -1625,6 +1625,12 @@ static int run_builtin(char **argv, int argc)
     if (!strcmp(n, "echo")) return do_echo(argv, argc);
     if (!strcmp(n, "true") || !strcmp(n, ":")) return 0;
     if (!strcmp(n, "false")) return 1;
+    if (!strcmp(n, "umask")) {
+        if (argc > 1) { u32 v = 0; for (const char *c = argv[1]; *c; c++) { if (*c < '0' || *c > '7') { errm("umask", "bad mask"); return 1; } v = v * 8 + (u32)(*c - '0'); } sys_umask(v); return 0; }
+        u32 m = (u32)sys_umask(0); sys_umask(m);
+        char b[8]; b[0] = '0'; b[1] = (char)('0' + ((m >> 6) & 7)); b[2] = (char)('0' + ((m >> 3) & 7)); b[3] = (char)('0' + (m & 7)); b[4] = '\n'; b[5] = 0;
+        outs(b); return 0;
+    }
     if (!strcmp(n, "pwd")) { outs(cwd_now()); outs("\n"); return 0; }
     if (!strcmp(n, "test") || !strcmp(n, "[")) return do_test(argv, argc);
     if (!strcmp(n, "read")) return do_read(argv, argc);
@@ -1742,7 +1748,7 @@ static char *expand_prompt(const char *ps, int *vislen)
         }
         case 'u': add = var_get("USER"); if (!add) add = "root"; break;
         case 'h': add = var_get("HOSTNAME"); if (!add) add = "zenix"; break;
-        case '$': { const char *u = var_get("USER"); add = (!u || !strcmp(u, "root")) ? "#" : "$"; break; }
+        case '$': add = sys_geteuid() == 0 ? "#" : "$"; break;
         case 'n': out[o++] = '\r'; out[o++] = '\n'; vis = 0; continue;
         case 'e': out[o++] = 27; continue;
         case '[': hidden = 1; continue;

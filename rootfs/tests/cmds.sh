@@ -27,7 +27,7 @@ t hexdump;   echo ABC | hexdump -C
 t tee;       echo hi | tee /tmp/tee1.out; cat /tmp/tee1.out
 t yes;       yes | head -n 3; yes ok | head -n 2
 t status;    true; echo $?; false; echo $?
-t env;       FOO=bar env | grep '^FOO='; printenv HOME | grep -c home
+t env;       FOO=bar env | grep '^FOO='; printenv HOME | grep -c .
 t which;     which ls | grep -c 'ls$'
 t sed;       sed 's/a/A/' fruit.txt; sed 's/a/A/g' fruit.txt; sed -n '2,3p' fruit.txt; sed '2d' fruit.txt; sed -n '/cherry/p' fruit.txt
 t sed2;      sed 's/\(a\)\(p\)/\2\1/' fruit.txt; sed -E 's/(b)(a)/\2\1/' fruit.txt; sed -n '$p' fruit.txt; sed '1!d' fruit.txt; sed 's/an/&&/' fruit.txt

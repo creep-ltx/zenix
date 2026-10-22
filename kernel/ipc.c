@@ -67,6 +67,7 @@ long ipc_call(int port, struct umsg *m)
     m->next = 0;
     m->from = current->pid;
     m->client = current;
+    m->uid = current->uid; m->gid = current->gid; m->umask = current->umask;
     m->server = 0;
     m->state = MSG_QUEUED;
     m->result = 0;

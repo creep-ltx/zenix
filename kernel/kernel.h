@@ -175,6 +175,7 @@ struct proc {                   /* start.S relies on the first three: */
     struct file *fd[NFD];
     int killed;
     int priv;                   /* may use the raw disk (the filesystem server) */
+    u16 uid, ruid, gid, umask;  /* effective and real user id, group id (inherited; a set-user-id program changes only uid); the filesystem server enforces the permissions */
     char env[ENVMAX];           /* environment: NAME=value NUL ... NUL NUL; inherited by children */
     u16 envlen;
     struct proc *rnext;         /* run queue link */
@@ -216,6 +217,7 @@ struct umsg {
     s32 result;                 /* set by the server's reply */
     u32 type;
     u32 a[4];                   /* arguments, free use */
+    u16 uid, gid, umask, pad;   /* kernel: the caller's identity, for the filesystem server */
     struct proc *client;        /* kernel: who is waiting for the reply */
 };
 int port_create(const char *name, int owner);
@@ -234,7 +236,8 @@ int fd_install(struct proc *p, struct file *f);
 long vfs_read(struct file *f, void *buf, u32 n);
 long vfs_write(struct file *f, const void *buf, u32 n);
 long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
-long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size);
+struct ustat;
+long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size, struct ustat *st);
 long vfs_open(const char *path, int flags);
 long vfs_stat(const char *path, struct ustat *st);
 long vfs_fstat(struct file *f, struct ustat *st);
@@ -329,12 +332,20 @@ int tty_of(const struct proc *p);
 #define SYS_time        58   /* seconds since 1970 (UTC) */
 #define SYS_settime     59
 #define SYS_isatty      60
+#define SYS_getuid      61
+#define SYS_getgid      62
+#define SYS_setuid      63   /* root: to anyone; others: only back to their own id */
+#define SYS_setgid      64
+#define SYS_umask       65   /* mask -> old mask */
+#define SYS_chown       66   /* path, uid, gid (-1 keeps one): root only */
+#define SYS_geteuid     67
+#define SYS_session     68   /* root: this is the logged-in session: its ids and environment are given to new workspace shells */
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
-#define SYS_mount       61   /* struct umountreq*: put a running filesystem server on a directory */
-#define SYS_umount      62   /* path: tell the server to quit and remove the mount */
-#define SYS_mountinfo   63   /* index, struct umountinfo*: 0, or -1 past the end */
-#define SYS_blk_flush   64   /* make everything written so far durable (disk server only) */
+#define SYS_mount       69   /* struct umountreq*: put a running filesystem server on a directory */
+#define SYS_umount      70   /* path: tell the server to quit and remove the mount */
+#define SYS_mountinfo   71   /* index, struct umountinfo*: 0, or -1 past the end */
+#define SYS_blk_flush   72   /* make everything written so far durable (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */
 #define SYS_ttymirror   37   /* 0 = stop copying screen output to the serial port */
 void syscall_c(u32 *rb);

@@ -1,14 +1,19 @@
-ID(1)			Zenix manual
+ID(1)	Zenix manual
 
 NAME
     id - print user and group identity
 
 SYNOPSIS
-    id
+    id [user]
 
 DESCRIPTION
-    Prints "uid=0(name) gid=0(name)" where name is $USER (default root). The
-    numbers are always 0: there are no real users or groups yet.
+    Prints "uid=1000(user) gid=100(users)" for the calling process, or for
+    the named user. A process running a set-user-id program also gets
+    "euid=0(root)": uid is who is really running it, euid the identity the
+    permission checks use.
+
+NOTES
+    Only one group per user (no supplementary groups yet).
 
 SEE ALSO
-    whoami(1)
+    whoami(1), su(1)

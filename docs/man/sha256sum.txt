@@ -1,0 +1,19 @@
+SHA256SUM(1)	Zenix manual
+
+NAME
+    sha256sum - print SHA-256 checksums
+
+SYNOPSIS
+    sha256sum [file...]
+
+DESCRIPTION
+    Prints the SHA-256 checksum of each file (standard input without
+    arguments), in the same format as the GNU program: 64 hex digits, two
+    spaces, the name. The same function hashes passwords (see passwd(1)).
+
+NOTES
+    Reads the whole file into memory first, so a file must fit in RAM.
+    The output equals the host's sha256sum on the files that were compared.
+
+EXIT STATUS
+    0, 1 if a file cannot be read.
