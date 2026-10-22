@@ -12,9 +12,10 @@ DESCRIPTION
     "disk". It reads the partition table - an Amiga RDB at the start of the
     disk, else a PC table (MBR) - and serves named devices: ide0 (the whole
     disk, whatever the hardware), ide0p1, ide0p2 ... (partitions, numbered in
-    the order found) and ram0 (the RAM disk loaded by the bootblock, when
-    there is one). Access through a partition is limited to that partition.
-    A device can be
+    the order found), ram0 (the RAM disk loaded by the bootblock, when
+    there is one) and df0-df3 (floppy drives, 1760 sectors; df0 is looked
+    for at start, df1-df3 on first use; no partitions). Access through a
+    partition is limited to that partition. A device can be
     mounted by one filesystem server, which is then its only writer; tools
     such as fdisk, mkfs.ext2 and fsck.ext2 open devices raw, which is refused
     while mounted. Besides read, write and info it offers DISK_FLUSH (make

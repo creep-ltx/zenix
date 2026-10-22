@@ -226,6 +226,14 @@ void syscall_c(u32 *rb)
             r = 0;
         }
         break;
+    case SYS_fd_info:
+        if (current->priv)
+            r = fd_info(a1);
+        break;
+    case SYS_fd_rw:
+        if (current->priv)
+            r = fd_rw(a1 >> 28, a1 & 0x07FFFFFF, a2, (void *)a3, (a1 >> 27) & 1);
+        break;
     case SYS_blk_size:
         if (current->priv)
             r = (s32)blk_sectors();

@@ -78,6 +78,8 @@ static inline int sys_wsreq(void) { return sys3(39, 0, 0, 0); }
 static inline int sys_spawn_tty(const char *path, char *const *argv, int tty) { return sys3(40, (u32)path, (u32)argv, (u32)tty); }
 static inline int sys_input(int *out) { return sys3(74, (u32)out, 0, 0); }   /* out[4]: mouse dx, dy, buttons, joystick */
 static inline int sys_klog(u32 off, void *buf, u32 n) { return sys3(73, off, (u32)buf, n); }   /* kernel log: characters copied */
+static inline int sys_fd_info(u32 d) { return sys3(76, d, 0, 0); }   /* floppy: bit 0 drive, 1 disk, 2 write protected; sectors << 8 */
+static inline int sys_fd_rw(u32 d, u32 lba, u32 n, void *buf, int wr) { return sys3(77, lba | d << 28 | (u32)(wr != 0) << 27, n, (u32)buf); }
 static inline int sys_blk_size(void) { return sys3(41, 0, 0, 0); }
 static inline int sys_blk_ram(u32 out[2]) { return sys3(42, (u32)out, 0, 0); }
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

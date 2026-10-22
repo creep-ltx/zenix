@@ -94,6 +94,7 @@ void irq2_c(u32 sr)
         ticks++;
         audio_tick();
         input_poll();
+        fd_tick();
         if (ticks % 100 == 0)
             bar_draw();
         sched_tick((u16)sr);

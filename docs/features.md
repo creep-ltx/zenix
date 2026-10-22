@@ -47,6 +47,7 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Pipes (2 KB) | verified | |
 | `fdisk` (RDB), `mkfs.ext2`, `fsck.ext2` (check and repair) | verified | man/fdisk.txt, man/mkfs.ext2.txt, man/fsck.ext2.txt |
 | SD card of a Raspberry Pi 4 / CM4 under Emu68 (PiStorm): polling SDHCI driver, 25 MHz 4-bit | built, host-tested, **not run on a Pi** | architecture.md section 3, `kernel/emmc.c` |
+| Floppy drives df0-df3 (AmigaDOS 880 KB tracks, MFM by Paula DMA), read and write with verify; `dd` | built, FS-UAE-tested, one open bug (a whole-disk read once wrong), **not run on a real drive** | architecture.md "Floppy driver", `kernel/floppy.c` |
 | Amiga 3000 on-board SCSI (WD33C93A + DMAC): a disk on targets 0-6, polled, DMA via a bounce buffer | built; host model test; see status in limits.md | architecture.md section 2 |
 | Mouse (port 1) and joystick (port 2): polled at 100 Hz, `input` shows them, system call `SYS_input` | joystick verified in FS-UAE (`tools/joystick-test.py`, keyboard-as-joystick); mouse movement and buttons built but not tested | man/input.txt |
 | Terminal bell: a short Paula tone (`beep`, any program printing BEL); the first beep logs whether the sound DMA ran | verified in FS-UAE (the DMA flag; not heard) | man/beep.txt |

@@ -12,6 +12,8 @@ typedef unsigned char u8;
 
 #define MAXDEV 14
 static struct diskinfo dev[MAXDEV];
+static int fd_probe = 1;                /* floppy drives looked at: bit 0 = df0; df1-3 only when a name asks for them (probing an absent drive takes a third of a second) */
+static int fdrive[MAXDEV];              /* floppy drive number of a device, -1 for the others */
 static int ndev;
 static u32 disk_sectors;
 static u8 *ram_base;                    /* the boot ramdisk, if any */
@@ -20,6 +22,7 @@ static u32 ram_sectors;
 static void add(const char *name, const char *label, u32 start, u32 sectors, u32 dostype, u32 flags)
 {
     if (ndev == MAXDEV) return;
+    fdrive[ndev] = -1;
     struct diskinfo *d = &dev[ndev++];
     memset(d, 0, sizeof *d);
     strcpy(d->name, name);
@@ -101,6 +104,19 @@ static void scan(void)
     if (ram_sectors) add("ram0", "", 0, ram_sectors, 0, 0);
     int count = 0;
     if (disk_sectors && !add_rdb(0, &count)) add_mbr(&count);
+    for (int f = 0; f < 4; f++) {                         /* floppy drives with a disk in them: df0 ... df3 */
+        if (!(fd_probe & (1 << f))) continue;
+        int r = sys_fd_info((u32)f);
+        if ((r & 3) == 3) {
+            char name[4] = { 'd', 'f', (char)('0' + f), 0 };
+            add(name, "", 0, (u32)r >> 8, 0, 0);
+            if (ndev > 0 && !strcmp(dev[ndev - 1].name, name)) {
+                fdrive[ndev - 1] = f;
+                dev[ndev - 1].caps = 0;                   /* write-through: nothing to flush */
+                dev[ndev - 1].maxsect = 22;
+            }
+        }
+    }
     for (int i = 0; i < ndev && i < oldn; i++) dev[i].mounted = keep[i];   /* mounts survive a rescan */
 }
 
@@ -115,7 +131,7 @@ static int find(const char *name)
 static int hits_mounted(u32 lba, u32 n)
 {
     for (int i = 1; i < ndev; i++)
-        if (dev[i].mounted && strcmp(dev[i].name, "ram0") &&
+        if (dev[i].mounted && strcmp(dev[i].name, "ram0") && fdrive[i] < 0 &&
             lba < dev[i].start + dev[i].sectors && lba + n > dev[i].start)
             return 1;
     return 0;
@@ -125,7 +141,12 @@ static int handle(struct umsg *m)
 {
     switch (m->type) {
     case DISK_OPEN: {
-        int h = find((const char *)m->a[0]);
+        const char *nm = (const char *)m->a[0];
+        if (nm[0] == 'd' && nm[1] == 'f' && nm[2] >= '0' && nm[2] <= '3' && !nm[3]) {
+            fd_probe |= 1 << (nm[2] - '0');
+            scan();                                                  /* a disk may have been put in since */
+        }
+        int h = find(nm);
         if (h < 0) return -1;
         if (m->a[1] & DISK_MOUNT) {
             if (dev[h].mounted) return -1;
@@ -150,6 +171,8 @@ static int handle(struct umsg *m)
             else memcpy(ram_base + lba * 512, (const void *)m->a[3], n * 512);
             return 0;
         }
+        if (fdrive[h] >= 0)
+            return sys_fd_rw((u32)fdrive[h], lba, n, (void *)m->a[3], m->type == DISK_WRITE);
         lba += dev[h].start;
         return m->type == DISK_READ ? sys_blk_read(lba, n, (void *)m->a[3])
                                     : sys_blk_write(lba, n, (const void *)m->a[3]);
@@ -160,7 +183,7 @@ static int handle(struct umsg *m)
         return 0;
     case DISK_FLUSH:
         if (m->a[0] >= (u32)ndev) return -1;
-        if (!strcmp(dev[m->a[0]].name, "ram0")) return 0;            /* nothing to flush */
+        if (!strcmp(dev[m->a[0]].name, "ram0") || fdrive[m->a[0]] >= 0) return 0;     /* nothing to flush */
         return sys_blk_flush();
     case DISK_RESCAN:
         scan();
@@ -175,7 +198,9 @@ int main(void)
     disk_sectors = n > 0 ? (u32)n : 0;
     u32 ram[2];
     if (sys_blk_ram(ram) == 0 && ram[1]) { ram_base = (u8 *)ram[0]; ram_sectors = ram[1] / 512; }
-    if (!disk_sectors && !ram_sectors) { printf("diskd: no disk\n"); return 1; }
+    int any_fd = 0;
+    if (sys_fd_info(0) & 1) any_fd = 1;
+    if (!disk_sectors && !ram_sectors && !any_fd) { printf("diskd: no disk\n"); return 1; }
     scan();
     int port = sys_port_create("disk");
     if (port < 0) return 1;
