@@ -11,6 +11,7 @@ for p in $PROGS; do
     cp "$B/$p.zx" "$T/bin/$name"
     chmod 755 "$T/bin/$name"
 done
+ln -s less "$T/bin/more"            # more is less
 rm -f "$OUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features
 mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$INODES" -d "$T" -F "$OUT" "$SIZE"

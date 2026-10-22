@@ -2,6 +2,11 @@
 #include "fsproto.h"
 
 static struct file files[NFILE];
+static int strcmp_(const char *a, const char *b)
+{
+    while (*a && *a == *b) { a++; b++; }
+    return (unsigned char)*a - (unsigned char)*b;
+}
 
 struct file *file_new(int type)
 {
@@ -161,9 +166,34 @@ long fs_read_file(const char *path, u32 cwd, u8 **buf, u32 *size)
     return 0;
 }
 
+/* the few device files: /dev/tty (this process's terminal), /dev/null, /dev/zero */
+static long open_device(const char *path, int flags)
+{
+    int type = 0;
+    if (!strcmp_(path, "/dev/tty") || !strcmp_(path, "/dev/console")) type = FT_TTY;
+    else if (!strcmp_(path, "/dev/null")) type = FT_NULL;
+    else if (!strcmp_(path, "/dev/zero")) type = FT_ZERO;
+    else return -2;
+    struct file *f = file_new(type);
+    if (!f)
+        return -1;
+    f->off = type == FT_TTY ? (u32)tty_of(current) : 0;
+    f->flags = (u16)flags;
+    f->mode = 020666;                       /* a character device */
+    int fd = fd_install(current, f);
+    if (fd < 0)
+        file_close(f);
+    return fd;
+}
+
 long vfs_open(const char *path, int flags)
 {
     struct ustat st;
+    if (path[0] == '/' && path[1] == 'd' && path[2] == 'e' && path[3] == 'v' && path[4] == '/') {
+        long d = open_device(path, flags);
+        if (d != -2)
+            return d;
+    }
     long ino = fs_call(FS_OPEN, (u32)path, current->cwd_ino, (u32)flags, (u32)&st);
     if (ino < 0)
         return -1;
@@ -186,6 +216,12 @@ long vfs_stat(const char *path, struct ustat *st)
 
 long vfs_fstat(struct file *f, struct ustat *st)
 {
+    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO) {
+        memset(st, 0, sizeof *st);
+        st->mode = 020666;
+        st->links = 1;
+        return 0;
+    }
     if (f->type != FT_INODE)
         return -1;
     return fs_call(FS_FSTAT, f->ino, (u32)st, 0, 0);
@@ -269,6 +305,11 @@ long vfs_read(struct file *f, void *buf, u32 n)
         return tty_read((int)f->off, buf, n);
     case FT_PIPE_R:
         return pipe_read(f, buf, n);
+    case FT_NULL:
+        return 0;
+    case FT_ZERO:
+        memset(buf, 0, n);
+        return (long)n;
     case FT_INODE: {
         if (S_ISDIR(f->mode) || (f->flags & O_WRONLY))
             return -1;
@@ -288,6 +329,8 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return tty_write((int)f->off, buf, n);
     case FT_PIPE_W:
         return pipe_write(f, buf, n);
+    case FT_NULL: case FT_ZERO:
+        return (long)n;                     /* the bit bucket */
     case FT_INODE: {
         if (!(f->flags & (O_WRONLY | O_RDWR)))
             return -1;
