@@ -3,7 +3,7 @@
 int main(int argc, char **argv)
 {
     if (argc < 3) { fprintf(2, "usage: cmp file1 file2\n"); return 2; }
-    int a = sys_open(argv[1], O_RDONLY), b = sys_open(argv[2], O_RDONLY);
+    int a = !strcmp(argv[1], "-") ? 0 : sys_open(argv[1], O_RDONLY), b = !strcmp(argv[2], "-") ? 0 : sys_open(argv[2], O_RDONLY);
     if (a < 0 || b < 0) { fprintf(2, "cmp: cannot open %s\n", a < 0 ? argv[1] : argv[2]); return 2; }
     struct rd ra, rb; rd_init(&ra, a); rd_init(&rb, b);
     u32 byte = 1, line = 1;

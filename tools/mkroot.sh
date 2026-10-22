@@ -15,7 +15,8 @@ mkdir -p "$T/usr/man"
 python3 "$(dirname "$0")/mkman.py" "$T/usr/man.gen" $PROGS
 for f in "$T"/usr/man.gen/*.txt; do b=$(basename "$f"); [ -e "$T/usr/man/$b" ] || cp "$f" "$T/usr/man/$b"; done
 rm -rf "$T/usr/man.gen"
-ln -s less "$T/bin/more"            # more is less
+ln -s less "$T/bin/more"
+ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"            # more is less
 rm -f "$OUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features
 mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$INODES" -d "$T" -F "$OUT" "$SIZE"

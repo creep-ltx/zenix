@@ -43,3 +43,5 @@ t ls-R;      ls -R sub | head -n 6; ls sub fruit.txt
 t cat;       cat -n fruit.txt; cat -b colon.txt; cat -E colon.txt
 t cpmv;      rm -rf /tmp/w; mkdir -p /tmp/w/a/b; cp -r sub /tmp/w/s; cat /tmp/w/s/deep.txt; mv /tmp/w/s /tmp/w/a/b/s2; ls /tmp/w/a/b/s2; mv /tmp/w/a/b/s2/deep.txt /tmp/w/d.txt; cat /tmp/w/d.txt | head -n 1; rm -rf /tmp/w; ls /tmp | grep -c '^w$'
 t touch;     rm -f /tmp/tt1; touch /tmp/tt1; ls /tmp | grep -c '^tt1$'; touch -c /tmp/nothere-zz; ls /tmp | grep -c nothere-zz
+t gzip;      rm -f /tmp/gz1 /tmp/gz1.gz; cp text.txt /tmp/gz1; gzip /tmp/gz1; [ -f /tmp/gz1 ] || echo orig-gone; gunzip /tmp/gz1.gz; cmp /tmp/gz1 text.txt; echo "rc=$?"
+t gzip2;     gzip -c fruit.txt | gzip -dc | cmp - fruit.txt; echo "rc=$?"; gzip -c fruit.txt | zcat | wc -l; gzip -9 -c text.txt | gunzip | cmp - text.txt; echo "rc=$?"

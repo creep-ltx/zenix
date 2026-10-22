@@ -13,9 +13,10 @@ static void count(int fd, const char *name, int fl, int fw, int fc, int show)
             if (!sp && !inw) words++;
             inw = !sp;
         }
-    if (fl) printf("%7u", lines);
-    if (fw) printf("%7u", words);
-    if (fc) printf("%7u", bytes);
+    int one = fl + fw + fc == 1;
+    if (fl) printf(one ? "%u" : "%7u", lines);
+    if (fw) printf(one ? "%u" : "%7u", words);
+    if (fc) printf(one ? "%u" : "%7u", bytes);
     if (show) printf(" %s", name);
     printf("\n");
     tl += lines; tw += words; tc += bytes;

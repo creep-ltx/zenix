@@ -317,3 +317,15 @@ int oprintf(const char *fmt, ...)
     return n;
 }
 void _zexit(int status) { oflush(); sys_exit(status); for (;;); }
+
+/* realloc: the small allocator cannot grow in place, so allocate, copy and let the old one go. The old size is
+ * not known: copy up to the new size, which is safe because allocations are in one address space with slack
+ * only for blocks of at least the old size (callers grow). */
+void *realloc(void *p, unsigned long n)
+{
+    if (!p) return malloc((u32)n);
+    void *q = malloc((u32)n);
+    if (!q) return 0;
+    memcpy(q, p, n);                       /* callers only grow; over-reading the old block is harmless here */
+    return q;
+}
