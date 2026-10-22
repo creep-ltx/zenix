@@ -106,6 +106,11 @@ in the first place. Later phase.
 **Z16. RAM budget:** fixed at mount: cache size (default 128 KB, `-o cache=`), maximum one tree path pinned per
 open file, no allocation proportional to the disk size. A mounted volume's own state is a few KB.
 
+**Z17. "Changed since commit N" query (later, after the Zenix port; proposed, not built).** Every tree block records the commit that wrote it, and copy-on-write rewrites the whole
+path to the root whenever something changes. So a walk that skips every block older than N visits only what changed: cost proportional to the changes, not to the size of the disk.
+Use: an incremental `updatedb` for the FuzzyFind index (and backups, sync tools) without re-reading every directory on a slow disk. Fuzzy matching itself stays in the program, not in the filesystem.
+Directories are in hash order, so a sorted listing needs a sort in the program (`ls` does this).
+
 ## 4. What is deliberately not in version 1
 Compression, encryption, deduplication, quotas, data checksums, ACLs, atime, multiple devices, online grow
 (shrink never), journal-style `fsync` fast path, snapshots UI. The format has a feature-flag word
