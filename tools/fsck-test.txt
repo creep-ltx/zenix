@@ -1,0 +1,9 @@
+sleep 22
+send fsck.ext2 ide0p1\r
+sleep 6
+send fsck.ext2 -y ide0p1\r
+sleep 8
+send fsck.ext2 -y ide0p1\r
+sleep 8
+send fsck.ext2 ide0p1\r
+sleep 6

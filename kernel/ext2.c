@@ -655,6 +655,12 @@ static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino)
     return ext2_iput(dir);
 }
 
+/* public: add an entry to a directory (used by fsck to attach orphans) */
+int ext2_link(struct inode *dir, const char *name, u32 ino)
+{
+    return dir_add(dir, name, strlen_(name), ino);
+}
+
 static int dir_remove(struct inode *dir, const char *name, u32 len, u32 *ino_out)
 {
     u32 nblk = dir->size / bsize;

@@ -30,7 +30,8 @@ static __attribute__((unused)) void disk_unmount(int h)
     sys_call(disk_port, &m);
 }
 
-/* the root filesystem: the first partition that holds ext2, else the bare disk, else the boot ramdisk.
+/* the root filesystem: a root image the boot floppy carried (the dev/test image) wins; otherwise the
+ * first IDE partition that holds ext2, else the bare disk.
  * A device is opened plain to probe it and only mounted (made ours alone) once ext2 is confirmed. */
 static int try_mount(const char *name)
 {
@@ -45,6 +46,7 @@ static int try_mount(const char *name)
 static int find_root(void)
 {
     struct diskinfo di;
+    if (!try_mount("ram0")) return 0;                 /* only exists when the floppy carried a root image */
     for (u32 i = 1; i < 16; i++) {                    /* 0 is the whole disk */
         struct umsg m;
         m.type = DISK_LIST; m.a[0] = i; m.a[1] = (u32)&di;
@@ -52,8 +54,7 @@ static int find_root(void)
         if (di.dostype == 0) continue;                /* ram0 */
         if (!try_mount(di.name)) return 0;
     }
-    if (!try_mount("ide0")) return 0;
-    return try_mount("ram0");                         /* the floppy-loaded root (dev/test image) */
+    return try_mount("ide0");
 }
 
 static void fill_stat(const struct inode *in, struct ustat *st)
