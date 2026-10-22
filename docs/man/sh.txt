@@ -20,6 +20,9 @@ LINE EDITING
              kept in ~/.sh_history
     Tab      complete a command, a file name or a $variable; twice lists
              the choices
+    Ctrl+R   search the history backwards as you type; Ctrl+R again goes to
+             an older match, Enter runs it, an arrow key keeps it for editing,
+             Ctrl+G cancels
     Ctrl+L   clear the screen            Ctrl+C   cancel the line
 
 LANGUAGE
@@ -27,6 +30,10 @@ LANGUAGE
                 function or an alias
     Variables:  NAME=value    $NAME ${NAME} ${NAME:-default}
                 ${NAME:=default} ${NAME:+other} ${#NAME}
+                ${NAME#pat} ${NAME##pat} ${NAME%pat} ${NAME%%pat}  remove a
+                prefix / suffix (shortest, longest) matching a pattern
+                ${NAME/pat/new} ${NAME//pat/new}  replace first / all
+                ${NAME:offset} ${NAME:offset:length}  part of the text
                 $? status of the last command   $$ shell pid
                 $# $1..$9 $@ $* the arguments   $! last background pid
     Quoting:    'literal'  "with $expansion"  \x escapes one character
@@ -34,11 +41,15 @@ LANGUAGE
                 $((1+2*3)) arithmetic;  ~ the home directory
     Wildcards:  * any text  ? one character  [abc] [a-z] [!a]
                 (names starting with . need a literal .)
+    Braces:     pre{a,b}post gives preapost prebpost; {1..5} {a..e} {01..10}
+                {1..10..3} (not inside quotes)
     Pipes and lists:  a | b   a && b   a || b   a ; b   a &   ! a
                 ( a; b )   { a; b; }
     Redirection:  < file   > file   >> file   2> file   2>&1   &> file
                 <<WORD (a here-document; <<-WORD strips tabs)
     Conditions: if list; then list; elif list; then list; else list; fi
+    Choices:    case word in pattern|pattern) list ;; ... esac
+                (patterns are wildcards; the first that matches runs)
     Loops:      while list; do list; done    until list; do list; done
                 for x in words; do list; done
     Functions:  name() { commands; }   return [n]   break [n]   continue [n]
@@ -50,8 +61,9 @@ BUILTINS
     cd [dir|-]  exit [n]  export NAME[=value]  unset NAME  set [-- args]
     alias [name=value]  unalias name  history [-c]  source file (or . file)
     read [-p prompt] name...  shift [n]  return  break  continue  jobs
-    wait [pid|%n]  kill pid|%n  type name  test expr (or [ expr ])
-    true false :  echo [-ne]  pwd  eval  local  help  umask
+    fg [%n]  bg [%n]  wait [pid|%n]  kill [-STOP|-CONT] pid|%n  type name
+    test expr (or [ expr ])  true false :  echo [-ne]  pwd  eval  local
+    help  umask [mask]  trap 'commands' EXIT
     test: -e -f -d -r -w -x -s -z -n -L, = != -eq -ne -lt -le -gt -ge,
           ! -a -o ( )
 
@@ -63,11 +75,24 @@ VARIABLES THE SHELL USES
     Start-up files: /etc/profile and ~/.shrc (read by an interactive shell).
 
 JOBS
-    command &   runs in the background; jobs lists them; wait waits;
-    kill %1 stops one. Ctrl+C stops the program in the foreground (and a
-    loop the shell itself is running).
+    command &   runs in the background; jobs lists them (Running, Stopped,
+    Done); wait waits; kill %1 ends one. Ctrl+C ends the program in the
+    foreground (and a loop the shell itself is running). Ctrl+Z stops the
+    program in the foreground and gives the prompt back: bg lets it run on in
+    the background, fg brings it back to the foreground (the job is %n from
+    jobs; without a number the most recent one). A pipeline stops and
+    continues as a whole.
 
 NOTES
+    There is no fork. A builtin, a function or a ( ) group in a pipeline, and
+    every $( ), runs in a child shell that is given the text of the command
+    plus the variables, functions and positional parameters it uses, so it
+    sees what the parent sees; changes it makes stay in the child. The shell
+    keeps within its 16 KB stack and answers "nested too deeply" instead of
+    running over it (a function that calls itself without end).
+    trap handles only EXIT (0); other signals are not delivered to the shell.
+    Brace and pattern text inside quotes is literal. Not done: [[ ]], arrays,
+    history expansion (!!), here-strings, process substitution, getopts.
     An access the user is not allowed is reported as "permission denied".
 
 SEE ALSO

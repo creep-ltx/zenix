@@ -1,0 +1,41 @@
+sleep 24
+send sleep 300\r
+sleep 2
+send \x1a
+sleep 2
+send jobs\r
+sleep 2
+send ps\r
+sleep 2
+send bg\r
+sleep 2
+send jobs\r
+sleep 2
+send fg\r
+sleep 2
+send \x03
+sleep 2
+send echo status=$?\r
+sleep 2
+send sleep 300 &\r
+sleep 2
+send jobs\r
+sleep 2
+send kill %1; jobs\r
+sleep 3
+send sleep 301\r
+sleep 1
+send \x1a
+sleep 2
+send kill %2; echo killed=$?\r
+sleep 3
+send jobs\r
+sleep 3
+send echo alpha-one\r
+sleep 2
+send echo beta-two\r
+sleep 2
+send \x12alp\r
+sleep 3
+send \x12bet\x12\r
+sleep 3

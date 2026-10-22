@@ -31,6 +31,7 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Named message ports, synchronous zero-copy calls | verified | architecture.md section 8 |
 | Servers: disk (`diskd`), filesystem (`fsd`), session manager (`boot`) | verified | architecture.md section 9 |
 | Environment variables inherited by children | verified | |
+| Job control: Ctrl-Z stop, `jobs`, `fg`, `bg`, stopped state in `ps` (`SYS_jobctl`, `SYS_wait` untraced) | verified (`tools/jobs-test.sh`) | architecture.md section 7 |
 | Priorities, signals with handlers, process groups | planned | |
 | Users and groups: uid/gid on every process (real and effective), `setuid`/`setgid`, `umask`, `chown` | verified | architecture.md section 14 |
 | Permission checks (r/w/x for owner, group, other; directory search; sticky bit; set-user-id programs) in the filesystem server | verified | architecture.md section 14 |
@@ -69,9 +70,11 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Colours, UTF-8, display server with a drawing API, mouse | planned | ROADMAP.md phase 5 |
 
 ## Shell
-Line editing, history (`~/.sh_history`), tab completion, variables and the environment, quoting, wildcards,
-pipes, redirects (`< > >> 2> 2>&1 &>`), here-documents, `if/while/until/for`, functions, aliases, arithmetic,
-command substitution, scripts, `&` and job control, `/etc/profile` and `~/.shrc`. **verified.** See man/sh.txt.
+Line editing, history (`~/.sh_history`) with Ctrl-R search, tab completion, variables and the environment, quoting,
+wildcards, brace expansion, `${v#pat} ${v%pat} ${v/pat/new} ${v:off:len}`, pipes, redirects (`< > >> 2> 2>&1 &>`),
+here-documents, `if/while/until/for/case`, functions, aliases, arithmetic, command substitution, `trap … EXIT`, scripts,
+`&` and job control (Ctrl-Z, `fg`, `bg`), `/etc/profile` and `~/.shrc`. **verified** (tools/cmds-test.sh compares with bash;
+tools/jobs-test.sh). See man/sh.txt.
 
 ## Commands
 Every command has a manual page. The full list with one-line summaries is in [commands.md](commands.md); the

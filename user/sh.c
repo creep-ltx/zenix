@@ -26,6 +26,13 @@ static void errm(const char *a, const char *b) { errs("sh: "); errs(a); if (b) {
  * region that is reset after each line. */
 #define ARENA 262144
 static char *arena, *abrk, *aend;
+/* The stack is 16 KB (the Makefile's STACK_sh is not applied yet: audit B6). The deepest use measured on the test scripts,
+ * including a function calling itself 40 deep, is under 6 KB. With no MMU an overflow would corrupt memory silently, so
+ * the recursive parts (running, parsing, expanding, globbing) refuse to go deeper than STK_LIMIT bytes below where main
+ * started, which leaves about 5 KB for the deepest leaf functions. */
+#define STK_LIMIT 11000
+static char *stk_top;
+static inline int stack_low(void) { char *sp; __asm__ volatile("move.l %%sp,%0" : "=r"(sp)); return stk_top && (u32)(stk_top - sp) > STK_LIMIT; }
 static void fatal(const char *m) { errm(m, 0); sys_exit(2); }
 static void *aalloc(u32 n)
 {
@@ -238,6 +245,44 @@ static void list_matches(char **m, int n)
 }
 
 /* read one edited line; returns its length, -1 at end of input (Ctrl-D on an empty line), -2 when cancelled with Ctrl-C */
+/* ---- Ctrl-R: incremental search backward through the history ---- */
+static int hist_find(const char *pat, int from)               /* newest match at or before index from, or nhist */
+{
+    u32 pl = strlen(pat);
+    for (int i = from; i >= 0; i--) {
+        const char *h = hist[i];
+        for (u32 k = 0; h[k]; k++) if (!strncmp(h + k, pat, pl)) return i;
+        if (!pl) return i;
+    }
+    return nhist;
+}
+/* 1 = the match was accepted with Enter (run it), 0 = back to editing (buf holds the match, or is unchanged if cancelled) */
+static int isearch(char *buf, int max, int *lenp, int *posp)
+{
+    char pat[48]; int pl = 0, found = nhist;
+    pat[0] = 0;
+    for (;;) {
+        char shown[64]; const char *m = found < nhist ? hist[found] : "";
+        strncpy(shown, m, 50); shown[50] = 0;
+        outs("\r(reverse-i-search)`"); outs(pat); outs("': "); outs(shown); outs("\033[K");
+        unsigned char c;
+        if (sys_read(0, &c, 1) != 1) return 0;
+        if (c == 18) { if (found > 0) { int f = hist_find(pat, found - 1); if (f < nhist) found = f; } continue; }   /* next older */
+        if (c == 127 || c == 8) { if (pl) { pat[--pl] = 0; found = nhist > 0 ? hist_find(pat, nhist - 1) : nhist; } continue; }
+        if (c == 7 || c == 3) return 0;                        /* Ctrl-G or Ctrl-C: cancel, keep the line as it was */
+        if (c >= 32 && c < 127) {
+            if (pl < 46) { pat[pl++] = (char)c; pat[pl] = 0; int f = hist_find(pat, found < nhist ? found : nhist - 1); if (f < nhist) found = f; else found = nhist; }
+            continue;
+        }
+        if (c == 27) {                                          /* an arrow key or Escape: accept the match, swallow the sequence */
+            unsigned char s1 = 0, s2 = 0;
+            if (sys_read(0, &s1, 1) == 1 && (s1 == '[' || s1 == 'O')) { while (sys_read(0, &s2, 1) == 1 && ((s2 >= '0' && s2 <= '9') || s2 == ';')) ; }
+        }
+        if (found < nhist && (int)strlen(hist[found]) < max - 2) { strcpy(buf, hist[found]); *lenp = *posp = (int)strlen(buf); }
+        return c == 13 || c == 10;
+    }
+}
+
 static int readline(const char *prompt, int plen, char *buf, int max)
 {
     int len = 0, pos = 0, scroll = 0, hidx = nhist, tabs = 0;
@@ -298,6 +343,9 @@ static int readline(const char *prompt, int plen, char *buf, int max)
                    memmove(buf + s, buf + pos, (u32)(len - pos + 1)); len -= pos - s; pos = s; break; }   /* Ctrl-W */
         case 12: outs("\033[2J\033[H"); break;                  /* Ctrl-L */
         case 20: if (pos > 0 && len > 1) { if (pos == len) pos--; char t = buf[pos - 1]; buf[pos - 1] = buf[pos]; buf[pos] = t; pos++; } break;   /* Ctrl-T */
+        case 18:                                                /* Ctrl-R: search the history */
+            if (isearch(buf, max, &len, &pos)) { outs("\r\n"); sys_ttymode(0); buf[len] = 0; return len; }
+            break;
         case 16:                                                /* history: previous */
             if (hidx > 0) {
                 if (hidx == nhist) { memcpy(saved, buf, (u32)len + 1); }
@@ -469,6 +517,7 @@ static int lex(const char *s)
                 ntoks--;                                       /* the delimiter word is folded into the << token */
                 i = e; continue;
             }
+            if (c == ';' && s[i + 1] == ';') { new_tok(T_OP, (u32)i, (u32)i + 2); t = &toks[ntoks - 1]; strcpy(t->op, ";;"); i += 2; continue; }
             new_tok(T_OP, (u32)i, (u32)i + 1); t = &toks[ntoks - 1]; t->op[0] = c; t->op[1] = 0; i++;
             continue;
         }
@@ -493,7 +542,8 @@ static int lex(const char *s)
 }
 
 /* ================================================================ parser */
-enum { N_SIMPLE, N_PIPE, N_AND, N_OR, N_SEQ, N_BG, N_IF, N_WHILE, N_FOR, N_GROUP, N_SUBSH, N_FUNC };
+enum { N_SIMPLE, N_PIPE, N_AND, N_OR, N_SEQ, N_BG, N_IF, N_WHILE, N_FOR, N_GROUP, N_SUBSH, N_FUNC, N_CASE };
+struct caseitem { char **pats; int np; struct node *body; struct caseitem *next; };
 struct redir { u8 fd, kind; u8 hdquoted; char *word, *body; struct redir *next; };   /* kind: 0 < 1 > 2 >> 3 >& 4 &> 5 << */
 struct node {
     u8 type, negate, until;
@@ -504,6 +554,7 @@ struct node {
     struct node **cmds; int ncmds;
     char *name; char *src;
     u32 start, end;
+    struct caseitem *items;         /* N_CASE: the patterns and commands; words[0] is the subject */
 };
 
 static struct node *new_node(int type)
@@ -530,6 +581,7 @@ static int at_stop(const char *const *stops)
     if (!t || !stops) return 0;
     for (int i = 0; stops[i]; i++) {
         if (stops[i][0] == ')' && is_op(t, ")")) return 1;
+        if (stops[i][0] == ';' && is_op(t, ";;")) return 1;
         if (t->type == T_WORD && !strcmp(t->text, stops[i])) return 1;
     }
     return 0;
@@ -584,6 +636,7 @@ static struct node *parse_simple(void)
 
 static struct node *parse_command(void)
 {
+    if (stack_low()) { syn("nested too deeply"); return 0; }
     struct tok *t = peek();
     if (!t) { lex_incomplete = 1; syn("unexpected end"); return 0; }
     if (t->type == T_WORD) {
@@ -649,6 +702,45 @@ static struct node *parse_command(void)
             static const char *const s_done[] = { "done", 0 };
             n->b = parse_list(s_done); if (!n->b) return 0;
             if (!is_kw(peek(), "done")) { if (at_eof()) lex_incomplete = 1; syn("expected done"); return 0; }
+            n->end = toks[ti].end; ti++;
+            n->start = start; n->src = adupn(lex_src + start, n->end - start);
+            return n;
+        }
+        if (is_kw(t, "case")) {
+            ti++;
+            struct tok *w = peek();
+            if (!w || w->type != T_WORD) { if (!w) lex_incomplete = 1; syn("expected a word after case"); return 0; }
+            struct node *n = new_node(N_CASE);
+            n->words = aalloc(2 * sizeof(char *)); n->words[0] = w->text; n->words[1] = 0; n->nwords = 1; ti++;
+            skip_nl();
+            if (!is_kw(peek(), "in")) { if (at_eof()) lex_incomplete = 1; syn("expected in"); return 0; }
+            ti++;
+            struct caseitem **tail = &n->items;
+            static const char *const s_item[] = { ";;", "esac", 0 };
+            for (;;) {
+                while (peek() && (peek()->type == T_NL || is_op(peek(), ";"))) ti++;
+                if (!peek()) { lex_incomplete = 1; syn("expected esac"); return 0; }
+                if (is_kw(peek(), "esac")) break;
+                if (is_op(peek(), "(")) ti++;
+                struct caseitem *it = aalloc(sizeof *it); memset(it, 0, sizeof *it);
+                char *pats[16]; int np = 0;
+                for (;;) {
+                    struct tok *pt = peek();
+                    if (!pt || pt->type != T_WORD) { if (!pt) lex_incomplete = 1; syn("expected a pattern"); return 0; }
+                    if (np < 16) pats[np++] = pt->text;
+                    ti++;
+                    if (is_op(peek(), "|")) { ti++; continue; }
+                    break;
+                }
+                if (!is_op(peek(), ")")) { if (at_eof()) lex_incomplete = 1; syn("expected ) after the pattern"); return 0; }
+                ti++;
+                it->np = np; it->pats = aalloc((u32)np * sizeof(char *)); memcpy(it->pats, pats, (u32)np * sizeof(char *));
+                while (peek() && peek()->type == T_NL) ti++;
+                if (!is_op(peek(), ";;") && !is_kw(peek(), "esac")) { it->body = parse_list(s_item); if (!it->body && perr) return 0; }
+                if (is_op(peek(), ";;")) ti++;
+                else if (!is_kw(peek(), "esac")) { if (at_eof()) lex_incomplete = 1; syn("expected ;; or esac"); return 0; }
+                *tail = it; tail = &it->next;
+            }
             n->end = toks[ti].end; ti++;
             n->start = start; n->src = adupn(lex_src + start, n->end - start);
             return n;
@@ -870,6 +962,7 @@ static int has_glob(const char *s, const u8 *q, u32 n)
 /* expand a wildcard pattern component by component; matches are appended to out */
 static void glob_rec(const char *pat, const u8 *q, u32 n, u32 pos, const char *prefix, char **out, int *cnt, int max)
 {
+    if (stack_low()) return;
     while (pos < n && pat[pos] == '/') pos++;
     if (pos >= n) { if (*cnt < max && path_exists(prefix)) out[(*cnt)++] = adup(prefix); return; }
     u32 e = pos; while (e < n && pat[e] != '/') e++;
@@ -902,13 +995,16 @@ static void glob_rec(const char *pat, const u8 *q, u32 n, u32 pos, const char *p
     }
 }
 
+static int no_glob_exp;                       /* expanding a case pattern: keep the field and its quote mask, do not glob */
+static u8 pat_q[FMAX]; static u32 pat_n;
 static void field_end(void)
 {
     if (!fhas) return;
     fbuf[fn] = 0;
+    if (no_glob_exp) { if (!pat_n) { memcpy(pat_q, fq, fn); pat_n = fn + 1; } }
     if (*ex_n < ex_max) {
         int before = *ex_n;
-        if (has_glob(fbuf, fq, fn)) {
+        if (!no_glob_exp && has_glob(fbuf, fq, fn)) {
             char *tmp[200]; int cnt = 0;
             glob_rec(fbuf, fq, fn, 0, fbuf[0] == '/' ? "/" : "", tmp, &cnt, 200);
             if (cnt) { sort_strs(tmp, cnt); for (int i = 0; i < cnt && *ex_n < ex_max; i++) ex_out[(*ex_n)++] = tmp[i]; }
@@ -984,6 +1080,53 @@ static int expand_dollar(const char *w, int i, int quoted)
         const char *v = var_get(name);
         if (!v && !name[1]) v = special_param(name[0], tmp);
         *op = saved;
+        if (!len_op && v && (*op == '#' || *op == '%' || *op == '/' || (*op == ':' && (op[1] >= '0' && op[1] <= '9')))) {
+            static const u8 zq[512];
+            char *val = adup(v); int vl = (int)strlen(val);
+            if (*op == '#' || *op == '%') {                     /* remove the shortest (#, %) or longest (##, %%) match of a pattern */
+                int longest = op[1] == *op; const char *pat = op + 1 + longest; int pn = (int)strlen(pat); if (pn > 512) pn = 512;
+                if (*op == '#') {
+                    int cut = 0, found = 0;
+                    for (int k = longest ? vl : 0; longest ? k >= 0 : k <= vl; k += longest ? -1 : 1) {
+                        char sv = val[k]; val[k] = 0; int m = gm(pat, zq, pn, val); val[k] = sv;
+                        if (m) { cut = k; found = 1; break; }
+                    }
+                    append_val(found ? val + cut : val, quoted);
+                } else {
+                    int cut = vl, found = 0;
+                    for (int k = longest ? 0 : vl; longest ? k <= vl : k >= 0; k += longest ? 1 : -1)
+                        if (gm(pat, zq, pn, val + k)) { cut = k; found = 1; break; }
+                    if (found) val[cut] = 0;
+                    append_val(val, quoted);
+                }
+            } else if (*op == '/') {                            /* ${v/pat/rep}: first match; ${v//pat/rep}: all */
+                int all = op[1] == '/'; char *pat = op + 1 + all, *rep = strchr(pat, '/');
+                if (rep) { *rep = 0; rep++; } else rep = (char *)"";
+                int pn = (int)strlen(pat); if (pn > 512) pn = 512;
+                char *res = aalloc((u32)(vl + 1) * 4 + 64); u32 ro = 0; int k = 0, did = 0;
+                while (k <= vl) {
+                    int hit = 0;
+                    if (pn && (all || !did)) {
+                        for (int l = vl - k; l >= 1; l--) {         /* longest match first */
+                            char sv = val[k + l]; val[k + l] = 0; int m = gm(pat, zq, pn, val + k); val[k + l] = sv;
+                            if (m) { u32 rl = strlen(rep); if (ro + rl + 8 > (u32)(vl + 1) * 4 + 64) break; memcpy(res + ro, rep, rl); ro += rl; k += l; did = 1; hit = 1; break; }
+                        }
+                    }
+                    if (!hit) { if (k < vl) res[ro++] = val[k]; k++; }
+                }
+                res[ro] = 0; append_val(res, quoted);
+            } else {                                            /* ${v:offset} or ${v:offset:length} */
+                const char *q = op + 1; int off = atoi(q), len = vl;
+                while (*q >= '0' && *q <= '9') q++;
+                if (*q == ':') len = atoi(q + 1);
+                if (off > vl) off = vl;
+                if (len < 0) len = vl - off + len;              /* ${v:1:-1}: a negative length counts from the end */
+                if (len < 0) len = 0;
+                if (len > vl - off) len = vl - off;
+                char *sub = adupn(val + off, (u32)len); append_val(sub, quoted);
+            }
+            return e + 1;
+        }
         if (len_op) { char b[12]; utoa(v ? strlen(v) : 0, b); append_val(b, quoted); }
         else if (mode == '-') append_val((v && *v) ? v : def, quoted);
         else if (mode == '=') { if (!v || !*v) { *op = 0; var_set(name, def, -1); *op = saved; v = def; } append_val(v, quoted); }
@@ -1012,8 +1155,85 @@ static int expand_dollar(const char *w, int i, int quoted)
 }
 
 /* expand one raw word into zero or more fields */
+static void expand_word(const char *w, char **out, int *n, int max);
+/* ---- brace expansion: pre{a,b,c}post -> preapost prebpost precpost; {1..5} {a..e} {01..10} {1..10..2} ---- */
+static int brace_range(const char *body, int bl, char **items, int *ni, int max)
+{
+    char tmp[48]; if (bl <= 0 || bl > 40) return 0;
+    memcpy(tmp, body, (u32)bl); tmp[bl] = 0;
+    char *d1 = strstr(tmp, ".."); if (!d1) return 0;
+    *d1 = 0; char *b = d1 + 2, *d2 = strstr(b, ".."), *st = 0;
+    if (d2) { *d2 = 0; st = d2 + 2; }
+    int step = st ? atoi(st) : 1; if (step < 0) step = -step; if (step == 0) step = 1;
+    int a_num = tmp[0] && (isdigit((unsigned char)tmp[0]) || (tmp[0] == '-' && isdigit((unsigned char)tmp[1])));
+    int b_num = b[0] && (isdigit((unsigned char)b[0]) || (b[0] == '-' && isdigit((unsigned char)b[1])));
+    if (a_num && b_num) {
+        int lo = atoi(tmp), hi = atoi(b), w = 0;
+        if ((tmp[0] == '0' && tmp[1]) || (b[0] == '0' && b[1])) w = (int)(strlen(tmp) > strlen(b) ? strlen(tmp) : strlen(b));
+        int dir = lo <= hi ? 1 : -1;
+        for (int v = lo; dir > 0 ? v <= hi : v >= hi; v += dir * step) {
+            if (*ni >= max) break;
+            char nb[16]; int neg = v < 0; utoa((u32)(neg ? -v : v), nb + 1); char *num = nb + 1;
+            char pad[24]; int pl = 0; if (neg) pad[pl++] = '-';
+            for (int z = (int)strlen(num) + neg; z < w; z++) pad[pl++] = '0';
+            memcpy(pad + pl, num, strlen(num) + 1);
+            items[(*ni)++] = adup(pad);
+        }
+        return 1;
+    }
+    if (tmp[0] && !tmp[1] && b[0] && !b[1]) {
+        int lo = (unsigned char)tmp[0], hi = (unsigned char)b[0], dir = lo <= hi ? 1 : -1;
+        for (int v = lo; dir > 0 ? v <= hi : v >= hi; v += dir * step) { if (*ni >= max) break; char c[2] = { (char)v, 0 }; items[(*ni)++] = adup(c); }
+        return 1;
+    }
+    return 0;
+}
+static int brace_try(const char *w, char **out, int *n, int max)
+{
+    for (int i = 0; w[i]; i++) {
+        char c = w[i];
+        if (c == '\\') { if (w[i + 1]) i++; continue; }
+        if (c == '\'') { i++; while (w[i] && w[i] != '\'') i++; if (!w[i]) return 0; continue; }
+        if (c == '"') { i++; while (w[i] && w[i] != '"') { if (w[i] == '\\' && w[i + 1]) i++; i++; } if (!w[i]) return 0; continue; }
+        if (c == '$' && w[i + 1] == '{') { int d = 0; for (i++; w[i]; i++) { if (w[i] == '{') d++; else if (w[i] == '}' && --d == 0) break; } if (!w[i]) return 0; continue; }
+        if (c == '$' && w[i + 1] == '(') { int e = skip_paren(w, i); if (e < 0) return 0; i = e - 1; continue; }
+        if (c != '{') continue;
+        int depth = 0, commas[32], nc = 0, close = -1;
+        for (int j = i; w[j]; j++) {
+            char d = w[j];
+            if (d == '\\') { if (w[j + 1]) j++; continue; }
+            if (d == '\'') { j++; while (w[j] && w[j] != '\'') j++; if (!w[j]) break; continue; }
+            if (d == '"') { j++; while (w[j] && w[j] != '"') { if (w[j] == '\\' && w[j + 1]) j++; j++; } if (!w[j]) break; continue; }
+            if (d == '$' && w[j + 1] == '{') { int dd = 0; for (j++; w[j]; j++) { if (w[j] == '{') dd++; else if (w[j] == '}' && --dd == 0) break; } if (!w[j]) break; continue; }
+            if (d == '{') depth++;
+            else if (d == '}') { if (--depth == 0) { close = j; break; } }
+            else if (d == ',' && depth == 1 && nc < 31) commas[nc++] = j;
+        }
+        if (close < 0) continue;
+        char *items[64]; int ni = 0;
+        if (nc) {
+            int from = i + 1;
+            for (int k = 0; k <= nc && ni < 64; k++) {
+                int to = k < nc ? commas[k] : close;
+                items[ni++] = adupn(w + from, (u32)(to - from));
+                from = to + 1;
+            }
+        } else if (!brace_range(w + i + 1, close - i - 1, items, &ni, 64)) continue;
+        char *pre = adupn(w, (u32)i), *post = adup(w + close + 1);
+        for (int k = 0; k < ni && *n < max; k++) {
+            u32 l = strlen(pre) + strlen(items[k]) + strlen(post);
+            char *nw = aalloc(l + 1); strcpy(nw, pre); strcat(nw, items[k]); strcat(nw, post);
+            expand_word(nw, out, n, max);
+        }
+        return 1;
+    }
+    return 0;
+}
+
 static void expand_word(const char *w, char **out, int *n, int max)
 {
+    if (stack_low()) return;
+    if (!no_glob_exp && brace_try(w, out, n, max)) return;
     ex_out = out; ex_n = n; ex_max = max; fn = 0; fhas = 0;
     int i = 0;
     if (w[0] == '~' && (w[1] == '/' || !w[1])) {
@@ -1098,24 +1318,26 @@ static char *expand_heredoc(const char *body)
 /* ================================================================ running commands */
 static int exec_node(struct node *n);
 static int env_dirty = 1;
+static char *exit_trap;                 /* trap '...' EXIT: run when the shell ends */
 
 #define MAXJOBS 16
-static struct job { int pid; char *cmd; u8 used, done; int status; } jobs[MAXJOBS];
+static struct job { int pid; char *cmd; u8 used, done, stopped; int status; int pids[8], np; } jobs[MAXJOBS];
 static int add_job(int pid, const char *cmd)
 {
-    for (int i = 0; i < MAXJOBS; i++) if (!jobs[i].used) { jobs[i].used = 1; jobs[i].done = 0; jobs[i].pid = pid; jobs[i].cmd = pdup(cmd); return i + 1; }
+    for (int i = 0; i < MAXJOBS; i++) if (!jobs[i].used) { jobs[i].used = 1; jobs[i].done = 0; jobs[i].stopped = 0; jobs[i].pid = pid; jobs[i].pids[0] = pid; jobs[i].np = 1; jobs[i].cmd = pdup(cmd); return i + 1; }
     return 0;
 }
+static int cur_job;             /* the job most recently started or stopped (what fg and bg use without an argument) */
 static void reap_jobs(int announce)
 {
     for (int i = 0; i < MAXJOBS; i++) {
         if (!jobs[i].used) continue;
-        if (!jobs[i].done) {
+        if (!jobs[i].done && !jobs[i].stopped) {
             int r = sys_waitnb(jobs[i].pid);
             if (r == -2) continue;
             jobs[i].done = 1; jobs[i].status = r;
         }
-        if (announce) {
+        if (announce && jobs[i].done) {
             char b[16]; outs("["); utoa((u32)i + 1, b); outs(b); outs("]  Done      "); outs(jobs[i].cmd); outs("\n");
             free(jobs[i].cmd); jobs[i].used = 0;
         }
@@ -1199,14 +1421,32 @@ static int start_program(char **argv)
     return pid;
 }
 
-static int wait_fg(int pid, const char *name)
+/* wait for a foreground job (a pipeline's processes); the last one holds the terminal, so Ctrl-Z stops that one and
+ * the shell stops the others. A stopped job is kept in the job table (fg and bg bring it back). job: its number when it
+ * is being brought back to the foreground, else 0. */
+static int fg_wait(int *pids, int np, const char *name, int job)
 {
-    sys_setfg(pid);
-    int st = sys_wait(pid);
+    sys_setfg(pids[np - 1]);
+    int st = sys_waitu(pids[np - 1]);
     sys_setfg(0);
+    if (st == ST_STOPPED) {
+        for (int i = 0; i < np - 1; i++) sys_jobctl(pids[i], 0);
+        if (!job) job = add_job(pids[np - 1], name);
+        if (job) {
+            struct job *j = &jobs[job - 1];
+            j->stopped = 1; j->done = 0; j->np = np > 8 ? 8 : np;
+            for (int i = 0; i < j->np; i++) j->pids[i] = pids[i];
+            cur_job = job;
+            char b[16]; outs("\n["); utoa((u32)job, b); outs(b); outs("]+  Stopped    "); outs(j->cmd); outs("\n");
+        }
+        return 128 + 20;
+    }
+    for (int i = 0; i < np - 1; i++) sys_wait(pids[i]);
+    if (job) { free(jobs[job - 1].cmd); jobs[job - 1].used = 0; if (cur_job == job) cur_job = 0; }
     if (st == 139) { errs("["); errs(name); errs(" crashed]\n"); }
     return st;
 }
+static int wait_fg(int pid, const char *name) { return fg_wait(&pid, 1, name, 0); }
 
 /* ---- builtins ---- */
 static int is_builtin(const char *n);
@@ -1271,6 +1511,69 @@ static int run_simple(struct node *n, int background, int *pidout)
 }
 
 /* ---- pipelines: each stage is a separate process ---- */
+/* There is no fork, so a builtin, function or compound command in a pipeline runs in a child shell that is given the text of
+ * the command. To make that child a faithful subshell it is also given what the parent knows: the variables that are not
+ * exported (the exported ones travel in the environment), the functions and the positional parameters, as a few lines
+ * of shell in front of the command. */
+static void prefix_quote(char *buf, u32 *o, u32 cap, const char *s)
+{
+    if (*o + 2 >= cap) return;
+    buf[(*o)++] = '\'';
+    for (; *s && *o + 6 < cap; s++) {
+        if (*s == '\'') { buf[(*o)++] = '\''; buf[(*o)++] = '\\'; buf[(*o)++] = '\''; buf[(*o)++] = '\''; }
+        else buf[(*o)++] = *s;
+    }
+    buf[(*o)++] = '\'';
+}
+static int mentions(const char *text, const char *name) { return strstr(text, name) != 0; }
+static char *subshell_text(const char *cmd)
+{
+    /* only what the command can reach: variables and functions named in it, or in the functions it calls */
+    u8 fin[48], vin[128]; memset(fin, 0, sizeof fin); memset(vin, 0, sizeof vin);
+    for (int changed = 1, round = 0; changed && round < 6; round++) {
+        changed = 0;
+        for (int i = 0; i < 48; i++) {
+            if (!funcs[i].used || fin[i]) continue;
+            int hit = mentions(cmd, funcs[i].name);
+            for (int j = 0; j < 48 && !hit; j++) if (fin[j] && mentions(funcs[j].body, funcs[i].name)) hit = 1;
+            if (hit) { fin[i] = 1; changed = 1; }
+        }
+        for (int i = 0; i < 128; i++) {
+            struct var *v = &vars[i];
+            if (!v->used || v->exp || vin[i] || !v->val || !is_name_c((unsigned char)v->name[0], 1)) continue;
+            int hit = mentions(cmd, v->name);
+            for (int j = 0; j < 48 && !hit; j++) if (fin[j] && mentions(funcs[j].body, v->name)) hit = 1;
+            if (hit) { vin[i] = 1; changed = 1; }
+        }
+    }
+    int need_pos = npos && strchr(cmd, '$');
+    for (int j = 0; j < 48 && npos && !need_pos; j++) if (fin[j] && strchr(funcs[j].body, '$')) need_pos = 1;
+    u32 size = strlen(cmd) + 8;
+    for (int i = 0; i < 128; i++) if (vin[i]) size += strlen(vars[i].name) + strlen(vars[i].val) * 4 + 8;
+    for (int i = 0; i < 48; i++) if (fin[i]) size += strlen(funcs[i].name) + strlen(funcs[i].body) + 8;
+    if (need_pos) { size += 12; for (int k = 0; k < npos; k++) size += strlen(pos_arg[k]) * 4 + 4; }
+    char *buf = aalloc(size); u32 o = 0;
+    for (int i = 0; i < 128; i++) {
+        if (!vin[i]) continue;
+        u32 nl = strlen(vars[i].name);
+        memcpy(buf + o, vars[i].name, nl); o += nl; buf[o++] = '=';
+        prefix_quote(buf, &o, size, vars[i].val); buf[o++] = ';'; buf[o++] = ' ';
+    }
+    for (int i = 0; i < 48; i++) {
+        if (!fin[i]) continue;
+        u32 nl = strlen(funcs[i].name), bl = strlen(funcs[i].body);
+        memcpy(buf + o, funcs[i].name, nl); o += nl; buf[o++] = '('; buf[o++] = ')'; buf[o++] = ' ';
+        memcpy(buf + o, funcs[i].body, bl); o += bl; buf[o++] = '\n';
+    }
+    if (need_pos) {
+        memcpy(buf + o, "set --", 6); o += 6;
+        for (int k = 0; k < npos; k++) { buf[o++] = ' '; prefix_quote(buf, &o, size, pos_arg[k]); }
+        buf[o++] = ';'; buf[o++] = ' ';
+    }
+    strcpy(buf + o, cmd);
+    return buf;
+}
+
 static int spawn_stage(struct node *c, int background_text_only)
 {
     (void)background_text_only;
@@ -1285,7 +1588,7 @@ static int spawn_stage(struct node *c, int background_text_only)
         }
     }
     /* builtins, functions and compound commands run in a child shell */
-    char *argv[5] = { "sh", "-c", c->src ? c->src : (char *)"true", 0, 0 };
+    char *argv[5] = { "sh", "-c", subshell_text(c->src ? c->src : "true"), 0, 0 };
     if (env_dirty) { env_sync(); env_dirty = 0; }
     return sys_spawn("/bin/sh", argv, 0);
 }
@@ -1311,11 +1614,7 @@ static int run_pipeline(struct node *p, int background, int *pidout)
     if (np == 0) return 1;
     if (pidout) *pidout = pids[np - 1];
     if (background) return 0;
-    sys_setfg(pids[np - 1]);
-    int st = 0;
-    for (int i = 0; i < np; i++) { int s = sys_wait(pids[i]); if (i == np - 1) st = s; }
-    sys_setfg(0);
-    return st;
+    return fg_wait(pids, np, p->src ? p->src : "pipeline", 0);
 }
 
 static int run_function(struct func *f, char **argv, int argc)
@@ -1346,6 +1645,7 @@ static int cond_true(struct node *c) { return exec_node(c) == 0; }
 
 static int exec_node(struct node *n)
 {
+    if (stack_low()) { errm("nested too deeply", 0); return 1; }
     if (!n) return 0;
     int st = 0;
     if (exit_requested) return last_status;
@@ -1376,6 +1676,7 @@ static int exec_node(struct node *n)
         if (pid > 0) {
             last_bg = pid;
             int j = add_job(pid, a->src ? a->src : "job");
+            cur_job = j;
             if (interactive) { char b[16]; outs("["); utoa((u32)j, b); outs(b); outs("] "); utoa((u32)pid, b); outs(b); outs("\n"); }
         }
         st = 0; break;
@@ -1420,9 +1721,26 @@ static int exec_node(struct node *n)
         break;
     }
     case N_GROUP: st = exec_node(n->a); break;
+    case N_CASE: {
+        char *subject = expand_plain(n->words[0]);
+        subject = adup(subject);
+        st = 0;
+        for (struct caseitem *it = n->items; it; it = it->next) {
+            int hit = 0;
+            for (int k = 0; k < it->np && !hit; k++) {
+                char *flds[4]; int nf = 0;
+                no_glob_exp = 1; pat_n = 0;
+                expand_word(it->pats[k], flds, &nf, 4);
+                no_glob_exp = 0;
+                if (nf && pat_n) hit = gm(flds[0], pat_q, (int)pat_n - 1, subject);
+            }
+            if (hit) { if (it->body) st = exec_node(it->body); break; }
+        }
+        break;
+    }
     case N_SUBSH: {
         char *inner = adupn(n->src + 1, strlen(n->src) - 2);
-        char *argv[5] = { "sh", "-c", inner, 0, 0 };
+        char *argv[5] = { "sh", "-c", subshell_text(inner), 0, 0 };
         if (env_dirty) { env_sync(); env_dirty = 0; }
         int pid = sys_spawn("/bin/sh", argv, 0);
         st = pid < 0 ? 126 : wait_fg(pid, "subshell");
@@ -1451,7 +1769,7 @@ static int run_capture(const char *cmd, char **out)
     struct rsave rs; rs_init(&rs);
     rs_save(&rs, 1);
     sys_dup2(pp[1], 1); sys_close(pp[1]);
-    char *argv[5] = { "sh", "-c", (char *)cmd, 0, 0 };
+    char *argv[5] = { "sh", "-c", subshell_text(cmd), 0, 0 };
     if (env_dirty) { env_sync(); env_dirty = 0; }
     int pid = sys_spawn("/bin/sh", argv, 0);
     rs_restore(&rs);
@@ -1489,7 +1807,7 @@ static int run_string(const char *text)
 static const char *const bnames[] = {
     "cd", "exit", "export", "unset", "set", "alias", "unalias", "history", "source", ".", "read", "shift",
     "return", "break", "continue", "jobs", "wait", "kill", "type", "test", "[", "true", "false", ":", "echo",
-    "pwd", "help", "local", "eval", "umask", 0 };
+    "pwd", "help", "local", "eval", "umask", "fg", "bg", "trap", 0 };
 static int is_builtin(const char *n) { for (int i = 0; bnames[i]; i++) if (!strcmp(bnames[i], n)) return 1; return 0; }
 static int builtin_names(const char **out, int max) { int n = 0; while (bnames[n] && n < max) { out[n] = bnames[n]; n++; } return n; }
 
@@ -1625,6 +1943,30 @@ static int run_builtin(char **argv, int argc)
     if (!strcmp(n, "echo")) return do_echo(argv, argc);
     if (!strcmp(n, "true") || !strcmp(n, ":")) return 0;
     if (!strcmp(n, "false")) return 1;
+    if (!strcmp(n, "fg") || !strcmp(n, "bg")) {
+        int fg = n[0] == 'f', j = 0;
+        if (argc > 1) { int pid = job_pid(argv[1]); for (int i = 0; i < MAXJOBS; i++) if (jobs[i].used && jobs[i].pid == pid) j = i + 1; }
+        else if (cur_job && jobs[cur_job - 1].used) j = cur_job;
+        else for (int i = MAXJOBS - 1; i >= 0; i--) if (jobs[i].used && !jobs[i].done) { j = i + 1; break; }
+        if (!j) { errm(n, "no such job"); return 1; }
+        struct job *jb = &jobs[j - 1];
+        outs(jb->cmd); outs(fg ? "\n" : " &\n");
+        jb->stopped = 0;
+        for (int i = 0; i < jb->np; i++) sys_jobctl(jb->pids[i], 1);
+        if (!fg) { cur_job = j; return 0; }
+        int pids[8], np = jb->np; for (int i = 0; i < np; i++) pids[i] = jb->pids[i];
+        return fg_wait(pids, np, jb->cmd, j);
+    }
+    if (!strcmp(n, "trap")) {                                  /* trap 'commands' EXIT   (only EXIT / 0 is supported) */
+        if (argc == 1) { if (exit_trap) { outs("trap -- '"); outs(exit_trap); outs("' EXIT\n"); } return 0; }
+        if (argc == 2 && !strcmp(argv[1], "-")) { exit_trap = 0; return 0; }
+        if (argc < 3) { errm("trap", "usage: trap 'commands' EXIT"); return 2; }
+        for (int i = 2; i < argc; i++) {
+            if (!strcmp(argv[i], "EXIT") || !strcmp(argv[i], "0")) exit_trap = argv[1][0] ? pdup(argv[1]) : 0;
+            else if (strcmp(argv[i], "INT") && strcmp(argv[i], "TERM") && strcmp(argv[i], "HUP")) { errm(argv[i], "unsupported signal for trap"); return 1; }
+        }
+        return 0;
+    }
     if (!strcmp(n, "umask")) {
         if (argc > 1) { u32 v = 0; for (const char *c = argv[1]; *c; c++) { if (*c < '0' || *c > '7') { errm("umask", "bad mask"); return 1; } v = v * 8 + (u32)(*c - '0'); } sys_umask(v); return 0; }
         u32 m = (u32)sys_umask(0); sys_umask(m);
@@ -1703,7 +2045,7 @@ static int run_builtin(char **argv, int argc)
     if (!strcmp(n, "continue")) { loop_continue = argc > 1 ? atoi(argv[1]) : 1; return 0; }
     if (!strcmp(n, "jobs")) {
         reap_jobs(0);
-        for (int i = 0; i < MAXJOBS; i++) if (jobs[i].used) { char b[16]; outs("["); utoa((u32)i + 1, b); outs(b); outs("]  "); outs(jobs[i].done ? "Done      " : "Running   "); outs(jobs[i].cmd); outs("\n"); if (jobs[i].done) { free(jobs[i].cmd); jobs[i].used = 0; } }
+        for (int i = 0; i < MAXJOBS; i++) if (jobs[i].used) { char b[16]; outs("["); utoa((u32)i + 1, b); outs(b); outs("]"); outs(cur_job == i + 1 ? "+ " : "  "); outs(jobs[i].done ? "Done       " : jobs[i].stopped ? "Stopped    " : "Running    "); outs(jobs[i].cmd); outs("\n"); if (jobs[i].done) { free(jobs[i].cmd); jobs[i].used = 0; } }
         return 0;
     }
     if (!strcmp(n, "wait")) {
@@ -1712,8 +2054,20 @@ static int run_builtin(char **argv, int argc)
         return 0;
     }
     if (!strcmp(n, "kill")) {
-        int rc = 0;
-        for (int i = 1; i < argc; i++) { if (argv[i][0] == '-') continue; int pid = job_pid(argv[i]); if (pid <= 0 || sys_kill(pid) < 0) { errm(argv[i], "no such process"); rc = 1; } }
+        int rc = 0, op = 2;                              /* 0 stop, 1 continue, 2 end it */
+        for (int i = 1; i < argc; i++) {
+            if (argv[i][0] == '-' && argv[i][1]) {
+                const char *sg = argv[i] + 1;
+                if (!strcmp(sg, "s") && i + 1 < argc) sg = argv[++i];
+                if (!strcmp(sg, "STOP") || !strcmp(sg, "TSTP") || !strcmp(sg, "SIGSTOP") || !strcmp(sg, "19") || !strcmp(sg, "20")) op = 0;
+                else if (!strcmp(sg, "CONT") || !strcmp(sg, "SIGCONT") || !strcmp(sg, "18")) op = 1;
+                else op = 2;
+                continue;
+            }
+            int pid = job_pid(argv[i]);
+            if (pid <= 0 || (op == 2 ? sys_kill(pid) : sys_jobctl(pid, op)) < 0) { errm(argv[i], "no such process"); rc = 1; continue; }
+            for (int j = 0; j < MAXJOBS; j++) if (jobs[j].used && jobs[j].pid == pid && op < 2) { jobs[j].stopped = op == 0; for (int q = 0; q < jobs[j].np; q++) sys_jobctl(jobs[j].pids[q], op); }
+        }
         return rc;
     }
     if (!strcmp(n, "type")) { int rc = 0; for (int i = 1; i < argc; i++) rc |= do_type(argv[i]); return rc; }
@@ -1722,7 +2076,7 @@ static int run_builtin(char **argv, int argc)
              "Language: VAR=value, $VAR, $(cmd), * ? [..], | && || ; &, < > >> 2> 2>&1 << EOF,\n"
              "  if/elif/else/fi, while/until/for/do/done, name() { ...; }, alias, scripts (sh file).\n"
              "Builtins: cd exit export unset set alias unalias history source read shift return break continue\n"
-             "  jobs wait kill type test [ true false : echo pwd eval local help\n");
+             "  jobs fg bg wait kill type test [ true false : echo pwd eval local umask help\n");
         return 0;
     }
     return 127;
@@ -1854,7 +2208,7 @@ static void interactive_loop(void)
     save_history();
 }
 
-int main(int argc, char **argv)
+static int shell_main(int argc, char **argv)
 {
     /* The arena holds the parsed commands of one input line or script; the long scripts of the tests peak near
      * 180 KB, an interactive session needs a few KB. Take an eighth of the free memory (the arena goes to fast RAM
@@ -1887,4 +2241,16 @@ int main(int argc, char **argv)
     load_history();
     interactive_loop();
     return last_status;
+}
+
+int main(int argc, char **argv)
+{
+    { char *sp; __asm__ volatile("move.l %%sp,%0" : "=r"(sp)); stk_top = sp; }
+    int st = shell_main(argc, argv);
+    if (exit_trap) {                                    /* trap '...' EXIT */
+        char *t = exit_trap; exit_trap = 0; exit_requested = 0;
+        abrk = arena;
+        run_string(t);
+    }
+    return st;
 }
