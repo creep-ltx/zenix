@@ -42,7 +42,7 @@ void *memset(void *d, int c, unsigned long n);
 void *memcpy(void *d, const void *s, unsigned long n);
 void *memmove(void *d, const void *s, unsigned long n);
 extern volatile u32 ticks;
-u32 hr_time(void);
+u32 hr_time(void);          /* E-clock ticks (709379 Hz PAL), CIA-B timers A+B; wraps after ~1.7 h; never early */
 u32 rtc_read(void);
 extern int tty_mirror;      /* 100 Hz, CIA-A timer A */
 
@@ -55,6 +55,7 @@ void ints_on(void);
 void ints_off(void);
 void cpu_idle(void);
 void cache_enable(int is040plus);
+void cache_flush_code(void);         /* after writing code that will run: I-cache (and Emu68 JIT) flush */
 void exc_common(void);
 void irq2_entry(void);
 
@@ -93,6 +94,7 @@ int ws_in_use(int w);
 extern int ws_cur;
 extern int ws_spawn_pending[10];
 void kbd_isr(void);
+void kbd_tick(void);                    /* from the 100 Hz tick: key repeat */
 void irq3_entry(void);
 void irq3_c(void);
 
@@ -102,6 +104,7 @@ u32 ide_sectors(void);
 int ide_read(u32 lba, u32 count, void *buf);
 int ide_write(u32 lba, u32 count, const void *buf);
 int ide_flush(void);                     /* ATA FLUSH CACHE: the drive's write cache is on the platter */
+void ide_stray_irq(void);                /* level 2 without a CIA cause: clear Gayle's IDE interrupt latch */
 
 /* blk.c: the one raw disk (IDE or SD card) behind the disk server */
 int blk_init(void);
