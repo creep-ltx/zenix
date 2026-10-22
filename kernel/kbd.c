@@ -10,7 +10,7 @@
  * layout, so those live in selectable keymaps (Latin-1 output — the
  * console renders it, Topaz has the glyphs). 40-67 are layout-neutral. */
 
-static u8 shift_down, ctrl_down, amiga_down;
+static u8 shift_down, ctrl_down, amiga_down, alt_down;
 
 struct keymap {
     char name[4];
@@ -79,21 +79,43 @@ static int special_key(u8 code)
     static const char *const fkeys[10] = {
         "\033OP", "\033OQ", "\033OR", "\033OS", "\033[15~",
         "\033[17~", "\033[18~", "\033[19~", "\033[20~", "\033[21~" };
+    int raw = (tty_getmode(ws_cur) & TTY_RAW) != 0;
     if (code >= 0x4C && code <= 0x4F) {
-        if ((shift_down || ctrl_down) && code <= 0x4D) {       /* scrollback */
+        static const char arrow[4] = { 'A', 'B', 'C', 'D' };
+        int mods = (shift_down ? 1 : 0) | (alt_down ? 2 : 0) | (ctrl_down ? 4 : 0);
+        if (raw) {                                              /* programs get xterm's modified arrows: ESC[1;5A */
+            char seq[8] = "\033[";
+            int n = 2;
+            if (mods) { seq[n++] = '1'; seq[n++] = ';'; seq[n++] = (char)('1' + mods); }
+            seq[n++] = arrow[code - 0x4C];
+            seq[n] = 0;
+            emit_seq(seq);
+            return 1;
+        }
+        if ((shift_down || ctrl_down) && code <= 0x4D) {        /* a plain terminal: scrollback */
             int step = ctrl_down ? TROWS - 1 : 1;
             term_scroll_view(code == 0x4C ? step : -step);
             return 1;
         }
-        if (shift_down && code >= 0x4E) {                      /* Shift+Right/Left = End/Home */
-            emit_seq(code == 0x4E ? "\033[F" : "\033[H");
+        return 1;                                               /* cursor keys mean nothing to line editing in the kernel */
+    }
+    if (code >= 0x50 && code <= 0x59) {
+        if (raw && (shift_down || ctrl_down || alt_down) && code - 0x50 >= 4) { /* modified F5..F10: ESC[15;2~ */
+            static const char *const num[6] = { "15", "17", "18", "19", "20", "21" };
+            char seq[16] = "\033["; int n = 2;
+            for (const char *q = num[code - 0x54]; *q; q++) seq[n++] = *q;
+            seq[n++] = ';'; seq[n++] = (char)('1' + ((shift_down ? 1 : 0) | (alt_down ? 2 : 0) | (ctrl_down ? 4 : 0))); seq[n++] = '~'; seq[n] = 0;
+            emit_seq(seq);
             return 1;
         }
-        static const char *const arrows[4] = { "\033[A", "\033[B", "\033[C", "\033[D" };
-        emit_seq(arrows[code - 0x4C]);
+        if (raw && (shift_down || ctrl_down || alt_down) && code - 0x50 < 4) {  /* modified F1..F4: ESC[1;2P */
+            char seq[10] = "\033[1;"; seq[4] = (char)('1' + ((shift_down ? 1 : 0) | (alt_down ? 2 : 0) | (ctrl_down ? 4 : 0))); seq[5] = "PQRS"[code - 0x50]; seq[6] = 0;
+            emit_seq(seq);
+            return 1;
+        }
+        emit_seq(fkeys[code - 0x50]);
         return 1;
     }
-    if (code >= 0x50 && code <= 0x59) { emit_seq(fkeys[code - 0x50]); return 1; }
     if (code == 0x5F) { emit_seq("\033[2~"); return 1; }       /* Help = Insert */
     if (code == 0x46) { emit_seq("\033[3~"); return 1; }       /* Del */
     return 0;
@@ -118,6 +140,9 @@ void kbd_isr(void)
         return;
     case 0x63:                          /* control */
         ctrl_down = (u8)!up;
+        return;
+    case 0x64: case 0x65:               /* left / right Alt */
+        alt_down = (u8)!up;
         return;
     case 0x66: case 0x67:               /* left / right Amiga */
         amiga_down = (u8)!up;
