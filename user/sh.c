@@ -1850,9 +1850,10 @@ static void interactive_loop(void)
 
 int main(int argc, char **argv)
 {
-    arena = sys_memalloc(ARENA);
+    u32 asize = ARENA;                              /* a machine short of memory gets a smaller arena, but never less than 128 KB (below that the shell refuses cleanly) */
+    while (!(arena = sys_memalloc(asize)) && asize > 131072) asize /= 2;
     if (!arena) { errm("no memory", 0); return 2; }
-    abrk = arena; aend = arena + ARENA;
+    abrk = arena; aend = arena + asize;
     shell_pid = sys_getpid();
     import_environment();
     init_vars();

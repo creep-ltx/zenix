@@ -24,7 +24,8 @@ for n in $CONFS; do
     grep -q 'killed' $OUT/$n.log || ok=0
     grep -q 'Zenix 0.2' $OUT/$n.log || ok=0
     grep -q 'Filesystem  1K-blocks' $OUT/$n.log || ok=0
-    grep -q '^ws2ok$' $OUT/$n.log || ok=0        # a shell on a second workspace
+    # a shell on a second workspace (needs memory: with 1 MB of chip RAM and no fast RAM only one shell fits)
+    if ! grep -q 'mem: [0-9]* KB chip, 0 KB fast' $OUT/$n.log; then grep -q '^ws2ok$' $OUT/$n.log || ok=0; fi
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"
 done

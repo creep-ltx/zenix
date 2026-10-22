@@ -39,6 +39,7 @@ void *memcpy(void *d, const void *s, unsigned long n);
 void *memmove(void *d, const void *s, unsigned long n);
 extern volatile u32 ticks;
 u32 hr_time(void);
+u32 rtc_read(void);
 extern int tty_mirror;      /* 100 Hz, CIA-A timer A */
 
 /* start.S */
