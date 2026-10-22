@@ -23,7 +23,9 @@ build/zxfs-tool ls disk.zxfs -l /stuff ; build/zxfs-tool cat disk.zxfs /stuff/fi
 build/zxfs-tool get disk.zxfs -r /stuff ~/copy ; build/zxfs-tool fsck disk.zxfs
 ```
 Commands: `mkfs info fsck ls stat cat put get mkdir rm rmdir mv ln` (options always after the image name; see the top of `zxfs/tools/zxfs-tool.c`).
-It is an image-file tool, not a mount: the image cannot yet be opened as a folder in Linux (that needs FUSE, not built).
+**Mount it as a folder** (needs fuse3): `make build/zxfs-fuse`, then `build/zxfs-fuse disk.zxfs /mnt/point` and `fusermount3 -u /mnt/point`. It is single-threaded
+and commits on close, `fsync`, when the cache fills and at unmount. `make fuse-test` copies trees through the mount, and kills the filesystem process with `kill -9` in the middle of a
+big copy eight times: every image must still pass `fsck`. *Verified* on 2026-10-22 (fuse3 3.18.3). Speed through FUSE says little about ZXFS itself.
 
 ## 1. Goal and the machine it is for
 A filesystem that is **safe** (no check after a crash, no replay, silent damage is noticed), **fast on slow
