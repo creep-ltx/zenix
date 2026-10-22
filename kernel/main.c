@@ -88,10 +88,13 @@ void irq2_c(u32 sr)
 {
     u8 icr = CIAA(CIA_ICR);             /* read acknowledges the CIA */
     INTREQ = INTF_PORTS;
+    if (!(icr & 0x1F))
+        ide_stray_irq();                /* not the CIA: Gayle's IDE latch (it shares level 2) */
     if (icr & 8)
         kbd_isr();
     if (icr & 1) {
         ticks++;
+        kbd_tick();
         audio_tick();
         input_poll();
         fd_tick();
@@ -101,19 +104,25 @@ void irq2_c(u32 sr)
     }
 }
 
-/* Time in E-clock ticks (709379 Hz on PAL), the CIA's own clock: the 100 Hz
- * tick count plus how far timer A has counted into the current tick. */
+/* Time in E-clock ticks (709379 Hz on PAL, 715909 on NTSC), the CIA's own clock, read from hardware only: CIA-B
+ * timer A counts E-clock pulses down from 0xFFFF, timer B counts timer A's underflows (CRB INMODE 10), so the two
+ * are one free-running 32-bit counter (wraps after about 1.7 hours). It does not depend on the tick interrupt
+ * being taken, so it never reads early (the old form, ticks * 7095 + timer A's position, read about 10 ms low
+ * in the moment between timer A wrapping and the tick interrupt running - always the case inside irq2 itself).
+ * Timer B only moves when timer A wraps (every 92 ms), so re-reading it after timer A catches that moment. */
 u32 hr_time(void)
 {
-    u32 t1, t2, hi, lo, hi2;
+    u32 bhi, blo, ahi, alo, ahi2, bhi2, blo2;
     do {
-        t1 = ticks;
-        hi = CIAA(CIA_TAHI);
-        lo = CIAA(CIA_TALO);
-        hi2 = CIAA(CIA_TAHI);
-        t2 = ticks;
-    } while (t1 != t2 || hi != hi2);
-    return t1 * (CIA_TICKS_100HZ + 1) + (CIA_TICKS_100HZ - ((hi << 8) | lo));
+        bhi = CIAB(CIA_TBHI);
+        blo = CIAB(CIA_TBLO);
+        ahi = CIAB(CIA_TAHI);
+        alo = CIAB(CIA_TALO);
+        ahi2 = CIAB(CIA_TAHI);          /* alo belongs to ahi only if the high byte did not move around it */
+        bhi2 = CIAB(CIA_TBHI);
+        blo2 = CIAB(CIA_TBLO);
+    } while (ahi != ahi2 || bhi != bhi2 || blo != blo2);
+    return ~(((bhi << 8 | blo) << 16) | (ahi << 8 | alo));
 }
 
 static void vectors_init(void)
@@ -129,6 +138,18 @@ static void vectors_init(void)
 
 static void timer_init(void)
 {
+    /* CIA-B timers A and B chained as the free-running E-clock counter behind hr_time() */
+    CIAB(CIA_CRA) = 0x00;
+    CIAB(CIA_CRB) = 0x00;
+    CIAB(CIA_ICR) = 0x7F;               /* no CIA-B interrupts */
+    (void)CIAB(CIA_ICR);
+    CIAB(CIA_TALO) = 0xFF;
+    CIAB(CIA_TAHI) = 0xFF;
+    CIAB(CIA_TBLO) = 0xFF;
+    CIAB(CIA_TBHI) = 0xFF;
+    CIAB(CIA_CRB) = 0x51;               /* timer B: count timer A underflows, continuous, force load, start */
+    CIAB(CIA_CRA) = 0x11;               /* timer A: E-clock, continuous, force load, start */
+
     CIAA(CIA_CRA) = 0x00;
     CIAA(CIA_ICR) = 0x7F;
     (void)CIAA(CIA_ICR);

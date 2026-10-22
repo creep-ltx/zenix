@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Keyboard test: boot Zenix in FS-UAE inside a private invisible Wayland session (the cage rig, as shot.py), press
+keys on the emulated Amiga keyboard with wtype, make the shell write what arrived into files, then read the files
+back from the disk image and compare. Checks the Swedish keymap's four layers (plain, Shift, Alt, Shift+Alt), Caps
+Lock, and software key repeat (a held key).
+
+usage: kbd-test.py config.fs-uae [serial-link]      (run by tools/kbd-test.sh)
+FS-UAE maps host keys to Amiga raw codes by position (a US host layout): host [ ; ' are Amiga 0x1A 0x29 0x2A.
+Traps (knowledge base, zenix-m0-m3-findings.md): the first key sent is lost, modifiers need real key events."""
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.expanduser("~/Projects/DemoScene/Creator"))
+from maker.cage_rig import Cage  # noqa: E402
+
+conf = sys.argv[1]
+link = sys.argv[2] if len(sys.argv) > 2 else "/tmp/zenix-serial"
+here = os.path.dirname(os.path.abspath(__file__))
+log = "/tmp/zenix-kbd/serial.log"
+os.makedirs("/tmp/zenix-kbd", exist_ok=True)
+script = "/tmp/zenix-kbd/script.txt"
+open(script, "w").write("sleep 1\n")
+tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"), link, log, script],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+time.sleep(1)
+t0 = time.time()
+
+
+def at(t):
+    time.sleep(max(0, t0 + t - time.time()))
+
+
+try:
+    with Cage(["fs-uae", conf]) as cage:
+        env = cage._env()
+
+        def w(*args):
+            subprocess.run(["wtype", *args], env=env, check=False)
+            time.sleep(0.15)
+
+        def text(s):                                 # plain ASCII through wtype's own key lookup
+            w("-s", "60", s)
+
+        def key(k, *mods):                           # a key with real modifier events around it
+            cmd = []
+            for m in mods: cmd += ["-P", m]
+            if mods: cmd += ["-s", "150"]
+            cmd += ["-k", k]
+            if mods: cmd += ["-s", "150"]
+            for m in mods: cmd += ["-p", m]
+            w(*cmd)
+
+        def redir(name):                             # " > /tmp/NAME" in Swedish key positions: > is Shift+<, / is Shift+7
+            text(" "); key("less", "Shift_L"); text(" "); key("7", "Shift_L"); text("tmp"); key("7", "Shift_L"); text(name)
+
+        at(22)                                       # the shell prompt is up (a 68020 boots in about 15 s)
+        w("-k", "x")                                 # warm-up: the first key is lost
+        time.sleep(0.5)
+        # 1. layers: å ö ä (plain), £ (Shift+3), [ (Alt+å key), { (Shift+Alt+å key), ² (Alt+2), \ (Alt+<, typed twice:
+        # the shell takes \\ as one backslash). The host's right Alt: the left one never reaches FS-UAE in the cage.
+        text("echo ")
+        key("bracketleft"); key("semicolon"); key("apostrophe")
+        key("3", "Shift_L")
+        key("bracketleft", "Alt_R"); key("bracketleft", "Alt_R", "Shift_R")
+        key("2", "Alt_R")
+        key("less", "Alt_R"); key("less", "Alt_R")   # host 'less' = the extra key left of Z (raw 0x30)
+        redir("k1.txt"); w("-k", "Return")
+        time.sleep(1)
+        # 2. Caps Lock: letters upper case, digits unchanged, Shift gives lower case
+        text("echo ")
+        w("-k", "Caps_Lock"); time.sleep(0.3)
+        text("ab1"); key("c", "Shift_L")
+        w("-k", "Caps_Lock"); time.sleep(0.3)
+        text("d"); redir("k2.txt"); w("-k", "Return")
+        time.sleep(1)
+        # 3. repeat: hold z for 1.2 s: 1 + about (1200 - 500) / 30 = roughly 24 z's; anything from 10 to 40 is right
+        text("echo ")
+        w("-P", "z", "-s", "1200", "-p", "z")
+        redir("k3.txt"); w("-k", "Return")
+        time.sleep(2)
+        text("sync"); w("-k", "Return")
+        time.sleep(3)
+        cage.screenshot("/tmp/zenix-kbd/screen.png")
+finally:
+    tap.terminate()
