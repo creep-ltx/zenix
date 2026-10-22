@@ -1,0 +1,214 @@
+# Zenix architecture
+
+Zenix is a small Unix-like operating system for Amigas with a 68020 or better and **no MMU**. It does not sit on
+top of AmigaOS: the floppy bootblock borrows Kickstart only to load the kernel and read the memory map, then
+switches the OS off and owns the machine. The sources are about 5,000 lines of kernel C/assembler (`kernel/`) and
+a set of user-mode programs (`user/`).
+
+## 1. The shape of the system
+
+```
+ user mode    sh  ls  cat  grep  sed  edit  less  ...   (ZEXE programs from the ext2 disk, /bin)
+                 |     (TRAP #0 system calls)
+ ------------------------------------------------------------------------------------------
+ kernel       scheduler | memory manager | ports + messages | file table, pipes, tty line
+              discipline | terminal + display (Copper/blitter) | keyboard | serial | IDE | clock
+                 |      (messages: "fs" port, "disk" port)
+ user mode    boot (session manager)   fsd (ext2 filesystem server)   diskd (disk server)
+              ^-- these three are linked into the kernel image and started before any disk is readable
+```
+
+Principles (from `docs/ROADMAP.md`): small kernel, servers for everything else; one way to do a thing; messages
+pass pointers, not copies; the standard build contains only what the standard system uses.
+
+Today the kernel is *not* a pure microkernel: the terminal, display, tty, pipes and the file table are still in
+it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decisions stand").
+
+## 2. Hardware assumptions
+
+- CPU: 68020 or better. `start.S` checks `AttnFlags` before any C runs; a 68000 gets a message on the serial port
+  and a red screen. No MMU is required or used. No FPU is required (`-msoft-float`).
+- Memory: **chip** RAM (reachable by the custom chips: display, audio, disk DMA) and **fast** RAM are separate
+  pools. Fast is preferred; chip is used when asked for (`MEM_CHIP`) or when there is nothing else.
+- Caches: instruction cache on. The data cache stays off, because without an MMU chip RAM cannot be marked
+  cache-inhibited and the cache would disagree with DMA. (68040/060 get a `cinva` before the cache is enabled.)
+- Interrupts used: level 1 serial transmit, level 2 CIA-A (100 Hz scheduler tick from timer A, and the keyboard),
+  level 3 vertical blank (display/scrolling), level 5 serial receive. Gayle IDE shares level 2 with the CIAs, so
+  disk transfers mask only levels 1-2.
+- Storage: Gayle IDE (A600/A1200/A4000) with an RDB partition table, or a **RAM disk** that the bootblock reads
+  from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek).
+
+## 3. Boot (summary; the full walk-through is in how-it-works.md)
+
+1. Kickstart loads the 1 KB bootblock (`boot/bootblock.S`) from the floppy and jumps to it.
+2. The bootblock reads the kernel (and optionally a RAM-disk image) with `trackdisk.device`, builds a
+   **bootinfo** block at `0x1000` (CPU flags, RAM regions with chip/fast attributes, kernel address, ramdisk
+   address, the ROM Topaz font pointer), picks the largest fast region as the kernel's home, kills the OS, copies
+   the kernel there and jumps into it.
+3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
+   `kmain()`.
+4. `kmain` starts the serial port, vector table, memory manager, caches, display, clock and disk, then creates
+   three built-in processes: `diskd`, `fsd`, `boot`. `boot` waits for the `fs` port and starts `/bin/init`, which
+   prints `/etc/motd` and runs `/bin/sh`.
+
+## 4. Executables: ZEXE and relocation
+
+No MMU means no per-process virtual addresses, so a program must run wherever it happens to be loaded.
+`tools/mkzexe.py` takes an ELF linked at address 0 (`-Wl,-q` keeps relocations) and produces:
+
+```
++0  bra.w entry     +4 'ZEXE'     +8 image_size   +12 mem_size   +16 nreloc
++20 reloc_off       +24 stack_size                +28 reserved
+...image...   then nreloc big-endian offsets of 32-bit words that hold link-time addresses
+```
+
+The loader (`proc_load` in `kernel/proc.c`) copies the image, zeroes the BSS, and adds the load address to every
+word in the relocation table. Only `R_68K_32` relocations are needed (PC-relative code stays valid), and
+debug-section relocations must be skipped (their offsets are not addresses). The kernel itself uses the same
+format and the same loop (in `start.S`). Programs declare their stack size in the header (default 16 KB; `sh`
+asks for 40 KB). There is no shared-library format yet; programs are linked statically against `user/libz.c`.
+
+## 5. Memory (`kernel/mem.c`)
+
+Nothing can be moved once handed out (no MMU, no paging), so fragmentation is the enemy. Rules:
+
+- Chip and fast are separate **ranges**; each range is a run of contiguous blocks with a 16-byte header
+  (size + used bit, size of the previous block, **owner pid**, a magic value `ZMEM` that catches overruns and
+  double frees).
+- Blocks of 16 KB or more are cut from the **high** end of a free block, small ones from the **low** end, so the
+  two sizes do not interleave and fragment each other.
+- Every block records its owner. `mem_free_owner(pid)` hands back everything a process held, which is how a
+  crashed or killed process is cleaned up without any cooperation from it.
+- Free-byte counters are O(1) so the status bar can read them from an interrupt.
+- `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 8).
+
+A process's own memory is **one block**: image + BSS + stack + the argument area. The kernel stack (4 KB) is a
+second block. Both are owned by the pid and freed together.
+
+## 6. Processes and scheduling (`kernel/proc.c`)
+
+- A fixed table of `NPROC` = 16 `struct proc`. State machine: `FREE, READY, SLEEP, WAIT, IO, ZOMBIE, MSG`.
+- **Preemptive round robin**: a 100 Hz tick, a slice of 5 ticks (50 ms), an O(1) run queue (linked list).
+  No priorities yet (DESIGN D6 says they are intended).
+- Preemption happens only when the timer interrupt hit **user mode**. Kernel code is never preempted, so the
+  kernel needs no locks. Where an interrupt can touch the run queue (`ready()`), interrupts are masked briefly.
+- pid 0 is the idle process: it runs on the boot stack and executes `cpu_idle()` when nothing is ready.
+- **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
+  process is `spawn(path, argv, stdio)`: load a ZEXE, give it the parent's cwd and environment, and pass only file
+  descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file).
+- Process exit closes fds, releases the tty, closes the process's ports (clients get an error), frees all
+  memory owned by the pid, and wakes a waiting parent. Orphaned zombies are reaped by the idle loop.
+- Each process has 16 file descriptors; the system has 64 open-file slots and 16 message ports.
+
+## 7. System calls (`kernel/syscall.c`)
+
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. About 55 calls: files (`open read write
+lseek readdir stat fstat lstat chdir getcwd mkdir unlink rmdir rename link symlink readlink chmod utimes dup dup2
+pipe`), processes (`spawn wait exit yield sleep kill procinfo`), memory (`memalloc memfree meminfo`), time
+(`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr isatty setfg`), environment (`envset envget`),
+messages (`port_create port_find call recv reply replyrecv`), and a few privileged ones for the servers.
+
+**Every user pointer is validated** (`user_ok`) against the process's own span and its `memalloc` regions. A bad
+pointer makes the call return -1; the process lives. Strings are copied into kernel buffers with bounds.
+
+`kill` today means "terminate" (`proc->killed`); Unix-style signal handlers do not exist yet.
+
+## 8. Ports and messages (`kernel/ipc.c`)
+
+The central mechanism (DESIGN D1). A **port** is a named queue owned by one process. A client calls
+
+```
+struct umsg { next, from, server, state, result, type, a[4], client }
+sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
+```
+
+- A message lives in the **sender's memory** and only its address moves. With no MMU the server simply reads and
+  writes the client's buffers in place: a `read()` of 4 KB is a message holding a pointer to the client's buffer
+  and the filesystem server fills it directly. **No copies.**
+- Calls are **synchronous** (send-and-wait-for-reply), like QNX and Minix 3, not asynchronous like AmigaOS
+  `PutMsg/GetMsg`. A client in a call (`P_MSG`) is woken only by the reply or by the server dying, never by a
+  `kill` - the server may still be using the client's buffers.
+- A server loops on `replyrecv(msg, result, port)`: reply to the last message and wait for the next in a single
+  trap. (Measured in the emulator: this and an O(1) run queue cut a message round trip from 407 to 248 us; only the
+  ratio means anything.)
+- If a server dies, its ports are closed and its pending and in-service requests fail with an I/O error (-5); the
+  kernel then forgets the cached port number and looks it up again next time.
+- Drawback of the design, noted in DESIGN.md: a **hung** server blocks its clients.
+
+## 9. The servers
+
+### diskd - the disk server (`user/diskd.c`, port `disk`)
+Owns the hardware through privileged raw-sector syscalls (`blk_read/blk_write/blk_size/blk_ram`, only for
+processes flagged `priv`). Reads the Amiga **RDB** partition table (`RDSK`/`PART` blocks, DosEnvec geometry) and
+serves named devices: `ide0` (whole disk), `ide0p1`, `ide0p2`..., and `ram0` for the boot RAM disk. Handles are
+confined to their partition (LBAs are partition-relative). A device opened `DISK_MOUNT` has exactly one writer -
+the filesystem server; tools (`fdisk`, `mkfs.ext2`, `fsck.ext2`) open `DISK_RAW`, which is refused while mounted.
+Protocol: `kernel/diskproto.h`.
+
+### fsd - the filesystem server (`user/fsd.c` + `kernel/ext2.c`, port `fs`)
+The ext2 code compiled to run in user mode (`user/fsenv.h` supplies its environment), speaking the protocol in
+`kernel/fsproto.h` (`FS_OPEN, FS_READ, FS_WRITE, FS_STAT, FS_READDIR, FS_MKDIR, FS_RENAME, ...`). Files are named
+by **inode number**; the kernel's open-file table stores the inode, offset and flags, the server is stateless
+about open files. Chooses its root: a RAM-disk image from the boot floppy if present, else the first RDB
+partition that probes as ext2, else the bare disk.
+
+### boot - the session manager (`user/boot.c`)
+Waits for the `fs` port, spawns `/bin/init`, and then sleeps in `SYS_wsreq`, spawning a shell on a new
+workspace whenever the user presses Amiga+Return. (It exists because the idle process cannot block on a message.)
+
+## 10. The filesystem
+
+- **ext2**, revision 0/1, 128-byte inodes, 1 KB or 4 KB blocks, read **and write** (bitmaps, group descriptors,
+  direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast symlinks).
+  Little-endian on disk, swapped on read/write of metadata. Write-through block cache with an MRU/hash lookup.
+  Directory entries are parsed in place in the cache.
+- Verified against the host's `e2fsck -fn` after scripted write sessions, and byte-for-byte file checksums.
+- Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair) and `fdisk` (RDB).
+- Not done: freeing a file that is still open (it frees at once), moving directories between parents,
+  triple-indirect files, a journal.
+- Planned: a multi-filesystem VFS with mount table, and **ZenFS** (atomic commit, checksummed metadata, extents),
+  see `zenfs.md`.
+
+## 11. Pipes, tty, terminal, display
+
+- **Pipes** (`vfs.c`): 2 KB ring buffer in the kernel; EOF when all writers close; a write to a pipe with no
+  readers ends the writer with status 141 (like SIGPIPE). Special files `/dev/tty`, `/dev/null`, `/dev/zero`.
+- **tty** (`tty.c`): one per workspace, line discipline in the kernel: echo, backspace, `^U`, `^C` (kills the
+  foreground process; if nobody is foreground the shell polls `ttyintr`), `^D`. `TTY_RAW` / `TTY_NOSIG` modes for
+  editors and pagers.
+- **Terminal** (`term.c`): 80x31 text grid per workspace plus 200 lines of scrollback, ANSI/VT100: cursor motion,
+  erase, insert/delete, scroll regions, bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor
+  position. Arrows and function keys arrive as escape codes.
+- **Display** (`gfx.c`): 640x256 hires, one bitplane. A **Copper list** splits the screen: palette and bitplane
+  pointers for a bar line, then the text area. Scrolling just moves the Copper's bitplane pointers at vertical
+  blank; when the 2-screen buffer wraps, the **blitter** copies the visible rows back to the top (identical pixels,
+  so there is no visible switch). Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
+  before the OS is killed.
+- **Workspaces**: nine, each with its own text grid and tty; the top bar (i3-style) lists the current one and the
+  occupied ones. Amiga+1..9 switch, Amiga+Return opens a shell. These are scaffolding for a future desktop and are
+  not part of what a terminal program should depend on.
+- **Keyboard** (`kbd.c`): CIA-A serial data register with handshake; Amiga raw codes to ASCII/escape codes.
+- **Serial** (`serial.c`): interrupt-driven, 115200 baud, mirrors the focused screen; the test rig depends on it.
+
+## 12. User space
+
+`user/libz.c` is a tiny freestanding C library (`printf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
+environment, buffered line reader, a regex engine from the CUtils project). About 77 programs: a full shell (`sh`:
+line editor, history, completion, variables, quoting, wildcards, pipes, redirects incl. here-documents,
+`if/while/for`, functions, aliases, arithmetic, command substitution, job control), file tools, text tools
+(`grep sed sort diff cut tr ...`), `gzip`/`tar`, a pager (`less`), an editor (`edit`), `man`, disk tools (`fdisk
+mkfs.ext2 fsck.ext2 df sync`) and test programs (`crash spin badptr hello bench termtest`). The commands are
+tested by running one script (`rootfs/tests/cmds.sh`) under Zenix and under GNU bash on the host and comparing the
+outputs (`tools/cmds-test.sh`).
+
+## 13. Build and test
+
+- Toolchain: `m68k-elf-gcc` in `~/opt/m68k-elf`; `make` produces `build/zenix.adf` (bootblock + kernel only),
+  `build/zenix.hdf` (ext2 root disk) and, as a separate dev/test build, `build/zenix-ram.adf` (the same plus a RAM
+  root image).
+- Test rig: FS-UAE (headless, serial script) via `tools/run-test.sh`, `tools/serial-tap.py`, `tools/shot.py`.
+  `tools/matrix.sh` boots 13 emulated machine variants (A1200 stock and with fast RAM, chip-only, NTSC, 030/040/060,
+  A4000, and an A600 that must refuse cleanly). Filesystem work is checked with the host's `e2fsck`.
+- Source layout: `boot/` bootblock, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
+  `link/` linker script, `tools/` build and test scripts, `rootfs/` files copied to the root disk, `fsuae/` emulator
+  configs, `later/` and `old-mmu/` code kept from the earlier MMU-based Zenix (reference, not built).
