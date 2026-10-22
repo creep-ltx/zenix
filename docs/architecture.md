@@ -84,6 +84,13 @@ just before the scheduler starts), so the boot messages - including every driver
 a machine with no serial cable (scroll back with Shift+Up). `SYS_klog` (73: offset, buffer, length) reads the ring;
 `dmesg` prints it.
 
+### Sound (`kernel/audio.c`)
+
+`beep(hz, ms)` plays a 32-byte square wave from chip RAM on Paula channels 0 and 1 (AUDxLC/LEN/PER/VOL, DMACON
+enable) and stops it from the 100 Hz tick. The terminal calls it for BEL (0x07). It is the only sound use so far:
+no sample playback, no mixing. The first beep logs whether channel 0 raised its end-of-sample flag (it can be
+checked without hearing it).
+
 ### SD card driver (`kernel/emmc.c`)
 
 The Pi 4/CM4 SD slot is a standard SDHCI controller (EMMC2) at `hwinfo.emmc`. Registers are little-endian

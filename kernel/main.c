@@ -92,6 +92,7 @@ void irq2_c(u32 sr)
         kbd_isr();
     if (icr & 1) {
         ticks++;
+        audio_tick();
         if (ticks % 100 == 0)
             bar_draw();
         sched_tick((u16)sr);

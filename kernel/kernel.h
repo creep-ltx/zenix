@@ -110,6 +110,10 @@ int blk_read(u32 lba, u32 count, void *buf);
 int blk_write(u32 lba, u32 count, const void *buf);
 int blk_flush(void);
 
+/* audio.c: Paula beep (the terminal bell) */
+void beep(u32 hz, u32 ms);
+void audio_tick(void);                  /* from the 100 Hz tick */
+
 /* a3000.c: the Amiga 3000's on-board SCSI (WD33C93A + DMAC) */
 int a3000_init(void);
 u32 a3000_sectors(void);

@@ -387,7 +387,7 @@ static void put1(struct term *t, int vis, u8 ch)
     case '\r': t->cx = 0; t->wrap = 0; return;
     case '\b': if (t->cx) t->cx--; t->wrap = 0; return;
     case '\t': t->cx = (t->cx + 8) & ~7; if (t->cx >= COLS) t->cx = COLS - 1; t->wrap = 0; return;
-    case 7: return;                                     /* bell */
+    case 7: beep(880, 80); return;                      /* bell */
     }
     if (ch < 32)
         return;

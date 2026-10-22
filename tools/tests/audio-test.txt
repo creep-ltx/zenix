@@ -1,0 +1,5 @@
+sleep 24
+send beep\r
+sleep 3
+send dmesg | grep audio\r
+sleep 3

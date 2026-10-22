@@ -10,13 +10,13 @@ CFLAGS  += -DDIW_V=$(DIWV)
 ASFLAGS := -mcpu=68020 -x assembler-with-cpp -c
 LIBGCC  := $(shell $(CC) $(CFLAGS) -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
           head tail sort uniq cut tr tee seq basename dirname yes sleep true false env printenv which clear \
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
-          sed diff chmod ln readlink date less edit man gzip tar dmesg login su passwd chown sha256sum mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
+          sed diff chmod ln readlink date less edit man gzip tar beep dmesg login su passwd chown sha256sum mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 # programs that need more than the default 16 KB stack
