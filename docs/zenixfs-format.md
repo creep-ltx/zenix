@@ -77,7 +77,7 @@ One B+tree holds everything. **Key** = 12 bytes: `obj` (4), `kind` (1), 3 bytes 
 | kind | meaning | off | value |
 |---|---|---|---|
 | 1 INODE | the object | 0 | inode (below) |
-| 2 DIRENT | names in directory `obj` | hash32(name) | one or more entries (below) |
+| 2 DIRENT | one name in directory `obj` | `hash24(name) << 8 \| seq` | ino 4, type 1, namelen 1, name |
 | 3 EXTENT | file data run | first logical block of the run | `phys` (4), `len` (4) blocks |
 | 4 INLINE | file data or symlink target, whole content, up to 192 bytes | 0 | the bytes |
 | 5 ORPHAN | `obj` = 0: an inode unlinked while open | the inode number | empty |
@@ -93,8 +93,10 @@ transaction; the parents are updated up to the root, and the new root goes in th
 (bit 0 = data is INLINE, bits 8..15 = Amiga protection bits), `parent` 4 (directories: the parent, for `..`), `rdev` 4.
 Root directory = object 1. Object 0 is reserved for ORPHAN items. A directory's `nlink` is 2 plus its subdirectories.
 
-**Directory entries**: a DIRENT value is a list of entries, each `ino` 4, `type` 1 (Unix file type), `namelen` 1, then the name (no NUL);
-several entries only when two names have the same `hash32` (rare). `hash32`: FNV-1a over the name bytes, never changed in version 1.
+**Directory entries**: one DIRENT item per name; the value is `ino` 4, `type` 1 (Unix file type), `namelen` 1, then the name (no NUL). The key
+offset is `hash24 << 8 | seq`: `hash24` is `((h >> 8) ^ h) & 0xFFFFFF` where `h` is the 32-bit FNV-1a hash of the name bytes (never changed in version 1);
+`seq` (0..255) numbers the names that share a `hash24`, from 0 with no gaps (removing a name moves the last name of its chain into the hole). A lookup
+probes seq 0, 1, 2 ... until an item is missing. The key offset is a 32-bit position that stays valid while the directory changes, and is used as the readdir cookie.
 A name is 1..255 arbitrary bytes except NUL and `/`; the filesystem does not interpret them. The superblock `charset` field says which encoding the volume's creator used (Latin-1 or UTF-8), so the operating system can convert at the boundary; the two encodings can even be mixed on one volume, since names are compared byte for byte.
 
 **Files**: if `flags` bit 0 is set the content is the INLINE item. Otherwise it is the EXTENT items; a block range with no extent reads as zeros (sparse).

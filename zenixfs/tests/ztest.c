@@ -512,6 +512,67 @@ static int test_orphan(void)
     return 0;
 }
 
+
+/* ---------- 7. names with the same directory hash form a chain: find, remove from the middle, list, check ---------- */
+static uint32_t h24(const char *n)
+{
+    uint32_t h = 2166136261u;
+    for (; *n; n++) { h ^= (uint8_t)*n; h *= 16777619u; }
+    return ((h >> 8) ^ h) & 0xFFFFFF;
+}
+struct hp { uint32_t h, i; };
+static int hpcmp(const void *a, const void *b)
+{
+    const struct hp *x = a, *y = b;
+    return x->h != y->h ? (x->h < y->h ? -1 : 1) : (x->i < y->i ? -1 : x->i > y->i);
+}
+static int test_collide(void)
+{
+    enum { N = 9000000 };
+    struct hp *v = malloc((size_t)N * sizeof *v);
+    char nm[32];
+    for (uint32_t i = 0; i < N; i++) { snprintf(nm, sizeof nm, "c%07u", i); v[i].h = h24(nm); v[i].i = i; }
+    qsort(v, N, sizeof *v, hpcmp);
+    uint32_t best = 0, bl = 0;
+    for (uint32_t i = 0; i < N; ) { uint32_t j = i; while (j < N && v[j].h == v[i].h) j++; if (j - i > bl) { bl = j - i; best = i; } i = j; }
+    printf("  longest chain found among %d names: %u names share one hash\n", (int)N, bl);
+    CHECK(bl >= 5);
+    uint32_t group[16]; uint32_t g = bl > 16 ? 16 : bl;
+    for (uint32_t k = 0; k < g; k++) group[k] = v[best + k].i;
+    free(v);
+    struct zmem *m = zmem_new(11, 4096, 0);
+    struct zenixfs *fs; uint32_t f, x;
+    CHECK(zenixfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);
+    for (uint32_t k = 0; k < g; k++) { snprintf(nm, sizeof nm, "c%07u", group[k]); CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, nm, strlen(nm), 0644, 0, 0, &f) == 0); CHECK(zenixfs_write(fs, f, 0, nm, strlen(nm)) > 0); }
+    for (int round = 0; round < 3; round++) {
+        for (uint32_t k = 0; k < g; k++) {
+            snprintf(nm, sizeof nm, "c%07u", group[k]);
+            if (zenixfs_lookup(fs, ZENIXFS_ROOT_INO, nm, strlen(nm), &x) != 0) continue;     /* removed earlier in this round */
+            char back[32]; int n = zenixfs_read(fs, x, 0, back, sizeof back);
+            CHECK(n == (int)strlen(nm) && !memcmp(back, nm, n));
+        }
+        /* remove the middle, then the first, then the last of what is left; each time all the rest must be found and listed */
+        uint32_t order[3] = { g / 2, 0, g - 1 };
+        snprintf(nm, sizeof nm, "c%07u", group[order[round]]);
+        CHECK(zenixfs_unlink(fs, ZENIXFS_ROOT_INO, nm, strlen(nm)) == 0);
+        CHECK(zenixfs_lookup(fs, ZENIXFS_ROOT_INO, nm, strlen(nm), &x) == ZENIXFS_ENOENT);
+        uint64_t cookie = 0; char dn[300]; uint32_t di; uint8_t dt; int seen = 0;
+        while (zenixfs_readdir(fs, ZENIXFS_ROOT_INO, &cookie, dn, &di, &dt) > 0) if (dn[0] == 'c') seen++;
+        CHECK(seen == (int)g - 1 - round);
+        CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0);
+    }
+    /* put one back: it joins the end of the chain, everything still found */
+    snprintf(nm, sizeof nm, "c%07u", group[0]);
+    CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, nm, strlen(nm), 0644, 0, 0, &f) == 0);
+    CHECK(zenixfs_lookup(fs, ZENIXFS_ROOT_INO, nm, strlen(nm), &x) == 0 && x == f);
+    CHECK(zenixfs_unmount(fs) == 0);
+    CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);
+    CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0);
+    zenixfs_unmount(fs); zmem_free(m);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     uint64_t seed = argc > 1 ? strtoull(argv[1], NULL, 10) : 1;
@@ -519,7 +580,7 @@ int main(int argc, char **argv)
     rs ^= seed * 0x9E3779B97F4A7C15ull; for (int i = 0; i < 10; i++) rnd();
     struct { const char *name; int (*fn)(void); } tests[] = {
         { "basic", test_basic }, { "random", test_random }, { "powercut", test_powercut },
-        { "bitflip", test_bitflip }, { "full", test_full }, { "orphan", test_orphan },
+        { "bitflip", test_bitflip }, { "full", test_full }, { "orphan", test_orphan }, { "collide", test_collide },
     };
     int ran = 0;
     for (unsigned i = 0; i < sizeof tests / sizeof *tests; i++) {

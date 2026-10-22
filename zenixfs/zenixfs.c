@@ -742,51 +742,79 @@ int zenixfs_setattr(struct zenixfs *fs, uint32_t ino, const struct zenixfs_inode
 }
 
 /* ---------- directories ---------- */
+/* A directory entry is one item per name, keyed by (directory, DIRENT, hash24 << 8 | seq). hash24 is a 24-bit hash of the
+ * name; seq counts names with the same hash (0, 1, 2 ... without gaps: removing a name moves the last one of its chain
+ * into the hole). So the key offset is a 32-bit position in the directory that stays valid while the directory changes:
+ * it is the readdir cookie. Value: ino 4, type 1, namelen 1, name. */
 static u32 name_hash(const u8 *n, int len)
 {
     u32 h = 2166136261u;
     for (int i = 0; i < len; i++) { h ^= n[i]; h *= 16777619u; }
-    return h;
+    return (((h >> 8) ^ h) & 0xFFFFFF) << 8;
 }
-/* find the entry; fills ino/type. *pos = byte offset of the entry in the value list when found */
-static int dir_find(struct zenixfs *fs, u32 dir, const u8 *name, int len, u32 *ino, u8 *type)
+static int dir_get(struct zenixfs *fs, u32 dir, u32 off, u8 *val, int *vl)
 {
-    u8 key[KEYLEN], val[VMAX]; int vl;
-    mkkey(key, dir, K_DIRENT, name_hash(name, len));
-    int e = t_search(fs, key, S_EXACT, NULL, val, &vl);
-    if (e) return e;
-    for (int p = 0; p + 6 <= vl; ) {
-        int nl = val[p + 5];
-        if (nl == len && !memcmp(val + p + 6, name, len)) { if (ino) *ino = rd32(val + p); if (type) *type = val[p + 4]; return 0; }
-        p += 6 + nl;
+    u8 key[KEYLEN];
+    mkkey(key, dir, K_DIRENT, off);
+    return t_search(fs, key, S_EXACT, NULL, val, vl);
+}
+/* find the entry; fills ino/type and the sequence number */
+static int dir_find_seq(struct zenixfs *fs, u32 dir, const u8 *name, int len, u32 *ino, u8 *type, u32 *seq)
+{
+    u32 base = name_hash(name, len);
+    for (u32 q = 0; q < 256; q++) {
+        u8 val[VMAX]; int vl;
+        int e = dir_get(fs, dir, base | q, val, &vl);
+        if (e) return e;                                   /* ENOENT ends the chain */
+        if (vl >= 6 && val[5] == len && !memcmp(val + 6, name, len)) {
+            if (ino) *ino = rd32(val);
+            if (type) *type = val[4];
+            if (seq) *seq = q;
+            return 0;
+        }
     }
     return ZENIXFS_ENOENT;
+}
+static int dir_find(struct zenixfs *fs, u32 dir, const u8 *name, int len, u32 *ino, u8 *type)
+{
+    return dir_find_seq(fs, dir, name, len, ino, type, NULL);
 }
 static int dir_add(struct zenixfs *fs, u32 dir, const u8 *name, int len, u32 ino, u8 type)
 {
-    u8 key[KEYLEN], val[VMAX + 300]; int vl = 0;
-    mkkey(key, dir, K_DIRENT, name_hash(name, len));
-    int e = t_search(fs, key, S_EXACT, NULL, val, &vl);
-    if (e == ZENIXFS_ENOENT) vl = 0; else if (e) return e;
-    wr32(val + vl, ino); val[vl + 4] = type; val[vl + 5] = (u8)len; memcpy(val + vl + 6, name, len);
-    vl += 6 + len;
-    return t_insert(fs, key, val, vl, 1);
+    u8 key[KEYLEN], val[300];
+    u32 base = name_hash(name, len), q = 0;
+    for (; q < 256; q++) {
+        u8 tmp[VMAX]; int vl;
+        int e = dir_get(fs, dir, base | q, tmp, &vl);
+        if (e == ZENIXFS_ENOENT) break;
+        if (e) return e;
+    }
+    if (q == 256) return ZENIXFS_ENOSPC;
+    wr32(val, ino); val[4] = type; val[5] = (u8)len; memcpy(val + 6, name, len);
+    mkkey(key, dir, K_DIRENT, base | q);
+    return t_insert(fs, key, val, 6 + len, 0);
 }
 static int dir_del(struct zenixfs *fs, u32 dir, const u8 *name, int len)
 {
+    u32 base = name_hash(name, len), k, last;
     u8 key[KEYLEN], val[VMAX]; int vl;
-    mkkey(key, dir, K_DIRENT, name_hash(name, len));
-    int e = t_search(fs, key, S_EXACT, NULL, val, &vl);
+    int e = dir_find_seq(fs, dir, name, len, NULL, NULL, &k);
     if (e) return e;
-    for (int p = 0; p + 6 <= vl; ) {
-        int nl = val[p + 5];
-        if (nl == len && !memcmp(val + p + 6, name, len)) {
-            memmove(val + p, val + p + 6 + nl, vl - p - 6 - nl); vl -= 6 + nl;
-            return vl ? t_insert(fs, key, val, vl, 1) : t_delete(fs, key);
-        }
-        p += 6 + nl;
+    for (last = k; last + 1 < 256; last++) {              /* the end of the chain */
+        u8 tmp[VMAX]; int tl;
+        int r = dir_get(fs, dir, base | (last + 1), tmp, &tl);
+        if (r == ZENIXFS_ENOENT) break;
+        if (r) return r;
     }
-    return ZENIXFS_ENOENT;
+    if (last != k) {                                       /* move the last name of the chain into the hole */
+        e = dir_get(fs, dir, base | last, val, &vl);
+        if (e) return e;
+        mkkey(key, dir, K_DIRENT, base | k);
+        e = t_insert(fs, key, val, vl, 1);
+        if (e) return e;
+    }
+    mkkey(key, dir, K_DIRENT, base | last);
+    return t_delete(fs, key);
 }
 static int dir_empty(struct zenixfs *fs, u32 dir)
 {
@@ -822,32 +850,18 @@ int zenixfs_readdir(struct zenixfs *fs, uint32_t dir, uint64_t *cookie, char *na
     u64 c = *cookie;
     if (c == 0) { strcpy(name, "."); *ino = dir; *type = 4; *cookie = 1; return 1; }
     if (c == 1) { strcpy(name, ".."); *ino = d.parent; *type = 4; *cookie = 2; return 1; }
-    if (c < 3) c = 3;
-    u32 hash = (u32)((c - 3) >> 8), idx = (u32)((c - 3) & 255);
-    for (;;) {
-        u8 key[KEYLEN], k2[KEYLEN], val[VMAX]; int vl;
-        mkkey(key, dir, K_DIRENT, hash);
-        e = t_search(fs, key, S_CEIL, k2, val, &vl);
-        if (e == ZENIXFS_ENOENT) return 0;
-        if (e) return e;
-        if (rd32(k2) != dir || k2[4] != K_DIRENT) return 0;
-        u32 h = rd32(k2 + 8);
-        if (h != hash) idx = 0;
-        u32 i = 0;
-        for (int p = 0; p + 6 <= vl; i++) {
-            int nl = val[p + 5];
-            if (i >= idx) {
-                memcpy(name, val + p + 6, nl); name[nl] = 0;
-                *ino = rd32(val + p); *type = val[p + 4];
-                *cookie = ((u64)h << 8 | (i + 1)) + 3;
-                if (i + 1 >= 255) *cookie = ((u64)(h + 1) << 8) + 3;
-                return 1;
-            }
-            p += 6 + nl;
-        }
-        if (h == 0xFFFFFFFFu) return 0;
-        hash = h + 1; idx = 0;
-    }
+    /* cookie = key offset of the last name returned + 3; always fits in 32 bits */
+    u8 key[KEYLEN], k2[KEYLEN], val[VMAX]; int vl;
+    mkkey(key, dir, K_DIRENT, (u32)(c - 2));
+    e = t_search(fs, key, S_CEIL, k2, val, &vl);
+    if (e == ZENIXFS_ENOENT) return 0;
+    if (e) return e;
+    if (rd32(k2) != dir || k2[4] != K_DIRENT) return 0;
+    if (vl < 6 || vl < 6 + val[5]) return ZENIXFS_ECORRUPT;
+    memcpy(name, val + 6, val[5]); name[val[5]] = 0;
+    *ino = rd32(val); *type = val[4];
+    *cookie = (u64)rd32(k2 + 8) + 3;
+    return 1;
 }
 
 /* ---------- file data ---------- */
@@ -1321,6 +1335,7 @@ struct fctx {
     struct zenixfs *fs; void (*log)(void *, const char *); void *lctx; int problems;
     u8 *used; struct fk *tab; u32 ntab, captab; u8 prev[KEYLEN]; int have_prev;
     u32 tree_blocks; u64 counted;
+    u32 prev_obj, prev_hash, prev_seq;
 };
 /* message with up to two numbers: each '#' or '%' in fmt is replaced by a (first) and b (second) */
 static void fprob(struct fctx *c, const char *fmt, u32 a, u32 b)
@@ -1398,14 +1413,14 @@ static void fwalk(struct fctx *c, u32 blk, int level)
         } else if (kind == K_INLINE) {
             ftab_get(c, obj, 1)->seen_inline |= 1;
         } else if (kind == K_DIRENT) {
-            for (u32 p = 0; p + 6 <= sz; ) {
-                u32 ino = rd32(v + p); u8 type = v[p + 4]; int nl = v[p + 5];
-                if (p + 6 + nl > sz || nl == 0) { fprob(c, "directory # has a bad entry", obj, 0); break; }
-                if (name_hash(v + p + 6, nl) != koff) fprob(c, "directory # entry hash mismatch", obj, 0);
-                struct fk *t = ftab_get(c, ino, 1); t->refs++;
-                if (type == 4) { t->seen_inline |= 0x200; ftab_get(c, obj, 1)->subdirs++; }
-                p += 6 + nl;
-            }
+            u32 ino = rd32(v); u8 type = v[4]; int nl = sz >= 6 ? v[5] : 0;
+            if (sz < 6 || nl == 0 || 6 + nl != (int)sz) { fprob(c, "directory # has a bad entry", obj, 0); continue; }
+            if ((name_hash(v + 6, nl) & ~0xFFu) != (koff & ~0xFFu)) fprob(c, "directory # entry hash mismatch", obj, 0);
+            if ((koff & 0xFF) != (c->prev_hash == (koff & ~0xFFu) && c->prev_obj == obj ? c->prev_seq + 1 : 0))
+                fprob(c, "directory # has a gap in a hash chain", obj, 0);
+            c->prev_obj = obj; c->prev_hash = koff & ~0xFFu; c->prev_seq = koff & 0xFF;
+            struct fk *t = ftab_get(c, ino, 1); t->refs++;
+            if (type == 4) { t->seen_inline |= 0x200; ftab_get(c, obj, 1)->subdirs++; }
         } else if (kind == K_ORPHAN) {
             ftab_get(c, koff, 1)->seen_inline |= 0x400;
         } else fprob(c, "unknown item kind in leaf #", blk, 0);
