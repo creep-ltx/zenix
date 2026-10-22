@@ -215,6 +215,8 @@ long vfs_stat(const char *path, struct ustat *st);
 long vfs_fstat(struct file *f, struct ustat *st);
 long vfs_chdir(const char *path);
 long vfs_lseek(struct file *f, s32 off, u32 whence);
+long vfs_statfs(void *out);
+long vfs_sync(void);
 long vfs_mkdir(const char *path);
 long vfs_unlink(const char *path);
 long vfs_rmdir(const char *path);
@@ -271,6 +273,8 @@ int tty_of(const struct proc *p);
 #define SYS_hrtime      36   /* E-clock ticks (709379 Hz PAL) since boot */
 #define SYS_wsreq       39   /* session manager: wait for a shell-on-workspace request */
 #define SYS_spawn_tty   40   /* spawn a program with its stdio on a workspace tty */
+#define SYS_statfs      43   /* filesystem usage of the root: struct ustatfs* */
+#define SYS_sync        44
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */

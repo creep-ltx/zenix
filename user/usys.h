@@ -74,3 +74,6 @@ static inline int sys_wsreq(void) { return sys3(39, 0, 0, 0); }
 static inline int sys_spawn_tty(const char *path, char *const *argv, int tty) { return sys3(40, (u32)path, (u32)argv, (u32)tty); }
 static inline int sys_blk_size(void) { return sys3(41, 0, 0, 0); }
 static inline int sys_blk_ram(u32 out[2]) { return sys3(42, (u32)out, 0, 0); }
+struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };
+static inline int sys_statfs(struct ustatfs *f) { return sys3(43, (u32)f, 0, 0); }
+static inline int sys_sync(void) { return sys3(44, 0, 0, 0); }

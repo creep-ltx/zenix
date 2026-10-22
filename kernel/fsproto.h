@@ -14,3 +14,6 @@
 #define FS_UNLINK  9   /* a0 path, a1 cwd ino */
 #define FS_RMDIR   10  /* a0 path, a1 cwd ino */
 #define FS_RENAME  11  /* a0 from, a1 to, a2 cwd ino */
+#define FS_STATFS  12  /* a0 struct ustatfs* -> 0 */
+#define FS_SYNC    13  /* flush everything (writes are write-through today, so a no-op) */
+struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

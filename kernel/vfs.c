@@ -220,6 +220,16 @@ long vfs_lseek(struct file *f, s32 off, u32 whence)
     return np;
 }
 
+long vfs_statfs(void *out)
+{
+    return fs_call(FS_STATFS, (u32)out, 0, 0, 0);
+}
+
+long vfs_sync(void)
+{
+    return fs_call(FS_SYNC, 0, 0, 0, 0);
+}
+
 long vfs_mkdir(const char *path)
 {
     return fs_call(FS_MKDIR, (u32)path, current->cwd_ino, 0, 0);

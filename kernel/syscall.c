@@ -163,6 +163,13 @@ void syscall_c(u32 *rb)
             }
         }
         break;
+    case SYS_statfs:
+        if (user_ok(current, a1, 20))
+            r = (s32)vfs_statfs((void *)a1);
+        break;
+    case SYS_sync:
+        r = (s32)vfs_sync();
+        break;
     case SYS_blk_ram:
         if (current->priv && user_ok(current, a1, 8)) {
             ((u32 *)a1)[0] = boot_ram_pa;

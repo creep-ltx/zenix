@@ -110,6 +110,12 @@ static int handle(struct umsg *m)
         *(u32 *)m->a[3] = cookie;
         return r;
     }
+    case FS_STATFS: {
+        struct ustatfs *f = (struct ustatfs *)m->a[0];
+        return ext2_statfs(&f->bsize, &f->blocks, &f->bfree, &f->files, &f->ffree);
+    }
+    case FS_SYNC:
+        return 0;                                     /* writes go straight to the disk */
     case FS_CHDIR:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0) || !S_ISDIR(in.mode)) return -1;
         return (int)in.ino;

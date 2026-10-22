@@ -43,3 +43,4 @@ int ext2_rmdir(struct inode *dir, const char *name);
 int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *nn);
 
 int ext2_link(struct inode *dir, const char *name, u32 ino);
+int ext2_statfs(u32 *bs, u32 *blocks, u32 *bfree, u32 *files, u32 *ffree);

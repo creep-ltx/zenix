@@ -859,3 +859,18 @@ int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *
         return -1;
     return 0;
 }
+
+/* usage numbers from the superblock (kept current by the allocator) */
+int ext2_statfs(u32 *bs, u32 *blocks, u32 *bfree, u32 *files, u32 *ffree)
+{
+    u8 sbk[24];
+    u32 blk = bsize == 1024 ? 1 : 0, base = bsize == 1024 ? 0 : 1024;
+    if (bread_copy(blk, base, sbk, 24))
+        return -1;
+    *bs = bsize;
+    *blocks = rd32(sbk + 4);
+    *bfree = rd32(sbk + 12);
+    *files = rd32(sbk + 0);
+    *ffree = rd32(sbk + 16);
+    return 0;
+}
