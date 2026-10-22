@@ -125,8 +125,18 @@ Compression, encryption, deduplication, quotas, data checksums, ACLs, atime, mul
 Dependencies on the other branches: VFS mount table (main), partition type id for RDB (here: DosType `ZEN\1`), `FS_*` message set in
 `kernel/fsproto.h` already fits (open, read, write, readdir, rename, link, symlink, statfs, sync); add `FS_FSYNC`.
 
-## 7. Open questions for the owner
-1. Default block size 4 KB (fast on CF/IDE, wastes space on tiny files - mitigated by inline) or 2 KB?
-2. Is `keep=N` undo wanted early, or after the first working version?
-3. Should the format already reserve space for per-file data checksums (flag per inode), cost nothing now?
-4. Name: ZenFS is fine for the filesystem; keep it?
+## 7. Decisions by the owner (2026-10-22)
+1. **Name: ZenFS.** Decided.
+2. **Block size:** the owner asked for pros and cons; recommendation: `mkfs.zenfs` picks by volume size (under 16 MB: 1 KB,
+   under 256 MB: 2 KB, larger: 4 KB) and `-b` overrides. Reasons in the table below.
+3. **Undo (`keep=N`, snapshots):** not in the first version. Reserve the room in the format now (root list in the commit
+   record, feature flag); build it in phase Z-4, after the power-cut tests pass, because it changes when blocks may be reused.
+4. **Data checksums:** reserve now, build later. A per-inode flag plus a feature flag; a directory flag is inherited by new
+   files. The checksums are stored as tree items next to the extents (4 bytes per block). Decide the default after measuring on hardware.
+
+| Block size | Good | Bad |
+|---|---|---|
+| 1 KB | Little waste with many small files; more blocks fit in a small cache | More IDE commands and more tree levels; worse on CF cards (writes smaller than the card's erase page); bigger bitmap |
+| 2 KB | Middle | Middle |
+| 4 KB | Fewest disk commands, shallowest tree, fastest large files, best match to CF cards | Wastes on average half a block per file (about 2 KB); fewer blocks in a small cache; one small change rewrites a bigger block |
+Small files under about 200 bytes are stored inside the tree and do not use a block, so the waste only matters for files of a few hundred bytes to a few KB on a small volume.
