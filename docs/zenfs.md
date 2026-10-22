@@ -114,6 +114,17 @@ Compression, encryption, deduplication, quotas, data checksums, ACLs, atime, mul
    figures measured on a real Amiga with a real drive; the host/emulator figures are labelled as such.
 5. **Fuzz** the mounted image (one fuzzer at a time on this PC, memory limits per the machine notes).
 
+## 5b. What can and cannot be measured here (owner, 2026-10-22)
+The only Amiga available is an A1200 with a PiStorm: the "disk" is the Pi's SD card (about 17 MB/s) behind Emu68, and the CPU is a JIT, not a real 68030.
+So **speed figures from it are not valid for real Amigas** and must never be quoted as such. What we can do:
+- **Correctness and crash safety are fully testable** on the host: format, power-cut replay, bit-flip detection, fsck. This is where ZenFS earns its name.
+- **Counted costs instead of timings:** the library counts disk reads, writes, flushes, commits and cache hits (`zfs_get_stats`). Fewer, larger, sequential
+  transfers can be shown by counts on the host; they are the same on every machine.
+- **Design from known hardware costs**, with the numbers in section 6b labelled as estimates.
+- **A benchmark tool that others can run** (small, one binary on the Zenix disk, prints a table) so people with real IDE/SCSI Amigas can send results;
+  defaults get tuned from those, not from the PiStorm.
+- On the PiStorm, only "does it work" and the CPU-bound case (fast media) are meaningful, and only labelled "PiStorm/Emu68".
+
 ## 6. Phases
 - **Z-0 Spec:** write `docs/zenfs-format.md` (every field, offsets, checksums, worked examples) from this plan; review it.
 - **Z-1 Host library:** tree, inode, inline files, extents, bitmap, commit, mkfs, fsck, dump; unit tests; the power-cut tester.
