@@ -2,13 +2,14 @@
 #include "libz.h"
 #include "../kernel/fsproto.h"
 #include "../kernel/diskproto.h"
+#include "../kernel/fsperm.h"
 #include "zenixfs_disk.h"
 
 /* mount.zenixfs DEVICE PORTNAME: the ZenixFS filesystem server (docs/zenixfs.md). Speaks the same protocol as the ext2
  * server (kernel/fsproto.h) on port PORTNAME; started by mount(8). Files are named by ZenixFS inode number.
  * The library keeps changes in memory and commits them atomically: here every 3 seconds after the first change, on
  * sync(8), and at umount. A power cut loses at most the last few seconds and never leaves a damaged volume.
- * The permission rules are the ones of the ext2 server (docs/architecture.md section 14). */
+ * The permission rules are the shared ones of kernel/fsperm.h, the same as in the ext2 server. */
 
 #define ROOT ZENIXFS_ROOT_INO
 #define COMMIT_TICKS 300                          /* 3 s at 100 Hz */
@@ -20,21 +21,16 @@ static int denied, quitting, dirty;
 static u32 dirty_since;
 static char devname[16];
 
-/* ---- permissions ---- */
-static int access_ok(const struct zenixfs_inode *in, int want)       /* want: 4 read, 2 write, 1 execute */
+/* ---- permissions (kernel/fsperm.h) ---- */
+static int access_ok(const struct zenixfs_inode *in, int want)       /* want: FSP_R, FSP_W, FSP_X */
 {
-    int ok;
-    if (cuid == 0) ok = !(want & 1) || (in->mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFDIR || (in->mode & 0111);
-    else {
-        int sh = cuid == in->uid ? 6 : cgid == in->gid ? 3 : 0;
-        ok = (((in->mode >> sh) & 7) & (unsigned)want) == (unsigned)want;
-    }
-    if (!ok) denied = 1;
-    return ok;
+    if (fsp_access(cuid, cgid, in->mode, in->uid, in->gid, want)) return 1;
+    denied = 1;
+    return 0;
 }
 static int owner_only(const struct zenixfs_inode *in)
 {
-    if (cuid == 0 || cuid == in->uid) return 1;
+    if (fsp_owner_or_root(cuid, in->uid)) return 1;
     denied = 1;
     return 0;
 }
@@ -60,7 +56,7 @@ static int namei(uint32_t cwd, const char *path, int follow_last, int depth, uin
         int last = !*q;
         struct zenixfs_inode dn;
         if (zenixfs_getattr(fs, cur, &dn) || !is_dir(&dn)) return -1;
-        if (!access_ok(&dn, 1)) return -13;
+        if (!access_ok(&dn, FSP_X)) return -13;
         uint32_t ino;
         if (zenixfs_lookup(fs, cur, p, (int)(e - p), &ino)) return -1;
         struct zenixfs_inode in;
@@ -104,16 +100,17 @@ static int dir_may(uint32_t dir)                  /* add or remove entries: w an
 {
     struct zenixfs_inode d;
     if (zenixfs_getattr(fs, dir, &d)) return 0;
-    return access_ok(&d, 3);
+    if (fsp_dir_modify(cuid, cgid, d.mode, d.uid, d.gid)) return 1;
+    denied = 1;
+    return 0;
 }
 static int sticky_ok(uint32_t dir, const char *name, int len)    /* in a sticky directory only owners may remove */
 {
     struct zenixfs_inode d, t;
     uint32_t ino;
     if (zenixfs_getattr(fs, dir, &d)) return 0;
-    if (cuid == 0 || !(d.mode & 01000) || cuid == d.uid) return 1;
     if (zenixfs_lookup(fs, dir, name, len, &ino) || zenixfs_getattr(fs, ino, &t)) return 1;
-    if (t.uid == cuid) return 1;
+    if (fsp_sticky_ok(cuid, d.mode, d.uid, t.uid)) return 1;
     denied = 1;
     return 0;
 }
@@ -143,12 +140,11 @@ static int handle1(struct umsg *m)
         r = namei(m->a[1], path, 1, 0, &ino);
         if (r) {
             if (denied || !(flags & O_CREAT) || parent(m->a[1], path, &dir, &name, &len) || !dir_may(dir)) return -1;
-            if (zenixfs_create(fs, dir, name, len, 0666 & ~cumask, cuid, cgid, &ino)) return -1;
+            if (zenixfs_create(fs, dir, name, len, fsp_new_file_mode(cumask), cuid, cgid, &ino)) return -1;
             touched();
         } else {
             if (zenixfs_getattr(fs, ino, &in)) return -1;
-            int want = ((flags & O_WRONLY) ? 2 : (flags & O_RDWR) ? 6 : 4) | ((flags & O_EXEC) ? 1 : 0);
-            if (!access_ok(&in, want)) return -1;
+            if (!access_ok(&in, fsp_open_want(flags))) return -1;
             if (writing) {
                 if (!is_reg(&in)) return -1;
                 if (flags & O_TRUNC) {
@@ -204,18 +200,24 @@ static int handle1(struct umsg *m)
         r = zenixfs_sync(fs);
         dirty = 0;
         return r ? -1 : 0;
-    case FS_CHMOD: case FS_UTIMES: {
+    case FS_CHMOD: {
         if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in) || !owner_only(&in)) return -1;
-        if (m->type == FS_CHMOD) in.mode = (in.mode & ZENIXFS_S_IFMT) | (m->a[2] & 07777);
-        else in.mtime = m->a[2];
+        in.mode = (in.mode & ZENIXFS_S_IFMT) | (m->a[2] & 07777);
         touched();
         return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
     }
+    case FS_UTIMES:
+        if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in)) return -1;
+        if (!fsp_owner_or_root(cuid, in.uid) && !access_ok(&in, FSP_W)) return -1;     /* the owner, or anyone who may write */
+        in.mtime = m->a[2];
+        touched();
+        return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
     case FS_CHOWN:
-        if (cuid != 0) { denied = 1; return -1; }
+        if (!fsp_is_root(cuid)) { denied = 1; return -1; }
         if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in)) return -1;
         if (m->a[2] != 0xFFFFFFFFu) in.uid = m->a[2];
         if (m->a[3] != 0xFFFFFFFFu) in.gid = m->a[3];
+        in.mode &= ~06000u;                              /* chown clears set-user-id and set-group-id */
         touched();
         return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
     case FS_LINK:
@@ -247,7 +249,7 @@ static int handle1(struct umsg *m)
     case FS_MKDIR:
         if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir)) return -1;
         touched();
-        return zenixfs_mkdir(fs, dir, name, len, 0777 & ~cumask, cuid, cgid, &ino) ? -1 : 0;
+        return zenixfs_mkdir(fs, dir, name, len, fsp_new_dir_mode(cumask), cuid, cgid, &ino) ? -1 : 0;
     case FS_UNLINK:
         if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir) || !sticky_ok(dir, name, len)) return -1;
         touched();
