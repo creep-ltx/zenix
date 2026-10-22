@@ -70,8 +70,11 @@ the `ranges` of the device-tree nodes `/soc` and `/scb` so each window gets the 
 rewritten `ranges` and stores, in `struct hwinfo` at `0x1100`: flags (`HW_DT` under Emu68, `HW_BCM2711` on a
 Pi 4/CM4, `HW_RANGEOPS` if Emu68 has the cache range opcodes), the peripheral base, mailbox, EMMC2 (SD), GPIO,
 GENET Ethernet (registers, two GIC interrupt numbers, PHY address, MAC), GIC-400 distributor and CPU interface,
-and the graphics memory Emu68 reserved. On a machine without Emu68 (or FS-UAE) the table is present with
-`flags == 0` and all addresses 0; `kmain` prints it (`pi: ...`).
+and the graphics memory Emu68 reserved. It also holds the **Zorro boards** AmigaOS configured (up to 16: manufacturer,
+product, type, serial number, base address, size), copied from `expansion.library`'s ConfigDev list with
+`FindConfigDev`; that works on every Amiga, with or without Emu68, and is how a future Zorro card driver finds its
+card without any autoconfig code of its own. On a machine without Emu68 (or FS-UAE) the Pi part of the table is
+empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and the boards (`zorro: ...`).
 
 ### SD card driver (`kernel/emmc.c`)
 

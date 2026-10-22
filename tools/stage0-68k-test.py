@@ -159,6 +159,8 @@ def lay_out(img, node):
 EXEC_BASE = 0x00300000
 DT_BASE = 0x00400000                 # resource base: vectors at DT_BASE-6, -12, ...
 HOOK_BASE = 0x00500000               # jump targets of the vectors, 8 bytes apart
+EXP_BASE = 0x00380000                # fake expansion.library (FindConfigDev at -72)
+CD_BASE = 0x00390000                 # fake ConfigDev images, 64 bytes each
 HALT = 0x00700000
 STACK_TOP = 0x00680000
 HWINFO = 0x1100
@@ -166,7 +168,13 @@ FIELDS = ["magic", "flags", "soc_base", "mailbox", "emmc", "gpio", "genet", "gen
           "phy_addr"]
 
 
-def run(blob_bytes, base, root, with_dt=True):
+BOARDS = [  # type, product, er_flags, cd_flags, manufacturer, serial, addr, size
+    (0xE0, 0x0A, 0x40, 2, 0x082C, 0x12345678, 0x00200000, 0x00400000),
+    (0x90, 0x21, 0x00, 0, 0x6D73, 0, 0x40000000, 0x00010000),
+]
+
+
+def run(blob_bytes, base, root, with_dt=True, with_boards=True):
     uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
     if UC_CPU_M68K_M68020 is not None:
         uc.ctl_set_cpu_model(UC_CPU_M68K_M68020) if hasattr(uc, "ctl_set_cpu_model") else None
@@ -179,6 +187,16 @@ def run(blob_bytes, base, root, with_dt=True):
     uc.mem_write(base, blob_bytes)
     # fake exec: OpenResource (-498) and a way back; fake resource: jmp.l hook for each of 11 vectors
     uc.mem_write(EXEC_BASE - 498, b"\x4e\xf9" + struct.pack(">I", HOOK_BASE + 0x100))
+    uc.mem_write(EXEC_BASE - 552, b"\x4e\xf9" + struct.pack(">I", HOOK_BASE + 0x140))      # OpenLibrary
+    uc.mem_write(EXP_BASE - 72, b"\x4e\xf9" + struct.pack(">I", HOOK_BASE + 0x180))        # FindConfigDev
+    cds = []
+    for i, (typ, prod, erfl, cdfl, mfr, ser, addr, size) in enumerate(BOARDS):
+        img = bytearray(64)
+        img[14] = cdfl; img[16] = typ; img[17] = prod; img[18] = erfl
+        struct.pack_into(">H", img, 20, mfr); struct.pack_into(">I", img, 22, ser)
+        struct.pack_into(">I", img, 32, addr); struct.pack_into(">I", img, 36, size)
+        uc.mem_write(CD_BASE + 64 * i, bytes(img))
+        cds.append(CD_BASE + 64 * i)
     for i in range(1, 12):
         uc.mem_write(DT_BASE - 6 * i, b"\x4e\xf9" + struct.pack(">I", HOOK_BASE + 8 * i))
     uc.mem_write(HALT, b"\x60\xfe")                              # bra.s *
@@ -219,6 +237,20 @@ def run(blob_bytes, base, root, with_dt=True):
             assert name == "devicetree.resource", name
             assert uc.reg_read(UC_M68K_REG_A6) == EXEC_BASE, "a6 is not ExecBase at OpenResource"
             uc.reg_write(UC_M68K_REG_D0, DT_BASE if with_dt else 0)
+        elif addr == HOOK_BASE + 0x140:                          # exec OpenLibrary(name a1, version d0)
+            name = rd_str(uc.reg_read(UC_M68K_REG_A1))
+            assert name == "expansion.library", name
+            assert uc.reg_read(UC_M68K_REG_A6) == EXEC_BASE, "a6 is not ExecBase at OpenLibrary"
+            uc.reg_write(UC_M68K_REG_D0, EXP_BASE if with_boards else 0)
+        elif addr == HOOK_BASE + 0x180:                          # FindConfigDev(prev a0, mfr d0, product d1)
+            assert uc.reg_read(UC_M68K_REG_A6) == EXP_BASE, "a6 is not the expansion base"
+            assert uc.reg_read(UC_M68K_REG_D0) == 0xFFFFFFFF and uc.reg_read(UC_M68K_REG_D1) == 0xFFFFFFFF, "not a wildcard search"
+            prev = uc.reg_read(UC_M68K_REG_A0)
+            nxt = cds[0] if prev == 0 else (cds[cds.index(prev) + 1] if cds.index(prev) + 1 < len(cds) else 0)
+            state["boardcalls"] = state.get("boardcalls", 0) + 1
+            uc.reg_write(UC_M68K_REG_D0, nxt)
+            uc.reg_write(UC_M68K_REG_D1, 0xDEADBEEF)
+            uc.reg_write(UC_M68K_REG_A1, 0xDEADBEEF)
         elif HOOK_BASE + 8 <= addr < HOOK_BASE + 8 * 12 and (addr - HOOK_BASE) % 8 == 0:
             idx = (addr - HOOK_BASE) // 8
             if uc.reg_read(UC_M68K_REG_A6) != DT_BASE:
@@ -288,7 +320,7 @@ def run(blob_bytes, base, root, with_dt=True):
     else:
         raise SystemExit("stage0 did not finish")
     bad = [hex(r) for r, v in marks.items() if uc.reg_read(r) != v]
-    tbl = bytes(uc.mem_read(HWINFO, 88))
+    tbl = bytes(uc.mem_read(HWINFO, 408))
     return tbl, state, uc.reg_read(UC_M68K_REG_A6), uc.reg_read(UC_M68K_REG_A7), bad
 
 
@@ -327,16 +359,28 @@ def main():
         vc_base, vc_size = struct.unpack(">II", tbl[56:64])
         check("vc4_base", vc_base, 0x30000000)
         check("vc4_size", vc_size, 16 << 20)
+        nb = struct.unpack(">I", tbl[64:68])[0]
+        check("nboards", nb, 2)
+        b0 = struct.unpack(">HBBIIIBBH", tbl[88:108])
+        check("b0 mfr", b0[0], 0x082C); check("b0 product", b0[1], 0x0A); check("b0 type", b0[2], 0xE0)
+        check("b0 serial", b0[3], 0x12345678); check("b0 addr", b0[4], 0x00200000); check("b0 size", b0[5], 0x00400000)
+        check("b0 erflags", b0[6], 0x40); check("b0 cdflags", b0[7], 2)
+        b1 = struct.unpack(">HBBIIIBBH", tbl[108:128])
+        check("b1 mfr", b1[0], 0x6D73); check("b1 addr", b1[4], 0x40000000)
         check("a6 at calls", int(st["a6_ok"]), 1)
         check("a6 on return", a6, EXEC_BASE)
         check("saved regs", len(bad), 0)
         print("   calls:", st["calls"])
-    print("--- no devicetree.resource (plain Amiga)")
+    print("--- no devicetree.resource (plain Amiga), the boards are still listed")
     tbl, st, a6, sp, bad = run(blob, 0x00200000, root, with_dt=False)
     magic, flags = struct.unpack(">II", tbl[:8])
     check("magic", magic, 0x5A485731)
     check("flags", flags, 0)
     check("emmc", struct.unpack(">I", tbl[16:20])[0], 0)
+    check("nboards", struct.unpack(">I", tbl[64:68])[0], 2)
+    print("--- no expansion.library")
+    tbl, st, a6, sp, bad = run(blob, 0x00200000, root, with_dt=False, with_boards=False)
+    check("nboards", struct.unpack(">I", tbl[64:68])[0], 0)
     check("a6 on return", a6, EXEC_BASE)
     print("FAILED" if fails else "all ok")
     return 1 if fails else 0

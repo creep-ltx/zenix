@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* devicetree.resource API on top of libfdt, for testing boot/stage0.c on the host. */
 #include <libfdt.h>
-struct ctx { void *db; };
+/* db = the flattened tree; boards = a NULL-terminated array of fake ConfigDev images (host test) */
+struct ctx { void *db; void **boards; };
 #define FDT(c) ((const void *)(c)->db)
 static inline void *dt_open(struct ctx *c, const char *path)
 { int o = fdt_path_offset(FDT(c), path); return o < 0 ? 0 : (void *)(long)(o + 1); }
@@ -15,3 +16,14 @@ static inline const void *dt_val(struct ctx *c, void *p) { (void)c; return ((str
 static inline void *dt_parent(struct ctx *c, void *key)
 { int o = fdt_parent_offset(FDT(c), (int)(long)key - 1); return o < 0 ? 0 : (void *)(long)(o + 1); }
 static inline const char *dt_name(struct ctx *c, void *key) { return fdt_get_name(FDT(c), (int)(long)key - 1, 0); }
+static inline void *os_next_board(struct ctx *c, void *prev)
+{
+    if (!c->boards)
+        return 0;
+    if (!prev)
+        return c->boards[0];
+    for (int i = 0; c->boards[i]; i++)
+        if (c->boards[i] == prev)
+            return c->boards[i + 1];
+    return 0;
+}

@@ -3,7 +3,7 @@
  * the 68k while AmigaOS is alive. Vector numbers from the resource's published function
  * list: OpenKey -6, CloseKey -12, GetChild -18, FindProperty -24, GetProperty -30,
  * GetPropLen -36, GetPropName -42, GetPropValue -48, GetParent -54, GetKeyName -60. */
-struct ctx { void *db; };
+struct ctx { void *db; void *exp; };      /* devicetree.resource base, expansion.library base (0 = none) */
 
 /* a6 is also the compiler's frame pointer, so it is never pinned to a C variable: the base is
  * moved into it only inside the asm, with the old value saved on the stack around the call. */
@@ -32,3 +32,17 @@ static inline unsigned dt_len(struct ctx *c, void *prop) { return (unsigned)(uns
 static inline const void *dt_val(struct ctx *c, void *prop) { return DT_CALL1(-48, c, prop); }
 static inline void *dt_parent(struct ctx *c, void *key) { return DT_CALL1(-54, c, key); }
 static inline const char *dt_name(struct ctx *c, void *key) { return DT_CALL1(-60, c, key); }
+
+/* expansion.library FindConfigDev(oldConfigDev a0, manufacturer d0, product d1) at -72: the next configured board
+ * after "prev" (0 = from the start), any manufacturer and product (-1). Same a6 handling as above. */
+static inline void *os_next_board(struct ctx *c, void *prev)
+{
+    register void *r_a0 __asm__("a0") = prev;
+    register long r_d0 __asm__("d0") = -1;
+    register long r_d1 __asm__("d1") = -1;
+    void *r_base = c->exp;
+    __asm__ volatile("move.l %%a6,-(%%sp)\n\tmove.l %3,%%a6\n\t"
+                     "jsr -72(%%a6)\n\tmove.l (%%sp)+,%%a6"
+        : "+r"(r_d0), "+r"(r_a0), "+r"(r_d1) : "a"(r_base) : "a1", "cc", "memory");
+    return (void *)r_d0;
+}

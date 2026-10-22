@@ -122,6 +122,29 @@ static void *by_phandle(struct ctx *c, void *key, u32 h, int depth)
     return 0;
 }
 
+/* the Zorro boards AmigaOS configured, from expansion.library's ConfigDev list. A ConfigDev is: node (14
+ * bytes), cd_Flags +14, an ExpansionRom at +16 (er_Type +16, er_Product +17, er_Flags +18, er_Manufacturer
+ * +20 (16 bit), er_SerialNumber +22), cd_BoardAddr +32, cd_BoardSize +36. */
+static u32 b32(const u8 *p) { return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3]; }
+
+void stage0_boards(struct ctx *c, struct hwinfo *hw)
+{
+    void *cd = 0;
+    hw->nboards = 0;
+    while (hw->nboards < HW_MAXBOARDS && (cd = os_next_board(c, cd))) {
+        const u8 *p = (const u8 *)cd;
+        struct hwboard *b = &hw->board[hw->nboards++];
+        b->cd_flags = p[14];
+        b->type = p[16];
+        b->product = p[17];
+        b->er_flags = p[18];
+        b->manufacturer = (unsigned short)(p[20] << 8 | p[21]);
+        b->serial = b32(p + 22);
+        b->addr = b32(p + 32);
+        b->size = b32(p + 36);
+    }
+}
+
 void stage0_fill(struct ctx *c, struct hwinfo *hw)
 {
     void *k;
@@ -183,23 +206,43 @@ void stage0_fill(struct ctx *c, struct hwinfo *hw)
 #define __STR(x) __STR2(x)
 
 #ifndef HOST_TEST
+/* exec.library OpenResource (-498) and OpenLibrary (-552): name in a1, (version 0 in d0), result in d0.
+ * a6 is the compiler's frame pointer: it is saved on the stack around the call, never pinned to a variable. */
+static void *exec_open_resource(void *execbase, const char *name)
+{
+    register void *a1 __asm__("a1") = (void *)name;
+    register void *d0 __asm__("d0");
+    __asm__ volatile("move.l %%a6,-(%%sp)\n\tmove.l %2,%%a6\n\t"
+                     "jsr -498(%%a6)\n\tmove.l (%%sp)+,%%a6"
+        : "=r"(d0), "+r"(a1) : "a"(execbase) : "d1", "a0", "cc", "memory");
+    return d0;
+}
+
+static void *exec_open_library(void *execbase, const char *name)
+{
+    register void *a1 __asm__("a1") = (void *)name;
+    register void *d0 __asm__("d0") = 0;
+    __asm__ volatile("move.l %%a6,-(%%sp)\n\tmove.l %2,%%a6\n\t"
+                     "jsr -552(%%a6)\n\tmove.l (%%sp)+,%%a6"
+        : "+r"(d0), "+r"(a1) : "a"(execbase) : "d1", "a0", "cc", "memory");
+    return d0;
+}
+
 /* called by the bootblock: a6 = ExecBase. Fills the table at HWINFO_ADDR. */
 void stage0_main(void *execbase, struct hwinfo *hw)
 {
-    register void *a1 __asm__("a1") = (void *)"devicetree.resource";
-    register void *d0 __asm__("d0");
-    __asm__ volatile("move.l %%a6,-(%%sp)\n\tmove.l %2,%%a6\n\t"           /* a6 is the frame pointer: save it */
-                     "jsr -498(%%a6)\n\tmove.l (%%sp)+,%%a6"                /* exec OpenResource */
-        : "=r"(d0), "+r"(a1) : "a"(execbase) : "d1", "a0", "cc", "memory");
     u8 *z = (u8 *)hw;
     for (unsigned i = 0; i < sizeof *hw; i++)
         z[i] = 0;
     hw->magic = HWINFO_MAGIC;
     hw->phy_addr = 0xFF;
-    if (!d0)
-        return;                                 /* not Emu68: table stays empty */
-    struct ctx c = { d0 };
-    stage0_fill(&c, hw);
+    struct ctx c = { 0, 0 };
+    c.exp = exec_open_library(execbase, "expansion.library");
+    if (c.exp)
+        stage0_boards(&c, hw);
+    c.db = exec_open_resource(execbase, "devicetree.resource");
+    if (c.db)
+        stage0_fill(&c, hw);                    /* not Emu68: the rest of the table stays empty */
 }
 
 /* entry: saves what the C code may not preserve, passes (ExecBase, table) */

@@ -192,6 +192,13 @@ void kmain(struct bootinfo *bi)
                 hwi->genet, hwi->gic_dist, hwi->gic_cpu);
     }
 
+    if (hwi->magic == HWINFO_MAGIC)
+        for (u32 i = 0; i < hwi->nboards && i < HW_MAXBOARDS; i++) {
+            const struct hwboard *b = &hwi->board[i];
+            kprintf("zorro: %u: manufacturer %x product %u at %p, %u KB%s%s\n", i, b->manufacturer, b->product,
+                    b->addr, b->size / 1024, (b->type & 0x20) ? ", RAM" : "", (b->type & 0xC0) == 0x80 ? ", Zorro III" : "");
+        }
+
     int font_ok = gfx_font_init(bi->font) == 0;     /* before mem_init: OS leftovers */
     vectors_init();
     mem_init(bi, bi->kernel_pa, *(u32 *)(bi->kernel_pa + 12));
