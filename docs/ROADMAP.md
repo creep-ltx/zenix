@@ -35,28 +35,42 @@ manager, scheduler; disk server (RDB partitions), filesystem server (ext2, read 
 pipes, shell and 20 commands; hires display with a Copper-split bar, workspaces, Amiga keyboard; a setup matrix
 of 13 emulated A1200 variants; a benchmark using the CIA's E-clock.
 
-## The plan, in phases
+## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenFS and the desktop)
 
-**Phase 1 - Storage you can trust.** Disk tools (`fdisk` for the RDB, `mkfs.ext2`, `fsck.ext2`, `df`, `sync`);
-a multi-filesystem VFS (mount table, several filesystem servers); clean-shutdown flag and write ordering.
-Then **ZenFS**, our own filesystem (docs/zenfs.md): atomic commit, checksummed metadata, extents, indexed
-directories, self-healing. ext2 stays for Linux compatibility.
+**Phase 1 - Disk tools.** `fdisk` (the RDB partition table), `mkfs.ext2`, `fsck.ext2`, `df`, `sync`; the disk
+server refuses raw access to mounted devices. Tested against scratch disks in the emulator and checked with the
+host's `e2fsck`.
 
 **Phase 2 - First real hardware.** Boot from the Gotek/GoDrive with the RAM-disk test image; measure the CPU
-side (benchmark); fix what real hardware shows. Hard-disk boot (bootblock finds the Zenix partition through the
-RDB) for IDE machines.
+side (benchmark); fix what real hardware shows. (The user's A1200 is a PiStorm with an SD card and no IDE disk,
+so this uses `zenix-ram.adf` until an SD driver exists.)
 
-**Phase 3 - The desktop.** Move the display out of the kernel into a display server with a drawing API
+**Phase 3 - A terminal you can live in.** Before any desktop:
+- *Shell:* history, line editing, tab completion, variables and the environment, scripting (`if`, `for`,
+  `while`, functions), globbing, aliases, job control, `2>` and here-documents, a profile file. Lessons from
+  the csh project (best of bash, zsh and fish).
+- *Terminal:* arrow, Home/End and function keys as standard escape codes, scrollback, text styles (bold,
+  inverse, underline), colours decided deliberately (the display is one bitplane now), UTF-8 later.
+- *C library and kernel:* full printf, stdio, `qsort`, `strtol`, time functions, `getenv`, signals, `kill`,
+  process groups, `/dev` (null, zero, tty), `/proc`-like info.
+- *Commands:* port CUtils (47 commands: sed, sort, diff, find, tar, gzip, ...) through a Zenix backend for its
+  `cu.h` layer; write the rest (`df`, `mount`, `date`, `env`, `test`, `expr`...).
+- *Editor and pager:* Sumi and Maki ported (they use tui.library; Zenix gets an equivalent that emits
+  standard escape codes), man pages.
+- *Network tools later,* when the network server exists.
+
+**Phase 4 - ZenFS.** Our own filesystem (docs/zenfs.md): atomic commit, checksummed metadata, extents, indexed
+directories, self-healing; needs the multi-filesystem VFS (mount table, several filesystem servers). ext2 stays
+for Linux compatibility.
+
+**Phase 5 - The desktop.** Move the display out of the kernel into a display server with a drawing API
 (planar, blitter and Copper); a client library; a terminal program as the first client; the workspace bar;
 Ahiru-style file view; mouse. Index server (FuzzyFind) for `locate` / `fzf`.
 
-**Phase 4 - A system you can live in.** A C library with the usual functions, a compiler toolchain story
-(self-hosting is a long shot; cross-compile first), package/installer, an editor, a pager, networking tools.
-
-**Phase 5 - More hardware, as servers.** PiStorm SD, network (TCP/IP server), USB, NVMe, RTG graphics, sound
+**Phase 6 - More hardware, as servers.** PiStorm SD, network (TCP/IP server), USB, NVMe, RTG graphics, sound
 (Paula) server, floppy driver, serial.
 
-**Phase 6 - Polish and release.** Documentation, license decisions, public repository, release images.
+**Phase 7 - Polish and release.** Documentation, licence decisions, public repository, release images.
 
 ## Open questions
 
