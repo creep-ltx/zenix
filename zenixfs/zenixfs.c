@@ -44,7 +44,10 @@ static inline void wr16(u8 *p, u16 v) { p[0] = v >> 8; p[1] = v; }
 static inline void wr32(u8 *p, u32 v) { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v; }
 static inline void wr64(u8 *p, u64 v) { wr32(p, v >> 32); wr32(p + 4, (u32)v); }
 
-struct cb { u32 blk; u8 *data; u8 valid, dirty, kind, pin; u32 lru; struct cb *next; };
+struct cb { u32 blk; u8 *data; u8 valid, dirty, kind, pin, fresh; u32 lru; struct cb *next; };   /* fresh: allocated in this transaction */
+struct bmpage { u32 idx; u8 valid, dirty; u32 lru; u8 *data; };   /* one page of the free-space bitmap (B - HDR bytes) */
+struct run { u32 start, len; };
+#define PENDMAX 1024                 /* runs of blocks freed in this transaction, kept allocated until the commit (8 KB) */
 
 struct zenixfs {
     struct zenixfs_dev *dev;
@@ -53,12 +56,16 @@ struct zenixfs {
     u32 gen;                     /* the transaction being built */
     u32 root, height, free_blocks, next_ino;
     u64 now;
-    u8 *bm, *qbm, *nbm, *bmdirty, *bmsel;
+    u8 *bmsel;                   /* per bitmap page: which of its two copies is current */
+    u8 *bmstaged;                /* per page: the other copy already holds newer content, switched at the commit */
+    u8 *bmfull;                  /* per page: known to have no free block (a hint, cleared when something is freed there) */
+    struct bmpage *bmp; u32 nbmp, bmclock;       /* the page cache: a few pages, not the whole map */
+    struct run pend[PENDMAX]; u32 npend, pend_blocks;
     u32 bmbytes;                 /* bytes of payload per bitmap block (B - HDR) */
     struct cb *cbs; struct cb **htab; u32 cap, hsize, clock, ndirty;
     u32 meta_hint, data_hint;
     int in_reserve, failed, txn_dirty;
-    u8 *sc_r, *sc_z, *sc_c, *sc_sel;   /* scratch blocks for read, truncate, commit, and the bitmap selector copy: allocated once at mount
+    u8 *sc_r, *sc_z, *sc_c, *sc_b, *sc_sel;   /* scratch blocks for read, truncate, commit, and the bitmap selector copy: allocated once at mount
                                          * (the Zenix malloc cannot give small blocks back, a server must not allocate while running) */
     struct zenixfs_stats st;
 };
@@ -120,7 +127,7 @@ static struct cb *cb_alloc(struct zenixfs *fs, u32 blk)
     }
     if (!best) return NULL;
     if (best->valid) cb_unhash(fs, best);
-    best->blk = blk; best->valid = 1; best->dirty = 0; best->pin = 1; best->lru = ++fs->clock;
+    best->blk = blk; best->valid = 1; best->dirty = 0; best->fresh = 0; best->pin = 1; best->lru = ++fs->clock;
     best->next = fs->htab[blk & (fs->hsize - 1)];
     fs->htab[blk & (fs->hsize - 1)] = best;
     return best;
@@ -150,6 +157,7 @@ static struct cb *cb_new(struct zenixfs *fs, u32 blk, int kind)
     if (c) { c->pin++; }
     else { c = cb_alloc(fs, blk); if (!c) return NULL; }
     c->kind = kind;
+    c->fresh = 1;
     memset(c->data, 0, fs->B);
     cb_markdirty(fs, c);
     return c;
@@ -163,39 +171,118 @@ static void cb_drop(struct zenixfs *fs, u32 blk)
     if (!c->pin) { cb_unhash(fs, c); c->valid = 0; }
 }
 
-/* ---------- allocation ---------- */
-static int blk_free_now(struct zenixfs *fs, u32 b) { return !bit_get(fs->bm, b) && !bit_get(fs->qbm, b); }
+static int dev_write(struct zenixfs *fs, u32 blk, const void *buf) { fs->st.writes++; return fs->dev->write(fs->dev->ctx, blk, buf); }
+static int dev_flush(struct zenixfs *fs) { fs->st.flushes++; return fs->dev->flush(fs->dev->ctx); }
+#define BMBLK(i, copy) (9 + 2 * (i) + (copy))
+
+/* ---------- the free-space bitmap: a few pages in RAM ----------
+ * Page i (a block of the volume, two copies at BMBLK(i,0/1)) holds the bits of blocks i*bpb .. (i+1)*bpb-1; 1 = used.
+ * A page that changes is written to its NON-current copy (when evicted, or at the commit) and the commit record then
+ * says which copy is current, so the committed bitmap is never overwritten. Blocks freed in a transaction stay marked
+ * used until the commit (they may still belong to the last commit), kept as runs in pend[]. */
+static int bm_stage(struct zenixfs *fs, struct bmpage *pg)
+{
+    u8 *buf = fs->sc_b; u32 i = pg->idx, blk = BMBLK(i, fs->bmsel[i] ^ 1);
+    memset(buf, 0, fs->B);
+    memcpy(buf + HDR, pg->data, fs->bmbytes);
+    hdr_set(buf, T_BITMAP, 0, blk);
+    seal(buf, fs->B, fs->gen);
+    if (dev_write(fs, blk, buf) < 0) { fs->failed = 1; return ZENIXFS_EIO; }
+    fs->bmstaged[i] = 1; pg->dirty = 0;
+    return 0;
+}
+static struct bmpage *bm_get(struct zenixfs *fs, u32 i)
+{
+    struct bmpage *v = NULL;
+    for (u32 k = 0; k < fs->nbmp; k++) {
+        struct bmpage *p = &fs->bmp[k];
+        if (p->valid && p->idx == i) { p->lru = ++fs->bmclock; return p; }
+        if (!v || (v->valid && (!p->valid || p->lru < v->lru))) v = p;
+    }
+    if (v->valid && v->dirty && bm_stage(fs, v)) return NULL;
+    u32 blk = BMBLK(i, fs->bmsel[i] ^ (fs->bmstaged[i] ? 1 : 0));
+    fs->st.reads++;
+    if (fs->dev->read(fs->dev->ctx, blk, fs->sc_b) < 0 || !verify(fs->sc_b, fs->B, T_BITMAP, blk)) { v->valid = 0; return NULL; }
+    memcpy(v->data, fs->sc_b + HDR, fs->bmbytes);
+    v->idx = i; v->valid = 1; v->dirty = 0; v->lru = ++fs->bmclock;
+    return v;
+}
 
 static u32 alloc_block(struct zenixfs *fs, int data, int *err)
 {
     if (fs->free_blocks <= fs->reserve && !fs->in_reserve) { *err = ZENIXFS_ENOSPC; return 0; }
     u32 start = data ? fs->data_hint : fs->meta_hint;
     if (start < fs->dstart || start >= fs->nblocks) start = fs->dstart;
-    u32 b = start;
-    for (u32 n = 0; n < fs->nblocks - fs->dstart; n++) {
+    u32 b = start, left = fs->nblocks - fs->dstart;
+    while (left) {
         if (b >= fs->nblocks) b = fs->dstart;
-        if (!(b & 7) && fs->bm[b >> 3] == 0xFF) { b += 8; n += 7; continue; }
-        if (blk_free_now(fs, b)) {
-            bit_set(fs->bm, b); bit_set(fs->nbm, b);
-            fs->bmdirty[b / fs->bpb] = 1;
-            fs->free_blocks--; fs->txn_dirty = 1;
-            if (data) fs->data_hint = b + 1; else fs->meta_hint = b + 1;
-            return b;
+        u32 i = b / fs->bpb, base = i * fs->bpb, pageend = base + fs->bpb;
+        if (pageend > fs->nblocks) pageend = fs->nblocks;
+        u32 step = pageend - b;
+        if (fs->bmfull[i]) { b = pageend; left = left > step ? left - step : 0; continue; }
+        struct bmpage *pg = bm_get(fs, i);
+        if (!pg) { *err = ZENIXFS_EIO; return 0; }
+        u32 bit = b - base, end = pageend - base;
+        while (bit < end) {
+            if (!(bit & 7) && pg->data[bit >> 3] == 0xFF) { bit += 8; continue; }
+            if (!bit_get(pg->data, bit)) break;
+            bit++;
         }
-        b++;
+        if (bit < end) {
+            u32 blk = base + bit;
+            bit_set(pg->data, bit); pg->dirty = 1;
+            fs->free_blocks--; fs->txn_dirty = 1;
+            if (data) fs->data_hint = blk + 1; else fs->meta_hint = blk + 1;
+            return blk;
+        }
+        if (b == base) fs->bmfull[i] = 1;                    /* looked at the whole page: nothing free */
+        b = pageend; left = left > step ? left - step : 0;
     }
     *err = ZENIXFS_ENOSPC;
     return 0;
 }
+static inline int isnew(struct zenixfs *fs, u32 b) { struct cb *c = cb_find(fs, b); return c && c->fresh; }
 static void free_block(struct zenixfs *fs, u32 b)
 {
+    int fresh = isnew(fs, b);
     cb_drop(fs, b);
-    bit_clr(fs->bm, b);
-    if (bit_get(fs->nbm, b)) bit_clr(fs->nbm, b); else bit_set(fs->qbm, b);
-    fs->bmdirty[b / fs->bpb] = 1;
     fs->free_blocks++; fs->txn_dirty = 1;
+    if (fresh) {                                             /* never part of a commit: reusable at once */
+        u32 i = b / fs->bpb;
+        struct bmpage *pg = bm_get(fs, i);
+        if (!pg) { fs->failed = 1; return; }
+        bit_clr(pg->data, b - i * fs->bpb); pg->dirty = 1; fs->bmfull[i] = 0;
+        return;
+    }
+    if (fs->npend && fs->pend[fs->npend - 1].start + fs->pend[fs->npend - 1].len == b) fs->pend[fs->npend - 1].len++;
+    else if (fs->npend < PENDMAX) { fs->pend[fs->npend].start = b; fs->pend[fs->npend].len = 1; fs->npend++; }
+    else { fs->failed = 1; return; }                         /* pressure() and the truncate loop keep room; this is a bug guard */
+    fs->pend_blocks++;
 }
-static inline int isnew(struct zenixfs *fs, u32 b) { return bit_get(fs->nbm, b); }
+/* at the commit: the blocks freed meanwhile become free in the bitmap that is being committed */
+static int apply_pending(struct zenixfs *fs)
+{
+    for (u32 r = 0; r < fs->npend; r++)
+        for (u32 k = 0; k < fs->pend[r].len; k++) {
+            u32 b = fs->pend[r].start + k, i = b / fs->bpb;
+            struct bmpage *pg = bm_get(fs, i);
+            if (!pg) return ZENIXFS_EIO;
+            bit_clr(pg->data, b - i * fs->bpb); pg->dirty = 1; fs->bmfull[i] = 0;
+        }
+    fs->npend = 0; fs->pend_blocks = 0;
+    return 0;
+}
+
+/* Can n more tree changes be made without running out of blocks halfway? Checked before an operation changes anything: an
+ * ENOSPC in the middle would leave blocks allocated that nothing uses. Each change copies at most height+2 blocks. Normal
+ * operations must leave the reserve alone; unlink, rmdir and truncate (in_reserve) may use it. Blocks freed in this
+ * transaction cannot be reused before the commit, so they do not count. */
+static int room(struct zenixfs *fs, u32 n)
+{
+    u32 avail = fs->free_blocks > fs->pend_blocks ? fs->free_blocks - fs->pend_blocks : 0;
+    u32 floor = fs->in_reserve ? 0 : fs->reserve;
+    return avail >= floor + n * (fs->height + 2);
+}
 
 /* ---------- keys ---------- */
 static void mkkey(u8 *k, u32 obj, u8 kind, u32 off)
@@ -242,7 +329,8 @@ static void leaf_remove(u8 *b, u32 idx)
     memmove(b + d + sz, b + d, off - d);
     memmove(IH(b, idx), IH(b, idx + 1), 16 * (n - idx - 1));
     SETN(b, n - 1);
-    for (u32 i = 0; i < n - 1; i++) { u32 o = rd16(IH(b, i) + 12); if (o < off) wr16(IH(b, i) + 12, o + sz); }
+    /* every item stored at or below the removed one moves up by its size; <= because an item of size 0 can sit at the very same offset */
+    for (u32 i = 0; i < n - 1; i++) { u32 o = rd16(IH(b, i) + 12); if (o <= off) wr16(IH(b, i) + 12, o + sz); }
     SETDO(b, d + sz);
 }
 static void leaf_init(struct zenixfs *fs, struct cb *c, u32 blk)
@@ -417,6 +505,7 @@ static int t_insert(struct zenixfs *fs, const u8 *key, const u8 *val, u32 len, i
 {
     struct ins_res r;
     if (len > fs->maxitem) return ZENIXFS_ENAMETOOLONG;
+    if (!room(fs, 1)) return ZENIXFS_ENOSPC;
     int e = t_ins(fs, fs->root, fs->height - 1, key, val, len, upsert, &r);
     if (e) return e;
     fs->root = r.nblk;
@@ -476,6 +565,7 @@ static int t_dl(struct zenixfs *fs, u32 blk, int level, const u8 *key, struct de
 static int t_delete(struct zenixfs *fs, const u8 *key)
 {
     struct del_res r;
+    if (!room(fs, 1)) return ZENIXFS_ENOSPC;
     int e = t_dl(fs, fs->root, fs->height - 1, key, &r, 1);
     if (e) return e;
     fs->root = r.nblk;
@@ -497,9 +587,6 @@ static int t_delete(struct zenixfs *fs, const u8 *key)
 }
 
 /* ---------- commit ---------- */
-static int dev_write(struct zenixfs *fs, u32 blk, const void *buf) { fs->st.writes++; return fs->dev->write(fs->dev->ctx, blk, buf); }
-static int dev_flush(struct zenixfs *fs) { fs->st.flushes++; return fs->dev->flush(fs->dev->ctx); }
-#define BMBLK(i, copy) (9 + 2 * (i) + (copy))
 
 static int commit(struct zenixfs *fs)
 {
@@ -514,18 +601,12 @@ static int commit(struct zenixfs *fs)
         c->dirty = 0;
     }
     fs->ndirty = 0;
+    if (apply_pending(fs)) { fs->failed = 1; return ZENIXFS_EIO; }
+    for (u32 k = 0; k < fs->nbmp; k++)                       /* the changed bitmap pages go to their other copy */
+        if (fs->bmp[k].valid && fs->bmp[k].dirty && bm_stage(fs, &fs->bmp[k])) return ZENIXFS_EIO;
     u8 *buf = fs->sc_c, *sel = fs->sc_sel;
     memcpy(sel, fs->bmsel, fs->nb);
-    for (u32 i = 0; i < fs->nb; i++) {
-        if (!fs->bmdirty[i]) continue;
-        memset(buf, 0, B);
-        memcpy(buf + HDR, fs->bm + (u64)i * fs->bmbytes, fs->bmbytes);
-        u32 nc = sel[i] ^ 1, blk = BMBLK(i, nc);
-        hdr_set(buf, T_BITMAP, 0, blk);
-        seal(buf, B, fs->gen);
-        if (dev_write(fs, blk, buf) < 0) { fs->failed = 1; return ZENIXFS_EIO; }
-        sel[i] = nc;
-    }
+    for (u32 i = 0; i < fs->nb; i++) if (fs->bmstaged[i]) sel[i] ^= 1;
     if (dev_flush(fs) < 0) { fs->failed = 1; return ZENIXFS_EIO; }
     memset(buf, 0, B);
     wr32(buf + 32, fs->root); wr32(buf + 36, fs->height); wr32(buf + 40, fs->free_blocks);
@@ -536,17 +617,26 @@ static int commit(struct zenixfs *fs)
     seal(buf, B, fs->gen);
     if (dev_write(fs, slot, buf) < 0 || dev_flush(fs) < 0) { fs->failed = 1; return ZENIXFS_EIO; }
     memcpy(fs->bmsel, sel, fs->nb);
-    memset(fs->bmdirty, 0, fs->nb);
-    memset(fs->qbm, 0, fs->bmbytes * fs->nb);
-    memset(fs->nbm, 0, fs->bmbytes * fs->nb);
+    memset(fs->bmstaged, 0, fs->nb);
+    for (u32 i = 0; i < fs->cap; i++) fs->cbs[i].fresh = 0;
     fs->gen++; fs->txn_dirty = 0; fs->st.commits++;
     return 0;
 }
 /* called at the start of each operation: commit if the cache is filling with dirty blocks */
+/* inside a long write, between two blocks: only when memory or the run list is really about to run out */
+static int pressure_blk(struct zenixfs *fs)
+{
+    if (fs->failed) return ZENIXFS_EIO;
+    if (fs->ndirty * 4 >= fs->cap * 3 || fs->npend + 8 > PENDMAX) return commit(fs);
+    return 0;
+}
 static int pressure(struct zenixfs *fs)
 {
     if (fs->failed) return ZENIXFS_EIO;
     if (fs->ndirty * 2 >= fs->cap) return commit(fs);
+    if (fs->npend + 160 > PENDMAX) return commit(fs);                      /* room for the runs of the next operation: a write of up to
+                                                                             * about 30 blocks then never needs a commit in its middle */
+    if (fs->npend && fs->free_blocks - fs->pend_blocks < 2 * fs->reserve + 16) return commit(fs);   /* freed space is not usable until the commit */
     return 0;
 }
 
@@ -571,10 +661,10 @@ int zenixfs_mkfs(struct zenixfs_dev *dev, const char *label, uint32_t reserve, u
     u32 B = 1u << dev->bshift, n = dev->nblocks;
     if (dev->bshift < 10 || dev->bshift > 12) return ZENIXFS_EINVAL;
     u32 nb = geometry_nb(n, B), dstart = 9 + 2 * nb;
-    if (nb > 8 * (B - 60) || n < dstart + 64) return ZENIXFS_EINVAL;
-    if (!reserve) { reserve = n / 50; if (reserve < 16) reserve = 16; }
-    u8 *buf = ZENIXFS_MALLOC(B), *bmp = ZENIXFS_MALLOC((size_t)nb * (B - HDR));
-    if (!buf || !bmp) { ZENIXFS_FREE(buf); ZENIXFS_FREE(bmp); return ZENIXFS_EIO; }
+    if (nb > 8 * (B - 60) || n < dstart + 128) return ZENIXFS_EINVAL;
+    if (!reserve) { reserve = n / 50; if (reserve < 32) reserve = 32; }
+    u8 *buf = ZENIXFS_MALLOC(B);
+    if (!buf) return ZENIXFS_EIO;
     memset(buf, 0, B);
     for (u32 i = 1; i <= RING; i++) if (dev->write(dev->ctx, i, buf) < 0) goto io;
     /* super */
@@ -585,15 +675,19 @@ int zenixfs_mkfs(struct zenixfs_dev *dev, const char *label, uint32_t reserve, u
     for (int i = 0; i < 16; i++) buf[68 + i] = (u8)(now * 2654435761u >> (i % 4 * 8)) ^ (u8)(i * 37);
     seal(buf, B, 0);
     if (dev->write(dev->ctx, 0, buf) < 0) goto io;
-    /* bitmap: system area + root leaf used, everything past the end used */
-    memset(bmp, 0, (size_t)nb * (B - HDR));
-    for (u32 b = 0; b <= dstart; b++) bit_set(bmp, b);       /* dstart = root leaf */
-    for (u32 b = n; b < nb * 8 * (B - HDR); b++) bit_set(bmp, b);
-    for (u32 i = 0; i < nb; i++) {
-        memset(buf, 0, B);
-        memcpy(buf + HDR, bmp + (size_t)i * (B - HDR), B - HDR);
-        hdr_set(buf, T_BITMAP, 0, BMBLK(i, 0)); seal(buf, B, 1);
-        if (dev->write(dev->ctx, BMBLK(i, 0), buf) < 0) goto io;
+    /* bitmap pages: the system area and the root leaf (blocks 0 .. dstart) are used, and so is everything past the end */
+    {
+        u32 bpb = 8 * (B - HDR);
+        for (u32 i = 0; i < nb; i++) {
+            memset(buf, 0, B);
+            u32 base = i * bpb;
+            for (u32 j = 0; j < bpb; j++) {
+                u32 blk = base + j;
+                if (blk <= dstart || blk >= n) bit_set(buf + HDR, j);
+            }
+            hdr_set(buf, T_BITMAP, 0, BMBLK(i, 0)); seal(buf, B, 1);
+            if (dev->write(dev->ctx, BMBLK(i, 0), buf) < 0) goto io;
+        }
     }
     /* root leaf with the root directory inode */
     memset(buf, 0, B);
@@ -614,10 +708,10 @@ int zenixfs_mkfs(struct zenixfs_dev *dev, const char *label, uint32_t reserve, u
     wr64(buf + 48, now); wr32(buf + 56, nb);
     hdr_set(buf, T_COMMIT, 0, 1 + (1 % RING)); seal(buf, B, 1);
     if (dev->write(dev->ctx, 1 + (1 % RING), buf) < 0 || dev->flush(dev->ctx) < 0) goto io;
-    ZENIXFS_FREE(buf); ZENIXFS_FREE(bmp);
+    ZENIXFS_FREE(buf);
     return 0;
 io:
-    ZENIXFS_FREE(buf); ZENIXFS_FREE(bmp);
+    ZENIXFS_FREE(buf);
     return ZENIXFS_EIO;
 }
 
@@ -625,14 +719,20 @@ static void fs_free(struct zenixfs *fs)
 {
     if (!fs) return;
     if (fs->cbs) for (u32 i = 0; i < fs->cap; i++) ZENIXFS_FREE(fs->cbs[i].data);
-    ZENIXFS_FREE(fs->cbs); ZENIXFS_FREE(fs->htab); ZENIXFS_FREE(fs->bm); ZENIXFS_FREE(fs->qbm); ZENIXFS_FREE(fs->nbm);
-    ZENIXFS_FREE(fs->bmdirty); ZENIXFS_FREE(fs->bmsel); ZENIXFS_FREE(fs->sc_r); ZENIXFS_FREE(fs->sc_z); ZENIXFS_FREE(fs->sc_c);
+    ZENIXFS_FREE(fs->cbs); ZENIXFS_FREE(fs->htab);
+    if (fs->bmp) for (u32 i = 0; i < fs->nbmp; i++) ZENIXFS_FREE(fs->bmp[i].data);
+    ZENIXFS_FREE(fs->bmp); ZENIXFS_FREE(fs->bmsel); ZENIXFS_FREE(fs->bmstaged); ZENIXFS_FREE(fs->bmfull);
+    ZENIXFS_FREE(fs->sc_r); ZENIXFS_FREE(fs->sc_z); ZENIXFS_FREE(fs->sc_c); ZENIXFS_FREE(fs->sc_b);
     ZENIXFS_FREE(fs->sc_sel); ZENIXFS_FREE(fs);
 }
 
 static int orphans_free(struct zenixfs *fs);
 
 int zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_blocks)
+{
+    return zenixfs_mount_ex(out, dev, cache_blocks, 0);
+}
+int zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_blocks, uint32_t bm_pages)
 {
     u32 B = 1u << dev->bshift;
     if (cache_blocks < 32) cache_blocks = 32;
@@ -651,14 +751,18 @@ int zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_
     if (fs->nblocks > dev->nblocks || fs->nb != geometry_nb(fs->nblocks, B)) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_ECORRUPT; }
     fs->cap = cache_blocks; fs->hsize = 1; while (fs->hsize < cache_blocks * 2) fs->hsize <<= 1;
     fs->cbs = ZENIXFS_MALLOC(sizeof(struct cb) * fs->cap); fs->htab = ZENIXFS_MALLOC(sizeof(struct cb *) * fs->hsize);
-    size_t bmsz = (size_t)fs->nb * fs->bmbytes;
-    fs->bm = ZENIXFS_MALLOC(bmsz); fs->qbm = ZENIXFS_MALLOC(bmsz); fs->nbm = ZENIXFS_MALLOC(bmsz);
-    fs->bmdirty = ZENIXFS_MALLOC(fs->nb); fs->bmsel = ZENIXFS_MALLOC(fs->nb);
-    fs->sc_r = ZENIXFS_MALLOC(B); fs->sc_z = ZENIXFS_MALLOC(B); fs->sc_c = ZENIXFS_MALLOC(B); fs->sc_sel = ZENIXFS_MALLOC(fs->nb);
-    if (!fs->cbs || !fs->htab || !fs->bm || !fs->qbm || !fs->nbm || !fs->bmdirty || !fs->bmsel || !fs->sc_r || !fs->sc_z || !fs->sc_c || !fs->sc_sel) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; }
+    fs->nbmp = bm_pages ? bm_pages : 8;
+    if (fs->nbmp > fs->nb) fs->nbmp = fs->nb;
+    fs->bmsel = ZENIXFS_MALLOC(fs->nb); fs->bmstaged = ZENIXFS_MALLOC(fs->nb); fs->bmfull = ZENIXFS_MALLOC(fs->nb);
+    fs->bmp = ZENIXFS_MALLOC(sizeof(struct bmpage) * fs->nbmp);
+    fs->sc_r = ZENIXFS_MALLOC(B); fs->sc_z = ZENIXFS_MALLOC(B); fs->sc_c = ZENIXFS_MALLOC(B); fs->sc_b = ZENIXFS_MALLOC(B);
+    fs->sc_sel = ZENIXFS_MALLOC(fs->nb);
+    if (!fs->cbs || !fs->htab || !fs->bmsel || !fs->bmstaged || !fs->bmfull || !fs->bmp || !fs->sc_r || !fs->sc_z || !fs->sc_c || !fs->sc_b || !fs->sc_sel) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; }
     memset(fs->cbs, 0, sizeof(struct cb) * fs->cap); memset(fs->htab, 0, sizeof(struct cb *) * fs->hsize);
+    memset(fs->bmsel, 0, fs->nb); memset(fs->bmstaged, 0, fs->nb); memset(fs->bmfull, 0, fs->nb);
+    memset(fs->bmp, 0, sizeof(struct bmpage) * fs->nbmp);
     for (u32 i = 0; i < fs->cap; i++) { fs->cbs[i].data = ZENIXFS_MALLOC(B); if (!fs->cbs[i].data) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; } }
-    memset(fs->qbm, 0, bmsz); memset(fs->nbm, 0, bmsz); memset(fs->bmdirty, 0, fs->nb);
+    for (u32 i = 0; i < fs->nbmp; i++) { fs->bmp[i].data = ZENIXFS_MALLOC(fs->bmbytes); if (!fs->bmp[i].data) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; } }
     /* commit records, newest valid first */
     u64 gens[RING]; u8 *recs = ZENIXFS_MALLOC((size_t)RING * B);
     if (!recs) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; }
@@ -682,11 +786,10 @@ int zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_
         u8 *r = recs + (size_t)bs * B; u64 g = gens[bs]; gens[bs] = 0;
         if (rd32(r + 56) != fs->nb) { fs->st.mount_damage++; continue; }
         int good = 1;
-        for (u32 i = 0; i < fs->nb && good; i++) {
+        for (u32 i = 0; i < fs->nb && good; i++) {                /* which copy of each bitmap page is current; checked now on volumes up to 4 MB of map */
             u32 sel = (r[60 + i / 8] >> (i % 8)) & 1, blk = BMBLK(i, sel);
-            if (dev->read(dev->ctx, blk, buf) < 0 || !verify(buf, B, T_BITMAP, blk)) { good = 0; break; }
-            memcpy(fs->bm + (size_t)i * fs->bmbytes, buf + HDR, fs->bmbytes);
             fs->bmsel[i] = sel;
+            if (fs->nb <= 1024 && (dev->read(dev->ctx, blk, buf) < 0 || !verify(buf, B, T_BITMAP, blk))) { good = 0; break; }
         }
         if (!good) { fs->st.mount_damage++; continue; }
         u32 root = rd32(r + 32);
@@ -748,7 +851,10 @@ int zenixfs_setattr(struct zenixfs *fs, uint32_t ino, const struct zenixfs_inode
     cur.mode = (cur.mode & ZENIXFS_S_IFMT) | (in->mode & ~ZENIXFS_S_IFMT);
     cur.uid = in->uid; cur.gid = in->gid; cur.mtime = in->mtime; cur.ctime = fs->now;
     cur.flags = (cur.flags & 0xFF) | (in->flags & ~0xFFu);
-    return ino_store(fs, ino, &cur);
+    int saved = fs->in_reserve; fs->in_reserve = 1;               /* chmod works on a full volume */
+    if (!room(fs, 1)) e = ZENIXFS_ENOSPC; else e = ino_store(fs, ino, &cur);
+    fs->in_reserve = saved;
+    return e;
 }
 
 /* ---------- directories ---------- */
@@ -938,6 +1044,10 @@ static int f_map_clear_from(struct zenixfs *fs, u32 ino, u32 lb)
 {
     for (;;) {
         u8 key[KEYLEN], k2[KEYLEN], val[VMAX]; int vl;
+        if (fs->npend + 8 > PENDMAX) {                   /* a very fragmented file: write out what is freed so far to make room */
+            int ce = commit(fs);                          /* (the callers keep the inode listed as an orphan or sized, so this state is consistent) */
+            if (ce) return ce;
+        }
         mkkey(key, ino, K_EXTENT, 0xFFFFFFFFu);
         int e = t_search(fs, key, S_FLOOR, k2, val, &vl);
         if (e == ZENIXFS_ENOENT) return 0;
@@ -1012,7 +1122,8 @@ static int f_write_blocks(struct zenixfs *fs, u32 ino, u64 off, const u8 *buf, u
 {
     u32 done = 0; int e;
     while (done < len) {
-        e = pressure(fs); if (e) return e;
+        e = pressure_blk(fs); if (e) return e;
+        if (!room(fs, 4)) return ZENIXFS_ENOSPC;                       /* the data block, the extent change and the inode */
         u64 pos = off + done; u32 lb = (u32)(pos >> fs->bshift), bo = (u32)(pos & (fs->B - 1)), chunk = fs->B - bo;
         if (chunk > len - done) chunk = len - done;
         u32 old; e = f_map_get(fs, ino, lb, &old);
@@ -1033,7 +1144,7 @@ static int f_write_blocks(struct zenixfs *fs, u32 ino, u64 off, const u8 *buf, u
             memcpy(c->data + bo, buf + done, chunk);
             cb_put(c);
             e = f_map_set(fs, ino, lb, nb);
-            if (e) return e;
+            if (e) { free_block(fs, nb); return e; }
         }
         done += chunk;
         struct zenixfs_inode in; e = ino_load(fs, ino, &in);
@@ -1091,6 +1202,7 @@ int zenixfs_truncate(struct zenixfs *fs, uint32_t ino, uint64_t size)
     if (size > 0x3FFFFFFFFFFFull) return ZENIXFS_EFBIG;
     u32 inl = ZENIXFS_INLINE_MAX < fs->maxitem ? ZENIXFS_INLINE_MAX : fs->maxitem;
     int saved = fs->in_reserve; fs->in_reserve = 1;
+    if (!room(fs, 6)) { fs->in_reserve = saved; return ZENIXFS_ENOSPC; }
     if (in.flags & IFL_INLINE) {
         if (size <= inl) {
             u8 tmp[VMAX]; int tl; e = inline_load(fs, ino, tmp, &tl);
@@ -1146,10 +1258,15 @@ static int make(struct zenixfs *fs, u32 dir, const char *name, int len, u32 mode
     if ((e = check_name(fs, name, len))) return e;
     if ((e = dir_check(fs, dir, &d))) return e;
     if (dir_find(fs, dir, (const u8 *)name, len, NULL, NULL) == 0) return ZENIXFS_EEXIST;
+    if (!room(fs, 5)) return ZENIXFS_ENOSPC;
     u32 ino;
     if ((e = new_inode(fs, mode, uid, gid, dir, &ino))) return e;
     u8 type = (mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFDIR ? 4 : (mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFLNK ? 10 : 8;
-    if ((e = dir_add(fs, dir, (const u8 *)name, len, ino, type))) return e;
+    if ((e = dir_add(fs, dir, (const u8 *)name, len, ino, type))) {
+        u8 k[KEYLEN]; mkkey(k, ino, K_INODE, 0);
+        t_delete(fs, k);                                      /* do not leave an inode that no name points to */
+        return e;
+    }
     if ((e = touch_dir(fs, dir, &d, type == 4 ? 1 : 0))) return e;
     if (out) *out = ino;
     return 0;
@@ -1183,6 +1300,7 @@ int zenixfs_link(struct zenixfs *fs, uint32_t dir, const char *name, int len, ui
     if ((e = ino_load(fs, ino, &in))) return e;
     if ((in.mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFDIR) return ZENIXFS_EISDIR;
     if (dir_find(fs, dir, (const u8 *)name, len, NULL, NULL) == 0) return ZENIXFS_EEXIST;
+    if (!room(fs, 4)) return ZENIXFS_ENOSPC;
     if ((e = dir_add(fs, dir, (const u8 *)name, len, ino, (in.mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFLNK ? 10 : 8))) return e;
     in.nlink++; in.ctime = fs->now;
     if ((e = ino_store(fs, ino, &in))) return e;
@@ -1193,14 +1311,25 @@ static int has_orphan(struct zenixfs *fs, u32 ino)
     u8 key[KEYLEN]; mkkey(key, 0, K_ORPHAN, ino);
     return t_search(fs, key, S_EXACT, NULL, NULL, NULL) == 0;
 }
+/* free an inode and its data. The inode is first stored with nlink 0 and listed as an orphan, so that a commit in the middle
+ * of freeing a big or fragmented file (or a crash) leaves a consistent volume that the next mount finishes cleaning. */
 static int inode_destroy(struct zenixfs *fs, u32 ino, struct zenixfs_inode *in)
 {
-    u8 key[KEYLEN]; int e;
+    u8 key[KEYLEN], okey[KEYLEN]; int e;
     int saved = fs->in_reserve; fs->in_reserve = 1;
+    mkkey(okey, 0, K_ORPHAN, ino);
+    e = t_insert(fs, okey, okey, 0, 1);
+    if (e) goto out;
+    in->nlink = 0;
+    e = ino_store(fs, ino, in);
+    if (e) goto out;
     if (in->flags & IFL_INLINE) { e = inline_store(fs, ino, NULL, 0); if (e) goto out; }
     else { e = f_map_clear_from(fs, ino, 0); if (e) goto out; }
     mkkey(key, ino, K_INODE, 0);
     e = t_delete(fs, key);
+    if (e) goto out;
+    e = t_delete(fs, okey);
+    if (e == ZENIXFS_ENOENT) e = 0;
 out:
     fs->in_reserve = saved;
     return e;
@@ -1222,6 +1351,7 @@ int zenixfs_unlink(struct zenixfs *fs, uint32_t dir, const char *name, int len)
     if ((e = dir_find(fs, dir, (const u8 *)name, len, &ino, &type))) return e;
     if (type == 4) return ZENIXFS_EISDIR;
     int saved = fs->in_reserve; fs->in_reserve = 1;
+    if (!room(fs, 8)) { fs->in_reserve = saved; return ZENIXFS_ENOSPC; }
     e = dir_del(fs, dir, (const u8 *)name, len);
     if (!e) e = drop_link(fs, ino);
     if (!e) e = touch_dir(fs, dir, &d, 0);
@@ -1240,6 +1370,7 @@ int zenixfs_rmdir(struct zenixfs *fs, uint32_t dir, const char *name, int len)
     if (!e) return ZENIXFS_ENOTEMPTY;
     if ((e = ino_load(fs, ino, &v))) return e;
     int saved = fs->in_reserve; fs->in_reserve = 1;
+    if (!room(fs, 8)) { fs->in_reserve = saved; return ZENIXFS_ENOSPC; }
     e = dir_del(fs, dir, (const u8 *)name, len);
     if (!e) e = inode_destroy(fs, ino, &v);
     if (!e) e = touch_dir(fs, dir, &d, -1);
@@ -1265,6 +1396,7 @@ int zenixfs_rename(struct zenixfs *fs, uint32_t odir, const char *oname, int ole
         }
     }
     int saved = fs->in_reserve; fs->in_reserve = 1;
+    if (!room(fs, 12)) { fs->in_reserve = saved; return ZENIXFS_ENOSPC; }
     e = dir_find(fs, ndir, (const u8 *)nname, nlen, &tino, &ttype);
     if (e == 0) {
         if (tino == ino) { fs->in_reserve = saved; return 0; }
@@ -1449,7 +1581,9 @@ int zenixfs_fsck(struct zenixfs *fs, void (*log)(void *, const char *), void *lc
         int has_inode = f->seen_inline & 0x100, orphan = f->seen_inline & 0x400;
         if (!has_inode) { if (f->ino != 0) fprob(&c, "inode # referenced or has data but no inode item", f->ino, 0); continue; }
         int isdir = (f->mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFDIR;
-        if (isdir) {
+        if (isdir && orphan) {
+            /* a directory being freed: nothing to check */
+        } else if (isdir) {
             u32 want = 2 + f->subdirs;
             if (f->nlink != want) fprob(&c, "directory # has nlink % (counted differently)", f->ino, f->nlink);
             if (f->ino != ZENIXFS_ROOT_INO && f->refs != 1) fprob(&c, "directory # is referenced % times", f->ino, f->refs);
@@ -1461,13 +1595,19 @@ int zenixfs_fsck(struct zenixfs *fs, void (*log)(void *, const char *), void *lc
         }
         if (f->nlink == 0 && !orphan && f->ino != ZENIXFS_ROOT_INO) fprob(&c, "inode # has nlink 0 and is not an orphan", f->ino, 0);
     }
-    /* bitmap against what the tree uses */
+    /* bitmap against what the tree uses, page by page */
     u32 freecnt = 0;
-    for (u32 b = 0; b < fs->nblocks; b++) {
-        int u = bit_get(c.used, b), m = bit_get(fs->bm, b);
-        if (u && !m) fprob(&c, "block # is used but marked free", b, 0);
-        if (!u && m) fprob(&c, "block # is marked used but nothing uses it", b, 0);
-        if (!m) freecnt++;
+    for (u32 i = 0; i < fs->nb; i++) {
+        struct bmpage *pg = bm_get(fs, i);
+        if (!pg) { fprob(&c, "free-space map page # is unreadable or damaged", i, 0); continue; }
+        for (u32 j = 0; j < fs->bpb; j++) {
+            u32 b = i * fs->bpb + j;
+            if (b >= fs->nblocks) break;
+            int u = bit_get(c.used, b), m = bit_get(pg->data, j);
+            if (u && !m) fprob(&c, "block # is used but marked free", b, 0);
+            if (!u && m) fprob(&c, "block # is marked used but nothing uses it", b, 0);
+            if (!m) freecnt++;
+        }
     }
     if (freecnt != fs->free_blocks) fprob(&c, "free block count is % but bitmap says #", freecnt, fs->free_blocks);
     ZENIXFS_FREE(c.used); ZENIXFS_FREE(c.tab);

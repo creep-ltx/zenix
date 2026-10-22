@@ -229,9 +229,10 @@ static int random_op(struct zenixfs *fs, int bounded_write)
         int n = me[e].node; if (mn[n].type != 0) return 0;
         if (node_ino(fs, me[e].dir, &di) || zenixfs_lookup(fs, di, me[e].name, strlen(me[e].name), &ino)) { printf("  lookup failed\n"); return 1; }
         size_t off, len;
-        if (bounded_write) { size_t blk = 1024; size_t b0 = rn(6) * blk; off = b0 + rn(blk); len = 1 + rn(blk - (off - b0)); }
+        if (bounded_write == 2) { off = rn(30000); len = 1 + rn(30000); }                    /* fat: fills a big volume across several map pages */
+        else if (bounded_write) { size_t blk = 1024; size_t b0 = rn(6) * blk; off = b0 + rn(blk); len = 1 + rn(blk - (off - b0)); }
         else { off = rn(7000); len = 1 + rn(900); }
-        uint8_t buf[1024]; for (size_t i = 0; i < len; i++) buf[i] = (uint8_t)rnd();
+        static uint8_t buf[32768]; for (size_t i = 0; i < len; i++) buf[i] = (uint8_t)rnd();
         int r = zenixfs_write(fs, ino, off, buf, len);
         if (r != (int)len) { printf("  write gave %d\n", r); return 1; }
         if (off + len > mn[n].size) m_resize(n, off + len);
@@ -240,8 +241,8 @@ static int random_op(struct zenixfs *fs, int bounded_write)
         int e = pick_ent(0); if (e < 0) return 0;
         int n = me[e].node; if (mn[n].type != 0) return 0;
         if (node_ino(fs, me[e].dir, &di) || zenixfs_lookup(fs, di, me[e].name, strlen(me[e].name), &ino)) return 1;
-        size_t sz = rn(7000);
-        if (bounded_write) sz = rn(2) ? 0 : mn[n].size;      /* a shrink to a block edge can be split by a commit; keep it atomic */
+        size_t sz = bounded_write == 2 ? rn(60000) : rn(7000);
+        if (bounded_write == 1) sz = rn(2) ? 0 : mn[n].size;      /* a shrink to a block edge can be split by a commit; keep it atomic */
         int r = zenixfs_truncate(fs, ino, sz);
         if (r) { printf("  truncate gave %d\n", r); return 1; }
         m_resize(n, sz);
@@ -343,23 +344,30 @@ static int test_random(void)
 }
 
 /* ---------- 3. power cut: replay every prefix of the recorded writes ---------- */
-static int test_powercut(void)
+static int powercut_run(int bshift, uint32_t nblocks, int mode, int ops, int stride, int bmpages, int cacheblk, int prefill)
 {
-    struct zmem *rec = zmem_new(10, 700, 1);
+    struct zmem *rec = zmem_new(bshift, nblocks, 1);
     struct zenixfs *fs;
     CHECK(zenixfs_mkfs(&rec->dev, NULL, 0, 5) == 0);
-    struct zmem *base = zmem_clone(rec);                 /* the image as mkfs left it; the log starts after it */
+    if (prefill) {                                       /* fill the first map page so that the recorded workload runs on later pages */
+        CHECK(zenixfs_mount_ex(&fs, &rec->dev, cacheblk, bmpages) == 0);
+        uint32_t f; static uint8_t chunk[65536]; memset(chunk, 0x5A, sizeof chunk);
+        CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, "fill", 4, 0644, 0, 0, &f) == 0);
+        for (int k = 0; k < prefill; k++) CHECK(zenixfs_write(fs, f, (uint64_t)k * sizeof chunk, chunk, sizeof chunk) == (int)sizeof chunk);
+        CHECK(zenixfs_unmount(fs) == 0);
+    }
+    struct zmem *base = zmem_clone(rec);                 /* the image as mkfs (and the prefill) left it; the log starts after it */
     for (size_t i = 0; i < rec->nlog; i++) free(rec->log[i].data);
     rec->nlog = 0;
-    CHECK(zenixfs_mount(&fs, &rec->dev, 32) == 0);
+    CHECK(zenixfs_mount_ex(&fs, &rec->dev, cacheblk, bmpages) == 0);
     model_reset();
     enum { MAXSIG = 400 };
     char *sigs[MAXSIG]; int nsig = 0; 
     int synced_sig[MAXSIG]; size_t synced_pos[MAXSIG]; int nsynced = 0;
     sigs[nsig] = fs_sig(fs); nsig++;
-    for (int i = 0; i < 300 && nsig < MAXSIG - 1; i++) {
+    for (int i = 0; i < ops && nsig < MAXSIG - 1; i++) {
         zenixfs_set_time(fs, 100 + i);
-        CHECK(!random_op(fs, 1));
+        CHECK(!random_op(fs, mode));
         sigs[nsig] = fs_sig(fs); nsig++;
         if (rn(12) == 0) {
             CHECK(zenixfs_sync(fs) == 0);
@@ -369,7 +377,9 @@ static int test_powercut(void)
     CHECK(zenixfs_sync(fs) == 0);
     synced_sig[nsynced] = nsig - 1; synced_pos[nsynced] = rec->nlog; nsynced++;
     struct zenixfs_stats st; zenixfs_get_stats(fs, &st);
-    printf("  power cut: %d states, %zu log entries, %u commits\n", nsig, rec->nlog, st.commits);
+    int high = 0;
+    for (uint32_t b = 8000; b < rec->dev.nblocks && (size_t)b << bshift < ((size_t)rec->dev.nblocks << bshift); b++) { const uint8_t *q = rec->img + ((size_t)b << bshift); for (int i = 0; i < (1 << bshift); i++) if (q[i]) { high++; break; } }
+    printf("  power cut: %d states, %zu log entries, %u commits, %d blocks used beyond block 8000\n", nsig, rec->nlog, st.commits, high);
     zenixfs_unmount(fs);
     size_t nlog = rec->nlog - 1;     /* the unmount's own (empty) activity is not part of the workload */
     (void)nlog;
@@ -379,8 +389,10 @@ static int test_powercut(void)
     size_t total = rec->nlog;
     for (size_t k = 0; k <= total; k++) {
         /* prefix of k log entries is applied in `work` */
+        int sample = stride <= 1 || k % stride == 0 || k == total || (k > 0 && rec->log[k - 1].is_flush);
+        if (!sample) { if (k < total) zmem_apply(work, &rec->log[k]); continue; }
         struct zmem *img = zmem_clone(work);
-        struct zenixfs *f2; int e = zenixfs_mount(&f2, &img->dev, 32);
+        struct zenixfs *f2; int e = zenixfs_mount_ex(&f2, &img->dev, cacheblk, bmpages);
         if (e) { printf("  prefix %zu: mount failed %d\n", k, e); failures++; return 1; }
         char *s = fs_sig(f2);
         int bad = zenixfs_fsck(f2, quiet, NULL) != 0;
@@ -400,7 +412,7 @@ static int test_powercut(void)
                 if (end > k + 1) for (int t = 0; t < 4; t++) {
                     struct zmem *im2 = zmem_clone(work);
                     for (size_t q = k; q < end; q++) if (rn(2)) zmem_apply(im2, &rec->log[q]);
-                    struct zenixfs *f3; int e3 = zenixfs_mount(&f3, &im2->dev, 32);
+                    struct zenixfs *f3; int e3 = zenixfs_mount_ex(&f3, &im2->dev, cacheblk, bmpages);
                     if (e3) { printf("  reorder at %zu: mount failed %d\n", k, e3); failures++; return 1; }
                     char *s3 = fs_sig(f3); int ok = s3 != NULL, bad3 = zenixfs_fsck(f3, quiet, NULL) != 0;
                     int m3 = -1; for (int j = 0; j < nsig && s3; j++) if (!strcmp(s3, sigs[j])) m3 = j;
@@ -416,6 +428,10 @@ static int test_powercut(void)
     zmem_free(work); zmem_free(base); zmem_free(rec);
     return 0;
 }
+
+static int test_powercut(void) { return powercut_run(10, 700, 1, 300, 1, 0, 32, 0); }
+/* a volume of several map pages with only one page in RAM, large writes, and a sampled replay (slow: not in the default run) */
+static int test_bigpower(void) { return powercut_run(10, 30000, 2, 380, 11, 1, 1000, 120); }     /* 120 x 64 KB = 7.5 MB of fill */
 
 /* ---------- 4. bit flips in metadata must never read back as silently different content ---------- */
 static int test_bitflip(void)
@@ -451,6 +467,32 @@ static int test_bitflip(void)
     }
     printf("  bit flips: %d trials: %d detected, %d harmless (unused or old copy), 0 silent\n", trials, detected, harmless);
     free(want); zmem_free(m);
+    return 0;
+}
+
+/* ---------- a volume of several free-space map pages (6) with ONE page in RAM, big random writes against the model ---------- */
+static int test_bigvol(void)
+{
+    struct zmem *m = zmem_new(10, 40000, 0);
+    struct zenixfs *fs;
+    CHECK(zenixfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zenixfs_mount_ex(&fs, &m->dev, 48, 1) == 0);
+    model_reset();
+    for (int i = 0; i < 20000; i++) {
+        zenixfs_set_time(fs, 100 + i);
+        if (random_op(fs, 2)) { printf("  op %d\n", i); failures++; return 1; }
+        if (i % 2000 == 1999) { CHECK(!compare_to_model(fs, "bigvol periodic")); CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0); }
+        if (i % 5000 == 4999) { CHECK(zenixfs_unmount(fs) == 0); CHECK(zenixfs_mount_ex(&fs, &m->dev, 48, 1) == 0); CHECK(!compare_to_model(fs, "bigvol remount")); }
+    }
+    struct zenixfs_stats st; zenixfs_get_stats(fs, &st);
+    struct zenixfs_statfs sf; zenixfs_statfs(fs, &sf);
+    printf("  bigvol: 20000 ops, %u commits, %u writes, %u reads; %u of %u blocks free at the end\n", st.commits, st.writes, st.reads, sf.bfree, sf.blocks);
+    CHECK(zenixfs_unmount(fs) == 0);
+    int high = 0;                                   /* blocks used beyond the first map page (7936 blocks): proves the other pages were in play */
+    for (uint32_t b = 8000; b < m->dev.nblocks; b++) { const uint8_t *q = m->img + ((size_t)b << 10); for (int i = 0; i < 1024; i++) if (q[i]) { high++; break; } }
+    printf("  bigvol: %d blocks written beyond the first map page\n", high);
+    CHECK(high > 100);
+    zmem_free(m);
     return 0;
 }
 
@@ -580,11 +622,12 @@ int main(int argc, char **argv)
     rs ^= seed * 0x9E3779B97F4A7C15ull; for (int i = 0; i < 10; i++) rnd();
     struct { const char *name; int (*fn)(void); } tests[] = {
         { "basic", test_basic }, { "random", test_random }, { "powercut", test_powercut },
-        { "bitflip", test_bitflip }, { "full", test_full }, { "orphan", test_orphan }, { "collide", test_collide },
+        { "bitflip", test_bitflip }, { "full", test_full }, { "orphan", test_orphan }, { "collide", test_collide }, { "bigvol", test_bigvol }, { "bigpower", test_bigpower },
     };
     int ran = 0;
     for (unsigned i = 0; i < sizeof tests / sizeof *tests; i++) {
         if (only && strcmp(only, tests[i].name)) continue;
+        if (!only && !strcmp(tests[i].name, "bigpower")) continue;     /* slow: run it by name */
         printf("%s (seed %llu)\n", tests[i].name, (unsigned long long)seed);
         int before = failures;
         tests[i].fn();

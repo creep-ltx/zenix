@@ -60,6 +60,8 @@ struct zenixfs;   /* a mounted volume */
 int  zenixfs_mkfs(struct zenixfs_dev *dev, const char *label, uint32_t reserve, uint64_t now);
 /* mount; cache_blocks = size of the block cache in blocks (at least 32). */
 int  zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_blocks);
+/* like zenixfs_mount; bm_pages = how many pages of the free-space map are kept in RAM (0 = 8; one page covers 8 * (blocksize - 32) blocks) */
+int  zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_blocks, uint32_t bm_pages);
 int  zenixfs_unmount(struct zenixfs *fs);                    /* commits */
 int  zenixfs_sync(struct zenixfs *fs);                       /* commit everything now */
 void zenixfs_set_time(struct zenixfs *fs, uint64_t now);

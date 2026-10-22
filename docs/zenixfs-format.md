@@ -102,10 +102,20 @@ A name is 1..255 arbitrary bytes except NUL and `/`; the filesystem does not int
 **Files**: if `flags` bit 0 is set the content is the INLINE item. Otherwise it is the EXTENT items; a block range with no extent reads as zeros (sparse).
 `size` is the length in bytes; bytes past it in the last block are zero.
 
-## 8. Rules that make it safe
+## 8. Rules that make it safe (and how an implementation keeps its RAM small)
 1. A transaction only ever writes blocks that were free in the last commit; it never writes any block the last commit uses.
 2. Commit order: file data, tree blocks (children first), bitmap blocks, **flush**, the commit record, **flush**.
-3. Blocks freed in a transaction are cleared in the bitmap of the same commit, but not reused until that commit is durable.
+3. Blocks freed in a transaction are cleared in the bitmap of the same commit, but not reused until that commit is durable. (The
+   implementation keeps them marked used and remembers them as runs until the commit; a block allocated in the same transaction
+   was never part of a commit and can be reused at once.)
 4. On mount: pick the newest valid commit record, check its root block. If the root fails its checksum, try the next older valid record (best effort: its blocks may have been reused).
 5. `reserve` blocks are never given to a write that grows the volume's use; only unlink, rmdir and truncate may use them.
 6. After mount: free the inodes listed as ORPHAN items (the open-but-unlinked files of a crash).
+7. The free-space bitmap needs only a few pages in RAM: a page that changes is written to its other copy (when it is evicted
+   or at the commit) and the commit record names the current copy, so any page can be written early without touching the
+   committed state.
+8. Freeing an inode first stores it with nlink 0 and lists it as an ORPHAN item, then frees its data, then deletes the inode
+   and the ORPHAN item. A commit or a crash in the middle leaves a consistent volume that the next mount finishes cleaning.
+9. `reserve` (default 2 % of the volume, at least 32 blocks) keeps unlink, rmdir, truncate, rename and chmod working on a full
+   volume. Every operation checks before it changes anything that the blocks it may need are there, so running out of space never
+   leaves a half-done change.

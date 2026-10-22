@@ -1,17 +1,14 @@
 # ZenixFS - the native Zenix filesystem (plan, 2026-10-22)
 
-**Status (2026-10-22):** phases Z-0 and Z-1 are done on the host: the exact format is in `zenixfs-format.md`, the library is in `zenixfs/` (branch `zenixfs`),
-and `make -C zenixfs test` runs the tests. *Verified* (run, 60 random seeds, with AddressSanitizer and UBSan): ~3000 random operations compared with a model, `fsck` clean,
-remount; the power-cut replay (every prefix of the recorded writes plus random subsets inside each flush epoch) always mounts, passes fsck and equals a committed state, and
-is never older than a durable commit; 600 random bit flips in metadata are detected or harmless, none silent; full volume and orphan cases. The tests were checked by mutation:
-removing the flush before the commit record, or reusing blocks freed in the same transaction, makes the power-cut test fail.
-Not done: the Zenix port (needs the multi-filesystem VFS), windowed bitmap (the library keeps the whole bitmap in RAM), delayed allocation (data is placed when written),
-hash-order `readdir` only, no `keep=N`, no data checksums, no defragmenter, no real-hardware measurements. Known limits of the library: a write that spans several blocks is
-not atomic across a commit that the cache pressure triggers in the middle of it (each block step is consistent, the whole write is not); a mount that had to fall back to an older commit
-is reported in `zenixfs_stats.mount_damage` and the caller must tell the user.
-
-Status of every statement: **proposed**. Numbers marked "estimate" are not measured; measure on a real
-A1200 (030 or 020, IDE or CF-in-IDE) before believing them. Background and sources: `Knowledge/amiga/zenix-filesystems-research.md`.
+**Status (2026-10-22):** the format is final for version 1 (`zenixfs-format.md`). The library in `zenixfs/` (branch `zenixfs`) runs on the host and **inside Zenix**
+(`mount.zenixfs`, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the new multi-filesystem VFS). *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
+`fsck` clean, remount; power-cut replay (every prefix of the recorded writes plus random subsets inside each flush epoch) always mounts, passes `fsck`, equals a committed state and is never
+older than a durable commit - also on a volume of several map pages with one page in RAM; 600 random bit flips in metadata are detected or harmless; directory hash chains; full volume; orphans.
+The tests were checked by mutation (no flush before the commit record, reuse of blocks freed in the same transaction: both make the power-cut test fail).
+The free-space map is windowed (a few pages in RAM, default 8); nothing is allocated while a server runs. Not done: delayed allocation (data is placed when written), `keep=N`/snapshots,
+data checksums, the defragmenter, merging adjacent blocks into one disk command, any real-hardware measurement. Known limits: a write of more than about 30 blocks is not atomic across a
+commit that cache pressure or the list of freed runs forces in its middle (each step is consistent, the whole write is not); a mount that had to fall back to an older commit is reported
+in `zenixfs_stats.mount_damage` and the caller must tell the user; names longer than 63 bytes are not listed through the kernel's 64-byte directory entry.
 
 ## 0. Try it on Linux (host tool, 2026-10-22)
 ```
@@ -161,6 +158,9 @@ So **speed figures from it are not valid for real Amigas** and must never be quo
 - **Z-3 Zenix server:** after main has the multi-filesystem VFS (mount table, several servers). Runs beside ext2; boot from ZenixFS later. Measure on the A1200.
 - **Z-4 Speed and safety extras:** hash directory tuning, read-ahead, defragmenter, scrub, dup metadata, keep=N / snapshots.
 - **Z-5 AmigaOS handler** (read-only first) so the other half of a dual-boot machine can read Zenix disks (Latin-1 names, big-endian: easy).
+  Notes (2026-10-22, an idea, not a plan): feasible as an ordinary AmigaDOS handler around the same library (big-endian and Latin-1 already match; RDB loading works like PFS3/SFS). The work is the AmigaDOS model
+  (locks, record locks, notifications), Amiga comments and 1978/50 Hz times (protection bits already have 8 flag bits), and **case-insensitive names**: AmigaDOS ignores case, ZenixFS does not. If it is ever wanted, decide
+  a volume flag "names compare ignoring case" (hash the folded name) while the format is still unreleased. The real gain would be one disk that Zenix and AmigaOS both read and write natively.
 
 Dependencies on the other branches: VFS mount table (main), partition type id for RDB (here: DosType `ZEN\1`), `FS_*` message set in
 `kernel/fsproto.h` already fits (open, read, write, readdir, rename, link, symlink, statfs, sync); add `FS_FSYNC`.

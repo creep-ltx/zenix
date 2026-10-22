@@ -33,6 +33,10 @@ build/zenixfs-fuse: tools/zenixfs-fuse.c $(LIB) zenixfs.h host/zdev.h | build
 build/zbench: tests/zbench.c $(LIB) zenixfs.h host/zdev.h | build
 	$(CC) $(CFLAGS) -o $@ tests/zbench.c $(LIB)
 
+# slow: crash replay on a volume of several free-space map pages with one page in RAM
+longtest: build/ztest
+	build/ztest 1 bigpower
+
 fuse-test: build/zenixfs-tool build/zenixfs-fuse
 	bash tests/fuse-test.sh
 
@@ -47,4 +51,4 @@ asan:
 
 clean:
 	rm -rf build
-.PHONY: all test fuse-test bench image asan clean
+.PHONY: all test longtest fuse-test bench image asan clean
