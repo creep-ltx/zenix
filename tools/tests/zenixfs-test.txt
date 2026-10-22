@@ -50,7 +50,11 @@ sleep 12
 send cmp /mnt/seq.txt /ext/seq.txt && echo SAME-ACROSS-MOUNTS\r
 sleep 8
 send mv /mnt/a.txt /ext/a.txt\r
-sleep 3
+sleep 4
+send cat /ext/a.txt\r
+sleep 2
+send ls /mnt\r
+sleep 2
 send echo END-OF-CROSS-MOUNT-MV\r
 sleep 1
 send rm /mnt/hard\r

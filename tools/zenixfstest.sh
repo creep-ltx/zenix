@@ -10,19 +10,22 @@ pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 dd if=/dev/zero of=build/scratch.hdf bs=1M count=16 status=none
 ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh fsuae/mounts.fs-uae 330 tools/tests/zenixfs-test.txt 2>&1 | tr -d '\r' | sed 's/\x1b\[K//g' > $OUT/run.log
-want() { if grep -aqF -- "$2" $OUT/run.log; then check "$1" ok; else check "$1" bad; fi; }
-want "fdisk shows a zenixfs partition" "zenixfs"
-want "mkfs.zenixfs runs" "mkfs.zenixfs: ide0p2:"
-grep -aq 'ide0p2 .*/mnt .*zenixfs' $OUT/run.log && check "mount lists the zenixfs volume (type read from the partition table)" ok || check "mount lists the zenixfs volume" bad
-want "file written and read back through a symbolic link" "hello-zenixfs"
-want "ls -l shows the symbolic link" "link -> a.txt"
-want "hard link count 2" "-rw-r--r-- 2"
-want "copy of a large file is identical" "SAME-SEQ"
-want "copy to an ext2 mount is identical" "SAME-ACROSS-MOUNTS"
-sed -n '/END-OF-CROSS-MOUNT-MV/q;p' $OUT/run.log | grep -aq 'mv:' && check "mv across mounts is refused" ok || check "mv across mounts is refused" bad
-want "pwd inside the mounted filesystem" "/mnt/dir2"
-want "data survives unmount and mount" "20000"
-want "fsck.zenixfs reports clean" "fsck.zenixfs: clean"
+# the log also holds the keystrokes the test typed, so a check must match a whole OUTPUT line, never a substring of the typing
+wantline() { if grep -aqx -- "$2" $OUT/run.log; then check "$1" ok; else check "$1" bad; fi; }
+wantre() { if grep -aqE -- "$2" $OUT/run.log; then check "$1" ok; else check "$1" bad; fi; }
+wantre "fdisk shows a zenixfs partition" '^ide0p2 .* zenixfs$'
+wantre "mkfs.zenixfs runs" '^mkfs.zenixfs: ide0p2: [0-9]+ blocks of [0-9]+ bytes$'
+wantre "mount lists the zenixfs volume (type read from the partition table)" '^ide0p2 +/mnt +zenixfs '
+wantline "file read back through a symbolic link" "hello-zenixfs"
+wantre "ls -l shows the symbolic link" '^lrwx.* link -> a.txt$'
+wantre "hard link count 2 for the file" '^-rw-r--r-- 2 root root +14 .* a.txt$'
+wantre "wc sees the 100 KB file: 20000 lines, 108894 bytes" '^ *20000 +20000 +108894 /mnt/seq.txt$'
+wantline "copy of the large file is identical" "SAME-SEQ"
+wantline "copy to an ext2 mount is identical" "SAME-ACROSS-MOUNTS"
+wantre "mv across mounts leaves the file on the ext2 side" '^ *hello-zenixfs$'
+wantre "pwd inside the mounted filesystem" '^/mnt/dir2$'
+wantre "data survives unmount and mount (wc again)" '^ *20000 +20000 +108894 /mnt/seq.txt$'
+wantline "fsck.zenixfs reports clean" "fsck.zenixfs: clean"
 # the host looks at the partition: find the superblock ('ZNFS' at byte 32 of its first block) on the scratch disk
 python3 - <<'PY' > $OUT/offset.txt
 import sys
