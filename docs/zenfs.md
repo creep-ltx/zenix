@@ -1,4 +1,14 @@
-# ZenFS - the native Zenix filesystem (plan, 2026-10-22; nothing is built)
+# ZenFS - the native Zenix filesystem (plan, 2026-10-22)
+
+**Status (2026-10-22):** phases Z-0 and Z-1 are done on the host: the exact format is in `zenfs-format.md`, the library is in `zenfs/` (branch `zenfs`),
+and `make -C zenfs test` runs the tests. *Verified* (run, 60 random seeds, with AddressSanitizer and UBSan): ~3000 random operations compared with a model, `fsck` clean,
+remount; the power-cut replay (every prefix of the recorded writes plus random subsets inside each flush epoch) always mounts, passes fsck and equals a committed state, and
+is never older than a durable commit; 600 random bit flips in metadata are detected or harmless, none silent; full volume and orphan cases. The tests were checked by mutation:
+removing the flush before the commit record, or reusing blocks freed in the same transaction, makes the power-cut test fail.
+Not done: the Zenix port (needs the multi-filesystem VFS), windowed bitmap (the library keeps the whole bitmap in RAM), delayed allocation (data is placed when written),
+hash-order `readdir` only, no `keep=N`, no data checksums, no defragmenter, no real-hardware measurements. Known limits of the library: a write that spans several blocks is
+not atomic across a commit that the cache pressure triggers in the middle of it (each block step is consistent, the whole write is not); a mount that had to fall back to an older commit
+is reported in `zfs_stats.mount_damage` and the caller must tell the user.
 
 Status of every statement: **proposed**. Numbers marked "estimate" are not measured; measure on a real
 A1200 (030 or 020, IDE or CF-in-IDE) before believing them. Background and sources: `Knowledge/amiga/zenix-filesystems-research.md`.
@@ -126,8 +136,8 @@ So **speed figures from it are not valid for real Amigas** and must never be quo
 - On the PiStorm, only "does it work" and the CPU-bound case (fast media) are meaningful, and only labelled "PiStorm/Emu68".
 
 ## 6. Phases
-- **Z-0 Spec:** write `docs/zenfs-format.md` (every field, offsets, checksums, worked examples) from this plan; review it.
-- **Z-1 Host library:** tree, inode, inline files, extents, bitmap, commit, mkfs, fsck, dump; unit tests; the power-cut tester.
+- **Z-0 Spec (done):** write `docs/zenfs-format.md` (every field, offsets, checksums, worked examples) from this plan; review it.
+- **Z-1 Host library (done):** tree, inode, inline files, extents, bitmap, commit, mkfs, fsck, dump; unit tests; the power-cut tester.
 - **Z-2 FUSE + stress** on the host; fix what the tests find.
 - **Z-3 Zenix server:** after main has the multi-filesystem VFS (mount table, several servers). Runs beside ext2; boot from ZenFS later. Measure on the A1200.
 - **Z-4 Speed and safety extras:** hash directory tuning, read-ahead, defragmenter, scrub, dup metadata, keep=N / snapshots.
