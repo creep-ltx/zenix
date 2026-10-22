@@ -33,3 +33,5 @@ FS-UAE crops the top display lines), `tools/run-test.sh` with `tools/tests/shell
 
 Documentation: [docs/README.md](docs/README.md) is the index (architecture, comparisons, command manuals,
 the feature list [docs/features.md](docs/features.md)). Design decisions: [docs/DESIGN.md](docs/DESIGN.md).
+
+Licence: GPL-2.0 only (see LICENSE). Decided 2026-10-22; the earlier "MIT" was inherited from zenix-old, never chosen for this project.

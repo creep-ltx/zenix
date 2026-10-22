@@ -82,6 +82,6 @@ Ahiru-style file view; mouse. Index server (FuzzyFind) for `locate` / `fzf`.
 ## Open questions
 
 - ZenFS name: a Western Digital project already uses "ZenFS" (RocksDB on zoned SSDs); decide if that matters.
-- Licence (MIT now; code copied from Fuzix or Linux would force GPLv2).
+- Licence: **GPL-2.0 only** (decided 2026-10-22 by the owner: nobody may close it; lets us take GPL-2 code from Linux, Fuzix, U-Boot). Code copied from other projects must be GPL-2 compatible (MIT, BSD, MPL files keep their own headers); new files carry `SPDX-License-Identifier: GPL-2.0-only`.
 - How much POSIX: `fork` is not possible without an MMU; `vfork`/`spawn` only. Programs that need `fork` are out.
 - Journaling: not needed if ZenFS commits atomically; ext2 gets a clean flag and our fsck.

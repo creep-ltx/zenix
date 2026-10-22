@@ -78,7 +78,7 @@ D7 boot/test: FS-UAE done; test Amigas and the shared A1200 not yet.
 2. Filesystem, tty, shell: the first "it is a Unix" moment. Tested on a real A1200.
 3. Graphics server, bar, terminal. 4. Network, audio, the rest.
 
-Open questions: licence (zenix-old was MIT; copying Fuzix/Linux code would make it GPLv2), whether to
+Open questions: whether to
 optionally use an MMU, and how much of the old user programs port unchanged.
 
 Written 2026-10-22: proposed. Only the "reused" list was read from zenix-old's source tree, nothing built.
