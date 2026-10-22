@@ -7,11 +7,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#ifndef ZENIXFS_MALLOC
-#include <stdlib.h>
-#define ZENIXFS_MALLOC(n) malloc(n)
-#define ZENIXFS_FREE(p)   free(p)
-#endif
 
 /* Block device the filesystem sits on. Block numbers are filesystem blocks (1 << bshift bytes). */
 struct zenixfs_dev {

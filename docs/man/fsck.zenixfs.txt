@@ -1,0 +1,24 @@
+FSCK.ZENIXFS(1)			Zenix manual
+
+NAME
+    fsck.zenixfs - check a ZenixFS filesystem
+
+SYNOPSIS
+    fsck.zenixfs device
+
+DESCRIPTION
+    Opens an unmounted ZenixFS volume and checks it: the checksum of every
+    block of the tree, the order of the keys, link counts, directories, the
+    extents of every file, and that the free-space map is exactly what the
+    tree uses. It prints each problem and "clean" if there is none.
+
+    ZenixFS never needs a check after a crash (changes are committed
+    atomically); this is for finding damage from a bad disk or a bug. If a
+    newer commit record was unreadable, it says so and checks the last good
+    commit. It only reports; nothing is repaired.
+
+EXIT STATUS
+    0 clean, 1 problems found or not a ZenixFS volume, 2 usage.
+
+SEE ALSO
+    mkfs.zenixfs(1), mount(8), docs/zenixfs.md

@@ -4,7 +4,14 @@
  *  - the whole free-space bitmap (and two marker bitmaps) is held in RAM (the plan says: windowed);
  *  - fsck keeps per-inode tables in RAM;
  *  - an ENOSPC in the middle of a tree change can leak a block or two until fsck (reserve makes it rare). */
+#ifdef ZENIXFS_FREESTANDING
+#include "zenixfs_env.h"      /* inside Zenix programs: no host headers (user/zenixfs_env.h) */
+#else
 #include <string.h>
+#include <stdlib.h>
+#define ZENIXFS_MALLOC(n) malloc(n)
+#define ZENIXFS_FREE(p)   free(p)
+#endif
 #include "zenixfs.h"
 
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64;
@@ -51,6 +58,8 @@ struct zenixfs {
     struct cb *cbs; struct cb **htab; u32 cap, hsize, clock, ndirty;
     u32 meta_hint, data_hint;
     int in_reserve, failed, txn_dirty;
+    u8 *sc_r, *sc_z, *sc_c, *sc_sel;   /* scratch blocks for read, truncate, commit, and the bitmap selector copy: allocated once at mount
+                                         * (the Zenix malloc cannot give small blocks back, a server must not allocate while running) */
     struct zenixfs_stats st;
 };
 
@@ -505,11 +514,7 @@ static int commit(struct zenixfs *fs)
         c->dirty = 0;
     }
     fs->ndirty = 0;
-    u8 *buf = ZENIXFS_MALLOC(B);
-    if (!buf) return ZENIXFS_EIO;
-    u8 newsel[8192];   /* bmsel copy: nb <= 8*(B-60) is checked at mkfs; limit here for the stack */
-    u8 *sel = fs->nb <= sizeof newsel ? newsel : NULL;
-    if (!sel) { ZENIXFS_FREE(buf); return ZENIXFS_EIO; }
+    u8 *buf = fs->sc_c, *sel = fs->sc_sel;
     memcpy(sel, fs->bmsel, fs->nb);
     for (u32 i = 0; i < fs->nb; i++) {
         if (!fs->bmdirty[i]) continue;
@@ -518,10 +523,10 @@ static int commit(struct zenixfs *fs)
         u32 nc = sel[i] ^ 1, blk = BMBLK(i, nc);
         hdr_set(buf, T_BITMAP, 0, blk);
         seal(buf, B, fs->gen);
-        if (dev_write(fs, blk, buf) < 0) { fs->failed = 1; ZENIXFS_FREE(buf); return ZENIXFS_EIO; }
+        if (dev_write(fs, blk, buf) < 0) { fs->failed = 1; return ZENIXFS_EIO; }
         sel[i] = nc;
     }
-    if (dev_flush(fs) < 0) { fs->failed = 1; ZENIXFS_FREE(buf); return ZENIXFS_EIO; }
+    if (dev_flush(fs) < 0) { fs->failed = 1; return ZENIXFS_EIO; }
     memset(buf, 0, B);
     wr32(buf + 32, fs->root); wr32(buf + 36, fs->height); wr32(buf + 40, fs->free_blocks);
     wr32(buf + 44, fs->next_ino); wr64(buf + 48, fs->now); wr32(buf + 56, fs->nb);
@@ -529,8 +534,7 @@ static int commit(struct zenixfs *fs)
     u32 slot = 1 + (fs->gen % RING);
     hdr_set(buf, T_COMMIT, 0, slot);
     seal(buf, B, fs->gen);
-    if (dev_write(fs, slot, buf) < 0 || dev_flush(fs) < 0) { fs->failed = 1; ZENIXFS_FREE(buf); return ZENIXFS_EIO; }
-    ZENIXFS_FREE(buf);
+    if (dev_write(fs, slot, buf) < 0 || dev_flush(fs) < 0) { fs->failed = 1; return ZENIXFS_EIO; }
     memcpy(fs->bmsel, sel, fs->nb);
     memset(fs->bmdirty, 0, fs->nb);
     memset(fs->qbm, 0, fs->bmbytes * fs->nb);
@@ -622,7 +626,8 @@ static void fs_free(struct zenixfs *fs)
     if (!fs) return;
     if (fs->cbs) for (u32 i = 0; i < fs->cap; i++) ZENIXFS_FREE(fs->cbs[i].data);
     ZENIXFS_FREE(fs->cbs); ZENIXFS_FREE(fs->htab); ZENIXFS_FREE(fs->bm); ZENIXFS_FREE(fs->qbm); ZENIXFS_FREE(fs->nbm);
-    ZENIXFS_FREE(fs->bmdirty); ZENIXFS_FREE(fs->bmsel); ZENIXFS_FREE(fs);
+    ZENIXFS_FREE(fs->bmdirty); ZENIXFS_FREE(fs->bmsel); ZENIXFS_FREE(fs->sc_r); ZENIXFS_FREE(fs->sc_z); ZENIXFS_FREE(fs->sc_c);
+    ZENIXFS_FREE(fs->sc_sel); ZENIXFS_FREE(fs);
 }
 
 static int orphans_free(struct zenixfs *fs);
@@ -649,7 +654,8 @@ int zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_
     size_t bmsz = (size_t)fs->nb * fs->bmbytes;
     fs->bm = ZENIXFS_MALLOC(bmsz); fs->qbm = ZENIXFS_MALLOC(bmsz); fs->nbm = ZENIXFS_MALLOC(bmsz);
     fs->bmdirty = ZENIXFS_MALLOC(fs->nb); fs->bmsel = ZENIXFS_MALLOC(fs->nb);
-    if (!fs->cbs || !fs->htab || !fs->bm || !fs->qbm || !fs->nbm || !fs->bmdirty || !fs->bmsel) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; }
+    fs->sc_r = ZENIXFS_MALLOC(B); fs->sc_z = ZENIXFS_MALLOC(B); fs->sc_c = ZENIXFS_MALLOC(B); fs->sc_sel = ZENIXFS_MALLOC(fs->nb);
+    if (!fs->cbs || !fs->htab || !fs->bm || !fs->qbm || !fs->nbm || !fs->bmdirty || !fs->bmsel || !fs->sc_r || !fs->sc_z || !fs->sc_c || !fs->sc_sel) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; }
     memset(fs->cbs, 0, sizeof(struct cb) * fs->cap); memset(fs->htab, 0, sizeof(struct cb *) * fs->hsize);
     for (u32 i = 0; i < fs->cap; i++) { fs->cbs[i].data = ZENIXFS_MALLOC(B); if (!fs->cbs[i].data) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; } }
     memset(fs->qbm, 0, bmsz); memset(fs->nbm, 0, bmsz); memset(fs->bmdirty, 0, fs->nb);
@@ -699,13 +705,11 @@ int zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_
 uint32_t zenixfs_charset(struct zenixfs *fs) { return fs->charset; }
 int zenixfs_set_charset(struct zenixfs *fs, uint32_t charset)
 {
-    u8 *buf = ZENIXFS_MALLOC(fs->B);
-    if (!buf) return ZENIXFS_EIO;
+    u8 *buf = fs->sc_c;
     int e = fs->dev->read(fs->dev->ctx, 0, buf) < 0 ? ZENIXFS_EIO : 0;
     if (!e && !verify(buf, fs->B, T_SUPER, 0)) e = ZENIXFS_ECORRUPT;
     if (!e) { wr32(buf + 124, charset); seal(buf, fs->B, 0); e = fs->dev->write(fs->dev->ctx, 0, buf) < 0 || fs->dev->flush(fs->dev->ctx) < 0 ? ZENIXFS_EIO : 0; }
     if (!e) fs->charset = charset;
-    ZENIXFS_FREE(buf);
     return e;
 }
 int zenixfs_sync(struct zenixfs *fs) { return commit(fs); }
@@ -985,23 +989,21 @@ int zenixfs_read(struct zenixfs *fs, uint32_t ino, uint64_t off, void *vbuf, uin
         for (u32 i = 0; i < len; i++) buf[i] = (off + i < (u64)tl) ? tmp[off + i] : 0;
         return len;
     }
-    u8 *blk = ZENIXFS_MALLOC(fs->B);
-    if (!blk) return ZENIXFS_EIO;
+    u8 *blk = fs->sc_r;
     u32 done = 0;
     while (done < len) {
         u64 pos = off + done; u32 lb = (u32)(pos >> fs->bshift), bo = (u32)(pos & (fs->B - 1)), chunk = fs->B - bo;
         if (chunk > len - done) chunk = len - done;
         u32 phys; e = f_map_get(fs, ino, lb, &phys);
-        if (e) { ZENIXFS_FREE(blk); return e; }
+        if (e) return e;
         if (!phys) memset(buf + done, 0, chunk);
         else {
             e = data_read_blk(fs, phys, blk);
-            if (e) { ZENIXFS_FREE(blk); return e; }
+            if (e) return e;
             memcpy(buf + done, blk + bo, chunk);
         }
         done += chunk;
     }
-    ZENIXFS_FREE(blk);
     return len;
 }
 
@@ -1104,8 +1106,8 @@ int zenixfs_truncate(struct zenixfs *fs, uint32_t ino, uint64_t size)
         if (size & (fs->B - 1)) {                 /* zero the tail of the last block */
             u32 lb = (u32)(size >> fs->bshift), bo = (u32)(size & (fs->B - 1)), phys;
             e = f_map_get(fs, ino, lb, &phys); if (e) goto out;
-            if (phys) { u8 *z = ZENIXFS_MALLOC(fs->B); if (!z) { e = ZENIXFS_EIO; goto out; } memset(z, 0, fs->B - bo);
-                e = f_write_blocks(fs, ino, size, z, fs->B - bo); ZENIXFS_FREE(z); if (e) goto out;
+            if (phys) { u8 *z = fs->sc_z; memset(z, 0, fs->B - bo);
+                e = f_write_blocks(fs, ino, size, z, fs->B - bo); if (e) goto out;
                 e = ino_load(fs, ino, &in); if (e) goto out; }
         }
     }

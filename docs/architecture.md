@@ -188,6 +188,12 @@ partition that probes as ext2, else the bare disk. Started with `fsd DEVICE PORT
 it serves that device on its own port instead; it answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
 (umount: sync, release the device, exit).
 
+### mount.zenixfs - the ZenixFS server (`user/zenixfsd.c` + `zenixfs/zenixfs.c`, port chosen by `mount`)
+The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the
+disk server (`user/zenixfs_disk.c`: filesystem blocks of 1-4 KB as 2-8 sector calls plus `DISK_FLUSH`). Same protocol and the same
+permission rules as the ext2 server. Changes commit three seconds after the first one, at `FS_SYNC` and at `FS_QUIT`. The library
+allocates only at mount (the Zenix `malloc` is a bump allocator that cannot return small blocks): block cache, bitmaps, three scratch blocks.
+
 ### The mount table (`kernel/vfs.c`)
 Entry 0 is the root (port `fs`); `SYS_mount` puts a running server's port on a directory (up to 8 mounts). With only the
 root mounted, paths go to its server untouched. Otherwise the kernel makes every path absolute and normalised as text

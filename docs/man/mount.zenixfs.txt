@@ -1,0 +1,28 @@
+MOUNT.ZENIXFS(8)			Zenix manual
+
+NAME
+    mount.zenixfs - the ZenixFS filesystem server for a mounted device
+
+SYNOPSIS
+    started by mount(8): mount.zenixfs device portname
+
+DESCRIPTION
+    Opens the device through the disk server (becoming its only writer),
+    mounts the ZenixFS volume on it, creates the port portname, and serves the
+    filesystem protocol (kernel/fsproto.h) there until umount tells it to
+    quit. Not meant to be run by hand.
+
+    Changes are kept in memory and committed atomically: three seconds after
+    the first change, at sync(8), and at umount. Each commit writes the data
+    and the new tree, flushes the disk, writes one small commit record and
+    flushes again, so a power cut leaves the volume as it was at the last
+    commit, never half changed. It checks the same permissions as the ext2
+    server.
+
+NOTES
+    Names longer than 63 bytes (possible on a volume written elsewhere) are
+    not listed by ls, because the directory entry the kernel hands to
+    programs is 64 bytes; they can still be opened by name.
+
+SEE ALSO
+    mount(8), umount(8), mkfs.zenixfs(1), fsck.zenixfs(1), sync(1)
