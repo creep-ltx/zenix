@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* ZenFS host tests: basics, random operations against a model, power-cut replay, bit flips.
+/* ZXFS host tests: basics, random operations against a model, power-cut replay, bit flips.
  * Usage: ztest [seed] [only-test-name] */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../zenfs.h"
+#include "../zxfs.h"
 #include "../host/zdev.h"
 
 static int failures;
@@ -26,32 +26,32 @@ static void sig_add(struct sigbuf *b, const char *line)
     memcpy(b->s + b->n, line, l - 1); b->s[b->n + l - 1] = '\n'; b->n += l; b->s[b->n] = 0;
 }
 static uint64_t fnv(uint64_t h, const uint8_t *p, size_t n) { for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ull; } return h; }
-static int sig_walk(struct zfs *fs, uint32_t dir, const char *path, struct sigbuf *b)
+static int sig_walk(struct zxfs *fs, uint32_t dir, const char *path, struct sigbuf *b)
 {
     uint64_t cookie = 0; char name[300]; uint32_t ino; uint8_t type;
     for (;;) {
-        int r = zfs_readdir(fs, dir, &cookie, name, &ino, &type);
+        int r = zxfs_readdir(fs, dir, &cookie, name, &ino, &type);
         if (r < 0) return r;
         if (!r) break;
         if (!strcmp(name, ".") || !strcmp(name, "..")) continue;
         char p[2000]; snprintf(p, sizeof p, "%s/%s", path, name);
-        struct zfs_inode in;
-        r = zfs_getattr(fs, ino, &in); if (r < 0) return r;
+        struct zxfs_inode in;
+        r = zxfs_getattr(fs, ino, &in); if (r < 0) return r;
         uint64_t h = 1469598103934665603ull;
-        if ((in.mode & ZFS_S_IFMT) != ZFS_S_IFDIR) {
+        if ((in.mode & ZXFS_S_IFMT) != ZXFS_S_IFDIR) {
             uint8_t buf[2048]; uint64_t off = 0;
             while (off < in.size) {
-                int n = zfs_read(fs, ino, off, buf, sizeof buf);
+                int n = zxfs_read(fs, ino, off, buf, sizeof buf);
                 if (n < 0) return n;
-                if (n == 0) return ZFS_EIO;
+                if (n == 0) return ZXFS_EIO;
                 h = fnv(h, buf, n); off += n;
             }
         }
         char line[2200];
         snprintf(line, sizeof line, "%s|%o|%llu|%u|%016llx", p, in.mode, (unsigned long long)in.size,
-                 (in.mode & ZFS_S_IFMT) == ZFS_S_IFDIR ? 0 : in.nlink, (unsigned long long)h);
+                 (in.mode & ZXFS_S_IFMT) == ZXFS_S_IFDIR ? 0 : in.nlink, (unsigned long long)h);
         sig_add(b, line);
-        if ((in.mode & ZFS_S_IFMT) == ZFS_S_IFDIR) { r = sig_walk(fs, ino, p, b); if (r < 0) return r; }
+        if ((in.mode & ZXFS_S_IFMT) == ZXFS_S_IFDIR) { r = sig_walk(fs, ino, p, b); if (r < 0) return r; }
     }
     return 0;
 }
@@ -69,10 +69,10 @@ static char *sig_sorted(struct sigbuf *b)
     *o = 0; free(lines); free(b->s);
     return out;
 }
-static char *fs_sig(struct zfs *fs)
+static char *fs_sig(struct zxfs *fs)
 {
     struct sigbuf b = {0};
-    if (sig_walk(fs, ZFS_ROOT_INO, "", &b) < 0) { free(b.s); return NULL; }
+    if (sig_walk(fs, ZXFS_ROOT_INO, "", &b) < 0) { free(b.s); return NULL; }
     if (!b.s) { b.s = strdup(""); b.n = 0; }
     return sig_sorted(&b);
 }
@@ -81,65 +81,65 @@ static char *fs_sig(struct zfs *fs)
 static int test_basic(void)
 {
     struct zmem *m = zmem_new(12, 2048, 0);
-    struct zfs *fs;
-    CHECK(zfs_mkfs(&m->dev, "test", 0, 1000) == 0);
-    CHECK(zfs_mount(&fs, &m->dev, 64) == 0);
-    CHECK(zfs_charset(fs) == ZFS_CHARSET_LATIN1);
-    CHECK(zfs_set_charset(fs, ZFS_CHARSET_UTF8) == 0);
-    zfs_set_time(fs, 2000);
+    struct zxfs *fs;
+    CHECK(zxfs_mkfs(&m->dev, "test", 0, 1000) == 0);
+    CHECK(zxfs_mount(&fs, &m->dev, 64) == 0);
+    CHECK(zxfs_charset(fs) == ZXFS_CHARSET_LATIN1);
+    CHECK(zxfs_set_charset(fs, ZXFS_CHARSET_UTF8) == 0);
+    zxfs_set_time(fs, 2000);
     {   /* both encodings are just bytes: Latin-1 a-diaeresis and UTF-8 a-diaeresis are different names and both work */
         uint32_t u1, u2, l;
-        CHECK(zfs_create(fs, ZFS_ROOT_INO, "\xe4", 1, 0644, 0, 0, &u1) == 0);
-        CHECK(zfs_create(fs, ZFS_ROOT_INO, "\xc3\xa4", 2, 0644, 0, 0, &u2) == 0 && u1 != u2);
-        CHECK(zfs_lookup(fs, ZFS_ROOT_INO, "\xe4", 1, &l) == 0 && l == u1);
-        CHECK(zfs_lookup(fs, ZFS_ROOT_INO, "\xc3\xa4", 2, &l) == 0 && l == u2);
-        CHECK(zfs_unlink(fs, ZFS_ROOT_INO, "\xe4", 1) == 0 && zfs_unlink(fs, ZFS_ROOT_INO, "\xc3\xa4", 2) == 0);
+        CHECK(zxfs_create(fs, ZXFS_ROOT_INO, "\xe4", 1, 0644, 0, 0, &u1) == 0);
+        CHECK(zxfs_create(fs, ZXFS_ROOT_INO, "\xc3\xa4", 2, 0644, 0, 0, &u2) == 0 && u1 != u2);
+        CHECK(zxfs_lookup(fs, ZXFS_ROOT_INO, "\xe4", 1, &l) == 0 && l == u1);
+        CHECK(zxfs_lookup(fs, ZXFS_ROOT_INO, "\xc3\xa4", 2, &l) == 0 && l == u2);
+        CHECK(zxfs_unlink(fs, ZXFS_ROOT_INO, "\xe4", 1) == 0 && zxfs_unlink(fs, ZXFS_ROOT_INO, "\xc3\xa4", 2) == 0);
     }
     uint32_t d, f, f2, x;
-    CHECK(zfs_mkdir(fs, ZFS_ROOT_INO, "etc", 3, 0755, 0, 0, &d) == 0);
-    CHECK(zfs_create(fs, d, "passwd", 6, 0644, 0, 0, &f) == 0);
-    CHECK(zfs_create(fs, d, "passwd", 6, 0644, 0, 0, &x) == ZFS_EEXIST);
-    CHECK(zfs_write(fs, f, 0, "root:x:0:0\n", 11) == 11);
+    CHECK(zxfs_mkdir(fs, ZXFS_ROOT_INO, "etc", 3, 0755, 0, 0, &d) == 0);
+    CHECK(zxfs_create(fs, d, "passwd", 6, 0644, 0, 0, &f) == 0);
+    CHECK(zxfs_create(fs, d, "passwd", 6, 0644, 0, 0, &x) == ZXFS_EEXIST);
+    CHECK(zxfs_write(fs, f, 0, "root:x:0:0\n", 11) == 11);
     char buf[64];
-    CHECK(zfs_read(fs, f, 0, buf, 64) == 11 && !memcmp(buf, "root:x:0:0\n", 11));
+    CHECK(zxfs_read(fs, f, 0, buf, 64) == 11 && !memcmp(buf, "root:x:0:0\n", 11));
     /* big file crosses inline -> extents */
-    CHECK(zfs_create(fs, ZFS_ROOT_INO, "big", 3, 0644, 0, 0, &f2) == 0);
+    CHECK(zxfs_create(fs, ZXFS_ROOT_INO, "big", 3, 0644, 0, 0, &f2) == 0);
     uint8_t *data = malloc(300000); for (int i = 0; i < 300000; i++) data[i] = (uint8_t)(i * 7 + i / 251);
-    CHECK(zfs_write(fs, f2, 0, data, 300000) == 300000);
+    CHECK(zxfs_write(fs, f2, 0, data, 300000) == 300000);
     uint8_t *back = malloc(300000);
-    CHECK(zfs_read(fs, f2, 0, back, 300000) == 300000 && !memcmp(back, data, 300000));
-    CHECK(zfs_sync(fs) == 0);
-    CHECK(zfs_fsck(fs, logmsg, NULL) == 0);
-    CHECK(zfs_unmount(fs) == 0);
-    CHECK(zfs_mount(&fs, &m->dev, 64) == 0);
-    CHECK(zfs_charset(fs) == ZFS_CHARSET_UTF8);
-    CHECK(zfs_lookup(fs, ZFS_ROOT_INO, "big", 3, &f2) == 0);
+    CHECK(zxfs_read(fs, f2, 0, back, 300000) == 300000 && !memcmp(back, data, 300000));
+    CHECK(zxfs_sync(fs) == 0);
+    CHECK(zxfs_fsck(fs, logmsg, NULL) == 0);
+    CHECK(zxfs_unmount(fs) == 0);
+    CHECK(zxfs_mount(&fs, &m->dev, 64) == 0);
+    CHECK(zxfs_charset(fs) == ZXFS_CHARSET_UTF8);
+    CHECK(zxfs_lookup(fs, ZXFS_ROOT_INO, "big", 3, &f2) == 0);
     memset(back, 0, 300000);
-    CHECK(zfs_read(fs, f2, 0, back, 300000) == 300000 && !memcmp(back, data, 300000));
-    CHECK(zfs_lookup(fs, ZFS_ROOT_INO, "etc", 3, &d) == 0 && zfs_lookup(fs, d, "passwd", 6, &f) == 0);
-    CHECK(zfs_read(fs, f, 0, buf, 64) == 11);
+    CHECK(zxfs_read(fs, f2, 0, back, 300000) == 300000 && !memcmp(back, data, 300000));
+    CHECK(zxfs_lookup(fs, ZXFS_ROOT_INO, "etc", 3, &d) == 0 && zxfs_lookup(fs, d, "passwd", 6, &f) == 0);
+    CHECK(zxfs_read(fs, f, 0, buf, 64) == 11);
     /* sparse + truncate */
-    CHECK(zfs_write(fs, f2, 1000000, "Z", 1) == 1);
-    CHECK(zfs_read(fs, f2, 500000, back, 10) == 10 && back[0] == 0);
-    CHECK(zfs_truncate(fs, f2, 5000) == 0);
-    CHECK(zfs_read(fs, f2, 0, back, 5000) == 5000 && !memcmp(back, data, 5000));
-    CHECK(zfs_truncate(fs, f2, 9000) == 0);
-    CHECK(zfs_read(fs, f2, 4990, back, 20) == 20 && !memcmp(back, data + 4990, 10) && back[10] == 0);
+    CHECK(zxfs_write(fs, f2, 1000000, "Z", 1) == 1);
+    CHECK(zxfs_read(fs, f2, 500000, back, 10) == 10 && back[0] == 0);
+    CHECK(zxfs_truncate(fs, f2, 5000) == 0);
+    CHECK(zxfs_read(fs, f2, 0, back, 5000) == 5000 && !memcmp(back, data, 5000));
+    CHECK(zxfs_truncate(fs, f2, 9000) == 0);
+    CHECK(zxfs_read(fs, f2, 4990, back, 20) == 20 && !memcmp(back, data + 4990, 10) && back[10] == 0);
     /* links, symlink, rename, rmdir */
-    CHECK(zfs_link(fs, ZFS_ROOT_INO, "big2", 4, f2) == 0);
-    struct zfs_inode in; CHECK(zfs_getattr(fs, f2, &in) == 0 && in.nlink == 2);
-    CHECK(zfs_symlink(fs, ZFS_ROOT_INO, "sl", 2, "etc/passwd", 0, 0, &x) == 0);
-    CHECK(zfs_readlink(fs, x, buf, 64) == 10 && !memcmp(buf, "etc/passwd", 10));
-    CHECK(zfs_rmdir(fs, ZFS_ROOT_INO, "etc", 3) == ZFS_ENOTEMPTY);
-    CHECK(zfs_rename(fs, d, "passwd", 6, ZFS_ROOT_INO, "pw", 2) == 0);
-    CHECK(zfs_rmdir(fs, ZFS_ROOT_INO, "etc", 3) == 0);
-    CHECK(zfs_unlink(fs, ZFS_ROOT_INO, "big", 3) == 0);
-    CHECK(zfs_unlink(fs, ZFS_ROOT_INO, "big2", 4) == 0);
-    CHECK(zfs_lookup(fs, ZFS_ROOT_INO, "big", 3, &x) == ZFS_ENOENT);
-    CHECK(zfs_fsck(fs, logmsg, NULL) == 0);
-    struct zfs_stats st; zfs_get_stats(fs, &st);
+    CHECK(zxfs_link(fs, ZXFS_ROOT_INO, "big2", 4, f2) == 0);
+    struct zxfs_inode in; CHECK(zxfs_getattr(fs, f2, &in) == 0 && in.nlink == 2);
+    CHECK(zxfs_symlink(fs, ZXFS_ROOT_INO, "sl", 2, "etc/passwd", 0, 0, &x) == 0);
+    CHECK(zxfs_readlink(fs, x, buf, 64) == 10 && !memcmp(buf, "etc/passwd", 10));
+    CHECK(zxfs_rmdir(fs, ZXFS_ROOT_INO, "etc", 3) == ZXFS_ENOTEMPTY);
+    CHECK(zxfs_rename(fs, d, "passwd", 6, ZXFS_ROOT_INO, "pw", 2) == 0);
+    CHECK(zxfs_rmdir(fs, ZXFS_ROOT_INO, "etc", 3) == 0);
+    CHECK(zxfs_unlink(fs, ZXFS_ROOT_INO, "big", 3) == 0);
+    CHECK(zxfs_unlink(fs, ZXFS_ROOT_INO, "big2", 4) == 0);
+    CHECK(zxfs_lookup(fs, ZXFS_ROOT_INO, "big", 3, &x) == ZXFS_ENOENT);
+    CHECK(zxfs_fsck(fs, logmsg, NULL) == 0);
+    struct zxfs_stats st; zxfs_get_stats(fs, &st);
     printf("  basic: %u commits, %u writes, %u flushes, %u cache hits, %u misses\n", st.commits, st.writes, st.flushes, st.cache_hits, st.cache_misses);
-    CHECK(zfs_unmount(fs) == 0);
+    CHECK(zxfs_unmount(fs) == 0);
     free(data); free(back); zmem_free(m);
     return 0;
 }
@@ -192,13 +192,13 @@ static char *model_sig(void)
     if (!b.s) b.s = strdup("");
     return sig_sorted(&b);
 }
-static int node_ino(struct zfs *fs, int node, uint32_t *ino)    /* resolve a model directory to an inode number */
+static int node_ino(struct zxfs *fs, int node, uint32_t *ino)    /* resolve a model directory to an inode number */
 {
-    if (node == 0) { *ino = ZFS_ROOT_INO; return 0; }
+    if (node == 0) { *ino = ZXFS_ROOT_INO; return 0; }
     uint32_t pi; int e = node_ino(fs, mn[node].parent, &pi);
     if (e) return e;
     for (int i = 0; i < MAXN * 2; i++) if (me[i].used && me[i].node == node && me[i].dir == mn[node].parent)
-        return zfs_lookup(fs, pi, me[i].name, strlen(me[i].name), ino);
+        return zxfs_lookup(fs, pi, me[i].name, strlen(me[i].name), ino);
     return -1;
 }
 
@@ -213,50 +213,50 @@ static int pick_ent(int want_dir)   /* a random entry; want_dir: -1 any, 0 non-d
 static int is_under(int node, int anc) { while (1) { if (node == anc) return 1; if (node == 0) return 0; node = mn[node].parent; } }
 
 /* one random operation on fs and model; returns 0, or 1 when fs and model disagree */
-static int random_op(struct zfs *fs, int bounded_write)
+static int random_op(struct zxfs *fs, int bounded_write)
 {
     int op = rn(100); uint32_t di, ino;
     if (op < 22) {                                           /* create */
         int d = pick_dir(); const char *nm = NAMES[rn(10)];
         if (node_ino(fs, d, &di)) { printf("  resolve failed\n"); return 1; }
         int exists = m_find(d, nm) >= 0;
-        int r = zfs_create(fs, di, nm, strlen(nm), 0644, 1, 2, &ino);
-        if (exists) { if (r != ZFS_EEXIST) { printf("  create existing gave %d\n", r); return 1; } return 0; }
+        int r = zxfs_create(fs, di, nm, strlen(nm), 0644, 1, 2, &ino);
+        if (exists) { if (r != ZXFS_EEXIST) { printf("  create existing gave %d\n", r); return 1; } return 0; }
         if (r) { printf("  create failed %d\n", r); return 1; }
         int n = m_newnode(0); if (n < 0) return 0; m_newent(d, nm, n);
     } else if (op < 50) {                                    /* write */
         int e = pick_ent(0); if (e < 0) return 0;
         int n = me[e].node; if (mn[n].type != 0) return 0;
-        if (node_ino(fs, me[e].dir, &di) || zfs_lookup(fs, di, me[e].name, strlen(me[e].name), &ino)) { printf("  lookup failed\n"); return 1; }
+        if (node_ino(fs, me[e].dir, &di) || zxfs_lookup(fs, di, me[e].name, strlen(me[e].name), &ino)) { printf("  lookup failed\n"); return 1; }
         size_t off, len;
         if (bounded_write) { size_t blk = 1024; size_t b0 = rn(6) * blk; off = b0 + rn(blk); len = 1 + rn(blk - (off - b0)); }
         else { off = rn(7000); len = 1 + rn(900); }
         uint8_t buf[1024]; for (size_t i = 0; i < len; i++) buf[i] = (uint8_t)rnd();
-        int r = zfs_write(fs, ino, off, buf, len);
+        int r = zxfs_write(fs, ino, off, buf, len);
         if (r != (int)len) { printf("  write gave %d\n", r); return 1; }
         if (off + len > mn[n].size) m_resize(n, off + len);
         memcpy(mn[n].data + off, buf, len);
     } else if (op < 58) {                                    /* truncate */
         int e = pick_ent(0); if (e < 0) return 0;
         int n = me[e].node; if (mn[n].type != 0) return 0;
-        if (node_ino(fs, me[e].dir, &di) || zfs_lookup(fs, di, me[e].name, strlen(me[e].name), &ino)) return 1;
+        if (node_ino(fs, me[e].dir, &di) || zxfs_lookup(fs, di, me[e].name, strlen(me[e].name), &ino)) return 1;
         size_t sz = rn(7000);
         if (bounded_write) sz = rn(2) ? 0 : mn[n].size;      /* a shrink to a block edge can be split by a commit; keep it atomic */
-        int r = zfs_truncate(fs, ino, sz);
+        int r = zxfs_truncate(fs, ino, sz);
         if (r) { printf("  truncate gave %d\n", r); return 1; }
         m_resize(n, sz);
     } else if (op < 70) {                                    /* unlink */
         int e = pick_ent(0); if (e < 0) return 0;
         if (node_ino(fs, me[e].dir, &di)) return 1;
-        int r = zfs_unlink(fs, di, me[e].name, strlen(me[e].name));
+        int r = zxfs_unlink(fs, di, me[e].name, strlen(me[e].name));
         if (r) { printf("  unlink gave %d\n", r); return 1; }
         int n = me[e].node; me[e].used = 0; m_unref(n);
     } else if (op < 78) {                                    /* mkdir */
         int d = pick_dir(); const char *nm = NAMES[rn(10)];
         if (node_ino(fs, d, &di)) return 1;
         int exists = m_find(d, nm) >= 0;
-        int r = zfs_mkdir(fs, di, nm, strlen(nm), 0755, 0, 0, &ino);
-        if (exists) return r == ZFS_EEXIST ? 0 : 1;
+        int r = zxfs_mkdir(fs, di, nm, strlen(nm), 0755, 0, 0, &ino);
+        if (exists) return r == ZXFS_EEXIST ? 0 : 1;
         if (r) { printf("  mkdir gave %d\n", r); return 1; }
         int n = m_newnode(1); if (n < 0) return 0;
         mn[n].parent = d; m_newent(d, nm, n); mn[d].nlink++;
@@ -264,8 +264,8 @@ static int random_op(struct zfs *fs, int bounded_write)
         int e = pick_ent(1); if (e < 0) return 0;
         int n = me[e].node;
         if (node_ino(fs, me[e].dir, &di)) return 1;
-        int r = zfs_rmdir(fs, di, me[e].name, strlen(me[e].name));
-        if (!m_dir_empty(n)) return r == ZFS_ENOTEMPTY ? 0 : (printf("  rmdir nonempty gave %d\n", r), 1);
+        int r = zxfs_rmdir(fs, di, me[e].name, strlen(me[e].name));
+        if (!m_dir_empty(n)) return r == ZXFS_ENOTEMPTY ? 0 : (printf("  rmdir nonempty gave %d\n", r), 1);
         if (r) { printf("  rmdir gave %d\n", r); return 1; }
         mn[me[e].dir].nlink--; me[e].used = 0; mn[n].used = 0;
     } else if (op < 92) {                                    /* rename */
@@ -273,14 +273,14 @@ static int random_op(struct zfs *fs, int bounded_write)
         int n = me[e].node, nd = pick_dir(); const char *nm = NAMES[rn(10)];
         if (mn[n].type == 1 && is_under(nd, n)) {
             uint32_t oi; if (node_ino(fs, me[e].dir, &oi) || node_ino(fs, nd, &di)) return 1;
-            int r = zfs_rename(fs, oi, me[e].name, strlen(me[e].name), di, nm, strlen(nm));
-            return r == ZFS_EINVAL ? 0 : (printf("  rename into itself gave %d\n", r), 1);
+            int r = zxfs_rename(fs, oi, me[e].name, strlen(me[e].name), di, nm, strlen(nm));
+            return r == ZXFS_EINVAL ? 0 : (printf("  rename into itself gave %d\n", r), 1);
         }
         int t = m_find(nd, nm);
         if (t >= 0 && (mn[me[t].node].type == 1 || mn[n].type == 1)) return 0;   /* skip the dir-replace cases */
         if (t >= 0 && me[t].node == n) return 0;
         uint32_t oi; if (node_ino(fs, me[e].dir, &oi) || node_ino(fs, nd, &di)) return 1;
-        int r = zfs_rename(fs, oi, me[e].name, strlen(me[e].name), di, nm, strlen(nm));
+        int r = zxfs_rename(fs, oi, me[e].name, strlen(me[e].name), di, nm, strlen(nm));
         if (r) { printf("  rename gave %d\n", r); return 1; }
         if (t >= 0) { int tn = me[t].node; me[t].used = 0; m_unref(tn); }
         if (mn[n].type == 1) { mn[me[e].dir].nlink--; mn[nd].nlink++; mn[n].parent = nd; }
@@ -289,8 +289,8 @@ static int random_op(struct zfs *fs, int bounded_write)
         int e = pick_ent(0); if (e < 0) return 0;
         int nd = pick_dir(); const char *nm = NAMES[rn(10)];
         if (m_find(nd, nm) >= 0) return 0;
-        uint32_t oi; if (node_ino(fs, me[e].dir, &oi) || node_ino(fs, nd, &di) || zfs_lookup(fs, oi, me[e].name, strlen(me[e].name), &ino)) return 1;
-        int r = zfs_link(fs, di, nm, strlen(nm), ino);
+        uint32_t oi; if (node_ino(fs, me[e].dir, &oi) || node_ino(fs, nd, &di) || zxfs_lookup(fs, oi, me[e].name, strlen(me[e].name), &ino)) return 1;
+        int r = zxfs_link(fs, di, nm, strlen(nm), ino);
         if (r) { printf("  link gave %d\n", r); return 1; }
         m_newent(nd, nm, me[e].node); mn[me[e].node].nlink++;
     } else {                                                 /* symlink */
@@ -298,7 +298,7 @@ static int random_op(struct zfs *fs, int bounded_write)
         if (m_find(d, nm) >= 0) return 0;
         if (node_ino(fs, d, &di)) return 1;
         char tgt[300]; int tl = 1 + rn(250); for (int i = 0; i < tl; i++) tgt[i] = 'a' + rn(26); tgt[tl] = 0;
-        int r = zfs_symlink(fs, di, nm, strlen(nm), tgt, 0, 0, &ino);
+        int r = zxfs_symlink(fs, di, nm, strlen(nm), tgt, 0, 0, &ino);
         if (r) { printf("  symlink gave %d\n", r); return 1; }
         int n = m_newnode(2); if (n < 0) return 0;
         m_resize(n, tl); memcpy(mn[n].data, tgt, tl); m_newent(d, nm, n);
@@ -306,7 +306,7 @@ static int random_op(struct zfs *fs, int bounded_write)
     return 0;
 }
 
-static int compare_to_model(struct zfs *fs, const char *when)
+static int compare_to_model(struct zxfs *fs, const char *when)
 {
     char *a = fs_sig(fs), *b = model_sig();
     int bad = !a || strcmp(a, b);
@@ -320,23 +320,23 @@ static int test_random(void)
 {
     for (int bs = 10; bs <= 12; bs += 2) {
         struct zmem *m = zmem_new(bs, bs == 10 ? 8192 : 2048, 0);
-        struct zfs *fs;
-        CHECK(zfs_mkfs(&m->dev, NULL, 0, 5) == 0);
-        CHECK(zfs_mount(&fs, &m->dev, 40) == 0);
+        struct zxfs *fs;
+        CHECK(zxfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+        CHECK(zxfs_mount(&fs, &m->dev, 40) == 0);
         model_reset();
         int ops = 3000;
         for (int i = 0; i < ops; i++) {
-            zfs_set_time(fs, 100 + i);
+            zxfs_set_time(fs, 100 + i);
             if (random_op(fs, 0)) { printf("  op %d (bshift %d)\n", i, bs); failures++; return 1; }
             if (i % 250 == 249) {
                 CHECK(!compare_to_model(fs, "periodic"));
-                CHECK(zfs_fsck(fs, logmsg, NULL) == 0);
+                CHECK(zxfs_fsck(fs, logmsg, NULL) == 0);
             }
-            if (i % 700 == 699) { CHECK(zfs_unmount(fs) == 0); CHECK(zfs_mount(&fs, &m->dev, 40) == 0); CHECK(!compare_to_model(fs, "after remount")); }
+            if (i % 700 == 699) { CHECK(zxfs_unmount(fs) == 0); CHECK(zxfs_mount(&fs, &m->dev, 40) == 0); CHECK(!compare_to_model(fs, "after remount")); }
         }
-        struct zfs_stats st; zfs_get_stats(fs, &st);
+        struct zxfs_stats st; zxfs_get_stats(fs, &st);
         printf("  random bshift %d: %d ops, %u commits, %u writes, %u flushes\n", bs, ops, st.commits, st.writes, st.flushes);
-        CHECK(zfs_unmount(fs) == 0);
+        CHECK(zxfs_unmount(fs) == 0);
         zmem_free(m);
     }
     return 0;
@@ -346,31 +346,31 @@ static int test_random(void)
 static int test_powercut(void)
 {
     struct zmem *rec = zmem_new(10, 700, 1);
-    struct zfs *fs;
-    CHECK(zfs_mkfs(&rec->dev, NULL, 0, 5) == 0);
+    struct zxfs *fs;
+    CHECK(zxfs_mkfs(&rec->dev, NULL, 0, 5) == 0);
     struct zmem *base = zmem_clone(rec);                 /* the image as mkfs left it; the log starts after it */
     for (size_t i = 0; i < rec->nlog; i++) free(rec->log[i].data);
     rec->nlog = 0;
-    CHECK(zfs_mount(&fs, &rec->dev, 32) == 0);
+    CHECK(zxfs_mount(&fs, &rec->dev, 32) == 0);
     model_reset();
     enum { MAXSIG = 400 };
     char *sigs[MAXSIG]; int nsig = 0; 
     int synced_sig[MAXSIG]; size_t synced_pos[MAXSIG]; int nsynced = 0;
     sigs[nsig] = fs_sig(fs); nsig++;
     for (int i = 0; i < 300 && nsig < MAXSIG - 1; i++) {
-        zfs_set_time(fs, 100 + i);
+        zxfs_set_time(fs, 100 + i);
         CHECK(!random_op(fs, 1));
         sigs[nsig] = fs_sig(fs); nsig++;
         if (rn(12) == 0) {
-            CHECK(zfs_sync(fs) == 0);
+            CHECK(zxfs_sync(fs) == 0);
             synced_sig[nsynced] = nsig - 1; synced_pos[nsynced] = rec->nlog; nsynced++;
         }
     }
-    CHECK(zfs_sync(fs) == 0);
+    CHECK(zxfs_sync(fs) == 0);
     synced_sig[nsynced] = nsig - 1; synced_pos[nsynced] = rec->nlog; nsynced++;
-    struct zfs_stats st; zfs_get_stats(fs, &st);
+    struct zxfs_stats st; zxfs_get_stats(fs, &st);
     printf("  power cut: %d states, %zu log entries, %u commits\n", nsig, rec->nlog, st.commits);
-    zfs_unmount(fs);
+    zxfs_unmount(fs);
     size_t nlog = rec->nlog - 1;     /* the unmount's own (empty) activity is not part of the workload */
     (void)nlog;
     /* replay */
@@ -380,19 +380,19 @@ static int test_powercut(void)
     for (size_t k = 0; k <= total; k++) {
         /* prefix of k log entries is applied in `work` */
         struct zmem *img = zmem_clone(work);
-        struct zfs *f2; int e = zfs_mount(&f2, &img->dev, 32);
+        struct zxfs *f2; int e = zxfs_mount(&f2, &img->dev, 32);
         if (e) { printf("  prefix %zu: mount failed %d\n", k, e); failures++; return 1; }
         char *s = fs_sig(f2);
-        int bad = zfs_fsck(f2, quiet, NULL) != 0;
+        int bad = zxfs_fsck(f2, quiet, NULL) != 0;
         int match = -1;
         for (int j = 0; j < nsig && s; j++) if (!strcmp(s, sigs[j])) match = j;
         int need = 0;                                      /* newest state that was already durable */
         for (int j = 0; j < nsynced; j++) if (synced_pos[j] <= k) need = synced_sig[j];
         if (!s || bad || match < 0 || match < need) {
             printf("  prefix %zu/%zu: %s (match=%d need>=%d fsck_bad=%d)\n", k, total, !s ? "walk error" : match < 0 ? "state is not any committed state" : "older than a durable state", match, need, bad);
-            failures++; zfs_unmount(f2); zmem_free(img); free(s); return 1;
+            failures++; zxfs_unmount(f2); zmem_free(img); free(s); return 1;
         }
-        free(s); zfs_unmount(f2); zmem_free(img); tested++;
+        free(s); zxfs_unmount(f2); zmem_free(img); tested++;
         if (k < total) {
             /* reordering: before applying a whole epoch, try random subsets of it */
             if (k == 0 || rec->log[k - 1].is_flush) {
@@ -400,12 +400,12 @@ static int test_powercut(void)
                 if (end > k + 1) for (int t = 0; t < 4; t++) {
                     struct zmem *im2 = zmem_clone(work);
                     for (size_t q = k; q < end; q++) if (rn(2)) zmem_apply(im2, &rec->log[q]);
-                    struct zfs *f3; int e3 = zfs_mount(&f3, &im2->dev, 32);
+                    struct zxfs *f3; int e3 = zxfs_mount(&f3, &im2->dev, 32);
                     if (e3) { printf("  reorder at %zu: mount failed %d\n", k, e3); failures++; return 1; }
-                    char *s3 = fs_sig(f3); int ok = s3 != NULL, bad3 = zfs_fsck(f3, quiet, NULL) != 0;
+                    char *s3 = fs_sig(f3); int ok = s3 != NULL, bad3 = zxfs_fsck(f3, quiet, NULL) != 0;
                     int m3 = -1; for (int j = 0; j < nsig && s3; j++) if (!strcmp(s3, sigs[j])) m3 = j;
                     if (!ok || bad3 || m3 < 0) { printf("  reorder at %zu..%zu: bad state (match=%d fsck_bad=%d)\n", k, end, m3, bad3); failures++; return 1; }
-                    free(s3); zfs_unmount(f3); zmem_free(im2); reorder_tests++;
+                    free(s3); zxfs_unmount(f3); zmem_free(im2); reorder_tests++;
                 }
             }
             zmem_apply(work, &rec->log[k]);
@@ -421,15 +421,15 @@ static int test_powercut(void)
 static int test_bitflip(void)
 {
     struct zmem *m = zmem_new(10, 4096, 0);
-    struct zfs *fs;
-    CHECK(zfs_mkfs(&m->dev, NULL, 0, 5) == 0);
-    CHECK(zfs_mount(&fs, &m->dev, 40) == 0);
+    struct zxfs *fs;
+    CHECK(zxfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zxfs_mount(&fs, &m->dev, 40) == 0);
     model_reset();
-    for (int i = 0; i < 400; i++) { zfs_set_time(fs, i); CHECK(!random_op(fs, 0)); }
-    CHECK(zfs_unmount(fs) == 0);
-    CHECK(zfs_mount(&fs, &m->dev, 40) == 0);
+    for (int i = 0; i < 400; i++) { zxfs_set_time(fs, i); CHECK(!random_op(fs, 0)); }
+    CHECK(zxfs_unmount(fs) == 0);
+    CHECK(zxfs_mount(&fs, &m->dev, 40) == 0);
     char *want = fs_sig(fs);
-    zfs_unmount(fs);
+    zxfs_unmount(fs);
     int detected = 0, harmless = 0, trials = 0;
     for (int t = 0; t < 600; t++) {
         uint32_t blk; int tries = 0;
@@ -439,15 +439,15 @@ static int test_bitflip(void)
         size_t byte = (size_t)blk * 1024 + rn(1024);
         c->img[byte] ^= 1 << rn(8);
         trials++;
-        struct zfs *f2; int e = zfs_mount(&f2, &c->dev, 40);
+        struct zxfs *f2; int e = zxfs_mount(&f2, &c->dev, 40);
         if (e) { detected++; zmem_free(c); continue; }
         char *s = fs_sig(f2);
-        int bad = zfs_fsck(f2, quiet, NULL) != 0;
-        struct zfs_stats mst; zfs_get_stats(f2, &mst);
+        int bad = zxfs_fsck(f2, quiet, NULL) != 0;
+        struct zxfs_stats mst; zxfs_get_stats(f2, &mst);
         if (!s || bad || mst.mount_damage) detected++;
         else if (!strcmp(s, want)) harmless++;
         else { printf("  SILENT CORRUPTION: flip in block %u byte %zu (type %d level %d) changed content with no error\n", blk, byte - (size_t)blk * 1024, m->img[(size_t)blk*1024+6], m->img[(size_t)blk*1024+7]); failures++; return 1; }
-        free(s); zfs_unmount(f2); zmem_free(c);
+        free(s); zxfs_unmount(f2); zmem_free(c);
     }
     printf("  bit flips: %d trials: %d detected, %d harmless (unused or old copy), 0 silent\n", trials, detected, harmless);
     free(want); zmem_free(m);
@@ -458,29 +458,29 @@ static int test_bitflip(void)
 static int test_full(void)
 {
     struct zmem *m = zmem_new(10, 1024, 0);
-    struct zfs *fs; uint32_t f;
-    CHECK(zfs_mkfs(&m->dev, NULL, 0, 5) == 0);
-    CHECK(zfs_mount(&fs, &m->dev, 32) == 0);
-    struct zfs_statfs a, b;
-    CHECK(zfs_statfs(fs, &a) == 0);
+    struct zxfs *fs; uint32_t f;
+    CHECK(zxfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zxfs_mount(&fs, &m->dev, 32) == 0);
+    struct zxfs_statfs a, b;
+    CHECK(zxfs_statfs(fs, &a) == 0);
     uint8_t buf[1024]; memset(buf, 7, sizeof buf);
     int n = 0, r = 0;
     for (; n < 100; n++) {
         char nm[16]; snprintf(nm, sizeof nm, "f%d", n);
-        r = zfs_create(fs, ZFS_ROOT_INO, nm, strlen(nm), 0644, 0, 0, &f);
+        r = zxfs_create(fs, ZXFS_ROOT_INO, nm, strlen(nm), 0644, 0, 0, &f);
         if (r) break;
-        for (int k = 0; k < 40 && r >= 0; k++) r = zfs_write(fs, f, (uint64_t)k * 1024, buf, 1024);
+        for (int k = 0; k < 40 && r >= 0; k++) r = zxfs_write(fs, f, (uint64_t)k * 1024, buf, 1024);
         if (r < 0) break;
     }
-    CHECK(r == ZFS_ENOSPC);
+    CHECK(r == ZXFS_ENOSPC);
     printf("  full: ENOSPC after %d files\n", n);
-    for (int i = 0; i <= n; i++) { char nm[16]; snprintf(nm, sizeof nm, "f%d", i); int u = zfs_unlink(fs, ZFS_ROOT_INO, nm, strlen(nm)); CHECK(u == 0 || u == ZFS_ENOENT); }
-    CHECK(zfs_sync(fs) == 0);
-    CHECK(zfs_statfs(fs, &b) == 0);
+    for (int i = 0; i <= n; i++) { char nm[16]; snprintf(nm, sizeof nm, "f%d", i); int u = zxfs_unlink(fs, ZXFS_ROOT_INO, nm, strlen(nm)); CHECK(u == 0 || u == ZXFS_ENOENT); }
+    CHECK(zxfs_sync(fs) == 0);
+    CHECK(zxfs_statfs(fs, &b) == 0);
     CHECK(b.bfree + 8 >= a.bfree);
-    CHECK(zfs_fsck(fs, logmsg, NULL) == 0);
-    CHECK(zfs_create(fs, ZFS_ROOT_INO, "again", 5, 0644, 0, 0, &f) == 0);
-    zfs_unmount(fs); zmem_free(m);
+    CHECK(zxfs_fsck(fs, logmsg, NULL) == 0);
+    CHECK(zxfs_create(fs, ZXFS_ROOT_INO, "again", 5, 0644, 0, 0, &f) == 0);
+    zxfs_unmount(fs); zmem_free(m);
     return 0;
 }
 
@@ -488,27 +488,27 @@ static int test_full(void)
 static int test_orphan(void)
 {
     struct zmem *m = zmem_new(10, 2048, 0);
-    struct zfs *fs; uint32_t f;
-    CHECK(zfs_mkfs(&m->dev, NULL, 0, 5) == 0);
-    CHECK(zfs_mount(&fs, &m->dev, 32) == 0);
-    struct zfs_statfs a, b; zfs_statfs(fs, &a);
-    CHECK(zfs_create(fs, ZFS_ROOT_INO, "tmp", 3, 0644, 0, 0, &f) == 0);
+    struct zxfs *fs; uint32_t f;
+    CHECK(zxfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zxfs_mount(&fs, &m->dev, 32) == 0);
+    struct zxfs_statfs a, b; zxfs_statfs(fs, &a);
+    CHECK(zxfs_create(fs, ZXFS_ROOT_INO, "tmp", 3, 0644, 0, 0, &f) == 0);
     uint8_t buf[4096]; memset(buf, 9, sizeof buf);
-    CHECK(zfs_write(fs, f, 0, buf, 4096) == 4096);
-    CHECK(zfs_orphan_add(fs, f) == 0);
-    CHECK(zfs_unlink(fs, ZFS_ROOT_INO, "tmp", 3) == 0);
-    uint8_t r[16]; CHECK(zfs_read(fs, f, 0, r, 16) == 16 && r[0] == 9);   /* still readable */
-    CHECK(zfs_sync(fs) == 0);                                              /* crash here: do not unmount */
+    CHECK(zxfs_write(fs, f, 0, buf, 4096) == 4096);
+    CHECK(zxfs_orphan_add(fs, f) == 0);
+    CHECK(zxfs_unlink(fs, ZXFS_ROOT_INO, "tmp", 3) == 0);
+    uint8_t r[16]; CHECK(zxfs_read(fs, f, 0, r, 16) == 16 && r[0] == 9);   /* still readable */
+    CHECK(zxfs_sync(fs) == 0);                                              /* crash here: do not unmount */
     struct zmem *c = zmem_clone(m);
-    struct zfs *f2; CHECK(zfs_mount(&f2, &c->dev, 32) == 0);               /* mount frees the orphan */
-    CHECK(zfs_sync(f2) == 0);
-    CHECK(zfs_fsck(f2, logmsg, NULL) == 0);
-    zfs_statfs(f2, &b);
+    struct zxfs *f2; CHECK(zxfs_mount(&f2, &c->dev, 32) == 0);               /* mount frees the orphan */
+    CHECK(zxfs_sync(f2) == 0);
+    CHECK(zxfs_fsck(f2, logmsg, NULL) == 0);
+    zxfs_statfs(f2, &b);
     CHECK(b.bfree + 4 >= a.bfree);
-    zfs_unmount(f2); zmem_free(c);
-    CHECK(zfs_orphan_done(fs, f) == 0);                                    /* the normal close path */
-    CHECK(zfs_fsck(fs, logmsg, NULL) == 0);
-    zfs_unmount(fs); zmem_free(m);
+    zxfs_unmount(f2); zmem_free(c);
+    CHECK(zxfs_orphan_done(fs, f) == 0);                                    /* the normal close path */
+    CHECK(zxfs_fsck(fs, logmsg, NULL) == 0);
+    zxfs_unmount(fs); zmem_free(m);
     return 0;
 }
 

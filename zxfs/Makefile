@@ -1,19 +1,19 @@
-# ZenFS host build: library, tools and tests. Run `make test`.
+# ZXFS host build: library, tools and tests. Run `make test`.
 CC ?= gcc
 CFLAGS ?= -std=gnu11 -O2 -g -Wall -Wextra
 SAN ?=
-LIB = zenfs.c host/zdev.c
+LIB = zxfs.c host/zdev.c
 
-all: build/zenfs-tool build/ztest
+all: build/zxfs-tool build/ztest
 
 build:
 	mkdir -p build
 
-build/ztest: tests/ztest.c $(LIB) zenfs.h host/zdev.h | build
+build/ztest: tests/ztest.c $(LIB) zxfs.h host/zdev.h | build
 	$(CC) $(CFLAGS) $(SAN) -o $@ tests/ztest.c $(LIB)
 
-build/zenfs-tool: tools/zenfs-tool.c $(LIB) zenfs.h host/zdev.h | build
-	$(CC) $(CFLAGS) $(SAN) -o $@ tools/zenfs-tool.c $(LIB)
+build/zxfs-tool: tools/zxfs-tool.c $(LIB) zxfs.h host/zdev.h | build
+	$(CC) $(CFLAGS) $(SAN) -o $@ tools/zxfs-tool.c $(LIB)
 
 test: build/ztest
 	build/ztest

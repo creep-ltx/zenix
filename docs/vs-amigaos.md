@@ -31,7 +31,7 @@ AmigaOS.
 | Crash | A bad pointer or illegal instruction raises a Guru Meditation and usually takes the whole machine | The offending process is killed, the rest continues |
 | Program model | `exec` tasks and DOS processes; startup from a CLI or Workbench | Unix: `spawn(path, argv, stdio)`, exit status, `wait` |
 | File naming | `DH0:dir/file`, volumes and assigns, case-insensitive | One tree rooted at `/`, case-sensitive, mount-based |
-| Filesystem | OFS/FFS/PFS3/SFS, `DosType` in the RDB selects the handler | ext2 today (readable by Linux), RDB partition table shared; ZenFS planned |
+| Filesystem | OFS/FFS/PFS3/SFS, `DosType` in the RDB selects the handler | ext2 today (readable by Linux), RDB partition table shared; ZXFS planned |
 | I/O model | Packets/IORequests to devices; ReadArgs templates; `Wait()` on signals | Everything is a file descriptor: `read/write` on files, ttys, pipes |
 | Pipes | Not a core concept (`PIPE:` handler) | Kernel pipes, first-class, `|` in the shell |
 | Libraries | Shared libraries opened at run time with a jump table (`OpenLibrary`) | None: static linking, a tiny libc per program; shared libs left open in the file format |
@@ -53,7 +53,7 @@ AmigaOS.
 
 - A **Unix environment**: `/`, pipes, a real shell with scripting, small composable tools, `man`.
 - **Containment:** a crashing program does not bring down the machine, and its memory comes back automatically.
-- **A filesystem that Linux can read** and fsck; ZenFS planned to be crash-safe by atomic commit.
+- **A filesystem that Linux can read** and fsck; ZXFS planned to be crash-safe by atomic commit.
 - A small, readable kernel (about 5,000 lines) with no hidden global state: no `Forbid` bugs, no lock ordering.
 - Predictable behaviour: one mechanism per job (messages), no parallel APIs for the same thing.
 
