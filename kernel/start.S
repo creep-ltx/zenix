@@ -64,6 +64,16 @@ msg_cpu:
 
     .text
 
+/* stage0 (boot/stage0.c): position-independent code the bootblock calls while AmigaOS is alive,
+ * found through the ZEXE header (+28, patched by tools/mkzexe.py). */
+    .section .text.stage0
+    .balign 4
+    .globl  stage0_blob
+stage0_blob:
+    .incbin "build/stage0.bin"
+    .balign 4
+    .text
+
 /* Every exception without its own handler: save all registers, pass the
  * block (d0-d7/a0-a6 ascending, CPU exception frame at +60) to C. */
     .globl  exc_common

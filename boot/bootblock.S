@@ -14,6 +14,8 @@
  *   +12 u32 DefaultFont (ROM Topaz TextFont*, 0 if unavailable)
  *   +16 {u32 attrs, u32 lower, u32 upper}[8]
  *
+ * hwinfo at 0x1100 (kernel/hwinfo.h): the Pi hardware addresses, filled in by stage0.
+ *
  * The longs at bootblock offsets 8 and 1020 are patched by tools/mkadf.py with
  * the kernel size and the ramdisk size (Kickstart jumps to offset 12, so the
  * code starts there) (both multiples of 512; the ramdisk
@@ -62,6 +64,18 @@ _start:
     moveq   #0,%d0
     jsr     -552(%a6)               /* OpenLibrary */
     move.l  %d0,0x100C
+
+    /* stage0: position-independent code inside the kernel image (ZEXE header +28, 0 = none).
+     * It reads the Pi's hardware addresses from Emu68's device tree into the table at
+     * HWINFO_ADDR (0x1100) while AmigaOS is alive. Clears the caches first: the image was
+     * just DMA'd into chip RAM. Preserves everything but d0/d1/a0/a1. */
+    move.l  28(%a4),%d0
+    beq.s   nostage0
+    jsr     -636(%a6)               /* CacheClearU */
+    move.l  28(%a4),%d0             /* (d0 was clobbered) */
+    lea     (%a4,%d0.l),%a0
+    jsr     (%a0)
+nostage0:
     lea     0x1010,%a3
     moveq   #0,%d6
     move.l  322(%a6),%a2            /* exec MemList lh_Head */

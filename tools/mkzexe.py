@@ -9,7 +9,7 @@ ZEXE = flat image + relocation table, loadable at any address:
   +16  u32 nreloc
   +20  u32 reloc_off    file offset of the relocation table
   +24  u32 stack_size   stack the program wants (0 = loader default)
-  +28  u32 reserved
+  +28  u32 stage0   file offset of position-independent code the bootblock calls (0 = none)
 After the image: nreloc big-endian u32 offsets of 32-bit words that hold
 link-time (base 0) addresses; the loader adds the load address to each.
 Only R_68K_32 needs relocating; PC-relative references stay valid.
@@ -79,6 +79,7 @@ def main():
     img[16:20] = struct.pack(">I", len(relocs))
     img[20:24] = struct.pack(">I", reloc_off)
     img[24:28] = struct.pack(">I", stack)
+    img[28:32] = struct.pack(">I", syms.get("stage0_blob", 0))
     open(out, "wb").write(bytes(img) + table)
     print(f"{out}: image {image_size}B, {len(relocs)} relocs, mem {mem_size}B")
 

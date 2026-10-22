@@ -8,8 +8,17 @@ SECS="${2:-25}"
 SCRIPT="$3"
 DIR="$(mktemp -d)"
 LOG="$DIR/serial.log"
+# Several sessions may test at once: ZENIX_SERIAL=/tmp/other-name gives this run its own serial
+# port (the config is copied with the port and the ../build paths rewritten).
+SERIAL=/tmp/zenix-serial
+if [ -n "$ZENIX_SERIAL" ]; then
+    SERIAL="$ZENIX_SERIAL"
+    ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+    sed -e "s#/tmp/zenix-serial#$SERIAL#" -e "s#\.\./build/#$ROOT/build/#g" "$CONF" > "$DIR/test.fs-uae"
+    CONF="$DIR/test.fs-uae"
+fi
 
-python3 "$(dirname "$0")/serial-tap.py" /tmp/zenix-serial "$LOG" $SCRIPT >"$DIR/tap.out" 2>&1 &
+python3 "$(dirname "$0")/serial-tap.py" "$SERIAL" "$LOG" $SCRIPT >"$DIR/tap.out" 2>&1 &
 TAP=$!
 sleep 1
 # Render offscreen: no window to steal focus (or get closed mid-test).

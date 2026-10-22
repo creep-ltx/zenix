@@ -6,6 +6,7 @@ SECTIONS
     . = 0;
     .text : {
         KEEP(*(.text.start))
+        KEEP(*(.text.stage0))
         *(.text*)
     }
     .rodata : { *(.rodata*) }

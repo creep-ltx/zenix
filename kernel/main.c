@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "hw.h"
+#include "hwinfo.h"
 
 static u32 vector_table[256] __attribute__((aligned(4)));
 volatile u32 ticks;
@@ -177,6 +178,18 @@ void kmain(struct bootinfo *bi)
         kprintf("  ram %p..%p %s\n", r->lower, r->upper,
                 (r->attrs & MEMF_FAST) ? "fast" :
                 (r->attrs & MEMF_CHIP) ? "chip" : "?");
+    }
+
+    const struct hwinfo *hwi = (const struct hwinfo *)HWINFO_ADDR;
+    if (hwi->magic != HWINFO_MAGIC)
+        kprintf("pi: no hardware table (old bootblock)\n");
+    else if (!(hwi->flags & HW_DT))
+        kprintf("pi: not running under Emu68 (no device tree)\n");
+    else {
+        kprintf("pi: Emu68%s%s, peripherals at %p\n", (hwi->flags & HW_BCM2711) ? ", BCM2711 (Pi 4/CM4)" : "",
+                (hwi->flags & HW_RANGEOPS) ? ", cache range opcodes" : "", hwi->soc_base);
+        kprintf("pi: emmc %p mailbox %p gpio %p genet %p gic %p/%p\n", hwi->emmc, hwi->mailbox, hwi->gpio,
+                hwi->genet, hwi->gic_dist, hwi->gic_cpu);
     }
 
     int font_ok = gfx_font_init(bi->font) == 0;     /* before mem_init: OS leftovers */
