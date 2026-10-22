@@ -293,6 +293,7 @@ void proc_exit(int code)
     if (par && par->state == P_WAIT &&
         (par->wait_for == -1 || par->wait_for == p->pid))
         ready(par);
+    tty_release(p->pid);
     ipc_proc_exit(p->pid);
     wake_io();
     schedule();

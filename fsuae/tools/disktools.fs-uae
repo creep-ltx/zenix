@@ -15,3 +15,5 @@ uae_serial_direct = true
 window_width = 960
 window_height = 768
 zoom = full
+joystick_port_0 = none
+joystick_port_1 = none

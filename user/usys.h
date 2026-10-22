@@ -77,3 +77,7 @@ static inline int sys_blk_ram(u32 out[2]) { return sys3(42, (u32)out, 0, 0); }
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };
 static inline int sys_statfs(struct ustatfs *f) { return sys3(43, (u32)f, 0, 0); }
 static inline int sys_sync(void) { return sys3(44, 0, 0, 0); }
+#define TTY_RAW   1
+#define TTY_NOSIG 2
+static inline int sys_ttymode(int flags) { return sys3(45, (u32)flags, 0, 0); }
+static inline int sys_ttyinfo(void) { return sys3(46, 0, 0, 0); }   /* rows << 16 | columns */

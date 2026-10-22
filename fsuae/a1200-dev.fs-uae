@@ -23,3 +23,5 @@ hard_drive_0 = ../build/zenix.hdf
 hard_drive_0_controller = ide0
 serial_port = /tmp/zenix-serial
 uae_serial_direct = true
+joystick_port_0 = none
+joystick_port_1 = none

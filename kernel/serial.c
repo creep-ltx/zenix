@@ -83,6 +83,10 @@ void serial_rx_isr(void)
                 ws_switch(c - '0');
             else if (c == '\r' || c == '\n')
                 ws_request_shell(ws_cur);
+            else if (c == 'u' || c == 'd')          /* scrollback one line */
+                term_scroll_view(c == 'u' ? 1 : -1);
+            else if (c == 'U' || c == 'D')          /* a page */
+                term_scroll_view(c == 'U' ? TROWS - 1 : -(TROWS - 1));
             continue;
         }
         if (c == 0x1d) {

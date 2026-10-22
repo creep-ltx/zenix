@@ -13,3 +13,5 @@ window_height = 768
 zoom = full
 amiga_model = A600
 kickstart_file = /home/creep/UAE/ROM/kick204-a500plus.rom
+joystick_port_0 = none
+joystick_port_1 = none

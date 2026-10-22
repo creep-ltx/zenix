@@ -71,13 +71,16 @@ void kfree(void *p);
 int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
 int gfx_up(void);
-void gfx_cell(int row, int col, u8 ch, u8 fg, u8 bg);
-void gfx_bar_cell(int col, u8 ch, u8 fg, u8 bg);
+void gfx_cell(int row, int col, u8 ch, u8 attr);
+void gfx_bar_cell(int col, u8 ch, u8 attr);
 void gfx_scroll(void);
 void gfx_clear_text(void);
 void gfx_vblank(void);
 void term_putc(int ws, char c);
 void term_write(int ws, const char *s, u32 n);
+void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
+int term_back(void);
+int term_size(void);                    /* rows << 16 | columns */
 void bar_draw(void);
 void ws_switch(int w);
 void ws_request_shell(int w);
@@ -229,6 +232,12 @@ void vfs_chdir_text(char *cwd, const char *path);
 void tty_init(void);
 void tty_input(u8 c);                   /* to the focused workspace's tty */
 long tty_read(int tty, void *buf, u32 n);
+#define TTY_RAW    1                    /* no line editing, no echo: bytes as they come */
+#define TTY_NOSIG  2                    /* ^C is delivered as a byte, not a kill */
+void tty_setmode(int tty, int mode, int owner_pid);
+int tty_getmode(int tty);
+void tty_inject(int tty, const char *s);   /* bytes into the input queue, bypassing the line discipline */
+void tty_release(int pid);              /* a process exited: undo its mode */
 long tty_write(int tty, const void *buf, u32 n);
 void tty_setfg(int tty, int pid);
 int tty_getfg(int tty);
@@ -275,6 +284,8 @@ int tty_of(const struct proc *p);
 #define SYS_spawn_tty   40   /* spawn a program with its stdio on a workspace tty */
 #define SYS_statfs      43   /* filesystem usage of the root: struct ustatfs* */
 #define SYS_sync        44
+#define SYS_ttymode     45   /* a1 = TTY_* flags for this process's tty */
+#define SYS_ttyinfo     46   /* rows << 16 | columns */
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */

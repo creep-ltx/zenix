@@ -15,3 +15,5 @@ chip_memory = 2048
 fast_memory = 8192
 uae_cpu_model = 68030
 uae_fpu_model = 68882
+joystick_port_0 = none
+joystick_port_1 = none

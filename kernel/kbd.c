@@ -64,6 +64,41 @@ static const char keyspecial[0x28] = {
     0, 0, 0, 0, 0, 0, 0, 0,
 };
 
+/* cursor keys, function keys, Help and Del as the usual escape sequences. Only
+ * programs in raw mode get them; Shift/Ctrl + Up/Down scroll the screen back. */
+static void emit_seq(const char *q)
+{
+    if (!(tty_getmode(ws_cur) & TTY_RAW))
+        return;
+    while (*q)
+        tty_input((u8)*q++);
+}
+
+static int special_key(u8 code)
+{
+    static const char *const fkeys[10] = {
+        "\033OP", "\033OQ", "\033OR", "\033OS", "\033[15~",
+        "\033[17~", "\033[18~", "\033[19~", "\033[20~", "\033[21~" };
+    if (code >= 0x4C && code <= 0x4F) {
+        if ((shift_down || ctrl_down) && code <= 0x4D) {       /* scrollback */
+            int step = ctrl_down ? TROWS - 1 : 1;
+            term_scroll_view(code == 0x4C ? step : -step);
+            return 1;
+        }
+        if (shift_down && code >= 0x4E) {                      /* Shift+Right/Left = End/Home */
+            emit_seq(code == 0x4E ? "\033[F" : "\033[H");
+            return 1;
+        }
+        static const char *const arrows[4] = { "\033[A", "\033[B", "\033[C", "\033[D" };
+        emit_seq(arrows[code - 0x4C]);
+        return 1;
+    }
+    if (code >= 0x50 && code <= 0x59) { emit_seq(fkeys[code - 0x50]); return 1; }
+    if (code == 0x5F) { emit_seq("\033[2~"); return 1; }       /* Help = Insert */
+    if (code == 0x46) { emit_seq("\033[3~"); return 1; }       /* Del */
+    return 0;
+}
+
 void kbd_isr(void)
 {
     u8 raw = CIAA(CIA_SDR);
@@ -97,8 +132,12 @@ void kbd_isr(void)
     }
     if (up)
         return;
+    if (special_key(code))
+        return;
     u8 c = 0;
-    if (code < 0x40)
+    if (code == 0x41 && (tty_getmode(ws_cur) & TTY_RAW))
+        c = 127;                                    /* Backspace is DEL for raw-mode programs */
+    else if (code < 0x40)
         c = shift_down ? kmap->shifted[code] : kmap->normal[code];
     else if (code < 0x68)
         c = (u8)keyspecial[code - 0x40];

@@ -181,6 +181,13 @@ void syscall_c(u32 *rb)
         if (current->priv)
             r = (s32)ide_sectors();
         break;
+    case SYS_ttymode:
+        tty_setmode(tty_of(current), (int)a1, current->pid);
+        r = 0;
+        break;
+    case SYS_ttyinfo:
+        r = term_size();
+        break;
     case SYS_hrtime:
         r = (s32)hr_time();
         break;

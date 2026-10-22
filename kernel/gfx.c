@@ -129,28 +129,31 @@ static void blit_clear(void *dst, u32 words)
 
 /* ---- drawing ---- */
 
-static void put_glyph(u8 *line0, int col, u8 ch, u8 fg, u8 bg)
+/* attr bits: 1 inverse, 2 underline, 4 bold. One plane: a set bit is the
+ * foreground colour, so inverse is just the glyph bits inverted. */
+static void put_glyph(u8 *line0, int col, u8 ch, u8 attr)
 {
     const u8 *g = glyphs[(ch < 32 ? '?' : ch) - 32];
-    (void)bg;                           /* one plane: fg 1 = glyph, 0 = inverted */
-    if (fg & 1)
-        for (int y = 0; y < 8; y++)
-            line0[y * STRIDE + col] = g[y];
-    else
-        for (int y = 0; y < 8; y++)
-            line0[y * STRIDE + col] = (u8)~g[y];
+    for (int y = 0; y < 8; y++) {
+        u8 b = g[y];
+        if (attr & 4)
+            b |= (u8)(b >> 1);                  /* bold: smear one pixel */
+        if ((attr & 2) && y == 7)
+            b = 0xFF;                           /* underline */
+        line0[y * STRIDE + col] = (attr & 1) ? (u8)~b : b;
+    }
 }
 
-void gfx_cell(int row, int col, u8 ch, u8 fg, u8 bg)
+void gfx_cell(int row, int col, u8 ch, u8 attr)
 {
     if (up)
-        put_glyph(tbuf + (u32)(off + row * 8) * STRIDE, col, ch, fg, bg);
+        put_glyph(tbuf + (u32)(off + row * 8) * STRIDE, col, ch, attr);
 }
 
-void gfx_bar_cell(int col, u8 ch, u8 fg, u8 bg)
+void gfx_bar_cell(int col, u8 ch, u8 attr)
 {
     if (up)
-        put_glyph(bbuf, col, ch, fg, bg);
+        put_glyph(bbuf, col, ch, attr);
 }
 
 /* Copper list layout (words):  0-3 bar colours, 4-7 bar pointer, 8-9 WAIT,

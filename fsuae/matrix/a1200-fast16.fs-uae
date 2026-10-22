@@ -13,3 +13,5 @@ window_height = 768
 zoom = full
 chip_memory = 2048
 fast_memory = 8192
+joystick_port_0 = none
+joystick_port_1 = none

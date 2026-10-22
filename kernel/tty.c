@@ -17,6 +17,8 @@ struct tty {
     u16 llen;
     int eof_pending;
     int fg;
+    int mode;                   /* TTY_RAW, TTY_NOSIG */
+    int owner;                  /* pid that set the mode */
 };
 static struct tty *tt[NTTY];
 int tty_mirror = 1;                     /* copy the focused screen to the serial port */
@@ -39,6 +41,35 @@ void tty_init(void) { }
 int tty_of(const struct proc *p)
 {
     return (p->fd[0] && p->fd[0]->type == FT_TTY) ? (int)p->fd[0]->off : 1;
+}
+
+void tty_setmode(int tty, int mode, int owner)
+{
+    struct tty *t = get(tty);
+    t->mode = mode;
+    t->owner = mode ? owner : 0;
+    t->llen = 0;
+}
+
+int tty_getmode(int tty) { return get(tty)->mode; }
+
+void tty_release(int pid)
+{
+    for (int i = 1; i < NTTY; i++)
+        if (tt[i] && tt[i]->owner == pid) {
+            tt[i]->mode = 0;
+            tt[i]->owner = 0;
+        }
+}
+
+static void commit(struct tty *t, u8 c);
+
+void tty_inject(int tty, const char *s)
+{
+    struct tty *t = get(tty);
+    while (*s)
+        commit(t, (u8)*s++);
+    wake_io();
 }
 
 void tty_setfg(int tty, int pid) { get(tty)->fg = pid; }
@@ -79,6 +110,17 @@ void tty_input(u8 c)
 {
     int i = ws_cur;
     struct tty *t = get(i);
+    if (t->mode & TTY_RAW) {                /* the program does its own editing */
+        if (c == 3 && !(t->mode & TTY_NOSIG)) {
+            struct proc *p = t->fg ? proc_by_pid(t->fg) : 0;
+            if (p)
+                proc_kill(p);
+        } else {
+            commit(t, c);
+        }
+        wake_io();
+        return;
+    }
     if (c == '\r')
         c = '\n';
     if (c == 3) {                           /* ^C */
@@ -132,6 +174,8 @@ void tty_input(u8 c)
 
 static int have_line(struct tty *t)
 {
+    if (t->mode & TTY_RAW)
+        return t->qtail != t->qhead;        /* any byte will do */
     for (u16 k = t->qtail; k != t->qhead; k = (u16)((k + 1) % QSZ))
         if (t->q[k] == '\n')
             return 1;
