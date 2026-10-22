@@ -202,8 +202,6 @@ void stage0_fill(struct ctx *c, struct hwinfo *hw)
     }
 }
 
-#define __STR2(x) #x
-#define __STR(x) __STR2(x)
 
 #ifndef HOST_TEST
 /* exec.library OpenResource (-498) and OpenLibrary (-552): name in a1, (version 0 in d0), result in d0.
@@ -228,7 +226,8 @@ static void *exec_open_library(void *execbase, const char *name)
     return d0;
 }
 
-/* called by the bootblock: a6 = ExecBase. Fills the table at HWINFO_ADDR. */
+/* called by the bootblock: a6 = ExecBase, a1 = the hwinfo table to fill (the bootblock's own block while AmigaOS
+ * is alive; it lands at HWINFO_ADDR when the kernel runs) */
 void stage0_main(void *execbase, struct hwinfo *hw)
 {
     u8 *z = (u8 *)hw;
@@ -245,13 +244,13 @@ void stage0_main(void *execbase, struct hwinfo *hw)
         stage0_fill(&c, hw);                    /* not Emu68: the rest of the table stays empty */
 }
 
-/* entry: saves what the C code may not preserve, passes (ExecBase, table) */
+/* entry: saves what the C code may not preserve, passes (ExecBase, table in a1) */
 __asm__(
     ".section .text.entry,\"ax\"\n"
     ".globl stage0_entry\n"
     "stage0_entry:\n"
     "    movem.l %d2-%d7/%a2-%a6,-(%sp)\n"
-    "    pea " __STR(HWINFO_ADDR) "\n"
+    "    move.l %a1,-(%sp)\n"
     "    move.l %a6,-(%sp)\n"
     "    jsr stage0_main(%pc)\n"
     "    addq.l #8,%sp\n"

@@ -10,7 +10,7 @@
  * address is 0; boards[] is filled on every Amiga. Notes: Knowledge/amiga/emu68-sd-controller-registers.md and
  * emu68-network-usb-rtg-hardware.md.
  */
-#define HWINFO_ADDR     0x1100          /* in the low chip RAM the kernel never hands out */
+#define HWINFO_ADDR     0x1100          /* in the low chip RAM the kernel never hands out; the bootblock copies the table here after the takeover */
 #define HWINFO_MAGIC    0x5A485731      /* "ZHW1" */
 
 #define HW_DT           0x01            /* devicetree.resource found: running under Emu68 */
