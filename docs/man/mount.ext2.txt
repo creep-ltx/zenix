@@ -1,0 +1,18 @@
+MOUNT.EXT2(8)			Zenix manual
+
+NAME
+    mount.ext2 - the ext2 filesystem server for a mounted device
+
+SYNOPSIS
+    started by mount(8): mount.ext2 device portname
+
+DESCRIPTION
+    The same server as the root filesystem's fsd, run as a program on a
+    device other than the root. It opens the device through the disk server
+    (becoming its only writer), creates the port portname, and serves the
+    filesystem protocol (kernel/fsproto.h) there until umount tells it
+    to quit.
+    It is not meant to be run by hand.
+
+SEE ALSO
+    mount(8), umount(8), docs/architecture.md

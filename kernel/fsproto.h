@@ -24,4 +24,7 @@
 #define FS_CHOWN   20  /* a0 path, a1 cwd ino, a2 uid, a3 gid (-1 = keep): root only */
 #define O_EXEC     0x8000  /* FS_OPEN flag: the caller wants to execute the file (needs an x bit) */
 #define FS_LSTAT   19  /* like FS_STAT but a final symbolic link is not followed */
+#define FS_ROOT    22  /* a0 struct fsinfo* (the server fills in its device and type) -> inode number of its root directory */
+#define FS_QUIT    23  /* sync, release the device, reply 0, exit: sent by umount */
+struct fsinfo { char dev[16]; char type[8]; };
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

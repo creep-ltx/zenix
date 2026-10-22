@@ -1,0 +1,23 @@
+UMOUNT(8)			Zenix manual
+
+NAME
+    umount - unmount a filesystem
+
+SYNOPSIS
+    umount dir
+
+DESCRIPTION
+    Writes out the filesystem mounted on dir, stops its server and releases
+    the device, so that tools such as fsck.ext2 can open it again. The
+    unmount is refused ("busy") while any program has the directory (or a
+    directory below it) as its working directory, has a file open there, or
+    while another filesystem is mounted below it.
+
+EXIT STATUS
+    0, 1 on an error (not a mount point, busy), 2 usage.
+
+NOTES
+    The root filesystem cannot be unmounted.
+
+SEE ALSO
+    mount(8)

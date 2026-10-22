@@ -10,7 +10,7 @@ DESCRIPTION
     Asks the filesystem server to write everything to disk. Today every
     write goes straight to the disk (write-through), so there is nothing
     waiting and sync returns at once; it is kept for scripts and for when
-    delayed writes arrive (see ZenFS in docs/zenfs.md).
+    delayed writes arrive (see ZenixFS in docs/zenixfs.md).
 
 SEE ALSO
     df(1)

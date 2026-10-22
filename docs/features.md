@@ -51,8 +51,9 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Pi hardware table from Emu68's device tree (stage0, read before AmigaOS is killed) | built; tested on the host and in a CPU emulator against the real CM4 tree, boots in FS-UAE (empty table) | architecture.md section 3 |
 | Disks with a PC partition table (MBR; primary entries): ext2 type 0x83, RDB inside type 0x76, FAT etc. listed and never mounted | verified in FS-UAE (`tools/mbr-test.sh`) | man/diskd.txt |
 | Extended partitions, GPT | not done | limits.md |
-| Mounting more than the root filesystem | planned | ROADMAP.md phase 4 |
-| ZenFS | planned | zenfs.md |
+| Mounting more than the root filesystem (`mount`, `umount`, nested mounts, ext2 servers per device) | verified in FS-UAE | man/mount.txt, architecture.md section 9 |
+| ZenixFS on Zenix: `mkfs.zenixfs`, `mount` (type from the partition table), `fsck.zenixfs`; atomic commits, checksums | see the ZenixFS status in zenixfs.md | man/mount.zenixfs.txt, man/mkfs.zenixfs.txt |
+| Disk flush request (ATA FLUSH CACHE) and device capabilities in the disk protocol | verified (IDE in FS-UAE; not on real drives) | man/diskd.txt |
 | Unlink of an open file, directory moves between parents, triple-indirect | not done | limits.md |
 
 ## Terminal and display

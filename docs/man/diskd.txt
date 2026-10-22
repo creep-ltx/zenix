@@ -17,7 +17,10 @@ DESCRIPTION
     A device can be
     mounted by one filesystem server, which is then its only writer; tools
     such as fdisk, mkfs.ext2 and fsck.ext2 open devices raw, which is refused
-    while mounted. Protocol: kernel/diskproto.h.
+    while mounted. Besides read, write and info it offers DISK_FLUSH (make
+    everything written so far durable: ATA FLUSH CACHE on IDE) and each device
+    reports capabilities (flush works, flash or rotating, largest transfer).
+    Protocol: kernel/diskproto.h.
 
 PARTITION TABLES
     RDB: the partitions of the table, with their labels and types.

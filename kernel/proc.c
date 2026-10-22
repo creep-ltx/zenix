@@ -210,7 +210,7 @@ int proc_spawn(const char *path, char *const *argv, int argc,
     u8 *file;
     u32 size;
     struct ustat st;
-    long r = fs_read_file(path, parent ? parent->cwd_ino : 2, &file, &size, &st);
+    long r = fs_read_file(path, parent, &file, &size, &st);
     if (r < 0)
         return (int)r;
     suid_override = (st.mode & 04000) ? (int)st.uid : -1;   /* set-user-id: the program runs as its owner (su, passwd) */

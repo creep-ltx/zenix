@@ -16,7 +16,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
           head tail sort uniq cut tr tee seq basename dirname yes sleep true false env printenv which clear \
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
-          sed diff chmod ln readlink date less edit man gzip tar login su passwd chown sha256sum
+          sed diff chmod ln readlink date less edit man gzip tar login su passwd chown sha256sum mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 # programs that need more than the default 16 KB stack
@@ -64,13 +64,22 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py
 $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@
 
-# the floppy has room for about 790 KB of root filesystem: the editor, pager, archive and search tools stay off the RAM image (it only serves the RAM-boot and disk-tool tests)
-RAMAPPS := $(filter-out gzip tar sha256sum edit less sed diff man find xargs du hexdump cmp,$(UAPPS))
+# the floppy has room for about 790 KB of root filesystem: the editor, pager, archive, search and mount tools stay off the RAM image (it only serves the RAM-boot and disk-tool tests)
+RAMAPPS := $(filter-out gzip tar sha256sum edit less sed diff man find xargs du hexdump cmp mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs,$(UAPPS))
+# the mount tests (tools/mounttest.sh) boot their own small floppy: the standard RAM image is full
+MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount mount.ext2 \
+             mount.zenixfs mkfs_zenixfs fsck_zenixfs su id whoami chmod touch wc head tail ps stat uname sleep true false env passwd
 
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.
 $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" 768K 128
+
+$(BUILD)/root-mount.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
+	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" 768K 128
+
+$(BUILD)/zenix-mount.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-mount.img tools/mkadf.py
+	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-mount.img
 
 $(BUILD)/zenix-ram.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-ram.img tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-ram.img
@@ -128,8 +137,31 @@ $(BUILD)/fsd.uelf: $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)
 	    $(BUILD)/crt0.o $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py
 	tools/mkzexe.py $< $@ 16384
+# the same server as a program: `mount -t ext2` starts /bin/mount.ext2 DEVICE PORT
+$(BUILD)/mount.ext2.zx: $(BUILD)/fsd.zx
+	cp $< $@
 $(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
+
+# ---- ZenixFS: the library (zenixfs/zenixfs.c, also built for the host) as a Zenix program part, its tools and server ----
+$(BUILD)/zenixfs_lib.uo: zenixfs/zenixfs.c zenixfs/zenixfs.h user/zenixfs_env.h | $(BUILD)
+	$(CC) $(UCFLAGS) -DZENIXFS_FREESTANDING -Iuser -c $< -o $@
+ZENIXFS_OBJS := $(BUILD)/zenixfs_lib.uo $(BUILD)/zenixfs_disk.uo
+$(BUILD)/zenixfs_disk.uo: user/zenixfs_disk.c user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
+	$(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/zenixfsd.uelf: $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	    $(BUILD)/crt0.o $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/mount.zenixfs.zx: $(BUILD)/zenixfsd.uelf tools/mkzexe.py
+	tools/mkzexe.py $< $@ 32768
+$(BUILD)/mkfs_zenixfs.uelf: $(BUILD)/mkfs_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	    $(BUILD)/crt0.o $(BUILD)/mkfs_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/fsck_zenixfs.uelf: $(BUILD)/fsck_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	    $(BUILD)/crt0.o $(BUILD)/fsck_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/mkfs_zenixfs.zx $(BUILD)/fsck_zenixfs.zx: %.zx: %.uelf tools/mkzexe.py
+	tools/mkzexe.py $< $@ 32768
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)

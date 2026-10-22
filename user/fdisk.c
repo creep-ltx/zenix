@@ -5,7 +5,7 @@
 /* fdisk: the Amiga partition table (RDB) of a disk.
  *   fdisk list [disk]                  show the disk(s) and partitions
  *   fdisk init DISK -y                 write an empty partition table (destroys the old one)
- *   fdisk add DISK LABEL SIZE [TYPE]   new partition; SIZE in MB or "rest"; TYPE ext2 (default) | zenfs
+ *   fdisk add DISK LABEL SIZE [TYPE]   new partition; SIZE in MB or "rest"; TYPE ext2 (default) | zenixfs
  *   fdisk del DISK N                   delete partition N
  *   fdisk boot DISK N on|off           mark bootable
  * Changes are written at once and the disk server re-reads the table. */
@@ -48,7 +48,7 @@ static void rescan(void)
 
 static const char *tname(unsigned t)
 {
-    return t == DT_EXT2 ? "ext2" : t == DT_ZENFS ? "zenfs" : "other";
+    return t == DT_EXT2 ? "ext2" : t == DT_ZENIXFS ? "zenixfs" : "other";
 }
 
 static void list(const char *only)
@@ -113,7 +113,7 @@ int main(int argc, char **argv)
         printf("fdisk: no partition table on %s (use: fdisk init %s -y)\n", argv[2], argv[2]);
         return 1;
     } else if (!strcmp(argv[1], "add")) {
-        if (argc < 5) { printf("usage: fdisk add DISK LABEL SIZE [ext2|zenfs]\n"); return 2; }
+        if (argc < 5) { printf("usage: fdisk add DISK LABEL SIZE [ext2|zenixfs]\n"); return 2; }
         if (r.nparts >= RDB_MAXPART) { printf("fdisk: too many partitions\n"); return 1; }
         unsigned first = 1;
         for (int i = 0; i < r.nparts; i++) if (r.part[i].highcyl + 1 > first) first = r.part[i].highcyl + 1;
@@ -126,7 +126,7 @@ int main(int argc, char **argv)
         memset(p, 0, sizeof *p);
         strcpy(p->label, argv[3]);
         p->lowcyl = first; p->highcyl = first + cyls - 1;
-        p->dostype = (argc > 5 && !strcmp(argv[5], "zenfs")) ? DT_ZENFS : DT_EXT2;
+        p->dostype = (argc > 5 && !strcmp(argv[5], "zenixfs")) ? DT_ZENIXFS : DT_EXT2;
     } else if (!strcmp(argv[1], "del") || !strcmp(argv[1], "boot")) {
         if (argc < 4) { printf("usage: fdisk %s DISK N\n", argv[1]); return 2; }
         int n = atoi(argv[3]) - 1;

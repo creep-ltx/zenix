@@ -1,0 +1,89 @@
+sleep 22
+send fdisk init ide0 -y\r
+sleep 3
+send fdisk add ide0 one 4\r
+sleep 3
+send fdisk add ide0 two rest zenixfs\r
+sleep 3
+send mkfs.ext2 ide0p1\r
+sleep 6
+send mkfs.zenixfs ide0p2\r
+sleep 8
+send fdisk list\r
+sleep 3
+send mkdir /mnt /ext\r
+sleep 2
+send mount ide0p1 /ext\r
+sleep 4
+send mount ide0p2 /mnt\r
+sleep 5
+send mount\r
+sleep 2
+send echo hello-zenixfs > /mnt/a.txt\r
+sleep 3
+send mkdir /mnt/dir\r
+sleep 2
+send cp /mnt/a.txt /mnt/dir/b.txt\r
+sleep 3
+send ln -s a.txt /mnt/link\r
+sleep 2
+send ln /mnt/a.txt /mnt/hard\r
+sleep 2
+send ls -l /mnt\r
+sleep 3
+send cat /mnt/link\r
+sleep 2
+send mv /mnt/dir /mnt/dir2\r
+sleep 2
+send cat /mnt/dir2/b.txt\r
+sleep 2
+send seq 1 20000 > /mnt/seq.txt\r
+sleep 12
+send wc /mnt/seq.txt\r
+sleep 5
+send cp /mnt/seq.txt /mnt/seq2.txt\r
+sleep 12
+send cmp /mnt/seq.txt /mnt/seq2.txt && echo SAME-SEQ\r
+sleep 8
+send cp /mnt/seq.txt /ext/seq.txt\r
+sleep 12
+send cmp /mnt/seq.txt /ext/seq.txt && echo SAME-ACROSS-MOUNTS\r
+sleep 8
+send mv /mnt/a.txt /ext/a.txt\r
+sleep 4
+send cat /ext/a.txt\r
+sleep 2
+send ls /mnt\r
+sleep 2
+send echo END-OF-CROSS-MOUNT-MV\r
+sleep 1
+send rm /mnt/hard\r
+sleep 2
+send cd /mnt/dir2\r
+sleep 1
+send pwd\r
+sleep 1
+send cd /\r
+sleep 1
+send df\r
+sleep 3
+send sync\r
+sleep 4
+send umount /mnt\r
+sleep 4
+send umount /ext\r
+sleep 3
+send mount ide0p2 /mnt\r
+sleep 5
+send cat /mnt/link /mnt/dir2/b.txt\r
+sleep 3
+send wc /mnt/seq.txt\r
+sleep 5
+send ls /mnt\r
+sleep 3
+send umount /mnt\r
+sleep 4
+send fsck.zenixfs ide0p2\r
+sleep 12
+send sync\r
+sleep 2

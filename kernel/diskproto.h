@@ -12,6 +12,7 @@
 #define DISK_INFO   4  /* a0 handle, a1 struct diskinfo* -> 0 */
 #define DISK_LIST   5  /* a0 index, a1 struct diskinfo* -> 0, -1 past the end */
 #define DISK_RESCAN 6  /* re-read the partition table (after fdisk wrote it) */
+#define DISK_FLUSH  8  /* a0 handle: everything written so far is durable when this returns (ATA FLUSH CACHE); needed for crash safety */
 struct diskinfo {
     char name[16];             /* "ide0", "ide0p1" */
     char label[32];            /* RDB drive name (DH0...) or "" */
@@ -20,4 +21,10 @@ struct diskinfo {
     unsigned dostype;          /* RDB DosType, 0 for the whole disk */
     unsigned flags;            /* 1 = bootable */
     unsigned mounted;          /* pid of the filesystem server that has it, 0 if free */
+    unsigned caps;             /* DISKCAP_* bits */
+    unsigned maxsect;          /* most sectors one read/write call may carry */
+    unsigned erase;            /* flash erase/page size in sectors, 0 if unknown or rotating */
 };
+#define DISKCAP_FLUSH  1       /* DISK_FLUSH really reaches the medium */
+#define DISKCAP_FLASH  2       /* flash (CF/SD): no seek cost, align writes to erase; unset: rotating or unknown */
+#define DISKCAP_RAM    4       /* memory: writes are durable only until reset */

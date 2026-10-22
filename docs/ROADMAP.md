@@ -35,7 +35,7 @@ manager, scheduler; disk server (RDB partitions), filesystem server (ext2, read 
 pipes, shell and 20 commands; hires display with a Copper-split bar, workspaces, Amiga keyboard; a setup matrix
 of 13 emulated A1200 variants; a benchmark using the CIA's E-clock.
 
-## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenFS and the desktop)
+## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 
 **Phase 1 - Disk tools.** `fdisk` (the RDB partition table), `mkfs.ext2`, `fsck.ext2`, `df`, `sync`; the disk
 server refuses raw access to mounted devices. Tested against scratch disks in the emulator and checked with the
@@ -61,7 +61,7 @@ so this uses `zenix-ram.adf` until an SD driver exists.)
   standard escape codes), man pages.
 - *Network tools later,* when the network server exists.
 
-**Phase 4 - ZenFS.** Our own filesystem (docs/zenfs.md): atomic commit, checksummed metadata, extents, indexed
+**Phase 4 - ZenixFS.** Our own filesystem (docs/zenixfs.md): atomic commit, checksummed metadata, extents, indexed
 directories, self-healing; needs the multi-filesystem VFS (mount table, several filesystem servers). ext2 stays
 for Linux compatibility.
 
@@ -81,7 +81,7 @@ Ahiru-style file view; mouse. Index server (FuzzyFind) for `locate` / `fzf`.
 
 ## Open questions
 
-- ZenFS name: a Western Digital project already uses "ZenFS" (RocksDB on zoned SSDs); decide if that matters.
+- ZenixFS name: a Western Digital project already uses "ZenixFS" (RocksDB on zoned SSDs); decide if that matters.
 - Licence: **GPL-2.0 only** (decided 2026-10-22 by the owner: nobody may close it; lets us take GPL-2 code from Linux, Fuzix, U-Boot). Code copied from other projects must be GPL-2 compatible (MIT, BSD, MPL files keep their own headers); new files carry `SPDX-License-Identifier: GPL-2.0-only`.
 - How much POSIX: `fork` is not possible without an MMU; `vfork`/`spawn` only. Programs that need `fork` are out.
-- Journaling: not needed if ZenFS commits atomically; ext2 gets a clean flag and our fsck.
+- Journaling: not needed if ZenixFS commits atomically; ext2 gets a clean flag and our fsck.

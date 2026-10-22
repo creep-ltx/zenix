@@ -36,3 +36,10 @@ int blk_write(u32 lba, u32 count, const void *buf)
 {
     return which == B_EMMC ? emmc_write(lba, count, buf) : which == B_A3000 ? a3000_write(lba, count, buf) : ide_write(lba, count, buf);
 }
+
+/* make every earlier write durable. The SD card driver writes block by block and waits for the card, so there is no
+ * cache of ours to flush; the A3000 driver is polled and synchronous too; the IDE drive has a cache of its own. */
+int blk_flush(void)
+{
+    return which == B_EMMC ? emmc_flush() : which == B_A3000 ? 0 : ide_flush();
+}

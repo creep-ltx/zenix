@@ -25,7 +25,7 @@ hardware, 68000 (not a target), MMU use. See docs/DESIGN.md.
 Images: `build/zenix.adf` (the standard floppy: bootblock + kernel only; the root filesystem is on the IDE disk,
 `build/zenix.hdf` or `zenix-rdb.hdf`) and `build/zenix-ram.adf` (development/test only: also carries a small root
 filesystem that is loaded into RAM, for machines without an IDE disk, e.g. a Gotek boot).
-Long-term plan and principles: docs/ROADMAP.md. Native filesystem idea: docs/zenfs.md.
+Long-term plan and principles: docs/ROADMAP.md. Native filesystem idea: docs/zenixfs.md.
 
 Build and test: `make` (needs ~/opt/m68k-elf, mke2fs), `make test` (headless serial log),
 `tools/shot.py` (screenshots in a private invisible Wayland session; build with `make DIWV=0x38` because

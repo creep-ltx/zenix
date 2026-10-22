@@ -97,12 +97,14 @@ int ide_init(void);
 u32 ide_sectors(void);
 int ide_read(u32 lba, u32 count, void *buf);
 int ide_write(u32 lba, u32 count, const void *buf);
+int ide_flush(void);                     /* ATA FLUSH CACHE: the drive's write cache is on the platter */
 
 /* blk.c: the one raw disk (IDE or SD card) behind the disk server */
 int blk_init(void);
 u32 blk_sectors(void);
 int blk_read(u32 lba, u32 count, void *buf);
 int blk_write(u32 lba, u32 count, const void *buf);
+int blk_flush(void);
 
 /* a3000.c: the Amiga 3000's on-board SCSI (WD33C93A + DMAC) */
 int a3000_init(void);
@@ -115,6 +117,7 @@ int emmc_init(void);
 u32 emmc_sectors(void);
 int emmc_read(u32 lba, u32 count, void *buf);
 int emmc_write(u32 lba, u32 count, const void *buf);
+int emmc_flush(void);
 
 #include "ext2.h"
 
@@ -147,7 +150,10 @@ struct file {
     struct pipe *pipe;
     u32 off;                    /* position (FT_TTY: the tty number) */
     u32 ino, mode;              /* FT_INODE: inode number and mode at open */
+    u8 fs;                      /* FT_INODE: which mount (vfs.c) the inode belongs to */
 };
+struct umountreq { const char *path, *port, *dev, *type; };   /* SYS_mount: a filesystem server's port goes on a directory */
+struct umountinfo { char path[48], port[16], dev[16], type[8]; };   /* SYS_mountinfo */
 struct uproc {                  /* returned by SYS_procinfo */
     u32 pid, ppid, state, mem;
     char name[16];
@@ -237,13 +243,16 @@ long vfs_read(struct file *f, void *buf, u32 n);
 long vfs_write(struct file *f, const void *buf, u32 n);
 long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
 struct ustat;
-long fs_read_file(const char *path, u32 cwd, u8 **buf, u32 *size, struct ustat *st);
+long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size, struct ustat *st);
 long vfs_open(const char *path, int flags);
 long vfs_stat(const char *path, struct ustat *st);
 long vfs_fstat(struct file *f, struct ustat *st);
 long vfs_chdir(const char *path);
 long vfs_lseek(struct file *f, s32 off, u32 whence);
-long vfs_statfs(void *out);
+long vfs_statfs(void *out, u32 mount);
+long vfs_mount(const struct umountreq *r);
+long vfs_umount(const char *path);
+long vfs_mountinfo(u32 index, struct umountinfo *out);
 long vfs_path1(u32 op, const char *p, u32 a2, u32 a3);   /* chmod/utimes/lstat/readlink on a path */
 long vfs_link(u32 op, const char *a, const char *b);
 extern u32 time_base;
@@ -339,6 +348,10 @@ int tty_of(const struct proc *p);
 #define SYS_session     68   /* root: this is the logged-in session: its ids and environment are given to new workspace shells */
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
+#define SYS_mount       69   /* struct umountreq*: put a running filesystem server on a directory */
+#define SYS_umount      70   /* path: tell the server to quit and remove the mount */
+#define SYS_mountinfo   71   /* index, struct umountinfo*: 0, or -1 past the end */
+#define SYS_blk_flush   72   /* make everything written so far durable (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */
 #define SYS_ttymirror   37   /* 0 = stop copying screen output to the serial port */
 void syscall_c(u32 *rb);

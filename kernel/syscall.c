@@ -185,7 +185,36 @@ void syscall_c(u32 *rb)
         break;
     case SYS_statfs:
         if (user_ok(current, a1, 20))
-            r = (s32)vfs_statfs((void *)a1);
+            r = (s32)vfs_statfs((void *)a1, a2);       /* a2 = mount index, 0 = the root */
+        break;
+    case SYS_mount: {                   /* root only */
+        struct umountreq rq;
+        char path[64], port[16], dev[16], type[8];
+        if (current->uid != 0) { r = -13; break; }
+        if (user_ok(current, a1, sizeof rq)) {
+            rq = *(const struct umountreq *)a1;
+            if (!copy_str(path, (u32)rq.path, sizeof path) && !copy_str(port, (u32)rq.port, sizeof port) &&
+                !copy_str(dev, (u32)rq.dev, sizeof dev) && !copy_str(type, (u32)rq.type, sizeof type)) {
+                rq.path = path; rq.port = port; rq.dev = dev; rq.type = type;
+                r = (s32)vfs_mount(&rq);
+            }
+        }
+        break;
+    }
+    case SYS_umount: {
+        char path[64];
+        if (current->uid != 0) { r = -13; break; }
+        if (!copy_str(path, a1, sizeof path))
+            r = (s32)vfs_umount(path);
+        break;
+    }
+    case SYS_mountinfo:
+        if (user_ok(current, a2, sizeof(struct umountinfo)))
+            r = (s32)vfs_mountinfo(a1, (struct umountinfo *)a2);
+        break;
+    case SYS_blk_flush:
+        if (current->priv)
+            r = blk_flush();
         break;
     case SYS_sync:
         r = (s32)vfs_sync();

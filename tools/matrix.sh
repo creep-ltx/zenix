@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.." || exit 1
 OUT=/tmp/zenix-matrix; mkdir -p $OUT
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 CONFS="$*"
-[ -z "$CONFS" ] && CONFS="$(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##')"
+[ -z "$CONFS" ] && CONFS="$(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts')"   # mounts: its own floppy, run by tools/mounttest.sh
 for n in $CONFS; do
     f=fsuae/$n.fs-uae; [ -f "$f" ] || f=fsuae/matrix/$n.fs-uae
     rm -f build/zenix.hdf build/zenix-rdb.hdf; make -s build/zenix.hdf build/zenix-rdb.hdf build/zenix-ram.adf >/dev/null 2>&1
