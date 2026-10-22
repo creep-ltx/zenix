@@ -28,7 +28,7 @@ struct rdb {
 typedef int (*rdb_io)(unsigned lba, void *buf);
 
 /* returns 1 if an RDB was found (and fills *r), 0 if the disk has none, -1 on error */
-static int rdb_read(rdb_io rd, struct rdb *r)
+static __attribute__((unused)) int rdb_read(rdb_io rd, struct rdb *r)
 {
     static unsigned sec[128];
     r->nparts = 0;

@@ -65,7 +65,7 @@ $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@
 
 # the floppy has room for about 790 KB of root filesystem: the editor, pager, archive, search and mount tools stay off the RAM image (it only serves the RAM-boot and disk-tool tests)
-RAMAPPS := $(filter-out gzip tar sha256sum edit less sed diff man find xargs du hexdump cmp mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs,$(UAPPS))
+RAMAPPS := $(filter-out gzip tar sha256sum edit less sed diff man find xargs du hexdump cmp beep input mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs,$(UAPPS))
 # the mount tests (tools/mounttest.sh) boot their own small floppy: the standard RAM image is full
 MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount mount.ext2 \
              mount.zenixfs mkfs_zenixfs fsck_zenixfs su id whoami chmod touch wc head tail ps stat uname sleep true false env passwd
