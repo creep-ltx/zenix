@@ -1,0 +1,22 @@
+#include "libz.h"
+/* test client: a few calls, a zero-copy string call, then N timed round trips */
+int main(int argc, char **argv)
+{
+    int port = sys_port_find("ping");
+    if (port < 0) { printf("ping: no server (run pingd &)\n"); return 1; }
+    struct umsg m;
+    m.type = 1; m.a[0] = 40; m.a[1] = 2;
+    int r = sys_call(port, &m);
+    printf("ping: 40+2 = %u (result %d)\n", m.a[2], r);
+    char text[] = "zero copy: the server edits my buffer";
+    m.type = 2; m.a[0] = (u32)text;
+    sys_call(port, &m);
+    printf("ping: %s\n", text);
+    int n = argc > 1 ? atoi(argv[1]) : 1000;
+    u32 t0 = sys_ticks();
+    for (int i = 0; i < n; i++) { m.type = 1; m.a[0] = (u32)i; m.a[1] = 1; sys_call(port, &m); }
+    u32 t1 = sys_ticks();
+    printf("ping: %d round trips in %u ticks (emulator time, 100 ticks = 1 s)\n", n, t1 - t0);
+    m.type = 9; sys_call(port, &m);
+    return 0;
+}

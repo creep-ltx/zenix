@@ -57,3 +57,10 @@ static inline int sys_mkdir(const char *p) { return sys3(25, (u32)p, 0, 0); }
 static inline int sys_unlink(const char *p) { return sys3(26, (u32)p, 0, 0); }
 static inline int sys_rmdir(const char *p) { return sys3(27, (u32)p, 0, 0); }
 static inline int sys_rename(const char *a, const char *b) { return sys3(28, (u32)a, (u32)b, 0); }
+
+struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; };
+static inline int sys_port_create(const char *n) { return sys3(29, (u32)n, 0, 0); }
+static inline int sys_port_find(const char *n) { return sys3(30, (u32)n, 0, 0); }
+static inline int sys_call(int port, struct umsg *m) { return sys3(31, (u32)port, (u32)m, 0); }
+static inline struct umsg *sys_recv(int port, int wait) { return (struct umsg *)sys3(32, (u32)port, (u32)wait, 0); }
+static inline int sys_reply(struct umsg *m, int result) { return sys3(33, (u32)m, (u32)result, 0); }

@@ -116,6 +116,28 @@ void syscall_c(u32 *rb)
             r = (s32)vfs_rename(from, to);
         break;
     }
+    case SYS_port_create: {
+        char name[16];
+        if (!copy_str(name, a1, sizeof name))
+            r = port_create(name, current->pid);
+        break;
+    }
+    case SYS_port_find: {
+        char name[16];
+        if (!copy_str(name, a1, sizeof name))
+            r = port_find(name);
+        break;
+    }
+    case SYS_call:
+        if (user_ok(current, a2, sizeof(struct umsg)))
+            r = (s32)ipc_call((int)a1, (struct umsg *)a2);
+        break;
+    case SYS_recv:
+        r = (s32)ipc_recv((int)a1, (int)a2);
+        break;
+    case SYS_reply:
+        r = (s32)ipc_reply((struct umsg *)a1, (s32)a2);
+        break;
     case SYS_close:
         if ((f = getfd(a1))) {
             current->fd[a1] = 0;

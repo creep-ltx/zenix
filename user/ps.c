@@ -1,7 +1,7 @@
 #include "libz.h"
 int main(void)
 {
-    static const char *st[] = { "free", "ready", "sleep", "wait", "io", "zombie" };
+    static const char *st[] = { "free", "ready", "sleep", "wait", "io", "zombie", "msg" };
     struct uproc p;
     printf("  PID  PPID STATE    MEM(K) NAME\n");
     for (u32 i = 0; i < 16; i++) {

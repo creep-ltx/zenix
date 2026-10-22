@@ -165,7 +165,7 @@ struct uproc {                  /* returned by SYS_procinfo */
 #define NPROC 16
 #define SLICE 5                 /* ticks (100 Hz) */
 #define NREG  8                 /* extra memory regions per process */
-enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE };
+enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE, P_MSG };
 struct proc {                   /* start.S relies on the first three: */
     u32 *ksp;                   /*   offset 0 */
     u32 usp;                    /*   offset 4 */
@@ -181,6 +181,8 @@ struct proc {                   /* start.S relies on the first three: */
     char cwd[96];
     struct file *fd[NFD];
     int killed;
+    struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
+    int wait_port;              /* P_MSG as a server: port being listened on */
     char name[16];
 };
 extern struct proc procs[NPROC];
@@ -198,6 +200,28 @@ void wake_io(void);
 void block_io(void);
 void proc_kill(struct proc *p);
 struct proc *proc_by_pid(int pid);
+
+/* ipc.c: ports and messages. A message lives in the sender's memory; only
+ * pointers move (no MMU, so the server reads and writes the client's
+ * buffers directly). The sender is blocked until the server replies. */
+#define NPORT 16
+#define MSG_QUEUED  1
+#define MSG_SERVING 2
+#define MSG_DONE    3
+struct umsg {
+    struct umsg *next;          /* kernel: queue link */
+    int from, server;           /* kernel: client pid, serving pid */
+    u32 state;                  /* kernel: MSG_* */
+    s32 result;                 /* set by the server's reply */
+    u32 type;
+    u32 a[4];                   /* arguments, free use */
+};
+int port_create(const char *name, int owner);
+int port_find(const char *name);
+long ipc_call(int port, struct umsg *m);
+struct umsg *ipc_recv(int port, int wait);
+long ipc_reply(struct umsg *m, s32 result);
+void ipc_proc_exit(int pid);
 
 /* vfs.c */
 struct file *file_new(int type);
@@ -254,6 +278,11 @@ int tty_of(const struct proc *p);
 #define SYS_unlink  26
 #define SYS_rmdir   27
 #define SYS_rename  28
+#define SYS_port_create 29
+#define SYS_port_find   30
+#define SYS_call        31
+#define SYS_recv        32
+#define SYS_reply       33
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

@@ -1,0 +1,11 @@
+sleep 22
+send pingd &\r
+sleep 2
+send ps\r
+sleep 2
+send ping 2000\r
+sleep 8
+send ps\r
+sleep 2
+send ping\r
+sleep 2

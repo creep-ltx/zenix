@@ -222,7 +222,8 @@ void block_io(void)
 void proc_kill(struct proc *p)
 {
     p->killed = 1;
-    if (p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT)
+    if (p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
+        (p->state == P_MSG && !p->wait_msg))        /* a server in recv, not a client in call */
         p->state = P_READY;
 }
 
@@ -243,6 +244,7 @@ void proc_exit(int code)
     if (par && par->state == P_WAIT &&
         (par->wait_for == -1 || par->wait_for == p->pid))
         par->state = P_READY;
+    ipc_proc_exit(p->pid);
     wake_io();
     schedule();
     for (;;)
