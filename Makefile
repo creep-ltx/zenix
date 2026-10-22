@@ -16,7 +16,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
           head tail sort uniq cut tr tee seq basename dirname yes sleep true false env printenv which clear \
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
-          sed diff chmod ln readlink date less edit
+          sed diff chmod ln readlink date less edit man
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 # programs that need more than the default 16 KB stack
@@ -105,7 +105,7 @@ $(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py
 	tools/mkzexe.py $< $@ 16384
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
-$(BUILD)/zenix.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
+$(BUILD)/zenix.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
 	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)"
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
