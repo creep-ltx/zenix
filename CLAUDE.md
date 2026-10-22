@@ -7,8 +7,10 @@ current work list), then `docs/architecture.md` for the part you touch.
 ## The owner
 - Not a programmer: explain in plain words, make the technical calls yourself, ask only about what Zenix should *be*.
 - Often on the phone. Short status lines, no walls of text.
-- Owns one Amiga: an A1200 with a PiStorm (Emu68 on a CM4) and a Gotek. That is the machine Zenix must come alive
-  on. Nothing has run on it yet; real-hardware time is scarce, so every build sent there must be ready for it.
+- Owns one Amiga: an A1200 with a PiStorm32-lite (Emu68 on a CM4) and a Gotek. **That machine is THE target until
+  Zenix is stable and usable there (owner, 2026-10-22); other platforms come after.** Order audit fixes by what
+  matters on it first. Nothing has run on it yet; real-hardware time is scarce, so every build sent there must be
+  ready for it.
 
 ## Current focus (2026-10-22): hardening, then the first real boot
 **FEATURE HALT (decided by the owner, 2026-10-22): no new features - no new commands, system calls, drivers,
