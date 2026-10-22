@@ -169,7 +169,7 @@ int main(int argc, char **argv)
     zenixfs_set_time(fs, (uint64_t)time(NULL));
     int rc = 0;
     struct zenixfs_stats ms; zenixfs_get_stats(fs, &ms);
-    if (ms.mount_damage) fprintf(stderr, "zenixfs-tool: WARNING: %u damaged commit record(s) or root(s) at mount; the volume was mounted from an OLDER commit, recent changes may be lost\n", ms.mount_damage);
+    if (ms.mount_damage) fprintf(stderr, "zenixfs-tool: WARNING: %u commit record(s) or root(s) were unreadable at mount (damage, or a write that was interrupted); the volume was mounted from the last good commit, the newest changes may be missing\n", ms.mount_damage);
     if (!strcmp(cmd, "info")) {
         struct zenixfs_statfs st; zenixfs_statfs(fs, &st);
         printf("ZenixFS: block size %u, %u blocks (%.1f MB), %u free blocks (%.1f MB usable), %u inodes used, names %s\n", st.bsize, st.blocks, (double)st.blocks * st.bsize / 1048576.0,

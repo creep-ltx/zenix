@@ -174,7 +174,7 @@ int main(int argc, char **argv)
     }
     if (!ok) { fprintf(stderr, "zenixfs-fuse: %s is not a ZenixFS image (or it is damaged)\n", path); return 1; }
     struct zenixfs_stats ms; zenixfs_get_stats(fs, &ms);
-    if (ms.mount_damage) fprintf(stderr, "zenixfs-fuse: WARNING: %u damaged commit record(s) at mount; mounted from an OLDER commit\n", ms.mount_damage);
+    if (ms.mount_damage) fprintf(stderr, "zenixfs-fuse: WARNING: %u commit record(s) were unreadable at mount (damage, or an interrupted write); mounted from the last good commit\n", ms.mount_damage);
     char **fargv = malloc((argc + 2) * sizeof *fargv); int fa = 0;
     fargv[fa++] = argv[0];
     for (int i = 2; i < argc; i++) fargv[fa++] = argv[i];

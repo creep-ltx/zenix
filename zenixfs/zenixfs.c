@@ -660,7 +660,13 @@ int zenixfs_mount(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t cache_
         gens[s] = 0;
         if (dev->read(dev->ctx, 1 + s, recs + (size_t)s * B) < 0) continue;
         if (verify(recs + (size_t)s * B, B, T_COMMIT, 1 + s)) gens[s] = rd64(recs + (size_t)s * B + 16);
-        else if (rd16(recs + (size_t)s * B + 4) == MAGIC16) fs->st.mount_damage++;   /* written once, now damaged */
+        else {                                              /* never written slots are all zero; anything else that fails is damage
+                                                             * (or an interrupted write of the newest commit) */
+            const u8 *q = recs + (size_t)s * B;
+            u32 nz = 0;
+            for (u32 i = 0; i < B; i++) nz |= q[i];
+            if (nz) fs->st.mount_damage++;
+        }
     }
     int ok = 0;
     for (int tries = 0; tries < RING && !ok; tries++) {
