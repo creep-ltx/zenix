@@ -53,7 +53,8 @@ where a command is smaller than its Unix namesake.
 ## How the pages get onto the system
 `docs/man/` is the one place for manual pages. `tools/mkroot.sh` copies every `docs/man/*.txt` to `/usr/man` on the
 root disk it builds; for a program that has no page there, `tools/mkman.py` still makes a minimal one from the
-comment at the top of the program's source. `man -k` reads only the first 2 KB of each page.
+comment at the top of the program's source. The small RAM-disk image (`zenix-ram.adf`, the install/test floppy) is
+built with `NOMAN=1` and carries no manual pages. `man -k` reads only the first 2 KB of each page.
 
 ## Keeping this in step with the code
 Adding or changing a command means changing its page in the same commit. The rule and the check

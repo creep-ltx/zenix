@@ -11,11 +11,13 @@ for p in $PROGS; do
     cp "$B/$p.zx" "$T/bin/$name"
     chmod 755 "$T/bin/$name"
 done
-mkdir -p "$T/usr/man"
-cp "$(dirname "$0")/../docs/man/"*.txt "$T/usr/man/"      # the manual pages live in docs/man
-python3 "$(dirname "$0")/mkman.py" "$T/usr/man.gen" $PROGS
-for f in "$T"/usr/man.gen/*.txt; do b=$(basename "$f"); [ -e "$T/usr/man/$b" ] || cp "$f" "$T/usr/man/$b"; done
-rm -rf "$T/usr/man.gen"
+if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small install / test images)
+    mkdir -p "$T/usr/man"
+    cp "$(dirname "$0")/../docs/man/"*.txt "$T/usr/man/"      # the manual pages live in docs/man
+    python3 "$(dirname "$0")/mkman.py" "$T/usr/man.gen" $PROGS
+    for f in "$T"/usr/man.gen/*.txt; do b=$(basename "$f"); [ -e "$T/usr/man/$b" ] || cp "$f" "$T/usr/man/$b"; done
+    rm -rf "$T/usr/man.gen"
+fi
 ln -s less "$T/bin/more"
 ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"            # more is less
 rm -f "$OUT"
