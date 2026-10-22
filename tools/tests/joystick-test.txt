@@ -1,0 +1,3 @@
+sleep 22
+send input -w 16\r
+sleep 22

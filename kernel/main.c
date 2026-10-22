@@ -92,6 +92,8 @@ void irq2_c(u32 sr)
         kbd_isr();
     if (icr & 1) {
         ticks++;
+        audio_tick();
+        input_poll();
         if (ticks % 100 == 0)
             bar_draw();
         sched_tick((u16)sr);
@@ -192,15 +194,23 @@ void kmain(struct bootinfo *bi)
                 hwi->genet, hwi->gic_dist, hwi->gic_cpu);
     }
 
+    if (hwi->magic == HWINFO_MAGIC)
+        for (u32 i = 0; i < hwi->nboards && i < HW_MAXBOARDS; i++) {
+            const struct hwboard *b = &hwi->board[i];
+            kprintf("zorro: %u: manufacturer %x product %u at %p, %u KB%s%s\n", i, b->manufacturer, b->product,
+                    b->addr, b->size / 1024, (b->type & 0x20) ? ", RAM" : "", (b->type & 0xC0) == 0x80 ? ", Zorro III" : "");
+        }
+
     int font_ok = gfx_font_init(bi->font) == 0;     /* before mem_init: OS leftovers */
     vectors_init();
     mem_init(bi, bi->kernel_pa, *(u32 *)(bi->kernel_pa + 12));
     mem_selftest();
     cache_enable((bi->attn & 0x88) != 0);       /* 68040 or 68060 */
     kprintf("cache: instruction cache on (data cache off: no MMU to keep DMA coherent)\n");
-    if (font_ok && gfx_init() == 0)
+    if (font_ok && gfx_init() == 0) {
+        klog_to_screen();                       /* the boot messages so far, then the rest as they come */
         kprintf("display: 640x256, 1 bitplane, Copper split bar + text, ROM Topaz 8\n");
-    else
+    } else
         kprintf("display: not available (%s), serial only\n",
                 font_ok ? "out of chip RAM" : "no ROM font");
 
@@ -219,6 +229,8 @@ void kmain(struct bootinfo *bi)
         panic("cannot start the filesystem server");
     kprintf("proc: diskd %d, fsd %d, boot %d (it starts /bin/init)\n", dpid, fpid, pid);
 
+    input_init();
+    klog_mirror_off();                          /* from here the screen belongs to the programs */
     timer_init();
     ints_on();
     bar_draw();

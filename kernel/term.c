@@ -387,7 +387,7 @@ static void put1(struct term *t, int vis, u8 ch)
     case '\r': t->cx = 0; t->wrap = 0; return;
     case '\b': if (t->cx) t->cx--; t->wrap = 0; return;
     case '\t': t->cx = (t->cx + 8) & ~7; if (t->cx >= COLS) t->cx = COLS - 1; t->wrap = 0; return;
-    case 7: return;                                     /* bell */
+    case 7: beep(880, 80); return;                      /* bell */
     }
     if (ch < 32)
         return;
@@ -418,6 +418,12 @@ void term_write(int w, const char *s, u32 n)
         put1(t, vis, (u8)s[i]);
     if (vis)
         cursor(t, 1);
+}
+
+/* kernel log text onto the visible workspace (kprintf mirror during boot) */
+void term_log(const char *s, u32 n)
+{
+    term_write(ws_cur, s, n);
 }
 
 void term_putc(int w, char c)

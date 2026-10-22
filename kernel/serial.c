@@ -103,12 +103,68 @@ void serial_puts(const char *s)
         serial_putc(*s++);
 }
 
+/* The kernel log: everything kprintf prints is also kept in a ring, for the `dmesg` command and so that the boot
+ * messages can be shown on the screen later (the display comes up after the first messages). While "mirror" is
+ * on, kprintf output also goes to the visible workspace; kmain switches it off when the boot is finished. */
+#define KLOG_SIZE 8192
+static char klog[KLOG_SIZE];
+static u32 klog_total;                  /* characters ever logged: the ring holds the last KLOG_SIZE of them */
+static int klog_mirror;
+
+static void kputc(char c)
+{
+    klog[klog_total++ % KLOG_SIZE] = c;
+    serial_putc(c);
+    if (klog_mirror) {
+        if (c == '\n')
+            term_log("\r", 1);
+        term_log(&c, 1);
+    }
+}
+
+static void kputs(const char *s)
+{
+    while (*s)
+        kputc(*s++);
+}
+
+/* copy up to n logged characters starting at position "off" (0 = the first ever); positions that have
+ * scrolled out of the ring start at the oldest one still held. Returns the count; 0 = no more yet. */
+u32 klog_read(u32 off, char *buf, u32 n)
+{
+    u32 oldest = klog_total > KLOG_SIZE ? klog_total - KLOG_SIZE : 0;
+    if (off < oldest)
+        off = oldest;
+    u32 got = 0;
+    while (got < n && off + got < klog_total) {
+        buf[got] = klog[(off + got) % KLOG_SIZE];
+        got++;
+    }
+    return got;
+}
+
+/* the display is up: show what was logged so far, and keep showing new messages */
+void klog_to_screen(void)
+{
+    char c;
+    u32 oldest = klog_total > KLOG_SIZE ? klog_total - KLOG_SIZE : 0;
+    for (u32 i = oldest; i < klog_total; i++) {
+        c = klog[i % KLOG_SIZE];
+        if (c == '\n')
+            term_log("\r", 1);
+        term_log(&c, 1);
+    }
+    klog_mirror = 1;
+}
+
+void klog_mirror_off(void) { klog_mirror = 0; }
+
 static void putnum(u32 v, u32 base, int sign)
 {
     char buf[12];
     int i = 0;
     if (sign && (s32)v < 0) {
-        serial_putc('-');
+        kputc('-');
         v = (u32)-(s32)v;
     }
     do {
@@ -117,7 +173,7 @@ static void putnum(u32 v, u32 base, int sign)
         v /= base;
     } while (v);
     while (i--)
-        serial_putc(buf[i]);
+        kputc(buf[i]);
 }
 
 void kprintf(const char *fmt, ...)
@@ -126,18 +182,18 @@ void kprintf(const char *fmt, ...)
     va_start(ap, fmt);
     for (; *fmt; fmt++) {
         if (*fmt != '%') {
-            serial_putc(*fmt);
+            kputc(*fmt);
             continue;
         }
         switch (*++fmt) {
-        case 'c': serial_putc((char)va_arg(ap, int)); break;
-        case 's': serial_puts(va_arg(ap, const char *)); break;
-        case 'p': serial_puts("0x"); /* fall through */
+        case 'c': kputc((char)va_arg(ap, int)); break;
+        case 's': kputs(va_arg(ap, const char *)); break;
+        case 'p': kputs("0x"); /* fall through */
         case 'x': putnum(va_arg(ap, u32), 16, 0); break;
         case 'u': putnum(va_arg(ap, u32), 10, 0); break;
         case 'd': putnum(va_arg(ap, u32), 10, 1); break;
-        case '%': serial_putc('%'); break;
-        default:  serial_putc('?'); break;
+        case '%': kputc('%'); break;
+        default:  kputc('?'); break;
         }
     }
     va_end(ap);

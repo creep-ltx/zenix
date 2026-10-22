@@ -1,0 +1,26 @@
+BEEP(1)				Zenix manual
+
+NAME
+    beep - ring the terminal bell
+
+SYNOPSIS
+    beep
+
+DESCRIPTION
+    Writes the bell character (BEL, control-G) to standard output. The
+    terminal answers with a short tone from Paula, the Amiga's sound chip
+    (880 Hz, 80 ms, both channels, a quarter of full volume). Any program
+    that prints BEL does the same.
+    The first beep after boot logs one line in the kernel log (see dmesg)
+    that says whether the sound hardware reacted; this is the check on a
+    machine where the tone cannot be heard.
+
+EXIT STATUS
+    Always 0.
+
+NOTES
+    Not done: choosing pitch or length, other sounds, a sound server.
+    The pitch is calculated for a PAL clock.
+
+SEE ALSO
+    dmesg(1), docs/architecture.md

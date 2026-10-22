@@ -70,8 +70,33 @@ the `ranges` of the device-tree nodes `/soc` and `/scb` so each window gets the 
 rewritten `ranges` and stores, in `struct hwinfo` at `0x1100`: flags (`HW_DT` under Emu68, `HW_BCM2711` on a
 Pi 4/CM4, `HW_RANGEOPS` if Emu68 has the cache range opcodes), the peripheral base, mailbox, EMMC2 (SD), GPIO,
 GENET Ethernet (registers, two GIC interrupt numbers, PHY address, MAC), GIC-400 distributor and CPU interface,
-and the graphics memory Emu68 reserved. On a machine without Emu68 (or FS-UAE) the table is present with
-`flags == 0` and all addresses 0; `kmain` prints it (`pi: ...`).
+and the graphics memory Emu68 reserved. It also holds the **Zorro boards** AmigaOS configured (up to 16: manufacturer,
+product, type, serial number, base address, size), copied from `expansion.library`'s ConfigDev list with
+`FindConfigDev`; that works on every Amiga, with or without Emu68, and is how a future Zorro card driver finds its
+card without any autoconfig code of its own. On a machine without Emu68 (or FS-UAE) the Pi part of the table is
+empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and the boards (`zorro: ...`).
+
+### Kernel log (`kernel/serial.c`, `dmesg`)
+
+`kprintf` writes to the serial port and into an 8 KB ring. When the display comes up (`gfx_init`), `kmain` writes the
+ring to the visible workspace and mirrors new `kprintf` output there until the boot is finished (`klog_mirror_off`
+just before the scheduler starts), so the boot messages - including every driver's init log - are on the screen of
+a machine with no serial cable (scroll back with Shift+Up). `SYS_klog` (73: offset, buffer, length) reads the ring;
+`dmesg` prints it.
+
+### Sound (`kernel/audio.c`)
+
+`beep(hz, ms)` plays a 32-byte square wave from chip RAM on Paula channels 0 and 1 (AUDxLC/LEN/PER/VOL, DMACON
+enable) and stops it from the 100 Hz tick. The terminal calls it for BEL (0x07). It is the only sound use so far:
+no sample playback, no mixing. The first beep logs whether channel 0 raised its end-of-sample flag (it can be
+checked without hearing it).
+
+### Mouse and joystick (`kernel/input.c`)
+
+Polled from the 100 Hz tick: JOY0DAT's two 8-bit counters give mouse movement (accumulated until read, so nothing is
+lost between reads), CIA-A port A bits 6 and 7 the left button and the joystick fire button, POTGOR the right and
+middle buttons; a joystick in port 2 is decoded from JOY1DAT. `SYS_input` (74) copies out
+{dx, dy, buttons, joystick} and clears the movement; `input` prints it. No pointer, no events yet.
 
 ### SD card driver (`kernel/emmc.c`)
 

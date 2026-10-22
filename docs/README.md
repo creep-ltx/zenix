@@ -8,6 +8,7 @@
 | [vs-unix-linux.md](vs-unix-linux.md) | Zenix next to Unix and Linux (and no-MMU Linux, Fuzix, Minix 3, QNX): where it behaves like a Unix and where it cannot. |
 | [commands.md](commands.md) | Reference for every command: what it does, how to use it, its options (manual pages in `man/`, ready for `man`). |
 | [features.md](features.md) | The one list of what Zenix can do, with its status (verified / planned). Kept in step with the code. |
+| [pi-first-boot.md](pi-first-boot.md) | How to try Zenix on a PiStorm A1200 for the first time, what the boot messages should say and what to report. |
 | [limits.md](limits.md) | What is missing, what is unmeasured, and the honest no-MMU limit. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
 | [zenixfs.md](zenixfs.md) | ZenixFS, the native filesystem: the design and its status (format in [zenixfs-format.md](zenixfs-format.md)). |

@@ -1,0 +1,5 @@
+sleep 24
+send dmesg\r
+sleep 3
+send dmesg | wc\r
+sleep 3
