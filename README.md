@@ -22,6 +22,11 @@ Status (2026-10-22, all *verified in FS-UAE* as a stock A1200 - 68EC020, no MMU 
 Not done: unlinking a file that is still open (frees at once), moving directories between parents, triple-indirect files, a graphical programs API, mouse, sound, network, real
 hardware, 68000 (not a target), MMU use. See DESIGN.md.
 
+Images: `build/zenix.adf` (the standard floppy: bootblock + kernel only; the root filesystem is on the IDE disk,
+`build/zenix.hdf` or `zenix-rdb.hdf`) and `build/zenix-ram.adf` (development/test only: also carries a small root
+filesystem that is loaded into RAM, for machines without an IDE disk, e.g. a Gotek boot).
+Long-term plan and principles: docs/ROADMAP.md. Native filesystem idea: docs/zenfs.md.
+
 Build and test: `make` (needs ~/opt/m68k-elf, mke2fs), `make test` (headless serial log),
 `tools/shot.py` (screenshots in a private invisible Wayland session; build with `make DIWV=0x38` because
 FS-UAE crops the top display lines), `tools/run-test.sh` with `tools/shell-test.txt`.

@@ -9,7 +9,7 @@ CONFS="$*"
 [ -z "$CONFS" ] && CONFS="$(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##')"
 for n in $CONFS; do
     f=fsuae/$n.fs-uae; [ -f "$f" ] || f=fsuae/matrix/$n.fs-uae
-    rm -f build/zenix.hdf build/zenix-rdb.hdf; make -s build/zenix.hdf build/zenix-rdb.hdf >/dev/null 2>&1
+    rm -f build/zenix.hdf build/zenix-rdb.hdf; make -s build/zenix.hdf build/zenix-rdb.hdf build/zenix-ram.adf >/dev/null 2>&1
     tools/run-test.sh "$f" 60 tools/matrix-test.txt > $OUT/$n.log 2>&1
     if [ "$n" = a600-68000 ]; then
         grep -q 'needs a 68020' $OUT/$n.log && echo "PASS $n (refuses cleanly)" || echo "FAIL $n"
