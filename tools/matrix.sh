@@ -18,7 +18,7 @@ for n in $CONFS; do
     ok=1
     for want in 'M0 ok' ; do :; done
     grep -q 'display: 640x256' $OUT/$n.log || ok=0
-    grep -q '^4 15 85' $OUT/$n.log || ok=0
+    grep -q '^ *4 *15 *85$' $OUT/$n.log || ok=0
     grep -q '^ok$' $OUT/$n.log || ok=0
     grep -q 'hello from pid' $OUT/$n.log || ok=0
     grep -q 'killed' $OUT/$n.log || ok=0

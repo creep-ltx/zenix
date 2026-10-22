@@ -116,6 +116,26 @@ static int handle(struct umsg *m)
     }
     case FS_SYNC:
         return 0;                                     /* writes go straight to the disk */
+    case FS_CHMOD:
+        if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
+        return ext2_chmod(in.ino, m->a[2]);
+    case FS_UTIMES:
+        if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
+        return ext2_utimes(in.ino, m->a[2]);
+    case FS_LSTAT:
+        if (ext2_namei_ex((const char *)m->a[0], m->a[1], &in, 0, 0)) return -1;
+        fill_stat(&in, (struct ustat *)m->a[2]);
+        return 0;
+    case FS_LINK:
+        if (ext2_namei((const char *)m->a[0], m->a[2], &in, 0) || S_ISDIR(in.mode)) return -1;
+        if (parent((const char *)m->a[1], m->a[2], &dir, name)) return -1;
+        return ext2_hardlink(&dir, name, in.ino);
+    case FS_SYMLINK:
+        if (parent((const char *)m->a[1], m->a[2], &dir, name)) return -1;
+        return ext2_symlink(&dir, name, (const char *)m->a[0]);
+    case FS_READLINK:
+        if (ext2_namei_ex((const char *)m->a[0], m->a[1], &in, 0, 0) || !S_ISLNK(in.mode)) return -1;
+        return ext2_readlink(&in, (char *)m->a[2], m->a[3]);
     case FS_CHDIR:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0) || !S_ISDIR(in.mode)) return -1;
         return (int)in.ino;

@@ -1,4 +1,5 @@
 #include "kernel.h"
+#include "fsproto.h"
 
 /* copy a NUL-terminated string from user memory, bounds-checked */
 static int copy_str(char *dst, u32 uptr, u32 max)
@@ -226,6 +227,40 @@ void syscall_c(u32 *rb)
         break;
     case SYS_ttyintr:
         r = tty_take_intr(tty_of(current));
+        break;
+    case SYS_chmod: case SYS_utimes: {
+        char path[64];
+        if (!copy_str(path, a1, sizeof path))
+            r = (s32)vfs_path1(rb[0] == SYS_chmod ? FS_CHMOD : FS_UTIMES, path, a2, 0);
+        break;
+    }
+    case SYS_lstat: {
+        char path[64];
+        if (!copy_str(path, a1, sizeof path) && user_ok(current, a2, sizeof(struct ustat)))
+            r = (s32)vfs_path1(FS_LSTAT, path, a2, 0);
+        break;
+    }
+    case SYS_readlink: {
+        char path[64];
+        if (!copy_str(path, a1, sizeof path) && user_ok(current, a2, a3))
+            r = (s32)vfs_path1(FS_READLINK, path, a2, a3);
+        break;
+    }
+    case SYS_link: case SYS_symlink: {
+        char p1[64], p2[64];
+        if (!copy_str(p1, a1, sizeof p1) && !copy_str(p2, a2, sizeof p2))
+            r = (s32)vfs_link(rb[0] == SYS_link ? FS_LINK : FS_SYMLINK, p1, p2);
+        break;
+    }
+    case SYS_time:
+        r = (s32)(time_base + ticks / 100);
+        break;
+    case SYS_settime:
+        time_base = a1 - ticks / 100;
+        r = 0;
+        break;
+    case SYS_isatty:
+        r = (f = getfd(a1)) && f->type == FT_TTY;
         break;
     case SYS_hrtime:
         r = (s32)hr_time();

@@ -15,7 +15,6 @@
 
 #define E_HZ 0
 typedef unsigned char u8;
-#define MAXTOK 600
 
 /* ---------------------------------------------------------------- output */
 static void outs(const char *s) { sys_write(1, s, strlen(s)); }
@@ -25,7 +24,7 @@ static void errm(const char *a, const char *b) { errs("sh: "); errs(a); if (b) {
 /* ---------------------------------------------------------------- arena
  * Everything a command line needs (tokens, tree, expansions) comes from one
  * region that is reset after each line. */
-#define ARENA 98304
+#define ARENA 262144
 static char *arena, *abrk, *aend;
 static void fatal(const char *m) { errm(m, 0); sys_exit(2); }
 static void *aalloc(u32 n)
@@ -351,8 +350,8 @@ static int readline(const char *prompt, int plen, char *buf, int max)
 /* ================================================================ lexer */
 enum { T_WORD, T_OP, T_NL };
 struct tok { u8 type, fd, hdquoted; char op[4]; char *text; u32 start, end; char *heredoc; };
-static struct tok toks[MAXTOK];
-static int ntoks, ti;
+static struct tok *toks;
+static int ntoks, ti, tokcap;
 static const char *lex_src;
 static int lex_incomplete;
 static char *perr;
@@ -402,7 +401,12 @@ static int word_end(const char *s, int i)
 
 static void new_tok(int type, u32 start, u32 end)
 {
-    if (ntoks >= MAXTOK) fatal("line too complex");
+    if (ntoks >= tokcap) {                              /* grow: the token list is as long as the script needs */
+        int nc = tokcap ? tokcap * 2 : 256;
+        struct tok *nt = aalloc((u32)nc * sizeof(struct tok));
+        if (ntoks) memcpy(nt, toks, (u32)ntoks * sizeof(struct tok));
+        toks = nt; tokcap = nc;
+    }
     struct tok *t = &toks[ntoks++];
     memset(t, 0, sizeof *t);
     t->type = (u8)type; t->start = start; t->end = end; t->fd = 255;
@@ -412,7 +416,7 @@ static void new_tok(int type, u32 start, u32 end)
 static int lex(const char *s)
 {
     int i = 0, pend[8], npend = 0;
-    lex_src = s; ntoks = 0; ti = 0; lex_incomplete = 0;
+    lex_src = s; ntoks = 0; ti = 0; lex_incomplete = 0; toks = 0; tokcap = 0;
     while (s[i]) {
         char c = s[i];
         if (c == ' ' || c == '\t') { i++; continue; }
@@ -1501,7 +1505,7 @@ static void set_pwd(const char *old)
 /* ---- test / [ ---- */
 static char **t_a; static int t_n, t_i;
 static int t_expr(void);
-static int t_isunary(const char *s) { return s[0] == '-' && s[1] && !s[2] && strchr("efdrwxszn", s[1]); }
+static int t_isunary(const char *s) { return s[0] == '-' && s[1] && !s[2] && strchr("efdrwxsznLh", s[1]); }
 static int t_isbin(const char *s) { return !strcmp(s, "=") || !strcmp(s, "==") || !strcmp(s, "!=") || !strcmp(s, "-eq") || !strcmp(s, "-ne") || !strcmp(s, "-lt") || !strcmp(s, "-le") || !strcmp(s, "-gt") || !strcmp(s, "-ge"); }
 static int t_primary(void)
 {
@@ -1521,7 +1525,10 @@ static int t_primary(void)
         case 'e': return sys_stat(a, &st) == 0;
         case 'f': return sys_stat(a, &st) == 0 && (st.mode & S_IFMT) == S_IFREG;
         case 'd': return sys_stat(a, &st) == 0 && (st.mode & S_IFMT) == S_IFDIR;
-        case 'r': case 'w': case 'x': return sys_stat(a, &st) == 0;
+        case 'r': return sys_stat(a, &st) == 0 && (st.mode & 0444);
+        case 'w': return sys_stat(a, &st) == 0 && (st.mode & 0222);
+        case 'x': return sys_stat(a, &st) == 0 && (st.mode & 0111);
+        case 'L': case 'h': return sys_lstat(a, &st) == 0 && (st.mode & S_IFMT) == S_IFLNK;
         case 's': return sys_stat(a, &st) == 0 && st.size > 0;
         case 'z': return *a == 0;
         case 'n': return *a != 0;

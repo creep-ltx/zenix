@@ -41,6 +41,20 @@ Bootblock, serial console, kmalloc, Gayle IDE, RDB partitions, FAT16 (optional m
 syscall idea, build and FS-UAE setup. **Rewritten:** process switching (shared memory map), loader
 (relocatable), exception handling. **Dropped:** 68030 MMU, per-process address spaces, mandatory FPU.
 
+## D8. Multi-user (decided 2026-10-22, to be built right after the terminal command batch)
+Zenix is multi-user from the start of the terminal phase, as a Unix expects, with one honest limit: **no MMU means no
+security boundary** - any program can read or write any memory and touch the hardware. Users, groups and permissions
+therefore give accounting, separation of home directories and protection against honest mistakes, not protection
+against a program written to cheat (the same trust level as AmigaOS). The docs must say so.
+- A user id and group id (and supplementary groups later) on every process, inherited by children; calls getuid,
+  geteuid, getgid, setuid (root, or back to the real id), setgid, umask.
+- The kernel passes the caller's ids to the filesystem server in every request; the server checks owner/group/other
+  r/w/x on lookup, open, create, unlink, rename, chdir and exec; root bypasses. New files get the caller's ids and
+  mode & ~umask. ext2 already stores uid, gid and mode.
+- /etc/passwd, /etc/group (plain text, no shadow file until there is something to protect), `login`, `su`, `id`,
+  `whoami`, `chown`, `chgrp`, `umask`, `passwd`; a home directory per user; each workspace may hold a different login.
+- The shell prompt shows `$` for a normal user and `#` for root (it already does, from $USER).
+
 ## Where the decisions stand (2026-10-22)
 D1 messages: ports + synchronous zero-copy calls done; the filesystem is a server (fsd, built into the kernel image, user mode, raw-disk syscalls only for it). tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).

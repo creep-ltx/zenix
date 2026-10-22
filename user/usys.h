@@ -87,3 +87,12 @@ static inline int sys_envget(char *block, u32 max) { return sys3(48, (u32)block,
 static inline int sys_dup(int fd) { return sys3(49, (u32)fd, 0, 0); }
 static inline int sys_dup2(int from, int to) { return sys3(50, (u32)from, (u32)to, 0); }
 static inline int sys_ttyintr(void) { return sys3(51, 0, 0, 0); }
+static inline int sys_chmod(const char *p, u32 mode) { return sys3(52, (u32)p, mode, 0); }
+static inline int sys_link(const char *a, const char *b) { return sys3(53, (u32)a, (u32)b, 0); }
+static inline int sys_symlink(const char *t, const char *p) { return sys3(54, (u32)t, (u32)p, 0); }
+static inline int sys_readlink(const char *p, char *buf, u32 max) { return sys3(55, (u32)p, (u32)buf, max); }
+static inline int sys_utimes(const char *p, u32 t) { return sys3(56, (u32)p, t, 0); }
+static inline int sys_lstat(const char *p, struct ustat *st) { return sys3(57, (u32)p, (u32)st, 0); }
+static inline u32 sys_time(void) { return (u32)sys3(58, 0, 0, 0); }
+static inline int sys_settime(u32 t) { return sys3(59, t, 0, 0); }
+static inline int sys_isatty(int fd) { return sys3(60, (u32)fd, 0, 0); }

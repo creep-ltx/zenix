@@ -225,6 +225,18 @@ long vfs_statfs(void *out)
     return fs_call(FS_STATFS, (u32)out, 0, 0, 0);
 }
 
+long vfs_path1(u32 op, const char *p, u32 a2, u32 a3)
+{
+    if (op == FS_READLINK)
+        return fs_call(op, (u32)p, current->cwd_ino, a2, a3);
+    return fs_call(op, (u32)p, current->cwd_ino, a2, 0);
+}
+
+long vfs_link(u32 op, const char *a, const char *b)
+{
+    return fs_call(op, (u32)a, (u32)b, current->cwd_ino, 0);
+}
+
 long vfs_sync(void)
 {
     return fs_call(FS_SYNC, 0, 0, 0, 0);

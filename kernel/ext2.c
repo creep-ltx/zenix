@@ -291,8 +291,26 @@ int ext2_lookup(const struct inode *dir, const char *name, u32 len, u32 *ino)
     return -1;
 }
 
-/* resolve a path; cwd is the starting inode for relative paths */
-int ext2_namei(const char *path, u32 cwd, struct inode *out, int depth)
+/* the bytes of a fast symbolic link (up to 59 characters stored in the inode's block array) */
+static void fast_link_bytes(const struct inode *in, char *out, u32 n)
+{
+    for (u32 i = 0; i < n; i++)
+        out[i] = (char)(in->block[i / 4] >> (8 * (i % 4)));    /* the on-disk bytes are little-endian words */
+}
+
+/* the target of a symbolic link inode into buf (max bytes, no NUL); returns its length */
+int ext2_readlink(const struct inode *in, char *buf, u32 max)
+{
+    u32 n = in->size < max ? in->size : max;
+    if (in->size < 60 && in->nblocks == 0)
+        fast_link_bytes(in, buf, n);
+    else if (ext2_read(in, 0, buf, n) != (int)n)
+        return -1;
+    return (int)n;
+}
+
+/* resolve a path; cwd is the starting inode; follow_last: a final symbolic link is followed */
+int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int follow_last)
 {
     u32 cur = (path[0] == '/') ? 2 : cwd;
     struct inode in;
@@ -314,29 +332,33 @@ int ext2_namei(const char *path, u32 cwd, struct inode *out, int depth)
         struct inode nin;
         if (ext2_iget(next, &nin))
             return -1;
-        if (S_ISLNK(nin.mode)) {
+        const char *rest = e;
+        while (*rest == '/')
+            rest++;
+        if (S_ISLNK(nin.mode) && (*rest || follow_last)) {
             char target[256];
-            u32 n = nin.size < 255 ? nin.size : 255;
-            if (nin.size < 60) {
-                memcpy(target, nin.block, n);   /* fast symlink: in the inode */
-            } else if (ext2_read(&nin, 0, target, n) != (int)n) {
+            int n = ext2_readlink(&nin, target, 255);
+            if (n < 0)
                 return -1;
-            }
             target[n] = 0;
             struct inode t;
-            if (ext2_namei(target, in.ino, &t, depth + 1))
+            if (ext2_namei_ex(target, in.ino, &t, depth + 1, 1))
                 return -1;
             nin = t;
         }
         in = nin;
         path = e;
-        if (*path && !S_ISDIR(in.mode))
+        if (*rest && !S_ISDIR(in.mode))
             return -1;
     }
     *out = in;
     return 0;
 }
 
+int ext2_namei(const char *path, u32 cwd, struct inode *out, int depth)
+{
+    return ext2_namei_ex(path, cwd, out, depth, 1);
+}
 
 /* ================= writing ================= */
 
@@ -345,7 +367,7 @@ static inline void wr16(u8 *p, u16 v) { *(u16 *)p = le16(v); }
 
 static u32 fs_now(void)
 {
-    return boot_time + fs_ticks() / 100;
+    return fs_time();
 }
 
 /* group descriptor field helpers: field at byte `f` of descriptor g */
@@ -833,6 +855,72 @@ int ext2_rmdir(struct inode *dir, const char *name)
 }
 
 /* rename within the filesystem: files anywhere, directories only inside one parent */
+int ext2_chmod(u32 ino, u32 mode)
+{
+    struct inode in;
+    if (ext2_iget(ino, &in))
+        return -1;
+    in.mode = (u16)((in.mode & S_IFMT) | (mode & 07777));
+    return ext2_iput(&in);
+}
+
+int ext2_utimes(u32 ino, u32 t)
+{
+    struct inode in;
+    if (ext2_iget(ino, &in))
+        return -1;
+    in.mtime = t;
+    return ext2_iput(&in);
+}
+
+/* a hard link: another name for an existing (non-directory) inode */
+int ext2_hardlink(struct inode *dir, const char *name, u32 ino)
+{
+    struct inode in;
+    u32 tmp;
+    if (ext2_lookup(dir, name, strlen_(name), &tmp) == 0)
+        return -2;
+    if (ext2_iget(ino, &in) || S_ISDIR(in.mode) || in.links >= 65000)
+        return -1;
+    in.links++;
+    if (ext2_iput(&in))
+        return -1;
+    if (dir_add(dir, name, strlen_(name), ino)) {
+        in.links--;
+        ext2_iput(&in);
+        return -1;
+    }
+    return 0;
+}
+
+int ext2_symlink(struct inode *dir, const char *name, const char *target)
+{
+    struct inode in;
+    u32 tmp, len = strlen_(target);
+    if (ext2_lookup(dir, name, strlen_(name), &tmp) == 0)
+        return -2;
+    if (len == 0 || len > bsize - 1)
+        return -1;
+    if (new_inode(&in, S_IFLNK | 0777, 0))
+        return -1;
+    in.size = len;
+    if (len < 60) {                                    /* fast symlink: the text lives in the inode */
+        for (u32 i = 0; i < len; i++)
+            in.block[i / 4] |= (u32)(u8)target[i] << (8 * (i % 4));
+    } else {
+        u32 blk = bmap_alloc(&in, 0);
+        if (!blk || bwrite_copy(blk, 0, target, len)) {
+            free_inode(in.ino, 0);
+            return -1;
+        }
+    }
+    if (ext2_iput(&in) || dir_add(dir, name, strlen_(name), in.ino)) {
+        free_inode(in.ino, 0);
+        return -1;
+    }
+    return 0;
+}
+
 int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *nn)
 {
     u32 ol = strlen_(on), nl = strlen_(nn), ino, tmp;

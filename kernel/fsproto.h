@@ -16,4 +16,10 @@
 #define FS_RENAME  11  /* a0 from, a1 to, a2 cwd ino */
 #define FS_STATFS  12  /* a0 struct ustatfs* -> 0 */
 #define FS_SYNC    13  /* flush everything (writes are write-through today, so a no-op) */
+#define FS_CHMOD   14  /* a0 path, a1 cwd ino, a2 mode */
+#define FS_LINK    15  /* a0 existing path, a1 new path, a2 cwd ino: a hard link */
+#define FS_SYMLINK 16  /* a0 target text, a1 link path, a2 cwd ino */
+#define FS_READLINK 17 /* a0 path, a1 cwd ino, a2 buffer, a3 max -> length */
+#define FS_UTIMES  18  /* a0 path, a1 cwd ino, a2 modification time */
+#define FS_LSTAT   19  /* like FS_STAT but a final symbolic link is not followed */
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

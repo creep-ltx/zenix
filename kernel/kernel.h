@@ -222,6 +222,9 @@ long vfs_fstat(struct file *f, struct ustat *st);
 long vfs_chdir(const char *path);
 long vfs_lseek(struct file *f, s32 off, u32 whence);
 long vfs_statfs(void *out);
+long vfs_path1(u32 op, const char *p, u32 a2, u32 a3);   /* chmod/utimes/lstat/readlink on a path */
+long vfs_link(u32 op, const char *a, const char *b);
+extern u32 time_base;
 long vfs_sync(void);
 long vfs_mkdir(const char *path);
 long vfs_unlink(const char *path);
@@ -295,6 +298,15 @@ int tty_of(const struct proc *p);
 #define SYS_dup         49   /* lowest free fd >= 3 referring to the same file */
 #define SYS_dup2        50
 #define SYS_ttyintr     51   /* did the user type ^C while this process (a shell) was the one running? */
+#define SYS_chmod       52   /* path, mode */
+#define SYS_link        53   /* existing, new */
+#define SYS_symlink     54   /* target text, link path */
+#define SYS_readlink    55   /* path, buffer, max */
+#define SYS_utimes      56   /* path, modification time */
+#define SYS_lstat       57   /* like stat, but a final symbolic link is not followed */
+#define SYS_time        58   /* seconds since 1970 (UTC) */
+#define SYS_settime     59
+#define SYS_isatty      60
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */

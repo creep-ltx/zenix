@@ -3,6 +3,7 @@
 
 static u32 vector_table[256] __attribute__((aligned(4)));
 volatile u32 ticks;
+u32 time_base;                  /* seconds since 1970 at tick 0: set by date -s (an RTC will set it at boot) */
 
 void *memset(void *d, int c, unsigned long n)
 {

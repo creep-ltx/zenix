@@ -51,6 +51,8 @@ so this uses `zenix-ram.adf` until an SD driver exists.)
   the csh project (best of bash, zsh and fish).
 - *Terminal:* arrow, Home/End and function keys as standard escape codes, scrollback, text styles (bold,
   inverse, underline), colours decided deliberately (the display is one bitplane now), UTF-8 later.
+- *Users:* multi-user with the honest no-MMU limit (DESIGN.md D8): uids, permission checks in the filesystem server,
+  `login`, `su`, `chown`, `/etc/passwd`.
 - *C library and kernel:* full printf, stdio, `qsort`, `strtol`, time functions, `getenv`, signals, `kill`,
   process groups, `/dev` (null, zero, tty), `/proc`-like info.
 - *Commands:* port CUtils (47 commands: sed, sort, diff, find, tar, gzip, ...) through a Zenix backend for its

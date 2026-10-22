@@ -29,3 +29,17 @@ t yes;       yes | head -n 3; yes ok | head -n 2
 t status;    true; echo $?; false; echo $?
 t env;       FOO=bar env | grep '^FOO='; printenv HOME | grep -c home
 t which;     which ls | grep -c 'ls$'
+t sed;       sed 's/a/A/' fruit.txt; sed 's/a/A/g' fruit.txt; sed -n '2,3p' fruit.txt; sed '2d' fruit.txt; sed -n '/cherry/p' fruit.txt
+t sed2;      sed 's/\(a\)\(p\)/\2\1/' fruit.txt; sed -E 's/(b)(a)/\2\1/' fruit.txt; sed -n '$p' fruit.txt; sed '1!d' fruit.txt; sed 's/an/&&/' fruit.txt
+t sed3;      sed 'y/abc/xyz/' fruit.txt; sed -n '=' text.txt; sed 2q fruit.txt; sed 's/[0-9]/#/g' colon.txt; sed -e 's/x/X/' -e 's/y/Y/' colon.txt
+t sed4;      sed '2i\inserted' colon.txt; sed '2a appended' colon.txt; sed '/^1/c\changed' colon.txt; sed 's/a/Q/2' fruit.txt; sed '/apple/,/Banana/d' fruit.txt
+t diff;      cp fruit.txt /tmp/f2.txt; echo extra >> /tmp/f2.txt; diff fruit.txt /tmp/f2.txt; echo "rc=$?"; diff fruit.txt fruit.txt; echo "rc=$?"
+t diff2;     sed 's/apple/APPLE/' fruit.txt > /tmp/f3.txt; diff fruit.txt /tmp/f3.txt; diff -u fruit.txt /tmp/f3.txt | tail -n +3; diff -q fruit.txt /tmp/f3.txt | sed 's#/tmp/##'
+t diff3;     diff colon.txt text.txt | head -n 8
+t chmod;     cp fruit.txt /tmp/m1; chmod 755 /tmp/m1; [ -x /tmp/m1 ] && echo x-set; chmod u-x,g-x,o-x /tmp/m1; [ -x /tmp/m1 ] || echo x-clear; chmod a+x /tmp/m1; [ -x /tmp/m1 ] && echo x-again; chmod 444 /tmp/m1; [ -w /tmp/m1 ] || echo not-writable
+t ln;        rm -f /tmp/lnk /tmp/hard; ln -s $D/fruit.txt /tmp/lnk; readlink /tmp/lnk | grep -c fruit.txt; head -n 1 /tmp/lnk; [ -L /tmp/lnk ] && echo islink; ln /tmp/m1 /tmp/hard; cmp /tmp/m1 /tmp/hard; echo "rc=$?"
+t ls;        ls; ls -a . | head -n 4; ls -1 sub; ls -F; ls -d sub; ls -r fruit.txt text.txt; ls -S fruit.txt text.txt colon.txt
+t ls-R;      ls -R sub | head -n 6; ls sub fruit.txt
+t cat;       cat -n fruit.txt; cat -b colon.txt; cat -E colon.txt
+t cpmv;      rm -rf /tmp/w; mkdir -p /tmp/w/a/b; cp -r sub /tmp/w/s; cat /tmp/w/s/deep.txt; mv /tmp/w/s /tmp/w/a/b/s2; ls /tmp/w/a/b/s2; mv /tmp/w/a/b/s2/deep.txt /tmp/w/d.txt; cat /tmp/w/d.txt | head -n 1; rm -rf /tmp/w; ls /tmp | grep -c '^w$'
+t touch;     rm -f /tmp/tt1; touch /tmp/tt1; ls /tmp | grep -c '^tt1$'; touch -c /tmp/nothere-zz; ls /tmp | grep -c nothere-zz

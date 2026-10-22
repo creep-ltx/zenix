@@ -1,12 +1,20 @@
 #include "libz.h"
+/* mkdir [-p] [-v] dir... */
 int main(int argc, char **argv)
 {
-    int rc = 0;
-    if (argc < 2) { fprintf(2, "usage: mkdir dir...\n"); return 2; }
-    for (int i = 1; i < argc; i++) {
-        int r = sys_mkdir(argv[i]);
+    int o_p = 0, o_v = 0, i = 1, rc = 0;
+    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'p') o_p = 1; else if (*p == 'v') o_v = 1; else { fprintf(2, "mkdir: unknown option -%c\n", *p); return 2; } }
+    if (i >= argc) { fprintf(2, "usage: mkdir [-pv] dir...\n"); return 2; }
+    for (; i < argc; i++) {
+        char path[200]; strncpy(path, argv[i], 190); path[190] = 0;
+        if (o_p) {
+            for (char *q = path + 1; *q; q++) if (*q == '/') { *q = 0; struct ustat st; if (sys_stat(path, &st) < 0) sys_mkdir(path); *q = '/'; }
+            struct ustat st; if (sys_stat(path, &st) == 0 && (st.mode & S_IFMT) == S_IFDIR) continue;
+        }
+        int r = sys_mkdir(path);
         if (r == -2) { fprintf(2, "mkdir: %s: exists\n", argv[i]); rc = 1; }
         else if (r < 0) { fprintf(2, "mkdir: %s: cannot create\n", argv[i]); rc = 1; }
+        else if (o_v) printf("mkdir: created directory '%s'\n", argv[i]);
     }
     return rc;
 }
