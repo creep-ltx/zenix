@@ -1,0 +1,15 @@
+sleep 22
+send fdisk list\r
+sleep 2
+send fdisk init ide0 -y\r
+sleep 3
+send fdisk add ide0 root 6\r
+sleep 3
+send fdisk add ide0 data rest\r
+sleep 3
+send fdisk boot ide0 1\r
+sleep 3
+send fdisk add ide0 toolarge 100\r
+sleep 3
+send fdisk list\r
+sleep 3

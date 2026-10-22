@@ -17,30 +17,43 @@ static int disk_rw(u32 op, u32 lba, u32 count, const void *buf)
 int fs_blk_read(u32 lba, u32 count, void *buf) { return disk_rw(DISK_READ, lba, count, buf); }
 int fs_blk_write(u32 lba, u32 count, const void *buf) { return disk_rw(DISK_WRITE, lba, count, buf); }
 
-static int disk_open(const char *name)
+static int disk_open(const char *name, u32 flags)
 {
     struct umsg m;
-    m.type = DISK_OPEN; m.a[0] = (u32)name;
+    m.type = DISK_OPEN; m.a[0] = (u32)name; m.a[1] = flags;
     return sys_call(disk_port, &m);
 }
+static __attribute__((unused)) void disk_unmount(int h)
+{
+    struct umsg m;
+    m.type = DISK_UNMOUNT; m.a[0] = (u32)h;
+    sys_call(disk_port, &m);
+}
 
-/* the root filesystem: the first partition that holds ext2, else the bare disk */
+/* the root filesystem: the first partition that holds ext2, else the bare disk, else the boot ramdisk.
+ * A device is opened plain to probe it and only mounted (made ours alone) once ext2 is confirmed. */
+static int try_mount(const char *name)
+{
+    fs_dev = disk_open(name, 0);
+    if (fs_dev < 0 || !ext2_probe()) return -1;
+    int h = disk_open(name, DISK_MOUNT);
+    if (h < 0) return -1;
+    fs_dev = h;
+    return 0;
+}
+
 static int find_root(void)
 {
     struct diskinfo di;
-    for (u32 i = 0; i < 16; i++) {
+    for (u32 i = 1; i < 16; i++) {                    /* 0 is the whole disk */
         struct umsg m;
         m.type = DISK_LIST; m.a[0] = i; m.a[1] = (u32)&di;
         if (sys_call(disk_port, &m) < 0) break;
-        if (di.dostype == 0 && i != 0) continue;
-        if (i == 0) continue;                         /* try the partitions first */
-        fs_dev = disk_open(di.name);
-        if (fs_dev >= 0 && ext2_probe()) return 0;
+        if (di.dostype == 0) continue;                /* ram0 */
+        if (!try_mount(di.name)) return 0;
     }
-    fs_dev = disk_open("ide0");
-    if (fs_dev >= 0 && ext2_probe()) return 0;
-    fs_dev = disk_open("ram0");                      /* the floppy-loaded root */
-    return (fs_dev >= 0 && ext2_probe()) ? 0 : -1;
+    if (!try_mount("ide0")) return 0;
+    return try_mount("ram0");                         /* the floppy-loaded root (dev/test image) */
 }
 
 static void fill_stat(const struct inode *in, struct ustat *st)

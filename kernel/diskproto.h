@@ -3,7 +3,10 @@
  * whole disk, "ide0p1", "ide0p2"... are the partitions of its RDB. A handle
  * from DISK_OPEN is a small number; reads and writes through a partition
  * handle are confined to that partition (LBAs are partition-relative). */
-#define DISK_OPEN   1  /* a0 name -> handle, or -1 */
+#define DISK_OPEN   1  /* a0 name, a1 flags (DISK_RAW or DISK_MOUNT) -> handle, or -1 */
+#define DISK_RAW    1  /*   for tools: refused while the device is mounted */
+#define DISK_MOUNT  2  /*   for a filesystem server: the caller becomes the only writer */
+#define DISK_UNMOUNT 7 /* a0 handle: release a mount */
 #define DISK_READ   2  /* a0 handle, a1 lba, a2 sector count, a3 buffer -> 0 or -1 */
 #define DISK_WRITE  3  /* same */
 #define DISK_INFO   4  /* a0 handle, a1 struct diskinfo* -> 0 */
@@ -16,4 +19,5 @@ struct diskinfo {
     unsigned start;            /* first sector on the whole disk (0 for the disk itself) */
     unsigned dostype;          /* RDB DosType, 0 for the whole disk */
     unsigned flags;            /* 1 = bootable */
+    unsigned mounted;          /* pid of the filesystem server that has it, 0 if free */
 };

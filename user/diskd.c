@@ -1,12 +1,16 @@
 #include "libz.h"
 #include "../kernel/diskproto.h"
+#include "rdb.h"
 typedef unsigned char u8;
 
 /* The disk server: owns the IDE disk (through the kernel's raw-sector calls,
  * which only this process may use), reads the Amiga partition table (RDB)
- * and serves the whole disk and each partition as a named device. */
+ * and serves the whole disk and each partition as a named device.
+ * Rules: a device a filesystem server has mounted can only be written by that
+ * server; tools open devices with DISK_RAW, which is refused while mounted;
+ * writes through the whole-disk handle may not touch a mounted partition. */
 
-#define MAXDEV 12
+#define MAXDEV 14
 static struct diskinfo dev[MAXDEV];
 static int ndev;
 static u32 disk_sectors;
@@ -23,36 +27,26 @@ static void add(const char *name, const char *label, u32 start, u32 sectors, u32
     d->start = start; d->sectors = sectors; d->dostype = dostype; d->flags = flags;
 }
 
+static int disk_rd(unsigned lba, void *buf) { return sys_blk_read(lba, 1, buf); }
+
 static void scan(void)
 {
-    static u32 sec[128];
+    struct rdb r;
+    u32 keep[MAXDEV];
+    for (int i = 0; i < ndev; i++) keep[i] = dev[i].mounted;
+    int oldn = ndev;
     ndev = 0;
-    if (disk_sectors)
-        add("ide0", "", 0, disk_sectors, 0, 0);
-    if (ram_sectors)
-        add("ram0", "", 0, ram_sectors, 0, 0);
-    if (!disk_sectors)
-        return;
-    for (u32 i = 0; i < 16; i++) {
-        if (sys_blk_read(i, 1, sec)) return;
-        if (sec[0] != 0x5244534b) continue;                 /* 'RDSK' */
-        u32 next = sec[7];                                  /* partition list */
-        for (int guard = 0; next != 0xFFFFFFFF && guard < 16; guard++) {
-            if (sys_blk_read(next, 1, sec) || sec[0] != 0x50415254) break;   /* 'PART' */
-            u32 *env = &sec[32];                            /* DosEnvec */
-            u32 surf = env[3], bpt = env[5], low = env[9], high = env[10];
-            u32 start = low * surf * bpt, size = (high - low + 1) * surf * bpt;
-            char label[32];
-            u8 *nm = (u8 *)&sec[9];                         /* BSTR drive name */
-            u32 l = nm[0] < 31 ? nm[0] : 31;
-            memcpy(label, nm + 1, l); label[l] = 0;
+    if (disk_sectors) add("ide0", "", 0, disk_sectors, 0, 0);
+    if (ram_sectors) add("ram0", "", 0, ram_sectors, 0, 0);
+    if (disk_sectors && rdb_read(disk_rd, &r) == 1)
+        for (int i = 0; i < r.nparts; i++) {
             char name[16] = "ide0p";
-            name[5] = (char)('1' + (ndev - 1 - (ram_sectors ? 1 : 0))); name[6] = 0;
-            add(name, label, start, size, env[16], sec[5] & 1);
-            next = sec[4];
+            name[5] = (char)('1' + i); name[6] = 0;
+            u32 start = r.part[i].lowcyl * RDB_CYL;
+            add(name, r.part[i].label, start, (r.part[i].highcyl - r.part[i].lowcyl + 1) * RDB_CYL,
+                r.part[i].dostype, r.part[i].bootable);
         }
-        return;
-    }
+    for (int i = 0; i < ndev && i < oldn; i++) dev[i].mounted = keep[i];   /* mounts survive a rescan */
 }
 
 static int find(const char *name)
@@ -62,13 +56,40 @@ static int find(const char *name)
     return -1;
 }
 
+/* does [lba, lba+n) on the whole disk touch a mounted partition? */
+static int hits_mounted(u32 lba, u32 n)
+{
+    for (int i = 1; i < ndev; i++)
+        if (dev[i].mounted && strcmp(dev[i].name, "ram0") &&
+            lba < dev[i].start + dev[i].sectors && lba + n > dev[i].start)
+            return 1;
+    return 0;
+}
+
 static int handle(struct umsg *m)
 {
     switch (m->type) {
-    case DISK_OPEN: return find((const char *)m->a[0]);
+    case DISK_OPEN: {
+        int h = find((const char *)m->a[0]);
+        if (h < 0) return -1;
+        if (m->a[1] & DISK_MOUNT) {
+            if (dev[h].mounted) return -1;
+            dev[h].mounted = (u32)m->from;
+        } else if ((m->a[1] & DISK_RAW) && h > 0 && dev[h].mounted) {
+            return -1;                                   /* tools stay off mounted devices */
+        }
+        return h;
+    }
+    case DISK_UNMOUNT:
+        if (m->a[0] < (u32)ndev && dev[m->a[0]].mounted == (u32)m->from) { dev[m->a[0]].mounted = 0; return 0; }
+        return -1;
     case DISK_READ: case DISK_WRITE: {
         u32 h = m->a[0], lba = m->a[1], n = m->a[2];
         if (h >= (u32)ndev || n == 0 || lba + n < lba || lba + n > dev[h].sectors) return -1;
+        if (m->type == DISK_WRITE) {
+            if (dev[h].mounted && dev[h].mounted != (u32)m->from) return -1;
+            if (h == 0 && !strcmp(dev[0].name, "ide0") && hits_mounted(lba, n)) return -1;
+        }
         if (!strcmp(dev[h].name, "ram0")) {              /* plain memory */
             if (m->type == DISK_READ) memcpy((void *)m->a[3], ram_base + lba * 512, n * 512);
             else memcpy(ram_base + lba * 512, (const void *)m->a[3], n * 512);
@@ -78,11 +99,7 @@ static int handle(struct umsg *m)
         return m->type == DISK_READ ? sys_blk_read(lba, n, (void *)m->a[3])
                                     : sys_blk_write(lba, n, (const void *)m->a[3]);
     }
-    case DISK_INFO:
-        if (m->a[0] >= (u32)ndev) return -1;
-        memcpy((void *)m->a[1], &dev[m->a[0]], sizeof(struct diskinfo));
-        return 0;
-    case DISK_LIST:
+    case DISK_INFO: case DISK_LIST:
         if (m->a[0] >= (u32)ndev) return -1;
         memcpy((void *)m->a[1], &dev[m->a[0]], sizeof(struct diskinfo));
         return 0;
