@@ -3,7 +3,7 @@
 int main(int argc, char **argv)
 {
     int i = 1; if (i < argc && !strcmp(argv[i], "-C")) i++;
-    int fd = 0; if (i < argc) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { fprintf(2, "hexdump: %s: cannot open\n", argv[i]); return 1; } }
+    int fd = 0; if (i < argc) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { fprintf(2, "hexdump: %s: %s\n", argv[i], zwhy("cannot open")); return 1; } }
     unsigned char b[16]; u32 off = 0; int n;
     struct rd r; rd_init(&r, fd);
     for (;;) {

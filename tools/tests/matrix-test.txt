@@ -1,4 +1,4 @@
-sleep 22
+sleep 30
 send free\r
 sleep 1
 send cat /etc/motd | wc\r

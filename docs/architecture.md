@@ -273,5 +273,7 @@ outputs (`tools/cmds-test.sh`).
 - `mkroot.sh` builds the image under `fakeroot` so files belong to root; `/tmp` is 1777; `su` and `passwd` are 4755.
 - The kernel's own file loading and the servers run as root. Kernel-side calls such as `fs_read_file` use the
   identity of the process that asked for the spawn.
+- Programs report a refusal as "permission denied": `sys3` stores the code of the last failed call in `zerrno`, and
+  `zwhy("cannot open")` (libz) returns that text unless the code was -13.
 - What this is not: with no MMU a program can still read any memory and call the disk server directly, so this is
   accounting and protection against honest mistakes (limits.md).

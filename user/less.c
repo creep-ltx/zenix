@@ -146,7 +146,7 @@ int main(int argc, char **argv)
     } else {
         for (; i < argc; i++) {
             int fd = sys_open(argv[i], O_RDONLY);
-            if (fd < 0) { fprintf(2, "less: %s: cannot open\n", argv[i]); continue; }
+            if (fd < 0) { fprintf(2, "less: %s: %s\n", argv[i], zwhy("cannot open")); continue; }
             name = argv[i];
             char b[1024]; int n; while ((n = sys_read(fd, b, sizeof b)) > 0) append(b, (u32)n);
             sys_close(fd);

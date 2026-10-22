@@ -28,6 +28,7 @@ EXIT STATUS
 
 NOTES
     Symbolic links are followed (the file they point to is copied).
+    An access the user is not allowed is reported as "permission denied".
 
 SEE ALSO
     mv(1), rm(1), tar(1)

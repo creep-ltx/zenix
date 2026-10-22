@@ -29,5 +29,8 @@ EXAMPLES
 EXIT STATUS
     0, 1 if a file cannot be opened, 2 usage error.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     tr(1), sort(1), sed(1)

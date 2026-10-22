@@ -28,7 +28,7 @@ int main(int argc, char **argv)
     int rc = 0, nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {
         int fd = 0;
-        if (nfiles) { fd = sys_open(argv[i + f], O_RDONLY); if (fd < 0) { fprintf(2, "cut: %s: cannot open\n", argv[i + f]); rc = 1; continue; } }
+        if (nfiles) { fd = sys_open(argv[i + f], O_RDONLY); if (fd < 0) { fprintf(2, "cut: %s: %s\n", argv[i + f], zwhy("cannot open")); rc = 1; continue; } }
         struct rd r; rd_init(&r, fd);
         char *line = 0; u32 cap = 0;
         while (rd_getline(&r, &line, &cap) >= 0) {

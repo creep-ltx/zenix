@@ -14,9 +14,9 @@ static void rmtree(const char *path, int top)
             sys_close(fd);
             for (int i = 0; i < n; i++) { char c[256]; if (strlen(path) + strlen(names[i]) + 2 < sizeof c) { strcpy(c, path); if (c[strlen(c) - 1] != '/') strcat(c, "/"); strcat(c, names[i]); rmtree(c, 0); } free(names[i]); }
         }
-        if (sys_rmdir(path) < 0) { fprintf(2, "rm: %s: cannot remove\n", path); rc = 1; } else if (o_v) printf("removed directory '%s'\n", path);
+        if (sys_rmdir(path) < 0) { fprintf(2, "rm: %s: %s\n", path, zwhy("cannot remove")); rc = 1; } else if (o_v) printf("removed directory '%s'\n", path);
     } else {
-        if (sys_unlink(path) < 0) { fprintf(2, "rm: %s: cannot remove\n", path); rc = 1; } else if (o_v) printf("removed '%s'\n", path);
+        if (sys_unlink(path) < 0) { fprintf(2, "rm: %s: %s\n", path, zwhy("cannot remove")); rc = 1; } else if (o_v) printf("removed '%s'\n", path);
     }
     (void)top;
 }

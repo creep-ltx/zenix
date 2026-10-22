@@ -18,6 +18,7 @@ DESCRIPTION
 NOTES
     /etc/passwd is readable by everyone, as in early Unix; there is no
     shadow file yet. The file is replaced through /etc/passwd.new.
+    An access the user is not allowed is reported as "permission denied".
 
 SEE ALSO
     login(1), su(1)

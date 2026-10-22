@@ -329,3 +329,7 @@ void *realloc(void *p, unsigned long n)
     memcpy(q, p, n);                       /* callers only grow; over-reading the old block is harmless here */
     return q;
 }
+
+/* the code of the last failed system call, and the reason to print for it */
+int zerrno;
+const char *zwhy(const char *dflt) { return zerrno == 13 ? "permission denied" : dflt; }

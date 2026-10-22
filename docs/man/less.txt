@@ -19,5 +19,8 @@ KEYS
     A short text is just printed. When the output is not a terminal, less
     acts like cat.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     man(1), edit(1)

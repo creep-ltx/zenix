@@ -245,7 +245,7 @@ int main(int argc, char **argv)
     int rc = 0;
     for (; i < argc; i++) {
         int fd = sys_open(argv[i], O_RDONLY);
-        if (fd < 0) { fprintf(2, "sed: %s: cannot open\n", argv[i]); rc = 2; continue; }
+        if (fd < 0) { fprintf(2, "sed: %s: %s\n", argv[i], zwhy("cannot open")); rc = 2; continue; }
         if (o_i) {
             char tmp[160]; strcpy(tmp, argv[i]); strcat(tmp, ".sedtmp");
             int out = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC); if (out < 0) { fprintf(2, "sed: cannot write %s\n", tmp); rc = 2; sys_close(fd); continue; }

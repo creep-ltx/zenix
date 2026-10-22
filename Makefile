@@ -64,8 +64,8 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py
 $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@
 
-# the floppy has room for about 790 KB of root filesystem: the archive tools stay off the RAM image
-RAMAPPS := $(filter-out gzip tar sha256sum,$(UAPPS))
+# the floppy has room for about 790 KB of root filesystem: the editor, pager, archive and search tools stay off the RAM image (it only serves the RAM-boot and disk-tool tests)
+RAMAPPS := $(filter-out gzip tar sha256sum edit less sed diff man find xargs du hexdump cmp,$(UAPPS))
 
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.

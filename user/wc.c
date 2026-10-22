@@ -31,7 +31,7 @@ int main(int argc, char **argv)
     if (i >= argc) { count(0, "", fl, fw, fc, 0); return 0; }
     for (; i < argc; i++) {
         int fd = sys_open(argv[i], O_RDONLY);
-        if (fd < 0) { fprintf(2, "wc: %s: cannot open\n", argv[i]); rc = 1; continue; }
+        if (fd < 0) { fprintf(2, "wc: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
         count(fd, argv[i], fl, fw, fc, 1); sys_close(fd); files++;
     }
     if (files > 1) { if (fl) printf("%7u", tl); if (fw) printf("%7u", tw); if (fc) printf("%7u", tc); printf(" total\n"); }

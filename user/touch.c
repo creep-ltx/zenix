@@ -9,7 +9,7 @@ int main(int argc, char **argv)
         if (sys_stat(argv[i], &st) == 0) { sys_utimes(argv[i], sys_time()); continue; }
         if (no_create) continue;
         int fd = sys_open(argv[i], O_WRONLY | O_CREAT);
-        if (fd < 0) { fprintf(2, "touch: %s: cannot create\n", argv[i]); rc = 1; } else { sys_close(fd); sys_utimes(argv[i], sys_time()); }
+        if (fd < 0) { fprintf(2, "touch: %s: %s\n", argv[i], zwhy("cannot create")); rc = 1; } else { sys_close(fd); sys_utimes(argv[i], sys_time()); }
     }
     return rc;
 }

@@ -28,5 +28,8 @@ EXIT STATUS
     0 success, 1 a file could not be opened (the others are still shown),
     2 unknown option.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     less(1), head(1), tail(1), tee(1)

@@ -36,6 +36,7 @@ NOTES
     The comparison is exact (longest common subsequence) for files up to
     about 3 million line pairs; larger differing middles are shown as one
     block replaced.
+    An access the user is not allowed is reported as "permission denied".
 
 EXIT STATUS
     0 identical, 1 different, 2 trouble.

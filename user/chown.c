@@ -6,7 +6,7 @@ static u32 new_uid = 0xFFFFFFFFu, new_gid = 0xFFFFFFFFu;
 
 static void apply(const char *path)
 {
-    if (sys_chown(path, new_uid, new_gid) < 0) { fprintf(2, "%s: %s: cannot change owner\n", only_group ? "chgrp" : "chown", path); rc = 1; return; }
+    if (sys_chown(path, new_uid, new_gid) < 0) { fprintf(2, "%s: %s: %s\n", only_group ? "chgrp" : "chown", path, zwhy("cannot change owner")); rc = 1; return; }
     struct ustat st;
     if (!recursive || sys_lstat(path, &st) < 0 || (st.mode & S_IFMT) != S_IFDIR) return;
     int fd = sys_open(path, O_RDONLY); if (fd < 0) return;

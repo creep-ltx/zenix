@@ -14,6 +14,7 @@ DESCRIPTION
 NOTES
     Reads the whole file into memory first, so a file must fit in RAM.
     The output equals the host's sha256sum on the files that were compared.
+    An access the user is not allowed is reported as "permission denied".
 
 EXIT STATUS
     0, 1 if a file cannot be read.

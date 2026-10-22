@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     int rc = 0;
     for (int i = 1; i < argc; i++) {
         int fd = sys_open(argv[i], O_RDONLY);
-        if (fd < 0) { fprintf(2, "sha256sum: %s: cannot open\n", argv[i]); rc = 1; continue; }
+        if (fd < 0) { fprintf(2, "sha256sum: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
         if (sum(fd, argv[i])) rc = 1;
         sys_close(fd);
     }

@@ -11,6 +11,8 @@ send echo mine > /tmp/u1; ls -l /tmp/u1; umask 077; echo x > /tmp/u2; ls -l /tmp
 sleep 3
 send rm /etc/motd; echo rm=$?; cat /etc/motd | head -n 1\r
 sleep 3
+send /etc/passwd; echo run=$?\r
+sleep 3
 send exit\r
 sleep 3
 send echo root-sees > /tmp/r1; chmod 600 /tmp/r1; su user\r

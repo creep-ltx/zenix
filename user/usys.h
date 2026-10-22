@@ -2,6 +2,7 @@
 /* Zenix system calls: TRAP #0, number in d0, args d1-d3, result in d0. */
 typedef unsigned int u32;
 
+extern int zerrno;                       /* libz: the code of the last failed system call (13 = permission denied) */
 static inline int sys3(int n, u32 a, u32 b, u32 c)
 {
     register int d0 __asm__("d0") = n;
@@ -9,6 +10,8 @@ static inline int sys3(int n, u32 a, u32 b, u32 c)
     register u32 d2 __asm__("d2") = b;
     register u32 d3 __asm__("d3") = c;
     __asm__ volatile("trap #0" : "+r"(d0) : "r"(d1), "r"(d2), "r"(d3) : "memory", "cc");
+    if (d0 < 0)
+        zerrno = -d0;
     return d0;
 }
 

@@ -13,7 +13,7 @@ int main(int argc, char **argv)
         }
         int r = sys_mkdir(path);
         if (r == -2) { fprintf(2, "mkdir: %s: exists\n", argv[i]); rc = 1; }
-        else if (r < 0) { fprintf(2, "mkdir: %s: cannot create\n", argv[i]); rc = 1; }
+        else if (r < 0) { fprintf(2, "mkdir: %s: %s\n", argv[i], zwhy("cannot create")); rc = 1; }
         else if (o_v) printf("mkdir: created directory '%s'\n", argv[i]);
     }
     return rc;

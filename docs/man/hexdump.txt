@@ -15,5 +15,8 @@ DESCRIPTION
 EXAMPLE
     00000000  5a 45 58 45 ...                                  |ZEXE....|
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     cat(1), cmp(1), less(1)

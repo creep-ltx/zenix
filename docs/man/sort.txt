@@ -32,5 +32,8 @@ EXAMPLES
 EXIT STATUS
     0, 2 on an unreadable file or bad option.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     uniq(1), cut(1), head(1)

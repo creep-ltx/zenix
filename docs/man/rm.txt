@@ -24,6 +24,7 @@ EXAMPLES
 NOTES
     Unlinking a file that is still open by another process frees its data at
     once (a known limit of the filesystem server).
+    An access the user is not allowed is reported as "permission denied".
 
 EXIT STATUS
     0, 1 on any failure, 2 usage error.

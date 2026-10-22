@@ -3,9 +3,9 @@
 static int o_r, o_f, o_p, o_v, rc;
 static int copy_file(const char *src, const char *dst, const struct ustat *st)
 {
-    int in = sys_open(src, O_RDONLY); if (in < 0) { fprintf(2, "cp: %s: cannot open\n", src); return 1; }
+    int in = sys_open(src, O_RDONLY); if (in < 0) { fprintf(2, "cp: %s: %s\n", src, zwhy("cannot open")); return 1; }
     int out = sys_open(dst, O_WRONLY | O_CREAT | O_TRUNC);
-    if (out < 0) { fprintf(2, "cp: %s: cannot write\n", dst); sys_close(in); return 1; }
+    if (out < 0) { fprintf(2, "cp: %s: %s\n", dst, zwhy("cannot write")); sys_close(in); return 1; }
     char b[1024]; int n, bad = 0;
     while ((n = sys_read(in, b, sizeof b)) > 0) if (sys_write(out, b, (u32)n) != n) { fprintf(2, "cp: write failed (disk full?)\n"); bad = 1; break; }
     sys_close(in); sys_close(out);
@@ -20,7 +20,7 @@ static void copy_path(const char *src, const char *dst)
     if ((st.mode & S_IFMT) == S_IFDIR) {
         if (!o_r) { fprintf(2, "cp: %s: is a directory (use -r)\n", src); rc = 1; return; }
         struct ustat dt;
-        if (sys_stat(dst, &dt) < 0 && sys_mkdir(dst) < 0) { fprintf(2, "cp: %s: cannot create\n", dst); rc = 1; return; }
+        if (sys_stat(dst, &dt) < 0 && sys_mkdir(dst) < 0) { fprintf(2, "cp: %s: %s\n", dst, zwhy("cannot create")); rc = 1; return; }
         if (o_p) sys_chmod(dst, st.mode & 07777);
         int fd = sys_open(src, O_RDONLY); if (fd < 0) return;
         char *names[256]; int n = 0; struct udirent d;

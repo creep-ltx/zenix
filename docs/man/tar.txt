@@ -35,6 +35,7 @@ EXAMPLES
 NOTES
     Hard links are stored as separate files. Device files and sparse files
     are not supported. Owners are recorded as numbers.
+    An access the user is not allowed is reported as "permission denied".
 
 EXIT STATUS
     0, 1 on error, 2 usage error.

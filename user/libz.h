@@ -16,6 +16,7 @@ void free(void *p);
 int fprintf(int fd, const char *fmt, ...);
 int printf(const char *fmt, ...);
 int atoi(const char *s);
+const char *zwhy(const char *dflt);   /* "permission denied" if the last failed call was refused, else dflt */
 
 /* more of the C library */
 char *strdup(const char *s);

@@ -16,5 +16,8 @@ OPTIONS
 EXIT STATUS
     0, 1 if a file could not be created.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     date(1), ls(1)

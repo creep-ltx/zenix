@@ -25,5 +25,8 @@ EXAMPLES
 EXIT STATUS
     0, or 1 if a file could not be opened.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     grep(1), sort(1), uniq(1)

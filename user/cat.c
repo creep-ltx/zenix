@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     if (i >= argc) return dump(0);
     for (; i < argc; i++) {
         int fd = !strcmp(argv[i], "-") ? 0 : sys_open(argv[i], O_RDONLY);
-        if (fd < 0) { fprintf(2, "cat: %s: cannot open\n", argv[i]); rc = 1; continue; }
+        if (fd < 0) { fprintf(2, "cat: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
         rc |= dump(fd); if (fd) sys_close(fd);
     }
     return rc;

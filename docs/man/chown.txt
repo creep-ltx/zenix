@@ -17,5 +17,8 @@ DESCRIPTION
 EXIT STATUS
     0, 1 if a name or file is wrong or the caller is not root, 2 usage.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     chmod(1), ls(1), id(1)

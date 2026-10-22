@@ -50,6 +50,7 @@ EXIT STATUS
 NOTES
     Back-references (\1) are not supported. The pattern engine does not
     backtrack, so a hard pattern cannot hang.
+    An access the user is not allowed is reported as "permission denied".
 
 SEE ALSO
     sed(1), find(1), sort(1)

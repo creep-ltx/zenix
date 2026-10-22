@@ -67,5 +67,8 @@ JOBS
     kill %1 stops one. Ctrl+C stops the program in the foreground (and a
     loop the shell itself is running).
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     edit(1), less(1), man(1)

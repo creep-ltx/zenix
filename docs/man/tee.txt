@@ -17,5 +17,8 @@ EXAMPLES
     make 2>&1 | tee build.log
     ls | tee list | wc -l
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     cat(1)

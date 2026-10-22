@@ -146,7 +146,7 @@ long fs_read_file(const char *path, u32 cwd, u8 **buf, u32 *size, struct ustat *
     struct ustat st;
     long ino = fs_call(FS_OPEN, (u32)path, cwd, O_RDONLY | O_EXEC, (u32)&st);
     if (ino < 0)
-        return -1;
+        return ino == -13 ? -13 : -1;
     if (!S_ISREG(st.mode) || st.size > 256u * 1024)
         return -2;
     u8 *b = kmalloc(st.size ? st.size : 1);
@@ -197,7 +197,7 @@ long vfs_open(const char *path, int flags)
     }
     long ino = fs_call(FS_OPEN, (u32)path, current->cwd_ino, (u32)flags, (u32)&st);
     if (ino < 0)
-        return -1;
+        return ino == -13 ? -13 : -1;
     struct file *f = file_new(FT_INODE);
     if (!f)
         return -1;
@@ -232,7 +232,7 @@ long vfs_chdir(const char *path)
 {
     long ino = fs_call(FS_CHDIR, (u32)path, current->cwd_ino, 0, 0);
     if (ino < 0)
-        return -1;
+        return ino == -13 ? -13 : -1;
     current->cwd_ino = (u32)ino;
     vfs_chdir_text(current->cwd, path);
     return 0;

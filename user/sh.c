@@ -1163,7 +1163,7 @@ static int apply_redirs(struct redir *r, struct rsave *rs)
         }
         int flags = r->kind == 0 ? O_RDONLY : r->kind == 2 ? (O_WRONLY | O_CREAT | O_APPEND) : (O_WRONLY | O_CREAT | O_TRUNC);
         fd = sys_open(target, flags);
-        if (fd < 0) { errm(target, r->kind == 0 ? "cannot open" : "cannot write"); return 1; }
+        if (fd < 0) { errm(target, zwhy(r->kind == 0 ? "cannot open" : "cannot write")); return 1; }
         if (r->kind == 4) { rs_save(rs, 1); rs_save(rs, 2); sys_dup2(fd, 1); sys_dup2(fd, 2); }
         else { rs_save(rs, r->fd); sys_dup2(fd, r->fd); }
         sys_close(fd);
@@ -1195,7 +1195,7 @@ static int start_program(char **argv)
     if (!find_program(argv[0], path, sizeof path)) { errm(argv[0], "command not found"); return -127; }
     if (env_dirty) { env_sync(); env_dirty = 0; }
     int pid = sys_spawn(path, argv, 0);
-    if (pid < 0) { errm(argv[0], "cannot run"); return -126; }
+    if (pid < 0) { errm(argv[0], zwhy("cannot run")); return -126; }
     return pid;
 }
 
@@ -1639,7 +1639,7 @@ static int run_builtin(char **argv, int argc)
         char old[128]; strcpy(old, cwd_now());
         if (d && !strcmp(d, "-")) { d = var_get("OLDPWD"); if (d) { outs(d); outs("\n"); } }
         if (!d) { errm("cd", "no directory"); return 1; }
-        if (sys_chdir(d) < 0) { errm(d, "no such directory"); return 1; }
+        if (sys_chdir(d) < 0) { errm(d, zwhy("no such directory")); return 1; }
         set_pwd(old); return 0;
     }
     if (!strcmp(n, "exit")) { last_status = argc > 1 ? atoi(argv[1]) : last_status; exit_requested = 1; return last_status; }
@@ -1876,7 +1876,7 @@ int main(int argc, char **argv)
     if (cmdstr) { int st = run_string(cmdstr); return exit_requested ? last_status : st; }
     if (script) {
         char *t = file_slurp(script, 0);
-        if (!t) { errm(script, "cannot open"); return 127; }
+        if (!t) { errm(script, zwhy("cannot open")); return 127; }
         int st = run_string(t);
         return exit_requested ? last_status : st;
     }

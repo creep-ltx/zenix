@@ -45,7 +45,7 @@ int main(int argc, char **argv)
         l = e + 1;
     }
     fd = sys_open("/etc/passwd.new", O_WRONLY | O_CREAT | O_TRUNC);
-    if (fd < 0 || sys_write(fd, new_file, o) != (int)o) { fprintf(2, "passwd: cannot write the new file\n"); return 1; }
+    if (fd < 0 || sys_write(fd, new_file, o) != (int)o) { fprintf(2, "passwd: %s\n", zwhy("cannot write the new file")); return 1; }
     sys_close(fd);
     sys_chmod("/etc/passwd.new", 0644);
     if (sys_rename("/etc/passwd.new", "/etc/passwd") < 0) { fprintf(2, "passwd: cannot replace /etc/passwd\n"); return 1; }

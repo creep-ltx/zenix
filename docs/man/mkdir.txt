@@ -18,5 +18,8 @@ EXAMPLES
 EXIT STATUS
     0, 1 if a directory exists or cannot be made, 2 usage error.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     rmdir(1), rm(1)

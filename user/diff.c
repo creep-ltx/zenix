@@ -73,8 +73,8 @@ static void range(int start, int cnt) { if (cnt <= 1) oprintf("%d", cnt ? start 
 static int diff_files(const char *p1, const char *p2, const char *l1, const char *l2)
 {
     struct lines a, b;
-    if (read_lines(p1, &a) < 0) { fprintf(2, "diff: %s: cannot open\n", p1); return 2; }
-    if (read_lines(p2, &b) < 0) { fprintf(2, "diff: %s: cannot open\n", p2); return 2; }
+    if (read_lines(p1, &a) < 0) { fprintf(2, "diff: %s: %s\n", p1, zwhy("cannot open")); return 2; }
+    if (read_lines(p2, &b) < 0) { fprintf(2, "diff: %s: %s\n", p2, zwhy("cannot open")); return 2; }
     char *ops; int total = script(&a, &b, &ops);
     if (total < 0) { fprintf(2, "diff: out of memory\n"); return 2; }
     int differ = 0;

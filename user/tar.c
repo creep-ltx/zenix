@@ -44,7 +44,7 @@ static void add(const char *path)
         char l[100]; int n = sys_readlink(path, l, sizeof l - 1); if (n < 0) return; l[n] = 0;
         write_header(path, &st, '2', l, 0);
     } else if (t == S_IFREG) {
-        int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "tar: %s: cannot open\n", path); return; }
+        int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "tar: %s: %s\n", path, zwhy("cannot open")); return; }
         write_header(path, &st, '0', 0, st.size);
         char b[512]; u32 left = st.size;
         while (left) { int want = left > 512 ? 512 : (int)left; memset(b, 0, 512); int r = sys_read(fd, b, want); if (r <= 0) { r = want; memset(b, 0, 512); } sys_write(1, b, 512); left -= (u32)r > left ? left : (u32)r; }
@@ -68,7 +68,7 @@ int main(int argc, char **argv)
     }
     if (!mode) { fprintf(2, "usage: tar c|x|t [v] [f archive] [-C dir] [file...]\n"); return 2; }
     if (mode == 'c') {
-        if (file && strcmp(file, "-")) { int fd = sys_open(file, O_WRONLY | O_CREAT | O_TRUNC); if (fd < 0) { fprintf(2, "tar: %s: cannot write\n", file); return 1; } sys_dup2(fd, 1); sys_close(fd); }
+        if (file && strcmp(file, "-")) { int fd = sys_open(file, O_WRONLY | O_CREAT | O_TRUNC); if (fd < 0) { fprintf(2, "tar: %s: %s\n", file, zwhy("cannot write")); return 1; } sys_dup2(fd, 1); sys_close(fd); }
         if (dir && sys_chdir(dir) < 0) { fprintf(2, "tar: %s: cannot enter\n", dir); return 1; }
         if (i >= argc) { fprintf(2, "tar: nothing to archive\n"); return 2; }
         for (; i < argc; i++) add(argv[i]);
@@ -76,7 +76,7 @@ int main(int argc, char **argv)
         return 0;
     }
     afd = 0;
-    if (file && strcmp(file, "-")) { afd = sys_open(file, O_RDONLY); if (afd < 0) { fprintf(2, "tar: %s: cannot open\n", file); return 1; } }
+    if (file && strcmp(file, "-")) { afd = sys_open(file, O_RDONLY); if (afd < 0) { fprintf(2, "tar: %s: %s\n", file, zwhy("cannot open")); return 1; } }
     if (mode == 'x' && dir && sys_chdir(dir) < 0) { fprintf(2, "tar: %s: cannot enter\n", dir); return 1; }
     unsigned char h[512]; int rc = 0;
     while (rd_full(h, 512) == 512) {
@@ -93,7 +93,7 @@ int main(int argc, char **argv)
         else if (type == '2') { char lk[101]; strncpy(lk, (char *)h + 157, 100); lk[100] = 0; mkpath(name); sys_unlink(name); if (sys_symlink(lk, name) < 0) { fprintf(2, "tar: %s: cannot link\n", name); rc = 1; } }
         else if (type == '0') {
             mkpath(name); int fd = sys_open(name, O_WRONLY | O_CREAT | O_TRUNC);
-            if (fd < 0) { fprintf(2, "tar: %s: cannot create\n", name); rc = 1; }
+            if (fd < 0) { fprintf(2, "tar: %s: %s\n", name, zwhy("cannot create")); rc = 1; }
             char b[512]; u32 left = size;
             for (u32 k = 0; k < blocks; k++) { rd_full(b, 512); u32 n = left > 512 ? 512 : left; if (fd >= 0) sys_write(fd, b, n); left -= n; }
             if (fd >= 0) { sys_close(fd); sys_chmod(name, mode_bits); sys_utimes(name, mt); }

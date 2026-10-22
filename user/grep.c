@@ -86,7 +86,7 @@ static void grep_path(const char *path, int top)
         return;
     }
     int fd = sys_open(path, O_RDONLY);
-    if (fd < 0) { if (!o_s) fprintf(2, "grep: %s: cannot open\n", path); return; }
+    if (fd < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); return; }
     grep_fd(fd, path); sys_close(fd);
     (void)top;
 }

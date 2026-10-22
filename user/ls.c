@@ -107,7 +107,7 @@ static int list(const char *path, int top)
     if (multi || o_R) { if (printed_any) oputc('\n'); oprintf("%s:\n", path); }
     printed_any = 1;
     (void)top;
-    int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "ls: %s: cannot open\n", path); return 1; }
+    int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "ls: %s: %s\n", path, zwhy("cannot open")); return 1; }
     struct ent *v = malloc(MAXE * sizeof(struct ent)); int n = 0; struct udirent d;
     while (sys_readdir(fd, &d) > 0 && n < MAXE) {
         if (d.name[0] == '.' && !o_a && !o_A) continue;

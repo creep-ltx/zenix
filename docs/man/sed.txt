@@ -59,6 +59,7 @@ EXAMPLES
 NOTES
     There is no hold space (h, g, x), no w, r or b commands, and a script
     holds at most 200 commands. Regular expressions have no back-references.
+    An access the user is not allowed is reported as "permission denied".
 
 EXIT STATUS
     0, 2 for a bad script or an unreadable file.

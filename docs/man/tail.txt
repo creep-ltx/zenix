@@ -26,5 +26,8 @@ EXAMPLES
 EXIT STATUS
     0, 1 if a file cannot be opened, 2 unknown option.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     head(1), less(1)

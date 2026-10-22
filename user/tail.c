@@ -13,7 +13,7 @@ int main(int argc, char **argv)
     int nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {
         int fd = 0; const char *name = "standard input";
-        if (nfiles) { name = argv[i + f]; fd = sys_open(name, O_RDONLY); if (fd < 0) { fprintf(2, "tail: %s: cannot open\n", name); rc = 1; continue; } }
+        if (nfiles) { name = argv[i + f]; fd = sys_open(name, O_RDONLY); if (fd < 0) { fprintf(2, "tail: %s: %s\n", name, zwhy("cannot open")); rc = 1; continue; } }
         if (nfiles > 1) oprintf("%s==> %s <==\n", f ? "\n" : "", name);
         struct rd r; rd_init(&r, fd);
         if (nc >= 0) {                                    /* the last nc bytes */

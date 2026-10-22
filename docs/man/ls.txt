@@ -48,6 +48,7 @@ EXAMPLES
 
 NOTES
     At most 400 names per directory are listed.
+    An access the user is not allowed is reported as "permission denied".
 
 EXIT STATUS
     0 success, 1 a file or directory could not be found or opened,

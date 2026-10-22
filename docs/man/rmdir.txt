@@ -13,5 +13,8 @@ DESCRIPTION
 EXIT STATUS
     0, 1 if a directory is not empty or cannot be removed, 2 usage error.
 
+NOTES
+    An access the user is not allowed is reported as "permission denied".
+
 SEE ALSO
     mkdir(1), rm(1)

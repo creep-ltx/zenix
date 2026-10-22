@@ -110,12 +110,12 @@ int main(int argc, char **argv)
     }
     for (; i < argc; i++) {
         const char *f = argv[i]; int in = sys_open(f, O_RDONLY);
-        if (in < 0) { fprintf(2, "gzip: %s: cannot open\n", f); rc = 1; continue; }
+        if (in < 0) { fprintf(2, "gzip: %s: %s\n", f, zwhy("cannot open")); rc = 1; continue; }
         char outname[160]; u32 fl = strlen(f), have_gz = fl > 3 && !strcmp(f + fl - 3, ".gz");
         if (decomp) { if (have_gz) { strcpy(outname, f); outname[fl - 3] = 0; } else if (fl > 4 && !strcmp(f + fl - 4, ".tgz")) { strcpy(outname, f); strcpy(outname + fl - 4, ".tar"); } else { fprintf(2, "gzip: %s: unknown suffix\n", f); sys_close(in); rc = 1; continue; } }
         else { if (have_gz) { fprintf(2, "gzip: %s already has .gz suffix\n", f); sys_close(in); rc = 1; continue; } snprintf(outname, sizeof outname, "%s.gz", f); }
         out_fd = to_stdout ? 1 : sys_open(outname, O_WRONLY | O_CREAT | O_TRUNC);
-        if (out_fd < 0) { fprintf(2, "gzip: %s: cannot write\n", outname); sys_close(in); rc = 1; continue; }
+        if (out_fd < 0) { fprintf(2, "gzip: %s: %s\n", outname, zwhy("cannot write")); sys_close(in); rc = 1; continue; }
         olen = 0; int r;
         if (decomp) { u32 n; char *b = slurp(in, &n); r = b ? decompress_buf((unsigned char *)b, n) : -1; }
         else { struct ustat st; u32 mt = sys_fstat(in, &st) == 0 ? st.mtime : 0; r = compress_fd(in, level, mt); }
