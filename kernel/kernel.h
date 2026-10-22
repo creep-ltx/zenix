@@ -31,6 +31,10 @@ void serial_rx_isr(void);
 void irq5_c(void);
 void serial_puts(const char *s);
 void kprintf(const char *fmt, ...);
+u32 klog_read(u32 off, char *buf, u32 n);     /* the kernel log: n characters from position off (0 = the first ever) */
+void klog_to_screen(void);                    /* the display is up: show the log so far and mirror new messages */
+void klog_mirror_off(void);                   /* boot is finished: kprintf goes to the serial port and the log only */
+void term_log(const char *s, u32 n);          /* text onto the visible workspace */
 
 /* main.c */
 void panic(const char *why) __attribute__((noreturn));
@@ -346,6 +350,7 @@ int tty_of(const struct proc *p);
 #define SYS_chown       66   /* path, uid, gid (-1 keeps one): root only */
 #define SYS_geteuid     67
 #define SYS_session     68   /* root: this is the logged-in session: its ids and environment are given to new workspace shells */
+#define SYS_klog        73   /* offset, buffer, length -> characters of the kernel log copied (0 = nothing more) */
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_mount       69   /* struct umountreq*: put a running filesystem server on a directory */

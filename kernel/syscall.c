@@ -375,6 +375,10 @@ void syscall_c(u32 *rb)
             r = rb[0] == SYS_blk_read ? blk_read(a1, a2, (void *)a3)
                                       : blk_write(a1, a2, (const void *)a3);
         break;
+    case SYS_klog:
+        if (a3 && user_ok(current, a2, a3))
+            r = (s32)klog_read(a1, (char *)a2, a3);
+        break;
     case SYS_getcwd: {
         u32 n = 0;
         while (current->cwd[n])

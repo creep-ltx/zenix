@@ -1,0 +1,26 @@
+DMESG(1)			Zenix manual
+
+NAME
+    dmesg - print the kernel message log
+
+SYNOPSIS
+    dmesg
+
+DESCRIPTION
+    Prints what the kernel has logged since boot: the same lines it writes to
+    the serial port (CPU and memory map, the Pi hardware table, the Zorro
+    boards, the disk found, driver messages, programs killed after a crash).
+    The kernel keeps the last 8 KB. The boot messages are also shown on the
+    screen while the system starts; scroll back with Shift+Up if they have
+    gone by. dmesg is how to read them again on a machine with no serial
+    cable.
+
+EXIT STATUS
+    Always 0.
+
+NOTES
+    Not done: clearing the log, following it as it grows, a level or a time
+    stamp per message. Output is plain text, one kernel message per line.
+
+SEE ALSO
+    uptime(1), docs/architecture.md

@@ -76,6 +76,14 @@ product, type, serial number, base address, size), copied from `expansion.librar
 card without any autoconfig code of its own. On a machine without Emu68 (or FS-UAE) the Pi part of the table is
 empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and the boards (`zorro: ...`).
 
+### Kernel log (`kernel/serial.c`, `dmesg`)
+
+`kprintf` writes to the serial port and into an 8 KB ring. When the display comes up (`gfx_init`), `kmain` writes the
+ring to the visible workspace and mirrors new `kprintf` output there until the boot is finished (`klog_mirror_off`
+just before the scheduler starts), so the boot messages - including every driver's init log - are on the screen of
+a machine with no serial cable (scroll back with Shift+Up). `SYS_klog` (73: offset, buffer, length) reads the ring;
+`dmesg` prints it.
+
 ### SD card driver (`kernel/emmc.c`)
 
 The Pi 4/CM4 SD slot is a standard SDHCI controller (EMMC2) at `hwinfo.emmc`. Registers are little-endian

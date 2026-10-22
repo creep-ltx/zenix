@@ -205,9 +205,10 @@ void kmain(struct bootinfo *bi)
     mem_selftest();
     cache_enable((bi->attn & 0x88) != 0);       /* 68040 or 68060 */
     kprintf("cache: instruction cache on (data cache off: no MMU to keep DMA coherent)\n");
-    if (font_ok && gfx_init() == 0)
+    if (font_ok && gfx_init() == 0) {
+        klog_to_screen();                       /* the boot messages so far, then the rest as they come */
         kprintf("display: 640x256, 1 bitplane, Copper split bar + text, ROM Topaz 8\n");
-    else
+    } else
         kprintf("display: not available (%s), serial only\n",
                 font_ok ? "out of chip RAM" : "no ROM font");
 
@@ -226,6 +227,7 @@ void kmain(struct bootinfo *bi)
         panic("cannot start the filesystem server");
     kprintf("proc: diskd %d, fsd %d, boot %d (it starts /bin/init)\n", dpid, fpid, pid);
 
+    klog_mirror_off();                          /* from here the screen belongs to the programs */
     timer_init();
     ints_on();
     bar_draw();

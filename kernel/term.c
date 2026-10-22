@@ -420,6 +420,12 @@ void term_write(int w, const char *s, u32 n)
         cursor(t, 1);
 }
 
+/* kernel log text onto the visible workspace (kprintf mirror during boot) */
+void term_log(const char *s, u32 n)
+{
+    term_write(ws_cur, s, n);
+}
+
 void term_putc(int w, char c)
 {
     term_write(w, &c, 1);
