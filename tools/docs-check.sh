@@ -33,7 +33,7 @@ if [ "$1" = "--staged" ]; then
         case "$c" in
         user/*.c)
             b=$(basename "$c" .c); n=$(echo "$b" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
-            case "$b" in libz|regex|miniz|fsd) continue;; esac
+            case "$b" in libz|regex|miniz|fsd|pw|sha) continue;; esac     # libraries and servers: no page of their own
             echo "$changed" | grep -qx "docs/man/$n.txt" || bad "$c changed but docs/man/$n.txt was not updated in this commit"
             ;;
         esac
