@@ -16,6 +16,8 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
+# programs that need more than the default 16 KB stack
+STACK_sh := 40960
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf

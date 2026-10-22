@@ -18,6 +18,7 @@ struct tty {
     int eof_pending;
     int fg;
     int mode;                   /* TTY_RAW, TTY_NOSIG */
+    int intr;                   /* ^C was typed with no foreground process: the shell polls this */
     int owner;                  /* pid that set the mode */
 };
 static struct tty *tt[NTTY];
@@ -52,6 +53,14 @@ void tty_setmode(int tty, int mode, int owner)
 }
 
 int tty_getmode(int tty) { return get(tty)->mode; }
+
+int tty_take_intr(int tty)
+{
+    struct tty *t = get(tty);
+    int v = t->intr;
+    t->intr = 0;
+    return v;
+}
 
 void tty_release(int pid)
 {
@@ -115,6 +124,8 @@ void tty_input(u8 c)
             struct proc *p = t->fg ? proc_by_pid(t->fg) : 0;
             if (p)
                 proc_kill(p);
+            else
+                t->intr = 1;
         } else {
             commit(t, c);
         }
@@ -129,6 +140,8 @@ void tty_input(u8 c)
         struct proc *p = t->fg ? proc_by_pid(t->fg) : 0;
         if (p)
             proc_kill(p);
+        else
+            t->intr = 1;                    /* the shell itself is running something: it polls */
         wake_io();
         return;
     }

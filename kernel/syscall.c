@@ -89,7 +89,7 @@ void syscall_c(u32 *rb)
         r = (s32)do_spawn(a1, a2, a3, 0);
         break;
     case SYS_wait:
-        r = proc_wait((int)a1);
+        r = proc_wait((int)a1, (int)a2);
         break;
     case SYS_sleep:
         current->wake = ticks + a1;
@@ -187,6 +187,45 @@ void syscall_c(u32 *rb)
         break;
     case SYS_ttyinfo:
         r = term_size();
+        break;
+    case SYS_envset:
+        if (a2 <= ENVMAX && user_ok(current, a1, a2)) {
+            memcpy(current->env, (const void *)a1, a2);
+            current->envlen = (u16)a2;
+            r = 0;
+        }
+        break;
+    case SYS_envget:
+        if (user_ok(current, a1, a2)) {
+            u32 n = current->envlen < a2 ? current->envlen : a2;
+            memcpy((void *)a1, current->env, n);
+            r = (s32)current->envlen;
+        }
+        break;
+    case SYS_dup:
+        if ((f = getfd(a1))) {
+            for (int i = 3; i < NFD; i++)
+                if (!current->fd[i]) {
+                    current->fd[i] = file_dup(f);
+                    r = i;
+                    break;
+                }
+        }
+        break;
+    case SYS_dup2:
+        if ((f = getfd(a1)) && a2 < NFD) {
+            if (a1 == a2) {
+                r = (s32)a2;
+            } else {
+                if (current->fd[a2])
+                    file_close(current->fd[a2]);
+                current->fd[a2] = file_dup(f);
+                r = (s32)a2;
+            }
+        }
+        break;
+    case SYS_ttyintr:
+        r = tty_take_intr(tty_of(current));
         break;
     case SYS_hrtime:
         r = (s32)hr_time();

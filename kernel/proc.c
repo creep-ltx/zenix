@@ -145,6 +145,10 @@ static int proc_load(const u8 *file, u32 fsize, const char *path, char *const *a
     p->base = (u32)base;
     p->span = span;
     p->cwd_ino = parent ? parent->cwd_ino : 2;
+    if (parent) {
+        memcpy(p->env, parent->env, parent->envlen);
+        p->envlen = parent->envlen;
+    }
     if (parent)
         memcpy(p->cwd, parent->cwd, sizeof p->cwd);
     else
@@ -302,7 +306,7 @@ void proc_exit(int code)
 }
 
 /* wait for a child; returns its exit code and releases it, -1 if none */
-int proc_wait(int pid)
+int proc_wait(int pid, int nohang)
 {
     for (;;) {
         int have = 0;
@@ -321,6 +325,8 @@ int proc_wait(int pid)
         }
         if (!have)
             return -1;
+        if (nohang)
+            return -2;
         current->wait_for = pid;
         current->state = P_WAIT;
         schedule();

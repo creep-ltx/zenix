@@ -1,0 +1,51 @@
+sleep 22
+send echo hello world\r
+sleep 2
+send X=42; echo "X is $X and ${X}0 $(echo sub)"\r
+sleep 2
+send echo 'single $X' "double $X" \\$X\r
+sleep 2
+send ls /bin/l* /etc/*\r
+sleep 2
+send echo one two three | wc -w\r
+sleep 2
+send echo abc > /tmp/f1; echo def >> /tmp/f1; cat /tmp/f1\r
+sleep 2
+send if [ -f /tmp/f1 ]; then echo exists; else echo missing; fi\r
+sleep 2
+send for i in a b c; do echo item $i; done\r
+sleep 3
+send n=0; while [ $n -lt 3 ]; do echo count $n; n=$((n+1)); done\r
+sleep 3
+send greet() { echo "hi $1"; }; greet bob\r
+sleep 2
+send alias ll='ls -l'; ll /etc\r
+sleep 2
+send true && echo yes; false || echo no; ! false && echo negated\r
+sleep 2
+send echo $?; false; echo $?\r
+sleep 2
+send cat <<EOF\r
+sleep 1
+send line one\r
+sleep 1
+send X is $X\r
+sleep 1
+send EOF\r
+sleep 2
+send echo nothere > /nonexistent/x; echo after\r
+sleep 2
+send nosuchcommand; echo status $?\r
+sleep 2
+send type cd ls greet ll nosuch\r
+sleep 2
+send export FOO=bar; sh -c 'echo child sees $FOO'\r
+sleep 3
+send set -- a b c; echo $# $1 $2 $3; shift; echo $@\r
+sleep 2
+send echo $(echo nested $(echo deep))\r
+sleep 3
+send history | tail -3\r
+sleep 2
+send echo end\r
+sleep 2

@@ -138,6 +138,7 @@ struct uproc {                  /* returned by SYS_procinfo */
 #define NPROC 16
 #define SLICE 5                 /* ticks (100 Hz) */
 #define NREG  8                 /* extra memory regions per process */
+#define ENVMAX 1024
 enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE, P_MSG };
 struct proc {                   /* start.S relies on the first three: */
     u32 *ksp;                   /*   offset 0 */
@@ -155,6 +156,8 @@ struct proc {                   /* start.S relies on the first three: */
     struct file *fd[NFD];
     int killed;
     int priv;                   /* may use the raw disk (the filesystem server) */
+    char env[ENVMAX];           /* environment: NAME=value NUL ... NUL NUL; inherited by children */
+    u16 envlen;
     struct proc *rnext;         /* run queue link */
     int queued;                 /* on the run queue */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
@@ -169,7 +172,7 @@ int proc_spawn(const char *path, char *const *argv, int argc,
 int proc_spawn_image(const void *img, u32 len, const char *name, int tty, int priv);
 void schedule(void);
 void proc_exit(int code) __attribute__((noreturn));
-int proc_wait(int pid);
+int proc_wait(int pid, int nohang);    /* nohang: -2 if children exist but none has exited */
 void proc_reap_orphans(void);
 void sched_tick(u16 sr);
 int user_ok(const struct proc *p, u32 ptr, u32 len);
@@ -237,7 +240,8 @@ long tty_read(int tty, void *buf, u32 n);
 void tty_setmode(int tty, int mode, int owner_pid);
 int tty_getmode(int tty);
 void tty_inject(int tty, const char *s);   /* bytes into the input queue, bypassing the line discipline */
-void tty_release(int pid);              /* a process exited: undo its mode */
+void tty_release(int pid);
+int tty_take_intr(int tty);             /* and clear: was ^C typed with nobody to kill? */              /* a process exited: undo its mode */
 long tty_write(int tty, const void *buf, u32 n);
 void tty_setfg(int tty, int pid);
 int tty_getfg(int tty);
@@ -286,6 +290,11 @@ int tty_of(const struct proc *p);
 #define SYS_sync        44
 #define SYS_ttymode     45   /* a1 = TTY_* flags for this process's tty */
 #define SYS_ttyinfo     46   /* rows << 16 | columns */
+#define SYS_envset      47   /* replace this process's environment (inherited by children) */
+#define SYS_envget      48
+#define SYS_dup         49   /* lowest free fd >= 3 referring to the same file */
+#define SYS_dup2        50
+#define SYS_ttyintr     51   /* did the user type ^C while this process (a shell) was the one running? */
 #define SYS_blk_ram     42   /* where the boot ramdisk is: u32[2] = address, size (disk server only) */
 #define SYS_blk_size    41   /* sectors on the disk (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */

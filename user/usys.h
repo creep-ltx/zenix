@@ -29,6 +29,7 @@ static inline int sys_getpid(void) { return sys3(4, 0, 0, 0); }
 static inline int sys_spawn(const char *path, char *const *argv, const int *stdio)
 { return sys3(5, (u32)path, (u32)argv, (u32)stdio); }
 static inline int sys_wait(int pid) { return sys3(6, (u32)pid, 0, 0); }
+static inline int sys_waitnb(int pid) { return sys3(6, (u32)pid, 1, 0); }   /* -2: not yet */
 static inline void sys_sleep(u32 ticks) { sys3(7, ticks, 0, 0); }
 static inline int sys_open(const char *p, int fl) { return sys3(8, (u32)p, (u32)fl, 0); }
 static inline int sys_close(int fd) { return sys3(9, (u32)fd, 0, 0); }
@@ -81,3 +82,8 @@ static inline int sys_sync(void) { return sys3(44, 0, 0, 0); }
 #define TTY_NOSIG 2
 static inline int sys_ttymode(int flags) { return sys3(45, (u32)flags, 0, 0); }
 static inline int sys_ttyinfo(void) { return sys3(46, 0, 0, 0); }   /* rows << 16 | columns */
+static inline int sys_envset(const char *block, u32 len) { return sys3(47, (u32)block, len, 0); }
+static inline int sys_envget(char *block, u32 max) { return sys3(48, (u32)block, max, 0); }
+static inline int sys_dup(int fd) { return sys3(49, (u32)fd, 0, 0); }
+static inline int sys_dup2(int from, int to) { return sys3(50, (u32)from, (u32)to, 0); }
+static inline int sys_ttyintr(void) { return sys3(51, 0, 0, 0); }
