@@ -205,7 +205,7 @@ void kmain(struct bootinfo *bi)
                 font_ok ? "out of chip RAM" : "no ROM font");
 
     { u32 t = rtc_read(); if (t) time_base = t - ticks / 100; }
-    if (ide_init() && !bi->ram_size)
+    if (blk_init() && !bi->ram_size)
         panic("no disk and no ramdisk");
     proc_init();
     tty_init();

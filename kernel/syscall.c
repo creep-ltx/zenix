@@ -180,7 +180,7 @@ void syscall_c(u32 *rb)
         break;
     case SYS_blk_size:
         if (current->priv)
-            r = (s32)ide_sectors();
+            r = (s32)blk_sectors();
         break;
     case SYS_ttymode:
         tty_setmode(tty_of(current), (int)a1, current->pid);
@@ -305,8 +305,8 @@ void syscall_c(u32 *rb)
         /* raw disk: only the disk server (trusted; the buffer is a client's, so
          * it is not checked against this process's own memory) */
         if (current->priv)
-            r = rb[0] == SYS_blk_read ? ide_read(a1, a2, (void *)a3)
-                                      : ide_write(a1, a2, (const void *)a3);
+            r = rb[0] == SYS_blk_read ? blk_read(a1, a2, (void *)a3)
+                                      : blk_write(a1, a2, (const void *)a3);
         break;
     case SYS_getcwd: {
         u32 n = 0;

@@ -69,6 +69,9 @@ _start:
      * It reads the Pi's hardware addresses from Emu68's device tree into the table at
      * HWINFO_ADDR (0x1100) while AmigaOS is alive. Clears the caches first: the image was
      * just DMA'd into chip RAM. Preserves everything but d0/d1/a0/a1. */
+    move.w  296(%a6),%d0            /* AttnFlags: stage0 is 68020 code, a 68000 must reach the kernel's own message */
+    and.w   #0x008E,%d0
+    beq.s   nostage0
     move.l  28(%a4),%d0
     beq.s   nostage0
     jsr     -636(%a6)               /* CacheClearU */

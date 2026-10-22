@@ -5,20 +5,24 @@
  * GetPropLen -36, GetPropName -42, GetPropValue -48, GetParent -54, GetKeyName -60. */
 struct ctx { void *db; };
 
+/* a6 is also the compiler's frame pointer, so it is never pinned to a C variable: the base is
+ * moved into it only inside the asm, with the old value saved on the stack around the call. */
 #define DT_CALL1(lvo, c, a) ({                                                   \
     register void *r_a0 __asm__("a0") = (void *)(a);                             \
-    register void *r_a6 __asm__("a6") = (c)->db;                                 \
     register void *r_d0 __asm__("d0");                                           \
-    __asm__ volatile("jsr " #lvo "(%%a6)"                                        \
-        : "=r"(r_d0), "+r"(r_a0), "+r"(r_a6) : : "d1", "a1", "cc", "memory");    \
+    void *r_base = (c)->db;                                                      \
+    __asm__ volatile("move.l %%a6,-(%%sp)\n\tmove.l %2,%%a6\n\t"                \
+                     "jsr " #lvo "(%%a6)\n\tmove.l (%%sp)+,%%a6"                 \
+        : "=r"(r_d0), "+r"(r_a0) : "a"(r_base) : "d1", "a1", "cc", "memory");    \
     r_d0; })
 #define DT_CALL2(lvo, c, a, b) ({                                                \
     register void *r_a0 __asm__("a0") = (void *)(a);                             \
     register void *r_a1 __asm__("a1") = (void *)(b);                             \
-    register void *r_a6 __asm__("a6") = (c)->db;                                 \
     register void *r_d0 __asm__("d0");                                           \
-    __asm__ volatile("jsr " #lvo "(%%a6)"                                        \
-        : "=r"(r_d0), "+r"(r_a0), "+r"(r_a1), "+r"(r_a6) : : "d1", "cc", "memory"); \
+    void *r_base = (c)->db;                                                      \
+    __asm__ volatile("move.l %%a6,-(%%sp)\n\tmove.l %3,%%a6\n\t"                \
+                     "jsr " #lvo "(%%a6)\n\tmove.l (%%sp)+,%%a6"                 \
+        : "=r"(r_d0), "+r"(r_a0), "+r"(r_a1) : "a"(r_base) : "d1", "cc", "memory"); \
     r_d0; })
 
 static inline void *dt_open(struct ctx *c, const char *path) { return DT_CALL1(-6, c, path); }

@@ -187,9 +187,10 @@ void stage0_fill(struct ctx *c, struct hwinfo *hw)
 void stage0_main(void *execbase, struct hwinfo *hw)
 {
     register void *a1 __asm__("a1") = (void *)"devicetree.resource";
-    register void *a6 __asm__("a6") = execbase;
     register void *d0 __asm__("d0");
-    __asm__ volatile("jsr -498(%%a6)" : "=r"(d0), "+r"(a1), "+r"(a6) : : "d1", "a0", "cc", "memory");
+    __asm__ volatile("move.l %%a6,-(%%sp)\n\tmove.l %2,%%a6\n\t"           /* a6 is the frame pointer: save it */
+                     "jsr -498(%%a6)\n\tmove.l (%%sp)+,%%a6"                /* exec OpenResource */
+        : "=r"(d0), "+r"(a1) : "a"(execbase) : "d1", "a0", "cc", "memory");
     u8 *z = (u8 *)hw;
     for (unsigned i = 0; i < sizeof *hw; i++)
         z[i] = 0;

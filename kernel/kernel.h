@@ -98,6 +98,18 @@ u32 ide_sectors(void);
 int ide_read(u32 lba, u32 count, void *buf);
 int ide_write(u32 lba, u32 count, const void *buf);
 
+/* blk.c: the one raw disk (IDE or SD card) behind the disk server */
+int blk_init(void);
+u32 blk_sectors(void);
+int blk_read(u32 lba, u32 count, void *buf);
+int blk_write(u32 lba, u32 count, const void *buf);
+
+/* emmc.c: the SD card of a Raspberry Pi 4 / CM4 under Emu68 (needs the hwinfo table from stage0) */
+int emmc_init(void);
+u32 emmc_sectors(void);
+int emmc_read(u32 lba, u32 count, void *buf);
+int emmc_write(u32 lba, u32 count, const void *buf);
+
 #include "ext2.h"
 
 /* ZEXE header, see tools/mkzexe.py */
