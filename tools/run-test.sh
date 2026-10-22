@@ -14,7 +14,7 @@ SERIAL=/tmp/zenix-serial
 if [ -n "$ZENIX_SERIAL" ]; then
     SERIAL="$ZENIX_SERIAL"
     ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-    sed -e "s#/tmp/zenix-serial#$SERIAL#" -e "s#\.\./build/#$ROOT/build/#g" "$CONF" > "$DIR/test.fs-uae"
+    sed -e "s#/tmp/zenix-serial#$SERIAL#" -e "s#\(\.\./\)\{1,\}build/#$ROOT/build/#g" "$CONF" > "$DIR/test.fs-uae"
     CONF="$DIR/test.fs-uae"
 fi
 
