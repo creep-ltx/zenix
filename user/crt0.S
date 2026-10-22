@@ -13,7 +13,6 @@ _entry:
     move.l  %d1,-(%sp)
     move.l  %d0,-(%sp)
     jsr     main
-    move.l  %d0,%d1
-    moveq   #1,%d0                  /* SYS_exit */
-    trap    #0
+    move.l  %d0,-(%sp)
+    jsr     _zexit                  /* flushes buffered output, then SYS_exit */
 1:  bra.s   1b

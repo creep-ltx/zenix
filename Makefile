@@ -13,7 +13,9 @@ LIBGCC  := $(shell $(CC) $(CFLAGS) -print-libgcc-file-name 2>/dev/null)
 KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
-          mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest
+          mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
+          head tail sort uniq cut tr tee seq basename dirname yes sleep true false env printenv which clear \
+          whoami hostname id uptime cmp hexdump stat expr find xargs du
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 # programs that need more than the default 16 KB stack
@@ -57,6 +59,12 @@ $(BUILD)/zenix-ram.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root
 # ---- servers built into the kernel image ----
 $(BUILD)/ext2_fsd.uo: kernel/ext2.c kernel/ext2.h user/fsenv.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -DFSD -c $< -o $@
+$(BUILD)/regex.uo: user/regex.c user/regex.h user/libz.h | $(BUILD)
+	$(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/grep.uelf: $(BUILD)/grep.uo $(BUILD)/regex.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	    $(BUILD)/crt0.o $(BUILD)/grep.uo $(BUILD)/regex.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+
 $(BUILD)/fsck_ext2.uelf: $(BUILD)/fsck_ext2.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
 	    $(BUILD)/crt0.o $(BUILD)/fsck_ext2.uo $(BUILD)/ext2_fsd.uo $(BUILD)/libz.uo $(LIBGCC) -o $@

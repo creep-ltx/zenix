@@ -140,3 +140,180 @@ int printf(const char *fmt, ...)
     if (n > 255) n = 255;
     return sys_write(1, b, (u32)n);
 }
+
+/* ---------------------------------------------------------------- more of the C library */
+char *strdup(const char *s) { u32 n = strlen(s) + 1; char *p = malloc(n); if (p) memcpy(p, s, n); return p; }
+char *strcat(char *d, const char *s) { strcpy(d + strlen(d), s); return d; }
+char *strncpy(char *d, const char *s, u32 n) { u32 i = 0; for (; i < n && s[i]; i++) d[i] = s[i]; for (; i < n; i++) d[i] = 0; return d; }
+char *strrchr(const char *s, int c) { const char *r = 0; for (;; s++) { if (*s == (char)c) r = s; if (!*s) break; } return (char *)r; }
+int memcmp(const void *a, const void *b, unsigned long n)
+{
+    const unsigned char *p = a, *q = b;
+    while (n--) { if (*p != *q) return *p - *q; p++; q++; }
+    return 0;
+}
+int isdigit(int c) { return c >= '0' && c <= '9'; }
+int isupper(int c) { return c >= 'A' && c <= 'Z'; }
+int islower(int c) { return c >= 'a' && c <= 'z'; }
+int isalpha(int c) { return isupper(c) || islower(c); }
+int isalnum(int c) { return isalpha(c) || isdigit(c); }
+int isspace(int c) { return c == ' ' || (c >= 9 && c <= 13); }
+int toupper(int c) { return islower(c) ? c - 32 : c; }
+int tolower(int c) { return isupper(c) ? c + 32 : c; }
+
+unsigned long strtoul(const char *s, char **end, int base)
+{
+    unsigned long v = 0;
+    while (isspace(*s)) s++;
+    if ((base == 0 || base == 16) && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) { s += 2; base = 16; }
+    else if (base == 0 && s[0] == '0') base = 8;
+    else if (base == 0) base = 10;
+    for (;; s++) {
+        int d = isdigit(*s) ? *s - '0' : isalpha(*s) ? tolower(*s) - 'a' + 10 : 99;
+        if (d >= base) break;
+        v = v * (unsigned long)base + (unsigned long)d;
+    }
+    if (end) *end = (char *)s;
+    return v;
+}
+long strtol(const char *s, char **end, int base)
+{
+    while (isspace(*s)) s++;
+    int neg = 0;
+    if (*s == '-') { neg = 1; s++; } else if (*s == '+') s++;
+    long v = (long)strtoul(s, end, base);
+    return neg ? -v : v;
+}
+
+/* a shell sort: small, no recursion, fine for the sizes commands see */
+void qsort(void *base, u32 n, u32 size, int (*cmp)(const void *, const void *))
+{
+    char *b = base, tmp[256];
+    if (size > sizeof tmp || n < 2) return;
+    for (u32 gap = n / 2; gap > 0; gap /= 2)
+        for (u32 i = gap; i < n; i++) {
+            memcpy(tmp, b + i * size, size);
+            u32 j = i;
+            while (j >= gap && cmp(b + (j - gap) * size, tmp) > 0) { memcpy(b + j * size, b + (j - gap) * size, size); j -= gap; }
+            memcpy(b + j * size, tmp, size);
+        }
+}
+
+int snprintf(char *buf, u32 max, const char *fmt, ...)
+{
+    char b[256]; va_list ap;
+    va_start(ap, fmt);
+    int n = vfmt(b, fmt, ap);
+    va_end(ap);
+    if (n > 255) n = 255;
+    if (max) { u32 c = (u32)n < max - 1 ? (u32)n : max - 1; memcpy(buf, b, c); buf[c] = 0; }
+    return n;
+}
+
+/* ---------------------------------------------------------------- the environment
+ * The kernel keeps NAME=value NUL ... NUL NUL per process, inherited by children;
+ * the first use copies it into a table the program owns. */
+char **environ;
+static char env_store[1024];
+static char *env_ptrs[64];
+static int env_ready;
+
+static void env_load(void)
+{
+    if (env_ready) return;
+    env_ready = 1;
+    int n = sys_envget(env_store, sizeof env_store), k = 0;
+    if (n > (int)sizeof env_store) n = (int)sizeof env_store;
+    for (int i = 0; i < n && env_store[i] && k < 63;) { env_ptrs[k++] = env_store + i; i += (int)strlen(env_store + i) + 1; }
+    env_ptrs[k] = 0;
+    environ = env_ptrs;
+}
+static void env_save(void)
+{
+    static char blk[1024];
+    u32 n = 0;
+    for (int i = 0; env_ptrs[i]; i++) { u32 l = strlen(env_ptrs[i]); if (n + l + 2 > sizeof blk) break; memcpy(blk + n, env_ptrs[i], l); n += l; blk[n++] = 0; }
+    blk[n++] = 0;
+    sys_envset(blk, n);
+}
+char *getenv(const char *name)
+{
+    env_load();
+    u32 l = strlen(name);
+    for (int i = 0; env_ptrs[i]; i++) if (!strncmp(env_ptrs[i], name, l) && env_ptrs[i][l] == '=') return env_ptrs[i] + l + 1;
+    return 0;
+}
+int unsetenv(const char *name)
+{
+    env_load();
+    u32 l = strlen(name);
+    for (int i = 0; env_ptrs[i]; i++)
+        if (!strncmp(env_ptrs[i], name, l) && env_ptrs[i][l] == '=') { for (int k = i; env_ptrs[k]; k++) env_ptrs[k] = env_ptrs[k + 1]; env_save(); return 0; }
+    return 0;
+}
+int setenv(const char *name, const char *value, int overwrite)
+{
+    env_load();
+    if (!overwrite && getenv(name)) return 0;
+    unsetenv(name);
+    int k = 0; while (env_ptrs[k]) k++;
+    if (k >= 63) return -1;
+    char *e = malloc(strlen(name) + strlen(value) + 2);
+    if (!e) return -1;
+    strcpy(e, name); strcat(e, "="); strcat(e, value);
+    env_ptrs[k] = e; env_ptrs[k + 1] = 0;
+    env_save();
+    return 0;
+}
+
+/* ---------------------------------------------------------------- buffered line reader */
+void rd_init(struct rd *r, int fd) { r->fd = fd; r->pos = r->len = r->eof = 0; }
+static int rd_fill(struct rd *r)
+{
+    if (r->eof) return 0;
+    int n = sys_read(r->fd, r->buf, sizeof r->buf);
+    if (n <= 0) { r->eof = 1; return 0; }
+    r->pos = 0; r->len = n;
+    return 1;
+}
+int rd_getc(struct rd *r)
+{
+    if (r->pos >= r->len && !rd_fill(r)) return -1;
+    return (unsigned char)r->buf[r->pos++];
+}
+int rd_getline(struct rd *r, char **line, u32 *cap)
+{
+    u32 n = 0;
+    if (!*line) { *cap = 128; *line = malloc(*cap); if (!*line) return -1; }
+    int c = rd_getc(r);
+    if (c < 0) return -1;
+    for (; c >= 0 && c != '\n'; c = rd_getc(r)) {
+        if (n + 2 > *cap) { char *nb = malloc(*cap * 2); if (!nb) break; memcpy(nb, *line, n); *line = nb; *cap *= 2; }
+        (*line)[n++] = (char)c;
+    }
+    (*line)[n] = 0;
+    return (int)n;
+}
+
+/* ---------------------------------------------------------------- buffered output */
+static char obuf[4096]; static u32 olen;
+void oflush(void) { if (olen) { int r = sys_write(1, obuf, olen); olen = 0; if (r < 0) sys_exit(141); } }   /* the reader is gone: end, as SIGPIPE would */
+void oputn(const char *s, u32 n)
+{
+    if (n >= sizeof obuf) { oflush(); if (sys_write(1, s, n) < 0) sys_exit(141); return; }
+    if (olen + n > sizeof obuf) oflush();
+    memcpy(obuf + olen, s, n); olen += n;
+}
+void oputs(const char *s) { oputn(s, strlen(s)); }
+void oputc(int c) { char b = (char)c; oputn(&b, 1); }
+int oprintf(const char *fmt, ...)
+{
+    char b[256]; va_list ap;
+    va_start(ap, fmt);
+    int n = vfmt(b, fmt, ap);
+    va_end(ap);
+    if (n > 255) n = 255;
+    oputn(b, (u32)n);
+    return n;
+}
+void _zexit(int status) { oflush(); sys_exit(status); for (;;); }

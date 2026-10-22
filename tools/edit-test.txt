@@ -1,0 +1,36 @@
+sleep 22
+send echo one\r
+sleep 2
+send \x1b[A
+sleep 1
+send \r
+sleep 2
+send ls /bi\t
+sleep 1
+send n/ca\t
+sleep 1
+send \r
+sleep 2
+send ls /bin/m\t\t
+sleep 2
+send \x15
+send echo cleared\r
+sleep 2
+send world\x01echo \r
+sleep 2
+send echoo\x7f ok\r
+sleep 2
+send echo ac\x1b[Db\r
+sleep 2
+send echo one two\x17three\r
+sleep 2
+send echo $HO\t\r
+sleep 2
+send cd /etc\r
+sleep 1
+send pwd\r
+sleep 2
+send echo hist\r
+sleep 1
+send \x1b[A\x1b[A\x1b[B\r
+sleep 2

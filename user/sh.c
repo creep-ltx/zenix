@@ -726,18 +726,24 @@ static struct node *parse_list(const char *const *stops)
     skip_nl();
     if (at_eof()) { lex_incomplete = 1; syn("unexpected end of input"); return 0; }
     if (at_stop(stops)) { syn("empty command list"); return 0; }
-    struct node *res = parse_andor(stops); if (!res) return 0;
+    struct node *first = parse_andor(stops); if (!first) return 0;
+    struct node *head = 0, *tail = 0, *cur = first;
     for (;;) {
         struct tok *t = peek();
-        if (is_op(t, "&")) { ti++; struct node *b = new_node(N_BG); b->a = res; res = b; }
+        if (is_op(t, "&")) { ti++; struct node *bg = new_node(N_BG); bg->a = cur; cur = bg; }
         else if (is_op(t, ";") || (t && t->type == T_NL)) ti++;
-        else break;
+        else {
+            if (!head) return cur;                                 /* one statement: no chain */
+            struct node *w = new_node(N_SEQ); w->a = cur; tail->b = w; tail = w;
+            return head;
+        }
         for (;;) { t = peek(); if (is_op(t, ";") || (t && t->type == T_NL)) ti++; else break; }
-        if (at_eof() || at_stop(stops)) break;
-        struct node *next = parse_andor(stops); if (!next) return 0;
-        struct node *s = new_node(N_SEQ); s->a = res; s->b = next; res = s;
+        /* cur is complete: link it into the chain (right-leaning: executed by a loop, never recursion) */
+        struct node *w = new_node(N_SEQ); w->a = cur;
+        if (!head) head = tail = w; else { tail->b = w; tail = w; }
+        if (at_eof() || at_stop(stops)) return head;
+        cur = parse_andor(stops); if (!cur) return 0;
     }
-    return res;
 }
 
 /* ================================================================ arithmetic: $(( ... )) */
@@ -963,7 +969,10 @@ static int expand_dollar(const char *w, int i, int quoted)
         if (!w[e]) { fpush('$', quoted); return i + 1; }
         char *body = adupn(w + i + 2, (u32)(e - i - 2));
         int len_op = body[0] == '#';
-        char *name = body + len_op; char *op = name; while (is_name_c((unsigned char)*op, op == name)) op++;
+        char *name = body + len_op; char *op = name;
+        if (isdigit((unsigned char)*op)) { while (isdigit((unsigned char)*op)) op++; }
+        else if (*op && strchr("?#$!@*", *op)) op++;
+        else while (is_name_c((unsigned char)*op, op == name)) op++;
         char *def = 0; int mode = 0;
         if (*op == ':' && (op[1] == '-' || op[1] == '=' || op[1] == '+')) { mode = op[1]; def = op + 2; }
         else if (*op == '-' || *op == '+') { mode = *op; def = op + 1; }
@@ -1206,7 +1215,7 @@ static int run_words(char **argv, int argc, int *pidout, int background)
     /* alias on the first word (once) */
     struct alias *al = alias_find(argv[0]);
     if (al && !background) {
-        char *nv[64]; int nn = 0;
+        char **nv = aalloc(64 * sizeof(char *)); int nn = 0;
         char *v = adup(al->val); char *p = v;
         while (*p && nn < 40) { while (is_space(*p)) p++; if (!*p) break; nv[nn++] = p; while (*p && !is_space(*p)) p++; if (*p) *p++ = 0; }
         for (int i = 1; i < argc && nn < 63; i++) nv[nn++] = argv[i];
@@ -1232,11 +1241,12 @@ static int expand_command(struct node *n, char **argv, int max)
 
 static int run_simple(struct node *n, int background, int *pidout)
 {
-    char *argv[96]; int argc = expand_command(n, argv, 96);
+    char *mark = abrk;                                      /* released when the command is done */
+    char **argv = aalloc(96 * sizeof(char *)); int argc = expand_command(n, argv, 96);
     struct rsave rs; rs_init(&rs);
     int st = 0;
     /* assignments */
-    char *saved_names[24]; char *saved_vals[24]; int saved_had[24];
+    char **saved_names = aalloc(24 * sizeof(char *)); char **saved_vals = aalloc(24 * sizeof(char *)); int *saved_had = aalloc(24 * sizeof(int));
     for (int i = 0; i < n->nassign; i++) {
         char *eq = strchr(n->assign[i], '='); *eq = 0;
         char *val = expand_plain(eq + 1);
@@ -1248,10 +1258,11 @@ static int run_simple(struct node *n, int background, int *pidout)
         *eq = '=';
         env_dirty = 1;
     }
-    if (n->redirs && apply_redirs(n->redirs, &rs)) { rs_restore(&rs); return 1; }
+    if (n->redirs && apply_redirs(n->redirs, &rs)) { rs_restore(&rs); abrk = mark; return 1; }
     if (argc) st = run_words(argv, argc, pidout, background);
     rs_restore(&rs);
     if (argc) for (int i = 0; i < n->nassign; i++) { if (saved_had[i]) var_set(saved_names[i], saved_vals[i], -1); else var_unset(saved_names[i]); env_dirty = 1; }
+    if (!background && !pidout) abrk = mark;
     return st;
 }
 
@@ -1260,7 +1271,7 @@ static int spawn_stage(struct node *c, int background_text_only)
 {
     (void)background_text_only;
     if (c->type == N_SIMPLE && !c->nassign) {
-        char *argv[96]; int argc = expand_command(c, argv, 96);
+        char **argv = aalloc(96 * sizeof(char *)); int argc = expand_command(c, argv, 96);
         if (argc && !func_find(argv[0]) && !is_builtin(argv[0]) && !alias_find(argv[0])) {
             struct rsave rs; rs_init(&rs);
             if (c->redirs && apply_redirs(c->redirs, &rs)) { rs_restore(&rs); return -1; }
@@ -1340,11 +1351,17 @@ static int exec_node(struct node *n)
     case N_PIPE: st = run_pipeline(n, 0, 0); break;
     case N_AND: st = exec_node(n->a); if (st == 0 && !exit_requested) st = exec_node(n->b); break;
     case N_OR: st = exec_node(n->a); if (st != 0 && !exit_requested) st = exec_node(n->b); break;
-    case N_SEQ: exec_node(n->a); if (exit_requested || loop_break || loop_continue || func_return) return last_status; st = exec_node(n->b); break;
+    case N_SEQ: {
+        for (struct node *c = n; c; c = c->b) {
+            st = exec_node(c->a);
+            if (exit_requested || loop_break || loop_continue || func_return || interrupted) break;
+        }
+        break;
+    }
     case N_BG: {
         struct node *a = n->a; int pid = 0;
         if (a->type == N_SIMPLE && !a->nassign) {
-            char *argv[96]; int argc = expand_command(a, argv, 96);
+            char **argv = aalloc(96 * sizeof(char *)); int argc = expand_command(a, argv, 96);
             struct rsave rs; rs_init(&rs);
             if (argc && !func_find(argv[0]) && !is_builtin(argv[0]) && !alias_find(argv[0])) {
                 if (!a->redirs || !apply_redirs(a->redirs, &rs)) { pid = start_program(argv); if (pid < 0) pid = 0; }
@@ -1384,7 +1401,7 @@ static int exec_node(struct node *n)
         }
         break;
     case N_FOR: {
-        char *items[160]; int ni = 0;
+        char **items = aalloc(160 * sizeof(char *)); int ni = 0;
         if (n->nwords < 0) { for (int i = 0; i < npos && ni < 159; i++) items[ni++] = pos_arg[i]; }
         else for (int i = 0; i < n->nwords; i++) expand_word(n->words[i], items, &ni, 159);
         st = 0;
