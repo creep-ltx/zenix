@@ -20,6 +20,8 @@ build/zenixfs-tool ls disk.zenixfs -l /stuff ; build/zenixfs-tool cat disk.zenix
 build/zenixfs-tool get disk.zenixfs -r /stuff ~/copy ; build/zenixfs-tool fsck disk.zenixfs
 ```
 Commands: `mkfs info fsck ls stat cat put get mkdir rm rmdir mv ln` (options always after the image name; see the top of `zenixfs/tools/zenixfs-tool.c`).
+**Stress test of the mount:** `make -C zenixfs fuse-stress` (a few seconds) or `ARGS="--heavy --rounds 3" make -C zenixfs fuse-stress` (about 4 minutes): thousands of small files, a directory with 15,000 entries, random reads/writes/truncates compared with an in-memory copy (alone and in four processes at once), renames, hard and symbolic links, a 120 MB file, nine kills of the filesystem process while four processes write (the volume must pass `fsck` each time), a full small volume (ENOSPC and recovery), and a final unmount/fsck/remount that compares every file. *Verified* 2026-10-22: 3 heavy rounds, 0 failures.
+
 **Mount it as a folder** (needs fuse3): `make build/zenixfs-fuse`, then `build/zenixfs-fuse disk.zenixfs /mnt/point` and `fusermount3 -u /mnt/point`. It is single-threaded
 and commits on close, `fsync`, when the cache fills and at unmount. `make fuse-test` copies trees through the mount, and kills the filesystem process with `kill -9` in the middle of a
 big copy eight times: every image must still pass `fsck`. *Verified* on 2026-10-22 (fuse3 3.18.3). Speed through FUSE says little about ZenixFS itself.

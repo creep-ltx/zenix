@@ -37,6 +37,10 @@ build/zbench: tests/zbench.c $(LIB) zenixfs.h host/zdev.h | build
 longtest: build/ztest
 	build/ztest 1 bigpower
 
+# stress test of the mount (needs fuse3): quick by default; ARGS="--heavy --rounds 3" for the long one
+fuse-stress: build/zenixfs-tool build/zenixfs-fuse
+	ARGS="$(ARGS)" bash tests/fuse-stress.sh
+
 fuse-test: build/zenixfs-tool build/zenixfs-fuse
 	bash tests/fuse-test.sh
 
@@ -51,4 +55,4 @@ asan:
 
 clean:
 	rm -rf build
-.PHONY: all test longtest fuse-test bench image asan clean
+.PHONY: all test longtest fuse-stress fuse-test bench image asan clean
