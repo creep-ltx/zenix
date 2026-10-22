@@ -315,17 +315,11 @@ int ext2_readlink(const struct inode *in, char *buf, u32 max)
 u32 ext2_uid, ext2_gid, ext2_umask = 022;
 int ext2_enforce, ext2_denied;          /* ext2_denied: the last failure was a permission failure */
 
-int ext2_access(const struct inode *in, int want)       /* want: 4 read, 2 write, 1 execute */
+int ext2_access(const struct inode *in, int want)       /* want: FSP_R, FSP_W, FSP_X; the rules are in fsperm.h */
 {
     if (!ext2_enforce)
         return 1;
-    int ok;
-    if (ext2_uid == 0) {
-        ok = !(want & 1) || S_ISDIR(in->mode) || (in->mode & 0111);
-    } else {
-        int sh = ext2_uid == in->uid ? 6 : ext2_gid == in->gid ? 3 : 0;
-        ok = (((in->mode >> sh) & 7) & want) == want;
-    }
+    int ok = fsp_access(ext2_uid, ext2_gid, in->mode, in->uid, in->gid, want);
     if (!ok)
         ext2_denied = 1;
     return ok;
@@ -795,7 +789,7 @@ static int new_inode(struct inode *out, u32 mode, int is_dir)
 /* create an empty regular file in dir */
 int ext2_create(struct inode *dir, const char *name, struct inode *out)
 {
-    if (new_inode(out, S_IFREG | (0666 & ~ext2_umask & 07777), 0))
+    if (new_inode(out, S_IFREG | fsp_new_file_mode(ext2_umask), 0))
         return -1;
     if (ext2_iput(out) || dir_add(dir, name, strlen_(name), out->ino)) {
         free_inode(out->ino, 0);
@@ -811,7 +805,7 @@ int ext2_mkdir(struct inode *dir, const char *name)
     u32 tmp;
     if (ext2_lookup(dir, name, len, &tmp) == 0)
         return -2;                      /* exists */
-    if (new_inode(&d, S_IFDIR | (0777 & ~ext2_umask & 07777), 1))
+    if (new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1))
         return -1;
     u32 blk = bmap_alloc(&d, 0);
     if (!blk) {

@@ -276,7 +276,8 @@ outputs (`tools/cmds-test.sh`).
 - A program file with the **set-user-id bit** (mode 04000) runs with its owner's effective uid (`proc_spawn`): this
   is how `su` and `passwd` work for ordinary users.
 - `ipc_call` stamps every message with the caller's uid, gid and umask (`struct umsg`), so the **filesystem server
-  decides**: `ext2_access` checks r/w/x (owner, then group, then other; root passes, except that executing needs
+  decides**. The rules are in one dependency-free header, `kernel/fsperm.h`, that every filesystem server
+  includes (ext2 today, ZenixFS next); `ext2_access` applies them to ext2 inodes. In words: `ext2_access` checks r/w/x (owner, then group, then other; root passes, except that executing needs
   at least one x bit); `ext2_namei` demands x on every directory searched; creating, removing, renaming and linking
   need w+x on the directory; opening needs r and/or w (and x with `O_EXEC`, which the kernel adds when it loads
   a program); `chmod` is for the owner and root; `chown` for root; a **sticky** directory (`/tmp`, 1777) only lets

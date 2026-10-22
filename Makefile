@@ -85,7 +85,7 @@ $(BUILD)/zenix-ram.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-ram.img
 
 # ---- servers built into the kernel image ----
-$(BUILD)/ext2_fsd.uo: kernel/ext2.c kernel/ext2.h user/fsenv.h user/libz.h | $(BUILD)
+$(BUILD)/ext2_fsd.uo: kernel/ext2.c kernel/ext2.h kernel/fsperm.h user/fsenv.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -DFSD -c $< -o $@
 $(BUILD)/regex.uo: user/regex.c user/regex.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@

@@ -2,6 +2,8 @@
 /* ext2 definitions shared by the filesystem server (user mode) and the kernel.
  * Needs u8/u16/u32 from the including file. */
 
+#include "fsperm.h"                 /* the permission rules shared by every filesystem server */
+
 #define S_IFMT  0170000
 #define S_IFDIR 0040000
 #define S_IFREG 0100000
