@@ -54,5 +54,5 @@ where a command is smaller than its Unix namesake.
 `tools/mkman.py` builds a page from the comment at the top of each program's source, and a hand-written
 `rootfs/usr/man/NAME.txt` replaces the generated one. To install these pages, copy `docs/man/*.txt` to
 `rootfs/usr/man/`. Two cautions: the RAM-disk test image (`build/zenix-ram.adf`) is only 640 KB with 128 inodes,
-and these pages are about 150 KB in about 75 files, so they will not all fit there; and `man -k` reads only the
+and these pages are about 51 KB in 72 files, which uses most of the 128 inodes with the existing files, so check before adding them there; and `man -k` reads only the
 first 2 KB of each page.
