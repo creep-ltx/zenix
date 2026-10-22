@@ -1,0 +1,18 @@
+TIMEOUT(1)		Zenix manual
+
+NAME
+    timeout - run a command with a time limit
+
+SYNOPSIS
+    timeout seconds command [argument...]
+
+DESCRIPTION
+    Runs the command and ends it if it is still running after the number of
+    seconds.
+
+EXIT STATUS
+    The command's own status; 124 if it was ended for taking too long;
+    127 if it cannot be run.
+
+SEE ALSO
+    kill(1), time(1)

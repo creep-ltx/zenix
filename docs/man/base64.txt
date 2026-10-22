@@ -1,0 +1,18 @@
+BASE64(1)		Zenix manual
+
+NAME
+    base64 - encode or decode base64
+
+SYNOPSIS
+    base64 [-d] [-w columns] [file]
+
+DESCRIPTION
+    Writes the file (or standard input) as base64 text in lines of 76
+    characters (-w sets the width, 0 for no breaks). With -d it decodes,
+    ignoring line breaks.
+
+EXIT STATUS
+    0, 1 if a file or process could not be used, 2 for a wrong option.
+
+SEE ALSO
+    sha256sum(1)

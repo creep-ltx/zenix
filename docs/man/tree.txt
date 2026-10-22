@@ -1,0 +1,21 @@
+TREE(1)		Zenix manual
+
+NAME
+    tree - show a directory tree
+
+SYNOPSIS
+    tree [-a] [-d] [directory...]
+
+DESCRIPTION
+    Lists the directory (default .) and everything below it, indented with
+    |-- and `-- lines, and a count at the end. -a includes names that start
+    with a dot; -d shows directories only.
+
+NOTES
+    Drawn with plain ASCII characters.
+
+EXIT STATUS
+    0, 2 for a wrong option.
+
+SEE ALSO
+    ls(1), find(1)

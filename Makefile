@@ -16,11 +16,12 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
           head tail sort uniq cut tr tee seq basename dirname yes sleep true false env printenv which clear \
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
-          sed diff chmod ln readlink date less edit man gzip tar login su passwd chown sha256sum printf mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
+          sed diff chmod ln readlink date less edit man gzip tar login su passwd chown sha256sum printf \
+          tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 # programs that need more than the default 16 KB stack
-STACK_sh := 40960
+STACK_sh := 24576
 STACK_gzip := 32768
 STACK_edit := 32768
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
@@ -64,8 +65,11 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py
 $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@
 
-# the floppy has room for about 790 KB of root filesystem: the editor, pager, archive, search and mount tools stay off the RAM image (it only serves the RAM-boot and disk-tool tests)
-RAMAPPS := $(filter-out gzip tar sha256sum edit less sed diff man find xargs du hexdump cmp mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs,$(UAPPS))
+# The floppy has room for about 780 KB of root filesystem after the kernel. The RAM-disk image only serves the RAM-boot
+# and disk-tool tests, so it gets a fixed short list of programs instead of everything (a new program does not need
+# adding here, and cannot overflow the image).
+RAMAPPS := init login sh ls cat echo pwd ps free wc hello crash uname df fdisk mkfs_ext2 fsck_ext2 sync mkdir rmdir rm cp mv \
+           touch head tail sleep true false chmod id whoami su passwd chown ln stat cmp date env printenv
 # the mount tests (tools/mounttest.sh) boot their own small floppy: the standard RAM image is full
 MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount mount.ext2 \
              mount.zenixfs mkfs_zenixfs fsck_zenixfs su id whoami chmod touch wc head tail ps stat uname sleep true false env passwd
@@ -73,7 +77,7 @@ MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sy
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.
 $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
-	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" 768K 128
+	NOMAN=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" 768K 128
 
 $(BUILD)/root-mount.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
 	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" 768K 128

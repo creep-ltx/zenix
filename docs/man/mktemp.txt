@@ -1,0 +1,23 @@
+MKTEMP(1)		Zenix manual
+
+NAME
+    mktemp - make a unique temporary file
+
+SYNOPSIS
+    mktemp [-d] [-p dir] [template]
+
+DESCRIPTION
+    Creates an empty file (a directory with -d) whose name is the template
+    with its trailing X characters replaced by random ones, and prints the
+    name. The default template is tmp.XXXXXX in /tmp (or the -p directory).
+    The file is made readable only by its owner.
+
+NOTES
+    Names are not guaranteed unpredictable: the random numbers come from the
+    clock.
+
+EXIT STATUS
+    0, 1 if the file cannot be created, 2 for a wrong template or option.
+
+SEE ALSO
+    sh(1)

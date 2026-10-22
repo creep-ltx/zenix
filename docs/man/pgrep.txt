@@ -1,0 +1,19 @@
+PGREP(1)		Zenix manual
+
+NAME
+    pgrep - find processes by name
+
+SYNOPSIS
+    pgrep [-lx] name   /   pkill [-x] name
+
+DESCRIPTION
+    pgrep prints the ids of processes whose program name contains name (-x:
+    is exactly name; -l: also the name). pkill ends them. Neither matches
+    itself or the shell that started it. Exit status 0 if any process
+    matched.
+
+EXIT STATUS
+    0 if a process matched, 1 if none did, 2 for a wrong option.
+
+SEE ALSO
+    ps(1), kill(1)

@@ -1,0 +1,19 @@
+KILL(1)		Zenix manual
+
+NAME
+    kill - end, stop or continue a process
+
+SYNOPSIS
+    kill [-s NAME | -NAME] pid...
+
+DESCRIPTION
+    Ends each process. -STOP (or -TSTP) stops it and -CONT continues it, as
+    Ctrl+Z and fg do; every other signal name or number ends it, because
+    there are no signal handlers yet. kill -l lists the names. The shell
+    also has a kill that understands %n job numbers.
+
+EXIT STATUS
+    0, 1 if a process does not exist or may not be signalled.
+
+SEE ALSO
+    sh(1), ps(1), pgrep(1)

@@ -1,0 +1,27 @@
+NL(1)		Zenix manual
+
+NAME
+    nl - number lines
+
+SYNOPSIS
+    nl [-b a|t|n] [-n ln|rn|rz] [-w width] [-s separator]
+       [-v first] [-i step] [file]
+
+DESCRIPTION
+    Copies the file (or standard input) with a line number in front of each
+    line.
+
+    -b a    number all lines
+    -b t    number only non-empty lines (the default)
+    -b n    number no lines
+    -n ln   left aligned    -n rn   right aligned (default)
+    -n rz   padded with zeros
+    -w N    width of the number (default 6)
+    -s STR  text after the number (default TAB)
+    -v N    first number (1)        -i N   step (1)
+
+EXIT STATUS
+    0, 1 if the file cannot be read, 2 for a wrong option.
+
+SEE ALSO
+    cat(1)

@@ -1,0 +1,16 @@
+PKILL(1)		Zenix manual
+
+NAME
+    pkill - end processes by name
+
+SYNOPSIS
+    pkill [-x] name
+
+DESCRIPTION
+    Same program as pgrep(1) (a link to it): ends the matching processes.
+
+EXIT STATUS
+    0 if a process matched, 1 if none did, 2 for a wrong option.
+
+SEE ALSO
+    pgrep(1)

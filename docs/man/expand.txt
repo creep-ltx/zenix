@@ -1,0 +1,17 @@
+EXPAND(1)		Zenix manual
+
+NAME
+    expand - turn tabs into spaces
+
+SYNOPSIS
+    expand [-t N] [file...]
+
+DESCRIPTION
+    Copies the files replacing each TAB by spaces up to the next tab stop
+    (every N columns, default 8).
+
+EXIT STATUS
+    0, 1 if a file or process could not be used, 2 for a wrong option.
+
+SEE ALSO
+    cat(1)

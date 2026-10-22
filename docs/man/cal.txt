@@ -1,0 +1,18 @@
+CAL(1)		Zenix manual
+
+NAME
+    cal - show a calendar
+
+SYNOPSIS
+    cal [[month] year]
+
+DESCRIPTION
+    Prints the calendar of the current month, of a month in a year (cal 3
+    2027), or of a whole year (cal 2027). Weeks start on Sunday. Today is
+    shown in reverse video when output goes to the terminal.
+
+EXIT STATUS
+    0, 2 for a bad month or year.
+
+SEE ALSO
+    date(1)

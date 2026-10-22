@@ -1,0 +1,25 @@
+sleep 26
+send cal 2 2024\r
+sleep 3
+send tree -d /home\r
+sleep 3
+send time sleep 1\r
+sleep 4
+send sleep 411 &\r
+sleep 2
+send pgrep sleep | wc -l; pgrep -l sleep | cut -d' ' -f2\r
+sleep 3
+send kill -STOP %1; sleep 1; echo stopped=$(ps | grep -c stopped)\r
+sleep 4
+send kill -CONT %1; sleep 1; echo stopped=$(ps | grep -c stopped)\r
+sleep 4
+send pkill sleep; sleep 1; pgrep sleep; echo gone=$?\r
+sleep 4
+send watch -n 1 echo tick\r
+sleep 4
+send \x03
+sleep 2
+send echo after-watch\r
+sleep 3
+send tac /etc/group | head -n 1; rev /etc/group | head -n 1; printf '%s\\n' x y | paste -s -d+\r
+sleep 3

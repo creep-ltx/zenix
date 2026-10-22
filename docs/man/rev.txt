@@ -1,0 +1,17 @@
+REV(1)		Zenix manual
+
+NAME
+    rev - reverse each line
+
+SYNOPSIS
+    rev [file...]
+
+DESCRIPTION
+    Writes every line with its characters in reverse order. Bytes are
+    reversed, so UTF-8 text with multi-byte characters comes out wrong.
+
+EXIT STATUS
+    0, 1 if a file or process could not be used, 2 for a wrong option.
+
+SEE ALSO
+    tac(1)

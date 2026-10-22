@@ -50,3 +50,22 @@ t tar2;      tar cf - fruit.txt colon.txt | gzip -c | gunzip | tar tf -; tar cf 
 t printf;     printf '%d|%5d|%-5d|%05d|%+d|% d\n' 42 42 42 42 42 42; printf '%x %X %o %#x %#o\n' 255 255 8 255 8; printf '%s|%10s|%-10s|%.3s|%10.3s|\n' hello hello hello hello hello
 t printf2;    printf '%c%c\n' abc xyz; printf '[%*d] [%-*d] [%.*s]\n' 6 7 6 7 2 abcdef; printf 'a\tb\\n\x41\101|\n'; printf '%d %d\n' 1 2 3 4 5; printf '%b\n' 'x\ty'; printf '%d %d %d %d\n' -5 0x1f 010 "'A"; printf '%5s|%-5s|\n' abcdefgh ab; printf '%%|%s|\n'
 t printf3;    printf '%s\n' 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789; printf '%s|\n' 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789 | wc -c; printf 'no newline'; echo
+t case;       for w in foo bar baz.txt "a b" ""; do case "$w" in foo) echo foo-exact;; b*r|b*z) echo b-star;; *.txt) echo txt;; "a b") echo quoted;; "") echo empty;; *) echo other;; esac; done; case x in (x) echo paren;; esac; case yy in y|yy) echo alt ;; esac
+t case2;      n=5; case $n in [0-9]) echo digit;; *) echo no;; esac; case abc in a?c) echo q;; esac; case "*" in "*") echo star-quoted;; esac; case b in a) echo a;; b) echo b ;; esac
+t trim;       v=archive.tar.gz; echo ${v%.gz} ${v%%.*} ${v#*.} ${v##*.} ${v#arch} ${v/tar/TAR} ${v//a/A} ${v:3} ${v:3:4} ${#v}; p=/usr/local/bin/tool; echo ${p##*/} ${p%/*} ${p%%/*} ${p#/}
+t brace;      echo {a,b,c}x; echo pre{1,2}post; echo {1..5}; echo {a..e}; echo {01..03}; echo {1..10..3}; echo x{a,b}{1,2}; echo {5..1}; echo {,a}b; echo '{a,b}'; echo "{a,b}"; echo ${HOME:+{1,2}} | wc -w
+t trap;       (trap 'echo trapped' EXIT; echo body); echo after
+t tac;        tac fruit.txt; printf 'a\nb\nc\n' | tac; printf 'one\ntwo' | tac | od -c 2>/dev/null | head -n 0
+t rev;        rev fruit.txt | head -n 3; echo abc | rev
+t nl;         nl fruit.txt | head -n 4; nl -ba -w3 -s: fruit.txt | head -n 3; nl -n rz -w4 text.txt | head -n 2; nl -n ln -w3 -i5 -v10 fruit.txt | head -n 3
+t fold;       echo 'the quick brown fox jumps over the lazy dog' | fold -w 10; echo 'the quick brown fox jumps over the lazy dog' | fold -s -w 12
+t paste;      paste fruit.txt text.txt | head -n 3; paste -d, fruit.txt text.txt | head -n 2; paste -s -d: colon.txt; paste -s fruit.txt | wc -l
+t comm;       printf 'a\nb\nc\n' > /tmp/c1; printf 'b\nc\nd\n' > /tmp/c2; comm /tmp/c1 /tmp/c2; comm -12 /tmp/c1 /tmp/c2; comm -3 /tmp/c1 /tmp/c2; comm -23 /tmp/c1 /tmp/c2
+t expand;     printf 'a\tb\tc\n' | expand; printf 'abc\tx\n' | expand -t 4
+t base64;     echo hello | base64; echo aGVsbG8K | base64 -d; printf 'a' | base64; printf 'ab' | base64; printf 'abc' | base64; head -c 100 fruit.txt | base64 | base64 -d | cmp - fruit.txt 2>/dev/null; echo rc=$?
+t md5sum;     md5sum fruit.txt text.txt; printf '' | md5sum; echo -n abc | md5sum
+t realpath;   basename $(realpath ./sub/..); basename $(realpath -e fruit.txt); realpath /usr/../tmp; realpath -e /nonexistent-zz 2>/dev/null; echo rc=$?
+t mktemp;     f=$(mktemp); [ -f $f ] && echo made; rm $f; d=$(mktemp -d); [ -d $d ] && echo dir; rmdir $d; f=$(mktemp /tmp/zzXXXXXX); echo $f | grep -c '^/tmp/zz'; rm $f
+t timeout;    timeout 1 sleep 5; echo rc=$?; timeout 5 true; echo rc=$?; timeout 5 sh -c 'exit 3'; echo rc=$?
+t subshell;   x=local; echo $x | cat; f() { echo in-f-$1; }; f a | cat; v=$(f b); echo $v; (f c); set -- p1 "p 2"; echo "$1|$2" | cat; ( echo "$#" ); y='it'"'"'s'; echo "$y" | cat; echo $(echo $x)
+t substr2;    v=abcdef; echo ${v:1:-1} ${v:2:-3} ${v:0:-6}x

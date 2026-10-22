@@ -21,6 +21,7 @@ where a command is smaller than its Unix namesake.
 | [mkdir](man/mkdir.txt), [rmdir](man/rmdir.txt), [touch](man/touch.txt) | make/remove directories, create files |
 | [ln](man/ln.txt), [readlink](man/readlink.txt) | hard and symbolic links |
 | [chmod](man/chmod.txt), [chown](man/chown.txt) ([chgrp](man/chgrp.txt)), [stat](man/stat.txt) | permission bits, owner and group, file information |
+| [tree](man/tree.txt) | a directory as a tree |
 | [find](man/find.txt), [xargs](man/xargs.txt), [du](man/du.txt), [df](man/df.txt) | search a tree, space used, space free |
 | [pwd](man/pwd.txt), [basename](man/basename.txt), [dirname](man/dirname.txt) | paths |
 | [tar](man/tar.txt), [gzip](man/gzip.txt) ([gunzip](man/gunzip.txt), [zcat](man/zcat.txt)) | archives and compression |
@@ -31,7 +32,9 @@ where a command is smaller than its Unix namesake.
 | [grep](man/grep.txt) | search (POSIX extended expressions) |
 | [sed](man/sed.txt) | stream editor |
 | [sort](man/sort.txt), [uniq](man/uniq.txt), [cut](man/cut.txt), [tr](man/tr.txt), [tee](man/tee.txt) | filters |
-| [head](man/head.txt), [tail](man/tail.txt), [wc](man/wc.txt) | parts and counts |
+| [head](man/head.txt), [tail](man/tail.txt), [tac](man/tac.txt), [rev](man/rev.txt), [nl](man/nl.txt), [wc](man/wc.txt) | parts, reversed, numbered, counts |
+| [fold](man/fold.txt), [expand](man/expand.txt), [paste](man/paste.txt), [comm](man/comm.txt) | wrap, tabs, merge, compare sorted |
+| [base64](man/base64.txt), [md5sum](man/md5sum.txt) | encoding and checksum |
 | [diff](man/diff.txt), [cmp](man/cmp.txt), [hexdump](man/hexdump.txt) | compare, dump |
 | [echo](man/echo.txt), [printf](man/printf.txt), [seq](man/seq.txt), [yes](man/yes.txt), [expr](man/expr.txt) | generate and calculate |
 | [less](man/less.txt) / [more](man/more.txt), [edit](man/edit.txt) | pager and editor |
@@ -42,6 +45,7 @@ where a command is smaller than its Unix namesake.
 |---|---|
 | [sh](man/sh.txt) | the shell |
 | [ps](man/ps.txt), [free](man/free.txt), [uptime](man/uptime.txt), [uname](man/uname.txt), [date](man/date.txt), [sleep](man/sleep.txt) | system state and time |
+| [kill](man/kill.txt), [pgrep](man/pgrep.txt) ([pkill](man/pkill.txt)), [time](man/time.txt), [timeout](man/timeout.txt), [watch](man/watch.txt), [cal](man/cal.txt), [mktemp](man/mktemp.txt), [realpath](man/realpath.txt) | processes, timing, calendar, temporary files, real paths |
 | [env](man/env.txt), [printenv](man/printenv.txt), [which](man/which.txt), [whoami](man/whoami.txt), [id](man/id.txt), [hostname](man/hostname.txt), [clear](man/clear.txt), [true](man/true.txt), [false](man/false.txt) | small utilities |
 | [login](man/login.txt), [su](man/su.txt), [passwd](man/passwd.txt), [sha256sum](man/sha256sum.txt) | users: sessions, switching user, passwords, checksums |
 | [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [mkfs.zenixfs](man/mkfs.zenixfs.txt), [fsck.zenixfs](man/fsck.zenixfs.txt), [sync](man/sync.txt) | disks |

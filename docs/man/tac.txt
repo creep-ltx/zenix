@@ -1,0 +1,16 @@
+TAC(1)		Zenix manual
+
+NAME
+    tac - print lines in reverse order
+
+SYNOPSIS
+    tac [file...]
+
+DESCRIPTION
+    Writes the lines of each file (or standard input) last line first.
+
+EXIT STATUS
+    0, 1 if a file or process could not be used, 2 for a wrong option.
+
+SEE ALSO
+    cat(1), rev(1)

@@ -1,0 +1,17 @@
+FOLD(1)		Zenix manual
+
+NAME
+    fold - wrap long lines
+
+SYNOPSIS
+    fold [-w width] [-s] [file...]
+
+DESCRIPTION
+    Breaks lines longer than width columns (default 80). With -s the break
+    is made at the last blank before the limit when there is one.
+
+EXIT STATUS
+    0, 1 if a file or process could not be used, 2 for a wrong option.
+
+SEE ALSO
+    fmt(1)

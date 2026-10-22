@@ -1,0 +1,17 @@
+REALPATH(1)		Zenix manual
+
+NAME
+    realpath - print the real absolute name
+
+SYNOPSIS
+    realpath [-e] path...
+
+DESCRIPTION
+    Prints each path made absolute, with . and .. removed and symbolic links
+    followed. With -e the path must exist.
+
+EXIT STATUS
+    0, 1 if a path cannot be resolved (or with -e does not exist).
+
+SEE ALSO
+    pwd(1), readlink(1)

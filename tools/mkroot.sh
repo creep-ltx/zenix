@@ -5,6 +5,7 @@ set -e
 OUT="$1"; B="$2"; PROGS="$3"; SIZE="${4:-8M}"; INODES="${5:-512}"
 T=$(mktemp -d)
 cp -r "$(dirname "$0")/../rootfs/." "$T/"
+[ -n "$NOTESTS" ] && rm -rf "$T/tests"      # NOTESTS=1: leave the test scripts out (the small RAM-disk image)
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2
@@ -19,7 +20,7 @@ if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small i
     rm -rf "$T/usr/man.gen"
 fi
 ln -s less "$T/bin/more"
-ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"            # more is less
+ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"; ln -s pgrep "$T/bin/pkill"            # more is less
 rm -f "$OUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features
 # ownership and modes under fakeroot, so the image holds uid 0 (not whoever runs the build): root owns everything,

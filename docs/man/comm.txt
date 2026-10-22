@@ -1,0 +1,17 @@
+COMM(1)		Zenix manual
+
+NAME
+    comm - compare two sorted files
+
+SYNOPSIS
+    comm [-123] file1 file2
+
+DESCRIPTION
+    Reads two sorted files and prints three columns: lines only in the
+    first, only in the second, in both. -1, -2, -3 leave out the column.
+
+EXIT STATUS
+    0, 1 if a file or process could not be used, 2 for a wrong option.
+
+SEE ALSO
+    diff(1), sort(1), uniq(1)

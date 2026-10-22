@@ -1,0 +1,17 @@
+WATCH(1)		Zenix manual
+
+NAME
+    watch - run a command repeatedly
+
+SYNOPSIS
+    watch [-n seconds] command [argument...]
+
+DESCRIPTION
+    Clears the screen, runs the command through sh -c, waits and repeats
+    (every 2 seconds unless -n). Ctrl+C ends it.
+
+EXIT STATUS
+    Only ends with Ctrl+C or when sh cannot be started (1).
+
+SEE ALSO
+    sleep(1)

@@ -1,0 +1,21 @@
+MD5SUM(1)		Zenix manual
+
+NAME
+    md5sum - print MD5 checksums
+
+SYNOPSIS
+    md5sum [file...]
+
+DESCRIPTION
+    Prints the MD5 checksum of each file, or of standard input, as 32 hex
+    digits, two spaces and the name.
+
+NOTES
+    MD5 can be broken on purpose; use sha256sum when it matters. The output
+    equals the host md5sum.
+
+EXIT STATUS
+    0, 1 if a file or process could not be used, 2 for a wrong option.
+
+SEE ALSO
+    sha256sum(1)

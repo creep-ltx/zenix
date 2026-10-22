@@ -1,0 +1,19 @@
+PASTE(1)		Zenix manual
+
+NAME
+    paste - merge lines of files
+
+SYNOPSIS
+    paste [-d list] [-s] file...
+
+DESCRIPTION
+    Writes the first line of every file side by side, separated by TAB, then
+    the second lines, and so on. -d gives other separators (used in turn);
+    -s puts each file on one line instead. At most 8 files; - is standard
+    input.
+
+EXIT STATUS
+    0, 1 if a file or process could not be used, 2 for a wrong option.
+
+SEE ALSO
+    cut(1), join(1)
