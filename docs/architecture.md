@@ -196,8 +196,8 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 - Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair) and `fdisk` (RDB).
 - Not done: freeing a file that is still open (it frees at once), moving directories between parents,
   triple-indirect files, a journal.
-- Planned: a multi-filesystem VFS with mount table, and **ZXFS** (atomic commit, checksummed metadata, extents),
-  see `zxfs.md`.
+- Planned: a multi-filesystem VFS with mount table, and **ZenixFS** (atomic commit, checksummed metadata, extents),
+  see `zenixfs.md`.
 
 ## 11. Pipes, tty, terminal, display
 

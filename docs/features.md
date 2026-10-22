@@ -48,7 +48,7 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Pi hardware table from Emu68's device tree (stage0, read before AmigaOS is killed) | built; tested on the host and in a CPU emulator against the real CM4 tree, boots in FS-UAE (empty table) | architecture.md section 3 |
 | SD card with an MBR partition table (the Emu68 boot card) | not done | limits.md |
 | Mounting more than the root filesystem | planned | ROADMAP.md phase 4 |
-| ZXFS | planned | zxfs.md |
+| ZenixFS | planned | zenixfs.md |
 | Unlink of an open file, directory moves between parents, triple-indirect | not done | limits.md |
 
 ## Terminal and display

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-2.0-only -->
-# ZXFS on-disk format, version 1 (draft, 2026-10-22; implemented on the host only)
+# ZenixFS on-disk format, version 1 (draft, 2026-10-22; implemented on the host only)
 
-Rationale and goals are in `zxfs.md`. This file is the exact format. **All integers are big-endian.** Because of
+Rationale and goals are in `zenixfs.md`. This file is the exact format. **All integers are big-endian.** Because of
 that, two keys compare correctly with a plain `memcmp`. A *block* is `1 << bshift` bytes (bshift 10, 11 or 12: 1, 2
 or 4 KB). Block numbers are 32-bit and count from the start of the volume (partition), block 0 first.
 
@@ -37,7 +37,7 @@ always detected; two changes cancel with probability 2^-32. A block is valid onl
 ## 4. Superblock (block 0, after the header)
 | off | size | field |
 |---|---|---|
-| 32 | 4 | `sb_magic` 'ZXFS' |
+| 32 | 4 | `sb_magic` 'ZNFS' |
 | 36 | 4 | `version` = 1 |
 | 40 | 4 | `bshift` |
 | 44 | 4 | `total_blocks` |

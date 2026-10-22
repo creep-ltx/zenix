@@ -1,31 +1,31 @@
-# ZXFS - the native Zenix filesystem (plan, 2026-10-22)
+# ZenixFS - the native Zenix filesystem (plan, 2026-10-22)
 
-**Status (2026-10-22):** phases Z-0 and Z-1 are done on the host: the exact format is in `zxfs-format.md`, the library is in `zxfs/` (branch `zxfs`),
-and `make -C zxfs test` runs the tests. *Verified* (run, 60 random seeds, with AddressSanitizer and UBSan): ~3000 random operations compared with a model, `fsck` clean,
+**Status (2026-10-22):** phases Z-0 and Z-1 are done on the host: the exact format is in `zenixfs-format.md`, the library is in `zenixfs/` (branch `zenixfs`),
+and `make -C zenixfs test` runs the tests. *Verified* (run, 60 random seeds, with AddressSanitizer and UBSan): ~3000 random operations compared with a model, `fsck` clean,
 remount; the power-cut replay (every prefix of the recorded writes plus random subsets inside each flush epoch) always mounts, passes fsck and equals a committed state, and
 is never older than a durable commit; 600 random bit flips in metadata are detected or harmless, none silent; full volume and orphan cases. The tests were checked by mutation:
 removing the flush before the commit record, or reusing blocks freed in the same transaction, makes the power-cut test fail.
 Not done: the Zenix port (needs the multi-filesystem VFS), windowed bitmap (the library keeps the whole bitmap in RAM), delayed allocation (data is placed when written),
 hash-order `readdir` only, no `keep=N`, no data checksums, no defragmenter, no real-hardware measurements. Known limits of the library: a write that spans several blocks is
 not atomic across a commit that the cache pressure triggers in the middle of it (each block step is consistent, the whole write is not); a mount that had to fall back to an older commit
-is reported in `zxfs_stats.mount_damage` and the caller must tell the user.
+is reported in `zenixfs_stats.mount_damage` and the caller must tell the user.
 
 Status of every statement: **proposed**. Numbers marked "estimate" are not measured; measure on a real
 A1200 (030 or 020, IDE or CF-in-IDE) before believing them. Background and sources: `Knowledge/amiga/zenix-filesystems-research.md`.
 
 ## 0. Try it on Linux (host tool, 2026-10-22)
 ```
-cd zxfs && make test        # the library tests and the tool round trip
-make image                  # builds build/example.zxfs (32 MB) holding a copy of these docs
-build/zxfs-tool mkfs disk.zxfs 64 -l mydisk     # new 64 MB image (block size by size, -b 10|11|12, -c utf8)
-build/zxfs-tool put disk.zxfs -r ~/some/folder /stuff
-build/zxfs-tool ls disk.zxfs -l /stuff ; build/zxfs-tool cat disk.zxfs /stuff/file.txt
-build/zxfs-tool get disk.zxfs -r /stuff ~/copy ; build/zxfs-tool fsck disk.zxfs
+cd zenixfs && make test        # the library tests and the tool round trip
+make image                  # builds build/example.zenixfs (32 MB) holding a copy of these docs
+build/zenixfs-tool mkfs disk.zenixfs 64 -l mydisk     # new 64 MB image (block size by size, -b 10|11|12, -c utf8)
+build/zenixfs-tool put disk.zenixfs -r ~/some/folder /stuff
+build/zenixfs-tool ls disk.zenixfs -l /stuff ; build/zenixfs-tool cat disk.zenixfs /stuff/file.txt
+build/zenixfs-tool get disk.zenixfs -r /stuff ~/copy ; build/zenixfs-tool fsck disk.zenixfs
 ```
-Commands: `mkfs info fsck ls stat cat put get mkdir rm rmdir mv ln` (options always after the image name; see the top of `zxfs/tools/zxfs-tool.c`).
-**Mount it as a folder** (needs fuse3): `make build/zxfs-fuse`, then `build/zxfs-fuse disk.zxfs /mnt/point` and `fusermount3 -u /mnt/point`. It is single-threaded
+Commands: `mkfs info fsck ls stat cat put get mkdir rm rmdir mv ln` (options always after the image name; see the top of `zenixfs/tools/zenixfs-tool.c`).
+**Mount it as a folder** (needs fuse3): `make build/zenixfs-fuse`, then `build/zenixfs-fuse disk.zenixfs /mnt/point` and `fusermount3 -u /mnt/point`. It is single-threaded
 and commits on close, `fsync`, when the cache fills and at unmount. `make fuse-test` copies trees through the mount, and kills the filesystem process with `kill -9` in the middle of a
-big copy eight times: every image must still pass `fsck`. *Verified* on 2026-10-22 (fuse3 3.18.3). Speed through FUSE says little about ZXFS itself.
+big copy eight times: every image must still pass `fsck`. *Verified* on 2026-10-22 (fuse3 3.18.3). Speed through FUSE says little about ZenixFS itself.
 
 ## 1. Goal and the machine it is for
 A filesystem that is **safe** (no check after a crash, no replay, silent damage is noticed), **fast on slow
@@ -99,7 +99,7 @@ Data blocks are not checksummed (cost, and the extent map already protects struc
 **Z11. Self-healing.** (a) Previous generation stays intact until the one after next commit, so a bad current root
 is survived by mounting the older commit slot. (b) `mkfs` option `-m dup`: metadata blocks written twice at
 different places (btrfs DUP), for CF/disks with bad sectors; off by default because it doubles metadata writes.
-(c) `scrub` walks the tree in the background, verifies checksums and rebuilds a bad bitmap from the extents. (d) `fsck.zxfs`
+(c) `scrub` walks the tree in the background, verifies checksums and rebuilds a bad bitmap from the extents. (d) `fsck.zenixfs`
 = verify tree, rebuild bitmap, count links; never needed after a plain crash.
 
 **Z12. Never wedges when full.** About 2 % (at least 64 blocks) is reserved so `unlink` and `truncate` work on a
@@ -131,12 +131,12 @@ Compression, encryption, deduplication, quotas, data checksums, ACLs, atime, mul
 (compat / read-only-compat / incompat, like ext2) so these can be added without breaking old volumes.
 
 ## 5. How we build and test it (the safe way)
-1. **A host library first.** `zxfs` as portable C (no Zenix calls; a `blockio` interface: read, write, flush) compiled on
+1. **A host library first.** `zenixfs` as portable C (no Zenix calls; a `blockio` interface: read, write, flush) compiled on
    Linux against a disk-image file. The same source later goes into the Zenix fs server unchanged.
-2. **Tools on the host:** `mkfs.zxfs`, `fsck.zxfs`, `zxfs-dump` (print the tree), and a **FUSE mount** so ordinary Linux tools (fsstress,
+2. **Tools on the host:** `mkfs.zenixfs`, `fsck.zenixfs`, `zenixfs-dump` (print the tree), and a **FUSE mount** so ordinary Linux tools (fsstress,
    fsx, rsync, diff -r) can hammer it. Same approach as checking ext2 with the host's e2fsck.
 3. **Power-cut test, deterministic:** record every write and flush of a test run; for each prefix (and for random subsets of writes inside a
-   flush epoch, to model reordering) rebuild the image, mount it, run `fsck.zxfs`, and compare the tree with a model of what must be there.
+   flush epoch, to model reordering) rebuild the image, mount it, run `fsck.zenixfs`, and compare the tree with a model of what must be there.
    This proves the commit order instead of hoping. Plus: flip random bits in metadata and check the damage is detected, never silently read.
 4. **Benchmarks before claims:** one script (sequential read/write of a large file, create 1000 small files, `ls` of a big directory, `rm -r`,
    untar a tree) run on the same real hardware against Zenix ext2, and under AmigaOS against FFS/PFS3/SFS. Docs state only
@@ -146,8 +146,8 @@ Compression, encryption, deduplication, quotas, data checksums, ACLs, atime, mul
 ## 5b. What can and cannot be measured here (owner, 2026-10-22)
 The only Amiga available is an A1200 with a PiStorm: the "disk" is the Pi's SD card (about 17 MB/s) behind Emu68, and the CPU is a JIT, not a real 68030.
 So **speed figures from it are not valid for real Amigas** and must never be quoted as such. What we can do:
-- **Correctness and crash safety are fully testable** on the host: format, power-cut replay, bit-flip detection, fsck. This is where ZXFS earns its name.
-- **Counted costs instead of timings:** the library counts disk reads, writes, flushes, commits and cache hits (`zxfs_get_stats`). Fewer, larger, sequential
+- **Correctness and crash safety are fully testable** on the host: format, power-cut replay, bit-flip detection, fsck. This is where ZenixFS earns its name.
+- **Counted costs instead of timings:** the library counts disk reads, writes, flushes, commits and cache hits (`zenixfs_get_stats`). Fewer, larger, sequential
   transfers can be shown by counts on the host; they are the same on every machine.
 - **Design from known hardware costs**, with the numbers in section 6b labelled as estimates.
 - **A benchmark tool that others can run** (small, one binary on the Zenix disk, prints a table) so people with real IDE/SCSI Amigas can send results;
@@ -155,10 +155,10 @@ So **speed figures from it are not valid for real Amigas** and must never be quo
 - On the PiStorm, only "does it work" and the CPU-bound case (fast media) are meaningful, and only labelled "PiStorm/Emu68".
 
 ## 6. Phases
-- **Z-0 Spec (done):** write `docs/zxfs-format.md` (every field, offsets, checksums, worked examples) from this plan; review it.
+- **Z-0 Spec (done):** write `docs/zenixfs-format.md` (every field, offsets, checksums, worked examples) from this plan; review it.
 - **Z-1 Host library (done):** tree, inode, inline files, extents, bitmap, commit, mkfs, fsck, dump; unit tests; the power-cut tester.
 - **Z-2 FUSE + stress** on the host; fix what the tests find.
-- **Z-3 Zenix server:** after main has the multi-filesystem VFS (mount table, several servers). Runs beside ext2; boot from ZXFS later. Measure on the A1200.
+- **Z-3 Zenix server:** after main has the multi-filesystem VFS (mount table, several servers). Runs beside ext2; boot from ZenixFS later. Measure on the A1200.
 - **Z-4 Speed and safety extras:** hash directory tuning, read-ahead, defragmenter, scrub, dup metadata, keep=N / snapshots.
 - **Z-5 AmigaOS handler** (read-only first) so the other half of a dual-boot machine can read Zenix disks (Latin-1 names, big-endian: easy).
 
@@ -170,7 +170,7 @@ Amiga disks hang on very different hardware (from general knowledge, to be check
 a CF card or a disk, fast-ATA add-on cards and IDE-fixes, Zorro/accelerator SCSI (e.g. Blizzard SCSI kits, some with **DMA**), the A3000/A4000T on-board
 SCSI, PCMCIA CF, and PiStorm's SD card (about 17 MB/s, measured elsewhere in the notes). Speed spans roughly 1 MB/s to 20 MB/s, and the bottleneck moves:
 slow PIO IDE = the disk is the limit and the CPU is half idle; DMA SCSI or SD = the **CPU is the limit** and the disk waits.
-So ZXFS must not be tuned for one case:
+So ZenixFS must not be tuned for one case:
 - **Rule 1: low CPU per block everywhere.** Cheap checksum, no per-byte work on file data, copy as little as possible (messages pass pointers).
   Data checksums stay **off by default** until measured; with PIO they ride along with the copy, with DMA they cost real CPU time.
 - **Rule 2: the filesystem asks the disk what it is.** Extend the disk protocol (`kernel/diskproto.h` today has READ/WRITE/INFO only, 512-byte sectors, no flush) with:
@@ -181,14 +181,14 @@ So ZXFS must not be tuned for one case:
   erase size -> 4 KB aligned), write batch size (as large as the device accepts in one command), read-ahead depth, commit interval, whether the allocator works hard for
   contiguous files (rotating disk: yes; flash: only alignment), and cache size. All overridable with mount options.
 - **Rule 4: no hardware assumed in the filesystem code.** It speaks only the `blockio` interface (read, write, flush, info). Gayle, SCSI, SD, a RAM disk and the host's file image are all just
-  drivers behind it; the same ZXFS code is tested on the host image and on the real machines.
-- **Rule 5: the flush barrier is the one thing we cannot fake.** If a device cannot flush, ZXFS mounts it but says "no crash guarantee on this device" (like ext2 `nobarrier`).
+  drivers behind it; the same ZenixFS code is tested on the host image and on the real machines.
+- **Rule 5: the flush barrier is the one thing we cannot fake.** If a device cannot flush, ZenixFS mounts it but says "no crash guarantee on this device" (like ext2 `nobarrier`).
   Test by really cutting power on each kind of device we claim to support, not only in the simulator.
 - Measure each kind (Gayle+CF, Gayle+disk, SCSI with/without DMA, SD) with the same benchmark script and write the table; the defaults come from that table.
 
 ## 7. Decisions by the owner (2026-10-22)
-1. **Name: ZXFS.** Decided.
-2. **Block size:** the owner asked for pros and cons; recommendation: `mkfs.zxfs` picks by volume size (under 16 MB: 1 KB,
+1. **Name: ZenixFS.** Decided.
+2. **Block size:** the owner asked for pros and cons; recommendation: `mkfs.zenixfs` picks by volume size (under 16 MB: 1 KB,
    under 256 MB: 2 KB, larger: 4 KB) and `-b` overrides. Reasons in the table below.
 3. **Undo (`keep=N`, snapshots):** not in the first version. Reserve the room in the format now (root list in the commit
    record, feature flag); build it in phase Z-4, after the power-cut tests pass, because it changes when blocks may be reused.

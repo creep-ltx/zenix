@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
-# Round trip through zxfs-tool: make an image, copy a tree in and out, links, rename, remove, check.
+# Round trip through zenixfs-tool: make an image, copy a tree in and out, links, rename, remove, check.
 set -e
-T=${1:-build/zxfs-tool}
+T=${1:-build/zenixfs-tool}
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
-I=$W/disk.zxfs
+I=$W/disk.zenixfs
 mkdir -p "$W/src/sub/deeper"
 head -c 300000 /dev/urandom > "$W/src/big.bin"
 head -c 100 /dev/urandom > "$W/src/small.bin"
@@ -28,6 +28,6 @@ for bs in 10 11 12; do
   [ "$("$T" cat "$I" /sub/renamed.txt)" = "$(printf 'line one\nline two')" ]
   cmp <("$T" cat "$I" /big-hard) "$W/src/big.bin"
   "$T" fsck "$I" >/dev/null
-  "$T" mkfs "$W/utf.zxfs" 4 -c utf8 | grep -q UTF-8
+  "$T" mkfs "$W/utf.zenixfs" 4 -c utf8 | grep -q UTF-8
 done
 echo "tool test: ok"
