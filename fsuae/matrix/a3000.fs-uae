@@ -1,0 +1,18 @@
+# Zenix on an Amiga 3000: 68030 at 25 MHz, SCSI hard disk (WD33C93A + DMAC), no IDE.
+[fs-uae]
+accuracy = 1
+amiga_model = A3000
+kickstart_file = /home/creep/UAE/ROM/kicka3000.rom
+chip_memory = 2048
+fast_memory = 4096
+floppy_drive_0 = ../../build/zenix.adf
+floppy_drive_speed = 0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true
+hard_drive_0 = ../../build/zenix.hdf
+hard_drive_0_controller = scsi0
+window_width = 960
+window_height = 768
+zoom = full
+joystick_port_0 = none
+joystick_port_1 = none

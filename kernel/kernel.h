@@ -104,6 +104,12 @@ u32 blk_sectors(void);
 int blk_read(u32 lba, u32 count, void *buf);
 int blk_write(u32 lba, u32 count, const void *buf);
 
+/* a3000.c: the Amiga 3000's on-board SCSI (WD33C93A + DMAC) */
+int a3000_init(void);
+u32 a3000_sectors(void);
+int a3000_read(u32 lba, u32 count, void *buf);
+int a3000_write(u32 lba, u32 count, const void *buf);
+
 /* emmc.c: the SD card of a Raspberry Pi 4 / CM4 under Emu68 (needs the hwinfo table from stage0) */
 int emmc_init(void);
 u32 emmc_sectors(void);
