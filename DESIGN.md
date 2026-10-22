@@ -46,7 +46,7 @@ D1 messages: **not done** - the kernel is still one program; drivers are not sep
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
 D3 relocating loader, no fork: done (ZEXE format, tools/mkzexe.py); shared libraries not started.
 D4 planar display server: the kernel draws text through Copper + blitter; a client API is not designed.
-D5 ext2: read-only driver (rev 0/1, 128+ byte inodes) done; writing not done; RDB partitions done.
+D5 ext2: rev 0/1, 128+ byte inodes, read and write (write-through, e2fsck-clean) done; RDB partitions done; no journal.
 D6 scheduler: preemptive round robin on a 100 Hz tick; no priorities yet.
 D7 boot/test: FS-UAE done; test Amigas and the shared A1200 not yet.
 

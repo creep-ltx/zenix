@@ -46,3 +46,14 @@ static inline int sys_procinfo(u32 i, struct uproc *p) { return sys3(21, i, (u32
 static inline int sys_meminfo(u32 out[4]) { return sys3(22, (u32)out, 0, 0); }
 static inline int sys_setfg(int pid) { return sys3(23, (u32)pid, 0, 0); }
 static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }
+
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR   2
+#define O_CREAT  0x40
+#define O_TRUNC  0x200
+#define O_APPEND 0x400
+static inline int sys_mkdir(const char *p) { return sys3(25, (u32)p, 0, 0); }
+static inline int sys_unlink(const char *p) { return sys3(26, (u32)p, 0, 0); }
+static inline int sys_rmdir(const char *p) { return sys3(27, (u32)p, 0, 0); }
+static inline int sys_rename(const char *a, const char *b) { return sys3(28, (u32)a, (u32)b, 0); }

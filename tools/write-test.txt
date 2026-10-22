@@ -1,0 +1,47 @@
+sleep 20
+send echo hello > /tmp/a\r
+sleep 1
+send echo world >> /tmp/a\r
+sleep 1
+send cat /tmp/a\r
+sleep 1
+send mkdir /tmp/d\r
+sleep 1
+send cp /tmp/a /tmp/d/b\r
+sleep 1
+send mv /tmp/d/b /tmp/d/c\r
+sleep 1
+send ls -l /tmp /tmp/d\r
+sleep 2
+send cat /bin/sh /bin/ls /bin/init /bin/grep /bin/wc > /tmp/big\r
+sleep 2
+send wc /tmp/big\r
+sleep 2
+send touch /tmp/n000 /tmp/n001 /tmp/n002 /tmp/n003 /tmp/n004 /tmp/n005 /tmp/n006 /tmp/n007 /tmp/n008 /tmp/n009 /tmp/n010 /tmp/n011 /tmp/n012 /tmp/n013 /tmp/n014\r
+sleep 3
+send touch /tmp/n100 /tmp/n101 /tmp/n102 /tmp/n103 /tmp/n104 /tmp/n105 /tmp/n106 /tmp/n107 /tmp/n108 /tmp/n109 /tmp/n110 /tmp/n111 /tmp/n112 /tmp/n113 /tmp/n114\r
+sleep 3
+send touch /tmp/n200 /tmp/n201 /tmp/n202 /tmp/n203 /tmp/n204 /tmp/n205 /tmp/n206 /tmp/n207 /tmp/n208 /tmp/n209 /tmp/n210 /tmp/n211 /tmp/n212 /tmp/n213 /tmp/n214\r
+sleep 3
+send touch /tmp/n300 /tmp/n301 /tmp/n302 /tmp/n303 /tmp/n304 /tmp/n305 /tmp/n306 /tmp/n307 /tmp/n308 /tmp/n309 /tmp/n310 /tmp/n311 /tmp/n312 /tmp/n313 /tmp/n314\r
+sleep 3
+send touch /tmp/n400 /tmp/n401 /tmp/n402 /tmp/n403 /tmp/n404 /tmp/n405 /tmp/n406 /tmp/n407 /tmp/n408 /tmp/n409 /tmp/n410 /tmp/n411 /tmp/n412 /tmp/n413 /tmp/n414\r
+sleep 3
+send ls /tmp | wc\r
+sleep 3
+send rm /tmp/a\r
+sleep 1
+send rmdir /tmp/d\r
+sleep 1
+send rm /tmp/d/c\r
+sleep 1
+send rmdir /tmp/d\r
+sleep 1
+send ls /tmp | wc\r
+sleep 3
+send cat /nonexistent > /tmp/x\r
+sleep 1
+send ls /tmp/x\r
+sleep 1
+send exit\r
+sleep 2

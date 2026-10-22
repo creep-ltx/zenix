@@ -5,7 +5,7 @@ set -e
 OUT="$1"; B="$2"; PROGS="$3"
 T=$(mktemp -d)
 cp -r "$(dirname "$0")/../rootfs/." "$T/"
-mkdir -p "$T/bin"
+mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     cp "$B/$p.zx" "$T/bin/$p"
     chmod 755 "$T/bin/$p"

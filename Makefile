@@ -12,7 +12,8 @@ LIBGCC  := $(shell $(CC) $(CFLAGS) -print-libgcc-file-name 2>/dev/null)
 
 KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/ext2.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o
 
-UAPPS := init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr
+UAPPS := init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr \
+          mkdir rmdir rm cp mv touch
 UCFLAGS := -mcpu=68020 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
@@ -68,6 +69,7 @@ run: all
 
 # boot headless, print the serial log
 test: all
+	rm -f $(BUILD)/zenix.hdf; $(MAKE) $(BUILD)/zenix.hdf
 	tools/run-test.sh fsuae/a1200-020.fs-uae 20
 
 clean:

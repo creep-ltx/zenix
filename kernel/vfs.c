@@ -118,18 +118,77 @@ long vfs_pipe(int fds[2])
 
 long vfs_open(const char *path, int flags)
 {
-    (void)flags;
     struct inode in;
-    if (ext2_namei(path, current->cwd_ino, &in, 0))
-        return -1;
+    int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
+    if (ext2_namei(path, current->cwd_ino, &in, 0)) {
+        struct inode dir;
+        char name[64];
+        if (!(flags & O_CREAT) ||
+            ext2_namei_parent(path, current->cwd_ino, &dir, name) ||
+            ext2_create(&dir, name, &in))
+            return -1;
+    } else if (writing) {
+        if (!S_ISREG(in.mode))
+            return -1;
+        if ((flags & O_TRUNC) && ext2_truncate(&in))
+            return -1;
+    }
     struct file *f = file_new(FT_INODE);
     if (!f)
         return -1;
     f->in = in;
+    f->flags = (u16)flags;
     int fd = fd_install(current, f);
     if (fd < 0)
         file_close(f);
     return fd;
+}
+
+/* other opens may have changed the file: always work on a fresh inode */
+static int refresh(struct file *f)
+{
+    return ext2_iget(f->in.ino, &f->in);
+}
+
+static int parent_of(const char *path, struct inode *dir, char *name)
+{
+    return ext2_namei_parent(path, current->cwd_ino, dir, name);
+}
+
+long vfs_mkdir(const char *path)
+{
+    struct inode dir;
+    char name[64];
+    if (parent_of(path, &dir, name))
+        return -1;
+    return ext2_mkdir(&dir, name);
+}
+
+long vfs_unlink(const char *path)
+{
+    struct inode dir;
+    char name[64];
+    if (parent_of(path, &dir, name))
+        return -1;
+    return ext2_unlink(&dir, name);
+}
+
+long vfs_rmdir(const char *path)
+{
+    struct inode dir;
+    char name[64];
+    if (parent_of(path, &dir, name))
+        return -1;
+    return ext2_rmdir(&dir, name);
+}
+
+long vfs_rename(const char *from, const char *to)
+{
+    struct inode od, nd;
+    char on[64], nn[64];
+    if (parent_of(from, &od, on) || parent_of(to, &nd, nn))
+        return -1;
+    return ext2_rename(&od, on, &nd, nn);
 }
 
 long vfs_read(struct file *f, void *buf, u32 n)
@@ -140,7 +199,7 @@ long vfs_read(struct file *f, void *buf, u32 n)
     case FT_PIPE_R:
         return pipe_read(f, buf, n);
     case FT_INODE: {
-        if (S_ISDIR(f->in.mode))
+        if (S_ISDIR(f->in.mode) || (f->flags & O_WRONLY) || refresh(f))
             return -1;
         int r = ext2_read(&f->in, f->off, buf, n);
         if (r > 0)
@@ -158,8 +217,18 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return tty_write((int)f->off, buf, n);
     case FT_PIPE_W:
         return pipe_write(f, buf, n);
+    case FT_INODE: {
+        if (!(f->flags & (O_WRONLY | O_RDWR)) || refresh(f))
+            return -1;
+        if (f->flags & O_APPEND)
+            f->off = f->in.size;
+        int r = ext2_write(&f->in, f->off, buf, n);
+        if (r > 0)
+            f->off += (u32)r;
+        return r;
     }
-    return -1;                              /* the filesystem is read-only so far */
+    }
+    return -1;
 }
 
 long vfs_readdir(struct file *f, struct udirent *out)

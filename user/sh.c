@@ -1,7 +1,7 @@
 #include "libz.h"
 
-/* The Zenix shell: pipes, < redirection, quotes, ; and &, builtins cd,
- * exit, help. Output redirection (> >>) waits for a writable filesystem. */
+/* The Zenix shell: pipes, < > >> redirection, quotes, ; and &, builtins cd,
+ * exit, help. */
 
 #define MAXARG 16
 #define MAXCMD 8
@@ -10,6 +10,8 @@ struct cmd {
     char *argv[MAXARG + 1];
     int argc;
     char *in;
+    char *out;
+    int append;
 };
 
 static int interactive;
@@ -44,7 +46,9 @@ static int parse_cmd(char *s, struct cmd *c, char **rest)
 {
     c->argc = 0;
     c->in = 0;
-    int want_in = 0;
+    c->out = 0;
+    c->append = 0;
+    int want_in = 0, want_out = 0;
     for (;;) {
         while (*s == ' ' || *s == '\t') s++;
         if (!*s) { *rest = s; return 0; }
@@ -56,10 +60,10 @@ static int parse_cmd(char *s, struct cmd *c, char **rest)
         }
         if (*s == '<') { want_in = 1; s++; continue; }
         if (*s == '>') {
-            fprintf(2, "sh: output redirection needs a writable filesystem (not yet)\n");
-            *rest = s + strlen(s);
-            c->argc = -1;
-            return 0;
+            want_out = 1;
+            s++;
+            if (*s == '>') { c->append = 1; s++; }
+            continue;
         }
         char *w = pool + pool_used;
         char *out = w;
@@ -79,6 +83,7 @@ static int parse_cmd(char *s, struct cmd *c, char **rest)
         *out++ = 0;
         pool_used += (int)(out - w);
         if (want_in) { c->in = w; want_in = 0; }
+        else if (want_out) { c->out = w; want_out = 0; }
         else if (c->argc < MAXARG) c->argv[c->argc++] = w;
     }
 }
@@ -99,18 +104,23 @@ static void run_pipeline(struct cmd *c, int n, int background)
         else { strcpy(path, "/bin/"); strcpy(path + 5, name); }
         c[i].argv[c[i].argc] = 0;
 
-        int p[2] = { -1, -1 }, stdio[3] = { -1, -1, -1 }, infd = -1;
+        int p[2] = { -1, -1 }, stdio[3] = { -1, -1, -1 }, infd = -1, outfd = -1;
         if (i < n - 1 && sys_pipe(p) < 0) { fprintf(2, "sh: pipe failed\n"); break; }
         if (c[i].in) {
             infd = sys_open(c[i].in, 0);
             if (infd < 0) { fprintf(2, "sh: %s: cannot open\n", c[i].in); pids[i] = -1; goto next; }
             stdio[0] = infd;
         } else if (prev >= 0) stdio[0] = prev;
-        if (p[1] >= 0) stdio[1] = p[1];
+        if (c[i].out) {
+            outfd = sys_open(c[i].out, O_WRONLY | O_CREAT | (c[i].append ? O_APPEND : O_TRUNC));
+            if (outfd < 0) { fprintf(2, "sh: %s: cannot write\n", c[i].out); pids[i] = -1; goto next; }
+            stdio[1] = outfd;
+        } else if (p[1] >= 0) stdio[1] = p[1];
         pids[i] = sys_spawn(path, c[i].argv, stdio);
         if (pids[i] < 0) fprintf(2, "sh: %s: not found\n", name);
     next:
         if (infd >= 0) sys_close(infd);
+        if (outfd >= 0) sys_close(outfd);
         if (p[1] >= 0) sys_close(p[1]);
         if (prev >= 0) sys_close(prev);
         prev = p[0];
@@ -137,8 +147,9 @@ static int builtin(struct cmd *c)
     if (!strcmp(n, "exit")) sys_exit(c->argc > 1 ? atoi(c->argv[1]) : 0);
     if (!strcmp(n, "help")) {
         printf("builtins: cd exit help\n"
-               "programs in /bin: ls cat echo pwd ps free wc grep uname hello spin sh\n"
-               "use | to pipe, < to read a file, & to run in the background, ^C to stop\n");
+               "programs in /bin: ls cat echo pwd ps free wc grep uname mkdir rmdir rm cp mv touch\n"
+               "                  hello spin sh\n"
+               "use | to pipe, < > >> to redirect, & to run in the background, ^C to stop\n");
         return 1;
     }
     return 0;

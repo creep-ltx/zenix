@@ -88,7 +88,7 @@ int ide_init(void);
 int ide_read(u32 lba, u32 count, void *buf);
 int ide_write(u32 lba, u32 count, const void *buf);
 
-/* ext2.c: read-only for now */
+/* ext2.c */
 #define S_IFMT  0170000
 #define S_IFDIR 0040000
 #define S_IFREG 0100000
@@ -97,7 +97,7 @@ int ide_write(u32 lba, u32 count, const void *buf);
 #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
 #define S_ISLNK(m) (((m) & S_IFMT) == S_IFLNK)
 struct inode {
-    u32 ino, size, mtime, block[15];
+    u32 ino, size, mtime, nblocks, block[15];
     u16 mode, uid, gid, links;
 };
 struct udirent {                /* returned by SYS_readdir */
@@ -116,6 +116,15 @@ int ext2_read(const struct inode *in, u32 off, void *dst, u32 n);
 int ext2_readdir(const struct inode *dir, u32 *cookie, struct udirent *out);
 int ext2_lookup(const struct inode *dir, const char *name, u32 len, u32 *ino);
 int ext2_namei(const char *path, u32 cwd, struct inode *out, int depth);
+int ext2_iput(const struct inode *in);
+int ext2_write(struct inode *in, u32 off, const void *src, u32 n);
+int ext2_truncate(struct inode *in);
+int ext2_namei_parent(const char *path, u32 cwd, struct inode *dir, char *name);
+int ext2_create(struct inode *dir, const char *name, struct inode *out);
+int ext2_mkdir(struct inode *dir, const char *name);
+int ext2_unlink(struct inode *dir, const char *name);
+int ext2_rmdir(struct inode *dir, const char *name);
+int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *nn);
 
 /* ZEXE header, see tools/mkzexe.py */
 struct zexe {
@@ -134,8 +143,15 @@ struct pipe {
     u16 rd, wr, count;
     u8 readers, writers;
 };
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR   2
+#define O_CREAT  0x40
+#define O_TRUNC  0x200
+#define O_APPEND 0x400
 struct file {
     u8 type, refs;
+    u16 flags;
     struct pipe *pipe;
     u32 off;
     struct inode in;
@@ -191,6 +207,10 @@ int fd_install(struct proc *p, struct file *f);
 long vfs_read(struct file *f, void *buf, u32 n);
 long vfs_write(struct file *f, const void *buf, u32 n);
 long vfs_open(const char *path, int flags);
+long vfs_mkdir(const char *path);
+long vfs_unlink(const char *path);
+long vfs_rmdir(const char *path);
+long vfs_rename(const char *from, const char *to);
 long vfs_readdir(struct file *f, struct udirent *out);
 void vfs_stat_inode(const struct inode *in, struct ustat *st);
 long vfs_pipe(int fds[2]);
@@ -230,6 +250,10 @@ int tty_of(const struct proc *p);
 #define SYS_meminfo 22
 #define SYS_setfg   23
 #define SYS_kill    24
+#define SYS_mkdir   25
+#define SYS_unlink  26
+#define SYS_rmdir   27
+#define SYS_rename  28
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

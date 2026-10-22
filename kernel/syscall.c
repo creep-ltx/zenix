@@ -103,6 +103,19 @@ void syscall_c(u32 *rb)
             r = (s32)vfs_open(path, (int)a2);
         break;
     }
+    case SYS_mkdir: case SYS_unlink: case SYS_rmdir: {
+        char path[64];
+        if (!copy_str(path, a1, sizeof path))
+            r = (s32)(rb[0] == SYS_mkdir ? vfs_mkdir(path) :
+                      rb[0] == SYS_unlink ? vfs_unlink(path) : vfs_rmdir(path));
+        break;
+    }
+    case SYS_rename: {
+        char from[64], to[64];
+        if (!copy_str(from, a1, sizeof from) && !copy_str(to, a2, sizeof to))
+            r = (s32)vfs_rename(from, to);
+        break;
+    }
     case SYS_close:
         if ((f = getfd(a1))) {
             current->fd[a1] = 0;
