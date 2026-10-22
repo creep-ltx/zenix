@@ -125,6 +125,27 @@ Compression, encryption, deduplication, quotas, data checksums, ACLs, atime, mul
 Dependencies on the other branches: VFS mount table (main), partition type id for RDB (here: DosType `ZEN\1`), `FS_*` message set in
 `kernel/fsproto.h` already fits (open, read, write, readdir, rename, link, symlink, statfs, sync); add `FS_FSYNC`.
 
+## 6b. Storage varies a lot (owner's reminder, 2026-10-22): design for the whole range
+Amiga disks hang on very different hardware (from general knowledge, to be checked per machine): Gayle IDE (A600/A1200) and A4000 IDE with
+a CF card or a disk, fast-ATA add-on cards and IDE-fixes, Zorro/accelerator SCSI (e.g. Blizzard SCSI kits, some with **DMA**), the A3000/A4000T on-board
+SCSI, PCMCIA CF, and PiStorm's SD card (about 17 MB/s, measured elsewhere in the notes). Speed spans roughly 1 MB/s to 20 MB/s, and the bottleneck moves:
+slow PIO IDE = the disk is the limit and the CPU is half idle; DMA SCSI or SD = the **CPU is the limit** and the disk waits.
+So ZenFS must not be tuned for one case:
+- **Rule 1: low CPU per block everywhere.** Cheap checksum, no per-byte work on file data, copy as little as possible (messages pass pointers).
+  Data checksums stay **off by default** until measured; with PIO they ride along with the copy, with DMA they cost real CPU time.
+- **Rule 2: the filesystem asks the disk what it is.** Extend the disk protocol (`kernel/diskproto.h` today has READ/WRITE/INFO only, 512-byte sectors, no flush) with:
+  `DISK_FLUSH` (ATA FLUSH CACHE / SCSI SYNCHRONIZE CACHE; essential for Z9, a driver that cannot flush says so), and capability fields in `diskinfo`: maximum sectors per
+  command, scatter/gather or DMA yes/no, memory the device can reach (some DMA cards reach only certain RAM), required alignment, physical sector or erase size (CF/SD
+  4 KB or more), "rotating" or "flash" (seeks matter or not), a rough speed class. The fs reads these at mount.
+- **Rule 3: tuning follows the capabilities, the format does not.** The on-disk format is identical on every medium. What adapts at mount: block size default (flash with a large
+  erase size -> 4 KB aligned), write batch size (as large as the device accepts in one command), read-ahead depth, commit interval, whether the allocator works hard for
+  contiguous files (rotating disk: yes; flash: only alignment), and cache size. All overridable with mount options.
+- **Rule 4: no hardware assumed in the filesystem code.** It speaks only the `blockio` interface (read, write, flush, info). Gayle, SCSI, SD, a RAM disk and the host's file image are all just
+  drivers behind it; the same ZenFS code is tested on the host image and on the real machines.
+- **Rule 5: the flush barrier is the one thing we cannot fake.** If a device cannot flush, ZenFS mounts it but says "no crash guarantee on this device" (like ext2 `nobarrier`).
+  Test by really cutting power on each kind of device we claim to support, not only in the simulator.
+- Measure each kind (Gayle+CF, Gayle+disk, SCSI with/without DMA, SD) with the same benchmark script and write the table; the defaults come from that table.
+
 ## 7. Decisions by the owner (2026-10-22)
 1. **Name: ZenFS.** Decided.
 2. **Block size:** the owner asked for pros and cons; recommendation: `mkfs.zenfs` picks by volume size (under 16 MB: 1 KB,
