@@ -31,10 +31,32 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
 - Memory: **chip** RAM (reachable by the custom chips: display, audio, disk DMA) and **fast** RAM are separate
   pools. Fast is preferred; chip is used when asked for (`MEM_CHIP`) or when there is nothing else.
 - Caches: instruction cache on. The data cache stays off, because without an MMU chip RAM cannot be marked
-  cache-inhibited and the cache would disagree with DMA. (68040/060 get a `cinva` before the cache is enabled.)
+  cache-inhibited and the cache would disagree with DMA. 68040/060 get a `cpusha bc` (0xF4F8: push and invalidate
+  both caches) before the cache is enabled - never `cinva`, which on Emu68 and on a copyback 040/060 throws away
+  unwritten data. **Every place that writes code the CPU will run flushes the instruction cache first**
+  (`cache_flush_code` in `start.S`: CACR bit 3 on 020/030 with the enable bits kept, `cpusha bc` on 040/060 and
+  Emu68, which otherwise keeps running its old translation of the bytes): the bootblock after copying the kernel
+  and after writing its copier, `start.S` after the self-relocation (followed by a register jump so no stale
+  prefetch runs), `proc_load` after a program's image is in place, BSS cleared and relocations applied. The CPU
+  type is read from bootinfo (`0x1000`). Verified in FS-UAE (every CPU of the matrix boots); what Emu68 does with
+  it is read from its source (knowledge base `amiga/emu68-jit-cache-rules.md`), not yet seen on the PiStorm.
+- Code is built with `-m68020-60` and the 68060 multilib's libgcc: no 64-bit `mulu.l`/`divu.l`, which a real 68060
+  lacks (`tools/check-68020-60.sh` fails the build on the opcode bytes of kernel, stage0 and every program).
 - Interrupts used: level 1 serial transmit, level 2 CIA-A (100 Hz scheduler tick from timer A, and the keyboard),
   level 3 vertical blank (display/scrolling), level 5 serial receive. Gayle IDE shares level 2 with the CIAs, so
-  disk transfers mask only levels 1-2.
+  disk transfers mask only levels 1-2. The IDE interrupt itself is never wanted (the driver polls): `ide_init`
+  sets nIEN in the device control register (`0xDA101A` on the A1200), clears Gayle's interrupt enable register
+  (`0xDAA000`) and its IDE latch (`0xDA9000`, write 0x7C) before probing, so a machine with no drive (a floating
+  INTRQ line) cannot storm level 2; a level-2 interrupt with no CIA cause makes `irq2_c` check and clear that latch
+  (`ide_stray_irq`, counted and reported once). A port whose status reads 0xFF (no drive, or Emu68's
+  `disable_scsi`) is given up at once. ATA's 400 ns settle after a command and after the last data word is two
+  CIA reads (E-clock synchronised, so at least 1.4 us on any CPU). All of this is read from the Linux and Fuzix
+  Gayle drivers and verified only in FS-UAE, which does not model the latch storm.
+- Clock: the 100 Hz tick is CIA-A timer A. `hr_time()` (and `SYS_hrtime`) is **CIA-B timers A and B chained**
+  (timer B counts timer A's underflows): a free-running 32-bit E-clock counter (709379 Hz PAL, 715909 NTSC, wraps
+  after about 1.7 hours) read from hardware alone, so it is never early or late with respect to the tick
+  interrupt (the earlier form, tick count plus timer A's position, read 10 ms low between timer A wrapping and
+  the interrupt being taken, and always inside the level-2 handler itself).
 - Storage: Gayle IDE (A600/A1200/A4000) with an RDB partition table, or a **RAM disk** that the bootblock reads
   from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek), or the
   **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - written and host-tested,
@@ -47,12 +69,16 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
 ## 3. Boot (summary; the full walk-through is in how-it-works.md)
 
 1. Kickstart loads the 1 KB bootblock (`boot/bootblock.S`) from the floppy and jumps to it.
-2. The bootblock reads the kernel (and optionally a RAM-disk image) with `trackdisk.device`, builds a
-   **bootinfo** block at `0x1000` (CPU flags, RAM regions with chip/fast attributes, kernel address, ramdisk
-   address, the ROM Topaz font pointer), picks the largest fast region as the kernel's home, kills the OS, copies
-   the kernel there and jumps into it. If the kernel header (ZEXE +28) names a **stage0** routine, the
-   bootblock first calls it (while AmigaOS is still alive; skipped on a 68000): it reads Emu68's
-   `devicetree.resource` and fills the **hardware table** at `0x1100` (see "Pi hardware table" below).
+2. The bootblock reads the kernel (and optionally a RAM-disk image) with `trackdisk.device`, turns the drive's
+   motor off (`TD_MOTOR`, length 0), builds a **bootinfo** block (CPU flags, RAM regions with chip/fast
+   attributes, kernel address, ramdisk address, the ROM Topaz font pointer) in a 1 KB block it gets from
+   `AllocMem` - `0x1000`, where the kernel wants it, belongs to exec while AmigaOS is alive (its chip free list
+   starts above it, so it can neither be allocated nor assumed free) - picks the largest fast region as the
+   kernel's home, kills the OS, copies the kernel there, copies the block to `0x1000`-`0x13FF`, flushes the
+   instruction cache and jumps into the kernel. If the kernel header (ZEXE +28) names a **stage0** routine, the
+   bootblock first calls it (while AmigaOS is still alive; skipped on a 68000) with the hardware table's address
+   in `a1`: it reads Emu68's `devicetree.resource` and fills the **hardware table** (408 bytes, at `+0x100` in the
+   block, so at `0x1100` for the kernel; see "Pi hardware table" below).
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
    `kmain()`.
 4. `kmain` starts the serial port, vector table, memory manager, caches, display, clock and disk, then creates
@@ -67,7 +93,8 @@ the `ranges` of the device-tree nodes `/soc` and `/scb` so each window gets the 
 (`devicetree.resource`), so the bootblock calls stage0 before the OS is killed. stage0 is position-independent
 68020 code (built with `-mpcrel`, no data, no absolute relocations) embedded in the kernel image; it keeps `a6`
 (the compiler's frame pointer) intact around every OS call. It translates each node's `reg` through the
-rewritten `ranges` and stores, in `struct hwinfo` at `0x1100`: flags (`HW_DT` under Emu68, `HW_BCM2711` on a
+rewritten `ranges` and stores, in the `struct hwinfo` the bootblock passes in `a1` (at `0x1100` once the kernel
+runs): flags (`HW_DT` under Emu68, `HW_BCM2711` on a
 Pi 4/CM4, `HW_RANGEOPS` if Emu68 has the cache range opcodes), the peripheral base, mailbox, EMMC2 (SD), GPIO,
 GENET Ethernet (registers, two GIC interrupt numbers, PHY address, MAC), GIC-400 distributor and CPU interface,
 and the graphics memory Emu68 reserved. It also holds the **Zorro boards** AmigaOS configured (up to 16: manufacturer,
@@ -105,7 +132,7 @@ ready, track 0, write protect and disk change; Paula reads and writes whole trac
 WORDSYNC on read, precompensation from cylinder 40 on write) into a chip-RAM buffer of 6656 words. `mfm.h` codes
 and decodes AmigaDOS tracks (11 sectors of 512 bytes, odd/even bit blocks, XOR checksums); one decoded track is
 kept as a cache. A write reads the track, replaces the sectors, writes the track and reads it back to verify.
-Waits use a clock that never runs backwards (`hr_time()` can read about 10 ms early around a tick). The 100 Hz
+Waits use `hr_time()` (the CIA-B E-clock counter, section 2). The 100 Hz
 tick turns idle motors off after 3 s. System calls 76 `SYS_fd_info` and 77 `SYS_fd_rw`, for the disk server only:
 `diskd` offers the drives as `df0`-`df3` (df0 probed at start, the others on first use); `dd` copies to and from
 them. Tests: `tools/mfm-test.sh` (host), `tools/floppy-test.sh` (FS-UAE, two drives). **Known bug (2026-10-22):**
@@ -292,7 +319,19 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 - **Workspaces**: nine, each with its own text grid and tty; the top bar (i3-style) lists the current one and the
   occupied ones. Amiga+1..9 switch, Amiga+Return opens a shell. These are scaffolding for a future desktop and are
   not part of what a terminal program should depend on.
-- **Keyboard** (`kbd.c`): CIA-A serial data register with handshake; Amiga raw codes to ASCII/escape codes.
+- **Keyboard** (`kbd.c`): CIA-A serial data register; after each byte the handshake pulls SP low for at least
+  75 E-clock ticks (105 us; the hardware manual asks for 85) timed with `hr_time()`, never with a counting loop
+  (Emu68 runs about 1000 MIPS). The keyboard interrupt is not enabled in CIA-A's mask: the byte is picked up by
+  the 100 Hz tick handler, which reads the ICR, so a key waits at most 10 ms (the keyboard's own limit is 143 ms
+  and it buffers 10 keys). Raw codes 0x00-0x3F go through a keymap with four layers like AmigaOS's (plain, Shift,
+  Alt, Shift+Alt; the Alt layer is AmigaOS's, the same on every national keyboard, and is where `[ ] { } \ | @`
+  live on a Swedish Amiga); `sv` is the AmigaOS keymap "s" (generated from xkeyboard-config by the Fuzix Amiga
+  port, checked against Workbench 3.1's `DEVS:Keymaps/s`), `us` the US one. Caps Lock (raw 0x62, a toggle the
+  keyboard reports as down/up) shifts the letters only. Accents that AmigaOS treats as dead keys are typed as
+  the spacing character (no composition). Software key repeat: 500 ms, then 33 per second from the tick, until
+  the key is released or another goes down; modifiers and Amiga combinations do not repeat. Codes 0x40-0x67 are
+  layout-neutral; arrows, F-keys, Help and Del become escape sequences in raw mode. Verified in FS-UAE
+  (`tools/kbd-test.sh`); the handshake length is read from the manual, not measured on hardware.
 - **Serial** (`serial.c`): interrupt-driven, 115200 baud, mirrors the focused screen; the test rig depends on it.
 
 ## 12. User space
@@ -317,7 +356,9 @@ outputs (`tools/cmds-test.sh`).
   device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
   emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,
   `tools/emmc-fake.h`) and `tools/a3000-test.sh` (the A3000 SCSI driver against a WD33C93A + DMAC model). They show the logic matches the specifications; they cannot show the real chip behaves the same.
-- Test rig: FS-UAE (headless, serial script) via `tools/run-test.sh`, `tools/serial-tap.py`, `tools/shot.py`.
+- Test rig: FS-UAE (headless, serial script) via `tools/run-test.sh`, `tools/serial-tap.py`, `tools/shot.py`;
+  `tools/kbd-test.sh` presses keys on the emulated keyboard (wtype in the cage rig) and checks the keymap layers,
+  Caps Lock and key repeat.
   `tools/matrix.sh` boots 13 emulated machine variants (A1200 stock and with fast RAM, chip-only, NTSC, 030/040/060,
   A4000, and an A600 that must refuse cleanly). Filesystem work is checked with the host's `e2fsck`.
 - Source layout: `boot/` bootblock, `kernel/` the kernel and its protocol headers, `user/` programs and libc,

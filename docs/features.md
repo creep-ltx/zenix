@@ -14,7 +14,8 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Chip and fast RAM pools, 1 MB chip up to 8 MB+ fast | verified | architecture.md section 5 |
 | Boot from floppy (ADF) bootblock; kernel in fast RAM if present | verified | how-it-works.md section 1 |
 | Boot with a RAM-disk root loaded from the floppy (no IDE disk) | verified (dev/test image) | `zenix-ram.adf` |
-| Gayle IDE disk with Amiga RDB partitions (A600/A1200/A4000) | verified | architecture.md section 9 |
+| Gayle IDE disk with Amiga RDB partitions (A600/A1200/A4000); its interrupt sources switched off (polling only) | verified (the interrupt quieting only in FS-UAE) | architecture.md section 2 |
+| Instruction-cache (and Emu68 JIT) flush after every write of code; built for 68020-68060 with an opcode check | verified in FS-UAE, read for Emu68 | architecture.md section 2 |
 | Battery clock (MSM6242, RP5C01) | verified in emulator | `kernel/rtc.c` |
 | Real Amiga hardware | planned | limits.md |
 | PiStorm SD, network, USB, sound, floppy, mouse, RTG | planned | ROADMAP.md phase 6 |
@@ -73,7 +74,8 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Scrollback 200 lines per workspace (Shift/Ctrl+Up/Down) | verified | |
 | Nine workspaces, i3-style bar, Amiga+1..9, Amiga+Return | verified | scaffolding for the desktop |
 | Raw tty mode, arrow and function keys as escape codes | verified | |
-| Amiga keyboard; serial console mirror (115200 baud) | verified | |
+| Amiga keyboard, handshake timed by the E-clock; serial console mirror (115200 baud) | verified | architecture.md section 11 |
+| Keymaps with AmigaOS's four layers (plain, Shift, Alt, Shift+Alt): Swedish (`sv`, the AmigaOS "s" layout) and US; Caps Lock; key repeat | verified in FS-UAE (`tools/kbd-test.sh`) | architecture.md section 11 |
 | Colours, UTF-8, display server with a drawing API, mouse | planned | ROADMAP.md phase 5 |
 
 ## Shell

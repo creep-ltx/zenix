@@ -41,7 +41,11 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   1 KB environment, argv of at most 16 arguments / 512 bytes, paths of at most 63 bytes (system calls copy into
   fixed buffers), pipes of 2 KB, 9 workspaces, 80 columns x 31 text rows, 200 scrollback lines.
 - Kernel stack 4 KB per process; user stack 16 KB by default.
-- Timer tick 100 Hz (PAL E-clock 709,379 Hz); the high-resolution clock (`SYS_hrtime`) uses the CIA timer.
+- Timer tick 100 Hz (PAL E-clock 709,379 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers
+  chained, an E-clock count that wraps after about 1.7 hours.
+- Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS
+  treats as dead keys (acute, grave, circumflex, tilde, diaeresis) type the spacing character, there is no
+  composition with the next letter.
 
 ## Traps found while building it (details in `Knowledge/amiga/zenix-m0-m3-findings.md`)
 
@@ -49,4 +53,6 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - The 68020 allows odd-address word/long access, so a "crash test" must use `illegal`.
 - Relocation tables must skip debug sections.
 - Masking all interrupts for a PIO sector made the serial receive interrupt lose characters; mask levels 1-2 only.
+- The boot tables at `0x1000` are in exec's private low chip RAM: the bootblock may only put them there after the
+  OS is dead (a 408-byte hwinfo written into a 512-byte block while AmigaOS lived gave a random guru).
 - FS-UAE crops the top of the screen; use `DIWV=0x38` for screenshot builds only.
