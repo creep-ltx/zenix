@@ -18,6 +18,13 @@ build/zxfs-tool: tools/zxfs-tool.c $(LIB) zxfs.h host/zdev.h | build
 test: build/ztest
 	build/ztest
 
+build/zbench: tests/zbench.c $(LIB) zxfs.h host/zdev.h | build
+	$(CC) $(CFLAGS) -o $@ tests/zbench.c $(LIB)
+
+# library-only speed on a RAM device (host figures, not an Amiga)
+bench: build/zbench
+	build/zbench
+
 # the same tests under AddressSanitizer + UBSan
 asan:
 	$(MAKE) clean
@@ -25,4 +32,4 @@ asan:
 
 clean:
 	rm -rf build
-.PHONY: all test asan clean
+.PHONY: all test bench asan clean
