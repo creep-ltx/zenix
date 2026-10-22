@@ -84,7 +84,17 @@ static int test_basic(void)
     struct zfs *fs;
     CHECK(zfs_mkfs(&m->dev, "test", 0, 1000) == 0);
     CHECK(zfs_mount(&fs, &m->dev, 64) == 0);
+    CHECK(zfs_charset(fs) == ZFS_CHARSET_LATIN1);
+    CHECK(zfs_set_charset(fs, ZFS_CHARSET_UTF8) == 0);
     zfs_set_time(fs, 2000);
+    {   /* both encodings are just bytes: Latin-1 a-diaeresis and UTF-8 a-diaeresis are different names and both work */
+        uint32_t u1, u2, l;
+        CHECK(zfs_create(fs, ZFS_ROOT_INO, "\xe4", 1, 0644, 0, 0, &u1) == 0);
+        CHECK(zfs_create(fs, ZFS_ROOT_INO, "\xc3\xa4", 2, 0644, 0, 0, &u2) == 0 && u1 != u2);
+        CHECK(zfs_lookup(fs, ZFS_ROOT_INO, "\xe4", 1, &l) == 0 && l == u1);
+        CHECK(zfs_lookup(fs, ZFS_ROOT_INO, "\xc3\xa4", 2, &l) == 0 && l == u2);
+        CHECK(zfs_unlink(fs, ZFS_ROOT_INO, "\xe4", 1) == 0 && zfs_unlink(fs, ZFS_ROOT_INO, "\xc3\xa4", 2) == 0);
+    }
     uint32_t d, f, f2, x;
     CHECK(zfs_mkdir(fs, ZFS_ROOT_INO, "etc", 3, 0755, 0, 0, &d) == 0);
     CHECK(zfs_create(fs, d, "passwd", 6, 0644, 0, 0, &f) == 0);
@@ -102,6 +112,7 @@ static int test_basic(void)
     CHECK(zfs_fsck(fs, logmsg, NULL) == 0);
     CHECK(zfs_unmount(fs) == 0);
     CHECK(zfs_mount(&fs, &m->dev, 64) == 0);
+    CHECK(zfs_charset(fs) == ZFS_CHARSET_UTF8);
     CHECK(zfs_lookup(fs, ZFS_ROOT_INO, "big", 3, &f2) == 0);
     memset(back, 0, 300000);
     CHECK(zfs_read(fs, f2, 0, back, 300000) == 300000 && !memcmp(back, data, 300000));

@@ -50,7 +50,7 @@ matches CF erase-page behaviour better than 512 B.
 **Z4. Big-endian on disk.** The CPU's own order, no swapping, simple fields. (The Amiga handler later is easier too.)
 
 **Z5. Names are opaque bytes**, 1-255, only NUL and `/` forbidden, case-sensitive. Zenix convention today is
-Latin-1 (keyboard, font, AmigaOS agree); UTF-8 later changes nothing here. See the Latin-1 note in the research file.
+Latin-1 (keyboard, font, AmigaOS agree) and UTF-8 is planned: both work, because names are bytes. The superblock records which one the volume uses (`charset`, a hint), and the operating system converts at the boundary when it differs from its own (mount option). The two can even be mixed on one volume; they are different byte strings. See the Latin-1 note in the research file.
 
 **Z6. Directories are hashed.** A directory entry is a tree item with key `(dir, hash32(name), n)`; lookup is one
 tree descent; no scan. `readdir` walks in key order and the cookie is the hash, so it stays valid while the

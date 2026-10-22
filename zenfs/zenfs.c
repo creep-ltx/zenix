@@ -42,6 +42,7 @@ struct cb { u32 blk; u8 *data; u8 valid, dirty, kind, pin; u32 lru; struct cb *n
 struct zfs {
     struct zfs_dev *dev;
     u32 bshift, B, nblocks, nb, bpb, reserve, dstart, maxitem, maxname;
+    u32 charset;
     u32 gen;                     /* the transaction being built */
     u32 root, height, free_blocks, next_ino;
     u64 now;
@@ -639,7 +640,7 @@ int zfs_mount(struct zfs **out, struct zfs_dev *dev, uint32_t cache_blocks)
     if (!fs) { ZFS_FREE(buf); return ZFS_EIO; }
     memset(fs, 0, sizeof *fs);
     fs->dev = dev; fs->bshift = dev->bshift; fs->B = B; fs->nblocks = rd32(buf + 44); fs->nb = rd32(buf + 48);
-    fs->reserve = rd32(buf + 52); fs->bpb = 8 * (B - HDR); fs->bmbytes = B - HDR; fs->dstart = 9 + 2 * fs->nb;
+    fs->charset = rd32(buf + 124); fs->reserve = rd32(buf + 52); fs->bpb = 8 * (B - HDR); fs->bmbytes = B - HDR; fs->dstart = 9 + 2 * fs->nb;
     fs->maxitem = (B - HDR) / 4 - 16; if (fs->maxitem > VMAX) fs->maxitem = VMAX;
     fs->maxname = fs->maxitem - 6; if (fs->maxname > ZFS_NAME_MAX) fs->maxname = ZFS_NAME_MAX;
     if (fs->nblocks > dev->nblocks || fs->nb != geometry_nb(fs->nblocks, B)) { ZFS_FREE(buf); fs_free(fs); return ZFS_ECORRUPT; }
@@ -688,6 +689,18 @@ int zfs_mount(struct zfs **out, struct zfs_dev *dev, uint32_t cache_blocks)
     if (e) { fs_free(fs); return e; }
     *out = fs;
     return 0;
+}
+uint32_t zfs_charset(struct zfs *fs) { return fs->charset; }
+int zfs_set_charset(struct zfs *fs, uint32_t charset)
+{
+    u8 *buf = ZFS_MALLOC(fs->B);
+    if (!buf) return ZFS_EIO;
+    int e = fs->dev->read(fs->dev->ctx, 0, buf) < 0 ? ZFS_EIO : 0;
+    if (!e && !verify(buf, fs->B, T_SUPER, 0)) e = ZFS_ECORRUPT;
+    if (!e) { wr32(buf + 124, charset); seal(buf, fs->B, 0); e = fs->dev->write(fs->dev->ctx, 0, buf) < 0 || fs->dev->flush(fs->dev->ctx) < 0 ? ZFS_EIO : 0; }
+    if (!e) fs->charset = charset;
+    ZFS_FREE(buf);
+    return e;
 }
 int zfs_sync(struct zfs *fs) { return commit(fs); }
 int zfs_unmount(struct zfs *fs) { int e = commit(fs); fs_free(fs); return e; }

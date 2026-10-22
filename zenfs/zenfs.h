@@ -56,6 +56,11 @@ struct zfs_statfs { uint32_t bsize, blocks, bfree, files; };
 
 struct zfs;   /* a mounted volume */
 
+/* Names are opaque bytes; the volume records which encoding its creator used, as a hint for the operating system
+ * (convert at the boundary when it differs from the system's own). The filesystem never changes or checks names. */
+#define ZFS_CHARSET_LATIN1 0   /* the default, and what an unset field means */
+#define ZFS_CHARSET_UTF8   1
+
 /* make a filesystem on dev; label may be NULL. reserve = blocks kept for unlink (0 = default 2%). */
 int  zfs_mkfs(struct zfs_dev *dev, const char *label, uint32_t reserve, uint64_t now);
 /* mount; cache_blocks = size of the block cache in blocks (at least 32). */
@@ -64,6 +69,8 @@ int  zfs_unmount(struct zfs *fs);                    /* commits */
 int  zfs_sync(struct zfs *fs);                       /* commit everything now */
 void zfs_set_time(struct zfs *fs, uint64_t now);
 int  zfs_statfs(struct zfs *fs, struct zfs_statfs *st);
+uint32_t zfs_charset(struct zfs *fs);
+int  zfs_set_charset(struct zfs *fs, uint32_t charset);     /* rewrites the superblock (one block) */
 
 int  zfs_lookup(struct zfs *fs, uint32_t dir, const char *name, int len, uint32_t *ino);
 int  zfs_getattr(struct zfs *fs, uint32_t ino, struct zfs_inode *out);

@@ -49,6 +49,7 @@ always detected; two changes cancel with probability 2^-32. A block is valid onl
 | 68 | 16 | uuid |
 | 84 | 8 | creation time (seconds, Unix epoch) |
 | 92 | 32 | label, NUL padded |
+| 124 | 4 | `charset` of the names, a hint only: 0 = Latin-1 (also when unset), 1 = UTF-8 |
 
 Defined flags (version 1): none yet. Reserved names: incompat bit 0 = data checksums, rocompat bit 0 = snapshots (not built).
 
@@ -94,7 +95,7 @@ Root directory = object 1. Object 0 is reserved for ORPHAN items. A directory's 
 
 **Directory entries**: a DIRENT value is a list of entries, each `ino` 4, `type` 1 (Unix file type), `namelen` 1, then the name (no NUL);
 several entries only when two names have the same `hash32` (rare). `hash32`: FNV-1a over the name bytes, never changed in version 1.
-A name is 1..255 arbitrary bytes except NUL and `/`; the filesystem does not interpret them (Zenix convention today: Latin-1).
+A name is 1..255 arbitrary bytes except NUL and `/`; the filesystem does not interpret them. The superblock `charset` field says which encoding the volume's creator used (Latin-1 or UTF-8), so the operating system can convert at the boundary; the two encodings can even be mixed on one volume, since names are compared byte for byte.
 
 **Files**: if `flags` bit 0 is set the content is the INLINE item. Otherwise it is the EXTENT items; a block range with no extent reads as zeros (sparse).
 `size` is the length in bytes; bytes past it in the last block are zero.
