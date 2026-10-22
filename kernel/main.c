@@ -151,8 +151,8 @@ void kmain(struct bootinfo *bi)
     vectors_init();
     mem_init(bi, bi->kernel_pa, *(u32 *)(bi->kernel_pa + 12));
     mem_selftest();
-    cache_enable();
-    kprintf("cache: instruction cache on\n");
+    cache_enable((bi->attn & 0x88) != 0);       /* 68040 or 68060 */
+    kprintf("cache: instruction cache on (data cache off: no MMU to keep DMA coherent)\n");
     if (font_ok && gfx_init() == 0)
         kprintf("display: 640x256, 2 bitplanes, Copper split bar + text, ROM Topaz 8\n");
     else

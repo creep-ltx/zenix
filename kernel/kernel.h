@@ -46,7 +46,7 @@ void irq_restore(u16 sr);
 void ints_on(void);
 void ints_off(void);
 void cpu_idle(void);
-void cache_enable(void);
+void cache_enable(int is040plus);
 void exc_common(void);
 void irq2_entry(void);
 

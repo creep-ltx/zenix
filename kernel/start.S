@@ -36,7 +36,28 @@ _entry:
     bcc.s   4f
     clr.l   (%a0)+
     bra.s   3b
-4:  lea     kstack_top,%sp
+4:  /* needs a 68020 or better: AttnFlags (bootinfo +0) bits 1-3 and 7 */
+    move.w  0x1000,%d0
+    and.w   #0x008E,%d0
+    bne.s   6f
+    lea     msg_cpu(%pc),%a0
+    lea     0xDFF000,%a1
+    move.w  #30,0x32(%a1)           /* SERPER: 115200 baud PAL */
+7:  move.b  (%a0)+,%d0
+    beq.s   9f
+8:  move.w  0x18(%a1),%d1           /* SERDATR */
+    btst    #13,%d1                 /* TBE */
+    beq.s   8b
+    move.w  #0x100,%d1
+    move.b  %d0,%d1
+    move.w  %d1,0x30(%a1)
+    bra.s   7b
+9:  move.w  #0xF00,0xDFF180         /* red screen */
+10: bra.s   10b
+msg_cpu:
+    .asciz  "\r\nzenix: needs a 68020 or better (this is a 68000/68010) - halting.\r\n"
+    .balign 2
+6:  lea     kstack_top,%sp
     pea     0x1000                  /* bootinfo */
     jsr     kmain
 5:  bra.s   5b
@@ -171,11 +192,20 @@ cpu_idle:
     stop    #0x2000
     rts
 
-/* void cache_enable(void): 68020 has only an instruction cache.
- * CACR bit 0 = enable, bit 3 = clear. */
+/* void cache_enable(int is040plus): instruction cache only. There is no
+ * MMU to mark chip RAM cache-inhibited, so the data cache stays off
+ * (DMA and copy-back would disagree).
+ * 020/030: CACR bit 0 = enable I-cache, bit 3 = clear it.
+ * 040/060: flush with CINVA BC, then CACR bit 15 = enable I-cache. */
     .globl  cache_enable
 cache_enable:
+    tst.l   4(%sp)
+    bne.s   1f
     move.l  #0x00000009,%d0
+    movec   %d0,%cacr
+    rts
+1:  .word   0xF4D8                  /* cinva bc */
+    move.l  #0x00008000,%d0
     movec   %d0,%cacr
     rts
 

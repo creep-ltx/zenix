@@ -1,0 +1,16 @@
+[fs-uae]
+accuracy = 1
+amiga_model = A1200
+kickstart_file = /home/creep/UAE/ROM/kicka1200.rom
+floppy_drive_0 = ../../build/zenix.adf
+floppy_drive_speed = 0
+hard_drive_0 = ../../build/zenix.hdf
+hard_drive_0_controller = ide0
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true
+window_width = 960
+window_height = 768
+zoom = full
+chip_memory = 2048
+fast_memory = 8192
+uae_cpu_model = 68040

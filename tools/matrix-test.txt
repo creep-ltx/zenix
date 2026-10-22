@@ -1,0 +1,15 @@
+sleep 22
+send free\r
+sleep 1
+send cat /etc/motd | wc\r
+sleep 1
+send echo ok > /tmp/m\r
+sleep 1
+send cat /tmp/m\r
+sleep 1
+send hello 1\r
+sleep 3
+send crash\r
+sleep 2
+send uname\r
+sleep 2
