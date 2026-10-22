@@ -10,7 +10,8 @@
 | [features.md](features.md) | The one list of what Zenix can do, with its status (verified / planned). Kept in step with the code. |
 | [limits.md](limits.md) | What is missing, what is unmeasured, and the honest no-MMU limit. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
-| [zenixfs.md](zenixfs.md) | The proposed native filesystem (nothing built). |
+| [zenixfs.md](zenixfs.md) | ZenixFS, the native filesystem: the design and its status (format in [zenixfs-format.md](zenixfs-format.md)). |
+| [audit-2026-10-22.md](audit-2026-10-22.md) | The full audit of 2026-10-22 and the current work list (batches A-E); fixed items are marked there. |
 | [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D8. |
 
 How these documents were written: by reading the source tree (`kernel/`, `user/`, `boot/`, `tools/`) and the
