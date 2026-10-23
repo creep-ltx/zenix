@@ -24,6 +24,8 @@ D and E.
 2. **Batch B** - memory foundations (libz `malloc`/`free`, `mem_alloc` overflow, interrupts only queue input, the
    lost wakeup, stack-hungry tools, the ZEXE loader checks).
 3. Then the first boot on the PiStorm with `build/zenix-ram.adf`, following the checklist in the audit (Part 4).
+**Text console = Unix/Linux style (owner, 2026-10-23):** ten virtual consoles on Amiga+F1..F10, each with its own login
+prompt; no bar, no Amiga+Return, no workspaces outside the future desktop. Never add desktop features to the text console.
 Mark each fixed item in the audit file in the same commit as the fix. When a batch is done, say so in ROADMAP.md.
 After the first real boot, the next goals are: a terminal the owner can live in on the real machine, then ZenixFS as
 root, then the desktop (ROADMAP phases).

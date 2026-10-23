@@ -38,6 +38,12 @@ manager, scheduler; disk server (RDB partitions), filesystem server (ext2, read 
 pipes, shell and 20 commands; hires display with a Copper-split bar, workspaces, Amiga keyboard; a setup matrix
 of 13 emulated A1200 variants; a benchmark using the CIA's E-clock.
 
+## The text console behaves like Unix/Linux (owner's decision, 2026-10-23)
+The text console has ten plain virtual consoles, switched with Amiga+F1..F10 (plain F-keys stay free for programs), each
+with its own `login` prompt, like Linux's Alt+F1..F6. No bar, no Amiga+Return, no workspaces in the text console: those
+are desktop features and come back in phase 5 with the display server. Done as a cleanup in audit batch E (it removes a
+wrong turn; it also removes the root shell that Amiga+Return gave at the login prompt).
+
 ## Feature halt (2026-10-22)
 The owner halted all new features on 2026-10-22. Until the owner lifts it, work is only the fixes listed in
 `audit-2026-10-22.md` (batches A-E), the tests that check them, documentation corrections and merging the branches
@@ -90,8 +96,6 @@ Ahiru-style file view; mouse. Index server (FuzzyFind) for `locate` / `fzf`.
 **Phase 7 - Polish and release.** Documentation, licence decisions, public repository, release images.
 
 ## Ideas parked for later
-- Virtual consoles: ten clean ttys (no bar) switched with Amiga+F1..F10 (plain F-keys stay free for programs); the bar
-  and workspaces move to the desktop. Same mechanism as today's workspaces (a tty each). After the terminal is comfortable.
 
 ## Open questions
 
