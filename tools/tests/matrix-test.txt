@@ -16,10 +16,10 @@ sleep 2
 send df\r
 sleep 2
 send \x1d2
-sleep 1
-send \x1d\r
-sleep 8
-send echo ws2ok\r
+sleep 5
+send root\r
+sleep 6
+send echo con2ok\r
 sleep 2
 send \x1d1
 sleep 2

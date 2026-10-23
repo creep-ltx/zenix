@@ -24,18 +24,24 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    top of chip RAM is found, and this boot writes the other of the two slots there); serial port (so there is always a console); font pointer extracted
    *before* the memory manager touches RAM; vector table (`VBR` set; exceptions, the four interrupt levels and
    `TRAP #0`); memory manager built from bootinfo with the kernel, low chip RAM and the RAM-disk excluded; a
-   memory self-test; instruction cache on; display (Copper list, bitplane, font); the previous boot's last lines
+   memory self-test; instruction cache on; the E-clock counter (PAL or NTSC crystal, from the Agnus/Alice id);
+   display (the beam's line count picks 32 or 25 text rows; Copper list, bitplane, font); the previous boot's last lines
    if there was one (`klog_show_prev`); real-time clock if present;
    IDE probe with Gayle's interrupt sources switched off first (panic only if there is neither a disk nor a RAM
    disk).
 5. `proc_init`, `tty_init`, then three processes **built into the kernel image** (so they need no disk):
-   `diskd` (priv), `fsd`, `boot` (priv). Timer interrupt and interrupts are switched on. The main thread becomes
+   `diskd` (priv), `fsd`, `boot` (priv), and `zfsd`. Timer interrupt (latch from the E-clock) and interrupts are
+   switched on. The main thread becomes
    the idle loop: reap orphans, `schedule()`, drain the serial buffer, `cpu_idle()` (stop until an interrupt).
 6. `diskd` finds the disk and RDB and creates the `disk` port. `fsd` mounts a device through it and creates the
-   `fs` port. `boot` polls for `fs` (up to ~30 s), then `spawn("/bin/init")`.
-   `spawn` itself is a message to `fsd`: the kernel's `proc_spawn` reads the file via `fs_read_file`.
-7. **`/bin/init`** prints `/etc/motd`, spawns `/bin/sh` with the tty as stdio, makes it the foreground process and
-   waits; if the shell exits it starts another.
+   `fs` port. `boot` polls for `fs` (up to ~30 s), then `spawn("/bin/init")` and waits for it.
+   `spawn` itself is messages to `fsd`: the kernel's `proc_spawn` opens the file (`fs_exec_open`) and reads it
+   straight into the new process's memory.
+7. **`/bin/init`** prints `/etc/motd`, runs `mount -a` if there is an `/etc/fstab`, and starts `/bin/login` on
+   console 1 (`/dev/tty1` as its stdio, so that console becomes its controlling tty). `login` logs in the user named in
+   `/etc/autologin` (console 1 only) or asks, then runs the user's shell and waits. init then waits for two kinds of
+   event: a login that ended (it starts a new one on that console) and a console shown with nobody on it (Amiga+F2:
+   it starts a login there).
 
 ## 2. Life of `cat notes | grep zen`
 
@@ -57,8 +63,8 @@ The shell parses the line and builds a pipeline:
 6. `cat` calls `write(1, ...)` on the pipe: bytes go into the ring; a waiting `grep` is made ready. A full ring
    blocks the writer (`P_IO`); `wake_io()` re-checks blocked peers when either side changes.
 7. `grep` reads the pipe, filters with the regex engine, writes to the tty. The kernel's `tty_write` passes the
-   bytes to the terminal parser, which updates that workspace's grid; if the workspace is visible the glyphs are
-   drawn with the blitter-assisted display code, and the focused tty is mirrored to the serial port.
+   bytes to the terminal parser, which updates that console's grid; if the console is on the screen the glyphs are
+   drawn with the blitter-assisted display code, and its output is mirrored to the serial port.
 8. `cat` exits: `proc_exit` closes its fds (the pipe loses its last writer), frees all memory owned by its pid,
    becomes a zombie and wakes the shell's `wait`. `grep` then reads EOF, exits too. The shell collects both exit
    codes.

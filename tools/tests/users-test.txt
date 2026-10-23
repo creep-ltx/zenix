@@ -47,7 +47,7 @@ send chown guest:users /tmp/u1; ls -l /tmp/u1; chgrp users /tmp/u2; ls -l /tmp/u
 sleep 4
 send sleep 90 &\r
 sleep 2
-send mkdir -p /tmp/sgd /tmp/mvt/src/dd /tmp/mvt/dst; chmod 2777 /tmp/sgd; echo x > /tmp/sgd/prog; chmod 6777 /tmp/sgd/prog\r
+send mkdir -p /tmp/sgd /tmp/mvt/src/dd /tmp/mvt/dst /tmp/priv; chmod 2777 /tmp/sgd; echo x > /tmp/sgd/prog; chmod 6777 /tmp/sgd/prog; chmod 700 /tmp/priv\r
 sleep 3
 send echo f > /tmp/mvt/src/dd/f; chmod 777 /tmp/mvt/src /tmp/mvt/dst; chmod 555 /tmp/mvt/src/dd\r
 sleep 2
@@ -71,18 +71,30 @@ send exit\r
 sleep 2
 send sh /tests/perm-root.sh\r
 sleep 14
-send kill %1; rm -r /home/user/.shrc /tmp/sgd /tmp/mvt\r
+send kill %1; rm -r /home/user/.shrc /tmp/sgd /tmp/mvt /tmp/priv\r
 sleep 2
 send echo user > /etc/autologin; exit\r
 sleep 8
 send id\r
 sleep 2
 send \x1d2
-sleep 1
-send \x1d\r
-sleep 6
-send id; whoami; echo $HOME; pwd\r
+sleep 5
+send user\r
+sleep 5
+send id; whoami; echo "home=$HOME"; pwd\r
 sleep 3
+send ls /bin | less\r
+sleep 5
+send q
+sleep 2
+send echo "less-st=$?"\r
+sleep 2
+send sleep 4\r
+sleep 1
+send echo typ
+sleep 6
+send ed-ahead-ok\r
+sleep 2
 send \x1d1
 sleep 2
 send su\r
@@ -92,12 +104,26 @@ sleep 2
 send exit\r
 sleep 5
 send \x1d3
-sleep 1
-send \x1d\r
-sleep 3
+sleep 5
 send \x1d1
 sleep 1
 send root\r
 sleep 4
 send echo root > /etc/autologin; id\r
+sleep 2
+send echo "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\r
+sleep 2
+send BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" > /dev/null\r
+sleep 2
+send \x1b[A
+sleep 2
+send \x03
+sleep 1
+send echo "hist-$((1+1))-ok"\r
+sleep 2
+send vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv=1\r
+sleep 2
+send echo $vvvv\t\x03
+sleep 2
+send echo "tab-$((2+1))-ok"\r
 sleep 2

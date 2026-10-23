@@ -96,8 +96,8 @@ void serial_rx_isr(void)
     }
 }
 
-/* Process context (kwork): the queued bytes, to the focused tty; 0x1d starts a test/remote-control command:
- * 1-9 switch workspace, Return opens a shell there, u/d and U/D scroll back a line or a page. */
+/* Process context (kwork): the queued bytes, to the tty of the console on the screen; 0x1d starts a test/remote-control
+ * command: 1-9 show console 1-9 and 0 console 10 (as Amiga+F1..F10), u/d and U/D scroll back a line or a page. */
 void serial_work(void)
 {
     static int hot;
@@ -107,14 +107,12 @@ void serial_work(void)
         rxq_tail = (u16)((t + 1) % RXQ);
         if (hot) {
             hot = 0;
-            if (c >= '1' && c <= '9')
-                ws_switch(c - '0');
-            else if (c == '\r' || c == '\n')
-                ws_request_shell(ws_cur);
+            if (c >= '0' && c <= '9')
+                con_switch(c == '0' ? 10 : c - '0');
             else if (c == 'u' || c == 'd')          /* scrollback one line */
                 term_scroll_view(c == 'u' ? 1 : -1);
             else if (c == 'U' || c == 'D')          /* a page */
-                term_scroll_view(c == 'U' ? TROWS - 1 : -(TROWS - 1));
+                term_scroll_view(c == 'U' ? trows - 1 : -(trows - 1));
             continue;
         }
         if (c == 0x1d) {

@@ -2,7 +2,8 @@
 """Keyboard test: boot Zenix in FS-UAE inside a private invisible Wayland session (the cage rig, as shot.py), press
 keys on the emulated Amiga keyboard with wtype, make the shell write what arrived into files, then read the files
 back from the disk image and compare. Checks the Swedish keymap's four layers (plain, Shift, Alt, Shift+Alt), Caps
-Lock, software key repeat (a held key), and typing while heavy output runs (nothing lost).
+Lock, software key repeat (a held key), typing while heavy output runs (nothing lost), and the virtual consoles
+(Amiga+F2 shows console 2 with its own login, Amiga+F1 goes back).
 
 usage: kbd-test.py config.fs-uae [serial-link]      (run by tools/kbd-test.sh)
 FS-UAE maps host keys to Amiga raw codes by position (a US host layout): host [ ; ' are Amiga 0x1A 0x29 0x2A.
@@ -86,6 +87,21 @@ try:
         time.sleep(0.5)
         text("echo typed during output"); redir("k4.txt"); w("-k", "Return")
         time.sleep(40)
+        # 5. virtual consoles: Amiga+F2 shows console 2 and its own login prompt; log in as root there (autologin is
+        # console 1's only); two logins are then running. Amiga+F1 goes back: console 1's shell has no jobs, console
+        # 2's has the sleep started there.
+        key("F2", "Super_L")
+        time.sleep(4)
+        text("root"); w("-k", "Return")
+        time.sleep(4)
+        text("sleep 300 "); key("6", "Shift_L"); w("-k", "Return")    # & is Shift+6 on a Swedish keyboard
+        time.sleep(1)
+        text("pgrep login"); redir("k6.txt"); w("-k", "Return")       # (no | or -: other keys there)
+        time.sleep(2)
+        key("F1", "Super_L")
+        time.sleep(2)
+        text("jobs"); redir("k7.txt"); w("-k", "Return")
+        time.sleep(2)
         text("dmesg"); redir("k5.txt"); w("-k", "Return")
         time.sleep(2)
         text("sync"); w("-k", "Return")

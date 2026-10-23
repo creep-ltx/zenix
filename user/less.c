@@ -4,7 +4,7 @@
  * Keys: Space/f page down, b page up, Enter/j/Down line down, k/Up line up, d/u half page, g/Home top, G/End bottom,
  * / pattern search, ? backward search, n/N next/previous match, h help, q quit.
  * Short files are just printed. Text from a pipe works: the keys come from /dev/tty. */
-#define ROWS 31
+static int ROWS = 25;                   /* the terminal's rows (main asks the kernel: 32 PAL, 25 NTSC) */
 static char *text; static u32 tlen, tcap;
 struct row { u32 off; unsigned short len; };
 static struct row *rows; static u32 nrows, rcap;
@@ -138,6 +138,7 @@ static void help(void)
 int main(int argc, char **argv)
 {
     int i = 1;
+    { int ti = sys_ttyinfo(); ROWS = ti > 0 ? ti >> 16 : 25; if (ROWS < 3) ROWS = 3; }    /* 32 on PAL, 25 on NTSC */
     while (i < argc && argv[i][0] == '-' && argv[i][1]) i++;         /* options are accepted and ignored */
     int tty_out = sys_isatty(1);
     if (i >= argc) {
@@ -154,7 +155,7 @@ int main(int argc, char **argv)
     }
     if (!tlen) return 0;
     layout();
-    if (!tty_out || nrows <= ROWS - 1) {                    /* not a terminal, or it all fits: just print it */
+    if (!tty_out || nrows <= (u32)(ROWS - 1)) {                    /* not a terminal, or it all fits: just print it */
         for (u32 r = 0; r < nrows; r++) { put_row(&rows[r]); oputc('\n'); }
         oflush();
         return 0;

@@ -38,7 +38,21 @@ users_d_checks() {
     line "... it is still where it was" "mv-dir-stays=0"
     line "the user part ran to the end" "perm-user-done"
     line "the root part ran to the end" "perm-root-done"
-    line "Amiga+Return at the login prompt opens no shell and says why" "Nobody is logged in: log in first; Amiga+Return then opens a shell."
+    # audit batch E: the virtual consoles (the serial hook 0x1d + digit shows console N), type-ahead, the shell's
+    # history and completion buffers, permission texts
+    line "console 2 shows its own login prompt; logging in there gives that user's shell" "home=/home/user"
+    line "ls | less on console 2 reads console 2's keys (q there ends it)" "less-st=0"
+    line "type-ahead: what was typed while a command ran is kept" "typed-ahead-ok"
+    line "a logout on console 1 starts a new login there" "init: session ended, starting another"
+    local np; np=$(grep -ao 'zenix login: ' "$L" | wc -l)      # not at a line start: the serial copy has no redraw
+    if [ "$np" -ge 3 ]; then echo "PASS ${pre}login prompts on console 2, console 1 after the logout, console 3 ($np)"; else echo "FAIL ${pre}login prompts: $np (3 wanted)"; bad=1; fi
+    line "a history entry longer than the line is cut, not copied over it" "hist-2-ok"
+    line "completing a 150-character variable name does not overflow" "tab-3-ok"
+    line "find says permission denied, not 'not found'" "find: /tmp/priv/x: permission denied"
+    line "du says permission denied" "du: /tmp/priv/x: permission denied"
+    line "cp says permission denied" "cp: /tmp/priv/x: permission denied"
+    line "grep says permission denied" "grep: /tmp/priv/x: permission denied"
+    line "diff says permission denied" "diff: /tmp/priv/x: permission denied"
     rm -f "$L"
     return $bad
 }

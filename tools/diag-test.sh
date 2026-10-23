@@ -3,7 +3,8 @@
 # First-boot diagnostics (audit A11/A12), in FS-UAE through the cage rig (tools/shot.py: nothing on the desktop).
 #  1. colours: test builds that hang at boot stage N (make DIAG=-DDIAG_STOP=N) must show stage N's colour over the
 #     whole screen; a build that panics before the display (DIAG_PANIC=7) and a 68000 must show the split screen
-#     (stage colour on top, red below); a panic after the boot (DIAG_PANIC=11) a red bar.
+#     (stage colour on top, red below); a panic after the boot (DIAG_PANIC=11) white text on dark red (no bar since
+#     audit batch E: the whole screen is text).
 #  2. previous-boot log: boot the RAM floppy, run `crash` (the kernel logs "killed"), warm reset with
 #     Ctrl+Amiga+Amiga, and check that the next boot shows the previous boot's last lines and `dmesg -p` has them;
 #     the same after a kernel panic (DIAG_PANIC=11): "ended here with a kernel panic" and the panic text, twice
@@ -111,13 +112,13 @@ if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
     [ "$(grep -c '^\[kernel\] pid [0-9]* (crash) killed' "$L")" = 2 ] && check "dmesg -p | tail prints the previous boot's last line" ok ||
         check "dmesg -p | tail prints the previous boot's last line" bad
 
-    build panic11 "-DDIAG_PANIC=11" DIWV=0x38      # the picture starts lower: FS-UAE's screenshot shows the bar
+    build panic11 "-DDIAG_PANIC=11" DIWV=0x38      # the picture starts lower: FS-UAE's screenshot shows its top rows
     conf "$OUT/preset.fs-uae" "$OUT/panic11/zenix-ram.adf"
     wait_free
     ZOOMOUT=0 RESET_AT=28,58 timeout 130 python3 tools/shot.py "$OUT/preset.fs-uae" "$OUT/idle.txt" "$OUT/preset" 26 56 86 >/dev/null 2>&1
     L=$OUT/preset.log; tr -d '\r' < "$OUT/preset.serial.log" > "$L"
-    bar=$(pixel "$OUT/preset-26.png" 0.02)
-    near "$bar" F00 && check "panic after the boot: the bar turns red" ok || check "panic after the boot: red bar (got $bar, see $OUT/preset-26.png)" bad
+    bg=$(pixel "$OUT/preset-26.png" 0.02)
+    near "$bg" 800 && check "panic after the boot: the background turns dark red" ok || check "panic after the boot: dark red background (got $bg, see $OUT/preset-26.png)" bad
     grep -q '^=== previous boot (1) ended here with a kernel panic' "$L" && check "next boot: ended with a kernel panic" ok || check "next boot: ended with a kernel panic" bad
     grep -q '^> \*\*\* kernel panic: test panic (DIAG_PANIC)' "$L" && check "next boot shows the panic text" ok || check "next boot shows the panic text" bad
     # a third boot: the log is back in the first slot and boot 2's is the previous one

@@ -8,15 +8,16 @@ SYNOPSIS
     badptr ipc
 
 DESCRIPTION
-    A test program. First it hands the kernel two pointers that are not the
-    program's own memory in a write() call: the kernel must answer -1 (an
-    error) instead of crashing. Then it checks the memory calls: memalloc of 0
-    or of sizes near 4 GB gives 0 (NULL), malloc of such sizes gives NULL, a
-    freed small block is used again, the largest small block (32 KB) can be
-    had, realloc keeps the contents, malloc says NULL when the process's
-    memory regions run out and free gives them back, and a free() of a pointer
-    malloc did not give out is reported and survived. Prints one line per
-    check, ending in "ok" or "FAILED", then "badptr: all ok".
+    A test program. First it hands the kernel two pointers that are not
+    the program's own memory in a write() call: the kernel must answer -14
+    (EFAULT, a bad address) instead of crashing. Then it checks the memory
+    calls: memalloc of 0 or of sizes near 4 GB gives 0 (NULL), malloc of
+    such sizes gives NULL, a freed small block is used again, the largest
+    small block (32 KB) can be had, realloc keeps the contents, malloc
+    says NULL when the process's memory regions run out and free gives
+    them back, and a free() of a pointer malloc did not give out is
+    reported and survived. Prints one line per check, ending in "ok" or
+    "FAILED", then "badptr: all ok".
 
     badptr ipc, run as a normal user, checks what such a user must not be
     able to do: create the ports "fs", "fs.*" or "disk"; send the
@@ -32,5 +33,9 @@ DESCRIPTION
 EXIT STATUS
     0 if every check passed, 1 otherwise; badptr ipc as root: 2.
 
+
+NOTES
+    The checks expect the error numbers of kernel/errno.h: a refusal is
+    -13 (EACCES), an existing name -17 (EEXIST).
 SEE ALSO
     crash(1)

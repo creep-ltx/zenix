@@ -1,8 +1,9 @@
 #pragma once
-/* Zenix system calls: TRAP #0, number in d0, args d1-d3, result in d0. */
+/* Zenix system calls: TRAP #0, number in d0, args d1-d3, result in d0 (a negative error number on failure). */
 typedef unsigned int u32;
+#include "../kernel/errno.h"
 
-extern int zerrno;                       /* libz: the code of the last failed system call (13 = permission denied) */
+extern int zerrno;                       /* libz: the error number of the last failed system call (EACCES ...) */
 static inline int sys3(int n, u32 a, u32 b, u32 c)
 {
     register int d0 __asm__("d0") = n;
@@ -35,6 +36,8 @@ static inline int sys_wait(int pid) { return sys3(6, (u32)pid, 0, 0); }
 static inline int sys_waitnb(int pid) { return sys3(6, (u32)pid, 1, 0); }   /* -2: not yet */
 #define ST_STOPPED 0x114        /* sys_waitu result: the child was stopped (Ctrl-Z) */
 static inline int sys_waitu(int pid) { return sys3(6, (u32)pid, 2, 0); }    /* like wait, but also returns ST_STOPPED once for a stopped child */
+#define ST_CONSOLE 0x200        /* sys_waitcon result ST_CONSOLE + n: console n was shown with nobody on it */
+static inline int sys_waitcon(void) { return sys3(6, (u32)-1, 4, 0); }    /* init (root): any child, or a console that wants a login */
 static inline int sys_jobctl(int pid, int op) { return sys3(75, (u32)pid, (u32)op, 0); }   /* op 0 = stop, 1 = continue */
 static inline void sys_sleep(u32 ticks) { sys3(7, ticks, 0, 0); }
 static inline int sys_open(const char *p, int fl) { return sys3(8, (u32)p, (u32)fl, 0); }
@@ -79,8 +82,6 @@ static inline int sys_blk_write(u32 lba, u32 n, const void *buf) { return sys3(3
 static inline u32 sys_hrtime(void) { return (u32)sys3(36, 0, 0, 0); }
 static inline int sys_ttymirror(int on) { return sys3(37, (u32)on, 0, 0); }
 static inline struct umsg *sys_replyrecv(struct umsg *m, int result, int port) { return (struct umsg *)sys3(38, (u32)m, (u32)result, (u32)port); }
-static inline int sys_wsreq(void) { return sys3(39, 0, 0, 0); }
-static inline int sys_spawn_tty(const char *path, char *const *argv, int tty) { return sys3(40, (u32)path, (u32)argv, (u32)tty); }
 static inline int sys_input(int *out) { return sys3(74, (u32)out, 0, 0); }   /* out[4]: mouse dx, dy, buttons, joystick */
 static inline int sys_klog(u32 off, void *buf, u32 n) { return sys3(73, off, (u32)buf, n); }   /* kernel log: characters copied */
 static inline int sys_fd_info(u32 d) { return sys3(76, d, 0, 0); }   /* floppy: bit 0 drive, 1 disk, 2 write protected; sectors << 8 */
@@ -116,7 +117,6 @@ static inline int sys_setgid(u32 id) { return sys3(64, id, 0, 0); }
 static inline int sys_umask(u32 mask) { return sys3(65, mask, 0, 0); }
 static inline int sys_chown(const char *p, u32 uid, u32 gid) { return sys3(66, (u32)p, uid, gid); }
 static inline int sys_geteuid(void) { return sys3(67, 0, 0, 0); }
-static inline int sys_session(u32 uid, u32 gid) { return sys3(68, uid, gid, 0); }
 struct umountreq { const char *path, *port, *dev, *type; };
 struct umountinfo { char path[48], port[16], dev[16], type[8]; };
 static inline int sys_mount(const struct umountreq *r) { return sys3(69, (u32)r, 0, 0); }

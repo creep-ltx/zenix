@@ -40,7 +40,7 @@ static int ipc_checks(void)
     check("ipc: DISK_RESCAN refused", disk >= 0 && call(disk, DISK_RESCAN, 0, 0, 0, 0) == -13);
     check("ipc: DISK_LIST still answers", disk >= 0 && call(disk, DISK_LIST, 0, (u32)buf, 0, 0) == 0);
     int servers = 0, refused = 0;
-    for (u32 i = 0; i < 16; i++) {
+    for (u32 i = 0; i < 256; i++) {      /* until procinfo says the table ends */
         struct uproc p;
         if (sys_procinfo(i, &p) < 0 || p.state == 0 || p.state == 5 || p.pid == 0) continue;
         if (strcmp(p.name, "diskd") && strcmp(p.name, "fsd") && strcmp(p.name, "zfsd") && strcmp(p.name, "boot") && strcmp(p.name, "init"))
@@ -74,7 +74,7 @@ int main(int argc, char **argv)
     int a = sys_write(1, (const void *)0x1000, 16);
     int b = sys_write(1, (const void *)0xFFFFFFF0, 64);
     printf("badptr: write(0x1000)=%d write(0xfffffff0)=%d\n", a, b);
-    check("bad pointers refused", a == -1 && b == -1);
+    check("bad pointers refused", a == -EFAULT && b == -EFAULT);
 
     /* the kernel: 0 on failure, never -1; sizes near 4 GB do not wrap */
     check("memalloc(0xfffffff0) is 0", sys_memalloc(0xFFFFFFF0u) == 0);

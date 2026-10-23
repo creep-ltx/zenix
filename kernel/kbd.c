@@ -123,7 +123,7 @@ static const char keyspecial[0x28] = {
  * programs in raw mode get them; Shift/Ctrl + Up/Down scroll the screen back. */
 static void emit_seq(const char *q)
 {
-    if (!(tty_getmode(ws_cur) & TTY_RAW))
+    if (!(tty_getmode(con_cur) & TTY_RAW))
         return;
     while (*q)
         tty_input((u8)*q++);
@@ -134,7 +134,7 @@ static int special_key(u8 code)
     static const char *const fkeys[10] = {
         "\033OP", "\033OQ", "\033OR", "\033OS", "\033[15~",
         "\033[17~", "\033[18~", "\033[19~", "\033[20~", "\033[21~" };
-    int raw = (tty_getmode(ws_cur) & TTY_RAW) != 0;
+    int raw = (tty_getmode(con_cur) & TTY_RAW) != 0;
     if (code >= 0x4C && code <= 0x4F) {
         static const char arrow[4] = { 'A', 'B', 'C', 'D' };
         int mods = (shift_down ? 1 : 0) | (alt_down ? 2 : 0) | (ctrl_down ? 4 : 0);
@@ -148,7 +148,7 @@ static int special_key(u8 code)
             return 1;
         }
         if ((shift_down || ctrl_down) && code <= 0x4D) {        /* a plain terminal: scrollback */
-            int step = ctrl_down ? TROWS - 1 : 1;
+            int step = ctrl_down ? trows - 1 : 1;
             term_scroll_view(code == 0x4C ? step : -step);
             return 1;
         }
@@ -182,7 +182,7 @@ static void key_down(u8 code)
     if (special_key(code))
         return;
     u8 c = 0;
-    if (code == 0x41 && (tty_getmode(ws_cur) & TTY_RAW))
+    if (code == 0x41 && (tty_getmode(con_cur) & TTY_RAW))
         c = 127;                                    /* Backspace is DEL for raw-mode programs */
     else if (code < 0x40) {
         int shift = shift_down;
@@ -262,7 +262,7 @@ void kbd_isr(void)
     kwork_pending = 1;
 }
 
-/* one raw code, in process context: modifiers, workspace keys, repeat, then the keymap and the tty */
+/* one raw code, in process context: modifiers, console keys, repeat, then the keymap and the tty */
 static void key_code(u8 code)
 {
     int up = code & 0x80;
@@ -289,12 +289,10 @@ static void key_code(u8 code)
             rep_code = 0;
         return;
     }
-    if (amiga_down) {                   /* workspace keys, like i3's mod key */
+    if (amiga_down) {                   /* Amiga+F1..F10: virtual console 1..10 (Linux: Alt+Fn); other Amiga keys: nothing */
         rep_code = 0;
-        if (code >= 0x01 && code <= 0x09)
-            ws_switch(code);
-        else if (code == 0x44)          /* Return: a shell here */
-            ws_request_shell(ws_cur);
+        if (code >= 0x50 && code <= 0x59)
+            con_switch(code - 0x50 + 1);
         return;
     }
     rep_code = code;

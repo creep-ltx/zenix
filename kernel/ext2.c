@@ -5,6 +5,8 @@
 #else
 #include "kernel.h"
 #endif
+#include "errno.h"
+#include "fsproto.h"            /* FS_PATHMAX */
 
 /* ext2 (revision 0/1), written from the public format description. On-disk numbers are little-endian; every field
  * is swapped when read, file data never is.
@@ -154,7 +156,7 @@ static int bread_copy(u32 blk, u32 off, void *dst, u32 len)
 {
     int i = bfind(blk);
     if (i < 0)
-        return -1;
+        return -EIO;
     memcpy(dst, buf[i].data + off, len);
     return 0;
 }
@@ -166,7 +168,7 @@ static int bwrite_copy(u32 blk, u32 off, const void *src, u32 len)
         return EROFS_;
     int i = bfind(blk);
     if (i < 0)
-        return -1;
+        return -EIO;
     memcpy(buf[i].data + off, src, len);
     return fs_blk_write(part_lba + blk * sectors_per_block, sectors_per_block,
                      buf[i].data);
@@ -336,21 +338,23 @@ int ext2_mount(void)
     return ext2_mount_as(EXT2_RW);
 }
 
+/* Errors are the negative errno numbers of kernel/errno.h (audit E): -ENOENT, -EEXIST, -ENOTDIR, -EISDIR, -ENOTEMPTY,
+ * -ENOSPC, -EIO (a damaged volume or the disk), -EROFS ... */
 int ext2_iget(u32 ino, struct inode *out)
 {
     if (!mounted || ino == 0 || ino > ninodes)
-        return -1;
+        return -EIO;
     u32 grp = (ino - 1) / ninodes_per_group;
     u32 idx = (ino - 1) % ninodes_per_group;
     u32 gd[2];
     u32 gdoff = grp * 32;
     if (bread_copy(gd_blk + gdoff / bsize, gdoff % bsize + 8, gd, 4))
-        return -1;
+        return -EIO;
     u32 itable = le32(gd[0]);
     u32 pos = idx * inode_size;
     u8 raw[128];
     if (bread_copy(itable + pos / bsize, pos % bsize, raw, 128))
-        return -1;
+        return -EIO;
     out->ino = ino;
     out->mode = le16(*(u16 *)(raw + 0));
     out->uid = le16(*(u16 *)(raw + 2));
@@ -476,7 +480,7 @@ int ext2_readdir(const struct inode *dir, u32 *cookie, struct udirent *out)
 int ext2_lookup(const struct inode *dir, const char *name, u32 len, u32 *ino)
 {
     if (!S_ISDIR(dir->mode))
-        return -1;
+        return -ENOTDIR;
     for (u32 b = 0; b < dir->size / bsize; b++) {
         u32 blk = ext2_bmap(dir, b);
         const u8 *p = blk ? bptr(blk) : 0;
@@ -498,7 +502,7 @@ int ext2_lookup(const struct inode *dir, const char *name, u32 len, u32 *ino)
             o += rl;
         }
     }
-    return -1;
+    return -ENOENT;
 }
 
 /* the bytes of a fast symbolic link (up to 59 characters stored in the inode's block array) */
@@ -539,10 +543,11 @@ int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int f
 {
     u32 cur = (path[0] == '/') ? 2 : cwd;
     struct inode in;
+    int r;
     if (depth > 8)
-        return -1;
-    if (ext2_iget(cur, &in))
-        return -1;
+        return -ELOOP;
+    if ((r = ext2_iget(cur, &in)))
+        return r;
     while (*path) {
         while (*path == '/')
             path++;
@@ -553,14 +558,16 @@ int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int f
             e++;
         u32 next;
         if (!S_ISDIR(in.mode))
-            return -1;
+            return -ENOTDIR;
         if (!ext2_access(&in, 1))               /* searching a directory needs x */
-            return -13;
-        if (e - path > 255 || ext2_lookup(&in, path, (u32)(e - path), &next))
-            return -1;
+            return -EACCES;
+        if (e - path > 255)
+            return -ENAMETOOLONG;
+        if ((r = ext2_lookup(&in, path, (u32)(e - path), &next)))
+            return r;
         struct inode nin;
-        if (ext2_iget(next, &nin))
-            return -1;
+        if ((r = ext2_iget(next, &nin)))
+            return r;
         const char *rest = e;
         while (*rest == '/')
             rest++;
@@ -568,17 +575,17 @@ int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int f
             char target[256];
             int n = ext2_readlink(&nin, target, 255);
             if (n < 0)
-                return -1;
+                return n;
             target[n] = 0;
             struct inode t;
-            if (ext2_namei_ex(target, in.ino, &t, depth + 1, 1))
-                return -1;
+            if ((r = ext2_namei_ex(target, in.ino, &t, depth + 1, 1)))
+                return r;
             nin = t;
         }
         in = nin;
         path = e;
         if (*rest && !S_ISDIR(in.mode))
-            return -1;
+            return -ENOTDIR;
     }
     *out = in;
     return 0;
@@ -751,15 +758,15 @@ static void free_inode(u32 ino, int is_dir)
 int ext2_iput(const struct inode *in)
 {
     if (in->ino == 0 || in->ino > ninodes)
-        return -1;
+        return -EIO;
     u32 grp = (in->ino - 1) / ninodes_per_group, idx = (in->ino - 1) % ninodes_per_group;
     u32 itable;
     if (gd_get(grp, 8, 4, &itable))
-        return -1;
+        return -EIO;
     u32 pos = idx * inode_size, blk = itable + pos / bsize, off = pos % bsize;
     u8 raw[128];
     if (bread_copy(blk, off, raw, 128))
-        return -1;
+        return -EIO;
     wr16(raw + 0, in->mode);
     wr16(raw + 2, in->uid);
     wr32(raw + 4, in->size);
@@ -867,8 +874,8 @@ int ext2_write(struct inode *in, u32 off, const void *src, u32 n)
         in->size = off + done;
     in->mtime = fs_now();
     if (ext2_iput(in))
-        return -1;
-    return done || !n ? (int)done : -1;
+        return -EIO;
+    return done || !n ? (int)done : -ENOSPC;    /* nothing written: no free block (or the file's map is full) */
 }
 
 /* free a block tree; *budget limits the blocks a (damaged) inode can make us visit */
@@ -941,7 +948,7 @@ int ext2_truncate(struct inode *in)
     if (ext2_readonly)
         return EROFS_;
     if (!S_ISREG(in->mode))
-        return -1;
+        return -EISDIR;
     free_data(in);
     in->mtime = fs_now();
     return ext2_iput(in);
@@ -966,7 +973,7 @@ int ext2_release(u32 ino)
     if (ext2_readonly)
         return EROFS_;
     if (ext2_iget(ino, &in) || in.links != 0 || in.mode == 0)
-        return -1;
+        return -EINVAL;
     release(&in);
     return 0;
 }
@@ -1007,8 +1014,10 @@ static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino, u32 mo
 {
     u32 need = 8 + ((len + 3) & ~3u);
     u32 nblk = dir->size / bsize;
-    if (len == 0 || len > 255)
-        return -1;
+    if (len == 0)
+        return -EINVAL;
+    if (len > 255)
+        return -ENAMETOOLONG;
     for (u32 i = 0; i < nblk; i++) {
         u32 blk = ext2_bmap(dir, i);
         if (!blk || bread_copy(blk, 0, dbuf, bsize))
@@ -1031,7 +1040,7 @@ static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino, u32 mo
                 dbuf[at + 7] = file_type(mode);
                 memcpy(dbuf + at + 8, name, len);
                 if (bwrite_copy(blk, 0, dbuf, bsize))
-                    return -1;
+                    return -EIO;
                 return dir_unindex(dir);
             }
             o += rl;
@@ -1039,7 +1048,7 @@ static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino, u32 mo
     }
     u32 blk = bmap_alloc(dir, nblk);            /* no room: a new directory block */
     if (!blk)
-        return -1;
+        return -ENOSPC;
     memset(dbuf, 0, bsize);
     wr32(dbuf, ino);
     wr16(dbuf + 4, (u16)bsize);
@@ -1047,7 +1056,7 @@ static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino, u32 mo
     dbuf[7] = file_type(mode);
     memcpy(dbuf + 8, name, len);
     if (bwrite_copy(blk, 0, dbuf, bsize))
-        return -1;
+        return -EIO;
     dir->size += bsize;
     dir->mtime = fs_now();
     dir->flags &= ~(u32)EXT2_INDEX_FL;
@@ -1058,8 +1067,9 @@ static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino, u32 mo
 int ext2_link(struct inode *dir, const char *name, u32 ino)
 {
     struct inode in;
-    if (ext2_iget(ino, &in))
-        return -1;
+    int r = ext2_iget(ino, &in);
+    if (r)
+        return r;
     return dir_add(dir, name, strlen_(name), ino, in.mode);
 }
 
@@ -1082,14 +1092,14 @@ static int dir_remove(struct inode *dir, const char *name, u32 len, u32 *ino_out
                 else
                     wr32(dbuf + o, 0);
                 if (bwrite_copy(blk, 0, dbuf, bsize))
-                    return -1;
+                    return -EIO;
                 return dir_unindex(dir);
             }
             prev = o;
             o += rl;
         }
     }
-    return -1;
+    return -ENOENT;
 }
 
 static int dir_is_empty(const struct inode *dir)
@@ -1106,9 +1116,11 @@ static int dir_is_empty(const struct inode *dir)
 /* split a path into parent directory and last component */
 int ext2_namei_parent(const char *path, u32 cwd, struct inode *dir, char *name)
 {
-    char p[128];
+    char p[FS_PATHMAX];                 /* the one path limit (fsproto.h): longer is refused, never cut */
     u32 n = 0;
-    while (path[n] && n < sizeof p - 1) {
+    while (path[n]) {
+        if (n == sizeof p - 1)
+            return -ENAMETOOLONG;
         p[n] = path[n];
         n++;
     }
@@ -1119,22 +1131,25 @@ int ext2_namei_parent(const char *path, u32 cwd, struct inode *dir, char *name)
     while (slash > 0 && p[slash - 1] != '/')
         slash--;
     u32 len = n - slash;
-    if (len == 0 || len > 63 || (len == 1 && p[slash] == '.') ||
+    if (len > 63)
+        return -ENAMETOOLONG;
+    if (len == 0 || (len == 1 && p[slash] == '.') ||
         (len == 2 && p[slash] == '.' && p[slash + 1] == '.'))
-        return -1;
+        return -EINVAL;                 /* "", "." or ".." as the last part: not something to create or remove */
     memcpy(name, p + slash, len);
     name[len] = 0;
+    int r;
     if (slash == 0) {
-        if (ext2_iget(cwd, dir))
-            return -1;
+        if ((r = ext2_iget(cwd, dir)))
+            return r;
     } else {
         p[slash] = 0;
         if (slash > 1 && p[slash - 1] == '/')
             p[slash - 1] = 0;
-        if (ext2_namei(p[0] ? p : "/", cwd, dir, 0))
-            return -1;
+        if ((r = ext2_namei(p[0] ? p : "/", cwd, dir, 0)))
+            return r;
     }
-    return S_ISDIR(dir->mode) ? 0 : -1;
+    return S_ISDIR(dir->mode) ? 0 : -ENOTDIR;
 }
 
 /* a new inode: the whole on-disk inode is cleared first (a reused inode keeps nothing of its old life:
@@ -1145,12 +1160,12 @@ static int new_inode(struct inode *out, u32 mode, int is_dir)
         return EROFS_;
     u32 ino = alloc_inode(is_dir);
     if (!ino)
-        return -1;
+        return -ENOSPC;                 /* no free inode */
     u32 grp = (ino - 1) / ninodes_per_group, idx = (ino - 1) % ninodes_per_group, itable;
     static u8 zero[4096];
     if (gd_get(grp, 8, 4, &itable)) {
         free_inode(ino, is_dir);
-        return -1;
+        return -EIO;
     }
     u32 pos = idx * inode_size;
     memset(zero, 0, inode_size);
@@ -1158,7 +1173,7 @@ static int new_inode(struct inode *out, u32 mode, int is_dir)
         wr16(zero + 128, (u16)extra_isize);     /* i_extra_isize as the superblock wants it */
     if (bwrite_copy(itable + pos / bsize, pos % bsize, zero, inode_size)) {
         free_inode(ino, is_dir);
-        return -1;
+        return -EIO;
     }
     memset(out, 0, sizeof *out);
     out->ino = ino;
@@ -1181,14 +1196,15 @@ static void inherit_group(struct inode *in, const struct inode *dir)
 /* create an empty regular file in dir */
 int ext2_create(struct inode *dir, const char *name, struct inode *out)
 {
-    if (new_inode(out, S_IFREG | fsp_new_file_mode(ext2_umask), 0))
-        return -1;
+    int r = new_inode(out, S_IFREG | fsp_new_file_mode(ext2_umask), 0);
+    if (r)
+        return r;
     inherit_group(out, dir);
-    if (ext2_iput(out) || dir_add(dir, name, strlen_(name), out->ino, out->mode)) {
+    if ((r = ext2_iput(out)) || (r = dir_add(dir, name, strlen_(name), out->ino, out->mode))) {
         out->links = 0;
         ext2_iput(out);
         free_inode(out->ino, 0);
-        return -1;
+        return r < 0 ? r : -EIO;
     }
     return 0;
 }
@@ -1199,18 +1215,19 @@ int ext2_mkdir(struct inode *dir, const char *name)
     u32 len = strlen_(name);
     u32 tmp;
     if (ext2_lookup(dir, name, len, &tmp) == 0)
-        return -2;                      /* exists */
+        return -EEXIST;
     if (dir->links >= 65000)
-        return -31;                     /* EMLINK */
-    if (new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1))
-        return -1;
+        return -EMLINK;
+    int r = new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1);
+    if (r)
+        return r;
     inherit_group(&d, dir);
     u32 blk = bmap_alloc(&d, 0);
     if (!blk) {
         d.links = 0;
         ext2_iput(&d);
         free_inode(d.ino, 1);
-        return -1;
+        return -ENOSPC;
     }
     d.size = bsize;
     memset(dbuf, 0, bsize);
@@ -1225,9 +1242,10 @@ int ext2_mkdir(struct inode *dir, const char *name)
     dbuf[19] = file_type(S_IFDIR);
     dbuf[20] = '.';
     dbuf[21] = '.';
-    if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d) ||
-        dir_add(dir, name, len, d.ino, d.mode))
-        return -1;
+    if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d))
+        return -EIO;
+    if ((r = dir_add(dir, name, len, d.ino, d.mode)))
+        return r;
     dir->links++;
     dir->mtime = fs_now();
     return ext2_iput(dir);
@@ -1238,13 +1256,16 @@ int ext2_unlink(struct inode *dir, const char *name)
     u32 len = strlen_(name), ino;
     if (ext2_readonly)
         return EROFS_;
-    if (ext2_lookup(dir, name, len, &ino))
-        return -1;
+    int r;
+    if ((r = ext2_lookup(dir, name, len, &ino)))
+        return r;
     struct inode in;
-    if (ext2_iget(ino, &in) || S_ISDIR(in.mode))
-        return -1;
-    if (dir_remove(dir, name, len, &ino))
-        return -1;
+    if ((r = ext2_iget(ino, &in)))
+        return r;
+    if (S_ISDIR(in.mode))
+        return -EISDIR;
+    if ((r = dir_remove(dir, name, len, &ino)))
+        return r;
     if (in.links > 1) {
         in.links--;
         return ext2_iput(&in);
@@ -1258,17 +1279,22 @@ int ext2_rmdir(struct inode *dir, const char *name)
     u32 len = strlen_(name), ino;
     if (ext2_readonly)
         return EROFS_;
-    if (ext2_lookup(dir, name, len, &ino))
-        return -1;
+    int r;
+    if ((r = ext2_lookup(dir, name, len, &ino)))
+        return r;
     struct inode in;
-    if (ext2_iget(ino, &in) || !S_ISDIR(in.mode) || ino == 2)
-        return -1;
+    if ((r = ext2_iget(ino, &in)))
+        return r;
+    if (!S_ISDIR(in.mode))
+        return -ENOTDIR;
+    if (ino == 2)
+        return -EBUSY;                  /* the root */
     if (!dir_is_empty(&in))
-        return -2;
-    if (dir_remove(dir, name, len, &ino))
-        return -1;
-    if (ext2_iget(dir->ino, dir))       /* dir_remove may have rewritten it (index flag) */
-        return -1;
+        return -ENOTEMPTY;
+    if ((r = dir_remove(dir, name, len, &ino)))
+        return r;
+    if ((r = ext2_iget(dir->ino, dir)))       /* dir_remove may have rewritten it (index flag) */
+        return r;
     unlinked(&in);
     if (dir->links > 2)
         dir->links--;
@@ -1280,8 +1306,9 @@ int ext2_rmdir(struct inode *dir, const char *name)
 int ext2_chmod(u32 ino, u32 mode)
 {
     struct inode in;
-    if (ext2_iget(ino, &in))
-        return -1;
+    int r = ext2_iget(ino, &in);
+    if (r)
+        return r;
     in.mode = (u16)((in.mode & S_IFMT) | (mode & 07777));
     return ext2_iput(&in);
 }
@@ -1289,8 +1316,9 @@ int ext2_chmod(u32 ino, u32 mode)
 int ext2_chown(u32 ino, u32 uid, u32 gid)
 {
     struct inode in;
-    if (ext2_iget(ino, &in))
-        return -1;
+    int r = ext2_iget(ino, &in);
+    if (r)
+        return r;
     if (uid != 0xFFFFFFFFu) in.uid = (u16)uid;
     if (gid != 0xFFFFFFFFu) in.gid = (u16)gid;
     in.mode &= (u16)~06000;                     /* changing the owner clears set-user-id / set-group-id */
@@ -1300,8 +1328,9 @@ int ext2_chown(u32 ino, u32 uid, u32 gid)
 int ext2_utimes(u32 ino, u32 t)
 {
     struct inode in;
-    if (ext2_iget(ino, &in))
-        return -1;
+    int r = ext2_iget(ino, &in);
+    if (r)
+        return r;
     in.mtime = t;
     return ext2_iput(&in);
 }
@@ -1312,16 +1341,23 @@ int ext2_hardlink(struct inode *dir, const char *name, u32 ino)
     struct inode in;
     u32 tmp;
     if (ext2_lookup(dir, name, strlen_(name), &tmp) == 0)
-        return -2;
-    if (ext2_iget(ino, &in) || S_ISDIR(in.mode) || in.links == 0 || in.links >= 65000)
-        return -1;
+        return -EEXIST;
+    int r = ext2_iget(ino, &in);
+    if (r)
+        return r;
+    if (S_ISDIR(in.mode))
+        return -EPERM;                  /* no hard links to directories */
+    if (in.links == 0)
+        return -ENOENT;
+    if (in.links >= 65000)
+        return -EMLINK;
     in.links++;
     if (ext2_iput(&in))
-        return -1;
-    if (dir_add(dir, name, strlen_(name), ino, in.mode)) {
+        return -EIO;
+    if ((r = dir_add(dir, name, strlen_(name), ino, in.mode))) {
         in.links--;
         ext2_iput(&in);
-        return -1;
+        return r;
     }
     return 0;
 }
@@ -1331,11 +1367,14 @@ int ext2_symlink(struct inode *dir, const char *name, const char *target)
     struct inode in;
     u32 tmp, len = strlen_(target);
     if (ext2_lookup(dir, name, strlen_(name), &tmp) == 0)
-        return -2;
-    if (len == 0 || len > bsize - 1)
-        return -1;
-    if (new_inode(&in, S_IFLNK | 0777, 0))
-        return -1;
+        return -EEXIST;
+    if (len == 0)
+        return -ENOENT;                 /* as Linux: an empty target */
+    if (len > bsize - 1)
+        return -ENAMETOOLONG;
+    int r = new_inode(&in, S_IFLNK | 0777, 0);
+    if (r)
+        return r;
     inherit_group(&in, dir);
     in.size = len;
     if (len < 60) {                                    /* fast symlink: the text lives in the inode */
@@ -1345,12 +1384,12 @@ int ext2_symlink(struct inode *dir, const char *name, const char *target)
         u32 blk = bmap_alloc(&in, 0);
         if (!blk || bwrite_copy(blk, 0, target, len)) {
             release(&in);
-            return -1;
+            return blk ? -EIO : -ENOSPC;
         }
     }
-    if (ext2_iput(&in) || dir_add(dir, name, strlen_(name), in.ino, in.mode)) {
+    if ((r = ext2_iput(&in)) || (r = dir_add(dir, name, strlen_(name), in.ino, in.mode))) {
         release(&in);
-        return -1;
+        return r < 0 ? r : -EIO;
     }
     return 0;
 }
@@ -1360,27 +1399,28 @@ int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *
     u32 ol = strlen_(on), nl = strlen_(nn), ino, tmp;
     if (ext2_readonly)
         return EROFS_;
-    if (ext2_lookup(od, on, ol, &ino))
-        return -1;
+    int r;
+    if ((r = ext2_lookup(od, on, ol, &ino)))
+        return r;
     struct inode in;
-    if (ext2_iget(ino, &in))
-        return -1;
+    if ((r = ext2_iget(ino, &in)))
+        return r;
     if (S_ISDIR(in.mode) && od->ino != nd->ino)
-        return -3;                      /* moving directories between parents: not supported */
+        return -EXDEV;                  /* moving directories between parents: not supported here; mv copies it */
     if (ext2_lookup(nd, nn, nl, &tmp) == 0) {
         if (tmp == ino)
             return 0;
-        if (ext2_unlink(nd, nn))
-            return -2;                  /* target is a directory or busy */
-        if (ext2_iget(nd->ino, nd))
-            return -1;
+        if ((r = ext2_unlink(nd, nn)))
+            return r;                   /* the target is a directory (-EISDIR), or cannot go */
+        if ((r = ext2_iget(nd->ino, nd)))
+            return r;
     }
-    if (dir_add(nd, nn, nl, ino, in.mode))
-        return -1;
-    if (ext2_iget(od->ino, od))
-        return -1;
-    if (dir_remove(od, on, ol, &tmp))
-        return -1;
+    if ((r = dir_add(nd, nn, nl, ino, in.mode)))
+        return r;
+    if ((r = ext2_iget(od->ino, od)))
+        return r;
+    if ((r = dir_remove(od, on, ol, &tmp)))
+        return r;
     return 0;
 }
 
@@ -1390,7 +1430,7 @@ int ext2_statfs(u32 *bs, u32 *blocks, u32 *bfree, u32 *files, u32 *ffree)
     u8 sbk[24];
     u32 blk = bsize == 1024 ? 1 : 0, base = bsize == 1024 ? 0 : 1024;
     if (bread_copy(blk, base, sbk, 24))
-        return -1;
+        return -EIO;
     *bs = bsize;
     *blocks = rd32(sbk + 4);
     *bfree = rd32(sbk + 12);

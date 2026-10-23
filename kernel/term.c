@@ -1,23 +1,23 @@
 #include "kernel.h"
 
-/* Workspaces: each has its own text grid (80x31, with attributes), its own
- * scrollback and its own tty. Only the current workspace is drawn; switching
+/* Virtual consoles, as on Linux: NCONS (10) of them, /dev/tty1 .. /dev/tty10,
+ * switched with Amiga+F1..F10. Each has its own text grid (80 columns, all the
+ * rows of the screen: 32 on PAL, 25 on NTSC, with attributes), its own
+ * scrollback and its own tty. Only the current console is drawn; switching
  * redraws from the grid. The terminal understands the usual ANSI/VT100
  * sequences (cursor movement, erase, insert/delete line and character,
  * scroll regions, bold/underline/inverse) so ordinary programs and editors
- * work. The bar on top is i3-style: it lists the current workspace plus
- * every workspace that has a program running, nothing else. */
+ * work. A console's grid and scrollback are allocated when it is first used. */
 
-#define NWS 9
-#define HLINES 200                      /* scrollback lines per workspace */
+#define HLINES 200                      /* scrollback lines per console */
 
 #define A_INV 1
 #define A_UND 2
 #define A_BOLD 4
 
 struct term {
-    u8 ch[TROWS][COLS];
-    u8 at[TROWS][COLS];
+    u8 ch[TROWS_MAX][COLS];
+    u8 at[TROWS_MAX][COLS];
     int cx, cy, sx, sy;                 /* cursor and its saved position */
     u8 attr;                            /* attributes for new characters */
     int top, bot;                       /* scroll region (rows, inclusive) */
@@ -29,9 +29,9 @@ struct term {
     int back;                           /* lines scrolled back (0 = live) */
 };
 
-static struct term *wsp[NWS + 1];
-int ws_cur = 1;
-int ws_spawn_pending[NWS + 1];
+static struct term *wsp[NCONS + 1];
+int con_cur = 1;
+u16 con_want;                           /* bit n: console n was shown with nobody on it: init starts a login there */
 
 static void reset_term(struct term *t)
 {
@@ -40,7 +40,7 @@ static void reset_term(struct term *t)
     t->cx = t->cy = t->sx = t->sy = 0;
     t->attr = 0;
     t->top = 0;
-    t->bot = TROWS - 1;
+    t->bot = trows - 1;
     t->wrap = 0;
     t->curvis = 1;
     t->esc = t->nparam = t->priv = 0;
@@ -82,7 +82,7 @@ static void draw_row(struct term *t, int y)
 static void redraw_all(struct term *t)
 {
     gfx_clear_text();
-    for (int y = 0; y < TROWS; y++)
+    for (int y = 0; y < trows; y++)
         for (int x = 0; x < COLS; x++)
             if (t->ch[y][x] != ' ' || t->at[y][x])
                 draw(t, y, x);
@@ -116,7 +116,7 @@ static const u8 *comp_line(struct term *t, int k, int *from_grid)
 static void show_back(struct term *t)
 {
     gfx_clear_text();
-    for (int r = 0; r < TROWS; r++) {
+    for (int r = 0; r < trows; r++) {
         int from_grid;
         const u8 *l = comp_line(t, t->hn - t->back + r, &from_grid);
         for (int x = 0; x < COLS; x++)
@@ -136,7 +136,7 @@ static void leave_back(struct term *t, int vis)
 
 void term_scroll_view(int delta)
 {
-    struct term *t = get(ws_cur);
+    struct term *t = get(con_cur);
     if (!gfx_up())
         return;
     int nb = t->back + delta;
@@ -152,16 +152,15 @@ void term_scroll_view(int delta)
         redraw_all(t);
         cursor(t, 1);
     }
-    bar_draw();
 }
 
-int term_back(void) { return wsp[ws_cur] ? wsp[ws_cur]->back : 0; }
+int term_back(void) { return wsp[con_cur] ? wsp[con_cur]->back : 0; }
 
 /* ---- scrolling inside the region ---- */
 
 static void scroll_up(struct term *t, int vis)          /* the region moves up one line */
 {
-    int full = (t->top == 0 && t->bot == TROWS - 1);
+    int full = (t->top == 0 && t->bot == trows - 1);
     if (full)
         hist_push(t, t->ch[0]);
     memmove(t->ch[t->top], t->ch[t->top + 1], (u32)(t->bot - t->top) * COLS);
@@ -193,7 +192,7 @@ static void linefeed(struct term *t, int vis)
 {
     if (t->cy == t->bot)
         scroll_up(t, vis);
-    else if (t->cy < TROWS - 1)
+    else if (t->cy < trows - 1)
         t->cy++;
 }
 
@@ -218,7 +217,7 @@ static void erase_screen(struct term *t, int vis, int mode)
     }
     if (mode == 0) {
         clear_cells(t, vis, t->cy, t->cx, COLS);
-        for (int y = t->cy + 1; y < TROWS; y++)
+        for (int y = t->cy + 1; y < trows; y++)
             clear_cells(t, vis, y, 0, COLS);
     } else {
         for (int y = 0; y < t->cy; y++)
@@ -239,16 +238,16 @@ static void csi(struct term *t, int vis, char c)
     int n = arg(t, 0, 1);
     t->wrap = 0;
     switch (c) {
-    case 'A': t->cy = clamp(t->cy - n, t->cy >= t->top ? t->top : 0, TROWS - 1); break;
-    case 'B': t->cy = clamp(t->cy + n, 0, t->cy <= t->bot ? t->bot : TROWS - 1); break;
+    case 'A': t->cy = clamp(t->cy - n, t->cy >= t->top ? t->top : 0, trows - 1); break;
+    case 'B': t->cy = clamp(t->cy + n, 0, t->cy <= t->bot ? t->bot : trows - 1); break;
     case 'C': t->cx = clamp(t->cx + n, 0, COLS - 1); break;
     case 'D': t->cx = clamp(t->cx - n, 0, COLS - 1); break;
-    case 'E': t->cy = clamp(t->cy + n, 0, TROWS - 1); t->cx = 0; break;
-    case 'F': t->cy = clamp(t->cy - n, 0, TROWS - 1); t->cx = 0; break;
+    case 'E': t->cy = clamp(t->cy + n, 0, trows - 1); t->cx = 0; break;
+    case 'F': t->cy = clamp(t->cy - n, 0, trows - 1); t->cx = 0; break;
     case 'G': t->cx = clamp(arg(t, 0, 1) - 1, 0, COLS - 1); break;
-    case 'd': t->cy = clamp(arg(t, 0, 1) - 1, 0, TROWS - 1); break;
+    case 'd': t->cy = clamp(arg(t, 0, 1) - 1, 0, trows - 1); break;
     case 'H': case 'f':
-        t->cy = clamp(arg(t, 0, 1) - 1, 0, TROWS - 1);
+        t->cy = clamp(arg(t, 0, 1) - 1, 0, trows - 1);
         t->cx = clamp(arg(t, 1, 1) - 1, 0, COLS - 1);
         break;
     case 'J': erase_screen(t, vis, t->nparam ? t->param[0] : 0); break;
@@ -303,8 +302,8 @@ static void csi(struct term *t, int vis, char c)
     case 'S': for (int i = 0; i < n; i++) scroll_up(t, vis); break;
     case 'T': for (int i = 0; i < n; i++) scroll_down(t, vis); break;
     case 'r': {                                         /* scroll region */
-        int tp = arg(t, 0, 1) - 1, bt = arg(t, 1, TROWS) - 1;
-        if (tp >= 0 && bt < TROWS && tp < bt) { t->top = tp; t->bot = bt; }
+        int tp = arg(t, 0, 1) - 1, bt = arg(t, 1, trows) - 1;
+        if (tp >= 0 && bt < trows && tp < bt) { t->top = tp; t->bot = bt; }
         t->cx = t->cy = 0;
         break;
     }
@@ -340,7 +339,7 @@ static void csi(struct term *t, int vis, char c)
             if (cc >= 10) b[k++] = (char)('0' + cc / 10);
             b[k++] = (char)('0' + cc % 10);
             b[k++] = 'R'; b[k] = 0;
-            tty_inject(ws_cur, b);
+            tty_inject(con_cur, b);
         }
         break;
     }
@@ -409,7 +408,7 @@ static void put1(struct term *t, int vis, u8 ch)
 void term_write(int w, const char *s, u32 n)
 {
     struct term *t = get(w);
-    int vis = (w == ws_cur) && gfx_up();
+    int vis = (w == con_cur) && gfx_up();
     if (t->back)
         leave_back(t, vis);                             /* output brings the live screen back */
     if (vis)
@@ -420,10 +419,10 @@ void term_write(int w, const char *s, u32 n)
         cursor(t, 1);
 }
 
-/* kernel log text onto the visible workspace (kprintf mirror during boot) */
+/* kernel log text onto the visible console (kprintf mirror during boot) */
 void term_log(const char *s, u32 n)
 {
-    term_write(ws_cur, s, n);
+    term_write(con_cur, s, n);
 }
 
 void term_putc(int w, char c)
@@ -431,82 +430,34 @@ void term_putc(int w, char c)
     term_write(w, &c, 1);
 }
 
-int term_size(void) { return (TROWS << 16) | COLS; }
+int term_size(void) { return (trows << 16) | COLS; }
 
-/* ---- bar ---- */
-
-static int in_use(int w)
+/* is anyone on console w? (a live process whose controlling tty it is) */
+int con_in_use(int w)
 {
     for (int i = 1; i < NPROC; i++) {
         struct proc *p = &procs[i];
-        if (p->state != P_FREE && p->state != P_ZOMBIE && p->fd[0] &&
-            p->fd[0]->type == FT_TTY && (int)p->fd[0]->off == w)
+        if (p->state != P_FREE && p->state != P_ZOMBIE && p->ctty == w)
             return 1;
     }
     return 0;
 }
 
-int ws_in_use(int w) { return in_use(w); }
-
-static int put_u(char *b, int n, u32 v, int minw)
+/* Amiga+Fn or the serial hook: show console w. A console nobody is on asks init for a login there (init waits for
+ * that in SYS_wait with WAIT_CONSOLE; called from kwork only, so the wakeup cannot be lost) - like Linux's autovt. */
+void con_switch(int w)
 {
-    char t[10];
-    int i = 0;
-    do { t[i++] = (char)('0' + v % 10); v /= 10; } while (v);
-    while (i < minw)
-        t[i++] = '0';
-    while (i--)
-        b[n++] = t[i];
-    return n;
-}
-
-void bar_draw(void)
-{
-    if (!gfx_up())
+    if (w < 1 || w > NCONS)
         return;
-    char b[COLS + 1];
-    u8 inv[COLS];
-    memset(b, ' ', COLS);
-    memset(inv, 0, COLS);
-    int n = 0;
-    b[n++] = ' ';
-    for (int w = 1; w <= NWS; w++) {
-        if (w != ws_cur && !in_use(w))
-            continue;
-        inv[n] = inv[n + 1] = inv[n + 2] = (w == ws_cur);
-        b[n + 1] = (char)('0' + w);
-        n += 3;
+    if (!con_in_use(w)) {
+        con_want |= (u16)(1u << w);
+        for (int i = 1; i < NPROC; i++)
+            if (procs[i].state == P_WAIT && procs[i].wait_con)
+                ready(&procs[i]);
     }
-    int back = term_back();
-    if (back) {                                         /* scrollback indicator */
-        const char *m = "[scrollback -";
-        n++;
-        while (*m) b[n++] = *m++;
-        n = put_u(b, n, (u32)back, 0);
-        b[n++] = ']';
-    }
-    /* right side: free memory and uptime */
-    u32 chip, fast;
-    mem_stats(&chip, &fast);
-    char r[40];
-    int m = 0;
-    r[m++] = 'c'; m = put_u(r, m, chip / 1024, 0); r[m++] = 'K'; r[m++] = ' ';
-    r[m++] = 'f'; m = put_u(r, m, fast / 1024, 0); r[m++] = 'K'; r[m++] = ' ';
-    r[m++] = ' ';
-    u32 s = ticks / 100;
-    m = put_u(r, m, s / 3600, 2); r[m++] = ':';
-    m = put_u(r, m, (s / 60) % 60, 2); r[m++] = ':';
-    m = put_u(r, m, s % 60, 2); r[m++] = ' ';
-    memcpy(b + COLS - m, r, (u32)m);
-    for (int i = 0; i < COLS; i++)
-        gfx_bar_cell(i, (u8)b[i], inv[i] ? A_INV : 0);
-}
-
-void ws_switch(int w)
-{
-    if (w < 1 || w > NWS || w == ws_cur)
+    if (w == con_cur)
         return;
-    ws_cur = w;
+    con_cur = w;
     if (gfx_up()) {
         struct term *t = get(w);
         if (t->back)
@@ -515,14 +466,5 @@ void ws_switch(int w)
             redraw_all(t);
             cursor(t, 1);
         }
-    }
-    bar_draw();
-}
-
-void ws_request_shell(int w)
-{
-    if (w >= 1 && w <= NWS && !in_use(w)) {
-        ws_spawn_pending[w] = 1;
-        wake_io();                      /* the session manager waits for this (SYS_wsreq); called from kwork only */
     }
 }

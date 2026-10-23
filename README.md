@@ -14,16 +14,16 @@ Status (2026-10-22, all *verified in FS-UAE* as a stock A1200 - 68EC020, no MMU 
   direct/indirect/double-indirect blocks, directories that grow, rename. Write-through cache. Verified:
   after a scripted session (`tools/tests/write-test.txt`) the host's `e2fsck -fn` reports a clean disk and a 15.5 KB
   file written by Zenix has the same SHA-256 as the host concatenation.
-- **M3** 640x256 hires planar display, Copper-split bar + 31 text rows, scrolling by Copper pointer with a
-  blitter copy at the wrap, nine workspaces (own text grid and tty each; the bar lists the current one and
-  the occupied ones, like i3), Amiga keyboard, ROM Topaz 8 font. Amiga+1..9 switch, Amiga+Return opens a
-  shell on an empty workspace. (Over serial: 0x1d then 1-9 / Return, for tests.)
+- **M3** 640x256 hires planar display (640x200 on NTSC), all text: 80x32 (80x25), scrolling by Copper pointer
+  with a blitter copy at the wrap, Amiga keyboard, ROM Topaz 8 font. Since audit batch E (2026-10-23) the text
+  console behaves like Unix/Linux: ten virtual consoles, Amiga+F1..F10, each with its own login prompt and
+  scrollback. (Over serial: 0x1d then 1-9 / 0 shows console 1-9 / 10, for tests.)
 
 Not done: unlinking a file that is still open (frees at once), moving directories between parents, triple-indirect files, a graphical programs API, mouse, sound, network, real
 hardware, 68000 (not a target), MMU use. See docs/DESIGN.md.
 
 **Not locked as shipped:** the images come with root logged in automatically and no passwords (root, user and
-guest; `/etc/autologin` names root, for the tests). Set passwords with `passwd` and remove `/etc/autologin` before
+guest; `/etc/autologin` names root, logged in on console 1, for the tests). Set passwords with `passwd` and remove `/etc/autologin` before
 trusting the system; `login` warns while root has no password. Even then, with no MMU the permissions protect
 against honest mistakes, not against a program written to cheat (docs/limits.md).
 

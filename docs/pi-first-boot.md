@@ -8,7 +8,10 @@ cable is needed.
 1. `make build/zenix-ram.adf` (the RAM-disk image: kernel plus a small root filesystem that the boot block loads into
    RAM, so no disk is needed to get a shell). Put `build/zenix-ram.adf` where the Gotek / GoDrive reads it.
 2. Boot the Amiga from that floppy image. Zenix needs a 68020 or better (Emu68 counts) and about 4 MB of fast RAM.
-3. The screen shows the kernel's boot messages, then the shell prompt. If they scrolled by: `dmesg`, or Shift+Up.
+3. The screen (all text, no bar: 32 rows on PAL, 25 on NTSC) shows the kernel's boot messages, then on console 1 the
+   autologin warning and the shell prompt (the image logs root in on console 1 by itself, `/etc/autologin`). If they
+   scrolled by: `dmesg`, or Shift+Up. Amiga+F2 .. Amiga+F10 show consoles 2-10, each with its own `zenix login:`
+   prompt (log in as `root`, no password); Amiga+F1 goes back.
    The floppy LED should go off before the kernel's messages (the bootblock stops the motor). Before the text
    appears the whole screen changes colour at every boot step (next section): if it stops on a colour, that colour
    says where.
@@ -30,11 +33,11 @@ started loading.)
 | **brown** | 7. exception vectors and the memory manager (self-test) | Memory map from AmigaOS, or the memory self-test. |
 | **pink** | 8. memory is fine; switching the instruction cache on | The cache (A1: `cpusha`). |
 | **white** | 9. starting the display | Copper list, bitplane, chip RAM for the screen. |
-| black with a blue bar and text | 10. the display is up | From here **the text** says where it is: the boot log is on the screen. |
+| black with grey text | 10. the display is up | From here **the text** says where it is: the boot log is on the screen. |
 | **grey** (after one of the above) | no display: no ROM font found or no chip RAM | Zenix carries on, but only on the serial port. |
 | **the whole screen red** | the bootblock failed | No memory, or a floppy read error. |
 | **a colour on top, red below** | the kernel stopped on an error at that step (a panic, an exception in the kernel) | The step is the top colour. Orange over red is also "this CPU is a 68000". |
-| **text with a red bar at the top** | a kernel panic after the display was up | The last lines on the screen say why. |
+| **white text on dark red** | a kernel panic after the display was up | The last lines on the screen say why. |
 
 **After a freeze or a panic, do this:**
 1. Take a photo of the screen (the whole screen: the colour, or the text).

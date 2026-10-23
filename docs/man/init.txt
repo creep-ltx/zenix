@@ -1,20 +1,33 @@
 INIT(8)			Zenix manual
 
 NAME
-    init - the first program
+    init - mount the filesystems and keep a login on the consoles
 
 SYNOPSIS
     started by boot; not run by hand
 
 DESCRIPTION
-    /bin/init is process 1. It prints /etc/motd, runs "mount -a" if there is
-    an /etc/fstab (so the filesystems listed there are mounted before anyone
-    can log in), starts /bin/login with the
-    terminal as its input and output, makes it the foreground program, and
-    waits. When the session ends, init says so, tells the kernel that
-    nobody is logged in (SYS_session with uid -1: from then on Amiga+Return
-    opens no shell until someone logs in) and starts login again, so the
-    console is never left without one.
+    /bin/init is started by boot(8) on console 1. It prints /etc/motd, runs
+    "mount -a" if there is an /etc/fstab (so the filesystems listed there
+    are mounted before anyone can log in), and then looks after the ten
+    virtual consoles (/dev/tty1 .. /dev/tty10, Amiga+F1 .. Amiga+F10), like
+    a Unix init with a getty on each terminal:
+
+    - console 1 gets a login(1) at once;
+    - another console gets one the first time it is shown with nobody on
+      it (the kernel tells init, as Linux's autovt does), so an unused
+      console costs no memory;
+    - when a login ends (the user logged out), init prints "init: session
+      ended, starting another" on that console and starts a new login
+      there after half a second.
+
+    Each login runs with its console as standard input, output and error,
+    which makes that console its controlling tty and its shell's.
+
+NOTES
+    init waits for both kinds of event in one call (wait with the
+    console flag, root only). If /bin/login cannot be started on console 1
+    init tries again every 5 seconds.
 
 SEE ALSO
     boot(8), login(1), mount(8)

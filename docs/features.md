@@ -31,18 +31,18 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | `malloc` with size classes and free lists (memory reused, big blocks given back), `realloc`; directory tools without stack arrays or entry limits | verified (`tools/memtest.sh`: flat shell memory, tools 25 directories deep) | architecture.md section 12 |
 | Preemptive round-robin scheduler, 100 Hz, 50 ms slice | verified | architecture.md section 6 |
 | `spawn` (no `fork`); wait, exit status, zombies | verified | architecture.md section 6 |
-| About 55 system calls via `TRAP #0`, all pointers validated | verified | architecture.md section 7 |
+| About 55 system calls via `TRAP #0`, all pointers validated; errors as negative errno numbers (`kernel/errno.h`, Linux values), the same from both filesystem servers, shown as text by `zwhy`/`zstrerror` | verified (users-test permission texts, cmds2-test batch E script, host ext2 test) | architecture.md section 7 |
 | Crash containment: a faulting program is killed, memory freed | verified | how-it-works.md section 3 |
 | Named message ports, synchronous zero-copy calls | verified | architecture.md section 8 |
-| Servers: disk (`diskd`), filesystem (`fsd`), session manager (`boot`) | verified | architecture.md section 9 |
+| Servers: disk (`diskd`), filesystem (`fsd`), starter (`boot`) | verified | architecture.md section 9 |
 | Environment variables inherited by children | verified | |
-| Interrupt handlers only queue input; tty, echo, Ctrl-C/Ctrl-Z, workspaces and the bar run in process context (no lost wakeups, lost input counted in `dmesg`) | verified in FS-UAE (`tools/kbd-test.sh`, `tools/jobs-test.sh`, the matrix) | architecture.md section 11 |
+| Interrupt handlers only queue input; tty, echo, Ctrl-C/Ctrl-Z and console switches run in process context (no lost wakeups, lost input counted in `dmesg`); unexpected interrupt vectors are logged once and ignored | verified in FS-UAE (`tools/kbd-test.sh`, `tools/jobs-test.sh`, the matrix); the unexpected vectors read only | architecture.md section 11 |
 | Job control: Ctrl-Z stop, `jobs`, `fg`, `bg`, stopped state in `ps` (`SYS_jobctl`, `SYS_wait` untraced) | verified (`tools/jobs-test.sh`) | architecture.md section 7 |
 | Priorities, signals with handlers, process groups | planned | |
 | Users and groups: uid/gid on every process (real and effective), `setuid`/`setgid`, `umask`, `chown` | verified | architecture.md section 14 |
 | Permission checks (r/w/x for owner, group, other; directory search; sticky bit; set-user-id programs) in the filesystem server | verified | architecture.md section 14 |
 | `/etc/passwd`, `/etc/group`, `login` (also autologin, with a warning while root has no password), `su` (gives the target's environment), `passwd` (salted SHA-256, 1000 rounds), `id`, `chown`/`chgrp` | verified | man pages |
-| Process and server protection (audit D): kill/stop/foreground only of one's own processes, never the built-in servers; clock and serial copy root only; the filesystem and disk servers answer only the kernel and root; reserved port names; no shell from Amiga+Return without a login | verified in FS-UAE (users-test, zroot-test) and on the host (ext2-host-test, disk-host-test) | architecture.md section 14 |
+| Process and server protection (audit D): kill/stop/foreground only of one's own processes, never the built-in servers; clock and serial copy root only; the filesystem and disk servers answer only the kernel and root; reserved port names; another console's `/dev/ttyN` root only | verified in FS-UAE (users-test, zroot-test) and on the host (ext2-host-test, disk-host-test) | architecture.md section 14 |
 | Set-group-id directories, non-owner writes clear set-user-id, `utimes` rules, exclusive create (`O_EXCL`) in both filesystem servers | verified (host test for ext2; FS-UAE for ZenixFS through badptr ipc, here-documents and mktemp) | kernel/fsperm.h, architecture.md section 14 |
 | Shared libraries | planned | |
 
@@ -53,7 +53,7 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | A damaged ext2 disk fails requests, never crashes the server (fuzzed) | verified on the host (`tools/ext2-host-test.sh`) | architecture.md section 10 |
 | Files up to double-indirect size, growing directories, rename | verified | |
 | Hard links, symbolic links (incl. fast symlinks), chmod, utimes | verified | |
-| `/dev/null`, `/dev/zero`, `/dev/tty` | verified | |
+| `/dev/null`, `/dev/zero`, `/dev/tty` (the controlling tty), `/dev/tty1`..`/dev/tty10`, `/dev/console` | verified | architecture.md section 11 |
 | Pipes (2 KB) | verified | |
 | `fdisk` (RDB), `mkfs.ext2`, `fsck.ext2` (check and repair) | verified | man/fdisk.txt, man/mkfs.ext2.txt, man/fsck.ext2.txt |
 | `fdisk` keeps an RDB written by HDToolBox exactly (other geometries, FileSysHeader/LSEG chain); refuses a table it cannot keep | verified (host `tools/disk-host-test.sh`, FS-UAE `tools/disktools.sh`) | man/fdisk.txt |
@@ -79,11 +79,13 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 ## Terminal and display
 | Feature | Status | Details |
 |---|---|---|
-| 640x256 hires planar display, Copper-split bar, blitter-assisted scrolling | verified | architecture.md section 11 |
+| 640x256 (PAL) or 640x200 (NTSC, measured at boot) hires planar display, all text, blitter-assisted scrolling | verified (the matrix, NTSC included) | architecture.md section 11 |
 | ROM Topaz 8 font from the Kickstart in use at boot | verified | |
-| 80x31 text, ANSI/VT100 (cursor, erase, insert/delete, scroll regions, bold/underline/inverse) | verified | man/termtest.txt |
-| Scrollback 200 lines per workspace (Shift/Ctrl+Up/Down) | verified | |
-| Nine workspaces, i3-style bar, Amiga+1..9, Amiga+Return | verified | scaffolding for the desktop |
+| 80x32 text (80x25 on NTSC), ANSI/VT100 (cursor, erase, insert/delete, scroll regions, bold/underline/inverse) | verified | man/termtest.txt |
+| Scrollback 200 lines per console (Shift/Ctrl+Up/Down) | verified | |
+| Ten virtual consoles, Amiga+F1..F10, each with its own `login` (started when the console is first shown, again after a logout); the controlling tty of a process is its console (`ls \| less` on console 2 reads console 2's keys) | verified in FS-UAE (`tools/kbd-test.sh`, `tools/users-test.sh`, the matrix) | architecture.md section 11, man/init.txt |
+| Type-ahead kept when a program switches the tty to raw mode | verified (`tools/users-test.sh`) | architecture.md section 11 |
+| The clock: tick latch from the machine's E-clock (PAL or NTSC crystal), 100 Hz to within the E-clock's resolution | built; the boot log shows the choice (the matrix's NTSC machine); the rate itself not measured | architecture.md section 11 |
 | Raw tty mode, arrow and function keys as escape codes | verified | |
 | Amiga keyboard, handshake timed by the E-clock; serial console mirror (115200 baud) | verified | architecture.md section 11 |
 | Keymaps with AmigaOS's four layers (plain, Shift, Alt, Shift+Alt): Swedish (`sv`, the AmigaOS "s" layout) and US; Caps Lock; key repeat | verified in FS-UAE (`tools/kbd-test.sh`) | architecture.md section 11 |
@@ -93,8 +95,10 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 Line editing, history (`~/.sh_history`) with Ctrl-R search, tab completion, variables and the environment, quoting,
 wildcards, brace expansion, `${v#pat} ${v%pat} ${v/pat/new} ${v:off:len}`, pipes, redirects (`< > >> 2> 2>&1 &>`),
 here-documents, `if/while/until/for/case`, functions, aliases, arithmetic, command substitution, `trap … EXIT`, scripts,
-`&` and job control (Ctrl-Z, `fg`, `bg`), `/etc/profile` and `~/.shrc`. **verified** (tools/cmds-test.sh compares with bash;
-tools/jobs-test.sh). See man/sh.txt.
+`&` and job control (Ctrl-Z, `fg`, `bg`), `local` (dynamic scope), `${10}`, `/etc/profile` and `~/.shrc`; no fixed caps on
+arguments, glob matches, words, pipeline stages or `for` items (they grow; a limit that is reached is an error), loops
+in flat memory, type-ahead kept. **verified** (tools/cmds-test.sh compares with bash; tools/jobs-test.sh;
+tools/cmds2-test.sh runs rootfs/tests/batch-e.sh). See man/sh.txt.
 
 ## Commands
 Every command has a manual page. The full list with one-line summaries is in [commands.md](commands.md); the

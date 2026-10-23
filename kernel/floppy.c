@@ -55,7 +55,7 @@ static u32 now(void)
 
 static void wait_us(u32 us)
 {
-    u32 t0 = now(), need = us * 709 / 1000 + 1;     /* E-clock: 709379 Hz */
+    u32 t0 = now(), need = us * (eclock_hz / 1000) / 1000 + 1;     /* E-clock: 709379 Hz PAL, 715909 NTSC */
     while ((u32)(now() - t0) < need)
         ;
 }
@@ -91,7 +91,7 @@ static void spin_up(int d)
         set_motor(d, 1);
         CIAB_PRB = pb(d, 1, 1, 0, 0, 0);
         u32 t0 = now();
-        while ((CIAA_PRA & A_RDY) && (u32)(now() - t0) < 709379u * 8 / 10)   /* ready, or 800 ms */
+        while ((CIAA_PRA & A_RDY) && (u32)(now() - t0) < eclock_hz * 8 / 10)   /* ready, or 800 ms */
             ;
         CIAB_PRB = 0xFF;
     }
@@ -220,7 +220,7 @@ static int dma(int write, int words, int cyl)
     DSKLEN = len;                                       /* the second write starts the DMA */
     u32 t0 = now();
     while (!(INTREQR & INTF_DSKBLK))
-        if ((u32)(now() - t0) > 709379u * 2) {
+        if ((u32)(now() - t0) > eclock_hz * 2) {
             DSKLEN = 0x4000;
             return -1;
         }
