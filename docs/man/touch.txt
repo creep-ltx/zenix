@@ -18,6 +18,9 @@ EXIT STATUS
 
 NOTES
     An access the user is not allowed is reported as "permission denied".
+    Setting the time to now is allowed to the owner, root and anyone who
+    may write the file; a given time (tar x, cp -p, mv) only to the owner
+    and root.
 
 SEE ALSO
     date(1), ls(1)

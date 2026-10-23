@@ -167,7 +167,7 @@ long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
         return -1;
     m.type = type;
     m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
-    long r = ipc_call(mt->port, &m);
+    long r = ipc_kcall(mt->port, &m);
     if (r == -5)
         mt->port = -1;                  /* the server is gone */
     return r;
@@ -362,7 +362,7 @@ long vfs_open(const char *path, int flags)
         return -1;
     long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, (u32)flags, (u32)&st);
     if (ino < 0)
-        return ino == -13 ? -13 : -1;
+        return ino == -13 || ino == -17 ? ino : -1;     /* permission denied; exists (O_CREAT|O_EXCL) */
     struct file *f = file_new(FT_INODE);
     if (!f) {
         fs_call_on(m, FS_CLOSE, (u32)ino, 0, 0, 0);

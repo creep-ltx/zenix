@@ -19,9 +19,28 @@ static struct file *getfd(u32 fd)
     return fd < NFD ? current->fd[fd] : 0;
 }
 
-/* the logged-in session (set by login): workspace shells started by the session manager run as this user */
-static u16 sess_uid, sess_gid, sess_envlen;
+/* the logged-in session (set by login): workspace shells started by the session manager run as this user. No session
+ * (before the first login, after a logout): Amiga+Return opens nothing (audit D) */
+static u16 sess_uid, sess_gid, sess_envlen, sess_active;
 static char sess_env[ENVMAX];
+
+/* May the caller kill, stop, continue or make foreground process p? One rule for SYS_kill, SYS_jobctl and SYS_setfg
+ * (audit D): root may (any process but the idle one); others only a process whose real or effective user id is their
+ * real or effective user id, or their own child - never a built-in server (diskd, fsd, zfsd, the session manager:
+ * started from the kernel image, ppid 0) or a privileged process. 0, -3 (ESRCH: no such process) or -13 (EACCES). */
+static int may_signal(const struct proc *p)
+{
+    if (!p || p->pid == 0 || p->state == P_FREE)
+        return -3;
+    if (current->uid == 0)
+        return 0;
+    if (p->ppid == 0 || p->priv)
+        return -13;
+    if (p->ppid == current->pid || p->ruid == current->ruid || p->ruid == current->uid ||
+        p->uid == current->ruid || p->uid == current->uid)
+        return 0;
+    return -13;
+}
 
 static long do_spawn(u32 upath, u32 uargv, u32 ustdio, int tty)
 {
@@ -152,7 +171,12 @@ void syscall_c(u32 *rb)
         r = (s32)ipc_replyrecv((struct umsg *)a1, (s32)a2, (int)a3);
         break;
     case SYS_spawn_tty:                 /* only the session manager (priv): the new shell belongs to the logged-in user */
-        if (current->priv) {
+        if (current->priv && !sess_active) {        /* nobody logged in (login prompt, after a logout): no shell, say why */
+            static const char why[] = "\nNobody is logged in: log in first; Amiga+Return then opens a shell.\n";
+            if (a3 >= 1 && a3 <= 9)
+                tty_write((int)a3, why, sizeof why - 1);
+            r = -13;
+        } else if (current->priv) {
             u16 u = current->uid, ru = current->ruid, g = current->gid, um = current->umask, el = current->envlen;
             static char saved_env[ENVMAX];
             memcpy(saved_env, current->env, ENVMAX);
@@ -163,8 +187,12 @@ void syscall_c(u32 *rb)
             memcpy(current->env, saved_env, ENVMAX); current->envlen = el;
         }
         break;
-    case SYS_session:                   /* login: remember who is logged in (ids + environment) for workspace shells */
-        if (current->uid == 0) {
+    case SYS_session:                   /* login: remember who is logged in (ids + environment) for workspace shells; */
+        if (current->uid == 0 && a1 == 0xFFFFFFFFu) {       /* uid -1: the session ended (init, after login returns) */
+            sess_active = 0;
+            r = 0;
+        } else if (current->uid == 0) {
+            sess_active = 1;
             sess_uid = (u16)a1; sess_gid = (u16)a2;
             memcpy(sess_env, current->env, ENVMAX); sess_envlen = current->envlen;
             r = 0;
@@ -316,7 +344,8 @@ void syscall_c(u32 *rb)
     case SYS_time:
         r = (s32)(time_base + ticks / 100);
         break;
-    case SYS_settime:
+    case SYS_settime:                   /* root only */
+        if (current->uid != 0) { r = -13; break; }
         time_base = a1 - ticks / 100;
         r = 0;
         break;
@@ -345,7 +374,8 @@ void syscall_c(u32 *rb)
     case SYS_hrtime:
         r = (s32)hr_time();
         break;
-    case SYS_ttymirror:
+    case SYS_ttymirror:                 /* root only: the serial copy is the test harness's and the cable's */
+        if (current->uid != 0) { r = -13; break; }
         tty_mirror = (int)a1;
         r = 0;
         break;
@@ -464,24 +494,23 @@ void syscall_c(u32 *rb)
             r = 0;
         }
         break;
-    case SYS_setfg:
-        tty_setfg(tty_of(current), (int)a1);
-        r = 0;
+    case SYS_setfg:                     /* on the caller's own tty; 0 = nobody, else a process the caller may signal */
+        if (a1 == 0 || !(r = may_signal(proc_by_pid((int)a1)))) {
+            tty_setfg(tty_of(current), (int)a1);
+            r = 0;
+        }
         break;
     case SYS_jobctl: {
         struct proc *p = proc_by_pid((int)a1);
-        if (p && p->pid != 0 && (current->uid == 0 || p->uid == current->uid || p->ppid == current->pid)) {
+        if (!(r = may_signal(p))) {
             if (a2 == 0) proc_stop(p); else proc_cont(p);
-            r = 0;
         }
         break;
     }
     case SYS_kill: {
         struct proc *p = proc_by_pid((int)a1);
-        if (p && p->pid != 0) {
+        if (!(r = may_signal(p)))
             proc_kill(p);
-            r = 0;
-        }
         break;
     }
     }

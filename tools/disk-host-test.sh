@@ -93,5 +93,13 @@ grep -q "list -> ide0 h0 start 0 sectors 32768 type 00000000 mounted 0 caps 0" $
 printf 'list\nopen ide0p1 mount 5\nflush 1\n' | HOSTDISK=$T/d.hdf $T/diskd > $T/c6.out 2>&1
 grep -q "list -> ide0 h0 .* caps 1" $T/c6.out && grep -q "flush 1 -> 0" $T/c6.out && check "a disk whose flush works has the capability" ok || { check "flush capability (working)" bad; cat $T/c6.out; }
 
+# ---- D: only root talks to the disk server (raw sectors bypass every file permission) ----
+python3 tools/mkrdb-hdtb.py make $T/d.hdf
+printf 'open ide0p1 mount 5\nas 1000\nlist\nopen ide0 plain 7\nopen ide0p2 raw 7\nread 0 0\nwrite 2 0 7\nflush 1\nrescan\nunmount 1 5\nas 0\nread 0 0\n' | HOSTDISK=$T/d.hdf $T/diskd > $T/d.out 2>&1
+grep -q "^list -> ide0p1 " $T/d.out && grep -q "^open ide0 plain 7 -> -13$" $T/d.out && grep -q "^open ide0p2 raw 7 -> -13$" $T/d.out && grep -q "^read 0 0 -> -13$" $T/d.out \
+    && grep -q "^write 2 0 7 -> -13$" $T/d.out && grep -q "^flush 1 -> -13$" $T/d.out && grep -q "^rescan -> -13$" $T/d.out && grep -q "^unmount 1 5 -> -13$" $T/d.out \
+    && check "diskd: a user may list devices, but not open, read, write, flush, rescan or unmount (-13)" ok || { check "diskd refuses users" bad; cat $T/d.out; }
+grep -q "^read 0 0 -> 0$" $T/d.out && check "diskd: root still reads" ok || { check "diskd: root still reads" bad; cat $T/d.out; }
+
 echo "disk-host-test: $pass passed, $fail failed"
 [ $fail = 0 ]

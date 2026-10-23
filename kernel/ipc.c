@@ -25,8 +25,18 @@ static int strncmp_(const char *a, const char *b, int n)
     return 0;
 }
 
+/* Reserved port names (audit D): "fs" (the root filesystem), "fs.*" (mounted filesystems, named by mount) and "disk"
+ * belong to the system: only root may create them, so a normal user cannot put a fake server in their place, also
+ * not after the real one died. */
+static int reserved(const char *n)
+{
+    return (n[0] == 'f' && n[1] == 's' && (!n[2] || n[2] == '.')) || !strncmp_(n, "disk", 16);
+}
+
 int port_create(const char *name, int owner)
 {
+    if (reserved(name) && current->uid != 0)
+        return -13;
     for (int i = 0; i < NPORT; i++)
         if (ports[i].used && !strncmp_(ports[i].name, name, 16))
             return -1;                          /* name taken */
@@ -59,7 +69,7 @@ static void finish(struct umsg *m, s32 result)
         ready(c);
 }
 
-long ipc_call(int port, struct umsg *m)
+static long call(int port, struct umsg *m, u16 kflags)
 {
     if (port < 0 || port >= NPORT || !ports[port].used || ports[port].owner == current->pid)
         return -1;                              /* (a call to one's own port would wait for ever) */
@@ -68,6 +78,7 @@ long ipc_call(int port, struct umsg *m)
     m->from = current->pid;
     m->client = current;
     m->uid = current->uid; m->gid = current->gid; m->umask = current->umask;
+    m->kflags = kflags;                         /* a user's SYS_call can never claim to be the kernel */
     m->server = 0;
     m->state = MSG_QUEUED;
     m->result = 0;
@@ -89,6 +100,11 @@ long ipc_call(int port, struct umsg *m)
     current->wait_msg = 0;
     return m->result;
 }
+
+long ipc_call(int port, struct umsg *m) { return call(port, m, 0); }
+/* the kernel's requests on behalf of the current process (its ids are stamped as usual): the filesystem servers do
+ * inode-number operations (FS_READ, FS_WRITE, FS_CLOSE, ...) only for these, or for root */
+long ipc_kcall(int port, struct umsg *m) { return call(port, m, UMSG_KERNEL); }
 
 /* wait: 0 = do not wait (0 if nothing is queued), 1 = wait for a message, N > 1 = wait at most N-1 ticks (then 0).
  * A timed wait sleeps as P_SLEEP with the port's waiter set, so either a message (ipc_call readies the waiter) or

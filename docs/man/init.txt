@@ -12,8 +12,9 @@ DESCRIPTION
     can log in), starts /bin/login with the
     terminal as its input and output, makes it the foreground program, and
     waits. When the session ends, init says so, tells the kernel that
-    nobody is logged in and starts login again, so the console is never
-    left without one.
+    nobody is logged in (SYS_session with uid -1: from then on Amiga+Return
+    opens no shell until someone logs in) and starts login again, so the
+    console is never left without one.
 
 SEE ALSO
     boot(8), login(1), mount(8)

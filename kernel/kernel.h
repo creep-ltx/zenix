@@ -265,12 +265,15 @@ struct umsg {
     s32 result;                 /* set by the server's reply */
     u32 type;
     u32 a[4];                   /* arguments, free use */
-    u16 uid, gid, umask, pad;   /* kernel: the caller's identity, for the filesystem server */
+    u16 uid, gid, umask;        /* kernel: the caller's identity, for the filesystem server */
+    u16 kflags;                 /* kernel: UMSG_KERNEL if the kernel sent it for a system call (ipc_kcall), else 0 */
     struct proc *client;        /* kernel: who is waiting for the reply */
 };
 int port_create(const char *name, int owner);
 int port_find(const char *name);
-long ipc_call(int port, struct umsg *m);
+long ipc_call(int port, struct umsg *m);       /* SYS_call: kflags 0 */
+long ipc_kcall(int port, struct umsg *m);      /* the kernel's own requests (vfs.c): kflags UMSG_KERNEL */
+#define UMSG_KERNEL 1
 struct umsg *ipc_recv(int port, int wait);
 struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port);
 long ipc_reply(struct umsg *m, s32 result);

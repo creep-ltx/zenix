@@ -165,6 +165,28 @@ static void touched(void)
     if (!dirty) { dirty = 1; dirty_since = sys_ticks(); }
 }
 
+/* the group a new entry in DIR gets, and the extra mode bits of a new directory there (set-group-id directories,
+ * kernel/fsperm.h rule 7) */
+static unsigned new_gid(uint32_t dir, unsigned *dirbits)
+{
+    struct zenixfs_inode d;
+    if (dirbits) *dirbits = 0;
+    if (zenixfs_getattr(fs, dir, &d)) return cgid;
+    if (dirbits) *dirbits = fsp_new_dir_bits(d.mode);
+    return fsp_new_gid(cgid, d.mode, d.gid);
+}
+/* a write or truncate by someone else than the owner and root: set-user-id (and set-group-id) go (rule 9) */
+static int clear_setid(uint32_t ino)
+{
+    struct zenixfs_inode in;
+    if (zenixfs_getattr(fs, ino, &in)) return -1;
+    unsigned nm = fsp_write_clear(cuid, in.uid, in.mode);
+    if (nm == in.mode) return 0;
+    in.mode = nm;
+    touched();
+    return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
+}
+
 static int handle1(struct umsg *m)
 {
     struct zenixfs_inode in;
@@ -176,10 +198,14 @@ static int handle1(struct umsg *m)
         const char *path = (const char *)m->a[0];
         u32 flags = m->a[2];
         int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
+        if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {   /* exclusive: the name must not exist, not even as a link */
+            if (!namei(m->a[1], path, 0, 0, &ino)) return -17;
+            if (denied) return -1;
+        }
         r = namei(m->a[1], path, 1, 0, &ino);
         if (r) {
             if (denied || !(flags & O_CREAT) || parent(m->a[1], path, &dir, &name, &len) || !dir_may(dir)) return -1;
-            if (zenixfs_create(fs, dir, name, len, fsp_new_file_mode(cumask), cuid, cgid, &ino)) return -1;
+            if (zenixfs_create(fs, dir, name, len, fsp_new_file_mode(cumask), cuid, new_gid(dir, 0), &ino)) return -1;
             touched();
         } else {
             if (zenixfs_getattr(fs, ino, &in)) return -1;
@@ -187,7 +213,7 @@ static int handle1(struct umsg *m)
             if (writing) {
                 if (!is_reg(&in)) return -1;
                 if (flags & O_TRUNC) {
-                    if (zenixfs_truncate(fs, ino, 0)) return -1;
+                    if (clear_setid(ino) || zenixfs_truncate(fs, ino, 0)) return -1;
                     touched();
                 }
             }
@@ -204,6 +230,7 @@ static int handle1(struct umsg *m)
         r = zenixfs_read(fs, m->a[0], m->a[1], (void *)m->a[2], m->a[3]);
         return r < 0 ? -1 : r;
     case FS_WRITE:
+        if (clear_setid(m->a[0])) return -1;
         r = zenixfs_write(fs, m->a[0], m->a[1], (const void *)m->a[2], m->a[3]);
         touched();
         return r < 0 ? -1 : r;
@@ -245,16 +272,18 @@ static int handle1(struct umsg *m)
         return r ? -1 : 0;
     case FS_CHMOD: {
         if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in) || !owner_only(&in)) return -1;
-        in.mode = (in.mode & ZENIXFS_S_IFMT) | (m->a[2] & 07777);
+        in.mode = (in.mode & ZENIXFS_S_IFMT) | fsp_chmod_mode(cuid, cgid, in.gid, m->a[2]);
         touched();
         return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
     }
-    case FS_UTIMES:
+    case FS_UTIMES: {
         if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in)) return -1;
-        if (!fsp_owner_or_root(cuid, in.uid) && !access_ok(&in, FSP_W)) return -1;     /* the owner, or anyone who may write */
-        in.mtime = m->a[2];
+        int given = m->a[2] != FS_UTIME_NOW;           /* a given time: the owner or root; "now": also anyone who may write */
+        if (!fsp_utimes_ok(cuid, in.uid, given, fsp_access(cuid, cgid, in.mode, in.uid, in.gid, FSP_W))) { denied = 1; return -1; }
+        in.mtime = given ? m->a[2] : (u32)sys_time();
         touched();
         return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
+    }
     case FS_CHOWN:
         if (!fsp_is_root(cuid)) { denied = 1; return -1; }
         if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in)) return -1;
@@ -271,7 +300,7 @@ static int handle1(struct umsg *m)
     case FS_SYMLINK:
         if (parent(m->a[2], (const char *)m->a[1], &dir, &name, &len) || !dir_may(dir)) return -1;
         touched();
-        return zenixfs_symlink(fs, dir, name, len, (const char *)m->a[0], cuid, cgid, &ino) ? -1 : 0;
+        return zenixfs_symlink(fs, dir, name, len, (const char *)m->a[0], cuid, new_gid(dir, 0), &ino) ? -1 : 0;
     case FS_READLINK:
         if (namei(m->a[1], (const char *)m->a[0], 0, 0, &ino) || zenixfs_getattr(fs, ino, &in) || !is_lnk(&in)) return -1;
         r = zenixfs_readlink(fs, ino, (char *)m->a[2], (int)m->a[3]);
@@ -289,10 +318,12 @@ static int handle1(struct umsg *m)
         if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in) || !is_dir(&in)) return -1;
         if (!access_ok(&in, 1)) return -1;
         return (int)ino;
-    case FS_MKDIR:
+    case FS_MKDIR: {
         if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir)) return -1;
+        unsigned bits, gid = new_gid(dir, &bits);
         touched();
-        return zenixfs_mkdir(fs, dir, name, len, fsp_new_dir_mode(cumask), cuid, cgid, &ino) ? -1 : 0;
+        return zenixfs_mkdir(fs, dir, name, len, fsp_new_dir_mode(cumask) | bits, cuid, gid, &ino) ? -1 : 0;
+    }
     case FS_UNLINK:
         if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir) || !sticky_ok(dir, name, len)) return -1;
         touched();
@@ -306,6 +337,8 @@ static int handle1(struct umsg *m)
         if (parent(m->a[2], (const char *)m->a[0], &dir, &name, &len) ||
             parent(m->a[2], (const char *)m->a[1], &dir2, &name2, &len2) ||
             !dir_may(dir) || !dir_may(dir2) || !sticky_ok(dir, name, len) || !sticky_ok(dir2, name2, len2)) return -1;
+        if (dir != dir2 && !zenixfs_lookup(fs, dir, name, len, &ino) && !zenixfs_getattr(fs, ino, &in) && is_dir(&in) &&
+            !access_ok(&in, FSP_W)) return -1;           /* a directory to another parent: its ".." changes (fsperm.h rule 10) */
         touched();
         before_remove(dir2, name2, len2);                /* a file renamed over may be open */
         return zenixfs_rename(fs, dir, name, len, dir2, name2, len2) ? -1 : 0;
@@ -315,6 +348,7 @@ static int handle1(struct umsg *m)
 
 static int handle(struct umsg *m)
 {
+    if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -13;     /* raw IPC from a user: inode numbers would bypass every check */
     cuid = m->uid; cgid = m->gid; cumask = m->umask;
     denied = 0;
     zenixfs_set_time(fs, sys_time());
