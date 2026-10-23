@@ -126,5 +126,11 @@ is not preemptive.
   Early Startup menu (hold both mouse buttons at power-on, Kickstart 2.0+) already chooses the boot partition. Pi-side
   choices (several FAT partitions, each with its own Emu68 and ROM, picked by the Pi firmware) are in the knowledge base
   note `amiga/emu68-and-pistorm.md`.
+- **`zc`, Zenix Commander** (owner's idea, 2026-10-23): a text-mode two-panel file manager in the spirit of Midnight
+  Commander - copy, move, delete, rename, view (with the pager) and edit (with the editor), a command line under the
+  panels. Fits the owner's rules: works in 80x32 / 80x25 (no wide-screen layout), every key configurable (as Ahiru and
+  CFile do), and loaded parts only when used. Natural after the shared text-interface library (and newlib); the owner's
+  Ahiru and CFile (AmigaOS) have file-manager experience to borrow ideas from, but Zenix needs its own code (their
+  shared core is built on AmigaOS).
 
 Last checked: 2026-10-23.
