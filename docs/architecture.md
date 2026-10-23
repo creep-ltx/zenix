@@ -66,7 +66,9 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   timed on the E-clock (`hr_time`); ERR is believed only once BSY is clear (ATA). IDENTIFY word 49 bit 9 must say
   LBA: a CHS-only drive is refused with a message (it would take LBA numbers as cylinder/head/sector). Data goes
   through Gayle's fast window (`0xDA2000`, "16 bit" timing; the registers stay in the "8 bit" `0xDA0000` window,
-  Gayle spec p.7-8); up to 256 sectors per READ/WRITE SECTORS command, one DRQ per sector. ATA's 400 ns settle after
+  Gayle spec p.7-8); on the Gayle port up to 256 sectors per READ/WRITE SECTORS command, one DRQ per sector (the
+  A4000 port keeps one sector per command: FS-UAE's A4000 IDE stayed busy for good now and then after a READ SECTORS
+  of 2, cause not found). ATA's 400 ns settle after
   a command and after the last data word is two CIA reads (E-clock synchronised, so at least 1.4 us on any CPU).
   Verified in FS-UAE (the matrix: Gayle ID 0xD, the fast data window, the A4000 and A3000 setups); the timings of real
   drives, the latch storm and a CHS-only drive are not modelled there.

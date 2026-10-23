@@ -95,7 +95,7 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   treats as dead keys (acute, grave, circumflex, tilde, diaeresis) type the spacing character, there is no
   composition with the next letter.
 - Disks: IDE only on an A600/A1200 Gayle (Gayle ID 0xD) and the A4000's port; LBA drives only (a CHS-only drive, as in
-  some early A600/A1200s, is refused with a message); PIO polling, up to 256 sectors per command. A drive is given up to
+  some early A600/A1200s, is refused with a message); PIO polling, up to 256 sectors per command on the Gayle port (one on the A4000's). A drive is given up to
   10 s to start (status 0) and 30 s for any one wait: a drive that never answers holds the boot that long. The A3000's
   SCSI waits once per target ID (250 ms selection timeout) and does not wait for slow drives to spin up.
 - The reset warning (Ctrl+Amiga+Amiga) gives init at most 8 s to sync the filesystems; only keyboards that send the

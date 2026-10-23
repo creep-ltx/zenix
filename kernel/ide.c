@@ -20,7 +20,7 @@
  * while BSY is set, ATA). IDENTIFY word 49 bit 9 must say LBA (I9): a CHS-only drive is refused, not misaddressed.
  * The data port goes through the fast window ($DA2000 on the Gayle: Gayle spec p.7-8 - "16 bit" timing from $DA2000,
  * "8 bit" from $DA0000), the task-file registers stay in the $DA0000 window. Up to 256 sectors per READ/WRITE SECTORS
- * command (I10), one DRQ per sector. */
+ * command (I10; the Gayle port only, see max_sectors), one DRQ per sector. */
 
 static u32 ide_base;                    /* task-file registers; set by ide_init */
 static u32 ide_data;                    /* the 16-bit data port */
@@ -47,6 +47,10 @@ static u32 ide_irq_latch;
 
 static u32 nsectors;
 static const char *port_name = "A1200/A600";
+/* sectors per command: up to 256 on the Gayle port (I10); one on the A4000 port, where FS-UAE's IDE hung now and
+ * then (BSY for good after a READ SECTORS of 2) once commands covered several sectors - the cause was not found,
+ * so that port keeps the one-sector commands it always had */
+static u32 max_sectors = 256;
 
 /* Sector data comes out of the port in correct byte order for a
  * big-endian CPU; only ATA IDENTIFY needs per-word swapping (its
@@ -236,6 +240,7 @@ int ide_init(void)
         ide_base = ide_data = A4000_IDE_BASE;
         ide_irq_latch = A4000_IDE_LATCH;
         port_name = "A4000";
+        max_sectors = 1;
     } else {
         int id = gayle_id();
         if (id != 0xD) {
@@ -286,16 +291,22 @@ static int ide_cmd(u32 lba, u32 n, u16 *p, int write)
     int rc = -1;
     if (ide_wait(ST_BSY, 0, T_BUSY_MS, "the drive before a command"))
         goto out;
-    IDE_REG(6) = 0xE0 | ((lba >> 24) & 0x0F);
-    IDE_REG(2) = (u8)n;                             /* 256 is written as 0 */
-    IDE_REG(3) = lba & 0xFF;
-    IDE_REG(4) = (lba >> 8) & 0xFF;
-    IDE_REG(5) = (lba >> 16) & 0xFF;
-    IDE_REG(7) = write ? 0x30 : 0x20;
-    ide_settle();
+    {
+        u16 sv = irq_save2();                       /* the task file and the command in one go */
+        IDE_REG(6) = 0xE0 | ((lba >> 24) & 0x0F);
+        IDE_REG(2) = (u8)n;                         /* 256 is written as 0 */
+        IDE_REG(3) = lba & 0xFF;
+        IDE_REG(4) = (lba >> 8) & 0xFF;
+        IDE_REG(5) = (lba >> 16) & 0xFF;
+        IDE_REG(7) = write ? 0x30 : 0x20;
+        ide_settle();
+        irq_restore(sv);
+    }
     for (u32 k = 0; k < n; k++) {
-        if (ide_wait(ST_BSY | ST_DRQ, ST_DRQ, T_BUSY_MS, write ? "the drive to take data" : "data from the drive"))
+        if (ide_wait(ST_BSY | ST_DRQ, ST_DRQ, T_BUSY_MS, write ? "the drive to take data" : "data from the drive")) {
+            kprintf("ide: %s of %u sectors at %u failed at sector %u\n", write ? "write" : "read", n, lba, k);
             goto out;
+        }
         u16 sv = irq_save2();
         if (write)
             for (int i = 0; i < 256; i++)
@@ -322,7 +333,7 @@ static int ide_rw(u32 lba, u32 count, void *buf, int write)
 {
     u16 *p = buf;
     while (count) {
-        u32 n = count > 256 ? 256 : count;
+        u32 n = count > max_sectors ? max_sectors : count;
         if (ide_cmd(lba, n, p, write))
             return -1;
         lba += n;
