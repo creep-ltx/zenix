@@ -119,5 +119,12 @@ is not preemptive.
   (DTT0/DTT1 on the 040/060, TT0/TT1 on the 030, ACRs on the EC parts) can mark chip RAM non-cacheable and cache the
   rest, without paging. Public: the MC68040 and MC68030 user manuals in `Knowledge/manuals`, section "Transparent
   Translation". Needs measuring on hardware.
+- **A boot menu on the small boot partition** (owner's idea, 2026-10-23): the Startup-Sequence runs a menu (Kickstart's
+  own graphics, keyboard and mouse, a default with a countdown) offering Zenix (runs `zenixboot`) and one or more AmigaOS
+  partitions. The reliable way to start another AmigaOS partition is to give it the highest boot priority for one boot
+  and reboot (the menu restores the order next time), not to chain into its startup files. Until then, Kickstart's own
+  Early Startup menu (hold both mouse buttons at power-on, Kickstart 2.0+) already chooses the boot partition. Pi-side
+  choices (several FAT partitions, each with its own Emu68 and ROM, picked by the Pi firmware) are in the knowledge base
+  note `amiga/emu68-and-pistorm.md`.
 
 Last checked: 2026-10-23.
