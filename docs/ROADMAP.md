@@ -25,8 +25,8 @@ built on the Amiga's own hardware (blitter, Copper, planar screens). Not Linux, 
    2026-10-23/24).** Zenix is tested first on the owner's A1200 with a PiStorm32-lite and a CM4 running Emu68, booting from
    the SD card or a GoDRIVE 1200, because that is the machine at hand. But it is built for real Amigas: a 68020-68060 at
    real clock speeds, Gayle IDE/CF, SCSI, real floppies, chip and fast RAM as the boards have it. So: nothing in the base
-   system may depend on Emu68 or the Pi (Pi hardware is reached by optional drivers/servers only); speed is judged by what
-   a stock 14 MHz 68EC020 can do, not by Emu68's ~1000 MIPS, which hides slow code; the stock A1200 setups stay in the
+   system may depend on Emu68 or the Pi (Pi hardware is reached by optional drivers/servers only); speed is judged on real
+   68k CPUs (today: what a stock 14 MHz 68EC020 can do), not by Emu68's ~1000 MIPS, which hides slow code; the stock A1200 setups stay in the
    test matrix; booting works the normal Amiga way (floppy, or a hard disk/CF/SD through `zenixboot`), never a custom ROM.
 7. **Write it down.** Findings go to the knowledge base, decisions to DESIGN.md, status to README.md.
 8. **Unix experience:** standard names, standard behaviour (POSIX where it makes sense), `/` filesystem,
@@ -116,6 +116,11 @@ DESIGN.md D9).
 ## Ideas parked for later
 
 ## Open questions
+
+- **Minimum requirements: not decided (owner, 2026-10-24).** The owner sets them later, depending on how much Zenix
+  grows. What is true today: the kernel refuses a 68000/68010 (the code needs a 68020+); everything boots and passes the
+  matrix on a stock 68EC020 with 2 MB chip RAM and no fast RAM, and on 1 MB chip-only with one login session. Until the
+  owner decides, keep it running on those, and say in a change's notes when it costs memory or speed on them.
 
 - ZenixFS name: a Western Digital project already uses "ZenixFS" (RocksDB on zoned SSDs); decide if that matters.
 - How much POSIX: `fork` is not possible without an MMU; `vfork`/`spawn` only. Programs that need `fork` are out.

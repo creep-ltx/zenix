@@ -9,7 +9,8 @@ current work list), then `docs/architecture.md` for the part you touch.
 - Often on the phone. Short status lines, no walls of text.
 - Owns one Amiga: an A1200 with a PiStorm32-lite (Emu68 on a CM4) and a Gotek. **That machine is the first test machine;
   real Amiga hardware is the ultimate target (owner, 2026-10-24): nothing in the base may depend on Emu68 or the Pi, and
-  speed is judged against a stock 14 MHz 68EC020, not Emu68's JIT.** Order audit fixes by what
+  speed is judged on real 68k CPUs (today a stock 14 MHz 68EC020), not Emu68's JIT. The minimum requirements
+  are not decided yet (ROADMAP, open questions).** Order audit fixes by what
   matters on it first. Nothing has run on it yet; real-hardware time is scarce, so every build sent there must be
   ready for it.
 
