@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 
 /* One tty per virtual console (1..NCONS, /dev/tty1..). Line discipline:

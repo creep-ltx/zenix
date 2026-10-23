@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # ZenixFS as the ROOT filesystem, in the emulator. Boot 1: root is ZenixFS (mount/df), files, links, a bigger file, sync.
 # Boot 2 (same disk): the data is there after a reboot; then the users-and-permissions test of tools/users-test.sh runs
 # against the ZenixFS root. Finally the host checks the root partition with zenixfs-tool.

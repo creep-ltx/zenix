@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Mount tests in the emulator: two ext2 partitions mounted on /mnt and /mnt/sub, data across unmount/mount.
 # Verified afterwards with the host's e2fsck.
 cd "$(dirname "$0")/.." || exit 1

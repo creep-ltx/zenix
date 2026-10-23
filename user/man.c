@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* man [-k word] name...: show a manual page (in the pager); -k lists the pages whose text mentions the word */
 #define DIR "/usr/man/"

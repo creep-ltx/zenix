@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
 /* Messages between the kernel and the filesystem server ("fs" port).
  * type = op, a[0..3] = arguments, result = value or -1 (-5 = server gone).

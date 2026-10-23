@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # ZenixFS in the emulator: partition, mkfs.zenixfs, mount next to an ext2 mount, files / links / rename / a 100 KB file,
 # unmount, remount, fsck.zenixfs; then the HOST checks the same partition with zenixfs-tool (independent implementation
 # of the check: the same library source, but a different program, block device and compiler).

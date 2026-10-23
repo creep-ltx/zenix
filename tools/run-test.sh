@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
 # Boot a config in FS-UAE with serial captured, print the serial log.
 # Usage: tools/run-test.sh fsuae/<config>.fs-uae [seconds] [keyscript]
 # Tap and emulator run in the same invocation so the PTY is shared.

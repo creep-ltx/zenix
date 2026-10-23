@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
 /* Zenix system calls: TRAP #0, number in d0, args d1-d3, result in d0 (a negative error number on failure). */
 typedef unsigned int u32;

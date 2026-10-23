@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Host test of kernel/a3000.c against a WD33C93A + DMAC model: tools/a3000-test.sh   (TRACE=1 shows each command)
 set -e
 cd "$(dirname "$0")/.."

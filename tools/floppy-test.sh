@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Floppy drives in the emulator, checked against the disk images on the host:
 #   df0 is the Zenix boot disk (build/zenix.adf), df1 a 880 KB image of random data.
 #   1. `fdisk list` shows df0 and, once it has been used (drives past df0 are probed on first use), df1.

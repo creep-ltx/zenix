@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* date [+FORMAT]: the time (UTC; Zenix has no time zones yet). Formats: %Y %m %d %H %M %S %s %a %A %b %B %j %e %y %Z %% %F %T %D %n */
 static const char *const wd[7] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };

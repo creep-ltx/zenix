@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 Tobias Karlsson (the CUtils project); the MIT permission notice is in regex.c. */
 #pragma once
 /* POSIX extended regular expressions (regex.c, a Pike VM: no pattern can make it slow). */
 #define RE_GROUPS 10

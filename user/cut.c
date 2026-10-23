@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* cut -f LIST [-d C] [-s] | -c LIST | -b LIST [file...]; LIST: N, N-M, N-, -M, comma separated */
 static struct { int lo, hi; } rng[32]; static int nr;

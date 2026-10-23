@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # Audit D checks run as a normal user by tools/users-test.sh (root left a "sleep" running): raw messages, kill and
 # stop of others' and the system's processes, the raw disk, the clock; root prepared /tmp/sgd (a set-group-id
 # directory, group root, with a 6777 program) and /tmp/mvt (a root directory the user may not write, in a parent

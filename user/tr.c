@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* tr [-d] [-s] SET1 [SET2]: translate, delete or squeeze characters; ranges a-z, classes [:upper:] [:lower:] [:digit:] [:alpha:] [:alnum:] [:space:], \n \t \\ */
 static int expand(const char *s, unsigned char *out, int max)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* ln [-s] [-f] target link_name   |   ln [-s] [-f] target... directory */
 int main(int argc, char **argv)

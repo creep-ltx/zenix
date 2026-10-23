@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 TOOLPREFIX := $(HOME)/opt/m68k-elf/bin/m68k-elf-
 CC      := $(TOOLPREFIX)gcc
 OBJCOPY := $(TOOLPREFIX)objcopy

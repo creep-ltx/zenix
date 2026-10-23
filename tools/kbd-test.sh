@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # The keyboard in FS-UAE: Swedish keymap layers (plain, Shift, Alt, Shift+Alt), Caps Lock, key repeat, typing
 # during heavy output and the console keys (Amiga+F2, Amiga+F1), typed with wtype on the emulated Amiga keyboard (tools/kbd-test.py, headless cage rig),
 # written to files by the shell and read back from the disk image. ZENIX_SERIAL=/tmp/name gives the run its own

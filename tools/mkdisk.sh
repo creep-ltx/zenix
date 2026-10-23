@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
 # Create the Zenix IDE test disk: 16MB whole-disk FAT16 with a hello file.
 set -e
 OUT="$1"

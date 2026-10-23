@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Run rootfs/tests/cmds.sh under Zenix (output to a file on its disk) and under the host's bash with GNU tools
 # (LC_ALL=C); the two outputs must be identical.
 cd "$(dirname "$0")/.." || exit 1

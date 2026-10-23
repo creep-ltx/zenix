@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # command tests: run under Zenix and under bash with GNU tools; the output must be identical
 D=${1:-/home/t}
 cd $D

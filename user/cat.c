@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* cat [-n] [-b] [-s] [-E] [file...] */
 static int o_n, o_b, o_s, o_E, lineno, blank_run, at_start = 1;

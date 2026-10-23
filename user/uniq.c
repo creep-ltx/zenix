@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* uniq [-c] [-d] [-u] [-i] [input [output]]: collapse adjacent duplicate lines */
 static int o_c, o_d, o_u, o_i;

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
 # Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name>.
 # usage: mkroot.sh out.hdf builddir "prog prog ..."
 set -e

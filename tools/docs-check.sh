@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Checks that the documentation is in step with the project.
 #   tools/docs-check.sh            check the whole tree
 #   tools/docs-check.sh --staged   also check what is about to be committed (use as a pre-commit check)
+#   tools/docs-check.sh --commit REV   the same check for a commit already made (e.g. after a merge: --commit HEAD)
 # Rules (see CLAUDE.md): every program has a manual page in docs/man and a row in docs/commands.md; manual pages
 # fit 78 columns; docs/features.md exists; no documentation files outside docs/ (README.md and CLAUDE.md excepted);
 # with --staged, a changed program needs its manual page changed in the same commit.
@@ -27,13 +29,16 @@ done
 stray=$(git ls-files '*.md' '*.txt' | grep -v '^docs/\|^rootfs/\|^tools/tests/\|^archive/\|^README.md$\|^CLAUDE.md$')
 [ -z "$stray" ] || bad "documentation outside docs/: $stray"
 
-if [ "$1" = "--staged" ]; then
-    changed=$(git diff --cached --name-only)
+if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
+    if [ "$1" = "--staged" ]; then range=(--cached); else range=("${2:-HEAD}~1" "${2:-HEAD}"); fi
+    changed=$(git diff "${range[@]}" --name-only)
     for c in $changed; do
         case "$c" in
         user/*.c)
             b=$(basename "$c" .c); n=$(echo "$b" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
             case "$b" in libz|regex|miniz|fsd|pw|sha|zenixfsd|zenixfs_disk) continue;; esac     # libraries and servers: no page of their own
+            # a change of the licence line only changes no behaviour
+            [ -z "$(git diff "${range[@]}" -U0 -- "$c" | grep '^[-+]' | grep -v '^+++\|^---\|SPDX-License-Identifier')" ] && continue
             echo "$changed" | grep -qx "docs/man/$n.txt" || bad "$c changed but docs/man/$n.txt was not updated in this commit"
             ;;
         esac

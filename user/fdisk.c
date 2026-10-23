@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #ifdef ZHOST
 #include "../tools/host/zhost.h"     /* host build for the tests (tools/disk-host-test.sh) */
 #else

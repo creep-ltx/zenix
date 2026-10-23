@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 
 /* Virtual consoles, as on Linux: NCONS (10) of them, /dev/tty1 .. /dev/tty10,

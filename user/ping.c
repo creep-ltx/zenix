@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* test client: a few calls, a zero-copy string call, then N timed round trips */
 int main(int argc, char **argv)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 #include "regex.h"
 /* sed [-n] [-E|-r] [-i] [-e script] [-f file] [script] [file...]

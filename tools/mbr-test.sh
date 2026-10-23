@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Boot Zenix from disks that carry a PC partition table (like an Emu68 SD card) in the emulator:
 #   1. MBR with a FAT boot partition and an ext2 partition (type 0x83)
 #   2. MBR with a FAT boot partition and a type 0x76 partition holding an Amiga RDB with the ext2 root

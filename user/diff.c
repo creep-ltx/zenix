@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* diff [-u] [-U N] [-q] [-i] [-w] [-r] file1 file2   (directories with -r)
  * Normal and unified output; exit status 0 same, 1 different, 2 trouble. */

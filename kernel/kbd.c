@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* The keymap tables below were generated from xkeyboard-config (MIT/X11 licence); its notice is above them. */
 #include "kernel.h"
 #include "hw.h"
 

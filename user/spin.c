@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* never yields: only preemption lets the others run (^C to stop) */
 int main(int argc, char **argv)

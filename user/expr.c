@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 #include "regex.h"
 /* expr arg op arg ...: arithmetic (+ - \* / %), comparisons, & |, STRING : REGEX, length STRING; prints the result,

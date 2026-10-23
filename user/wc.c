@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* wc [-l] [-w] [-c] [file...]: lines, words, bytes (all three by default) */
 static u32 tl, tw, tc;

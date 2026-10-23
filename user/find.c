@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* find [path...] [-name PAT] [-iname PAT] [-type f|d] [-maxdepth N] [-mindepth N] [-print] [-exec cmd {} ;] [-delete]
  * Patterns: * ? [..]. The tests are and-ed; with no action the path is printed. Symbolic links below the starting

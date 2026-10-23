@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 #include "../kernel/fsproto.h"
 #include "../kernel/diskproto.h"

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Boot Zenix in every FS-UAE setup under fsuae/ and fsuae/matrix/, run
 # tools/tests/matrix-test.txt over the serial port, and report PASS/FAIL per setup.
 # usage: tools/matrix.sh [name...]     (default: all)

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # The commands that cannot be compared with GNU output (they depend on the clock, the machine or the process list):
 # cal, tree, time, pgrep/pkill, kill -STOP/-CONT, watch (and a few filters, for the record). Then the audit batch E
 # script (rootfs/tests/batch-e.sh: the shell's loops in flat memory, no silent caps, the expansion and builtin fixes,

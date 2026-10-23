@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
 /* Amiga Rigid Disk Block (RDB) partition table: reading, shared by the disk server and fdisk so there is one
  * implementation. Every PART block keeps its own geometry (DosEnvec Surfaces, BlocksPerTrack, SizeBlock, as

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Turn a linked ELF (linked at address 0, with -Wl,-q) into a ZEXE image.
 
 ZEXE = flat image + relocation table, loadable at any address:

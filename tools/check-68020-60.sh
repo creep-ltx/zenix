@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Fail if a built ELF contains a 64-bit multiply or divide: mulu.l/muls.l <ea>,Dh:Dl or divu.l/divs.l <ea>,Dr:Dq with a
 # 64-bit dividend. The 68060 does not implement them (it traps to vector 61, "unimplemented integer instruction"), and
 # under Zenix there is no 68060.library to emulate them, so the kernel would panic or the program be killed. The

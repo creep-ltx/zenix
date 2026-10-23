@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Wrap a filesystem image in an Amiga RDB (one partition), as a real
 hard disk or CF card has. usage: mkrdb.py fs.img out.hdf [ext2|zenixfs]"""
 import struct

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* mv [-f] [-v] source... dest : rename. Only when the rename cannot be done because the target is on another
  * filesystem (EXDEV: another mount, or ext2 moving a directory to another parent) is the source copied and removed;

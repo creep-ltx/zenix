@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 #include "regex.h"
 /* grep [-ivncloqhHrEFwxs] [-A N] [-B N] [-C N] [-e PAT] PATTERN [file...]

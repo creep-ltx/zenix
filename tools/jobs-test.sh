@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Job control in the emulator: Ctrl-Z stops the foreground program, jobs lists it, ps shows it stopped, bg continues it,
 # fg brings it back (and Ctrl-C then ends it with status 130), kill ends a stopped job.
 cd "$(dirname "$0")/.." || exit 1

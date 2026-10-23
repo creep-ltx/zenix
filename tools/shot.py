@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Boot Zenix in FS-UAE inside a private invisible Wayland session (cage on
 the headless backend, nothing appears on the desktop), type into the serial
 port with a script (tools/serial-tap.py format) and save screenshots.

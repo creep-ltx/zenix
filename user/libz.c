@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 
 u32 strlen(const char *s) { u32 n = 0; while (s[n]) n++; return n; }

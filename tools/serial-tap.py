@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Create a PTY, symlink its slave end at argv[1] for FS-UAE's serial_port,
 and append everything received on the master end to the log file argv[2].
 

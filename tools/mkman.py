@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Make a manual page for each program from the comment at the top of its source file (user/NAME.c).
 A hand-written page in docs/man/ wins: it is copied in afterwards and replaces the generated one.
 usage: mkman.py OUTDIR program..."""

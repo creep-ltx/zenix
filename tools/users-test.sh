@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Users and permissions in the emulator: boots as the autologin root, switches users with su, checks what a normal user may
 # and may not do (write to /, remove another user's file, read a 0600 file, sticky /tmp), umask, owner names in ls -l,
 # passwd with a wrong and a right password, chown/chgrp.

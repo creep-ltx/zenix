@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # The editor: type, move, save, quit, reopen, replace, undo/redo, all by serial key presses; the saved file is read back
 # from the disk image and compared with what it must be.
 cd "$(dirname "$0")/.." || exit 1

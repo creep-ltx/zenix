@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* sleep SECONDS (whole seconds; a fraction like 0.5 is rounded to hundredths) */
 int main(int argc, char **argv)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* head [-n N | -N] [-c N] [file...]: the first lines (default 10) or bytes */
 int main(int argc, char **argv)

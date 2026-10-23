@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* cp [-r] [-f] [-p] [-v] source... dest   (dest a directory when there are several sources) */
 static int o_r, o_f, o_p, o_v, rc;

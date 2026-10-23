@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* test server: port "ping"; type 1 = add a[0]+a[1] into a[2]; type 2 = copy
  * the client's string a[0] (pointer into the client's memory) to upper case
