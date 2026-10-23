@@ -44,9 +44,25 @@ static int up;
 #define GB_TEXTFONTS 140
 #define GB_DEFAULTFONT 154
 
+/* A pointer left by AmigaOS is followed only if it lies in RAM that exec listed (the bootinfo regions) or in the
+ * Kickstart ROM. Accelerators and Emu68 put fast RAM - and with it GfxBase and the font lists - far above 16 MB
+ * (Emu68: 0x08000000..., 0x41000000...), so a fixed "below 128 MB" window lost the font on a PiStorm (first boot
+ * on the owner's A1200, 2026-10-23: "display: not available (no ROM font)"). */
 static int plausible(u32 a)
 {
-    return (a >= 0x400 && a < 0x08000000u) || (a >= 0xF00000u && a < 0x1000000u);
+    const struct bootinfo *bi = (const struct bootinfo *)0x1000;
+    if (a >= 0xF00000u && a < 0x1000000u)           /* Kickstart ROM */
+        return 1;
+    if (a >= 0xE00000u && a < 0xE80000u)            /* extended ROM area */
+        return 1;
+    for (int i = 0; i < bi->nregions && i < 8; i++) {
+        u32 lo = bi->r[i].lower & ~0x3Fu, hi = bi->r[i].upper;  /* lower is just past the MemHeader */
+        if (lo < 0x400)
+            lo = 0x400;
+        if (a >= lo && a + 64 <= hi)
+            return 1;
+    }
+    return 0;
 }
 
 static int font_extract(u32 tf)
