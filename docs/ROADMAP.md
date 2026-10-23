@@ -49,6 +49,9 @@ Linux's autovt), the whole screen text (32 rows PAL, 25 NTSC), the serial hook 0
 The owner halted all new features on 2026-10-22. Until the owner lifts it, work is only the fixes listed in
 `audit-2026-10-22.md` (batches A-E), the tests that check them, documentation corrections and merging the branches
 built before the halt. The phases below resume after that.
+**Exception approved by the owner on 2026-10-23:** booting without a floppy - a small AmigaDOS boot partition whose
+Startup-Sequence runs `zenixboot`, an Amiga program that loads the kernel from a file and takes over like the bootblock.
+It works on any Amiga that boots from a hard disk, CF or SD card (the PiStorm's SD card through Emu68's driver).
 
 Progress: **batch A (first-boot blockers) is done** except A7 (a chip-only A1200 booting the RAM disk, left open:
 the owner's machine has fast RAM), with the approved first-boot diagnostics (A11 boot colours, A12 previous-boot
