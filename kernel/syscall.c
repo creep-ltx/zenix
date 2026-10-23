@@ -109,6 +109,15 @@ void syscall_c(u32 *rb)
 #define UOK(p, n)     (user_ok(current, p, n) || ((r = -EFAULT), 0))
 #define GETFD(f_, fd) (((f_) = getfd(fd)) || ((r = -EBADF), 0))
 
+    {   /* the stack guard (proc.c) at every system call: the quick check, the full one if it fails (the register block
+         * is the kernel stack pointer) */
+        u32 usp = get_usp();
+        int bad = stack_user_suspect(current, usp) ? stack_bad(current, (u32)rb - 64, usp) : 0;
+        if (bad) {
+            stack_fail(current, bad);
+            proc_exit(139);
+        }
+    }
     switch (rb[0]) {
     case SYS_exit:
         proc_exit((int)a1);
@@ -121,6 +130,14 @@ void syscall_c(u32 *rb)
             r = (s32)vfs_read(f, (void *)a2, a3);
         break;
     case SYS_yield:
+#ifdef STACK_TEST
+        /* test builds only (make DIAG=-DSTACK_TEST, tools/diag-test.sh stack): `crash kstack` / `crash idle` damage
+         * the guard of their own kernel stack / of pid 0's, as an overflow would, to test the check */
+        if (a1 == 0x4B53544Bu)          /* "KSTK" */
+            *(u32 *)current->kstk = 0;
+        if (a1 == 0x49444C45u)          /* "IDLE" */
+            *(u32 *)procs[0].kstk = 0;
+#endif
         schedule();
         r = 0;
         break;

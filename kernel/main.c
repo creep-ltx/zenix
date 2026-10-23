@@ -114,7 +114,12 @@ void exc_c(u32 *rb)
     u32 faddr = (fmt == 0xA || fmt == 0xB) ? *(u32 *)(frame + 16) : 0;
 
     if (!(sr & 0x2000) && current->pid != 0) {
-        /* user-mode fault: kill just this process, free what it owned */
+        /* user-mode fault: kill just this process, free what it owned (an overflowed stack is the likely cause, and
+         * then says so first) */
+        int bad = stack_bad(current, (u32)rb, get_usp());
+        if (bad && !current->killed)
+            kprintf("\n[kernel] pid %d (%s) overflowed its %s stack\n", current->pid, current->name,
+                    bad == STK_KERNEL ? "kernel" : "user");
         kprintf("\n[kernel] pid %d (%s) killed: vector %u pc=%p addr=%p\n",
                 current->pid, current->name, vec, pc, faddr);
         proc_exit(139);
@@ -226,6 +231,16 @@ void irq2_c(u32 sr)
         fd_tick();
     }
     if (!(sr & 0x2000)) {               /* we interrupted user mode: no kernel code is running */
+        if (current->pid != 0 && !current->killed) {
+            u32 usp = get_usp();        /* the stack guard, every tick: the quick check, then the full one */
+            int bad = stack_user_suspect(current, usp) ? stack_bad(current, (u32)__builtin_frame_address(0), usp) : 0;
+            if (bad) {
+                stack_fail(current, bad);
+                irq_restore(0x2000);
+                schedule();             /* it dies there (or when it next runs) */
+                return;
+            }
+        }
         if (kwork_pending) {
             irq_restore(0x2000);        /* interrupts on: this is return-to-user work, not interrupt work */
             kwork();

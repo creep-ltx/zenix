@@ -40,7 +40,7 @@ An event then wakes exactly that process. Without idea 1, a small list of waiter
 **Public source:** per-object wait queues are textbook design (any Unix kernel's sleep/wakeup on a wait channel).
 
 ## 3. Stack overflow check at every task switch (approved as a fix, 2026-10-23)
-**Today:** there is nothing below any stack (limits.md). Kernel stacks are 4 KB and interrupts run on them.
+**Before batch F:** there was nothing below any stack. Kernel stacks are 4 KB and interrupts run on them.
 
 **Idea:**
 - Put a guard pattern at the bottom of every kernel stack and user stack.
@@ -51,6 +51,8 @@ An event then wakes exactly that process. Without idea 1, a small list of waiter
 **Why:** an overflow becomes a clear message instead of random crashes. The cost is a compare or two per switch.
 
 **Public source:** stack canaries and guard words are textbook practice.
+
+**Done** (audit batch F, 2026-10-23): architecture.md section 6 ("Stack guard").
 
 ## 4. CPU time per process and an idle counter
 **Today:** there is no per-process CPU time, no idle counter and no profiling hook.

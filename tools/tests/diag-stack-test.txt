@@ -1,0 +1,7 @@
+sleep 30
+send crash kstack\r
+sleep 4
+send echo after-kstack\r
+sleep 3
+send crash idle\r
+sleep 8

@@ -212,7 +212,7 @@ stages of a pipeline). Only `R_68K_32` relocations are needed (PC-relative code 
 debug-section relocations must be skipped (their offsets are not addresses). The kernel itself uses the same
 format and the same loop (in `start.S`). Programs declare their stack size in the header: 16 KB unless the
 Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB; the numbers and how they were measured
-are in limits.md). There is no guard below a stack. There is no shared-library format yet; programs are linked
+are in limits.md). A guard pattern lies at the bottom of every stack (section 6). There is no shared-library format yet; programs are linked
 statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).
 
 ## 5. Memory (`kernel/mem.c`)
@@ -238,7 +238,8 @@ The pools leave out low chip RAM (`0`-`0x1FFF`: vectors, boot tables), the kerne
 log's area at the top of chip RAM (section 3, "Previous-boot log").
 
 A process's own memory is **one block**: image + BSS + stack + the argument area. The kernel stack (4 KB) is a
-second block. Both are owned by the pid and freed together.
+second block. Both are owned by the pid and freed together. The lowest 16 bytes of each stack hold the stack guard's
+pattern (section 6).
 
 ## 6. Processes and scheduling (`kernel/proc.c`)
 
@@ -306,6 +307,22 @@ inside a call to a server is never stopped until the reply arrives (the server h
 
 ## 8. Ports and messages (`kernel/ipc.c`)
 
+- **Stack guard** (future-ideas.md section 3, done as a fix 2026-10-23). Nothing stops a stack from growing past its
+  bottom without an MMU, so four guard words (16 bytes, "ZSTK"...) lie at the bottom of every kernel stack, every
+  user stack (just above the program's BSS) and the boot stack (pid 0). At every task switch the process leaving
+  the CPU has both guards and both stack pointers checked (`stack_bad`), and the saved stack pointers of the one
+  coming in are checked against its bounds; every system call and every tick that interrupts user code makes the
+  cheap check (the user stack pointer in bounds, the guard's first word intact) and the full one if that fails; a
+  program that faults is told whether its stack had overflowed. A failure prints "[kernel] pid N (name) overflowed
+  its user stack: killed" (or kernel stack) and kills the process (exit 139, as for a fault; a blocked one is woken
+  so that it dies at once); pid 0's kernel stack, or a saved kernel stack pointer outside its stack, is a panic, so
+  the text is in the previous-boot log. It finds an overflow, it cannot prevent one: what was written below the stack
+  before the check stays written (one frame for a program that makes system calls, up to one tick for one that does
+  not). Cost, counted in the 68020 code: about 70 instructions per task switch, about 18 per system call and per
+  tick. Verified in FS-UAE: `crash stack` (the matrix, every machine) recurses with a system call per level until the
+  guard kills it and the system goes on; a `STACK_TEST` build (`tools/diag-test.sh stack`) damages a process's own
+  kernel-stack guard (`crash kstack`: killed with the message, the system goes on) and pid 0's (`crash idle`: the
+  panic, and its text in the next boot's previous-boot lines).
 The central mechanism (DESIGN D1). A **port** is a named queue owned by one process. A client calls
 
 ```

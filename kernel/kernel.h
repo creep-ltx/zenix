@@ -70,6 +70,8 @@ void irq_restore(u16 sr);
 void ints_on(void);
 void ints_off(void);
 void cpu_idle(void);
+u32 get_usp(void);                   /* the user stack pointer register (the running process's, in the kernel) */
+extern u32 kstack_bottom[];          /* the boot stack (pid 0, idle): 8 KB below kstack_top */
 void cache_enable(int is040plus);
 void cache_flush_code(void);         /* after writing code that will run: I-cache (and Emu68 JIT) flush */
 void exc_common(void);
@@ -239,6 +241,8 @@ struct proc {                   /* start.S relies on the first three: */
     u16 uid, ruid, gid, umask;  /* effective and real user id, group id (inherited; a set-user-id program changes only uid); the filesystem server enforces the permissions */
     char env[ENVMAX];           /* environment: NAME=value NUL ... NUL NUL; inherited by children */
     u16 envlen;
+    u32 kstk, ktop, ustk;       /* stack guard (proc.c): bottom and top of the kernel stack, bottom of the user stack
+                                 * (0: none, pid 0); a guard pattern lies at each bottom */
     struct proc *rnext;         /* run queue link */
     int queued;                 /* on the run queue */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
@@ -277,6 +281,21 @@ struct proc *proc_by_pid(int pid);
 /* ipc.c: ports and messages. A message lives in the sender's memory; only
  * pointers move (no MMU, so the server reads and writes the client's
  * buffers directly). The sender is blocked until the server replies. */
+/* Stack guard (proc.c): a pattern at the bottom of every kernel and user stack, checked with the stack pointers at
+ * every task switch, at every system call, at the tick when it interrupts user code and when a program faults.
+ * stack_bad: 0, STK_KERNEL or STK_USER (ksp/usp: the stack pointers now; usp 0 = not known, only the guard).
+ * stack_fail: says "pid N (name) overflowed its kernel/user stack" and kills it (exit 139), or panics for pid 0. */
+#define STK_KERNEL 1
+#define STK_USER   2
+int stack_bad(const struct proc *p, u32 ksp, u32 usp);
+void stack_fail(struct proc *p, int which);
+#define STACK_GUARD0 0x5A53544Bu        /* the guard's first word ("ZSTK"), the one nearest the stack */
+/* the cheap form for every system call and tick: the user stack pointer in bounds and the guard's first word intact;
+ * the full check (all guard words, both stacks) runs at every task switch, and when this one fails */
+static inline int stack_user_suspect(const struct proc *p, u32 usp)
+{
+    return p->ustk && (usp < p->ustk + 16 || usp > p->base + p->span || *(const u32 *)p->ustk != STACK_GUARD0);
+}
 #define NPORT 16
 #define MSG_QUEUED  1
 #define MSG_SERVING 2

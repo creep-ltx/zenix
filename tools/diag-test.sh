@@ -9,7 +9,10 @@
 #     Ctrl+Amiga+Amiga, and check that the next boot shows the previous boot's last lines and `dmesg -p` has them;
 #     the same after a kernel panic (DIAG_PANIC=11): "ended here with a kernel panic" and the panic text, twice
 #     (the two slots alternate).
-# usage: tools/diag-test.sh [colours|reset|all]     (ZENIX_SERIAL defaults to /tmp/zenix-diag-serial)
+#  3. the stack guard's kernel-stack checks, in a STACK_TEST build: `crash kstack` damages the guard of its own kernel
+#     stack (killed with "overflowed its kernel stack", the shell goes on), `crash idle` damages pid 0's (a kernel
+#     panic); after a warm reset the next boot shows that panic as the previous boot's end.
+# usage: tools/diag-test.sh [colours|reset|stack|all]     (ZENIX_SERIAL defaults to /tmp/zenix-diag-serial)
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 WHAT=${1:-all}
@@ -128,3 +131,20 @@ if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
 fi
 echo "logs and screenshots: $OUT"
 exit $((1 - pass))
+if [ "$WHAT" = stack ] || [ "$WHAT" = all ]; then
+    build stack "-DSTACK_TEST"
+    conf "$OUT/stack.fs-uae" "$OUT/stack/zenix-ram.adf"
+    wait_free
+    RESET_AT=56 timeout 130 python3 tools/shot.py "$OUT/stack.fs-uae" tools/tests/diag-stack-test.txt "$OUT/stack" 50 95 >/dev/null 2>&1
+    L=$OUT/stack.log; tr -d '\r' < "$OUT/stack.serial.log" > "$L"
+    grep -q '^\[kernel\] pid [0-9]* (crash) overflowed its kernel stack: killed' "$L" &&
+        check "a damaged kernel-stack guard: the process is killed with the message" ok ||
+        check "a damaged kernel-stack guard: the process is killed with the message" bad
+    grep -q '^after-kstack$' "$L" && check "the system goes on after it" ok || check "the system goes on after it" bad
+    grep -q '^\*\*\* kernel panic: pid 0 (idle) overflowed its kernel stack' "$L" &&
+        check "a damaged guard of pid 0's stack: a kernel panic with the message" ok ||
+        check "a damaged guard of pid 0's stack: a kernel panic with the message" bad
+    grep -q '^> \*\*\* kernel panic: pid 0 (idle) overflowed its kernel stack' "$L" &&
+        check "the next boot shows that panic in the previous boot's lines" ok ||
+        check "the next boot shows that panic in the previous boot's lines" bad
+fi

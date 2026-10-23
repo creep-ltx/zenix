@@ -12,6 +12,8 @@ send hello 1\r
 sleep 3
 send crash\r
 sleep 2
+send crash stack\r
+sleep 3
 send uname\r
 sleep 2
 send df\r

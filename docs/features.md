@@ -34,6 +34,7 @@ built. Last checked against the code: 2026-10-23.
 | `spawn` (no `fork`); wait, exit status, zombies | verified | architecture.md section 6 |
 | System calls via `TRAP #0` (the count and the list: architecture.md section 7), all pointers validated; errors as negative errno numbers (`kernel/errno.h`, Linux values), the same from both filesystem servers, shown as text by `zwhy`/`zstrerror` | verified (users-test permission texts, cmds2-test batch E script, host ext2 test) | architecture.md section 7 |
 | Crash containment: a faulting program is killed, memory freed | verified | how-it-works.md section 3 |
+| Stack guard: a pattern below every kernel and user stack, checked with the stack pointers at every task switch, system call and tick; an overflow kills the process with "overflowed its user/kernel stack" (pid 0: a panic) | verified in FS-UAE (`crash stack` in the matrix; `tools/diag-test.sh stack` for the kernel-stack checks) | architecture.md section 6 |
 | Named message ports, synchronous zero-copy calls | verified | architecture.md section 8 |
 | Servers: disk (`diskd`), filesystems (`fsd` for ext2, `zfsd`/`mount.zenixfs` for ZenixFS), starter (`boot`) | verified | architecture.md section 9 |
 | Environment variables inherited by children | verified | |

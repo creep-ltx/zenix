@@ -7,10 +7,12 @@ point here instead of repeating them.
 
 Any program can read or write any memory and touch the hardware. Zenix **contains visible crashes** (exceptions
 kill only the faulting process; its memory is freed; the kernel validates every pointer passed to a system call;
-a magic word in every memory block's header catches overruns of the heap; there is no guard word or guard page
-below a stack). It does **not** isolate programs from each other. A buggy
-program that writes through a valid-looking pointer can corrupt another process, a server or the kernel and
-bring the system down. Users, groups and file permissions (DESIGN D8, built) give accounting and
+a magic word in every memory block's header catches overruns of the heap; a guard pattern at the bottom of every
+stack, checked at every task switch, system call and tick, kills a process whose stack overflowed - after the fact:
+what it wrote below the stack before the check stays written, at most one frame for a program making system calls,
+up to one tick (10 ms) of work for one that does not; there is no guard page). It does **not** isolate programs
+from each other. A buggy program that writes through a valid-looking pointer can corrupt another process, a server
+or the kernel and bring the system down. Users, groups and file permissions (DESIGN D8, built) give accounting and
 protection against honest mistakes, not against a program written to cheat - the same trust level as AmigaOS.
 The documentation must keep saying this.
 
@@ -66,7 +68,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   128 variables, 48 aliases and 48 functions, 200 history lines (a recalled line is cut to the 478 characters the
   editor holds, with the bell).
 - Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
-  Makefile's `STACK_*`, written into each program's header). No guard below a stack. Measured with `-fstack-usage`
+  Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
+  pattern (architecture.md section 6). Measured with `-fstack-usage`
   (2026-10-23): the largest single frames are `mkfs.ext2` main 8.5 KB, `man` 6.1 KB, miniz's Huffman table builder
   5.6 KB (gzip), `fsck.ext2` main 5.4 KB; the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
@@ -98,7 +101,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 
 ## Traps found while building it (details in `Knowledge/amiga/zenix-m0-m3-findings.md`)
 
-- Deep recursion in the shell looked like silent garbage because stacks have no guard pages.
+- Deep recursion in the shell looked like silent garbage because stacks had no guard (now a guard pattern, checked
+  at task switches and system calls).
 - The 68020 allows odd-address word/long access, so a "crash test" must use `illegal`.
 - Relocation tables must skip debug sections.
 - Masking all interrupts for a PIO sector made the serial receive interrupt lose characters; mask levels 1-2 only.
