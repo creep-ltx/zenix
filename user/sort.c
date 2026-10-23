@@ -52,7 +52,7 @@ int main(int argc, char **argv)
     int nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {
         int fd = 0;
-        if (nfiles) { fd = sys_open(argv[i + f], O_RDONLY); if (fd < 0) { fprintf(2, "sort: %s: %s\n", argv[i + f], zwhy("cannot open")); rc = 2; continue; } }
+        if (nfiles && strcmp(argv[i + f], "-")) { fd = sys_open(argv[i + f], O_RDONLY); if (fd < 0) { fprintf(2, "sort: %s: %s\n", argv[i + f], zwhy("cannot open")); rc = 2; continue; } }
         struct rd r; rd_init(&r, fd);
         char *line = 0; u32 lc = 0;
         while (rd_getline(&r, &line, &lc) >= 0) {
@@ -61,7 +61,7 @@ int main(int argc, char **argv)
             n++;
         }
         free(line);
-        if (nfiles) sys_close(fd);
+        if (fd) sys_close(fd);
     }
     char **tmp = malloc((n ? n : 1) * sizeof(char *));
     if (!tmp) { fprintf(2, "sort: out of memory\n"); return 2; }

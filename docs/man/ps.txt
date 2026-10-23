@@ -30,7 +30,9 @@ EXAMPLE (the numbers will differ)
         ...
 
 NOTES
-    Zenix has room for 16 processes in all, so ps shows at most 16 lines.
+    Zenix has room for 32 processes in all (a login and a shell on each of
+    the ten consoles, the servers and the commands they run), so ps shows
+    at most 32 lines.
     The idle process (pid 0) is not listed.
 
 SEE ALSO

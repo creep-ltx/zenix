@@ -92,7 +92,7 @@ void panic(const char *why)
     panic_printing = 0;
     serial_flush();             /* TX ring won't drain with ints off */
     if (gfx_up() && !panic_noscreen)
-        gfx_panic();            /* the bar turns red, the text stays */
+        gfx_panic();            /* the background turns dark red, the text stays */
     else
         diag_halt(diag_colour); /* no display: the stage colour over red */
     for (;;)
@@ -137,10 +137,48 @@ void irq5_c(void)
     serial_rx_isr();
 }
 
+/* Vectors 24-31 without a handler of their own (start.S irq_other_entry): a spurious interrupt (24), a level 1, 4 or
+ * 6 request although none of their sources is enabled, or the NMI (31). A Paula level is switched off in INTENA so a
+ * stuck source cannot keep interrupting (its INTREQ bits are left alone: the floppy and sound drivers poll them),
+ * level 6 also reads CIA-B's ICR; then back to whatever ran, which is not touched. kwork logs each vector once (an
+ * interrupt only takes note, audit B4). */
+static volatile u8 irq_other_seen;      /* bit v - 24 */
+
+void irq_other_c(u32 fv)
+{
+    u32 vec = (fv & 0xFFF) >> 2;
+    if (vec < 24 || vec > 31)
+        return;
+    if (vec == 25)
+        INTENA = 0x0007;                /* TBE, DSKBLK, SOFT */
+    else if (vec == 28)
+        INTENA = 0x0780;                /* AUD0-3 */
+    else if (vec == 30) {
+        INTENA = 0x2000;                /* EXTER: CIA-B and the expansion bus's INT6 */
+        (void)CIAB(CIA_ICR);
+    }
+    irq_other_seen |= (u8)(1u << (vec - 24));
+    kwork_pending = 1;
+}
+
+static void irq_other_report(void)
+{
+    static u8 told;
+    u8 news = irq_other_seen & (u8)~told;
+    if (!news)
+        return;
+    told |= news;
+    for (u32 v = 24; v <= 31; v++)
+        if (news & (1u << (v - 24)))
+            kprintf("irq: unexpected %s (vector %u), ignored%s\n",
+                    v == 24 ? "spurious interrupt" : v == 31 ? "NMI" : "interrupt", v,
+                    (v == 25 || v == 28 || v == 30) ? "; its level is switched off" : "");
+}
+
 /* ---- deferred input work (audit B4/B5) ----
  * The keyboard and serial interrupts only queue raw codes and bytes (kbd.c, serial.c) and set kwork_pending; the
- * tick sets it for key repeat and once a second for the bar. kwork() does the real work - keymap, tty line
- * discipline and echo, Ctrl-C/Ctrl-Z, workspace switches, scrollback, the bar - in process context, with interrupts
+ * tick sets it for key repeat. kwork() does the real work - keymap, tty line discipline and echo, Ctrl-C/Ctrl-Z,
+ * console switches, scrollback - in process context, with interrupts
  * enabled. It is called from four places only, each a point where no kernel code is half-way through anything:
  *   - the idle loop (pid 0, between schedule() calls),
  *   - the end of every system call (syscall_c, just before the return to user mode),
@@ -150,16 +188,15 @@ void irq5_c(void)
  *     check-then-block is pending, so a program printing a lot does not overflow the input rings.
  * An interrupt that cuts into kernel code (a system call, or kwork itself) never runs it, and `busy` keeps it from
  * being re-entered, so tty, terminal, heap and blitter state are only ever changed by one piece of code at a time.
- * This also closes the lost wakeup (B5): a reader that finds no line and then blocks (tty_read, SYS_wsreq) is kernel
- * code with none of the four points between its check and its block_io(), so kwork - the only producer of input and
- * of workspace requests - cannot run there; input that arrives meanwhile waits in the ring and its wake_io() comes
+ * This also closes the lost wakeup (B5): a reader that finds no line and then blocks (tty_read; init's proc_wait for a
+ * console that wants a login) is kernel code with none of the four points between its check and its block, so kwork -
+ * the only producer of input and of console requests - cannot run there; input that arrives meanwhile waits in the ring and its wake_io() comes
  * after the reader is P_IO. A new call of kwork() must keep it that way. */
 volatile int kwork_pending;
 
 void kwork(void)
 {
     static int busy;
-    static u32 bar_sec;
     if (busy)
         return;
     busy = 1;
@@ -167,10 +204,7 @@ void kwork(void)
         kwork_pending = 0;              /* cleared before the work: input queued during it asks for another round */
         serial_work();
         kbd_work();
-        if (ticks / 100 != bar_sec) {   /* the clock on the bar, once a second */
-            bar_sec = ticks / 100;
-            bar_draw();
-        }
+        irq_other_report();
     }
     busy = 0;
 }
@@ -189,8 +223,6 @@ void irq2_c(u32 sr)
         audio_tick();
         input_poll();
         fd_tick();
-        if (ticks % 100 == 0)
-            kwork_pending = 1;          /* the bar's clock */
     }
     if (!(sr & 0x2000)) {               /* we interrupted user mode: no kernel code is running */
         if (kwork_pending) {
@@ -206,7 +238,12 @@ void irq2_c(u32 sr)
     }
 }
 
-/* Time in E-clock ticks (709379 Hz on PAL, 715909 on NTSC), the CIA's own clock, read from hardware only: CIA-B
+/* The E-clock (crystal / 40) of this machine: 709379 Hz on PAL, 715909 on NTSC, from the Agnus/Alice id's NTSC bit
+ * (VPOSR bit 12: OCS $10, ECS $30, AGA $32/$33 are NTSC chips). It drives the 100 Hz tick (latch below) and is what
+ * hr_time() counts. */
+u32 eclock_hz = ECLOCK_PAL;
+
+/* Time in E-clock ticks (eclock_hz: 709379 Hz on PAL, 715909 on NTSC), the CIA's own clock, read from hardware only: CIA-B
  * timer A counts E-clock pulses down from 0xFFFF, timer B counts timer A's underflows (CRB INMODE 10), so the two
  * are one free-running 32-bit counter (wraps after about 1.7 hours). It does not depend on the tick interrupt
  * being taken, so it never reads early (the old form, ticks * 7095 + timer A's position, read about 10 ms low
@@ -231,6 +268,8 @@ static void vectors_init(void)
 {
     for (int i = 0; i < 256; i++)
         vector_table[i] = (u32)exc_common;
+    for (int i = 24; i <= 31; i++)
+        vector_table[i] = (u32)irq_other_entry;     /* spurious, levels 1-7: logged once and returned from */
     vector_table[26] = (u32)irq2_entry;     /* level 2: CIA-A tick */
     vector_table[27] = (u32)irq3_entry;     /* level 3: vertical blank */
     vector_table[29] = (u32)irq5_entry;     /* level 5: serial receive */
@@ -238,9 +277,11 @@ static void vectors_init(void)
     set_vbr(vector_table);
 }
 
-static void timer_init(void)
+/* CIA-B timers A and B chained as the free-running E-clock counter behind hr_time(): started early in kmain, because
+ * gfx_init times its frame measurement with it */
+static void eclock_init(void)
 {
-    /* CIA-B timers A and B chained as the free-running E-clock counter behind hr_time() */
+    eclock_hz = (VPOSR & 0x1000) ? ECLOCK_NTSC : ECLOCK_PAL;
     CIAB(CIA_CRA) = 0x00;
     CIAB(CIA_CRB) = 0x00;
     CIAB(CIA_ICR) = 0x7F;               /* no CIA-B interrupts */
@@ -251,12 +292,18 @@ static void timer_init(void)
     CIAB(CIA_TBHI) = 0xFF;
     CIAB(CIA_CRB) = 0x51;               /* timer B: count timer A underflows, continuous, force load, start */
     CIAB(CIA_CRA) = 0x11;               /* timer A: E-clock, continuous, force load, start */
+}
 
+/* the 100 Hz tick: CIA-A timer A. Its period is latch + 1 E-clock counts: the latch nearest to eclock_hz / 100 */
+static void timer_init(void)
+{
+    u32 latch = (eclock_hz + 50) / 100 - 1;     /* 7093 PAL (99.997 Hz), 7158 NTSC (100.001 Hz) */
+    kprintf("clock: E-clock %u Hz (%s), tick latch %u\n", eclock_hz, eclock_hz == ECLOCK_NTSC ? "NTSC" : "PAL", latch);
     CIAA(CIA_CRA) = 0x00;
     CIAA(CIA_ICR) = 0x7F;
     (void)CIAA(CIA_ICR);
-    CIAA(CIA_TALO) = CIA_TICKS_100HZ & 0xFF;
-    CIAA(CIA_TAHI) = CIA_TICKS_100HZ >> 8;
+    CIAA(CIA_TALO) = (u8)(latch & 0xFF);
+    CIAA(CIA_TAHI) = (u8)(latch >> 8);
     CIAA(CIA_ICR) = 0x81;               /* timer A interrupt only */
     INTREQ = INTF_PORTS;
     INTENA = INTF_SETCLR | INTF_INTEN | INTF_PORTS | INTF_RBF;
@@ -336,9 +383,10 @@ void kmain(struct bootinfo *bi)
     cache_enable((bi->attn & 0x88) != 0);       /* 68040 or 68060 */
     kprintf("cache: instruction cache on (data cache off: no MMU to keep DMA coherent)\n");
     diag_stage(9, DIAG_WHITE);
+    eclock_init();                              /* hr_time() from here on (gfx_init measures the frame with it) */
     if (font_ok && gfx_init() == 0) {
         klog_to_screen();                       /* the boot messages so far, then the rest as they come */
-        kprintf("display: 640x256, 1 bitplane, Copper split bar + text, ROM Topaz 8\n");
+        kprintf("display: 640x%d, 1 bitplane, %dx%d text, ROM Topaz 8\n", trows * 8, COLS, trows);
     } else {
         diag_stage(0, DIAG_GREY);
         kprintf("display: not available (%s), serial only\n",
@@ -370,7 +418,6 @@ void kmain(struct bootinfo *bi)
     diag_stage(DIAG_BOOTED, 0);
     timer_init();
     ints_on();
-    bar_draw();
     for (;;) {
         proc_reap_orphans();
         kwork();                /* queued input first: it may wake a reader */

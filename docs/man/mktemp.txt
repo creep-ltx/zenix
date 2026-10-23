@@ -18,6 +18,8 @@ NOTES
     The random characters come from the fast E-clock timer mixed with the
     time and the process id: hard to guess, but not cryptographic. Safety
     does not depend on it: the creation is exclusive.
+    A name that is already taken (EEXIST) is replaced by another random
+    one.
 
 EXIT STATUS
     0, 1 if the file cannot be created, 2 for a wrong template or option.

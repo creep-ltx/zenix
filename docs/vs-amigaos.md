@@ -35,7 +35,7 @@ AmigaOS.
 | I/O model | Packets/IORequests to devices; ReadArgs templates; `Wait()` on signals | Everything is a file descriptor: `read/write` on files, ttys, pipes |
 | Pipes | Not a core concept (`PIPE:` handler) | Kernel pipes, first-class, `|` in the shell |
 | Libraries | Shared libraries opened at run time with a jump table (`OpenLibrary`) | None: static linking, a tiny libc per program; shared libs left open in the file format |
-| GUI | Intuition, windows, screens, gadgets, ReAction/MUI | None yet: text terminal, workspaces and a bar; display server planned |
+| GUI | Intuition, windows, screens, gadgets, ReAction/MUI | None yet: ten text consoles (Amiga+F1..F10); display server planned |
 | Drivers/devices | `.device` and `.library` files, loaded on demand, resident modules in ROM | Built-in IDE, serial, keyboard drivers; more drivers planned as servers |
 | CPU | 68000 and up | 68020 and up (68000 refused: not a target) |
 | Real hardware | Decades of it | **Only FS-UAE so far**; not yet on a real Amiga |

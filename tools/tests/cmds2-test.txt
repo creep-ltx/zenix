@@ -23,3 +23,5 @@ send echo after-watch\r
 sleep 3
 send tac /etc/group | head -n 1; rev /etc/group | head -n 1; printf '%s\\n' x y | paste -s -d+\r
 sleep 3
+send sh /tests/batch-e.sh > /tmp/be.out 2>&1; sync; echo finished-be\r
+sleep 240

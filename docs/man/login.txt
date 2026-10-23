@@ -1,31 +1,35 @@
 LOGIN(1)	Zenix manual
 
 NAME
-    login - start a session
+    login - log in on a console
 
 SYNOPSIS
     login [-f] [user]
 
 DESCRIPTION
-    init runs login whenever no session is open. login asks for a user name
-    and a password (typing is not echoed), checks them against /etc/passwd,
-    sets USER, LOGNAME, HOME, SHELL and PATH, goes to the home directory and
-    runs the user's shell as that user. When the shell ends, login ends and
-    init starts it again.
+    init runs login on every console that is in use (see init(8)): on
+    console 1 at boot, on another console the first time it is shown
+    (Amiga+F2 .. Amiga+F10), and again on a console whose login ended.
+    login asks for a user name and a password (typing is not echoed),
+    checks them against /etc/passwd, sets USER, LOGNAME, HOME, SHELL and
+    PATH, goes to the home directory and runs the user's shell as that user.
+    When the shell ends, login ends and init starts it again.
 
     A user whose password field is empty is not asked for a password. With -f
-    (or a user named in /etc/autologin) the password is not asked at all; the
-    images that Zenix ships contain /etc/autologin with "root", so they start
-    straight in a root shell. Remove that file to get a login prompt. The
-    shipped root, user and guest accounts have no password: while root has
-    none, an automatic login prints a one-line warning. Set passwords with
-    passwd(1) and remove /etc/autologin before trusting the system.
+    the password is not asked at all. On console 1 only, a user named in
+    /etc/autologin is logged in without asking; the images that Zenix ships
+    contain /etc/autologin with "root", so console 1 starts straight in a
+    root shell while the other consoles ask. Remove that file to get a login
+    prompt on console 1 too. The shipped root, user and guest accounts have
+    no password: while root has none, an automatic login prints a one-line
+    warning. Set passwords with passwd(1) and remove /etc/autologin before
+    trusting the system.
 
-    There is one session at a time: workspace shells (Amiga+Return) run as the
-    user who is logged in. The environment of the session is what new
-    workspace shells start with. While nobody is logged in (at the login
-    prompt, after a logout) Amiga+Return opens no shell; the workspace says
-    "Nobody is logged in: log in first".
+    Every console has its own login, so several users (or one user several
+    times) can be logged in at once, one on each console. Each session
+    costs about 200 KB (login, the shell and its work area): a machine with
+    only 1 MB of chip RAM and no fast RAM has room for one, and a login on
+    a second console then says "login: cannot start /bin/sh: out of memory".
 
 FILES
     /etc/passwd   name:hash:uid:gid:comment:home:shell
@@ -33,9 +37,11 @@ FILES
     /etc/autologin
 
 NOTES
-    Five wrong tries end the program (init starts it again). With no MMU
-    any program can still read any memory, so login is accounting and
-    protection against honest mistakes, not a security boundary.
+    Five wrong tries end the program (init starts it again). login knows
+    console 1 by its standard input (fstat of a console gives its number).
+    With no MMU any program can still read any memory, so login is
+    accounting and protection against honest mistakes, not a security
+    boundary.
 
 SEE ALSO
-    su(1), passwd(1), id(1)
+    init(8), su(1), passwd(1), id(1)

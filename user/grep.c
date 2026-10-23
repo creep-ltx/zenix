@@ -3,7 +3,7 @@
 /* grep [-ivncloqhHrEFwxs] [-A N] [-B N] [-C N] [-e PAT] PATTERN [file...]
  * Patterns are POSIX extended regular expressions (-F: fixed strings). */
 static int o_i, o_v, o_n, o_c, o_l, o_L, o_o, o_q, o_h, o_H, o_r, o_F, o_w, o_x, o_s, ctx_a, ctx_b;
-static void *re; static const char *fixed; static int rc_found;
+static void *re; static const char *fixed; static int rc_found, rc_err;
 static int multi;
 
 static int word_edge(const char *s, int a, int b) { return (a == 0 || !isalnum((unsigned char)s[a - 1])) && !isalnum((unsigned char)s[b]) ; }
@@ -40,8 +40,9 @@ static int grep_fd(int fd, const char *name)
 {
     struct rd r; rd_init(&r, fd);
     char *line = 0; u32 cap = 0; int ln = 0, count = 0, after = 0;
-    char *before[16]; int nb = 0, bhead = 0, bln[16];
-    for (int k = 0; k < 16; k++) before[k] = 0;
+    int bsz = ctx_b ? ctx_b : 1;                       /* the -B lines: a ring as long as asked for */
+    char **before = xmalloc((u32)bsz * sizeof(char *)); int nb = 0, bhead = 0, *bln = xmalloc((u32)bsz * sizeof(int));
+    for (int k = 0; k < bsz; k++) before[k] = 0;
     int len;
     while ((len = rd_getline(&r, &line, &cap)) >= 0) {
         ln++;
@@ -49,10 +50,10 @@ static int grep_fd(int fd, const char *name)
         if (o_v) m = !m;
         if (m) {
             count++; rc_found = 1;
-            if (o_q) return 1;
+            if (o_q) { for (int k = 0; k < bsz; k++) free(before[k]); free(before); free(bln); free(line); return 1; }
             if (o_l || o_L) break;
             if (!o_c) {
-                if (nb) { for (int k = 0; k < nb; k++) { int idx = (bhead - nb + k + 32) % 16; emit(name, bln[idx], '-', before[idx]); } nb = 0; }
+                if (nb) { for (int k = 0; k < nb; k++) { int idx = (bhead - nb + k + bsz) % bsz; emit(name, bln[idx], '-', before[idx]); } nb = 0; }
                 if (o_o && !o_v) {
                     int from = ms; const char *p = line;
                     for (;;) { if (multi && !o_h) { oputs(name); oputc(':'); } if (o_n) oprintf("%d:", ln); oputn(p + from, (u32)(me - from)); oputc('\n');
@@ -62,12 +63,14 @@ static int grep_fd(int fd, const char *name)
             }
         } else if (!o_c) {
             if (after > 0) { emit(name, ln, '-', line); after--; }
-            else if (ctx_b) { int idx = bhead; if (before[idx]) free(before[idx]); if (!(before[idx] = strdup(line))) { fprintf(2, "grep: out of memory\n"); _zexit(2); } bln[idx] = ln; bhead = (bhead + 1) % 16; if (nb < ctx_b && nb < 16) nb++; }
+            else if (ctx_b) { int idx = bhead; if (before[idx]) free(before[idx]); if (!(before[idx] = strdup(line))) { fprintf(2, "grep: out of memory\n"); _zexit(2); } bln[idx] = ln; bhead = (bhead + 1) % bsz; if (nb < ctx_b) nb++; }
         }
     }
     if (o_c) { if (multi && !o_h) { oputs(name); oputc(':'); } oprintf("%d\n", count); }
     if (o_l && count) { oputs(name); oputc('\n'); }
     if (o_L && !count) { oputs(name); oputc('\n'); }
+    for (int k = 0; k < bsz; k++) free(before[k]);
+    free(before); free(bln);
     free(line);
     return count != 0;
 }
@@ -75,21 +78,22 @@ static int grep_fd(int fd, const char *name)
 static void grep_path(const char *path, int top)
 {
     struct ustat st;
-    if (sys_stat(path, &st) < 0) { if (!o_s) fprintf(2, "grep: %s: not found\n", path); return; }
+    if (path[0] == '-' && !path[1] && top) { grep_fd(0, "(standard input)"); return; }     /* "-": standard input */
+    if (sys_stat(path, &st) < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("no such file or directory")); rc_err = 1; return; }
     if ((st.mode & S_IFMT) == S_IFDIR) {
-        if (!o_r) { if (!o_s) fprintf(2, "grep: %s: is a directory\n", path); return; }
+        if (!o_r) { if (!o_s) fprintf(2, "grep: %s: is a directory\n", path); rc_err = 1; return; }
         char **names; int n = dir_list(path, &names);         /* heap, not stack: one level per directory */
-        if (n < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); return; }
+        if (n < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); rc_err = 1; return; }
         for (int i = 0; i < n; i++) {
             char *c = path_join(path, names[i]);
-            if (c) grep_path(c, 0); else if (!o_s) fprintf(2, "grep: %s/%s: %s\n", path, names[i], zwhy("cannot open"));
+            if (c) grep_path(c, 0); else { if (!o_s) fprintf(2, "grep: %s/%s: %s\n", path, names[i], zwhy("cannot open")); rc_err = 1; }
             free(c);
         }
         dir_free(names, n);
         return;
     }
     int fd = sys_open(path, O_RDONLY);
-    if (fd < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); return; }
+    if (fd < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); rc_err = 1; return; }
     grep_fd(fd, path); sys_close(fd);
     (void)top;
 }
@@ -119,12 +123,11 @@ int main(int argc, char **argv)
         }
     }
     if (!pat) { if (i >= argc) { fprintf(2, "usage: grep [options] PATTERN [file...]\n"); return 2; } pat = argv[i++]; }
-    if (ctx_b > 16) ctx_b = 16;
     if (o_F) fixed = pat;
     else { re = re_comp(pat, (o_i ? RE_ICASE : 0) | RE_LONGEST); if (!re) { fprintf(2, "grep: bad pattern %s\n", pat); return 2; } }
     int nfiles = argc - i;
     multi = nfiles > 1 || o_r || o_H;
     if (!nfiles) { if (o_r) grep_path(".", 1); else grep_fd(0, "(standard input)"); }
     else for (; i < argc; i++) grep_path(argv[i], 1);
-    return rc_found ? 0 : 1;
+    return rc_err && !(o_q && rc_found) ? 2 : rc_found ? 0 : 1;     /* as GNU grep: trouble is 2, unless -q found a match */
 }

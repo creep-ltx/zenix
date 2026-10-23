@@ -14,13 +14,14 @@ The documentation must keep saying this.
 
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a
 system process, cannot set the clock, cannot talk to the filesystem or disk server directly (the servers answer only
-the kernel and root; the names `fs`, `fs.*` and `disk` are reserved for root), cannot get a shell with Amiga+Return
-when nobody is logged in, and `su`, `tar x`, `find -delete`, here-documents and `mktemp` do not hand one user's
+the kernel and root; the names `fs`, `fs.*` and `disk` are reserved for root), cannot open another user's console
+(`/dev/ttyN`: root, or the console one is on), and `su`, `tar x`, `find -delete`, here-documents and `mktemp` do not hand one user's
 files or environment to another (architecture.md section 14). What they cannot cover: a program written to cheat
 can still overwrite a message after the kernel stamped it, or any memory at all.
 
 **The shipped images are not locked.** They come with root logged in automatically and no passwords: root, user
-and guest have empty passwords and `/etc/autologin` names root (the tests rely on it). `login` prints a one-line
+and guest have empty passwords and `/etc/autologin` names root, which logs root in on console 1 (the tests rely on
+it; the other consoles ask for a name). `login` prints a one-line
 warning while this is so. Set the passwords with `passwd` and remove `/etc/autologin` before trusting the system.
 
 A second consequence: **servers are trusted code.** A hung filesystem server blocks every client waiting on it.
@@ -38,33 +39,48 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   partitions, GPT, the 50 MHz high-speed mode, eMMC. Until then: RAM-disk root from the floppy.
 - Signals and handlers, process groups, `/proc`; supplementary groups; a shadow password file (`/etc/passwd` is
   world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on
-  hardware); one login session at a time (workspaces are not separate sessions); user and group ids are 16 bits.
+  hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
 - A graphical programs API, mouse, sound, network, USB, floppy driver, RTG.
-- Display server (the terminal and workspaces are inside the kernel), index server for `locate`/`fzf`.
+- Display server (the terminal and the consoles are inside the kernel; workspaces and a bar come with the desktop),
+  index server for `locate`/`fzf`.
 - ZenixFS; multi-filesystem VFS; ext2 journal (an ext3 volume mounts read-only, ext4 is refused); moving directories between parents; triple-indirect blocks; writing ext2 files over 4 GB.
 - Scheduler priorities; kernel is single-CPU by design.
 - 68000 support (not a target).
 
 ## Hard numbers worth knowing
 
-- 16 processes, 16 message ports, 64 open files, 16 fds per process, 8 extra memory regions per process,
-  1 KB environment, argv of at most 16 arguments / 512 bytes, paths of at most 63 bytes (system calls copy into
-  fixed buffers), pipes of 2 KB, 9 workspaces, 80 columns x 31 text rows, 200 scrollback lines.
+- 32 processes, 16 message ports, 64 open files, 16 fds per process, 8 extra memory regions per process,
+  1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
+  at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
+  -ENAMETOOLONG beyond, never cut), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
+  NTSC), 200 scrollback lines per console, a cooked tty line of 255 characters (the bell for more).
+- The shell: no fixed count of arguments, glob matches, words, pipeline stages, `for` items or positional
+  parameters (they grow in its arena, which is an eighth of free memory, 64-256 KB: "out of memory" ends a script
+  that needs more); a word or an expanded here-document of at most 4095 characters (longer is an error, status 1);
+  at most 8 here-documents on one line, 16 nested alias expansions, 64 `local` variables in the running functions,
+  128 variables, 48 aliases and 48 functions, 200 history lines (a recalled line is cut to the 478 characters the
+  editor holds, with the bell).
 - Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
   Makefile's `STACK_*`, written into each program's header). No guard below a stack. Measured with `-fstack-usage`
   (2026-10-23): the largest single frames are `mkfs.ext2` main 8.5 KB, `man` 6.1 KB, miniz's Huffman table builder
   5.6 KB (gzip), `fsck.ext2` main 5.4 KB; the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
   about 1430).
+- A login session (login, the shell and its work area) needs about 200 KB: a machine with 1 MB of chip RAM and no
+  fast RAM has room for one; a second console's login says "cannot start /bin/sh: out of memory" (the matrix checks it).
 - Memory per process: at most 8 extra regions at a time (`SYS_memalloc`), each at most 64 MB. `malloc` keeps blocks of
   up to 32 KB in a few growing chunks (32 KB, 64 KB, ... 512 KB each) and gives every bigger block a region of its
   own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with two chunks
   in use, gets 6); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
 - Paths: at most 63 bytes in a system call; the directory tools report a longer joined path instead of cutting it.
-- Timer tick 100 Hz (PAL E-clock 709,379 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers
-  chained, an E-clock count that wraps after about 1.7 hours.
+- Timer tick 100 Hz to within the E-clock's resolution (latch 7093 on PAL, 709,379 Hz: 99.997 Hz; 7158 on NTSC,
+  715,909 Hz: 100.001 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers chained, an E-clock count
+  that wraps after about 1.7 hours (`bench` converts it with the PAL rate).
+- Error numbers: the kernel and the servers return negative errno values (architecture.md section 7). Still a bare
+  -1: `SYS_mountinfo` past the end, `ipc_call`/`ipc_recv` on a bad port, `port_create`/`port_find`, the internal
+  block allocators of ext2.c. `zwhy` shows no text for -1 (EPERM, 1) for that reason: the caller's own words appear.
 - Input rings between the interrupts and `kwork`: 128 keyboard codes, 1024 serial bytes; a tty queue holds 1024
   bytes of typed input that no program has read yet. Anything dropped is counted on the kernel log.
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS

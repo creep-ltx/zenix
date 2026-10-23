@@ -27,13 +27,16 @@ static int gm(const char *p, const char *s, int icase)
 /* -exec: its buffers live in this function, not in visit(), which recurses once per directory level */
 static void __attribute__((noinline)) run_exec(const char *path)
 {
-    char *av[24]; int n = 0;
-    for (int i = 0; i < exec_n && n < 22; i++) av[n++] = !strcmp(exec_argv[i], "{}") ? (char *)path : exec_argv[i];
+    char **av = xmalloc((u32)(exec_n + 1) * sizeof(char *)); int n = 0;
+    for (int i = 0; i < exec_n; i++) av[n++] = !strcmp(exec_argv[i], "{}") ? (char *)path : exec_argv[i];
     av[n] = 0;
-    char prog[128]; if (strchr(av[0], '/')) strcpy(prog, av[0]); else { strcpy(prog, "/bin/"); strcat(prog, av[0]); }
+    char prog[160];
     oflush();
+    if (!path_find(av[0], prog, sizeof prog)) { fprintf(2, "find: %s: command not found\n", av[0]); rc = 1; free(av); return; }
     int pid = sys_spawn(prog, av, 0);
-    if (pid >= 0) sys_wait(pid);
+    if (pid < 0) { fprintf(2, "find: %s: %s\n", av[0], zwhy("cannot run")); rc = 1; }
+    else sys_wait(pid);                                     /* as GNU find: the command's own status does not change find's */
+    free(av);
 }
 static void visit(const char *path, const char *name, int depth, const struct ustat *st)
 {
@@ -65,9 +68,10 @@ static void visit(const char *path, const char *name, int depth, const struct us
 }
 int main(int argc, char **argv)
 {
-    int i = 1; char *paths[16]; int np = 0;
-    for (; i < argc && argv[i][0] != '-' && argv[i][0] != '!' && np < 16; i++) paths[np++] = argv[i];
-    if (!np) paths[np++] = ".";
+    int i = 1, np = 0; char **paths = argv + 1;
+    for (; i < argc && argv[i][0] != '-' && argv[i][0] != '!'; i++) np++;
+    static char *dot[] = { ".", 0 };
+    if (!np) { paths = dot; np = 1; }
     for (; i < argc; i++) {
         if (!strcmp(argv[i], "-name") && i + 1 < argc) p_name = argv[++i];
         else if (!strcmp(argv[i], "-iname") && i + 1 < argc) p_iname = argv[++i];
@@ -81,7 +85,7 @@ int main(int argc, char **argv)
     }
     for (int k = 0; k < np; k++) {
         struct ustat st;
-        if ((do_delete ? sys_lstat(paths[k], &st) : sys_stat(paths[k], &st)) < 0) { fprintf(2, "find: %s: not found\n", paths[k]); rc = 1; continue; }
+        if ((do_delete ? sys_lstat(paths[k], &st) : sys_stat(paths[k], &st)) < 0) { fprintf(2, "find: %s: %s\n", paths[k], zwhy("not found")); rc = 1; continue; }
         const char *nm = strrchr(paths[k], '/'); nm = nm && nm[1] ? nm + 1 : paths[k];
         visit(paths[k], nm, 0, &st);
     }

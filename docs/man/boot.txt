@@ -1,17 +1,18 @@
 BOOT(8)			Zenix manual
 
 NAME
-    boot - the session manager
+    boot - start init
 
 SYNOPSIS
     built into the kernel image; not run by hand
 
 DESCRIPTION
     Started by the kernel together with diskd and fsd. It waits (up to about
-    30 seconds) for the filesystem server's "fs" port, starts /bin/init, and
-    stays to open a shell on a new workspace whenever the user presses
-    Amiga+Return. It needs this role because the idle process cannot wait
-    for messages.
+    30 seconds) for the filesystem server's "fs" port, starts /bin/init on
+    console 1 and waits for it. Should init ever end, boot says so ("boot:
+    /bin/init ended (status N), starting it again") and starts it again a
+    second later. It exists because the idle process cannot wait for
+    messages.
 
 SEE ALSO
     init(8), diskd(8)

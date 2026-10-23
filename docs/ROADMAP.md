@@ -35,14 +35,16 @@ built on the Amiga's own hardware (blitter, Copper, planar screens). Not Linux, 
 
 Done and verified in FS-UAE (not yet on real hardware): kernel with relocation, user mode, messages, memory
 manager, scheduler; disk server (RDB partitions), filesystem server (ext2, read and write, e2fsck-clean), tty,
-pipes, shell and 20 commands; hires display with a Copper-split bar, workspaces, Amiga keyboard; a setup matrix
+pipes, shell and 20 commands; hires text display, Amiga keyboard; a setup matrix
 of 13 emulated A1200 variants; a benchmark using the CIA's E-clock.
 
 ## The text console behaves like Unix/Linux (owner's decision, 2026-10-23)
 The text console has ten plain virtual consoles, switched with Amiga+F1..F10 (plain F-keys stay free for programs), each
 with its own `login` prompt, like Linux's Alt+F1..F6. No bar, no Amiga+Return, no workspaces in the text console: those
 are desktop features and come back in phase 5 with the display server. Done as a cleanup in audit batch E (it removes a
-wrong turn; it also removes the root shell that Amiga+Return gave at the login prompt).
+wrong turn; it also removes the root shell that Amiga+Return gave at the login prompt). **Done** (2026-10-23, branch
+`fix-e`, verified in FS-UAE): `/dev/tty1`..`/dev/tty10`, a login on each (started when a console is first shown, as
+Linux's autovt), the whole screen text (32 rows PAL, 25 NTSC), the serial hook 0x1d + digit; architecture.md section 11.
 
 ## Feature halt (2026-10-22)
 The owner halted all new features on 2026-10-22. Until the owner lifts it, work is only the fixes listed in
@@ -54,6 +56,10 @@ verified in FS-UAE (`tools/memtest.sh`, keyboard, job-control and matrix tests);
 **Batch C (filesystem and disk safety) is done** - C1-C10, 2026-10-23 on branch `fix-c`: verified on the host (`tools/ext2-host-test.sh`,
 `tools/disk-host-test.sh`, `make -C zenixfs test`) and in FS-UAE (disk, mount, ZenixFS, ZenixFS-root, command, user and matrix tests);
 not yet on the A1200.
+**Batch E (correctness in daily use) is done** - 2026-10-23 on branch `fix-e`: the Linux-style consoles, the shell's
+leaks and silent caps, the command fixes, the kernel items and errno numbers; verified in FS-UAE (users, keyboard,
+matrix, command, job, log, diagnostics, memory, mount, ZenixFS and ZenixFS-root tests) and on the host; what is left
+is listed at the end of the audit; not yet on the A1200.
 
 ## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 
@@ -85,8 +91,8 @@ so this uses `zenix-ram.adf` until an SD driver exists.)
 directories, self-healing; needs the multi-filesystem VFS (mount table, several filesystem servers). ext2 stays
 for Linux compatibility.
 
-**Phase 5 - The desktop.** (The workspaces and the i3-style bar are desktop features: today the kernel console carries them as scaffolding
-so several terminals can be tested; they move into the display server here. The terminal itself never depends on them.) Move the display out of the kernel into a display server with a drawing API
+**Phase 5 - The desktop.** (The workspaces and the i3-style bar are desktop features: they were removed from the kernel
+console in audit batch E and come back here, in the display server. The terminal itself never depends on them.) Move the display out of the kernel into a display server with a drawing API
 (planar, blitter and Copper); a client library; a terminal program as the first client; the workspace bar;
 Ahiru-style file view; mouse. Index server (FuzzyFind) for `locate` / `fzf`.
 

@@ -11,11 +11,11 @@ int main(int argc, char **argv)
     if (i >= argc) { fprintf(2, "usage: %s [-lx] name\n", me); return 2; }
     int self = sys_getpid(); struct uproc p; int parent = -1;
     if (sys_procinfo(0, &p) == 0) { }
-    for (u32 k = 0; k < 16; k++) {
+    for (u32 k = 0; k < 256; k++) {      /* until procinfo says the table ends */
         if (sys_procinfo(k, &p) < 0 || p.state == 0) continue;
         if ((int)p.pid == self) parent = (int)p.ppid;
     }
-    for (u32 k = 0; k < 16; k++) {
+    for (u32 k = 0; k < 256; k++) {      /* until procinfo says the table ends */
         if (sys_procinfo(k, &p) < 0 || p.state == 0 || p.pid == 0 || (int)p.pid == self || (int)p.pid == parent || p.state == 5) continue;
         if (exact ? strcmp(p.name, argv[i]) : !strstr(p.name, argv[i])) continue;
         found++;

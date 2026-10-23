@@ -85,7 +85,7 @@ static int open_ref(u32 ino)
         if (opens[i].count && opens[i].ino == ino) { opens[i].count++; return 0; }
         if (!opens[i].count && fr < 0) fr = i;
     }
-    if (fr < 0) return -23;                           /* ENFILE: should not happen (the kernel has fewer files) */
+    if (fr < 0) return -ENFILE;                       /* should not happen (the kernel has fewer files) */
     opens[fr].ino = ino; opens[fr].count = 1;
     return 0;
 }
@@ -145,30 +145,37 @@ static int clear_setid(struct inode *in)
     return ext2_iput(in);
 }
 
+/* One request. The result is >= 0, or a negative errno (kernel/errno.h) - the same numbers the ZenixFS server returns
+ * for the same cases (audit E). A permission failure becomes -EACCES in handle(). */
 static int handle1(struct umsg *m)
 {
     struct inode in, dir, dir2;
     char name[64], name2[64];
+    int r;
     switch (m->type) {
     case FS_OPEN: {
         const char *path = (const char *)m->a[0];
         u32 flags = m->a[2];
         int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
         if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {   /* exclusive: the name must not exist, not even as a link */
-            if (!ext2_namei_ex(path, m->a[1], &in, 0, 0)) return -17;
-            if (ext2_denied) return -1;
+            if (!ext2_namei_ex(path, m->a[1], &in, 0, 0)) return -EEXIST;
+            if (ext2_denied) return -EACCES;
         }
-        if (ext2_namei(path, m->a[1], &in, 0)) {
-            if (ext2_denied || !(flags & O_CREAT)) return -1;
-            if (ext2_readonly) return -30;
-            if (parent(path, m->a[1], &dir, name) || !dir_may(&dir) || ext2_create(&dir, name, &in))
-                return -1;
+        if ((r = ext2_namei(path, m->a[1], &in, 0))) {
+            if (ext2_denied || !(flags & O_CREAT) || r != -ENOENT) return r;
+            if (!ext2_namei_ex(path, m->a[1], &in, 0, 0))
+                return -ENOENT;                     /* a symbolic link to nothing: not a second entry of that name */
+            if (ext2_readonly) return -EROFS;
+            if ((r = parent(path, m->a[1], &dir, name))) return r;
+            if (!dir_may(&dir)) return -EACCES;
+            if ((r = ext2_create(&dir, name, &in))) return r;
         } else {
-            if (!ext2_access(&in, fsp_open_want(flags))) return -1;
+            if (!ext2_access(&in, fsp_open_want(flags))) return -EACCES;
             if (writing) {
-                if (ext2_readonly) return -30;
-                if (!S_ISREG(in.mode)) return -1;
-                if ((flags & O_TRUNC) && (clear_setid(&in) || ext2_truncate(&in))) return -1;
+                if (ext2_readonly) return -EROFS;
+                if (S_ISDIR(in.mode)) return -EISDIR;
+                if (!S_ISREG(in.mode)) return -EACCES;
+                if ((flags & O_TRUNC) && ((r = clear_setid(&in)) || (r = ext2_truncate(&in)))) return r;
             }
         }
         int e = open_ref(in.ino);
@@ -177,24 +184,27 @@ static int handle1(struct umsg *m)
         return (int)in.ino;
     }
     case FS_READ:
-        if (ext2_iget(m->a[0], &in)) return -1;
+        if ((r = ext2_iget(m->a[0], &in))) return r;
+        if (S_ISDIR(in.mode)) return -EISDIR;
         return ext2_read(&in, m->a[1], (void *)m->a[2], m->a[3]);
     case FS_WRITE:
-        if (ext2_iget(m->a[0], &in)) return -1;
+        if ((r = ext2_iget(m->a[0], &in))) return r;
+        if (S_ISDIR(in.mode)) return -EISDIR;
         in.mode = (u16)fsp_write_clear(ext2_uid, in.uid, in.mode);    /* stored by ext2_write with the new size */
         return ext2_write(&in, m->a[1], (const void *)m->a[2], m->a[3]);
     case FS_STAT:
-        if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
+        if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
         fill_stat(&in, (struct ustat *)m->a[2]);
         return 0;
     case FS_FSTAT:
-        if (ext2_iget(m->a[0], &in)) return -1;
+        if ((r = ext2_iget(m->a[0], &in))) return r;
         fill_stat(&in, (struct ustat *)m->a[1]);
         return 0;
     case FS_READDIR: {
         u32 cookie = m->a[1];
-        if (ext2_iget(m->a[0], &in) || !S_ISDIR(in.mode)) return -1;
-        int r = ext2_readdir(&in, &cookie, (struct udirent *)m->a[2]);
+        if ((r = ext2_iget(m->a[0], &in))) return r;
+        if (!S_ISDIR(in.mode)) return -ENOTDIR;
+        r = ext2_readdir(&in, &cookie, (struct udirent *)m->a[2]);
         *(u32 *)m->a[3] = cookie;
         return r;
     }
@@ -206,34 +216,39 @@ static int handle1(struct umsg *m)
         open_unref(m->a[0]);
         return 0;
     case FS_SYNC:
-        return disk_flush() < 0 ? -5 : 0;             /* writes went straight to the disk; the drive's cache is left */
+        return disk_flush() < 0 ? -EIO : 0;           /* writes went straight to the disk; the drive's cache is left */
     case FS_CHMOD:
-        if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0) || !owner_only(&in)) return -1;
+        if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
+        if (!owner_only(&in)) return -EACCES;
         return ext2_chmod(in.ino, fsp_chmod_mode(ext2_uid, ext2_gid, in.gid, m->a[2]));
     case FS_CHOWN:
-        if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
-        if (ext2_enforce && !fsp_is_root(ext2_uid)) { ext2_denied = 1; return -1; }
+        if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
+        if (ext2_enforce && !fsp_is_root(ext2_uid)) { ext2_denied = 1; return -EACCES; }
         return ext2_chown(in.ino, m->a[2], m->a[3]);
     case FS_UTIMES: {
-        if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
+        if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
         int given = m->a[2] != FS_UTIME_NOW;
         if (ext2_enforce && !fsp_utimes_ok(ext2_uid, in.uid, given, fsp_access(ext2_uid, ext2_gid, in.mode, in.uid, in.gid, FSP_W)))
-            { deny(); return -1; }
+            { deny(); return -EACCES; }
         return ext2_utimes(in.ino, given ? m->a[2] : fs_time());
     }
     case FS_LSTAT:
-        if (ext2_namei_ex((const char *)m->a[0], m->a[1], &in, 0, 0)) return -1;
+        if ((r = ext2_namei_ex((const char *)m->a[0], m->a[1], &in, 0, 0))) return r;
         fill_stat(&in, (struct ustat *)m->a[2]);
         return 0;
     case FS_LINK:
-        if (ext2_namei((const char *)m->a[0], m->a[2], &in, 0) || S_ISDIR(in.mode)) return -1;
-        if (parent((const char *)m->a[1], m->a[2], &dir, name) || !dir_may(&dir)) return -1;
+        if ((r = ext2_namei((const char *)m->a[0], m->a[2], &in, 0))) return r;
+        if (S_ISDIR(in.mode)) return -EPERM;          /* no hard links to directories */
+        if ((r = parent((const char *)m->a[1], m->a[2], &dir, name))) return r;
+        if (!dir_may(&dir)) return -EACCES;
         return ext2_hardlink(&dir, name, in.ino);
     case FS_SYMLINK:
-        if (parent((const char *)m->a[1], m->a[2], &dir, name) || !dir_may(&dir)) return -1;
+        if ((r = parent((const char *)m->a[1], m->a[2], &dir, name))) return r;
+        if (!dir_may(&dir)) return -EACCES;
         return ext2_symlink(&dir, name, (const char *)m->a[0]);
     case FS_READLINK:
-        if (ext2_namei_ex((const char *)m->a[0], m->a[1], &in, 0, 0) || !S_ISLNK(in.mode)) return -1;
+        if ((r = ext2_namei_ex((const char *)m->a[0], m->a[1], &in, 0, 0))) return r;
+        if (!S_ISLNK(in.mode)) return -EINVAL;
         return ext2_readlink(&in, (char *)m->a[2], m->a[3]);
     case FS_ROOT: {
         struct fsinfo *fi = (struct fsinfo *)m->a[0];
@@ -245,24 +260,29 @@ static int handle1(struct umsg *m)
         quitting = 1;
         return 0;
     case FS_CHDIR:
-        if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0) || !S_ISDIR(in.mode) || !ext2_access(&in, 1)) return -1;
+        if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
+        if (!S_ISDIR(in.mode)) return -ENOTDIR;
+        if (!ext2_access(&in, 1)) return -EACCES;
         return (int)in.ino;
     case FS_MKDIR:
-        if (parent((const char *)m->a[0], m->a[1], &dir, name) || !dir_may(&dir)) return -1;
+        if ((r = parent((const char *)m->a[0], m->a[1], &dir, name))) return r == -EINVAL ? -EEXIST : r;   /* "." ".." exist */
+        if (!dir_may(&dir)) return -EACCES;
         return ext2_mkdir(&dir, name);
     case FS_UNLINK:
-        if (parent((const char *)m->a[0], m->a[1], &dir, name) || !dir_may(&dir) || !sticky_ok(&dir, name)) return -1;
+        if ((r = parent((const char *)m->a[0], m->a[1], &dir, name))) return r == -EINVAL ? -EISDIR : r;
+        if (!dir_may(&dir) || !sticky_ok(&dir, name)) return -EACCES;
         return ext2_unlink(&dir, name);
     case FS_RMDIR:
-        if (parent((const char *)m->a[0], m->a[1], &dir, name) || !dir_may(&dir) || !sticky_ok(&dir, name)) return -1;
+        if ((r = parent((const char *)m->a[0], m->a[1], &dir, name))) return r;
+        if (!dir_may(&dir) || !sticky_ok(&dir, name)) return -EACCES;
         return ext2_rmdir(&dir, name);
     case FS_RENAME:
-        if (parent((const char *)m->a[0], m->a[2], &dir, name) ||
-            parent((const char *)m->a[1], m->a[2], &dir2, name2) ||
-            !dir_may(&dir) || !dir_may(&dir2) || !sticky_ok(&dir, name) || !sticky_ok(&dir2, name2)) return -1;
+        if ((r = parent((const char *)m->a[0], m->a[2], &dir, name)) ||
+            (r = parent((const char *)m->a[1], m->a[2], &dir2, name2))) return r;
+        if (!dir_may(&dir) || !dir_may(&dir2) || !sticky_ok(&dir, name) || !sticky_ok(&dir2, name2)) return -EACCES;
         return ext2_rename(&dir, name, &dir2, name2);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 /* requests that change the volume: refused at once on a read-only mount (ext2.c also refuses every block write) */
@@ -277,12 +297,12 @@ static int changes(const struct umsg *m)
 
 static int handle(struct umsg *m)
 {
-    if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -13;     /* raw IPC from a user: inode numbers would bypass every check */
-    if (ext2_readonly && changes(m)) return -30;      /* EROFS */
+    if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -EACCES; /* raw IPC from a user: inode numbers would bypass every check */
+    if (ext2_readonly && changes(m)) return -EROFS;
     ext2_uid = m->uid; ext2_gid = m->gid; ext2_umask = m->umask;
     ext2_enforce = 1; ext2_denied = 0;
     int r = handle1(m);
-    return r < 0 && ext2_denied ? -13 : r;
+    return r < 0 && ext2_denied ? -EACCES : r;
 }
 
 /* fsd                      the root filesystem server (built into the kernel): finds the root device, port "fs"

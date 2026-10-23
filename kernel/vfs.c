@@ -62,7 +62,7 @@ int fd_install(struct proc *p, struct file *f)
             p->fd[i] = f;
             return i;
         }
-    return -1;
+    return -EMFILE;
 }
 
 static long pipe_read(struct file *f, void *buf, u32 n)
@@ -71,7 +71,7 @@ static long pipe_read(struct file *f, void *buf, u32 n)
     u8 *d = buf;
     for (;;) {
         if (current->killed)
-            return -1;
+            return -EINTR;
         if (p->count) {
             u32 got = 0;
             while (got < n && p->count) {
@@ -95,9 +95,9 @@ static long pipe_write(struct file *f, const void *buf, u32 n)
     u32 put = 0;
     while (put < n) {
         if (current->killed)
-            return -1;
+            return -EINTR;
         if (!p->readers)
-            return -1;                      /* broken pipe */
+            return -EPIPE;                  /* broken pipe */
         if (p->count < sizeof p->buf) {
             p->buf[p->wr] = s[put++];
             p->wr = (u16)((p->wr + 1) % sizeof p->buf);
@@ -119,7 +119,7 @@ long vfs_pipe(int fds[2])
         if (r) r->type = FT_NONE;
         if (w) w->type = FT_NONE;
         kfree(p);
-        return -1;
+        return p ? -ENFILE : -ENOMEM;
     }
     memset(p, 0, sizeof *p);
     p->readers = p->writers = 1;
@@ -131,7 +131,7 @@ long vfs_pipe(int fds[2])
         if (fds[1] >= 0) current->fd[fds[1]] = 0;
         file_close(r);
         file_close(w);
-        return -1;
+        return -EMFILE;
     }
     return 0;
 }
@@ -162,9 +162,9 @@ long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
     struct umsg m;                      /* on this process's kernel stack: the server reads it in place */
     struct mount *mt = &mnt[mi];
     if (current->pid == 0 || !mt->used)
-        return -1;
+        return -EINVAL;
     if (mt->port < 0 && (mt->port = port_find(mt->pname)) < 0)
-        return -1;
+        return -EIO;                    /* the filesystem server is gone */
     m.type = type;
     m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
     long r = ipc_kcall(mt->port, &m);
@@ -191,8 +191,9 @@ static u32 mount_root(int mi)
     return mnt[mi].root ? mnt[mi].root : 2;
 }
 
-#define PATHMAX 160
-/* out = PATH as an absolute, normalised path (from the text working directory CWD); 0, or -1 if too long */
+#define PATHMAX FS_PATHMAX
+/* out = PATH as an absolute, normalised path (from the text working directory CWD): the one normaliser, for routing,
+ * mount points and the working directory text. 0, or -ENAMETOOLONG if it would be longer than PATHMAX - 1 */
 static int path_abs(char *out, const char *cwd, const char *path)
 {
     int n = 0;
@@ -212,7 +213,7 @@ static int path_abs(char *out, const char *cwd, const char *path)
             while (n > 0 && out[n - 1] != '/') n--;
             if (n > 0) n--;
         } else {
-            if (n + 1 + len >= PATHMAX) return -1;
+            if (n + 1 + len >= PATHMAX) return -ENAMETOOLONG;
             out[n++] = '/';
             for (int i = 0; i < len; i++) out[n++] = p[i];
         }
@@ -224,12 +225,13 @@ static int path_abs(char *out, const char *cwd, const char *path)
 }
 
 /* which mount takes PATH; *rel = the path to give its server (in buf, PATHMAX bytes, or PATH itself), *cwd = the
- * working directory inode to give it. -1 when the path is too long. */
+ * working directory inode to give it. -ENAMETOOLONG when the path is too long. */
 static int route(const char *path, const char *cwdtext, u32 cwdino, char *buf, const char **rel, u32 *cwd)
 {
     if (nmnt <= 1) { *rel = path; *cwd = cwdino; return 0; }
     char tmp[PATHMAX];
-    if (path_abs(tmp, cwdtext, path)) return -1;
+    int e = path_abs(tmp, cwdtext, path);
+    if (e) return e;
     int best = 0, bl = 1;
     for (int i = 1; i < NMOUNT; i++) {
         if (!mnt[i].used) continue;
@@ -260,15 +262,15 @@ long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = route(path, parent ? parent->cwd : "/", parent ? parent->cwd_ino : 2, rb, &rel, &cwd);
     if (m < 0)
-        return -1;
+        return m;
     long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY | O_EXEC, (u32)&x->st);
     if (ino < 0)
-        return ino == -13 ? -13 : -1;
+        return ino;
     x->m = m;
     x->ino = ino;
     if (!S_ISREG(x->st.mode) || x->st.size > 256u * 1024) {
         fs_exec_close(x);
-        return -2;
+        return S_ISDIR(x->st.mode) ? -EISDIR : S_ISREG(x->st.mode) ? -EFBIG : -EACCES;
     }
     return 0;
 }
@@ -285,7 +287,7 @@ long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
     while (got < n) {
         long r = fs_call_on(x->m, FS_READ, (u32)x->ino, off + got, (u32)((u8 *)dst + got), n - got);
         if (r <= 0)
-            return -1;
+            return r < 0 ? r : -EIO;        /* shorter than its size said */
         got += (u32)r;
     }
     return 0;
@@ -297,19 +299,19 @@ long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *si
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = route(path, parent ? parent->cwd : "/", parent ? parent->cwd_ino : 2, rb, &rel, &cwd);
     if (m < 0)
-        return -1;
+        return m;
     long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY | O_EXEC, (u32)&st);
     if (ino < 0)
-        return ino == -13 ? -13 : -1;
+        return ino;
     struct exec_src x = { m, ino, st };
     if (!S_ISREG(st.mode) || st.size > 256u * 1024) {
         fs_exec_close(&x);
-        return -2;
+        return S_ISDIR(st.mode) ? -EISDIR : S_ISREG(st.mode) ? -EFBIG : -EACCES;
     }
     u8 *b = kmalloc(st.size ? st.size : 1);
     if (!b) {
         fs_exec_close(&x);
-        return -3;
+        return -ENOMEM;
     }
     u32 got = 0;
     while (got < st.size) {
@@ -317,7 +319,7 @@ long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *si
         if (r <= 0) {
             kfree(b);
             fs_exec_close(&x);
-            return -4;
+            return r < 0 ? r : -EIO;
         }
         got += (u32)r;
     }
@@ -328,18 +330,31 @@ long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *si
     return 0;
 }
 
-/* the few device files: /dev/tty (this process's terminal), /dev/null, /dev/zero */
+/* the few device files: /dev/tty (this process's controlling tty), /dev/console (console 1), /dev/tty1 .. /dev/tty10
+ * (the virtual consoles: root, or a process whose controlling tty it is - nobody reads another user's keys),
+ * /dev/null, /dev/zero */
 static long open_device(const char *path, int flags)
 {
-    int type = 0;
-    if (!strcmp_(path, "/dev/tty") || !strcmp_(path, "/dev/console")) type = FT_TTY;
+    int type = 0, con = 0;
+    if (!strcmp_(path, "/dev/tty")) { type = FT_TTY; con = tty_of(current); }
     else if (!strcmp_(path, "/dev/null")) type = FT_NULL;
     else if (!strcmp_(path, "/dev/zero")) type = FT_ZERO;
-    else return -2;
+    else {
+        if (!strcmp_(path, "/dev/console"))
+            con = 1;
+        else if (path[5] == 't' && path[6] == 't' && path[7] == 'y' && path[8] >= '1' && path[8] <= '9' &&
+                 (!path[9] || (path[8] == '1' && path[9] == '0' && !path[10])))
+            con = path[9] ? 10 : path[8] - '0';
+        else
+            return -ENODEV;                 /* not a device of ours: the filesystem's /dev */
+        type = FT_TTY;
+        if (current->uid != 0 && con != tty_of(current))
+            return -EACCES;                  /* another console: root only */
+    }
     struct file *f = file_new(type);
     if (!f)
-        return -1;
-    f->off = type == FT_TTY ? (u32)tty_of(current) : 0;
+        return -ENFILE;
+    f->off = (u32)con;
     f->flags = (u16)flags;
     f->mode = 020666;                       /* a character device */
     int fd = fd_install(current, f);
@@ -354,19 +369,19 @@ long vfs_open(const char *path, int flags)
     char rb[PATHMAX]; const char *rel; u32 cwd;
     if (path[0] == '/' && path[1] == 'd' && path[2] == 'e' && path[3] == 'v' && path[4] == '/') {
         long d = open_device(path, flags);
-        if (d != -2)
+        if (d != -ENODEV)
             return d;
     }
     int m = ROUTE(path, rb, rel, cwd);
     if (m < 0)
-        return -1;
+        return m;
     long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, (u32)flags, (u32)&st);
     if (ino < 0)
-        return ino == -13 || ino == -17 ? ino : -1;     /* permission denied; exists (O_CREAT|O_EXCL) */
+        return ino;                         /* the server's errno: -ENOENT, -EACCES, -EEXIST (O_CREAT|O_EXCL) ... */
     struct file *f = file_new(FT_INODE);
     if (!f) {
         fs_call_on(m, FS_CLOSE, (u32)ino, 0, 0, 0);
-        return -1;
+        return -ENFILE;
     }
     f->ino = (u32)ino;
     f->fs = (u8)m;
@@ -382,7 +397,7 @@ long vfs_stat(const char *path, struct ustat *st)
 {
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = ROUTE(path, rb, rel, cwd);
-    return m < 0 ? -1 : fs_call_on(m, FS_STAT, (u32)rel, cwd, (u32)st, 0);
+    return m < 0 ? m : fs_call_on(m, FS_STAT, (u32)rel, cwd, (u32)st, 0);
 }
 
 long vfs_fstat(struct file *f, struct ustat *st)
@@ -391,24 +406,29 @@ long vfs_fstat(struct file *f, struct ustat *st)
         memset(st, 0, sizeof *st);
         st->mode = 020666;
         st->links = 1;
+        if (f->type == FT_TTY)
+            st->ino = f->off;               /* a console's number (1..NCONS): the ustat has no device field */
         return 0;
     }
     if (f->type != FT_INODE)
-        return -1;
+        return -EINVAL;                     /* a pipe: no stat */
     return fs_call_on(f->fs, FS_FSTAT, f->ino, (u32)st, 0, 0);
 }
 
 long vfs_chdir(const char *path)
 {
-    char rb[PATHMAX]; const char *rel; u32 cwd;
+    char rb[PATHMAX], text[PATHMAX]; const char *rel; u32 cwd;
+    int e = path_abs(text, current->cwd, path);         /* the new working directory's text must fit: else refused */
+    if (e)
+        return e;
     int m = ROUTE(path, rb, rel, cwd);
     if (m < 0)
-        return -1;
+        return m;
     long ino = fs_call_on(m, FS_CHDIR, (u32)rel, cwd, 0, 0);
     if (ino < 0)
-        return ino == -13 ? -13 : -1;
+        return ino;
     current->cwd_ino = (u32)ino;
-    vfs_chdir_text(current->cwd, path);
+    strcpy_(current->cwd, text);
     return 0;
 }
 
@@ -419,14 +439,16 @@ long vfs_lseek(struct file *f, s32 off, u32 whence)
         np = off;
     else if (whence == 1)
         np = (s32)f->off + off;
-    else {
+    else if (whence == 2) {
         struct ustat st;
-        if (fs_call_on(f->fs, FS_FSTAT, f->ino, (u32)&st, 0, 0) < 0)
-            return -1;
+        long r = fs_call_on(f->fs, FS_FSTAT, f->ino, (u32)&st, 0, 0);
+        if (r < 0)
+            return r;
         np = (s32)st.size + off;
-    }
+    } else
+        return -EINVAL;                     /* SEEK_SET 0, SEEK_CUR 1, SEEK_END 2: nothing else */
     if (np < 0)
-        return -1;
+        return -EINVAL;
     f->off = (u32)np;
     return np;
 }
@@ -434,7 +456,7 @@ long vfs_lseek(struct file *f, s32 off, u32 whence)
 long vfs_statfs(void *out, u32 mount)
 {
     if (mount >= NMOUNT || !mnt[mount].used)
-        return -1;
+        return -EINVAL;
     return fs_call_on((int)mount, FS_STATFS, (u32)out, 0, 0, 0);
 }
 
@@ -443,7 +465,7 @@ long vfs_path1(u32 op, const char *p, u32 a2, u32 a3)
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = ROUTE(p, rb, rel, cwd);
     if (m < 0)
-        return -1;
+        return m;
     return fs_call_on(m, op, (u32)rel, cwd, a2, a3);
 }
 
@@ -452,11 +474,13 @@ long vfs_link(u32 op, const char *a, const char *b)
     char ra[PATHMAX], rb[PATHMAX]; const char *rela, *relb; u32 ca, cb;
     if (op == FS_SYMLINK) {                 /* a is the link text, only b is a path */
         int m = ROUTE(b, rb, relb, cb);
-        return m < 0 ? -1 : fs_call_on(m, op, (u32)a, (u32)relb, cb, 0);
+        return m < 0 ? m : fs_call_on(m, op, (u32)a, (u32)relb, cb, 0);
     }
     int m1 = ROUTE(a, ra, rela, ca), m2 = ROUTE(b, rb, relb, cb);
-    if (m1 < 0 || m1 != m2)
-        return -1;                          /* a hard link cannot cross filesystems */
+    if (m1 < 0 || m2 < 0)
+        return m1 < 0 ? m1 : m2;
+    if (m1 != m2)
+        return -EXDEV;                      /* a hard link cannot cross filesystems */
     return fs_call_on(m1, op, (u32)rela, (u32)relb, ca, 0);
 }
 
@@ -465,7 +489,7 @@ long vfs_sync(void)
     long r = 0;
     for (int i = 0; i < NMOUNT; i++)
         if (mnt[i].used && fs_call_on(i, FS_SYNC, 0, 0, 0, 0) < 0 && i == 0)
-            r = -1;
+            r = -EIO;
     return r;
 }
 
@@ -473,29 +497,31 @@ long vfs_mkdir(const char *path)
 {
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = ROUTE(path, rb, rel, cwd);
-    return m < 0 ? -1 : fs_call_on(m, FS_MKDIR, (u32)rel, cwd, 0, 0);
+    return m < 0 ? m : fs_call_on(m, FS_MKDIR, (u32)rel, cwd, 0, 0);
 }
 
 long vfs_unlink(const char *path)
 {
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = ROUTE(path, rb, rel, cwd);
-    return m < 0 ? -1 : fs_call_on(m, FS_UNLINK, (u32)rel, cwd, 0, 0);
+    return m < 0 ? m : fs_call_on(m, FS_UNLINK, (u32)rel, cwd, 0, 0);
 }
 
 long vfs_rmdir(const char *path)
 {
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = ROUTE(path, rb, rel, cwd);
-    return m < 0 ? -1 : fs_call_on(m, FS_RMDIR, (u32)rel, cwd, 0, 0);
+    return m < 0 ? m : fs_call_on(m, FS_RMDIR, (u32)rel, cwd, 0, 0);
 }
 
 long vfs_rename(const char *from, const char *to)
 {
     char ra[PATHMAX], rb[PATHMAX]; const char *rela, *relb; u32 ca, cb;
     int m1 = ROUTE(from, ra, rela, ca), m2 = ROUTE(to, rb, relb, cb);
-    if (m1 < 0 || m1 != m2)
-        return -1;                          /* not across filesystems (EXDEV) */
+    if (m1 < 0 || m2 < 0)
+        return m1 < 0 ? m1 : m2;
+    if (m1 != m2)
+        return -EXDEV;                      /* not across filesystems: mv copies */
     return fs_call_on(m1, FS_RENAME, (u32)rela, (u32)relb, ca, 0);
 }
 
@@ -511,16 +537,20 @@ long vfs_read(struct file *f, void *buf, u32 n)
     case FT_ZERO:
         memset(buf, 0, n);
         return (long)n;
+    case FT_PIPE_W:
+        return -EBADF;
     case FT_INODE: {
-        if (S_ISDIR(f->mode) || (f->flags & O_WRONLY))
-            return -1;
+        if (S_ISDIR(f->mode))
+            return -EISDIR;
+        if (f->flags & O_WRONLY)
+            return -EBADF;                  /* opened for writing only */
         long r = fs_call_on(f->fs, FS_READ, f->ino, f->off, (u32)buf, n);
         if (r > 0)
             f->off += (u32)r;
         return r;
     }
     }
-    return -1;
+    return -EBADF;
 }
 
 long vfs_write(struct file *f, const void *buf, u32 n)
@@ -534,11 +564,12 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return (long)n;                     /* the bit bucket */
     case FT_INODE: {
         if (!(f->flags & (O_WRONLY | O_RDWR)))
-            return -1;
+            return -EBADF;                  /* opened for reading only */
         if (f->flags & O_APPEND) {
             struct ustat st;
-            if (fs_call_on(f->fs, FS_FSTAT, f->ino, (u32)&st, 0, 0) < 0)
-                return -1;
+            long e = fs_call_on(f->fs, FS_FSTAT, f->ino, (u32)&st, 0, 0);
+            if (e < 0)
+                return e;
             f->off = st.size;
         }
         long r = fs_call_on(f->fs, FS_WRITE, f->ino, f->off, (u32)buf, n);
@@ -547,14 +578,14 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return r;
     }
     }
-    return -1;
+    return -EBADF;
 }
 
 long vfs_readdir(struct file *f, struct udirent *out)
 {
     u32 cookie = f->off;
     if (f->type != FT_INODE || !S_ISDIR(f->mode))
-        return -1;
+        return -ENOTDIR;
     long r = fs_call_on(f->fs, FS_READDIR, f->ino, f->off, (u32)out, (u32)&cookie);
     if (r >= 0)
         f->off = cookie;
@@ -569,23 +600,32 @@ long vfs_mount(const struct umountreq *r)
 {
     char abs[PATHMAX], rb[PATHMAX]; const char *rel; u32 cwd;
     struct ustat st;
-    if (path_abs(abs, current->cwd, r->path) || abs[1] == 0 || strlen_(abs) >= sizeof mnt[0].path)
-        return -1;                              /* not the root, and short enough */
+    int e = path_abs(abs, current->cwd, r->path);
+    if (e)
+        return e;
+    if (abs[1] == 0)
+        return -EBUSY;                          /* not on the root */
+    if (strlen_(abs) >= sizeof mnt[0].path)
+        return -ENAMETOOLONG;                   /* a mount point is at most 47 bytes */
     int free = -1;
     for (int i = 1; i < NMOUNT; i++) {
         if (mnt[i].used && user_str_eq(mnt[i].path, abs))
-            return -1;                          /* already mounted there */
+            return -EBUSY;                      /* already mounted there */
         if (!mnt[i].used && free < 0)
             free = i;
     }
     if (free < 0)
-        return -1;
+        return -EBUSY;                          /* all NMOUNT entries in use */
     int pm = ROUTE(abs, rb, rel, cwd);
-    if (pm < 0 || fs_call_on(pm, FS_STAT, (u32)rel, cwd, (u32)&st, 0) < 0 || !S_ISDIR(st.mode))
-        return -1;                              /* the mount point must be a directory */
+    if (pm < 0)
+        return pm;
+    if ((e = (int)fs_call_on(pm, FS_STAT, (u32)rel, cwd, (u32)&st, 0)) < 0)
+        return e;
+    if (!S_ISDIR(st.mode))
+        return -ENOTDIR;                        /* the mount point must be a directory */
     int port = port_find(r->port);
     if (port < 0)
-        return -1;
+        return -ENODEV;                         /* no server on that port */
     struct mount *mt = &mnt[free];
     memset(mt, 0, sizeof *mt);
     strcpy_(mt->path, abs);
@@ -598,7 +638,7 @@ long vfs_mount(const struct umountreq *r)
     long root = fs_call_on(free, FS_ROOT, (u32)&fi, 0, 0, 0);
     if (root <= 0) {
         mt->used = 0;
-        return -1;
+        return root < 0 ? root : -EIO;
     }
     mt->root = (u32)root;
     nmnt++;
@@ -614,26 +654,27 @@ static int prefix_of(const char *dir, const char *path)         /* is PATH DIR o
 long vfs_umount(const char *path)
 {
     char abs[PATHMAX];
-    if (path_abs(abs, current->cwd, path))
-        return -1;
+    int e = path_abs(abs, current->cwd, path);
+    if (e)
+        return e;
     int mi = -1;
     for (int i = 1; i < NMOUNT; i++)
         if (mnt[i].used && user_str_eq(mnt[i].path, abs))
             mi = i;
     if (mi < 0)
-        return -1;
+        return -EINVAL;                         /* nothing is mounted there */
     for (int i = 1; i < NMOUNT; i++)                    /* busy: another filesystem is mounted below it */
         if (i != mi && mnt[i].used && prefix_of(mnt[mi].path, mnt[i].path))
-            return -2;
+            return -EBUSY;
     for (int i = 1; i < NPROC; i++) {                   /* busy: a working directory or an open file inside */
         struct proc *p = &procs[i];
         if (p->state == P_FREE)
             continue;
         if (prefix_of(mnt[mi].path, p->cwd))
-            return -2;
+            return -EBUSY;
         for (int k = 0; k < NFD; k++)
             if (p->fd[k] && p->fd[k]->type == FT_INODE && p->fd[k]->fs == mi)
-                return -2;
+                return -EBUSY;
     }
     fs_call_on(mi, FS_QUIT, 0, 0, 0, 0);               /* the server syncs, lets go of its device and exits */
     mnt[mi].used = 0;
@@ -658,48 +699,5 @@ long vfs_mountinfo(u32 index, struct umountinfo *out)
         strncpy_(out->type, mnt[i].type, sizeof out->type - 1);
         return 0;
     }
-    return -1;
-}
-
-/* join and normalise a path textually: handles "." and ".." */
-void vfs_chdir_text(char *cwd, const char *path)
-{
-    char out[96];
-    int n = 0;
-    if (path[0] != '/') {
-        while (cwd[n] && n < 95) {
-            out[n] = cwd[n];
-            n++;
-        }
-        if (n == 1)
-            n = 0;                          /* "/" + "/x" must not give "//x" */
-    }
-    const char *p = path;
-    while (*p) {
-        while (*p == '/')
-            p++;
-        if (!*p)
-            break;
-        const char *e = p;
-        while (*e && *e != '/')
-            e++;
-        u32 len = (u32)(e - p);
-        if (len == 1 && p[0] == '.') {
-        } else if (len == 2 && p[0] == '.' && p[1] == '.') {
-            while (n > 0 && out[n - 1] != '/')
-                n--;
-            if (n > 0)
-                n--;                        /* drop the slash before it */
-        } else if (n + 1 + (int)len < 95) {
-            out[n++] = '/';
-            for (u32 i = 0; i < len; i++)
-                out[n++] = p[i];
-        }
-        p = e;
-    }
-    if (n == 0)
-        out[n++] = '/';
-    out[n] = 0;
-    for (int i = 0; i <= n; i++)
-        cwd[i] = out[i];
+    return -1;                                  /* past the end (mount -l counts on it: not an error) */
 }

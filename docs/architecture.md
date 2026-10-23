@@ -14,7 +14,7 @@ a set of user-mode programs (`user/`).
  kernel       scheduler | memory manager | ports + messages | file table, pipes, tty line
               discipline | terminal + display (Copper/blitter) | keyboard | serial | IDE | clock
                  |      (messages: "fs" port, "disk" port)
- user mode    boot (session manager)   fsd (ext2 filesystem server)   diskd (disk server)
+ user mode    boot (starts init)   fsd (ext2 filesystem server)   diskd (disk server)
               ^-- these three are linked into the kernel image and started before any disk is readable
 ```
 
@@ -95,7 +95,7 @@ The bootblock's first instructions switch Copper and bitplane DMA off and set `B
 screen as text; grey means the display could not start. A stop on an error before the display is up
 (`panic`, an exception in the kernel, a 68000 in `start.S`) calls `diag_halt()` (`start.S`, plain 68000 code): it
 polls the beam counter and paints the stage colour above line 150 and red below, forever. After the display is up a
-panic turns the bar red (`gfx_panic`) and leaves its text on the screen. The whole screen red is the bootblock's
+panic turns the screen dark red with white text (`gfx_panic`) and leaves its text there. The whole screen red is the bootblock's
 own failure. The table for the owner (colour, where, likely cause) is in pi-first-boot.md. Test builds:
 `make DIAG=-DDIAG_STOP=N` hangs at stage N, `DIAG=-DDIAG_PANIC=N` panics there (`tools/diag-test.sh`).
 
@@ -120,7 +120,7 @@ empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and th
 ### Kernel log (`kernel/serial.c`, `dmesg`)
 
 `kprintf` writes to the serial port and into an 8 KB ring. When the display comes up (`gfx_init`), `kmain` writes the
-ring to the visible workspace and mirrors new `kprintf` output there until the boot is finished (`klog_mirror_off`
+ring to console 1 (the console on the screen at boot) and mirrors new `kprintf` output there until the boot is finished (`klog_mirror_off`
 just before the scheduler starts), so the boot messages - including every driver's init log - are on the screen of
 a machine with no serial cable (scroll back with Shift+Up). `SYS_klog` (73: offset, buffer, length) reads the ring;
 `dmesg` prints it. A panic or an exception in the kernel switches the mirror on again, so its text reaches the
@@ -240,23 +240,33 @@ second block. Both are owned by the pid and freed together.
 
 ## 6. Processes and scheduling (`kernel/proc.c`)
 
-- A fixed table of `NPROC` = 16 `struct proc`. State machine: `FREE, READY, SLEEP, WAIT, IO, ZOMBIE, MSG`.
+- A fixed table of `NPROC` = 32 `struct proc` (room for a login and a shell on each of the ten consoles, the servers,
+  init and the commands they run). State machine: `FREE, READY, SLEEP, WAIT, IO, ZOMBIE, MSG, STOP`.
 - **Preemptive round robin**: a 100 Hz tick, a slice of 5 ticks (50 ms), an O(1) run queue (linked list).
   No priorities yet (DESIGN D6 says they are intended).
 - Preemption happens only when the timer interrupt hit **user mode**. Kernel code is never preempted, so the
   kernel needs no locks. Where an interrupt can touch the run queue (`ready()`), interrupts are masked briefly.
 - **Interrupts only queue** (audit B4). The keyboard and serial interrupts put raw codes and bytes into rings and
-  set `kwork_pending`; everything else input causes (keymap, line discipline, echo, Ctrl-C/Ctrl-Z, workspace
-  switches, scrollback, the bar) is done by `kwork()` in process context - see section 11. The same rule closes the
+  set `kwork_pending`; everything else input causes (keymap, line discipline, echo, Ctrl-C/Ctrl-Z, console
+  switches, scrollback) is done by `kwork()` in process context - see section 11. The same rule closes the
   lost wakeup (B5): a reader's "is there input? no: block" is kernel code, and `kwork`, the only thing that delivers
   input, runs only at a few chosen points, never between such a check and its block.
 - pid 0 is the idle process: it runs on the boot stack and executes `cpu_idle()` when nothing is ready.
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
   process is `spawn(path, argv, stdio)`: load a ZEXE, give it the parent's cwd and environment, and pass only file
-  descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file).
+  descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file). At most 256 arguments
+  and 8 KB of argument text (`SPAWN_ARGC`, `SPAWN_ARGBYTES`, syscall.c; copied through the kernel heap, not the
+  4 KB kernel stack); more is refused with -E2BIG.
+- **Controlling tty** (`struct proc` `ctty`, audit E): a process's terminal is the console of its fd 0 at spawn
+  when that is a console (init starting `login` on `/dev/ttyN`), else its parent's. `/dev/tty`, `SYS_ttymode`,
+  `SYS_setfg` and `SYS_ttyintr` use it, so the second stage of `ls | less` on console 2 reads console 2's keys
+  (before, a process whose fd 0 was a pipe fell back to console 1).
 - Process exit closes fds, releases the tty, closes the process's ports (clients get an error), frees all
-  memory owned by the pid, and wakes a waiting parent. Orphaned zombies are reaped by the idle loop.
-- Each process has 16 file descriptors; the system has 64 open-file slots and 16 message ports.
+  memory owned by the pid, and wakes a waiting parent. A zombie nobody will wait for (its parent is gone or is
+  itself a zombie) is freed by the idle loop, by every process exit and before a spawn looks for a free slot, so
+  a busy machine that never idles does not fill its table with them.
+- Each process has 16 file descriptors; the system has 64 open-file slots (a slot's reference count is 16 bits)
+  and 16 message ports.
 
 ## 7. System calls (`kernel/syscall.c`)
 
@@ -268,15 +278,29 @@ messages (`port_create port_find call recv reply replyrecv`), mounts (`mount umo
 mount index), and a few privileged ones for the servers (`blk_read blk_write blk_flush blk_size blk_ram`).
 
 **Every user pointer is validated** (`user_ok`) against the process's own span and its `memalloc` regions. A bad
-pointer makes the call return -1; the process lives. Strings are copied into kernel buffers with bounds.
+pointer makes the call return -EFAULT; the process lives. Strings are copied into kernel buffers with bounds; a path
+argument longer than 63 bytes is -ENAMETOOLONG.
 
-Identity: `getuid getgid geteuid setuid setgid umask chown session` (see section 14).
+**Errors are negative errno numbers** (audit E), the Linux/POSIX values in one header, `kernel/errno.h`, shared by
+the kernel, the servers, libz and the host tests: -ENOENT, -EACCES, -EEXIST, -ENOTDIR, -EISDIR, -EINVAL, -ENOSPC,
+-EROFS, -ENAMETOOLONG, -ENOTEMPTY, -EXDEV, -EBUSY, -EBADF, -EFAULT, -ENOMEM, -E2BIG ... The filesystem servers'
+answers pass through the kernel unchanged, and both servers return the same number for the same case (section 9).
+libz keeps the last one in `zerrno`; `zwhy(dflt)` and `zstrerror(e)` give its text. Still a bare -1 (the reason is
+not known there, or the caller treats it as a plain "no"): `SYS_mountinfo` past the end, `ipc_call`/`ipc_recv` on a
+bad port, `port_create`/`port_find` (a taken or missing name), `ext2_mount_as` refusals (the reason is printed);
+limits.md lists them. A permission refusal is always -EACCES (13), also for chmod/chown by a non-owner (Linux says
+EPERM there).
+
+Identity: `getuid getgid geteuid setuid setgid umask chown` (see section 14). Numbers 39, 40 (the workspace shell
+requests) and 68 (the login session) were removed with the workspaces in audit batch E and are free.
 
 `kill` today means "terminate" (`proc->killed`); Unix-style signal handlers do not exist yet. There is one more
 thing a process can be told: **stop and continue** (job control). Ctrl-Z on a terminal (`kernel/tty.c`) or `SYS_jobctl`
 (pid, 0 = stop, 1 = continue) calls `proc_stop`, which sets `stop_req` and wakes the process if it is blocked; at its
 next return from `schedule()` it turns itself into `P_STOP`, tells a waiting parent, and is not scheduled again until
-`proc_cont`. `SYS_wait` with flag 2 (`WAIT_UNTRACED`) reports a stopped child once, as `ST_STOPPED` (0x114). A client
+`proc_cont`. `SYS_wait` with flag 2 (`WAIT_UNTRACED`) reports a stopped child once, as `ST_STOPPED` (0x114); flag 4
+(`WAIT_CONSOLE`, root only: init) also returns `ST_CONSOLE` + n (0x200 + n) when console n was shown with nobody on it,
+so init starts a login there (section 11). A client
 inside a call to a server is never stopped until the reply arrives (the server holds pointers into its memory).
 `sleep` loops until its time, so a stop and continue does not cut it short.
 
@@ -301,14 +325,16 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 - `recv(port, wait)`: wait 0 returns at once (0 if nothing is queued), 1 waits for a message, N > 1 waits at most N-1
   ticks and then returns 0 - a server with a deadline (ZenixFS's commit three seconds after the first change) sleeps
   until a message or the deadline, whichever comes first, instead of polling.
-- If a server dies, its ports are closed and its pending and in-service requests fail with an I/O error (-5); the
-  kernel then forgets the cached port number and looks it up again next time.
+- If a server dies, its ports are closed and its pending and in-service requests fail with an I/O error (-EIO); the
+  kernel then forgets the cached port number and looks it up again next time. `ipc_reply` looks the message up
+  among the requests really in flight (the clients' `wait_msg`) before it reads anything in it, so a stray or forged
+  pointer from a server is refused (-EINVAL) instead of being followed.
 - The kernel stamps every message with the caller's uid, gid and umask, and `kflags`: `UMSG_KERNEL` when the kernel
   itself sends it for a system call (`ipc_kcall`, used by vfs.c), 0 for a program's own `SYS_call` (`ipc_call`
   always clears it). The filesystem servers answer only messages with `UMSG_KERNEL`, or from root; the disk server
   only root (and `DISK_LIST`/`DISK_INFO` for anyone). Port names `fs`, `fs.*` (mounts) and `disk` are reserved:
   only root may create them, so a dead server's name cannot be taken over by a normal user (`port_create` answers
-  -13). Audit D.
+  -EACCES). Audit D.
 - Drawback of the design, noted in DESIGN.md: a **hung** server blocks its clients.
 
 ## 9. The servers
@@ -357,17 +383,30 @@ allocates only at mount (block cache, bitmaps, three scratch blocks), so a runni
 ### The mount table (`kernel/vfs.c`)
 Entry 0 is the root (port `fs`); `SYS_mount` puts a running server's port on a directory (up to 8 mounts). With only the
 root mounted, paths go to its server untouched. Otherwise the kernel makes every path absolute and normalised as text
-(working-directory text + path, `.` and `..` removed), picks the longest mount point that prefixes it and hands the server
+(working-directory text + path, `.` and `..` removed; `path_abs`, the one normaliser, also used for the
+working-directory text itself and for mount points; at most 159 bytes, `FS_PATHMAX` in fsproto.h, longer is
+-ENAMETOOLONG and never cut: before, the working directory text was cut at 95 characters, so relative paths could
+act on the wrong directory once something was mounted), picks the longest mount point that prefixes it and hands the server
 the rest as a path inside that filesystem together with that filesystem's root inode as the working directory. Each
 open file remembers its mount. `link` and `rename` across two mounts fail. `umount` is refused while a process has its
 working directory or an open file inside, or another mount lies below. Caveat: because `..` is resolved on the text, a
 working directory reached through a symbolic link behaves as its text says once a second filesystem is mounted.
 
-### boot - the session manager (`user/boot.c`)
-Waits for the `fs` port, spawns `/bin/init`, and then sleeps in `SYS_wsreq`, spawning a shell on a new
-workspace whenever the user presses Amiga+Return. (It exists because the idle process cannot block on a message.)
-While nobody is logged in (`SYS_session` not set, or ended by init with uid -1) `SYS_spawn_tty` refuses (-13) and the
-workspace shows "Nobody is logged in: log in first; Amiga+Return then opens a shell."
+### boot - the starter (`user/boot.c`)
+Waits for the `fs` port, spawns `/bin/init` on console 1 and waits for it; should init end, it says so and starts it
+again. (It exists because the idle process cannot block on a message.) The logins on the consoles are init's work
+(section 11, man/init.txt).
+
+### What the two filesystem servers answer (audit E)
+The same errno for the same case: a missing name -ENOENT, an existing one -EEXIST (also `mkdir` of an existing
+directory, and of `.`/`..`), a path through a non-directory -ENOTDIR, reading, writing or opening for writing a
+directory -EISDIR (`FS_READ`/`FS_WRITE` on a directory inode too), `rmdir` of a non-empty directory -ENOTEMPTY,
+`unlink` of a directory -EISDIR, a hard link to a directory -EPERM, `readlink` of a non-link -EINVAL, a name
+longer than 63 bytes -ENAMETOOLONG, too many links followed -ELOOP, a full volume -ENOSPC, a read-only one -EROFS,
+the disk or a damaged volume -EIO, any permission refusal -EACCES, an unknown request -ENOSYS. `O_CREAT` on a
+symbolic link that points nowhere is -ENOENT in both (no second entry of that name; Linux would create the
+target). What they still do differently, by capability: ext2 cannot move a directory to another parent (-EXDEV, so
+`mv` copies it) nor rename over an existing directory (-EISDIR); ZenixFS does both.
 
 ## 10. The filesystem
 
@@ -399,48 +438,64 @@ workspace shows "Nobody is logged in: log in first; Amiga+Return then opens a sh
   AddressSanitizer).
 - Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair; it repairs nothing when it finds
   damage it cannot repair) and `fdisk` (RDB).
-- Not done: moving directories between parents, triple-indirect files, a journal.
+- Not done: moving directories between parents (rename answers -EXDEV, so `mv` copies), triple-indirect files, a
+  journal.
 - Several filesystems can be mounted (`mount`, see section 9). Planned: **ZenixFS** (atomic commit, checksummed metadata, extents),
   see `zenixfs.md`.
 
 ## 11. Pipes, tty, terminal, display
 
 - **Pipes** (`vfs.c`): 2 KB ring buffer in the kernel; EOF when all writers close; a write to a pipe with no
-  readers ends the writer with status 141 (like SIGPIPE). Special files `/dev/tty`, `/dev/null`, `/dev/zero`.
-- **tty** (`tty.c`): one per workspace, line discipline in the kernel: echo, backspace, `^U`, `^C` (kills the
-  foreground process; if nobody is foreground the shell polls `ttyintr`), `^D`. `TTY_RAW` / `TTY_NOSIG` modes for
-  editors and pagers.
-- **Terminal** (`term.c`): 80x31 text grid per workspace plus 200 lines of scrollback, ANSI/VT100: cursor motion,
-  erase, insert/delete, scroll regions, bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor
-  position. Arrows and function keys arrive as escape codes.
-- **Display** (`gfx.c`): 640x256 hires, one bitplane. A **Copper list** splits the screen: palette and bitplane
-  pointers for a bar line, then the text area. Scrolling just moves the Copper's bitplane pointers at vertical
+  readers ends the writer with status 141 (like SIGPIPE). Special files `/dev/tty` (the process's controlling
+  tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
+  (console 1, the same rule), `/dev/null`, `/dev/zero`. `fstat` of a console gives its number in `st_ino` (the
+  `ustat` has no device field; `login` uses it to apply `/etc/autologin` to console 1 only).
+- **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
+  `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**
+  shows console 1-10 (Linux: Alt+F1..); plain F-keys stay with the programs and send their escape codes; other
+  Amiga+key combinations do nothing. The whole screen is text: no bar, no status line, no workspaces (those are
+  desktop features, ROADMAP phase 5). `init` keeps a `login` on every console that has been shown, like a getty:
+  console 1 at boot, console N the first time it is shown (`con_switch` sees nobody whose controlling tty it is,
+  sets a bit in `con_want` and readies init, which waits in `SYS_wait` with `WAIT_CONSOLE` - Linux's autovt does the
+  same), and a login that ends is started again. So a console costs memory only once it is used.
+- **tty** (`tty.c`): one per console, line discipline in the kernel: echo, backspace, `^U`, `^C` (kills the
+  foreground process; if nobody is foreground the shell polls `ttyintr`), `^D`; Tab is kept in the line (Backspace
+  over it moves back one column on the screen; the line itself is right). A cooked line holds 255 characters:
+  more ring the bell and are not taken. `TTY_RAW` / `TTY_NOSIG` modes for editors and pagers. **Type-ahead is
+  kept**: when a program switches the tty to raw mode (the shell's line editor after a command), what was typed
+  meanwhile as a half line goes into the queue as it is (before, `tty_setmode` dropped it: `rm /etc/motd` typed
+  during a slow command arrived as `c/motd`).
+- **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
+  NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100: cursor motion, erase, insert/delete, scroll regions,
+  bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position. Arrows and function keys
+  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it.
+- **Display** (`gfx.c`): 640 pixels wide hires, one bitplane, the whole screen text (grey on black). `gfx_init`
+  measures the beam's last line for about 60 ms (E-clock timed): above 280 (312 on PAL) the display is 256 lines,
+  32 rows; else (262 on NTSC) 200 lines, 25 rows and `DIWSTOP` to match, so no row is hidden below the picture. A
+  two-colour **Copper list** points at the text; scrolling just moves the Copper's bitplane pointer at vertical
   blank; when the 2-screen buffer wraps, the **blitter** copies the visible rows back to the top (identical pixels,
   so there is no visible switch). Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
-  before the OS is killed.
-- **Workspaces**: nine, each with its own text grid and tty; the top bar (i3-style) lists the current one and the
-  occupied ones. Amiga+1..9 switch, Amiga+Return opens a shell. These are scaffolding for a future desktop and are
-  not part of what a terminal program should depend on.
+  before the OS is killed. A kernel panic turns it white on dark red.
 - **Input path: interrupts queue, `kwork` works** (`kernel/main.c`, audit B4/B5). The interrupt handlers do
   only what cannot wait: the keyboard handler (`kbd_isr`) reads the byte, answers the keyboard's handshake and puts
   the raw code into a 128-slot ring; the serial handler (`serial_rx_isr`, level 5) moves each byte from Paula into a
-  1024-byte ring; the 100 Hz tick asks for work while a key is held (repeat) and once a second (the bar's clock).
+  1024-byte ring; the 100 Hz tick asks for work while a key is held (repeat).
   Each ring has one producer and one consumer, so no lock: the producer fills the slot, then moves `head`; the
   consumer reads it, then moves `tail`. A full ring drops the new input and counts it; `kwork` reports the count on
   the kernel log (`dmesg`: "kbd: N key codes lost", "serial: N bytes lost"; after lost key codes the held modifiers
   and the repeating key are forgotten, since a lost "key up" would leave a key repeating), and a full tty queue
   (nobody reading) says so too. `kwork()` empties the rings in process context with interrupts enabled - `serial_work` (bytes to
-  the tty, the 0x1d test hook), `kbd_work` (modifiers, Amiga+key workspace commands, keymap, key repeat, the tty),
-  the bar - and is called from exactly four places: the idle loop; the end of every system call; the level-2
+  the tty, the 0x1d test hook), `kbd_work` (modifiers, Amiga+F1..F10 console switches, keymap, key repeat, the tty),
+  the log line for an unexpected interrupt vector - and is called from exactly four places: the idle loop; the end of every system call; the level-2
   interrupt when it cut into **user** mode (then no kernel code is running at all, because the kernel is never
   preempted; the mask is lowered to 0 first, and if Ctrl-C or Ctrl-Z hit the running program it is rescheduled
   at once so it ends or stops); and between the 256-byte pieces of a long terminal write (`tty_write`: drawing
   4 KB can take seconds on a 68020 with chip RAM only, and the rings would overflow; the terminal is consistent
   there, and a writer killed by Ctrl-C stops at once). An interrupt that cuts into kernel code (a system call, or `kwork` itself) never
   calls it, and a `busy` flag keeps it from being re-entered, so the tty queue and line, the terminal grids, the
-  blitter and the heap (the first use of a workspace allocates its tty and terminal) are only ever changed by one
-  piece of code at a time. Lost wakeups (B5) cannot happen: `tty_read` and `SYS_wsreq` test "is there something?"
-  and then `block_io()` in kernel code with none of those points in between, so `kwork` - the only producer -
+  blitter and the heap (the first use of a console allocates its tty and terminal) are only ever changed by one
+  piece of code at a time. Lost wakeups (B5) cannot happen: `tty_read` and init's `proc_wait` (`WAIT_CONSOLE`) test
+  "is there something?" and then block in kernel code with none of those points in between, so `kwork` - the only producer -
   cannot run between the two; input that
   arrives meanwhile waits in its ring, and the `wake_io()` that delivers it comes after the reader is blocked. The
   idle loop checks `kwork_pending` with interrupts masked and then `STOP`s (which enables them in the same
@@ -461,8 +516,21 @@ workspace shows "Nobody is logged in: log in first; Amiga+Return then opens a sh
   layout-neutral; arrows, F-keys, Help and Del become escape sequences in raw mode. Verified in FS-UAE
   (`tools/kbd-test.sh`); the handshake length is read from the manual, not measured on hardware.
 - **Serial** (`serial.c`): interrupt-driven receive (queued for `serial_work`, above), 115200 baud, mirrors the
-  focused screen; the test rig depends on it, including the hook 0x1D + 1-9 (switch workspace) / Return (open a
-  shell) / u d U D (scroll back).
+  console on the screen (its output from then on; a switch does not resend the screen); input goes to that
+  console's tty. The test rig depends on it, including the hook 0x1D + 1-9 / 0 (show console 1-9 / 10, as
+  Amiga+F1..F10) and u d U D (scroll back a line or a page).
+- **Unexpected interrupts** (audit E): vectors 24-31 without a handler of their own (spurious, levels 1, 4 and 6,
+  the NMI; nothing enables their sources) go to `irq_other_entry`: a Paula level is switched off in `INTENA` (its
+  `INTREQ` bits stay: the floppy and sound drivers poll them), level 6 also reads CIA-B's ICR, `kwork` logs each
+  vector once (`irq: unexpected ...`), and the interrupted code goes on untouched. Before, they killed whatever
+  process was running (or panicked in kernel code).
+- **The clock** (`main.c`, audit E): the E-clock is the crystal / 40, 709379 Hz on PAL machines and 715909 Hz on
+  NTSC ones; the kernel reads which from the Agnus/Alice id's NTSC bit (VPOSR bit 12) at boot (`eclock_hz`) and sets
+  the CIA-A tick latch to the nearest of E / 100 - 1 (a timer period is latch + 1): 7093 on PAL (99.997 Hz, about
+  0.25 s a day), 7158 on NTSC (100.001 Hz). The old fixed 7094 gave 99.98 Hz on PAL (15 s a day) and 100.9 Hz on
+  NTSC (13 minutes a day). `hr_time()` counts the same E-clock; the floppy driver's waits use `eclock_hz`; the boot
+  log says `clock: E-clock N Hz (PAL|NTSC), tick latch N`. What the display shows (the beam count above) and the
+  crystal are read separately, so a machine switched to the other display standard still keeps time.
 
 ## 12. User space
 
@@ -484,8 +552,11 @@ enough, else copies only the old block's bytes. `xmalloc` ends the program with 
 **Directory walkers** (audit B6: `rm -r`, `cp -r`, `mv`, `du`, `find`, `grep -r`, `chown -R`, `tar c`, `diff -r`,
 `tree`, `ls -R`) use two libz helpers instead of arrays on the stack: `dir_list` reads a directory into a
 heap array that grows as needed (no limit on entries; `dir_free` gives it back), and `path_join` makes "dir/name" in
-a new heap string, or refuses (NULL, `zerrno` 36, "path too long") when it would be longer than the 63 bytes a
-system call takes. A level of recursion costs about 100 bytes of stack instead of 1.4-2.7 KB. `printf`, `snprintf`, `sprintf`, `fprintf`
+a new heap string, or refuses (NULL, `zerrno` ENAMETOOLONG, "file name too long") when it would be longer than the
+63 bytes a system call takes. Programs that start another program by name (`find -exec`, `xargs`, `timeout`) find it
+with `path_find`, the shell's `$PATH` search; `sed` and `expr :` share `bre_to_ere`. libz and the programs are built
+with `-ffunction-sections -fdata-sections`, so the linker's `--gc-sections` leaves out the libz parts a program does
+not use. A level of recursion costs about 100 bytes of stack instead of 1.4-2.7 KB. `printf`, `snprintf`, `sprintf`, `fprintf`
 and `oprintf` share one formatter with no length limit: `%d %i %u %x %X %o %c %s %p %%`, flags `- 0 + space #`, width and
 precision as numbers or `*`; no floating point, no 64-bit numbers. About 77 programs: a full shell (`sh`:
 line editor, history, completion, variables, quoting, wildcards, pipes, redirects incl. here-documents,
@@ -530,15 +601,15 @@ outputs (`tools/cmds-test.sh`).
   need w+x on the directory; opening needs r and/or w (and x with `O_EXEC`, which the kernel adds when it loads
   a program); `chmod` is for the owner and root; `chown` for root; a **sticky** directory (`/tmp`, 1777) only lets
   the owner of the file or of the directory remove or rename entries. New files belong to the caller and get
-  `0666 & ~umask` (directories `0777 & ~umask`). A refusal returns -13 to the caller.
-- `login` (run by `init`) authenticates against `/etc/passwd`, drops root and starts the shell; it calls `SYS_session`
-  first, so the kernel remembers the ids and environment of the session and gives them to workspace shells that
-  the session manager starts (`SYS_spawn_tty`). `init` ends the session (`SYS_session` with uid -1) when login
-  returns; with no session Amiga+Return opens nothing (section 9, boot). One session at a time.
+  `0666 & ~umask` (directories `0777 & ~umask`). A refusal returns -EACCES (13) to the caller.
+- `login` (run by `init` on each console, section 11) authenticates against `/etc/passwd`, drops root and starts
+  the shell. Every console has its own login, so several users (or one user several times) can be logged in at
+  once; nothing in the kernel records a "session" any more (`SYS_session` and the workspace shells it served are
+  gone, audit E).
 - **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill`, `SYS_jobctl` and `SYS_setfg`): root may signal
   any process but the idle one; others only a process whose real or effective uid equals their real or effective
   uid, or their own child, and never a built-in server (started from the kernel image: diskd, fsd, zfsd, boot) or a
-  privileged process. A refusal is -13, no such process -3. `SYS_setfg` works on the caller's own terminal, 0 (nobody)
+  privileged process. A refusal is -EACCES, no such process -ESRCH. `SYS_setfg` works on the caller's own terminal, 0 (nobody)
   is always allowed. `SYS_settime` and `SYS_ttymirror` are root only.
 - **Raw messages** (section 8): the filesystem servers do nothing for a message that did not come from the kernel
   unless it is root's, so a user cannot read or write by inode number, open files without the kernel's open-file
@@ -550,7 +621,7 @@ outputs (`tools/cmds-test.sh`).
   root clears set-user-id (and set-group-id when the group has x); `utimes` with a given time is for the owner and
   root, "now" (`FS_UTIME_NOW`) also for anyone who may write; a non-root owner's `chmod` drops set-group-id unless
   the file's group is theirs; moving a directory to another parent needs w on it (ZenixFS; ext2 does not move
-  directories between parents). `O_EXCL` with `O_CREAT` fails with -17 if the name exists, also as a dangling
+  directories between parents). `O_EXCL` with `O_CREAT` fails with -EEXIST if the name exists, also as a dangling
   symbolic link, in the same request as the creation (here-documents and `mktemp` use it, with mode 0600).
 - **The tools**: `su` gives the target's USER, LOGNAME, HOME, SHELL and PATH=/bin and drops IFS, ENV, CDPATH; `sh`
   reads `~/.shrc` only if it belongs to the effective user or root; `/etc/passwd` lines with a non-numeric uid or
@@ -561,8 +632,9 @@ outputs (`tools/cmds-test.sh`).
 - `mkroot.sh` builds the image under `fakeroot` so files belong to root; `/tmp` is 1777; `su` and `passwd` are 4755.
 - The kernel's own file loading and the servers run as root. Kernel-side calls such as `fs_read_file` use the
   identity of the process that asked for the spawn.
-- Programs report a refusal as "permission denied": `sys3` stores the code of the last failed call in `zerrno`, and
-  `zwhy("cannot open")` (libz) returns that text unless the code was -13.
+- Programs report a refusal as "permission denied": `sys3` stores the error number of the last failed call in
+  `zerrno`, and `zwhy("cannot open")` (libz) returns its text ("permission denied", "no such file or directory",
+  ...; section 7), or the given text when there is none.
 - What this is not: with no MMU a program can still read and write any memory - for example change a message after
   the kernel stamped it, or the kernel's own tables - so this is accounting and protection against honest mistakes
   and against users using the system's own calls, not against a program written to cheat (limits.md).

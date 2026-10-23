@@ -1,5 +1,7 @@
 #include "libz.h"
-/* expr arg op arg ...: arithmetic (+ - \* / %), comparisons, & |, length STRING; prints the result, status 1 if it is 0 or empty */
+#include "regex.h"
+/* expr arg op arg ...: arithmetic (+ - \* / %), comparisons, & |, STRING : REGEX, length STRING; prints the result,
+ * status 1 if it is 0 or empty */
 static char **av; static int ac, ai;
 static long num(const char *s, int *ok) { char *e; long v = strtol(s, &e, 10); *ok = *s && !*e; return v; }
 static char *val(void);
@@ -11,11 +13,36 @@ static char *prim(void)
     if (!strcmp(av[ai], "length") && ai + 1 < ac) { ai += 2; return fmt((long)strlen(av[ai - 1])); }
     return strdup(av[ai++]);
 }
-static char *mul(void)
+/* STRING : REGEX (a basic regular expression, anchored at the start of STRING, as POSIX expr): the text of the first
+ * \( \) group, or the number of characters matched (0 = no match) */
+static char *match(void)
 {
     char *l = prim();
+    while (ai < ac && !strcmp(av[ai], ":")) {
+        ai++;
+        char *r = prim();
+        char *ere = bre_to_ere(r), *anch = xmalloc(strlen(ere) + 2);
+        anch[0] = '^'; strcpy(anch + 1, r[0] == '^' ? ere + 1 : ere);       /* "^" in the expression is the anchor anyway */
+        void *re = re_comp(anch, RE_LONGEST);
+        if (!re) { fprintf(2, "expr: bad regular expression: %s\n", r); _zexit(2); }
+        int caps[2 * RE_GROUPS]; for (int k = 0; k < 2 * RE_GROUPS; k++) caps[k] = -1;
+        int len = (int)strlen(l), hit = re_exec(re, l, len, 0, caps);
+        int groups = 0; for (const char *q = r; *q; q++) if (q[0] == '\\' && q[1] == '(') { groups = 1; break; }
+        char *res;
+        if (groups) {
+            if (hit && caps[2] >= 0 && caps[3] >= caps[2]) { res = xmalloc((u32)(caps[3] - caps[2]) + 1); memcpy(res, l + caps[2], (u32)(caps[3] - caps[2])); res[caps[3] - caps[2]] = 0; }
+            else res = strdup("");
+        } else res = fmt(hit ? (long)(caps[1] - caps[0]) : 0);
+        re_free(re); free(ere); free(anch);
+        l = res;
+    }
+    return l;
+}
+static char *mul(void)
+{
+    char *l = match();
     while (ai < ac && (!strcmp(av[ai], "*") || !strcmp(av[ai], "/") || !strcmp(av[ai], "%"))) {
-        char op = av[ai++][0]; char *r = prim(); int ok1, ok2; long a = num(l, &ok1), b = num(r, &ok2);
+        char op = av[ai++][0]; char *r = match(); int ok1, ok2; long a = num(l, &ok1), b = num(r, &ok2);
         if (!ok1 || !ok2) { fprintf(2, "expr: non-numeric argument\n"); _zexit(2); }
         if (op != '*' && !b) { fprintf(2, "expr: division by zero\n"); _zexit(2); }
         l = fmt(op == '*' ? a * b : op == '/' ? a / b : a % b);

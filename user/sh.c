@@ -43,12 +43,28 @@ static void *aalloc(u32 n)
 static char *adupn(const char *s, u32 n) { char *p = aalloc(n + 1); memcpy(p, s, n); p[n] = 0; return p; }
 static char *adup(const char *s) { return adupn(s, strlen(s)); }
 
+/* A list of strings that grows as needed (in the arena): expanded arguments, glob matches, for-loop items, words of a
+ * command. No silent cap: the only limit is the arena ("out of memory"). v[n] is always 0. */
+struct words { char **v; int n, cap; };
+static void wv_init(struct words *w, int cap) { w->v = aalloc((u32)(cap + 1) * sizeof(char *)); w->n = 0; w->cap = cap; w->v[0] = 0; }
+static void wv_push(struct words *w, char *s)
+{
+    if (w->n >= w->cap) {
+        int nc = w->cap * 2; char **nv = aalloc((u32)(nc + 1) * sizeof(char *));
+        memcpy(nv, w->v, (u32)w->n * sizeof(char *)); w->v = nv; w->cap = nc;
+    }
+    w->v[w->n++] = s; w->v[w->n] = 0;
+}
+
 /* persistent strings (variables, history, aliases, functions) */
 static char *pdup(const char *s) { u32 n = strlen(s) + 1; char *p = malloc(n); if (!p) fatal("out of memory"); memcpy(p, s, n); return p; }
 
 /* ---------------------------------------------------------------- state */
 static int last_status, shell_pid, last_bg, interactive, loop_break, loop_continue, func_return, in_func, exit_requested;
-static char *pos_arg[24]; static int npos;
+/* the positional parameters $1..: borrowed (the arguments of a function call or of the shell) or, after `set --`,
+ * owned copies on the heap (they must outlive the command that set them) */
+static char **pos_arg; static int npos; static u8 pos_owned;
+static void pos_free(void) { if (pos_owned) { for (int i = 0; i < npos; i++) free(pos_arg[i]); free(pos_arg); } pos_arg = 0; npos = 0; pos_owned = 0; }
 static char *arg0 = "sh";
 
 struct var { char *name, *val; u32 cap; u8 exp, used; };
@@ -182,12 +198,15 @@ static int complete_dir(char **m, int n, int max, const char *dir, const char *b
     if (fd < 0) return n;
     struct udirent d;
     u32 bl = strlen(base);
+    u32 dl = strlen(dir);
     while (sys_readdir(fd, &d) > 0) {
         if (strncmp(d.name, base, bl)) continue;
         if (d.name[0] == '.' && base[0] != '.') continue;
-        char full[200]; u32 dl = strlen(dir);
-        memcpy(full, dir, dl); strcpy(full + dl, d.name);
-        char cand[100]; strcpy(cand, d.name);
+        u32 nl = strlen(d.name);
+        if (dl + nl + 2 > 200 || nl + 2 > 100) continue;    /* longer than any path a system call takes: not offered */
+        char full[200];
+        memcpy(full, dir, dl); memcpy(full + dl, d.name, nl + 1);
+        char cand[100]; memcpy(cand, d.name, nl + 1);
         int isdir = path_is_dir(full);
         if (cmd_only_exec && !isdir && !path_is_file(full)) continue;
         if (isdir && dirs_only_slash) { u32 l = strlen(cand); cand[l] = '/'; cand[l + 1] = 0; }
@@ -211,13 +230,13 @@ static int find_completions(const char *buf, int pos, char **m, int max, int *ws
     memcpy(pre, buf + ws, (u32)pl); pre[pl] = 0;
     int n = 0;
     if (pre[0] == '$' && !strchr(pre, '/')) {                       /* variable names */
-        for (int i = 0; i < 128; i++) if (vars[i].used && !strncmp(vars[i].name, pre + 1, strlen(pre + 1))) {
+        for (int i = 0; i < 128; i++) if (vars[i].used && !strncmp(vars[i].name, pre + 1, strlen(pre + 1)) && strlen(vars[i].name) < 98) {
             char c[100]; c[0] = '$'; strcpy(c + 1, vars[i].name); n = add_match(m, n, max, c);
         }
     } else if (strchr(pre, '/')) {                                  /* a path */
         char *sl = pre + strlen(pre); while (sl > pre && sl[-1] != '/') sl--;
         char dir[200]; u32 dl = (u32)(sl - pre); memcpy(dir, pre, dl); dir[dl] = 0;
-        n = complete_dir(m, n, max, dir, sl, 1, 0);
+        n = complete_dir(m, n, max, dir, sl, 1, 0);         /* dir is under 200 bytes, each match under 100 */
         for (int i = 0; i < n; i++) { char full[300]; strcpy(full, dir); strcpy(full + dl, m[i]); m[i] = adup(full); }
     } else if (cmdpos) {                                            /* a command */
         const char *bn[64]; int nb = builtin_names(bn, 64);
@@ -291,6 +310,15 @@ static int isearch(char *buf, int max, int *lenp, int *posp)
     }
 }
 
+/* a history entry into the line: an entry longer than the line (a multi-line command can be 2 KB) is cut, and the
+ * bell says so */
+static void hist_copy(char *buf, const char *h, int max)
+{
+    u32 n = strlen(h);
+    if (n > (u32)max - 2) { n = (u32)max - 2; outs("\a"); }
+    memcpy(buf, h, n); buf[n] = 0;
+}
+
 static int readline(const char *prompt, int plen, char *buf, int max)
 {
     int len = 0, pos = 0, scroll = 0, hidx = nhist, tabs = 0;
@@ -357,13 +385,13 @@ static int readline(const char *prompt, int plen, char *buf, int max)
         case 16:                                                /* history: previous */
             if (hidx > 0) {
                 if (hidx == nhist) { memcpy(saved, buf, (u32)len + 1); }
-                hidx--; strcpy(buf, hist[hidx]); len = pos = (int)strlen(buf);
+                hidx--; hist_copy(buf, hist[hidx], max); len = pos = (int)strlen(buf);
             }
             break;
         case 14:                                                /* history: next */
             if (hidx < nhist) {
                 hidx++;
-                if (hidx == nhist) strcpy(buf, saved); else strcpy(buf, hist[hidx]);
+                if (hidx == nhist) strcpy(buf, saved); else hist_copy(buf, hist[hidx], max);
                 len = pos = (int)strlen(buf);
             }
             break;
@@ -411,6 +439,7 @@ static int ntoks, ti, tokcap;
 static const char *lex_src;
 static int lex_incomplete;
 static char *perr;
+static const char *lex_err;             /* why lex returned 2, when it is not a plain syntax error */
 
 static int skip_paren(const char *s, int i)               /* s[i..] = "$(": index after the matching ')', or -1 */
 {
@@ -472,7 +501,7 @@ static void new_tok(int type, u32 start, u32 end)
 static int lex(const char *s)
 {
     int i = 0, pend[8], npend = 0;
-    lex_src = s; ntoks = 0; ti = 0; lex_incomplete = 0; toks = 0; tokcap = 0;
+    lex_src = s; ntoks = 0; ti = 0; lex_incomplete = 0; toks = 0; tokcap = 0; lex_err = 0;
     while (s[i]) {
         char c = s[i];
         if (c == ' ' || c == '\t') { i++; continue; }
@@ -519,7 +548,8 @@ static int lex(const char *s)
                 if (e < 0) return 1;
                 if (e == i) return 2;
                 new_tok(T_WORD, (u32)i, (u32)e); toks[ntoks - 1].text = adupn(s + i, (u32)(e - i));
-                if (npend < 8) pend[npend++] = ntoks - 2;      /* the << token carries the body (and fd 1 = strip tabs) */
+                if (npend == 8) { lex_err = "more than 8 here-documents on one line"; return 2; }
+                pend[npend++] = ntoks - 2;                     /* the << token carries the body (and fd 1 = strip tabs) */
                 toks[ntoks - 2].text = toks[ntoks - 1].text;
                 toks[ntoks - 2].hdquoted = (strchr(toks[ntoks - 1].text, '\'') || strchr(toks[ntoks - 1].text, '"') || strchr(toks[ntoks - 1].text, '\\')) ? 1 : 0;
                 ntoks--;                                       /* the delimiter word is folded into the << token */
@@ -605,7 +635,7 @@ static int is_assign(const char *w)
 static struct node *parse_simple(void)
 {
     struct node *n = new_node(N_SIMPLE);
-    char *words[64]; char *assigns[24]; int nw = 0, na = 0;
+    struct words words, assigns; wv_init(&words, 16); wv_init(&assigns, 4);
     struct redir *rhead = 0, **rtail = &rhead;
     u32 start = toks[ti].start, end = start;
     for (;;) {
@@ -630,13 +660,13 @@ static struct node *parse_simple(void)
             }
             break;                                                 /* | ; & && || ( ) end the command */
         }
-        if (nw == 0 && na < 24 && is_assign(t->text) && !(is_kw(t, "{") )) { assigns[na++] = t->text; end = t->end; ti++; continue; }
-        if (nw < 63) words[nw++] = t->text;
+        if (words.n == 0 && is_assign(t->text) && !(is_kw(t, "{") )) { wv_push(&assigns, t->text); end = t->end; ti++; continue; }
+        wv_push(&words, t->text);                              /* any number of words */
         end = t->end; ti++;
     }
-    if (!nw && !na && !rhead) { syn("syntax error"); return 0; }
-    n->nwords = nw; n->words = aalloc((u32)(nw + 1) * sizeof(char *)); memcpy(n->words, words, (u32)nw * sizeof(char *)); n->words[nw] = 0;
-    n->nassign = na; n->assign = aalloc((u32)(na + 1) * sizeof(char *)); memcpy(n->assign, assigns, (u32)na * sizeof(char *));
+    if (!words.n && !assigns.n && !rhead) { syn("syntax error"); return 0; }
+    n->nwords = words.n; n->words = words.v;
+    n->nassign = assigns.n; n->assign = assigns.v;
     n->redirs = rhead; n->start = start; n->end = end;
     n->src = adupn(lex_src + start, end - start);
     return n;
@@ -697,13 +727,13 @@ static struct node *parse_command(void)
             struct tok *v = peek();
             if (!v || v->type != T_WORD) { if (!v) lex_incomplete = 1; syn("expected a variable name"); return 0; }
             struct node *n = new_node(N_FOR); n->name = v->text; ti++;
-            char *ws[64]; int nw = 0; int has_in = 0;
+            struct words ws; wv_init(&ws, 8); int has_in = 0;
             if (is_kw(peek(), "in")) {
                 has_in = 1; ti++;
-                while (peek() && peek()->type == T_WORD && nw < 63) ws[nw++] = toks[ti++].text;
+                while (peek() && peek()->type == T_WORD) wv_push(&ws, toks[ti++].text);
             }
-            n->nwords = has_in ? nw : -1;
-            n->words = aalloc((u32)(nw + 1) * sizeof(char *)); memcpy(n->words, ws, (u32)nw * sizeof(char *));
+            n->nwords = has_in ? ws.n : -1;
+            n->words = ws.v;
             if (is_op(peek(), ";") || (peek() && peek()->type == T_NL)) { while (is_op(peek(), ";") || (peek() && peek()->type == T_NL)) ti++; }
             if (!is_kw(peek(), "do")) { if (at_eof()) lex_incomplete = 1; syn("expected do"); return 0; }
             ti++;
@@ -731,18 +761,18 @@ static struct node *parse_command(void)
                 if (is_kw(peek(), "esac")) break;
                 if (is_op(peek(), "(")) ti++;
                 struct caseitem *it = aalloc(sizeof *it); memset(it, 0, sizeof *it);
-                char *pats[16]; int np = 0;
+                struct words pats; wv_init(&pats, 4);
                 for (;;) {
                     struct tok *pt = peek();
                     if (!pt || pt->type != T_WORD) { if (!pt) lex_incomplete = 1; syn("expected a pattern"); return 0; }
-                    if (np < 16) pats[np++] = pt->text;
+                    wv_push(&pats, pt->text);
                     ti++;
                     if (is_op(peek(), "|")) { ti++; continue; }
                     break;
                 }
                 if (!is_op(peek(), ")")) { if (at_eof()) lex_incomplete = 1; syn("expected ) after the pattern"); return 0; }
                 ti++;
-                it->np = np; it->pats = aalloc((u32)np * sizeof(char *)); memcpy(it->pats, pats, (u32)np * sizeof(char *));
+                it->np = pats.n; it->pats = pats.v;
                 while (peek() && peek()->type == T_NL) ti++;
                 if (!is_op(peek(), ";;") && !is_kw(peek(), "esac")) { it->body = parse_list(s_item); if (!it->body && perr) return 0; }
                 if (is_op(peek(), ";;")) ti++;
@@ -799,12 +829,13 @@ static struct node *parse_pipeline(void)
     if (is_kw(peek(), "!")) { neg = 1; ti++; }
     struct node *first = parse_command(); if (!first) return 0;
     if (!is_op(peek(), "|")) { first->negate = (u8)neg; return first; }
-    struct node *cmds[16]; int n = 0; cmds[n++] = first;
+    int cap = 8, n = 0; struct node **cmds = aalloc((u32)cap * sizeof *cmds); cmds[n++] = first;
     while (is_op(peek(), "|")) {
         ti++; skip_nl();
         if (at_eof()) { lex_incomplete = 1; syn("expected a command after |"); return 0; }
         struct node *c = parse_command(); if (!c) return 0;
-        if (n < 16) cmds[n++] = c;
+        if (n == cap) { struct node **nc = aalloc((u32)cap * 2 * sizeof *nc); memcpy(nc, cmds, (u32)n * sizeof *nc); cmds = nc; cap *= 2; }
+        cmds[n++] = c;                                     /* any number of stages */
     }
     struct node *p = new_node(N_PIPE);
     p->negate = (u8)neg; p->ncmds = n; p->cmds = aalloc((u32)n * sizeof(struct node *)); memcpy(p->cmds, cmds, (u32)n * sizeof(struct node *));
@@ -854,8 +885,13 @@ static struct node *parse_list(const char *const *stops)
 static const char *ar_p;
 static long ar_or(void);
 static void ar_ws(void) { while (*ar_p == ' ' || *ar_p == '\t') ar_p++; }
+static int ex_error;
 static long ar_atom(void)
 {
+    if (stack_low()) {                                          /* (((((...: refuse before the stack runs out */
+        if (!ex_error) errm("arithmetic", "nested too deeply");
+        ex_error = 1; ar_p += strlen(ar_p); return 0;
+    }
     ar_ws();
     if (*ar_p == '(') { ar_p++; long v = ar_or(); ar_ws(); if (*ar_p == ')') ar_p++; return v; }
     if (*ar_p == '-') { ar_p++; return -ar_atom(); }
@@ -926,7 +962,8 @@ static int run_string(const char *text);
 
 #define FMAX 4096
 static char fbuf[FMAX]; static u8 fq[FMAX]; static u32 fn; static int fhas;
-static char **ex_out; static int *ex_n; static int ex_max;
+static struct words *ex_w;
+/* ex_error (above): an expansion failed (bad substitution, too deep): the command is not run, status 1 */
 
 static int gm(const char *p, const u8 *q, int pn, const char *s)
 {
@@ -967,12 +1004,12 @@ static int has_glob(const char *s, const u8 *q, u32 n)
     return 0;
 }
 
-/* expand a wildcard pattern component by component; matches are appended to out */
-static void glob_rec(const char *pat, const u8 *q, u32 n, u32 pos, const char *prefix, char **out, int *cnt, int max)
+/* expand a wildcard pattern component by component; matches are appended to out (no limit on their number) */
+static void glob_rec(const char *pat, const u8 *q, u32 n, u32 pos, const char *prefix, struct words *out)
 {
-    if (stack_low()) return;
+    if (stack_low()) { errm("wildcard", "nested too deeply"); ex_error = 1; return; }
     while (pos < n && pat[pos] == '/') pos++;
-    if (pos >= n) { if (*cnt < max && path_exists(prefix)) out[(*cnt)++] = adup(prefix); return; }
+    if (pos >= n) { if (path_exists(prefix)) wv_push(out, adup(prefix)); return; }
     u32 e = pos; while (e < n && pat[e] != '/') e++;
     int last = (e >= n);
     if (!has_glob(pat + pos, q + pos, e - pos)) {
@@ -980,26 +1017,26 @@ static void glob_rec(const char *pat, const u8 *q, u32 n, u32 pos, const char *p
         if (pl + (e - pos) + 3 > sizeof np) return;
         memcpy(np, prefix, pl); memcpy(np + pl, pat + pos, e - pos); np[pl + e - pos] = 0;
         if (!last) { u32 l = strlen(np); np[l] = '/'; np[l + 1] = 0; }
-        glob_rec(pat, q, n, e, np, out, cnt, max);
+        glob_rec(pat, q, n, e, np, out);
         return;
     }
     int fd = sys_open(prefix[0] ? prefix : ".", O_RDONLY);
     if (fd < 0) return;
     struct udirent d;
-    char *found[120]; int nf = 0;
-    while (sys_readdir(fd, &d) > 0 && nf < 120) {
+    struct words found; wv_init(&found, 16);
+    while (sys_readdir(fd, &d) > 0) {
         if (d.name[0] == '.' && pat[pos] != '.') continue;
         if (!strcmp(d.name, ".") || !strcmp(d.name, "..")) continue;
-        if (gm(pat + pos, q + pos, (int)(e - pos), d.name)) found[nf++] = adup(d.name);
+        if (gm(pat + pos, q + pos, (int)(e - pos), d.name)) wv_push(&found, adup(d.name));
     }
     sys_close(fd);
-    sort_strs(found, nf);
-    for (int i = 0; i < nf; i++) {
-        char np[300]; u32 pl = strlen(prefix), fl = strlen(found[i]);
-        if (pl + fl + 3 > sizeof np) continue;
-        memcpy(np, prefix, pl); memcpy(np + pl, found[i], fl); np[pl + fl] = 0;
+    sort_strs(found.v, found.n);
+    for (int i = 0; i < found.n; i++) {
+        char np[300]; u32 pl = strlen(prefix), fl = strlen(found.v[i]);
+        if (pl + fl + 3 > sizeof np) continue;              /* longer than any path a system call takes (63) */
+        memcpy(np, prefix, pl); memcpy(np + pl, found.v[i], fl); np[pl + fl] = 0;
         if (!last) { if (!path_is_dir(np)) continue; np[pl + fl] = '/'; np[pl + fl + 1] = 0; }
-        glob_rec(pat, q, n, e, np, out, cnt, max);
+        glob_rec(pat, q, n, e, np, out);
     }
 }
 
@@ -1010,14 +1047,15 @@ static void field_end(void)
     if (!fhas) return;
     fbuf[fn] = 0;
     if (no_glob_exp) { if (!pat_n) { memcpy(pat_q, fq, fn); pat_n = fn + 1; } }
-    if (*ex_n < ex_max) {
-        int before = *ex_n;
+    {
+        int before = ex_w->n;
         if (!no_glob_exp && has_glob(fbuf, fq, fn)) {
-            char *tmp[200]; int cnt = 0;
-            glob_rec(fbuf, fq, fn, 0, fbuf[0] == '/' ? "/" : "", tmp, &cnt, 200);
-            if (cnt) { sort_strs(tmp, cnt); for (int i = 0; i < cnt && *ex_n < ex_max; i++) ex_out[(*ex_n)++] = tmp[i]; }
+            struct words tmp; wv_init(&tmp, 16);
+            glob_rec(fbuf, fq, fn, 0, fbuf[0] == '/' ? "/" : "", &tmp);
+            sort_strs(tmp.v, tmp.n);
+            for (int i = 0; i < tmp.n; i++) wv_push(ex_w, tmp.v[i]);
         }
-        if (*ex_n == before) ex_out[(*ex_n)++] = adupn(fbuf, fn);         /* no match: the word itself */
+        if (ex_w->n == before) wv_push(ex_w, adupn(fbuf, fn));          /* no match: the word itself */
     }
     fn = 0; fhas = 0;
 }
@@ -1025,6 +1063,7 @@ static void field_end(void)
 static void fpush(char c, int quoted)
 {
     if (fn < FMAX - 1) { fbuf[fn] = c; fq[fn] = (u8)quoted; fn++; }
+    else if (!ex_error) { errm("a word is longer than 4095 characters", 0); ex_error = 1; }
     fhas = 1;
 }
 
@@ -1047,6 +1086,14 @@ static const char *special_param(char c, char *buf)
     if (c == '0') return arg0;
     if (c >= '1' && c <= '9') { int k = c - '1'; return k < npos ? pos_arg[k] : ""; }
     return 0;
+}
+/* ${NN}: a positional parameter by number (also 10 and more) */
+static const char *pos_param(const char *name)
+{
+    int k = 0;
+    for (const char *p = name; *p; p++) { if (*p < '0' || *p > '9') return 0; if (k < 100000) k = k * 10 + (*p - '0'); }
+    if (k == 0) return arg0;
+    return k <= npos ? pos_arg[k - 1] : "";
 }
 
 /* handles the $-expression at w[i]; returns the index after it */
@@ -1085,7 +1132,7 @@ static int expand_dollar(const char *w, int i, int quoted)
         if (*op == ':' && (op[1] == '-' || op[1] == '=' || op[1] == '+')) { mode = op[1]; def = op + 2; }
         else if (*op == '-' || *op == '+') { mode = *op; def = op + 1; }
         char saved = *op; *op = 0;
-        const char *v = var_get(name);
+        const char *v = isdigit((unsigned char)name[0]) ? pos_param(name) : var_get(name);
         if (!v && !name[1]) v = special_param(name[0], tmp);
         *op = saved;
         if (!len_op && v && (*op == '#' || *op == '%' || *op == '/' || (*op == ':' && (op[1] >= '0' && op[1] <= '9')))) {
@@ -1129,7 +1176,10 @@ static int expand_dollar(const char *w, int i, int quoted)
                 if (*q == ':') len = atoi(q + 1);
                 if (off > vl) off = vl;
                 if (len < 0) len = vl - off + len;              /* ${v:1:-1}: a negative length counts from the end */
-                if (len < 0) len = 0;
+                if (len < 0) {                                  /* as bash: an error, not an empty string */
+                    *op = 0; errm(name, "substring expression < 0"); *op = saved;
+                    ex_error = 1; len = 0;
+                }
                 if (len > vl - off) len = vl - off;
                 char *sub = adupn(val + off, (u32)len); append_val(sub, quoted);
             }
@@ -1163,7 +1213,7 @@ static int expand_dollar(const char *w, int i, int quoted)
 }
 
 /* expand one raw word into zero or more fields */
-static void expand_word(const char *w, char **out, int *n, int max);
+static void expand_word(const char *w, struct words *out);
 /* ---- brace expansion: pre{a,b,c}post -> preapost prebpost precpost; {1..5} {a..e} {01..10} {1..10..2} ---- */
 static int brace_range(const char *body, int bl, char **items, int *ni, int max)
 {
@@ -1196,7 +1246,7 @@ static int brace_range(const char *body, int bl, char **items, int *ni, int max)
     }
     return 0;
 }
-static int brace_try(const char *w, char **out, int *n, int max)
+static int brace_try(const char *w, struct words *out)
 {
     for (int i = 0; w[i]; i++) {
         char c = w[i];
@@ -1228,21 +1278,21 @@ static int brace_try(const char *w, char **out, int *n, int max)
             }
         } else if (!brace_range(w + i + 1, close - i - 1, items, &ni, 64)) continue;
         char *pre = adupn(w, (u32)i), *post = adup(w + close + 1);
-        for (int k = 0; k < ni && *n < max; k++) {
+        for (int k = 0; k < ni; k++) {
             u32 l = strlen(pre) + strlen(items[k]) + strlen(post);
             char *nw = aalloc(l + 1); strcpy(nw, pre); strcat(nw, items[k]); strcat(nw, post);
-            expand_word(nw, out, n, max);
+            expand_word(nw, out);
         }
         return 1;
     }
     return 0;
 }
 
-static void expand_word(const char *w, char **out, int *n, int max)
+static void expand_word(const char *w, struct words *out)
 {
-    if (stack_low()) return;
-    if (!no_glob_exp && brace_try(w, out, n, max)) return;
-    ex_out = out; ex_n = n; ex_max = max; fn = 0; fhas = 0;
+    if (stack_low()) { errm("expansion", "nested too deeply"); ex_error = 1; return; }
+    if (!no_glob_exp && brace_try(w, out)) return;
+    ex_w = out; fn = 0; fhas = 0;
     int i = 0;
     if (w[0] == '~' && (w[1] == '/' || !w[1])) {
         const char *h = var_get("HOME"); if (!h) h = "/";
@@ -1286,15 +1336,14 @@ static char *expand_plain(const char *w)
 {
     static char out[FMAX];
     u32 olen = 0;
-    char *flds[64]; int nf = 0;
-    /* reuse the quote-aware expander but join the fields with a space and ignore globbing results */
-    char *save_ifs = 0; (void)save_ifs;
-    expand_word(w, flds, &nf, 64);
-    for (int k = 0; k < nf; k++) {
-        u32 l = strlen(flds[k]);
-        if (olen + l + 2 >= sizeof out) break;
-        memcpy(out + olen, flds[k], l); olen += l;
-        if (k + 1 < nf) out[olen++] = ' ';
+    struct words f; wv_init(&f, 8);
+    /* reuse the quote-aware expander but join the fields with a space */
+    expand_word(w, &f);
+    for (int k = 0; k < f.n; k++) {
+        u32 l = strlen(f.v[k]);
+        if (olen + l + 2 >= sizeof out) { errm("a word is longer than 4095 characters", 0); ex_error = 1; break; }
+        memcpy(out + olen, f.v[k], l); olen += l;
+        if (k + 1 < f.n) out[olen++] = ' ';
     }
     out[olen] = 0;
     return adup(out);
@@ -1353,14 +1402,26 @@ static void reap_jobs(int announce)
 }
 
 /* ---- redirections: applied to the shell's own fds 0-2, then undone ---- */
-struct rsave { int saved[3]; char *tmpfiles[4]; int ntmp; };
+/* saved[fd]: -1 not touched, -2 was closed (close it again), else a copy to put back. fds 0-9, so `3>&1 1>&2 2>&3` leaves
+ * fd 3 as it was. */
+struct rsave { int saved[10]; char *tmpfiles[4]; int ntmp; };
+#define NFD_SH 16                       /* file descriptors per process (kernel NFD) */
 
-static void rs_init(struct rsave *r) { r->saved[0] = r->saved[1] = r->saved[2] = -1; r->ntmp = 0; }
-static void rs_save(struct rsave *r, int fd) { if (fd >= 0 && fd < 3 && r->saved[fd] < 0) r->saved[fd] = sys_dup(fd); }
+static void rs_init(struct rsave *r) { for (int i = 0; i < 10; i++) r->saved[i] = -1; r->ntmp = 0; }
+/* the copy goes to a free fd of 10-15 (out of the way of 3>&1 and friends), else the lowest free one */
+static int dup_high(int fd)
+{
+    for (int k = NFD_SH - 1; k >= 10; k--) { int t = sys_dup(k); if (t >= 0) { sys_close(t); continue; } if (sys_dup2(fd, k) >= 0) return k; }
+    return sys_dup(fd);
+}
+static void rs_save(struct rsave *r, int fd) { if (fd >= 0 && fd < 10 && r->saved[fd] == -1) { int t = sys_dup(fd); if (t < 0) { r->saved[fd] = -2; return; } sys_close(t); r->saved[fd] = dup_high(fd); } }
 static void rs_restore(struct rsave *r)
 {
-    for (int fd = 0; fd < 3; fd++)
-        if (r->saved[fd] >= 0) { sys_dup2(r->saved[fd], fd); sys_close(r->saved[fd]); r->saved[fd] = -1; }
+    for (int fd = 9; fd >= 0; fd--) {
+        if (r->saved[fd] >= 0) { sys_dup2(r->saved[fd], fd); sys_close(r->saved[fd]); }
+        else if (r->saved[fd] == -2) sys_close(fd);
+        r->saved[fd] = -1;
+    }
     for (int i = 0; i < r->ntmp; i++) sys_unlink(r->tmpfiles[i]);
     r->ntmp = 0;
 }
@@ -1377,8 +1438,8 @@ static int apply_redirs(struct redir *r, struct rsave *rs)
             char name[40] = "/tmp/.sh"; char b[12];
             utoa((u32)shell_pid, b); strcpy(name + strlen(name), b); u32 l = strlen(name); name[l++] = '_';
             u32 um = (u32)sys_umask(077);
-            fd = -17;
-            for (int tries = 0; tries < 50 && fd == -17; tries++) {
+            fd = -EEXIST;
+            for (int tries = 0; tries < 50 && fd == -EEXIST; tries++) {
                 u32 x = sys_hrtime() * 2654435761u ^ (u32)hd_seq++ * 40503u ^ sys_ticks();
                 for (int k = 0; k < 8; k++) { name[l + k] = "abcdefghijklmnopqrstuvwxyz012345"[x & 31]; x = (x >> 5) ^ (x * 69069u); }
                 name[l + 8] = 0;
@@ -1390,6 +1451,7 @@ static int apply_redirs(struct redir *r, struct rsave *rs)
             sys_write(fd, body, strlen(body)); sys_close(fd);
             fd = sys_open(name, O_RDONLY);
             if (rs->ntmp < 4) rs->tmpfiles[rs->ntmp++] = adup(name);
+            else sys_unlink(name);                            /* open already: it goes when the last reader closes it */
             rs_save(rs, 0); sys_dup2(fd, 0); sys_close(fd);
             continue;
         }
@@ -1474,14 +1536,21 @@ static int run_function(struct func *f, char **argv, int argc);
 static int run_words(char **argv, int argc, int *pidout, int background)
 {
     if (argc == 0) return 0;
-    /* alias on the first word (once) */
+    /* alias on the first word; as in bash, an alias being expanded is not expanded again (alias a=b b=a ends) */
+    static struct alias *active[16]; static int nactive;
     struct alias *al = alias_find(argv[0]);
-    if (al && !background) {
-        char **nv = aalloc(64 * sizeof(char *)); int nn = 0;
+    for (int i = 0; i < nactive && al; i++) if (active[i] == al) al = 0;
+    if (al && !background && nactive < 16) {
+        struct words nv; wv_init(&nv, 8);
         char *v = adup(al->val); char *p = v;
-        while (*p && nn < 40) { while (is_space(*p)) p++; if (!*p) break; nv[nn++] = p; while (*p && !is_space(*p)) p++; if (*p) *p++ = 0; }
-        for (int i = 1; i < argc && nn < 63; i++) nv[nn++] = argv[i];
-        if (nn && strcmp(nv[0], argv[0])) { nv[nn] = 0; return run_words(nv, nn, pidout, background); }
+        while (*p) { while (is_space(*p)) p++; if (!*p) break; wv_push(&nv, p); while (*p && !is_space(*p)) p++; if (*p) *p++ = 0; }
+        for (int i = 1; i < argc; i++) wv_push(&nv, argv[i]);
+        if (nv.n && strcmp(nv.v[0], argv[0])) {
+            active[nactive++] = al;
+            int st = run_words(nv.v, nv.n, pidout, background);
+            nactive--;
+            return st;
+        }
     }
     struct func *f = func_find(argv[0]);
     if (f) return run_function(f, argv, argc);
@@ -1493,22 +1562,27 @@ static int run_words(char **argv, int argc, int *pidout, int background)
     return wait_fg(pid, argv[0]);
 }
 
-static int expand_command(struct node *n, char **argv, int max)
+/* all the words of a command, expanded (no limit on their number); -1 if an expansion failed (said why) */
+static int expand_command(struct node *n, char ***argvp)
 {
-    int argc = 0;
-    for (int i = 0; i < n->nwords && argc < max - 1; i++) expand_word(n->words[i], argv, &argc, max - 1);
-    argv[argc] = 0;
-    return argc;
+    struct words w; wv_init(&w, 16);
+    ex_error = 0;
+    for (int i = 0; i < n->nwords; i++) expand_word(n->words[i], &w);
+    *argvp = w.v;
+    if (ex_error) { ex_error = 0; return -1; }
+    return w.n;
 }
 
 static int run_simple(struct node *n, int background, int *pidout)
 {
     char *mark = abrk;                                      /* released when the command is done */
-    char **argv = aalloc(96 * sizeof(char *)); int argc = expand_command(n, argv, 96);
+    char **argv; int argc = expand_command(n, &argv);
+    if (argc < 0) { abrk = mark; return 1; }
     struct rsave rs; rs_init(&rs);
     int st = 0;
     /* assignments */
-    char **saved_names = aalloc(24 * sizeof(char *)); char **saved_vals = aalloc(24 * sizeof(char *)); int *saved_had = aalloc(24 * sizeof(int));
+    int nas = n->nassign ? n->nassign : 1;
+    char **saved_names = aalloc((u32)nas * sizeof(char *)); char **saved_vals = aalloc((u32)nas * sizeof(char *)); int *saved_had = aalloc((u32)nas * sizeof(int));
     for (int i = 0; i < n->nassign; i++) {
         char *eq = strchr(n->assign[i], '='); *eq = 0;
         char *val = expand_plain(eq + 1);
@@ -1520,7 +1594,7 @@ static int run_simple(struct node *n, int background, int *pidout)
         *eq = '=';
         env_dirty = 1;
     }
-    if (n->redirs && apply_redirs(n->redirs, &rs)) { rs_restore(&rs); abrk = mark; return 1; }
+    if ((n->redirs && apply_redirs(n->redirs, &rs)) || ex_error) { ex_error = 0; rs_restore(&rs); abrk = mark; return 1; }
     if (argc) st = run_words(argv, argc, pidout, background);
     rs_restore(&rs);
     if (argc) for (int i = 0; i < n->nassign; i++) { if (saved_had[i]) var_set(saved_names[i], saved_vals[i], -1); else var_unset(saved_names[i]); env_dirty = 1; }
@@ -1596,7 +1670,8 @@ static int spawn_stage(struct node *c, int background_text_only)
 {
     (void)background_text_only;
     if (c->type == N_SIMPLE && !c->nassign) {
-        char **argv = aalloc(96 * sizeof(char *)); int argc = expand_command(c, argv, 96);
+        char **argv; int argc = expand_command(c, &argv);
+        if (argc < 0) return -1;
         if (argc && !func_find(argv[0]) && !is_builtin(argv[0]) && !alias_find(argv[0])) {
             struct rsave rs; rs_init(&rs);
             if (c->redirs && apply_redirs(c->redirs, &rs)) { rs_restore(&rs); return -1; }
@@ -1613,7 +1688,8 @@ static int spawn_stage(struct node *c, int background_text_only)
 
 static int run_pipeline(struct node *p, int background, int *pidout)
 {
-    int pids[16], np = 0, prev = -1;
+    char *mark = abrk;
+    int *pids = aalloc((u32)p->ncmds * sizeof(int)), np = 0, prev = -1;
     struct rsave rs; rs_init(&rs);
     for (int i = 0; i < p->ncmds; i++) {
         int pp[2] = { -1, -1 };
@@ -1629,25 +1705,55 @@ static int run_pipeline(struct node *p, int background, int *pidout)
         if (pid >= 0) pids[np++] = pid;
     }
     if (prev >= 0) sys_close(prev);
-    if (np == 0) return 1;
+    if (np == 0) { abrk = mark; return 1; }
     if (pidout) *pidout = pids[np - 1];
-    if (background) return 0;
-    return fg_wait(pids, np, p->src ? p->src : "pipeline", 0);
+    int st = background ? 0 : fg_wait(pids, np, p->src ? p->src : "pipeline", 0);
+    abrk = mark;
+    return st;
 }
+
+/* `local NAME` saves the old value here; the function's end puts it back (dynamic scope, as in bash) */
+#define NLOCAL 64
+static struct lsave { char *name, *val; u8 had; } lsaves[NLOCAL];
+static int nlsave;
+static int frame_base;                  /* where the running function's saves start (local_save looks only there) */
+static int local_save(const char *name)
+{
+    for (int i = nlsave - 1; i >= frame_base && i >= 0; i--) if (!strcmp(lsaves[i].name, name)) return 0;   /* saved already */
+    if (nlsave >= NLOCAL) { errm("local", "too many local variables (64)"); return 1; }
+    const char *old = var_get(name);
+    struct var *v = var_find(name);
+    lsaves[nlsave].name = pdup(name); lsaves[nlsave].had = old != 0;
+    lsaves[nlsave].val = old ? pdup(old) : 0;
+    if (v) lsaves[nlsave].had |= (u8)(v->exp << 1);
+    nlsave++;
+    return 0;
+}
+static void local_restore(int base)
+{
+    while (nlsave > base) {
+        struct lsave *l = &lsaves[--nlsave];
+        if (l->had & 1) var_set(l->name, l->val, (l->had >> 1) & 1); else var_unset(l->name);
+        free(l->name); free(l->val); l->name = l->val = 0;
+        env_dirty = 1;
+    }
+}
+
+/* the positional parameters for a call (function, `. file args`): borrowed from argv, given back afterwards */
+struct possave { char **v; int n; u8 owned; };
+static void pos_push(struct possave *sv, char **v, int n) { sv->v = pos_arg; sv->n = npos; sv->owned = pos_owned; pos_arg = v; npos = n; pos_owned = 0; }
+static void pos_pop(struct possave *sv) { pos_free(); pos_arg = sv->v; npos = sv->n; pos_owned = sv->owned; }
 
 static int run_function(struct func *f, char **argv, int argc)
 {
-    char *save_pos[24]; int save_n = npos;
-    memcpy(save_pos, pos_arg, sizeof save_pos);
-    npos = argc - 1 < 23 ? argc - 1 : 23;
-    for (int i = 0; i < npos; i++) pos_arg[i] = argv[i + 1];
+    struct possave sv; pos_push(&sv, argv + 1, argc - 1);
+    int save_base = frame_base, base = nlsave; frame_base = base;
     in_func++; func_return = 0;
-    char *saved_arena = abrk;
     int st = run_string(f->body);
-    (void)saved_arena;
     if (func_return) { st = func_return - 1; func_return = 0; }
     in_func--;
-    npos = save_n; memcpy(pos_arg, save_pos, sizeof save_pos);
+    local_restore(base); frame_base = save_base;
+    pos_pop(&sv);
     return st;
 }
 
@@ -1674,23 +1780,29 @@ static int exec_node(struct node *n)
     case N_AND: st = exec_node(n->a); if (st == 0 && !exit_requested) st = exec_node(n->b); break;
     case N_OR: st = exec_node(n->a); if (st != 0 && !exit_requested) st = exec_node(n->b); break;
     case N_SEQ: {
+        char *mark = abrk;                                  /* each statement's allocations go when it is done */
         for (struct node *c = n; c; c = c->b) {
+            abrk = mark;
             st = exec_node(c->a);
             if (exit_requested || loop_break || loop_continue || func_return || interrupted) break;
         }
+        abrk = mark;
         break;
     }
     case N_BG: {
         struct node *a = n->a; int pid = 0;
+        char *mark = abrk;                                  /* released when it has started */
         if (a->type == N_SIMPLE && !a->nassign) {
-            char **argv = aalloc(96 * sizeof(char *)); int argc = expand_command(a, argv, 96);
+            char **argv; int argc = expand_command(a, &argv);
             struct rsave rs; rs_init(&rs);
-            if (argc && !func_find(argv[0]) && !is_builtin(argv[0]) && !alias_find(argv[0])) {
+            if (argc < 0) pid = 0;
+            else if (argc && !func_find(argv[0]) && !is_builtin(argv[0]) && !alias_find(argv[0])) {
                 if (!a->redirs || !apply_redirs(a->redirs, &rs)) { pid = start_program(argv); if (pid < 0) pid = 0; }
                 rs_restore(&rs);
             } else pid = spawn_stage(a, 1);
         } else if (a->type == N_PIPE) { run_pipeline(a, 1, &pid); }
         else pid = spawn_stage(a, 1);
+        abrk = mark;
         if (pid > 0) {
             last_bg = pid;
             int j = add_job(pid, a->src ? a->src : "job");
@@ -1711,9 +1823,13 @@ static int exec_node(struct node *n)
         }
         break;
     }
-    case N_WHILE:
+    case N_WHILE: {
+        /* what one round allocates (pipelines, expansions, substitutions) is given back before the next, so a long
+         * `while read` loop runs in flat memory; what must outlive a round lives on the heap (variables, set --, jobs) */
+        char *mark = abrk;
         st = 0;
         for (;;) {
+            abrk = mark;
             int c = exec_node(n->a);
             if (exit_requested) break;
             if (n->until ? c == 0 : c != 0) break;
@@ -1722,20 +1838,27 @@ static int exec_node(struct node *n)
             if (loop_continue) { loop_continue--; continue; }
             if (func_return) break;
         }
+        abrk = mark;
         break;
+    }
     case N_FOR: {
-        char **items = aalloc(160 * sizeof(char *)); int ni = 0;
-        if (n->nwords < 0) { for (int i = 0; i < npos && ni < 159; i++) items[ni++] = pos_arg[i]; }
-        else for (int i = 0; i < n->nwords; i++) expand_word(n->words[i], items, &ni, 159);
+        struct words it; wv_init(&it, 16);
+        ex_error = 0;
+        if (n->nwords < 0) { for (int i = 0; i < npos; i++) wv_push(&it, adup(pos_arg[i])); }   /* copies: set -- may change them */
+        else for (int i = 0; i < n->nwords; i++) expand_word(n->words[i], &it);
+        if (ex_error) { ex_error = 0; st = 1; break; }
+        char *mark = abrk;                                  /* the items stay; each round's allocations go (see N_WHILE) */
         st = 0;
-        for (int i = 0; i < ni; i++) {
-            var_set(n->name, items[i], -1);
+        for (int i = 0; i < it.n; i++) {
+            abrk = mark;
+            var_set(n->name, it.v[i], -1);
             st = exec_node(n->b);
             if (exit_requested) break;
             if (loop_break) { loop_break--; break; }
             if (loop_continue) { loop_continue--; continue; }
             if (func_return) break;
         }
+        abrk = mark;
         break;
     }
     case N_GROUP: st = exec_node(n->a); break;
@@ -1746,22 +1869,24 @@ static int exec_node(struct node *n)
         for (struct caseitem *it = n->items; it; it = it->next) {
             int hit = 0;
             for (int k = 0; k < it->np && !hit; k++) {
-                char *flds[4]; int nf = 0;
+                struct words f; wv_init(&f, 4);
                 no_glob_exp = 1; pat_n = 0;
-                expand_word(it->pats[k], flds, &nf, 4);
+                expand_word(it->pats[k], &f);
                 no_glob_exp = 0;
-                if (nf && pat_n) hit = gm(flds[0], pat_q, (int)pat_n - 1, subject);
+                if (f.n && pat_n) hit = gm(f.v[0], pat_q, (int)pat_n - 1, subject);
             }
             if (hit) { if (it->body) st = exec_node(it->body); break; }
         }
         break;
     }
     case N_SUBSH: {
+        char *mark = abrk;
         char *inner = adupn(n->src + 1, strlen(n->src) - 2);
         char *argv[5] = { "sh", "-c", subshell_text(inner), 0, 0 };
         if (env_dirty) { env_sync(); env_dirty = 0; }
         int pid = sys_spawn("/bin/sh", argv, 0);
         st = pid < 0 ? 126 : wait_fg(pid, "subshell");
+        abrk = mark;
         break;
     }
     case N_FUNC: {
@@ -1811,7 +1936,7 @@ static int run_string(const char *text)
     struct node *tree;
     int rc = lex(text);
     if (rc == 1) { errm("unexpected end of input", 0); return 2; }
-    if (rc) { errm("syntax error", 0); return 2; }
+    if (rc) { errm(lex_err ? lex_err : "syntax error", 0); return 2; }
     if (!ntoks) return last_status;
     perr = 0; lex_incomplete = 0;
     tree = parse_list(0);
@@ -2005,6 +2130,18 @@ static int run_builtin(char **argv, int argc)
     if (!strcmp(n, "exit")) { last_status = argc > 1 ? atoi(argv[1]) : last_status; exit_requested = 1; return last_status; }
     if (!strcmp(n, "export") || !strcmp(n, "local")) {
         int is_export = n[0] == 'e';
+        if (!is_export && !in_func) { errm("local", "can only be used in a function"); return 1; }
+        if (!is_export) {
+            for (int i = 1; i < argc; i++) {
+                char *eq = strchr(argv[i], '=');
+                if (eq) *eq = 0;
+                int bad = local_save(argv[i]);
+                if (eq) { var_set(argv[i], eq + 1, -1); *eq = '='; }
+                else if (!bad) var_set(argv[i], "", -1);   /* bash: a local without a value is empty here */
+                if (bad) return 1;
+            }
+            env_dirty = 1; return 0;
+        }
         if (argc == 1) { for (int i = 0; i < 128; i++) if (vars[i].used && vars[i].exp) { outs("export "); outs(vars[i].name); outs("=\""); outs(vars[i].val); outs("\"\n"); } return 0; }
         for (int i = 1; i < argc; i++) {
             char *eq = strchr(argv[i], '=');
@@ -2019,10 +2156,24 @@ static int run_builtin(char **argv, int argc)
         int i = 1;
         while (i < argc && argv[i][0] == '-' && argv[i][1] && strcmp(argv[i], "--")) i++;       /* -e -x ... accepted, ignored */
         if (i < argc && !strcmp(argv[i], "--")) i++;
-        if (i < argc || (argc > 1 && !strcmp(argv[1], "--"))) { npos = 0; for (; i < argc && npos < 23; i++) pos_arg[npos++] = adup(argv[i]); }
+        if (i < argc || (argc > 1 && !strcmp(argv[1], "--"))) {    /* new parameters: copies on the heap (they outlive this command) */
+            int k = argc - i;
+            char **nv = malloc((u32)(k + 1) * sizeof(char *));
+            if (!nv) { errm("set", "out of memory"); return 1; }
+            for (int j = 0; j < k; j++) if (!(nv[j] = malloc(strlen(argv[i + j]) + 1))) { while (j--) free(nv[j]); free(nv); errm("set", "out of memory"); return 1; } else strcpy(nv[j], argv[i + j]);
+            nv[k] = 0;
+            pos_free(); pos_arg = nv; npos = k; pos_owned = 1;
+        }
         return 0;
     }
-    if (!strcmp(n, "shift")) { int k = argc > 1 ? atoi(argv[1]) : 1; if (k > npos) return 1; memmove(pos_arg, pos_arg + k, (u32)(npos - k) * sizeof(char *)); npos -= k; return 0; }
+    if (!strcmp(n, "shift")) {
+        int k = 1;
+        if (argc > 1) { char *e; long v = strtol(argv[1], &e, 10); if (*e || v < 0) { errm(argv[1], "shift count out of range"); return 1; } k = (int)v; }
+        if (k > npos) return 1;
+        if (pos_owned) { for (int j = 0; j < k; j++) free(pos_arg[j]); memmove(pos_arg, pos_arg + k, (u32)(npos - k + 1) * sizeof(char *)); }
+        else pos_arg += k;                                 /* borrowed: just look further on */
+        npos -= k; return 0;
+    }
     if (!strcmp(n, "alias")) {
         if (argc == 1) { for (int i = 0; i < 48; i++) if (aliases[i].used) { outs("alias "); outs(aliases[i].name); outs("='"); outs(aliases[i].val); outs("'\n"); } return 0; }
         for (int i = 1; i < argc; i++) {
@@ -2046,10 +2197,10 @@ static int run_builtin(char **argv, int argc)
         if (argc < 2) { errm(n, "file name needed"); return 2; }
         char *text = file_slurp(argv[1], 0);
         if (!text) { errm(argv[1], "cannot read"); return 1; }
-        char *save_pos[24]; int save_n = npos;
-        if (argc > 2) { memcpy(save_pos, pos_arg, sizeof save_pos); npos = 0; for (int i = 2; i < argc && npos < 23; i++) pos_arg[npos++] = argv[i]; }
+        struct possave sv;
+        if (argc > 2) pos_push(&sv, argv + 2, argc - 2);
         int st = run_string(text);
-        if (argc > 2) { npos = save_n; memcpy(pos_arg, save_pos, sizeof save_pos); }
+        if (argc > 2) pos_pop(&sv);
         return st;
     }
     if (!strcmp(n, "eval")) {
@@ -2151,8 +2302,9 @@ static void init_vars(void)
 {
     static const char *const defs[][2] = {
         { "PATH", "/bin" }, { "HOME", "/home" }, { "USER", "root" }, { "HOSTNAME", "zenix" }, { "SHELL", "/bin/sh" },
-        { "TERM", "vt100" }, { "LINES", "31" }, { "COLUMNS", "80" }, { 0, 0 } };
+        { "TERM", "vt100" }, { "COLUMNS", "80" }, { 0, 0 } };
     for (int i = 0; defs[i][0]; i++) if (!var_get(defs[i][0])) var_set(defs[i][0], defs[i][1], 1);
+    if (!var_get("LINES")) { char b[12]; int ti = sys_ttyinfo(); utoa(ti > 0 ? (u32)ti >> 16 : 25, b); var_set("LINES", b, 1); }   /* 32 PAL, 25 NTSC */
     if (!var_get("PS1")) var_set("PS1", "\\h:\\w\\$ ", 0);
     if (!var_get("PS2")) var_set("PS2", "> ", 0);
     if (!var_get("IFS")) var_set("IFS", " \t\n", 0);
@@ -2244,7 +2396,7 @@ static int shell_main(int argc, char **argv)
     int ai = 1; char *cmdstr = 0, *script = 0;
     if (argc > 1 && !strcmp(argv[1], "-c")) { if (argc < 3) { errm("-c", "needs a command"); return 2; } cmdstr = argv[2]; ai = 3; if (ai < argc) { arg0 = argv[ai]; ai++; } }
     else if (argc > 1) { script = argv[1]; arg0 = argv[1]; ai = 2; }
-    for (; ai < argc && npos < 23; ai++) pos_arg[npos++] = argv[ai];
+    if (ai < argc) { pos_arg = argv + ai; npos = argc - ai; }      /* the shell's own arguments: they live as long as it */
     if (cmdstr) { int st = run_string(cmdstr); return exit_requested ? last_status : st; }
     if (script) {
         char *t = file_slurp(script, 0);

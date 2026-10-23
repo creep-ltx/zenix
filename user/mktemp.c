@@ -36,7 +36,7 @@ int main(int argc, char **argv)
             }
         } else {
             int fd = sys_open(name, O_WRONLY | O_CREAT | O_EXCL);
-            if (fd == -17) continue;                                            /* taken: another name */
+            if (fd == -EEXIST) continue;                                            /* taken: another name */
             if (fd < 0) { sys_umask(old); fprintf(2, "mktemp: %s: %s\n", name, zwhy("cannot create")); return 1; }
             sys_close(fd);
         }

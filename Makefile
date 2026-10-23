@@ -6,7 +6,7 @@ BUILD   := build
 # -m68020-60: code that runs on every CPU from the 68020 to the 68060 (no 64-bit mulu.l/divu.l, which a 68060 lacks and
 # nothing emulates under Zenix); tools/check-68020-60.sh proves it on every kernel, stage0 and program
 CFLAGS  := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
-           -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
+           -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 DIWV    ?= 0x2C
 CFLAGS  += -DDIW_V=$(DIWV)
 ASFLAGS := -m68020-60 -x assembler-with-cpp -c
@@ -28,7 +28,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
-           -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
+           -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 # Stack sizes written into each program's ZEXE header (the loader gives this much; no guard below it). Default 16 KB;
 # these need more (measured with -fstack-usage, docs/limits.md): sh's recursive parser and runner (its own depth
 # guard, STK_LIMIT, keeps to 16 KB and the rest is margin), gzip's deflate (about 12 KB of frames in one chain), edit.
@@ -147,6 +147,10 @@ $(BUILD)/pw.uo $(BUILD)/sha.uo: $(BUILD)/%.uo: user/%.c user/pw.h user/libz.h us
 $(BUILD)/grep.uelf: $(BUILD)/grep.uo $(BUILD)/regex.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/grep.uo $(BUILD)/regex.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+
+$(BUILD)/expr.uelf: $(BUILD)/expr.uo $(BUILD)/regex.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
+	    $(BUILD)/crt0.o $(BUILD)/expr.uo $(BUILD)/regex.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 $(BUILD)/fsck_ext2.uelf: $(BUILD)/fsck_ext2.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \

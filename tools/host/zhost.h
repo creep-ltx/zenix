@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../kernel/errno.h"        /* the Zenix error numbers (the same values as Linux) */
 
 typedef unsigned int u32;
 typedef unsigned char u8;

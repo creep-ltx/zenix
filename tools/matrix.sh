@@ -20,14 +20,21 @@ for n in $CONFS; do
     fi
     ok=1
     for want in 'M0 ok' ; do :; done
-    grep -q 'display: 640x256' $OUT/$n.log || ok=0
+    grep -q 'display: 640x' $OUT/$n.log || ok=0           # 640x256 on PAL, 640x200 on NTSC
+    case $n in *ntsc*) grep -q 'display: 640x200, 1 bitplane, 80x25 text' $OUT/$n.log || ok=0;;
+               *) grep -q 'display: 640x256, 1 bitplane, 80x32 text' $OUT/$n.log || ok=0;; esac
     grep -q '^ *4 *15 *85$' $OUT/$n.log || ok=0
     grep -q '^ok$' $OUT/$n.log || ok=0
     grep -q 'hello from pid' $OUT/$n.log || ok=0
     grep -q 'killed' $OUT/$n.log || ok=0
     grep -q 'Zenix 0.2' $OUT/$n.log || ok=0
     grep -q 'Filesystem  1K-blocks' $OUT/$n.log || ok=0
-    grep -q '^ws2ok$' $OUT/$n.log || ok=0        # a shell on a second workspace
+    grep -q 'zenix login: ' $OUT/$n.log || ok=0   # console 2 shows its own login prompt
+    if [ "$n" = a1200-chip1m ]; then              # 1 MB chip, no fast RAM: room for one session (man/login.txt), and it says so
+        grep -q 'login: cannot start /bin/sh: out of memory' $OUT/$n.log || ok=0
+    else
+        grep -q '^con2ok$' $OUT/$n.log || ok=0   # ... and a login there gives a shell
+    fi
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"
 done

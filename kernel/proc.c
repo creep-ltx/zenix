@@ -95,7 +95,7 @@ static int fill_mem(const void *ctx, u8 *base, const struct zexe *h)
     const u8 *file = ctx;
     const u32 *rel = (const u32 *)(file + h->reloc_off);
     if (!relocs_ok(rel, h))
-        return -5;
+        return -ENOEXEC;
     memcpy(base, file, h->image_size);
     relocate(base, rel, h->nreloc);
     return 0;
@@ -106,18 +106,18 @@ static int fill_fs(const void *ctx, u8 *base, const struct zexe *h)
 {
     const struct exec_src *x = ctx;
     if (fs_exec_read(x, 0, base, h->image_size))
-        return -4;
+        return -EIO;
     u32 rsz = h->nreloc * 4;                    /* nreloc was checked against the file size: no wrap */
     u32 *rel = kmalloc(rsz ? rsz : 4);
     if (!rel)
-        return -7;
+        return -ENOMEM;
     if (rsz && fs_exec_read(x, h->reloc_off, rel, rsz)) {
         kfree(rel);
-        return -4;
+        return -EIO;
     }
     if (!relocs_ok(rel, h)) {
         kfree(rel);
-        return -5;
+        return -ENOEXEC;
     }
     relocate(base, rel, h->nreloc);
     kfree(rel);
@@ -149,7 +149,7 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
     const char *bad = zexe_bad(h, fsize);
     if (bad) {
         kprintf("exec: %s refused: %s\n", path, bad);
-        return -5;
+        return -ENOEXEC;
     }
 
     u32 strsz = 0;
@@ -167,13 +167,13 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
     u32 *ks = mem_alloc(KSTACK, 0, (u32)pid);
     if (!base || !ks) {
         mem_free_owner((u32)pid);
-        return -7;
+        return -ENOMEM;
     }
     /* Reading the image can block (messages to the filesystem server), and another process may spawn meanwhile: so the
      * process slot is chosen only afterwards, and nothing below blocks. */
     int fr = fill(fillctx, base, h);
     if (fr) {
-        if (fr == -5)
+        if (fr == -ENOEXEC)
             kprintf("exec: %s refused: a relocation points outside the program\n", path);
         mem_free_owner((u32)pid);
         return fr;
@@ -182,6 +182,7 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
     cache_flush_code();         /* the image is code the CPU has not seen: no stale I-cache lines or Emu68 translations
                                  * (another program ran at this address before) may run instead */
     struct proc *p = 0;
+    proc_reap_orphans();                /* zombies nobody will wait for give their slots back first */
     for (int i = 1; i < NPROC; i++)
         if (procs[i].state == P_FREE) {
             p = &procs[i];
@@ -189,7 +190,7 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
         }
     if (!p) {
         mem_free_owner((u32)pid);
-        return -6;
+        return -EAGAIN;
     }
 
     /* arguments at the top of the stack: usp -> argc, argv, argv[]..., strings */
@@ -249,14 +250,8 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
         p->name[15] = 0;
     }
 
-    /* file descriptors */
-    if (parent && tty > 0) {
-        /* started on a workspace (by the session manager): own tty, parent cwd */
-        struct file *t = file_new(FT_TTY);
-        t->off = (u32)tty;
-        for (int i = 0; i < 3; i++)
-            p->fd[i] = i == 0 ? t : file_dup(t);
-    } else if (parent) {
+    /* file descriptors and the controlling tty */
+    if (parent) {
         /* only fds 0-2 are passed on (so a pipe's write end cannot leak
          * into a reader and keep it from seeing end-of-file) */
         for (int i = 0; i < 3; i++) {
@@ -264,12 +259,22 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
             if (src < NFD && parent->fd[src])
                 p->fd[i] = file_dup(parent->fd[src]);
         }
+        /* a console as standard input makes it the controlling tty (init starting login on /dev/ttyN); otherwise the
+         * parent's, so the second stage of `ls | less` still reads the keys of the console it runs on */
+        p->ctty = (p->fd[0] && p->fd[0]->type == FT_TTY) ? (u8)p->fd[0]->off : parent->ctty;
     } else {
         struct file *t = file_new(FT_TTY);
+        if (!t) {                       /* every open-file slot taken: the slot p is still free (state 0) */
+            mem_free_owner((u32)pid);
+            return -ENFILE;
+        }
         t->off = (u32)tty;
         for (int i = 0; i < 3; i++)
             p->fd[i] = i == 0 ? t : file_dup(t);
+        p->ctty = (u8)tty;
     }
+    if (p->ctty < 1 || p->ctty > NCONS)
+        p->ctty = 1;
     p->priv = priv;
     p->state = P_READY;
     {
@@ -291,7 +296,7 @@ int proc_spawn(const char *path, char *const *argv, int argc,
     memset(&h, 0, sizeof h);
     if (x.st.size >= sizeof h && fs_exec_read(&x, 0, &h, sizeof h)) {    /* shorter: proc_load says why it is refused */
         fs_exec_close(&x);
-        return -4;
+        return -EIO;
     }
     int pid = proc_load(&h, x.st.size, fill_fs, &x, path, argv, argc, parent, stdio, tty, 0,
                         (x.st.mode & 04000) ? (int)x.st.uid : -1);    /* set-user-id: runs as its owner (su, passwd) */
@@ -415,18 +420,28 @@ void proc_exit(int code)
         ready(par);
     tty_release(p->pid);
     ipc_proc_exit(p->pid);
+    proc_reap_orphans();                /* its zombie children have nobody to wait for them now */
     wake_io();
     schedule();
     for (;;)
         ;
 }
 
-/* wait for a child; returns its exit code and releases it, -1 if none */
+/* wait for a child; returns its exit code and releases it, -1 if none. With WAIT_CONSOLE (root, init) it also returns
+ * ST_CONSOLE + n when console n was shown with nobody on it (con_switch), so that init starts a login there. */
 int proc_wait(int pid, int flags)
 {
     int nohang = flags & WAIT_NOHANG;
+    int con = (flags & WAIT_CONSOLE) && current->uid == 0;
     for (;;) {
         int have = 0;
+        if (con && con_want) {
+            for (int n = 1; n <= NCONS; n++)
+                if (con_want & (1u << n)) {
+                    con_want &= (u16)~(1u << n);
+                    return ST_CONSOLE + n;
+                }
+        }
         for (int i = 1; i < NPROC; i++) {
             struct proc *c = &procs[i];
             if (c->state == P_FREE || c->ppid != current->pid ||
@@ -444,24 +459,32 @@ int proc_wait(int pid, int flags)
                 return code;
             }
         }
-        if (!have)
+        if (!have && !con)
             return -1;
         if (nohang)
-            return -2;
+            return have ? -2 : -1;
         current->wait_for = pid;
+        current->wait_con = (u8)con;    /* con_switch readies it; the check above and this block have no kwork between */
         current->state = P_WAIT;
         schedule();
+        current->wait_con = 0;
     }
 }
 
-/* idle calls this: free zombies whose parent is gone */
+/* Free zombies nobody will wait for: the parent is gone or is itself a zombie (it can never wait). Called by the idle
+ * loop, by every process exit (for its own children) and before a spawn looks for a free slot, so a busy machine that
+ * never idles does not fill its process table with them. A process never frees itself (it runs on its kernel stack). */
 void proc_reap_orphans(void)
 {
-    for (int i = 1; i < NPROC; i++) {
-        struct proc *c = &procs[i];
-        if (c->state == P_ZOMBIE && (c->ppid == 0 || !proc_by_pid(c->ppid))) {
-            mem_free_owner((u32)c->pid);
-            c->state = P_FREE;
+    for (int pass = 0; pass < 2; pass++)            /* a second pass for the children of zombies freed in the first */
+        for (int i = 1; i < NPROC; i++) {
+            struct proc *c = &procs[i];
+            if (c->state != P_ZOMBIE || c == current)
+                continue;
+            struct proc *par = c->ppid ? proc_by_pid(c->ppid) : 0;
+            if (!par || par->state == P_ZOMBIE) {
+                mem_free_owner((u32)c->pid);
+                c->state = P_FREE;
+            }
         }
-    }
 }

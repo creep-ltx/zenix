@@ -62,6 +62,8 @@ NOTES
     An access the user is not allowed is reported as "permission denied".
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.
+    Basic regular expressions are translated to the extended syntax of the
+    engine by the same libz helper that expr's ":" operator uses.
 
 EXIT STATUS
     0, 2 for a bad script or an unreadable file.

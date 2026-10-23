@@ -19,23 +19,6 @@ static int o_n, o_E, o_i;
 static struct rd rdr; static char *nextline; static u32 nextcap; static int have_next, lineno;
 static int quit_now;
 
-/* convert a basic regular expression to the extended syntax the engine speaks */
-static char *bre_to_ere(const char *s)
-{
-    char *out = xmalloc(strlen(s) * 2 + 2), *o = out; int in_br = 0;
-    while (*s) {
-        if (in_br) { *o++ = *s; if (*s == ']') in_br = 0; s++; continue; }
-        if (*s == '[') { in_br = 1; *o++ = *s++; if (*s == '^') *o++ = *s++; if (*s == ']') *o++ = *s++; continue; }
-        if (*s == '\\' && s[1]) {
-            char c = s[1];
-            if (c == '(' || c == ')' || c == '{' || c == '}' || c == '|' || c == '+' || c == '?') { *o++ = c; s += 2; continue; }
-            *o++ = '\\'; *o++ = c; s += 2; continue;
-        }
-        if (*s == '(' || *s == ')' || *s == '{' || *s == '}' || *s == '|' || *s == '+' || *s == '?') { *o++ = '\\'; *o++ = *s++; continue; }
-        *o++ = *s++;
-    }
-    *o = 0; return out;
-}
 static void *compile(const char *re, int icase)
 {
     char *e = o_E ? strdup(re) : bre_to_ere(re);

@@ -52,8 +52,9 @@ against a program written to cheat (the same trust level as AmigaOS). The docs m
   r/w/x on lookup, open, create, unlink, rename, chdir and exec; root bypasses. New files get the caller's ids and
   mode & ~umask. ext2 already stores uid, gid and mode.
 - /etc/passwd, /etc/group (plain text, no shadow file until there is something to protect), `login`, `su`, `id`,
-  `whoami`, `chown`, `chgrp`, `umask`, `passwd`; a home directory per user. One login session at a time (switch user with
-  `su` or by logging in again); workspaces are a desktop feature and have nothing to do with users.
+  `whoami`, `chown`, `chgrp`, `umask`, `passwd`; a home directory per user. A login on each of the ten virtual consoles
+  (owner, 2026-10-23: like Linux; switch user with `su`, or log in on another console); workspaces are a desktop feature
+  and have nothing to do with users.
 - The shell prompt shows `$` for a normal user and `#` for root (it already does, from $USER).
 
 ## Where the decisions stand (2026-10-22)
@@ -70,7 +71,8 @@ D7 boot/test: FS-UAE done; test Amigas and the shared A1200 not yet.
   for `locate`, `fzf` and tab completion, and is told about every create/delete/rename by the filesystem server so
   it is never stale. May also cache directory listings. Decide after the benchmark (tools/bench) shows where directory
   reads really spend their time. Reuses ~/Projects/FuzzyFind's index layout and matcher.
-- **display server**: the console/bar/workspaces now inside the kernel, moved behind a port with a drawing API (D4).
+- **display server**: the text consoles now inside the kernel, moved behind a port with a drawing API (D4); the
+  desktop's workspaces and bar live there.
 
 ## Milestones (all three first ones done, see README)
 0. Boots in FS-UAE as an A1200 (68EC020, no MMU) and prints to the serial port.

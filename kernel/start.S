@@ -159,6 +159,20 @@ irq5_entry:
     movem.l (%sp)+,%d0-%d1/%a0-%a1
     rte
 
+/* The other interrupt vectors (24 spurious, 25 level 1, 28 level 4, 30 level 6, 31 NMI): no source of them is
+ * enabled, so one that arrives anyway is logged once and returned from (irq_other_c), never taken for a fault of
+ * whatever process happened to run. The format/vector word is at 22(%sp) after the 4 saved registers. */
+    .globl  irq_other_entry
+irq_other_entry:
+    movem.l %d0-%d1/%a0-%a1,-(%sp)
+    moveq   #0,%d0
+    move.w  22(%sp),%d0
+    move.l  %d0,-(%sp)
+    jsr     irq_other_c
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d0-%d1/%a0-%a1
+    rte
+
 /* System call gate: TRAP #0. Block = d0-d7/a0-a6 ascending; the C
  * handler writes the result into the saved d0. */
     .globl  trap0_entry

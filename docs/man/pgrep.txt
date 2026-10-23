@@ -15,5 +15,8 @@ DESCRIPTION
 EXIT STATUS
     0 if a process matched, 1 if none did, 2 for a wrong option.
 
+
+NOTES
+    It looks through the whole process table (32 entries).
 SEE ALSO
     ps(1), kill(1)

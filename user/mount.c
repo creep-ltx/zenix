@@ -62,7 +62,7 @@ static int mount_one(const char *dev, const char *dir, const char *type)
     if (port < 0) { printf("mount: %s did not start\n", prog); sys_kill(pid); return 1; }
     struct umountreq rq = { dir, pname, dev, type };
     if (sys_mount(&rq) < 0) {
-        printf("mount: cannot mount %s on %s (is it an existing directory, not already a mount point? are you root?)\n", dev, dir);
+        printf("mount: cannot mount %s on %s: %s\n", dev, dir, zwhy("refused (is it an existing directory, not already a mount point? are you root?)"));
         struct umsg m; m.type = FS_QUIT;
         sys_call(port, &m);
         return 1;

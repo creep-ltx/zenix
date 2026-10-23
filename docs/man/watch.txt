@@ -13,5 +13,8 @@ DESCRIPTION
 EXIT STATUS
     Only ends with Ctrl+C or when sh cannot be started (1).
 
+
+NOTES
+    The command may be any length: nothing of it is cut.
 SEE ALSO
     sleep(1)

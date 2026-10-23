@@ -8,11 +8,12 @@ SYNOPSIS
 
 DESCRIPTION
     Runs the command and ends it if it is still running after the number of
-    seconds.
+    seconds. The command is found through $PATH, as the shell does, unless
+    it contains a slash.
 
 EXIT STATUS
     The command's own status; 124 if it was ended for taking too long;
-    127 if it cannot be run.
+    127 if it is not found or cannot be run.
 
 SEE ALSO
     kill(1), time(1)

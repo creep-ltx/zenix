@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stdarg.h>
+#include "errno.h"              /* the error numbers, shared with the servers and libz */
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -55,7 +56,8 @@ void *memset(void *d, int c, unsigned long n);
 void *memcpy(void *d, const void *s, unsigned long n);
 void *memmove(void *d, const void *s, unsigned long n);
 extern volatile u32 ticks;
-u32 hr_time(void);          /* E-clock ticks (709379 Hz PAL), CIA-B timers A+B; wraps after ~1.7 h; never early */
+u32 hr_time(void);          /* E-clock ticks (eclock_hz), CIA-B timers A+B; wraps after ~1.7 h; never early */
+extern u32 eclock_hz;       /* 709379 (PAL) or 715909 (NTSC), read at boot */
 u32 rtc_read(void);
 extern int tty_mirror;      /* 100 Hz, CIA-A timer A */
 
@@ -71,6 +73,8 @@ void cache_enable(int is040plus);
 void cache_flush_code(void);         /* after writing code that will run: I-cache (and Emu68 JIT) flush */
 void exc_common(void);
 void irq2_entry(void);
+void irq_other_entry(void);         /* vectors 24-31 without a handler of their own */
+void irq_other_c(u32 fv);
 
 /* mem.c */
 #define MEM_CHIP     1u         /* must be chip RAM (DMA: graphics, audio, disk) */
@@ -86,34 +90,33 @@ void mem_stats(u32 *chip_free, u32 *fast_free);
 void *kmalloc(u32 n);
 void kfree(void *p);
 
-/* gfx.c, term.c: display, workspaces, bar */
+/* gfx.c, term.c: display and the virtual consoles */
 #define COLS  80
-#define TROWS 31
+#define TROWS_MAX 32                    /* text rows on a PAL display; NTSC shows 25 (trows, measured at boot) */
+#define NCONS 10                        /* virtual consoles /dev/tty1 .. /dev/tty10 (Amiga+F1..F10) */
+extern int trows;
 int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
 int gfx_up(void);
-void gfx_panic(void);            /* panic with the display up: red bar, the text stays */
+void gfx_panic(void);            /* panic with the display up: dark red background, white text, the text stays */
 void gfx_cell(int row, int col, u8 ch, u8 attr);
-void gfx_bar_cell(int col, u8 ch, u8 attr);
 void gfx_scroll(void);
 void gfx_clear_text(void);
 void gfx_vblank(void);
-void term_putc(int ws, char c);
-void term_write(int ws, const char *s, u32 n);
+void term_putc(int con, char c);
+void term_write(int con, const char *s, u32 n);
 void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
 int term_back(void);
 int term_size(void);                    /* rows << 16 | columns */
-void bar_draw(void);
-void ws_switch(int w);
-void ws_request_shell(int w);
-int ws_in_use(int w);
-extern int ws_cur;
-extern int ws_spawn_pending[10];
+void con_switch(int con);               /* show console con (1..NCONS); an unused one asks init for a login */
+int con_in_use(int con);                /* is a live process's controlling tty this console? */
+extern int con_cur;                     /* the console on the screen (keyboard and serial input go to it) */
+extern u16 con_want;                    /* bit n: console n was shown with nobody on it (init's WAIT_CONSOLE) */
 void kbd_isr(void);                     /* level 2: handshake and queue the raw code only */
 void kbd_tick(void);                    /* from the 100 Hz tick: asks for kbd_work while a key repeats */
-void kbd_work(void);                    /* process context: keymap, workspace keys, repeat, tty */
+void kbd_work(void);                    /* process context: keymap, console keys, repeat, tty */
 /* Deferred input work (audit B4, main.c): interrupts only queue raw input and set kwork_pending; kwork() does the
- * rest - tty line discipline, echo, Ctrl-C/Ctrl-Z, workspace switches, scrollback, the bar - in process context:
+ * rest - tty line discipline, echo, Ctrl-C/Ctrl-Z, console switches, scrollback - in process context:
  * from the idle loop, at the end of every system call, when the tick or keyboard interrupt arrives while user
  * code runs (interrupts enabled again first), and between the pieces of a long terminal write. Never from inside
  * kernel code that an interrupt cut into, and never re-entered, so it needs no locks: the kernel is not preempted. */
@@ -194,7 +197,8 @@ struct pipe {
 #define O_TRUNC  0x200
 #define O_APPEND 0x400
 struct file {
-    u8 type, refs;
+    u8 type;
+    u16 refs;                   /* fds and processes sharing it: up to NPROC * NFD = 512, so not a byte */
     u16 flags;
     struct pipe *pipe;
     u32 off;                    /* position (FT_TTY: the tty number) */
@@ -209,7 +213,7 @@ struct uproc {                  /* returned by SYS_procinfo */
 };
 
 /* proc.c */
-#define NPROC 16
+#define NPROC 32                /* 10 consoles with a login and a shell each, the servers, init and the commands they run */
 #define SLICE 5                 /* ticks (100 Hz) */
 #define NREG  8                 /* extra memory regions per process */
 #define ENVMAX 1024
@@ -226,7 +230,7 @@ struct proc {                   /* start.S relies on the first three: */
     u32 base, span;             /* the process's own memory (image+bss+stack) */
     struct { u32 base, size; } reg[NREG];   /* memalloc'd blocks */
     u32 cwd_ino;
-    char cwd[96];
+    char cwd[160];              /* the working directory as text (FS_PATHMAX, fsproto.h): a longer one is refused */
     struct file *fd[NFD];
     int killed;
     u8 stop_req, stop_rep;      /* stop asked for (acted on when the process next runs); the parent has been told it is stopped */
@@ -237,6 +241,8 @@ struct proc {                   /* start.S relies on the first three: */
     struct proc *rnext;         /* run queue link */
     int queued;                 /* on the run queue */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
+    u8 ctty;                    /* controlling tty (console 1..NCONS): the console of fd 0 at spawn, else the parent's */
+    u8 wait_con;                /* P_WAIT with WAIT_CONSOLE: a console switch wakes it too */
     int wait_port;              /* P_MSG as a server: port being listened on */
     char name[16];
 };
@@ -251,6 +257,9 @@ void proc_exit(int code) __attribute__((noreturn));
 #define WAIT_NOHANG   1       /* proc_wait flag: -2 if children exist but none has exited */
 #define WAIT_UNTRACED 2       /* proc_wait flag: also report a child that has stopped, once (as ST_STOPPED) */
 #define ST_STOPPED    0x114   /* proc_wait result for a stopped child (0x100 + 20, the SIGTSTP number) */
+#define WAIT_CONSOLE  4       /* proc_wait flag, root only (init): also return ST_CONSOLE + n when console n was shown
+                               * with nobody on it (it wants a login) */
+#define ST_CONSOLE    0x200   /* ST_CONSOLE + n: see WAIT_CONSOLE */
 int proc_wait(int pid, int flags);
 void proc_stop(struct proc *p);       /* Ctrl-Z / jobctl: stop it when it next runs */
 void proc_cont(struct proc *p);
@@ -325,11 +334,10 @@ long vfs_rmdir(const char *path);
 long vfs_rename(const char *from, const char *to);
 long vfs_readdir(struct file *f, struct udirent *out);
 long vfs_pipe(int fds[2]);
-void vfs_chdir_text(char *cwd, const char *path);
 
 /* tty.c */
 void tty_init(void);
-void tty_input(u8 c);                   /* to the focused workspace's tty */
+void tty_input(u8 c);                   /* to the tty of the console on the screen */
 long tty_read(int tty, void *buf, u32 n);
 #define TTY_RAW    1                    /* no line editing, no echo: bytes as they come */
 #define TTY_NOSIG  2                    /* ^C is delivered as a byte, not a kill */
@@ -379,9 +387,8 @@ int tty_of(const struct proc *p);
 #define SYS_reply       33
 #define SYS_blk_read    34
 #define SYS_blk_write   35
-#define SYS_hrtime      36   /* E-clock ticks (709379 Hz PAL) since boot */
-#define SYS_wsreq       39   /* session manager: wait for a shell-on-workspace request */
-#define SYS_spawn_tty   40   /* spawn a program with its stdio on a workspace tty */
+#define SYS_hrtime      36   /* E-clock ticks since boot (709379 Hz PAL, 715909 NTSC) */
+/* 39 and 40 (the workspace shell requests) and 68 (the login session) were removed in audit batch E: free */
 #define SYS_statfs      43   /* filesystem usage of the root: struct ustatfs* */
 #define SYS_sync        44
 #define SYS_ttymode     45   /* a1 = TTY_* flags for this process's tty */
@@ -407,7 +414,6 @@ int tty_of(const struct proc *p);
 #define SYS_umask       65   /* mask -> old mask */
 #define SYS_chown       66   /* path, uid, gid (-1 keeps one): root only */
 #define SYS_geteuid     67
-#define SYS_session     68   /* root: this is the logged-in session: its ids and environment are given to new workspace shells */
 #define SYS_fd_info     76   /* drive -> bit 0 drive present, 1 disk inserted, 2 write protected; sectors << 8 (disk server only) */
 #define SYS_fd_rw       77   /* lba | drive << 28 | write << 27, count, buffer -> 0 or -1 (disk server only) */
 #define SYS_input       74   /* s32[4] <- mouse dx, dy (since the last call), mouse buttons, joystick bits */

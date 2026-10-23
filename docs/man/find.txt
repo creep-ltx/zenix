@@ -23,9 +23,10 @@ TESTS
 ACTIONS
     -print           print the path (the default)
     -exec cmd args ; run the command for each match; {} in the arguments is
-                     replaced by the path. The command is looked up in /bin
-                     unless it contains a slash. The ";" must reach find as
-                     a separate argument: write \; or ';' in the shell.
+                     replaced by the path. The command is found through
+                     $PATH, as the shell does, unless it contains a slash.
+                     The ";" must reach find as a separate argument: write
+                     \; or ';' in the shell.
     -delete          remove the matches (files, and directories as the walk
                      leaves them); implies no printing
 
@@ -45,8 +46,10 @@ NOTES
     too long") and skipped, never cut short.
 
 EXIT STATUS
-    0, 1 if a starting path does not exist or a directory or path below it
-    could not be read, 2 unknown expression.
+    0, 1 if a starting path does not exist (or may not be read: the
+    message says which), a directory or path below it could not be read, or
+    an -exec command could not be found or started; 2 unknown expression.
+    The status of the -exec command itself does not change find's.
 
 SEE ALSO
     ls(1), grep(1), xargs(1), du(1)

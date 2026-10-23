@@ -28,7 +28,7 @@ grep -aqx 'data-persist' $OUT/boot2.log && check "the fstab mount and its data a
 grep -aqx 'persist-me' $OUT/boot2.log && grep -aqx 'inner' $OUT/boot2.log && check "files are there after a reboot" ok || check "files are there after a reboot" bad
 grep -aqE '^ *5000 +5000 +23893 /big.txt$' $OUT/boot2.log && check "the bigger file is there after a reboot" ok || check "the bigger file is there after a reboot" bad
 # users and permissions: main's test script and expectations, on this root
-ZENIX_SERIAL=$SER tools/run-test.sh fsuae/zroot.fs-uae 240 tools/tests/users-test.txt 2>&1 | clean > $OUT/users.log
+ZENIX_SERIAL=$SER tools/run-test.sh fsuae/zroot.fs-uae 320 tools/tests/users-test.txt 2>&1 | clean > $OUT/users.log
 want() { if grep -aqF -- "$2" $OUT/users.log; then check "users: $1" ok; else check "users: $1" bad; fi; }
 want "root identity" "uid=0(root) gid=0(root)"
 want "su to a user" "uid=1000(user) gid=100(users)"
@@ -45,7 +45,6 @@ want "su with a wrong password fails" "su: wrong password"
 want "su with the right password works" "uid=1001(guest) gid=100(users)"
 want "chown by name" "-rw-r--r-- 1 guest users 5"
 want "sha256sum matches the host" "$(sha256sum rootfs/etc/group | cut -d' ' -f1)"
-want "workspace shell runs as the logged-in user" "/home/user"
 . tools/users-d-checks.sh
 users_d_checks $OUT/users.log "users: " || pass=0
 # the host looks at the root partition

@@ -23,6 +23,9 @@ NOTES
     An access the user is not allowed is reported as "permission denied".
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.
+    It pages as many rows as the terminal has (32 on PAL, 25 on NTSC). In
+    a pipe (ls | less) the keys come from the console less runs on, its
+    controlling tty, not from console 1.
 
 SEE ALSO
     man(1), edit(1)

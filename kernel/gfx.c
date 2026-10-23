@@ -1,30 +1,30 @@
 #include "kernel.h"
 #include "hw.h"
 
-/* Display: 640x256 hires, ONE bitplane: half the chip-bus DMA of two
- * planes, which matters on a stock A1200 where the CPU shares chip RAM
- * with the display. The two colours come from the Copper: a two-part
- * list switches the palette at the split between the 8-line bar on top
- * (white on blue; its own small buffer) and the 31 text rows below
- * (grey on black; a buffer twice the screen's height). An inverted cell
- * (blue on white in the bar) is just the glyph bits inverted.
- * Scrolling the text is a pointer bump in the Copper list, applied at
- * vertical blank; only when the window reaches the end of the buffer
- * does the blitter copy the visible rows back to the top (the copy
- * leaves identical pixels, so the switch cannot be seen). Glyphs come
- * from the Kickstart ROM's Topaz 8, found through GfxBase before the
- * OS memory is reused. */
+/* Display: 640 pixels wide hires, ONE bitplane: half the chip-bus DMA of
+ * two planes, which matters on a stock A1200 where the CPU shares chip RAM
+ * with the display. The whole screen is text (grey on black): 32 rows of 8
+ * lines on a PAL display (256 lines), 25 on NTSC (200 lines); gfx_init
+ * measures which one the machine shows (the beam's last line), so no row is
+ * ever hidden below the picture. Scrolling the text is a pointer bump in the
+ * Copper list, applied at vertical blank; only when the window reaches the
+ * end of the buffer (twice the screen's height) does the blitter copy the
+ * visible rows back to the top (the copy leaves identical pixels, so the
+ * switch cannot be seen). An inverted cell is just the glyph bits inverted.
+ * Glyphs come from the Kickstart ROM's Topaz 8, found through GfxBase before
+ * the OS memory is reused. */
 
-/* first display line; 0x2C is the standard PAL start. Emulator windows
+/* first display line; 0x2C is the standard start. Emulator windows
  * crop the top, so screenshot tests build with DIW_V=0x38 (make DIWV=0x38). */
 #ifndef DIW_V
 #define DIW_V 0x2C
 #endif
 #define STRIDE  80
-#define BUFL    (2 * TROWS * 8)
-#define BARL    8
+#define BUFL    (2 * TROWS_MAX * 8)
 
-static u8 *tbuf, *bbuf;                 /* chip RAM */
+int trows = TROWS_MAX;                  /* text rows on this display: 32 (PAL) or 25 (NTSC) */
+static int dlines = 256;                /* display lines: 8 * trows */
+static u8 *tbuf;                        /* chip RAM */
 static volatile u16 *cop;
 static int off;                         /* drawing window top (lines) */
 static volatile int hw_off = -1;        /* what the Copper list shows */
@@ -150,15 +150,8 @@ void gfx_cell(int row, int col, u8 ch, u8 attr)
         put_glyph(tbuf + (u32)(off + row * 8) * STRIDE, col, ch, attr);
 }
 
-void gfx_bar_cell(int col, u8 ch, u8 attr)
-{
-    if (up)
-        put_glyph(bbuf, col, ch, attr);
-}
-
-/* Copper list layout (words):  0-3 bar colours, 4-7 bar pointer, 8-9 WAIT,
- * 10-13 text colours, 14-17 text pointer (15 and 17 are the scroll words) */
-#define CTXT 14
+/* Copper list layout (words): 0-3 the two colours, 4-7 the bitplane pointer (5 and 7 are the scroll words), 8-9 end */
+#define CTXT 4
 
 static void cop_point(int idx, const u8 *p0)
 {
@@ -180,13 +173,13 @@ void gfx_scroll(void)
 {
     if (!up)
         return;
-    if (off + 8 + TROWS * 8 <= BUFL) {
+    if (off + 8 + dlines <= BUFL) {
         off += 8;
-        blit_clear(tbuf + (u32)(off + (TROWS - 1) * 8) * STRIDE, 8 * STRIDE / 2);
+        blit_clear(tbuf + (u32)(off + (trows - 1) * 8) * STRIDE, 8 * STRIDE / 2);
     } else {                            /* end of buffer: copy rows 1.. back to the top */
         blit_copy(tbuf + (u32)(off + 8) * STRIDE, tbuf,
-                  (u32)(TROWS - 1) * 8 * STRIDE / 2);
-        blit_clear(tbuf + (u32)((TROWS - 1) * 8) * STRIDE, 8 * STRIDE / 2);
+                  (u32)(trows - 1) * 8 * STRIDE / 2);
+        blit_clear(tbuf + (u32)((trows - 1) * 8) * STRIDE, 8 * STRIDE / 2);
         off = 0;
     }
     blit_wait();
@@ -201,26 +194,39 @@ void gfx_clear_text(void)
     blit_wait();
 }
 
+/* The beam's last line over three frames (about 60 ms, timed with the E-clock counter, which main.c starts before
+ * this): 312 on a PAL display, 262 on NTSC. It follows what the chips show (BEAMCON0 as Kickstart left it), so an
+ * ECS/AGA machine switched to the other standard counts as what it shows. 0 if the beam did not move. */
+static int frame_lines(void)
+{
+    int max = 0;
+    u32 t0 = hr_time(), n = 0;
+    while ((u32)(hr_time() - t0) < 42000u && ++n < 2000000u) {
+        int v = (int)((VPOSL >> 8) & 0x1FF);
+        if (v > max)
+            max = v;
+    }
+    return max;
+}
+
 int gfx_init(void)
 {
-    glyphs[0][0] = glyphs[0][0];        /* font already extracted */
+    int fl = frame_lines();
+    if (fl && fl < 280) {               /* NTSC: 200 lines */
+        trows = 25;
+        dlines = 200;
+    }
+    kprintf("display: beam's last line %d: %s, %d text rows\n", fl, trows == 25 ? "NTSC" : "PAL", trows);
     tbuf = mem_alloc((u32)BUFL * STRIDE, MEM_CHIP, 0);
-    bbuf = mem_alloc(BARL * STRIDE, MEM_CHIP, 0);
     cop = mem_alloc(64, MEM_CHIP, 0);
-    if (!tbuf || !bbuf || !cop)
+    if (!tbuf || !cop)
         return -1;
     memset(tbuf, 0, (u32)BUFL * STRIDE);
-    memset(bbuf, 0, BARL * STRIDE);
-    cop[0] = 0x0180; cop[1] = 0x135;    /* bar: blue background */
-    cop[2] = 0x0182; cop[3] = 0xFFF;    /*      white text */
+    cop[0] = 0x0180; cop[1] = 0x000;    /* black background */
+    cop[2] = 0x0182; cop[3] = 0xBBB;    /* grey text */
     cop[4] = 0x00E0; cop[6] = 0x00E2;   /* BPL1PTH/L */
-    cop_point(4, bbuf);
-    cop[8] = (u16)(((DIW_V + BARL - 1) << 8) | 0xDF); cop[9] = 0xFFFE;  /* end of the last bar line */
-    cop[10] = 0x0180; cop[11] = 0x000;  /* text: black */
-    cop[12] = 0x0182; cop[13] = 0xBBB;  /*       grey */
-    cop[14] = 0x00E0; cop[16] = 0x00E2;
     cop_point(CTXT, tbuf);
-    cop[18] = 0xFFFF; cop[19] = 0xFFFE;
+    cop[8] = 0xFFFF; cop[9] = 0xFFFE;
     off = 0;
     hw_off = 0;
 
@@ -231,7 +237,7 @@ int gfx_init(void)
     DDFSTRT = 0x3C;
     DDFSTOP = 0xD4;
     DIWSTRT = (u16)((DIW_V << 8) | 0x81);
-    DIWSTOP = (u16)(((DIW_V & 0xFF) << 8) | 0xC1);    /* +256 lines */
+    DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);   /* the stop line's bit 8 is implied (not bit 7) */
     COP1LCH = (u16)((u32)cop >> 16);
     COP1LCL = (u16)(u32)cop;
     COPJMP1 = 0;
@@ -245,11 +251,13 @@ int gfx_init(void)
 int gfx_up(void) { return up; }
 
 /* a kernel panic with the display up (interrupts are off): show the scroll position the text was drawn at (the
- * vertical-blank interrupt that normally applies it no longer runs) and turn the bar red; the text stays */
+ * vertical-blank interrupt that normally applies it no longer runs) and turn the background dark red with white
+ * text, so the photo of the screen shows at once that it stopped; the text stays */
 void gfx_panic(void)
 {
     if (!up)
         return;
     gfx_vblank();
-    cop[1] = 0xF00;
+    cop[1] = 0x800;
+    cop[3] = 0xFFF;
 }

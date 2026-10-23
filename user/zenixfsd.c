@@ -49,7 +49,8 @@ static int namei(uint32_t cwd, const char *path, int follow_last, int depth, uin
 {
     uint32_t cur = path[0] == '/' ? ROOT : cwd;
     const char *p = path;
-    if (depth > 8) return -1;
+    int r;
+    if (depth > 8) return -ELOOP;
     for (;;) {
         while (*p == '/') p++;
         if (!*p) { *out = cur; return 0; }
@@ -59,19 +60,21 @@ static int namei(uint32_t cwd, const char *path, int follow_last, int depth, uin
         while (*q == '/') q++;
         int last = !*q;
         struct zenixfs_inode dn;
-        if (zenixfs_getattr(fs, cur, &dn) || !is_dir(&dn)) return -1;
-        if (!access_ok(&dn, FSP_X)) return -13;
+        if ((r = zenixfs_getattr(fs, cur, &dn))) return r;
+        if (!is_dir(&dn)) return -ENOTDIR;
+        if (!access_ok(&dn, FSP_X)) return -EACCES;
         uint32_t ino;
-        if (zenixfs_lookup(fs, cur, p, (int)(e - p), &ino)) return -1;
+        if (e - p > 255) return -ENAMETOOLONG;
+        if ((r = zenixfs_lookup(fs, cur, p, (int)(e - p), &ino))) return r;
         struct zenixfs_inode in;
-        if (zenixfs_getattr(fs, ino, &in)) return -1;
+        if ((r = zenixfs_getattr(fs, ino, &in))) return r;
         if (is_lnk(&in) && (!last || follow_last)) {
             char target[256];
             int n = zenixfs_readlink(fs, ino, target, 255);
-            if (n < 0) return -1;
+            if (n < 0) return n;
             target[n] = 0;
             uint32_t t;
-            int r = namei(cur, target, 1, depth + 1, &t);
+            r = namei(cur, target, 1, depth + 1, &t);
             if (r) return r;
             ino = t;
         }
@@ -88,10 +91,11 @@ static int parent(uint32_t cwd, const char *path, uint32_t *dir, const char **na
     while (n > 1 && path[n - 1] == '/') n--;
     int s = n;
     while (s > 0 && path[s - 1] != '/') s--;
-    if (n - s <= 0) return -1;
-    if ((n - s == 1 && path[s] == '.') || (n - s == 2 && path[s] == '.' && path[s + 1] == '.')) return -1;
+    if (n - s <= 0) return -EINVAL;
+    if ((n - s == 1 && path[s] == '.') || (n - s == 2 && path[s] == '.' && path[s + 1] == '.')) return -EINVAL;
+    if (n - s > 63) return -ENAMETOOLONG;             /* as ext2: a name in a directory entry is at most 63 here */
     char dpath[256];
-    if (s > 255) return -1;
+    if (s > 255) return -ENAMETOOLONG;
     memcpy(dpath, path, (u32)s);
     dpath[s] = 0;
     if (s == 0) { dpath[0] = '.'; dpath[1] = 0; }
@@ -142,7 +146,7 @@ static int open_ref(u32 ino)
     if (i >= 0) { opens[i].count++; return 0; }
     for (i = 0; i < NOPEN; i++)
         if (!opens[i].count) { opens[i].ino = ino; opens[i].count = 1; opens[i].orphan = 0; return 0; }
-    return -23;                                       /* ENFILE: should not happen (the kernel has fewer files) */
+    return -ENFILE;                                   /* should not happen (the kernel has fewer files) */
 }
 static void touched(void);
 static void open_unref(u32 ino)
@@ -179,14 +183,17 @@ static unsigned new_gid(uint32_t dir, unsigned *dirbits)
 static int clear_setid(uint32_t ino)
 {
     struct zenixfs_inode in;
-    if (zenixfs_getattr(fs, ino, &in)) return -1;
+    int r = zenixfs_getattr(fs, ino, &in);
+    if (r) return r;
     unsigned nm = fsp_write_clear(cuid, in.uid, in.mode);
     if (nm == in.mode) return 0;
     in.mode = nm;
     touched();
-    return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
+    return zenixfs_setattr(fs, ino, &in);
 }
 
+/* One request. The result is >= 0, or a negative errno (kernel/errno.h; the ZenixFS library uses the same numbers) -
+ * the same the ext2 server returns for the same case (audit E). A permission failure becomes -EACCES in handle(). */
 static int handle1(struct umsg *m)
 {
     struct zenixfs_inode in;
@@ -199,26 +206,30 @@ static int handle1(struct umsg *m)
         u32 flags = m->a[2];
         int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
         if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {   /* exclusive: the name must not exist, not even as a link */
-            if (!namei(m->a[1], path, 0, 0, &ino)) return -17;
-            if (denied) return -1;
+            if (!namei(m->a[1], path, 0, 0, &ino)) return -EEXIST;
+            if (denied) return -EACCES;
         }
         r = namei(m->a[1], path, 1, 0, &ino);
         if (r) {
-            if (denied || !(flags & O_CREAT) || parent(m->a[1], path, &dir, &name, &len) || !dir_may(dir)) return -1;
-            if (zenixfs_create(fs, dir, name, len, fsp_new_file_mode(cumask), cuid, new_gid(dir, 0), &ino)) return -1;
+            if (denied || !(flags & O_CREAT) || r != -ENOENT) return r;
+            if (!namei(m->a[1], path, 0, 0, &ino)) return -ENOENT;     /* a symbolic link to nothing: as ext2 */
+            if ((r = parent(m->a[1], path, &dir, &name, &len))) return r;
+            if (!dir_may(dir)) return -EACCES;
+            if ((r = zenixfs_create(fs, dir, name, len, fsp_new_file_mode(cumask), cuid, new_gid(dir, 0), &ino))) return r;
             touched();
         } else {
-            if (zenixfs_getattr(fs, ino, &in)) return -1;
-            if (!access_ok(&in, fsp_open_want(flags))) return -1;
+            if ((r = zenixfs_getattr(fs, ino, &in))) return r;
+            if (!access_ok(&in, fsp_open_want(flags))) return -EACCES;
             if (writing) {
-                if (!is_reg(&in)) return -1;
+                if (is_dir(&in)) return -EISDIR;
+                if (!is_reg(&in)) return -EACCES;
                 if (flags & O_TRUNC) {
-                    if (clear_setid(ino) || zenixfs_truncate(fs, ino, 0)) return -1;
+                    if ((r = clear_setid(ino)) || (r = zenixfs_truncate(fs, ino, 0))) return r;
                     touched();
                 }
             }
         }
-        if (zenixfs_getattr(fs, ino, &in)) return -1;
+        if ((r = zenixfs_getattr(fs, ino, &in))) return r;
         if ((r = open_ref(ino))) return r;
         fill_stat(ino, &in, (struct ustat *)m->a[3]);
         return (int)ino;
@@ -226,29 +237,28 @@ static int handle1(struct umsg *m)
     case FS_CLOSE:
         open_unref(m->a[0]);
         return 0;
-    case FS_READ:
-        r = zenixfs_read(fs, m->a[0], m->a[1], (void *)m->a[2], m->a[3]);
-        return r < 0 ? -1 : r;
+    case FS_READ:                                    /* a directory: -EISDIR from the library, as ext2 */
+        return zenixfs_read(fs, m->a[0], m->a[1], (void *)m->a[2], m->a[3]);
     case FS_WRITE:
-        if (clear_setid(m->a[0])) return -1;
+        if ((r = clear_setid(m->a[0]))) return r;
         r = zenixfs_write(fs, m->a[0], m->a[1], (const void *)m->a[2], m->a[3]);
         touched();
-        return r < 0 ? -1 : r;
+        return r;
     case FS_STAT: case FS_LSTAT:
-        if (namei(m->a[1], (const char *)m->a[0], m->type == FS_STAT, 0, &ino) || zenixfs_getattr(fs, ino, &in)) return -1;
+        if ((r = namei(m->a[1], (const char *)m->a[0], m->type == FS_STAT, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
         fill_stat(ino, &in, (struct ustat *)m->a[2]);
         return 0;
     case FS_FSTAT:
-        if (zenixfs_getattr(fs, m->a[0], &in)) return -1;
+        if ((r = zenixfs_getattr(fs, m->a[0], &in))) return r;
         fill_stat(m->a[0], &in, (struct ustat *)m->a[1]);
         return 0;
     case FS_READDIR: {
         struct udirent *ud = (struct udirent *)m->a[2];
         uint64_t cookie = m->a[1];
         char nm[300]; uint8_t type;
-        for (;;) {
+        for (;;) {                                       /* not a directory: -ENOTDIR from the library */
             r = zenixfs_readdir(fs, m->a[0], &cookie, nm, &ino, &type);
-            if (r < 0) return -1;
+            if (r < 0) return r;
             if (r == 0) break;
             if (strlen(nm) < sizeof ud->name) {         /* longer names (from other systems' volumes) do not fit a udirent */
                 ud->ino = ino; ud->type = type;
@@ -269,42 +279,47 @@ static int handle1(struct umsg *m)
     case FS_SYNC:
         r = zenixfs_sync(fs);
         dirty = 0;
-        return r ? -1 : 0;
+        return r < 0 ? r : 0;
     case FS_CHMOD: {
-        if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in) || !owner_only(&in)) return -1;
+        if ((r = namei(m->a[1], (const char *)m->a[0], 1, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
+        if (!owner_only(&in)) return -EACCES;
         in.mode = (in.mode & ZENIXFS_S_IFMT) | fsp_chmod_mode(cuid, cgid, in.gid, m->a[2]);
         touched();
-        return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
+        return zenixfs_setattr(fs, ino, &in);
     }
     case FS_UTIMES: {
-        if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in)) return -1;
+        if ((r = namei(m->a[1], (const char *)m->a[0], 1, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
         int given = m->a[2] != FS_UTIME_NOW;           /* a given time: the owner or root; "now": also anyone who may write */
-        if (!fsp_utimes_ok(cuid, in.uid, given, fsp_access(cuid, cgid, in.mode, in.uid, in.gid, FSP_W))) { denied = 1; return -1; }
+        if (!fsp_utimes_ok(cuid, in.uid, given, fsp_access(cuid, cgid, in.mode, in.uid, in.gid, FSP_W))) { denied = 1; return -EACCES; }
         in.mtime = given ? m->a[2] : (u32)sys_time();
         touched();
-        return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
+        return zenixfs_setattr(fs, ino, &in);
     }
     case FS_CHOWN:
-        if (!fsp_is_root(cuid)) { denied = 1; return -1; }
-        if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in)) return -1;
+        if ((r = namei(m->a[1], (const char *)m->a[0], 1, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
+        if (!fsp_is_root(cuid)) { denied = 1; return -EACCES; }
         if (m->a[2] != 0xFFFFFFFFu) in.uid = m->a[2];
         if (m->a[3] != 0xFFFFFFFFu) in.gid = m->a[3];
         in.mode &= ~06000u;                              /* chown clears set-user-id and set-group-id */
         touched();
-        return zenixfs_setattr(fs, ino, &in) ? -1 : 0;
+        return zenixfs_setattr(fs, ino, &in);
     case FS_LINK:
-        if (namei(m->a[2], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in) || is_dir(&in)) return -1;
-        if (parent(m->a[2], (const char *)m->a[1], &dir, &name, &len) || !dir_may(dir)) return -1;
+        if ((r = namei(m->a[2], (const char *)m->a[0], 1, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
+        if (is_dir(&in)) return -EPERM;                  /* no hard links to directories */
+        if ((r = parent(m->a[2], (const char *)m->a[1], &dir, &name, &len))) return r;
+        if (!dir_may(dir)) return -EACCES;
         touched();
-        return zenixfs_link(fs, dir, name, len, ino) ? -1 : 0;
+        return zenixfs_link(fs, dir, name, len, ino);
     case FS_SYMLINK:
-        if (parent(m->a[2], (const char *)m->a[1], &dir, &name, &len) || !dir_may(dir)) return -1;
+        if ((r = parent(m->a[2], (const char *)m->a[1], &dir, &name, &len))) return r;
+        if (!dir_may(dir)) return -EACCES;
+        if (!((const char *)m->a[0])[0]) return -ENOENT;          /* an empty target, as ext2 and Linux */
         touched();
-        return zenixfs_symlink(fs, dir, name, len, (const char *)m->a[0], cuid, new_gid(dir, 0), &ino) ? -1 : 0;
+        return zenixfs_symlink(fs, dir, name, len, (const char *)m->a[0], cuid, new_gid(dir, 0), &ino);
     case FS_READLINK:
-        if (namei(m->a[1], (const char *)m->a[0], 0, 0, &ino) || zenixfs_getattr(fs, ino, &in) || !is_lnk(&in)) return -1;
-        r = zenixfs_readlink(fs, ino, (char *)m->a[2], (int)m->a[3]);
-        return r < 0 ? -1 : r;
+        if ((r = namei(m->a[1], (const char *)m->a[0], 0, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
+        if (!is_lnk(&in)) return -EINVAL;
+        return zenixfs_readlink(fs, ino, (char *)m->a[2], (int)m->a[3]);
     case FS_ROOT: {
         struct fsinfo *fi = (struct fsinfo *)m->a[0];
         strncpy(fi->dev, devname, sizeof fi->dev - 1);
@@ -315,45 +330,49 @@ static int handle1(struct umsg *m)
         quitting = 1;
         return 0;
     case FS_CHDIR:
-        if (namei(m->a[1], (const char *)m->a[0], 1, 0, &ino) || zenixfs_getattr(fs, ino, &in) || !is_dir(&in)) return -1;
-        if (!access_ok(&in, 1)) return -1;
+        if ((r = namei(m->a[1], (const char *)m->a[0], 1, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
+        if (!is_dir(&in)) return -ENOTDIR;
+        if (!access_ok(&in, 1)) return -EACCES;
         return (int)ino;
     case FS_MKDIR: {
-        if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir)) return -1;
+        if ((r = parent(m->a[1], (const char *)m->a[0], &dir, &name, &len))) return r == -EINVAL ? -EEXIST : r;   /* "." ".." exist */
+        if (!dir_may(dir)) return -EACCES;
         unsigned bits, gid = new_gid(dir, &bits);
         touched();
-        return zenixfs_mkdir(fs, dir, name, len, fsp_new_dir_mode(cumask) | bits, cuid, gid, &ino) ? -1 : 0;
+        return zenixfs_mkdir(fs, dir, name, len, fsp_new_dir_mode(cumask) | bits, cuid, gid, &ino);
     }
     case FS_UNLINK:
-        if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir) || !sticky_ok(dir, name, len)) return -1;
+        if ((r = parent(m->a[1], (const char *)m->a[0], &dir, &name, &len))) return r == -EINVAL ? -EISDIR : r;
+        if (!dir_may(dir) || !sticky_ok(dir, name, len)) return -EACCES;
         touched();
         before_remove(dir, name, len);
-        return zenixfs_unlink(fs, dir, name, len) ? -1 : 0;
+        return zenixfs_unlink(fs, dir, name, len);
     case FS_RMDIR:
-        if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir) || !sticky_ok(dir, name, len)) return -1;
+        if ((r = parent(m->a[1], (const char *)m->a[0], &dir, &name, &len))) return r;
+        if (!dir_may(dir) || !sticky_ok(dir, name, len)) return -EACCES;
         touched();
-        return zenixfs_rmdir(fs, dir, name, len) ? -1 : 0;
+        return zenixfs_rmdir(fs, dir, name, len);
     case FS_RENAME:
-        if (parent(m->a[2], (const char *)m->a[0], &dir, &name, &len) ||
-            parent(m->a[2], (const char *)m->a[1], &dir2, &name2, &len2) ||
-            !dir_may(dir) || !dir_may(dir2) || !sticky_ok(dir, name, len) || !sticky_ok(dir2, name2, len2)) return -1;
+        if ((r = parent(m->a[2], (const char *)m->a[0], &dir, &name, &len)) ||
+            (r = parent(m->a[2], (const char *)m->a[1], &dir2, &name2, &len2))) return r;
+        if (!dir_may(dir) || !dir_may(dir2) || !sticky_ok(dir, name, len) || !sticky_ok(dir2, name2, len2)) return -EACCES;
         if (dir != dir2 && !zenixfs_lookup(fs, dir, name, len, &ino) && !zenixfs_getattr(fs, ino, &in) && is_dir(&in) &&
-            !access_ok(&in, FSP_W)) return -1;           /* a directory to another parent: its ".." changes (fsperm.h rule 10) */
+            !access_ok(&in, FSP_W)) return -EACCES;      /* a directory to another parent: its ".." changes (fsperm.h rule 10) */
         touched();
         before_remove(dir2, name2, len2);                /* a file renamed over may be open */
-        return zenixfs_rename(fs, dir, name, len, dir2, name2, len2) ? -1 : 0;
+        return zenixfs_rename(fs, dir, name, len, dir2, name2, len2);
     }
-    return -1;
+    return -ENOSYS;
 }
 
 static int handle(struct umsg *m)
 {
-    if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -13;     /* raw IPC from a user: inode numbers would bypass every check */
+    if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -EACCES; /* raw IPC from a user: inode numbers would bypass every check */
     cuid = m->uid; cgid = m->gid; cumask = m->umask;
     denied = 0;
     zenixfs_set_time(fs, sys_time());
     int r = handle1(m);
-    return r < 0 && denied ? -13 : r;
+    return r < 0 && denied ? -EACCES : r;
 }
 
 static int try_mount(const char *name)

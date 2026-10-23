@@ -11,6 +11,8 @@
 #define SERDAT  REG16(0xDFF030)
 #define SERPER  REG16(0xDFF032)
 #define DMACON  REG16(0xDFF096)
+#define VPOSR   REG16(0xDFF004)  /* bit 0 V8, bits 14-8 the Agnus/Alice id: bit 12 set on an NTSC chip */
+#define VPOSL   (*(volatile u32 *)0xDFF004)   /* VPOSR:VHPOSR as one long: bits 16-8 the beam's line */
 #define INTENA  REG16(0xDFF09A)
 #define INTREQ  REG16(0xDFF09C)
 #define COLOR00 REG16(0xDFF180)
@@ -55,8 +57,11 @@
 /* CIA-B: even byte addresses, register stride 0x100 (its timers A+B are the E-clock counter of hr_time) */
 #define CIAB(r) REG8(0xBFD000 + ((u32)(r) << 8))
 
-/* PAL E-clock ~709379 Hz (NTSC 715909); 100 Hz scheduler tick */
-#define CIA_TICKS_100HZ 7094
+/* The E-clock is the crystal / 40: 709379 Hz on PAL machines, 715909 Hz on NTSC ones (main.c reads which at boot).
+ * A CIA timer period is latch + 1 counts, so the 100 Hz tick latch is round(E / 100) - 1: 7093 gives 99.997 Hz on
+ * PAL, 7158 gives 100.001 Hz on NTSC (the old fixed 7094 gave 99.98 and 100.9 Hz). */
+#define ECLOCK_PAL  709379u
+#define ECLOCK_NTSC 715909u
 
 /* more custom-chip registers: display, blitter */
 #define DMACONR REG16(0xDFF002)

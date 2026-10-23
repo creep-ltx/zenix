@@ -147,12 +147,19 @@ struct umsg *ipc_recv(int port, int wait)
     return m;
 }
 
+/* m comes from user space (a server's reply): it is looked up among the requests that are really in flight before
+ * anything in it is read, so a stray or forged pointer cannot make the kernel read or write elsewhere */
 long ipc_reply(struct umsg *m, s32 result)
 {
-    struct proc *c = m ? m->client : 0;
-    if (!c || c->state != P_MSG || c->wait_msg != m ||
-        m->state != MSG_SERVING || m->server != current->pid)
-        return -1;
+    struct proc *c = 0;
+    if (m)
+        for (int i = 1; i < NPROC; i++)
+            if (procs[i].state == P_MSG && procs[i].wait_msg == m) {
+                c = &procs[i];
+                break;
+            }
+    if (!c || m->client != c || m->state != MSG_SERVING || m->server != current->pid)
+        return -EINVAL;
     finish(m, result);
     return 0;
 }

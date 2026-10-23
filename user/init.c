@@ -1,9 +1,32 @@
 #include "libz.h"
 
-/* pid 1: print the banner, run the shell, run it again when it exits */
+/* init: print /etc/motd, mount what /etc/fstab lists, then keep a login prompt on the virtual consoles, like a
+ * Unix init with a getty on each terminal. Console 1 (/dev/tty1) gets its login at once; console N (2..10) the first
+ * time it is shown (Amiga+FN: the kernel tells init through sys_waitcon, like Linux's autovt). A login that ends
+ * (the user logged out) is started again on its console. /etc/autologin applies to console 1 only (login.c). */
+#define NCON 10
+static int pid[NCON + 1];               /* the login on console n, 0 = none */
+
+static void start(int n, int again)
+{
+    char dev[12] = "/dev/tty";
+    if (n == 10) { dev[8] = '1'; dev[9] = '0'; dev[10] = 0; }
+    else { dev[8] = (char)('0' + n); dev[9] = 0; }
+    int fd = sys_open(dev, O_RDWR);
+    if (fd < 0) { printf("init: cannot open %s\n", dev); return; }
+    if (again) fprintf(fd, "init: session ended, starting another\n");
+    char *argv[] = { "/bin/login", 0 };
+    int io[3] = { fd, fd, fd };
+    pid[n] = sys_spawn("/bin/login", argv, io);
+    sys_close(fd);
+    if (pid[n] < 0) {
+        printf("init: cannot start /bin/login on %s\n", dev);
+        pid[n] = 0;
+    }
+}
+
 int main(void)
 {
-    char *sh[] = { "/bin/login", 0 };
     int fd = sys_open("/etc/motd", 0);
     if (fd >= 0) {
         char b[256]; int n;
@@ -17,12 +40,25 @@ int main(void)
         int mp = sys_spawn("/bin/mount", ma, 0);
         if (mp >= 0) sys_wait(mp);
     }
+    sys_setfg(0);
+    int again = 0;
     for (;;) {
-        int pid = sys_spawn("/bin/login", sh, 0);
-        if (pid < 0) { printf("init: cannot start /bin/login\n"); sys_sleep(500); continue; }
-        sys_setfg(0);
-        sys_wait(pid);
-        sys_session(0xFFFFFFFFu, 0);            /* nobody is logged in any more: Amiga+Return opens nothing now */
-        printf("init: session ended, starting another\n");
+        while (!pid[1]) {                               /* console 1 always has a login */
+            if (again) sys_sleep(50);                   /* a login that fails at once must not keep the CPU busy */
+            start(1, again);
+            if (!pid[1]) sys_sleep(500);
+        }
+        again = 1;
+        int r = sys_waitcon();                          /* a child ended, or a console wants a login */
+        if (r >= ST_CONSOLE + 1 && r <= ST_CONSOLE + NCON) {
+            int n = r - ST_CONSOLE;
+            if (!pid[n]) start(n, 0);
+            continue;
+        }
+        for (int n = 1; n <= NCON; n++)                 /* which login ended? (its zombie is gone: wait says -1) */
+            if (pid[n] && sys_waitnb(pid[n]) != -2) {
+                pid[n] = 0;
+                if (n > 1) { sys_sleep(50); start(n, 1); }   /* console 1: the loop above */
+            }
     }
 }

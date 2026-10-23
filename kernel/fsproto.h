@@ -6,6 +6,10 @@
  * Who may send them: the kernel (struct umsg kflags UMSG_KERNEL, set only by ipc_kcall for a system call, with the
  * caller's ids) and root. Any other message - a user's own SYS_call to the port - is answered -13: inode numbers
  * (FS_READ, FS_WRITE, ...) and FS_QUIT would bypass every permission check (audit D). */
+/* One path limit (audit E): an absolute, normalised path - what the kernel builds from the working directory and a
+ * relative path, and what a server may be handed - is at most FS_PATHMAX - 1 (159) bytes; the working directory text
+ * too. A longer one is refused with -ENAMETOOLONG, never cut. (A path given to a system call is at most 63 bytes.) */
+#define FS_PATHMAX 160
 #define FS_OPEN    1   /* a0 path, a1 cwd ino, a2 flags (O_*), a3 ustat* -> ino */
 #define FS_READ    2   /* a0 ino, a1 offset, a2 buffer, a3 length -> bytes */
 #define FS_WRITE   3   /* a0 ino, a1 offset, a2 buffer, a3 length -> bytes */

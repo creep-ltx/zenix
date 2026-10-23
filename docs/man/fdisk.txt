@@ -65,6 +65,8 @@ NOTES
     fdisk's own geometry (16 heads x 63 sectors), destroying the old one and
     the filesystem handlers stored in it. Tested against an RDB laid out as
     HDToolBox writes one (tools/mkrdb-hdtb.py), on the host and in FS-UAE.
+    A device in use is recognised by the disk server's EBUSY answer: fdisk
+    then only lists it.
 
 SEE ALSO
     mkfs.ext2(1), fsck.ext2(1), df(1)

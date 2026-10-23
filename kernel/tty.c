@@ -1,17 +1,20 @@
 #include "kernel.h"
 
-/* One tty per workspace. Line discipline: echo, backspace, ^U, ^C
- * (kills the tty's foreground process), ^D (end of file). Reads return
- * one line at a time. Input (serial or Amiga keyboard) always goes to
- * the focused workspace's tty; output goes to that tty's terminal and,
- * for the focused one, is mirrored to the serial port.
+/* One tty per virtual console (1..NCONS, /dev/tty1..). Line discipline:
+ * echo, backspace, ^U, ^C (kills the tty's foreground process), ^D (end
+ * of file); Tab is kept. Reads return one line at a time. Input (serial or
+ * Amiga keyboard) always goes to the tty of the console on the screen;
+ * output goes to that tty's terminal and, for the console on the screen,
+ * is mirrored to the serial port. A process's tty is its controlling tty
+ * (struct proc ctty, given at spawn), not whatever its fd 0 is, so
+ * `ls | less` on console 2 reads console 2's keys.
  * Everything here runs in process context: tty_input is called by kwork
  * (main.c), never by an interrupt (audit B4), so the queue, the line and
  * the screen are never changed by two pieces of code at once. */
 
-#define NTTY 10
+#define NTTY (NCONS + 1)
 #define QSZ 1024
-#define LSZ 256
+#define LSZ 256                         /* a cooked line holds 255 characters; more ring the bell and are not taken */
 
 struct tty {
     u8 q[QSZ];
@@ -25,7 +28,7 @@ struct tty {
     int owner;                  /* pid that set the mode */
 };
 static struct tty *tt[NTTY];
-int tty_mirror = 1;                     /* copy the focused screen to the serial port */
+int tty_mirror = 1;                     /* copy the console on the screen to the serial port */
 
 static struct tty *get(int i)
 {
@@ -44,12 +47,22 @@ void tty_init(void) { }
 
 int tty_of(const struct proc *p)
 {
-    return (p->fd[0] && p->fd[0]->type == FT_TTY) ? (int)p->fd[0]->off : 1;
+    return p->ctty;                     /* always 1..NCONS: proc_load sets it */
 }
 
+static void commit(struct tty *t, u8 c);
+
+/* A program switching the tty to raw mode (the shell's line editor after a command) gets what was typed meanwhile:
+ * the half-typed cooked line goes into the queue as it is, so nothing typed ahead is lost (as on a Unix tty). */
 void tty_setmode(int tty, int mode, int owner)
 {
     struct tty *t = get(tty);
+    if ((mode & TTY_RAW) && !(t->mode & TTY_RAW)) {
+        for (u16 k = 0; k < t->llen; k++)
+            commit(t, t->line[k]);
+        if (t->llen)
+            wake_io();
+    }
     t->mode = mode;
     t->owner = mode ? owner : 0;
     t->llen = 0;
@@ -74,8 +87,6 @@ void tty_release(int pid)
         }
 }
 
-static void commit(struct tty *t, u8 c);
-
 void tty_inject(int tty, const char *s)
 {
     struct tty *t = get(tty);
@@ -90,7 +101,7 @@ int tty_getfg(int tty) { return get(tty)->fg; }
 static void out(int i, char c)
 {
     term_putc(i, c);
-    if (i == ws_cur && tty_mirror)
+    if (i == con_cur && tty_mirror)
         serial_putc(c);
 }
 
@@ -107,7 +118,7 @@ long tty_write(int i, const void *buf, u32 n)
     while (done < n) {
         u32 k = n - done > TTY_WPIECE ? TTY_WPIECE : n - done;
         term_write(i, s + done, k);         /* the screen: cursor handled once per piece */
-        if (i == ws_cur && tty_mirror)
+        if (i == con_cur && tty_mirror)
             for (u32 j = 0; j < k; j++)
                 serial_putc(s[done + j]);
         done += k;
@@ -141,7 +152,7 @@ static void erase1(int i)
 /* one typed byte, from kwork (serial_work or kbd_work): process context, never an interrupt */
 void tty_input(u8 c)
 {
-    int i = ws_cur;
+    int i = con_cur;
     struct tty *t = get(i);
     if (t->mode & TTY_RAW) {                /* the program does its own editing */
         if (c == 3 && !(t->mode & TTY_NOSIG)) {
@@ -213,9 +224,12 @@ void tty_input(u8 c)
         wake_io();
         return;
     }
-    if (c >= 32 && t->llen < LSZ - 1) {
-        t->line[t->llen++] = c;
-        out(i, (char)c);
+    if (c >= 32 || c == '\t') {
+        if (t->llen < LSZ - 1) {
+            t->line[t->llen++] = c;
+            out(i, (char)c);
+        } else
+            beep(880, 40);                  /* the line is full: say so (the bell), do not take it */
     }
 }
 

@@ -35,6 +35,8 @@ FILES
 NOTES
     Running out of memory ends the editor with "edit: out of memory"; changes
     not yet saved are lost.
+    It uses all the rows of the terminal: 30 text rows on a PAL screen, 23
+    on NTSC (the other two are the title and the status line).
 
 SEE ALSO
     less(1), sh(1)

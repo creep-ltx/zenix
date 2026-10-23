@@ -9,7 +9,8 @@
  * line, Ctrl+Left/Right line start/end, Ctrl+Up/Down file start/end, Alt+Up/Down page, Alt+Left/Right word,
  * Tab / Shift+Tab indent / unindent, F4 line numbers, F1 help. */
 
-#define TEXT_ROWS 29
+#define TEXT_ROWS_MAX 30                /* text rows on a PAL screen (32 rows, 2 for the bars) */
+static int text_rows = 23;              /* this terminal: its rows - 2 (main sets it: 30 PAL, 23 NTSC) */
 #define SCR_COLS 80
 
 /* ------------------------------------------------------------ the buffer: an array of lines */
@@ -309,7 +310,7 @@ static int save_file(const char *path)
 
 /* ------------------------------------------------------------ the screen: only changed rows are sent */
 struct cell_row { char c[SCR_COLS + 1]; unsigned char inv[SCR_COLS]; };
-static struct cell_row shadow[TEXT_ROWS + 2], cur_row;
+static struct cell_row shadow[TEXT_ROWS_MAX + 2], cur_row;
 static int shadow_valid;
 
 static void flush_row(int r, const struct cell_row *want)
@@ -345,10 +346,10 @@ static void render(void)
     clamp_cursor();
     int cc = vcol(cy, cx);
     if (cy < top) top = cy;
-    if (cy >= top + TEXT_ROWS) top = cy - TEXT_ROWS + 1;
+    if (cy >= top + text_rows) top = cy - text_rows + 1;
     if (cc < leftcol) leftcol = cc;
     if (cc >= leftcol + width) leftcol = cc - width + 1;
-    for (int r = 0; r < TEXT_ROWS; r++) {
+    for (int r = 0; r < text_rows; r++) {
         blank_row(&cur_row, 0);
         int y = top + r;
         if (y < nL) {
@@ -376,11 +377,11 @@ static void render(void)
     put_str(&cur_row, 0, st, n, 1);
     n = snprintf(st, sizeof st, "line %d/%d  col %d  Ctrl+S save  Ctrl+Q quit  F1 help ", cy + 1, nL, cc + 1);
     put_str(&cur_row, SCR_COLS - n > 0 ? SCR_COLS - n : 0, st, n, 1);
-    flush_row(TEXT_ROWS, &cur_row);
+    flush_row(text_rows, &cur_row);
     /* message line */
     blank_row(&cur_row, 0);
     if (message[0]) put_str(&cur_row, 1, message, (int)strlen(message), 0);
-    flush_row(TEXT_ROWS + 1, &cur_row);
+    flush_row(text_rows + 1, &cur_row);
     shadow_valid = 1;
     char pos[16]; snprintf(pos, sizeof pos, "\033[%d;%dH", cy - top + 1, g + cc - leftcol + 1);
     oputs(pos);
@@ -424,7 +425,7 @@ static int prompt(const char *label, char *out, int max, const char *initial)
     if (initial) { n = (int)strlen(initial); if (n >= max) n = max - 1; memcpy(out, initial, (u32)n); }
     for (;;) {
         char line[SCR_COLS + 1]; snprintf(line, sizeof line, "%s%.*s", label, n, out);
-        char pos[24]; snprintf(pos, sizeof pos, "\033[%d;1H", TEXT_ROWS + 2); oputs(pos); oputs("\033[K"); oputs(line); oflush();
+        char pos[24]; snprintf(pos, sizeof pos, "\033[%d;1H", text_rows + 2); oputs(pos); oputs("\033[K"); oputs(line); oflush();
         shadow_valid = 0;
         int c = read_key();
         if (c == '\r' || c == '\n') { out[n] = 0; return 1; }
@@ -435,7 +436,7 @@ static int prompt(const char *label, char *out, int max, const char *initial)
 }
 static int ask(const char *q, const char *keys)         /* one key from keys, or 0 */
 {
-    char pos[24]; snprintf(pos, sizeof pos, "\033[%d;1H", TEXT_ROWS + 2); oputs(pos); oputs("\033[K"); oputs(q); oflush();
+    char pos[24]; snprintf(pos, sizeof pos, "\033[%d;1H", text_rows + 2); oputs(pos); oputs("\033[K"); oputs(q); oflush();
     shadow_valid = 0;
     for (;;) { int c = read_key(); if (c < 0) return 0; if (c == 27 || c == 3) return 0; if (c < 256 && strchr(keys, tolower(c))) return tolower(c); }
 }
@@ -546,6 +547,8 @@ static int quit_ok(void)
 int main(int argc, char **argv)
 {
     int goto_line = 0, i = 1;
+    { int ti = sys_ttyinfo(), rows = ti > 0 ? ti >> 16 : 25;      /* the screen's rows: 32 on PAL, 25 on NTSC */
+      text_rows = rows - 2; if (text_rows > TEXT_ROWS_MAX) text_rows = TEXT_ROWS_MAX; if (text_rows < 3) text_rows = 3; }
     for (; i < argc; i++) {
         if (argv[i][0] == '+' && isdigit((unsigned char)argv[i][1])) goto_line = atoi(argv[i] + 1);
         else if (!filename[0]) { strncpy(filename, argv[i], 127); filename[127] = 0; }
@@ -573,12 +576,12 @@ int main(int argc, char **argv)
             switch (plain) {
             case K_UP:
                 if (mods & M_CTRL) move_to(0, 0, extend);
-                else if (mods & M_ALT) { int y = cy - (TEXT_ROWS - 1); move_to(y < 0 ? 0 : y, cx, extend); }
+                else if (mods & M_ALT) { int y = cy - (text_rows - 1); move_to(y < 0 ? 0 : y, cx, extend); }
                 else { if (want < 0) want = vcol(cy, cx); int y = cy > 0 ? cy - 1 : 0; move_to(y, byte_at_vcol(y, want), extend); }
                 break;
             case K_DOWN:
                 if (mods & M_CTRL) move_to(nL - 1, L[nL - 1].len, extend);
-                else if (mods & M_ALT) { int y = cy + TEXT_ROWS - 1; move_to(y >= nL ? nL - 1 : y, cx, extend); }
+                else if (mods & M_ALT) { int y = cy + text_rows - 1; move_to(y >= nL ? nL - 1 : y, cx, extend); }
                 else { if (want < 0) want = vcol(cy, cx); int y = cy + 1 < nL ? cy + 1 : cy; move_to(y, byte_at_vcol(y, want), extend); }
                 break;
             case K_LEFT:

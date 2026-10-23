@@ -45,6 +45,9 @@ NOTES
     a working directory reached through a symbolic link behaves as its text
     says. Hard links and renames across two mounts fail. Only the first 8
     mounts fit. A mount does not survive a reboot unless it is in /etc/fstab.
+    A mount the kernel refuses says why (for example "not a directory",
+    "device or resource busy" for a directory that is already a mount
+    point, "permission denied" for a normal user).
 
 SEE ALSO
     umount(8), fdisk(1), df(1), mkfs.ext2(1)

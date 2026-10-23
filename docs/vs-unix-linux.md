@@ -34,7 +34,7 @@ source (2026-10-22). Not benchmarked against any of them.
 | Executables | ELF (shared objects, dynamic linking) | ZEXE: one flat image + relocation table, static linking, no shared libraries yet |
 | Scheduling | CFS/EEVDF, priorities, nice, multicore | Round robin on a 100 Hz tick, one CPU, no priorities yet |
 | Time | 64-bit time, NTP | Seconds since 1970 in 32 bits; Amiga battery clock (MSM6242 / RP5C01) when present |
-| Terminals | tty layer, ptys, termios | One tty per workspace, partial termios (raw / no-signal flags); ANSI/VT100 interpreted in the kernel; no ptys |
+| Terminals | tty layer, ptys, termios, virtual consoles (Alt+F1..) | Ten virtual consoles /dev/tty1..10 (Amiga+F1..F10) with a login each, a controlling tty per process, partial termios (raw / no-signal flags); ANSI/VT100 interpreted in the kernel; no ptys |
 | Networking, graphics stack, sound | Full | None yet (planned as servers) |
 
 ## Closest relatives

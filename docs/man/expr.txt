@@ -12,6 +12,10 @@ DESCRIPTION
     around them, and characters the shell treats specially must be quoted.
     Operators, from tightest to loosest binding:
 
+        STRING : REGEX         match a basic regular expression (as sed's)
+                               at the start of STRING: the text of the
+                               first \( \) group, or else the number of
+                               characters matched (0: no match)
         length STRING          the number of characters
         *  /  %                multiply, divide, remainder (whole numbers)
         +  -                   add, subtract
@@ -26,16 +30,15 @@ DESCRIPTION
 EXAMPLES
     expr 2 + 3 '*' 4            prints 14
     expr length hello           prints 5
+    expr file.txt : '.*\.\(.*\)'  prints txt
+    expr abc : 'a.'             prints 2
     n=$(expr $n + 1)
 
     The shell can also calculate by itself: echo $((2 + 3 * 4)).
 
 EXIT STATUS
     0 if the result is neither empty nor 0, 1 if it is, 2 on an error
-    (division by zero, non-numeric operand).
-
-NOTES
-    There is no regular-expression ":" operator.
+    (division by zero, non-numeric operand, bad regular expression).
 
 SEE ALSO
     sh(1), test (built into sh)
