@@ -133,4 +133,30 @@ is not preemptive.
   Ahiru and CFile (AmigaOS) have file-manager experience to borrow ideas from, but Zenix needs its own code (their
   shared core is built on AmigaOS).
 
-Last checked: 2026-10-23.
+## The kernel: the best idea from each system (owner's goal, 2026-10-23: "an outstanding kernel")
+The owner wants the best of Exec, Linux, BSD, Minix, Fuzix, QNX and the Hurd in one kernel. Principle 2 ("one way to do
+a thing") still rules: for each area **one** idea is taken, the one that fits a 68020+ Amiga without an MMU, not all of
+them. Ideas only: code may come only from GPL-2-compatible sources (Linux, Fuzix, BSD, Minix); Exec and QNX are
+proprietary, so from them only the documented behaviour (the ROM Kernel Manuals; QNX's published papers).
+
+| Area | Taken from | The idea | Zenix today |
+|---|---|---|---|
+| Scheduling | **Exec** | Priorities: the highest ready process runs, round robin within a priority. First thing to build after the halt (small, makes the terminal and servers feel quick); with a fairness test | round robin only |
+| Servers and priorities | **QNX** | Priority inheritance: a server handling a message runs at its client's priority, so a high-priority program is never stuck behind a low one's request | - |
+| Waiting | **Exec** | Signal bits per process (section 1 above); `select`/`poll` built on them | one source at a time |
+| Event API for programs | **BSD** | kqueue-style: register many events once, get the ready ones in one call (a thin layer on the signal bits) | - |
+| Messages | **QNX / Minix 3** | Synchronous send/receive/reply, pointers not copies | **done** |
+| Reliability | **Minix 3** | The reincarnation server: a supervisor restarts a crashed server or driver (fsd, diskd, the network server) instead of the system stopping | a dead server stays dead |
+| Devices | **Exec** | Servers loaded on first use (like `OpenDevice` loading from `DEVS:`), unloaded when unused | all start at boot |
+| User-level servers | **the Hurd** | Translators: a program can serve a file or directory (an FTP site, an archive, `/proc`) and any user may attach one to their own files | mount is root-only |
+| `/proc` and `/dev` | **Linux / Plan 9 via the Hurd idea** | System information as files, served by a translator, not by special system calls | special calls (`procinfo`, `meminfo`) |
+| Memory | **Linux/BSD slab + Exec pools** | Slab caches for kernel objects (no fragmentation from many small objects); pools for programs | general allocator; size classes in libz |
+| No-MMU discipline | **uClinux / Fuzix** | Relocated flat binaries, `vfork`/spawn, careful fragmentation rules; Fuzix's habit of keeping everything small | **done** (ZEXE, spawn) |
+| Shared libraries | **Exec** | Libraries with jump tables, opened by name, one copy in memory (works without an MMU) | static only |
+| Timers | **Linux** | One ordered timer list (or a timer wheel); sleeping processes cost nothing until due | scan of every process |
+| Users and permissions | **Unix/BSD** | The classic model, with the honest no-MMU limit | **done** (batch D) |
+
+What stays deliberately out: `fork` (needs an MMU), Linux's size and its thousands of system calls, Exec's lack of
+users and of resource tracking (Zenix keeps per-process ownership: everything a process held is freed when it dies).
+
+Last checked: 2026-10-24.
