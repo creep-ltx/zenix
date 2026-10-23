@@ -116,6 +116,16 @@ int con_in_use(int con);                /* is a live process's controlling tty t
 extern int con_cur;                     /* the console on the screen (keyboard and serial input go to it) */
 extern u16 con_want;                    /* bit n: console n was shown with nobody on it (init's WAIT_CONSOLE) */
 void kbd_isr(void);                     /* level 2: handshake and queue the raw code only */
+void kbd_init(void);                    /* one handshake at start (the keyboard may still be waiting for one) */
+/* the reset warning (kbd.c): Ctrl+Amiga+Amiga on a keyboard that sends it. KDAT is held low while init syncs the
+ * filesystems (kbd_reset_flush, from proc_wait), then released; the tick lets go after 8 s in any case */
+#define KRS_NONE     0
+#define KRS_HELD     1                  /* KDAT held low, init not yet at it */
+#define KRS_FLUSHING 2
+#define KRS_DONE     3                  /* KDAT released: the keyboard resets the machine */
+extern volatile u8 kbd_reset_state;
+void kbd_reset_flush(void);
+extern volatile int disk_frozen;        /* after the reset-warning flush: disk writes are refused (-EIO) */
 void kbd_tick(void);                    /* from the 100 Hz tick: asks for kbd_work while a key repeats */
 void kbd_work(void);                    /* process context: keymap, console keys, repeat, tty */
 /* Deferred input work (audit B4, main.c): interrupts only queue raw input and set kwork_pending; kwork() does the
@@ -231,6 +241,8 @@ struct proc {                   /* start.S relies on the first three: */
     int wait_for;               /* P_WAIT: child pid, -1 = any */
     u32 wake;                   /* P_SLEEP: tick to wake at */
     u32 base, span;             /* the process's own memory (image+bss+stack) */
+    u32 kstk, ktop, ustk;       /* stack guard (proc.c): bottom and top of the kernel stack, bottom of the user stack
+                                 * (0: none, pid 0); a guard pattern lies at each bottom */
     struct { u32 base, size; } reg[NREG];   /* memalloc'd blocks */
     u32 cwd_ino;
     char cwd[160];              /* the working directory as text (FS_PATHMAX, fsproto.h): a longer one is refused */
@@ -241,8 +253,6 @@ struct proc {                   /* start.S relies on the first three: */
     u16 uid, ruid, gid, umask;  /* effective and real user id, group id (inherited; a set-user-id program changes only uid); the filesystem server enforces the permissions */
     char env[ENVMAX];           /* environment: NAME=value NUL ... NUL NUL; inherited by children */
     u16 envlen;
-    u32 kstk, ktop, ustk;       /* stack guard (proc.c): bottom and top of the kernel stack, bottom of the user stack
-                                 * (0: none, pid 0); a guard pattern lies at each bottom */
     struct proc *rnext;         /* run queue link */
     int queued;                 /* on the run queue */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
@@ -271,16 +281,6 @@ void proc_cont(struct proc *p);
 void proc_reap_orphans(void);
 void sched_tick(u16 sr);
 int user_ok(const struct proc *p, u32 ptr, u32 len);
-void wake_io(void);
-void ready(struct proc *p);         /* make a blocked process runnable */
-extern int nsleep;
-void block_io(void);
-void proc_kill(struct proc *p);
-struct proc *proc_by_pid(int pid);
-
-/* ipc.c: ports and messages. A message lives in the sender's memory; only
- * pointers move (no MMU, so the server reads and writes the client's
- * buffers directly). The sender is blocked until the server replies. */
 /* Stack guard (proc.c): a pattern at the bottom of every kernel and user stack, checked with the stack pointers at
  * every task switch, at every system call, at the tick when it interrupts user code and when a program faults.
  * stack_bad: 0, STK_KERNEL or STK_USER (ksp/usp: the stack pointers now; usp 0 = not known, only the guard).
@@ -294,8 +294,18 @@ void stack_fail(struct proc *p, int which);
  * the full check (all guard words, both stacks) runs at every task switch, and when this one fails */
 static inline int stack_user_suspect(const struct proc *p, u32 usp)
 {
-    return p->ustk && (usp < p->ustk + 16 || usp > p->base + p->span || *(const u32 *)p->ustk != STACK_GUARD0);
+    return p->ustk && (usp < p->ustk + 16 || usp > p->base + p->span || *(const u32 *)(unsigned long)p->ustk != STACK_GUARD0);
 }
+void wake_io(void);
+void ready(struct proc *p);         /* make a blocked process runnable */
+extern int nsleep;
+void block_io(void);
+void proc_kill(struct proc *p);
+struct proc *proc_by_pid(int pid);
+
+/* ipc.c: ports and messages. A message lives in the sender's memory; only
+ * pointers move (no MMU, so the server reads and writes the client's
+ * buffers directly). The sender is blocked until the server replies. */
 #define NPORT 16
 #define MSG_QUEUED  1
 #define MSG_SERVING 2

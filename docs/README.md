@@ -46,8 +46,7 @@ into the serial port (`tools/serial-tap.py`: `sleep`, `send` and `wait REGEX [ti
 then the emulator tests one after another (about 1.5 hours), each with its own serial port and output directory, and
 prints a table (test, PASS/FAIL, time, details; the logs stay in `/tmp/zenix-check.*`). It fails if any test fails.
 `tools/check.sh host` runs only the host tests, `tools/check.sh NAME...` only the named ones (e.g. `matrix users-test`).
-Not run by it: `floppy-test` (known broken: a whole-disk read of df1 once came back wrong) and `stage0-68k-test` when
-the Python module `unicorn` is missing (shown as skipped).
+Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (shown as skipped).
 
 | Test | What it checks |
 |---|---|
@@ -60,6 +59,7 @@ the Python module `unicorn` is missing (shown as skipped).
 | users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root |
 | jobs-test, kbd-test | job control and history search; the keyboard (keymaps, repeat, consoles) |
 | diag-test | the boot colours, the panic screens, the previous-boot log across a warm reset; the stack guard's kernel-stack checks (a `STACK_TEST` build) |
+| floppy-test | two floppy drives: whole-disk reads, a write and its read-back, the image file on the host afterwards |
 | memtest | the allocator, deep directory walks, corrupt program files refused |
 | mounttest, zenixfstest | mounting ext2 and ZenixFS, `fsck`, nested mounts |
 | edit-regress, disktools, mbr-test | the editor; `fdisk`/`mkfs`/`fsck` on scratch disks; PC partition tables |

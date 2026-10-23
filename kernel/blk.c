@@ -34,6 +34,8 @@ int blk_read(u32 lba, u32 count, void *buf)
 
 int blk_write(u32 lba, u32 count, const void *buf)
 {
+    if (disk_frozen)
+        return -1;                      /* the reset warning's flush is done: nothing new may start (kbd.c) */
     return which == B_EMMC ? emmc_write(lba, count, buf) : which == B_A3000 ? a3000_write(lba, count, buf) : ide_write(lba, count, buf);
 }
 

@@ -320,10 +320,12 @@ static void timer_init(void)
     (void)CIAA(CIA_ICR);
     CIAA(CIA_TALO) = (u8)(latch & 0xFF);
     CIAA(CIA_TAHI) = (u8)(latch >> 8);
-    CIAA(CIA_ICR) = 0x81;               /* timer A interrupt only */
+    CIAA(CIA_ICR) = 0x89;               /* timer A and the serial port (the keyboard: its byte is taken at once, not
+                                         * at the next tick - hand-off item K5) */
     INTREQ = INTF_PORTS;
     INTENA = INTF_SETCLR | INTF_INTEN | INTF_PORTS | INTF_RBF;
     CIAA(CIA_CRA) = 0x11;               /* start, continuous */
+    kbd_init();                         /* one handshake: the keyboard may still wait for one (K2) */
 }
 
 static void mem_selftest(void)

@@ -46,7 +46,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
 - A graphical programs API, a mouse pointer (the mouse is only read, `input`; untested), sound beyond the bell, network,
-  USB, RTG. The floppy driver is experimental (one open bug: a whole-disk read of df1 once came back wrong, no error).
+  USB, RTG. The floppy driver is experimental: DD disks only (an HD drive or disk is not recognised), no drive-type
+  ID, never run on a real drive or a Gotek.
 - Display server (the terminal and the consoles are inside the kernel; workspaces and a bar come with the desktop),
   index server for `locate`/`fzf`.
 - ext2: a journal (an ext3 volume mounts read-only, ext4 is refused), moving a directory to another parent (`mv`
@@ -93,6 +94,12 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS
   treats as dead keys (acute, grave, circumflex, tilde, diaeresis) type the spacing character, there is no
   composition with the next letter.
+- Disks: IDE only on an A600/A1200 Gayle (Gayle ID 0xD) and the A4000's port; LBA drives only (a CHS-only drive, as in
+  some early A600/A1200s, is refused with a message); PIO polling, up to 256 sectors per command. A drive is given up to
+  10 s to start (status 0) and 30 s for any one wait: a drive that never answers holds the boot that long. The A3000's
+  SCSI waits once per target ID (250 ms selection timeout) and does not wait for slow drives to spin up.
+- The reset warning (Ctrl+Amiga+Amiga) gives init at most 8 s to sync the filesystems; only keyboards that send the
+  warning give that time at all (the HRM: not every model). After it, disk writes are refused until the reset.
 - Kernel log: 8 KB, kept in the top 16.5 KB of chip RAM (two 8 KB slots: this boot's and the previous one's). The
   previous-boot log needs chip RAM to survive the reset: it is lost after a power-off, and on the PiStorm it is not
   yet known whether a warm reset keeps it. It holds the last 8 KB of the previous boot; the next boot shows its last

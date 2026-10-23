@@ -4,7 +4,7 @@
  * Written from the WD33C93A data sheet's programming model as the Linux wd33c93/a3000 drivers use it
  * (register numbers, command codes and the DMAC register layout are facts about the hardware, listed in
  * Knowledge/amiga/zenix-hardware-driver-survey.md): one command at a time, no disconnect, no synchronous
- * transfers, no interrupts (the chip's INT bit is polled with levels 1-2 masked, the DMAC's interrupt
+ * transfers, no interrupts (the chip's INT bit is polled with interrupts on, the DMAC's interrupt
  * enable stays off). Each SCSI command is one "select with ATN and transfer" (level 2) command; data
  * moves by DMA through a bounce buffer in chip RAM, which the DMAC can reach and which is always aligned.
  * Only direct-access devices (disks) with 512-byte blocks are used.
@@ -78,16 +78,24 @@ static inline u8 wd_read(u8 reg) { sasr_wr(reg); return scmd_rd(); }
 static inline void wd_write(u8 reg, u8 v) { sasr_wr(reg); scmd_wr(v); }
 static inline u8 wd_asr(void) { return sasr_rd(); }
 
-/* Levels 1-2 are masked while a command runs (the shared level-2 line carries the CIA tick), so time
- * cannot be read from the tick: waits are counted in polls of the chip (~1 us each on a 68030). */
-#define SPINS_MS 1000u
+/* Waits are timed on the E-clock counter (hr_time: CIA-B, readable with any interrupt mask), not counted in polls,
+ * which on Emu68 would be a thousand times too short (hardware hand-off note S6). Interrupts stay on while a command
+ * runs: the DMAC's interrupt enable is never set, so the chip cannot interrupt, and a wait of up to 3 s with level 2
+ * masked would make the keyboard time out (143 ms) and drop keys (K5). */
 static int wait_int(u32 ms)
 {
-    for (u32 i = 0; i < ms * SPINS_MS; i++)
+    u32 t0 = hr_time(), lim = ms * (eclock_hz / 1000);
+    for (;;) {
         if (wd_asr() & ASR_INT)
             return 0;
-    return -1;
+        if ((u32)(hr_time() - t0) > lim)
+            return -1;
+    }
 }
+
+/* the selection timeout register: 250 ms (what SCSI recommends) x the chip's input clock in MHz / 80 (WD33C93A data
+ * sheet; S1): 45 at the A3000's 14.3 MHz. (It was 20, about 110 ms.) */
+#define WD_TIMEOUT_250MS 45
 
 static void wd_reset(void)
 {
@@ -102,13 +110,12 @@ static void wd_reset(void)
  * (0 = GOOD), or -1 if the chip or the target did not answer. len <= BOUNCE. */
 static int scsi_cmd(u8 target, const u8 *cdb, u32 cdblen, void *buf, u32 len, int dir_in)
 {
-    u16 sv = irq_save2();
     int rc = -1;
     if (wd_asr() & (ASR_BSY | ASR_CIP)) {                  /* a stuck bus: reset the chip */
         wd_reset();
         wait_int(100);
         wd_read(W_STATUS);
-        wd_write(W_TIMEOUT, 20);
+        wd_write(W_TIMEOUT, WD_TIMEOUT_250MS);
     }
     wd_write(W_DEST_ID, target | (len && dir_in ? DSTID_DPD : 0));
     wd_write(W_SRC_ID, 0);                                 /* no reselection: no disconnect */
@@ -145,7 +152,8 @@ static int scsi_cmd(u8 target, const u8 *cdb, u32 cdblen, void *buf, u32 len, in
         dmac16_wr(D_CNTR, CNTR_PDMD | (dir_in ? 0 : CNTR_DDIR));
         if (dir_in) {
             dmac16_wr(D_FLUSH, 1);
-            for (u32 i = 0; i < 100 * SPINS_MS && !(dmac16_rd(D_ISTR) & ISTR_FE_FLG); i++)
+            u32 t0 = hr_time();
+            while (!(dmac16_rd(D_ISTR) & ISTR_FE_FLG) && (u32)(hr_time() - t0) < 100 * (eclock_hz / 1000))
                 ;
         }
         dmac16_wr(D_CINT, 1);
@@ -160,13 +168,12 @@ static int scsi_cmd(u8 target, const u8 *cdb, u32 cdblen, void *buf, u32 len, in
         wd_reset();                                        /* leave the chip in a known state */
         wait_int(100);
         wd_read(W_STATUS);
-        wd_write(W_TIMEOUT, 20);
+        wd_write(W_TIMEOUT, WD_TIMEOUT_250MS);
     } else if (csr == CSR_SEL_XFER_DONE) {
         rc = st;
     } else if (csr != CSR_TIMEOUT) {
         kprintf("a3000: scsi target %u: unexpected chip status %x\n", target, csr);
     }
-    irq_restore(sv);
     return rc;
 }
 
@@ -227,7 +234,7 @@ int a3000_init(void)
     u8 sr = wd_read(W_STATUS);
     if (sr != 0x00 && sr != 0x01)
         return -1;
-    wd_write(W_TIMEOUT, 20);                               /* 200 ms selection timeout */
+    wd_write(W_TIMEOUT, WD_TIMEOUT_250MS);                 /* 250 ms selection timeout */
     wd_write(W_CONTROL, CTRL_IDI | CTRL_EDI);
     kprintf("a3000: WD33C93%s found (reset status %x)\n", sr == 0x01 ? "A/B" : "", sr);
     for (u8 t = 0; t < 7; t++)

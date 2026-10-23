@@ -6,7 +6,8 @@
 #     (stage colour on top, red below); a panic after the boot (DIAG_PANIC=11) white text on dark red (no bar since
 #     audit batch E: the whole screen is text).
 #  2. previous-boot log: boot the RAM floppy, run `crash` (the kernel logs "killed"), warm reset with
-#     Ctrl+Amiga+Amiga, and check that the next boot shows the previous boot's last lines and `dmesg -p` has them;
+#     Ctrl+Amiga+Amiga, and check that the next boot shows the previous boot's last lines and `dmesg -p` has them -
+#     the last one is the reset warning's "filesystems synced" (FS-UAE's keyboard sends the warning: kbd.c);
 #     the same after a kernel panic (DIAG_PANIC=11): "ended here with a kernel panic" and the panic text, twice
 #     (the two slots alternate).
 #  3. the stack guard's kernel-stack checks, in a STACK_TEST build: `crash kstack` damages the guard of its own kernel
@@ -112,7 +113,11 @@ if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
     grep -q '^klog: boot 2, log kept at' "$L" && check "second boot counts 2" ok || check "second boot counts 2" bad
     grep -q '^=== previous boot (1) ended here without a panic' "$L" && check "previous boot shown, no panic recorded" ok || check "previous boot shown, no panic recorded" bad
     grep -q '^> \[kernel\] pid [0-9]* (crash) killed' "$L" && check "its last lines include the crash" ok || check "its last lines include the crash" bad
-    [ "$(grep -c '^\[kernel\] pid [0-9]* (crash) killed' "$L")" = 2 ] && check "dmesg -p | tail prints the previous boot's last line" ok ||
+    # FS-UAE's keyboard sends the reset warning ($78 twice, HRM p.361): init synced the disks and said so last
+    grep -q '^> kbd: reset warning: filesystems synced in [0-9]* ms' "$L" &&
+        check "reset warning: the reset waited while init synced the disks (in the previous boot's lines)" ok ||
+        check "reset warning: the reset waited while init synced the disks (in the previous boot's lines)" bad
+    [ "$(grep -c '^kbd: reset warning: filesystems synced in [0-9]* ms' "$L")" = 2 ] && check "dmesg -p | tail prints the previous boot's last line" ok ||
         check "dmesg -p | tail prints the previous boot's last line" bad
 
     build panic11 "-DDIAG_PANIC=11" DIWV=0x38      # the picture starts lower: FS-UAE's screenshot shows its top rows
@@ -129,8 +134,6 @@ if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
         check "third boot: boot 2's log (the other slot) is the previous one" ok ||
         check "third boot: boot 2's log (the other slot) is the previous one" bad
 fi
-echo "logs and screenshots: $OUT"
-exit $((1 - pass))
 if [ "$WHAT" = stack ] || [ "$WHAT" = all ]; then
     build stack "-DSTACK_TEST"
     conf "$OUT/stack.fs-uae" "$OUT/stack/zenix-ram.adf"
@@ -148,3 +151,5 @@ if [ "$WHAT" = stack ] || [ "$WHAT" = all ]; then
         check "the next boot shows that panic in the previous boot's lines" ok ||
         check "the next boot shows that panic in the previous boot's lines" bad
 fi
+echo "logs and screenshots: $OUT"
+exit $((1 - pass))

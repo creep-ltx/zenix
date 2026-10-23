@@ -511,6 +511,8 @@ int proc_wait(int pid, int flags)
     int con = (flags & WAIT_CONSOLE) && current->uid == 0;
     for (;;) {
         int have = 0;
+        if (con && kbd_reset_state == KRS_HELD)
+            kbd_reset_flush();          /* Ctrl+Amiga+Amiga: init syncs the disks before the reset (kbd.c) */
         if (con && con_want) {
             for (int n = 1; n <= NCONS; n++)
                 if (con_want & (1u << n)) {

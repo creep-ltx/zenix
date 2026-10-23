@@ -89,8 +89,13 @@ static inline void mfm_encode_sector(mfm_u16 *words, int track, int sector, int 
     }
 }
 
-/* A whole track as the disk is written: "gapwords" words of MFM zeros, then the 11 sectors in order. Returns the
- * number of words written. data = 11 * 512 bytes. */
+/* A whole track as the disk is written: "gapwords" words of MFM zeros, then the 11 sectors in order, then one filler
+ * word. Paula switches the write off three bit cells before the last word has gone out ("a hardware bug causes the
+ * last three bits of data sent to the disk to be lost", HRM 3rd ed. p.247), so the last word is an MFM zero whose
+ * last three bits are 0 ($AAA8, or $2AA8 after a 1 bit): only filler is lost, never sector 10's data (the filler
+ * word is the hardware hand-off note's, 2026-10-23). Returns the number of words to write (gapwords + 5985).
+ * data = 11 * 512 bytes. */
+#define MFM_TAIL_WORDS 1
 static inline int mfm_encode_track(mfm_u16 *words, int gapwords, int track, const mfm_u8 *data)
 {
     mfm_u32 prev = 0;
@@ -101,15 +106,58 @@ static inline int mfm_encode_track(mfm_u16 *words, int gapwords, int track, cons
     }
     for (int s = 0; s < MFM_SECTORS; s++, n += MFM_SECTOR_WORDS)
         mfm_encode_sector(words + n, track, s, MFM_SECTORS - s, data + 512 * s, &prev);
+    words[n++] = (prev & 1) ? 0x2AA8 : 0xAAA8;
     return n;
 }
 
+/* One sector whose header info long starts at raw[j] (just after its sync words): its number if the header and the
+ * data checksums are right and it belongs to "track" (the data then goes to out), else -1. */
+static inline int mfm_decode_sector(const mfm_u16 *raw, int j, int track, mfm_u8 *out)
+{
+    mfm_u32 l[270];
+    for (int k = 0; k < 270; k++)
+        l[k] = (mfm_u32)raw[j + 2 * k] << 16 | raw[j + 2 * k + 1];
+    mfm_u32 info, hsum, dsum;
+    mfm_u32 hcalc = 0;
+    mfm_decode_block(&info, l, 1);
+    for (int k = 0; k < 10; k++)
+        hcalc ^= l[k];
+    hcalc &= MFM_M;
+    mfm_decode_block(&hsum, l + 10, 1);
+    mfm_decode_block(&dsum, l + 12, 1);
+    int fmt = (int)(info >> 24), trk = (int)((info >> 16) & 0xFF), sec = (int)((info >> 8) & 0xFF);
+    if (fmt != 0xFF || hcalc != hsum || trk != track || sec >= MFM_SECTORS)
+        return -1;
+    mfm_u32 dcalc = 0;
+    for (int k = 14; k < 270; k++)
+        dcalc ^= l[k];
+    dcalc &= MFM_M;
+    if (dcalc != dsum)
+        return -1;
+    mfm_u32 d[128];
+    mfm_decode_block(d, l + 14, 128);
+    for (int k = 0; k < 128; k++) {
+        out[512 * sec + 4 * k] = (mfm_u8)(d[k] >> 24);
+        out[512 * sec + 4 * k + 1] = (mfm_u8)(d[k] >> 16);
+        out[512 * sec + 4 * k + 2] = (mfm_u8)(d[k] >> 8);
+        out[512 * sec + 4 * k + 3] = (mfm_u8)d[k];
+    }
+    return sec;
+}
+
 /* Find the sectors of track "track" in a raw read of nwords words (a bit more than one revolution, starting at
- * a sync). Decoded data goes to out (11 * 512 bytes). Returns a bit mask of the sectors found with valid header
- * and data checksums. */
+ * a sync). Decoded data goes to out (11 * 512 bytes); only sectors that pass their checksums are written there.
+ * Returns a bit mask of the sectors found with valid header and data checksums.
+ * Paula stores the words after the first sync word; rarely the DMA starts inside the first sync word and the buffer
+ * begins with the header of the first sector, with no sync in front (hand-off note): that sector is tried at 0. */
 static inline int mfm_decode_track(const mfm_u16 *raw, int nwords, int track, mfm_u8 *out)
 {
     int mask = 0;
+    if (nwords >= MFM_SECTOR_WORDS - 4 && raw[0] != 0x4489) {
+        int sec = mfm_decode_sector(raw, 0, track, out);
+        if (sec >= 0)
+            mask |= 1 << sec;
+    }
     for (int i = 0; i < nwords;) {
         if (raw[i] != 0x4489) {
             i++;
@@ -120,38 +168,12 @@ static inline int mfm_decode_track(const mfm_u16 *raw, int nwords, int track, mf
             j++;
         if (j + (MFM_SECTOR_WORDS - 4) > nwords)
             break;
-        mfm_u32 l[270];
-        for (int k = 0; k < 270; k++)
-            l[k] = (mfm_u32)raw[j + 2 * k] << 16 | raw[j + 2 * k + 1];
-        mfm_u32 info, hsum, dsum, tmp;
-        mfm_u32 hcalc = 0;
-        mfm_decode_block(&info, l, 1);
-        for (int k = 0; k < 10; k++)
-            hcalc ^= l[k];
-        hcalc &= MFM_M;
-        mfm_decode_block(&hsum, l + 10, 1);
-        mfm_decode_block(&dsum, l + 12, 1);
-        int fmt = (int)(info >> 24), trk = (int)((info >> 16) & 0xFF), sec = (int)((info >> 8) & 0xFF);
-        if (fmt == 0xFF && hcalc == hsum && trk == track && sec < MFM_SECTORS) {
-            mfm_u32 dcalc = 0;
-            for (int k = 14; k < 270; k++)
-                dcalc ^= l[k];
-            dcalc &= MFM_M;
-            if (dcalc == dsum) {
-                mfm_u32 d[128];
-                mfm_decode_block(d, l + 14, 128);
-                for (int k = 0; k < 128; k++) {
-                    out[512 * sec + 4 * k] = (mfm_u8)(d[k] >> 24);
-                    out[512 * sec + 4 * k + 1] = (mfm_u8)(d[k] >> 16);
-                    out[512 * sec + 4 * k + 2] = (mfm_u8)(d[k] >> 8);
-                    out[512 * sec + 4 * k + 3] = (mfm_u8)d[k];
-                }
-                mask |= 1 << sec;
-                i = j + 540;                                /* a whole sector: its data cannot hold a sync */
-                continue;
-            }
+        int sec = mfm_decode_sector(raw, j, track, out);
+        if (sec >= 0) {
+            mask |= 1 << sec;
+            i = j + 540;                                    /* a whole sector: its data cannot hold a sync */
+            continue;
         }
-        (void)tmp;
         i = j;          /* no good sector here (a stray sync in the gap, a damaged one): the next sync may be close */
     }
     return mask;
