@@ -159,6 +159,20 @@ proprietary, so from them only the documented behaviour (the ROM Kernel Manuals;
 | Drivers | **Darwin (IOKit)** | A registry of hardware found (Zorro boards, the Pi's device tree) and drivers matched to it by properties, instead of each driver probing for itself | each driver probes |
 | Users and permissions | **Unix/BSD** | The classic model, with the honest no-MMU limit | **done** (batch D) |
 
+
+**How these get built without making a mess (owner, 2026-10-24: "keep it nice and tidy"):**
+- **One idea per area.** Where two rows overlap they become one mechanism: Exec's "on first use", Minix 3's restart and
+  launchd are **one** service manager (grown from today's `boot`); the signal bits are the base and `select`/`poll`
+  and the kqueue-style call are thin layers on them, not three systems.
+- **A new mechanism replaces an old one** in the same step: port rights replace the reserved names and the kernel
+  flag; the service manager replaces "start everything at boot"; the ordered timer list replaces the scan. Nothing is
+  kept "for now" next to its replacement.
+- **A design note first:** each idea gets a numbered decision in DESIGN.md (what, why, what it replaces, what it costs)
+  before code, and the owner agrees to it.
+- **Measured and tested:** each one comes with checking tests in `make check`, and a before/after measurement on the
+  real A1200 (kernel size, switch cost, message cost).
+- **An audit after every batch,** as on 2026-10-22, before the next one starts.
+
 What stays deliberately out: `fork` (needs an MMU), Linux's size and its thousands of system calls, Exec's lack of
 users and of resource tracking (Zenix keeps per-process ownership: everything a process held is freed when it dies).
 
