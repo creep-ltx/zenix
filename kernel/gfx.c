@@ -243,3 +243,13 @@ int gfx_init(void)
 }
 
 int gfx_up(void) { return up; }
+
+/* a kernel panic with the display up (interrupts are off): show the scroll position the text was drawn at (the
+ * vertical-blank interrupt that normally applies it no longer runs) and turn the bar red; the text stays */
+void gfx_panic(void)
+{
+    if (!up)
+        return;
+    gfx_vblank();
+    cop[1] = 0xF00;
+}

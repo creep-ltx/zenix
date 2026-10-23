@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     dmesg
+    dmesg -p
 
 DESCRIPTION
     Prints what the kernel has logged since boot: the same lines it writes to
@@ -15,12 +16,21 @@ DESCRIPTION
     gone by. dmesg is how to read them again on a machine with no serial
     cable.
 
+    -p  Print the log of the previous boot instead: the kernel keeps its log
+        at the top of chip RAM, and after a warm reset (Ctrl-Amiga-Amiga) the
+        next boot finds it there. This is how to see why a boot froze or
+        panicked. While booting, the kernel already shows its last 20 lines
+        (marked "> ") between "=== previous boot (N) ended here" and
+        "=== end of the previous boot's log ===".
+
 EXIT STATUS
-    Always 0.
+    0, or 1 for -p when there is no log from a previous boot (after a power
+    off, or when the memory did not survive the reset); 2 for a wrong option.
 
 NOTES
     Not done: clearing the log, following it as it grows, a level or a time
     stamp per message. Output is plain text, one kernel message per line.
+    Whether chip RAM survives a warm reset on a PiStorm is not yet known.
 
 SEE ALSO
-    uptime(1), docs/architecture.md
+    uptime(1), docs/architecture.md, docs/pi-first-boot.md

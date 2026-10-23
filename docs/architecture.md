@@ -27,7 +27,8 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
 ## 2. Hardware assumptions
 
 - CPU: 68020 or better. `start.S` checks `AttnFlags` before any C runs; a 68000 gets a message on the serial port
-  and a red screen. No MMU is required or used. No FPU is required (`-msoft-float`).
+  and the screen orange over red (a stop at stage 5, section 3). No MMU is required or used. No FPU is required
+  (`-msoft-float`).
 - Memory: **chip** RAM (reachable by the custom chips: display, audio, disk DMA) and **fast** RAM are separate
   pools. Fast is preferred; chip is used when asked for (`MEM_CHIP`) or when there is nothing else.
 - Caches: instruction cache on. The data cache stays off, because without an MMU chip RAM cannot be marked
@@ -81,9 +82,22 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
    block, so at `0x1100` for the kernel; see "Pi hardware table" below).
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
    `kmain()`.
-4. `kmain` starts the serial port, vector table, memory manager, caches, display, clock and disk, then creates
-   three built-in processes: `diskd`, `fsd`, `boot`. `boot` waits for the `fs` port and starts `/bin/init`, which
-   prints `/etc/motd` and runs `/bin/sh`.
+4. `kmain` reads the previous boot's log (below), then starts the serial port, vector table, memory manager,
+   caches, display, clock and disk, then creates three built-in processes: `diskd`, `fsd`, `boot`. `boot` waits for
+   the `fs` port and starts `/bin/init`, which prints `/etc/motd` and runs `/bin/sh`.
+
+### Boot stage colours (`kernel/diag.h`, audit A11)
+
+The bootblock's first instructions switch Copper and bitplane DMA off and set `BPLCON0` to no bitplanes (and
+`BPLCON3` to 0 on ECS/AGA), so `COLOR00` fills the whole screen. Each boot step then writes its own colour: stages
+1-3 in the bootblock (blue, cyan, magenta), 4-5 in `start.S` (yellow, orange), 6-9 in `kmain` through
+`diag_stage()` (green, brown, pink, white); from stage 10 the Copper owns `COLOR00` and the boot log is on the
+screen as text; grey means the display could not start. A stop on an error before the display is up
+(`panic`, an exception in the kernel, a 68000 in `start.S`) calls `diag_halt()` (`start.S`, plain 68000 code): it
+polls the beam counter and paints the stage colour above line 150 and red below, forever. After the display is up a
+panic turns the bar red (`gfx_panic`) and leaves its text on the screen. The whole screen red is the bootblock's
+own failure. The table for the owner (colour, where, likely cause) is in pi-first-boot.md. Test builds:
+`make DIAG=-DDIAG_STOP=N` hangs at stage N, `DIAG=-DDIAG_PANIC=N` panics there (`tools/diag-test.sh`).
 
 ### Pi hardware table (stage0, `boot/stage0.c`, `kernel/hwinfo.h`)
 
@@ -109,7 +123,27 @@ empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and th
 ring to the visible workspace and mirrors new `kprintf` output there until the boot is finished (`klog_mirror_off`
 just before the scheduler starts), so the boot messages - including every driver's init log - are on the screen of
 a machine with no serial cable (scroll back with Shift+Up). `SYS_klog` (73: offset, buffer, length) reads the ring;
-`dmesg` prints it.
+`dmesg` prints it. A panic or an exception in the kernel switches the mirror on again, so its text reaches the
+screen, and records the reason in the log before the machine stops.
+
+**Previous-boot log (audit A12).** The log lives in the top 16.5 KB of chip RAM (`KLOG_AREA_SIZE` = `0x4200` below the
+highest chip address in bootinfo; `0x1FBE00` on a 2 MB machine), so that after a warm reset (Ctrl-Amiga-Amiga) the
+next boot can show how this one ended. Why there: Kickstart keeps its own data low in chip RAM (exec's free list
+starts at `0x4020` on 3.1) and its free-memory headers at the start of a free block, and allocations go first-fit from
+the bottom; the bootblock `AllocAbs()`es the area (exec's `MaxLocMem` - `0x4200`) before it asks for any buffer, so
+neither the boot tables nor the kernel/RAM-disk load buffer can land on it, and `mem_init` keeps it out of the chip
+pool. Layout: two slots, each a 256-byte header (magic `ZKLG`, ring size, boot number, characters logged, a sum over
+the 8 KB ring, the reason the boot ended - running or panic -, and a sum over the header) and the 8 KB ring. Both sums
+are updated with every character (interrupts masked, O(1)), so a slot is consistent between any two characters.
+`klog_init()`, the first call in `kmain`, checks both slots before anything is printed; the valid one with the higher
+boot number is the previous boot's, and this boot writes the other slot (boot number + 1), so the previous log stays
+where it is and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
+at ...` and "no log from a previous boot", "damaged (checksum)" or the previous boot's last 20 lines, each starting
+with a `>`, between `=== previous boot (N) ended here ...` (with or without a kernel panic) and `=== end of the
+previous boot's log ===`. `SYS_klog` with bit 31 set in the offset (`KLOG_PREV`) reads the previous slot (`dmesg -p`).
+If the area overlaps the kernel or the RAM disk (little chip RAM), a 1 KB ring in the BSS is used and the log does not
+survive a reset (the kernel says so). Whether chip RAM survives a warm reset on the PiStorm is not yet known; in
+FS-UAE (Kickstart 3.1, keyboard reset) it does (`tools/diag-test.sh`).
 
 ### Sound (`kernel/audio.c`)
 
@@ -197,6 +231,9 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
 - Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
   at least one header, a multiple of 16 and inside the range. A header that fails means something overwrote the heap:
   the kernel prints its address on the serial port and stops (`panic`) instead of looping on garbage.
+
+The pools leave out low chip RAM (`0`-`0x1FFF`: vectors, boot tables), the kernel, the RAM disk and the kernel
+log's area at the top of chip RAM (section 3, "Previous-boot log").
 
 A process's own memory is **one block**: image + BSS + stack + the argument area. The kernel stack (4 KB) is a
 second block. Both are owned by the pid and freed together.
@@ -458,7 +495,10 @@ outputs (`tools/cmds-test.sh`).
   `tools/emmc-fake.h`) and `tools/a3000-test.sh` (the A3000 SCSI driver against a WD33C93A + DMAC model). They show the logic matches the specifications; they cannot show the real chip behaves the same.
 - Test rig: FS-UAE (headless, serial script) via `tools/run-test.sh`, `tools/serial-tap.py`, `tools/shot.py`;
   `tools/kbd-test.sh` presses keys on the emulated keyboard (wtype in the cage rig) and checks the keymap layers,
-  Caps Lock and key repeat.
+  Caps Lock and key repeat. `tools/diag-test.sh` checks the boot stage colours (test builds that stop at each
+  stage; the screenshot's pixel colour), the split and red-bar panic screens, and the previous-boot log across a
+  warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `make BUILD=/tmp/x` builds everything
+  in another directory (the kernel finds `stage0.bin` and the built-in servers through `-I$(BUILD)`).
   `tools/matrix.sh` boots 13 emulated machine variants (A1200 stock and with fast RAM, chip-only, NTSC, 030/040/060,
   A4000, and an A600 that must refuse cleanly). Filesystem work is checked with the host's `e2fsck`.
 - Source layout: `boot/` bootblock, `kernel/` the kernel and its protocol headers, `user/` programs and libc,

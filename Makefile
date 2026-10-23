@@ -10,6 +10,11 @@ CFLAGS  := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
 DIWV    ?= 0x2C
 CFLAGS  += -DDIW_V=$(DIWV)
 ASFLAGS := -m68020-60 -x assembler-with-cpp -c
+# test builds only (audit A11/A12, docs/pi-first-boot.md): DIAG=-DDIAG_STOP=N hangs at boot stage N (its colour stays),
+# DIAG=-DDIAG_PANIC=N panics there. Use a build directory of its own (make BUILD=/tmp/x DIAG=...): flags are not tracked.
+DIAG    ?=
+CFLAGS  += $(DIAG)
+ASFLAGS += $(DIAG)
 # libgcc's 64-bit helpers (__udivdi3, __muldi3) in the default multilib use the 64-bit mulu.l/divu.l themselves; the
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
@@ -60,7 +65,7 @@ $(BUILD)/stage0.bin: $(BUILD)/stage0.elf tools/check-68020-60.sh
 	$(OBJCOPY) -O binary $< $@
 
 $(BUILD)/start.o: kernel/start.S $(BUILD)/stage0.bin | $(BUILD)
-	$(CC) $(ASFLAGS) $< -o $@
+	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
 $(BUILD)/%.o: kernel/%.c $(wildcard kernel/*.h) | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
@@ -157,7 +162,7 @@ $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py tools/check-68020-60.sh
 $(BUILD)/mount.ext2.zx: $(BUILD)/fsd.zx
 	cp $< $@
 $(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx $(BUILD)/mount.zenixfs.zx | $(BUILD)
-	$(CC) $(ASFLAGS) $< -o $@
+	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
 
 # ---- ZenixFS: the library (zenixfs/zenixfs.c, also built for the host) as a Zenix program part, its tools and server ----
 $(BUILD)/zenixfs_lib.uo: zenixfs/zenixfs.c zenixfs/zenixfs.h user/zenixfs_env.h | $(BUILD)
