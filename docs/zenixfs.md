@@ -101,7 +101,10 @@ Latin-1 (keyboard, font, AmigaOS agree) and UTF-8 is planned: both work, because
 
 **Z6. Directories are hashed.** A directory entry is a tree item with key `(dir, hash32(name), n)`; lookup is one
 tree descent; no scan. `readdir` walks in key order and the cookie is the hash, so it stays valid while the
-directory changes. Many small entries share a block (SFS idea, comes free from the tree). Hash: a cheap one
+directory changes (a removal never moves another name: chains may have gaps, `zenixfs-format.md`). Every tree block read from the
+disk is checked for its structure as well as its checksum (item count, offsets and sizes inside the block and at most the largest
+item, node levels, children inside the data area), so a crafted image with good checksums fails with ECORRUPT instead of overflowing
+a buffer (`make -C zenixfs test`: `crafted`, `readdir-delete`). Many small entries share a block (SFS idea, comes free from the tree). Hash: a cheap one
 (FNV-style or a 32-bit multiply-rotate), fixed forever in the format.
 
 **Z7. Files are extents** `(logical block, physical start, length)`, 32-bit each. Files under about 200 bytes live

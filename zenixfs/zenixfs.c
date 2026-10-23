@@ -64,7 +64,7 @@ struct zenixfs {
     u32 bmbytes;                 /* bytes of payload per bitmap block (B - HDR) */
     struct cb *cbs; struct cb **htab; u32 cap, hsize, clock, ndirty;
     u32 meta_hint, data_hint;
-    int in_reserve, failed, txn_dirty;
+    int in_reserve, failed, txn_dirty, readonly;
     u8 *sc_r, *sc_z, *sc_c, *sc_b, *sc_sel;   /* scratch blocks for read, truncate, commit, and the bitmap selector copy: allocated once at mount
                                          * (the Zenix malloc cannot give small blocks back, a server must not allocate while running) */
     struct zenixfs_stats st;
@@ -92,11 +92,7 @@ static int verify(const u8 *b, u32 n, u8 type, u32 self)
     if (rd16(b + 4) != MAGIC16 || b[6] != type || rd32(b + 8) != self) return 0;
     return csum_of(b, n) == rd32(b);
 }
-static int verify_tree(const u8 *b, u32 n, u32 self)
-{
-    if (rd16(b + 4) != MAGIC16 || (b[6] != T_LEAF && b[6] != T_NODE) || rd32(b + 8) != self) return 0;
-    return csum_of(b, n) == rd32(b);
-}
+static int verify_tree(const struct zenixfs *fs, const u8 *b, u32 self);
 
 /* ---------- bit helpers ---------- */
 static inline int bit_get(const u8 *a, u32 i) { return (a[i >> 3] >> (i & 7)) & 1; }
@@ -147,7 +143,7 @@ static int cb_get(struct zenixfs *fs, u32 blk, int kind, struct cb **out)
     c->kind = kind;
     fs->st.reads++;
     if (fs->dev->read(fs->dev->ctx, blk, c->data) < 0) { c->valid = 0; cb_unhash(fs, c); c->pin = 0; return ZENIXFS_EIO; }
-    if (kind == KIND_TREE && !verify_tree(c->data, fs->B, blk)) { c->valid = 0; cb_unhash(fs, c); c->pin = 0; return ZENIXFS_ECORRUPT; }
+    if (kind == KIND_TREE && !verify_tree(fs, c->data, blk)) { c->valid = 0; cb_unhash(fs, c); c->pin = 0; return ZENIXFS_ECORRUPT; }
     *out = c;
     return 0;
 }
@@ -171,7 +167,12 @@ static void cb_drop(struct zenixfs *fs, u32 blk)
     if (!c->pin) { cb_unhash(fs, c); c->valid = 0; }
 }
 
-static int dev_write(struct zenixfs *fs, u32 blk, const void *buf) { fs->st.writes++; return fs->dev->write(fs->dev->ctx, blk, buf); }
+static int dev_write(struct zenixfs *fs, u32 blk, const void *buf)
+{
+    if (fs->readonly) return -1;                            /* a read-only mount never reaches the device */
+    fs->st.writes++;
+    return fs->dev->write(fs->dev->ctx, blk, buf);
+}
 static int dev_flush(struct zenixfs *fs) { fs->st.flushes++; return fs->dev->flush(fs->dev->ctx); }
 #define BMBLK(i, copy) (9 + 2 * (i) + (copy))
 
@@ -303,6 +304,43 @@ static int kdec(u8 *k)
 #define SETDO(b, o) wr16((b) + 26, (o))
 #define IH(b, i) ((b) + HDR + 16 * (i))      /* item header: key 12, off 2, size 2; node entry: key 12, child 4 */
 
+/* a tree block read from the disk: header, checksum, AND its structure (a crafted image can have good checksums):
+ * item count, item offsets and sizes inside the block and at most maxitem (every caller's buffer is VMAX), node levels
+ * and children inside the data area. A block that fails is ECORRUPT: nothing is copied out of it. */
+#define MAXHEIGHT 24
+static int verify_tree(const struct zenixfs *fs, const u8 *b, u32 self)
+{
+    u32 B = fs->B;
+    if (rd16(b + 4) != MAGIC16 || (b[6] != T_LEAF && b[6] != T_NODE) || rd32(b + 8) != self) return 0;
+    if (csum_of(b, B) != rd32(b)) return 0;
+    u32 n = NITEMS(b);
+    if (n > (B - HDR) / 16) return 0;
+    if (b[6] == T_LEAF) {
+        u32 d = DATAOFF(b);
+        if (b[7] != 0 || HDR + 16 * n > d || d > B) return 0;
+        for (u32 i = 0; i < n; i++) {
+            u32 off = rd16(IH(b, i) + 12), sz = rd16(IH(b, i) + 14);
+            if (off < d || off + sz > B || sz > fs->maxitem) return 0;
+        }
+    } else {
+        if (b[7] == 0 || b[7] >= MAXHEIGHT || n == 0) return 0;
+        for (u32 i = 0; i < n; i++) {
+            u32 ch = rd32(IH(b, i) + 12);
+            if (ch < fs->dstart || ch >= fs->nblocks) return 0;
+        }
+    }
+    return 1;
+}
+/* the tree block at the given level (0 = leaf): a block of another kind or level there is damage */
+static int tree_get(struct zenixfs *fs, u32 blk, int level, struct cb **out)
+{
+    int e = cb_get(fs, blk, KIND_TREE, out);
+    if (e) return e;
+    const u8 *b = (*out)->data;
+    if (b[7] != level || b[6] != (level ? T_NODE : T_LEAF)) { cb_put(*out); return ZENIXFS_ECORRUPT; }
+    return 0;
+}
+
 static u32 leaf_free(const u8 *b)
 {
     return DATAOFF(b) - (HDR + 16 * NITEMS(b));
@@ -391,7 +429,7 @@ static int t_search(struct zenixfs *fs, const u8 *key0, int mode, u8 *okey, u8 *
         u32 blk = fs->root;
         u8 lower[KEYLEN], upper[KEYLEN]; int lv = 0, uv = 0;
         for (int level = fs->height - 1; ; level--) {
-            struct cb *c; int e = cb_get(fs, blk, KIND_TREE, &c);
+            struct cb *c; int e = tree_get(fs, blk, level, &c);
             if (e) return e;
             u8 *b = c->data;
             if (level > 0) {
@@ -431,7 +469,7 @@ static int t_ins(struct zenixfs *fs, u32 blk, int level, const u8 *key, const u8
     int e; struct cb *c;
     r->sblk = 0;
     if (level > 0) {
-        struct cb *rc; e = cb_get(fs, blk, KIND_TREE, &rc);
+        struct cb *rc; e = tree_get(fs, blk, level, &rc);
         if (e) return e;
         u32 idx = node_slot(rc->data, key), child = rd32(IH(rc->data, idx) + 12);
         cb_put(rc);
@@ -464,7 +502,7 @@ static int t_ins(struct zenixfs *fs, u32 blk, int level, const u8 *key, const u8
         return 0;
     }
     /* leaf */
-    e = cb_get(fs, blk, KIND_TREE, &c);
+    e = tree_get(fs, blk, 0, &c);
     if (e) return e;
     u32 idx = lower_bound(c->data, key);
     int exists = idx < NITEMS(c->data) && !kcmp(IH(c->data, idx), key);
@@ -531,7 +569,7 @@ static int t_dl(struct zenixfs *fs, u32 blk, int level, const u8 *key, struct de
     int e; struct cb *c;
     r->empty = 0;
     if (level > 0) {
-        struct cb *rc; e = cb_get(fs, blk, KIND_TREE, &rc);
+        struct cb *rc; e = tree_get(fs, blk, level, &rc);
         if (e) return e;
         u32 idx = node_slot(rc->data, key), child = rd32(IH(rc->data, idx) + 12);
         cb_put(rc);
@@ -549,7 +587,7 @@ static int t_dl(struct zenixfs *fs, u32 blk, int level, const u8 *key, struct de
         cb_put(c);
         return 0;
     }
-    e = cb_get(fs, blk, KIND_TREE, &c);
+    e = tree_get(fs, blk, 0, &c);
     if (e) return e;
     u32 idx = lower_bound(c->data, key);
     if (idx >= NITEMS(c->data) || kcmp(IH(c->data, idx), key)) { cb_put(c); return ZENIXFS_ENOENT; }
@@ -591,6 +629,7 @@ static int t_delete(struct zenixfs *fs, const u8 *key)
 static int commit(struct zenixfs *fs)
 {
     if (!fs->txn_dirty) return 0;
+    if (fs->readonly) return ZENIXFS_EROFS;
     if (fs->failed) return ZENIXFS_EIO;
     u32 B = fs->B;
     for (u32 i = 0; i < fs->cap; i++) {
@@ -626,12 +665,14 @@ static int commit(struct zenixfs *fs)
 /* inside a long write, between two blocks: only when memory or the run list is really about to run out */
 static int pressure_blk(struct zenixfs *fs)
 {
+    if (fs->readonly) return ZENIXFS_EROFS;
     if (fs->failed) return ZENIXFS_EIO;
     if (fs->ndirty * 4 >= fs->cap * 3 || fs->npend + 8 > PENDMAX) return commit(fs);
     return 0;
 }
 static int pressure(struct zenixfs *fs)
 {
+    if (fs->readonly) return ZENIXFS_EROFS;
     if (fs->failed) return ZENIXFS_EIO;
     if (fs->ndirty * 2 >= fs->cap) return commit(fs);
     if (fs->npend + 160 > PENDMAX) return commit(fs);                      /* room for the runs of the next operation: a write of up to
@@ -800,14 +841,17 @@ int zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const stru
         }
         if (!good) { fs->st.mount_damage++; continue; }
         u32 root = rd32(r + 32);
-        if (root >= fs->nblocks || dev->read(dev->ctx, root, buf) < 0 || !verify_tree(buf, B, root)) { fs->st.mount_damage++; continue; }
+        u32 height = rd32(r + 36);
+        if (root < fs->dstart || root >= fs->nblocks || height == 0 || height >= MAXHEIGHT || dev->read(dev->ctx, root, buf) < 0 ||
+            !verify_tree(fs, buf, root) || buf[7] != height - 1) { fs->st.mount_damage++; continue; }
         fs->root = root; fs->height = rd32(r + 36); fs->free_blocks = rd32(r + 40); fs->next_ino = rd32(r + 44);
         fs->now = rd64(r + 48); fs->gen = (u32)maxg + 1; (void)g; ok = 1;     /* above every valid record: after a rollback ours is the newest */
     }
     ZENIXFS_FREE(recs); ZENIXFS_FREE(buf);
     if (!ok) { fs_free(fs); return ZENIXFS_ECORRUPT; }
     fs->meta_hint = fs->dstart; fs->data_hint = fs->dstart + fs->nblocks / 32;
-    int e = (mo->flags & ZENIXFS_MNT_READONLYISH) ? 0 : orphans_free(fs);          /* a recovery mount does not change anything by itself */
+    fs->readonly = (mo->flags & ZENIXFS_MNT_READONLY) != 0;
+    int e = (mo->flags & (ZENIXFS_MNT_READONLYISH | ZENIXFS_MNT_READONLY)) ? 0 : orphans_free(fs);   /* a recovery mount does not change anything by itself */
     if (e) { fs_free(fs); return e; }
     *out = fs;
     return 0;
@@ -875,28 +919,35 @@ static u32 name_hash(const u8 *n, int len)
     for (int i = 0; i < len; i++) { h ^= n[i]; h *= 16777619u; }
     return (((h >> 8) ^ h) & 0xFFFFFF) << 8;
 }
-static int dir_get(struct zenixfs *fs, u32 dir, u32 off, u8 *val, int *vl)
+/* the next entry of the hash chain "base" at sequence number q or above (chains may have gaps: a removed name leaves
+ * one, nothing is moved, so readdir cookies stay valid); 0 and *at = its sequence number, or ENOENT */
+static int dir_next(struct zenixfs *fs, u32 dir, u32 base, u32 q, u32 *at, u8 *val, int *vl)
 {
-    u8 key[KEYLEN];
-    mkkey(key, dir, K_DIRENT, off);
-    return t_search(fs, key, S_EXACT, NULL, val, vl);
+    u8 key[KEYLEN], k2[KEYLEN];
+    if (q > 255) return ZENIXFS_ENOENT;
+    mkkey(key, dir, K_DIRENT, base | q);
+    int e = t_search(fs, key, S_CEIL, k2, val, vl);
+    if (e) return e;
+    if (rd32(k2) != dir || k2[4] != K_DIRENT || (rd32(k2 + 8) & ~0xFFu) != base) return ZENIXFS_ENOENT;
+    *at = rd32(k2 + 8) & 0xFF;
+    return 0;
 }
 /* find the entry; fills ino/type and the sequence number */
 static int dir_find_seq(struct zenixfs *fs, u32 dir, const u8 *name, int len, u32 *ino, u8 *type, u32 *seq)
 {
-    u32 base = name_hash(name, len);
-    for (u32 q = 0; q < 256; q++) {
+    u32 base = name_hash(name, len), q = 0, at;
+    for (;;) {
         u8 val[VMAX]; int vl;
-        int e = dir_get(fs, dir, base | q, val, &vl);
-        if (e) return e;                                   /* ENOENT ends the chain */
+        int e = dir_next(fs, dir, base, q, &at, val, &vl);
+        if (e) return e;                                   /* ENOENT: the end of the chain */
         if (vl >= 6 && val[5] == len && !memcmp(val + 6, name, len)) {
             if (ino) *ino = rd32(val);
             if (type) *type = val[4];
-            if (seq) *seq = q;
+            if (seq) *seq = at;
             return 0;
         }
+        q = at + 1;
     }
-    return ZENIXFS_ENOENT;
 }
 static int dir_find(struct zenixfs *fs, u32 dir, const u8 *name, int len, u32 *ino, u8 *type)
 {
@@ -905,38 +956,25 @@ static int dir_find(struct zenixfs *fs, u32 dir, const u8 *name, int len, u32 *i
 static int dir_add(struct zenixfs *fs, u32 dir, const u8 *name, int len, u32 ino, u8 type)
 {
     u8 key[KEYLEN], val[300];
-    u32 base = name_hash(name, len), q = 0;
-    for (; q < 256; q++) {
+    u32 base = name_hash(name, len), q = 0, at;
+    for (; q < 256; q = at + 1) {                          /* the first free sequence number: a gap, or the end */
         u8 tmp[VMAX]; int vl;
-        int e = dir_get(fs, dir, base | q, tmp, &vl);
-        if (e == ZENIXFS_ENOENT) break;
+        int e = dir_next(fs, dir, base, q, &at, tmp, &vl);
+        if (e == ZENIXFS_ENOENT || (!e && at > q)) break;
         if (e) return e;
     }
-    if (q == 256) return ZENIXFS_ENOSPC;
+    if (q >= 256) return ZENIXFS_ENOSPC;
     wr32(val, ino); val[4] = type; val[5] = (u8)len; memcpy(val + 6, name, len);
     mkkey(key, dir, K_DIRENT, base | q);
     return t_insert(fs, key, val, 6 + len, 0);
 }
 static int dir_del(struct zenixfs *fs, u32 dir, const u8 *name, int len)
 {
-    u32 base = name_hash(name, len), k, last;
-    u8 key[KEYLEN], val[VMAX]; int vl;
+    u32 base = name_hash(name, len), k;
+    u8 key[KEYLEN];
     int e = dir_find_seq(fs, dir, name, len, NULL, NULL, &k);
     if (e) return e;
-    for (last = k; last + 1 < 256; last++) {              /* the end of the chain */
-        u8 tmp[VMAX]; int tl;
-        int r = dir_get(fs, dir, base | (last + 1), tmp, &tl);
-        if (r == ZENIXFS_ENOENT) break;
-        if (r) return r;
-    }
-    if (last != k) {                                       /* move the last name of the chain into the hole */
-        e = dir_get(fs, dir, base | last, val, &vl);
-        if (e) return e;
-        mkkey(key, dir, K_DIRENT, base | k);
-        e = t_insert(fs, key, val, vl, 1);
-        if (e) return e;
-    }
-    mkkey(key, dir, K_DIRENT, base | last);
+    mkkey(key, dir, K_DIRENT, base | k);                   /* only this name goes: the others keep their places */
     return t_delete(fs, key);
 }
 static int dir_empty(struct zenixfs *fs, u32 dir)
@@ -1530,7 +1568,7 @@ static void fwalk(struct fctx *c, u32 blk, int level)
     if (e) { fprob(c, "tree block # unreadable or bad checksum", blk, 0); return; }
     u8 *b = cb->data;
     fuse_blk(c, blk, "tree"); c->tree_blocks++;
-    if (b[7] != level) fprob(c, "block # has the wrong level", blk, 0);
+    if (b[7] != level || b[6] != (level ? T_NODE : T_LEAF)) { fprob(c, "block # has the wrong level", blk, 0); cb_put(cb); return; }
     u32 n = NITEMS(b);
     if (level > 0) {
         for (u32 i = 0; i < n; i++) {
@@ -1563,8 +1601,8 @@ static void fwalk(struct fctx *c, u32 blk, int level)
             u32 ino = rd32(v); u8 type = v[4]; int nl = sz >= 6 ? v[5] : 0;
             if (sz < 6 || nl == 0 || 6 + nl != (int)sz) { fprob(c, "directory # has a bad entry", obj, 0); continue; }
             if ((name_hash(v + 6, nl) & ~0xFFu) != (koff & ~0xFFu)) fprob(c, "directory # entry hash mismatch", obj, 0);
-            if ((koff & 0xFF) != (c->prev_hash == (koff & ~0xFFu) && c->prev_obj == obj ? c->prev_seq + 1 : 0))
-                fprob(c, "directory # has a gap in a hash chain", obj, 0);
+            if (c->prev_hash == (koff & ~0xFFu) && c->prev_obj == obj && (koff & 0xFF) <= c->prev_seq)
+                fprob(c, "directory # hash chain out of order", obj, 0);
             c->prev_obj = obj; c->prev_hash = koff & ~0xFFu; c->prev_seq = koff & 0xFF;
             struct fk *t = ftab_get(c, ino, 1); t->refs++;
             if (type == 4) { t->seen_inline |= 0x200; ftab_get(c, obj, 1)->subdirs++; }

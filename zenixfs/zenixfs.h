@@ -34,6 +34,7 @@ struct zenixfs_dev {
 #define ZENIXFS_ENAMETOOLONG (-36)
 #define ZENIXFS_EFBIG    (-27)
 #define ZENIXFS_ECORRUPT (-117)   /* checksum or structure error found */
+#define ZENIXFS_EROFS    (-30)    /* mounted read-only */
 
 /* Unix mode type bits */
 #define ZENIXFS_S_IFMT  0170000
@@ -67,6 +68,7 @@ int  zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t ca
  * (mount an older state of the volume). */
 #define ZENIXFS_MNT_NOBITMAPCHECK 1
 #define ZENIXFS_MNT_READONLYISH   2
+#define ZENIXFS_MNT_READONLY      4   /* nothing is ever written (no orphan cleanup, no commit; changes fail with EROFS): for fsck */
 struct zenixfs_mount_opts { uint32_t cache_blocks, bm_pages, flags, skip_commits; };
 int  zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const struct zenixfs_mount_opts *o);
 int  zenixfs_unmount(struct zenixfs *fs);                    /* commits */
