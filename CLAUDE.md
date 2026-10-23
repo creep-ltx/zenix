@@ -48,10 +48,7 @@ unseen). So:
 ## Numbers that are claimed (update here before using a new one)
 | System calls | Owner |
 |---|---|
-| 1-72 | main (see `kernel/kernel.h`) |
-| 73 `SYS_klog`, 74 `SYS_input` | `drivers` branch |
-| 75 `SYS_jobctl` | main (staged work) |
-| 76 `SYS_fd_info`, 77 `SYS_fd_rw` | `floppy` work (it used 75/76: renumber before committing) |
+| 1-77 in use except 39, 40, 68 (removed with the workspaces in batch E; free again) | main, all merged (see `kernel/kernel.h`) |
 | **next free: 78** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8.
