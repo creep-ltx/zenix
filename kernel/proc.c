@@ -289,10 +289,14 @@ int proc_spawn(const char *path, char *const *argv, int argc,
     if (r < 0)
         return (int)r;
     memset(&h, 0, sizeof h);
-    if (x.st.size >= sizeof h && fs_exec_read(&x, 0, &h, sizeof h))      /* shorter: proc_load says why it is refused */
+    if (x.st.size >= sizeof h && fs_exec_read(&x, 0, &h, sizeof h)) {    /* shorter: proc_load says why it is refused */
+        fs_exec_close(&x);
         return -4;
-    return proc_load(&h, x.st.size, fill_fs, &x, path, argv, argc, parent, stdio, tty, 0,
-                     (x.st.mode & 04000) ? (int)x.st.uid : -1);       /* set-user-id: runs as its owner (su, passwd) */
+    }
+    int pid = proc_load(&h, x.st.size, fill_fs, &x, path, argv, argc, parent, stdio, tty, 0,
+                        (x.st.mode & 04000) ? (int)x.st.uid : -1);    /* set-user-id: runs as its owner (su, passwd) */
+    fs_exec_close(&x);                  /* the image is in memory: the server may forget this open */
+    return pid;
 }
 
 /* a program built into the kernel image (no filesystem needed) */

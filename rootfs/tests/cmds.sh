@@ -68,4 +68,5 @@ t realpath;   basename $(realpath ./sub/..); basename $(realpath -e fruit.txt); 
 t mktemp;     f=$(mktemp); [ -f $f ] && echo made; rm $f; d=$(mktemp -d); [ -d $d ] && echo dir; rmdir $d; f=$(mktemp /tmp/zzXXXXXX); echo $f | grep -c '^/tmp/zz'; rm $f
 t timeout;    timeout 1 sleep 5; echo rc=$?; timeout 5 true; echo rc=$?; timeout 5 sh -c 'exit 3'; echo rc=$?
 t subshell;   x=local; echo $x | cat; f() { echo in-f-$1; }; f a | cat; v=$(f b); echo $v; (f c); set -- p1 "p 2"; echo "$1|$2" | cat; ( echo "$#" ); y='it'"'"'s'; echo "$y" | cat; echo $(echo $x)
+t unlinkopen; printf 'old-data\n' > /tmp/uo1; printf 'rm /tmp/uo1; echo NEW > /tmp/uo2; cat; cat /tmp/uo2\n' > /tmp/uo.sh; sh /tmp/uo.sh < /tmp/uo1; rm -f /tmp/uo2 /tmp/uo.sh
 t substr2;    v=abcdef; echo ${v:1:-1} ${v:2:-3} ${v:0:-6}x

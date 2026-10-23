@@ -15,7 +15,9 @@ DESCRIPTION
     ZenixFS never needs a check after a crash (changes are committed
     atomically); this is for finding damage from a bad disk or a bug. If a
     newer commit record was unreadable, it says so and checks the last good
-    commit. It only reports; nothing is repaired.
+    commit. It only reports; nothing is repaired, and nothing is written:
+    the volume is mounted read-only (not even the cleanup of files that were
+    deleted while open, which a normal mount does, is written).
 
 EXIT STATUS
     0 clean, 1 problems found or not a ZenixFS volume, 2 usage.

@@ -261,6 +261,9 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 - A server loops on `replyrecv(msg, result, port)`: reply to the last message and wait for the next in a single
   trap. (Measured in the emulator: this and an O(1) run queue cut a message round trip from 407 to 248 us; only the
   ratio means anything.)
+- `recv(port, wait)`: wait 0 returns at once (0 if nothing is queued), 1 waits for a message, N > 1 waits at most N-1
+  ticks and then returns 0 - a server with a deadline (ZenixFS's commit three seconds after the first change) sleeps
+  until a message or the deadline, whichever comes first, instead of polling.
 - If a server dies, its ports are closed and its pending and in-service requests fail with an I/O error (-5); the
   kernel then forgets the cached port number and looks it up again next time.
 - Drawback of the design, noted in DESIGN.md: a **hung** server blocks its clients.
@@ -271,17 +274,28 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 Owns the hardware through privileged raw-sector syscalls (`blk_read/blk_write/blk_size/blk_ram`, only for
 processes flagged `priv`). Reads the Amiga **RDB** partition table (`RDSK`/`PART` blocks, DosEnvec geometry) and
 serves named devices: `ide0` (the whole disk - IDE or the Pi SD card), `ide0p1`, `ide0p2`... (the partitions of an RDB, else of a PC MBR: type 0x83 = ext2, type 0x76 = an RDB inside, others listed and never mounted), and `ram0` for the boot RAM disk. Handles are
-confined to their partition (LBAs are partition-relative). A device opened `DISK_MOUNT` has exactly one writer -
-the filesystem server; tools (`fdisk`, `mkfs.ext2`, `fsck.ext2`) open `DISK_RAW`, which is refused while mounted.
-`DISK_FLUSH` makes earlier writes durable (ATA FLUSH CACHE through `blk_flush`; the SD driver has no write cache of its own);
-`struct diskinfo` carries capability bits and the largest transfer. Protocol: `kernel/diskproto.h`.
+confined to their partition (LBAs are partition-relative). RDB partitions are placed by their own DosEnvec geometry
+(`user/rdb.h`). A handle is a device's slot, kept across rescans (same sectors, same medium), so a mounted server's handle
+never moves. Devices that share sectors overlap (the whole disk and its partitions, a 0x76 container and the RDB inside,
+overlapping partitions of a damaged table): `DISK_MOUNT` and `DISK_RAW` (tools: `fdisk`, `mkfs.ext2`, `fsck.ext2`) are
+refused while an overlapping device is mounted, and a write touching a device another process has mounted is refused; a
+plain open reads. A mount whose server has died is released when it is in the way (checked with `SYS_procinfo`).
+`DISK_FLUSH` makes earlier writes durable (`blk_flush`: ATA FLUSH CACHE on IDE, SYNCHRONIZE CACHE (10) on the A3000; the SD
+driver waits after every write until the card has programmed it). `struct diskinfo` carries capability bits and the largest
+transfer; `DISKCAP_FLUSH` is set only if a flush tried at start worked, and `DISK_FLUSH` answers -95 on a device without it.
+`FS_SYNC` and `FS_QUIT` (umount) end with a `DISK_FLUSH` in both filesystem servers. Protocol: `kernel/diskproto.h`.
 
 ### fsd - the filesystem server (`user/fsd.c` + `kernel/ext2.c`, port `fs`)
 The ext2 code compiled to run in user mode (`user/fsenv.h` supplies its environment), speaking the protocol in
 `kernel/fsproto.h` (`FS_OPEN, FS_READ, FS_WRITE, FS_STAT, FS_READDIR, FS_MKDIR, FS_RENAME, ...`). Files are named
-by **inode number**; the kernel's open-file table stores the inode, offset and flags, the server is stateless
-about open files. Chooses its root: a RAM-disk image from the boot floppy if present, else the first RDB
-partition that probes as ext2, else the bare disk. Started with `fsd DEVICE PORTNAME` (as `/bin/mount.ext2`, by `mount`)
+by **inode number**; the kernel's open-file table stores the inode, offset and flags. The server counts opens: every
+successful `FS_OPEN` (also the kernel's own, to load a program) is matched by one `FS_CLOSE` when the kernel lets go of
+the inode (the last close of the file, or the program is loaded). An inode whose last name goes while it is open keeps
+its blocks until its last `FS_CLOSE` (so an old handle never reads or writes a file that reused the number); after a
+crash such an inode is left with no links and `fsck.ext2`/`e2fsck` free it. ZenixFS makes it an orphan
+(`zenixfs_orphan_add`), which the next mount frees after a crash. Chooses its root: a RAM-disk image from the boot floppy if present, else the first partition of
+type ext2 (RDB `LNX\0`, MBR 0x83) that holds an ext2 volume Zenix can **write** (see "ext2: what is mounted" in
+section 10; an ext3, ext4 or damaged volume is never the root), else the bare disk. Started with `fsd DEVICE PORTNAME` (as `/bin/mount.ext2`, by `mount`)
 it serves that device on its own port instead; it answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
 (umount: sync, release the device, exit). Two root servers are built into the kernel image, `fsd` (ext2) and `mount.zenixfs`
 started without arguments (`zfsd`); both run at boot and apply `user/rootpick.h`: a RAM disk is the root; else the bootable
@@ -309,14 +323,35 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 
 ## 10. The filesystem
 
-- **ext2**, revision 0/1, 128-byte inodes, 1 KB or 4 KB blocks, read **and write** (bitmaps, group descriptors,
-  direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast symlinks).
-  Little-endian on disk, swapped on read/write of metadata. Write-through block cache with an MRU/hash lookup.
-  Directory entries are parsed in place in the cache.
-- Verified against the host's `e2fsck -fn` after scripted write sessions, and byte-for-byte file checksums.
-- Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair) and `fdisk` (RDB).
-- Not done: freeing a file that is still open (it frees at once), moving directories between parents,
-  triple-indirect files, a journal.
+- **ext2**, revision 0/1, inodes of 128 bytes or more, 1, 2 or 4 KB blocks, read **and write** (bitmaps, group
+  descriptors, direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast
+  symlinks). Little-endian on disk, swapped on read/write of metadata. Write-through block cache with an MRU/hash
+  lookup. Directory entries are parsed in place in the cache.
+- **ext2: what is mounted** (`ext2_mount_as`, kernel/ext2.c). Refused: revision above 1, blocks above 4 KB, a
+  superblock or group table that does not add up (sizes, inode count, every group's bitmaps and inode table inside
+  its group), and every INCOMPAT feature except `filetype` - extents, 64bit, flex_bg, meta_bg, needs_recovery,
+  journal_dev, inline_data, ... (so ext4 is refused, with the feature names). **Read-only**: unknown RO_COMPAT
+  features (known: sparse_super, large_file), an ext3 journal (`has_journal`: Zenix does not write journals), and a
+  volume whose state says "has errors"; every write then fails with -30 (EROFS) and the server writes no block. The
+  root is only taken from a volume that would mount read-write (`mount` may mount the others read-only). A volume
+  made by a modern `mke2fs -t ext2` (ext_attr, resize_inode, dir_index, filetype, sparse_super, large_file, 256-byte
+  inodes) is written so that `e2fsck -fn` stays clean: the filetype byte of directory entries is filled in, a
+  directory Zenix changes loses its htree flag (`EXT2_INDEX_FL`; its index blocks read as empty entries), a new
+  inode is cleared whole (with `i_extra_isize` as the superblock asks), extended-attribute blocks are released
+  (reference count) with their inode, the reserved inodes below `s_first_ino` are never handed out.
+- **A damaged disk** fails requests, it never crashes the server or makes it write outside the volume: every block
+  number from the disk is checked against the volume in one place (the block cache), directory entries are checked
+  (length, name length, inode number) wherever they are parsed, freeing a block or inode that is out of range or
+  already free is refused (reported as `ext2: damaged: ...`, at most 20 lines per mount) instead of corrupting the
+  counters, and freeing a file visits at most as many blocks as the inode says it owns. Fast symbolic links and
+  device inodes keep text and device numbers in the block array: they are never freed as blocks.
+- Verified against the host's `e2fsck -fn` after scripted write sessions, and byte-for-byte file checksums; on the
+  host by `tools/ext2-host-test.sh` (the server, `fsck.ext2` and `mkfs.ext2` built for the PC against image files:
+  modern ext2/ext3/ext4 images, a workload then `e2fsck -fn`, and a bounded fuzz loop of damaged images under
+  AddressSanitizer).
+- Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair; it repairs nothing when it finds
+  damage it cannot repair) and `fdisk` (RDB).
+- Not done: moving directories between parents, triple-indirect files, a journal.
 - Several filesystems can be mounted (`mount`, see section 9). Planned: **ZenixFS** (atomic commit, checksummed metadata, extents),
   see `zenixfs.md`.
 

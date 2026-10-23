@@ -7,10 +7,18 @@ SYNOPSIS
     sync
 
 DESCRIPTION
-    Asks the filesystem server to write everything to disk. Today every
-    write goes straight to the disk (write-through), so there is nothing
-    waiting and sync returns at once; it is kept for scripts and for when
-    delayed writes arrive (see ZenixFS in docs/zenixfs.md).
+    Asks every filesystem server to make everything written so far durable,
+    and returns when it is. The ext2 server writes through, so it asks the
+    disk to flush its own write cache (DISK_FLUSH: ATA FLUSH CACHE on IDE,
+    SYNCHRONIZE CACHE on the A3000's SCSI disk; the SD card driver waits for
+    every write already). ZenixFS commits its pending changes (with the same
+    flush around the commit record, see docs/zenixfs.md). umount does the
+    same before it lets go of the device.
+
+NOTES
+    A disk whose drive does not know the flush command has no flush
+    capability (diskd says so at boot): sync then returns when everything
+    has been sent to the drive, which may still hold it in its cache.
 
 SEE ALSO
     df(1)

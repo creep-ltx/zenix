@@ -18,7 +18,7 @@ static int dma_started, acr_written, fifo_valid;
 static u8 *dma_ptr;                                    /* what the DMAC's address register points at */
 static u8 fifo[65536];
 static u32 fifo_len;
-static int faults, trace, tur_calls, disk_target = 2;
+static int faults, trace, tur_calls, disk_target = 2, syncs, fake_nosync;
 static u32 cmds, resets;
 
 #define FAULT(...) do { faults++; printf("FAKE FAULT: " __VA_ARGS__); printf("\n"); } while (0)
@@ -60,6 +60,9 @@ static u8 disk_cmd(const u8 *cdb, const u8 *in, u8 *out, u32 *dlen, int *dir_in)
         out[4] = 0; out[5] = 0; out[6] = 2; out[7] = 0;
         *dlen = 8;
         return 0; }
+    case 0x35:                                         /* SYNCHRONIZE CACHE(10): fake_nosync makes it an unknown command */
+        syncs++;
+        return fake_nosync ? 2 : 0;
     case 0x28: case 0x2A: {                            /* READ(10) / WRITE(10) */
         u32 lba = (u32)cdb[2] << 24 | cdb[3] << 16 | cdb[4] << 8 | cdb[5], n = cdb[7] << 8 | cdb[8];
         *dir_in = cdb[0] == 0x28;

@@ -4,7 +4,8 @@
 #include "zenixfs_disk.h"
 
 /* fsck.zenixfs DEVICE
- * Checks a ZenixFS volume: every checksum, the tree order, links and the free-space map. It only reports; a crash never needs it. */
+ * Checks a ZenixFS volume: every checksum, the tree order, links and the free-space map. It only reports; a crash never needs it.
+ * The volume is mounted read-only (ZENIXFS_MNT_READONLY): nothing is written, not even the orphan cleanup a mount does. */
 static void say(void *ctx, const char *m) { (void)ctx; printf("  %s\n", m); }
 
 int main(int argc, char **argv)
@@ -15,7 +16,8 @@ int main(int argc, char **argv)
     struct zenixfs *fs = 0;
     for (unsigned bs = 10; bs <= 12 && !fs; bs++) {
         zdisk_dev(&d, bs);
-        if (zenixfs_mount(&fs, &d, 64) != 0) fs = 0;
+        struct zenixfs_mount_opts mo = { 64, 0, ZENIXFS_MNT_READONLY, 0 };
+        if (zenixfs_mount_opts(&fs, &d, &mo) != 0) fs = 0;
     }
     if (!fs) { printf("fsck.zenixfs: %s is not a ZenixFS volume, or it is too damaged to open\n", argv[1]); return 1; }
     struct zenixfs_stats st;

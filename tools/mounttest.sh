@@ -10,6 +10,7 @@ dd if=/dev/zero of=build/scratch.hdf bs=1M count=16 status=none
 ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh fsuae/mounts.fs-uae 150 tools/tests/mount-test.txt > $OUT/mount.log 2>&1
 grep -q 'ide0p1 .*/mnt .*ext2' $OUT/mount.log && check "mount lists the first filesystem" ok || check "mount lists the first filesystem" bad
 grep -q 'ide0p2 .*/mnt/sub .*ext2' $OUT/mount.log && check "nested mount works" ok || check "nested mount works" bad
+grep -aq '^fdisk: ide0 is in use (a partition on it is mounted)' $OUT/mount.log && check "fdisk does not write a disk with a mounted partition" ok || check "fdisk does not write a disk with a mounted partition" bad
 grep -qx 'hello-one' $OUT/mount.log && grep -qx 'hello-two' $OUT/mount.log && check "files read back through both mounts" ok || check "files read back through both mounts" bad
 grep -q '^/mnt/sub' $OUT/mount.log && check "pwd inside a mount" ok || check "pwd inside a mount" bad
 sed -n '/END-OF-BUSY-TEST/q;p' $OUT/mount.log | grep -q 'is busy' && check "umount refuses a mount with another mount below it" ok || check "umount refuses a mount with another mount below it" bad

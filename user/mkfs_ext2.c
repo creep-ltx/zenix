@@ -1,13 +1,17 @@
+#ifdef ZHOST
+#include "../tools/host/zhost.h"     /* host build for the tests (tools/ext2-host-test.sh) */
+#else
 #include "libz.h"
-#include "../kernel/diskproto.h"
 typedef unsigned char u8;
 typedef unsigned short u16;
+#endif
+#include "../kernel/diskproto.h"
 
 /* mkfs.ext2 [-b 1024|2048|4096] [-i BYTES_PER_INODE] DEVICE
  * Makes a revision-0 ext2 filesystem (128-byte inodes, no optional features,
  * a superblock and group table copy in every group): readable by Linux and
- * by the Zenix filesystem server. The inode tables are not zeroed (slow on a
- * big disk, and unused inodes are never read). */
+ * by the Zenix filesystem server. Every group's inode table is zeroed: e2fsck
+ * and fsck.ext2 read every inode, and old data there would look like files. */
 
 static int port, h;
 static u32 bsize = 1024, bpi = 4096;
@@ -18,6 +22,24 @@ static int wblk(u32 n, const void *buf)
     struct umsg m;
     m.type = DISK_WRITE; m.a[0] = (u32)h; m.a[1] = n * (bsize / 512); m.a[2] = bsize / 512; m.a[3] = (u32)buf;
     return sys_call(port, &m);
+}
+
+/* n zero blocks from block b, in pieces of up to 32 KB */
+static u32 maxsect = 64;                     /* the device's largest transfer (DISK_INFO), at most 32 KB */
+static int wzero(u32 b, u32 n)
+{
+    static u8 *z;
+    u32 per = (maxsect < 64 ? maxsect : 64) * 512 / bsize;
+    if (per == 0) per = 1;
+    if (!z) { z = (u8 *)xmalloc(32768); memset(z, 0, 32768); }
+    while (n) {
+        u32 k = n < per ? n : per;
+        struct umsg m;
+        m.type = DISK_WRITE; m.a[0] = (u32)h; m.a[1] = b * (bsize / 512); m.a[2] = k * (bsize / 512); m.a[3] = (u32)z;
+        if (sys_call(port, &m)) return -1;
+        b += k; n -= k;
+    }
+    return 0;
 }
 
 static void w32(u8 *p, u32 v) { p[0] = (u8)v; p[1] = (u8)(v >> 8); p[2] = (u8)(v >> 16); p[3] = (u8)(v >> 24); }
@@ -46,6 +68,7 @@ int main(int argc, char **argv)
     struct diskinfo di;
     m.type = DISK_INFO; m.a[0] = (u32)h; m.a[1] = (u32)&di;
     if (h < 0 || sys_call(port, &m) < 0) { printf("mkfs.ext2: cannot open %s (mounted, or no such device)\n", dev); return 1; }
+    if (di.maxsect) maxsect = di.maxsect;
     if (!strcmp(dev, "ide0") && di.start == 0 && di.dostype == 0)
         printf("mkfs.ext2: warning: formatting the whole disk, not a partition\n");
 
@@ -130,6 +153,7 @@ int main(int argc, char **argv)
         if (g == 0) for (u32 i = 0; i < 11; i++) setbit(imap, i);
         for (u32 i = ipg; i < bsize * 8; i++) setbit(imap, i);
         if (wblk(gs + 1 + gdt + 1, imap)) goto fail;
+        if (g && wzero(gs + 1 + gdt + 2, itb)) goto fail;     /* the inode table (group 0's is written below) */
     }
 
     /* inodes 2 (root) and 11 (lost+found) live in group 0's table */

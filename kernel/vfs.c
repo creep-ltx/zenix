@@ -36,10 +36,14 @@ struct file *file_dup(struct file *f)
     return f;
 }
 
+long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
+
 void file_close(struct file *f)
 {
     if (!f || --f->refs)
         return;
+    if (f->type == FT_INODE)                /* the server counts opens: an unlinked inode is freed at the last close */
+        fs_call_on(f->fs, FS_CLOSE, f->ino, 0, 0, 0);
     if (f->type == FT_PIPE_R && f->pipe)
         f->pipe->readers--;
     if (f->type == FT_PIPE_W && f->pipe)
@@ -260,11 +264,19 @@ long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *
     long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY | O_EXEC, (u32)&x->st);
     if (ino < 0)
         return ino == -13 ? -13 : -1;
-    if (!S_ISREG(x->st.mode) || x->st.size > 256u * 1024)
-        return -2;
     x->m = m;
     x->ino = ino;
+    if (!S_ISREG(x->st.mode) || x->st.size > 256u * 1024) {
+        fs_exec_close(x);
+        return -2;
+    }
     return 0;
+}
+
+/* every successful fs_exec_open ends with this (the server counts opens, see FS_CLOSE) */
+void fs_exec_close(const struct exec_src *x)
+{
+    fs_call_on(x->m, FS_CLOSE, (u32)x->ino, 0, 0, 0);
 }
 
 long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
@@ -289,20 +301,27 @@ long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *si
     long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY | O_EXEC, (u32)&st);
     if (ino < 0)
         return ino == -13 ? -13 : -1;
-    if (!S_ISREG(st.mode) || st.size > 256u * 1024)
+    struct exec_src x = { m, ino, st };
+    if (!S_ISREG(st.mode) || st.size > 256u * 1024) {
+        fs_exec_close(&x);
         return -2;
+    }
     u8 *b = kmalloc(st.size ? st.size : 1);
-    if (!b)
+    if (!b) {
+        fs_exec_close(&x);
         return -3;
+    }
     u32 got = 0;
     while (got < st.size) {
         long r = fs_call_on(m, FS_READ, (u32)ino, got, (u32)(b + got), st.size - got);
         if (r <= 0) {
             kfree(b);
+            fs_exec_close(&x);
             return -4;
         }
         got += (u32)r;
     }
+    fs_exec_close(&x);
     *buf = b;
     *size = st.size;
     if (stout) *stout = st;
@@ -345,8 +364,10 @@ long vfs_open(const char *path, int flags)
     if (ino < 0)
         return ino == -13 ? -13 : -1;
     struct file *f = file_new(FT_INODE);
-    if (!f)
+    if (!f) {
+        fs_call_on(m, FS_CLOSE, (u32)ino, 0, 0, 0);
         return -1;
+    }
     f->ino = (u32)ino;
     f->fs = (u8)m;
     f->mode = st.mode;

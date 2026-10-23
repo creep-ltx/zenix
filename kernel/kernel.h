@@ -143,6 +143,7 @@ int a3000_init(void);
 u32 a3000_sectors(void);
 int a3000_read(u32 lba, u32 count, void *buf);
 int a3000_write(u32 lba, u32 count, const void *buf);
+int a3000_flush(void);                   /* SYNCHRONIZE CACHE; -95 if the drive cannot */
 
 /* emmc.c: the SD card of a Raspberry Pi 4 / CM4 under Emu68 (needs the hwinfo table from stage0) */
 int emmc_init(void);
@@ -287,6 +288,7 @@ struct ustat;
 struct exec_src { int m; long ino; struct ustat st; };
 long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x);
 long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n);
+void fs_exec_close(const struct exec_src *x);      /* FS_CLOSE for an fs_exec_open that succeeded */
 long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size, struct ustat *st);
 long vfs_open(const char *path, int flags);
 long vfs_stat(const char *path, struct ustat *st);

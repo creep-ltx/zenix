@@ -34,13 +34,16 @@ static void disk_unmount(int h)
     sys_call(disk_port, &m);
 }
 
-/* the root filesystem: a root image the boot floppy carried (the dev/test image) wins; otherwise the
- * first IDE partition that holds ext2, else the bare disk.
- * A device is opened plain to probe it and only mounted (made ours alone) once ext2 is confirmed. */
-static int try_mount(const char *name)
+/* A device is opened plain to read its superblock and only mounted (made ours alone) once ext2_mount_as accepts it.
+ * mode EXT2_RW: refuse a volume Zenix could only read (the root must be writable); EXT2_ANY: read-only is allowed. */
+static int try_mount(const char *name, int mode)
 {
     fs_dev = disk_open(name, 0);
     if (fs_dev < 0 || !ext2_probe()) return -1;
+    if (ext2_mount_as(mode)) {
+        printf("fsd: %s: %s\n", name, ext2_why);
+        return -1;
+    }
     int h = disk_open(name, DISK_MOUNT);
     if (h < 0) return -1;
     fs_dev = h;
@@ -48,18 +51,60 @@ static int try_mount(const char *name)
     return 0;
 }
 
+/* the root filesystem: a root image the boot floppy carried (the dev/test image) wins; otherwise the first partition
+ * of type ext2 (RDB 'LNX\0', MBR 0x83) that holds a writable ext2 volume Zenix fully supports (a refused or read-only
+ * one - ext3, ext4, errors - is never the root), else the bare disk. */
 static int find_root(void)
 {
     struct diskinfo di;
-    if (!try_mount("ram0")) return 0;                 /* only exists when the floppy carried a root image */
+    if (!try_mount("ram0", EXT2_RW)) return 0;        /* only exists when the floppy carried a root image */
     for (u32 i = 1; i < 16; i++) {                    /* 0 is the whole disk */
         struct umsg m;
         m.type = DISK_LIST; m.a[0] = i; m.a[1] = (u32)&di;
         if (sys_call(disk_port, &m) < 0) break;
-        if (di.dostype == 0) continue;                /* ram0 */
-        if (!try_mount(di.name)) return 0;
+        if (di.dostype != DT_EXT2) continue;          /* ram0 and partitions of other types */
+        if (!try_mount(di.name, EXT2_RW)) return 0;
     }
-    return try_mount("ide0");
+    return try_mount("ide0", EXT2_RW);
+}
+
+/* Open inodes (FS_OPEN counts one, FS_CLOSE from the kernel one less): an inode whose last name goes while it is
+ * open keeps its blocks until the last close (ext2_busy / ext2_release), so an old handle never reaches a file that
+ * reused the number. After a crash such an inode is left with no links: fsck.ext2 (or e2fsck) frees it. */
+#define NOPEN 96                                      /* the kernel's file table (NFILE 64) plus programs being loaded */
+static struct { u32 ino, count; } opens[NOPEN];
+static int open_busy(u32 ino)
+{
+    for (int i = 0; i < NOPEN; i++) if (opens[i].count && opens[i].ino == ino) return 1;
+    return 0;
+}
+static int open_ref(u32 ino)
+{
+    int fr = -1;
+    for (int i = 0; i < NOPEN; i++) {
+        if (opens[i].count && opens[i].ino == ino) { opens[i].count++; return 0; }
+        if (!opens[i].count && fr < 0) fr = i;
+    }
+    if (fr < 0) return -23;                           /* ENFILE: should not happen (the kernel has fewer files) */
+    opens[fr].ino = ino; opens[fr].count = 1;
+    return 0;
+}
+/* make what was written durable: the cache is write-through, so only the device's own cache is left. A device
+ * that cannot flush (-95, no DISKCAP_FLUSH) has had everything sent to it: that is all that can be done */
+static int disk_flush(void)
+{
+    struct umsg m;
+    m.type = DISK_FLUSH; m.a[0] = (u32)fs_dev;
+    int r = sys_call(disk_port, &m);
+    return r == -95 ? 0 : r;
+}
+static void open_unref(u32 ino)
+{
+    for (int i = 0; i < NOPEN; i++)
+        if (opens[i].count && opens[i].ino == ino) {
+            if (--opens[i].count == 0 && !ext2_readonly) ext2_release(ino);   /* frees it only if it has no names */
+            return;
+        }
 }
 
 static void fill_stat(const struct inode *in, struct ustat *st)
@@ -101,16 +146,20 @@ static int handle1(struct umsg *m)
         u32 flags = m->a[2];
         int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
         if (ext2_namei(path, m->a[1], &in, 0)) {
-            if (ext2_denied || !(flags & O_CREAT) || parent(path, m->a[1], &dir, name) ||
-                !dir_may(&dir) || ext2_create(&dir, name, &in))
+            if (ext2_denied || !(flags & O_CREAT)) return -1;
+            if (ext2_readonly) return -30;
+            if (parent(path, m->a[1], &dir, name) || !dir_may(&dir) || ext2_create(&dir, name, &in))
                 return -1;
         } else {
             if (!ext2_access(&in, fsp_open_want(flags))) return -1;
             if (writing) {
+                if (ext2_readonly) return -30;
                 if (!S_ISREG(in.mode)) return -1;
                 if ((flags & O_TRUNC) && ext2_truncate(&in)) return -1;
             }
         }
+        int e = open_ref(in.ino);
+        if (e) return e;
         fill_stat(&in, (struct ustat *)m->a[3]);
         return (int)in.ino;
     }
@@ -139,8 +188,11 @@ static int handle1(struct umsg *m)
         struct ustatfs *f = (struct ustatfs *)m->a[0];
         return ext2_statfs(&f->bsize, &f->blocks, &f->bfree, &f->files, &f->ffree);
     }
+    case FS_CLOSE:
+        open_unref(m->a[0]);
+        return 0;
     case FS_SYNC:
-        return 0;                                     /* writes go straight to the disk */
+        return disk_flush() < 0 ? -5 : 0;             /* writes went straight to the disk; the drive's cache is left */
     case FS_CHMOD:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0) || !owner_only(&in)) return -1;
         return ext2_chmod(in.ino, m->a[2]);
@@ -196,8 +248,19 @@ static int handle1(struct umsg *m)
     return -1;
 }
 
+/* requests that change the volume: refused at once on a read-only mount (ext2.c also refuses every block write) */
+static int changes(const struct umsg *m)
+{
+    switch (m->type) {
+    case FS_WRITE: case FS_CHMOD: case FS_CHOWN: case FS_UTIMES: case FS_LINK: case FS_SYMLINK:
+    case FS_MKDIR: case FS_UNLINK: case FS_RMDIR: case FS_RENAME: return 1;
+    }
+    return 0;
+}
+
 static int handle(struct umsg *m)
 {
+    if (ext2_readonly && changes(m)) return -30;      /* EROFS */
     ext2_uid = m->uid; ext2_gid = m->gid; ext2_umask = m->umask;
     ext2_enforce = 1; ext2_denied = 0;
     int r = handle1(m);
@@ -209,6 +272,7 @@ static int handle(struct umsg *m)
 int main(int argc, char **argv)
 {
     const char *pname = "fs";
+    ext2_busy = open_busy;
     int tries = 0;
     while ((disk_port = sys_port_find("disk")) < 0) {
         if (++tries > 600) { printf("fsd: no disk server\n"); return 1; }
@@ -216,19 +280,22 @@ int main(int argc, char **argv)
     }
     if (argc >= 3) {
         pname = argv[2];
-        if (try_mount(argv[1]) || ext2_mount()) { printf("mount.ext2: %s is not an ext2 filesystem, or is in use\n", argv[1]); return 1; }
+        if (try_mount(argv[1], EXT2_ANY)) { printf("mount.ext2: %s is not an ext2 filesystem Zenix can mount, or is in use\n", argv[1]); return 1; }
     } else {
         struct rootpick rp;
         rootpick(disk_port, &rp);
         if (!rp.have_ram && rp.found && rp.dostype == DT_ZENIXFS) return 0;   /* the root is ZenixFS: mount.zenixfs serves it */
-        if (find_root() || ext2_mount()) { printf("fsd: no ext2 filesystem\n"); return 1; }
+        if (find_root()) { printf("fsd: no ext2 filesystem\n"); return 1; }
     }
     int port = sys_port_create(pname);
     if (port < 0) { printf("fsd: cannot create the port %s\n", pname); return 1; }
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {
         int r = handle(m);
-        if (quitting) {                                 /* umount: answer first, then let go of the device */
+        if (quitting) {                                 /* umount: flush, answer, then let go of the device */
+            for (int i = 0; i < NOPEN; i++)             /* nothing is open at umount; deletions still waiting are done */
+                if (opens[i].count && !ext2_readonly) { opens[i].count = 0; ext2_release(opens[i].ino); }
+            disk_flush();
             sys_reply(m, r);
             disk_unmount(fs_dev);
             return 0;

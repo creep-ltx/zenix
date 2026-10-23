@@ -15,7 +15,7 @@
 #define FS_RMDIR   10  /* a0 path, a1 cwd ino */
 #define FS_RENAME  11  /* a0 from, a1 to, a2 cwd ino */
 #define FS_STATFS  12  /* a0 struct ustatfs* -> 0 */
-#define FS_SYNC    13  /* flush everything (writes are write-through today, so a no-op) */
+#define FS_SYNC    13  /* everything written so far is on the medium when this returns (DISK_FLUSH of the device) */
 #define FS_CHMOD   14  /* a0 path, a1 cwd ino, a2 mode */
 #define FS_LINK    15  /* a0 existing path, a1 new path, a2 cwd ino: a hard link */
 #define FS_SYMLINK 16  /* a0 target text, a1 link path, a2 cwd ino */
@@ -26,5 +26,7 @@
 #define FS_LSTAT   19  /* like FS_STAT but a final symbolic link is not followed */
 #define FS_ROOT    22  /* a0 struct fsinfo* (the server fills in its device and type) -> inode number of its root directory */
 #define FS_QUIT    23  /* sync, release the device, reply 0, exit: sent by umount */
+#define FS_CLOSE   24  /* a0 ino: the kernel let go of an inode FS_OPEN gave it (one per successful FS_OPEN). An inode
+                        * unlinked while open is freed at its last FS_CLOSE, not at the unlink */
 struct fsinfo { char dev[16]; char type[8]; };
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

@@ -1,19 +1,39 @@
+/* the server is size-critical (it is embedded in the kernel image): optimise for size */
+#pragma GCC optimize("Os")
 #ifdef FSD
 #include "../user/fsenv.h"      /* running as the filesystem server (user mode) */
 #else
 #include "kernel.h"
 #endif
 
-/* Read-only ext2 (revision 0/1, 128-byte or larger inodes, no extents),
- * written from the public format description. On-disk numbers are
- * little-endian; every field is swapped when read, file data never is. */
+/* ext2 (revision 0/1), written from the public format description. On-disk numbers are little-endian; every field
+ * is swapped when read, file data never is.
+ * What is mounted (ext2_mount_as, the rules are in docs/architecture.md "ext2: what is mounted"):
+ *   - refused: a revision above 1, block size above 4 KB, a superblock or group table that does not add up, and
+ *     every INCOMPAT feature except filetype (extents, 64bit, flex_bg, meta_bg, journal recovery, ...);
+ *   - read only: unknown RO_COMPAT features (only sparse_super and large_file are known), an ext3 journal
+ *     (has_journal: Zenix does not write journals), or a volume marked "has errors";
+ *   - read and write otherwise. dir_index (htree) directories are read as plain lists, and a directory Zenix changes
+ *     loses its index flag, as e2fsck would; the filetype byte is written when that feature is on; extended
+ *     attribute blocks are released with their file.
+ * Everything read from the disk is checked before use (block numbers against the volume, inode numbers, directory
+ * entry lengths): a damaged disk fails the request with -5 (EIO) and logs "ext2: damaged: ...", it never crashes
+ * the server or makes it write outside the volume. */
 
+#ifdef ZHOST                            /* host test build (little-endian PC): disk order is CPU order */
+static inline u32 le32(u32 v) { return v; }
+static inline u16 le16(u16 v) { return v; }
+#else
 static inline u32 le32(u32 v)
 {
     __asm__("rol.w #8,%0\n\tswap %0\n\trol.w #8,%0" : "+d"(v));
     return v;
 }
 static inline u16 le16(u16 v) { return (u16)((v >> 8) | (v << 8)); }
+#endif
+
+#define EIO_ (-5)
+#define EROFS_ (-30)
 
 #define NBUF 48
 static inline u32 strlen_(const char *s) { u32 n = 0; while (s[n]) n++; return n; }
@@ -30,23 +50,60 @@ static inline int memcmp_(const void *a, const void *b, u32 n)
 }
 static struct { u32 blk, stamp; u8 *data; } buf[NBUF];
 static u32 stamp;
+static int last_slot;
+static u8 hashslot[64];                 /* blk & 63 -> slot that probably holds it */
 
 static u32 part_lba, bsize, ninodes_per_group, inode_size;
 static u32 first_data_block, blocks_per_group, ngroups, boot_time;
 static u32 sectors_per_block, total_blocks, ninodes;
 static u32 gd_blk;                      /* first block of the group descriptor table */
+static u32 rev, f_compat, f_incompat, f_rocompat, first_ino, extra_isize;
 static int mounted;
+int ext2_readonly;                      /* mounted read-only: every write is refused (EROFS) */
+const char *ext2_why = "";              /* why the last mount was refused or made read-only */
+int (*ext2_busy)(u32 ino);              /* set by the server: is this inode open? (its deletion then waits for the close) */
+
+#define COMPAT_HAS_JOURNAL  0x0004
+#define COMPAT_EXT_ATTR     0x0008
+#define COMPAT_DIR_INDEX    0x0020
+#define INCOMPAT_FILETYPE   0x0002
+#define RO_SPARSE_SUPER     0x0001
+#define RO_LARGE_FILE       0x0002
+#define EXT2_INDEX_FL       0x1000      /* i_flags: an htree directory */
+#define XATTR_MAGIC         0xEA020000u
+
+/* a damaged disk: say what, at most 20 times (a badly damaged disk must not flood the screen) */
+static u32 ndamage;
+static int damaged(const char *what, u32 v)
+{
+    if (ndamage++ < 20)
+        fs_log("ext2: damaged: %s %u\n", what, v);
+    return EIO_;
+}
+
+static void cache_drop(void)            /* forget every cached block (a new device, maybe another block size) */
+{
+    for (int i = 0; i < NBUF; i++) {
+        if (buf[i].data)
+            fs_free(buf[i].data);
+        buf[i].data = 0;
+        buf[i].blk = 0xFFFFFFFF;
+    }
+    last_slot = 0;
+}
 
 /* returns the cache slot holding block blk (loading it), or -1.
  * Fast paths first: the last slot used, then a small hash of block
  * numbers; only a miss scans the whole cache for a victim. */
-static int last_slot;
-static u8 hashslot[64];                 /* blk & 63 -> slot that probably holds it */
 
 static int bfind(u32 blk)
 {
     int victim = 0;
     u32 oldest = 0xFFFFFFFF;
+    if (blk >= total_blocks) {          /* every block number from the disk ends here: none outside the volume */
+        damaged("block number out of range:", blk);
+        return -1;
+    }
     stamp++;
     if (buf[last_slot].data && buf[last_slot].blk == blk) {
         buf[last_slot].stamp = stamp;
@@ -76,6 +133,7 @@ static int bfind(u32 blk)
         if (!buf[victim].data)
             return -1;
     }
+    buf[victim].blk = 0xFFFFFFFF;
     if (fs_blk_read(part_lba + blk * sectors_per_block, sectors_per_block,
                     buf[victim].data))
         return -1;
@@ -104,6 +162,8 @@ static int bread_copy(u32 blk, u32 off, void *dst, u32 len)
 /* write-through: the cache and the disk are updated together */
 static int bwrite_copy(u32 blk, u32 off, const void *src, u32 len)
 {
+    if (ext2_readonly)
+        return EROFS_;
     int i = bfind(blk);
     if (i < 0)
         return -1;
@@ -113,6 +173,7 @@ static int bwrite_copy(u32 blk, u32 off, const void *src, u32 len)
 }
 
 static u32 rd32(const u8 *p) { return le32(*(const u32 *)p); }
+static u32 rd16(const u8 *p) { return le16(*(const u16 *)p); }
 
 /* ---- the device is a partition (or a bare disk) opened through the disk
  * server: sector 0 of it is where the filesystem starts ---- */
@@ -125,32 +186,154 @@ int ext2_probe(void)
     return le16(*(u16 *)(sec + 56)) == 0xEF53;
 }
 
-int ext2_mount(void)
+static void feature_names(char *out, u32 bits, const char *const *names)
+{
+    u32 n = 0;
+    out[0] = 0;
+    for (int i = 0; i < 32 && n < 90; i++) {
+        if (!(bits & (1u << i)))
+            continue;
+        const char *s = names[i] ? names[i] : "?";
+        if (n) out[n++] = ' ';
+        while (*s && n < 98) out[n++] = *s++;
+    }
+    out[n] = 0;
+}
+static const char *const incompat_names[32] = { "compression", "filetype", "needs_recovery", "journal_dev", "meta_bg",
+    0, "extent", "64bit", "mmp", "flex_bg", "ea_inode", 0, "dirdata", "metadata_csum_seed", "large_dir", "inline_data",
+    "encrypt", "casefold" };
+static const char *const rocompat_names[32] = { "sparse_super", "large_file", "btree_dir", "huge_file", "uninit_bg",
+    "dir_nlink", "extra_isize", "has_snapshot", "quota", "bigalloc", "metadata_csum", "replica", "read-only", "project",
+    "shared_blocks", "verity", "orphan_present" };
+static char why_buf[160];
+
+static int refuse(const char *why)
+{
+    ext2_why = why;
+    fs_log("ext2: not mounted: %s\n", why);
+    return -1;
+}
+static void readonly(const char *why)
+{
+    if (!ext2_readonly)
+        ext2_why = why;
+    ext2_readonly = 1;
+}
+
+/* mode EXT2_RW: the volume must be writable (the root, fsck), else it is refused; EXT2_ANY: read-only is allowed */
+int ext2_mount_as(int mode)
 {
     u8 sb[1024];
     part_lba = 0;
+    mounted = 0;
+    ext2_readonly = 0;
+    ext2_why = "";
+    ndamage = 0;
+    cache_drop();
+    total_blocks = 0;
     if (fs_blk_read(part_lba + 2, 2, sb))
-        return -1;
+        return refuse("cannot read the superblock");
+    if (rd16(sb + 56) != 0xEF53)
+        return refuse("no ext2 superblock");
+    rev = rd32(sb + 76);
     u32 logbs = rd32(sb + 24);
+    if (rev > 1)
+        return refuse("unknown ext2 revision");
+    if (logbs > 2)
+        return refuse("block size above 4 KB");
     bsize = 1024u << logbs;
-    if (logbs > 2) {
-        fs_log("ext2: block size %u not supported\n", bsize);
-        return -1;
-    }
     sectors_per_block = bsize / 512;
     ninodes = rd32(sb + 0);
     total_blocks = rd32(sb + 4);
-    ninodes_per_group = rd32(sb + 40);
     first_data_block = rd32(sb + 20);
     blocks_per_group = rd32(sb + 32);
-    ngroups = (total_blocks - first_data_block + blocks_per_group - 1) / blocks_per_group;
+    ninodes_per_group = rd32(sb + 40);
     boot_time = rd32(sb + 48);          /* last write time: a clock of sorts */
-    inode_size = rd32(sb + 76) == 0 ? 128 : le16(*(u16 *)(sb + 88));
-    gd_blk = (bsize == 1024) ? 2 : 1;
+    if (first_data_block != (bsize == 1024 ? 1u : 0u) || total_blocks <= first_data_block + 2 ||
+        rd32(sb + 28) != logbs || blocks_per_group == 0 || blocks_per_group > 8 * bsize ||
+        ninodes_per_group == 0 || ninodes_per_group > 8 * bsize) {
+        total_blocks = 0;
+        return refuse("damaged superblock (sizes)");
+    }
+    ngroups = (total_blocks - first_data_block + blocks_per_group - 1) / blocks_per_group;
+    if (ninodes / ninodes_per_group != ngroups || ninodes % ninodes_per_group) {
+        total_blocks = 0;
+        return refuse("damaged superblock (inode count)");
+    }
+    inode_size = 128;
+    first_ino = 11;
+    f_compat = f_incompat = f_rocompat = 0;
+    extra_isize = 0;
+    if (rev == 1) {
+        inode_size = rd16(sb + 88);
+        first_ino = rd32(sb + 84);
+        f_compat = rd32(sb + 92);
+        f_incompat = rd32(sb + 96);
+        f_rocompat = rd32(sb + 100);
+        extra_isize = rd16(sb + 350);                   /* s_want_extra_isize */
+        if (inode_size < 128 || inode_size > bsize || (inode_size & (inode_size - 1)) ||
+            first_ino < 11 || first_ino > ninodes || extra_isize > inode_size - 128 || (extra_isize & 3)) {
+            total_blocks = 0;
+            return refuse("damaged superblock (inode size or first inode)");
+        }
+    }
+    if (f_incompat & ~(u32)INCOMPAT_FILETYPE) {
+        char names[100];
+        feature_names(names, f_incompat & ~(u32)INCOMPAT_FILETYPE, incompat_names);
+        snprintf(why_buf, sizeof why_buf, "features Zenix cannot read: %s (ext3/ext4?)", names);
+        total_blocks = 0;
+        return refuse(why_buf);
+    }
+    /* the group table and every group's bitmaps and inode table must lie inside their group */
+    gd_blk = first_data_block + 1;
+    u32 gd_blocks = (ngroups * 32 + bsize - 1) / bsize;
+    u32 itb = (ninodes_per_group * inode_size + bsize - 1) / bsize;
+    if (gd_blk + gd_blocks > total_blocks) {
+        total_blocks = 0;
+        return refuse("damaged superblock (group table)");
+    }
+    for (u32 g = 0; g < ngroups; g++) {
+        u8 d[12];
+        u32 o = g * 32;
+        if (bread_copy(gd_blk + o / bsize, o % bsize, d, 12)) {
+            total_blocks = 0;
+            return refuse("cannot read the group table");
+        }
+        u32 gs = first_data_block + g * blocks_per_group;
+        u32 ge = total_blocks - gs < blocks_per_group ? total_blocks : gs + blocks_per_group;
+        u32 bb = rd32(d), ib = rd32(d + 4), it = rd32(d + 8);
+        if (bb < gs || bb >= ge || ib < gs || ib >= ge || it < gs || it >= ge || itb > ge - it) {
+            snprintf(why_buf, sizeof why_buf, "damaged group table (group %u)", g);
+            total_blocks = 0;
+            return refuse(why_buf);
+        }
+    }
+    if (f_rocompat & ~(u32)(RO_SPARSE_SUPER | RO_LARGE_FILE)) {
+        char names[100];
+        feature_names(names, f_rocompat & ~(u32)(RO_SPARSE_SUPER | RO_LARGE_FILE), rocompat_names);
+        snprintf(why_buf, sizeof why_buf, "read-only: features Zenix cannot write: %s", names);
+        readonly(why_buf);
+    }
+    if (f_compat & COMPAT_HAS_JOURNAL)
+        readonly("read-only: ext3 journal (Zenix does not write journals)");
+    if (rd16(sb + 58) & 2)
+        readonly("read-only: the filesystem has errors (run fsck.ext2 on it)");
+    if (ext2_readonly && mode == EXT2_RW) {
+        ext2_readonly = 0;
+        total_blocks = 0;
+        return refuse(ext2_why + 11);                   /* without the "read-only: " */
+    }
     mounted = 1;
-    fs_log("ext2: %u KB blocks, %u blocks, %u inodes\n",
-            bsize / 1024, total_blocks, ninodes);
+    fs_log("ext2: %u KB blocks, %u blocks, %u inodes%s\n",
+            bsize / 1024, total_blocks, ninodes, ext2_readonly ? ", read-only" : "");
+    if (ext2_readonly)
+        fs_log("ext2: %s\n", ext2_why);
     return 0;
+}
+
+int ext2_mount(void)
+{
+    return ext2_mount_as(EXT2_RW);
 }
 
 int ext2_iget(u32 ino, struct inode *out)
@@ -176,9 +359,25 @@ int ext2_iget(u32 ino, struct inode *out)
     out->gid = le16(*(u16 *)(raw + 24));
     out->links = le16(*(u16 *)(raw + 26));
     out->nblocks = rd32(raw + 28);
+    out->flags = rd32(raw + 32);
+    out->acl = rd32(raw + 104);
+    out->size_high = S_ISREG(out->mode) ? rd32(raw + 108) : 0;
     for (int i = 0; i < 15; i++)
         out->block[i] = rd32(raw + 40 + i * 4);
     return 0;
+}
+
+/* is this a fast symbolic link (the target text in the inode's block array, no data block)? As Linux decides it:
+ * a symlink whose block count, without its extended-attribute block, is 0. */
+static int fast_symlink(const struct inode *in)
+{
+    u32 ea = in->acl ? bsize / 512 : 0;
+    return S_ISLNK(in->mode) && in->nblocks <= ea && in->size < 60;
+}
+/* does block[] hold block numbers? Not for fast symbolic links (text) or device inodes (device numbers). */
+static int has_block_map(const struct inode *in)
+{
+    return S_ISREG(in->mode) || S_ISDIR(in->mode) || (S_ISLNK(in->mode) && !fast_symlink(in));
 }
 
 static u32 ind(u32 blk, u32 idx)
@@ -192,6 +391,8 @@ static u32 ind(u32 blk, u32 idx)
 u32 ext2_bmap(const struct inode *in, u32 n)
 {
     u32 per = bsize / 4;
+    if (!has_block_map(in))
+        return 0;
     if (n < 12)
         return in->block[n];
     n -= 12;
@@ -220,7 +421,7 @@ int ext2_read(const struct inode *in, u32 off, void *dst, u32 n)
         u32 blk = ext2_bmap(in, pos / bsize);
         if (blk) {
             if (bread_copy(blk, pos % bsize, d + done, chunk))
-                return -1;
+                return EIO_;
         } else {
             memset(d + done, 0, chunk);     /* hole */
         }
@@ -229,22 +430,31 @@ int ext2_read(const struct inode *in, u32 off, void *dst, u32 n)
     return (int)n;
 }
 
+/* is the directory entry at p (rl bytes left in the block from it) well formed? */
+static int dirent_bad(const u8 *e, u32 left)
+{
+    u32 rl = rd16(e + 4), nl = e[6];
+    return left < 8 || rl < 8 || (rl & 3) || rl > left || nl + 8 > rl || rd32(e) > ninodes;
+}
+
 /* next live directory entry at/after byte offset *cookie, parsed in place in
  * the cache (one block lookup per call, not per field); returns 1, 0 at the
- * end, -1 on error */
+ * end, -5 on a damaged directory */
 int ext2_readdir(const struct inode *dir, u32 *cookie, struct udirent *out)
 {
     u32 off = *cookie;
+    if (off & 3)
+        return EIO_;
     while (off < dir->size) {
         u32 blk = ext2_bmap(dir, off / bsize);
         const u8 *p = blk ? bptr(blk) : 0;
         if (!p)
-            return -1;
+            return damaged("directory block missing in inode", dir->ino);
         u32 end = bsize - off % bsize;          /* bytes left in this block */
         const u8 *e = p + off % bsize;
-        u32 rl = le16(*(const u16 *)(e + 4));
-        if (rl < 8 || rl > end)
-            return -1;
+        if (dirent_bad(e, end))
+            return damaged("directory entry in inode", dir->ino);
+        u32 rl = rd16(e + 4);
         off += rl;
         u32 ino = rd32(e);
         if (ino == 0)
@@ -255,7 +465,7 @@ int ext2_readdir(const struct inode *dir, u32 *cookie, struct udirent *out)
         memcpy(out->name, e + 8, nl);
         out->name[nl] = 0;
         out->ino = ino;
-        out->type = e[7];
+        out->type = (f_incompat & INCOMPAT_FILETYPE) ? e[7] : 0;
         *cookie = off;
         return 1;
     }
@@ -267,15 +477,15 @@ int ext2_lookup(const struct inode *dir, const char *name, u32 len, u32 *ino)
 {
     if (!S_ISDIR(dir->mode))
         return -1;
-    for (u32 b = 0; b * bsize < dir->size; b++) {
+    for (u32 b = 0; b < dir->size / bsize; b++) {
         u32 blk = ext2_bmap(dir, b);
         const u8 *p = blk ? bptr(blk) : 0;
         if (!p)
-            return -1;
+            return damaged("directory block missing in inode", dir->ino);
         for (u32 o = 0; o + 8 <= bsize;) {
-            u32 rl = le16(*(const u16 *)(p + o + 4));
-            if (rl < 8 || o + rl > bsize)
-                return -1;
+            if (dirent_bad(p + o, bsize - o))
+                return damaged("directory entry in inode", dir->ino);
+            u32 rl = rd16(p + o + 4);
             if (p[o + 6] == len && rd32(p + o) != 0) {
                 u32 i = 0;
                 while (i < len && p[o + 8 + i] == (u8)name[i])
@@ -302,10 +512,10 @@ static void fast_link_bytes(const struct inode *in, char *out, u32 n)
 int ext2_readlink(const struct inode *in, char *buf, u32 max)
 {
     u32 n = in->size < max ? in->size : max;
-    if (in->size < 60 && in->nblocks == 0)
+    if (fast_symlink(in))
         fast_link_bytes(in, buf, n);
     else if (ext2_read(in, 0, buf, n) != (int)n)
-        return -1;
+        return EIO_;
     return (int)n;
 }
 
@@ -342,9 +552,11 @@ int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int f
         while (*e && *e != '/')
             e++;
         u32 next;
+        if (!S_ISDIR(in.mode))
+            return -1;
         if (!ext2_access(&in, 1))               /* searching a directory needs x */
             return -13;
-        if (ext2_lookup(&in, path, (u32)(e - path), &next))
+        if (e - path > 255 || ext2_lookup(&in, path, (u32)(e - path), &next))
             return -1;
         struct inode nin;
         if (ext2_iget(next, &nin))
@@ -390,6 +602,8 @@ static u32 fs_now(void)
 /* group descriptor field helpers: field at byte `f` of descriptor g */
 static int gd_get(u32 g, u32 f, u32 size, u32 *v)
 {
+    if (g >= ngroups)
+        return -1;
     u32 o = g * 32 + f;
     u8 b[4];
     if (bread_copy(gd_blk + o / bsize, o % bsize, b, size))
@@ -434,13 +648,16 @@ static int bitmap_alloc(u32 bm_blk, u32 nbits, u32 first_bit)
     return -2;                          /* full */
 }
 
+/* clear a bit: 0 done, 1 it was clear already (the disk is damaged: nothing is changed), -1 error */
 static int bitmap_free(u32 bm_blk, u32 bit)
 {
     u8 b;
-    if (bread_copy(bm_blk, bit / 8, &b, 1))
+    if (bit >= 8 * bsize || bread_copy(bm_blk, bit / 8, &b, 1))
         return -1;
+    if (!(b & (1u << (bit % 8))))
+        return 1;
     b &= (u8)~(1u << (bit % 8));
-    return bwrite_copy(bm_blk, bit / 8, &b, 1);
+    return bwrite_copy(bm_blk, bit / 8, &b, 1) ? -1 : 0;
 }
 
 static u32 alloc_block(u32 goal_group)
@@ -466,12 +683,21 @@ static u32 alloc_block(u32 goal_group)
     return 0;
 }
 
+/* give a block back. Never trusts the number: outside the data area, or already free, it is reported and left alone */
 static void free_block(u32 blk)
 {
+    if (blk < first_data_block || blk >= total_blocks) {
+        damaged("freeing a block number out of range:", blk);
+        return;
+    }
     u32 g = (blk - first_data_block) / blocks_per_group, bit = (blk - first_data_block) % blocks_per_group, bmb;
     if (gd_get(g, 0, 4, &bmb))
         return;
-    bitmap_free(bmb, bit);
+    int r = bitmap_free(bmb, bit);
+    if (r == 1)
+        damaged("freeing a block that is already free:", blk);
+    if (r)
+        return;
     gd_add(g, 12, 1);
     sb_add(12, 1);
 }
@@ -482,7 +708,12 @@ static u32 alloc_inode(int is_dir)
         u32 bmb;
         if (gd_get(g, 4, 4, &bmb))
             return 0;
-        int bit = bitmap_alloc(bmb, ninodes_per_group, g == 0 ? 10 : 0);
+        u32 skip = 0;                                   /* the reserved inodes 1 .. first_ino-1 */
+        if (g * ninodes_per_group < first_ino - 1)
+            skip = first_ino - 1 - g * ninodes_per_group;
+        if (skip >= ninodes_per_group)
+            continue;
+        int bit = bitmap_alloc(bmb, ninodes_per_group, skip);
         if (bit == -1)
             return 0;
         if (bit < 0)
@@ -498,10 +729,18 @@ static u32 alloc_inode(int is_dir)
 
 static void free_inode(u32 ino, int is_dir)
 {
+    if (ino < first_ino || ino > ninodes) {
+        damaged("freeing an inode number out of range:", ino);
+        return;
+    }
     u32 g = (ino - 1) / ninodes_per_group, bmb;
     if (gd_get(g, 4, 4, &bmb))
         return;
-    bitmap_free(bmb, (ino - 1) % ninodes_per_group);
+    int r = bitmap_free(bmb, (ino - 1) % ninodes_per_group);
+    if (r == 1)
+        damaged("freeing an inode that is already free:", ino);
+    if (r)
+        return;
     gd_add(g, 14, 1);
     if (is_dir)
         gd_add(g, 16, -1);
@@ -511,6 +750,8 @@ static void free_inode(u32 ino, int is_dir)
 /* write the inode's fields back (other on-disk fields are kept) */
 int ext2_iput(const struct inode *in)
 {
+    if (in->ino == 0 || in->ino > ninodes)
+        return -1;
     u32 grp = (in->ino - 1) / ninodes_per_group, idx = (in->ino - 1) % ninodes_per_group;
     u32 itable;
     if (gd_get(grp, 8, 4, &itable))
@@ -529,9 +770,22 @@ int ext2_iput(const struct inode *in)
     wr16(raw + 24, in->gid);
     wr16(raw + 26, in->links);
     wr32(raw + 28, in->nblocks);
+    wr32(raw + 32, S_ISDIR(in->mode) ? in->flags & ~(u32)EXT2_INDEX_FL : in->flags);  /* a changed directory is a plain list */
     for (int i = 0; i < 15; i++)
         wr32(raw + 40 + i * 4, in->block[i]);
+    wr32(raw + 104, in->acl);
+    if (S_ISREG(in->mode))
+        wr32(raw + 108, in->size_high);
     return bwrite_copy(blk, off, raw, 128);
+}
+
+/* a directory Zenix changes is no longer indexed: drop the htree flag (the index blocks read as empty entries) */
+static int dir_unindex(struct inode *dir)
+{
+    if (!(dir->flags & EXT2_INDEX_FL))
+        return 0;
+    dir->flags &= ~(u32)EXT2_INDEX_FL;
+    return ext2_iput(dir);
 }
 
 /* block number for file block n, allocating it (and indirect blocks) if missing */
@@ -539,6 +793,8 @@ static u32 bmap_alloc(struct inode *in, u32 n)
 {
     u32 per = bsize / 4, spb = bsize / 512;
     u32 goal = (in->ino - 1) / ninodes_per_group;
+    if (!has_block_map(in))
+        return 0;
     if (n < 12) {
         if (!in->block[n]) {
             in->block[n] = alloc_block(goal);
@@ -592,6 +848,10 @@ int ext2_write(struct inode *in, u32 off, const void *src, u32 n)
 {
     const u8 *s = src;
     u32 done = 0;
+    if (ext2_readonly)
+        return EROFS_;
+    if (in->size_high)
+        return -27;                     /* EFBIG: a file over 4 GB (large_file) is only read */
     while (done < n) {
         u32 pos = off + done, chunk = bsize - pos % bsize;
         if (chunk > n - done)
@@ -611,58 +871,154 @@ int ext2_write(struct inode *in, u32 off, const void *src, u32 n)
     return done || !n ? (int)done : -1;
 }
 
-static void free_tree(u32 blk, int level)
+/* free a block tree; *budget limits the blocks a (damaged) inode can make us visit */
+static void free_tree(u32 blk, int level, u32 *budget)
 {
-    if (!blk)
+    if (!blk || !*budget)
         return;
+    if (blk < first_data_block || blk >= total_blocks) {
+        damaged("block number out of range in a file:", blk);
+        return;
+    }
+    (*budget)--;
     if (level > 0) {
         u32 per = bsize / 4;
-        for (u32 i = 0; i < per; i++) {
+        for (u32 i = 0; i < per && *budget; i++) {
             u8 b[4];
             if (bread_copy(blk, i * 4, b, 4))
                 break;
             u32 e = rd32(b);
             if (e)
-                free_tree(e, level - 1);
+                free_tree(e, level - 1, budget);
         }
     }
     free_block(blk);
 }
 
+/* free the data blocks of a regular file, directory or slow symbolic link (never block[] of a fast symlink or a
+ * device: that is text / device numbers). The extended-attribute block, if any, stays: see release_acl. */
+static void free_data(struct inode *in)
+{
+    if (has_block_map(in)) {
+        u32 budget = in->nblocks / (bsize / 512) + 1;   /* no more blocks than the inode says it has */
+        for (int i = 0; i < 12; i++)
+            free_tree(in->block[i], 0, &budget);
+        free_tree(in->block[12], 1, &budget);
+        free_tree(in->block[13], 2, &budget);
+        free_tree(in->block[14], 3, &budget);
+        for (int i = 0; i < 15; i++)
+            in->block[i] = 0;
+        in->nblocks = in->acl ? bsize / 512 : 0;
+        in->size = 0;
+        in->size_high = 0;
+    }
+}
+
+/* the inode's extended-attribute block: one reference less, freed with the last one */
+static void release_acl(struct inode *in)
+{
+    u32 b = in->acl;
+    if (!b)
+        return;
+    in->acl = 0;
+    in->nblocks = in->nblocks >= bsize / 512 ? in->nblocks - bsize / 512 : 0;
+    u8 h[8];
+    if (b < first_data_block || b >= total_blocks || bread_copy(b, 0, h, 8) || rd32(h) != XATTR_MAGIC) {
+        damaged("extended attribute block", b);
+        return;
+    }
+    u32 refs = rd32(h + 4);
+    if (refs > 1) {
+        wr32(h + 4, refs - 1);
+        bwrite_copy(b, 4, h + 4, 4);
+    } else {
+        free_block(b);
+    }
+}
+
 int ext2_truncate(struct inode *in)
 {
-    for (int i = 0; i < 12; i++)
-        if (in->block[i])
-            free_block(in->block[i]);
-    free_tree(in->block[12], 1);
-    free_tree(in->block[13], 2);
-    free_tree(in->block[14], 3);
-    for (int i = 0; i < 15; i++)
-        in->block[i] = 0;
-    in->size = 0;
-    in->nblocks = 0;
+    if (ext2_readonly)
+        return EROFS_;
+    if (!S_ISREG(in->mode))
+        return -1;
+    free_data(in);
     in->mtime = fs_now();
     return ext2_iput(in);
+}
+
+/* an inode with no names left: give its blocks and number back */
+static void release(struct inode *in)
+{
+    int is_dir = S_ISDIR(in->mode);
+    free_data(in);
+    release_acl(in);
+    in->links = 0;
+    in->mtime = fs_now();
+    ext2_iput(in);
+    free_inode(in->ino, is_dir);
+}
+
+/* the last close of an inode whose last name went while it was open: delete it now. Only an inode with no links */
+int ext2_release(u32 ino)
+{
+    struct inode in;
+    if (ext2_readonly)
+        return EROFS_;
+    if (ext2_iget(ino, &in) || in.links != 0 || in.mode == 0)
+        return -1;
+    release(&in);
+    return 0;
+}
+
+/* the last name of an inode went: delete it now, or (open) at the last close */
+static void unlinked(struct inode *in)
+{
+    if (ext2_busy && ext2_busy(in->ino)) {
+        in->links = 0;
+        in->mtime = fs_now();
+        ext2_iput(in);                  /* kept, with its blocks, until ext2_release */
+        return;
+    }
+    release(in);
 }
 
 /* ---- directories ---- */
 
 static u8 dbuf[4096];
 
-static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino)
+static u8 file_type(u32 mode)            /* the directory entry's file type byte (filetype feature) */
+{
+    if (!(f_incompat & INCOMPAT_FILETYPE))
+        return 0;                       /* revision 0: that byte is the high byte of the name length */
+    switch (mode & S_IFMT) {
+    case S_IFREG: return 1;
+    case S_IFDIR: return 2;
+    case 0020000: return 3;
+    case 0060000: return 4;
+    case 0010000: return 5;
+    case 0140000: return 6;
+    case S_IFLNK: return 7;
+    }
+    return 0;
+}
+
+static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino, u32 mode)
 {
     u32 need = 8 + ((len + 3) & ~3u);
     u32 nblk = dir->size / bsize;
+    if (len == 0 || len > 255)
+        return -1;
     for (u32 i = 0; i < nblk; i++) {
         u32 blk = ext2_bmap(dir, i);
         if (!blk || bread_copy(blk, 0, dbuf, bsize))
-            return -1;
+            return damaged("directory block missing in inode", dir->ino);
         for (u32 o = 0; o + 8 <= bsize;) {
-            u32 eino = rd32(dbuf + o), rl = le16(*(u16 *)(dbuf + o + 4));
+            if (dirent_bad(dbuf + o, bsize - o))
+                return damaged("directory entry in inode", dir->ino);
+            u32 eino = rd32(dbuf + o), rl = rd16(dbuf + o + 4);
             u32 elen = eino ? 8 + (((u32)dbuf[o + 6] + 3) & ~3u) : 0;
-            if (rl < 8 || o + rl > bsize)
-                return -1;
-            if (rl - elen >= need) {
+            if (rl >= elen && rl - elen >= need) {
                 u32 at = o + elen;
                 if (elen) {                     /* split the live entry */
                     wr16(dbuf + o + 4, (u16)elen);
@@ -672,9 +1028,11 @@ static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino)
                 }
                 wr32(dbuf + at, ino);
                 dbuf[at + 6] = (u8)len;
-                dbuf[at + 7] = 0;
+                dbuf[at + 7] = file_type(mode);
                 memcpy(dbuf + at + 8, name, len);
-                return bwrite_copy(blk, 0, dbuf, bsize);
+                if (bwrite_copy(blk, 0, dbuf, bsize))
+                    return -1;
+                return dir_unindex(dir);
             }
             o += rl;
         }
@@ -686,18 +1044,23 @@ static int dir_add(struct inode *dir, const char *name, u32 len, u32 ino)
     wr32(dbuf, ino);
     wr16(dbuf + 4, (u16)bsize);
     dbuf[6] = (u8)len;
+    dbuf[7] = file_type(mode);
     memcpy(dbuf + 8, name, len);
     if (bwrite_copy(blk, 0, dbuf, bsize))
         return -1;
     dir->size += bsize;
     dir->mtime = fs_now();
+    dir->flags &= ~(u32)EXT2_INDEX_FL;
     return ext2_iput(dir);
 }
 
 /* public: add an entry to a directory (used by fsck to attach orphans) */
 int ext2_link(struct inode *dir, const char *name, u32 ino)
 {
-    return dir_add(dir, name, strlen_(name), ino);
+    struct inode in;
+    if (ext2_iget(ino, &in))
+        return -1;
+    return dir_add(dir, name, strlen_(name), ino, in.mode);
 }
 
 static int dir_remove(struct inode *dir, const char *name, u32 len, u32 *ino_out)
@@ -706,19 +1069,21 @@ static int dir_remove(struct inode *dir, const char *name, u32 len, u32 *ino_out
     for (u32 i = 0; i < nblk; i++) {
         u32 blk = ext2_bmap(dir, i);
         if (!blk || bread_copy(blk, 0, dbuf, bsize))
-            return -1;
+            return damaged("directory block missing in inode", dir->ino);
         u32 prev = 0xFFFFFFFF;
         for (u32 o = 0; o + 8 <= bsize;) {
-            u32 eino = rd32(dbuf + o), rl = le16(*(u16 *)(dbuf + o + 4)), nl = dbuf[o + 6];
-            if (rl < 8 || o + rl > bsize)
-                return -1;
+            if (dirent_bad(dbuf + o, bsize - o))
+                return damaged("directory entry in inode", dir->ino);
+            u32 eino = rd32(dbuf + o), rl = rd16(dbuf + o + 4), nl = dbuf[o + 6];
             if (eino && nl == len && !memcmp_(dbuf + o + 8, name, len)) {
                 *ino_out = eino;
                 if (prev != 0xFFFFFFFF)
-                    wr16(dbuf + prev + 4, (u16)(le16(*(u16 *)(dbuf + prev + 4)) + rl));
+                    wr16(dbuf + prev + 4, (u16)(rd16(dbuf + prev + 4) + rl));
                 else
                     wr32(dbuf + o, 0);
-                return bwrite_copy(blk, 0, dbuf, bsize);
+                if (bwrite_copy(blk, 0, dbuf, bsize))
+                    return -1;
+                return dir_unindex(dir);
             }
             prev = o;
             o += rl;
@@ -731,10 +1096,11 @@ static int dir_is_empty(const struct inode *dir)
 {
     u32 cookie = 0;
     struct udirent e;
-    while (ext2_readdir(dir, &cookie, &e) > 0)
+    int r;
+    while ((r = ext2_readdir(dir, &cookie, &e)) > 0)
         if (strcmp_(e.name, ".") && strcmp_(e.name, ".."))
             return 0;
-    return 1;
+    return r == 0;                      /* a damaged directory is not "empty" */
 }
 
 /* split a path into parent directory and last component */
@@ -771,11 +1137,29 @@ int ext2_namei_parent(const char *path, u32 cwd, struct inode *dir, char *name)
     return S_ISDIR(dir->mode) ? 0 : -1;
 }
 
+/* a new inode: the whole on-disk inode is cleared first (a reused inode keeps nothing of its old life:
+ * flags, extended-attribute block, size_high), then the fields are filled in */
 static int new_inode(struct inode *out, u32 mode, int is_dir)
 {
+    if (ext2_readonly)
+        return EROFS_;
     u32 ino = alloc_inode(is_dir);
     if (!ino)
         return -1;
+    u32 grp = (ino - 1) / ninodes_per_group, idx = (ino - 1) % ninodes_per_group, itable;
+    static u8 zero[4096];
+    if (gd_get(grp, 8, 4, &itable)) {
+        free_inode(ino, is_dir);
+        return -1;
+    }
+    u32 pos = idx * inode_size;
+    memset(zero, 0, inode_size);
+    if (inode_size > 128)
+        wr16(zero + 128, (u16)extra_isize);     /* i_extra_isize as the superblock wants it */
+    if (bwrite_copy(itable + pos / bsize, pos % bsize, zero, inode_size)) {
+        free_inode(ino, is_dir);
+        return -1;
+    }
     memset(out, 0, sizeof *out);
     out->ino = ino;
     out->mode = (u16)mode;
@@ -791,7 +1175,9 @@ int ext2_create(struct inode *dir, const char *name, struct inode *out)
 {
     if (new_inode(out, S_IFREG | fsp_new_file_mode(ext2_umask), 0))
         return -1;
-    if (ext2_iput(out) || dir_add(dir, name, strlen_(name), out->ino)) {
+    if (ext2_iput(out) || dir_add(dir, name, strlen_(name), out->ino, out->mode)) {
+        out->links = 0;
+        ext2_iput(out);
         free_inode(out->ino, 0);
         return -1;
     }
@@ -805,10 +1191,14 @@ int ext2_mkdir(struct inode *dir, const char *name)
     u32 tmp;
     if (ext2_lookup(dir, name, len, &tmp) == 0)
         return -2;                      /* exists */
+    if (dir->links >= 65000)
+        return -31;                     /* EMLINK */
     if (new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1))
         return -1;
     u32 blk = bmap_alloc(&d, 0);
     if (!blk) {
+        d.links = 0;
+        ext2_iput(&d);
         free_inode(d.ino, 1);
         return -1;
     }
@@ -817,14 +1207,16 @@ int ext2_mkdir(struct inode *dir, const char *name)
     wr32(dbuf, d.ino);
     wr16(dbuf + 4, 12);
     dbuf[6] = 1;
+    dbuf[7] = file_type(S_IFDIR);
     dbuf[8] = '.';
     wr32(dbuf + 12, dir->ino);
     wr16(dbuf + 16, (u16)(bsize - 12));
     dbuf[18] = 2;
+    dbuf[19] = file_type(S_IFDIR);
     dbuf[20] = '.';
     dbuf[21] = '.';
     if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d) ||
-        dir_add(dir, name, len, d.ino))
+        dir_add(dir, name, len, d.ino, d.mode))
         return -1;
     dir->links++;
     dir->mtime = fs_now();
@@ -834,6 +1226,8 @@ int ext2_mkdir(struct inode *dir, const char *name)
 int ext2_unlink(struct inode *dir, const char *name)
 {
     u32 len = strlen_(name), ino;
+    if (ext2_readonly)
+        return EROFS_;
     if (ext2_lookup(dir, name, len, &ino))
         return -1;
     struct inode in;
@@ -845,30 +1239,29 @@ int ext2_unlink(struct inode *dir, const char *name)
         in.links--;
         return ext2_iput(&in);
     }
-    ext2_truncate(&in);
-    in.links = 0;
-    ext2_iput(&in);
-    free_inode(in.ino, 0);
+    unlinked(&in);
     return 0;
 }
 
 int ext2_rmdir(struct inode *dir, const char *name)
 {
     u32 len = strlen_(name), ino;
+    if (ext2_readonly)
+        return EROFS_;
     if (ext2_lookup(dir, name, len, &ino))
         return -1;
     struct inode in;
-    if (ext2_iget(ino, &in) || !S_ISDIR(in.mode))
+    if (ext2_iget(ino, &in) || !S_ISDIR(in.mode) || ino == 2)
         return -1;
     if (!dir_is_empty(&in))
         return -2;
     if (dir_remove(dir, name, len, &ino))
         return -1;
-    ext2_truncate(&in);
-    in.links = 0;
-    ext2_iput(&in);
-    free_inode(in.ino, 1);
-    dir->links--;
+    if (ext2_iget(dir->ino, dir))       /* dir_remove may have rewritten it (index flag) */
+        return -1;
+    unlinked(&in);
+    if (dir->links > 2)
+        dir->links--;
     dir->mtime = fs_now();
     return ext2_iput(dir);
 }
@@ -910,12 +1303,12 @@ int ext2_hardlink(struct inode *dir, const char *name, u32 ino)
     u32 tmp;
     if (ext2_lookup(dir, name, strlen_(name), &tmp) == 0)
         return -2;
-    if (ext2_iget(ino, &in) || S_ISDIR(in.mode) || in.links >= 65000)
+    if (ext2_iget(ino, &in) || S_ISDIR(in.mode) || in.links == 0 || in.links >= 65000)
         return -1;
     in.links++;
     if (ext2_iput(&in))
         return -1;
-    if (dir_add(dir, name, strlen_(name), ino)) {
+    if (dir_add(dir, name, strlen_(name), ino, in.mode)) {
         in.links--;
         ext2_iput(&in);
         return -1;
@@ -940,12 +1333,12 @@ int ext2_symlink(struct inode *dir, const char *name, const char *target)
     } else {
         u32 blk = bmap_alloc(&in, 0);
         if (!blk || bwrite_copy(blk, 0, target, len)) {
-            free_inode(in.ino, 0);
+            release(&in);
             return -1;
         }
     }
-    if (ext2_iput(&in) || dir_add(dir, name, strlen_(name), in.ino)) {
-        free_inode(in.ino, 0);
+    if (ext2_iput(&in) || dir_add(dir, name, strlen_(name), in.ino, in.mode)) {
+        release(&in);
         return -1;
     }
     return 0;
@@ -954,6 +1347,8 @@ int ext2_symlink(struct inode *dir, const char *name, const char *target)
 int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *nn)
 {
     u32 ol = strlen_(on), nl = strlen_(nn), ino, tmp;
+    if (ext2_readonly)
+        return EROFS_;
     if (ext2_lookup(od, on, ol, &ino))
         return -1;
     struct inode in;
@@ -969,9 +1364,9 @@ int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *
         if (ext2_iget(nd->ino, nd))
             return -1;
     }
-    if (dir_add(nd, nn, nl, ino))
+    if (dir_add(nd, nn, nl, ino, in.mode))
         return -1;
-    if (od->ino == nd->ino && ext2_iget(od->ino, od))
+    if (ext2_iget(od->ino, od))
         return -1;
     if (dir_remove(od, on, ol, &tmp))
         return -1;

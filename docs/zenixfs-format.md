@@ -95,8 +95,11 @@ Root directory = object 1. Object 0 is reserved for ORPHAN items. A directory's 
 
 **Directory entries**: one DIRENT item per name; the value is `ino` 4, `type` 1 (Unix file type), `namelen` 1, then the name (no NUL). The key
 offset is `hash24 << 8 | seq`: `hash24` is `((h >> 8) ^ h) & 0xFFFFFF` where `h` is the 32-bit FNV-1a hash of the name bytes (never changed in version 1);
-`seq` (0..255) numbers the names that share a `hash24`, from 0 with no gaps (removing a name moves the last name of its chain into the hole). A lookup
-probes seq 0, 1, 2 ... until an item is missing. The key offset is a 32-bit position that stays valid while the directory changes, and is used as the readdir cookie.
+`seq` (0..255) numbers the names that share a `hash24`. A chain may have gaps: removing a name removes only its item (no other name moves), and a new name takes
+the lowest free `seq`. A lookup walks the chain with ceiling searches (`(dir, DIRENT, hash24 << 8 | seq)` and up, until the hash part differs). The key
+offset is a 32-bit position that stays valid while the directory changes, and is used as the readdir cookie: a name that is neither added nor removed
+during a walk is returned exactly once. (Until 2026-10-23 chains had no gaps and a removal moved the last name of its chain into the hole, behind a
+reader in progress; volumes from then are valid, with no gaps.)
 A name is 1..255 arbitrary bytes except NUL and `/`; the filesystem does not interpret them. The superblock `charset` field says which encoding the volume's creator used (Latin-1 or UTF-8), so the operating system can convert at the boundary; the two encodings can even be mixed on one volume, since names are compared byte for byte.
 
 **Files**: if `flags` bit 0 is set the content is the INLINE item. Otherwise it is the EXTENT items; a block range with no extent reads as zeros (sparse).

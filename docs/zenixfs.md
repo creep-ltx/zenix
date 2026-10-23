@@ -101,7 +101,10 @@ Latin-1 (keyboard, font, AmigaOS agree) and UTF-8 is planned: both work, because
 
 **Z6. Directories are hashed.** A directory entry is a tree item with key `(dir, hash32(name), n)`; lookup is one
 tree descent; no scan. `readdir` walks in key order and the cookie is the hash, so it stays valid while the
-directory changes. Many small entries share a block (SFS idea, comes free from the tree). Hash: a cheap one
+directory changes (a removal never moves another name: chains may have gaps, `zenixfs-format.md`). Every tree block read from the
+disk is checked for its structure as well as its checksum (item count, offsets and sizes inside the block and at most the largest
+item, node levels, children inside the data area), so a crafted image with good checksums fails with ECORRUPT instead of overflowing
+a buffer (`make -C zenixfs test`: `crafted`, `readdir-delete`). Many small entries share a block (SFS idea, comes free from the tree). Hash: a cheap one
 (FNV-style or a 32-bit multiply-rotate), fixed forever in the format.
 
 **Z7. Files are extents** `(logical block, physical start, length)`, 32-bit each. Files under about 200 bytes live
@@ -219,6 +222,9 @@ So ZenixFS must not be tuned for one case:
 - **Rule 4: no hardware assumed in the filesystem code.** It speaks only the `blockio` interface (read, write, flush, info). Gayle, SCSI, SD, a RAM disk and the host's file image are all just
   drivers behind it; the same ZenixFS code is tested on the host image and on the real machines.
 - **Rule 5: the flush barrier is the one thing we cannot fake.** If a device cannot flush, ZenixFS mounts it but says "no crash guarantee on this device" (like ext2 `nobarrier`).
+  Built (2026-10-23): diskd sets `DISKCAP_FLUSH` only when a flush tried at start works (IDE FLUSH CACHE, A3000 SYNCHRONIZE CACHE, the SD
+  driver); without it `mount.zenixfs` prints that a power cut may lose the last commits, or damage the volume if the disk reorders writes,
+  and a commit's flushes are then only "everything sent" (the weaker guarantee).
   Test by really cutting power on each kind of device we claim to support, not only in the simulator.
 - Measure each kind (Gayle+CF, Gayle+disk, SCSI with/without DMA, SD) with the same benchmark script and write the table; the defaults come from that table.
 

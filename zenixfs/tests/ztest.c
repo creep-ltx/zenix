@@ -568,8 +568,11 @@ static int hpcmp(const void *a, const void *b)
     const struct hp *x = a, *y = b;
     return x->h != y->h ? (x->h < y->h ? -1 : 1) : (x->i < y->i ? -1 : x->i > y->i);
 }
-static int test_collide(void)
+/* names that share one hash24 (a long collision chain), found once */
+static uint32_t cgroup[16], cg;
+static uint32_t collide_group(void)
 {
+    if (cg) return cg;
     enum { N = 9000000 };
     struct hp *v = malloc((size_t)N * sizeof *v);
     char nm[32];
@@ -578,10 +581,16 @@ static int test_collide(void)
     uint32_t best = 0, bl = 0;
     for (uint32_t i = 0; i < N; ) { uint32_t j = i; while (j < N && v[j].h == v[i].h) j++; if (j - i > bl) { bl = j - i; best = i; } i = j; }
     printf("  longest chain found among %d names: %u names share one hash\n", (int)N, bl);
-    CHECK(bl >= 5);
-    uint32_t group[16]; uint32_t g = bl > 16 ? 16 : bl;
-    for (uint32_t k = 0; k < g; k++) group[k] = v[best + k].i;
+    cg = bl > 16 ? 16 : bl;
+    for (uint32_t k = 0; k < cg; k++) cgroup[k] = v[best + k].i;
     free(v);
+    return cg;
+}
+static int test_collide(void)
+{
+    char nm[32];
+    uint32_t g = collide_group(), *group = cgroup;
+    CHECK(g >= 5);
     struct zmem *m = zmem_new(11, 4096, 0);
     struct zenixfs *fs; uint32_t f, x;
     CHECK(zenixfs_mkfs(&m->dev, NULL, 0, 5) == 0);
@@ -615,6 +624,162 @@ static int test_collide(void)
     return 0;
 }
 
+/* C9: removing names while a reader walks the directory: every name that stays is returned exactly once
+ * (a removal used to move the last name of a hash chain into the hole, behind the reader) */
+static int test_readdir_delete(void)
+{
+    char nm[32], dn[300]; uint32_t di, f; uint8_t dt;
+    uint32_t g = collide_group();
+    CHECK(g >= 5);
+    struct zmem *m = zmem_new(11, 4096, 0);
+    struct zenixfs *fs;
+    CHECK(zenixfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);
+    for (uint32_t k = 0; k < g; k++) { snprintf(nm, sizeof nm, "c%07u", cgroup[k]); CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, nm, strlen(nm), 0644, 0, 0, &f) == 0); }
+    for (int i = 0; i < 40; i++) { snprintf(nm, sizeof nm, "other%d", i); CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, nm, strlen(nm), 0644, 0, 0, &f) == 0); }
+    /* walk; after the third chain name, remove the first chain name (already returned) and every second "other" */
+    uint64_t cookie = 0; int seen_c = 0, removed = 0;
+    char gone[32]; snprintf(gone, sizeof gone, "c%07u", cgroup[0]);
+    int count[64]; memset(count, 0, sizeof count);
+    while (zenixfs_readdir(fs, ZENIXFS_ROOT_INO, &cookie, dn, &di, &dt) > 0) {
+        if (dn[0] == 'c') {
+            for (uint32_t k = 0; k < g; k++) { snprintf(nm, sizeof nm, "c%07u", cgroup[k]); if (!strcmp(nm, dn)) count[k]++; }
+            if (++seen_c == 3 && !removed) {
+                CHECK(zenixfs_unlink(fs, ZENIXFS_ROOT_INO, gone, strlen(gone)) == 0);
+                for (int i = 0; i < 40; i += 2) { snprintf(nm, sizeof nm, "other%d", i); zenixfs_unlink(fs, ZENIXFS_ROOT_INO, nm, strlen(nm)); }
+                removed = 1;
+            }
+        }
+    }
+    for (uint32_t k = 0; k < g; k++) CHECK(count[k] == 1);         /* every chain name once, the removed one before it went */
+    CHECK(seen_c == (int)g);
+    /* after the walk: lookups still find every name that stays, fsck agrees, a removed name can come back */
+    for (uint32_t k = 1; k < g; k++) { snprintf(nm, sizeof nm, "c%07u", cgroup[k]); CHECK(zenixfs_lookup(fs, ZENIXFS_ROOT_INO, nm, strlen(nm), &f) == 0); }
+    CHECK(zenixfs_lookup(fs, ZENIXFS_ROOT_INO, gone, strlen(gone), &f) == ZENIXFS_ENOENT);
+    CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0);
+    CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, gone, strlen(gone), 0644, 0, 0, &f) == 0);
+    CHECK(zenixfs_lookup(fs, ZENIXFS_ROOT_INO, gone, strlen(gone), &di) == 0 && di == f);
+    CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0);
+    zenixfs_unmount(fs); zmem_free(m);
+    return 0;
+}
+
+/* C9: a crafted image with GOOD checksums but impossible structure (item sizes, offsets, counts, levels, children):
+ * every call returns an error, nothing reads or writes outside a buffer (run under AddressSanitizer: make asan) */
+static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
+static void put16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 8); p[1] = (uint8_t)v; }
+static void put32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v; }
+static void reseal(uint8_t *b, uint32_t n)        /* the library's checksum (zenixfs.c csum_of) */
+{
+    uint32_t s = 0x5A4E4653u;
+    for (uint32_t i = 4; i < n; i += 4) { uint32_t w = be32(b + i); s = ((s << 1) | (s >> 31)) + w; }
+    put32(b, s);
+}
+static int test_crafted(void)
+{
+    const uint32_t B = 1024, NB = 2048;
+    struct zmem *m = zmem_new(10, NB, 0);
+    struct zenixfs *fs; uint32_t f, d;
+    char nm[32];
+    CHECK(zenixfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);
+    CHECK(zenixfs_mkdir(fs, ZENIXFS_ROOT_INO, "d", 1, 0755, 0, 0, &d) == 0);
+    for (int i = 0; i < 120; i++) {               /* enough items for a tree of more than one level */
+        snprintf(nm, sizeof nm, "file-%03d", i);
+        CHECK(zenixfs_create(fs, i % 2 ? d : ZENIXFS_ROOT_INO, nm, strlen(nm), 0644, 0, 0, &f) == 0);
+        CHECK(zenixfs_write(fs, f, 0, nm, strlen(nm)) > 0);
+    }
+    CHECK(zenixfs_unmount(fs) == 0);
+    int variants = 0, refused = 0;
+    for (uint32_t blk = 0; blk < NB; blk++) {
+        const uint8_t *b0 = m->img + (size_t)blk * B;
+        if (!(b0[4] == 0x5A && b0[5] == 0x42 && (b0[6] == 4 || b0[6] == 5) && be32(b0 + 8) == blk)) continue;
+        { /* only blocks of the current tree count (copy-on-write leaves old copies that nothing reads) */
+            struct zmem *c = zmem_clone(m);
+            memset(c->img + (size_t)blk * B + 12, 0xA5, 64);
+            struct zenixfs *x; int seen = 0;
+            if (zenixfs_mount(&x, &c->dev, 64) != 0) seen = 1;
+            else { seen = zenixfs_fsck(x, quiet, NULL) > 0; zenixfs_unmount(x); }
+            zmem_free(c);
+            if (!seen) continue;
+        }
+        for (int how = 0; how < 6; how++) {
+            struct zmem *c = zmem_clone(m);
+            uint8_t *b = c->img + (size_t)blk * B;
+            uint32_t n = (uint32_t)b[24] << 8 | b[25];
+            if (b[6] == 4) {                      /* leaf */
+                if (how == 0 && n) put16(b + 32 + 14, 0xFFFF);              /* an item of 64 KB */
+                else if (how == 1 && n) put16(b + 32 + 12, 0xFFF0);         /* an item far outside the block */
+                else if (how == 2) put16(b + 24, 0xFFFF);                   /* 65535 items */
+                else if (how == 3) b[7] = 3;                                /* a leaf that says it is a node level */
+                else if (how == 4) put16(b + 26, 8);                        /* data area over the item headers */
+                else { zmem_free(c); continue; }
+            } else {                              /* node */
+                if (how == 0 && n) put32(b + 32 + 12, NB + 7);             /* a child outside the volume */
+                else if (how == 1) put16(b + 24, 0xFFFF);
+                else if (how == 2) b[7] = 0;                                /* a node at leaf level */
+                else if (how == 3) put16(b + 24, 0);                        /* a node without children */
+                else if (how == 4 && n) put32(b + 32 + 12, 3);             /* a child in the system area */
+                else if (how == 5) b[7] = 30;                               /* far too deep */
+                else { zmem_free(c); continue; }
+            }
+            reseal(b, B);
+            variants++;
+            struct zenixfs *x;
+            int bad = 0;
+            if (zenixfs_mount(&x, &c->dev, 64) != 0) { refused++; zmem_free(c); continue; }
+            uint64_t cookie = 0; char dn[300]; uint32_t di, ino; uint8_t dt; char buf[64];
+            int r;
+            while ((r = zenixfs_readdir(x, ZENIXFS_ROOT_INO, &cookie, dn, &di, &dt)) > 0) ;
+            if (r < 0) bad = 1;
+            for (int i = 0; i < 120; i++) {
+                snprintf(nm, sizeof nm, "file-%03d", i);
+                r = zenixfs_lookup(x, i % 2 ? d : ZENIXFS_ROOT_INO, nm, strlen(nm), &ino);
+                if (r < 0 && r != ZENIXFS_ENOENT) bad = 1;
+                if (r == 0 && zenixfs_read(x, ino, 0, buf, sizeof buf) < 0) bad = 1;
+            }
+            if (zenixfs_create(x, ZENIXFS_ROOT_INO, "new", 3, 0644, 0, 0, &ino) < 0) bad = 1;
+            if (zenixfs_fsck(x, quiet, NULL) > 0) bad = 1;
+            zenixfs_unmount(x);
+            refused += bad;
+            zmem_free(c);
+        }
+    }
+    printf("  %d crafted blocks (good checksums), %d refused at mount or answered with errors\n", variants, refused);
+    CHECK(variants >= 8);
+    CHECK(refused == variants);                   /* every one is noticed: nothing reads damage as data */
+    zmem_free(m);
+    return 0;
+}
+
+/* C9: a read-only mount (fsck.zenixfs) writes nothing, not even the orphan cleanup of a normal mount */
+static int test_readonly(void)
+{
+    struct zmem *m = zmem_new(10, 2048, 0);
+    struct zenixfs *fs; uint32_t f;
+    CHECK(zenixfs_mkfs(&m->dev, NULL, 0, 5) == 0);
+    CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);
+    CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, "open", 4, 0644, 0, 0, &f) == 0);
+    CHECK(zenixfs_write(fs, f, 0, "data", 4) == 4);
+    CHECK(zenixfs_orphan_add(fs, f) == 0);                  /* unlinked while open, then the power went */
+    CHECK(zenixfs_unlink(fs, ZENIXFS_ROOT_INO, "open", 4) == 0);
+    CHECK(zenixfs_sync(fs) == 0);
+    struct zmem *before = zmem_clone(m);
+    zenixfs_unmount(fs);                                    /* (a crash would leave the same image: it was committed) */
+    m->writes = 0;
+    struct zenixfs_mount_opts mo = { 64, 0, ZENIXFS_MNT_READONLY, 0 };
+    CHECK(zenixfs_mount_opts(&fs, &m->dev, &mo) == 0);
+    CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0);
+    CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, "x", 1, 0644, 0, 0, &f) == ZENIXFS_EROFS);
+    CHECK(zenixfs_unmount(fs) == 0);
+    CHECK(m->writes == 0 && !memcmp(m->img, before->img, 2048u * 1024));
+    CHECK(zenixfs_mount(&fs, &m->dev, 64) == 0);            /* a normal mount frees the orphan */
+    CHECK(zenixfs_getattr(fs, f, &(struct zenixfs_inode){0}) != 0);
+    CHECK(zenixfs_fsck(fs, logmsg, NULL) == 0);
+    zenixfs_unmount(fs); zmem_free(m); zmem_free(before);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     uint64_t seed = argc > 1 ? strtoull(argv[1], NULL, 10) : 1;
@@ -622,7 +787,8 @@ int main(int argc, char **argv)
     rs ^= seed * 0x9E3779B97F4A7C15ull; for (int i = 0; i < 10; i++) rnd();
     struct { const char *name; int (*fn)(void); } tests[] = {
         { "basic", test_basic }, { "random", test_random }, { "powercut", test_powercut },
-        { "bitflip", test_bitflip }, { "full", test_full }, { "orphan", test_orphan }, { "collide", test_collide }, { "bigvol", test_bigvol }, { "bigpower", test_bigpower },
+        { "bitflip", test_bitflip }, { "full", test_full }, { "orphan", test_orphan }, { "collide", test_collide }, { "readdir-delete", test_readdir_delete },
+        { "crafted", test_crafted }, { "readonly", test_readonly }, { "bigvol", test_bigvol }, { "bigpower", test_bigpower },
     };
     int ran = 0;
     for (unsigned i = 0; i < sizeof tests / sizeof *tests; i++) {
