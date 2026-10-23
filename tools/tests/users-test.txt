@@ -45,6 +45,34 @@ send exit\r
 sleep 3
 send chown guest:users /tmp/u1; ls -l /tmp/u1; chgrp users /tmp/u2; ls -l /tmp/u2; sha256sum /etc/group\r
 sleep 4
+send sleep 90 &\r
+sleep 2
+send mkdir -p /tmp/sgd /tmp/mvt/src/dd /tmp/mvt/dst; chmod 2777 /tmp/sgd; echo x > /tmp/sgd/prog; chmod 6777 /tmp/sgd/prog\r
+sleep 3
+send echo f > /tmp/mvt/src/dd/f; chmod 777 /tmp/mvt/src /tmp/mvt/dst; chmod 555 /tmp/mvt/src/dd\r
+sleep 2
+send su user\r
+sleep 3
+send sh /tests/perm-user.sh\r
+sleep 10
+send PATH=/tmp:/bin IFS=Q su\r
+sleep 3
+send echo "P=$PATH H=$HOME"; printenv IFS; echo ifs=$?; exit\r
+sleep 3
+send exit\r
+sleep 3
+send HOME=/home/user sh\r
+sleep 3
+send exit\r
+sleep 2
+send su user\r
+sleep 3
+send exit\r
+sleep 2
+send sh /tests/perm-root.sh\r
+sleep 14
+send kill %1; rm -r /home/user/.shrc /tmp/sgd /tmp/mvt\r
+sleep 2
 send echo user > /etc/autologin; exit\r
 sleep 8
 send id\r
@@ -59,5 +87,17 @@ send \x1d1
 sleep 2
 send su\r
 sleep 3
-send echo root > /etc/autologin; exit\r
+send rm /etc/autologin; exit\r
+sleep 2
+send exit\r
+sleep 5
+send \x1d3
+sleep 1
+send \x1d\r
+sleep 3
+send \x1d1
+sleep 1
+send root\r
+sleep 4
+send echo root > /etc/autologin; id\r
 sleep 2
