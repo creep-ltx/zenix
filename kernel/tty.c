@@ -4,7 +4,10 @@
  * (kills the tty's foreground process), ^D (end of file). Reads return
  * one line at a time. Input (serial or Amiga keyboard) always goes to
  * the focused workspace's tty; output goes to that tty's terminal and,
- * for the focused one, is mirrored to the serial port. */
+ * for the focused one, is mirrored to the serial port.
+ * Everything here runs in process context: tty_input is called by kwork
+ * (main.c), never by an interrupt (audit B4), so the queue, the line and
+ * the screen are never changed by two pieces of code at once. */
 
 #define NTTY 10
 #define QSZ 1024
@@ -91,22 +94,43 @@ static void out(int i, char c)
         serial_putc(c);
 }
 
+/* Drawing a big write takes long on a slow machine (seconds for 4 KB on a 68020 with chip RAM only), and input is
+ * only taken by kwork: so a write is drawn in pieces, and between two pieces - the terminal is in a consistent state
+ * there, and no check-then-block is pending - queued input is handled (echo, Ctrl-C: a killed writer stops at once).
+ * This keeps the input rings from overflowing while a program prints a lot. */
+#define TTY_WPIECE 256
+
 long tty_write(int i, const void *buf, u32 n)
 {
     const char *s = buf;
-    term_write(i, s, n);                    /* the screen: cursor handled once per batch */
-    if (i == ws_cur && tty_mirror)
-        for (u32 k = 0; k < n; k++)
-            serial_putc(s[k]);
-    return (long)n;
+    u32 done = 0;
+    while (done < n) {
+        u32 k = n - done > TTY_WPIECE ? TTY_WPIECE : n - done;
+        term_write(i, s + done, k);         /* the screen: cursor handled once per piece */
+        if (i == ws_cur && tty_mirror)
+            for (u32 j = 0; j < k; j++)
+                serial_putc(s[done + j]);
+        done += k;
+        if (done < n && kwork_pending) {
+            kwork();
+            if (current->killed)
+                break;
+        }
+    }
+    return (long)done;
 }
+
+static u32 q_dropped;
 
 static void commit(struct tty *t, u8 c)
 {
     t->q[t->qhead] = c;
     t->qhead = (u16)((t->qhead + 1) % QSZ);
-    if (t->qhead == t->qtail)
-        t->qtail = (u16)((t->qtail + 1) % QSZ);     /* overflow: drop oldest */
+    if (t->qhead == t->qtail) {                     /* full: the oldest byte goes, and the log says so once per 64 */
+        t->qtail = (u16)((t->qtail + 1) % QSZ);
+        if (q_dropped++ % 64 == 0)
+            kprintf("tty: input queue full (nobody reading?), oldest bytes dropped (%u so far)\n", q_dropped);
+    }
 }
 
 static void erase1(int i)
@@ -114,7 +138,7 @@ static void erase1(int i)
     out(i, '\b'); out(i, ' '); out(i, '\b');
 }
 
-/* from the serial receive interrupt or the keyboard */
+/* one typed byte, from kwork (serial_work or kbd_work): process context, never an interrupt */
 void tty_input(u8 c)
 {
     int i = ws_cur;
@@ -227,6 +251,9 @@ long tty_read(int i, void *buf, u32 n)
             t->eof_pending = 0;
             return 0;
         }
+        /* No lost wakeup between the checks above and block_io (audit B5): input reaches the queue only through
+         * kwork, which runs only at the points listed in main.c, none of them between here and block_io, so a
+         * byte that arrives now waits in its ring and its wake_io() comes after this process is P_IO. */
         block_io();
     }
 }

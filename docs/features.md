@@ -24,7 +24,10 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Feature | Status | Details |
 |---|---|---|
 | Relocating kernel and programs (ZEXE format, no MMU) | verified | architecture.md section 4 |
+| Program loader checks every header field and relocation offset; a corrupt program file is refused with a message | verified (`tools/memtest.sh`, 11 corrupt files) | architecture.md section 4 |
 | Memory manager with per-process ownership, freed on exit | verified | architecture.md section 5 |
+| Memory calls answer 0 (NULL) on failure; sizes near 4 GB refused; a corrupt heap header stops the kernel with its address | verified (`badptr` in `tools/memtest.sh`) | architecture.md section 5 |
+| `malloc` with size classes and free lists (memory reused, big blocks given back), `realloc`; directory tools without stack arrays or entry limits | verified (`tools/memtest.sh`: flat shell memory, tools 25 directories deep) | architecture.md section 12 |
 | Preemptive round-robin scheduler, 100 Hz, 50 ms slice | verified | architecture.md section 6 |
 | `spawn` (no `fork`); wait, exit status, zombies | verified | architecture.md section 6 |
 | About 55 system calls via `TRAP #0`, all pointers validated | verified | architecture.md section 7 |
@@ -32,6 +35,7 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Named message ports, synchronous zero-copy calls | verified | architecture.md section 8 |
 | Servers: disk (`diskd`), filesystem (`fsd`), session manager (`boot`) | verified | architecture.md section 9 |
 | Environment variables inherited by children | verified | |
+| Interrupt handlers only queue input; tty, echo, Ctrl-C/Ctrl-Z, workspaces and the bar run in process context (no lost wakeups, lost input counted in `dmesg`) | verified in FS-UAE (`tools/kbd-test.sh`, `tools/jobs-test.sh`, the matrix) | architecture.md section 11 |
 | Job control: Ctrl-Z stop, `jobs`, `fg`, `bg`, stopped state in `ps` (`SYS_jobctl`, `SYS_wait` untraced) | verified (`tools/jobs-test.sh`) | architecture.md section 7 |
 | Priorities, signals with handlers, process groups | planned | |
 | Users and groups: uid/gid on every process (real and effective), `setuid`/`setgid`, `umask`, `chown` | verified | architecture.md section 14 |

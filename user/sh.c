@@ -67,14 +67,22 @@ static void var_set(const char *n, const char *val, int exp)
     if (!v) {
         for (int i = 0; i < 128; i++) if (!vars[i].used) { v = &vars[i]; break; }
         if (!v) { errm("too many variables", 0); return; }
-        v->used = 1; v->name = pdup(n); v->val = 0; v->cap = 0; v->exp = 0;
+        char *nm = malloc(strlen(n) + 1);
+        if (!nm) { errm(n, "out of memory"); return; }
+        strcpy(nm, n);
+        v->used = 1; v->name = nm; v->val = 0; v->cap = 0; v->exp = 0;
     }
     u32 need = strlen(val) + 1;
-    if (need > v->cap) { v->val = malloc(need < 32 ? 32 : need); v->cap = need < 32 ? 32 : need; }
+    if (need > v->cap) {                    /* a bigger home for the value; the old one is given back */
+        u32 nc = need < 32 ? 32 : need;
+        char *nv = realloc(v->val, nc);
+        if (!nv) { errm(n, "out of memory"); if (!v->val) { free(v->name); v->used = 0; } return; }
+        v->val = nv; v->cap = nc;
+    }
     memcpy(v->val, val, need);
     if (exp >= 0) v->exp = (u8)exp;
 }
-static void var_unset(const char *n) { struct var *v = var_find(n); if (v) v->used = 0; }
+static void var_unset(const char *n) { struct var *v = var_find(n); if (v) { free(v->name); free(v->val); v->name = v->val = 0; v->cap = 0; v->used = 0; } }
 
 /* the exported variables go to the kernel, which gives them to every child */
 static void env_sync(void)
@@ -1962,7 +1970,7 @@ static int run_builtin(char **argv, int argc)
         if (argc == 2 && !strcmp(argv[1], "-")) { exit_trap = 0; return 0; }
         if (argc < 3) { errm("trap", "usage: trap 'commands' EXIT"); return 2; }
         for (int i = 2; i < argc; i++) {
-            if (!strcmp(argv[i], "EXIT") || !strcmp(argv[i], "0")) exit_trap = argv[1][0] ? pdup(argv[1]) : 0;
+            if (!strcmp(argv[i], "EXIT") || !strcmp(argv[i], "0")) { free(exit_trap); exit_trap = argv[1][0] ? pdup(argv[1]) : 0; }
             else if (strcmp(argv[i], "INT") && strcmp(argv[i], "TERM") && strcmp(argv[i], "HUP")) { errm(argv[i], "unsupported signal for trap"); return 1; }
         }
         return 0;
@@ -2018,7 +2026,7 @@ static int run_builtin(char **argv, int argc)
         }
         return 0;
     }
-    if (!strcmp(n, "unalias")) { for (int i = 1; i < argc; i++) { struct alias *a = alias_find(argv[i]); if (a) a->used = 0; } return 0; }
+    if (!strcmp(n, "unalias")) { for (int i = 1; i < argc; i++) { struct alias *a = alias_find(argv[i]); if (a) { free(a->name); free(a->val); a->name = a->val = 0; a->used = 0; } } return 0; }
     if (!strcmp(n, "history")) {
         if (argc > 1 && !strcmp(argv[1], "-c")) { for (int i = 0; i < nhist; i++) free(hist[i]); nhist = 0; return 0; }
         for (int i = 0; i < nhist; i++) { char b[12]; utoa((u32)i + 1, b); for (u32 k = strlen(b); k < 5; k++) outs(" "); outs(b); outs("  "); outs(hist[i]); outs("\n"); }

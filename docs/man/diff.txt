@@ -37,6 +37,11 @@ NOTES
     about 3 million line pairs; larger differing middles are shown as one
     block replaced.
     An access the user is not allowed is reported as "permission denied".
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
+    Directories with any number of entries are walked, as deep as paths go. A
+    path longer than 63 bytes (what a system call takes) is reported ("path
+    too long") and skipped, never cut short.
 
 EXIT STATUS
     0 identical, 1 different, 2 trouble.

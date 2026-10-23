@@ -16,7 +16,7 @@ static int keyword(const char *w)
 {
     int fd = sys_open(DIR, O_RDONLY); if (fd < 0) return 1;
     char *names[400]; int n = 0; struct udirent d;
-    while (sys_readdir(fd, &d) > 0 && n < 400) if (strstr(d.name, ".txt")) names[n++] = strdup(d.name);
+    while (sys_readdir(fd, &d) > 0 && n < 400) if (strstr(d.name, ".txt") && (names[n] = strdup(d.name))) n++;
     sys_close(fd);
     for (int i = 1; i < n; i++) { char *t = names[i]; int j = i; while (j > 0 && strcmp(names[j - 1], t) > 0) { names[j] = names[j - 1]; j--; } names[j] = t; }
     int found = 0;

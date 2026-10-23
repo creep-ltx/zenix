@@ -2,7 +2,7 @@
 /* find [path...] [-name PAT] [-iname PAT] [-type f|d] [-maxdepth N] [-mindepth N] [-print] [-exec cmd {} ;] [-delete]
  * Patterns: * ? [..]. The tests are and-ed; with no action the path is printed. */
 static const char *p_name, *p_iname; static int p_type, maxdepth = 100000, mindepth, do_print = 1, do_delete;
-static char **exec_argv; static int exec_n;
+static char **exec_argv; static int exec_n, rc;
 
 static int gm(const char *p, const char *s, int icase)
 {
@@ -22,6 +22,17 @@ static int gm(const char *p, const char *s, int icase)
     }
 }
 
+/* -exec: its buffers live in this function, not in visit(), which recurses once per directory level */
+static void __attribute__((noinline)) run_exec(const char *path)
+{
+    char *av[24]; int n = 0;
+    for (int i = 0; i < exec_n && n < 22; i++) av[n++] = !strcmp(exec_argv[i], "{}") ? (char *)path : exec_argv[i];
+    av[n] = 0;
+    char prog[128]; if (strchr(av[0], '/')) strcpy(prog, av[0]); else { strcpy(prog, "/bin/"); strcat(prog, av[0]); }
+    oflush();
+    int pid = sys_spawn(prog, av, 0);
+    if (pid >= 0) sys_wait(pid);
+}
 static void visit(const char *path, const char *name, int depth, const struct ustat *st)
 {
     int isdir = (st->mode & S_IFMT) == S_IFDIR;
@@ -33,29 +44,20 @@ static void visit(const char *path, const char *name, int depth, const struct us
         if (p_type == 'd' && !isdir) ok = 0;
         if (ok) {
             if (do_print) { oputs(path); oputc('\n'); }
-            if (exec_n) {
-                char *av[24]; int n = 0;
-                for (int i = 0; i < exec_n && n < 22; i++) av[n++] = !strcmp(exec_argv[i], "{}") ? (char *)path : exec_argv[i];
-                av[n] = 0;
-                char prog[128]; if (strchr(av[0], '/')) strcpy(prog, av[0]); else { strcpy(prog, "/bin/"); strcat(prog, av[0]); }
-                oflush();
-                int pid = sys_spawn(prog, av, 0);
-                if (pid >= 0) sys_wait(pid);
-            }
+            if (exec_n) run_exec(path);
             if (do_delete && !isdir) sys_unlink(path);
         }
     }
     if (isdir && depth < maxdepth) {
-        int fd = sys_open(path, O_RDONLY); if (fd < 0) return;
-        char *names[256]; int nn = 0; struct udirent d;
-        while (sys_readdir(fd, &d) > 0 && nn < 256) { if (!strcmp(d.name, ".") || !strcmp(d.name, "..")) continue; names[nn++] = strdup(d.name); }
-        sys_close(fd);
+        char **names; int nn = dir_list(path, &names);        /* heap, not stack: one level per directory */
+        if (nn < 0) { fprintf(2, "find: %s: %s\n", path, zwhy("cannot read")); rc = 1; return; }
         for (int i = 0; i < nn; i++) {
-            char child[256]; u32 pl = strlen(path); if (pl + strlen(names[i]) + 2 >= sizeof child) continue;
-            strcpy(child, path); if (pl && child[pl - 1] != '/') strcat(child, "/"); strcat(child, names[i]);
+            char *child = path_join(path, names[i]);
+            if (!child) { fprintf(2, "find: %s/%s: %s\n", path, names[i], zwhy("cannot read")); rc = 1; continue; }
             struct ustat cs; if (sys_stat(child, &cs) == 0) visit(child, names[i], depth + 1, &cs);
-            free(names[i]);
+            free(child);
         }
+        dir_free(names, nn);
         if (do_delete && depth >= mindepth) sys_rmdir(path);
     }
 }
@@ -75,7 +77,6 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-exec")) { exec_argv = argv + i + 1; do_print = 0; while (i + 1 < argc && strcmp(argv[i + 1], ";")) { i++; exec_n++; } i++; }
         else { fprintf(2, "find: unknown expression %s\n", argv[i]); return 2; }
     }
-    int rc = 0;
     for (int k = 0; k < np; k++) {
         struct ustat st;
         if (sys_stat(paths[k], &st) < 0) { fprintf(2, "find: %s: not found\n", paths[k]); rc = 1; continue; }

@@ -6,8 +6,9 @@ static int sum(int fd, const char *name)
     static unsigned char *data; static u32 cap;
     u32 n = 0; int r;
     if (!data) { cap = 65536; data = malloc(cap); }
+    if (!data) return -1;
     for (;;) {
-        if (n + 4096 > cap) { unsigned char *nd = malloc(cap * 2); if (!nd) return -1; memcpy(nd, data, n); data = nd; cap *= 2; }
+        if (n + 4096 > cap) { unsigned char *nd = realloc(data, cap * 2); if (!nd) return -1; data = nd; cap *= 2; }
         if ((r = sys_read(fd, data + n, 4096)) <= 0) break;
         n += (u32)r;
     }

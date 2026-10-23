@@ -9,6 +9,10 @@ SYNOPSIS
 DESCRIPTION
     Writes the lines of each file (or standard input) last line first.
 
+NOTES
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
+
 EXIT STATUS
     0, 1 if a file or process could not be used, 2 for a wrong option.
 

@@ -68,16 +68,44 @@ void serial_flush(void)
         serial_tx_drain();
 }
 
-/* Receive: RBF interrupt (level 5) drains Paula's 1-byte buffer into
- * the console input ring; HRM: read SERDATR, then reset INTF_RBF to
- * avoid overrun. */
+/* Receive: the RBF interrupt (level 5) drains Paula's 1-byte buffer (HRM: read SERDATR, then reset INTF_RBF to
+ * avoid overrun) into a ring, and that is all it does (audit B4). serial_work, in process context, hands the bytes
+ * to the tty and runs the test hook. One producer, one consumer: the interrupt writes the slot and then moves head,
+ * serial_work reads the slot and then moves tail, so no lock is needed. 1024 bytes are about 90 ms of input at
+ * 115200 baud; serial_work runs at least every tick while a program computes, and at once when the machine is idle
+ * or a system call ends. A full ring drops the byte and counts it (serial_work reports it on the kernel log). */
+#define RXQ 1024
+static volatile u8 rxq[RXQ];
+static volatile u16 rxq_head, rxq_tail;
+static volatile u32 rxq_lost;
+static u32 rxq_lost_told;
+
 void serial_rx_isr(void)
 {
-    static int hot;
     while (INTREQR & INTF_RBF) {
         u8 c = SERDATR & 0xFF;
         INTREQ = INTF_RBF;
-        if (hot) {                  /* test/remote control: 0x1d then 1-9 or Return */
+        u16 h = rxq_head, nh = (u16)((h + 1) % RXQ);
+        if (nh == rxq_tail) {
+            rxq_lost++;
+            continue;
+        }
+        rxq[h] = c;
+        rxq_head = nh;
+        kwork_pending = 1;
+    }
+}
+
+/* Process context (kwork): the queued bytes, to the focused tty; 0x1d starts a test/remote-control command:
+ * 1-9 switch workspace, Return opens a shell there, u/d and U/D scroll back a line or a page. */
+void serial_work(void)
+{
+    static int hot;
+    while (rxq_tail != rxq_head) {
+        u16 t = rxq_tail;
+        u8 c = rxq[t];
+        rxq_tail = (u16)((t + 1) % RXQ);
+        if (hot) {
             hot = 0;
             if (c >= '1' && c <= '9')
                 ws_switch(c - '0');
@@ -94,6 +122,11 @@ void serial_rx_isr(void)
             continue;
         }
         tty_input(c);
+    }
+    u32 lost = rxq_lost;
+    if (lost != rxq_lost_told) {
+        kprintf("serial: %u bytes lost (input ring full)\n", lost - rxq_lost_told);
+        rxq_lost_told = lost;
     }
 }
 

@@ -3,7 +3,7 @@
 
 /* tar c|x|t [v] [f archive] [-C dir] [file...]   (ustar; archive defaults to standard output/input; use a pipe
  * through gzip for .tgz). Handles files, directories and symbolic links. */
-static int afd, verbose;
+static int afd, verbose, add_rc;              /* add_rc: 1 when tar c could not add something */
 static int rd_full(void *b, int n) { int g = 0; while (g < n) { int r = sys_read(afd, (char *)b + g, n - g); if (r <= 0) break; g += r; } return g; }
 
 static void put_oct(char *f, int w, u32 v) { for (int i = w - 2; i >= 0; i--) { f[i] = '0' + (v & 7); v >>= 3; } f[w - 1] = 0; }
@@ -26,30 +26,44 @@ static void write_header(const char *name, const struct ustat *st, char type, co
     sys_write(1, h, 512);
 }
 
+/* the parts of add() that need buffers are separate functions, so the recursion (one add() per directory level)
+ * carries none of them */
+static void __attribute__((noinline)) add_link(const char *path, const struct ustat *st)
+{
+    char l[100]; int n = sys_readlink(path, l, sizeof l - 1); if (n < 0) return; l[n] = 0;
+    write_header(path, st, '2', l, 0);
+}
+static void __attribute__((noinline)) add_file(const char *path, const struct ustat *st)
+{
+    int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "tar: %s: %s\n", path, zwhy("cannot open")); add_rc = 1; return; }
+    write_header(path, st, '0', 0, st->size);
+    char b[512]; u32 left = st->size;
+    while (left) { int want = left > 512 ? 512 : (int)left; memset(b, 0, 512); int r = sys_read(fd, b, want); if (r <= 0) { r = want; memset(b, 0, 512); } sys_write(1, b, 512); left -= (u32)r > left ? left : (u32)r; }
+    sys_close(fd);
+}
 static void add(const char *path)
 {
     struct ustat st;
-    if (sys_lstat(path, &st) < 0) { fprintf(2, "tar: %s: cannot stat\n", path); return; }
+    if (sys_lstat(path, &st) < 0) { fprintf(2, "tar: %s: cannot stat\n", path); add_rc = 1; return; }
     u32 t = st.mode & S_IFMT;
     if (verbose) fprintf(2, "%s\n", path);
     if (t == S_IFDIR) {
-        char nm[256]; snprintf(nm, sizeof nm, "%s/", path);
+        u32 pl = strlen(path);
+        char *nm = malloc(pl + 2);
+        if (!nm) { fprintf(2, "tar: %s: out of memory\n", path); add_rc = 1; return; }
+        memcpy(nm, path, pl); nm[pl] = '/'; nm[pl + 1] = 0;
         write_header(nm, &st, '5', 0, 0);
-        int fd = sys_open(path, O_RDONLY); if (fd < 0) return;
-        char *names[512]; int nn = 0; struct udirent d;
-        while (sys_readdir(fd, &d) > 0 && nn < 512) { if (!strcmp(d.name, ".") || !strcmp(d.name, "..")) continue; names[nn++] = strdup(d.name); }
-        sys_close(fd);
-        for (int i = 0; i < nn; i++) { char c[256]; snprintf(c, sizeof c, "%s/%s", path, names[i]); add(c); }
-    } else if (t == S_IFLNK) {
-        char l[100]; int n = sys_readlink(path, l, sizeof l - 1); if (n < 0) return; l[n] = 0;
-        write_header(path, &st, '2', l, 0);
-    } else if (t == S_IFREG) {
-        int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "tar: %s: %s\n", path, zwhy("cannot open")); return; }
-        write_header(path, &st, '0', 0, st.size);
-        char b[512]; u32 left = st.size;
-        while (left) { int want = left > 512 ? 512 : (int)left; memset(b, 0, 512); int r = sys_read(fd, b, want); if (r <= 0) { r = want; memset(b, 0, 512); } sys_write(1, b, 512); left -= (u32)r > left ? left : (u32)r; }
-        sys_close(fd);
-    }
+        free(nm);
+        char **names; int nn = dir_list(path, &names);        /* heap, not stack: one level per directory */
+        if (nn < 0) { fprintf(2, "tar: %s: %s\n", path, zwhy("cannot read")); add_rc = 1; return; }
+        for (int i = 0; i < nn; i++) {
+            char *c = path_join(path, names[i]);
+            if (c) add(c); else { fprintf(2, "tar: %s/%s: %s\n", path, names[i], zwhy("cannot add")); add_rc = 1; }
+            free(c);
+        }
+        dir_free(names, nn);
+    } else if (t == S_IFLNK) add_link(path, &st);
+    else if (t == S_IFREG) add_file(path, &st);
 }
 
 static void mkpath(char *p)
@@ -73,7 +87,7 @@ int main(int argc, char **argv)
         if (i >= argc) { fprintf(2, "tar: nothing to archive\n"); return 2; }
         for (; i < argc; i++) add(argv[i]);
         char z[1024]; memset(z, 0, sizeof z); sys_write(1, z, sizeof z);
-        return 0;
+        return add_rc;
     }
     afd = 0;
     if (file && strcmp(file, "-")) { afd = sys_open(file, O_RDONLY); if (afd < 0) { fprintf(2, "tar: %s: %s\n", file, zwhy("cannot open")); return 1; } }

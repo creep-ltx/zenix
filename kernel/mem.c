@@ -83,9 +83,21 @@ void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
     }
 }
 
+/* A header that is not ours, or a size that does not lead to the next block inside the range, means something
+ * wrote over the heap: stop with the address on the serial port instead of walking garbage (a size of 0 would loop
+ * forever in the kernel, which nothing can interrupt). */
+static void check_blk(const struct range *r, const struct mblk *b)
+{
+    if (b->magic != MAGIC || SZ(b) < HDR || (SZ(b) & 15) || SZ(b) > r->hi - (u32)b) {
+        kprintf("mem: corrupt block header at %p (size %x, magic %x)\n", (u32)b, b->size, b->magic);
+        panic("mem: heap corrupt");
+    }
+}
+
 static void *alloc_in(struct range *r, u32 need, u32 owner)
 {
     for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b)) {
+        check_blk(r, b);
         if (USED(b) || SZ(b) < need)
             continue;
         u32 left = SZ(b) - need;
@@ -126,9 +138,9 @@ static void *alloc_in(struct range *r, u32 need, u32 owner)
 
 void *mem_alloc(u32 n, u32 flags, u32 owner)
 {
-    u32 need = ((n + 15) & ~15u) + HDR;
-    if (n == 0)
+    if (n == 0 || n > MEM_ALLOC_MAX)            /* the size arithmetic below cannot wrap */
         return 0;
+    u32 need = ((n + 15) & ~15u) + HDR;
     for (int pass = 0; pass < 2; pass++) {
         /* pass 0: the wanted pool; pass 1: the other, unless chip-only */
         int want_chip = (flags & MEM_CHIP) ? 1 : 0;
@@ -188,8 +200,11 @@ void mem_free(void *p)
         return;
     struct mblk *b = (struct mblk *)p - 1;
     struct range *r = range_of((u32)b);
-    if (!r || b->magic != MAGIC || !USED(b))
+    if (!r || b->magic != MAGIC || !USED(b)) {
+        kprintf("mem_free: bad or double free of %p\n", (u32)p);
         panic("mem_free: bad or double free");
+    }
+    check_blk(r, b);
     free_blk(r, b);
 }
 
@@ -200,8 +215,7 @@ u32 mem_free_owner(u32 owner)
         struct range *r = &ranges[i];
         struct mblk *b = (struct mblk *)r->lo;
         while (b) {
-            if (b->magic != MAGIC)
-                panic("mem: heap corrupt");
+            check_blk(r, b);
             if (USED(b) && b->owner == owner) {
                 got += SZ(b) - HDR;
                 b = free_blk(r, b);

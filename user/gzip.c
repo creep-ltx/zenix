@@ -32,8 +32,9 @@ static int deflate_out(const void *buf, int len, void *user) { (void)user; retur
 static char *slurp(int fd, u32 *len)
 {
     u32 cap = 16384, n = 0; char *b = malloc(cap);
+    if (!b) { fprintf(2, "gzip: out of memory\n"); return 0; }
     for (;;) {
-        if (n + 8192 > cap) { char *nb = malloc(cap * 2); if (!nb) return 0; memcpy(nb, b, n); b = nb; cap *= 2; }
+        if (n + 8192 > cap) { char *nb = realloc(b, cap * 2); if (!nb) { fprintf(2, "gzip: out of memory\n"); free(b); return 0; } b = nb; cap *= 2; }
         int r = sys_read(fd, b + n, 8192); if (r <= 0) break; n += (u32)r;
     }
     *len = n; return b;
@@ -43,6 +44,7 @@ static int compress_fd(int in, int level, u32 mtime)
 {
     static tdefl_compressor *d;
     if (!d) d = malloc(sizeof *d);
+    if (!d) { fprintf(2, "gzip: out of memory\n"); return -1; }
     static const mz_uint probes[10] = { 0, 4, 8, 16, 32, 64, 128, 256, 512, 1000 };
     mz_uint flags = probes[level < 1 ? 1 : level > 9 ? 9 : level] | (level <= 3 ? TDEFL_GREEDY_PARSING_FLAG : 0);
     unsigned char hdr[10] = { 0x1f, 0x8b, 8, 0, (unsigned char)mtime, (unsigned char)(mtime >> 8), (unsigned char)(mtime >> 16), (unsigned char)(mtime >> 24), 0, 3 };
@@ -63,7 +65,9 @@ static int compress_fd(int in, int level, u32 mtime)
 static int decompress_buf(const unsigned char *in, u32 len)
 {
     static unsigned char *dict; static tinfl_decompressor *dec;
-    if (!dict) { dict = malloc(TINFL_LZ_DICT_SIZE); dec = malloc(sizeof *dec); }
+    if (!dict) dict = malloc(TINFL_LZ_DICT_SIZE);
+    if (!dec) dec = malloc(sizeof *dec);
+    if (!dict || !dec) { fprintf(2, "gzip: out of memory\n"); return -1; }
     u32 pos = 0;
     while (pos < len) {                                         /* one member after another */
         if (len - pos < 18 || in[pos] != 0x1f || in[pos + 1] != 0x8b || in[pos + 2] != 8) { if (pos) break; fprintf(2, "gzip: not in gzip format\n"); return -1; }
@@ -104,7 +108,7 @@ int main(int argc, char **argv)
     }
     if (i >= argc) {                                            /* standard input to standard output */
         out_fd = 1;
-        if (decomp) { u32 n; char *b = slurp(0, &n); rc = b ? decompress_buf((unsigned char *)b, n) : -1; }
+        if (decomp) { u32 n; char *b = slurp(0, &n); rc = b ? decompress_buf((unsigned char *)b, n) : -1; free(b); }
         else rc = compress_fd(0, level, sys_time());
         return rc < 0;
     }
@@ -117,7 +121,7 @@ int main(int argc, char **argv)
         out_fd = to_stdout ? 1 : sys_open(outname, O_WRONLY | O_CREAT | O_TRUNC);
         if (out_fd < 0) { fprintf(2, "gzip: %s: %s\n", outname, zwhy("cannot write")); sys_close(in); rc = 1; continue; }
         olen = 0; int r;
-        if (decomp) { u32 n; char *b = slurp(in, &n); r = b ? decompress_buf((unsigned char *)b, n) : -1; }
+        if (decomp) { u32 n; char *b = slurp(in, &n); r = b ? decompress_buf((unsigned char *)b, n) : -1; free(b); }
         else { struct ustat st; u32 mt = sys_fstat(in, &st) == 0 ? st.mtime : 0; r = compress_fd(in, level, mt); }
         sys_close(in);
         if (!to_stdout) { sys_close(out_fd); if (r < 0) sys_unlink(outname); else if (!keep) sys_unlink(f); }

@@ -56,13 +56,15 @@ int main(int argc, char **argv)
         struct rd r; rd_init(&r, fd);
         char *line = 0; u32 lc = 0;
         while (rd_getline(&r, &line, &lc) >= 0) {
-            if (n == cap) { u32 nc = cap ? cap * 2 : 256; char **nv = malloc(nc * sizeof(char *)); if (!nv) { fprintf(2, "sort: out of memory\n"); return 2; } if (n) memcpy(nv, v, n * sizeof(char *)); v = nv; cap = nc; }
-            v[n++] = strdup(line);
+            if (n == cap) { u32 nc = cap ? cap * 2 : 256; char **nv = realloc(v, nc * sizeof(char *)); if (!nv) { fprintf(2, "sort: out of memory\n"); return 2; } v = nv; cap = nc; }
+            if (!(v[n] = strdup(line))) { fprintf(2, "sort: out of memory\n"); return 2; }
+            n++;
         }
         free(line);
         if (nfiles) sys_close(fd);
     }
     char **tmp = malloc((n ? n : 1) * sizeof(char *));
+    if (!tmp) { fprintf(2, "sort: out of memory\n"); return 2; }
     msort(v, tmp, n);
     int ofd = 1;
     if (outfile) { ofd = sys_open(outfile, O_WRONLY | O_CREAT | O_TRUNC); if (ofd < 0) { fprintf(2, "sort: %s: %s\n", outfile, zwhy("cannot write")); return 2; } }

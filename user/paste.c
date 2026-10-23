@@ -27,7 +27,7 @@ int main(int argc, char **argv)
         int alive = 0; static char *cells[8];
         for (int k = 0; k < nf; k++) {
             cells[k] = 0;
-            if (!done[k]) { if (rd_getline(&rds[k], &line, &cap) >= 0) { cells[k] = strdup(line); alive = 1; } else done[k] = 1; }
+            if (!done[k]) { if (rd_getline(&rds[k], &line, &cap) >= 0) { if (!(cells[k] = strdup(line))) { fprintf(2, "paste: out of memory\n"); return 1; } alive = 1; } else done[k] = 1; }
         }
         if (!alive) break;
         for (int k = 0; k < nf; k++) { if (k) oputc(delims[(k - 1) % nd]); if (cells[k]) { oputs(cells[k]); free(cells[k]); } }

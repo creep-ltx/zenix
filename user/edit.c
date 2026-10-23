@@ -25,16 +25,14 @@ static void line_reserve(struct line *l, int n)
 {
     if (n + 1 <= l->cap) return;
     int nc = l->cap ? l->cap * 2 : 32; while (nc < n + 1) nc *= 2;
-    char *ns = malloc((u32)nc); if (!ns) { fprintf(2, "edit: out of memory\n"); _zexit(1); }
-    if (l->len) memcpy(ns, l->s, (u32)l->len);
+    char *ns = realloc(l->s, (u32)nc); if (!ns) { fprintf(2, "edit: out of memory\n"); _zexit(1); }
     l->s = ns; l->cap = nc;
 }
 static void lines_reserve(int n)
 {
     if (n <= capL) return;
     int nc = capL ? capL * 2 : 256; while (nc < n) nc *= 2;
-    struct line *nl = malloc((u32)nc * sizeof *nl); if (!nl) { fprintf(2, "edit: out of memory\n"); _zexit(1); }
-    if (nL) memcpy(nl, L, (u32)nL * sizeof *nl);
+    struct line *nl = realloc(L, (u32)nc * sizeof *nl); if (!nl) { fprintf(2, "edit: out of memory\n"); _zexit(1); }
     L = nl; capL = nc;
 }
 static void insert_line_at(int y)                       /* a new empty line before index y */
@@ -45,6 +43,7 @@ static void insert_line_at(int y)                       /* a new empty line befo
 }
 static void remove_lines(int y, int n)
 {
+    for (int k = y; k < y + n; k++) free(L[k].s);
     memmove(&L[y], &L[y + n], (u32)(nL - y - n) * sizeof *L); nL -= n;
 }
 
@@ -59,7 +58,7 @@ static void buf_insert(int y, int x, const char *t, int n, int *ey, int *ex)
         if (first) {
             struct line *l = &L[y];
             int rest = l->len - x;
-            if (i < n) { tail.s = malloc((u32)rest + 1); if (rest) memcpy(tail.s, l->s + x, (u32)rest); tail.len = tail.cap = rest; }
+            if (i < n) { tail.s = xmalloc((u32)rest + 1); if (rest) memcpy(tail.s, l->s + x, (u32)rest); tail.len = tail.cap = rest; }
             line_reserve(l, x + seglen + (i < n ? 0 : rest));
             if (i == n) memmove(l->s + x + seglen, l->s + x, (u32)rest);
             memcpy(l->s + x, t + start, (u32)seglen);
@@ -78,13 +77,14 @@ static void buf_insert(int y, int x, const char *t, int n, int *ey, int *ex)
         }
         start = i + 1;
     }
+    free(tail.s);
 }
 /* remove [y1,x1) .. [y2,x2) and return the removed text (malloc'd) */
 static char *buf_delete(int y1, int x1, int y2, int x2, int *outn)
 {
     int total = 0;
     for (int y = y1; y <= y2; y++) total += (y == y2 ? x2 : L[y].len) - (y == y1 ? x1 : 0) + (y < y2 ? 1 : 0);
-    char *out = malloc((u32)total + 1); int o = 0;
+    char *out = xmalloc((u32)total + 1); int o = 0;
     for (int y = y1; y <= y2; y++) {
         int a = y == y1 ? x1 : 0, b = y == y2 ? x2 : L[y].len;
         memcpy(out + o, L[y].s + a, (u32)(b - a)); o += b - a;
@@ -108,11 +108,11 @@ static int group_id, last_typed_end_y = -1, last_typed_end_x;
 
 static void note(int kind, int y, int x, const char *t, int n)
 {
-    if (nU == capU) { int nc = capU ? capU * 2 : 128; struct undo *nu = malloc((u32)nc * sizeof *nu); if (nU) memcpy(nu, U, (u32)nU * sizeof *nu); U = nu; capU = nc; }
+    if (nU == capU) { int nc = capU ? capU * 2 : 128; struct undo *nu = realloc(U, (u32)nc * sizeof *nu); if (!nu) { fprintf(2, "edit: out of memory\n"); _zexit(1); } U = nu; capU = nc; }
     redo_to = 0;
     struct undo *u = &U[nU++];
     u->kind = kind; u->y = y; u->x = x; u->n = n; u->group = group_id; u->cy0 = cy; u->cx0 = cx;
-    u->t = malloc((u32)n + 1); memcpy(u->t, t, (u32)n); u->t[n] = 0;
+    u->t = xmalloc((u32)n + 1); memcpy(u->t, t, (u32)n); u->t[n] = 0;
 }
 static void end_pos(int y, int x, const char *t, int n, int *ey, int *ex)
 {
@@ -171,7 +171,7 @@ static char *get_sel(int *n)
 {
     int y1, x1, y2, x2; sel_range(&y1, &x1, &y2, &x2);
     int total = 0; for (int y = y1; y <= y2; y++) total += (y == y2 ? x2 : L[y].len) - (y == y1 ? x1 : 0) + (y < y2 ? 1 : 0);
-    char *out = malloc((u32)total + 1); int o = 0;
+    char *out = xmalloc((u32)total + 1); int o = 0;
     for (int y = y1; y <= y2; y++) { int a = y == y1 ? x1 : 0, b = y == y2 ? x2 : L[y].len; memcpy(out + o, L[y].s + a, (u32)(b - a)); o += b - a; if (y < y2) out[o++] = '\n'; }
     out[o] = 0; *n = o; return out;
 }
@@ -182,7 +182,7 @@ static void delete_selection(void)
     do_delete(y1, x1, y2, x2); cy = y1; cx = x1; sel_on = 0;
 }
 static int has_newline(const char *t, int n) { for (int i = 0; i < n; i++) if (t[i] == '\n') return 1; return 0; }
-static void set_clip(const char *t, int n) { clip = malloc((u32)n + 1); memcpy(clip, t, (u32)n); clip[n] = 0; clip_n = n; }
+static void set_clip(const char *t, int n) { free(clip); clip = xmalloc((u32)n + 1); memcpy(clip, t, (u32)n); clip[n] = 0; clip_n = n; }
 
 /* ------------------------------------------------------------ editing commands */
 static void clamp_cursor(void)
@@ -226,7 +226,7 @@ static void delete_forward(void)
 static void cut_line(void)
 {
     group_id++; last_typed_end_y = -1;
-    char *t = malloc((u32)L[cy].len + 2); memcpy(t, L[cy].s, (u32)L[cy].len); t[L[cy].len] = '\n';
+    char *t = xmalloc((u32)L[cy].len + 2); memcpy(t, L[cy].s, (u32)L[cy].len); t[L[cy].len] = '\n';
     set_clip(t, L[cy].len + 1); free(t);
     if (cy + 1 < nL) do_delete(cy, 0, cy + 1, 0);
     else if (cy > 0) { int py = cy - 1; do_delete(py, L[py].len, cy, L[cy].len); cy = py; }
@@ -236,7 +236,7 @@ static void cut_line(void)
 static void copy_cmd(void)
 {
     if (has_sel()) { int n; char *t = get_sel(&n); set_clip(t, n); free(t); snprintf(message, sizeof message, "copied"); }
-    else { char *t = malloc((u32)L[cy].len + 2); memcpy(t, L[cy].s, (u32)L[cy].len); t[L[cy].len] = '\n'; set_clip(t, L[cy].len + 1); free(t); snprintf(message, sizeof message, "line copied"); }
+    else { char *t = xmalloc((u32)L[cy].len + 2); memcpy(t, L[cy].s, (u32)L[cy].len); t[L[cy].len] = '\n'; set_clip(t, L[cy].len + 1); free(t); snprintf(message, sizeof message, "line copied"); }
 }
 static void cut_cmd(void)
 {
@@ -256,7 +256,7 @@ static void paste_cmd(void)
 static void dup_line(void)
 {
     group_id++; last_typed_end_y = -1;
-    char *t = malloc((u32)L[cy].len + 2); t[0] = '\n'; memcpy(t + 1, L[cy].s, (u32)L[cy].len);
+    char *t = xmalloc((u32)L[cy].len + 2); t[0] = '\n'; memcpy(t + 1, L[cy].s, (u32)L[cy].len);
     int ey, ex; do_insert(cy, L[cy].len, t, L[cy].len + 1, &ey, &ex); cy = ey; free(t);
 }
 static void indent(int dir)

@@ -40,9 +40,22 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - 16 processes, 16 message ports, 64 open files, 16 fds per process, 8 extra memory regions per process,
   1 KB environment, argv of at most 16 arguments / 512 bytes, paths of at most 63 bytes (system calls copy into
   fixed buffers), pipes of 2 KB, 9 workspaces, 80 columns x 31 text rows, 200 scrollback lines.
-- Kernel stack 4 KB per process; user stack 16 KB by default.
+- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
+  Makefile's `STACK_*`, written into each program's header). No guard below a stack. Measured with `-fstack-usage`
+  (2026-10-23): the largest single frames are `mkfs.ext2` main 8.5 KB, `man` 6.1 KB, miniz's Huffman table builder
+  5.6 KB (gzip), `fsck.ext2` main 5.4 KB; the directory walkers use 72-170 bytes per directory level (they used
+  1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
+  about 1430).
+- Memory per process: at most 8 extra regions at a time (`SYS_memalloc`), each at most 64 MB. `malloc` keeps blocks of
+  up to 32 KB in a few growing chunks (32 KB, 64 KB, ... 512 KB each) and gives every bigger block a region of its
+  own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with two chunks
+  in use, gets 6); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
+  stack of 4 KB to 1 MB.
+- Paths: at most 63 bytes in a system call; the directory tools report a longer joined path instead of cutting it.
 - Timer tick 100 Hz (PAL E-clock 709,379 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers
   chained, an E-clock count that wraps after about 1.7 hours.
+- Input rings between the interrupts and `kwork`: 128 keyboard codes, 1024 serial bytes; a tty queue holds 1024
+  bytes of typed input that no program has read yet. Anything dropped is counted on the kernel log.
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS
   treats as dead keys (acute, grave, circumflex, tilde, diaeresis) type the spacing character, there is no
   composition with the next letter.

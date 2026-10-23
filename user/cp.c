@@ -1,7 +1,7 @@
 #include "libz.h"
 /* cp [-r] [-f] [-p] [-v] source... dest   (dest a directory when there are several sources) */
 static int o_r, o_f, o_p, o_v, rc;
-static int copy_file(const char *src, const char *dst, const struct ustat *st)
+static int __attribute__((noinline)) copy_file(const char *src, const char *dst, const struct ustat *st)   /* not in the recursion */
 {
     int in = sys_open(src, O_RDONLY); if (in < 0) { fprintf(2, "cp: %s: %s\n", src, zwhy("cannot open")); return 1; }
     int out = sys_open(dst, O_WRONLY | O_CREAT | O_TRUNC);
@@ -22,16 +22,15 @@ static void copy_path(const char *src, const char *dst)
         struct ustat dt;
         if (sys_stat(dst, &dt) < 0 && sys_mkdir(dst) < 0) { fprintf(2, "cp: %s: %s\n", dst, zwhy("cannot create")); rc = 1; return; }
         if (o_p) sys_chmod(dst, st.mode & 07777);
-        int fd = sys_open(src, O_RDONLY); if (fd < 0) return;
-        char *names[256]; int n = 0; struct udirent d;
-        while (sys_readdir(fd, &d) > 0 && n < 256) if (strcmp(d.name, ".") && strcmp(d.name, "..")) names[n++] = strdup(d.name);
-        sys_close(fd);
+        char **names; int n = dir_list(src, &names);          /* heap, not stack: one level per directory */
+        if (n < 0) { fprintf(2, "cp: %s: %s\n", src, zwhy("cannot read")); rc = 1; return; }
         for (int i = 0; i < n; i++) {
-            char s2[256], d2[256];
-            if (strlen(src) + strlen(names[i]) + 2 >= sizeof s2 || strlen(dst) + strlen(names[i]) + 2 >= sizeof d2) continue;
-            strcpy(s2, src); strcat(s2, "/"); strcat(s2, names[i]); strcpy(d2, dst); strcat(d2, "/"); strcat(d2, names[i]);
-            copy_path(s2, d2); free(names[i]);
+            char *s2 = path_join(src, names[i]), *d2 = s2 ? path_join(dst, names[i]) : 0;
+            if (d2) copy_path(s2, d2);
+            else { fprintf(2, "cp: %s/%s: %s\n", s2 ? dst : src, names[i], zwhy("cannot copy")); rc = 1; }
+            free(s2); free(d2);
         }
+        dir_free(names, n);
         return;
     }
     if (copy_file(src, dst, &st)) rc = 1;

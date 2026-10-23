@@ -12,6 +12,10 @@ DESCRIPTION
     -s puts each file on one line instead. At most 8 files; - is standard
     input.
 
+NOTES
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
+
 EXIT STATUS
     0, 1 if a file or process could not be used, 2 for a wrong option.
 

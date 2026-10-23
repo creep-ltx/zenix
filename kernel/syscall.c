@@ -183,7 +183,8 @@ void syscall_c(u32 *rb)
                     }
                 if (r > 0)
                     break;
-                block_io();
+                block_io();             /* race-free: ws_spawn_pending is only set by kwork, which never runs between
+                                         * the check above and this block (the points in main.c, audit B5) */
             }
         }
         break;
@@ -417,7 +418,10 @@ void syscall_c(u32 *rb)
             }
         }
         break;
-    case SYS_memalloc:
+    case SYS_memalloc:                  /* the region's address, or 0 (NULL) when it cannot be given: never -1 */
+        r = 0;
+        if (a1 == 0 || a1 > MEMALLOC_MAX)
+            break;
         for (int i = 0; i < NREG; i++)
             if (!current->reg[i].base) {
                 void *m = mem_alloc(a1, 0, (u32)current->pid);
@@ -482,6 +486,8 @@ void syscall_c(u32 *rb)
     }
     }
     rb[0] = (u32)r;
+    if (kwork_pending)
+        kwork();                        /* queued input: done here, on the way back to user mode (main.c) */
     if (current->killed)
         proc_exit(130);
 }

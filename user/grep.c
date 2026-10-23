@@ -62,7 +62,7 @@ static int grep_fd(int fd, const char *name)
             }
         } else if (!o_c) {
             if (after > 0) { emit(name, ln, '-', line); after--; }
-            else if (ctx_b) { int idx = bhead; if (before[idx]) free(before[idx]); before[idx] = strdup(line); bln[idx] = ln; bhead = (bhead + 1) % 16; if (nb < ctx_b && nb < 16) nb++; }
+            else if (ctx_b) { int idx = bhead; if (before[idx]) free(before[idx]); if (!(before[idx] = strdup(line))) { fprintf(2, "grep: out of memory\n"); _zexit(2); } bln[idx] = ln; bhead = (bhead + 1) % 16; if (nb < ctx_b && nb < 16) nb++; }
         }
     }
     if (o_c) { if (multi && !o_h) { oputs(name); oputc(':'); } oprintf("%d\n", count); }
@@ -78,11 +78,14 @@ static void grep_path(const char *path, int top)
     if (sys_stat(path, &st) < 0) { if (!o_s) fprintf(2, "grep: %s: not found\n", path); return; }
     if ((st.mode & S_IFMT) == S_IFDIR) {
         if (!o_r) { if (!o_s) fprintf(2, "grep: %s: is a directory\n", path); return; }
-        int fd = sys_open(path, O_RDONLY); if (fd < 0) return;
-        char *names[256]; int n = 0; struct udirent d;
-        while (sys_readdir(fd, &d) > 0 && n < 256) if (strcmp(d.name, ".") && strcmp(d.name, "..")) names[n++] = strdup(d.name);
-        sys_close(fd);
-        for (int i = 0; i < n; i++) { char c[256]; strcpy(c, path); u32 l = strlen(c); if (l && c[l - 1] != '/') strcat(c, "/"); strncpy(c + strlen(c), names[i], 100); grep_path(c, 0); free(names[i]); }
+        char **names; int n = dir_list(path, &names);         /* heap, not stack: one level per directory */
+        if (n < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); return; }
+        for (int i = 0; i < n; i++) {
+            char *c = path_join(path, names[i]);
+            if (c) grep_path(c, 0); else if (!o_s) fprintf(2, "grep: %s/%s: %s\n", path, names[i], zwhy("cannot open"));
+            free(c);
+        }
+        dir_free(names, n);
         return;
     }
     int fd = sys_open(path, O_RDONLY);

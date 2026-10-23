@@ -160,6 +160,13 @@ No MMU means no per-process virtual addresses, so a program must run wherever it
 ...image...   then nreloc big-endian offsets of 32-bit words that hold link-time addresses
 ```
 
+**Nothing in the header is trusted** (audit B7): before anything is allocated, `zexe_bad` checks that the image lies
+inside the file and holds the header, the relocation table lies inside the file (`nreloc` is compared with what is
+left after `reloc_off`, so `nreloc * 4` cannot wrap), memory is at least the image and at most `ZEXE_MEM_MAX`
+(16 MB), and a stack size, if given, is between 4 KB and 1 MB; then every relocation offset is checked to name a whole
+word inside the image at an even address before the first one is applied. A program that fails is refused: the
+kernel logs `exec: PATH refused: WHY`, the spawn fails (the shell says "cannot run") and its memory is freed.
+
 The loader (`proc_load` in `kernel/proc.c`) allocates the process's memory, **reads the image straight from the file
 system into it** (`fs_exec_open` / `fs_exec_read`: no buffer holding the whole file, so a spawn needs only the
 process's own memory plus the few-KB relocation table), zeroes the BSS, and adds the load address to every
@@ -167,8 +174,10 @@ word in the relocation table. Reading can block (messages to the file system ser
 only after the image is in place and nothing blocks after that; two programs may be loading at the same time (the two
 stages of a pipeline). Only `R_68K_32` relocations are needed (PC-relative code stays valid), and
 debug-section relocations must be skipped (their offsets are not addresses). The kernel itself uses the same
-format and the same loop (in `start.S`). Programs declare their stack size in the header (default 16 KB; `sh`
-asks for 24 KB, but the `STACK_*` Makefile values are not applied yet - audit B6 - so every program gets 16 KB). There is no shared-library format yet; programs are linked statically against `user/libz.c`.
+format and the same loop (in `start.S`). Programs declare their stack size in the header: 16 KB unless the
+Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB; the numbers and how they were measured
+are in limits.md). There is no guard below a stack. There is no shared-library format yet; programs are linked
+statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).
 
 ## 5. Memory (`kernel/mem.c`)
 
@@ -181,8 +190,13 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
   two sizes do not interleave and fragment each other.
 - Every block records its owner. `mem_free_owner(pid)` hands back everything a process held, which is how a
   crashed or killed process is cleaned up without any cooperation from it.
-- Free-byte counters are O(1) so the status bar can read them from an interrupt.
-- `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 8).
+- Free-byte counters are O(1), so the status bar can read them cheaply.
+- `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 8 at a time,
+  each at most `MEMALLOC_MAX` = 64 MB). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
+  refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
+- Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
+  at least one header, a multiple of 16 and inside the range. A header that fails means something overwrote the heap:
+  the kernel prints its address on the serial port and stops (`panic`) instead of looping on garbage.
 
 A process's own memory is **one block**: image + BSS + stack + the argument area. The kernel stack (4 KB) is a
 second block. Both are owned by the pid and freed together.
@@ -194,6 +208,11 @@ second block. Both are owned by the pid and freed together.
   No priorities yet (DESIGN D6 says they are intended).
 - Preemption happens only when the timer interrupt hit **user mode**. Kernel code is never preempted, so the
   kernel needs no locks. Where an interrupt can touch the run queue (`ready()`), interrupts are masked briefly.
+- **Interrupts only queue** (audit B4). The keyboard and serial interrupts put raw codes and bytes into rings and
+  set `kwork_pending`; everything else input causes (keymap, line discipline, echo, Ctrl-C/Ctrl-Z, workspace
+  switches, scrollback, the bar) is done by `kwork()` in process context - see section 11. The same rule closes the
+  lost wakeup (B5): a reader's "is there input? no: block" is kernel code, and `kwork`, the only thing that delivers
+  input, runs only at a few chosen points, never between such a check and its block.
 - pid 0 is the idle process: it runs on the boot stack and executes `cpu_idle()` when nothing is ready.
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
   process is `spawn(path, argv, stdio)`: load a ZEXE, give it the parent's cwd and environment, and pass only file
@@ -273,7 +292,7 @@ exits. `init` runs `mount -a` (from `/etc/fstab`) before login.
 The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the
 disk server (`user/zenixfs_disk.c`: filesystem blocks of 1-4 KB as 2-8 sector calls plus `DISK_FLUSH`). Same protocol and the same
 permission rules as the ext2 server. Changes commit three seconds after the first one, at `FS_SYNC` and at `FS_QUIT`. The library
-allocates only at mount (the Zenix `malloc` is a bump allocator that cannot return small blocks): block cache, bitmaps, three scratch blocks.
+allocates only at mount (block cache, bitmaps, three scratch blocks), so a running server needs no more memory.
 
 ### The mount table (`kernel/vfs.c`)
 Entry 0 is the root (port `fs`); `SYS_mount` puts a running server's port on a directory (up to 8 mounts). With only the
@@ -319,25 +338,71 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 - **Workspaces**: nine, each with its own text grid and tty; the top bar (i3-style) lists the current one and the
   occupied ones. Amiga+1..9 switch, Amiga+Return opens a shell. These are scaffolding for a future desktop and are
   not part of what a terminal program should depend on.
+- **Input path: interrupts queue, `kwork` works** (`kernel/main.c`, audit B4/B5). The interrupt handlers do
+  only what cannot wait: the keyboard handler (`kbd_isr`) reads the byte, answers the keyboard's handshake and puts
+  the raw code into a 128-slot ring; the serial handler (`serial_rx_isr`, level 5) moves each byte from Paula into a
+  1024-byte ring; the 100 Hz tick asks for work while a key is held (repeat) and once a second (the bar's clock).
+  Each ring has one producer and one consumer, so no lock: the producer fills the slot, then moves `head`; the
+  consumer reads it, then moves `tail`. A full ring drops the new input and counts it; `kwork` reports the count on
+  the kernel log (`dmesg`: "kbd: N key codes lost", "serial: N bytes lost"; after lost key codes the held modifiers
+  and the repeating key are forgotten, since a lost "key up" would leave a key repeating), and a full tty queue
+  (nobody reading) says so too. `kwork()` empties the rings in process context with interrupts enabled - `serial_work` (bytes to
+  the tty, the 0x1d test hook), `kbd_work` (modifiers, Amiga+key workspace commands, keymap, key repeat, the tty),
+  the bar - and is called from exactly four places: the idle loop; the end of every system call; the level-2
+  interrupt when it cut into **user** mode (then no kernel code is running at all, because the kernel is never
+  preempted; the mask is lowered to 0 first, and if Ctrl-C or Ctrl-Z hit the running program it is rescheduled
+  at once so it ends or stops); and between the 256-byte pieces of a long terminal write (`tty_write`: drawing
+  4 KB can take seconds on a 68020 with chip RAM only, and the rings would overflow; the terminal is consistent
+  there, and a writer killed by Ctrl-C stops at once). An interrupt that cuts into kernel code (a system call, or `kwork` itself) never
+  calls it, and a `busy` flag keeps it from being re-entered, so the tty queue and line, the terminal grids, the
+  blitter and the heap (the first use of a workspace allocates its tty and terminal) are only ever changed by one
+  piece of code at a time. Lost wakeups (B5) cannot happen: `tty_read` and `SYS_wsreq` test "is there something?"
+  and then `block_io()` in kernel code with none of those points in between, so `kwork` - the only producer -
+  cannot run between the two; input that
+  arrives meanwhile waits in its ring, and the `wake_io()` that delivers it comes after the reader is blocked. The
+  idle loop checks `kwork_pending` with interrupts masked and then `STOP`s (which enables them in the same
+  instruction), so input queued in between ends the wait at once. Latency: at once when the machine is idle or a
+  system call ends; at the next tick (10 ms) while a program computes without system calls; every 256 bytes of
+  terminal output; while another long system call runs (a disk transfer), input waits in the ring until it ends.
 - **Keyboard** (`kbd.c`): CIA-A serial data register; after each byte the handshake pulls SP low for at least
   75 E-clock ticks (105 us; the hardware manual asks for 85) timed with `hr_time()`, never with a counting loop
   (Emu68 runs about 1000 MIPS). The keyboard interrupt is not enabled in CIA-A's mask: the byte is picked up by
   the 100 Hz tick handler, which reads the ICR, so a key waits at most 10 ms (the keyboard's own limit is 143 ms
-  and it buffers 10 keys). Raw codes 0x00-0x3F go through a keymap with four layers like AmigaOS's (plain, Shift,
+  and it buffers 10 keys); the handler queues it for `kbd_work` (above). Raw codes 0x00-0x3F go through a keymap with four layers like AmigaOS's (plain, Shift,
   Alt, Shift+Alt; the Alt layer is AmigaOS's, the same on every national keyboard, and is where `[ ] { } \ | @`
   live on a Swedish Amiga); `sv` is the AmigaOS keymap "s" (generated from xkeyboard-config by the Fuzix Amiga
   port, checked against Workbench 3.1's `DEVS:Keymaps/s`), `us` the US one. Caps Lock (raw 0x62, a toggle the
   keyboard reports as down/up) shifts the letters only. Accents that AmigaOS treats as dead keys are typed as
-  the spacing character (no composition). Software key repeat: 500 ms, then 33 per second from the tick, until
+  the spacing character (no composition). Software key repeat: 500 ms, then 33 per second (timed by the tick, done by `kbd_work`), until
   the key is released or another goes down; modifiers and Amiga combinations do not repeat. Codes 0x40-0x67 are
   layout-neutral; arrows, F-keys, Help and Del become escape sequences in raw mode. Verified in FS-UAE
   (`tools/kbd-test.sh`); the handshake length is read from the manual, not measured on hardware.
-- **Serial** (`serial.c`): interrupt-driven, 115200 baud, mirrors the focused screen; the test rig depends on it.
+- **Serial** (`serial.c`): interrupt-driven receive (queued for `serial_work`, above), 115200 baud, mirrors the
+  focused screen; the test rig depends on it, including the hook 0x1D + 1-9 (switch workspace) / Return (open a
+  shell) / u d U D (scroll back).
 
 ## 12. User space
 
 `user/libz.c` is a tiny freestanding C library (`printf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
-environment, buffered line reader, a regex engine from the CUtils project). `printf`, `snprintf`, `sprintf`, `fprintf`
+environment, buffered line reader, a regex engine from the CUtils project).
+
+**`malloc`** (audit B2) has to live with `NREG` = 8 regions per process, so small blocks never take a region each.
+Every block has an 8-byte header: its capacity and a tag (small in use, big in use, free). Blocks of up to 32 KB
+come in size classes of 16, 32, 64 ... 32768 bytes (the header on top, so the usual power-of-two buffer fills its
+class), cut from chunks the kernel gives: the first
+chunk is 32 KB, each next one twice the last up to 512 KB (smaller when memory is short), so even a program that
+needs megabytes uses few regions. A freed small block goes on its class's free list and is used again (O(1), no
+coalescing); an empty class carves a free block of a larger class before taking new chunk space; small blocks are never given
+back to the kernel (that happens when the program ends). A bigger block gets a region of its own, and `free` gives
+exactly those back with `SYS_memfree`. `free` and `realloc` check the tag: a pointer `malloc` did not give out, or
+one freed twice, is reported on standard error and ignored. `realloc` grows in place when the block's capacity is
+enough, else copies only the old block's bytes. `xmalloc` ends the program with "NAME: out of memory".
+
+**Directory walkers** (audit B6: `rm -r`, `cp -r`, `mv`, `du`, `find`, `grep -r`, `chown -R`, `tar c`, `diff -r`,
+`tree`, `ls -R`) use two libz helpers instead of arrays on the stack: `dir_list` reads a directory into a
+heap array that grows as needed (no limit on entries; `dir_free` gives it back), and `path_join` makes "dir/name" in
+a new heap string, or refuses (NULL, `zerrno` 36, "path too long") when it would be longer than the 63 bytes a
+system call takes. A level of recursion costs about 100 bytes of stack instead of 1.4-2.7 KB. `printf`, `snprintf`, `sprintf`, `fprintf`
 and `oprintf` share one formatter with no length limit: `%d %i %u %x %X %o %c %s %p %%`, flags `- 0 + space #`, width and
 precision as numbers or `*`; no floating point, no 64-bit numbers. About 77 programs: a full shell (`sh`:
 line editor, history, completion, variables, quoting, wildcards, pipes, redirects incl. here-documents,

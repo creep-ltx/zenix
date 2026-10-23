@@ -61,22 +61,125 @@ int atoi(const char *s)
     return neg ? -v : v;
 }
 
-/* malloc: bump allocation inside 32 KB chunks from the kernel; big blocks
- * get their own region. free() only returns big blocks. */
-static char *chunk; static u32 left;
+/* ---------------------------------------------------------------- memory
+ * malloc over the kernel's SYS_memalloc, which gives a process at most NREG (8) extra regions, so small blocks must
+ * not use one each. Every block has an 8-byte header: its capacity (the bytes after the header) and a tag saying
+ * whether it is a small block in use, a big block in use or a free block.
+ *  - Small blocks hold 16, 32, 64 ... 32768 bytes (size classes; the header comes on top, so a request of exactly a
+ *    power of two, as buffers and doubling arrays usually are, fills its class). They are cut from chunks the kernel
+ *    gives: the first is 32 KB, each next one twice the last, up to 512 KB (smaller if memory is short), so a program
+ *    that needs a lot still uses few regions. A freed small block goes on its class's free list and is used again;
+ *    it is never given back to the kernel (that happens when the program ends). O(1), no coalescing; a class that is
+ *    empty carves a block of a larger class before taking new chunk space.
+ *  - Bigger blocks get a region of their own, and free() gives exactly those back with SYS_memfree.
+ * free() and realloc() check the tag: a pointer malloc did not give out (or one freed twice) is reported on
+ * standard error and ignored instead of corrupting the lists. */
+#define M_SMALL   0x5a4d5300u           /* "ZMS" + class: a small block in use */
+#define M_BIG     0x5a4d4247u           /* "ZMBG": a block in its own region */
+#define M_FREE    0x5a4d4652u           /* "ZMFR": on a free list */
+#define NCLASS    12                    /* capacities 16 << 0 .. 16 << 11 = 32 KB */
+#define CAP(k)    (16u << (k))
+#define BLK(k)    (CAP(k) + 8u)         /* a class's block: capacity + header */
+#define CHUNK_MIN 32768u
+#define CHUNK_MAX (512u * 1024)
+#define MALLOC_MAX 0x3FFFFFF0u          /* a request above this is refused (no size arithmetic below can wrap) */
+struct mhdr { u32 cap, tag; };
+static struct mhdr *freel[NCLASS];      /* free blocks; the next pointer is the first word after the header */
+static char *chunk; static u32 left;    /* the unused end of the newest chunk */
+static u32 next_chunk = CHUNK_MIN;
+
+static void mfree_put(struct mhdr *h, int k)
+{
+    h->cap = CAP(k);
+    h->tag = M_FREE;
+    *(struct mhdr **)(h + 1) = freel[k];
+    freel[k] = h;
+}
+/* memory that is not needed now (the end of a chunk, the rest of a carved block): cut it into free blocks of the
+ * largest classes that fit, so none of it is lost */
+static void carve(char *p, u32 n)
+{
+    while (n >= BLK(0)) {
+        int k = NCLASS - 1;
+        while (BLK(k) > n) k--;
+        mfree_put((struct mhdr *)p, k);
+        p += BLK(k); n -= BLK(k);
+    }
+}
+static struct mhdr *small_get(int k)
+{
+    u32 sz = BLK(k);
+    struct mhdr *h = freel[k];
+    if (h) { freel[k] = *(struct mhdr **)(h + 1); return h; }
+    if (left < sz) {
+        for (int j = k + 1; j < NCLASS; j++)            /* a free block of a larger class: take ours from its start */
+            if (freel[j]) {
+                h = freel[j]; freel[j] = *(struct mhdr **)(h + 1);
+                carve((char *)h + sz, BLK(j) - sz);
+                return h;
+            }
+        u32 want = next_chunk;
+        while (want < sz) want *= 2;
+        char *c;
+        while (!(c = sys_memalloc(want)) && want / 2 >= sz) want /= 2;  /* smaller if memory is short */
+        if (!c && !(c = sys_memalloc(want = sz))) return 0;             /* last try: just this block */
+        carve(chunk, left);                             /* the old chunk's end, before it is forgotten */
+        chunk = c; left = want;
+        if (next_chunk < CHUNK_MAX) next_chunk *= 2;
+    }
+    h = (struct mhdr *)chunk; chunk += sz; left -= sz;
+    return h;
+}
 void *malloc(u32 n)
 {
-    n = (n + 7) & ~7u;
-    if (n >= 8192) return sys_memalloc(n);
-    if (n > left) {
-        chunk = sys_memalloc(32768);
-        if (!chunk) return 0;
-        left = 32768;
+    if (n > MALLOC_MAX) return 0;
+    struct mhdr *h;
+    if (n <= CAP(NCLASS - 1)) {
+        int k = 0;
+        while (CAP(k) < n) k++;
+        if (!(h = small_get(k))) return 0;
+        h->cap = CAP(k);
+        h->tag = M_SMALL | (u32)k;
+    } else {
+        u32 need = (n + sizeof *h + 15) & ~15u;
+        if (!(h = sys_memalloc(need))) return 0;
+        h->cap = need - sizeof *h;
+        h->tag = M_BIG;
     }
-    void *p = chunk; chunk += n; left -= n;
-    return p;
+    return h + 1;
 }
-void free(void *p) { if (p) sys_memfree(p); }
+/* the header of a block malloc gave out, or 0 (reported) */
+static struct mhdr *mhdr_of(void *p, const char *who)
+{
+    struct mhdr *h = (struct mhdr *)p - 1;
+    if (((u32)p & 7) || !(h->tag == M_BIG || (h->tag & ~0xFFu) == M_SMALL)) {
+        fprintf(2, "libz: %s() of a pointer malloc did not give out (or freed twice): %p\n", who, p);
+        return 0;
+    }
+    return h;
+}
+void free(void *p)
+{
+    if (!p) return;
+    struct mhdr *h = mhdr_of(p, "free");
+    if (!h) return;
+    if (h->tag == M_BIG) { h->tag = M_FREE; sys_memfree(h); }
+    else mfree_put(h, (int)(h->tag & 0xFF));
+}
+/* realloc: in place when the block is already big enough, else a new block with the old contents (only as many
+ * bytes as the old block holds) and the old one freed. On failure the old block is left as it was. */
+void *realloc(void *p, unsigned long n)
+{
+    if (!p) return malloc((u32)n);
+    struct mhdr *h = mhdr_of(p, "realloc");
+    if (!h) return 0;
+    if (n <= h->cap) return p;
+    void *q = malloc((u32)n);
+    if (!q) return 0;
+    memcpy(q, p, h->cap);
+    free(p);
+    return q;
+}
 
 /* ---------------------------------------------------------------- formatted output
  * One formatter feeds a "sink": a file descriptor (written in chunks), the buffered standard output, or a memory
@@ -347,7 +450,7 @@ int rd_getline(struct rd *r, char **line, u32 *cap)
     int c = rd_getc(r);
     if (c < 0) return -1;
     for (; c >= 0 && c != '\n'; c = rd_getc(r)) {
-        if (n + 2 > *cap) { char *nb = malloc(*cap * 2); if (!nb) break; memcpy(nb, *line, n); *line = nb; *cap *= 2; }
+        if (n + 2 > *cap) { char *nb = realloc(*line, *cap * 2); if (!nb) break; *line = nb; *cap *= 2; }   /* out of memory: the line is cut here */
         (*line)[n++] = (char)c;
     }
     (*line)[n] = 0;
@@ -367,18 +470,76 @@ void oputs(const char *s) { oputn(s, strlen(s)); }
 void oputc(int c) { char b = (char)c; oputn(&b, 1); }
 void _zexit(int status) { oflush(); sys_exit(status); for (;;); }
 
-/* realloc: the small allocator cannot grow in place, so allocate, copy and let the old one go. The old size is
- * not known: copy up to the new size, which is safe because allocations are in one address space with slack
- * only for blocks of at least the old size (callers grow). */
-void *realloc(void *p, unsigned long n)
+/* malloc that does not come back empty: out of memory ends the program with a message and status 1 */
+char **_zargv;
+void *xmalloc(u32 n)
 {
-    if (!p) return malloc((u32)n);
-    void *q = malloc((u32)n);
-    if (!q) return 0;
-    memcpy(q, p, n);                       /* callers only grow; over-reading the old block is harmless here */
-    return q;
+    void *p = malloc(n);
+    if (!p) { fprintf(2, "%s: out of memory\n", _zargv && _zargv[0] ? _zargv[0] : "libz"); _zexit(1); }
+    return p;
 }
 
-/* the code of the last failed system call, and the reason to print for it */
+/* the code of the last failed system call (or libz helper), and the reason to print for it */
 int zerrno;
-const char *zwhy(const char *dflt) { return zerrno == 13 ? "permission denied" : dflt; }
+const char *zwhy(const char *dflt)
+{
+    return zerrno == 13 ? "permission denied" : zerrno == 36 ? "path too long" : zerrno == 12 ? "out of memory" : dflt;
+}
+
+/* ---------------------------------------------------------------- directories and paths
+ * The two helpers every directory walker uses, so that no walker keeps a name array or a path buffer on its 16 KB
+ * stack (a recursive walk takes one level per directory, and there is no guard below the stack). */
+
+/* "dir/name" in a new malloc'd string (no double slash). NULL when it would be longer than a system call takes
+ * (zerrno 36, "path too long") or there is no memory (zerrno 12): the caller reports it, nothing is cut. */
+char *path_join(const char *dir, const char *name)
+{
+    u32 dl = strlen(dir), nl = strlen(name);
+    u32 slash = dl && dir[dl - 1] != '/';
+    if (dl + slash + nl > ZPATH_MAX - 1) { zerrno = 36; return 0; }
+    char *p = malloc(dl + slash + nl + 1);
+    if (!p) { zerrno = 12; return 0; }
+    memcpy(p, dir, dl);
+    if (slash) p[dl] = '/';
+    memcpy(p + dl + slash, name, nl + 1);
+    return p;
+}
+
+/* The names in a directory, without "." and "..", in the order the filesystem gives them: *names is a malloc'd
+ * array (as long as needed, NULL-terminated) of malloc'd strings, given back with dir_free. Returns the count, or
+ * -1 when the directory cannot be read (zerrno from the system call) or memory runs out (zerrno 12); *names is
+ * then NULL and nothing is left allocated. */
+int dir_list(const char *path, char ***names)
+{
+    *names = 0;
+    int fd = sys_open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    char **v = 0; int n = 0, cap = 0; struct udirent d;
+    while (sys_readdir(fd, &d) > 0) {
+        if (!strcmp(d.name, ".") || !strcmp(d.name, "..")) continue;
+        if (n + 1 >= cap) {
+            int nc = cap ? cap * 2 : 32;
+            char **nv = realloc(v, (u32)nc * sizeof *nv);
+            if (!nv) goto oom;
+            v = nv; cap = nc;
+        }
+        if (!(v[n] = strdup(d.name))) goto oom;
+        n++;
+    }
+    sys_close(fd);
+    if (!v && !(v = malloc(sizeof *v))) { zerrno = 12; return -1; }
+    v[n] = 0;
+    *names = v;
+    return n;
+oom:
+    sys_close(fd);
+    dir_free(v, n);
+    zerrno = 12;
+    return -1;
+}
+void dir_free(char **names, int n)
+{
+    if (!names) return;
+    for (int i = 0; i < n; i++) free(names[i]);
+    free(names);
+}

@@ -25,6 +25,8 @@ EXAMPLES
 
 NOTES
     At most 256 words are collected per run when -n is not given.
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
 
 EXIT STATUS
     0 if every run succeeded, 123 if a command exited non-zero, 127 if it

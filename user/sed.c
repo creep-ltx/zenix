@@ -22,7 +22,7 @@ static int quit_now;
 /* convert a basic regular expression to the extended syntax the engine speaks */
 static char *bre_to_ere(const char *s)
 {
-    char *out = malloc(strlen(s) * 2 + 2), *o = out; int in_br = 0;
+    char *out = xmalloc(strlen(s) * 2 + 2), *o = out; int in_br = 0;
     while (*s) {
         if (in_br) { *o++ = *s; if (*s == ']') in_br = 0; s++; continue; }
         if (*s == '[') { in_br = 1; *o++ = *s++; if (*s == '^') *o++ = *s++; if (*s == ']') *o++ = *s++; continue; }
@@ -49,7 +49,7 @@ static void die(const char *m, const char *a) { fprintf(2, "sed: %s%s%s\n", m, a
 /* read a delimited part of s (after the opening delimiter); returns the part, advances *p past the closing one */
 static char *part(const char **p, char delim, int is_regex)
 {
-    char *o = malloc(strlen(*p) + 2), *w = o; const char *s = *p;
+    char *o = xmalloc(strlen(*p) + 2), *w = o; const char *s = *p;
     while (*s && *s != delim) {
         if (*s == '\\' && s[1]) {
             if (s[1] == delim) { *w++ = delim; s += 2; continue; }
@@ -102,7 +102,7 @@ static void parse_script(const char *s)
         case 'y': {
             char d = *s++; char *a = part(&s, d, 0), *b = part(&s, d, 0);
             if (strlen(a) != strlen(b)) die("y: strings differ in length", 0);
-            c->ytab = malloc(256); for (int k = 0; k < 256; k++) c->ytab[k] = (char)k;
+            c->ytab = xmalloc(256); for (int k = 0; k < 256; k++) c->ytab[k] = (char)k;
             for (int k = 0; a[k]; k++) c->ytab[(unsigned char)a[k]] = b[k];
             break;
         }
@@ -110,7 +110,7 @@ static void parse_script(const char *s)
             if (*s == '\\') { s++; while (*s == ' ') s++; if (*s == '\n') s++; }
             else while (*s == ' ') s++;
             const char *e = s; while (*e && *e != '\n') e++;
-            c->text = malloc((u32)(e - s) + 1); memcpy(c->text, s, (u32)(e - s)); c->text[e - s] = 0; s = e;
+            c->text = xmalloc((u32)(e - s) + 1); memcpy(c->text, s, (u32)(e - s)); c->text[e - s] = 0; s = e;
             break;
         }
         case 'd': case 'p': case 'q': case 'n': case 'N': case '=': case '{': case '}': break;
@@ -164,8 +164,8 @@ static int addr_match(struct cmd *c, const char *line)
 static int do_subst(struct cmd *c, char **ps, u32 *cap)
 {
     const char *line = *ps; int len = (int)strlen(line), from = 0, count = 0, did = 0, caps[2 * RE_GROUPS];
-    char *out = malloc((u32)len * 2 + 64); u32 oc = (u32)len * 2 + 64, on = 0;
-    #define OPUT(ch) do { if (on + 2 > oc) { char *nb = malloc(oc * 2); memcpy(nb, out, on); out = nb; oc *= 2; } out[on++] = (char)(ch); } while (0)
+    char *out = xmalloc((u32)len * 2 + 64); u32 oc = (u32)len * 2 + 64, on = 0;
+    #define OPUT(ch) do { if (on + 2 > oc) { char *nb = realloc(out, oc * 2); if (!nb) die("out of memory", 0); out = nb; oc *= 2; } out[on++] = (char)(ch); } while (0)
     int copied = 0;
     while (from <= len && re_exec(c->re, line, len, from, caps)) {
         int ms = caps[0], me = caps[1];
@@ -185,6 +185,7 @@ static int do_subst(struct cmd *c, char **ps, u32 *cap)
     if (!did) { free(out); return 0; }
     for (int k = copied; k < len; k++) OPUT(line[k]);
     out[on] = 0;
+    free(*ps);
     *ps = out; *cap = oc;
     return 1;
 }
@@ -215,7 +216,7 @@ static int run_stream(int fd, int outfd)
             case 'c': if (!c->a2t || !c->in_range) { OUTS(c->text); OUTNL(); } deleted = 1; k = ncmd; break;
             case 'y': for (char *q = ps; *q; q++) *q = c->ytab[(unsigned char)*q]; break;
             case 'n': if (printed_auto) { OUTS(ps); OUTNL(); } if (!read_line(&ps, &pcap)) { deleted = 1; k = ncmd; break; } lineno++; break;
-            case 'N': { char *nl = 0; u32 nc = 0; if (read_line(&nl, &nc)) { lineno++; char *j = malloc(strlen(ps) + strlen(nl) + 2); strcpy(j, ps); strcat(j, "\n"); strcat(j, nl); ps = j; pcap = (u32)strlen(j) + 1; } else { quit_now = 1; } break; }
+            case 'N': { char *nl = 0; u32 nc = 0; if (read_line(&nl, &nc)) { lineno++; char *j = xmalloc(strlen(ps) + strlen(nl) + 2); strcpy(j, ps); strcat(j, "\n"); strcat(j, nl); free(ps); ps = j; pcap = (u32)strlen(j) + 1; } else { quit_now = 1; } free(nl); break; }
             }
         }
         if (!deleted && printed_auto) { OUTS(ps); OUTNL(); }
@@ -227,14 +228,15 @@ static int run_stream(int fd, int outfd)
 
 int main(int argc, char **argv)
 {
-    int i = 1, have_script = 0; char *script = malloc(1); script[0] = 0;
+    int i = 1, have_script = 0; char *script = xmalloc(1); script[0] = 0;
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         if (!strcmp(argv[i], "--")) { i++; break; }
-        if (!strcmp(argv[i], "-e") && i + 1 < argc) { char *n = malloc(strlen(script) + strlen(argv[i + 1]) + 2); strcpy(n, script); strcat(n, argv[++i]); strcat(n, "\n"); script = n; have_script = 1; continue; }
+        if (!strcmp(argv[i], "-e") && i + 1 < argc) { char *n = realloc(script, strlen(script) + strlen(argv[i + 1]) + 2); if (!n) die("out of memory", 0); strcat(n, argv[++i]); strcat(n, "\n"); script = n; have_script = 1; continue; }
         if (!strcmp(argv[i], "-f") && i + 1 < argc) {
             int fd = sys_open(argv[++i], O_RDONLY); if (fd < 0) die("cannot read the script", argv[i]);
             struct rd r; rd_init(&r, fd); char *ln = 0; u32 cp = 0;
-            while (rd_getline(&r, &ln, &cp) >= 0) { char *n = malloc(strlen(script) + strlen(ln) + 2); strcpy(n, script); strcat(n, ln); strcat(n, "\n"); script = n; }
+            while (rd_getline(&r, &ln, &cp) >= 0) { char *n = realloc(script, strlen(script) + strlen(ln) + 2); if (!n) die("out of memory", 0); strcat(n, ln); strcat(n, "\n"); script = n; }
+            free(ln);
             sys_close(fd); have_script = 1; continue;
         }
         for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'n') o_n = 1; else if (*p == 'E' || *p == 'r') o_E = 1; else if (*p == 'i') o_i = 1; else if (*p == 's') ; else die("unknown option", argv[i]); }
@@ -247,10 +249,11 @@ int main(int argc, char **argv)
         int fd = sys_open(argv[i], O_RDONLY);
         if (fd < 0) { fprintf(2, "sed: %s: %s\n", argv[i], zwhy("cannot open")); rc = 2; continue; }
         if (o_i) {
-            char tmp[160]; strcpy(tmp, argv[i]); strcat(tmp, ".sedtmp");
-            int out = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC); if (out < 0) { fprintf(2, "sed: cannot write %s\n", tmp); rc = 2; sys_close(fd); continue; }
+            char *tmp = xmalloc(strlen(argv[i]) + 8); strcpy(tmp, argv[i]); strcat(tmp, ".sedtmp");
+            int out = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC); if (out < 0) { fprintf(2, "sed: cannot write %s\n", tmp); rc = 2; sys_close(fd); free(tmp); continue; }
             run_stream(fd, out); sys_close(fd); sys_close(out);
             sys_unlink(argv[i]); sys_rename(tmp, argv[i]);
+            free(tmp);
         } else { run_stream(fd, 1); sys_close(fd); }
         if (quit_now) break;
     }

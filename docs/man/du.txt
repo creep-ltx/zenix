@@ -22,5 +22,13 @@ EXAMPLES
     du -sh /bin
     du -a rootfs | sort -n | tail
 
+NOTES
+    Directories with any number of entries are walked, as deep as paths go. A
+    path longer than 63 bytes (what a system call takes) is reported ("path
+    too long") and skipped, never cut short.
+
+EXIT STATUS
+    0, 1 if a directory or path below could not be read, 2 unknown option.
+
 SEE ALSO
     df(1), ls(1), find(1)

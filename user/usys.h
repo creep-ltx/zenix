@@ -47,7 +47,7 @@ static inline int sys_fstat(int fd, struct ustat *s) { return sys3(14, (u32)fd, 
 static inline int sys_chdir(const char *p) { return sys3(15, (u32)p, 0, 0); }
 static inline int sys_getcwd(char *b, u32 n) { return sys3(16, (u32)b, n, 0); }
 static inline int sys_pipe(int fds[2]) { return sys3(17, (u32)fds, 0, 0); }
-static inline void *sys_memalloc(u32 n) { return (void *)sys3(18, n, 0, 0); }
+static inline void *sys_memalloc(u32 n) { return (void *)sys3(18, n, 0, 0); }   /* 0 (NULL) on failure */
 static inline int sys_memfree(void *p) { return sys3(19, (u32)p, 0, 0); }
 static inline u32 sys_ticks(void) { return (u32)sys3(20, 0, 0, 0); }
 static inline int sys_procinfo(u32 i, struct uproc *p) { return sys3(21, i, (u32)p, 0); }

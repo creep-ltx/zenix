@@ -7,11 +7,13 @@ static void one(int fd, const char *name)
     struct rd r; rd_init(&r, fd);
     char **v = 0; u32 n = 0, cap = 0; char *line = 0, *tmp = 0; u32 lc = 0;
     while (rd_getline(&r, &line, &lc) >= 0) {
-        if (n == cap) { u32 nc = cap ? cap * 2 : 64; char **nv = malloc(nc * sizeof *nv); if (!nv) { fprintf(2, "tac: %s: out of memory\n", name); rc = 1; break; } if (n) memcpy(nv, v, n * sizeof *nv); v = nv; cap = nc; }
-        v[n++] = strdup(line);
+        if (n == cap) { u32 nc = cap ? cap * 2 : 64; char **nv = realloc(v, nc * sizeof *nv); if (!nv) { fprintf(2, "tac: %s: out of memory\n", name); rc = 1; break; } v = nv; cap = nc; }
+        if (!(v[n] = strdup(line))) { fprintf(2, "tac: %s: out of memory\n", name); rc = 1; break; }
+        n++;
     }
     (void)tmp;
-    while (n) { oputs(v[--n]); oputc('\n'); }
+    while (n) { oputs(v[--n]); oputc('\n'); free(v[n]); }
+    free(v); free(line);
 }
 int main(int argc, char **argv)
 {

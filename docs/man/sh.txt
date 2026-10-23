@@ -94,6 +94,10 @@ NOTES
     Brace and pattern text inside quotes is literal. Not done: [[ ]], arrays,
     history expansion (!!), here-strings, process substitution, getopts.
     An access the user is not allowed is reported as "permission denied".
+    A variable, alias or EXIT trap that is unset or replaced gives its memory
+    back, so a shell that runs for a long time does not slowly run out of
+    memory. When there is no memory for a new value, the shell says so and the
+    variable keeps its old value.
 
 SEE ALSO
     edit(1), less(1), man(1)

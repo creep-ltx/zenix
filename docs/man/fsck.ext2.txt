@@ -27,6 +27,8 @@ EXIT STATUS
 NOTES
     Block sizes up to 4096 are supported. Tested against deliberate damage
     and against the host's e2fsck.
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
 
 SEE ALSO
     mkfs.ext2(1), fdisk(1), df(1)

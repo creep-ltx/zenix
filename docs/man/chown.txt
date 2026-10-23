@@ -19,6 +19,9 @@ EXIT STATUS
 
 NOTES
     An access the user is not allowed is reported as "permission denied".
+    Directories with any number of entries are walked, as deep as paths go. A
+    path longer than 63 bytes (what a system call takes) is reported ("path
+    too long") and skipped, never cut short.
 
 SEE ALSO
     chmod(1), ls(1), id(1)

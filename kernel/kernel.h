@@ -27,7 +27,8 @@ void serial_putc(char c);
 void serial_flush(void);
 int serial_tx_pending(void);
 void serial_tx_drain(void);
-void serial_rx_isr(void);
+void serial_rx_isr(void);               /* level 5: queues the byte only */
+void serial_work(void);                 /* process context: the queued bytes to the tty, the 0x1d test hook */
 void irq5_c(void);
 void serial_puts(const char *s);
 void kprintf(const char *fmt, ...);
@@ -64,7 +65,9 @@ void irq2_entry(void);
 #define MEM_FASTONLY 2u         /* fast RAM only, fail rather than use chip */
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
 extern u32 boot_ram_pa, boot_ram_size;
-void *mem_alloc(u32 n, u32 flags, u32 owner);
+void *mem_alloc(u32 n, u32 flags, u32 owner);   /* 0 if n is 0, above MEM_ALLOC_MAX, or does not fit */
+#define MEM_ALLOC_MAX 0x7FFF0000u       /* no block size near 4 GB: the rounding in mem_alloc cannot wrap */
+#define MEMALLOC_MAX  (64u << 20)       /* largest region SYS_memalloc gives a process (64 MB) */
 void mem_free(void *p);
 u32 mem_free_owner(u32 owner);
 void mem_stats(u32 *chip_free, u32 *fast_free);
@@ -93,8 +96,16 @@ void ws_request_shell(int w);
 int ws_in_use(int w);
 extern int ws_cur;
 extern int ws_spawn_pending[10];
-void kbd_isr(void);
-void kbd_tick(void);                    /* from the 100 Hz tick: key repeat */
+void kbd_isr(void);                     /* level 2: handshake and queue the raw code only */
+void kbd_tick(void);                    /* from the 100 Hz tick: asks for kbd_work while a key repeats */
+void kbd_work(void);                    /* process context: keymap, workspace keys, repeat, tty */
+/* Deferred input work (audit B4, main.c): interrupts only queue raw input and set kwork_pending; kwork() does the
+ * rest - tty line discipline, echo, Ctrl-C/Ctrl-Z, workspace switches, scrollback, the bar - in process context:
+ * from the idle loop, at the end of every system call, when the tick or keyboard interrupt arrives while user
+ * code runs (interrupts enabled again first), and between the pieces of a long terminal write. Never from inside
+ * kernel code that an interrupt cut into, and never re-entered, so it needs no locks: the kernel is not preempted. */
+extern volatile int kwork_pending;
+void kwork(void);
 void irq3_entry(void);
 void irq3_c(void);
 
@@ -149,6 +160,9 @@ struct zexe {
     u32 image_size, mem_size, nreloc, reloc_off, stack_size, reserved;
 };
 #define ZEXE_MAGIC 0x5a455845u
+#define ZEXE_MEM_MAX   (16u << 20)     /* the loader refuses a program asking for more (image + bss) */
+#define ZEXE_STACK_MIN 4096u            /* a stack size in the header, if not 0, lies in this range */
+#define ZEXE_STACK_MAX (1u << 20)
 
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16

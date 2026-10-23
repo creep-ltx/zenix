@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The keyboard in FS-UAE: Swedish keymap layers (plain, Shift, Alt, Shift+Alt), Caps Lock and key repeat, typed with
-# wtype on the emulated Amiga keyboard (tools/kbd-test.py, headless cage rig), written to files by the shell and read
-# back from the disk image. ZENIX_SERIAL=/tmp/name gives the run its own serial port.
+# The keyboard in FS-UAE: Swedish keymap layers (plain, Shift, Alt, Shift+Alt), Caps Lock, key repeat and typing
+# during heavy output, typed with wtype on the emulated Amiga keyboard (tools/kbd-test.py, headless cage rig),
+# written to files by the shell and read back from the disk image. ZENIX_SERIAL=/tmp/name gives the run its own
+# serial port.
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
@@ -17,4 +18,7 @@ want /tmp/k1.txt "e5f6e4a35b7bb25c0a" "Swedish layers: plain, Shift, Alt, Shift+
 want /tmp/k2.txt "41423163640a" "Caps Lock on letters only, Shift inverts it"
 n=$(get /tmp/k3.txt | tr -cd z | wc -c)
 if [ "$n" -ge 10 ] && [ "$n" -le 40 ]; then echo "PASS key repeat ($n z's from a 1.2 s hold)"; else echo "FAIL key repeat: $n z's"; pass=0; fi
+if [ "$(get /tmp/k4.txt)" = "typed during output" ]; then echo "PASS keys typed during heavy output arrive"; else echo "FAIL typed during output: got '$(get /tmp/k4.txt)'"; pass=0; fi
+if get /tmp/k5.txt | grep -q 'lost\|queue full'; then echo "FAIL the kernel log reports lost input: $(get /tmp/k5.txt | grep 'lost\|queue full')"; pass=0
+elif get /tmp/k5.txt | grep -q 'Zenix'; then echo "PASS no input lost (kernel log)"; else echo "FAIL no kernel log in k5.txt"; pass=0; fi
 exit $((1 - pass))

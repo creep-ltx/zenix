@@ -28,6 +28,8 @@ EXIT STATUS
 
 NOTES
     An access the user is not allowed is reported as "permission denied".
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
 
 SEE ALSO
     head(1), less(1)

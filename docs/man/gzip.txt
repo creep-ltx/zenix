@@ -33,6 +33,8 @@ NOTES
     The whole file is read into memory first, so very large files need free
     RAM about as big as the file. The program asks for a 32 KB stack.
     An access the user is not allowed is reported as "permission denied".
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
 
 EXIT STATUS
     0, 1 on a problem with a file, 2 unknown option.
