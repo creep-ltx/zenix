@@ -67,7 +67,7 @@ against a program written to cheat (the same trust level as AmigaOS). The docs m
 projects must be GPL-2 compatible and keeps its own licence header (miniz and `user/regex.c` from CUtils: MIT). Every
 Zenix file carries `SPDX-License-Identifier: GPL-2.0-only`. (The "MIT" seen earlier was inherited from zenix-old, never chosen.)
 
-## D10. Priorities (proposed 2026-10-24, waiting for the owner's OK; first item of future-ideas "the kernel best-of list")
+## D10. Priorities (approved by the owner 2026-10-24, to be built after the audit fixing and its closing report; first item of future-ideas "the kernel best-of list")
 **What.** Every process has a priority. The highest ready priority always runs; processes of the same priority take
 turns (round robin, 50 ms slices) - the Exec rule, which DESIGN D6 always intended.
 - **Levels:** 32 levels inside the kernel. Users see the Unix `nice` scale (-20 most favoured ... 19 least), mapped onto

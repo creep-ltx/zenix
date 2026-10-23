@@ -18,7 +18,8 @@ current work list), then `docs/architecture.md` for the part you touch.
 **FEATURE HALT (decided by the owner, 2026-10-22): no new features - no new commands, system calls, drivers,
 options or programs.** Only fixes from `docs/audit-2026-10-22.md`, tests that check them, and documentation
 corrections. Merging work that was already built before the halt (the `drivers`, `zenixfs` and `floppy` branches) is
-allowed. **Approved exception (owner, 2026-10-23): booting from the SD card / a hard disk without a floppy (`zenixboot`).**
+allowed. **Approved exceptions:** booting without a floppy (`zenixboot`, owner 2026-10-23); DESIGN D10 priorities (owner
+2026-10-24), to start only after the audit fixing is done and the closing audit report is written.
 Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
 parked (e.g. the uncommitted `user/awk.c`). Order of the fixes: batches A and B, then the first PiStorm boot, then C,
 D and E.
