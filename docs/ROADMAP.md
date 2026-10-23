@@ -43,6 +43,9 @@ The owner halted all new features on 2026-10-22. Until the owner lifts it, work 
 `audit-2026-10-22.md` (batches A-E), the tests that check them, documentation corrections and merging the branches
 built before the halt. The phases below resume after that.
 
+Progress: **batch B (memory foundations) is done** - all seven items (B1-B7), 2026-10-23 on branch `fix-b`,
+verified in FS-UAE (`tools/memtest.sh`, keyboard, job-control and matrix tests); not yet on the A1200.
+
 ## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 
 **Phase 1 - Disk tools.** `fdisk` (the RDB partition table), `mkfs.ext2`, `fsck.ext2`, `df`, `sync`; the disk

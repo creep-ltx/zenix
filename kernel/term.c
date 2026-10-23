@@ -523,6 +523,6 @@ void ws_request_shell(int w)
 {
     if (w >= 1 && w <= NWS && !in_use(w)) {
         ws_spawn_pending[w] = 1;
-        wake_io();                      /* the session manager waits for this */
+        wake_io();                      /* the session manager waits for this (SYS_wsreq); called from kwork only */
     }
 }

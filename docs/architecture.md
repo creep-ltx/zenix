@@ -208,6 +208,11 @@ second block. Both are owned by the pid and freed together.
   No priorities yet (DESIGN D6 says they are intended).
 - Preemption happens only when the timer interrupt hit **user mode**. Kernel code is never preempted, so the
   kernel needs no locks. Where an interrupt can touch the run queue (`ready()`), interrupts are masked briefly.
+- **Interrupts only queue** (audit B4). The keyboard and serial interrupts put raw codes and bytes into rings and
+  set `kwork_pending`; everything else input causes (keymap, line discipline, echo, Ctrl-C/Ctrl-Z, workspace
+  switches, scrollback, the bar) is done by `kwork()` in process context - see section 11. The same rule closes the
+  lost wakeup (B5): a reader's "is there input? no: block" is kernel code, and `kwork`, the only thing that delivers
+  input, runs only at a few chosen points, never between such a check and its block.
 - pid 0 is the idle process: it runs on the boot stack and executes `cpu_idle()` when nothing is ready.
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
   process is `spawn(path, argv, stdio)`: load a ZEXE, give it the parent's cwd and environment, and pass only file
@@ -333,20 +338,48 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 - **Workspaces**: nine, each with its own text grid and tty; the top bar (i3-style) lists the current one and the
   occupied ones. Amiga+1..9 switch, Amiga+Return opens a shell. These are scaffolding for a future desktop and are
   not part of what a terminal program should depend on.
+- **Input path: interrupts queue, `kwork` works** (`kernel/main.c`, audit B4/B5). The interrupt handlers do
+  only what cannot wait: the keyboard handler (`kbd_isr`) reads the byte, answers the keyboard's handshake and puts
+  the raw code into a 128-slot ring; the serial handler (`serial_rx_isr`, level 5) moves each byte from Paula into a
+  1024-byte ring; the 100 Hz tick asks for work while a key is held (repeat) and once a second (the bar's clock).
+  Each ring has one producer and one consumer, so no lock: the producer fills the slot, then moves `head`; the
+  consumer reads it, then moves `tail`. A full ring drops the new input and counts it; `kwork` reports the count on
+  the kernel log (`dmesg`: "kbd: N key codes lost", "serial: N bytes lost"; after lost key codes the held modifiers
+  and the repeating key are forgotten, since a lost "key up" would leave a key repeating), and a full tty queue
+  (nobody reading) says so too. `kwork()` empties the rings in process context with interrupts enabled - `serial_work` (bytes to
+  the tty, the 0x1d test hook), `kbd_work` (modifiers, Amiga+key workspace commands, keymap, key repeat, the tty),
+  the bar - and is called from exactly four places: the idle loop; the end of every system call; the level-2
+  interrupt when it cut into **user** mode (then no kernel code is running at all, because the kernel is never
+  preempted; the mask is lowered to 0 first, and if Ctrl-C or Ctrl-Z hit the running program it is rescheduled
+  at once so it ends or stops); and between the 256-byte pieces of a long terminal write (`tty_write`: drawing
+  4 KB can take seconds on a 68020 with chip RAM only, and the rings would overflow; the terminal is consistent
+  there, and a writer killed by Ctrl-C stops at once). An interrupt that cuts into kernel code (a system call, or `kwork` itself) never
+  calls it, and a `busy` flag keeps it from being re-entered, so the tty queue and line, the terminal grids, the
+  blitter and the heap (the first use of a workspace allocates its tty and terminal) are only ever changed by one
+  piece of code at a time. Lost wakeups (B5) cannot happen: `tty_read` and `SYS_wsreq` test "is there something?"
+  and then `block_io()` in kernel code with none of those points in between, so `kwork` - the only producer -
+  cannot run between the two; input that
+  arrives meanwhile waits in its ring, and the `wake_io()` that delivers it comes after the reader is blocked. The
+  idle loop checks `kwork_pending` with interrupts masked and then `STOP`s (which enables them in the same
+  instruction), so input queued in between ends the wait at once. Latency: at once when the machine is idle or a
+  system call ends; at the next tick (10 ms) while a program computes without system calls; every 256 bytes of
+  terminal output; while another long system call runs (a disk transfer), input waits in the ring until it ends.
 - **Keyboard** (`kbd.c`): CIA-A serial data register; after each byte the handshake pulls SP low for at least
   75 E-clock ticks (105 us; the hardware manual asks for 85) timed with `hr_time()`, never with a counting loop
   (Emu68 runs about 1000 MIPS). The keyboard interrupt is not enabled in CIA-A's mask: the byte is picked up by
   the 100 Hz tick handler, which reads the ICR, so a key waits at most 10 ms (the keyboard's own limit is 143 ms
-  and it buffers 10 keys). Raw codes 0x00-0x3F go through a keymap with four layers like AmigaOS's (plain, Shift,
+  and it buffers 10 keys); the handler queues it for `kbd_work` (above). Raw codes 0x00-0x3F go through a keymap with four layers like AmigaOS's (plain, Shift,
   Alt, Shift+Alt; the Alt layer is AmigaOS's, the same on every national keyboard, and is where `[ ] { } \ | @`
   live on a Swedish Amiga); `sv` is the AmigaOS keymap "s" (generated from xkeyboard-config by the Fuzix Amiga
   port, checked against Workbench 3.1's `DEVS:Keymaps/s`), `us` the US one. Caps Lock (raw 0x62, a toggle the
   keyboard reports as down/up) shifts the letters only. Accents that AmigaOS treats as dead keys are typed as
-  the spacing character (no composition). Software key repeat: 500 ms, then 33 per second from the tick, until
+  the spacing character (no composition). Software key repeat: 500 ms, then 33 per second (timed by the tick, done by `kbd_work`), until
   the key is released or another goes down; modifiers and Amiga combinations do not repeat. Codes 0x40-0x67 are
   layout-neutral; arrows, F-keys, Help and Del become escape sequences in raw mode. Verified in FS-UAE
   (`tools/kbd-test.sh`); the handshake length is read from the manual, not measured on hardware.
-- **Serial** (`serial.c`): interrupt-driven, 115200 baud, mirrors the focused screen; the test rig depends on it.
+- **Serial** (`serial.c`): interrupt-driven receive (queued for `serial_work`, above), 115200 baud, mirrors the
+  focused screen; the test rig depends on it, including the hook 0x1D + 1-9 (switch workspace) / Return (open a
+  shell) / u d U D (scroll back).
 
 ## 12. User space
 

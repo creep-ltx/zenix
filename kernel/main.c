@@ -84,6 +84,44 @@ void irq5_c(void)
     serial_rx_isr();
 }
 
+/* ---- deferred input work (audit B4/B5) ----
+ * The keyboard and serial interrupts only queue raw codes and bytes (kbd.c, serial.c) and set kwork_pending; the
+ * tick sets it for key repeat and once a second for the bar. kwork() does the real work - keymap, tty line
+ * discipline and echo, Ctrl-C/Ctrl-Z, workspace switches, scrollback, the bar - in process context, with interrupts
+ * enabled. It is called from four places only, each a point where no kernel code is half-way through anything:
+ *   - the idle loop (pid 0, between schedule() calls),
+ *   - the end of every system call (syscall_c, just before the return to user mode),
+ *   - the level-2 interrupt (tick or keyboard) when it interrupted *user* mode: the kernel is never preempted, so
+ *     then no kernel code is running at all; the mask is lowered to 0 first (it is "return to user mode" work),
+ *   - between the 256-byte pieces of a long terminal write (tty_write), where the terminal is consistent and no
+ *     check-then-block is pending, so a program printing a lot does not overflow the input rings.
+ * An interrupt that cuts into kernel code (a system call, or kwork itself) never runs it, and `busy` keeps it from
+ * being re-entered, so tty, terminal, heap and blitter state are only ever changed by one piece of code at a time.
+ * This also closes the lost wakeup (B5): a reader that finds no line and then blocks (tty_read, SYS_wsreq) is kernel
+ * code with none of the four points between its check and its block_io(), so kwork - the only producer of input and
+ * of workspace requests - cannot run there; input that arrives meanwhile waits in the ring and its wake_io() comes
+ * after the reader is P_IO. A new call of kwork() must keep it that way. */
+volatile int kwork_pending;
+
+void kwork(void)
+{
+    static int busy;
+    static u32 bar_sec;
+    if (busy)
+        return;
+    busy = 1;
+    while (kwork_pending) {
+        kwork_pending = 0;              /* cleared before the work: input queued during it asks for another round */
+        serial_work();
+        kbd_work();
+        if (ticks / 100 != bar_sec) {   /* the clock on the bar, once a second */
+            bar_sec = ticks / 100;
+            bar_draw();
+        }
+    }
+    busy = 0;
+}
+
 void irq2_c(u32 sr)
 {
     u8 icr = CIAA(CIA_ICR);             /* read acknowledges the CIA */
@@ -91,7 +129,7 @@ void irq2_c(u32 sr)
     if (!(icr & 0x1F))
         ide_stray_irq();                /* not the CIA: Gayle's IDE latch (it shares level 2) */
     if (icr & 8)
-        kbd_isr();
+        kbd_isr();                      /* only queues the code */
     if (icr & 1) {
         ticks++;
         kbd_tick();
@@ -99,8 +137,19 @@ void irq2_c(u32 sr)
         input_poll();
         fd_tick();
         if (ticks % 100 == 0)
-            bar_draw();
-        sched_tick((u16)sr);
+            kwork_pending = 1;          /* the bar's clock */
+    }
+    if (!(sr & 0x2000)) {               /* we interrupted user mode: no kernel code is running */
+        if (kwork_pending) {
+            irq_restore(0x2000);        /* interrupts on: this is return-to-user work, not interrupt work */
+            kwork();
+            if (current->killed || current->stop_req) {
+                schedule();             /* Ctrl-C / Ctrl-Z of the running program: it ends or stops now */
+                return;
+            }
+        }
+        if (icr & 1)
+            sched_tick((u16)sr);
     }
 }
 
@@ -261,10 +310,14 @@ void kmain(struct bootinfo *bi)
     bar_draw();
     for (;;) {
         proc_reap_orphans();
+        kwork();                /* queued input first: it may wake a reader */
         schedule();             /* run anything ready; returns when idle */
         serial_tx_drain();
-        if (!serial_tx_pending())
+        u16 s = irq_save();     /* checked with interrupts masked: STOP enables them and waits in one instruction,
+                                 * so input queued after the check still ends the wait at once */
+        if (!kwork_pending && !serial_tx_pending())
             cpu_idle();
+        irq_restore(s);
     }
 }
 

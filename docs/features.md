@@ -35,6 +35,7 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Named message ports, synchronous zero-copy calls | verified | architecture.md section 8 |
 | Servers: disk (`diskd`), filesystem (`fsd`), session manager (`boot`) | verified | architecture.md section 9 |
 | Environment variables inherited by children | verified | |
+| Interrupt handlers only queue input; tty, echo, Ctrl-C/Ctrl-Z, workspaces and the bar run in process context (no lost wakeups, lost input counted in `dmesg`) | verified in FS-UAE (`tools/kbd-test.sh`, `tools/jobs-test.sh`, the matrix) | architecture.md section 11 |
 | Job control: Ctrl-Z stop, `jobs`, `fg`, `bg`, stopped state in `ps` (`SYS_jobctl`, `SYS_wait` untraced) | verified (`tools/jobs-test.sh`) | architecture.md section 7 |
 | Priorities, signals with handlers, process groups | planned | |
 | Users and groups: uid/gid on every process (real and effective), `setuid`/`setgid`, `umask`, `chown` | verified | architecture.md section 14 |

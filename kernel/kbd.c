@@ -176,7 +176,7 @@ static int special_key(u8 code)
     return 0;
 }
 
-/* a key going down (also called again by kbd_tick while it is held): translate and hand it to the tty */
+/* a key going down (also again from kbd_work while it is held): translate and hand it to the tty */
 static void key_down(u8 code)
 {
     if (special_key(code))
@@ -201,18 +201,29 @@ static void key_down(u8 code)
 
 /* Software key repeat (an Amiga keyboard sends one code per press; AmigaOS repeats in software too): the last key
  * held repeats after KBD_REPEAT_DELAY ticks, then every KBD_REPEAT_RATE ticks, until it is released or another key
- * goes down. Modifier and Amiga-combination keys do not repeat. Driven by the 100 Hz tick (kbd_tick). */
+ * goes down. Modifier and Amiga-combination keys do not repeat. The tick only asks for the work (kbd_tick); the
+ * repeat itself happens in kbd_work, in process context. */
 #define KBD_REPEAT_DELAY 50             /* 500 ms */
 #define KBD_REPEAT_RATE  3              /* about 33 per second */
-static u8 rep_code;                     /* 0: nothing held */
+static volatile u8 rep_code;            /* 0: nothing held; written by kbd_work only, read by the tick */
 static u32 rep_at;                      /* tick of the next repeat */
+
+/* Raw key codes from the interrupt to kbd_work: a ring with one producer (kbd_isr, level 2) and one consumer
+ * (kbd_work, process context, never re-entered), so it needs no lock: the producer writes the slot and then moves
+ * head, the consumer reads the slot and then moves tail. A full ring drops the code and counts it (kbd_work reports
+ * the count on the kernel log) and, because the lost code may be a key going up, forgets the held modifiers and the
+ * repeating key (a stuck key would repeat for ever). kwork runs at least between the 256-byte pieces of a long
+ * terminal write (tty.c), so 128 slots (about 6 seconds of fast typing) are far more than it needs. */
+#define KQ 128
+static volatile u8 kq[KQ];
+static volatile u16 kq_head, kq_tail;
+static volatile u32 kq_lost;
+static u32 kq_lost_told;
 
 void kbd_tick(void)
 {
-    if (rep_code && (s32)(ticks - rep_at) >= 0) {
-        rep_at = ticks + KBD_REPEAT_RATE;
-        key_down(rep_code);
-    }
+    if (rep_code)
+        kwork_pending = 1;              /* kbd_work checks whether the repeat is due */
 }
 
 /* Handshake: SP as output, low, for at least 85 us (HRM: "to ensure compatibility with all keyboard models"), then
@@ -234,12 +245,26 @@ static void handshake(void)
     CIAA(CIA_CRA) &= (u8)~0x40;
 }
 
+/* From the level-2 interrupt (the tick handler sees the CIA's serial-port bit): take the byte, answer the keyboard,
+ * queue the raw code. Nothing else happens here (audit B4): no keymap, no tty, no drawing. */
 void kbd_isr(void)
 {
     u8 raw = CIAA(CIA_SDR);
     u8 code = (u8)~((raw >> 1) | (raw << 7));
     handshake();
+    u16 h = kq_head, nh = (u16)((h + 1) % KQ);
+    if (nh == kq_tail) {
+        kq_lost++;
+        return;
+    }
+    kq[h] = code;
+    kq_head = nh;
+    kwork_pending = 1;
+}
 
+/* one raw code, in process context: modifiers, workspace keys, repeat, then the keymap and the tty */
+static void key_code(u8 code)
+{
     int up = code & 0x80;
     code &= 0x7F;
     switch (code) {
@@ -275,4 +300,26 @@ void kbd_isr(void)
     rep_code = code;
     rep_at = ticks + KBD_REPEAT_DELAY;
     key_down(code);
+}
+
+/* Process context (kwork): everything the keyboard interrupt queued, then a key repeat if one is due. */
+void kbd_work(void)
+{
+    while (kq_tail != kq_head) {
+        u16 t = kq_tail;
+        u8 code = kq[t];
+        kq_tail = (u16)((t + 1) % KQ);
+        key_code(code);
+    }
+    if (rep_code && (s32)(ticks - rep_at) >= 0) {
+        rep_at = ticks + KBD_REPEAT_RATE;
+        key_down(rep_code);
+    }
+    u32 lost = kq_lost;
+    if (lost != kq_lost_told) {
+        kprintf("kbd: %u key codes lost (input ring full)\n", lost - kq_lost_told);
+        kq_lost_told = lost;
+        rep_code = 0;                   /* a lost "key up" must not leave a key repeating or a modifier held */
+        shift_down = ctrl_down = alt_down = amiga_down = 0;
+    }
 }

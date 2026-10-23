@@ -54,6 +54,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Paths: at most 63 bytes in a system call; the directory tools report a longer joined path instead of cutting it.
 - Timer tick 100 Hz (PAL E-clock 709,379 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers
   chained, an E-clock count that wraps after about 1.7 hours.
+- Input rings between the interrupts and `kwork`: 128 keyboard codes, 1024 serial bytes; a tty queue holds 1024
+  bytes of typed input that no program has read yet. Anything dropped is counted on the kernel log.
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS
   treats as dead keys (acute, grave, circumflex, tilde, diaeresis) type the spacing character, there is no
   composition with the next letter.

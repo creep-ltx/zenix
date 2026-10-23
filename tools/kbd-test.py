@@ -2,7 +2,7 @@
 """Keyboard test: boot Zenix in FS-UAE inside a private invisible Wayland session (the cage rig, as shot.py), press
 keys on the emulated Amiga keyboard with wtype, make the shell write what arrived into files, then read the files
 back from the disk image and compare. Checks the Swedish keymap's four layers (plain, Shift, Alt, Shift+Alt), Caps
-Lock, and software key repeat (a held key).
+Lock, software key repeat (a held key), and typing while heavy output runs (nothing lost).
 
 usage: kbd-test.py config.fs-uae [serial-link]      (run by tools/kbd-test.sh)
 FS-UAE maps host keys to Amiga raw codes by position (a US host layout): host [ ; ' are Amiga 0x1A 0x29 0x2A.
@@ -79,6 +79,14 @@ try:
         text("echo ")
         w("-P", "z", "-s", "1200", "-p", "z")
         redir("k3.txt"); w("-k", "Return")
+        time.sleep(2)
+        # 4. typing while the screen is busy (audit B4): keys typed during heavy output wait in the input ring and the
+        # tty queue, then run; nothing is lost (the kernel log would say so, k5.txt)
+        text("seq 1 3000"); w("-k", "Return")
+        time.sleep(0.5)
+        text("echo typed during output"); redir("k4.txt"); w("-k", "Return")
+        time.sleep(40)
+        text("dmesg"); redir("k5.txt"); w("-k", "Return")
         time.sleep(2)
         text("sync"); w("-k", "Return")
         time.sleep(3)

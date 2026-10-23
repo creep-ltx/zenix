@@ -183,7 +183,8 @@ void syscall_c(u32 *rb)
                     }
                 if (r > 0)
                     break;
-                block_io();
+                block_io();             /* race-free: ws_spawn_pending is only set by kwork, which never runs between
+                                         * the check above and this block (the points in main.c, audit B5) */
             }
         }
         break;
@@ -485,6 +486,8 @@ void syscall_c(u32 *rb)
     }
     }
     rb[0] = (u32)r;
+    if (kwork_pending)
+        kwork();                        /* queued input: done here, on the way back to user mode (main.c) */
     if (current->killed)
         proc_exit(130);
 }

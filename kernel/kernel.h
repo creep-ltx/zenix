@@ -27,7 +27,8 @@ void serial_putc(char c);
 void serial_flush(void);
 int serial_tx_pending(void);
 void serial_tx_drain(void);
-void serial_rx_isr(void);
+void serial_rx_isr(void);               /* level 5: queues the byte only */
+void serial_work(void);                 /* process context: the queued bytes to the tty, the 0x1d test hook */
 void irq5_c(void);
 void serial_puts(const char *s);
 void kprintf(const char *fmt, ...);
@@ -95,8 +96,16 @@ void ws_request_shell(int w);
 int ws_in_use(int w);
 extern int ws_cur;
 extern int ws_spawn_pending[10];
-void kbd_isr(void);
-void kbd_tick(void);                    /* from the 100 Hz tick: key repeat */
+void kbd_isr(void);                     /* level 2: handshake and queue the raw code only */
+void kbd_tick(void);                    /* from the 100 Hz tick: asks for kbd_work while a key repeats */
+void kbd_work(void);                    /* process context: keymap, workspace keys, repeat, tty */
+/* Deferred input work (audit B4, main.c): interrupts only queue raw input and set kwork_pending; kwork() does the
+ * rest - tty line discipline, echo, Ctrl-C/Ctrl-Z, workspace switches, scrollback, the bar - in process context:
+ * from the idle loop, at the end of every system call, when the tick or keyboard interrupt arrives while user
+ * code runs (interrupts enabled again first), and between the pieces of a long terminal write. Never from inside
+ * kernel code that an interrupt cut into, and never re-entered, so it needs no locks: the kernel is not preempted. */
+extern volatile int kwork_pending;
+void kwork(void);
 void irq3_entry(void);
 void irq3_c(void);
 
