@@ -21,11 +21,13 @@ built on the Amiga's own hardware (blitter, Copper, planar screens). Not Linux, 
    that matter are taken on the real A1200 and written down with the date.
 5. **Nothing is done until it is tested.** Every feature has a test in the setup matrix (tools/matrix.sh) or a
    script next to it. Filesystem code is checked with the host's e2fsck.
-6. **The owner's A1200 first (decided 2026-10-22).** The target is the owner's own machine: an A1200 with a
-   PiStorm32-lite and a CM4 running Emu68, booting from a Gotek, with its disk on the Pi's SD card. Zenix must be
-   stable and usable there before anything else. Other platforms (a stock A1200 with IDE, A3000/A4000 SCSI and IDE,
-   real 68030/040/060 cards) come after that and never complicate the base. Code already written for them stays,
-   but is not a priority.
+6. **Real Amiga hardware is the ultimate target; the owner's PiStorm A1200 is the first test machine (owner,
+   2026-10-23/24).** Zenix is tested first on the owner's A1200 with a PiStorm32-lite and a CM4 running Emu68, booting from
+   the SD card or a GoDRIVE 1200, because that is the machine at hand. But it is built for real Amigas: a 68020-68060 at
+   real clock speeds, Gayle IDE/CF, SCSI, real floppies, chip and fast RAM as the boards have it. So: nothing in the base
+   system may depend on Emu68 or the Pi (Pi hardware is reached by optional drivers/servers only); speed is judged by what
+   a stock 14 MHz 68EC020 can do, not by Emu68's ~1000 MIPS, which hides slow code; the stock A1200 setups stay in the
+   test matrix; booting works the normal Amiga way (floppy, or a hard disk/CF/SD through `zenixboot`), never a custom ROM.
 7. **Write it down.** Findings go to the knowledge base, decisions to DESIGN.md, status to README.md.
 8. **Unix experience:** standard names, standard behaviour (POSIX where it makes sense), `/` filesystem,
    text tools that pipe.
