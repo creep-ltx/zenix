@@ -17,13 +17,16 @@ LINE EDITING
     Ctrl+K   cut to the end              Ctrl+U   cut to the start
     Ctrl+W   cut the word before         Ctrl+T   swap two characters
     Up, Down (Ctrl+P, Ctrl+N)   earlier and later commands; the history is
-             kept in ~/.sh_history
+             kept in ~/.sh_history (a command longer than the 478
+             characters the line holds comes back cut, with the bell)
     Tab      complete a command, a file name or a $variable; twice lists
              the choices
     Ctrl+R   search the history backwards as you type; Ctrl+R again goes to
              an older match, Enter runs it, an arrow key keeps it for editing,
              Ctrl+G cancels
     Ctrl+L   clear the screen            Ctrl+C   cancel the line
+    What is typed while a command runs is kept and appears at the next
+    prompt (as on a Unix tty).
 
 LANGUAGE
     Commands:   name arg...   a program found in $PATH, a builtin, a
@@ -33,9 +36,12 @@ LANGUAGE
                 ${NAME#pat} ${NAME##pat} ${NAME%pat} ${NAME%%pat}  remove a
                 prefix / suffix (shortest, longest) matching a pattern
                 ${NAME/pat/new} ${NAME//pat/new}  replace first / all
-                ${NAME:offset} ${NAME:offset:length}  part of the text
+                ${NAME:offset} ${NAME:offset:length}  part of the text (a
+                negative length counts from the end; one that ends before
+                the offset is an error, "substring expression < 0", as bash)
                 $? status of the last command   $$ shell pid
-                $# $1..$9 $@ $* the arguments   $! last background pid
+                $# $1..$9 ${10}... $@ $* the arguments   $! last background
+                pid
     Quoting:    'literal'  "with $expansion"  \x escapes one character
     Expansion:  $(command) or `command` the command's output;
                 $((1+2*3)) arithmetic;  ~ the home directory
@@ -46,6 +52,8 @@ LANGUAGE
     Pipes and lists:  a | b   a && b   a || b   a ; b   a &   ! a
                 ( a; b )   { a; b; }
     Redirection:  < file   > file   >> file   2> file   2>&1   &> file
+                N>&M for fds 0-9 (3>&1 1>&2 2>&3 swaps; fd 3 is closed
+                again afterwards)
                 <<WORD (a here-document; <<-WORD strips tabs)
     Conditions: if list; then list; elif list; then list; else list; fi
     Choices:    case word in pattern|pattern) list ;; ... esac
@@ -60,16 +68,19 @@ LANGUAGE
 BUILTINS
     cd [dir|-]  exit [n]  export NAME[=value]  unset NAME  set [-- args]
     alias [name=value]  unalias name  history [-c]  source file (or . file)
-    read [-p prompt] name...  shift [n]  return  break  continue  jobs
+    read [-p prompt] name...  shift [n] (n >= 0)  return  break  continue
+    jobs
     fg [%n]  bg [%n]  wait [pid|%n]  kill [-STOP|-CONT] pid|%n  type name
-    test expr (or [ expr ])  true false :  echo [-ne]  pwd  eval  local
+    test expr (or [ expr ])  true false :  echo [-ne]  pwd  eval
+    local NAME[=value] (in a function only: the old value comes back when
+    the function returns, as in bash)
     help  umask [mask]  trap 'commands' EXIT
     test: -e -f -d -r -w -x -s -z -n -L, = != -eq -ne -lt -le -gt -ge,
           ! -a -o ( )
 
 VARIABLES THE SHELL USES
     PATH (default /bin)  HOME  USER  HOSTNAME  IFS  PWD  OLDPWD  TERM
-    LINES  COLUMNS
+    LINES (from the terminal: 32 on PAL, 25 on NTSC)  COLUMNS
     PS1 (the prompt: \w directory, \W its name, \u user, \h host,
         \$ # or $, \n)   PS2 (the continuation prompt)
     Start-up files: /etc/profile and ~/.shrc (read by an interactive shell).
@@ -95,7 +106,22 @@ NOTES
     trap handles only EXIT (0); other signals are not delivered to the shell.
     Brace and pattern text inside quotes is literal. Not done: [[ ]], arrays,
     history expansion (!!), here-strings, process substitution, getopts.
-    An access the user is not allowed is reported as "permission denied".
+    An error says why: "permission denied", "no such file or directory",
+    "argument list too long" (a program takes at most 256 arguments and
+    8 KB of them) ...
+    No silent limits: the number of arguments, wildcard matches, words in
+    a command, pipeline stages and for-loop items grows as needed (in the
+    shell's arena, an eighth of free memory: "out of memory" ends a script
+    that needs more). A word longer than 4095 characters, more than 8
+    here-documents on one line, more than 64 local variables or more than
+    16 aliases expanding into each other are errors (status 1, or 2 for the
+    here-documents), never a silent cut. An alias is not expanded again
+    inside its own expansion (alias a=b b=a ends with "a: command not
+    found", as bash). Arithmetic nested too deeply is an error. Each round
+    of a loop gives back what it used, so a long while-read loop runs in
+    the same memory.
+    Not done: redirections after a compound command (done < file), and
+    redirections of fds 3-9 to files (only N>&M).
     A here-document is kept in /tmp/.shPID_XXXXXXXX (random letters),
     created exclusively and readable only by the user, and removed when
     the command ends.
