@@ -13,6 +13,12 @@ DESCRIPTION
     filesystem protocol (kernel/fsproto.h) there until umount tells it
     to quit.
     It is not meant to be run by hand.
+    What it mounts (details: docs/architecture.md section 10): a volume with
+    an INCOMPAT feature other than filetype (ext4: extents, 64bit, flex_bg,
+    ...) is refused and the features are named; one with an ext3 journal,
+    an unknown read-only feature or the "has errors" state is mounted
+    READ-ONLY with a line saying why (every write fails, EROFS). The root
+    filesystem is only taken from a volume that mounts read-write.
 
 SEE ALSO
     mount(8), umount(8), docs/architecture.md

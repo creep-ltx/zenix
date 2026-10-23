@@ -46,7 +46,8 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 ## Filesystem and disks
 | Feature | Status | Details |
 |---|---|---|
-| ext2 (revision 0/1, 1-4 KB blocks) read and write, clean under host `e2fsck` | verified | architecture.md section 10 |
+| ext2 (revision 0/1, 1-4 KB blocks) read and write, clean under host `e2fsck`; modern `mke2fs -t ext2` volumes too; ext3 read-only, ext4 refused | verified (FS-UAE; host test `tools/ext2-host-test.sh`) | architecture.md section 10 |
+| A damaged ext2 disk fails requests, never crashes the server (fuzzed) | verified on the host (`tools/ext2-host-test.sh`) | architecture.md section 10 |
 | Files up to double-indirect size, growing directories, rename | verified | |
 | Hard links, symbolic links (incl. fast symlinks), chmod, utimes | verified | |
 | `/dev/null`, `/dev/zero`, `/dev/tty` | verified | |

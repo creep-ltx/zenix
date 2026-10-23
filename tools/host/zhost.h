@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#pragma once
+/* Host build of Zenix filesystem code (kernel/ext2.c, user/fsd.c, user/fsck_ext2.c, user/mkfs_ext2.c): the few libz
+ * and system-call pieces they use, served from an image file (tools/host/hostdisk.c). Build with -m32 -DZHOST: the
+ * Zenix code passes pointers in 32-bit message words. Used only by the host tests (tools/ext2-host-test.sh). */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef unsigned int u32;
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef int s32;
+
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR   2
+#define O_CREAT  0x100
+#define O_TRUNC  0x200
+#define O_APPEND 0x400
+
+struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, pad; u32 client_; };
+
+int sys_call(int port, struct umsg *m);          /* hostdisk.c: the disk server's messages on an image file */
+int sys_port_find(const char *name);
+int sys_port_create(const char *name);
+struct umsg *sys_recv(int port, int wait);
+struct umsg *sys_replyrecv(struct umsg *m, int r, int port);
+int sys_reply(struct umsg *m, int r);
+void sys_sleep(u32 ticks);
+u32 sys_ticks(void);
+long sys_time(void);
+void *xmalloc(u32 n);

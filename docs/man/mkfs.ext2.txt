@@ -11,9 +11,10 @@ DESCRIPTION
     DESTROYING what was on it. The result is the original revision-0 ext2:
     128-byte inodes, no optional features, a superblock and group table copy
     in every block group. Linux can mount it and e2fsck reports it clean
-    (checked with block sizes 1 KB and 4 KB). The inode tables are not zeroed,
-    which makes it quick on a large disk; unused inodes are never read.
-    The device must not be mounted.
+    (checked with block sizes 1 KB and 4 KB, also over a device full of old
+    data). The inode tables of all groups are zeroed: fsck reads every
+    inode, and old data there would look like files. The device must not
+    be mounted.
 
 OPTIONS
     -b size   block size in bytes (default 1024)

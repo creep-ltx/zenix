@@ -10,9 +10,17 @@ DESCRIPTION
     Checks an UNMOUNTED ext2 filesystem the way e2fsck does, in five passes,
     and reports what is wrong. With -y it repairs what it safely can:
     block and inode bitmaps, free counts, link counts, directory entries
-    pointing at unused inodes, ".." entries, and orphaned inodes (moved to
-    /lost+found as #inode). It cannot repair duplicate or out-of-range block
-    pointers: it reports them. By default (or with -n) it only reports.
+    pointing at unused inodes, ".." entries, file type bytes, and orphaned
+    inodes (moved to /lost+found as #inode). By default (or with -n) it only
+    reports.
+    It always checks first without writing. If it finds damage it cannot
+    repair - duplicate or out-of-range block pointers, an invalid mode, a
+    damaged directory block, a damaged resize inode, more than 512
+    unreachable inodes - it repairs NOTHING and says so ("nothing was
+    changed"): a half-done repair can make a disk worse. Use e2fsck then.
+    An inode that looks used but is free in the inode bitmap counts as a
+    file only if a directory names it (its bit is then set again).
+    Directories are followed through all levels of indirect blocks.
     A device that the system has mounted is refused by the disk server; to
     check the root disk, boot from other media.
 
@@ -25,8 +33,13 @@ EXIT STATUS
     not ext2), 2 usage error.
 
 NOTES
-    Block sizes up to 4096 are supported. Tested against deliberate damage
-    and against the host's e2fsck.
+    Block sizes up to 4096 are supported, and the features of a modern
+    "mke2fs -t ext2" (filetype, sparse_super, large_file, ext_attr,
+    resize_inode, dir_index). A volume with an ext3 journal or any other
+    feature is refused (exit 8): use e2fsck. Link counts up to 65535.
+    Tested on the host against deliberate and random damage and against
+    e2fsck (tools/ext2-host-test.sh): a repair never leaves more for e2fsck
+    to fix than there was; e2fsck checks more fields than fsck.ext2.
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.
 

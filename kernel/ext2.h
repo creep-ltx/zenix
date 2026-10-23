@@ -13,6 +13,7 @@
 #define S_ISLNK(m) (((m) & S_IFMT) == S_IFLNK)
 struct inode {
     u32 ino, size, mtime, nblocks, block[15];
+    u32 flags, acl, size_high;          /* i_flags, i_file_acl (extended-attribute block), i_size_high of a regular file */
     u16 mode, uid, gid, links;
 };
 #ifndef USYS_STRUCTS
@@ -27,7 +28,14 @@ struct ustat {                  /* returned by SYS_stat / SYS_fstat */
 };
 #endif
 int ext2_probe(void);        /* does the open device hold an ext2 filesystem? */
-int ext2_mount(void);        /* needs fs_blk_read/fs_blk_write from the environment */
+int ext2_mount(void);        /* needs fs_blk_read/fs_blk_write from the environment; = ext2_mount_as(EXT2_RW) */
+#define EXT2_ANY 0           /* mount read-only when the volume needs it (journal, unknown read-only features, errors) */
+#define EXT2_RW  1           /* the volume must be writable (the root, fsck): otherwise it is refused */
+int ext2_mount_as(int mode); /* 0, or -1 (refused: ext2_why says why) */
+extern int ext2_readonly;    /* the mounted volume is read-only: writes fail with -30 (EROFS) */
+extern const char *ext2_why; /* why the last mount was refused or read-only */
+extern int (*ext2_busy)(u32 ino);   /* set by the server: is the inode open? Its deletion then waits for ext2_release */
+int ext2_release(u32 ino);   /* the last close of an inode that lost its last name while open: free it now */
 int ext2_iget(u32 ino, struct inode *out);
 u32 ext2_bmap(const struct inode *in, u32 n);
 int ext2_read(const struct inode *in, u32 off, void *dst, u32 n);

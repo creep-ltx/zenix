@@ -280,8 +280,9 @@ the filesystem server; tools (`fdisk`, `mkfs.ext2`, `fsck.ext2`) open `DISK_RAW`
 The ext2 code compiled to run in user mode (`user/fsenv.h` supplies its environment), speaking the protocol in
 `kernel/fsproto.h` (`FS_OPEN, FS_READ, FS_WRITE, FS_STAT, FS_READDIR, FS_MKDIR, FS_RENAME, ...`). Files are named
 by **inode number**; the kernel's open-file table stores the inode, offset and flags, the server is stateless
-about open files. Chooses its root: a RAM-disk image from the boot floppy if present, else the first RDB
-partition that probes as ext2, else the bare disk. Started with `fsd DEVICE PORTNAME` (as `/bin/mount.ext2`, by `mount`)
+about open files. Chooses its root: a RAM-disk image from the boot floppy if present, else the first partition of
+type ext2 (RDB `LNX\0`, MBR 0x83) that holds an ext2 volume Zenix can **write** (see "ext2: what is mounted" in
+section 10; an ext3, ext4 or damaged volume is never the root), else the bare disk. Started with `fsd DEVICE PORTNAME` (as `/bin/mount.ext2`, by `mount`)
 it serves that device on its own port instead; it answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
 (umount: sync, release the device, exit). Two root servers are built into the kernel image, `fsd` (ext2) and `mount.zenixfs`
 started without arguments (`zfsd`); both run at boot and apply `user/rootpick.h`: a RAM disk is the root; else the bootable
@@ -309,12 +310,34 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 
 ## 10. The filesystem
 
-- **ext2**, revision 0/1, 128-byte inodes, 1 KB or 4 KB blocks, read **and write** (bitmaps, group descriptors,
-  direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast symlinks).
-  Little-endian on disk, swapped on read/write of metadata. Write-through block cache with an MRU/hash lookup.
-  Directory entries are parsed in place in the cache.
-- Verified against the host's `e2fsck -fn` after scripted write sessions, and byte-for-byte file checksums.
-- Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair) and `fdisk` (RDB).
+- **ext2**, revision 0/1, inodes of 128 bytes or more, 1, 2 or 4 KB blocks, read **and write** (bitmaps, group
+  descriptors, direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast
+  symlinks). Little-endian on disk, swapped on read/write of metadata. Write-through block cache with an MRU/hash
+  lookup. Directory entries are parsed in place in the cache.
+- **ext2: what is mounted** (`ext2_mount_as`, kernel/ext2.c). Refused: revision above 1, blocks above 4 KB, a
+  superblock or group table that does not add up (sizes, inode count, every group's bitmaps and inode table inside
+  its group), and every INCOMPAT feature except `filetype` - extents, 64bit, flex_bg, meta_bg, needs_recovery,
+  journal_dev, inline_data, ... (so ext4 is refused, with the feature names). **Read-only**: unknown RO_COMPAT
+  features (known: sparse_super, large_file), an ext3 journal (`has_journal`: Zenix does not write journals), and a
+  volume whose state says "has errors"; every write then fails with -30 (EROFS) and the server writes no block. The
+  root is only taken from a volume that would mount read-write (`mount` may mount the others read-only). A volume
+  made by a modern `mke2fs -t ext2` (ext_attr, resize_inode, dir_index, filetype, sparse_super, large_file, 256-byte
+  inodes) is written so that `e2fsck -fn` stays clean: the filetype byte of directory entries is filled in, a
+  directory Zenix changes loses its htree flag (`EXT2_INDEX_FL`; its index blocks read as empty entries), a new
+  inode is cleared whole (with `i_extra_isize` as the superblock asks), extended-attribute blocks are released
+  (reference count) with their inode, the reserved inodes below `s_first_ino` are never handed out.
+- **A damaged disk** fails requests, it never crashes the server or makes it write outside the volume: every block
+  number from the disk is checked against the volume in one place (the block cache), directory entries are checked
+  (length, name length, inode number) wherever they are parsed, freeing a block or inode that is out of range or
+  already free is refused (reported as `ext2: damaged: ...`, at most 20 lines per mount) instead of corrupting the
+  counters, and freeing a file visits at most as many blocks as the inode says it owns. Fast symbolic links and
+  device inodes keep text and device numbers in the block array: they are never freed as blocks.
+- Verified against the host's `e2fsck -fn` after scripted write sessions, and byte-for-byte file checksums; on the
+  host by `tools/ext2-host-test.sh` (the server, `fsck.ext2` and `mkfs.ext2` built for the PC against image files:
+  modern ext2/ext3/ext4 images, a workload then `e2fsck -fn`, and a bounded fuzz loop of damaged images under
+  AddressSanitizer).
+- Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair; it repairs nothing when it finds
+  damage it cannot repair) and `fdisk` (RDB).
 - Not done: freeing a file that is still open (it frees at once), moving directories between parents,
   triple-indirect files, a journal.
 - Several filesystems can be mounted (`mount`, see section 9). Planned: **ZenixFS** (atomic commit, checksummed metadata, extents),
