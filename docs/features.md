@@ -10,7 +10,8 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Feature | Status | Details |
 |---|---|---|
 | 68020, 68030, 68040, 68060 (soft float, no MMU use) | verified | architecture.md section 2; matrix of 13 emulated setups |
-| 68000 refused with a message (red screen, serial text) | verified | start.S |
+| 68000 refused with a message (orange over red screen, serial text) | verified (`tools/diag-test.sh`) | start.S |
+| Boot stage colours: the whole screen changes colour at each boot step until the display is up; error stops show the step's colour over red, a panic after that a red bar with its text | verified in FS-UAE (`tools/diag-test.sh`: each stage's colour from a screenshot); not yet on the A1200 | pi-first-boot.md (the table), architecture.md section 3 |
 | Chip and fast RAM pools, 1 MB chip up to 8 MB+ fast | verified | architecture.md section 5 |
 | Boot from floppy (ADF) bootblock; kernel in fast RAM if present | verified | how-it-works.md section 1 |
 | Boot with a RAM-disk root loaded from the floppy (no IDE disk) | verified (dev/test image) | `zenix-ram.adf` |
@@ -61,6 +62,7 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Mouse (port 1) and joystick (port 2): polled at 100 Hz, `input` shows them, system call `SYS_input` | joystick verified in FS-UAE (`tools/joystick-test.py`, keyboard-as-joystick); mouse movement and buttons built but not tested | man/input.txt |
 | Terminal bell: a short Paula tone (`beep`, any program printing BEL); the first beep logs whether the sound DMA ran | verified in FS-UAE (the DMA flag; not heard) | man/beep.txt |
 | Kernel message log: boot messages on the screen, `dmesg` afterwards (8 KB ring) | verified in FS-UAE | architecture.md section 3, man/dmesg.txt |
+| Previous-boot log: the log is kept at the top of chip RAM; after a warm reset the next boot shows the last 20 lines and whether it ended in a panic; `dmesg -p` prints all of it | verified in FS-UAE (`tools/diag-test.sh`, keyboard reset, Kickstart 3.1); whether chip RAM survives a reset on the PiStorm is unknown | architecture.md section 3, man/dmesg.txt |
 | List of the Zorro expansion boards AmigaOS configured (manufacturer, product, address, size), read before the OS is killed | verified in FS-UAE (its fast-RAM board shows up) and in a 68020 emulator | architecture.md section 3 |
 | Pi hardware table from Emu68's device tree (stage0, read before AmigaOS is killed) | built; tested on the host and in a CPU emulator against the real CM4 tree, boots in FS-UAE (empty table) | architecture.md section 3 |
 | Disks with a PC partition table (MBR; primary entries): ext2 type 0x83, RDB inside type 0x76, FAT etc. listed and never mounted | verified in FS-UAE (`tools/mbr-test.sh`) | man/diskd.txt |

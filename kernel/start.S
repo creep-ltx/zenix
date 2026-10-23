@@ -7,6 +7,14 @@
  * DMA off. Bootinfo is at 0x1000. There is no MMU: every address is
  * physical.
  */
+/* boot stage colours (audit A11, kernel/diag.h): 4 yellow = the kernel runs, 5 orange = relocated, BSS cleared */
+#define DIAG_YELLOW 0xFF0
+#define DIAG_ORANGE 0xF80
+#ifdef DIAG_STOP
+#define DIAGSTOP(n)     .if DIAG_STOP == n ; 99: bra.s 99b ; .endif
+#else
+#define DIAGSTOP(n)
+#endif
     .section .text.start
     .globl  _start
 _start:
@@ -20,6 +28,8 @@ _start:
     .long   0                       /* reserved */
 _entry:
     move.w  #0x2700,%sr
+    move.w  #DIAG_YELLOW,0xDFF180   /* stage 4 */
+    DIAGSTOP(4)
     lea     _start(%pc),%a5         /* a5 = where we really are */
     move.l  16(%a5),%d1             /* nreloc */
     beq.s   2f
@@ -52,10 +62,12 @@ _entry:
     bcc.s   4f
     clr.l   (%a0)+
     bra.s   3b
-4:  /* needs a 68020 or better: AttnFlags (bootinfo +0) bits 1-3 and 7 */
+4:  move.w  #DIAG_ORANGE,0xDFF180   /* stage 5 */
+    DIAGSTOP(5)
+    /* needs a 68020 or better: AttnFlags (bootinfo +0) bits 1-3 and 7 */
     move.w  0x1000,%d0
     and.w   #0x008E,%d0
-    bne.s   6f
+    bne.w   6f
     lea     msg_cpu(%pc),%a0
     lea     0xDFF000,%a1
     move.w  #30,0x32(%a1)           /* SERPER: 115200 baud PAL */
@@ -68,11 +80,29 @@ _entry:
     move.b  %d0,%d1
     move.w  %d1,0x30(%a1)
     bra.s   7b
-9:  move.w  #0xF00,0xDFF180         /* red screen */
-10: bra.s   10b
+9:  move.l  #DIAG_ORANGE,-(%sp)     /* split screen: orange (stage 5) over red */
+    bsr.w   diag_halt
 msg_cpu:
     .asciz  "\r\nzenix: needs a 68020 or better (this is a 68000/68010) - halting.\r\n"
     .balign 2
+
+/* void diag_halt(u16 top): stop for good with the screen split - the stage colour reached on top, red from line 150
+ * down - so a phone photo shows both "it stopped on an error" and where (audit A11, kernel/diag.h). The beam counter
+ * (VPOSR/VHPOSR as one long: V8 in bit 16, V7-V0 in bits 15-8) works without DMA; line 150 is inside the picture on
+ * PAL and NTSC. Plain 68000 code: the CPU check above uses it. Interrupts must be off already. */
+    .globl  diag_halt
+diag_halt:
+    move.w  6(%sp),%d1
+    lea     0xDFF000,%a0
+1:  move.l  4(%a0),%d0
+    lsr.l   #8,%d0
+    and.w   #0x1FF,%d0
+    cmp.w   #150,%d0
+    bcc.s   2f
+    move.w  %d1,0x180(%a0)
+    bra.s   1b
+2:  move.w  #0xF00,0x180(%a0)
+    bra.s   1b
 6:  lea     kstack_top,%sp
     pea     0x1000                  /* bootinfo */
     jsr     kmain
@@ -86,7 +116,7 @@ msg_cpu:
     .balign 4
     .globl  stage0_blob
 stage0_blob:
-    .incbin "build/stage0.bin"
+    .incbin "stage0.bin"             /* found through -I$(BUILD) (Makefile) */
     .balign 4
     .text
 

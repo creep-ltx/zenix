@@ -5,6 +5,8 @@ port with a script (tools/serial-tap.py format) and save screenshots.
 
 usage: shot.py config.fs-uae script.txt out_prefix t1 [t2 ...]
  -> out_prefix-<t>.png for each time t (seconds after start)
+ZENIX_SERIAL=/tmp/name: a private serial port (the config is copied with the port rewritten, as run-test.sh does).
+RESET_AT=s[,s...]: press Ctrl + Left Amiga + Right Amiga (a warm reset) at those times (tools/diag-test.sh).
 Needs the cage rig from the Creator project (maker/cage_rig.py)."""
 import os
 import subprocess
@@ -18,8 +20,14 @@ conf, script, prefix = sys.argv[1:4]
 times = sorted(float(t) for t in sys.argv[4:])
 here = os.path.dirname(os.path.abspath(__file__))
 log = prefix + ".serial.log"
+serial = os.environ.get("ZENIX_SERIAL", "/tmp/zenix-serial")
+if serial != "/tmp/zenix-serial":
+    text = open(conf).read().replace("/tmp/zenix-serial", serial)
+    conf = prefix + ".fs-uae"
+    open(conf, "w").write(text)
+resets = sorted(float(t) for t in os.environ.get("RESET_AT", "").split(",") if t)
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"),
-                        "/tmp/zenix-serial", log, script],
+                        serial, log, script],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)
 t0 = time.time()
@@ -54,8 +62,14 @@ try:
                 for _ in range(int(count or 1)):
                     subprocess.run(cmd, env=cage._env(), check=False)
                     time.sleep(0.15)
-        for t in times:
+        events = [(t, "shot") for t in times] + [(t, "reset") for t in resets]
+        for t, what in sorted(events):
             time.sleep(max(0, t0 + t - time.time()))
-            cage.screenshot("%s-%d.png" % (prefix, int(t)))
+            if what == "shot":
+                cage.screenshot("%s-%d.png" % (prefix, int(t)))
+            else:                                  # the keyboard reset: all three held, then released
+                subprocess.run(["wtype", "-P", "Control_L", "-s", "150", "-P", "Super_L", "-s", "150",
+                                "-P", "Super_R", "-s", "700", "-p", "Super_R", "-p", "Super_L", "-p", "Control_L"],
+                               env=cage._env(), check=False)
 finally:
     tap.terminate()

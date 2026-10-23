@@ -35,6 +35,17 @@ void kprintf(const char *fmt, ...);
 u32 klog_read(u32 off, char *buf, u32 n);     /* the kernel log: n characters from position off (0 = the first ever) */
 void klog_to_screen(void);                    /* the display is up: show the log so far and mirror new messages */
 void klog_mirror_off(void);                   /* boot is finished: kprintf goes to the serial port and the log only */
+void klog_mirror_on(void);                    /* a panic: its text goes to the screen too */
+/* previous-boot log (audit A12): the ring lives in the top KLOG_AREA_SIZE bytes of chip RAM (the bootblock reserves
+ * the same size), so the next boot after a warm reset can show how this one ended */
+#define KLOG_AREA_SIZE  0x4000
+#define KLOG_PREV       0x80000000u           /* SYS_klog offset flag: read the previous boot's log (dmesg -p) */
+#define KLOG_END_RUNNING 0u                   /* why a boot ended, kept in the log header for the next boot */
+#define KLOG_END_PANIC   1u
+void klog_init(const struct bootinfo *bi);    /* first thing in kmain: read the previous log, start this one */
+void klog_show_prev(void);                    /* print what klog_init found (and the previous boot's last lines) */
+void klog_set_reason(u32 r);
+u32 klog_area_base(void);                     /* the chip RAM address of the area, 0 if the log is not kept there */
 void term_log(const char *s, u32 n);          /* text onto the visible workspace */
 
 /* main.c */
@@ -80,6 +91,7 @@ void kfree(void *p);
 int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
 int gfx_up(void);
+void gfx_panic(void);            /* panic with the display up: red bar, the text stays */
 void gfx_cell(int row, int col, u8 ch, u8 attr);
 void gfx_bar_cell(int col, u8 ch, u8 attr);
 void gfx_scroll(void);

@@ -1,0 +1,7 @@
+sleep 30
+send dmesg -p\r
+sleep 2
+send crash\r
+sleep 36
+send dmesg -p | tail -n 1\r
+sleep 3

@@ -9,8 +9,46 @@ cable is needed.
    RAM, so no disk is needed to get a shell). Put `build/zenix-ram.adf` where the Gotek / GoDrive reads it.
 2. Boot the Amiga from that floppy image. Zenix needs a 68020 or better (Emu68 counts) and about 4 MB of fast RAM.
 3. The screen shows the kernel's boot messages, then the shell prompt. If they scrolled by: `dmesg`, or Shift+Up.
-   The floppy LED should go off before the kernel's messages (the bootblock stops the motor). A red screen before
-   any message means the bootblock could not get memory or read the floppy.
+   The floppy LED should go off before the kernel's messages (the bootblock stops the motor). Before the text
+   appears the whole screen changes colour at every boot step (next section): if it stops on a colour, that colour
+   says where.
+
+## If it freezes: screen colours, then the previous-boot log
+No serial cable is needed. Until the display is up, every boot step paints the **whole screen** one colour; a
+freeze leaves the colour of the last step reached. (Before the first Zenix colour, Kickstart's own colours come and
+go: dark and light grey at power-on, and its insert-disk picture. A Zenix colour only appears once the floppy has
+started loading.)
+
+| Screen | Where it stopped | What it likely means |
+|---|---|---|
+| **blue** | 1. bootblock: loading the kernel from the floppy | The floppy read hangs (Gotek, image) or takes very long. |
+| **cyan** (light blue-green) | 2. kernel loaded; stage0 reads the Pi's tables, the memory list is collected | stage0 or Emu68's device tree (a guru here means the OS was still alive: stage0). |
+| **magenta** (purple-pink) | 3. AmigaOS switched off; the kernel is copied to its home | The copy or the jump to the kernel (cache flush, A2). |
+| **yellow** | 4. the kernel runs, relocating itself | Relocation, or the cache flush after it. |
+| **orange** | 5. relocated; about to start the kernel's C code | The start of `kmain`, the kernel stack. |
+| **green** | 6. log and serial port, hardware tables, ROM font | Printing the Pi / Zorro tables, the ROM font. |
+| **brown** | 7. exception vectors and the memory manager (self-test) | Memory map from AmigaOS, or the memory self-test. |
+| **pink** | 8. memory is fine; switching the instruction cache on | The cache (A1: `cpusha`). |
+| **white** | 9. starting the display | Copper list, bitplane, chip RAM for the screen. |
+| black with a blue bar and text | 10. the display is up | From here **the text** says where it is: the boot log is on the screen. |
+| **grey** (after one of the above) | no display: no ROM font found or no chip RAM | Zenix carries on, but only on the serial port. |
+| **the whole screen red** | the bootblock failed | No memory, or a floppy read error. |
+| **a colour on top, red below** | the kernel stopped on an error at that step (a panic, an exception in the kernel) | The step is the top colour. Orange over red is also "this CPU is a 68000". |
+| **text with a red bar at the top** | a kernel panic after the display was up | The last lines on the screen say why. |
+
+**After a freeze or a panic, do this:**
+1. Take a photo of the screen (the whole screen: the colour, or the text).
+2. Press **Ctrl + Left Amiga + Right Amiga** together (a warm reset). The Gotek still holds the floppy image, so
+   Zenix boots again.
+3. When the text appears, look for the lines between `=== previous boot (N) ended here ...` and
+   `=== end of the previous boot's log ===`: the last 20 lines the frozen boot wrote, each marked `> `. Take a photo
+   of them (Shift+Up scrolls back if they went by). The first line also says whether it ended with a kernel panic.
+4. At the prompt, `dmesg -p` shows the whole previous log, `dmesg` this boot's.
+
+The log lives in the top 16 KB of chip RAM, which a warm reset should not clear. Whether that is true on the
+PiStorm is **not yet known**: if the next boot says `klog: no log from a previous boot (power-on, or the memory
+was cleared)` right after a warm reset, chip RAM did not survive it there; please report that line. After a
+power-off the log is always gone. `klog: ... damaged (checksum)` means part of it was overwritten.
 
 ## What the boot messages should say
 | Line | Means |
@@ -33,8 +71,8 @@ cable is needed.
 
 ## What to report back
 A photo or the text of `dmesg`, plus: did the prompt appear, did `fdisk list` show the card, and the last `emmc:` line
-if something failed. If the screen stays black or the machine hangs before any text, say at which point (Kickstart
-screen, then black).
+if something failed. If the machine hangs before any text: the colour of the screen (table above), and after a
+warm reset the photo of the "previous boot" lines and whether the `klog:` lines say the log survived.
 
 ## Known unverified (could fail on the first run)
 The SD controller is written from the SD Host Controller specification and has only run against a model; clocks, the

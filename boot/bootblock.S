@@ -27,11 +27,37 @@
  * code starts there) (both multiples of 512; the ramdisk
  * image follows the kernel on the disk and is loaded with it).
  */
+/* Boot stage colours (audit A11; the table is in docs/pi-first-boot.md): the whole screen shows COLOR00 from the
+ * first instruction on (copper and bitplane DMA off, 0 bitplanes), so a freeze is named by its colour. Same values
+ * as kernel/diag.h. A test build may stop at stage N (make DIAG=-DDIAG_STOP=N) to check the colour in FS-UAE. */
+#define DIAG_BLUE       0x00F       /* 1: the bootblock runs, loading the kernel from the floppy */
+#define DIAG_CYAN       0x0FF       /* 2: loaded; stage0 (Pi tables) and the memory list, AmigaOS still alive */
+#define DIAG_MAGENTA    0xF0F       /* 3: AmigaOS switched off, the copier moves the kernel to its home */
+#ifdef DIAG_STOP
+#define DIAGSTOP(n)     .if DIAG_STOP == n ; 99: bra.s 99b ; .endif
+#else
+#define DIAGSTOP(n)
+#endif
+/* The previous-boot log (audit A12): the top 16 KB of chip RAM (kernel/serial.c KLOG_AREA_SIZE, the same value) */
+#define KLOG_AREA_SIZE  0x4000
+
     .text
     .globl  _start
 _start:
+    move.w  #0x0180,0xDFF096        /* DMACON: copper and bitplane DMA off: COLOR00 fills the whole screen */
+    move.w  #0x0200,0xDFF100        /* BPLCON0: no bitplanes, colour on */
+    move.w  #0,0xDFF106             /* BPLCON3 (ECS/AGA): bank 0, no border blanking (not clr: a 68000 reads first) */
+    move.w  #DIAG_BLUE,0xDFF180
+    DIAGSTOP(1)
     move.l  %a1,%a5                 /* trackdisk ioreq */
     move.l  _start-4(%pc),%d7       /* kernel size (bootblock offset 8) */
+
+    /* keep the kernel log's area (the top 16 KB of chip RAM, MaxLocMem) out of every buffer below: the kernel reads
+     * the previous boot's log from there. If exec already uses it AllocAbs fails; harmless (the kernel checks). */
+    move.l  62(%a6),%a1             /* ExecBase->MaxLocMem: top of chip RAM */
+    lea     -KLOG_AREA_SIZE(%a1),%a1
+    move.l  #KLOG_AREA_SIZE,%d0
+    jsr     -204(%a6)               /* AllocAbs (never freed: the OS dies) */
 
     /* the bootinfo + hwinfo table: 1 KB of cleared chip RAM (bootinfo 120 bytes, hwinfo 408 at +0x100), moved to
      * 0x1000 by the copier */
@@ -61,6 +87,8 @@ _start:
     jsr     -456(%a6)               /* DoIO */
     tst.l   %d0
     bne     fail
+    move.w  #DIAG_CYAN,0xDFF180
+    DIAGSTOP(2)
 
     /* the drive is not used again: motor off (TD_MOTOR with io_Length 0), or it would run until Zenix's own
      * floppy driver happens to use the drive (it only stops motors it started) */
@@ -155,6 +183,8 @@ nofast:
     move.w  #0x7FFF,0x96(%a0)       /* DMACON: everything off */
     move.b  #0x7F,0xBFED01          /* CIA-A ICR: all sources off */
     move.b  #0x7F,0xBFDD00          /* CIA-B ICR: all sources off */
+    move.w  #DIAG_MAGENTA,0x180(%a0)
+    DIAGSTOP(3)
 
     /* relocate the copier clear of any possible overlap */
     lea     copier(%pc),%a0
@@ -173,7 +203,7 @@ nofast:
     jmp     0x500
 
 fail:
-    move.w  #0xF00,0xDFF180         /* red background = boot failure */
+    move.w  #0xF00,0xDFF180         /* the whole screen red = the bootblock failed (no memory, or a floppy read error) */
     bra.s   fail
 
 /* Instruction-cache flush after code was written (supervisor mode): the CPU

@@ -52,7 +52,7 @@ static void add_range(u32 lo, u32 hi, int chip)
     freeb[chip] += hi - lo;
 }
 
-/* Add [lo,hi) minus up to two excluded spans */
+/* Add [lo,hi) minus the excluded spans */
 static void add_minus(u32 lo, u32 hi, int chip, const u32 ex[][2], int nex)
 {
     for (int i = 0; i < nex; i++) {
@@ -71,9 +71,11 @@ static void add_minus(u32 lo, u32 hi, int chip, const u32 ex[][2], int nex)
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
 {
     /* low chip RAM (vectors, bootinfo, bootblock scratch) and the kernel */
-    u32 ex[3][2] = { { 0, 0x2000 }, { kernel_pa, kernel_pa + kernel_mem },
-                     { bi->ram_pa, bi->ram_pa + bi->ram_size } };
-    int nex = bi->ram_size ? 3 : 2;
+    /* ... and the kernel log's area at the top of chip RAM (audit A12; 0 when the log could not be kept there) */
+    u32 kla = klog_area_base();
+    u32 ex[4][2] = { { 0, 0x2000 }, { kernel_pa, kernel_pa + kernel_mem },
+                     { kla, kla ? kla + KLOG_AREA_SIZE : 0 }, { bi->ram_pa, bi->ram_pa + bi->ram_size } };
+    int nex = bi->ram_size ? 4 : 3;
     boot_ram_pa = bi->ram_pa;
     boot_ram_size = bi->ram_size;
     for (int i = 0; i < bi->nregions; i++) {

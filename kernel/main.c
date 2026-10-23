@@ -1,6 +1,7 @@
 #include "kernel.h"
 #include "hw.h"
 #include "hwinfo.h"
+#include "diag.h"
 
 static u32 vector_table[256] __attribute__((aligned(4)));
 volatile u32 ticks;
@@ -39,11 +40,61 @@ void *memcpy(void *d, const void *s, unsigned long n)
     return d;
 }
 
-void panic(const char *why)
+/* ---- boot stage colours (audit A11, kernel/diag.h) ---- */
+u16 diag_colour = DIAG_ORANGE;          /* start.S set stage 5 before kmain */
+
+void diag_stage(int n, u16 colour)
+{
+    if (colour) {
+        diag_colour = colour;
+        if (!gfx_up())                  /* once the Copper runs, it owns COLOR00 */
+            COLOR00 = colour;
+    }
+#ifdef DIAG_STOP
+    if (n == DIAG_STOP) {
+        kprintf("diag: stopped at stage %d (DIAG_STOP test build)\n", n);
+        serial_flush();
+        for (;;)
+            ;
+    }
+#endif
+#ifdef DIAG_PANIC
+    if (n == DIAG_PANIC) {
+        kprintf("diag: test panic at stage %d (DIAG_PANIC test build)\n", n);
+        panic("test panic (DIAG_PANIC)");
+    }
+#endif
+    (void)n;
+}
+
+/* The start of every kernel stop: interrupts off, the reason kept for the next boot's "previous boot" lines (A12),
+ * and the message to the screen too once the display is up (after the boot it only goes to the log). A fault while
+ * the panic text is being printed (the terminal itself failing) leaves the screen alone from then on. */
+static int panic_printing, panic_noscreen;
+
+static void panic_begin(void)
 {
     ints_off();
+    klog_set_reason(KLOG_END_PANIC);
+    if (panic_printing) {
+        klog_mirror_off();
+        panic_noscreen = 1;
+    } else if (gfx_up() && !panic_noscreen)
+        klog_mirror_on();
+    panic_printing = 1;
+}
+
+void panic(const char *why)
+{
+    panic_begin();
     kprintf("\n*** kernel panic: %s\n", why);
+    kprintf("*** stopped. Photo, then Ctrl-Amiga-Amiga: the next boot shows this again\n");
+    panic_printing = 0;
     serial_flush();             /* TX ring won't drain with ints off */
+    if (gfx_up() && !panic_noscreen)
+        gfx_panic();            /* the bar turns red, the text stays */
+    else
+        diag_halt(diag_colour); /* no display: the stage colour over red */
     for (;;)
         ;
 }
@@ -67,9 +118,11 @@ void exc_c(u32 *rb)
                 current->pid, current->name, vec, pc, faddr);
         proc_exit(139);
     }
+    panic_begin();                      /* this text, too, must reach the log and the screen before the stop */
     kprintf("\n*** exception in the kernel: vector %u sr=%x pc=%p", vec, sr, pc);
     if (fmt == 0xA || fmt == 0xB)
         kprintf(" fault-addr=%p", faddr);
+    panic_printing = 0;
     panic("unhandled exception");
 }
 
@@ -242,6 +295,8 @@ static const char *cpu_name(u16 attn)
 
 void kmain(struct bootinfo *bi)
 {
+    klog_init(bi);                      /* before anything prints: the previous boot's log is read from there */
+    diag_stage(6, DIAG_GREEN);
     serial_init();
     kprintf("\nZenix - 68020+, flat, no MMU\n");
     kprintf("cpu: %s (attnflags %x)\n", cpu_name(bi->attn), bi->attn);
@@ -273,17 +328,24 @@ void kmain(struct bootinfo *bi)
         }
 
     int font_ok = gfx_font_init(bi->font) == 0;     /* before mem_init: OS leftovers */
+    diag_stage(7, DIAG_BROWN);
     vectors_init();
     mem_init(bi, bi->kernel_pa, *(u32 *)(bi->kernel_pa + 12));
     mem_selftest();
+    diag_stage(8, DIAG_PINK);
     cache_enable((bi->attn & 0x88) != 0);       /* 68040 or 68060 */
     kprintf("cache: instruction cache on (data cache off: no MMU to keep DMA coherent)\n");
+    diag_stage(9, DIAG_WHITE);
     if (font_ok && gfx_init() == 0) {
         klog_to_screen();                       /* the boot messages so far, then the rest as they come */
         kprintf("display: 640x256, 1 bitplane, Copper split bar + text, ROM Topaz 8\n");
-    } else
+    } else {
+        diag_stage(0, DIAG_GREY);
         kprintf("display: not available (%s), serial only\n",
                 font_ok ? "out of chip RAM" : "no ROM font");
+    }
+    klog_show_prev();                           /* how the previous boot ended (A12), on the screen if it is up */
+    diag_stage(DIAG_DISPLAY_UP, 0);
 
     { u32 t = rtc_read(); if (t) time_base = t - ticks / 100; }
     if (blk_init() && !bi->ram_size)
@@ -305,6 +367,7 @@ void kmain(struct bootinfo *bi)
 
     input_init();
     klog_mirror_off();                          /* from here the screen belongs to the programs */
+    diag_stage(DIAG_BOOTED, 0);
     timer_init();
     ints_on();
     bar_draw();
