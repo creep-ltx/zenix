@@ -85,8 +85,6 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Error numbers: the kernel and the servers return negative errno values (architecture.md section 7). Still a bare
   -1: `SYS_mountinfo` past the end, `ipc_call`/`ipc_recv` on a bad port, `port_create`/`port_find`, the internal
   block allocators of ext2.c. `zwhy` shows no text for -1 (EPERM, 1) for that reason: the caller's own words appear.
-- `ls` lists at most 400 names of one directory; more are left out without a message (a known gap, found
-  2026-10-23, listed at the end of the audit).
 - Input rings between the interrupts and `kwork`: 128 keyboard codes, 1024 serial bytes; a tty queue holds 1024
   bytes of typed input that no program has read yet. Anything dropped is counted on the kernel log.
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS
