@@ -1,7 +1,7 @@
 [fs-uae]
 accuracy = 1
 amiga_model = A1200
-kickstart_file = /home/creep/UAE/ROM/kicka1200.rom
+kickstart_file = $ZENIX_KICKSTART_DIR/kicka1200.rom
 floppy_drive_0 = ../../build/zenix.adf
 floppy_drive_speed = 0
 hard_drive_0 = ../../build/zenix.hdf
@@ -12,6 +12,6 @@ window_width = 960
 window_height = 768
 zoom = full
 amiga_model = A600
-kickstart_file = /home/creep/UAE/ROM/kick204-a500plus.rom
+kickstart_file = $ZENIX_KICKSTART_DIR/kick204-a500plus.rom
 joystick_port_0 = none
 joystick_port_1 = none

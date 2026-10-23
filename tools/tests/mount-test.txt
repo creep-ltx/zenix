@@ -1,4 +1,5 @@
-sleep 22
+wait zenix:/# 90
+sleep 1
 send fdisk init ide0 -y\r
 sleep 3
 send fdisk add ide0 one 6\r

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* tail [-n N | -N | -n +N] [-c N] [file...]: the last lines (default 10) or bytes */
 int main(int argc, char **argv)

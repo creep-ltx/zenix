@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* chmod MODE file...: MODE octal (644) or symbolic ([ugoa]*[+-=][rwxX]+ , comma separated) */
 static int apply(const char *spec, unsigned cur, unsigned *out, int isdir)

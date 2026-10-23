@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # dmesg shows the kernel log: the boot messages appear a second time, in the output of the command.
 # usage: tools/klog-test.sh   (ZENIX_SERIAL defaults to /tmp/zenix-klog-serial so it can run beside other tests)
 cd "$(dirname "$0")/.." || exit 1

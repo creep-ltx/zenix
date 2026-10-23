@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Users and permissions in the emulator: boots as the autologin root, switches users with su, checks what a normal user may
 # and may not do (write to /, remove another user's file, read a 0600 file, sticky /tmp), umask, owner names in ls -l,
 # passwd with a wrong and a right password, chown/chgrp.
@@ -9,7 +10,7 @@
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
-OUT=${USERS_OUT:-/tmp/zenix-users}; mkdir -p $OUT
+OUT=${USERS_OUT:-${ZENIX_OUT:-/tmp/zenix-users}}; mkdir -p $OUT
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae 320 tools/tests/users-test.txt 2>&1 | sed 's/\x1b\[K//g' > $OUT/run.log
 pass=1
 want() { if grep -aqF -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }

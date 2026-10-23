@@ -4,12 +4,13 @@
 feature is added, changed or removed, its line here changes in the same commit. `README.md` only summarises it.
 
 Status words: **verified** = built and run in FS-UAE (an emulator; no feature has yet run on a real Amiga);
-**read** = checked in the source only; **planned** = not built. Last full update: 2026-10-22.
+**read** = checked in the source only; **built** = written, but no test runs it where it matters; **planned** = not
+built. Last checked against the code: 2026-10-23.
 
 ## Machine support
 | Feature | Status | Details |
 |---|---|---|
-| 68020, 68030, 68040, 68060 (soft float, no MMU use) | verified | architecture.md section 2; matrix of 13 emulated setups |
+| 68020, 68030, 68040, 68060 (soft float, no MMU use) | verified | architecture.md section 2; the emulated machines of the matrix (architecture.md section 13) |
 | 68000 refused with a message (orange over red screen, serial text) | verified (`tools/diag-test.sh`) | start.S |
 | Boot stage colours: the whole screen changes colour at each boot step until the display is up; error stops show the step's colour over red, a panic after that a red bar with its text | verified in FS-UAE (`tools/diag-test.sh`: each stage's colour from a screenshot); not yet on the A1200 | pi-first-boot.md (the table), architecture.md section 3 |
 | Chip and fast RAM pools, 1 MB chip up to 8 MB+ fast | verified | architecture.md section 5 |
@@ -17,9 +18,9 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Boot with a RAM-disk root loaded from the floppy (no IDE disk) | verified (dev/test image) | `zenix-ram.adf` |
 | Gayle IDE disk with Amiga RDB partitions (A600/A1200/A4000); its interrupt sources switched off (polling only) | verified (the interrupt quieting only in FS-UAE) | architecture.md section 2 |
 | Instruction-cache (and Emu68 JIT) flush after every write of code; built for 68020-68060 with an opcode check | verified in FS-UAE, read for Emu68 | architecture.md section 2 |
-| Battery clock (MSM6242, RP5C01) | verified in emulator | `kernel/rtc.c` |
+| Battery clock (MSM6242, RP5C01) | read (no test checks it) | `kernel/rtc.c` |
 | Real Amiga hardware | planned | limits.md |
-| PiStorm SD, network, USB, sound, floppy, mouse, RTG | planned | ROADMAP.md phase 6 |
+| Network, USB, RTG graphics, sound beyond the bell | planned | ROADMAP.md phase 6 |
 
 ## Kernel
 | Feature | Status | Details |
@@ -31,10 +32,10 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | `malloc` with size classes and free lists (memory reused, big blocks given back), `realloc`; directory tools without stack arrays or entry limits | verified (`tools/memtest.sh`: flat shell memory, tools 25 directories deep) | architecture.md section 12 |
 | Preemptive round-robin scheduler, 100 Hz, 50 ms slice | verified | architecture.md section 6 |
 | `spawn` (no `fork`); wait, exit status, zombies | verified | architecture.md section 6 |
-| About 55 system calls via `TRAP #0`, all pointers validated; errors as negative errno numbers (`kernel/errno.h`, Linux values), the same from both filesystem servers, shown as text by `zwhy`/`zstrerror` | verified (users-test permission texts, cmds2-test batch E script, host ext2 test) | architecture.md section 7 |
+| System calls via `TRAP #0` (the count and the list: architecture.md section 7), all pointers validated; errors as negative errno numbers (`kernel/errno.h`, Linux values), the same from both filesystem servers, shown as text by `zwhy`/`zstrerror` | verified (users-test permission texts, cmds2-test batch E script, host ext2 test) | architecture.md section 7 |
 | Crash containment: a faulting program is killed, memory freed | verified | how-it-works.md section 3 |
 | Named message ports, synchronous zero-copy calls | verified | architecture.md section 8 |
-| Servers: disk (`diskd`), filesystem (`fsd`), starter (`boot`) | verified | architecture.md section 9 |
+| Servers: disk (`diskd`), filesystems (`fsd` for ext2, `zfsd`/`mount.zenixfs` for ZenixFS), starter (`boot`) | verified | architecture.md section 9 |
 | Environment variables inherited by children | verified | |
 | Interrupt handlers only queue input; tty, echo, Ctrl-C/Ctrl-Z and console switches run in process context (no lost wakeups, lost input counted in `dmesg`); unexpected interrupt vectors are logged once and ignored | verified in FS-UAE (`tools/kbd-test.sh`, `tools/jobs-test.sh`, the matrix); the unexpected vectors read only | architecture.md section 11 |
 | Job control: Ctrl-Z stop, `jobs`, `fg`, `bg`, stopped state in `ps` (`SYS_jobctl`, `SYS_wait` untraced) | verified (`tools/jobs-test.sh`) | architecture.md section 7 |
@@ -51,9 +52,9 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 |---|---|---|
 | ext2 (revision 0/1, 1-4 KB blocks) read and write, clean under host `e2fsck`; modern `mke2fs -t ext2` volumes too; ext3 read-only, ext4 refused | verified (FS-UAE; host test `tools/ext2-host-test.sh`) | architecture.md section 10 |
 | A damaged ext2 disk fails requests, never crashes the server (fuzzed) | verified on the host (`tools/ext2-host-test.sh`) | architecture.md section 10 |
-| Files up to double-indirect size, growing directories, rename | verified | |
+| Files up to double-indirect size, growing directories, rename | verified (FS-UAE write tests; the double-indirect size on the host, `tools/ext2-host-test.sh`: a 300 KB file on 1 KB blocks, `e2fsck` clean) | |
 | Hard links, symbolic links (incl. fast symlinks), chmod, utimes | verified | |
-| `/dev/null`, `/dev/zero`, `/dev/tty` (the controlling tty), `/dev/tty1`..`/dev/tty10`, `/dev/console` | verified | architecture.md section 11 |
+| `/dev/null`, `/dev/zero`, `/dev/tty` (the controlling tty), `/dev/tty1`..`/dev/tty10`, `/dev/console` | verified: `/dev/null` (the test scripts), the consoles and their root-only rule (users-test); the rest read | architecture.md section 11 |
 | Pipes (2 KB) | verified | |
 | `fdisk` (RDB), `mkfs.ext2`, `fsck.ext2` (check and repair) | verified | man/fdisk.txt, man/mkfs.ext2.txt, man/fsck.ext2.txt |
 | `fdisk` keeps an RDB written by HDToolBox exactly (other geometries, FileSysHeader/LSEG chain); refuses a table it cannot keep | verified (host `tools/disk-host-test.sh`, FS-UAE `tools/disktools.sh`) | man/fdisk.txt |
@@ -71,25 +72,26 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Extended partitions, GPT | not done | limits.md |
 | Mounting more than the root filesystem (`mount`, `umount`, nested mounts, ext2 servers per device) | verified in FS-UAE | man/mount.txt, architecture.md section 9 |
 | ZenixFS on Zenix: `mkfs.zenixfs`, `mount` (type from the partition table), `fsck.zenixfs`; atomic commits, checksums | verified in FS-UAE | man/mount.zenixfs.txt, man/mkfs.zenixfs.txt |
-| ZenixFS as the root filesystem (a second root server in the kernel, chosen by the partition type) | built; test tools/zroot-test.sh written, not yet run | man/mount.zenixfs.txt |
-| `/etc/fstab` and `mount -a` at boot | built; test tools/zroot-test.sh written, not yet run | man/mount.txt, man/init.txt |
+| ZenixFS as the root filesystem (a second root server in the kernel, chosen by the partition type) | verified in FS-UAE (`tools/zroot-test.sh`) | man/mount.zenixfs.txt |
+| `/etc/fstab` and `mount -a` at boot | verified in FS-UAE (`tools/zroot-test.sh` mounts an ext2 volume from it) | man/mount.txt, man/init.txt |
 | Disk flush request (ATA FLUSH CACHE) and device capabilities in the disk protocol | verified (IDE in FS-UAE; not on real drives) | man/diskd.txt |
-| Unlink of an open file, directory moves between parents, triple-indirect | not done | limits.md |
+| An open file that is unlinked keeps its data until the last close (both filesystems) | verified (host ext2 test, cmds-test `unlinkopen`) | architecture.md section 9 |
+| ext2: moving a directory to another parent (ZenixFS does it; `mv` copies), triple-indirect files | not done | limits.md |
 
 ## Terminal and display
 | Feature | Status | Details |
 |---|---|---|
 | 640x256 (PAL) or 640x200 (NTSC, measured at boot) hires planar display, all text, blitter-assisted scrolling | verified (the matrix, NTSC included) | architecture.md section 11 |
-| ROM Topaz 8 font from the Kickstart in use at boot | verified | |
-| 80x32 text (80x25 on NTSC), ANSI/VT100 (cursor, erase, insert/delete, scroll regions, bold/underline/inverse) | verified | man/termtest.txt |
-| Scrollback 200 lines per console (Shift/Ctrl+Up/Down) | verified | |
+| ROM Topaz 8 font from the Kickstart in use at boot | read (every test boots with it; no test compares the glyphs) | |
+| 80x32 text (80x25 on NTSC), ANSI/VT100 (cursor, erase, insert/delete, scroll regions, bold/underline/inverse) | the size verified (the matrix); the escape codes read (`termtest` draws them, no test compares the screen) | man/termtest.txt |
+| Scrollback 200 lines per console (Shift/Ctrl+Up/Down) | read (no test checks it) | |
 | Ten virtual consoles, Amiga+F1..F10, each with its own `login` (started when the console is first shown, again after a logout); the controlling tty of a process is its console (`ls \| less` on console 2 reads console 2's keys) | verified in FS-UAE (`tools/kbd-test.sh`, `tools/users-test.sh`, the matrix) | architecture.md section 11, man/init.txt |
 | Type-ahead kept when a program switches the tty to raw mode | verified (`tools/users-test.sh`) | architecture.md section 11 |
 | The clock: tick latch from the machine's E-clock (PAL or NTSC crystal), 100 Hz to within the E-clock's resolution | built; the boot log shows the choice (the matrix's NTSC machine); the rate itself not measured | architecture.md section 11 |
-| Raw tty mode, arrow and function keys as escape codes | verified | |
+| Raw tty mode, arrow and function keys as escape codes | verified for the arrows (`tools/edit-regress.sh`); the function keys read | |
 | Amiga keyboard, handshake timed by the E-clock; serial console mirror (115200 baud) | verified | architecture.md section 11 |
 | Keymaps with AmigaOS's four layers (plain, Shift, Alt, Shift+Alt): Swedish (`sv`, the AmigaOS "s" layout) and US; Caps Lock; key repeat | verified in FS-UAE (`tools/kbd-test.sh`) | architecture.md section 11 |
-| Colours, UTF-8, display server with a drawing API, mouse | planned | ROADMAP.md phase 5 |
+| Colours, UTF-8, display server with a drawing API, a mouse pointer | planned | ROADMAP.md phase 5 |
 
 ## Shell
 Line editing, history (`~/.sh_history`) with Ctrl-R search, tab completion, variables and the environment, quoting,
@@ -109,6 +111,7 @@ pages are in [man/](man/). **verified** against GNU for the text tools (`tools/c
 |---|---|
 | `make` builds the floppy, the disk image and the test images | verified |
 | Headless FS-UAE test runs from serial scripts (`tools/run-test.sh`, `tools/tests/`) | verified |
-| 13-machine matrix (`tools/matrix.sh`), benchmark with the CIA E-clock (`bench`) | verified |
+| `make check`: every strong test in one run, a table, fails on any failure (`tools/check.sh`, docs/README.md "Testing") | verified |
+| The machine matrix (`tools/matrix.sh`, architecture.md section 13), benchmark with the CIA E-clock (`bench`) | verified |
 | Commands compared against GNU (`tools/cmds-test.sh`) | verified |
 | Documentation check (`tools/docs-check.sh`) | verified |

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # ZenixFS host build: library, tools and tests. Run `make test`.
 CC ?= gcc
 CFLAGS ?= -std=gnu11 -O2 -g -Wall -Wextra

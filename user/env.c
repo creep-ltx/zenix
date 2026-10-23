@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* env [NAME=value...] [command [args...]]: print the environment, or run a command with changes */
 int main(int argc, char **argv)

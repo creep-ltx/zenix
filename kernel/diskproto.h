@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
 /* Messages to the disk server ("disk" port). Devices are named: "ide0" is the
  * whole disk, "ide0p1", "ide0p2"... are the partitions of its RDB. A handle

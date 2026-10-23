@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Fail if a built ELF contains a 64-bit multiply or divide: mulu.l/muls.l <ea>,Dh:Dl or divu.l/divs.l <ea>,Dr:Dq with a
 # 64-bit dividend. The 68060 does not implement them (it traps to vector 61, "unimplemented integer instruction"), and
 # under Zenix there is no 68060.library to emulate them, so the kernel would panic or the program be killed. The
@@ -10,7 +11,8 @@
 # (bit 10 clear: mulu.l #k,Dn and divul.l <ea>,Dr:Dq) are allowed. Verified against objdump's mnemonics: it prints the
 # 64-bit forms as "mulul #k,%dh,%dl" / "divul %ea,%dr,%dq" (three operands with two different registers) and the 32-bit
 # ones as "mulul #k,%dn" / "divull ...".
-TOOLPREFIX="${TOOLPREFIX:-$HOME/opt/m68k-elf/bin/m68k-elf-}"
+TOOLPREFIX="${TOOLPREFIX:-m68k-elf-}"     # the Makefile passes its own; default: from PATH
+command -v "${TOOLPREFIX}objdump" >/dev/null || { echo "check-68020-60: ${TOOLPREFIX}objdump not found (set TOOLPREFIX)"; exit 1; }
 fail=0
 for f in "$@"; do
     bad=$("${TOOLPREFIX}objdump" -d "$f" | grep -E '^ *[0-9a-f]+:[[:space:]]+4c[0-7][0-9a-f] [0-7][4c]0[0-7]( |$)')

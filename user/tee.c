@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* tee [-a] [file...]: copy standard input to standard output and the files */
 int main(int argc, char **argv)

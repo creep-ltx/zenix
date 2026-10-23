@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Host test of boot/stage0.c against a real device tree: tools/stage0-test.sh [bcm2711-rpi-cm4.dtb]
 set -e
 cd "$(dirname "$0")/.."

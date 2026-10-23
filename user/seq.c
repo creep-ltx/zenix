@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* seq [first [step]] last */
 int main(int argc, char **argv)

@@ -7,7 +7,8 @@ cable is needed.
 ## Boot it
 1. `make build/zenix-ram.adf` (the RAM-disk image: kernel plus a small root filesystem that the boot block loads into
    RAM, so no disk is needed to get a shell). Put `build/zenix-ram.adf` where the Gotek / GoDrive reads it.
-2. Boot the Amiga from that floppy image. Zenix needs a 68020 or better (Emu68 counts) and about 4 MB of fast RAM.
+2. Boot the Amiga from that floppy image. Zenix needs a 68020 or better (Emu68 counts); fast RAM is
+   recommended (with 1 MB of chip RAM and nothing else there is room for one login).
 3. The screen (all text, no bar: 32 rows on PAL, 25 on NTSC) shows the kernel's boot messages, then on console 1 the
    autologin warning and the shell prompt (the image logs root in on console 1 by itself, `/etc/autologin`). If they
    scrolled by: `dmesg`, or Shift+Up. Amiga+F2 .. Amiga+F10 show consoles 2-10, each with its own `zenix login:`
@@ -62,7 +63,7 @@ power-off the log is always gone. `klog: ... damaged (checksum)` means part of i
 | `zorro: N: manufacturer 6d73 product 33 ...` | Emu68's own boards (and RAM) as AmigaOS configured them. |
 | `emmc: controller at ..., mailbox at ...` then `base clock`, `SD clock`, `card ready`, `card address`, `sectors`, `sector 0 starts ...` | The SD card driver, stage by stage. **The last line that appears shows how far it got.** |
 | `ide: no drive found` | Expected: there is no IDE disk (the status port reads 0xFF, so this comes at once). Zenix then tries the SD card, then the A3000's SCSI. Gayle's interrupt sources were switched off first; `ide: stray Gayle IDE interrupt` later would mean they were not. |
-| `ext2: 1 KB blocks, 768 blocks ...` | The root filesystem came from the RAM disk (the SD card is not the root). |
+| `ext2: 1 KB blocks, 704 blocks, 128 inodes` | The root filesystem came from the RAM disk (the SD card is not the root). |
 
 ## Then look at the disk
 - `fdisk list` shows `ide0` (the whole SD card: its size in sectors) and its partitions. A normal Emu68 card has a
@@ -81,3 +82,5 @@ warm reset the photo of the "previous boot" lines and whether the `klog:` lines 
 The SD controller is written from the SD Host Controller specification and has only run against a model; clocks, the
 mailbox calls, card detect and the cache handling around the mailbox message are the likely trouble spots (see
 limits.md). Speed is the safe 25 MHz mode (about 12 MB/s at most).
+
+Last checked against the code: 2026-10-23.

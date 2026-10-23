@@ -1,4 +1,11 @@
-TOOLPREFIX := $(HOME)/opt/m68k-elf/bin/m68k-elf-
+# SPDX-License-Identifier: GPL-2.0-only
+# The m68k-elf cross toolchain (gcc, binutils). Give its prefix with `make TOOLPREFIX=/path/to/bin/m68k-elf-` or in the
+# environment; by default m68k-elf-gcc from PATH, else the default install place $(HOME)/opt/m68k-elf. Exported, so
+# tools/mkzexe.py and tools/check-68020-60.sh use the same one.
+ifeq ($(origin TOOLPREFIX),undefined)
+TOOLPREFIX := $(if $(shell command -v m68k-elf-gcc 2>/dev/null),m68k-elf-,$(HOME)/opt/m68k-elf/bin/m68k-elf-)
+endif
+export TOOLPREFIX
 CC      := $(TOOLPREFIX)gcc
 OBJCOPY := $(TOOLPREFIX)objcopy
 BUILD   := build
@@ -219,17 +226,21 @@ $(BUILD)/zenix-zroot.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot-ze
 	make -s -C zenixfs build/zenixfs-tool
 	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS)" 8
 
+# boots in a window on this screen (for a person, never for a test; tools/fsuae_conf.py fills in the Kickstart directory,
+# ZENIX_KICKSTART_DIR)
 run: all
-	fs-uae fsuae/a1200-020.fs-uae
+	ZENIX_BUILD=$(abspath $(BUILD)) python3 tools/fsuae_conf.py fsuae/a1200-020.fs-uae $(BUILD)/run.fs-uae
+	fs-uae $(BUILD)/run.fs-uae
 
-# boot headless, print the serial log
-test: all
-	rm -f $(BUILD)/zenix.hdf; $(MAKE) $(BUILD)/zenix.hdf
-	tools/run-test.sh fsuae/a1200-020.fs-uae 20
+# the gate: build every image, run the host tests and then every strong emulator test one at a time, print a table, fail
+# if anything failed (tools/check.sh; about 1.5 hours; docs/README.md "Testing"). Uses build/ of this tree.
+check:
+	tools/check.sh
+test: check
 
 clean:
 	rm -rf $(BUILD)
 
 .SECONDARY:
 .DELETE_ON_ERROR:           # a recipe that fails leaves no half-written target behind for the next make to trust
-.PHONY: all run test clean
+.PHONY: all run test check clean

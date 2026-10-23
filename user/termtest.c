@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* Terminal test: ANSI features, then a raw-mode key reader (q quits). */
 #define ESC "\033"

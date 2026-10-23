@@ -1,6 +1,7 @@
 # How Zenix works: three walk-throughs
 
-Read architecture.md first for the parts. Everything here is *read* from the source (2026-10-22).
+Read architecture.md first for the parts. Everything here is *read* from the source; last checked against the code
+2026-10-23.
 
 ## 1. From power-on to a shell prompt
 
@@ -29,12 +30,13 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    if there was one (`klog_show_prev`); real-time clock if present;
    IDE probe with Gayle's interrupt sources switched off first (panic only if there is neither a disk nor a RAM
    disk).
-5. `proc_init`, `tty_init`, then three processes **built into the kernel image** (so they need no disk):
-   `diskd` (priv), `fsd`, `boot` (priv), and `zfsd`. Timer interrupt (latch from the E-clock) and interrupts are
+5. `proc_init`, `tty_init`, then four processes **built into the kernel image** (so they need no disk):
+   `diskd` (priv), `fsd` (ext2), `zfsd` (ZenixFS) and `boot` (priv). Timer interrupt (latch from the E-clock) and interrupts are
    switched on. The main thread becomes
    the idle loop: reap orphans, `schedule()`, drain the serial buffer, `cpu_idle()` (stop until an interrupt).
-6. `diskd` finds the disk and RDB and creates the `disk` port. `fsd` mounts a device through it and creates the
-   `fs` port. `boot` polls for `fs` (up to ~30 s), then `spawn("/bin/init")` and waits for it.
+6. `diskd` finds the disk and its partition table and creates the `disk` port. `fsd` and `zfsd` both choose the root
+   device the same way (architecture.md section 9); the one whose filesystem it is mounts it and creates the `fs`
+   port, the other ends. `boot` polls for `fs` (up to ~30 s), then `spawn("/bin/init")` and waits for it.
    `spawn` itself is messages to `fsd`: the kernel's `proc_spawn` opens the file (`fs_exec_open`) and reads it
    straight into the new process's memory.
 7. **`/bin/init`** prints `/etc/motd`, runs `mount -a` if there is an `/etc/fstab`, and starts `/bin/login` on

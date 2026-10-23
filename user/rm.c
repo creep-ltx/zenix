@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* rm [-f] [-r] [-v] file... : remove files; -r removes directories and what is in them */
 static int o_f, o_r, o_v, rc;

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #pragma once
 #include "miniz_common.h"
 /* ------------------- Low-level Decompression API Definitions */

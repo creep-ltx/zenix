@@ -2,29 +2,72 @@
 
 | Document | What it answers |
 |---|---|
-| [architecture.md](architecture.md) | How Zenix is put together: the layers, the kernel, memory, processes, messages, the servers, the filesystem, the terminal and display, and how the image is built. |
+| [architecture.md](architecture.md) | How Zenix is put together: the layers, the kernel, memory, processes, messages, the servers, the filesystems, the terminal and display, the build and the tests. |
 | [how-it-works.md](how-it-works.md) | Walk-throughs: from power-on to a shell prompt, what happens inside `cat file | grep x`, what happens when a program crashes. |
+| [features.md](features.md) | The one list of what Zenix can do, with the status of each feature (verified / read / planned). |
+| [limits.md](limits.md) | What is missing, what is unmeasured, the hard numbers (limits), and the honest no-MMU limit. |
+| [commands.md](commands.md) | The command index (every program, with a link to its manual page in `man/`, the pages `man` shows). |
 | [vs-amigaos.md](vs-amigaos.md) | Zenix next to AmigaOS: what is the same, what is different, what Zenix gives up and gains. |
 | [vs-unix-linux.md](vs-unix-linux.md) | Zenix next to Unix and Linux (and no-MMU Linux, Fuzix, Minix 3, QNX): where it behaves like a Unix and where it cannot. |
-| [commands.md](commands.md) | Reference for every command: what it does, how to use it, its options (manual pages in `man/`, ready for `man`). |
-| [features.md](features.md) | The one list of what Zenix can do, with its status (verified / planned). Kept in step with the code. |
-| [pi-first-boot.md](pi-first-boot.md) | How to try Zenix on a PiStorm A1200 for the first time, what the boot messages should say and what to report. |
-| [limits.md](limits.md) | What is missing, what is unmeasured, and the honest no-MMU limit. |
+| [pi-first-boot.md](pi-first-boot.md) | How to try Zenix on a PiStorm A1200 for the first time: the boot colours, what the messages should say, what to report. |
+| [zenixfs.md](zenixfs.md) | ZenixFS, the native filesystem: why, the design, the host tools, its status. |
+| [zenixfs-format.md](zenixfs-format.md) | ZenixFS's exact on-disk format, version 1. |
+| [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D9 and where each one stands. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
-| [zenixfs.md](zenixfs.md) | ZenixFS, the native filesystem: the design and its status (format in [zenixfs-format.md](zenixfs-format.md)). |
-| [audit-2026-10-22.md](audit-2026-10-22.md) | The full audit of 2026-10-22 and the current work list (batches A-E); fixed items are marked there. |
-| [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D8. |
+| [audit-2026-10-22.md](audit-2026-10-22.md) | The audit of 2026-10-22: the work list of the hardening round (batches A-E), each item marked with its fix. |
 
-How these documents were written: by reading the source tree (`kernel/`, `user/`, `boot/`, `tools/`) and the
-existing notes on 2026-10-22. Statements about this code are *read* from the source unless a sentence says
-*verified* (it was run in FS-UAE, see the knowledge-base note `amiga/zenix-m0-m3-findings.md`). Statements about
-AmigaOS, Linux and other systems are from general knowledge, not measured here. Nothing has run on a real Amiga yet.
+How these documents are written: by reading the source tree. A statement about Zenix is *read* from the source unless
+it says *verified* (a test checked it in FS-UAE; on real hardware it would say "verified on the A1200" with the date).
+Statements about AmigaOS, Linux and other systems are general knowledge, not measured here. Nothing has run on a real
+Amiga yet.
 
 ## Where things live (and the rule)
-- All documentation is in `docs/`. The only others are `README.md` (short, points here), `CLAUDE.md` (the rules for
-  whoever works on the project) and the manual pages' sources, which are also in `docs/man/`.
-- Manual pages: `docs/man/NAME.txt`, one per program. Command index: `commands.md`. Features: `features.md`.
-- Code and data that look like text but are not documentation stay where they are: `rootfs/` (files that end up on
-  the Zenix disk), `tools/tests/` (scripts typed into the emulator), `archive/` (old code kept for reference).
+- All documentation is in `docs/`. The only others are `README.md` (short, points here) and `CLAUDE.md` (the rules for
+  whoever works on the project). `archive/README` says what the old code in `archive/` is (not built) and its licence.
+- Manual pages: `docs/man/NAME.txt`, one per program, plain text of at most 78 columns (the format `man` reads); the
+  root disk gets them in `/usr/man`. Command index: `commands.md`. Features: `features.md`.
+- Text that is not documentation stays where it is used: `rootfs/` (files that end up on the Zenix disk),
+  `tools/tests/` (scripts typed into the emulator).
 - **When a command is added, changed or removed, or a feature appears, the same commit updates its manual page,
-  `commands.md` and `features.md`.** `tools/docs-check.sh` checks this; `--staged` checks a commit before it is made.
+  `commands.md` and `features.md`.** One fact lives in one place; other documents point to it.
+
+`tools/docs-check.sh` checks this: every program has a page and a line in `commands.md`, every link there and in the
+other documents leads to a file, this index lists every document, and the counts written in the documents ("N
+programs", "N system calls", "N emulated setups") match the Makefile's `UAPPS`, `kernel/kernel.h` and the matrix
+configs. `--staged` also checks what is about to be committed (a changed program needs its page changed),
+`--commit REV` a commit already made.
+
+## Testing
+Nothing counts as done until a test checks it. The tests run FS-UAE headless (never on the screen), from scripts typed
+into the serial port (`tools/serial-tap.py`: `sleep`, `send` and `wait REGEX [timeout]`, which waits for the output).
+
+**The gate: `make check`** (also `make test`, `tools/check.sh`). It builds every image, runs the host tests (seconds),
+then the emulator tests one after another (about 1.5 hours), each with its own serial port and output directory, and
+prints a table (test, PASS/FAIL, time, details; the logs stay in `/tmp/zenix-check.*`). It fails if any test fails.
+`tools/check.sh host` runs only the host tests, `tools/check.sh NAME...` only the named ones (e.g. `matrix users-test`).
+Not run by it: `floppy-test` (known broken: a whole-disk read of df1 once came back wrong) and `stage0-68k-test` when
+the Python module `unicorn` is missing (shown as skipped).
+
+| Test | What it checks |
+|---|---|
+| docs-check | the documentation rules above |
+| ext2-host-test, disk-host-test | the ext2 server, `fsck.ext2`, `mkfs.ext2`, `fdisk` and `diskd` built for the PC, against image files and `e2fsck`, with a fuzz loop |
+| zenixfs-test | `make -C zenixfs test`: the ZenixFS library on the PC (random operations, power cuts, damaged blocks) |
+| mfm-test, emmc-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, A3000 SCSI and Pi device-tree code against models |
+| matrix | boots every emulated machine (architecture.md section 13), a short session on each |
+| cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
+| users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root |
+| jobs-test, kbd-test | job control and history search; the keyboard (keymaps, repeat, consoles) |
+| diag-test | the boot colours, the panic screens, the previous-boot log across a warm reset |
+| memtest | the allocator, deep directory walks, corrupt program files refused |
+| mounttest, zenixfstest | mounting ext2 and ZenixFS, `fsck`, nested mounts |
+| edit-regress, disktools, mbr-test | the editor; `fdisk`/`mkfs`/`fsck` on scratch disks; PC partition tables |
+
+What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default
+FS-UAE's `~/Documents/FS-UAE/Kickstarts`); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
+fills it in, with the build directory and the serial port). kbd-test, diag-test and the screenshots
+(`tools/shot.py`) also need the headless cage rig: `ZENIX_CAGE_RIG` names its directory. A single test:
+`ZENIX_SERIAL=/tmp/NAME tools/users-test.sh` (a serial port of its own, so it can run beside another session's test);
+one emulator run at a time per session. `make run` boots a window for a person, never for a test.
+
+Last checked against the code: 2026-10-23.

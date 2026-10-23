@@ -2,8 +2,9 @@
 
 Zenix is a small Unix-like operating system for Amigas with a 68020 or better and **no MMU**. It does not sit on
 top of AmigaOS: the floppy bootblock borrows Kickstart only to load the kernel and read the memory map, then
-switches the OS off and owns the machine. The sources are about 5,000 lines of kernel C/assembler (`kernel/`) and
-a set of user-mode programs (`user/`).
+switches the OS off and owns the machine. The sources are about 9,000 lines of kernel C, assembler and headers
+(`kernel/`) and the user-mode programs and servers (`user/`, about 11,000 lines), plus the ZenixFS library
+(`zenixfs/`). Last checked against the code: 2026-10-23.
 
 ## 1. The shape of the system
 
@@ -14,15 +15,15 @@ a set of user-mode programs (`user/`).
  kernel       scheduler | memory manager | ports + messages | file table, pipes, tty line
               discipline | terminal + display (Copper/blitter) | keyboard | serial | IDE | clock
                  |      (messages: "fs" port, "disk" port)
- user mode    boot (starts init)   fsd (ext2 filesystem server)   diskd (disk server)
-              ^-- these three are linked into the kernel image and started before any disk is readable
+ user mode    boot (starts init)   fsd (ext2)   zfsd (ZenixFS)   diskd (disk server)
+              ^-- these four are linked into the kernel image and started before any disk is readable
 ```
 
 Principles (from `docs/ROADMAP.md`): small kernel, servers for everything else; one way to do a thing; messages
 pass pointers, not copies; the standard build contains only what the standard system uses.
 
 Today the kernel is *not* a pure microkernel: the terminal, display, tty, pipes and the file table are still in
-it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decisions stand").
+it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisions stand").
 
 ## 2. Hardware assumptions
 
@@ -83,8 +84,9 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
    `kmain()`.
 4. `kmain` reads the previous boot's log (below), then starts the serial port, vector table, memory manager,
-   caches, display, clock and disk, then creates three built-in processes: `diskd`, `fsd`, `boot`. `boot` waits for
-   the `fs` port and starts `/bin/init`, which prints `/etc/motd` and runs `/bin/sh`.
+   caches, display, clock and disk, then creates the four built-in processes: `diskd`, `fsd`, `zfsd`, `boot`. `boot`
+   waits for the `fs` port and starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and starts `login` on
+   console 1 (section 11).
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)
 
@@ -224,7 +226,7 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
   two sizes do not interleave and fragment each other.
 - Every block records its owner. `mem_free_owner(pid)` hands back everything a process held, which is how a
   crashed or killed process is cleaned up without any cooperation from it.
-- Free-byte counters are O(1), so the status bar can read them cheaply.
+- Free-byte counters are O(1), so `free` and `SYS_meminfo` read them cheaply.
 - `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 8 at a time,
   each at most `MEMALLOC_MAX` = 64 MB). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
   refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
@@ -270,12 +272,15 @@ second block. Both are owned by the pid and freed together.
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. About 55 calls: files (`open read write
-lseek readdir stat fstat lstat chdir getcwd mkdir unlink rmdir rename link symlink readlink chmod utimes dup dup2
-pipe`), processes (`spawn wait exit yield sleep kill procinfo`), memory (`memalloc memfree meminfo`), time
-(`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr isatty setfg`), environment (`envset envget`),
-messages (`port_create port_find call recv reply replyrecv`), mounts (`mount umount mountinfo`; `statfs` takes a
-mount index), and a few privileged ones for the servers (`blk_read blk_write blk_flush blk_size blk_ram`).
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 74 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-77, of which 39, 40 and 68 are unused; the next free number is
+claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
+rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
+index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo`), memory (`memalloc memfree meminfo`),
+time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`), environment (`envset
+envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
+recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
+ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`blk_read blk_write blk_flush blk_size blk_ram fd_info fd_rw`).
 
 **Every user pointer is validated** (`user_ok`) against the process's own span and its `memalloc` regions. A bad
 pointer makes the call return -EFAULT; the process lives. Strings are copied into kernel buffers with bounds; a path
@@ -285,14 +290,9 @@ argument longer than 63 bytes is -ENAMETOOLONG.
 the kernel, the servers, libz and the host tests: -ENOENT, -EACCES, -EEXIST, -ENOTDIR, -EISDIR, -EINVAL, -ENOSPC,
 -EROFS, -ENAMETOOLONG, -ENOTEMPTY, -EXDEV, -EBUSY, -EBADF, -EFAULT, -ENOMEM, -E2BIG ... The filesystem servers'
 answers pass through the kernel unchanged, and both servers return the same number for the same case (section 9).
-libz keeps the last one in `zerrno`; `zwhy(dflt)` and `zstrerror(e)` give its text. Still a bare -1 (the reason is
-not known there, or the caller treats it as a plain "no"): `SYS_mountinfo` past the end, `ipc_call`/`ipc_recv` on a
-bad port, `port_create`/`port_find` (a taken or missing name), `ext2_mount_as` refusals (the reason is printed);
-limits.md lists them. A permission refusal is always -EACCES (13), also for chmod/chown by a non-owner (Linux says
+libz keeps the last one in `zerrno`; `zwhy(dflt)` and `zstrerror(e)` give its text. A few places still answer a
+bare -1; limits.md ("Error numbers") lists them. A permission refusal is always -EACCES (13), also for chmod/chown by a non-owner (Linux says
 EPERM there).
-
-Identity: `getuid getgid geteuid setuid setgid umask chown` (see section 14). Numbers 39, 40 (the workspace shell
-requests) and 68 (the login session) were removed with the workspaces in audit batch E and are free.
 
 `kill` today means "terminate" (`proc->killed`); Unix-style signal handlers do not exist yet. There is one more
 thing a process can be told: **stop and continue** (job control). Ctrl-Z on a terminal (`kernel/tty.c`) or `SYS_jobctl`
@@ -381,7 +381,8 @@ permission rules as the ext2 server. Changes commit three seconds after the firs
 allocates only at mount (block cache, bitmaps, three scratch blocks), so a running server needs no more memory.
 
 ### The mount table (`kernel/vfs.c`)
-Entry 0 is the root (port `fs`); `SYS_mount` puts a running server's port on a directory (up to 8 mounts). With only the
+Entry 0 is the root (port `fs`); `SYS_mount` puts a running server's port on a directory (8 entries, the root
+included). With only the
 root mounted, paths go to its server untouched. Otherwise the kernel makes every path absolute and normalised as text
 (working-directory text + path, `.` and `..` removed; `path_abs`, the one normaliser, also used for the
 working-directory text itself and for mount points; at most 159 bytes, `FS_PATHMAX` in fsproto.h, longer is
@@ -440,8 +441,8 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   damage it cannot repair) and `fdisk` (RDB).
 - Not done: moving directories between parents (rename answers -EXDEV, so `mv` copies), triple-indirect files, a
   journal.
-- Several filesystems can be mounted (`mount`, see section 9). Planned: **ZenixFS** (atomic commit, checksummed metadata, extents),
-  see `zenixfs.md`.
+- Several filesystems can be mounted (`mount`, see section 9). **ZenixFS** (copy-on-write commits, checksummed
+  metadata, extents) is the native one, served by `mount.zenixfs` and possible as the root: `zenixfs.md`.
 
 ## 11. Pipes, tty, terminal, display
 
@@ -556,9 +557,9 @@ a new heap string, or refuses (NULL, `zerrno` ENAMETOOLONG, "file name too long"
 63 bytes a system call takes. Programs that start another program by name (`find -exec`, `xargs`, `timeout`) find it
 with `path_find`, the shell's `$PATH` search; `sed` and `expr :` share `bre_to_ere`. libz and the programs are built
 with `-ffunction-sections -fdata-sections`, so the linker's `--gc-sections` leaves out the libz parts a program does
-not use. A level of recursion costs about 100 bytes of stack instead of 1.4-2.7 KB. `printf`, `snprintf`, `sprintf`, `fprintf`
+not use. A level of recursion costs 72-170 bytes of stack instead of 1.4-2.7 KB. `printf`, `snprintf`, `sprintf`, `fprintf`
 and `oprintf` share one formatter with no length limit: `%d %i %u %x %X %o %c %s %p %%`, flags `- 0 + space #`, width and
-precision as numbers or `*`; no floating point, no 64-bit numbers. About 77 programs: a full shell (`sh`:
+precision as numbers or `*`; no floating point, no 64-bit numbers. The programs (the count and the list: commands.md): a full shell (`sh`:
 line editor, history, completion, variables, quoting, wildcards, pipes, redirects incl. here-documents,
 `if/while/for`, functions, aliases, arithmetic, command substitution, job control), file tools, text tools
 (`grep sed sort diff cut tr ...`), `gzip`/`tar`, a pager (`less`), an editor (`edit`), `man`, disk tools (`fdisk
@@ -568,7 +569,7 @@ outputs (`tools/cmds-test.sh`).
 
 ## 13. Build and test
 
-- Toolchain: `m68k-elf-gcc` in `~/opt/m68k-elf`; `make` produces `build/zenix.adf` (bootblock + kernel only),
+- Toolchain: `m68k-elf-gcc` and binutils, prefix `TOOLPREFIX` (README.md); `make` produces `build/zenix.adf` (bootblock + kernel only),
   `build/zenix.hdf` (ext2 root disk) and, as a separate dev/test build, `build/zenix-ram.adf` (the same plus a RAM
   root image).
 - Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
@@ -581,8 +582,12 @@ outputs (`tools/cmds-test.sh`).
   stage; the screenshot's pixel colour), the split and red-bar panic screens, and the previous-boot log across a
   warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `make BUILD=/tmp/x` builds everything
   in another directory (the kernel finds `stage0.bin` and the built-in servers through `-I$(BUILD)`).
-  `tools/matrix.sh` boots 13 emulated machine variants (A1200 stock and with fast RAM, chip-only, NTSC, 030/040/060,
-  A4000, and an A600 that must refuse cleanly). Filesystem work is checked with the host's `e2fsck`.
+  `tools/matrix.sh` boots 14 emulated setups, every config in `fsuae/` and `fsuae/matrix/` but the mount and
+  ZenixFS-root ones: A1200 stock (68EC020, 2 MB chip), with 4 or 8 MB fast RAM, 1 MB chip only, NTSC, with a
+  68030, 68040 or 68060, an RDB disk, a RAM-disk boot with no disk, an A3000 (SCSI), two 68030 development setups
+  (A1200- and A4000-class), and a 68000 that must be refused cleanly. Each boots, runs a short session and logs in
+  on console 2. Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go
+  (docs/README.md, "Testing"); the Kickstart files come from `ZENIX_KICKSTART_DIR` (`tools/fsuae_conf.py`).
 - Source layout: `boot/` bootblock, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
   `link/` linker script, `tools/` build and test scripts, `rootfs/` files copied to the root disk, `fsuae/` emulator
   configs, `archive/later/` and `archive/old-mmu/` code kept from the earlier MMU-based Zenix (reference, not built).
@@ -604,8 +609,7 @@ outputs (`tools/cmds-test.sh`).
   `0666 & ~umask` (directories `0777 & ~umask`). A refusal returns -EACCES (13) to the caller.
 - `login` (run by `init` on each console, section 11) authenticates against `/etc/passwd`, drops root and starts
   the shell. Every console has its own login, so several users (or one user several times) can be logged in at
-  once; nothing in the kernel records a "session" any more (`SYS_session` and the workspace shells it served are
-  gone, audit E).
+  once; nothing in the kernel records a "session".
 - **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill`, `SYS_jobctl` and `SYS_setfg`): root may signal
   any process but the idle one; others only a process whose real or effective uid equals their real or effective
   uid, or their own child, and never a built-in server (started from the kernel image: diskd, fsd, zfsd, boot) or a

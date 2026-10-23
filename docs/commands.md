@@ -1,16 +1,17 @@
 # Command reference
 
-Manual pages for every Zenix program, in `docs/man/NAME.txt`. They use the exact format that Zenix's own `man`
-reads (plain text, under 80 columns, `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`,
-`EXAMPLES`, `EXIT STATUS`, `SEE ALSO`), so they can be copied straight to `/usr/man/` on the system disk. `man -k`
-reads the line after `NAME` ("name - summary").
+Zenix has 106 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
+`more`, `pkill`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
+`NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
+root disk gets them in `/usr/man` (below). `man -k` reads the line after `NAME` ("name - summary").
 
-The shell, the pager and the editor have longer hand-written pages in `rootfs/usr/man/` (`sh.txt`, `less.txt`,
-`edit.txt`); those are the ones installed today.
-
-**Written 2026-10-22 by reading each program's source** (`user/*.c`): options, defaults, limits and exit codes
-are what the code does, not what the usual Unix tool does. Nothing here was run; each "NOTES" section lists
-where a command is smaller than its Unix namesake.
+The pages are written by reading each program's source (`user/*.c`): options, defaults, limits and exit codes are
+what the code does, not what the usual Unix tool does. Each NOTES section lists where a command is smaller than its
+Unix namesake. Whether a command is tested: features.md (the text tools and the shell are compared with GNU bash and
+tools by `tools/cmds-test.sh` and `tools/cmds2-test.sh`). This index was checked against the Makefile on
+2026-10-23 (`tools/docs-check.sh` does it on every commit); the pages are kept in step with each change, and were
+spot-checked against the code that day.
 
 ## Files and directories
 | Command | Summary |

@@ -89,7 +89,11 @@ Disks and data:
   `ZENIX_SERIAL=/tmp/<name> tools/run-test.sh ...`, `make BUILD=/tmp/<name>`. One emulator run of yours at a time;
   stop if the machine's load is above 16.
 - Before committing: `make` (all images, including `build/zenix-ram.adf`), the tests for what you touched, and
-  `tools/docs-check.sh --staged` (must say `docs-check: ok`).
+  `tools/docs-check.sh --staged` (must say `docs-check: ok`). Before a merge or a hardware build: `make check` (every
+  strong test, a table, about 1.5 hours; docs/README.md "Testing").
+- The repository names no path of this PC. On the owner's PC the tests need (in the environment of every test run):
+  `export ZENIX_KICKSTART_DIR=~/UAE/ROM ZENIX_CAGE_RIG=~/Projects/DemoScene/Creator`; `TOOLPREFIX` defaults to
+  `$(HOME)/opt/m68k-elf/bin/m68k-elf-` when `m68k-elf-gcc` is not on PATH, which is where it is here.
 - The real A1200 is shared with other projects: message the other sessions before using it through Wasabi, and say
   when you are done.
 

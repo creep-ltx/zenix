@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Boot Zenix in FS-UAE inside a private invisible Wayland session (cage on
 the headless backend, nothing appears on the desktop), type into the serial
 port with a script (tools/serial-tap.py format) and save screenshots.
 
 usage: shot.py config.fs-uae script.txt out_prefix t1 [t2 ...]
  -> out_prefix-<t>.png for each time t (seconds after start)
-ZENIX_SERIAL=/tmp/name: a private serial port (the config is copied with the port rewritten, as run-test.sh does).
+ZENIX_SERIAL=/tmp/name: a private serial port (the config is always copied and filled in by fsuae_conf.py, as run-test.sh does).
 RESET_AT=s[,s...]: press Ctrl + Left Amiga + Right Amiga (a warm reset) at those times (tools/diag-test.sh).
-Needs the cage rig from the Creator project (maker/cage_rig.py)."""
+Needs the headless cage rig: ZENIX_CAGE_RIG names its directory (tools/fsuae_conf.py)."""
 import os
 import subprocess
 import sys
 import time
 
-sys.path.insert(0, os.path.expanduser("~/Projects/DemoScene/Creator"))
-from maker.cage_rig import Cage  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fsuae_conf  # noqa: E402
+Cage = fsuae_conf.load_cage()
 
 conf, script, prefix = sys.argv[1:4]
 times = sorted(float(t) for t in sys.argv[4:])
 here = os.path.dirname(os.path.abspath(__file__))
 log = prefix + ".serial.log"
 serial = os.environ.get("ZENIX_SERIAL", "/tmp/zenix-serial")
-if serial != "/tmp/zenix-serial":
-    text = open(conf).read().replace("/tmp/zenix-serial", serial)
-    conf = prefix + ".fs-uae"
-    open(conf, "w").write(text)
+try:                    # the Kickstart directory, the build directory and the serial port filled in (fsuae_conf.py)
+    text = fsuae_conf.resolve(open(conf).read(), serial=serial)
+except fsuae_conf.ConfError as e:
+    sys.exit(f"shot.py: {e}")
+conf = prefix + ".fs-uae"
+open(conf, "w").write(text)
 resets = sorted(float(t) for t in os.environ.get("RESET_AT", "").split(",") if t)
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"),
                         serial, log, script],

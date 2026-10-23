@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 
 /* Named ports with synchronous calls. See kernel.h for the model.

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Floppy bootblock for Zenix (bootinfo v3).
  *
  * The Kickstart boot strap loads sectors 0-1 (1024 bytes), verifies the

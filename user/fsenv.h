@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
 /* Environment for kernel/ext2.c when it is built into the filesystem server. */
 #ifdef ZHOST

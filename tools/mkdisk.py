@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Raw boot disk until the filesystem exists: sector 0 = ZDIR table
 (magic, count, 15 x {name[20], lba, bytes}), files from sector 1 on.
 usage: mkdisk.py out.hdf file.zx ...   (entry name = file name minus .zx)"""

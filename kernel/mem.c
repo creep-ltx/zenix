@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 
 /* Memory manager. No MMU, so every byte is physical and nothing can be

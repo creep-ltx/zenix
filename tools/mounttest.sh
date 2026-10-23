@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Mount tests in the emulator: two ext2 partitions mounted on /mnt and /mnt/sub, data across unmount/mount.
 # Verified afterwards with the host's e2fsck.
 cd "$(dirname "$0")/.." || exit 1
 make -s all build/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-OUT=/tmp/zenix-mounttest; mkdir -p $OUT
+OUT=${ZENIX_OUT:-/tmp/zenix-mounttest}; mkdir -p $OUT
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 dd if=/dev/zero of=build/scratch.hdf bs=1M count=16 status=none

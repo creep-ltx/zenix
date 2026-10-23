@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: GPL-2.0-only -->
-# ZenixFS on-disk format, version 1 (draft, 2026-10-22; implemented on the host only)
+# ZenixFS on-disk format, version 1 (final 2026-10-22; implemented by `zenixfs/zenixfs.c` on the host and in Zenix; checked 2026-10-23)
 
 Rationale and goals are in `zenixfs.md`. This file is the exact format. **All integers are big-endian.** Because of
 that, two keys compare correctly with a plain `memcmp`. A *block* is `1 << bshift` bytes (bshift 10, 11 or 12: 1, 2

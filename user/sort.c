@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* sort [-r] [-n] [-u] [-f] [-b] [-k N] [-t C] [-o FILE] [file...]: stable merge sort of lines */
 static int o_r, o_n, o_u, o_f, o_b, o_key; static int o_sep = -1;

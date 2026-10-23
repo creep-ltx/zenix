@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Build a bootable Amiga floppy image (ADF) from bootblock code + kernel.
 
 Layout: sectors 0-1 = bootblock ('DOS\\0', checksum, kernel size, code),

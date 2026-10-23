@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "pw.h"
 /* ls [-aAldRFht rSs1] [file...]: list files. In a terminal the names come in columns; -l is the long form. */
 static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty, printed_any;

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* cmp file1 file2: the first byte where they differ */
 int main(int argc, char **argv)

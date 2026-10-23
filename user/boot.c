@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* Built into the kernel image: the starter. Waits for the filesystem
  * server, starts /bin/init on console 1 and waits for it; should init

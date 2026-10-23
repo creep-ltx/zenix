@@ -1,4 +1,5 @@
-sleep 26
+wait zenix:/# 90
+sleep 1
 send mount\r
 sleep 3
 send df\r

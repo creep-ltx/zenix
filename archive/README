@@ -1,0 +1,13 @@
+archive/ - old code kept for reference only. NOTHING HERE IS BUILT: no Makefile, script or image uses it.
+
+later/    pieces of the earlier, MMU-based Zenix ("zenix-old") that may be reused one day (console, ELF
+          loader, FAT, IDE, keyboard, kmalloc, processes, signals, some user programs).
+old-mmu/  that earlier kernel's core: start-up, memory, FPU and the 68030 MMU (per-process address spaces),
+          dropped by the restart.
+
+Licence: this is the owner's own code from zenix-old, which carried the MIT licence
+(Copyright (c) 2026 Tobias Karlsson). The files have not been relicensed one by one; code moved from here
+into the built tree becomes part of Zenix under GPL-2.0-only (the owner may relicense their own code, and MIT
+is compatible with GPL-2 in any case) and gets the GPL-2.0-only SPDX line then.
+
+Checked 2026-10-23.

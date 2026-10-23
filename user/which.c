@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* which name...: where a program is found in $PATH */
 int main(int argc, char **argv)

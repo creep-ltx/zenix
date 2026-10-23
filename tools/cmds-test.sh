@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Run rootfs/tests/cmds.sh under Zenix (output to a file on its disk) and under the host's bash with GNU tools
 # (LC_ALL=C); the two outputs must be identical.
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
-OUT=/tmp/zenix-cmds; mkdir -p $OUT
+OUT=${ZENIX_OUT:-/tmp/zenix-cmds}; mkdir -p $OUT
 ( cd rootfs/home/t && LC_ALL=C bash ../../tests/cmds.sh "$PWD" > $OUT/expected.txt 2>&1 )
 cat > $OUT/script.txt <<EOS
-sleep 22
+wait zenix:/# 90
+sleep 1
 send sh /tests/cmds.sh > /tmp/cmds.out 2>&1; echo finished-cmds\r
-sleep ${CMDS_WAIT:-100}
+wait (?m)^finished-cmds$ ${CMDS_WAIT:-100}
 EOS
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae $(( ${CMDS_WAIT:-100} + 30 )) $OUT/script.txt > $OUT/run.log 2>&1
 debugfs -R "cat /tmp/cmds.out" build/zenix.hdf > $OUT/actual.txt 2>/dev/null

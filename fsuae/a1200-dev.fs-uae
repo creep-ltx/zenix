@@ -9,7 +9,7 @@
 # verified via the kernel's "cpu: ~N MHz effective" E-clock probe.
 accuracy = 0
 amiga_model = A1200
-kickstart_file = /home/creep/UAE/ROM/kicka1200.rom
+kickstart_file = $ZENIX_KICKSTART_DIR/kicka1200.rom
 chip_memory = 2048
 fast_memory = 8192
 uae_cpu_model = 68030

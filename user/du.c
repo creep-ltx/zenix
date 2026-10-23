@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* du [-s] [-a] [-h] [-k] [path...]: space used, in 1 KB blocks (file sizes rounded up) */
 static int o_s, o_a, o_h, rc;

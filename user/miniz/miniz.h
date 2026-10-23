@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /* miniz.h - CUtils' cut-down stand-in for miniz's own miniz.h: only the
  * raw deflate (tdefl) and inflate (tinfl) parts are kept, no zlib API, no
  * zip archives, no stdio. The platform switches are fixed to the portable

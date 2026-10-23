@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Boot Zenix from disks that carry a PC partition table (like an Emu68 SD card) in the emulator:
 #   1. MBR with a FAT boot partition and an ext2 partition (type 0x83)
 #   2. MBR with a FAT boot partition and a type 0x76 partition holding an Amiga RDB with the ext2 root
@@ -6,7 +7,7 @@
 # usage: tools/mbr-test.sh   (uses ZENIX_SERIAL, default /tmp/zenix-mbr-serial, so it can run beside other tests)
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-OUT=/tmp/zenix-mbr; mkdir -p $OUT
+OUT=${ZENIX_OUT:-/tmp/zenix-mbr}; mkdir -p $OUT
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-mbr-serial}
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Build build/scratch.hdf: an RDB disk whose one partition holds an ext2 filesystem with deliberate damage,
 # to test fsck.ext2 against. usage: tools/mkbadfs.sh [clean]
 set -e

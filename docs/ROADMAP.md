@@ -1,7 +1,8 @@
 # Zenix: vision, principles and plan
 
-Written 2026-10-22. This is the one place for the long-term picture; DESIGN.md holds the numbered
-decisions and README.md the current state. Update all three when something changes.
+Written 2026-10-22, last checked against the code 2026-10-23. This is the one place for the long-term picture and
+the progress of the plan; DESIGN.md holds the numbered decisions, features.md what is built, README.md the short
+state. Update them when something changes.
 
 ## Vision
 
@@ -31,12 +32,10 @@ built on the Amiga's own hardware (blitter, Copper, planar screens). Not Linux, 
 9. **AmigaOS speed:** messages pass pointers, no copies; one address space; the blitter and Copper do the
    drawing; chip and fast RAM are separate pools.
 
-## Where we are (2026-10-22)
+## Where we are (2026-10-23)
 
-Done and verified in FS-UAE (not yet on real hardware): kernel with relocation, user mode, messages, memory
-manager, scheduler; disk server (RDB partitions), filesystem server (ext2, read and write, e2fsck-clean), tty,
-pipes, shell and 20 commands; hires text display, Amiga keyboard; a setup matrix
-of 13 emulated A1200 variants; a benchmark using the CIA's E-clock.
+Phases 1, 3 (most of it) and 4 are built and verified in FS-UAE, not yet on real hardware; the list is features.md.
+The hardening round of the audit is done (below); the next step is phase 2, the first real boot.
 
 ## The text console behaves like Unix/Linux (owner's decision, 2026-10-23)
 The text console has ten plain virtual consoles, switched with Amiga+F1..F10 (plain F-keys stay free for programs), each
@@ -51,11 +50,16 @@ The owner halted all new features on 2026-10-22. Until the owner lifts it, work 
 `audit-2026-10-22.md` (batches A-E), the tests that check them, documentation corrections and merging the branches
 built before the halt. The phases below resume after that.
 
-Progress: **batch B (memory foundations) is done** - all seven items (B1-B7), 2026-10-23 on branch `fix-b`,
+Progress: **batch A (first-boot blockers) is done** except A7 (a chip-only A1200 booting the RAM disk, left open:
+the owner's machine has fast RAM), with the approved first-boot diagnostics (A11 boot colours, A12 previous-boot
+log); verified in FS-UAE, not yet on the A1200.
+**Batch B (memory foundations) is done** - all seven items (B1-B7), 2026-10-23 on branch `fix-b`,
 verified in FS-UAE (`tools/memtest.sh`, keyboard, job-control and matrix tests); not yet on the A1200.
 **Batch C (filesystem and disk safety) is done** - C1-C10, 2026-10-23 on branch `fix-c`: verified on the host (`tools/ext2-host-test.sh`,
 `tools/disk-host-test.sh`, `make -C zenixfs test`) and in FS-UAE (disk, mount, ZenixFS, ZenixFS-root, command, user and matrix tests);
 not yet on the A1200.
+**Batch D (permissions as documented) is done** - 2026-10-23 on branch `fix-d`: verified in FS-UAE (users and
+ZenixFS-root tests) and on the host (ext2 and disk tests); not yet on the A1200.
 **Batch E (correctness in daily use) is done** - 2026-10-23 on branch `fix-e`: the Linux-style consoles, the shell's
 leaks and silent caps, the command fixes, the kernel items and errno numbers; verified in FS-UAE (users, keyboard,
 matrix, command, job, log, diagnostics, memory, mount, ZenixFS and ZenixFS-root tests) and on the host; what is left
@@ -63,7 +67,7 @@ is listed at the end of the audit; not yet on the A1200.
 
 ## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 
-**Phase 1 - Disk tools.** `fdisk` (the RDB partition table), `mkfs.ext2`, `fsck.ext2`, `df`, `sync`; the disk
+**Phase 1 - Disk tools** (done, verified in FS-UAE). `fdisk` (the RDB partition table), `mkfs.ext2`, `fsck.ext2`, `df`, `sync`; the disk
 server refuses raw access to mounted devices. Tested against scratch disks in the emulator and checked with the
 host's `e2fsck`.
 
@@ -71,7 +75,8 @@ host's `e2fsck`.
 side (benchmark); fix what real hardware shows. (The user's A1200 is a PiStorm with an SD card and no IDE disk,
 so this uses `zenix-ram.adf` until an SD driver exists.)
 
-**Phase 3 - A terminal you can live in.** Before any desktop:
+**Phase 3 - A terminal you can live in** (mostly built; what is left is in features.md and limits.md). Before
+any desktop:
 - *Shell:* history, line editing, tab completion, variables and the environment, scripting (`if`, `for`,
   `while`, functions), globbing, aliases, job control, `2>` and here-documents, a profile file. Lessons from
   the csh project (best of bash, zsh and fish).
@@ -81,31 +86,32 @@ so this uses `zenix-ram.adf` until an SD driver exists.)
   `login`, `su`, `chown`, `/etc/passwd`.
 - *C library and kernel:* full printf, stdio, `qsort`, `strtol`, time functions, `getenv`, signals, `kill`,
   process groups, `/dev` (null, zero, tty), `/proc`-like info.
-- *Commands:* port CUtils (47 commands: sed, sort, diff, find, tar, gzip, ...) through a Zenix backend for its
-  `cu.h` layer; write the rest (`df`, `mount`, `date`, `env`, `test`, `expr`...).
+- *Commands:* written natively for Zenix, with ideas and the regex engine from CUtils (sed, sort, diff, find, tar,
+  gzip, ...; the list is commands.md).
 - *Editor and pager:* Sumi and Maki ported (they use tui.library; Zenix gets an equivalent that emits
   standard escape codes), man pages.
 - *Network tools later,* when the network server exists.
 
-**Phase 4 - ZenixFS.** Our own filesystem (docs/zenixfs.md): atomic commit, checksummed metadata, extents, indexed
-directories, self-healing; needs the multi-filesystem VFS (mount table, several filesystem servers). ext2 stays
-for Linux compatibility.
+**Phase 4 - ZenixFS** (built: the library, the server, the tools, the mount table; works as the root in FS-UAE;
+what is left is in zenixfs.md). Our own filesystem (docs/zenixfs.md): atomic commit, checksummed metadata, extents,
+indexed directories, self-healing. ext2 stays for Linux compatibility.
 
 **Phase 5 - The desktop.** (The workspaces and the i3-style bar are desktop features: they were removed from the kernel
 console in audit batch E and come back here, in the display server. The terminal itself never depends on them.) Move the display out of the kernel into a display server with a drawing API
 (planar, blitter and Copper); a client library; a terminal program as the first client; the workspace bar;
 Ahiru-style file view; mouse. Index server (FuzzyFind) for `locate` / `fzf`.
 
-**Phase 6 - More hardware, as servers.** PiStorm SD, network (TCP/IP server), USB, NVMe, RTG graphics, sound
-(Paula) server, floppy driver, serial.
+**Phase 6 - More hardware, as servers.** Network (TCP/IP server), USB, NVMe, RTG graphics, sound (Paula) server,
+serial. (Already built into the kernel and to be moved out later: the PiStorm SD card, never run on a Pi; the floppy
+driver, experimental; the A3000 SCSI.)
 
-**Phase 7 - Polish and release.** Documentation, licence decisions, public repository, release images.
+**Phase 7 - Polish and release.** Documentation, public repository, release images (the licence is decided:
+DESIGN.md D9).
 
 ## Ideas parked for later
 
 ## Open questions
 
 - ZenixFS name: a Western Digital project already uses "ZenixFS" (RocksDB on zoned SSDs); decide if that matters.
-- Licence: **GPL-2.0 only** (decided 2026-10-22 by the owner: nobody may close it; lets us take GPL-2 code from Linux, Fuzix, U-Boot). Code copied from other projects must be GPL-2 compatible (MIT, BSD, MPL files keep their own headers); new files carry `SPDX-License-Identifier: GPL-2.0-only`.
 - How much POSIX: `fork` is not possible without an MMU; `vfork`/`spawn` only. Programs that need `fork` are out.
 - Journaling: not needed if ZenixFS commits atomically; ext2 gets a clean flag and our fsck.

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # The keyboard in FS-UAE: Swedish keymap layers (plain, Shift, Alt, Shift+Alt), Caps Lock, key repeat, typing
 # during heavy output and the console keys (Amiga+F2, Amiga+F1), typed with wtype on the emulated Amiga keyboard (tools/kbd-test.py, headless cage rig),
 # written to files by the shell and read back from the disk image. ZENIX_SERIAL=/tmp/name gives the run its own
@@ -6,9 +7,9 @@
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
-OUT=/tmp/zenix-kbd; mkdir -p $OUT
+OUT=${ZENIX_OUT:-/tmp/zenix-kbd}; mkdir -p $OUT
 SERIAL=${ZENIX_SERIAL:-/tmp/zenix-serial}
-sed -e "s#/tmp/zenix-serial#$SERIAL#" -e "s#\(\.\./\)\{1,\}build/#$PWD/build/#g" fsuae/a1200-020-fast.fs-uae > $OUT/kbd.fs-uae
+ZENIX_SERIAL=$SERIAL python3 tools/fsuae_conf.py fsuae/a1200-020-fast.fs-uae $OUT/kbd.fs-uae || exit 1
 python3 tools/kbd-test.py $OUT/kbd.fs-uae "$SERIAL" > $OUT/run.log 2>&1
 pass=1
 get() { debugfs -R "cat $1" build/zenix.hdf 2>/dev/null; }

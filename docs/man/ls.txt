@@ -47,9 +47,10 @@ EXAMPLES
     ls -d */               only the directories here
 
 NOTES
-    At most 400 names per directory are listed.
+    At most 400 names of one directory are listed; more are left out
+    without a message (a known gap).
     An access the user is not allowed is reported as "permission denied".
-    Directories with any number of entries are walked, as deep as paths go. A
+    With -R, directories are walked as deep as paths go. A
     path longer than 63 bytes (what a system call takes) is reported ("path
     too long") and skipped, never cut short.
 

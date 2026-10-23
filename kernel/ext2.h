@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
 /* ext2 definitions shared by the filesystem server (user mode) and the kernel.
  * Needs u8/u16/u32 from the including file. */

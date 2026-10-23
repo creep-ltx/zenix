@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 
 /* Processes. No MMU: all processes share one address space, so the

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Programs built into the kernel image (ZEXE blobs with their own relocations), found through -I$(BUILD). */
     .section .rodata
     .balign 4

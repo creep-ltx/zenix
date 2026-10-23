@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # ZenixFS in the emulator: partition, mkfs.zenixfs, mount next to an ext2 mount, files / links / rename / a 100 KB file,
 # unmount, remount, fsck.zenixfs; then the HOST checks the same partition with zenixfs-tool (independent implementation
 # of the check: the same library source, but a different program, block device and compiler).
 cd "$(dirname "$0")/.." || exit 1
 make -s all build/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "host tool build failed"; exit 1; }
-OUT=/tmp/zenix-zenixfstest; mkdir -p $OUT
+OUT=${ZENIX_OUT:-/tmp/zenix-zenixfstest}; mkdir -p $OUT
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 dd if=/dev/zero of=build/scratch.hdf bs=1M count=16 status=none

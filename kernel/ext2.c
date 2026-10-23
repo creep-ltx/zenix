@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* the server is size-critical (it is embedded in the kernel image): optimise for size */
 #pragma GCC optimize("Os")
 #ifdef FSD

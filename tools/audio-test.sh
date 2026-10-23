@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # The terminal bell starts Paula's audio DMA: after `beep`, the kernel log says the channel's end-of-sample flag was seen.
 # usage: tools/audio-test.sh   (ZENIX_SERIAL defaults to /tmp/zenix-audio-serial)
 cd "$(dirname "$0")/.." || exit 1

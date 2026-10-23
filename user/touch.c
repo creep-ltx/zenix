@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 #include "../kernel/fsproto.h"
 /* touch [-c] file... : create files, or set their modification time to now (FS_UTIME_NOW: the server takes its clock,

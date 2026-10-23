@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # Audit batch E: the shell and command fixes, run by tools/cmds2-test.sh (output compared with tools/tests/batch-e.expected)
 # The loops run in flat memory: each round gives its arena space back (a 1000-character case subject used to leak ~3 KB a round)
 big=xxxxxxxxxx; big=$big$big$big$big$big$big$big$big$big$big; big=$big$big$big$big$big$big$big$big$big$big

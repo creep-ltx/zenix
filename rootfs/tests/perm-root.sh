@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # Audit D checks run as root by tools/users-test.sh (the output is compared there, line by line):
 # tar x of absolute and ".." names and through a link from the same archive, find -delete and a link out of the
 # tree, here-document and mktemp files (exclusive, mode 0600, random names).

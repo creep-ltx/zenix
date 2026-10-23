@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Program entry. The kernel loads and relocates the ZEXE image, clears
  * bss, builds the stack and jumps to offset 0. At entry the stack holds
  * argc and argv. */

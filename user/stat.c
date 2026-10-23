@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* stat file...: inode, mode, links, size, time */
 int main(int argc, char **argv)

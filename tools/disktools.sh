@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Regression test for fdisk, mkfs.ext2 and fsck.ext2 in the emulator, verified with the host's e2fsck.
 cd "$(dirname "$0")/.." || exit 1
 make -s all build/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-OUT=/tmp/zenix-disktools; mkdir -p $OUT
+OUT=${ZENIX_OUT:-/tmp/zenix-disktools}; mkdir -p $OUT
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 

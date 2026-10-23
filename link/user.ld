@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 OUTPUT_ARCH(m68k)
 ENTRY(_start)
 SECTIONS

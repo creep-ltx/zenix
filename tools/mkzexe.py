@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
 """Turn a linked ELF (linked at address 0, with -Wl,-q) into a ZEXE image.
 
 ZEXE = flat image + relocation table, loadable at any address:
@@ -14,12 +15,13 @@ After the image: nreloc big-endian u32 offsets of 32-bit words that hold
 link-time (base 0) addresses; the loader adds the load address to each.
 Only R_68K_32 needs relocating; PC-relative references stay valid.
 """
+import os
 import re
 import struct
 import subprocess
 import sys
 
-PFX = "/home/creep/opt/m68k-elf/bin/m68k-elf-"
+PFX = os.environ.get("TOOLPREFIX", "m68k-elf-")    # the Makefile exports it; default: m68k-elf-objcopy from PATH
 HDR_MAGIC_OFF = 4
 STACK_DEFAULT = 0
 

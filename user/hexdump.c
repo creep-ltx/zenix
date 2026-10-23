@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* hexdump -C [file]: canonical hex + ASCII dump (the only format) */
 int main(int argc, char **argv)

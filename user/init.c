@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 
 /* init: print /etc/motd, mount what /etc/fstab lists, then keep a login prompt on the virtual consoles, like a

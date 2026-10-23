@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # Host test of kernel/emmc.c against an SDHCI model: tools/emmc-test.sh   (TRACE=1 shows every command)
 set -e
 cd "$(dirname "$0")/.."

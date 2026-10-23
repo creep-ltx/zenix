@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Kernel entry and low-level glue (68020+, no MMU, flat 32-bit).
  *
  * The kernel is a ZEXE image (tools/mkzexe.py): linked at address 0 and
