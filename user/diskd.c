@@ -234,7 +234,7 @@ static int blocked(int s, u32 lba, u32 n, u32 pid)
 static int handle(struct umsg *m)
 {
     if (m->uid != 0 && m->type != DISK_LIST && m->type != DISK_INFO)
-        return -13;                     /* raw sectors bypass every file permission: root only (the filesystem servers are root) */
+        return -EACCES;                 /* raw sectors bypass every file permission: root only (the filesystem servers are root) */
     switch (m->type) {
     case DISK_OPEN: {
         const char *nm = (const char *)m->a[0];
@@ -243,22 +243,23 @@ static int handle(struct umsg *m)
             scan();                                                  /* a disk may have been put in since */
         }
         int h = find(nm);
-        if (h < 0) return -1;
+        if (h < 0) return -ENODEV;
         if (m->a[1] & (DISK_MOUNT | DISK_RAW)) {
             /* a mount, or a tool that may write the device: nothing overlapping it may be mounted (not even
              * by the caller: a server mounts one device) */
-            if (blocked(h, 0, dev[h].sectors, 0)) return -16;       /* EBUSY */
+            if (blocked(h, 0, dev[h].sectors, 0)) return -EBUSY;
             if (m->a[1] & DISK_MOUNT) dev[h].mounted = (u32)m->from;
         }
         return h;
     }
     case DISK_UNMOUNT:
         if (m->a[0] < MAXDEV && used[m->a[0]] && dev[m->a[0]].mounted == (u32)m->from) { dev[m->a[0]].mounted = 0; return 0; }
-        return -1;
+        return -EINVAL;
     case DISK_READ: case DISK_WRITE: {
         u32 h = m->a[0], lba = m->a[1], n = m->a[2];
-        if (h >= MAXDEV || !used[h] || n == 0 || lba + n < lba || lba + n > dev[h].sectors) return -1;
-        if (m->type == DISK_WRITE && blocked((int)h, lba, n, (u32)m->from)) return -16;
+        if (h >= MAXDEV || !used[h]) return -EBADF;
+        if (n == 0 || lba + n < lba || lba + n > dev[h].sectors) return -EINVAL;
+        if (m->type == DISK_WRITE && blocked((int)h, lba, n, (u32)m->from)) return -EBUSY;
         if (phys[h] == 1) {                                         /* the RAM disk: plain memory */
             if (m->type == DISK_READ) memcpy((void *)m->a[3], ram_base + lba * 512, n * 512);
             else memcpy(ram_base + lba * 512, (const void *)m->a[3], n * 512);
@@ -271,25 +272,25 @@ static int handle(struct umsg *m)
                                     : sys_blk_write(lba, n, (const void *)m->a[3]);
     }
     case DISK_INFO:
-        if (m->a[0] >= MAXDEV || !used[m->a[0]]) return -1;
+        if (m->a[0] >= MAXDEV || !used[m->a[0]]) return -EBADF;
         holder((int)m->a[0]);
         memcpy((void *)m->a[1], &dev[m->a[0]], sizeof(struct diskinfo));
         return 0;
     case DISK_LIST:
-        if (m->a[0] >= (u32)norder) return -1;
+        if (m->a[0] >= (u32)norder) return -ENODEV;            /* past the end of the list */
         holder(order[m->a[0]]);
         memcpy((void *)m->a[1], &dev[order[m->a[0]]], sizeof(struct diskinfo));
         return 0;
     case DISK_FLUSH:
-        if (m->a[0] >= MAXDEV || !used[m->a[0]]) return -1;
+        if (m->a[0] >= MAXDEV || !used[m->a[0]]) return -EBADF;
         if (phys[m->a[0]] != 0) return 0;                           /* RAM disk, floppy: nothing to flush */
-        if (!(dev[m->a[0]].caps & DISKCAP_FLUSH)) return -95;       /* EOPNOTSUPP: this disk cannot promise it */
+        if (!(dev[m->a[0]].caps & DISKCAP_FLUSH)) return -EOPNOTSUPP;   /* this disk cannot promise it */
         return sys_blk_flush();
     case DISK_RESCAN:
         scan();
         return norder;
     }
-    return -1;
+    return -ENOSYS;
 }
 
 int main(void)

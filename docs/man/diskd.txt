@@ -25,7 +25,7 @@ DESCRIPTION
     partition, a type 0x76 partition the RDB partitions inside it, and two
     partitions of a damaged table may overlap. A device can be mounted by
     one filesystem server; mounting it, or opening it raw (fdisk, mkfs.ext2,
-    fsck.ext2), is refused (-16, busy) while an overlapping device is
+    fsck.ext2), is refused (-EBUSY, 16) while an overlapping device is
     mounted, and a write that touches a device another process has mounted
     is refused. A plain open may read anything. When the server that
     mounted a device has died, its mount is released the next time it is in
@@ -35,12 +35,12 @@ DESCRIPTION
     each device reports capabilities (flush works, flash or rotating,
     largest transfer). The flush capability is real: diskd tries a flush
     at start, and a drive that refuses it gets none (a line says so);
-    DISK_FLUSH on such a device answers -95. Floppies write synchronously
-    with verify and count as flushable; the RAM disk as RAM.
+    DISK_FLUSH on such a device answers -EOPNOTSUPP (95). Floppies write
+    synchronously with verify and count as flushable; the RAM disk as RAM.
     Only root may use it (the filesystem servers run as root): from any
-    other user every request but DISK_LIST and DISK_INFO is answered -13,
-    because raw sectors would bypass every file permission. The port name
-    "disk" is reserved for root.
+    other user every request but DISK_LIST and DISK_INFO is answered
+    -EACCES (13), because raw sectors would bypass every file permission.
+    The port name "disk" is reserved for root.
     Protocol: kernel/diskproto.h.
 
 PARTITION TABLES
@@ -58,6 +58,9 @@ PARTITION TABLES
 
 NOTES
     Not done: extended partitions, GPT.
+    Errors are negative errno numbers (kernel/errno.h): an unknown device
+    -ENODEV, a bad handle -EBADF, a range outside the device -EINVAL, an
+    overlapping mount -EBUSY.
 
 SEE ALSO
     fdisk(1), mkfs.ext2(1), fsck.ext2(1), docs/architecture.md

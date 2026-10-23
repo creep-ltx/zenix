@@ -18,6 +18,8 @@ EXIT STATUS
 
 NOTES
     The root filesystem cannot be unmounted.
+    The messages: "is busy", "is not a mount point", or the reason the
+    kernel gave.
 
 SEE ALSO
     mount(8)

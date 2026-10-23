@@ -93,7 +93,7 @@ static int has_mbr(void)
 static int may_write(const char *name)
 {
     int r = open_disk(name, DISK_RAW);
-    if (r == -16) { printf("fdisk: %s is in use (a partition on it is mounted): fdisk can only list it\n", name); return 0; }
+    if (r == -EBUSY) { printf("fdisk: %s is in use (a partition on it is mounted): fdisk can only list it\n", name); return 0; }
     if (r < 0) { printf("fdisk: cannot open %s for writing\n", name); return 0; }
     h = r;
     return 1;

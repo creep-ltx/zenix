@@ -24,6 +24,9 @@ EXAMPLES
 
 NOTES
     A link name longer than 63 bytes is reported, never cut short.
+    A link that cannot be made says why ("file exists", "permission
+    denied", "cross-device link" for a hard link to another filesystem
+    ...).
 
 EXIT STATUS
     0, 1 if a link could not be made, 2 usage error.
