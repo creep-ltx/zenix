@@ -1,8 +1,8 @@
 # Zenix compared with AmigaOS
 
 AmigaOS facts below are from general knowledge of Exec, DOS and Intuition (the ROM Kernel Manuals are in the
-knowledge base under `manuals/`); Zenix facts are read from this source tree. Nothing was benchmarked against
-AmigaOS.
+knowledge base under `manuals/`); Zenix facts are read from this source tree (last checked 2026-10-23). Nothing was
+benchmarked against AmigaOS.
 
 ## What they share (and why Zenix was built this way)
 
@@ -12,7 +12,7 @@ AmigaOS.
   / reply`. Messages carry pointers, not data, because everything shares one address space - the Amiga's famous
   speed trick, kept deliberately (ROADMAP principle 9).
 - **Servers instead of a fat kernel.** AmigaOS filesystems are handler *processes* reached by DOS packets.
-  Zenix's `fsd` and `diskd` are the same idea.
+  Zenix's filesystem servers (`fsd`, `mount.zenixfs`) and `diskd` are the same idea.
 - **Relocating executables.** AmigaOS HUNK files carry relocation tables and are loaded wherever memory is free;
   Zenix's ZEXE does the same with a much simpler format (one image, one table).
 - **Preemptive multitasking** with a small kernel and fast context switches.
@@ -31,12 +31,12 @@ AmigaOS.
 | Crash | A bad pointer or illegal instruction raises a Guru Meditation and usually takes the whole machine | The offending process is killed, the rest continues |
 | Program model | `exec` tasks and DOS processes; startup from a CLI or Workbench | Unix: `spawn(path, argv, stdio)`, exit status, `wait` |
 | File naming | `DH0:dir/file`, volumes and assigns, case-insensitive | One tree rooted at `/`, case-sensitive, mount-based |
-| Filesystem | OFS/FFS/PFS3/SFS, `DosType` in the RDB selects the handler | ext2 today (readable by Linux), RDB partition table shared; ZenixFS planned |
+| Filesystem | OFS/FFS/PFS3/SFS, `DosType` in the RDB selects the handler | ext2 (readable by Linux) and ZenixFS (its own, copy-on-write), each served by a filesystem server; the RDB partition table is shared |
 | I/O model | Packets/IORequests to devices; ReadArgs templates; `Wait()` on signals | Everything is a file descriptor: `read/write` on files, ttys, pipes |
 | Pipes | Not a core concept (`PIPE:` handler) | Kernel pipes, first-class, `|` in the shell |
 | Libraries | Shared libraries opened at run time with a jump table (`OpenLibrary`) | None: static linking, a tiny libc per program; shared libs left open in the file format |
 | GUI | Intuition, windows, screens, gadgets, ReAction/MUI | None yet: ten text consoles (Amiga+F1..F10); display server planned |
-| Drivers/devices | `.device` and `.library` files, loaded on demand, resident modules in ROM | Built-in IDE, serial, keyboard drivers; more drivers planned as servers |
+| Drivers/devices | `.device` and `.library` files, loaded on demand, resident modules in ROM | Drivers built into the kernel (IDE, A3000 SCSI, the Pi's SD card, floppy, serial, keyboard, mouse/joystick, bell); later ones planned as servers |
 | CPU | 68000 and up | 68020 and up (68000 refused: not a target) |
 | Real hardware | Decades of it | **Only FS-UAE so far**; not yet on a real Amiga |
 
@@ -53,8 +53,10 @@ AmigaOS.
 
 - A **Unix environment**: `/`, pipes, a real shell with scripting, small composable tools, `man`.
 - **Containment:** a crashing program does not bring down the machine, and its memory comes back automatically.
-- **A filesystem that Linux can read** and fsck; ZenixFS planned to be crash-safe by atomic commit.
-- A small, readable kernel (about 5,000 lines) with no hidden global state: no `Forbid` bugs, no lock ordering.
+- **A filesystem that Linux can read** and fsck (ext2), and ZenixFS, which stays consistent after a crash by
+  committing atomically.
+- A small, readable kernel (about 9,000 lines) that is never preempted, so it has no locks: no `Forbid` bugs, no
+  lock ordering.
 - Predictable behaviour: one mechanism per job (messages), no parallel APIs for the same thing.
 
 ## The one thing they have in common that matters most

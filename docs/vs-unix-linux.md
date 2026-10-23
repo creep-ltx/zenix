@@ -1,7 +1,7 @@
 # Zenix compared with Unix and Linux
 
 Statements about Unix, Linux, Minix, QNX and Fuzix are from general knowledge; Zenix statements are read from the
-source (2026-10-22). Not benchmarked against any of them.
+source (last checked 2026-10-23). Not benchmarked against any of them.
 
 ## What Zenix keeps from Unix
 
@@ -11,7 +11,7 @@ source (2026-10-22). Not benchmarked against any of them.
   `^D`.
 - **Everything is a file descriptor**: files, pipes, the terminal, `/dev/null`, `/dev/zero`, `/dev/tty`.
 - **The process model's skeleton:** `spawn` + `wait` + exit status, per-process cwd, environment and fd table,
-  zombies until reaped (orphans are reaped by the idle loop).
+  zombies until reaped (one nobody will wait for is freed by the kernel).
 - **ext2** as the on-disk format, so a Zenix disk can be mounted on Linux and fsck'd with `e2fsck`; the Zenix
   `mkfs.ext2` and `fsck.ext2` are checked against the host tools.
 - A **POSIX-flavoured libc** (small and incomplete).
@@ -23,13 +23,13 @@ source (2026-10-22). Not benchmarked against any of them.
 | Hardware | MMU required (Linux: separate no-MMU uClinux port) | No MMU: one shared address space |
 | Process creation | `fork` + `exec` | `spawn` only. `fork` cannot work without an MMU (a copy would need different addresses) |
 | Memory protection | Per-process virtual memory; a wild write is a segfault | None. Pointers are checked at system calls only; a wild write inside user code can corrupt anyone |
-| Kernel structure | Monolithic (Linux) with loadable modules | Small kernel + servers (filesystem, disk) behind synchronous message ports; the rest still in the kernel for now |
+| Kernel structure | Monolithic (Linux) with loadable modules | Small kernel + servers (filesystems, disk) behind synchronous message ports; drivers, tty and display still in the kernel for now |
 | Kernel concurrency | Preemptive kernel, locks, RCU, per-CPU data | Kernel never preempted: single thread of control, no locks; sleeping = blocking in `schedule()` |
-| System calls | Hundreds, `int 0x80`/`syscall` | About 55, `TRAP #0` |
+| System calls | Hundreds, `int 0x80`/`syscall` | Fewer than a hundred (architecture.md section 7), `TRAP #0` |
 | Syscall into the filesystem | Function call into a VFS inside the kernel | Message to a user-mode server; the client blocks, the server writes straight into the client's buffer |
 | IPC | Pipes, sockets, signals, SysV/POSIX IPC, shared memory, futexes | Pipes and kernel messages; the same address space makes shared memory unnecessary |
-| Signals | `sigaction`, handlers, masks | Not implemented: `kill` terminates; `^C` kills the foreground process; the tty has a poll flag for shells |
-| Users/permissions | uid/gid enforced by the kernel with MMU backing | Planned (D8): uids and permission checks in the filesystem server; honest limit: no security boundary against a program written to cheat |
+| Signals | `sigaction`, handlers, masks | No handlers: `kill` terminates; `^C` ends the foreground program, `^Z` stops it and `fg`/`bg` continue it (job control); the tty has a poll flag for shells |
+| Users/permissions | uid/gid enforced by the kernel with MMU backing | Built (D8): real and effective uids, set-user-id programs, permission checks in the filesystem servers, `login`/`su`/`passwd`; honest limit: no security boundary against a program written to cheat |
 | Memory allocation | Virtual memory, demand paging, swap, overcommit | Physical blocks, no paging, no swap; fragmentation is managed by allocation policy; every block has an owner |
 | Executables | ELF (shared objects, dynamic linking) | ZEXE: one flat image + relocation table, static linking, no shared libraries yet |
 | Scheduling | CFS/EEVDF, priorities, nice, multicore | Round robin on a 100 Hz tick, one CPU, no priorities yet |
@@ -59,5 +59,4 @@ source (2026-10-22). Not benchmarked against any of them.
 
 ## Licence
 
-Zenix is **GPL-2.0-only** (decided 2026-10-22 on the `drivers` branch; "2 only" on purpose, so Linux and Fuzix
-code can be reused). See `Knowledge/amiga/zenix-licence-and-driver-rules.md`.
+Zenix is **GPL-2.0-only**, so Linux and Fuzix code can be reused (DESIGN.md D9).

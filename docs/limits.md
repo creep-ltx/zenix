@@ -1,12 +1,14 @@
 # Limits: what is missing and what is not known
 
-Written 2026-10-22 from README.md, DESIGN.md, ROADMAP.md and the source.
+Read from the source; last checked against the code 2026-10-23. This is the home of the hard numbers: other documents
+point here instead of repeating them.
 
 ## The no-MMU limit (permanent unless an MMU mode is added)
 
 Any program can read or write any memory and touch the hardware. Zenix **contains visible crashes** (exceptions
 kill only the faulting process; its memory is freed; the kernel validates every pointer passed to a system call;
-guard words and block magic catch kernel-side overruns). It does **not** isolate programs from each other. A buggy
+a magic word in every memory block's header catches overruns of the heap; there is no guard word or guard page
+below a stack). It does **not** isolate programs from each other. A buggy
 program that writes through a valid-looking pointer can corrupt another process, a server or the kernel and
 bring the system down. Users, groups and file permissions (DESIGN D8, built) give accounting and
 protection against honest mistakes, not against a program written to cheat - the same trust level as AmigaOS.
@@ -26,7 +28,7 @@ warning while this is so. Set the passwords with `passwd` and remove `/etc/autol
 
 A second consequence: **servers are trusted code.** A hung filesystem server blocks every client waiting on it.
 
-## Not done yet (see README "Not done" and ROADMAP)
+## Not done yet (the plan: ROADMAP.md)
 
 - Real hardware. Everything is verified in FS-UAE only. Emulator timing is not CPU timing, so **no speed claim is
   made**; the TRAP cost, message cost and cache effects are unmeasured on a real 68020+.
@@ -41,17 +43,19 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
-- A graphical programs API, mouse, sound, network, USB, floppy driver, RTG.
+- A graphical programs API, a mouse pointer (the mouse is only read, `input`; untested), sound beyond the bell, network,
+  USB, RTG. The floppy driver is experimental (one open bug: a whole-disk read of df1 once came back wrong, no error).
 - Display server (the terminal and the consoles are inside the kernel; workspaces and a bar come with the desktop),
   index server for `locate`/`fzf`.
-- ZenixFS; multi-filesystem VFS; ext2 journal (an ext3 volume mounts read-only, ext4 is refused); moving directories between parents; triple-indirect blocks; writing ext2 files over 4 GB.
+- ext2: a journal (an ext3 volume mounts read-only, ext4 is refused), moving a directory to another parent (`mv`
+  copies it; ZenixFS moves it), triple-indirect blocks, files over 4 GB. ZenixFS: what zenixfs.md lists as not done.
 - Scheduler priorities; kernel is single-CPU by design.
 - 68000 support (not a target).
 
 ## Hard numbers worth knowing
 
-- 32 processes, 16 message ports, 64 open files, 16 fds per process, 8 extra memory regions per process,
-  1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
+- 32 processes, 16 message ports, 64 open files, 16 fds per process, 8 extra memory regions per process, 8 mounts
+  (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
   at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
   -ENAMETOOLONG beyond, never cut), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
   NTSC), 200 scrollback lines per console, a cooked tty line of 255 characters (the bell for more).
@@ -74,13 +78,15 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with two chunks
   in use, gets 6); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
-- Paths: at most 63 bytes in a system call; the directory tools report a longer joined path instead of cutting it.
+- Paths: the directory tools report a joined path longer than a system call takes (63 bytes) instead of cutting it.
 - Timer tick 100 Hz to within the E-clock's resolution (latch 7093 on PAL, 709,379 Hz: 99.997 Hz; 7158 on NTSC,
   715,909 Hz: 100.001 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers chained, an E-clock count
   that wraps after about 1.7 hours (`bench` converts it with the PAL rate).
 - Error numbers: the kernel and the servers return negative errno values (architecture.md section 7). Still a bare
   -1: `SYS_mountinfo` past the end, `ipc_call`/`ipc_recv` on a bad port, `port_create`/`port_find`, the internal
   block allocators of ext2.c. `zwhy` shows no text for -1 (EPERM, 1) for that reason: the caller's own words appear.
+- `ls` lists at most 400 names of one directory; more are left out without a message (a known gap, found
+  2026-10-23, listed at the end of the audit).
 - Input rings between the interrupts and `kwork`: 128 keyboard codes, 1024 serial bytes; a tty queue holds 1024
   bytes of typed input that no program has read yet. Anything dropped is counted on the kernel log.
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS

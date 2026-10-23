@@ -1,7 +1,7 @@
-# ZenixFS - the native Zenix filesystem (plan, 2026-10-22)
+# ZenixFS - the native Zenix filesystem (design 2026-10-22; built; status last checked 2026-10-23)
 
-**Status (2026-10-22):** the format is final for version 1 (`zenixfs-format.md`). The library in `zenixfs/` (branch `zenixfs`) runs on the host and **inside Zenix**
-(`mount.zenixfs`, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the new multi-filesystem VFS). *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
+**Status (2026-10-23):** the format is final for version 1 (`zenixfs-format.md`). The library in `zenixfs/` runs on the host and **inside Zenix**
+(`mount.zenixfs`, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the mount table); ZenixFS can be the root filesystem (*verified* in FS-UAE: `tools/zroot-test.sh`). *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
 `fsck` clean, remount; power-cut replay (every prefix of the recorded writes plus random subsets inside each flush epoch) always mounts, passes `fsck`, equals a committed state and is never
 older than a durable commit - also on a volume of several map pages with one page in RAM; 600 random bit flips in metadata are detected or harmless; directory hash chains; full volume; orphans.
 The tests were checked by mutation (no flush before the commit record, reuse of blocks freed in the same transaction: both make the power-cut test fail).
@@ -212,7 +212,7 @@ slow PIO IDE = the disk is the limit and the CPU is half idle; DMA SCSI or SD = 
 So ZenixFS must not be tuned for one case:
 - **Rule 1: low CPU per block everywhere.** Cheap checksum, no per-byte work on file data, copy as little as possible (messages pass pointers).
   Data checksums stay **off by default** until measured; with PIO they ride along with the copy, with DMA they cost real CPU time.
-- **Rule 2: the filesystem asks the disk what it is.** Extend the disk protocol (`kernel/diskproto.h` today has READ/WRITE/INFO only, 512-byte sectors, no flush) with:
+- **Rule 2: the filesystem asks the disk what it is.** Extend the disk protocol (`kernel/diskproto.h`; built so far: `DISK_FLUSH`, a capability bit for it and the largest transfer, see rule 5) with:
   `DISK_FLUSH` (ATA FLUSH CACHE / SCSI SYNCHRONIZE CACHE; essential for Z9, a driver that cannot flush says so), and capability fields in `diskinfo`: maximum sectors per
   command, scatter/gather or DMA yes/no, memory the device can reach (some DMA cards reach only certain RAM), required alignment, physical sector or erase size (CF/SD
   4 KB or more), "rotating" or "flash" (seeks matter or not), a rough speed class. The fs reads these at mount.

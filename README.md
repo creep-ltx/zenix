@@ -1,42 +1,52 @@
 # Zenix
 
-A small, fast, POSIX-like operating system for real Amigas with a 68020 or better and **no MMU needed**.
-It runs on the Amiga itself: no Raspberry Pi, no emulation layer, no AmigaOS underneath.
+A small Unix-like operating system for Amigas with a 68020 or better. **No MMU is needed.** Zenix runs on the Amiga
+itself: the floppy's bootblock borrows Kickstart to load the kernel, then switches AmigaOS off and owns the machine.
+No AmigaOS, no Linux and no emulation layer underneath.
 
-Status (2026-10-22, all *verified in FS-UAE* as a stock A1200 - 68EC020, no MMU - not yet on a real Amiga):
-- **M0** boots, serial banner, memory map, timer interrupt.
-- **M1** relocating kernel (runs from fast RAM when there is any), chip/fast memory manager with owner tracking,
-  user-mode processes with `TRAP #0` system calls, preemptive scheduler, crash containment (an illegal
-  instruction kills only the offender), user pointers validated.
-- **M2** ext2 root filesystem (now writable, see M4) found through the RDB, tty line discipline (^C ^D ^U),
-  pipes, argv, a shell (`|`, `<`, `&`, quotes, cd) and `ls cat echo pwd ps free wc grep uname`.
-- **M2b (write support)** `>` `>>`, `mkdir rmdir rm cp mv touch`: block and inode allocation, files with
-  direct/indirect/double-indirect blocks, directories that grow, rename. Write-through cache. Verified:
-  after a scripted session (`tools/tests/write-test.txt`) the host's `e2fsck -fn` reports a clean disk and a 15.5 KB
-  file written by Zenix has the same SHA-256 as the host concatenation.
-- **M3** 640x256 hires planar display (640x200 on NTSC), all text: 80x32 (80x25), scrolling by Copper pointer
-  with a blitter copy at the wrap, Amiga keyboard, ROM Topaz 8 font. Since audit batch E (2026-10-23) the text
-  console behaves like Unix/Linux: ten virtual consoles, Amiga+F1..F10, each with its own login prompt and
-  scrollback. (Over serial: 0x1d then 1-9 / 0 shows console 1-9 / 10, for tests.)
+**Status (2026-10-23):** what is listed below is *verified in FS-UAE* (an emulator: a stock A1200 and the other machines
+of the test matrix) unless it says otherwise.
+**Nothing has run on a real Amiga yet**; the first boot on the owner's PiStorm A1200 is next ([docs/pi-first-boot.md](docs/pi-first-boot.md)).
+New features are on hold until then (hardening round, [docs/audit-2026-10-22.md](docs/audit-2026-10-22.md)). Emulator timing is not hardware
+timing, so no speed is claimed.
 
-Not done: unlinking a file that is still open (frees at once), moving directories between parents, triple-indirect files, a graphical programs API, mouse, sound, network, real
-hardware, 68000 (not a target), MMU use. See docs/DESIGN.md.
+## What it has
+| | |
+|---|---|
+| **Kernel** | Relocating kernel and programs (no MMU), preemptive scheduler, chip and fast RAM with an owner for every block, `spawn` instead of `fork`, synchronous zero-copy message ports, system calls with every pointer checked, errors as errno numbers. A crashing program is killed and its memory freed; the rest keeps running. |
+| **Servers** | The disk (`diskd`) and the filesystems (ext2 and ZenixFS) are user-mode servers behind message ports. |
+| **Filesystems** | ext2 read and write (Linux and `e2fsck` agree with it; ext3 read-only, ext4 refused), ZenixFS (our own: copy-on-write commits, checksummed metadata), either one as the root; `mount`, `/etc/fstab`; RDB and PC (MBR) partition tables. |
+| **Disks** | Gayle IDE (A600/A1200/A4000), A3000 SCSI, the PiStorm's SD card (written, not yet run on a Pi), floppy drives (experimental), a RAM disk from the boot floppy. |
+| **Console** | Ten text consoles on Amiga+F1..F10, each with its own login (like Linux); ANSI/VT100 terminal, 80x32 on PAL (80x25 on NTSC), scrollback, the ROM's Topaz font, blitter and Copper scrolling; Amiga keyboard with the Swedish and US keymaps, key repeat. |
+| **Users** | Users and groups, file permissions checked by the filesystem servers, `login`, `su`, `passwd`, set-user-id programs. |
+| **Shell** | A bash-like `sh`: line editing, history, completion, variables, quoting, wildcards, pipes, redirects, here-documents, `if/while/for/case`, functions, aliases, arithmetic, command substitution, job control. Checked against bash. |
+| **Commands** | The usual Unix tools, each with a manual page: files, text (`grep sed sort diff ...`), `tar`, `gzip`, a pager, an editor, `man`, disk tools (`fdisk mkfs fsck`), processes and users. List: [docs/commands.md](docs/commands.md). |
+| **Diagnostics** | Boot messages on the screen and in `dmesg`, a screen colour for every boot step, and the previous boot's log kept across a warm reset. |
 
-**Not locked as shipped:** the images come with root logged in automatically and no passwords (root, user and
-guest; `/etc/autologin` names root, logged in on console 1, for the tests). Set passwords with `passwd` and remove `/etc/autologin` before
-trusting the system; `login` warns while root has no password. Even then, with no MMU the permissions protect
-against honest mistakes, not against a program written to cheat (docs/limits.md).
+The full list with the status of each feature is [docs/features.md](docs/features.md); what is missing is [docs/limits.md](docs/limits.md).
 
-Images: `build/zenix.adf` (the standard floppy: bootblock + kernel only; the root filesystem is on the IDE disk,
-`build/zenix.hdf` or `zenix-rdb.hdf`) and `build/zenix-ram.adf` (development/test only: also carries a small root
-filesystem that is loaded into RAM, for machines without an IDE disk, e.g. a Gotek boot).
-Long-term plan and principles: docs/ROADMAP.md. Native filesystem idea: docs/zenixfs.md.
+## Not locked as shipped
+**Root is logged in automatically on console 1, and nobody has a password** (root, user and guest). `/etc/autologin`
+does that (the tests rely on it); the other consoles ask for a name, with no password. `login` warns about it. Before
+trusting the system, set passwords with `passwd` and remove `/etc/autologin`. Even then, with no MMU the permissions
+protect against honest mistakes, not against a program written to cheat ([docs/limits.md](docs/limits.md)).
 
-Build and test: `make` (needs ~/opt/m68k-elf, mke2fs), `make test` (headless serial log),
-`tools/shot.py` (screenshots in a private invisible Wayland session; build with `make DIWV=0x38` because
-FS-UAE crops the top display lines), `tools/run-test.sh` with `tools/tests/shell-test.txt`.
+## Build and test
+Needs: the `m68k-elf` cross toolchain (gcc and binutils; `make TOOLPREFIX=/path/to/bin/m68k-elf-`, by default
+`m68k-elf-gcc` from PATH), Python 3, `mke2fs`/`debugfs`/`e2fsck` (e2fsprogs) and `fakeroot`. For the tests: FS-UAE and
+the Kickstart ROM files, in the directory named by `ZENIX_KICKSTART_DIR` (tools/fsuae_conf.py).
 
-Documentation: [docs/README.md](docs/README.md) is the index (architecture, comparisons, command manuals,
-the feature list [docs/features.md](docs/features.md)). Design decisions: [docs/DESIGN.md](docs/DESIGN.md).
+- `make` builds `build/zenix.adf` (the floppy: bootblock and kernel) and `build/zenix.hdf` (the root disk);
+  `make build/zenix-ram.adf` the floppy with a small root filesystem in RAM, for a machine with no disk (a Gotek boot).
+- `make check` (also `make test`) builds everything and runs every strong test, host and emulator, one after another,
+  and prints a table; about 1.5 hours. How to run single tests: [docs/README.md](docs/README.md), "Testing".
 
-Licence: GPL-2.0 only (see LICENSE). Decided 2026-10-22; the earlier "MIT" was inherited from zenix-old, never chosen for this project.
+## Documentation
+[docs/README.md](docs/README.md) is the index: architecture, walk-throughs, comparisons with AmigaOS and Unix, the command manuals, the
+feature list, the design decisions ([docs/DESIGN.md](docs/DESIGN.md)) and the plan ([docs/ROADMAP.md](docs/ROADMAP.md)).
+
+## Licence
+GPL-2.0-only ([LICENSE](LICENSE); [docs/DESIGN.md](docs/DESIGN.md) D9). Files taken from other projects keep their own licence: miniz and
+`user/regex.c` (from CUtils) are MIT.
+
+Last checked against the code: 2026-10-23.
