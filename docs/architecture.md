@@ -261,6 +261,9 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 - A server loops on `replyrecv(msg, result, port)`: reply to the last message and wait for the next in a single
   trap. (Measured in the emulator: this and an O(1) run queue cut a message round trip from 407 to 248 us; only the
   ratio means anything.)
+- `recv(port, wait)`: wait 0 returns at once (0 if nothing is queued), 1 waits for a message, N > 1 waits at most N-1
+  ticks and then returns 0 - a server with a deadline (ZenixFS's commit three seconds after the first change) sleeps
+  until a message or the deadline, whichever comes first, instead of polling.
 - If a server dies, its ports are closed and its pending and in-service requests fail with an I/O error (-5); the
   kernel then forgets the cached port number and looks it up again next time.
 - Drawback of the design, noted in DESIGN.md: a **hung** server blocks its clients.

@@ -382,16 +382,14 @@ int main(int argc, char **argv)
             continue;
         }
         sys_reply(m, r);
-        for (;;) {                                      /* changes are waiting: wait for the next request, but commit on time */
-            m = sys_recv(port, 0);
-            if (m) break;                               /* a request, or -1: the port is gone */
-            if (sys_ticks() - dirty_since >= COMMIT_TICKS) {
-                zenixfs_sync(fs);
-                dirty = 0;
-                m = sys_recv(port, 1);
-                break;
-            }
-            sys_sleep(10);
+        u32 age = sys_ticks() - dirty_since;
+        m = 0;
+        if (age < COMMIT_TICKS)                         /* changes are waiting: the next request, or the commit time */
+            m = (struct umsg *)sys3(32, (u32)port, 1 + COMMIT_TICKS - age, 0);     /* SYS_recv, waiting at most that long */
+        if (!m) {                                       /* on time, also under a steady stream of requests */
+            zenixfs_sync(fs);
+            dirty = 0;
+            m = sys_recv(port, 1);
         }
     }
     zenixfs_unmount(fs);

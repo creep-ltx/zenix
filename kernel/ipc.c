@@ -90,18 +90,33 @@ long ipc_call(int port, struct umsg *m)
     return m->result;
 }
 
+/* wait: 0 = do not wait (0 if nothing is queued), 1 = wait for a message, N > 1 = wait at most N-1 ticks (then 0).
+ * A timed wait sleeps as P_SLEEP with the port's waiter set, so either a message (ipc_call readies the waiter) or
+ * the tick (schedule wakes sleepers) ends it - a server can keep a deadline without polling. */
 struct umsg *ipc_recv(int port, int wait)
 {
     if (port < 0 || port >= NPORT || !ports[port].used ||
         ports[port].owner != current->pid)
         return (struct umsg *)-1;
     struct port *p = &ports[port];
+    u32 until = ticks + (u32)(wait - 1);
     while (!p->head) {
         if (!wait)
             return 0;
+        if (wait > 1 && (s32)(ticks - until) >= 0) {
+            if (p->waiter == current)
+                p->waiter = 0;
+            return 0;
+        }
         p->waiter = current;
-        current->state = P_MSG;
         current->wait_port = port;
+        if (wait > 1) {
+            current->wake = until;
+            current->state = P_SLEEP;
+            nsleep++;
+        } else {
+            current->state = P_MSG;
+        }
         schedule();
         if (!ports[port].used || current->killed)
             return (struct umsg *)-1;
