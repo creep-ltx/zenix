@@ -21,14 +21,14 @@ static int session(const struct pw *p)
 
 int main(int argc, char **argv)
 {
-    int force = 0, i = 1;
+    int force = 0, autologin = 0, i = 1;
     char name[32] = "", pass[100];
     struct pw p;
     if (i < argc && !strcmp(argv[i], "-f")) { force = 1; i++; }
     if (i < argc) strncpy(name, argv[i], 31);
     if (!name[0] && !force) {                                   /* autologin: the first line of /etc/autologin */
         int fd = sys_open("/etc/autologin", O_RDONLY);
-        if (fd >= 0) { int n = sys_read(fd, name, 31); sys_close(fd); if (n < 0) n = 0; name[n] = 0; char *nl = strchr(name, '\n'); if (nl) *nl = 0; if (name[0]) force = 1; }
+        if (fd >= 0) { int n = sys_read(fd, name, 31); sys_close(fd); if (n < 0) n = 0; name[n] = 0; char *nl = strchr(name, '\n'); if (nl) *nl = 0; if (name[0]) force = autologin = 1; }
     }
     for (int tries = 0; tries < 5; ) {
         if (!name[0]) {
@@ -39,6 +39,11 @@ int main(int argc, char **argv)
             if (!name[0]) continue;
         }
         if (pw_byname(name, &p) == 0) {
+            if (autologin) {                                    /* the shipped images: say plainly what that means */
+                struct pw r;
+                if (pw_byname("root", &r) == 0 && !r.hash[0])
+                    fputs("login: warning: root has no password and /etc/autologin logs in without asking; set passwords with passwd and remove /etc/autologin before trusting this system\n", 1);
+            }
             if (force || !p.hash[0]) return session(&p);
             if (read_secret("Password: ", pass, sizeof pass) == 0 && pw_check(pass, p.hash)) return session(&p);
         } else {
@@ -46,7 +51,7 @@ int main(int argc, char **argv)
         }
         fputs("Login incorrect\n", 1);
         sys_sleep(100);
-        tries++; name[0] = 0; force = 0;
+        tries++; name[0] = 0; force = autologin = 0;
     }
     return 1;
 }

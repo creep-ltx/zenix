@@ -23,11 +23,14 @@ int main(int argc, char **argv)
         pw_hash(n1, salt, hash);
     }
     /* rewrite /etc/passwd through a new file, then rename it into place */
-    static char old_file[4096], new_file[4600];
-    int fd = sys_open("/etc/passwd", O_RDONLY), n = 0, r;
-    if (fd < 0) { fprintf(2, "passwd: cannot read /etc/passwd\n"); return 1; }
-    while (n < (int)sizeof old_file - 1 && (r = sys_read(fd, old_file + n, sizeof old_file - 1 - (u32)n)) > 0) n += r;
-    sys_close(fd); old_file[n] = 0;
+    int n = 0, fd;
+    char *old_file = pw_slurp("/etc/passwd", &n);       /* the whole file: no user past some size may be lost */
+    if (!old_file) { fprintf(2, "passwd: cannot read /etc/passwd\n"); return 1; }
+    u32 lines = 1;
+    for (int k = 0; k < n; k++) if (old_file[k] == '\n') lines++;
+    u32 cap = (u32)n + lines * (strlen(hash) + 2);      /* each line may get the new hash and a newline */
+    char *new_file = malloc(cap);
+    if (!new_file) { fprintf(2, "passwd: out of memory\n"); return 1; }
     u32 o = 0;
     for (char *l = old_file; *l; ) {
         char *e = strchr(l, '\n'); u32 len = e ? (u32)(e - l) : strlen(l);

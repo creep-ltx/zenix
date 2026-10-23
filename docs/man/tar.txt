@@ -18,7 +18,12 @@ DESCRIPTION
 
 MODES
     c    create an archive of the named files and directories (recursively)
-    x    extract everything, creating directories as needed
+    x    extract everything, creating directories as needed. Leading "/"
+         are dropped from names (everything lands under the current or -C
+         directory); a name with a ".." part is refused, and so is a name
+         that is, or goes through, a symbolic link made earlier from the
+         same archive (it would write outside). A refused member is
+         skipped with a message and tar exits 1.
     t    list the names in the archive
 
 OPTIONS

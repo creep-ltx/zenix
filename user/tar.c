@@ -71,6 +71,49 @@ static void mkpath(char *p)
     for (char *s = p + 1; *s; s++) if (*s == '/') { *s = 0; sys_mkdir(p); *s = '/'; }
 }
 
+/* A member name made safe to extract (audit D), in place: leading slashes are dropped (the archive lands under the
+ * current directory, as GNU tar does), "." parts and doubled slashes go. 0, or -1 for a name with a ".." part, which is
+ * refused: it could reach outside the directory. */
+static int safe_name(char *name)
+{
+    char *o = name, *p = name;
+    while (*p) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        char *e = p;
+        while (*e && *e != '/') e++;
+        u32 len = (u32)(e - p);
+        if (len == 2 && p[0] == '.' && p[1] == '.') return -1;
+        if (!(len == 1 && p[0] == '.')) {
+            if (o != name) *o++ = '/';
+            memmove(o, p, len); o += len;
+        }
+        p = e;
+    }
+    *o = 0;
+    return 0;
+}
+
+/* the symbolic links this archive created: nothing later in it may be written through one of them (a member
+ * "x -> /etc" followed by "x/passwd" would otherwise write /etc/passwd) */
+static char **links; static u32 nlinks;
+static void remember_link(const char *name)
+{
+    char **n = realloc(links, (nlinks + 1) * sizeof *n);
+    char *c = strdup(name);
+    if (!n || !c) { free(c); if (n) links = n; return; }
+    links = n; links[nlinks++] = c;
+}
+/* does NAME go through (or is it) a link this archive made? */
+static const char *through_link(const char *name)
+{
+    for (u32 i = 0; i < nlinks; i++) {
+        u32 l = strlen(links[i]);
+        if (!strncmp(name, links[i], l) && (name[l] == '/' || name[l] == 0)) return links[i];
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     char mode = 0; const char *file = 0, *dir = 0; int i = 1;
@@ -102,9 +145,20 @@ int main(int argc, char **argv)
         u32 l = strlen(name); while (l > 1 && name[l - 1] == '/') name[--l] = 0;
         if (mode == 't' || verbose) printf("%s%s\n", name, type == '5' ? "/" : "");
         u32 blocks = (size + 511) / 512;
+        if (mode == 'x') {
+            const char *lk = 0;
+            char *orig = strdup(name);
+            int skip = 1;
+            if (safe_name(name)) { fprintf(2, "tar: %s: refused: a \"..\" part could reach outside the directory\n", orig ? orig : name); rc = 1; }
+            else if (!name[0]) ;                                        /* "/" or "." alone: nothing to make */
+            else if ((lk = through_link(name))) { fprintf(2, "tar: %s: refused: it goes through the symbolic link %s from this archive\n", name, lk); rc = 1; }
+            else skip = 0;
+            free(orig);
+            if (skip) { char sk[512]; for (u32 b = 0; b < blocks; b++) rd_full(sk, 512); continue; }
+        }
         if (mode == 't') { char skip[512]; for (u32 b = 0; b < blocks; b++) rd_full(skip, 512); if (type != '0' && type != '5' && type != '2') ; continue; }
         if (type == '5') { mkpath(name); sys_mkdir(name); sys_chmod(name, mode_bits); }
-        else if (type == '2') { char lk[101]; strncpy(lk, (char *)h + 157, 100); lk[100] = 0; mkpath(name); sys_unlink(name); if (sys_symlink(lk, name) < 0) { fprintf(2, "tar: %s: cannot link\n", name); rc = 1; } }
+        else if (type == '2') { char lk[101]; strncpy(lk, (char *)h + 157, 100); lk[100] = 0; mkpath(name); sys_unlink(name); if (sys_symlink(lk, name) < 0) { fprintf(2, "tar: %s: cannot link\n", name); rc = 1; } else remember_link(name); }
         else if (type == '0') {
             mkpath(name); int fd = sys_open(name, O_WRONLY | O_CREAT | O_TRUNC);
             if (fd < 0) { fprintf(2, "tar: %s: %s\n", name, zwhy("cannot create")); rc = 1; }

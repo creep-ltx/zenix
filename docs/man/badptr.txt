@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     badptr
+    badptr ipc
 
 DESCRIPTION
     A test program. First it hands the kernel two pointers that are not the
@@ -17,8 +18,19 @@ DESCRIPTION
     malloc did not give out is reported and survived. Prints one line per
     check, ending in "ok" or "FAILED", then "badptr: all ok".
 
+    badptr ipc, run as a normal user, checks what such a user must not be
+    able to do: create the ports "fs", "fs.*" or "disk"; send the
+    filesystem server its own FS_READ, FS_WRITE, FS_OPEN or FS_QUIT, or the
+    disk server DISK_OPEN, DISK_READ or DISK_RESCAN (all refused with -13,
+    also when the message claims to come from the kernel); kill, stop or
+    make foreground diskd, fsd, zfsd, boot or init; set the clock; switch
+    the serial copy. DISK_LIST must still answer. It also checks O_EXCL in
+    /tmp: a second exclusive create of a name, and one over a dangling
+    symbolic link, give -17 and follow nothing. Ends in
+    "badptr: ipc all ok".
+
 EXIT STATUS
-    0 if every check passed, 1 otherwise.
+    0 if every check passed, 1 otherwise; badptr ipc as root: 2.
 
 SEE ALSO
     crash(1)

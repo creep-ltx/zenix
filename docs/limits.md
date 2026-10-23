@@ -12,6 +12,17 @@ bring the system down. Users, groups and file permissions (DESIGN D8, built) giv
 protection against honest mistakes, not against a program written to cheat - the same trust level as AmigaOS.
 The documentation must keep saying this.
 
+What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a
+system process, cannot set the clock, cannot talk to the filesystem or disk server directly (the servers answer only
+the kernel and root; the names `fs`, `fs.*` and `disk` are reserved for root), cannot get a shell with Amiga+Return
+when nobody is logged in, and `su`, `tar x`, `find -delete`, here-documents and `mktemp` do not hand one user's
+files or environment to another (architecture.md section 14). What they cannot cover: a program written to cheat
+can still overwrite a message after the kernel stamped it, or any memory at all.
+
+**The shipped images are not locked.** They come with root logged in automatically and no passwords: root, user
+and guest have empty passwords and `/etc/autologin` names root (the tests rely on it). `login` prints a one-line
+warning while this is so. Set the passwords with `passwd` and remove `/etc/autologin` before trusting the system.
+
 A second consequence: **servers are trusted code.** A hung filesystem server blocks every client waiting on it.
 
 ## Not done yet (see README "Not done" and ROADMAP)
@@ -25,8 +36,9 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   Partition tables: an RDB or a PC MBR (primary entries; verified in FS-UAE with disk images). The Emu68 boot card
   holds Emu68 and the Kickstart ROM in its FAT partition: never write to it without a plan. Not done: extended
   partitions, GPT, the 50 MHz high-speed mode, eMMC. Until then: RAM-disk root from the floppy.
-- Signals and handlers, process groups, `/proc`; supplementary groups; a shadow password file; one login session at a
-  time (workspaces are not separate sessions); user and group ids are 16 bits.
+- Signals and handlers, process groups, `/proc`; supplementary groups; a shadow password file (`/etc/passwd` is
+  world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on
+  hardware); one login session at a time (workspaces are not separate sessions); user and group ids are 16 bits.
 - Shared libraries; only static programs.
 - A graphical programs API, mouse, sound, network, USB, floppy driver, RTG.
 - Display server (the terminal and workspaces are inside the kernel), index server for `locate`/`fzf`.

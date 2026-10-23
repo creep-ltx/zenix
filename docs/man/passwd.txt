@@ -12,12 +12,18 @@ DESCRIPTION
     first; root changes anyone's. An empty new password removes the password.
     passwd is installed set-user-id root.
 
-    The hash is "salt$hex": SHA-256 over salt and password, repeated 100
-    times (see sha256sum(1) for the plain function).
+    The hash is "1000$salt$hex": SHA-256 over salt and password, repeated
+    1000 times (the number before the first $; see sha256sum(1) for the
+    plain function). Hashes in the older form "salt$hex" (100 rounds) are
+    still accepted; changing the password stores the new form.
 
 NOTES
     /etc/passwd is readable by everyone, as in early Unix; there is no
-    shadow file yet. The file is replaced through /etc/passwd.new.
+    shadow file yet. The file is replaced through /etc/passwd.new; it is
+    read whole (up to 64 KB, a bigger file is refused), so no user is lost.
+    1000 rounds is a choice for a 14 MHz 68020 (estimated at about a second,
+    not measured on hardware); it only slows guessing a password from the
+    world-readable file.
     An access the user is not allowed is reported as "permission denied".
 
 SEE ALSO

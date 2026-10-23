@@ -36,8 +36,10 @@ EXAMPLES
     find . -type f -exec wc -l {} ';'
 
 NOTES
-    At most 256 entries per directory are examined, and paths are limited to
-    255 characters.
+    Symbolic links below the starting paths are never followed (as GNU
+    find's default, -P): a link is reported as itself (-type f and -type d
+    do not match it), and -delete removes the link, never what it points to.
+    With -delete a starting path that is a link is not followed either.
     Directories with any number of entries are walked, as deep as paths go. A
     path longer than 63 bytes (what a system call takes) is reported ("path
     too long") and skipped, never cut short.

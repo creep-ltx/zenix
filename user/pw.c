@@ -1,16 +1,46 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "pw.h"
 
-/* read a whole small file into a static buffer */
-static char *slurp(const char *path)
+/* read a whole file into a malloc'd buffer (64 KB at most: more is refused, never cut) */
+char *pw_slurp(const char *path, int *len)
 {
-    static char buf[4096];
     int fd = sys_open(path, O_RDONLY), n = 0, r;
+    u32 cap = 4096;
     if (fd < 0) return 0;
-    while (n < (int)sizeof buf - 1 && (r = sys_read(fd, buf + n, sizeof buf - 1 - (u32)n)) > 0) n += r;
+    char *buf = malloc(cap);
+    while (buf) {
+        if ((u32)n + 1 >= cap) {
+            if (cap >= 65536) { fprintf(2, "%s is larger than 64 KB: not read\n", path); free(buf); buf = 0; break; }
+            char *nb = realloc(buf, cap * 2);
+            if (!nb) { free(buf); buf = 0; break; }
+            buf = nb; cap *= 2;
+        }
+        r = sys_read(fd, buf + n, cap - 1 - (u32)n);
+        if (r < 0) { free(buf); buf = 0; break; }
+        if (r == 0) break;
+        n += r;
+    }
     sys_close(fd);
+    if (!buf) return 0;
     buf[n] = 0;
+    if (len) *len = n;
     return buf;
+}
+static char *slurp(const char *path)          /* the last file read stays until the next call */
+{
+    static char *last;
+    free(last);
+    return last = pw_slurp(path, 0);
+}
+
+/* a uid/gid field: decimal digits only, 0-65535 (an empty or non-numeric field is not 0, which is root) */
+static int idnum(const char *s, u32 *out)
+{
+    u32 v = 0;
+    if (!*s) return 0;
+    for (; *s; s++) { if (*s < '0' || *s > '9') return 0; v = v * 10 + (u32)(*s - '0'); if (v > 65535) return 0; }
+    *out = v;
+    return 1;
 }
 
 /* split one line at ':' into up to n fields (in place) */
@@ -32,9 +62,11 @@ static int pw_find(const char *name, int has_uid, u32 uid, struct pw *out)
     for (char *l = file; *l; ) {
         char *e = strchr(l, '\n'); if (e) *e = 0;
         char *f[8];
-        if (*l && *l != '#' && fields(l, f, 7) == 7 && (has_uid ? (u32)atoi(f[2]) == uid : !strcmp(f[0], name))) {
+        u32 u, g;
+        if (*l && *l != '#' && fields(l, f, 7) == 7 && idnum(f[2], &u) && idnum(f[3], &g) &&
+            (has_uid ? u == uid : !strcmp(f[0], name))) {
             copy(out->name, f[0], sizeof out->name); copy(out->hash, f[1], sizeof out->hash);
-            out->uid = (u32)atoi(f[2]); out->gid = (u32)atoi(f[3]);
+            out->uid = u; out->gid = g;
             copy(out->comment, f[4], sizeof out->comment); copy(out->home, f[5], sizeof out->home); copy(out->shell, f[6], sizeof out->shell);
             return 0;
         }
@@ -53,8 +85,9 @@ static int gr_find(const char *name, int has_gid, u32 gid, struct gr *out)
     for (char *l = file; *l; ) {
         char *e = strchr(l, '\n'); if (e) *e = 0;
         char *f[5];
-        if (*l && *l != '#' && fields(l, f, 4) == 4 && (has_gid ? (u32)atoi(f[2]) == gid : !strcmp(f[0], name))) {
-            copy(out->name, f[0], sizeof out->name); out->gid = (u32)atoi(f[2]); copy(out->members, f[3], sizeof out->members);
+        u32 g;
+        if (*l && *l != '#' && fields(l, f, 4) == 4 && idnum(f[2], &g) && (has_gid ? g == gid : !strcmp(f[0], name))) {
+            copy(out->name, f[0], sizeof out->name); out->gid = g; copy(out->members, f[3], sizeof out->members);
             return 0;
         }
         if (!e) break;
