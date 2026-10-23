@@ -11,9 +11,11 @@
  * when its seconds are seen ticking. Same logic as the Fuzix Amiga port (verified in FS-UAE with both chip types).
  * Two year digits: 78-99 are 19xx, 00-77 are 20xx (FS-UAE's MSM6242 keeps years since 1900: taken mod 100). */
 #include "kernel.h"
+#include "hw.h"
 
 #define RTC(n)  (*(volatile u8 *)(0xDC0003UL + ((n) << 2)))
 #define VHPOSR  (*(volatile u8 *)0xDFF006)
+#define RTC_INTENAR (*(volatile u16 *)0xDC001C)       /* where a mirror of the custom chips would show INTENAR */
 
 static u8 nib(u8 n) { return RTC(n) & 0x0F; }
 static u8 two(u8 lo) { return nib(lo) + 10 * nib(lo + 1); }
@@ -38,10 +40,30 @@ static u32 days_from_civil(u32 y, u32 m, u32 d)
     return era * 146097 + doe - 719468;
 }
 
+/* On a machine without a clock $DC0000 can mirror the custom chips (hardware hand-off note, 2026-10-23, item C1): then
+ * a write to a clock register would land in a chip register. Checked before anything is written, without writing
+ * there: an audio channel's enable bit is set and cleared in the real INTENA (with the CPU's interrupts masked - kmain
+ * runs at level 7 until the boot is done - and put back), and a mirror shows the same INTENAR at offset $1C both times.
+ * A clock shows its register 7 there, which does not follow. */
+static int custom_mirror(void)
+{
+    u16 was = INTENAR & 0x0400, same = 1;
+    INTENA = INTF_SETCLR | 0x0400;
+    if (RTC_INTENAR != INTENAR) same = 0;
+    INTENA = 0x0400;
+    if (RTC_INTENAR != INTENAR) same = 0;
+    INTENA = was ? (INTF_SETCLR | 0x0400) : 0x0400;
+    return same;
+}
+
 /* Seconds since 1970, or 0 when there is no usable clock. */
 u32 rtc_read(void)
 {
     u8 i, s, mode = 0, msm_type;
+    if (custom_mirror()) {
+        kprintf("clock: none (the custom chips are mirrored at $DC0000)\n");
+        return 0;
+    }
     if ((nib(13) & 8) && (nib(13) & 3)) {       /* Kickstart leaves an RP5C01 on bank 1: the time is in bank 0 */
         mode = nib(13);
         RTC(13) = mode & 0x0C;
@@ -64,7 +86,9 @@ u32 rtc_read(void)
         for (i = 0; i < 8 && (nib(13) & 2); i++) { RTC(13) = 0; wait_lines(1); RTC(13) = 1; wait_lines(2); }
         h24 = nib(15) & 4; d = 6;
     } else {
-        RTC(13) = (nib(13) & 0x0C) | 1; h24 = nib(10) & 1; RTC(13) = (nib(13) & 0x0C);
+        RTC(13) = (nib(13) & 0x0C) | 1; h24 = nib(10) & 1;
+        RTC(13) = nib(13) & 0x04;               /* bank 0 with the timer stopped while the digits are read (C4): a read
+                                                 * at a rollover cannot mix old and new digits */
         d = 7;
     }
     (void)wd_unused;
@@ -74,6 +98,7 @@ u32 rtc_read(void)
     if (!h24) { if (hh == 12) hh = 0; if (pm) hh += 12; }
     u32 day = two(d), mon = two(d + 2), yr = two(d + 4) % 100;
     if (msm_type) RTC(13) = 0;                  /* release the hold */
+    else RTC(13) = mode ? mode : 0x08 | (nib(13) & 0x04);  /* the timer runs again; Kickstart's bank 1 if it was so */
     if (sec > 59 || min > 59 || hh > 23 || day < 1 || day > 31 || mon < 1 || mon > 12) goto none;
     u32 year = yr >= 78 ? 1900 + yr : 2000 + yr;
     kprintf("clock: %s %u-%s%u-%s%u %s%u:%s%u:%s%u\n", msm_type ? "MSM6242" : "RP5C01", year, mon < 10 ? "0" : "", mon,

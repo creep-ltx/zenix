@@ -15,6 +15,9 @@ void kprintf(const char *fmt, ...)
 }
 u16 irq_save2(void) { return 0; }
 void irq_restore(u16 v) { (void)v; }
+u32 eclock_hz = 709379;
+static u32 fake_clock;
+u32 hr_time(void) { return fake_clock += 7; }            /* every read: about 10 us of E-clock time passes */
 void *mem_alloc(u32 n, u32 flags, u32 owner)
 {
     (void)flags; (void)owner;
@@ -37,6 +40,7 @@ int main(void)
     EXPECT_TRUE(a3000_init() == 0, "a3000_init finds the disk on target 2 (targets 0 and 1 time out)");
     EXPECT_TRUE(a3000_sectors() == FAKE_BLOCKS, "capacity from READ CAPACITY");
     EXPECT_TRUE(resets >= 1, "the chip was reset");
+    EXPECT_TRUE(wdreg[0x02] == 45, "selection timeout register 45: 250 ms at 14.3 MHz (data sheet: ms x MHz / 80)");
 
     static u8 buf[512 * 300 + 8];
     u8 *b = buf + 1;                                     /* odd address on purpose: the DMA uses the bounce buffer */

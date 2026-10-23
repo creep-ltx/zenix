@@ -7,10 +7,12 @@ point here instead of repeating them.
 
 Any program can read or write any memory and touch the hardware. Zenix **contains visible crashes** (exceptions
 kill only the faulting process; its memory is freed; the kernel validates every pointer passed to a system call;
-a magic word in every memory block's header catches overruns of the heap; there is no guard word or guard page
-below a stack). It does **not** isolate programs from each other. A buggy
-program that writes through a valid-looking pointer can corrupt another process, a server or the kernel and
-bring the system down. Users, groups and file permissions (DESIGN D8, built) give accounting and
+a magic word in every memory block's header catches overruns of the heap; a guard pattern at the bottom of every
+stack, checked at every task switch, system call and tick, kills a process whose stack overflowed - after the fact:
+what it wrote below the stack before the check stays written, at most one frame for a program making system calls,
+up to one tick (10 ms) of work for one that does not; there is no guard page). It does **not** isolate programs
+from each other. A buggy program that writes through a valid-looking pointer can corrupt another process, a server
+or the kernel and bring the system down. Users, groups and file permissions (DESIGN D8, built) give accounting and
 protection against honest mistakes, not against a program written to cheat - the same trust level as AmigaOS.
 The documentation must keep saying this.
 
@@ -44,7 +46,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
 - A graphical programs API, a mouse pointer (the mouse is only read, `input`; untested), sound beyond the bell, network,
-  USB, RTG. The floppy driver is experimental (one open bug: a whole-disk read of df1 once came back wrong, no error).
+  USB, RTG. The floppy driver is experimental: DD disks only (an HD drive or disk is not recognised), no drive-type
+  ID, never run on a real drive or a Gotek.
 - Display server (the terminal and the consoles are inside the kernel; workspaces and a bar come with the desktop),
   index server for `locate`/`fzf`.
 - ext2: a journal (an ext3 volume mounts read-only, ext4 is refused), moving a directory to another parent (`mv`
@@ -66,7 +69,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   128 variables, 48 aliases and 48 functions, 200 history lines (a recalled line is cut to the 478 characters the
   editor holds, with the bell).
 - Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
-  Makefile's `STACK_*`, written into each program's header). No guard below a stack. Measured with `-fstack-usage`
+  Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
+  pattern (architecture.md section 6). Measured with `-fstack-usage`
   (2026-10-23): the largest single frames are `mkfs.ext2` main 8.5 KB, `man` 6.1 KB, miniz's Huffman table builder
   5.6 KB (gzip), `fsck.ext2` main 5.4 KB; the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
@@ -85,13 +89,17 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Error numbers: the kernel and the servers return negative errno values (architecture.md section 7). Still a bare
   -1: `SYS_mountinfo` past the end, `ipc_call`/`ipc_recv` on a bad port, `port_create`/`port_find`, the internal
   block allocators of ext2.c. `zwhy` shows no text for -1 (EPERM, 1) for that reason: the caller's own words appear.
-- `ls` lists at most 400 names of one directory; more are left out without a message (a known gap, found
-  2026-10-23, listed at the end of the audit).
 - Input rings between the interrupts and `kwork`: 128 keyboard codes, 1024 serial bytes; a tty queue holds 1024
   bytes of typed input that no program has read yet. Anything dropped is counted on the kernel log.
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS
   treats as dead keys (acute, grave, circumflex, tilde, diaeresis) type the spacing character, there is no
   composition with the next letter.
+- Disks: IDE only on an A600/A1200 Gayle (Gayle ID 0xD) and the A4000's port; LBA drives only (a CHS-only drive, as in
+  some early A600/A1200s, is refused with a message); PIO polling, up to 256 sectors per command on the Gayle port (one on the A4000's). A drive is given up to
+  10 s to start (status 0) and 30 s for any one wait: a drive that never answers holds the boot that long. The A3000's
+  SCSI waits once per target ID (250 ms selection timeout) and does not wait for slow drives to spin up.
+- The reset warning (Ctrl+Amiga+Amiga) gives init at most 8 s to sync the filesystems; only keyboards that send the
+  warning give that time at all (the HRM: not every model). After it, disk writes are refused until the reset.
 - Kernel log: 8 KB, kept in the top 16.5 KB of chip RAM (two 8 KB slots: this boot's and the previous one's). The
   previous-boot log needs chip RAM to survive the reset: it is lost after a power-off, and on the PiStorm it is not
   yet known whether a warm reset keeps it. It holds the last 8 KB of the previous boot; the next boot shows its last
@@ -100,7 +108,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 
 ## Traps found while building it (details in `Knowledge/amiga/zenix-m0-m3-findings.md`)
 
-- Deep recursion in the shell looked like silent garbage because stacks have no guard pages.
+- Deep recursion in the shell looked like silent garbage because stacks had no guard (now a guard pattern, checked
+  at task switches and system calls).
 - The 68020 allows odd-address word/long access, so a "crash test" must use `illegal`.
 - Relocation tables must skip debug sections.
 - Masking all interrupts for a PIO sector made the serial receive interrupt lose characters; mask levels 1-2 only.

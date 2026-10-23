@@ -1,20 +1,26 @@
-sleep 26
+wait zenix:/# 90
+sleep 1
 send fdisk list\r
-sleep 8
+wait df0 +1760 30
+sleep 2
 send dd if=df0 of=/tmp/a count=200\r
-sleep 15
+wait 200\+0 records out 60
 send sha256sum /tmp/a\r
-sleep 4
+wait [0-9a-f]{64}  /tmp/a 60
 send dd if=df1 of=/tmp/b\r
-sleep 40
+wait 1760\+0 records out 150
 send sha256sum /tmp/b\r
-sleep 4
+wait [0-9a-f]{64}  /tmp/b 90
 send dd if=/tmp/a of=df1 seek=500 count=100\r
-sleep 40
+wait 100\+0 records out 120
 send dd if=df1 of=/tmp/c skip=500 count=100\r
-sleep 20
+wait 100\+0 records out 60
 send sha256sum /tmp/c\r
-sleep 4
+wait [0-9a-f]{64}  /tmp/c 60
+send dd if=df1 of=/tmp/d\r
+wait 1760\+0 records out 150
+send sha256sum /tmp/d\r
+wait [0-9a-f]{64}  /tmp/d 90
 send fdisk list\r
 sleep 6
 send sync\r

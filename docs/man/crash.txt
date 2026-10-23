@@ -5,11 +5,26 @@ NAME
 
 SYNOPSIS
     crash
+    crash stack
+    crash kstack | idle
 
 DESCRIPTION
-    Executes an illegal instruction. The kernel must report
-    "pid N (crash) killed: vector 4 ..." and kill only this program; the rest
-    of the system keeps running. A test program.
+    Without an argument, executes an illegal instruction. The kernel must
+    report "pid N (crash) killed: vector 4 ..." and kill only this program;
+    the rest of the system keeps running.
+
+    crash stack recurses, with a system call on every level, until its
+    stack runs past its bottom. The stack guard must report
+    "pid N (crash) overflowed its user stack: killed" and the system must
+    go on.
+
+    crash kstack and crash idle only do something in a kernel built for
+    the test (make DIAG=-DSTACK_TEST, tools/diag-test.sh stack): they damage
+    the guard of crash's own kernel stack (the process is killed with
+    "overflowed its kernel stack") or of the idle process's (a kernel
+    panic). In a normal kernel they say "still here" and exit with 1.
+
+    A test program.
 
 SEE ALSO
     spin(1), badptr(1)

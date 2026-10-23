@@ -69,6 +69,11 @@ ZenixFS-root tests) and on the host (ext2 and disk tests); not yet on the A1200.
 leaks and silent caps, the command fixes, the kernel items and errno numbers; verified in FS-UAE (users, keyboard,
 matrix, command, job, log, diagnostics, memory, mount, ZenixFS and ZenixFS-root tests) and on the host; what is left
 is listed at the end of the audit; not yet on the A1200.
+**Batch F (stack guard, `ls`, the hardware hand-off note) is done** - 2026-10-23 on branch `fix-f`: the stack guard,
+`ls` without a cap, and every item of the hardware hand-off note that applies (keyboard reset warning and handshakes,
+IDE machine detection and timing, floppy write tail, gap, settle times, retries and disk change, clock, A3000 SCSI
+timeouts); the floppy test is back in `make check`; verified in FS-UAE and on the host as the audit says per item; not
+yet on the A1200.
 
 ## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 

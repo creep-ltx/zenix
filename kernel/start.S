@@ -258,6 +258,11 @@ ints_on:
 ints_off:
     or.w    #0x0700,%sr
     rts
+    .globl  get_usp
+get_usp:
+    move.l  %usp,%a0
+    move.l  %a0,%d0
+    rts
     .globl  cpu_idle
 cpu_idle:
     stop    #0x2000
@@ -302,5 +307,7 @@ cache_flush_code:
 
     .section .bss
     .balign 8
+    .globl  kstack_bottom
+kstack_bottom:                      /* pid 0's stack guard lies here (proc.c) */
     .space  8192
 kstack_top:
