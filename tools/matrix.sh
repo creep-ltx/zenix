@@ -3,10 +3,12 @@
 # tools/tests/matrix-test.txt over the serial port, and report PASS/FAIL per setup.
 # usage: tools/matrix.sh [name...]     (default: all)
 cd "$(dirname "$0")/.." || exit 1
-OUT=/tmp/zenix-matrix; mkdir -p $OUT
+OUT=$(mktemp -d /tmp/zenix-matrix.XXXXXX)      # this run only: two runs (two sessions) never share logs
 make -s all 2>&1 | grep -v 'RWX permissions' | grep -i 'error\|check-68020-60\|too big\|\*\*\*' ; [ "${PIPESTATUS[0]}" = 0 ] || { echo "build failed"; exit 1; }
 CONFS="$*"
-[ -z "$CONFS" ] && CONFS="$(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts')"   # mounts: its own floppy, run by tools/mounttest.sh
+# mounts: its own floppy (tools/mounttest.sh); zroot: its own ZenixFS root disk, which this script does not build
+# (tools/zroot-test.sh)
+[ -z "$CONFS" ] && CONFS="$(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot')"
 for n in $CONFS; do
     f=fsuae/$n.fs-uae; [ -f "$f" ] || f=fsuae/matrix/$n.fs-uae
     rm -f build/zenix.hdf build/zenix-rdb.hdf
