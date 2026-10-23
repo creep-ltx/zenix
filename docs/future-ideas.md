@@ -134,7 +134,7 @@ is not preemptive.
   shared core is built on AmigaOS).
 
 ## The kernel: the best idea from each system (owner's goal, 2026-10-23: "an outstanding kernel")
-The owner wants the best of Exec, Linux, BSD, Minix, Fuzix, QNX and the Hurd in one kernel. Principle 2 ("one way to do
+The owner wants the best of Exec, Linux, BSD, Minix, Fuzix, QNX, the Hurd and Darwin in one kernel. Principle 2 ("one way to do
 a thing") still rules: for each area **one** idea is taken, the one that fits a 68020+ Amiga without an MMU, not all of
 them. Ideas only: code may come only from GPL-2-compatible sources (Linux, Fuzix, BSD, Minix); Exec and QNX are
 proprietary, so from them only the documented behaviour (the ROM Kernel Manuals; QNX's published papers).
@@ -154,6 +154,9 @@ proprietary, so from them only the documented behaviour (the ROM Kernel Manuals;
 | No-MMU discipline | **uClinux / Fuzix** | Relocated flat binaries, `vfork`/spawn, careful fragmentation rules; Fuzix's habit of keeping everything small | **done** (ZEXE, spawn) |
 | Shared libraries | **Exec** | Libraries with jump tables, opened by name, one copy in memory (works without an MMU) | static only |
 | Timers | **Linux** | One ordered timer list (or a timer wheel); sleeping processes cost nothing until due | scan of every process |
+| Port security | **Darwin (Mach)** | Port rights: a process may only send to a port it holds a send right for, handed out by the kernel or by another holder. Replaces batch D's reserved names and kernel flag with one clean rule | reserved names + a kernel-only flag |
+| Starting and keeping servers | **Darwin (launchd)** | One service manager that creates a server's port at boot but starts the server only on the first message, and restarts it if it dies (joins the Exec "on first use" and the Minix 3 restart rows) | all start at boot |
+| Drivers | **Darwin (IOKit)** | A registry of hardware found (Zorro boards, the Pi's device tree) and drivers matched to it by properties, instead of each driver probing for itself | each driver probes |
 | Users and permissions | **Unix/BSD** | The classic model, with the honest no-MMU limit | **done** (batch D) |
 
 What stays deliberately out: `fork` (needs an MMU), Linux's size and its thousands of system calls, Exec's lack of
