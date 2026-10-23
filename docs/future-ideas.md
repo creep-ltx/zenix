@@ -107,22 +107,14 @@ is not preemptive.
   advertising clause.
 - **SD card log area:** once the SD driver is proven on the owner's card, save the kernel log to a small area of that
   card, so it can be read on a PC.
-- **Zenix as its own ROM** (hand-off note "rom-boot-sequence", 2026-10-23, kept outside the repository with the
-  owner's research notes): Emu68 loads a Zenix `kick.rom` and AmigaOS never runs. Dual boot stays possible through
-  separate Pi FAT partitions, each with its own kick.rom, chosen with `autoboot.txt` or a one-shot reboot into the other
-  partition (knowledge base `amiga/emu68-and-pistorm.md`). The note covers:
-  - the ROM image layout;
-  - the power-on sequence (overlay, silencing the chips, per-CPU setup, chip RAM sizing, warm vs cold reset);
-  - Zorro autoconfig as a ROM must do it;
-  - Emu68's flattened device tree on its ROM board (magic $D00DFEED), which a ROM-booted Zenix can scan for directly,
-    without `devicetree.resource`;
-  - an 11-step checklist for a Zenix ROM.
-
-  Two things must happen first:
-  - **its own font.** Zenix borrows the Topaz 8 bitmap from the running Kickstart at boot, and that font is Commodore's.
-    Checked 2026-10-23: no Topaz data is copied into Zenix's files. A ROM build needs a free font, for example a
-    public-domain 8x8 font.
-  - **a copy to RAM before running**, because the kernel patches itself.
+- **Zenix as its own ROM: not pursued (owner's decision, 2026-10-23: "not for now, maybe never").** Zenix must run on
+  Amigas in general, booted the normal way from a floppy or disk, not only on the owner's PiStorm. A clean-room hand-off
+  note about ROM booting (2026-10-23) is kept with the owner's research notes, outside the repository. Two points from
+  it still matter without a ROM:
+  - Zenix borrows the Topaz 8 font from the running Kickstart at boot. Checked 2026-10-23: no Topaz data is copied into
+    Zenix's files, and none may ever be (the font is Commodore's).
+  - Emu68 also puts a standard flattened device tree (magic $D00DFEED) on its ROM board, a possible second way for
+    stage0 to find the Pi's addresses.
 - **The data cache without an MMU** on 68030/040/060 (audit Part 3 item 2): the transparent-translation registers
   (DTT0/DTT1 on the 040/060, TT0/TT1 on the 030, ACRs on the EC parts) can mark chip RAM non-cacheable and cache the
   rest, without paging. Public: the MC68040 and MC68030 user manuals in `Knowledge/manuals`, section "Transparent
