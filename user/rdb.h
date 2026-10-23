@@ -112,8 +112,12 @@ static __attribute__((unused)) int rdb_read(rdb_io rd, struct rdb *r)
         unsigned guard = 0;
         for (unsigned next = plist; next != 0xFFFFFFFFu; guard++) {
             if (r->nparts == RDB_MAXPART || guard > RDB_MAXPART) { if (!r->noedit) r->noedit = "more partitions than fdisk handles"; break; }
-            if ((next > r->rdbhi && !r->noedit) || rdb_own(r, next)) { if (!r->noedit) r->noedit = "the partition chain leaves the RDB area or loops"; if (next > r->rdbhi + 4096) break; }
-            if (rd(next, sec)) return -1;
+            if (rdb_own(r, next)) { if (!r->noedit) r->noedit = "the partition chain loops"; break; }
+            if (next > r->rdbhi) {               /* outside the RDB area: still read (AmigaOS follows it), never edited */
+                if (!r->noedit) r->noedit = "the partition chain leaves the RDB area";
+                if (next > r->rdbhi + 4096) break;
+            }
+            if (rd(next, sec)) { if (!r->noedit) r->noedit = "a partition block cannot be read"; break; }
             if (sec[0] != RDB_ID_PART) { if (!r->noedit) r->noedit = "the partition chain holds a block that is not a PART"; break; }
             if (!rdb_sum_ok(sec) && !r->noedit) r->noedit = "a PART block has a bad checksum";
             struct rdb_part *p = &r->part[r->nparts++];

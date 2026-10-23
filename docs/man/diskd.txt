@@ -44,6 +44,7 @@ PARTITION TABLES
     by each partition's own geometry (DosEnvec Surfaces, BlocksPerTrack and
     SizeBlock), whatever tool wrote it. A partition whose geometry cannot be
     placed, or that does not fit the disk, is not served (a line says so).
+    A partition chain that loops ends at the first block seen twice.
     MBR (sector 0 ends in 55 AA and holds plausible primary entries): each
     entry is a device; type 0x83 (Linux) is taken as ext2; type 0x76 holds an
     Amiga RDB of its own, whose partitions are listed after it (Emu68's way of

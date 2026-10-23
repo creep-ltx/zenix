@@ -31,6 +31,20 @@ python3 tools/mkrdb-hdtb.py make $T/d.hdf badsum; cp $T/d.hdf $T/before.hdf
 fd add ide0 ZX1 1; [ $? = 1 ] && grep -q "will not change a table" $T/fdisk.log && cmp -s $T/d.hdf $T/before.hdf \
     && check "a table with a bad checksum is not edited (image unchanged)" ok || { check "bad checksum refused" bad; cat $T/fdisk.log; }
 
+# a partition chain that loops (DH2 points back at DH0): listed once, never edited, no hang
+python3 tools/mkrdb-hdtb.py make $T/d.hdf
+python3 -I - $T/d.hdf <<'PY'
+import struct, sys
+f = open(sys.argv[1], "r+b"); f.seek(7 * 512); b = list(struct.unpack(">128L", f.read(512)))
+b[4] = 1; b[2] = 0; b[2] = (-sum(b[:b[1]])) & 0xFFFFFFFF
+f.seek(7 * 512); f.write(struct.pack(">128L", *b))
+PY
+cp $T/d.hdf $T/before.hdf
+timeout 10 env HOSTDISK_BE=1 HOSTDISK=$T/d.hdf $T/fdisk add ide0 ZX1 1 > $T/fdisk.log 2>&1
+grep -q "loops" $T/fdisk.log && cmp -s $T/d.hdf $T/before.hdf && check "a looping partition chain: fdisk refuses, image unchanged" ok || { check "looping chain refused" bad; cat $T/fdisk.log; }
+printf 'list\n' | timeout 10 env HOSTDISK=$T/d.hdf $T/diskd > $T/loop.out 2>&1
+[ "$(grep -c '^list -> ide0p' $T/loop.out)" = 3 ] && check "diskd lists a looping chain's partitions once" ok || { check "diskd and a looping chain" bad; cat $T/loop.out; }
+
 # ---- C4: the disk server ----
 python3 tools/mkrdb-hdtb.py make $T/d.hdf
 cat > $T/c4.txt <<'EOF2'

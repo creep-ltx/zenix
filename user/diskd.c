@@ -226,7 +226,7 @@ static int overlaps(int s, u32 lba, u32 n, int t)
 static int blocked(int s, u32 lba, u32 n, u32 pid)
 {
     for (int t = 0; t < MAXDEV; t++)
-        if (used[t] && dev[t].mounted && overlaps(s, lba, n, t) && holder(t) && dev[t].mounted != pid)
+        if (used[t] && dev[t].mounted && dev[t].mounted != pid && overlaps(s, lba, n, t) && holder(t))   /* (holder checks the pid only then: writes are hot) */
             return 1;
     return 0;
 }
