@@ -31,7 +31,7 @@ static u8 order[MAXDEV];                /* DISK_LIST order: slots in the order t
 static int norder;
 static int fd_probe = 1;                /* floppy drives looked at: bit 0 = df0; df1-3 only when a name asks for them (probing an absent drive takes a third of a second) */
 static int fdrive[MAXDEV];              /* floppy drive number of a device, -1 for the others */
-static u32 disk_sectors;
+static u32 disk_sectors, disk_caps;     /* disk_caps: DISKCAP_FLUSH if the driver's flush works (tried once at start) */
 static u8 *ram_base;                    /* the boot ramdisk, if any */
 static u32 ram_sectors;
 
@@ -51,7 +51,7 @@ static void add(const char *name, const char *label, u32 start, u32 sectors, u32
     strncpy(d->label, label, sizeof d->label - 1);
     d->start = start; d->sectors = sectors; d->dostype = dostype; d->flags = flags;
     d->maxsect = 256;
-    d->caps = DISKCAP_FLUSH;
+    d->caps = disk_caps;
     if (!strcmp(name, "ram0")) { d->caps = DISKCAP_RAM; cphys[ncand - 1] = 1; }
 }
 
@@ -148,7 +148,7 @@ static void scan(void)
             if (ncand > before) {
                 cfd[ncand - 1] = f;
                 cphys[ncand - 1] = (u8)(2 + f);
-                cand[ncand - 1].caps = 0;                 /* write-through: nothing to flush */
+                cand[ncand - 1].caps = DISKCAP_FLUSH;     /* writes are synchronous (verified): nothing is held back */
                 cand[ncand - 1].maxsect = 22;
             }
         }
@@ -281,6 +281,7 @@ static int handle(struct umsg *m)
     case DISK_FLUSH:
         if (m->a[0] >= MAXDEV || !used[m->a[0]]) return -1;
         if (phys[m->a[0]] != 0) return 0;                           /* RAM disk, floppy: nothing to flush */
+        if (!(dev[m->a[0]].caps & DISKCAP_FLUSH)) return -95;       /* EOPNOTSUPP: this disk cannot promise it */
         return sys_blk_flush();
     case DISK_RESCAN:
         scan();
@@ -298,6 +299,11 @@ int main(void)
     int any_fd = 0;
     if (sys_fd_info(0) & 1) any_fd = 1;
     if (!disk_sectors && !ram_sectors && !any_fd) { printf("diskd: no disk\n"); return 1; }
+    if (disk_sectors) {                 /* can the drive make writes durable? (ATA FLUSH CACHE, SCSI SYNCHRONIZE CACHE) */
+        int f = sys_blk_flush();
+        disk_caps = f == 0 ? DISKCAP_FLUSH : 0;
+        if (f) printf("diskd: ide0 cannot flush its write cache (%d): sync and ZenixFS commits are weaker there\n", f);
+    }
     scan();
     int port = sys_port_create("disk");
     if (port < 0) return 1;

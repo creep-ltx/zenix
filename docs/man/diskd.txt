@@ -30,8 +30,13 @@ DESCRIPTION
     is refused. A plain open may read anything. When the server that
     mounted a device has died, its mount is released the next time it is in
     the way. Besides read, write and info it offers DISK_FLUSH (make
-    everything written so far durable: ATA FLUSH CACHE on IDE) and each device
-    reports capabilities (flush works, flash or rotating, largest transfer).
+    everything written so far durable: ATA FLUSH CACHE on IDE, SYNCHRONIZE
+    CACHE on the A3000's SCSI disk; the SD driver waits for each write) and
+    each device reports capabilities (flush works, flash or rotating,
+    largest transfer). The flush capability is real: diskd tries a flush
+    at start, and a drive that refuses it gets none (a line says so);
+    DISK_FLUSH on such a device answers -95. Floppies write synchronously
+    with verify and count as flushable; the RAM disk as RAM.
     Protocol: kernel/diskproto.h.
 
 PARTITION TABLES

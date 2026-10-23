@@ -4,7 +4,7 @@
 #include "zenixfs_disk.h"
 
 static int dport = -1, handle = -1;
-static unsigned nsect, dtype, shift_;
+static unsigned nsect, dtype, shift_, caps;
 
 int zdisk_open(const char *name, unsigned flags)
 {
@@ -16,7 +16,7 @@ int zdisk_open(const char *name, unsigned flags)
     if (handle < 0) return -1;
     m.type = DISK_INFO; m.a[0] = (u32)handle; m.a[1] = (u32)&di;
     if (sys_call(dport, &m) < 0) { handle = -1; return -1; }
-    nsect = di.sectors; dtype = di.dostype;
+    nsect = di.sectors; dtype = di.dostype; caps = di.caps;
     return 0;
 }
 
@@ -43,6 +43,7 @@ void zdisk_close(void)
 }
 
 unsigned zdisk_sectors(void) { return nsect; }
+int zdisk_can_flush(void) { return (caps & (DISKCAP_FLUSH | DISKCAP_RAM)) != 0; }
 unsigned zdisk_dostype(void) { return dtype; }
 
 static int zd_rw(uint32_t op, uint32_t blk, void *buf)
@@ -59,7 +60,8 @@ static int zd_flush(void *ctx)
     struct umsg m;
     (void)ctx;
     m.type = DISK_FLUSH; m.a[0] = (u32)handle;
-    return sys_call(dport, &m) < 0 ? -1 : 0;
+    int r = sys_call(dport, &m);
+    return r == -95 ? 0 : r < 0 ? -1 : 0;           /* -95: the disk cannot flush its cache (mount.zenixfs said so) */
 }
 
 void zdisk_dev(struct zenixfs_dev *dev, unsigned bshift)

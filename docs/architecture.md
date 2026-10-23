@@ -277,8 +277,10 @@ never moves. Devices that share sectors overlap (the whole disk and its partitio
 overlapping partitions of a damaged table): `DISK_MOUNT` and `DISK_RAW` (tools: `fdisk`, `mkfs.ext2`, `fsck.ext2`) are
 refused while an overlapping device is mounted, and a write touching a device another process has mounted is refused; a
 plain open reads. A mount whose server has died is released when it is in the way (checked with `SYS_procinfo`).
-`DISK_FLUSH` makes earlier writes durable (ATA FLUSH CACHE through `blk_flush`; the SD driver has no write cache of its own);
-`struct diskinfo` carries capability bits and the largest transfer. Protocol: `kernel/diskproto.h`.
+`DISK_FLUSH` makes earlier writes durable (`blk_flush`: ATA FLUSH CACHE on IDE, SYNCHRONIZE CACHE (10) on the A3000; the SD
+driver waits after every write until the card has programmed it). `struct diskinfo` carries capability bits and the largest
+transfer; `DISKCAP_FLUSH` is set only if a flush tried at start worked, and `DISK_FLUSH` answers -95 on a device without it.
+`FS_SYNC` and `FS_QUIT` (umount) end with a `DISK_FLUSH` in both filesystem servers. Protocol: `kernel/diskproto.h`.
 
 ### fsd - the filesystem server (`user/fsd.c` + `kernel/ext2.c`, port `fs`)
 The ext2 code compiled to run in user mode (`user/fsenv.h` supplies its environment), speaking the protocol in

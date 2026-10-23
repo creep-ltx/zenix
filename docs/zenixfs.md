@@ -219,6 +219,9 @@ So ZenixFS must not be tuned for one case:
 - **Rule 4: no hardware assumed in the filesystem code.** It speaks only the `blockio` interface (read, write, flush, info). Gayle, SCSI, SD, a RAM disk and the host's file image are all just
   drivers behind it; the same ZenixFS code is tested on the host image and on the real machines.
 - **Rule 5: the flush barrier is the one thing we cannot fake.** If a device cannot flush, ZenixFS mounts it but says "no crash guarantee on this device" (like ext2 `nobarrier`).
+  Built (2026-10-23): diskd sets `DISKCAP_FLUSH` only when a flush tried at start works (IDE FLUSH CACHE, A3000 SYNCHRONIZE CACHE, the SD
+  driver); without it `mount.zenixfs` prints that a power cut may lose the last commits, or damage the volume if the disk reorders writes,
+  and a commit's flushes are then only "everything sent" (the weaker guarantee).
   Test by really cutting power on each kind of device we claim to support, not only in the simulator.
 - Measure each kind (Gayle+CF, Gayle+disk, SCSI with/without DMA, SD) with the same benchmark script and write the table; the defaults come from that table.
 

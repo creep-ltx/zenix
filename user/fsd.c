@@ -89,6 +89,15 @@ static int open_ref(u32 ino)
     opens[fr].ino = ino; opens[fr].count = 1;
     return 0;
 }
+/* make what was written durable: the cache is write-through, so only the device's own cache is left. A device
+ * that cannot flush (-95, no DISKCAP_FLUSH) has had everything sent to it: that is all that can be done */
+static int disk_flush(void)
+{
+    struct umsg m;
+    m.type = DISK_FLUSH; m.a[0] = (u32)fs_dev;
+    int r = sys_call(disk_port, &m);
+    return r == -95 ? 0 : r;
+}
 static void open_unref(u32 ino)
 {
     for (int i = 0; i < NOPEN; i++)
@@ -183,7 +192,7 @@ static int handle1(struct umsg *m)
         open_unref(m->a[0]);
         return 0;
     case FS_SYNC:
-        return 0;                                     /* writes go straight to the disk */
+        return disk_flush() < 0 ? -5 : 0;             /* writes went straight to the disk; the drive's cache is left */
     case FS_CHMOD:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0) || !owner_only(&in)) return -1;
         return ext2_chmod(in.ino, m->a[2]);
@@ -283,9 +292,10 @@ int main(int argc, char **argv)
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {
         int r = handle(m);
-        if (quitting) {                                 /* umount: answer, then let go of the device */
+        if (quitting) {                                 /* umount: flush, answer, then let go of the device */
             for (int i = 0; i < NOPEN; i++)             /* nothing is open at umount; deletions still waiting are done */
                 if (opens[i].count && !ext2_readonly) { opens[i].count = 0; ext2_release(opens[i].ino); }
+            disk_flush();
             sys_reply(m, r);
             disk_unmount(fs_dev);
             return 0;

@@ -65,6 +65,7 @@ int main(void)
     struct stat st; fstat(fd, &st); nsec = (u32)(st.st_size / 512);
     if (getenv("NOFLUSH")) flush_result = -95;
     disk_sectors = nsec;
+    disk_caps = sys_blk_flush() == 0 ? DISKCAP_FLUSH : 0;
     scan();
     char line[512];
     static u8 sec[512];

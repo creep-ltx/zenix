@@ -364,6 +364,8 @@ int main(int argc, char **argv)
     zenixfs_get_stats(fs, &st);
     if (st.mount_damage)
         printf("mount.zenixfs: %s: %u commit record(s) were unreadable; mounted from the last good commit\n", devname, st.mount_damage);
+    if (!zdisk_can_flush())
+        printf("mount.zenixfs: %s: the disk cannot flush its write cache: a power cut may lose the last commits, or damage the volume if the disk reorders writes\n", devname);
     int port = sys_port_create(pname);
     if (port < 0) { printf("mount.zenixfs: cannot create the port %s\n", pname); return 1; }
     struct umsg *m = sys_recv(port, 1);

@@ -263,3 +263,23 @@ static int rw(u32 lba, u32 count, void *buf, int write)
 
 int a3000_read(u32 lba, u32 count, void *buf) { return rw(lba, count, buf, 0); }
 int a3000_write(u32 lba, u32 count, const void *buf) { return rw(lba, count, (void *)buf, 1); }
+
+/* SYNCHRONIZE CACHE (10), the whole disk: returns when the drive's write cache is on the medium. A drive that does
+ * not know the command (old SCSI disks, which then have no write-back cache to speak of, but we cannot know) answers
+ * CHECK CONDITION: -95, so the disk server reports no flush capability instead of a promise it cannot keep. */
+int a3000_flush(void)
+{
+    if (!up)
+        return -1;
+    u8 cdb[10] = { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    int r = scsi_cmd(target_id, cdb, 10, 0, 0, 0);
+    if (r == 0)
+        return 0;
+    if (r > 0) {                        /* CHECK CONDITION etc.: clear the sense data */
+        static u8 junk[18];
+        u8 sense[6] = { 0x03, 0, 0, 0, 18, 0 };
+        scsi_cmd(target_id, sense, 6, junk, 18, 1);
+        return -95;
+    }
+    return -1;
+}

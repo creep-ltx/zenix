@@ -6,6 +6,7 @@
 #     a table it cannot keep exactly (a bad checksum) is not written at all;
 #   - C4: handles stay with their partition across a rescan that changes the table; a device overlapping a
 #     mounted one cannot be opened raw or mounted, nor written; a dead server's mount is released;
+#   - C6: a disk whose flush does not work has no flush capability and DISK_FLUSH says so.
 cd "$(dirname "$0")/.." || exit 1
 T=$(mktemp -d /tmp/zdisk.XXXXXX)
 trap 'rm -rf $T' EXIT
@@ -69,6 +70,14 @@ want "the mounted handle still writes its own partition" "write 2 0 5 -> 0"
 want "another partition can be written by its own handle" "write 3 0 5 -> 0"
 want "the mount of a server that died is released" "pid 5) is gone: mount released"
 want "... and the partition can be opened again" "open ide0p1 raw 9 -> 2"
+
+# ---- C6: flush capability ----
+python3 tools/mkrdb-hdtb.py make $T/d.hdf
+printf 'list\nopen ide0p1 mount 5\nflush 1\n' | NOFLUSH=1 HOSTDISK=$T/d.hdf $T/diskd > $T/c6.out 2>&1
+grep -q "list -> ide0 h0 start 0 sectors 32768 type 00000000 mounted 0 caps 0" $T/c6.out && grep -q "flush 1 -> -95" $T/c6.out \
+    && check "a disk whose flush fails has no flush capability, DISK_FLUSH answers -95" ok || { check "flush capability" bad; cat $T/c6.out; }
+printf 'list\nopen ide0p1 mount 5\nflush 1\n' | HOSTDISK=$T/d.hdf $T/diskd > $T/c6.out 2>&1
+grep -q "list -> ide0 h0 .* caps 1" $T/c6.out && grep -q "flush 1 -> 0" $T/c6.out && check "a disk whose flush works has the capability" ok || { check "flush capability (working)" bad; cat $T/c6.out; }
 
 echo "disk-host-test: $pass passed, $fail failed"
 [ $fail = 0 ]

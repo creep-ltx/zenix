@@ -61,6 +61,9 @@ int main(void)
         if (fake_disk[i] != before[i]) stray++;
     }
     EXPECT_TRUE(stray == 0, "writes touched only their own sectors");
+    EXPECT_TRUE(a3000_flush() == 0 && syncs == 1, "flush sends SYNCHRONIZE CACHE");
+    fake_nosync = 1;
+    EXPECT_TRUE(a3000_flush() == -95, "a drive without SYNCHRONIZE CACHE: flush says it cannot (-95)");
     EXPECT_TRUE(faults == 0, "no programming-model faults from the chip model");
     printf(bad || faults ? "FAILED\n" : "all ok\n");
     return bad || faults;
