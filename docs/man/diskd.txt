@@ -15,16 +15,30 @@ DESCRIPTION
     the order found), ram0 (the RAM disk loaded by the bootblock, when
     there is one) and df0-df3 (floppy drives, 1760 sectors; df0 is looked
     for at start, df1-df3 on first use; no partitions). Access through a
-    partition is limited to that partition. A device can be
-    mounted by one filesystem server, which is then its only writer; tools
-    such as fdisk, mkfs.ext2 and fsck.ext2 open devices raw, which is refused
-    while mounted. Besides read, write and info it offers DISK_FLUSH (make
+    partition is limited to that partition.
+    A handle is the device's slot. A slot keeps its device across rescans
+    (the same sectors of the same medium; a partition renumbered by a change
+    before it keeps its slot under its new name), so a filesystem server's
+    handle never moves to another partition; a mounted device that vanished
+    from the table keeps its slot until it is unmounted.
+    Devices that share sectors overlap: the whole disk overlaps every
+    partition, a type 0x76 partition the RDB partitions inside it, and two
+    partitions of a damaged table may overlap. A device can be mounted by
+    one filesystem server; mounting it, or opening it raw (fdisk, mkfs.ext2,
+    fsck.ext2), is refused (-16, busy) while an overlapping device is
+    mounted, and a write that touches a device another process has mounted
+    is refused. A plain open may read anything. When the server that
+    mounted a device has died, its mount is released the next time it is in
+    the way. Besides read, write and info it offers DISK_FLUSH (make
     everything written so far durable: ATA FLUSH CACHE on IDE) and each device
     reports capabilities (flush works, flash or rotating, largest transfer).
     Protocol: kernel/diskproto.h.
 
 PARTITION TABLES
-    RDB: the partitions of the table, with their labels and types.
+    RDB: the partitions of the table, with their labels and types, placed
+    by each partition's own geometry (DosEnvec Surfaces, BlocksPerTrack and
+    SizeBlock), whatever tool wrote it. A partition whose geometry cannot be
+    placed, or that does not fit the disk, is not served (a line says so).
     MBR (sector 0 ends in 55 AA and holds plausible primary entries): each
     entry is a device; type 0x83 (Linux) is taken as ext2; type 0x76 holds an
     Amiga RDB of its own, whose partitions are listed after it (Emu68's way of

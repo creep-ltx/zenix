@@ -53,6 +53,8 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | `/dev/null`, `/dev/zero`, `/dev/tty` | verified | |
 | Pipes (2 KB) | verified | |
 | `fdisk` (RDB), `mkfs.ext2`, `fsck.ext2` (check and repair) | verified | man/fdisk.txt, man/mkfs.ext2.txt, man/fsck.ext2.txt |
+| `fdisk` keeps an RDB written by HDToolBox exactly (other geometries, FileSysHeader/LSEG chain); refuses a table it cannot keep | verified (host `tools/disk-host-test.sh`, FS-UAE `tools/disktools.sh`) | man/fdisk.txt |
+| Disk server: stable handles, overlapping devices protected, a dead server's mount released | verified on the host (`tools/disk-host-test.sh`) | man/diskd.txt |
 | SD card of a Raspberry Pi 4 / CM4 under Emu68 (PiStorm): polling SDHCI driver, 25 MHz 4-bit | built, host-tested, **not run on a Pi** | architecture.md section 3, `kernel/emmc.c` |
 | Floppy drives df0-df3 (AmigaDOS 880 KB tracks, MFM by Paula DMA), read and write with verify; `dd` | built, FS-UAE-tested, one open bug (a whole-disk read once wrong), **not run on a real drive** | architecture.md "Floppy driver", `kernel/floppy.c` |
 | Amiga 3000 on-board SCSI (WD33C93A + DMAC): a disk on targets 0-6, polled, DMA via a bounce buffer | built; host model test; see status in limits.md | architecture.md section 2 |

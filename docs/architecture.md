@@ -271,8 +271,12 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 Owns the hardware through privileged raw-sector syscalls (`blk_read/blk_write/blk_size/blk_ram`, only for
 processes flagged `priv`). Reads the Amiga **RDB** partition table (`RDSK`/`PART` blocks, DosEnvec geometry) and
 serves named devices: `ide0` (the whole disk - IDE or the Pi SD card), `ide0p1`, `ide0p2`... (the partitions of an RDB, else of a PC MBR: type 0x83 = ext2, type 0x76 = an RDB inside, others listed and never mounted), and `ram0` for the boot RAM disk. Handles are
-confined to their partition (LBAs are partition-relative). A device opened `DISK_MOUNT` has exactly one writer -
-the filesystem server; tools (`fdisk`, `mkfs.ext2`, `fsck.ext2`) open `DISK_RAW`, which is refused while mounted.
+confined to their partition (LBAs are partition-relative). RDB partitions are placed by their own DosEnvec geometry
+(`user/rdb.h`). A handle is a device's slot, kept across rescans (same sectors, same medium), so a mounted server's handle
+never moves. Devices that share sectors overlap (the whole disk and its partitions, a 0x76 container and the RDB inside,
+overlapping partitions of a damaged table): `DISK_MOUNT` and `DISK_RAW` (tools: `fdisk`, `mkfs.ext2`, `fsck.ext2`) are
+refused while an overlapping device is mounted, and a write touching a device another process has mounted is refused; a
+plain open reads. A mount whose server has died is released when it is in the way (checked with `SYS_procinfo`).
 `DISK_FLUSH` makes earlier writes durable (ATA FLUSH CACHE through `blk_flush`; the SD driver has no write cache of its own);
 `struct diskinfo` carries capability bits and the largest transfer. Protocol: `kernel/diskproto.h`.
 

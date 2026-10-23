@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 
 static int fd = -1;
+static int be;                                  /* HOSTDISK_BE: swap every long, so code written for the 68k's big-endian longs reads
+                                                 * an RDB right (fdisk's host test) */
 static unsigned long long start_sec;
 static u32 nsec;
 unsigned long hostdisk_writes;                  /* sectors written so far */
@@ -23,6 +25,7 @@ int hostdisk_use(const char *path, u32 start, u32 sectors)
     struct stat st;
     fstat(fd, &st);
     start_sec = start;
+    be = getenv("HOSTDISK_BE") != 0;
     nsec = sectors ? sectors : (u32)(st.st_size / 512 - start);
     return 0;
 }
@@ -49,7 +52,7 @@ int sys_call(int port, struct umsg *m)
         if (m->type == DISK_LIST && m->a[0] != 0) return -1;
         struct diskinfo *d = (struct diskinfo *)m->a[1];
         memset(d, 0, sizeof *d);
-        strcpy(d->name, "hd0");
+        strcpy(d->name, "ide0");
         d->sectors = nsec;
         d->maxsect = 256;
         return 0;
@@ -58,11 +61,18 @@ int sys_call(int port, struct umsg *m)
         u32 lba = m->a[1], n = m->a[2];
         if (n == 0 || lba + n < lba || lba + n > nsec) return -1;
         off_t off = (off_t)((start_sec + lba) * 512);
-        if (m->type == DISK_READ)
-            return pread(fd, (void *)m->a[3], (size_t)n * 512, off) == (ssize_t)n * 512 ? 0 : -1;
+        u32 *w = (u32 *)m->a[3];
+        if (m->type == DISK_READ) {
+            if (pread(fd, (void *)m->a[3], (size_t)n * 512, off) != (ssize_t)n * 512) return -1;
+            if (be) for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]);
+            return 0;
+        }
         if (hostdisk_writes + n > hostdisk_limit) return -1;
         hostdisk_writes += n;
-        return pwrite(fd, (const void *)m->a[3], (size_t)n * 512, off) == (ssize_t)n * 512 ? 0 : -1;
+        if (be) for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]);
+        int r = pwrite(fd, (const void *)m->a[3], (size_t)n * 512, off) == (ssize_t)n * 512 ? 0 : -1;
+        if (be) for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]);
+        return r;
     }
     }
     return -1;

@@ -24,4 +24,12 @@ grep -q 'problem(s) found' $OUT/fsck.log && check "fsck finds the damage" ok || 
 grep -q 'fsck.ext2: clean' $OUT/fsck.log && check "fsck repairs it (clean on the last run)" ok || check "fsck repairs it" bad
 dd if=build/scratch.hdf of=$OUT/fixed.img bs=512 skip=1008 count=8192 status=none
 e2fsck -fn $OUT/fixed.img >$OUT/e2fsck-fixed.log 2>&1 && check "host e2fsck agrees the repaired disk is clean" ok || check "host e2fsck agrees" bad
+
+# 3. fdisk on an RDB that HDToolBox could have written (other geometries, a FileSysHeader + LSEG chain): it changes
+#    only what it must (tools/mkrdb-hdtb.py check compares every block)
+python3 tools/mkrdb-hdtb.py make build/scratch.hdf; cp build/scratch.hdf $OUT/rdb-before.hdf
+tools/run-test.sh fsuae/tools/disktools.fs-uae 50 tools/tests/rdb-keep-test.txt > $OUT/rdb.log 2>&1
+grep -qE "ide0p2 +DH1 +6400 " $OUT/rdb.log && check "fdisk lists partitions in their own geometry" ok || check "fdisk lists partitions in their own geometry" bad
+python3 tools/mkrdb-hdtb.py check $OUT/rdb-before.hdf build/scratch.hdf > $OUT/rdb-check.log 2>&1 && check "fdisk add/del/boot keep every other partition, the FileSysHeader/LSEG chain, the RDB" ok || { check "fdisk keeps an HDToolBox RDB" bad; cat $OUT/rdb-check.log; }
+grep -q "ZX2@9:30336+2432" $OUT/rdb-check.log && check "the new partition went into free space (in sectors)" ok || check "the new partition went into free space" bad
 exit $((1 - pass))

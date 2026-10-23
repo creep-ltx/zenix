@@ -16,7 +16,21 @@ DESCRIPTION
     disk, "ide0p1", "ide0p2" ... its partitions. Changes are written at once
     and the disk server re-reads the table. The disk must be a whole disk
     that no filesystem has mounted (the disk the system runs from is mounted,
-    so use a second disk or a scratch image).
+    so use a second disk or a scratch image): on a disk with a mounted
+    partition fdisk only lists ("is in use").
+
+    Editing keeps everything it does not change exactly as it was, so a
+    table made by HDToolBox (or any other Amiga tool) stays valid for
+    AmigaOS: the other partitions' blocks are not rewritten (only the link
+    to the next partition, in the one before a change), each partition
+    keeps its own geometry, the filesystem handlers stored in the RDB
+    (FileSysHeader and LSEG blocks, e.g. PFS3 or SFS), the bad-block list
+    and the drive-init code are never touched. A new partition gets a free
+    block of the RDB area, the RDB's own geometry, and the first free space
+    (in sectors) that holds it, checked against every other partition. A
+    table fdisk cannot keep exactly - a bad checksum, blocks other than 512
+    bytes, partitions that overlap, a geometry it cannot place, more than
+    32 partitions, chains that loop - is not changed at all (use HDToolBox).
 
     A disk with a PC partition table (MBR, e.g. an Emu68 SD card) is listed
     by "list" but not edited: add, del and boot say so, and "init" refuses
@@ -27,9 +41,10 @@ COMMANDS
     init disk -y   write an empty table, DESTROYING the old one; "-y" is
                    required to confirm
     add disk label size [type]
-                   new partition named label. Size is in megabytes, or the
-                   word "rest" for all the remaining space. Type is ext2
-                   (default) or zenixfs (the ZenixFS partition type).
+                   new partition named label (1-31 characters). Size is in
+                   megabytes, or the word "rest" for the largest free
+                   space. Type is ext2 (default) or zenixfs (the ZenixFS
+                   partition type).
     del disk n     delete partition number n (numbers start at 1; later ones
                    move up)
     boot disk n    mark partition n bootable; "off" clears the mark
@@ -45,7 +60,10 @@ EXIT STATUS
     0, 1 on an error (not a whole disk, mounted, no such partition), 2 usage.
 
 NOTES
-    Always back up first. No undo.
+    Always back up first. No undo. "init" writes a new table with fdisk's
+    own geometry (16 heads x 63 sectors), destroying the old one and the
+    filesystem handlers stored in it. Tested against an RDB laid out as
+    HDToolBox writes one (tools/mkrdb-hdtb.py), on the host and in FS-UAE.
 
 SEE ALSO
     mkfs.ext2(1), fsck.ext2(1), df(1)
