@@ -10,7 +10,7 @@
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
-OUT=${USERS_OUT:-/tmp/zenix-users}; mkdir -p $OUT
+OUT=${USERS_OUT:-${ZENIX_OUT:-/tmp/zenix-users}}; mkdir -p $OUT
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae 320 tools/tests/users-test.txt 2>&1 | sed 's/\x1b\[K//g' > $OUT/run.log
 pass=1
 want() { if grep -aqF -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }

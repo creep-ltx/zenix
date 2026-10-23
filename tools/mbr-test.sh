@@ -7,7 +7,7 @@
 # usage: tools/mbr-test.sh   (uses ZENIX_SERIAL, default /tmp/zenix-mbr-serial, so it can run beside other tests)
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-OUT=/tmp/zenix-mbr; mkdir -p $OUT
+OUT=${ZENIX_OUT:-/tmp/zenix-mbr}; mkdir -p $OUT
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-mbr-serial}
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }

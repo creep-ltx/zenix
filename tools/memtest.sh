@@ -14,9 +14,10 @@ for f in $OUT/bad/badzexe*; do
     debugfs -w -R "sif /tests/$n mode 0100755" build/zenix.hdf >/dev/null 2>&1
 done
 cat > $OUT/script.txt <<EOS
-sleep 22
+wait zenix:/# 90
+sleep 1
 send sh /tests/mem.sh > /tmp/mem.out 2>&1; echo finished-mem\r
-sleep ${MEM_WAIT:-200}
+wait (?m)^finished-mem$ ${MEM_WAIT:-200}
 EOS
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae $(( ${MEM_WAIT:-200} + 30 )) $OUT/script.txt > $OUT/run.log 2>&1
 debugfs -R "cat /tmp/mem.out" build/zenix.hdf > $OUT/mem.out 2>/dev/null

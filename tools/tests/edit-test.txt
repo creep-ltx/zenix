@@ -1,4 +1,5 @@
-sleep 20
+wait zenix:/# 90
+sleep 1
 send edit /tmp/e1.txt\r
 sleep 4
 send hello world\rsecond line\rthird\x1b[A\x1b[A\x1b[D

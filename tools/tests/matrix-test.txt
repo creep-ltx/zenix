@@ -1,4 +1,5 @@
-sleep 30
+wait zenix:/# 90
+sleep 1
 send free\r
 sleep 1
 send cat /etc/motd | wc\r
@@ -16,7 +17,7 @@ sleep 2
 send df\r
 sleep 2
 send \x1d2
-sleep 5
+wait zenix login: 30
 send root\r
 sleep 6
 send echo con2ok\r

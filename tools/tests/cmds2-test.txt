@@ -1,4 +1,5 @@
-sleep 26
+wait zenix:/# 90
+sleep 1
 send cal 2 2024\r
 sleep 3
 send tree -d /home\r

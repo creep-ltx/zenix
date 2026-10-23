@@ -1,4 +1,5 @@
-sleep 22
+wait zenix:/# 90
+sleep 1
 send fsck.ext2 ide0p1\r
 sleep 6
 send fsck.ext2 -y ide0p1\r

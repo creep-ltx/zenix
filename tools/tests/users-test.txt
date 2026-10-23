@@ -1,4 +1,5 @@
-sleep 24
+wait zenix:/# 90
+sleep 1
 send id; whoami; umask\r
 sleep 2
 send ls -l /bin/su /tmp /home\r
@@ -78,7 +79,7 @@ sleep 8
 send id\r
 sleep 2
 send \x1d2
-sleep 5
+wait zenix login: 30
 send user\r
 sleep 5
 send id; whoami; echo "home=$HOME"; pwd\r
@@ -104,7 +105,7 @@ sleep 2
 send exit\r
 sleep 5
 send \x1d3
-sleep 5
+wait zenix login: 30
 send \x1d1
 sleep 1
 send root\r

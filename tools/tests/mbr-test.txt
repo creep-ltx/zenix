@@ -1,4 +1,5 @@
-sleep 24
+wait zenix:/# 90
+sleep 1
 send fdisk list\r
 sleep 3
 send df\r

@@ -1,4 +1,5 @@
-sleep 24
+wait zenix:/# 90
+sleep 1
 send sleep 300\r
 sleep 2
 send \x1a

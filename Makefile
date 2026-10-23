@@ -232,14 +232,15 @@ run: all
 	ZENIX_BUILD=$(abspath $(BUILD)) python3 tools/fsuae_conf.py fsuae/a1200-020.fs-uae $(BUILD)/run.fs-uae
 	fs-uae $(BUILD)/run.fs-uae
 
-# boot headless, print the serial log
-test: all
-	rm -f $(BUILD)/zenix.hdf; $(MAKE) $(BUILD)/zenix.hdf
-	tools/run-test.sh fsuae/a1200-020.fs-uae 20
+# the gate: build every image, run the host tests and then every strong emulator test one at a time, print a table, fail
+# if anything failed (tools/check.sh; about 1.5 hours; docs/README.md "Testing"). Uses build/ of this tree.
+check:
+	tools/check.sh
+test: check
 
 clean:
 	rm -rf $(BUILD)
 
 .SECONDARY:
 .DELETE_ON_ERROR:           # a recipe that fails leaves no half-written target behind for the next make to trust
-.PHONY: all run test clean
+.PHONY: all run test check clean

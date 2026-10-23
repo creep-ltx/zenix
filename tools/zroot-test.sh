@@ -6,7 +6,7 @@
 cd "$(dirname "$0")/.." || exit 1
 make -s all build/zenix.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "host tool build failed"; exit 1; }
-OUT=/tmp/zenix-zroot; mkdir -p $OUT
+OUT=${ZENIX_OUT:-/tmp/zenix-zroot}; mkdir -p $OUT
 # the root disk: ZenixFS root + a second partition (ext2, empty) that /etc/fstab mounts on /data at boot
 rm -f build/zenix-zroot.hdf $OUT/data.img
 mke2fs -q -t ext2 -E revision=0 -b 1024 -F $OUT/data.img 2M || { echo "mke2fs failed"; exit 1; }
