@@ -2,7 +2,7 @@
 # to 68030 + MMU + 68882, 2MB chip + 8MB fast, IDE hardfile on ide0.
 [fs-uae]
 amiga_model = A4000
-kickstart_file = /home/creep/UAE/ROM/kicka4000.rom
+kickstart_file = $ZENIX_KICKSTART_DIR/kicka4000.rom
 chip_memory = 2048
 fast_memory = 8192
 uae_cpu_model = 68030

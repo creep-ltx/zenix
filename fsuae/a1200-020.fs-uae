@@ -2,7 +2,7 @@
 [fs-uae]
 accuracy = 1
 amiga_model = A1200
-kickstart_file = /home/creep/UAE/ROM/kicka1200.rom
+kickstart_file = $ZENIX_KICKSTART_DIR/kicka1200.rom
 chip_memory = 2048
 fast_memory = 0
 floppy_drive_0 = ../build/zenix.adf

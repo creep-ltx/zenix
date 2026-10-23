@@ -10,15 +10,15 @@ import subprocess
 import sys
 import time
 
-sys.path.insert(0, os.path.expanduser("~/Projects/DemoScene/Creator"))
-from maker.cage_rig import Cage  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fsuae_conf  # noqa: E402
+Cage = fsuae_conf.load_cage()
 
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.dirname(here)
 serial, log = "/tmp/zenix-joy-serial", "/tmp/zenix-joy.log"
 conf = "/tmp/zenix-joy.fs-uae"
-text = open(os.path.join(root, "fsuae/a1200-020-fast.fs-uae")).read()
-text = text.replace("/tmp/zenix-serial", serial).replace("../build/", root + "/build/")
+text = fsuae_conf.resolve(open(os.path.join(root, "fsuae/a1200-020-fast.fs-uae")).read(), serial=serial)
 text = text.replace("joystick_port_1 = none", "joystick_port_1 = keyboard")
 open(conf, "w").write(text)
 subprocess.run(["make", "-s", "all"], cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

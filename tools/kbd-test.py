@@ -14,8 +14,9 @@ import subprocess
 import sys
 import time
 
-sys.path.insert(0, os.path.expanduser("~/Projects/DemoScene/Creator"))
-from maker.cage_rig import Cage  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fsuae_conf  # noqa: E402
+Cage = fsuae_conf.load_cage()
 
 conf = sys.argv[1]
 link = sys.argv[2] if len(sys.argv) > 2 else "/tmp/zenix-serial"
