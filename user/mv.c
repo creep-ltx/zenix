@@ -1,5 +1,7 @@
 #include "libz.h"
-/* mv [-f] [-v] source... dest : rename; across directories a directory is copied and removed */
+/* mv [-f] [-v] source... dest : rename. Only when the rename cannot be done because the target is on another
+ * filesystem (EXDEV: another mount, or ext2 moving a directory to another parent) is the source copied and removed;
+ * any other refusal (permission, a busy target) is reported and nothing is copied. */
 static int o_v;
 /* a file's copy buffer lives here, not in copy_tree(), which recurses once per directory level */
 static int __attribute__((noinline)) copy_file(const char *src, const char *dst, const struct ustat *st)
@@ -56,8 +58,11 @@ int main(int argc, char **argv)
         if (todir) { const char *b = strrchr(argv[i], '/'); b = b && b[1] ? b + 1 : argv[i]; target = path_join(dest, b); }
         else target = strdup(dest);
         if (!target) { fprintf(2, "mv: %s: %s\n", argv[i], zwhy("cannot move")); rc = 1; continue; }
-        if (sys_rename(argv[i], target) < 0) {
-            if (copy_tree(argv[i], target) < 0 || remove_tree(argv[i]) < 0) { fprintf(2, "mv: cannot move %s\n", argv[i]); rc = 1; free(target); continue; }
+        int r = sys_rename(argv[i], target);
+        if (r == -EXDEV) {
+            if (copy_tree(argv[i], target) < 0 || remove_tree(argv[i]) < 0) { fprintf(2, "mv: cannot move %s to %s: %s\n", argv[i], target, zwhy("copy failed")); rc = 1; free(target); continue; }
+        } else if (r < 0) {
+            fprintf(2, "mv: cannot move %s to %s: %s\n", argv[i], target, zwhy("failed")); rc = 1; free(target); continue;
         }
         if (o_v) printf("'%s' -> '%s'\n", argv[i], target);
         free(target);

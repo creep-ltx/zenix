@@ -7,7 +7,8 @@ SYNOPSIS
     sort [-rnufb] [-k field] [-t char] [-o file] [file...]
 
 DESCRIPTION
-    Reads all the lines of the files (or the standard input), sorts them and
+    Reads all the lines of the files (or the standard input; "-" names it
+    too, and "--" ends the options), sorts them and
     writes the result. The sort is stable: lines that compare equal stay in
     their original order. The whole input is held in memory.
     Lines are compared as plain bytes unless an option says otherwise.

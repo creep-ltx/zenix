@@ -44,9 +44,19 @@ NOTES
     Directories with any number of entries are walked, as deep as paths go. A
     path longer than 63 bytes (what a system call takes) is reported ("path
     too long") and skipped, never cut short.
+    Reading an archive (t, x), every header's checksum is checked: a
+    damaged header, or something that is not a tar archive, stops tar with
+    "damaged archive: wrong header checksum at block N" and status 2, and
+    so does an archive that ends in the middle of a member ("unexpected
+    end of the archive"). Writing (c), a file that becomes shorter while
+    it is read is padded with zeros to the size in its header and said so;
+    a link target longer than 100 bytes or a name longer than ustar allows
+    is reported and makes the status 1; a failed write of the archive ends
+    tar with status 2.
 
 EXIT STATUS
-    0, 1 on error (also when tar c could not add a file), 2 usage error.
+    0, 1 on error (also when tar c could not add a file), 2 usage error,
+    a damaged or cut archive, or a failed write of the archive.
 
 SEE ALSO
     gzip(1), cp(1)

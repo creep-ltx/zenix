@@ -8,7 +8,8 @@ SYNOPSIS
          pattern [file...]
 
 DESCRIPTION
-    Reads each file (or the standard input) and prints the lines that match
+    Reads each file (or the standard input; a file named "-" is the
+    standard input too) and prints the lines that match
     the pattern. The pattern is a POSIX extended regular expression, as in
     "grep -E": . [abc] [^a-z] * + ? {n,m} | ( ) ^ $. The longest match is
     used. With -F the pattern is a plain string instead. When several files
@@ -31,9 +32,10 @@ OPTIONS
     -w       the match must be a whole word
     -x       the match must be the whole line
     -s       do not complain about missing or unreadable files
-    -e pat   use pat as the pattern (lets a pattern start with "-")
+    -e pat   use pat as the pattern (lets a pattern start with "-");
+             so does "--": everything after it is a pattern or a file
     -A n     also print n lines after each match
-    -B n     also print n lines before each match (at most 16)
+    -B n     also print n lines before each match
     -C n     both: n lines before and after
     Context lines use "-" after the name/number instead of ":".
 
@@ -45,12 +47,15 @@ EXAMPLES
     grep -F 'a.b' file           the dot is a plain dot
 
 EXIT STATUS
-    0 if at least one line matched, 1 if none, 2 on a bad option or pattern.
+    0 if at least one line matched, 1 if none, 2 on a bad option or
+    pattern, or when a file could not be read (as GNU grep: unless -q found
+    a match).
 
 NOTES
     Back-references (\1) are not supported. The pattern engine does not
     backtrack, so a hard pattern cannot hang.
-    An access the user is not allowed is reported as "permission denied".
+    A file that cannot be read says why ("no such file or directory",
+    "permission denied" ...).
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.
     Directories with any number of entries are walked, as deep as paths go. A

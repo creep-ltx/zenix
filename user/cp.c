@@ -16,7 +16,7 @@ static int __attribute__((noinline)) copy_file(const char *src, const char *dst,
 static void copy_path(const char *src, const char *dst)
 {
     struct ustat st;
-    if (sys_stat(src, &st) < 0) { fprintf(2, "cp: %s: not found\n", src); rc = 1; return; }
+    if (sys_stat(src, &st) < 0) { fprintf(2, "cp: %s: %s\n", src, zwhy("no such file or directory")); rc = 1; return; }
     if ((st.mode & S_IFMT) == S_IFDIR) {
         if (!o_r) { fprintf(2, "cp: %s: is a directory (use -r)\n", src); rc = 1; return; }
         struct ustat dt;
@@ -45,10 +45,12 @@ int main(int argc, char **argv)
     int todir = sys_stat(dest, &dt) == 0 && (dt.mode & S_IFMT) == S_IFDIR;
     if (n > 2 && !todir) { fprintf(2, "cp: %s: not a directory\n", dest); return 2; }
     for (; i < argc - 1; i++) {
-        char target[256];
-        if (todir) { const char *b = strrchr(argv[i], '/'); b = b && b[1] ? b + 1 : argv[i]; strcpy(target, dest); if (target[strlen(target) - 1] != '/') strcat(target, "/"); strncpy(target + strlen(target), b, 100); }
-        else strcpy(target, dest);
+        char *target;
+        if (todir) { const char *b = strrchr(argv[i], '/'); b = b && b[1] ? b + 1 : argv[i]; target = path_join(dest, b); }
+        else target = strdup(dest);
+        if (!target) { fprintf(2, "cp: %s: %s\n", argv[i], zwhy("cannot copy")); rc = 1; continue; }
         copy_path(argv[i], target);
+        free(target);
     }
     return rc;
 }

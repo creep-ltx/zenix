@@ -10,13 +10,14 @@ DESCRIPTION
     Reads words from the standard input (separated by blanks or newlines;
     single or double quotes keep blanks inside a word) and runs the command
     with those words added after the given arguments. The default command is
-    echo. A command without a slash is looked for in /bin.
+    echo. A command without a slash is found through $PATH, as the shell
+    does.
 
 OPTIONS
-    -n count   use at most count words per run of the command
+    -n count   use at most count words per run of the command (at least 1)
     -I string  run the command once per input LINE, replacing string in the
                arguments with that line (words are then separated by newlines
-               only)
+               only); the string must not be empty
 
 EXAMPLES
     find . -name '*.tmp' | xargs rm
@@ -24,13 +25,17 @@ EXAMPLES
     ls *.c | xargs -I X cp X backup/X
 
 NOTES
-    At most 256 words are collected per run when -n is not given.
-    Running out of memory is reported ("out of memory") and ends the command
-    with a non-zero status; nothing is cut short silently.
+    One run takes as many words as a program can be given (256 arguments
+    and 8 KB of text, the kernel's limits for starting a program); more
+    words make more runs, none is left out. A single word too long for that
+    is reported and ends xargs with status 1. Running out of memory is
+    reported ("out of memory") and ends the command with a non-zero status;
+    nothing is cut short silently.
 
 EXIT STATUS
     0 if every run succeeded, 123 if a command exited non-zero, 127 if it
-    could not be started, 2 unknown option.
+    was not found or could not be started, 1 a word too long to pass, 2
+    unknown option or a bad -n or -I.
 
 SEE ALSO
     find(1), sh(1)

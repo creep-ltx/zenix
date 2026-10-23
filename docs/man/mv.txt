@@ -9,9 +9,12 @@ SYNOPSIS
 DESCRIPTION
     Renames the source to the destination. With more than two names the last
     must be a directory and everything is moved into it. If the destination
-    is an existing directory the source is moved into it. If a plain rename
-    is not possible (for example a directory to another parent), mv copies
-    the tree and removes the original.
+    is an existing directory the source is moved into it. Only when the
+    rename cannot be done because the destination is on another filesystem
+    (another mount; on ext2 also a directory moved to another parent) does mv
+    copy the tree and remove the original. Any other refusal (permission
+    denied, a non-empty directory in the way) is reported and nothing is
+    copied: "mv: cannot move SOURCE to DEST: REASON".
 
 OPTIONS
     -v    print "'source' -> 'destination'" for each move

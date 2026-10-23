@@ -79,7 +79,8 @@ static int script(struct lines *a, struct lines *b, char **ops)
 
 static void range(int start, int cnt) { if (cnt <= 1) oprintf("%d", cnt ? start : start); else oprintf("%d,%d", start, start + cnt - 1); }
 
-static int diff_files(const char *p1, const char *p2, const char *l1, const char *l2)
+/* hdr: the "diff -r A B" line of a directory comparison, printed only when the two files differ (as GNU diff) */
+static int diff_files(const char *p1, const char *p2, const char *l1, const char *l2, const char *hdr)
 {
     struct lines a = { 0, 0 }, b = { 0, 0 };
     char *ops = 0; struct hunk { int a0, ac, b0, bc, k0, k1; } *h = 0;
@@ -92,6 +93,7 @@ static int diff_files(const char *p1, const char *p2, const char *l1, const char
     for (int k = 0; k < total; k++) if (ops[k] != ' ') { differ = 1; break; }
     if (!differ) { rc = 0; goto out; }
     if (o_q) { oprintf("Files %s and %s differ\n", l1, l2); rc = 1; goto out; }
+    if (hdr) oputs(hdr);
 
     /* hunks: runs of non-common ops, with their positions in a and b */
     int ai = 0, bi = 0;
@@ -168,8 +170,13 @@ static int diff_dirs(const char *d1, const char *d2)
             int dir1 = (s1.mode & S_IFMT) == S_IFDIR, dir2 = (s2.mode & S_IFMT) == S_IFDIR;
             if (dir1 && dir2) { if (o_r) { int r = diff_dirs(p1, p2); if (r > rc) rc = r; } else oprintf("Common subdirectories: %s and %s\n", p1, p2); }
             else {
-                if (!o_q) oprintf("diff %s%s %s\n", o_u ? "-u " : "", p1, p2);
-                int r = diff_files(p1, p2, p1, p2); if (r > rc) rc = r;
+                char *hdr = 0;
+                if (!o_q) {
+                    u32 hl = strlen(p1) + strlen(p2) + 16;
+                    if ((hdr = malloc(hl))) snprintf(hdr, hl, "diff %s%s %s\n", o_u ? "-u " : "", p1, p2);
+                }
+                int r = diff_files(p1, p2, p1, p2, hdr); if (r > rc) rc = r;
+                free(hdr);
             }
         }
         free(p1); free(p2);
@@ -190,7 +197,7 @@ int main(int argc, char **argv)
     struct ustat s1, s2;
     int e1 = sys_stat(argv[i], &s1), e2 = sys_stat(argv[i + 1], &s2);
     if (e1 == 0 && e2 == 0 && (s1.mode & S_IFMT) == S_IFDIR && (s2.mode & S_IFMT) == S_IFDIR) { int rc = diff_dirs(argv[i], argv[i + 1]); oflush(); return rc; }
-    int rc = diff_files(argv[i], argv[i + 1], argv[i], argv[i + 1]);
+    int rc = diff_files(argv[i], argv[i + 1], argv[i], argv[i + 1], 0);
     oflush();
     return rc;
 }

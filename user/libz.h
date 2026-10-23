@@ -18,7 +18,8 @@ void *realloc(void *p, unsigned long n);  /* in place if it fits; copies only th
 int fprintf(int fd, const char *fmt, ...);
 int printf(const char *fmt, ...);
 int atoi(const char *s);
-const char *zwhy(const char *dflt);   /* the reason for the last failure (permission denied, path too long, out of memory), else dflt */
+const char *zwhy(const char *dflt);   /* the text of the last failure's error number (zerrno: "permission denied" ...), else dflt */
+const char *zstrerror(int e);         /* strerror: the text of an error number (either sign), 0 if unknown */
 
 /* directories and paths: every directory walker uses these (no name arrays or path buffers on the stack) */
 #define ZPATH_MAX 64                          /* system calls take paths of at most 63 bytes */
@@ -42,6 +43,8 @@ int vfprintf(int fd, const char *fmt, va_list ap);
 int isdigit(int c); int isalpha(int c); int isalnum(int c); int isspace(int c);
 int isupper(int c); int islower(int c); int toupper(int c); int tolower(int c);
 char *getenv(const char *name);
+int path_find(const char *name, char *out, u32 max);   /* a program by name through $PATH, as sh does: 1 = found (out) */
+char *bre_to_ere(const char *bre);   /* a basic regular expression in the extended syntax of regex.c (malloc'd) */
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
 extern char **environ;

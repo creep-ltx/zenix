@@ -479,11 +479,37 @@ void *xmalloc(u32 n)
     return p;
 }
 
-/* the code of the last failed system call (or libz helper), and the reason to print for it */
+/* the error number of the last failed system call (or libz helper), and the reason to print for it */
 int zerrno;
+static const struct { unsigned char e; const char *text; } errtext[] = {
+    { EPERM, "operation not permitted" }, { ENOENT, "no such file or directory" }, { ESRCH, "no such process" },
+    { EINTR, "interrupted" }, { EIO, "input/output error" }, { ENXIO, "no such device" },
+    { E2BIG, "argument list too long" }, { ENOEXEC, "not a Zenix program" }, { EBADF, "bad file descriptor" },
+    { ECHILD, "no child process" }, { EAGAIN, "too many processes" }, { ENOMEM, "out of memory" },
+    { EACCES, "permission denied" }, { EFAULT, "bad address" }, { EBUSY, "device or resource busy" },
+    { EEXIST, "file exists" }, { EXDEV, "cross-device link" }, { ENODEV, "no such device" },
+    { ENOTDIR, "not a directory" }, { EISDIR, "is a directory" }, { EINVAL, "invalid argument" },
+    { ENFILE, "too many open files in the system" }, { EMFILE, "too many open files" }, { ENOTTY, "not a terminal" },
+    { EFBIG, "file too large" }, { ENOSPC, "no space left on device" }, { ESPIPE, "illegal seek" },
+    { EROFS, "read-only file system" }, { EMLINK, "too many links" }, { EPIPE, "broken pipe" },
+    { ERANGE, "result out of range" }, { ENAMETOOLONG, "file name too long" }, { ENOSYS, "not implemented" },
+    { ENOTEMPTY, "directory not empty" }, { ELOOP, "too many levels of symbolic links" },
+    { EOPNOTSUPP, "operation not supported" },
+};
+/* strerror: the text of an error number (positive or negative), 0 if it has none */
+const char *zstrerror(int e)
+{
+    if (e < 0) e = -e;
+    for (unsigned i = 0; i < sizeof errtext / sizeof errtext[0]; i++)
+        if (errtext[i].e == e) return errtext[i].text;
+    return 0;
+}
+/* The text for zerrno, else dflt. EPERM (1) gives dflt too: a bare -1, which some calls still return for "failed"
+ * without a reason, looks the same (docs/limits.md lists them). */
 const char *zwhy(const char *dflt)
 {
-    return zerrno == 13 ? "permission denied" : zerrno == 36 ? "path too long" : zerrno == 12 ? "out of memory" : dflt;
+    const char *t = zerrno > 1 ? zstrerror(zerrno) : 0;
+    return t ? t : dflt;
 }
 
 /* ---------------------------------------------------------------- directories and paths
@@ -496,9 +522,9 @@ char *path_join(const char *dir, const char *name)
 {
     u32 dl = strlen(dir), nl = strlen(name);
     u32 slash = dl && dir[dl - 1] != '/';
-    if (dl + slash + nl > ZPATH_MAX - 1) { zerrno = 36; return 0; }
+    if (dl + slash + nl > ZPATH_MAX - 1) { zerrno = ENAMETOOLONG; return 0; }
     char *p = malloc(dl + slash + nl + 1);
-    if (!p) { zerrno = 12; return 0; }
+    if (!p) { zerrno = ENOMEM; return 0; }
     memcpy(p, dir, dl);
     if (slash) p[dl] = '/';
     memcpy(p + dl + slash, name, nl + 1);
@@ -527,14 +553,14 @@ int dir_list(const char *path, char ***names)
         n++;
     }
     sys_close(fd);
-    if (!v && !(v = malloc(sizeof *v))) { zerrno = 12; return -1; }
+    if (!v && !(v = malloc(sizeof *v))) { zerrno = ENOMEM; return -1; }
     v[n] = 0;
     *names = v;
     return n;
 oom:
     sys_close(fd);
     dir_free(v, n);
-    zerrno = 12;
+    zerrno = ENOMEM;
     return -1;
 }
 void dir_free(char **names, int n)
@@ -542,4 +568,50 @@ void dir_free(char **names, int n)
     if (!names) return;
     for (int i = 0; i < n; i++) free(names[i]);
     free(names);
+}
+
+/* A program by name, as the shell finds it: a name with a slash as it is, else the first PATH directory (default /bin)
+ * that has a regular file of that name. 1 and the path in out, or 0 (not found, or longer than max). */
+int path_find(const char *name, char *out, u32 max)
+{
+    struct ustat st;
+    if (strchr(name, '/')) {
+        if (strlen(name) >= max) return 0;
+        strcpy(out, name);
+        return sys_stat(out, &st) == 0 && (st.mode & S_IFMT) == S_IFREG;
+    }
+    const char *p = getenv("PATH");
+    if (!p) p = "/bin";
+    u32 nl = strlen(name);
+    while (*p) {
+        const char *e = p; while (*e && *e != ':') e++;
+        u32 l = (u32)(e - p);
+        if (l + nl + 2 <= max) {
+            memcpy(out, p, l);
+            if (!l) out[l++] = '.';
+            if (out[l - 1] != '/') out[l++] = '/';
+            memcpy(out + l, name, nl + 1);
+            if (sys_stat(out, &st) == 0 && (st.mode & S_IFMT) == S_IFREG) return 1;
+        }
+        p = *e ? e + 1 : e;
+    }
+    return 0;
+}
+
+/* a basic regular expression (sed, expr :) in the extended syntax regex.c speaks; malloc'd (xmalloc) */
+char *bre_to_ere(const char *s)
+{
+    char *out = xmalloc(strlen(s) * 2 + 2), *o = out; int in_br = 0;
+    while (*s) {
+        if (in_br) { *o++ = *s; if (*s == ']') in_br = 0; s++; continue; }
+        if (*s == '[') { in_br = 1; *o++ = *s++; if (*s == '^') *o++ = *s++; if (*s == ']') *o++ = *s++; continue; }
+        if (*s == '\\' && s[1]) {
+            char c = s[1];
+            if (c == '(' || c == ')' || c == '{' || c == '}' || c == '|' || c == '+' || c == '?') { *o++ = c; s += 2; continue; }
+            *o++ = '\\'; *o++ = c; s += 2; continue;
+        }
+        if (*s == '(' || *s == ')' || *s == '{' || *s == '}' || *s == '|' || *s == '+' || *s == '?') { *o++ = '\\'; *o++ = *s++; continue; }
+        *o++ = *s++;
+    }
+    *o = 0; return out;
 }

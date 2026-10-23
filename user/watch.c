@@ -8,8 +8,10 @@ int main(int argc, char **argv)
     if (i + 1 < argc && !strcmp(argv[i], "-n")) { secs = atoi(argv[i + 1]); i += 2; }
     if (secs < 1) secs = 1;
     if (i >= argc) { fprintf(2, "usage: watch [-n seconds] command [argument...]\n"); return 2; }
-    char cmd[256] = ""; 
-    for (int k = i; k < argc; k++) { if (k > i) strcat(cmd, " "); if (strlen(cmd) + strlen(argv[k]) + 2 < sizeof cmd) strcat(cmd, argv[k]); }
+    u32 len = 1;
+    for (int k = i; k < argc; k++) len += strlen(argv[k]) + 1;
+    char *cmd = xmalloc(len); cmd[0] = 0;                   /* the whole command, however long: nothing is cut */
+    for (int k = i; k < argc; k++) { if (k > i) strcat(cmd, " "); strcat(cmd, argv[k]); }
     for (;;) {
         printf("\033[2J\033[HEvery %ds: %s\n\n", secs, cmd);
         char *sh[] = { "/bin/sh", "-c", cmd, 0 };

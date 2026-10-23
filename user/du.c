@@ -9,12 +9,12 @@ static void show(u32 kb, const char *p)
 static u32 walk(const char *path, int top)
 {
     struct ustat st;
-    if (sys_stat(path, &st) < 0) return 0;
+    if (sys_stat(path, &st) < 0) { fprintf(2, "du: %s: %s\n", path, zwhy("cannot read")); rc = 1; return 0; }
     u32 kb = (st.size + 1023) / 1024;
     if ((st.mode & S_IFMT) == S_IFDIR) {
         kb = 1;
         char **names; int n = dir_list(path, &names);         /* heap, not stack: one level per directory */
-        if (n < 0 && zerrno == 12) { fprintf(2, "du: %s: out of memory\n", path); rc = 1; }
+        if (n < 0) { fprintf(2, "du: %s: %s\n", path, zwhy("cannot read")); rc = 1; }
         for (int i = 0; i < n; i++) {
             char *c = path_join(path, names[i]);
             if (c) kb += walk(c, 0); else { fprintf(2, "du: %s/%s: %s\n", path, names[i], zwhy("cannot read")); rc = 1; }
