@@ -49,7 +49,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Memory per process: at most 8 extra regions at a time (`SYS_memalloc`), each at most 64 MB. `malloc` keeps blocks of
   up to 32 KB in a few growing chunks (32 KB, 64 KB, ... 512 KB each) and gives every bigger block a region of its
   own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with two chunks
-  in use, gets 6); then `malloc` answers NULL.
+  in use, gets 6); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
+  stack of 4 KB to 1 MB.
 - Paths: at most 63 bytes in a system call; the directory tools report a longer joined path instead of cutting it.
 - Timer tick 100 Hz (PAL E-clock 709,379 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers
   chained, an E-clock count that wraps after about 1.7 hours.

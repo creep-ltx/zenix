@@ -42,4 +42,15 @@ mkdir mvd && mv deep mvd/ && [ -f mvd/$p/f ] && echo "mem: mv 25 deep ok" || ech
 rm -r mvd deep.tar
 cd /
 
+# B7: program files with a corrupt header or relocation table are refused (the kernel says why on its log),
+# nothing is loaded, and a good program still runs afterwards
+k=1
+while [ $k -le 11 ]; do
+    /tests/badzexe$k 2>/tmp/bz.err; rc=$?
+    [ $rc -ne 0 ] && echo "mem: corrupt program $k refused (rc $rc) ok" || echo "mem: corrupt program $k ran FAILED"
+    k=$(( k + 1 ))
+done
+n=$(dmesg | grep -c 'exec: /tests/badzexe.* refused')
+[ $n -eq 11 ] && echo "mem: the kernel named all 11 refusals ok" || echo "mem: the kernel named $n of 11 refusals FAILED"
+hello 1 | grep -q 'hello from pid' && echo "mem: a good program still runs ok" || echo "mem: a good program still runs FAILED"
 echo "mem: done"

@@ -76,13 +76,28 @@ struct proc *proc_by_pid(int pid)
  * child's fds 0-2; the child gets no other fds. */
 /* put the image into the process's memory at base and relocate it: from a program built into the kernel ... */
 typedef int (*fillfn)(const void *ctx, u8 *base, const struct zexe *h);
+/* Every relocation offset must name a whole 32-bit word inside the image, at an even address (where the linker puts
+ * addresses): a corrupt table must not write outside the program. All are checked before the first is applied. */
+static int relocs_ok(const u32 *rel, const struct zexe *h)
+{
+    for (u32 i = 0; i < h->nreloc; i++)
+        if (rel[i] > h->image_size - 4 || (rel[i] & 1))
+            return 0;
+    return 1;
+}
+static void relocate(u8 *base, const u32 *rel, u32 n)
+{
+    for (u32 i = 0; i < n; i++)
+        *(u32 *)(base + rel[i]) += (u32)base;
+}
 static int fill_mem(const void *ctx, u8 *base, const struct zexe *h)
 {
     const u8 *file = ctx;
-    memcpy(base, file, h->image_size);
     const u32 *rel = (const u32 *)(file + h->reloc_off);
-    for (u32 i = 0; i < h->nreloc; i++)
-        *(u32 *)(base + rel[i]) += (u32)base;
+    if (!relocs_ok(rel, h))
+        return -5;
+    memcpy(base, file, h->image_size);
+    relocate(base, rel, h->nreloc);
     return 0;
 }
 /* ... or straight from the file system: no buffer holding the whole file, so a spawn needs only the process's own
@@ -91,26 +106,51 @@ static int fill_fs(const void *ctx, u8 *base, const struct zexe *h)
 {
     const struct exec_src *x = ctx;
     if (fs_exec_read(x, 0, base, h->image_size))
-        return -1;
-    u32 rsz = h->nreloc * 4;
+        return -4;
+    u32 rsz = h->nreloc * 4;                    /* nreloc was checked against the file size: no wrap */
     u32 *rel = kmalloc(rsz ? rsz : 4);
-    if (!rel || (rsz && fs_exec_read(x, h->reloc_off, rel, rsz))) {
-        if (rel)
-            kfree(rel);
-        return -1;
+    if (!rel)
+        return -7;
+    if (rsz && fs_exec_read(x, h->reloc_off, rel, rsz)) {
+        kfree(rel);
+        return -4;
     }
-    for (u32 i = 0; i < h->nreloc; i++)
-        *(u32 *)(base + rel[i]) += (u32)base;
+    if (!relocs_ok(rel, h)) {
+        kfree(rel);
+        return -5;
+    }
+    relocate(base, rel, h->nreloc);
     kfree(rel);
+    return 0;
+}
+
+/* The ZEXE header comes from a file: every field is checked, with arithmetic that cannot wrap, before anything is
+ * allocated or read (audit B7). Returns 0, or what is wrong for the message. */
+static const char *zexe_bad(const struct zexe *h, u32 fsize)
+{
+    if (fsize < sizeof *h || h->magic != ZEXE_MAGIC)
+        return "not a Zenix program (no ZEXE header)";
+    if (h->image_size < sizeof *h || h->image_size > fsize)
+        return "image size outside the file";
+    if (h->reloc_off > fsize || h->nreloc > (fsize - h->reloc_off) / 4)
+        return "relocation table outside the file";
+    if (h->nreloc && h->image_size < 4)
+        return "relocations in an empty image";
+    if (h->mem_size < h->image_size || h->mem_size > ZEXE_MEM_MAX)
+        return "memory size impossible";
+    if (h->stack_size && (h->stack_size < ZEXE_STACK_MIN || h->stack_size > ZEXE_STACK_MAX))
+        return "stack size impossible";
     return 0;
 }
 
 static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *fillctx, const char *path, char *const *argv,
                      int argc, struct proc *parent, const int *stdio, int tty, int priv, int suid)
 {
-    if (fsize < sizeof *h || h->magic != ZEXE_MAGIC || h->image_size > fsize ||
-        h->mem_size < h->image_size || h->reloc_off + h->nreloc * 4 > fsize)
+    const char *bad = zexe_bad(h, fsize);
+    if (bad) {
+        kprintf("exec: %s refused: %s\n", path, bad);
         return -5;
+    }
 
     u32 strsz = 0;
     for (int i = 0; i < argc; i++) {
@@ -131,9 +171,12 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
     }
     /* Reading the image can block (messages to the filesystem server), and another process may spawn meanwhile: so the
      * process slot is chosen only afterwards, and nothing below blocks. */
-    if (fill(fillctx, base, h)) {
+    int fr = fill(fillctx, base, h);
+    if (fr) {
+        if (fr == -5)
+            kprintf("exec: %s refused: a relocation points outside the program\n", path);
         mem_free_owner((u32)pid);
-        return -4;
+        return fr;
     }
     memset(base + h->image_size, 0, span - h->image_size);
     cache_flush_code();         /* the image is code the CPU has not seen: no stale I-cache lines or Emu68 translations
@@ -245,7 +288,8 @@ int proc_spawn(const char *path, char *const *argv, int argc,
     long r = fs_exec_open(path, parent, &x);
     if (r < 0)
         return (int)r;
-    if (fs_exec_read(&x, 0, &h, sizeof h))
+    memset(&h, 0, sizeof h);
+    if (x.st.size >= sizeof h && fs_exec_read(&x, 0, &h, sizeof h))      /* shorter: proc_load says why it is refused */
         return -4;
     return proc_load(&h, x.st.size, fill_fs, &x, path, argv, argc, parent, stdio, tty, 0,
                      (x.st.mode & 04000) ? (int)x.st.uid : -1);       /* set-user-id: runs as its owner (su, passwd) */

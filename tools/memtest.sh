@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
 # Memory tests (audit batch B): rootfs/tests/mem.sh under Zenix - malloc/free/realloc and memory calls failing with
-# NULL (badptr), a long-running shell keeping its memory flat, directory tools 25 levels deep. Checks every "ok" line.
+# NULL (badptr), a long-running shell keeping its memory flat, directory tools 25 levels deep, and corrupt program
+# files (made by tools/mkbadzexe.py, written onto the disk here) refused by the loader. Checks every "ok" line.
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=$(mktemp -d /tmp/zenix-memtest.XXXXXX)
+python3 tools/mkbadzexe.py build/hello.zx $OUT/bad >/dev/null || exit 1
+for f in $OUT/bad/badzexe*; do
+    n=$(basename $f)
+    debugfs -w -R "write $f /tests/$n" build/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /tests/$n mode 0100755" build/zenix.hdf >/dev/null 2>&1
+done
 cat > $OUT/script.txt <<EOS
 sleep 22
 send sh /tests/mem.sh > /tmp/mem.out 2>&1; echo finished-mem\r
@@ -15,7 +22,7 @@ tools/run-test.sh fsuae/a1200-020-fast.fs-uae $(( ${MEM_WAIT:-200} + 30 )) $OUT/
 debugfs -R "cat /tmp/mem.out" build/zenix.hdf > $OUT/mem.out 2>/dev/null
 cat $OUT/mem.out
 ok=$(grep -c ' ok$' $OUT/mem.out); bad=$(grep -c 'FAILED' $OUT/mem.out)
-want=$(( 13 + 1 + 8 ))      # badptr (12 checks + "all ok"), shell churn, directory tools
+want=$(( 13 + 1 + 8 + 11 + 2 ))      # badptr (12 checks + "all ok"), shell churn, directory tools, corrupt programs, kernel log + good program
 e2fsck -fn build/zenix.hdf >$OUT/fsck.log 2>&1 || { echo "FAIL: e2fsck finds errors (see $OUT/fsck.log)"; exit 1; }
 if [ "$ok" -eq "$want" ] && [ "$bad" -eq 0 ] && grep -q 'mem: done' $OUT/mem.out; then
     echo "PASS: $ok of $want memory checks ok, e2fsck clean"

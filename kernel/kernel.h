@@ -151,6 +151,9 @@ struct zexe {
     u32 image_size, mem_size, nreloc, reloc_off, stack_size, reserved;
 };
 #define ZEXE_MAGIC 0x5a455845u
+#define ZEXE_MEM_MAX   (16u << 20)     /* the loader refuses a program asking for more (image + bss) */
+#define ZEXE_STACK_MIN 4096u            /* a stack size in the header, if not 0, lies in this range */
+#define ZEXE_STACK_MAX (1u << 20)
 
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16

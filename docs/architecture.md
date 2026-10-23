@@ -160,6 +160,13 @@ No MMU means no per-process virtual addresses, so a program must run wherever it
 ...image...   then nreloc big-endian offsets of 32-bit words that hold link-time addresses
 ```
 
+**Nothing in the header is trusted** (audit B7): before anything is allocated, `zexe_bad` checks that the image lies
+inside the file and holds the header, the relocation table lies inside the file (`nreloc` is compared with what is
+left after `reloc_off`, so `nreloc * 4` cannot wrap), memory is at least the image and at most `ZEXE_MEM_MAX`
+(16 MB), and a stack size, if given, is between 4 KB and 1 MB; then every relocation offset is checked to name a whole
+word inside the image at an even address before the first one is applied. A program that fails is refused: the
+kernel logs `exec: PATH refused: WHY`, the spawn fails (the shell says "cannot run") and its memory is freed.
+
 The loader (`proc_load` in `kernel/proc.c`) allocates the process's memory, **reads the image straight from the file
 system into it** (`fs_exec_open` / `fs_exec_read`: no buffer holding the whole file, so a spawn needs only the
 process's own memory plus the few-KB relocation table), zeroes the BSS, and adds the load address to every
