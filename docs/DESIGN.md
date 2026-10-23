@@ -96,7 +96,7 @@ slowed by a low-priority busy program while a server works for it; the existing 
 **Measured:** task-switch and message round-trip cost before and after (`bench`), in FS-UAE and on the A1200.
 **Cost:** a few hundred bytes of kernel; one more word per process.
 
-## D11. Service manager (outline, 2026-10-24; detailed after D10)
+## D11. Service manager (outline, 2026-10-24. Owner 2026-10-24: may be built after D10 once its design here is complete and fully thought through - a full design note, reviewed, before any code)
 `boot` grows into one service manager (Exec "load on first use" + Minix 3 restart + launchd, as one mechanism): it starts
 the servers listed in a small configuration file, restarts a server that dies (clients of a dead server already get an
 error and retry), and later starts servers on first use. It replaces "start everything at boot" and the hard-wired
