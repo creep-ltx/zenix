@@ -21,11 +21,13 @@ built on the Amiga's own hardware (blitter, Copper, planar screens). Not Linux, 
    that matter are taken on the real A1200 and written down with the date.
 5. **Nothing is done until it is tested.** Every feature has a test in the setup matrix (tools/matrix.sh) or a
    script next to it. Filesystem code is checked with the host's e2fsck.
-6. **The owner's A1200 first (decided 2026-10-22).** The target is the owner's own machine: an A1200 with a
-   PiStorm32-lite and a CM4 running Emu68, booting from a Gotek, with its disk on the Pi's SD card. Zenix must be
-   stable and usable there before anything else. Other platforms (a stock A1200 with IDE, A3000/A4000 SCSI and IDE,
-   real 68030/040/060 cards) come after that and never complicate the base. Code already written for them stays,
-   but is not a priority.
+6. **Real Amiga hardware is the ultimate target; the owner's PiStorm A1200 is the first test machine (owner,
+   2026-10-23/24).** Zenix is tested first on the owner's A1200 with a PiStorm32-lite and a CM4 running Emu68, booting from
+   the SD card or a GoDRIVE 1200, because that is the machine at hand. But it is built for real Amigas: a 68020-68060 at
+   real clock speeds, Gayle IDE/CF, SCSI, real floppies, chip and fast RAM as the boards have it. So: nothing in the base
+   system may depend on Emu68 or the Pi (Pi hardware is reached by optional drivers/servers only); speed is judged on real
+   68k CPUs (today: what a stock 14 MHz 68EC020 can do), not by Emu68's ~1000 MIPS, which hides slow code; the stock A1200 setups stay in the
+   test matrix; booting works the normal Amiga way (floppy, or a hard disk/CF/SD through `zenixboot`), never a custom ROM.
 7. **Write it down.** Findings go to the knowledge base, decisions to DESIGN.md, status to README.md.
 8. **Unix experience:** standard names, standard behaviour (POSIX where it makes sense), `/` filesystem,
    text tools that pipe.
@@ -67,6 +69,11 @@ ZenixFS-root tests) and on the host (ext2 and disk tests); not yet on the A1200.
 leaks and silent caps, the command fixes, the kernel items and errno numbers; verified in FS-UAE (users, keyboard,
 matrix, command, job, log, diagnostics, memory, mount, ZenixFS and ZenixFS-root tests) and on the host; what is left
 is listed at the end of the audit; not yet on the A1200.
+**Batch F (stack guard, `ls`, the hardware hand-off note) is done** - 2026-10-23 on branch `fix-f`: the stack guard,
+`ls` without a cap, and every item of the hardware hand-off note that applies (keyboard reset warning and handshakes,
+IDE machine detection and timing, floppy write tail, gap, settle times, retries and disk change, clock, A3000 SCSI
+timeouts); the floppy test is back in `make check`; verified in FS-UAE and on the host as the audit says per item; not
+yet on the A1200.
 
 ## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 
@@ -114,6 +121,11 @@ DESIGN.md D9).
 ## Ideas parked for later
 
 ## Open questions
+
+- **Minimum requirements: not decided (owner, 2026-10-24).** The owner sets them later, depending on how much Zenix
+  grows. What is true today: the kernel refuses a 68000/68010 (the code needs a 68020+); everything boots and passes the
+  matrix on a stock 68EC020 with 2 MB chip RAM and no fast RAM, and on 1 MB chip-only with one login session. Until the
+  owner decides, keep it running on those, and say in a change's notes when it costs memory or speed on them.
 
 - ZenixFS name: a Western Digital project already uses "ZenixFS" (RocksDB on zoned SSDs); decide if that matters.
 - How much POSIX: `fork` is not possible without an MMU; `vfork`/`spawn` only. Programs that need `fork` are out.

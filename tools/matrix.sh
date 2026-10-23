@@ -28,6 +28,7 @@ for n in $CONFS; do
     grep -q '^ok$' $OUT/$n.log || ok=0
     grep -q 'hello from pid' $OUT/$n.log || ok=0
     grep -q 'killed' $OUT/$n.log || ok=0
+    grep -q 'pid [0-9]* (crash) overflowed its user stack: killed' $OUT/$n.log || ok=0   # the stack guard (proc.c)
     grep -q 'Zenix 0.2' $OUT/$n.log || ok=0
     grep -q 'Filesystem  1K-blocks' $OUT/$n.log || ok=0
     grep -q 'zenix login: ' $OUT/$n.log || ok=0   # console 2 shows its own login prompt

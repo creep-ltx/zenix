@@ -38,8 +38,7 @@ OPTIONS
 LONG FORMAT
     -rwxr-xr-x 1 root root 5120 Oct 22 12:51 sh
     The date shows the time of day for recent files and the year for files
-    older than about six months. Owner and group are always shown as "root"
-    (Zenix has no users yet).
+    older than about six months.
 
 EXAMPLES
     ls -l /bin             long list of the programs
@@ -47,15 +46,16 @@ EXAMPLES
     ls -d */               only the directories here
 
 NOTES
-    At most 400 names of one directory are listed; more are left out
-    without a message (a known gap).
+    A directory of any size is listed: the names are kept in memory, and
+    if memory runs out ls says "out of memory" and exits with 1.
     An access the user is not allowed is reported as "permission denied".
     With -R, directories are walked as deep as paths go. A
     path longer than 63 bytes (what a system call takes) is reported ("path
     too long") and skipped, never cut short.
 
 EXIT STATUS
-    0 success, 1 a file or directory could not be found or opened,
+    0 success, 1 a file or directory could not be found or opened (or
+    memory ran out),
     2 unknown option.
 
 SEE ALSO

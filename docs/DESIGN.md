@@ -67,6 +67,41 @@ against a program written to cheat (the same trust level as AmigaOS). The docs m
 projects must be GPL-2 compatible and keeps its own licence header (miniz and `user/regex.c` from CUtils: MIT). Every
 Zenix file carries `SPDX-License-Identifier: GPL-2.0-only`. (The "MIT" seen earlier was inherited from zenix-old, never chosen.)
 
+## D10. Priorities (approved by the owner 2026-10-24, to be built after the audit fixing and its closing report; first item of future-ideas "the kernel best-of list")
+**What.** Every process has a priority. The highest ready priority always runs; processes of the same priority take
+turns (round robin, 50 ms slices) - the Exec rule, which DESIGN D6 always intended.
+- **Levels:** 32 levels inside the kernel. Users see the Unix `nice` scale (-20 most favoured ... 19 least), mapped onto
+  them; one scale for users, one inside, no third.
+- **Who may change what (Unix rule):** anyone may lower their own processes' priority (`nice`, `renice`); only root
+  may raise it. A child inherits its parent's priority.
+- **Defaults:** the built-in servers (diskd, fsd, zfsd) above normal programs, so a busy program never delays the disk
+  and filesystems everyone waits for; login shells and programs at the normal level (nice 0).
+- **QNX priority inheritance (the second row of the best-of table, same step):** a server that receives a message
+  runs at least at its client's priority until it replies. Simple here because calls are synchronous: the boost starts
+  at receive and ends at reply. A low-priority program can then not hold up a high-priority one through a shared server.
+- **Waking a higher priority:** when an interrupt or a reply makes a higher-priority process ready, the running one
+  gives way at its next return to user mode (a "reschedule" flag checked where `kwork()` already runs). The kernel stays
+  non-preemptive; no locks are added.
+- **Run queue:** one list per level plus a 32-bit mask of non-empty levels; the 68020's `BFFFO` instruction finds the
+  highest in one step. O(1), as today.
+**What it replaces:** the single run queue (rq_head/rq_tail). Nothing old stays next to it.
+**Not taken:** Linux-style fairness/aging (complex) - Exec shows that strict priorities work when programs wait for
+input, and the "only root raises" rule stops a normal user from starving others. Revisit only if a test shows starvation
+in normal use.
+**Interface:** POSIX `getpriority`/`setpriority` (two system calls, numbers claimed in CLAUDE.md first), commands `nice`
+and `renice`, a PRI column in `ps` and `top`-style tools; docs and man pages in the same change.
+**Tests (in `make check`):** equal priorities alternate only at slice end (the fairness lesson in future-ideas);
+a higher one always wins; nice/renice rules for users and root; priority inheritance: a high-priority client is not
+slowed by a low-priority busy program while a server works for it; the existing matrix/jobs/kbd tests unchanged.
+**Measured:** task-switch and message round-trip cost before and after (`bench`), in FS-UAE and on the A1200.
+**Cost:** a few hundred bytes of kernel; one more word per process.
+
+## D11. Service manager (outline, 2026-10-24. Owner 2026-10-24: may be built after D10 once its design here is complete and fully thought through - a full design note, reviewed, before any code)
+`boot` grows into one service manager (Exec "load on first use" + Minix 3 restart + launchd, as one mechanism): it starts
+the servers listed in a small configuration file, restarts a server that dies (clients of a dead server already get an
+error and retry), and later starts servers on first use. It replaces "start everything at boot" and the hard-wired
+server list in kmain. Port rights (Darwin) are a separate, later decision.
+
 ## Where the decisions stand (2026-10-23)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`/`mount.zenixfs`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).

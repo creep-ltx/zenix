@@ -42,12 +42,65 @@ static int slice;
 #define USTACK_DEFAULT 16384u
 #define FILE_MAX (256u * 1024)
 
+/* ---- the stack guard (future-ideas.md section 3, a fix since 2026-10-23) ----
+ * Without an MMU nothing stops a stack from growing past its bottom into the memory below (the program's own bss for a
+ * user stack, another block of the kernel heap for a kernel stack). So a pattern of GUARD_WORDS long words lies at the
+ * bottom of every stack, and the stack pointers are compared with the stack's bounds: at every task switch (the
+ * process leaving the CPU, and the saved pointers of the one coming in), on every system call, at the tick when it
+ * interrupts user code, and when a program faults. A process that failed is told off on the kernel log - "pid N
+ * (name) overflowed its user stack" - and killed (exit 139, as for a fault); pid 0 (idle, the boot stack, where
+ * kmain and the interrupts taken while idle run) panics with the text in the kernel log, so the next boot shows it.
+ * This finds an overflow, it cannot prevent one: what was written below the stack before the next check stays
+ * written. A deep recursion that makes system calls is caught within one frame; one that never enters the kernel
+ * within one tick (10 ms). */
+#define GUARD_WORDS 4
+#define GUARD_BYTES (GUARD_WORDS * 4u)
+#define KSP_SLACK   64u                 /* what switch_to and its caller still push below the C frame that checks */
+static const u32 guard_pat[GUARD_WORDS] = { STACK_GUARD0, 0xA5ACABB4u, 0x4B53545Au, 0xB4ABACA5u };   /* "ZSTK" ... */
+
+static void guard_set(u32 bottom)
+{
+    u32 *g = (u32 *)bottom;
+    for (int i = 0; i < GUARD_WORDS; i++)
+        g[i] = guard_pat[i];
+}
+
+static int guard_ok(u32 bottom)
+{
+    const u32 *g = (const u32 *)bottom;
+    return g[0] == guard_pat[0] && g[1] == guard_pat[1] && g[2] == guard_pat[2] && g[3] == guard_pat[3];
+}
+
+int stack_bad(const struct proc *p, u32 ksp, u32 usp)
+{
+    if (!guard_ok(p->kstk) || ksp < p->kstk + GUARD_BYTES || ksp > p->ktop)
+        return STK_KERNEL;
+    if (p->ustk && (!guard_ok(p->ustk) || (usp && (usp < p->ustk + GUARD_BYTES || usp > p->base + p->span))))
+        return STK_USER;
+    return 0;
+}
+
+void stack_fail(struct proc *p, int which)
+{
+    const char *k = which == STK_KERNEL ? "kernel" : "user";
+    if (p->pid == 0) {
+        kprintf("\n[kernel] pid 0 (idle) overflowed its kernel stack\n");
+        panic("pid 0 (idle) overflowed its kernel stack");
+    }
+    kprintf("\n[kernel] pid %d (%s) overflowed its %s stack: killed\n", p->pid, p->name, k);
+    proc_kill(p);                       /* a blocked one is woken: it dies the moment it runs again (schedule) */
+    p->killed = 2;                      /* 2: exit code 139, as for a fault */
+}
+
 void proc_init(void)
 {
     memset(procs, 0, sizeof procs);
     procs[0].state = P_READY;           /* pid 0: idle, runs on the boot stack */
     procs[0].pid = 0;
     memcpy(procs[0].name, "idle", 5);
+    procs[0].kstk = (u32)kstack_bottom;
+    procs[0].ktop = (u32)kstack_bottom + 8192;
+    guard_set(procs[0].kstk);           /* kmain is far above it by now */
     current = &procs[0];
 }
 
@@ -180,6 +233,9 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
         return fr;
     }
     memset(base + h->image_size, 0, span - h->image_size);
+    u32 ustk = (u32)base + ((h->mem_size + 15) & ~15u);         /* the user stack starts above image and bss */
+    guard_set(ustk);
+    guard_set((u32)ks);
     cache_flush_code();         /* the image is code the CPU has not seen: no stale I-cache lines or Emu68 translations
                                  * (another program ran at this address before) may run instead */
     struct proc *p = 0;
@@ -224,6 +280,9 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
     p->ppid = parent ? parent->pid : 0;
     p->base = (u32)base;
     p->span = span;
+    p->kstk = (u32)ks;
+    p->ktop = (u32)ks + KSTACK;
+    p->ustk = ustk;
     p->cwd_ino = parent ? parent->cwd_ino : 2;
     p->uid = parent ? parent->uid : 0;
     p->ruid = parent ? parent->ruid : 0;
@@ -317,6 +376,13 @@ void schedule(void)
     u16 s = irq_save();
     struct proc *old = current, *n;
 
+    /* the stack guard: the one leaving the CPU (its stacks now), unless it is already on its way out */
+    if (!old->killed && old->state != P_ZOMBIE) {
+        int bad = stack_bad(old, (u32)__builtin_frame_address(0) - KSP_SLACK, get_usp());
+        if (bad)
+            stack_fail(old, bad);       /* pid 0: a panic; else killed when it next runs */
+    }
+
     if (old->state == P_READY && old->pid != 0 && !old->queued)
         rq_push(old);                   /* yielded or preempted: back of the line */
     if (nsleep)
@@ -334,13 +400,22 @@ void schedule(void)
     }
     slice = SLICE;
     if (n != old) {
+        /* ... and the saved stack pointers of the one coming in (pid 0 has no user stack: ustk 0). A kernel stack
+         * pointer outside its stack means the process table itself is damaged: it cannot be resumed, nor killed in
+         * its own context. */
+        if (n->ksp && ((u32)n->ksp < n->kstk + GUARD_BYTES || (u32)n->ksp > n->ktop)) {
+            kprintf("\n[kernel] pid %d (%s): saved kernel stack pointer %p outside its stack\n", n->pid, n->name, n->ksp);
+            panic("a saved kernel stack pointer is outside its stack");
+        }
+        if (n->ustk && !n->killed && (n->usp < n->ustk + GUARD_BYTES || n->usp > n->base + n->span))
+            stack_fail(n, STK_USER);
         current = n;
         switch_to(old, n);
     }
     irq_restore(s);
     /* a process that was killed while blocked or preempted dies here */
     if (current->killed && current->state == P_READY && current->pid != 0)
-        proc_exit(130);
+        proc_exit(current->killed == 2 ? 139 : 130);
     if (current->stop_req && current->state == P_READY && current->pid != 0 && !current->wait_msg) {
         struct proc *p = current;                       /* stopped: not runnable until proc_cont */
         p->stop_req = 0;
@@ -436,6 +511,8 @@ int proc_wait(int pid, int flags)
     int con = (flags & WAIT_CONSOLE) && current->uid == 0;
     for (;;) {
         int have = 0;
+        if (con && kbd_reset_state == KRS_HELD)
+            kbd_reset_flush();          /* Ctrl+Amiga+Amiga: init syncs the disks before the reset (kbd.c) */
         if (con && con_want) {
             for (int n = 1; n <= NCONS; n++)
                 if (con_want & (1u << n)) {

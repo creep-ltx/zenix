@@ -36,11 +36,12 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    memory self-test; instruction cache on; the E-clock counter (PAL or NTSC crystal, from the Agnus/Alice id);
    display (the beam's line count picks 32 or 25 text rows; Copper list, bitplane, font); the previous boot's last lines
    if there was one (`klog_show_prev`); real-time clock if present;
-   IDE probe with Gayle's interrupt sources switched off first (panic only if there is neither a disk nor a RAM
-   disk).
+   IDE probe on this machine's port only - a Ramsey means the A4000 port, Gayle ID 0xD the A600/A1200 one with its
+   interrupt sources switched off first, anything else no IDE - then the SD card, then the A3000's SCSI (panic only
+   if there is neither a disk nor a RAM disk).
 5. `proc_init`, `tty_init`, then four processes **built into the kernel image** (so they need no disk):
-   `diskd` (priv), `fsd` (ext2), `zfsd` (ZenixFS) and `boot` (priv). Timer interrupt (latch from the E-clock) and interrupts are
-   switched on. The main thread becomes
+   `diskd` (priv), `fsd` (ext2), `zfsd` (ZenixFS) and `boot` (priv). Timer and keyboard interrupts (latch from the
+   E-clock; one keyboard handshake in case it still waits for one) and interrupts are switched on. The main thread becomes
    the idle loop: reap orphans, `schedule()`, drain the serial buffer, `cpu_idle()` (stop until an interrupt).
 6. `diskd` finds the disk and its partition table and creates the `disk` port (on the zenixboot SD card it lists the
    FAT partition, the 0x76 container, the FFS boot partition inside it and the ext2 partition; only the last one can

@@ -216,6 +216,9 @@ static u32 rep_at;                      /* tick of the next repeat */
  * the count on the kernel log) and, because the lost code may be a key going up, forgets the held modifiers and the
  * repeating key (a stuck key would repeat for ever). kwork runs at least between the 256-byte pieces of a long
  * terminal write (tty.c), so 128 slots (about 6 seconds of fast typing) are far more than it needs. */
+static void reset_release(void);
+static u32 rw_since;
+#define KBD_RESET_MAX 800               /* 8 s: the reset-warning flush, at most (the keyboard waits 10 s) */
 #define KQ 128
 static volatile u8 kq[KQ];
 static volatile u16 kq_head, kq_tail;
@@ -226,6 +229,10 @@ void kbd_tick(void)
 {
     if (rep_code)
         kwork_pending = 1;              /* kbd_work checks whether the repeat is due */
+    if ((kbd_reset_state == KRS_HELD || kbd_reset_state == KRS_FLUSHING) && (u32)(ticks - rw_since) > KBD_RESET_MAX) {
+        disk_frozen = 1;
+        reset_release();                /* the flush took too long: let the keyboard reset (it would at 10 s anyway) */
+    }
 }
 
 /* Handshake: SP as output, low, for at least 85 us (HRM: "to ensure compatibility with all keyboard models"), then
@@ -247,12 +254,46 @@ static void handshake(void)
     CIAA(CIA_CRA) &= (u8)~0x40;
 }
 
-/* From the level-2 interrupt (the tick handler sees the CIA's serial-port bit): take the byte, answer the keyboard,
+/* ---- the reset warning (HRM p.361; hand-off item K3) ----
+ * Ctrl+Amiga+Amiga makes keyboards that have the feature send the reset-warning code $78 twice. The first is answered
+ * like any key. On the second the Amiga must pull KDAT low within 250 ms; it then has up to 10 s before the keyboard
+ * resets the machine, which it does as soon as KDAT goes high again. Only two consecutive $78 codes count (any other
+ * code between them starts again), which the hardware hand-off note (2026-10-23) has from a long-proven driver.
+ * Zenix keeps KDAT low (the handshake's output mode, not ended), lets init sync every filesystem in its own process
+ * context (kbd_reset_flush, from proc_wait: the servers write what they hold and flush the drive's write cache, as
+ * `sync` does; floppy writes are synchronous, so no track is half written while init runs), refuses every later disk
+ * write (disk_frozen), writes a line to the kernel log - kept in chip RAM for the next boot - and releases KDAT. The
+ * tick lets go after KBD_RESET_MAX ticks whatever happened, well inside the keyboard's 10 s. A keyboard without the
+ * feature (the HRM: not every model) simply resets at once: nothing changes for it. */
+volatile u8 kbd_reset_state;            /* KRS_*: 0 nothing; set by the interrupt, moved on by kbd_reset_flush */
+static u8 rw_count;                     /* consecutive $78 codes */
+static u8 rw_told;
+volatile int disk_frozen;               /* set once the reset-warning flush is done: no new disk writes start */
+
+static void reset_release(void)
+{
+    CIAA(CIA_CRA) &= (u8)~0x40;         /* KDAT high again: the keyboard resets the machine now */
+    kbd_reset_state = KRS_DONE;
+}
+
+/* From the level-2 interrupt (the CIA-A serial-port interrupt, ICR bit 3): take the byte, answer the keyboard,
  * queue the raw code. Nothing else happens here (audit B4): no keymap, no tty, no drawing. */
 void kbd_isr(void)
 {
     u8 raw = CIAA(CIA_SDR);
     u8 code = (u8)~((raw >> 1) | (raw << 7));
+    if (code == 0x78) {                 /* reset warning: never queued as a key */
+        if (++rw_count >= 2 && kbd_reset_state == KRS_NONE) {
+            CIAA(CIA_CRA) |= 0x40;      /* KDAT low, and it stays low until the disks are flushed */
+            kbd_reset_state = KRS_HELD;
+            rw_since = ticks;
+            kwork_pending = 1;
+            return;
+        }
+        handshake();
+        return;
+    }
+    rw_count = 0;
     handshake();
     u16 h = kq_head, nh = (u16)((h + 1) % KQ);
     if (nh == kq_tail) {
@@ -264,9 +305,43 @@ void kbd_isr(void)
     kwork_pending = 1;
 }
 
+/* K2 (hand-off note): at start the keyboard may still be waiting for the answer to a byte nobody took (the CIA's
+ * interrupt flag was cleared with the rest at timer_init), so give it one handshake. Otherwise it would time out after
+ * 143 ms (HRM p.359), resync and resend, and the first key typed at boot could be lost. */
+void kbd_init(void)
+{
+    (void)CIAA(CIA_SDR);
+    handshake();
+}
+
+/* In init's process context (proc_wait, WAIT_CONSOLE), once kbd_work has seen the held reset warning and woken it. */
+void kbd_reset_flush(void)
+{
+    if (kbd_reset_state != KRS_HELD)
+        return;
+    kbd_reset_state = KRS_FLUSHING;
+    long r = vfs_sync();
+    disk_frozen = 1;
+    if (kbd_reset_state != KRS_FLUSHING)        /* the tick gave up waiting: the machine is resetting */
+        return;
+    kprintf("kbd: reset warning: filesystems synced%s in %u ms, disk writes stopped; resetting\n",
+            r < 0 ? " (with an error)" : "", (ticks - rw_since) * 10);
+    reset_release();
+}
+
 /* one raw code, in process context: modifiers, console keys, repeat, then the keymap and the tty */
 static void key_code(u8 code)
 {
+    if (code >= 0xF9 && code <= 0xFE) { /* the keyboard's own codes (HRM p.359-360, hand-off item K4), not keys */
+        if (code == 0xF9 || code == 0xFA) {     /* lost sync / its buffer overflowed: key-up codes may be lost */
+            rep_code = 0;
+            shift_down = ctrl_down = alt_down = amiga_down = 0;
+            kprintf("kbd: the keyboard reports %s; held keys forgotten\n",
+                    code == 0xF9 ? "a lost sync" : "its buffer overflowed (keys lost)");
+        } else if (code == 0xFC)
+            kprintf("kbd: the keyboard reports a failed self test\n");
+        return;                         /* $FD/$FE: start/end of the keys held at power-up */
+    }
     int up = code & 0x80;
     code &= 0x7F;
     switch (code) {
@@ -314,6 +389,13 @@ void kbd_work(void)
     if (rep_code && (s32)(ticks - rep_at) >= 0) {
         rep_at = ticks + KBD_REPEAT_RATE;
         key_down(rep_code);
+    }
+    if (kbd_reset_state == KRS_HELD && !rw_told) {
+        rw_told = 1;
+        kprintf("kbd: reset warning (Ctrl-Amiga-Amiga): syncing the disks before the reset\n");
+        for (int i = 1; i < NPROC; i++)         /* init does it, in its own context (kbd_reset_flush) */
+            if (procs[i].state == P_WAIT && procs[i].wait_con)
+                ready(&procs[i]);
     }
     u32 lost = kq_lost;
     if (lost != kq_lost_told) {

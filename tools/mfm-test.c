@@ -17,7 +17,21 @@ int main(void)
         data[i] = (mfm_u8)(i * 7 + (i >> 8) * 13 + 1);
     static mfm_u16 trk[6400];
     int n = mfm_encode_track(trk, 224, 37, data);
-    EXPECT_TRUE(n == 224 + 11 * 544, "track length: gap + 11 sectors of 544 words");
+    EXPECT_TRUE(n == 224 + 11 * 544 + MFM_TAIL_WORDS, "track length: gap + 11 sectors of 544 words + the filler word");
+    /* the filler word (HRM p.247: Paula loses the last three bits of a write): an MFM zero whose last 3 bits are 0,
+     * clock bit right after the last data bit of sector 10 */
+    EXPECT_TRUE((trk[n - 1] & 7) == 0 && (trk[n - 1] == 0xAAA8 || trk[n - 1] == 0x2AA8) &&
+                (trk[n - 1] == 0x2AA8) == (trk[n - 2] & 1), "write tail: $AAA8 / $2AA8 after sector 10");
+    {   /* with its last three bits lost (and whatever was on the disk there), sector 10 still decodes */
+        static mfm_u16 cut[6400];
+        memcpy(cut, trk, n * sizeof *cut);
+        cut[n - 1] ^= 0x0007;
+        memset(back, 0, sizeof back);
+        EXPECT_TRUE(mfm_decode_track(cut, n, 37, back) == 0x7FF, "write tail: losing its last 3 bits costs no sector");
+        cut[n - 2] ^= 0x0007;                               /* without the tail the data's last bits would be lost */
+        memset(back, 0, sizeof back);
+        EXPECT_TRUE(mfm_decode_track(cut, n, 37, back) == 0x3FF, "without the tail: losing 3 bits breaks sector 10");
+    }
 
     /* MFM validity, over the whole bit stream, ignoring the sync words (0x4489 breaks the rule on purpose) */
     int ones_adjacent = 0, long_zero = 0, run = 0, prevbit = 0;
@@ -68,6 +82,18 @@ int main(void)
         memset(back, 0, sizeof back);
         EXPECT_TRUE(mfm_decode_track(gap, g + 11 * 544, 37, back) == 0x7FF && !memcmp(back, data, sizeof data),
                     "decode: a stray sync in the gap does not hide the sector after it");
+    }
+
+    /* the DMA started inside the first sync word (hand-off note: about 1 read in 1000): the buffer begins with
+     * sector 4's header, no sync in front; it must still be found */
+    {
+        static mfm_u16 nos[6656];
+        int st = 224 + 4 * 544 + 4;                         /* sector 4's header info, after both syncs */
+        for (int i = 0; i < 6656; i++)
+            nos[i] = trk[(st + i) % n];
+        memset(back, 0, sizeof back);
+        EXPECT_TRUE(mfm_decode_track(nos, 6656, 37, back) == 0x7FF && !memcmp(back, data, sizeof data),
+                    "decode: a read that starts right after the sync words (no sync in front of the first sector)");
     }
 
     /* round trip of every sector with an all-ones and all-zero pattern (clock rule at the extremes) */

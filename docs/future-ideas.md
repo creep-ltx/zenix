@@ -40,7 +40,7 @@ An event then wakes exactly that process. Without idea 1, a small list of waiter
 **Public source:** per-object wait queues are textbook design (any Unix kernel's sleep/wakeup on a wait channel).
 
 ## 3. Stack overflow check at every task switch (approved as a fix, 2026-10-23)
-**Today:** there is nothing below any stack (limits.md). Kernel stacks are 4 KB and interrupts run on them.
+**Before batch F:** there was nothing below any stack. Kernel stacks are 4 KB and interrupts run on them.
 
 **Idea:**
 - Put a guard pattern at the bottom of every kernel stack and user stack.
@@ -51,6 +51,8 @@ An event then wakes exactly that process. Without idea 1, a small list of waiter
 **Why:** an overflow becomes a clear message instead of random crashes. The cost is a compare or two per switch.
 
 **Public source:** stack canaries and guard words are textbook practice.
+
+**Done** (audit batch F, 2026-10-23): architecture.md section 6 ("Stack guard").
 
 ## 4. CPU time per process and an idle counter
 **Today:** there is no per-process CPU time, no idle counter and no profiling hook.
@@ -119,5 +121,61 @@ is not preemptive.
   (DTT0/DTT1 on the 040/060, TT0/TT1 on the 030, ACRs on the EC parts) can mark chip RAM non-cacheable and cache the
   rest, without paging. Public: the MC68040 and MC68030 user manuals in `Knowledge/manuals`, section "Transparent
   Translation". Needs measuring on hardware.
+- **A boot menu on the small boot partition** (owner's idea, 2026-10-23): the Startup-Sequence runs a menu (Kickstart's
+  own graphics, keyboard and mouse, a default with a countdown) offering Zenix (runs `zenixboot`) and one or more AmigaOS
+  partitions. The reliable way to start another AmigaOS partition is to give it the highest boot priority for one boot
+  and reboot (the menu restores the order next time), not to chain into its startup files. Until then, Kickstart's own
+  Early Startup menu (hold both mouse buttons at power-on, Kickstart 2.0+) already chooses the boot partition. Pi-side
+  choices (several FAT partitions, each with its own Emu68 and ROM, picked by the Pi firmware) are in the knowledge base
+  note `amiga/emu68-and-pistorm.md`.
+- **`zc`, Zenix Commander** (owner's idea, 2026-10-23): a text-mode two-panel file manager in the spirit of Midnight
+  Commander - copy, move, delete, rename, view (with the pager) and edit (with the editor), a command line under the
+  panels. Fits the owner's rules: works in 80x32 / 80x25 (no wide-screen layout), every key configurable (as Ahiru and
+  CFile do), and loaded parts only when used. Natural after the shared text-interface library (and newlib); the owner's
+  Ahiru and CFile (AmigaOS) have file-manager experience to borrow ideas from, but Zenix needs its own code (their
+  shared core is built on AmigaOS).
 
-Last checked: 2026-10-23.
+## The kernel: the best idea from each system (owner's goal, 2026-10-23: "an outstanding kernel")
+The owner wants the best of Exec, Linux, BSD, Minix, Fuzix, QNX, the Hurd and Darwin in one kernel. Principle 2 ("one way to do
+a thing") still rules: for each area **one** idea is taken, the one that fits a 68020+ Amiga without an MMU, not all of
+them. Ideas only: code may come only from GPL-2-compatible sources (Linux, Fuzix, BSD, Minix); Exec and QNX are
+proprietary, so from them only the documented behaviour (the ROM Kernel Manuals; QNX's published papers).
+
+| Area | Taken from | The idea | Zenix today |
+|---|---|---|---|
+| Scheduling | **Exec** | Priorities: the highest ready process runs, round robin within a priority. First thing to build after the halt (small, makes the terminal and servers feel quick); with a fairness test | round robin only |
+| Servers and priorities | **QNX** | Priority inheritance: a server handling a message runs at its client's priority, so a high-priority program is never stuck behind a low one's request | - |
+| Waiting | **Exec** | Signal bits per process (section 1 above); `select`/`poll` built on them | one source at a time |
+| Event API for programs | **BSD** | kqueue-style: register many events once, get the ready ones in one call (a thin layer on the signal bits) | - |
+| Messages | **QNX / Minix 3** | Synchronous send/receive/reply, pointers not copies | **done** |
+| Reliability | **Minix 3** | The reincarnation server: a supervisor restarts a crashed server or driver (fsd, diskd, the network server) instead of the system stopping | a dead server stays dead |
+| Devices | **Exec** | Servers loaded on first use (like `OpenDevice` loading from `DEVS:`), unloaded when unused | all start at boot |
+| User-level servers | **the Hurd** | Translators: a program can serve a file or directory (an FTP site, an archive, `/proc`) and any user may attach one to their own files | mount is root-only |
+| `/proc` and `/dev` | **Linux / Plan 9 via the Hurd idea** | System information as files, served by a translator, not by special system calls | special calls (`procinfo`, `meminfo`) |
+| Memory | **Linux/BSD slab + Exec pools** | Slab caches for kernel objects (no fragmentation from many small objects); pools for programs | general allocator; size classes in libz |
+| No-MMU discipline | **uClinux / Fuzix** | Relocated flat binaries, `vfork`/spawn, careful fragmentation rules; Fuzix's habit of keeping everything small | **done** (ZEXE, spawn) |
+| Shared libraries | **Exec** | Libraries with jump tables, opened by name, one copy in memory (works without an MMU) | static only |
+| Timers | **Linux** | One ordered timer list (or a timer wheel); sleeping processes cost nothing until due | scan of every process |
+| Port security | **Darwin (Mach)** | Port rights: a process may only send to a port it holds a send right for, handed out by the kernel or by another holder. Replaces batch D's reserved names and kernel flag with one clean rule | reserved names + a kernel-only flag |
+| Starting and keeping servers | **Darwin (launchd)** | One service manager that creates a server's port at boot but starts the server only on the first message, and restarts it if it dies (joins the Exec "on first use" and the Minix 3 restart rows) | all start at boot |
+| Drivers | **Darwin (IOKit)** | A registry of hardware found (Zorro boards, the Pi's device tree) and drivers matched to it by properties, instead of each driver probing for itself | each driver probes |
+| Users and permissions | **Unix/BSD** | The classic model, with the honest no-MMU limit | **done** (batch D) |
+
+
+**How these get built without making a mess (owner, 2026-10-24: "keep it nice and tidy"):**
+- **One idea per area.** Where two rows overlap they become one mechanism: Exec's "on first use", Minix 3's restart and
+  launchd are **one** service manager (grown from today's `boot`); the signal bits are the base and `select`/`poll`
+  and the kqueue-style call are thin layers on them, not three systems.
+- **A new mechanism replaces an old one** in the same step: port rights replace the reserved names and the kernel
+  flag; the service manager replaces "start everything at boot"; the ordered timer list replaces the scan. Nothing is
+  kept "for now" next to its replacement.
+- **A design note first:** each idea gets a numbered decision in DESIGN.md (what, why, what it replaces, what it costs)
+  before code, and the owner agrees to it.
+- **Measured and tested:** each one comes with checking tests in `make check`, and a before/after measurement on the
+  real A1200 (kernel size, switch cost, message cost).
+- **An audit after every batch,** as on 2026-10-22, before the next one starts.
+
+What stays deliberately out: `fork` (needs an MMU), Linux's size and its thousands of system calls, Exec's lack of
+users and of resource tracking (Zenix keeps per-process ownership: everything a process held is freed when it dies).
+
+Last checked: 2026-10-24.

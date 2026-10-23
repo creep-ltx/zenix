@@ -81,7 +81,8 @@ power-off the log is always gone. `klog: ... damaged (checksum)` means part of i
 | `pi: emmc ... mailbox ... gpio ... genet ... gic ...` | The addresses the drivers will use. Expect emmc near 0xf234xxxx, mailbox near 0xf200b880, gpio 0xf2200000. |
 | `zorro: N: manufacturer 6d73 product 33 ...` | Emu68's own boards (and RAM) as AmigaOS configured them. |
 | `emmc: controller at ..., mailbox at ...` then `base clock`, `SD clock`, `card ready`, `card address`, `sectors`, `sector 0 starts ...` | The SD card driver, stage by stage. **The last line that appears shows how far it got.** |
-| `ide: no drive found` | Expected: there is no IDE disk (the status port reads 0xFF, so this comes at once). Zenix then tries the SD card, then the A3000's SCSI. Gayle's interrupt sources were switched off first; `ide: stray Gayle IDE interrupt` later would mean they were not. |
+| `ide: no drive found on the A1200/A600 port` | Expected: there is no IDE disk. Zenix read the Gayle ID first (0xD on an A1200; `ide: no A600/A1200 Gayle (Gayle id N)` would mean it saw something else, and then no IDE port is touched). Usually the status reads 0xFF and this comes at once; if the empty port reads 0 instead, a line `ide: ... status 0, waiting up to 10 s for a drive to start` comes first and the boot waits those 10 s (a slow disk may need them; please note whether it happens). Zenix then tries the SD card, then the A3000's SCSI. Gayle's interrupt sources were switched off first; `ide: stray IDE interrupt` later would mean they were not. |
+| `kbd: reset warning ...` (in the previous boot's lines after Ctrl+Amiga+Amiga) | Your keyboard sends the reset warning: Zenix synced the disks before the reset (`... synced in N ms`). No such line is fine: not every keyboard sends it (Zenix does nothing then). |
 | `ext2: 1 KB blocks, 704 blocks, 128 inodes` | The root filesystem came from the RAM disk (the SD card is not the root). |
 
 ## Then look at the disk

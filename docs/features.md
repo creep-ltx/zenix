@@ -17,9 +17,9 @@ built. Last checked against the code: 2026-10-23.
 | Boot from floppy (ADF) bootblock; kernel in fast RAM if present | verified | how-it-works.md section 1 |
 | Boot with a RAM-disk root loaded from the floppy (no IDE disk) | verified (dev/test image) | `zenix-ram.adf` |
 | Boot without a floppy: Kickstart boots a small FFS partition whose Startup-Sequence runs `zenixboot` (an AmigaOS program, Kickstart 2.04+, 68020+), which loads the kernel file (and optionally a RAM disk) and starts Zenix; errors return to AmigaOS. Images: `build/zenix-boot.hdf` (RDB disk for IDE/CF), `build/zenix-card.img` (Emu68 SD card: MBR, FAT, 0x76 RDB, ext2 root), written by `tools/write-card.sh` | verified in FS-UAE (`tools/zenixboot-test.sh`: Kickstart 3.1, 3.2 and 2.05; 68EC020, 68020 chip-only, 68040; the 68000 refused; the error paths); **not yet on a real Amiga** (the SD card path never: FS-UAE has no Emu68) | man/zenixboot.txt, how-it-works.md section 1 |
-| Gayle IDE disk with Amiga RDB partitions (A600/A1200/A4000); its interrupt sources switched off (polling only) | verified (the interrupt quieting only in FS-UAE) | architecture.md section 2 |
+| Gayle IDE disk with Amiga RDB partitions (A600/A1200/A4000); the machine decided first (Ramsey, Gayle ID 0xD) and only its port probed; a drive must prove it is there (register read-back), slow starters get 10 s, waits timed on the E-clock; LBA drives only; up to 256 sectors per command on the Gayle port; its interrupt sources switched off (polling only) | verified in FS-UAE (the matrix); real drives' timing, CHS-only drives and the interrupt storm read only | architecture.md section 2 |
 | Instruction-cache (and Emu68 JIT) flush after every write of code; built for 68020-68060 with an opcode check | verified in FS-UAE, read for Emu68 | architecture.md section 2 |
-| Battery clock (MSM6242, RP5C01) | read (no test checks it) | `kernel/rtc.c` |
+| Battery clock (MSM6242, RP5C01); no write before a check that the area is not a mirror of the custom chips; the RP5C01 read with its timer stopped | read (FS-UAE shows the time in the boot log; no test compares it) | architecture.md section 2 |
 | Real Amiga hardware | planned | limits.md |
 | Network, USB, RTG graphics, sound beyond the bell | planned | ROADMAP.md phase 6 |
 
@@ -35,6 +35,7 @@ built. Last checked against the code: 2026-10-23.
 | `spawn` (no `fork`); wait, exit status, zombies | verified | architecture.md section 6 |
 | System calls via `TRAP #0` (the count and the list: architecture.md section 7), all pointers validated; errors as negative errno numbers (`kernel/errno.h`, Linux values), the same from both filesystem servers, shown as text by `zwhy`/`zstrerror` | verified (users-test permission texts, cmds2-test batch E script, host ext2 test) | architecture.md section 7 |
 | Crash containment: a faulting program is killed, memory freed | verified | how-it-works.md section 3 |
+| Stack guard: a pattern below every kernel and user stack, checked with the stack pointers at every task switch, system call and tick; an overflow kills the process with "overflowed its user/kernel stack" (pid 0: a panic) | verified in FS-UAE (`crash stack` in the matrix; `tools/diag-test.sh stack` for the kernel-stack checks) | architecture.md section 6 |
 | Named message ports, synchronous zero-copy calls | verified | architecture.md section 8 |
 | Servers: disk (`diskd`), filesystems (`fsd` for ext2, `zfsd`/`mount.zenixfs` for ZenixFS), starter (`boot`) | verified | architecture.md section 9 |
 | Environment variables inherited by children | verified | |
@@ -61,7 +62,7 @@ built. Last checked against the code: 2026-10-23.
 | `fdisk` keeps an RDB written by HDToolBox exactly (other geometries, FileSysHeader/LSEG chain); refuses a table it cannot keep | verified (host `tools/disk-host-test.sh`, FS-UAE `tools/disktools.sh`) | man/fdisk.txt |
 | Disk server: stable handles, overlapping devices protected, a dead server's mount released | verified on the host (`tools/disk-host-test.sh`) | man/diskd.txt |
 | SD card of a Raspberry Pi 4 / CM4 under Emu68 (PiStorm): polling SDHCI driver, 25 MHz 4-bit | built, host-tested, **not run on a Pi** | architecture.md section 3, `kernel/emmc.c` |
-| Floppy drives df0-df3 (AmigaDOS 880 KB tracks, MFM by Paula DMA), read and write with verify; `dd` | built, FS-UAE-tested, one open bug (a whole-disk read once wrong), **not run on a real drive** | architecture.md "Floppy driver", `kernel/floppy.c` |
+| Floppy drives df0-df3 (AmigaDOS 880 KB tracks, MFM by Paula DMA), read and write with verify; disk changes detected; `dd` | verified in FS-UAE (`tools/floppy-test.sh`); the drive timings read only, **not run on a real drive or a Gotek** | architecture.md "Floppy driver", `kernel/floppy.c` |
 | Amiga 3000 on-board SCSI (WD33C93A + DMAC): a disk on targets 0-6, polled, DMA via a bounce buffer | built; host model test; see status in limits.md | architecture.md section 2 |
 | Mouse (port 1) and joystick (port 2): polled at 100 Hz, `input` shows them, system call `SYS_input` | joystick verified in FS-UAE (`tools/joystick-test.py`, keyboard-as-joystick); mouse movement and buttons built but not tested | man/input.txt |
 | Terminal bell: a short Paula tone (`beep`, any program printing BEL); the first beep logs whether the sound DMA ran | verified in FS-UAE (the DMA flag; not heard) | man/beep.txt |
@@ -90,7 +91,8 @@ built. Last checked against the code: 2026-10-23.
 | Type-ahead kept when a program switches the tty to raw mode | verified (`tools/users-test.sh`) | architecture.md section 11 |
 | The clock: tick latch from the machine's E-clock (PAL or NTSC crystal), 100 Hz to within the E-clock's resolution | built; the boot log shows the choice (the matrix's NTSC machine); the rate itself not measured | architecture.md section 11 |
 | Raw tty mode, arrow and function keys as escape codes | verified for the arrows (`tools/edit-regress.sh`); the function keys read | |
-| Amiga keyboard, handshake timed by the E-clock; serial console mirror (115200 baud) | verified | architecture.md section 11 |
+| Amiga keyboard, handshake timed by the E-clock, taken by its own CIA interrupt, one handshake at start, lost-sync/overflow codes forget held keys; serial console mirror (115200 baud) | verified (the keyboard tests); the keyboard's own codes read | architecture.md section 11 |
+| Reset warning: Ctrl+Amiga+Amiga on a keyboard that sends it holds the reset while init syncs the disks (at most 8 s) | verified in FS-UAE (`tools/diag-test.sh`: its keyboard sends the warning; the sync's line is in the next boot's previous-boot lines); whether the A1200's keyboard sends it is unknown | architecture.md section 11 |
 | Keymaps with AmigaOS's four layers (plain, Shift, Alt, Shift+Alt): Swedish (`sv`, the AmigaOS "s" layout) and US; Caps Lock; key repeat | verified in FS-UAE (`tools/kbd-test.sh`) | architecture.md section 11 |
 | Colours, UTF-8, display server with a drawing API, a mouse pointer | planned | ROADMAP.md phase 5 |
 

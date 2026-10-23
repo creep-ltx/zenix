@@ -3,7 +3,6 @@
 /* ls [-aAldRFht rSs1] [file...]: list files. In a terminal the names come in columns; -l is the long form. */
 static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty, printed_any;
 struct ent { char name[64]; struct ustat st; char link[64]; int islink; };
-#define MAXE 400
 static const char *const mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 static int leap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
 
@@ -108,18 +107,21 @@ static int list(const char *path, int top)
     if (multi || o_R) { if (printed_any) oputc('\n'); oprintf("%s:\n", path); }
     printed_any = 1;
     (void)top;
-    int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "ls: %s: %s\n", path, zwhy("cannot open")); return 1; }
-    struct ent *v = malloc(MAXE * sizeof(struct ent));
-    if (!v) { fprintf(2, "ls: %s: out of memory\n", path); sys_close(fd); return 1; } int n = 0; struct udirent d;
-    while (sys_readdir(fd, &d) > 0 && n < MAXE) {
-        if (d.name[0] == '.' && !o_a && !o_A) continue;
-        if (o_A && (!strcmp(d.name, ".") || !strcmp(d.name, ".."))) continue;
-        struct ent *e = &v[n++]; strncpy(e->name, d.name, 63); e->name[63] = 0;
-        char *full = path_join(path, d.name);
-        if (full) fill(e, full); else { memset(&e->st, 0, sizeof e->st); e->islink = 0; e->link[0] = 0; fprintf(2, "ls: %s/%s: %s\n", path, d.name, zwhy("cannot read")); }
+    /* the names come from the heap and grow as needed (libz dir_list): no limit but memory, and running out says so */
+    char **names; int nn = dir_list(path, &names);
+    if (nn < 0) { fprintf(2, "ls: %s: %s\n", path, zwhy("cannot open")); return 1; }
+    struct ent *v = malloc(((u32)nn + 2) * sizeof(struct ent));
+    if (!v) { fprintf(2, "ls: %s: out of memory (%d names)\n", path, nn); dir_free(names, nn); return 1; }
+    int n = 0;
+    for (int k = o_a ? -2 : 0; k < nn; k++) {          /* -a: . and .. too (dir_list leaves them out) */
+        const char *nm = k == -2 ? "." : k == -1 ? ".." : names[k];
+        if (k >= 0 && nm[0] == '.' && !o_a && !o_A) continue;
+        struct ent *e = &v[n++]; strncpy(e->name, nm, 63); e->name[63] = 0;
+        char *full = path_join(path, nm);
+        if (full) fill(e, full); else { memset(&e->st, 0, sizeof e->st); e->islink = 0; e->link[0] = 0; fprintf(2, "ls: %s/%s: %s\n", path, nm, zwhy("cannot read")); }
         free(full);
     }
-    sys_close(fd);
+    dir_free(names, nn);
     show(v, n);
     int rc = 0;
     if (o_R)

@@ -24,5 +24,8 @@ send echo after-watch\r
 sleep 3
 send tac /etc/group | head -n 1; rev /etc/group | head -n 1; printf '%s\\n' x y | paste -s -d+\r
 sleep 3
+send mkdir /tmp/many; cd /tmp/many; touch f0; seq 1 449 | sed 's/^/f/' | xargs -n 1 ln f0; cd /; echo lsn=$(ls /tmp/many | wc -l) lsa=$(ls -a /tmp/many | wc -l) lsl=$(ls -l /tmp/many | grep -c 'f449$'); rm -r /tmp/many\r
+wait lsn=[0-9]+ lsa 180
+sleep 2
 send sh /tests/batch-e.sh > /tmp/be.out 2>&1; sync; echo finished-be\r
 sleep 240

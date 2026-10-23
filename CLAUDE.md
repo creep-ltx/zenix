@@ -7,8 +7,10 @@ current work list), then `docs/architecture.md` for the part you touch.
 ## The owner
 - Not a programmer: explain in plain words, make the technical calls yourself, ask only about what Zenix should *be*.
 - Often on the phone. Short status lines, no walls of text.
-- Owns one Amiga: an A1200 with a PiStorm32-lite (Emu68 on a CM4) and a Gotek. **That machine is THE target until
-  Zenix is stable and usable there (owner, 2026-10-22); other platforms come after.** Order audit fixes by what
+- Owns one Amiga: an A1200 with a PiStorm32-lite (Emu68 on a CM4) and a Gotek. **That machine is the first test machine;
+  real Amiga hardware is the ultimate target (owner, 2026-10-24): nothing in the base may depend on Emu68 or the Pi, and
+  speed is judged on real 68k CPUs (today a stock 14 MHz 68EC020), not Emu68's JIT. The minimum requirements
+  are not decided yet (ROADMAP, open questions).** Order audit fixes by what
   matters on it first. Nothing has run on it yet; real-hardware time is scarce, so every build sent there must be
   ready for it.
 
@@ -16,7 +18,8 @@ current work list), then `docs/architecture.md` for the part you touch.
 **FEATURE HALT (decided by the owner, 2026-10-22): no new features - no new commands, system calls, drivers,
 options or programs.** Only fixes from `docs/audit-2026-10-22.md`, tests that check them, and documentation
 corrections. Merging work that was already built before the halt (the `drivers`, `zenixfs` and `floppy` branches) is
-allowed. **Approved exception (owner, 2026-10-23): booting from the SD card / a hard disk without a floppy (`zenixboot`).**
+allowed. **Approved exceptions:** booting without a floppy (`zenixboot`, owner 2026-10-23); DESIGN D10 priorities (owner
+2026-10-24), to start only after the audit fixing is done and the closing audit report is written.
 Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
 parked (e.g. the uncommitted `user/awk.c`). Order of the fixes: batches A and B, then the first PiStorm boot, then C,
 D and E.

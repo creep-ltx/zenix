@@ -44,29 +44,56 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   it is read from its source (knowledge base `amiga/emu68-jit-cache-rules.md`), not yet seen on the PiStorm.
 - Code is built with `-m68020-60` and the 68060 multilib's libgcc: no 64-bit `mulu.l`/`divu.l`, which a real 68060
   lacks (`tools/check-68020-60.sh` fails the build on the opcode bytes of kernel, stage0 and every program).
-- Interrupts used: level 1 serial transmit, level 2 CIA-A (100 Hz scheduler tick from timer A, and the keyboard),
-  level 3 vertical blank (display/scrolling), level 5 serial receive. Gayle IDE shares level 2 with the CIAs, so
-  disk transfers mask only levels 1-2. The IDE interrupt itself is never wanted (the driver polls): `ide_init`
-  sets nIEN in the device control register (`0xDA101A` on the A1200), clears Gayle's interrupt enable register
-  (`0xDAA000`) and its IDE latch (`0xDA9000`, write 0x7C) before probing, so a machine with no drive (a floating
-  INTRQ line) cannot storm level 2; a level-2 interrupt with no CIA cause makes `irq2_c` check and clear that latch
-  (`ide_stray_irq`, counted and reported once). A port whose status reads 0xFF (no drive, or Emu68's
-  `disable_scsi`) is given up at once. ATA's 400 ns settle after a command and after the last data word is two
-  CIA reads (E-clock synchronised, so at least 1.4 us on any CPU). All of this is read from the Linux and Fuzix
-  Gayle drivers and verified only in FS-UAE, which does not model the latch storm.
+- Interrupts used: level 1 serial transmit, level 2 CIA-A (100 Hz scheduler tick from timer A, and the keyboard's
+  serial-port interrupt, ICR bit 3), level 3 vertical blank (display/scrolling), level 5 serial receive. Gayle IDE
+  shares level 2 with the CIAs; the IDE interrupt itself is never wanted (the drivers poll), and no disk wait runs
+  with level 2 masked (a keyboard that gets no handshake for 143 ms resyncs and, after about ten keys, drops them):
+  IDE masks levels 1-2 only around each sector's 256 data words and the acknowledge, the A3000's SCSI not at all.
+- **IDE** (`kernel/ide.c`). The machine is decided before any IDE register is touched (the hardware hand-off note,
+  2026-10-23, items I1-I4, I7, I9, I10): a Ramsey chip (version 0x0D/0x0F at `0xDE0043`: A3000/A4000) means the A4000
+  port at `0xDD2020` only; otherwise the Gayle ID - after a check that `0xDE1000` is not a mirror of the custom chips
+  (the real INTENA is toggled with interrupts masked and the mirror would show INTENAR at offset 0x1C), a byte written
+  to `0xDE1000` and four reads giving one bit each in bit 7 - must be 0xD (A600/A1200) for the Gayle port at `0xDA0000`;
+  anything else probes no port. The Gayle ID and the mirror check are not in the public manuals (hand-off note). On
+  the Gayle, `ide_init` sets nIEN in the device control register (`0xDA101A`), clears Gayle's interrupt enable
+  register (`0xDAA000`) and its IDE latch (`0xDA9000`, write 0x7C), so a machine with no drive (a floating INTRQ line)
+  cannot storm level 2; a level-2 interrupt with no CIA cause makes `irq2_c` read the drive's status and then clear
+  that latch (`ide_stray_irq`, counted and reported once). The drive must then show it is there: status 0xFF (no
+  drive, or Emu68's `disable_scsi`) is given up at once; BSY and DRDY together (impossible) means no drive; BSY alone
+  must read the same from the cylinder-low register (ATA: a busy drive answers its status from every register); DRDY
+  must keep 0x55 and 0xAA written to cylinder-low; status 0 is a drive still starting (some show 0 for about 9 s,
+  hand-off note) and gets up to 10 s, BSY up to 30 s, with a line on the log saying what it waits for. Every wait is
+  timed on the E-clock (`hr_time`); ERR is believed only once BSY is clear (ATA). IDENTIFY word 49 bit 9 must say
+  LBA: a CHS-only drive is refused with a message (it would take LBA numbers as cylinder/head/sector). Data goes
+  through Gayle's fast window (`0xDA2000`, "16 bit" timing; the registers stay in the "8 bit" `0xDA0000` window,
+  Gayle spec p.7-8); on the Gayle port up to 256 sectors per READ/WRITE SECTORS command, one DRQ per sector (the
+  A4000 port keeps one sector per command: FS-UAE's A4000 IDE stayed busy for good now and then after a READ SECTORS
+  of 2, cause not found). ATA's 400 ns settle after
+  a command and after the last data word is two CIA reads (E-clock synchronised, so at least 1.4 us on any CPU).
+  Verified in FS-UAE (the matrix: Gayle ID 0xD, the fast data window, the A4000 and A3000 setups); the timings of real
+  drives, the latch storm and a CHS-only drive are not modelled there.
 - Clock: the 100 Hz tick is CIA-A timer A. `hr_time()` (and `SYS_hrtime`) is **CIA-B timers A and B chained**
   (timer B counts timer A's underflows): a free-running 32-bit E-clock counter (709379 Hz PAL, 715909 NTSC, wraps
   after about 1.7 hours) read from hardware alone, so it is never early or late with respect to the tick
   interrupt (the earlier form, tick count plus timer A's position, read 10 ms low between timer A wrapping and
   the interrupt being taken, and always inside the level-2 handler itself).
+- Battery clock (`kernel/rtc.c`, read once at boot): an Oki MSM6242 or a Ricoh RP5C01 at `0xDC0000`. Before any
+  clock register is written the area is checked not to be a mirror of the custom chips (as for the Gayle ID above;
+  a write there would land in a chip register: hand-off note C1); the clock then counts only if its seconds are seen
+  ticking. The RP5C01 is read with its timer stopped (bank 0, MODE 0) and restarted after, so a read at a rollover
+  cannot mix old and new digits (hand-off note C4). Seen in FS-UAE (the boot log's `clock:` line); no test compares
+  it.
 - Storage: Gayle IDE (A600/A1200/A4000) with an RDB partition table, or a **RAM disk** that the bootblock reads
   from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek), or the
   **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - written and host-tested,
   **not yet run on a real Pi**). `kernel/blk.c` picks the raw disk: IDE first, else the SD card. Either one is
   served by `diskd` under the name `ide0`. On an **Amiga 3000** (no IDE) `kernel/a3000.c` drives the on-board SCSI:
   WD33C93A chip behind the DMAC at `0xDD0000`, one "select with ATN and transfer" command per SCSI command, polling
-  (levels 1-2 masked while a command runs), data by DMA through a 64 KB chip-RAM bounce buffer, first direct-access
-  device found on targets 0-6, 512-byte blocks only; verified on the host against a model of the chip.
+  (interrupts on, the DMAC's interrupt enable off), data by DMA through a 64 KB chip-RAM bounce buffer, first direct-access
+  device found on targets 0-6, 512-byte blocks only; verified on the host against a model of the chip. Its waits are
+  timed on the E-clock (they were counted in polls, a thousand times too short on Emu68) with interrupts on, and the
+  selection timeout register is 45 (250 ms at 14.3 MHz: ms x MHz / 80, WD33C93A data sheet; it was 20, about
+  110 ms).
 
 ## 3. Boot (summary; the full walk-through is in how-it-works.md)
 
@@ -183,14 +210,41 @@ middle buttons; a joystick in port 2 is decoded from JOY1DAT. `SYS_input` (74) c
 
 The internal and external drives df0-df3: CIA-B port B selects, steps and starts the motor, CIA-A port A reports
 ready, track 0, write protect and disk change; Paula reads and writes whole tracks by DMA (sync word 0x4489,
-WORDSYNC on read, precompensation from cylinder 40 on write) into a chip-RAM buffer of 6656 words. `mfm.h` codes
-and decodes AmigaDOS tracks (11 sectors of 512 bytes, odd/even bit blocks, XOR checksums); one decoded track is
-kept as a cache. A write reads the track, replaces the sectors, writes the track and reads it back to verify.
-Waits use `hr_time()` (the CIA-B E-clock counter, section 2). The 100 Hz
-tick turns idle motors off after 3 s. System calls 76 `SYS_fd_info` and 77 `SYS_fd_rw`, for the disk server only:
-`diskd` offers the drives as `df0`-`df3` (df0 probed at start, the others on first use); `dd` copies to and from
-them. Tests: `tools/mfm-test.sh` (host), `tools/floppy-test.sh` (FS-UAE, two drives). **Known bug (2026-10-22):**
-a whole-disk read of df1 in FS-UAE has once come back with a wrong SHA-256 and no error; not found yet.
+WORDSYNC on read, precompensation from cylinder 40 on write) into a chip-RAM buffer. `mfm.h` codes and decodes
+AmigaDOS tracks (11 sectors of 512 bytes, odd/even bit blocks, XOR checksums); one decoded track is kept as a cache,
+with a mask of which of its sectors are valid. Waits use `hr_time()` (the CIA-B E-clock counter, section 2). The
+100 Hz tick turns idle motors off after 3 s. System calls 76 `SYS_fd_info` and 77 `SYS_fd_rw`, for the disk server
+only: `diskd` offers the drives as `df0`-`df3` (df0 probed at start, the others on first use); `dd` copies to and
+from them. The hardware rules it follows (HRM 3rd ed. p.244-248 and Appendix H; the numbers marked "hand-off" come
+from the hardware hand-off note, 2026-10-23, and are not in the public manuals):
+- **A read** is 6656 words (a bit more than one revolution) after the sync word; the buffer is cleared first, so a
+  DMA that did not run cannot leave an older track to be decoded again. A sector whose header begins the buffer with
+  no sync in front (the DMA started inside the first sync word, about 1 read in 1000: hand-off) is still found. Up to
+  10 tries, a full recalibration before every 4th (hand-off); good sectors are kept from try to try, so a weak sector
+  fails only the requests that need it. The disk-block flag must come within 300 ms for the sync (hand-off) plus the
+  transfer time, not 2 s.
+- **A write** reads the track (all 11 sectors must be good, unless the request covers the whole track), replaces the
+  sectors, writes the track and reads it back to compare. The written track is 836 words of MFM zeros, the 11
+  sectors and one filler word, 6821 words: longer than one revolution at the slowest drive speed long-proven drivers
+  allow for (6000-6812 words, hand-off), so no strip of the old track survives; the filler word ($AAA8, or $2AA8 after
+  a 1 bit) is there because Paula loses the last three bits of every write (HRM p.247; the filler word is hand-off).
+  4 ms after the write before the DMA stops (the HRM's 1.3 ms; some drives need 4, hand-off).
+- **Heads**: 3 ms a step, 18 ms when the direction changes, 15 ms to settle (HRM p.244); 1.5 ms after any side or
+  select change before a DMA (hand-off; the HRM's 100 us gave errors), and the side line is never flipped just before
+  a write. Recalibration (hand-off): if track 0 is already signalled, step inward until it goes off, then outward at
+  4 ms a step (the signal needs the extra millisecond) for at most 100 steps.
+- **Disk change**: the change line is read with the drive selected, 20 us after the select (one drive make needs about
+  12, hand-off), at the start of every request and after every DMA. When it is active the cached track and the head
+  position are forgotten and the request fails with a log line; every later request on that drive fails until the
+  disk server opens it again (`fd_info`, called on every open of `dfN`), so a swapped disk never receives the old
+  disk's sectors. No disk at all fails at once instead of after the read retries.
+- After the reset warning's flush (section 11, keyboard) no new track write starts.
+Tests: `tools/mfm-test.sh` (host: the filler word, losing its last 3 bits costs no sector, a read with no sync in
+front), `tools/floppy-test.sh` (FS-UAE, two drives, part of `make check`: whole-disk reads, a write, its read-back, a
+whole-disk read after it and the host's image file). FS-UAE does not model the lost bits, the drive timings or the
+change line's delays: those are read, not verified. The "whole-disk read of df1 came back wrong" of 2026-10-22 was
+FS-UAE, not the driver: it had kept an earlier run's writes in an overlay file (`Save States/test/df1.sdf`) and laid
+them over the fresh image; the test now gives FS-UAE a save-state directory of its own.
 
 ### SD card driver (`kernel/emmc.c`)
 
@@ -230,7 +284,7 @@ stages of a pipeline). Only `R_68K_32` relocations are needed (PC-relative code 
 debug-section relocations must be skipped (their offsets are not addresses). The kernel itself uses the same
 format and the same loop (in `start.S`). Programs declare their stack size in the header: 16 KB unless the
 Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB; the numbers and how they were measured
-are in limits.md). There is no guard below a stack. There is no shared-library format yet; programs are linked
+are in limits.md). A guard pattern lies at the bottom of every stack (section 6). There is no shared-library format yet; programs are linked
 statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).
 
 ## 5. Memory (`kernel/mem.c`)
@@ -256,7 +310,8 @@ The pools leave out low chip RAM (`0`-`0x1FFF`: vectors, boot tables), the kerne
 log's area at the top of chip RAM (section 3, "Previous-boot log").
 
 A process's own memory is **one block**: image + BSS + stack + the argument area. The kernel stack (4 KB) is a
-second block. Both are owned by the pid and freed together.
+second block. Both are owned by the pid and freed together. The lowest 16 bytes of each stack hold the stack guard's
+pattern (section 6).
 
 ## 6. Processes and scheduling (`kernel/proc.c`)
 
@@ -272,6 +327,22 @@ second block. Both are owned by the pid and freed together.
   lost wakeup (B5): a reader's "is there input? no: block" is kernel code, and `kwork`, the only thing that delivers
   input, runs only at a few chosen points, never between such a check and its block.
 - pid 0 is the idle process: it runs on the boot stack and executes `cpu_idle()` when nothing is ready.
+- **Stack guard** (future-ideas.md section 3, done as a fix 2026-10-23). Nothing stops a stack from growing past its
+  bottom without an MMU, so four guard words (16 bytes, "ZSTK"...) lie at the bottom of every kernel stack, every
+  user stack (just above the program's BSS) and the boot stack (pid 0). At every task switch the process leaving
+  the CPU has both guards and both stack pointers checked (`stack_bad`), and the saved stack pointers of the one
+  coming in are checked against its bounds; every system call and every tick that interrupts user code makes the
+  cheap check (the user stack pointer in bounds, the guard's first word intact) and the full one if that fails; a
+  program that faults is told whether its stack had overflowed. A failure prints "[kernel] pid N (name) overflowed
+  its user stack: killed" (or kernel stack) and kills the process (exit 139, as for a fault; a blocked one is woken
+  so that it dies at once); pid 0's kernel stack, or a saved kernel stack pointer outside its stack, is a panic, so
+  the text is in the previous-boot log. It finds an overflow, it cannot prevent one: what was written below the stack
+  before the check stays written (one frame for a program that makes system calls, up to one tick for one that does
+  not). Cost, counted in the 68020 code: about 70 instructions per task switch, about 18 per system call and per
+  tick. Verified in FS-UAE: `crash stack` (the matrix, every machine) recurses with a system call per level until the
+  guard kills it and the system goes on; a `STACK_TEST` build (`tools/diag-test.sh stack`) damages a process's own
+  kernel-stack guard (`crash kstack`: killed with the message, the system goes on) and pid 0's (`crash idle`: the
+  panic, and its text in the next boot's previous-boot lines).
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
   process is `spawn(path, argv, stdio)`: load a ZEXE, give it the parent's cwd and environment, and pass only file
   descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file). At most 256 arguments
@@ -523,9 +594,21 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   terminal output; while another long system call runs (a disk transfer), input waits in the ring until it ends.
 - **Keyboard** (`kbd.c`): CIA-A serial data register; after each byte the handshake pulls SP low for at least
   75 E-clock ticks (105 us; the hardware manual asks for 85) timed with `hr_time()`, never with a counting loop
-  (Emu68 runs about 1000 MIPS). The keyboard interrupt is not enabled in CIA-A's mask: the byte is picked up by
-  the 100 Hz tick handler, which reads the ICR, so a key waits at most 10 ms (the keyboard's own limit is 143 ms
-  and it buffers 10 keys); the handler queues it for `kbd_work` (above). Raw codes 0x00-0x3F go through a keymap with four layers like AmigaOS's (plain, Shift,
+  (Emu68 runs about 1000 MIPS). The CIA's serial-port interrupt (ICR bit 3) is enabled, so the byte is taken and
+  answered at once, not at the next tick (the keyboard's own limit is 143 ms, and it buffers about 10 keys); the
+  handler queues it for `kbd_work` (above). One handshake is given when the tick starts (`kbd_init`): the keyboard may
+  still wait for an answer to a byte nobody took (hand-off note K2). The keyboard's own codes are not keys: $F9 (lost
+  sync) and $FA (its buffer overflowed) make `kbd_work` forget held modifiers and the repeating key, since key-up
+  codes may be lost, and say so on the log; $FC (self test failed) is logged; $FD/$FE are ignored (HRM p.359-360).
+  **Reset warning** (HRM p.361): Ctrl+Amiga+Amiga makes keyboards that have the feature send $78 twice; only two in a
+  row count. The first is answered normally; on the second `kbd_isr` keeps KDAT low, `kbd_work` logs "kbd: reset
+  warning" and wakes init, and init, in its own context in `proc_wait` (`kbd_reset_flush`), syncs every filesystem
+  (the servers write what they hold and flush the drive's write cache, as `sync` does; floppy writes are synchronous,
+  so no track is half written), then all disk writes are refused (`disk_frozen`), the log gets "kbd: reset warning:
+  filesystems synced in N ms" (kept in chip RAM for the next boot) and KDAT is released: the keyboard resets the
+  machine. The tick lets go after 8 s whatever happened (the keyboard waits 10 s). A keyboard without the feature
+  resets at once, as before. Verified in FS-UAE, whose keyboard sends the warning (`tools/diag-test.sh`: "filesystems
+  synced in 10 ms" in the next boot's previous-boot lines); whether the A1200's keyboard sends it is not known. Raw codes 0x00-0x3F go through a keymap with four layers like AmigaOS's (plain, Shift,
   Alt, Shift+Alt; the Alt layer is AmigaOS's, the same on every national keyboard, and is where `[ ] { } \ | @`
   live on a Swedish Amiga); `sv` is the AmigaOS keymap "s" (generated from xkeyboard-config by the Fuzix Amiga
   port, checked against Workbench 3.1's `DEVS:Keymaps/s`), `us` the US one. Caps Lock (raw 0x62, a toggle the
@@ -533,7 +616,8 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   the spacing character (no composition). Software key repeat: 500 ms, then 33 per second (timed by the tick, done by `kbd_work`), until
   the key is released or another goes down; modifiers and Amiga combinations do not repeat. Codes 0x40-0x67 are
   layout-neutral; arrows, F-keys, Help and Del become escape sequences in raw mode. Verified in FS-UAE
-  (`tools/kbd-test.sh`); the handshake length is read from the manual, not measured on hardware.
+  (`tools/kbd-test.sh`); the handshake length and the reset warning are read from the manual and the hand-off note,
+  not measured on hardware.
 - **Serial** (`serial.c`): interrupt-driven receive (queued for `serial_work`, above), 115200 baud, mirrors the
   console on the screen (its output from then on; a switch does not resend the screen); input goes to that
   console's tty. The test rig depends on it, including the hook 0x1D + 1-9 / 0 (show console 1-9 / 10, as
