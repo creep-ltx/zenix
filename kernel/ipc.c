@@ -61,8 +61,8 @@ static void finish(struct umsg *m, s32 result)
 
 long ipc_call(int port, struct umsg *m)
 {
-    if (port < 0 || port >= NPORT || !ports[port].used)
-        return -1;
+    if (port < 0 || port >= NPORT || !ports[port].used || ports[port].owner == current->pid)
+        return -1;                              /* (a call to one's own port would wait for ever) */
     struct port *p = &ports[port];
     m->next = 0;
     m->from = current->pid;

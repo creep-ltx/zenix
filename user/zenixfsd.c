@@ -125,6 +125,41 @@ static void fill_stat(uint32_t ino, const struct zenixfs_inode *in, struct ustat
     st->mtime = (u32)in->mtime; st->uid = in->uid; st->gid = in->gid; st->links = in->nlink;
 }
 
+/* Open inodes (FS_OPEN counts one, FS_CLOSE from the kernel one less). When the last name of an open file goes, the
+ * file becomes an orphan (zenixfs_orphan_add: a marker in the tree, so a crash frees it at the next mount) and is
+ * freed at the last close (zenixfs_orphan_done). ZenixFS never reuses an inode number, so even without this an old
+ * handle could not reach another file; this keeps the data readable through it, as Unix does. */
+#define NOPEN 96
+static struct { u32 ino, count, orphan; } opens[NOPEN];
+static int open_slot(u32 ino)
+{
+    for (int i = 0; i < NOPEN; i++) if (opens[i].count && opens[i].ino == ino) return i;
+    return -1;
+}
+static int open_ref(u32 ino)
+{
+    int i = open_slot(ino);
+    if (i >= 0) { opens[i].count++; return 0; }
+    for (i = 0; i < NOPEN; i++)
+        if (!opens[i].count) { opens[i].ino = ino; opens[i].count = 1; opens[i].orphan = 0; return 0; }
+    return -23;                                       /* ENFILE: should not happen (the kernel has fewer files) */
+}
+static void touched(void);
+static void open_unref(u32 ino)
+{
+    int i = open_slot(ino);
+    if (i < 0) return;
+    if (--opens[i].count == 0 && opens[i].orphan) { zenixfs_orphan_done(fs, ino); touched(); }
+}
+/* the entry NAME in DIR is about to go: if it names an open file, make that an orphan first */
+static void before_remove(uint32_t dir, const char *name, int len)
+{
+    uint32_t ino;
+    if (zenixfs_lookup(fs, dir, name, len, &ino)) return;
+    int i = open_slot(ino);
+    if (i >= 0 && !opens[i].orphan && zenixfs_orphan_add(fs, ino) == 0) opens[i].orphan = 1;
+}
+
 static void touched(void)
 {
     if (!dirty) { dirty = 1; dirty_since = sys_ticks(); }
@@ -158,9 +193,13 @@ static int handle1(struct umsg *m)
             }
         }
         if (zenixfs_getattr(fs, ino, &in)) return -1;
+        if ((r = open_ref(ino))) return r;
         fill_stat(ino, &in, (struct ustat *)m->a[3]);
         return (int)ino;
     }
+    case FS_CLOSE:
+        open_unref(m->a[0]);
+        return 0;
     case FS_READ:
         r = zenixfs_read(fs, m->a[0], m->a[1], (void *)m->a[2], m->a[3]);
         return r < 0 ? -1 : r;
@@ -257,6 +296,7 @@ static int handle1(struct umsg *m)
     case FS_UNLINK:
         if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir) || !sticky_ok(dir, name, len)) return -1;
         touched();
+        before_remove(dir, name, len);
         return zenixfs_unlink(fs, dir, name, len) ? -1 : 0;
     case FS_RMDIR:
         if (parent(m->a[1], (const char *)m->a[0], &dir, &name, &len) || !dir_may(dir) || !sticky_ok(dir, name, len)) return -1;
@@ -267,6 +307,7 @@ static int handle1(struct umsg *m)
             parent(m->a[2], (const char *)m->a[1], &dir2, &name2, &len2) ||
             !dir_may(dir) || !dir_may(dir2) || !sticky_ok(dir, name, len) || !sticky_ok(dir2, name2, len2)) return -1;
         touched();
+        before_remove(dir2, name2, len2);                /* a file renamed over may be open */
         return zenixfs_rename(fs, dir, name, len, dir2, name2, len2) ? -1 : 0;
     }
     return -1;

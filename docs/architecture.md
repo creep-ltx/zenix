@@ -279,8 +279,12 @@ the filesystem server; tools (`fdisk`, `mkfs.ext2`, `fsck.ext2`) open `DISK_RAW`
 ### fsd - the filesystem server (`user/fsd.c` + `kernel/ext2.c`, port `fs`)
 The ext2 code compiled to run in user mode (`user/fsenv.h` supplies its environment), speaking the protocol in
 `kernel/fsproto.h` (`FS_OPEN, FS_READ, FS_WRITE, FS_STAT, FS_READDIR, FS_MKDIR, FS_RENAME, ...`). Files are named
-by **inode number**; the kernel's open-file table stores the inode, offset and flags, the server is stateless
-about open files. Chooses its root: a RAM-disk image from the boot floppy if present, else the first partition of
+by **inode number**; the kernel's open-file table stores the inode, offset and flags. The server counts opens: every
+successful `FS_OPEN` (also the kernel's own, to load a program) is matched by one `FS_CLOSE` when the kernel lets go of
+the inode (the last close of the file, or the program is loaded). An inode whose last name goes while it is open keeps
+its blocks until its last `FS_CLOSE` (so an old handle never reads or writes a file that reused the number); after a
+crash such an inode is left with no links and `fsck.ext2`/`e2fsck` free it. ZenixFS makes it an orphan
+(`zenixfs_orphan_add`), which the next mount frees after a crash. Chooses its root: a RAM-disk image from the boot floppy if present, else the first partition of
 type ext2 (RDB `LNX\0`, MBR 0x83) that holds an ext2 volume Zenix can **write** (see "ext2: what is mounted" in
 section 10; an ext3, ext4 or damaged volume is never the root), else the bare disk. Started with `fsd DEVICE PORTNAME` (as `/bin/mount.ext2`, by `mount`)
 it serves that device on its own port instead; it answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
@@ -338,8 +342,7 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
   AddressSanitizer).
 - Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair; it repairs nothing when it finds
   damage it cannot repair) and `fdisk` (RDB).
-- Not done: freeing a file that is still open (it frees at once), moving directories between parents,
-  triple-indirect files, a journal.
+- Not done: moving directories between parents, triple-indirect files, a journal.
 - Several filesystems can be mounted (`mount`, see section 9). Planned: **ZenixFS** (atomic commit, checksummed metadata, extents),
   see `zenixfs.md`.
 

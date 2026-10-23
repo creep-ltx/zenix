@@ -68,6 +68,36 @@ static int find_root(void)
     return try_mount("ide0", EXT2_RW);
 }
 
+/* Open inodes (FS_OPEN counts one, FS_CLOSE from the kernel one less): an inode whose last name goes while it is
+ * open keeps its blocks until the last close (ext2_busy / ext2_release), so an old handle never reaches a file that
+ * reused the number. After a crash such an inode is left with no links: fsck.ext2 (or e2fsck) frees it. */
+#define NOPEN 96                                      /* the kernel's file table (NFILE 64) plus programs being loaded */
+static struct { u32 ino, count; } opens[NOPEN];
+static int open_busy(u32 ino)
+{
+    for (int i = 0; i < NOPEN; i++) if (opens[i].count && opens[i].ino == ino) return 1;
+    return 0;
+}
+static int open_ref(u32 ino)
+{
+    int fr = -1;
+    for (int i = 0; i < NOPEN; i++) {
+        if (opens[i].count && opens[i].ino == ino) { opens[i].count++; return 0; }
+        if (!opens[i].count && fr < 0) fr = i;
+    }
+    if (fr < 0) return -23;                           /* ENFILE: should not happen (the kernel has fewer files) */
+    opens[fr].ino = ino; opens[fr].count = 1;
+    return 0;
+}
+static void open_unref(u32 ino)
+{
+    for (int i = 0; i < NOPEN; i++)
+        if (opens[i].count && opens[i].ino == ino) {
+            if (--opens[i].count == 0 && !ext2_readonly) ext2_release(ino);   /* frees it only if it has no names */
+            return;
+        }
+}
+
 static void fill_stat(const struct inode *in, struct ustat *st)
 {
     st->ino = in->ino; st->mode = in->mode; st->size = in->size;
@@ -119,6 +149,8 @@ static int handle1(struct umsg *m)
                 if ((flags & O_TRUNC) && ext2_truncate(&in)) return -1;
             }
         }
+        int e = open_ref(in.ino);
+        if (e) return e;
         fill_stat(&in, (struct ustat *)m->a[3]);
         return (int)in.ino;
     }
@@ -147,6 +179,9 @@ static int handle1(struct umsg *m)
         struct ustatfs *f = (struct ustatfs *)m->a[0];
         return ext2_statfs(&f->bsize, &f->blocks, &f->bfree, &f->files, &f->ffree);
     }
+    case FS_CLOSE:
+        open_unref(m->a[0]);
+        return 0;
     case FS_SYNC:
         return 0;                                     /* writes go straight to the disk */
     case FS_CHMOD:
@@ -228,6 +263,7 @@ static int handle(struct umsg *m)
 int main(int argc, char **argv)
 {
     const char *pname = "fs";
+    ext2_busy = open_busy;
     int tries = 0;
     while ((disk_port = sys_port_find("disk")) < 0) {
         if (++tries > 600) { printf("fsd: no disk server\n"); return 1; }
@@ -247,7 +283,9 @@ int main(int argc, char **argv)
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {
         int r = handle(m);
-        if (quitting) {                                 /* umount: answer first, then let go of the device */
+        if (quitting) {                                 /* umount: answer, then let go of the device */
+            for (int i = 0; i < NOPEN; i++)             /* nothing is open at umount; deletions still waiting are done */
+                if (opens[i].count && !ext2_readonly) { opens[i].count = 0; ext2_release(opens[i].ino); }
             sys_reply(m, r);
             disk_unmount(fs_dev);
             return 0;

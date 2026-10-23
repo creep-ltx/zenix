@@ -5,6 +5,7 @@
 #     read-only, unknown read-only feature read-only; the root rule refuses all but plain writable ext2;
 #   - a workload on revision 0 and modern ext2 (fast/slow symlinks removed, hard links, an htree directory changed,
 #     a big file) and host e2fsck -fn clean afterwards;
+#   - an open file that is unlinked keeps its data until the close, and its number is not reused meanwhile;
 #   - fsck.ext2 against host e2fsck on damaged images; mkfs.ext2 results checked by e2fsck;
 #   - a bounded fuzz loop: randomly damaged images must never crash the server (AddressSanitizer build).
 # usage: tools/ext2-host-test.sh [fuzz-rounds]     (default 150; memory: one small image at a time)
@@ -109,6 +110,33 @@ fsd $T/sym.img $T/sym.txt $T/out
 free1=$(dumpe2fs -h $T/sym.img 2>/dev/null | awk '/^Free blocks/ {print $3}')
 ! grep -q damaged $T/out && [ "$free0" = "$free1" ] && clean $T/sym.img && check "rm of 30 fast symlinks: no block freed, e2fsck clean" ok || { check "rm of fast symlinks" bad; cat $T/e2fsck.log; }
 
+# ---- C5: an open file that is unlinked ----
+cp $T/plain.img $T/open.img
+cat > $T/o2.txt <<EOF
+mount
+open /f wc
+write %1 0 old-data
+unlink /f
+fstat %1
+open /g wc
+write %1 0 OLD
+read %1 0 8
+stat /g
+close %1
+close %2
+open /h wc
+EOF
+fsd $T/open.img $T/o2.txt $T/out
+f=$(grep '^open -> ' $T/out | sed -n 1p | awk '{print $3}'); g=$(grep '^open -> ' $T/out | sed -n 2p | awk '{print $3}')
+grep -q "fstat -> 0 ino $f .* links 0" $T/out && [ "$g" != "$f" ] && grep -q "read -> 8 OLD-data" $T/out && grep -q "stat -> 0 ino $g .* size 0 " $T/out \
+    && check "unlinked open file: still readable/writable, number not reused, new file untouched" ok || { check "unlinked open file" bad; cat $T/out; }
+h=$(grep '^open -> ' $T/out | sed -n 3p | awk '{print $3}')
+[ "$h" = "$f" ] && clean $T/open.img && check "unlinked open file freed at the last close, e2fsck clean" ok || { check "freed at the last close" bad; cat $T/e2fsck.log; }
+cp $T/plain.img $T/open2.img
+printf "mount\nopen /f wc\nwrite %%1 0 x\nunlink /f\n" > $T/o3.txt
+fsd $T/open2.img $T/o3.txt $T/out
+e2fsck -fn $T/open2.img > $T/e2fsck.log 2>&1; grep -q "Inode bitmap differences: *-$f" $T/e2fsck.log && check "a crash while an unlinked file is open leaves an inode e2fsck reclaims" ok || { check "crash with an unlinked open file" bad; cat $T/e2fsck.log; }
+
 # ---- C7: fsck.ext2 against host e2fsck ----
 # repair: fsck.ext2 -y until it says clean (at most 3 runs), then e2fsck -fn must agree
 repair() {
@@ -145,6 +173,8 @@ for kind in rev0 plain plain4k; do
     repair $T/f.img && check "fsck.ext2 -y repairs it, host e2fsck agrees ($kind)" ok || { check "fsck.ext2 -y repairs it ($kind)" bad; cat $T/e2fsck.log | head; }
     debugfs -R "cat /bin/ls" $T/f.img 2>/dev/null | cmp -s - $T/bad/bin/ls && check "the file whose bitmap bit was lost is kept ($kind)" ok || check "the file whose bitmap bit was lost is kept ($kind)" bad
 done
+# a crash while an unlinked file was open (from the C5 test above)
+repair $T/open2.img && check "fsck.ext2 -y reclaims the inode of an unlinked open file after a crash" ok || check "fsck.ext2 reclaims an unlinked open file" bad
 # more than 255 links (300 subdirectories)
 mkdir -p $T/links; for i in $(seq 1 300); do mkdir -p $T/links/d/s$i; done
 rm -f $T/l.img; mke2fs -q -F -t ext2 -E revision=0 -b 1024 -N 1024 -d $T/links $T/l.img 8M

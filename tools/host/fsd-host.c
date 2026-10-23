@@ -2,6 +2,7 @@
 /* The ext2 filesystem server (user/fsd.c + kernel/ext2.c) on the host, driven by commands on stdin, one per line:
  *   mount [root]            try_mount of the image (root: it must be writable, as the root picker demands)
  *   open PATH FLAGS         FS_OPEN (flags: r w rw c t a, combined: "wct"); prints the inode number or the error
+ *   close INO               FS_CLOSE
  *   write INO OFF TEXT      FS_WRITE ("TEXT" may be @N: N bytes of a pattern)
  *   read INO OFF N          FS_READ, prints what came back
  *   fstat INO | stat PATH | lstat PATH
@@ -46,6 +47,7 @@ int main(void)
 {
     char line[1024];
     disk_port = 1;
+    ext2_busy = open_busy;
     static char big[1 << 20];
     while (fgets(line, sizeof line, stdin)) {
         line[strcspn(line, "\n")] = 0;
@@ -60,6 +62,7 @@ int main(void)
         }
         if (!strcmp(cmd, "as")) { cur_uid = (unsigned)atoi(a); cur_gid = (unsigned)atoi(b); printf("as -> %u %u\n", cur_uid, cur_gid); continue; }
         if (!strcmp(cmd, "open")) { r = req(FS_OPEN, (u32)a, 2, flags_of(b ? b : "r"), (u32)&st); if (r > 0 && nopened < 100) opened[nopened++] = r; }
+        else if (!strcmp(cmd, "close")) r = req(FS_CLOSE, num(a), 0, 0, 0);
         else if (!strcmp(cmd, "write")) {
             const char *t = c ? c : "";
             u32 n = (u32)strlen(t);
@@ -93,6 +96,7 @@ int main(void)
             struct udirent e;
             printf("ls ->");
             while ((r = req(FS_READDIR, (u32)ino, cookie, (u32)&e, (u32)&cookie)) > 0) { printf(" %s", e.name); n++; }
+            req(FS_CLOSE, (u32)ino, 0, 0, 0);
             printf(" (%u, %d)\n", n, r);
             continue;
         }

@@ -30,8 +30,7 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Shared libraries; only static programs.
 - A graphical programs API, mouse, sound, network, USB, floppy driver, RTG.
 - Display server (the terminal and workspaces are inside the kernel), index server for `locate`/`fzf`.
-- ZenixFS; multi-filesystem VFS; ext2 journal (an ext3 volume mounts read-only, ext4 is refused); unlink of open
-  files; moving directories between parents; triple-indirect blocks; writing ext2 files over 4 GB.
+- ZenixFS; multi-filesystem VFS; ext2 journal (an ext3 volume mounts read-only, ext4 is refused); moving directories between parents; triple-indirect blocks; writing ext2 files over 4 GB.
 - Scheduler priorities; kernel is single-CPU by design.
 - 68000 support (not a target).
 

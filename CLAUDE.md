@@ -52,6 +52,7 @@ unseen). So:
 | 76 `SYS_fd_info`, 77 `SYS_fd_rw` | `floppy` work (it used 75/76: renumber before committing) |
 | **next free: 78** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
+Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8.
 
 ## Rules for code (each one was a real bug found on 2026-10-22)
 Real hardware and Emu68 (details: knowledge base `amiga/emu68-jit-cache-rules.md`):
