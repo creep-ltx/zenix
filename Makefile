@@ -52,7 +52,7 @@ all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/bootblock.o: boot/bootblock.S | $(BUILD)
+$(BUILD)/bootblock.o: boot/bootblock.S boot/handoff.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/bootblock.elf: $(BUILD)/bootblock.o
 	$(CC) $(CFLAGS) -nostartfiles -Wl,-Ttext=0 -Wl,--build-id=none $< -o $@
@@ -70,6 +70,23 @@ $(BUILD)/stage0.elf: $(BUILD)/stage0.o link/stage0.ld
 $(BUILD)/stage0.bin: $(BUILD)/stage0.elf tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	$(OBJCOPY) -O binary $< $@
+
+# zenixboot: the AmigaOS program that boots Zenix from files on a hard disk, CF or SD card partition
+# (docs/man/zenixboot.txt). Built with the same m68k-elf compiler as the kernel, freestanding (it calls AmigaOS through
+# one assembly stub), linked like a Zenix program and then wrapped into an AmigaOS hunk executable by tools/mkhunk.py,
+# so it needs no Amiga toolchain. It shares the hand-over code with the bootblock (boot/handoff.S).
+$(BUILD)/zenixboot-start.o: boot/zenixboot-start.S boot/handoff.S | $(BUILD)
+	$(CC) $(ASFLAGS) $< -o $@
+$(BUILD)/zenixboot.bo: boot/zenixboot.c | $(BUILD)
+	$(CC) $(CFLAGS) -Os -c $< -o $@
+$(BUILD)/zenixboot.elf: $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo link/user.ld
+	$(CC) $(CFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
+	    $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo $(LIBGCC) -o $@
+$(BUILD)/zenixboot.zx: $(BUILD)/zenixboot.elf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@
+$(BUILD)/zenixboot: $(BUILD)/zenixboot.zx tools/mkhunk.py
+	python3 tools/mkhunk.py $< $@
 
 $(BUILD)/start.o: kernel/start.S $(BUILD)/stage0.bin | $(BUILD)
 	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
@@ -225,6 +242,24 @@ $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
 $(BUILD)/zenix-zroot.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot-zenixfs.sh tools/mkrdb.py tools/mkman.py $(wildcard zenixfs/*.c zenixfs/*.h zenixfs/tools/*.c)
 	make -s -C zenixfs build/zenixfs-tool
 	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS)" 8
+
+# ---- booting without a floppy (zenixboot; docs/how-it-works.md, docs/pi-first-boot.md) ----
+# The AmigaDOS boot volume Kickstart starts from: S/Startup-Sequence (one line), zenixboot, the kernel as "zenix".
+# 33 RDB cylinders of 504 KB (16 heads x 63 sectors): the FFS volume fills its partition exactly.
+BOOTFS_SIZE := 16632K
+$(BUILD)/zenix-bootfs.img: $(BUILD)/zenixboot $(BUILD)/kernel.bin tools/mkffs.py
+	printf 'SYS:zenixboot\n' > $(BUILD)/startup-sequence
+	python3 tools/mkffs.py $@ $(BOOTFS_SIZE) ZenixBoot $(BUILD)/startup-sequence=S/Startup-Sequence \
+	    $(BUILD)/zenixboot=zenixboot $(BUILD)/kernel.bin=zenix
+# a hard disk / CF card of any Amiga: an RDB with the boot volume and the ext2 root (the same root as zenix.hdf)
+$(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkcard.py tools/mkrdb-multi.py
+	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
+# the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
+# ext2 root with every program (written to a card by tools/write-card.sh)
+$(BUILD)/root-card.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
+	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)" 512M 8192
+$(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
+	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img
 
 # boots in a window on this screen (for a person, never for a test; tools/fsuae_conf.py fills in the Kickstart directory,
 # ZENIX_KICKSTART_DIR)

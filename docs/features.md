@@ -16,6 +16,7 @@ built. Last checked against the code: 2026-10-23.
 | Chip and fast RAM pools, 1 MB chip up to 8 MB+ fast | verified | architecture.md section 5 |
 | Boot from floppy (ADF) bootblock; kernel in fast RAM if present | verified | how-it-works.md section 1 |
 | Boot with a RAM-disk root loaded from the floppy (no IDE disk) | verified (dev/test image) | `zenix-ram.adf` |
+| Boot without a floppy: Kickstart boots a small FFS partition whose Startup-Sequence runs `zenixboot` (an AmigaOS program, Kickstart 2.04+, 68020+), which loads the kernel file (and optionally a RAM disk) and starts Zenix; errors return to AmigaOS. Images: `build/zenix-boot.hdf` (RDB disk for IDE/CF), `build/zenix-card.img` (Emu68 SD card: MBR, FAT, 0x76 RDB, ext2 root), written by `tools/write-card.sh` | verified in FS-UAE (`tools/zenixboot-test.sh`: Kickstart 3.1, 3.2 and 2.05; 68EC020, 68020 chip-only, 68040; the 68000 refused; the error paths); **not yet on a real Amiga** (the SD card path never: FS-UAE has no Emu68) | man/zenixboot.txt, how-it-works.md section 1 |
 | Gayle IDE disk with Amiga RDB partitions (A600/A1200/A4000); its interrupt sources switched off (polling only) | verified (the interrupt quieting only in FS-UAE) | architecture.md section 2 |
 | Instruction-cache (and Emu68 JIT) flush after every write of code; built for 68020-68060 with an opcode check | verified in FS-UAE, read for Emu68 | architecture.md section 2 |
 | Battery clock (MSM6242, RP5C01) | read (no test checks it) | `kernel/rtc.c` |
@@ -110,6 +111,7 @@ pages are in [man/](man/). **verified** against GNU for the text tools (`tools/c
 | Feature | Status |
 |---|---|
 | `make` builds the floppy, the disk image and the test images | verified |
+| AmigaOS-side tools from Linux without root or amitools: an FFS volume (`tools/mkffs.py`), an AmigaOS executable from a ZEXE (`tools/mkhunk.py`), the zenixboot disks (`tools/mkcard.py`) | verified (Kickstart 3.1/3.2/2.05 boot the FFS volume in FS-UAE; amitools' `xdftool` reads it back when installed) |
 | Headless FS-UAE test runs from serial scripts (`tools/run-test.sh`, `tools/tests/`) | verified |
 | `make check`: every strong test in one run, a table, fails on any failure (`tools/check.sh`, docs/README.md "Testing") | verified |
 | The machine matrix (`tools/matrix.sh`, architecture.md section 13), benchmark with the CIA E-clock (`bench`) | verified |

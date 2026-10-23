@@ -81,6 +81,23 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    bootblock first calls it (while AmigaOS is still alive; skipped on a 68000) with the hardware table's address
    in `a1`: it reads Emu68's `devicetree.resource` and fills the **hardware table** (408 bytes, at `+0x100` in the
    block, so at `0x1100` for the kernel; see "Pi hardware table" below).
+   **Or, with no floppy: `zenixboot`** (`boot/zenixboot.c`, `boot/zenixboot-start.S`), an AmigaOS program on a small
+   AmigaDOS FFS boot partition (on an IDE/CF disk's RDB, or under Emu68 in the RDB inside an MBR type-0x76 partition
+   of the SD card). Kickstart boots that partition with its ROM filesystem and runs its one-line
+   `S:Startup-Sequence` (`SYS:zenixboot`) in its ROM shell; zenixboot reads the kernel *file* (`zenix`, the same
+   `kernel.bin` as on the floppy) and an optional RAM-disk image with `dos.library`, checks them, and then runs
+   **the same hand-over code as the bootblock**: `boot/handoff.S` holds the stage colours, the klog-area size and
+   four macros (`handoff_tables`: bootinfo, GfxBase, stage0, the memory list, the kernel's home; `handoff_kill`:
+   SuperState, interrupts/DMA/CIA interrupts off; `handoff_jump`: the copier to `0x500` and the jump; `handoff_subs`:
+   the cache flush and the copier). The bootblock built from them is byte-for-byte the one before the split. Unlike the
+   bootblock, zenixboot fails safely: everything is loaded and checked while AmigaOS runs, an error is printed (on the
+   console and the serial port) and returns to AmigaOS. It keeps its buffers out of the kernel's future place, low
+   memory and the klog area (allocating again when a block lands there), and before the jump it also stops every
+   floppy motor, shows no screen (`LoadView(NULL)`), resets FMODE/BPLCON0/BPLCON3, waits for the blitter, switches a
+   68040/060's data cache (`CacheControl`) and MMU off (TC and the transparent-translation registers, probed with
+   the illegal and line-F vectors caught), all of which a running AmigaOS may have changed and a floppy boot never
+   has. It is built with the same m68k-elf compiler as the kernel (no Amiga toolchain): linked like a Zenix program
+   and wrapped into an AmigaOS hunk executable by `tools/mkhunk.py`. Details and limits: man/zenixboot.txt.
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
    `kmain()`.
 4. `kmain` reads the previous boot's log (below), then starts the serial port, vector table, memory manager,
@@ -90,7 +107,8 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)
 
-The bootblock's first instructions switch Copper and bitplane DMA off and set `BPLCON0` to no bitplanes (and
+The bootblock's first instructions (zenixboot: once its files are open, so that an error message can still be shown)
+switch Copper and bitplane DMA off and set `BPLCON0` to no bitplanes (and
 `BPLCON3` to 0 on ECS/AGA), so `COLOR00` fills the whole screen. Each boot step then writes its own colour: stages
 1-3 in the bootblock (blue, cyan, magenta), 4-5 in `start.S` (yellow, orange), 6-9 in `kmain` through
 `diag_stage()` (green, brown, pink, white); from stage 10 the Copper owns `COLOR00` and the boot log is on the
@@ -582,13 +600,17 @@ outputs (`tools/cmds-test.sh`).
   stage; the screenshot's pixel colour), the split and red-bar panic screens, and the previous-boot log across a
   warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `make BUILD=/tmp/x` builds everything
   in another directory (the kernel finds `stage0.bin` and the built-in servers through `-I$(BUILD)`).
+  `tools/zenixboot-test.sh` boots with no floppy: Kickstart 3.1 on an A1200 (68EC020, and a 68040), Kickstart 3.2
+  and 2.05 (an A600 with a 68020 and chip RAM only) when those ROMs are given, a 68000 that zenixboot must refuse, and
+  a run through its error paths; the disks are made by `tools/mkffs.py` (an FFS volume written from Linux),
+  `tools/mkrdb-multi.py` and `tools/mkcard.py`.
   `tools/matrix.sh` boots 14 emulated setups, every config in `fsuae/` and `fsuae/matrix/` but the mount and
   ZenixFS-root ones: A1200 stock (68EC020, 2 MB chip), with 4 or 8 MB fast RAM, 1 MB chip only, NTSC, with a
   68030, 68040 or 68060, an RDB disk, a RAM-disk boot with no disk, an A3000 (SCSI), two 68030 development setups
   (A1200- and A4000-class), and a 68000 that must be refused cleanly. Each boots, runs a short session and logs in
   on console 2. Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go
   (docs/README.md, "Testing"); the Kickstart files come from `ZENIX_KICKSTART_DIR` (`tools/fsuae_conf.py`).
-- Source layout: `boot/` bootblock, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
+- Source layout: `boot/` bootblock, zenixboot and the hand-over code they share, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
   `link/` linker script, `tools/` build and test scripts, `rootfs/` files copied to the root disk, `fsuae/` emulator
   configs, `archive/later/` and `archive/old-mmu/` code kept from the earlier MMU-based Zenix (reference, not built).
 

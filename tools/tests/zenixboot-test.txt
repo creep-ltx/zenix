@@ -1,0 +1,8 @@
+wait zenix:/# 120
+sleep 1
+send fdisk list\r
+sleep 3
+send mount\r
+sleep 2
+send echo zb\x6fk\r
+sleep 2
