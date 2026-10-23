@@ -15,6 +15,7 @@
 | [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D9 and where each one stands. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
 | [audit-2026-10-22.md](audit-2026-10-22.md) | The audit of 2026-10-22: the work list of the hardening round (batches A-E), each item marked with its fix. |
+| [future-ideas.md](future-ideas.md) | Ideas kept for after the feature halt (signal bits, CPU accounting, shared libraries, newlib, PFS3, Zenix as its own ROM, ...), each with its public source. Nothing in it is built. |
 
 How these documents are written: by reading the source tree. A statement about Zenix is *read* from the source unless
 it says *verified* (a test checked it in FS-UAE; on real hardware it would say "verified on the A1200" with the date).
