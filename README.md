@@ -22,6 +22,11 @@ Status (2026-10-22, all *verified in FS-UAE* as a stock A1200 - 68EC020, no MMU 
 Not done: unlinking a file that is still open (frees at once), moving directories between parents, triple-indirect files, a graphical programs API, mouse, sound, network, real
 hardware, 68000 (not a target), MMU use. See docs/DESIGN.md.
 
+**Not locked as shipped:** the images come with root logged in automatically and no passwords (root, user and
+guest; `/etc/autologin` names root, for the tests). Set passwords with `passwd` and remove `/etc/autologin` before
+trusting the system; `login` warns while root has no password. Even then, with no MMU the permissions protect
+against honest mistakes, not against a program written to cheat (docs/limits.md).
+
 Images: `build/zenix.adf` (the standard floppy: bootblock + kernel only; the root filesystem is on the IDE disk,
 `build/zenix.hdf` or `zenix-rdb.hdf`) and `build/zenix-ram.adf` (development/test only: also carries a small root
 filesystem that is loaded into RAM, for machines without an IDE disk, e.g. a Gotek boot).

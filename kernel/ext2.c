@@ -1170,11 +1170,20 @@ static int new_inode(struct inode *out, u32 mode, int is_dir)
     return 0;
 }
 
+/* a new entry in a set-group-id directory gets the directory's group, a new directory also the bit (fsperm.h rule 7) */
+static void inherit_group(struct inode *in, const struct inode *dir)
+{
+    in->gid = (u16)fsp_new_gid(ext2_gid, dir->mode, dir->gid);
+    if (S_ISDIR(in->mode))
+        in->mode = (u16)(in->mode | fsp_new_dir_bits(dir->mode));
+}
+
 /* create an empty regular file in dir */
 int ext2_create(struct inode *dir, const char *name, struct inode *out)
 {
     if (new_inode(out, S_IFREG | fsp_new_file_mode(ext2_umask), 0))
         return -1;
+    inherit_group(out, dir);
     if (ext2_iput(out) || dir_add(dir, name, strlen_(name), out->ino, out->mode)) {
         out->links = 0;
         ext2_iput(out);
@@ -1195,6 +1204,7 @@ int ext2_mkdir(struct inode *dir, const char *name)
         return -31;                     /* EMLINK */
     if (new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1))
         return -1;
+    inherit_group(&d, dir);
     u32 blk = bmap_alloc(&d, 0);
     if (!blk) {
         d.links = 0;
@@ -1326,6 +1336,7 @@ int ext2_symlink(struct inode *dir, const char *name, const char *target)
         return -1;
     if (new_inode(&in, S_IFLNK | 0777, 0))
         return -1;
+    inherit_group(&in, dir);
     in.size = len;
     if (len < 60) {                                    /* fast symlink: the text lives in the inode */
         for (u32 i = 0; i < len; i++)

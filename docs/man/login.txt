@@ -16,11 +16,16 @@ DESCRIPTION
     A user whose password field is empty is not asked for a password. With -f
     (or a user named in /etc/autologin) the password is not asked at all; the
     images that Zenix ships contain /etc/autologin with "root", so they start
-    straight in a root shell. Remove that file to get a login prompt.
+    straight in a root shell. Remove that file to get a login prompt. The
+    shipped root, user and guest accounts have no password: while root has
+    none, an automatic login prints a one-line warning. Set passwords with
+    passwd(1) and remove /etc/autologin before trusting the system.
 
     There is one session at a time: workspace shells (Amiga+Return) run as the
     user who is logged in. The environment of the session is what new
-    workspace shells start with.
+    workspace shells start with. While nobody is logged in (at the login
+    prompt, after a logout) Amiga+Return opens no shell; the workspace says
+    "Nobody is logged in: log in first".
 
 FILES
     /etc/passwd   name:hash:uid:gid:comment:home:shell

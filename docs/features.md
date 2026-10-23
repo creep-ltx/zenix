@@ -41,7 +41,9 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 | Priorities, signals with handlers, process groups | planned | |
 | Users and groups: uid/gid on every process (real and effective), `setuid`/`setgid`, `umask`, `chown` | verified | architecture.md section 14 |
 | Permission checks (r/w/x for owner, group, other; directory search; sticky bit; set-user-id programs) in the filesystem server | verified | architecture.md section 14 |
-| `/etc/passwd`, `/etc/group`, `login` (also autologin), `su`, `passwd` (salted SHA-256), `id`, `chown`/`chgrp` | verified | man pages |
+| `/etc/passwd`, `/etc/group`, `login` (also autologin, with a warning while root has no password), `su` (gives the target's environment), `passwd` (salted SHA-256, 1000 rounds), `id`, `chown`/`chgrp` | verified | man pages |
+| Process and server protection (audit D): kill/stop/foreground only of one's own processes, never the built-in servers; clock and serial copy root only; the filesystem and disk servers answer only the kernel and root; reserved port names; no shell from Amiga+Return without a login | verified in FS-UAE (users-test, zroot-test) and on the host (ext2-host-test, disk-host-test) | architecture.md section 14 |
+| Set-group-id directories, non-owner writes clear set-user-id, `utimes` rules, exclusive create (`O_EXCL`) in both filesystem servers | verified (host test for ext2; FS-UAE for ZenixFS through badptr ipc, here-documents and mktemp) | kernel/fsperm.h, architecture.md section 14 |
 | Shared libraries | planned | |
 
 ## Filesystem and disks

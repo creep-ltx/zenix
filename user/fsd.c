@@ -136,6 +136,15 @@ static int sticky_ok(const struct inode *dir, const char *name)  /* in a sticky 
     return fsp_sticky_ok(ext2_uid, dir->mode, dir->uid, t.uid) || deny();
 }
 
+/* a write or truncate by someone else than the owner and root: set-user-id (and set-group-id) go (fsperm.h rule 9) */
+static int clear_setid(struct inode *in)
+{
+    u16 nm = (u16)fsp_write_clear(ext2_uid, in->uid, in->mode);
+    if (nm == in->mode) return 0;
+    in->mode = nm;
+    return ext2_iput(in);
+}
+
 static int handle1(struct umsg *m)
 {
     struct inode in, dir, dir2;
@@ -145,6 +154,10 @@ static int handle1(struct umsg *m)
         const char *path = (const char *)m->a[0];
         u32 flags = m->a[2];
         int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
+        if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {   /* exclusive: the name must not exist, not even as a link */
+            if (!ext2_namei_ex(path, m->a[1], &in, 0, 0)) return -17;
+            if (ext2_denied) return -1;
+        }
         if (ext2_namei(path, m->a[1], &in, 0)) {
             if (ext2_denied || !(flags & O_CREAT)) return -1;
             if (ext2_readonly) return -30;
@@ -155,7 +168,7 @@ static int handle1(struct umsg *m)
             if (writing) {
                 if (ext2_readonly) return -30;
                 if (!S_ISREG(in.mode)) return -1;
-                if ((flags & O_TRUNC) && ext2_truncate(&in)) return -1;
+                if ((flags & O_TRUNC) && (clear_setid(&in) || ext2_truncate(&in))) return -1;
             }
         }
         int e = open_ref(in.ino);
@@ -168,6 +181,7 @@ static int handle1(struct umsg *m)
         return ext2_read(&in, m->a[1], (void *)m->a[2], m->a[3]);
     case FS_WRITE:
         if (ext2_iget(m->a[0], &in)) return -1;
+        in.mode = (u16)fsp_write_clear(ext2_uid, in.uid, in.mode);    /* stored by ext2_write with the new size */
         return ext2_write(&in, m->a[1], (const void *)m->a[2], m->a[3]);
     case FS_STAT:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
@@ -195,15 +209,18 @@ static int handle1(struct umsg *m)
         return disk_flush() < 0 ? -5 : 0;             /* writes went straight to the disk; the drive's cache is left */
     case FS_CHMOD:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0) || !owner_only(&in)) return -1;
-        return ext2_chmod(in.ino, m->a[2]);
+        return ext2_chmod(in.ino, fsp_chmod_mode(ext2_uid, ext2_gid, in.gid, m->a[2]));
     case FS_CHOWN:
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
         if (ext2_enforce && !fsp_is_root(ext2_uid)) { ext2_denied = 1; return -1; }
         return ext2_chown(in.ino, m->a[2], m->a[3]);
-    case FS_UTIMES:
+    case FS_UTIMES: {
         if (ext2_namei((const char *)m->a[0], m->a[1], &in, 0)) return -1;
-        if (!owner_only(&in) && !(ext2_denied = 0, ext2_access(&in, 2))) return -1;
-        return ext2_utimes(in.ino, m->a[2]);
+        int given = m->a[2] != FS_UTIME_NOW;
+        if (ext2_enforce && !fsp_utimes_ok(ext2_uid, in.uid, given, fsp_access(ext2_uid, ext2_gid, in.mode, in.uid, in.gid, FSP_W)))
+            { deny(); return -1; }
+        return ext2_utimes(in.ino, given ? m->a[2] : fs_time());
+    }
     case FS_LSTAT:
         if (ext2_namei_ex((const char *)m->a[0], m->a[1], &in, 0, 0)) return -1;
         fill_stat(&in, (struct ustat *)m->a[2]);
@@ -260,6 +277,7 @@ static int changes(const struct umsg *m)
 
 static int handle(struct umsg *m)
 {
+    if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -13;     /* raw IPC from a user: inode numbers would bypass every check */
     if (ext2_readonly && changes(m)) return -30;      /* EROFS */
     ext2_uid = m->uid; ext2_gid = m->gid; ext2_umask = m->umask;
     ext2_enforce = 1; ext2_denied = 0;

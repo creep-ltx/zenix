@@ -2,7 +2,10 @@
 /* Messages between the kernel and the filesystem server ("fs" port).
  * type = op, a[0..3] = arguments, result = value or -1 (-5 = server gone).
  * All pointers are plain addresses: no MMU, the server reads and writes
- * the caller's buffers in place. */
+ * the caller's buffers in place.
+ * Who may send them: the kernel (struct umsg kflags UMSG_KERNEL, set only by ipc_kcall for a system call, with the
+ * caller's ids) and root. Any other message - a user's own SYS_call to the port - is answered -13: inode numbers
+ * (FS_READ, FS_WRITE, ...) and FS_QUIT would bypass every permission check (audit D). */
 #define FS_OPEN    1   /* a0 path, a1 cwd ino, a2 flags (O_*), a3 ustat* -> ino */
 #define FS_READ    2   /* a0 ino, a1 offset, a2 buffer, a3 length -> bytes */
 #define FS_WRITE   3   /* a0 ino, a1 offset, a2 buffer, a3 length -> bytes */
@@ -20,9 +23,13 @@
 #define FS_LINK    15  /* a0 existing path, a1 new path, a2 cwd ino: a hard link */
 #define FS_SYMLINK 16  /* a0 target text, a1 link path, a2 cwd ino */
 #define FS_READLINK 17 /* a0 path, a1 cwd ino, a2 buffer, a3 max -> length */
-#define FS_UTIMES  18  /* a0 path, a1 cwd ino, a2 modification time */
+#define FS_UTIMES  18  /* a0 path, a1 cwd ino, a2 modification time, or FS_UTIME_NOW: an explicit time only for the owner and
+                        * root; "now" also for anyone who may write the file */
+#define FS_UTIME_NOW 0xFFFFFFFFu
 #define FS_CHOWN   20  /* a0 path, a1 cwd ino, a2 uid, a3 gid (-1 = keep): root only */
 #define O_EXEC     0x8000  /* FS_OPEN flag: the caller wants to execute the file (needs an x bit) */
+#define O_EXCL     0x80    /* FS_OPEN flag with O_CREAT: fail with -17 (EEXIST) if the name exists, also as a symbolic link
+                            * (dangling or not); the check and the creation are one request, so no one can come between */
 #define FS_LSTAT   19  /* like FS_STAT but a final symbolic link is not followed */
 #define FS_ROOT    22  /* a0 struct fsinfo* (the server fills in its device and type) -> inode number of its root directory */
 #define FS_QUIT    23  /* sync, release the device, reply 0, exit: sent by umount */

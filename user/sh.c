@@ -1372,9 +1372,19 @@ static int apply_redirs(struct redir *r, struct rsave *rs)
         int fd;
         if (r->fd > 2 && r->kind != 3) { errm("only fds 0, 1 and 2 can be redirected", 0); return 1; }
         if (r->kind == 5) {                                   /* here-document: a temporary file */
+            /* /tmp/.shPID_RANDOM, created exclusively with mode 0600: another user cannot guess the name ahead, put a link
+             * there or read the text (audit D) */
             char name[40] = "/tmp/.sh"; char b[12];
-            utoa((u32)shell_pid, b); strcpy(name + strlen(name), b); u32 l = strlen(name); name[l++] = '_'; utoa((u32)hd_seq++, name + l);
-            fd = sys_open(name, O_WRONLY | O_CREAT | O_TRUNC);
+            utoa((u32)shell_pid, b); strcpy(name + strlen(name), b); u32 l = strlen(name); name[l++] = '_';
+            u32 um = (u32)sys_umask(077);
+            fd = -17;
+            for (int tries = 0; tries < 50 && fd == -17; tries++) {
+                u32 x = sys_hrtime() * 2654435761u ^ (u32)hd_seq++ * 40503u ^ sys_ticks();
+                for (int k = 0; k < 8; k++) { name[l + k] = "abcdefghijklmnopqrstuvwxyz012345"[x & 31]; x = (x >> 5) ^ (x * 69069u); }
+                name[l + 8] = 0;
+                fd = sys_open(name, O_WRONLY | O_CREAT | O_EXCL);
+            }
+            sys_umask(um);
             if (fd < 0) { errm("cannot create a here-document file in /tmp", 0); return 1; }
             const char *body = r->hdquoted ? r->body : expand_heredoc(r->body);
             sys_write(fd, body, strlen(body)); sys_close(fd);
@@ -2073,7 +2083,7 @@ static int run_builtin(char **argv, int argc)
                 continue;
             }
             int pid = job_pid(argv[i]);
-            if (pid <= 0 || (op == 2 ? sys_kill(pid) : sys_jobctl(pid, op)) < 0) { errm(argv[i], "no such process"); rc = 1; continue; }
+            if (pid <= 0 || (op == 2 ? sys_kill(pid) : sys_jobctl(pid, op)) < 0) { errm(argv[i], zwhy("no such process")); rc = 1; continue; }
             for (int j = 0; j < MAXJOBS; j++) if (jobs[j].used && jobs[j].pid == pid && op < 2) { jobs[j].stopped = op == 0; for (int q = 0; q < jobs[j].np; q++) sys_jobctl(jobs[j].pids[q], op); }
         }
         return rc;
@@ -2244,7 +2254,9 @@ static int shell_main(int argc, char **argv)
     }
     interactive = 1;
     run_startup_file("/etc/profile");
-    { char p[160]; const char *h = var_get("HOME"); strcpy(p, h ? h : "/"); u32 l = strlen(p); if (l && p[l - 1] != '/') p[l++] = '/'; strcpy(p + l, ".shrc"); run_startup_file(p); }
+    { char p[160]; const char *h = var_get("HOME"); strncpy(p, h ? h : "/", 150); p[150] = 0; u32 l = strlen(p); if (l && p[l - 1] != '/') p[l++] = '/'; strcpy(p + l, ".shrc");
+      struct ustat st;                    /* only a ~/.shrc of the effective user (or root): never another user's commands as root */
+      if (sys_stat(p, &st) == 0 && (st.uid == (u32)sys_geteuid() || st.uid == 0)) run_startup_file(p); }
     abrk = arena;
     load_history();
     interactive_loop();

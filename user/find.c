@@ -1,6 +1,8 @@
 #include "libz.h"
 /* find [path...] [-name PAT] [-iname PAT] [-type f|d] [-maxdepth N] [-mindepth N] [-print] [-exec cmd {} ;] [-delete]
- * Patterns: * ? [..]. The tests are and-ed; with no action the path is printed. */
+ * Patterns: * ? [..]. The tests are and-ed; with no action the path is printed. Symbolic links below the starting
+ * points are never followed (GNU find's default -P), so -delete cannot leave the tree; with -delete a starting point
+ * that is a link is not followed either. */
 static const char *p_name, *p_iname; static int p_type, maxdepth = 100000, mindepth, do_print = 1, do_delete;
 static char **exec_argv; static int exec_n, rc;
 
@@ -54,7 +56,7 @@ static void visit(const char *path, const char *name, int depth, const struct us
         for (int i = 0; i < nn; i++) {
             char *child = path_join(path, names[i]);
             if (!child) { fprintf(2, "find: %s/%s: %s\n", path, names[i], zwhy("cannot read")); rc = 1; continue; }
-            struct ustat cs; if (sys_stat(child, &cs) == 0) visit(child, names[i], depth + 1, &cs);
+            struct ustat cs; if (sys_lstat(child, &cs) == 0) visit(child, names[i], depth + 1, &cs);   /* a link is not followed */
             free(child);
         }
         dir_free(names, nn);
@@ -79,7 +81,7 @@ int main(int argc, char **argv)
     }
     for (int k = 0; k < np; k++) {
         struct ustat st;
-        if (sys_stat(paths[k], &st) < 0) { fprintf(2, "find: %s: not found\n", paths[k]); rc = 1; continue; }
+        if ((do_delete ? sys_lstat(paths[k], &st) : sys_stat(paths[k], &st)) < 0) { fprintf(2, "find: %s: not found\n", paths[k]); rc = 1; continue; }
         const char *nm = strrchr(paths[k], '/'); nm = nm && nm[1] ? nm + 1 : paths[k];
         visit(paths[k], nm, 0, &st);
     }

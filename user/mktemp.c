@@ -17,16 +17,34 @@ int main(int argc, char **argv)
     int n = (int)strlen(name), x = n; while (x > 0 && name[x - 1] == 'X') x--;
     if (x == n) { fprintf(2, "mktemp: the template needs trailing X characters\n"); return 2; }
     static const char set[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    u32 seed = sys_hrtime() ^ ((u32)sys_time() << 8) ^ (u32)sys_getpid();
+    /* the name: not guessable from the pid or the time alone (the E-clock's low bits change every 1.4 us), and the
+     * file is created exclusively (O_EXCL: the check and the creation are one request), mode 0600 / 0700 from the start */
+    u32 seed = sys_hrtime() * 2654435761u ^ ((u32)sys_time() << 8) ^ ((u32)sys_getpid() << 24) ^ sys_ticks() * 40503u;
+    u32 old = (u32)sys_umask(077);
     for (int tries = 0; tries < 100; tries++) {
-        for (int k = x; k < n; k++) { seed = seed * 1103515245u + 12345u; name[k] = set[(seed >> 16) % 62]; }
-        struct ustat st;
-        if (sys_stat(name, &st) == 0) continue;
-        if (dir) { if (sys_mkdir(name) < 0) { fprintf(2, "mktemp: %s: %s\n", name, zwhy("cannot create")); return 1; } sys_chmod(name, 0700); }
-        else { int fd = sys_open(name, O_WRONLY | O_CREAT | O_TRUNC); if (fd < 0) { fprintf(2, "mktemp: %s: %s\n", name, zwhy("cannot create")); return 1; } sys_close(fd); sys_chmod(name, 0600); }
+        for (int k = x; k < n; k++) {
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;            /* xorshift32 */
+            seed += sys_hrtime();
+            name[k] = set[(seed >> 8) % 62];
+        }
+        if (dir) {
+            if (sys_mkdir(name) < 0) {
+                struct ustat st;
+                if (sys_stat(name, &st) == 0) continue;                       /* taken: another name */
+                sys_umask(old);
+                fprintf(2, "mktemp: %s: %s\n", name, zwhy("cannot create")); return 1;
+            }
+        } else {
+            int fd = sys_open(name, O_WRONLY | O_CREAT | O_EXCL);
+            if (fd == -17) continue;                                            /* taken: another name */
+            if (fd < 0) { sys_umask(old); fprintf(2, "mktemp: %s: %s\n", name, zwhy("cannot create")); return 1; }
+            sys_close(fd);
+        }
+        sys_umask(old);
         printf("%s\n", name);
         return 0;
     }
+    sys_umask(old);
     fprintf(2, "mktemp: no free name\n");
     return 1;
 }

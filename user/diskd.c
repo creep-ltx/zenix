@@ -233,6 +233,8 @@ static int blocked(int s, u32 lba, u32 n, u32 pid)
 
 static int handle(struct umsg *m)
 {
+    if (m->uid != 0 && m->type != DISK_LIST && m->type != DISK_INFO)
+        return -13;                     /* raw sectors bypass every file permission: root only (the filesystem servers are root) */
     switch (m->type) {
     case DISK_OPEN: {
         const char *nm = (const char *)m->a[0];

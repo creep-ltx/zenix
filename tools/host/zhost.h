@@ -19,7 +19,8 @@ typedef int s32;
 #define O_TRUNC  0x200
 #define O_APPEND 0x400
 
-struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, pad; u32 client_; };
+struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, kflags; u32 client_; };
+#define UMSG_KERNEL 1
 
 int sys_call(int port, struct umsg *m);          /* hostdisk.c: the disk server's messages on an image file */
 int sys_port_find(const char *name);

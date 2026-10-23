@@ -61,12 +61,14 @@ static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }
 #define O_CREAT  0x40
 #define O_TRUNC  0x200
 #define O_APPEND 0x400
+#define O_EXCL   0x80     /* with O_CREAT: fail with -17 if the name exists (also as a symbolic link) */
 static inline int sys_mkdir(const char *p) { return sys3(25, (u32)p, 0, 0); }
 static inline int sys_unlink(const char *p) { return sys3(26, (u32)p, 0, 0); }
 static inline int sys_rmdir(const char *p) { return sys3(27, (u32)p, 0, 0); }
 static inline int sys_rename(const char *a, const char *b) { return sys3(28, (u32)a, (u32)b, 0); }
 
-struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, pad; u32 client_; };
+struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, kflags; u32 client_; };
+#define UMSG_KERNEL 1     /* kflags: the kernel sent this message for a system call (servers trust only these, and root) */
 static inline int sys_port_create(const char *n) { return sys3(29, (u32)n, 0, 0); }
 static inline int sys_port_find(const char *n) { return sys3(30, (u32)n, 0, 0); }
 static inline int sys_call(int port, struct umsg *m) { return sys3(31, (u32)port, (u32)m, 0); }

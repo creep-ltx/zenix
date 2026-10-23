@@ -30,8 +30,8 @@ EXAMPLES
     date +%s
 
 NOTES
-    Dates before 1970 and after 2106 cannot be represented. Setting
-    the clock is not restricted (there are no users yet).
+    Dates before 1970 and after 2106 cannot be represented. Only root may
+    set the clock; for others date -s says "permission denied" and exits 1.
 
 SEE ALSO
     uptime(1), touch(1)

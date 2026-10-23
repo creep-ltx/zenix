@@ -24,6 +24,8 @@ EXIT STATUS
     0 on success, 1 on a read, write or open error, 2 on a usage error.
 
 NOTES
+    Disks and partitions are for root only (the disk server refuses others);
+    for a normal user such a name is taken as a file name.
     Not done: conv=, ibs/obs, status output on a signal, devices opened for
     a size that is not a whole number of sectors (a short last block of a
     file is written as it is).

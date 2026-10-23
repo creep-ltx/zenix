@@ -285,7 +285,7 @@ inside a call to a server is never stopped until the reply arrives (the server h
 The central mechanism (DESIGN D1). A **port** is a named queue owned by one process. A client calls
 
 ```
-struct umsg { next, from, server, state, result, type, a[4], uid, gid, umask, client }
+struct umsg { next, from, server, state, result, type, a[4], uid, gid, umask, kflags, client }
 sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 ```
 
@@ -303,6 +303,12 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   until a message or the deadline, whichever comes first, instead of polling.
 - If a server dies, its ports are closed and its pending and in-service requests fail with an I/O error (-5); the
   kernel then forgets the cached port number and looks it up again next time.
+- The kernel stamps every message with the caller's uid, gid and umask, and `kflags`: `UMSG_KERNEL` when the kernel
+  itself sends it for a system call (`ipc_kcall`, used by vfs.c), 0 for a program's own `SYS_call` (`ipc_call`
+  always clears it). The filesystem servers answer only messages with `UMSG_KERNEL`, or from root; the disk server
+  only root (and `DISK_LIST`/`DISK_INFO` for anyone). Port names `fs`, `fs.*` (mounts) and `disk` are reserved:
+  only root may create them, so a dead server's name cannot be taken over by a normal user (`port_create` answers
+  -13). Audit D.
 - Drawback of the design, noted in DESIGN.md: a **hung** server blocks its clients.
 
 ## 9. The servers
@@ -321,6 +327,9 @@ plain open reads. A mount whose server has died is released when it is in the wa
 driver waits after every write until the card has programmed it). `struct diskinfo` carries capability bits and the largest
 transfer; `DISKCAP_FLUSH` is set only if a flush tried at start worked, and `DISK_FLUSH` answers -95 on a device without it.
 `FS_SYNC` and `FS_QUIT` (umount) end with a `DISK_FLUSH` in both filesystem servers. Protocol: `kernel/diskproto.h`.
+Only root's messages (`m->uid` 0, stamped by the kernel) are served, except `DISK_LIST` and `DISK_INFO`: raw sectors
+would bypass every file permission. The filesystem servers, `fdisk`, `mkfs.*`, `fsck.*` and `dd` on a device run as
+root; for anyone else they answer "permission denied" or cannot open the device (audit D).
 
 ### fsd - the filesystem server (`user/fsd.c` + `kernel/ext2.c`, port `fs`)
 The ext2 code compiled to run in user mode (`user/fsenv.h` supplies its environment), speaking the protocol in
@@ -357,6 +366,8 @@ working directory reached through a symbolic link behaves as its text says once 
 ### boot - the session manager (`user/boot.c`)
 Waits for the `fs` port, spawns `/bin/init`, and then sleeps in `SYS_wsreq`, spawning a shell on a new
 workspace whenever the user presses Amiga+Return. (It exists because the idle process cannot block on a message.)
+While nobody is logged in (`SYS_session` not set, or ended by init with uid -1) `SYS_spawn_tty` refuses (-13) and the
+workspace shows "Nobody is logged in: log in first; Amiga+Return then opens a shell."
 
 ## 10. The filesystem
 
@@ -522,11 +533,36 @@ outputs (`tools/cmds-test.sh`).
   `0666 & ~umask` (directories `0777 & ~umask`). A refusal returns -13 to the caller.
 - `login` (run by `init`) authenticates against `/etc/passwd`, drops root and starts the shell; it calls `SYS_session`
   first, so the kernel remembers the ids and environment of the session and gives them to workspace shells that
-  the session manager starts (`SYS_spawn_tty`). `init` clears the session when it ends. One session at a time.
+  the session manager starts (`SYS_spawn_tty`). `init` ends the session (`SYS_session` with uid -1) when login
+  returns; with no session Amiga+Return opens nothing (section 9, boot). One session at a time.
+- **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill`, `SYS_jobctl` and `SYS_setfg`): root may signal
+  any process but the idle one; others only a process whose real or effective uid equals their real or effective
+  uid, or their own child, and never a built-in server (started from the kernel image: diskd, fsd, zfsd, boot) or a
+  privileged process. A refusal is -13, no such process -3. `SYS_setfg` works on the caller's own terminal, 0 (nobody)
+  is always allowed. `SYS_settime` and `SYS_ttymirror` are root only.
+- **Raw messages** (section 8): the filesystem servers do nothing for a message that did not come from the kernel
+  unless it is root's, so a user cannot read or write by inode number, open files without the kernel's open-file
+  table, or send `FS_QUIT`; the disk server serves root only; `fs`, `fs.*` and `disk` are names only root can take.
+  `proc_spawn` takes the set-user-id bit only from the server of the mount table (the port it routes the path to;
+  a port of that name can only be root's).
+- **The filesystem rules** added by audit D (kernel/fsperm.h rules 5, 7, 9, 10, in both servers): a set-group-id
+  directory gives new entries its group and new directories the bit; a write or truncate by anyone but the owner and
+  root clears set-user-id (and set-group-id when the group has x); `utimes` with a given time is for the owner and
+  root, "now" (`FS_UTIME_NOW`) also for anyone who may write; a non-root owner's `chmod` drops set-group-id unless
+  the file's group is theirs; moving a directory to another parent needs w on it (ZenixFS; ext2 does not move
+  directories between parents). `O_EXCL` with `O_CREAT` fails with -17 if the name exists, also as a dangling
+  symbolic link, in the same request as the creation (here-documents and `mktemp` use it, with mode 0600).
+- **The tools**: `su` gives the target's USER, LOGNAME, HOME, SHELL and PATH=/bin and drops IFS, ENV, CDPATH; `sh`
+  reads `~/.shrc` only if it belongs to the effective user or root; `/etc/passwd` lines with a non-numeric uid or
+  gid are ignored (never read as 0); `passwd` and the lookups read the whole file (up to 64 KB); new password hashes
+  are `1000$salt$hex` (old `salt$hex`, 100 rounds, still accepted); `tar x` drops leading `/`, refuses `..` parts and
+  names through a link the same archive made; `find` never follows links below its starting points.
+- **The shipped images** have root logged in automatically and no passwords (limits.md); `login` warns.
 - `mkroot.sh` builds the image under `fakeroot` so files belong to root; `/tmp` is 1777; `su` and `passwd` are 4755.
 - The kernel's own file loading and the servers run as root. Kernel-side calls such as `fs_read_file` use the
   identity of the process that asked for the spawn.
 - Programs report a refusal as "permission denied": `sys3` stores the code of the last failed call in `zerrno`, and
   `zwhy("cannot open")` (libz) returns that text unless the code was -13.
-- What this is not: with no MMU a program can still read any memory and call the disk server directly, so this is
-  accounting and protection against honest mistakes (limits.md).
+- What this is not: with no MMU a program can still read and write any memory - for example change a message after
+  the kernel stamped it, or the kernel's own tables - so this is accounting and protection against honest mistakes
+  and against users using the system's own calls, not against a program written to cheat (limits.md).

@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "pw.h"
 
-/* SHA-256 (FIPS 180-4) and the password hash built on it. The stored form is "salt$hex": hex of SHA-256 applied
- * ROUNDS times, starting from salt + password. No MMU means no real security boundary on this system; the hash
- * only keeps passwords from being read straight out of /etc/passwd. */
-#define ROUNDS 100
+/* SHA-256 (FIPS 180-4) and the password hash built on it. The stored form is "ROUNDS$salt$hex": hex of SHA-256
+ * applied ROUNDS times, starting from salt + password. New hashes use PW_ROUNDS; the older form "salt$hex" (no round
+ * count, one '$') means 100 rounds and stays valid. No MMU means no real security boundary on this system, and
+ * /etc/passwd is world-readable (no shadow file): the hash only makes guessing a password from it slow.
+ * PW_ROUNDS 1000 is a choice, not a measurement: one SHA-256 block per round, estimated at about a second on a
+ * 14 MHz 68020 and well under that on the PiStorm (not measured on hardware: docs/limits.md). */
+#define OLD_ROUNDS 100
+#define PW_ROUNDS 1000
+#define MAX_ROUNDS 100000
 
 static const u32 K[64] = {
     0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,
@@ -48,29 +53,56 @@ void sha256(const void *data, u32 len, unsigned char out[32])
     for (int i = 0; i < 8; i++) { out[4*i] = (unsigned char)(h[i] >> 24); out[4*i+1] = (unsigned char)(h[i] >> 16); out[4*i+2] = (unsigned char)(h[i] >> 8); out[4*i+3] = (unsigned char)h[i]; }
 }
 
-void pw_hash(const char *password, const char *salt, char *out)
+static void hash_rounds(const char *password, const char *salt, u32 rounds, unsigned char x[32])
 {
-    unsigned char d[32 + 40 + 1], x[32];
+    unsigned char d[32 + 40 + 1];
     char in[128];
     u32 sl = strlen(salt); if (sl > 16) sl = 16;
     memcpy(in, salt, sl); strncpy(in + sl, password, 100); in[sl + 100] = 0;
     sha256(in, sl + strlen(in + sl), x);
-    for (int i = 1; i < ROUNDS; i++) { memcpy(d, x, 32); memcpy(d + 32, salt, sl); sha256(d, 32 + sl, x); }
-    memcpy(out, salt, sl); out[sl] = '$';
+    for (u32 i = 1; i < rounds; i++) { memcpy(d, x, 32); memcpy(d + 32, salt, sl); sha256(d, 32 + sl, x); }
+}
+
+static void put_hex(char *out, const unsigned char x[32])
+{
     static const char hex[] = "0123456789abcdef";
-    for (int i = 0; i < 32; i++) { out[sl + 1 + 2*i] = hex[x[i] >> 4]; out[sl + 2 + 2*i] = hex[x[i] & 15]; }
-    out[sl + 65] = 0;
+    for (int i = 0; i < 32; i++) { out[2*i] = hex[x[i] >> 4]; out[2*i + 1] = hex[x[i] & 15]; }
+    out[64] = 0;
+}
+
+/* out: "ROUNDS$salt$hex" (at most 6 + 16 + 1 + 64 + 1 bytes) */
+void pw_hash(const char *password, const char *salt, char *out)
+{
+    unsigned char x[32];
+    u32 sl = strlen(salt); if (sl > 16) sl = 16;
+    hash_rounds(password, salt, PW_ROUNDS, x);
+    int n = snprintf(out, 8, "%u$", (unsigned)PW_ROUNDS);
+    memcpy(out + n, salt, sl); out[n + sl] = '$';
+    put_hex(out + n + sl + 1, x);
 }
 
 int pw_check(const char *password, const char *stored)
 {
     if (!stored[0]) return 1;                           /* no password set */
     if (!strcmp(stored, "*")) return 0;                 /* locked */
-    const char *dollar = strchr(stored, '$');
-    if (!dollar) return 0;
-    char salt[20], h[100];
-    u32 sl = (u32)(dollar - stored); if (sl > 16) return 0;
-    memcpy(salt, stored, sl); salt[sl] = 0;
-    pw_hash(password, salt, h);
-    return !strcmp(h, stored);
+    const char *d1 = strchr(stored, '$');
+    if (!d1) return 0;
+    const char *d2 = strchr(d1 + 1, '$');
+    u32 rounds = OLD_ROUNDS;
+    const char *salt = stored;
+    if (d2) {                                           /* "ROUNDS$salt$hex": digits only, in range */
+        if (d1 == stored || d1 - stored > 6) return 0;
+        rounds = 0;
+        for (const char *p = stored; p < d1; p++) { if (*p < '0' || *p > '9') return 0; rounds = rounds * 10 + (u32)(*p - '0'); }
+        if (rounds < 1 || rounds > MAX_ROUNDS) return 0;
+        salt = d1 + 1;
+        d1 = d2;
+    }
+    char sbuf[20], h[70];
+    u32 sl = (u32)(d1 - salt); if (sl > 16) return 0;
+    memcpy(sbuf, salt, sl); sbuf[sl] = 0;
+    unsigned char x[32];
+    hash_rounds(password, sbuf, rounds, x);
+    put_hex(h, x);
+    return !strcmp(h, d1 + 1);
 }

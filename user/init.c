@@ -22,7 +22,7 @@ int main(void)
         if (pid < 0) { printf("init: cannot start /bin/login\n"); sys_sleep(500); continue; }
         sys_setfg(0);
         sys_wait(pid);
-        sys_session(0, 0);                      /* nobody is logged in any more */
+        sys_session(0xFFFFFFFFu, 0);            /* nobody is logged in any more: Amiga+Return opens nothing now */
         printf("init: session ended, starting another\n");
     }
 }

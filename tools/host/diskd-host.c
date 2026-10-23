@@ -6,6 +6,7 @@
  *   write H LBA PID | read H LBA      one sector through handle H
  *   unmount H PID | rescan | flush H
  *   dead PID                that process no longer exists (sys_procinfo stops listing it)
+ *   as UID                  later requests come from this user id (0 = root, the default)
  *   sh COMMAND              run a host command (to change the image between steps)
  * Every command prints one line "COMMAND LINE -> RESULT". */
 #include "zhost.h"
@@ -50,11 +51,12 @@ int sys_procinfo(u32 i, struct uproc *p)                  /* processes 1..40 exi
 #include "../../user/diskd.c"
 #undef main
 
+static unsigned cur_uid;
 static int req(u32 type, u32 a0, u32 a1, u32 a2, u32 a3, int from)
 {
     struct umsg m;
     memset(&m, 0, sizeof m);
-    m.type = type; m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3; m.from = from;
+    m.type = type; m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3; m.from = from; m.uid = (unsigned short)cur_uid;
     return handle(&m);
 }
 
@@ -89,6 +91,7 @@ int main(void)
         else if (!strcmp(cmd, "unmount")) r = req(DISK_UNMOUNT, (u32)atoi(a), 0, 0, 0, atoi(b));
         else if (!strcmp(cmd, "rescan")) r = req(DISK_RESCAN, 0, 0, 0, 0, 1);
         else if (!strcmp(cmd, "flush")) r = req(DISK_FLUSH, (u32)atoi(a), 0, 0, 0, 1);
+        else if (!strcmp(cmd, "as")) { cur_uid = (unsigned)atoi(a); r = 0; }
         else if (!strcmp(cmd, "dead")) { if (ndead < 16) deadpid[ndead++] = (u32)atoi(a); r = 0; }
         else { printf("%s -> unknown\n", cmd); continue; }
         printf("%s -> %d\n", whole, r);

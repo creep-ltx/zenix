@@ -10,8 +10,16 @@ DESCRIPTION
     Starts the user's shell (root by default) and waits for it. Root is not
     asked for a password; everyone else gives the target user's password
     (an account with an empty password needs none, a locked one "*" cannot
-    be reached). With "-" the shell gets the target's HOME and starts there.
-    su is installed set-user-id root.
+    be reached). The shell gets the target user's USER, LOGNAME, HOME and
+    SHELL, PATH=/bin, and no IFS, ENV or CDPATH from the caller; with "-" it
+    also starts in the target's home directory. su is installed
+    set-user-id root.
+
+NOTES
+    The caller's PATH and HOME are not kept on purpose: a shell running as
+    root must not find the caller's programs first or read the caller's
+    ~/.shrc (sh(1) also reads a ~/.shrc only if it belongs to the user the
+    shell runs as, or to root).
 
 SEE ALSO
     login(1), passwd(1), id(1)

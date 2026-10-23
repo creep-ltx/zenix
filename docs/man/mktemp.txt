@@ -10,11 +10,14 @@ DESCRIPTION
     Creates an empty file (a directory with -d) whose name is the template
     with its trailing X characters replaced by random ones, and prints the
     name. The default template is tmp.XXXXXX in /tmp (or the -p directory).
-    The file is made readable only by its owner.
+    The file is created with mode 0600 (the directory 0700) and
+    exclusively: if the name exists - also as a symbolic link - another
+    name is tried, so nobody can slip a file or link in between.
 
 NOTES
-    Names are not guaranteed unpredictable: the random numbers come from the
-    clock.
+    The random characters come from the fast E-clock timer mixed with the
+    time and the process id: hard to guess, but not cryptographic. Safety
+    does not depend on it: the creation is exclusive.
 
 EXIT STATUS
     0, 1 if the file cannot be created, 2 for a wrong template or option.

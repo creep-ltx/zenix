@@ -37,6 +37,10 @@ DESCRIPTION
     at start, and a drive that refuses it gets none (a line says so);
     DISK_FLUSH on such a device answers -95. Floppies write synchronously
     with verify and count as flushable; the RAM disk as RAM.
+    Only root may use it (the filesystem servers run as root): from any
+    other user every request but DISK_LIST and DISK_INFO is answered -13,
+    because raw sectors would bypass every file permission. The port name
+    "disk" is reserved for root.
     Protocol: kernel/diskproto.h.
 
 PARTITION TABLES

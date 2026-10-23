@@ -6,6 +6,8 @@
 #   - a workload on revision 0 and modern ext2 (fast/slow symlinks removed, hard links, an htree directory changed,
 #     a big file) and host e2fsck -fn clean afterwards;
 #   - an open file that is unlinked keeps its data until the close, and its number is not reused meanwhile;
+#   - the permission rules of audit D: set-group-id directories, a non-owner write clears set-user-id, utimes, chmod
+#     and set-group-id, O_EXCL, and that raw messages from a user (not from the kernel) are refused;
 #   - fsck.ext2 against host e2fsck on damaged images; mkfs.ext2 results checked by e2fsck;
 #   - a bounded fuzz loop: randomly damaged images must never crash the server (AddressSanitizer build).
 # usage: tools/ext2-host-test.sh [fuzz-rounds]     (default 150; memory: one small image at a time)
@@ -136,6 +138,70 @@ cp $T/plain.img $T/open2.img
 printf "mount\nopen /f wc\nwrite %%1 0 x\nunlink /f\n" > $T/o3.txt
 fsd $T/open2.img $T/o3.txt $T/out
 e2fsck -fn $T/open2.img > $T/e2fsck.log 2>&1; grep -q "Inode bitmap differences: *-$f" $T/e2fsck.log && check "a crash while an unlinked file is open leaves an inode e2fsck reclaims" ok || { check "crash with an unlinked open file" bad; cat $T/e2fsck.log; }
+
+# ---- D: permission rules of the server (kernel/fsperm.h) and who may talk to it ----
+cp $T/plain.img $T/perm.img
+cat > $T/perm.txt <<'EOF'
+mount
+mkdir /sg
+chmod /sg 2777
+as 1000 100
+open /sg/f wc
+mkdir /sg/d
+stat /sg/f
+stat /sg/d
+as 0 0
+mkdir /pub
+chmod /pub 777
+open /pub/prog wc
+chmod /pub/prog 6777
+as 1000 100
+open /pub/prog w
+write %3 0 changed
+stat /pub/prog
+utimes /pub/prog 12345
+utimes /pub/prog now
+as 0 0
+utimes /pub/prog 12345
+stat /pub/prog
+as 1001 200
+open /pub/own wc
+as 0 0
+chown /pub/own 1001 0
+as 1001 200
+chmod /pub/own 2755
+stat /pub/own
+as 0 0
+open /x1 wcx
+open /x1 wcx
+symlink /nowhere /dangling
+open /dangling wcx
+lstat /dangling
+as 1000 100
+raw on
+open /x1 r
+read 12 0 4
+quit
+raw off
+as 0 0
+raw on
+stat /x1
+raw off
+EOF
+fsd $T/perm.img $T/perm.txt $T/out
+st() { grep '^stat -> ' $T/out | sed -n ${1}p; }
+st 1 | grep -q "gid 0 " && st 2 | grep -q "mode 42755 .* gid 0 " && check "set-group-id directory: new file and directory get its group, the directory keeps the bit" ok || { check "set-group-id directory" bad; cat $T/out; }
+st 3 | grep -q "mode 100777 " && check "a write by a non-owner clears set-user-id and set-group-id" ok || { check "a write by a non-owner clears set-user-id" bad; cat $T/out; }
+ut=$(grep '^utimes -> ' $T/out | tr '\n' ' ')
+[ "$ut" = "utimes -> -13 utimes -> 0 utimes -> 0 " ] && st 4 | grep -q "mtime 12345$" && check "utimes: a given time only for the owner and root, now also for a writer" ok || { check "utimes rules ($ut)" bad; cat $T/out; }
+st 5 | grep -q "mode 100755 " && check "chmod by a non-root owner drops set-group-id for a group not theirs" ok || { check "chmod set-group-id rule" bad; cat $T/out; }
+o=$(grep '^open -> ' $T/out | sed -n '5,7p' | awk '{print $3}' | tr '\n' ' ')
+case "$o" in [0-9]*" -17 -17 ") check "O_EXCL: creates once, then -17; a dangling symbolic link counts as existing" ok;; *) check "O_EXCL ($o)" bad; cat $T/out;; esac
+grep -q "^lstat -> 0 .* mode 120777" $T/out && check "O_EXCL left the dangling link alone" ok || check "O_EXCL left the dangling link alone" bad
+[ "$(grep '^open -> ' $T/out | sed -n 8p)" = "open -> -13" ] && grep -q "^read -> -13" $T/out && grep -q "^quit -> -13" $T/out \
+    && check "raw messages from a user (not from the kernel) are refused: FS_OPEN, FS_READ by inode, FS_QUIT" ok || { check "raw messages from a user refused" bad; cat $T/out; }
+tail -3 $T/out | grep -q "^stat -> 0 ino" && check "raw messages from root are served" ok || { check "raw messages from root are served" bad; cat $T/out; }
+clean $T/perm.img && check "host e2fsck -fn clean after the permission test" ok || { check "e2fsck after the permission test" bad; cat $T/e2fsck.log; }
 
 # ---- C7: fsck.ext2 against host e2fsck ----
 # repair: fsck.ext2 -y until it says clean (at most 3 runs), then e2fsck -fn must agree

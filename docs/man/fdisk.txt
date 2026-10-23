@@ -60,9 +60,10 @@ EXIT STATUS
     0, 1 on an error (not a whole disk, mounted, no such partition), 2 usage.
 
 NOTES
-    Always back up first. No undo. "init" writes a new table with fdisk's
-    own geometry (16 heads x 63 sectors), destroying the old one and the
-    filesystem handlers stored in it. Tested against an RDB laid out as
+    Root only: the disk server lists devices to anyone but opens them only
+    for root. Always back up first. No undo. "init" writes a new table with
+    fdisk's own geometry (16 heads x 63 sectors), destroying the old one and
+    the filesystem handlers stored in it. Tested against an RDB laid out as
     HDToolBox writes one (tools/mkrdb-hdtb.py), on the host and in FS-UAE.
 
 SEE ALSO

@@ -12,6 +12,12 @@ DESCRIPTION
     there are no signal handlers yet. kill -l lists the names. The shell
     also has a kill that understands %n job numbers.
 
+    Who may: root any process; everyone else only processes whose real or
+    effective user id is their own (or their own children), never the
+    built-in servers (diskd, fsd, zfsd, boot). A refusal says "permission
+    denied". The same rule decides who may stop and continue a process and
+    which processes a shell may make the foreground of its terminal.
+
 EXIT STATUS
     0, 1 if a process does not exist or may not be signalled.
 
