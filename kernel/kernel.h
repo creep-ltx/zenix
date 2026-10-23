@@ -64,7 +64,9 @@ void irq2_entry(void);
 #define MEM_FASTONLY 2u         /* fast RAM only, fail rather than use chip */
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
 extern u32 boot_ram_pa, boot_ram_size;
-void *mem_alloc(u32 n, u32 flags, u32 owner);
+void *mem_alloc(u32 n, u32 flags, u32 owner);   /* 0 if n is 0, above MEM_ALLOC_MAX, or does not fit */
+#define MEM_ALLOC_MAX 0x7FFF0000u       /* no block size near 4 GB: the rounding in mem_alloc cannot wrap */
+#define MEMALLOC_MAX  (64u << 20)       /* largest region SYS_memalloc gives a process (64 MB) */
 void mem_free(void *p);
 u32 mem_free_owner(u32 owner);
 void mem_stats(u32 *chip_free, u32 *fast_free);

@@ -102,19 +102,21 @@ static int list(const char *path, int top)
     int isdir = (st.mode & S_IFMT) == S_IFDIR;
     if (!isdir && (st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(path, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) { isdir = 1; st = t; } }
     if (!isdir || o_d) {
-        struct ent *e = malloc(sizeof *e); strncpy(e->name, path, 63); e->name[63] = 0; fill(e, path); show(e, 1); free(e); return 0;
+        struct ent *e = xmalloc(sizeof *e); strncpy(e->name, path, 63); e->name[63] = 0; fill(e, path); show(e, 1); free(e); return 0;
     }
     if (multi || o_R) { if (printed_any) oputc('\n'); oprintf("%s:\n", path); }
     printed_any = 1;
     (void)top;
     int fd = sys_open(path, O_RDONLY); if (fd < 0) { fprintf(2, "ls: %s: %s\n", path, zwhy("cannot open")); return 1; }
-    struct ent *v = malloc(MAXE * sizeof(struct ent)); int n = 0; struct udirent d;
+    struct ent *v = malloc(MAXE * sizeof(struct ent));
+    if (!v) { fprintf(2, "ls: %s: out of memory\n", path); sys_close(fd); return 1; } int n = 0; struct udirent d;
     while (sys_readdir(fd, &d) > 0 && n < MAXE) {
         if (d.name[0] == '.' && !o_a && !o_A) continue;
         if (o_A && (!strcmp(d.name, ".") || !strcmp(d.name, ".."))) continue;
         struct ent *e = &v[n++]; strncpy(e->name, d.name, 63); e->name[63] = 0;
-        char full[200]; strncpy(full, path, 130); full[130] = 0; if (full[strlen(full) - 1] != '/') strcat(full, "/"); strncpy(full + strlen(full), d.name, 60);
-        fill(e, full);
+        char *full = path_join(path, d.name);
+        if (full) fill(e, full); else { memset(&e->st, 0, sizeof e->st); e->islink = 0; e->link[0] = 0; fprintf(2, "ls: %s/%s: %s\n", path, d.name, zwhy("cannot read")); }
+        free(full);
     }
     sys_close(fd);
     show(v, n);
@@ -122,8 +124,9 @@ static int list(const char *path, int top)
     if (o_R)
         for (int i = 0; i < n; i++)
             if ((v[i].st.mode & S_IFMT) == S_IFDIR && strcmp(v[i].name, ".") && strcmp(v[i].name, "..")) {
-                char full[200]; strncpy(full, path, 130); full[130] = 0; if (full[strlen(full) - 1] != '/') strcat(full, "/"); strncpy(full + strlen(full), v[i].name, 60);
-                rc |= list(full, 0);
+                char *full = path_join(path, v[i].name);
+                if (full) rc |= list(full, 0); else { fprintf(2, "ls: %s/%s: %s\n", path, v[i].name, zwhy("cannot read")); rc = 1; }
+                free(full);
             }
     free(v);
     return rc;
@@ -143,8 +146,8 @@ int main(int argc, char **argv)
     int n = argc - i; multi = n > 1;
     if (!n) { rc = list(".", 1); oflush(); return rc; }
     /* operands: everything that is not a directory is listed together first, sorted; then each directory */
-    struct ent *files = malloc((u32)n * sizeof(struct ent)); int nf = 0;
-    struct ent *dirs = malloc((u32)n * sizeof(struct ent)); int nd = 0;
+    struct ent *files = xmalloc((u32)n * sizeof(struct ent)); int nf = 0;
+    struct ent *dirs = xmalloc((u32)n * sizeof(struct ent)); int nd = 0;
     for (int k = 0; k < n; k++) {
         const char *a = argv[i + k];
         struct ustat st;

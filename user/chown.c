@@ -9,11 +9,14 @@ static void apply(const char *path)
     if (sys_chown(path, new_uid, new_gid) < 0) { fprintf(2, "%s: %s: %s\n", only_group ? "chgrp" : "chown", path, zwhy("cannot change owner")); rc = 1; return; }
     struct ustat st;
     if (!recursive || sys_lstat(path, &st) < 0 || (st.mode & S_IFMT) != S_IFDIR) return;
-    int fd = sys_open(path, O_RDONLY); if (fd < 0) return;
-    char *names[512]; int nn = 0; struct udirent d;
-    while (sys_readdir(fd, &d) > 0 && nn < 512) { if (strcmp(d.name, ".") && strcmp(d.name, "..")) names[nn++] = strdup(d.name); }
-    sys_close(fd);
-    for (int i = 0; i < nn; i++) { char c[256]; snprintf(c, sizeof c, "%s/%s", path, names[i]); apply(c); }
+    char **names; int nn = dir_list(path, &names);            /* heap, not stack: one level per directory */
+    if (nn < 0) { fprintf(2, "%s: %s: %s\n", only_group ? "chgrp" : "chown", path, zwhy("cannot read")); rc = 1; return; }
+    for (int i = 0; i < nn; i++) {
+        char *c = path_join(path, names[i]);
+        if (c) apply(c); else { fprintf(2, "%s: %s/%s: %s\n", only_group ? "chgrp" : "chown", path, names[i], zwhy("cannot change owner")); rc = 1; }
+        free(c);
+    }
+    dir_free(names, nn);
 }
 
 static int id_of(const char *s, int group, u32 *out)

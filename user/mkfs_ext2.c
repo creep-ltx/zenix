@@ -73,10 +73,10 @@ int main(int argc, char **argv)
     u32 root_blk = first + 1 + gdt + 2 + itb;       /* first data blocks of group 0 */
     u32 lf_first = root_blk + 1;
     u32 used0 = overhead + 1 + lf_blocks;
-    u32 *gfree = (u32 *)malloc(ngroups * 4 * 4);    /* free blocks, free inodes, dirs */
+    u32 *gfree = (u32 *)xmalloc(ngroups * 4 * 4);    /* free blocks, free inodes, dirs */
 
     /* group descriptor table (same in every group) */
-    u8 *gd = (u8 *)malloc(gdt * bsize);
+    u8 *gd = (u8 *)xmalloc(gdt * bsize);
     memset(gd, 0, gdt * bsize);
     u32 total_free = 0;
     for (u32 g = 0; g < ngroups; g++) {
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
 
     /* inodes 2 (root) and 11 (lost+found) live in group 0's table */
     u32 itable = first + 1 + gdt + 2;
-    u8 *it = (u8 *)malloc(itb * bsize);
+    u8 *it = (u8 *)xmalloc(itb * bsize);
     memset(it, 0, itb * bsize);
     u8 *root = it + (2 - 1) * 128, *lf = it + (11 - 1) * 128;
     w16(root + 0, 0040755); w32(root + 4, bsize); w16(root + 26, 3); w32(root + 28, bsize / 512); w32(root + 40, root_blk);

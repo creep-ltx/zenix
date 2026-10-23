@@ -17,7 +17,7 @@ int main(int argc, char **argv)
         if (nfiles > 1) oprintf("%s==> %s <==\n", f ? "\n" : "", name);
         struct rd r; rd_init(&r, fd);
         if (nc >= 0) {                                    /* the last nc bytes */
-            char *ring = malloc((u32)nc + 1); long n = 0, head = 0; int c;
+            char *ring = xmalloc((u32)nc + 1); long n = 0, head = 0; int c;
             while ((c = rd_getc(&r)) >= 0) { if (nc) { ring[head] = (char)c; head = (head + 1) % nc; if (n < nc) n++; } }
             for (long k = 0; k < n; k++) oputc(ring[(head - n + k + nc * 2) % nc]);
             free(ring);
@@ -26,16 +26,18 @@ int main(int argc, char **argv)
             while (rd_getline(&r, &line, &cap) >= 0) { if (k++ >= nl) { oputs(line); oputc('\n'); } }
             free(line);
         } else {
-            char **ring = malloc((u32)(nl ? nl : 1) * sizeof(char *)); long n = 0, head = 0;
+            char **ring = xmalloc((u32)(nl ? nl : 1) * sizeof(char *)); long n = 0, head = 0;
             for (long k = 0; k < nl; k++) ring[k] = 0;
             char *line = 0; u32 cap = 0; int len;
             while ((len = rd_getline(&r, &line, &cap)) >= 0) {
                 if (!nl) continue;
                 if (ring[head]) free(ring[head]);
-                ring[head] = strdup(line); head = (head + 1) % nl; if (n < nl) n++;
+                if (!(ring[head] = strdup(line))) { fprintf(2, "tail: out of memory\n"); _zexit(1); }
+                head = (head + 1) % nl; if (n < nl) n++;
             }
             for (long k = 0; k < n; k++) { char *s = ring[(head - n + k + nl * 2) % nl]; oputs(s); oputc('\n'); }
-            free(line);
+            for (long k = 0; k < nl; k++) free(ring[k]);
+            free(ring); free(line);
         }
         if (nfiles) sys_close(fd);
     }

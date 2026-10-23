@@ -2,30 +2,39 @@
 #include "libz.h"
 /* tree [-a] [-d] [directory...]: show a directory and everything below it as an indented tree (-a also names starting
  * with a dot, -d directories only) */
-static int o_a, o_d; static long ndirs, nfiles;
+static int o_a, o_d, rc; static long ndirs, nfiles;
 static int cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+static void __attribute__((noinline)) show_link(const char *child)
+{
+    char t[160]; int n = sys_readlink(child, t, sizeof t - 1); if (n > 0) { t[n] = 0; printf(" -> %s", t); }
+}
 static void walk(const char *path, const char *prefix)
 {
-    int fd = sys_open(path, O_RDONLY); if (fd < 0) return;
-    char **names = malloc(512 * sizeof *names); int nn = 0; struct udirent d;      /* heap, not stack: one level per directory */
-    char *child = malloc(256), *np = malloc(160);
-    if (!names || !child || !np) { fprintf(2, "tree: out of memory\n"); sys_close(fd); return; }
-    while (sys_readdir(fd, &d) > 0 && nn < 512) {
-        if (!strcmp(d.name, ".") || !strcmp(d.name, "..") || (!o_a && d.name[0] == '.')) continue;
-        names[nn++] = strdup(d.name);
-    }
-    sys_close(fd);
+    char **names; int nn = dir_list(path, &names);            /* heap, not stack: one level per directory */
+    if (nn < 0) { fprintf(2, "tree: %s: %s\n", path, zwhy("cannot read")); rc = 1; return; }
     qsort(names, (u32)nn, sizeof *names, cmp);
+    int last_i = -1;                                          /* the last name that is shown gets the corner */
+    for (int i = 0; i < nn; i++) if (o_a || names[i][0] != '.') last_i = i;
     for (int i = 0; i < nn; i++) {
-        snprintf(child, 256, "%s/%s", path, names[i]);
+        if (!o_a && names[i][0] == '.') continue;
+        char *child = path_join(path, names[i]);
+        if (!child) { fprintf(2, "tree: %s/%s: %s\n", path, names[i], zwhy("cannot read")); rc = 1; continue; }
         struct ustat st; int isdir = sys_lstat(child, &st) == 0 && (st.mode & S_IFMT) == S_IFDIR;
-        if (o_d && !isdir) continue;
-        int last = i == nn - 1;
+        if (o_d && !isdir) { free(child); continue; }
+        int last = i == last_i;
         printf("%s%s%s", prefix, last ? "`-- " : "|-- ", names[i]);
-        if (sys_lstat(child, &st) == 0 && (st.mode & S_IFMT) == S_IFLNK) { char t[160]; int n = sys_readlink(child, t, sizeof t - 1); if (n > 0) { t[n] = 0; printf(" -> %s", t); } }
+        if (sys_lstat(child, &st) == 0 && (st.mode & S_IFMT) == S_IFLNK) show_link(child);
         printf("\n");
-        if (isdir) { snprintf(np, 160, "%s%s", prefix, last ? "    " : "|   "); ndirs++; char *c2 = strdup(child), *p2 = strdup(np); walk(c2, p2); } else nfiles++;
+        if (isdir) {
+            ndirs++;
+            u32 pl = strlen(prefix);
+            char *np = malloc(pl + 5);
+            if (np) { memcpy(np, prefix, pl); strcpy(np + pl, last ? "    " : "|   "); walk(child, np); free(np); }
+            else { fprintf(2, "tree: out of memory\n"); rc = 1; }
+        } else nfiles++;
+        free(child);
     }
+    dir_free(names, nn);
 }
 int main(int argc, char **argv)
 {
@@ -35,5 +44,5 @@ int main(int argc, char **argv)
     if (i >= argc) { printf(".\n"); walk(".", ""); }
     for (; i < argc; i++) { printf("%s\n", argv[i]); walk(argv[i], ""); }
     printf("\n%ld director%s, %ld file%s\n", ndirs, ndirs == 1 ? "y" : "ies", nfiles, nfiles == 1 ? "" : "s");
-    return 0;
+    return rc;
 }

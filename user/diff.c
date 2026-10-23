@@ -12,12 +12,20 @@ static int read_lines(const char *path, struct lines *l)
     struct rd r; rd_init(&r, fd);
     char *line = 0; u32 cap = 0, max = 0;
     while (rd_getline(&r, &line, &cap) >= 0) {
-        if ((u32)l->n == max) { u32 nm = max ? max * 2 : 128; char **nv = malloc(nm * sizeof(char *)); if (!nv) return -1; if (l->n) memcpy(nv, l->v, (u32)l->n * sizeof(char *)); l->v = nv; max = nm; }
-        l->v[l->n++] = strdup(line);
+        char *d = 0;
+        if ((u32)l->n == max) { u32 nm = max ? max * 2 : 128; char **nv = realloc(l->v, nm * sizeof(char *)); if (!nv) goto oom; l->v = nv; max = nm; }
+        if (!(d = strdup(line))) goto oom;
+        l->v[l->n++] = d;
     }
     free(line);
     if (fd) sys_close(fd);
     return 0;
+oom:                                /* what was read is freed again; n = -1 tells the caller it was memory, not the file */
+    free(line);
+    if (fd) sys_close(fd);
+    for (int k = 0; k < l->n; k++) free(l->v[k]);
+    free(l->v); l->v = 0; l->n = -1;
+    return -1;
 }
 
 static int same(const char *a, const char *b)
@@ -41,13 +49,14 @@ static int script(struct lines *a, struct lines *b, char **ops)
     while (suf < n - pre && suf < m - pre && same(a->v[n - 1 - suf], b->v[m - 1 - suf])) suf++;
     int an = n - pre - suf, bn = m - pre - suf;
     char *o = malloc((u32)(n + m + 2)); int k = 0;
+    if (!o) return -1;
     for (int i = 0; i < pre; i++) o[k++] = ' ';
     if ((long)an * bn > 3000000L) {                               /* too big for the table: treat the middle as replaced */
         for (int i = 0; i < an; i++) o[k++] = '-';
         for (int j = 0; j < bn; j++) o[k++] = '+';
     } else {
         unsigned short *L = malloc((u32)(an + 1) * (u32)(bn + 1) * 2);
-        if (!L) return -1;
+        if (!L) { free(o); return -1; }
         #define LT(i, j) L[(u32)(i) * (u32)(bn + 1) + (u32)(j)]
         for (int i = an; i >= 0; i--)
             for (int j = bn; j >= 0; j--) {
@@ -72,19 +81,22 @@ static void range(int start, int cnt) { if (cnt <= 1) oprintf("%d", cnt ? start 
 
 static int diff_files(const char *p1, const char *p2, const char *l1, const char *l2)
 {
-    struct lines a, b;
-    if (read_lines(p1, &a) < 0) { fprintf(2, "diff: %s: %s\n", p1, zwhy("cannot open")); return 2; }
-    if (read_lines(p2, &b) < 0) { fprintf(2, "diff: %s: %s\n", p2, zwhy("cannot open")); return 2; }
-    char *ops; int total = script(&a, &b, &ops);
-    if (total < 0) { fprintf(2, "diff: out of memory\n"); return 2; }
+    struct lines a = { 0, 0 }, b = { 0, 0 };
+    char *ops = 0; struct hunk { int a0, ac, b0, bc, k0, k1; } *h = 0;
+    int rc, total;
+    if (read_lines(p1, &a) < 0) { fprintf(2, "diff: %s: %s\n", p1, a.n < 0 ? "out of memory" : zwhy("cannot open")); rc = 2; goto out; }
+    if (read_lines(p2, &b) < 0) { fprintf(2, "diff: %s: %s\n", p2, b.n < 0 ? "out of memory" : zwhy("cannot open")); rc = 2; goto out; }
+    total = script(&a, &b, &ops);
+    if (total < 0) { fprintf(2, "diff: out of memory\n"); rc = 2; goto out; }
     int differ = 0;
     for (int k = 0; k < total; k++) if (ops[k] != ' ') { differ = 1; break; }
-    if (!differ) return 0;
-    if (o_q) { oprintf("Files %s and %s differ\n", l1, l2); return 1; }
+    if (!differ) { rc = 0; goto out; }
+    if (o_q) { oprintf("Files %s and %s differ\n", l1, l2); rc = 1; goto out; }
 
     /* hunks: runs of non-common ops, with their positions in a and b */
     int ai = 0, bi = 0;
-    struct hunk { int a0, ac, b0, bc, k0, k1; } *h = malloc(sizeof(struct hunk) * (u32)(total / 1 + 1)); int nh = 0;
+    h = malloc(sizeof *h * (u32)(total + 1)); int nh = 0;
+    if (!h) { fprintf(2, "diff: out of memory\n"); rc = 2; goto out; }
     for (int k = 0; k < total;) {
         if (ops[k] == ' ') { ai++; bi++; k++; continue; }
         struct hunk *x = &h[nh++]; x->a0 = ai; x->b0 = bi; x->k0 = k; x->ac = x->bc = 0;
@@ -102,7 +114,7 @@ static int diff_files(const char *p1, const char *p2, const char *l1, const char
             if (x->ac && x->bc) oputs("---\n");
             for (int k = 0; k < x->bc; k++) { oputs("> "); oputs(b.v[x->b0 + k]); oputc('\n'); }
         }
-        return 1;
+        rc = 1; goto out;
     }
     oprintf("--- %s\n+++ %s\n", l1, l2);
     for (int i = 0; i < nh;) {
@@ -126,35 +138,43 @@ static int diff_files(const char *p1, const char *p2, const char *l1, const char
         for (; pa < a_end; pa++) { oputc(' '); oputs(a.v[pa]); oputc('\n'); }
         i = j + 1;
     }
-    return 1;
+    rc = 1;
+out:
+    for (int k = 0; k < a.n; k++) free(a.v[k]);
+    for (int k = 0; k < b.n; k++) free(b.v[k]);
+    free(a.v); free(b.v); free(ops); free(h);
+    return rc;
 }
 
 static int diff_dirs(const char *d1, const char *d2)
 {
     int rc = 0;
-    char *names[512]; int nn = 0;
-    for (int side = 0; side < 2; side++) {
-        int fd = sys_open(side ? d2 : d1, O_RDONLY); if (fd < 0) continue;
-        struct udirent d;
-        while (sys_readdir(fd, &d) > 0 && nn < 512) {
-            if (!strcmp(d.name, ".") || !strcmp(d.name, "..")) continue;
-            int dup = 0; for (int i = 0; i < nn; i++) if (!strcmp(names[i], d.name)) dup = 1;
-            if (!dup) names[nn++] = strdup(d.name);
-        }
-        sys_close(fd);
-    }
+    /* the names of both sides, each once, sorted; lists and paths on the heap (one level per directory) */
+    char **l1, **l2; int n1 = dir_list(d1, &l1), n2 = dir_list(d2, &l2);
+    if (n1 < 0 || n2 < 0) { fprintf(2, "diff: %s: %s\n", n1 < 0 ? d1 : d2, zwhy("cannot read")); dir_free(l1, n1); dir_free(l2, n2); return 2; }
+    char **names = malloc((u32)(n1 + n2 + 1) * sizeof *names); int nn = 0;
+    if (!names) { fprintf(2, "diff: out of memory\n"); dir_free(l1, n1); dir_free(l2, n2); return 2; }
+    for (int i = 0; i < n1; i++) names[nn++] = l1[i];
+    for (int i = 0; i < n2; i++) { int dup = 0; for (int k = 0; k < n1; k++) if (!strcmp(l1[k], l2[i])) dup = 1; if (!dup) names[nn++] = l2[i]; }
     for (int i = 1; i < nn; i++) { char *t = names[i]; int j = i; while (j > 0 && strcmp(names[j - 1], t) > 0) { names[j] = names[j - 1]; j--; } names[j] = t; }
     for (int i = 0; i < nn; i++) {
-        char p1[200], p2[200]; struct ustat s1, s2;
-        strcpy(p1, d1); strcat(p1, "/"); strcat(p1, names[i]); strcpy(p2, d2); strcat(p2, "/"); strcat(p2, names[i]);
+        struct ustat s1, s2;
+        char *p1 = path_join(d1, names[i]), *p2 = p1 ? path_join(d2, names[i]) : 0;
+        if (!p2) { fprintf(2, "diff: %s/%s: %s\n", p1 ? d2 : d1, names[i], zwhy("cannot compare")); free(p1); rc = 2; continue; }
         int e1 = sys_stat(p1, &s1) == 0, e2 = sys_stat(p2, &s2) == 0;
-        if (!e1) { oprintf("Only in %s: %s\n", d2, names[i]); rc = 1; continue; }
-        if (!e2) { oprintf("Only in %s: %s\n", d1, names[i]); rc = 1; continue; }
-        int dir1 = (s1.mode & S_IFMT) == S_IFDIR, dir2 = (s2.mode & S_IFMT) == S_IFDIR;
-        if (dir1 && dir2) { if (o_r) { int r = diff_dirs(p1, p2); if (r > rc) rc = r; } else oprintf("Common subdirectories: %s and %s\n", p1, p2); continue; }
-        if (!o_q) oprintf("diff %s%s %s\n", o_u ? "-u " : "", p1, p2);
-        int r = diff_files(p1, p2, p1, p2); if (r > rc) rc = r;
+        if (!e1) { oprintf("Only in %s: %s\n", d2, names[i]); if (rc < 1) rc = 1; }
+        else if (!e2) { oprintf("Only in %s: %s\n", d1, names[i]); if (rc < 1) rc = 1; }
+        else {
+            int dir1 = (s1.mode & S_IFMT) == S_IFDIR, dir2 = (s2.mode & S_IFMT) == S_IFDIR;
+            if (dir1 && dir2) { if (o_r) { int r = diff_dirs(p1, p2); if (r > rc) rc = r; } else oprintf("Common subdirectories: %s and %s\n", p1, p2); }
+            else {
+                if (!o_q) oprintf("diff %s%s %s\n", o_u ? "-u " : "", p1, p2);
+                int r = diff_files(p1, p2, p1, p2); if (r > rc) rc = r;
+            }
+        }
+        free(p1); free(p2);
     }
+    free(names); dir_free(l1, n1); dir_free(l2, n2);
     return rc;
 }
 

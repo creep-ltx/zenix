@@ -174,6 +174,7 @@ int main(int argc, char **argv)
     memset(reach, 0, (ninodes + 8) / 8); memset(scanned, 0, (ninodes + 8) / 8);
     memset(links, 0, ninodes + 1); memset(dotdot, 0, (ninodes + 1) * 4); memset(parent, 0, (ninodes + 1) * 4);
     dirlist = malloc(4096 * 4);
+    if (!dirlist) { printf("fsck.ext2: out of memory\n"); return 8; }
     for (u32 i = 0; i < gdt_blocks; i++) if (rblk(gdt_start + i, gdt + i * bsize)) { printf("fsck.ext2: cannot read the group table\n"); return 8; }
 
     printf("fsck.ext2: %s: %u blocks of %u bytes, %u groups, %u inodes%s\n", dev, nblocks, bsize, ngroups, ninodes, fix ? " (repair mode)" : "");

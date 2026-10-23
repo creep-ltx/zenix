@@ -167,8 +167,10 @@ word in the relocation table. Reading can block (messages to the file system ser
 only after the image is in place and nothing blocks after that; two programs may be loading at the same time (the two
 stages of a pipeline). Only `R_68K_32` relocations are needed (PC-relative code stays valid), and
 debug-section relocations must be skipped (their offsets are not addresses). The kernel itself uses the same
-format and the same loop (in `start.S`). Programs declare their stack size in the header (default 16 KB; `sh`
-asks for 24 KB, but the `STACK_*` Makefile values are not applied yet - audit B6 - so every program gets 16 KB). There is no shared-library format yet; programs are linked statically against `user/libz.c`.
+format and the same loop (in `start.S`). Programs declare their stack size in the header: 16 KB unless the
+Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB; the numbers and how they were measured
+are in limits.md). There is no guard below a stack. There is no shared-library format yet; programs are linked
+statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).
 
 ## 5. Memory (`kernel/mem.c`)
 
@@ -181,8 +183,13 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
   two sizes do not interleave and fragment each other.
 - Every block records its owner. `mem_free_owner(pid)` hands back everything a process held, which is how a
   crashed or killed process is cleaned up without any cooperation from it.
-- Free-byte counters are O(1) so the status bar can read them from an interrupt.
-- `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 8).
+- Free-byte counters are O(1), so the status bar can read them cheaply.
+- `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 8 at a time,
+  each at most `MEMALLOC_MAX` = 64 MB). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
+  refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
+- Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
+  at least one header, a multiple of 16 and inside the range. A header that fails means something overwrote the heap:
+  the kernel prints its address on the serial port and stops (`panic`) instead of looping on garbage.
 
 A process's own memory is **one block**: image + BSS + stack + the argument area. The kernel stack (4 KB) is a
 second block. Both are owned by the pid and freed together.
@@ -273,7 +280,7 @@ exits. `init` runs `mount -a` (from `/etc/fstab`) before login.
 The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the
 disk server (`user/zenixfs_disk.c`: filesystem blocks of 1-4 KB as 2-8 sector calls plus `DISK_FLUSH`). Same protocol and the same
 permission rules as the ext2 server. Changes commit three seconds after the first one, at `FS_SYNC` and at `FS_QUIT`. The library
-allocates only at mount (the Zenix `malloc` is a bump allocator that cannot return small blocks): block cache, bitmaps, three scratch blocks.
+allocates only at mount (block cache, bitmaps, three scratch blocks), so a running server needs no more memory.
 
 ### The mount table (`kernel/vfs.c`)
 Entry 0 is the root (port `fs`); `SYS_mount` puts a running server's port on a directory (up to 8 mounts). With only the
@@ -337,7 +344,25 @@ workspace whenever the user presses Amiga+Return. (It exists because the idle pr
 ## 12. User space
 
 `user/libz.c` is a tiny freestanding C library (`printf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
-environment, buffered line reader, a regex engine from the CUtils project). `printf`, `snprintf`, `sprintf`, `fprintf`
+environment, buffered line reader, a regex engine from the CUtils project).
+
+**`malloc`** (audit B2) has to live with `NREG` = 8 regions per process, so small blocks never take a region each.
+Every block has an 8-byte header: its capacity and a tag (small in use, big in use, free). Blocks of up to 32 KB
+come in size classes of 16, 32, 64 ... 32768 bytes (the header on top, so the usual power-of-two buffer fills its
+class), cut from chunks the kernel gives: the first
+chunk is 32 KB, each next one twice the last up to 512 KB (smaller when memory is short), so even a program that
+needs megabytes uses few regions. A freed small block goes on its class's free list and is used again (O(1), no
+coalescing); an empty class carves a free block of a larger class before taking new chunk space; small blocks are never given
+back to the kernel (that happens when the program ends). A bigger block gets a region of its own, and `free` gives
+exactly those back with `SYS_memfree`. `free` and `realloc` check the tag: a pointer `malloc` did not give out, or
+one freed twice, is reported on standard error and ignored. `realloc` grows in place when the block's capacity is
+enough, else copies only the old block's bytes. `xmalloc` ends the program with "NAME: out of memory".
+
+**Directory walkers** (audit B6: `rm -r`, `cp -r`, `mv`, `du`, `find`, `grep -r`, `chown -R`, `tar c`, `diff -r`,
+`tree`, `ls -R`) use two libz helpers instead of arrays on the stack: `dir_list` reads a directory into a
+heap array that grows as needed (no limit on entries; `dir_free` gives it back), and `path_join` makes "dir/name" in
+a new heap string, or refuses (NULL, `zerrno` 36, "path too long") when it would be longer than the 63 bytes a
+system call takes. A level of recursion costs about 100 bytes of stack instead of 1.4-2.7 KB. `printf`, `snprintf`, `sprintf`, `fprintf`
 and `oprintf` share one formatter with no length limit: `%d %i %u %x %X %o %c %s %p %%`, flags `- 0 + space #`, width and
 precision as numbers or `*`; no floating point, no 64-bit numbers. About 77 programs: a full shell (`sh`:
 line editor, history, completion, variables, quoting, wildcards, pipes, redirects incl. here-documents,

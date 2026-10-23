@@ -32,5 +32,9 @@ FILES
     complete, keeping its permissions. A file that does not exist is created
     when you save.
 
+NOTES
+    Running out of memory ends the editor with "edit: out of memory"; changes
+    not yet saved are lost.
+
 SEE ALSO
     less(1), sh(1)

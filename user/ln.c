@@ -9,12 +9,14 @@ int main(int argc, char **argv)
     struct ustat st; int rc = 0;
     int todir = n > 2 || (sys_stat(argv[argc - 1], &st) == 0 && (st.mode & S_IFMT) == S_IFDIR);
     for (; i < argc - 1; i++) {
-        char link[200];
-        strcpy(link, argv[argc - 1]);
-        if (todir) { const char *b = strrchr(argv[i], '/'); b = b ? b + 1 : argv[i]; if (link[strlen(link) - 1] != '/') strcat(link, "/"); strcat(link, b); }
+        char *link;
+        if (todir) { const char *b = strrchr(argv[i], '/'); b = b ? b + 1 : argv[i]; link = path_join(argv[argc - 1], b); }
+        else link = strdup(argv[argc - 1]);
+        if (!link) { fprintf(2, "ln: %s: %s\n", argv[i], zwhy("cannot create the link")); rc = 1; continue; }
         if (force) sys_unlink(link);
         int r = sym ? sys_symlink(argv[i], link) : sys_link(argv[i], link);
         if (r < 0) { fprintf(2, "ln: cannot create %s\n", link); rc = 1; }
+        free(link);
     }
     return rc;
 }

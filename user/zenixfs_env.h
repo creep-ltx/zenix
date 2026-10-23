@@ -2,8 +2,8 @@
 #pragma once
 /* Environment for zenixfs/zenixfs.c when it is built into a Zenix program (-DZENIXFS_FREESTANDING): the few C library
  * functions it needs, declared by hand because the library source must not see libz.h (whose u32 differs from uint32_t).
- * malloc/free come from user/libz.c. That malloc cannot return small blocks, so the library allocates only while
- * mounting and in mkfs/fsck, never while a server is running. */
+ * malloc/free come from user/libz.c. The library allocates only while mounting and in mkfs/fsck, never while a
+ * server is running, so a running server needs no more memory. */
 void *memcpy(void *, const void *, __SIZE_TYPE__);
 void *memset(void *, int, __SIZE_TYPE__);
 void *memmove(void *, const void *, __SIZE_TYPE__);

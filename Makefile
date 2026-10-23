@@ -24,10 +24,15 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common
-# programs that need more than the default 16 KB stack
+# Stack sizes written into each program's ZEXE header (the loader gives this much; no guard below it). Default 16 KB;
+# these need more (measured with -fstack-usage, docs/limits.md): sh's recursive parser and runner (its own depth
+# guard, STK_LIMIT, keeps to 16 KB and the rest is margin), gzip's deflate (about 12 KB of frames in one chain), edit.
+STACK_DEFAULT := 16384
 STACK_sh := 24576
 STACK_gzip := 32768
 STACK_edit := 32768
+# every program links only the parts of libz it calls (libz is built one section per function)
+ULDFLAGS := -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf
@@ -100,15 +105,15 @@ $(BUILD)/ext2_fsd.uo: kernel/ext2.c kernel/ext2.h kernel/fsperm.h user/fsenv.h u
 $(BUILD)/regex.uo: user/regex.c user/regex.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@
 $(BUILD)/sed.uelf: $(BUILD)/sed.uo $(BUILD)/regex.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/sed.uo $(BUILD)/regex.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 $(BUILD)/less.uelf: $(BUILD)/less.uo $(BUILD)/regex.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/less.uo $(BUILD)/regex.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 $(BUILD)/edit.uelf: $(BUILD)/edit.uo $(BUILD)/regex.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/edit.uo $(BUILD)/regex.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 MINIZ_CFLAGS := -Iuser/miniz/shim -Iuser/miniz -Wno-unused-parameter -Wno-sign-compare -Wno-implicit-fallthrough -Wno-misleading-indentation -Wno-unused-function
@@ -119,31 +124,31 @@ $(BUILD)/miniz_tinfl.uo: user/miniz/miniz_tinfl.c | $(BUILD)
 $(BUILD)/gzip.uo: user/gzip.c user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) $(MINIZ_CFLAGS) -c $< -o $@
 $(BUILD)/gzip.uelf: $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 # programs that look up users and groups (/etc/passwd, /etc/group), and those that also check passwords
 PWAPPS := ls id whoami chown
 AUTHAPPS := login su passwd sha256sum
 $(PWAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $< $(BUILD)/pw.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(AUTHAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $< $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/pw.uo $(BUILD)/sha.uo: $(BUILD)/%.uo: user/%.c user/pw.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@
 
 $(BUILD)/grep.uelf: $(BUILD)/grep.uo $(BUILD)/regex.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/grep.uo $(BUILD)/regex.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 $(BUILD)/fsck_ext2.uelf: $(BUILD)/fsck_ext2.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/fsck_ext2.uo $(BUILD)/ext2_fsd.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 $(BUILD)/fsd.uelf: $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/fsd.uo $(BUILD)/ext2_fsd.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
@@ -163,16 +168,16 @@ $(BUILD)/zenixfs_disk.uo: user/zenixfs_disk.c user/zenixfs_disk.h zenixfs/zenixf
 $(BUILD)/zenixfsd.uo: user/zenixfsd.c user/rootpick.h user/rdb.h kernel/fsperm.h kernel/fsproto.h user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -ffunction-sections -c $< -o $@
 $(BUILD)/zenixfsd.uelf: $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/mount.zenixfs.zx: $(BUILD)/zenixfsd.uelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ 32768
 $(BUILD)/mkfs_zenixfs.uelf: $(BUILD)/mkfs_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/mkfs_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/fsck_zenixfs.uelf: $(BUILD)/fsck_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/fsck_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/mkfs_zenixfs.zx $(BUILD)/fsck_zenixfs.zx: %.zx: %.uelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
@@ -182,15 +187,15 @@ $(BUILD)/mkfs_zenixfs.zx $(BUILD)/fsck_zenixfs.zx: %.zx: %.uelf tools/mkzexe.py 
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/libz.uo: user/libz.c user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -c $< -o $@
+	$(CC) $(UCFLAGS) -ffunction-sections -fdata-sections -c $< -o $@
 $(BUILD)/%.uo: user/%.c user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@
 $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q \
+	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $< $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py tools/check-68020-60.sh
+$(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py tools/check-68020-60.sh Makefile
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
-	tools/mkzexe.py $< $@ 16384
+	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
 $(BUILD)/zenix.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py

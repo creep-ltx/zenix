@@ -38,9 +38,13 @@ EXAMPLES
 NOTES
     At most 256 entries per directory are examined, and paths are limited to
     255 characters.
+    Directories with any number of entries are walked, as deep as paths go. A
+    path longer than 63 bytes (what a system call takes) is reported ("path
+    too long") and skipped, never cut short.
 
 EXIT STATUS
-    0, 1 if a starting path does not exist, 2 unknown expression.
+    0, 1 if a starting path does not exist or a directory or path below it
+    could not be read, 2 unknown expression.
 
 SEE ALSO
     ls(1), grep(1), xargs(1), du(1)

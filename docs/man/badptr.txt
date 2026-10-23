@@ -1,15 +1,24 @@
 BADPTR(1)			Zenix manual
 
 NAME
-    badptr - test pointer checking
+    badptr - test pointer checking and the memory calls
 
 SYNOPSIS
     badptr
 
 DESCRIPTION
-    Hands the kernel two pointers that are not the program's own memory in a
-    write() call. The kernel must answer -1 (an error) instead of crashing.
-    Exits 0 if both calls failed as they should. A test program.
+    A test program. First it hands the kernel two pointers that are not the
+    program's own memory in a write() call: the kernel must answer -1 (an
+    error) instead of crashing. Then it checks the memory calls: memalloc of 0
+    or of sizes near 4 GB gives 0 (NULL), malloc of such sizes gives NULL, a
+    freed small block is used again, the largest small block (32 KB) can be
+    had, realloc keeps the contents, malloc says NULL when the process's
+    memory regions run out and free gives them back, and a free() of a pointer
+    malloc did not give out is reported and survived. Prints one line per
+    check, ending in "ok" or "FAILED", then "badptr: all ok".
+
+EXIT STATUS
+    0 if every check passed, 1 otherwise.
 
 SEE ALSO
     crash(1)

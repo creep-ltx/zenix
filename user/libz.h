@@ -13,10 +13,18 @@ void *memset(void *d, int c, unsigned long n);
 void *memmove(void *d, const void *s, unsigned long n);
 void *malloc(u32 n);
 void free(void *p);
+void *xmalloc(u32 n);                     /* malloc, or "NAME: out of memory" and exit status 1 */
+void *realloc(void *p, unsigned long n);  /* in place if it fits; copies only the old block; NULL leaves p as it was */
 int fprintf(int fd, const char *fmt, ...);
 int printf(const char *fmt, ...);
 int atoi(const char *s);
-const char *zwhy(const char *dflt);   /* "permission denied" if the last failed call was refused, else dflt */
+const char *zwhy(const char *dflt);   /* the reason for the last failure (permission denied, path too long, out of memory), else dflt */
+
+/* directories and paths: every directory walker uses these (no name arrays or path buffers on the stack) */
+#define ZPATH_MAX 64                          /* system calls take paths of at most 63 bytes */
+char *path_join(const char *dir, const char *name);   /* malloc'd "dir/name"; NULL: too long (zerrno 36) or no memory (12) */
+int dir_list(const char *path, char ***names);  /* malloc'd, NULL-terminated names without . and ..; count or -1 */
+void dir_free(char **names, int n);
 
 /* more of the C library */
 char *strdup(const char *s);

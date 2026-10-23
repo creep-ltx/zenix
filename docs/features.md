@@ -25,6 +25,8 @@ Status words: **verified** = built and run in FS-UAE (an emulator; no feature ha
 |---|---|---|
 | Relocating kernel and programs (ZEXE format, no MMU) | verified | architecture.md section 4 |
 | Memory manager with per-process ownership, freed on exit | verified | architecture.md section 5 |
+| Memory calls answer 0 (NULL) on failure; sizes near 4 GB refused; a corrupt heap header stops the kernel with its address | verified (`badptr` in `tools/memtest.sh`) | architecture.md section 5 |
+| `malloc` with size classes and free lists (memory reused, big blocks given back), `realloc`; directory tools without stack arrays or entry limits | verified (`tools/memtest.sh`: flat shell memory, tools 25 directories deep) | architecture.md section 12 |
 | Preemptive round-robin scheduler, 100 Hz, 50 ms slice | verified | architecture.md section 6 |
 | `spawn` (no `fork`); wait, exit status, zombies | verified | architecture.md section 6 |
 | About 55 system calls via `TRAP #0`, all pointers validated | verified | architecture.md section 7 |

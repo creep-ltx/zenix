@@ -24,6 +24,10 @@ EXAMPLE
     fdisk add ide1 DH0 rest
     mkfs.ext2 -b 4096 ide1p1
 
+NOTES
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
+
 EXIT STATUS
     0, 1 on an error, 2 usage error.
 

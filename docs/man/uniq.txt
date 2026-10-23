@@ -28,6 +28,8 @@ NOTES
     The optional second file name ("output") is accepted but ignored: the
     result always goes to the standard output. Use ">" instead.
     An access the user is not allowed is reported as "permission denied".
+    Running out of memory is reported ("out of memory") and ends the command
+    with a non-zero status; nothing is cut short silently.
 
 SEE ALSO
     sort(1)

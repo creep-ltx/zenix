@@ -21,6 +21,7 @@ int main(int argc, char **argv)
         if (prev && same(prev, line)) { count++; continue; }
         FLUSH();
         free(prev); prev = strdup(line); count = 1;
+        if (!prev) { fprintf(2, "uniq: out of memory\n"); return 1; }
     }
     FLUSH();
     return 0;

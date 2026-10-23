@@ -417,7 +417,10 @@ void syscall_c(u32 *rb)
             }
         }
         break;
-    case SYS_memalloc:
+    case SYS_memalloc:                  /* the region's address, or 0 (NULL) when it cannot be given: never -1 */
+        r = 0;
+        if (a1 == 0 || a1 > MEMALLOC_MAX)
+            break;
         for (int i = 0; i < NREG; i++)
             if (!current->reg[i].base) {
                 void *m = mem_alloc(a1, 0, (u32)current->pid);

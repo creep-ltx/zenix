@@ -13,12 +13,12 @@ static void *re; static const char *name = "(standard input)";
 
 static void append(const char *b, u32 n)
 {
-    if (tlen + n + 1 > tcap) { u32 nc = tcap ? tcap * 2 : 8192; while (nc < tlen + n + 1) nc *= 2; char *nt = malloc(nc); if (!nt) { fprintf(2, "less: out of memory\n"); _zexit(1); } if (tlen) memcpy(nt, text, tlen); text = nt; tcap = nc; }
+    if (tlen + n + 1 > tcap) { u32 nc = tcap ? tcap * 2 : 8192; while (nc < tlen + n + 1) nc *= 2; char *nt = realloc(text, nc); if (!nt) { fprintf(2, "less: out of memory\n"); _zexit(1); } text = nt; tcap = nc; }
     memcpy(text + tlen, b, n); tlen += n;
 }
 static void add_row(u32 off, u32 len)
 {
-    if (nrows == rcap) { u32 nc = rcap ? rcap * 2 : 512; struct row *nr = malloc(nc * sizeof *nr); if (!nr) _zexit(1); if (nrows) memcpy(nr, rows, nrows * sizeof *nr); rows = nr; rcap = nc; }
+    if (nrows == rcap) { u32 nc = rcap ? rcap * 2 : 512; struct row *nr = realloc(rows, nc * sizeof *nr); if (!nr) { fprintf(2, "less: out of memory\n"); _zexit(1); } rows = nr; rcap = nc; }
     rows[nrows].off = off; rows[nrows].len = (unsigned short)len; nrows++;
 }
 /* split the text into screen rows: lines of up to 80 columns, tabs to the next multiple of 8 */

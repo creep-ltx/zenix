@@ -4,7 +4,7 @@
 static char *subst(const char *s, const char *pat, const char *with)
 {
     u32 pl = strlen(pat), wl = strlen(with);
-    char *out = malloc(strlen(s) + 1 + (wl > pl ? (wl - pl) * (strlen(s) / pl + 1) : 0)); char *o = out;
+    char *out = xmalloc(strlen(s) + 1 + (wl > pl ? (wl - pl) * (strlen(s) / pl + 1) : 0)); char *o = out;
     while (*s) { if (!strncmp(s, pat, pl)) { memcpy(o, with, wl); o += wl; s += pl; } else *o++ = *s++; }
     *o = 0;
     return out;
@@ -37,7 +37,7 @@ int main(int argc, char **argv)
         else if (c == '"' || c == '\'') { int q = c; while ((c = rd_getc(&r)) >= 0 && c != q && n < 510) tok[n++] = (char)c; }
         else { do { tok[n++] = (char)c; } while ((c = rd_getc(&r)) >= 0 && !isspace(c) && n < 510); }
         tok[n] = 0;
-        if (ni < 256) items[ni++] = strdup(tok);
+        if (ni < 256 && !(items[ni++] = strdup(tok))) { fprintf(2, "xargs: out of memory\n"); return 1; }
         if (repl) { RUN(ni - 1, 1); ni = 0; }
         else if (maxn && ni == maxn) { RUN(0, ni); ni = 0; }
     }

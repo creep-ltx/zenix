@@ -10,6 +10,7 @@ _start:
 _entry:
     move.l  (%sp),%d0               /* argc */
     move.l  4(%sp),%d1              /* argv */
+    move.l  %d1,_zargv              /* for libz's messages (xmalloc) */
     move.l  %d1,-(%sp)
     move.l  %d0,-(%sp)
     jsr     main

@@ -22,6 +22,9 @@ EXAMPLES
     ln -s /bin/less /bin/more
     ln data data.old
 
+NOTES
+    A link name longer than 63 bytes is reported, never cut short.
+
 EXIT STATUS
     0, 1 if a link could not be made, 2 usage error.
 
