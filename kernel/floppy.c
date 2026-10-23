@@ -47,17 +47,10 @@ static mfm_u8 *cache;                   /* 11 sectors of the track in "ctrack" *
 static int cdrive = -1, ctrack = -1;
 static volatile int busy;
 
-/* hr_time() can read about 10 ms early in the moment between the CIA timer wrapping and the tick interrupt being
- * taken (and always inside the tick interrupt itself, where fd_tick runs). A polling loop that hits that moment sees
- * "now - start" as a huge unsigned number and stops waiting at once. This clock never goes backwards. */
+/* hr_time() reads the CIA-B E-clock counter (hardware only, never early), so a wait can trust "now - start" */
 static u32 now(void)
 {
-    static u32 last;
-    u32 t = hr_time();
-    if ((s32)(t - last) < 0 && (s32)(t - last) > -14188)       /* back by up to 20 ms: the wrap moment */
-        t = last;
-    last = t;
-    return t;
+    return hr_time();
 }
 
 static void wait_us(u32 us)

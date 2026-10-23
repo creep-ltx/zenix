@@ -12,10 +12,14 @@ static u32 ide_base;                    /* set by ide_init probe */
 static u32 ide_irq_latch;
 #define IDE_DATA (*(volatile u16 *)ide_base)
 #define IDE_REG(n) (*(volatile u8 *)(ide_base + ((u32)(n) << 2) + 2))
+#define IDE_CTL  (*(volatile u8 *)(ide_base + 0x101Au))       /* device control / alternate status (A1200: 0xDA101A) */
+#define GAYLE_A1200_BASE  0xDA0000u
+#define GAYLE_A1200_LATCH 0xDA9000u     /* bit 7: IDE interrupt; write 0x7C clears it, keeps the other bits */
+#define GAYLE_A1200_INTEN 0xDAA000u     /* which Gayle sources may raise INT2: bit 7 IDE, 6-2 the PCMCIA ones */
 
 static const struct { u32 base, latch; const char *name; } ide_ports[] = {
     { 0xDD2020u, 0xDD3020u, "A4000" },
-    { 0xDA0000u, 0xDA9000u, "A1200/A600" },
+    { GAYLE_A1200_BASE, GAYLE_A1200_LATCH, "A1200/A600" },
 };
 
 #define ST_BSY  0x80
@@ -47,6 +51,15 @@ static void ide_ack(void)
         *(volatile u8 *)ide_irq_latch = 0x7C;
 }
 
+/* ATA asks for 400 ns after a command is written before status is read, and after the last data word before status
+ * is read. Two CIA reads: every CIA access is synchronised to the E-clock (709 kHz, 1.4 us), so this is at least
+ * 1.4 us on any CPU - a 68020 or Emu68 alike (an empty loop would be 100 times too short on Emu68). */
+static void ide_settle(void)
+{
+    (void)CIAA(CIA_CRA);
+    (void)CIAA(CIA_CRA);
+}
+
 static int ide_wait(u8 mask, u8 want)
 {
     for (u32 i = 0; i < 2000000; i++) {
@@ -61,16 +74,50 @@ static int ide_wait(u8 mask, u8 want)
 
 static int ide_identify(void)
 {
+    if (IDE_REG(7) == 0xFF)         /* nothing drives the bus (no drive, or Emu68's disable_scsi): do not wait for it */
+        return -1;
     IDE_REG(6) = 0xE0;              /* master, LBA mode */
+    ide_settle();
     if (ide_wait(ST_BSY, 0))
         return -1;
     IDE_REG(7) = 0xEC;              /* IDENTIFY DEVICE */
+    ide_settle();
     return ide_wait(ST_BSY | ST_DRQ, ST_DRQ);
+}
+
+/* Gayle's IDE interrupt is a level-2 source shared with the CIA tick. Zenix polls, so it must never fire: nIEN in the
+ * drive's device control register (it stops the drive asserting INTRQ), Gayle's own enable register cleared (no
+ * drive fitted: the INTRQ line floats, and a floating line with the enable set is an INT2 storm), and the latch
+ * cleared in case it is already set. On an A4000 the 0xDAxxxx addresses are not decoded: harmless. */
+static void gayle_quiet(void)
+{
+    ide_base = GAYLE_A1200_BASE;
+    ide_irq_latch = GAYLE_A1200_LATCH;
+    IDE_CTL = 0x02;                                 /* nIEN */
+    *(volatile u8 *)GAYLE_A1200_INTEN = 0;
+    (void)IDE_REG(7);
+    *(volatile u8 *)GAYLE_A1200_LATCH = 0x7C;
+}
+
+static u32 stray_irqs;
+
+/* called by irq2_c when a level-2 interrupt had no CIA cause: Gayle's IDE latch (A1200; the A4000's is cleared by
+ * the read). Counts them and says so once; with gayle_quiet() done this is not expected to happen. */
+void ide_stray_irq(void)
+{
+    u8 v = *(volatile u8 *)ide_irq_latch;
+    if (!(v & 0x80))
+        return;
+    if (ide_irq_latch == GAYLE_A1200_LATCH)
+        *(volatile u8 *)ide_irq_latch = 0x7C;
+    if (!stray_irqs++)
+        kprintf("ide: stray Gayle IDE interrupt cleared (latch %p)\n", ide_irq_latch);
 }
 
 int ide_init(void)
 {
     int found = -1;
+    gayle_quiet();
     for (u32 i = 0; i < sizeof ide_ports / sizeof ide_ports[0]; i++) {
         ide_base = ide_ports[i].base;
         ide_irq_latch = ide_ports[i].latch;
@@ -80,12 +127,16 @@ int ide_init(void)
         }
     }
     if (found < 0) {
+        ide_base = GAYLE_A1200_BASE;                /* the latch irq2_c watches: the A1200's (the owner's machine) */
+        ide_irq_latch = GAYLE_A1200_LATCH;
         kprintf("ide: no drive found (A4000/A1200 ports probed)\n");
         return -1;
     }
+    IDE_CTL = 0x02;                                 /* nIEN on the port that has the drive (polling only) */
     static u16 id[256];
     for (int i = 0; i < 256; i++)
         id[i] = swab(IDE_DATA);
+    ide_settle();
     ide_ack();
 
     nsectors = ((u32)id[61] << 16) | id[60];
@@ -118,16 +169,19 @@ static int ide_sector(u32 lba, u16 *p, int write)
     IDE_REG(4) = (lba >> 8) & 0xFF;
     IDE_REG(5) = (lba >> 16) & 0xFF;
     IDE_REG(7) = write ? 0x30 : 0x20;
+    ide_settle();
     if (ide_wait(ST_BSY | ST_DRQ, ST_DRQ))
         goto out;
     if (write) {
         for (int i = 0; i < 256; i++)
             IDE_DATA = *p++;
+        ide_settle();
         if (ide_wait(ST_BSY, 0) || (IDE_REG(7) & ST_ERR))
             goto out;
     } else {
         for (int i = 0; i < 256; i++)
             *p++ = IDE_DATA;
+        ide_settle();
     }
     rc = 0;
 out:
@@ -171,6 +225,7 @@ int ide_flush(void)
         goto out;
     IDE_REG(6) = 0xE0;
     IDE_REG(7) = 0xE7;
+    ide_settle();
     for (u32 i = 0; i < 40; i++) {                  /* up to ~40 x the poll limit of ide_wait */
         u8 st = IDE_REG(7);
         if (!(st & ST_BSY)) {

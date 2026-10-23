@@ -7,18 +7,23 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
 1. **Kickstart** (the Amiga ROM) boots from the floppy: it loads the 1024-byte bootblock, checks its checksum
    and jumps to offset 12 with `a1` = the trackdisk request and `a6` = ExecBase. Zenix is still running *inside*
    AmigaOS at this point.
-2. **Bootblock** (`boot/bootblock.S`): allocates a chip buffer, reads the kernel (+ optional RAM-disk image) with
-   `DoIO`, then collects what only a live Exec knows: `AttnFlags` (which CPU), the memory list (each region with
-   chip/fast attribute), `GfxBase` (to find the ROM Topaz font later). It writes these to **bootinfo** at `0x1000`.
-   It chooses the kernel's home (largest fast region, 256 KB aligned; else chip `0x40000`), disables interrupts
-   and DMA, copies the kernel there and jumps to it. There is no way back to AmigaOS.
+2. **Bootblock** (`boot/bootblock.S`): gets a 1 KB block for the boot tables and a chip buffer for the kernel,
+   reads the kernel (+ optional RAM-disk image) with `DoIO`, switches the floppy motor off, then collects what
+   only a live Exec knows: `AttnFlags` (which CPU), the memory list (each region with chip/fast attribute),
+   `GfxBase` (to find the ROM Topaz font later), and under Emu68 the Pi's hardware addresses (stage0). It writes
+   these into its block (**bootinfo** and **hwinfo**). It chooses the kernel's home (largest fast region, 256 KB
+   aligned; else chip `0x40000`), disables interrupts and DMA, copies the kernel there, copies the block to
+   `0x1000` (free only now that the OS is dead), flushes the instruction cache and jumps to the kernel. There is
+   no way back to AmigaOS.
 3. **`start.S`**: the kernel image is a ZEXE; the first code walks its own relocation table adding the real load
-   address, clears BSS, and refuses to continue on a 68000 (serial message + red screen).
+   address, flushes the instruction cache (the patched words must not run from a stale cache or an Emu68
+   translation), clears BSS, and refuses to continue on a 68000 (serial message + red screen).
 4. **`kmain`** (`kernel/main.c`), in order: serial port (so there is always a console); font pointer extracted
    *before* the memory manager touches RAM; vector table (`VBR` set; exceptions, the four interrupt levels and
    `TRAP #0`); memory manager built from bootinfo with the kernel, low chip RAM and the RAM-disk excluded; a
    memory self-test; instruction cache on; display (Copper list, bitplane, font); real-time clock if present;
-   IDE probe (panic only if there is neither a disk nor a RAM disk).
+   IDE probe with Gayle's interrupt sources switched off first (panic only if there is neither a disk nor a RAM
+   disk).
 5. `proc_init`, `tty_init`, then three processes **built into the kernel image** (so they need no disk):
    `diskd` (priv), `fsd`, `boot` (priv). Timer interrupt and interrupts are switched on. The main thread becomes
    the idle loop: reap orphans, `schedule()`, drain the serial buffer, `cpu_idle()` (stop until an interrupt).

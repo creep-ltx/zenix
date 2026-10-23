@@ -305,6 +305,7 @@ def run(blob_bytes, base, root, with_dt=True, with_boards=True):
     for r, v in marks.items():
         uc.reg_write(r, v)
     uc.reg_write(UC_M68K_REG_A6, EXEC_BASE)
+    uc.reg_write(UC_M68K_REG_A1, HWINFO)                         # the bootblock passes the table in a1
     sp = STACK_TOP - 4
     uc.mem_write(sp, struct.pack(">I", HALT))
     uc.reg_write(UC_M68K_REG_A7, sp)

@@ -30,6 +30,22 @@ _entry:
     add.l   %d2,(%a5,%d0.l)
     subq.l  #1,%d1
     bne.s   1b
+    /* The relocation loop wrote into code. Nothing below may run from a stale instruction cache (or a stale Emu68
+     * translation): flush, then reach the next instruction through a register jump so the pipeline / the JIT
+     * fetches the patched bytes. CPU type from bootinfo (0x1000, AttnFlags): the bootblock filled it. A 68000 has
+     * no cache and no CACR: skip (it is refused below, after the BSS clear). */
+    move.w  0x1000,%d0
+    and.w   #0x008E,%d0             /* 68020 or better? */
+    beq.s   2f
+    and.w   #0x0088,%d0             /* 68040 or 68060? */
+    bne.s   11f
+    movec   %cacr,%d0
+    or.w    #0x0008,%d0             /* 020/030: CACR CI = clear the instruction cache, enable bits kept */
+    movec   %d0,%cacr
+    bra.s   12f
+11: .word   0xF4F8                  /* cpusha bc: push and invalidate both caches (never cinva: Emu68 would drop dirty data) */
+12: lea     2f(%pc),%a0
+    jmp     (%a0)
 2:  lea     __bss_start,%a0         /* relocated now */
     lea     __bss_end,%a1
 3:  cmp.l   %a1,%a0
@@ -206,7 +222,9 @@ cpu_idle:
  * MMU to mark chip RAM cache-inhibited, so the data cache stays off
  * (DMA and copy-back would disagree).
  * 020/030: CACR bit 0 = enable I-cache, bit 3 = clear it.
- * 040/060: flush with CINVA BC, then CACR bit 15 = enable I-cache. */
+ * 040/060: push and invalidate both caches with CPUSHA BC (0xF4F8), then
+ * CACR bit 15 = enable I-cache. Never CINVA (0xF4D8) on the data cache: on
+ * Emu68 (and a copyback 040/060) it throws away unwritten data. */
     .globl  cache_enable
 cache_enable:
     tst.l   4(%sp)
@@ -214,9 +232,27 @@ cache_enable:
     move.l  #0x00000009,%d0
     movec   %d0,%cacr
     rts
-1:  .word   0xF4D8                  /* cinva bc */
+1:  .word   0xF4F8                  /* cpusha bc */
     move.l  #0x00008000,%d0
     movec   %d0,%cacr
+    rts
+
+/* void cache_flush_code(void): call after writing code that will run
+ * (a loaded program, a relocated image). 020/030: CACR bit 3 (CI) clears
+ * the instruction cache, the enable bits are kept. 040/060 (and Emu68,
+ * which reports an 040): CPUSHA BC, which also makes Emu68's JIT drop
+ * its translations of the old bytes. The CPU type comes from bootinfo
+ * (0x1000, AttnFlags bits 3 and 7), low chip RAM the kernel keeps. */
+    .globl  cache_flush_code
+cache_flush_code:
+    move.w  0x1000,%d0
+    and.w   #0x0088,%d0
+    bne.s   1f
+    movec   %cacr,%d0
+    or.w    #0x0008,%d0
+    movec   %d0,%cacr
+    rts
+1:  .word   0xF4F8                  /* cpusha bc */
     rts
 
     .section .bss

@@ -9,6 +9,8 @@ cable is needed.
    RAM, so no disk is needed to get a shell). Put `build/zenix-ram.adf` where the Gotek / GoDrive reads it.
 2. Boot the Amiga from that floppy image. Zenix needs a 68020 or better (Emu68 counts) and about 4 MB of fast RAM.
 3. The screen shows the kernel's boot messages, then the shell prompt. If they scrolled by: `dmesg`, or Shift+Up.
+   The floppy LED should go off before the kernel's messages (the bootblock stops the motor). A red screen before
+   any message means the bootblock could not get memory or read the floppy.
 
 ## What the boot messages should say
 | Line | Means |
@@ -18,7 +20,7 @@ cable is needed.
 | `pi: emmc ... mailbox ... gpio ... genet ... gic ...` | The addresses the drivers will use. Expect emmc near 0xf234xxxx, mailbox near 0xf200b880, gpio 0xf2200000. |
 | `zorro: N: manufacturer 6d73 product 33 ...` | Emu68's own boards (and RAM) as AmigaOS configured them. |
 | `emmc: controller at ..., mailbox at ...` then `base clock`, `SD clock`, `card ready`, `card address`, `sectors`, `sector 0 starts ...` | The SD card driver, stage by stage. **The last line that appears shows how far it got.** |
-| `ide: no drive found` | Expected: there is no IDE disk. Zenix then tries the SD card, then the A3000's SCSI. |
+| `ide: no drive found` | Expected: there is no IDE disk (the status port reads 0xFF, so this comes at once). Zenix then tries the SD card, then the A3000's SCSI. Gayle's interrupt sources were switched off first; `ide: stray Gayle IDE interrupt` later would mean they were not. |
 | `ext2: 1 KB blocks, 768 blocks ...` | The root filesystem came from the RAM disk (the SD card is not the root). |
 
 ## Then look at the disk

@@ -52,7 +52,10 @@
 #define CIA_CRA  14
 #define CIA_CRB  15
 
-/* PAL E-clock ~709379 Hz; 100 Hz scheduler tick */
+/* CIA-B: even byte addresses, register stride 0x100 (its timers A+B are the E-clock counter of hr_time) */
+#define CIAB(r) REG8(0xBFD000 + ((u32)(r) << 8))
+
+/* PAL E-clock ~709379 Hz (NTSC 715909); 100 Hz scheduler tick */
 #define CIA_TICKS_100HZ 7094
 
 /* more custom-chip registers: display, blitter */

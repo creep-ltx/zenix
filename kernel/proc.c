@@ -136,6 +136,8 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
         return -4;
     }
     memset(base + h->image_size, 0, span - h->image_size);
+    cache_flush_code();         /* the image is code the CPU has not seen: no stale I-cache lines or Emu68 translations
+                                 * (another program ran at this address before) may run instead */
     struct proc *p = 0;
     for (int i = 1; i < NPROC; i++)
         if (procs[i].state == P_FREE) {

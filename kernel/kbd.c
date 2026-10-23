@@ -4,39 +4,94 @@
 /* Amiga keyboard: bytes arrive in CIA-A's serial shift register (SP/CNT
  * pins), raising ICR bit 3. Data is rotated and inverted on the wire;
  * after each byte the CPU must handshake by driving SP as output low
- * for at least 85us (HRM ch.8). Key release = keycode | 0x80.
+ * for at least 85us (HRM appendix G). Key release = keycode | 0x80.
  *
  * Keycodes 00-3F are positional; their meaning depends on the national
- * layout, so those live in selectable keymaps (Latin-1 output — the
- * console renders it, Topaz has the glyphs). 40-67 are layout-neutral. */
+ * layout, so those live in selectable keymaps (Latin-1 output - the
+ * console renders it, Topaz has the glyphs). 40-67 are layout-neutral.
+ *
+ * Each keymap has four layers, as AmigaOS keymaps do: plain, Shift, Alt,
+ * Shift+Alt. The Alt layer is AmigaOS's own and the same on every national
+ * keyboard: Latin-1 symbols on the letters and digits (Alt+A ae, Alt+O
+ * o-slash, Alt+S sharp s, Alt+1 superscript 1 ...), the US character on
+ * the other keys - which is where [ ] { } \ | @ live on a Swedish Amiga.
+ * Caps Lock acts as Shift on the keys marked in `caps` (the letters,
+ * including aring/adiaeresis/odiaeresis). Accents that AmigaOS treats as
+ * dead keys (acute, grave, circumflex, tilde, diaeresis) are typed as the
+ * spacing character here: there is no composition.
+ *
+ * The Swedish table is the AmigaOS keymap "s", generated from
+ * xkeyboard-config's se layout by the Fuzix Amiga port's mkxkbkeymap.py
+ * (xkeyboard-config: MIT/X11 licence, its notice is above the tables) with
+ * the Amiga conventions applied, then checked key by key against
+ * DEVS:Keymaps/s of Workbench 3.1 (two Alt keys corrected: Alt+' is the
+ * acute accent, Alt+the key left of Return is u-diaeresis). The US Alt layer
+ * comes from the same generator. */
 
-static u8 shift_down, ctrl_down, amiga_down, alt_down;
+static u8 shift_down, ctrl_down, amiga_down, alt_down, caps_lock;
 
 struct keymap {
     char name[4];
     u8 normal[0x40];
     u8 shifted[0x40];
+    u8 alt[0x40];
+    u8 shift_alt[0x40];
+    u8 caps[8];                 /* bit (code & 7) of byte code >> 3: Caps Lock shifts this key */
 };
 
+/* xkeyboard-config notice (the Swedish layout and the US Alt layer were generated from it):
+ * Copyright 1996 by Joseph Moss; Copyright (C) 2002-2007 Free Software Foundation, Inc.; and others.
+ * Permission to use, copy, modify, distribute, and sell this software and its documentation for any purpose is
+ * hereby granted without fee, provided that the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting documentation, and that the name of the
+ * copyright holder(s) not be used in advertising or publicity pertaining to distribution of the software without
+ * specific, written prior permission. The copyright holder(s) makes no representations about the suitability of
+ * this software for any purpose. It is provided "as is" without express or implied warranty. */
 static const struct keymap keymaps[] = {
     { "us",
-      { '`', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\\', 0, '0',
-        'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', 0, '1', '2', '3',
-        'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', 0, 0, '4', '5', '6',
-        0, 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0, '.', '7', '8', '9' },
-      { '~', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '|', 0, '0',
-        'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', 0, '1', '2', '3',
-        'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', 0, 0, '4', '5', '6',
-        0, 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 0, '.', '7', '8', '9' } },
-    { "sv",       /* Swedish: Latin-1 for a-ring/a-diaeresis/o-diaeresis */
-      { 0xA7, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '+', 0xB4, '\'', 0, '0',
-        'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', 0xE5, 0xA8, 0, '1', '2', '3',
-        'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 0xF6, 0xE4, '\'', 0, '4', '5', '6',
-        '<', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '-', 0, '.', '7', '8', '9' },
-      { 0xBD, '!', '"', '#', 0xA4, '%', '&', '/', '(', ')', '=', '?', '`', '*', 0, '0',
-        'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', 0xC5, '^', 0, '1', '2', '3',
-        'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 0xD6, 0xC4, '*', 0, '4', '5', '6',
-        '>', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', ';', ':', '_', 0, '.', '7', '8', '9' } },
+      { /* plain */
+         '`',  '1',  '2',  '3',  '4',  '5',  '6',  '7',  '8',  '9',  '0',  '-',  '=', '\\',    0,  '0',
+         'q',  'w',  'e',  'r',  't',  'y',  'u',  'i',  'o',  'p',  '[',  ']',    0,  '1',  '2',  '3',
+         'a',  's',  'd',  'f',  'g',  'h',  'j',  'k',  'l',  ';', '\'',    0,    0,  '4',  '5',  '6',
+           0,  'z',  'x',  'c',  'v',  'b',  'n',  'm',  ',',  '.',  '/',    0,  '.',  '7',  '8',  '9', },
+      { /* Shift */
+         '~',  '!',  '@',  '#',  '$',  '%',  '^',  '&',  '*',  '(',  ')',  '_',  '+',  '|',    0,  '0',
+         'Q',  'W',  'E',  'R',  'T',  'Y',  'U',  'I',  'O',  'P',  '{',  '}',    0,  '1',  '2',  '3',
+         'A',  'S',  'D',  'F',  'G',  'H',  'J',  'K',  'L',  ':',  '"',    0,    0,  '4',  '5',  '6',
+           0,  'Z',  'X',  'C',  'V',  'B',  'N',  'M',  '<',  '>',  '?',    0,  '.',  '7',  '8',  '9', },
+      { /* Alt */
+         '`', 0xB9, 0xB2, 0xB3, 0xA2, 0xBC, 0xBD, 0xBE, 0xB7, 0xAB, 0xBB,  '-',  '=', '\\',    0,  '0',
+        0xE5, 0xB0, 0xA9, 0xAE, 0xFE, 0xA4, 0xB5, 0xA1, 0xF8, 0xB6,  '[',  ']',    0,  '1',  '2',  '3',
+        0xE6, 0xDF, 0xF0, 0xB4,  '`',  '^',  '~', 0xA8, 0xA3,  ';', '\'',    0,    0,  '4',  '5',  '6',
+        '\\', 0xB1, 0xD7, 0xE7, 0xAA, 0xBA, 0xAD, 0xB8,  ',',  '.',  '/',    0,  '.',  '7',  '8',  '9', },
+      { /* Shift+Alt */
+         '~',  '!',  '@',  '#',  '$',  '%',  '^',  '&',  '*',  '(',  ')',  '_',  '+',  '|',    0,  '0',
+        0xC5, 0xB0, 0xA9, 0xAE, 0xDE, 0xA5, 0xB5, 0xA6, 0xD8, 0xB6,  '{',  '}',    0,  '1',  '2',  '3',
+        0xC6, 0xA7, 0xD0, 0xB4,  '`',  '^',  '~', 0xA8, 0xA3,  ':',  '"',    0,    0,  '4',  '5',  '6',
+         '|', 0xAC, 0xF7, 0xC7, 0xAA, 0xBA, 0xAF, 0xBF,  '<',  '>',  '?',    0,  '.',  '7',  '8',  '9', },
+      { 0x00, 0x00, 0xFF, 0x03, 0xFF, 0x01, 0xFE, 0x00 } },
+    { "sv",       /* AmigaOS keymap "s" (Swedish and Finnish) */
+      { /* plain */
+         '`',  '1',  '2',  '3',  '4',  '5',  '6',  '7',  '8',  '9',  '0',  '+', 0xB4, '\\',    0,  '0',
+         'q',  'w',  'e',  'r',  't',  'y',  'u',  'i',  'o',  'p', 0xE5, 0xA8,    0,  '1',  '2',  '3',
+         'a',  's',  'd',  'f',  'g',  'h',  'j',  'k',  'l', 0xF6, 0xE4, '\'',    0,  '4',  '5',  '6',
+         '<',  'z',  'x',  'c',  'v',  'b',  'n',  'm',  ',',  '.',  '-',    0,  '.',  '7',  '8',  '9', },
+      { /* Shift */
+         '~',  '!',  '"', 0xA3,  '$',  '%',  '&',  '/',  '(',  ')',  '=',  '?',  '`',  '|',    0,  '0',
+         'Q',  'W',  'E',  'R',  'T',  'Y',  'U',  'I',  'O',  'P', 0xC5,  '^',    0,  '1',  '2',  '3',
+         'A',  'S',  'D',  'F',  'G',  'H',  'J',  'K',  'L', 0xD6, 0xC4,  '*',    0,  '4',  '5',  '6',
+         '>',  'Z',  'X',  'C',  'V',  'B',  'N',  'M',  ';',  ':',  '_',    0,  '.',  '7',  '8',  '9', },
+      { /* Alt */
+         '`', 0xB9, 0xB2, 0xB3, 0xA2, 0xBC, 0xBD, 0xBE, 0xB7, 0xAB, 0xBB,  '-',  '=', '\\',    0,  '0',
+        0xE5, 0xB0, 0xA9, 0xAE, 0xFE, 0xA4, 0xB5, 0xA1, 0xF8, 0xB6,  '[',  ']',    0,  '1',  '2',  '3',
+        0xE6, 0xDF, 0xF0, 0xB4,  '`',  '^',  '~', 0xA8, 0xA3,  ';', 0xB4, 0xFC,    0,  '4',  '5',  '6',
+        '\\', 0xB1, 0xD7, 0xE7, 0xAA, 0xBA, 0xAD, 0xB8,  ',',  '.',  '/',    0,  '.',  '7',  '8',  '9', },
+      { /* Shift+Alt */
+         '~',  '!',  '@',  '#',  '$',  '%',  '^',  '&',  '*',  '(',  ')',  '_',  '+',  '|',    0,  '0',
+        0xC5, 0xB0, 0xA9, 0xAE, 0xDE, 0xA5, 0xB5, 0xA6, 0xD8, 0xB6,  '{',  '}',    0,  '1',  '2',  '3',
+        0xC6, 0xA7, 0xD0, 0xB4,  '`',  '^',  '~', 0xA8, 0xA3,  ':',  '"', 0xDC,    0,  '4',  '5',  '6',
+         '|', 0xAC, 0xF7, 0xC7, 0xAA, 0xBA, 0xAF, 0xBF,  '<',  '>',  '?',    0,  '.',  '7',  '8',  '9', },
+      { 0x00, 0x00, 0xFF, 0x07, 0xFF, 0x07, 0xFE, 0x00 } },
 };
 
 static const struct keymap *kmap = &keymaps[1];   /* sv; /etc/keymap later */
@@ -121,22 +176,78 @@ static int special_key(u8 code)
     return 0;
 }
 
+/* a key going down (also called again by kbd_tick while it is held): translate and hand it to the tty */
+static void key_down(u8 code)
+{
+    if (special_key(code))
+        return;
+    u8 c = 0;
+    if (code == 0x41 && (tty_getmode(ws_cur) & TTY_RAW))
+        c = 127;                                    /* Backspace is DEL for raw-mode programs */
+    else if (code < 0x40) {
+        int shift = shift_down;
+        if (caps_lock && (kmap->caps[code >> 3] >> (code & 7) & 1))
+            shift = !shift;                         /* Caps Lock: Shift on the letters only */
+        c = alt_down ? (shift ? kmap->shift_alt[code] : kmap->alt[code])
+                     : (shift ? kmap->shifted[code] : kmap->normal[code]);
+    } else if (code < 0x68)
+        c = (u8)keyspecial[code - 0x40];
+    if (!c)
+        return;
+    if (ctrl_down && (c & 0x40) && c < 0x80)
+        c &= 0x1F;                      /* Ctrl-letter, incl. Ctrl-C */
+    tty_input(c);
+}
+
+/* Software key repeat (an Amiga keyboard sends one code per press; AmigaOS repeats in software too): the last key
+ * held repeats after KBD_REPEAT_DELAY ticks, then every KBD_REPEAT_RATE ticks, until it is released or another key
+ * goes down. Modifier and Amiga-combination keys do not repeat. Driven by the 100 Hz tick (kbd_tick). */
+#define KBD_REPEAT_DELAY 50             /* 500 ms */
+#define KBD_REPEAT_RATE  3              /* about 33 per second */
+static u8 rep_code;                     /* 0: nothing held */
+static u32 rep_at;                      /* tick of the next repeat */
+
+void kbd_tick(void)
+{
+    if (rep_code && (s32)(ticks - rep_at) >= 0) {
+        rep_at = ticks + KBD_REPEAT_RATE;
+        key_down(rep_code);
+    }
+}
+
+/* Handshake: SP as output, low, for at least 85 us (HRM: "to ensure compatibility with all keyboard models"), then
+ * back to input. Timed with the E-clock counter (hr_time, CIA-B timers A+B), not a counting loop: the CPU may be a
+ * 14 MHz 68020 or Emu68 at about 1000 MIPS. 75 E-clock ticks = 106 us on PAL (709379 Hz), 105 us on NTSC. */
+#define KBD_HANDSHAKE_TICKS 75
+static int handshake_failed;
+
+static void handshake(void)
+{
+    CIAA(CIA_CRA) |= 0x40;
+    u32 t0 = hr_time(), n = 0;
+    while ((u32)(hr_time() - t0) < KBD_HANDSHAKE_TICKS)
+        if (++n > 20000) {              /* every hr_time() is six CIA accesses: this is far more than 85 us on any CPU */
+            if (!handshake_failed++)
+                kprintf("kbd: the E-clock counter did not advance during the keyboard handshake\n");
+            break;
+        }
+    CIAA(CIA_CRA) &= (u8)~0x40;
+}
+
 void kbd_isr(void)
 {
     u8 raw = CIAA(CIA_SDR);
     u8 code = (u8)~((raw >> 1) | (raw << 7));
-
-    /* handshake: SP output (low) for >85us, then back to input */
-    CIAA(CIA_CRA) |= 0x40;
-    for (volatile int i = 0; i < 3000; i++)
-        ;
-    CIAA(CIA_CRA) &= (u8)~0x40;
+    handshake();
 
     int up = code & 0x80;
     code &= 0x7F;
     switch (code) {
     case 0x60: case 0x61:               /* shift */
         shift_down = (u8)!up;
+        return;
+    case 0x62:                          /* Caps Lock: the keyboard sends "down" when its LED goes on, "up" when off */
+        caps_lock = (u8)!up;
         return;
     case 0x63:                          /* control */
         ctrl_down = (u8)!up;
@@ -148,27 +259,20 @@ void kbd_isr(void)
         amiga_down = (u8)!up;
         return;
     }
+    if (up) {
+        if (code == rep_code)
+            rep_code = 0;
+        return;
+    }
     if (amiga_down) {                   /* workspace keys, like i3's mod key */
-        if (!up && code >= 0x01 && code <= 0x09)
+        rep_code = 0;
+        if (code >= 0x01 && code <= 0x09)
             ws_switch(code);
-        else if (!up && code == 0x44)   /* Return: a shell here */
+        else if (code == 0x44)          /* Return: a shell here */
             ws_request_shell(ws_cur);
         return;
     }
-    if (up)
-        return;
-    if (special_key(code))
-        return;
-    u8 c = 0;
-    if (code == 0x41 && (tty_getmode(ws_cur) & TTY_RAW))
-        c = 127;                                    /* Backspace is DEL for raw-mode programs */
-    else if (code < 0x40)
-        c = shift_down ? kmap->shifted[code] : kmap->normal[code];
-    else if (code < 0x68)
-        c = (u8)keyspecial[code - 0x40];
-    if (!c)
-        return;
-    if (ctrl_down && (c & 0x40) && c < 0x80)
-        c &= 0x1F;                      /* Ctrl-letter, incl. Ctrl-C */
-    tty_input(c);
+    rep_code = code;
+    rep_at = ticks + KBD_REPEAT_DELAY;
+    key_down(code);
 }
