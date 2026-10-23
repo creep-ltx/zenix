@@ -27,7 +27,8 @@ it. Only the filesystem and the disk are servers (DESIGN.md, "Where the decision
 ## 2. Hardware assumptions
 
 - CPU: 68020 or better. `start.S` checks `AttnFlags` before any C runs; a 68000 gets a message on the serial port
-  and the screen orange over red (a stop at stage 5, section 3). No MMU is required or used. No FPU is required (`-msoft-float`).
+  and the screen orange over red (a stop at stage 5, section 3). No MMU is required or used. No FPU is required
+  (`-msoft-float`).
 - Memory: **chip** RAM (reachable by the custom chips: display, audio, disk DMA) and **fast** RAM are separate
   pools. Fast is preferred; chip is used when asked for (`MEM_CHIP`) or when there is nothing else.
 - Caches: instruction cache on. The data cache stays off, because without an MMU chip RAM cannot be marked
@@ -125,23 +126,24 @@ a machine with no serial cable (scroll back with Shift+Up). `SYS_klog` (73: offs
 `dmesg` prints it. A panic or an exception in the kernel switches the mirror on again, so its text reaches the
 screen, and records the reason in the log before the machine stops.
 
-**Previous-boot log (audit A12).** The ring lives in the top 16 KB of chip RAM (`KLOG_AREA_SIZE` below the highest
-chip address in bootinfo; `0x1FC000` on a 2 MB machine), so that after a warm reset (Ctrl-Amiga-Amiga) the next boot
-can show how this one ended. Why there: Kickstart keeps its own data low in chip RAM (exec's free list starts at
-`0x4020` on 3.1) and its free-memory headers at the start of a free block, and allocations go first-fit from the
-bottom; the bootblock `AllocAbs()`es the area (exec's `MaxLocMem` - 16 KB) before it asks for any buffer, so neither
-the boot tables nor the kernel/RAM-disk load buffer can land on it, and `mem_init` keeps it out of the chip pool.
-Layout: a 256-byte header (magic `ZKLG`, size, boot number, characters logged, a sum over the 8 KB text, the reason
-the boot ended - running or panic -, and a sum over the header), then the text. Both sums are updated with every
-character (interrupts masked, O(1)), so the area is consistent between any two characters. `klog_init()`, the first
-call in `kmain`, checks the area before anything is printed: a valid log is copied (oldest character first) into
-the kernel's BSS, the area is then reset for this boot with the boot number + 1. Once the display is up,
-`klog_show_prev()` prints `klog: boot N, log kept at ...` and either "no log from a previous boot", "damaged
-(checksum)", or the previous boot's last 20 lines, each marked `> `, between `=== previous boot (N) ended here ...`
-(with or without a kernel panic) and `=== end of the previous boot's log ===`. `SYS_klog` with bit 31 set in the
-offset (`KLOG_PREV`) reads the saved copy (`dmesg -p`). If the area overlaps the kernel or the RAM disk (little chip
-RAM), the ring stays in the BSS and the log does not survive a reset (the kernel says so). Whether chip RAM survives
-a warm reset on the PiStorm is not yet known; in FS-UAE (Kickstart 3.1, keyboard reset) it does (`tools/diag-test.sh`).
+**Previous-boot log (audit A12).** The log lives in the top 16.5 KB of chip RAM (`KLOG_AREA_SIZE` = `0x4200` below the
+highest chip address in bootinfo; `0x1FBE00` on a 2 MB machine), so that after a warm reset (Ctrl-Amiga-Amiga) the
+next boot can show how this one ended. Why there: Kickstart keeps its own data low in chip RAM (exec's free list
+starts at `0x4020` on 3.1) and its free-memory headers at the start of a free block, and allocations go first-fit from
+the bottom; the bootblock `AllocAbs()`es the area (exec's `MaxLocMem` - `0x4200`) before it asks for any buffer, so
+neither the boot tables nor the kernel/RAM-disk load buffer can land on it, and `mem_init` keeps it out of the chip
+pool. Layout: two slots, each a 256-byte header (magic `ZKLG`, ring size, boot number, characters logged, a sum over
+the 8 KB ring, the reason the boot ended - running or panic -, and a sum over the header) and the 8 KB ring. Both sums
+are updated with every character (interrupts masked, O(1)), so a slot is consistent between any two characters.
+`klog_init()`, the first call in `kmain`, checks both slots before anything is printed; the valid one with the higher
+boot number is the previous boot's, and this boot writes the other slot (boot number + 1), so the previous log stays
+where it is and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
+at ...` and "no log from a previous boot", "damaged (checksum)" or the previous boot's last 20 lines, each starting
+with a `>`, between `=== previous boot (N) ended here ...` (with or without a kernel panic) and `=== end of the
+previous boot's log ===`. `SYS_klog` with bit 31 set in the offset (`KLOG_PREV`) reads the previous slot (`dmesg -p`).
+If the area overlaps the kernel or the RAM disk (little chip RAM), a 1 KB ring in the BSS is used and the log does not
+survive a reset (the kernel says so). Whether chip RAM survives a warm reset on the PiStorm is not yet known; in
+FS-UAE (Kickstart 3.1, keyboard reset) it does (`tools/diag-test.sh`).
 
 ### Sound (`kernel/audio.c`)
 

@@ -6,7 +6,8 @@
 #     (stage colour on top, red below); a panic after the boot (DIAG_PANIC=11) a red bar.
 #  2. previous-boot log: boot the RAM floppy, run `crash` (the kernel logs "killed"), warm reset with
 #     Ctrl+Amiga+Amiga, and check that the next boot shows the previous boot's last lines and `dmesg -p` has them;
-#     the same after a kernel panic (DIAG_PANIC=11): "ended here with a kernel panic" and the panic text.
+#     the same after a kernel panic (DIAG_PANIC=11): "ended here with a kernel panic" and the panic text, twice
+#     (the two slots alternate).
 # usage: tools/diag-test.sh [colours|reset|all]     (ZENIX_SERIAL defaults to /tmp/zenix-diag-serial)
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
@@ -113,12 +114,16 @@ if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
     build panic11 "-DDIAG_PANIC=11" DIWV=0x38      # the picture starts lower: FS-UAE's screenshot shows the bar
     conf "$OUT/preset.fs-uae" "$OUT/panic11/zenix-ram.adf"
     wait_free
-    ZOOMOUT=0 RESET_AT=28 timeout 100 python3 tools/shot.py "$OUT/preset.fs-uae" "$OUT/idle.txt" "$OUT/preset" 26 56 >/dev/null 2>&1
+    ZOOMOUT=0 RESET_AT=28,58 timeout 130 python3 tools/shot.py "$OUT/preset.fs-uae" "$OUT/idle.txt" "$OUT/preset" 26 56 86 >/dev/null 2>&1
     L=$OUT/preset.log; tr -d '\r' < "$OUT/preset.serial.log" > "$L"
     bar=$(pixel "$OUT/preset-26.png" 0.02)
     near "$bar" F00 && check "panic after the boot: the bar turns red" ok || check "panic after the boot: red bar (got $bar, see $OUT/preset-26.png)" bad
     grep -q '^=== previous boot (1) ended here with a kernel panic' "$L" && check "next boot: ended with a kernel panic" ok || check "next boot: ended with a kernel panic" bad
     grep -q '^> \*\*\* kernel panic: test panic (DIAG_PANIC)' "$L" && check "next boot shows the panic text" ok || check "next boot shows the panic text" bad
+    # a third boot: the log is back in the first slot and boot 2's is the previous one
+    grep -q '^klog: boot 3, log kept at' "$L" && grep -q '^=== previous boot (2) ended here with a kernel panic' "$L" &&
+        check "third boot: boot 2's log (the other slot) is the previous one" ok ||
+        check "third boot: boot 2's log (the other slot) is the previous one" bad
 fi
 echo "logs and screenshots: $OUT"
 exit $((1 - pass))

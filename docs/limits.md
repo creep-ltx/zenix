@@ -58,11 +58,11 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS
   treats as dead keys (acute, grave, circumflex, tilde, diaeresis) type the spacing character, there is no
   composition with the next letter.
-- Kernel log: 8 KB, kept in the top 16 KB of chip RAM. The previous-boot log needs chip RAM to survive the reset:
-  it is lost after a power-off, and on the PiStorm it is not yet known whether a warm reset keeps it. It holds the
-  last 8 KB of the previous boot; the next boot shows its last 20 lines. A boot that stops before the display only
-  shows its colour (no text) until the next boot. With little chip RAM (the kernel or the RAM disk in the top 16 KB)
-  the log is not kept there at all.
+- Kernel log: 8 KB, kept in the top 16.5 KB of chip RAM (two 8 KB slots: this boot's and the previous one's). The
+  previous-boot log needs chip RAM to survive the reset: it is lost after a power-off, and on the PiStorm it is not
+  yet known whether a warm reset keeps it. It holds the last 8 KB of the previous boot; the next boot shows its last
+  20 lines. A boot that stops before the display only shows its colour (no text) until the next boot. With little chip
+  RAM (the kernel or the RAM disk in the top 16.5 KB) the log is not kept there at all.
 
 ## Traps found while building it (details in `Knowledge/amiga/zenix-m0-m3-findings.md`)
 

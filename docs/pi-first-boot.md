@@ -45,7 +45,7 @@ started loading.)
    of them (Shift+Up scrolls back if they went by). The first line also says whether it ended with a kernel panic.
 4. At the prompt, `dmesg -p` shows the whole previous log, `dmesg` this boot's.
 
-The log lives in the top 16 KB of chip RAM, which a warm reset should not clear. Whether that is true on the
+The log lives in the top 16.5 KB of chip RAM, which a warm reset should not clear. Whether that is true on the
 PiStorm is **not yet known**: if the next boot says `klog: no log from a previous boot (power-on, or the memory
 was cleared)` right after a warm reset, chip RAM did not survive it there; please report that line. After a
 power-off the log is always gone. `klog: ... damaged (checksum)` means part of it was overwritten.

@@ -36,9 +36,10 @@ u32 klog_read(u32 off, char *buf, u32 n);     /* the kernel log: n characters fr
 void klog_to_screen(void);                    /* the display is up: show the log so far and mirror new messages */
 void klog_mirror_off(void);                   /* boot is finished: kprintf goes to the serial port and the log only */
 void klog_mirror_on(void);                    /* a panic: its text goes to the screen too */
-/* previous-boot log (audit A12): the ring lives in the top KLOG_AREA_SIZE bytes of chip RAM (the bootblock reserves
- * the same size), so the next boot after a warm reset can show how this one ended */
-#define KLOG_AREA_SIZE  0x4000
+/* previous-boot log (audit A12): the log lives in the top KLOG_AREA_SIZE bytes of chip RAM (two slots of a 256-byte
+ * header and an 8 KB ring; the bootblock reserves the same size), so the next boot after a warm reset can show how
+ * this one ended */
+#define KLOG_AREA_SIZE  0x4200
 #define KLOG_PREV       0x80000000u           /* SYS_klog offset flag: read the previous boot's log (dmesg -p) */
 #define KLOG_END_RUNNING 0u                   /* why a boot ended, kept in the log header for the next boot */
 #define KLOG_END_PANIC   1u

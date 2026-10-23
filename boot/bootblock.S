@@ -38,8 +38,8 @@
 #else
 #define DIAGSTOP(n)
 #endif
-/* The previous-boot log (audit A12): the top 16 KB of chip RAM (kernel/serial.c KLOG_AREA_SIZE, the same value) */
-#define KLOG_AREA_SIZE  0x4000
+/* The previous-boot log (audit A12): the top 16.5 KB of chip RAM (KLOG_AREA_SIZE in kernel/kernel.h, the same value) */
+#define KLOG_AREA_SIZE  0x4200
 
     .text
     .globl  _start
@@ -52,7 +52,7 @@ _start:
     move.l  %a1,%a5                 /* trackdisk ioreq */
     move.l  _start-4(%pc),%d7       /* kernel size (bootblock offset 8) */
 
-    /* keep the kernel log's area (the top 16 KB of chip RAM, MaxLocMem) out of every buffer below: the kernel reads
+    /* keep the kernel log's area (the top 16.5 KB of chip RAM, below MaxLocMem) out of every buffer below: the kernel reads
      * the previous boot's log from there. If exec already uses it AllocAbs fails; harmless (the kernel checks). */
     move.l  62(%a6),%a1             /* ExecBase->MaxLocMem: top of chip RAM */
     lea     -KLOG_AREA_SIZE(%a1),%a1

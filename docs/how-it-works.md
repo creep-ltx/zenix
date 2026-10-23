@@ -16,12 +16,12 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    `0x1000` (free only now that the OS is dead), flushes the instruction cache and jumps to the kernel. There is
    no way back to AmigaOS. Its first instructions switch the display to one plain colour, and every step from here
    to the display paints the screen its own colour (blue, cyan, magenta in the bootblock; architecture.md "Boot
-   stage colours"); it also reserves the top 16 KB of chip RAM (`AllocAbs`) for the kernel log.
+   stage colours"); it also reserves the top 16.5 KB of chip RAM (`AllocAbs`) for the kernel log.
 3. **`start.S`**: the kernel image is a ZEXE; the first code walks its own relocation table adding the real load
    address, flushes the instruction cache (the patched words must not run from a stale cache or an Emu68
    translation), clears BSS, and refuses to continue on a 68000 (serial message, orange over red).
 4. **`kmain`** (`kernel/main.c`), in order: the kernel log (`klog_init`: a log left by the previous boot at the
-   top of chip RAM is saved before anything is printed over it); serial port (so there is always a console); font pointer extracted
+   top of chip RAM is found, and this boot writes the other of the two slots there); serial port (so there is always a console); font pointer extracted
    *before* the memory manager touches RAM; vector table (`VBR` set; exceptions, the four interrupt levels and
    `TRAP #0`); memory manager built from bootinfo with the kernel, low chip RAM and the RAM-disk excluded; a
    memory self-test; instruction cache on; display (Copper list, bitplane, font); the previous boot's last lines
