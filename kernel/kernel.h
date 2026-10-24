@@ -385,7 +385,6 @@ struct exec_src { int m; long ino; struct ustat st; };
 long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x);
 long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n);
 void fs_exec_close(const struct exec_src *x);      /* FS_CLOSE for an fs_exec_open that succeeded */
-long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size, struct ustat *st);
 long vfs_open(const char *path, int flags);
 long vfs_stat(const char *path, struct ustat *st);
 long vfs_fstat(struct file *f, struct ustat *st);

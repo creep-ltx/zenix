@@ -668,7 +668,7 @@ log only). 4: undecided, not blocking D11.
 | 6 | **Killing a process while it spawns** dies in the middle of `proc_load`: the child's memory (owned by a pid that was never born) and the program's `FS_CLOSE` are lost. | **prerequisite** (step 0); one rule fixes 5 and 6 together (step 0; 5.6) |
 | 7 | fsd's `find_root` ignores the bootable flag (takes the first writable ext2 partition), unlike rootpick and architecture.md section 9. | fixed (4.1: boot passes the device); a one-line fix in main is possible before |
 | 8 | `proc_exit` makes message calls (`FS_CLOSE`) with interrupts masked. | made safe for D11 (no starts from there); the masking itself is future-ideas item 5 |
-| 9 | `fs_read_file` (`kernel/vfs.c`) opens a file with no file entry; nothing calls it. | deleted in step 0 (5.4) |
+| 9 | `fs_read_file` (`kernel/vfs.c`) opens a file with no file entry; nothing calls it. | deleted in step 0 (5.4): **done** (branch d11, 2026-10-24) |
 | 10 | `ipc_recv` checks `killed` only while the queue is empty: a server with a steady queue never sees a kill. | fixed (5.6) |
 
 Not a bug today, to be checked with D11: the kernel stack depth of nested calls (step 1).

@@ -809,8 +809,8 @@ outputs (`tools/cmds-test.sh`).
   names through a link the same archive made; `find` never follows links below its starting points.
 - **The shipped images** have root logged in automatically and no passwords (limits.md); `login` warns.
 - `mkroot.sh` builds the image under `fakeroot` so files belong to root; `/tmp` is 1777; `su` and `passwd` are 4755.
-- The kernel's own file loading and the servers run as root. Kernel-side calls such as `fs_read_file` use the
-  identity of the process that asked for the spawn.
+- The kernel's own file loading and the servers run as root. The kernel's reads of a program (`fs_exec_open`,
+  `fs_exec_read`) use the identity of the process that asked for the spawn.
 - Programs report a refusal as "permission denied": `sys3` stores the error number of the last failed call in
   `zerrno`, and `zwhy("cannot open")` (libz) returns its text ("permission denied", "no such file or directory",
   ...; section 7), or the given text when there is none.

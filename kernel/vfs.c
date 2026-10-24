@@ -294,43 +294,6 @@ long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
     return 0;
 }
 
-long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *size, struct ustat *stout)
-{
-    struct ustat st;
-    char rb[PATHMAX]; const char *rel; u32 cwd;
-    int m = route(path, parent ? parent->cwd : "/", parent ? parent->cwd_ino : 2, rb, &rel, &cwd);
-    if (m < 0)
-        return m;
-    long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY | O_EXEC, (u32)&st);
-    if (ino < 0)
-        return ino;
-    struct exec_src x = { m, ino, st };
-    if (!S_ISREG(st.mode) || st.size > 256u * 1024) {
-        fs_exec_close(&x);
-        return S_ISDIR(st.mode) ? -EISDIR : S_ISREG(st.mode) ? -EFBIG : -EACCES;
-    }
-    u8 *b = kmalloc(st.size ? st.size : 1);
-    if (!b) {
-        fs_exec_close(&x);
-        return -ENOMEM;
-    }
-    u32 got = 0;
-    while (got < st.size) {
-        long r = fs_call_on(m, FS_READ, (u32)ino, got, (u32)(b + got), st.size - got);
-        if (r <= 0) {
-            kfree(b);
-            fs_exec_close(&x);
-            return r < 0 ? r : -EIO;
-        }
-        got += (u32)r;
-    }
-    fs_exec_close(&x);
-    *buf = b;
-    *size = st.size;
-    if (stout) *stout = st;
-    return 0;
-}
-
 /* the few device files: /dev/tty (this process's controlling tty), /dev/console (console 1), /dev/tty1 .. /dev/tty10
  * (the virtual consoles: root, or a process whose controlling tty it is - nobody reads another user's keys),
  * /dev/null, /dev/zero */
