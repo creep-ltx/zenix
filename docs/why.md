@@ -6,8 +6,8 @@ decisions), the parts in [architecture.md](architecture.md).
 
 ## The machine sets the rules
 
-An A1200 has a 14 MHz 68EC020, 2 MB of chip RAM and no MMU. Most accelerated Amigas have an MMU-less CPU too (the
-EC versions of the 68020, 030 and 040), and the PiStorm's Emu68 offers none. Unix was designed around an MMU. Each
+An A1200 has a 14 MHz 68EC020, 2 MB of chip RAM and no MMU. Many accelerator cards have a full CPU with an MMU, but many
+others do not (the EC versions of the 68020, 030 and 040), and the PiStorm's Emu68 offers none. Unix was designed around an MMU. Each
 program gets its own private memory, `fork` copies a process cheaply, and a bad pointer only hurts its owner.
 
 Zenix keeps what a Unix *user* sees (processes, a shell, pipes, files, users, permissions) and finds another way to
