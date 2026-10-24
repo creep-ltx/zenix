@@ -17,6 +17,25 @@ cable is needed.
    appears the whole screen changes colour at every boot step (next section): if it stops on a colour, that colour
    says where.
 
+## Booting from the SD card without a floppy
+Instead of the floppy, the SD card can carry Zenix: Kickstart boots a small AmigaDOS partition on the card, whose
+start-up script runs `zenixboot` (man/zenixboot.txt), and Zenix uses the ext2 partition on the same card as its root.
+The card: p1 FAT32 with Emu68's files, p2 (type 0x76) the 16 MB boot partition, p3 (type 0x83) the Zenix root, 512 MB.
+Use the Zenix test card (or another spare card): **everything on the card after p1 is replaced**.
+1. On the PC, in the Zenix folder, with the card in the reader (here `/dev/sda`; `lsblk` shows the name):
+   `sudo bash tools/write-card.sh /dev/sda`
+   This keeps the card's Emu68 partition (the test card has it at the right place) and writes the rest. For a new
+   card, give the folder with the Emu68 files (config.txt, start4.elf, the Emu68 file, kick.rom) as well:
+   `sudo bash tools/write-card.sh /dev/sda <emu68-dir>` - that erases the whole card first. The script refuses a disk
+   that is not removable or not 1-64 GB, shows the card and waits 5 seconds (Ctrl-C stops it), and checks what it
+   wrote.
+2. Put the card in the Amiga, take any disk out of the Gotek, and switch on. No key is needed.
+3. Kickstart's boot screen, then the whole screen blue (zenixboot reads the kernel), cyan, magenta, and from there on
+   the same colours and boot log as from the floppy. If zenixboot finds a problem it writes it on the AmigaOS screen
+   and stops there (a `1>` prompt).
+Not yet tried on the PiStorm: whether Emu68's SD driver boots this partition is the first thing this checks (if
+Kickstart shows its insert-disk picture instead, it did not).
+
 ## If it freezes: screen colours, then the previous-boot log
 No serial cable is needed. Until the display is up, every boot step paints the **whole screen** one colour; a
 freeze leaves the colour of the last step reached. (Before the first Zenix colour, Kickstart's own colours come and
@@ -25,7 +44,7 @@ started loading.)
 
 | Screen | Where it stopped | What it likely means |
 |---|---|---|
-| **blue** | 1. bootblock: loading the kernel from the floppy | The floppy read hangs (Gotek, image) or takes very long. |
+| **blue** | 1. bootblock: loading the kernel from the floppy (or zenixboot reading its files) | The floppy read hangs (Gotek, image) or takes very long. |
 | **cyan** (light blue-green) | 2. kernel loaded; stage0 reads the Pi's tables, the memory list is collected | stage0 or Emu68's device tree (a guru here means the OS was still alive: stage0). |
 | **magenta** (purple-pink) | 3. AmigaOS switched off; the kernel is copied to its home | The copy or the jump to the kernel (cache flush, A2). |
 | **yellow** | 4. the kernel runs, relocating itself | Relocation, or the cache flush after it. |

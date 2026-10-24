@@ -1,0 +1,99 @@
+ZENIXBOOT(8)			Zenix manual
+
+NAME
+    zenixboot - start Zenix from AmigaOS, from files on a disk partition
+
+SYNOPSIS
+    zenixboot [KERNEL] [RAM=FILE] [CHECK]
+
+DESCRIPTION
+    zenixboot is an AmigaOS program, not a Zenix one. It boots Zenix on an
+    Amiga that starts from a hard disk, a CF card or (under Emu68) an SD
+    card, so that no Zenix floppy is needed. It is meant to be the only
+    line of S:Startup-Sequence on a small AmigaDOS (FFS) boot partition
+    that holds nothing but S/Startup-Sequence, zenixboot and the kernel:
+    Kickstart boots that partition with its own ROM filesystem and shell,
+    and no other AmigaOS file is needed. It also runs from a normal
+    AmigaOS shell.
+
+    It does what the floppy's boot block does, with the same code for the
+    hand-over (boot/handoff.S): it reads the kernel file (the same image as
+    on the floppy, build/kernel.bin, called "zenix" on the boot partition)
+    and the optional RAM-disk image, collects the CPU type, the memory list
+    and the Pi's hardware addresses (stage0, under Emu68), keeps the top
+    16.5 KB of chip RAM free for the kernel log, switches AmigaOS off and
+    jumps to the kernel. Zenix then finds its root filesystem by itself:
+    the RAM disk if one was given, else the first ext2 or ZenixFS
+    partition (docs/architecture.md section 9).
+
+    Everything is read and checked while AmigaOS still runs. Any problem
+    is printed and zenixboot returns to AmigaOS with nothing switched off;
+    from a Startup-Sequence that leaves the boot shell's prompt on the
+    screen. Only when the last check has passed does it switch AmigaOS
+    off; from then on there is no way back but a reset.
+
+    While it loads, the whole screen is blue; then cyan while the tables
+    are collected, magenta when AmigaOS is off: the boot colours of the
+    floppy (docs/pi-first-boot.md). On an error the AmigaOS screen comes
+    back with the message. Every message is also sent to the serial port
+    (9600 baud, through exec's RawPutChar), so a boot can be followed with
+    a cable.
+
+    Besides what the boot block switches off (interrupts, DMA, the CIA
+    interrupts), zenixboot also stops every floppy motor, shows no screen
+    (LoadView of none, so the display registers a Workbench screen set do
+    not stay), puts the AGA fetch mode and the bitplane registers back to
+    their reset values, waits for the blitter, switches a 68040/68060's
+    data cache off (as after a reset) and its MMU off (SetPatch's CPU
+    library switches it on; Zenix runs without one).
+
+ARGUMENTS
+    KERNEL      the kernel image to start; default "zenix" in the
+                directory zenixboot itself is in (PROGDIR:)
+    RAM=FILE    also load FILE as the RAM disk (an ext2 image such as
+                build/root-ram.img); Zenix then uses it as its root
+    CHECK       do everything up to switching AmigaOS off (load, check,
+                collect the tables, choose where the kernel will run),
+                say so, and return to AmigaOS
+
+EXAMPLES
+    SYS:zenixboot
+        The whole S:Startup-Sequence of the boot partition.
+    zenixboot DH1:zenix/kernel.bin RAM=DH1:zenix/root-ram.img
+        From a shell: another kernel, with a RAM disk as the root.
+    zenixboot CHECK
+        Try it without leaving AmigaOS.
+
+EXIT STATUS
+    0 after CHECK (or when started from Workbench, which it does not
+    support: it returns at once), 20 on any error. On success it does
+    not return.
+
+NOTES
+    Needs Kickstart 2.04 or newer and a 68020, 68030, 68040 or 68060 (or
+    Emu68): on a 68000 or 68010 or under Kickstart 1.3 it says so and
+    returns before doing anything. Kickstart 1.3 is not a target.
+
+    Started from a running Workbench, it switches off whatever runs there:
+    files being written may be lost and volumes may need validating. Best
+    started from a boot partition, or from a freshly booted system. A
+    network or USB driver that keeps receiving into memory by DMA (on
+    the Pi's side, under Emu68) is not stopped by switching AmigaOS off;
+    start zenixboot from a system without them.
+
+    The kernel goes to the start of the largest fast-RAM region (256 KB
+    aligned), or to chip RAM at 0x40000 when there is no fast RAM; the
+    load buffers are kept clear of that place, of low memory and of the
+    kernel log's area, and zenixboot refuses (not enough memory) when
+    they cannot be.
+
+    The boot partition is made by tools/mkffs.py and tools/mkcard.py
+    (make build/zenix-card.img for an Emu68 SD card, build/zenix-boot.hdf
+    for an IDE or CF disk); tools/write-card.sh writes the SD card.
+
+    Verified in FS-UAE (tools/zenixboot-test.sh); not yet run on a real
+    Amiga. Not verified: whether an RTG card gives the monitor back to the
+    chipset when no screen is shown.
+
+SEE ALSO
+    docs/how-it-works.md, docs/pi-first-boot.md, diskd(8), fdisk(1)

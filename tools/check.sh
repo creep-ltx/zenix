@@ -13,7 +13,7 @@
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
 HOST="docs-check ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test a3000-test stage0-test stage0-68k-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test kbd-test diag-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test kbd-test diag-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
 host) LIST="$HOST" ;;

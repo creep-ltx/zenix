@@ -9,7 +9,8 @@
 # docs/README.md lists every docs/*.md; every relative link in README.md and docs/*.md leads to a file; the counts
 # the documents state - "N programs", "N commands", "N system calls", "N emulated setups" (the audit, a record of
 # its day, excepted) - match the Makefile's UAPPS, the SYS_ numbers in kernel/kernel.h and the matrix configs;
-# with --staged, a changed program needs its manual page changed in the same commit.
+# with --staged, a changed program (zenixboot, the AmigaOS boot program in boot/, too) needs its manual page changed in
+# the same commit.
 cd "$(dirname "$0")/.." || exit 1
 fail=0
 bad() { echo "docs-check: $*"; fail=1; }
@@ -72,6 +73,10 @@ if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
             # a change of the licence line only changes no behaviour
             [ -z "$(git diff "${range[@]}" -U0 -- "$c" | grep '^[-+]' | grep -v '^+++\|^---\|SPDX-License-Identifier')" ] && continue
             echo "$changed" | grep -qx "docs/man/$n.txt" || bad "$c changed but docs/man/$n.txt was not updated in this commit"
+            ;;
+        boot/zenixboot*)        # an AmigaOS program, not in UAPPS, but a program with a page all the same
+            [ -z "$(git diff "${range[@]}" -U0 -- "$c" | grep '^[-+]' | grep -v '^+++\|^---\|SPDX-License-Identifier')" ] && continue
+            echo "$changed" | grep -qx "docs/man/zenixboot.txt" || bad "$c changed but docs/man/zenixboot.txt was not updated in this commit"
             ;;
         esac
     done
