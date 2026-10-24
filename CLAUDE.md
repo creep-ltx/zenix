@@ -30,6 +30,9 @@ Next approved, in this order after D11 (owner 2026-10-24): **D13 shared librarie
 memory of libz and of a program several processes run, as AmigaOS libraries and pure programs; design note first,
 reviewed, before code; it comes before the self-updates so the updater ships the final program format), then Zenix
 installing updates by itself (no card swaps), then the network driver.
+**Standing order (owner 2026-10-24, away from home):** when D11 is merged, start D13 without waiting for the owner:
+review the design note (an independent review, fixes, a second look), then build stage 1 step by step in FS-UAE. The
+A1200 measurements (note section 8) wait until the owner is home; nothing is written to the owner's card meanwhile.
 **The owner's own goal (2026-10-24): Claude in a terminal on Zenix on the A1200.** It sets the order of the work, but it
 is the owner's goal, not Zenix's purpose (owner, 2026-10-24): never present it as Zenix's main goal in the docs. Approved now: a serial terminal program (Zenix to the PC over the null-modem cable, from
 the weekend of 2026-10-31); then the same over the network; then a console good enough for Claude Code's screen
