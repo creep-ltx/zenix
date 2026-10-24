@@ -133,3 +133,10 @@ Disks and data:
 ## Licence
 GPL-2.0-only. New files carry `SPDX-License-Identifier: GPL-2.0-only`. Code from other projects must be
 GPL-2-compatible and keeps its own licence header (miniz MIT, regex.c MIT from CUtils).
+
+
+**Clean room (AmigaOS sources).** Never open or cite the leaked AmigaOS source. Allowed sources of AmigaOS knowledge:
+the public manuals and autodocs (knowledge base `manuals/`), the clean hand-offs in the owner's research folder
+(hardware quirks, ROM boot sequence, 2026-10-23) and the knowledge base's `amiga/aos31-study/` notes (owner,
+2026-10-24): ideas, facts and numbers in someone else's words, never code or routine-shaped pseudo-code. Cite them as
+"AmigaOS 3.1 study, aos31-study/<note>".
