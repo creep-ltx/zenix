@@ -296,7 +296,7 @@ is to be excellent from the start** - the best of bash, zsh and fish, as the own
   for Zenix (compression, networking) · Zenix on other 68k machines (Atari ST/TT, 68k Macs, Sun 3).
 
 **A pacman-like package system (the owner's wish, 2026-10-24).** Installing and updating programs, and Zenix itself, the
-way Arch Linux's `pacman` does: a repository with a package database, `zpkg -S name` to install with its dependencies,
+way Arch Linux's `pacman` does: a repository with a package database, `zpkg -S name` to install with its dependencies, `zpkg -Ss word` to search the repository (names and descriptions),
 `zpkg -Syu` to bring the whole system up to date, `zpkg -R` to remove, a record of which package owns which file. The
 repository lives on the owner's NAS (served over the network: HTTP or NFS, once Zenix has TCP/IP), built on the PC from
 the Zenix build. It must be **one mechanism with the approved self-updates** (Zenix installing updates by itself, after
