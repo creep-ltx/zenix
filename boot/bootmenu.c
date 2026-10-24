@@ -13,7 +13,7 @@ typedef unsigned long u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define BM_VERSION "0.1b6"
+#define BM_VERSION "0.1b7"
 #define BM_DATE "24.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: bootmenu " BM_VERSION " (" BM_DATE ")";
 
@@ -249,7 +249,7 @@ static void menu_open(void)
             while (b[i]) spec[n++] = b[i++];
             spec[n++] = '/';
         }
-        const char *rest = "Boot menu/NOBORDER/NOSIZE/NOCLOSE/NODEPTH/NODRAG/SIMPLE";
+        const char *rest = "/NOBORDER/NOSIZE/NOCLOSE/NODEPTH/NODRAG/SIMPLE";    /* no title: no title bar */
         while (*rest) spec[n++] = *rest++;
         spec[n] = 0;
         menu_con = Open(spec, MODE_OLDFILE);
