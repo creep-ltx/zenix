@@ -16,5 +16,5 @@ diskd_blob:
 diskd_blob_end:
     .balign 4
 zfsd_blob:
-    .incbin "mount.zenixfs.zx"      /* the ZenixFS server: serves the root if the root is ZenixFS */
+    .incbin "mount.zenixfs.zx"      /* the ZenixFS server (@zfsd): the root's server if the root is ZenixFS (svc.c) */
 zfsd_blob_end:

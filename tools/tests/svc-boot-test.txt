@@ -1,0 +1,5 @@
+wait zenix:/# 90
+send mount\r
+sleep 2
+send echo svc-b-done\r
+sleep 2

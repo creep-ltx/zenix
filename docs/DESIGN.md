@@ -1,7 +1,7 @@
 # Zenix design decisions
 
 The numbered decisions, D1-D11. D1-D9 were proposed on 2026-10-22; D1-D10 are decided and most are built ("Where
-the decisions stand" below); D11 is designed, reviewed and approved by the owner (2026-10-24), not built yet. Last checked against the code: 2026-10-23.
+the decisions stand" below); D11 is designed, reviewed and approved by the owner (2026-10-24) and being built on branch d11 (the note's section 15). Last checked against the code: 2026-10-23.
 
 ## Goal
 A Unix-like system (processes, `/` filesystem, pipes, signals, a shell) for the Amiga that is fast and uses
@@ -96,7 +96,7 @@ slowed by a low-priority busy program while a server works for it; the existing 
 **Measured:** task-switch and message round-trip cost before and after (`bench`), in FS-UAE and on the A1200.
 **Cost:** a few hundred bytes of kernel; one more word per process.
 
-## D11. Service manager (design, not built; reviewed twice and revised; approved by the owner 2026-10-24, questions answered in the note section 12. Owner 2026-10-24: may be built after D10 once its design is complete and fully thought through - a full design note, reviewed, before any code)
+## D11. Service manager (being built on branch d11: steps 0-1, the note's section 15; reviewed twice and revised; approved by the owner 2026-10-24, questions answered in the note section 12. Owner 2026-10-24: may be built after D10 once its design is complete and fully thought through - a full design note, reviewed, before any code)
 **What.** One mechanism for starting and keeping the servers (Exec "load on first use" + Minix 3 restart + launchd, as
 the future-ideas table asks): a registered port name always exists, in a slot range of its own; the first message to
 it starts its server, and a server that dies is started again by the next message, with limits (5 ends in 60 s:

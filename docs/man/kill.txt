@@ -18,6 +18,13 @@ DESCRIPTION
     denied". The same rule decides who may stop and continue a process and
     which processes a shell may make the foreground of its terminal.
 
+    A process in the middle of a message call ends when the call is done.
+    A server killed while it serves a request ends between requests, so a
+    change on the disk is never cut in half; a second kill, or one still
+    waiting after 5 seconds, ends it at once (a hung server). A service
+    (diskd, the filesystem servers) killed this way is started again by
+    the next call to it (DESIGN D11): kill is how root restarts one.
+
 EXIT STATUS
     0, 1 if a process does not exist or may not be signalled.
 

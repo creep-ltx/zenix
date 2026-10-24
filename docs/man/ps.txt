@@ -31,15 +31,18 @@ DESCRIPTION
 EXAMPLE (the numbers will differ)
       PID  PPID PRI  NI STATE    MEM(K) NAME
         0     0   -   0 ready         0 idle
-        1     0   8 -10 msg          37 diskd
-        2     0   8 -10 msg          61 fsd
+        1     0  16   0 wait          4 boot
+        2     0   8 -10 msg          37 diskd
+        3     0   8 -10 msg          61 fsd
         ...
 
 NOTES
     Zenix has room for 32 processes in all (a login and a shell on each of
     the ten consoles, the servers and the commands they run), so ps shows
     at most 32 lines.
-    The idle process (pid 0) is listed first, with no level.
+    The idle process (pid 0) is listed first, with no level. boot is
+    pid 1; the servers (diskd, fsd or zfsd) have PPID 0 and get a new pid
+    when they are started again after a crash or a kill (dmesg says so).
 
 SEE ALSO
     free(1), sh(1) (jobs, kill), nice(1), renice(1)

@@ -39,7 +39,7 @@ struct file *file_dup(struct file *f)
 
 long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
 
-void file_close(struct file *f)
+__attribute__((noinline)) void file_close(struct file *f)
 {
     if (!f || --f->refs)
         return;
@@ -158,7 +158,7 @@ struct mount {
 static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "" } };
 static int nmnt = 1;                    /* mounts in use, the root included */
 
-long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
+__attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
 {
     struct umsg m;                      /* on this process's kernel stack: the server reads it in place */
     struct mount *mt = &mnt[mi];
@@ -168,14 +168,18 @@ long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
         return -EIO;                    /* the filesystem server is gone */
     m.type = type;
     m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
-    long r = ipc_kcall(mt->port, &m);
+    /* FS_CLOSE never starts a stopped server (D11): a new server has no opens to release, and proc_exit's closes
+     * must never load a program */
+    long r = ipc_kcall(mt->port, &m, type == FS_CLOSE ? SVC_NS_CLOSE : 0);
+    if (r == -ECONNRESET)
+        r = -EIO;                       /* the server is gone (D11): programs see an I/O error, as before */
     if (r == -5 || r == -1)
         mt->port = -1;                  /* the server is gone (-1: its port is closed or its slot reused, audit G1) */
     return r;
 }
 
 /* the root inode of mount mi (learned from the server the first time it is needed) */
-static u32 mount_root(int mi)
+static __attribute__((noinline)) u32 mount_root(int mi)
 {
     if (!mnt[mi].root) {
         struct fsinfo fi;
@@ -195,7 +199,7 @@ static u32 mount_root(int mi)
 #define PATHMAX FS_PATHMAX
 /* out = PATH as an absolute, normalised path (from the text working directory CWD): the one normaliser, for routing,
  * mount points and the working directory text. 0, or -ENAMETOOLONG if it would be longer than PATHMAX - 1 */
-static int path_abs(char *out, const char *cwd, const char *path)
+static __attribute__((noinline)) int path_abs(char *out, const char *cwd, const char *path)
 {
     int n = 0;
     if (path[0] != '/') {
@@ -227,7 +231,7 @@ static int path_abs(char *out, const char *cwd, const char *path)
 
 /* which mount takes PATH; *rel = the path to give its server (in buf, PATHMAX bytes, or PATH itself), *cwd = the
  * working directory inode to give it. -ENAMETOOLONG when the path is too long. */
-static int route(const char *path, const char *cwdtext, u32 cwdino, char *buf, const char **rel, u32 *cwd)
+static __attribute__((noinline)) int route(const char *path, const char *cwdtext, u32 cwdino, char *buf, const char **rel, u32 *cwd)
 {
     if (nmnt <= 1) { *rel = path; *cwd = cwdino; return 0; }
     char tmp[PATHMAX];

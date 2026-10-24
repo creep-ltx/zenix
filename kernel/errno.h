@@ -39,3 +39,4 @@
 #define ENOTEMPTY    39     /* directory not empty */
 #define ELOOP        40     /* too many symbolic links */
 #define EOPNOTSUPP   95     /* operation not supported (here) */
+#define ECONNRESET  104     /* the server is gone: it died while serving, could not be started, or was given up (D11) */

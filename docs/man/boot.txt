@@ -1,18 +1,36 @@
 BOOT(8)			Zenix manual
 
 NAME
-    boot - start init
+    boot - start the servers and init
 
 SYNOPSIS
     built into the kernel image; not run by hand
 
 DESCRIPTION
-    Started by the kernel together with diskd and fsd. It waits (up to about
-    30 seconds) for the filesystem server's "fs" port, starts /bin/init on
-    console 1 and waits for it. Should init ever end, boot says so ("boot:
-    /bin/init ended (status N), starting it again") and starts it again a
-    second later. It exists because the idle process cannot wait for
-    messages.
+    The one process the kernel starts itself (pid 1). It registers the
+    disk server and the root filesystem server as services (DESIGN D11:
+    the first call to a service starts its server, and a server that
+    died is started again by the next call):
+      disk  ->  @diskd, nice -10. boot's first question to it (the list
+                of devices) starts diskd.
+      fs    ->  @fsd DEVICE fs -root -id ID, or @zfsd ... for ZenixFS,
+                nice -10. The root DEVICE: the RAM disk from the boot
+                floppy, else the partition of type ext2 or zenixfs marked
+                bootable (fdisk boot), else the first such partition, else
+                the bare disk. boot reads its superblock to choose the
+                server; ID is the volume's place (start and size, in hex)
+                and its uuid. Asking for the root inode then starts it.
+    Then it starts /bin/init on console 1 and waits for it. Should init
+    ever end, boot says so ("boot: /bin/init ended (status N), starting it
+    again") and starts it again a second later. It exists because the idle
+    process cannot wait for messages.
+
+NOTES
+    The two servers are essential: if diskd or the root server ends before
+    it ever served, the kernel stops with "svc: an essential server ended
+    before it served" (no disk, or no root filesystem); the server's own
+    line before it says why. Every start and end is in the kernel log
+    (dmesg, "svc:" lines).
 
 SEE ALSO
     init(8), diskd(8)

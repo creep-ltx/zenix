@@ -5,17 +5,9 @@
  * A client in P_MSG is woken only by the reply (or by its server dying),
  * never by a kill: the server may still be using the client's buffers. */
 
-static int strncmp_(const char *a, const char *b, int n);
-static struct port {
-    int used, owner;
-    u32 gen;                    /* how many times this slot was created: part of the port number (audit G1) */
-    struct proc *op;            /* the owner's slot (valid while used: a dying owner's ports are closed) */
-    char name[16];
-    struct umsg *head, *tail;
-    struct proc *waiter;        /* server blocked in recv */
-} ports[NPORT];
-
-#define EIO_ (-5)
+/* Slots 0..NSVC-1 are the held ports of the services (D11, svc.c): a registered name keeps its slot and its number
+ * across restarts; owner 0 there means "no server running", and a call to it goes to svc_call. */
+struct port ports[NPORT];
 
 static int strncmp_(const char *a, const char *b, int n)
 {
@@ -40,7 +32,6 @@ static int reserved(const char *n)
  * from a server that died (a mount's cached port, fsd's disk port) no longer names whatever port takes the slot next:
  * port_of() refuses it, and a call to it fails as a call to a closed port (audit G1: otherwise a user's new port in
  * that slot received the kernel's filesystem requests and could serve a set-user-id root program). */
-#define PORT_ID(i) ((int)((ports[i].gen << 8) | (u32)(i)))
 static struct port *port_of(int id)
 {
     u32 i = (u32)id & 0xFF;
@@ -49,14 +40,24 @@ static struct port *port_of(int id)
     return &ports[i];
 }
 
-int port_create(const char *name, int owner)
+int port_slot(const char *name)
 {
-    if (reserved(name) && current->uid != 0)
-        return -13;
     for (int i = 0; i < NPORT; i++)
         if (ports[i].used && !strncmp_(ports[i].name, name, 16))
-            return -1;                          /* name taken */
-    for (int i = 0; i < NPORT; i++)
+            return i;
+    return -1;
+}
+
+/* A registered name (D11) is taken over only by the process the kernel started for it, anyone else - root too - gets
+ * -EBUSY; "fs", "fs.*" and "disk" not registered yet need root. */
+int port_create(const char *name, int owner)
+{
+    int i = port_slot(name);
+    if (i >= 0)
+        return i < NSVC && svc_handover(i) ? PORT_ID(i) : -EBUSY;
+    if (reserved(name) && current->uid != 0)
+        return -13;
+    for (i = NSVC; i < NPORT; i++)
         if (!ports[i].used) {
             u32 gen = (ports[i].gen + 1) & 0x7FFFFF;          /* positive port numbers: 23 bits of generation */
             memset(&ports[i], 0, sizeof ports[i]);
@@ -73,16 +74,15 @@ int port_create(const char *name, int owner)
 
 int port_find(const char *name)
 {
-    for (int i = 0; i < NPORT; i++)
-        if (ports[i].used && !strncmp_(ports[i].name, name, 16))
-            return PORT_ID(i);
-    return -1;
+    int i = port_slot(name);
+    return i < 0 ? -1 : PORT_ID(i);
 }
 
+/* who works for the port's callers: its server, or for a held port the loader or the starting server (D11) */
 struct proc *port_owner(int port)
 {
     struct port *p = port_of(port);
-    return p ? p->op : 0;
+    return !p ? 0 : p->op ? p->op : svc_proc((int)(p - ports));
 }
 
 /* priority inheritance (DESIGN D10): the best (lowest) level among the clients queued on pid's ports and those whose
@@ -104,7 +104,17 @@ u8 ipc_best_client(int pid)
     return best;
 }
 
-static void finish(struct umsg *m, s32 result)
+int ipc_serving(int pid)
+{
+    for (int i = 1; i < NPROC; i++) {
+        struct proc *c = &procs[i];
+        if (c->state == P_MSG && c->wait_msg && c->wait_msg->state == MSG_SERVING && c->wait_msg->server == pid)
+            return 1;
+    }
+    return 0;
+}
+
+void ipc_finish(struct umsg *m, s32 result)
 {
     m->result = result;
     m->state = MSG_DONE;
@@ -113,7 +123,63 @@ static void finish(struct umsg *m, s32 result)
         ready(c);
 }
 
-static long call(int port, struct umsg *m, u16 kflags)
+/* queue m on p (at the front: a loader's own message once its server runs) and wake the server */
+void ipc_enqueue(struct port *p, struct umsg *m, int front)
+{
+    m->state = MSG_QUEUED;
+    if (front || !p->head) {
+        m->next = p->head;
+        p->head = m;
+        if (!p->tail)
+            p->tail = m;
+    } else {
+        m->next = 0;
+        p->tail->next = m;
+        p->tail = m;
+    }
+    struct proc *o = p->op ? p->op : svc_proc((int)(p - ports));
+    if (o && current->prio < o->prio)           /* the server works at least at the caller's level until it replies */
+        prio_raise(o, current->prio);
+    if (p->waiter) {                            /* wake the server */
+        ready(p->waiter);
+        p->waiter = 0;
+    }
+}
+
+void ipc_unqueue(struct port *p, struct umsg *m)
+{
+    struct umsg **q = &p->head, *prev = 0;
+    while (*q && *q != m) { prev = *q; q = &(*q)->next; }
+    if (!*q)
+        return;
+    *q = m->next;
+    if (p->tail == m)
+        p->tail = prev;
+    m->next = 0;
+}
+
+/* wait for the reply to m; a client woken to load or to watch for a held port does that first (svc.c) */
+long ipc_wait(struct umsg *m)
+{
+    while (m->state != MSG_DONE) {
+        current->wait_msg = m;                  /* (a load's own calls used it) */
+        if (current->svc_role) {
+            long r = svc_role(m);
+            if (r) {
+                current->wait_msg = 0;
+                return r;
+            }
+            continue;
+        }
+        current->state = P_MSG;
+        schedule();
+    }
+    current->wait_msg = 0;
+    current->svc_role = 0;
+    return m->result;
+}
+
+static long call(int port, struct umsg *m, u16 kflags, int ns)
 {
     struct port *p = port_of(port);
     if (!p || p->owner == current->pid)
@@ -121,37 +187,25 @@ static long call(int port, struct umsg *m, u16 kflags)
     m->next = 0;
     m->from = current->pid;
     m->client = current;
-    m->uid = current->uid; m->gid = current->gid; m->umask = current->umask;
+    /* a service's program is read as root (D11): whether it starts never depends on who needed it first */
+    m->uid = current->svc_depth ? 0 : current->uid; m->gid = current->svc_depth ? 0 : current->gid;
+    m->umask = current->umask;
     m->kflags = kflags;                         /* a user's SYS_call can never claim to be the kernel */
     m->server = 0;
-    m->state = MSG_QUEUED;
     m->result = 0;
-    if (p->tail)
-        p->tail->next = m;
-    else
-        p->head = m;
-    p->tail = m;
-    current->wait_msg = m;
     current->wait_port = port;
-    current->state = P_MSG;
-    if (current->prio < p->op->prio)            /* the server works at least at the caller's level until it replies */
-        prio_raise(p->op, current->prio);
-    if (p->waiter) {                            /* wake the server */
-        ready(p->waiter);
-        p->waiter = 0;
-    }
-    while (m->state != MSG_DONE) {
-        current->state = P_MSG;
-        schedule();
-    }
-    current->wait_msg = 0;
-    return m->result;
+    current->wait_msg = m;
+    current->call_ns = (u8)(ns ? ns : current->exiting);   /* every call from proc_exit is a no-start call */
+    if (!p->op)                                 /* a held port: svc.c starts the server or queues */
+        return svc_call((int)(p - ports), m, current->call_ns);
+    ipc_enqueue(p, m, 0);
+    return ipc_wait(m);
 }
 
-long ipc_call(int port, struct umsg *m) { return call(port, m, 0); }
+long ipc_call(int port, struct umsg *m) { return call(port, m, 0, 0); }
 /* the kernel's requests on behalf of the current process (its ids are stamped as usual): the filesystem servers do
  * inode-number operations (FS_READ, FS_WRITE, FS_CLOSE, ...) only for these, or for root */
-long ipc_kcall(int port, struct umsg *m) { return call(port, m, UMSG_KERNEL); }
+long ipc_kcall(int port, struct umsg *m, int ns) { return call(port, m, UMSG_KERNEL, ns); }
 
 /* wait: 0 = do not wait (0 if nothing is queued), 1 = wait for a message, N > 1 = wait at most N-1 ticks (then 0).
  * A timed wait sleeps as P_SLEEP with the port's waiter set, so either a message (ipc_call readies the waiter) or
@@ -159,8 +213,8 @@ long ipc_kcall(int port, struct umsg *m) { return call(port, m, UMSG_KERNEL); }
 struct umsg *ipc_recv(int port, int wait)
 {
     struct port *p = port_of(port);
-    if (!p || p->owner != current->pid)
-        return (struct umsg *)-1;
+    if (!p || p->owner != current->pid || current->killed)
+        return (struct umsg *)-1;               /* a kill acts between requests: before the next one is taken */
     u32 until = ticks + (u32)(wait - 1);
     while (!p->head) {
         if (!wait)
@@ -204,22 +258,23 @@ long ipc_reply(struct umsg *m, s32 result)
             }
     if (!c || m->client != c || m->state != MSG_SERVING || m->server != current->pid)
         return -EINVAL;
-    finish(m, result);
+    ipc_finish(m, result);
     if (current->prio < current->blevel)        /* the boost from this client ends with the reply */
         prio_recalc(current);
     return 0;
 }
 
-/* a process died: close its ports (waking clients with an error) and fail
- * every request it was serving */
+/* a process died: its service ports go back to held (svc.c: their queued messages wait for the next server), its
+ * other ports close (waking their clients with -ECONNRESET), and every request it was serving fails */
 void ipc_proc_exit(int pid)
 {
+    svc_exit(current);
     for (int i = 0; i < NPORT; i++) {
         if (!ports[i].used || ports[i].owner != pid)
             continue;
         for (struct umsg *m = ports[i].head, *n; m; m = n) {
             n = m->next;
-            finish(m, EIO_);
+            ipc_finish(m, -ECONNRESET);
         }
         if (ports[i].waiter)
             ready(ports[i].waiter);
@@ -229,7 +284,7 @@ void ipc_proc_exit(int pid)
         struct proc *c = &procs[i];
         if (c->state == P_MSG && c->wait_msg && c->wait_msg->state == MSG_SERVING &&
             c->wait_msg->server == pid)
-            finish(c->wait_msg, EIO_);
+            ipc_finish(c->wait_msg, -ECONNRESET);
     }
 }
 

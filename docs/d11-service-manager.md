@@ -1,6 +1,7 @@
 # D11: the service manager (design note)
 
-**Status: design, not built; reviewed twice, approved by the owner 2026-10-24 (questions answered in section 12).** Nothing in this note exists in the code yet. Revision 3
+**Status: approved by the owner 2026-10-24 (questions answered in section 12); being built on branch `d11` - what is
+built so far, and where the code differs from this note, is in section 15.** Revision 3
 (2026-10-24): the findings of two reviews are worked in (section 14 lists them). Facts about today's Zenix were read
 from branch `d11` (= main after D10); the file and function names below say where. The decision itself is DESIGN.md
 D11; this note is its full design.
@@ -692,6 +693,36 @@ watcher), 5.6; 5 hung servers -> 5.6 (`killed` checked before taking a message, 
 `SVC_SAVE`/`LOAD` while starting -> 8.1; 7 the record's size -> 5.4; 8 the damaged record -> 5.4 (panic at once, the
 generation alternative and why not, pids never reused); 9 removing the mount programs -> 6.4; 10 held slots after
 umount -> 5.2; 11 size -> 10; 12 the step 0 rule -> 11, 5.6.
+
+## 15. As built (branch d11)
+
+**Built:** step 0 (2026-10-24: `fs_read_file` deleted; the "exiting" flag and the kill-in-a-call rule came from main
+with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`).
+
+**Where the code differs from the note** (each one small, and the reason):
+- *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM
+  floppy four small helpers the kernel inlined many times are no longer inlined (`copy_str` in syscall.c; `route`,
+  `path_abs`, `fs_call_on`, `file_close`, `mount_root` in vfs.c: one call more per system call, against a message call
+  that costs thousands of cycles) and boot prints without `printf` (boot.zx 4884 -> 2184 bytes). Measured: kernel
+  174264 bytes before D11, 173012 after step 1.
+- *The volume id* is written `START,SIZE,UUID` (hex) after `-id`; the medium comes from the device name's prefix
+  (`ide0`, `ram0`, `dfN`), so the longest registration, a mount's `@zfsd ide0p19 fs.ide0p19 -id ...`, fits the 80
+  bytes.
+- *File services* can already be registered and loaded (as root, the nesting limit) in step 1: the tests of steps 4
+  and 5 need a non-essential service (`pingd`). Step 7 adds only `/etc/svctab`.
+- *The back-off and the deadline* are in step 1 (the note lists them there; step 4 adds the give-up and the tests).
+- *An essential server that cannot even be loaded* (out of memory, the process table full) is a panic too ("svc:
+  cannot start an essential server"): otherwise boot would wait for ever with no disk.
+- *The start of a file service:* `proc_load` marks the entry *starting* (`svc_born`) as soon as the process exists,
+  because the loader still closes the program file afterwards (a blocking call) and the new server may take its port
+  meanwhile.
+- *Kills:* `killed` 3 is "a second kill" (ends at once, status 130). A fault (`killed` 2) still ends a process at once,
+  but no longer while its message is queued or being served (a stack overflow found while it waited).
+- *The log* names the request type by number ("during request 12 for pid 17"), and says "start N when next used" on a
+  line of its own; an essential server's end before it served panics with "svc: an essential server ended before it
+  served" after its "ended" line (the server's own message, e.g. "fsd: no writable ext2 filesystem on ide0 for the
+  root", is just above).
+- *`port_create`* of a name an ordinary port already has answers -EBUSY (was -1).
 
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
 same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10

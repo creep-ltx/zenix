@@ -28,9 +28,9 @@ static int ipc_checks(void)
 {
     static char buf[512];
     if (sys_geteuid() == 0) { printf("badptr: ipc: run this as a normal user\n"); return 2; }
-    check("ipc: port \"fs\" cannot be created", sys_port_create("fs") == -13);
+    check("ipc: port \"fs\" cannot be created", sys_port_create("fs") == -EBUSY);     /* registered services (D11) */
     check("ipc: port \"fs.ide0p9\" cannot be created", sys_port_create("fs.ide0p9") == -13);
-    check("ipc: port \"disk\" cannot be created", sys_port_create("disk") == -13);
+    check("ipc: port \"disk\" cannot be created", sys_port_create("disk") == -EBUSY);
     int fs = sys_port_find("fs"), disk = sys_port_find("disk");
     check("ipc: FS_READ by inode refused", fs >= 0 && call(fs, FS_READ, 2, 0, (u32)buf, 16) == -13);
     check("ipc: FS_WRITE by inode refused", fs >= 0 && call(fs, FS_WRITE, 12, 0, (u32)buf, 4) == -13);

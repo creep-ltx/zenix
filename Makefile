@@ -26,7 +26,7 @@ ASFLAGS += $(DIAG)
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
@@ -34,7 +34,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot
+          nice renice priotest reboot svctest
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 # Stack sizes written into each program's ZEXE header (the loader gives this much; no guard below it). Default 16 KB;
@@ -204,6 +204,7 @@ $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py tools/check-68020-60.sh
 # the same server as a program: `mount -t ext2` starts /bin/mount.ext2 DEVICE PORT
 $(BUILD)/mount.ext2.zx: $(BUILD)/fsd.zx
 	cp $< $@
+$(BUILD)/boot.uo: user/rootpick.h user/rdb.h kernel/diskproto.h
 $(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx $(BUILD)/mount.zenixfs.zx | $(BUILD)
 	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
 
@@ -213,7 +214,7 @@ $(BUILD)/zenixfs_lib.uo: zenixfs/zenixfs.c zenixfs/zenixfs.h user/zenixfs_env.h 
 ZENIXFS_OBJS := $(BUILD)/zenixfs_lib.uo $(BUILD)/zenixfs_disk.uo
 $(BUILD)/zenixfs_disk.uo: user/zenixfs_disk.c user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -ffunction-sections -c $< -o $@
-$(BUILD)/zenixfsd.uo: user/zenixfsd.c user/rootpick.h user/rdb.h kernel/fsperm.h kernel/fsproto.h user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
+$(BUILD)/zenixfsd.uo: user/zenixfsd.c user/rdb.h kernel/fsperm.h kernel/fsproto.h user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -ffunction-sections -c $< -o $@
 $(BUILD)/zenixfsd.uelf: $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \

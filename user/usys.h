@@ -132,3 +132,13 @@ static inline int sys_setpriority(int which, int who, int nice) { return sys3(79
 #define BOOTNOTE_AMIGAOS 1u                     /* SYS_reboot: the boot menu starts this system at once (kernel.h) */
 #define BOOTNOTE_ZENIX   2u
 static inline int sys_reboot(u32 note) { return sys3(80, note, 0, 0); }
+/* the service manager (DESIGN D11): register a port name with a program ("@image args" or "/path args", at most 80
+ * bytes, 6 words) and its nice (root); remove it (root); how many times the caller's service was started (0: none) */
+#define SVC_REGISTER 1
+#define SVC_REMOVE   2
+#define SVC_SELF     3
+#define SVC_TEXT_MAX 80
+static inline int sys_svc_register(const char *name, const char *prog, int nice)
+{ return sys3(81, SVC_REGISTER | ((u32)nice & 0xFF) << 8, (u32)name, (u32)prog); }
+static inline int sys_svc_remove(const char *name) { return sys3(81, SVC_REMOVE, (u32)name, 0); }
+static inline int sys_svc_self(void) { return sys3(81, SVC_SELF, 0, 0); }

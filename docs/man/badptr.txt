@@ -20,7 +20,8 @@ DESCRIPTION
     "FAILED", then "badptr: all ok".
 
     badptr ipc, run as a normal user, checks what such a user must not be
-    able to do: create the ports "fs", "fs.*" or "disk"; send the
+    able to do: create the ports "fs", "fs.*" or "disk" (the registered
+    services "fs" and "disk" answer -16, EBUSY, the others -13); send the
     filesystem server its own FS_READ, FS_WRITE, FS_OPEN or FS_QUIT, or the
     disk server DISK_OPEN, DISK_READ or DISK_RESCAN (all refused with -13,
     also when the message claims to come from the kernel); kill, stop or

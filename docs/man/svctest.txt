@@ -1,0 +1,35 @@
+SVCTEST(1)		Zenix manual
+
+NAME
+    svctest - test the service manager
+
+SYNOPSIS
+    svctest port NAME
+    svctest reg NAME NICE PROGRAM [ARGUMENTS]
+    svctest rm NAME
+    svctest call NAME TYPE [A0]
+
+DESCRIPTION
+    A test program for the service manager (DESIGN D11,
+    docs/d11-service-manager.md). Each use prints one line starting with
+    "svctest" and the result (0 or more, or a negative error number):
+
+    port   tries to create the message port NAME. A registered name
+           (disk, fs) is refused with -16 (EBUSY) for everyone, root
+           included: only the process the kernel started for it may
+           take it.
+    reg    registers the service NAME (root): PROGRAM is a built-in
+           image (@diskd, @fsd, @zfsd) or an absolute path, NICE the
+           server's priority. The first call to NAME starts it.
+    rm     removes the service NAME (root).
+    call   makes one call to the port NAME with message type TYPE (and
+           a0) and prints the result and how long it took, in ms of
+           the E-clock (emulator times are not hardware times).
+
+    tools/svc-test.sh uses it in the emulator.
+
+EXIT STATUS
+    0, or 2 for a usage error.
+
+SEE ALSO
+    boot(8), ping(1), pingd(1)

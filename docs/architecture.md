@@ -128,9 +128,11 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
    `kmain()`.
 4. `kmain` reads the previous boot's log (below), then starts the serial port, vector table, memory manager,
-   caches, display, clock and disk, then creates the four built-in processes: `diskd`, `fsd`, `zfsd`, `boot`. `boot`
-   waits for the `fs` port and starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and starts `login` on
-   console 1 (section 11).
+   caches, display, clock and disk, then creates one process from its image: `boot` (pid 1). `boot` registers the
+   disk server and the root filesystem server as services (section 9, "The service manager"): its first call to
+   `disk` starts `diskd` (pid 2), it picks the root device and its server from the superblock, and its first call to
+   `fs` starts `fsd` or `zfsd` (pid 3); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
+   starts `login` on console 1 (section 11).
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)
 
@@ -393,7 +395,7 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 77 system calls (the numbers and
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 78 system calls (the numbers and
 a line on each are in `kernel/kernel.h`; numbers 1-80, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
@@ -459,16 +461,21 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 - `recv(port, wait)`: wait 0 returns at once (0 if nothing is queued), 1 waits for a message, N > 1 waits at most N-1
   ticks and then returns 0 - a server with a deadline (ZenixFS's commit three seconds after the first change) sleeps
   until a message or the deadline, whichever comes first, instead of polling.
-- If a server dies, its ports are closed and its pending and in-service requests fail with an I/O error (-EIO); the
-  kernel then forgets the cached port number and looks it up again next time. `ipc_reply` looks the message up
+- If a server dies, the request it was serving fails with -ECONNRESET ("the server is gone", errno 104; the kernel's
+  file calls turn it into -EIO for programs). A service's port (section 9, "The service manager") goes back to
+  *held*: its queued requests wait for the next server, which the first of them starts. Any other port is closed, its
+  queued requests fail with -ECONNRESET, and the kernel forgets a cached port number and looks it up again next time. `ipc_reply` looks the message up
   among the requests really in flight (the clients' `wait_msg`) before it reads anything in it, so a stray or forged
   pointer from a server is refused (-EINVAL) instead of being followed.
 - The kernel stamps every message with the caller's uid, gid and umask, and `kflags`: `UMSG_KERNEL` when the kernel
   itself sends it for a system call (`ipc_kcall`, used by vfs.c), 0 for a program's own `SYS_call` (`ipc_call`
   always clears it). The filesystem servers answer only messages with `UMSG_KERNEL`, or from root; the disk server
-  only root (and `DISK_LIST`/`DISK_INFO` for anyone). Port names `fs`, `fs.*` (mounts) and `disk` are reserved:
-  only root may create them, so a dead server's name cannot be taken over by a normal user (`port_create` answers
-  -EACCES). Audit D.
+  only root (and `DISK_LIST`/`DISK_INFO` for anyone). A registered service name (`disk`, `fs`) is created only by the
+  process the kernel started for it: anyone else, root too, gets -EBUSY, also after a crash. The names `fs.*`
+  (mounts) not registered as services are reserved: only root may create them (`port_create` answers -EACCES), so a
+  dead server's name cannot be taken over by a normal user. Audit D, D11.
+- 28 port slots: the first 12 are the held ports of the services (one per entry, never given to another port), the
+  other 16 ordinary ones, so creating ports until the ordinary ones run out cannot stop a service.
 - **Priority inheritance** (DESIGN D10, after QNX). A server runs at least at the level of every client it holds:
   `call()` raises the port owner to the caller's effective level when the message is queued (so a server with several
   queued clients serves at the best waiting one's level), and `ipc_reply()` (also the reply half of `replyrecv`)
@@ -479,7 +486,11 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   through a shared server: a nice 0 client of a nice 10 server is not delayed by a busy nice 5 program (`priotest
   inherit`; a test-only kernel built with `-DNO_PRIO_INHERIT` fails that check: the calls wait until the busy program
   ends).
-- Drawback of the design, noted in DESIGN.md: a **hung** server blocks its clients.
+- Drawback of the design, noted in DESIGN.md: a **hung** server blocks its clients (a kill ends it: below).
+- **Kills and servers** (D11). A kill (not a fault) waits for the end of a message call; a process killed while it
+  serves a request ends only between requests: `ipc_recv` refuses to take the next message, and the end of a system
+  call ends it only when it serves nothing. So a kill never cuts a filesystem change in half. A second kill, or a kill
+  still pending 5 s later, ends it at once (a server hung inside a request).
 
 ## 9. The servers
 
@@ -510,14 +521,17 @@ successful `FS_OPEN` (also the kernel's own, to load a program) is matched by on
 the inode (the last close of the file, or the program is loaded). An inode whose last name goes while it is open keeps
 its blocks until its last `FS_CLOSE` (so an old handle never reads or writes a file that reused the number); after a
 crash such an inode is left with no links and `fsck.ext2`/`e2fsck` free it. ZenixFS makes it an orphan
-(`zenixfs_orphan_add`), which the next mount frees after a crash. Chooses its root: a RAM-disk image from the boot floppy if present, else the first partition of
-type ext2 (RDB `LNX\0`, MBR 0x83) that holds an ext2 volume Zenix can **write** (see "ext2: what is mounted" in
-section 10; an ext3, ext4 or damaged volume is never the root), else the bare disk. Started with `fsd DEVICE PORTNAME` (as `/bin/mount.ext2`, by `mount`)
-it serves that device on its own port instead; it answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
-(umount: sync, release the device, exit). Two root servers are built into the kernel image, `fsd` (ext2) and `mount.zenixfs`
-started without arguments (`zfsd`); both run at boot and apply `user/rootpick.h`: a RAM disk is the root; else the bootable
-ext2/zenixfs partition; else the first one of those; else the bare disk. The one whose type it is serves port `fs`, the other
-exits. `init` runs `mount -a` (from `/etc/fstab`) before login.
+(`zenixfs_orphan_add`), which the next mount frees after a crash. Started as `fsd DEVICE PORTNAME [-root] [-id ID]`: it
+serves DEVICE on port PORTNAME; with `-root` (the root's server, registered by boot) the volume must be one Zenix can
+**write** (see "ext2: what is mounted" in section 10; an ext3, ext4 or damaged volume is never the root), and it
+prints as `fsd`, not as `mount.ext2`; `-id` carries the volume id boot read (place and uuid; used by restarts, D11 step 3).
+As `/bin/mount.ext2` it is started by `mount`. It answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
+(umount: sync, release the device, exit). Two root servers are built into the kernel image, `fsd` (ext2) and `zfsd`
+(the ZenixFS server, the same program as `/bin/mount.zenixfs`). **Which one serves the root** is boot's choice
+(`user/rootpick.h`): a RAM disk is the root; else the bootable ext2/zenixfs partition; else the first one of those;
+else the bare disk; boot reads the device's superblock (ext2 magic at byte 1080, ZenixFS `ZNFS` at byte 32) and
+registers `fs` with that server and device, so only one root server is ever started. `init` runs `mount -a` (from
+`/etc/fstab`) before login.
 
 ### mount.zenixfs - the ZenixFS server (`user/zenixfsd.c` + `zenixfs/zenixfs.c`, port chosen by `mount`)
 The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the
@@ -539,9 +553,41 @@ working directory or an open file inside, or another mount lies below. Caveat: b
 working directory reached through a symbolic link behaves as its text says once a second filesystem is mounted.
 
 ### boot - the starter (`user/boot.c`)
-Waits for the `fs` port, spawns `/bin/init` on console 1 and waits for it; should init end, it says so and starts it
-again. (It exists because the idle process cannot block on a message.) The logins on the consoles are init's work
-(section 11, man/init.txt).
+pid 1, the only process the kernel creates itself. It registers `disk` -> `@diskd` (nice -10), picks the root (above),
+registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10), asks for the root inode (`SYS_mountinfo`
+0: the first call to `fs` starts the root server), then spawns `/bin/init` on console 1 and waits for it; should init
+end, it says so and starts it again. (It exists because the idle process cannot block on a message.) The logins on the
+consoles are init's work (section 11, man/init.txt).
+
+### The service manager (`kernel/svc.c`, DESIGN D11)
+The full design is docs/d11-service-manager.md; what is built (steps 0-1 of its build order):
+- **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
+  bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
+  (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are
+  *essential* (set by the kernel for these names).
+- **Held ports.** A registered name always has its port, in a slot of its own (slots 0-11), with the same number
+  (generation included) across restarts, so every cached port number stays right. Only the process the kernel started
+  for the entry can take the port over (`port_create`); anyone else gets -EBUSY.
+- **On demand.** A call to a held port with no server makes the *caller* the loader, in its own context (no loader
+  process to deadlock with): an image is copied from the kernel (no disk), a file is read as root (the calls of a
+  load carry uid 0). The new process has no parent (uid 0, `/`, empty environment, ppid 0: only root may kill it), the
+  entry's nice, and output on console 1. Callers that come meanwhile queue and wait. The loader's own message stays out
+  of the queue while it loads and goes first once the server took its port.
+- **The deadline.** A started server has 30 s to open its port, kept by a *watcher* (the loader, else the first
+  queued client) with a timed sleep in its own context, never in the tick; one that misses it is killed and counted,
+  and the queued calls fail with -ECONNRESET. A loader or watcher that is killed passes its role on.
+- **A death.** The request in service fails with -ECONNRESET; the queued ones stay and the first of them starts the
+  next server. An end with status 0 while nothing was in service is a *stop* (not counted); anything else is an *end*,
+  logged and counted. The start after the 2nd, 3rd and 4th end within 60 s waits 1, 2 and 4 s. A server that ends
+  before it opened its port has failed to start: its queued calls fail. An essential server that ends before it ever
+  served (or cannot be loaded) is a panic at once ("svc: an essential server ended before it served").
+- **No-start calls.** `FS_CLOSE` (from `file_close` and the end of a program load) and every call made by a dying
+  process never start a server: dropped while the entry is stopped, queued while it is loading or starting.
+- **Loads nest at most two deep** (a file service read while the root server is stopped); a third level fails with
+  -ECONNRESET. Kernel stack: the deepest such chain is about 2.1 KB of the 4 KB (`-fstack-usage` sums, 2026-10-24).
+- **The log** (`dmesg`): `svc: NAME: started PROGRAM (pid N, for pid M NAME)`, `svc: NAME: PROG (pid N) ended, status
+  S[, during request T for pid C]`, `... stopped`, `svc: NAME: start K when next used`, `... did not open its port in
+  30 s`, `... cannot start PROGRAM (error E)`.
 
 ### What the two filesystem servers answer (audit E)
 The same errno for the same case: a missing name -ENOENT, an existing one -EEXIST (also `mkdir` of an existing

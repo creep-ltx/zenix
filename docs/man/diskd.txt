@@ -4,7 +4,9 @@ NAME
     diskd - the disk server
 
 SYNOPSIS
-    built into the kernel image; not run by hand
+    built into the kernel image; not run by hand. boot(8) registers it as
+    the service "disk": the first call starts it, and a call after it
+    ended (a crash, or a kill by root) starts it again (DESIGN D11)
 
 DESCRIPTION
     Owns the disk hardware through privileged system calls (an IDE drive, or

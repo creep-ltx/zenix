@@ -292,13 +292,17 @@ struct proc {                   /* start.S relies on the first three: */
     u8 wait_con;                /* P_WAIT with WAIT_CONSOLE: a console switch wakes it too */
     int wait_port;              /* P_MSG: as a server the port being listened on, as a client the port called */
     char name[16];
+    u32 kill_at;                /* when the first kill came (a service process: 5 s later it ends even mid-request) */
+    u8 svc_role;                /* D11: woken to load (SVC_ROLE_LOAD) or to keep a start's deadline (SVC_ROLE_WATCH) */
+    u8 svc_depth;               /* D11: service loads under way in this process (at most 2 nested); its calls carry uid 0 */
+    u8 call_ns;                 /* D11: the call in flight may not start a server (a no-start call, svc.c) */
 };
 extern struct proc procs[NPROC];
 extern struct proc *current;
 void proc_init(void);
 int proc_spawn(const char *path, char *const *argv, int argc,
                struct proc *parent, const int *stdio, int tty);
-int proc_spawn_image(const void *img, u32 len, const char *name, int tty, int priv);
+int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv);   /* no parent, console 1 */
 void schedule(void);
 void proc_exit(int code) __attribute__((noreturn));
 #define WAIT_NOHANG   1       /* proc_wait flag: -2 if children exist but none has exited */
@@ -340,13 +344,15 @@ void wake_io(void);
 void ready(struct proc *p);         /* make a blocked process runnable */
 extern int nsleep;
 void block_io(void);
-void proc_kill(struct proc *p);
+void proc_kill(struct proc *p);       /* killed: 1 a kill, 2 a fault (139), 3 a second kill (at once) */
+int proc_kill_now(void);              /* the end of a system call: is current killed and may it end now? */
 struct proc *proc_by_pid(int pid);
 
 /* ipc.c: ports and messages. A message lives in the sender's memory; only
  * pointers move (no MMU, so the server reads and writes the client's
  * buffers directly). The sender is blocked until the server replies. */
-#define NPORT 16
+#define NSVC  12               /* D11 service entries (svc.c); port slots 0..NSVC-1 are their held ports */
+#define NPORT (NSVC + 16)       /* the held ports, then 16 ordinary ones */
 #define MSG_QUEUED  1
 #define MSG_SERVING 2
 #define MSG_DONE    3
@@ -361,16 +367,49 @@ struct umsg {
     u16 kflags;                 /* kernel: UMSG_KERNEL if the kernel sent it for a system call (ipc_kcall), else 0 */
     struct proc *client;        /* kernel: who is waiting for the reply */
 };
+struct port {
+    int used, owner;            /* owner 0: a held port (D11) whose server is not running */
+    u32 gen;                    /* how many times this slot was created: part of the port number (audit G1) */
+    struct proc *op;            /* the owner's slot (valid while owned: a dying owner's ports are closed or held) */
+    char name[16];
+    struct umsg *head, *tail;
+    struct proc *waiter;        /* server blocked in recv */
+};
+extern struct port ports[NPORT];
+#define PORT_ID(i) ((int)((ports[i].gen << 8) | (u32)(i)))     /* a port number: (generation << 8) | slot */
 int port_create(const char *name, int owner);
+int port_slot(const char *name);                /* the slot of a port by name, -1 if none */
 int port_find(const char *name);
 struct proc *port_owner(int port);             /* the process that owns a port, 0 if none */
 long ipc_call(int port, struct umsg *m);       /* SYS_call: kflags 0 */
-long ipc_kcall(int port, struct umsg *m);      /* the kernel's own requests (vfs.c): kflags UMSG_KERNEL */
+long ipc_kcall(int port, struct umsg *m, int ns);   /* the kernel's own requests (vfs.c): kflags UMSG_KERNEL; ns: SVC_NS_* */
+long ipc_wait(struct umsg *m);                 /* the caller's m is queued: wait for the reply (and take a D11 role) */
+void ipc_enqueue(struct port *p, struct umsg *m, int front);
+void ipc_unqueue(struct port *p, struct umsg *m);
+void ipc_finish(struct umsg *m, s32 result);
+int ipc_serving(int pid);                      /* is pid serving a request now? */
 #define UMSG_KERNEL 1
 struct umsg *ipc_recv(int port, int wait);
 struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port);
 long ipc_reply(struct umsg *m, s32 result);
 void ipc_proc_exit(int pid);
+
+/* svc.c: the service manager (DESIGN D11, docs/d11-service-manager.md) */
+#define SVC_TEXT 80                     /* a program and its arguments: at most 80 bytes of text, 6 words */
+#define SVC_REGISTER 1                  /* SYS_svc op | nice << 8, name, program text (root) */
+#define SVC_REMOVE   2                  /* op, name (root) */
+#define SVC_SELF     3                  /* op -> how many times the caller's entry was started, 0 if not a service */
+#define SVC_NS_CLOSE 1                  /* no-start call: dropped if stopped, queued while loading or starting */
+#define SVC_NS_SKIP  2                  /* no-start call: answered -ECONNRESET unless a server runs */
+#define SVC_ROLE_LOAD  1
+#define SVC_ROLE_WATCH 2
+long svc_call(int slot, struct umsg *m, int ns);   /* a call to a held port with no server */
+long svc_role(struct umsg *m);          /* the caller was woken to load or watch for the port of its call */
+int svc_handover(int slot);             /* port_create of a registered name: the started process takes its port */
+struct proc *svc_proc(int slot);        /* who works for a held port now (the loader or the starting server) */
+void svc_exit(struct proc *p);          /* p is dying: the entries it served, loaded or watched */
+void svc_born(int pid);                 /* proc_load made the server of the load under way in current */
+long svc_sys(u32 op, const char *name, const char *text);
 
 /* vfs.c */
 struct file *file_new(int type);
@@ -500,6 +539,7 @@ int tty_of(const struct proc *p);
 #define SYS_getpriority 78   /* which (PRIO_*), who -> 20 - nice (1 .. 40, never a negative errno's range), or -errno */
 #define SYS_setpriority 79   /* which, who, nice: anyone lowers their own processes, only root raises */
 #define SYS_reboot      80   /* note (0, BOOTNOTE_AMIGAOS, BOOTNOTE_ZENIX): root only; sync, stop disk writes, reset */
+#define SYS_svc         81   /* op (SVC_*), arg, buffer: the service manager (D11, svc.c) */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

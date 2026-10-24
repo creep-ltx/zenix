@@ -4,7 +4,7 @@
 
 /* copy a NUL-terminated string from user memory, bounds-checked: 0, -EFAULT (outside the caller's memory) or
  * -ENAMETOOLONG (longer than max - 1: a path given to a system call is at most 63 bytes) */
-static int copy_str(char *dst, u32 uptr, u32 max)
+static __attribute__((noinline)) int copy_str(char *dst, u32 uptr, u32 max)
 {
     for (u32 i = 0; i < max; i++) {
         if (!user_ok(current, uptr + i, 1))
@@ -567,6 +567,16 @@ void syscall_c(u32 *rb)
             machine_reset();
         }
         break;
+    case SYS_svc: {                     /* D11: op | nice << 8, name, program text */
+        char name[16], text[SVC_TEXT];
+        u32 op = a1 & 0xFF;
+        if (op != SVC_SELF && !CSTR(name, a2))
+            break;
+        if (op == SVC_REGISTER && !CSTR(text, a3))
+            break;
+        r = (s32)svc_sys(a1, op == SVC_SELF ? 0 : name, text);
+        break;
+    }
     case SYS_kill: {
         struct proc *p = proc_by_pid((int)a1);
         if (!(r = may_signal(p)))
@@ -579,6 +589,6 @@ void syscall_c(u32 *rb)
         kwork();                        /* queued input: done here, on the way back to user mode (main.c) */
     if (need_resched)
         resched();                      /* a better process became ready (a reply, a wake, input): it runs now */
-    if (current->killed)
-        proc_exit(130);
+    if (proc_kill_now())
+        proc_exit(current->killed == 2 ? 139 : 130);
 }

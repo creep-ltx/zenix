@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     started by mount(8): mount.ext2 device portname
+    built into the kernel image as fsd: fsd device fs -root -id ID
 
 DESCRIPTION
     The same server as the root filesystem's fsd, run as a program on a
@@ -18,7 +19,10 @@ DESCRIPTION
     ...) is refused and the features are named; one with an ext3 journal,
     an unknown read-only feature or the "has errors" state is mounted
     READ-ONLY with a line saying why (every write fails, EROFS). The root
-    filesystem is only taken from a volume that mounts read-write.
+    filesystem is only taken from a volume that mounts read-write: the root's
+    server, fsd, is started by the kernel for boot(8) with -root, which
+    refuses any other ("fsd: no writable ext2 filesystem on DEVICE for the
+    root").
 
 SEE ALSO
     mount(8), umount(8), docs/architecture.md

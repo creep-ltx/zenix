@@ -419,24 +419,12 @@ void kmain(struct bootinfo *bi)
         panic("no disk and no ramdisk");
     proc_init();
     tty_init();
-    /* the filesystem server and the starter are built into the kernel */
-    extern const char fsd_blob[], fsd_blob_end[], boot_blob[], boot_blob_end[],
-                      diskd_blob[], diskd_blob_end[], zfsd_blob[], zfsd_blob_end[];
-    int dpid = proc_spawn_image(diskd_blob, (u32)(diskd_blob_end - diskd_blob), "diskd", 1, 1);
-    int fpid = proc_spawn_image(fsd_blob, (u32)(fsd_blob_end - fsd_blob), "fsd", 1, 0);
-    int pid = proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), "boot", 1, 1);
-    if (dpid < 0 || fpid < 0 || pid < 0)
-        panic("cannot start the filesystem server");
-    /* the second root server: it serves the root if the root is ZenixFS and leaves at once otherwise (user/rootpick.h). Started last
-     * so that the process numbers above stay as they were. If it cannot be started the ext2 root still works. */
-    int zpid = proc_spawn_image(zfsd_blob, (u32)(zfsd_blob_end - zfsd_blob), "zfsd", 1, 0);
-    /* the built-in servers run above normal programs (DESIGN D10), so a busy program never delays the disk and the
-     * filesystems everyone waits for; boot (it serves nothing) and what it starts stay at nice 0 */
-    proc_renice(proc_by_pid(dpid), NICE_SERVER);
-    proc_renice(proc_by_pid(fpid), NICE_SERVER);
-    if (zpid > 0)
-        proc_renice(proc_by_pid(zpid), NICE_SERVER);
-    kprintf("proc: diskd %d, fsd %d, boot %d (it starts /bin/init)\n", dpid, fpid, pid);
+    /* only the starter is started here (D11): boot registers the disk and root filesystem servers (built into the
+     * kernel, svc.c), and its first calls start them; then it starts /bin/init */
+    extern const char boot_blob[], boot_blob_end[];
+    char *bargv[] = { "boot", 0 };
+    if (proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), bargv, 1, 1) < 0)
+        panic("cannot start boot");
 
     input_init();
     klog_mirror_off();                          /* from here the screen belongs to the programs */

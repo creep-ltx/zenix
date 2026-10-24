@@ -67,11 +67,14 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 
 ## Hard numbers worth knowing
 
-- 32 processes, 16 message ports, 64 open files, 16 fds per process, 8 extra memory regions per process, 8 mounts
+- 32 processes, 28 message ports (12 held for services, 16 ordinary), 64 open files, 16 fds per process, 8 extra memory regions per process, 8 mounts
   (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
   at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
   -ENAMETOOLONG beyond, never cut), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
   NTSC), 200 scrollback lines per console, a cooked tty line of 255 characters (the bell for more).
+- Services (DESIGN D11, architecture.md section 9): 12 entries; a program and its arguments of at most 6 words in 80
+  bytes; a started server has 30 s to open its port; the start after the 2nd, 3rd and 4th end within 60 s waits 1, 2
+  and 4 s; loads nest at most two deep.
 - Priorities (DESIGN D10, architecture.md section 6): 32 levels; nice -20..19 (a value outside is taken as the nearest
   end); a 50 ms slice; the built-in servers at nice -10; priority inheritance passes along a chain of at most 8 servers.
 - The shell: no fixed count of arguments, glob matches, words, pipeline stages, `for` items or positional

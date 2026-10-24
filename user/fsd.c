@@ -3,7 +3,6 @@
 #include "../kernel/fsproto.h"
 #include "../kernel/diskproto.h"
 #include "rdb.h"
-#include "rootpick.h"
 
 /* The filesystem server: kernel/ext2.c in user mode behind the "fs" port.
  * Embedded in the kernel image (the kernel needs it before any disk is
@@ -50,23 +49,6 @@ static int try_mount(const char *name, int mode)
     fs_dev = h;
     strncpy(devname, name, sizeof devname - 1);
     return 0;
-}
-
-/* the root filesystem: a root image the boot floppy carried (the dev/test image) wins; otherwise the first partition
- * of type ext2 (RDB 'LNX\0', MBR 0x83) that holds a writable ext2 volume Zenix fully supports (a refused or read-only
- * one - ext3, ext4, errors - is never the root), else the bare disk. */
-static int find_root(void)
-{
-    struct diskinfo di;
-    if (!try_mount("ram0", EXT2_RW)) return 0;        /* only exists when the floppy carried a root image */
-    for (u32 i = 1; i < 16; i++) {                    /* 0 is the whole disk */
-        struct umsg m;
-        m.type = DISK_LIST; m.a[0] = i; m.a[1] = (u32)&di;
-        if (sys_call(disk_port, &m) < 0) break;
-        if (di.dostype != DT_EXT2) continue;          /* ram0 and partitions of other types */
-        if (!try_mount(di.name, EXT2_RW)) return 0;
-    }
-    return try_mount("ide0", EXT2_RW);
 }
 
 /* Open inodes (FS_OPEN counts one, FS_CLOSE from the kernel one less): an inode whose last name goes while it is
@@ -306,25 +288,20 @@ static int handle(struct umsg *m)
     return r < 0 && ext2_denied ? -EACCES : r;
 }
 
-/* fsd                      the root filesystem server (built into the kernel): finds the root device, port "fs"
- * fsd DEVICE PORTNAME       a second ext2 filesystem on DEVICE, served on port PORTNAME (started by mount) */
+/* fsd DEVICE PORTNAME [-root] [-id ID]   the ext2 filesystem on DEVICE, served on port PORTNAME. Built into the kernel
+ * and started as a service (DESIGN D11): boot registers the root's ("fs", -root: it must be writable, as the root is
+ * - a refused or read-only volume, ext3, ext4, errors, is never the root); also /bin/mount.ext2, started by mount. */
 int main(int argc, char **argv)
 {
-    const char *pname = "fs";
     ext2_busy = open_busy;
-    int tries = 0;
-    while ((disk_port = sys_port_find("disk")) < 0) {
-        if (++tries > 600) { printf("fsd: no disk server\n"); return 1; }
-        sys_sleep(5);
-    }
-    if (argc >= 3) {
-        pname = argv[2];
-        if (try_mount(argv[1], EXT2_ANY)) { printf("mount.ext2: %s is not an ext2 filesystem Zenix can mount, or is in use\n", argv[1]); return 1; }
-    } else {
-        struct rootpick rp;
-        rootpick(disk_port, &rp);
-        if (!rp.have_ram && rp.found && rp.dostype == DT_ZENIXFS) return 0;   /* the root is ZenixFS: mount.zenixfs serves it */
-        if (find_root()) { printf("fsd: no ext2 filesystem\n"); return 1; }
+    disk_port = sys_port_find("disk");                /* a registered service: calling it starts diskd if need be */
+    int root = argc > 3 && !strcmp(argv[3], "-root");
+    if (argc < 3) { printf("usage: fsd DEVICE PORT [-root] [-id ID]\n"); return 2; }
+    const char *pname = argv[2];
+    if (try_mount(argv[1], root ? EXT2_RW : EXT2_ANY)) {
+        printf(root ? "fsd: no writable ext2 filesystem on %s for the root\n"
+                    : "mount.ext2: %s is not an ext2 filesystem Zenix can mount, or is in use\n", argv[1]);
+        return 1;
     }
     int port = sys_port_create(pname);
     if (port < 0) { printf("fsd: cannot create the port %s\n", pname); return 1; }

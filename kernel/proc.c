@@ -499,6 +499,8 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
         rq_push(p);
         irq_restore(s);
     }
+    if (current->svc_depth)
+        svc_born(pid);                  /* a service's server (D11): its entry is starting from now on */
     return pid;
 }
 
@@ -521,12 +523,23 @@ int proc_spawn(const char *path, char *const *argv, int argc,
     return pid;
 }
 
-/* a program built into the kernel image (no filesystem needed) */
-int proc_spawn_image(const void *img, u32 len, const char *name, int tty, int priv)
+/* a program built into the kernel image (no filesystem needed): no parent (uid 0, /, nice 0), output to console 1 */
+int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv)
 {
-    char *argv[] = { (char *)name, 0 };
-    return proc_load(img, len, fill_mem, img, name, argv, 1, 0, 0, tty, priv, -1);
+    return proc_load(img, len, fill_mem, img, argv[0], argv, argc, 0, 0, 1, priv, -1);
 }
+
+/* may killed process p end now? A kill (not a fault) waits for the end of a message call (the server may still use
+ * the client's buffers) and of a service load; a service process killed while serving a request ends only between
+ * requests (D11 5.6) - unless it was killed twice or 5 s ago (a hung server); a fault ends it at once, but never while
+ * its message is still queued or served */
+static int kill_now(const struct proc *p)
+{
+    if (p->exiting || (p->wait_msg && (p->killed != 2 || p->wait_msg->state != MSG_DONE)))
+        return 0;
+    return p->killed != 1 || (s32)(ticks - p->kill_at) >= 500 || !ipc_serving(p->pid);
+}
+int proc_kill_now(void) { return current->killed && kill_now(current); }
 
 void schedule(void)
 {
@@ -574,10 +587,9 @@ void schedule(void)
     /* A process that was killed while blocked or preempted dies here - but not while it is already exiting (proc_exit's
      * own FS_CLOSE calls end up here: a nested exit closed its files twice, the u16 refs wrapped, audit G3), and a kill
      * (not a fault) waits while it is in a message call: the reply readies it, the call returns, and it dies at the end
-     * of its system call, so a close or a program load is not cut in half (G4). (A killed server still ends at the end of
-     * its next system call, possibly between two blocks of a change: D11 lets a kill act only between requests, G5.) */
-    if (current->killed && current->state == P_READY && current->pid != 0 && !current->exiting &&
-        (current->killed == 2 || !current->wait_msg))
+     * of its system call, so a close or a program load is not cut in half (G4); a killed server ends between requests
+     * (G5, D11): kill_now */
+    if (current->killed && current->state == P_READY && current->pid != 0 && kill_now(current))
         proc_exit(current->killed == 2 ? 139 : 130);
     if (current->stop_req && current->state == P_READY && current->pid != 0 && !current->wait_msg) {
         struct proc *p = current;                       /* stopped: not runnable until proc_cont */
@@ -658,7 +670,12 @@ void proc_cont(struct proc *p)
 
 void proc_kill(struct proc *p)
 {
-    p->killed = 1;
+    if (p->killed == 1)
+        p->killed = 3;                  /* a second kill: at once, even in the middle of a request (D11 5.6) */
+    else if (!p->killed) {
+        p->killed = 1;
+        p->kill_at = ticks;
+    }
     if (p->state == P_STOP || p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
         (p->state == P_MSG && !p->wait_msg))        /* a server in recv, not a client in call */
         ready(p);

@@ -1,0 +1,11 @@
+wait zenix:/# 90
+send ps\r
+sleep 2
+send echo n1=$(ls /etc | wc -l)\r
+sleep 2
+send kill 3; sleep 1; echo n2=$(ls /etc | wc -l); touch /tmp/after-zfsd && echo write-ok; ps\r
+sleep 6
+send dmesg | grep svc\r
+sleep 3
+send echo svc-z-done\r
+sleep 2

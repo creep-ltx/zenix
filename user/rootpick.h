@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
-/* Which root filesystem server serves the root? Two root servers are built into the kernel (the ext2 fsd and ZenixFS's
- * mount.zenixfs started without arguments) and both run at boot. Both apply this same rule to the same list of
- * devices, so exactly one of them finds that the root is its own and serves it; the other leaves quietly.
+/* Which device is the root? boot (user/boot.c) applies this rule at start, then reads the device's superblock to
+ * choose the server (the ext2 fsd or the ZenixFS zfsd, both built into the kernel) and registers it for port "fs"
+ * with that device (DESIGN D11).
  *   1. A RAM disk (ram0, from the boot floppy) is the root. Today it is always ext2.
  *   2. Otherwise the first partition of type ext2 or zenixfs that is marked bootable (fdisk boot ...),
  *   3. else the first partition of those types.
- *   4. No such partition: the bare disk ide0 (whoever finds its own filesystem on it).
+ *   4. No such partition: the bare disk ide0 (its superblock tells the type).
  * Needs libz.h, diskproto.h and rdb.h before it. */
 struct rootpick { int have_ram; int found; char name[16]; unsigned dostype; };
 
