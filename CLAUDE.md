@@ -24,6 +24,8 @@ The boot menu and the dual-boot SD card (owner 2026-10-24: a small boot partitio
 on PFS3 partitions, Zenix root and /home); the menu program lives with `zenixboot` in `boot/`.
 Rebooting between the systems (owner 2026-10-24): `bootzenix` in AmigaOS, `reboot [amigaos]` / `bootamigaos` in Zenix,
 through a one-shot note the boot menu reads. Later (not now): a Wasabi-like remote-access daemon for Zenix (needs the network driver).
+DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved, docs/d11-service-manager.md).
+Next approved, in this order after D11: Zenix installing updates by itself (no card swaps), then the network driver.
 Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
 parked (e.g. the uncommitted `user/awk.c`). Order of the fixes: batches A and B, then the first PiStorm boot, then C,
 D and E.
