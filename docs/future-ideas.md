@@ -247,13 +247,16 @@ the clock on every model · joysticks, the parallel port (printer, sampler) · a
 shared libraries and the text-UI library (they unlock most of the rest), then the owner's own tools (Sumi, Maki, `zc`),
 `lha`/FFS/FAT and an installer, then the display and sound servers with a MOD player and games.
 
-**More ideas (100, added by the owner 2026-10-24; ideas only, same rules as the list above):**
-- *Claude and the terminal:* a `claude` command that connects to Claude on the PC (serial or network) [goal] · a console
+**More ideas (100, added by the owner 2026-10-24; ideas only, same rules as the list above).** The owner's marks the
+same day: the ten under *Claude and the terminal* are **wanted** (the first five also serve the goal); the rest were
+skimmed, "yes" for the list, to be looked at properly before any is built. Instead of porting csh: **Zenix's own `sh`
+is to be excellent from the start** - the best of bash, zsh and fish, as the owner's csh was designed.
+- *Claude and the terminal* (**wanted**): a `claude` command that connects to Claude on the PC (serial or network) [goal] · a console
   mode tuned for Claude Code's screen (status line, symbol stand-ins) [goal] · UTF-8 in the console with Topaz stand-ins
   [goal] · a 640x512 interlaced or 132-column console [goal] · a colour console (2-4 bitplanes, ANSI colours) [goal] ·
   `ansiview` for text-art files · a clipboard shared by the consoles (Amiga+C / Amiga+V) · mouse text selection · search
   in the scrollback · saving a console's history to a file.
-- *The owner's programs ported:* csh as a second shell · CTerm's tabs and layouts in the console · CUtils' `ls` colours
+- *The owner's programs ported:* CTerm's tabs and layouts in the console · CUtils' `ls` colours
   and `ctop` look · Ahiru in text mode · the utf8 and tui libraries as Zenix shared libraries · a `json` command and
   library · Charcoal's text-art viewer · a Wasabi-compatible daemon so the existing `wasabi` tool works with Zenix.
 - *BBS and the scene:* a BBX client · a small BBS running on Zenix (serial or telnet) · message-network tools (FidoNet,
