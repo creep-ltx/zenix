@@ -1,7 +1,7 @@
 # Zenix design decisions
 
-The numbered decisions, D1-D9. They were proposed on 2026-10-22; all are decided now, and most are built ("Where
-the decisions stand" below). Last checked against the code: 2026-10-23.
+The numbered decisions, D1-D11. D1-D9 were proposed on 2026-10-22; D1-D10 are decided and most are built ("Where
+the decisions stand" below); D11 is a design awaiting review and the owner's approval. Last checked against the code: 2026-10-23.
 
 ## Goal
 A Unix-like system (processes, `/` filesystem, pipes, signals, a shell) for the Amiga that is fast and uses
@@ -96,11 +96,18 @@ slowed by a low-priority busy program while a server works for it; the existing 
 **Measured:** task-switch and message round-trip cost before and after (`bench`), in FS-UAE and on the A1200.
 **Cost:** a few hundred bytes of kernel; one more word per process.
 
-## D11. Service manager (outline, 2026-10-24. Owner 2026-10-24: may be built after D10 once its design here is complete and fully thought through - a full design note, reviewed, before any code)
-`boot` grows into one service manager (Exec "load on first use" + Minix 3 restart + launchd, as one mechanism): it starts
-the servers listed in a small configuration file, restarts a server that dies (clients of a dead server already get an
-error and retry), and later starts servers on first use. It replaces "start everything at boot" and the hard-wired
-server list in kmain. Port rights (Darwin) are a separate, later decision.
+## D11. Service manager (design, not built; awaiting review and the owner's approval. Owner 2026-10-24: may be built after D10 once its design is complete and fully thought through - a full design note, reviewed, before any code)
+**What.** One mechanism for starting and keeping the servers (Exec "load on first use" + Minix 3 restart + launchd, as
+the future-ideas table asks): a registered port name always exists; the first message to it starts its server, and a
+server that dies is started again by the next message, with limits (5 ends in 60 s: given up; for diskd and the root
+filesystem a panic), every event in the kernel log. The client that needs a stopped server loads it in its own
+context (ramlib's escape from the loader deadlock), so there is no manager process to deadlock. The kernel keeps the
+table and the held ports; `boot` fills it (diskd, the root server it picks, `/etc/svctab`); `mount` registers its
+servers. **Replaces** the hard-wired server list in `kmain`, the polling for ports in boot, fsd, zfsd and mount, and
+"a dead server stays dead". **Not in it:** port rights, stopping idle servers when memory is low, keep-alive servers,
+dependency lists. **Interface (proposed):** one system call (`SYS_svc`), one error number (ECONNRESET), no new message
+types, no new command. **Cost (estimated):** about 2-2.7 KB of the RAM floppy, about 1.5 KB of RAM, one test per message
+call. The full design, its tests, build order and the owner's open questions: [d11-service-manager.md](d11-service-manager.md).
 
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`/`mount.zenixfs`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
