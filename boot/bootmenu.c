@@ -13,7 +13,7 @@ typedef unsigned long u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define BM_VERSION "0.1b4"
+#define BM_VERSION "0.1b6"
 #define BM_DATE "24.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: bootmenu " BM_VERSION " (" BM_DATE ")";
 
@@ -179,6 +179,46 @@ static int key(long in, long us)
 }
 
 /* seconds since an earlier call, from the system clock (DateStamp: days, minutes, ticks of 1/50 s) */
+/* ---- the timing log (SYS:bootmenu.log): where the time goes at boot (a diagnosis, 2026-10-24) ----
+ * Under Emu68 the Pi's system timer (1 MHz, on the ARM side: it keeps counting while the 68k side is stalled, which
+ * the system clock does not) is read at the peripheral window Emu68 maps (0xF2003004, the same address Emu68's own
+ * SD driver reads); elsewhere the log says so and uses the system clock. */
+static int pitimer;
+static u32 tod(void)                                     /* microseconds */
+{
+    if (pitimer) {
+        u32 v = *(volatile u32 *)0xF2003004;
+        return (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24);
+    }
+    long d[3];
+    DateStamp(d);
+    return ((u32)d[1] * 3000u + (u32)d[2]) * 20000u;
+}
+static u32 tod0;
+static char logbuf[2048];
+static int loglen;
+static void logn(const char *what, u32 v)
+{
+    char b[12]; int i = 11; b[i] = 0;
+    u32 ms = (tod() - tod0) / 1000u;
+    do { b[--i] = '0' + ms % 10; ms /= 10; } while (ms && i);
+    for (const char *s = b + i; *s && loglen < 2000; ) logbuf[loglen++] = *s++;
+    logbuf[loglen++] = ' ';
+    for (const char *s = what; *s && loglen < 2000; ) logbuf[loglen++] = *s++;
+    if (v != 0xFFFFFFFFu) {
+        i = 11; b[i] = 0;
+        do { b[--i] = '0' + v % 10; v /= 10; } while (v && i);
+        logbuf[loglen++] = ' ';
+        for (const char *s = b + i; *s && loglen < 2000; ) logbuf[loglen++] = *s++;
+    }
+    logbuf[loglen++] = '\n';
+}
+static void log_save(void)
+{
+    long f = Open("SYS:bootmenu.log", 1006);            /* MODE_NEWFILE */
+    if (f) { Write(f, logbuf, loglen); Close(f); }
+}
+
 static u32 now_ticks(void)
 {
     long d[3];
@@ -186,21 +226,68 @@ static u32 now_ticks(void)
     return ((u32)d[0] * 1440u + (u32)d[1]) * 3000u + (u32)d[2];
 }
 
-/* The menu runs at priority 10 while it is shown: at boot the disk tasks (the filesystems mounting the other
- * partitions; Emu68's SD driver keeps the CPU busy while it reads) would otherwise leave it no time to answer a key
- * for seconds. It only waits for keys, so it takes nothing from them. The countdown follows the clock, not the
- * number of waits, so a slow start does not stretch it. */
+/* The menu window: a borderless console window as big as the Workbench screen, so the menu fills the screen. 0 if it
+ * cannot be opened (then the Shell's own window is used, as before). */
+static long menu_con;
+static long menu_in(void) { return menu_con ? menu_con : Input(); }
+static void menu_open(void)
+{
+    void *ib = OpenLibrary("intuition.library", 37);
+    if (!ib)
+        return;
+    u8 *scr = (u8 *)bm_os(ib, -510, 0, 0, 0, 0, 0, 0);          /* LockPubScreen(NULL): the default screen */
+    if (scr) {
+        u32 w = *(u16 *)(scr + 12), h = *(u16 *)(scr + 14);
+        bm_os(ib, -516, 0, 0, 0, 0, 0, (long)scr);              /* UnlockPubScreen(NULL, scr) */
+        static char spec[100];
+        int n = 0;
+        for (const char *q = "CON:0/0/"; *q; ) spec[n++] = *q++;
+        u32 v[2] = { w, h };
+        for (int k = 0; k < 2; k++) {
+            char b[8]; int i = 7; b[i] = 0;
+            do { b[--i] = '0' + v[k] % 10; v[k] /= 10; } while (v[k] && i);
+            while (b[i]) spec[n++] = b[i++];
+            spec[n++] = '/';
+        }
+        const char *rest = "Boot menu/NOBORDER/NOSIZE/NOCLOSE/NODEPTH/NODRAG/SIMPLE";
+        while (*rest) spec[n++] = *rest++;
+        spec[n] = 0;
+        menu_con = Open(spec, MODE_OLDFILE);
+        if (menu_con)
+            out = menu_con;
+    }
+    CloseLibrary(ib);
+}
+static void menu_close(void)
+{
+    if (!menu_con)
+        return;
+    Close(menu_con);
+    menu_con = 0;
+    out = Output();
+}
+
+/* The menu runs at priority 21 while it is shown, above the disk tasks (their filesystems run at 10) and the input
+ * handler (20): at boot those are busy mounting the other partitions and would otherwise leave it no time to draw or
+ * answer a key for seconds (seen on the A1200: the countdown stood at 5 for 3 s, then jumped to 2). It only waits for
+ * keys, so it takes nothing from them. The countdown follows the clock, not the number of waits. */
 static int choose(void)
 {
-    long in = Input();
+    long in = menu_in();
     void *me = FindTask(0);
-    long oldpri = SetTaskPri(me, 10);
+    long oldpri = SetTaskPri(me, 21);
     int sel = defchoice, left = timeout;
     u32 start = now_ticks();
+    logn("menu: SetMode", 0xFFFFFFFFu);
     SetMode(in, 1);                                     /* raw: keys arrive one by one, not echoed */
+    logn("menu: first draw", 0xFFFFFFFFu);
     draw(sel, left);
+    logn("menu: drawn", 0xFFFFFFFFu);
+    int nlog = 0;
     for (;;) {
+        u32 w0 = tod();
         int k = key(in, left >= 0 ? 200000 : 0x7fffffff);
+        if (nlog < 40) { nlog++; logn(k ? "key after ms" : "0.2 s wait took ms", (tod() - w0) / 1000u); }
         if (k == 0) {
             if (left < 0) continue;
             int l = timeout - (int)((now_ticks() - start) / 50u);
@@ -217,6 +304,8 @@ static int choose(void)
     }
     SetMode(in, 0);
     SetTaskPri(me, oldpri);
+    logn("menu: chosen", (u32)sel + 1);
+    log_save();
     puts_("\x9b" " p\n\n");                         /* the cursor back on */
     return sel;
 }
@@ -313,7 +402,10 @@ long bm_main(void)
 {
     DOSBase = OpenLibrary("dos.library", 37);
     if (!DOSBase) return 20;
+    pitimer = bm_os(SysBase, -498, 0, 0, 0, 0, 0, (long)"devicetree.resource") != 0;     /* OpenResource: Emu68 */
+    tod0 = tod();
     out = Output();
+    logn(pitimer ? "start (Pi timer)" : "start (system clock)", 0xFFFFFFFFu);
     {
         char name[108];
         const char *me = name;
@@ -341,6 +433,9 @@ long bm_main(void)
         return 5;
     }
     if (defchoice < 0 || defchoice >= nentries) defchoice = 0;
+    logn("config read", 0xFFFFFFFFu);
+    menu_open();
+    logn(menu_con ? "menu window open" : "no menu window: the Shell's", 0xFFFFFFFFu);
     int asked = note_entry(note_take());            /* reboot amigaos / bootzenix: no menu this time */
     for (;;) {
         struct entry *e = &entries[asked >= 0 ? asked : choose()];
@@ -348,6 +443,8 @@ long bm_main(void)
         puts_("Starting ");
         puts_(e->label);
         puts_("...\n");
+        if (e->action != A_PARTITION)
+            menu_close();                               /* the command or the rescue Shell gets the Shell's window */
         if (e->action == A_SHELL) break;
         if (e->action == A_PARTITION) boot_partition(e->arg);
         else {
@@ -364,6 +461,7 @@ long bm_main(void)
         SetMode(in, 1);
         while (key(in, 0x7fffffff) != '\r') ;
         SetMode(in, 0);
+        menu_open();
     }
     CloseLibrary(DOSBase);
     return 0;
