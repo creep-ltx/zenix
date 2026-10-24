@@ -91,8 +91,12 @@ static void put_or_drop(u8 c)
     irq_restore(s);
 }
 
+static int serdev;                      /* /dev/ttyS0 is open: the port belongs to that program (D12) */
+
 void serial_putc(char c)
 {
+    if (serdev)
+        return;                         /* the console copy is off while a program owns the port */
     if (rx_heard) {
         serial_putc_wait(c);
         return;
@@ -142,6 +146,17 @@ void serial_work(void)
 {
     static int hot;
     int rxq_took = 0;
+    if (serdev) {                       /* the bytes wait in the ring for serdev_read; wake its reader */
+        if (rxq_tail != rxq_head)
+            wake_io();
+        u32 lost = rxq_lost;
+        if (lost != rxq_lost_told) {
+            kprintf("serial: %u bytes lost (input ring full)\n", lost - rxq_lost_told);
+            rxq_lost_told = lost;
+        }
+        hot = 0;
+        return;
+    }
     while (rxq_tail != rxq_head) {
         rxq_took = 1;
         u16 t = rxq_tail;
@@ -187,8 +202,53 @@ void serial_work(void)
 
 void serial_puts(const char *s)
 {
-    while (*s)
+    while (*s && !serdev)
         serial_putc_wait(*s++);
+}
+
+/* /dev/ttyS0 (DESIGN D12) */
+long serdev_open(void)
+{
+    if (serdev)
+        return -EBUSY;
+    serdev = 1;
+    u16 s = irq_save();
+    rxq_tail = rxq_head;                /* what arrived before is the console's, not the program's */
+    irq_restore(s);
+    return 0;
+}
+
+void serdev_close(void)
+{
+    serdev = 0;
+}
+
+u32 serdev_take(u8 *buf, u32 n)
+{
+    u32 got = 0;
+    while (got < n && rxq_tail != rxq_head) {
+        u16 t = rxq_tail;
+        buf[got++] = rxq[t];
+        rxq_tail = (u16)((t + 1) % RXQ);
+    }
+    return got;
+}
+
+void serdev_put(u8 c)
+{
+    for (;;) {
+        u16 s = irq_save();
+        u16 nh = (u16)((txhead + 1) & 4095);
+        if (nh != txtail) {
+            txring[txhead] = c;
+            txhead = nh;
+            tx_drain_locked();
+            irq_restore(s);
+            return;
+        }
+        tx_drain_locked();
+        irq_restore(s);
+    }
 }
 
 /* The kernel log: everything kprintf prints is also kept in a ring, for the `dmesg` command and so that the boot
@@ -327,7 +387,8 @@ static void kputc(char c)
         kl->hdrsum = hdr_sum(kl);
         irq_restore(s);
     }
-    serial_putc_wait(c);
+    if (!serdev)                        /* a program owns the port: the log stays in the ring (dmesg) */
+        serial_putc_wait(c);
     if (klog_mirror) {
         if (c == '\n')
             term_log("\r", 1);

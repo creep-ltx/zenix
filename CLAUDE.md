@@ -11,7 +11,7 @@ current work list), then `docs/architecture.md` for the part you touch.
   real Amiga hardware is the ultimate target (owner, 2026-10-24): nothing in the base may depend on Emu68 or the Pi, and
   speed is judged on real 68k CPUs (today a stock 14 MHz 68EC020), not Emu68's JIT. The minimum requirements
   are not decided yet (ROADMAP, open questions).** Order audit fixes by what
-  matters on it first. Nothing has run on it yet; real-hardware time is scarce, so every build sent there must be
+  matters on it first. Zenix runs on it since 2026-10-23; real-hardware time is scarce, so every build sent there must be
   ready for it.
 
 ## Current focus (2026-10-22): hardening, then the first real boot
@@ -25,13 +25,22 @@ on PFS3 partitions, Zenix root and /home); the menu program lives with `zenixboo
 Rebooting between the systems (owner 2026-10-24): `bootzenix` in AmigaOS, `reboot [amigaos]` / `bootamigaos` in Zenix,
 through a one-shot note the boot menu reads. Later (not now): a Wasabi-like remote-access daemon for Zenix (needs the network driver).
 DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved, docs/d11-service-manager.md).
-Next approved, in this order after D11: Zenix installing updates by itself (no card swaps), then the network driver.
-**The main goal (owner 2026-10-24): Claude in a terminal on Zenix on the A1200** - the owner's computer use is mostly
-Claude Code in a terminal. Approved now: a serial terminal program (Zenix to the PC over the null-modem cable, from
+`awk` (owner 2026-10-24: finish the parked `user/awk.c` now, while D11 is built; a colour console proposed next, not yet approved).
+Next approved, in this order after D11 (owner 2026-10-24): **D13 shared libraries and shared program code** (one copy in
+memory of libz and of a program several processes run, as AmigaOS libraries and pure programs; design note first,
+reviewed, before code; it comes before the self-updates so the updater ships the final program format), then Zenix
+installing updates by itself (no card swaps), then the network driver.
+**Standing order (owner 2026-10-24, away from home):** when D11 is merged, first a **focused audit** of everything
+changed since the audit closed (D10, the boot menu and reboot, D12/cu, awk, G1/G3/G4, D11): one independent reviewer,
+findings fixed, tested and merged; then start D13 without waiting for the owner:
+review the design note (an independent review, fixes, a second look), then build stage 1 step by step in FS-UAE. The
+A1200 measurements (note section 8) wait until the owner is home; nothing is written to the owner's card meanwhile.
+**The owner's own goal (2026-10-24): Claude in a terminal on Zenix on the A1200.** It sets the order of the work, but it
+is the owner's goal, not Zenix's purpose (owner, 2026-10-24): never present it as Zenix's main goal in the docs. Approved now: a serial terminal program (Zenix to the PC over the null-modem cable, from
 the weekend of 2026-10-31); then the same over the network; then a console good enough for Claude Code's screen
 (colours, stand-ins for its Unicode symbols).
 Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
-parked (e.g. the uncommitted `user/awk.c`). Order of the fixes: batches A and B, then the first PiStorm boot, then C,
+parked. Order of the fixes: batches A and B, then the first PiStorm boot, then C,
 D and E.
 1. **Batch A** - first-boot blockers (cache flushes, `cpusha`, `-m68020-60`, keyboard timing, Amiga Swedish keymap,
    the RAM-disk image, bootinfo/Gayle/floppy motor). Without these the PiStorm boot fails.
@@ -47,7 +56,7 @@ root, then the desktop (ROADMAP phases).
 ## Sessions: one main session, at most one side session
 Parallel sessions collided before (two programs claimed system call 75; the Makefile conflicted; the floppy filled up
 unseen). So:
-- **One main session** works in `~/Projects/zenix` on `main`. Only it edits the shared files: `kernel/kernel.h`
+- **One main session** works in the main checkout on `main`. Only it edits the shared files: `kernel/kernel.h`
   (system call numbers, limits), `kernel/main.c` (boot order, the 100 Hz tick), `Makefile` (UAPPS, RAMAPPS, image
   sizes), `user/usys.h`, `user/libz.*`, and the counts in `docs/`.
 - **At most one side session**, in its own worktree and branch, on a part that touches none of those (good: the
@@ -111,7 +120,7 @@ Disks and data:
   `tools/docs-check.sh --staged` (must say `docs-check: ok`). Before a merge or a hardware build: `make check` (every
   strong test, a table, about 1.5 hours; docs/README.md "Testing").
 - The repository names no path of this PC. On the owner's PC the tests need (in the environment of every test run):
-  `export ZENIX_KICKSTART_DIR=~/UAE/ROM ZENIX_CAGE_RIG=~/Projects/DemoScene/Creator`; `TOOLPREFIX` defaults to
+  `ZENIX_KICKSTART_DIR` and `ZENIX_CAGE_RIG` (their values are in the owner's private notes, not here); `TOOLPREFIX` defaults to
   `$(HOME)/opt/m68k-elf/bin/m68k-elf-` when `m68k-elf-gcc` is not on PATH, which is where it is here.
 - The real A1200 is shared with other projects: message the other sessions before using it through Wasabi, and say
   when you are done.
@@ -120,7 +129,7 @@ Disks and data:
 - **Documentation lives in `docs/`, nowhere else.** No `.md`/`.txt` notes in `kernel/`, `user/`, `boot/`, `tools/`
   or the project root (only `README.md` and this file). Decisions: `docs/DESIGN.md`. Plan: `docs/ROADMAP.md`. Work
   list: `docs/audit-2026-10-22.md`. Findings that help other projects: the shared knowledge base
-  (`~/Projects/Knowledge/amiga/zenix-*.md`), not here.
+  (its `amiga/zenix-*.md` notes), not here.
 - Manual pages: `docs/man/NAME.txt` (plain text, at most 78 columns, the format `man` reads). Command index:
   `docs/commands.md`. Feature list: `docs/features.md`.
 - Test input scripts: `tools/tests/`. Old code kept for reference: `archive/` (not built). Files copied onto the

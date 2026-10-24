@@ -2,6 +2,8 @@
 
 | Document | What it answers |
 |---|---|
+| [why.md](why.md) | Why Zenix works the way it does: the reason behind each big decision (no MMU, `spawn`, messages, zero-copy, priorities, ext2, booting through Kickstart, ...), in plain words. Start here. |
+| [source-tree.md](source-tree.md) | What each folder and file in the source is, and where to start reading. |
 | [architecture.md](architecture.md) | How Zenix is put together: the layers, the kernel, memory, processes, messages, the servers, the filesystems, the terminal and display, the build and the tests. |
 | [how-it-works.md](how-it-works.md) | Walk-throughs: from power-on to a shell prompt, what happens inside `cat file | grep x`, what happens when a program crashes. |
 | [features.md](features.md) | The one list of what Zenix can do, with the status of each feature (verified / read / planned). |
@@ -12,8 +14,9 @@
 | [pi-first-boot.md](pi-first-boot.md) | How to try Zenix on a PiStorm A1200 for the first time: the boot colours, what the messages should say, what to report. |
 | [zenixfs.md](zenixfs.md) | ZenixFS, the native filesystem: why, the design, the host tools, its status. |
 | [zenixfs-format.md](zenixfs-format.md) | ZenixFS's exact on-disk format, version 1. |
-| [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D11 and where each one stands. |
-| [d11-service-manager.md](d11-service-manager.md) | The full design note of DESIGN D11, the service manager (servers started on first use and started again when they die): not built, awaiting review. |
+| [d13-shared-code.md](d13-shared-code.md) | DESIGN D13's design note: one copy in memory of a program's code and of shared libraries, how (gcc's separate-data mode, a base register), the file format, the loader, safety, the measurements it must pass. Proposed, awaiting review. |
+| [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D13 and where each one stands. |
+| [d11-service-manager.md](d11-service-manager.md) | The full design note of DESIGN D11, the service manager (servers started on first use and started again when they die): approved; steps 0-5 (the core) built and merged, steps 6-9 next; section 15 says where the code differs. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
 | [audit-2026-10-22.md](audit-2026-10-22.md) | The audit of 2026-10-22: the work list of the hardening round (batches A-E), each item marked with its fix. |
 | [audit-closing-2026-10-24.md](audit-closing-2026-10-24.md) | The closing report of the audit round: what was fixed, what is verified on the real A1200, what is left. |
@@ -21,8 +24,8 @@
 
 How these documents are written: by reading the source tree. A statement about Zenix is *read* from the source unless
 it says *verified* (a test checked it in FS-UAE; on real hardware it would say "verified on the A1200" with the date).
-Statements about AmigaOS, Linux and other systems are general knowledge, not measured here. Nothing has run on a real
-Amiga yet.
+Statements about AmigaOS, Linux and other systems are general knowledge, not measured here. Zenix has run on a real
+Amiga (the owner's PiStorm A1200) since 2026-10-23; what was checked there is listed in audit-closing-2026-10-24.md.
 
 ## Where things live (and the rule)
 - All documentation is in `docs/`. The only others are `README.md` (short, points here) and `CLAUDE.md` (the rules for
@@ -59,7 +62,8 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch) |
 | cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
 | users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root |
-| jobs-test, kbd-test | job control and history search; the keyboard (keymaps, repeat, consoles) |
+| jobs-test, kbd-test | job control and history search; the keyboard (keymaps, repeat, consoles, scrollback) |
+| cu-test | `cu` and `/dev/ttyS0` (DESIGN D12): the other computer's line reaches cu, keys reach the port, `~.` ends it, the console's copy comes back |
 | prio-test | priorities (D10): nice/renice for a user and for root, PRI/NI in `ps`, `priotest` (equal priorities take turns per slice, a higher one wins, wake-up, priority inheritance; a kernel built without inheritance must fail that check) |
 | diag-test | the boot colours, the panic screens, the previous-boot log across a warm reset; the stack guard's kernel-stack checks (a `STACK_TEST` build) |
 | floppy-test | two floppy drives: whole-disk reads, a write and its read-back, the image file on the host afterwards |
@@ -70,8 +74,8 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | svc-test | the service manager (DESIGN D11): boot's pids, restarts of diskd, fsd and zfsd, the bootable root, no root, the RAM floppy, diskd's saved table, open files across a restart, a dd copy, limits and back-off, the deadline, reboot with a dead server, a damaged table (a test build) |
 
 What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default
-FS-UAE's `~/Documents/FS-UAE/Kickstarts`); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
-fills it in, with the build directory and the serial port). kbd-test, diag-test and the screenshots
+FS-UAE's own Kickstarts folder, `Documents/FS-UAE/Kickstarts` in your home directory); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
+fills it in, with the build directory and the serial port). kbd-test, cu-test, diag-test and the screenshots
 (`tools/shot.py`) also need the headless cage rig: `ZENIX_CAGE_RIG` names its directory. A single test:
 `ZENIX_SERIAL=/tmp/NAME tools/users-test.sh` (a serial port of its own, so it can run beside another session's test);
 one emulator run at a time per session. `make run` boots a window for a person, never for a test.

@@ -1,7 +1,7 @@
 # Zenix design decisions
 
-The numbered decisions, D1-D11. D1-D9 were proposed on 2026-10-22; D1-D10 are decided and most are built ("Where
-the decisions stand" below); D11 is designed, reviewed and approved by the owner (2026-10-24) and being built on branch d11 (the note's section 15). Last checked against the code: 2026-10-23.
+The numbered decisions, D1-D13. D1-D9 were proposed on 2026-10-22; D1-D10 are decided and most are built ("Where
+the decisions stand" below); D11 is designed, reviewed and approved by the owner (2026-10-24); its core (steps 0-5) is built and merged, steps 6-9 follow (the note's section 15); D12 is built; D13 is approved, its design note awaiting review. Last checked against the code: 2026-10-23.
 
 ## Goal
 A Unix-like system (processes, `/` filesystem, pipes, signals, a shell) for the Amiga that is fast and uses
@@ -113,9 +113,9 @@ error number (ECONNRESET), no new message types, no new command. **Cost (estimat
 left on the RAM floppy, about 1.8 KB of RAM, one test per message call. The full design, its tests, build order, the
 owner's open questions and the bugs found in today's code: [d11-service-manager.md](d11-service-manager.md).
 
-## D12. The serial port as a device, and `cu` (approved by the owner 2026-10-24: the first step to Claude in a terminal on Zenix)
-**Why.** The owner's main use of a computer is Claude Code in a terminal. Step 1 is Zenix's console talking to the PC
-through the null-modem cable, where Claude runs. Today the serial port belongs to the console: everything shown is
+## D12. The serial port as a device, and `cu` (approved by the owner 2026-10-24)
+**Why.** Zenix needs a way to talk to another computer before there is a network: a terminal session on a PC
+through the null-modem cable. Today the serial port belongs to the console: everything shown is
 copied there (the mirror), what arrives is typed into the shown console, and `kprintf` writes the kernel log there.
 That serves the test rig and a debug terminal, but a program cannot use the port.
 
@@ -138,13 +138,22 @@ signal-bit waiting of future-ideas item 1 exists, `cu` can become one process). 
 serial adapter (`agetty` on /dev/ttyUSB0 at 115200), set up once on the PC.
 
 **Not in D12:** network (the same over TCP comes with the network driver), the console's colours and Unicode stand-ins
-(step 3 of the main goal), handshake lines, file transfer.
+(a later step), handshake lines, file transfer.
 
 **Tests.** FS-UAE's serial port is a PTY on the host: a test opens it, writes bytes and checks `cu`'s screen and what
 arrives, the mirror off while `cu` runs and back after `~.`, -EBUSY for a second open, a non-root user refused, and the
-kernel log not on the wire while the device is open. On the A1200 with the cable (from 2026-10-31): Claude Code on the
-PC, shown in Zenix.
+kernel log not on the wire while the device is open. On the A1200 with the cable (from 2026-10-31): a terminal session on
+the PC, shown in Zenix.
 
+## D13. Shared libraries and shared program code (approved by the owner 2026-10-24 as the step after D11; design note to come, reviewed before any code)
+**Why.** Zenix is for machines with little memory. Today every program carries its own copy of the libz functions it
+uses (5-7 KB each, measured 2026-10-24), and worse, every running copy of a program loads its whole code again: four
+shells on four consoles hold four copies of `sh` (86 KB each). AmigaOS solved both without an MMU: libraries with jump
+tables, opened by name, one copy in memory; and "pure" programs whose code is shared while each process has its own
+data. D3 left room for this in the program format. D13 builds it: one copy of the code, a data area per process (a base
+register, as gcc's `-msep-data`/`-mid-shared-library` for no-MMU systems), libz as the first shared library. It comes
+before the self-updates (so they ship the final format), newlib and the network (which make programs much larger).
+The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 1, 2026-10-24, awaiting review).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`/`mount.zenixfs`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).

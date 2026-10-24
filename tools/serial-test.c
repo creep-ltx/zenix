@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Host test of the serial copy of the console (kernel/serial.c) against a model of Paula's port (serial-fake.h):
  * with nothing received since boot a full send ring drops console bytes (counted, logged) instead of waiting; the
- * kernel's own output always waits; after the first received byte the console copy waits and loses nothing.
+ * kernel's own output always waits; after the first received byte the console copy waits and loses nothing. And
+ * /dev/ttyS0 (DESIGN D12): one owner; while open the console copy and the log stay off the wire and received bytes
+ * wait for the reader.
  * Build and run: tools/serial-test.sh */
 #include <stdio.h>
 #define SERIAL_HOST_TEST 1
@@ -16,6 +18,8 @@ void term_scroll_view(int d) { (void)d; }
 void term_log(const char *s, u32 n) { (void)s; (void)n; }
 static unsigned long typed;
 void tty_input(u8 c) { (void)c; typed++; }
+static int woken;
+void wake_io(void) { woken++; }
 
 static int bad;
 #define EXPECT_TRUE(c, msg) do { if (!(c)) { printf("FAIL: %s\n", msg); bad++; } else printf("ok:   %s\n", msg); } while (0)
@@ -65,6 +69,35 @@ int main(void)
     int order = fake_nsent - start == 20000;
     for (unsigned long i = 0; order && i < 20000; i++) order = fake_sent[start + i] == 'A' + i % 26;
     EXPECT_TRUE(tx_dropped == d1 && order, "after input: 20000 console bytes all sent, in order, none dropped");
+
+    /* 4. /dev/ttyS0 (D12): the port belongs to one program */
+    fake_wire_period = 1;
+    fake_rx = 'q'; serial_rx_isr();                       /* typed before the open: the console's, not the program's */
+    EXPECT_TRUE(serdev_open() == 0, "/dev/ttyS0 opens");
+    EXPECT_TRUE(serdev_open() == -EBUSY, "... a second open is refused (busy)");
+    unsigned long s0 = fake_nsent;
+    serial_putc('X'); serial_putc('\n');
+    kprintf("log line while the port is a program's\n");
+    drain_all();
+    EXPECT_TRUE(fake_nsent == s0, "while open: no console copy and no kernel log on the wire");
+    serdev_put('h'); serdev_put('\n');
+    drain_all();
+    EXPECT_TRUE(fake_nsent == s0 + 2 && fake_sent[s0] == 'h' && fake_sent[s0 + 1] == '\n',
+                "the program's bytes go out as they are (no CR added)");
+    unsigned long t0 = typed;
+    u8 got[8];
+    EXPECT_TRUE(serdev_take(got, 8) == 0, "what arrived before the open is not the program's");
+    fake_rx = 'k'; serial_rx_isr();
+    woken = 0;
+    serial_work();
+    EXPECT_TRUE(typed == t0 && woken, "a received byte is not typed into the console; the reader is woken");
+    EXPECT_TRUE(serdev_take(got, 8) == 1 && got[0] == 'k', "... and the program reads it");
+    serdev_close();
+    s0 = fake_nsent;
+    serial_putc('Y');
+    drain_all();
+    EXPECT_TRUE(fake_nsent == s0 + 1 && serdev_open() == 0, "after the close the console copy is back, and it opens again");
+    serdev_close();
     printf(bad ? "FAILED\n" : "all ok\n");
     return bad != 0;
 }

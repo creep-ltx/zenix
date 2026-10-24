@@ -3,7 +3,8 @@
 **This is the one list of what Zenix can do.** It is kept in step with the code (rule in `../CLAUDE.md`): when a
 feature is added, changed or removed, its line here changes in the same commit. `README.md` only summarises it.
 
-Status words: **verified** = built and run in FS-UAE (an emulator; no feature has yet run on a real Amiga);
+Status words: **verified** = built and run in FS-UAE (an emulator); "verified on the A1200" with a date when it ran on the owner's real PiStorm A1200 (the list of
+what was checked there: audit-closing-2026-10-24.md);
 **read** = checked in the source only; **built** = written, but no test runs it where it matters; **planned** = not
 built. Last checked against the code: 2026-10-23.
 
@@ -12,15 +13,15 @@ built. Last checked against the code: 2026-10-23.
 |---|---|---|
 | 68020, 68030, 68040, 68060 (soft float, no MMU use) | verified | architecture.md section 2; the emulated machines of the matrix (architecture.md section 13) |
 | 68000 refused with a message (orange over red screen, serial text) | verified (`tools/diag-test.sh`) | start.S |
-| Boot stage colours: the whole screen changes colour at each boot step until the display is up; error stops show the step's colour over red, a panic after that a red bar with its text | verified in FS-UAE (`tools/diag-test.sh`: each stage's colour from a screenshot); not yet on the A1200 | pi-first-boot.md (the table), architecture.md section 3 |
+| Boot stage colours: the whole screen changes colour at each boot step until the display is up; error stops show the step's colour over red, a panic after that a red bar with its text | verified in FS-UAE (`tools/diag-test.sh`: each stage's colour from a screenshot); verified on the A1200 (2026-10-23) | pi-first-boot.md (the table), architecture.md section 3 |
 | Chip and fast RAM pools, 1 MB chip up to 8 MB+ fast | verified | architecture.md section 5 |
 | Boot from floppy (ADF) bootblock; kernel in fast RAM if present | verified | how-it-works.md section 1 |
 | Boot with a RAM-disk root loaded from the floppy (no IDE disk) | verified (dev/test image) | `zenix-ram.adf` |
-| Boot without a floppy: Kickstart boots a small FFS partition whose Startup-Sequence runs `zenixboot` (an AmigaOS program, Kickstart 2.04+, 68020+), which loads the kernel file (and optionally a RAM disk) and starts Zenix; errors return to AmigaOS. Images: `build/zenix-boot.hdf` (RDB disk for IDE/CF), `build/zenix-card.img` (Emu68 SD card: MBR, FAT, 0x76 RDB, ext2 root), written by `tools/write-card.sh` | verified in FS-UAE (`tools/zenixboot-test.sh`: Kickstart 3.1, 3.2 and 2.05; 68EC020, 68020 chip-only, 68040; the 68000 refused; the error paths); **not yet on a real Amiga** (the SD card path never: FS-UAE has no Emu68) | man/zenixboot.txt, how-it-works.md section 1 |
+| Boot without a floppy: Kickstart boots a small FFS partition whose Startup-Sequence runs `zenixboot` (an AmigaOS program, Kickstart 2.04+, 68020+), which loads the kernel file (and optionally a RAM disk) and starts Zenix; errors return to AmigaOS. Images: `build/zenix-boot.hdf` (RDB disk for IDE/CF), `build/zenix-card.img` (Emu68 SD card: MBR, FAT, 0x76 RDB, ext2 root), written by `tools/write-card.sh` | verified in FS-UAE (`tools/zenixboot-test.sh`: Kickstart 3.1, 3.2 and 2.05; 68EC020, 68020 chip-only, 68040; the 68000 refused; the error paths); verified on the A1200 (2026-10-23: from the SD card under Emu68, Kickstart 3.2.3; the RDB disk image for IDE/CF not yet on real hardware) | man/zenixboot.txt, how-it-works.md section 1 |
 | Gayle IDE disk with Amiga RDB partitions (A600/A1200/A4000); the machine decided first (Ramsey, Gayle ID 0xD) and only its port probed; a drive must prove it is there (register read-back), slow starters get 10 s, waits timed on the E-clock; LBA drives only; up to 256 sectors per command on the Gayle port; its interrupt sources switched off (polling only) | verified in FS-UAE (the matrix); real drives' timing, CHS-only drives and the interrupt storm read only | architecture.md section 2 |
 | Instruction-cache (and Emu68 JIT) flush after every write of code; built for 68020-68060 with an opcode check | verified in FS-UAE, read for Emu68 | architecture.md section 2 |
 | Battery clock (MSM6242, RP5C01); no write before a check that the area is not a mirror of the custom chips; the RP5C01 read with its timer stopped | read (FS-UAE shows the time in the boot log; no test compares it) | architecture.md section 2 |
-| Real Amiga hardware | planned | limits.md |
+| Real Amiga hardware: the owner's A1200 with a PiStorm32-lite (Emu68), booted from its SD card through `zenixboot` and the boot menu | verified on the A1200 (2026-10-23/24) | audit-closing-2026-10-24.md (what was checked); a stock 68020 without the PiStorm is not tested yet |
 | Network, USB, RTG graphics, sound beyond the bell | planned | ROADMAP.md phase 6 |
 
 ## Kernel
@@ -111,12 +112,18 @@ tools/cmds2-test.sh runs rootfs/tests/batch-e.sh). See man/sh.txt.
 Every command has a manual page. The full list with one-line summaries is in [commands.md](commands.md); the
 pages are in [man/](man/). **verified** against GNU for the text tools (`tools/cmds-test.sh`).
 
+`awk` (owner-approved 2026-10-24): a POSIX awk (patterns and actions, arrays, user functions, the built-in functions,
+`printf`, `getline`, output to files and pipes), on a fixed 64 KB stack with a depth guard. **verified** in FS-UAE:
+`tools/cmds-test.sh` compares 17 groups of awk programs with GNU awk; `tools/memtest.sh` checks that endless recursion
+and deep nesting stop with a message and that a long loop keeps memory flat. See man/awk.txt.
+
 ## Tooling
 | Feature | Status |
 |---|---|
 | `make` builds the floppy, the disk image and the test images | verified |
 | Boot menu (owner-approved 2026-10-24): `bootmenu` on the boot partition of an SD card with AmigaOS and Zenix (`tools/mkdualcard.sh`: Emu68 FAT, an RDB with BOOT and the AmigaOS partitions, Zenix root and /home); a countdown and a default, AmigaOS partitions booted through a one-shot resident at the next reset (nothing written to the disk), Zenix through zenixboot | verified in FS-UAE (Kickstart 3.2: countdown, reboot into the chosen partition; a test card's root and /home mounted by Zenix); **verified on the A1200 2026-10-24** (Emu68 1.1, Kickstart 3.2.3: the menu and the reboot into DH0) | man/bootmenu.txt |
 | Rebooting between the systems (owner-approved 2026-10-24): `reboot [amigaos|zenix]` / `bootamigaos` in Zenix (system call 80: sync, stop disk writes, reset) and `bootzenix` in AmigaOS leave a one-shot note at the top of chip RAM that `bootmenu` follows without showing the menu | verified in FS-UAE (both ways, Kickstart 3.2.3); verified on the A1200 2026-10-24, both ways (`bootzenix`, `bootamigaos`) | man/reboot.txt, man/bootmenu.txt |
+| The serial port as a device, `/dev/ttyS0`, and `cu` (DESIGN D12, owner-approved 2026-10-24): root, one owner at a time; while open the console copy, the log copy and the 0x1D hook are off the wire | verified in FS-UAE (`tools/cu-test.sh`: a line from the PC reaches cu, keys reach the port alone, `~.` ends it, the console copy comes back; `tools/serial-test.sh` on the host: one owner, -EBUSY, nothing else on the wire, bytes unchanged); **not yet on the A1200** (the cable arrives 2026-10-31) | man/cu.txt |
 | AmigaOS-side tools from Linux without root or amitools: an FFS volume (`tools/mkffs.py`), an AmigaOS executable from a ZEXE (`tools/mkhunk.py`), the zenixboot disks (`tools/mkcard.py`) | verified (Kickstart 3.1/3.2/2.05 boot the FFS volume in FS-UAE; amitools' `xdftool` reads it back when installed) |
 | Headless FS-UAE test runs from serial scripts (`tools/run-test.sh`, `tools/tests/`) | verified |
 | `make check`: every strong test in one run, a table, fails on any failure (`tools/check.sh`, docs/README.md "Testing") | verified |

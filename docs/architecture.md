@@ -85,8 +85,8 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   it.
 - Storage: Gayle IDE (A600/A1200/A4000) with an RDB partition table, or a **RAM disk** that the bootblock reads
   from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek), or the
-  **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - written and host-tested,
-  **not yet run on a real Pi**). `kernel/blk.c` picks the raw disk: IDE first, else the SD card. Either one is
+  **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - host-tested, and
+  verified on the A1200 since 2026-10-23). `kernel/blk.c` picks the raw disk: IDE first, else the SD card. Either one is
   served by `diskd` under the name `ide0`. On an **Amiga 3000** (no IDE) `kernel/a3000.c` drives the on-board SCSI:
   WD33C93A chip behind the DMAC at `0xDD0000`, one "select with ATN and transfer" command per SCSI command, polling
   (interrupts on, the DMAC's interrupt enable off), data by DMA through a 64 KB chip-RAM bounce buffer, first direct-access
@@ -679,7 +679,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **Pipes** (`vfs.c`): 2 KB ring buffer in the kernel; EOF when all writers close; a write to a pipe with no
   readers ends the writer with status 141 (like SIGPIPE). Special files `/dev/tty` (the process's controlling
   tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
-  (console 1, the same rule), `/dev/null`, `/dev/zero`. `fstat` of a console gives its number in `st_ino` (the
+  (console 1, the same rule), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
+  is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
+  receive ring for its reader), `/dev/null`, `/dev/zero`. `fstat` of a console gives its number in `st_ino` (the
   `ustat` has no device field; `login` uses it to apply `/etc/autologin` to console 1 only).
 - **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
   `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**
