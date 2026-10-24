@@ -66,8 +66,9 @@ NOTES
     which it does on a real Amiga and on Emu68; the partition's boot
     priority in the RDB is never changed. Kickstart's own Early Startup
     menu (both mouse buttons held at power-on) still chooses a partition
-    by hand. The menu is plain text in a borderless console window as big
-    as the screen (the Shell window if that cannot be opened), no graphics.
+    by hand. The menu has its own screen, like the Workbench's but with no
+    title bar and no mouse pointer, and reads the keys itself (a console
+    window, then the Shell window, if that screen cannot be opened).
     While shown it runs at priority 21, so the disk tasks mounting the
     other partitions at boot do not hold it up. For now it writes a timing
     log, SYS:bootmenu.log, at every start (a diagnosis; to be removed).

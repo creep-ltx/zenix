@@ -13,7 +13,7 @@ typedef unsigned long u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define BM_VERSION "0.1b7"
+#define BM_VERSION "0.1b8"
 #define BM_DATE "24.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: bootmenu " BM_VERSION " (" BM_DATE ")";
 
@@ -75,6 +75,10 @@ struct entry { char label[LINEMAX]; int action; char arg[LINEMAX]; };
 static struct entry entries[MAXENTRY];
 static int nentries, timeout = 5, defchoice;
 static long out;
+
+/* the compiler copies initialised local arrays (the tag lists) with these */
+void *memcpy(void *d, const void *s, unsigned long n) { u8 *a = d; const u8 *b = s; while (n--) *a++ = *b++; return d; }
+void *memset(void *d, int c, unsigned long n) { u8 *a = d; while (n--) *a++ = (u8)c; return d; }
 
 static int slen(const char *s) { int n = 0; while (s[n]) n++; return n; }
 static void puts_(const char *s) { Write(out, s, slen(s)); }
@@ -226,12 +230,146 @@ static u32 now_ticks(void)
     return ((u32)d[0] * 1440u + (u32)d[1]) * 3000u + (u32)d[2];
 }
 
+/* ---- the menu's own screen: no title bar, no mouse pointer, the text drawn here and the keys read directly ----
+ * A screen like the Workbench's (SA_LikeWorkbench: the same mode and font), quiet (no title bar), with one borderless
+ * backdrop window that takes the keys (IDCMP VANILLAKEY for 1-9 and Return, RAWKEY for the cursor keys) and has a
+ * blank pointer. Values from the NDK headers (intuition/screens.h, intuition.h). If any of it fails, the console
+ * window below is used. */
+static void *IntuitionBase, *GfxBase;
+static u8 *gui_scr, *gui_win, *gui_ptr;
+#define TAG_DONE 0u
+#define SA_Depth 0x80000025u
+#define SA_ShowTitle 0x80000036u
+#define SA_Quiet 0x80000038u
+#define SA_LikeWorkbench 0x80000047u
+#define WA_Left 0x80000064u
+#define WA_Top 0x80000065u
+#define WA_Width 0x80000066u
+#define WA_Height 0x80000067u
+#define WA_IDCMP 0x8000006Au
+#define WA_Flags 0x8000006Bu
+#define WA_CustomScreen 0x80000070u
+#define WFLG_SIMPLE_REFRESH 0x40u
+#define WFLG_BACKDROP 0x100u
+#define WFLG_BORDERLESS 0x800u
+#define WFLG_ACTIVATE 0x1000u
+#define WFLG_RMBTRAP 0x10000u
+#define WFLG_NOCAREREFRESH 0x20000u
+#define IDCMP_RAWKEY 0x400u
+#define IDCMP_VANILLAKEY 0x200000u
+#define GUI_RP() ((void *)*(u32 *)(gui_win + 50))           /* Window.RPort */
+#define GUI_PORT() ((void *)*(u32 *)(gui_win + 86))         /* Window.UserPort */
+
+static void gui_close(void)
+{
+    if (gui_win) bm_os(IntuitionBase, -72, 0, 0, 0, 0, (long)gui_win, 0);       /* CloseWindow */
+    if (gui_scr) bm_os(IntuitionBase, -66, 0, 0, 0, 0, (long)gui_scr, 0);       /* CloseScreen */
+    if (gui_ptr) FreeMem(gui_ptr, 16);
+    gui_win = gui_scr = gui_ptr = 0;
+}
+
+static int gui_open(void)
+{
+    if (!IntuitionBase) IntuitionBase = OpenLibrary("intuition.library", 39);
+    if (!GfxBase) GfxBase = OpenLibrary("graphics.library", 39);
+    if (!IntuitionBase || !GfxBase)
+        return 0;
+    u32 st[] = { SA_LikeWorkbench, 1, SA_Depth, 2, SA_Quiet, 1, SA_ShowTitle, 0, TAG_DONE };
+    gui_scr = (u8 *)bm_os(IntuitionBase, -612, 0, 0, 0, 0, 0, (long)st);        /* OpenScreenTagList(NULL, tags) */
+    if (!gui_scr)
+        return 0;
+    u32 wt[] = { WA_CustomScreen, (u32)gui_scr, WA_Left, 0, WA_Top, 0,
+                 WA_Width, *(u16 *)(gui_scr + 12), WA_Height, *(u16 *)(gui_scr + 14),
+                 WA_Flags, WFLG_BORDERLESS | WFLG_BACKDROP | WFLG_ACTIVATE | WFLG_RMBTRAP | WFLG_SIMPLE_REFRESH |
+                           WFLG_NOCAREREFRESH,
+                 WA_IDCMP, IDCMP_VANILLAKEY | IDCMP_RAWKEY, TAG_DONE };
+    gui_win = (u8 *)bm_os(IntuitionBase, -606, 0, 0, 0, 0, 0, (long)wt);        /* OpenWindowTagList(NULL, tags) */
+    gui_ptr = AllocMem(16, MEMF_CHIP | MEMF_CLEAR);                             /* a blank one-line sprite */
+    if (!gui_win || !gui_ptr) {
+        gui_close();
+        return 0;
+    }
+    bm_os(IntuitionBase, -270, 1, 16, 0, 0, (long)gui_win, (long)gui_ptr);     /* SetPointer: invisible */
+    return 1;
+}
+
+/* one line of text at text row `row`, padded with spaces to the full width, so it covers what was there */
+static void gui_line(int row, const char *s, int inverse)
+{
+    void *rp = GUI_RP();
+    u32 h = *(u16 *)((u8 *)rp + 58), base = *(u16 *)((u8 *)rp + 62);          /* TxHeight, TxBaseline */
+    u32 x = 2 * *(u16 *)((u8 *)rp + 60);                                       /* two characters in (TxWidth) */
+    static char buf[84];
+    int n = 0;
+    while (*s && n < 78) buf[n++] = *s++;
+    int end = inverse ? n : 78;
+    while (n < end) buf[n++] = ' ';
+    bm_os(GfxBase, -354, 1, 0, 0, 0, 0, (long)rp);                               /* SetDrMd(JAM2) */
+    if (inverse) {                                       /* the padding outside the bar in the normal colours */
+        bm_os(GfxBase, -342, 1, 0, 0, 0, 0, (long)rp);
+        bm_os(GfxBase, -348, 0, 0, 0, 0, 0, (long)rp);
+        bm_os(GfxBase, -240, 0, (long)(8 + row * h + base), 0, 0, 0, (long)rp);
+        static const char sp[] = "                                                                                ";
+        bm_os(GfxBase, -60, 80, 0, 0, 0, (long)sp, (long)rp);
+    }
+    bm_os(GfxBase, -342, inverse ? 2 : 1, 0, 0, 0, 0, (long)rp);                /* SetAPen */
+    bm_os(GfxBase, -348, inverse ? 1 : 0, 0, 0, 0, 0, (long)rp);                /* SetBPen */
+    bm_os(GfxBase, -240, (long)x, (long)(8 + row * h + base), 0, 0, 0, (long)rp);   /* Move(rp, x, y) */
+    bm_os(GfxBase, -60, n, 0, 0, 0, (long)buf, (long)rp);                       /* Text(rp, buf, n) */
+}
+
+static void gui_draw(int sel, int left)
+{
+    static char t[100];
+    int row = 1;
+    gui_line(row++, "Boot menu", 0);
+    gui_line(row++, "", 0);
+    for (int i = 0; i < nentries; i++) {
+        int n = 0;
+        t[n++] = ' '; t[n++] = (char)('1' + i); t[n++] = ' '; t[n++] = ' ';
+        for (const char *s = entries[i].label; *s && n < 70; ) t[n++] = *s++;
+        t[n++] = ' '; t[n] = 0;
+        gui_line(row++, t, i == sel);
+    }
+    gui_line(row++, "", 0);
+    int n = 0;
+    for (const char *s = "Up/Down or 1-"; *s; ) t[n++] = *s++;
+    t[n++] = (char)('0' + nentries);
+    for (const char *s = ", Return to start."; *s; ) t[n++] = *s++;
+    if (left >= 0) {
+        for (const char *s = "  Starting in "; *s; ) t[n++] = *s++;
+        if (left >= 10) t[n++] = (char)('0' + left / 10);
+        t[n++] = (char)('0' + left % 10);
+        for (const char *s = " s."; *s; ) t[n++] = *s++;
+    }
+    t[n] = 0;
+    gui_line(row, t, 0);
+}
+
+/* the next key from the window: '1'..'9', '\r', 'U', 'D', -1 for any other, 0 when there is none */
+static int gui_key(void)
+{
+    u8 *m;
+    while ((m = (u8 *)bm_os(SysBase, -372, 0, 0, 0, 0, (long)GUI_PORT(), 0))) {   /* GetMsg */
+        u32 cls = *(u32 *)(m + 20);
+        u32 code = *(u16 *)(m + 24);
+        bm_os(SysBase, -378, 0, 0, 0, 0, 0, (long)m);                            /* ReplyMsg */
+        if (cls == IDCMP_VANILLAKEY)
+            return code == '\n' ? '\r' : (int)code;
+        if (cls == IDCMP_RAWKEY && !(code & 0x80))
+            return code == 0x4C ? 'U' : code == 0x4D ? 'D' : -1;
+    }
+    return 0;
+}
+
 /* The menu window: a borderless console window as big as the Workbench screen, so the menu fills the screen. 0 if it
  * cannot be opened (then the Shell's own window is used, as before). */
 static long menu_con;
 static long menu_in(void) { return menu_con ? menu_con : Input(); }
 static void menu_open(void)
 {
+    if (gui_open())
+        return;
     void *ib = OpenLibrary("intuition.library", 37);
     if (!ib)
         return;
@@ -260,6 +398,7 @@ static void menu_open(void)
 }
 static void menu_close(void)
 {
+    gui_close();
     if (!menu_con)
         return;
     Close(menu_con);
@@ -271,8 +410,42 @@ static void menu_close(void)
  * handler (20): at boot those are busy mounting the other partitions and would otherwise leave it no time to draw or
  * answer a key for seconds (seen on the A1200: the countdown stood at 5 for 3 s, then jumped to 2). It only waits for
  * keys, so it takes nothing from them. The countdown follows the clock, not the number of waits. */
+#define Delay(t) bm_os(DOSBase, -198, 0, (long)(t), 0, 0, 0, 0)
+static int choose_gui(void)
+{
+    void *me = FindTask(0);
+    long oldpri = SetTaskPri(me, 21);
+    int sel = defchoice, left = timeout;
+    u32 start = now_ticks();
+    gui_draw(sel, left);
+    logn("menu: drawn (own screen)", 0xFFFFFFFFu);
+    for (;;) {
+        int k = gui_key();
+        if (k == 0) {
+            Delay(2);                                   /* 40 ms between looks at the keys */
+            if (left < 0) continue;
+            int l = timeout - (int)((now_ticks() - start) / 50u);
+            if (l < 0) break;
+            if (l != left) { left = l; gui_draw(sel, left); }
+            continue;
+        }
+        left = -1;                                      /* any key stops the countdown */
+        if (k == '\r') break;
+        if (k == 'U' && sel > 0) sel--;
+        else if (k == 'D' && sel < nentries - 1) sel++;
+        else if (k >= '1' && k < '1' + nentries) { sel = k - '1'; gui_draw(sel, left); break; }
+        gui_draw(sel, left);
+    }
+    SetTaskPri(me, oldpri);
+    logn("menu: chosen", (u32)sel + 1);
+    log_save();
+    return sel;
+}
+
 static int choose(void)
 {
+    if (gui_win)
+        return choose_gui();
     long in = menu_in();
     void *me = FindTask(0);
     long oldpri = SetTaskPri(me, 21);
