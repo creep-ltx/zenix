@@ -246,3 +246,48 @@ the clock on every model · joysticks, the parallel port (printer, sampler) · a
 **The order proposed on 2026-10-24:** the main goal first (TCP/IP, `telnet`, the console for Claude Code), then newlib,
 shared libraries and the text-UI library (they unlock most of the rest), then the owner's own tools (Sumi, Maki, `zc`),
 `lha`/FFS/FAT and an installer, then the display and sound servers with a MOD player and games.
+
+**More ideas (100, added by the owner 2026-10-24; ideas only, same rules as the list above):**
+- *Claude and the terminal:* a `claude` command that connects to Claude on the PC (serial or network) [goal] · a console
+  mode tuned for Claude Code's screen (status line, symbol stand-ins) [goal] · UTF-8 in the console with Topaz stand-ins
+  [goal] · a 640x512 interlaced or 132-column console [goal] · a colour console (2-4 bitplanes, ANSI colours) [goal] ·
+  `ansiview` for text-art files · a clipboard shared by the consoles (Amiga+C / Amiga+V) · mouse text selection · search
+  in the scrollback · saving a console's history to a file.
+- *The owner's programs ported:* csh as a second shell · CTerm's tabs and layouts in the console · CUtils' `ls` colours
+  and `ctop` look · Ahiru in text mode · the utf8 and tui libraries as Zenix shared libraries · a `json` command and
+  library · Charcoal's text-art viewer · a Wasabi-compatible daemon so the existing `wasabi` tool works with Zenix.
+- *BBS and the scene:* a BBX client · a small BBS running on Zenix (serial or telnet) · message-network tools (FidoNet,
+  AmigaNet packets, a QWK reader) · door games · a text-mode ANSI editor (a small Charcoal) · an NFO/DIZ viewer with
+  Amiga fonts · a scene-news reader (Pouet, Demozoo) · a bootblock and cracktro viewer that runs old intro code safely.
+- *Music:* a Modland/HVSC browser streaming from the NAS mirror · a ProTracker-style tracker in the text console · a
+  MOD info tool · text-mode VU meters · a background playlist daemon · a network remote for the player (PC, phone).
+- *Everyday use:* a to-do list · notes with Markdown and search · a calendar with reminders at login · weather · an RSS
+  reader · a pomodoro timer · an encrypted password store · unit and currency conversion · a world clock · a small
+  spreadsheet (sc-style) · a word processor with page layout · an address book · a dashboard console (clock, CPU,
+  memory, network, news).
+- *For drivers (the owner's DropPoint domain):* a route and stop list · a trip log (km, fuel, notes) with totals · an EU
+  driving-hours calculator.
+- *System and safety:* a health screen (Pi temperature and voltage, as `wasabi health`) · a crash reporter (after a panic,
+  the log saved to the card and shown at the next boot) · a disk check at boot after an unclean stop · a safe-mode boot
+  entry in the menu · snapshots before updates, rollback from the boot menu · a firewall in the network server · login
+  history (`last`, `who`, failed logins) · disk quotas · a memory-map viewer (owners, fragmentation) · a live monitor of
+  the messages between servers · a benchmark suite that keeps the A1200 numbers over time · a hardware information
+  screen (CPU, Emu68 version, Zorro boards, memory).
+- *Amiga bridges:* reading the AmigaOS partitions on the same card (PFS3, read-only) · a shared FAT exchange partition ·
+  an AmigaOS filesystem handler for Zenix's ext2 and ZenixFS · running Zenix inside AmigaOS in a window, for testing
+  without a reboot · an AmigaGuide viewer · a `.info` icon viewer and converter · a Kickstart ROM information tool · a
+  Workbench-style drawer view in `zc`.
+- *Programming and learning:* a 68k assembly tutorial in a sandboxed process · a BASIC interpreter (AMOS/Blitz spirit) ·
+  Logo (after the display server) · a C playground (with the compiler) · manual pages for the kernel interface (system
+  calls, messages) · a "write your own server" kit with a template · a 68k instruction reference · a read-only Amiga
+  hardware register browser (root).
+- *Fun and the demoscene:* ASCII demos in the console · a Copper rainbow screen blanker · a cracktro-style "about Zenix"
+  screen · a boot logo in the boot menu · two-player Pong on one keyboard · Hunt the Wumpus, Lunar Lander, Star Trek ·
+  a daily puzzle (crossword, sudoku) · a MUD client, later a small MUD server.
+- *Networking extras:* an NFS server so the PC can mount Zenix's files · `talk`/`write` between Zenix machines · a small
+  web server for files (download to the phone) · wake-on-LAN and remote reboot of the PC · a Home Assistant / MQTT
+  client · a packet sniffer · the console in a web browser on the phone.
+- *Distribution:* a live floppy for any A1200 · an Aminet release with an installer · a website served by Zenix itself ·
+  a first-boot tour for new users · translated messages (Swedish first) · a ready FS-UAE image.
+- *Long term:* an optional MMU mode on 68030/040/060 (open question in DESIGN.md) · letting the Pi's ARM side do jobs
+  for Zenix (compression, networking) · Zenix on other 68k machines (Atari ST/TT, 68k Macs, Sun 3).
