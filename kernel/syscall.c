@@ -559,6 +559,7 @@ void syscall_c(u32 *rb)
         else if (a1 && (r = (s32)bootnote_set(a1)) < 0)
             ;
         else {
+            svc_hurry();                /* loaders in a back-off start at once (D11 6.3) */
             long e = vfs_sync();
             disk_frozen = 1;
             klog_set_reason(KLOG_END_REBOOT);

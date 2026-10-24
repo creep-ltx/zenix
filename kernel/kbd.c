@@ -334,6 +334,7 @@ void kbd_reset_flush(void)
     if (kbd_reset_state != KRS_HELD)
         return;
     kbd_reset_state = KRS_FLUSHING;
+    svc_hurry();                                /* loaders in a back-off start at once (D11 6.3) */
     long r = vfs_sync();
     disk_frozen = 1;
     if (kbd_reset_state != KRS_FLUSHING)        /* the tick gave up waiting: the machine is resetting */

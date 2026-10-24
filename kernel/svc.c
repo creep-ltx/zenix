@@ -18,6 +18,8 @@ enum { SV_FREE, SV_STOPPED, SV_LOADING, SV_STARTING, SV_RUNNING, SV_GIVENUP };
 #define MAX_ENDS 5                      /* ... and the 5th in one gives the service up */
 #define SVC_ARGS 6
 
+static u8 hurry;                        /* the reset warning or reboot began (svc_hurry) */
+
 static struct svc {
     u8 state, essential, served, ends, nwords, depth, midreq;
     s8 nice;
@@ -210,7 +212,7 @@ static long load(int i, struct umsg *m)
     }
     s->depth = ++current->svc_depth;
     u32 back = s->ends >= 2 && (s32)(ticks - s->win) < (s32)WINDOW_TICKS ? 100u << (s->ends - 2) : 0, until = ticks + back;
-    while (back && !current->killed && (s32)(ticks - until) < 0) {
+    while (back && !current->killed && !hurry && (s32)(ticks - until) < 0) {
         sleep_until(until);                     /* the back-off: a kill wakes it */
         schedule();
     }
@@ -240,6 +242,14 @@ static long load(int i, struct umsg *m)
     return watch(i, m, 0);
 }
 
+void svc_hurry(void)
+{
+    hurry = 1;
+    for (int i = 0; i < NSVC; i++)
+        if (svcs[i].state == SV_LOADING)
+            wake(svcs[i].pid);
+}
+
 /* proc_load made process pid for the innermost load of current: from here (before the loader's next blocking call,
  * the close of a program file) the entry is starting, so the new process may take its port at once */
 void svc_born(int pid)
@@ -265,7 +275,7 @@ long svc_call(int i, struct umsg *m, int ns)
         kprintf("svc: %s: its own server called it before it opened its port\n", ports[i].name);
         return -ECONNRESET;                     /* it would wait for itself */
     }
-    if (s->state == SV_STOPPED && !ns) {
+    if (s->state == SV_STOPPED && !ns && !disk_frozen) {     /* once disk writes are stopped nothing is started */
         long r = load(i, m);
         if (r)
             return r;

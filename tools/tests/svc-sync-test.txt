@@ -1,0 +1,6 @@
+wait zenix:/# 90
+send svctest reg ping 0 /bin/pingd; svctest call ping 7; svctest call ping 7; svctest call ping 7; svctest call ping 7\r
+sleep 16
+send svctest call ping 1 & sleep 1; svctest reboot 3\r
+wait klog: boot 2 60
+sleep 3

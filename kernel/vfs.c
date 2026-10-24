@@ -169,10 +169,13 @@ __attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 
     m.type = type;
     m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
     /* FS_CLOSE never starts a stopped server (D11): a new server has no opens to release, and proc_exit's closes
-     * must never load a program */
-    long r = ipc_kcall(mt->port, &m, type == FS_CLOSE ? SVC_NS_CLOSE : 0);
+     * must never load a program; FS_SYNC and FS_QUIT skip a server that is not running (it has nothing to write: an
+     * ext2 one wrote through, a dead ZenixFS one's uncommitted changes are gone, a starting one wrote nothing yet) */
+    int ns = type == FS_CLOSE ? SVC_NS_CLOSE : type == FS_SYNC || type == FS_QUIT ? SVC_NS_SKIP : 0;
+    long r = ipc_kcall(mt->port, &m, ns);
     if (r == -ECONNRESET)
-        r = -EIO;                       /* the server is gone (D11): programs see an I/O error, as before */
+        r = ns == SVC_NS_SKIP ? 0 : -EIO;   /* the server is gone (D11): programs see an I/O error, as before; a sync
+                                             * or quit skipped a server that is not running: nothing to write */
     if (r == -5 || r == -1)
         mt->port = -1;                  /* the server is gone (-1: its port is closed or its slot reused, audit G1) */
     return r;

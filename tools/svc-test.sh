@@ -23,10 +23,12 @@
 #      4 s more), then given up: -104 at once; registering again clears it; a start-up calling its own port fails at
 #      once; a loader killed in its back-off passes the role on (the next call works); a cycle of two services fails
 #      after the 30 s deadline
+#   s  the sync paths (step 5): reboot with the root server dead and a loader asleep in a 4 s back-off: the sync skips
+#      the dead server at once (no error), the machine resets and boots again
 #   dmg  a test-only kernel damages diskd's saved table: diskd stops with its message, the kernel panics
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
-PARTS=" ${*:-a z b n r d o zo u l dmg} "
+PARTS=" ${*:-a z b n r d o zo u l s dmg} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
 make -s all build/zenix-zroot.hdf build/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
@@ -205,6 +207,19 @@ rx   l "a loader killed in its back-off: the next call works" ".*svctest call k 
 rx   l "a cycle of two services: the deadline ends it" "svc: c[12]: pingd did not open its port in 30 s"
 rx   l "... and the caller gets -104 after about 30 s" ".*svctest call c1 1: -104 in (29|3[0-9])[0-9]{3} ms"
 line l "the script ran to the end" "svc-l-done"
+fi
+
+# ---- s: reboot with a dead server and a sleeping loader ----
+if want_part s; then
+cp build/zenix.hdf "$OUT/root.hdf"
+conf s "$OUT/root.hdf"
+run s "$OUT/s.fs-uae" 120 tools/tests/svc-sync-test.txt
+rx   s "the loader sleeps in a back-off of 4 s (four ends)" "svc: ping: start 5 when next used"
+line s "the root server was dead before the reboot" "svc: fs: fsd (pid 3) ended, status 130"
+line s "the sync skipped it at once, without an error" "reboot: filesystems synced, disk writes stopped; resetting"
+rx   s "... the machine reset and booted again" "klog: boot 2, .*"
+if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck-s.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean"; else echo "FAIL the host's e2fsck finds the root clean"; pass=0; fi
+rm -f "$OUT/root.hdf"
 fi
 
 # ---- dmg: a damaged saved table stops the machine ----

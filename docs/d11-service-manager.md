@@ -701,7 +701,9 @@ with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`), step 2 (2
 retried claim and the one retry of the filesystem servers; `tools/svc-test.sh` d and dmg, `tools/disk-host-test.sh`),
 step 3 (2026-10-24: `SVC_OPENS`, the volume id rule in `user/volid.h`, uuids from all three tools, the ext2 state bit,
 ZenixFS's kept orphans and inode floor; `tools/svc-test.sh` o, zo, u), step 4 (2026-10-24: the give-up, a start-up
-calling its own port; `tools/svc-test.sh` l).
+calling its own port; `tools/svc-test.sh` l), step 5 (2026-10-24: the sync paths; `tools/svc-test.sh` s). Steps
+6-9 (mount and umount as services, `/etc/svctab`, the servers' output to the kernel log, the remaining documents)
+are not built yet.
 
 **Where the code differs from the note** (each one small, and the reason):
 - *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM
@@ -751,6 +753,10 @@ calling its own port; `tools/svc-test.sh` l).
   a "wait a second, then crash" request (type 7) for the tests. Found while testing: a `kill` from a program of normal
   priority always lands between requests (the servers run at nice -10 and finish a request before such a program
   runs again), so the mid-request test kills from nice -20 (`svctest kill`).
+- *Step 5:* a skipped `FS_SYNC`/`FS_QUIT` counts as success in the kernel's file calls (not -EIO), so `reboot`
+  says "filesystems synced" without "(with an error)" when the root server is not running. Tested with `reboot`
+  (part s); the reset warning (Ctrl-Amiga-Amiga) runs the same `svc_hurry` + `vfs_sync`, and its own test
+  (`tools/diag-test.sh`) was run unchanged, not extended with a dead server.
 
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
 same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10

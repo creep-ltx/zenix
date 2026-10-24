@@ -414,6 +414,7 @@ long svc_role(struct umsg *m);          /* the caller was woken to load or watch
 int svc_handover(int slot);             /* port_create of a registered name: the started process takes its port */
 struct proc *svc_proc(int slot);        /* who works for a held port now (the loader or the starting server) */
 void svc_exit(struct proc *p);          /* p is dying: the entries it served, loaded or watched */
+void svc_hurry(void);                   /* the reset warning or reboot began: no more back-off, sleeping loaders go on */
 void svc_born(int pid);                 /* proc_load made the server of the load under way in current */
 long svc_sys(u32 op, const char *name, const char *text);
 long svc_data(u32 op, void *buf, u32 len);   /* SVC_SAVE, SVC_LOAD */

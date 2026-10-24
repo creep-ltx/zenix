@@ -14,6 +14,8 @@
  *                                  bytes after a filesystem server restart (D11 5.4), then close it
  *   svctest kill PID SECS          wait SECS seconds, then kill PID twice (at once even mid-request); run at nice -20 it
  *                                  wakes while a busy server is in the middle of a request
+ *   svctest reboot PID             kill PID (a server), wait half a second, then reboot (root): with the server dead and
+ *                                  maybe a loader asleep in its back-off, the sync must not wait (D11 6.3)
  *   svctest lost FILE SECS [PID]   create FILE and write AAAA, kill PID (the filesystem server: it ends before its next
  *                                  commit), wait, read it through the open file (ZenixFS: the file is gone with the
  *                                  uncommitted seconds: an error, never another file) */
@@ -83,6 +85,12 @@ int main(int argc, char **argv)
         int a = sys_kill(atoi(argv[2])), b = sys_kill(atoi(argv[2]));
         printf("svctest kill %s: %d %d\n", argv[2], a, b);
         return 0;
+    }
+    if (argc >= 3 && !strcmp(argv[1], "reboot")) {
+        sys_kill(atoi(argv[2]));
+        sys_sleep(50);
+        printf("svctest reboot: %d\n", sys_reboot(0));
+        return 1;
     }
     if (argc >= 4 && !strcmp(argv[1], "lost")) {
         char buf[8];

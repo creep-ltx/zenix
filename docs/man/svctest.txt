@@ -12,6 +12,7 @@ SYNOPSIS
     svctest hold DEVICE SECONDS
     svctest keep FILE SECONDS
     svctest kill PID SECONDS
+    svctest reboot PID
     svctest lost FILE SECONDS [PID]
 
 DESCRIPTION
@@ -42,6 +43,9 @@ DESCRIPTION
     kill   waits SECONDS seconds, then kills PID twice (the second kill
            ends a server at once, also in the middle of a request). Run
            at nice -20 it wakes while a busy server is serving.
+    reboot kills process PID (a server), waits half a second and reboots
+           (root): the sync before the reset must not wait for a server
+           that is not running, nor for a loader asleep in its back-off.
     lost   creates FILE, writes AAAA, kills process PID if given (the
            filesystem server), waits, and reads it through the open
            file. On ZenixFS a server that died before its next

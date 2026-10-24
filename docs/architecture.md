@@ -584,7 +584,7 @@ end, it says so and starts it again. (It exists because the idle process cannot 
 consoles are init's work (section 11, man/init.txt).
 
 ### The service manager (`kernel/svc.c`, DESIGN D11)
-The full design is docs/d11-service-manager.md; what is built (steps 0-4 of its build order):
+The full design is docs/d11-service-manager.md; what is built (steps 0-5 of its build order, the core):
 - **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
   bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
   (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are
@@ -619,6 +619,9 @@ The full design is docs/d11-service-manager.md; what is built (steps 0-4 of its 
   whether the last end came in the middle of a request.
 - **No-start calls.** `FS_CLOSE` (from `file_close` and the end of a program load) and every call made by a dying
   process never start a server: dropped while the entry is stopped, queued while it is loading or starting.
+- **The reset warning and `reboot`** (step 5): `FS_SYNC` and `FS_QUIT` are no-start calls that skip a server that
+  is not running (it has nothing to write); a live one may still start diskd to flush, with no back-off: loaders
+  asleep in a back-off are woken (`svc_hurry`). Once `disk_frozen` is set nothing is started any more.
 - **Loads nest at most two deep** (a file service read while the root server is stopped); a third level fails with
   -ECONNRESET. Kernel stack: the deepest such chain is about 2.1 KB of the 4 KB (`-fstack-usage` sums, 2026-10-24).
 - **The log** (`dmesg`): `svc: NAME: started PROGRAM (pid N, for pid M NAME)`, `svc: NAME: PROG (pid N) ended, status

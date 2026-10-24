@@ -11,7 +11,10 @@ DESCRIPTION
     reboot does what pressing Ctrl-Amiga-Amiga does on a keyboard that
     sends the reset warning: every filesystem is synced, disk writes are
     stopped, and the machine is reset. The next boot's log (dmesg -p)
-    says that the previous boot ended with reboot.
+    says that the previous boot ended with reboot. A filesystem server
+    that is not running at that moment (it crashed and nobody needed it
+    since) is skipped: it has nothing to write. No server is started
+    once disk writes are stopped.
 
     With a system named, the boot menu (bootmenu(8), on a disk that has
     one) starts that system at once instead of showing the menu:
