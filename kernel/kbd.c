@@ -121,10 +121,8 @@ static const char keyspecial[0x28] = {
     0, 0, 0, 0, 0, 0, 0, 0,
 };
 
-/* cursor keys, function keys, Help and Del as the usual escape sequences. Only
- * programs in raw mode get them; Shift/Ctrl + Up/Down scroll the screen back. Shift + PgUp/PgDn (keypad 9 and 3,
- * where the A1200 keyboard prints Pg Up and Pg Dn) scroll back a screenful in every mode and never reach a program:
- * Linux's Shift+PageUp, so the scrollback also works at the shell's prompt, whose line editor runs in raw mode. */
+/* cursor keys, function keys, Help and Del as the usual escape sequences. Only programs in raw mode get them.
+ * Scrollback is a console key, Amiga + Up/Down (see kbd_key), like the console switch Amiga+F1..F10. */
 static void emit_seq(const char *q)
 {
     if (!(tty_getmode(con_cur) & TTY_RAW))
@@ -139,10 +137,6 @@ static int special_key(u8 code)
         "\033OP", "\033OQ", "\033OR", "\033OS", "\033[15~",
         "\033[17~", "\033[18~", "\033[19~", "\033[20~", "\033[21~" };
     int raw = (tty_getmode(con_cur) & TTY_RAW) != 0;
-    if (shift_down && (code == 0x3F || code == 0x1F)) {        /* Shift + keypad 9 / 3: Pg Up / Pg Dn */
-        term_scroll_view(code == 0x3F ? trows - 1 : -(trows - 1));
-        return 1;
-    }
     if (code >= 0x4C && code <= 0x4F) {
         static const char arrow[4] = { 'A', 'B', 'C', 'D' };
         int mods = (shift_down ? 1 : 0) | (alt_down ? 2 : 0) | (ctrl_down ? 4 : 0);
@@ -153,11 +147,6 @@ static int special_key(u8 code)
             seq[n++] = arrow[code - 0x4C];
             seq[n] = 0;
             emit_seq(seq);
-            return 1;
-        }
-        if ((shift_down || ctrl_down) && code <= 0x4D) {        /* a plain terminal: scrollback */
-            int step = ctrl_down ? trows - 1 : 1;
-            term_scroll_view(code == 0x4C ? step : -step);
             return 1;
         }
         return 1;                                               /* cursor keys mean nothing to line editing in the kernel */
@@ -391,10 +380,14 @@ static void key_code(u8 code)
             rep_code = 0;
         return;
     }
-    if (amiga_down) {                   /* Amiga+F1..F10: virtual console 1..10 (Linux: Alt+Fn); other Amiga keys: nothing */
+    if (amiga_down) {                   /* console keys, never seen by a program (Linux: Alt+Fn, Shift+PageUp) */
         rep_code = 0;
-        if (code >= 0x50 && code <= 0x59)
+        if (code >= 0x50 && code <= 0x59)               /* Amiga+F1..F10: virtual console 1..10 */
             con_switch(code - 0x50 + 1);
+        else if (code == 0x4C || code == 0x4D) {        /* Amiga+Up/Down: scroll back a screenful, with Shift a line */
+            int step = shift_down ? 1 : trows - 1;      /* every Amiga keyboard has these (no Page Up on most) */
+            term_scroll_view(code == 0x4C ? step : -step);
+        }
         return;
     }
     rep_code = code;

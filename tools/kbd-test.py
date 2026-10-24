@@ -89,12 +89,12 @@ try:
         time.sleep(0.5)
         text("echo typed during output"); redir("k4.txt"); w("-k", "Return")
         time.sleep(40)
-        # 4b. scrollback at the shell's prompt (its line editor is in raw mode): Shift + keypad 9 (Pg Up) shows older
-        # lines, Shift + keypad 3 (Pg Dn) comes back. Screenshots compared by kbd-test.sh.
+        # 4b. scrollback at the shell's prompt (its line editor is in raw mode): Amiga+Up shows older lines,
+        # Amiga+Down comes back. Screenshots compared by kbd-test.sh.
         cage.screenshot("/tmp/zenix-kbd/sb0.png")
-        key("KP_9", "Shift_L"); time.sleep(1)
+        key("Up", "Super_L"); time.sleep(1)
         cage.screenshot("/tmp/zenix-kbd/sb1.png")
-        key("KP_3", "Shift_L"); time.sleep(1)
+        key("Down", "Super_L"); time.sleep(1)
         cage.screenshot("/tmp/zenix-kbd/sb2.png")
         # 5. virtual consoles: Amiga+F2 shows console 2 and its own login prompt; log in as root there (autologin is
         # console 1's only); two logins are then running. Amiga+F1 goes back: console 1's shell has no jobs, console
