@@ -14,10 +14,13 @@ int main(int argc, char **argv)
     sys_call(port, &m);
     printf("ping: %s\n", text);
     int n = argc > 1 ? atoi(argv[1]) : 1000;
-    u32 t0 = sys_ticks();
+    if (n < 1) n = 1;
+    u32 t0 = sys_hrtime();                              /* the E-clock, as bench uses: the 100 Hz tick is too coarse */
     for (int i = 0; i < n; i++) { m.type = 1; m.a[0] = (u32)i; m.a[1] = 1; sys_call(port, &m); }
-    u32 t1 = sys_ticks();
-    printf("ping: %d round trips in %u ticks (emulator time, 100 ticks = 1 s)\n", n, t1 - t0);
+    u32 e = sys_hrtime() - t0;
+    u32 tenths = (u32)(((unsigned long long)e * 10000000ull) / 709379u / (u32)n);   /* 0.1 us per trip (PAL E-clock) */
+    u32 total = (u32)(((unsigned long long)e * 1000000ull) / 709379u);
+    printf("ping: %d round trips in %u us, %u.%u us each\n", n, total, tenths / 10, tenths % 10);
     m.type = 9; sys_call(port, &m);
     return 0;
 }

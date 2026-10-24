@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # The commands that cannot be compared with GNU output (they depend on the clock, the machine or the process list):
 # cal, tree, time, pgrep/pkill, kill -STOP/-CONT, watch (and a few filters, for the record), ls of a 450-name
-# directory (more than the old 400 cap). Then the audit batch E
+# directory (more than the old 400 cap), ping's round trips in microseconds. Then the audit batch E
 # script (rootfs/tests/batch-e.sh: the shell's loops in flat memory, no silent caps, the expansion and builtin fixes,
 # xargs, diff -r, watch, tar, expr :, $PATH in find/xargs/timeout, sort/grep "-", mv): its output, read from the disk
 # with debugfs, must equal tools/tests/batch-e.expected line for line.
@@ -27,6 +27,7 @@ want "Ctrl-C ends watch" "after-watch"
 want "tac (last line first)" "users::100:user,guest"
 want "rev" "toor:0::toor"
 want "paste -s -d+" "x+y"
+tr -d '\r' < $OUT/run.log | grep -aqxE 'ping: 500 round trips in [0-9]+ us, [0-9]+\.[0-9] us each' && echo "PASS ping times round trips in microseconds" || { echo "FAIL ping times round trips in microseconds"; pass=0; }
 want "ls lists all 450 names of a directory (hard links: the disk has few inodes; -a adds . and ..; -l finds the last)" "lsn=450 lsa=452 lsl=1"
 debugfs -R "cat /tmp/be.out" build/zenix.hdf > $OUT/batch-e.txt 2>/dev/null
 if diff tools/tests/batch-e.expected $OUT/batch-e.txt > $OUT/batch-e.diff; then echo "PASS batch E script: $(wc -l < tools/tests/batch-e.expected) lines as expected"
