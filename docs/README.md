@@ -14,6 +14,7 @@
 | [pi-first-boot.md](pi-first-boot.md) | How to try Zenix on a PiStorm A1200 for the first time: the boot colours, what the messages should say, what to report. |
 | [zenixfs.md](zenixfs.md) | ZenixFS, the native filesystem: why, the design, the host tools, its status. |
 | [zenixfs-format.md](zenixfs-format.md) | ZenixFS's exact on-disk format, version 1. |
+| [d13-shared-code.md](d13-shared-code.md) | DESIGN D13's design note: one copy in memory of a program's code and of shared libraries, how (gcc's separate-data mode, a base register), the file format, the loader, safety, the measurements it must pass. Proposed, awaiting review. |
 | [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D9 and where each one stands. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
 | [audit-2026-10-22.md](audit-2026-10-22.md) | The audit of 2026-10-22: the work list of the hardening round (batches A-E), each item marked with its fix. |
