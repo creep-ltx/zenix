@@ -11,12 +11,16 @@
 #   erased and p1 is made new with those files.
 #   Without it: the card must already have Emu68's FAT partition where this layout puts it (sector 8192, 512 MB, as on
 #   the Zenix test card made 2026-10-23); it is kept as it is, and everything after it is replaced.
+#   sudo bash tools/write-card.sh /dev/sdX --whole IMAGE
+#   Write a whole card image, every partition including p1 and the partition table, byte for byte (the card made by
+#   tools/mkdualcard.sh, which carries the owner's own Emu68 partition). Everything on the card is replaced.
 # Safety: only the device named is touched; it must be a whole removable disk (or an mmcblk SD slot) of 1-64 GB, none
 # of its partitions may hold this PC's system, and there is a 5-second pause to stop it (Ctrl-C).
 set -euo pipefail
-DEV="${1:-}"; EMU="${2:-}"
+DEV="${1:-}"; EMU="${2:-}"; WHOLE=""
 TOP="$(cd "$(dirname "$0")/.." && pwd)"
 IMG="$TOP/build/zenix-card.img"
+if [ "$EMU" = --whole ]; then WHOLE="${3:-}"; EMU=""; IMG="$WHOLE"; fi
 die() { echo "write-card: $*" >&2; exit 1; }
 
 [ -n "$DEV" ] || die "usage: sudo bash tools/write-card.sh /dev/sdX [EMU68-FOLDER]"
@@ -35,6 +39,26 @@ while read -r src tgt; do
         case "$tgt" in /|/boot|/boot/*|/home|/usr|/var|/efi) die "$src is mounted on $tgt: that is this PC's system disk";; esac ;;
     esac
 done < <(findmnt -rno SOURCE,TARGET)
+if [ "${2:-}" = --whole ]; then
+    [ -n "$WHOLE" ] && [ -f "$WHOLE" ] || die "--whole needs the image file"
+    LEN=$(stat -c %s "$WHOLE")
+    P="$DEV"; case "$NAME" in *[0-9]) P="${DEV}p";; esac
+    [ "$LEN" -le "$SIZE" ] || die "$DEV ($SIZE bytes) is too small for $WHOLE ($LEN bytes)"
+    echo "Card: $DEV, $SIZE bytes. Now on it:"
+    lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINTS "$DEV" || true
+    echo "ERASING THE WHOLE CARD in 5 seconds (Ctrl-C to stop): writing $WHOLE ($((LEN / 1048576)) MB) onto it."
+    sleep 5
+    for p in "$P"?*; do [ -b "$p" ] && umount "$p" 2>/dev/null || true; done
+    dd if="$WHOLE" of="$DEV" bs=4M conv=fsync status=progress
+    blockdev --rereadpt "$DEV" || true; sleep 2; udevadm settle || true
+    for p in "$P"?*; do [ -b "$p" ] && umount "$p" 2>/dev/null || true; done
+    echo "write-card: checking what was written"
+    cmp -n "$LEN" "$WHOLE" "$DEV" || die "the card differs from the image"
+    for p in "${P}3" "${P}4"; do [ -b "$p" ] && e2fsck -fn "$p" | tail -1; done
+    sync
+    echo "Done. Partitions:"; sfdisk -l "$DEV" | tail -5
+    exit 0
+fi
 if [ -n "$EMU" ]; then
     [ -d "$EMU" ] || die "$EMU is not a folder"
     [ -f "$EMU/config.txt" ] && [ -f "$EMU/start4.elf" ] || die "$EMU does not look like Emu68's files (no config.txt or start4.elf)"
