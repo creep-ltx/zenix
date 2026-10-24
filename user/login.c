@@ -35,9 +35,11 @@ int main(int argc, char **argv)
     for (int tries = 0; tries < 5; ) {
         if (!name[0]) {
             fputs("zenix login: ", 1);
+            /* the tty is in cooked mode here: it echoes the name, edits the line (Backspace, ^U) and echoes the
+             * Return, so login only takes the characters (echoing them too printed the name twice) */
             int n = 0; char c;
-            while (sys_read(0, &c, 1) == 1 && c != '\n' && c != '\r') { if ((c == 8 || c == 127)) { if (n) { n--; fputs("\b \b", 1); } } else if (n < 31 && c >= ' ') { name[n++] = c; sys_write(1, &c, 1); } }
-            name[n] = 0; fputs("\n", 1);
+            while (sys_read(0, &c, 1) == 1 && c != '\n' && c != '\r') { if (n < 31 && c >= ' ') name[n++] = c; }
+            name[n] = 0;
             if (!name[0]) continue;
         }
         if (pw_byname(name, &p) == 0) {
