@@ -18,7 +18,8 @@ Optional argv[3]: a keystroke script driven while logging. Lines:
 
 After every boot the tap sends one harmless byte pair, 0x1D '.' (the kernel's
 test hook with a letter that is no command), half a second after the kernel's
-"tick latch" line, when its receive interrupt is on. The kernel's serial copy
+"clock: ... tick latch" line (at a line start), when its receive interrupt is
+on. The kernel's serial copy
 of the console waits for the port only once it has received something since
 boot (else it drops what does not fit, to keep the screen fast); this makes
 the log complete even before the script types anything.
@@ -68,6 +69,7 @@ def wait_for(pattern, timeout):
             cond.wait(min(left, 0.5))
 
 
+TICK_LINE = re.compile(rb"(?:^|\n)clock: [^\n]*tick latch")
 send_lock = threading.Lock()    # a `send` line and the greeting never interleave (0x1D takes the next byte)
 
 
@@ -77,9 +79,11 @@ def greet():
     while True:
         with cond:
             while True:
-                i = bytes(received).find(b"tick latch", seen)
-                if i >= 0:
-                    seen = i + 1
+                # at a line start: the previous boot's lines, replayed early in the next boot (before its receive
+                # interrupt is on), hold the same text after "> "
+                m = TICK_LINE.search(bytes(received), seen)
+                if m:
+                    seen = m.end()
                     break
                 cond.wait(1)
         time.sleep(0.5)
