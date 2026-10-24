@@ -37,7 +37,10 @@ DESCRIPTION
     unless -y is given twice (it would wipe the MBR and the boot files).
 
 COMMANDS
-    list [disk]    show disks and partitions (all disks if none is named)
+    list [disk]    show disks and partitions (all disks if none is named):
+                   device, label, size in 512-byte sectors, size in KB
+                   below 1 MB (a floppy, the RAM disk) or else in MB,
+                   type and the boot/mounted marks
     init disk -y   write an empty table, DESTROYING the old one; "-y" is
                    required to confirm
     add disk label size [type]

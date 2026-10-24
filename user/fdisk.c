@@ -71,10 +71,14 @@ static const char *tname(unsigned t)
 static void list(const char *only)
 {
     struct diskinfo d;
-    printf("%-8s %-10s %10s %8s  %s\n", "DEVICE", "LABEL", "SECTORS", "SIZE(MB)", "TYPE");
+    printf("%-8s %-10s %10s %9s  %s\n", "DEVICE", "LABEL", "SECTORS", "SIZE", "TYPE");
     for (u32 i = 0; dlist(i, &d) == 0; i++) {
         if (only && strncmp(d.name, only, strlen(only))) continue;
-        printf("%-8s %-10s %10u %8u  %s%s%s\n", d.name, d.label, d.sectors, d.sectors / 2048,
+        /* KB below 1 MB (a floppy, the RAM disk), MB from there on: never "0" for a disk that has sectors */
+        char size[16];
+        if (d.sectors < 2048) snprintf(size, sizeof size, "%u KB", d.sectors / 2);
+        else snprintf(size, sizeof size, "%u MB", d.sectors / 2048);
+        printf("%-8s %-10s %10u %9s  %s%s%s\n", d.name, d.label, d.sectors, size,
                d.dostype ? tname(d.dostype) : "", d.flags & 1 ? " boot" : "", d.mounted ? " mounted" : "");
     }
 }
