@@ -11,8 +11,13 @@ DESCRIPTION
     finer than the 100 Hz tick) and prints microseconds per operation:
     a null system call, stat through the filesystem server, a message round
     trip, cached and uncached file reads, creating and deleting 50 small
-    files, listing /bin, and printing 300 lines with scrolling. It is a
-    development tool and is not meant for everyday use.
+    files, listing /bin, and printing 300 lines to the terminal (/dev/tty)
+    twice: with the serial copy of the console off (only root may switch it
+    off; for others that line says so) and on. With the copy on, the screen
+    waits for the 115200-baud serial port only if the port has received
+    something since boot (a terminal is attached); otherwise the copy drops
+    what does not fit and the two lines are close. It is a development tool
+    and is not meant for everyday use.
 
     Every open, read, write, close, mkdir, unlink and stat is checked: when
     calls fail, the line says "FAILED", how many and the first error, and

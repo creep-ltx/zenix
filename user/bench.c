@@ -167,17 +167,31 @@ static void bench_dir(void)
     sys_close(fd);
 }
 
+/* 300 lines to the terminal (/dev/tty, so "bench > file" still measures the screen): once with the serial copy of
+ * the console off, once with it on. The copy waits for the port only after the port has received something since
+ * boot (a terminal or the test harness typed); with nobody listening it drops what does not fit (kernel/serial.c). */
+static u32 print_lines(int fd, const char *line)
+{
+    u32 t0 = sys_hrtime();
+    for (int i = 0; i < 300; i++) sys_write(fd, line, 80);
+    return sys_hrtime() - t0;
+}
+
 static void bench_screen(void)
 {
     static char line[80];
     memset(line, 'x', 79); line[79] = '\n';
-    sys_ttymirror(0);                            /* the serial port would be the bottleneck */
-    u32 t0 = sys_hrtime();
-    for (int i = 0; i < 300; i++) sys_write(1, line, 80);
-    u32 e = sys_hrtime() - t0;
+    int fd = sys_open("/dev/tty", O_WRONLY);
+    if (fd < 0) fd = 1;
+    int off = sys_ttymirror(0) == 0;              /* root only */
+    u32 e_off = off ? print_lines(fd, line) : 0;
     sys_ttymirror(1);
+    u32 e_on = print_lines(fd, line);
+    if (fd != 1) sys_close(fd);
     printf("\n");
-    report("print 300 lines of 79 chars (scrolling)", e, 300);
+    if (off) report("print 300 lines of 79 chars (no copy)", e_off, 300);
+    else printf("print 300 lines, serial copy off: not measured (only root may turn the copy off)\n");
+    report("... with the serial copy on", e_on, 300);
 }
 
 int main(void)
