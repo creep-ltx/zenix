@@ -297,7 +297,7 @@ is to be excellent from the start** - the best of bash, zsh and fish, as the own
 
 **A pacman-like package system (the owner's wish, 2026-10-24).** Installing and updating programs, and Zenix itself, the
 way Arch Linux's `pacman` does: a repository with a package database, `zpkg -S name` to install with its dependencies, `zpkg -Ss word` to search the repository (names and descriptions),
-`zpkg -Syu` to bring the whole system up to date, `zpkg -R` to remove, a record of which package owns which file. The
+`zpkg -Syu` to bring the whole system up to date, `zpkg -R` to remove (`-Rns`: also the dependencies nothing else needs, and the package's saved settings files, as pacman), a record of which package owns which file. The
 repository lives on the owner's NAS (served over the network: HTTP or NFS, once Zenix has TCP/IP), built on the PC from
 the Zenix build. It must be **one mechanism with the approved self-updates** (Zenix installing updates by itself, after
 D11): the self-update is designed as the first part of it (the kernel, the boot files and the system as packages, with
