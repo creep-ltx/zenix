@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 106 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 109 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -46,6 +46,7 @@ spot-checked against the code that day.
 |---|---|
 | [sh](man/sh.txt) | the shell |
 | [ps](man/ps.txt), [dmesg](man/dmesg.txt), [beep](man/beep.txt), [input](man/input.txt), [free](man/free.txt), [uptime](man/uptime.txt), [uname](man/uname.txt), [date](man/date.txt), [sleep](man/sleep.txt) | system state and time |
+| [nice](man/nice.txt), [renice](man/renice.txt) | run a command at a priority, change a running one's |
 | [kill](man/kill.txt), [pgrep](man/pgrep.txt) ([pkill](man/pkill.txt)), [time](man/time.txt), [timeout](man/timeout.txt), [watch](man/watch.txt), [cal](man/cal.txt), [mktemp](man/mktemp.txt), [realpath](man/realpath.txt) | processes, timing, calendar, temporary files, real paths |
 | [env](man/env.txt), [printenv](man/printenv.txt), [which](man/which.txt), [whoami](man/whoami.txt), [id](man/id.txt), [hostname](man/hostname.txt), [clear](man/clear.txt), [true](man/true.txt), [false](man/false.txt) | small utilities |
 | [login](man/login.txt), [su](man/su.txt), [passwd](man/passwd.txt), [sha256sum](man/sha256sum.txt) | users: logging in on a console, switching user, passwords, checksums |
@@ -55,11 +56,12 @@ spot-checked against the code that day.
 ## Internals and test programs
 [init](man/init.txt), [boot](man/boot.txt), [diskd](man/diskd.txt) (the built-in start-up programs);
 [hello](man/hello.txt), [spin](man/spin.txt), [crash](man/crash.txt), [badptr](man/badptr.txt),
-[ping](man/ping.txt), [pingd](man/pingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt).
+[ping](man/ping.txt), [pingd](man/pingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt),
+[priotest](man/priotest.txt).
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 106 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 109 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 
 ## How the pages get onto the system
 `docs/man/` is the one place for manual pages. `tools/mkroot.sh` copies every `docs/man/*.txt` to `/usr/man` on the

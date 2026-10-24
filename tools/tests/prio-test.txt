@@ -1,0 +1,32 @@
+wait zenix:/# 90
+sleep 1
+send ps\r
+sleep 2
+send echo n0=$(nice) n5=$(nice -n 5 nice) n7=$(nice -n 3 nice -n 4 nice) r=$(nice -n -5 nice) d=$(nice nice)\r
+sleep 4
+send sleep 300 & echo bg=$!\r
+sleep 2
+send renice 7 $!; renice -n -3 -p $!; ps | grep sleep\r
+sleep 3
+send kill $!\r
+sleep 2
+send su user\r
+sleep 3
+send echo u5=$(nice -n 5 nice) uc=$(nice -n 3 nice -n 2 nice); nice -n -1 nice; echo neg=$?\r
+sleep 4
+send sleep 300 &\r
+sleep 2
+send renice 5 $!; echo lower=$?; renice 2 $!; echo raise=$?; renice 5 1; echo server=$?; renice 5 -u user; echo user=$?\r
+sleep 4
+send ps | grep sleep; kill $!; exit\r
+sleep 3
+send priotest fair\r
+sleep 9
+send priotest prio\r
+sleep 8
+send priotest wake\r
+sleep 8
+send priotest inherit\r
+sleep 10
+send echo prio-done\r
+sleep 2

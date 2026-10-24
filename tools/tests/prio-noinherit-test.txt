@@ -1,0 +1,4 @@
+wait zenix:/# 90
+sleep 1
+send priotest inherit\r
+sleep 12

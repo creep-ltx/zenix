@@ -33,7 +33,8 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           head tail sort uniq cut tr tee seq basename dirname yes sleep true false env printenv which clear \
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
-          tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs
+          tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mount.ext2 mount.zenixfs mkfs_zenixfs fsck_zenixfs \
+          nice renice priotest
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 # Stack sizes written into each program's ZEXE header (the loader gives this much; no guard below it). Default 16 KB;
@@ -157,7 +158,7 @@ $(BUILD)/gzip.uelf: $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl
 	    $(BUILD)/crt0.o $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 # programs that look up users and groups (/etc/passwd, /etc/group), and those that also check passwords
-PWAPPS := ls id whoami chown
+PWAPPS := ls id whoami chown renice
 AUTHAPPS := login su passwd sha256sum
 $(PWAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \

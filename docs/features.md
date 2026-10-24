@@ -31,7 +31,8 @@ built. Last checked against the code: 2026-10-23.
 | Memory manager with per-process ownership, freed on exit | verified | architecture.md section 5 |
 | Memory calls answer 0 (NULL) on failure; sizes near 4 GB refused; a corrupt heap header stops the kernel with its address | verified (`badptr` in `tools/memtest.sh`) | architecture.md section 5 |
 | `malloc` with size classes and free lists (memory reused, big blocks given back), `realloc`; directory tools without stack arrays or entry limits | verified (`tools/memtest.sh`: flat shell memory, tools 25 directories deep) | architecture.md section 12 |
-| Preemptive round-robin scheduler, 100 Hz, 50 ms slice | verified | architecture.md section 6 |
+| Preemptive scheduler with priorities (DESIGN D10): the highest ready level runs, round robin in 50 ms slices within a level; nice -20..19 on 32 levels; built-in servers at nice -10; `nice`, `renice`, `getpriority`/`setpriority`; PRI and NI in `ps` | verified in FS-UAE (`tools/prio-test.sh`: fairness, a higher one wins, wake-up, the user/root rules) | architecture.md section 6 |
+| Priority inheritance: a server runs at least at its best client's level until it replies | verified in FS-UAE (`priotest inherit`; a kernel without it fails the check) | architecture.md section 8 |
 | `spawn` (no `fork`); wait, exit status, zombies | verified | architecture.md section 6 |
 | System calls via `TRAP #0` (the count and the list: architecture.md section 7), all pointers validated; errors as negative errno numbers (`kernel/errno.h`, Linux values), the same from both filesystem servers, shown as text by `zwhy`/`zstrerror` | verified (users-test permission texts, cmds2-test batch E script, host ext2 test) | architecture.md section 7 |
 | Crash containment: a faulting program is killed, memory freed | verified | how-it-works.md section 3 |
@@ -41,7 +42,7 @@ built. Last checked against the code: 2026-10-23.
 | Environment variables inherited by children | verified | |
 | Interrupt handlers only queue input; tty, echo, Ctrl-C/Ctrl-Z and console switches run in process context (no lost wakeups, lost input counted in `dmesg`); unexpected interrupt vectors are logged once and ignored | verified in FS-UAE (`tools/kbd-test.sh`, `tools/jobs-test.sh`, the matrix); the unexpected vectors read only | architecture.md section 11 |
 | Job control: Ctrl-Z stop, `jobs`, `fg`, `bg`, stopped state in `ps` (`SYS_jobctl`, `SYS_wait` untraced) | verified (`tools/jobs-test.sh`) | architecture.md section 7 |
-| Priorities, signals with handlers, process groups | planned | |
+| Signals with handlers, process groups | planned | |
 | Users and groups: uid/gid on every process (real and effective), `setuid`/`setgid`, `umask`, `chown` | verified | architecture.md section 14 |
 | Permission checks (r/w/x for owner, group, other; directory search; sticky bit; set-user-id programs) in the filesystem server | verified | architecture.md section 14 |
 | `/etc/passwd`, `/etc/group`, `login` (also autologin, with a warning while root has no password), `su` (gives the target's environment), `passwd` (salted SHA-256, 1000 rounds), `id`, `chown`/`chgrp` | verified | man pages |

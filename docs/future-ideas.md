@@ -98,6 +98,7 @@ is not preemptive.
   started. Do this for the kernel's `mem.c` and for the large-block regions of the user `malloc`. (A bug class that
   goes unseen for years when nothing tests it.)
 - **Fairness.** If priorities are added, test that processes of equal priority switch only at the end of a time slice.
+  Done with D10 (`priotest fair`); it found that the slice only counted ticks taken in user mode.
 
 ## Other ideas noted on 2026-10-23
 - **Shared libraries:** one copy in memory used by many programs (AmigaOS-style jump tables work without an MMU).
@@ -143,8 +144,8 @@ proprietary, so from them only the documented behaviour (the ROM Kernel Manuals;
 
 | Area | Taken from | The idea | Zenix today |
 |---|---|---|---|
-| Scheduling | **Exec** | Priorities: the highest ready process runs, round robin within a priority. First thing to build after the halt (small, makes the terminal and servers feel quick); with a fairness test | round robin only |
-| Servers and priorities | **QNX** | Priority inheritance: a server handling a message runs at its client's priority, so a high-priority program is never stuck behind a low one's request | - |
+| Scheduling | **Exec** | Priorities: the highest ready process runs, round robin within a priority. First thing to build after the halt (small, makes the terminal and servers feel quick); with a fairness test | **done** (D10, 2026-10-24) |
+| Servers and priorities | **QNX** | Priority inheritance: a server handling a message runs at its client's priority, so a high-priority program is never stuck behind a low one's request | **done** (D10, 2026-10-24) |
 | Waiting | **Exec** | Signal bits per process (section 1 above); `select`/`poll` built on them | one source at a time |
 | Event API for programs | **BSD** | kqueue-style: register many events once, get the ready ones in one call (a thin layer on the signal bits) | - |
 | Messages | **QNX / Minix 3** | Synchronous send/receive/reply, pointers not copies | **done** |

@@ -8,6 +8,7 @@
 static int strncmp_(const char *a, const char *b, int n);
 static struct port {
     int used, owner;
+    struct proc *op;            /* the owner's slot (valid while used: a dying owner's ports are closed) */
     char name[16];
     struct umsg *head, *tail;
     struct proc *waiter;        /* server blocked in recv */
@@ -46,6 +47,7 @@ int port_create(const char *name, int owner)
             memset(&ports[i], 0, sizeof ports[i]);
             ports[i].used = 1;
             ports[i].owner = owner;
+            ports[i].op = current;
             for (int k = 0; k < 15 && name[k]; k++)
                 ports[i].name[k] = name[k];
             return i;
@@ -59,6 +61,30 @@ int port_find(const char *name)
         if (ports[i].used && !strncmp_(ports[i].name, name, 16))
             return i;
     return -1;
+}
+
+struct proc *port_owner(int port)
+{
+    return port >= 0 && port < NPORT && ports[port].used ? ports[port].op : 0;
+}
+
+/* priority inheritance (DESIGN D10): the best (lowest) level among the clients queued on pid's ports and those whose
+ * request pid is serving now; NLEVEL if none */
+u8 ipc_best_client(int pid)
+{
+    u8 best = NLEVEL;
+    for (int i = 0; i < NPORT; i++)
+        if (ports[i].used && ports[i].owner == pid)
+            for (struct umsg *m = ports[i].head; m; m = m->next)
+                if (m->client && m->client->prio < best)
+                    best = m->client->prio;
+    for (int i = 1; i < NPROC; i++) {
+        struct proc *c = &procs[i];
+        if (c->state == P_MSG && c->wait_msg && c->wait_msg->state == MSG_SERVING && c->wait_msg->server == pid &&
+            c->prio < best)
+            best = c->prio;
+    }
+    return best;
 }
 
 static void finish(struct umsg *m, s32 result)
@@ -89,7 +115,10 @@ static long call(int port, struct umsg *m, u16 kflags)
         p->head = m;
     p->tail = m;
     current->wait_msg = m;
+    current->wait_port = port;
     current->state = P_MSG;
+    if (current->prio < p->op->prio)            /* the server works at least at the caller's level until it replies */
+        prio_raise(p->op, current->prio);
     if (p->waiter) {                            /* wake the server */
         ready(p->waiter);
         p->waiter = 0;
@@ -128,9 +157,7 @@ struct umsg *ipc_recv(int port, int wait)
         p->waiter = current;
         current->wait_port = port;
         if (wait > 1) {
-            current->wake = until;
-            current->state = P_SLEEP;
-            nsleep++;
+            sleep_until(until);
         } else {
             current->state = P_MSG;
         }
@@ -162,6 +189,8 @@ long ipc_reply(struct umsg *m, s32 result)
     if (!c || m->client != c || m->state != MSG_SERVING || m->server != current->pid)
         return -EINVAL;
     finish(m, result);
+    if (current->prio < current->blevel)        /* the boost from this client ends with the reply */
+        prio_recalc(current);
     return 0;
 }
 

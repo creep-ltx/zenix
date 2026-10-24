@@ -8,18 +8,62 @@
 struct proc procs[NPROC];
 struct proc *current;
 static int next_pid = 1;
-static struct proc *rq_head, *rq_tail;  /* runnable processes, round robin */
 int nsleep, nio;                        /* how many are in P_SLEEP / P_IO */
+volatile u32 wake_min;                  /* while nsleep: no sleeper is due before this tick */
+volatile u8 need_resched;               /* a better process than the running one is ready, or a sleeper is due */
+
+/* ---- the run queue (DESIGN D10) ----
+ * One list per level (0 the highest) and a mask of the non-empty ones, level L as bit 31 - L, so that the 68020's
+ * BFFFO (find the first set bit from the top; on every CPU up to the 68060) gives the best level in one instruction:
+ * O(1). Round robin within a level: a process joins at the back. pid 0 (idle) is never queued; it runs when the mask is
+ * empty. Changed with interrupts masked where an interrupt path could also reach it (ready). */
+static struct proc *rq_head[NLEVEL], *rq_tail[NLEVEL];
+static u32 rq_mask;
+
+static inline int rq_top(void)          /* the best non-empty level, NLEVEL if none */
+{
+    int off;
+    __asm__("bfffo %1{#0:#32},%0" : "=d"(off) : "d"(rq_mask) : "cc");
+    return off;
+}
 
 static void rq_push(struct proc *p)
 {
+    u8 l = p->prio;
     p->rnext = 0;
     p->queued = 1;
-    if (rq_tail)
-        rq_tail->rnext = p;
+    p->qlevel = l;
+    if (rq_tail[l])
+        rq_tail[l]->rnext = p;
     else
-        rq_head = p;
-    rq_tail = p;
+        rq_head[l] = p;
+    rq_tail[l] = p;
+    rq_mask |= 0x80000000u >> l;
+}
+
+static void rq_remove(struct proc *p)   /* p is queued: take it out of its level's list (short lists: a walk) */
+{
+    u8 l = p->qlevel;
+    struct proc *prev = 0;
+    for (struct proc *q = rq_head[l]; q && q != p; q = q->rnext)
+        prev = q;
+    if (prev)
+        prev->rnext = p->rnext;
+    else
+        rq_head[l] = p->rnext;
+    if (rq_tail[l] == p)
+        rq_tail[l] = prev;
+    if (!rq_head[l])
+        rq_mask &= ~(0x80000000u >> l);
+    p->rnext = 0;
+    p->queued = 0;
+}
+
+/* a ready process better than the running one: switch at the next return to user mode (kwork's points) */
+static inline void want_switch(const struct proc *p)
+{
+    if (p->prio < current->prio)
+        need_resched = 1;
 }
 
 /* make a blocked process runnable (never call this on the running one) */
@@ -32,10 +76,120 @@ void ready(struct proc *p)
         else if (p->state == P_IO)
             nio--;
         p->state = P_READY;
-        if (p->pid != 0 && !p->queued)
+        if (p->pid != 0 && !p->queued) {
             rq_push(p);
+            want_switch(p);
+        }
     }
     irq_restore(s);
+}
+
+/* the effective level of p becomes l: a queued p moves to that level's list; a client in a call passes the change on
+ * to the server of its request (fsd calling diskd for a client: the chain is short, depth caps it) */
+static void prio_set(struct proc *p, u8 l, int depth)
+{
+    u8 old = p->prio;
+    if (l == old)
+        return;
+    u16 s = irq_save();
+    if (p->queued) {
+        rq_remove(p);
+        p->prio = l;
+        rq_push(p);
+        want_switch(p);
+    } else {
+        p->prio = l;
+        if (p == current && rq_mask && rq_top() < l)
+            need_resched = 1;           /* it dropped below a ready one */
+    }
+    irq_restore(s);
+#ifndef NO_PRIO_INHERIT
+    if (p->state == P_MSG && p->wait_msg && depth < 8) {
+        struct umsg *m = p->wait_msg;
+        struct proc *srv = m->state == MSG_SERVING ? proc_by_pid(m->server) : 0;
+        if (m->state == MSG_QUEUED)
+            srv = port_owner(p->wait_port);
+        if (srv) {
+            if (l < srv->prio)
+                prio_set(srv, l, depth + 1);
+            else if (old == srv->prio && srv->prio < srv->blevel) {   /* its boost may have come from p */
+                u8 c = ipc_best_client(srv->pid);
+                prio_set(srv, c < srv->blevel ? c : srv->blevel, depth + 1);
+            }
+        }
+    }
+#else
+    (void)depth;
+#endif
+}
+
+/* QNX-style priority inheritance (DESIGN D10): a server holding or about to receive a request from a client at level l
+ * runs at least at l until it replies; then it drops to its base or to the best client still waiting for it */
+void prio_raise(struct proc *p, u8 l)
+{
+#ifndef NO_PRIO_INHERIT                 /* a test-only build (tools/prio-test.sh) shows what inheritance prevents */
+    if (l < p->prio)
+        prio_set(p, l, 0);
+#else
+    (void)p; (void)l;
+#endif
+}
+
+void prio_recalc(struct proc *p)
+{
+    u8 l = p->blevel;
+#ifndef NO_PRIO_INHERIT
+    if (p->prio < l) {                  /* only a boosted one has anything to recompute */
+        u8 c = ipc_best_client(p->pid);
+        if (c < l)
+            l = c;
+    }
+#endif
+    prio_set(p, l, 0);
+}
+
+/* the base priority (nice) of p; its effective level follows, keeping a boost it has while serving */
+int proc_renice(struct proc *p, int nice)
+{
+    if (nice < NICE_MIN)
+        nice = NICE_MIN;
+    if (nice > NICE_MAX)
+        nice = NICE_MAX;
+    p->nice = (s8)nice;
+    p->blevel = NICE_LEVEL(nice);
+    if (p->pid != 0)
+        prio_recalc(p);                 /* the new base, or a client's level while it serves a better one */
+    return nice;
+}
+
+/* current goes to sleep until tick t (the caller schedules); wake_min lets the tick and schedule() skip the scan of
+ * the process table until a sleeper is due */
+void sleep_until(u32 t)
+{
+    u16 s = irq_save();
+    current->wake = t;
+    current->state = P_SLEEP;
+    if (nsleep++ == 0 || (s32)(t - wake_min) < 0)
+        wake_min = t;
+    irq_restore(s);
+}
+
+/* ready every sleeper that is due (each to its own level), and note when the next one is; interrupts masked */
+static void wake_sleepers(void)
+{
+    if (!nsleep || (s32)(ticks - wake_min) < 0)
+        return;
+    u32 next = ticks + 0x7FFFFFFFu;
+    for (int i = 1; i < NPROC; i++) {
+        struct proc *q = &procs[i];
+        if (q->state != P_SLEEP)
+            continue;
+        if ((s32)(ticks - q->wake) >= 0)
+            ready(q);
+        else if ((s32)(q->wake - next) < 0)
+            next = q->wake;
+    }
+    wake_min = next;
 }
 static int slice;
 #define KSTACK 4096u
@@ -98,6 +252,7 @@ void proc_init(void)
     procs[0].state = P_READY;           /* pid 0: idle, runs on the boot stack */
     procs[0].pid = 0;
     memcpy(procs[0].name, "idle", 5);
+    procs[0].prio = procs[0].blevel = PRI_IDLE;     /* below every level: anything ready is better */
     procs[0].kstk = (u32)kstack_bottom;
     procs[0].ktop = (u32)kstack_bottom + 8192;
     guard_set(procs[0].kstk);           /* kmain is far above it by now */
@@ -288,6 +443,8 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
     p->ruid = parent ? parent->ruid : 0;
     p->gid = parent ? parent->gid : 0;
     p->umask = parent ? parent->umask : 022;
+    p->nice = parent ? parent->nice : 0;            /* a child inherits the base priority (not a server's boost) */
+    p->blevel = p->prio = NICE_LEVEL(p->nice);
     if (suid >= 0) p->uid = (u16)suid;                 /* set-user-id program: runs as its owner */
     if (parent) {
         memcpy(p->env, parent->env, parent->envlen);
@@ -384,16 +541,17 @@ void schedule(void)
     }
 
     if (old->state == P_READY && old->pid != 0 && !old->queued)
-        rq_push(old);                   /* yielded or preempted: back of the line */
-    if (nsleep)
-        for (int i = 1; i < NPROC; i++)
-            if (procs[i].state == P_SLEEP && (s32)(ticks - procs[i].wake) >= 0)
-                ready(&procs[i]);
-    n = rq_head;
-    if (n) {
-        rq_head = n->rnext;
-        if (!rq_head)
-            rq_tail = 0;
+        rq_push(old);                   /* yielded or preempted: back of its level's line */
+    wake_sleepers();
+    need_resched = 0;
+    int l = rq_top();
+    if (l < NLEVEL) {
+        n = rq_head[l];
+        if (!(rq_head[l] = n->rnext)) {
+            rq_tail[l] = 0;
+            rq_mask &= ~(0x80000000u >> l);
+        }
+        n->rnext = 0;
         n->queued = 0;
     } else {
         n = &procs[0];                  /* nothing to run: idle */
@@ -428,10 +586,34 @@ void schedule(void)
     }
 }
 
-void sched_tick(u16 sr)
+/* from the level-2 interrupt. Every tick counts the running process's slice, whether it cut into user code or into a
+ * system call (a program that spends most of its time in system calls has its slice end too); the end of the slice,
+ * like a better process becoming ready, only sets need_resched. The switch itself happens when user code was cut (here)
+ * or at the end of the system call (syscall_c): the kernel is never preempted. */
+void sched_tick(u16 sr, int tick)
 {
-    if (!(sr & 0x2000) && current->pid != 0 && --slice <= 0)
+    if (current->pid == 0)
+        return;
+    if (tick && slice > 0 && --slice == 0)
+        need_resched = 1;
+    if (!(sr & 0x2000) && need_resched)
+        resched();
+}
+
+/* act on need_resched (at a return to user mode): a strictly better level takes the CPU at once; at the end of the
+ * slice the next one of the same level gets its turn (equal levels alternate only there); with nobody of the same
+ * level waiting, the running one starts a new slice */
+void resched(void)
+{
+    u16 s = irq_save();
+    need_resched = 0;
+    wake_sleepers();
+    int l = rq_top();
+    irq_restore(s);
+    if (l < current->prio || (slice <= 0 && l <= current->prio))
         schedule();
+    else if (slice <= 0)
+        slice = SLICE;
 }
 
 void wake_io(void)

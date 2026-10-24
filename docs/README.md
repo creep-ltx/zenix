@@ -59,6 +59,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
 | users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root |
 | jobs-test, kbd-test | job control and history search; the keyboard (keymaps, repeat, consoles) |
+| prio-test | priorities (D10): nice/renice for a user and for root, PRI/NI in `ps`, `priotest` (equal priorities take turns per slice, a higher one wins, wake-up, priority inheritance; a kernel built without inheritance must fail that check) |
 | diag-test | the boot colours, the panic screens, the previous-boot log across a warm reset; the stack guard's kernel-stack checks (a `STACK_TEST` build) |
 | floppy-test | two floppy drives: whole-disk reads, a write and its read-back, the image file on the host afterwards |
 | memtest | the allocator, deep directory walks, corrupt program files refused |

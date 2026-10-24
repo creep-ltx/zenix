@@ -39,6 +39,55 @@ static int may_signal(const struct proc *p)
     return -EACCES;
 }
 
+/* getpriority / setpriority (DESIGN D10). PRIO_PROCESS: who is a pid, 0 the caller; PRIO_USER: every process of user
+ * id who (0: the caller's real id); PRIO_PGRP: there are no process groups (-EINVAL). Changing another process needs
+ * the kill rule (may_signal); raising a base priority (a lower nice) needs root: -EACCES. getpriority answers 20 - nice
+ * (1 .. 40, the best of the matching processes), so a result never looks like an error number; libz turns it back. */
+static long do_priority(int set, u32 which, u32 who, s32 nice)
+{
+    if (which == PRIO_PROCESS) {
+        struct proc *p = who ? proc_by_pid((int)who) : current;
+        if (!p || p->pid == 0 || p->state == P_FREE || p->state == P_ZOMBIE)
+            return -ESRCH;
+        if (!set)
+            return 20 - p->nice;
+        long r = p == current ? 0 : may_signal(p);
+        if (r)
+            return r;
+        if (nice < p->nice && current->uid != 0)
+            return -EACCES;
+        proc_renice(p, nice);
+        return 0;
+    }
+    if (which != PRIO_USER)
+        return -EINVAL;
+    u32 uid = who ? who : current->ruid;
+    int found = 0, best = NICE_MAX + 1;
+    for (int i = 1; i < NPROC; i++) {
+        struct proc *p = &procs[i];
+        if (p->state == P_FREE || p->state == P_ZOMBIE || p->ruid != uid)
+            continue;
+        found = 1;
+        if (!set) {
+            if (p->nice < best)
+                best = p->nice;
+            continue;
+        }
+        if (p != current && may_signal(p))
+            return -EACCES;
+        if (nice < p->nice && current->uid != 0)
+            return -EACCES;
+    }
+    if (!found)
+        return -ESRCH;
+    if (!set)
+        return 20 - best;
+    for (int i = 1; i < NPROC; i++)                 /* every check passed: all or nothing */
+        if (procs[i].state != P_FREE && procs[i].state != P_ZOMBIE && procs[i].ruid == uid)
+            proc_renice(&procs[i], nice);
+    return 0;
+}
+
 /* spawn's arguments: up to SPAWN_ARGC arguments and SPAWN_ARGBYTES bytes of text (copied to the kernel heap, then to
  * the top of the new program's stack); more is -E2BIG ("argument list too long"), never a silent cut */
 #define SPAWN_ARGC     256
@@ -153,9 +202,7 @@ void syscall_c(u32 *rb)
     case SYS_sleep: {
         u32 until = ticks + a1;
         while ((s32)(ticks - until) < 0 && !current->killed) {    /* a stop and continue in between wakes it early */
-            current->wake = until;
-            current->state = P_SLEEP;
-            nsleep++;
+            sleep_until(until);
             schedule();
         }
         r = 0;
@@ -473,6 +520,8 @@ void syscall_c(u32 *rb)
             u->state = (u32)p->state;
             u->mem = p->span;
             memcpy(u->name, p->name, 16);
+            u->nice = p->nice;
+            u->pri = p->prio;
             r = 0;
         }
         break;
@@ -496,6 +545,12 @@ void syscall_c(u32 *rb)
         }
         break;
     }
+    case SYS_getpriority:
+        r = (s32)do_priority(0, a1, a2, 0);
+        break;
+    case SYS_setpriority:
+        r = (s32)do_priority(1, a1, a2, (s32)a3);
+        break;
     case SYS_kill: {
         struct proc *p = proc_by_pid((int)a1);
         if (!(r = may_signal(p)))
@@ -506,6 +561,8 @@ void syscall_c(u32 *rb)
     rb[0] = (u32)r;
     if (kwork_pending)
         kwork();                        /* queued input: done here, on the way back to user mode (main.c) */
+    if (need_resched)
+        resched();                      /* a better process became ready (a reply, a wake, input): it runs now */
     if (current->killed)
         proc_exit(130);
 }

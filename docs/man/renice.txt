@@ -1,0 +1,46 @@
+RENICE(1)		Zenix manual
+
+NAME
+    renice - change the priority of running processes
+
+SYNOPSIS
+    renice [-n] N [-p] pid...
+    renice [-n] N -u user...
+
+DESCRIPTION
+    Sets the niceness of each process (or of every process of each user)
+    to N, on the Unix scale -20 (most favoured) .. 19 (least); a value
+    outside it is taken as the nearest end. As on Linux, N is the new
+    value, not an increment. For each one it prints
+
+        PID (process ID) old priority OLD, new priority N
+
+    (or "UID (user ID)" with -u).
+
+    Who may: root any process, to any value. Everyone else only their own
+    processes (the rule kill uses: never a built-in server), and only to
+    a lower priority (a higher N); anything else is "permission denied".
+
+    A server that is serving a client runs at least at that client's
+    priority until it replies (priority inheritance), whatever its own
+    niceness; ps shows that as PRI.
+
+OPTIONS
+    -n      the next argument is N (optional, for the POSIX form)
+    -p      the following arguments are process ids (the default)
+    -u      the following arguments are user names or user ids
+
+EXAMPLES
+    renice 10 123          let process 123 run only when nothing better is
+                           ready
+    renice 5 -u guest      every process of guest
+
+EXIT STATUS
+    0, 1 if any process or user could not be changed, 2 for a usage error.
+
+NOTES
+    No -g (process groups): Zenix has none. With -u the old priority shown
+    is the best of that user's processes.
+
+SEE ALSO
+    nice(1), ps(1), kill(1)

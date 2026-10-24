@@ -32,7 +32,7 @@ source (last checked 2026-10-23). Not benchmarked against any of them.
 | Users/permissions | uid/gid enforced by the kernel with MMU backing | Built (D8): real and effective uids, set-user-id programs, permission checks in the filesystem servers, `login`/`su`/`passwd`; honest limit: no security boundary against a program written to cheat |
 | Memory allocation | Virtual memory, demand paging, swap, overcommit | Physical blocks, no paging, no swap; fragmentation is managed by allocation policy; every block has an owner |
 | Executables | ELF (shared objects, dynamic linking) | ZEXE: one flat image + relocation table, static linking, no shared libraries yet |
-| Scheduling | CFS/EEVDF, priorities, nice, multicore | Round robin on a 100 Hz tick, one CPU, no priorities yet |
+| Scheduling | CFS/EEVDF, priorities, nice, multicore | Strict priorities (nice -20..19 on 32 levels), round robin within one on a 100 Hz tick, priority inheritance through servers, one CPU, no CPU-time shares |
 | Time | 64-bit time, NTP | Seconds since 1970 in 32 bits; Amiga battery clock (MSM6242 / RP5C01) when present |
 | Terminals | tty layer, ptys, termios, virtual consoles (Alt+F1..) | Ten virtual consoles /dev/tty1..10 (Amiga+F1..F10) with a login each, a controlling tty per process, partial termios (raw / no-signal flags); ANSI/VT100 interpreted in the kernel; no ptys |
 | Networking, graphics stack, sound | Full | None yet (planned as servers) |

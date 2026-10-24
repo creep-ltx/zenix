@@ -25,7 +25,7 @@ benchmarked against AmigaOS.
 | Role of the OS | Runs on the ROM; applications and the OS coexist; you can leave it | Takes the machine over from the bootblock, kills AmigaOS; no way back |
 | Message semantics | Asynchronous: `PutMsg` returns at once, the receiver `GetMsg`s/`ReplyMsg`s, signals wake tasks | Synchronous call: the client blocks until the reply (QNX/Minix style); simpler, no signal bits |
 | Messages and memory | Message is a struct in sender memory; ownership by convention | Same, but the kernel tracks *who owns what* per block |
-| Scheduling | Priority-based preemptive, with time slicing among equals | Round robin, 50 ms slice, no priorities yet |
+| Scheduling | Priority-based preemptive, with time slicing among equals | The same rule: priorities (nice -20..19), 50 ms slices among equals; servers inherit their client's priority |
 | Kernel preemption | `Forbid()` / `Disable()` let tasks turn off multitasking/interrupts | Kernel code is never preempted: no locks anywhere in the kernel |
 | Memory cleanup | A task must free what it allocated; leaks survive a crash | Every block has an owner pid; death frees everything automatically |
 | Crash | A bad pointer or illegal instruction raises a Guru Meditation and usually takes the whole machine | The offending process is killed, the rest continues |

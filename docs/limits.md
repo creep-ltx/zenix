@@ -52,7 +52,7 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   index server for `locate`/`fzf`.
 - ext2: a journal (an ext3 volume mounts read-only, ext4 is refused), moving a directory to another parent (`mv`
   copies it; ZenixFS moves it), triple-indirect blocks, files over 4 GB. ZenixFS: what zenixfs.md lists as not done.
-- Scheduler priorities; kernel is single-CPU by design.
+- Kernel is single-CPU by design. Priorities have no ageing and no CPU-time share (DESIGN D10, "Not taken").
 - 68000 support (not a target).
 - Booting without a floppy (`zenixboot`): Kickstart 1.3 is not a target (it refuses; 1.3 also cannot boot an RDB
   partition by itself). Started from a running Workbench it switches AmigaOS off as it is: unwritten files are lost,
@@ -72,6 +72,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
   -ENAMETOOLONG beyond, never cut), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
   NTSC), 200 scrollback lines per console, a cooked tty line of 255 characters (the bell for more).
+- Priorities (DESIGN D10, architecture.md section 6): 32 levels; nice -20..19 (a value outside is taken as the nearest
+  end); a 50 ms slice; the built-in servers at nice -10; priority inheritance passes along a chain of at most 8 servers.
 - The shell: no fixed count of arguments, glob matches, words, pipeline stages, `for` items or positional
   parameters (they grow in its arena, which is an eighth of free memory, 64-256 KB: "out of memory" ends a script
   that needs more); a word or an expanded here-document of at most 4095 characters (longer is an error, status 1);
