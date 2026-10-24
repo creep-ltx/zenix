@@ -57,6 +57,10 @@ spot-checked against the code that day.
 [hello](man/hello.txt), [spin](man/spin.txt), [crash](man/crash.txt), [badptr](man/badptr.txt),
 [ping](man/ping.txt), [pingd](man/pingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt).
 
+## Run on AmigaOS, not on Zenix
+[zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
+needed (not one of the 106 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+
 ## How the pages get onto the system
 `docs/man/` is the one place for manual pages. `tools/mkroot.sh` copies every `docs/man/*.txt` to `/usr/man` on the
 root disk it builds; for a program that has no page there, `tools/mkman.py` still makes a minimal one from the

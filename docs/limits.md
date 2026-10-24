@@ -54,6 +54,16 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   copies it; ZenixFS moves it), triple-indirect blocks, files over 4 GB. ZenixFS: what zenixfs.md lists as not done.
 - Scheduler priorities; kernel is single-CPU by design.
 - 68000 support (not a target).
+- Booting without a floppy (`zenixboot`): Kickstart 1.3 is not a target (it refuses; 1.3 also cannot boot an RDB
+  partition by itself). Started from a running Workbench it switches AmigaOS off as it is: unwritten files are lost,
+  and DMA that the Pi side keeps doing for an Emu68 network or USB driver is not stopped. Whether an RTG card gives the
+  monitor back to the chipset is not verified. The boot partition must be FFS/OFS that the Kickstart ROM mounts by
+  itself, with no FileSysHeader in the RDB: verified for DOS\3 and DOS\1 (plain FFS, what the images use: the type
+  every FFS ROM registers) with Kickstart 3.1, 3.2 and 2.05 in FS-UAE. Emu68's own SD driver (`brcm-emmc.device`)
+  mounts the RDB inside a 0x76 partition and looks a partition's type up in the RDB's FileSysHeaders, then in
+  `FileSystem.resource` (read from the strings in its binary, not its source); that it boots this partition is not
+  yet seen on the PiStorm. The SD
+  card image's FAT partition is empty (tools/write-card.sh fills it or keeps the card's).
 
 ## Hard numbers worth knowing
 

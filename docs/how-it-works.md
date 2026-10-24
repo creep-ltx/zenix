@@ -18,6 +18,14 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    no way back to AmigaOS. Its first instructions switch the display to one plain colour, and every step from here
    to the display paints the screen its own colour (blue, cyan, magenta in the bootblock; architecture.md "Boot
    stage colours"); it also reserves the top 16.5 KB of chip RAM (`AllocAbs`) for the kernel log.
+   **Without a floppy** (a hard disk, CF card or, under Emu68, the SD card): Kickstart boots a small AmigaDOS
+   partition instead and runs its `S:Startup-Sequence`, whose one line starts **`zenixboot`** (`boot/zenixboot.c`), an
+   AmigaOS program. It reads the kernel from the file `zenix` next to it (and a RAM-disk image if given `RAM=FILE`),
+   checks the image, and only then does what the bootblock does, with the bootblock's own code (`boot/handoff.S`):
+   the same tables, stage0, the same kernel home, the same colours (blue while reading, cyan, magenta). A problem
+   before that point is printed and leaves AmigaOS running. Because a running AmigaOS may have more switched on than
+   a fresh floppy boot, it also stops the floppy motors, shows no screen, resets the display registers and switches a
+   68040/060's data cache and MMU off. From step 3 on the two paths are the same.
 3. **`start.S`**: the kernel image is a ZEXE; the first code walks its own relocation table adding the real load
    address, flushes the instruction cache (the patched words must not run from a stale cache or an Emu68
    translation), clears BSS, and refuses to continue on a 68000 (serial message, orange over red).
@@ -35,7 +43,9 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    `diskd` (priv), `fsd` (ext2), `zfsd` (ZenixFS) and `boot` (priv). Timer and keyboard interrupts (latch from the
    E-clock; one keyboard handshake in case it still waits for one) and interrupts are switched on. The main thread becomes
    the idle loop: reap orphans, `schedule()`, drain the serial buffer, `cpu_idle()` (stop until an interrupt).
-6. `diskd` finds the disk and its partition table and creates the `disk` port. `fsd` and `zfsd` both choose the root
+6. `diskd` finds the disk and its partition table and creates the `disk` port (on the zenixboot SD card it lists the
+   FAT partition, the 0x76 container, the FFS boot partition inside it and the ext2 partition; only the last one can
+   be a root). `fsd` and `zfsd` both choose the root
    device the same way (architecture.md section 9); the one whose filesystem it is mounts it and creates the `fs`
    port, the other ends. `boot` polls for `fs` (up to ~30 s), then `spawn("/bin/init")` and waits for it.
    `spawn` itself is messages to `fsd`: the kernel's `proc_spawn` opens the file (`fs_exec_open`) and reads it
