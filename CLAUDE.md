@@ -65,9 +65,12 @@ unseen). So:
 | 1-77 in use except 39, 40, 68 (removed with the workspaces in batch E; free again) | main, all merged (see `kernel/kernel.h`) |
 | 78 `getpriority`, 79 `setpriority` (DESIGN D10, priorities) | main, merged 2026-10-24 |
 | 80 `reboot` (save the disks, reset; optionally leave the boot menu a one-shot choice) | main, 2026-10-24 |
-| **next free: 81** | |
+| 81 `svc` (DESIGN D11, the service manager: register, remove, self, save, load, opens) | d11 branch, 2026-10-24 |
+| **next free: 82** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8.
+Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; d11 branch). Port names registered as services (D11):
+`disk`, `fs`, `fs.*`; `ping` (the test service).
 
 ## Rules for code (each one was a real bug found on 2026-10-22)
 Real hardware and Emu68 (details: knowledge base `amiga/emu68-jit-cache-rules.md`):
