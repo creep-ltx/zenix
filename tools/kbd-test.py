@@ -20,10 +20,11 @@ Cage = fsuae_conf.load_cage()
 
 conf = sys.argv[1]
 link = sys.argv[2] if len(sys.argv) > 2 else "/tmp/zenix-serial"
+out = os.path.dirname(os.path.abspath(conf))         # kbd-test.sh's $OUT: the config, the log and the screenshots together
 here = os.path.dirname(os.path.abspath(__file__))
-log = "/tmp/zenix-kbd/serial.log"
-os.makedirs("/tmp/zenix-kbd", exist_ok=True)
-script = "/tmp/zenix-kbd/script.txt"
+log = os.path.join(out, "serial.log")
+os.makedirs(out, exist_ok=True)
+script = os.path.join(out, "script.txt")
 open(script, "w").write("sleep 1\n")
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"), link, log, script],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -91,11 +92,11 @@ try:
         time.sleep(40)
         # 4b. scrollback at the shell's prompt (its line editor is in raw mode): Amiga+Up shows older lines,
         # Amiga+Down comes back. Screenshots compared by kbd-test.sh.
-        cage.screenshot("/tmp/zenix-kbd/sb0.png")
+        cage.screenshot(os.path.join(out, "sb0.png"))
         key("Up", "Super_L"); time.sleep(1)
-        cage.screenshot("/tmp/zenix-kbd/sb1.png")
+        cage.screenshot(os.path.join(out, "sb1.png"))
         key("Down", "Super_L"); time.sleep(1)
-        cage.screenshot("/tmp/zenix-kbd/sb2.png")
+        cage.screenshot(os.path.join(out, "sb2.png"))
         # 5. virtual consoles: Amiga+F2 shows console 2 and its own login prompt; log in as root there (autologin is
         # console 1's only); two logins are then running. Amiga+F1 goes back: console 1's shell has no jobs, console
         # 2's has the sleep started there.
@@ -115,6 +116,6 @@ try:
         time.sleep(2)
         text("sync"); w("-k", "Return")
         time.sleep(3)
-        cage.screenshot("/tmp/zenix-kbd/screen.png")
+        cage.screenshot(os.path.join(out, "screen.png"))
 finally:
     tap.terminate()
