@@ -52,6 +52,15 @@ int main(void)
     }
     EXPECT_TRUE(stray == 0, "writes touched only their own sectors");
 
+    {                                                   /* the boot line names what sector 0 holds */
+        static u8 s0[512]; char w[48];
+        memcpy(s0, "RDSK", 4); sector0_kind(s0, w);
+        EXPECT_TRUE(!strcmp(w, "Amiga RDB"), "sector 0 with RDSK: Amiga RDB");
+        memset(s0, 0, 512); s0[510] = 0x55; s0[511] = 0xAA; sector0_kind(s0, w);
+        EXPECT_TRUE(!strcmp(w, "MBR partition table"), "sector 0 with 55 AA: MBR partition table");
+        memset(s0, 0, 512); s0[0] = 0xfa; s0[3] = 0x0c; sector0_kind(s0, w);
+        EXPECT_TRUE(!strcmp(w, "unknown (first bytes fa 00 00 0c)"), "other sector 0: its first bytes in hex");
+    }
     EXPECT_TRUE(faults == 0, "no protocol faults from the model");
     printf(bad || faults ? "FAILED\n" : "all ok\n");
     return bad || faults;
