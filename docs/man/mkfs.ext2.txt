@@ -14,7 +14,9 @@ DESCRIPTION
     (checked with block sizes 1 KB and 4 KB, also over a device full of old
     data). The inode tables of all groups are zeroed: fsck reads every
     inode, and old data there would look like files. The device must not
-    be mounted.
+    be mounted. The superblock gets a volume id (a uuid from the clocks):
+    the filesystem server finds its volume by place and id after a
+    restart.
 
 OPTIONS
     -b size   block size in bytes (default 1024)

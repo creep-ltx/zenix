@@ -10,7 +10,9 @@ DESCRIPTION
     Writes an empty ZenixFS filesystem (the format is in
     docs/zenixfs-format.md) on a device: a partition such as ide0p2, made
     with "fdisk add ... zenixfs". The old contents are lost. The device must
-    not be mounted.
+    not be mounted. The superblock gets a volume id (a uuid from the
+    clocks): the filesystem server finds its volume by place and id after
+    a restart.
 
     -b n      block size 1 << n bytes: 10 = 1 KB, 11 = 2 KB, 12 = 4 KB.
               Default: 1 KB under 16 MB, 2 KB under 256 MB, else 4 KB.

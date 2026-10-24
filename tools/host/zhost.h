@@ -47,4 +47,6 @@ int sys_procinfo(u32 i, struct uproc *p);
 int sys_svc_self(void);
 int sys_svc_save(const void *buf, u32 n);
 int sys_svc_load(void *buf, u32 n);
+int sys_svc_opens(u32 *ino, u32 bytes);
+#define SVC_MIDREQ 0x10000
 #define SVC_EXIT_DAMAGED 86

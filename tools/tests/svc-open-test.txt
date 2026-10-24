@@ -1,0 +1,17 @@
+wait zenix:/# 90
+send cat /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/keep; sync; echo f1=$(df | grep ' /$' | tr -s ' ' | cut -d' ' -f4)\r
+sleep 8
+send svctest keep /tmp/keep 10 &\r
+sleep 3
+send kill 3; sleep 1; echo n=$(ls / | wc -l)\r
+wait svctest keep /tmp/keep: 40
+send sleep 1; sync; echo f2=$(df | grep ' /$' | tr -s ' ' | cut -d' ' -f4)\r
+sleep 4
+send cat /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/big; sync; echo f3=$(df | grep ' /$' | tr -s ' ' | cut -d' ' -f4); rm /tmp/big; sync; echo f4=$(df | grep ' /$' | tr -s ' ' | cut -d' ' -f4)\r
+sleep 12
+send cat /bin/sh /bin/edit /bin/gzip /bin/less /bin/sh /bin/edit /bin/gzip /bin/less /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/big\r
+sleep 10
+send cp /tmp/big /tmp/big2 & cp /tmp/big /tmp/big3 & cp /tmp/big /tmp/big4 & nice -n -20 svctest kill $(pgrep fsd) 2; wait; sleep 1; ls / > /dev/null; dmesg | grep -a 'svc:\|was being changed'\r
+sleep 15
+send rm -f /tmp/big /tmp/big2 /tmp/big3 /tmp/big4; sync; echo svc-o-done\r
+sleep 4

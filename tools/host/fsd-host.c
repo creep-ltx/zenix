@@ -19,6 +19,8 @@
 #define main fsd_main
 #include "../../user/fsd.c"
 #undef main
+int sys_svc_self(void) { return 1; }                      /* a first start: no restart rules */
+int sys_svc_opens(u32 *ino, u32 bytes) { (void)ino; (void)bytes; return 0; }
 
 static unsigned cur_uid, cur_gid, raw;
 static int opened[100], nopened;

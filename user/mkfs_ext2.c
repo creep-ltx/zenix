@@ -125,6 +125,17 @@ int main(int argc, char **argv)
     w32(sb + 32, bpg); w32(sb + 36, bpg); w32(sb + 40, ipg);
     w16(sb + 52, 0); w16(sb + 54, 0xFFFF); w16(sb + 56, 0xEF53); w16(sb + 58, 1); w16(sb + 60, 1);
     w32(sb + 76, 0);                                /* revision 0 */
+    {   /* a volume id (DESIGN D11 4.3: the root's server finds its volume by place and uuid): the clock, the tick and
+         * (on Zenix) the E-clock, mixed */
+        u32 x = (u32)sys_time() * 2654435761u ^ sys_ticks();
+        for (int i = 0; i < 16; i++) {
+#ifndef ZHOST
+            x += sys_hrtime();
+#endif
+            x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+            sb[104 + i] = (u8)(x >> 24);
+        }
+    }
 
     printf("mkfs.ext2: %s: %u blocks of %u bytes, %u groups, %u inodes\n", dev, nblocks, bsize, ngroups, ninodes);
 

@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
+#pragma GCC optimize("Os")              /* built into the kernel image: size first (ext2.c is -Os too) */
 #include "fsenv.h"
 #include "../kernel/fsproto.h"
 #include "../kernel/diskproto.h"
 #include "diskcall.h"
+#include "volid.h"
 
 /* The filesystem server: kernel/ext2.c in user mode behind the "fs" port.
  * Embedded in the kernel image (the kernel needs it before any disk is
@@ -297,14 +299,30 @@ int main(int argc, char **argv)
     disk_port = sys_port_find("disk");                /* a registered service: calling it starts diskd if need be */
     int root = argc > 3 && !strcmp(argv[3], "-root");
     if (argc < 3) { printf("usage: fsd DEVICE PORT [-root] [-id ID]\n"); return 2; }
-    const char *pname = argv[2];
-    if (try_mount(argv[1], root ? EXT2_RW : EXT2_ANY)) {
+    const char *pname = argv[2], *dev = argv[1], *who = root ? "fsd" : pname;
+    char name[16];
+    int self = sys_svc_self(), restart = (self & 0xFFFF) > 1;
+    if (argc > 4 && !strcmp(argv[argc - 2], "-id")) {      /* the volume by its place and uuid (volid.h) */
+        if (vol_find(disk_port, dev, argv[argc - 1], name, who, restart)) return 1;
+        dev = name;
+    }
+    if (try_mount(dev, root ? EXT2_RW : EXT2_ANY)) {
         printf(root ? "fsd: no writable ext2 filesystem on %s for the root\n"
-                    : "mount.ext2: %s is not an ext2 filesystem Zenix can mount, or is in use\n", argv[1]);
+                    : "mount.ext2: %s is not an ext2 filesystem Zenix can mount, or is in use\n", dev);
         return 1;
+    }
+    if ((self & SVC_MIDREQ) && !ext2_readonly) {        /* ext2 has no journal: the change may be half done (D11 5.4) */
+        ext2_mark_unclean();
+        printf("fsd: %s was being changed when its server ended: check it with fsck.ext2\n", dev);
     }
     int port = sys_port_create(pname);
     if (port < 0) { printf("fsd: cannot create the port %s\n", pname); return 1; }
+    if (restart) {                                      /* the inodes the kernel holds open on us (D11 5.4) */
+        static u32 ino[160];
+        int n = sys_svc_opens(ino, sizeof ino);
+        for (int i = 0; i < n; i++) open_ref(ino[i]);
+        if (n < 0) printf("fsd: %s: restart: the open files are unknown (%d): space of deleted open files stays used until fsck.ext2\n", dev, n);
+    }
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {
         int r = handle(m);

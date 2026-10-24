@@ -19,7 +19,9 @@ DESCRIPTION
                 bootable (fdisk boot), else the first such partition, else
                 the bare disk. boot reads its superblock to choose the
                 server; ID is the volume's place (start and size, in hex)
-                and its uuid. Asking for the root inode then starts it.
+                and its uuid: at every start, the first too, the server
+                looks for its volume by place, the uuid confirming it
+                (user/volid.h). Asking for the root inode starts it.
     Then it starts /bin/init on console 1 and waits for it. Should init
     ever end, boot says so ("boot: /bin/init ended (status N), starting it
     again") and starts it again a second later. It exists because the idle

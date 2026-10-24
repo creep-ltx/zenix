@@ -30,6 +30,12 @@ int main(int argc, char **argv)
     zdisk_dev(&d, bs);
     int r = zenixfs_mkfs(&d, label, 0, (uint64_t)sys_time());
     if (r) { printf("mkfs.zenixfs: failed (%d); the device may be too small\n", r); return 1; }
+    {   /* a volume id (DESIGN D11 4.3): the clock, the tick and the E-clock, mixed */
+        unsigned char u[16];
+        u32 x = (u32)sys_time() * 2654435761u ^ sys_ticks();
+        for (int i = 0; i < 16; i++) { x += sys_hrtime(); x ^= x << 13; x ^= x >> 17; x ^= x << 5; u[i] = (unsigned char)(x >> 24); }
+        if (zenixfs_set_uuid(&d, u)) { printf("mkfs.zenixfs: cannot write the volume id\n"); return 1; }
+    }
     if (cs != ZENIXFS_CHARSET_LATIN1) {                  /* the charset hint lives in the superblock, set it through a mount */
         struct zenixfs *fs;
         if (zenixfs_mount(&fs, &d, 32) == 0) { zenixfs_set_charset(fs, cs); zenixfs_unmount(fs); }

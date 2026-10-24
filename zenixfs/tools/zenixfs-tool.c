@@ -286,6 +286,12 @@ int main(int argc, char **argv)
         uint32_t nblocks = (uint32_t)(((uint64_t)mb << 20) >> bs);
         if (zfile_open(&img, path, bs, (int)nblocks) < 0) die("create image", -1);
         int r = zenixfs_mkfs(&img.dev, label, 0, (uint64_t)time(NULL)); if (r) die("mkfs", r);
+        {   /* a volume id (Zenix D11: a filesystem server finds its volume by place and uuid): random */
+            uint8_t u[16]; FILE *rf = fopen("/dev/urandom", "rb");
+            if (!rf || fread(u, 1, 16, rf) != 16) die("read /dev/urandom", -1);
+            fclose(rf);
+            if ((r = zenixfs_set_uuid(&img.dev, u))) die("uuid", r);
+        }
         r = zenixfs_mount(&fs, &img.dev, 64); if (r) die("mount", r);
         if (cs != ZENIXFS_CHARSET_LATIN1) zenixfs_set_charset(fs, cs);
         struct zenixfs_statfs st; zenixfs_statfs(fs, &st);

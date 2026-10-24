@@ -260,6 +260,8 @@ long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
     return fs_call_on(0, type, a0, a1, a2, a3);
 }
 
+static struct exec_src *loading;        /* the program loads in progress, linked through the spawners' kernel stacks */
+
 /* Open a program for loading without reading it into a buffer first: the loader reads the header, allocates the
  * process's memory and then reads the image straight into it (fs_exec_read). */
 long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x)
@@ -273,6 +275,8 @@ long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *
         return ino;
     x->m = m;
     x->ino = ino;
+    x->next = loading;                  /* until fs_exec_close: a restarted server must count this open (D11) */
+    loading = x;
     if (!S_ISREG(x->st.mode) || x->st.size > 256u * 1024) {
         fs_exec_close(x);
         return S_ISDIR(x->st.mode) ? -EISDIR : S_ISREG(x->st.mode) ? -EFBIG : -EACCES;
@@ -281,9 +285,44 @@ long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *
 }
 
 /* every successful fs_exec_open ends with this (the server counts opens, see FS_CLOSE) */
-void fs_exec_close(const struct exec_src *x)
+void fs_exec_close(struct exec_src *x)
 {
     fs_call_on(x->m, FS_CLOSE, (u32)x->ino, 0, 0, 0);
+    for (struct exec_src **q = &loading; *q; q = &(*q)->next)   /* after the close: it counted until then */
+        if (*q == x) {
+            *q = x->next;
+            break;
+        }
+}
+
+/* SVC_OPENS (D11 5.4): one inode number for every open the kernel holds on the mount served on port PNAME (number
+ * PORT): its file entries (also one being closed, refs already 0: its FS_CLOSE is queued and takes it off again), the
+ * FS_OPENs answered but not yet used (the client has not run since: no file entry yet), the program loads in
+ * progress. The kernel is not preempted, so the list is exact. -ENOSPC if more than max. */
+long vfs_opens(const char *pname, int port, u32 *out, u32 max)
+{
+    int mi = -1;
+    u32 n = 0;
+    for (int i = 0; i < NMOUNT; i++)
+        if (mnt[i].used && !strcmp_(mnt[i].pname, pname))
+            mi = i;
+    if (mi < 0)
+        return 0;
+#define PUT(v) do { if (n == max) return -ENOSPC; out[n++] = (u32)(v); } while (0)
+    for (int i = 0; i < NFILE; i++)
+        if (files[i].type == FT_INODE && files[i].fs == mi)
+            PUT(files[i].ino);
+    for (int i = 1; i < NPROC; i++) {
+        struct umsg *m = procs[i].wait_msg;
+        if (procs[i].state != P_FREE && m && m->state == MSG_DONE && m->type == FS_OPEN && m->result >= 0 &&
+            procs[i].wait_port == port)
+            PUT(m->result);
+    }
+    for (struct exec_src *x = loading; x; x = x->next)
+        if (x->m == mi)
+            PUT(x->ino);
+    return (long)n;
+#undef PUT
 }
 
 long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)

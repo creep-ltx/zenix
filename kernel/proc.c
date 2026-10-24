@@ -529,13 +529,13 @@ int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int 
     return proc_load(img, len, fill_mem, img, argv[0], argv, argc, 0, 0, 1, priv, -1);
 }
 
-/* may killed process p end now? A kill (not a fault) waits for the end of a message call (the server may still use
- * the client's buffers) and of a service load; a service process killed while serving a request ends only between
- * requests (D11 5.6) - unless it was killed twice or 5 s ago (a hung server); a fault ends it at once, but never while
- * its message is still queued or served */
+/* may killed process p end now? Never inside a message call (the server may still use the client's buffers, and the
+ * kernel code around the call - a program load, the list of loads in progress through the kernel stacks - must reach
+ * its end): it ends at the end of its system call. A service process killed while serving a request ends only between
+ * requests (D11 5.6) - unless it was killed twice or 5 s ago (a hung server); a fault ends it at once. */
 static int kill_now(const struct proc *p)
 {
-    if (p->exiting || (p->wait_msg && (p->killed != 2 || p->wait_msg->state != MSG_DONE)))
+    if (p->exiting || p->wait_msg)
         return 0;
     return p->killed != 1 || (s32)(ticks - p->kill_at) >= 500 || !ipc_serving(p->pid);
 }

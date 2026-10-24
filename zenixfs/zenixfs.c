@@ -1513,6 +1513,44 @@ static int orphans_free(struct zenixfs *fs)
         if ((e = zenixfs_orphan_done(fs, rd32(k2 + 8)))) return e;
     }
 }
+int zenixfs_orphans_keep(struct zenixfs *fs, int (*held)(uint32_t ino))
+{
+    u32 next = 0;
+    int kept = 0;
+    for (;;) {
+        u8 key[KEYLEN], k2[KEYLEN]; mkkey(key, 0, K_ORPHAN, next);
+        int e = t_search(fs, key, S_CEIL, k2, NULL, NULL);
+        if (e == ZENIXFS_ENOENT) return kept;
+        if (e) return e;
+        if (rd32(k2) != 0 || k2[4] != K_ORPHAN) return kept;
+        u32 ino = rd32(k2 + 8);
+        if (held(ino)) kept++;
+        else if ((e = zenixfs_orphan_done(fs, ino))) return e;
+        if (ino == 0xFFFFFFFFu) return kept;
+        next = ino + 1;
+    }
+}
+int zenixfs_ino_floor(struct zenixfs *fs, uint32_t min)
+{
+    u32 n = fs->next_ino + 65536u < fs->next_ino ? 0xFFFFFFFFu : fs->next_ino + 65536u;
+    fs->next_ino = n > min ? n : min;
+    fs->txn_dirty = 1;
+    return commit(fs);
+}
+int zenixfs_set_uuid(struct zenixfs_dev *dev, const uint8_t *uuid)
+{
+    u32 B = 1u << dev->bshift;
+    u8 *buf = ZENIXFS_MALLOC(B);
+    if (!buf) return ZENIXFS_EIO;
+    int e = dev->read(dev->ctx, 0, buf) < 0 ? ZENIXFS_EIO : verify(buf, B, T_SUPER, 0) ? 0 : ZENIXFS_ECORRUPT;
+    if (!e) {
+        memcpy(buf + 68, uuid, 16);
+        seal(buf, B, 0);
+        e = dev->write(dev->ctx, 0, buf) < 0 || dev->flush(dev->ctx) < 0 ? ZENIXFS_EIO : 0;
+    }
+    ZENIXFS_FREE(buf);
+    return e;
+}
 
 /* ---------- fsck ---------- */
 struct fk { u32 ino, mode, nlink, flags, refs, subdirs; u64 size; u32 maxext; int seen_inline; };

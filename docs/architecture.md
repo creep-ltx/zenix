@@ -533,7 +533,16 @@ crash such an inode is left with no links and `fsck.ext2`/`e2fsck` free it. Zeni
 (`zenixfs_orphan_add`), which the next mount frees after a crash. Started as `fsd DEVICE PORTNAME [-root] [-id ID]`: it
 serves DEVICE on port PORTNAME; with `-root` (the root's server, registered by boot) the volume must be one Zenix can
 **write** (see "ext2: what is mounted" in section 10; an ext3, ext4 or damaged volume is never the root), and it
-prints as `fsd`, not as `mount.ext2`; `-id` carries the volume id boot read (place and uuid; used by restarts, D11 step 3).
+prints as `fsd`, not as `mount.ext2`; `-id START,SIZE,UUID` is the volume id boot read (`user/volid.h`): at every
+start the server looks for the device at that place on the same medium (a partition renamed by `fdisk` is found
+under its new name) and serves it if its superblock's uuid matches or the recorded one is all zero; only if nothing is
+at that place, the one device carrying that uuid (two carriers are refused); else it ends ("the volume is on no
+device"). A floppy without a uuid is not served again after a restart (it may have been swapped).
+**A restarted fsd** (D11 step 3) learns the inodes the kernel holds open on its mount (`SVC_OPENS`) before its
+first request and rebuilds its open counts, so a deleted file held open keeps its data and frees its space at its last
+close; if its predecessor ended in the middle of a request it clears the superblock's "cleanly unmounted" state bit
+(Linux and e2fsck then check the volume; Zenix keeps writing) and says "DEV was being changed when its server
+ended: check it with fsck.ext2".
 As `/bin/mount.ext2` it is started by `mount`. It answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
 (umount: sync, release the device, exit). Two root servers are built into the kernel image, `fsd` (ext2) and `zfsd`
 (the ZenixFS server, the same program as `/bin/mount.zenixfs`). **Which one serves the root** is boot's choice
@@ -545,7 +554,13 @@ registers `fs` with that server and device, so only one root server is ever star
 ### mount.zenixfs - the ZenixFS server (`user/zenixfsd.c` + `zenixfs/zenixfs.c`, port chosen by `mount`)
 The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the
 disk server (`user/zenixfs_disk.c`: filesystem blocks of 1-4 KB as 2-8 sector calls plus `DISK_FLUSH`). Same protocol and the same
-permission rules as the ext2 server. Changes commit three seconds after the first one, at `FS_SYNC` and at `FS_QUIT`. The library
+permission rules as the ext2 server. Changes commit three seconds after the first one, at `FS_SYNC` and at `FS_QUIT`.
+Started as the root's server (`zfsd`) it takes the same `-root -id` arguments as fsd. **A restarted zfsd** mounts the
+last commit keeping the orphans (`ZENIXFS_MNT_READONLYISH`), rebuilds its open counts from `SVC_OPENS`, frees only
+the orphans nobody holds (`zenixfs_orphans_keep`) and sets the next inode number to at least the committed one +
+65536 and above every number the kernel holds (`zenixfs_ino_floor`, committed before the first request): a file
+created in the seconds before the crash (not committed) is gone, its open file reads an error, and its number is
+never handed to another file. The library
 allocates only at mount (block cache, bitmaps, three scratch blocks), so a running server needs no more memory.
 
 ### The mount table (`kernel/vfs.c`)
@@ -569,7 +584,7 @@ end, it says so and starts it again. (It exists because the idle process cannot 
 consoles are init's work (section 11, man/init.txt).
 
 ### The service manager (`kernel/svc.c`, DESIGN D11)
-The full design is docs/d11-service-manager.md; what is built (steps 0-2 of its build order):
+The full design is docs/d11-service-manager.md; what is built (steps 0-3 of its build order):
 - **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
   bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
   (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are
@@ -594,6 +609,11 @@ The full design is docs/d11-service-manager.md; what is built (steps 0-2 of its 
   server leaves for its next start, kept in the kernel while the entry exists (diskd's slots and claims, above).
   `SVC_SELF` tells a server it is a restart (more than 1 start). An essential server that ends with status 86 (its
   saved table is damaged) is a panic, not counted.
+- **Open files across a restart.** `SVC_OPENS` (the started server, after it took its port, before its first
+  request): one inode number per open the kernel holds on that mount - every file entry of the mount (also one
+  whose close is in flight), every `FS_OPEN` answered but not yet used by its client, every program load in progress
+  (the loads are linked through the spawners' kernel stacks until their `FS_CLOSE`). `SVC_SELF` also says (bit 16)
+  whether the last end came in the middle of a request.
 - **No-start calls.** `FS_CLOSE` (from `file_close` and the end of a program load) and every call made by a dying
   process never start a server: dropped while the entry is stopped, queued while it is loading or starting.
 - **Loads nest at most two deep** (a file service read while the root server is stopped); a third level fails with

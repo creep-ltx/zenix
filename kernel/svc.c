@@ -18,7 +18,7 @@ enum { SV_FREE, SV_STOPPED, SV_LOADING, SV_STARTING, SV_RUNNING, SV_GIVENUP };
 #define SVC_ARGS 6
 
 static struct svc {
-    u8 state, essential, served, ends, nwords, depth;
+    u8 state, essential, served, ends, nwords, depth, midreq;
     s8 nice;
     int pid;                            /* LOADING: the loader; STARTING, RUNNING: the server */
     int watcher;                        /* STARTING: who keeps the deadline (0: nobody yet) */
@@ -325,6 +325,7 @@ void svc_exit(struct proc *p)
         else
             kprintf("svc: %s: %s (pid %d) ended, status %d%s\n", pt->name, p->name, p->pid, p->exit_code,
                     was_running ? "" : ", before it opened its port");
+        s->midreq = in != 0;                    /* the next server is told (fsd marks ext2 "needs a check") */
         if (in && p->exit_code == 130)
             kprintf("svc: %s: killed in the middle of a request: the change may be half done\n", pt->name);
         if (s->essential && !s->served)
@@ -343,21 +344,24 @@ void svc_exit(struct proc *p)
     }
 }
 
-static struct svc *mine(void)           /* the entry whose started (or running) server current is */
+static int mine(void)                   /* the entry whose started (or running) server current is, -1 if none */
 {
     for (int i = 0; i < NSVC; i++)
         if ((svcs[i].state == SV_STARTING || svcs[i].state == SV_RUNNING) && svcs[i].pid == current->pid)
-            return &svcs[i];
-    return 0;
+            return i;
+    return -1;
 }
 
 /* SVC_SAVE / SVC_LOAD: the small table a server leaves for its next start (diskd's slots and claims, D11 5.4). Only
  * the process the kernel started for an entry; the table is kept while the entry exists. */
 long svc_data(u32 op, void *buf, u32 len)
 {
-    struct svc *s = mine();
-    if (!s)
+    int i = mine();
+    if (i < 0)
         return -EPERM;
+    struct svc *s = &svcs[i];
+    if (op == SVC_OPENS)                        /* after the hand-over, before the first receive (D11 5.4) */
+        return s->state == SV_RUNNING ? vfs_opens(ports[i].name, PORT_ID(i), buf, len / 4) : -EPERM;
     if (op == SVC_SAVE) {
         if (len > SVC_SAVED)
             return -E2BIG;
@@ -386,8 +390,8 @@ long svc_sys(u32 op, const char *name, const char *text)
     int i = name ? port_slot(name) : -1;
     struct svc *s = i >= 0 && i < NSVC && svcs[i].state != SV_FREE ? &svcs[i] : 0;
     if ((op & 0xFF) == SVC_SELF) {
-        s = mine();
-        return s ? (long)s->starts : 0;
+        i = mine();
+        return i < 0 ? 0 : (long)(svcs[i].starts | (svcs[i].midreq ? SVC_MIDREQ : 0));
     }
     if (current->uid != 0)
         return -EPERM;

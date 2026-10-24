@@ -98,6 +98,16 @@ int  zenixfs_truncate(struct zenixfs *fs, uint32_t ino, uint64_t size);
  * zenixfs_orphan_done when the last close happens (frees it). zenixfs_unlink never frees an orphan-flagged inode. */
 int  zenixfs_orphan_add(struct zenixfs *fs, uint32_t ino);
 int  zenixfs_orphan_done(struct zenixfs *fs, uint32_t ino);
+/* A restarted server (DESIGN D11 5.4) mounts with ZENIXFS_MNT_READONLYISH (the orphans stay), learns which inodes are
+ * still open, and then: zenixfs_orphans_keep frees every orphan for which held() says 0 and keeps the others (held()
+ * may note that they are orphans: their last close frees them); returns how many it kept, or negative.
+ * zenixfs_ino_floor sets the next inode number to at least the committed one + 65536 and at least min, and commits:
+ * numbers handed out in the seconds before a crash (not committed) are never handed out again while the kernel may
+ * still hold them. */
+int  zenixfs_orphans_keep(struct zenixfs *fs, int (*held)(uint32_t ino));
+int  zenixfs_ino_floor(struct zenixfs *fs, uint32_t min);
+/* write UUID (16 bytes) into the superblock of the volume on dev (mkfs.zenixfs, zenixfs-tool: a volume id, D11 4.3) */
+int  zenixfs_set_uuid(struct zenixfs_dev *dev, const uint8_t *uuid);
 
 /* Recovery. zenixfs_rebuild_bitmap: recompute the free-space map from the tree (every block the tree reaches is used, the rest is free)
  * and commit it; returns the number of blocks whose state changed, or negative. zenixfs_rewrite_super: write a new superblock for a

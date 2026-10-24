@@ -147,3 +147,6 @@ static inline int sys_svc_self(void) { return sys3(81, SVC_SELF, 0, 0); }
 #define SVC_EXIT_DAMAGED 86     /* a server's exit status: its saved table is damaged (the kernel stops for diskd) */
 static inline int sys_svc_save(const void *buf, u32 n) { return sys3(81, SVC_SAVE, (u32)buf, n); }   /* at most 512 bytes */
 static inline int sys_svc_load(void *buf, u32 n) { return sys3(81, SVC_LOAD, (u32)buf, n); }        /* bytes copied, 0: none */
+#define SVC_OPENS    6
+#define SVC_MIDREQ   0x10000    /* in sys_svc_self(): the server's last end was in the middle of a request */
+static inline int sys_svc_opens(u32 *ino, u32 bytes) { return sys3(81, SVC_OPENS, (u32)ino, bytes); }   /* how many */

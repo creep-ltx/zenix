@@ -698,7 +698,9 @@ umount -> 5.2; 11 size -> 10; 12 the step 0 rule -> 11, 5.6.
 
 **Built:** step 0 (2026-10-24: `fs_read_file` deleted; the "exiting" flag and the kill-in-a-call rule came from main
 with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`), step 2 (2026-10-24: diskd's saved table, the
-retried claim and the one retry of the filesystem servers; `tools/svc-test.sh` d and dmg, `tools/disk-host-test.sh`).
+retried claim and the one retry of the filesystem servers; `tools/svc-test.sh` d and dmg, `tools/disk-host-test.sh`),
+step 3 (2026-10-24: `SVC_OPENS`, the volume id rule in `user/volid.h`, uuids from all three tools, the ext2 state bit,
+ZenixFS's kept orphans and inode floor; `tools/svc-test.sh` o, zo, u).
 
 **Where the code differs from the note** (each one small, and the reason):
 - *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM
@@ -731,6 +733,17 @@ retried claim and the one retry of the filesystem servers; `tools/svc-test.sh` d
   only, `user/say.h`) instead of libz's `printf`: diskd.zx 13120 -> 9352 bytes. The retry lives in `user/diskcall.h`;
   because `zenixfs_disk.c` is shared with `mkfs.zenixfs` and `fsck.zenixfs`, those raw tools retry once too instead of
   reporting the error (repeating a sector read or write is safe either way).
+- *Step 3, the note was wrong:* `zenixfs_mkfs` already wrote a uuid (derived from the creation time: two volumes made
+  in the same second got the same one). Now `mkfs.zenixfs` (the clocks) and `zenixfs-tool` (`/dev/urandom`) write a
+  better one with the new `zenixfs_set_uuid`; `mkfs.ext2` writes one too. The kept-orphans mount is the existing
+  `ZENIXFS_MNT_READONLYISH`; the library gained `zenixfs_orphans_keep` and `zenixfs_ino_floor`.
+- *Step 3:* "the previous server ended in the middle of a request" is any request (`SVC_SELF` bit 16), not only one
+  that changes the volume: the kernel does not sort the types, and a needless "needs a check" mark costs only a
+  check. `fsd.c` is now built with `-Os` (ext2.c already was). The fault rule of step 1 is now: no process ends inside
+  a message call, also not for a fault (the list of program loads is linked through the kernel stacks).
+- *Not tested (step 3):* a partition renamed or moved while its server is stopped - `fdisk` refuses to change a disk
+  whose partition is mounted, so it cannot happen to the root in a running system; the place-first rule is tested with
+  a `dd` copy of the root beside it (part u). A swapped floppy needs mounts as services (step 6).
 
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
 same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10

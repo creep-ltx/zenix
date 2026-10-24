@@ -11,10 +11,17 @@
 #      refused) and the handles (a floppy probed on demand, df1, keeps its slot); killed twice during a long cp (the
 #      second kill ends it at once, even mid-request: fsd sends the failed request again) the copy is right and the
 #      host's e2fsck finds the root clean
+#   o  the ext2 root's restart (step 3): a deleted file held open reads the same bytes after fsd restarted, and its
+#      space comes back at its last close (the open counts came from the kernel, SVC_OPENS); rm after a restart frees
+#      space; fsd killed twice in the middle of a copy: the next one marks the volume "needs a check" (the host's
+#      dumpe2fs: not clean)
+#   zo the same on the ZenixFS root, and a file created less than 3 s before zfsd died (not committed) is gone for its
+#      open file: the read fails and never reaches the next new file
+#   u  a dd copy of the root partition beside it (the same uuid): the restart serves the original (the place first)
 #   dmg  a test-only kernel damages diskd's saved table: diskd stops with its message, the kernel panics
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
-PARTS=" ${*:-a z b n r d dmg} "
+PARTS=" ${*:-a z b n r d o zo u dmg} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
 make -s all build/zenix-zroot.hdf build/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
@@ -118,6 +125,53 @@ line d "... the copy is right (cmp)" "cmp-ok"
 line d "the script ran to the end" "svc-d-done"
 if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean after the restarts"; else echo "FAIL the host's e2fsck finds the root clean after the restarts (see $OUT/e2fsck.log)"; pass=0; fi
 rm -f "$OUT/root.hdf" "$OUT/df1.adf"
+fi
+
+free_grew() {   # free_grew LOG WHAT A B MIN: the number in B=... exceeds the one in A=... by at least MIN
+    local a b; a=$(grep -aoxE "$3=[0-9]+" "$OUT/$1.log" | head -1); b=$(grep -aoxE "$4=[0-9]+" "$OUT/$1.log" | head -1)
+    a=${a#*=}; b=${b#*=}
+    if [ -n "$a" ] && [ -n "$b" ] && [ $((b - a)) -ge "$5" ]; then echo "PASS $2 ($a -> $b KB)"; else echo "FAIL $2 ($a -> $b KB)"; pass=0; fi
+}
+
+# ---- o: the ext2 root's restart rules ----
+if want_part o; then
+cp build/zenix.hdf "$OUT/root.hdf"
+conf o "$OUT/root.hdf"
+run o "$OUT/o.fs-uae" 200 tools/tests/svc-open-test.txt
+rx   o "a deleted file held open reads the same after fsd restarted" ".*svctest keep /tmp/keep: read 4096, deleted 0, again 4096: the same bytes"
+rx   o "... the restart happened meanwhile" "svc: fs: started @fsd \\(pid [0-9]+, for pid [0-9]+ [a-z]+\\)"
+free_grew o "... its space came back at its last close" f1 f2 100
+free_grew o "rm after a restart gives the space back" f3 f4 100
+line o "fsd killed in the middle of a change: the next one says the volume needs a check" "fsd: ide0 was being changed when its server ended: check it with fsck.ext2"
+line o "the script ran to the end" "svc-o-done"
+if dumpe2fs -h "$OUT/root.hdf" 2>/dev/null | grep -q '^Filesystem state: *not clean'; then echo "PASS ... the host sees the state bit cleared (dumpe2fs: not clean)"; else echo "FAIL ... the host sees the state bit cleared (dumpe2fs: not clean)"; pass=0; fi
+rm -f "$OUT/root.hdf"
+fi
+
+# ---- zo: the ZenixFS root's restart rules ----
+if want_part zo; then
+cp build/zenix-zroot.hdf "$OUT/zroot.hdf"
+conf zo "$OUT/zroot.hdf"
+run zo "$OUT/zo.fs-uae" 200 tools/tests/svc-zopen-test.txt
+rx   zo "a deleted file held open (an orphan) reads the same after zfsd restarted" ".*svctest keep /tmp/keep: read 4096, deleted 0, again 4096: the same bytes"
+free_grew zo "... and is freed at its last close" f1 f2 100
+rx   zo "a file not yet committed when zfsd died: its open file reads an error" ".*svctest lost /tmp/lw: wrote 4, read -[0-9]+ \"\""
+none zo "... never the next new file's bytes" ".*svctest lost /tmp/lw: wrote 4, read 4 \"BBBB\""
+line zo "the new file is fine" "BBBB"
+line zo "the script ran to the end" "svc-zo-done"
+rm -f "$OUT/zroot.hdf"
+fi
+
+# ---- u: a copy with the same uuid beside the root ----
+if want_part u; then
+python3 tools/mkrdb-multi.py "$OUT/dup.hdf" build/zenix.hdf:ext2:DH0:- build/zenix.hdf:ext2:DH1:boot >/dev/null || { echo "FAIL mkrdb-multi"; exit 1; }
+conf u "$OUT/dup.hdf"
+run u "$OUT/u.fs-uae" 100 tools/tests/svc-dup-test.txt
+rx   u "with a copy beside it the restarted fsd still serves the original (the place first)" "svc: fs: started @fsd \\(pid [0-9]+, for pid [0-9]+ [a-z]+\\)"
+line u "... a file written before the restart is there (not the copy's root)" "original"
+line u "... and the root is writable again" "write-ok"
+line u "the script ran to the end" "svc-u-done"
+rm -f "$OUT/dup.hdf"
 fi
 
 # ---- dmg: a damaged saved table stops the machine ----

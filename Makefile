@@ -204,9 +204,9 @@ $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py tools/check-68020-60.sh
 # the same server as a program: `mount -t ext2` starts /bin/mount.ext2 DEVICE PORT
 $(BUILD)/mount.ext2.zx: $(BUILD)/fsd.zx
 	cp $< $@
-$(BUILD)/boot.uo: user/rootpick.h user/rdb.h kernel/diskproto.h
+$(BUILD)/boot.uo: user/rootpick.h user/volid.h user/rdb.h kernel/diskproto.h
 $(BUILD)/diskd.uo: user/say.h user/rdb.h kernel/diskproto.h
-$(BUILD)/fsd.uo: user/diskcall.h kernel/diskproto.h kernel/fsproto.h
+$(BUILD)/fsd.uo: user/volid.h user/diskcall.h kernel/diskproto.h kernel/fsproto.h
 $(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx $(BUILD)/mount.zenixfs.zx | $(BUILD)
 	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
 
@@ -216,7 +216,7 @@ $(BUILD)/zenixfs_lib.uo: zenixfs/zenixfs.c zenixfs/zenixfs.h user/zenixfs_env.h 
 ZENIXFS_OBJS := $(BUILD)/zenixfs_lib.uo $(BUILD)/zenixfs_disk.uo
 $(BUILD)/zenixfs_disk.uo: user/zenixfs_disk.c user/zenixfs_disk.h user/diskcall.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -ffunction-sections -c $< -o $@
-$(BUILD)/zenixfsd.uo: user/zenixfsd.c user/rdb.h kernel/fsperm.h kernel/fsproto.h user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
+$(BUILD)/zenixfsd.uo: user/zenixfsd.c user/volid.h user/rdb.h kernel/fsperm.h kernel/fsproto.h user/zenixfs_disk.h zenixfs/zenixfs.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -ffunction-sections -c $< -o $@
 $(BUILD)/zenixfsd.uelf: $(BUILD)/zenixfsd.uo $(ZENIXFS_OBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \

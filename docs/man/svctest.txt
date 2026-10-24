@@ -10,6 +10,9 @@ SYNOPSIS
     svctest call NAME TYPE [A0]
     svctest raw DEVICE
     svctest hold DEVICE SECONDS
+    svctest keep FILE SECONDS
+    svctest kill PID SECONDS
+    svctest lost FILE SECONDS [PID]
 
 DESCRIPTION
     A test program for the service manager (DESIGN D11,
@@ -33,6 +36,17 @@ DESCRIPTION
            seconds and reads it again with the same handle: "svctest
            hold DEVICE: handle H, read R, after the wait R2". A disk
            server started again meanwhile must still know the handle.
+    keep   opens FILE, reads it, deletes it, waits and reads it again
+           through the open file, then closes it: "... the same bytes"
+           also when the filesystem server was started again meanwhile.
+    kill   waits SECONDS seconds, then kills PID twice (the second kill
+           ends a server at once, also in the middle of a request). Run
+           at nice -20 it wakes while a busy server is serving.
+    lost   creates FILE, writes AAAA, kills process PID if given (the
+           filesystem server), waits, and reads it through the open
+           file. On ZenixFS a server that died before its next
+           commit took the file with it: the read fails, and it never
+           reads another file that got the same number.
 
     tools/svc-test.sh uses it in the emulator.
 

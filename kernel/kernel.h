@@ -401,6 +401,8 @@ void ipc_proc_exit(int pid);
 #define SVC_SELF     3                  /* op -> how many times the caller's entry was started, 0 if not a service */
 #define SVC_SAVE     4                  /* op, buffer, length: the started server leaves a table for its next start */
 #define SVC_LOAD     5                  /* op, buffer, length -> the bytes of that table copied (0: none) */
+#define SVC_OPENS    6                  /* op, buffer, length -> inode numbers the kernel holds open on the caller's mount */
+#define SVC_MIDREQ   0x10000            /* SVC_SELF: the last end was in the middle of a request */
 #define SVC_SAVED    512                /* the most a server may save */
 #define SVC_EXIT_DAMAGED 86             /* a server's exit status: its saved table is damaged (an essential one: panic) */
 #define SVC_NS_CLOSE 1                  /* no-start call: dropped if stopped, queued while loading or starting */
@@ -425,10 +427,11 @@ long vfs_read(struct file *f, void *buf, u32 n);
 long vfs_write(struct file *f, const void *buf, u32 n);
 long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
 struct ustat;
-struct exec_src { int m; long ino; struct ustat st; };
+struct exec_src { int m; long ino; struct ustat st; struct exec_src *next; };   /* next: the loads in progress (D11) */
 long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x);
 long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n);
-void fs_exec_close(const struct exec_src *x);      /* FS_CLOSE for an fs_exec_open that succeeded */
+void fs_exec_close(struct exec_src *x);            /* FS_CLOSE for an fs_exec_open that succeeded */
+long vfs_opens(const char *pname, int port, u32 *out, u32 max);   /* SVC_OPENS: the inodes held open on that mount */
 long vfs_open(const char *path, int flags);
 long vfs_stat(const char *path, struct ustat *st);
 long vfs_fstat(struct file *f, struct ustat *st);
