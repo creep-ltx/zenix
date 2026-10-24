@@ -183,3 +183,66 @@ What stays deliberately out: `fork` (needs an MMU), Linux's size and its thousan
 users and of resource tracking (Zenix keeps per-process ownership: everything a process held is freed when it dies).
 
 Last checked: 2026-10-24.
+
+## The software list (owner, 2026-10-24: "an operating system isn't better than its software")
+A list of programs Zenix could have, by area, from a read-only survey on 2026-10-24 and the owner's goal. **None of
+it is approved** unless marked: the feature halt still holds, and each item needs the owner's OK, a design note where
+it touches the architecture, tests, and a build on the A1200. Marks: **[built]**, **[approved]**, **[goal]** (needed for
+the main goal, Claude in a terminal on Zenix: ROADMAP), otherwise an idea. Where an idea needs a foundation first, the
+foundation is named.
+
+**Foundations that most of the list depends on** (each is its own decision):
+newlib, a fuller C library (porting) · signal bits and `select`/`poll` (item 1 above) · shared libraries · a shared
+text-UI library (full-screen tools) · the TCP/IP server [approved, after D11 and self-updates] · a display server and a
+sound server (phase 5) · the service manager [approved: D11, being built].
+
+**1. Shell and terminal life:** `zc` Zenix Commander · ports of the owner's Sumi (editor), Maki (pager), Markdown
+(viewer) · `top`/`ctop` (needs CPU time per process, item 4) · FuzzyFind (`fzf`, `locate`, `updatedb`) · tmux/screen-style
+panes and detachable sessions · an `ncdu`-style disk browser · `htop`-style process tree, `pstree` · `script` and
+`ttyrec` · `bc`/`dc`, `units` · fish-style suggestions, a `.zenixrc` setup wizard · `cron`/`at` · `logger` and a syslog
+server · `banner`, `figlet`, `cowsay`, `fortune`.
+
+**2. Text and data:** finish `awk` (parked in user/awk.c) · `join`, `split`, `csplit`, `column`, `fmt`, `pr`, `shuf`,
+`od`, `strings`, `iconv` · `patch`, `diff3` · `bzip2`, `xz`, `zip`/`unzip`, `cpio` · **`lha`/`lzx` unpackers** (Aminet
+archives) · a `jq`-style JSON tool · a small database or key-value store · `file` (Amiga formats too) · `sha1sum`,
+`crc32`, `b2sum`.
+
+**3. Programming on the machine:** an assembler and a C compiler that output ZEXE (vasm/vbcc/tcc-like) · `make` · a
+debugger `zdb` on the crash handler · an `strace`-style tracer (the message design suits it) · a profiler on the switch
+hook · `objdump`/`nm`/`size` for ZEXE, a 68k disassembler · Lua, Forth, Scheme, MicroPython · ARexx-like scripting through
+programs' command ports · a small version-control tool.
+
+**4. Networking (after TCP/IP):** `ifconfig`/`ip`, real `ping`, `route`, `netstat`, a DHCP client, `/etc/hosts` and DNS ·
+network cards as servers (the Pi's GENET first [approved], Zorro cards, SLIP/PPP over serial) · the Wasabi-like remote
+daemon [owner's idea, later] · `telnet` [goal], `ssh` client/server, `nc` · `wget`/`curl`, `ftp`, `tftp`, rsync-lite ·
+an NFS client (the owner's AmiNFSv3 knowledge), an SMB client for the NAS · a tiny `httpd` status page · IRC, Gemini,
+Gopher, a lynx-style browser · a BBS client with ANSI and Zmodem (`sz`/`rz`), BBX's door protocol · NTP · a mutt-style
+mail reader · **Claude on Zenix** [goal: `cu` over serial **[built]**, then over the network].
+
+**5. Desktop (phase 5):** the display server (planar, blitter, Copper) · a terminal window first · workspaces and an
+i3-style bar · a tiling window manager (the Sprawl idea) · an Ahiru-style file manager · picture viewer (IFF ILBM, PNG,
+QOI, GIF, JPEG) · text-art viewer (ANSI, Amiga ASCII) · clock, calendar, meters · screenshot, screen blanker · a
+Deluxe Paint-lite, a font editor · one preferences program (ControlPanel-style).
+
+**6. Sound and music (a Paula server):** `play` (WAV, 8SVX, QOA, FLAC) · a MOD/tracker player (the owner's bbmp
+knowledge) · AHX/HivelyTracker, SID later · `mixer`, a notify sound · a small tracker or sequencer (much later).
+
+**7. Games and fun:** rogue/nethack-lite, a Z-machine (Zork), tetris, snake, 2048, minesweeper, chess, sokoban · after
+the display server: blitter/sprite/Copper games · demos that run on Zenix.
+
+**8. Amiga compatibility:** an FFS/OFS reader (read-only first), PFS3 from its format description (licence, above) · `adf`
+tools and writing a floppy from an image · a FAT reader/writer (the Pi's boot partition, USB sticks) · ISO 9660 · IFF
+tools · an AmigaOS CLI-program runner through a dos.library translation layer (large; needs a design decision first).
+
+**9. Administration and reliability:** the service manager [approved: D11] · `useradd`, `userdel`, `groupadd`,
+`chpasswd`, shadow passwords · `/proc`-style information, `lsof`, `fuser`, `vmstat`, `iostat` · `lsdev` (Zorro boards,
+Gayle, the Pi) · an installer (partition, format, copy, boot menu) · a package manager (`zpkg`) · backups, ZenixFS
+snapshots · disk health, `badblocks` · Zenix installing its own updates [approved, after D11] · serial tools: `getty`
+on serial, `stty`, a minicom-style terminal (`cu` **[built]**), file transfer over serial.
+
+**10. Drivers (as servers):** USB (keyboard, mouse, memory sticks) · RTG graphics cards · faster IDE, CF, CD drives ·
+the clock on every model · joysticks, the parallel port (printer, sampler) · a printing service.
+
+**The order proposed on 2026-10-24:** the main goal first (TCP/IP, `telnet`, the console for Claude Code), then newlib,
+shared libraries and the text-UI library (they unlock most of the rest), then the owner's own tools (Sumi, Maki, `zc`),
+`lha`/FFS/FAT and an installer, then the display and sound servers with a MOD player and games.
