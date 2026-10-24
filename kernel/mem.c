@@ -148,12 +148,14 @@ void *mem_alloc(u32 n, u32 flags, u32 owner)
         /* pass 0: the wanted pool; pass 1: the other, unless chip-only */
         int want_chip = (flags & MEM_CHIP) ? 1 : 0;
         if (pass == 1) {
-            if (flags & (MEM_CHIP | MEM_FASTONLY))
+            if (flags & (MEM_CHIP | MEM_FASTONLY | MEM_LOW1G))
                 break;
             want_chip = 1;
         }
         for (int i = 0; i < nranges; i++) {
             if (ranges[i].chip != want_chip)
+                continue;
+            if ((flags & MEM_LOW1G) && ranges[i].hi > 0x40000000u)
                 continue;
             void *p = alloc_in(&ranges[i], need, owner);
             if (p)

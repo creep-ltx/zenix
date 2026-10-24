@@ -13,7 +13,7 @@ typedef unsigned long u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define BM_VERSION "0.1b2"
+#define BM_VERSION "0.1b3"
 #define BM_DATE "24.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: bootmenu " BM_VERSION " (" BM_DATE ")";
 
@@ -34,6 +34,8 @@ extern u8 kt_oldmem[], kt_oldtag[];
 #define SumKickData()       ((u32)bm_os(SysBase, -612, 0, 0, 0, 0, 0, 0))
 #define CacheClearU()       bm_os(SysBase, -636, 0, 0, 0, 0, 0, 0)
 #define ColdReboot()        bm_os(SysBase, -726, 0, 0, 0, 0, 0, 0)
+#define FindTask(n)         ((void *)bm_os(SysBase, -294, 0, 0, 0, 0, 0, (long)(n)))
+#define SetTaskPri(t, p)    bm_os(SysBase, -300, (long)(p), 0, 0, 0, 0, (long)(t))
 #define MEMF_CHIP  (1L << 1)
 #define MEMF_CLEAR (1L << 16)
 /* dos.library */
@@ -46,6 +48,7 @@ extern u8 kt_oldmem[], kt_oldtag[];
 #define WaitForChar(f, us)  bm_os(DOSBase, -204, 0, (long)(f), (long)(us), 0, 0, 0)
 #define SetMode(f, m)       bm_os(DOSBase, -426, 0, (long)(f), (long)(m), 0, 0, 0)
 #define SystemTagList(c, t) bm_os(DOSBase, -606, 0, (long)(c), (long)(t), 0, 0, 0)
+#define DateStamp(d)        bm_os(DOSBase, -192, 0, (long)(d), 0, 0, 0, 0)
 #define MODE_OLDFILE 1005
 
 #define EXEC_L(off) (*(volatile u32 *)((u8 *)SysBase + (off)))
@@ -164,18 +167,34 @@ static int key(long in, long us)
     return c;
 }
 
+/* seconds since an earlier call, from the system clock (DateStamp: days, minutes, ticks of 1/50 s) */
+static u32 now_ticks(void)
+{
+    long d[3];
+    DateStamp(d);
+    return ((u32)d[0] * 1440u + (u32)d[1]) * 3000u + (u32)d[2];
+}
+
+/* The menu runs at priority 10 while it is shown: at boot the disk tasks (the filesystems mounting the other
+ * partitions; Emu68's SD driver keeps the CPU busy while it reads) would otherwise leave it no time to answer a key
+ * for seconds. It only waits for keys, so it takes nothing from them. The countdown follows the clock, not the
+ * number of waits, so a slow start does not stretch it. */
 static int choose(void)
 {
     long in = Input();
+    void *me = FindTask(0);
+    long oldpri = SetTaskPri(me, 10);
     int sel = defchoice, left = timeout;
+    u32 start = now_ticks();
     SetMode(in, 1);                                     /* raw: keys arrive one by one, not echoed */
     draw(sel, left);
     for (;;) {
-        int k = key(in, left >= 0 ? 1000000 : 0x7fffffff);
-        if (k == 0) {                                   /* one more second without a key */
+        int k = key(in, left >= 0 ? 200000 : 0x7fffffff);
+        if (k == 0) {
             if (left < 0) continue;
-            if (--left < 0) break;
-            draw(sel, left);
+            int l = timeout - (int)((now_ticks() - start) / 50u);
+            if (l < 0) break;
+            if (l != left) { left = l; draw(sel, left); }
             continue;
         }
         left = -1;                                      /* any key stops the countdown */
@@ -186,6 +205,7 @@ static int choose(void)
         draw(sel, left);
     }
     SetMode(in, 0);
+    SetTaskPri(me, oldpri);
     puts_("\x9b" " p\n\n");                         /* the cursor back on */
     return sel;
 }

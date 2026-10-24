@@ -37,8 +37,13 @@ static inline void data_wr(u32 v) { *(volatile u32 *)(emmc_base + 0x20) = v; }
 static inline u32 now_us(void) { return __builtin_bswap32(*(volatile u32 *)(timer_base + 0x04)); }
 
 /* the mailbox message goes to the VideoCore, which reads it from RAM: clean the line(s) out of
- * the ARM data cache before, and drop them after. 040 instructions, translated by Emu68. */
-static u32 mbox_msg[16] __attribute__((aligned(64)));
+ * the ARM data cache before, and drop them after. 040 instructions, translated by Emu68.
+ * The Pi 4's VideoCore reaches only the first 1 GB of RAM: a message above it is never read and every call fails
+ * (verified on the A1200 2026-10-24: Emu68 1.1 put the kernel at 0x41040000, and power on and the clock rate
+ * failed). So the message lives in fast RAM below 1 GB (MEM_LOW1G), taken at emmc_init; the buffer in the kernel
+ * is only the fallback when there is none. */
+static u32 mbox_static[16] __attribute__((aligned(64)));
+static u32 *mbox_msg = mbox_static;
 static void cache_clean(void *p)  { register void *a __asm__("a0") = p; __asm__ volatile(".word 0xF468" :: "a"(a) : "memory"); }
 static void cache_inval(void *p)  { register void *a __asm__("a0") = p; __asm__ volatile(".word 0xF448" :: "a"(a) : "memory"); }
 
@@ -246,6 +251,15 @@ int emmc_init(void)
     timer_base = hw->soc_base + 0x3000;                 /* system timer: 1 MHz free running counter */
 #endif
     kprintf("emmc: controller at %p, mailbox at %p\n", hw->emmc, hw->mailbox);
+#ifndef EMMC_HOST_TEST
+    if ((u32)mbox_msg + sizeof mbox_static > 0x40000000u) {
+        u8 *b = mem_alloc(64 + 64, MEM_FASTONLY | MEM_LOW1G, 0);      /* kept for good: one small block */
+        if (b)
+            mbox_msg = (u32 *)(((u32)b + 63) & ~63u);
+        else
+            kprintf("emmc: no fast RAM below 1 GB for the mailbox message: the clock calls may fail\n");
+    }
+#endif
 
     /* power-cycle the card (firmware power domain 0 = SD card) so that it is in a known state
      * whatever the last driver did to it, and make sure the controller's clocks run */
