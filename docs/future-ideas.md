@@ -187,8 +187,8 @@ Last checked: 2026-10-24.
 ## The software list (owner, 2026-10-24: "an operating system isn't better than its software")
 A list of programs Zenix could have, by area, from a read-only survey on 2026-10-24 and the owner's goal. **None of
 it is approved** unless marked: the feature halt still holds, and each item needs the owner's OK, a design note where
-it touches the architecture, tests, and a build on the A1200. Marks: **[built]**, **[approved]**, **[goal]** (needed for
-the main goal, Claude in a terminal on Zenix: ROADMAP), otherwise an idea. Where an idea needs a foundation first, the
+it touches the architecture, tests, and a build on the A1200. Marks: **[built]**, **[approved]**, **[owner]** (the owner's
+own wish: a terminal good enough to run Claude Code from the A1200), otherwise an idea. Where an idea needs a foundation first, the
 foundation is named.
 
 **Foundations that most of the list depends on** (each is its own decision):
@@ -214,10 +214,10 @@ programs' command ports · a small version-control tool.
 
 **4. Networking (after TCP/IP):** `ifconfig`/`ip`, real `ping`, `route`, `netstat`, a DHCP client, `/etc/hosts` and DNS ·
 network cards as servers (the Pi's GENET first [approved], Zorro cards, SLIP/PPP over serial) · the Wasabi-like remote
-daemon [owner's idea, later] · `telnet` [goal], `ssh` client/server, `nc` · `wget`/`curl`, `ftp`, `tftp`, rsync-lite ·
+daemon [owner's idea, later] · `telnet` [owner], `ssh` client/server, `nc` · `wget`/`curl`, `ftp`, `tftp`, rsync-lite ·
 an NFS client (the owner's AmiNFSv3 knowledge), an SMB client for the NAS · a tiny `httpd` status page · IRC, Gemini,
 Gopher, a lynx-style browser · a BBS client with ANSI and Zmodem (`sz`/`rz`), BBX's door protocol · NTP · a mutt-style
-mail reader · **Claude on Zenix** [goal: `cu` over serial **[built]**, then over the network].
+mail reader · **Claude on Zenix** [owner: `cu` over serial **[built]**, then over the network].
 
 **5. Desktop (phase 5):** the display server (planar, blitter, Copper) · a terminal window first · workspaces and an
 i3-style bar · a tiling window manager (the Sprawl idea) · an Ahiru-style file manager · picture viewer (IFF ILBM, PNG,
@@ -243,17 +243,17 @@ on serial, `stty`, a minicom-style terminal (`cu` **[built]**), file transfer ov
 **10. Drivers (as servers):** USB (keyboard, mouse, memory sticks) · RTG graphics cards · faster IDE, CF, CD drives ·
 the clock on every model · joysticks, the parallel port (printer, sampler) · a printing service.
 
-**The order proposed on 2026-10-24:** the main goal first (TCP/IP, `telnet`, the console for Claude Code), then newlib,
+**The order proposed on 2026-10-24:** the owner's wish first (TCP/IP, `telnet`, a better console), then newlib,
 shared libraries and the text-UI library (they unlock most of the rest), then the owner's own tools (Sumi, Maki, `zc`),
 `lha`/FFS/FAT and an installer, then the display and sound servers with a MOD player and games.
 
 **More ideas (100, added by the owner 2026-10-24; ideas only, same rules as the list above).** The owner's marks the
-same day: the ten under *Claude and the terminal* are **wanted** (the first five also serve the goal); the rest were
+same day: the ten under *Claude and the terminal* are **wanted** (the first five are also the owner's own wish); the rest were
 skimmed, "yes" for the list, to be looked at properly before any is built. Instead of porting csh: **Zenix's own `sh`
 is to be excellent from the start** - the best of bash, zsh and fish, as the owner's csh was designed.
-- *Claude and the terminal* (**wanted**): a `claude` command that connects to Claude on the PC (serial or network) [goal] · a console
-  mode tuned for Claude Code's screen (status line, symbol stand-ins) [goal] · UTF-8 in the console with Topaz stand-ins
-  [goal] · a 640x512 interlaced or 132-column console [goal] · a colour console (2-4 bitplanes, ANSI colours) [goal] ·
+- *Claude and the terminal* (**wanted**): a `claude` command that connects to Claude on the PC (serial or network) [owner] · a console
+  mode tuned for Claude Code's screen (status line, symbol stand-ins) [owner] · UTF-8 in the console with Topaz stand-ins
+  [owner] · a 640x512 interlaced or 132-column console [owner] · a colour console (2-4 bitplanes, ANSI colours) [owner] ·
   `ansiview` for text-art files · a clipboard shared by the consoles (Amiga+C / Amiga+V) · mouse text selection · search
   in the scrollback · saving a console's history to a file.
 - *The owner's programs ported:* CTerm's tabs and layouts in the console · CUtils' `ls` colours

@@ -40,16 +40,6 @@ Phases 1, 3 (most of it) and 4 are built and verified in FS-UAE; phase 2 is done
 (PiStorm32-lite, Emu68 1.1), booted from the SD card through a boot menu next to AmigaOS. The audit round is closed;
 D10 (priorities) is built, D11 (service manager) is designed and approved.
 
-## The main goal: Claude in a terminal on Zenix (owner, 2026-10-24)
-The owner's daily computing is Claude Code in a terminal. Zenix becomes something to live in when it is a good terminal
-for that, on the A1200: Claude runs on the PC as today, Zenix shows it. In this order:
-1. **A serial terminal program**: Zenix's console connected to the PC through the null-modem cable (the cable is usable
-   from the weekend of 2026-10-31).
-2. **The same over the network** (the CM4's Ethernet: driver and TCP/IP, approved after D11 and the self-updates).
-3. **A console good enough for Claude Code's screen**: colours, and readable stand-ins for its Unicode symbols and box
-   lines on an 80x32 Topaz screen.
-Each step ends with a build on the A1200 and a short "what you can try now" for the owner.
-
 ## The text console behaves like Unix/Linux (owner's decision, 2026-10-23)
 The text console has ten plain virtual consoles, switched with Amiga+F1..F10 (plain F-keys stay free for programs), each
 with its own `login` prompt, like Linux's Alt+F1..F6. No bar, no Amiga+Return, no workspaces in the text console: those

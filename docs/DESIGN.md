@@ -102,9 +102,9 @@ the servers listed in a small configuration file, restarts a server that dies (c
 error and retry), and later starts servers on first use. It replaces "start everything at boot" and the hard-wired
 server list in kmain. Port rights (Darwin) are a separate, later decision.
 
-## D12. The serial port as a device, and `cu` (approved by the owner 2026-10-24: the first step to Claude in a terminal on Zenix)
-**Why.** The owner's main use of a computer is Claude Code in a terminal. Step 1 is Zenix's console talking to the PC
-through the null-modem cable, where Claude runs. Today the serial port belongs to the console: everything shown is
+## D12. The serial port as a device, and `cu` (approved by the owner 2026-10-24)
+**Why.** Zenix needs a way to talk to another computer before there is a network: a terminal session on a PC
+through the null-modem cable. Today the serial port belongs to the console: everything shown is
 copied there (the mirror), what arrives is typed into the shown console, and `kprintf` writes the kernel log there.
 That serves the test rig and a debug terminal, but a program cannot use the port.
 
@@ -127,12 +127,12 @@ signal-bit waiting of future-ideas item 1 exists, `cu` can become one process). 
 serial adapter (`agetty` on /dev/ttyUSB0 at 115200), set up once on the PC.
 
 **Not in D12:** network (the same over TCP comes with the network driver), the console's colours and Unicode stand-ins
-(step 3 of the main goal), handshake lines, file transfer.
+(a later step), handshake lines, file transfer.
 
 **Tests.** FS-UAE's serial port is a PTY on the host: a test opens it, writes bytes and checks `cu`'s screen and what
 arrives, the mirror off while `cu` runs and back after `~.`, -EBUSY for a second open, a non-root user refused, and the
-kernel log not on the wire while the device is open. On the A1200 with the cable (from 2026-10-31): Claude Code on the
-PC, shown in Zenix.
+kernel log not on the wire while the device is open. On the A1200 with the cable (from 2026-10-31): a terminal session on
+the PC, shown in Zenix.
 
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`/`mount.zenixfs`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).

@@ -118,8 +118,7 @@ real A1200 were debugged.
 **What we do.** Ten text consoles on Amiga+F1 to F10, each with its own login, drawn with the Copper and the blitter
 in the ROM's Topaz font.
 
-**Why.** A terminal you can live in is the foundation. It is what a Unix user needs first, and it is how you will run
-Claude in a terminal on the A1200. The windowed desktop comes later as its own server (D4) and stays out of the text
+**Why.** A terminal you can live in is the foundation. It is what a Unix user needs first. The windowed desktop comes later as its own server (D4) and stays out of the text
 console, so neither gets in the other's way.
 
 ## Multi-user, with an honest limit
@@ -135,8 +134,8 @@ normal user. Without an MMU it can't be a security wall, and the documents say s
 **What we do.** `/dev/ttyS0` belongs to one program at a time, and `cu` connects the console to another computer.
 While it is in use, the kernel's own copy of the console stays off the wire (D12).
 
-**Why.** It's the first link from Zenix to the PC and the first step towards Claude on the A1200, before there is a
-network driver.
+**Why.** It's Zenix's first link to another computer, before there is a network driver: a terminal session on
+a PC or a server, from the Amiga's own keyboard.
 
 ## Coming next: servers that come back (D11)
 
