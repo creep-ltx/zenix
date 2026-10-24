@@ -700,7 +700,8 @@ umount -> 5.2; 11 size -> 10; 12 the step 0 rule -> 11, 5.6.
 with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`), step 2 (2026-10-24: diskd's saved table, the
 retried claim and the one retry of the filesystem servers; `tools/svc-test.sh` d and dmg, `tools/disk-host-test.sh`),
 step 3 (2026-10-24: `SVC_OPENS`, the volume id rule in `user/volid.h`, uuids from all three tools, the ext2 state bit,
-ZenixFS's kept orphans and inode floor; `tools/svc-test.sh` o, zo, u).
+ZenixFS's kept orphans and inode floor; `tools/svc-test.sh` o, zo, u), step 4 (2026-10-24: the give-up, a start-up
+calling its own port; `tools/svc-test.sh` l).
 
 **Where the code differs from the note** (each one small, and the reason):
 - *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM
@@ -744,6 +745,12 @@ ZenixFS's kept orphans and inode floor; `tools/svc-test.sh` o, zo, u).
 - *Not tested (step 3):* a partition renamed or moved while its server is stopped - `fdisk` refuses to change a disk
   whose partition is mounted, so it cannot happen to the root in a running system; the place-first rule is tested with
   a `dd` copy of the root beside it (part u). A swapped floppy needs mounts as services (step 6).
+- *Step 4:* `call()` does not refuse a call to one's own *held* port (its owner is 0 while the server starts), so
+  svc_call refuses it: "svc: NAME: its own server called it before it opened its port", -ECONNRESET at once.
+  Registering a given-up name again makes it stopped with its counters cleared. `pingd` gained `-port`, `-call` and
+  a "wait a second, then crash" request (type 7) for the tests. Found while testing: a `kill` from a program of normal
+  priority always lands between requests (the servers run at nice -10 and finish a request before such a program
+  runs again), so the mid-request test kills from nice -20 (`svctest kill`).
 
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
 same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10

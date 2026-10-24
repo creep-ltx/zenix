@@ -15,6 +15,7 @@
 enum { SV_FREE, SV_STOPPED, SV_LOADING, SV_STARTING, SV_RUNNING, SV_GIVENUP };
 #define START_TICKS  3000u              /* 30 s for a started server to open its port */
 #define WINDOW_TICKS 6000u              /* ends are counted in 60 s windows */
+#define MAX_ENDS 5                      /* ... and the 5th in one gives the service up */
 #define SVC_ARGS 6
 
 static struct svc {
@@ -108,13 +109,24 @@ static void pass_watch(int i)               /* a starting entry always has a wat
     }
 }
 
-static void count_end(struct svc *s)
+/* an end of entry i's server, counted: the 5th within 60 s gives the service up (its port stays held, every call
+ * fails at once; for diskd and the root a panic). 1 if given up (its queue failed), else 0 */
+static int count_end(int i)
 {
+    struct svc *s = &svcs[i];
     if (!s->ends || (s32)(ticks - s->win) >= (s32)WINDOW_TICKS) {
         s->win = ticks;
         s->ends = 0;
     }
-    s->ends++;
+    if (++s->ends < MAX_ENDS)
+        return 0;
+    kprintf("svc: %s: given up after %d ends in 60 s\n", ports[i].name, MAX_ENDS);
+    if (s->essential)
+        panic("svc: an essential server ended 5 times in 60 s");
+    s->state = SV_GIVENUP;
+    s->pid = 0;
+    fail_queue(i);
+    return 1;
 }
 
 /* start entry i's program (current is the loader): the new pid, or a negative errno */
@@ -166,10 +178,11 @@ static long watch(int i, struct umsg *m, int queued)
                 proc_kill(q);
                 q->killed = 3;
             }
-            count_end(s);
-            s->state = SV_STOPPED;
-            s->pid = 0;
-            fail_queue(i);
+            if (!count_end(i)) {
+                s->state = SV_STOPPED;
+                s->pid = 0;
+                fail_queue(i);
+            }
             return queued ? 0 : -ECONNRESET;
         }
         sleep_until(s->deadline);
@@ -247,6 +260,11 @@ void svc_born(int pid)
 long svc_call(int i, struct umsg *m, int ns)
 {
     struct svc *s = &svcs[i];
+    if (s->state == SV_STARTING && s->pid == current->pid) {
+        current->wait_msg = 0;
+        kprintf("svc: %s: its own server called it before it opened its port\n", ports[i].name);
+        return -ECONNRESET;                     /* it would wait for itself */
+    }
     if (s->state == SV_STOPPED && !ns) {
         long r = load(i, m);
         if (r)
@@ -332,7 +350,8 @@ void svc_exit(struct proc *p)
             panic("svc: an essential server ended before it served");
         if (s->essential && p->exit_code == SVC_EXIT_DAMAGED)
             panic("svc: an essential server's saved table is damaged");   /* no retry can cure it: not counted */
-        count_end(s);
+        if (count_end(i))
+            continue;
         if (was_running) {
             kprintf("svc: %s: start %u when next used\n", pt->name, s->starts + 1);
             pass_load(i);
@@ -452,6 +471,10 @@ long svc_sys(u32 op, const char *name, const char *text)
     }
     if (s->nwords != n || differ(s->prog, t, (u32)k)) {
         s->starts = 0;                          /* a new program: its counters start again */
+        s->ends = 0;
+    }
+    if (s->state == SV_GIVENUP) {               /* registered again: tried again */
+        s->state = SV_STOPPED;
         s->ends = 0;
     }
     memset(s->prog, 0, sizeof s->prog);

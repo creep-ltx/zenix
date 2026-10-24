@@ -18,10 +18,15 @@
 #   zo the same on the ZenixFS root, and a file created less than 3 s before zfsd died (not committed) is gone for its
 #      open file: the read fails and never reaches the next new file
 #   u  a dd copy of the root partition beside it (the same uuid): the restart serves the original (the place first)
+#   l  the limits (step 4) with pingd as a file service: started on demand at its nice, a quit is a stop and the next
+#      call starts it again; five crashes in a request (-104 each) with the back-off (the 3rd, 4th, 5th call wait 1, 2,
+#      4 s more), then given up: -104 at once; registering again clears it; a start-up calling its own port fails at
+#      once; a loader killed in its back-off passes the role on (the next call works); a cycle of two services fails
+#      after the 30 s deadline
 #   dmg  a test-only kernel damages diskd's saved table: diskd stops with its message, the kernel panics
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
-PARTS=" ${*:-a z b n r d o zo u dmg} "
+PARTS=" ${*:-a z b n r d o zo u l dmg} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
 make -s all build/zenix-zroot.hdf build/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
@@ -172,6 +177,34 @@ line u "... a file written before the restart is there (not the copy's root)" "o
 line u "... and the root is writable again" "write-ok"
 line u "the script ran to the end" "svc-u-done"
 rm -f "$OUT/dup.hdf"
+fi
+
+# ---- l: limits, back-off, deadline ----
+if want_part l; then
+run l fsuae/a1200-020-fast.fs-uae 260 tools/tests/svc-limit-test.txt
+line l "registering a file service" "svctest reg ping: 0"
+line l "... no pingd before the first call" "before=0"
+rx   l "... the first call starts it" ".*svctest call ping 1: 0 in [0-9]+ ms"
+rx   l "... at its nice (0)" " +[0-9]+ +0 +16 +0 [a-z]+ +[0-9]+ pingd"
+rx   l "... the log names the start" "svc: ping: started /bin/pingd \(pid [0-9]+, for pid [0-9]+ svctest\)"
+rx   l "a quit while idle is a stop" "svc: ping: pingd \(pid [0-9]+\) stopped"
+line l "... no pingd after it" "after-quit=0"
+rx   l "a crash in a request: the client gets -104" ".*svctest call ping 7: -104 in [0-9]+ ms"
+L=$OUT/l.log
+t=$(tr -d '\r' < "$L" | grep -ao 'svctest call ping 7: -104 in [0-9]* ms' | grep -o '[0-9]* ms' | tr -d ' ms' | tr '\n' ' ')
+set -- $t
+if [ $# -ge 5 ] && [ $(( $3 - $2 )) -ge 700 ] && [ $(( $3 - $2 )) -le 1500 ] && [ $(( $4 - $2 )) -ge 1700 ] && [ $(( $4 - $2 )) -le 2500 ] \
+   && [ $(( $5 - $2 )) -ge 3700 ] && [ $(( $5 - $2 )) -le 4600 ]; then echo "PASS the back-off: the 3rd, 4th and 5th start wait about 1, 2 and 4 s more ($t ms)"
+else echo "FAIL the back-off: the 3rd, 4th and 5th start wait about 1, 2 and 4 s more ($t ms)"; pass=0; fi
+line l "five ends in 60 s: given up" "svc: ping: given up after 5 ends in 60 s"
+rx   l "... the next call fails at once" ".*svctest call ping 1: -104 in [0-9] ms"
+if [ "$(grep -ac 'svctest call ping 1: 0 in' "$L")" -ge 3 ]; then echo "PASS registering it again clears the give-up"; else echo "FAIL registering it again clears the give-up"; pass=0; fi
+line l "a start-up that calls its own port fails at once" "svc: own: its own server called it before it opened its port"
+rx   l "... and its caller gets -104" ".*svctest call own 1: -104 in [0-9]+ ms"
+rx   l "a loader killed in its back-off: the next call works" ".*svctest call k 1: 0 in [0-9]+ ms"
+rx   l "a cycle of two services: the deadline ends it" "svc: c[12]: pingd did not open its port in 30 s"
+rx   l "... and the caller gets -104 after about 30 s" ".*svctest call c1 1: -104 in (29|3[0-9])[0-9]{3} ms"
+line l "the script ran to the end" "svc-l-done"
 fi
 
 # ---- dmg: a damaged saved table stops the machine ----

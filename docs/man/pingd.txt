@@ -4,14 +4,20 @@ NAME
     pingd - test message server
 
 SYNOPSIS
-    pingd [count]
+    pingd [-port NAME] [-call NAME] [count]
 
 DESCRIPTION
     Creates a message port named "ping" and answers the requests of ping(1):
     type 1 adds two numbers, type 2 converts a string to upper case IN PLACE
     in the client's memory (showing that messages pass pointers, not
-    copies), type 9 ends the server. It also ends after serving count
-    requests if given. Start it in the background:  pingd &
+    copies), type 7 waits a second and then crashes (an illegal
+    instruction: for the service manager's tests), type 9 ends the
+    server. It also ends after serving count requests if given. Start it
+    in the background:  pingd &
+    -port NAME  serve port NAME instead of "ping".
+    -call NAME  call port NAME once before opening its own port (a server
+                whose start needs another service; D11's tests use it to
+                make a cycle).
     A development tool; see docs/architecture.md, "Ports and messages".
 
 SEE ALSO

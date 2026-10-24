@@ -584,7 +584,7 @@ end, it says so and starts it again. (It exists because the idle process cannot 
 consoles are init's work (section 11, man/init.txt).
 
 ### The service manager (`kernel/svc.c`, DESIGN D11)
-The full design is docs/d11-service-manager.md; what is built (steps 0-3 of its build order):
+The full design is docs/d11-service-manager.md; what is built (steps 0-4 of its build order):
 - **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
   bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
   (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are
@@ -602,7 +602,10 @@ The full design is docs/d11-service-manager.md; what is built (steps 0-3 of its 
   and the queued calls fail with -ECONNRESET. A loader or watcher that is killed passes its role on.
 - **A death.** The request in service fails with -ECONNRESET; the queued ones stay and the first of them starts the
   next server. An end with status 0 while nothing was in service is a *stop* (not counted); anything else is an *end*,
-  logged and counted. The start after the 2nd, 3rd and 4th end within 60 s waits 1, 2 and 4 s. A server that ends
+  logged and counted. The start after the 2nd, 3rd and 4th end within 60 s waits 1, 2 and 4 s; the 5th end within
+  60 s gives the service up ("svc: NAME: given up after 5 ends in 60 s"): its port stays held and every call fails
+  at once with -ECONNRESET until root registers it again (for diskd and the root a panic, "svc: an essential server
+  ended 5 times in 60 s"). A server's start-up that calls its own port fails at once (it would wait for itself). A server that ends
   before it opened its port has failed to start: its queued calls fail. An essential server that ends before it ever
   served (or cannot be loaded) is a panic at once ("svc: an essential server ended before it served").
 - **A saved table.** `SVC_SAVE` / `SVC_LOAD` (the process the kernel started for an entry only): up to 512 bytes a
