@@ -1,0 +1,48 @@
+NICE(1)			Zenix manual
+
+NAME
+    nice - run a command at a lower (or, for root, higher) priority
+
+SYNOPSIS
+    nice [-n N | -N] [command [argument...]]
+
+DESCRIPTION
+    Runs the command with its niceness raised by N (default 10). The
+    niceness is the Unix scale of priority: -20 is the most favoured, 0
+    is normal, 19 the least favoured. The result is kept within -20..19.
+    The command and everything it starts inherit the new value.
+
+    Without a command, nice prints its own niceness (the shell's, as it
+    inherited it).
+
+    Anyone may lower their own priority (a positive N). Only root may
+    raise it (a negative N): for anyone else nice says "cannot set
+    niceness N: permission denied" and does not run the command.
+
+    The highest priority that is ready always runs; programs of the same
+    priority take turns every 50 ms. A program at a lower priority gets
+    the processor only while every better one waits (for input, a disk,
+    a timer). The built-in servers run at -10.
+
+OPTIONS
+    -n N    add N to the niceness (N may be negative: root only)
+    -N      the same, the old form (nice -5 cmd, nice --5 cmd)
+
+EXAMPLES
+    nice tar cf /tmp/all.tar /home    a big job that leaves the
+                                      terminal quick
+    nice -n 5 nice                    prints 5
+
+EXIT STATUS
+    The command's own status; 125 if nice itself failed (a bad -n, a
+    refused raise), 126 if the command could not be run, 127 if it was
+    not found.
+
+NOTES
+    The command is looked up in $PATH like the shell does. There is no
+    CPU-time accounting, so a lower priority means "runs when nothing
+    better is ready", not "a smaller share" as on Linux: a busy program
+    at nice 0 keeps one at nice 5 from running at all until it waits.
+
+SEE ALSO
+    renice(1), ps(1), sh(1)

@@ -102,16 +102,19 @@ the servers listed in a small configuration file, restarts a server that dies (c
 error and retry), and later starts servers on first use. It replaces "start everything at boot" and the hard-wired
 server list in kmain. Port rights (Darwin) are a separate, later decision.
 
-## Where the decisions stand (2026-10-23)
+## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`/`mount.zenixfs`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
 D3 relocating loader, no fork: done (ZEXE format, tools/mkzexe.py); shared libraries not started.
 D4 planar display server: not started; the kernel draws ten text consoles through Copper + blitter; a client API is not designed.
 D5 ext2: rev 0/1, 128+ byte inodes, read and write (write-through, e2fsck-clean) done; RDB and MBR partitions done; no journal. ZenixFS built and verified in FS-UAE, also as the root.
-D6 scheduler: preemptive round robin on a 100 Hz tick; no priorities yet.
+D6 scheduler: preemptive on a 100 Hz tick, with priorities and round robin within a priority (D10); the kernel itself is not preempted (a switch waits for the return to user mode); no lazy FPU save yet (no FPU code).
 D7 boot/test: FS-UAE done (the matrix, `make check`); the owner's A1200 not yet.
 D8 multi-user: built (architecture.md section 14).
 D9 licence: decided.
+D10 priorities: built 2026-10-24 (branch d10): 32 levels, nice -20..19, the run queue per level with BFFFO, the
+reschedule flag, QNX priority inheritance, getpriority/setpriority (PRIO_PROCESS and PRIO_USER), `nice`, `renice`, PRI
+and NI in `ps`; verified in FS-UAE (`tools/prio-test.sh`); not yet measured on the A1200.
 
 ## Planned servers
 - **index server ("find")**: keeps a FuzzyFind-style catalogue of the filesystem in memory, answers search messages

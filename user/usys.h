@@ -20,7 +20,7 @@ static inline int sys3(int n, u32 a, u32 b, u32 c)
 #define USYS_STRUCTS
 struct udirent { u32 ino, type; char name[64]; };
 struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
-struct uproc { u32 pid, ppid, state, mem; char name[16]; };
+struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; };   /* nice -20..19; pri: the level now, 0 highest, 32 idle */
 
 #define S_IFMT  0170000
 #define S_IFDIR 0040000
@@ -124,3 +124,8 @@ static inline int sys_mount(const struct umountreq *r) { return sys3(69, (u32)r,
 static inline int sys_umount(const char *path) { return sys3(70, (u32)path, 0, 0); }
 static inline int sys_mountinfo(u32 index, struct umountinfo *out) { return sys3(71, index, (u32)out, 0); }
 static inline int sys_blk_flush(void) { return sys3(72, 0, 0, 0); }
+#define PRIO_PROCESS 0    /* priorities (DESIGN D10): who is a pid, 0 = the caller */
+#define PRIO_PGRP    1    /* not supported: no process groups */
+#define PRIO_USER    2    /* who is a user id, 0 = the caller's */
+static inline int sys_getpriority(int which, int who) { return sys3(78, (u32)which, (u32)who, 0); }   /* 20 - nice, or -errno */
+static inline int sys_setpriority(int which, int who, int nice) { return sys3(79, (u32)which, (u32)who, (u32)nice); }

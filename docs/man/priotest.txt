@@ -1,0 +1,36 @@
+PRIOTEST(1)		Zenix manual
+
+NAME
+    priotest - test the scheduler's priorities
+
+SYNOPSIS
+    priotest fair|prio|wake|inherit
+
+DESCRIPTION
+    A test program for the priorities (DESIGN D10). Each check starts
+    child processes, times them with the E-clock and prints one line,
+    "priotest CHECK: PASS (...)" or "priotest CHECK: FAIL (...)" with the
+    measured numbers:
+
+    fair     two busy programs at the same priority take turns, each
+             running a whole 50 ms slice (35..70 ms is accepted)
+    prio     a busy program at nice 0 keeps the processor; one at nice 5
+             does not run until it ends
+    wake     a nice 0 program waking from a one-tick sleep runs at once
+             (within 25 ms) although a nice 5 program is busy
+    inherit  a nice 0 client calling a nice 10 server is not held up by a
+             busy nice 5 program: the server works at the client's level
+             (16) while it serves it and is back at its own (24) after
+
+    tools/prio-test.sh runs all four in the emulator. Emulator times are
+    not hardware times; the checks compare the programs with each other.
+
+EXIT STATUS
+    0 if the check passed, 1 if not, 2 for a usage error.
+
+NOTES
+    The children share a block of the parent's memory (no MMU), and the
+    inherit check uses a port called "priot".
+
+SEE ALSO
+    nice(1), renice(1), ps(1), bench(1)

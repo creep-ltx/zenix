@@ -8,6 +8,7 @@ typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 typedef int32_t s32;
+typedef int8_t s8;
 
 /* bootinfo v3, written by the bootblock at 0x1000 */
 #define MEMF_CHIP 2u
@@ -223,11 +224,26 @@ struct umountinfo { char path[48], port[16], dev[16], type[8]; };   /* SYS_mount
 struct uproc {                  /* returned by SYS_procinfo */
     u32 pid, ppid, state, mem;
     char name[16];
+    s32 nice;                   /* the base priority on the nice scale, -20 (most favoured) .. 19 */
+    u32 pri;                    /* the effective level now, 0 (highest) .. 31; PRI_IDLE for pid 0 */
 };
 
 /* proc.c */
 #define NPROC 32                /* 10 consoles with a login and a shell each, the servers, init and the commands they run */
 #define SLICE 5                 /* ticks (100 Hz) */
+/* Priorities (DESIGN D10, architecture.md section 6): NLEVEL levels inside the kernel, 0 the highest; users see the
+ * nice scale -20 (most favoured) .. 19, level = (nice + 20) * 4 / 5, so nice 0 is level 16. Every process has a base
+ * (its nice) and an effective level: the base's level, or better while it serves a better client (priority
+ * inheritance, ipc.c). The highest non-empty level runs; round robin within a level. */
+#define NLEVEL      32
+#define NICE_MIN    (-20)
+#define NICE_MAX    19
+#define NICE_SERVER (-10)               /* diskd, fsd, zfsd: above normal programs (level 8) */
+#define PRI_IDLE    NLEVEL              /* pid 0 runs below every level */
+#define NICE_LEVEL(n) ((u8)((((n) - NICE_MIN) * 4) / 5))
+#define PRIO_PROCESS 0                  /* SYS_getpriority / SYS_setpriority: who is a pid (0: the caller) */
+#define PRIO_PGRP    1                  /* not supported (no process groups): -EINVAL */
+#define PRIO_USER    2                  /* who is a user id (0: the caller's real user id) */
 #define NREG  8                 /* extra memory regions per process */
 #define ENVMAX 1024
 enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE, P_MSG, P_STOP };
@@ -254,11 +270,15 @@ struct proc {                   /* start.S relies on the first three: */
     char env[ENVMAX];           /* environment: NAME=value NUL ... NUL NUL; inherited by children */
     u16 envlen;
     struct proc *rnext;         /* run queue link */
-    int queued;                 /* on the run queue */
+    u8 queued;                  /* on the run queue (of level qlevel) */
+    u8 qlevel;
+    s8 nice;                    /* base priority, NICE_MIN .. NICE_MAX: inherited, lowered by anyone, raised by root */
+    u8 blevel;                  /* NICE_LEVEL(nice), kept so that no path divides */
+    u8 prio;                    /* effective level (0 highest): blevel, or a better client's while serving it */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
     u8 ctty;                    /* controlling tty (console 1..NCONS): the console of fd 0 at spawn, else the parent's */
     u8 wait_con;                /* P_WAIT with WAIT_CONSOLE: a console switch wakes it too */
-    int wait_port;              /* P_MSG as a server: port being listened on */
+    int wait_port;              /* P_MSG: as a server the port being listened on, as a client the port called */
     char name[16];
 };
 extern struct proc procs[NPROC];
@@ -279,7 +299,15 @@ int proc_wait(int pid, int flags);
 void proc_stop(struct proc *p);       /* Ctrl-Z / jobctl: stop it when it next runs */
 void proc_cont(struct proc *p);
 void proc_reap_orphans(void);
-void sched_tick(u16 sr);
+void sched_tick(u16 sr, int tick);   /* the level-2 interrupt: counts the slice; switches if it cut into user code and one is wanted */
+extern volatile u8 need_resched;     /* a process better than the running one is ready (or a sleeper is due) */
+extern volatile u32 wake_min;        /* no sleeper is due before this tick (while nsleep) */
+void resched(void);                  /* act on need_resched: switch only to a strictly better level */
+void sleep_until(u32 tick);          /* current to P_SLEEP until tick (the caller then schedules) */
+int proc_renice(struct proc *p, int nice);   /* set the base priority (clamped); the effective level follows */
+void prio_raise(struct proc *p, u8 level);   /* inheritance: p serves a client at level: at least that until done */
+void prio_recalc(struct proc *p);            /* p finished serving: back to its base or its best waiting client */
+u8 ipc_best_client(int pid);                 /* ipc.c: the best level among clients waiting for or served by pid */
 int user_ok(const struct proc *p, u32 ptr, u32 len);
 /* Stack guard (proc.c): a pattern at the bottom of every kernel and user stack, checked with the stack pointers at
  * every task switch, at every system call, at the tick when it interrupts user code and when a program faults.
@@ -323,6 +351,7 @@ struct umsg {
 };
 int port_create(const char *name, int owner);
 int port_find(const char *name);
+struct proc *port_owner(int port);             /* the process that owns a port, 0 if none */
 long ipc_call(int port, struct umsg *m);       /* SYS_call: kflags 0 */
 long ipc_kcall(int port, struct umsg *m);      /* the kernel's own requests (vfs.c): kflags UMSG_KERNEL */
 #define UMSG_KERNEL 1
@@ -457,6 +486,8 @@ int tty_of(const struct proc *p);
 #define SYS_blk_flush   72   /* make everything written so far durable (disk server only) */
 #define SYS_replyrecv   38   /* reply to a message and wait for the next, in one trap */
 #define SYS_ttymirror   37   /* 0 = stop copying screen output to the serial port */
+#define SYS_getpriority 78   /* which (PRIO_*), who -> 20 - nice (1 .. 40, never a negative errno's range), or -errno */
+#define SYS_setpriority 79   /* which, who, nice: anyone lowers their own processes, only root raises */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

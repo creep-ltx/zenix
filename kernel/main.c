@@ -229,6 +229,8 @@ void irq2_c(u32 sr)
         audio_tick();
         input_poll();
         fd_tick();
+        if (nsleep && (s32)(ticks - wake_min) >= 0)
+            need_resched = 1;           /* a sleeper is due: schedule() (or the next return to user mode) wakes it */
     }
     if (!(sr & 0x2000)) {               /* we interrupted user mode: no kernel code is running */
         if (current->pid != 0 && !current->killed) {
@@ -249,9 +251,8 @@ void irq2_c(u32 sr)
                 return;
             }
         }
-        if (icr & 1)
-            sched_tick((u16)sr);
     }
+    sched_tick((u16)sr, icr & 1);       /* the tick counts the slice in any mode; a switch only when user code was cut */
 }
 
 /* The E-clock (crystal / 40) of this machine: 709379 Hz on PAL, 715909 on NTSC, from the Agnus/Alice id's NTSC bit
@@ -428,7 +429,13 @@ void kmain(struct bootinfo *bi)
         panic("cannot start the filesystem server");
     /* the second root server: it serves the root if the root is ZenixFS and leaves at once otherwise (user/rootpick.h). Started last
      * so that the process numbers above stay as they were. If it cannot be started the ext2 root still works. */
-    proc_spawn_image(zfsd_blob, (u32)(zfsd_blob_end - zfsd_blob), "zfsd", 1, 0);
+    int zpid = proc_spawn_image(zfsd_blob, (u32)(zfsd_blob_end - zfsd_blob), "zfsd", 1, 0);
+    /* the built-in servers run above normal programs (DESIGN D10), so a busy program never delays the disk and the
+     * filesystems everyone waits for; boot (it serves nothing) and what it starts stay at nice 0 */
+    proc_renice(proc_by_pid(dpid), NICE_SERVER);
+    proc_renice(proc_by_pid(fpid), NICE_SERVER);
+    if (zpid > 0)
+        proc_renice(proc_by_pid(zpid), NICE_SERVER);
     kprintf("proc: diskd %d, fsd %d, boot %d (it starts /bin/init)\n", dpid, fpid, pid);
 
     input_init();

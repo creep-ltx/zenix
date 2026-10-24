@@ -317,10 +317,42 @@ pattern (section 6).
 
 - A fixed table of `NPROC` = 32 `struct proc` (room for a login and a shell on each of the ten consoles, the servers,
   init and the commands they run). State machine: `FREE, READY, SLEEP, WAIT, IO, ZOMBIE, MSG, STOP`.
-- **Preemptive round robin**: a 100 Hz tick, a slice of 5 ticks (50 ms), an O(1) run queue (linked list).
-  No priorities yet (DESIGN D6 says they are intended).
-- Preemption happens only when the timer interrupt hit **user mode**. Kernel code is never preempted, so the
-  kernel needs no locks. Where an interrupt can touch the run queue (`ready()`), interrupts are masked briefly.
+- **Priorities** (DESIGN D10): the highest ready priority always runs; processes of the same priority take turns, a
+  slice of 5 ticks (50 ms) of the 100 Hz tick each. There is no ageing: a busy program keeps every worse one off the
+  processor until it waits (the Exec rule).
+  - **Levels and the nice scale.** 32 levels inside the kernel (`NLEVEL`), 0 the highest. Users see the Unix nice
+    scale, -20 (most favoured) .. 19, and nothing else; the kernel maps it once, `level = (nice + 20) * 4 / 5`
+    (`NICE_LEVEL`): nice -20 and -19 are level 0, nice -10 is 8, nice 0 is 16, nice 10 is 24, nice 19 is 31 (five
+    nice values share four levels). The idle process (pid 0) runs below every level (`PRI_IDLE`, 32).
+  - **Base and effective.** Each process keeps its base (`nice`, with its level `blevel`) and its effective level
+    (`prio`), which is the base or, while it serves a better client, that client's level (priority inheritance,
+    section 8). `ps` shows both: PRI the effective level, NI the nice value.
+  - **Rules.** A child inherits its parent's nice (not a server's boost). Anyone may lower the priority of their own
+    processes (`nice`, `renice`, `setpriority`); only root may raise one, or change another user's; the built-in
+    servers are out of reach of non-root (the kill rule, section 14). diskd, fsd and zfsd start at nice -10
+    (`NICE_SERVER`, kmain), so a busy program never delays the disk and the filesystems everyone waits for; boot,
+    init, login, the shells and their programs run at nice 0.
+  - **Run queue.** One list per level and a 32-bit mask of the non-empty levels (level L is bit 31 - L), so the
+    68020's `BFFFO` gives the best level in one instruction (implemented in hardware on every CPU up to the 68060; it
+    is not on the 68060's list of unimplemented integer instructions). O(1). A process joins its level at the back; a
+    queued process whose effective level changes moves to its new level's list (a short walk of the old one).
+  - **Switching.** The kernel is still never preempted, so it needs no locks; where an interrupt path can touch the run
+    queue (`ready()`), interrupts are masked briefly. Every tick counts the running process's slice, whether it cut
+    into user code or into a system call (before D10 only user-mode ticks counted, so a program that spent most of its
+    time in system calls kept the processor for many slices; the fairness test found it). The end of a slice, a
+    process of a strictly better level becoming ready (`ready()`: a reply, a wake-up, input in `kwork`, a child's
+    exit) and a sleeper falling due (the tick compares `wake_min`) all only set `need_resched`; `resched()` acts on it
+    at the next return to user mode - the end of every system call, and the level-2 interrupt when it cut into user
+    code, the places where `kwork()` already runs. A better level switches at once; at the end of a slice the next
+    process of the same level gets its turn (the running one goes to the back), and with nobody of its level waiting
+    it starts a new slice. A process of the same level that becomes ready waits for the end of the running one's
+    slice, so equal priorities alternate only there.
+  - **Sleepers.** `schedule()` still scans the process table for due sleepers (the ordered timer list is a later
+    item of future-ideas.md), but only once one is due: `sleep_until()` keeps `wake_min`, the earliest wake-up, and the
+    scan readies every due sleeper onto its own level and finds the next one.
+  - Verified in FS-UAE by `tools/prio-test.sh` (in `make check`): equal priorities take turns in whole 50 ms slices,
+    a higher priority keeps the processor, a woken higher priority runs within a tick, inheritance (section 8), and
+    the nice/renice rules for a user and for root.
 - **Interrupts only queue** (audit B4). The keyboard and serial interrupts put raw codes and bytes into rings and
   set `kwork_pending`; everything else input causes (keymap, line discipline, echo, Ctrl-C/Ctrl-Z, console
   switches, scrollback) is done by `kwork()` in process context - see section 11. The same rule closes the
@@ -361,11 +393,11 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 74 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-77, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 76 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-79, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
-index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo`), memory (`memalloc memfree meminfo`),
+index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority`), memory (`memalloc memfree meminfo`),
 time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
@@ -382,6 +414,14 @@ answers pass through the kernel unchanged, and both servers return the same numb
 libz keeps the last one in `zerrno`; `zwhy(dflt)` and `zstrerror(e)` give its text. A few places still answer a
 bare -1; limits.md ("Error numbers") lists them. A permission refusal is always -EACCES (13), also for chmod/chown by a non-owner (Linux says
 EPERM there).
+
+**Priorities** (section 6): `SYS_getpriority(which, who)` and `SYS_setpriority(which, who, nice)`, POSIX's calls.
+`PRIO_PROCESS`: who is a pid, 0 the caller; `PRIO_USER`: every process whose real uid is who (0: the caller's);
+`PRIO_PGRP` is -EINVAL (there are no process groups). getpriority answers 20 - nice (1..40, the best of the matching
+processes, as Linux's system call does), so no nice value looks like an error number; libz's `getpriority()` turns
+it back into the nice value (-1 with `zerrno` set on failure, as POSIX). setpriority clamps to -20..19; a value below
+the process's present nice needs root (-EACCES), another process needs the kill rule (section 14); with `PRIO_USER`
+every process is checked before any is changed.
 
 `kill` today means "terminate" (`proc->killed`); Unix-style signal handlers do not exist yet. There is one more
 thing a process can be told: **stop and continue** (job control). Ctrl-Z on a terminal (`kernel/tty.c`) or `SYS_jobctl`
@@ -424,6 +464,16 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   only root (and `DISK_LIST`/`DISK_INFO` for anyone). Port names `fs`, `fs.*` (mounts) and `disk` are reserved:
   only root may create them, so a dead server's name cannot be taken over by a normal user (`port_create` answers
   -EACCES). Audit D.
+- **Priority inheritance** (DESIGN D10, after QNX). A server runs at least at the level of every client it holds:
+  `call()` raises the port owner to the caller's effective level when the message is queued (so a server with several
+  queued clients serves at the best waiting one's level), and `ipc_reply()` (also the reply half of `replyrecv`)
+  drops it back to its base, or to the best client still queued for it or still being served by it
+  (`ipc_best_client`). Only a boosted server recomputes, so a reply costs a compare when nothing was raised. The
+  boost passes along a chain: a raised process that is itself a client in a call (fsd calling diskd for a client)
+  raises the server of its request, up to a depth of 8. So a low-priority program cannot hold up a high-priority one
+  through a shared server: a nice 0 client of a nice 10 server is not delayed by a busy nice 5 program (`priotest
+  inherit`; a test-only kernel built with `-DNO_PRIO_INHERIT` fails that check: the calls wait until the busy program
+  ends).
 - Drawback of the design, noted in DESIGN.md: a **hung** server blocks its clients.
 
 ## 9. The servers
@@ -729,7 +779,8 @@ outputs (`tools/cmds-test.sh`).
 - `login` (run by `init` on each console, section 11) authenticates against `/etc/passwd`, drops root and starts
   the shell. Every console has its own login, so several users (or one user several times) can be logged in at
   once; nothing in the kernel records a "session".
-- **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill`, `SYS_jobctl` and `SYS_setfg`): root may signal
+- **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill`, `SYS_jobctl`, `SYS_setfg` and `SYS_setpriority`
+  on another process): root may signal
   any process but the idle one; others only a process whose real or effective uid equals their real or effective
   uid, or their own child, and never a built-in server (started from the kernel image: diskd, fsd, zfsd, boot) or a
   privileged process. A refusal is -EACCES, no such process -ESRCH. `SYS_setfg` works on the caller's own terminal, 0 (nobody)

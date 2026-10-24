@@ -34,7 +34,7 @@ u32 sys_ticks(void);
 long sys_time(void);
 void *xmalloc(u32 n);
 /* the disk server's privileged calls (tools/host/diskd-host.c provides them) */
-struct uproc { u32 pid, ppid, state, mem; char name[16]; };
+struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; };
 int sys_blk_read(u32 lba, u32 n, void *buf);
 int sys_blk_write(u32 lba, u32 n, const void *buf);
 int sys_blk_size(void);

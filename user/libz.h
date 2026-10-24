@@ -49,6 +49,8 @@ char *bre_to_ere(const char *bre);   /* a basic regular expression in the extend
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
 extern char **environ;
+int getpriority(int which, int who);            /* POSIX: the nice value (-20..19); -1 and zerrno set on failure */
+int setpriority(int which, int who, int nice);  /* POSIX: 0, or -1 and zerrno (EACCES: only root may raise) */
 
 /* buffered line reader */
 struct rd { int fd; int pos, len, eof; char buf[2048]; };

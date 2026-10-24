@@ -616,3 +616,15 @@ char *bre_to_ere(const char *s)
     }
     *o = 0; return out;
 }
+
+/* priorities (DESIGN D10): the kernel answers getpriority with 20 - nice (1..40), so that no nice value looks like an
+ * error number; POSIX callers get the nice value, or -1 with zerrno set (clear zerrno first to tell -1 apart) */
+int getpriority(int which, int who)
+{
+    int r = sys_getpriority(which, who);
+    return r < 0 ? -1 : 20 - r;
+}
+int setpriority(int which, int who, int nice)
+{
+    return sys_setpriority(which, who, nice) < 0 ? -1 : 0;
+}

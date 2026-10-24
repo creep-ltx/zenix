@@ -55,7 +55,8 @@ unseen). So:
 | System calls | Owner |
 |---|---|
 | 1-77 in use except 39, 40, 68 (removed with the workspaces in batch E; free again) | main, all merged (see `kernel/kernel.h`) |
-| **next free: 78** | |
+| 78 `getpriority`, 79 `setpriority` (DESIGN D10, priorities) | d10 |
+| **next free: 80** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8.
 

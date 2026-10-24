@@ -7,12 +7,17 @@ SYNOPSIS
     ps
 
 DESCRIPTION
-    Prints one line for every process: its id, its parent's id, its state,
-    the memory it owns in kilobytes, and its program name. There are no
-    options and no filtering.
+    Prints one line for every process: its id, its parent's id, its
+    priority, its niceness, its state, the memory it owns in kilobytes, and
+    its program name. There are no options and no filtering.
 
     PID   process id
     PPID  parent process id (0 for the programs started by the kernel)
+    PRI   the level it runs at now: 0 is the highest, 31 the lowest (nice
+          0 is 16, the built-in servers' -10 is 8). A server serving a
+          client shows that client's level if it is better than its own
+          (priority inheritance); the idle process shows -
+    NI    its niceness, -20 (most favoured) .. 19 (nice(1), renice(1))
     STATE ready    can run, waiting for its turn
           sleep    waiting for a timer (sleep)
           wait     waiting for a child to end (wait)
@@ -24,16 +29,17 @@ DESCRIPTION
     NAME  the file name of the program (first 15 characters)
 
 EXAMPLE (the numbers will differ)
-      PID  PPID STATE    MEM(K)  NAME
-        1     0 msg          36  diskd
-        2     0 msg          44  fsd
+      PID  PPID PRI  NI STATE    MEM(K) NAME
+        0     0   -   0 ready         0 idle
+        1     0   8 -10 msg          37 diskd
+        2     0   8 -10 msg          61 fsd
         ...
 
 NOTES
     Zenix has room for 32 processes in all (a login and a shell on each of
     the ten consoles, the servers and the commands they run), so ps shows
     at most 32 lines.
-    The idle process (pid 0) is not listed.
+    The idle process (pid 0) is listed first, with no level.
 
 SEE ALSO
-    free(1), sh(1) (jobs, kill)
+    free(1), sh(1) (jobs, kill), nice(1), renice(1)
