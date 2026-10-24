@@ -7,8 +7,9 @@ SYNOPSIS
     termtest
 
 DESCRIPTION
-    Draws a test page: bold, underline and inverse text, a box with cursor
-    addressing, a scroll region, line erase, and line insertion. It then
+    Draws a test page: bold, underline and inverse text, a 36-column box
+    drawn with cursor addressing (its text clear of the borders), a scroll
+    region, line erase, and line insertion. It then
     switches the terminal to raw mode and shows each key you press as the
     escape code or byte received (arrows, function keys, Delete). Press q to
     quit. A development tool.
