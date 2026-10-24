@@ -169,7 +169,7 @@ empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and th
 `kprintf` writes to the serial port and into an 8 KB ring. When the display comes up (`gfx_init`), `kmain` writes the
 ring to console 1 (the console on the screen at boot) and mirrors new `kprintf` output there until the boot is finished (`klog_mirror_off`
 just before the scheduler starts), so the boot messages - including every driver's init log - are on the screen of
-a machine with no serial cable (scroll back with Shift+Up). `SYS_klog` (73: offset, buffer, length) reads the ring;
+a machine with no serial cable (scroll back with Amiga+Up). `SYS_klog` (73: offset, buffer, length) reads the ring;
 `dmesg` prints it. A panic or an exception in the kernel switches the mirror on again, so its text reaches the
 screen, and records the reason in the log before the machine stops.
 

@@ -11,7 +11,7 @@ cable is needed.
    recommended (with 1 MB of chip RAM and nothing else there is room for one login).
 3. The screen (all text, no bar: 32 rows on PAL, 25 on NTSC) shows the kernel's boot messages, then on console 1 the
    autologin warning and the shell prompt (the image logs root in on console 1 by itself, `/etc/autologin`). If they
-   scrolled by: `dmesg`, or Shift+Up. Amiga+F2 .. Amiga+F10 show consoles 2-10, each with its own `zenix login:`
+   scrolled by: `dmesg`, or Amiga+Up. Amiga+F2 .. Amiga+F10 show consoles 2-10, each with its own `zenix login:`
    prompt (log in as `root`, no password); Amiga+F1 goes back.
    The floppy LED should go off before the kernel's messages (the bootblock stops the motor). Before the text
    appears the whole screen changes colour at every boot step (next section): if it stops on a colour, that colour
@@ -65,7 +65,7 @@ started loading.)
    Zenix boots again.
 3. When the text appears, look for the lines between `=== previous boot (N) ended here ...` and
    `=== end of the previous boot's log ===`: the last 20 lines the frozen boot wrote, each marked `> `. Take a photo
-   of them (Shift+Up scrolls back if they went by). The first line also says whether it ended with a kernel panic.
+   of them (Amiga+Up scrolls back if they went by). The first line also says whether it ended with a kernel panic.
 4. At the prompt, `dmesg -p` shows the whole previous log, `dmesg` this boot's.
 
 The log lives in the top 16.5 KB of chip RAM, which a warm reset should not clear. Whether that is true on the

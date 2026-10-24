@@ -28,5 +28,7 @@ send priotest wake\r
 sleep 8
 send priotest inherit\r
 sleep 10
+send priotest stale\r
+sleep 6
 send echo prio-done\r
 sleep 2

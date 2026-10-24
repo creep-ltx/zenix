@@ -8,8 +8,9 @@ SYNOPSIS
 
 DESCRIPTION
     Copies blocks of bs bytes (default 512) from SOURCE to DEST, then prints
-    how many full and partial blocks were read and written. SOURCE and DEST
-    are files, or devices of the disk server: a name without a slash that
+    how many full and partial blocks were read and written, on the error
+    output as GNU dd does (dd ... > file keeps it off the file). SOURCE and
+    DEST are files, or devices of the disk server: a name without a slash that
     the disk server knows (df0 the first floppy drive, ide0 the whole disk,
     ide0p1 its first partition, ram0 the boot RAM disk; see fdisk list).
     On a device the block size must be a multiple of 512, and a device that

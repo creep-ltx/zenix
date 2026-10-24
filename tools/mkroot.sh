@@ -12,6 +12,11 @@ TMPOUT="$OUT.tmp.$$"
 trap 'rm -rf "$T" "$TMPOUT"' EXIT
 cp -r "$(dirname "$0")/../rootfs/." "$T/"
 [ -n "$NOTESTS" ] && rm -rf "$T/tests"      # NOTESTS=1: leave the test scripts out (the small RAM-disk image)
+# the eleven corrupt programs mem.sh feeds to the loader (tools/mkbadzexe.py), with the scripts, so mem.sh also runs on
+# a real machine's card (2026-10-24: on the A1200 they were missing and the check passed for the wrong reason)
+if [ -z "$NOTESTS" ] && [ -f "$B/hello.zx" ]; then
+    python3 "$(dirname "$0")/mkbadzexe.py" "$B/hello.zx" "$T/tests" >/dev/null && chmod 755 "$T"/tests/badzexe*
+fi
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2

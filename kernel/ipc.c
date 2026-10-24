@@ -8,6 +8,7 @@
 static int strncmp_(const char *a, const char *b, int n);
 static struct port {
     int used, owner;
+    u32 gen;                    /* how many times this slot was created: part of the port number (audit G1) */
     struct proc *op;            /* the owner's slot (valid while used: a dying owner's ports are closed) */
     char name[16];
     struct umsg *head, *tail;
@@ -35,6 +36,19 @@ static int reserved(const char *n)
     return (n[0] == 'f' && n[1] == 's' && (!n[2] || n[2] == '.')) || !strncmp_(n, "disk", 16);
 }
 
+/* A port number is (generation << 8) | slot. Each create of a slot counts its generation up, so a number someone kept
+ * from a server that died (a mount's cached port, fsd's disk port) no longer names whatever port takes the slot next:
+ * port_of() refuses it, and a call to it fails as a call to a closed port (audit G1: otherwise a user's new port in
+ * that slot received the kernel's filesystem requests and could serve a set-user-id root program). */
+#define PORT_ID(i) ((int)((ports[i].gen << 8) | (u32)(i)))
+static struct port *port_of(int id)
+{
+    u32 i = (u32)id & 0xFF;
+    if (id < 0 || i >= NPORT || !ports[i].used || ports[i].gen != ((u32)id >> 8))
+        return 0;
+    return &ports[i];
+}
+
 int port_create(const char *name, int owner)
 {
     if (reserved(name) && current->uid != 0)
@@ -44,13 +58,15 @@ int port_create(const char *name, int owner)
             return -1;                          /* name taken */
     for (int i = 0; i < NPORT; i++)
         if (!ports[i].used) {
+            u32 gen = (ports[i].gen + 1) & 0x7FFFFF;          /* positive port numbers: 23 bits of generation */
             memset(&ports[i], 0, sizeof ports[i]);
+            ports[i].gen = gen;
             ports[i].used = 1;
             ports[i].owner = owner;
             ports[i].op = current;
             for (int k = 0; k < 15 && name[k]; k++)
                 ports[i].name[k] = name[k];
-            return i;
+            return PORT_ID(i);
         }
     return -2;
 }
@@ -59,13 +75,14 @@ int port_find(const char *name)
 {
     for (int i = 0; i < NPORT; i++)
         if (ports[i].used && !strncmp_(ports[i].name, name, 16))
-            return i;
+            return PORT_ID(i);
     return -1;
 }
 
 struct proc *port_owner(int port)
 {
-    return port >= 0 && port < NPORT && ports[port].used ? ports[port].op : 0;
+    struct port *p = port_of(port);
+    return p ? p->op : 0;
 }
 
 /* priority inheritance (DESIGN D10): the best (lowest) level among the clients queued on pid's ports and those whose
@@ -98,9 +115,9 @@ static void finish(struct umsg *m, s32 result)
 
 static long call(int port, struct umsg *m, u16 kflags)
 {
-    if (port < 0 || port >= NPORT || !ports[port].used || ports[port].owner == current->pid)
-        return -1;                              /* (a call to one's own port would wait for ever) */
-    struct port *p = &ports[port];
+    struct port *p = port_of(port);
+    if (!p || p->owner == current->pid)
+        return -1;                              /* closed, reused, or one's own port (that would wait for ever) */
     m->next = 0;
     m->from = current->pid;
     m->client = current;
@@ -141,10 +158,9 @@ long ipc_kcall(int port, struct umsg *m) { return call(port, m, UMSG_KERNEL); }
  * the tick (schedule wakes sleepers) ends it - a server can keep a deadline without polling. */
 struct umsg *ipc_recv(int port, int wait)
 {
-    if (port < 0 || port >= NPORT || !ports[port].used ||
-        ports[port].owner != current->pid)
+    struct port *p = port_of(port);
+    if (!p || p->owner != current->pid)
         return (struct umsg *)-1;
-    struct port *p = &ports[port];
     u32 until = ticks + (u32)(wait - 1);
     while (!p->head) {
         if (!wait)
@@ -162,7 +178,7 @@ struct umsg *ipc_recv(int port, int wait)
             current->state = P_MSG;
         }
         schedule();
-        if (!ports[port].used || current->killed)
+        if (!port_of(port) || current->killed)
             return (struct umsg *)-1;
     }
     struct umsg *m = p->head;

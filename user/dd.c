@@ -76,6 +76,6 @@ int main(int argc, char **argv)
         if (w != n) { fprintf(2, "dd: write error\n"); return 1; }
         if ((u32)n == bs) recs++; else partial++;
     }
-    printf("%u+%u records in\n%u+%u records out\n", recs, partial, recs, partial);
+    fprintf(2, "%u+%u records in\n%u+%u records out\n", recs, partial, recs, partial);   /* on stderr, as GNU dd */
     return 0;
 }

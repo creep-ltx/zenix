@@ -254,7 +254,7 @@ void syscall_c(u32 *rb)
         break;
     case SYS_statfs:
         if (UOK(a1, 20))
-            r = (s32)vfs_statfs((void *)a1, a2);       /* a2 = mount index, 0 = the root */
+            r = (s32)vfs_statfs((void *)a1, a2);       /* a2 = the n-th mount, as SYS_mountinfo counts (0 = the root) */
         break;
     case SYS_mount: {                   /* root only */
         struct umountreq rq;

@@ -4,7 +4,7 @@ NAME
     priotest - test the scheduler's priorities
 
 SYNOPSIS
-    priotest fair|prio|wake|inherit
+    priotest fair|prio|wake|inherit|stale
 
 DESCRIPTION
     A test program for the priorities (DESIGN D10). Each check starts
@@ -21,8 +21,11 @@ DESCRIPTION
     inherit  a nice 0 client calling a nice 10 server is not held up by a
              busy nice 5 program: the server works at the client's level
              (16) while it serves it and is back at its own (24) after
+    stale    a port number kept from a server that ended does not reach
+             the next port created in its slot (audit G1): the call is
+             refused, the new port's own number works
 
-    tools/prio-test.sh runs all four in the emulator. Emulator times are
+    tools/prio-test.sh runs all five in the emulator. Emulator times are
     not hardware times; the checks compare the programs with each other.
 
 EXIT STATUS
@@ -30,7 +33,7 @@ EXIT STATUS
 
 NOTES
     The children share a block of the parent's memory (no MMU), and the
-    inherit check uses a port called "priot".
+    inherit and stale checks use a port called "priot".
 
 SEE ALSO
     nice(1), renice(1), ps(1), bench(1)

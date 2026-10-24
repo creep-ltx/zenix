@@ -121,8 +121,8 @@ static const char keyspecial[0x28] = {
     0, 0, 0, 0, 0, 0, 0, 0,
 };
 
-/* cursor keys, function keys, Help and Del as the usual escape sequences. Only
- * programs in raw mode get them; Shift/Ctrl + Up/Down scroll the screen back. */
+/* cursor keys, function keys, Help and Del as the usual escape sequences. Only programs in raw mode get them.
+ * Scrollback is a console key, Amiga + Up/Down (see kbd_key), like the console switch Amiga+F1..F10. */
 static void emit_seq(const char *q)
 {
     if (!(tty_getmode(con_cur) & TTY_RAW))
@@ -147,11 +147,6 @@ static int special_key(u8 code)
             seq[n++] = arrow[code - 0x4C];
             seq[n] = 0;
             emit_seq(seq);
-            return 1;
-        }
-        if ((shift_down || ctrl_down) && code <= 0x4D) {        /* a plain terminal: scrollback */
-            int step = ctrl_down ? trows - 1 : 1;
-            term_scroll_view(code == 0x4C ? step : -step);
             return 1;
         }
         return 1;                                               /* cursor keys mean nothing to line editing in the kernel */
@@ -385,10 +380,14 @@ static void key_code(u8 code)
             rep_code = 0;
         return;
     }
-    if (amiga_down) {                   /* Amiga+F1..F10: virtual console 1..10 (Linux: Alt+Fn); other Amiga keys: nothing */
+    if (amiga_down) {                   /* console keys, never seen by a program (Linux: Alt+Fn, Shift+PageUp) */
         rep_code = 0;
-        if (code >= 0x50 && code <= 0x59)
+        if (code >= 0x50 && code <= 0x59)               /* Amiga+F1..F10: virtual console 1..10 */
             con_switch(code - 0x50 + 1);
+        else if (code == 0x4C || code == 0x4D) {        /* Amiga+Up/Down: scroll back a screenful, with Shift a line */
+            int step = shift_down ? 1 : trows - 1;      /* every Amiga keyboard has these (no Page Up on most) */
+            term_scroll_view(code == 0x4C ? step : -step);
+        }
         return;
     }
     rep_code = code;

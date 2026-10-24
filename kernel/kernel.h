@@ -275,6 +275,7 @@ struct proc {                   /* start.S relies on the first three: */
     char cwd[160];              /* the working directory as text (FS_PATHMAX, fsproto.h): a longer one is refused */
     struct file *fd[NFD];
     int killed;
+    u8 exiting;                 /* in proc_exit: its own calls (FS_CLOSE) must not end it a second time */
     u8 stop_req, stop_rep;      /* stop asked for (acted on when the process next runs); the parent has been told it is stopped */
     int priv;                   /* may use the raw disk (the filesystem server) */
     u16 uid, ruid, gid, umask;  /* effective and real user id, group id (inherited; a set-user-id program changes only uid); the filesystem server enforces the permissions */

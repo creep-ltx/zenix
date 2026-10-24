@@ -2,17 +2,13 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Memory tests (audit batch B): rootfs/tests/mem.sh under Zenix - malloc/free/realloc and memory calls failing with
 # NULL (badptr), a long-running shell keeping its memory flat, directory tools 25 levels deep, and corrupt program
-# files (made by tools/mkbadzexe.py, written onto the disk here) refused by the loader. Checks every "ok" line.
+# files (made by tools/mkbadzexe.py, put in /tests by tools/mkroot.sh) refused by the loader. Checks every "ok" line.
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=$(mktemp -d /tmp/zenix-memtest.XXXXXX)
-python3 tools/mkbadzexe.py build/hello.zx $OUT/bad >/dev/null || exit 1
-for f in $OUT/bad/badzexe*; do
-    n=$(basename $f)
-    debugfs -w -R "write $f /tests/$n" build/zenix.hdf >/dev/null 2>&1
-    debugfs -w -R "sif /tests/$n mode 0100755" build/zenix.hdf >/dev/null 2>&1
-done
+debugfs -R "stat /tests/badzexe11" build/zenix.hdf 2>/dev/null | grep -q 'Mode:  0755' ||
+    { echo "FAIL: build/zenix.hdf has no /tests/badzexe1-11 (tools/mkroot.sh puts them there)"; exit 1; }
 cat > $OUT/script.txt <<EOS
 wait zenix:/# 90
 sleep 1

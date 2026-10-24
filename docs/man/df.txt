@@ -7,9 +7,12 @@ SYNOPSIS
     df
 
 DESCRIPTION
-    Prints the size, used and available space of the root filesystem in 1 KB
-    blocks, the percentage used, and the number of inodes (free inodes in
-    brackets). Only the root filesystem is shown; there are no options.
+    Prints, for every mounted filesystem (the root first, then the others
+    in the order mount lists them), the device, the size, used and
+    available space in 1 KB blocks, the percentage used, the number of
+    inodes (free inodes in brackets) and where it is mounted. There are no
+    options. A filesystem whose server does not answer is listed with
+    "cannot read the filesystem".
 
 SEE ALSO
-    du(1), free(1)
+    du(1), free(1), mount(8)

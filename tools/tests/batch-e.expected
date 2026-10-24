@@ -33,7 +33,7 @@ sh: more than 8 here-documents on one line
 hd-st=2
 xargs: -I needs a non-empty string
 xargs-I-st=2
-diff /tmp/d1/g /tmp/d2/g
+diff /tmp/batch-e.t/d1/g /tmp/batch-e.t/d2/g
 1c1
 < one
 ---
@@ -51,7 +51,7 @@ txt
 2
 0
 expr-st=1
-found /tmp/pb/myecho
+found /tmp/batch-e.t/pb/myecho
 timeout-found
 xargs-found x
 a
@@ -63,4 +63,7 @@ grep: /nonexistent: no such file or directory
 grep-st=2
 moved
 0
+ln: cannot create /tmp/batch-e.t/hard: hard link not allowed for directory
+ln-dir=1
+after-kills
 batch-e-done

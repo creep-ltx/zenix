@@ -26,14 +26,13 @@ if [ "$after" -ge "$before" ]; then echo "mem: shell churn kept memory flat ($be
 else echo "mem: shell churn lost $(( before - after )) KB ($before KB -> $after KB) FAILED"; fi
 
 # B6: tools that walk directories work 25 levels deep (no stack arrays) and stop cleanly at the path limit
-cd /tmp
-rm -r deep deep2 deep.tar 2>/dev/null
+T=/tmp/mem.t; rm -rf $T; mkdir -p $T; cd $T     # this script's own scratch folder, emptied first: repeatable
 p=deep; mkdir deep; k=0
 while [ $k -lt 25 ]; do p=$p/d; mkdir $p; k=$(( k + 1 )); done
 echo bottom > $p/f
 n=$(find deep | wc -l); [ $n -eq 27 ] && echo "mem: find 25 deep ok" || echo "mem: find 25 deep ($n) FAILED"
-du deep > /tmp/du.out && [ $(wc -l < /tmp/du.out) -eq 26 ] && echo "mem: du 25 deep ok" || echo "mem: du 25 deep FAILED"
-grep -r bottom deep > /tmp/gr.out && [ $(wc -l < /tmp/gr.out) -eq 1 ] && echo "mem: grep -r 25 deep ok" || echo "mem: grep -r 25 deep FAILED"
+du deep > $T/du.out && [ $(wc -l < $T/du.out) -eq 26 ] && echo "mem: du 25 deep ok" || echo "mem: du 25 deep FAILED"
+grep -r bottom deep > $T/gr.out && [ $(wc -l < $T/gr.out) -eq 1 ] && echo "mem: grep -r 25 deep ok" || echo "mem: grep -r 25 deep FAILED"
 cp -r deep deep2 && diff -r deep deep2 && echo "mem: cp -r, diff -r 25 deep ok" || echo "mem: cp -r, diff -r 25 deep FAILED"
 chown -R 0 deep2 && echo "mem: chown -R 25 deep ok" || echo "mem: chown -R 25 deep FAILED"
 tar cf deep.tar deep && [ $(tar tf deep.tar | wc -l) -eq 27 ] && echo "mem: tar c 25 deep ok" || echo "mem: tar c 25 deep FAILED"
@@ -46,8 +45,10 @@ cd /
 # nothing is loaded, and a good program still runs afterwards
 k=1
 while [ $k -le 11 ]; do
-    /tests/badzexe$k 2>/tmp/bz.err; rc=$?
-    [ $rc -ne 0 ] && echo "mem: corrupt program $k refused (rc $rc) ok" || echo "mem: corrupt program $k ran FAILED"
+    /tests/badzexe$k 2>$T/bz.err; rc=$?
+    if [ $rc -eq 127 ]; then echo "mem: corrupt program $k not found (/tests/badzexe$k is missing) FAILED"
+    elif [ $rc -ne 0 ]; then echo "mem: corrupt program $k refused (rc $rc) ok"
+    else echo "mem: corrupt program $k ran FAILED"; fi
     k=$(( k + 1 ))
 done
 n=$(dmesg | grep -c 'exec: /tests/badzexe.* refused')

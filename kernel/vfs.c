@@ -169,8 +169,8 @@ long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
     m.type = type;
     m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
     long r = ipc_kcall(mt->port, &m);
-    if (r == -5)
-        mt->port = -1;                  /* the server is gone */
+    if (r == -5 || r == -1)
+        mt->port = -1;                  /* the server is gone (-1: its port is closed or its slot reused, audit G1) */
     return r;
 }
 
@@ -454,11 +454,15 @@ long vfs_lseek(struct file *f, s32 off, u32 whence)
     return np;
 }
 
+/* mount is the n-th mount in use, as for vfs_mountinfo (0 = the root), so the two can be paired after an unmount
+ * left a gap in the table */
 long vfs_statfs(void *out, u32 mount)
 {
-    if (mount >= NMOUNT || !mnt[mount].used)
-        return -EINVAL;
-    return fs_call_on((int)mount, FS_STATFS, (u32)out, 0, 0, 0);
+    u32 seen = 0;
+    for (int i = 0; i < NMOUNT; i++)
+        if (mnt[i].used && seen++ == mount)
+            return fs_call_on(i, FS_STATFS, (u32)out, 0, 0, 0);
+    return -EINVAL;
 }
 
 long vfs_path1(u32 op, const char *p, u32 a2, u32 a3)

@@ -16,7 +16,13 @@ int main(int argc, char **argv)
         if (!link) { fprintf(2, "ln: %s: %s\n", argv[i], zwhy("cannot create the link")); rc = 1; continue; }
         if (force) sys_unlink(link);
         int r = sym ? sys_symlink(argv[i], link) : sys_link(argv[i], link);
-        if (r < 0) { fprintf(2, "ln: cannot create %s: %s\n", link, zwhy("failed")); rc = 1; }
+        if (r < 0) {                    /* zwhy() skips error 1 (EPERM: a bare -1 from an old call looks the same) */
+            const char *why = zstrerror(r);
+            if (!sym && sys_stat(argv[i], &st) == 0 && (st.mode & S_IFMT) == S_IFDIR)
+                why = "hard link not allowed for directory";        /* GNU ln's words */
+            fprintf(2, "ln: cannot create %s: %s\n", link, why ? why : "failed");
+            rc = 1;
+        }
         free(link);
     }
     return rc;
