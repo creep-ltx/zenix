@@ -60,6 +60,8 @@ spot-checked against the code that day.
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
 needed (not one of the 106 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+[bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
+`tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 
 ## How the pages get onto the system
 `docs/man/` is the one place for manual pages. `tools/mkroot.sh` copies every `docs/man/*.txt` to `/usr/man` on the

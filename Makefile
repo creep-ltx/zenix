@@ -88,6 +88,20 @@ $(BUILD)/zenixboot.zx: $(BUILD)/zenixboot.elf tools/mkzexe.py tools/check-68020-
 $(BUILD)/zenixboot: $(BUILD)/zenixboot.zx tools/mkhunk.py
 	python3 tools/mkhunk.py $< $@
 
+# bootmenu: the boot menu of a disk with several systems (docs/man/bootmenu.txt), built the same way as zenixboot
+$(BUILD)/bootmenu-start.o: boot/bootmenu-start.S | $(BUILD)
+	$(CC) $(ASFLAGS) $< -o $@
+$(BUILD)/bootmenu.bo: boot/bootmenu.c | $(BUILD)
+	$(CC) $(CFLAGS) -Os -c $< -o $@
+$(BUILD)/bootmenu.elf: $(BUILD)/bootmenu-start.o $(BUILD)/bootmenu.bo link/user.ld
+	$(CC) $(CFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
+	    $(BUILD)/bootmenu-start.o $(BUILD)/bootmenu.bo $(LIBGCC) -o $@
+$(BUILD)/bootmenu.zx: $(BUILD)/bootmenu.elf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@
+$(BUILD)/bootmenu: $(BUILD)/bootmenu.zx tools/mkhunk.py
+	python3 tools/mkhunk.py $< $@
+
 $(BUILD)/start.o: kernel/start.S $(BUILD)/stage0.bin | $(BUILD)
 	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
 $(BUILD)/%.o: kernel/%.c $(wildcard kernel/*.h) | $(BUILD)

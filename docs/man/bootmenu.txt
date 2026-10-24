@@ -1,0 +1,65 @@
+BOOTMENU(8)			Zenix manual
+
+NAME
+    bootmenu - choose AmigaOS or Zenix when an Amiga starts
+
+SYNOPSIS
+    bootmenu
+
+DESCRIPTION
+    bootmenu is an AmigaOS program, not a Zenix one, like zenixboot. It is
+    the boot menu of a disk that holds several systems, for example the
+    SD card made by tools/mkdualcard.sh: Emu68's FAT partition, an Amiga
+    RDB with a small boot partition (BOOT) and the AmigaOS partitions, and
+    Zenix's root and /home. Kickstart boots BOOT (the highest boot
+    priority); its S:Startup-Sequence is the one line "SYS:bootmenu".
+
+    bootmenu reads S:BootMenu.conf, shows the entries in the boot Shell's
+    window and waits for a choice: Up/Down and Return, or the entry's
+    number. When nothing is pressed, the default entry starts after the
+    countdown; any key stops the countdown.
+
+    An entry does one of three things:
+    partition NAME
+                boot the AmigaOS partition NAME (DH0, without the colon).
+                bootmenu leaves a small helper in chip RAM (a resident
+                module on exec's KickTagPtr list, ROM Kernel Manual,
+                exec.library/SumKickData) and reboots. At the reset the
+                helper moves NAME to the head of Kickstart's boot list, so
+                Kickstart boots it, and takes itself off the list again.
+                Nothing is written to the disk: the next reset or power-on
+                shows the menu again. If NAME is not found, BOOT boots as
+                usual and the menu comes back.
+    run COMMAND
+                run an AmigaDOS command. "run SYS:zenixboot" starts Zenix
+                (it does not come back). When a command does come back,
+                bootmenu says with which code and shows the menu again
+                after Return.
+    shell       leave the menu: the Startup-Sequence ends and the boot
+                Shell stays open (a rescue Shell with Kickstart's own
+                commands).
+
+S:BOOTMENU.CONF
+    One setting or entry per line; "#" starts a comment line, unknown lines
+    are ignored. At most 9 entries.
+        timeout 5                   the countdown in seconds
+        default 1                   the entry the countdown starts
+        AmigaOS = partition DH0
+        Zenix = run SYS:zenixboot
+        AmigaOS rescue shell = shell
+
+NOTES
+    Needs Kickstart 2.04 or newer and a 68020 or better (the build is the
+    same as zenixboot's). The helper needs chip RAM that survives a reset,
+    which it does on a real Amiga and on Emu68; the partition's boot
+    priority in the RDB is never changed. Kickstart's own Early Startup
+    menu (both mouse buttons held at power-on) still chooses a partition
+    by hand. The menu is plain text in the Shell window, no graphics.
+    Verified in FS-UAE (Kickstart 3.2: the countdown, the reboot into the
+    chosen partition); not yet on a real Amiga.
+
+FILES
+    S:BootMenu.conf
+
+SEE ALSO
+    zenixboot(8)
