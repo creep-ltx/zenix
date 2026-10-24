@@ -26,7 +26,10 @@ Rebooting between the systems (owner 2026-10-24): `bootzenix` in AmigaOS, `reboo
 through a one-shot note the boot menu reads. Later (not now): a Wasabi-like remote-access daemon for Zenix (needs the network driver).
 DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved, docs/d11-service-manager.md).
 `awk` (owner 2026-10-24: finish the parked `user/awk.c` now, while D11 is built; a colour console proposed next, not yet approved).
-Next approved, in this order after D11: Zenix installing updates by itself (no card swaps), then the network driver.
+Next approved, in this order after D11 (owner 2026-10-24): **D13 shared libraries and shared program code** (one copy in
+memory of libz and of a program several processes run, as AmigaOS libraries and pure programs; design note first,
+reviewed, before code; it comes before the self-updates so the updater ships the final program format), then Zenix
+installing updates by itself (no card swaps), then the network driver.
 **The owner's own goal (2026-10-24): Claude in a terminal on Zenix on the A1200.** It sets the order of the work, but it
 is the owner's goal, not Zenix's purpose (owner, 2026-10-24): never present it as Zenix's main goal in the docs. Approved now: a serial terminal program (Zenix to the PC over the null-modem cable, from
 the weekend of 2026-10-31); then the same over the network; then a console good enough for Claude Code's screen
