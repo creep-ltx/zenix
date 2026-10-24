@@ -5,7 +5,7 @@
 The configs in the repository name no path of the machine they were written on. Three things are filled in:
   $ZENIX_KICKSTART_DIR   the directory with the Kickstart ROM files (kicka1200.rom, kicka3000.rom, kicka4000.rom,
                          kick204-a500plus.rom). From the environment variable of that name; default FS-UAE's own
-                         Kickstarts directory, ~/Documents/FS-UAE/Kickstarts.
+                         Kickstarts directory (Documents/FS-UAE/Kickstarts in the home directory).
   ../build/              the build directory: ZENIX_BUILD if set, else build/ of this source tree.
   /tmp/zenix-serial      the serial port: ZENIX_SERIAL if set (each test run its own port).
 

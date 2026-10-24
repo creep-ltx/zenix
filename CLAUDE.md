@@ -11,7 +11,7 @@ current work list), then `docs/architecture.md` for the part you touch.
   real Amiga hardware is the ultimate target (owner, 2026-10-24): nothing in the base may depend on Emu68 or the Pi, and
   speed is judged on real 68k CPUs (today a stock 14 MHz 68EC020), not Emu68's JIT. The minimum requirements
   are not decided yet (ROADMAP, open questions).** Order audit fixes by what
-  matters on it first. Nothing has run on it yet; real-hardware time is scarce, so every build sent there must be
+  matters on it first. Zenix runs on it since 2026-10-23; real-hardware time is scarce, so every build sent there must be
   ready for it.
 
 ## Current focus (2026-10-22): hardening, then the first real boot
@@ -47,7 +47,7 @@ root, then the desktop (ROADMAP phases).
 ## Sessions: one main session, at most one side session
 Parallel sessions collided before (two programs claimed system call 75; the Makefile conflicted; the floppy filled up
 unseen). So:
-- **One main session** works in `~/Projects/zenix` on `main`. Only it edits the shared files: `kernel/kernel.h`
+- **One main session** works in the main checkout on `main`. Only it edits the shared files: `kernel/kernel.h`
   (system call numbers, limits), `kernel/main.c` (boot order, the 100 Hz tick), `Makefile` (UAPPS, RAMAPPS, image
   sizes), `user/usys.h`, `user/libz.*`, and the counts in `docs/`.
 - **At most one side session**, in its own worktree and branch, on a part that touches none of those (good: the
@@ -108,7 +108,7 @@ Disks and data:
   `tools/docs-check.sh --staged` (must say `docs-check: ok`). Before a merge or a hardware build: `make check` (every
   strong test, a table, about 1.5 hours; docs/README.md "Testing").
 - The repository names no path of this PC. On the owner's PC the tests need (in the environment of every test run):
-  `export ZENIX_KICKSTART_DIR=~/UAE/ROM ZENIX_CAGE_RIG=~/Projects/DemoScene/Creator`; `TOOLPREFIX` defaults to
+  `ZENIX_KICKSTART_DIR` and `ZENIX_CAGE_RIG` (their values are in the owner's private notes, not here); `TOOLPREFIX` defaults to
   `$(HOME)/opt/m68k-elf/bin/m68k-elf-` when `m68k-elf-gcc` is not on PATH, which is where it is here.
 - The real A1200 is shared with other projects: message the other sessions before using it through Wasabi, and say
   when you are done.
@@ -117,7 +117,7 @@ Disks and data:
 - **Documentation lives in `docs/`, nowhere else.** No `.md`/`.txt` notes in `kernel/`, `user/`, `boot/`, `tools/`
   or the project root (only `README.md` and this file). Decisions: `docs/DESIGN.md`. Plan: `docs/ROADMAP.md`. Work
   list: `docs/audit-2026-10-22.md`. Findings that help other projects: the shared knowledge base
-  (`~/Projects/Knowledge/amiga/zenix-*.md`), not here.
+  (its `amiga/zenix-*.md` notes), not here.
 - Manual pages: `docs/man/NAME.txt` (plain text, at most 78 columns, the format `man` reads). Command index:
   `docs/commands.md`. Feature list: `docs/features.md`.
 - Test input scripts: `tools/tests/`. Old code kept for reference: `archive/` (not built). Files copied onto the

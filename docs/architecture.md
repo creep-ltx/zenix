@@ -85,8 +85,8 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   it.
 - Storage: Gayle IDE (A600/A1200/A4000) with an RDB partition table, or a **RAM disk** that the bootblock reads
   from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek), or the
-  **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - written and host-tested,
-  **not yet run on a real Pi**). `kernel/blk.c` picks the raw disk: IDE first, else the SD card. Either one is
+  **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - host-tested, and
+  verified on the A1200 since 2026-10-23). `kernel/blk.c` picks the raw disk: IDE first, else the SD card. Either one is
   served by `diskd` under the name `ide0`. On an **Amiga 3000** (no IDE) `kernel/a3000.c` drives the on-board SCSI:
   WD33C93A chip behind the DMAC at `0xDD0000`, one "select with ATN and transfer" command per SCSI command, polling
   (interrupts on, the DMAC's interrupt enable off), data by DMA through a 64 KB chip-RAM bounce buffer, first direct-access

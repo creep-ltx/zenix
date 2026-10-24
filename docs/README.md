@@ -2,6 +2,8 @@
 
 | Document | What it answers |
 |---|---|
+| [why.md](why.md) | Why Zenix works the way it does: the reason behind each big decision (no MMU, `spawn`, messages, zero-copy, priorities, ext2, booting through Kickstart, ...), in plain words. Start here. |
+| [source-tree.md](source-tree.md) | What each folder and file in the source is, and where to start reading. |
 | [architecture.md](architecture.md) | How Zenix is put together: the layers, the kernel, memory, processes, messages, the servers, the filesystems, the terminal and display, the build and the tests. |
 | [how-it-works.md](how-it-works.md) | Walk-throughs: from power-on to a shell prompt, what happens inside `cat file | grep x`, what happens when a program crashes. |
 | [features.md](features.md) | The one list of what Zenix can do, with the status of each feature (verified / read / planned). |
@@ -20,8 +22,8 @@
 
 How these documents are written: by reading the source tree. A statement about Zenix is *read* from the source unless
 it says *verified* (a test checked it in FS-UAE; on real hardware it would say "verified on the A1200" with the date).
-Statements about AmigaOS, Linux and other systems are general knowledge, not measured here. Nothing has run on a real
-Amiga yet.
+Statements about AmigaOS, Linux and other systems are general knowledge, not measured here. Zenix has run on a real
+Amiga (the owner's PiStorm A1200) since 2026-10-23; what was checked there is listed in audit-closing-2026-10-24.md.
 
 ## Where things live (and the rule)
 - All documentation is in `docs/`. The only others are `README.md` (short, points here) and `CLAUDE.md` (the rules for
@@ -69,7 +71,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | zenixboot-test | booting with no floppy: Kickstart boots the FFS partition, zenixboot starts Zenix on its IDE root; zenixboot's error paths; Kickstart 3.2 and 2.05 only when `ZENIX_KICK32` / `ZENIX_KICK205` name those ROMs (else SKIP) |
 
 What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default
-FS-UAE's `~/Documents/FS-UAE/Kickstarts`); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
+FS-UAE's own Kickstarts folder, `Documents/FS-UAE/Kickstarts` in your home directory); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
 fills it in, with the build directory and the serial port). kbd-test, cu-test, diag-test and the screenshots
 (`tools/shot.py`) also need the headless cage rig: `ZENIX_CAGE_RIG` names its directory. A single test:
 `ZENIX_SERIAL=/tmp/NAME tools/users-test.sh` (a serial port of its own, so it can run beside another session's test);
