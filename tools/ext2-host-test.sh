@@ -104,6 +104,20 @@ for img in rev0 plain plain4k; do
 done
 debugfs -R "stat /idx" $T/w-plain.img 2>/dev/null | grep -q "Flags: 0x0" && check "a changed htree directory lost its index flag" ok || check "a changed htree directory lost its index flag" bad
 
+# ---- bench's create/delete: every request is on the disk when it is answered (write-through, no sync) ----
+# (the PiStorm bench showed 25 us per create on the SD card, too fast for that: this checks the server's side)
+{ echo mount; echo mkdir /bench; echo writes
+  for i in $(seq 10 59); do echo "open /bench/f$i wc"; echo "write %$((i-9)) 0 hello"; echo "close %$((i-9))"; done; echo writes
+  for i in $(seq 10 59); do echo "unlink /bench/f$i"; done; echo writes; echo "open /bench/last wc"; echo "write %51 0 kept"; } > $T/wt.txt
+cp $T/plain.img $T/wt.img
+fsd $T/wt.img $T/wt.txt $T/out                  # ends without sync or quit: as if the power went
+w=($(grep '^writes -> ' $T/out | awk '{print $3}'))
+cs=$(( (w[1] - w[0]) / 50 )); ds=$(( (w[2] - w[1]) / 50 ))
+[ "$(debugfs -R 'cat /bench/last' $T/wt.img 2>/dev/null)" = kept ] && ! debugfs -R 'ls /bench' $T/wt.img 2>/dev/null | grep -q f10 \
+    && clean $T/wt.img && ! grep -qE ' -> -[0-9]' $T/out \
+    && check "50 creates and deletes are on the image when answered, no sync ($cs sectors per create, $ds per delete)" ok \
+    || { check "creates and deletes written through" bad; cat $T/e2fsck.log; }
+
 # ---- C1: removing fast symlinks frees nothing ----
 cp $T/rev0.img $T/sym.img
 free0=$(dumpe2fs -h $T/sym.img 2>/dev/null | awk '/^Free blocks/ {print $3}')

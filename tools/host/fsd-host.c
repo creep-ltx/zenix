@@ -9,6 +9,7 @@
  *   unlink P | rmdir P | mkdir P | symlink TARGET P | link OLD NEW | rename OLD NEW | readlink P | chmod P MODE
  *   ls PATH                 every entry (FS_READDIR)
  *   sync | quit             FS_SYNC | FS_QUIT
+ *   writes                  the sectors written to the image so far (hostdisk_writes)
  *   as UID GID              later requests come from this user
  *   raw on|off              later requests come as a user's own SYS_call (no UMSG_KERNEL), not from the kernel
  *   utimes P T | chown P UID GID     FS_UTIMES (T "now" = FS_UTIME_NOW) | FS_CHOWN
@@ -108,6 +109,7 @@ int main(void)
             printf(" (%u, %d)\n", n, r);
             continue;
         }
+        else if (!strcmp(cmd, "writes")) { extern unsigned long hostdisk_writes; printf("writes -> %lu\n", hostdisk_writes); continue; }
         else if (!strcmp(cmd, "sync")) r = req(FS_SYNC, 0, 0, 0, 0);
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);
         else { printf("%s -> unknown command\n", cmd); continue; }

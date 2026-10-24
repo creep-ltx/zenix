@@ -35,13 +35,32 @@ static void bench_syscall(void)
     report("null system call (getpid)", sys_hrtime() - t0, 5000);
 }
 
+/* every call's result is checked: a failed open is fast, and a timing made of failures is not a timing */
+static int nfail;
+static char first_fail[80];
+static void failed(const char *what, const char *name, int r)
+{
+    if (!nfail++) {
+        const char *t = zstrerror(r);
+        snprintf(first_fail, sizeof first_fail, "%s %s: %s", what, name, t ? t : "failed");
+    }
+}
+
+static void report_checked(const char *what, u32 e, u32 n)
+{
+    if (nfail) printf("%-34s FAILED: %d of %u calls (first: %s); no timing\n", what, nfail, n, first_fail);
+    else report(what, e, n);
+    nfail = 0;
+}
+
 static void bench_fsstat(void)
 {
     struct ustat st;
-    sys_stat("/bin/sh", &st);                    /* warm */
+    int r = sys_stat("/bin/sh", &st);            /* warm */
+    if (r < 0) failed("stat", "/bin/sh", r);
     u32 t0 = sys_hrtime();
-    for (int i = 0; i < 500; i++) sys_stat("/bin/sh", &st);
-    report("stat /bin/sh (call to fs server)", sys_hrtime() - t0, 500);
+    for (int i = 0; i < 500 && !nfail; i++) if ((r = sys_stat("/bin/sh", &st)) < 0) failed("stat", "/bin/sh", r);
+    report_checked("stat /bin/sh (call to fs server)", sys_hrtime() - t0, 500);
 }
 
 static void bench_ipc(void)
@@ -65,18 +84,21 @@ static void bench_read(void)
 {
     static char buf[4096];
     int fd = sys_open("/bin/sh", O_RDONLY);
+    if (fd < 0) { failed("open", "/bin/sh", fd); report_checked("read /bin/sh, 4K chunks, cached", 0, 1); return; }
     u32 t0 = sys_hrtime();
     u32 bytes = 0;
     for (int r = 0; r < 100; r++) {
         sys_lseek(fd, 0, 0);
         int n;
         while ((n = sys_read(fd, buf, sizeof buf)) > 0) bytes += (u32)n;
+        if (n < 0) failed("read", "/bin/sh", n);
     }
     u32 e = sys_hrtime() - t0;
     sys_close(fd);
-    report("read /bin/sh, 4K chunks, cached", e, 100);
+    int bad = nfail;
+    report_checked("read /bin/sh, 4K chunks, cached", e, 100);
     u32 t = us(e);
-    if (t) printf("   = %u KB/s\n", (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024));
+    if (t && !bad) printf("   = %u KB/s\n", (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024));
 }
 
 static void bench_cold(void)
@@ -86,49 +108,62 @@ static void bench_cold(void)
     u32 t0 = sys_hrtime(), bytes = 0;
     for (int i = 0; i < 6; i++) {
         int fd = sys_open(files[i], O_RDONLY), n;
+        if (fd < 0) { failed("open", files[i], fd); continue; }
         while ((n = sys_read(fd, buf, sizeof buf)) > 0) bytes += (u32)n;
+        if (n < 0) failed("read", files[i], n);
         sys_close(fd);
     }
     u32 e = sys_hrtime() - t0;
-    report("read 6 files, first time (disk)", e, 6);
+    int bad = nfail;
+    report_checked("read 6 files, first time (disk)", e, 6);
     u32 t = us(e);
-    if (t) printf("   = %u KB/s from the disk (%u bytes)\n", (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024), bytes);
+    if (t && !bad) printf("   = %u KB/s from the disk (%u bytes)\n", (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024), bytes);
 }
 
 static void bench_create(void)
 {
     char name[24];
-    sys_mkdir("/tmp/bench");
+    int r = sys_mkdir("/tmp/bench");
+    if (r < 0 && r != -EEXIST) {
+        const char *t = zstrerror(r);
+        printf("create/delete: cannot make /tmp/bench (%s): skipped\n", t ? t : "failed");
+        return;
+    }
     u32 t0 = sys_hrtime();
     for (int i = 0; i < 50; i++) {
         strcpy(name, "/tmp/bench/f");
         name[12] = (char)('0' + i / 10); name[13] = (char)('0' + i % 10); name[14] = 0;
-        int fd = sys_open(name, O_WRONLY | O_CREAT);
-        sys_write(fd, "hello", 5);
-        sys_close(fd);
+        int fd = sys_open(name, O_WRONLY | O_CREAT | O_TRUNC);
+        if (fd < 0) { failed("open", name, fd); continue; }
+        if ((r = sys_write(fd, "hello", 5)) != 5) failed("write", name, r < 0 ? r : -EIO);
+        if ((r = sys_close(fd)) < 0) failed("close", name, r);
     }
-    report("create + write 50 small files", sys_hrtime() - t0, 50);
+    report_checked("create + write 50 small files", sys_hrtime() - t0, 50);
     t0 = sys_hrtime();
     for (int i = 0; i < 50; i++) {
         strcpy(name, "/tmp/bench/f");
         name[12] = (char)('0' + i / 10); name[13] = (char)('0' + i % 10); name[14] = 0;
-        sys_unlink(name);
+        if ((r = sys_unlink(name)) < 0) failed("unlink", name, r);
     }
-    report("delete 50 files", sys_hrtime() - t0, 50);
-    sys_rmdir("/tmp/bench");
+    report_checked("delete 50 files", sys_hrtime() - t0, 50);
+    if ((r = sys_rmdir("/tmp/bench")) < 0) {
+        const char *t = zstrerror(r);
+        printf("create/delete: cannot remove /tmp/bench (%s)\n", t ? t : "failed");
+    }
 }
 
 static void bench_dir(void)
 {
     struct udirent d;
     int fd = sys_open("/bin", O_RDONLY);
+    if (fd < 0) { failed("open", "/bin", fd); report_checked("list /bin (entries read)", 0, 1); return; }
     u32 t0 = sys_hrtime();
     int total = 0;
     for (int r = 0; r < 50; r++) {
         sys_lseek(fd, 0, 0);
         while (sys_readdir(fd, &d) > 0) total++;
     }
-    report("list /bin (entries read)", sys_hrtime() - t0, (u32)total);
+    report_checked("list /bin (entries read)", sys_hrtime() - t0, (u32)total);
     sys_close(fd);
 }
 

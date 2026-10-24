@@ -14,6 +14,13 @@ DESCRIPTION
     files, listing /bin, and printing 300 lines with scrolling. It is a
     development tool and is not meant for everyday use.
 
+    Every open, read, write, close, mkdir, unlink and stat is checked: when
+    calls fail, the line says "FAILED", how many and the first error, and
+    gives no timing (a failed call is fast, so its time would mislead). The
+    create and delete lines need a writable /tmp; their files are written
+    through to the disk before each call returns (no write-back cache), so
+    on a real disk they take milliseconds, not microseconds.
+
     Numbers taken in an emulator are NOT hardware numbers. Run it on the real
     Amiga and write the result down with the date.
 

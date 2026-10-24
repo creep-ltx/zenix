@@ -30,5 +30,8 @@ sleep 2
 send pingd & sleep 1; ping 500\r
 wait round.trips.in 60
 sleep 2
+send touch /tmp/bench; bench > /tmp/b1; rm /tmp/bench; bench > /tmp/b2; echo bench f1=$(grep -c FAILED /tmp/b1) f2=$(grep -c FAILED /tmp/b2); grep 'small files' /tmp/b1\r
+wait bench.f1=[0-9] 240
+sleep 2
 send sh /tests/batch-e.sh > /tmp/be.out 2>&1; sync; echo finished-be\r
 sleep 240
