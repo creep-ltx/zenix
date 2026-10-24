@@ -446,7 +446,9 @@ static int rw(u32 lba, u32 count, void *buf, int write)
             for (;;) {
                 if (cmd(13, card_rca << 16, CMD_R1, 0, 500000))
                     return -1;
-                if (resp[0] & (1u << 8))                /* READY_FOR_DATA */
+                /* READY_FOR_DATA only says the card's buffer is free; some cards set it while still programming,
+                 * so the card state (bits 12:9) must have left "prg" (7) too - as Linux's mmc driver checks */
+                if ((resp[0] & (1u << 8)) && ((resp[0] >> 9) & 15) != 7)
                     break;
                 if (now_us() - t1 > 3000000) {
                     kprintf("emmc: card stays busy after a write\n");
@@ -463,7 +465,8 @@ static int rw(u32 lba, u32 count, void *buf, int write)
 int emmc_read(u32 lba, u32 count, void *buf) { return rw(lba, count, buf, 0); }
 int emmc_write(u32 lba, u32 count, const void *buf) { return rw(lba, count, (void *)buf, 1); }
 
-/* emmc_write returns after the card has taken the block; there is no write cache in the driver to flush. */
+/* emmc_write returns after the card has programmed the block (CMD13: ready for data and out of the programming state);
+ * there is no write cache in the driver to flush. */
 int emmc_flush(void)
 {
     return 0;

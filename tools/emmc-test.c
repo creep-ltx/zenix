@@ -52,6 +52,14 @@ int main(void)
     }
     EXPECT_TRUE(stray == 0, "writes touched only their own sectors");
 
+    {   /* a card that sets READY_FOR_DATA while still in the programming state: the write must wait for the state
+         * too, or the next command finds the card busy (the model counts that as a fault) */
+        int f0 = faults;
+        fake_ready_in_prg = 1;
+        EXPECT_TRUE(emmc_write(2100, 1, pat) == 0 && emmc_write(2101, 1, pat) == 0 && emmc_read(2100, 1, b) == 0
+                    && faults == f0, "a write returns only after the card has left the programming state");
+        fake_ready_in_prg = 0;
+    }
     {                                                   /* the boot line names what sector 0 holds */
         static u8 s0[512]; char w[48];
         memcpy(s0, "RDSK", 4); sector0_kind(s0, w);

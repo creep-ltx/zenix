@@ -16,6 +16,7 @@ static u32 R[0x100 / 4];
 static u32 fake_t;
 static int faults, trace;
 static int app, acmd41_calls, rca_given, wr_busy_once;
+static int fake_ready_in_prg;   /* a card that reports READY_FOR_DATA while still programming (Linux checks the state too) */
 enum { S_IDLE, S_READY, S_IDENT, S_STBY, S_TRAN, S_DATA, S_RCV, S_PRG };
 static int state;
 static int blocks_left, pos, xfer_write;
@@ -115,7 +116,7 @@ static void exec(u32 v)
             break;
         case 13:
             EXPECT(2, 1, 1, 0);
-            if (state == S_PRG && wr_busy_once) { wr_busy_once = 0; r0 = 7 << 9; }
+            if (state == S_PRG && wr_busy_once) { wr_busy_once = 0; r0 = 7 << 9 | (fake_ready_in_prg ? 1u << 8 : 0); }
             else { if (state == S_PRG) state = S_TRAN; r0 = state << 9 | 1 << 8; }
             break;
         case 16: EXPECT(2, 1, 1, 0); r0 = state << 9 | 1 << 8; FAULT("CMD16 on an SDHC card is not needed"); break;

@@ -421,7 +421,8 @@ overlapping partitions of a damaged table): `DISK_MOUNT` and `DISK_RAW` (tools: 
 refused while an overlapping device is mounted, and a write touching a device another process has mounted is refused; a
 plain open reads. A mount whose server has died is released when it is in the way (checked with `SYS_procinfo`).
 `DISK_FLUSH` makes earlier writes durable (`blk_flush`: ATA FLUSH CACHE on IDE, SYNCHRONIZE CACHE (10) on the A3000; the SD
-driver waits after every write until the card has programmed it). `struct diskinfo` carries capability bits and the largest
+driver waits after every write until the card has programmed it: CMD13 until READY_FOR_DATA and the card state is out of
+"prg", as Linux checks - some cards report ready for data while still programming). `struct diskinfo` carries capability bits and the largest
 transfer; `DISKCAP_FLUSH` is set only if a flush tried at start worked, and `DISK_FLUSH` answers -95 on a device without it.
 `FS_SYNC` and `FS_QUIT` (umount) end with a `DISK_FLUSH` in both filesystem servers. Protocol: `kernel/diskproto.h`.
 Only root's messages (`m->uid` 0, stamped by the kernel) are served, except `DISK_LIST` and `DISK_INFO`: raw sectors
