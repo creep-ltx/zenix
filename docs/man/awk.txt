@@ -1,0 +1,97 @@
+AWK(1)			Zenix manual
+
+NAME
+    awk - pattern scanning and text processing language
+
+SYNOPSIS
+    awk [-F fs] [-v name=value]... 'program' [name=value | file]...
+    awk [-F fs] [-v name=value]... -f progfile [name=value | file]...
+
+DESCRIPTION
+    Reads the files (or the standard input) one record at a time, splits
+    each record into fields, and runs the program's rules on it. A rule is
+    a pattern and an action:
+        pattern { action }
+    A rule without a pattern runs for every record; one without an action
+    prints the matching record. The record is $0, its fields $1, $2 ...
+    $NF. This is a POSIX awk; its output is checked against GNU awk.
+
+    Patterns:
+        BEGIN, END        before the first record, after the last
+        /re/              records matching the regular expression
+        expression        records for which it is true (non-zero or
+                          non-empty)
+        pat1, pat2        a range: from a record matching pat1 to one
+                          matching pat2
+
+    Statements: if/else, while, do/while, for (;;), for (key in array),
+    break, continue, next, nextfile, exit [status], return, delete,
+    getline, print, printf, { ... }. Functions:
+        function name(param, ..., local, ...) { ... }
+    Arrays are passed by reference, other values by value; extra
+    parameters are the usual way to get local variables.
+
+    Operators, by precedence: ( ) $ ++ -- ^ ! unary + - * / % + - (string
+    concatenation) < <= == != > >= ~ !~ in && || ?: and the assignments
+    = += -= *= /= %= ^=.
+
+BUILT-IN FUNCTIONS
+    length(s)  substr(s, m, n)  index(s, t)  split(s, a, fs)
+    sub(re, repl, target)  gsub(re, repl, target)  match(s, re)
+    sprintf(fmt, ...)  tolower(s)  toupper(s)
+    int(x)  sqrt(x)  exp(x)  log(x)  sin(x)  cos(x)  atan2(y, x)
+    rand()  srand(seed)  system(cmd)  close(name)  fflush(name)
+    In sub and gsub, & in the replacement is the matched text, \& a
+    plain &. match sets RSTART and RLENGTH.
+
+INPUT AND OUTPUT
+    print > "file"   print >> "file"   print | "command"
+    getline          getline var       getline < "file"
+    getline var < "file"               "command" | getline [var]
+    "-" and /dev/stdin are the standard input, /dev/stdout and
+    /dev/stderr the outputs. close(name) ends a file or command so it can
+    be read or written again from the start.
+
+VARIABLES
+    NR, FNR    record number in all input, in this file
+    NF         number of fields (assigning it shortens or grows $0)
+    FS, OFS    input and output field separators (" " splits on runs of
+               spaces and tabs; one other character splits on it; longer
+               values are regular expressions)
+    RS, ORS    record separators: RS is one character, or "" for blocks
+               of lines separated by empty lines
+    FILENAME, SUBSEP, RSTART, RLENGTH, CONVFMT, OFMT, ENVIRON, ARGC, ARGV
+
+OPTIONS
+    -F fs           set FS ("t" means a tab)
+    -v name=value   set a variable before BEGIN runs
+    -f progfile     read the program from a file
+    A name=value argument among the files sets the variable when awk gets
+    to it.
+
+EXAMPLES
+    awk '{ print $2, $1 }' file          swap the first two columns
+    awk -F: '{ print $1 }' /etc/passwd   the user names
+    awk '$3 > 100' data                  lines whose third field is > 100
+    awk '{ n[$1]++ } END { for (k in n) print k, n[k] }' words
+    awk '{ s += $NF } END { print s / NR }' numbers    the average
+    ls -l | awk '{ print $5, $NF }'      sizes and names
+
+NOTES
+    Numbers are doubles computed in software (Zenix uses no FPU), so heavy
+    arithmetic is slow on a real 68020. Whole numbers print in full up to
+    16 digits (as gawk); larger ones use CONVFMT/OFMT (%.6g). The stack is
+    fixed at 64 KB: a program nested very deeply (endless recursion,
+    hundreds of nested parentheses) stops with "nested too deeply" and
+    status 2 instead of crashing. An RS of more than one character, the
+    gawk extensions (BEGINFILE, regex RS, gensub, arrays of arrays,
+    @include) and locales are not supported. Regular expressions are the
+    extended ones of grep -E; they have no back-references. Running out of
+    memory ends awk with "awk: out of memory".
+
+EXIT STATUS
+    0, the value given to exit, or 2 for a syntax error, an unreadable
+    program file or another fatal error (1 for out of memory).
+
+SEE ALSO
+    sed(1), grep(1), cut(1), sort(1), sh(1)

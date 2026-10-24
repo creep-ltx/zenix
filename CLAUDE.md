@@ -25,13 +25,14 @@ on PFS3 partitions, Zenix root and /home); the menu program lives with `zenixboo
 Rebooting between the systems (owner 2026-10-24): `bootzenix` in AmigaOS, `reboot [amigaos]` / `bootamigaos` in Zenix,
 through a one-shot note the boot menu reads. Later (not now): a Wasabi-like remote-access daemon for Zenix (needs the network driver).
 DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved, docs/d11-service-manager.md).
+`awk` (owner 2026-10-24: finish the parked `user/awk.c` now, while D11 is built; a colour console proposed next, not yet approved).
 Next approved, in this order after D11: Zenix installing updates by itself (no card swaps), then the network driver.
 **The owner's own goal (2026-10-24): Claude in a terminal on Zenix on the A1200.** It sets the order of the work, but it
 is the owner's goal, not Zenix's purpose (owner, 2026-10-24): never present it as Zenix's main goal in the docs. Approved now: a serial terminal program (Zenix to the PC over the null-modem cable, from
 the weekend of 2026-10-31); then the same over the network; then a console good enough for Claude Code's screen
 (colours, stand-ins for its Unicode symbols).
 Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
-parked (e.g. the uncommitted `user/awk.c`). Order of the fixes: batches A and B, then the first PiStorm boot, then C,
+parked. Order of the fixes: batches A and B, then the first PiStorm boot, then C,
 D and E.
 1. **Batch A** - first-boot blockers (cache flushes, `cpusha`, `-m68020-60`, keyboard timing, Amiga Swedish keymap,
    the RAM-disk image, bootinfo/Gayle/floppy motor). Without these the PiStorm boot fails.

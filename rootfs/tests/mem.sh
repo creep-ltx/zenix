@@ -54,4 +54,15 @@ done
 n=$(dmesg | grep -c 'exec: /tests/badzexe.* refused')
 [ $n -eq 11 ] && echo "mem: the kernel named all 11 refusals ok" || echo "mem: the kernel named $n of 11 refusals FAILED"
 hello 1 | grep -q 'hello from pid' && echo "mem: a good program still runs ok" || echo "mem: a good program still runs FAILED"
+# awk: its fixed 64 KB stack (no MMU, nothing grows it). Endless recursion and a deeply nested expression stop with
+# awk's own message and status 2, not with the kernel's stack guard killing it; a long loop does not lose memory
+# (20000 x 1 KB strings would need 20 MB if each one leaked).
+awk 'function f(n) { return f(n + 1) } BEGIN { f(1) }' > $T/awk1.out 2>&1; rc=$?
+[ $rc -eq 2 ] && grep -q 'nested too deeply' $T/awk1.out && echo "mem: awk endless recursion stopped cleanly ok" || echo "mem: awk endless recursion (rc $rc) FAILED"
+e=1; k=0; while [ $k -lt 600 ]; do e="($e)"; k=$(( k + 1 )); done
+awk "BEGIN { print $e }" > $T/awk2.out 2>&1; rc=$?
+{ [ $rc -eq 0 ] || grep -q 'nested too deeply' $T/awk2.out; } && echo "mem: awk deep expression (rc $rc) ok" || echo "mem: awk deep expression (rc $rc) FAILED"
+dmesg | grep -q 'awk.*overflowed' && echo "mem: awk overflowed its stack FAILED" || echo "mem: the stack guard never had to kill awk ok"
+awk 'BEGIN { s = sprintf("%1000s", "x"); for (i = 0; i < 20000; i++) { t = s i; a[i % 10] = t } print "done" }' > $T/awk3.out 2>&1
+grep -q '^done$' $T/awk3.out && echo "mem: awk 20000 string assignments ok" || echo "mem: awk 20000 string assignments FAILED: $(head -c 80 $T/awk3.out)"
 echo "mem: done"

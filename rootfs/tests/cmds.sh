@@ -73,3 +73,20 @@ t timeout;    timeout 1 sleep 5; echo rc=$?; timeout 5 true; echo rc=$?; timeout
 t subshell;   x=local; echo $x | cat; f() { echo in-f-$1; }; f a | cat; v=$(f b); echo $v; (f c); set -- p1 "p 2"; echo "$1|$2" | cat; ( echo "$#" ); y='it'"'"'s'; echo "$y" | cat; echo $(echo $x)
 t unlinkopen; printf 'old-data\n' > $T/uo1; printf 'rm $T/uo1; echo NEW > $T/uo2; cat; cat $T/uo2\n' > $T/uo.sh; sh $T/uo.sh < $T/uo1; rm -f $T/uo2 $T/uo.sh
 t substr2;    v=abcdef; echo ${v:1:-1} ${v:2:-3} ${v:0:-6}x
+t awk-fields; awk '{ print $2, $1 }' fruit.txt; awk -F: '{ print $3 "-" $1, NF }' colon.txt; awk '{ $2 = $2 * 2; print; print NF }' fruit.txt | head -n 4
+t awk-patterns; awk '/an/' fruit.txt; awk '$2 > 5 { n++ } END { print n " big" }' fruit.txt; awk 'NR == 2, NR == 3 { print NR ": " $0 }' fruit.txt; awk '!/apple/ && $2 < 5' fruit.txt
+t awk-begin;  awk 'BEGIN { x = 3; y = 4; print x * y, x / y, 2 ^ 10, 7 % 3, -x, x "" y; print 0.1 + 0.2, 1e6, 1/3, int(-3.7), 100000 * 100000 }'
+t awk-vars;   awk -v n=5 'BEGIN { for (i = 1; i <= n; i++) s = s i; print s }'; echo 'a b c' | awk '{ print NF, $NF, $(NF-1) }'; awk 'END { print NR, $0 }' fruit.txt
+t awk-arrays; awk '{ sum[$1] += $2 } END { for (k in sum) print k, sum[k] }' fruit.txt | sort; awk 'BEGIN { a["x"] = 1; delete a["x"]; print ("x" in a), length("hello") }'
+t awk-split;  awk 'BEGIN { n = split("a,b,,c", p, ","); print n, p[1], p[4]; m = split("  one two  ", q); print m, q[1] q[2] }'
+t awk-strings; awk 'BEGIN { s = "Hello, World"; print substr(s, 1, 5), substr(s, 8), index(s, "World"), toupper(s), tolower(s), length(s) }'
+t awk-subs;   echo 'aaa bbb aaa' | awk '{ n = gsub(/a/, "x"); print n, $0 }'; echo 'foo bar' | awk '{ sub(/o+/, "[&]"); print }'; echo 'xyz' | awk '{ if (match($0, /y+/)) print RSTART, RLENGTH }'
+t awk-printf; awk 'BEGIN { printf "%5d|%-5s|%05.2f|%x|%o|%c|%e|%%\n", 42, "ab", 3.14159, 255, 8, 65, 12345.678 }'; awk '{ printf "%-8s%3d\n", $1, $2 }' fruit.txt
+t awk-func;   awk 'function fact(n) { return n <= 1 ? 1 : n * fact(n - 1) } BEGIN { print fact(10); print fact(15); print 2 ^ 53, -2 ^ 52 + 1 }'; awk 'function f(a, i) { a["k"] = 9; i = 5 } BEGIN { f(arr); print arr["k"], i "" }'
+t awk-control; awk 'BEGIN { for (i = 0; i < 10; i++) { if (i == 2) continue; if (i == 5) break; printf "%d ", i }; print ""; while (j < 3) j++; do k++; while (k < 2); print j, k }'
+t awk-ofs;    awk 'BEGIN { OFS = "-"; ORS = "|\n" } { $1 = $1; print }' colon.txt; awk -F: -v OFS=: '{ print $1, $3 }' colon.txt
+t awk-io;     awk '{ print $1 > "'$T'/awk1.out" }' fruit.txt; sort $T/awk1.out | uniq -c; awk 'BEGIN { while ((getline line < "colon.txt") > 0) n++; print n }'; awk '{ print $2 | "sort -n" }' fruit.txt
+t awk-getline; awk 'BEGIN { "echo hi there" | getline x; print x; close("echo hi there") }'; awk 'NR == 1 { getline; print "after getline:", $0, NR }' fruit.txt
+t awk-cmp;    awk 'BEGIN { print ("10" < "9"), (10 < 9), ("abc" < "abd"); x = "3.0"; print (x == 3) }'; echo '10 9' | awk '{ print ($1 < $2) }'
+t awk-rc;     awk 'BEGIN { exit 3 }'; echo rc=$?; awk 'BEGIN { print "x" } END { print "end" }' < /dev/null; awk '{ exit } END { print "end ran", NR }' fruit.txt
+t awk-file;   printf '{ print NR ": " $1 }\n' > $T/prog.awk; awk -f $T/prog.awk colon.txt; awk '{ print FILENAME, FNR }' colon.txt fruit.txt | tail -n 2

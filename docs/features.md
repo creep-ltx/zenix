@@ -111,6 +111,11 @@ tools/cmds2-test.sh runs rootfs/tests/batch-e.sh). See man/sh.txt.
 Every command has a manual page. The full list with one-line summaries is in [commands.md](commands.md); the
 pages are in [man/](man/). **verified** against GNU for the text tools (`tools/cmds-test.sh`).
 
+`awk` (owner-approved 2026-10-24): a POSIX awk (patterns and actions, arrays, user functions, the built-in functions,
+`printf`, `getline`, output to files and pipes), on a fixed 64 KB stack with a depth guard. **verified** in FS-UAE:
+`tools/cmds-test.sh` compares 17 groups of awk programs with GNU awk; `tools/memtest.sh` checks that endless recursion
+and deep nesting stop with a message and that a long loop keeps memory flat. See man/awk.txt.
+
 ## Tooling
 | Feature | Status |
 |---|---|

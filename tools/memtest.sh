@@ -19,7 +19,7 @@ tools/run-test.sh fsuae/a1200-020-fast.fs-uae $(( ${MEM_WAIT:-200} + 30 )) $OUT/
 debugfs -R "cat /tmp/mem.out" build/zenix.hdf > $OUT/mem.out 2>/dev/null
 cat $OUT/mem.out
 ok=$(grep -c ' ok$' $OUT/mem.out); bad=$(grep -c 'FAILED' $OUT/mem.out)
-want=$(( 13 + 1 + 8 + 11 + 2 ))      # badptr (12 checks + "all ok"), shell churn, directory tools, corrupt programs, kernel log + good program
+want=$(( 13 + 1 + 8 + 11 + 2 + 4 ))  # badptr (12 checks + "all ok"), shell churn, directory tools, corrupt programs, kernel log + good program, awk
 e2fsck -fn build/zenix.hdf >$OUT/fsck.log 2>&1 || { echo "FAIL: e2fsck finds errors (see $OUT/fsck.log)"; exit 1; }
 if [ "$ok" -eq "$want" ] && [ "$bad" -eq 0 ] && grep -q 'mem: done' $OUT/mem.out; then
     echo "PASS: $ok of $want memory checks ok, e2fsck clean"
