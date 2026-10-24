@@ -102,6 +102,38 @@ the servers listed in a small configuration file, restarts a server that dies (c
 error and retry), and later starts servers on first use. It replaces "start everything at boot" and the hard-wired
 server list in kmain. Port rights (Darwin) are a separate, later decision.
 
+## D12. The serial port as a device, and `cu` (approved by the owner 2026-10-24: the first step to Claude in a terminal on Zenix)
+**Why.** The owner's main use of a computer is Claude Code in a terminal. Step 1 is Zenix's console talking to the PC
+through the null-modem cable, where Claude runs. Today the serial port belongs to the console: everything shown is
+copied there (the mirror), what arrives is typed into the shown console, and `kprintf` writes the kernel log there.
+That serves the test rig and a debug terminal, but a program cannot use the port.
+
+**Decision, as Linux and BSD do it.** The port is also a device, `/dev/ttyS0`, handled where the other devices are
+(`open_device` in vfs.c, a new file type FT_SERIAL; no server, like `/dev/tty1..10`). One process may have it open at a
+time (a second open gets -EBUSY); root only, as for the raw disks (the port's other end is a whole other computer).
+While it is open the port is that program's alone: the console's mirror stops, received bytes go to the device and not
+to the console, the 0x1D test hook is off, and `kprintf` keeps writing the kernel log to its ring (`dmesg`) but not to
+the wire. At the last close everything is as before. Reads return the bytes the receive ring holds (blocking until at
+least one, the way a tty in raw mode does; `O_NONBLOCK`-style polling is not needed by `cu`); writes go out through
+the existing 4 KB send ring, waiting for room. 115200 baud 8N1, no handshake (the cable's minimal wiring); a later
+option may set the speed. Nothing else changes: the receive interrupt still only queues (audit B4), `serial_work`
+hands the bytes to the device instead of the console.
+
+**`cu`.** A user program, the classic Unix "call up": `cu [-l /dev/ttyS0]` puts the console in raw mode, copies keys to
+the port and the port's bytes to the screen, and ends at `~.` typed at the start of a line (as in BSD/Linux cu; `~~`
+sends one `~`). Two directions at once without threads or `select`: `cu` spawns a second copy of itself for the
+port-to-screen direction and keeps the keyboard-to-port one, ending both at `~.` (Zenix has no `select` yet; when the
+signal-bit waiting of future-ideas item 1 exists, `cu` can become one process). The PC side is a login on the USB
+serial adapter (`agetty` on /dev/ttyUSB0 at 115200), set up once on the PC.
+
+**Not in D12:** network (the same over TCP comes with the network driver), the console's colours and Unicode stand-ins
+(step 3 of the main goal), handshake lines, file transfer.
+
+**Tests.** FS-UAE's serial port is a PTY on the host: a test opens it, writes bytes and checks `cu`'s screen and what
+arrives, the mirror off while `cu` runs and back after `~.`, -EBUSY for a second open, a non-root user refused, and the
+kernel log not on the wire while the device is open. On the A1200 with the cable (from 2026-10-31): Claude Code on the
+PC, shown in Zenix.
+
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`/`mount.zenixfs`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
