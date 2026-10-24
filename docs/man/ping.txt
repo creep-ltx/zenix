@@ -9,8 +9,18 @@ SYNOPSIS
 DESCRIPTION
     Talks to pingd(1) through its message port: calls it to add 40+2, has it
     edit a string in this program's own memory, then times rounds message
-    round trips (default 1000) in 100 Hz ticks, and finally tells the server
-    to quit. This is NOT the network ping; Zenix has no network yet.
+    round trips (default 1000) with the E-clock (as bench(1) does) and
+    prints the total and the time of one round trip in microseconds, and
+    finally tells the server to quit. This is NOT the network ping; Zenix
+    has no network yet.
+
+OUTPUT
+    ping: 1000 round trips in 3012 us, 3.0 us each
+
+NOTES
+    The microseconds assume the PAL E-clock (709379 Hz); on an NTSC machine
+    (715909 Hz) they read about 1% high. Times measured in an emulator are
+    not hardware times.
 
 SEE ALSO
     pingd(1), bench(1)

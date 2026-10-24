@@ -16,6 +16,14 @@ Optional argv[3]: a keystroke script driven while logging. Lines:
                        a timeout the script goes on, and the tap prints
                        "serial-tap: wait timed out: <regex>" on its output.
 
+After every boot the tap sends one harmless byte pair, 0x1D '.' (the kernel's
+test hook with a letter that is no command), half a second after the kernel's
+"clock: ... tick latch" line (at a line start), when its receive interrupt is
+on. The kernel's serial copy
+of the console waits for the port only once it has received something since
+boot (else it drops what does not fit, to keep the screen fast); this makes
+the log complete even before the script types anything.
+
 The tap holds its own slave fd open so the master never enters the EIO
 "no slave" state between emulator sessions."""
 import os
@@ -61,6 +69,28 @@ def wait_for(pattern, timeout):
             cond.wait(min(left, 0.5))
 
 
+TICK_LINE = re.compile(rb"(?:^|\n)clock: [^\n]*tick latch")
+send_lock = threading.Lock()    # a `send` line and the greeting never interleave (0x1D takes the next byte)
+
+
+def greet():
+    """0x1D '.' after each boot's "tick latch" line: the kernel then knows someone listens (kernel/serial.c)."""
+    seen = 0
+    while True:
+        with cond:
+            while True:
+                # at a line start: the previous boot's lines, replayed early in the next boot (before its receive
+                # interrupt is on), hold the same text after "> "
+                m = TICK_LINE.search(bytes(received), seen)
+                if m:
+                    seen = m.end()
+                    break
+                cond.wait(1)
+        time.sleep(0.5)
+        with send_lock:
+            os.write(master, b"\x1d.")
+
+
 def run_script(path):
     global mark
     for line in open(path):
@@ -77,11 +107,13 @@ def run_script(path):
             text = line[5:].encode().decode("unicode_escape")
             with cond:
                 mark = len(received)
-            for ch in text.encode("latin1"):    # trickle like a human types
-                os.write(master, bytes([ch]))
-                time.sleep(0.02)
+            with send_lock:
+                for ch in text.encode("latin1"):    # trickle like a human types
+                    os.write(master, bytes([ch]))
+                    time.sleep(0.02)
 
 
+threading.Thread(target=greet, daemon=True).start()
 if script:
     threading.Thread(target=run_script, args=(script,), daemon=True).start()
 

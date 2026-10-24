@@ -31,6 +31,7 @@ rm -f fsuae/floppy-test.fs-uae
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 grep -qE '^df0 +' $OUT/log && grep -qE '^df1 +1760' $OUT/log && check "fdisk list shows df0 and df1" ok || check "fdisk list shows df0 and df1" bad
+grep -qE '^df1 +1760 +880 KB' $OUT/log && check "fdisk list gives a floppy's size in KB (not 0 MB)" ok || check "fdisk list gives a floppy's size in KB (not 0 MB)" bad
 want0=$(head -c $((200*512)) build/zenix.adf | sha256sum | cut -d' ' -f1)
 grep -q "$want0  /tmp/a" $OUT/log && check "df0: first 200 sectors identical to the host's" ok || check "df0: first 200 sectors identical to the host's" bad
 want1=$(sha256sum < $OUT/df1.orig | cut -d' ' -f1)

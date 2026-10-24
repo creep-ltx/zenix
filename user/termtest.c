@@ -10,9 +10,10 @@ int main(void)
     printf(ESC "[7m Zenix terminal test " ESC "[0m  size %dx%d\n", sz & 0xFFFF, sz >> 16);
     printf("normal " ESC "[1mbold" ESC "[0m " ESC "[4munderline" ESC "[0m " ESC "[7minverse" ESC "[0m "
            ESC "[1;4;7mall three" ESC "[0m\n");
-    at(4, 1, "+------------------------------+");
-    for (int r = 5; r < 9; r++) { at(r, 1, "|"); at(r, 32, "|"); }
-    at(9, 1, "+------------------------------+");
+    /* the box is 36 columns wide: its longest line (27 characters from column 5) keeps a margin */
+    at(4, 1, "+----------------------------------+");
+    for (int r = 5; r < 9; r++) { at(r, 1, "|"); at(r, 36, "|"); }
+    at(9, 1, "+----------------------------------+");
     at(6, 5, "cursor addressing works");
     at(7, 5, "ESC[row;colH, erase, scroll");
     /* scroll region rows 11..14: print 8 numbers, only that area scrolls */

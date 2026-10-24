@@ -216,6 +216,20 @@ static int set_clock(u32 base, u32 target)
     return 0;
 }
 
+/* what sector 0 holds, for the log: "Amiga RDB", "MBR partition table" or "unknown (first bytes 00 00 00 00)"
+ * (the RDB may also start in sectors 1-15; diskd looks there, this line only names sector 0) */
+static void sector0_kind(const u8 *sec, char *out)
+{
+    const char *k = 0;
+    if (sec[0] == 'R' && sec[1] == 'D' && sec[2] == 'S' && sec[3] == 'K') k = "Amiga RDB";
+    else if (sec[510] == 0x55 && sec[511] == 0xAA) k = "MBR partition table";
+    if (k) { while ((*out++ = *k++)) ; return; }
+    static const char hex[] = "0123456789abcdef", pre[] = "unknown (first bytes";
+    for (k = pre; *k; ) *out++ = *k++;
+    for (int i = 0; i < 4; i++) { *out++ = ' '; *out++ = hex[sec[i] >> 4]; *out++ = hex[sec[i] & 15]; }
+    *out++ = ')'; *out = 0;
+}
+
 int emmc_init(void)
 {
 #ifdef EMMC_HOST_TEST
@@ -347,7 +361,9 @@ int emmc_init(void)
         up = 0;
         return -1;
     }
-    kprintf("emmc: sector 0 starts %c%c%c%c (an Amiga RDB says RDSK)\n", sec[0], sec[1], sec[2], sec[3]);
+    char what[48];
+    sector0_kind(sec, what);
+    kprintf("emmc: sector 0: %s\n", what);
     return 0;
 }
 
@@ -430,7 +446,9 @@ static int rw(u32 lba, u32 count, void *buf, int write)
             for (;;) {
                 if (cmd(13, card_rca << 16, CMD_R1, 0, 500000))
                     return -1;
-                if (resp[0] & (1u << 8))                /* READY_FOR_DATA */
+                /* READY_FOR_DATA only says the card's buffer is free; some cards set it while still programming,
+                 * so the card state (bits 12:9) must have left "prg" (7) too - as Linux's mmc driver checks */
+                if ((resp[0] & (1u << 8)) && ((resp[0] >> 9) & 15) != 7)
                     break;
                 if (now_us() - t1 > 3000000) {
                     kprintf("emmc: card stays busy after a write\n");
@@ -447,7 +465,8 @@ static int rw(u32 lba, u32 count, void *buf, int write)
 int emmc_read(u32 lba, u32 count, void *buf) { return rw(lba, count, buf, 0); }
 int emmc_write(u32 lba, u32 count, const void *buf) { return rw(lba, count, (void *)buf, 1); }
 
-/* emmc_write returns after the card has taken the block; there is no write cache in the driver to flush. */
+/* emmc_write returns after the card has programmed the block (CMD13: ready for data and out of the programming state);
+ * there is no write cache in the driver to flush. */
 int emmc_flush(void)
 {
     return 0;

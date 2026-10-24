@@ -52,6 +52,23 @@ int main(void)
     }
     EXPECT_TRUE(stray == 0, "writes touched only their own sectors");
 
+    {   /* a card that sets READY_FOR_DATA while still in the programming state: the write must wait for the state
+         * too, or the next command finds the card busy (the model counts that as a fault) */
+        int f0 = faults;
+        fake_ready_in_prg = 1;
+        EXPECT_TRUE(emmc_write(2100, 1, pat) == 0 && emmc_write(2101, 1, pat) == 0 && emmc_read(2100, 1, b) == 0
+                    && faults == f0, "a write returns only after the card has left the programming state");
+        fake_ready_in_prg = 0;
+    }
+    {                                                   /* the boot line names what sector 0 holds */
+        static u8 s0[512]; char w[48];
+        memcpy(s0, "RDSK", 4); sector0_kind(s0, w);
+        EXPECT_TRUE(!strcmp(w, "Amiga RDB"), "sector 0 with RDSK: Amiga RDB");
+        memset(s0, 0, 512); s0[510] = 0x55; s0[511] = 0xAA; sector0_kind(s0, w);
+        EXPECT_TRUE(!strcmp(w, "MBR partition table"), "sector 0 with 55 AA: MBR partition table");
+        memset(s0, 0, 512); s0[0] = 0xfa; s0[3] = 0x0c; sector0_kind(s0, w);
+        EXPECT_TRUE(!strcmp(w, "unknown (first bytes fa 00 00 0c)"), "other sector 0: its first bytes in hex");
+    }
     EXPECT_TRUE(faults == 0, "no protocol faults from the model");
     printf(bad || faults ? "FAILED\n" : "all ok\n");
     return bad || faults;

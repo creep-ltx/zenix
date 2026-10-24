@@ -101,6 +101,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   block allocators of ext2.c. `zwhy` shows no text for -1 (EPERM, 1) for that reason: the caller's own words appear.
 - Input rings between the interrupts and `kwork`: 128 keyboard codes, 1024 serial bytes; a tty queue holds 1024
   bytes of typed input that no program has read yet. Anything dropped is counted on the kernel log.
+- Serial send ring: 4 KB, drained at about 11.5 KB/s (115200 baud). Until the port has received a byte since boot,
+  console output that does not fit is dropped (counted on the kernel log); after that the console waits for it.
 - Keyboard: 500 ms repeat delay, 33 repeats per second; keymaps `sv` and `us` only; the accent keys that AmigaOS
   treats as dead keys (acute, grave, circumflex, tilde, diaeresis) type the spacing character, there is no
   composition with the next letter.

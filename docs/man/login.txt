@@ -10,10 +10,11 @@ DESCRIPTION
     init runs login on every console that is in use (see init(8)): on
     console 1 at boot, on another console the first time it is shown
     (Amiga+F2 .. Amiga+F10), and again on a console whose login ended.
-    login asks for a user name and a password (typing is not echoed),
-    checks them against /etc/passwd, sets USER, LOGNAME, HOME, SHELL and
-    PATH, goes to the home directory and runs the user's shell as that user.
-    When the shell ends, login ends and init starts it again.
+    login asks for a user name (shown as it is typed, with the console's
+    usual line editing) and a password (typing is not echoed), checks them
+    against /etc/passwd, sets USER, LOGNAME, HOME, SHELL and PATH, goes to
+    the home directory and runs the user's shell as that user. When the
+    shell ends, login ends and init starts it again.
 
     A user whose password field is empty is not asked for a password. With -f
     the password is not asked at all. On console 1 only, a user named in

@@ -439,7 +439,8 @@ overlapping partitions of a damaged table): `DISK_MOUNT` and `DISK_RAW` (tools: 
 refused while an overlapping device is mounted, and a write touching a device another process has mounted is refused; a
 plain open reads. A mount whose server has died is released when it is in the way (checked with `SYS_procinfo`).
 `DISK_FLUSH` makes earlier writes durable (`blk_flush`: ATA FLUSH CACHE on IDE, SYNCHRONIZE CACHE (10) on the A3000; the SD
-driver waits after every write until the card has programmed it). `struct diskinfo` carries capability bits and the largest
+driver waits after every write until the card has programmed it: CMD13 until READY_FOR_DATA and the card state is out of
+"prg", as Linux checks - some cards report ready for data while still programming). `struct diskinfo` carries capability bits and the largest
 transfer; `DISKCAP_FLUSH` is set only if a flush tried at start worked, and `DISK_FLUSH` answers -95 on a device without it.
 `FS_SYNC` and `FS_QUIT` (umount) end with a `DISK_FLUSH` in both filesystem servers. Protocol: `kernel/diskproto.h`.
 Only root's messages (`m->uid` 0, stamped by the kernel) are served, except `DISK_LIST` and `DISK_INFO`: raw sectors
@@ -621,7 +622,19 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **Serial** (`serial.c`): interrupt-driven receive (queued for `serial_work`, above), 115200 baud, mirrors the
   console on the screen (its output from then on; a switch does not resend the screen); input goes to that
   console's tty. The test rig depends on it, including the hook 0x1D + 1-9 / 0 (show console 1-9 / 10, as
-  Amiga+F1..F10) and u d U D (scroll back a line or a page).
+  Amiga+F1..F10) and u d U D (scroll back a line or a page); 0x1D with any other byte does nothing.
+  Sending is a 4 KB ring drained by polling Paula (about 11.5 KB/s), far slower than the screen. **The kernel's
+  own output** (`kprintf`: the boot log, panics) always waits for room, so it is complete. **The console's copy**
+  waits only once the port has received a byte since boot (someone listens: a terminal, or the test harness, which
+  sends 0x1D '.' half a second after each boot's `tick latch` line); until then a byte that does not fit the ring
+  is dropped and counted, so with no cable the screen is never held to the serial speed. The kernel log says
+  `serial: nothing received on the serial port yet: ...` at the first drop, the running count at each doubling,
+  and the total when input is first seen. Root can also switch the copy off (`SYS_ttymirror`; bench measures its
+  screen line both ways). Verified on the host (`tools/serial-test.sh`, a model of Paula's port); FS-UAE sends
+  serial bytes without the baud-rate delay, so its ring never fills and it cannot show the drops. Drawing text is
+  slow too: a 79-character line takes about 11 ms on an A1200's chip RAM (FS-UAE 68020, and bench on the PiStorm
+  with the copy off), longer than its 7 ms on the wire - the copy limits output that is cheap to draw (escape
+  sequences, a fast CPU with fast drawing), not plain text on a stock A1200.
 - **Unexpected interrupts** (audit E): vectors 24-31 without a handler of their own (spurious, levels 1, 4 and 6,
   the NMI; nothing enables their sources) go to `irq_other_entry`: a Paula level is switched off in `INTENA` (its
   `INTREQ` bits stay: the floppy and sound drivers poll them), level 6 also reads CIA-B's ICR, `kwork` logs each

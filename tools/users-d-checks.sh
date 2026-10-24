@@ -46,6 +46,9 @@ users_d_checks() {
     line "a logout on console 1 starts a new login there" "init: session ended, starting another"
     local np; np=$(grep -ao 'zenix login: ' "$L" | wc -l)      # not at a line start: the serial copy has no redraw
     if [ "$np" -ge 3 ]; then echo "PASS ${pre}login prompts on console 2, console 1 after the logout, console 3 ($np)"; else echo "FAIL ${pre}login prompts: $np (3 wanted)"; bad=1; fi
+    # the typed name is echoed once (by the tty), not again by login (found on the A1200, 2026-10-23)
+    if grep -aqE 'zenix login: user$' "$L" && ! awk '/zenix login: user$/ { getline n; if (n == "user") bad = 1 } END { exit !bad }' "$L"; then
+        echo "PASS ${pre}login echoes the typed name once"; else echo "FAIL ${pre}login echoes the typed name once"; bad=1; fi
     line "a history entry longer than the line is cut, not copied over it" "hist-2-ok"
     line "completing a 150-character variable name does not overflow" "tab-3-ok"
     line "find says permission denied, not 'not found'" "find: /tmp/priv/x: permission denied"
