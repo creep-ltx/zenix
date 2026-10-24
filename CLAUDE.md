@@ -26,6 +26,10 @@ Rebooting between the systems (owner 2026-10-24): `bootzenix` in AmigaOS, `reboo
 through a one-shot note the boot menu reads. Later (not now): a Wasabi-like remote-access daemon for Zenix (needs the network driver).
 DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved, docs/d11-service-manager.md).
 Next approved, in this order after D11: Zenix installing updates by itself (no card swaps), then the network driver.
+**The main goal (owner 2026-10-24): Claude in a terminal on Zenix on the A1200** - the owner's computer use is mostly
+Claude Code in a terminal. Approved now: a serial terminal program (Zenix to the PC over the null-modem cable, from
+the weekend of 2026-10-31); then the same over the network; then a console good enough for Claude Code's screen
+(colours, stand-ins for its Unicode symbols).
 Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
 parked (e.g. the uncommitted `user/awk.c`). Order of the fixes: batches A and B, then the first PiStorm boot, then C,
 D and E.
