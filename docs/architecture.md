@@ -594,7 +594,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **Pipes** (`vfs.c`): 2 KB ring buffer in the kernel; EOF when all writers close; a write to a pipe with no
   readers ends the writer with status 141 (like SIGPIPE). Special files `/dev/tty` (the process's controlling
   tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
-  (console 1, the same rule), `/dev/null`, `/dev/zero`. `fstat` of a console gives its number in `st_ino` (the
+  (console 1, the same rule), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
+  is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
+  receive ring for its reader), `/dev/null`, `/dev/zero`. `fstat` of a console gives its number in `st_ino` (the
   `ustat` has no device field; `login` uses it to apply `/etc/autologin` to console 1 only).
 - **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
   `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**

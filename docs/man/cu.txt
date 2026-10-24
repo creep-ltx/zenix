@@ -1,0 +1,42 @@
+CU(1)			Zenix manual
+
+NAME
+    cu - call up another computer through the serial port
+
+SYNOPSIS
+    cu [-l DEVICE]
+
+DESCRIPTION
+    cu connects the console to the serial port (DEVICE, default
+    /dev/ttyS0): every key goes to the other computer as it is (Ctrl-C
+    included), and everything the other computer sends is shown on the
+    screen, escape sequences and all. With a null-modem cable to a PC and a
+    login on the PC's serial adapter, the console becomes a terminal on
+    the PC (for example for Claude Code).
+
+    Type ~. at the start of a line to end cu; ~~ sends one ~. "The start
+    of a line" is after Return, Ctrl-C or Ctrl-U.
+
+    While cu runs the serial port is its own: the console's copy on the
+    serial port, the kernel log's copy and the serial test keys are off
+    the wire (the kernel log still goes to dmesg). They come back when cu
+    ends.
+
+OPTIONS
+    -l DEVICE   the device to use (only /dev/ttyS0 exists)
+
+EXIT STATUS
+    0 after ~., 1 if the port cannot be opened (another program has it:
+    busy; not root: permission denied), 2 for a usage error.
+
+NOTES
+    Root only, as the port reaches a whole other computer. 115200 baud,
+    8 bits, no parity, no handshake (the cable's three wires). No file
+    transfer, no speed option, no ~ commands but ~. and ~~. The other
+    side's screen should be 80x32 (PAL) or 80x25 (NTSC) and plain: the
+    console shows Latin-1, two colours.
+    PC side (Linux), once: a login on the USB serial adapter, e.g.
+    systemctl start serial-getty@ttyUSB0 (115200 baud).
+
+SEE ALSO
+    dmesg(1), docs/DESIGN.md D12

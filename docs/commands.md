@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 110 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 111 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -39,6 +39,7 @@ spot-checked against the code that day.
 | [diff](man/diff.txt), [cmp](man/cmp.txt), [hexdump](man/hexdump.txt) | compare, dump |
 | [echo](man/echo.txt), [printf](man/printf.txt), [seq](man/seq.txt), [yes](man/yes.txt), [expr](man/expr.txt) | generate and calculate |
 | [less](man/less.txt) / [more](man/more.txt), [edit](man/edit.txt) | pager and editor |
+| [cu](man/cu.txt) | a terminal on another computer through the serial port (DESIGN D12) |
 | [man](man/man.txt) | these manuals |
 
 ## The system
@@ -61,7 +62,7 @@ spot-checked against the code that day.
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 110 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 111 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

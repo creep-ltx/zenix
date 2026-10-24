@@ -58,7 +58,8 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch) |
 | cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
 | users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root |
-| jobs-test, kbd-test | job control and history search; the keyboard (keymaps, repeat, consoles) |
+| jobs-test, kbd-test | job control and history search; the keyboard (keymaps, repeat, consoles, scrollback) |
+| cu-test | `cu` and `/dev/ttyS0` (DESIGN D12): the other computer's line reaches cu, keys reach the port, `~.` ends it, the console's copy comes back |
 | prio-test | priorities (D10): nice/renice for a user and for root, PRI/NI in `ps`, `priotest` (equal priorities take turns per slice, a higher one wins, wake-up, priority inheritance; a kernel built without inheritance must fail that check) |
 | diag-test | the boot colours, the panic screens, the previous-boot log across a warm reset; the stack guard's kernel-stack checks (a `STACK_TEST` build) |
 | floppy-test | two floppy drives: whole-disk reads, a write and its read-back, the image file on the host afterwards |
@@ -69,7 +70,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 
 What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default
 FS-UAE's `~/Documents/FS-UAE/Kickstarts`); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
-fills it in, with the build directory and the serial port). kbd-test, diag-test and the screenshots
+fills it in, with the build directory and the serial port). kbd-test, cu-test, diag-test and the screenshots
 (`tools/shot.py`) also need the headless cage rig: `ZENIX_CAGE_RIG` names its directory. A single test:
 `ZENIX_SERIAL=/tmp/NAME tools/users-test.sh` (a serial port of its own, so it can run beside another session's test);
 one emulator run at a time per session. `make run` boots a window for a person, never for a test.

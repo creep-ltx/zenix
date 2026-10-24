@@ -34,6 +34,12 @@ void serial_rx_isr(void);               /* level 5: queues the byte only */
 void serial_work(void);                 /* process context: the queued bytes to the tty, the 0x1d test hook */
 void irq5_c(void);
 void serial_puts(const char *s);
+/* /dev/ttyS0 (DESIGN D12): one process at a time owns the port; then the console copy, the kernel log's copy and the
+ * 0x1d hook are off the wire and received bytes wait for serdev_read */
+long serdev_open(void);                 /* -EBUSY when it is open already */
+void serdev_close(void);
+u32 serdev_take(u8 *buf, u32 n);        /* bytes received so far (0: none yet) */
+void serdev_put(u8 c);                  /* one byte as it is, waiting for room in the send ring */
 void kprintf(const char *fmt, ...);
 u32 klog_read(u32 off, char *buf, u32 n);     /* the kernel log: n characters from position off (0 = the first ever) */
 void klog_to_screen(void);                    /* the display is up: show the log so far and mirror new messages */
@@ -209,7 +215,7 @@ struct zexe {
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16
 #define NFILE 64
-enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO };
+enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL };
 struct pipe {
     u8 buf[2048];
     u16 rd, wr, count;

@@ -45,6 +45,8 @@ void file_close(struct file *f)
         return;
     if (f->type == FT_INODE)                /* the server counts opens: an unlinked inode is freed at the last close */
         fs_call_on(f->fs, FS_CLOSE, f->ino, 0, 0, 0);
+    if (f->type == FT_SERIAL)
+        serdev_close();
     if (f->type == FT_PIPE_R && f->pipe)
         f->pipe->readers--;
     if (f->type == FT_PIPE_W && f->pipe)
@@ -333,11 +335,19 @@ long fs_read_file(const char *path, const struct proc *parent, u8 **buf, u32 *si
 
 /* the few device files: /dev/tty (this process's controlling tty), /dev/console (console 1), /dev/tty1 .. /dev/tty10
  * (the virtual consoles: root, or a process whose controlling tty it is - nobody reads another user's keys),
- * /dev/null, /dev/zero */
+ * /dev/ttyS0 (the serial port, DESIGN D12), /dev/null, /dev/zero */
 static long open_device(const char *path, int flags)
 {
     int type = 0, con = 0;
     if (!strcmp_(path, "/dev/tty")) { type = FT_TTY; con = tty_of(current); }
+    else if (!strcmp_(path, "/dev/ttyS0")) {        /* the serial port (DESIGN D12): root, one owner at a time */
+        if (current->uid != 0)
+            return -EACCES;
+        long e = serdev_open();
+        if (e < 0)
+            return e;
+        type = FT_SERIAL;
+    }
     else if (!strcmp_(path, "/dev/null")) type = FT_NULL;
     else if (!strcmp_(path, "/dev/zero")) type = FT_ZERO;
     else {
@@ -353,8 +363,11 @@ static long open_device(const char *path, int flags)
             return -EACCES;                  /* another console: root only */
     }
     struct file *f = file_new(type);
-    if (!f)
+    if (!f) {
+        if (type == FT_SERIAL)
+            serdev_close();
         return -ENFILE;
+    }
     f->off = (u32)con;
     f->flags = (u16)flags;
     f->mode = 020666;                       /* a character device */
@@ -403,7 +416,7 @@ long vfs_stat(const char *path, struct ustat *st)
 
 long vfs_fstat(struct file *f, struct ustat *st)
 {
-    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO) {
+    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL) {
         memset(st, 0, sizeof *st);
         st->mode = 020666;
         st->links = 1;
@@ -537,6 +550,15 @@ long vfs_read(struct file *f, void *buf, u32 n)
         return tty_read((int)f->off, buf, n);
     case FT_PIPE_R:
         return pipe_read(f, buf, n);
+    case FT_SERIAL:                         /* waits for at least one byte, then returns what has arrived */
+        for (;;) {
+            if (current->killed)
+                return -EINTR;
+            u32 got = serdev_take(buf, n);
+            if (got)
+                return (long)got;
+            block_io();
+        }
     case FT_NULL:
         return 0;
     case FT_ZERO:
@@ -565,6 +587,15 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return tty_write((int)f->off, buf, n);
     case FT_PIPE_W:
         return pipe_write(f, buf, n);
+    case FT_SERIAL: {
+        const u8 *s = buf;
+        for (u32 i = 0; i < n; i++) {
+            if (current->killed)
+                return i ? (long)i : -EINTR;
+            serdev_put(s[i]);
+        }
+        return (long)n;
+    }
     case FT_NULL: case FT_ZERO:
         return (long)n;                     /* the bit bucket */
     case FT_INODE: {

@@ -8,12 +8,12 @@
 #   tools/check.sh NAME...         only these (names as in the table, e.g. matrix users-test)
 # A test fails if it exits non-zero or prints a line starting with FAIL (matrix.sh reports per machine that way).
 # Not run, on purpose: stage0-68k-test when the Python module unicorn is missing (named as skipped), audio/klog/joystick (weak or
-# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test and diag-test,
+# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test and diag-test,
 # ZENIX_CAGE_RIG. Stops if the machine's load is above 16 (never two emulator runs at once: one at a time here).
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
 HOST="docs-check ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test serial-test a3000-test stage0-test stage0-68k-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test prio-test kbd-test diag-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test prio-test kbd-test cu-test diag-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
 host) LIST="$HOST" ;;
