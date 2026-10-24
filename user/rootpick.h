@@ -16,7 +16,7 @@ static void rootpick(int disk_port, struct rootpick *r)
     struct diskinfo di;
     int first = 0;
     memset(r, 0, sizeof *r);
-    for (u32 i = 1; i < 16; i++) {
+    for (u32 i = 0; i < 16; i++) {                  /* 0 too: with no hard disk ram0 is the first */
         m.type = DISK_LIST; m.a[0] = i; m.a[1] = (u32)&di;
         if (sys_call(disk_port, &m) < 0) break;
         if (!strcmp(di.name, "ram0")) { r->have_ram = 1; continue; }
