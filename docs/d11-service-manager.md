@@ -1,6 +1,6 @@
 # D11: the service manager (design note)
 
-**Status: design, not built; awaiting the owner's approval.** Nothing in this note exists in the code yet. Revision 3
+**Status: design, not built; reviewed twice, approved by the owner 2026-10-24 (questions answered in section 12).** Nothing in this note exists in the code yet. Revision 3
 (2026-10-24): the findings of two reviews are worked in (section 14 lists them). Facts about today's Zenix were read
 from branch `d11` (= main after D10); the file and function names below say where. The decision itself is DESIGN.md
 D11; this note is its full design.
@@ -638,7 +638,11 @@ Steps 1-5 together are the useful core (servers come back); 6-8 can follow one a
 `kernel/main.c`, the Makefile, libz and `docs/` counts are the main session's files (CLAUDE.md): whoever builds D11 does
 it there, or asks for those lines first.
 
-## 12. Open questions for the owner
+## 12. Questions for the owner (answered 2026-10-24)
+
+**The owner's answers (2026-10-24):** 1-3 as proposed below (keep writing after a crash, with the "needs a check"
+mark and a log line; stop with a clear message when an essential server keeps crashing; server messages in the kernel
+log only). 4: undecided, not blocking D11.
 
 1. **After a filesystem server crashes during a change and comes back, should Zenix keep writing to that disk, or
    make it read-only until it is checked?** The disk is marked "needs a check" either way (5.4). My choice: keep
