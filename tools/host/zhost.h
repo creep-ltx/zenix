@@ -43,3 +43,8 @@ int sys_blk_flush(void);
 int sys_fd_info(u32 drive);
 int sys_fd_rw(u32 drive, u32 lba, u32 n, void *buf, int write);
 int sys_procinfo(u32 i, struct uproc *p);
+/* the service manager's calls (DESIGN D11): diskd-host.c keeps the saved table in a buffer of its own */
+int sys_svc_self(void);
+int sys_svc_save(const void *buf, u32 n);
+int sys_svc_load(void *buf, u32 n);
+#define SVC_EXIT_DAMAGED 86

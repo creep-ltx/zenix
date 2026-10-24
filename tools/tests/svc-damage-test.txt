@@ -1,0 +1,3 @@
+wait zenix:/# 90
+send kill 2; ls /\r
+sleep 8

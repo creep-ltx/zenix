@@ -570,6 +570,11 @@ void syscall_c(u32 *rb)
     case SYS_svc: {                     /* D11: op | nice << 8, name, program text */
         char name[16], text[SVC_TEXT];
         u32 op = a1 & 0xFF;
+        if (op >= SVC_SAVE) {
+            if (UOK(a2, a3))
+                r = (s32)svc_data(op, (void *)a2, a3);
+            break;
+        }
         if (op != SVC_SELF && !CSTR(name, a2))
             break;
         if (op == SVC_REGISTER && !CSTR(text, a3))

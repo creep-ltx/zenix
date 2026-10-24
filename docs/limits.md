@@ -74,7 +74,7 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   NTSC), 200 scrollback lines per console, a cooked tty line of 255 characters (the bell for more).
 - Services (DESIGN D11, architecture.md section 9): 12 entries; a program and its arguments of at most 6 words in 80
   bytes; a started server has 30 s to open its port; the start after the 2nd, 3rd and 4th end within 60 s waits 1, 2
-  and 4 s; loads nest at most two deep.
+  and 4 s; loads nest at most two deep; a server's saved table is at most 512 bytes (diskd's is 426).
 - Priorities (DESIGN D10, architecture.md section 6): 32 levels; nice -20..19 (a value outside is taken as the nearest
   end); a 50 ms slice; the built-in servers at nice -10; priority inheritance passes along a chain of at most 8 servers.
 - The shell: no fixed count of arguments, glob matches, words, pipeline stages, `for` items or positional

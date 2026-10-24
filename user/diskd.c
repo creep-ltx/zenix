@@ -7,6 +7,7 @@
 #endif
 #include "../kernel/diskproto.h"
 #include "rdb.h"
+#include "say.h"
 #ifndef ZHOST
 typedef unsigned char u8;
 #endif
@@ -21,7 +22,9 @@ typedef unsigned char u8;
  *    overlaps the RDB partitions inside it, and two RDB partitions may overlap on a damaged table;
  *  - DISK_MOUNT and DISK_RAW are refused while an overlapping device is mounted; a write is refused when it
  *    touches a device another process has mounted. A plain open may read anything;
- *  - a mount whose server has died is released (checked when it would block someone). */
+ *  - a mount whose server has died is released (checked when it would block someone);
+ *  - restarted after a crash (DESIGN D11), it gets its slots and claims back from the table it left with the kernel
+ *    (save/restore below), so old handles and claims keep meaning the same devices. */
 
 #define MAXDEV 20
 static struct diskinfo dev[MAXDEV];
@@ -34,6 +37,9 @@ static int fdrive[MAXDEV];              /* floppy drive number of a device, -1 f
 static u32 disk_sectors, disk_caps;     /* disk_caps: DISKCAP_FLUSH if the driver's flush works (tried once at start) */
 static u8 *ram_base;                    /* the boot ramdisk, if any */
 static u32 ram_sectors;
+
+static void save(void);
+static int alive(u32 pid);
 
 /* the scan's result before it is merged into the slots */
 static struct diskinfo cand[MAXDEV];
@@ -78,12 +84,12 @@ static int add_rdb(u32 base, u32 limit, int *count)
         part_name(name, ++*count);
         const struct rdb_part *p = &r.part[i];
         if (!p->sectors || p->start + p->sectors > limit || p->start + p->sectors < p->start) {
-            printf("diskd: %s (%s) has a geometry or size that does not fit the disk: not served\n", name, p->label);
+            say("diskd: %s (%s) has a geometry or size that does not fit the disk: not served\n", name, p->label);
             continue;
         }
         add(name, p->label, base + p->start, p->sectors, p->dostype, p->bootable);
     }
-    if (r.noedit) printf("diskd: note: the partition table: %s\n", r.noedit);
+    if (r.noedit) say("diskd: note: the partition table: %s\n", r.noedit);
     return 1;
 }
 
@@ -153,7 +159,7 @@ static void scan(void)
             }
         }
     }
-    if (dropped) printf("diskd: more than %d devices: %d not served\n", MAXDEV, dropped);
+    if (dropped) say("diskd: more than %d devices: %d not served\n", MAXDEV, dropped);
     u8 taken[MAXDEV];
     memset(taken, 0, sizeof taken);
     norder = 0;
@@ -173,7 +179,7 @@ static void scan(void)
         if (taken[c]) continue;
         int s;
         for (s = 0; s < MAXDEV && used[s]; s++) ;
-        if (s == MAXDEV) { printf("diskd: no slot for %s: not served\n", cand[c].name); continue; }
+        if (s == MAXDEV) { say("diskd: no slot for %s: not served\n", cand[c].name); continue; }
         used[s] = 1; dev[s] = cand[c]; fdrive[s] = cfd[c]; phys[s] = cphys[c];
         taken[c] = 1;
     }
@@ -185,6 +191,58 @@ static void scan(void)
         for (int k = 0; k < norder; k++) if (order[k] == s) in = 1;
         if (used[s] && !in && norder < MAXDEV) order[norder++] = (u8)s;
     }
+    save();
+}
+
+/* ---- the saved table (D11 5.4) ----
+ * For every slot: the medium (0xFF: unused), start, size, name (8 bytes, NUL-terminated: at most "ide0p19") and the
+ * claiming pid; then the floppy drives looked at and a checksum. Left with the kernel (SVC_SAVE) whenever it changes,
+ * before the reply to the request that changed it; read back (SVC_LOAD) by a restarted diskd before it opens its port
+ * and checked like anything read from a disk. A damaged one is never guessed at: diskd stops, and the kernel with it. */
+#define REC_SLOT 21
+static u8 rec[2 + MAXDEV * REC_SLOT + 4];
+static u32 rec_sum(int n)
+{
+    u32 s = 0x5A44534Bu;
+    for (int i = 0; i < n; i++) s = (s << 1 | s >> 31) + rec[i];
+    return s;
+}
+static void put32(u8 *p, u32 v) { p[0] = (u8)(v >> 24); p[1] = (u8)(v >> 16); p[2] = (u8)(v >> 8); p[3] = (u8)v; }
+static u32 get32(const u8 *p) { return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3]; }
+static void save(void)
+{
+    u8 *p = rec + 2;
+    memset(rec, 0, sizeof rec);
+    rec[0] = (u8)fd_probe; rec[1] = MAXDEV;
+    for (int s = 0; s < MAXDEV; s++, p += REC_SLOT) {
+        if (!used[s]) { p[0] = 0xFF; continue; }
+        p[0] = phys[s]; put32(p + 1, dev[s].start); put32(p + 5, dev[s].sectors);
+        strncpy((char *)p + 9, dev[s].name, 7); put32(p + 17, dev[s].mounted);
+    }
+    put32(p, rec_sum((int)(p - rec)));
+    sys_svc_save(rec, sizeof rec);
+}
+/* 0: restored (or nothing saved), -1: damaged */
+static int restore(void)
+{
+    int n = sys_svc_load(rec, sizeof rec);
+    if (n <= 0) return 0;
+    if (n != (int)sizeof rec || rec[1] != MAXDEV || rec[0] > 15 || get32(rec + n - 4) != rec_sum(n - 4)) return -1;
+    for (int pass = 0; pass < 2; pass++) {                /* every slot checked before the first is used */
+        const u8 *p = rec + 2;
+        for (int s = 0; s < MAXDEV; s++, p += REC_SLOT) {
+            if (p[0] == 0xFF) continue;
+            u32 st = get32(p + 1), sz = get32(p + 5), lim = p[0] == 0 ? disk_sectors : p[0] == 1 ? ram_sectors : 3520;
+            if (p[0] > 5 || p[16] || !p[9] || st + sz < st || st + sz > lim) return -1;
+            if (!pass) continue;
+            used[s] = 1; phys[s] = p[0]; memset(&dev[s], 0, sizeof dev[s]);
+            dev[s].start = st; dev[s].sectors = sz; strcpy(dev[s].name, (const char *)p + 9);
+            dev[s].mounted = alive(get32(p + 17)) ? get32(p + 17) : 0;
+            fdrive[s] = p[0] >= 2 ? p[0] - 2 : -1;
+        }
+    }
+    fd_probe = rec[0];
+    return 0;
 }
 
 static int find(const char *name)
@@ -208,8 +266,9 @@ static int alive(u32 pid)               /* is the process that mounted a device 
 static u32 holder(int s)
 {
     if (dev[s].mounted && !alive(dev[s].mounted)) {
-        printf("diskd: %s: the filesystem server (pid %u) is gone: mount released\n", dev[s].name, dev[s].mounted);
+        say("diskd: %s: the filesystem server (pid %u) is gone: mount released\n", dev[s].name, dev[s].mounted);
         dev[s].mounted = 0;
+        save();
     }
     return dev[s].mounted;
 }
@@ -246,14 +305,16 @@ static int handle(struct umsg *m)
         if (h < 0) return -ENODEV;
         if (m->a[1] & (DISK_MOUNT | DISK_RAW)) {
             /* a mount, or a tool that may write the device: nothing overlapping it may be mounted (not even
-             * by the caller: a server mounts one device) */
+             * by the caller: a server mounts one device) - except a repeated mount by the holder of the claim (its
+             * request was in service when a diskd died, and it asks again) */
+            if ((m->a[1] & DISK_MOUNT) && dev[h].mounted == (u32)m->from) return h;
             if (blocked(h, 0, dev[h].sectors, 0)) return -EBUSY;
-            if (m->a[1] & DISK_MOUNT) dev[h].mounted = (u32)m->from;
+            if (m->a[1] & DISK_MOUNT) { dev[h].mounted = (u32)m->from; save(); }
         }
         return h;
     }
     case DISK_UNMOUNT:
-        if (m->a[0] < MAXDEV && used[m->a[0]] && dev[m->a[0]].mounted == (u32)m->from) { dev[m->a[0]].mounted = 0; return 0; }
+        if (m->a[0] < MAXDEV && used[m->a[0]] && dev[m->a[0]].mounted == (u32)m->from) { dev[m->a[0]].mounted = 0; save(); return 0; }
         return -EINVAL;
     case DISK_READ: case DISK_WRITE: {
         u32 h = m->a[0], lba = m->a[1], n = m->a[2];
@@ -301,11 +362,15 @@ int main(void)
     if (sys_blk_ram(ram) == 0 && ram[1]) { ram_base = (u8 *)ram[0]; ram_sectors = ram[1] / 512; }
     int any_fd = 0;
     if (sys_fd_info(0) & 1) any_fd = 1;
-    if (!disk_sectors && !ram_sectors && !any_fd) { printf("diskd: no disk\n"); return 1; }
+    if (!disk_sectors && !ram_sectors && !any_fd) { say("diskd: no disk\n"); return 1; }
     if (disk_sectors) {                 /* can the drive make writes durable? (ATA FLUSH CACHE, SCSI SYNCHRONIZE CACHE) */
         int f = sys_blk_flush();
         disk_caps = f == 0 ? DISKCAP_FLUSH : 0;
-        if (f) printf("diskd: ide0 cannot flush its write cache (%d): sync and ZenixFS commits are weaker there\n", f);
+        if (f) say("diskd: ide0 cannot flush its write cache (%d): sync and ZenixFS commits are weaker there\n", f);
+    }
+    if (sys_svc_self() > 1 && restore()) {             /* started again after an end: the old slots and claims */
+        say("diskd: the saved device table is damaged: stopping so no disk gets another's writes\n");
+        return SVC_EXIT_DAMAGED;
     }
     scan();
     int port = sys_port_create("disk");

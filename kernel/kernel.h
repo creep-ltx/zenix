@@ -399,6 +399,10 @@ void ipc_proc_exit(int pid);
 #define SVC_REGISTER 1                  /* SYS_svc op | nice << 8, name, program text (root) */
 #define SVC_REMOVE   2                  /* op, name (root) */
 #define SVC_SELF     3                  /* op -> how many times the caller's entry was started, 0 if not a service */
+#define SVC_SAVE     4                  /* op, buffer, length: the started server leaves a table for its next start */
+#define SVC_LOAD     5                  /* op, buffer, length -> the bytes of that table copied (0: none) */
+#define SVC_SAVED    512                /* the most a server may save */
+#define SVC_EXIT_DAMAGED 86             /* a server's exit status: its saved table is damaged (an essential one: panic) */
 #define SVC_NS_CLOSE 1                  /* no-start call: dropped if stopped, queued while loading or starting */
 #define SVC_NS_SKIP  2                  /* no-start call: answered -ECONNRESET unless a server runs */
 #define SVC_ROLE_LOAD  1
@@ -410,6 +414,7 @@ struct proc *svc_proc(int slot);        /* who works for a held port now (the lo
 void svc_exit(struct proc *p);          /* p is dying: the entries it served, loaded or watched */
 void svc_born(int pid);                 /* proc_load made the server of the load under way in current */
 long svc_sys(u32 op, const char *name, const char *text);
+long svc_data(u32 op, void *buf, u32 len);   /* SVC_SAVE, SVC_LOAD */
 
 /* vfs.c */
 struct file *file_new(int type);

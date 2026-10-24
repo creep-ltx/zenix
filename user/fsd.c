@@ -2,7 +2,7 @@
 #include "fsenv.h"
 #include "../kernel/fsproto.h"
 #include "../kernel/diskproto.h"
-#include "rdb.h"
+#include "diskcall.h"
 
 /* The filesystem server: kernel/ext2.c in user mode behind the "fs" port.
  * Embedded in the kernel image (the kernel needs it before any disk is
@@ -16,7 +16,7 @@ static int disk_rw(u32 op, u32 lba, u32 count, const void *buf)
 {
     struct umsg m;
     m.type = op; m.a[0] = (u32)fs_dev; m.a[1] = lba; m.a[2] = count; m.a[3] = (u32)buf;
-    return sys_call(disk_port, &m);
+    return disk_call(disk_port, &m);
 }
 int fs_blk_read(u32 lba, u32 count, void *buf) { return disk_rw(DISK_READ, lba, count, buf); }
 int fs_blk_write(u32 lba, u32 count, const void *buf) { return disk_rw(DISK_WRITE, lba, count, buf); }
@@ -25,13 +25,13 @@ static int disk_open(const char *name, u32 flags)
 {
     struct umsg m;
     m.type = DISK_OPEN; m.a[0] = (u32)name; m.a[1] = flags;
-    return sys_call(disk_port, &m);
+    return disk_call(disk_port, &m);
 }
 static void disk_unmount(int h)
 {
     struct umsg m;
     m.type = DISK_UNMOUNT; m.a[0] = (u32)h;
-    sys_call(disk_port, &m);
+    disk_call(disk_port, &m);
 }
 
 /* A device is opened plain to read its superblock and only mounted (made ours alone) once ext2_mount_as accepts it.
@@ -78,7 +78,7 @@ static int disk_flush(void)
 {
     struct umsg m;
     m.type = DISK_FLUSH; m.a[0] = (u32)fs_dev;
-    int r = sys_call(disk_port, &m);
+    int r = disk_call(disk_port, &m);
     return r == -95 ? 0 : r;
 }
 static void open_unref(u32 ino)

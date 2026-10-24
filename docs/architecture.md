@@ -509,6 +509,15 @@ driver waits after every write until the card has programmed it: CMD13 until REA
 "prg", as Linux checks - some cards report ready for data while still programming). `struct diskinfo` carries capability bits and the largest
 transfer; `DISKCAP_FLUSH` is set only if a flush tried at start worked, and `DISK_FLUSH` answers -95 on a device without it.
 `FS_SYNC` and `FS_QUIT` (umount) end with a `DISK_FLUSH` in both filesystem servers. Protocol: `kernel/diskproto.h`.
+**Across a restart** (D11): whenever its table changes (a claim by `DISK_MOUNT`, `DISK_UNMOUNT`, a rescan, a floppy
+probed, a dead server's claim released) diskd leaves the kernel a small record (`SVC_SAVE`: per slot the medium, start,
+size, name and claiming pid; the floppy drives looked at; a checksum; 426 bytes), before it replies. A restarted diskd
+reads it back (`SVC_LOAD`) before it opens its port, checks it like disk data, puts every device back into its old slot
+with its claim (if the claiming process still lives) and then rescans as usual: old handles keep naming the same
+devices and mounted devices stay protected. A damaged record is never guessed at: diskd stops (exit status 86) and the
+kernel panics. The holder of a claim may send its `DISK_OPEN` with `DISK_MOUNT` again and gets its handle back. The
+filesystem servers send a request that failed with -ECONNRESET (diskd ended while serving it) once more
+(`user/diskcall.h`): repeating a sector read or write is safe.
 Only root's messages (`m->uid` 0, stamped by the kernel) are served, except `DISK_LIST` and `DISK_INFO`: raw sectors
 would bypass every file permission. The filesystem servers, `fdisk`, `mkfs.*`, `fsck.*` and `dd` on a device run as
 root; for anyone else they answer "permission denied" or cannot open the device (audit D).
@@ -560,7 +569,7 @@ end, it says so and starts it again. (It exists because the idle process cannot 
 consoles are init's work (section 11, man/init.txt).
 
 ### The service manager (`kernel/svc.c`, DESIGN D11)
-The full design is docs/d11-service-manager.md; what is built (steps 0-1 of its build order):
+The full design is docs/d11-service-manager.md; what is built (steps 0-2 of its build order):
 - **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
   bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
   (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are
@@ -581,6 +590,10 @@ The full design is docs/d11-service-manager.md; what is built (steps 0-1 of its 
   logged and counted. The start after the 2nd, 3rd and 4th end within 60 s waits 1, 2 and 4 s. A server that ends
   before it opened its port has failed to start: its queued calls fail. An essential server that ends before it ever
   served (or cannot be loaded) is a panic at once ("svc: an essential server ended before it served").
+- **A saved table.** `SVC_SAVE` / `SVC_LOAD` (the process the kernel started for an entry only): up to 512 bytes a
+  server leaves for its next start, kept in the kernel while the entry exists (diskd's slots and claims, above).
+  `SVC_SELF` tells a server it is a restart (more than 1 start). An essential server that ends with status 86 (its
+  saved table is damaged) is a panic, not counted.
 - **No-start calls.** `FS_CLOSE` (from `file_close` and the end of a program load) and every call made by a dying
   process never start a server: dropped while the entry is stopped, queued while it is loading or starting.
 - **Loads nest at most two deep** (a file service read while the root server is stopped); a third level fails with

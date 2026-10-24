@@ -6,6 +6,8 @@
  *   write H LBA PID | read H LBA      one sector through handle H
  *   unmount H PID | rescan | flush H
  *   dead PID                that process no longer exists (sys_procinfo stops listing it)
+ *   restart                 diskd ends and is started again (DESIGN D11): a fresh state, then its saved table
+ *   damage                  flip a byte of the saved table (the next restart must refuse it)
  *   as UID                  later requests come from this user id (0 = root, the default)
  *   sh COMMAND              run a host command (to change the image between steps)
  * Every command prints one line "COMMAND LINE -> RESULT". */
@@ -46,6 +48,11 @@ int sys_procinfo(u32 i, struct uproc *p)                  /* processes 1..40 exi
     for (int k = 0; k < ndead; k++) if (deadpid[k] == p->pid) p->state = 0;
     return 0;
 }
+
+static u8 saved[512]; static u32 nsaved, starts = 1;
+int sys_svc_self(void) { return (int)starts; }
+int sys_svc_save(const void *buf, u32 n) { if (n > sizeof saved) return -7; memcpy(saved, buf, n); nsaved = n; return 0; }
+int sys_svc_load(void *buf, u32 n) { if (n > nsaved) n = nsaved; memcpy(buf, saved, n); return (int)n; }
 
 #define main diskd_main
 #include "../../user/diskd.c"
@@ -93,6 +100,14 @@ int main(void)
         else if (!strcmp(cmd, "flush")) r = req(DISK_FLUSH, (u32)atoi(a), 0, 0, 0, 1);
         else if (!strcmp(cmd, "as")) { cur_uid = (unsigned)atoi(a); r = 0; }
         else if (!strcmp(cmd, "dead")) { if (ndead < 16) deadpid[ndead++] = (u32)atoi(a); r = 0; }
+        else if (!strcmp(cmd, "restart")) {           /* a new diskd: nothing but what it saved */
+            memset(dev, 0, sizeof dev); memset(used, 0, sizeof used); memset(phys, 0, sizeof phys);
+            memset(order, 0, sizeof order); norder = 0; fd_probe = 1; starts++;
+            for (int s = 0; s < MAXDEV; s++) fdrive[s] = -1;
+            r = restore();
+            if (!r) scan();
+        }
+        else if (!strcmp(cmd, "damage")) { saved[nsaved / 2] ^= 0x5A; r = 0; }
         else { printf("%s -> unknown\n", cmd); continue; }
         printf("%s -> %d\n", whole, r);
         fflush(stdout);

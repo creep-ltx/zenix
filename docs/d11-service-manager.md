@@ -697,7 +697,8 @@ umount -> 5.2; 11 size -> 10; 12 the step 0 rule -> 11, 5.6.
 ## 15. As built (branch d11)
 
 **Built:** step 0 (2026-10-24: `fs_read_file` deleted; the "exiting" flag and the kill-in-a-call rule came from main
-with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`).
+with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`), step 2 (2026-10-24: diskd's saved table, the
+retried claim and the one retry of the filesystem servers; `tools/svc-test.sh` d and dmg, `tools/disk-host-test.sh`).
 
 **Where the code differs from the note** (each one small, and the reason):
 - *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM
@@ -723,6 +724,13 @@ with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`).
   served" after its "ended" line (the server's own message, e.g. "fsd: no writable ext2 filesystem on ide0 for the
   root", is just above).
 - *`port_create`* of a name an ordinary port already has answers -EBUSY (was -1).
+- *Step 2:* diskd's record keeps all 20 slots in place (an unused one marked by its medium byte 0xFF), 21 bytes each,
+  plus the floppy drives, the slot count and a checksum computed by diskd: 426 bytes. A damaged record makes diskd end
+  with status 86 (`SVC_EXIT_DAMAGED`), which the kernel turns into the panic for an essential server. The test-only
+  kernel flag `SVC_DAMAGE_TEST` damages the record on its way back. diskd now prints with a small `say()` (`%s %d %u`
+  only, `user/say.h`) instead of libz's `printf`: diskd.zx 13120 -> 9352 bytes. The retry lives in `user/diskcall.h`;
+  because `zenixfs_disk.c` is shared with `mkfs.zenixfs` and `fsck.zenixfs`, those raw tools retry once too instead of
+  reporting the error (repeating a sector read or write is safe either way).
 
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
 same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10

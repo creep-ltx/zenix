@@ -1,0 +1,5 @@
+wait zenix:/# 90
+send df\r
+sleep 2
+send echo svc-r-done\r
+sleep 2

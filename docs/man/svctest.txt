@@ -8,6 +8,8 @@ SYNOPSIS
     svctest reg NAME NICE PROGRAM [ARGUMENTS]
     svctest rm NAME
     svctest call NAME TYPE [A0]
+    svctest raw DEVICE
+    svctest hold DEVICE SECONDS
 
 DESCRIPTION
     A test program for the service manager (DESIGN D11,
@@ -25,6 +27,12 @@ DESCRIPTION
     call   makes one call to the port NAME with message type TYPE (and
            a0) and prints the result and how long it took, in ms of
            the E-clock (emulator times are not hardware times).
+    raw    opens DEVICE raw at the disk server, as fdisk or dd would:
+           -16 while it (or a device sharing its sectors) is mounted.
+    hold   opens DEVICE (plain), reads its first sector, waits SECONDS
+           seconds and reads it again with the same handle: "svctest
+           hold DEVICE: handle H, read R, after the wait R2". A disk
+           server started again meanwhile must still know the handle.
 
     tools/svc-test.sh uses it in the emulator.
 

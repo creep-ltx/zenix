@@ -6,7 +6,12 @@ NAME
 SYNOPSIS
     built into the kernel image; not run by hand. boot(8) registers it as
     the service "disk": the first call starts it, and a call after it
-    ended (a crash, or a kill by root) starts it again (DESIGN D11)
+    ended (a crash, or a kill by root) starts it again (DESIGN D11).
+    It keeps a small table of its slots and claims with the kernel, so
+    a restarted diskd gives every device its old handle back and every
+    mounted device stays protected; a damaged table stops the machine
+    ("diskd: the saved device table is damaged: stopping so no disk gets
+    another's writes") rather than risk writes to the wrong device
 
 DESCRIPTION
     Owns the disk hardware through privileged system calls (an IDE drive, or

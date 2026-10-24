@@ -85,6 +85,39 @@ want "another partition can be written by its own handle" "write 3 0 5 -> 0"
 want "the mount of a server that died is released" "pid 5) is gone: mount released"
 want "... and the partition can be opened again" "open ide0p1 raw 9 -> 2"
 
+# ---- D11 step 2: a restarted diskd keeps its slots and claims (the table it saved), refuses a damaged one ----
+python3 tools/mkrdb-hdtb.py make $T/d.hdf
+cat > $T/r.txt <<'EOF2'
+open ide0p2 mount 5
+open ide0p3 plain 7
+sh python3 -I tools/host/rdb-del-first.py $HOSTDISK
+rescan
+restart
+list
+open ide0p1 raw 7
+open ide0p1 mount 6
+open ide0p1 mount 5
+write 2 0 5
+read 3 0
+dead 5
+restart
+open ide0p1 raw 7
+damage
+restart
+EOF2
+HOSTDISK=$T/d.hdf $T/diskd < $T/r.txt > $T/r.out 2>&1
+rwant() { grep -q -- "$2" $T/r.out && check "diskd restart: $1" ok || { check "diskd restart: $1" bad; cat $T/r.out; }; }
+rwant "restored after a rescan renamed the mounted partition" "^restart -> 0$"
+rwant "the mounted DH1 keeps handle 2 (a fresh scan would give it 1)" "list -> ide0p1 h2 start 12800 sectors 6400 .* mounted 5 "
+rwant "the claim survived: a raw open of the mounted partition is refused" "^open ide0p1 raw 7 -> -16$"
+rwant "... and so is another server's mount" "^open ide0p1 mount 6 -> -16$"
+rwant "the holder of the claim asking again gets its handle back" "^open ide0p1 mount 5 -> 2$"
+rwant "the old handle still writes its own partition" "^write 2 0 5 -> 0$"
+rwant "a handle another program held still reads" "^read 3 0 -> 0$"
+grep -A1 "^dead 5" $T/r.out | grep -q "^restart -> 0$" && grep -q "^open ide0p1 raw 7 -> 2$" $T/r.out \
+    && check "diskd restart: a claim of a server that died is not kept" ok || { check "diskd restart: dead claim" bad; cat $T/r.out; }
+rwant "a damaged saved table is refused" "^restart -> -1$"
+
 # ---- C6: flush capability ----
 python3 tools/mkrdb-hdtb.py make $T/d.hdf
 printf 'list\nopen ide0p1 mount 5\nflush 1\n' | NOFLUSH=1 HOSTDISK=$T/d.hdf $T/diskd > $T/c6.out 2>&1

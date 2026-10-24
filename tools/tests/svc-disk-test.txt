@@ -1,0 +1,15 @@
+wait zenix:/# 90
+send svctest raw ide0\r
+sleep 2
+send svctest hold df1 10 &\r
+sleep 4
+send kill 2; sleep 1; svctest raw ide0; mount ide0 /tmp\r
+sleep 5
+send cat /bin/sh /bin/edit /bin/gzip /bin/less /bin/sed /bin/tar /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/big; echo big=$(wc -c < /tmp/big)\r
+sleep 8
+send cp /tmp/big /tmp/big2 & p=$(pgrep diskd); kill $p $p; wait; cmp /tmp/big /tmp/big2 && echo cmp-ok\r
+wait (?m)^cmp-ok 60
+send rm /tmp/big /tmp/big2; sync; dmesg | grep svc\r
+sleep 4
+send echo svc-d-done\r
+sleep 2

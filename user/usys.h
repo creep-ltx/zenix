@@ -142,3 +142,8 @@ static inline int sys_svc_register(const char *name, const char *prog, int nice)
 { return sys3(81, SVC_REGISTER | ((u32)nice & 0xFF) << 8, (u32)name, (u32)prog); }
 static inline int sys_svc_remove(const char *name) { return sys3(81, SVC_REMOVE, (u32)name, 0); }
 static inline int sys_svc_self(void) { return sys3(81, SVC_SELF, 0, 0); }
+#define SVC_SAVE     4
+#define SVC_LOAD     5
+#define SVC_EXIT_DAMAGED 86     /* a server's exit status: its saved table is damaged (the kernel stops for diskd) */
+static inline int sys_svc_save(const void *buf, u32 n) { return sys3(81, SVC_SAVE, (u32)buf, n); }   /* at most 512 bytes */
+static inline int sys_svc_load(void *buf, u32 n) { return sys3(81, SVC_LOAD, (u32)buf, n); }        /* bytes copied, 0: none */

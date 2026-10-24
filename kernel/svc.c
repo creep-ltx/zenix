@@ -24,6 +24,8 @@ static struct svc {
     int watcher;                        /* STARTING: who keeps the deadline (0: nobody yet) */
     u32 deadline, win, starts;
     char prog[SVC_TEXT];                /* the program and its arguments, the words NUL-separated */
+    u8 *saved;                          /* the table the server left for its next start (kmalloc'd at its first save) */
+    u32 savedlen;
 } svcs[NSVC];
 
 extern const char fsd_blob[], fsd_blob_end[], diskd_blob[], diskd_blob_end[], zfsd_blob[], zfsd_blob_end[];
@@ -327,6 +329,8 @@ void svc_exit(struct proc *p)
             kprintf("svc: %s: killed in the middle of a request: the change may be half done\n", pt->name);
         if (s->essential && !s->served)
             panic("svc: an essential server ended before it served");
+        if (s->essential && p->exit_code == SVC_EXIT_DAMAGED)
+            panic("svc: an essential server's saved table is damaged");   /* no retry can cure it: not counted */
         count_end(s);
         if (was_running) {
             kprintf("svc: %s: start %u when next used\n", pt->name, s->starts + 1);
@@ -345,6 +349,35 @@ static struct svc *mine(void)           /* the entry whose started (or running) 
         if ((svcs[i].state == SV_STARTING || svcs[i].state == SV_RUNNING) && svcs[i].pid == current->pid)
             return &svcs[i];
     return 0;
+}
+
+/* SVC_SAVE / SVC_LOAD: the small table a server leaves for its next start (diskd's slots and claims, D11 5.4). Only
+ * the process the kernel started for an entry; the table is kept while the entry exists. */
+long svc_data(u32 op, void *buf, u32 len)
+{
+    struct svc *s = mine();
+    if (!s)
+        return -EPERM;
+    if (op == SVC_SAVE) {
+        if (len > SVC_SAVED)
+            return -E2BIG;
+        if (!s->saved && !(s->saved = kmalloc(SVC_SAVED)))
+            return -ENOMEM;
+        memcpy(s->saved, buf, len);
+        s->savedlen = len;
+        return 0;
+    }
+    if (op != SVC_LOAD)
+        return -EINVAL;
+    if (len > s->savedlen)
+        len = s->savedlen;
+    if (len)
+        memcpy(buf, s->saved, len);
+#ifdef SVC_DAMAGE_TEST
+    if (len > 8)                                /* a test-only build (tools/svc-test.sh): the table is damaged */
+        ((u8 *)buf)[len / 2] ^= 0x5A;
+#endif
+    return (long)len;
 }
 
 /* SVC_REGISTER and SVC_REMOVE (root; strings already copied into the kernel), SVC_SELF */
@@ -367,6 +400,8 @@ long svc_sys(u32 op, const char *name, const char *text)
             fail_queue(i);
             ports[i].used = 0;
         }
+        kfree(s->saved);
+        s->saved = 0;
         s->state = SV_FREE;
         return 0;
     }
