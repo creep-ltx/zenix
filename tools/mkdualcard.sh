@@ -47,6 +47,7 @@ cat > "$T/conf" <<'EOF'
 # | shell. "default N" picks entry N when the countdown runs out; "timeout S" is the countdown in seconds.
 timeout 5
 default 1
+# background black
 AmigaOS = partition DH0
 Zenix = run SYS:zenixboot
 AmigaOS rescue shell = shell

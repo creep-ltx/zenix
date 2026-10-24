@@ -56,6 +56,8 @@ S:BOOTMENU.CONF
     are ignored. At most 9 entries.
         timeout 5                   the countdown in seconds
         default 1                   the entry the countdown starts
+        background black            black (light grey text) or grey (the
+                                    Workbench's colours, the default)
         AmigaOS = partition DH0
         Zenix = run SYS:zenixboot
         AmigaOS rescue shell = shell
@@ -70,8 +72,7 @@ NOTES
     title bar and no mouse pointer, and reads the keys itself (a console
     window, then the Shell window, if that screen cannot be opened).
     While shown it runs at priority 21, so the disk tasks mounting the
-    other partitions at boot do not hold it up. For now it writes a timing
-    log, SYS:bootmenu.log, at every start (a diagnosis; to be removed).
+    other partitions at boot do not hold it up.
     Verified in FS-UAE (Kickstart 3.2: the countdown, the reboot into the
     chosen partition) and on the owner's A1200 (PiStorm32-lite, Emu68 1.1,
     Kickstart 3.2.3, 2026-10-24: the menu, the reboot into DH0). The boot

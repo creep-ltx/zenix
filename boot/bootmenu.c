@@ -13,7 +13,7 @@ typedef unsigned long u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define BM_VERSION "0.1b8"
+#define BM_VERSION "0.1b9"
 #define BM_DATE "24.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: bootmenu " BM_VERSION " (" BM_DATE ")";
 
@@ -73,7 +73,7 @@ extern u8 kt_oldmem[], kt_oldtag[];
 enum { A_PARTITION, A_RUN, A_SHELL };
 struct entry { char label[LINEMAX]; int action; char arg[LINEMAX]; };
 static struct entry entries[MAXENTRY];
-static int nentries, timeout = 5, defchoice;
+static int nentries, timeout = 5, defchoice, black;
 static long out;
 
 /* the compiler copies initialised local arrays (the tag lists) with these */
@@ -108,6 +108,7 @@ static void conf_line(char *l)
     if (*l == '#' || *l == 0) return;
     if (startswith(l, "timeout")) { timeout = atoi_(l + 7); return; }
     if (startswith(l, "default")) { defchoice = atoi_(l + 7) - 1; return; }
+    if (startswith(l, "background")) { black = lower(*skipsp(l + 10)) == 'b'; return; }     /* black or grey */
     char *eq = l;
     while (*eq && *eq != '=') eq++;
     if (*eq != '=' || nentries == MAXENTRY) return;
@@ -183,46 +184,6 @@ static int key(long in, long us)
 }
 
 /* seconds since an earlier call, from the system clock (DateStamp: days, minutes, ticks of 1/50 s) */
-/* ---- the timing log (SYS:bootmenu.log): where the time goes at boot (a diagnosis, 2026-10-24) ----
- * Under Emu68 the Pi's system timer (1 MHz, on the ARM side: it keeps counting while the 68k side is stalled, which
- * the system clock does not) is read at the peripheral window Emu68 maps (0xF2003004, the same address Emu68's own
- * SD driver reads); elsewhere the log says so and uses the system clock. */
-static int pitimer;
-static u32 tod(void)                                     /* microseconds */
-{
-    if (pitimer) {
-        u32 v = *(volatile u32 *)0xF2003004;
-        return (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24);
-    }
-    long d[3];
-    DateStamp(d);
-    return ((u32)d[1] * 3000u + (u32)d[2]) * 20000u;
-}
-static u32 tod0;
-static char logbuf[2048];
-static int loglen;
-static void logn(const char *what, u32 v)
-{
-    char b[12]; int i = 11; b[i] = 0;
-    u32 ms = (tod() - tod0) / 1000u;
-    do { b[--i] = '0' + ms % 10; ms /= 10; } while (ms && i);
-    for (const char *s = b + i; *s && loglen < 2000; ) logbuf[loglen++] = *s++;
-    logbuf[loglen++] = ' ';
-    for (const char *s = what; *s && loglen < 2000; ) logbuf[loglen++] = *s++;
-    if (v != 0xFFFFFFFFu) {
-        i = 11; b[i] = 0;
-        do { b[--i] = '0' + v % 10; v /= 10; } while (v && i);
-        logbuf[loglen++] = ' ';
-        for (const char *s = b + i; *s && loglen < 2000; ) logbuf[loglen++] = *s++;
-    }
-    logbuf[loglen++] = '\n';
-}
-static void log_save(void)
-{
-    long f = Open("SYS:bootmenu.log", 1006);            /* MODE_NEWFILE */
-    if (f) { Write(f, logbuf, loglen); Close(f); }
-}
-
 static u32 now_ticks(void)
 {
     long d[3];
@@ -290,6 +251,12 @@ static int gui_open(void)
         return 0;
     }
     bm_os(IntuitionBase, -270, 1, 16, 0, 0, (long)gui_win, (long)gui_ptr);     /* SetPointer: invisible */
+    if (black) {                                        /* colour 0 the background, 1 the text, 2 the text on the bar */
+        void *vp = gui_scr + 44;                        /* Screen.ViewPort */
+        bm_os(GfxBase, -288, 0, 0, 0, 0, (long)vp, 0);                         /* SetRGB4(vp, 0, 0, 0, 0) */
+        bm_os(GfxBase, -288, 1, 0xC, 0xC, 0xC, (long)vp, 0);                   /* light grey */
+        bm_os(GfxBase, -288, 2, 0, 0, 0, (long)vp, 0);                         /* black */
+    }
     return 1;
 }
 
@@ -418,7 +385,6 @@ static int choose_gui(void)
     int sel = defchoice, left = timeout;
     u32 start = now_ticks();
     gui_draw(sel, left);
-    logn("menu: drawn (own screen)", 0xFFFFFFFFu);
     for (;;) {
         int k = gui_key();
         if (k == 0) {
@@ -437,8 +403,6 @@ static int choose_gui(void)
         gui_draw(sel, left);
     }
     SetTaskPri(me, oldpri);
-    logn("menu: chosen", (u32)sel + 1);
-    log_save();
     return sel;
 }
 
@@ -451,16 +415,10 @@ static int choose(void)
     long oldpri = SetTaskPri(me, 21);
     int sel = defchoice, left = timeout;
     u32 start = now_ticks();
-    logn("menu: SetMode", 0xFFFFFFFFu);
     SetMode(in, 1);                                     /* raw: keys arrive one by one, not echoed */
-    logn("menu: first draw", 0xFFFFFFFFu);
     draw(sel, left);
-    logn("menu: drawn", 0xFFFFFFFFu);
-    int nlog = 0;
     for (;;) {
-        u32 w0 = tod();
         int k = key(in, left >= 0 ? 200000 : 0x7fffffff);
-        if (nlog < 40) { nlog++; logn(k ? "key after ms" : "0.2 s wait took ms", (tod() - w0) / 1000u); }
         if (k == 0) {
             if (left < 0) continue;
             int l = timeout - (int)((now_ticks() - start) / 50u);
@@ -477,8 +435,6 @@ static int choose(void)
     }
     SetMode(in, 0);
     SetTaskPri(me, oldpri);
-    logn("menu: chosen", (u32)sel + 1);
-    log_save();
     puts_("\x9b" " p\n\n");                         /* the cursor back on */
     return sel;
 }
@@ -575,10 +531,7 @@ long bm_main(void)
 {
     DOSBase = OpenLibrary("dos.library", 37);
     if (!DOSBase) return 20;
-    pitimer = bm_os(SysBase, -498, 0, 0, 0, 0, 0, (long)"devicetree.resource") != 0;     /* OpenResource: Emu68 */
-    tod0 = tod();
     out = Output();
-    logn(pitimer ? "start (Pi timer)" : "start (system clock)", 0xFFFFFFFFu);
     {
         char name[108];
         const char *me = name;
@@ -606,9 +559,7 @@ long bm_main(void)
         return 5;
     }
     if (defchoice < 0 || defchoice >= nentries) defchoice = 0;
-    logn("config read", 0xFFFFFFFFu);
     menu_open();
-    logn(menu_con ? "menu window open" : "no menu window: the Shell's", 0xFFFFFFFFu);
     int asked = note_entry(note_take());            /* reboot amigaos / bootzenix: no menu this time */
     for (;;) {
         struct entry *e = &entries[asked >= 0 ? asked : choose()];
