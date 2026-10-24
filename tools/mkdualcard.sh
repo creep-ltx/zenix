@@ -52,7 +52,7 @@ Zenix = run SYS:zenixboot
 AmigaOS rescue shell = shell
 EOF
 python3 "$HERE/mkffs.py" "$T/boot.img" $((BOOTSECT * 512)) BOOT "$T/startup=S/Startup-Sequence" \
-    "$T/conf=S/BootMenu.conf" "$B/bootmenu=bootmenu" "$B/zenixboot=zenixboot" "$B/kernel.bin=zenix" >/dev/null
+    "$T/conf=S/BootMenu.conf" "$B/bootmenu=bootmenu" "$B/bootmenu=bootzenix" "$B/zenixboot=zenixboot" "$B/kernel.bin=zenix" >/dev/null
 cp --sparse=always "$AMIGA" "$T/amiga.img"
 rdbtool "$T/amiga.img" import 0 "$T/boot.img" >/dev/null
 

@@ -315,6 +315,25 @@ void kbd_init(void)
 }
 
 /* In init's process context (proc_wait, WAIT_CONSOLE), once kbd_work has seen the held reset warning and woken it. */
+/* A software reset, as exec's ColdReboot does it (ROM Kernel Manual, exec.library/ColdReboot): the ROM's start
+ * address from its header, then RESET and JMP in one long word, so the JMP is already fetched when RESET takes the
+ * ROM overlay and the chips back to their start state. */
+void machine_reset(void)
+{
+    __asm__ volatile(
+        "move.w #0x2700,%%sr\n\t"
+        "lea 0x01000000,%%a0\n\t"
+        "sub.l -0x14(%%a0),%%a0\n\t"          /* the ROM's size is in its last bytes: its start */
+        "move.l 4(%%a0),%%a0\n\t"             /* the initial PC */
+        "subq.l #2,%%a0\n\t"
+        "bra.s 1f\n\t"
+        ".balign 4\n"
+        "1:\treset\n\t"
+        "jmp (%%a0)\n" ::: "a0", "memory");
+    for (;;)
+        ;
+}
+
 void kbd_reset_flush(void)
 {
     if (kbd_reset_state != KRS_HELD)

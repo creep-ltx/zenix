@@ -129,6 +129,9 @@ is not preemptive.
   Early Startup menu (hold both mouse buttons at power-on, Kickstart 2.0+) already chooses the boot partition. Pi-side
   choices (several FAT partitions, each with its own Emu68 and ROM, picked by the Pi firmware) are in the knowledge base
   note `amiga/emu68-and-pistorm.md`.
+- **Remote access for Zenix, like Wasabi** (owner's idea, 2026-10-24): a daemon that lets the PC (and Claude) run
+  commands, move files and see the screen on a running Zenix, as `wasabid` does on AmigaOS. Needs the network driver
+  (GENET) and a TCP/IP stack first; until then the serial cable is the way in.
 - **`zc`, Zenix Commander** (owner's idea, 2026-10-23): a text-mode two-panel file manager in the spirit of Midnight
   Commander - copy, move, delete, rename, view (with the pager) and edit (with the editor), a command line under the
   panels. Fits the owner's rules: works in 80x32 / 80x25 (no wide-screen layout), every key configurable (as Ahiru and

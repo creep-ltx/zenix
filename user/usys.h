@@ -129,3 +129,6 @@ static inline int sys_blk_flush(void) { return sys3(72, 0, 0, 0); }
 #define PRIO_USER    2    /* who is a user id, 0 = the caller's */
 static inline int sys_getpriority(int which, int who) { return sys3(78, (u32)which, (u32)who, 0); }   /* 20 - nice, or -errno */
 static inline int sys_setpriority(int which, int who, int nice) { return sys3(79, (u32)which, (u32)who, (u32)nice); }
+#define BOOTNOTE_AMIGAOS 1u                     /* SYS_reboot: the boot menu starts this system at once (kernel.h) */
+#define BOOTNOTE_ZENIX   2u
+static inline int sys_reboot(u32 note) { return sys3(80, note, 0, 0); }

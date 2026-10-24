@@ -22,6 +22,8 @@ allowed. **Approved exceptions:** booting without a floppy (`zenixboot`, owner 2
 2026-10-24), to start only after the audit fixing is done and the closing audit report is written.
 The boot menu and the dual-boot SD card (owner 2026-10-24: a small boot partition with a menu, the owner's AmigaOS
 on PFS3 partitions, Zenix root and /home); the menu program lives with `zenixboot` in `boot/`.
+Rebooting between the systems (owner 2026-10-24): `bootzenix` in AmigaOS, `reboot [amigaos]` / `bootamigaos` in Zenix,
+through a one-shot note the boot menu reads. Later (not now): a Wasabi-like remote-access daemon for Zenix (needs the network driver).
 Only the owner lifts the halt; a session never decides on its own that it is over. Unfinished work stays
 parked (e.g. the uncommitted `user/awk.c`). Order of the fixes: batches A and B, then the first PiStorm boot, then C,
 D and E.
@@ -56,7 +58,8 @@ unseen). So:
 |---|---|
 | 1-77 in use except 39, 40, 68 (removed with the workspaces in batch E; free again) | main, all merged (see `kernel/kernel.h`) |
 | 78 `getpriority`, 79 `setpriority` (DESIGN D10, priorities) | main, merged 2026-10-24 |
-| **next free: 80** | |
+| 80 `reboot` (save the disks, reset; optionally leave the boot menu a one-shot choice) | main, 2026-10-24 |
+| **next free: 81** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8.
 

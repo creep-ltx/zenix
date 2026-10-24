@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     bootmenu
+    bootzenix
 
 DESCRIPTION
     bootmenu is an AmigaOS program, not a Zenix one, like zenixboot. It is
@@ -39,6 +40,17 @@ DESCRIPTION
                 Shell stays open (a rescue Shell with Kickstart's own
                 commands).
 
+REBOOTING BETWEEN THE SYSTEMS
+    Started under the name bootzenix (a copy of bootmenu, or a link to
+    it), the program leaves a one-shot note "next boot: Zenix" at the top
+    of chip RAM (in the spare bytes of Zenix's log area) and reboots; the
+    menu then starts the first "run ...zenixboot" entry at once, without
+    a countdown. Zenix's "reboot amigaos" (reboot(8)) leaves "next boot:
+    AmigaOS", and the menu starts the first "partition" entry. The note
+    is read only after AllocAbs() on its 16 bytes succeeded (memory in
+    use by AmigaOS is never read or written) and is cleared when read, so
+    the boot after shows the menu again.
+
 S:BOOTMENU.CONF
     One setting or entry per line; "#" starts a comment line, unknown lines
     are ignored. At most 9 entries.
@@ -57,10 +69,11 @@ NOTES
     by hand. The menu is plain text in the Shell window, no graphics.
     Verified in FS-UAE (Kickstart 3.2: the countdown, the reboot into the
     chosen partition) and on the owner's A1200 (PiStorm32-lite, Emu68 1.1,
-    Kickstart 3.2.3, 2026-10-24: the menu, the reboot into DH0).
+    Kickstart 3.2.3, 2026-10-24: the menu, the reboot into DH0). The boot
+    note both ways (bootzenix, reboot amigaos): verified in FS-UAE.
 
 FILES
     S:BootMenu.conf
 
 SEE ALSO
-    zenixboot(8)
+    zenixboot(8), reboot(8)

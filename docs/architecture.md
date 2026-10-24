@@ -393,11 +393,11 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 76 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-79, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 77 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-80, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
-index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority`), memory (`memalloc memfree meminfo`),
+index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority`), the machine (`reboot`), memory (`memalloc memfree meminfo`),
 time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
@@ -414,6 +414,11 @@ answers pass through the kernel unchanged, and both servers return the same numb
 libz keeps the last one in `zerrno`; `zwhy(dflt)` and `zstrerror(e)` give its text. A few places still answer a
 bare -1; limits.md ("Error numbers") lists them. A permission refusal is always -EACCES (13), also for chmod/chown by a non-owner (Linux says
 EPERM there).
+
+**Reboot**: `SYS_reboot(note)`, root only, does what the reset warning does (every filesystem synced, disk writes
+stopped), notes "rebooted" in the log for the next boot (`dmesg -p`), and resets the machine as exec's ColdReboot does
+(RESET and JMP to the ROM's start in one long word). A note of 1 (AmigaOS) or 2 (Zenix) is first left in the spare
+bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the boot menu (`man/bootmenu.txt`).
 
 **Priorities** (section 6): `SYS_getpriority(which, who)` and `SYS_setpriority(which, who, nice)`, POSIX's calls.
 `PRIO_PROCESS`: who is a pid, 0 the caller; `PRIO_USER`: every process whose real uid is who (0: the caller's);

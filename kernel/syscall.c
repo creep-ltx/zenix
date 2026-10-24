@@ -551,6 +551,22 @@ void syscall_c(u32 *rb)
     case SYS_setpriority:
         r = (s32)do_priority(1, a1, a2, (s32)a3);
         break;
+    case SYS_reboot:                    /* like the reset warning: sync, stop disk writes, then the reset */
+        if (current->uid != 0)
+            r = -EPERM;
+        else if (a1 > BOOTNOTE_ZENIX)
+            r = -EINVAL;
+        else if (a1 && (r = (s32)bootnote_set(a1)) < 0)
+            ;
+        else {
+            long e = vfs_sync();
+            disk_frozen = 1;
+            klog_set_reason(KLOG_END_REBOOT);
+            kprintf("reboot: filesystems synced%s, disk writes stopped; resetting%s\n", e < 0 ? " (with an error)" : "",
+                    a1 == BOOTNOTE_AMIGAOS ? " into AmigaOS" : a1 == BOOTNOTE_ZENIX ? " into Zenix" : "");
+            machine_reset();
+        }
+        break;
     case SYS_kill: {
         struct proc *p = proc_by_pid((int)a1);
         if (!(r = may_signal(p)))

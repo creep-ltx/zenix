@@ -46,6 +46,16 @@ void klog_mirror_on(void);                    /* a panic: its text goes to the s
 #define KLOG_PREV       0x80000000u           /* SYS_klog offset flag: read the previous boot's log (dmesg -p) */
 #define KLOG_END_RUNNING 0u                   /* why a boot ended, kept in the log header for the next boot */
 #define KLOG_END_PANIC   1u
+#define KLOG_END_REBOOT  2u                   /* the reboot system call */
+/* the boot note (SYS_reboot): a one-shot choice for the boot menu (boot/bootmenu.c) in the spare bytes of the log
+ * area's first header, BOOTNOTE_OFF from the area's start (the top of chip RAM - KLOG_AREA_SIZE). Four longs: magic,
+ * kind, ~(magic + kind), 0. The same numbers are in boot/bootmenu.c. */
+#define BOOTNOTE_OFF     0xF0u
+#define BOOTNOTE_MAGIC   0x5A4E5854u          /* "ZNXT" */
+#define BOOTNOTE_AMIGAOS 1u
+#define BOOTNOTE_ZENIX   2u
+long bootnote_set(u32 kind);                  /* -ENODEV when the log area is not in chip RAM (a small machine) */
+void machine_reset(void) __attribute__((noreturn));
 void klog_init(const struct bootinfo *bi);    /* first thing in kmain: read the previous log, start this one */
 void klog_show_prev(void);                    /* print what klog_init found (and the previous boot's last lines) */
 void klog_set_reason(u32 r);
@@ -489,6 +499,7 @@ int tty_of(const struct proc *p);
 #define SYS_ttymirror   37   /* 0 = stop copying screen output to the serial port */
 #define SYS_getpriority 78   /* which (PRIO_*), who -> 20 - nice (1 .. 40, never a negative errno's range), or -errno */
 #define SYS_setpriority 79   /* which, who, nice: anyone lowers their own processes, only root raises */
+#define SYS_reboot      80   /* note (0, BOOTNOTE_AMIGAOS, BOOTNOTE_ZENIX): root only; sync, stop disk writes, reset */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

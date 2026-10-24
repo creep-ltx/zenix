@@ -1,0 +1,37 @@
+REBOOT(8)			Zenix manual
+
+NAME
+    reboot, bootamigaos - save the disks and restart the Amiga
+
+SYNOPSIS
+    reboot [amigaos | zenix]
+    bootamigaos
+
+DESCRIPTION
+    reboot does what pressing Ctrl-Amiga-Amiga does on a keyboard that
+    sends the reset warning: every filesystem is synced, disk writes are
+    stopped, and the machine is reset. The next boot's log (dmesg -p)
+    says that the previous boot ended with reboot.
+
+    With a system named, the boot menu (bootmenu(8), on a disk that has
+    one) starts that system at once instead of showing the menu:
+    "reboot amigaos" goes back to AmigaOS, "reboot zenix" boots Zenix
+    again. The choice is a one-shot note in the spare bytes of the
+    kernel log's area at the top of chip RAM; the boot after that shows
+    the menu again. bootamigaos is the same program and means "reboot
+    amigaos". The way back from AmigaOS is bootzenix (bootmenu(8)).
+
+    Only root may reboot.
+
+EXIT STATUS
+    reboot does not return when it works; 1 when the kernel refused
+    (not root; the note needs the log area in chip RAM, which a machine
+    with very little chip RAM does not have), 2 for a wrong argument.
+
+NOTES
+    Running programs are not asked to quit first: what they have not
+    written is lost, as with the reset warning. Without a boot menu on
+    the disk the note is simply not read.
+
+SEE ALSO
+    bootmenu(8), sync(1), dmesg(1)

@@ -13,7 +13,7 @@ typedef unsigned long u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define BM_VERSION "0.1b3"
+#define BM_VERSION "0.1b4"
 #define BM_DATE "24.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: bootmenu " BM_VERSION " (" BM_DATE ")";
 
@@ -28,6 +28,7 @@ extern u8 kt_oldmem[], kt_oldtag[];
 #define Forbid()            bm_os(SysBase, -132, 0, 0, 0, 0, 0, 0)
 #define Permit()            bm_os(SysBase, -138, 0, 0, 0, 0, 0, 0)
 #define AllocMem(n, f)      ((u8 *)bm_os(SysBase, -198, (long)(n), (long)(f), 0, 0, 0, 0))
+#define AllocAbs(n, a)      ((u8 *)bm_os(SysBase, -204, (long)(n), 0, 0, 0, 0, (long)(a)))
 #define FreeMem(a, n)       bm_os(SysBase, -210, (long)(n), 0, 0, 0, 0, (long)(a))
 #define OpenLibrary(n, v)   ((void *)bm_os(SysBase, -552, (long)(v), 0, 0, 0, 0, (long)(n)))
 #define CloseLibrary(b)     bm_os(SysBase, -414, 0, 0, 0, 0, 0, (long)(b))
@@ -49,12 +50,22 @@ extern u8 kt_oldmem[], kt_oldtag[];
 #define SetMode(f, m)       bm_os(DOSBase, -426, 0, (long)(f), (long)(m), 0, 0, 0)
 #define SystemTagList(c, t) bm_os(DOSBase, -606, 0, (long)(c), (long)(t), 0, 0, 0)
 #define DateStamp(d)        bm_os(DOSBase, -192, 0, (long)(d), 0, 0, 0, 0)
+#define GetProgramName(b, n) bm_os(DOSBase, -576, 0, (long)(b), (long)(n), 0, 0, 0)
 #define MODE_OLDFILE 1005
 
 #define EXEC_L(off) (*(volatile u32 *)((u8 *)SysBase + (off)))
 #define KICKMEMPTR   0x222
 #define KICKTAGPTR   0x226
 #define KICKCHECKSUM 0x22A
+
+/* The boot note: a one-shot choice left by Zenix's "reboot amigaos" or by "bootzenix" here, in the spare bytes of the
+ * first header of Zenix's log area at the top of chip RAM (kernel/kernel.h: BOOTNOTE_*, KLOG_AREA_SIZE; the same
+ * numbers). Read and written only after AllocAbs() succeeded on it, so memory AmigaOS is using is never touched. */
+#define KLOG_AREA_SIZE   0x4200u
+#define BOOTNOTE_OFF     0xF0u
+#define BOOTNOTE_MAGIC   0x5A4E5854u
+#define BOOTNOTE_AMIGAOS 1u
+#define BOOTNOTE_ZENIX   2u
 
 #define MAXENTRY 9
 #define LINEMAX 80
@@ -242,19 +253,98 @@ static void boot_partition(const char *name)
     Permit();
 }
 
+static u32 *note_addr(void)
+{
+    u32 top = EXEC_L(0x3E) & ~0xFFFu;                   /* MaxLocMem: the end of chip RAM */
+    return (u32 *)(top - KLOG_AREA_SIZE + BOOTNOTE_OFF);
+}
+
+/* take the note if there is one: its kind, or 0 */
+static u32 note_take(void)
+{
+    u32 *n = note_addr();
+    u32 *a = (u32 *)AllocAbs(16, n);
+    if (!a)
+        return 0;                                       /* in use by AmigaOS: no note can be there */
+    u32 kind = 0;
+    if (n[0] == BOOTNOTE_MAGIC && n[2] == ~(BOOTNOTE_MAGIC + n[1]) &&
+        (n[1] == BOOTNOTE_AMIGAOS || n[1] == BOOTNOTE_ZENIX))
+        kind = n[1];
+    n[0] = n[1] = n[2] = n[3] = 0;
+    FreeMem(a, 16);
+    return kind;
+}
+
+/* started as "bootzenix" (or "bootamigaos"): leave the note and reboot */
+static long note_reboot(u32 kind)
+{
+    u32 *n = note_addr();
+    if (!AllocAbs(16, n)) {
+        puts_("bootmenu: the memory for the boot note is in use; reboot and choose in the menu\n");
+        return 10;
+    }
+    n[0] = BOOTNOTE_MAGIC;
+    n[1] = kind;
+    n[2] = ~(BOOTNOTE_MAGIC + kind);
+    n[3] = 0;
+    CacheClearU();
+    ColdReboot();
+    return 10;
+}
+
+/* the entry a note asks for: the first "partition" entry for AmigaOS, the first "run ...zenixboot" for Zenix */
+static int note_entry(u32 kind)
+{
+    for (int i = 0; i < nentries; i++) {
+        if (kind == BOOTNOTE_AMIGAOS && entries[i].action == A_PARTITION)
+            return i;
+        if (kind == BOOTNOTE_ZENIX && entries[i].action == A_RUN) {
+            const char *a = entries[i].arg;
+            for (; *a; a++)
+                if (lower(a[0]) == 'z' && lower(a[1]) == 'e' && lower(a[2]) == 'n' && lower(a[3]) == 'i' &&
+                    lower(a[4]) == 'x' && lower(a[5]) == 'b')
+                    return i;
+        }
+    }
+    return -1;
+}
+
 long bm_main(void)
 {
     DOSBase = OpenLibrary("dos.library", 37);
     if (!DOSBase) return 20;
     out = Output();
+    {
+        char name[108];
+        const char *me = name;
+        if (GetProgramName(name, sizeof name)) {
+            for (char *q = name; *q; q++)
+                if (*q == ':' || *q == '/')
+                    me = q + 1;
+            int z = 1, a = 1;
+            const char *zw = "bootzenix", *aw = "bootamigaos";
+            for (int i = 0; i < 12; i++) {
+                if (z && lower(me[i]) != zw[i]) z = 0;
+                if (a && lower(me[i]) != aw[i]) a = 0;
+                if (!me[i]) break;
+            }
+            if (z || a) {
+                long rc = note_reboot(z ? BOOTNOTE_ZENIX : BOOTNOTE_AMIGAOS);
+                CloseLibrary(DOSBase);
+                return rc;
+            }
+        }
+    }
     if (!read_conf()) {
         puts_("bootmenu: no entries in S:BootMenu.conf\n");
         CloseLibrary(DOSBase);
         return 5;
     }
     if (defchoice < 0 || defchoice >= nentries) defchoice = 0;
+    int asked = note_entry(note_take());            /* reboot amigaos / bootzenix: no menu this time */
     for (;;) {
-        struct entry *e = &entries[choose()];
+        struct entry *e = &entries[asked >= 0 ? asked : choose()];
+        asked = -1;
         puts_("Starting ");
         puts_(e->label);
         puts_("...\n");

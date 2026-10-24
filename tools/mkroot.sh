@@ -26,7 +26,7 @@ if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small i
     rm -rf "$T/usr/man.gen"
 fi
 ln -s less "$T/bin/more"
-ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"; ln -s pgrep "$T/bin/pkill"            # more is less
+ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"; ln -s pgrep "$T/bin/pkill"; ln -s reboot "$T/bin/bootamigaos"   # more is less
 rm -f "$TMPOUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features
 # ownership and modes under fakeroot, so the image holds uid 0 (not whoever runs the build): root owns everything,

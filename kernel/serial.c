@@ -293,6 +293,18 @@ void klog_init(const struct bootinfo *bi)
 }
 
 /* why this boot ends (KLOG_END_PANIC from panic and kernel exceptions), kept for the next boot */
+long bootnote_set(u32 kind)
+{
+    if (!klog_area_pa)
+        return -ENODEV;
+    volatile u32 *n = (volatile u32 *)(klog_area_pa + BOOTNOTE_OFF);
+    n[0] = BOOTNOTE_MAGIC;
+    n[1] = kind;
+    n[2] = ~(BOOTNOTE_MAGIC + kind);
+    n[3] = 0;
+    return 0;
+}
+
 void klog_set_reason(u32 r)
 {
     if (!kl)
@@ -398,6 +410,7 @@ void klog_show_prev(void)
     }
     kprintf("=== previous boot (%u) ended here%s; its last lines (all of it: dmesg -p): ===\n", kprev->bootno,
             kprev->reason == KLOG_END_PANIC ? " with a kernel panic" :
+            kprev->reason == KLOG_END_REBOOT ? " with reboot" :
             " without a panic message (it hung, or was reset or switched off)");
     int bol = 1;
     for (; i < end; i++) {                  /* each line marked "> ", so it cannot pass for one of this boot's */
