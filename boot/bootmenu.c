@@ -13,7 +13,7 @@ typedef unsigned long u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define BM_VERSION "0.1b1"
+#define BM_VERSION "0.1b2"
 #define BM_DATE "24.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: bootmenu " BM_VERSION " (" BM_DATE ")";
 
@@ -124,16 +124,20 @@ static int read_conf(void)
 /* ---- the screen: the Shell window, drawn with the console's own control sequences ---- */
 static void draw(int sel, int left)
 {
-    puts_("\x9b" "H\x9b" "J");                           /* home, clear */
-    puts_("\n  \x9b" "1mBoot menu\x9b" "0m\n\n");
+    static int drawn;
+    /* the first time: clear the window and hide the cursor; later: go home and write over the same text, line by
+     * line with "erase to the end of the line", so that a real display does not flash at every countdown second */
+    puts_(drawn ? "\x9b" "H" : "\x9b" "0 p\x9b" "H\x9b" "J");
+    drawn = 1;
+    puts_("\x9b" "K\n  \x9b" "1mBoot menu\x9b" "0m\x9b" "K\n\x9b" "K\n");
     for (int i = 0; i < nentries; i++) {
         puts_(i == sel ? "  \x9b" "7m " : "   ");
         putn(i + 1);
         puts_("  ");
         puts_(entries[i].label);
-        puts_(" \x9b" "0m\n");
+        puts_(" \x9b" "0m\x9b" "K\n");
     }
-    puts_("\n  Up/Down or 1-");
+    puts_("\x9b" "K\n  Up/Down or 1-");
     putn(nentries);
     puts_(", Return to start.");
     if (left >= 0) { puts_("  Starting in "); putn(left); puts_(" s."); }
@@ -182,7 +186,7 @@ static int choose(void)
         draw(sel, left);
     }
     SetMode(in, 0);
-    puts_("\n\n");
+    puts_("\x9b" " p\n\n");                         /* the cursor back on */
     return sel;
 }
 

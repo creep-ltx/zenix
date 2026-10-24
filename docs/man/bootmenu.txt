@@ -56,7 +56,8 @@ NOTES
     menu (both mouse buttons held at power-on) still chooses a partition
     by hand. The menu is plain text in the Shell window, no graphics.
     Verified in FS-UAE (Kickstart 3.2: the countdown, the reboot into the
-    chosen partition); not yet on a real Amiga.
+    chosen partition) and on the owner's A1200 (PiStorm32-lite, Emu68 1.1,
+    Kickstart 3.2.3, 2026-10-24: the menu, the reboot into DH0).
 
 FILES
     S:BootMenu.conf
