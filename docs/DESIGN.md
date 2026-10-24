@@ -96,20 +96,20 @@ slowed by a low-priority busy program while a server works for it; the existing 
 **Measured:** task-switch and message round-trip cost before and after (`bench`), in FS-UAE and on the A1200.
 **Cost:** a few hundred bytes of kernel; one more word per process.
 
-## D11. Service manager (design, not built; reviewed once and revised, awaiting the owner's approval. Owner 2026-10-24: may be built after D10 once its design is complete and fully thought through - a full design note, reviewed, before any code)
+## D11. Service manager (design, not built; reviewed twice and revised, awaiting the owner's approval. Owner 2026-10-24: may be built after D10 once its design is complete and fully thought through - a full design note, reviewed, before any code)
 **What.** One mechanism for starting and keeping the servers (Exec "load on first use" + Minix 3 restart + launchd, as
 the future-ideas table asks): a registered port name always exists, in a slot range of its own; the first message to
 it starts its server, and a server that dies is started again by the next message, with limits (5 ends in 60 s:
 given up; for diskd and the root filesystem a panic), every event in the kernel log. The client that needs a stopped
 server loads it in its own context, as root (our extension of ramlib's escape from the loader deadlock), so there is
 no manager process to deadlock. The kernel keeps the table and the held ports; `boot` fills it (diskd, the root
-server with its device and volume id, `/etc/svctab`); `mount` registers its servers as the built-in images. A
+server with its device's place and volume id, `/etc/svctab`); `mount` registers its servers as the built-in images. A
 restarted diskd restores its device slots and claims from a small table it left with the kernel; a restarted
 filesystem server rebuilds its open-file counts from the kernel's open files. **Replaces** the hard-wired server list
 in `kmain`, the polling for ports in boot, fsd, zfsd and mount, `/bin/mount.ext2` and `/bin/mount.zenixfs`, and "a
 dead server stays dead". **Not in it:** port rights, stopping idle servers when memory is low, keep-alive servers,
 dependency lists. **Interface (proposed):** one system call (`SYS_svc`: register, remove, self, save, load, opens), one
-error number (ECONNRESET), no new message types, no new command. **Cost (estimated):** about 2.6-3.4 KB of the 5.1 KB
+error number (ECONNRESET), no new message types, no new command. **Cost (estimated):** about 2.7-3.6 KB of the 5.1 KB
 left on the RAM floppy, about 1.8 KB of RAM, one test per message call. The full design, its tests, build order, the
 owner's open questions and the bugs found in today's code: [d11-service-manager.md](d11-service-manager.md).
 

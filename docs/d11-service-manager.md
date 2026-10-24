@@ -1,7 +1,7 @@
 # D11: the service manager (design note)
 
-**Status: design, not built; awaiting the owner's approval.** Nothing in this note exists in the code yet. Revision 2
-(2026-10-24): the first review's findings are worked in (section 14 lists them). Facts about today's Zenix were read
+**Status: design, not built; awaiting the owner's approval.** Nothing in this note exists in the code yet. Revision 3
+(2026-10-24): the findings of two reviews are worked in (section 14 lists them). Facts about today's Zenix were read
 from branch `d11` (= main after D10); the file and function names below say where. The decision itself is DESIGN.md
 D11; this note is its full design.
 
@@ -119,9 +119,9 @@ and they depend only on each other (a filesystem server -> diskd; diskd calls no
 4. On a bare disk (no partition of either type) rootpick cannot tell the type; boot reads the device's superblock
    itself (`DISK_READ`; boot is root) and looks for the ext2 or ZenixFS magic, so no server is started on trial.
    boot also reads the **volume id** of the chosen device: the 16-byte uuid of the superblock (ext2 at byte 104,
-   ZenixFS at byte 68, zenixfs-format.md), together with the device's start and size. Zenix's own `mkfs.ext2` writes
-   no uuid today; it gets one (from the E-clock) in build step 3, and an all-zero uuid falls back to start, size and
-   the filesystem's block count.
+   ZenixFS at byte 68, zenixfs-format.md) and the device's **place** (medium, start and size). Nothing in Zenix writes
+   a uuid today - not `mkfs.ext2`, not `mkfs.zenixfs`, not `zenixfs-tool` (the ZenixFS field exists only in the
+   format); all three get one (from the E-clock) in build step 3. An all-zero uuid confirms nothing (4.3).
 5. `boot` registers `fs` -> `@zfsd` or `@fsd` with arguments `DEVICE fs -root -id ID`, nice -10. `-root` means:
    must be writable (fsd's `EXT2_RW`, as `find_root` asks today), print as the root server, not as `mount.ext2`.
    `-id` means: serve only the volume with this id (4.3). So the very first start already serves rootpick's device
@@ -152,7 +152,7 @@ exits again on every ext2 boot).
 | essential | for `disk` and `fs` only (4.1, 5.3) |
 | state | stopped, loading (with the loader's pid), starting (with the new pid and a deadline), running (with its pid), given up |
 | counters | starts, ends in the current 60 s window and when that window began; reset when the program changes |
-| saved table | at most 512 bytes a server may leave for its next start (5.4, diskd only today), with a checksum |
+| saved table | at most 512 bytes a server may leave for its next start (5.4, diskd only today), with a checksum; kept while the entry exists |
 
 Registering a name that exists replaces program, arguments and nice; it keeps the state and, if the program text is
 unchanged, the counters. Registering a name that an ordinary (unregistered) port holds is -EBUSY. Only root may
@@ -160,11 +160,21 @@ register or remove, and only root may name a built-in image; an image keeps its 
 give `priv` to anything else.
 
 ### 4.3 The volume id rule (filesystem servers)
-fsd and zfsd, given `-id ID`, open the device named in their arguments and compare its volume id. On a mismatch
-(partitions were renamed: `scan`/`same` keep a partition's slot but give it its new name, so `ide0p2` may now be
-another partition) they look through `DISK_LIST` for the device that carries the id and use that one; if none does,
-they say so ("fsd: the root volume ID is on no device") and end, and the start counts as failed. The same rule serves
-`mount`'s registrations (6.4).
+`-id` carries the place and the uuid. **The place is the key, the uuid confirms it** (a copy made with `dd` or a
+cloned card carries the same uuid, so a uuid alone could pick the copy):
+1. fsd or zfsd look through `DISK_LIST` for the device at that place (medium, start and size: what diskd's `same`
+   keeps across renames; partitions renamed by `fdisk` are found under their new names). If its uuid matches, or the
+   recorded uuid is all zero, they serve it.
+2. Only if nothing is at that place (the partition was moved) do they search by uuid, and only a uuid that is not all
+   zero and is carried by **exactly one** device counts; two or more carriers are refused ("fsd: two devices carry the
+   root volume's id").
+3. Otherwise they say so ("fsd: the root volume is on no device") and end; the start counts as failed.
+
+**Floppies:** every floppy has the same place (start 0, 1760 sectors), so the uuid is the only guard against a disk
+swapped in the drive. A restart of a server for a floppy whose recorded uuid is all zero is **refused** (logged:
+"fs.df0: a floppy without a volume id is not served again after a restart: mount it again") - the start counts as
+failed, and `umount`/`mount` by hand is the way back. (Today a swapped floppy under a mounted server is not noticed at
+all; that stays a separate limit.) The same rule serves `mount`'s registrations (6.4).
 
 ### 4.4 The service file: `/etc/svctab`
 For servers that live on the disk (none today besides the `pingd` test server; later the display, index and network
@@ -203,18 +213,22 @@ A client calls a port (a program's `SYS_call`, or the kernel's `ipc_kcall` for a
    environment, `ppid` 0 (the kill rule protects it as it does kmain's servers today), the entry's nice, output to
    console 1 (to the kernel log after build step 8).
 4. With the process created the entry becomes *starting* and its **deadline** begins: 30 s from now, so a slow
-   floppy read of the program or a back-off never eats into it. The loader then waits **in its own context**, a timed
-   wait like `ipc_recv`'s (a sleep with a deadline that the hand-over or the new process's death also ends): never in
-   the tick, which may only count and wake (CLAUDE.md's interrupt rule).
+   floppy read of the program or a back-off never eats into it. The deadline is kept by the entry's **watcher**, in
+   the watcher's own context, with a timed wait like `ipc_recv`'s (a sleep that the hand-over or the new process's
+   death also ends): never in the tick, which may only count and wake (CLAUDE.md's interrupt rule). The loader is the
+   first watcher. **A starting entry always has a watcher:** a watcher that leaves (killed, 5.6) passes the role to
+   the first client queued on the entry; with nobody queued the role is empty, and the next client that queues on a
+   starting entry with no watcher becomes the watcher. So nobody can wait for ever on a server that never opens its
+   port.
 5. The server initialises and calls `port_create` with its name. The kernel finds the held port of its entry and,
-   **only if the caller is the process it started for that entry**, hands the port over and wakes the loader. The
+   **only if the caller is the process it started for that entry**, hands the port over and wakes the watcher. The
    queued messages are now the server's; the loader puts its own message at the front of the queue and waits for
    the reply as any client. The entry becomes *running*.
-6. **Failure**, all handled by the loader in its own context: the program cannot be loaded (no such file, not a Zenix
-   program, out of memory, process table full: logged, not counted); the process ends before it opened its port
-   (counted, 5.3); the deadline passes (the loader logs "svc: NAME: PROGRAM did not open its port in 30 s", kills
-   the process and counts it). In each case every queued message fails with -ECONNRESET and the entry is stopped
-   (or given up).
+6. **Failure**, all handled in the loader's or the watcher's own context: the program cannot be loaded (no such file,
+   not a Zenix program, out of memory, process table full: logged, not counted); the process ends before it opened
+   its port (counted, 5.3); the deadline passes (the watcher logs "svc: NAME: PROGRAM did not open its port in 30 s",
+   kills the process and counts it). In each case every queued message fails with -ECONNRESET and the entry is
+   stopped (or given up).
 
 **The loader's own message.** While the loader reads the program it is itself a client of the filesystem; the reply
 lookup (`ipc_reply` matches `wait_msg`) and priority inheritance (`prio_set` follows `wait_msg`) must see only that
@@ -227,7 +241,10 @@ the reply would be refused as a stray pointer and the loader would wait for ever
 once (-ECONNRESET, which these callers ignore). Used by: `FS_CLOSE` from `file_close` and `fs_exec_close` (a new
 server has no opens to release, and `proc_exit` must never become a loader with interrupts masked: a 28-36 KB image
 copy would take milliseconds on a 14 MHz 68020 and lose serial input); `FS_SYNC` and `FS_QUIT` (6.3, 6.4). **Every
-call made from `proc_exit` is a no-start call.**
+call made from `proc_exit` is a no-start call.** One difference for `FS_CLOSE`: while the entry is *loading* or
+*starting* it is **queued** (it starts nothing, someone else is starting the server already), so the new server sees
+it after its open list and the counts stay right (5.4). Only while the entry is *stopped* is it dropped; the cost is
+noted in 5.4.
 
 **The deadlock rules** (the ramlib lesson, written down so nobody breaks them later):
 - Nobody loads on behalf of someone else: the loader is always a client that needed the service.
@@ -252,7 +269,10 @@ call made from `proc_exit` is a no-start call.**
   `mount` registers it), so a user still cannot put a fake server there.
 - When the server dies its service port goes back to held instead of being closed. Its other ports, if it made any,
   are closed as today.
-- Removing an entry (umount, 6.4) turns its port into an ordinary port of the running server, closed when it exits.
+- Removing an entry (umount, 6.4) turns its port into an ordinary port of the running server, closed when it exits;
+  **the held slot is free again when that port closes** (the server ends right after its `FS_QUIT` reply). A
+  registration that finds no free held slot waits up to 2 s for one that is being given back (an `umount` followed at
+  once by a `mount`), then fails with -EBUSY ("mount: too many filesystems mounted").
 
 ### 5.3 Crash handling
 **Noticing.** `proc_exit` already calls `ipc_proc_exit(pid)`. If the dying process is the running server of an entry,
@@ -289,30 +309,56 @@ Every server here keeps its real data on the disk; what is lost is what it held 
 
 **diskd: the saved table** (the idea of Minix 3's data store, where a driver leaves state for its next incarnation).
 A diskd started for the first time has nothing to restore. Whenever its table changes - a `DISK_MOUNT` or
-`DISK_UNMOUNT`, a rescan, a floppy drive probed - diskd hands the kernel a small record (`SVC_SAVE`, 8.1): for every
-used slot its medium, start, size, name and the pid that has it mounted, plus `fd_probe`. That is rare (never on a read
-or write) and at most about 450 bytes for 20 slots. A restarted diskd reads it back (`SVC_LOAD`), checks it like
-anything read from a disk (the checksum, every slot number, medium, start and size in range), puts each device back
-**into its old slot**, keeps each claim whose pid is still alive (`alive`), probes the same floppy drives, and only then
-runs `scan()`, which merges the partition tables as at any rescan (`same` keeps the old slots). So:
+`DISK_UNMOUNT`, a rescan, a floppy drive probed, a dead server's claim released by `holder()` - diskd hands the kernel a
+small record (`SVC_SAVE`, 8.1), **before it replies** to the request that changed it, so a diskd that dies after the
+save but before the reply leaves the claim the client will ask for again. The record: for every used slot its medium
+(1 byte), start and size (4 + 4), name (8 bytes: names are at most `ide0p19` with `MAXDEV` 20; `struct diskinfo`'s
+16-byte field is cut, not stored whole) and the claiming pid (4), so 21 bytes a slot, 420 for 20 slots, plus
+`fd_probe`, a count and the checksum: about 430 bytes, inside the 512. Saving is rare: never on a read or write. A
+restarted diskd reads it back (`SVC_LOAD`) before it opens its port, checks it like anything read from a disk (the
+checksum, every slot number, medium, start and size in range, names terminated), puts each device back **into its old
+slot**, keeps each claim whose pid is still alive (`alive`: pids are never reused, `next_pid++` in `proc_load`, so a
+live pid is the same server), probes the same floppy drives, and only then runs `scan()`, which merges the partition
+tables as at any rescan (`same` keeps the old slots). So:
 - old handles keep meaning the same device: requests that were queued for the dead diskd, and raw tools holding a
   handle (`fsck.ext2`, `fdisk`, `dd`), carry on correctly; a filesystem server that was idle when diskd died never
   notices;
 - the claims survive, so `blocked()` still refuses writes and raw opens on mounted devices from the first request on;
 - only the request in service fails (-ECONNRESET); the shared disk-client code of fsd and zfsd sends that one request
-  again once (repeating a sector read or write is safe); raw tools report the error.
+  again once (repeating a sector read or write is safe); raw tools report the error;
+- a repeated `DISK_OPEN` with `DISK_MOUNT` **by the process that already holds the claim** on that device returns the
+  handle again. (Today `handle()` checks `blocked(h, 0, size, 0)`: pid 0 means "not even the caller", so the retry
+  after a restart would refuse itself with -EBUSY - for the root's first start that would be the panic of 4.1.)
 If the record is damaged (a wild write in diskd can damage anything, there is no MMU), the restarted diskd **does not
-guess**: it ends with "diskd: the saved device table is damaged: stopping so no disk gets another's writes", which for
-an essential service is a panic. Renumbering devices under running servers is worse than stopping.
+guess**: it ends with "diskd: the saved device table is damaged: stopping so no disk gets another's writes". That is a
+**panic at once**, not counted toward the five (it is not a crash that a retry could cure). The safe-looking
+alternative, a generation number in every handle (old handles then fail with a distinct error and the servers
+reconnect), was weighed and not taken: it loses the claims, so writes and raw opens on mounted devices are unguarded
+until every filesystem server reconnects - and an idle mount never does - while raw tools fail mid-run. A damaged
+record means diskd's memory was overwritten, which without an MMU nothing contains; stopping is the honest answer.
 
 **fsd (ext2).** Its block cache and its table of open inodes (`opens`) are lost; everything it wrote is on the disk
 (write-through).
 - *Open files.* Before its first receive, a restarted fsd asks the kernel for the inodes the kernel holds open on its
-  mount (`SVC_OPENS`, 8.1: the `FT_INODE` files with that mount, plus the program files being loaded at that moment,
-  which the kernel keeps on a short list while their load is open) and rebuilds `opens` with those counts. The list is
-  exact: the kernel is never preempted, and it is taken after the port was handed over but before the server receives
-  anything, so every `FS_OPEN` and `FS_CLOSE` made since is still queued and applies on top. Deleting and freeing then
-  work as before; no space is held back.
+  mount (`SVC_OPENS`, 8.1) and rebuilds `opens` with those counts. The list counts:
+  1. every file entry of type `FT_INODE` on that mount, **including one whose `refs` is already 0**: `file_close`
+     drops `refs` before its `FS_CLOSE` and clears the type only afterwards, so a close in flight is counted here and
+     its queued `FS_CLOSE` takes the count back off;
+  2. every **answered but not yet used `FS_OPEN`**: a client whose `wait_msg` is still set (`call()` clears it only
+     when the client runs again), whose message is `MSG_DONE`, of type `FS_OPEN`, with a result >= 0, sent to this
+     port (`wait_port`). The dead server answered it, but `vfs_open` creates the file entry only when the client runs
+     - a nice 19 client may not have run yet when the nice -10 new server asks;
+  3. every **program load in progress** on that mount, from its `FS_OPEN` reply until its `fs_exec_close`: the
+     loading process's `exec_src` is linked into a list through the spawners' kernel stacks (no allocation, no fixed
+     size); between the `FS_OPEN` reply and the link, rule 2 covers it.
+  `fs_read_file` (`kernel/vfs.c`) is a third kind of open with no file entry; nothing calls it today, so it is deleted
+  in build step 0 rather than listed. The list is then exact: the kernel is never preempted, and it is taken after the
+  port was handed over but before the server receives anything, so every `FS_OPEN` and `FS_CLOSE` made since is still
+  queued and applies on top. Deleting and freeing work as before; no space is held back. One small leak remains: a
+  file deleted while open, whose last close happens while its server is *stopped* (dead, not yet started again), is
+  closed with nobody to tell (5.1, no-start calls); ext2 keeps its blocks until the next `fsck.ext2`, as after a crash
+  today. ZenixFS has no such leak: the inode stays an orphan, and the restarted server frees the orphans nobody
+  holds.
 - *A change that was half done.* If fsd died during a change (the log names the request), the volume may be as after
   a power cut during that change. ext2 has no journal. The restarted fsd **clears the superblock's "cleanly unmounted"
   state bit** (s_state bit 0, `EXT2_VALID_FS`), not its "has errors" bit (bit 1, which `ext2_mount_as` turns into a
@@ -354,19 +400,29 @@ guarantees.
 ### 5.6 Kills, Ctrl-C and the loader
 - **A loader is killed** (Ctrl-C on a program that happened to need a stopped server, or `kill`): its process is
   *loading*, and a kill of a loading process takes effect only at the end of its system call - `schedule()`'s tail
-  does not run `proc_exit` for it. A back-off sleep is woken by the kill (`proc_kill` readies sleepers): the loader
-  sees it, gives the loader role to the first queued client (woken to load instead) and leaves without starting
-  anything. A load already under way finishes or fails normally, so `proc_load` always reaches its own clean-up (no
-  memory owned by a pid that was never born, no 4 KB kernel stack lost) and `fs_exec_close` is always sent. Then the
-  loader does not queue its own message, hands on the role if others are queued, and dies at the end of the call.
+  does not run `proc_exit` for it. This is one rule with the step 0 fix (section 13, findings 5 and 6): `schedule()`'s
+  tail runs `proc_exit` only for a process that is neither *loading*, nor in a call (`wait_msg` set), nor already
+  exiting (`proc_exit` sets that flag at once). A back-off sleep is woken by the kill (`proc_kill` readies sleepers):
+  the loader sees it, gives the loader role to the first queued client (woken to load instead) and leaves without
+  starting anything. A load already under way finishes or fails normally, so `proc_load` always reaches its own
+  clean-up (no memory owned by a pid that was never born, no 4 KB kernel stack lost) and `fs_exec_close` is always
+  sent. Then the loader does not queue its own message, passes the loader or watcher role on (5.1, step 4: to the
+  first queued client, or to the next one that queues), and dies at the end of the call.
 - **Any other exit of a loader** (a fault cannot happen in kernel code without a panic, but the rule is general):
   `proc_exit` checks whether the process is an entry's loader; if so the entry goes back to stopped and the first
   queued client is woken as the new loader.
 - **A service process is killed** (`kill` by root, `killed` = 1): the kill takes effect only *between requests* - in
-  `ipc_recv` (which already returns -1 to a killed server, and every server's loop then ends), or at the end of a system
-  call while it serves nothing (no message with `server` = its pid in `MSG_SERVING`). So `kill` is a safe way to
-  restart a server by hand (8.4), and a kill can no longer cut an ext2 change in half (section 13, finding 3). Faults
-  and stack overflows (`killed` = 2) still end the process at once: they are crashes, and 5.3 handles them.
+  `ipc_recv`, which checks `killed` **before it takes a message** (today it checks only inside its wait loop, `while
+  (!p->head)`, so a server with a steady queue would never see the kill), or at the end of a system call while it
+  serves nothing (no message with `server` = its pid in `MSG_SERVING`). So `kill` is a safe way to restart a server by
+  hand (8.4), and a kill can no longer cut an ext2 change in half (section 13, finding 3).
+- **The escape for a hung server.** A server stuck inside a request (looping on bad data, or waiting on a hung diskd)
+  is never "between requests". So a **second kill**, or a kill still pending **5 s** later, ends it at once as today
+  (at its next system call, or through `schedule()`'s tail when the tick preempts it in user mode): counted as an end
+  (5.3) and logged "svc: fs: fsd killed in the middle of FS_RENAME: the change may be half done". A server blocked as a
+  *client* of a hung diskd can only be freed by ending diskd the same way (its request then fails and it runs again),
+  as a client in a call can never be ended while its server may still use its buffers (today's rule).
+- Faults and stack overflows (`killed` = 2) still end the process at once: they are crashes, and 5.3 handles them.
 
 ## 6. How it fits the rest of Zenix
 
@@ -406,7 +462,13 @@ starting a filesystem server), nice -10, and calls `SYS_mount`; the kernel's fir
 dmesg" for the server's own words once they go to the kernel log). `umount` (`vfs_umount`) removes the entry
 **before** it sends `FS_QUIT` (a no-start call), so the server's end is final. A mounted filesystem is not essential:
 given up, it stays mounted and answers -EIO until `umount`. `/bin/mount.ext2` and `/bin/mount.zenixfs` are then no
-longer used and are removed (with their pages) in build step 6.
+longer used and are removed in build step 6. That touches the Makefile (`UAPPS`, `MOUNTAPPS` for `zenix-mount.adf`, the
+`mount.ext2.zx` rule), `docs/commands.md`, their two manual pages, `zenixfs.md` and `vs-amigaos.md` where they are named,
+and the `mount.TYPE` naming in `user/mount.c` (no test script names them; `/etc/fstab` uses type names). **The rule
+for future types** (D5's optional FAT module): a filesystem type with no built-in image is a file service
+(`/sbin/fs.TYPE`, say), registered by `mount` with its path; mounting and restarting it then needs the root
+filesystem server again (nesting depth 2: the file, then the root image), and it is a decision for that module
+whether its server goes into the kernel image instead.
 
 ### 6.5 Zero copy
 Nothing is copied by D11. A message still lives in its client's memory; a queued message survives a restart only
@@ -430,10 +492,10 @@ recently used stoppable service. That belongs with the first real stateless serv
 `SYS_svc(op, arg, buffer)`:
 - `SVC_REGISTER` (root; arg: port name, program text, nice) and `SVC_REMOVE` (root; arg: port name).
 - `SVC_SELF` (any process): how many times its entry has been started (1 = the first start, 0 = not a service).
-- `SVC_SAVE` / `SVC_LOAD` (the running server of an entry only): leave or read back the saved table (at most 512
-  bytes; 5.4).
-- `SVC_OPENS` (the running server of an entry only): the inode numbers, with counts, that the kernel holds open on
-  the mount this server serves (5.4).
+- `SVC_SAVE` / `SVC_LOAD` (only **the process the kernel started for an entry**, while the entry is starting or
+  running: diskd restores before it opens its port): leave or read back the saved table (at most 512 bytes; 5.4).
+- `SVC_OPENS` (the same process): the inode numbers, with counts, that the kernel holds open on the mount this server
+  serves, counted by the three rules in 5.4.
 
 No status operation: the kernel log already says everything (8.4).
 
@@ -498,6 +560,14 @@ diskd and fsd lines) and `tools/users-d-checks.sh` (`kill 1` now names boot).
 | ports used up | a user creates ports until refused; root's `mount` still works | output |
 | reset warning, reboot | with a given-up mount and with a loader asleep in a back-off: the others sync in time and the machine resets | `tools/diag-test.sh reset` extended |
 | port name taken | root and a user creating `fs` or a registered name: -EBUSY | output |
+| `DISK_MOUNT` retried | diskd killed (test build: after its save, before its reply) during a mount: the retry gets its handle, the mount works; the same at the root's first start (no panic) | output |
+| answered `FS_OPEN` not yet used | a nice 19 client whose `FS_OPEN` was answered just before fsd died, then `rm` of the file by another program: the client's later reads give the file's bytes | `svctest` |
+| `FS_CLOSE` while starting | a deleted open file closed while its server is starting: after the start `df` shows the space back | `df` |
+| duplicate uuid | a `dd` copy of the root partition on the same disk: the restart still serves the original (place first); with the original moved, two carriers are refused | output, `dmesg` |
+| floppy swapped | a zero-uuid floppy mounted, its server killed: the restart is refused with the message; with a uuid, a swapped disk is refused | output |
+| watcher | a loader killed after creating the process, nobody queued, the server never opens its port: the next caller becomes the watcher and fails after 30 s | output within a timeout |
+| hung server | a test server looping inside a request, and one with a steady queue: one kill ends the busy one between requests; the looping one ends at the second kill, and after 5 s with one; the log line says so | output, `dmesg` |
+| twelve registrations | all held slots in use, `umount` then `mount` at once: the mount waits for the slot and works | output |
 | priorities | restarted servers at nice -10; `tools/prio-test.sh` (inheritance) otherwise unchanged | `ps` NI |
 | kernel stack | the deepest nesting (a file service loaded while the root restarts) under the stack guard | the guard does not fire; `-fstack-usage` sums |
 
@@ -518,7 +588,9 @@ everything below is on it (boot, diskd, fsd and zfsd are inside the kernel image
   restart rules about 0.3-0.4 KB each (one shared disk-client copy).
 - Saved: rootpick in fsd and zfsd (about 0.25 KB each) and four polling loops (about 0.05 KB each).
 - Step 8's kernel-log file: about 0.1 KB.
-- **About 2.6-3.4 KB in all: half to two thirds of what is left.** If it does not fit, the lever is the RAM disk's size
+- Revision 3's additions (the watcher, the second-kill escape, the retried claim, the fuller open list, the place
+  rule): about 0.1-0.2 KB more.
+- **About 2.7-3.6 KB in all: half to two thirds of what is left, so tight.** If it does not fit, the lever is the RAM disk's size
   (704 KB in the Makefile, a main-session and owner decision), not a second build of boot.
 - RAM: the table about 1.3 KB (with the saved-table buffer allocated only by diskd), twelve more ports about 0.5 KB.
   Saved: zfsd's process on every ext2 boot.
@@ -532,7 +604,9 @@ on the A1200.
 ## 11. Build order (each step builds, passes `make check` and is committed on its own)
 
 0. **Prerequisites in main** (section 13): the nested `proc_exit` file-slot leak and the kill-while-spawning leak, both
-   found in today's code, because D11 adds calls on the same paths.
+   found in today's code, because D11 adds calls on the same paths. One rule fixes both: `proc_exit` sets an
+   "exiting" flag at once, and `schedule()`'s tail runs `proc_exit` only when that flag and `wait_msg` are both clear
+   (5.6 extends it to *loading*). Also: delete the unused `fs_read_file`.
 1. **The mechanism, for the built-in servers.** `kernel/svc.c`: the table, held ports and their slot range, the
    hand-over, the loader (images only) with its deadline, back-off, kill rules and no-start calls, death (the served
    request fails, queued ones wait), -ECONNRESET and the -EIO mapping, `SYS_svc` REGISTER, REMOVE and SELF; `kmain`
@@ -540,7 +614,8 @@ on the A1200.
    Measure the kernel stack depth and the size. Tests: all of `make check` (pids updated), kill fsd/zfsd idle, no root.
 2. **diskd's saved table** (`SVC_SAVE`/`SVC_LOAD`) and the shared disk client's one retry. Tests: diskd killed during
    `cp`, after a rescan, after `df1`, idle then `fdisk`; a raw tool; a damaged record.
-3. **The filesystem servers' restart rules**: `SVC_OPENS`, the volume id rule and the uuid in `mkfs.ext2`, the ext2
+3. **The filesystem servers' restart rules**: `SVC_OPENS`, the volume id rule (place first) and the uuid in
+   `mkfs.ext2`, `mkfs.zenixfs` and `zenixfs-tool`, the ext2
    state bit, ZenixFS's orphan flag and `next_ino` jump. Tests: deleted open files, free space, lost-window file,
    renamed partitions.
 4. **Limits**: the back-off, the 5-in-60 s give-up, the deadline. Tests: limit, back-off, cycle, own port, loader
@@ -586,9 +661,11 @@ it there, or asks for those lines first.
 | 3 | A kill of fsd mid-request takes effect in `schedule()`'s tail when diskd's reply readies it, inside a multi-block ext2 change. | fixed for kills (5.6); a crash can still do it (5.4) |
 | 4 | Mounted filesystem servers run at nice 0 (`proc_load` copies the parent's nice; `mount` uses `sys_spawn`). | fixed (6.1) |
 | 5 | **A Ctrl-C can corrupt a file slot.** `proc_exit` closes a file, `file_close` sends `FS_CLOSE`, the reply readies the killed process, `schedule()`'s tail runs `proc_exit` again, nested; it closes the same file again before the first loop cleared `p->fd[i]`, and the 16-bit `refs` wraps from 0 to 65535 (the slot is never freed). | **prerequisite** (step 0): D11's no-start `FS_CLOSE` narrows it but does not remove it |
-| 6 | **Killing a process while it spawns** dies in the middle of `proc_load`: the child's memory (owned by a pid that was never born) and the program's `FS_CLOSE` are lost. | **prerequisite** (step 0); the same "kill at the end of the system call" rule as a loader (5.6) is the natural fix |
+| 6 | **Killing a process while it spawns** dies in the middle of `proc_load`: the child's memory (owned by a pid that was never born) and the program's `FS_CLOSE` are lost. | **prerequisite** (step 0); one rule fixes 5 and 6 together (step 0; 5.6) |
 | 7 | fsd's `find_root` ignores the bootable flag (takes the first writable ext2 partition), unlike rootpick and architecture.md section 9. | fixed (4.1: boot passes the device); a one-line fix in main is possible before |
 | 8 | `proc_exit` makes message calls (`FS_CLOSE`) with interrupts masked. | made safe for D11 (no starts from there); the masking itself is future-ideas item 5 |
+| 9 | `fs_read_file` (`kernel/vfs.c`) opens a file with no file entry; nothing calls it. | deleted in step 0 (5.4) |
+| 10 | `ipc_recv` checks `killed` only while the queue is empty: a server with a steady queue never sees a kill. | fixed (5.6) |
 
 Not a bug today, to be checked with D11: the kernel stack depth of nested calls (step 1).
 
@@ -603,6 +680,15 @@ first user -> 5.1 (as root); 9 the deadline in the tick -> 5.1 (the loader's own
 area -> 5.1, 5.2; 15 size -> 10; 16 documents and tests -> 9, 11; 17 the owner's questions -> 12; the ramlib
 paraphrase -> 3.1; today's bugs -> 13.
 
+The second review (revision 3): 1 a retried `DISK_MOUNT` refusing itself -> 5.4 (save before the reply, the holder may
+ask again, `holder()` saves); 2 gaps in `SVC_OPENS` -> 5.4 (refs 0, answered opens, the load list through kernel
+stacks, `fs_read_file` deleted) and 5.1 (`FS_CLOSE` queued while starting); 3 the volume id -> 4.1, 4.3 (place first,
+duplicates refused, floppies, uuids written by all three tools); 4 nobody watching the deadline -> 5.1 step 4 (the
+watcher), 5.6; 5 hung servers -> 5.6 (`killed` checked before taking a message, the second-kill and 5 s escape); 6
+`SVC_SAVE`/`LOAD` while starting -> 8.1; 7 the record's size -> 5.4; 8 the damaged record -> 5.4 (panic at once, the
+generation alternative and why not, pids never reused); 9 removing the mount programs -> 6.4; 10 held slots after
+umount -> 5.2; 11 size -> 10; 12 the step 0 rule -> 11, 5.6.
+
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
-same day after the first review. A design: nothing built or measured, except the kernel size quoted in section 10
+same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10
 (measured by the reviewer).*
