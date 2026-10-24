@@ -236,7 +236,7 @@ tools · an AmigaOS CLI-program runner through a dos.library translation layer (
 
 **9. Administration and reliability:** the service manager [approved: D11] · `useradd`, `userdel`, `groupadd`,
 `chpasswd`, shadow passwords · `/proc`-style information, `lsof`, `fuser`, `vmstat`, `iostat` · `lsdev` (Zorro boards,
-Gayle, the Pi) · an installer (partition, format, copy, boot menu) · a package manager (`zpkg`) · backups, ZenixFS
+Gayle, the Pi) · an installer (partition, format, copy, boot menu) · **a package manager like Arch's pacman** (owner's wish, 2026-10-24, see below) · backups, ZenixFS
 snapshots · disk health, `badblocks` · Zenix installing its own updates [approved, after D11] · serial tools: `getty`
 on serial, `stty`, a minicom-style terminal (`cu` **[built]**), file transfer over serial.
 
@@ -294,3 +294,12 @@ is to be excellent from the start** - the best of bash, zsh and fish, as the own
   a first-boot tour for new users · translated messages (Swedish first) · a ready FS-UAE image.
 - *Long term:* an optional MMU mode on 68030/040/060 (open question in DESIGN.md) · letting the Pi's ARM side do jobs
   for Zenix (compression, networking) · Zenix on other 68k machines (Atari ST/TT, 68k Macs, Sun 3).
+
+**A pacman-like package system (the owner's wish, 2026-10-24).** Installing and updating programs, and Zenix itself, the
+way Arch Linux's `pacman` does: a repository with a package database, `zpkg -S name` to install with its dependencies,
+`zpkg -Syu` to bring the whole system up to date, `zpkg -R` to remove, a record of which package owns which file. The
+repository lives on the owner's NAS (served over the network: HTTP or NFS, once Zenix has TCP/IP), built on the PC from
+the Zenix build. It must be **one mechanism with the approved self-updates** (Zenix installing updates by itself, after
+D11): the self-update is designed as the first part of it (the kernel, the boot files and the system as packages, with
+the old version kept to boot back to from the menu), so there is never a second way to update. Needs: the network,
+checksums on every package (sha256sum exists), and a design note before any code.
