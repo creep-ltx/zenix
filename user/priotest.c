@@ -207,10 +207,39 @@ static int t_inherit(void)
                   ms_of(took), busy ? "busy all along" : "had ENDED", sh->serving_pri, mine, after);
 }
 
+/* audit G1: a port number kept from a server that ended must not reach the port that takes its slot next. The
+ * server ends; a new one creates its port again (the first free slot: the same one); the old number is refused. */
+static int t_stale(void)
+{
+    struct umsg m;
+    int sp = start("s", 0, 0);
+    for (int i = 0; i < 200 && !sh->ready; i++) sys_sleep(1);
+    int old = sys_port_find("priot");
+    if (old < 0) return result("stale", 0, "(the first server did not start)");
+    m.type = 9;
+    sys_call(old, &m);                              /* it ends */
+    sys_wait(sp);
+    sh->ready = 0;
+    sp = start("s", 0, 0);
+    for (int i = 0; i < 200 && !sh->ready; i++) sys_sleep(1);
+    int now = sys_port_find("priot");
+    m.type = 1;
+    int r_old = sys_call(old, &m);
+    m.type = 1;
+    int r_now = now >= 0 ? sys_call(now, &m) : -1;
+    m.type = 9;
+    if (now >= 0) sys_call(now, &m);
+    sys_wait(sp);
+    int same_slot = now >= 0 && (old & 0xFF) == (now & 0xFF);
+    int ok = same_slot && r_old < 0 && r_now == 0;
+    return result("stale", ok, "(the slot %s; the old number %s, the new one %s)", same_slot ? "was reused" : "was NOT reused",
+                  r_old < 0 ? "refused" : "REACHED the new port", r_now == 0 ? "works" : "FAILED");
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 6 && !strcmp(argv[1], "-c")) return child(argv);
-    if (argc != 2) { fprintf(2, "usage: priotest fair|prio|wake|inherit\n"); return 2; }
+    if (argc != 2) { fprintf(2, "usage: priotest fair|prio|wake|inherit|stale\n"); return 2; }
     sh = sys_memalloc(sizeof *sh);
     if (!sh) { fprintf(2, "priotest: out of memory\n"); return 1; }
     memset(sh, 0, sizeof *sh);
@@ -218,6 +247,7 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1], "prio")) return t_prio();
     if (!strcmp(argv[1], "wake")) return t_wake();
     if (!strcmp(argv[1], "inherit")) return t_inherit();
-    fprintf(2, "usage: priotest fair|prio|wake|inherit\n");
+    if (!strcmp(argv[1], "stale")) return t_stale();
+    fprintf(2, "usage: priotest fair|prio|wake|inherit|stale\n");
     return 2;
 }

@@ -65,4 +65,5 @@ moved
 0
 ln: cannot create /tmp/batch-e.t/hard: hard link not allowed for directory
 ln-dir=1
+after-kills
 batch-e-done

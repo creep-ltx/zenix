@@ -34,4 +34,4 @@ send touch /tmp/bench; bench > /tmp/b1; rm /tmp/bench; bench > /tmp/b2; echo ben
 wait bench.f1=[0-9] 240
 sleep 2
 send sh /tests/batch-e.sh > /tmp/be.out 2>&1; sync; echo finished-be\r
-sleep 240
+sleep 330

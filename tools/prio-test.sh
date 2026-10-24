@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-prio}; mkdir -p $OUT
-tools/run-test.sh fsuae/a1200-020-fast.fs-uae 150 tools/tests/prio-test.txt 2>&1 | sed 's/\x1b\[K//g' | tr -d '\r' > $OUT/run.log
+tools/run-test.sh fsuae/a1200-020-fast.fs-uae 170 tools/tests/prio-test.txt 2>&1 | sed 's/\x1b\[K//g' | tr -d '\r' > $OUT/run.log
 pass=1
 line() { if grep -aqxF -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 rx()   { if grep -aqxE -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
@@ -32,7 +32,7 @@ line "... status 1" "server=1"
 line "renice -u lowers all of a user's processes" "1000 (user ID) old priority 0, new priority 5"
 line "... status 0" "user=0"
 rx   "ps shows PRI 20 and NI 5 for the user's process" " +[0-9]+ +[0-9]+ +20 +5 sleep +[0-9]+ sleep"
-for t in fair prio wake inherit; do
+for t in fair prio wake inherit stale; do
     l=$(grep -a "^priotest $t: " $OUT/run.log | head -1)
     case "$l" in *": PASS"*) echo "PASS ${l#priotest }" ;; *) echo "FAIL priotest $t: ${l:-no result}"; pass=0 ;; esac
 done

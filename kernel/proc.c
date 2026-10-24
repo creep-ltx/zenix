@@ -571,8 +571,13 @@ void schedule(void)
         switch_to(old, n);
     }
     irq_restore(s);
-    /* a process that was killed while blocked or preempted dies here */
-    if (current->killed && current->state == P_READY && current->pid != 0)
+    /* A process that was killed while blocked or preempted dies here - but not while it is already exiting (proc_exit's
+     * own FS_CLOSE calls end up here: a nested exit closed its files twice, the u16 refs wrapped, audit G3), and a kill
+     * (not a fault) waits while it is in a message call: the reply readies it, the call returns, and it dies at the end
+     * of its system call, so a close or a program load is not cut in half (G4). (A killed server still ends at the end of
+     * its next system call, possibly between two blocks of a change: D11 lets a kill act only between requests, G5.) */
+    if (current->killed && current->state == P_READY && current->pid != 0 && !current->exiting &&
+        (current->killed == 2 || !current->wait_msg))
         proc_exit(current->killed == 2 ? 139 : 130);
     if (current->stop_req && current->state == P_READY && current->pid != 0 && !current->wait_msg) {
         struct proc *p = current;                       /* stopped: not runnable until proc_cont */
@@ -663,6 +668,7 @@ void proc_exit(int code)
 {
     ints_off();
     struct proc *p = current;
+    p->exiting = 1;
     for (int i = 0; i < NFD; i++)
         if (p->fd[i]) {
             file_close(p->fd[i]);
