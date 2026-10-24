@@ -20,6 +20,7 @@ clean() { tr -d '\r' | sed 's/\x1b\[K//g'; }
 ZENIX_SERIAL=$SER tools/run-test.sh fsuae/zroot.fs-uae 110 tools/tests/zroot-test.txt 2>&1 | clean > $OUT/boot1.log
 grep -aqE '^ide0p1 +/ +zenixfs ' $OUT/boot1.log && check "the root filesystem is ZenixFS (mount)" ok || check "the root filesystem is ZenixFS (mount)" bad
 grep -aqE '^ide0p2 +/data +ext2 ' $OUT/boot1.log && check "/etc/fstab mounted the second partition at boot" ok || check "/etc/fstab mounted the second partition at boot" bad
+grep -aqE '^ide0p2 +[0-9]+ +[0-9]+ +[0-9]+ +[0-9]+% .* /data$' $OUT/boot1.log && check "df lists the fstab-mounted partition too, not only the root" ok || check "df lists the fstab-mounted partition too, not only the root" bad
 grep -aqx 'data-persist' $OUT/boot1.log && check "the fstab-mounted ext2 partition can be written and read" ok || check "the fstab-mounted ext2 partition can be written and read" bad
 grep -aqE '^ *5000 +5000 +23893 /big.txt$' $OUT/boot1.log && check "a 23 KB file is written" ok || check "a 23 KB file is written" bad
 grep -aqx 'persist-me' $OUT/boot1.log && check "a file is read back through a symbolic link" ok || check "a file is read back through a symbolic link" bad

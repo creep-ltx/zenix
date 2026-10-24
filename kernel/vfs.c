@@ -454,11 +454,15 @@ long vfs_lseek(struct file *f, s32 off, u32 whence)
     return np;
 }
 
+/* mount is the n-th mount in use, as for vfs_mountinfo (0 = the root), so the two can be paired after an unmount
+ * left a gap in the table */
 long vfs_statfs(void *out, u32 mount)
 {
-    if (mount >= NMOUNT || !mnt[mount].used)
-        return -EINVAL;
-    return fs_call_on((int)mount, FS_STATFS, (u32)out, 0, 0, 0);
+    u32 seen = 0;
+    for (int i = 0; i < NMOUNT; i++)
+        if (mnt[i].used && seen++ == mount)
+            return fs_call_on(i, FS_STATFS, (u32)out, 0, 0, 0);
+    return -EINVAL;
 }
 
 long vfs_path1(u32 op, const char *p, u32 a2, u32 a3)
