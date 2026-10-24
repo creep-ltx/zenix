@@ -87,7 +87,7 @@ built. Last checked against the code: 2026-10-23.
 | 640x256 (PAL) or 640x200 (NTSC, measured at boot) hires planar display, all text, blitter-assisted scrolling | verified (the matrix, NTSC included) | architecture.md section 11 |
 | ROM Topaz 8 font from the Kickstart in use at boot | read (every test boots with it; no test compares the glyphs) | |
 | 80x32 text (80x25 on NTSC), ANSI/VT100 (cursor, erase, insert/delete, scroll regions, bold/underline/inverse) | the size verified (the matrix); the escape codes read (`termtest` draws them, no test compares the screen) | man/termtest.txt |
-| Scrollback 200 lines per console (Shift/Ctrl+Up/Down) | read (no test checks it) | |
+| Scrollback 200 lines per console: Shift+PgUp/PgDn (keypad 9/3) everywhere, also at the shell's prompt (Linux's Shift+PageUp; programs never see these keys); Shift/Ctrl+Up/Down where no program reads the keys raw | verified in FS-UAE (`tools/kbd-test.sh`: Shift+PgUp at the prompt shows older lines, Shift+PgDn returns) | |
 | Ten virtual consoles, Amiga+F1..F10, each with its own `login` (started when the console is first shown, again after a logout); the controlling tty of a process is its console (`ls \| less` on console 2 reads console 2's keys) | verified in FS-UAE (`tools/kbd-test.sh`, `tools/users-test.sh`, the matrix) | architecture.md section 11, man/init.txt |
 | Type-ahead kept when a program switches the tty to raw mode | verified (`tools/users-test.sh`) | architecture.md section 11 |
 | The clock: tick latch from the machine's E-clock (PAL or NTSC crystal), 100 Hz to within the E-clock's resolution | built; the boot log shows the choice (the matrix's NTSC machine); the rate itself not measured | architecture.md section 11 |

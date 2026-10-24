@@ -122,7 +122,9 @@ static const char keyspecial[0x28] = {
 };
 
 /* cursor keys, function keys, Help and Del as the usual escape sequences. Only
- * programs in raw mode get them; Shift/Ctrl + Up/Down scroll the screen back. */
+ * programs in raw mode get them; Shift/Ctrl + Up/Down scroll the screen back. Shift + PgUp/PgDn (keypad 9 and 3,
+ * where the A1200 keyboard prints Pg Up and Pg Dn) scroll back a screenful in every mode and never reach a program:
+ * Linux's Shift+PageUp, so the scrollback also works at the shell's prompt, whose line editor runs in raw mode. */
 static void emit_seq(const char *q)
 {
     if (!(tty_getmode(con_cur) & TTY_RAW))
@@ -137,6 +139,10 @@ static int special_key(u8 code)
         "\033OP", "\033OQ", "\033OR", "\033OS", "\033[15~",
         "\033[17~", "\033[18~", "\033[19~", "\033[20~", "\033[21~" };
     int raw = (tty_getmode(con_cur) & TTY_RAW) != 0;
+    if (shift_down && (code == 0x3F || code == 0x1F)) {        /* Shift + keypad 9 / 3: Pg Up / Pg Dn */
+        term_scroll_view(code == 0x3F ? trows - 1 : -(trows - 1));
+        return 1;
+    }
     if (code >= 0x4C && code <= 0x4F) {
         static const char arrow[4] = { 'A', 'B', 'C', 'D' };
         int mods = (shift_down ? 1 : 0) | (alt_down ? 2 : 0) | (ctrl_down ? 4 : 0);

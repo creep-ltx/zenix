@@ -12,9 +12,9 @@ DESCRIPTION
     the serial port (CPU and memory map, the Pi hardware table, the Zorro
     boards, the disk found, driver messages, programs killed after a crash).
     The kernel keeps the last 8 KB. The boot messages are also shown on the
-    screen while the system starts; scroll back with Shift+Up if they have
-    gone by. dmesg is how to read them again on a machine with no serial
-    cable.
+    screen while the system starts; scroll back with Shift+PgUp (keypad 9)
+    if they have gone by. dmesg is how to read them again on a machine with
+    no serial cable.
 
     -p  Print the log of the previous boot instead: the kernel keeps its log
         at the top of chip RAM, and after a warm reset (Ctrl-Amiga-Amiga) the
