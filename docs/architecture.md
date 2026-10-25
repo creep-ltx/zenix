@@ -857,7 +857,10 @@ outputs (`tools/cmds-test.sh`).
   `build/zenix.hdf` (ext2 root disk) and, as a separate dev/test build, `build/zenix-ram.adf` (the same plus a RAM
   root image). That floppy holds the bootblock, the kernel and the 704 KB RAM disk (`RAMDISK_K` in the Makefile), so
   the kernel may be at most 179200 bytes (`KERNEL_MAX`): every build of `kernel.bin` prints how much is left, and
-  `tools/mkadf.py` refuses an image that is over and says by how much.
+  `tools/mkadf.py` refuses an image that is over and says by how much. The kernel is built with `-O2`, except the five
+  truly cold drivers - `floppy`, `emmc`, `a3000`, `rtc` and `kbd` (every wait in them is timed by the E-clock or a timer)
+  - which are built with `-Os` (`KOPT_*` in the Makefile, DESIGN D13 step 0: about 6.8 KB smaller); the floppy's MFM
+  track coding (`mfm.h`) keeps `-O2` through a pragma in `floppy.c`.
 - Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
   device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
   emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,

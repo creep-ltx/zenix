@@ -107,7 +107,15 @@ $(BUILD)/bootmenu: $(BUILD)/bootmenu.zx tools/mkhunk.py
 $(BUILD)/start.o: kernel/start.S $(BUILD)/stage0.bin | $(BUILD)
 	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
 $(BUILD)/%.o: kernel/%.c $(wildcard kernel/*.h) | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(KOPT_$*) -c $< -o $@
+# -Os for the kernel files that are truly cold (DESIGN D13, docs/d13-shared-code.md section 10: room for the shared
+# code): every wait in them is timed by the E-clock or a timer, none is on a hot path. The floppy's track coding
+# (mfm.h) keeps -O2 through a pragma in floppy.c. Everything else stays -O2.
+KOPT_floppy := -Os
+KOPT_emmc := -Os
+KOPT_a3000 := -Os
+KOPT_rtc := -Os
+KOPT_kbd := -Os
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
