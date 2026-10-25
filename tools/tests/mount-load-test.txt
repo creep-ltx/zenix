@@ -1,0 +1,6 @@
+wait zenix:/# 90
+send mkdir /f; mount -t ext2 df1 /f; ls -l /f; echo 'BEGIN { print "loaded-" "ok" }' > /tmp/p.awk; sleep 4\r
+sleep 10
+send nice -n -20 sh -c 'sleep 1.5; umount /f; echo um=$?' & time /f/awk -f /tmp/p.awk; wait; umount /f; echo um2=$?; echo load-$(echo done)\r
+wait load-done 90
+sleep 1

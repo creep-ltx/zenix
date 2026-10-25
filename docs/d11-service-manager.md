@@ -347,7 +347,7 @@ record means diskd's memory was overwritten, which without an MMU nothing contai
      its queued `FS_CLOSE` takes the count back off;
   2. every **answered but not yet used `FS_OPEN`**: a client whose `wait_msg` is still set (`call()` clears it only
      when the client runs again), whose message is `MSG_DONE`, of type `FS_OPEN`, with a result >= 0, sent to this
-     port (`wait_port`). The dead server answered it, but `vfs_open` creates the file entry only when the client runs
+     port (`wait_port`) by the kernel (`UMSG_KERNEL`: a root program's own `FS_OPEN` makes no file entry). The dead server answered it, but `vfs_open` creates the file entry only when the client runs
      - a nice 19 client may not have run yet when the nice -10 new server asks;
   3. every **program load in progress** on that mount, from its `FS_OPEN` reply until its `fs_exec_close`: the
      loading process's `exec_src` is linked into a list through the spawners' kernel stacks (no allocation, no fixed

@@ -13,9 +13,10 @@ DESCRIPTION
     starts the server again. A mount whose server has died or was given up
     is unmounted the same way. The
     unmount is refused ("busy") while any program has the directory (or a
-    directory below it) as its working directory, has a file open there, or
-    while another filesystem is mounted below it, or while its server is
-    being started.
+    directory below it) as its working directory, has a file open there
+    (or an open just answered), while a program is being loaded from it,
+    while the kernel waits for its server, while another filesystem is
+    mounted below it, or while its server is being started.
 
 EXIT STATUS
     0, 1 on an error (not a mount point, busy), 2 usage.

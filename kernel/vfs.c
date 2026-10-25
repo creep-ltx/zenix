@@ -300,27 +300,23 @@ void fs_exec_close(struct exec_src *x)
         }
 }
 
-/* SVC_OPENS (D11 5.4): one inode number for every open the kernel holds on the mount served on port PNAME (number
- * PORT): its file entries (also one being closed, refs already 0: its FS_CLOSE is queued and takes it off again), the
- * FS_OPENs answered but not yet used (the client has not run since: no file entry yet), the program loads in
- * progress. The kernel is not preempted, so the list is exact. -ENOSPC if more than max. */
-long vfs_opens(const char *pname, int port, u32 *out, u32 max)
+/* the opens the kernel holds on mount mi, served on port PORT: its file entries (also one being closed, refs already
+ * 0: its FS_CLOSE is queued and takes it off again), the kernel's FS_OPENs answered but not yet used (the client has
+ * not run since: no file entry yet; a root program's own FS_OPEN makes none and is not counted), the program loads in
+ * progress. With OUT 0 (umount's busy check) every kernel request still in flight on the port counts too. The kernel
+ * is not preempted, so the list is exact. The count (inode numbers in OUT), or -ENOSPC if more than max. */
+static __attribute__((noinline)) long mount_opens(int mi, int port, u32 *out, u32 max)
 {
-    int mi = -1;
     u32 n = 0;
-    for (int i = 0; i < NMOUNT; i++)
-        if (mnt[i].used && !strcmp_(mnt[i].pname, pname))
-            mi = i;
-    if (mi < 0)
-        return 0;
-#define PUT(v) do { if (n == max) return -ENOSPC; out[n++] = (u32)(v); } while (0)
+#define PUT(v) do { if (n == max) return -ENOSPC; if (out) out[n] = (u32)(v); n++; } while (0)
     for (int i = 0; i < NFILE; i++)
         if (files[i].type == FT_INODE && files[i].fs == mi)
             PUT(files[i].ino);
     for (int i = 1; i < NPROC; i++) {
         struct umsg *m = procs[i].wait_msg;
-        if (procs[i].state != P_FREE && m && m->state == MSG_DONE && m->type == FS_OPEN && m->result >= 0 &&
-            procs[i].wait_port == port)
+        if (procs[i].state == P_FREE || !m || procs[i].wait_port != port || !(m->kflags & UMSG_KERNEL))
+            continue;
+        if (m->state == MSG_DONE ? m->type == FS_OPEN && m->result >= 0 : !out)
             PUT(m->result);
     }
     for (struct exec_src *x = loading; x; x = x->next)
@@ -328,6 +324,17 @@ long vfs_opens(const char *pname, int port, u32 *out, u32 max)
             PUT(x->ino);
     return (long)n;
 #undef PUT
+}
+
+/* SVC_OPENS (D11 5.4): one inode number for every open the kernel holds on the mount served on port PNAME (number
+ * PORT), mount_opens. -ENOSPC if more than max. */
+long vfs_opens(const char *pname, int port, u32 *out, u32 max)
+{
+    int mi = -1;
+    for (int i = 0; i < NMOUNT; i++)
+        if (mnt[i].used && !strcmp_(mnt[i].pname, pname))
+            mi = i;
+    return mi < 0 ? 0 : mount_opens(mi, port, out, max);
 }
 
 long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
@@ -714,16 +721,13 @@ long vfs_umount(const char *path)
     for (int i = 1; i < NMOUNT; i++)                    /* busy: another filesystem is mounted below it */
         if (i != mi && mnt[i].used && prefix_of(mnt[mi].path, mnt[i].path))
             return -EBUSY;
-    for (int i = 1; i < NPROC; i++) {                   /* busy: a working directory or an open file inside */
-        struct proc *p = &procs[i];
-        if (p->state == P_FREE)
-            continue;
-        if (prefix_of(mnt[mi].path, p->cwd))
+    for (int i = 1; i < NPROC; i++)                     /* busy: a working directory inside */
+        if (procs[i].state != P_FREE && prefix_of(mnt[mi].path, procs[i].cwd))
             return -EBUSY;
-        for (int k = 0; k < NFD; k++)
-            if (p->fd[k] && p->fd[k]->type == FT_INODE && p->fd[k]->fs == mi)
-                return -EBUSY;
-    }
+    /* ... an open file, an open answered but not yet a file, a program being loaded from it, a request in flight
+     * (audit A3: a load that went on after umount read a new mount's inode with the same number) */
+    if (mount_opens(mi, mnt[mi].port >= 0 ? mnt[mi].port : port_find(mnt[mi].pname), 0, 0))
+        return -EBUSY;
     /* the mount's service goes first (D11 6.4): the server's end after FS_QUIT is final, no call starts it again */
     if (svc_sys(SVC_REMOVE, mnt[mi].pname, 0) == -EBUSY)
         return -EBUSY;                                  /* its server is being started right now */

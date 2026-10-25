@@ -49,6 +49,20 @@ has "the servers' messages are in the kernel log: diskd's (a dead server's claim
 has "... zfsd's (not a ZenixFS volume)" '^(.*# )?inlog-zfsd=[1-9]$'
 has "... fsd's (the floppy refused at its restart)" '^(.*# )?inlog-fsd=[1-9]$'
 has "the script ran to the end" '^(.*# )?mount-svc-done$'
+# umount while a program is being loaded from the mount (audit A3): refused, the load completes; a floppy's reads are
+# slow enough to umount in the middle
+head -c 901120 /dev/zero > $OUT/df1l.adf
+mke2fs -q -t ext2 -E revision=0 -b 1024 -F $OUT/df1l.adf >/dev/null 2>&1 || { echo "FAIL mke2fs"; exit 1; }
+debugfs -w -R "write build/awk.zx awk" $OUT/df1l.adf >/dev/null 2>&1
+debugfs -w -R "sif awk mode 0100755" $OUT/df1l.adf >/dev/null 2>&1
+cp build/zenix.hdf $OUT/lroot.hdf
+sed "s#^floppy_drive_0 = .*#&\nfloppy_drive_1 = $OUT/df1l.adf\nfloppy_drive_count = 2#; s#^floppy_drive_speed = .*#floppy_drive_speed = 100#; s#^hard_drive_0 = .*#hard_drive_0 = $OUT/lroot.hdf#" fsuae/a1200-020-fast.fs-uae > $OUT/load.fs-uae
+ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh $OUT/load.fs-uae 150 tools/tests/mount-load-test.txt > $OUT/load.log 2>&1
+L=$OUT/load.log
+has "umount during a program load from the mount is refused" '^(.*# )?um=1$'
+has "... the program loaded and ran" '^(.*# )?loaded-ok$'
+has "... and the umount after it works" '^(.*# )?um2=0$'
+rm -f $OUT/df1l.adf $OUT/lroot.hdf
 # the unmounted partitions are clean ext2 as seen by the host (partitions start at cylinder 1 and 14 of 1008 sectors)
 for spec in "1 13104" "14 18144"; do set -- $spec
   dd if=build/scratch.hdf of=$OUT/p$1.img bs=512 skip=$(( $1 * 1008 )) count=$2 status=none

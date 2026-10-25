@@ -629,9 +629,12 @@ The full design is docs/d11-service-manager.md; what is built (steps 0-8 of its 
   saved table is damaged) is a panic, not counted.
 - **Open files across a restart.** `SVC_OPENS` (the started server, after it took its port, before its first
   request): one inode number per open the kernel holds on that mount - every file entry of the mount (also one
-  whose close is in flight), every `FS_OPEN` answered but not yet used by its client, every program load in progress
-  (the loads are linked through the spawners' kernel stacks until their `FS_CLOSE`). `SVC_SELF` also says (bit 16)
-  whether the last end came in the middle of a request.
+  whose close is in flight), every `FS_OPEN` the kernel sent that was answered but not yet used by its client (a root
+  program's own `FS_OPEN` makes no file entry and is not counted), every program load in progress (the loads are
+  linked through the spawners' kernel stacks until their `FS_CLOSE`). `SVC_SELF` also says (bit 16) whether the last
+  end came in the middle of a request. `umount` uses the same list (`mount_opens`), and also any kernel request still
+  in flight on the mount's port: while any of them exists the mount is busy (audit A3: a load that went on after an
+  `umount` read the inode of whatever volume was mounted next in the same slot).
 - **No-start calls.** `FS_CLOSE` (from `file_close` and the end of a program load) and every call made by a dying
   process never start a server: dropped while the entry is stopped, queued while it is loading or starting.
 - **The reset warning and `reboot`** (step 5): `FS_SYNC` and `FS_QUIT` are no-start calls that skip a server that
