@@ -72,8 +72,9 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
   -ENAMETOOLONG beyond, never cut), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
   NTSC), 200 scrollback lines per console, a cooked tty line of 255 characters (the bell for more).
-- Services (DESIGN D11, architecture.md section 9): 12 entries; a program and its arguments of at most 6 words in 80
-  bytes (so at most 10 mounted filesystems as services beside diskd and the root, of the 8 mounts); a registration
+- Services (DESIGN D11, architecture.md section 9): 12 entries; a program and its arguments of at most 6 words in 79
+  characters (the text is copied into 80 bytes with its end); at most 10 services beside diskd and the root, but the
+  8 mounts include the root, so at most 7 mounted filesystems besides it; a registration
   waits up to 2 s for a slot or a name being given back; a started server has 30 s to open its port; the start after the 2nd, 3rd and 4th end within 60 s waits 1, 2
   and 4 s, and the 5th end within 60 s gives a service up; loads nest at most two deep; a server's saved table is at most 512 bytes (diskd's is 426); a restarted filesystem server takes at most 160 open
   inode numbers from the kernel (more than the 64 open files and 32 program loads there can be).

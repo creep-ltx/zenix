@@ -1,7 +1,7 @@
 # D11: the service manager (design note)
 
-**Status: approved by the owner 2026-10-24 (questions answered in section 12); built (steps 0-9; 0-5 merged, 6-9 on
-branch `d11`) - where the code differs from this note is in section 15.** Revision 3
+**Status: approved by the owner 2026-10-24 (questions answered in section 12); built (steps 0-9, all on main) - where the code
+differs from this note is in section 15.** Revision 3
 (2026-10-24): the findings of two reviews are worked in (section 14 lists them). Facts about today's Zenix were read
 from branch `d11` (= main after D10); the file and function names below say where. The decision itself is DESIGN.md
 D11; this note is its full design.
@@ -694,7 +694,7 @@ watcher), 5.6; 5 hung servers -> 5.6 (`killed` checked before taking a message, 
 generation alternative and why not, pids never reused); 9 removing the mount programs -> 6.4; 10 held slots after
 umount -> 5.2; 11 size -> 10; 12 the step 0 rule -> 11, 5.6.
 
-## 15. As built (branch d11)
+## 15. As built (on main)
 
 **Built:** step 0 (2026-10-24: `fs_read_file` deleted; the "exiting" flag and the kill-in-a-call rule came from main
 with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`), step 2 (2026-10-24: diskd's saved table, the
@@ -705,7 +705,7 @@ calling its own port; `tools/svc-test.sh` l), step 5 (2026-10-24: the sync paths
 (2026-10-25: mount and umount as services; `/bin/mount.ext2` and `/bin/mount.zenixfs` removed; `tools/mounttest.sh`
 extended), step 7 (2026-10-25: `/etc/svctab`; `tools/svc-test.sh` t), step 8 (2026-10-25: the servers' output in the
 kernel log; `tools/mounttest.sh`) and step 9 (2026-10-25: the documents, each step's own in its commit, then a
-final pass: how-it-works.md, kill, ps, DESIGN.md). Steps 6-9 are on branch d11, not yet merged.
+final pass: how-it-works.md, kill, ps, DESIGN.md). All of it is on main (merged 2026-10-25).
 
 **Where the code differs from the note** (each one small, and the reason):
 - *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM

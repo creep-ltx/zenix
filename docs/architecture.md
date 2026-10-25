@@ -500,7 +500,9 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 - **Kills and servers** (D11). A kill (not a fault) waits for the end of a message call; a process killed while it
   serves a request ends only between requests: `ipc_recv` refuses to take the next message, and the end of a system
   call ends it only when it serves nothing. So a kill never cuts a filesystem change in half. A second kill, or a kill
-  still pending 5 s later, ends it at once (a server hung inside a request).
+  still pending 5 s later, ends it at once (a server hung inside a request) - but not while the server is itself a
+  client waiting in a message call it made (fsd waiting for diskd): no kill ends a process in a call, so such a
+  server ends when its own call returns (a hung diskd keeps the fsd waiting for it too).
 
 ## 9. The servers
 
