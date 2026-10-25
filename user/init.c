@@ -14,16 +14,19 @@ static void start(int n, int again)
     if (n == 10) { dev[8] = '1'; dev[9] = '0'; dev[10] = 0; }
     else { dev[8] = (char)('0' + n); dev[9] = 0; }
     int fd = sys_open(dev, O_RDWR);
-    if (fd < 0) { printf("init: cannot open %s\n", dev); return; }
+    if (fd < 0) { printf("init: cannot open %s\n", dev); oflush(); return; }
     if (again) fprintf(fd, "init: session ended, starting another\n");
     char *argv[] = { "/bin/login", 0 };
     int io[3] = { fd, fd, fd };
     pid[n] = sys_spawn("/bin/login", argv, io);
-    sys_close(fd);
-    if (pid[n] < 0) {
-        printf("init: cannot start /bin/login on %s\n", dev);
+    if (pid[n] < 0) {                   /* said on that console and on init's own output (flushed: init never ends) */
+        const char *why = zstrerror(pid[n]); if (!why) why = "failed";
+        fprintf(fd, "init: cannot start /bin/login: %s\n", why);
+        printf("init: cannot start /bin/login on %s: %s\n", dev, why);
+        oflush();
         pid[n] = 0;
     }
+    sys_close(fd);
 }
 
 int main(void)

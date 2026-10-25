@@ -8,7 +8,7 @@ cable is needed.
 1. `make build/zenix-ram.adf` (the RAM-disk image: kernel plus a small root filesystem that the boot block loads into
    RAM, so no disk is needed to get a shell). Put `build/zenix-ram.adf` where the Gotek / GoDrive reads it.
 2. Boot the Amiga from that floppy image. Zenix needs a 68020 or better (Emu68 counts); fast RAM is
-   recommended (with 1 MB of chip RAM and nothing else there is room for one login).
+   recommended (with 1 MB of chip RAM and nothing else there is room for two logins).
 3. The screen (all text, no bar: 32 rows on PAL, 25 on NTSC) shows the kernel's boot messages, then on console 1 the
    autologin warning and the shell prompt (the image logs root in on console 1 by itself, `/etc/autologin`). If they
    scrolled by: `dmesg`, or Amiga+Up. Amiga+F2 .. Amiga+F10 show consoles 2-10, each with its own `zenix login:`

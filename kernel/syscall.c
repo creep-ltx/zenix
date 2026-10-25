@@ -523,7 +523,10 @@ void syscall_c(u32 *rb)
             u->pid = (u32)p->pid;
             u->ppid = (u32)p->ppid;
             u->state = (u32)p->state;
-            u->mem = p->span + (p->seg ? 0 : p->csize);     /* its own memory: a private copy of code counts */
+            u->mem = p->span + (p->seg ? 0 : p->csize);     /* its own memory: a private copy of code counts, */
+            for (int i = 0; i < NREG; i++)                  /* and the regions it asked for (malloc, sh's arena) */
+                if (p->reg[i].base)
+                    u->mem += p->reg[i].size;
             u->shared = p->seg ? p->csize : 0;
             memcpy(u->name, p->name, 16);
             u->nice = p->nice;

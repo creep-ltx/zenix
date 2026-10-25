@@ -27,7 +27,8 @@ DESCRIPTION
           zombie   ended, not yet collected by its parent
           stopped  stopped by Ctrl-Z or a job-control request (fg, bg go on)
     MEM(K) the memory the process owns (its program's data and BSS - for a
-          program without shared code its code too - and its stack)
+          program without shared code its code too - its stack, and the
+          memory it asked for while running: malloc, the shell's arena)
     SHR(K) the shared code it runs: one copy for every process running
           the same program, not counted in MEM (0: none)
     NAME  the file name of the program (first 15 characters)

@@ -70,4 +70,7 @@ ln $T/m2 $T/hard; echo "ln-dir=$?"       # a hard link to a directory: refused, 
 dd if=/dev/zero of=$T/big bs=1024 count=3000 > /dev/null 2>&1
 for i in $(seq 1 70); do cat $T/big > /dev/null & sleep 1; kill $!; wait; done
 echo after-kills > $T/g3; cat $T/g3
+# a single command too big for memory says so and ends that shell (status 2), never a silent cut (the shell's arena
+# grows on demand: here a command substitution that never ends)
+sh -c 'x=$(yes 0123456789012345678901234567890123456789)' 2>&1; echo "huge-st=$?"
 echo batch-e-done

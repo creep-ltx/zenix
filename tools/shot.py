@@ -8,11 +8,23 @@ usage: shot.py config.fs-uae script.txt out_prefix t1 [t2 ...]
  -> out_prefix-<t>.png for each time t (seconds after start)
 ZENIX_SERIAL=/tmp/name: a private serial port (the config is always copied and filled in by fsuae_conf.py, as run-test.sh does).
 RESET_AT=s[,s...]: press Ctrl + Left Amiga + Right Amiga (a warm reset) at those times (tools/diag-test.sh).
+SHOT_LIMIT=s: end the run (and its cage and FS-UAE) at most s seconds after the emulator started (default: the last
+screenshot or reset + 30 s). The time spent waiting for the machine's emulator lock does not count, so a caller needs no
+timeout of its own; a TERM, HUP or INT (a caller's timeout) also ends the cage and FS-UAE before shot.py exits.
 Needs the headless cage rig: ZENIX_CAGE_RIG names its directory (tools/fsuae_conf.py)."""
 import os
+import signal
 import subprocess
 import sys
 import time
+
+
+def _end(sig, frame):   # a signal or the time limit: leave through the with-block, which ends cage and FS-UAE
+    raise SystemExit(128 + sig)
+
+
+for _s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGALRM):
+    signal.signal(_s, _end)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fsuae_conf  # noqa: E402
@@ -37,6 +49,8 @@ time.sleep(1)
 t0 = time.time()
 try:
     with Cage(["fs-uae", conf]) as cage:
+        last = max(times + resets) if times or resets else 0
+        signal.alarm(max(1, int(float(os.environ.get("SHOT_LIMIT", last + 30)))))
         time.sleep(6)
         for _ in range(int(os.environ.get("ZOOMOUT", "2"))):   # FS-UAE: Shift+F11 pads the viewport
             subprocess.run(["wtype", "-M", "shift", "-k", "F11", "-m", "shift"],
@@ -76,4 +90,5 @@ try:
                                 "-P", "Super_R", "-s", "700", "-p", "Super_R", "-p", "Super_L", "-p", "Control_L"],
                                env=cage._env(), check=False)
 finally:
+    signal.alarm(0)
     tap.terminate()

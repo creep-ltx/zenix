@@ -32,10 +32,12 @@ for n in $CONFS; do
     grep -q 'Zenix 0.2' $OUT/$n.log || ok=0
     grep -q 'Filesystem  1K-blocks' $OUT/$n.log || ok=0
     grep -q 'zenix login: ' $OUT/$n.log || ok=0   # console 2 shows its own login prompt
-    if [ "$n" = a1200-chip1m ]; then              # 1 MB chip, no fast RAM: room for one session (man/login.txt), and it says so
-        grep -q 'login: cannot start /bin/sh: out of memory' $OUT/$n.log || ok=0
+    grep -q '^con2ok$' $OUT/$n.log || ok=0   # ... and a login there gives a shell (1 MB chip only too: room for two
+                                             # sessions since the shell's arena grows on demand, man/login.txt)
+    if [ "$n" = a1200-chip1m ]; then              # ... but not three: init (or login) says so
+        grep -qE 'init: cannot start /bin/login.*out of memory|login: cannot start /bin/sh: out of memory' $OUT/$n.log || ok=0
     else
-        grep -q '^con2ok$' $OUT/$n.log || ok=0   # ... and a login there gives a shell
+        grep -q '^con3ok$' $OUT/$n.log || ok=0
     fi
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"

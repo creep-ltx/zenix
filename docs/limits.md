@@ -91,8 +91,10 @@ pointers.
 - Priorities (DESIGN D10, architecture.md section 6): 32 levels; nice -20..19 (a value outside is taken as the nearest
   end); a 50 ms slice; the built-in servers at nice -10; priority inheritance passes along a chain of at most 8 servers.
 - The shell: no fixed count of arguments, glob matches, words, pipeline stages, `for` items or positional
-  parameters (they grow in its arena, which is an eighth of free memory, 64-256 KB: "out of memory" ends a script
-  that needs more); a word or an expanded here-document of at most 4095 characters (longer is an error, status 1);
+  parameters, and no limit on a script's length (it is read and run a command at a time). They grow in its arena,
+  which starts at 8 KB and takes more from the kernel while a command needs it (chunks of at least 16 KB, each
+  four times the last, so the 8 memory regions a process may have reach several MB), given back when the
+  command is done; when the kernel has no more: "sh: out of memory" and that shell ends (status 2); a word or an expanded here-document of at most 4095 characters (longer is an error, status 1);
   at most 8 here-documents on one line, 16 nested alias expansions, 64 `local` variables in the running functions,
   128 variables, 48 aliases and 48 functions, 200 history lines (a recalled line is cut to the 478 characters the
   editor holds, with the bell).
@@ -104,8 +106,9 @@ pointers.
   main 5.4 KB (`mkfs.ext2` main was 8.5 KB; 0.3 KB since its two 4 KB blocks are static, 2026-10-25); the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
   about 1430).
-- A login session (login, the shell and its work area) needs about 200 KB: a machine with 1 MB of chip RAM and no
-  fast RAM has room for one; a second console's login says "cannot start /bin/sh: out of memory" (the matrix checks it).
+- A login session (login, the shell and its work area) needs about 185 KB (293 KB before the shell memory fix of
+  2026-10-25): a machine with 1 MB of chip RAM and no fast RAM has room for two; on a third console init says "cannot start
+  /bin/login: out of memory" (the matrix checks both; that message was lost before 2026-10-25, init never flushed it).
 - Shared code (DESIGN D13, architecture.md section 4): at most 8 segments (`NSEG`) at a time; a ninth program with
   shared code runs as a private copy. A ZEX2 program's address table is at most 32 KB (16-bit offsets: a larger one
   is a link error).

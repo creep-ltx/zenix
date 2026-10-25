@@ -28,6 +28,12 @@ sleep 3
 send sh -c 'sleep 4' & sh -c 'sleep 4' & sleep 1; echo ==s4b; free\r
 wait (?m)^==s4b 20
 sleep 5
+send : $(seq 1 30000) && echo big-ok\r
+wait (?m)^big-ok 120
+sleep 1
+send echo ==s4c; ps; echo ==s4d\r
+wait (?m)^==s4d 20
+sleep 2
 send \x1d2
 sleep 2
 send echo alive-on-2; exit\r

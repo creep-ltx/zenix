@@ -161,7 +161,7 @@ DESIGN.md D9).
 
 - **Minimum requirements: not decided (owner, 2026-10-24).** The owner sets them later, depending on how much Zenix
   grows. What is true today: the kernel refuses a 68000/68010 (the code needs a 68020+); everything boots and passes the
-  matrix on a stock 68EC020 with 2 MB chip RAM and no fast RAM, and on 1 MB chip-only with one login session. Until the
+  matrix on a stock 68EC020 with 2 MB chip RAM and no fast RAM, and on 1 MB chip-only with two login sessions (one before the shell memory fix of 2026-10-25). Until the
   owner decides, keep it running on those, and say in a change's notes when it costs memory or speed on them.
 
 - ZenixFS name: a Western Digital project already uses "ZenixFS" (RocksDB on zoned SSDs); decide if that matters.
