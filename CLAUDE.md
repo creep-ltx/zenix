@@ -34,7 +34,7 @@ demand, give memory back, and read scripts a piece at a time.
 for the Amiga". Every day ends with something finished and merged, and a short status for the owner. Care matches risk:
 two independent design reviews for deep core changes (kernel, loader, updates), one for features; every change has tests;
 every merge gets the full suite; a focused audit after each big block, its findings fixed at once.
-**The week of 2026-10-26 (owner at work until Friday 2026-10-30):** Sun D13 merged, shell memory fix started; Mon shell
+**The week of 2026-10-26 (owner at work until Friday 2026-10-30; the order, not the speed: when a step is done the next starts at once):** Sun D13 merged, shell memory fix started; Mon shell
 fix merged, colour console designed; Tue colour console built; Wed self-updates design (two reviews); Thu self-updates
 building starts, and the owner's Friday package ready (card update, DoM image, checklist, cable and cu instructions).
 **Order after D13 (owner 2026-10-25: "fix things when we find them"):** first the shell's memory fix, then the
