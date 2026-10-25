@@ -1,0 +1,6 @@
+# /etc/svctab - services that live on the disk (DESIGN D11; boot reads this file once the root is up).
+# PORT     NICE  PROGRAM [ARGUMENTS]
+# A service is started by the first call to its port, and again by the next call after it ended.
+# PROGRAM is an absolute path (read as root) or a built-in image (@diskd, @fsd, @zfsd); at most 6 words in 80 bytes.
+# A bad line is reported by boot and skipped. Example (the test message server; ping(1) calls it):
+#ping      0     /bin/pingd

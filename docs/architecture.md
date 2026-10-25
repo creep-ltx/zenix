@@ -587,13 +587,14 @@ working directory reached through a symbolic link behaves as its text says once 
 ### boot - the starter (`user/boot.c`)
 pid 1, the only process the kernel creates itself. It registers `disk` -> `@diskd` (nice -10), picks the root (above),
 registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10), asks for the root inode (`SYS_mountinfo`
-0: the first call to `fs` starts the root server), then spawns `/bin/init` on console 1 and waits for it; should init
+0: the first call to `fs` starts the root server), registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
+[ARGUMENTS]` a line, man/boot.txt; a bad line is reported on console 1 and skipped), then spawns `/bin/init` on console 1 and waits for it; should init
 end, it says so and starts it again. (It exists because the idle process cannot block on a message.) The logins on the
 consoles are init's work (section 11, man/init.txt).
 
 ### The service manager (`kernel/svc.c`, DESIGN D11)
-The full design is docs/d11-service-manager.md; what is built (steps 0-6 of its build order: the core and the
-mounts):
+The full design is docs/d11-service-manager.md; what is built (steps 0-7 of its build order: the core, the mounts
+and `/etc/svctab`):
 - **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
   bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
   (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are

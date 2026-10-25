@@ -1,0 +1,17 @@
+wait zenix:/# 90
+send printf '# a test svctab\n\nping   5   /bin/pingd\ngone   0   /bin/nosuchprog\nbad line here\nq      0   /bin/pingd -port q\n' > /etc/svctab; sync; reboot\r
+wait klog: boot 2 60
+sleep 3
+wait zenix:/# 90
+send echo before=$(pgrep -x pingd | grep -c .); svctest call ping 1; ps | grep pingd; ping 10\r
+sleep 4
+send echo after-quit=$(pgrep -x pingd | grep -c .); ping 10\r
+sleep 4
+send svctest call gone 1; svctest call gone 1; svctest call gone 1\r
+sleep 3
+send svctest call q 1; svctest call q 7 & sleep 0.3; svctest call q 1; wait\r
+sleep 5
+send svctest kcall 3 ping 1\r
+sleep 6
+send dmesg | grep -a 'svc: [a-z0-9]*:'; rm /etc/svctab; echo svc-t-done\r
+sleep 4

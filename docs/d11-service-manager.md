@@ -703,8 +703,8 @@ step 3 (2026-10-24: `SVC_OPENS`, the volume id rule in `user/volid.h`, uuids fro
 ZenixFS's kept orphans and inode floor; `tools/svc-test.sh` o, zo, u), step 4 (2026-10-24: the give-up, a start-up
 calling its own port; `tools/svc-test.sh` l), step 5 (2026-10-24: the sync paths; `tools/svc-test.sh` s), step 6
 (2026-10-25: mount and umount as services; `/bin/mount.ext2` and `/bin/mount.zenixfs` removed; `tools/mounttest.sh`
-extended). Steps 7-9 (`/etc/svctab`, the servers' output to the kernel log, the remaining documents) are not built
-yet.
+extended), step 7 (2026-10-25: `/etc/svctab`; `tools/svc-test.sh` t). Steps 8-9 (the servers' output to the kernel
+log, the remaining documents) are not built yet.
 
 **Where the code differs from the note** (each one small, and the reason):
 - *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM
@@ -772,6 +772,15 @@ yet.
   floppy case is tested with a zero-uuid floppy (the restart is refused); a swapped floppy with a uuid is not (FS-UAE
   cannot swap a disk from the test script). Found while testing: `mount df1` said "no such device" (before D11 too): `DISK_LIST` lists a
   floppy drive past df0 only once something opened it by name; `mount` now reads the volume id (a `DISK_OPEN`) first.
+
+- *Step 7:* boot reports a bad `/etc/svctab` line on console 1 ("boot: /etc/svctab: line skipped: PORT"), not in the
+  kernel log: boot is not a service, and its output is init's console (init inherits it). A line the kernel refuses
+  (a taken name, no free slot, a bad program) is reported the same way. The path is **not** checked to lie on the root
+  filesystem: a program on a mount nests no deeper (a mount's server is an image, so the load is still at most two
+  deep). Tabs count as spaces. The shipped `/etc/svctab` holds only comments (a registered `ping` would make the
+  tests' `pingd &` say "port busy"). The ramlib case is tested with the root server stopped (killed, idle) before the
+  call that reads `pingd` (`svctest kcall`): the loader then starts the root server itself, two loads nested; a kill
+  that lands *during* the load is not tested (the race cannot be placed from a script).
 
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
 same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10

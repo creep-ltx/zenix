@@ -24,10 +24,30 @@ DESCRIPTION
                 (user/volid.h, the same code mount(8) uses for the
                 filesystems it mounts). Asking for the root inode starts
                 it.
-    Then it starts /bin/init on console 1 and waits for it. Should init
+    Then it registers the services listed in /etc/svctab (below) and
+    starts /bin/init on console 1 and waits for it. Should init
     ever end, boot says so ("boot: /bin/init ended (status N), starting it
     again") and starts it again a second later. It exists because the idle
     process cannot wait for messages.
+
+FILES
+    /etc/svctab   services whose programs live on the disk, one a line:
+                    PORT  NICE  PROGRAM [ARGUMENTS]
+                  for example "ping 0 /bin/pingd". PROGRAM is an absolute
+                  path (read as root when the service starts) or a
+                  built-in image (@diskd, @fsd, @zfsd); at most 6 words in
+                  80 bytes; NICE -20..19. Lines starting with # and empty
+                  lines are skipped. Nothing is started at boot: the first
+                  call to PORT starts the program, and the next call after
+                  it ended starts it again (a server that ends with status
+                  0 while idle has simply stopped). There is no start-at-
+                  boot, restart or dependency field: a server that needs
+                  another one calls it, and that starts it. A line that is
+                  not of this form, or that the kernel refuses (a name a
+                  port already has, more than 12 services), is reported
+                  ("boot: /etc/svctab: line skipped: PORT") and skipped.
+                  The file is read once, at boot: a change takes effect at
+                  the next boot.
 
 NOTES
     The two servers are essential: if diskd or the root server ends before
@@ -37,4 +57,4 @@ NOTES
     (dmesg, "svc:" lines).
 
 SEE ALSO
-    init(8), diskd(8)
+    init(8), diskd(8), mount(8), dmesg(1)

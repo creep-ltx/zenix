@@ -9,6 +9,8 @@
  *   svctest reg NAME NICE PROG...  register service NAME (root)
  *   svctest rm NAME                remove it (root)
  *   svctest call NAME TYPE [A0]    one call to port NAME: the result and how long it took (E-clock, ms)
+ *   svctest kcall PID NAME TYPE    kill PID (the root server), wait a second, then the same call: a file service is then
+ *                                  read while the root server is stopped (two loads nested, D11 5.1)
  *   svctest raw DEVICE             open DEVICE raw at the disk server (-16 while it is mounted)
  *   svctest hold DEVICE SECS       open DEVICE, read its sector 0, wait SECS seconds, read it again with the same handle
  *                                  (a diskd restarted meanwhile must still know the handle)
@@ -55,6 +57,13 @@ int main(int argc, char **argv)
     if (argc >= 3 && !strcmp(argv[1], "rm")) {
         printf("svctest rm %s: %d\n", argv[2], sys_svc_remove(argv[2]));
         return 0;
+    }
+    if (argc >= 5 && !strcmp(argv[1], "kcall")) {
+        sys_kill(atoi(argv[2]));
+        sys_sleep(100);
+        argv++;
+        argc--;
+        argv[1] = "call";                       /* the rest as svctest call NAME TYPE */
     }
     if (argc >= 4 && !strcmp(argv[1], "call")) {
         int port = sys_port_find(argv[2]);
@@ -118,6 +127,6 @@ int main(int argc, char **argv)
         sys_close(fd);
         return 0;
     }
-    printf("usage: svctest port|ports|reg|rm|call|raw|hold|keep|lost ...\n");
+    printf("usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost ...\n");
     return 2;
 }

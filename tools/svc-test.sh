@@ -25,10 +25,15 @@
 #      after the 30 s deadline
 #   s  the sync paths (step 5): reboot with the root server dead and a loader asleep in a 4 s back-off: the sync skips
 #      the dead server at once (no error), the machine resets and boots again
+#   t  /etc/svctab (step 7): a service listed there starts on the first call at its nice; ping's quit is a stop and
+#      the next ping starts it again; a missing program fails at once each time, logged, never counted (no give-up);
+#      a bad line is reported and skipped; a crash during a request: that client gets -104, a client queued behind it
+#      is served by the next server; the root server stopped while a file service must be read from it: the load
+#      starts the root server too (two loads nested) and the call works
 #   dmg  a test-only kernel damages diskd's saved table: diskd stops with its message, the kernel panics
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
-PARTS=" ${*:-a z b n r d o zo u l s dmg} "
+PARTS=" ${*:-a z b n r d o zo u l s t dmg} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
 make -s all build/zenix-zroot.hdf build/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
@@ -219,6 +224,30 @@ line s "the root server was dead before the reboot" "svc: fs: fsd (pid 3) ended,
 line s "the sync skipped it at once, without an error" "reboot: filesystems synced, disk writes stopped; resetting"
 rx   s "... the machine reset and booted again" "klog: boot 2, .*"
 if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck-s.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean"; else echo "FAIL the host's e2fsck finds the root clean"; pass=0; fi
+rm -f "$OUT/root.hdf"
+fi
+
+# ---- t: /etc/svctab ----
+if want_part t; then
+cp build/zenix.hdf "$OUT/root.hdf"
+conf t "$OUT/root.hdf"
+run t "$OUT/t.fs-uae" 160 tools/tests/svc-tab-test.txt
+line t "a bad line is reported and skipped" "boot: /etc/svctab: line skipped: bad"
+rx   t "... no pingd before the first call" "(.*# )?before=0"
+rx   t "the first call starts it" ".*svctest call ping 1: 0 in [0-9]+ ms"
+rx   t "... at the nice from the table (5)" " +[0-9]+ +0 +[0-9]+ +5 [a-z]+ +[0-9]+ pingd"
+rx   t "... the log names the start" "svc: ping: started /bin/pingd \(pid [0-9]+, for pid [0-9]+ svctest\)"
+rx   t "ping's quit is a stop" ".*svc: ping: pingd \(pid [0-9]+\) stopped"
+rx   t "... none left after it" "(.*# )?after-quit=0"
+if [ "$(grep -ac 'svc: ping: started /bin/pingd' "$OUT/t.log")" -ge 3 ]; then echo "PASS ... the next ping starts it again"; else echo "FAIL ... the next ping starts it again"; pass=0; fi
+if [ "$(grep -acE '.*svctest call gone 1: -104 in [0-9] ms' "$OUT/t.log")" -ge 3 ]; then echo "PASS a missing program fails at once, every time"; else echo "FAIL a missing program fails at once, every time"; pass=0; fi
+rx   t "... the log says why" "svc: gone: cannot start /bin/nosuchprog \(error -2\)"
+none t "... and it is never counted (no give-up)" "svc: gone: given up.*"
+rx   t "a crash during a request: that client gets -104" ".*svctest call q 7: -104 in [0-9]+ ms"
+rx   t "... the client queued behind it is served by the next server" ".*svctest call q 1: 0 in ([6-9][0-9]{2}|[0-9]{4,}) ms"
+rx   t "the root server stopped, a file service read from it: the load started the root server too" "svc: fs: started @fsd \(pid [0-9]+, for pid [0-9]+ svctest\)"
+rx   t "... and the call worked" ".*svctest call ping 1: 0 in [0-9]{3,} ms"
+line t "the script ran to the end" "svc-t-done"
 rm -f "$OUT/root.hdf"
 fi
 

@@ -9,6 +9,7 @@ SYNOPSIS
     svctest reg NAME NICE PROGRAM [ARGUMENTS]
     svctest rm NAME
     svctest call NAME TYPE [A0]
+    svctest kcall PID NAME TYPE
     svctest raw DEVICE
     svctest hold DEVICE SECONDS
     svctest keep FILE SECONDS
@@ -36,6 +37,10 @@ DESCRIPTION
     call   makes one call to the port NAME with message type TYPE (and
            a0) and prints the result and how long it took, in ms of
            the E-clock (emulator times are not hardware times).
+    kcall  kills process PID (the root filesystem server), waits a
+           second and makes the same call as call: a service on the
+           disk is then read while the root server is stopped (the
+           load starts the root server too).
     raw    opens DEVICE raw at the disk server, as fdisk or dd would:
            -16 while it (or a device sharing its sectors) is mounted.
     hold   opens DEVICE (plain), reads its first sector, waits SECONDS
