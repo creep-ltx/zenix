@@ -10,7 +10,7 @@ tools/run-test.sh fsuae/a1200-020-fast.fs-uae 75 tools/tests/jobs-test.txt 2>&1 
 pass=1
 want() { if grep -aqF -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 want "^Z stops the foreground program" "Stopped    sleep"
-grep -aqE "stopped +[0-9]+ sleep" $OUT/run.log && echo "PASS ps shows it stopped" || { echo "FAIL ps shows it stopped"; pass=0; }   # any size: programs shrink and grow
+grep -aqE "stopped +[0-9]+ +[0-9]+ sleep" $OUT/run.log && echo "PASS ps shows it stopped" || { echo "FAIL ps shows it stopped"; pass=0; }   # any size: programs shrink and grow
 want "bg continues it" "sleep &"
 want "the continued job runs on" "Running    sleep"
 want "fg brings it back and ^C ends it (status 130)" "status=130"

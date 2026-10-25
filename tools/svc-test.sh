@@ -62,10 +62,10 @@ conf() {   # conf NAME HDF: the fast A1200 with another hard disk
 # ---- a: the normal root ----
 if want_part a; then
 run a fsuae/a1200-020-fast.fs-uae 120 tools/tests/svc-test.txt
-rx   a "boot is pid 1" " +1 +0 +16 +0 [a-z]+ +[0-9]+ boot"
-rx   a "diskd is pid 2, started by boot's first call, at nice -10" " +2 +0 +8 +-10 msg +[0-9]+ diskd"
-rx   a "fsd is pid 3, at nice -10" " +3 +0 +8 +-10 msg +[0-9]+ fsd"
-none a "no zfsd on an ext2 boot" " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ zfsd"
+rx   a "boot is pid 1" " +1 +0 +16 +0 [a-z]+ +[0-9]+ +[0-9]+ boot"
+rx   a "diskd is pid 2, started by boot's first call, at nice -10" " +2 +0 +8 +-10 msg +[0-9]+ +[0-9]+ diskd"
+rx   a "fsd is pid 3, at nice -10" " +3 +0 +8 +-10 msg +[0-9]+ +[0-9]+ fsd"
+none a "no zfsd on an ext2 boot" " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +[0-9]+ zfsd"
 line a "the log: diskd started for boot" "svc: disk: started @diskd (pid 2, for pid 1 boot)"
 line a "the log: fsd started for boot" "svc: fs: started @fsd (pid 3, for pid 1 boot)"
 line a "root cannot create the registered port fs" "svctest port fs: -16"
@@ -75,7 +75,7 @@ line a "fsd killed while idle: the log says it ended" "svc: fs: fsd (pid 3) ende
 rx   a "... and the next use started it again" "svc: fs: started @fsd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
 same a "... files are there after the restart" n1 n2
 line a "... the root is still writable (the restart used -root)" "write-ok"
-rx   a "... the new fsd runs at nice -10" " +[0-9]{2,} +0 +8 +-10 msg +[0-9]+ fsd"
+rx   a "... the new fsd runs at nice -10" " +[0-9]{2,} +0 +8 +-10 msg +[0-9]+ +[0-9]+ fsd"
 line a "diskd killed while idle: the log says it ended" "svc: disk: diskd (pid 2) ended, status 130"
 rx   a "... and the next use started it again" "svc: disk: started @diskd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
 same a "... files are there after the restart" n1 n3
@@ -85,7 +85,7 @@ fi
 # ---- z: the ZenixFS root ----
 if want_part z; then
 run z fsuae/zroot.fs-uae 120 tools/tests/svc-zroot-test.txt
-rx   z "zfsd serves the ZenixFS root as pid 3" " +3 +0 +8 +-10 msg +[0-9]+ zfsd"
+rx   z "zfsd serves the ZenixFS root as pid 3" " +3 +0 +8 +-10 msg +[0-9]+ +[0-9]+ zfsd"
 none z "no fsd serves the root on a ZenixFS boot (the fsd in ps is fstab's ext2 mount)" "svc: fs: started @fsd.*"
 line z "zfsd killed while idle: the log says it ended" "svc: fs: zfsd (pid 3) ended, status 130"
 rx   z "... and the next use started it again" "svc: fs: started @zfsd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
@@ -197,7 +197,7 @@ run l fsuae/a1200-020-fast.fs-uae 260 tools/tests/svc-limit-test.txt
 line l "registering a file service" "svctest reg ping: 0"
 line l "... no pingd before the first call" "before=0"
 rx   l "... the first call starts it" ".*svctest call ping 1: 0 in [0-9]+ ms"
-rx   l "... at its nice (0)" " +[0-9]+ +0 +16 +0 [a-z]+ +[0-9]+ pingd"
+rx   l "... at its nice (0)" " +[0-9]+ +0 +16 +0 [a-z]+ +[0-9]+ +[0-9]+ pingd"
 rx   l "... the log names the start" "svc: ping: started /bin/pingd \(pid [0-9]+, for pid [0-9]+ svctest\)"
 rx   l "a quit while idle is a stop" "svc: ping: pingd \(pid [0-9]+\) stopped"
 line l "... no pingd after it" "after-quit=0"
@@ -227,8 +227,8 @@ line f "... a stop while it waits afterwards stops it" "a1-stopped=1"
 line f "... and a kill ends it at once" "a1-left=0 a1-end"
 line f "a loader killed in its back-off ends" "a1b-left=0 a1b-end"
 if [ "$(grep -ac 'svctest call f 1: -104 in' "$OUT/f.log")" = 4 ]; then echo "PASS ... at once: it printed nothing after the kill"; else echo "FAIL ... at once: it printed nothing after the kill"; pass=0; fi
-rx   f "a nice 19 loader whose start failed is back at its own level" " +[0-9]+ +[0-9]+ +31 +19 [a-z]+ +[0-9]+ svctest"
-none f "... not at the queued nice -20 client's" " +[0-9]+ +[0-9]+ +[0-9] +19 [a-z]+ +[0-9]+ svctest"
+rx   f "a nice 19 loader whose start failed is back at its own level" " +[0-9]+ +[0-9]+ +31 +19 [a-z]+ +[0-9]+ +[0-9]+ svctest"
+none f "... not at the queued nice -20 client's" " +[0-9]+ +[0-9]+ +[0-9] +19 [a-z]+ +[0-9]+ +[0-9]+ svctest"
 line f "... and ends at a kill" "a2-left=0 a2-end"
 rx   f "a crash in a request: the next start is told so (start 2 + 65536)" ".*svctest call m 3: 65538 in [0-9]+ ms"
 rx   f "... a clean stop after it clears that: the start after it is not (start 3, audit A8)" ".*svctest call m 3: 3 in [0-9]+ ms"
@@ -272,7 +272,7 @@ run t "$OUT/t.fs-uae" 160 tools/tests/svc-tab-test.txt
 line t "a bad line is reported and skipped" "boot: /etc/svctab: line skipped: bad"
 rx   t "... no pingd before the first call" "(.*# )?before=0"
 rx   t "the first call starts it" ".*svctest call ping 1: 0 in [0-9]+ ms"
-rx   t "... at the nice from the table (5)" " +[0-9]+ +0 +[0-9]+ +5 [a-z]+ +[0-9]+ pingd"
+rx   t "... at the nice from the table (5)" " +[0-9]+ +0 +[0-9]+ +5 [a-z]+ +[0-9]+ +[0-9]+ pingd"
 rx   t "... the log names the start" "svc: ping: started /bin/pingd \(pid [0-9]+, for pid [0-9]+ svctest\)"
 rx   t "ping's quit is a stop" ".*svc: ping: pingd \(pid [0-9]+\) stopped"
 rx   t "... none left after it" "(.*# )?after-quit=0"

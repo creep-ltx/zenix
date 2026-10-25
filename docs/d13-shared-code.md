@@ -274,5 +274,29 @@ What the build did differently from sections 1-13, and why; each item names the 
   later "applied once" class in the shared part needs no format change. mkzexe also refuses a writable section in the
   shared part, a table slot that holds something other than its symbol's address, and a `.got.plt` that is not zero;
   it verified on every slot of `hello`, `cat` and `sh` that the 16-bit offsets count from the start of `.got`.
+- **Step 2.** The segments live in a new file, `kernel/seg.c` (`-Os` except the checksum loop), with a fixed table
+  of `NSEG` = 8; a program that finds it full runs as a private copy. A private copy (open for writing, stale, table
+  full) is simply owned by the process's pid, so `mem_free_owner` frees it at the reap; only a listed segment's block
+  gets `SEG_OWNER` (`mem_set_owner`, new in mem.c, when it is listed). A loader's own copy checks that its first 40
+  bytes are the header it read first (a file changed between the two reads is refused, -EIO). **`ETXTBSY`:** the kernel
+  learns a file's inode only from the server, so a write-open with `O_TRUNC` (the server truncates inside `FS_OPEN`)
+  costs one `FS_STAT` before the open - only while something of that mount is loaded, which with `sh` pure (step 3b) is
+  always on the root - and every other write-open is checked on the open's answer and closed again if busy. A
+  segment is "busy" when its whole key matches the file's status (inode, size, time, generation), so an unlinked
+  program's inode number given to a new file does not make that file busy. Gap, said openly: a load or a listing that
+  happens between that `FS_STAT` and the truncating `FS_OPEN` cannot be refused any more; it is unlisted or marked stale
+  (never reused), but the file is already truncated. `O_TRUNC` without write access truncates nothing in either server
+  and is not checked. **Generations** come from one counter (`gen_last`), set on every mount and on every
+  `svc_handover` of a port that a mount uses (also the first start: harmless). `umount` needs no rule of its own: the
+  slot's next mount has a new generation. **`ps`** got a SHR(K) column after MEM(K) (the tests that read `ps` lines
+  were adjusted); MEM is the process's own memory, a private copy's code included. **`free`** prints a third line,
+  "shared code: N KB, sharing saves M KB" (SYS_meminfo words 2 and 3: the bytes of shared code in memory and, for each
+  segment, its size times its users beyond the first). **Tests:** a shell cannot be made to fault on purpose, so the
+  crash, damage and literal checks use a ZEX2 build of `crash` with four new test modes (`sleep N`, `poke`, `damage`,
+  `literal`; `crash` is a test program, man page updated), placed with the ZEX2 `hello` only in the test images'
+  `/tests` (not commands; the mount tests' small floppy leaves them out: no room). The remount check mounts a floppy
+  holding `hellopure` twice in the same slot. `tools/mkbadzexe.py` also writes 14 corrupt ZEX2 files from `hellopure`.
+  The kernel went from 170212 to 174368 bytes (4832 left): about 4.2 KB, more than the 1.5-2 KB estimated (seg.c 1.4 KB,
+  the loader 1.5 KB, vfs 0.7 KB, the rest and the kernel's relocation table); `-Os` on seg.c saved 240 bytes.
 
 Last checked against the code: 2026-10-25.

@@ -11,9 +11,15 @@ DESCRIPTION
     by the Amiga custom chips: screen, sound, disk) and fast RAM (CPU only).
     There are no options. On a machine without fast RAM the fast line shows 0.
 
+    The third line is about programs with shared code (one copy of the
+    code in memory for every process running the program): how much such
+    code is in memory, and how much more the copies it saves would take
+    (for each program, its code times its processes beyond the first).
+
 EXAMPLE (the numbers will differ)
     chip RAM free: 1210 KB
     fast RAM free: 0 KB
+    shared code: 83 KB, sharing saves 166 KB
 
 SEE ALSO
     ps(1), df(1)

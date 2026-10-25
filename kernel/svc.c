@@ -311,6 +311,7 @@ int svc_handover(int i)
     p->op = current;
     s->state = SV_RUNNING;
     s->served = 1;
+    vfs_server_started(p->name);                /* D13: its mounts' code segments are not reused */
     if (eq(p->name, "fs"))
         klog_mirror_off();                      /* the root is up: from here the screen belongs to the programs */
     wake(s->watcher);

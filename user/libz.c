@@ -500,7 +500,7 @@ static const struct { unsigned char e; const char *text; } errtext[] = {
     { EACCES, "permission denied" }, { EFAULT, "bad address" }, { EBUSY, "device or resource busy" },
     { EEXIST, "file exists" }, { EXDEV, "cross-device link" }, { ENODEV, "no such device" },
     { ENOTDIR, "not a directory" }, { EISDIR, "is a directory" }, { EINVAL, "invalid argument" },
-    { ENFILE, "too many open files in the system" }, { EMFILE, "too many open files" }, { ENOTTY, "not a terminal" },
+    { ENFILE, "too many open files in the system" }, { EMFILE, "too many open files" }, { ENOTTY, "not a terminal" }, { ETXTBSY, "text file busy" },
     { EFBIG, "file too large" }, { ENOSPC, "no space left on device" }, { ESPIPE, "illegal seek" },
     { EROFS, "read-only file system" }, { EMLINK, "too many links" }, { EPIPE, "broken pipe" },
     { ERANGE, "result out of range" }, { ENAMETOOLONG, "file name too long" }, { ENOSYS, "not implemented" },

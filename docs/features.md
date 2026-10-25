@@ -29,6 +29,7 @@ built. Last checked against the code: 2026-10-23.
 |---|---|---|
 | Relocating kernel and programs (ZEXE format, no MMU) | verified | architecture.md section 4 |
 | Program loader checks every header field and relocation offset; a corrupt program file is refused with a message | verified (`tools/memtest.sh`, 11 corrupt files) | architecture.md section 4 |
+| Shared program code (DESIGN D13 stage 1, ZEX2): one copy in memory of a program's code for all its processes; system calls may read a literal in it, never write; a changed file is never reused (text file busy, generations, private copies); the checksum finds a damaged copy | verified (`tools/pure-test.sh`, `tools/mkzexe-test.sh`; ZEX2 builds of hello and crash, 14 corrupt files) | architecture.md sections 4 and 10, d13-shared-code.md |
 | Memory manager with per-process ownership, freed on exit | verified | architecture.md section 5 |
 | Memory calls answer 0 (NULL) on failure; sizes near 4 GB refused; a corrupt heap header stops the kernel with its address | verified (`badptr` in `tools/memtest.sh`) | architecture.md section 5 |
 | `malloc` with size classes and free lists (memory reused, big blocks given back), `realloc`; directory tools without stack arrays or entry limits | verified (`tools/memtest.sh`: flat shell memory, tools 25 directories deep) | architecture.md section 12 |

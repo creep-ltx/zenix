@@ -8,8 +8,9 @@ SYNOPSIS
 
 DESCRIPTION
     Prints one line for every process: its id, its parent's id, its
-    priority, its niceness, its state, the memory it owns in kilobytes, and
-    its program name. There are no options and no filtering.
+    priority, its niceness, its state, the memory it owns and the shared
+    code it runs in kilobytes, and its program name. There are no options
+    and no filtering.
 
     PID   process id
     PPID  parent process id (0 for the programs started by the kernel)
@@ -25,15 +26,18 @@ DESCRIPTION
           msg      waiting for a server's answer, or (a server) for a request
           zombie   ended, not yet collected by its parent
           stopped  stopped by Ctrl-Z or a job-control request (fg, bg go on)
-    MEM(K) all memory the process owns (program, stack, extra blocks)
+    MEM(K) the memory the process owns (its program's data and BSS - for a
+          program without shared code its code too - and its stack)
+    SHR(K) the shared code it runs: one copy for every process running
+          the same program, not counted in MEM (0: none)
     NAME  the file name of the program (first 15 characters)
 
 EXAMPLE (the numbers will differ)
-      PID  PPID PRI  NI STATE    MEM(K) NAME
-        0     0   -   0 ready         0 idle
-        1     0  16   0 wait          4 boot
-        2     0   8 -10 msg          37 diskd
-        3     0   8 -10 msg          61 fsd
+      PID  PPID PRI  NI STATE    MEM(K) SHR(K) NAME
+        0     0   -   0 ready         0      0 idle
+        1     0  16   0 wait         25      0 boot
+        2     0   8 -10 msg          35      0 diskd
+        3     0   8 -10 msg          63      0 fsd
         ...
 
 NOTES

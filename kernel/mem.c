@@ -217,6 +217,15 @@ void mem_free(void *p)
     free_blk(r, b);
 }
 
+void mem_set_owner(void *p, u32 owner)
+{
+    struct mblk *b = (struct mblk *)p - 1;
+    struct range *r = range_of((u32)b);
+    if (!r || b->magic != MAGIC || !USED(b))
+        panic("mem_set_owner: not a block in use");
+    b->owner = owner;
+}
+
 u32 mem_free_owner(u32 owner)
 {
     u32 got = 0;

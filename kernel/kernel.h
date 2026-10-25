@@ -108,6 +108,8 @@ void *mem_alloc(u32 n, u32 flags, u32 owner);   /* 0 if n is 0, above MEM_ALLOC_
 #define MEMALLOC_MAX  (64u << 20)       /* largest region SYS_memalloc gives a process (64 MB) */
 void mem_free(void *p);
 u32 mem_free_owner(u32 owner);
+void mem_set_owner(void *p, u32 owner);         /* a block changes hands (a loaded program's code becomes a segment's) */
+#define SEG_OWNER 0x80000000u                   /* the owner of every shared code segment's block: never a pid (D13) */
 void mem_stats(u32 *chip_free, u32 *fast_free);
 void *kmalloc(u32 n);
 void kfree(void *p);
@@ -211,6 +213,16 @@ struct zexe {
     u32 image_size, mem_size, nreloc, reloc_off, stack_size, reserved;
 };
 #define ZEXE_MAGIC 0x5a455845u
+/* ZEX2: a program with shared code (DESIGN D13, tools/mkzexe.py, docs/d13-shared-code.md): the shared part (code and
+ * constants) is file offsets 0..text_size, one copy in memory for every process running it (a segment, seg.c); the
+ * data part (table, .data, then .bss) every process has its own copy of, a5 pointing at its start */
+struct zex2 {
+    u16 bra, bra_disp;
+    u32 magic;                  /* 'ZEX2' */
+    u32 text_size, data_size, mem_size, nrel_code, nrel_data, reloc_off, stack_size, reserved;
+};
+#define ZEX2_MAGIC 0x5a455832u
+union zhdr { struct zexe v1; struct zex2 v2; };
 #define ZEXE_MEM_MAX   (16u << 20)     /* the loader refuses a program asking for more (image + bss) */
 #define ZEXE_STACK_MIN 4096u            /* a stack size in the header, if not 0, lies in this range */
 #define ZEXE_STACK_MAX (1u << 20)
@@ -246,6 +258,7 @@ struct uproc {                  /* returned by SYS_procinfo */
     char name[16];
     s32 nice;                   /* the base priority on the nice scale, -20 (most favoured) .. 19 */
     u32 pri;                    /* the effective level now, 0 (highest) .. 31; PRI_IDLE for pid 0 */
+    u32 shared;                 /* D13: bytes of shared code it runs (one copy for all its users; not in mem) */
 };
 
 /* proc.c */
@@ -305,6 +318,10 @@ struct proc {                   /* start.S relies on the first three: */
     u8 svc_role;                /* D11: woken to load (SVC_ROLE_LOAD) or to keep a start's deadline (SVC_ROLE_WATCH) */
     u8 svc_depth;               /* D11: service loads under way in this process (at most 2 nested); its calls carry uid 0 */
     u8 call_ns;                 /* D11: the call in flight may not start a server (a no-start call, svc.c) */
+    struct seg *seg;            /* D13: the shared code segment it runs (0: none, or a private copy) */
+    u32 code, csize;            /* D13, a ZEX2 program: where its code is (the segment's or its own private copy); user
+                                 * pointers into it may be read by system calls, never written (user_ok_rd) */
+    u32 a5;                     /* D13: the a5 its code needs (the start of its data part; 0 for a ZEXE program) */
 };
 extern struct proc procs[NPROC];
 extern struct proc *current;
@@ -333,7 +350,9 @@ int proc_renice(struct proc *p, int nice);   /* set the base priority (clamped);
 void prio_raise(struct proc *p, u8 level);   /* inheritance: p serves a client at level: at least that until done */
 void prio_recalc(struct proc *p);            /* p finished serving: back to its base or its best waiting client */
 u8 ipc_best_client(int pid);                 /* ipc.c: the best level among clients waiting for or served by pid */
-int user_ok(const struct proc *p, u32 ptr, u32 len);
+int user_ok_wr(const struct proc *p, u32 ptr, u32 len);   /* the process's own memory: it may be written */
+int user_ok_rd(const struct proc *p, u32 ptr, u32 len);   /* ... or its shared code (D13): only read */
+u32 user_rd_extent(const struct proc *p, u32 ptr);        /* how many bytes from ptr on user_ok_rd allows (0: none) */
 /* Stack guard (proc.c): a pattern at the bottom of every kernel and user stack, checked with the stack pointers at
  * every task switch, at every system call, at the tick when it interrupts user code and when a program faults.
  * stack_bad: 0, STK_KERNEL or STK_USER (ksp/usp: the stack pointers now; usp 0 = not known, only the guard).
@@ -437,11 +456,39 @@ long vfs_read(struct file *f, void *buf, u32 n);
 long vfs_write(struct file *f, const void *buf, u32 n);
 long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
 struct ustat;
-struct exec_src { int m; long ino; struct ustat st; struct exec_src *next; };   /* next: the loads in progress (D11) */
+struct exec_src {                       /* a program file being loaded (fs_exec_open .. fs_exec_close) */
+    int m; long ino; struct ustat st;
+    struct exec_src *next;              /* the loads in progress (D11) */
+    u32 gen;                            /* D13: the mount's generation at the open */
+    u8 stale;                           /* D13: the file may have changed since the open: never enter it as a segment */
+    u8 wopen;                           /* D13: it was open for writing at the open: load a private copy */
+};
 long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x);
 long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n);
 void fs_exec_close(struct exec_src *x);            /* FS_CLOSE for an fs_exec_open that succeeded */
-long vfs_opens(const char *pname, int port, u32 *out, u32 max);   /* SVC_OPENS: the inodes held open on that mount */
+long vfs_opens(const char *pname, int port, u32 *out, u32 max);
+u32 vfs_mount_gen(int m);                       /* D13: changes on every mount and server restart (0: not mounted) */
+void vfs_server_started(const char *pname);     /* D13: a filesystem server (re)started on that port (svc.c) */
+/* seg.c: shared code segments (DESIGN D13, docs/d13-shared-code.md sections 6-7) */
+#define NSEG 8
+struct seg {
+    u32 code, size;             /* the shared part in memory; code 0: the slot is free */
+    u32 sum;                    /* its add-and-rotate checksum, taken after loading */
+    u16 refs;                   /* processes running it */
+    u8 listed;                  /* found by seg_find: the key still names an unchanged file */
+    u8 m;                       /* the key: mount slot, generation, inode, size, modification time */
+    u32 gen, ino, fsize, mtime;
+};
+u32 seg_sum(u32 code, u32 size);
+struct seg *seg_find(const struct exec_src *x, u32 size, const char *path);   /* a reference to a listed, intact one */
+struct seg *seg_enter(const struct exec_src *x, u32 code, u32 size, u32 sum, const char *path, int *made);   /* list
+                                 * it, or the one listed meanwhile (made 0: the caller frees its copy); 0: private */
+void seg_put(struct seg *s);                    /* drop a reference; the last one frees the code */
+void seg_unlist(int m, long ino);               /* file ino (-1: every file) of mount m may have changed */
+int seg_busy(int m, const struct ustat *st);    /* a segment of that file exists (ETXTBSY) */
+int seg_on(int m);                              /* a segment loaded from mount m exists */
+void seg_stats(u32 *bytes, u32 *saved);         /* shared code in memory, and what sharing it saves */
+void seg_crash(struct proc *p, u32 pc);         /* a process running shared code faulted: is the code intact? */   /* SVC_OPENS: the inodes held open on that mount */
 long vfs_open(const char *path, int flags);
 long vfs_stat(const char *path, struct ustat *st);
 long vfs_fstat(struct file *f, struct ustat *st);

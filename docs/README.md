@@ -76,6 +76,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | mounttest, zenixfstest | mounting ext2 and ZenixFS, `fsck`, nested mounts |
 | edit-regress, disktools, mbr-test | the editor; `fdisk`/`mkfs`/`fsck` on scratch disks; PC partition tables |
 | zenixboot-test | booting with no floppy: Kickstart boots the FFS partition, zenixboot starts Zenix on its IDE root; zenixboot's error paths; Kickstart 3.2 and 2.05 only when `ZENIX_KICK32` / `ZENIX_KICK205` name those ROMs (else SKIP) |
+| pure-test | shared program code (DESIGN D13): one copy for one, two and four processes (`free`, `ps`), the first ending and the last freeing it, two started at once, a crash in one, literals in system calls (a read into one refused), text file busy, an update renamed over a running program, a private copy of a file open for writing, a new generation after a server restart and after a remount, a damaged copy found and not used again, corrupt ZEX2 files refused |
 | svc-test | the service manager (DESIGN D11): boot's pids, restarts of diskd, fsd and zfsd, the bootable root, no root, the RAM floppy, diskd's saved table, open files across a restart, a dd copy, limits and back-off, the deadline, a call whose start fails (stop, kill, the loader's priority), reboot with a dead server and with one that hangs, a damaged table (a test build) |
 
 What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default

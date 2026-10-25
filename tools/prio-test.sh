@@ -14,13 +14,13 @@ tools/run-test.sh fsuae/a1200-020-fast.fs-uae 170 tools/tests/prio-test.txt 2>&1
 pass=1
 line() { if grep -aqxF -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 rx()   { if grep -aqxE -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
-rx   "diskd runs at nice -10 (level 8)" " +2 +0 +8 -10 msg +[0-9]+ diskd"
-rx   "fsd runs at nice -10 (level 8)" " +3 +0 +8 -10 msg +[0-9]+ fsd"
-rx   "the shell runs at nice 0 (level 16)" " +[0-9]+ +[0-9]+ +16 +0 [a-z]+ +[0-9]+ sh"
+rx   "diskd runs at nice -10 (level 8)" " +2 +0 +8 -10 msg +[0-9]+ +[0-9]+ diskd"
+rx   "fsd runs at nice -10 (level 8)" " +3 +0 +8 -10 msg +[0-9]+ +[0-9]+ fsd"
+rx   "the shell runs at nice 0 (level 16)" " +[0-9]+ +[0-9]+ +16 +0 [a-z]+ +[0-9]+ +[0-9]+ sh"
 line "nice: prints the niceness, adds -n, adds up, root may go negative, 10 by default" "n0=0 n5=5 n7=7 r=-5 d=10"
 rx   "renice sets a value (root)" "[0-9]+ \(process ID\) old priority 0, new priority 7"
 rx   "root may raise with renice" "[0-9]+ \(process ID\) old priority 7, new priority -3"
-rx   "ps shows PRI 13 and NI -3 for it" " +[0-9]+ +[0-9]+ +13 +-3 sleep +[0-9]+ sleep"
+rx   "ps shows PRI 13 and NI -3 for it" " +[0-9]+ +[0-9]+ +13 +-3 sleep +[0-9]+ +[0-9]+ sleep"
 line "a user may lower with nice" "u5=5 uc=5"
 line "a user may not raise with nice" "nice: cannot set niceness -1: permission denied"
 line "... and nice says so in its status" "neg=125"
@@ -31,7 +31,7 @@ line "a user may not renice a server" "renice: 1: permission denied"
 line "... status 1" "server=1"
 line "renice -u lowers all of a user's processes" "1000 (user ID) old priority 0, new priority 5"
 line "... status 0" "user=0"
-rx   "ps shows PRI 20 and NI 5 for the user's process" " +[0-9]+ +[0-9]+ +20 +5 sleep +[0-9]+ sleep"
+rx   "ps shows PRI 20 and NI 5 for the user's process" " +[0-9]+ +[0-9]+ +20 +5 sleep +[0-9]+ +[0-9]+ sleep"
 for t in fair prio wake inherit stale; do
     l=$(grep -a "^priotest $t: " $OUT/run.log | head -1)
     case "$l" in *": PASS"*) echo "PASS ${l#priotest }" ;; *) echo "FAIL priotest $t: ${l:-no result}"; pass=0 ;; esac
