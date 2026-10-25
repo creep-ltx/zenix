@@ -3,7 +3,7 @@
 Status: **revised after the first review (2026-10-25), awaiting a second look.** Approved by the owner on 2026-10-24
 as the step after D11 and before the self-updates. No code until the second look agrees. The short version is in
 [DESIGN.md](DESIGN.md) D13. Facts marked *measured* were taken with the project's own cross compiler (gcc 16.1,
-`m68k-elf`) on the real build: all 113 programs built with `-msep-data` through the Makefile (2026-10-25). Clock counts
+`m68k-elf`) on the real build: all 111 programs and the two filesystem servers built with `-msep-data` through the Makefile (2026-10-25). Clock counts
 come from the MC68020 User's Manual's tables (*from the manual*); nothing here is timed in an emulator.
 
 What changed from revision 1 (the review's findings, all accepted): the kernel's pointer checks (section 5, a blocker
@@ -82,7 +82,7 @@ Zenix from the DoM, the same `bench` and text-tool runs are timed there,** the f
   undefined weak symbol (0 in the table), and any reference from the shared part *into data*.
 - **References inside the shared part are allowed** when they point into the shared part: they are the same for every
   process, so they are applied once when the segment loads (libgcc's `__clz_tab` and `$_exception_handler` in seven
-  programs). Only shared-to-data is refused; in all 113 programs that is `awk`'s soft-float `_fpCCR` and `crt0`'s
+  programs). Only shared-to-data is refused; in all 111 programs and the servers that is `awk`'s soft-float `_fpCCR` and `crt0`'s
   `_zargv` (below).
 - **The kernel checks every relocation**: its place lies in the part it claims, its target class matches, its value
   lies inside that part. Nothing in a header is trusted (audit B7).
