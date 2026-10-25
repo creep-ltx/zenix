@@ -182,8 +182,10 @@ long ipc_wait(struct umsg *m)
 static long call(int port, struct umsg *m, u16 kflags, int ns)
 {
     struct port *p = port_of(port);
-    if (!p || p->owner == current->pid)
-        return -1;                              /* closed, reused, or one's own port (that would wait for ever) */
+    if (!p)
+        return -ECONNRESET;                     /* closed or reused (G1): its server is gone (A11: was a bare -1) */
+    if (p->owner == current->pid)
+        return -EINVAL;                         /* one's own port: that would wait for ever */
     m->next = 0;
     m->from = current->pid;
     m->client = current;

@@ -105,7 +105,7 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   715,909 Hz: 100.001 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers chained, an E-clock count
   that wraps after about 1.7 hours (`bench` converts it with the PAL rate).
 - Error numbers: the kernel and the servers return negative errno values (architecture.md section 7). Still a bare
-  -1: `SYS_mountinfo` past the end, `ipc_call`/`ipc_recv` on a bad port, `port_create`/`port_find`, the internal
+  -1: `SYS_mountinfo` past the end, `ipc_recv` on a bad port, `port_create`/`port_find`, the internal
   block allocators of ext2.c. `zwhy` shows no text for -1 (EPERM, 1) for that reason: the caller's own words appear.
 - Input rings between the interrupts and `kwork`: 128 keyboard codes, 1024 serial bytes; a tty queue holds 1024
   bytes of typed input that no program has read yet. Anything dropped is counted on the kernel log.

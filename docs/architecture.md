@@ -470,7 +470,9 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 - If a server dies, the request it was serving fails with -ECONNRESET ("the server is gone", errno 104; the kernel's
   file calls turn it into -EIO for programs). A service's port (section 9, "The service manager") goes back to
   *held*: its queued requests wait for the next server, which the first of them starts. Any other port is closed, its
-  queued requests fail with -ECONNRESET, and the kernel forgets a cached port number and looks it up again next time. `ipc_reply` looks the message up
+  queued requests fail with -ECONNRESET, and so does a later call to it (a closed port, or a port number whose slot
+  was reused); the kernel forgets a cached port number and looks it up again next time. A call to one's own port is
+  -EINVAL. `ipc_reply` looks the message up
   among the requests really in flight (the clients' `wait_msg`) before it reads anything in it, so a stray or forged
   pointer from a server is refused (-EINVAL) instead of being followed.
 - The kernel stamps every message with the caller's uid, gid and umask, and `kflags`: `UMSG_KERNEL` when the kernel
