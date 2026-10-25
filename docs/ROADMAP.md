@@ -76,8 +76,8 @@ IDE machine detection and timing, floppy write tail, gap, settle times, retries 
 timeouts); the floppy test is back in `make check`; verified in FS-UAE and on the host as the audit says per item; not
 yet on the A1200.
 
-## The order of work (owner 2026-10-25)
-The phases below say *what*; this says *in which order*. Real-hardware findings and problems found along the way are
+## The order of work (approved by the owner 2026-10-25)
+The phases below say *what*; this says *in which order*. When one item is done, the next starts at once. Real-hardware findings and problems found along the way are
 fixed next, ahead of everything here ("fix things when we find them"). A focused audit closes every block; its findings
 are fixed at once. Two independent design reviews for deep core changes, one for features.
 
@@ -97,6 +97,18 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    RTG, faster IDE, CD. Audit.
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full
    audit of the whole system, then release 1.0 with the owner's yes.
+
+## Versions and updates (approved by the owner 2026-10-25)
+- **Every part is a package with its own version** (the kernel, `sh`, `awk`, a driver ...); `zpkg -Syu` fetches what
+  is new, a fix to one program waits for nothing else.
+- **"base" moves as one:** the kernel, the built-in servers, `init` and the C library share system-call and message
+  numbers, so they are one package group with one version, always updated together.
+- **Rolling, in two channels:** *testing* (every version that passes `make check`; the owner's A1200) and *stable* (a
+  version that has been in daily use a while without trouble: "beta until daily driven").
+- **Dated snapshots** for installing and for release notes ("Zenix 2026.11"), not "version 2" that everyone waits for.
+- **Always a way back:** an update keeps the previous version, and the boot menu can start it.
+- Everything is 0.x with beta numbers until the owner calls a release 1.0.
+The self-updates design (DESIGN, the week of 2026-10-26) and `zpkg` are built on this.
 
 ## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 

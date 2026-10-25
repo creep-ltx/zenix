@@ -30,6 +30,8 @@ DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved
 `less`); a design note first (a DESIGN number, reviewed), then built. **The shell's memory** (a fix, audit 2026-10-25
 'found while fixing'): sh grabs a fixed arena of 64-256 KB per shell and parses a whole script at once; make it grow on
 demand, give memory back, and read scripts a piece at a time.
+**The order of work is approved (owner 2026-10-25): docs/ROADMAP.md "The order of work" - always the next item when
+one is done; and the versioning model there ("Versions and updates").**
 **Pace (owner 2026-10-25):** steady progress every day, done properly, never hasty: "an absolute epic operating system
 for the Amiga". Every day ends with something finished and merged, and a short status for the owner. Care matches risk:
 two independent design reviews for deep core changes (kernel, loader, updates), one for features; every change has tests;
