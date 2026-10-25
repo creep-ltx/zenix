@@ -76,8 +76,12 @@ def load_cage():
             self._slot = emulator_slot()
             try:
                 super().__init__(*args, **kw)
-            except BaseException:
-                self._slot.close()
+            except BaseException:          # a signal while cage starts: end what was started, then let go
+                try:
+                    if getattr(self, "proc", None):
+                        self.stop()
+                finally:
+                    self._slot.close()
                 raise
 
         def __exit__(self, *exc):
