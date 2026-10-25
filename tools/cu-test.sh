@@ -26,4 +26,5 @@ case "$first" in abc*) check "keys typed in cu reach the serial port (and nothin
 printf '%s\n' "$after" | grep -qx 'back' && check "after cu the console's copy on the serial port is back" ok || check "after cu the console's copy on the serial port is back" bad
 printf '%s\n' "$after" | grep -q 'hello-from-pc' && check "the PC's line is not echoed back to the PC" bad || check "the PC's line is not echoed back to the PC" ok
 echo "$got" | grep -q 'cu: disconnected from /dev/ttyS0' && check "~. ends cu" ok || check "~. ends cu" bad
+printf '%s\n' "$log" | grep -qx 'cukill-done' && check "a killed cu's receiving half ends at the next byte: the port is free again" ok || check "a killed cu's receiving half ends at the next byte: the port is free again" bad
 exit $((1 - pass))

@@ -76,6 +76,7 @@ static int panic_printing, panic_noscreen;
 static void panic_begin(void)
 {
     ints_off();
+    serdev_close();                     /* the panic text goes on the wire also while a program has /dev/ttyS0 (A10) */
     klog_set_reason(KLOG_END_PANIC);
     if (panic_printing) {
         klog_mirror_off();

@@ -4,14 +4,32 @@
  * port's bytes to the screen; "~." typed at the start of a line ends it, "~~" sends one "~". Two directions without
  * select: the port-to-screen copy is a second cu (cu -r), started with the port as its standard input. */
 
-static int copy_in(void)                    /* cu -r: the port (stdin) to the screen (stdout), until killed */
+static int alive(int pid)                   /* is process pid there and not yet ended */
+{
+    struct uproc p;
+    for (u32 k = 0; k < 256; k++)
+        if (sys_procinfo(k, &p) == 0 && p.state != 0 && (int)p.pid == pid)
+            return p.state != 5;                /* 5: a zombie */
+    return 0;
+}
+
+/* cu -r: the port (stdin) to the screen (stdout), until killed - or, after a read, if the cu that started it is gone
+ * (killed: it can no longer end this half, which would hold the port for good; audit A10) */
+static int copy_in(void)
 {
     static char buf[256];
+    struct uproc p;
+    int self = sys_getpid(), parent = -1;
+    for (u32 k = 0; k < 256 && parent < 0; k++)
+        if (sys_procinfo(k, &p) == 0 && p.state != 0 && (int)p.pid == self)
+            parent = (int)p.ppid;
     for (;;) {
         int n = sys_read(0, buf, sizeof buf);
         if (n <= 0)
             return n < 0 ? 1 : 0;
         if (sys_write(1, buf, (u32)n) < 0)
+            return 1;
+        if (!alive(parent))
             return 1;
     }
 }

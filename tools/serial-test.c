@@ -120,7 +120,13 @@ int main(void)
     EXPECT_TRUE(serdev_write(big, 10) == -EINTR && ticks == t0k, "a kill ends the wait at once (-EINTR)");
     me.killed = 0;
     fake_tbe = 1; drain_all();
-    serdev_close();
+
+    /* 6. a panic while the port is a program's (audit A10): panic_begin (main.c) takes the port back first */
+    serdev_close();                                       /* what panic_begin does */
+    kprintf("*** kernel panic: a test\n");
+    drain_all();
+    EXPECT_TRUE(sent_has("*** kernel panic: a test"), "a panic's text reaches the wire although /dev/ttyS0 was open");
+    serdev_close();                                       /* the program's own close afterwards changes nothing */
     s0 = fake_nsent;
     serial_putc('Y');
     drain_all();

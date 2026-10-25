@@ -4,7 +4,8 @@
 emulated Amiga keyboard with wtype, and play "the other computer" on the serial port (serial-tap.py with a script).
 The keyboard starts `cu > /tmp/cu.out` (its port-to-screen half writes there, so the file shows what reached the
 screen), the "PC" sends a line, the keyboard types a line (it must arrive on the serial port), then ~. ends cu and
-`echo back` checks that the console's copy on the serial port is back. tools/cu-test.sh reads the results.
+`echo back` checks that the console's copy on the serial port is back. Then rootfs/tests/cukill.sh kills a cu: after
+the PC's next byte its receiving half must end and give the port back (audit A10). tools/cu-test.sh reads the results.
 
 usage: cu-test.py config.fs-uae [serial-link]
 Swedish key positions (FS-UAE maps host keys by position): > is Shift+<, / is Shift+7, ~ is Shift+` ."""
@@ -25,7 +26,7 @@ os.makedirs(out, exist_ok=True)
 log = f"{out}/serial.log"
 script = f"{out}/script.txt"
 # the PC side: wait until the console's copy shows the cu command typed (cu starts then), then send a line to it
-open(script, "w").write("wait cu\\.out 150\nsleep 4\nsend hello-from-pc\\r\\n\nsleep 40\n")
+open(script, "w").write("wait cu\\.out 150\nsleep 4\nsend hello-from-pc\\r\\n\nwait cukill 90\nsleep 5\nsend x\\r\\n\nsleep 30\n")
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"), link, log, script],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)
@@ -68,6 +69,9 @@ try:
         time.sleep(3)
         text("echo back"); w("-k", "Return")         # the console's copy on the serial port is back
         time.sleep(2)
+        at(60)                                       # cu killed (rootfs/tests/cukill.sh); the PC sends a byte 5 s later
+        text("sh "); key("7", "Shift_L"); text("tests"); key("7", "Shift_L"); text("cukill.sh"); w("-k", "Return")
+        time.sleep(14)
         text("sync"); w("-k", "Return")
         time.sleep(3)
 finally:

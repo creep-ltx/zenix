@@ -35,6 +35,9 @@ NOTES
     transfer, no speed option, no ~ commands but ~. and ~~. The other
     side's screen should be 80x32 (PAL) or 80x25 (NTSC) and plain: the
     console shows Latin-1, two colours.
+    If cu itself is killed (not ended with ~.), its receiving half (a
+    second cu, "cu -r") ends at the next byte that arrives, and the port is
+    free again.
     PC side (Linux), once: a login on the USB serial adapter, e.g.
     systemctl start serial-getty@ttyUSB0 (115200 baud).
 
