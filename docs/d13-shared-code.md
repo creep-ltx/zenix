@@ -1,7 +1,8 @@
-# D13: shared libraries and shared program code (design note, revision 2)
+# D13: shared libraries and shared program code (design note, revision 3)
 
-Status: **revised after the first review (2026-10-25), awaiting a second look.** Approved by the owner on 2026-10-24
-as the step after D11 and before the self-updates. No code until the second look agrees. The short version is in
+Status: **ready to build (revision 3, 2026-10-25),** after a first review and a second look (both independent). Approved
+by the owner on 2026-10-24 as the step after D11 and before the self-updates; the owner's standing order of 2026-10-24
+says to build it without waiting for them, the A1200 measurements excepted. The short version is in
 [DESIGN.md](DESIGN.md) D13. Facts marked *measured* were taken with the project's own cross compiler (gcc 16.1,
 `m68k-elf`) on the real build: all 111 programs and the two filesystem servers built with `-msep-data` through the Makefile (2026-10-25). Clock counts
 come from the MC68020 User's Manual's tables (*from the manual*); nothing here is timed in an emulator.
@@ -11,6 +12,9 @@ the first revision missed); two relocation bases instead of "no relocations in t
 address-table offsets, which make pure code smaller and nearly as fast (section 3); a new file magic (section 4); a
 stronger file identity and the cache rules (section 6); segment ownership and races (section 7); the corrected
 numbers (section 2); stage 1 starts with `sh` and `login` only (section 8); the kernel-size plan (section 10).
+Revision 3 adds the second look's findings: a changed file is never reused (`ETXTBSY`, mount generations, stale loads;
+section 6), which writes are checked where (section 5), `-Os` only on truly cold files (section 10), one relocation
+class fewer in stage 1, the segment reference rules, and a safer build order (sections 4, 7, 12).
 
 ## 1. The problem
 
@@ -32,8 +36,8 @@ programs written for it (the RKM's reentrant start-up: "no unshareable globals")
 | per extra login session | | **about 85 KB saved**: 255 KB for four sessions |
 
 The `sh` file today is 87608 bytes, 12 KB of it a table of 3089 relocations freed after loading; pure, it shrinks to
-about 81 KB with 425 relocations, and a second shell's start reads about 2 KB and applies 422 relocations instead of
-75 KB and 3089.
+about 81 KB with 425 relocations, and a second shell's start reads about 3.5 KB (table, data and relocations) and applies 422 relocations instead
+of 75 KB and 3089.
 
 A session also holds things D13 does not touch: `sh`'s 35 KB of BSS, a 24 KB stack, two 4 KB kernel stacks, libz's
 first 32 KB malloc chunk, and the shell's arena (an eighth of free memory, 64-256 KB: about 190 KB for the first shell
@@ -75,14 +79,19 @@ Zenix from the DoM, the same `bench` and text-tool runs are timed there,** the f
   96 `.data` words point into `.rodata`, and 245 of 326 table entries point into code or constants):
   - *to code*: add the segment's address;
   - *to data*: add (the process's data address - `text_size`).
-  `mkzexe.py` classifies each by the target symbol's section. It **adds one relocation per `.got` entry itself** (a
+  `mkzexe.py` classifies each by the target symbol's section; **table slots are classified by their symbol**, which every
+  slot has through an `R_68K_GOT16O` relocation in `.rela.text` (*measured*: `sh` 326 of 326, `login` 42 of 42), so
+  the value-equals-`text_size` ambiguity disappears and absolute symbols are refused. `.got.plt` is placed explicitly
+  in `user.ld` (otherwise it lands unplaced between `.data` and `.bss`). It **adds one relocation per `.got` entry itself** (a
   static `-q` link writes the table but lists no `.rela.got`; every entry is an address: *measured*, 695 entries in five
   programs, none zero). It accepts and skips `R_68K_GOT16O`/`GOT32O`/`PLT32` in `.rela.text` (resolved at link time),
   leaves the 12 zero bytes of `.got.plt` alone, and refuses: a value exactly equal to `text_size` (ambiguous), an
   undefined weak symbol (0 in the table), and any reference from the shared part *into data*.
 - **References inside the shared part are allowed** when they point into the shared part: they are the same for every
   process, so they are applied once when the segment loads (libgcc's `__clz_tab` and `$_exception_handler` in seven
-  programs). Only shared-to-data is refused; in all 111 programs and the servers that is `awk`'s soft-float `_fpCCR` and `crt0`'s
+  programs). **Stage 1 refuses every relocation placed in the shared part:** in `sh` and `login` the only ones are
+  `crt0`'s three, which disappear with `_zstart` (section 8), so the "applied once" class waits until a libgcc user
+  goes pure. Shared-to-data is refused in any case; in all 111 programs and the servers that is `awk`'s soft-float `_fpCCR` and `crt0`'s
   `_zargv` (below).
 - **The kernel checks every relocation**: its place lies in the part it claims, its target class matches, its value
   lies inside that part. Nothing in a header is trusted (audit B7).
@@ -93,29 +102,60 @@ Zenix from the DoM, the same `bench` and text-tool runs are timed there,** the f
 
 `user_ok()` (kernel/proc.c) accepts only the process's own block and its memalloc regions. With shared code, string
 literals live in the shared constants, so `open("/etc/x")`, `write(1, "text", n)` and `spawn("/bin/ls", ...)` would
-all fail with -EFAULT. And the kernel must never write into the shared part: `read(fd, literal, n)`, or a filesystem
-server answering a read into it, would corrupt the code every process runs. So:
-- `user_ok_rd` accepts the process's own memory **and its segment**; `user_ok_wr` accepts only its own memory.
-- Each of the 22 `UOK` sites in `syscall.c`, `copy_str`, and the message paths (a server copying into a client's
-  buffer) uses the right one: anything the kernel or a server *writes* is `wr`.
-- Tests: a literal path works for `open`/`spawn`/`write`; a `read` into a literal fails with -EFAULT and the code is
-  unchanged.
+all fail with -EFAULT. And nothing may write into the shared part: a `read(fd, literal, n)` would corrupt the code every
+process runs. So `user_ok_rd` accepts the process's own memory **and its segment**; `user_ok_wr` only its own memory.
 
-## 6. Loaded code: identity and the cache rules
+Where each is used (21 check sites in `syscall.c`, read from the code):
+- **Writes (`user_ok_wr`):** read, statfs, mountinfo, blk_ram, envget, lstat, readlink, readdir, stat, fstat, input,
+  klog, getcwd, pipe, procinfo, meminfo; the message of `SYS_call` (the server answers into it); `SYS_svc`'s single
+  check is split: SVC_SAVE reads, SVC_LOAD and SVC_OPENS write.
+- **Reads (`user_ok_rd`):** write, envset, mount, `copy_str`, and `do_spawn`'s three direct checks.
+- `SYS_blk_read` and `SYS_fd_rw` stay unchecked by design (privileged, as today).
 
-- **The key:** (mount slot + that mount's generation, inode, size, modification time). The generation is new on every
-  mount, so a slot reused after `umount`/`mount` (the audit A3 class) never matches.
-- **Invalidation:** the kernel drops a file's segment from the lookup table (its running users keep it) on every open
-  for writing, `O_TRUNC`, rename, unlink and umount: all go through the kernel. This covers an in-place `cp` that keeps
-  the inode, the size and the second.
+**Messages.** Requests the kernel sends to a server on a process's behalf carry only pointers the system call already
+checked (or kernel buffers), so the server's zero-copy write into them is covered by the system call's `wr` check.
+**Raw messages** a program sends itself (`SYS_call`) are not checked by the servers today: pingd, diskd's `DISK_INFO`/
+`DISK_LIST` and root's raw filesystem requests write through the pointers they are given. That stays as it is (the
+no-MMU trust level), with one rule: **a program that sends raw messages stays v1** until servers check pointers
+(bench, badptr, dd, fsck_ext2, fdisk, ping, mount, pingd, mkfs_ext2, priotest, svctest; `sh` and `login` send none).
+
+Tests: a literal path works for `open`/`spawn`/`write`; a `read` into a literal fails with -EFAULT and the code is
+unchanged.
+
+## 6. Loaded code: never reuse a changed file
+
+The rule: a segment is reused only if the file cannot have changed since it was loaded. The kernel sees every change
+that goes through it, and refuses the rest:
+- **`ETXTBSY`, as Unix:** opening a file for writing (or with `O_TRUNC`) fails with `-ETXTBSY` ("text file busy") while
+  a segment of it exists or a load of it is in progress. Updating a program is then done the safe Unix way: write a new
+  file and rename it over the old name (a new inode, so a new key); running shells keep the old code. This is also what
+  the self-updates will do.
+- **The other direction:** a spawn of a file that is open for writing loads a private copy (v1 style, never entered in
+  the table).
+- **Names that change:** unlink, rename, link and symlink are path-only in the kernel (vfs.c), so it cannot tell which
+  inode they touch; each drops every unused-for-lookup segment of that mount from the table (running users keep theirs).
+  This also covers an unlinked inode number being reused for a new file.
+- **The key:** (mount slot, the mount's generation, inode, size, modification time). The **mount generation is new**
+  (a field in `struct mount`): it changes on every mount *and* whenever the mount's filesystem server is restarted by
+  the service manager (D11), because a restarted ZenixFS server drops uncommitted changes and could bring back older
+  contents under the same key.
+- **Loads in progress:** the kernel's list of loads (`loading`, vfs.c) carries mount and inode; an invalidation marks
+  a matching load stale, and a stale load is not entered in the table (it runs as a private copy).
 - **Every spawn still opens the file through the filesystem** (`fs_exec_open`): execute permission and set-user-id are
-  checked each time. The segment table never bypasses them.
+  checked each time; the table never bypasses them.
+- **Known gaps, said openly:** raw `FS_WRITE` messages from root bypass the kernel (nothing in the tree sends them);
+  a raw `dd` to a mounted device or a second mount of it are refused by diskd already (checked).
+- **The checksum is not a backstop for a changed file:** it detects damage to the copy in memory, not a stale but intact
+  copy. The rules above are what prevent stale reuse.
 
 ## 7. The kernel: segments, ownership, races, crashes
 
 - **A segment** (`struct seg`): the key, the code's address and size, a reference count, a checksum, and a flag
   "complete". It belongs to no process: its memory carries a **segment owner tag**, so `mem_free_owner(pid)` of the first
   sharer does not free it (today it would).
+- **References:** a spawn that reuses a segment takes its reference **at lookup, before any read that can block**
+  (otherwise the last user could exit and free it meanwhile), and every failure exit of `proc_load` after that drops it.
+  A process drops its reference in `proc_exit` (after the crash checksum below), not at reap.
 - **Loading:** a spawn that finds no complete segment loads its own copy. It is entered in the table **only when fully
   loaded, relocated and checksummed**; if another spawn finished first meanwhile, the later one uses the existing segment
   and frees its copy. Nobody waits on a half-loaded segment (so no D10 priority inversion of a nice-19 loader holding up
@@ -123,8 +163,9 @@ server answering a read into it, would corrupt the code every process runs. So:
 - **The process gets only its data:** one block for table + data + BSS + stack + arguments, as today minus the code;
   the heap (libz's malloc chunks, the shell's arena) stays in separate memalloc regions. The loader copies the data
   image, applies both relocation lists and sets `a5`.
-- **`a5`:** set in the first register frame `proc_load` builds (word 9 of the 11 that `user_first_entry` pops; `a5` =
-  0 would read table entries from the vector table at address 0). Kept in `struct proc` for anything that may one day
+- **`a5`:** set in the first register frame `proc_load` builds: the 11 words `switch_to` pops with `movem.l
+  (sp)+,d2-d7/a2-a6` (start.S), `a5` the 10th from the lowest address (index 9); `user_first_entry` then builds only SR
+  and PC. `a5` = 0 would read table entries from the vector table at address 0. Kept in `struct proc` for anything that may one day
   enter user code (signal handlers, callbacks). Checked: `TRAP #0` saves and restores every register; interrupt
   handlers save d0-d1/a0-a1 and the kernel's C code keeps `a5` by the calling rules (the kernel is not built with
   `-msep-data`); `switch_to` saves a2-a6; a user fault kills the process. There is no `fork`, exec-in-place or
@@ -133,7 +174,10 @@ server answering a read into it, would corrupt the code every process runs. So:
   `sh`, roughly 10-25 ms per reuse on a 14 MHz chip-only A1200 (*from the manual*, chip-RAM waits included), much less
   than loading. Checked when a spawn reuses a segment (a mismatch: logged, the segment leaves the table, the spawn loads
   a fresh copy) and when a process running shared code crashes (the crash line then says whether the code was damaged,
-  and gives "code+offset").
+  and gives "code+offset"). After a crash that damaged the code, the other processes keep running the damaged copy (nothing
+can stop that without an MMU): the log names their pids.
+- **`ps` and `free`:** `free` reports shared code through the two spare words `SYS_meminfo` already returns; `ps`
+  showing shared and own sizes needs a new field in `struct uproc` (an interface change, documented with it).
 - **Last user gone:** the segment is freed at once in stage 1. (Later, AmigaOS's rule fits: a library whose openers
   have all closed it is "a candidate for purging", RKM Libraries & Devices p. 229. In Zenix that is a few dozen bytes:
   when `mem_alloc` fails, drop unused segments and try once more.)
@@ -163,13 +207,16 @@ such a library exists, with its own short design review.
 
 The kernel is 177064 of the 179200 bytes the RAM floppy allows (2136 left; `make` prints it). D13 adds an estimated
 1.5-2 KB (v2 checks, the segment table, two-base relocation, the checksum, `user_ok_rd`/`wr`, the invalidation, the
-messages; estimated from the sizes of `proc_load`, `user_ok` and `zexe_bad`). So, **before D13's kernel code**:
-1. **`-Os` for the cold kernel files** (syscall, vfs, floppy, emmc, ide, a3000, rtc, main, serial, kbd, tty): about
-   15.8 KB smaller (*measured*, text + rodata). The hot ones stay `-O2`: term, gfx, mem, proc, ipc. Every test must pass
-   unchanged; `bench` numbers are compared on the A1200 (Emu68, labelled) for the syscall path.
-2. Later, if needed: a byte-delta relocation table for the kernel (11,628 bytes today, about 8 KB smaller, about 20
-   bytes more in `start.S`), usable for v2 programs and the built-in images too.
-3. After stage 1, `RAMDISK_K` can shrink as the v2 files do.
+messages). So, **before D13's kernel code**, `-Os` for the files that are truly cold: **floppy, emmc, a3000, rtc and
+kbd**, about 6.3 KB smaller (*measured*), three times what D13 needs, and none of them on a hot path (every wait in them
+is timed by the E-clock or a timer, checked). The floppy's track decoding (`mfm_decode_track`, inlined from `mfm.h`)
+keeps `-O2` through a function attribute. **Not** `-Os`: `main.c` (the kernel's `memcpy`/`memset`, the tick, the serial
+interrupt, `kwork`), `syscall.c` (every system call), `tty.c` (every console write), `vfs.c` (pipes, read/write), `ide.c`
+(its unrolled read loop is the DoM's disk path), `serial.c` (the serial terminal work from 2026-10-31), and the hot term,
+gfx, mem, proc and ipc. So no speed check is needed for this step.
+
+Later, if needed: a byte-delta relocation table for the kernel (11,628 bytes today, about 8 KB smaller, about 20 bytes
+more in `start.S`), usable for v2 programs and the built-in images too; and a smaller `RAMDISK_K` as v2 files shrink.
 Rejected: moving zfsd off the RAM floppy (the mount tests need it, and the RAM root has too few free blocks for it);
 compressing the kernel (a decompressor in the boot path is the most work).
 
@@ -183,17 +230,24 @@ compressing the kernel (a decompressor in the boot path is the most work).
   first shell exits and the others keep running; two shells started at once share one segment; a crash in one shell
   leaves the others; the code is freed when the last user ends; a literal passed to a system call works and a `read`
   into a literal is refused; a file overwritten in place in the same second, and a remount in the same slot, are not
-  reused; a damaged segment is detected and not reused; every existing test passes.
+  reused; a write-open of a running program gives `ETXTBSY` and a rename-over update is picked up by the next spawn
+  while running shells keep the old code; a filesystem server restart bumps the mount generation; a damaged segment is
+  detected and not reused; every existing test passes.
 - On the A1200 (when the owner is home): `free` with one, four and ten logins, before and after.
 
 ## 12. Order of the work (each step tested and merged before the next)
 
-0. Room in the kernel: `-Os` for the cold files (section 10), all tests, the size printed.
-1. `mkzexe.py`: v2 files (`ZEX2`, the layout, two relocation lists, the checks), the `.w` assembler wrapper, the host
-   test; programs still built as v1.
-2. The kernel: `user_ok_rd`/`wr`, segments, the v2 loader, `a5`, the checksum, the invalidation; v1 programs unchanged.
-3. `crt0`/`_zstart`; `sh` and `login` built pure; the emulator tests.
-4. The measurements of section 2 and 3 (memory in FS-UAE and on the A1200; speed by static counts, and timed on the
+0. Room in the kernel: `-Os` for floppy, emmc, a3000, rtc, kbd (section 10); all tests; the size printed.
+1. `mkzexe.py`: v2 files (`ZEX2`, the layout, the relocation lists, the checks), the `.w` assembler wrapper, the host
+   test; programs still built as v1, and **every v1 `.zx` and `kernel.bin` byte-identical before and after**.
+2. The kernel: `user_ok_rd`/`wr` at the 21 sites, segments and references, the v2 loader, `a5`, the checksum, mount
+   generations, `ETXTBSY` and the invalidation; v1 programs unchanged. Tested with a pure build of `hello` placed in
+   the test image only (not a new command).
+3. a. `crt0` with `_zstart` for all 111 programs; `make check`.
+   b. `sh` and `login` pure: separate pure builds of crt0, libz, `pw.uo` and `sha.uo` (the header lengths differ);
+      a `-Wwrite-strings` review of both (a pure program writing into its own literal would corrupt every shell; the 8
+      warnings found so far only read); the emulator tests of section 11.
+4. The measurements of sections 2 and 3 (memory in FS-UAE and on the A1200; speed by static counts, and timed on the
    stock A1200 from the DoM when the owner is home); then decide which programs follow.
 
 ## 13. Open questions (answered by the first review)

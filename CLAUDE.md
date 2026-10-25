@@ -78,7 +78,8 @@ unseen). So:
 | **next free: 82** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8.
-Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main). Port names registered as services (D11):
+Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main); `ETXTBSY` 26 (D13, "text file busy": a running
+shared program opened for writing; claimed 2026-10-25, Linux's number). Port names registered as services (D11):
 `disk`, `fs`, `fs.*`; `ping` (the test service).
 
 ## Rules for code (each one was a real bug found on 2026-10-22)

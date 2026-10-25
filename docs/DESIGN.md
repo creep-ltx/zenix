@@ -154,7 +154,7 @@ tables, opened by name, one copy in memory; and "pure" programs whose code is sh
 data. D3 left room for this in the program format. D13 builds it: one copy of the code, a data area per process (a base
 register, as gcc's `-msep-data`/`-mid-shared-library` for no-MMU systems), libz as the first shared library. It comes
 before the self-updates (so they ship the final format), newlib and the network (which make programs much larger).
-The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 2, 2026-10-25, after the first review: stage 1 makes `sh` and `login` pure; awaiting a second look).
+The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 3, 2026-10-25, after a first review and a second look: stage 1 makes `sh` and `login` pure; ready to build).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
