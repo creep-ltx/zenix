@@ -148,9 +148,9 @@ static int spawn(struct svc *s)
         argv[0] = text + 1;
         for (u32 k = 0; k < sizeof images / sizeof images[0]; k++)
             if (eq(images[k].name, argv[0]))
-                pid = proc_spawn_image(images[k].s, (u32)(images[k].e - images[k].s), argv, s->nwords, images[k].priv);
+                pid = proc_spawn_image(images[k].s, (u32)(images[k].e - images[k].s), argv, s->nwords, images[k].priv, 0);
     } else {
-        pid = proc_spawn(text, argv, s->nwords, 0, 0, 1);
+        pid = proc_spawn(text, argv, s->nwords, 0, 0, 0);   /* tty 0: output to the kernel log */
     }
     if (pid > 0)
         proc_renice(proc_by_pid(pid), s->nice);
@@ -311,6 +311,8 @@ int svc_handover(int i)
     p->op = current;
     s->state = SV_RUNNING;
     s->served = 1;
+    if (eq(p->name, "fs"))
+        klog_mirror_off();                      /* the root is up: from here the screen belongs to the programs */
     wake(s->watcher);
     u8 b = ipc_best_client(current->pid);      /* the queued clients are its own now */
     if (b < current->prio)

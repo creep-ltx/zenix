@@ -11,7 +11,7 @@ send cat /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/big; sync; echo f3=$(df | 
 sleep 12
 send cat /bin/sh /bin/edit /bin/gzip /bin/less /bin/sh /bin/edit /bin/gzip /bin/less /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/big\r
 sleep 10
-send cp /tmp/big /tmp/big2 & cp /tmp/big /tmp/big3 & cp /tmp/big /tmp/big4 & nice -n -20 svctest kill $(pgrep fsd) 2; wait; sleep 1; ls / > /dev/null; dmesg | grep -a 'svc:\|was being changed'\r
+send cp /tmp/big /tmp/big2 & cp /tmp/big /tmp/big3 & cp /tmp/big /tmp/big4 & nice -n -20 svctest kill $(pgrep fsd) 2; wait; sleep 1; ls / > /dev/null; dmesg | grep 'svc:\|was being changed'\r
 sleep 15
 send rm -f /tmp/big /tmp/big2 /tmp/big3 /tmp/big4; sync; echo svc-o-done\r
 sleep 4

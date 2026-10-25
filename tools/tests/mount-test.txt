@@ -101,7 +101,13 @@ send cat /mnt/f.txt\r
 sleep 3
 send kill $(pgrep -x fsd | grep -vx 3); sleep 1; cat /mnt/f.txt\r
 sleep 8
-send dmesg | grep -a 'svc: fs\.'\r
+send echo inlog-diskd=$(dmesg | grep -c 'diskd: ide0p1: the filesystem server')\r
+sleep 2
+send echo inlog-zfsd=$(dmesg | grep -c 'ide0p2 is not a ZenixFS')\r
+sleep 2
+send echo inlog-fsd=$(dmesg | grep -c 'fs.df1: a floppy without')\r
+sleep 3
+send dmesg | grep 'svc: fs\.'\r
 sleep 3
 send umount /mnt; mount; echo mount-svc-done\r
 sleep 3

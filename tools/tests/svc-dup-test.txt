@@ -1,5 +1,5 @@
 wait zenix:/# 90
-send echo original > /tmp/marker; sync; kill 3; sleep 1; cat /tmp/marker; touch /tmp/after-fsd && echo write-ok; dmesg | grep -a 'svc:'\r
+send echo original > /tmp/marker; sync; kill 3; sleep 1; cat /tmp/marker; touch /tmp/after-fsd && echo write-ok; dmesg | grep 'svc:'\r
 sleep 8
 send echo svc-u-done\r
 sleep 2

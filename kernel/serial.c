@@ -442,6 +442,7 @@ void klog_to_screen(void)
 }
 
 void klog_mirror_off(void) { klog_mirror = 0; }
+void klog_write(const char *s, u32 n) { while (n--) kputc(*s++); }
 void klog_mirror_on(void) { klog_mirror = 1; }
 
 /* Says what klog_init found, and shows the previous boot's last lines (on the screen too while the boot log is

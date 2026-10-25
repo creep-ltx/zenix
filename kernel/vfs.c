@@ -425,7 +425,7 @@ long vfs_stat(const char *path, struct ustat *st)
 
 long vfs_fstat(struct file *f, struct ustat *st)
 {
-    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL) {
+    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL || f->type == FT_KLOG) {
         memset(st, 0, sizeof *st);
         st->mode = 020666;
         st->links = 1;
@@ -568,7 +568,7 @@ long vfs_read(struct file *f, void *buf, u32 n)
                 return (long)got;
             block_io();
         }
-    case FT_NULL:
+    case FT_NULL: case FT_KLOG:
         return 0;
     case FT_ZERO:
         memset(buf, 0, n);
@@ -605,6 +605,9 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         }
         return (long)n;
     }
+    case FT_KLOG:
+        klog_write(buf, n);                 /* a service's output: in dmesg, not on a console */
+        return (long)n;
     case FT_NULL: case FT_ZERO:
         return (long)n;                     /* the bit bucket */
     case FT_INODE: {

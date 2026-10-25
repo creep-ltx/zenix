@@ -703,8 +703,8 @@ step 3 (2026-10-24: `SVC_OPENS`, the volume id rule in `user/volid.h`, uuids fro
 ZenixFS's kept orphans and inode floor; `tools/svc-test.sh` o, zo, u), step 4 (2026-10-24: the give-up, a start-up
 calling its own port; `tools/svc-test.sh` l), step 5 (2026-10-24: the sync paths; `tools/svc-test.sh` s), step 6
 (2026-10-25: mount and umount as services; `/bin/mount.ext2` and `/bin/mount.zenixfs` removed; `tools/mounttest.sh`
-extended), step 7 (2026-10-25: `/etc/svctab`; `tools/svc-test.sh` t). Steps 8-9 (the servers' output to the kernel
-log, the remaining documents) are not built yet.
+extended), step 7 (2026-10-25: `/etc/svctab`; `tools/svc-test.sh` t), step 8 (2026-10-25: the servers' output in the
+kernel log; `tools/mounttest.sh`). Step 9 (the remaining documents) is not done yet.
 
 **Where the code differs from the note** (each one small, and the reason):
 - *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM
@@ -781,6 +781,14 @@ log, the remaining documents) are not built yet.
   tests' `pingd &` say "port busy"). The ramlib case is tested with the root server stopped (killed, idle) before the
   call that reads `pingd` (`svctest kcall`): the loader then starts the root server itself, two loads nested; a kill
   that lands *during* the load is not tested (the race cannot be placed from a script).
+
+- *Step 8:* the kernel log file is `FT_KLOG` (`klog_write`, the same `kputc` as `kprintf`); a started server gets it as
+  fds 0-2 (`proc_load` with no parent and console 0). The boot mirror (8.5, "during the boot they still appear on
+  the screen") needed a change: it used to end in `kmain` before boot ran, so it now ends when the root server takes
+  its port (`svc_handover` of `fs`); the kernel's own lines up to then (the `svc:` starts) are on the screen too.
+  Measured: kernel +140 bytes. Tested with three server lines that `dmesg` must hold after the boot (diskd's "mount
+  released" at a restart, zfsd's "not a ZenixFS volume", fsd's floppy refusal); a normal boot prints none from diskd
+  or fsd, so "their start-up lines" are those of a restart and a failed start.
 
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
 same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10

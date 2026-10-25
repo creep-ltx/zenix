@@ -169,9 +169,14 @@ empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and th
 ### Kernel log (`kernel/serial.c`, `dmesg`)
 
 `kprintf` writes to the serial port and into an 8 KB ring. When the display comes up (`gfx_init`), `kmain` writes the
-ring to console 1 (the console on the screen at boot) and mirrors new `kprintf` output there until the boot is finished (`klog_mirror_off`
-just before the scheduler starts), so the boot messages - including every driver's init log - are on the screen of
-a machine with no serial cable (scroll back with Amiga+Up). `SYS_klog` (73: offset, buffer, length) reads the ring;
+ring to console 1 (the console on the screen at boot) and mirrors new `kprintf` output there until the root
+filesystem's server has opened its port (`klog_mirror_off` in `svc_handover`), so the boot messages - including every
+driver's init log and the start-up lines of diskd and the root server - are on the screen of a machine with no
+serial cable (scroll back with Amiga+Up). **The servers' output** (D11 step 8): a process the service manager starts
+gets, as its standard input, output and error, a file of type `FT_KLOG`: what it writes goes through `kputc` like
+`kprintf` (the serial port, the ring, the screen while mirrored); reading it gives end of file. So after the boot no
+server message appears on a console; `mount` says "see dmesg" when a server did not start. `boot` itself (and so
+`init`) keeps console 1. `SYS_klog` (73: offset, buffer, length) reads the ring;
 `dmesg` prints it. A panic or an exception in the kernel switches the mirror on again, so its text reaches the
 screen, and records the reason in the log before the machine stops.
 
@@ -593,8 +598,8 @@ end, it says so and starts it again. (It exists because the idle process cannot 
 consoles are init's work (section 11, man/init.txt).
 
 ### The service manager (`kernel/svc.c`, DESIGN D11)
-The full design is docs/d11-service-manager.md; what is built (steps 0-7 of its build order: the core, the mounts
-and `/etc/svctab`):
+The full design is docs/d11-service-manager.md; what is built (steps 0-8 of its build order: the core, the mounts,
+`/etc/svctab` and the servers' output in the kernel log):
 - **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
   bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
   (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are
@@ -605,7 +610,7 @@ and `/etc/svctab`):
 - **On demand.** A call to a held port with no server makes the *caller* the loader, in its own context (no loader
   process to deadlock with): an image is copied from the kernel (no disk), a file is read as root (the calls of a
   load carry uid 0). The new process has no parent (uid 0, `/`, empty environment, ppid 0: only root may kill it), the
-  entry's nice, and output on console 1. Callers that come meanwhile queue and wait. The loader's own message stays out
+  entry's nice, and its output in the kernel log (section 3, "Kernel log"). Callers that come meanwhile queue and wait. The loader's own message stays out
   of the queue while it loads and goes first once the server took its port.
 - **The deadline.** A started server has 30 s to open its port, kept by a *watcher* (the loader, else the first
   queued client) with a timed sleep in its own context, never in the tick; one that misses it is killed and counted,

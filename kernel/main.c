@@ -423,11 +423,12 @@ void kmain(struct bootinfo *bi)
      * kernel, svc.c), and its first calls start them; then it starts /bin/init */
     extern const char boot_blob[], boot_blob_end[];
     char *bargv[] = { "boot", 0 };
-    if (proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), bargv, 1, 1) < 0)
+    if (proc_spawn_image(boot_blob, (u32)(boot_blob_end - boot_blob), bargv, 1, 1, 1) < 0)
         panic("cannot start boot");
 
     input_init();
-    klog_mirror_off();                          /* from here the screen belongs to the programs */
+    /* the log stays mirrored on the screen until the root filesystem server opened its port (svc.c): the start-up
+     * lines of diskd and the root server, and why they failed, are on the screen of a machine with no cable */
     diag_stage(DIAG_BOOTED, 0);
     timer_init();
     ints_on();

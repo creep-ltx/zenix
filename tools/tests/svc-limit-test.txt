@@ -13,5 +13,5 @@ send svctest reg k 0 /bin/pingd -port k; svctest call k 7; svctest call k 7; svc
 wait svctest call k 1: 0 60
 send svctest reg c1 0 /bin/pingd -port c1 -call c2; svctest reg c2 0 /bin/pingd -port c2 -call c1; svctest call c1 1\r
 wait svctest call c1 1: 50
-send dmesg | grep -a 'svc: [a-z0-9]*:'; echo svc-l-done\r
+send dmesg | grep 'svc: [a-z0-9]*:'; echo svc-l-done\r
 sleep 4

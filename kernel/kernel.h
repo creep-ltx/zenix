@@ -45,6 +45,7 @@ u32 klog_read(u32 off, char *buf, u32 n);     /* the kernel log: n characters fr
 void klog_to_screen(void);                    /* the display is up: show the log so far and mirror new messages */
 void klog_mirror_off(void);                   /* boot is finished: kprintf goes to the serial port and the log only */
 void klog_mirror_on(void);                    /* a panic: its text goes to the screen too */
+void klog_write(const char *s, u32 n);        /* a service's output (FT_KLOG): into the log as kprintf's */
 /* previous-boot log (audit A12): the log lives in the top KLOG_AREA_SIZE bytes of chip RAM (two slots of a 256-byte
  * header and an 8 KB ring; the bootblock reserves the same size), so the next boot after a warm reset can show how
  * this one ended */
@@ -215,7 +216,7 @@ struct zexe {
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16
 #define NFILE 64
-enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL };
+enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG };   /* FT_KLOG: a service's output, into the kernel log (D11) */
 struct pipe {
     u8 buf[2048];
     u16 rd, wr, count;
@@ -308,7 +309,7 @@ extern struct proc *current;
 void proc_init(void);
 int proc_spawn(const char *path, char *const *argv, int argc,
                struct proc *parent, const int *stdio, int tty);
-int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv);   /* no parent, console 1 */
+int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv, int tty);   /* no parent; console tty, 0: the kernel log */
 void schedule(void);
 void proc_exit(int code) __attribute__((noreturn));
 #define WAIT_NOHANG   1       /* proc_wait flag: -2 if children exist but none has exited */

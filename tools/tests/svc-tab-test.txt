@@ -13,5 +13,5 @@ send svctest call q 1; svctest call q 7 & sleep 0.3; svctest call q 1; wait\r
 sleep 5
 send svctest kcall 3 ping 1\r
 sleep 6
-send dmesg | grep -a 'svc: [a-z0-9]*:'; rm /etc/svctab; echo svc-t-done\r
+send dmesg | grep 'svc: [a-z0-9]*:'; rm /etc/svctab; echo svc-t-done\r
 sleep 4

@@ -11,5 +11,5 @@ send svctest lost /tmp/lw 8 $(pgrep zfsd) &\r
 sleep 3
 send echo BBBB > /tmp/lw2; cat /tmp/lw2\r
 wait svctest lost /tmp/lw: 40
-send dmesg | grep -a 'svc:'; sync; echo svc-zo-done\r
+send dmesg | grep 'svc:'; sync; echo svc-zo-done\r
 sleep 4

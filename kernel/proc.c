@@ -480,7 +480,8 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
          * parent's, so the second stage of `ls | less` still reads the keys of the console it runs on */
         p->ctty = (p->fd[0] && p->fd[0]->type == FT_TTY) ? (u8)p->fd[0]->off : parent->ctty;
     } else {
-        struct file *t = file_new(FT_TTY);
+        struct file *t = file_new(tty ? FT_TTY : FT_KLOG);  /* no parent: boot on console 1, a service's server
+                                                             * writes into the kernel log (D11 step 8) */
         if (!t) {                       /* every open-file slot taken: the slot p is still free (state 0) */
             mem_free_owner((u32)pid);
             return -ENFILE;
@@ -523,10 +524,11 @@ int proc_spawn(const char *path, char *const *argv, int argc,
     return pid;
 }
 
-/* a program built into the kernel image (no filesystem needed): no parent (uid 0, /, nice 0), output to console 1 */
-int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv)
+/* a program built into the kernel image (no filesystem needed): no parent (uid 0, /, nice 0), output to console tty
+ * (0: the kernel log, a service's server) */
+int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv, int tty)
 {
-    return proc_load(img, len, fill_mem, img, argv[0], argv, argc, 0, 0, 1, priv, -1);
+    return proc_load(img, len, fill_mem, img, argv[0], argv, argc, 0, 0, tty, priv, -1);
 }
 
 /* may killed process p end now? Never inside a message call (the server may still use the client's buffers, and the

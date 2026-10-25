@@ -12,9 +12,14 @@ DESCRIPTION
     the serial port (CPU and memory map, the Pi hardware table, the Zorro
     boards, the disk found, driver messages, programs killed after a crash,
     and the service manager's "svc:" lines: every start of a server, for
-    whom, and every end with its status).
+    whom, and every end with its status). The servers' own messages are
+    here too, and only here once the system is up: diskd's, the root
+    filesystem server's ("fsd: ..."), a mount's ("fs.ide0p2: ...") and
+    those of the services in /etc/svctab - their output goes into this
+    log, not onto a console, so nothing writes over what you are doing.
     The kernel keeps the last 8 KB. The boot messages are also shown on the
-    screen while the system starts; scroll back with Amiga+Up if they have
+    screen while the system starts (until the root filesystem's server is
+    up); scroll back with Amiga+Up if they have
     gone by. dmesg is how to read them again on a machine with
     no serial cable.
 

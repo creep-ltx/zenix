@@ -3,7 +3,8 @@
 # Mount tests in the emulator: two ext2 partitions mounted on /mnt and /mnt/sub, data across unmount/mount.
 # Verified afterwards with the host's e2fsck. Mounts are services (DESIGN D11 6.4): a mount's server runs at nice -10
 # with no parent, comes back after a kill, ends for good at umount; a failed mount leaves no service; ordinary ports
-# used up and all twelve service slots in use; a floppy without a volume id is not served again after a restart.
+# used up and all twelve service slots in use; a floppy without a volume id is not served again after a restart; the
+# servers' own messages go to the kernel log (dmesg).
 cd "$(dirname "$0")/.." || exit 1
 make -s all build/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-mounttest}; mkdir -p $OUT
@@ -44,6 +45,9 @@ has "a thirteenth service is refused" 'svctest reg d10: -16$'
 has "... and mount says so" '^mount: too many filesystems mounted$'
 has "a floppy reads through its mount" '^(.*# )?floppy-one$'
 has "a floppy without a volume id is not served again after a restart" '^fs\.df1: a floppy without a volume id is not served again after a restart: mount it again$'
+has "the servers' messages are in the kernel log: diskd's (a dead server's claim released at the restart)" '^(.*# )?inlog-diskd=[1-9]$'
+has "... zfsd's (not a ZenixFS volume)" '^(.*# )?inlog-zfsd=[1-9]$'
+has "... fsd's (the floppy refused at its restart)" '^(.*# )?inlog-fsd=[1-9]$'
 has "the script ran to the end" '^(.*# )?mount-svc-done$'
 # the unmounted partitions are clean ext2 as seen by the host (partitions start at cylinder 1 and 14 of 1008 sectors)
 for spec in "1 13104" "14 18144"; do set -- $spec
