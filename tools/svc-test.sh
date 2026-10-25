@@ -254,6 +254,8 @@ cp build/zenix.hdf "$OUT/root.hdf"
 conf h "$OUT/root.hdf"
 run h "$OUT/h.fs-uae" 100 tools/tests/svc-hang-test.txt
 rx   h "a fake filesystem that hangs on sync is mounted" ".*svctest mount /tmp/hang: 0"
+rx   h "a mount whose server gives no root fails" ".*svctest mount /tmp/bad: -[0-9]+"
+rx   h "... and the server was told to quit: its port is free again (audit A9)" ".*svctest port fs\.bad: [0-9]+"
 line h "the reboot gives it 5 s, then resets, naming it" "reboot: fs.hang did not sync in 5 s; resetting"
 rx   h "... the machine booted again" "klog: boot 2, .*"
 if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck-h.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean (it was synced first)"; else echo "FAIL the host's e2fsck finds the root clean (it was synced first)"; pass=0; fi

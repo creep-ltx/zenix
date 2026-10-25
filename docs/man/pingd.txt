@@ -4,7 +4,7 @@ NAME
     pingd - test message server
 
 SYNOPSIS
-    pingd [-port NAME] [-call NAME] [-fs] [count]
+    pingd [-port NAME] [-call NAME] [-fs | -fsbad] [count]
 
 DESCRIPTION
     Creates a message port named "ping" and answers the requests of ping(1):
@@ -24,6 +24,8 @@ DESCRIPTION
                 for its root directory, never answers a sync, ends at the
                 quit of umount and refuses the rest (svctest mount puts
                 it on a directory; the reboot test uses it).
+    -fsbad      the same, but the request for its root fails too: a
+                mount that fails must end its server.
     A development tool; see docs/architecture.md, "Ports and messages".
 
 SEE ALSO

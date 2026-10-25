@@ -6,7 +6,8 @@
  * instruction: the service manager's tests, DESIGN D11); type 9 = quit. Exits after serving COUNT requests if given.
  * -call NAME: call port NAME once before creating its own (a start-up that needs another service: D11's tests).
  * -fs: a filesystem server that hangs on sync: FS_ROOT answers 2, FS_SYNC never returns, FS_QUIT ends it, anything
- * else fails (a reboot must not wait for it for ever: audit A7, tools/svc-test.sh). */
+ * else fails (a reboot must not wait for it for ever: audit A7, tools/svc-test.sh). -fsbad: the same, but FS_ROOT
+ * fails too (a mount that fails must end its server: audit A9). */
 #define FS_SYNC 13
 #define FS_ROOT 22
 #define FS_QUIT 23
@@ -17,6 +18,7 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-port") && i + 1 < argc) pname = argv[++i];
         else if (!strcmp(argv[i], "-fs")) fs = 1;
+        else if (!strcmp(argv[i], "-fsbad")) fs = 2;
         else if (!strcmp(argv[i], "-call") && i + 1 < argc) {
             struct umsg c;
             memset(&c, 0, sizeof c);
@@ -34,7 +36,7 @@ int main(int argc, char **argv)
         if (fs) {
             if (m->type == FS_SYNC) for (;;) sys_sleep(100);
             if (m->type == FS_QUIT) { sys_reply(m, 0); return 0; }
-            m = sys_replyrecv(m, m->type == FS_ROOT ? 2 : -38, port);
+            m = sys_replyrecv(m, m->type == FS_ROOT && fs == 1 ? 2 : -38, port);
             continue;
         }
         if (m->type == 1) m->a[2] = m->a[0] + m->a[1];

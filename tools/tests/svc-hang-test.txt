@@ -1,6 +1,8 @@
 wait zenix:/# 90
 send mkdir -p /tmp/hang; pingd -port fs.hang -fs & sleep 1; svctest mount fs.hang /tmp/hang; mount\r
 sleep 4
+send mkdir -p /tmp/bad; pingd -port fs.bad -fsbad & sleep 1; svctest mount fs.bad /tmp/bad; sleep 1; svctest port fs.bad\r
+sleep 4
 send reboot\r
 wait klog: boot 2 60
 sleep 3

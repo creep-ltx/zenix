@@ -695,6 +695,7 @@ long vfs_mount(const struct umountreq *r)
     struct fsinfo fi;
     long root = fs_call_on(free, FS_ROOT, (u32)&fi, 0, 0, 0);
     if (root <= 0) {
+        fs_call_on(free, FS_QUIT, 0, 0, 0, 0);     /* a server that runs but gave no root lets its device go (A9) */
         mt->used = 0;
         return root < 0 ? root : -EIO;
     }
