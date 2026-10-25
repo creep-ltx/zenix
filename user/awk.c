@@ -1162,6 +1162,11 @@ static int next_main_record(void)               /* 1 = a record is in main_line,
 static void skip_main_file(void) { if (main_in) { if (main_in->fd > 0) sys_close(main_in->fd); free(main_in->name); free(main_in); main_in = 0; } }
 
 /* ================================================================ printf */
+#define FMT_MAX 4096                            /* the widest field width or precision printf takes */
+static long star_arg(double d)                  /* a * width or precision: out of range (NaN too) is too large */
+{
+    return d >= -1e9 && d <= 1e9 ? (long)d : 1000000000L;
+}
 static const char *do_sprintf(const char *fmt, struct node **args, int nargs)
 {
     char *out = talloc(1); u32 olen = 0, ocap = 0; (void)out;
@@ -1173,35 +1178,43 @@ static const char *do_sprintf(const char *fmt, struct node **args, int nargs)
         if (*p != '%') { APPEND(p, 1); continue; }
         if (p[1] == '%') { APPEND("%", 1); p++; continue; }
         char spec[40]; int sl = 0; spec[sl++] = '%'; p++;
-        while (*p && strchr("-+ #0", *p) && sl < 8) spec[sl++] = *p++;
-        if (*p == '*') { double w = ai < nargs ? to_num(eval(args[ai++])) : 0; sl += snprintf(spec + sl, 12, "%d", (int)w); p++; }
-        else while (isdigit((unsigned char)*p) && sl < 16) spec[sl++] = *p++;
+        while (*p && strchr("-+ #0", *p)) { if (sl < 8) spec[sl++] = *p; p++; }
+        long wd = 0, pr = -1; int have_w = 0;
+        if (*p == '*') { wd = star_arg(ai < nargs ? to_num(eval(args[ai++])) : 0); have_w = 1; p++; }
+        else if (isdigit((unsigned char)*p)) { have_w = 1; while (isdigit((unsigned char)*p)) { if (wd <= FMT_MAX) wd = wd * 10 + (*p - '0'); p++; } }
         if (*p == '.') {
-            spec[sl++] = *p++;
-            if (*p == '*') { double w = ai < nargs ? to_num(eval(args[ai++])) : 0; sl += snprintf(spec + sl, 12, "%d", (int)w); p++; }
-            else while (isdigit((unsigned char)*p) && sl < 24) spec[sl++] = *p++;
+            p++; pr = 0;
+            if (*p == '*') { pr = star_arg(ai < nargs ? to_num(eval(args[ai++])) : 0); p++; }
+            else while (isdigit((unsigned char)*p)) { if (pr <= FMT_MAX) pr = pr * 10 + (*p - '0'); p++; }
         }
+        if (wd > FMT_MAX || wd < -FMT_MAX || pr > FMT_MAX) fatal("field width too large (at most %d)", FMT_MAX);
+        if (have_w) sl += snprintf(spec + sl, 12, "%ld", wd);
+        if (pr >= 0) sl += snprintf(spec + sl, 12, ".%ld", pr);       /* a negative precision from * means none, as in C */
         while (*p == 'l' || *p == 'h' || *p == 'q' || *p == 'L') p++;
         char conv = *p; if (!conv) { APPEND(spec, (u32)sl); break; }
         struct val v = ai < nargs ? eval(args[ai++]) : vstr("");
-        char tmp[128];
+        /* every conversion is measured first (libz's snprintf returns the length it needs) and written to the heap:
+         * no fixed buffer to overrun (audit A4) */
+        #define FMT_PUT(arg) do { spec[sl++] = conv; spec[sl] = 0; int n_ = snprintf(0, 0, spec, arg); char *t_ = xmalloc((u32)n_ + 1); \
+            snprintf(t_, (u32)n_ + 1, spec, arg); APPEND(t_, (u32)n_); free(t_); } while (0)
         switch (conv) {
         case 'd': case 'i': { double d = to_num(v); long iv = d > 2147483647.0 ? 2147483647L : d < -2147483648.0 ? -2147483647L - 1 : (long)d;
-            spec[sl++] = 'd'; spec[sl] = 0; int n = snprintf(tmp, sizeof tmp, spec, (int)iv); APPEND(tmp, (u32)n); break; }
+            conv = 'd'; FMT_PUT((int)iv); break; }
         case 'o': case 'x': case 'X': case 'u': { double d = to_num(v); unsigned long uv = d < 0 ? (unsigned long)(long)d : d > 4294967295.0 ? 4294967295UL : (unsigned long)d;
-            spec[sl++] = conv; spec[sl] = 0; int n = snprintf(tmp, sizeof tmp, spec, (unsigned)uv); APPEND(tmp, (u32)n); break; }
+            FMT_PUT((unsigned)uv); break; }
         case 'c': { char ch;
             if ((v.fl & F_STR) && !(v.fl & F_STRNUM)) { const char *s = v.s; ch = s ? s[0] : 0; } else ch = (char)(int)to_num(v);
-            spec[sl++] = 'c'; spec[sl] = 0; int n = snprintf(tmp, sizeof tmp, spec, ch); APPEND(tmp, (u32)n); break; }
-        case 's': { const char *s = to_str(v); spec[sl++] = 's'; spec[sl] = 0; int n = snprintf(0, 0, spec, s); char *t = xmalloc((u32)n + 1); snprintf(t, (u32)n + 1, spec, s); APPEND(t, (u32)n); free(t); break; }
+            FMT_PUT(ch); break; }
+        case 's': { const char *s = to_str(v); FMT_PUT(s); break; }
         case 'e': case 'E': case 'f': case 'F': case 'g': case 'G': {
             int flags_left = 0, flags_zero = 0, flags_plus = 0, flags_space = 0, alt = 0, width = 0, prec = -1;
             const char *q = spec + 1;
             for (; *q && strchr("-+ #0", *q); q++) { if (*q == '-') flags_left = 1; else if (*q == '0') flags_zero = 1; else if (*q == '+') flags_plus = 1; else if (*q == ' ') flags_space = 1; else alt = 1; }
             while (isdigit((unsigned char)*q)) width = width * 10 + (*q++ - '0');
             if (*q == '.') { q++; prec = 0; while (isdigit((unsigned char)*q)) prec = prec * 10 + (*q++ - '0'); }
-            char num[400]; double d = to_num(v);
-            int n = fmt_float(num, sizeof num, d, conv == 'F' ? 'f' : conv, prec, alt);
+            int numsz = (prec < 0 ? 6 : prec) + 340;      /* sign, 309 digits, point, the precision, an exponent */
+            char *num = xmalloc((u32)numsz); double d = to_num(v);
+            int n = fmt_float(num, numsz, d, conv == 'F' ? 'f' : conv, prec, alt);
             char sign = 0; char *body = num;
             if (num[0] == '-') { sign = '-'; body++; n--; } else if (flags_plus) sign = '+'; else if (flags_space) sign = ' ';
             int total = n + (sign ? 1 : 0);
@@ -1211,6 +1224,7 @@ static const char *do_sprintf(const char *fmt, struct node **args, int nargs)
             if (!flags_left && flags_zero) for (int k = 0; k < padn; k++) APPEND("0", 1);
             APPEND(body, (u32)n);
             if (flags_left) for (int k = 0; k < padn; k++) APPEND(" ", 1);
+            free(num);
             break; }
         default: APPEND(spec, (u32)sl); APPEND(&conv, 1); break;
         }
@@ -1220,6 +1234,7 @@ static const char *do_sprintf(const char *fmt, struct node **args, int nargs)
     char *r = tstrn(buf, olen); free(buf);
     return r;
     #undef APPEND
+    #undef FMT_PUT
 }
 
 /* ================================================================ math without a math library */

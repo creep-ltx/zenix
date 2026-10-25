@@ -33,5 +33,8 @@ sleep 2
 send touch /tmp/bench; bench > /tmp/b1; rm /tmp/bench; bench > /tmp/b2; echo bench f1=$(grep -c FAILED /tmp/b1) f2=$(grep -c FAILED /tmp/b2); grep 'small files' /tmp/b1\r
 wait bench.f1=[0-9] 240
 sleep 2
+send awk 'BEGIN { printf "%5000d\n", 1 }'; echo awkrc=$?; awk 'BEGIN { printf "%.*f\n", 9999, 1 }'; echo awkrc2=$?\r
+wait awkrc2=[0-9] 30
+sleep 1
 send sh /tests/batch-e.sh > /tmp/be.out 2>&1; sync; echo finished-be\r
 sleep 330

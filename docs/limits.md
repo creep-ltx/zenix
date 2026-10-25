@@ -85,6 +85,7 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   at most 8 here-documents on one line, 16 nested alias expansions, 64 `local` variables in the running functions,
   128 variables, 48 aliases and 48 functions, 200 history lines (a recalled line is cut to the 478 characters the
   editor holds, with the bell).
+- awk: a `printf`/`sprintf` field width or precision of at most 4096 ("field width too large", status 2).
 - Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
   Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
   pattern (architecture.md section 6). Measured with `-fstack-usage`

@@ -83,6 +83,7 @@ t awk-strings; awk 'BEGIN { s = "Hello, World"; print substr(s, 1, 5), substr(s,
 t awk-subs;   echo 'aaa bbb aaa' | awk '{ n = gsub(/a/, "x"); print n, $0 }'; echo 'foo bar' | awk '{ sub(/o+/, "[&]"); print }'; echo 'xyz' | awk '{ if (match($0, /y+/)) print RSTART, RLENGTH }'
 t awk-printf; awk 'BEGIN { printf "%5d|%-5s|%05.2f|%x|%o|%c|%e|%%\n", 42, "ab", 3.14159, 255, 8, 65, 12345.678 }'; awk '{ printf "%-8s%3d\n", $1, $2 }' fruit.txt
 t awk-func;   awk 'function fact(n) { return n <= 1 ? 1 : n * fact(n - 1) } BEGIN { print fact(10); print fact(15); print 2 ^ 53, -2 ^ 52 + 1 }'; awk 'function f(a, i) { a["k"] = 9; i = 5 } BEGIN { f(arr); print arr["k"], i "" }'
+t awk-wide;   sh $D/../../tests/awkwide.sh
 t awk-control; awk 'BEGIN { for (i = 0; i < 10; i++) { if (i == 2) continue; if (i == 5) break; printf "%d ", i }; print ""; while (j < 3) j++; do k++; while (k < 2); print j, k }'
 t awk-ofs;    awk 'BEGIN { OFS = "-"; ORS = "|\n" } { $1 = $1; print }' colon.txt; awk -F: -v OFS=: '{ print $1, $3 }' colon.txt
 t awk-io;     awk '{ print $1 > "'$T'/awk1.out" }' fruit.txt; sort $T/awk1.out | uniq -c; awk 'BEGIN { while ((getline line < "colon.txt") > 0) n++; print n }'; awk '{ print $2 | "sort -n" }' fruit.txt

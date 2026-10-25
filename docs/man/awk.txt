@@ -87,7 +87,9 @@ NOTES
     gawk extensions (BEGINFILE, regex RS, gensub, arrays of arrays,
     @include) and locales are not supported. Regular expressions are the
     extended ones of grep -E; they have no back-references. Running out of
-    memory ends awk with "awk: out of memory".
+    memory ends awk with "awk: out of memory". A printf or sprintf
+    field width or precision (also one given with *) is at most 4096: a
+    larger one stops awk with "field width too large" and status 2.
 
 EXIT STATUS
     0, the value given to exit, or 2 for a syntax error, an unreadable

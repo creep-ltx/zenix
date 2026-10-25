@@ -31,6 +31,9 @@ tr -d '\r' < $OUT/run.log | grep -aqxE 'ping: 500 round trips in [0-9]+ us, [0-9
 want "bench: failed creates are reported, not timed; a writable /tmp gives no failures" "bench f1=2 f2=0"
 want "... the line names the count and the first error" "create + write 50 small files      FAILED: 50 of 50 calls (first: open /tmp/bench/f00:"
 want "ls lists all 450 names of a directory (hard links: the disk has few inodes; -a adds . and ..; -l finds the last)" "lsn=450 lsa=452 lsl=1"
+want "awk refuses a field width over 4096 (audit A4)" "awk: field width too large (at most 4096)"
+want "... with status 2" "awkrc=2"
+want "... and a precision over it too" "awkrc2=2"
 debugfs -R "cat /tmp/be.out" build/zenix.hdf > $OUT/batch-e.txt 2>/dev/null
 if diff tools/tests/batch-e.expected $OUT/batch-e.txt > $OUT/batch-e.diff; then echo "PASS batch E script: $(wc -l < tools/tests/batch-e.expected) lines as expected"
 else echo "FAIL batch E script (expected, then got):"; head -40 $OUT/batch-e.diff; pass=0; fi
