@@ -126,7 +126,8 @@ While it is open the port is that program's alone: the console's mirror stops, r
 to the console, the 0x1D test hook is off, and `kprintf` keeps writing the kernel log to its ring (`dmesg`) but not to
 the wire. At the last close everything is as before. Reads return the bytes the receive ring holds (blocking until at
 least one, the way a tty in raw mode does; `O_NONBLOCK`-style polling is not needed by `cu`); writes go out through
-the existing 4 KB send ring, waiting for room. 115200 baud 8N1, no handshake (the cable's minimal wiring); a later
+the existing 4 KB send ring, waiting for room (a tick at a time; a kill or 2 s with no progress ends the write, audit
+A5). 115200 baud 8N1, no handshake (the cable's minimal wiring); a later
 option may set the speed. Nothing else changes: the receive interrupt still only queues (audit B4), `serial_work`
 hands the bytes to the device instead of the console.
 

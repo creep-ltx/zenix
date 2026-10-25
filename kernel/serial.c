@@ -234,21 +234,37 @@ u32 serdev_take(u8 *buf, u32 n)
     return got;
 }
 
-void serdev_put(u8 c)
+/* a program's write (D12): every byte, as it is. With the ring full it waits a tick at a time (the tick drains the
+ * ring), never spinning with the machine stopped (audit A5); a kill ends the wait, and so do 2 s in which the port
+ * took nothing (Paula wedged: logged): what was written so far, or -EINTR / -EIO if nothing */
+#define SERDEV_STALL 200u
+__attribute__((optimize("Os"))) long serdev_write(const u8 *buf, u32 n)
 {
-    for (;;) {
+    u32 i = 0, since = ticks;
+    while (i < n) {
+        u32 i0 = i;
         u16 s = irq_save();
-        u16 nh = (u16)((txhead + 1) & 4095);
-        if (nh != txtail) {
-            txring[txhead] = c;
-            txhead = nh;
-            tx_drain_locked();
-            irq_restore(s);
-            return;
+        tx_drain_locked();
+        while (i < n && ((txhead + 1) & 4095) != txtail) {
+            txring[txhead] = buf[i++];
+            txhead = (u16)((txhead + 1) & 4095);
         }
         tx_drain_locked();
         irq_restore(s);
+        if (i == n)
+            break;
+        if (i != i0)
+            since = ticks;                      /* progress: the 2 s count again */
+        if (current->killed)
+            return i ? (long)i : -EINTR;
+        if ((s32)(ticks - since) >= (s32)SERDEV_STALL) {
+            kprintf("serial: /dev/ttyS0: the port took nothing for 2 s: write failed\n");
+            return i ? (long)i : -EIO;
+        }
+        sleep_until(ticks + 1);
+        schedule();
     }
+    return (long)i;
 }
 
 /* The kernel log: everything kprintf prints is also kept in a ring, for the `dmesg` command and so that the boot

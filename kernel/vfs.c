@@ -603,15 +603,8 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return tty_write((int)f->off, buf, n);
     case FT_PIPE_W:
         return pipe_write(f, buf, n);
-    case FT_SERIAL: {
-        const u8 *s = buf;
-        for (u32 i = 0; i < n; i++) {
-            if (current->killed)
-                return i ? (long)i : -EINTR;
-            serdev_put(s[i]);
-        }
-        return (long)n;
-    }
+    case FT_SERIAL:
+        return serdev_write(buf, n);
     case FT_KLOG:
         klog_write(buf, n);                 /* a service's output: in dmesg, not on a console */
         return (long)n;

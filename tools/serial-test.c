@@ -20,6 +20,13 @@ static unsigned long typed;
 void tty_input(u8 c) { (void)c; typed++; }
 static int woken;
 void wake_io(void) { woken++; }
+/* the scheduler, for a write that waits (audit A5): each sleep is one tick, and the tick drains the ring */
+volatile u32 ticks;
+static struct proc me;
+struct proc *current = &me;
+static u32 sleeps;
+void sleep_until(u32 t) { sleeps++; ticks = t; }
+void schedule(void) { serial_tx_drain(); }
 
 static int bad;
 #define EXPECT_TRUE(c, msg) do { if (!(c)) { printf("FAIL: %s\n", msg); bad++; } else printf("ok:   %s\n", msg); } while (0)
@@ -80,7 +87,7 @@ int main(void)
     kprintf("log line while the port is a program's\n");
     drain_all();
     EXPECT_TRUE(fake_nsent == s0, "while open: no console copy and no kernel log on the wire");
-    serdev_put('h'); serdev_put('\n');
+    EXPECT_TRUE(serdev_write((const u8 *)"h\n", 2) == 2, "a write to the port takes every byte");
     drain_all();
     EXPECT_TRUE(fake_nsent == s0 + 2 && fake_sent[s0] == 'h' && fake_sent[s0 + 1] == '\n',
                 "the program's bytes go out as they are (no CR added)");
@@ -92,6 +99,27 @@ int main(void)
     serial_work();
     EXPECT_TRUE(typed == t0 && woken, "a received byte is not typed into the console; the reader is woken");
     EXPECT_TRUE(serdev_take(got, 8) == 1 && got[0] == 'k', "... and the program reads it");
+
+    /* 5. a write with the send ring full (audit A5): it waits by ticks, never spinning; a port that takes nothing for
+     * 2 s fails the write; a kill ends the wait */
+    static u8 big[10000];
+    memset(big, 'z', sizeof big);
+    fake_wire_period = 3;                                 /* slower than the writer: the ring fills */
+    s0 = fake_nsent; sleeps = 0;
+    EXPECT_TRUE(serdev_write(big, sizeof big) == (long)sizeof big, "a slow port: a 10000-byte write takes them all");
+    drain_all();
+    EXPECT_TRUE(fake_nsent == s0 + sizeof big, "... every byte reached the wire");
+    fake_wire_period = 0; fake_tbe = 0;                   /* Paula takes nothing any more */
+    u32 t0k = ticks; sleeps = 0;
+    long w1 = serdev_write(big, sizeof big);
+    EXPECT_TRUE(w1 == 4095, "a stuck port: the write returns what fitted the ring (4095)");
+    EXPECT_TRUE(ticks - t0k >= 200 && ticks - t0k <= 202 && sleeps >= 200, "... after waiting 2 s, a tick at a time");
+    t0k = ticks;
+    EXPECT_TRUE(serdev_write(big, 10) == -EIO && ticks - t0k >= 200, "... the next write fails with -EIO after 2 s");
+    me.killed = 1; t0k = ticks;
+    EXPECT_TRUE(serdev_write(big, 10) == -EINTR && ticks == t0k, "a kill ends the wait at once (-EINTR)");
+    me.killed = 0;
+    fake_tbe = 1; drain_all();
     serdev_close();
     s0 = fake_nsent;
     serial_putc('Y');

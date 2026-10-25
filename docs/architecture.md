@@ -699,7 +699,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
   (console 1, the same rule), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
   is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
-  receive ring for its reader), `/dev/null`, `/dev/zero`. `fstat` of a console gives its number in `st_ino` (the
+  receive ring for its reader; a write waits for room in the 4 KB send ring a tick at a time, so the machine runs on,
+  and ends on a kill or after 2 s in which the port took nothing (logged: what was written, or -EIO), audit A5),
+  `/dev/null`, `/dev/zero`. `fstat` of a console gives its number in `st_ino` (the
   `ustat` has no device field; `login` uses it to apply `/etc/autologin` to console 1 only).
 - **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
   `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**

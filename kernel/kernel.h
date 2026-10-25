@@ -39,7 +39,7 @@ void serial_puts(const char *s);
 long serdev_open(void);                 /* -EBUSY when it is open already */
 void serdev_close(void);
 u32 serdev_take(u8 *buf, u32 n);        /* bytes received so far (0: none yet) */
-void serdev_put(u8 c);                  /* one byte as it is, waiting for room in the send ring */
+long serdev_write(const u8 *buf, u32 n);  /* all of it, waiting by ticks; on a kill or a 2 s stall the count, or -EINTR/-EIO */
 void kprintf(const char *fmt, ...);
 u32 klog_read(u32 off, char *buf, u32 n);     /* the kernel log: n characters from position off (0 = the first ever) */
 void klog_to_screen(void);                    /* the display is up: show the log so far and mirror new messages */
