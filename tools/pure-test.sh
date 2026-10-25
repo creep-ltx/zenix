@@ -16,7 +16,8 @@
 #   m  a remount in the same slot: the same file (inode, size, time) on a floppy mounted again is not reused
 #   s  sh and login are ZEX2 (stage 1): one session's sh and login are the shared code; logins on consoles 2, 3 and 4
 #      add no copy (free: what sharing saves grows by sh + login each; ps: SHR for every sh and login); sh -c shells
-#      share it too; a session that ends (console 2, then console 1's own) leaves the others running; a literal
+#      share it too; idle shells hold little memory (ps MEM at most 112 KB: the arena grows and shrinks), also right
+#      after a command that needed a big arena; a session that ends (console 2, then console 1's own) leaves the others running; a literal
 #      echoed into a file by a shell
 # tools/pure-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
@@ -123,6 +124,16 @@ cmp_ "four logins (consoles 1-4): still one copy" "$(S s s4)" -eq "$(S s s1)"
 cmp_ "... sharing saves three sessions' code" "$(V s s4)" -eq $((3 * both / 1024))
 scount s s4 s4b "ps shows the shared code for each of the four shells ($SK KB)" 4 " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +$SK sh"
 scount s s4 s4b "... and for each of the four logins ($LK KB)" 4 " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +$LK login"
+# the shell's arena (audit 2026-10-25, found while fixing): an idle shell holds only its first 8 KB chunk, so its MEM
+# (data and BSS, its 24 KB stack, the arena, malloc's first 32 KB chunk) stays small: 100 KB measured on 2026-10-25;
+# with the old fixed arena (an eighth of free memory, up to 256 KB) it was about 290. The limit: 112 KB.
+IDLE=$(awk '$0 == "==s4" { f = 1; next } $0 == "==s4b" { f = 0 } f && $5 == "io" && $NF == "sh" { print $6 }' "$OUT/s.log")
+imax=-1; for m in $IDLE; do [ "$m" -gt "$imax" ] && imax=$m; done
+[ "$(echo $IDLE | wc -w)" = 3 ] && cmp_ "the three idle shells (consoles 2-4) hold little memory (ps MEM, KB, the largest)" "$imax" -le 112 ||
+    bad "three idle shells in ps between ==s4 and ==s4b (found: $IDLE)"
+line s "a command that needs a big arena ran (30000 words from a 168894-byte command substitution)" "big-ok"
+BIG=$(awk '$0 == "==s4c" { f = 1; next } $0 == "==s4d" { f = 0 } f && $5 == "wait" && $NF == "sh" { print $6 }' "$OUT/s.log" | head -n 1)
+cmp_ "... and the shell gave the memory back afterwards (ps MEM of console 1's shell, KB)" "${BIG:--1}" -le 112
 cmp_ "two more shells (sh -c) share it too" "$(V s s4b)" -gt "$(V s s4)"
 cmp_ "... still one copy" "$(S s s4b)" -eq "$(S s s1)"
 rx   s "console 2's shell ran before it ended" ".*alive-on-2"

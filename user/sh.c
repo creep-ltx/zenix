@@ -23,10 +23,17 @@ static void errs(const char *s) { sys_write(2, s, strlen(s)); }
 static void errm(const char *a, const char *b) { errs("sh: "); errs(a); if (b) { errs(": "); errs(b); } errs("\n"); }
 
 /* ---------------------------------------------------------------- arena
- * Everything a command line needs (tokens, tree, expansions) comes from one
- * region that is reset after each line. */
-#define ARENA 262144
-static char *arena, *abrk, *aend;
+ * Everything a command needs (tokens, tree, expansions) comes from the arena, given back when the command is done:
+ * `char *mark = abrk;` ... `arel(mark);` (marks are released in the reverse order they were taken). The arena is a
+ * stack of chunks from SYS_memalloc: a first one of ACHUNK0 bytes that stays, and more as a command needs them, each
+ * four times the last (a process has at most 8 regions, shared with malloc, so they must be few). Releasing a mark
+ * gives back the chunks taken after it, except one kept as a spare (so a loop round that crosses a chunk's end does
+ * not ask the kernel each round); arena_idle() gives the spare back too, between the commands of a script and at the
+ * prompt. When the kernel has no memory for a chunk: "out of memory" and the shell ends (status 2). */
+#define ACHUNK0 8192
+struct achunk { struct achunk *prev; char *end; u32 size; u32 pad; };    /* 16 bytes, then the chunk's data */
+static struct achunk *acur, *aspare;    /* the newest chunk (the first one at the bottom), and the spare */
+static char *arena, *abrk, *aend;       /* the first chunk's data; the next free byte and the end of the newest chunk */
 /* The stack is 16 KB (the Makefile's STACK_sh is not applied yet: audit B6). The deepest use measured on the test scripts,
  * including a function calling itself 40 deep, is under 6 KB. With no MMU an overflow would corrupt memory silently, so
  * the recursive parts (running, parsing, expanding, globbing) refuse to go deeper than STK_LIMIT bytes below where main
@@ -35,11 +42,46 @@ static char *arena, *abrk, *aend;
 static char *stk_top;
 static inline int stack_low(void) { char *sp; __asm__ volatile("move.l %%sp,%0" : "=r"(sp)); return stk_top && (u32)(stk_top - sp) > STK_LIMIT; }
 static void fatal(const char *m) { errm(m, 0); sys_exit(2); }
+static void agrow(u32 n)                /* a new chunk with room for n bytes on top of the stack */
+{
+    struct achunk *c = 0;
+    u32 need = n + (u32)sizeof(struct achunk);
+    if (aspare && aspare->size >= need) { c = aspare; aspare = 0; }
+    else {
+        if (aspare) { sys_memfree(aspare); aspare = 0; }
+        u32 want = acur ? acur->size * 4 : ACHUNK0;  /* four times the last: few regions even for a big command */
+        if (want < 16384) want = 16384;
+        if (want < need) want = (need + 4095) & ~4095u;
+        while (!(c = sys_memalloc(want)) && want / 2 >= need) want /= 2;   /* smaller if memory is short */
+        if (!c && !(c = sys_memalloc(want = need))) fatal("out of memory");
+        c->size = want;
+    }
+    c->prev = acur; c->end = (char *)c + c->size; acur = c;
+    abrk = (char *)(c + 1); aend = c->end;
+}
 static void *aalloc(u32 n)
 {
+    if (n > 0x3FFFFFF0u) fatal("out of memory");       /* no size arithmetic below can wrap */
     n = (n + 3) & ~3u;
-    if (abrk + n > aend) fatal("out of memory");
+    if (n > (u32)(aend - abrk)) agrow(n);
     void *p = abrk; abrk += n; return p;
+}
+/* back to a mark: the chunks taken after it go (the biggest of them, or the spare, stays as the spare) */
+static void arel(char *mark)
+{
+    while (!(mark >= (char *)(acur + 1) && mark <= acur->end)) {
+        struct achunk *c = acur;
+        if (!c->prev) fatal("arena mark lost");         /* a mark released out of order: a bug, never silently */
+        acur = c->prev;
+        if (!aspare || c->size > aspare->size) { if (aspare) sys_memfree(aspare); aspare = c; }
+        else sys_memfree(c);
+    }
+    abrk = mark; aend = acur->end;
+}
+static void arena_idle(void)            /* nothing is in use: only the first chunk stays */
+{
+    arel(arena);
+    if (aspare) { sys_memfree(aspare); aspare = 0; }
 }
 static char *adupn(const char *s, u32 n) { char *p = aalloc(n + 1); memcpy(p, s, n); p[n] = 0; return p; }
 static char *adup(const char *s) { return adupn(s, strlen(s)); }
@@ -400,7 +442,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             char *m[160]; int ws;
             char *mark = abrk;
             int n = find_completions(buf, pos, m, 160, &ws);
-            if (n == 0) { abrk = mark; break; }
+            if (n == 0) { arel(mark); break; }
             const char *first = m[0]; int common = (int)strlen(first);
             for (int i = 1; i < n; i++) { int k = 0; while (k < common && m[i][k] == first[k]) k++; common = k; }
             int have = pos - ws;
@@ -418,7 +460,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             } else if (n == 1 && first[common - 1] != '/' && len < max - 2) {
                 memmove(buf + pos + 1, buf + pos, (u32)(len - pos + 1)); buf[pos] = ' '; pos++; len++;
             }
-            abrk = mark;
+            arel(mark);
             break;
         }
         default:
@@ -441,6 +483,10 @@ static const char *lex_src;
 static int lex_incomplete;
 static char *perr;
 static const char *lex_err;             /* why lex returned 2, when it is not a plain syntax error */
+/* why lex returned 1 (more input needed), for the script reader: 1 an open quote, $( or ${, 2 a here-document whose
+ * end line (lex_hd, tabs stripped first when lex_hdtab) has not come yet */
+static int lex_why, lex_hdtab;
+static char lex_hd[100];
 
 static int skip_paren(const char *s, int i)               /* s[i..] = "$(": index after the matching ')', or -1 */
 {
@@ -488,7 +534,7 @@ static int word_end(const char *s, int i)
 static void new_tok(int type, u32 start, u32 end)
 {
     if (ntoks >= tokcap) {                              /* grow: the token list is as long as the script needs */
-        int nc = tokcap ? tokcap * 2 : 256;
+        int nc = tokcap ? tokcap * 2 : 32;
         struct tok *nt = aalloc((u32)nc * sizeof(struct tok));
         if (ntoks) memcpy(nt, toks, (u32)ntoks * sizeof(struct tok));
         toks = nt; tokcap = nc;
@@ -502,7 +548,7 @@ static void new_tok(int type, u32 start, u32 end)
 static int lex(const char *s)
 {
     int i = 0, pend[8], npend = 0;
-    lex_src = s; ntoks = 0; ti = 0; lex_incomplete = 0; toks = 0; tokcap = 0; lex_err = 0;
+    lex_src = s; ntoks = 0; ti = 0; lex_incomplete = 0; toks = 0; tokcap = 0; lex_err = 0; lex_why = 0;
     while (s[i]) {
         char c = s[i];
         if (c == ' ' || c == '\t') { i++; continue; }
@@ -516,18 +562,22 @@ static int lex(const char *s)
                 char dl[100]; u32 dn = 0;
                 for (const char *q = delim; *q && dn < 98; q++) if (*q != '\'' && *q != '"' && *q != '\\') dl[dn++] = *q;
                 dl[dn] = 0;
-                u32 rem = strlen(s + i);
-                char *body = aalloc(rem + 2); u32 blen = 0; int found = 0;
-                while (s[i]) {
-                    int e = i; while (s[e] && s[e] != '\n') e++;
-                    int ls = i;
-                    if (h->fd == 1) while (ls < e && s[ls] == '\t') ls++;
-                    if ((u32)(e - ls) == dn && !strncmp(s + ls, dl, dn)) { found = 1; i = s[e] ? e + 1 : e; break; }
-                    memcpy(body + blen, s + ls, (u32)(e - ls)); blen += (u32)(e - ls); body[blen++] = '\n';
-                    i = s[e] ? e + 1 : e;
+                u32 blen = 0; int found = 0, b0 = i;
+                for (int pass = 0; pass < 2; pass++) {       /* measure the body, then copy it (no more than it needs) */
+                    char *body = pass ? aalloc(blen + 1) : 0; u32 bo = 0;
+                    i = b0;
+                    while (s[i]) {
+                        int e = i; while (s[e] && s[e] != '\n') e++;
+                        int ls = i;
+                        if (h->fd == 1) while (ls < e && s[ls] == '\t') ls++;
+                        if ((u32)(e - ls) == dn && !strncmp(s + ls, dl, dn)) { found = 1; i = s[e] ? e + 1 : e; break; }
+                        if (body) { memcpy(body + bo, s + ls, (u32)(e - ls)); body[bo + (u32)(e - ls)] = '\n'; }
+                        bo += (u32)(e - ls) + 1;
+                        i = s[e] ? e + 1 : e;
+                    }
+                    if (!found) { lex_why = 2; lex_hdtab = h->fd == 1; memcpy(lex_hd, dl, dn + 1); return 1; }
+                    if (body) { body[bo] = 0; h->heredoc = body; } else blen = bo;
                 }
-                if (!found) return 1;
-                body[blen] = 0; h->heredoc = body;
             }
             npend = 0;
             continue;
@@ -546,7 +596,7 @@ static int lex(const char *s)
                 i += 2 + dash;
                 while (s[i] == ' ' || s[i] == '\t') i++;
                 int e = word_end(s, i);
-                if (e < 0) return 1;
+                if (e < 0) { lex_why = 1; return 1; }
                 if (e == i) return 2;
                 new_tok(T_WORD, (u32)i, (u32)e); toks[ntoks - 1].text = adupn(s + i, (u32)(e - i));
                 if (npend == 8) { lex_err = "more than 8 here-documents on one line"; return 2; }
@@ -561,7 +611,7 @@ static int lex(const char *s)
             continue;
         }
         int e = word_end(s, i);
-        if (e < 0) return 1;
+        if (e < 0) { lex_why = 1; return 1; }
         /* N> and N< : a single digit right before a redirection operator */
         if (e == i + 1 && s[i] >= '0' && s[i] <= '9' && (s[e] == '>' || s[e] == '<')) {
             int fd = s[i] - '0'; i = e;
@@ -576,7 +626,7 @@ static int lex(const char *s)
         toks[ntoks - 1].text = adupn(s + i, (u32)(e - i));
         i = e;
     }
-    if (npend) return 1;
+    if (npend) { lex_why = 1; return 1; }
     return 0;
 }
 
@@ -885,6 +935,8 @@ static struct node *parse_list(const char *const *stops)
 /* ================================================================ arithmetic: $(( ... )) */
 static const char *ar_p;
 static long ar_or(void);
+static const char *special_param(char c, char *buf);
+static const char *pos_param(const char *name);
 static void ar_ws(void) { while (*ar_p == ' ' || *ar_p == '\t') ar_p++; }
 static int ex_error;
 static long ar_atom(void)
@@ -905,6 +957,17 @@ static long ar_atom(void)
             while ((*ar_p >= '0' && *ar_p <= '9') || (*ar_p >= 'a' && *ar_p <= 'f') || (*ar_p >= 'A' && *ar_p <= 'F')) { int d = *ar_p <= '9' ? *ar_p - '0' : (*ar_p | 32) - 'a' + 10; v = v * 16 + d; ar_p++; }
         } else while (*ar_p >= '0' && *ar_p <= '9') v = v * 10 + (*ar_p++ - '0');
         return v;
+    }
+    if (*ar_p == '$') {                         /* $name ${name} $1 ${10} $# $?: the value, as a number (it was 0) */
+        ar_p++;
+        int br = *ar_p == '{'; if (br) ar_p++;
+        char nm[40], b[16]; int k = 0; const char *v = 0;
+        if (*ar_p && strchr("?$#!", *ar_p)) v = special_param(*ar_p++, b);
+        else if (*ar_p >= '0' && *ar_p <= '9' && !br) v = special_param(*ar_p++, b);
+        else if (*ar_p >= '0' && *ar_p <= '9') { while (*ar_p >= '0' && *ar_p <= '9' && k < 39) nm[k++] = *ar_p++; nm[k] = 0; v = pos_param(nm); }
+        else { while (is_name_c((unsigned char)*ar_p, k == 0) && k < 39) nm[k++] = *ar_p++; nm[k] = 0; v = k ? var_get(nm) : 0; }
+        if (br && *ar_p == '}') ar_p++;
+        return v ? atoi(v) : 0;
     }
     if (is_name_c((unsigned char)*ar_p, 1)) {
         char nm[40]; int k = 0;
@@ -1578,7 +1641,7 @@ static int run_simple(struct node *n, int background, int *pidout)
 {
     char *mark = abrk;                                      /* released when the command is done */
     char **argv; int argc = expand_command(n, &argv);
-    if (argc < 0) { abrk = mark; return 1; }
+    if (argc < 0) { arel(mark); return 1; }
     struct rsave rs; rs_init(&rs);
     int st = 0;
     /* assignments */
@@ -1595,11 +1658,11 @@ static int run_simple(struct node *n, int background, int *pidout)
         *eq = '=';
         env_dirty = 1;
     }
-    if ((n->redirs && apply_redirs(n->redirs, &rs)) || ex_error) { ex_error = 0; rs_restore(&rs); abrk = mark; return 1; }
+    if ((n->redirs && apply_redirs(n->redirs, &rs)) || ex_error) { ex_error = 0; rs_restore(&rs); arel(mark); return 1; }
     if (argc) st = run_words(argv, argc, pidout, background);
     rs_restore(&rs);
     if (argc) for (int i = 0; i < n->nassign; i++) { if (saved_had[i]) var_set(saved_names[i], saved_vals[i], -1); else var_unset(saved_names[i]); env_dirty = 1; }
-    if (!background && !pidout) abrk = mark;
+    if (!background && !pidout) arel(mark);
     return st;
 }
 
@@ -1706,10 +1769,10 @@ static int run_pipeline(struct node *p, int background, int *pidout)
         if (pid >= 0) pids[np++] = pid;
     }
     if (prev >= 0) sys_close(prev);
-    if (np == 0) { abrk = mark; return 1; }
+    if (np == 0) { arel(mark); return 1; }
     if (pidout) *pidout = pids[np - 1];
     int st = background ? 0 : fg_wait(pids, np, p->src ? p->src : "pipeline", 0);
-    abrk = mark;
+    arel(mark);
     return st;
 }
 
@@ -1783,11 +1846,11 @@ static int exec_node(struct node *n)
     case N_SEQ: {
         char *mark = abrk;                                  /* each statement's allocations go when it is done */
         for (struct node *c = n; c; c = c->b) {
-            abrk = mark;
+            arel(mark);
             st = exec_node(c->a);
             if (exit_requested || loop_break || loop_continue || func_return || interrupted) break;
         }
-        abrk = mark;
+        arel(mark);
         break;
     }
     case N_BG: {
@@ -1803,7 +1866,7 @@ static int exec_node(struct node *n)
             } else pid = spawn_stage(a, 1);
         } else if (a->type == N_PIPE) { run_pipeline(a, 1, &pid); }
         else pid = spawn_stage(a, 1);
-        abrk = mark;
+        arel(mark);
         if (pid > 0) {
             last_bg = pid;
             int j = add_job(pid, a->src ? a->src : "job");
@@ -1830,7 +1893,7 @@ static int exec_node(struct node *n)
         char *mark = abrk;
         st = 0;
         for (;;) {
-            abrk = mark;
+            arel(mark);
             int c = exec_node(n->a);
             if (exit_requested) break;
             if (n->until ? c == 0 : c != 0) break;
@@ -1839,7 +1902,7 @@ static int exec_node(struct node *n)
             if (loop_continue) { loop_continue--; continue; }
             if (func_return) break;
         }
-        abrk = mark;
+        arel(mark);
         break;
     }
     case N_FOR: {
@@ -1851,7 +1914,7 @@ static int exec_node(struct node *n)
         char *mark = abrk;                                  /* the items stay; each round's allocations go (see N_WHILE) */
         st = 0;
         for (int i = 0; i < it.n; i++) {
-            abrk = mark;
+            arel(mark);
             var_set(n->name, it.v[i], -1);
             st = exec_node(n->b);
             if (exit_requested) break;
@@ -1859,7 +1922,7 @@ static int exec_node(struct node *n)
             if (loop_continue) { loop_continue--; continue; }
             if (func_return) break;
         }
-        abrk = mark;
+        arel(mark);
         break;
     }
     case N_GROUP: st = exec_node(n->a); break;
@@ -1887,7 +1950,7 @@ static int exec_node(struct node *n)
         if (env_dirty) { env_sync(); env_dirty = 0; }
         int pid = sys_spawn("/bin/sh", argv, 0);
         st = pid < 0 ? 126 : wait_fg(pid, "subshell");
-        abrk = mark;
+        arel(mark);
         break;
     }
     case N_FUNC: {
@@ -1918,9 +1981,17 @@ static int run_capture(const char *cmd, char **out)
     int pid = sys_spawn("/bin/sh", argv, 0);
     rs_restore(&rs);
     if (pid < 0) { sys_close(pp[0]); return 126; }
-    u32 cap = 512, len = 0; char *b = aalloc(cap);
+    /* the output goes into 4 KB of arena; more goes into a heap buffer of its own region (64 KB and up, doubling: libz
+     * gives such blocks back to the kernel when freed, the smaller ones it keeps), copied into the arena once at the
+     * end. A buffer doubling in the arena would keep every smaller copy until the command is done. */
+    u32 cap = 4096, len = 0; char *b = aalloc(cap); int heap = 0;
     for (;;) {
-        if (len + 256 > cap) { char *nb = aalloc(cap * 2); memcpy(nb, b, len); b = nb; cap *= 2; }
+        if (len + 256 > cap) {
+            char *nb = heap ? realloc(b, cap * 2) : malloc(65536);
+            if (!nb) { if (heap) free(b); fatal("out of memory"); }
+            if (!heap) { memcpy(nb, b, len); cap = 65536; heap = 1; } else cap *= 2;
+            b = nb;
+        }
         int n = sys_read(pp[0], b + len, 256);
         if (n <= 0) break;
         len += (u32)n;
@@ -1928,7 +1999,7 @@ static int run_capture(const char *cmd, char **out)
     sys_close(pp[0]);
     int st = sys_wait(pid);
     while (len && b[len - 1] == '\n') len--;
-    b[len] = 0; *out = b;
+    if (heap) { *out = adupn(b, len); free(b); } else { b[len] = 0; *out = b; }
     return st;
 }
 
@@ -1944,6 +2015,113 @@ static int run_string(const char *text)
     if (!tree) { errm(perr ? perr : "syntax error", 0); return 2; }
     if (ti < ntoks) { errm("syntax error near unexpected token", 0); return 2; }
     int st = exec_node(tree);
+    return st;
+}
+
+/* A file of commands (sh file, . file, the start-up files) is read and run one command at a time, as bash does: lines
+ * are read until they make a complete command (an if ... fi, a loop, a case, a function, a here-document with its body,
+ * a line that ends in a backslash, | or &&), which is parsed and run, and its memory is given back before the next one
+ * is read. So a script of any length runs in the memory of its biggest command. An error in the syntax ends the file
+ * there (status 2), after the commands before it have run. top: not inside another command (the script itself, a
+ * start-up file), so the arena's spare chunk goes back between commands too.
+ * An unfinished command is lexed and parsed again only when the new line can finish it, so a long one costs about
+ * as much as reading it once: a here-document only at its end line, an open quote only at a line with a quote or a
+ * bracket, an open if/loop/case/function/group only at a line with a closing word or bracket (or after a line that
+ * ends in | && ||). */
+struct sreader { int fd, eof; u32 rpos, rlen; char rbuf[512]; };
+static int sr_getc(struct sreader *r)
+{
+    if (r->rpos == r->rlen) {
+        if (r->eof) return -1;
+        int n = sys_read(r->fd, r->rbuf, sizeof r->rbuf);
+        if (n <= 0) { r->eof = 1; return -1; }
+        r->rpos = 0; r->rlen = (u32)n;
+    }
+    return (unsigned char)r->rbuf[r->rpos++];
+}
+static int may_close(const char *l, u32 n)          /* a line with fi, done, esac, } or ): it may end a construct */
+{
+    for (u32 i = 0; i < n;) {
+        char c = l[i];
+        if (c == '}' || c == ')') return 1;
+        if (is_space(c) || c == ';' || c == '&' || c == '|' || c == '(' || c == '<' || c == '>') { i++; continue; }
+        u32 e = i; while (e < n && !is_space(l[e]) && !strchr(";&|()<>}", l[e])) e++;
+        u32 w = e - i;
+        if ((w == 2 && !strncmp(l + i, "fi", 2)) || (w == 4 && !strncmp(l + i, "done", 4)) || (w == 4 && !strncmp(l + i, "esac", 4))) return 1;
+        i = e;
+    }
+    return 0;
+}
+static int ends_in_op(const char *b, u32 n)         /* the text ends in | && || (the next line is the command after it) */
+{
+    while (n && is_space(b[n - 1])) n--;
+    return n && b[n - 1] == '|' ? 1 : (n >= 2 && b[n - 1] == '&' && b[n - 2] == '&');
+}
+static int run_file(int fd, int top)
+{
+    struct sreader *r = aalloc(sizeof *r);
+    r->fd = dup_high(fd); if (r->fd < 0) r->fd = fd; else sys_close(fd);   /* out of the way of N>&M (fds 3-9) */
+    r->eof = 0; r->rpos = r->rlen = 0;
+    char *base = abrk;
+    int st = last_status;
+    for (;;) {
+        arel(base);
+        if (top && aspare) { sys_memfree(aspare); aspare = 0; }
+        u32 cap = 256, len = 0; char *buf = aalloc(cap);
+        char *amark = abrk;
+        struct node *tree = 0;
+        int done = 0, wait = 0, opwait = 0, hdtab = 0;   /* wait: what an unfinished command waits for (see above) */
+        char hd[100]; hd[0] = 0;
+        for (;;) {                                      /* read lines until they are a whole command */
+            int c, got = 0; u32 ls = len;
+            while ((c = sr_getc(r)) >= 0) {
+                if (len + 2 > cap) {                    /* a bigger buffer above this one (both go after the command) */
+                    arel(amark);
+                    char *nb = aalloc(cap * 2); memcpy(nb, buf, len); buf = nb; cap *= 2;
+                    amark = abrk;
+                }
+                buf[len++] = (char)c; got = 1;
+                if (c == '\n') break;
+            }
+            buf[len] = 0;
+            int eof = c < 0;
+            if (!got && !len) { done = 1; break; }      /* the end of the file */
+            if (!eof) {
+                u32 k = len - 1, bs = 0;                /* a line that ends in an unquoted backslash goes on */
+                while (k > ls && buf[k - 1] == '\\') { k--; bs++; }
+                if (bs & 1) continue;
+                u32 ll = len - ls - 1; const char *l = buf + ls;   /* the new line, without its newline */
+                if (wait == 2) {
+                    if (hdtab) while (ll && *l == '\t') { l++; ll--; }
+                    if (ll != strlen(hd) || strncmp(l, hd, ll)) continue;
+                } else if (wait == 1) {
+                    int q = 0; for (u32 i = 0; i < ll && !q; i++) q = l[i] == '\'' || l[i] == '"' || l[i] == '`' || l[i] == ')' || l[i] == '}';
+                    if (!q) continue;
+                } else if (wait == 3 && !opwait && !may_close(l, ll)) continue;
+            }
+            arel(amark);
+            int rc = lex(buf);
+            if (rc == 1 && !eof) {
+                wait = lex_why == 2 ? 2 : 1;
+                if (wait == 2) { hdtab = lex_hdtab; strcpy(hd, lex_hd); }
+                continue;
+            }
+            if (rc == 1) { errm("unexpected end of input", 0); st = 2; done = 1; break; }
+            if (rc) { errm(lex_err ? lex_err : "syntax error", 0); st = 2; done = 1; break; }
+            if (!ntoks) break;                          /* only blank lines and comments */
+            perr = 0; lex_incomplete = 0;
+            tree = parse_list(0);
+            if (!tree && lex_incomplete && !eof) { wait = 3; opwait = ends_in_op(buf, len); continue; }
+            if (!tree) { errm(perr ? perr : "syntax error", 0); st = 2; done = 1; break; }
+            if (ti < ntoks) { errm("syntax error near unexpected token", 0); st = 2; done = 1; tree = 0; break; }
+            break;
+        }
+        if (done) break;
+        if (tree) st = exec_node(tree);
+        if (exit_requested || loop_break || loop_continue || func_return || interrupted) break;
+    }
+    arel(base);
+    sys_close(r->fd);
     return st;
 }
 
@@ -2196,11 +2374,11 @@ static int run_builtin(char **argv, int argc)
     }
     if (!strcmp(n, "source") || !strcmp(n, ".")) {
         if (argc < 2) { errm(n, "file name needed"); return 2; }
-        char *text = file_slurp(argv[1], 0);
-        if (!text) { errm(argv[1], "cannot read"); return 1; }
+        int fd = sys_open(argv[1], O_RDONLY);
+        if (fd < 0) { errm(argv[1], "cannot read"); return 1; }
         struct possave sv;
         if (argc > 2) pos_push(&sv, argv + 2, argc - 2);
-        int st = run_string(text);
+        int st = run_file(fd, 0);
         if (argc > 2) pos_pop(&sv);
         return st;
     }
@@ -2339,15 +2517,15 @@ static void save_history(void)
 
 static void run_startup_file(const char *path)
 {
-    char *t = file_slurp(path, 0);
-    if (t) run_string(t);
+    int fd = sys_open(path, O_RDONLY);
+    if (fd >= 0) run_file(fd, 1);
 }
 
 static void interactive_loop(void)
 {
     static char line[LMAX], full[2048];
     for (;;) {
-        abrk = arena;
+        arena_idle();
         reap_jobs(1);
         int plen;
         const char *ps = var_get("PS1");
@@ -2381,16 +2559,10 @@ static void interactive_loop(void)
 
 static int shell_main(int argc, char **argv)
 {
-    /* The arena holds the parsed commands of one input line or script; the long scripts of the tests peak near
-     * 180 KB, an interactive session needs a few KB. Take an eighth of the free memory (the arena goes to fast RAM
-     * when there is any), between 64 and 256 KB, so a small machine keeps room for a second shell. */
-    u32 mi[4]; sys_meminfo(mi);
-    u32 asize = (mi[1] ? mi[1] : mi[0]) / 8;
-    if (asize > ARENA) asize = ARENA;
-    if (asize < 65536) asize = 65536;
-    while (!(arena = sys_memalloc(asize)) && asize > 32768) asize /= 2;
-    if (!arena) { errm("no memory", 0); return 2; }
-    abrk = arena; aend = arena + asize;
+    /* the arena's first chunk (it grows on demand: see aalloc); an interactive command needs a few KB */
+    if (!(acur = sys_memalloc(ACHUNK0))) { errm("no memory", 0); return 2; }
+    acur->prev = 0; acur->size = ACHUNK0; acur->end = (char *)acur + ACHUNK0;
+    arena = abrk = (char *)(acur + 1); aend = acur->end;
     shell_pid = sys_getpid();
     import_environment();
     init_vars();
@@ -2400,9 +2572,9 @@ static int shell_main(int argc, char **argv)
     if (ai < argc) { pos_arg = argv + ai; npos = argc - ai; }      /* the shell's own arguments: they live as long as it */
     if (cmdstr) { int st = run_string(cmdstr); return exit_requested ? last_status : st; }
     if (script) {
-        char *t = file_slurp(script, 0);
-        if (!t) { errm(script, zwhy("cannot open")); return 127; }
-        int st = run_string(t);
+        int fd = sys_open(script, O_RDONLY);
+        if (fd < 0) { errm(script, zwhy("cannot open")); return 127; }
+        int st = run_file(fd, 1);
         return exit_requested ? last_status : st;
     }
     interactive = 1;
@@ -2410,7 +2582,7 @@ static int shell_main(int argc, char **argv)
     { char p[160]; const char *h = var_get("HOME"); strncpy(p, h ? h : "/", 150); p[150] = 0; u32 l = strlen(p); if (l && p[l - 1] != '/') p[l++] = '/'; strcpy(p + l, ".shrc");
       struct ustat st;                    /* only a ~/.shrc of the effective user (or root): never another user's commands as root */
       if (sys_stat(p, &st) == 0 && (st.uid == (u32)sys_geteuid() || st.uid == 0)) run_startup_file(p); }
-    abrk = arena;
+    arena_idle();
     load_history();
     interactive_loop();
     return last_status;
@@ -2422,7 +2594,7 @@ int main(int argc, char **argv)
     int st = shell_main(argc, argv);
     if (exit_trap) {                                    /* trap '...' EXIT */
         char *t = exit_trap; exit_trap = 0; exit_requested = 0;
-        abrk = arena;
+        arena_idle();
         run_string(t);
     }
     return st;

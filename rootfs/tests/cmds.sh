@@ -83,7 +83,7 @@ t awk-strings; awk 'BEGIN { s = "Hello, World"; print substr(s, 1, 5), substr(s,
 t awk-subs;   echo 'aaa bbb aaa' | awk '{ n = gsub(/a/, "x"); print n, $0 }'; echo 'foo bar' | awk '{ sub(/o+/, "[&]"); print }'; echo 'xyz' | awk '{ if (match($0, /y+/)) print RSTART, RLENGTH }'
 t awk-printf; awk 'BEGIN { printf "%5d|%-5s|%05.2f|%x|%o|%c|%e|%%\n", 42, "ab", 3.14159, 255, 8, 65, 12345.678 }'; awk '{ printf "%-8s%3d\n", $1, $2 }' fruit.txt
 t awk-func;   awk 'function fact(n) { return n <= 1 ? 1 : n * fact(n - 1) } BEGIN { print fact(10); print fact(15); print 2 ^ 53, -2 ^ 52 + 1 }'; awk 'function f(a, i) { a["k"] = 9; i = 5 } BEGIN { f(arr); print arr["k"], i "" }'
-t awk-wide;   sh $D/../../tests/awkwide.sh
+t awk-wide;   awk 'BEGIN { printf "%300d|\n", 7 }' | wc -c; awk 'BEGIN { printf "%300d|\n", 7 }' | tr -d ' '; awk 'BEGIN { x = sprintf("%200c", "a"); print length(x); gsub(/ /, "", x); print x }'; awk 'BEGIN { x = sprintf("%-500.3f|", 3.14159); print length(x); gsub(/ /, "", x); print x }'; awk 'BEGIN { x = sprintf("%*x|%-*o|%0300i", 300, 255, 150, 8, -5); print length(x); gsub(/ /, "", x); sub(/^ff\|10\|-0+/, "", x); print x }'; awk 'BEGIN { printf "%4096s|\n", "e" }' | wc -c; awk 'BEGIN { printf "%4096u|\n", 3 }' | tr -d ' '
 t awk-control; awk 'BEGIN { for (i = 0; i < 10; i++) { if (i == 2) continue; if (i == 5) break; printf "%d ", i }; print ""; while (j < 3) j++; do k++; while (k < 2); print j, k }'
 t awk-ofs;    awk 'BEGIN { OFS = "-"; ORS = "|\n" } { $1 = $1; print }' colon.txt; awk -F: -v OFS=: '{ print $1, $3 }' colon.txt
 t awk-io;     awk '{ print $1 > "'$T'/awk1.out" }' fruit.txt; sort $T/awk1.out | uniq -c; awk 'BEGIN { while ((getline line < "colon.txt") > 0) n++; print n }'; awk '{ print $2 | "sort -n" }' fruit.txt
@@ -91,3 +91,14 @@ t awk-getline; awk 'BEGIN { "echo hi there" | getline x; print x; close("echo hi
 t awk-cmp;    awk 'BEGIN { print ("10" < "9"), (10 < 9), ("abc" < "abd"); x = "3.0"; print (x == 3) }'; echo '10 9' | awk '{ print ($1 < $2) }'
 t awk-rc;     awk 'BEGIN { exit 3 }'; echo rc=$?; awk 'BEGIN { print "x" } END { print "end" }' < /dev/null; awk '{ exit } END { print "end ran", NR }' fruit.txt
 t awk-file;   printf '{ print NR ": " $1 }\n' > $T/prog.awk; awk -f $T/prog.awk colon.txt; awk '{ print FILENAME, FNR }' colon.txt fruit.txt | tail -n 2
+# a long script, made here: read and run a command at a time (the shell once parsed a whole script at once and ran out of
+# memory near 90 lines); a function, a here-document, if/case over several lines, a continued line, a pipe at a line's
+# end, a sourced file, and a 2 KB line among 600 short ones
+L=$T/long.sh; printf 'add() {\n    x=$((x + $1))\n}\nx=0\n' > $L; seq 0 599 | sed 's/^/add /' >> $L
+printf 'cat <<EOF\nhere x=$x\nEOF\nif [ $x -gt 0 ]\nthen\n    echo big\nelse\n    echo small\nfi\n' >> $L
+printf 'case $x in\n179700) echo case-ok ;;\n*) echo case-bad ;;\nesac\necho one \\\n  two\necho piped |\n  tr a-z A-Z\n' >> $L
+printf "echo 'two\nlines'\ntrue &&\n  echo and-ok\ni=0\nwhile [ \$i -lt 3 ]\ndo\n  i=\$((i + 1))\ndone\necho i=\$i\n" >> $L
+printf 'cat <<-E\n\tindented\n\tE\ncat <<"Q"\nfi done esac } ) \x27 " $x\nQ\n' >> $L
+printf 'y=from-long2\n' > $T/long2.sh; echo ". $T/long2.sh; echo \$y" >> $L; echo set -- $(seq 1000 1399) >> $L
+printf 'echo "n=$# last=${400}"\nf() { echo "f sees $x"; }\nf\necho "sum=$x"\n' >> $L
+t sh-long;    sh $L; echo "rc=$? lines=$(wc -l < $L) longest=$(awk '{ if (length($0) > m) m = length($0) } END { print m }' $L)"

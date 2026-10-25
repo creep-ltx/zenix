@@ -42,7 +42,8 @@ of 75 KB and 3089.
 A session also holds things D13 does not touch: `sh`'s 35 KB of BSS, a 24 KB stack, two 4 KB kernel stacks, libz's
 first 32 KB malloc chunk, and the shell's arena (an eighth of free memory, 64-256 KB: about 190 KB for the first shell
 on a 2 MB machine). So D13 saves roughly a fifth to a quarter of a session. **The arena rule is a bigger, separate
-lever** (a later item, not D13).
+lever** (a later item, not D13; done 2026-10-25: the arena now starts at 8 KB and grows and shrinks with the command,
+architecture.md section 12, the numbers in audit-2026-10-25.md "Found while fixing").
 
 ## 3. The compiler side
 

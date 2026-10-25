@@ -26,8 +26,11 @@ DESCRIPTION
 
 NOTES
     init waits for both kinds of event in one call (wait with the
-    console flag, root only). If /bin/login cannot be started on console 1
-    init tries again every 5 seconds.
+    console flag, root only). If /bin/login cannot be started (no memory
+    left, for instance), init says so on that console and on its own
+    output: "init: cannot start /bin/login: out of memory". On console 1
+    it tries again every 5 seconds; another console gets a new try the
+    next time it is shown.
 
 SEE ALSO
     boot(8), login(1), mount(8)

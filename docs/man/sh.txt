@@ -44,7 +44,8 @@ LANGUAGE
                 pid
     Quoting:    'literal'  "with $expansion"  \x escapes one character
     Expansion:  $(command) or `command` the command's output;
-                $((1+2*3)) arithmetic;  ~ the home directory
+                $((1+2*3)) arithmetic (names, $name, ${name}, $1, $# inside
+                are their values);  ~ the home directory
     Wildcards:  * any text  ? one character  [abc] [a-z] [!a]
                 (names starting with . need a literal .)
     Braces:     pre{a,b}post gives preapost prebpost; {1..5} {a..e} {01..10}
@@ -109,17 +110,21 @@ NOTES
     An error says why: "permission denied", "no such file or directory",
     "argument list too long" (a program takes at most 256 arguments and
     8 KB of them) ...
-    No silent limits: the number of arguments, wildcard matches, words in
-    a command, pipeline stages and for-loop items grows as needed (in the
-    shell's arena, an eighth of free memory: "out of memory" ends a script
-    that needs more). A word longer than 4095 characters, more than 8
-    here-documents on one line, more than 64 local variables or more than
-    16 aliases expanding into each other are errors (status 1, or 2 for the
-    here-documents), never a silent cut. An alias is not expanded again
-    inside its own expansion (alias a=b b=a ends with "a: command not
-    found", as bash). Arithmetic nested too deeply is an error. Each round
-    of a loop gives back what it used, so a long while-read loop runs in
-    the same memory.
+    No silent limits: the number of arguments, wildcard matches, words in a
+    command, pipeline stages and for-loop items grows as needed (in the
+    shell's work area, which starts at 8 KB, grows while a command needs more
+    and gives it back when the command is done; when memory runs out the shell
+    says "out of memory" and ends, status 2). A script (sh file, . file, the
+    start-up files) is read and run one command at a time, so its length does
+    not matter: a syntax error ends it there, after the commands before it
+    have run. A word longer than 4095 characters, more than 8 here-documents
+    on one line, more than 64 local variables or more than 16 aliases
+    expanding into each other are errors (status 1, or 2 for the
+    here-documents), never a silent cut. An alias is not expanded again inside
+    its own expansion (alias a=b b=a ends with "a: command not found", as
+    bash). Arithmetic nested too deeply is an error. Each round of a loop
+    gives back what it used, so a long while-read loop runs in the same
+    memory.
     Not done: redirections after a compound command (done < file), and
     redirections of fds 3-9 to files (only N>&M).
     A here-document is kept in /tmp/.shPID_XXXXXXXX (random letters),

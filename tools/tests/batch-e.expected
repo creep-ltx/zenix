@@ -66,4 +66,6 @@ moved
 ln: cannot create /tmp/batch-e.t/hard: hard link not allowed for directory
 ln-dir=1
 after-kills
+sh: out of memory
+huge-st=2
 batch-e-done

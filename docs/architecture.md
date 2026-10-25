@@ -927,6 +927,20 @@ exactly those back with `SYS_memfree`. `free` and `realloc` check the tag: a poi
 one freed twice, is reported on standard error and ignored. `realloc` grows in place when the block's capacity is
 enough, else copies only the old block's bytes. `xmalloc` ends the program with "NAME: out of memory".
 
+**The shell's arena** (`user/sh.c`, fixed 2026-10-25: it was a fixed region of an eighth of free memory, 64-256 KB per
+shell, and a script was read and parsed whole). Tokens, the parsed tree and expansions come from a stack of chunks
+taken with `SYS_memalloc`: an 8 KB first chunk that stays, and more while a command needs them (at least 16 KB, each
+four times the last, so few regions; a command substitution's output is gathered in a `malloc` buffer and copied
+in once). Every command, loop round and pipeline takes a mark and releases it when done;
+releasing gives back the chunks taken after the mark except one kept as a spare, and between the commands of a script
+and at the prompt the spare goes back too, so an idle shell holds only the first chunk. A file of commands (`sh file`,
+`. file`, `/etc/profile`, `~/.shrc`) is read 512 bytes at a time on a descriptor above 9 (out of the way of `N>&M`)
+and run one complete command at a time: lines are added until the lexer and the parser no longer ask for more (an
+open quote, a here-document without its end, an `if` without `fi`, a line ending in `\`, `|` or `&&`), the command
+runs, and its memory is released before the next is read. Functions keep their text on the heap (they are parsed again
+at each call), so they outlive the command that defined them. When the kernel gives no more memory the shell says
+"out of memory" and ends (status 2). Variables, aliases, history and functions live on the heap (`malloc`).
+
 **Directory walkers** (audit B6: `rm -r`, `cp -r`, `mv`, `du`, `find`, `grep -r`, `chown -R`, `tar c`, `diff -r`,
 `tree`, `ls -R`) use two libz helpers instead of arrays on the stack: `dir_list` reads a directory into a
 heap array that grows as needed (no limit on entries; `dir_free` gives it back), and `path_join` makes "dir/name" in
