@@ -8,7 +8,8 @@
  *                                  seconds (the held slots of the services are not among them: D11 5.2)
  *   svctest reg NAME NICE PROG...  register service NAME (root)
  *   svctest rm NAME                remove it (root)
- *   svctest call NAME TYPE [A0]    one call to port NAME: the result and how long it took (E-clock, ms)
+ *   svctest call NAME TYPE [A0 [SECS]]  one call to port NAME: the result and how long it took (E-clock, ms); then
+ *                                  wait SECS seconds (a kill after a failed call must end it at once: audit A1)
  *   svctest kcall PID NAME TYPE    kill PID (the root server), wait a second, then the same call: a file service is then
  *                                  read while the root server is stopped (two loads nested, D11 5.1)
  *   svctest raw DEVICE             open DEVICE raw at the disk server (-16 while it is mounted)
@@ -74,6 +75,8 @@ int main(int argc, char **argv)
         u32 t0 = sys_hrtime();
         int r = port < 0 ? port : sys_call(port, &m);
         printf("svctest call %s %s: %d in %u ms\n", argv[2], argv[3], r, (sys_hrtime() - t0) / E_MS);
+        if (argc > 5)
+            sys_sleep((u32)atoi(argv[5]) * 100);
         return 0;
     }
     if (argc >= 3 && (!strcmp(argv[1], "raw") || !strcmp(argv[1], "hold"))) {

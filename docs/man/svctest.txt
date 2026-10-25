@@ -8,7 +8,7 @@ SYNOPSIS
     svctest ports SECONDS
     svctest reg NAME NICE PROGRAM [ARGUMENTS]
     svctest rm NAME
-    svctest call NAME TYPE [A0]
+    svctest call NAME TYPE [A0 [SECONDS]]
     svctest kcall PID NAME TYPE
     svctest raw DEVICE
     svctest hold DEVICE SECONDS
@@ -36,7 +36,9 @@ DESCRIPTION
     rm     removes the service NAME (root).
     call   makes one call to the port NAME with message type TYPE (and
            a0) and prints the result and how long it took, in ms of
-           the E-clock (emulator times are not hardware times).
+           the E-clock (emulator times are not hardware times). With
+           SECONDS it then waits that long: a kill after a call that
+           failed must still end it at once.
     kcall  kills process PID (the root filesystem server), waits a
            second and makes the same call as call: a service on the
            disk is then read while the root server is stopped (the

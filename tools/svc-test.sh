@@ -30,10 +30,13 @@
 #      a bad line is reported and skipped; a crash during a request: that client gets -104, a client queued behind it
 #      is served by the next server; the root server stopped while a file service must be read from it: the load
 #      starts the root server too (two loads nested) and the call works
+#   f  a call whose start fails (audit A1, A2): the caller is no longer in a call - killed while it waits after the
+#      failure, or in its back-off, it ends at once; a nice 19 loader boosted by a nice -20 client queued in its
+#      back-off is back at its own level (PRI 31) after the start failed
 #   dmg  a test-only kernel damages diskd's saved table: diskd stops with its message, the kernel panics
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
-PARTS=" ${*:-a z b n r d o zo u l s t dmg} "
+PARTS=" ${*:-a z b n r d o zo u l f s t dmg} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
 make -s all build/zenix-zroot.hdf build/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
@@ -212,6 +215,20 @@ rx   l "a loader killed in its back-off: the next call works" ".*svctest call k 
 rx   l "a cycle of two services: the deadline ends it" "svc: c[12]: pingd did not open its port in 30 s"
 rx   l "... and the caller gets -104 after about 30 s" ".*svctest call c1 1: -104 in (29|3[0-9])[0-9]{3} ms"
 line l "the script ran to the end" "svc-l-done"
+fi
+
+# ---- f: a failed start ends the call (audit A1, A2) ----
+if want_part f; then
+run f fsuae/a1200-020-fast.fs-uae 120 tools/tests/svc-fail-test.txt
+rx   f "a start that fails: the caller gets -104" ".*svctest call f 1: -104 in [0-9]+ ms"
+line f "... a stop while it waits afterwards stops it" "a1-stopped=1"
+line f "... and a kill ends it at once" "a1-left=0 a1-end"
+line f "a loader killed in its back-off ends" "a1b-left=0 a1b-end"
+if [ "$(grep -ac 'svctest call f 1: -104 in' "$OUT/f.log")" = 4 ]; then echo "PASS ... at once: it printed nothing after the kill"; else echo "FAIL ... at once: it printed nothing after the kill"; pass=0; fi
+rx   f "a nice 19 loader whose start failed is back at its own level" " +[0-9]+ +[0-9]+ +31 +19 [a-z]+ +[0-9]+ svctest"
+none f "... not at the queued nice -20 client's" " +[0-9]+ +[0-9]+ +[0-9] +19 [a-z]+ +[0-9]+ svctest"
+line f "... and ends at a kill" "a2-left=0 a2-end"
+line f "the script ran to the end" "svc-f-done"
 fi
 
 # ---- s: reboot with a dead server and a sleeping loader ----

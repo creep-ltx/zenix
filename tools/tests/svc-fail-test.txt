@@ -1,0 +1,9 @@
+wait zenix:/# 90
+send svctest reg f 0 /bin/false; svctest call f 1 0 30 & p=$!; sleep 3; kill -STOP $p; sleep 0.5; echo a1-stopped=$(ps | grep svctest | grep -c stopped); kill -CONT $p; kill $p; sleep 1; echo a1-left=$(ps | grep svctest | grep -vc zombie) a1-$(echo end)\r
+wait a1-end 30
+send svctest call f 1; svctest call f 1 0 30 & p=$!; sleep 0.4; kill $p; sleep 1; echo a1b-left=$(ps | grep svctest | grep -vc zombie) a1b-$(echo end)\r
+wait a1b-end 30
+send nice -n 19 svctest call f 1 0 20 & p=$!; sleep 0.3; nice -n -20 svctest call f 1; sleep 0.5; ps | grep svctest; kill $(pgrep svctest); sleep 1; echo a2-left=$(ps | grep svctest | grep -vc zombie) a2-$(echo end)\r
+wait a2-end 30
+send dmesg | grep 'svc: f:'; echo svc-f-$(echo done)\r
+wait svc-f-done 20

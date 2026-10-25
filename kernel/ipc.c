@@ -196,8 +196,15 @@ static long call(int port, struct umsg *m, u16 kflags, int ns)
     current->wait_port = port;
     current->wait_msg = m;
     current->call_ns = (u8)(ns ? ns : current->exiting);   /* every call from proc_exit is a no-start call */
-    if (!p->op)                                 /* a held port: svc.c starts the server or queues */
-        return svc_call((int)(p - ports), m, current->call_ns);
+    if (!p->op) {                               /* a held port: svc.c starts the server or queues */
+        long r = svc_call((int)(p - ports), m, current->call_ns);
+        /* every way out of svc_call ends the call: a failed load or watch left wait_msg naming m (in a frame about to
+         * die: kill_now and the stop check would refuse for ever) and kept a loader's boost from the queued clients */
+        current->wait_msg = 0;
+        current->svc_role = 0;
+        prio_recalc(current);
+        return r;
+    }
     ipc_enqueue(p, m, 0);
     return ipc_wait(m);
 }
