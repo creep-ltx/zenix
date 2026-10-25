@@ -76,6 +76,28 @@ IDE machine detection and timing, floppy write tail, gap, settle times, retries 
 timeouts); the floppy test is back in `make check`; verified in FS-UAE and on the host as the audit says per item; not
 yet on the A1200.
 
+## The order of work (owner 2026-10-25)
+The phases below say *what*; this says *in which order*. Real-hardware findings and problems found along the way are
+fixed next, ahead of everything here ("fix things when we find them"). A focused audit closes every block; its findings
+are fixed at once. Two independent design reviews for deep core changes, one for features.
+
+1. **Foundations finished (the week of 2026-10-26):** D13 shared code; the shell's memory fix; the colour console;
+   the self-updates. Audit.
+2. **Zenix reaches the world:** signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
+   server, DHCP, DNS); `ping`, `telnet`, `wget`, an NFS client; a Wasabi-like remote control (early: it lets the A1200
+   be tested remotely); `zpkg` with its repository on the owner's NAS. A security audit.
+3. **A terminal you can live in:** a fuller C library (newlib); D13 stage 2 (shared libraries) decided; the text-UI
+   library, then Sumi, Maki, Markdown and `zc`; UTF-8 in the console. Audit; then a first public pre-release (0.1),
+   with the owner's yes.
+4. **The Amiga world:** FAT, FFS/OFS, then PFS3; LhA/LZX unpacking; ZenixFS as the root on real hardware; the
+   installer. Audit, with the filesystems fuzzed against damaged disks.
+5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
+   viewers, preferences. Audit.
+6. **Sound and hardware:** a Paula server, `play`, a MOD player; optional memory protection on CPUs with an MMU; USB,
+   RTG, faster IDE, CD. Audit.
+7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full
+   audit of the whole system, then release 1.0 with the owner's yes.
+
 ## The plan, in phases (reordered 2026-10-22: a terminal to live in comes before ZenixFS and the desktop)
 
 **Phase 1 - Disk tools** (done, verified in FS-UAE). `fdisk` (the RDB partition table), `mkfs.ext2`, `fsck.ext2`, `df`, `sync`; the disk
