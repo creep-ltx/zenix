@@ -89,8 +89,8 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
 - Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
   Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
   pattern (architecture.md section 6). Measured with `-fstack-usage`
-  (2026-10-23): the largest single frames are `mkfs.ext2` main 8.5 KB, `man` 6.1 KB, miniz's Huffman table builder
-  5.6 KB (gzip), `fsck.ext2` main 5.4 KB; the directory walkers use 72-170 bytes per directory level (they used
+  (2026-10-23): the largest single frames are `man` 6.1 KB, miniz's Huffman table builder 5.6 KB (gzip), `fsck.ext2`
+  main 5.4 KB (`mkfs.ext2` main was 8.5 KB; 0.3 KB since its two 4 KB blocks are static, 2026-10-25); the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
   about 1430).
 - A login session (login, the shell and its work area) needs about 200 KB: a machine with 1 MB of chip RAM and no

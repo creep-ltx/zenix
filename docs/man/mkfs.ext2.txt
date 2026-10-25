@@ -29,7 +29,8 @@ EXAMPLE
 
 NOTES
     Running out of memory is reported ("out of memory") and ends the command
-    with a non-zero status; nothing is cut short silently.
+    with a non-zero status; nothing is cut short silently. Its two block
+    buffers are static, not on the stack: it runs in the default 16 KB.
 
 EXIT STATUS
     0, 1 on an error, 2 usage error.

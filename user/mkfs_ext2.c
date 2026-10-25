@@ -117,7 +117,7 @@ int main(int argc, char **argv)
     }
 
     /* superblock */
-    u8 sb[4096];
+    static u8 sb[4096];                 /* not on the 16 KB stack (audit A12) */
     memset(sb, 0, sizeof sb);
     w32(sb + 0, ninodes); w32(sb + 4, nblocks); w32(sb + 8, 0);
     w32(sb + 12, total_free); w32(sb + 16, ninodes - 11); w32(sb + 20, first);
@@ -146,7 +146,7 @@ int main(int argc, char **argv)
             memcpy(blk, sb, 1024);
             if (wblk(gs, blk)) goto fail;
         } else {
-            u8 tmp[4096];
+            static u8 tmp[4096];
             memset(tmp, 0, bsize);
             if (g == 0) memcpy(tmp + 1024, sb, 1024); else memcpy(tmp, sb, 1024);
             if (wblk(gs, tmp)) goto fail;
