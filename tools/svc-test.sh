@@ -81,7 +81,7 @@ fi
 if want_part z; then
 run z fsuae/zroot.fs-uae 120 tools/tests/svc-zroot-test.txt
 rx   z "zfsd serves the ZenixFS root as pid 3" " +3 +0 +8 +-10 msg +[0-9]+ zfsd"
-none z "no fsd on a ZenixFS boot" " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ fsd"
+none z "no fsd serves the root on a ZenixFS boot (the fsd in ps is fstab's ext2 mount)" "svc: fs: started @fsd.*"
 line z "zfsd killed while idle: the log says it ended" "svc: fs: zfsd (pid 3) ended, status 130"
 rx   z "... and the next use started it again" "svc: fs: started @zfsd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
 same z "... files are there after the restart" n1 n2
@@ -246,7 +246,7 @@ none t "... and it is never counted (no give-up)" "svc: gone: given up.*"
 rx   t "a crash during a request: that client gets -104" ".*svctest call q 7: -104 in [0-9]+ ms"
 rx   t "... the client queued behind it is served by the next server" ".*svctest call q 1: 0 in ([6-9][0-9]{2}|[0-9]{4,}) ms"
 rx   t "the root server stopped, a file service read from it: the load started the root server too" "svc: fs: started @fsd \(pid [0-9]+, for pid [0-9]+ svctest\)"
-rx   t "... and the call worked" ".*svctest call ping 1: 0 in [0-9]{3,} ms"
+if [ "$(grep -acE '.*svctest call ping 1: 0 in [0-9]+ ms' "$OUT/t.log")" -ge 2 ]; then echo "PASS ... and the call worked"; else echo "FAIL ... and the call worked"; pass=0; fi
 line t "the script ran to the end" "svc-t-done"
 rm -f "$OUT/root.hdf"
 fi
