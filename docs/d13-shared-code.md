@@ -301,5 +301,32 @@ What the build did differently from sections 1-13, and why; each item names the 
 - **Step 3a.** As planned: crt0 is `bsr.l _zstart` for every program (the stack at entry already holds argc and
   argv as `_zstart`'s arguments, so crt0 pushes nothing). Each ZEXE program loses crt0's three relocations; the kernel
   grew 24 bytes (its built-in servers link libz's `_zstart`): 174392 of 179200.
+- **Step 3b.** `sh` and `login` are installed as ZEX2 through `PUREAPPS` in the Makefile (`build/sh.zx` is a copy of
+  `sh.pzx`), linked with pure builds of crt0, libz, `pw.po` and `sha.po`: sh 72800 bytes shared + 1840 data, login
+  12336 + 412. The `-Wwrite-strings` review found the 8 warnings of sh.c and login.c (`arg0`, the `{ "sh", "-c", ... }`
+  argument vectors, login's `{ p->shell, 0 }`) and, with `-Wcast-qual`, `rep = (char *)""` and `perr = (char *)m` in
+  sh.c: all only read (passed to `sys_spawn`, `strlen`, `memcpy` from, or an error message). Nothing changed. The
+  shells' tests (`tools/pure-test.sh` part s) log in on consoles 2-4 through the serial hook; a shell cannot be made
+  to fault on purpose, so "a crash in one leaves the others" is checked with `crashpure` (part p) and, for shells, a
+  session ending (console 2's, then console 1's own) while the others run.
+- **Measured in FS-UAE (memory, not time), stage 1, 2026-10-25,** `free` after 1, 2 and 4 logins (console 1 plus
+  consoles 2-4), ZEXE `sh`/`login` (step 3a) against ZEX2 (step 3b):
+
+  | machine | sessions | free before | free after | more free |
+  |---|---|---|---|---|
+  | stock A1200, 2 MB chip only | 1 | 1040 KB | 1040 KB | 0 |
+  | | 2 | 674 KB | 747 KB | 73 KB |
+  | | 4 | 55 KB | 279 KB | 224 KB |
+  | A1200, 2 MB chip + 4 MB fast (fast free) | 1 | 3061 KB | 3062 KB | 1 KB |
+  | | 2 | 2544 KB | 2629 KB | 85 KB |
+  | | 4 | 1566 KB | 1794 KB | 228 KB |
+
+  `ps`: a session's own memory went from 165 KB (login 34 + sh 131) to 82 KB (22 + 60), with 83 KB of code shared once
+  (sh 71, login 12); `free`'s "sharing saves" says 83 KB per extra session, 249 KB for four. The machine gains a little
+  less than that (73 and 224 KB on the stock A1200) because each shell's arena is an eighth of the memory free when it
+  starts: more free memory, bigger arenas - the separate lever section 2 names. On the stock A1200 the ZEXE build's
+  fourth session left 55 KB, and two `sh -c` then failed with "out of memory"; with ZEX2, 279 KB.
+  Static instruction counts (objdump of `.text`): sh 21634 (ZEXE) against 22341 (ZEX2), +3.3%, `.text` 71194 against
+  69228 bytes; login 3651 against 3676, +0.7%, 11084 against 10940 bytes (section 3 estimated +4.5% for sh).
 
 Last checked against the code: 2026-10-25.

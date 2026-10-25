@@ -43,6 +43,9 @@ NOTES
     With no MMU any program can still read any memory, so login is
     accounting and protection against honest mistakes, not a security
     boundary.
+    login is a program with shared code: one copy of its code in memory
+    serves the login of every console (ps shows it as SHR, free as shared
+    code).
 
 SEE ALSO
     init(8), su(1), passwd(1), id(1)

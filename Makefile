@@ -281,6 +281,16 @@ $(BUILD)/%.puelf: $(BUILD)/%.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.
 $(BUILD)/%.pzx: $(BUILD)/%.puelf tools/mkzexe.py tools/check-68020-60.sh Makefile
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
+# login also links the user and password parts (pure builds of them: pw.po, sha.po)
+$(BUILD)/login.puelf: $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
+	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/libz.po $(LIBGCC) -o $@
+$(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po: user/pw.h
+# DESIGN D13 stage 1: these commands are installed as programs with shared code (one copy of sh's and login's code
+# for every console's session). Nothing they do sends raw messages (limits.md); sh.c and login.c were checked with
+# -Wwrite-strings: no write into a literal.
+PUREAPPS := sh login
+$(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
+	cp $< $@
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
 $(BUILD)/zenix.hdf: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py

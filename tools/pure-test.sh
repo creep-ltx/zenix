@@ -14,9 +14,13 @@
 #      names the other one still running it), and is not used again; the corrupt ZEX2 files are refused with reasons;
 #      a ZEXE program still runs
 #   m  a remount in the same slot: the same file (inode, size, time) on a floppy mounted again is not reused
+#   s  sh and login are ZEX2 (stage 1): one session's sh and login are the shared code; logins on consoles 2, 3 and 4
+#      add no copy (free: what sharing saves grows by sh + login each; ps: SHR for every sh and login); sh -c shells
+#      share it too; a session that ends (console 2, then console 1's own) leaves the others running; a literal
+#      echoed into a file by a shell
 # tools/pure-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
-PARTS=" ${*:-p m} "
+PARTS=" ${*:-p m s} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
@@ -34,6 +38,10 @@ rx()   { if grep -aqxE -- "$3" "$OUT/$1.log"; then ok "$2"; else bad "$2"; fi; }
 count() {  # count LOG WHAT N REGEX: exactly N lines match
     local n; n=$(grep -acxE -- "$4" "$OUT/$1.log")
     if [ "$n" = "$3" ]; then ok "$2"; else bad "$2 ($n lines, not $3)"; fi
+}
+scount() { # scount LOG FROM TO WHAT N REGEX: exactly N lines between the markers ==FROM and ==TO match
+    local n; n=$(awk -v a="==$2" -v b="==$3" '$0 == a { f = 1; next } $0 == b { f = 0 } f' "$OUT/$1.log" | grep -acxE -- "$6")
+    if [ "$n" = "$5" ]; then ok "$4"; else bad "$4 ($n lines, not $5)"; fi
 }
 # the free line after the marker ==NAME: "shared code: S KB, sharing saves V KB" -> S V
 # (typed characters may land in front of it)
@@ -101,6 +109,29 @@ run m "$OUT/m.fs-uae" 120 tools/tests/pure-mount-test.txt
 line m "umount works while the program runs (it holds no file open)" "umount=0"
 cmp_ "mounted again in the same slot: the same file is loaded again, not reused" "$(S m m2)" -gt "$(S m m1)"
 line m "the script ran to the end" "pure-m-done"
+fi
+
+if want_part s; then
+run s fsuae/a1200-020-fast.fs-uae 200 tools/tests/pure-shells-test.txt
+SK=$(codekb build/sh.zx); LK=$(codekb build/login.zx)
+both=$(python3 -c 'import struct, sys; print(sum(struct.unpack(">I", open(f, "rb").read()[8:12])[0] for f in sys.argv[1:]))' build/sh.zx build/login.zx)
+cmp_ "one session: sh and login are the shared code" "$(S s s1)" -eq $((both / 1024))
+cmp_ "... nothing saved yet" "$(V s s1)" -eq 0
+cmp_ "a second login (console 2): no new copy" "$(S s s2)" -eq "$(S s s1)"
+cmp_ "... sharing saves its sh and login" "$(V s s2)" -eq $((both / 1024))
+cmp_ "four logins (consoles 1-4): still one copy" "$(S s s4)" -eq "$(S s s1)"
+cmp_ "... sharing saves three sessions' code" "$(V s s4)" -eq $((3 * both / 1024))
+scount s s4 s4b "ps shows the shared code for each of the four shells ($SK KB)" 4 " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +$SK sh"
+scount s s4 s4b "... and for each of the four logins ($LK KB)" 4 " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +$LK login"
+cmp_ "two more shells (sh -c) share it too" "$(V s s4b)" -gt "$(V s s4)"
+cmp_ "... still one copy" "$(S s s4b)" -eq "$(S s s1)"
+rx   s "console 2's shell ran before it ended" ".*alive-on-2"
+rx   s "a session ended: console 3's shell still runs" ".*alive-on-3"
+cmp_ "... still one copy" "$(S s s3)" -eq "$(S s s1)"
+line s "a shell writes a literal into a file" "a literal"
+rx   s "console 1's (the first) session ended and came back: console 3's shell still runs" ".*alive-after-the-first"
+cmp_ "... still one copy" "$(S s s5)" -eq "$(S s s1)"
+line s "the script ran to the end" "pure-s-done"
 fi
 
 [ $pass = 1 ] && { echo "pure-test: all passed"; exit 0; }

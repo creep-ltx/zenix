@@ -1,0 +1,59 @@
+wait zenix:/# 90
+sleep 3
+send echo ==s1; free; ps\r
+wait (?m)^==s1 20
+sleep 3
+send \x1d2
+wait zenix login: 30
+send root\r
+sleep 5
+send \x1d1
+sleep 3
+send echo ==s2; free; ps\r
+wait (?m)^==s2 20
+sleep 3
+send \x1d3
+wait zenix login: 30
+send root\r
+sleep 5
+send \x1d4
+wait zenix login: 30
+send root\r
+sleep 5
+send \x1d1
+sleep 3
+send echo ==s4; free; ps\r
+wait (?m)^==s4 20
+sleep 3
+send sh -c 'sleep 4' & sh -c 'sleep 4' & sleep 1; echo ==s4b; free\r
+wait (?m)^==s4b 20
+sleep 5
+send \x1d2
+sleep 2
+send echo alive-on-2; exit\r
+sleep 4
+send \x1d3
+sleep 2
+send echo alive-on-3\r
+sleep 2
+send \x1d1
+sleep 2
+send echo ==s3; free; ps\r
+wait (?m)^==s3 20
+sleep 2
+send sh -c 'echo "a literal" > /tmp/lit; cat /tmp/lit'; echo ==lit\r
+wait (?m)^==lit 20
+send exit\r
+wait zenix:/# 30
+sleep 3
+send \x1d3
+sleep 2
+send echo alive-after-the-first\r
+sleep 2
+send \x1d1
+sleep 2
+send echo ==s5; free; ps\r
+wait (?m)^==s5 20
+sleep 2
+send echo pure-s-done\r
+sleep 2

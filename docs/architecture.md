@@ -343,7 +343,10 @@ PATH: its shared code in memory is damaged (checksum): loading a fresh copy", th
 process running shared code faults: the crash line gives `code+OFFSET`, and the next line says the code is intact, or
 that it is DAMAGED, is not used again, and which processes still run it (nothing can stop them without an MMU).
 `tools/pure-test.sh` (part of `make check`) checks all of this in FS-UAE with ZEX2 builds of `hello` and `crash`
-(`/tests/hellopure`, `/tests/crashpure`) and 14 corrupt ZEX2 files.
+(`/tests/hellopure`, `/tests/crashpure`) and 14 corrupt ZEX2 files. **Stage 1 installs `sh` and `login` as ZEX2**
+(`PUREAPPS` in the Makefile: `/bin/sh` and `/bin/login` are `sh.pzx`, `login.pzx`, linked with pure builds of
+crt0, libz, `pw.po` and `sha.po`); every other program and the built-in servers stay ZEXE. A program that sends raw
+messages must stay ZEXE (limits.md); `sh` and `login` send none.
 
 ## 5. Memory (`kernel/mem.c`)
 
