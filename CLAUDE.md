@@ -25,7 +25,14 @@ on PFS3 partitions, Zenix root and /home); the menu program lives with `zenixboo
 Rebooting between the systems (owner 2026-10-24): `bootzenix` in AmigaOS, `reboot [amigaos]` / `bootamigaos` in Zenix,
 through a one-shot note the boot menu reads. Later (not now): a Wasabi-like remote-access daemon for Zenix (needs the network driver).
 DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved, docs/d11-service-manager.md).
-`awk` (owner 2026-10-24: finish the parked `user/awk.c` now, while D11 is built; a colour console proposed next, not yet approved).
+`awk` (owner 2026-10-24: finish the parked `user/awk.c` now, while D11 is built).
+**Colour console approved (owner 2026-10-25):** colours in the text console (ANSI colours, for `ls`, `grep`, the prompt,
+`less`); a design note first (a DESIGN number, reviewed), then built. **The shell's memory** (a fix, audit 2026-10-25
+'found while fixing'): sh grabs a fixed arena of 64-256 KB per shell and parses a whole script at once; make it grow on
+demand, give memory back, and read scripts a piece at a time.
+**Order after D13 (main session's plan, 2026-10-25):** the self-updates design note (then build), the colour console,
+the shell's memory fix, then the network driver; the owner's weekend 2026-10-30/31: card update, serial cable and `cu`,
+the DoM on the stock A1200 and the Apollo 060 (D13 measurements).
 Next approved, in this order after D11 (owner 2026-10-24): **D13 shared libraries and shared program code** (one copy in
 memory of libz and of a program several processes run, as AmigaOS libraries and pure programs; design note first,
 reviewed, before code; it comes before the self-updates so the updater ships the final program format), then Zenix
