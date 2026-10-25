@@ -41,8 +41,11 @@ NOTES
     the ten consoles, the servers and the commands they run), so ps shows
     at most 32 lines.
     The idle process (pid 0) is listed first, with no level. boot is
-    pid 1; the servers (diskd, fsd or zfsd) have PPID 0 and get a new pid
-    when they are started again after a crash or a kill (dmesg says so).
+    pid 1, diskd pid 2 and the root's server pid 3 on a normal boot; the
+    servers (diskd, fsd or zfsd for the root and for each mount, and the
+    services of /etc/svctab) have PPID 0, appear only once something
+    first called them, and get a new pid when they are started again
+    after a crash or a kill (dmesg says so).
 
 SEE ALSO
     free(1), sh(1) (jobs, kill), nice(1), renice(1)

@@ -131,7 +131,7 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    caches, display, clock and disk, then creates one process from its image: `boot` (pid 1). `boot` registers the
    disk server and the root filesystem server as services (section 9, "The service manager"): its first call to
    `disk` starts `diskd` (pid 2), it picks the root device and its server from the superblock, and its first call to
-   `fs` starts `fsd` or `zfsd` (pid 3); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
+   `fs` starts `fsd` or `zfsd` (pid 3); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
    starts `login` on console 1 (section 11).
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)

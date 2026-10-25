@@ -16,7 +16,7 @@
 | [zenixfs-format.md](zenixfs-format.md) | ZenixFS's exact on-disk format, version 1. |
 | [d13-shared-code.md](d13-shared-code.md) | DESIGN D13's design note: one copy in memory of a program's code and of shared libraries, how (gcc's separate-data mode, a base register), the file format, the loader, safety, the measurements it must pass. Proposed, awaiting review. |
 | [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D13 and where each one stands. |
-| [d11-service-manager.md](d11-service-manager.md) | The full design note of DESIGN D11, the service manager (servers started on first use and started again when they die): approved; steps 0-5 (the core) built and merged, steps 6-9 next; section 15 says where the code differs. |
+| [d11-service-manager.md](d11-service-manager.md) | The full design note of DESIGN D11, the service manager (servers started on first use and started again when they die): approved; built: steps 0-5 (the core) merged, steps 6-9 (mounts, `/etc/svctab`, the servers' output in the kernel log) on branch d11; section 15 says where the code differs. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
 | [audit-2026-10-22.md](audit-2026-10-22.md) | The audit of 2026-10-22: the work list of the hardening round (batches A-E), each item marked with its fix. |
 | [audit-closing-2026-10-24.md](audit-closing-2026-10-24.md) | The closing report of the audit round: what was fixed, what is verified on the real A1200, what is left. |

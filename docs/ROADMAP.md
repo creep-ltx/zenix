@@ -38,7 +38,7 @@ built on the Amiga's own hardware (blitter, Copper, planar screens). Not Linux, 
 
 Phases 1, 3 (most of it) and 4 are built and verified in FS-UAE; phase 2 is done: Zenix runs on the owner's A1200
 (PiStorm32-lite, Emu68 1.1), booted from the SD card through a boot menu next to AmigaOS. The audit round is closed;
-D10 (priorities) is built, D11 (service manager) is designed and approved.
+D10 (priorities) is built, D11 (service manager) is built (its last steps on branch d11, to be merged).
 
 ## The text console behaves like Unix/Linux (owner's decision, 2026-10-23)
 The text console has ten plain virtual consoles, switched with Amiga+F1..F10 (plain F-keys stay free for programs), each

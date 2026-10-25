@@ -39,15 +39,19 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    IDE probe on this machine's port only - a Ramsey means the A4000 port, Gayle ID 0xD the A600/A1200 one with its
    interrupt sources switched off first, anything else no IDE - then the SD card, then the A3000's SCSI (panic only
    if there is neither a disk nor a RAM disk).
-5. `proc_init`, `tty_init`, then four processes **built into the kernel image** (so they need no disk):
-   `diskd` (priv), `fsd` (ext2), `zfsd` (ZenixFS) and `boot` (priv). Timer and keyboard interrupts (latch from the
+5. `proc_init`, `tty_init`, then one process **built into the kernel image**: `boot` (pid 1, priv). Timer and keyboard interrupts (latch from the
    E-clock; one keyboard handshake in case it still waits for one) and interrupts are switched on. The main thread becomes
    the idle loop: reap orphans, `schedule()`, drain the serial buffer, `cpu_idle()` (stop until an interrupt).
-6. `diskd` finds the disk and its partition table and creates the `disk` port (on the zenixboot SD card it lists the
-   FAT partition, the 0x76 container, the FFS boot partition inside it and the ext2 partition; only the last one can
-   be a root). `fsd` and `zfsd` both choose the root
-   device the same way (architecture.md section 9); the one whose filesystem it is mounts it and creates the `fs`
-   port, the other ends. `boot` polls for `fs` (up to ~30 s), then `spawn("/bin/init")` and waits for it.
+6. `boot` starts the servers by using them (DESIGN D11, the service manager; architecture.md section 9). It registers
+   the service `disk` -> `@diskd` (nice -10): the name now has a *held* port with no server. Its first question to it
+   (the device list, for choosing the root) makes boot itself load `diskd` from the kernel image (pid 2, priv); diskd
+   finds the disk and its partition table and takes its port, and the question is answered (on the zenixboot SD card
+   it lists the FAT partition, the 0x76 container, the FFS boot partition inside it and the ext2 partition; only the
+   last one can be a root). boot picks the root (a RAM disk; else the bootable partition; else the first ext2 or
+   ZenixFS one; else the bare disk), reads its superblock to tell ext2 from ZenixFS and its volume id, and registers
+   `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...`. Asking for the root inode starts that server (pid 3); from
+   then on the kernel log is no longer mirrored on the screen. boot registers the services of `/etc/svctab` (nothing
+   is started for them yet), then `spawn("/bin/init")` and waits for it.
    `spawn` itself is messages to `fsd`: the kernel's `proc_spawn` opens the file (`fs_exec_open`) and reads it
    straight into the new process's memory.
 7. **`/bin/init`** prints `/etc/motd`, runs `mount -a` if there is an `/etc/fstab`, and starts `/bin/login` on
@@ -95,6 +99,14 @@ Context switches happen at those blocking points and at the 50 ms time slice, in
 3. `proc_exit` closes the files, releases the tty, closes the process's ports (so a crashing *server* fails its
    clients with an error instead of hanging them), `mem_free_owner(pid)` returns every block it owned, and the
    parent's `wait` returns 139. Everyone else keeps running (verified: `crash` killed, `spin` continued).
+   **If the process was a server of a service** (diskd, a filesystem server, an `/etc/svctab` service: DESIGN D11),
+   its port is not closed but goes back to *held*: the request it was serving fails (-ECONNRESET; a program's file
+   call sees -EIO), the requests queued behind it stay queued, and the first of those clients loads the program again
+   in its own context; the new server takes the port and serves them as if nothing happened. The kernel log says
+   `svc: NAME: PROG (pid N) ended, status 139, during request T for pid C` and `start K when next used`. A restarted
+   diskd gets its device table back from the kernel, a restarted filesystem server its open files; repeated crashes
+   wait 1, 2, 4 s before the next start, and 5 ends within a minute give the service up (for diskd or the root
+   filesystem: a panic with the reason).
 4. If the exception was in **supervisor mode**, it's a kernel bug: print the vector, PC and fault address and
    `panic` (halt).
 
