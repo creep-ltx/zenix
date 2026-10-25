@@ -114,6 +114,7 @@ int main(void)
         else if (!strcmp(cmd, "writes")) { extern unsigned long hostdisk_writes; printf("writes -> %lu\n", hostdisk_writes); continue; }
         else if (!strcmp(cmd, "sync")) r = req(FS_SYNC, 0, 0, 0, 0);
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);
+        else if (!strcmp(cmd, "unclean")) r = ext2_mark_unclean();     /* what a restarted fsd does after a crash */
         else { printf("%s -> unknown command\n", cmd); continue; }
         printf("%s -> %d\n", cmd, r);
     }

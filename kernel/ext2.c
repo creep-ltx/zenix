@@ -644,14 +644,16 @@ static int sb_add(u32 f, int delta)             /* 32-bit counters in the superb
 /* clear the superblock's "cleanly unmounted" state (s_state bit 0, not bit 1 "has errors", which makes a read-only
  * mount): Linux and e2fsck then check the volume. A restarted fsd does it when its predecessor ended in the middle of a
  * request (DESIGN D11 5.4: ext2 has no journal, the change may be half done). */
-int ext2_mark_unclean(void)
+int ext2_mark_unclean(void)                     /* 0, -EROFS, or -EIO (audit A14: was a bare -1) */
 {
     u32 blk = bsize == 1024 ? 1 : 0, base = bsize == 1024 ? 0 : 1024;
     u8 b[2];
-    if (ext2_readonly || bread_copy(blk, base + 58, b, 2))
-        return -1;
+    if (ext2_readonly)
+        return -EROFS;
+    if (bread_copy(blk, base + 58, b, 2))
+        return -EIO;
     wr16(b, (u16)(rd16(b) & ~1u));
-    return bwrite_copy(blk, base + 58, b, 2);
+    return bwrite_copy(blk, base + 58, b, 2) ? -EIO : 0;
 }
 
 static int bitmap_alloc(u32 bm_blk, u32 nbits, u32 first_bit)

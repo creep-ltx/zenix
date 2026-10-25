@@ -312,8 +312,10 @@ int main(int argc, char **argv)
         return 1;
     }
     if ((self & SVC_MIDREQ) && !ext2_readonly) {        /* ext2 has no journal: the change may be half done (D11 5.4) */
-        ext2_mark_unclean();
+        int e = ext2_mark_unclean();
         printf("%s: %s was being changed when its server ended: check it with fsck.ext2\n", who, dev);
+        if (e < 0)
+            printf("%s: %s: could not mark it \"needs a check\" on the disk (error %d): run fsck.ext2 by hand\n", who, dev, e);
     }
     int port = sys_port_create(pname);
     if (port < 0) { printf("%s: cannot create the port %s\n", who, pname); return 1; }

@@ -53,6 +53,13 @@ printf 'mount\nopen /x wc\nmkdir /d\nopen /lost+found r\nls /\n' > $T/w.txt
 fsd $T/ro.img $T/w.txt $T/out
 [ "$sum1" = "$(sha256sum < $T/ro.img)" ] && grep -q "open -> -30" $T/out && grep -q "mkdir -> -30" $T/out && check "read-only mount: writes refused (EROFS), image unchanged" ok || { check "read-only mount: writes refused, image unchanged" bad; cat $T/out; }
 
+# the "needs a check" mark of a restart after a crash mid-request (D11 5.4, audit A14: errno values, not -1)
+cp $T/plain.img $T/uc.img; printf 'mount\nunclean\n' > $T/uc.txt; fsd $T/uc.img $T/uc.txt $T/out
+grep -q "unclean -> 0" $T/out && dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *not clean' && check "the needs-a-check mark: 0, and the host sees the volume not clean" ok || { check "the needs-a-check mark: 0, and the host sees the volume not clean" bad; cat $T/out; }
+cp $T/ext3.img $T/uc.img; fsd $T/uc.img $T/uc.txt $T/out
+grep -q "unclean -> -30" $T/out && check "... on a read-only mount it is refused with -EROFS" ok || { check "... on a read-only mount it is refused with -EROFS" bad; cat $T/out; }
+rm -f $T/uc.img
+
 # ---- 2. a workload, then host e2fsck ----
 cat > $T/work.txt <<'EOF'
 mount
