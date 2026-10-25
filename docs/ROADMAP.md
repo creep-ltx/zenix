@@ -85,14 +85,16 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    the self-updates. Audit.
 2. **Zenix reaches the world:** signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
    server, DHCP, DNS); `ping`, `telnet`, `wget`, an NFS client; a Wasabi-like remote control (early: it lets the A1200
-   be tested remotely); `zpkg` with its repository on the owner's NAS. A security audit.
+   be tested remotely); `zpkg` with its repository on the owner's NAS. A security audit. Then **the Zenix demo floppy**
+   (owner 2026-10-25, in the spirit of the 1999 QNX demo disk): one 880 KB Amiga floppy that boots into Zenix with the
+   network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5.
 3. **A terminal you can live in:** a fuller C library (newlib); D13 stage 2 (shared libraries) decided; the text-UI
    library, then Sumi, Maki, Markdown and `zc`; UTF-8 in the console. Audit; then a first public pre-release (0.1),
    with the owner's yes.
 4. **The Amiga world:** FAT, FFS/OFS, then PFS3; LhA/LZX unpacking; ZenixFS as the root on real hardware; the
    installer. Audit, with the filesystems fuzzed against damaged disks.
 5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
-   viewers, preferences. Audit.
+   viewers, preferences; the demo floppy's desktop edition. Audit.
 6. **Sound and hardware:** a Paula server, `play`, a MOD player; optional memory protection on CPUs with an MMU; USB,
    RTG, faster IDE, CD. Audit.
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full
