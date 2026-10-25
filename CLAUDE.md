@@ -30,8 +30,9 @@ DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved
 `less`); a design note first (a DESIGN number, reviewed), then built. **The shell's memory** (a fix, audit 2026-10-25
 'found while fixing'): sh grabs a fixed arena of 64-256 KB per shell and parses a whole script at once; make it grow on
 demand, give memory back, and read scripts a piece at a time.
-**Order after D13 (main session's plan, 2026-10-25):** the self-updates design note (then build), the colour console,
-the shell's memory fix, then the network driver; the owner's weekend 2026-10-30/31: card update, serial cable and `cu`,
+**Order after D13 (owner 2026-10-25: "fix things when we find them"):** first the shell's memory fix, then the
+self-updates design note (then build), the colour console, then the network driver. Rule from then on: a problem found
+during other work is fixed next (or now if small), not parked behind new features; the owner's weekend 2026-10-30/31: card update, serial cable and `cu`,
 the DoM on the stock A1200 and the Apollo 060 (D13 measurements).
 Next approved, in this order after D11 (owner 2026-10-24): **D13 shared libraries and shared program code** (one copy in
 memory of libz and of a program several processes run, as AmigaOS libraries and pure programs; design note first,
