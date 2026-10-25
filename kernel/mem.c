@@ -97,10 +97,13 @@ static void check_blk(const struct range *r, const struct mblk *b)
     }
 }
 
-static void *alloc_in(struct range *r, u32 need, u32 owner)
+/* LIMIT (0: none): the block must end at or below it, cut from the low end of a free block (MEM_LOW1G) */
+static void *alloc_in(struct range *r, u32 need, u32 owner, u32 limit)
 {
     for (struct mblk *b = (struct mblk *)r->lo; b; b = next_of(r, b)) {
         check_blk(r, b);
+        if (limit && (u32)b + need > limit)
+            break;                              /* the blocks only get higher from here */
         if (USED(b) || SZ(b) < need)
             continue;
         u32 left = SZ(b) - need;
@@ -112,7 +115,7 @@ static void *alloc_in(struct range *r, u32 need, u32 owner)
             return b + 1;
         }
         freeb[r->chip] -= need;
-        if (need >= BIG) {                      /* big: cut from the high end */
+        if (need >= BIG && !limit) {            /* big: cut from the high end */
             use = (struct mblk *)((u32)b + left);
             b->size = left;
             use->size = need | 1;
@@ -155,9 +158,10 @@ void *mem_alloc(u32 n, u32 flags, u32 owner)
         for (int i = 0; i < nranges; i++) {
             if (ranges[i].chip != want_chip)
                 continue;
-            if ((flags & MEM_LOW1G) && ranges[i].hi > 0x40000000u)
-                continue;
-            void *p = alloc_in(&ranges[i], need, owner);
+            u32 limit = (flags & MEM_LOW1G) ? 0x40000000u : 0;
+            if (limit && ranges[i].lo >= limit)
+                continue;                       /* wholly above 1 GB; one crossing it gives from its low part (A15) */
+            void *p = alloc_in(&ranges[i], need, owner, limit);
             if (p)
                 return p;
         }

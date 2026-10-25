@@ -302,7 +302,9 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
   (size + used bit, size of the previous block, **owner pid**, a magic value `ZMEM` that catches overruns and
   double frees).
 - Blocks of 16 KB or more are cut from the **high** end of a free block, small ones from the **low** end, so the
-  two sizes do not interleave and fragment each other.
+  two sizes do not interleave and fragment each other. `MEM_LOW1G` (the SD driver's mailbox message, which the Pi's
+  VideoCore reads only below 1 GB) takes a block that ends below 1 GB, from the low end, also from a fast range that
+  crosses 1 GB (audit A15; `tools/mem-test.sh`).
 - Every block records its owner. `mem_free_owner(pid)` hands back everything a process held, which is how a
   crashed or killed process is cleaned up without any cooperation from it.
 - Free-byte counters are O(1), so `free` and `SYS_meminfo` read them cheaply.

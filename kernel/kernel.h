@@ -100,7 +100,7 @@ void irq_other_c(u32 fv);
 /* mem.c */
 #define MEM_CHIP     1u         /* must be chip RAM (DMA: graphics, audio, disk) */
 #define MEM_FASTONLY 2u         /* fast RAM only, fail rather than use chip */
-#define MEM_LOW1G    4u         /* fast RAM wholly below 1 GB: what the Pi 4's VideoCore can read (the mailbox) */
+#define MEM_LOW1G    4u         /* fast RAM ending below 1 GB: what the Pi 4's VideoCore can read (the mailbox) */
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
 extern u32 boot_ram_pa, boot_ram_size;
 void *mem_alloc(u32 n, u32 flags, u32 owner);   /* 0 if n is 0, above MEM_ALLOC_MAX, or does not fit */

@@ -62,7 +62,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | docs-check | the documentation rules above |
 | ext2-host-test, disk-host-test | the ext2 server, `fsck.ext2`, `mkfs.ext2`, `fdisk` and `diskd` built for the PC, against image files and `e2fsck`, with a fuzz loop |
 | zenixfs-test | `make -C zenixfs test`: the ZenixFS library on the PC (random operations, power cuts, damaged blocks) |
-| mfm-test, emmc-test, serial-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console, A3000 SCSI and Pi device-tree code against models |
+| mfm-test, emmc-test, serial-test, mem-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console and `/dev/ttyS0`, the kernel allocator around 1 GB (`MEM_LOW1G`), A3000 SCSI and Pi device-tree code against models |
 | matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch) |
 | cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
 | users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root |
