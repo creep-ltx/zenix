@@ -533,7 +533,7 @@ crash such an inode is left with no links and `fsck.ext2`/`e2fsck` free it. Zeni
 (`zenixfs_orphan_add`), which the next mount frees after a crash. Started as `fsd DEVICE PORTNAME [-root] [-id ID]`: it
 serves DEVICE on port PORTNAME; with `-root` (the root's server, registered by boot) the volume must be one Zenix can
 **write** (see "ext2: what is mounted" in section 10; an ext3, ext4 or damaged volume is never the root), and it
-prints as `fsd`, not as `mount.ext2`; `-id START,SIZE,UUID` is the volume id boot read (`user/volid.h`): at every
+prints as `fsd` (a mount's server prints as its port name, `fs.ide0p2:`); `-id START,SIZE,UUID` is the volume id boot or `mount` read (`user/volid.h`): at every
 start the server looks for the device at that place on the same medium (a partition renamed by `fdisk` is found
 under its new name) and serves it if its superblock's uuid matches or the recorded one is all zero; only if nothing is
 at that place, the one device carrying that uuid (two carriers are refused); else it ends ("the volume is on no
@@ -543,19 +543,19 @@ first request and rebuilds its open counts, so a deleted file held open keeps it
 close; if its predecessor ended in the middle of a request it clears the superblock's "cleanly unmounted" state bit
 (Linux and e2fsck then check the volume; Zenix keeps writing) and says "DEV was being changed when its server
 ended: check it with fsck.ext2".
-As `/bin/mount.ext2` it is started by `mount`. It answers `FS_ROOT` (root inode, device and type names) and `FS_QUIT`
-(umount: sync, release the device, exit). Two root servers are built into the kernel image, `fsd` (ext2) and `zfsd`
-(the ZenixFS server, the same program as `/bin/mount.zenixfs`). **Which one serves the root** is boot's choice
+A mounted filesystem's server is the same built-in image, registered by `mount` (the mount table, below). It answers
+`FS_ROOT` (root inode, device and type names) and `FS_QUIT` (umount: sync, release the device, exit). Two filesystem
+servers are built into the kernel image, `fsd` (ext2) and `zfsd` (ZenixFS); there is no other copy of them. **Which one serves the root** is boot's choice
 (`user/rootpick.h`): a RAM disk is the root; else the bootable ext2/zenixfs partition; else the first one of those;
 else the bare disk; boot reads the device's superblock (ext2 magic at byte 1080, ZenixFS `ZNFS` at byte 32) and
 registers `fs` with that server and device, so only one root server is ever started. `init` runs `mount -a` (from
 `/etc/fstab`) before login.
 
-### mount.zenixfs - the ZenixFS server (`user/zenixfsd.c` + `zenixfs/zenixfs.c`, port chosen by `mount`)
+### zfsd - the ZenixFS server (`user/zenixfsd.c` + `zenixfs/zenixfs.c`, port `fs` or `fs.DEVICE`)
 The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the
 disk server (`user/zenixfs_disk.c`: filesystem blocks of 1-4 KB as 2-8 sector calls plus `DISK_FLUSH`). Same protocol and the same
 permission rules as the ext2 server. Changes commit three seconds after the first one, at `FS_SYNC` and at `FS_QUIT`.
-Started as the root's server (`zfsd`) it takes the same `-root -id` arguments as fsd. **A restarted zfsd** mounts the
+It takes the same `-root -id` arguments as fsd and prints as `zfsd` (the root's) or as its port name (a mount's). **A restarted zfsd** mounts the
 last commit keeping the orphans (`ZENIXFS_MNT_READONLYISH`), rebuilds its open counts from `SVC_OPENS`, frees only
 the orphans nobody holds (`zenixfs_orphans_keep`) and sets the next inode number to at least the committed one +
 65536 and above every number the kernel holds (`zenixfs_ino_floor`, committed before the first request): a file
@@ -564,8 +564,16 @@ never handed to another file. The library
 allocates only at mount (block cache, bitmaps, three scratch blocks), so a running server needs no more memory.
 
 ### The mount table (`kernel/vfs.c`)
-Entry 0 is the root (port `fs`); `SYS_mount` puts a running server's port on a directory (8 entries, the root
-included). With only the
+Entry 0 is the root (port `fs`); `SYS_mount` puts a server's port on a directory (8 entries, the root
+included). **Mounts are services** (D11 6.4): `mount DEVICE DIR` reads the device's volume id (as boot does),
+registers `fs.DEVICE` -> `@fsd DEVICE fs.DEVICE -id ID` or `@zfsd ...` at nice -10 and calls `SYS_mount`, whose first
+call to the port (`FS_ROOT`) starts the server in `mount`'s context; a mount whose server died is started again by
+its next use, from the kernel image (no disk read). A failed mount removes its entry again. `umount` (`vfs_umount`)
+removes the entry *before* it sends `FS_QUIT` (a no-start call), so the server's end is final; the held slot is free
+again when the server's port closes, and a registration that finds its name or every slot still being given back
+waits up to 2 s for it (an `umount` followed at once by a `mount`). A mounted filesystem is not essential: given up,
+it stays mounted and answers -EIO until `umount`. A future filesystem type with no built-in image would be a file
+service (`/sbin/fs.TYPE`), not built. With only the
 root mounted, paths go to its server untouched. Otherwise the kernel makes every path absolute and normalised as text
 (working-directory text + path, `.` and `..` removed; `path_abs`, the one normaliser, also used for the
 working-directory text itself and for mount points; at most 159 bytes, `FS_PATHMAX` in fsproto.h, longer is
@@ -584,7 +592,8 @@ end, it says so and starts it again. (It exists because the idle process cannot 
 consoles are init's work (section 11, man/init.txt).
 
 ### The service manager (`kernel/svc.c`, DESIGN D11)
-The full design is docs/d11-service-manager.md; what is built (steps 0-5 of its build order, the core):
+The full design is docs/d11-service-manager.md; what is built (steps 0-6 of its build order: the core and the
+mounts):
 - **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
   bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
   (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are
@@ -672,7 +681,7 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - Not done: moving directories between parents (rename answers -EXDEV, so `mv` copies), triple-indirect files, a
   journal.
 - Several filesystems can be mounted (`mount`, see section 9). **ZenixFS** (copy-on-write commits, checksummed
-  metadata, extents) is the native one, served by `mount.zenixfs` and possible as the root: `zenixfs.md`.
+  metadata, extents) is the native one, served by `zfsd` and possible as the root: `zenixfs.md`.
 
 ## 11. Pipes, tty, terminal, display
 

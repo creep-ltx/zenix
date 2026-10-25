@@ -7,7 +7,8 @@
 #include "zenixfs_disk.h"
 #include "volid.h"
 
-/* mount.zenixfs DEVICE PORTNAME [-root] [-id ID]: the ZenixFS filesystem server (docs/zenixfs.md), started by mount(8);
+/* zfsd DEVICE PORTNAME [-root] [-id ID]: the ZenixFS filesystem server (docs/zenixfs.md), built into the kernel and
+ * started as a service (DESIGN D11): the root's ("fs") registered by boot, a mount's ("fs.DEVICE") by mount(8);
  * built into the kernel as zfsd, which boot registers as the root's service ("fs") when the root is ZenixFS (DESIGN
  * D11). Speaks the same protocol as the ext2 server (kernel/fsproto.h) on port PORTNAME. Files are named by ZenixFS inode number.
  * The library keeps changes in memory and commits them atomically: here every 3 seconds after the first change, on
@@ -398,7 +399,7 @@ static int held(uint32_t ino)                    /* an orphan the kernel still h
 /* After the port is ours, before the first request (DESIGN D11 5.4): the inodes the kernel holds open on us, then
  * the orphans nobody holds are freed, and inode numbers jump past any the dead server may have handed out after its
  * last commit (the kernel may hold those: they must never name another file) */
-static void restart_opens(void)
+static void restart_opens(const char *who)
 {
     static u32 ino[160];
     int n = sys_svc_opens(ino, sizeof ino);
@@ -409,30 +410,30 @@ static void restart_opens(void)
     }
     int kept = zenixfs_orphans_keep(fs, held);
     if (n < 0 || kept < 0 || zenixfs_ino_floor(fs, top + 1))
-        printf("mount.zenixfs: %s: restart: open files %d, orphans %d: some space may stay used until fsck.zenixfs\n", devname, n, kept);
+        printf("%s: %s: restart: open files %d, orphans %d: some space may stay used until fsck.zenixfs\n", who, devname, n, kept);
 }
 
 int main(int argc, char **argv)
 {
-    if (argc < 3) { printf("usage: mount.zenixfs DEVICE PORT [-root] [-id ID]\n"); return 2; }
-    const char *pname = argv[2], *dev = argv[1];
+    if (argc < 3) { printf("usage: zfsd DEVICE PORT [-root] [-id ID]\n"); return 2; }
+    const char *pname = argv[2], *dev = argv[1], *who = pname[2] ? pname : "zfsd";
     char name[16];
     int restart = (sys_svc_self() & 0xFFFF) > 1;
     if (argc > 4 && !strcmp(argv[argc - 2], "-id")) {      /* the volume by its place and uuid (volid.h) */
-        if (vol_find(sys_port_find("disk"), dev, argv[argc - 1], name, pname[2] ? pname : "zfsd", restart)) return 1;
+        if (vol_find(sys_port_find("disk"), dev, argv[argc - 1], name, who, restart)) return 1;
         dev = name;
     }
-    if (try_mount(dev, restart)) { printf("mount.zenixfs: %s is not a ZenixFS volume, or is in use\n", dev); return 1; }
+    if (try_mount(dev, restart)) { printf("%s: %s is not a ZenixFS volume, or is in use\n", who, dev); return 1; }
     struct zenixfs_stats st;
     zenixfs_get_stats(fs, &st);
     if (st.mount_damage)
-        printf("mount.zenixfs: %s: %u commit record(s) were unreadable; mounted from the last good commit\n", devname, st.mount_damage);
+        printf("%s: %s: %u commit record(s) were unreadable; mounted from the last good commit\n", who, devname, st.mount_damage);
     if (!zdisk_can_flush())
-        printf("mount.zenixfs: %s: the disk cannot flush its write cache: a power cut may lose the last commits, or damage the volume if the disk reorders writes\n", devname);
+        printf("%s: %s: the disk cannot flush its write cache: a power cut may lose the last commits, or damage the volume if the disk reorders writes\n", who, devname);
     int port = sys_port_create(pname);
-    if (port < 0) { printf("mount.zenixfs: cannot create the port %s\n", pname); return 1; }
+    if (port < 0) { printf("%s: cannot create the port %s\n", who, pname); return 1; }
     if (restart)
-        restart_opens();
+        restart_opens(who);
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {
         int r = handle(m);

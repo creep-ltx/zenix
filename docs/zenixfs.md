@@ -1,7 +1,7 @@
 # ZenixFS - the native Zenix filesystem (design 2026-10-22; built; status last checked 2026-10-23)
 
 **Status (2026-10-23):** the format is final for version 1 (`zenixfs-format.md`). The library in `zenixfs/` runs on the host and **inside Zenix**
-(`mount.zenixfs`, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the mount table); ZenixFS can be the root filesystem (*verified* in FS-UAE: `tools/zroot-test.sh`). *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
+(the `zfsd` server that `mount` starts, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the mount table); ZenixFS can be the root filesystem (*verified* in FS-UAE: `tools/zroot-test.sh`). *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
 `fsck` clean, remount; power-cut replay (every prefix of the recorded writes plus random subsets inside each flush epoch) always mounts, passes `fsck`, equals a committed state and is never
 older than a durable commit - also on a volume of several map pages with one page in RAM; 600 random bit flips in metadata are detected or harmless; directory hash chains; full volume; orphans.
 The tests were checked by mutation (no flush before the commit record, reuse of blocks freed in the same transaction: both make the power-cut test fail).
@@ -223,7 +223,7 @@ So ZenixFS must not be tuned for one case:
   drivers behind it; the same ZenixFS code is tested on the host image and on the real machines.
 - **Rule 5: the flush barrier is the one thing we cannot fake.** If a device cannot flush, ZenixFS mounts it but says "no crash guarantee on this device" (like ext2 `nobarrier`).
   Built (2026-10-23): diskd sets `DISKCAP_FLUSH` only when a flush tried at start works (IDE FLUSH CACHE, A3000 SYNCHRONIZE CACHE, the SD
-  driver); without it `mount.zenixfs` prints that a power cut may lose the last commits, or damage the volume if the disk reorders writes,
+  driver); without it `zfsd` prints that a power cut may lose the last commits, or damage the volume if the disk reorders writes,
   and a commit's flushes are then only "everything sent" (the weaker guarantee).
   Test by really cutting power on each kind of device we claim to support, not only in the simulator.
 - Measure each kind (Gayle+CF, Gayle+disk, SCSI with/without DMA, SD) with the same benchmark script and write the table; the defaults come from that table.

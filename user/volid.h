@@ -17,7 +17,7 @@ static int vol_call(int port, u32 type, u32 a0, u32 a1, u32 a2, void *a3)
 
 /* the filesystem on DEV: 1 ext2 (magic at byte 1080, uuid at 1128), 2 ZenixFS ("ZNFS" at byte 32, uuid at 68), 0
  * neither; *di its disk server entry, uuid its id (zeros if none or neither) */
-static int vol_look(int port, const char *dev, struct diskinfo *di, unsigned char *uuid)
+static __attribute__((unused)) int vol_look(int port, const char *dev, struct diskinfo *di, unsigned char *uuid)
 {
     static unsigned char sec[512];
     int type = 0, h = vol_call(port, DISK_OPEN, (u32)dev, 0, 0, 0);
@@ -34,12 +34,42 @@ static int vol_look(int port, const char *dev, struct diskinfo *di, unsigned cha
     return type;
 }
 
-static int vol_medium(const char *a, const char *b)       /* the same medium: ide0..., ram0, the same dfN */
+static __attribute__((unused)) char *vol_hex8(char *p, const unsigned char *b, int n)
+{
+    for (int i = 0; i < n; i++) {
+        *p++ = "0123456789abcdef"[b[i] >> 4];
+        *p++ = "0123456789abcdef"[b[i] & 15];
+    }
+    return p;
+}
+/* the volume id of DEV, "START,SIZE,UUID" in hex, into ID (at least 50 bytes; empty if DEV cannot be read): what boot
+ * and mount register a filesystem server with. 1 ext2, 2 ZenixFS, 0 neither */
+static __attribute__((unused)) int vol_id(int port, const char *dev, char *id)
+{
+    struct diskinfo di;
+    unsigned char uuid[16], w[8];
+    int type = vol_look(port, dev, &di, uuid);
+    *id = 0;
+    if (type < 0)
+        return 0;
+    for (int i = 0; i < 4; i++) {
+        w[i] = (unsigned char)(di.start >> (24 - 8 * i));
+        w[4 + i] = (unsigned char)(di.sectors >> (24 - 8 * i));
+    }
+    char *p = vol_hex8(id, w, 4);
+    *p++ = ',';
+    p = vol_hex8(p, w + 4, 4);
+    *p++ = ',';
+    *vol_hex8(p, uuid, 16) = 0;
+    return type;
+}
+
+static __attribute__((unused)) int vol_medium(const char *a, const char *b)       /* the same medium: ide0..., ram0, the same dfN */
 {
     return !strncmp(a, b, a[0] == 'd' ? 3 : 4);
 }
 
-static u32 vol_hex(const char **p, int n)                 /* n hex digits (0: up to a ',') */
+static __attribute__((unused)) u32 vol_hex(const char **p, int n)                 /* n hex digits (0: up to a ',') */
 {
     u32 v = 0;
     for (int i = 0; n ? i < n : **p && **p != ','; i++, (*p)++) {

@@ -49,7 +49,7 @@ static int zd_flush(void *ctx)
     (void)ctx;
     m.type = DISK_FLUSH; m.a[0] = (u32)handle;
     int r = disk_call(dport, &m);
-    return r == -95 ? 0 : r < 0 ? -1 : 0;           /* -95: the disk cannot flush its cache (mount.zenixfs said so) */
+    return r == -95 ? 0 : r < 0 ? -1 : 0;           /* -95: the disk cannot flush its cache (zfsd says so) */
 }
 
 void zdisk_dev(struct zenixfs_dev *dev, unsigned bshift)

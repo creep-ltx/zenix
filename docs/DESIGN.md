@@ -155,7 +155,7 @@ register, as gcc's `-msep-data`/`-mid-shared-library` for no-MMU systems), libz 
 before the self-updates (so they ship the final format), newlib and the network (which make programs much larger).
 The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 1, 2026-10-24, awaiting review).
 ## Where the decisions stand (2026-10-24)
-D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`/`mount.zenixfs`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
+D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
 D3 relocating loader, no fork: done (ZEXE format, tools/mkzexe.py); shared libraries not started.
 D4 planar display server: not started; the kernel draws ten text consoles through Copper + blitter; a client API is not designed.

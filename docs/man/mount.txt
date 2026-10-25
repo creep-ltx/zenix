@@ -12,14 +12,34 @@ DESCRIPTION
     Without arguments, lists the mounted filesystems: device, mount point,
     type, size and free space in KB. The first line is the root filesystem.
 
-    With a device and a directory, starts the filesystem server for the
-    device (/bin/mount.TYPE) and puts it on the directory. The directory
-    must exist; what was in it is hidden until the unmount. Devices are the
-    names the disk server gives: ide0p1, ide0p2 ... (see fdisk). Filesystems
-    can be mounted inside each other (/mnt, then /mnt/sub).
+    With a device and a directory, puts the device's filesystem on the
+    directory. The directory must exist; what was in it is hidden until the
+    unmount. Devices are the names the disk server gives: ide0p1, ide0p2
+    ..., df0, df1 (see fdisk). Filesystems can be mounted inside each other
+    (/mnt, then /mnt/sub).
 
     The type is ext2 or zenixfs. Without -t it is read from the partition's
     type in the partition table (fdisk add ... ext2|zenixfs).
+
+    The filesystem's server is a service (DESIGN D11): mount reads the
+    device's volume id (where it is and its superblock's uuid) and
+    registers the service fs.DEVICE with the server built into the kernel
+    for the type - fsd for ext2, zfsd for ZenixFS, the same programs that
+    serve the root - at priority -10. The kernel's first call to it starts
+    the server; should it crash or be killed, the next use of the
+    filesystem starts it again (from the kernel, no disk read), and it
+    finds its volume by the id (a floppy without a uuid is then refused: it
+    may have been swapped; mount it again). The servers' own messages and
+    the service lines are in dmesg(1).
+
+    ext2: a volume with an INCOMPAT feature other than filetype (ext4:
+    extents, 64bit, flex_bg, ...) is refused and the features are named;
+    one with an ext3 journal, an unknown read-only feature or the "has
+    errors" state is mounted read-only with a line saying why (every write
+    fails, EROFS). Details: docs/architecture.md section 10.
+    ZenixFS: changes are kept in memory and committed atomically three
+    seconds after the first change, at sync(1) and at umount, so a power
+    cut leaves the volume as it was at the last commit (docs/zenixfs.md).
 
     mount -a mounts everything listed in /etc/fstab; init runs it at boot.
     Each line is "device dir type options" (fields separated by spaces or
@@ -36,18 +56,27 @@ EXAMPLES
     echo 'ide0p2 /data auto defaults' >> /etc/fstab
 
 EXIT STATUS
-    0, 1 on an error (no such device, already in use, not that filesystem,
-    directory missing; for mount -a, any line failed), 2 usage.
+    0, 1 on an error (no such device, already in use or mounted, unknown
+    type, the server did not start, directory missing; for mount -a, any
+    line failed), 2 usage.
 
 NOTES
     Once something is mounted, paths are resolved as text for the mount
     table: "." and ".." are removed from the path before it is looked up, so
     a working directory reached through a symbolic link behaves as its text
     says. Hard links and renames across two mounts fail. Only the first 8
-    mounts fit. A mount does not survive a reboot unless it is in /etc/fstab.
+    mounts fit, and 12 services in all (the disk and root servers included):
+    beyond that mount says "too many filesystems mounted". A mount does not
+    survive a reboot unless it is in /etc/fstab.
     A mount the kernel refuses says why (for example "not a directory",
     "device or resource busy" for a directory that is already a mount
-    point, "permission denied" for a normal user).
+    point, "permission denied" for a normal user); a server that did not
+    start says "its filesystem server did not start (see dmesg)", and the
+    service is removed again.
+    ZenixFS names longer than 63 bytes (possible on a volume written
+    elsewhere) are not listed by ls; they can still be opened by name.
+    Only types with a server in the kernel can be mounted (ext2, zenixfs).
 
 SEE ALSO
-    umount(8), fdisk(1), df(1), mkfs.ext2(1)
+    umount(8), fdisk(1), df(1), dmesg(1), mkfs.ext2(1), mkfs.zenixfs(1),
+    boot(8)

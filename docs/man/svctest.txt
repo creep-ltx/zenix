@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     svctest port NAME
+    svctest ports SECONDS
     svctest reg NAME NICE PROGRAM [ARGUMENTS]
     svctest rm NAME
     svctest call NAME TYPE [A0]
@@ -24,6 +25,10 @@ DESCRIPTION
            (disk, fs) is refused with -16 (EBUSY) for everyone, root
            included: only the process the kernel started for it may
            take it.
+    ports  creates ordinary ports (u00, u01 ...) until one is refused,
+           prints "svctest ports: N made, then E" and keeps them
+           SECONDS seconds. The services' held ports are not among
+           them, so root can still mount meanwhile.
     reg    registers the service NAME (root): PROGRAM is a built-in
            image (@diskd, @fsd, @zfsd) or an absolute path, NICE the
            server's priority. The first call to NAME starts it.
@@ -52,7 +57,7 @@ DESCRIPTION
            commit took the file with it: the read fails, and it never
            reads another file that got the same number.
 
-    tools/svc-test.sh uses it in the emulator.
+    tools/svc-test.sh and tools/mounttest.sh use it in the emulator.
 
 EXIT STATUS
     0, or 2 for a usage error.

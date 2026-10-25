@@ -9,9 +9,13 @@ SYNOPSIS
 DESCRIPTION
     Writes out the filesystem mounted on dir, stops its server and releases
     the device, so that tools such as fsck.ext2 can open it again. The
+    server's service (fs.DEVICE, see mount(8)) is removed first, so nothing
+    starts the server again. A mount whose server has died or was given up
+    is unmounted the same way. The
     unmount is refused ("busy") while any program has the directory (or a
     directory below it) as its working directory, has a file open there, or
-    while another filesystem is mounted below it.
+    while another filesystem is mounted below it, or while its server is
+    being started.
 
 EXIT STATUS
     0, 1 on an error (not a mount point, busy), 2 usage.

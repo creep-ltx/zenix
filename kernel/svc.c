@@ -455,18 +455,20 @@ long svc_sys(u32 op, const char *name, const char *text)
     }
     if (!n || (t[0] != '@' && t[0] != '/'))
         return -EINVAL;                         /* a built-in image or an absolute path */
-    if (i >= 0 && !s)
+    if (i >= NSVC)
         return -EBUSY;                          /* an ordinary port has that name */
     if (!s) {
-        for (int tries = 0; ; tries++) {        /* a slot being given back (umount, then mount at once): up to 2 s */
+        /* a held slot being given back (umount, then mount at once: the old server still has the name until it
+         * ends), or none free: wait up to 2 s */
+        for (int tries = 0; ; tries++) {
             for (i = 0; i < NSVC && ports[i].used; i++)
                 ;
-            if (i < NSVC || tries == 20 || current->killed)
+            if ((i < NSVC && port_slot(name) < 0) || tries == 20 || current->killed)
                 break;
             sleep_until(ticks + 10);
             schedule();
         }
-        if (i == NSVC)
+        if (i == NSVC || port_slot(name) >= 0)
             return -EBUSY;
         u32 gen = (ports[i].gen + 1) & 0x7FFFFF;
         memset(&ports[i], 0, sizeof ports[i]);

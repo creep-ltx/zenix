@@ -4,6 +4,8 @@
 /* svctest: a test program for the service manager (DESIGN D11, tools/svc-test.sh). Each use prints one line starting
  * with "svctest " and the result.
  *   svctest port NAME              try to create port NAME (a registered name: -16 for anyone, root too)
+ *   svctest ports SECS             create ordinary ports (u0, u1 ...) until refused, say how many, hold them SECS
+ *                                  seconds (the held slots of the services are not among them: D11 5.2)
  *   svctest reg NAME NICE PROG...  register service NAME (root)
  *   svctest rm NAME                remove it (root)
  *   svctest call NAME TYPE [A0]    one call to port NAME: the result and how long it took (E-clock, ms)
@@ -25,6 +27,18 @@ int main(int argc, char **argv)
 {
     if (argc >= 3 && !strcmp(argv[1], "port")) {
         printf("svctest port %s: %d\n", argv[2], sys_port_create(argv[2]));
+        return 0;
+    }
+    if (argc >= 3 && !strcmp(argv[1], "ports")) {
+        char n[8];
+        int k = 0, r;
+        for (;;) {
+            n[0] = 'u'; n[1] = (char)('0' + k / 10); n[2] = (char)('0' + k % 10); n[3] = 0;
+            if ((r = sys_port_create(n)) < 0) break;
+            k++;
+        }
+        printf("svctest ports: %d made, then %d\n", k, r);
+        sys_sleep((u32)atoi(argv[2]) * 100);
         return 0;
     }
     if (argc >= 5 && !strcmp(argv[1], "reg")) {
@@ -104,6 +118,6 @@ int main(int argc, char **argv)
         sys_close(fd);
         return 0;
     }
-    printf("usage: svctest port|reg|rm|call|raw|hold|keep|lost ...\n");
+    printf("usage: svctest port|ports|reg|rm|call|raw|hold|keep|lost ...\n");
     return 2;
 }

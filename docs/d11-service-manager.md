@@ -701,9 +701,10 @@ with G3/G4), step 1 (2026-10-24, `kernel/svc.c`; `tools/svc-test.sh`), step 2 (2
 retried claim and the one retry of the filesystem servers; `tools/svc-test.sh` d and dmg, `tools/disk-host-test.sh`),
 step 3 (2026-10-24: `SVC_OPENS`, the volume id rule in `user/volid.h`, uuids from all three tools, the ext2 state bit,
 ZenixFS's kept orphans and inode floor; `tools/svc-test.sh` o, zo, u), step 4 (2026-10-24: the give-up, a start-up
-calling its own port; `tools/svc-test.sh` l), step 5 (2026-10-24: the sync paths; `tools/svc-test.sh` s). Steps
-6-9 (mount and umount as services, `/etc/svctab`, the servers' output to the kernel log, the remaining documents)
-are not built yet.
+calling its own port; `tools/svc-test.sh` l), step 5 (2026-10-24: the sync paths; `tools/svc-test.sh` s), step 6
+(2026-10-25: mount and umount as services; `/bin/mount.ext2` and `/bin/mount.zenixfs` removed; `tools/mounttest.sh`
+extended). Steps 7-9 (`/etc/svctab`, the servers' output to the kernel log, the remaining documents) are not built
+yet.
 
 **Where the code differs from the note** (each one small, and the reason):
 - *Size.* svc.c is built with `-Os` (it runs only at a start, a death or a registration), and to make room on the RAM
@@ -757,6 +758,20 @@ are not built yet.
   says "filesystems synced" without "(with an error)" when the root server is not running. Tested with `reboot`
   (part s); the reset warning (Ctrl-Amiga-Amiga) runs the same `svc_hurry` + `vfs_sync`, and its own test
   (`tools/diag-test.sh`) was run unchanged, not extended with a dead server.
+
+- *Step 6:* the 2 s wait of a registration also covers a name still held by the old server (it keeps its port, now an
+  ordinary one, until it ends after `FS_QUIT`); otherwise `umount` then `mount` of the same device at once got -EBUSY.
+  `mount` refuses a device whose `fs.DEVICE` is already on the mount table (a dead server's claim is released by
+  diskd, so `di.mounted` alone would let the same service be mounted twice), and an unknown type ("ext2 or zenixfs"):
+  the rule for a type with no built-in image (a file service) stays a rule, nothing uses it. `umount` of a mount whose
+  server is being started at that moment is refused as busy (`SVC_REMOVE` cannot remove a loading entry). The built
+  ZenixFS image is now `zfsd.zx`; zfsd and fsd print as their port name for a mount (`fs.ide0p2: ...`), `zfsd` /
+  `fsd` for the root. *Ports used up* is tested with root's program filling the 16 ordinary slots (the slots are
+  the same for every user); the twelve-registrations case checks the -EBUSY of a 13th registration (after its 2 s
+  wait), mount's "too many filesystems mounted", and `umount` then `mount` at once with all twelve in use. The
+  floppy case is tested with a zero-uuid floppy (the restart is refused); a swapped floppy with a uuid is not (FS-UAE
+  cannot swap a disk from the test script). Found while testing: `mount df1` said "no such device" (before D11 too): `DISK_LIST` lists a
+  floppy drive past df0 only once something opened it by name; `mount` now reads the volume id (a `DISK_OPEN`) first.
 
 *Written 2026-10-24 by reading the code on branch d11 (= main after D10) and the AmigaOS 3.1 study notes; revised the
 same day after two reviews (revisions 2 and 3). A design: nothing built or measured, except the kernel size quoted in section 10

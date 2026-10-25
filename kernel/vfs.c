@@ -721,6 +721,9 @@ long vfs_umount(const char *path)
             if (p->fd[k] && p->fd[k]->type == FT_INODE && p->fd[k]->fs == mi)
                 return -EBUSY;
     }
+    /* the mount's service goes first (D11 6.4): the server's end after FS_QUIT is final, no call starts it again */
+    if (svc_sys(SVC_REMOVE, mnt[mi].pname, 0) == -EBUSY)
+        return -EBUSY;                                  /* its server is being started right now */
     fs_call_on(mi, FS_QUIT, 0, 0, 0, 0);               /* the server syncs, lets go of its device and exits */
     mnt[mi].used = 0;
     nmnt--;

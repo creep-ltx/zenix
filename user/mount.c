@@ -3,9 +3,10 @@
 #include "../kernel/diskproto.h"
 #include "../kernel/fsproto.h"
 #include "rdb.h"
+#include "volid.h"
 
 /* mount                      list the mounted filesystems
- * mount [-t TYPE] DEVICE DIR  start the filesystem server /bin/mount.TYPE on DEVICE and put it on DIR
+ * mount [-t TYPE] DEVICE DIR  serve DEVICE with the filesystem server for TYPE (a service, fs.DEVICE) and put it on DIR
  * mount -a                   mount everything listed in /etc/fstab (init does this at boot)
  * TYPE is ext2 or zenixfs; without -t it is read from the partition's type in the RDB.
  * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs or auto (from the partition type), OPTIONS =
@@ -36,35 +37,38 @@ static void list(void)
     }
 }
 
-/* mount DEV on DIR; type 0 = from the partition. Returns 0, or 1 after printing why not. */
+/* mount DEV on DIR; type 0 = from the partition. The server is a service (DESIGN D11 6.4): fs.DEV is registered with the
+ * kernel's built-in server for the type and the volume id, at nice -10; the kernel's first call to it (the root inode,
+ * in SYS_mount) starts it, and a call after it died starts it again. Returns 0, or 1 after printing why not. */
 static int mount_one(const char *dev, const char *dir, const char *type)
 {
     struct diskinfo di;
+    struct umountinfo mi;
+    char pname[16], id[64], prog[SVC_TEXT_MAX];
+    vol_id(sys_port_find("disk"), dev, id);                /* its DISK_OPEN also probes a floppy drive past df0 */
     if (disk_info(dev, &di) < 0) { printf("mount: no such device: %s\n", dev); return 1; }
     if (di.mounted) { printf("mount: %s is already in use\n", dev); return 1; }
     if (!type) {
         type = di.dostype == DT_EXT2 ? "ext2" : di.dostype == DT_ZENIXFS ? "zenixfs" : 0;
         if (!type) { printf("mount: cannot tell the type of %s; use -t ext2 or -t zenixfs\n", dev); return 1; }
     }
-    char prog[40], pname[16];
-    if (strlen(type) > 12) { printf("mount: bad type\n"); return 1; }
-    strcpy(prog, "/bin/mount."); strcat(prog, type);
+    int z = !strcmp(type, "zenixfs");
+    if (!z && strcmp(type, "ext2")) { printf("mount: unknown type %s (ext2 or zenixfs)\n", type); return 1; }
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
-    char *args[4] = { prog, (char *)dev, pname, 0 };
-    int pid = sys_spawn(prog, args, 0);
-    if (pid < 0) { printf("mount: cannot start %s\n", prog); return 1; }
-    int port = -1;
-    for (int t = 0; t < 1500; t++) {                       /* up to 15 s: a big filesystem takes a while to open */
-        if ((port = sys_port_find(pname)) >= 0) break;
-        if (sys_waitnb(pid) != -2) { printf("mount: %s failed\n", prog); return 1; }
-        sys_sleep(1);
+    for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++)
+        if (!strcmp(mi.port, pname)) { printf("mount: %s is already mounted on %s\n", dev, mi.path); return 1; }
+    strcpy(prog, z ? "@zfsd " : "@fsd ");
+    strcat(prog, dev); strcat(prog, " "); strcat(prog, pname); strcat(prog, " -id "); strcat(prog, id);
+    int r = sys_svc_register(pname, prog, -10);
+    if (r < 0) {
+        printf(r == -EBUSY ? "mount: too many filesystems mounted\n" : "mount: cannot register the server of %s (%d)\n", dev, r);
+        return 1;
     }
-    if (port < 0) { printf("mount: %s did not start\n", prog); sys_kill(pid); return 1; }
     struct umountreq rq = { dir, pname, dev, type };
-    if (sys_mount(&rq) < 0) {
-        printf("mount: cannot mount %s on %s: %s\n", dev, dir, zwhy("refused (is it an existing directory, not already a mount point? are you root?)"));
-        struct umsg m; m.type = FS_QUIT;
-        sys_call(port, &m);
+    if ((r = sys_mount(&rq)) < 0) {
+        if (r == -EIO) printf("mount: cannot mount %s: its filesystem server did not start (see dmesg)\n", dev);
+        else printf("mount: cannot mount %s on %s: %s\n", dev, dir, zwhy("refused (is it an existing directory, not already a mount point? are you root?)"));
+        sys_svc_remove(pname);                             /* a failed mount leaves no service behind */
         return 1;
     }
     return 0;

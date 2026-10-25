@@ -12,7 +12,7 @@ benchmarked against AmigaOS.
   / reply`. Messages carry pointers, not data, because everything shares one address space - the Amiga's famous
   speed trick, kept deliberately (ROADMAP principle 9).
 - **Servers instead of a fat kernel.** AmigaOS filesystems are handler *processes* reached by DOS packets.
-  Zenix's filesystem servers (`fsd`, `mount.zenixfs`) and `diskd` are the same idea.
+  Zenix's filesystem servers (`fsd`, `zfsd`) and `diskd` are the same idea.
 - **Relocating executables.** AmigaOS HUNK files carry relocation tables and are loaded wherever memory is free;
   Zenix's ZEXE does the same with a much simpler format (one image, one table).
 - **Preemptive multitasking** with a small kernel and fast context switches.

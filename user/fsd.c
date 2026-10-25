@@ -292,7 +292,7 @@ static int handle(struct umsg *m)
 
 /* fsd DEVICE PORTNAME [-root] [-id ID]   the ext2 filesystem on DEVICE, served on port PORTNAME. Built into the kernel
  * and started as a service (DESIGN D11): boot registers the root's ("fs", -root: it must be writable, as the root is
- * - a refused or read-only volume, ext3, ext4, errors, is never the root); also /bin/mount.ext2, started by mount. */
+ * - a refused or read-only volume, ext3, ext4, errors, is never the root); mount registers a mount's ("fs.DEVICE"). */
 int main(int argc, char **argv)
 {
     ext2_busy = open_busy;
@@ -307,21 +307,21 @@ int main(int argc, char **argv)
         dev = name;
     }
     if (try_mount(dev, root ? EXT2_RW : EXT2_ANY)) {
-        printf(root ? "fsd: no writable ext2 filesystem on %s for the root\n"
-                    : "mount.ext2: %s is not an ext2 filesystem Zenix can mount, or is in use\n", dev);
+        if (root) printf("fsd: no writable ext2 filesystem on %s for the root\n", dev);
+        else printf("%s: %s is not an ext2 filesystem Zenix can mount, or is in use\n", who, dev);
         return 1;
     }
     if ((self & SVC_MIDREQ) && !ext2_readonly) {        /* ext2 has no journal: the change may be half done (D11 5.4) */
         ext2_mark_unclean();
-        printf("fsd: %s was being changed when its server ended: check it with fsck.ext2\n", dev);
+        printf("%s: %s was being changed when its server ended: check it with fsck.ext2\n", who, dev);
     }
     int port = sys_port_create(pname);
-    if (port < 0) { printf("fsd: cannot create the port %s\n", pname); return 1; }
+    if (port < 0) { printf("%s: cannot create the port %s\n", who, pname); return 1; }
     if (restart) {                                      /* the inodes the kernel holds open on us (D11 5.4) */
         static u32 ino[160];
         int n = sys_svc_opens(ino, sizeof ino);
         for (int i = 0; i < n; i++) open_ref(ino[i]);
-        if (n < 0) printf("fsd: %s: restart: the open files are unknown (%d): space of deleted open files stays used until fsck.ext2\n", dev, n);
+        if (n < 0) printf("%s: %s: restart: the open files are unknown (%d): space of deleted open files stays used until fsck.ext2\n", who, dev, n);
     }
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {
