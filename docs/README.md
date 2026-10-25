@@ -63,6 +63,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | ext2-host-test, disk-host-test | the ext2 server, `fsck.ext2`, `mkfs.ext2`, `fdisk` and `diskd` built for the PC, against image files and `e2fsck`, with a fuzz loop |
 | zenixfs-test | `make -C zenixfs test`: the ZenixFS library on the PC (random operations, power cuts, damaged blocks) |
 | mfm-test, emmc-test, serial-test, mem-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console and `/dev/ttyS0`, the kernel allocator around 1 GB (`MEM_LOW1G`), A3000 SCSI and Pi device-tree code against models |
+| mkzexe-test | the ZEX2 program format of shared code (DESIGN D13): `tools/mkzexe.py` classifies each relocation by its target (a `.data` pointer into constants to code, a table slot of a BSS array to data) and refuses a reference from the shared code into data, a value equal to `text_size`, an undefined weak and an absolute symbol |
 | matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch) |
 | cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
 | users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root |
@@ -75,6 +76,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | mounttest, zenixfstest | mounting ext2 and ZenixFS, `fsck`, nested mounts |
 | edit-regress, disktools, mbr-test | the editor; `fdisk`/`mkfs`/`fsck` on scratch disks; PC partition tables |
 | zenixboot-test | booting with no floppy: Kickstart boots the FFS partition, zenixboot starts Zenix on its IDE root; zenixboot's error paths; Kickstart 3.2 and 2.05 only when `ZENIX_KICK32` / `ZENIX_KICK205` name those ROMs (else SKIP) |
+| pure-test | shared program code (DESIGN D13): one copy for one, two and four processes (`free`, `ps`), the first ending and the last freeing it, two started at once, a crash in one, literals in system calls (a read into one refused), text file busy, an update renamed over a running program, a private copy of a file open for writing, a new generation after a server restart and after a remount, a damaged copy found and not used again, corrupt ZEX2 files refused; `sh` and `login` shared by four consoles' sessions and by `sh -c` shells, a session ending while the others run |
 | svc-test | the service manager (DESIGN D11): boot's pids, restarts of diskd, fsd and zfsd, the bootable root, no root, the RAM floppy, diskd's saved table, open files across a restart, a dd copy, limits and back-off, the deadline, a call whose start fails (stop, kill, the loader's priority), reboot with a dead server and with one that hangs, a damaged table (a test build) |
 
 What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default

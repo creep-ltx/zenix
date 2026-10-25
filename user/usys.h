@@ -20,7 +20,7 @@ static inline int sys3(int n, u32 a, u32 b, u32 c)
 #define USYS_STRUCTS
 struct udirent { u32 ino, type; char name[64]; };
 struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
-struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; };   /* nice -20..19; pri: the level now, 0 highest, 32 idle */
+struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 shared; };   /* nice -20..19; pri: the level now, 0 highest, 32 idle; mem: its own memory; shared: the shared code it runs (D13) */
 
 #define S_IFMT  0170000
 #define S_IFDIR 0040000

@@ -15,7 +15,12 @@
  */
 #include "kernel.h"
 #include "hw.h"
+/* This file is built with -Os (Makefile, KOPT_floppy: cold code, every wait timed); the MFM track coding is the one
+ * loop that touches every word of a track, so it keeps -O2 */
+#pragma GCC push_options
+#pragma GCC optimize("O2")
 #include "mfm.h"
+#pragma GCC pop_options
 
 #define DSKPTH  (*(volatile u32 *)0xDFF020)
 #define DSKLEN  REG16(0xDFF024)

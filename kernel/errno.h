@@ -27,6 +27,7 @@
 #define ENFILE       23     /* the system's open-file table is full */
 #define EMFILE       24     /* the process has no free file descriptor */
 #define ENOTTY       25     /* not a terminal */
+#define ETXTBSY      26     /* text file busy: the program's shared code is in memory (D13) */
 #define EFBIG        27     /* file too large */
 #define ENOSPC       28     /* no space left on the device */
 #define ESPIPE       29     /* seek on a pipe or terminal */

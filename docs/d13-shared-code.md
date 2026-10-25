@@ -257,4 +257,76 @@ compressing the kernel (a decompressor in the boot path is the most work).
    keeps it for the future (section 7).
 3. *Stage 2's format?* Not decided yet; AmigaOS-style jump tables lean ahead for new libraries (section 9).
 
+## 14. As built (stage 1)
+
+What the build did differently from sections 1-13, and why; each item names the step.
+
+- **Step 0.** The floppy's MFM code keeps `-O2` through `#pragma GCC optimize("O2")` around `#include "mfm.h"` in
+  `floppy.c`, so the whole of `mfm.h` (encoding too, not only `mfm_decode_track`) stays `-O2`: the decode and encode
+  functions compile to the same instructions as before (compared with objdump). The kernel went from 177064 to 170212
+  bytes (8988 left of 179200).
+- **Step 1.** The pure layout lives in a new linker script, `link/pure.ld`, not in `link/user.ld`: changing
+  `user.ld` would have moved every v1 program's `.data` (the 16-byte alignment) and broken "every v1 file
+  byte-identical". `pure.ld` also discards `.eh_frame` (nothing unwinds). `_zstart` (libz) and crt0's `-DZEX2` variant
+  came with step 1, because the host test needs a working pure link; v1 programs do not reach `_zstart`, so
+  `--gc-sections` drops it from them (step 3a moves every program to it). Pure objects are `NAME.po`, a pure program
+  `NAME.pzx` (`make build/NAME.pzx`). The relocation lists hold link addresses (not offsets in the data part), so a
+  later "applied once" class in the shared part needs no format change. mkzexe also refuses a writable section in the
+  shared part, a table slot that holds something other than its symbol's address, and a `.got.plt` that is not zero;
+  it verified on every slot of `hello`, `cat` and `sh` that the 16-bit offsets count from the start of `.got`.
+- **Step 2.** The segments live in a new file, `kernel/seg.c` (`-Os` except the checksum loop), with a fixed table
+  of `NSEG` = 8; a program that finds it full runs as a private copy. A private copy (open for writing, stale, table
+  full) is simply owned by the process's pid, so `mem_free_owner` frees it at the reap; only a listed segment's block
+  gets `SEG_OWNER` (`mem_set_owner`, new in mem.c, when it is listed). A loader's own copy checks that its first 40
+  bytes are the header it read first (a file changed between the two reads is refused, -EIO). **`ETXTBSY`:** the kernel
+  learns a file's inode only from the server, so a write-open with `O_TRUNC` (the server truncates inside `FS_OPEN`)
+  costs one `FS_STAT` before the open - only while something of that mount is loaded, which with `sh` pure (step 3b) is
+  always on the root - and every other write-open is checked on the open's answer and closed again if busy. A
+  segment is "busy" when its whole key matches the file's status (inode, size, time, generation), so an unlinked
+  program's inode number given to a new file does not make that file busy. Gap, said openly: a load or a listing that
+  happens between that `FS_STAT` and the truncating `FS_OPEN` cannot be refused any more; it is unlisted or marked stale
+  (never reused), but the file is already truncated. `O_TRUNC` without write access truncates nothing in either server
+  and is not checked. **Generations** come from one counter (`gen_last`), set on every mount and on every
+  `svc_handover` of a port that a mount uses (also the first start: harmless). `umount` needs no rule of its own: the
+  slot's next mount has a new generation. **`ps`** got a SHR(K) column after MEM(K) (the tests that read `ps` lines
+  were adjusted); MEM is the process's own memory, a private copy's code included. **`free`** prints a third line,
+  "shared code: N KB, sharing saves M KB" (SYS_meminfo words 2 and 3: the bytes of shared code in memory and, for each
+  segment, its size times its users beyond the first). **Tests:** a shell cannot be made to fault on purpose, so the
+  crash, damage and literal checks use a ZEX2 build of `crash` with four new test modes (`sleep N`, `poke`, `damage`,
+  `literal`; `crash` is a test program, man page updated), placed with the ZEX2 `hello` only in the test images'
+  `/tests` (not commands; the mount tests' small floppy leaves them out: no room). The remount check mounts a floppy
+  holding `hellopure` twice in the same slot. `tools/mkbadzexe.py` also writes 14 corrupt ZEX2 files from `hellopure`.
+  The kernel went from 170212 to 174368 bytes (4832 left): about 4.2 KB, more than the 1.5-2 KB estimated (seg.c 1.4 KB,
+  the loader 1.5 KB, vfs 0.7 KB, the rest and the kernel's relocation table); `-Os` on seg.c saved 240 bytes.
+- **Step 3a.** As planned: crt0 is `bsr.l _zstart` for every program (the stack at entry already holds argc and
+  argv as `_zstart`'s arguments, so crt0 pushes nothing). Each ZEXE program loses crt0's three relocations; the kernel
+  grew 24 bytes (its built-in servers link libz's `_zstart`): 174392 of 179200.
+- **Step 3b.** `sh` and `login` are installed as ZEX2 through `PUREAPPS` in the Makefile (`build/sh.zx` is a copy of
+  `sh.pzx`), linked with pure builds of crt0, libz, `pw.po` and `sha.po`: sh 72800 bytes shared + 1840 data, login
+  12336 + 412. The `-Wwrite-strings` review found the 8 warnings of sh.c and login.c (`arg0`, the `{ "sh", "-c", ... }`
+  argument vectors, login's `{ p->shell, 0 }`) and, with `-Wcast-qual`, `rep = (char *)""` and `perr = (char *)m` in
+  sh.c: all only read (passed to `sys_spawn`, `strlen`, `memcpy` from, or an error message). Nothing changed. The
+  shells' tests (`tools/pure-test.sh` part s) log in on consoles 2-4 through the serial hook; a shell cannot be made
+  to fault on purpose, so "a crash in one leaves the others" is checked with `crashpure` (part p) and, for shells, a
+  session ending (console 2's, then console 1's own) while the others run.
+- **Measured in FS-UAE (memory, not time), stage 1, 2026-10-25,** `free` after 1, 2 and 4 logins (console 1 plus
+  consoles 2-4), ZEXE `sh`/`login` (step 3a) against ZEX2 (step 3b):
+
+  | machine | sessions | free before | free after | more free |
+  |---|---|---|---|---|
+  | stock A1200, 2 MB chip only | 1 | 1040 KB | 1040 KB | 0 |
+  | | 2 | 674 KB | 747 KB | 73 KB |
+  | | 4 | 55 KB | 279 KB | 224 KB |
+  | A1200, 2 MB chip + 4 MB fast (fast free) | 1 | 3061 KB | 3062 KB | 1 KB |
+  | | 2 | 2544 KB | 2629 KB | 85 KB |
+  | | 4 | 1566 KB | 1794 KB | 228 KB |
+
+  `ps`: a session's own memory went from 165 KB (login 34 + sh 131) to 82 KB (22 + 60), with 83 KB of code shared once
+  (sh 71, login 12); `free`'s "sharing saves" says 83 KB per extra session, 249 KB for four. The machine gains a little
+  less than that (73 and 224 KB on the stock A1200) because each shell's arena is an eighth of the memory free when it
+  starts: more free memory, bigger arenas - the separate lever section 2 names. On the stock A1200 the ZEXE build's
+  fourth session left 55 KB, and two `sh -c` then failed with "out of memory"; with ZEX2, 279 KB.
+  Static instruction counts (objdump of `.text`): sh 21634 (ZEXE) against 22341 (ZEX2), +3.3%, `.text` 71194 against
+  69228 bytes; login 3651 against 3676, +0.7%, 11084 against 10940 bytes (section 3 estimated +4.5% for sh).
+
 Last checked against the code: 2026-10-25.

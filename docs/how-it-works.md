@@ -74,7 +74,7 @@ The shell parses the line and builds a pipeline:
 4. `cat` calls `open("notes")`. The kernel copies the path, sends `FS_OPEN{path, cwd inode, flags}` to `fs`, and
    blocks in state `P_MSG`. `fsd` wakes, walks the directory inodes through its block cache and replies with an
    inode number. The kernel stores that in a `struct file`.
-5. `cat` calls `read(fd, buf, 1024)`. After `user_ok` checks the buffer, the kernel sends `FS_READ{ino, offset,
+5. `cat` calls `read(fd, buf, 1024)`. After `user_ok_wr` checks the buffer, the kernel sends `FS_READ{ino, offset,
    buf, len}`; **`fsd` copies from its cache directly into `cat`'s buffer** (no intermediate copy) and replies
    with the byte count.
 6. `cat` calls `write(1, ...)` on the pipe: bytes go into the ring; a waiting `grep` is made ready. A full ring

@@ -26,7 +26,7 @@ ASFLAGS += $(DIAG)
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
@@ -48,6 +48,8 @@ STACK_awk := 65536
 # every program links only the parts of libz it calls (libz is built one section per function)
 ULDFLAGS := -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
+# programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
+TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf
 
@@ -107,7 +109,15 @@ $(BUILD)/bootmenu: $(BUILD)/bootmenu.zx tools/mkhunk.py
 $(BUILD)/start.o: kernel/start.S $(BUILD)/stage0.bin | $(BUILD)
 	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
 $(BUILD)/%.o: kernel/%.c $(wildcard kernel/*.h) | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(KOPT_$*) -c $< -o $@
+# -Os for the kernel files that are truly cold (DESIGN D13, docs/d13-shared-code.md section 10: room for the shared
+# code): every wait in them is timed by the E-clock or a timer, none is on a hot path. The floppy's track coding
+# (mfm.h) keeps -O2 through a pragma in floppy.c. Everything else stays -O2.
+KOPT_floppy := -Os
+KOPT_emmc := -Os
+KOPT_a3000 := -Os
+KOPT_rtc := -Os
+KOPT_kbd := -Os
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
@@ -143,7 +153,7 @@ $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" $(RAMDISK_K)K 128
 
 $(BUILD)/root-mount.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
-	NOMAN=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" $(RAMDISK_K)K 128
+	NOMAN=1 NOPURE=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" $(RAMDISK_K)K 128
 
 $(BUILD)/zenix-mount.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-mount.img tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-mount.img
@@ -257,8 +267,33 @@ $(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py tools/check-68020-60.sh Makefile
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
 
+# ---- programs with shared code (DESIGN D13, ZEX2: docs/d13-shared-code.md): one copy of the code for every process
+# running it. Every object is compiled with -msep-data through tools/purecc.sh (the 16-bit table offsets) - libz and
+# crt0 too, so a pure program has its own builds of them (.po) - and linked with link/pure.ld. NAME.pzx is the
+# program; nothing in `all` uses one yet. ----
+PULDFLAGS := -nostartfiles -T link/pure.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections
+$(BUILD)/crt0-pure.o: user/crt0.S | $(BUILD)
+	$(CC) $(ASFLAGS) -DZEX2 $< -o $@
+$(BUILD)/%.po: user/%.c user/libz.h user/usys.h tools/purecc.sh | $(BUILD)
+	tools/purecc.sh $(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/%.puelf: $(BUILD)/%.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
+	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $< $(BUILD)/libz.po $(LIBGCC) -o $@
+$(BUILD)/%.pzx: $(BUILD)/%.puelf tools/mkzexe.py tools/check-68020-60.sh Makefile
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
+# login also links the user and password parts (pure builds of them: pw.po, sha.po)
+$(BUILD)/login.puelf: $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
+	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/libz.po $(LIBGCC) -o $@
+$(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po: user/pw.h
+# DESIGN D13 stage 1: these commands are installed as programs with shared code (one copy of sh's and login's code
+# for every console's session). Nothing they do sends raw messages (limits.md); sh.c and login.c were checked with
+# -Wwrite-strings: no write into a literal.
+PUREAPPS := sh login
+$(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
+	cp $< $@
+
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
-$(BUILD)/zenix.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
+$(BUILD)/zenix.hdf: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
 	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)"
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
@@ -283,7 +318,7 @@ $(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkca
 	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
 # the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
 # ext2 root with every program (written to a card by tools/write-card.sh)
-$(BUILD)/root-card.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
+$(BUILD)/root-card.img: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
 	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)" 512M 8192
 $(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
 	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img

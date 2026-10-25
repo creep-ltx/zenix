@@ -7,6 +7,7 @@ SYNOPSIS
     crash
     crash stack
     crash kstack | idle
+    crash sleep N | poke | damage | literal
 
 DESCRIPTION
     Without an argument, executes an illegal instruction. The kernel must
@@ -23,6 +24,17 @@ DESCRIPTION
     the guard of crash's own kernel stack (the process is killed with
     "overflowed its kernel stack") or of the idle process's (a kernel
     panic). In a normal kernel they say "still here" and exit with 1.
+
+    The last four are for the shared-code tests (tools/pure-test.sh runs
+    a build of crash with shared code, /tests/crashpure): crash sleep N
+    sleeps N seconds and exits 0 (another process running the same code);
+    crash poke changes a byte of its own constants and exits 0 (in the
+    shared build: the code every process of it runs; the next start must
+    find the damage); crash damage does the same and then faults (the
+    kernel must say the shared code is damaged and name the processes
+    still running it); crash literal opens, writes, reads into and
+    spawns with string literals and prints what each system call said (a
+    read into a literal must fail with -14 in the shared build).
 
     A test program.
 

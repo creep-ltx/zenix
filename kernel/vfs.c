@@ -156,8 +156,10 @@ struct mount {
     char path[48];                      /* where it is mounted ("/" for the root) */
     char pname[16];                     /* port name of the server */
     char dev[16], type[8];
+    u32 gen;                            /* D13: new on every mount and every (re)start of its server (vfs_server_started) */
 };
-static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "" } };
+static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1 } };
+static u32 gen_last = 1;
 static int nmnt = 1;                    /* mounts in use, the root included */
 
 __attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
@@ -269,6 +271,52 @@ long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
 
 static struct exec_src *loading;        /* the program loads in progress, linked through the spawners' kernel stacks */
 
+/* ---- D13: what tells the shared code segments (seg.c) that a file may have changed ---- */
+u32 vfs_mount_gen(int m)
+{
+    return m >= 0 && m < NMOUNT && mnt[m].used ? mnt[m].gen : 0;
+}
+
+/* the server on port PNAME was started (svc_handover): a restarted ZenixFS server drops uncommitted changes and could
+ * bring back older contents under the same inode, size and time, so its mounts get a new generation */
+void vfs_server_started(const char *pname)
+{
+    for (int i = 0; i < NMOUNT; i++)
+        if (mnt[i].used && !strcmp_(mnt[i].pname, pname))
+            mnt[i].gen = ++gen_last;
+}
+
+/* is something loaded from mount m (a segment, or a load in progress)? */
+static int exec_on(int m)
+{
+    if (seg_on(m))
+        return 1;
+    for (struct exec_src *x = loading; x; x = x->next)
+        if (x->m == m)
+            return 1;
+    return 0;
+}
+
+/* would writing the file with status st change a program in memory or being read (-ETXTBSY)? */
+static __attribute__((noinline)) int exec_busy(int m, const struct ustat *st)
+{
+    if (seg_busy(m, st))
+        return 1;
+    for (struct exec_src *x = loading; x; x = x->next)
+        if (x->m == m && x->ino == (long)st->ino)
+            return 1;
+    return 0;
+}
+
+/* file INO (-1: any file) of mount m may have changed: its segments are no longer found, its loads not listed */
+static __attribute__((noinline)) void changed(int m, long ino)
+{
+    seg_unlist(m, ino);
+    for (struct exec_src *x = loading; x; x = x->next)
+        if (x->m == m && (ino < 0 || x->ino == ino))
+            x->stale = 1;
+}
+
 /* Open a program for loading without reading it into a buffer first: the loader reads the header, allocates the
  * process's memory and then reads the image straight into it (fs_exec_read). */
 long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x)
@@ -282,6 +330,12 @@ long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *
         return ino;
     x->m = m;
     x->ino = ino;
+    x->gen = mnt[m].gen;
+    x->stale = 0;
+    x->wopen = 0;
+    for (int i = 0; i < NFILE; i++)     /* open for writing now: a ZEX2 program gets a private copy (D13) */
+        if (files[i].type == FT_INODE && files[i].fs == m && files[i].ino == (u32)ino && (files[i].flags & (O_WRONLY | O_RDWR)))
+            x->wopen = 1;
     x->next = loading;                  /* until fs_exec_close: a restarted server must count this open (D11) */
     loading = x;
     if (!S_ISREG(x->st.mode) || x->st.size > 256u * 1024) {
@@ -407,9 +461,23 @@ long vfs_open(const char *path, int flags)
     int m = ROUTE(path, rb, rel, cwd);
     if (m < 0)
         return m;
+    /* D13: an open for writing of a program whose shared code is in memory or being read is refused, "text file
+     * busy" (the safe update is a new file renamed over the old name). The server truncates in its FS_OPEN, so with
+     * O_TRUNC the kernel asks first (only while something of that mount is loaded); without, it checks the answer. */
+    int wr = flags & (O_WRONLY | O_RDWR);
+    if (wr && (flags & O_TRUNC) && exec_on(m) && fs_call_on(m, FS_STAT, (u32)rel, cwd, (u32)&st, 0) >= 0 &&
+        exec_busy(m, &st))
+        return -ETXTBSY;
     long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, (u32)flags, (u32)&st);
     if (ino < 0)
         return ino;                         /* the server's errno: -ENOENT, -EACCES, -EEXIST (O_CREAT|O_EXCL) ... */
+    if (wr) {
+        if (exec_busy(m, &st)) {
+            fs_call_on(m, FS_CLOSE, (u32)ino, 0, 0, 0);
+            return -ETXTBSY;
+        }
+        changed(m, ino);                    /* a segment of it listed since the check (O_TRUNC) is never reused */
+    }
     struct file *f = file_new(FT_INODE);
     if (!f) {
         fs_call_on(m, FS_CLOSE, (u32)ino, 0, 0, 0);
@@ -510,14 +578,20 @@ long vfs_link(u32 op, const char *a, const char *b)
     char ra[PATHMAX], rb[PATHMAX]; const char *rela, *relb; u32 ca, cb;
     if (op == FS_SYMLINK) {                 /* a is the link text, only b is a path */
         int m = ROUTE(b, rb, relb, cb);
-        return m < 0 ? m : fs_call_on(m, op, (u32)a, (u32)relb, cb, 0);
+        if (m < 0)
+            return m;
+        long r = fs_call_on(m, op, (u32)a, (u32)relb, cb, 0);
+        changed(m, -1);
+        return r;
     }
     int m1 = ROUTE(a, ra, rela, ca), m2 = ROUTE(b, rb, relb, cb);
     if (m1 < 0 || m2 < 0)
         return m1 < 0 ? m1 : m2;
     if (m1 != m2)
         return -EXDEV;                      /* a hard link cannot cross filesystems */
-    return fs_call_on(m1, op, (u32)rela, (u32)relb, ca, 0);
+    long r = fs_call_on(m1, op, (u32)rela, (u32)relb, ca, 0);
+    changed(m1, -1);                        /* D13: a name changed; which inode is the server's business */
+    return r;
 }
 
 /* every mount's server writes out what it holds. With REBOOT (SYS_reboot) each has at most 5 s: the tick resets the
@@ -550,7 +624,11 @@ long vfs_unlink(const char *path)
 {
     char rb[PATHMAX]; const char *rel; u32 cwd;
     int m = ROUTE(path, rb, rel, cwd);
-    return m < 0 ? m : fs_call_on(m, FS_UNLINK, (u32)rel, cwd, 0, 0);
+    if (m < 0)
+        return m;
+    long r = fs_call_on(m, FS_UNLINK, (u32)rel, cwd, 0, 0);
+    changed(m, -1);                         /* D13: the inode number may be given to a new file */
+    return r;
 }
 
 long vfs_rmdir(const char *path)
@@ -568,7 +646,9 @@ long vfs_rename(const char *from, const char *to)
         return m1 < 0 ? m1 : m2;
     if (m1 != m2)
         return -EXDEV;                      /* not across filesystems: mv copies */
-    return fs_call_on(m1, FS_RENAME, (u32)rela, (u32)relb, ca, 0);
+    long r = fs_call_on(m1, FS_RENAME, (u32)rela, (u32)relb, ca, 0);
+    changed(m1, -1);                        /* D13: a name now leads to another inode */
+    return r;
 }
 
 long vfs_read(struct file *f, void *buf, u32 n)
@@ -693,6 +773,7 @@ long vfs_mount(const struct umountreq *r)
     strncpy_(mt->dev, r->dev, sizeof mt->dev - 1);
     strncpy_(mt->type, r->type, sizeof mt->type - 1);
     mt->port = port;
+    mt->gen = ++gen_last;                   /* D13: nothing loaded from the slot's last mount is reused */
     mt->used = 1;
     struct fsinfo fi;
     long root = fs_call_on(free, FS_ROOT, (u32)&fi, 0, 0, 0);

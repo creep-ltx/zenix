@@ -1,0 +1,47 @@
+wait zenix:/# 90
+sleep 1
+send echo ==base; free; hello 1\r
+wait (?m)^hello from pid 20
+send /tests/crashpure sleep 12 & sleep 1; echo ==one; free; /tests/crashpure sleep 30 & sleep 1; echo ==two; free; /tests/crashpure sleep 25 & /tests/crashpure sleep 25 & sleep 1; echo ==four; free; ps\r
+wait crash: slept 12 s 30
+sleep 1
+send echo ==after-first; free\r
+wait crash: slept 30 s 40
+sleep 2
+send echo ==all-done; free\r
+sleep 2
+send sh -c '/tests/crashpure sleep 4' & sh -c '/tests/crashpure sleep 4' & sleep 2; echo ==together; free\r
+wait (?m)^==together 20
+sleep 4
+send /tests/crashpure sleep 3 & sleep 1; /tests/crashpure; echo ==crashed\r
+wait crash: slept 3 s 20
+sleep 1
+send /tests/crashpure literal; crash literal\r
+sleep 3
+send cp -p /tests/hellopure /tmp/hp; /tmp/hp 30 > /tmp/old.out & sleep 1; cp /tests/hellopure2 /tmp/hp; echo cp=$?; echo x >> /tmp/hp; echo app=$?; echo ==busy\r
+wait (?m)^==busy 20
+send cp -p /tests/hellopure2 /tmp/hp.new; mv /tmp/hp.new /tmp/hp; /tmp/hp 10 > /tmp/new.out & sleep 1; echo ==versions; free\r
+wait (?m)^==versions 20
+sleep 7
+send echo old=$(grep -c 'hello from pid' /tmp/old.out) new=$(grep -c 'HELLO from pid' /tmp/new.out); echo ==gone; free\r
+wait (?m)^==gone 20
+sleep 2
+send cp -p /tests/hellopure /tmp/hw; sleep 4 >> /tmp/hw & sleep 1; /tmp/hw 10 > /dev/null & sleep 1; echo ==private; free; ps\r
+wait (?m)^==private 20
+sleep 5
+send /tests/crashpure sleep 8 & sleep 1; echo ==gen1; free; kill 3; sleep 1; ls / > /dev/null; /tests/crashpure sleep 2 & sleep 1; echo ==gen2; free\r
+wait (?m)^==gen2 30
+sleep 8
+send /tests/crashpure sleep 6 & sleep 1; /tests/crashpure poke; /tests/crashpure sleep 2 & sleep 1; echo ==poked; free\r
+wait (?m)^==poked 20
+sleep 7
+send /tests/crashpure sleep 6 & sleep 1; /tests/crashpure damage; /tests/crashpure sleep 2 & sleep 1; echo ==damaged; free\r
+wait (?m)^==damaged 20
+sleep 7
+send for k in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do /tests/badzex2_$k; done; echo ==bad\r
+wait (?m)^==bad 20
+send dmesg | grep -E 'shared code|crashpure|badzex2|svc: fs'; echo ==end; free\r
+wait (?m)^==end 20
+sleep 2
+send echo pure-p-done\r
+sleep 2

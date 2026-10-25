@@ -1,6 +1,6 @@
 # Limits: what is missing and what is not known
 
-Read from the source; last checked against the code 2026-10-23. This is the home of the hard numbers: other documents
+Read from the source; last checked against the code 2026-10-25. This is the home of the hard numbers: other documents
 point here instead of repeating them.
 
 ## The no-MMU limit (permanent unless an MMU mode is added)
@@ -29,6 +29,16 @@ it; the other consoles ask for a name). `login` prints a one-line
 warning while this is so. Set the passwords with `passwd` and remove `/etc/autologin` before trusting the system.
 
 A second consequence: **servers are trusted code.** A hung filesystem server blocks every client waiting on it.
+
+**Shared code (DESIGN D13) at this trust level.** One copy of a ZEX2 program's code is run by all its processes, and
+nothing but good behaviour keeps a program from writing into it: the kernel refuses to write there for a system call
+(`user_ok_wr`), but a program writing through a stray pointer changes the code its other processes run. The checksum
+finds that at the next start (a fresh copy is loaded) and when a process running it faults (the log names the
+processes still running the damaged copy); those go on running it - nothing can stop them without an MMU. **Raw
+messages** a program sends itself (`SYS_call`) carry pointers the servers write through without a check (pingd,
+diskd's `DISK_INFO`/`DISK_LIST`, root's raw filesystem requests): a program that sends raw messages (bench, badptr,
+dd, fsck.ext2, fdisk, ping, mount, pingd, mkfs.ext2, priotest, svctest) must stay ZEXE until the servers check
+pointers.
 
 ## Not done yet (the plan: ROADMAP.md)
 
@@ -96,6 +106,9 @@ A second consequence: **servers are trusted code.** A hung filesystem server blo
   about 1430).
 - A login session (login, the shell and its work area) needs about 200 KB: a machine with 1 MB of chip RAM and no
   fast RAM has room for one; a second console's login says "cannot start /bin/sh: out of memory" (the matrix checks it).
+- Shared code (DESIGN D13, architecture.md section 4): at most 8 segments (`NSEG`) at a time; a ninth program with
+  shared code runs as a private copy. A ZEX2 program's address table is at most 32 KB (16-bit offsets: a larger one
+  is a link error).
 - Memory per process: at most 8 extra regions at a time (`SYS_memalloc`), each at most 64 MB. `malloc` keeps blocks of
   up to 32 KB in a few growing chunks (32 KB, 64 KB, ... 512 KB each) and gives every bigger block a region of its
   own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with two chunks

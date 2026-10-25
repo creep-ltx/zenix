@@ -294,6 +294,60 @@ Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB
 are in limits.md). A guard pattern lies at the bottom of every stack (section 6). There is no shared-library format yet; programs are linked
 statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).
 
+**ZEX2: programs with shared code** (DESIGN D13, docs/d13-shared-code.md). A program built for it has one copy of its
+code and constants in memory for every process running it, as an AmigaOS pure program. Every object is compiled with
+gcc's `-msep-data` through `tools/purecc.sh`, which rewrites `sym@GOT(%a5)` to `sym@GOT.w(%a5)` before assembling,
+so each global is reached through the program's address table with a 16-bit offset from `a5` (`move.l (d16,a5)`; a
+table over 32 KB is a link error). Such a program has its own builds of crt0 (`-DZEX2`) and of every part it links
+(`NAME.po`), is linked with `link/pure.ld` and made by `make build/NAME.pzx`. The layout: code and constants first
+(the shared part), then from `text_size` (16-aligned, `__text_end`) the data part every process has its own copy of:
+the table `.got` first (`a5` points at its start: the offsets count from there, not from `_GLOBAL_OFFSET_TABLE_`),
+`.got.plt` (12 zero bytes), `.data`, `.bss`. The header:
+
+```
++0  bra.w entry   +4 'ZEX2'   +8 text_size   +12 data_size   +16 mem_size (data + bss)
++20 nrel_code     +24 nrel_data              +28 reloc_off   +32 stack_size   +36 reserved
+code and constants (text_size)   data image (data_size)   nrel_code, then nrel_data link addresses of 32-bit words
+```
+
+The words to relocate all lie in the data image (stage 1 allows none in the shared part); those in the first list
+point into the shared part (the loader adds the code's address), those in the second into the data part (it adds the
+data's address minus `text_size`). `tools/mkzexe.py` classifies every relocation by the section of its target symbol,
+never by its value: the table's slots through the `R_68K_GOT16O` relocations in the code that read them (a static
+link lists no relocations for the table, so it adds one per slot). It refuses, naming the symbol: a relocation placed
+in the shared part, a PC-relative reference between the two parts (shared code reaching data), a value equal to
+`text_size` (it could be either part), an undefined weak or an absolute symbol, a table slot no relocation names, a
+writable section in the shared part. `tools/mkzexe-test.sh` (host) checks this. The new magic means a kernel that
+does not know ZEX2 refuses such a file as "not a Zenix program" instead of starting it wrongly. The programs built
+into the kernel (diskd, fsd, zfsd, boot) stay ZEXE; a ZEX2 file is loaded only from a filesystem.
+
+**Loading a ZEX2 program** (`proc_load`, `fill_v2` in `kernel/proc.c`; the segments in `kernel/seg.c`). The header is
+checked as a ZEXE one is (`zex2_bad`: the shared part 16-aligned, holding the header and inside the file; the data
+image and the two lists inside the file and in that order, without overlap and with no count that can wrap; memory at
+least the data image and at most 16 MB; the stack size), and every relocation before the first is applied (`rel2_ok`:
+its place a whole word of the data image at an even address, its value inside the part its list says). The process's
+block holds only the data part (table + `.data` + BSS), the stack and the arguments; its code is a **segment**: one
+copy for every process that starts the same unchanged file. A spawn looks for a listed segment of the file first and
+takes a reference to it at once, before anything can block, after checking its checksum; else it reads a copy of its
+own (and checks that its header is the one read first), and only when that copy is complete, checked and
+checksummed is it listed (if another spawn listed the same file meanwhile, that one is used and this copy freed:
+nobody waits on a half-loaded segment). Then both lists are applied (to-code words get the code's address, to-data
+words the data address minus `text_size`) and the first register frame gets `a5` = the start of the data part (the
+10th of the 11 words `switch_to` pops; `struct proc` keeps it in `a5`). A segment is listed under a key, (mount slot,
+the mount's generation, inode, size, modification time), and is found only while nothing the kernel saw can have
+changed the file (section 10, "Loaded code"). A copy that may not be listed - the file was open for writing at the
+spawn, it may have changed during the load, the table of `NSEG` = 8 segments is full - is the process's own (a
+private copy, freed with it). The process drops its reference in `proc_exit`; the last one frees the code at once.
+The checksum (a 32-bit add-and-rotate over every long word of the code) is checked at every reuse (a mismatch: "exec:
+PATH: its shared code in memory is damaged (checksum): loading a fresh copy", the segment leaves the list) and when a
+process running shared code faults: the crash line gives `code+OFFSET`, and the next line says the code is intact, or
+that it is DAMAGED, is not used again, and which processes still run it (nothing can stop them without an MMU).
+`tools/pure-test.sh` (part of `make check`) checks all of this in FS-UAE with ZEX2 builds of `hello` and `crash`
+(`/tests/hellopure`, `/tests/crashpure`) and 14 corrupt ZEX2 files. **Stage 1 installs `sh` and `login` as ZEX2**
+(`PUREAPPS` in the Makefile: `/bin/sh` and `/bin/login` are `sh.pzx`, `login.pzx`, linked with pure builds of
+crt0, libz, `pw.po` and `sha.po`); every other program and the built-in servers stay ZEXE. A program that sends raw
+messages must stay ZEXE (limits.md); `sh` and `login` send none.
+
 ## 5. Memory (`kernel/mem.c`)
 
 Nothing can be moved once handed out (no MMU, no paging), so fragmentation is the enemy. Rules:
@@ -318,8 +372,11 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
 The pools leave out low chip RAM (`0`-`0x1FFF`: vectors, boot tables), the kernel, the RAM disk and the kernel
 log's area at the top of chip RAM (section 3, "Previous-boot log").
 
-A process's own memory is **one block**: image + BSS + stack + the argument area. The kernel stack (4 KB) is a
-second block. Both are owned by the pid and freed together. The lowest 16 bytes of each stack hold the stack guard's
+A process's own memory is **one block**: image + BSS + stack + the argument area (a ZEX2 program's: its data part,
+section 4). The kernel stack (4 KB) is a second block. Both are owned by the pid and freed together. The code of a
+ZEX2 program shared by several processes (a segment, section 4) is a block owned by no process: its owner is
+`SEG_OWNER` (0x80000000, never a pid), so `mem_free_owner` of one of its users never frees it; the segment's
+references do (`mem_set_owner` hands a loader's copy over to the segment when it is listed). The lowest 16 bytes of each stack hold the stack guard's
 pattern (section 6).
 
 ## 6. Processes and scheduling (`kernel/proc.c`)
@@ -384,6 +441,9 @@ pattern (section 6).
   guard kills it and the system goes on; a `STACK_TEST` build (`tools/diag-test.sh stack`) damages a process's own
   kernel-stack guard (`crash kstack`: killed with the message, the system goes on) and pid 0's (`crash idle`: the
   panic, and its text in the next boot's previous-boot lines).
+- **Shared code** (DESIGN D13, section 4): a ZEX2 program's processes run one copy of its code (a segment); each has
+  its own data part, and `a5` set in its first register frame (`TRAP #0` and the interrupt handlers keep every user
+  register; the kernel is not built with `-msep-data` and keeps `a5` by the C calling rules; `switch_to` saves it).
 - **No `fork`.** Without an MMU a copy of a process cannot be given the same addresses. The only way to make a
   process is `spawn(path, argv, stdio)`: load a ZEXE, give it the parent's cwd and environment, and pass only file
   descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file). At most 256 arguments
@@ -412,8 +472,21 @@ envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), me
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
 ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`blk_read blk_write blk_flush blk_size blk_ram fd_info fd_rw`).
 
-**Every user pointer is validated** (`user_ok`) against the process's own span and its `memalloc` regions. A bad
-pointer makes the call return -EFAULT; the process lives. Strings are copied into kernel buffers with bounds; a path
+**Every user pointer is validated** against the process's own span and its `memalloc` regions. A bad
+pointer makes the call return -EFAULT; the process lives. Since D13 there are two checks: `user_ok_wr` (its own memory
+only) where the kernel, or a server answering for it, writes into the caller's memory - `read`, `statfs`, `mountinfo`,
+`blk_ram`, `envget`, `lstat`, `readlink`, `readdir`, `stat`, `fstat`, `input`, `klog`, `getcwd`, `pipe`, `procinfo`,
+`meminfo`, the message of `call` (the server answers into it), `svc`'s `SVC_LOAD` and `SVC_OPENS` - and `user_ok_rd`
+(its own memory or its code: a ZEX2 program's string literals lie in its shared code) where it only reads - `write`,
+`envset`, `mount`'s request, `svc`'s `SVC_SAVE`, every string copied in (`copy_str`) and `spawn`'s argument vector and
+stdio array. So a literal path works, and a `read` into a literal fails with -EFAULT instead of changing the code every
+process running the program runs. `blk_read` and `fd_rw` stay unchecked (privileged, as before). Raw messages a
+program sends itself are not checked by the servers (limits.md): a program that sends them stays ZEXE.
+`SYS_procinfo` fills `struct uproc`, which has a field `shared` since D13 (an interface change: the struct grew by
+4 bytes, so a program built before it passes a buffer too small at the end of its block): `mem` is the memory the
+process owns (a private copy of code included), `shared` the bytes of shared code it runs (`ps` shows them as
+SHR). `SYS_meminfo` fills four words: chip free, fast free, the bytes of shared code in memory, and what sharing saves
+(for each segment, its size times its users beyond the first); `free` prints the last two. Strings are copied into kernel buffers with bounds; a path
 argument longer than 63 bytes is -ENAMETOOLONG.
 
 **Errors are negative errno numbers** (audit E), the Linux/POSIX values in one header, `kernel/errno.h`, shared by
@@ -696,6 +769,20 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   damage it cannot repair) and `fdisk` (RDB).
 - Not done: moving directories between parents (rename answers -EXDEV, so `mv` copies), triple-indirect files, a
   journal.
+- **Loaded code: a changed file is never reused** (DESIGN D13, `kernel/vfs.c` and `kernel/seg.c`). A shared code
+  segment (section 4) is found only while the kernel has seen nothing that could have changed its file. Opening a
+  file for writing (`O_WRONLY` or `O_RDWR`) fails with -ETXTBSY (26, "text file busy") while a segment of it is in
+  memory or a load of it is in progress (with `O_TRUNC` the kernel asks the server for the file's status before the
+  open, since the server truncates in it - only while something of that mount is loaded; without, it checks the
+  open's answer and closes it again); so a program is updated the Unix way, a new file renamed over the old name, and
+  running processes keep the old code. A spawn of a file that is open for writing loads a private copy. unlink,
+  rename, link and symlink are path-only in the kernel, so after each the mount's segments leave the list and its
+  loads in progress are marked stale (never listed); running processes keep theirs. Every mount, and every start of a
+  mount's filesystem server by the service manager (`svc_handover`, `vfs_server_started`: a restarted ZenixFS server
+  drops what it had not committed and could bring back older contents under the same inode, size and time), gives the
+  mount a new generation, part of the key. Every spawn still opens the file through the server (execute permission,
+  set-user-id). Not seen by the kernel: raw `FS_WRITE` messages from root (nothing sends them), and a raw write to a
+  mounted device (diskd refuses it). The checksum finds damage to the copy in memory, not a stale but intact copy.
 - Several filesystems can be mounted (`mount`, see section 9). **ZenixFS** (copy-on-write commits, checksummed
   metadata, extents) is the native one, served by `zfsd` and possible as the root: `zenixfs.md`.
 
@@ -819,6 +906,12 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 
 ## 12. User space
 
+Every program starts in `user/crt0.S`: the kernel jumps to offset 0 with argc and argv on the stack, where the C
+rules put a function's arguments, and crt0 makes one PC-relative call to libz's `_zstart`, which sets `_zargv` (for
+libz's messages), calls `main` and ends with `_zexit` (buffered output flushed, then `SYS_exit`). So crt0 holds no
+address that needs relocating and no hand-written code reaches a global, which a program with shared code requires
+(DESIGN D13; crt0 built with `-DZEX2` has the ZEX2 header).
+
 `user/libz.c` is a tiny freestanding C library (`printf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
 environment, buffered line reader, a regex engine from the CUtils project).
 
@@ -857,7 +950,10 @@ outputs (`tools/cmds-test.sh`).
   `build/zenix.hdf` (ext2 root disk) and, as a separate dev/test build, `build/zenix-ram.adf` (the same plus a RAM
   root image). That floppy holds the bootblock, the kernel and the 704 KB RAM disk (`RAMDISK_K` in the Makefile), so
   the kernel may be at most 179200 bytes (`KERNEL_MAX`): every build of `kernel.bin` prints how much is left, and
-  `tools/mkadf.py` refuses an image that is over and says by how much.
+  `tools/mkadf.py` refuses an image that is over and says by how much. The kernel is built with `-O2`, except the five
+  truly cold drivers - `floppy`, `emmc`, `a3000`, `rtc` and `kbd` (every wait in them is timed by the E-clock or a timer)
+  - which are built with `-Os` (`KOPT_*` in the Makefile, DESIGN D13 step 0: about 6.8 KB smaller); the floppy's MFM
+  track coding (`mfm.h`) keeps `-O2` through a pragma in `floppy.c`.
 - Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
   device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
   emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,

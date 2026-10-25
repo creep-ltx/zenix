@@ -121,8 +121,11 @@ void exc_c(u32 *rb)
         if (bad && !current->killed)
             kprintf("\n[kernel] pid %d (%s) overflowed its %s stack\n", current->pid, current->name,
                     bad == STK_KERNEL ? "kernel" : "user");
-        kprintf("\n[kernel] pid %d (%s) killed: vector %u pc=%p addr=%p\n",
-                current->pid, current->name, vec, pc, faddr);
+        kprintf("\n[kernel] pid %d (%s) killed: vector %u pc=%p addr=%p", current->pid, current->name, vec, pc, faddr);
+        if (current->csize && pc - current->code < current->csize)
+            kprintf(" (code+%x)", pc - current->code);     /* D13: where in the program, wherever its code is */
+        kprintf("\n");
+        seg_crash(current, pc);         /* shared code: was it damaged? (before proc_exit drops the reference) */
         proc_exit(139);
     }
     panic_begin();                      /* this text, too, must reach the log and the screen before the stop */

@@ -2,7 +2,7 @@
 #include "kernel.h"
 
 /* Processes. No MMU: all processes share one address space, so the
- * kernel never trusts a user pointer (user_ok) and contains a crashing
+ * kernel never trusts a user pointer (user_ok_rd/wr) and contains a crashing
  * process by killing it and giving back everything it owned. */
 
 struct proc procs[NPROC];
@@ -259,7 +259,10 @@ void proc_init(void)
     current = &procs[0];
 }
 
-int user_ok(const struct proc *p, u32 ptr, u32 len)
+/* User pointers (D13, docs/d13-shared-code.md section 5). What a process may hand the kernel to write into: its own
+ * block and its memalloc regions. To read from: those and its code (a ZEX2 program's string literals live in the
+ * shared part; nothing may ever write there: every process running the program runs that code). */
+int user_ok_wr(const struct proc *p, u32 ptr, u32 len)
 {
     if (ptr + len < ptr)
         return 0;
@@ -269,6 +272,25 @@ int user_ok(const struct proc *p, u32 ptr, u32 len)
         if (p->reg[i].base && ptr >= p->reg[i].base &&
             ptr + len <= p->reg[i].base + p->reg[i].size)
             return 1;
+    return 0;
+}
+
+int user_ok_rd(const struct proc *p, u32 ptr, u32 len)
+{
+    if (user_ok_wr(p, ptr, len))
+        return 1;
+    return p->csize && ptr + len >= ptr && ptr >= p->code && ptr + len <= p->code + p->csize;
+}
+
+u32 user_rd_extent(const struct proc *p, u32 ptr)
+{
+    if (ptr >= p->base && ptr < p->base + p->span)
+        return p->base + p->span - ptr;
+    for (int i = 0; i < NREG; i++)
+        if (p->reg[i].base && ptr >= p->reg[i].base && ptr < p->reg[i].base + p->reg[i].size)
+            return p->reg[i].base + p->reg[i].size - ptr;
+    if (p->csize && ptr >= p->code && ptr < p->code + p->csize)
+        return p->code + p->csize - ptr;
     return 0;
 }
 
@@ -352,14 +374,106 @@ static const char *zexe_bad(const struct zexe *h, u32 fsize)
     return 0;
 }
 
-static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *fillctx, const char *path, char *const *argv,
-                     int argc, struct proc *parent, const int *stdio, int tty, int priv, int suid)
+/* ---- ZEX2: a program with shared code (D13, docs/d13-shared-code.md section 4) ----
+ * The header comes from a file: every field is checked first, as for ZEXE */
+static const char *zex2_bad(const struct zex2 *h, u32 fsize)
 {
-    const char *bad = zexe_bad(h, fsize);
+    if (fsize < sizeof *h)
+        return "not a Zenix program (no ZEX2 header)";
+    if (h->text_size < sizeof *h || (h->text_size & 15) || h->text_size > fsize)
+        return "shared part outside the file";
+    if (h->data_size > fsize - h->text_size || (h->data_size & 3))
+        return "data image outside the file";
+    if (h->reloc_off < h->text_size + h->data_size || h->reloc_off > fsize)
+        return "relocation table overlaps the image or lies outside the file";
+    u32 room = (fsize - h->reloc_off) / 4;
+    if (h->nrel_code > room || h->nrel_data > room - h->nrel_code)
+        return "relocation table outside the file";
+    if (h->mem_size < h->data_size || h->mem_size > ZEXE_MEM_MAX)
+        return "memory size impossible";
+    if (h->stack_size && (h->stack_size < ZEXE_STACK_MIN || h->stack_size > ZEXE_STACK_MAX))
+        return "stack size impossible";
+    return 0;
+}
+
+/* Every relocation (link addresses: the first nrel_code point into the shared part, the rest into the data part) must
+ * name a whole word of the data image at an even address (stage 1: none lies in the shared part), and the word's value
+ * must lie in the part its list says. All are checked before the first is applied. */
+static int rel2_ok(const u32 *rel, const struct zex2 *h, const u8 *data)
+{
+    u32 ts = h->text_size, n = h->nrel_code + h->nrel_data;
+    for (u32 i = 0; i < n; i++) {
+        u32 at = rel[i] - ts;
+        if (rel[i] < ts || h->data_size < 4 || at > h->data_size - 4 || (at & 1))
+            return 0;
+        u32 v = *(const u32 *)(data + at);
+        if (i < h->nrel_code ? v >= ts : v < ts || v - ts > h->mem_size)
+            return 0;
+    }
+    return 1;
+}
+
+/* Load a ZEX2 program's data part into DATA (the process's block) and its code: the segment *segp already found (a
+ * reference taken), else a copy of its own - listed as a segment for the next spawns when the file cannot have changed
+ * (seg_enter), else kept private (owned by pid, freed with the process). *codep: where the code is. Nobody waits on a
+ * half-loaded segment: each spawn that finds none loads its own copy; it is listed only when complete. */
+static int fill_v2(struct exec_src *x, u8 *data, const struct zex2 *h, u32 pid, const char *path, struct seg **segp,
+                   u32 *codep)
+{
+    u32 ts = h->text_size, nrel = h->nrel_code + h->nrel_data, rsz = nrel * 4;     /* checked: no wrap */
+    u8 *own = 0;
+    if (!*segp) {
+        if (!(own = mem_alloc(ts, 0, pid)))
+            return -ENOMEM;
+        if (fs_exec_read(x, 0, own, ts))
+            return -EIO;
+        for (u32 i = 0; i < sizeof *h; i++)     /* the file changed between the two reads: never run a mix */
+            if (own[i] != ((const u8 *)h)[i])
+                return -EIO;
+    }
+    if (h->data_size && fs_exec_read(x, ts, data, h->data_size))
+        return -EIO;
+    u32 *rel = kmalloc(rsz ? rsz : 4);
+    if (!rel)
+        return -ENOMEM;
+    if (rsz && fs_exec_read(x, h->reloc_off, rel, rsz)) {
+        kfree(rel);
+        return -EIO;
+    }
+    if (!rel2_ok(rel, h, data)) {
+        kfree(rel);
+        return -ENOEXEC;
+    }
+    if (own) {
+        int made;
+        struct seg *s = seg_enter(x, (u32)own, ts, seg_sum((u32)own, ts), path, &made);
+        if (s && !made)
+            mem_free(own);              /* another spawn listed the same file first: use that one */
+        *segp = s;
+    }
+    u32 code = *segp ? (*segp)->code : (u32)own, dd = (u32)data - ts;
+    for (u32 i = 0; i < nrel; i++)
+        *(u32 *)(data + rel[i] - ts) += i < h->nrel_code ? code : dd;
+    kfree(rel);
+    *codep = code;
+    return 0;
+}
+
+static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *fillctx, const char *path,
+                     char *const *argv, int argc, struct proc *parent, const int *stdio, int tty, int priv, int suid)
+{
+    const struct zexe *h = &hu->v1;
+    int v2 = h->magic == ZEX2_MAGIC && fill == fill_fs;    /* the programs built into the kernel stay ZEXE */
+    const char *bad = v2 ? zex2_bad(&hu->v2, fsize) : zexe_bad(h, fsize);
     if (bad) {
         kprintf("exec: %s refused: %s\n", path, bad);
         return -ENOEXEC;
     }
+    u32 img = v2 ? hu->v2.data_size : h->image_size, memsz = v2 ? hu->v2.mem_size : h->mem_size;
+    struct exec_src *x = v2 ? (struct exec_src *)fillctx : 0;
+    /* a segment of this file already in memory: the reference is taken now, before anything below can block */
+    struct seg *seg = v2 ? seg_find(x, hu->v2.text_size, path) : 0;
+    u32 code = 0;
 
     u32 strsz = 0;
     for (int i = 0; i < argc; i++) {
@@ -370,25 +484,28 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
     }
     u32 argsz = (strsz + (u32)(argc + 1) * 4 + 8 + 15) & ~15u;
     int pid = next_pid++;
-    u32 stack = h->stack_size ? h->stack_size : USTACK_DEFAULT;
-    u32 span = ((h->mem_size + 15) & ~15u) + ((stack + 15) & ~15u) + argsz;
+    u32 stk = v2 ? hu->v2.stack_size : h->stack_size;
+    u32 stack = stk ? stk : USTACK_DEFAULT;
+    u32 span = ((memsz + 15) & ~15u) + ((stack + 15) & ~15u) + argsz;
     u8 *base = mem_alloc(span, 0, (u32)pid);
     u32 *ks = mem_alloc(KSTACK, 0, (u32)pid);
     if (!base || !ks) {
         mem_free_owner((u32)pid);
+        seg_put(seg);
         return -ENOMEM;
     }
     /* Reading the image can block (messages to the filesystem server), and another process may spawn meanwhile: so the
      * process slot is chosen only afterwards, and nothing below blocks. */
-    int fr = fill(fillctx, base, h);
+    int fr = v2 ? fill_v2(x, base, &hu->v2, (u32)pid, path, &seg, &code) : fill(fillctx, base, h);
     if (fr) {
         if (fr == -ENOEXEC)
             kprintf("exec: %s refused: a relocation points outside the program\n", path);
         mem_free_owner((u32)pid);
+        seg_put(seg);
         return fr;
     }
-    memset(base + h->image_size, 0, span - h->image_size);
-    u32 ustk = (u32)base + ((h->mem_size + 15) & ~15u);         /* the user stack starts above image and bss */
+    memset(base + img, 0, span - img);
+    u32 ustk = (u32)base + ((memsz + 15) & ~15u);               /* the user stack starts above image and bss */
     guard_set(ustk);
     guard_set((u32)ks);
     cache_flush_code();         /* the image is code the CPU has not seen: no stale I-cache lines or Emu68 translations
@@ -402,6 +519,7 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
         }
     if (!p) {
         mem_free_owner((u32)pid);
+        seg_put(seg);
         return -EAGAIN;
     }
 
@@ -421,16 +539,23 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
     usp[0] = (u32)argc;
     usp[1] = (u32)vec;
 
-    /* kernel stack for the first switch_to: d2-d7,a2-a6 and the return address */
+    /* kernel stack for the first switch_to: d2-d7,a2-a6 and the return address. A ZEX2 program's code needs a5 = the
+     * start of its data part (the table): the 10th of the 11 words movem pops (index 9); user_first_entry keeps it. */
     u32 *kt = ks + KSTACK / 4;
     *--kt = (u32)user_first_entry;
     for (int i = 0; i < 11; i++)
         *--kt = 0;
+    if (v2)
+        kt[9] = (u32)base;
 
     memset(p, 0, sizeof *p);
     p->ksp = kt;
     p->usp = (u32)usp;
-    p->entry = (u32)base;
+    p->entry = v2 ? code : (u32)base;
+    p->seg = seg;
+    p->code = code;
+    p->csize = v2 ? hu->v2.text_size : 0;
+    p->a5 = v2 ? (u32)base : 0;
     p->pid = pid;
     p->ppid = parent ? parent->pid : 0;
     p->base = (u32)base;
@@ -484,6 +609,8 @@ static int proc_load(const struct zexe *h, u32 fsize, fillfn fill, const void *f
                                                              * writes into the kernel log (D11 step 8) */
         if (!t) {                       /* every open-file slot taken: the slot p is still free (state 0) */
             mem_free_owner((u32)pid);
+            seg_put(seg);
+            p->seg = 0;
             return -ENFILE;
         }
         t->off = (u32)tty;
@@ -509,12 +636,13 @@ int proc_spawn(const char *path, char *const *argv, int argc,
                struct proc *parent, const int *stdio, int tty)
 {
     struct exec_src x;
-    struct zexe h;
+    union zhdr h;                       /* a ZEXE header, or the longer ZEX2 one */
     long r = fs_exec_open(path, parent, &x);
     if (r < 0)
         return (int)r;
     memset(&h, 0, sizeof h);
-    if (x.st.size >= sizeof h && fs_exec_read(&x, 0, &h, sizeof h)) {    /* shorter: proc_load says why it is refused */
+    u32 hn = x.st.size < sizeof h ? x.st.size : sizeof h;
+    if (x.st.size >= sizeof h.v1 && fs_exec_read(&x, 0, &h, hn)) {      /* shorter: proc_load says why it is refused */
         fs_exec_close(&x);
         return -EIO;
     }
@@ -528,7 +656,7 @@ int proc_spawn(const char *path, char *const *argv, int argc,
  * (0: the kernel log, a service's server) */
 int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv, int tty)
 {
-    return proc_load(img, len, fill_mem, img, argv[0], argv, argc, 0, 0, tty, priv, -1);
+    return proc_load((const union zhdr *)img, len, fill_mem, img, argv[0], argv, argc, 0, 0, tty, priv, -1);
 }
 
 /* may killed process p end now? Never inside a message call (the server may still use the client's buffers, and the
@@ -688,6 +816,10 @@ void proc_exit(int code)
     ints_off();
     struct proc *p = current;
     p->exiting = 1;
+    seg_put(p->seg);                    /* D13: after exc_c's crash check; the last user frees the code */
+    if (p->seg)
+        p->csize = 0;
+    p->seg = 0;
     for (int i = 0; i < NFD; i++)
         if (p->fd[i]) {
             file_close(p->fd[i]);
