@@ -294,6 +294,33 @@ Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB
 are in limits.md). A guard pattern lies at the bottom of every stack (section 6). There is no shared-library format yet; programs are linked
 statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).
 
+**ZEX2: programs with shared code** (DESIGN D13, docs/d13-shared-code.md). A program built for it has one copy of its
+code and constants in memory for every process running it, as an AmigaOS pure program. Every object is compiled with
+gcc's `-msep-data` through `tools/purecc.sh`, which rewrites `sym@GOT(%a5)` to `sym@GOT.w(%a5)` before assembling,
+so each global is reached through the program's address table with a 16-bit offset from `a5` (`move.l (d16,a5)`; a
+table over 32 KB is a link error). Such a program has its own builds of crt0 (`-DZEX2`) and of every part it links
+(`NAME.po`), is linked with `link/pure.ld` and made by `make build/NAME.pzx`. The layout: code and constants first
+(the shared part), then from `text_size` (16-aligned, `__text_end`) the data part every process has its own copy of:
+the table `.got` first (`a5` points at its start: the offsets count from there, not from `_GLOBAL_OFFSET_TABLE_`),
+`.got.plt` (12 zero bytes), `.data`, `.bss`. The header:
+
+```
++0  bra.w entry   +4 'ZEX2'   +8 text_size   +12 data_size   +16 mem_size (data + bss)
++20 nrel_code     +24 nrel_data              +28 reloc_off   +32 stack_size   +36 reserved
+code and constants (text_size)   data image (data_size)   nrel_code, then nrel_data link addresses of 32-bit words
+```
+
+The words to relocate all lie in the data image (stage 1 allows none in the shared part); those in the first list
+point into the shared part (the loader adds the code's address), those in the second into the data part (it adds the
+data's address minus `text_size`). `tools/mkzexe.py` classifies every relocation by the section of its target symbol,
+never by its value: the table's slots through the `R_68K_GOT16O` relocations in the code that read them (a static
+link lists no relocations for the table, so it adds one per slot). It refuses, naming the symbol: a relocation placed
+in the shared part, a PC-relative reference between the two parts (shared code reaching data), a value equal to
+`text_size` (it could be either part), an undefined weak or an absolute symbol, a table slot no relocation names, a
+writable section in the shared part. `tools/mkzexe-test.sh` (host) checks this. The new magic means a kernel that
+does not know ZEX2 refuses such a file as "not a Zenix program" instead of starting it wrongly. Every program
+(`all`) is still built as ZEXE.
+
 ## 5. Memory (`kernel/mem.c`)
 
 Nothing can be moved once handed out (no MMU, no paging), so fragmentation is the enemy. Rules:

@@ -265,6 +265,21 @@ $(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py tools/check-68020-60.sh Makefile
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
 
+# ---- programs with shared code (DESIGN D13, ZEX2: docs/d13-shared-code.md): one copy of the code for every process
+# running it. Every object is compiled with -msep-data through tools/purecc.sh (the 16-bit table offsets) - libz and
+# crt0 too, so a pure program has its own builds of them (.po) - and linked with link/pure.ld. NAME.pzx is the
+# program; nothing in `all` uses one yet. ----
+PULDFLAGS := -nostartfiles -T link/pure.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections
+$(BUILD)/crt0-pure.o: user/crt0.S | $(BUILD)
+	$(CC) $(ASFLAGS) -DZEX2 $< -o $@
+$(BUILD)/%.po: user/%.c user/libz.h user/usys.h tools/purecc.sh | $(BUILD)
+	tools/purecc.sh $(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/%.puelf: $(BUILD)/%.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
+	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $< $(BUILD)/libz.po $(LIBGCC) -o $@
+$(BUILD)/%.pzx: $(BUILD)/%.puelf tools/mkzexe.py tools/check-68020-60.sh Makefile
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
+
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
 $(BUILD)/zenix.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
 	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)"

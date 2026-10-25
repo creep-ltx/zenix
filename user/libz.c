@@ -480,6 +480,16 @@ void *xmalloc(u32 n)
     return p;
 }
 
+/* The C side of the program's start: crt0.S calls it with argc and argv where the C rules want them, so no
+ * hand-written code reaches a global (in a program with shared code those go through the table in a5, DESIGN D13) */
+int main(int argc, char **argv);
+void _zstart(int argc, char **argv) __attribute__((noreturn));
+void _zstart(int argc, char **argv)
+{
+    _zargv = argv;
+    _zexit(main(argc, argv));
+}
+
 /* the error number of the last failed system call (or libz helper), and the reason to print for it */
 int zerrno;
 static const struct { unsigned char e; const char *text; } errtext[] = {

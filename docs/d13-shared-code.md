@@ -257,4 +257,22 @@ compressing the kernel (a decompressor in the boot path is the most work).
    keeps it for the future (section 7).
 3. *Stage 2's format?* Not decided yet; AmigaOS-style jump tables lean ahead for new libraries (section 9).
 
+## 14. As built (stage 1)
+
+What the build did differently from sections 1-13, and why; each item names the step.
+
+- **Step 0.** The floppy's MFM code keeps `-O2` through `#pragma GCC optimize("O2")` around `#include "mfm.h"` in
+  `floppy.c`, so the whole of `mfm.h` (encoding too, not only `mfm_decode_track`) stays `-O2`: the decode and encode
+  functions compile to the same instructions as before (compared with objdump). The kernel went from 177064 to 170212
+  bytes (8988 left of 179200).
+- **Step 1.** The pure layout lives in a new linker script, `link/pure.ld`, not in `link/user.ld`: changing
+  `user.ld` would have moved every v1 program's `.data` (the 16-byte alignment) and broken "every v1 file
+  byte-identical". `pure.ld` also discards `.eh_frame` (nothing unwinds). `_zstart` (libz) and crt0's `-DZEX2` variant
+  came with step 1, because the host test needs a working pure link; v1 programs do not reach `_zstart`, so
+  `--gc-sections` drops it from them (step 3a moves every program to it). Pure objects are `NAME.po`, a pure program
+  `NAME.pzx` (`make build/NAME.pzx`). The relocation lists hold link addresses (not offsets in the data part), so a
+  later "applied once" class in the shared part needs no format change. mkzexe also refuses a writable section in the
+  shared part, a table slot that holds something other than its symbol's address, and a `.got.plt` that is not zero;
+  it verified on every slot of `hello`, `cat` and `sh` that the 16-bit offsets count from the start of `.got`.
+
 Last checked against the code: 2026-10-25.
