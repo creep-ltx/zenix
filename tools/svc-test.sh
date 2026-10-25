@@ -230,6 +230,8 @@ if [ "$(grep -ac 'svctest call f 1: -104 in' "$OUT/f.log")" = 4 ]; then echo "PA
 rx   f "a nice 19 loader whose start failed is back at its own level" " +[0-9]+ +[0-9]+ +31 +19 [a-z]+ +[0-9]+ svctest"
 none f "... not at the queued nice -20 client's" " +[0-9]+ +[0-9]+ +[0-9] +19 [a-z]+ +[0-9]+ svctest"
 line f "... and ends at a kill" "a2-left=0 a2-end"
+rx   f "a crash in a request: the next start is told so (start 2 + 65536)" ".*svctest call m 3: 65538 in [0-9]+ ms"
+rx   f "... a clean stop after it clears that: the start after it is not (start 3, audit A8)" ".*svctest call m 3: 3 in [0-9]+ ms"
 line f "the script ran to the end" "svc-f-done"
 fi
 

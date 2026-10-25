@@ -5,5 +5,7 @@ send svctest call f 1; svctest call f 1 0 30 & p=$!; sleep 0.4; kill $p; sleep 1
 wait a1b-end 30
 send nice -n 19 svctest call f 1 0 20 & p=$!; sleep 0.3; nice -n -20 svctest call f 1; sleep 0.5; ps | grep svctest; kill $(pgrep svctest); sleep 1; echo a2-left=$(ps | grep svctest | grep -vc zombie) a2-$(echo end)\r
 wait a2-end 30
+send svctest reg m 0 /bin/pingd -port m; svctest call m 7; svctest call m 3; svctest call m 9; sleep 1; svctest call m 3; echo a8-$(echo end)\r
+wait a8-end 40
 send dmesg | grep 'svc: f:'; echo svc-f-$(echo done)\r
 wait svc-f-done 20

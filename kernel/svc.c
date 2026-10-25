@@ -346,6 +346,7 @@ void svc_exit(struct proc *p)
         int was_running = s->state == SV_RUNNING;
         if (was_running && p->exit_code == 0 && !in) {
             kprintf("svc: %s: %s (pid %d) stopped\n", pt->name, p->name, p->pid);
+            s->midreq = 0;                      /* a clean stop: the next start has nothing half done (A8) */
             pass_load(i);
             continue;
         }

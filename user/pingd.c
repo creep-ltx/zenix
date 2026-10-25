@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 /* test server: port "ping" (or -port NAME); type 1 = add a[0]+a[1] into a[2]; type 2 = copy the client's string a[0]
- * (pointer into the client's memory) to upper case in place; type 7 = wait a second, then crash (an illegal
+ * (pointer into the client's memory) to upper case in place; type 3 = answer with its sys_svc_self() (the start count and
+ * SVC_MIDREQ: audit A8's test); type 7 = wait a second, then crash (an illegal
  * instruction: the service manager's tests, DESIGN D11); type 9 = quit. Exits after serving COUNT requests if given.
  * -call NAME: call port NAME once before creating its own (a start-up that needs another service: D11's tests).
  * -fs: a filesystem server that hangs on sync: FS_ROOT answers 2, FS_SYNC never returns, FS_QUIT ends it, anything
@@ -38,6 +39,7 @@ int main(int argc, char **argv)
         }
         if (m->type == 1) m->a[2] = m->a[0] + m->a[1];
         else if (m->type == 2) { char *s = (char *)m->a[0]; for (; *s; s++) if (*s >= 'a' && *s <= 'z') *s -= 32; }
+        else if (m->type == 3) r = sys_svc_self();
         else if (m->type == 7) { sys_sleep(100); __asm__ volatile("illegal"); }
         else if (m->type == 9) { sys_reply(m, 0); return 0; }
         else r = -1;

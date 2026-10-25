@@ -10,7 +10,9 @@ DESCRIPTION
     Creates a message port named "ping" and answers the requests of ping(1):
     type 1 adds two numbers, type 2 converts a string to upper case IN PLACE
     in the client's memory (showing that messages pass pointers, not
-    copies), type 7 waits a second and then crashes (an illegal
+    copies), type 3 answers with what the service manager told it at its
+    start (the start count, plus 65536 if the last server ended in the
+    middle of a request), type 7 waits a second and then crashes (an illegal
     instruction: for the service manager's tests), type 9 ends the
     server. It also ends after serving count requests if given. Start it
     in the background:  pingd &
