@@ -25,7 +25,6 @@ cp build/zenix.adf $OUT/df0.adf
 cp $OUT/df1.adf $OUT/df1.orig
 rm -rf $OUT/states; mkdir -p $OUT/states
 sed -e "s#floppy_drive_0 = .*#floppy_drive_0 = $OUT/df0.adf\nfloppy_drive_1 = $OUT/df1.adf\nfloppy_drive_count = 2\nwritable_floppy_images = 1\nsave_states_dir = $OUT/states#" fsuae/a1200-020-fast.fs-uae > fsuae/floppy-test.fs-uae
-while pgrep -x fs-uae >/dev/null; do sleep 1; done
 tools/run-test.sh fsuae/floppy-test.fs-uae ${FLOPPY_SECS:-300} tools/tests/floppy-test.txt > $OUT/log 2>&1
 rm -f fsuae/floppy-test.fs-uae
 pass=1

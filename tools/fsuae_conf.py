@@ -45,12 +45,46 @@ def resolve(text, serial=None, build=None):
     return text
 
 
+# One FS-UAE on this machine at a time: a second one quits or spoils both runs, and other projects use FS-UAE too. Every
+# emulator run of every tree takes this lock (tools/run-test.sh with flock, the cage rig's runs here), then waits until
+# no other FS-UAE runs, and lets go when its run ends. Nothing waits while holding the lock but for a running FS-UAE,
+# which ends on its own: no two trees can wait for each other.
+EMULATOR_LOCK = os.environ.get("ZENIX_EMU_LOCK", "/tmp/zenix-emulator.lock")
+
+
+def emulator_slot():
+    """take the machine's emulator lock and wait for no running FS-UAE; close the returned file to let go"""
+    import fcntl
+    import subprocess
+    import time
+    f = open(EMULATOR_LOCK, "a")
+    fcntl.flock(f, fcntl.LOCK_EX)
+    while subprocess.run(["pgrep", "-x", "fs-uae"], stdout=subprocess.DEVNULL).returncode == 0:
+        time.sleep(5)
+    return f
+
+
 def load_cage():
     rig = os.environ.get("ZENIX_CAGE_RIG")
     if not rig:
         sys.exit("set ZENIX_CAGE_RIG to the directory that holds maker/cage_rig.py (the headless cage rig)")
     sys.path.insert(0, os.path.expanduser(rig))
-    from maker.cage_rig import Cage
+    from maker.cage_rig import Cage as RigCage
+
+    class Cage(RigCage):            # the rig's session, holding the emulator lock from its start to its end
+        def __init__(self, *args, **kw):
+            self._slot = emulator_slot()
+            try:
+                super().__init__(*args, **kw)
+            except BaseException:
+                self._slot.close()
+                raise
+
+        def __exit__(self, *exc):
+            try:
+                return super().__exit__(*exc)
+            finally:
+                self._slot.close()
     return Cage
 
 

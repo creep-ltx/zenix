@@ -70,16 +70,7 @@ joystick_port_1 = none
 EOF
 }
 
-others() {  # another emulator, or another tree's test scripts (they start emulators back to back): wait for them
-    pgrep -x fs-uae >/dev/null && return 0
-    local p
-    for p in $(pgrep -f 'tools/(check|matrix|run-test|[a-z0-9-]*-test)\.sh'); do
-        [ "$(readlink /proc/$p/cwd 2>/dev/null)" = "$(pwd -P)" ] || return 0
-    done
-    return 1
-}
-run() {     # name seconds [keyscript]
-    while others; do sleep 5; done                               # one emulator on the machine at a time
+run() {     # name seconds [keyscript] (run-test.sh waits for the machine's one emulator slot)
     tools/run-test.sh "$OUT/$1.fs-uae" "$2" $3 >"$OUT/$1.log" 2>&1
 }
 

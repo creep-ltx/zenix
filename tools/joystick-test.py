@@ -22,8 +22,6 @@ text = fsuae_conf.resolve(open(os.path.join(root, "fsuae/a1200-020-fast.fs-uae")
 text = text.replace("joystick_port_1 = none", "joystick_port_1 = keyboard")
 open(conf, "w").write(text)
 subprocess.run(["make", "-s", "all"], cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-while subprocess.run(["pgrep", "-x", "fs-uae"], stdout=subprocess.DEVNULL).returncode == 0:
-    time.sleep(1)
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"), serial, log,
                         os.path.join(here, "tests/joystick-test.txt")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)

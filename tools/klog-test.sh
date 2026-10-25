@@ -5,7 +5,6 @@
 cd "$(dirname "$0")/.." || exit 1
 make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-klog-serial}
-while pgrep -x fs-uae >/dev/null; do sleep 1; done
 OUT=/tmp/zenix-klog.log
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae 45 tools/tests/klog-test.txt > $OUT 2>&1
 pass=1

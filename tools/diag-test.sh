@@ -65,7 +65,6 @@ near() { python3 -c "
 got = [int(x) for x in '$1'.split()]; want = [int(c, 16) * 17 for c in '$2']
 exit(0 if all(abs(a - b) <= 40 for a, b in zip(got, want)) else 1)"; }
 
-wait_free() { while pgrep -x fs-uae >/dev/null; do sleep 1; done; }
 echo "sleep 1" > "$OUT/idle.txt"
 
 if [ "$WHAT" = colours ] || [ "$WHAT" = all ]; then
@@ -74,7 +73,6 @@ if [ "$WHAT" = colours ] || [ "$WHAT" = all ]; then
         n=${sc%%:*}; col=${sc#*:}
         build stop$n "-DDIAG_STOP=$n"
         conf "$OUT/stop$n.fs-uae" "$OUT/stop$n/zenix.adf"
-        wait_free
         timeout 60 python3 tools/shot.py "$OUT/stop$n.fs-uae" "$OUT/idle.txt" "$OUT/stop$n" 18 >/dev/null 2>&1
         px=$(pixel "$OUT/stop$n-18.png" 0.5)
         near "$px" "$col" && check "stage $n stops with colour $col over the screen" ok ||
@@ -83,7 +81,6 @@ if [ "$WHAT" = colours ] || [ "$WHAT" = all ]; then
 
     build panic7 "-DDIAG_PANIC=7"
     conf "$OUT/panic7.fs-uae" "$OUT/panic7/zenix.adf"
-    wait_free
     timeout 60 python3 tools/shot.py "$OUT/panic7.fs-uae" "$OUT/idle.txt" "$OUT/panic7" 18 >/dev/null 2>&1
     top=$(pixel "$OUT/panic7-18.png" 0.15); bot=$(pixel "$OUT/panic7-18.png" 0.85)
     near "$top" 630 && near "$bot" F00 && check "panic before the display: brown (stage 7) over red" ok ||
@@ -94,7 +91,6 @@ if [ "$WHAT" = colours ] || [ "$WHAT" = all ]; then
     # a 68000 is refused at stage 5: orange over red (the standard floppy of the stop builds will do)
     conf "$OUT/a600.fs-uae" "$OUT/stop9/zenix.adf" A600
     sed -i 's/^fast_memory = .*/fast_memory = 0/; s/^chip_memory = .*/chip_memory = 1024/' "$OUT/a600.fs-uae"
-    wait_free
     timeout 60 python3 tools/shot.py "$OUT/a600.fs-uae" "$OUT/idle.txt" "$OUT/a600" 20 >/dev/null 2>&1
     top=$(pixel "$OUT/a600-20.png" 0.15); bot=$(pixel "$OUT/a600-20.png" 0.85)
     near "$top" F80 && near "$bot" F00 && check "68000 refused: orange (stage 5) over red" ok ||
@@ -104,7 +100,6 @@ fi
 if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
     build normal ""
     conf "$OUT/reset.fs-uae" "$OUT/normal/zenix-ram.adf"
-    wait_free
     RESET_AT=38 timeout 120 python3 tools/shot.py "$OUT/reset.fs-uae" tools/tests/diag-reset-test.txt "$OUT/reset" 36 66 78 >/dev/null 2>&1
     L=$OUT/reset.log; tr -d '\r' < "$OUT/reset.serial.log" > "$L"
     grep -q '^klog: no log from a previous boot' "$L" && check "cold start: no previous log" ok || check "cold start: no previous log" bad
@@ -122,7 +117,6 @@ if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
 
     build panic11 "-DDIAG_PANIC=11" DIWV=0x38      # the picture starts lower: FS-UAE's screenshot shows its top rows
     conf "$OUT/preset.fs-uae" "$OUT/panic11/zenix-ram.adf"
-    wait_free
     ZOOMOUT=0 RESET_AT=28,58 timeout 130 python3 tools/shot.py "$OUT/preset.fs-uae" "$OUT/idle.txt" "$OUT/preset" 26 56 86 >/dev/null 2>&1
     L=$OUT/preset.log; tr -d '\r' < "$OUT/preset.serial.log" > "$L"
     bg=$(pixel "$OUT/preset-26.png" 0.02)
@@ -137,7 +131,6 @@ fi
 if [ "$WHAT" = stack ] || [ "$WHAT" = all ]; then
     build stack "-DSTACK_TEST"
     conf "$OUT/stack.fs-uae" "$OUT/stack/zenix-ram.adf"
-    wait_free
     RESET_AT=56 timeout 130 python3 tools/shot.py "$OUT/stack.fs-uae" tools/tests/diag-stack-test.txt "$OUT/stack" 50 95 >/dev/null 2>&1
     L=$OUT/stack.log; tr -d '\r' < "$OUT/stack.serial.log" > "$L"
     grep -q '^\[kernel\] pid [0-9]* (crash) overflowed its kernel stack: killed' "$L" &&

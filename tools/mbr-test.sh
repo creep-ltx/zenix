@@ -15,7 +15,6 @@ check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi
 sed -e "s#hard_drive_0 = .*#hard_drive_0 = ../build/zenix-mbr.hdf\nhard_drive_0_type = rdb#" fsuae/a1200-020-fast.fs-uae > fsuae/mbr-test.fs-uae
 for mode in plain rdb; do
     if [ $mode = rdb ]; then tools/mkmbr.py build/zenix-mbr.hdf build/zenix.hdf rdb >/dev/null; else tools/mkmbr.py build/zenix-mbr.hdf build/zenix.hdf >/dev/null; fi
-    while pgrep -x fs-uae >/dev/null; do sleep 1; done          # FS-UAE allows one instance at a time
     tools/run-test.sh fsuae/mbr-test.fs-uae 50 tools/tests/mbr-test.txt > $OUT/$mode.log 2>&1
     grep -q 'ext2: 1 KB blocks' $OUT/$mode.log && check "$mode: root mounted from the partition" ok || check "$mode: root mounted from the partition" bad
     grep -q 'ide0p1' $OUT/$mode.log && check "$mode: FAT partition listed" ok || check "$mode: FAT partition listed" bad

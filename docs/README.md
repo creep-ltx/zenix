@@ -47,6 +47,9 @@ configs. `--staged` also checks what is about to be committed (a changed program
 ## Testing
 Nothing counts as done until a test checks it. The tests run FS-UAE headless (never on the screen), from scripts typed
 into the serial port (`tools/serial-tap.py`: `sleep`, `send` and `wait REGEX [timeout]`, which waits for the output).
+Only one FS-UAE can run on a machine, so every emulator run (`tools/run-test.sh`, and the cage rig's through
+`tools/fsuae_conf.py`) first takes the lock `/tmp/zenix-emulator.lock` (`ZENIX_EMU_LOCK`), waits until no other FS-UAE
+runs (another project's too), and lets go when its run ends: test scripts of several trees take turns, run by run.
 
 **The gate: `make check`** (also `make test`, `tools/check.sh`). It builds every image, runs the host tests (seconds),
 then the emulator tests one after another (about 1.5 hours), each with its own serial port and output directory, and
