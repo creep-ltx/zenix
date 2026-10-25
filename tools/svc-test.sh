@@ -25,6 +25,8 @@
 #      after the 30 s deadline
 #   s  the sync paths (step 5): reboot with the root server dead and a loader asleep in a 4 s back-off: the sync skips
 #      the dead server at once (no error), the machine resets and boots again
+#   h  reboot with a filesystem server that never answers its sync (pingd -fs, audit A7): after 5 s the machine is
+#      reset anyway, the log names the server, and it boots again
 #   t  /etc/svctab (step 7): a service listed there starts on the first call at its nice; ping's quit is a stop and
 #      the next ping starts it again; a missing program fails at once each time, logged, never counted (no give-up);
 #      a bad line is reported and skipped; a crash during a request: that client gets -104, a client queued behind it
@@ -36,7 +38,7 @@
 #   dmg  a test-only kernel damages diskd's saved table: diskd stops with its message, the kernel panics
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
-PARTS=" ${*:-a z b n r d o zo u l f s t dmg} "
+PARTS=" ${*:-a z b n r d o zo u l f s h t dmg} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
 make -s all build/zenix-zroot.hdf build/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
@@ -241,6 +243,18 @@ line s "the root server was dead before the reboot" "svc: fs: fsd (pid 3) ended,
 line s "the sync skipped it at once, without an error" "reboot: filesystems synced, disk writes stopped; resetting"
 rx   s "... the machine reset and booted again" "klog: boot 2, .*"
 if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck-s.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean"; else echo "FAIL the host's e2fsck finds the root clean"; pass=0; fi
+rm -f "$OUT/root.hdf"
+fi
+
+# ---- h: reboot with a server that hangs on its sync (audit A7) ----
+if want_part h; then
+cp build/zenix.hdf "$OUT/root.hdf"
+conf h "$OUT/root.hdf"
+run h "$OUT/h.fs-uae" 100 tools/tests/svc-hang-test.txt
+rx   h "a fake filesystem that hangs on sync is mounted" ".*svctest mount /tmp/hang: 0"
+line h "the reboot gives it 5 s, then resets, naming it" "reboot: fs.hang did not sync in 5 s; resetting"
+rx   h "... the machine booted again" "klog: boot 2, .*"
+if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck-h.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean (it was synced first)"; else echo "FAIL the host's e2fsck finds the root clean (it was synced first)"; pass=0; fi
 rm -f "$OUT/root.hdf"
 fi
 

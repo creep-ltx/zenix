@@ -220,8 +220,20 @@ static volatile u16 kq_head, kq_tail;
 static volatile u32 kq_lost;
 static u32 kq_lost_told;
 
+/* SYS_reboot's sync gives every filesystem server at most 5 s (vfs_sync): one that hangs must not keep the machine from
+ * resetting (audit A7). The tick does the reset then, as the keyboard does after the reset warning. */
+volatile u32 reboot_deadline;
+const char *volatile reboot_who;
+
 void kbd_tick(void)
 {
+    if (reboot_deadline && (s32)(ticks - reboot_deadline) >= 0) {
+        disk_frozen = 1;
+        klog_set_reason(KLOG_END_REBOOT);
+        kprintf("reboot: %s did not sync in 5 s; resetting\n", reboot_who);
+        serial_flush();
+        machine_reset();
+    }
     if (rep_code)
         kwork_pending = 1;              /* kbd_work checks whether the repeat is due */
     if ((kbd_reset_state == KRS_HELD || kbd_reset_state == KRS_FLUSHING) && (u32)(ticks - rw_since) > KBD_RESET_MAX) {
@@ -335,7 +347,7 @@ void kbd_reset_flush(void)
         return;
     kbd_reset_state = KRS_FLUSHING;
     svc_hurry();                                /* loaders in a back-off start at once (D11 6.3) */
-    long r = vfs_sync();
+    long r = vfs_sync(0);
     disk_frozen = 1;
     if (kbd_reset_state != KRS_FLUSHING)        /* the tick gave up waiting: the machine is resetting */
         return;

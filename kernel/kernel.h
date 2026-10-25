@@ -145,6 +145,8 @@ void kbd_init(void);                    /* one handshake at start (the keyboard 
 extern volatile u8 kbd_reset_state;
 void kbd_reset_flush(void);
 extern volatile int disk_frozen;        /* after the reset-warning flush: disk writes are refused (-EIO) */
+extern volatile u32 reboot_deadline;    /* SYS_reboot's sync: the tick resets the machine at this tick (0: none; A7) */
+extern const char *volatile reboot_who; /* ... naming the server it waited for */
 void kbd_tick(void);                    /* from the 100 Hz tick: asks for kbd_work while a key repeats */
 void kbd_work(void);                    /* process context: keymap, console keys, repeat, tty */
 /* Deferred input work (audit B4, main.c): interrupts only queue raw input and set kwork_pending; kwork() does the
@@ -452,7 +454,7 @@ long vfs_mountinfo(u32 index, struct umountinfo *out);
 long vfs_path1(u32 op, const char *p, u32 a2, u32 a3);   /* chmod/utimes/lstat/readlink on a path */
 long vfs_link(u32 op, const char *a, const char *b);
 extern u32 time_base;
-long vfs_sync(void);
+long vfs_sync(int reboot);             /* 1: SYS_reboot, each server at most 5 s (then the tick resets) */
 long vfs_mkdir(const char *path);
 long vfs_unlink(const char *path);
 long vfs_rmdir(const char *path);

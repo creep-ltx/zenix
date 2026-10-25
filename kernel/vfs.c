@@ -518,12 +518,22 @@ long vfs_link(u32 op, const char *a, const char *b)
     return fs_call_on(m1, op, (u32)rela, (u32)relb, ca, 0);
 }
 
-long vfs_sync(void)
+/* every mount's server writes out what it holds. With REBOOT (SYS_reboot) each has at most 5 s: the tick resets the
+ * machine after that, naming it (kbd_tick, audit A7) */
+long vfs_sync(int reboot)
 {
     long r = 0;
-    for (int i = 0; i < NMOUNT; i++)
-        if (mnt[i].used && fs_call_on(i, FS_SYNC, 0, 0, 0, 0) < 0 && i == 0)
+    for (int i = 0; i < NMOUNT; i++) {
+        if (!mnt[i].used)
+            continue;
+        if (reboot) {
+            reboot_who = mnt[i].pname;
+            reboot_deadline = (ticks + 500) | 1;
+        }
+        if (fs_call_on(i, FS_SYNC, 0, 0, 0, 0) < 0 && i == 0)
             r = -EIO;
+    }
+    reboot_deadline = 0;
     return r;
 }
 

@@ -4,7 +4,7 @@ NAME
     pingd - test message server
 
 SYNOPSIS
-    pingd [-port NAME] [-call NAME] [count]
+    pingd [-port NAME] [-call NAME] [-fs] [count]
 
 DESCRIPTION
     Creates a message port named "ping" and answers the requests of ping(1):
@@ -18,6 +18,10 @@ DESCRIPTION
     -call NAME  call port NAME once before opening its own port (a server
                 whose start needs another service; D11's tests use it to
                 make a cycle).
+    -fs         be a filesystem server that hangs: it answers the request
+                for its root directory, never answers a sync, ends at the
+                quit of umount and refuses the rest (svctest mount puts
+                it on a directory; the reboot test uses it).
     A development tool; see docs/architecture.md, "Ports and messages".
 
 SEE ALSO

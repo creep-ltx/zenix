@@ -285,7 +285,7 @@ void syscall_c(u32 *rb)
         r = current->priv ? blk_flush() : -EPERM;
         break;
     case SYS_sync:
-        r = (s32)vfs_sync();
+        r = (s32)vfs_sync(0);
         break;
     case SYS_blk_ram:
         r = -EPERM;
@@ -560,7 +560,7 @@ void syscall_c(u32 *rb)
             ;
         else {
             svc_hurry();                /* loaders in a back-off start at once (D11 6.3) */
-            long e = vfs_sync();
+            long e = vfs_sync(1);       /* each server has 5 s (A7) */
             disk_frozen = 1;
             klog_set_reason(KLOG_END_REBOOT);
             kprintf("reboot: filesystems synced%s, disk writes stopped; resetting%s\n", e < 0 ? " (with an error)" : "",

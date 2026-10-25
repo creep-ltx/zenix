@@ -16,6 +16,7 @@ SYNOPSIS
     svctest kill PID SECONDS
     svctest reboot PID
     svctest lost FILE SECONDS [PID]
+    svctest mount PORT DIR
 
 DESCRIPTION
     A test program for the service manager (DESIGN D11,
@@ -63,6 +64,9 @@ DESCRIPTION
            file. On ZenixFS a server that died before its next
            commit took the file with it: the read fails, and it never
            reads another file that got the same number.
+    mount  puts the server already running on port PORT (pingd -fs) on
+           the directory DIR as a filesystem (root): a reboot must not
+           wait for a server that never answers its sync.
 
     tools/svc-test.sh and tools/mounttest.sh use it in the emulator.
 

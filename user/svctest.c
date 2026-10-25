@@ -21,6 +21,8 @@
  *                                  wakes while a busy server is in the middle of a request
  *   svctest reboot PID             kill PID (a server), wait half a second, then reboot (root): with the server dead and
  *                                  maybe a loader asleep in its back-off, the sync must not wait (D11 6.3)
+ *   svctest mount PORT DIR         put the filesystem server on port PORT (already running) on DIR (root): a fake
+ *                                  filesystem (pingd -fs) for the reboot's time limit (audit A7)
  *   svctest lost FILE SECS [PID]   create FILE and write AAAA, kill PID (the filesystem server: it ends before its next
  *                                  commit), wait, read it through the open file (ZenixFS: the file is gone with the
  *                                  uncommitted seconds: an error, never another file) */
@@ -130,6 +132,11 @@ int main(int argc, char **argv)
         sys_close(fd);
         return 0;
     }
-    printf("usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost ...\n");
+    if (argc >= 4 && !strcmp(argv[1], "mount")) {
+        struct umountreq rq = { argv[3], argv[2], "test", "test" };
+        printf("svctest mount %s: %d\n", argv[3], sys_mount(&rq));
+        return 0;
+    }
+    printf("usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost|mount ...\n");
     return 2;
 }

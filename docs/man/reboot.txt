@@ -13,7 +13,9 @@ DESCRIPTION
     stopped, and the machine is reset. The next boot's log (dmesg -p)
     says that the previous boot ended with reboot. A filesystem server
     that is not running at that moment (it crashed and nobody needed it
-    since) is skipped: it has nothing to write. No server is started
+    since) is skipped: it has nothing to write. A server that does not
+    answer within 5 s is given up: the log says "reboot: NAME did not
+    sync in 5 s" and the machine resets anyway. No server is started
     once disk writes are stopped.
 
     With a system named, the boot menu (bootmenu(8), on a disk that has

@@ -423,7 +423,8 @@ bare -1; limits.md ("Error numbers") lists them. A permission refusal is always 
 EPERM there).
 
 **Reboot**: `SYS_reboot(note)`, root only, does what the reset warning does (every filesystem synced, disk writes
-stopped), notes "rebooted" in the log for the next boot (`dmesg -p`), and resets the machine as exec's ColdReboot does
+stopped; each server has 5 s to answer its `FS_SYNC`, then the tick resets the machine anyway and logs the server's
+name, audit A7), notes "rebooted" in the log for the next boot (`dmesg -p`), and resets the machine as exec's ColdReboot does
 (RESET and JMP to the ROM's start in one long word). A note of 1 (AmigaOS) or 2 (Zenix) is first left in the spare
 bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the boot menu (`man/bootmenu.txt`).
 
