@@ -30,6 +30,13 @@ DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved
 `less`); a design note first (a DESIGN number, reviewed), then built. **The shell's memory** (a fix, audit 2026-10-25
 'found while fixing'): sh grabs a fixed arena of 64-256 KB per shell and parses a whole script at once; make it grow on
 demand, give memory back, and read scripts a piece at a time.
+**Pace (owner 2026-10-25):** steady progress every day, done properly, never hasty: "an absolute epic operating system
+for the Amiga". Every day ends with something finished and merged, and a short status for the owner. Care matches risk:
+two independent design reviews for deep core changes (kernel, loader, updates), one for features; every change has tests;
+every merge gets the full suite; a focused audit after each big block, its findings fixed at once.
+**The week of 2026-10-26 (owner at work until Friday 2026-10-30):** Sun D13 merged, shell memory fix started; Mon shell
+fix merged, colour console designed; Tue colour console built; Wed self-updates design (two reviews); Thu self-updates
+building starts, and the owner's Friday package ready (card update, DoM image, checklist, cable and cu instructions).
 **Order after D13 (owner 2026-10-25: "fix things when we find them"):** first the shell's memory fix, then the
 self-updates design note (then build), the colour console, then the network driver. Rule from then on: a problem found
 during other work is fixed next (or now if small), not parked behind new features; the owner's weekend 2026-10-30/31: card update, serial cable and `cu`,
