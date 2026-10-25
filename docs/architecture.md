@@ -903,6 +903,12 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 
 ## 12. User space
 
+Every program starts in `user/crt0.S`: the kernel jumps to offset 0 with argc and argv on the stack, where the C
+rules put a function's arguments, and crt0 makes one PC-relative call to libz's `_zstart`, which sets `_zargv` (for
+libz's messages), calls `main` and ends with `_zexit` (buffered output flushed, then `SYS_exit`). So crt0 holds no
+address that needs relocating and no hand-written code reaches a global, which a program with shared code requires
+(DESIGN D13; crt0 built with `-DZEX2` has the ZEX2 header).
+
 `user/libz.c` is a tiny freestanding C library (`printf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
 environment, buffered line reader, a regex engine from the CUtils project).
 

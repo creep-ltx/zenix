@@ -298,5 +298,8 @@ What the build did differently from sections 1-13, and why; each item names the 
   holding `hellopure` twice in the same slot. `tools/mkbadzexe.py` also writes 14 corrupt ZEX2 files from `hellopure`.
   The kernel went from 170212 to 174368 bytes (4832 left): about 4.2 KB, more than the 1.5-2 KB estimated (seg.c 1.4 KB,
   the loader 1.5 KB, vfs 0.7 KB, the rest and the kernel's relocation table); `-Os` on seg.c saved 240 bytes.
+- **Step 3a.** As planned: crt0 is `bsr.l _zstart` for every program (the stack at entry already holds argc and
+  argv as `_zstart`'s arguments, so crt0 pushes nothing). Each ZEXE program loses crt0's three relocations; the kernel
+  grew 24 bytes (its built-in servers link libz's `_zstart`): 174392 of 179200.
 
 Last checked against the code: 2026-10-25.
