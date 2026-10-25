@@ -843,7 +843,9 @@ outputs (`tools/cmds-test.sh`).
 
 - Toolchain: `m68k-elf-gcc` and binutils, prefix `TOOLPREFIX` (README.md); `make` produces `build/zenix.adf` (bootblock + kernel only),
   `build/zenix.hdf` (ext2 root disk) and, as a separate dev/test build, `build/zenix-ram.adf` (the same plus a RAM
-  root image).
+  root image). That floppy holds the bootblock, the kernel and the 704 KB RAM disk (`RAMDISK_K` in the Makefile), so
+  the kernel may be at most 179200 bytes (`KERNEL_MAX`): every build of `kernel.bin` prints how much is left, and
+  `tools/mkadf.py` refuses an image that is over and says by how much.
 - Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
   device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
   emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,

@@ -36,7 +36,9 @@ def main() -> None:
     ksize = (len(kernel) + 511) & ~511
     rsize = (len(ramdisk) + 511) & ~511
     if BB_SIZE + ksize + rsize > ADF_SIZE:
-        sys.exit(f"kernel + ramdisk too big for a floppy: {ksize} + {rsize}")
+        sys.exit(f"{out_path}: kernel + ramdisk too big for a floppy: the kernel is {len(kernel)} bytes, "
+                 f"{len(kernel) - (ADF_SIZE - BB_SIZE - rsize)} over the {ADF_SIZE - BB_SIZE - rsize} left beside "
+                 f"the {rsize}-byte ramdisk")
 
     bb = bytearray(BB_SIZE)
     bb[0:4] = b"DOS\0"
