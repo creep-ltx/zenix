@@ -155,7 +155,7 @@ data. D3 left room for this in the program format. D13 builds it: one copy of th
 register, as gcc's `-msep-data`/`-mid-shared-library` for no-MMU systems), libz as the first shared library. It comes
 before the self-updates (so they ship the final format), newlib and the network (which make programs much larger).
 The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 3, 2026-10-25, after a first review and a second look: stage 1 makes `sh` and `login` pure; ready to build).
-## D14. The colour console (approved by the owner 2026-10-25; design note, one review, then building)
+## D14. The colour console (approved by the owner 2026-10-25; design note reviewed, revision 2 ready to build)
 **Why.** Colours in the text console, as every Unix terminal has: `ls`, `grep`, the prompt, `less`, and programs using
 the standard ANSI colour codes. **How.** More bitplanes behind the same text console (16 colours on AGA, 8 on OCS/ECS,
 a setting from 1 to 4 planes; 1 keeps today's look and speed), a colour byte per cell and in the scrollback, the ANSI

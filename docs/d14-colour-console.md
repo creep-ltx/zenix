@@ -1,6 +1,9 @@
-# D14: the colour console (design note, revision 1)
+# D14: the colour console (design note, revision 2)
 
-Status: **proposed, awaiting one review** (a feature, not deep core: one independent review, then building).
+Status: **ready to build (revision 2, 2026-10-25), after its independent review** (a feature: one review). Revision 2
+takes in every finding: FMODE 3 is a condition, not an option; AGA detection and registers; a 12-bit palette; the
+scrollback number corrected; the default by memory too; the Copper list; background-colour erase; region scrolls by
+blitter; a hardened escape parser; the test harness; `TERM=xterm-16color` with cursor-key mode; no runtime setting yet.
 Approved by the owner on 2026-10-25. The short version is in [DESIGN.md](DESIGN.md) D14. Facts marked *read* come from
 the source (kernel/gfx.c, kernel/term.c); hardware facts from the Amiga Hardware Reference Manual (*from the manual*).
 
@@ -22,85 +25,138 @@ foundation for running modern terminal programs on the console.
 
 ## 3. The choice: how many bitplanes
 
-Each bitplane doubles the colours and adds a full copy of the screen to draw, scroll and keep in chip RAM.
+| Planes | Colours | Chip RAM (double-height buffer) | Display DMA |
+|---|---|---|---|
+| 1 (today) | 2 | 40 KB | 40 slots per line (FMODE 0) |
+| 4 on AGA **with FMODE 3** (64-bit fetch) | **16, all of ANSI** | 160 KB | **40 slots per line: the same as today** |
+| 4 on AGA at FMODE 0 | 16 | 160 KB | **all 160 slots of the fetch window: the CPU is locked out of chip RAM during the visible lines** (AHRM 3rd ed. p. 212, "locks out the 68000"; AGA at FMODE 0 behaves the same). **Never used.** |
+| 3 on OCS/ECS | 8 | 120 KB | half of the CPU's slots during the visible lines (by the AHRM's slot figures; the knowledge base marks the parity reading uncertain) |
 
-| Planes | Colours | Chip RAM (double-height buffer) | Fits ANSI | Display DMA cost (hires) |
-|---|---|---|---|---|
-| 1 (today) | 2 | 40 KB | no colour | lightest |
-| 2 | 4 | 80 KB | a reduced mapping | light |
-| 3 | 8 | 120 KB | **the 8 standard colours** exactly | medium |
-| 4 | 16 | 160 KB | **all 16** (normal and bright) | heaviest: on OCS/ECS hires 4 planes takes nearly every free display slot during the visible lines (*from the manual*); AGA's wider fetch (FMODE) makes it far lighter |
-
-**Proposal: the depth is chosen at boot, default by machine.**
-- **AGA (the A1200, A4000): 4 planes, 16 colours** (full ANSI with bright colours), with AGA's wider fetch mode so the
-  display DMA stays light.
-- **OCS/ECS (A500-class with an accelerator, A3000): 3 planes, 8 colours**, bright colours shown as their normal
-  colour plus bold (as many terminals did).
-- **A setting** (in `/etc/console`, read by `init` and passed to the kernel with a small console control, or a boot
-  argument) chooses 1-4 planes. 1 keeps today's look and speed exactly, for anyone who wants every cycle.
-Measured on real hardware before the default is final: the cost of 3 and 4 planes on the stock A1200 (the owner's DoM
-weekend), CPU benchmark with the console idle and while text scrolls. *No speed claim from the emulator.*
+**The default, by chipset and memory:**
+- **AGA** (detected, section 4) with fast RAM or at least 2 MB chip: **4 planes at FMODE 3**, the 16 ANSI colours at
+  today's DMA cost. If FMODE 3 cannot be set up and verified: **1 plane**, never 4 at FMODE 0.
+- **OCS/ECS with fast RAM:** 3 planes, 8 colours (bright shown as the colour plus bold). 2 planes is a possible later
+  choice for chip-only OCS/ECS machines.
+- **Chip-only with less than 2 MB:** 1 plane (the 1 MB machine keeps room for its one login; limits.md).
+- **No runtime setting in the first build:** the machine decides, and a make variable selects 1/3/4 planes for the
+  screenshot builds (as `DIWV` does). A setting (root-only, once by `init` before the first login, while chip RAM is
+  unfragmented) would need a new system call (82) and the owner's word: proposed later if wanted, with the safe switch
+  sequence the review gave (allocate, wait for the blitter, a new Copper list with BPLCON0/FMODE inside, switch with
+  VERTB masked, wait a vblank with a timeout, free the old buffer, redraw).
+Measured on the real A1200 before the default is final (the owner's DoM weekend): CPU benchmark with the console idle
+and while text scrolls, at 1 and 4 planes. *No speed claim from the emulator.*
 
 ## 4. How it works
 
-- **Cells:** the attribute byte stays for bold/underline/inverse; a second byte per cell holds the colours (foreground
-  4 bits, background 4 bits). 2.5 KB more per console grid.
-- **Drawing:** a glyph is drawn into each plane: the bits where the foreground colour has a 1 get the glyph, where the
-  background has a 1 get its inverse. On 4 planes that is 4 writes per glyph line instead of 1; the CPU loop stays
-  simple (byte writes, no blitter for single cells). Clearing and the copy-back on scroll use the blitter per plane, as
-  today for one.
-- **Scrolling:** unchanged in kind: the Copper list gets one pointer pair per plane, all bumped at vertical blank.
-- **Palette:** the 16 standard ANSI colours as Amiga colour registers (12-bit on OCS/ECS, 24-bit on AGA), chosen to be
-  readable in Topaz on a real monitor (grey on black stays the default text, as today). A later setting may change them.
-- **Escape codes** (term.c's `m` handling): `30-37`/`40-47` set the colours, `90-97`/`100-107` the bright ones, `39`/`49`
-  restore the defaults, `0` resets everything, `1` bold stays bold (bold never changes the colour: one rule,
-  documented). 256-colour and true-colour codes (`38;5;n`, `38;2;r;g;b`) are mapped to the nearest of the 16, so
-  programs that use them still look sensible.
-- **Scrollback:** keeps the colour and attribute bytes too (one more byte per character: 200 lines x 80 x 2 = 32 KB per
-  console instead of 16 KB, allocated when first used, as today). Fixes today's loss of bold/inverse in the scrollback.
-- **`TERM`:** set by `login` to a name programs understand for 16 colours (`ansi`-like); documented in the man page.
+- **AGA detection and registers:** `gfx_init` detects AGA by DENISEID (`$DFF07C`, Lisa reads `$F8`; read several
+  times: OCS has no such register). The display writes FMODE, BPLCON3 = `$0C00` and **BPLCON4 = `$0011`** itself, in the
+  Copper list, every frame: today nobody resets BPLCON4, whose BPLAM bits XOR every colour index and survive a warm
+  reset (knowledge base aga-specifics).
+- **FMODE 3 requirements:** plane pointers and modulos multiples of 8 bytes (`mem_alloc` gives 16-byte-aligned blocks;
+  80-byte rows); the 640-pixel line is 10 fetch units. The DDFSTRT/DDFSTOP/BPLCON1 values for hires at FMODE 3 are
+  **not established anywhere yet**: found by a screenshot test (distinct first and last columns, all 80 visible,
+  nothing repeated), then confirmed on the A1200 (Emu68 drives the real chipset, so the PiStorm shows the real display).
+  The values go into the knowledge base.
+- **Interleaved planes:** the planes of a line lie one after another (modulo (N-1)*80), so clear and copy-back are one
+  blit each and one base pointer serves all planes (31 rows x 8 lines x 4 planes = 992 blitter rows, within BLTSIZE's
+  1024; a whole-buffer clear is two blits).
+- **The palette:** 12-bit on every chipset (on AGA with LOCT=0 the 12-bit value fills the low nibbles), the 16 ANSI
+  colours chosen readable in Topaz on a real monitor; grey on black stays the default text. 24-bit only if a later
+  palette setting needs it.
+- **The Copper list:** resized for the AGA registers, BPLCON0, 16 colours and N pointer pairs (about 104+ bytes, the
+  indices recomputed). A Copper WAIT at line `$20` (before the display on the `$2C` and the `$38` test builds, PAL and
+  NTSC) comes before the pointer moves; `gfx_vblank` writes the pointers only while the beam is well before that line,
+  else at the next vblank, so all planes always move together (this also closes the same race that exists today for the
+  high/low word pair). `gfx_panic` sets the new layout's background to dark red and the text to white.
+- **Cells:** the attribute byte stays (bold, underline, inverse); a second byte holds the colours (foreground and
+  background, 4 bits each). 2.5 KB more per console grid. If foreground equals background, the inverse cursor falls
+  back to the default inverse so it stays visible.
+- **Drawing a glyph:** one byte per plane per glyph line, branch-free: `(glyph & m1[p]) ^ m2[p]` (m1 = 0xFF where the
+  foreground and background bits differ, m2 = 0xFF where the background bit is set; inverse swaps them first). The
+  loop is specialised per depth with the masks in registers and the glyph read as two longwords (gcc otherwise keeps the
+  masks on the stack, which is chip RAM on a stock A1200). Estimate, not measured: about 40 chip accesses per cell at 4
+  planes against 16 at 1, roughly +10-15% on plain text output (with FMODE 3).
+- **Region scrolls by blitter:** `CSI S/T/L/M` and scrolling inside a region (what `less` and `edit` do) become one
+  blitter copy of the region (descending for downward) plus drawing only the new row, instead of the CPU redrawing every
+  row of the region. Faster at 1 plane too.
+- **Erase with the background colour** (as Linux and xterm terminals do): erased cells and the new line of a scroll
+  take (default foreground, current background): a blitter fill writes each plane's constant (0x00 or 0xFF), the CPU
+  does single cells. `redraw_all`'s and `show_back`'s "skip blank cells" tests count non-default colours too.
+- **Scrolling:** unchanged in kind, the Copper pointer bump at vertical blank. The copy-back (once per 32 scrolled
+  lines on PAL, 39 on NTSC) costs about 22 ms at 4 planes against 5.6 ms (estimate), about 0.7 ms per line amortised.
+- **Scrollback:** each line keeps its characters and **one colour byte with inverse folded in** (foreground and
+  background swapped when the line is pushed): 200 lines x 80 x 2 = **32 KB per console** (16 KB today), allocated when
+  the console is first used. Bold and underline are not kept in the scrollback (no worse than today). Keeping every
+  attribute exactly would be 48 KB per console; not worth it on a 2 MB machine.
+- **The escape parser, hardened to ECMA-48:** parameter bytes 0x30-0x3F (up to 16 parameters, values clamped, digits
+  past the limit ignored), intermediate bytes 0x20-0x2F, a final byte 0x40-0x7E. Unknown sequences are swallowed whole
+  (today they abort and the rest is printed as text); SGR applies only without a private marker (`>`, `=`, `<`, `?`);
+  `:` sub-parameters (`38:5:196`) accepted; OSC (`ESC ] ... BEL` or `ESC \`, window titles) swallowed; `ESC ( x`
+  swallowed (line drawing later: Topaz has no box glyphs). SGR: `30-37`/`40-47`, `90-97`/`100-107`, `39`/`49`, `0` and a
+  bare `ESC[m` reset everything (so does `ESC c`), `1` bold stays bold and never changes the colour, `38;5;n`/`48;5;n`
+  and `38;2;r;g;b`/`48;2;...` map to the nearest of the 16; `2 3 5 8 9` are ignored (listed in the man page). `ESC 7`/`8`
+  also save and restore the attributes and colours, as xterm does.
+- **`TERM=xterm-16color`,** set where `TERM` is set today (the shell, sh.c), one fact in one place. The keyboard already
+  speaks xterm (F1 = `ESC O P`, modified keys `ESC[1;5A`); added: **cursor-key mode (DECCKM, `ESC[?1h`/`ESC[?1l`)**, a
+  per-console flag `kbd.c` reads so arrows are sent as `ESC O A` when a program asks. This fixes a bug that exists today:
+  full-screen programs on another computer (over `cu` or later the network) switch it on and then misread the arrows.
+  Over a serial line the remote side's getty picks `TERM`, not Zenix (said in the docs). `vt100` today becomes
+  `xterm-16color`; `linux` was the alternative (arrows match, but 8 colours and different F-keys).
 
 ## 5. Memory, in total
 
-On a 2 MB chip-only A1200 at 4 planes: the screen buffer grows from 40 KB to 160 KB of chip RAM, and each used console's
-scrollback by 16 KB. Against D13's savings (about 83 KB per extra session) this is affordable, but not free; the setting
-lets a small machine stay at 1 or 3 planes.
+On a 2 MB chip-only A1200 at 4 planes: the screen buffer grows from 40 KB to 160 KB of chip RAM, each used console's
+scrollback from 16 KB to 32 KB, its grid by 2.5 KB. Against D13's saving (about 83 KB per extra session) this is
+affordable; machines with less than 2 MB of chip RAM and no fast RAM stay at 1 plane.
 
 ## 6. Programs that use colour (part of D14)
 
-- `ls --color` (default when the output is a console, like GNU's `auto`): directories, programs, links; the scheme from
-  `LS_COLORS`-style defaults kept small.
-- `grep --color` (auto on a console): the match highlighted.
-- The shell's prompt: `PS1` already supports escapes; the default prompt gets a colour.
-- `less` and `edit`: colours passed through / used for the status line.
-- `termtest`: a colour page (the 16 colours on both backgrounds, bright and bold), so a screenshot test can check them.
+- **The `auto` rule** (one libz helper used by every program): colour when the output is a terminal, `TERM` is set and
+  not `dumb`, and `NO_COLOR` is unset (no-color.org).
+- **`ls --color=auto|always|never`** and **`grep --color=...`**: GNU's own default is `never` and distributions turn
+  `auto` on with an alias; **Zenix's default is `auto`, a deliberate difference** (documented). The codes are GNU's exact
+  sequences so tests can compare bytes: `ls`: `ESC[0m` before the first coloured name, then `ESC[01;34m`name`ESC[0m`;
+  `grep`: `ESC[01;31mESC[K`match`ESC[mESC[K`, with GNU's defaults for file names (35), line numbers (32) and separators
+  (36).
+- **The shell's prompt:** the default prompt gets a colour (`PS1` already supports escapes).
+- **`less`** passes SGR codes through only (like GNU less's `-R`) and counts them as zero width when it wraps lines;
+  **`edit`** uses colour for its status line.
+- **`termtest`:** a colour page (the 16 colours on both backgrounds, bold, inverse) for the screenshot tests.
 
 ## 7. Tests
 
-- term.c on the host (a small model, like the other host tests): each escape code sets the right cell colours; 256 and
-  true colour map to the expected of the 16; reset and bold rules.
-- Screenshots in FS-UAE (`tools/shot.py`, the cage rig, as kbd-test does): `termtest`'s colour page at 1, 3 and 4
-  planes, colours compared against the palette; scrolling with colours leaves no garbage; Amiga+Up/Down scrollback
-  shows colours.
-- cmds-test style: `ls --color`/`grep --color` output compared with GNU's (`LC_ALL=C`, same colour defaults) where the
-  codes are the same.
+- **The harness first, in the same commit as the coloured prompt:** `serial-tap.py` and the scripts' shared `clean()`
+  strip `ESC[...m` (today they strip only `ESC[K`); one colour test checks the raw bytes; then `make check`.
+- **term.c on the host** (a model, like the other host tests): each escape sets the right cell colours; 256 and true
+  colour map as expected; reset and bold rules; long and unknown sequences, OSC, private markers and `:` sub-parameters
+  are swallowed without printing anything; DECCKM switches the arrow keys.
+- **Screenshots in FS-UAE** (`tools/shot.py`, the cage rig): the FMODE 3 test (all 80 columns, first and last distinct,
+  nothing repeated); `termtest`'s colour page at 1, 3 and 4 planes, colours compared with the palette; scrolling with
+  colours, region scrolls and background-colour erase leave no garbage; Amiga+Up/Down scrollback shows colours.
+- **`ls`/`grep`:** both GNU and Zenix with `--color=always`, `LC_ALL=C`, `LS_COLORS`/`GREP_COLORS` unset, compared byte
+  for byte; `auto` through a pipe gives no codes.
 - The full suite at the default depth.
 
 ## 8. Order of work
 
-1. The planes as a setting in gfx.c (1-4), the Copper list for N planes, the palette; 1 plane must look and test exactly
-   as today.
-2. Colour bytes in term.c, the escape codes, the scrollback with attributes; the host test.
-3. `termtest`'s colour page and the screenshot tests.
-4. `ls`, `grep`, the prompt, `less`, `edit`; `TERM`.
-5. Docs (architecture.md section 11, features.md, limits.md, man pages).
+0. Found while reviewing (fixed first): `blit_wait` gets a timeout (CLAUDE.md: every wait on hardware has one), and the
+   escape parser's hardening (it prints garbage for sequences it does not know today).
+1. gfx.c: AGA detection, the registers in the Copper list, interleaved planes, 1/3/4 planes by the default rule, the
+   palette, the WAIT before the pointers, `gfx_panic`; FMODE 3's display values found by the screenshot test; 1 plane
+   must look and test exactly as today.
+2. term.c: the colour byte, SGR, background-colour erase, region scrolls by blitter, the scrollback with colours, DECCKM
+   (with kbd.c), `ESC 7/8`; the host test.
+3. The harness change, `termtest`'s colour page, the screenshot tests.
+4. The `auto` helper, `ls`, `grep`, the prompt, `less`, `edit`; `TERM=xterm-16color`.
+5. Docs (architecture.md section 11, features.md line "Colours", limits.md, man pages). The FMODE 3 values and the
+   BPLCON4 trap go into the knowledge base.
 
-## 9. Open questions for the review
+## 9. The review's answers to the open questions
 
-1. Default depth on the stock A1200: 4 planes with AGA fetch, or 3 to stay light until measured?
-2. Bold: keep bold as bold, or show bold as bright (the old terminal habit)? Proposed: bold stays bold; bright is
-   bright.
-3. Should the colour bytes and the planes count go into the D11-style saved state for a future display server (D4), or
-   stay console-only? Proposed: console-only; the desktop's terminal window will have its own.
+1. Default on the stock A1200: 4 planes, only with FMODE 3 verified (same DMA as today); otherwise 1. Never 4 at FMODE 0.
+2. Bold: stays bold (pixel smear); bright is bright, as VTE and xterm do today.
+3. The display server (D4): console-only; the desktop's terminal window will have its own.
+The "no desktop features in the text console" rule is kept: 16 colours, a palette and a depth are what the Linux
+console has; no bar, themes or menus.
 
 Last checked against the code: 2026-10-25.
