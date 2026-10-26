@@ -97,7 +97,9 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    when they start, which is what makes a desktop edition fit 880 KB.
 3. **A terminal you can live in:** a fuller C library (newlib); D13 stage 2 (shared libraries) decided; the text-UI
    library, then Sumi, Maki, Markdown and `zc`; UTF-8 in the console; PC (CP437) and other bitmap fonts for the console
-   (the PC set comes earlier, with telnet); a text-only e-mail client (IMAP/SMTP over TLS; owner 2026-10-26). Audit; then a first public pre-release (0.1),
+   (the PC set comes earlier, with telnet); a text-only e-mail client (IMAP/SMTP over TLS; owner 2026-10-26); and
+   (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported, a tracker music player (MOD and friends, on
+   Paula), an IRC client. Audit; then a first public pre-release (0.1),
    with the owner's yes.
 4. **The Amiga world:** FAT, FFS/OFS, then PFS3; LhA/LZX unpacking; ZenixFS as the root on real hardware; the
    installer. Audit, with the filesystems fuzzed against damaged disks.
