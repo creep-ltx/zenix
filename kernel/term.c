@@ -46,6 +46,7 @@ struct term {
     u8 (*hist)[COLS];                   /* scrollback: the oldest line is hist[(hhead - hn) mod HLINES]; its colours */
     int hn, hhead;                      /* are hist[HLINES + the same index] (inverse folded in) */
     int back;                           /* lines scrolled back (0 = live) */
+    u8 con;                             /* its console's number: where its answers (ESC[6n) go */
 };
 
 static struct term *wsp[NCONS + 1];
@@ -75,6 +76,7 @@ static struct term *get(int w)
         if (!wsp[w])
             panic("term: out of memory");
         memset(wsp[w], 0, sizeof *wsp[w]);
+        wsp[w]->con = (u8)w;
         reset_term(wsp[w]);
     }
     return wsp[w];
@@ -457,7 +459,7 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
             if (cc >= 10) b[k++] = (char)('0' + cc / 10);
             b[k++] = (char)('0' + cc % 10);
             b[k++] = 'R'; b[k] = 0;
-            tty_inject(con_cur, b);
+            tty_inject(t->con, b);          /* the asking program's console, not the one on screen (audit3 B9) */
         }
         break;
     }

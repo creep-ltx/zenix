@@ -937,7 +937,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   during a slow command arrived as `c/motd`).
 - **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
   NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100/xterm: cursor motion, erase, insert/delete, scroll regions,
-  bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position. Arrows and function keys
+  bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position, as input on the console of the
+  program that asked (it went to the console on screen, so a background program could type into another console's
+  input: audit3 B9). Arrows and function keys
   arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it and `TERM=xterm-16color`
   (xterm's keys and 16 colours; it was `vt100`; over a serial line the other side's getty picks `TERM`). Programs
   colour their output by one libz rule (`color_auto`: the output is a terminal, `TERM` set and not `dumb`,
