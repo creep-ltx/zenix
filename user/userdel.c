@@ -4,22 +4,6 @@
 /* userdel [-r] name: remove a user from /etc/passwd and from every member list in /etc/group (root only); -r also
  * removes the home directory (through rm -r). root (user 0) cannot be removed. Both files are replaced safely. */
 
-/* drop NAME from a comma-separated member list in place */
-static void drop_member(char *list, const char *name)
-{
-    char out[256]; u32 o = 0, nl = strlen(name);
-    for (char *p = list; *p; ) {
-        char *c = strchr(p, ','); u32 len = c ? (u32)(c - p) : strlen(p);
-        if (!(len == nl && !strncmp(p, name, nl)) && len && o + len + 2 < sizeof out) {
-            if (o) out[o++] = ',';
-            memcpy(out + o, p, len); o += len;
-        }
-        if (!c) break;
-        p = c + 1;
-    }
-    out[o] = 0; strcpy(list, out);
-}
-
 /* rewrite FILE without the line whose first field is NAME (passwd), or with NAME taken out of the 4th field (group) */
 static int rewrite(const char *file, const char *name, int group, int *found)
 {
@@ -40,7 +24,7 @@ static int rewrite(const char *file, const char *name, int group, int *found)
                 memcpy(line, l, len); line[len] = 0;
                 char *f = line; int k = 0;                   /* the 4th field: name:pass:gid:members */
                 for (; *f && k < 3; f++) if (*f == ':') k++;
-                if (k == 3 && *f) drop_member(f, name);
+                if (k == 3 && *f) gr_drop(f, name);
                 u32 ll = strlen(line); memcpy(nf + o, line, ll); o += ll;
             } else { memcpy(nf + o, l, len); o += len; }    /* a line too long to edit is kept unchanged */
             nf[o++] = '\n';

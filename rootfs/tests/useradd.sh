@@ -12,7 +12,8 @@ grep '^dave:' /etc/passwd
 ls -d /home/dave; echo dave-home=$?
 echo 'id' | su anna
 echo 'useradd eve; echo user-add=$?' | su user
-sed 's/^users::100:.*/&,anna/' /etc/group > /tmp/g; cp /tmp/g /etc/group; rm /tmp/g
+gpasswd -a anna users; echo gp-add=$?
+gpasswd -a anna users; echo gp-again=$?
 echo; grep '^users:' /etc/group
 userdel -r anna; echo del-anna=$?
 grep -c '^anna:' /etc/passwd
@@ -22,4 +23,22 @@ userdel dave; echo del-dave=$?
 userdel root; echo del-root=$?
 userdel nosuch; echo del-none=$?
 grep -c . /etc/passwd
+# sudo: user is in wheel (shipped), guest is not; fay is made a wheel member with -G and gets a password
+echo; echo 'sudo id; echo sudo-user=$?' | su user
+echo 'sudo id; echo sudo-guest=$?' | su guest
+useradd -G wheel,users fay; echo add-fay=$?
+echo; grep '^wheel:' /etc/group
+printf 'pw1\npw1\n' | passwd fay > /dev/null; echo pw-fay=$?
+echo 'echo pw1 | sudo id; echo sudo-pw=$?' | su fay
+echo 'printf "a\nb\nc\n" | sudo id; echo sudo-wrong=$?' | su fay
+echo 'echo pw1 | sudo -u guest id' | su fay
+echo 'echo pw1 | sudo nosuchcmd; echo sudo-nocmd=$?' | su fay
+echo 'echo pw1 | sudo false; echo sudo-false=$?' | su fay
+echo 'echo pw1 | sudo -u nobody id; echo sudo-nouser=$?' | su fay
+gpasswd -a guest wheel; echo 'sudo whoami' | su guest
+gpasswd -d guest wheel; echo gp-del=$?
+gpasswd -d guest wheel; echo gp-del-again=$?
+echo 'gpasswd -a guest wheel; echo gp-user=$?' | su user
+userdel -r fay; echo del-fay=$?
+echo; grep '^wheel:' /etc/group
 echo useradd-done

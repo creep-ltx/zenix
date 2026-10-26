@@ -1,0 +1,29 @@
+GPASSWD(8)		Zenix manual
+
+NAME
+    gpasswd - add a user to a group, or take them out
+
+SYNOPSIS
+    gpasswd -a user group
+    gpasswd -d user group
+
+DESCRIPTION
+    -a adds USER to GROUP's member list in /etc/group; -d takes them out.
+    Only root may change groups. The file is rewritten safely (through
+    /etc/group.new and a rename), as useradd(8) does with /etc/passwd.
+
+EXAMPLES
+    gpasswd -a adam wheel           adam may now use sudo(8)
+    gpasswd -d adam wheel
+
+EXIT STATUS
+    0 (also when the user is a member already with -a), 1 when the user or
+    group is unknown, the user is not a member (-d), the file cannot be
+    written or the caller is not root, 2 for bad arguments.
+
+NOTES
+    Zenix's gpasswd only edits member lists; group passwords are not used.
+    A user's main group is in /etc/passwd and is not changed here.
+
+SEE ALSO
+    useradd(8), userdel(8), sudo(8), id(1)

@@ -4,7 +4,8 @@ NAME
     useradd - add a user
 
 SYNOPSIS
-    useradd [-u uid] [-g group] [-d home] [-s shell] [-c comment] [-M] name
+    useradd [-u uid] [-g group] [-d home] [-s shell] [-c comment]
+            [-G group,...] [-M] name
 
 DESCRIPTION
     Adds a line for NAME to /etc/passwd and makes the home directory,
@@ -22,11 +23,14 @@ OPTIONS
     -d home     the home directory (absolute); default /home/NAME
     -s shell    the login shell; default /bin/sh
     -c comment  the full name or other text
+    -G groups   also make the user a member of these groups (a comma
+                list); -G wheel lets them use sudo(8)
     -M          make no home directory
 
 EXAMPLES
     useradd anna                    then: passwd anna
     useradd -c "Anna Berg" -g users anna
+    useradd -G wheel adam           adam may use sudo
     useradd -M -u 2000 -s /bin/sh backup
 
 EXIT STATUS
@@ -37,10 +41,11 @@ EXIT STATUS
 NOTES
     A name is 1-31 characters of a-z, 0-9, _ and -, starting with a letter
     or _. The home, shell and comment may not contain ':' or a newline and
-    are at most 63, 31 and 47 characters. The new user is not added to any
-    group's member list in /etc/group (the main group is in /etc/passwd).
+    are at most 63, 31 and 47 characters. Without -G the new user is not added
+    to any group's member list in /etc/group (the main group is in
+    /etc/passwd); gpasswd(8) changes the lists later.
     An existing home directory is left as it is. /etc/passwd is read whole,
     at most 64 KB. There is no /etc/skel: the home starts empty.
 
 SEE ALSO
-    userdel(8), passwd(1), login(1), su(1), id(1)
+    userdel(8), gpasswd(8), sudo(8), passwd(1), login(1), su(1), id(1)
