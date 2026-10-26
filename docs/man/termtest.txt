@@ -4,7 +4,7 @@ NAME
     termtest - terminal feature test
 
 SYNOPSIS
-    termtest
+    termtest [columns]
 
 DESCRIPTION
     Draws a test page: bold, underline and inverse text, a 36-column box
@@ -13,6 +13,10 @@ DESCRIPTION
     switches the terminal to raw mode and shows each key you press as the
     escape code or byte received (arrows, function keys, Delete). Press q to
     quit. A development tool.
+
+    termtest columns draws the screenshot test of the display's fetch
+    window: rows 1-7 number the 80 columns in binary (a lit cell is a set
+    bit, row 1 the lowest), row 8 is lit across all 80; q quits.
 
 SEE ALSO
     clear(1), edit(1)

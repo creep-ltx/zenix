@@ -73,7 +73,7 @@ static struct term *get(int w)
 
 static void draw(struct term *t, int y, int x)
 {
-    gfx_cell(y, x, t->ch[y][x], t->at[y][x]);
+    gfx_cell(y, x, t->ch[y][x], t->at[y][x], 0x07);
 }
 
 static void cursor(struct term *t, int on)
@@ -81,7 +81,7 @@ static void cursor(struct term *t, int on)
     if (!t->curvis || t->back)
         return;
     if (on)
-        gfx_cell(t->cy, t->cx, t->ch[t->cy][t->cx], t->at[t->cy][t->cx] ^ A_INV);
+        gfx_cell(t->cy, t->cx, t->ch[t->cy][t->cx], t->at[t->cy][t->cx] ^ A_INV, 0x07);
     else
         draw(t, t->cy, t->cx);
 }
@@ -94,7 +94,7 @@ static void draw_row(struct term *t, int y)
 
 static void redraw_all(struct term *t)
 {
-    gfx_clear_text();
+    gfx_clear_text(0x07);
     for (int y = 0; y < trows; y++)
         for (int x = 0; x < COLS; x++)
             if (t->ch[y][x] != ' ' || t->at[y][x])
@@ -128,13 +128,13 @@ static const u8 *comp_line(struct term *t, int k, int *from_grid)
 
 static void show_back(struct term *t)
 {
-    gfx_clear_text();
+    gfx_clear_text(0x07);
     for (int r = 0; r < trows; r++) {
         int from_grid;
         const u8 *l = comp_line(t, t->hn - t->back + r, &from_grid);
         for (int x = 0; x < COLS; x++)
             if (l[x] != ' ')
-                gfx_cell(r, x, l[x], 0);
+                gfx_cell(r, x, l[x], 0, 0x07);
     }
 }
 
@@ -183,7 +183,7 @@ static void scroll_up(struct term *t, int vis)          /* the region moves up o
     if (!vis)
         return;
     if (full) {
-        gfx_scroll();                                   /* the Copper pointer moves: no copying */
+        gfx_scroll(0x07);                                   /* the Copper pointer moves: no copying */
     } else {
         for (int y = t->top; y <= t->bot; y++)
             draw_row(t, y);
@@ -225,7 +225,7 @@ static void erase_screen(struct term *t, int vis, int mode)
         memset(t->ch, ' ', sizeof t->ch);
         memset(t->at, 0, sizeof t->at);
         if (vis)
-            gfx_clear_text();
+            gfx_clear_text(0x07);
         return;
     }
     if (mode == 0) {
@@ -390,7 +390,7 @@ static void put1(struct term *t, int vis, u8 ch)
             case 'M':
                 if (t->cy == t->top) scroll_down(t, vis); else if (t->cy > 0) t->cy--;
                 return;
-            case 'c': reset_term(t); if (vis) gfx_clear_text(); return;
+            case 'c': reset_term(t); if (vis) gfx_clear_text(0x07); return;
             }
             if (ch >= 0x20 && ch <= 0x2F)               /* ESC ( B and the like: swallowed up to the final byte */
                 t->esc = E_ESCI;

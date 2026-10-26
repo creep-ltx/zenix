@@ -822,14 +822,33 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   which only `?25` (`h`/`l`, the cursor) is acted on; OSC and the other control strings (window titles) are swallowed up
   to BEL or `ESC \`, `ESC ( B` and the like up to their final byte; CAN and SUB cancel a sequence; a control character
   inside one acts and the sequence goes on (tools/term-test.sh, on the host).
-- **Display** (`gfx.c`): 640 pixels wide hires, one bitplane, the whole screen text (grey on black). `gfx_init`
+- **Display** (`gfx.c`, DESIGN D14): 640 pixels wide hires, the whole screen text. `gfx_init`
   measures the beam's last line for about 60 ms (E-clock timed): above 280 (312 on PAL) the display is 256 lines,
-  32 rows; else (262 on NTSC) 200 lines, 25 rows and `DIWSTOP` to match, so no row is hidden below the picture. A
-  two-colour **Copper list** points at the text; scrolling just moves the Copper's bitplane pointer at vertical
-  blank; when the 2-screen buffer wraps, the **blitter** copies the visible rows back to the top (identical pixels,
-  so there is no visible switch; every wait for the blitter gives up after 500 ms and says so once on the log).
-  Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
-  before the OS is killed. A kernel panic turns it white on dark red.
+  32 rows; else (262 on NTSC) 200 lines, 25 rows and `DIWSTOP` to match, so no row is hidden below the picture.
+  **How many bitplanes** the machine decides at boot, because the display takes chip-bus time from the CPU: **AGA**
+  (Lisa's id register `DENISEID` reads `$F8`, 16 reads alike) with fast RAM or 2 MB of chip RAM: **4 planes, 16
+  colours, fetched 64 bits at a time (FMODE 3)**, which costs the 40 bus slots per line that one plane costs at the
+  16-bit fetch (never 4 planes at FMODE 0: that takes every slot of the visible lines); **OCS/ECS with fast RAM: 3
+  planes**, 8 colours (a bright foreground is the colour plus bold, bright black is grey); **otherwise 1 plane**, grey
+  on black (the colours are not shown, inverse is the glyph inverted). `make GFXDEPTH=1|3|4` builds a kernel that
+  uses that depth (the screenshot tests; 4 only on AGA). If chip RAM is short the next smaller depth is used. The boot
+  log says which: `display: AGA chips, 4 bitplanes at 64-bit fetch (FMODE 3)` and `display: 640x256, 4 bitplanes,
+  80x32 text`. At FMODE 3 the fetch window is `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0 (one plane at the old
+  fetch uses `$3C`/`$D4`): found by the screenshot test of `termtest columns` (all 80 columns, the edges exactly where
+  one plane puts them, nothing repeated; knowledge base `amiga/zenix-colour-console.md`), not yet seen on the A1200.
+  The planes are **interleaved** (the planes of a line follow each other, 80 bytes each; modulo (N-1) x 80), so one
+  pointer serves all planes and whole lines are cleared or copied with one blit per plane or one blit. The
+  **Copper list** writes FMODE, `BPLCON3` = `$0C00` and `BPLCON4` = `$0011` (AGA only: a previous program's
+  colour-index XOR survives a warm reset), `BPLCON0`-`2`, the modulos, the fetch window and the 2/8/16 colours (12
+  bits) every frame, then WAITs for line `$20` (before the picture on the `$2C` and `$38` builds, PAL and NTSC) and
+  moves the plane pointers. Scrolling moves those pointers at vertical blank, written only while the beam is before
+  line `$1C` (else at the next vertical blank), so all planes move together; when the 2-screen buffer wraps, the
+  **blitter** copies the visible rows back to the top (identical pixels, so there is no visible switch; every wait
+  for the blitter gives up after 500 ms and says so once on the log). A glyph line is drawn by the CPU, one byte per
+  plane: `(glyph & m1) ^ m2` (m1 set where the foreground and background bits differ, m2 where the background bit is
+  set); with more than one plane the glyphs are kept a second time with each line repeated in all four bytes of a
+  long (7 KB), so a line is one read. Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
+  before the OS is killed. A kernel panic turns the background dark red and every other colour white.
 - **Input path: interrupts queue, `kwork` works** (`kernel/main.c`, audit B4/B5). The interrupt handlers do
   only what cannot wait: the keyboard handler (`kbd_isr`) reads the byte, answers the keyboard's handshake and puts
   the raw code into a 128-slot ring; the serial handler (`serial_rx_isr`, level 5) moves each byte from Paula into a
@@ -982,7 +1001,8 @@ outputs (`tools/cmds-test.sh`).
   `tools/mkadf.py` refuses an image that is over and says by how much. The kernel is built with `-O2`, except the five
   truly cold drivers - `floppy`, `emmc`, `a3000`, `rtc` and `kbd` (every wait in them is timed by the E-clock or a timer)
   - which are built with `-Os` (`KOPT_*` in the Makefile, DESIGN D13 step 0: about 6.8 KB smaller); the floppy's MFM
-  track coding (`mfm.h`) keeps `-O2` through a pragma in `floppy.c`.
+  track coding (`mfm.h`) keeps `-O2` through a pragma in `floppy.c`. `gfx` is built with `-Os` too (DESIGN D14: its
+  set-up code), its glyph drawing with `-O2` (a function attribute).
 - Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
   device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
   emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,

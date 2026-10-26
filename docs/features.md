@@ -87,7 +87,7 @@ built. Last checked against the code: 2026-10-23.
 ## Terminal and display
 | Feature | Status | Details |
 |---|---|---|
-| 640x256 (PAL) or 640x200 (NTSC, measured at boot) hires planar display, all text, blitter-assisted scrolling | verified (the matrix, NTSC included) | architecture.md section 11 |
+| 640x256 (PAL) or 640x200 (NTSC, measured at boot) hires planar display, all text, blitter-assisted scrolling; 4 bitplanes on AGA (64-bit fetch, FMODE 3), 3 on OCS/ECS with fast RAM, 1 on chip-only machines below 2 MB (DESIGN D14) | verified (the matrix, NTSC included, checks the depth on every machine; the FMODE 3 fetch window by a screenshot of `termtest columns`); **not yet on the A1200** | architecture.md section 11 |
 | ROM Topaz 8 font from the Kickstart in use at boot | read (every test boots with it; no test compares the glyphs) | |
 | 80x32 text (80x25 on NTSC), ANSI/VT100 (cursor, erase, insert/delete, scroll regions, bold/underline/inverse) | the size verified (the matrix); the escape codes read (`termtest` draws them, no test compares the screen) | man/termtest.txt |
 | Scrollback 200 lines per console: Amiga+Up/Down a screenful, Amiga+Shift+Up/Down a line, in every mode, also at the shell's prompt (a console key like Amiga+F1..F10, as Linux's Shift+PageUp: programs never see it; every Amiga keyboard has these keys) | verified in FS-UAE (`tools/kbd-test.sh`: Amiga+Up at the prompt shows older lines, Amiga+Down returns) | |

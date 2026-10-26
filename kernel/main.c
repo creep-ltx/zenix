@@ -409,7 +409,8 @@ void kmain(struct bootinfo *bi)
     eclock_init();                              /* hr_time() from here on (gfx_init measures the frame with it) */
     if (font_ok && gfx_init() == 0) {
         klog_to_screen();                       /* the boot messages so far, then the rest as they come */
-        kprintf("display: 640x%d, 1 bitplane, %dx%d text, ROM Topaz 8\n", trows * 8, COLS, trows);
+        kprintf("display: 640x%d, %d bitplane%s, %dx%d text, ROM Topaz 8\n", trows * 8, gfx_depth,
+                gfx_depth > 1 ? "s" : "", COLS, trows);
     } else {
         diag_stage(0, DIAG_GREY);
         kprintf("display: not available (%s), serial only\n",
