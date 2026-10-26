@@ -5,14 +5,15 @@
 # written to files by the shell and read back from the disk image. ZENIX_SERIAL=/tmp/name gives the run its own
 # serial port.
 cd "$(dirname "$0")/.." || exit 1
-make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-kbd}; mkdir -p $OUT
 SERIAL=${ZENIX_SERIAL:-/tmp/zenix-serial}
 ZENIX_SERIAL=$SERIAL python3 tools/fsuae_conf.py fsuae/a1200-020-fast.fs-uae $OUT/kbd.fs-uae || exit 1
 python3 tools/kbd-test.py $OUT/kbd.fs-uae "$SERIAL" > $OUT/run.log 2>&1
 pass=1
-get() { debugfs -R "cat $1" build/zenix.hdf 2>/dev/null; }
+get() { debugfs -R "cat $1" $BD/zenix.hdf 2>/dev/null; }
 want() { if [ "$(get $1 | od -An -tx1 | tr -d ' \n')" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got $(get $1 | od -An -tx1 | tr -d '\n')"; pass=0; fi; }
 # å ö ä £ [ { ² \ newline, Latin-1
 want /tmp/k1.txt "e5f6e4a35b7bb25c0a" "Swedish layers: plain, Shift, Alt, Shift+Alt"
@@ -21,7 +22,7 @@ n=$(get /tmp/k3.txt | tr -cd z | wc -c)
 if [ "$n" -ge 10 ] && [ "$n" -le 40 ]; then echo "PASS key repeat ($n z's from a 1.2 s hold)"; else echo "FAIL key repeat: $n z's"; pass=0; fi
 if [ "$(get /tmp/k4.txt)" = "typed during output" ]; then echo "PASS keys typed during heavy output arrive"; else echo "FAIL typed during output: got '$(get /tmp/k4.txt)'"; pass=0; fi
 if [ "$(get /tmp/k6.txt | grep -c .)" = "2" ]; then echo "PASS Amiga+F2: console 2 has its own login (two logins run)"; else echo "FAIL Amiga+F2: logins running: '$(get /tmp/k6.txt)'"; pass=0; fi
-if debugfs -R "stat /tmp/k7.txt" build/zenix.hdf 2>/dev/null | grep -q 'Size: 0$'; then echo "PASS Amiga+F1: back on console 1 (its shell has no jobs; console 2's has one)"; else echo "FAIL Amiga+F1: jobs '$(get /tmp/k7.txt)' (or no file)"; pass=0; fi
+if debugfs -R "stat /tmp/k7.txt" $BD/zenix.hdf 2>/dev/null | grep -q 'Size: 0$'; then echo "PASS Amiga+F1: back on console 1 (its shell has no jobs; console 2's has one)"; else echo "FAIL Amiga+F1: jobs '$(get /tmp/k7.txt)' (or no file)"; pass=0; fi
 if get /tmp/k5.txt | grep -q 'lost\|queue full'; then echo "FAIL the kernel log reports lost input: $(get /tmp/k5.txt | grep 'lost\|queue full')"; pass=0
 elif get /tmp/k5.txt | grep -q 'Zenix'; then echo "PASS no input lost (kernel log)"; else echo "FAIL no kernel log in k5.txt"; pass=0; fi
 # 4b: the screen after Amiga+Up differs from before (older lines; digits cover only about 1% of the screen, so a

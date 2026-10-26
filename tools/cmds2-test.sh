@@ -7,8 +7,9 @@
 # xargs, diff -r, watch, tar, expr :, $PATH in find/xargs/timeout, sort/grep "-", mv): its output, read from the disk
 # with debugfs, must equal tools/tests/batch-e.expected line for line.
 cd "$(dirname "$0")/.." || exit 1
-make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-cmds2}; mkdir -p $OUT
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae ${CMDS2_SECS:-700} tools/tests/cmds2-test.txt 2>&1 | sed 's/\x1b\[K//g' > $OUT/run.log
 pass=1
@@ -34,8 +35,8 @@ want "ls lists all 450 names of a directory (hard links: the disk has few inodes
 want "awk refuses a field width over 4096 (audit A4)" "awk: field width too large (at most 4096)"
 want "... with status 2" "awkrc=2"
 want "... and a precision over it too" "awkrc2=2"
-debugfs -R "cat /tmp/be.out" build/zenix.hdf > $OUT/batch-e.txt 2>/dev/null
+debugfs -R "cat /tmp/be.out" $BD/zenix.hdf > $OUT/batch-e.txt 2>/dev/null
 if diff tools/tests/batch-e.expected $OUT/batch-e.txt > $OUT/batch-e.diff; then echo "PASS batch E script: $(wc -l < tools/tests/batch-e.expected) lines as expected"
 else echo "FAIL batch E script (expected, then got):"; head -40 $OUT/batch-e.diff; pass=0; fi
-if e2fsck -fn build/zenix.hdf > $OUT/e2fsck.log 2>&1; then echo "PASS host e2fsck -fn clean after the run"; else echo "FAIL e2fsck finds errors (see $OUT/e2fsck.log)"; pass=0; fi
+if e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck.log 2>&1; then echo "PASS host e2fsck -fn clean after the run"; else echo "FAIL e2fsck finds errors (see $OUT/e2fsck.log)"; pass=0; fi
 exit $((1 - pass))

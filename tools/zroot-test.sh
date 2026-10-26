@@ -4,15 +4,16 @@
 # Boot 2 (same disk): the data is there after a reboot; then the users-and-permissions test of tools/users-test.sh runs
 # against the ZenixFS root. Finally the host checks the root partition with zenixfs-tool.
 cd "$(dirname "$0")/.." || exit 1
-make -s all build/zenix.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all $BD/zenix.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "host tool build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-zroot}; mkdir -p $OUT
 # the root disk: ZenixFS root + a second partition (ext2, empty) that /etc/fstab mounts on /data at boot
-rm -f build/zenix-zroot.hdf $OUT/data.img
+rm -f $BD/zenix-zroot.hdf $OUT/data.img
 mke2fs -q -t ext2 -E revision=0 -b 1024 -F $OUT/data.img 2M || { echo "mke2fs failed"; exit 1; }
 printf '# test fstab\nide0p2  /data  auto  defaults\n' > $OUT/fstab
-make -s build/zenix-zroot.hdf >/dev/null 2>&1    # makes the plain one (also builds the programs); then ours replaces it
-FSTAB_FILE=$OUT/fstab MOUNTDIRS=data EXTRA="$OUT/data.img:ext2:data" tools/mkroot-zenixfs.sh build/zenix-zroot.hdf build "$(make -s -f Makefile --eval 'pa:;@echo $(UAPPS)' pa 2>/dev/null)" 8 >/dev/null || { echo "zroot disk build failed"; exit 1; }
+make -s BUILD=$BD $BD/zenix-zroot.hdf >/dev/null 2>&1    # makes the plain one (also builds the programs); then ours replaces it
+FSTAB_FILE=$OUT/fstab MOUNTDIRS=data EXTRA="$OUT/data.img:ext2:data" tools/mkroot-zenixfs.sh $BD/zenix-zroot.hdf $BD "$(make -s BUILD=$BD -f Makefile --eval 'pa:;@echo $(UAPPS)' pa 2>/dev/null)" 8 >/dev/null || { echo "zroot disk build failed"; exit 1; }
 SER=${ZENIX_SERIAL:-/tmp/zenixfs-serial}
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
@@ -50,8 +51,9 @@ want "sha256sum matches the host" "$(sha256sum rootfs/etc/group | cut -d' ' -f1)
 . tools/users-d-checks.sh
 users_d_checks $OUT/users.log "users: " || pass=0
 # the host looks at the root partition
-python3 - <<'PY' > $OUT/offset.txt
-d = open('build/zenix-zroot.hdf', 'rb').read()
+python3 - "$BD/zenix-zroot.hdf" <<'PY' > $OUT/offset.txt
+import sys
+d = open(sys.argv[1], 'rb').read()
 off = 0
 while True:
     i = d.find(b'ZNFS', off)
@@ -62,7 +64,7 @@ while True:
 PY
 if [ -s $OUT/offset.txt ]; then
   start=$(cat $OUT/offset.txt)
-  dd if=build/zenix-zroot.hdf of=$OUT/root.img bs=512 skip=$(( start / 512 )) status=none
+  dd if=$BD/zenix-zroot.hdf of=$OUT/root.img bs=512 skip=$(( start / 512 )) status=none
   zenixfs/build/zenixfs-tool fsck $OUT/root.img > $OUT/hostfsck.log 2>&1 && check "host zenixfs-tool fsck of the root: clean" ok || { check "host zenixfs-tool fsck of the root: clean" bad; cat $OUT/hostfsck.log; }
   zenixfs/build/zenixfs-tool cat $OUT/root.img /persist.txt 2>/dev/null | grep -q persist-me && check "host reads the file the Amiga wrote on the root" ok || check "host reads the file the Amiga wrote on the root" bad
 else

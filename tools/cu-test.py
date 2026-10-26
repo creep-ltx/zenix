@@ -27,6 +27,7 @@ log = f"{out}/serial.log"
 script = f"{out}/script.txt"
 # the PC side: wait until the console's copy shows the cu command typed (cu starts then), then send a line to it
 open(script, "w").write("wait cu\\.out 150\nsleep 4\nsend hello-from-pc\\r\\n\nwait cukill 90\nsleep 5\nsend x\\r\\n\nsleep 30\n")
+slot = fsuae_conf.emulator_slot()     # before the tap: its script and the timings start with the emulator
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"), link, log, script],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)

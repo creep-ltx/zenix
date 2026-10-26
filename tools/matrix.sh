@@ -4,16 +4,17 @@
 # tools/tests/matrix-test.txt over the serial port, and report PASS/FAIL per setup.
 # usage: tools/matrix.sh [name...]     (default: all)
 cd "$(dirname "$0")/.." || exit 1
-OUT=$(mktemp -d /tmp/zenix-matrix.XXXXXX)      # this run only: two runs (two sessions) never share logs
-make -s all 2>&1 | grep -v 'RWX permissions' | grep -i 'error\|check-68020-60\|too big\|\*\*\*' ; [ "${PIPESTATUS[0]}" = 0 ] || { echo "build failed"; exit 1; }
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-matrix.XXXXXX)}; mkdir -p $OUT    # this run only: two runs (two sessions) never share logs
+make -s BUILD=$BD all 2>&1 | grep -v 'RWX permissions' | grep -i 'error\|check-68020-60\|too big\|\*\*\*' ; [ "${PIPESTATUS[0]}" = 0 ] || { echo "build failed"; exit 1; }
 CONFS="$*"
 # mounts: its own floppy (tools/mounttest.sh); zroot: its own ZenixFS root disk, which this script does not build
 # (tools/zroot-test.sh)
 [ -z "$CONFS" ] && CONFS="$(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot')"
 for n in $CONFS; do
     f=fsuae/$n.fs-uae; [ -f "$f" ] || f=fsuae/matrix/$n.fs-uae
-    rm -f build/zenix.hdf build/zenix-rdb.hdf
-    make -s build/zenix.hdf build/zenix-rdb.hdf build/zenix-ram.adf >$OUT/build.log 2>&1 || { echo "FAIL $n: build failed:"; grep -v 'RWX permissions' $OUT/build.log | tail -15; exit 1; }
+    rm -f $BD/zenix.hdf $BD/zenix-rdb.hdf
+    make -s BUILD=$BD $BD/zenix.hdf $BD/zenix-rdb.hdf $BD/zenix-ram.adf >$OUT/build.log 2>&1 || { echo "FAIL $n: build failed:"; grep -v 'RWX permissions' $OUT/build.log | tail -15; exit 1; }
     tools/run-test.sh "$f" 85 tools/tests/matrix-test.txt > $OUT/$n.log 2>&1
     if [ "$n" = a600-68000 ]; then
         grep -q 'needs a 68020' $OUT/$n.log && echo "PASS $n (refuses cleanly)" || echo "FAIL $n"

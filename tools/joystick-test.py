@@ -16,12 +16,13 @@ Cage = fsuae_conf.load_cage()
 
 here = os.path.dirname(os.path.abspath(__file__))
 root = os.path.dirname(here)
-serial, log = "/tmp/zenix-joy-serial", "/tmp/zenix-joy.log"
+serial, log = os.environ.get("ZENIX_SERIAL", "/tmp/zenix-joy-serial"), "/tmp/zenix-joy.log"
 conf = "/tmp/zenix-joy.fs-uae"
-text = fsuae_conf.resolve(open(os.path.join(root, "fsuae/a1200-020-fast.fs-uae")).read(), serial=serial)
+text = fsuae_conf.resolve(open(os.path.join(root, "fsuae/a1200-020-fast.fs-uae")).read(), serial=serial, states="/tmp/zenix-joy.states")
 text = text.replace("joystick_port_1 = none", "joystick_port_1 = keyboard")
 open(conf, "w").write(text)
 subprocess.run(["make", "-s", "all"], cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+slot = fsuae_conf.emulator_slot()     # before the tap: its script and the timings start with the emulator
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"), serial, log,
                         os.path.join(here, "tests/joystick-test.txt")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)

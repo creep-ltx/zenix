@@ -14,30 +14,31 @@
 # So every run gets a save-state directory of its own.
 # usage: tools/floppy-test.sh   (private serial port; waits for other FS-UAE runs)
 cd "$(dirname "$0")/.." || exit 1
-make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-floppy-serial}
 OUT=${ZENIX_OUT:-/tmp/zenix-floppy}; mkdir -p $OUT
 python3 - <<PY
 import os
 open("$OUT/df1.adf", "wb").write(os.urandom(901120))
 PY
-cp build/zenix.adf $OUT/df0.adf
+cp $BD/zenix.adf $OUT/df0.adf
 cp $OUT/df1.adf $OUT/df1.orig
 rm -rf $OUT/states; mkdir -p $OUT/states
-sed -e "s#floppy_drive_0 = .*#floppy_drive_0 = $OUT/df0.adf\nfloppy_drive_1 = $OUT/df1.adf\nfloppy_drive_count = 2\nwritable_floppy_images = 1\nsave_states_dir = $OUT/states#" fsuae/a1200-020-fast.fs-uae > fsuae/floppy-test.fs-uae
-tools/run-test.sh fsuae/floppy-test.fs-uae ${FLOPPY_SECS:-300} tools/tests/floppy-test.txt > $OUT/log 2>&1
-rm -f fsuae/floppy-test.fs-uae
+sed -e "s#floppy_drive_0 = .*#floppy_drive_0 = $OUT/df0.adf\nfloppy_drive_1 = $OUT/df1.adf\nfloppy_drive_count = 2\nwritable_floppy_images = 1\nsave_states_dir = $OUT/states#" fsuae/a1200-020-fast.fs-uae > $OUT/floppy-test.fs-uae
+tools/run-test.sh $OUT/floppy-test.fs-uae ${FLOPPY_SECS:-300} tools/tests/floppy-test.txt > $OUT/log 2>&1
+rm -f $OUT/floppy-test.fs-uae
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 grep -qE '^df0 +' $OUT/log && grep -qE '^df1 +1760' $OUT/log && check "fdisk list shows df0 and df1" ok || check "fdisk list shows df0 and df1" bad
 grep -qE '^df1 +1760 +880 KB' $OUT/log && check "fdisk list gives a floppy's size in KB (not 0 MB)" ok || check "fdisk list gives a floppy's size in KB (not 0 MB)" bad
-want0=$(head -c $((200*512)) build/zenix.adf | sha256sum | cut -d' ' -f1)
+want0=$(head -c $((200*512)) $BD/zenix.adf | sha256sum | cut -d' ' -f1)
 grep -q "$want0  /tmp/a" $OUT/log && check "df0: first 200 sectors identical to the host's" ok || check "df0: first 200 sectors identical to the host's" bad
 want1=$(sha256sum < $OUT/df1.orig | cut -d' ' -f1)
 grep -q "$want1  /tmp/b" $OUT/log && check "df1: all 1760 sectors read back identical" ok || check "df1: all 1760 sectors read back identical" bad
-wantc=$(head -c $((100*512)) build/zenix.adf | sha256sum | cut -d' ' -f1)
+wantc=$(head -c $((100*512)) $BD/zenix.adf | sha256sum | cut -d' ' -f1)
 grep -q "$wantc  /tmp/c" $OUT/log && check "df1: 100 sectors written at sector 500 read back identical" ok || check "df1: 100 sectors written at sector 500 read back identical" bad
-want4=$( { head -c $((500*512)) $OUT/df1.orig; head -c $((100*512)) build/zenix.adf; tail -c +$((600*512+1)) $OUT/df1.orig; } | sha256sum | cut -d' ' -f1)
+want4=$( { head -c $((500*512)) $OUT/df1.orig; head -c $((100*512)) $BD/zenix.adf; tail -c +$((600*512+1)) $OUT/df1.orig; } | sha256sum | cut -d' ' -f1)
 grep -q "$want4  /tmp/d" $OUT/log && check "df1 after the write: the original with exactly sectors 500-599 replaced" ok ||
     check "df1 after the write: the original with exactly sectors 500-599 replaced" bad
 got=$(sha256sum < $OUT/df1.adf | cut -d' ' -f1)

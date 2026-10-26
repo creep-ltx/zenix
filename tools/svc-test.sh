@@ -38,9 +38,10 @@
 #   dmg  a test-only kernel damages diskd's saved table: diskd stops with its message, the kernel panics
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
 PARTS=" ${*:-a z b n r d o zo u l f s h t dmg} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
-make -s all build/zenix-zroot.hdf build/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+make -s BUILD=$BD all $BD/zenix-zroot.hdf $BD/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-svc-serial}
 pass=1
@@ -98,7 +99,7 @@ fi
 if want_part b; then
 B=$OUT/two.hdf
 mke2fs -q -t ext2 -E revision=0 -b 1024 -F "$OUT/decoy.img" 2M || { echo "FAIL mke2fs"; exit 1; }
-python3 tools/mkrdb-multi.py "$B" "$OUT/decoy.img:ext2:DH0:-" build/zenix.hdf:ext2:DH1:boot >/dev/null || { echo "FAIL mkrdb-multi"; exit 1; }
+python3 tools/mkrdb-multi.py "$B" "$OUT/decoy.img:ext2:DH0:-" $BD/zenix.hdf:ext2:DH1:boot >/dev/null || { echo "FAIL mkrdb-multi"; exit 1; }
 conf b "$B"
 run b "$OUT/b.fs-uae" 100 tools/tests/svc-boot-test.txt
 rx   b "with two ext2 partitions the bootable second one is the root" "ide0p2 +/ +ext2 .*"
@@ -127,7 +128,7 @@ fi
 
 # ---- d: diskd keeps its slots and claims across a restart ----
 if want_part d; then
-cp build/zenix.hdf "$OUT/root.hdf"
+cp $BD/zenix.hdf "$OUT/root.hdf"
 head -c 901120 /dev/zero > "$OUT/df1.adf"
 conf d "$OUT/root.hdf"
 printf 'floppy_drive_1 = %s\nfloppy_drive_count = 2\n' "$OUT/df1.adf" >> "$OUT/d.fs-uae"
@@ -152,7 +153,7 @@ free_grew() {   # free_grew LOG WHAT A B MIN: the number in B=... exceeds the on
 
 # ---- o: the ext2 root's restart rules ----
 if want_part o; then
-cp build/zenix.hdf "$OUT/root.hdf"
+cp $BD/zenix.hdf "$OUT/root.hdf"
 conf o "$OUT/root.hdf"
 run o "$OUT/o.fs-uae" 200 tools/tests/svc-open-test.txt
 rx   o "a deleted file held open reads the same after fsd restarted" ".*svctest keep /tmp/keep: read 4096, deleted 0, again 4096: the same bytes"
@@ -167,7 +168,7 @@ fi
 
 # ---- zo: the ZenixFS root's restart rules ----
 if want_part zo; then
-cp build/zenix-zroot.hdf "$OUT/zroot.hdf"
+cp $BD/zenix-zroot.hdf "$OUT/zroot.hdf"
 conf zo "$OUT/zroot.hdf"
 run zo "$OUT/zo.fs-uae" 200 tools/tests/svc-zopen-test.txt
 rx   zo "a deleted file held open (an orphan) reads the same after zfsd restarted" ".*svctest keep /tmp/keep: read 4096, deleted 0, again 4096: the same bytes"
@@ -181,7 +182,7 @@ fi
 
 # ---- u: a copy with the same uuid beside the root ----
 if want_part u; then
-python3 tools/mkrdb-multi.py "$OUT/dup.hdf" build/zenix.hdf:ext2:DH0:- build/zenix.hdf:ext2:DH1:boot >/dev/null || { echo "FAIL mkrdb-multi"; exit 1; }
+python3 tools/mkrdb-multi.py "$OUT/dup.hdf" $BD/zenix.hdf:ext2:DH0:- $BD/zenix.hdf:ext2:DH1:boot >/dev/null || { echo "FAIL mkrdb-multi"; exit 1; }
 conf u "$OUT/dup.hdf"
 run u "$OUT/u.fs-uae" 100 tools/tests/svc-dup-test.txt
 rx   u "with a copy beside it the restarted fsd still serves the original (the place first)" "svc: fs: started @fsd \\(pid [0-9]+, for pid [0-9]+ [a-z]+\\)"
@@ -237,7 +238,7 @@ fi
 
 # ---- s: reboot with a dead server and a sleeping loader ----
 if want_part s; then
-cp build/zenix.hdf "$OUT/root.hdf"
+cp $BD/zenix.hdf "$OUT/root.hdf"
 conf s "$OUT/root.hdf"
 run s "$OUT/s.fs-uae" 120 tools/tests/svc-sync-test.txt
 rx   s "the loader sleeps in a back-off of 4 s (four ends)" "svc: ping: start 5 when next used"
@@ -250,7 +251,7 @@ fi
 
 # ---- h: reboot with a server that hangs on its sync (audit A7) ----
 if want_part h; then
-cp build/zenix.hdf "$OUT/root.hdf"
+cp $BD/zenix.hdf "$OUT/root.hdf"
 conf h "$OUT/root.hdf"
 run h "$OUT/h.fs-uae" 100 tools/tests/svc-hang-test.txt
 rx   h "a fake filesystem that hangs on sync is mounted" ".*svctest mount /tmp/hang: 0"
@@ -266,7 +267,7 @@ fi
 
 # ---- t: /etc/svctab ----
 if want_part t; then
-cp build/zenix.hdf "$OUT/root.hdf"
+cp $BD/zenix.hdf "$OUT/root.hdf"
 conf t "$OUT/root.hdf"
 run t "$OUT/t.fs-uae" 160 tools/tests/svc-tab-test.txt
 line t "a bad line is reported and skipped" "boot: /etc/svctab: line skipped: bad"

@@ -6,11 +6,12 @@
 # used up and all twelve service slots in use; a floppy without a volume id is not served again after a restart; the
 # servers' own messages go to the kernel log (dmesg).
 cd "$(dirname "$0")/.." || exit 1
-make -s all build/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all $BD/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-mounttest}; mkdir -p $OUT
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
-dd if=/dev/zero of=build/scratch.hdf bs=1M count=16 status=none
+dd if=/dev/zero of=$BD/scratch.hdf bs=1M count=16 status=none
 # df1: an ext2 floppy whose superblock carries no uuid (zeros), with one file
 head -c 901120 /dev/zero > $OUT/df1.adf
 mke2fs -q -t ext2 -E revision=0 -b 1024 -F $OUT/df1.adf >/dev/null 2>&1 || { echo "FAIL mke2fs"; exit 1; }
@@ -53,9 +54,9 @@ has "the script ran to the end" '^(.*# )?mount-svc-done$'
 # slow enough to umount in the middle
 head -c 901120 /dev/zero > $OUT/df1l.adf
 mke2fs -q -t ext2 -E revision=0 -b 1024 -F $OUT/df1l.adf >/dev/null 2>&1 || { echo "FAIL mke2fs"; exit 1; }
-debugfs -w -R "write build/awk.zx awk" $OUT/df1l.adf >/dev/null 2>&1
+debugfs -w -R "write $BD/awk.zx awk" $OUT/df1l.adf >/dev/null 2>&1
 debugfs -w -R "sif awk mode 0100755" $OUT/df1l.adf >/dev/null 2>&1
-cp build/zenix.hdf $OUT/lroot.hdf
+cp $BD/zenix.hdf $OUT/lroot.hdf
 sed "s#^floppy_drive_0 = .*#&\nfloppy_drive_1 = $OUT/df1l.adf\nfloppy_drive_count = 2#; s#^floppy_drive_speed = .*#floppy_drive_speed = 100#; s#^hard_drive_0 = .*#hard_drive_0 = $OUT/lroot.hdf#" fsuae/a1200-020-fast.fs-uae > $OUT/load.fs-uae
 ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh $OUT/load.fs-uae 150 tools/tests/mount-load-test.txt > $OUT/load.log 2>&1
 L=$OUT/load.log
@@ -65,7 +66,7 @@ has "... and the umount after it works" '^(.*# )?um2=0$'
 rm -f $OUT/df1l.adf $OUT/lroot.hdf
 # the unmounted partitions are clean ext2 as seen by the host (partitions start at cylinder 1 and 14 of 1008 sectors)
 for spec in "1 13104" "14 18144"; do set -- $spec
-  dd if=build/scratch.hdf of=$OUT/p$1.img bs=512 skip=$(( $1 * 1008 )) count=$2 status=none
+  dd if=$BD/scratch.hdf of=$OUT/p$1.img bs=512 skip=$(( $1 * 1008 )) count=$2 status=none
   e2fsck -fn $OUT/p$1.img >$OUT/e2fsck$1.log 2>&1 && check "host e2fsck: partition at cylinder $1 is clean" ok || check "host e2fsck: partition at cylinder $1 is clean" bad
 done
 exit $((1 - pass))

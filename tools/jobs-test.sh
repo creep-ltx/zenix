@@ -3,8 +3,9 @@
 # Job control in the emulator: Ctrl-Z stops the foreground program, jobs lists it, ps shows it stopped, bg continues it,
 # fg brings it back (and Ctrl-C then ends it with status 130), kill ends a stopped job.
 cd "$(dirname "$0")/.." || exit 1
-make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-jobs}; mkdir -p $OUT
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae 75 tools/tests/jobs-test.txt 2>&1 | sed 's/\x1b\[K//g' > $OUT/run.log
 pass=1

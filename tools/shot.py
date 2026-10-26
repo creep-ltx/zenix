@@ -36,12 +36,13 @@ here = os.path.dirname(os.path.abspath(__file__))
 log = prefix + ".serial.log"
 serial = os.environ.get("ZENIX_SERIAL", "/tmp/zenix-serial")
 try:                    # the Kickstart directory, the build directory and the serial port filled in (fsuae_conf.py)
-    text = fsuae_conf.resolve(open(conf).read(), serial=serial)
+    text = fsuae_conf.resolve(open(conf).read(), serial=serial, states=os.path.abspath(prefix) + ".states")
 except fsuae_conf.ConfError as e:
     sys.exit(f"shot.py: {e}")
 conf = prefix + ".fs-uae"
 open(conf, "w").write(text)
 resets = sorted(float(t) for t in os.environ.get("RESET_AT", "").split(",") if t)
+slot = fsuae_conf.emulator_slot()     # before the tap: its script and the timings start with the emulator
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"),
                         serial, log, script],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

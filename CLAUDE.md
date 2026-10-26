@@ -131,12 +131,16 @@ Disks and data:
 - Nothing is done until a test *checks* it (the output is compared, not just printed). "verified" in the docs means
   such a test exists and passed in FS-UAE; on hardware say "verified on the A1200" with the date.
 - Emulator timing is not hardware timing: no speed claims from FS-UAE.
-- Run FS-UAE headless only, never on the owner's screen. Give every run its own serial port and build directory:
-  `ZENIX_SERIAL=/tmp/<name> tools/run-test.sh ...`, `make BUILD=/tmp/<name>`. One emulator run of yours at a time;
-  stop if the machine's load is above 16.
+- Run FS-UAE headless only, never on the owner's screen. Up to 6 FS-UAEs may run at once on this PC (owner,
+  2026-10-26), all sessions together: every run takes a slot (`tools/run-test.sh`, `ZENIX_EMU_SLOTS`, lock files
+  `/tmp/zenix-emulator.lock` and `.1`-`.5`) and needs its own serial port, image files and output folder:
+  `ZENIX_SERIAL=/tmp/<name> ZENIX_BUILD=/tmp/<name>-build ZENIX_OUT=/tmp/<name>-out tools/<test>.sh` (a copy of
+  `build/`), or `make BUILD=/tmp/<name>`. `make check` runs its tests that way by itself. No new emulator while the
+  machine's 1-minute load is above 16.
 - Before committing: `make` (all images, including `build/zenix-ram.adf`), the tests for what you touched, and
   `tools/docs-check.sh --staged` (must say `docs-check: ok`). Before a merge or a hardware build: `make check` (every
-  strong test, a table, about 1.5 hours; docs/README.md "Testing").
+  strong test, a table, about 35 minutes with 6 at once; docs/README.md "Testing"). Do not edit the tree while it
+  runs (the tests read their scripts and `rootfs/` from it).
 - The repository names no path of this PC. On the owner's PC the tests need (in the environment of every test run):
   `ZENIX_KICKSTART_DIR` and `ZENIX_CAGE_RIG` (their values are in the owner's private notes, not here); `TOOLPREFIX` defaults to
   `$(HOME)/opt/m68k-elf/bin/m68k-elf-` when `m68k-elf-gcc` is not on PATH, which is where it is here.

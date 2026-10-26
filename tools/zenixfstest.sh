@@ -4,12 +4,13 @@
 # unmount, remount, fsck.zenixfs; then the HOST checks the same partition with zenixfs-tool (independent implementation
 # of the check: the same library source, but a different program, block device and compiler).
 cd "$(dirname "$0")/.." || exit 1
-make -s all build/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all $BD/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "host tool build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-zenixfstest}; mkdir -p $OUT
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
-dd if=/dev/zero of=build/scratch.hdf bs=1M count=16 status=none
+dd if=/dev/zero of=$BD/scratch.hdf bs=1M count=16 status=none
 ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh fsuae/mounts.fs-uae 330 tools/tests/zenixfs-test.txt 2>&1 | tr -d '\r' | sed 's/\x1b\[K//g' > $OUT/run.log
 # the log also holds the keystrokes the test typed, so a check must match a whole OUTPUT line, never a substring of the typing
 wantline() { if grep -aqx -- "$2" $OUT/run.log; then check "$1" ok; else check "$1" bad; fi; }
@@ -28,9 +29,9 @@ wantre "pwd inside the mounted filesystem" '^/mnt/dir2$'
 wantre "data survives unmount and mount (wc again)" '^ *20000 +20000 +108894 /mnt/seq.txt$'
 wantline "fsck.zenixfs reports clean" "fsck.zenixfs: clean"
 # the host looks at the partition: find the superblock ('ZNFS' at byte 32 of its first block) on the scratch disk
-python3 - <<'PY' > $OUT/offset.txt
+python3 - "$BD/scratch.hdf" <<'PY' > $OUT/offset.txt
 import sys
-d = open('build/scratch.hdf', 'rb').read()
+d = open(sys.argv[1], 'rb').read()
 off = 0
 while True:
     i = d.find(b'ZNFS', off)
@@ -42,7 +43,7 @@ PY
 if [ -s $OUT/offset.txt ]; then
   start=$(cat $OUT/offset.txt)
   size=$(( 16*1024*1024 - start ))
-  dd if=build/scratch.hdf of=$OUT/p2.img bs=512 skip=$(( start / 512 )) count=$(( size / 512 )) status=none
+  dd if=$BD/scratch.hdf of=$OUT/p2.img bs=512 skip=$(( start / 512 )) count=$(( size / 512 )) status=none
   zenixfs/build/zenixfs-tool fsck $OUT/p2.img > $OUT/hostfsck.log 2>&1 && check "host zenixfs-tool fsck: clean" ok || { check "host zenixfs-tool fsck: clean" bad; cat $OUT/hostfsck.log; }
   zenixfs/build/zenixfs-tool ls $OUT/p2.img / > $OUT/hostls.log 2>&1
   grep -q seq.txt $OUT/hostls.log && grep -q dir2 $OUT/hostls.log && check "host sees the files the Amiga wrote" ok || check "host sees the files the Amiga wrote" bad
