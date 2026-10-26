@@ -356,3 +356,29 @@ Hard parts: exec's private fields, interrupt sharing, the screen switch, Kicksta
 Size estimate (proposed): 15,000-25,000 lines, about half of Zenix's 37,500 lines of system code on 2026-10-26; the
 long part is the compatibility hunt afterwards, months of small fixes, as with Wine. MorphOS runs old Amiga programs in
 a similar way.
+
+## The desktop: notes from a talk with the owner (2026-10-26; ideas, nothing decided)
+
+Block 5, "much later, when the foundation is rock solid" (the owner). **Two desktops on one base:** a tiling one (the
+owner's taste, i3-like) and a classic one with icons and floating windows for everyone else. Both on the same window
+server and toolkit; only the window manager's policy differs, so every program runs in both.
+
+- **Tiling on 640x256 PAL hires:** one full-screen program per workspace with tabs (i3's tabbed mode) as the default;
+  splits possible (two 45-column terminals with a 7-pixel font) but not the default; requesters and file dialogs float
+  briefly. Non-overlapping windows are also the cheap design: no hidden parts to keep or redraw.
+- **Workspace = its own screen + layout + font:** each workspace has its own Amiga screen mode (e.g. shells at 640x256 8
+  colours with a 7-pixel font; a BBS at 640x512 interlaced 16 colours, flicker-free with an Indivision; pictures in a
+  256-colour mode). The bar is its own thin screen above, joined by the copper; where the modes cannot share a frame
+  (interlace, other scan rates) the bar is redrawn in the workspace's mode. On 2 MB only the visible workspace keeps its
+  bitmap (programs redraw on a switch); with fast RAM recent ones stay ready. On a graphics card each workspace is a
+  card screen and the bar is drawn on each.
+- **Toolkit: our own, small, not from zero.** Borrow microui's minimal core (MIT), EmuTOS GEM's bitplane drawing know-how
+  (GPL-2+), MUI's box/group layout as an idea (no code), and the owner's tui.library model, so the block-3 text-UI
+  toolkit and the window toolkit share one way of building programs. Two drawing backends (bitplanes + blitter; chunky
+  pixels for graphics cards), keyboard first, configurable keys, designed for 4-8 colours; a shared library (D13 stage
+  2), estimate 30-50 KB of code. Ported toolkits (Nuklear, LVGL, Nano-X) assume chunky pixels or floating point.
+- **Not Intuition from ROM** for Zenix's own desktop (it needs the Wine-route exec, puts AmigaOS back underneath, is
+  tied to ROM versions, overlaps windows, needs P96/CGX on cards); ROM Intuition is for running Amiga programs. Ask again
+  only if that layer one day works well.
+- **First program:** a terminal (day one is an i3 full of terminals), then a file manager, settings, an editor, telnet
+  for BBSes in a window and the demo browser.
