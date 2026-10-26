@@ -205,7 +205,7 @@ int zb_main(void)
 
     /* the klog area first, before anything else can be allocated there (as the bootblock); if AmigaOS already uses
      * part of it, the zones below keep our buffers out of it */
-    u32 chiptop = EXEC_L(62);           /* MaxLocMem */
+    u32 chiptop = EXEC_L(62) & ~0xFFFu; /* MaxLocMem, rounded down to 4 KB as the kernel does (kernel/serial.c) */
     klog = AllocAbs(KLOG_AREA_SIZE, chiptop - KLOG_AREA_SIZE);
     zone_lo[0] = 0; zone_hi[0] = HANDOFF_STACK;
     zone_lo[1] = chiptop - KLOG_AREA_SIZE; zone_hi[1] = chiptop;

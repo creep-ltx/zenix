@@ -95,10 +95,35 @@ unseen). So:
 | 82 `update` (DESIGN D15: INFO, RELEASE, NOTE) | claimed 2026-10-26, not built yet |
 | **next free: 83** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
-Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8.
+Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
+10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
 Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main); `ETXTBSY` 26 (D13, "text file busy": a running
 shared program opened for writing; claimed 2026-10-25, Linux's number). Port names registered as services (D11):
 `disk`, `fs`, `fs.*`; `ping` (the test service).
+
+## Frozen interfaces (D15 step 0, 2026-10-26; checked in every review)
+Updates install a new kernel before the programs (docs/d15-self-updates.md 2 and 4), so an older program always meets
+a newer kernel and newer servers. So these never change meaning; they only grow, at the end:
+- **Append-only:** system call numbers and their argument meanings; error numbers; message types and their argument
+  meanings (`kernel/fsproto.h`, `kernel/diskproto.h`). Never reused, never changed. A new argument goes where every
+  older caller passed 0, or into a new number (claimed in the table above first).
+- **Structs the kernel or a server writes into a program's memory** (`ustat`, `uproc`, `ustatfs`, `udirent`,
+  `umountinfo`, `diskinfo`, the `SYS_meminfo` words) grow only at the end, and the caller passes its buffer size and
+  gets at most that many bytes: `SYS_stat`/`lstat`/`fstat`/`readdir`/`procinfo`/`statfs`/`mountinfo` take it in their
+  third argument, `SYS_meminfo` in its second; size 0 (every program built before D15) gets the struct's first size
+  (`uproc`: 32 bytes), a size below that is -EINVAL; `DISK_INFOSZ`/`DISK_LISTSZ` take it in `a[2]` (the old
+  `DISK_INFO`/`DISK_LIST` write the first 80 bytes). The structs servers answer in (`ustat`, `udirent`, `ustatfs`)
+  are frozen at their size in the message protocol: a bigger one needs a new message type. libz passes `sizeof`.
+- **Frozen:** the program start contract (the stack at entry, `a5`); the ZEXE and ZEX2 formats (the loader keeps both
+  for ever); the bootinfo layout; the klog area and boot-note layout and the klog flags (zenixboot and bootmenu
+  against the kernel); the `/etc` formats base programs read (svctab, fstab, passwd, group); the service manager's
+  `SVC_*` numbers and limits (`SVC_TEXT` 80, `SVC_SAVED` 512, `SVC_MIDREQ`, exit status 86 for a damaged table), the
+  port names (`disk`, `fs`, `fs.*`) and the built-in `@name` programs; the tty mode bits (`TTY_RAW`, `TTY_NOSIG`),
+  `O_*` flags and mode bits, the spawn limits (argument count and bytes), exit and wait status conventions (139 for a
+  fault, `waitcon`'s console status); the boot note's kinds and `SYS_reboot`'s arguments; D15's own formats (the
+  bootinfo bundle fields, the update note, the state file, the bundle header and manifest).
+- Not on the list: the kernel's internal file kinds. Signal numbers join it when signals come. libz is linked into
+  each program, so it needs no rule of its own.
 
 ## Rules for code (each one was a real bug found on 2026-10-22)
 Real hardware and Emu68 (details: knowledge base `amiga/emu68-jit-cache-rules.md`):

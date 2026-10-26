@@ -1424,7 +1424,7 @@ int zenixfs_rmdir(struct zenixfs *fs, uint32_t dir, const char *name, int len)
 }
 int zenixfs_rename(struct zenixfs *fs, uint32_t odir, const char *oname, int olen, uint32_t ndir, const char *nname, int nlen)
 {
-    struct zenixfs_inode od, nd; u32 ino, tino; u8 type, ttype; int e = pressure(fs);
+    struct zenixfs_inode od, nd; u32 ino, tino, victim = 0; u8 type, ttype; int e = pressure(fs);
     if (e) return e;
     if ((e = check_name(fs, nname, nlen))) return e;
     if ((e = dir_check(fs, odir, &od))) return e;
@@ -1449,15 +1449,11 @@ int zenixfs_rename(struct zenixfs *fs, uint32_t odir, const char *oname, int ole
         if (type != 4 && ttype == 4) { e = ZENIXFS_EISDIR; goto out; }
         if (ttype == 4) {
             int em = dir_empty(fs, tino); if (em < 0) { e = em; goto out; } if (!em) { e = ZENIXFS_ENOTEMPTY; goto out; }
-            struct zenixfs_inode tv; if ((e = ino_load(fs, tino, &tv))) goto out;
             if ((e = dir_del(fs, ndir, (const u8 *)nname, nlen))) goto out;
-            if ((e = inode_destroy(fs, tino, &tv))) goto out;
             if ((e = ino_load(fs, ndir, &nd))) goto out;
             nd.nlink--; if ((e = ino_store(fs, ndir, &nd))) goto out;
-        } else {
-            if ((e = dir_del(fs, ndir, (const u8 *)nname, nlen))) goto out;
-            if ((e = drop_link(fs, tino))) goto out;
-        }
+        } else if ((e = dir_del(fs, ndir, (const u8 *)nname, nlen))) goto out;
+        victim = tino;              /* destroyed only after the new entry is in place: freeing a big file may commit */
     } else if (e != ZENIXFS_ENOENT) goto out;
     if ((e = dir_del(fs, odir, (const u8 *)oname, olen))) goto out;
     if ((e = dir_add(fs, ndir, (const u8 *)nname, nlen, ino, type))) goto out;
@@ -1478,6 +1474,11 @@ int zenixfs_rename(struct zenixfs *fs, uint32_t odir, const char *oname, int ole
             if ((e = ino_load(fs, ndir, &nd))) goto out;
             e = touch_dir(fs, ndir, &nd, 0);
         }
+    }
+    if (!e && victim) {             /* the old target's last link: orphaned first, then freed (inode_destroy) */
+        struct zenixfs_inode tv;
+        if (ttype != 4) e = drop_link(fs, victim);
+        else if (!(e = ino_load(fs, victim, &tv))) e = inode_destroy(fs, victim, &tv);
     }
 out:
     fs->in_reserve = saved;

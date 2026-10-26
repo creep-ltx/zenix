@@ -18,7 +18,7 @@ static int disk_info(const char *dev, struct diskinfo *di)
     struct umsg m;
     if (dp < 0) return -1;
     for (u32 i = 0; i < 16; i++) {
-        m.type = DISK_LIST; m.a[0] = i; m.a[1] = (u32)di;
+        m.type = DISK_LISTSZ; m.a[0] = i; m.a[1] = (u32)di; m.a[2] = sizeof *di;
         if (sys_call(dp, &m) < 0) return -1;
         if (!strcmp(di->name, dev)) return 0;
     }

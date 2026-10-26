@@ -14,6 +14,9 @@
 #define DISK_LIST   5  /* a0 index, a1 struct diskinfo* -> 0, -1 past the end */
 #define DISK_RESCAN 6  /* re-read the partition table (after fdisk wrote it) */
 #define DISK_FLUSH  8  /* a0 handle: everything written so far is durable when this returns (ATA FLUSH CACHE); needed for crash safety */
+#define DISK_INFOSZ 9  /* DISK_INFO with a2 = the caller's buffer size: at most that many bytes of struct diskinfo */
+#define DISK_LISTSZ 10 /* DISK_LIST with a2 = the buffer size (the old two write the frozen first 80 bytes; their a2 was
+                        * never set by callers, so it cannot carry a size) */
 struct diskinfo {
     char name[16];             /* "ide0", "ide0p1" */
     char label[32];            /* RDB drive name (DH0...) or "" */
@@ -26,6 +29,7 @@ struct diskinfo {
     unsigned maxsect;          /* most sectors one read/write call may carry */
     unsigned erase;            /* flash erase/page size in sectors, 0 if unknown or rotating */
 };
+#define DISKINFO_FIRST 80      /* struct diskinfo's first size: what DISK_INFO / DISK_LIST write (frozen) */
 #define DISKCAP_FLUSH  1       /* DISK_FLUSH really reaches the medium */
 #define DISKCAP_FLASH  2       /* flash (CF/SD): no seek cost, align writes to erase; unset: rotating or unknown */
 #define DISKCAP_RAM    4       /* memory: writes are durable only until reset */

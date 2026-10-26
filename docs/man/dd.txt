@@ -30,6 +30,9 @@ NOTES
     Not done: conv=, ibs/obs, status output on a signal, devices opened for
     a size that is not a whole number of sectors (a short last block of a
     file is written as it is).
+    It asks the disk server for a device's details with DISK_INFOSZ or
+    DISK_LISTSZ and its buffer's size, so a newer disk server never
+    writes past it (the frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
     fdisk(1), mkfs.ext2(1), docs/architecture.md

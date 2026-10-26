@@ -31,6 +31,9 @@ NOTES
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently. Its two block
     buffers are static, not on the stack: it runs in the default 16 KB.
+    It asks the disk server for a device's details with DISK_INFOSZ or
+    DISK_LISTSZ and its buffer's size, so a newer disk server never
+    writes past it (the frozen-interface rule, CLAUDE.md).
 
 EXIT STATUS
     0, 1 on an error, 2 usage error.

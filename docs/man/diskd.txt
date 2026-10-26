@@ -68,6 +68,12 @@ NOTES
     Errors are negative errno numbers (kernel/errno.h): an unknown device
     -ENODEV, a bad handle -EBADF, a range outside the device -EINVAL, an
     overlapping mount -EBUSY.
+    A device's details (struct diskinfo) go into the caller's buffer:
+    DISK_INFO and DISK_LIST write its first 80 bytes (their callers never
+    set a[2], so it cannot carry a size); DISK_INFOSZ (9) and DISK_LISTSZ
+    (10) take the buffer's size in a[2] and write at most that many bytes
+    (less than 80 is -EINVAL). The struct only grows at its end (the
+    frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
     fdisk(1), mkfs.ext2(1), fsck.ext2(1), docs/architecture.md

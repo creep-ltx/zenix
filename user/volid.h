@@ -22,7 +22,7 @@ static __attribute__((unused)) int vol_look(int port, const char *dev, struct di
     static unsigned char sec[512];
     int type = 0, h = vol_call(port, DISK_OPEN, (u32)dev, 0, 0, 0);
     memset(uuid, 0, 16);
-    if (h < 0 || vol_call(port, DISK_INFO, (u32)h, (u32)di, 0, 0) < 0)
+    if (h < 0 || vol_call(port, DISK_INFOSZ, (u32)h, (u32)di, sizeof *di, 0) < 0)
         return -1;
     if (vol_call(port, DISK_READ, (u32)h, 2, 1, sec) == 0 && sec[56] == 0x53 && sec[57] == 0xEF) {
         type = 1;
@@ -101,7 +101,7 @@ static __attribute__((unused)) int vol_find(int port, const char *dev, const cha
     }
     int at_place = 0, carriers = 0;
     for (u32 i = 0; i < 32; i++) {
-        if (vol_call(port, DISK_LIST, i, (u32)&di, 0, 0) < 0) break;
+        if (vol_call(port, DISK_LISTSZ, i, (u32)&di, sizeof di, 0) < 0) break;
         if (!vol_medium(di.name, dev) || di.start != start || di.sectors != size) continue;
         at_place = 1;
         if (vol_look(port, di.name, &di, got) >= 0 && (zero || !memcmp(got, want, 16))) {
@@ -112,7 +112,7 @@ static __attribute__((unused)) int vol_find(int port, const char *dev, const cha
     if (!at_place && !zero)                                /* the partition was moved: the uuid alone, if unique */
         for (u32 i = 0; i < 32; i++) {
             char n[16];
-            if (vol_call(port, DISK_LIST, i, (u32)&di, 0, 0) < 0) break;
+            if (vol_call(port, DISK_LISTSZ, i, (u32)&di, sizeof di, 0) < 0) break;
             strcpy(n, di.name);
             if (vol_look(port, n, &di, got) > 0 && !memcmp(got, want, 16) && carriers++ == 0)
                 strcpy(name, n);

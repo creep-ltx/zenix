@@ -70,6 +70,9 @@ NOTES
     HDToolBox writes one (tools/mkrdb-hdtb.py), on the host and in FS-UAE.
     A device in use is recognised by the disk server's EBUSY answer: fdisk
     then only lists it.
+    It asks the disk server for a device's details with DISK_INFOSZ or
+    DISK_LISTSZ and its buffer's size, so a newer disk server never
+    writes past it (the frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
     mkfs.ext2(1), fsck.ext2(1), df(1)

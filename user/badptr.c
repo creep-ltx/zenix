@@ -69,6 +69,47 @@ static int ipc_checks(void)
     return bad;
 }
 
+/* D15 step 0 (frozen interfaces): a struct the kernel or a server writes never goes past the caller's buffer. Size 0
+ * is what every program built before D15 passes: it gets the struct's first size (uproc: 32 bytes; D10 made it 40 and
+ * D13 44, so an older ps had less room than the kernel wrote) */
+static unsigned char gb[160];
+static int fill(void) { memset(gb, 0xA5, sizeof gb); return 0; }
+static int written(u32 n)               /* exactly the first n bytes were written: everything after is untouched */
+{
+    for (u32 i = n; i < sizeof gb; i++) if (gb[i] != 0xA5) return 0;
+    return 1;
+}
+static void size_checks(void)
+{
+    fill();
+    int r = sys3(21, 0, (u32)gb, 0);
+    printf("badptr: procinfo, size 0: %d, bytes 32-43 %s\n", r, written(32) ? "untouched" : "WRITTEN");
+    check("procinfo from an old program (size 0, a 40-byte buffer and a guard): 32 bytes, nothing after", r == 0 && written(32));
+    int ok = fill() || (sys3(21, 0, (u32)gb, 40) == 0 && written(40));
+    ok = ok && !fill() && sys3(21, 0, (u32)gb, sizeof(struct uproc) + 64) == 0 && written(sizeof(struct uproc));
+    ok = ok && !fill() && sys3(21, 0, (u32)gb, 8) == -EINVAL && written(0);
+    check("procinfo sized: 40 gets 40 bytes, more gets the whole struct, less than 32 -EINVAL", ok);
+    int fd = sys_open("/", O_RDONLY);
+    ok = fd >= 0;
+    for (u32 big = 0; big <= 100; big += 100) {         /* size 0 (an old program), then one bigger than every struct */
+        ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, big) == 0 && written(sizeof(struct ustat));
+        ok = ok && !fill() && sys3(57, (u32)"/", (u32)gb, big) == 0 && written(sizeof(struct ustat));
+        ok = ok && !fill() && sys3(14, (u32)fd, (u32)gb, big) == 0 && written(sizeof(struct ustat));
+        ok = ok && !fill() && sys3(12, (u32)fd, (u32)gb, big) > 0 && written(sizeof(struct udirent));
+        ok = ok && !fill() && sys3(43, (u32)gb, 0, big) == 0 && written(sizeof(struct ustatfs));
+        ok = ok && !fill() && sys3(71, 0, (u32)gb, big) == 0 && written(sizeof(struct umountinfo));
+        ok = ok && !fill() && sys3(22, (u32)gb, big, 0) == 0 && written(16);
+    }
+    ok = ok && !fill() && sys3(13, (u32)"/", (u32)gb, 4) == -EINVAL && sys3(22, (u32)gb, 4, 0) == -EINVAL && written(0);
+    if (fd >= 0) sys_close(fd);
+    check("stat, lstat, fstat, readdir, statfs, mountinfo, meminfo: size 0 or bigger writes the struct only; smaller -EINVAL", ok);
+    int disk = sys_port_find("disk");
+    ok = disk >= 0 && !fill() && call(disk, DISK_LIST, 0, (u32)gb, 0x7FFF, 0) == 0 && written(DISKINFO_FIRST);
+    ok = ok && !fill() && call(disk, DISK_LISTSZ, 0, (u32)gb, sizeof gb, 0) == 0 && written(sizeof(struct diskinfo));
+    ok = ok && !fill() && call(disk, DISK_LISTSZ, 0, (u32)gb, 40, 0) == -EINVAL && written(0);
+    check("disk info: DISK_LIST writes the first 80 bytes, DISK_LISTSZ at most the size given, below 80 -EINVAL", ok);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1 && !strcmp(argv[1], "ipc")) return ipc_checks();
@@ -76,6 +117,7 @@ int main(int argc, char **argv)
     int b = sys_write(1, (const void *)0xFFFFFFF0, 64);
     printf("badptr: write(0x1000)=%d write(0xfffffff0)=%d\n", a, b);
     check("bad pointers refused", a == -EFAULT && b == -EFAULT);
+    size_checks();
 
     /* the kernel: 0 on failure, never -1; sizes near 4 GB do not wrap */
     check("memalloc(0xfffffff0) is 0", sys_memalloc(0xFFFFFFF0u) == 0);

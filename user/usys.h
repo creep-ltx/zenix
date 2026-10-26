@@ -18,6 +18,8 @@ static inline int sys3(int n, u32 a, u32 b, u32 c)
 }
 
 #define USYS_STRUCTS
+/* Frozen interfaces (CLAUDE.md): a struct the kernel or a server writes into our memory only grows at its end, and we
+ * pass our buffer's size (sizeof) so a newer kernel never writes past it; an older one writes its smaller struct */
 struct udirent { u32 ino, type; char name[64]; };
 struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
 struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 shared; };   /* nice -20..19; pri: the level now, 0 highest, 32 idle; mem: its own memory; shared: the shared code it runs (D13) */
@@ -45,17 +47,17 @@ static inline int sys_open(const char *p, int fl) { return sys3(8, (u32)p, (u32)
 static inline int sys_close(int fd) { return sys3(9, (u32)fd, 0, 0); }
 static inline int sys_read(int fd, void *p, u32 n) { return sys3(10, (u32)fd, (u32)p, n); }
 static inline int sys_lseek(int fd, int off, int whence) { return sys3(11, (u32)fd, (u32)off, (u32)whence); }
-static inline int sys_readdir(int fd, struct udirent *d) { return sys3(12, (u32)fd, (u32)d, 0); }
-static inline int sys_stat(const char *p, struct ustat *s) { return sys3(13, (u32)p, (u32)s, 0); }
-static inline int sys_fstat(int fd, struct ustat *s) { return sys3(14, (u32)fd, (u32)s, 0); }
+static inline int sys_readdir(int fd, struct udirent *d) { return sys3(12, (u32)fd, (u32)d, sizeof *d); }
+static inline int sys_stat(const char *p, struct ustat *s) { return sys3(13, (u32)p, (u32)s, sizeof *s); }
+static inline int sys_fstat(int fd, struct ustat *s) { return sys3(14, (u32)fd, (u32)s, sizeof *s); }
 static inline int sys_chdir(const char *p) { return sys3(15, (u32)p, 0, 0); }
 static inline int sys_getcwd(char *b, u32 n) { return sys3(16, (u32)b, n, 0); }
 static inline int sys_pipe(int fds[2]) { return sys3(17, (u32)fds, 0, 0); }
 static inline void *sys_memalloc(u32 n) { return (void *)sys3(18, n, 0, 0); }   /* 0 (NULL) on failure */
 static inline int sys_memfree(void *p) { return sys3(19, (u32)p, 0, 0); }
 static inline u32 sys_ticks(void) { return (u32)sys3(20, 0, 0, 0); }
-static inline int sys_procinfo(u32 i, struct uproc *p) { return sys3(21, i, (u32)p, 0); }
-static inline int sys_meminfo(u32 out[4]) { return sys3(22, (u32)out, 0, 0); }
+static inline int sys_procinfo(u32 i, struct uproc *p) { return sys3(21, i, (u32)p, sizeof *p); }
+static inline int sys_meminfo(u32 out[4]) { return sys3(22, (u32)out, 16, 0); }
 static inline int sys_setfg(int pid) { return sys3(23, (u32)pid, 0, 0); }
 static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }
 
@@ -90,8 +92,8 @@ static inline int sys_fd_rw(u32 d, u32 lba, u32 n, void *buf, int wr) { return s
 static inline int sys_blk_size(void) { return sys3(41, 0, 0, 0); }
 static inline int sys_blk_ram(u32 out[2]) { return sys3(42, (u32)out, 0, 0); }
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };
-static inline int sys_statfs(struct ustatfs *f) { return sys3(43, (u32)f, 0, 0); }
-static inline int sys_statfs_mount(struct ustatfs *f, u32 mount) { return sys3(43, (u32)f, mount, 0); }
+static inline int sys_statfs(struct ustatfs *f) { return sys3(43, (u32)f, 0, sizeof *f); }
+static inline int sys_statfs_mount(struct ustatfs *f, u32 mount) { return sys3(43, (u32)f, mount, sizeof *f); }
 static inline int sys_sync(void) { return sys3(44, 0, 0, 0); }
 #define TTY_RAW   1
 #define TTY_NOSIG 2
@@ -107,7 +109,7 @@ static inline int sys_link(const char *a, const char *b) { return sys3(53, (u32)
 static inline int sys_symlink(const char *t, const char *p) { return sys3(54, (u32)t, (u32)p, 0); }
 static inline int sys_readlink(const char *p, char *buf, u32 max) { return sys3(55, (u32)p, (u32)buf, max); }
 static inline int sys_utimes(const char *p, u32 t) { return sys3(56, (u32)p, t, 0); }
-static inline int sys_lstat(const char *p, struct ustat *st) { return sys3(57, (u32)p, (u32)st, 0); }
+static inline int sys_lstat(const char *p, struct ustat *st) { return sys3(57, (u32)p, (u32)st, sizeof *st); }
 static inline u32 sys_time(void) { return (u32)sys3(58, 0, 0, 0); }
 static inline int sys_settime(u32 t) { return sys3(59, t, 0, 0); }
 static inline int sys_isatty(int fd) { return sys3(60, (u32)fd, 0, 0); }
@@ -122,7 +124,7 @@ struct umountreq { const char *path, *port, *dev, *type; };
 struct umountinfo { char path[48], port[16], dev[16], type[8]; };
 static inline int sys_mount(const struct umountreq *r) { return sys3(69, (u32)r, 0, 0); }
 static inline int sys_umount(const char *path) { return sys3(70, (u32)path, 0, 0); }
-static inline int sys_mountinfo(u32 index, struct umountinfo *out) { return sys3(71, index, (u32)out, 0); }
+static inline int sys_mountinfo(u32 index, struct umountinfo *out) { return sys3(71, index, (u32)out, sizeof *out); }
 static inline int sys_blk_flush(void) { return sys3(72, 0, 0, 0); }
 #define PRIO_PROCESS 0    /* priorities (DESIGN D10): who is a pid, 0 = the caller */
 #define PRIO_PGRP    1    /* not supported: no process groups */

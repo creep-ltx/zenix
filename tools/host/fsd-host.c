@@ -10,6 +10,7 @@
  *   ls PATH                 every entry (FS_READDIR)
  *   sync | quit             FS_SYNC | FS_QUIT
  *   writes                  the sectors written to the image so far (hostdisk_writes)
+ *   cut N                   a power cut: only N more sectors reach the image, every later write fails
  *   as UID GID              later requests come from this user
  *   raw on|off              later requests come as a user's own SYS_call (no UMSG_KERNEL), not from the kernel
  *   utimes P T | chown P UID GID     FS_UTIMES (T "now" = FS_UTIME_NOW) | FS_CHOWN
@@ -111,6 +112,7 @@ int main(void)
             printf(" (%u, %d)\n", n, r);
             continue;
         }
+        else if (!strcmp(cmd, "cut")) { extern unsigned long hostdisk_writes, hostdisk_limit; hostdisk_limit = hostdisk_writes + (unsigned long)atol(a); printf("cut -> %lu\n", hostdisk_limit); continue; }
         else if (!strcmp(cmd, "writes")) { extern unsigned long hostdisk_writes; printf("writes -> %lu\n", hostdisk_writes); continue; }
         else if (!strcmp(cmd, "sync")) r = req(FS_SYNC, 0, 0, 0, 0);
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);

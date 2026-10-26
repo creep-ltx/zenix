@@ -239,7 +239,7 @@ file instead of hashing `zenix` every time); the signature is checked once per t
 
 ## 12. Order of work
 
-0. Before D15 (found bugs, fixed first): the crash-safe ext2 rename (new-name case and file-type byte included) and the
+0. **Done (branch fix3, 2026-10-26; docs/audit-2026-10-25.md has the tests).** Before D15 (found bugs, fixed first): the crash-safe ext2 rename (new-name case and file-type byte included) and the
    ZenixFS mid-rename commit; the size-passing calls for every kernel-written struct; the klog slot choice by header sum
    and bootmenu's whole-area `AllocAbs` (bootmenu fixed in the source; installed by hand with the owner); the
    frozen-interface rule in CLAUDE.md.

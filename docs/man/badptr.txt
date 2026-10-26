@@ -11,6 +11,14 @@ DESCRIPTION
     A test program. First it hands the kernel two pointers that are not
     the program's own memory in a write() call: the kernel must answer -14
     (EFAULT, a bad address) instead of crashing. Then it checks the memory
+    calls that write a struct into the program: procinfo with size 0 (as
+    every program built before D15 passes) into a 40-byte buffer with a
+    guard after it gets 32 bytes and nothing after; sizes 40, a bigger
+    one and 8 get 40 bytes, the whole struct and -22 (EINVAL); stat, lstat,
+    fstat, readdir, statfs, mountinfo and meminfo at size 0 and 100 write
+    their struct and nothing after it, a smaller size is -22; the disk
+    server's DISK_LIST writes 80 bytes, DISK_LISTSZ at most the size
+    given. Then it checks the memory
     calls: memalloc of 0 or of sizes near 4 GB gives 0 (NULL), malloc of
     such sizes gives NULL, a freed small block is used again, 600 small blocks
     across several of malloc's growing chunks keep their contents and are

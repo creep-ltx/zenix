@@ -48,13 +48,16 @@ int sys_call(int port, struct umsg *m)
     switch (m->type) {
     case DISK_OPEN: return 0;
     case DISK_UNMOUNT: case DISK_FLUSH: case DISK_RESCAN: return 0;
-    case DISK_INFO: case DISK_LIST: {
-        if (m->type == DISK_LIST && m->a[0] != 0) return -1;
-        struct diskinfo *d = (struct diskinfo *)m->a[1];
-        memset(d, 0, sizeof *d);
-        strcpy(d->name, "ide0");
-        d->sectors = nsec;
-        d->maxsect = 256;
+    case DISK_INFO: case DISK_LIST: case DISK_INFOSZ: case DISK_LISTSZ: {   /* at most the caller's size, as diskd */
+        if ((m->type == DISK_LIST || m->type == DISK_LISTSZ) && m->a[0] != 0) return -1;
+        u32 n = m->type == DISK_INFOSZ || m->type == DISK_LISTSZ ? m->a[2] : DISKINFO_FIRST;
+        if (n < DISKINFO_FIRST) return -1;
+        struct diskinfo d;
+        memset(&d, 0, sizeof d);
+        strcpy(d.name, "ide0");
+        d.sectors = nsec;
+        d.maxsect = 256;
+        memcpy((void *)m->a[1], &d, n < sizeof d ? n : sizeof d);
         return 0;
     }
     case DISK_READ: case DISK_WRITE: {

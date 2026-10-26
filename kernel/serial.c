@@ -303,7 +303,8 @@ static struct { struct klog_hdr h; char text[KLOG_SMALL]; } klog_small;     /* t
 static struct klog_hdr *kl, *kprev;     /* kl is 0 until klog_init: nothing is logged before it */
 static int klog_mirror;
 static int prev_state;                  /* 0 none, 1 valid (kprev), 2 found but damaged, 3 area not usable */
-static int prev_damaged;                /* a slot had the magic but failed its checks */
+static int prev_damaged;                /* a slot had the magic but failed its header checks */
+static int prev_text;                   /* kprev's ring passes its sum: only then is its text shown */
 static u32 klog_area_pa;
 
 #define KTEXT(h) ((char *)(h) + KLOG_HDR)
@@ -313,20 +314,26 @@ static u32 hdr_sum(const struct klog_hdr *a)
     return ~(a->magic + a->size + a->bootno + a->total + a->textsum + a->reason);
 }
 
+/* A slot counts by its header alone (magic, size, header sum): the slot choice, the boot number and the reason come
+ * from it. The text sum decides only whether the text is shown: an old boot menu wrote 8 bytes into slot 0's text (an
+ * AllocAbs() remainder's header), and a slot rejected for that made the kernel show an older boot as the previous one */
 static int slot_valid(const struct klog_hdr *a)
 {
     if (a->magic != KLOG_MAGIC)
         return 0;
-    u32 sum = 0;
-    if (a->size == KLOG_SIZE && a->hdrsum == hdr_sum(a)) {
-        const char *t = KTEXT(a);
-        for (u32 i = 0; i < KLOG_SIZE; i++)
-            sum += (u8)t[i];
-        if (sum == a->textsum)
-            return 1;
-    }
+    if (a->size == KLOG_SIZE && a->hdrsum == hdr_sum(a))
+        return 1;
     prev_damaged = 1;
     return 0;
+}
+
+static int text_valid(const struct klog_hdr *a)
+{
+    u32 sum = 0;
+    const char *t = KTEXT(a);
+    for (u32 i = 0; i < KLOG_SIZE; i++)
+        sum += (u8)t[i];
+    return sum == a->textsum;
 }
 
 u32 klog_area_base(void) { return klog_area_pa; }
@@ -358,6 +365,7 @@ void klog_init(const struct bootinfo *bi)
         else if (v1)
             kprev = s1;
         prev_state = kprev ? 1 : prev_damaged ? 2 : 0;
+        prev_text = kprev && text_valid(kprev);
         kl = kprev == s0 ? s1 : s0;
         memset(kl, 0, KLOG_HDR + KLOG_SIZE);
         kl->size = KLOG_SIZE;
@@ -438,7 +446,7 @@ static u32 ring_read(const struct klog_hdr *h, u32 off, char *buf, u32 n)
 u32 klog_read(u32 off, char *buf, u32 n)
 {
     if (off & KLOG_PREV)
-        return kprev ? ring_read(kprev, off & ~KLOG_PREV, buf, n) : 0;
+        return prev_text ? ring_read(kprev, off & ~KLOG_PREV, buf, n) : 0;
     return kl ? ring_read(kl, off, buf, n) : 0;
 }
 
@@ -477,6 +485,13 @@ void klog_show_prev(void)
             kprintf("klog: no log from a previous boot (power-on, or the memory was cleared)\n");
         return;
     }
+    const char *why = kprev->reason == KLOG_END_PANIC ? " with a kernel panic" :
+                      kprev->reason == KLOG_END_REBOOT ? " with reboot" :
+                      " without a panic message (it hung, or was reset or switched off)";
+    if (!prev_text) {
+        kprintf("klog: previous boot (%u) ended%s; its log text is damaged (checksum): not shown\n", kprev->bootno, why);
+        return;
+    }
     const char *t = KTEXT(kprev);
     u32 size = kprev->size, end = kprev->total, first = end > size ? end - size : 0, i = end, lines = 0;
     if (i > first && t[(i - 1) % size] == '\n')
@@ -486,10 +501,7 @@ void klog_show_prev(void)
             break;
         i--;
     }
-    kprintf("=== previous boot (%u) ended here%s; its last lines (all of it: dmesg -p): ===\n", kprev->bootno,
-            kprev->reason == KLOG_END_PANIC ? " with a kernel panic" :
-            kprev->reason == KLOG_END_REBOOT ? " with reboot" :
-            " without a panic message (it hung, or was reset or switched off)");
+    kprintf("=== previous boot (%u) ended here%s; its last lines (all of it: dmesg -p): ===\n", kprev->bootno, why);
     int bol = 1;
     for (; i < end; i++) {                  /* each line marked "> ", so it cannot pass for one of this boot's */
         char c = t[i % size];

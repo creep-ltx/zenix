@@ -189,9 +189,15 @@ neither the boot tables nor the kernel/RAM-disk load buffer can land on it, and 
 pool. Layout: two slots, each a 256-byte header (magic `ZKLG`, ring size, boot number, characters logged, a sum over
 the 8 KB ring, the reason the boot ended - running or panic -, and a sum over the header) and the 8 KB ring. Both sums
 are updated with every character (interrupts masked, O(1)), so a slot is consistent between any two characters.
-`klog_init()`, the first call in `kmain`, checks both slots before anything is printed; the valid one with the higher
-boot number is the previous boot's, and this boot writes the other slot (boot number + 1), so the previous log stays
-where it is and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
+`klog_init()`, the first call in `kmain`, checks both slots before anything is printed. A slot counts by its header
+alone (magic, size, header sum: D15 step 0); the valid one with the higher boot number is the previous boot's, its
+boot number and reason are used, and its text is shown only if the ring's sum matches too (else "its log text is
+damaged (checksum): not shown"). The boot menu (`boot/bootmenu.c`) `AllocAbs()`es the whole area to read and clear
+the boot note, never only the note's 16 bytes: exec writes an 8-byte free-memory header at the start of the free
+remainder an allocation leaves, which was slot 0's first text bytes; a slot rejected for that showed an older boot as
+the previous one (`tools/zenixboot-test.sh bootmenu`). zenixboot rounds the chip top as the kernel does
+(`MaxLocMem & ~0xFFF`). This boot writes the other slot (boot number + 1), so the previous log stays where it is
+and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
 at ...` and "no log from a previous boot", "damaged (checksum)" or the previous boot's last 20 lines, each starting
 with a `>`, between `=== previous boot (N) ended here ...` (with or without a kernel panic) and `=== end of the
 previous boot's log ===`. `SYS_klog` with bit 31 set in the offset (`KLOG_PREV`) reads the previous slot (`dmesg -p`).
@@ -482,8 +488,15 @@ only) where the kernel, or a server answering for it, writes into the caller's m
 stdio array. So a literal path works, and a `read` into a literal fails with -EFAULT instead of changing the code every
 process running the program runs. `blk_read` and `fd_rw` stay unchecked (privileged, as before). Raw messages a
 program sends itself are not checked by the servers (limits.md): a program that sends them stays ZEXE.
-`SYS_procinfo` fills `struct uproc`, which has a field `shared` since D13 (an interface change: the struct grew by
-4 bytes, so a program built before it passes a buffer too small at the end of its block): `mem` is the memory the
+**A struct written into a program never overruns its buffer** (D15 step 0, the frozen-interface rule in CLAUDE.md):
+`stat`, `lstat`, `fstat`, `readdir`, `procinfo`, `statfs` and `mountinfo` take the caller's buffer size in their third
+argument, `meminfo` in its second (libz passes `sizeof`). Every program built before this passed 0 there, and 0 means
+the struct's first size; a size below it is -EINVAL; a bigger one gets at most the kernel's own struct (`usize` in
+syscall.c). The disk server does the same for `DISK_INFOSZ`/`DISK_LISTSZ` (size in `a[2]`; the old `DISK_INFO` and
+`DISK_LIST` write the first 80 bytes of `struct diskinfo`, their callers never set `a[2]`). Tested by `badptr` (memtest):
+an old 40-byte `uproc` buffer with a guard after it gets 32 bytes; the old kernel wrote 44.
+`SYS_procinfo` fills `struct uproc` (32 bytes at first: pid to name; D10 appended `nice` and `pri`, D13 `shared`; a
+caller passing size 0 gets the first 32): `mem` is the memory the
 process owns (a private copy of code included), `shared` the bytes of shared code it runs (`ps` shows them as
 SHR). `SYS_meminfo` fills four words: chip free, fast free, the bytes of shared code in memory, and what sharing saves
 (for each segment, its size times its users beyond the first); `free` prints the last two. Strings are copied into kernel buffers with bounds; a path
@@ -767,6 +780,13 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   AddressSanitizer).
 - Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair; it repairs nothing when it finds
   damage it cannot repair) and `fdisk` (RDB).
+- **Rename survives a power cut** (no journal, so the order of the block writes does it, as Linux's ext2): the moving
+  inode's link count is raised first, the existing target's entry is pointed at it in place (inode number and
+  file-type byte, one block write) or the new entry added, the old entry removed, the count lowered, and only then the
+  old target's inode dropped. A cut between any two writes leaves at worst a count one too high or a nameless inode
+  (`fsck` fixes both), never a missing name. Tested on the host by cutting the disk after every block write
+  (`tools/ext2-host-test.sh`, then `e2fsck -fn`). ZenixFS's rename is one commit, and an old target that loses its
+  last link is freed only after the new entry is in place (freeing a big file may commit on the way).
 - Not done: moving directories between parents (rename answers -EXDEV, so `mv` copies), triple-indirect files, a
   journal.
 - **Loaded code: a changed file is never reused** (DESIGN D13, `kernel/vfs.c` and `kernel/seg.c`). A shared code
