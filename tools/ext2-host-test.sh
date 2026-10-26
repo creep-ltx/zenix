@@ -8,6 +8,7 @@
 #   - an open file that is unlinked keeps its data until the close, and its number is not reused meanwhile;
 #   - the permission rules of audit D: set-group-id directories, a non-owner write clears set-user-id, utimes, chmod
 #     and set-group-id, O_EXCL, and that raw messages from a user (not from the kernel) are refused;
+#   - a rename cut by a power cut after every block write leaves at worst a leak (e2fsck -fn);
 #   - fsck.ext2 against host e2fsck on damaged images; mkfs.ext2 results checked by e2fsck;
 #   - a bounded fuzz loop: randomly damaged images must never crash the server (AddressSanitizer build).
 # usage: tools/ext2-host-test.sh [fuzz-rounds]     (default 150; memory: one small image at a time)
@@ -315,6 +316,65 @@ done
 echo "  fsck fuzz: $FR images: $fz_fixed repaired or clean, $fz_refused refused, $fz_disagree where e2fsck still found errors"
 [ $fz_crash = 0 ] && [ $fz_changed = 0 ] && check "fsck fuzz: no crash, a refusal writes nothing" ok || check "fsck fuzz: $fz_crash crashes, $fz_changed refusals that wrote" bad
 [ $fz_worse = 0 ] && check "fsck fuzz: a repair never leaves more for e2fsck to fix than before" ok || check "fsck fuzz: $fz_worse repairs left more problems for e2fsck" bad
+
+# ---- a power cut in the middle of a rename (D15 step 0): stop the disk after N sectors, for every N, then e2fsck ----
+# At worst a link count one too high or a leaked (nameless) inode; never a missing target, a moving file without a
+# name, a count below its names, or a wrong file-type byte. Files and directories, replacing a name and a new name.
+cat > $T/rc-setup.txt <<'EOF2'
+mount
+mkdir /d
+mkdir /e
+open /d/a wc
+write %1 0 AAAA
+open /d/b wc
+write %2 0 BBBB
+open /d/c wc
+write %3 0 CCCC
+link /d/c /e/c2
+mkdir /d/sub
+open /d/sub/x wc
+write %4 0 XXXX
+EOF2
+rm -f $T/rc-base.img; mke2fs -q -F -t ext2 -b 1024 $T/rc-base.img 4M || exit 1
+fsd $T/rc-base.img $T/rc-setup.txt $T/out
+clean $T/rc-base.img || { check "rename power-cut test image" bad; cat $T/out $T/e2fsck.log; }
+ino_of() { debugfs -R "stat $2" "$1" 2>/dev/null | sed -n 's/^Inode: \([0-9]*\).*/\1/p'; }
+rc_bad=0; rc_runs=0
+for cs in "file replaces a file:/d/a:/d/b" "file replaces a file in another directory:/d/a:/e/b" \
+          "file replaces a file with two links:/d/a:/d/c" "file to a new name in another directory:/d/a:/e/new" \
+          "directory to a new name:/d/sub:/d/sub2" "directory replaces a file:/d/sub:/d/b"; do
+    what=${cs%%:*}; rest=${cs#*:}; src=${rest%%:*}; dst=${rest#*:}
+    sino=$(ino_of $T/rc-base.img $src); tino=$(ino_of $T/rc-base.img $dst)
+    n=0; done_=0
+    while [ $done_ = 0 ] && [ $n -le 40 ]; do
+        cp $T/rc-base.img $T/rc.img
+        printf 'mount\ncut %s\nrename %s %s\nwrites\n' $n $src $dst > $T/rc.txt
+        fsd $T/rc.img $T/rc.txt $T/rc.out          # finished: the rename said 0 and no write was refused
+        lim=$(sed -n 's/^cut -> //p' $T/rc.out); wr=$(sed -n 's/^writes -> //p' $T/rc.out)
+        grep -q "^rename -> 0" $T/rc.out && [ "$wr" -lt "$lim" ] && done_=1
+        rc_runs=$((rc_runs+1))
+        e2fsck -fn $T/rc.img > $T/rc-e2.log 2>&1; e2rc=$?
+        s_now=$(ino_of $T/rc.img $src); d_now=$(ino_of $T/rc.img $dst)
+        why=$(python3 -I - $T/rc-e2.log "$sino" "$tino" "$s_now" "$d_now" $done_ $e2rc <<'PY'
+import re, sys
+log, sino, tino, s_now, d_now, done, e2rc = open(sys.argv[1]).read(), *sys.argv[2:]
+bad = []
+for i, have, want in re.findall(r"Inode (\d+) ref count is (\d+), should be (\d+)", log):
+    if int(have) < int(want): bad.append("inode %s count %s below its %s names" % (i, have, want))
+for pat in ("deleted/unused inode", "Multiply-claimed", "incorrect filetype", "bad inode", "Unconnected directory"):
+    if pat in log: bad.append("e2fsck: " + pat)
+if sino not in (s_now, d_now): bad.append("the moving inode has no name")
+if tino and d_now not in (sino, tino): bad.append("the target name is missing or wrong")
+if done == "1" and (e2rc != "0" or d_now != sino or s_now): bad.append("the finished rename is not clean")
+print("; ".join(bad))
+PY
+)
+        [ -n "$why" ] && { rc_bad=$((rc_bad+1)); echo "  $what, cut after $n sectors: $why"; grep -E "count|Entry|Unattached|filetype" $T/rc-e2.log | head -5; }
+        n=$((n+2))
+    done
+    [ $done_ = 1 ] || { rc_bad=$((rc_bad+1)); echo "  $what: never finished"; cat $T/rc.out; }
+done
+[ $rc_bad = 0 ] && check "rename cut by a power cut after every block write ($rc_runs runs, 6 cases): e2fsck finds at worst a leak" ok || check "rename power cuts: $rc_bad bad states" bad
 
 # ---- C10: randomly damaged images never crash the server, hang it, or make it write outside (AddressSanitizer) ----
 rm -f $T/fz-base.img; mke2fs -q -F -t ext2 -E revision=0 -b 1024 -N 512 -d $T/src $T/fz-base.img 4M

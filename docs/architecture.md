@@ -767,6 +767,13 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   AddressSanitizer).
 - Zenix ships its own `mkfs.ext2` and `fsck.ext2` (five-pass check and repair; it repairs nothing when it finds
   damage it cannot repair) and `fdisk` (RDB).
+- **Rename survives a power cut** (no journal, so the order of the block writes does it, as Linux's ext2): the moving
+  inode's link count is raised first, the existing target's entry is pointed at it in place (inode number and
+  file-type byte, one block write) or the new entry added, the old entry removed, the count lowered, and only then the
+  old target's inode dropped. A cut between any two writes leaves at worst a count one too high or a nameless inode
+  (`fsck` fixes both), never a missing name. Tested on the host by cutting the disk after every block write
+  (`tools/ext2-host-test.sh`, then `e2fsck -fn`). ZenixFS's rename is one commit, and an old target that loses its
+  last link is freed only after the new entry is in place (freeing a big file may commit on the way).
 - Not done: moving directories between parents (rename answers -EXDEV, so `mv` copies), triple-indirect files, a
   journal.
 - **Loaded code: a changed file is never reused** (DESIGN D13, `kernel/vfs.c` and `kernel/seg.c`). A shared code

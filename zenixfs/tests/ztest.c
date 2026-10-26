@@ -780,6 +780,60 @@ static int test_readonly(void)
     return 0;
 }
 
+/* ---------- 13. rename over a big fragmented file: destroying the old target commits on its way (f_map_clear_from), so
+ * every prefix of the writes must still be "before" or "after" the rename, never "target gone, source still there" ---------- */
+static int test_renamecut(void)
+{
+    struct zmem *rec = zmem_new(10, 6000, 1);
+    struct zenixfs *fs; uint32_t a, b, s;
+    CHECK(zenixfs_mkfs(&rec->dev, NULL, 0, 5) == 0);
+    CHECK(zenixfs_mount(&fs, &rec->dev, 64) == 0);
+    CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, "target", 6, 0644, 0, 0, &a) == 0);
+    CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, "gaps", 4, 0644, 0, 0, &b) == 0);
+    uint8_t blk[1024];
+    for (int i = 0; i < 1300; i++) {                     /* interleaved: every block of "target" is its own extent */
+        memset(blk, (uint8_t)i, sizeof blk);
+        CHECK(zenixfs_write(fs, a, (uint64_t)i * 1024, blk, 1024) == 1024);
+        CHECK(zenixfs_write(fs, b, (uint64_t)i * 1024, blk, 1024) == 1024);
+    }
+    CHECK(zenixfs_unlink(fs, ZENIXFS_ROOT_INO, "gaps", 4) == 0);
+    CHECK(zenixfs_create(fs, ZENIXFS_ROOT_INO, "new", 3, 0644, 0, 0, &s) == 0);
+    CHECK(zenixfs_write(fs, s, 0, "fresh", 5) == 5);
+    CHECK(zenixfs_sync(fs) == 0);
+    char *before = fs_sig(fs);
+    struct zmem *work = zmem_clone(rec);
+    for (size_t i = 0; i < rec->nlog; i++) free(rec->log[i].data);
+    rec->nlog = 0;
+    struct zenixfs_stats st0, st1; zenixfs_get_stats(fs, &st0);
+    CHECK(zenixfs_rename(fs, ZENIXFS_ROOT_INO, "new", 3, ZENIXFS_ROOT_INO, "target", 6) == 0);
+    CHECK(zenixfs_sync(fs) == 0);
+    zenixfs_get_stats(fs, &st1);
+    char *after = fs_sig(fs);
+    CHECK(before && after && strcmp(before, after));
+    zenixfs_unmount(fs);
+    printf("  rename over a %d-extent file: %u commits, %zu writes to replay\n", 1300, st1.commits - st0.commits, rec->nlog);
+    CHECK(st1.commits - st0.commits >= 2);               /* the test means something only if the destroy commits mid-way */
+    int tested = 0;
+    for (size_t k = 0; k <= rec->nlog; k++) {
+        {
+            struct zmem *img = zmem_clone(work);
+            struct zenixfs *f2; CHECK(zenixfs_mount(&f2, &img->dev, 64) == 0);
+            char *sg = fs_sig(f2);
+            int bad = zenixfs_fsck(f2, quiet, NULL) != 0;
+            if (!sg || bad || (strcmp(sg, before) && strcmp(sg, after))) {
+                printf("  prefix %zu/%zu: %s\n", k, rec->nlog, bad ? "fsck finds damage" : "neither before nor after the rename");
+                if (sg) printf("%s", sg);
+                failures++; return 1;
+            }
+            free(sg); zenixfs_unmount(f2); zmem_free(img); tested++;
+        }
+        if (k < rec->nlog) zmem_apply(work, &rec->log[k]);
+    }
+    printf("  rename power cut: %d cut points, each before or after the rename\n", tested);
+    free(before); free(after); zmem_free(work); zmem_free(rec);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     uint64_t seed = argc > 1 ? strtoull(argv[1], NULL, 10) : 1;
@@ -789,6 +843,7 @@ int main(int argc, char **argv)
         { "basic", test_basic }, { "random", test_random }, { "powercut", test_powercut },
         { "bitflip", test_bitflip }, { "full", test_full }, { "orphan", test_orphan }, { "collide", test_collide }, { "readdir-delete", test_readdir_delete },
         { "crafted", test_crafted }, { "readonly", test_readonly }, { "bigvol", test_bigvol }, { "bigpower", test_bigpower },
+        { "renamecut", test_renamecut },
     };
     int ran = 0;
     for (unsigned i = 0; i < sizeof tests / sizeof *tests; i++) {

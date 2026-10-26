@@ -1089,7 +1089,9 @@ int ext2_link(struct inode *dir, const char *name, u32 ino)
     return dir_add(dir, name, strlen_(name), ino, in.mode);
 }
 
-static int dir_remove(struct inode *dir, const char *name, u32 len, u32 *ino_out)
+/* remove the entry NAME (newino 0), or point it at newino with mode's file-type byte instead: one block write either
+ * way. *ino_out gets the inode number it had */
+static int dir_change(struct inode *dir, const char *name, u32 len, u32 *ino_out, u32 newino, u32 mode)
 {
     u32 nblk = dir->size / bsize;
     for (u32 i = 0; i < nblk; i++) {
@@ -1103,7 +1105,10 @@ static int dir_remove(struct inode *dir, const char *name, u32 len, u32 *ino_out
             u32 eino = rd32(dbuf + o), rl = rd16(dbuf + o + 4), nl = dbuf[o + 6];
             if (eino && nl == len && !memcmp_(dbuf + o + 8, name, len)) {
                 *ino_out = eino;
-                if (prev != 0xFFFFFFFF)
+                if (newino) {
+                    wr32(dbuf + o, newino);
+                    dbuf[o + 7] = file_type(mode);
+                } else if (prev != 0xFFFFFFFF)
                     wr16(dbuf + prev + 4, (u16)(rd16(dbuf + prev + 4) + rl));
                 else
                     wr32(dbuf + o, 0);
@@ -1116,6 +1121,11 @@ static int dir_remove(struct inode *dir, const char *name, u32 len, u32 *ino_out
         }
     }
     return -ENOENT;
+}
+
+static int dir_remove(struct inode *dir, const char *name, u32 len, u32 *ino_out)
+{
+    return dir_change(dir, name, len, ino_out, 0, 0);
 }
 
 static int dir_is_empty(const struct inode *dir)
@@ -1318,7 +1328,6 @@ int ext2_rmdir(struct inode *dir, const char *name)
     return ext2_iput(dir);
 }
 
-/* rename within the filesystem: files anywhere, directories only inside one parent */
 int ext2_chmod(u32 ino, u32 mode)
 {
     struct inode in;
@@ -1410,33 +1419,57 @@ int ext2_symlink(struct inode *dir, const char *name, const char *target)
     return 0;
 }
 
+/* Crash-safe in the Linux order, every step one write-through block write, so a power cut between any two leaves at
+ * worst a link count one too high or an old target with no name (a leaked inode e2fsck reattaches), never a missing
+ * name or two names on a count of 1: raise the moving inode's count; point the existing target entry at it in place
+ * (inode number and file-type byte) or add the new entry; remove the old entry; lower the count; then drop the old
+ * target's inode. Files move anywhere in the filesystem; directories only inside one parent, so no ".." and no parent
+ * count changes */
 int ext2_rename(struct inode *od, const char *on, struct inode *nd, const char *nn)
 {
-    u32 ol = strlen_(on), nl = strlen_(nn), ino, tmp;
+    u32 ol = strlen_(on), nl = strlen_(nn), ino, old = 0, tmp;
     if (ext2_readonly)
         return EROFS_;
     int r;
     if ((r = ext2_lookup(od, on, ol, &ino)))
         return r;
-    struct inode in;
+    struct inode in, tg;
     if ((r = ext2_iget(ino, &in)))
         return r;
     if (S_ISDIR(in.mode) && od->ino != nd->ino)
         return -EXDEV;                  /* moving directories between parents: not supported here; mv copies it */
-    if (ext2_lookup(nd, nn, nl, &tmp) == 0) {
-        if (tmp == ino)
+    if (ext2_lookup(nd, nn, nl, &old) == 0) {
+        if (old == ino)
             return 0;
-        if ((r = ext2_unlink(nd, nn)))
-            return r;                   /* the target is a directory (-EISDIR), or cannot go */
-        if ((r = ext2_iget(nd->ino, nd)))
+        if ((r = ext2_iget(old, &tg)))
             return r;
+        if (S_ISDIR(tg.mode))
+            return -EISDIR;             /* a directory is never replaced */
+    } else
+        old = 0;
+    if (in.links >= 65000)
+        return -EMLINK;
+    in.links++;
+    if ((r = ext2_iput(&in)))
+        return r;
+    r = old ? dir_change(nd, nn, nl, &tmp, ino, in.mode) : dir_add(nd, nn, nl, ino, in.mode);
+    if (r) {
+        in.links--;
+        ext2_iput(&in);
+        return r;
     }
-    if ((r = dir_add(nd, nn, nl, ino, in.mode)))
+    if ((r = ext2_iget(od->ino, od)) || (r = dir_remove(od, on, ol, &tmp)))
         return r;
-    if ((r = ext2_iget(od->ino, od)))
+    in.links--;
+    if ((r = ext2_iput(&in)) || !old)
         return r;
-    if ((r = dir_remove(od, on, ol, &tmp)))
+    if ((r = ext2_iget(old, &tg)))
         return r;
+    if (tg.links > 1) {
+        tg.links--;
+        return ext2_iput(&tg);
+    }
+    unlinked(&tg);
     return 0;
 }
 
