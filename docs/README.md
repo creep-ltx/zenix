@@ -21,6 +21,7 @@
 | [d11-service-manager.md](d11-service-manager.md) | The full design note of DESIGN D11, the service manager (servers started on first use and started again when they die): approved; built: steps 0-5 (the core) merged, steps 6-9 (mounts, `/etc/svctab`, the servers' output in the kernel log) on branch d11; section 15 says where the code differs. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
 | [audit-2026-10-22.md](audit-2026-10-22.md) | The audit of 2026-10-22: the work list of the hardening round (batches A-E), each item marked with its fix. |
+| [audit-2026-10-26.md](audit-2026-10-26.md) | The focused audit closing roadmap block 1 (D13 to D15): the work list B1-B9 and T1, each marked with its fix. |
 | [audit-2026-10-25.md](audit-2026-10-25.md) | The focused audit of 2026-10-25 (everything since the first audit closed, D11 included): the work list A1-A16 and P1, each marked with its fix. |
 | [audit-closing-2026-10-24.md](audit-closing-2026-10-24.md) | The closing report of the audit round: what was fixed, what is verified on the real A1200, what is left. |
 | [future-ideas.md](future-ideas.md) | Ideas kept for after the feature halt (signal bits, CPU accounting, shared libraries, newlib, PFS3, Zenix as its own ROM, ...), each with its public source. Nothing in it is built. |
