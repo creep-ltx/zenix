@@ -139,7 +139,8 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    disk server and the root filesystem server as services (section 9, "The service manager"): its first call to
    `disk` starts `diskd` (pid 2), it picks the root device and its server from the superblock, and its first call to
    `fs` starts `fsd` or `zfsd` (pid 3); it runs `/sbin/zup` (D15: an update's root half, a journal a power cut left, or the way back; boot waits, says so after a
-minute and stops it after 20, then gives the bundle's memory back with `SYS_update RELEASE`); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
+minute and stops it after 20 - every process named zup, also the second one a new zup runs, audit3 B4 -, then, when
+none runs any more, gives the bundle's memory back with `SYS_update RELEASE`); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
    starts `login` on console 1 (section 11).
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)
@@ -203,12 +204,18 @@ boot number and reason are used, and its text is shown only if the ring's sum ma
 damaged (checksum): not shown"). The boot menu (`boot/bootmenu.c`) `AllocAbs()`es the whole area to read and clear
 the boot note, never only the note's 16 bytes: exec writes an 8-byte free-memory header at the start of the free
 remainder an allocation leaves, which was slot 0's first text bytes; a slot rejected for that showed an older boot as
-the previous one (`tools/zenixboot-test.sh bootmenu`). zenixboot rounds the chip top as the kernel does
+the previous one (`tools/zenixboot-test.sh bootmenu`). Its `AllocAbs()` and `FreeMem()` run under `Forbid()` (audit3
+B8): `FreeMem()` writes such a header at the area's start (slot 0's magic and size) unless the free memory below ends
+there, and with no other task taking that memory in between it merges back; it writes one there only when a free
+block already began at the area, whose header was in those bytes before. (Restoring the 8 bytes afterwards, as the
+audit proposed, would overwrite that header and break AmigaOS's memory list.) zenixboot rounds the chip top as the kernel does
 (`MaxLocMem & ~0xFFF`). **The update note** (D15) lies at `+0xE0`-`+0xEF`, in slot 0's header padding (outside every
-sum, before the boot note at `+0xF0`): magic `ZUPN`, kind (1 done, 2 failed - written by zup -, 3 confirmed -
-written by `login` when its prompt is up on console 1), a version, and `~(magic + kind + version)`. zenixboot reads
-it at the next start and clears it; `klog_init` clears it when this boot writes slot 0, which comes before every
-write of it. This boot writes the other slot (boot number + 1), so the previous log stays where it is
+sum, before the boot note at `+0xF0`): magic `ZUPN`, kind (1 done, 2 failed - written by zup, or by `boot` when
+`/sbin/zup` is missing or did not end well -, 3 confirmed - written by `login` when its prompt is up on console 1 -,
+4 confirmed but the root half failed: the kernel makes a confirmation over a failed note of the same version that, so
+login never erases zup's failure, audit3 B1), a version, and `~(magic + kind + version)`. zenixboot reads it at the
+next start and clears it; `klog_init` clears it at every start, before every write of it, so it says what this boot
+did. This boot writes the other slot (boot number + 1), so the previous log stays where it is
 and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
 at ...` and "no log from a previous boot", "damaged (checksum)" or the previous boot's last 20 lines, each starting
 with a `>`, between `=== previous boot (N) ended here ...` (with or without a kernel panic) and `=== end of the
@@ -566,13 +573,17 @@ program sends itself are not checked by the servers (limits.md): a program that 
 **A struct written into a program never overruns its buffer** (D15 step 0, the frozen-interface rule in CLAUDE.md):
 `stat`, `lstat`, `fstat`, `readdir`, `procinfo`, `statfs` and `mountinfo` take the caller's buffer size in their third
 argument, `meminfo` in its second (libz passes `sizeof`). Every program built before this passed 0 there, and 0 means
-the struct's first size; a size below it is -EINVAL; a bigger one gets at most the kernel's own struct (`usize` in
+the struct's first size - a frozen constant in kernel.h (`USTAT_FIRST` 28, `UDIRENT_FIRST` 72, `UMOUNTINFO_FIRST` 88,
+`UUPDATE_FIRST` 32, `UPROC_FIRST` 32, `USTATFS_FIRST` 20, `UMEMINFO_FIRST` 16), checked against the structs' first
+fields by `_Static_assert` and by the host test `tools/usize-test.sh` (audit3 B3: four calls passed `sizeof`, which
+would have grown with the struct); a size below it is -EINVAL; a bigger one gets at most the kernel's own struct (`usize` in
 syscall.c). The disk server does the same for `DISK_INFOSZ`/`DISK_LISTSZ` (size in `a[2]`; the old `DISK_INFO` and
 `DISK_LIST` write the first 80 bytes of `struct diskinfo`, their callers never set `a[2]`). Tested by `badptr` (memtest):
 an old 40-byte `uproc` buffer with a guard after it gets 32 bytes; the old kernel wrote 44.
 `SYS_procinfo` fills `struct uproc` (32 bytes at first: pid to name; D10 appended `nice` and `pri`, D13 `shared`; a
 caller passing size 0 gets the first 32): `mem` is the memory the
-process owns (a private copy of code included), `shared` the bytes of shared code it runs (`ps` shows them as
+process owns (since D13 its `memalloc` regions and a private code copy too; before, only its load block - image,
+data, stack: an accepted one-time change of meaning, audit3 B7 and CLAUDE.md "Frozen interfaces"), `shared` the bytes of shared code it runs (`ps` shows them as
 SHR). `SYS_meminfo` fills four words: chip free, fast free, the bytes of shared code in memory, and what sharing saves
 (for each segment, its size times its users beyond the first); `free` prints the last two. Strings are copied into kernel buffers with bounds; a path
 argument longer than 63 bytes is -ENAMETOOLONG.
@@ -595,10 +606,12 @@ bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the b
 at most the size given in `b`: the bundle's address and size - 0 when there is none -, its flags, the running kernel's
 version number and string from the `ZVER` record; anyone); `UPD_RELEASE` gives the bundle's memory back to the pool
 (root; `boot` calls it after zup, whatever zup did); `UPD_NOTE` (root) writes the update note (kind 1 done, 2 failed,
-3 confirmed, and a version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version
+3 confirmed, 4 confirmed but the root half failed - what a 3 over a 2 or 4 of the same version becomes -, and a
+version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version
 from it. The bundle is read in place and never passed to a system call: it is no process's memory (-EFAULT). Test
 builds only: `DIAG=-DDIAG_TRIAL=1` panics instead of confirming (and the panic resets the machine), `=2` resets
-without confirming, `=3` never confirms (tools/update-test.sh).
+without confirming, `=3` never confirms (tools/update-test.sh); `UDIAG=-DDIAG_SLOWZUP` (the programs' flags) gives
+boot a 4-minute limit for zup and makes a zup started as the second stage hang (update-test's `slowzup`).
 
 **Priorities** (section 6): `SYS_getpriority(which, who)` and `SYS_setpriority(which, who, nice)`, POSIX's calls.
 `PRIO_PROCESS`: who is a pid, 0 the caller; `PRIO_USER`: every process whose real uid is who (0: the caller's);
@@ -879,11 +892,17 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   segment (section 4) is found only while the kernel has seen nothing that could have changed its file. Opening a
   file for writing (`O_WRONLY` or `O_RDWR`) fails with -ETXTBSY (26, "text file busy") while a segment of it is in
   memory or a load of it is in progress (with `O_TRUNC` the kernel asks the server for the file's status before the
-  open, since the server truncates in it - only while something of that mount is loaded; without, it checks the
-  open's answer and closes it again); so a program is updated the Unix way, a new file renamed over the old name, and
+  open, since the server truncates in it - only while something of that mount is loaded - and that check is the
+  answer: a load that began between it and the open is marked stale and a segment listed meanwhile unlisted, never
+  refused after the file is already emptied, audit3 B5; without `O_TRUNC` it checks the open's answer and closes it
+  again); so a program is updated the Unix way, a new file renamed over the old name, and
   running processes keep the old code. A spawn of a file that is open for writing loads a private copy. unlink,
-  rename, link and symlink are path-only in the kernel, so after each the mount's segments leave the list and its
-  loads in progress are marked stale (never listed); running processes keep theirs. Every mount, and every start of a
+  rename, link and symlink are path-only in the kernel, so while something of that mount is loaded the kernel first
+  asks the server which inode the affected name leads to (`FS_LSTAT`: the name removed, the one renamed over, a
+  link's new name) and afterwards unlists that inode's segments and marks its loads stale (its number may be given
+  to a new file); the rest of the mount keeps sharing (audit3 B2: every rm unlisted the whole mount, so the next
+  shell loaded a private copy). The renamed file keeps its inode and contents, so its segments stay right; running
+  processes keep theirs. Every mount, and every start of a
   mount's filesystem server by the service manager (`svc_handover`, `vfs_server_started`: a restarted ZenixFS server
   drops what it had not committed and could bring back older contents under the same inode, size and time), gives the
   mount a new generation, part of the key. Every spawn still opens the file through the server (execute permission,
@@ -920,7 +939,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   during a slow command arrived as `c/motd`).
 - **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
   NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100/xterm: cursor motion, erase, insert/delete, scroll regions,
-  bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position. Arrows and function keys
+  bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position, as input on the console of the
+  program that asked (it went to the console on screen, so a background program could type into another console's
+  input: audit3 B9). Arrows and function keys
   arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it and `TERM=xterm-16color`
   (xterm's keys and 16 colours; it was `vt100`; over a serial line the other side's getty picks `TERM`). Programs
   colour their output by one libz rule (`color_auto`: the output is a terminal, `TERM` set and not `dumb`,

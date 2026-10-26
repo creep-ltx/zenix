@@ -482,18 +482,25 @@ static u32 *klog_area(void)
 }
 #define NOTE(a) ((u32 *)((u8 *)(a) + BOOTNOTE_OFF))
 
-/* take the note if there is one: its kind, or 0 */
+/* take the note if there is one: its kind, or 0. FreeMem() writes a free-memory header (8 bytes: slot 0's magic and
+ * size) at the area's start unless the free memory just below it ends there, so the two calls run under Forbid()
+ * (audit3 B8): no other task can take the memory below meanwhile, and FreeMem() then merges the area back into the
+ * free block it came from. A header is written at the area's start only when a free block already began there,
+ * whose header was in those bytes before bootmenu ran. Restoring the 8 bytes after FreeMem() (the audit's proposal)
+ * would overwrite that header and break AmigaOS's memory list, so it is not done. */
 static u32 note_take(void)
 {
-    u32 *a = (u32 *)AllocAbs(KLOG_AREA_SIZE, klog_area());
-    if (!a)
-        return 0;                                       /* in use by AmigaOS: no note can be there */
-    u32 *n = NOTE(a), kind = 0;
-    if (n[0] == BOOTNOTE_MAGIC && n[2] == ~(BOOTNOTE_MAGIC + n[1]) &&
-        (n[1] == BOOTNOTE_AMIGAOS || n[1] == BOOTNOTE_ZENIX))
-        kind = n[1];
-    n[0] = n[1] = n[2] = n[3] = 0;
-    FreeMem(a, KLOG_AREA_SIZE);
+    Forbid();
+    u32 *a = (u32 *)AllocAbs(KLOG_AREA_SIZE, klog_area()), kind = 0;
+    if (a) {                                            /* else in use by AmigaOS: no note can be there */
+        u32 *n = NOTE(a);
+        if (n[0] == BOOTNOTE_MAGIC && n[2] == ~(BOOTNOTE_MAGIC + n[1]) &&
+            (n[1] == BOOTNOTE_AMIGAOS || n[1] == BOOTNOTE_ZENIX))
+            kind = n[1];
+        n[0] = n[1] = n[2] = n[3] = 0;
+        FreeMem(a, KLOG_AREA_SIZE);
+    }
+    Permit();
     return kind;
 }
 

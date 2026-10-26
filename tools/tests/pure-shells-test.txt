@@ -28,6 +28,9 @@ sleep 3
 send sh -c 'sleep 4' & sh -c 'sleep 4' & sleep 1; echo ==s4b; free\r
 wait (?m)^==s4b 20
 sleep 5
+send touch /tmp/zz; rm /tmp/zz; touch /tmp/za; mv /tmp/za /tmp/zb; ln /tmp/zb /tmp/zc; rm /tmp/zb /tmp/zc; echo ==rm; sh -c 'free'\r
+wait (?m)^==rm 20
+sleep 3
 send : $(seq 1 30000) && echo big-ok\r
 wait (?m)^big-ok 120
 sleep 1

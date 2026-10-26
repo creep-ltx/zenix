@@ -50,8 +50,10 @@ REBOOTING BETWEEN THE SYSTEMS
     is read only after AllocAbs() on the whole 16.5 KB log area succeeded
     (memory in use by AmigaOS is never read or written; the whole area,
     because exec writes a free-memory header at the start of what an
-    allocation leaves free, which would land in Zenix's log) and is
-    cleared when read, so the boot after shows the menu again.
+    allocation leaves free, which would land in Zenix's log; with
+    multitasking held off meanwhile, so that giving it back merges it
+    with the free memory it came from) and is cleared when read, so the
+    boot after shows the menu again.
 
 S:BOOTMENU.CONF
     One setting or entry per line; "#" starts a comment line, unknown lines

@@ -19,12 +19,17 @@
 #                kernel the default again, the root rolled back
 #   powercut     the emulator killed while zup installs: the next start finishes it or rolls it back and installs
 #   bad          a damaged bundle and a .part: both renamed .bad, the installed system starts
+#   refused      a bundle zup refuses (it needs a newer base than any): the kernel comes up and confirms, but the
+#                bundle is kept (not .done) and handed over again at the next start, where zup refuses it again
+#   nozup        a root without /sbin/zup: boot says so and leaves the note FAILED; the bundle is kept the same way
+#   slowzup      a test build (UDIAG=-DDIAG_SLOWZUP: boot's limit 4 min, the bundle's zup hangs as stage 2): boot stops
+#                both zups and gives the bundle's memory back only after that (audit3 B4); no zup runs at the prompt
 # usage: tools/update-test.sh [setup...]     (ZENIX_SERIAL, ZENIX_OUT, ZENIX_BUILD as the other tests)
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-update.XXXXXX)}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-update-serial}
-SETUPS="${*:-install cold panic hang previous powercut bad}"
+SETUPS="${*:-install cold panic hang previous powercut bad refused nozup slowzup}"
 BG=; [ $# = 0 ] && BG=1                 # all of them: side by side (each takes an emulator slot); named ones: in turn
 V1=$(sed -n 's/^#define ZENIX_VNUM \([0-9]*\)u$/\1/p' kernel/version.h); V2=$((V1 + 101))
 make -s BUILD=$BD $BD/zenixboot $BD/kernel.bin $BD/zenix.hdf $BD/pkg/list >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL build"; exit 1; }
@@ -45,12 +50,20 @@ python3 tools/mkzup.py repack $P utils /bin/hello=$OUT/hello2 >/dev/null || { ec
 for k in b2 b2t1 b2t2 b2t3; do
     python3 tools/mkzup.py bundle $OUT/$k.zup --kernel $OUT/$k/kernel.bin $P zup base utils man >/dev/null || { echo "FAIL bundle $k"; exit 1; }
 done
+make -s BUILD=$OUT/b2s ZVNUM=$V2 UDIAG=-DDIAG_SLOWZUP $OUT/b2s/kernel.bin $OUT/b2s/pkg/list >>$OUT/make.log 2>&1 ||
+    { echo "FAIL build slowzup"; exit 1; }
+rm -rf $OUT/pkgs; mkdir -p $OUT/pkgs; cp $P/* $OUT/pkgs/; cp $OUT/b2s/pkg/zup.* $OUT/pkgs/
+python3 tools/mkzup.py bundle $OUT/b2s.zup --kernel $OUT/b2s/kernel.bin $OUT/pkgs zup base utils man >/dev/null ||
+    { echo "FAIL bundle b2s"; exit 1; }
+python3 tools/mkzup.py bundle $OUT/b2min.zup --kernel $OUT/b2/kernel.bin --min 4000000000 $P zup base utils man >/dev/null ||
+    { echo "FAIL bundle b2min"; exit 1; }
 # the owner's root: this build's, with a line added to /etc/passwd
 cp $B/zenix.hdf $OUT/root.img
 cp rootfs/etc/passwd $OUT/passwd1; echo 'owner::1002:100::/home/owner:/bin/sh' >>$OUT/passwd1
 printf 'rm /etc/passwd\nwrite %s /etc/passwd\nsif /etc/passwd uid 0\nsif /etc/passwd gid 0\nsif /etc/passwd mode 0100644\n' \
     $OUT/passwd1 >$OUT/dbg
 debugfs -w -f $OUT/dbg $OUT/root.img >/dev/null 2>&1
+cp $OUT/root.img $OUT/root-nozup.img; debugfs -w -R 'rm /sbin/zup' $OUT/root-nozup.img >/dev/null 2>&1   # setup nozup
 
 # disk NAME BUNDLE [STARTUP]: the setup's disk (its own directory $OUT/NAME)
 disk() {
@@ -66,7 +79,7 @@ ffs_put() {
     while IFS= read -r f; do args+=("$d/boot/$f=$f"); done < <(cd $d/boot && find . -type f | sed 's#^\./##' | sort)
     python3 tools/mkffs.py $d/ffs.img 16632K ZenixBoot "${args[@]}" >/dev/null || return 1
     if [ -f $d/disk.hdf ]; then python3 tools/ffsread.py $d/disk.hdf --part ZB0 load $d/ffs.img
-    else python3 tools/mkcard.py ide $d/disk.hdf $d/ffs.img $OUT/root.img >/dev/null; fi
+    else python3 tools/mkcard.py ide $d/disk.hdf $d/ffs.img ${ROOTIMG:-$OUT/root.img} >/dev/null; fi
 }
 ffs_get() { rm -rf $OUT/$1/boot; mkdir -p $OUT/$1/boot; python3 tools/ffsread.py $OUT/$1/disk.hdf --part ZB0 extract $OUT/$1/boot; }
 run() {     # NAME RUN SECONDS SCRIPT
@@ -248,6 +261,45 @@ setup_bad() {
     check $n "a damaged bundle is renamed .bad with the reason" "$(has $n 1 'zenix-update.zup is not used: a part does not match its SHA-256')"
     check $n "the installed system starts" "$(grep -aq "^Zenix 0\\.2 ($V1) m68k" $OUT/$n/1.txt && [ "$(same $OUT/$n/boot/Zenix/zenix $B/kernel.bin)" = ok ] && [ ! -f $OUT/$n/boot/Zenix/zenix.old ] && echo ok || echo bad)"
 }
+# refused / nozup: the root half fails (zup refuses the bundle, or there is no zup), the kernel confirms (login on
+# console 1); the next start must keep the bundle and hand it over again (audit3 B1: it was retired as done)
+setup_rootfail() {
+    local n=$1 zup=$2 why=$3
+    disk $n $zup || { check $n "the disk" bad; return; }
+    cat >$OUT/$n/s1.txt <<EOF
+$S_PROMPT
+sleep 2
+send reboot\r
+wait (?m)^klog: boot 2, 300
+wait (?m)^login: warning: root has no password 900
+sleep 3
+send uname; echo zb\x6fk\r
+sleep 3
+stop
+EOF
+    run $n 1 1500 $OUT/$n/s1.txt
+    local b=$OUT/$n/boot/Zenix
+    check $n "the kernel installed, the root half failed ($why)" "$(inorder $n 1 'update: installing version '$V2 'state trial' "$why")"
+    check $n "the next start: it came up, but the bundle is kept and handed over again" \
+        "$(inorder $n 1 'reboot: filesystems synced' 'Zenix '$V2' came up, but its root half was not installed' 'version '$V2' in trial: the bundle goes to Zenix again' "$why")"
+    check $n "... not retired: no 'the update is done', no .done" "$(! grep -aq 'the update is done' $OUT/$n/1.txt && [ -f $b/zenix-update.zup ] && [ ! -f $b/zenix-update.done ] && grep -q '^phase trial$' $b/state && echo ok || echo bad)"
+    check $n "... the new kernel runs, a shell prompt" "$(grep -aq "^Zenix 0\.2 ($V2) m68k" $OUT/$n/1.txt && grep -aq '^zbok$' $OUT/$n/1.txt && echo ok || echo bad)"
+    check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
+}
+setup_slowzup() {
+    local n=slowzup
+    disk $n $OUT/b2s.zup || { check $n "the disk" bad; return; }
+    printf '%s\n%s\nsleep 2\nsend echo ==ps; ps; echo ==pse; echo zb\\x6fk\\r\nsleep 4\nstop\n' 'wait boot: /sbin/zup stopped 900' "$S_PROMPT" >$OUT/$n/s1.txt
+    run $n 1 900 $OUT/$n/s1.txt
+    check $n "zup installed the new zup (its manifest), which hangs as stage 2; boot stops after its limit" \
+        "$([ "$(inorder $n 1 '^zup: diag: DIAG_SLOWZUP: stage 2 hangs' 'boot: /sbin/zup stopped after')" = ok ] &&
+           rfile $n 1 /var/lib/zpkg/zup.manifest | grep -q "^version $V2 " && echo ok || echo bad)"
+    check $n "... the bundle's memory is given back only after both zups are stopped" \
+        "$(inorder $n 1 'boot: /sbin/zup stopped after' "update: the bundle's [0-9]+ bytes are free again" 'zenix:/#')"
+    check $n "... no zup runs at the prompt (ps)" "$(awk '$0 == "==ps" { f = 1; next } $0 == "==pse" { f = 0 } f' $OUT/$n/1.txt | grep -aqE ' zup$' && echo bad || { grep -aqx '==pse' $OUT/$n/1.txt && echo ok || echo bad; })"
+    check $n "... a shell prompt" "$(has $n 1 '^zbok$')"
+    check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
+}
 
 one() {
     case $1 in
@@ -258,6 +310,9 @@ one() {
     previous) setup_previous ;;
     powercut) setup_powercut ;;
     bad) setup_bad ;;
+    refused) setup_rootfail refused $OUT/b2min.zup 'zup: the bundle needs base 4000000000 or newer' ;;
+    slowzup) setup_slowzup ;;
+    nozup) ROOTIMG=$OUT/root-nozup.img setup_rootfail nozup $OUT/b2.zup 'boot: no /sbin/zup: the update is not installed' ;;
     *) echo "FAIL unknown setup $1" >$OUT/$1.res ;;
     esac
 }

@@ -99,7 +99,9 @@ Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_
 zup's "needs a check" mark), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
 Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main); `ETXTBSY` 26 (D13, "text file busy": a running
-shared program opened for writing; claimed 2026-10-25, Linux's number). Port names registered as services (D11):
+shared program opened for writing; claimed 2026-10-25, Linux's number). Update note kinds (D15, frozen, append-only):
+1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). Port names
+registered as services (D11):
 `disk`, `fs`, `fs.*`; `ping` (the test service).
 
 ## Frozen interfaces (D15 step 0, 2026-10-26; checked in every review)
@@ -111,9 +113,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - **Structs the kernel or a server writes into a program's memory** (`ustat`, `uproc`, `ustatfs`, `udirent`,
   `umountinfo`, `diskinfo`, the `SYS_meminfo` words) grow only at the end, and the caller passes its buffer size and
   gets at most that many bytes: `SYS_stat`/`lstat`/`fstat`/`readdir`/`procinfo`/`statfs`/`mountinfo` take it in their
-  third argument, `SYS_meminfo` in its second; size 0 (every program built before D15) gets the struct's first size
-  (`uproc`: 32 bytes), a size below that is -EINVAL; `DISK_INFOSZ`/`DISK_LISTSZ` take it in `a[2]` (the old
-  `DISK_INFO`/`DISK_LIST` write the first 80 bytes). The structs servers answer in (`ustat`, `udirent`, `ustatfs`)
+  third argument, `SYS_meminfo` in its second; size 0 (every program built before D15) gets the struct's first size,
+  a frozen constant, never `sizeof` (`kernel/kernel.h` `*_FIRST`: `ustat` 28, `udirent` 72, `umountinfo` 88,
+  `uupdate` 32, `uproc` 32, `ustatfs` 20, `SYS_meminfo` 16; `tools/usize-test.sh`), a size below that is -EINVAL;
+  `DISK_INFOSZ`/`DISK_LISTSZ` take it in `a[2]` (the old `DISK_INFO`/`DISK_LIST` write the first 80 bytes). The structs servers answer in (`ustat`, `udirent`, `ustatfs`)
   are frozen at their size in the message protocol: a bigger one needs a new message type. libz passes `sizeof`.
 - **Frozen:** the program start contract (the stack at entry, `a5`); the ZEXE and ZEX2 formats (the loader keeps both
   for ever); the bootinfo layout; the klog area and boot-note layout and the klog flags (zenixboot and bootmenu
@@ -123,6 +126,11 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `O_*` flags and mode bits, the spawn limits (argument count and bytes), exit and wait status conventions (139 for a
   fault, `waitcon`'s console status); the boot note's kinds and `SYS_reboot`'s arguments; D15's own formats (the
   bootinfo bundle fields, the update note, the state file, the bundle header and manifest, zup's journal and undo logs).
+- **One accepted change of meaning (audit3 B7, 2026-10-26):** `uproc.mem` counts a process's memory regions
+  (`memalloc`) and a private code copy since D13; before, only its load block (image, data, stack). Accepted once,
+  not repeated: every program is built and shipped together with the kernel (no released program reads `mem` with
+  the old meaning; `ps` and `free` show it), and it still means "the memory this process owns". Any later change is
+  a new field.
 - Not on the list: the kernel's internal file kinds. Signal numbers join it when signals come. libz is linked into
   each program, so it needs no rule of its own.
 

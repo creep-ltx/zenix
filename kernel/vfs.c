@@ -317,6 +317,22 @@ static __attribute__((noinline)) void changed(int m, long ino)
             x->stale = 1;
 }
 
+/* D13, audit3 B2: the inode a name leads to now (0: none, or nothing of mount m is loaded), asked before an unlink,
+ * a rename over it, or a link or symlink made there; after the call, changed(m, that inode) unlists only its
+ * segments (its number may be given to a new file), so an rm or mv elsewhere on the mount keeps the sharing */
+static __attribute__((noinline)) long name_ino(int m, const char *rel, u32 cwd)
+{
+    struct ustat st;
+    if (!exec_on(m) || fs_call_on(m, FS_LSTAT, (u32)rel, cwd, (u32)&st, 0) < 0)
+        return 0;
+    return (long)st.ino;
+}
+static void unlist_ino(int m, long ino)
+{
+    if (ino > 0)
+        changed(m, ino);
+}
+
 /* Open a program for loading without reading it into a buffer first: the loader reads the header, allocates the
  * process's memory and then reads the image straight into it (fs_exec_read). */
 long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x)
@@ -472,11 +488,14 @@ long vfs_open(const char *path, int flags)
     if (ino < 0)
         return ino;                         /* the server's errno: -ENOENT, -EACCES, -EEXIST (O_CREAT|O_EXCL) ... */
     if (wr) {
-        if (exec_busy(m, &st)) {
+        /* with O_TRUNC the check came before the open, which has truncated the file already: a load that began
+         * since is not refused afterwards (that answered -ETXTBSY for a file already emptied, audit3 B5); it is
+         * marked stale and a segment listed since is unlisted, so nothing read while the file changed is shared */
+        if (!(flags & O_TRUNC) && exec_busy(m, &st)) {
             fs_call_on(m, FS_CLOSE, (u32)ino, 0, 0, 0);
             return -ETXTBSY;
         }
-        changed(m, ino);                    /* a segment of it listed since the check (O_TRUNC) is never reused */
+        changed(m, ino);
     }
     struct file *f = file_new(FT_INODE);
     if (!f) {
@@ -580,8 +599,9 @@ long vfs_link(u32 op, const char *a, const char *b)
         int m = ROUTE(b, rb, relb, cb);
         if (m < 0)
             return m;
+        long ino = name_ino(m, relb, cb);
         long r = fs_call_on(m, op, (u32)a, (u32)relb, cb, 0);
-        changed(m, -1);
+        unlist_ino(m, ino);
         return r;
     }
     int m1 = ROUTE(a, ra, rela, ca), m2 = ROUTE(b, rb, relb, cb);
@@ -589,8 +609,9 @@ long vfs_link(u32 op, const char *a, const char *b)
         return m1 < 0 ? m1 : m2;
     if (m1 != m2)
         return -EXDEV;                      /* a hard link cannot cross filesystems */
+    long ino = name_ino(m1, relb, cb);      /* the new name (a link never replaces one; asked to be sure) */
     long r = fs_call_on(m1, op, (u32)rela, (u32)relb, ca, 0);
-    changed(m1, -1);                        /* D13: a name changed; which inode is the server's business */
+    unlist_ino(m1, ino);
     return r;
 }
 
@@ -626,8 +647,9 @@ long vfs_unlink(const char *path)
     int m = ROUTE(path, rb, rel, cwd);
     if (m < 0)
         return m;
+    long ino = name_ino(m, rel, cwd);       /* D13: its inode number may be given to a new file */
     long r = fs_call_on(m, FS_UNLINK, (u32)rel, cwd, 0, 0);
-    changed(m, -1);                         /* D13: the inode number may be given to a new file */
+    unlist_ino(m, ino);
     return r;
 }
 
@@ -646,8 +668,10 @@ long vfs_rename(const char *from, const char *to)
         return m1 < 0 ? m1 : m2;
     if (m1 != m2)
         return -EXDEV;                      /* not across filesystems: mv copies */
+    long ino = name_ino(m1, relb, cb);      /* D13: the file renamed over (its inode may be reused); the moved one
+                                             * keeps its inode and contents, so its segments stay right */
     long r = fs_call_on(m1, FS_RENAME, (u32)rela, (u32)relb, ca, 0);
-    changed(m1, -1);                        /* D13: a name now leads to another inode */
+    unlist_ino(m1, ino);
     return r;
 }
 

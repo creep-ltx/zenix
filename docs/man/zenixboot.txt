@@ -77,9 +77,13 @@ UPDATES
     (bootinfo +0x78), at every start of the trial; zup installs it once.
     The trial ends when the update note in the kernel log's area (top of
     chip RAM) says the new version came up (login's prompt on console 1):
-    the bundle is renamed zenix-update.done. It also ends after 3 starts
-    with no sign of trouble. A bundle offered again after that is renamed
-    .done at once; the previous kernel stays zenix.old.
+    the bundle is renamed zenix-update.done. When the note says it came
+    up but its root half failed (zup refused the bundle, or /sbin/zup is
+    missing or did not end well), the bundle is kept and goes to Zenix
+    again at the next start ("Zenix V came up, but its root half was not
+    installed"), and the count of starts begins again. It also ends after
+    3 starts with no sign of trouble. A bundle offered again after that
+    is renamed .done at once; the previous kernel stays zenix.old.
 
     Only evidence counts. When a warm reset follows a trial boot whose log
     ended with a panic, or that was still running and never confirmed

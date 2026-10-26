@@ -38,7 +38,9 @@ DESCRIPTION
     console 1, when login starts (its prompt is about to be shown, or the
     autologin runs), it tells the kernel that this boot came up
     (SYS_update NOTE "confirmed"): zenixboot(8) then takes a newly
-    installed version as working.
+    installed version as working. A confirmation never erases a failed
+    root half of the same version (the kernel keeps both facts), so
+    zenixboot keeps such a bundle and offers it again.
 
 FILES
     /etc/passwd   name:hash:uid:gid:comment:home:shell

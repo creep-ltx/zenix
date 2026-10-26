@@ -14,7 +14,7 @@
 # also takes one of the machine's emulator slots (tools/run-test.sh), shared with other sessions on this PC.
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
-HOST="docs-check mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test serial-test term-test mem-test a3000-test stage0-test stage0-68k-test"
+HOST="docs-check usize-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test serial-test term-test mem-test a3000-test stage0-test stage0-68k-test"
 EMU="matrix cmds-test cmds2-test users-test jobs-test prio-test kbd-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
@@ -31,7 +31,7 @@ LONGEST="update-test svc-test matrix diag-test colour-test cmds2-test pure-test 
 declare -A SPLIT
 SPLIT[svc-test]="a z b n r d|o zo u l|f s h t dmg"
 SPLIT[colour-test]="1 4|3"                     # the 1-plane run first: its edges are the 4-plane run's reference
-SPLIT[update-test]="install bad|cold previous|panic hang|powercut"
+SPLIT[update-test]="install bad|cold previous|panic hang|powercut slowzup|refused nozup"
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh
 m1=""; m2=""; for ((i = 0; i < ${#m[@]}; i++)); do if ((i % 2)); then m2="$m2 ${m[i]}"; else m1="$m1 ${m[i]}"; fi; done
 SPLIT[matrix]="${m1# }|${m2# }"

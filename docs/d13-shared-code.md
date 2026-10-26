@@ -136,6 +136,9 @@ that goes through it, and refuses the rest:
 - **Names that change:** unlink, rename, link and symlink are path-only in the kernel (vfs.c), so it cannot tell which
   inode they touch; each drops every unused-for-lookup segment of that mount from the table (running users keep theirs).
   This also covers an unlinked inode number being reused for a new file.
+  **Changed by audit3 B2 (2026-10-26):** dropping the whole mount made sharing worthless after any `rm` on the root, so
+  while something of the mount is loaded the kernel now asks the server first (`FS_LSTAT` of the name removed, renamed
+  over, or linked to) and drops only that inode's segments (architecture.md section 10).
 - **The key:** (mount slot, the mount's generation, inode, size, modification time). The **mount generation is new**
   (a field in `struct mount`): it changes on every mount *and* whenever the mount's filesystem server is restarted by
   the service manager (D11), because a restarted ZenixFS server drops uncommitted changes and could bring back older
@@ -286,7 +289,8 @@ What the build did differently from sections 1-13, and why; each item names the 
   segment is "busy" when its whole key matches the file's status (inode, size, time, generation), so an unlinked
   program's inode number given to a new file does not make that file busy. Gap, said openly: a load or a listing that
   happens between that `FS_STAT` and the truncating `FS_OPEN` cannot be refused any more; it is unlisted or marked stale
-  (never reused), but the file is already truncated. `O_TRUNC` without write access truncates nothing in either server
+  (never reused), and since audit3 B5 the open then succeeds (it answered -ETXTBSY for a file the server had already
+  truncated); such a load reads a file being rewritten, as a spawn of a file open for writing does. `O_TRUNC` without write access truncates nothing in either server
   and is not checked. **Generations** come from one counter (`gen_last`), set on every mount and on every
   `svc_handover` of a port that a mount uses (also the first start: harmless). `umount` needs no rule of its own: the
   slot's next mount has a new generation. **`ps`** got a SHR(K) column after MEM(K) (the tests that read `ps` lines

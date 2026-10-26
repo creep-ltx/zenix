@@ -64,7 +64,8 @@ def sha(data):
 
 
 def check_path(p):
-    if not PATH_RE.match(p) or '//' in p or '/./' in p or '/../' in p or p.endswith('/') or len(p) > PATHMAX:
+    if (not PATH_RE.match(p) or '//' in p or '/./' in p or '/../' in p or p.endswith('/') or p.endswith('/.') or
+            p.endswith('/..') or len(p) > PATHMAX):
         die("bad path %r (absolute, [A-Za-z0-9._+/-], at most %d bytes)" % (p, PATHMAX))
 
 

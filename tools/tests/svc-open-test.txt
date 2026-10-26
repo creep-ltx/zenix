@@ -11,7 +11,14 @@ send cat /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/big; sync; echo f3=$(df | 
 sleep 12
 send cat /bin/sh /bin/edit /bin/gzip /bin/less /bin/sh /bin/edit /bin/gzip /bin/less /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/big\r
 sleep 10
-send cp /tmp/big /tmp/big2 & cp /tmp/big /tmp/big3 & cp /tmp/big /tmp/big4 & nice -n -20 svctest kill $(pgrep fsd) 2; wait; sleep 1; ls / > /dev/null; dmesg | grep 'svc:\|was being changed'\r
-sleep 15
+send n0=$(dmesg | grep -c 'during req'); B=/tmp/big; echo ==n0\r
+wait (?m)^==n0 20
+send for t in 1 2 3; do cp $B ${B}2 & cp $B ${B}3 & cp $B ${B}4 & nice -n -20 svctest kill $(pgrep fsd) 2; wait; sleep 1; [ $(dmesg|grep -c 'during req') -gt $n0 ] && break; done; echo ==lp\r
+wait (?m)^==lp 150
+sleep 1
+send echo midreq-tries=$t; dmesg | grep 'svc:\|was being changed'; echo ==o-kill-done\r
+wait (?m)^==o-kill-done 120
+sleep 2
 send rm -f /tmp/big /tmp/big2 /tmp/big3 /tmp/big4; sync; echo svc-o-done\r
-sleep 4
+wait (?m)^svc-o-done 60
+sleep 2

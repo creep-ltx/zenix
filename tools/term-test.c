@@ -78,7 +78,8 @@ void panic(const char *why) { printf("FAIL: panic %s\n", why); exit(1); }
 static int bells;
 void beep(u32 hz, u32 ms) { (void)hz; (void)ms; bells++; }
 static char injected[64];
-void tty_inject(int tty, const char *s) { (void)tty; strncat(injected, s, sizeof injected - strlen(injected) - 1); }
+static int injected_to;
+void tty_inject(int tty, const char *s) { injected_to = tty; strncat(injected, s, sizeof injected - strlen(injected) - 1); }
 
 static int bad;
 #define EXPECT_TRUE(c, msg) do { if (!(c)) { printf("FAIL: %s\n", msg); bad++; } else printf("ok:   %s\n", msg); } while (0)
@@ -163,7 +164,11 @@ int main(void)
     reset(); { char b[3] = { 'A', 7, 'B' }; int b0 = bells; outn(b, 3); EXPECT_TRUE(only("AB") && bells == b0 + 1, "BEL rings, prints nothing"); }
 
     reset(); out("\033[6n");
-    EXPECT_TRUE(!strcmp(injected, "\033[1;1R"), "ESC[6n answers the cursor position");
+    EXPECT_TRUE(!strcmp(injected, "\033[1;1R") && injected_to == 1, "ESC[6n answers the cursor position");
+    injected[0] = 0; injected_to = 0;
+    term_write(3, "ab\033[6n", 6);                    /* a program on console 3 asks while console 1 is shown */
+    EXPECT_TRUE(!strcmp(injected, "\033[1;3R") && injected_to == 3,
+                "... a program on a background console gets the answer on its own console, not the one on screen (audit3 B9)");
     injected[0] = 0; out("\033[?6n");
     EXPECT_TRUE(!injected[0], "... ESC[?6n (private) does not");
 

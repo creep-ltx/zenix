@@ -183,8 +183,19 @@ static int path_ok(const char *p)
     u32 n = strlen(p);
     if (p[0] != '/' || n < 2 || n > PMAX - 9 || p[n - 1] == '/' || strstr(p, "//") || strstr(p, "/./") || strstr(p, "/../"))
         return 0;
+    if (!strcmp(p + n - 2, "/.") || (n >= 3 && !strcmp(p + n - 3, "/..")))    /* a final . or .. (audit3 B6) */
+        return 0;
     for (const char *q = p; *q; q++)
         if (!isalnum(*q) && !strchr("._+/-", *q)) return 0;
+    return 1;
+}
+/* a package name (used in paths: the database's NAME.manifest): [a-z0-9][a-z0-9+.-]*, at most 24 (audit3 B6) */
+static int name_ok(const char *p)
+{
+    u32 n = strlen(p);
+    if (n < 1 || n > 24 || !((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9'))) return 0;
+    for (; *p; p++)
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '+' || *p == '.' || *p == '-')) return 0;
     return 1;
 }
 static u32 num(const char *s, int base, int *bad)
@@ -214,12 +225,13 @@ static int parse_manifest(struct pkg *p, char *text, u32 len, const char *where)
         }
         if (!nw) continue;
         int bad = 0;
-        if (!strcmp(w[0], "name") && nw == 2) p->name = w[1];
+        if (!strcmp(w[0], "name") && nw == 2) { p->name = w[1]; if (!name_ok(w[1])) bad = 1; }
         else if (!strcmp(w[0], "version") && nw == 3) { p->vnum = num(w[1], 10, &bad); p->vstr = w[2]; }
         else if (!strcmp(w[0], "group") && nw == 2) p->group = w[1];
         else if (!strcmp(w[0], "depends") && nw == 3) {
             if (p->ndep == MAXDEP) { say("%s: more than %d dependencies", where, MAXDEP); return -EINVAL; }
             p->dep[p->ndep] = w[1]; p->depv[p->ndep++] = num(w[2], 10, &bad);
+            if (!name_ok(w[1])) bad = 1;
         } else if ((!strcmp(w[0], "f") || !strcmp(w[0], "c") || !strcmp(w[0], "d") || !strcmp(w[0], "l")) && nw >= 3) {
             struct ent x;
             memset(&x, 0, sizeof x);
@@ -311,6 +323,7 @@ static int bundle_parse(struct bundle *b, const u8 *p, u32 len)
         char *dot = strrchr(name, '.');
         if (!dot || dot - name - 4 < 1 || dot - name - 4 > 24) { say("%s: not a package part", name); return -EINVAL; }
         *dot = 0;
+        if (!name_ok(name + 4)) { say("%s: a bad package name (only a-z 0-9 + . -)", name); return -EINVAL; }
         struct pkg *k = 0;
         for (int j = 0; j < b->npkg; j++) if (!strcmp(b->pk[j].name, name + 4)) k = &b->pk[j];
         if (!k) {
@@ -1035,6 +1048,9 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "-l")) return list();
     if (argc > 1 && !stage2) { printf("usage: zup [-l]   (boot runs zup at every start; see man zup)\n"); return 2; }
     if (sys_getuid() != 0) { printf("zup: only root installs updates\n"); return 1; }
+#ifdef DIAG_SLOWZUP     /* test builds (tools/update-test.sh slowzup): a stage 2 that hangs, for boot's time limit */
+    if (stage2) { sys_write(1, "zup: diag: DIAG_SLOWZUP: stage 2 hangs\n", 39); for (;;) sys_sleep(100); }
+#endif
     struct uupdate u;
     memset(&u, 0, sizeof u);
     if (sys_update(UPD_INFO, (u32)&u, sizeof u) < 0) return 0;      /* a kernel without updates: nothing to do */

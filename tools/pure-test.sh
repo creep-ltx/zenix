@@ -17,7 +17,7 @@
 #   s  sh and login are ZEX2 (stage 1): one session's sh and login are the shared code; logins on consoles 2, 3 and 4
 #      add no copy (free: what sharing saves grows by sh + login each; ps: SHR for every sh and login); sh -c shells
 #      share it too; idle shells hold little memory (ps MEM at most 112 KB: the arena grows and shrinks), also right
-#      after a command that needed a big arena; a session that ends (console 2, then console 1's own) leaves the others running; a literal
+#      after a command that needed a big arena; an rm, mv or ln elsewhere on the mount keeps the sharing; a session that ends (console 2, then console 1's own) leaves the others running; a literal
 #      echoed into a file by a shell
 # tools/pure-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
@@ -137,6 +137,8 @@ BIG=$(awk '$0 == "==s4c" { f = 1; next } $0 == "==s4d" { f = 0 } f && $5 == "wai
 cmp_ "... and the shell gave the memory back afterwards (ps MEM of console 1's shell, KB)" "${BIG:--1}" -le 112
 cmp_ "two more shells (sh -c) share it too" "$(V s s4b)" -gt "$(V s s4)"
 cmp_ "... still one copy" "$(S s s4b)" -eq "$(S s s1)"
+cmp_ "after an rm, mv and ln in /tmp (the same mount) a new sh -c still shares the copy (audit3 B2)" "$(S s rm)" -eq "$(S s s1)"
+cmp_ "... sharing saves its sh too" "$(V s rm)" -gt "$(V s s4)"
 rx   s "console 2's shell ran before it ended" ".*alive-on-2"
 rx   s "a session ended: console 3's shell still runs" ".*alive-on-3"
 cmp_ "... still one copy" "$(S s s3)" -eq "$(S s s1)"
