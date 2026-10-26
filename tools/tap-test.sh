@@ -3,7 +3,8 @@
 # Host test of tools/serial-tap.py's `wait` (audit 2026-10-26 F1), no emulator: a fake Zenix shell on the tap's serial
 # port redraws its prompt with each key, as user/sh.c's line editor does, and takes 2 s per command before it prints
 # the next prompt. A `wait` for the prompt after a `send` that ends a line must wait for that next prompt, not match
-# the prompt the redraw put in the echo; `waitecho` and a `send` without a line end still match the echo.
+# the prompt the redraw put in the echo; `waitecho` and a `send` without a line end still match the echo. A `wait`
+# that times out, or is cut short when the run ends, is a failure; a `waitopt` may time out (F7).
 #   tools/tap-test.sh [TAP]      TAP: the tap to test (default tools/serial-tap.py; an older copy shows the old rule)
 cd "$(dirname "$0")/.." || exit 1
 TAP=${1:-tools/serial-tap.py}
@@ -74,5 +75,28 @@ check "a wait for the prompt after 'send LINE\\r' waits for the next prompt, not
 check "... the lines arrived whole and in order" "$(awk '$2 == "got" { printf "%s|", $3 " " $4 }' "$OUT/events" | grep -qx 'say one|say two|say three|quit |' && echo ok || echo bad)"
 check "waitecho and a send without a line end still match the echo, and no wait timed out" "$(! grep -q 'wait timed out' "$OUT/tap.out" && echo ok || { cat "$OUT/tap.out"; echo bad; })"
 [ -n "$order" ] && echo "$order"
+
+# A wait that times out is a failure (audit 2026-10-26 F7): the tap prints a FAIL line and adds it to ZENIX_TIMEOUTS;
+# a `waitopt` that times out is allowed; the tap stopped while a wait still waits is the same failure as a timeout.
+cat >"$OUT/script2.txt" <<'EOF'
+wait zenix:/# 10
+waitopt never-printed-a 1
+wait never-printed-b 1
+wait zenix:/# 1
+wait never-printed-c 60
+EOF
+rm -f "$OUT/timeouts" "$OUT/serial.log"
+ZENIX_TIMEOUTS="$OUT/timeouts" python3 "$TAP" "$PORT" "$OUT/serial.log" "$OUT/script2.txt" >"$OUT/tap2.out" 2>&1 &
+TAPPID=$!
+for _ in $(seq 50); do [ -e "$PORT" ] && break; sleep 0.1; done
+python3 "$OUT/fake.py" "$PORT" "$OUT/events2" &
+FAKE=$!
+sleep 6
+kill $TAPPID $FAKE 2>/dev/null; wait $TAPPID $FAKE 2>/dev/null
+rm -f "$PORT" "$PORT.stop"
+want='FAIL: serial-tap: wait timed out after 1 s: never-printed-b
+FAIL: serial-tap: the run ended during a wait: never-printed-c'
+check "a wait that timed out and one cut short by the end of the run are FAIL lines in ZENIX_TIMEOUTS" "$([ "$(cat "$OUT/timeouts" 2>/dev/null)" = "$want" ] && echo ok || { cat "$OUT/tap2.out"; echo bad; })"
+check "... and on the tap's output; a waitopt that timed out is allowed, not a failure" "$(grep -q '^serial-tap: optional wait timed out (allowed): never-printed-a$' "$OUT/tap2.out" && [ "$(grep -c '^FAIL' "$OUT/tap2.out")" = 2 ] && echo ok || { cat "$OUT/tap2.out"; echo bad; })"
 [ $pass = 1 ] && rm -rf "$OUT"
 exit $((1 - pass))

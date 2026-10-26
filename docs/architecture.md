@@ -1129,7 +1129,10 @@ command, loop round and pipeline takes a mark and releases it when done;
 releasing gives back the chunks taken after the mark except one kept as a spare, and between the commands of a script
 and at the prompt the spare goes back too, so an idle shell holds only the first chunk. A file of commands (`sh file`,
 `. file`, `/etc/profile`, `~/.shrc`) is read 512 bytes at a time on a descriptor above 9 (out of the way of `N>&M`)
-and run one complete command at a time: lines are added until the lexer and the parser no longer ask for more (an
+and run one complete command at a time (so are commands from standard input when it is not a terminal: there fd 0 is
+read in place, one byte at a time from a pipe, or a block at a time from a file with the position moved back to the
+end of the command before it runs, so the command reads the rest; `sh -i` forces the prompt): lines are added until
+the lexer and the parser no longer ask for more (an
 open quote, a here-document without its end, an `if` without `fi`, a line ending in `\`, `|` or `&&`), the command
 runs, and its memory is released before the next is read. The interactive prompt asks the same question of what was
 typed (`cmd_incomplete`: lexed and parsed in the arena, then released): while the command is unfinished it prints PS2

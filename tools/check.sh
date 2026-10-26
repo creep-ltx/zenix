@@ -7,7 +7,9 @@
 #   tools/check.sh                 everything
 #   tools/check.sh host            the host tests only
 #   tools/check.sh NAME...         only these (names as in the table, e.g. matrix users-test)
-# A test fails if it exits non-zero or prints a line starting with FAIL (matrix.sh reports per machine that way).
+# A test fails if it exits non-zero or prints a line starting with FAIL (matrix.sh reports per machine that way), or
+# if a `wait` in one of its serial scripts timed out or was cut short by the end of the run (ZENIX_TIMEOUTS,
+# tools/serial-tap.py; a `waitopt` may time out).
 # Not run, on purpose: stage0-68k-test when the Python module unicorn is missing (named as skipped), audio/klog/joystick (weak or
 # covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test, diag-test and colour-test,
 # ZENIX_CAGE_RIG. A new emulator test starts only while the machine's 1-minute load is 16 or less; every FS-UAE run
@@ -61,8 +63,13 @@ run_job() {
         env=(ZENIX_BUILD="$RUN/$j.build") ;;
     esac
     start=$(date +%s)
-    env "${env[@]}" ZENIX_SERIAL="/tmp/zenix-check-$$-$j" ZENIX_OUT="$RUN/$j" USERS_OUT="$RUN/$j" "${cmd[@]}" >"$RUN/$j.log" 2>&1
+    rm -f "$RUN/$j.timeouts"
+    env "${env[@]}" ZENIX_SERIAL="/tmp/zenix-check-$$-$j" ZENIX_OUT="$RUN/$j" USERS_OUT="$RUN/$j" ZENIX_TIMEOUTS="$RUN/$j.timeouts" \
+        "${cmd[@]}" >"$RUN/$j.log" 2>&1
     rc=$?
+    # a script's `wait` that timed out (or was still waiting when the run ended) fails the test, whatever the test
+    # script made of its output (tools/serial-tap.py, audit 2026-10-26 F7): its lines join the job's log
+    if [ -s "$RUN/$j.timeouts" ]; then cat "$RUN/$j.timeouts" >>"$RUN/$j.log"; [ $rc = 0 ] && rc=3; fi
     echo "$rc $(( $(date +%s) - start ))" >"$RUN/$j.res"
     rm -f "/tmp/zenix-check-$$-$j"
     if [ $rc = 0 ] && ! grep -aq '^FAIL' "$RUN/$j.log"; then rm -rf "$RUN/$j.build"; echo "check: $j PASS"   # a failed one keeps its images

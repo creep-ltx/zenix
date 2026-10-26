@@ -6,7 +6,23 @@ NAME
 SYNOPSIS
     sh [file [argument...]]      run a script
     sh -c 'commands' [name [argument...]]
-    sh                           an interactive shell
+    sh                           commands from standard input
+    sh -i                        an interactive shell even without a
+                                 terminal
+
+STANDARD INPUT
+    With no file and no -c the shell reads its commands from standard
+    input. As bash, it is interactive (prompts, the line editor, history,
+    the start-up files, job messages such as [1] 23) only when standard
+    input and standard error are both terminals, or with -i. Otherwise,
+    as when a pipe or a file is its input (echo id | su anna, sh < file),
+    it prints no prompt and reads the input like a script, one command at
+    a time, so a command it runs reads the rest of the input:
+    printf 'read x\nhello\necho $x\n' | sh prints hello. From a pipe it
+    reads one byte at a time, so it never takes more than the next
+    command; from a file it reads a block and moves the file's position
+    back to the end of the command before running it. A syntax error ends
+    the input there (status 2), as in a script.
 
 LINE EDITING
     Left, Right      move
@@ -103,7 +119,8 @@ VARIABLES THE SHELL USES
     a function, { or ( without its end, a line ending in | && || or a
     backslash) is continued on the next line after PS2, as in bash; Ctrl+C
     there drops it. A command typed this way is at most 2047 bytes.
-    Start-up files: /etc/profile and ~/.shrc (read by an interactive shell).
+    Start-up files: /etc/profile and ~/.shrc (read by an interactive shell
+    only: not by a script, sh -c or commands from a pipe).
     ~/.shrc is read only if it belongs to the effective user or to root, so
     a shell that runs as root never runs another user's start-up commands.
 
