@@ -95,7 +95,8 @@ unseen). So:
 | 82 `update` (DESIGN D15: INFO, RELEASE, NOTE) | claimed 2026-10-26, not built yet |
 | **next free: 83** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
-Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8.
+Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
+10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
 Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main); `ETXTBSY` 26 (D13, "text file busy": a running
 shared program opened for writing; claimed 2026-10-25, Linux's number). Port names registered as services (D11):
 `disk`, `fs`, `fs.*`; `ping` (the test service).
