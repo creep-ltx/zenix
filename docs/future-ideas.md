@@ -335,7 +335,8 @@ was discussed the same day: shell programs are realistic later, window programs 
 
 ## Amiga programs on Zenix: the Wine route (the owner's wish, 2026-10-26; a long-term idea, not approved as a feature)
 
-The owner: not the highest priority, but "even with 40% compatibility you unlock an extremely large software library".
+The owner: not the highest priority, but even a small share (10%, 40%: examples, not goals) of Amiga programs
+working unlocks a large software library.
 After the demos above (easier, first). The idea, as Wine does for Windows: rewrite only the core parts that clash with
 Zenix and load everything else unchanged from the machine. MUI, ReAction and GadTools sit on top of intuition,
 graphics, layers, exec and dos; graphics, layers, intuition and the input/timer devices are in the owner's own
