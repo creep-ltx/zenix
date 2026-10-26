@@ -15,8 +15,50 @@ DESCRIPTION
     stopsrv  a server stopped (job control) while it waits in receive
              does not answer a message that arrives meanwhile; after
              SIGCONT it does (D16 rule 2)
+    handler  a handler runs at the end of the call that sent it, with the
+             registers and errno kept; signals blocked by its sa_mask and
+             itself wait until it returns
+    block    a blocked signal waits; unblocked, a handler runs once; a
+             blocked SIGTERM ends the process when unblocked (143);
+             SIGKILL and SIGSTOP are never blocked
+    ignore   an ignored signal does nothing and stays ignored in a child;
+             a caught one is the default there
+    kill     kill(pid, 0) only asks; the old form gives 130, SIGTERM 143,
+             SIGKILL 137; a gone process ESRCH, -1 and 99 EINVAL
+    alarm    a CPU-bound program ends at its alarm (142); with a handler
+             it goes on; alarm reports the ticks left
+    restart  SA_RESTART restarts a pipe read; without it the read gives
+             EINTR; sleep is cut short and never restarted
+    ttyread  a tty read restarted after a handler gets the line typed
+             later (needs a line typed: abc)
+    chld     SIGCHLD on a child's end and stop; ignored, children are
+             reaped by themselves and wait gives ECHILD
+    pipe     writing to a pipe nobody reads ends the writer (141);
+             ignored, the write fails with EPIPE; zup -l into a closed
+             pipe ends normally (zup ignores SIGPIPE)
+    poll     poll on a pipe and a port with a timeout: the timeout, the
+             pipe, the port; a closed pipe gives POLLHUP, an unused fd
+             POLLNVAL
+    select   poll on the tty, a pipe and a port: a typed line wakes it
+             (needs a line typed: xyz); select's timeout
+    group    setpgid, getpgid; kill(-g) ends every member; an empty group
+             is ESRCH; a zombie child may still join a group
+    cont     a caught signal waits while the process is stopped; SIGCONT
+             continues it and both handlers run
+    srvcall  a signal sent during a server call is delivered after the
+             reply
+    stack    a handler with room on the stack runs; one that would leave
+             less than 512 bytes above the stack guard is refused: the
+             process is killed (139) with a message, nothing is written
+             below the stack
+    forged   sigreturn with a frame outside the process, an SR of 0x2700
+             or 0x1000 (only the condition codes are taken: the program
+             stays in user mode), an odd PC: killed (139); an SR of
+             0x0700: interrupts stay on, the alarm still comes (142)
 
-    tools/signal-test.sh runs them in the emulator.
+    tools/signal-test.sh runs them in the emulator, and uses sigtest
+    _jobber (TSTP and CONT handlers) and sigtest _intr (an INT handler)
+    for the shell's job control checks.
 
 EXIT STATUS
     The number of checks that failed.

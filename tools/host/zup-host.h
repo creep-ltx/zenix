@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <signal.h>                     /* zup ignores SIGPIPE (DESIGN D16 rule 11): the host's own call here */
 #include "../../kernel/errno.h"
 
 typedef unsigned int u32;

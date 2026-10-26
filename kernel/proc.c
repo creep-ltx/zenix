@@ -8,8 +8,8 @@
 struct proc procs[NPROC];
 struct proc *current;
 static int next_pid = 1;
-int nsleep, nio;                        /* how many are in P_SLEEP / P_IO */
-volatile u32 wake_min;                  /* while nsleep: no sleeper is due before this tick */
+int ntimer;                             /* how many are in P_SLEEP, plus the alarms set (D16 rule 3) */
+volatile u32 wake_min;                  /* while ntimer: no sleeper or alarm is due before this tick */
 volatile u8 need_resched;               /* a better process than the running one is ready, or a sleeper is due */
 
 /* ---- the run queue (DESIGN D10) ----
@@ -74,9 +74,7 @@ static void ready_(struct proc *p, int force)
     u16 s = irq_save();                 /* interrupts wake processes too */
     if (p->state != P_READY && p->state != P_FREE && p->state != P_ZOMBIE && (force || p->state != P_STOP)) {
         if (p->state == P_SLEEP)
-            nsleep--;
-        else if (p->state == P_IO)
-            nio--;
+            ntimer--;
         p->state = P_READY;
         if (p->pid != 0 && !p->queued) {
             rq_push(p);
@@ -173,19 +171,29 @@ void sleep_until(u32 t)
     u16 s = irq_save();
     current->wake = t;
     current->state = P_SLEEP;
-    if (nsleep++ == 0 || (s32)(t - wake_min) < 0)
+    if (ntimer++ == 0 || (s32)(t - wake_min) < 0)
         wake_min = t;
     irq_restore(s);
 }
 
-/* ready every sleeper that is due (each to its own level), and note when the next one is; interrupts masked */
+/* ready every sleeper that is due (each to its own level), send SIGALRM for every alarm that is due (D16 rule 3: every
+ * live process with one, also a running one: a CPU-bound program gets it at the tick), and note when the next one is;
+ * interrupts masked */
 static void wake_sleepers(void)
 {
-    if (!nsleep || (s32)(ticks - wake_min) < 0)
+    if (!ntimer || (s32)(ticks - wake_min) < 0)
         return;
     u32 next = ticks + 0x7FFFFFFFu;
     for (int i = 1; i < NPROC; i++) {
         struct proc *q = &procs[i];
+        if (q->alarm_on) {
+            if ((s32)(ticks - q->alarm_at) >= 0) {
+                q->alarm_on = 0;
+                ntimer--;
+                sig_send(q, SIGALRM);
+            } else if ((s32)(q->alarm_at - next) < 0)
+                next = q->alarm_at;
+        }
         if (q->state != P_SLEEP)
             continue;
         if ((s32)(ticks - q->wake) >= 0)
@@ -573,6 +581,12 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     p->gid = parent ? parent->gid : 0;
     p->umask = parent ? parent->umask : 022;
     p->nice = parent ? parent->nice : 0;            /* a child inherits the base priority (not a server's boost) */
+    p->pgid = parent ? parent->pgid : pid;          /* D16 rule 7: no parent (boot, the servers): its own group */
+    if (parent) {                                   /* as fork and exec: ignored and blocked signals are kept, handled
+                                                     * ones (the new program has no handlers) go back to the default */
+        p->sig_ign = parent->sig_ign;
+        p->sig_block = parent->sig_block;
+    }
     p->blevel = p->prio = NICE_LEVEL(p->nice);
     if (suid >= 0) p->uid = (u16)suid;                 /* set-user-id program: runs as its owner */
     if (parent) {
@@ -724,15 +738,17 @@ void schedule(void)
      * of its system call, so a close or a program load is not cut in half (G4); a killed server ends between requests
      * (G5, D11): kill_now */
     if (current->killed && current->state == P_READY && current->pid != 0 && kill_now(current))
-        proc_exit(current->killed == 2 ? 139 : 130);
+        proc_exit(kill_status(current));
     if (current->stop_req && current->state == P_READY && current->pid != 0 && !current->wait_msg) {
         struct proc *p = current;                       /* stopped: not runnable until proc_cont */
         p->stop_req = 0;
         p->stop_rep = 0;
         p->state = P_STOP;
         struct proc *par = proc_by_pid(p->ppid);
-        if (par && par->state == P_WAIT && (par->wait_for == -1 || par->wait_for == p->pid))
-            ready(par);
+        if (par) {                                      /* the parent's wait sees it; SIGCHLD (D16 4) */
+            ev_post(par, EV_CHILD);
+            sig_send(par, SIGCHLD);
+        }
         schedule();
     }
 }
@@ -767,30 +783,12 @@ void resched(void)
         slice = SLICE;
 }
 
-void wake_io(void)
-{
-    if (!nio)
-        return;
-    for (int i = 1; i < NPROC; i++)
-        if (procs[i].state == P_IO)
-            ready(&procs[i]);
-}
-
-void block_io(void)
-{
-    u16 s = irq_save();                 /* state and count change together */
-    current->state = P_IO;
-    nio++;
-    irq_restore(s);
-    schedule();
-}
-
 void proc_stop(struct proc *p)
 {
     if (p->pid == 0 || p->priv || p->state == P_ZOMBIE || p->state == P_FREE || p->state == P_STOP)
         return;
     p->stop_req = 1;
-    if (p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
+    if (p->state == P_EV || p->state == P_SLEEP ||
         (p->state == P_MSG && !p->wait_msg))            /* wake it so that it notices */
         ready(p);
 }
@@ -810,9 +808,14 @@ void proc_kill(struct proc *p)
         p->killed = 1;
         p->kill_at = ticks;
     }
-    if (p->state == P_STOP || p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
+    if (p->state == P_STOP || p->state == P_EV || p->state == P_SLEEP ||
         (p->state == P_MSG && !p->wait_msg))        /* a server in recv, not a client in call */
         ready_force(p);
+}
+
+int kill_status(const struct proc *p)
+{
+    return p->killed == 2 ? 139 : p->kill_sig ? 128 + p->kill_sig : 130;
 }
 
 void proc_exit(int code)
@@ -829,18 +832,29 @@ void proc_exit(int code)
             file_close(p->fd[i]);
             p->fd[i] = 0;
         }
-    if (tty_getfg(tty_of(p)) == p->pid)
-        tty_setfg(tty_of(p), 0);
+    if (tty_fgpid(tty_of(p)) == p->pid)
+        tty_setfg(tty_of(p), 0, 0);     /* a single-process foreground only: a group keeps it (D16 rule 7) */
+    if (p->alarm_on) {
+        p->alarm_on = 0;
+        ntimer--;
+    }
+    for (int i = 1; i < NPROC; i++) {   /* rule 12: its stopped children go on, and SIGHUP ends them by default */
+        struct proc *c = &procs[i];
+        if (c->ppid == p->pid && (c->state == P_STOP || c->stop_req)) {
+            sig_send(c, SIGCONT);
+            sig_send(c, SIGHUP);
+        }
+    }
     p->exit_code = code;
     p->state = P_ZOMBIE;
     struct proc *par = proc_by_pid(p->ppid);
-    if (par && par->state == P_WAIT &&
-        (par->wait_for == -1 || par->wait_for == p->pid))
-        ready(par);
+    if (par) {
+        ev_post(par, EV_CHILD);
+        sig_send(par, SIGCHLD);
+    }
     tty_release(p->pid);
     ipc_proc_exit(p->pid);
     proc_reap_orphans();                /* its zombie children have nobody to wait for them now */
-    wake_io();
     schedule();
     for (;;)
         ;
@@ -852,8 +866,10 @@ int proc_wait(int pid, int flags)
 {
     int nohang = flags & WAIT_NOHANG;
     int con = (flags & WAIT_CONSOLE) && current->uid == 0;
+    int ign = (current->sig_ign & SIGBIT(SIGCHLD)) != 0;   /* SIGCHLD ignored: children are reaped, never reported */
     for (;;) {
         int have = 0;
+        current->ev_pending &= ~(EV_CHILD | EV_CON);    /* D16 step 1: children and consoles post to us directly */
         if (con && kbd_reset_state == KRS_HELD)
             kbd_reset_flush();          /* Ctrl+Amiga+Amiga: init syncs the disks before the reset (kbd.c) */
         if (con && con_want) {
@@ -868,7 +884,7 @@ int proc_wait(int pid, int flags)
             if (c->state == P_FREE || c->ppid != current->pid ||
                 (pid != -1 && c->pid != pid))
                 continue;
-            have = 1;
+            have++;
             if (c->state == P_STOP && (flags & WAIT_UNTRACED) && !c->stop_rep) {
                 c->stop_rep = 1;
                 return ST_STOPPED;
@@ -877,18 +893,22 @@ int proc_wait(int pid, int flags)
                 int code = c->exit_code;
                 mem_free_owner((u32)c->pid);
                 c->state = P_FREE;
+                if (ign) {
+                    have--;
+                    continue;
+                }
                 return code;
             }
         }
         if (!have && !con)
-            return -1;
+            return ign ? -ECHILD : -1;  /* rule 10: -ECHILD when nothing is left (only a program that ignores SIGCHLD) */
         if (nohang)
             return have ? -2 : -1;
-        current->wait_for = pid;
-        current->wait_con = (u8)con;    /* con_switch readies it; the check above and this block have no kwork between */
-        current->state = P_WAIT;
-        schedule();
+        current->wait_con = (u8)con;    /* con_switch posts EV_CON (event.c's order: no lost wake-up) */
+        long e = ev_block(EV_CHILD | (con ? EV_CON : 0), 0, 0, 1);
         current->wait_con = 0;
+        if (e)
+            return (int)e;              /* -EINTR: a handler runs (and the call is restarted with SA_RESTART) */
     }
 }
 
@@ -903,7 +923,7 @@ void proc_reap_orphans(void)
             if (c->state != P_ZOMBIE || c == current)
                 continue;
             struct proc *par = c->ppid ? proc_by_pid(c->ppid) : 0;
-            if (!par || par->state == P_ZOMBIE) {
+            if (!par || par->state == P_ZOMBIE || (par->sig_ign & SIGBIT(SIGCHLD))) {    /* D16 rule 10 */
                 mem_free_owner((u32)c->pid);
                 c->state = P_FREE;
             }

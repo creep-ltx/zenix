@@ -39,7 +39,7 @@ UDIAG   ?=
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch pingd ping bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
@@ -66,7 +66,7 @@ STACK_boot := 4096
 ULDFLAGS := -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
-TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx
+TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf
 
@@ -146,6 +146,9 @@ KOPT_term := -Os
 # interrupt entries stay -O2.
 KOPT_tty := -Os
 KOPT_vfs := -Os
+# DESIGN D16's own files (rule 14): events and signals at -Os; only the one-word test on the return paths is inline
+KOPT_event := -Os
+KOPT_signal := -Os
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld

@@ -73,6 +73,7 @@ static void read_palette(void)
 /* ---- the rest of the kernel that term.c calls ---- */
 struct proc procs[NPROC];
 void ready(struct proc *p) { (void)p; }
+void ev_post(struct proc *p, u32 bits) { (void)p; (void)bits; }
 void *kmalloc(u32 n) { return malloc(n); }
 void panic(const char *why) { printf("FAIL: panic %s\n", why); exit(1); }
 static int bells;

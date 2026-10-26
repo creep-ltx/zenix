@@ -1051,6 +1051,7 @@ static int list(void)
 
 int main(int argc, char **argv)
 {
+    signal(SIGPIPE, SIG_IGN);           /* DESIGN D16 rule 11: `zup | less` and quitting less never end an update half-way */
     int stage2 = argc > 1 && !strcmp(argv[1], "-2");
     if (argc > 1 && !strcmp(argv[1], "-l")) return list();
     if (argc > 1 && !stage2) { printf("usage: zup [-l]   (boot runs zup at every start; see man zup)\n"); return 2; }

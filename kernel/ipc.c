@@ -144,6 +144,17 @@ void ipc_enqueue(struct port *p, struct umsg *m, int front)
         ready(p->waiter);
         p->waiter = 0;
     }
+    ev_wake(&p->evw);                           /* and whoever polls the port (D16) */
+}
+
+/* SYS_evwait on a port (D16, POLLPORT): POLLIN when a message is queued; only the owner may wait on it */
+u16 port_poll(int port)
+{
+    struct port *p = port_of(port);
+    if (!p || p->owner != current->pid)
+        return POLLNVAL;
+    ev_arm(&p->evw);
+    return p->head ? POLLIN : 0;
 }
 
 void ipc_unqueue(struct port *p, struct umsg *m)
@@ -243,6 +254,13 @@ struct umsg *ipc_recv(int port, int wait)
         schedule();
         if (!port_of(port) || current->killed)
             return (struct umsg *)-1;
+        if (!p->head && SIG_DUE(current) && wait == 1) {    /* a handler (D16): -EINTR, restarted with SA_RESTART;
+                                                             * a timed receive is never cut (rule 4) */
+            if (p->waiter == current)
+                p->waiter = 0;
+            current->sig_intr = 1;
+            return (struct umsg *)-EINTR;
+        }
     }
     struct umsg *m = p->head;
     p->head = m->next;
@@ -287,6 +305,7 @@ void ipc_proc_exit(int pid)
         }
         if (ports[i].waiter)
             ready(ports[i].waiter);
+        ev_wake(&ports[i].evw);
         ports[i].used = 0;
     }
     for (int i = 1; i < NPROC; i++) {

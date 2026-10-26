@@ -469,7 +469,9 @@ pattern (section 6).
 ## 6. Processes and scheduling (`kernel/proc.c`)
 
 - A fixed table of `NPROC` = 32 `struct proc` (room for a login and a shell on each of the ten consoles, the servers,
-  init and the commands they run). State machine: `FREE, READY, SLEEP, WAIT, IO, ZOMBIE, MSG, STOP`.
+  init and the commands they run). State machine: `FREE, READY, SLEEP, ZOMBIE, MSG, STOP, EV` (`WAIT` and `IO` keep
+  their numbers for `SYS_procinfo`, which reports a process in `EV` as `WAIT` when it waits for a child and as `IO`
+  otherwise, but are no longer entered: DESIGN D16).
 - **Priorities** (DESIGN D10): the highest ready priority always runs; processes of the same priority take turns, a
   slice of 5 ticks (50 ms) of the 100 Hz tick each. There is no ageing: a busy program keeps every worse one off the
   processor until it waits (the Exec rule).
@@ -506,6 +508,63 @@ pattern (section 6).
   - Verified in FS-UAE by `tools/prio-test.sh` (in `make check`): equal priorities take turns in whole 50 ms slices,
     a higher priority keeps the processor, a woken higher priority runs within a tick, inheritance (section 8), and
     the nice/renice rules for a user and for root.
+- **Events** (DESIGN D16, `kernel/event.c`, docs/d16-events-and-signals.md). Exec's model underneath: every process has
+  fixed event bits pending and bits it waits for (`EV_IO` an object it registered on changed, `EV_SIG` a signal that
+  runs a handler, `EV_CHILD` a child ended or stopped, `EV_CON` init's console requests); each object a process can
+  wait on - a tty, a pipe's two ends, `/dev/ttyS0`, a port - carries a 32-bit mask of the waiting process slots
+  (`NPROC` is 32), so registering is one OR. A waker sets the bit and readies a process only if it is in the
+  event-wait state (`P_EV`, or `P_SLEEP` with bits set: a timed wait) and waits for that bit (rule 1); a stale bit in
+  a mask (a process that left or died) does nothing, because every wait checks again in a loop. A wait goes in
+  Exec's order: register on the objects and clear the bit, check readiness with interrupts on, then with interrupts
+  masked only test the bits (and that no kill, stop or handler is due) and block (`ev_block`). Every producer -
+  `tty_input`, `tty_setmode`, `tty_inject`, `serial_work`, the pipes and `file_close`, a child's exit or stop (to its
+  parent), `con_switch`, `ipc_enqueue`, `sig_send`, the alarm - runs in process context and sets the bit under the
+  same mask, so no wake-up is lost (`tools/signal-host-test.sh` tries every interleaving). Blocking `read`, `write`
+  and `wait` wait this way, so the old `wake_io` (which woke every process waiting for any I/O) is gone.
+  `SYS_evwait` waits for several at once: up to 32 items { fd, events, revents } (Linux's `struct pollfd` and bits)
+  and a timeout in ticks (-1: none, 0: only look); an item with `POLLPORT` names a port the caller owns (`POLLIN`: a
+  message is queued). It returns how many items are ready, 0 at the timeout, -EINTR when a handler is due (never
+  restarted). ttys and `/dev/ttyS0` are always writable (the tick empties their send rings); files and `/dev/null`
+  never wait; a pipe's read end gives `POLLHUP` when no writer is left, its write end `POLLERR` when no reader is.
+  libz's `poll` (milliseconds) and `select` (`fd_set` of 32) are built on it.
+- **Signals** (DESIGN D16, `kernel/signal.c`). Linux's numbers and default actions (frozen): HUP 1, INT 2, QUIT 3,
+  KILL 9, USR1 10, USR2 12, PIPE 13, ALRM 14, TERM 15, CHLD 17, CONT 18, STOP 19, TSTP 20, TTIN 21, TTOU 22, WINCH 28;
+  the default ends the process (wait status 128 + the number: 143 TERM, 137 KILL, 141 PIPE, 142 ALRM), stops it
+  (STOP, TSTP, TTIN, TTOU), continues it (CONT) or does nothing (CHLD, WINCH). KILL and STOP are never caught,
+  blocked or ignored; KILL acts at once (as a second kill). Process 1 (`boot`) is never ended or stopped by a default
+  action (the old form of `kill` still ends it for root). Per process the kernel keeps the pending, blocked, caught,
+  ignored and restart masks, one `sa_mask` per signal and **one entry point** in the program (Exec's exception
+  code): libz keeps the table of handlers, the kernel only knows "caught". A spawned program keeps the ignored and
+  blocked signals of its parent and starts with the default for the caught ones (as fork and exec). A caught,
+  unblocked signal is pending until the process next returns to user mode; there, as the very last step of a system
+  call and of the level-2 interrupt when it cut into user code (whose entry now saves all 15 registers, like the
+  system call's), `sig_deliver` first acts on a kill and a stop, then writes a frame on the user stack (84 bytes:
+  size, d0-d7, a0-a7, PC, condition codes, signal, blocked mask; refused - "stack overflow in a signal: killed", 139 -
+  if it would leave less than 512 bytes above the stack guard) and sends the process to its entry (d0 the signal, a0
+  the frame, a5 its D13 data base); the signal and its `sa_mask` are blocked while the handler runs. `SYS_sigreturn`
+  takes the frame back after checking it lies in the process's memory before reading it, that the PC is even (else
+  the process is killed, 139) and taking only the condition codes of the status register, never its upper byte (user
+  mode, interrupts on). Only a signal that will run a handler interrupts a blocking call (-EINTR): tty, pipe and
+  serial reads and writes, `sleep`, `wait`, `evwait` and a server's untimed receive; a write that moved bytes returns
+  the count; a client in a server call gets it after the reply; the service manager's waits are never cut.
+  `SA_RESTART` restarts the call after the handler (the trap again: PC - 2, d0 the call's number), never `sleep`,
+  `evwait` or a timed receive. `SYS_alarm` is a kernel deadline counted with the sleepers (`ntimer`, `wake_min`), so
+  SIGALRM reaches a program that computes without system calls. SIGCHLD goes to the parent when a child ends or
+  stops; a parent that ignores SIGCHLD has its children reaped by themselves and `wait` then gives -ECHILD. A write to
+  a pipe with no reader sends SIGPIPE (ignored: -EPIPE). A process that exits sends its stopped children SIGCONT and
+  SIGHUP (rule 12). Calls: `sigaction(sig, struct usigaction *)` (size, handler: 0 default, 1 ignore, else caught;
+  mask, flags, entry; returns the old disposition), `sigprocmask(how, set, old *)`, `sigreturn(frame)`,
+  `alarm(ticks)`; `kill`'s new form and the groups below.
+- **Process groups** (DESIGN D16). `pgid` is inherited at spawn; a process with no parent (boot, the servers) is its
+  own group; `login` and every interactive `sh` make their own, and the shell puts each job in one (its first
+  process's pid). `SYS_setpgid(pid, pgid)` only on oneself or one's own children (a zombie child too), into its own
+  pid or a group that exists. A terminal's foreground is a process group (`SYS_setfg(pgid, 1)`) or, in the old form,
+  one process; ^C sends SIGINT and ^Z SIGTSTP to every member, so every stage of a pipeline gets them; when nobody is
+  in the foreground ^C still sets the tty's `intr` (`SYS_ttyintr`). `SYS_kill(pid, sig, 1)` is the new form (pid 0:
+  the caller's group, -g: group g, sig 0 only asks): 0 if at least one process got the signal, -EPERM if none was
+  allowed, -ESRCH for nobody, -EINVAL for pid -1; the old form `SYS_kill(pid, 0, 0)` ends a process with status 130
+  as before. `SYS_jobctl` (stop, continue) sends SIGSTOP and SIGCONT. `uproc` ends with the `pgid` (libz's
+  `getpgid`).
 - **Interrupts only queue** (audit B4). The keyboard and serial interrupts put raw codes and bytes into rings and
   set `kwork_pending`; everything else input causes (keymap, line discipline, echo, Ctrl-C/Ctrl-Z, console
   switches, scrollback) is done by `kwork()` in process context - see section 11. The same rule closes the
@@ -549,11 +608,12 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 79 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-82, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 85 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-88, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
-index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority`), the machine (`reboot`,
+index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
+events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
 `update`), services (`svc`), memory (`memalloc memfree meminfo`),
 time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
@@ -621,17 +681,19 @@ it back into the nice value (-1 with `zerrno` set on failure, as POSIX). setprio
 the process's present nice needs root (-EACCES), another process needs the kill rule (section 14); with `PRIO_USER`
 every process is checked before any is changed.
 
-`kill` today means "terminate" (`proc->killed`); Unix-style signal handlers do not exist yet. There is one more
-thing a process can be told: **stop and continue** (job control). Ctrl-Z on a terminal (`kernel/tty.c`) or `SYS_jobctl`
-(pid, 0 = stop, 1 = continue) calls `proc_stop`, which sets `stop_req` and wakes the process if it is blocked; at its
+`kill` sends a signal (section 6, DESIGN D16); its old form, and a signal's default "end it", go through
+`proc_kill` (`proc->killed`, D11's rules for servers). **Stop and continue** (job control): SIGTSTP (Ctrl-Z on a
+terminal, `kernel/tty.c`), SIGSTOP or `SYS_jobctl` (pid, 0 = stop, 1 = continue: SIGSTOP and SIGCONT) call
+`proc_stop`, which sets `stop_req` and wakes the process if it is blocked; at its
 next return from `schedule()` it turns itself into `P_STOP`, tells a waiting parent, and is not scheduled again until
 `proc_cont`: no other wake-up runs a stopped process (`ready()` leaves it stopped; only `proc_cont` and `proc_kill`
 end a stop, DESIGN D16 rule 2), so a server stopped while it waited in receive does not answer a message that arrives
 meanwhile. `SYS_wait` with flag 2 (`WAIT_UNTRACED`) reports a stopped child once, as `ST_STOPPED` (0x114); flag 4
 (`WAIT_CONSOLE`, root only: init) also returns `ST_CONSOLE` + n (0x200 + n) when console n was shown with nobody on it,
 so init starts a login there (section 11). A client
-inside a call to a server is never stopped until the reply arrives (the server holds pointers into its memory).
-`sleep` loops until its time, so a stop and continue does not cut it short.
+inside a call to a server is never stopped until the reply arrives (the server holds pointers into its memory). A stop
+the process asks for itself (a SIGTSTP handler raising SIGTSTP) is acted on at the end of that system call.
+`sleep` loops until its time, so a stop and continue does not cut it short (a handler does: -EINTR).
 
 ## 8. Ports and messages (`kernel/ipc.c`)
 
@@ -653,7 +715,9 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   ratio means anything.)
 - `recv(port, wait)`: wait 0 returns at once (0 if nothing is queued), 1 waits for a message, N > 1 waits at most N-1
   ticks and then returns 0 - a server with a deadline (ZenixFS's commit three seconds after the first change) sleeps
-  until a message or the deadline, whichever comes first, instead of polling.
+  until a message or the deadline, whichever comes first, instead of polling. A server that installs a signal
+  handler (DESIGN D16) gets -EINTR from an untimed `recv` when a handler is due (restarted with `SA_RESTART`); a timed
+  one is never cut. A port's owner may also wait for it among other things with `SYS_evwait` (`POLLPORT`).
 - If a server dies, the request it was serving fails with -ECONNRESET ("the server is gone", errno 104; the kernel's
   file calls turn it into -EIO for programs). A service's port (section 9, "The service manager") goes back to
   *held*: its queued requests wait for the next server, which the first of them starts. Any other port is closed, its
@@ -941,7 +1005,8 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 ## 11. Pipes, tty, terminal, display
 
 - **Pipes** (`vfs.c`): 2 KB ring buffer in the kernel; EOF when all writers close; a write to a pipe with no
-  readers ends the writer with status 141 (like SIGPIPE). Special files `/dev/tty` (the process's controlling
+  readers sends the writer SIGPIPE, which by default ends it with status 141 (ignored: the write gives -EPIPE; DESIGN
+  D16). A blocked reader or writer waits on the pipe's slot mask (section 6). Special files `/dev/tty` (the process's controlling
   tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
   (console 1, the same rule), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
   is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
@@ -957,8 +1022,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   console 1 at boot, console N the first time it is shown (`con_switch` sees nobody whose controlling tty it is,
   sets a bit in `con_want` and readies init, which waits in `SYS_wait` with `WAIT_CONSOLE` - Linux's autovt does the
   same), and a login that ends is started again. So a console costs memory only once it is used.
-- **tty** (`tty.c`): one per console, line discipline in the kernel: echo, backspace, `^U`, `^C` (kills the
-  foreground process; if nobody is foreground the shell polls `ttyintr`), `^D`; Tab is kept in the line (Backspace
+- **tty** (`tty.c`): one per console, line discipline in the kernel: echo, backspace, `^U`, `^C` (SIGINT to the
+  foreground: a process group or, in the old form of `SYS_setfg`, one process; nobody, or a group with no living
+  member: `intr` is set for a shell that polls `ttyintr`), `^Z` (SIGTSTP the same way), `^D`; Tab is kept in the line (Backspace
   over it moves back one column on the screen; the line itself is right). A cooked line holds 511 characters
   (more than the shell's line editor, 478, so a line typed ahead for the shell is never cut here): a key past that
   rings the bell and marks the line too long, and at its end the whole line is refused with "tty: the line was too
@@ -1050,7 +1116,8 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   piece of code at a time. Lost wakeups (B5) cannot happen: `tty_read` and init's `proc_wait` (`WAIT_CONSOLE`) test
   "is there something?" and then block in kernel code with none of those points in between, so `kwork` - the only producer -
   cannot run between the two; input that
-  arrives meanwhile waits in its ring, and the `wake_io()` that delivers it comes after the reader is blocked. The
+  arrives meanwhile waits in its ring, and the wake-up that delivers it (`ev_wake`, section 6) comes after the reader
+  is blocked - and one that came between the check and the block is caught by the event bit. The
   idle loop checks `kwork_pending` with interrupts masked and then `STOP`s (which enables them in the same
   instruction), so input queued in between ends the wait at once. Latency: at once when the machine is idle or a
   system call ends; at the next tick (10 ms) while a program computes without system calls; every 256 bytes of
@@ -1119,7 +1186,12 @@ address that needs relocating and no hand-written code reaches a global, which a
 (DESIGN D13; crt0 built with `-DZEX2` has the ZEX2 header).
 
 `user/libz.c` is a tiny freestanding C library (`printf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
-environment, buffered line reader, a regex engine from the CUtils project).
+environment, buffered line reader, a regex engine from the CUtils project), and the POSIX signal and wait calls on
+top of DESIGN D16's system calls (section 6): `sigaction`, `signal` (BSD style, as glibc: with `SA_RESTART`),
+`sigprocmask` and the `sigset_t` macros, `kill`, `raise`, `alarm` (seconds), `pause`, `setpgid`, `getpgid`,
+`getpgrp`, `tcsetpgrp`, `poll` (milliseconds; also ports), `select`, `zsig_num` / `zsig_name` (the names `kill`,
+`pkill`, `timeout` and the shell take). The handler table and the entry the kernel sends handlers to (`_zsigentry`:
+pc-relative only, a5-relative data, so it works in a program with shared code) are libz's; the entry keeps `zerrno`.
 
 **`malloc`** (audit B2) has to live with `NREG` = 8 regions per process, so small blocks never take a region each.
 Every block has an 8-byte header: its capacity and a tag (small in use, big in use, free). Blocks of up to 32 KB
@@ -1232,11 +1304,11 @@ outputs (`tools/cmds-test.sh`).
 - `login` (run by `init` on each console, section 11) authenticates against `/etc/passwd`, drops root and starts
   the shell. Every console has its own login, so several users (or one user several times) can be logged in at
   once; nothing in the kernel records a "session".
-- **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill`, `SYS_jobctl`, `SYS_setfg` and `SYS_setpriority`
-  on another process): root may signal
+- **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill` - each member of a group, D16 -, `SYS_jobctl`,
+  `SYS_setfg` and `SYS_setpriority` on another process): root may signal
   any process but the idle one; others only a process whose real or effective uid equals their real or effective
   uid, or their own child, and never a built-in server (started from the kernel image: diskd, fsd, zfsd, boot) or a
-  privileged process. A refusal is -EACCES, no such process -ESRCH. `SYS_setfg` works on the caller's own terminal, 0 (nobody)
+  privileged process. A refusal is -EACCES (-EPERM in `kill`'s new form, as POSIX), no such process -ESRCH. `SYS_setfg` works on the caller's own terminal, 0 (nobody)
   is always allowed. `SYS_settime` and `SYS_ttymirror` are root only.
 - **Raw messages** (section 8): the filesystem servers do nothing for a message that did not come from the kernel
   unless it is root's, so a user cannot read or write by inode number, open files without the kernel's open-file

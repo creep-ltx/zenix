@@ -19,7 +19,8 @@ void term_log(const char *s, u32 n) { (void)s; (void)n; }
 static unsigned long typed;
 void tty_input(u8 c) { (void)c; typed++; }
 static int woken;
-void wake_io(void) { woken++; }
+void ev_wake(u32 *mask) { (void)mask; woken++; }     /* D16: the reader's slot mask */
+void ev_arm(u32 *mask) { (void)mask; }
 /* the scheduler, for a write that waits (audit A5): each sleep is one tick, and the tick drains the ring */
 volatile u32 ticks;
 static struct proc me;

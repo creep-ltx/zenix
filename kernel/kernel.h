@@ -97,11 +97,13 @@ void ints_on(void);
 void ints_off(void);
 void cpu_idle(void);
 u32 get_usp(void);                   /* the user stack pointer register (the running process's, in the kernel) */
+void set_usp(u32 usp);               /* D16: the live user stack pointer (a signal frame, sigreturn) */
 extern u32 kstack_bottom[];          /* the boot stack (pid 0, idle): 8 KB below kstack_top */
 void cache_enable(int is040plus);
 void cache_flush_code(void);         /* after writing code that will run: I-cache (and Emu68 JIT) flush */
 void exc_common(void);
 void irq2_entry(void);
+void irq2_c(u32 *rb);                /* D16: the level-2 entry saves all registers (d0-d7, a0-a6, then the CPU frame) */
 void irq_other_entry(void);         /* vectors 24-31 without a handler of their own */
 void irq_other_c(u32 fv);
 
@@ -261,6 +263,7 @@ struct pipe {
     u8 buf[2048];
     u16 rd, wr, count;
     u8 readers, writers;
+    u32 rwait, wwait;           /* D16: the slots waiting to read, to write (event.c) */
 };
 #define O_RDONLY 0
 #define O_WRONLY 1
@@ -286,6 +289,7 @@ struct uproc {                  /* returned by SYS_procinfo */
     s32 nice;                   /* the base priority on the nice scale, -20 (most favoured) .. 19 */
     u32 pri;                    /* the effective level now, 0 (highest) .. 31; PRI_IDLE for pid 0 */
     u32 shared;                 /* D13: bytes of shared code it runs (one copy for all its users; not in mem) */
+    u32 pgid;                   /* D16: its process group (rule 8: at the end) */
 };
 #define UPROC_FIRST 32          /* its first size (pid .. name): what a caller passing size 0 gets (D15 step 0) */
 /* the first sizes of the other structs written into a program's memory (frozen, audit3 B3: never sizeof, which
@@ -304,6 +308,83 @@ static inline u32 usize_n(u32 given, u32 first, u32 now)
     return !given ? first : given < first ? 0 : given < now ? given : now;
 }
 
+/* DESIGN D16: events (event.c). Fixed bits per process; objects carry masks of the waiting slots */
+#define EV_IO    1u                     /* an object it registered on (tty, pipe, serial device, port) changed */
+#define EV_SIG   2u                     /* a signal that runs a handler arrived */
+#define EV_CHILD 4u                     /* a child ended or stopped */
+#define EV_CON   8u                     /* init: a console wants a login, or the reset warning came */
+struct upollfd { s32 fd; u16 events, revents; };    /* SYS_evwait's items: Linux's struct pollfd (frozen) */
+#define POLLIN   0x0001                 /* poll's bits: Linux values (frozen) */
+#define POLLOUT  0x0004
+#define POLLERR  0x0008
+#define POLLHUP  0x0010
+#define POLLNVAL 0x0020
+#define POLLPORT 0x4000                 /* Zenix: fd is a port the caller owns; POLLIN = a message is queued */
+#define EV_MAXITEMS 32
+struct proc;
+void ev_post(struct proc *p, u32 bits);
+void ev_wake(u32 *mask);                /* every slot in the mask gets EV_IO; the mask empties */
+void ev_arm(u32 *mask);                 /* the caller registers on an object and clears EV_IO */
+long ev_block(u32 bits, int timed, u32 until, int restart);  /* 0 woken, -EINTR killed or a handler due */
+long ev_wait_items(u32 uitems, u32 n, s32 timeout);
+u16 vfs_poll(struct file *f);           /* registers the caller on the object (vfs.c) */
+u16 port_poll(int port);                /* ipc.c */
+u16 serdev_poll(void);                  /* serial.c */
+extern u32 serdev_wait;
+/* DESIGN D16: signals (signal.c). Numbers and default actions as Linux (frozen) */
+#define SIGHUP   1
+#define SIGINT   2
+#define SIGQUIT  3
+#define SIGKILL  9
+#define SIGUSR1  10
+#define SIGUSR2  12
+#define SIGPIPE  13
+#define SIGALRM  14
+#define SIGTERM  15
+#define SIGCHLD  17
+#define SIGCONT  18
+#define SIGSTOP  19
+#define SIGTSTP  20
+#define SIGTTIN  21
+#define SIGTTOU  22
+#define SIGWINCH 28
+#define NSIG     32
+#define SIGBIT(n) (1u << (n))
+#define SIG_UNCATCHABLE (SIGBIT(SIGKILL) | SIGBIT(SIGSTOP))
+#define SIG_DUE(p) ((p)->sig_pend & ~(p)->sig_block)        /* a handler is due (only caught ones are pending unblocked) */
+#define SIG_BLOCK   0
+#define SIG_UNBLOCK 1
+#define SIG_SETMASK 2
+#define SA_RESTART  0x10000000u
+struct usigaction {             /* SYS_sigaction (frozen, grows at the end; size first) */
+    u32 size;                   /* USIGACT_FIRST or more */
+    u32 handler;                /* 0 default, 1 ignore, anything else: caught (libz's table holds the function) */
+    u32 mask, flags;            /* blocked while it runs; SA_RESTART */
+    u32 entry;                  /* the program's entry for handlers (0: the one registered before) */
+};
+#define USIGACT_FIRST 20
+struct sigframe {               /* written on the user stack for a handler, read back by sigreturn (frozen, grows at the end) */
+    u32 size;                   /* SIGFRAME_FIRST */
+    u32 regs[16];               /* d0-d7, a0-a6, a7 (the user stack pointer before the frame) */
+    u32 pc;
+    u32 ccr;                    /* the condition codes: the status register's low 5 bits */
+    u32 sig;
+    u32 blocked;                /* the blocked mask before the handler */
+};
+#define SIGFRAME_FIRST 84
+#define SIG_STACK_ROOM (16u + 512u)    /* the frame leaves the guard (16 bytes) and 512 bytes below it (rule 5) */
+void sig_send(struct proc *p, int sig);
+long sig_group(int g, int sig, int check);
+long sig_action(u32 sig, u32 uact);
+long sig_procmask(u32 how, u32 set, u32 uold);
+long sig_alarm(u32 t);
+long sig_setpgid(int pid, int pg);
+void sig_deliver(u32 *rb, u32 nr);
+long sig_return(u32 *rb, u32 f);
+int may_signal(const struct proc *p);   /* syscall.c: 0, -ESRCH or -EACCES */
+/* the one test on the return paths: anything for sig_deliver to do? */
+#define SIG_WORK(p) (SIG_DUE(p) | (u32)(p)->killed | (p)->stop_req)
+
 /* proc.c */
 #define NPROC 32                /* 10 consoles with a login and a shell each, the servers, init and the commands they run */
 #define SLICE 5                 /* ticks (100 Hz) */
@@ -318,11 +399,13 @@ static inline u32 usize_n(u32 given, u32 first, u32 now)
 #define PRI_IDLE    NLEVEL              /* pid 0 runs below every level */
 #define NICE_LEVEL(n) ((u8)((((n) - NICE_MIN) * 4) / 5))
 #define PRIO_PROCESS 0                  /* SYS_getpriority / SYS_setpriority: who is a pid (0: the caller) */
-#define PRIO_PGRP    1                  /* not supported (no process groups): -EINVAL */
+#define PRIO_PGRP    1                  /* not supported: -EINVAL (frozen, D16 rule 8) */
 #define PRIO_USER    2                  /* who is a user id (0: the caller's real user id) */
 #define NREG  8                 /* extra memory regions per process */
 #define ENVMAX 1024
-enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE, P_MSG, P_STOP };
+/* P_WAIT and P_IO are no longer entered (D16: wait and I/O block in P_EV); SYS_procinfo still reports a process in
+ * P_EV as one of them (waiting for a child: P_WAIT, else P_IO), so the numbers programs know keep their meaning */
+enum pstate { P_FREE = 0, P_READY, P_SLEEP, P_WAIT, P_IO, P_ZOMBIE, P_MSG, P_STOP, P_EV };
 struct proc {                   /* start.S relies on the first three: */
     u32 *ksp;                   /*   offset 0 */
     u32 usp;                    /*   offset 4 */
@@ -330,7 +413,6 @@ struct proc {                   /* start.S relies on the first three: */
     int state;
     int pid, ppid;
     int exit_code;
-    int wait_for;               /* P_WAIT: child pid, -1 = any */
     u32 wake;                   /* P_SLEEP: tick to wake at */
     u32 base, span;             /* the process's own memory (image+bss+stack) */
     u32 kstk, ktop, ustk;       /* stack guard (proc.c): bottom and top of the kernel stack, bottom of the user stack
@@ -354,7 +436,7 @@ struct proc {                   /* start.S relies on the first three: */
     u8 prio;                    /* effective level (0 highest): blevel, or a better client's while serving it */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
     u8 ctty;                    /* controlling tty (console 1..NCONS): the console of fd 0 at spawn, else the parent's */
-    u8 wait_con;                /* P_WAIT with WAIT_CONSOLE: a console switch wakes it too */
+    u8 wait_con;                /* in wait with WAIT_CONSOLE: a console switch posts it EV_CON */
     int wait_port;              /* P_MSG: as a server the port being listened on, as a client the port called */
     char name[16];
     u32 kill_at;                /* when the first kill came (a service process: 5 s later it ends even mid-request) */
@@ -365,6 +447,17 @@ struct proc {                   /* start.S relies on the first three: */
     u32 code, csize;            /* D13, a ZEX2 program: where its code is (the segment's or its own private copy); user
                                  * pointers into it may be read by system calls, never written (user_ok_rd) */
     u32 a5;                     /* D13: the a5 its code needs (the start of its data part; 0 for a ZEXE program) */
+    /* D16 (event.c, signal.c) */
+    u32 ev_pending, ev_wait;    /* event bits (EV_*) that arrived / it waits for (0 when not in an event wait) */
+    u32 sig_pend, sig_block;    /* signals (bit n: signal n) pending, blocked */
+    u32 sig_catch, sig_ign, sig_rest;   /* handled by its program, ignored, restarted after the handler (SA_RESTART) */
+    u32 sig_entry;              /* the program's entry for handlers (libz), registered by sigaction */
+    u32 sig_mask[32];           /* per signal: what is blocked while its handler runs (sa_mask) */
+    u32 alarm_at;               /* alarm: SIGALRM at this tick (while alarm_on) */
+    int pgid;                   /* process group (inherited; no parent: its own pid) */
+    u8 alarm_on;
+    u8 sig_intr;                /* the system call gave up for a signal (a restart is possible, rule 4) */
+    u8 kill_sig;                /* ended by this signal's default action: wait status 128 + it */
 };
 extern struct proc procs[NPROC];
 extern struct proc *current;
@@ -386,7 +479,7 @@ void proc_cont(struct proc *p);
 void proc_reap_orphans(void);
 void sched_tick(u16 sr, int tick);   /* the level-2 interrupt: counts the slice; switches if it cut into user code and one is wanted */
 extern volatile u8 need_resched;     /* a process better than the running one is ready (or a sleeper is due) */
-extern volatile u32 wake_min;        /* no sleeper is due before this tick (while nsleep) */
+extern volatile u32 wake_min;        /* no sleeper or alarm is due before this tick (while ntimer) */
 void resched(void);                  /* act on need_resched: switch only to a strictly better level */
 void sleep_until(u32 tick);          /* current to P_SLEEP until tick (the caller then schedules) */
 int proc_renice(struct proc *p, int nice);   /* set the base priority (clamped); the effective level follows */
@@ -411,11 +504,10 @@ static inline int stack_user_suspect(const struct proc *p, u32 usp)
 {
     return p->ustk && (usp < p->ustk + 16 || usp > p->base + p->span || *(const u32 *)(unsigned long)p->ustk != STACK_GUARD0);
 }
-void wake_io(void);
 void ready(struct proc *p);         /* make a blocked process runnable; a stopped one stays stopped (D16 rule 2) */
-extern int nsleep;
-void block_io(void);
+extern int ntimer;                  /* sleepers (P_SLEEP) plus alarms set: gates the tick's scan (D16 rule 3) */
 void proc_kill(struct proc *p);       /* killed: 1 a kill, 2 a fault (139), 3 a second kill (at once) */
+int kill_status(const struct proc *p);   /* the exit status of a killed process: 139 a fault, 128 + n signal n, 130 */
 int proc_kill_now(void);              /* the end of a system call: is current killed and may it end now? */
 struct proc *proc_by_pid(int pid);
 
@@ -445,6 +537,7 @@ struct port {
     char name[16];
     struct umsg *head, *tail;
     struct proc *waiter;        /* server blocked in recv */
+    u32 evw;                    /* D16: the slots polling it (SYS_evwait with POLLPORT) */
 };
 extern struct port ports[NPORT];
 #define PORT_ID(i) ((int)((ports[i].gen << 8) | (u32)(i)))     /* a port number: (generation << 8) | slot */
@@ -564,8 +657,9 @@ void tty_inject(int tty, const char *s);   /* bytes into the input queue, bypass
 void tty_release(int pid);
 int tty_take_intr(int tty);             /* and clear: was ^C typed with nobody to kill? */              /* a process exited: undo its mode */
 long tty_write(int tty, const void *buf, u32 n);
-void tty_setfg(int tty, int pid);
-int tty_getfg(int tty);
+void tty_setfg(int tty, int id, int group);   /* the foreground: a pid, or (group) a process group; 0 nobody */
+int tty_fgpid(int tty);                 /* the foreground's pid when it is a single process, else 0 */
+u16 tty_poll(int tty);                  /* D16: POLLIN when a read would not wait (registers the caller); POLLOUT */
 int tty_of(const struct proc *p);
 
 /* syscalls: TRAP #0, number in d0, args d1-d3, result in d0 */
@@ -649,6 +743,15 @@ int tty_of(const struct proc *p);
 #define SYS_reboot      80   /* note (0, BOOTNOTE_AMIGAOS, BOOTNOTE_ZENIX): root only; sync, stop disk writes, reset */
 #define SYS_svc         81   /* op (SVC_*), arg, buffer: the service manager (D11, svc.c) */
 #define SYS_update      82   /* op (UPD_*), a, b: the update bundle, the kernel's version, the update note (D15) */
+/* DESIGN D16, events and signals (docs/d16-events-and-signals.md). SYS_kill's third argument 1: the new form (pid, sig;
+ * sig 0 only asks whether it exists; pid 0 the caller's group, -g group g); 0: the old form, as before. SYS_setfg's
+ * second argument 1: the foreground is a process group. SYS_jobctl's stop and continue are SIGSTOP and SIGCONT. */
+#define SYS_evwait      83   /* struct upollfd *, count, timeout in ticks (-1: none) -> items ready, 0, -EINTR */
+#define SYS_sigaction   84   /* sig, struct usigaction * (0: only ask) -> old disposition: 0 default, 1 ignored, 2 caught */
+#define SYS_sigprocmask 85   /* how (SIG_BLOCK ...), set, u32 *old (0: none) */
+#define SYS_sigreturn   86   /* the frame the entry was given: back from a handler (returns the frame's d0) */
+#define SYS_alarm       87   /* ticks (0: off) -> ticks the previous alarm had left */
+#define SYS_setpgid     88   /* pid (0: self), pgid (0: pid): oneself or one's own children */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

@@ -78,6 +78,8 @@ EXIT STATUS
     was refused or an install was rolled back, 2 for a wrong argument.
 
 NOTES
+    zup ignores SIGPIPE: zup | less, and quitting less early, never ends
+    an install half-way (its messages just go nowhere then).
     The bundle lies in memory that is no process's own: zup copies what it
     writes through its own buffers (a system call would refuse a pointer
     into the bundle). Only the root filesystem is changed; /home and other

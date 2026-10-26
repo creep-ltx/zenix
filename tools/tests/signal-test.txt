@@ -1,6 +1,21 @@
 wait zenix:/# 90
 sleep 1
-send sigtest stopsrv; echo sigtest-end-$((40+2))\r
-wait sigtest-end-42 120
+send sigtest stopsrv handler block ignore kill alarm restart chld pipe poll group cont srvcall stack forged; echo sigtest-end-$((40+2))\r
+wait sigtest-end-42 240
+sleep 1
+send /tests/sigtestpure handler block ignore alarm restart chld cont srvcall forged | sed 's/^sigtest /pure /'; echo pure-end-$((40+3))\r
+wait pure-end-43 240
+sleep 1
+send sigtest ttyread\r
+wait sigtest: type a line 30
+sleep 1
+send abc\r
+wait sigtest ttyread: 30
+send sigtest select\r
+wait sigtest: type for select 30
+sleep 1
+send xyz\r
+wait sigtest select: 30
+sleep 1
 sleep 1
 stop

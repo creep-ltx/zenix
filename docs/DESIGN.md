@@ -170,12 +170,13 @@ in memory, as it already does for a RAM disk; Zenix's installer applies them tra
 the previous version kept, the owner's changed settings never overwritten); the boot menu's "Zenix (previous)" goes
 back. The same bundle and installer serve the serial cable and the network later (`zpkg`). The full design:
 [d15-self-updates.md](d15-self-updates.md).
-## D16. Events and signals (roadmap block 2, the first item; design note revision 3 after two reviews: ready to build)
+## D16. Events and signals (roadmap block 2, the first item; design note revision 3 after two reviews; built on branch d16, 2026-10-26)
 **Why.** A process can wait for only one thing at a time, every I/O event wakes every waiting process, and there are no
 Unix signals (no handlers for Ctrl-C, no SIGCHLD, SIGALRM or SIGPIPE): the network, telnet and ported programs need
 all three. **How.** Exec's signal bits underneath (a pending and a waiting word per process, one AND decides a wake-up,
 no lost wake-ups), per-object waiters, `poll`/`select` on one new call, and Unix signals with handlers delivered through
-a frame on the user stack and a libz trampoline. The full design: [d16-events-and-signals.md](d16-events-and-signals.md).
+a frame on the user stack and a libz trampoline; process groups, so ^C and ^Z reach a whole pipeline. The full design
+and what was built: [d16-events-and-signals.md](d16-events-and-signals.md) (section 15, "As built").
 ## D17. The ext2 clean mark and the check at boot (audit 2026-10-26 F5, F6; design note revision 2 after two reviews; built on branch fsck)
 **Why.** ext2 has no journal: a power cut while it is written leaves leaks (since F5 never worse), but Zenix never
 marked a volume "not cleanly unmounted" during use and never repaired one by itself. **How.** fsd marks a writable

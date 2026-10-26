@@ -48,7 +48,7 @@ static struct file *getfd(u32 fd)
  * (audit D): root may (any process but the idle one); others only a process whose real or effective user id is their
  * real or effective user id, or their own child - never a built-in server (diskd, fsd, zfsd, boot:
  * started from the kernel image, ppid 0) or a privileged process. 0, -3 (ESRCH: no such process) or -13 (EACCES). */
-static int may_signal(const struct proc *p)
+int may_signal(const struct proc *p)
 {
     if (!p || p->pid == 0 || p->state == P_FREE)
         return -ESRCH;
@@ -173,7 +173,7 @@ out:
  * d1-d3 = arguments; the result goes back into rb[0]. */
 void syscall_c(u32 *rb)
 {
-    u32 a1 = rb[1], a2 = rb[2], a3 = rb[3];
+    u32 nr = rb[0], a1 = rb[1], a2 = rb[2], a3 = rb[3];
     s32 r = -ENOSYS;                    /* an unknown call number; every failing check below sets its own errno */
     struct file *f;
     /* the checks, each setting r when it fails (so a condition reads as "all of these hold") */
@@ -196,7 +196,8 @@ void syscall_c(u32 *rb)
             proc_exit(139);
         }
     }
-    switch (rb[0]) {
+    current->sig_intr = 0;              /* set only by a blocking site of this call that gave up for a handler (D16) */
+    switch (nr) {
     case SYS_exit:
         proc_exit((int)a1);
     case SYS_write:
@@ -228,13 +229,12 @@ void syscall_c(u32 *rb)
     case SYS_wait:
         r = proc_wait((int)a1, (int)a2);
         break;
-    case SYS_sleep: {
+    case SYS_sleep: {                   /* a stop and continue in between wakes it early: it sleeps on; a handler ends it
+                                         * (-EINTR, never restarted: D16 rule 4) */
         u32 until = ticks + a1;
-        while ((s32)(ticks - until) < 0 && !current->killed) {    /* a stop and continue in between wakes it early */
-            sleep_until(until);
-            schedule();
-        }
         r = 0;
+        while ((s32)(ticks - until) < 0 && !(r = (s32)ev_block(0, 1, until, 0)))
+            ;
         break;
     }
     case SYS_open: {
@@ -246,8 +246,8 @@ void syscall_c(u32 *rb)
     case SYS_mkdir: case SYS_unlink: case SYS_rmdir: {
         char path[64];
         if (CSTR(path, a1))
-            r = (s32)(rb[0] == SYS_mkdir ? vfs_mkdir(path) :
-                      rb[0] == SYS_unlink ? vfs_unlink(path) : vfs_rmdir(path));
+            r = (s32)(nr == SYS_mkdir ? vfs_mkdir(path) :
+                      nr == SYS_unlink ? vfs_unlink(path) : vfs_rmdir(path));
         break;
     }
     case SYS_rename: {
@@ -384,7 +384,7 @@ void syscall_c(u32 *rb)
     case SYS_chmod: case SYS_utimes: {
         char path[64];
         if (CSTR(path, a1))
-            r = (s32)vfs_path1(rb[0] == SYS_chmod ? FS_CHMOD : FS_UTIMES, path, a2, 0);
+            r = (s32)vfs_path1(nr == SYS_chmod ? FS_CHMOD : FS_UTIMES, path, a2, 0);
         break;
     }
     case SYS_lstat: {
@@ -402,7 +402,7 @@ void syscall_c(u32 *rb)
     case SYS_link: case SYS_symlink: {
         char p1[64], p2[64];
         if (CSTR(p1, a1) && CSTR(p2, a2))
-            r = (s32)vfs_link(rb[0] == SYS_link ? FS_LINK : FS_SYMLINK, p1, p2);
+            r = (s32)vfs_link(nr == SYS_link ? FS_LINK : FS_SYMLINK, p1, p2);
         break;
     }
     case SYS_time:
@@ -477,7 +477,7 @@ void syscall_c(u32 *rb)
     case SYS_blk_read: case SYS_blk_write:
         /* raw disk: only the disk server (trusted; the buffer is a client's, so
          * it is not checked against this process's own memory) */
-        r = !current->priv ? -EPERM : rb[0] == SYS_blk_read ? blk_read(a1, a2, (void *)a3)
+        r = !current->priv ? -EPERM : nr == SYS_blk_read ? blk_read(a1, a2, (void *)a3)
                                                               : blk_write(a1, a2, (const void *)a3);
         break;
     case SYS_input:
@@ -545,7 +545,8 @@ void syscall_c(u32 *rb)
             struct uproc uu, *u = &uu;
             u->pid = (u32)p->pid;
             u->ppid = (u32)p->ppid;
-            u->state = (u32)p->state;
+            u->state = p->state != P_EV ? (u32)p->state : (p->ev_wait & EV_CHILD) ? P_WAIT : P_IO;
+            u->pgid = (u32)p->pgid;
             u->mem = p->span + (p->seg ? 0 : p->csize);     /* its own memory: a private copy of code counts, */
             for (int i = 0; i < NREG; i++)                  /* and the regions it asked for (malloc, sh's arena) */
                 if (p->reg[i].base)
@@ -565,19 +566,37 @@ void syscall_c(u32 *rb)
             r = 0;
         }
         break;
-    case SYS_setfg:                     /* on the caller's own tty; 0 = nobody, else a process the caller may signal */
-        if (a1 == 0 || !(r = may_signal(proc_by_pid((int)a1)))) {
-            tty_setfg(tty_of(current), (int)a1);
+    case SYS_setfg:                     /* on the caller's own tty; 0 = nobody, else a process the caller may signal, or
+                                         * (a2 1, D16) a process group with a member the caller may signal */
+        if (a1 == 0 || !(r = a2 ? (s32)sig_group((int)a1, 0, 1) : may_signal(proc_by_pid((int)a1)))) {
+            tty_setfg(tty_of(current), (int)a1, a2 != 0);
             r = 0;
         }
         break;
-    case SYS_jobctl: {
+    case SYS_jobctl: {                  /* D16 rule 9: SIGSTOP and SIGCONT (so a SIGCONT handler runs) */
         struct proc *p = proc_by_pid((int)a1);
-        if (!(r = may_signal(p))) {
-            if (a2 == 0) proc_stop(p); else proc_cont(p);
-        }
+        if (!(r = may_signal(p)))
+            sig_send(p, a2 ? SIGCONT : SIGSTOP);
         break;
     }
+    case SYS_evwait:
+        r = (s32)ev_wait_items(a1, a2, (s32)a3);
+        break;
+    case SYS_sigaction:
+        r = (s32)sig_action(a1, a2);
+        break;
+    case SYS_sigprocmask:
+        r = (s32)sig_procmask(a1, a2, a3);
+        break;
+    case SYS_sigreturn:
+        r = (s32)sig_return(rb, a1);
+        break;
+    case SYS_alarm:
+        r = (s32)sig_alarm(a1);
+        break;
+    case SYS_setpgid:
+        r = (s32)sig_setpgid((int)a1, (int)a2);
+        break;
     case SYS_getpriority:
         r = (s32)do_priority(0, a1, a2, 0);
         break;
@@ -648,12 +667,26 @@ void syscall_c(u32 *rb)
         else
             r = -EINVAL;
         break;
-    case SYS_kill: {
-        struct proc *p = proc_by_pid((int)a1);
-        if (!(r = may_signal(p)))
-            proc_kill(p);
+    case SYS_kill:                      /* the old form (a3 0): end it, status 130, D11's rules. The new one (a3 1, D16
+                                         * section 7): a2 the signal (0: does it exist?), a1 > 0 a pid, 0 the caller's
+                                         * group, < -1 a group; rule 15's results */
+        if (!a3) {
+            struct proc *p = proc_by_pid((int)a1);
+            if (!(r = may_signal(p)))
+                proc_kill(p);
+        } else if (a3 != 1 || a2 >= NSIG || (s32)a1 == -1)
+            r = -EINVAL;
+        else if ((s32)a1 <= 0)
+            r = (s32)sig_group(a1 ? -(s32)a1 : current->pgid, (int)a2, 1);
+        else {
+            struct proc *p = proc_by_pid((int)a1);
+            r = may_signal(p);
+            if (r == -EACCES)
+                r = -EPERM;
+            if (!r && a2)
+                sig_send(p, (int)a2);
+        }
         break;
-    }
     }
     rb[0] = (u32)r;
     if (kwork_pending)
@@ -661,5 +694,7 @@ void syscall_c(u32 *rb)
     if (need_resched)
         resched();                      /* a better process became ready (a reply, a wake, input): it runs now */
     if (proc_kill_now())
-        proc_exit(current->killed == 2 ? 139 : 130);
+        proc_exit(kill_status(current));
+    if (SIG_WORK(current))
+        sig_deliver(rb, nr);            /* D16: a stop, then a handler; the very last step before user mode */
 }

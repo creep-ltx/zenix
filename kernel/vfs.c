@@ -47,15 +47,18 @@ __attribute__((noinline)) void file_close(struct file *f)
         fs_call_on(f->fs, FS_CLOSE, f->ino, 0, 0, 0);
     if (f->type == FT_SERIAL)
         serdev_close();
-    if (f->type == FT_PIPE_R && f->pipe)
-        f->pipe->readers--;
-    if (f->type == FT_PIPE_W && f->pipe)
-        f->pipe->writers--;
-    if ((f->type == FT_PIPE_R || f->type == FT_PIPE_W) && f->pipe &&
-        !f->pipe->readers && !f->pipe->writers)
-        kfree(f->pipe);
+    struct pipe *pp = (f->type == FT_PIPE_R || f->type == FT_PIPE_W) ? f->pipe : 0;
+    if (pp) {
+        if (f->type == FT_PIPE_R)
+            pp->readers--;
+        else
+            pp->writers--;
+        ev_wake(&pp->rwait);                /* blocked peers check again: end of file, a broken pipe (D16) */
+        ev_wake(&pp->wwait);
+        if (!pp->readers && !pp->writers)
+            kfree(pp);
+    }
     f->type = FT_NONE;
-    wake_io();                              /* blocked pipe peers re-check */
 }
 
 int fd_install(struct proc *p, struct file *f)
@@ -68,6 +71,8 @@ int fd_install(struct proc *p, struct file *f)
     return -EMFILE;
 }
 
+/* D16: a blocked reader or writer waits on the pipe's slot mask (event.c's order); a handler interrupts the wait
+ * (-EINTR, restarted with SA_RESTART), a write that already moved bytes returns their count */
 __attribute__((optimize("O2"))) static long pipe_read(struct file *f, void *buf, u32 n)
 {
     struct pipe *p = f->pipe;
@@ -75,6 +80,7 @@ __attribute__((optimize("O2"))) static long pipe_read(struct file *f, void *buf,
     for (;;) {
         if (current->killed)
             return -EINTR;
+        ev_arm(&p->rwait);
         if (p->count) {
             u32 got = 0;
             while (got < n && p->count) {
@@ -82,12 +88,14 @@ __attribute__((optimize("O2"))) static long pipe_read(struct file *f, void *buf,
                 p->rd = (u16)((p->rd + 1) % sizeof p->buf);
                 p->count--;
             }
-            wake_io();
+            ev_wake(&p->wwait);
             return (long)got;
         }
         if (!p->writers)
             return 0;                       /* end of file */
-        block_io();
+        long e = ev_block(EV_IO, 0, 0, 1);
+        if (e)
+            return e;
     }
 }
 
@@ -99,19 +107,46 @@ __attribute__((optimize("O2"))) static long pipe_write(struct file *f, const voi
     while (put < n) {
         if (current->killed)
             return -EINTR;
-        if (!p->readers)
-            return -EPIPE;                  /* broken pipe */
+        if (!p->readers) {
+            sig_send(current, SIGPIPE);     /* broken pipe: by default the writer ends (141); ignored: -EPIPE */
+            return -EPIPE;
+        }
         if (p->count < sizeof p->buf) {
             p->buf[p->wr] = s[put++];
             p->wr = (u16)((p->wr + 1) % sizeof p->buf);
             p->count++;
             continue;
         }
-        wake_io();
-        block_io();
+        ev_wake(&p->rwait);
+        ev_arm(&p->wwait);
+        if (p->count < sizeof p->buf || !p->readers)
+            continue;
+        long e = ev_block(EV_IO, 0, 0, !put);
+        if (e)
+            return put ? (long)put : e;
     }
-    wake_io();
+    ev_wake(&p->rwait);
     return (long)put;
+}
+
+/* SYS_evwait's check of one open file (D16): what a read or write would do without waiting; registers the caller on
+ * the object. Files, /dev/null and the like never wait */
+u16 vfs_poll(struct file *f)
+{
+    struct pipe *p = f->pipe;
+    switch (f->type) {
+    case FT_TTY:
+        return tty_poll((int)f->off);
+    case FT_SERIAL:
+        return serdev_poll();
+    case FT_PIPE_R:
+        ev_arm(&p->rwait);
+        return p->count ? POLLIN : !p->writers ? POLLIN | POLLHUP : 0;
+    case FT_PIPE_W:
+        ev_arm(&p->wwait);
+        return !p->readers ? POLLERR : p->count < sizeof p->buf ? POLLOUT : 0;
+    }
+    return POLLIN | POLLOUT;
 }
 
 long vfs_pipe(int fds[2])
@@ -686,10 +721,13 @@ long vfs_read(struct file *f, void *buf, u32 n)
         for (;;) {
             if (current->killed)
                 return -EINTR;
+            ev_arm(&serdev_wait);
             u32 got = serdev_take(buf, n);
             if (got)
                 return (long)got;
-            block_io();
+            long e = ev_block(EV_IO, 0, 0, 1);
+            if (e)
+                return e;
         }
     case FT_NULL: case FT_KLOG:
         return 0;

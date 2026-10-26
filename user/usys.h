@@ -22,7 +22,7 @@ static inline int sys3(int n, u32 a, u32 b, u32 c)
  * pass our buffer's size (sizeof) so a newer kernel never writes past it; an older one writes its smaller struct */
 struct udirent { u32 ino, type; char name[64]; };
 struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
-struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 shared; };   /* nice -20..19; pri: the level now, 0 highest, 32 idle; mem: its own memory; shared: the shared code it runs (D13) */
+struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 shared; u32 pgid; };   /* nice -20..19; pri: the level now, 0 highest, 32 idle; mem: its own memory; shared: the shared code it runs (D13); pgid: its process group (D16) */
 
 #define S_IFMT  0170000
 #define S_IFDIR 0040000
@@ -59,7 +59,7 @@ static inline u32 sys_ticks(void) { return (u32)sys3(20, 0, 0, 0); }
 static inline int sys_procinfo(u32 i, struct uproc *p) { return sys3(21, i, (u32)p, sizeof *p); }
 static inline int sys_meminfo(u32 out[4]) { return sys3(22, (u32)out, 16, 0); }
 static inline int sys_setfg(int pid) { return sys3(23, (u32)pid, 0, 0); }
-static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }
+static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }   /* the old form: end it (status 130) */
 
 #define O_RDONLY 0
 #define O_WRONLY 1
@@ -127,7 +127,7 @@ static inline int sys_umount(const char *path) { return sys3(70, (u32)path, 0, 0
 static inline int sys_mountinfo(u32 index, struct umountinfo *out) { return sys3(71, index, (u32)out, sizeof *out); }
 static inline int sys_blk_flush(void) { return sys3(72, 0, 0, 0); }
 #define PRIO_PROCESS 0    /* priorities (DESIGN D10): who is a pid, 0 = the caller */
-#define PRIO_PGRP    1    /* not supported: no process groups */
+#define PRIO_PGRP    1    /* not supported (-EINVAL) */
 #define PRIO_USER    2    /* who is a user id, 0 = the caller's */
 static inline int sys_getpriority(int which, int who) { return sys3(78, (u32)which, (u32)who, 0); }   /* 20 - nice, or -errno */
 static inline int sys_setpriority(int which, int who, int nice) { return sys3(79, (u32)which, (u32)who, (u32)nice); }
@@ -166,3 +166,47 @@ struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };
 #define UPDNOTE_CONFIRMED 3u    /* login's prompt is up on console 1: this kernel works (login.c) */
 #define UPDNOTE_ROOTFAILED 4u   /* the kernel makes a CONFIRMED over a FAILED of the same version this (audit3 B1) */
 static inline int sys_update(u32 op, u32 a, u32 b) { return sys3(82, op, a, b); }
+/* events and signals (DESIGN D16, docs/d16-events-and-signals.md; libz.h has the POSIX calls on top of these) */
+struct pollfd { int fd; short events, revents; };
+#define POLLIN   0x0001         /* Linux's values */
+#define POLLOUT  0x0004
+#define POLLERR  0x0008
+#define POLLHUP  0x0010
+#define POLLNVAL 0x0020
+#define POLLPORT 0x4000         /* Zenix: fd is a port this process owns; POLLIN when a message is queued */
+static inline int sys_evwait(struct pollfd *f, u32 n, int ticks) { return sys3(83, (u32)f, n, (u32)ticks); }   /* ticks -1: no limit */
+struct usigaction { u32 size, handler, mask, flags, entry; };   /* handler 0 default, 1 ignore, else caught */
+static inline int sys_sigaction(int sig, const struct usigaction *a) { return sys3(84, (u32)sig, (u32)a, 0); }   /* old: 0 default, 1 ignored, 2 caught */
+static inline int sys_sigprocmask(int how, u32 set, u32 *old) { return sys3(85, (u32)how, set, (u32)old); }
+static inline int sys_sigreturn(void *frame) { return sys3(86, (u32)frame, 0, 0); }
+static inline int sys_alarm(u32 ticks) { return sys3(87, ticks, 0, 0); }       /* ticks the previous alarm had left */
+static inline int sys_setpgid(int pid, int pg) { return sys3(88, (u32)pid, (u32)pg, 0); }
+static inline int sys_killsig(int pid, int sig) { return sys3(24, (u32)pid, (u32)sig, 1); }   /* pid 0: own group, -g: group g */
+static inline int sys_setfgpg(int pg) { return sys3(23, (u32)pg, 1, 0); }     /* the tty's foreground: process group pg */
+#define SIGHUP   1
+#define SIGINT   2
+#define SIGQUIT  3
+#define SIGILL   4
+#define SIGTRAP  5
+#define SIGABRT  6
+#define SIGBUS   7
+#define SIGFPE   8
+#define SIGKILL  9
+#define SIGUSR1  10
+#define SIGSEGV  11
+#define SIGUSR2  12
+#define SIGPIPE  13
+#define SIGALRM  14
+#define SIGTERM  15
+#define SIGCHLD  17
+#define SIGCONT  18
+#define SIGSTOP  19
+#define SIGTSTP  20
+#define SIGTTIN  21
+#define SIGTTOU  22
+#define SIGWINCH 28
+#define NSIG     32
+#define SIG_BLOCK   0
+#define SIG_UNBLOCK 1
+#define SIG_SETMASK 2
+#define SA_RESTART  0x10000000
