@@ -12,6 +12,15 @@
 
 #define HLINES 200                      /* scrollback lines per console */
 
+/* the escape parser's states (ECMA-48): after ESC; inside CSI; inside a control string (OSC, DCS, APC, PM, SOS:
+ * swallowed up to BEL or ESC); after ESC and an intermediate byte (ESC ( B: swallowed up to the final byte) */
+#define E_ESC 1
+#define E_CSI 2
+#define E_STR 3
+#define E_ESCI 4
+#define NPAR 16                         /* CSI parameters kept; more are read and ignored */
+#define PMAX 9999                       /* a parameter's largest value: more digits keep it there */
+
 #define A_INV 1
 #define A_UND 2
 #define A_BOLD 4
@@ -24,7 +33,10 @@ struct term {
     int top, bot;                       /* scroll region (rows, inclusive) */
     int wrap;                           /* last column written: wrap before the next character */
     int curvis;
-    int esc, nparam, param[6], priv;    /* escape sequence parser */
+    u8 esc, priv, inter;                /* escape sequence parser: state (E_*), private marker, intermediate seen */
+    u8 nparam;                          /* parameters seen (up to NPAR are kept) */
+    u16 sub;                            /* bit i: parameter i came after ':' (a sub-parameter, 38:5:196) */
+    u16 param[NPAR];
     u8 (*hist)[COLS];                   /* scrollback: the oldest line is hist[(hhead - hn) mod HLINES] */
     int hn, hhead;
     int back;                           /* lines scrolled back (0 = live) */
@@ -44,7 +56,7 @@ static void reset_term(struct term *t)
     t->bot = trows - 1;
     t->wrap = 0;
     t->curvis = 1;
-    t->esc = t->nparam = t->priv = 0;
+    t->esc = 0;
 }
 
 static struct term *get(int w)
@@ -237,6 +249,8 @@ static int clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; 
 static void csi(struct term *t, int vis, char c)
 {
     int n = arg(t, 0, 1);
+    if (t->priv && c != 'h' && c != 'l')
+        return;                                         /* private sequences (CSI > c, CSI ? 6 n ...): not ours */
     t->wrap = 0;
     switch (c) {
     case 'A': t->cy = clamp(t->cy - n, t->cy >= t->top ? t->top : 0, trows - 1); break;
@@ -325,7 +339,7 @@ static void csi(struct term *t, int vis, char c)
         }
         break;
     case 'h': case 'l':
-        if (t->priv && t->nparam && t->param[0] == 25)
+        if (t->priv == '?' && t->nparam && t->param[0] == 25)
             t->curvis = (c == 'h');
         break;
     case 'n':
@@ -349,47 +363,85 @@ static void csi(struct term *t, int vis, char c)
 /* one character; the caller hides and redraws the cursor around a batch */
 static void put1(struct term *t, int vis, u8 ch)
 {
-    if (t->esc == 1) {                                  /* after ESC */
-        t->esc = 0;
-        switch (ch) {
-        case '[': t->esc = 2; t->nparam = 0; t->priv = 0; t->param[0] = 0; return;
-        case '7': t->sx = t->cx; t->sy = t->cy; return;
-        case '8': t->cx = t->sx; t->cy = t->sy; t->wrap = 0; return;
-        case 'D': linefeed(t, vis); return;
-        case 'E': t->cx = 0; linefeed(t, vis); return;
-        case 'M':
-            if (t->cy == t->top) scroll_down(t, vis); else if (t->cy > 0) t->cy--;
+    if (t->esc) {
+        if (ch == 0x18 || ch == 0x1A) {                 /* CAN, SUB: the sequence is cancelled */
+            t->esc = 0;
             return;
-        case 'c': reset_term(t); if (vis) gfx_clear_text(); return;
         }
-        return;
-    }
-    if (t->esc == 2) {                                  /* CSI: digits ; digits ... final */
-        if (ch == '?') { t->priv = 1; return; }
+        if (t->esc == E_STR) {                          /* OSC and other strings (window titles): swallowed */
+            if (ch == 7)
+                t->esc = 0;
+            else if (ch == 27)
+                t->esc = E_ESC;                         /* ESC \ ends it (the \ is then an unknown final, swallowed) */
+            return;
+        }
+        if (ch < 0x20 && ch != 27)                      /* a control inside a sequence acts and the sequence goes on */
+            goto control;
+        if (t->esc == E_ESC) {                          /* after ESC */
+            t->esc = 0;
+            switch (ch) {
+            case 27: t->esc = E_ESC; return;
+            case '[': t->esc = E_CSI; t->nparam = 0; t->priv = 0; t->inter = 0; t->sub = 0; t->param[0] = 0; return;
+            case ']': case 'P': case '_': case '^': case 'X': t->esc = E_STR; return;
+            case '7': t->sx = t->cx; t->sy = t->cy; return;
+            case '8': t->cx = t->sx; t->cy = t->sy; t->wrap = 0; return;
+            case 'D': linefeed(t, vis); return;
+            case 'E': t->cx = 0; linefeed(t, vis); return;
+            case 'M':
+                if (t->cy == t->top) scroll_down(t, vis); else if (t->cy > 0) t->cy--;
+                return;
+            case 'c': reset_term(t); if (vis) gfx_clear_text(); return;
+            }
+            if (ch >= 0x20 && ch <= 0x2F)               /* ESC ( B and the like: swallowed up to the final byte */
+                t->esc = E_ESCI;
+            return;                                     /* any other: an unknown sequence, swallowed */
+        }
+        if (t->esc == E_ESCI) {
+            if (ch == 27)
+                t->esc = E_ESC;
+            else if (ch >= 0x30)
+                t->esc = 0;
+            return;
+        }
+        /* CSI: parameter bytes 0x30-0x3F, intermediate bytes 0x20-0x2F, a final byte 0x40-0x7E */
         if (ch >= '0' && ch <= '9') {
             if (!t->nparam) t->nparam = 1;
-            t->param[t->nparam - 1] = t->param[t->nparam - 1] * 10 + (ch - '0');
+            if (t->nparam <= NPAR) {
+                u16 *v = &t->param[t->nparam - 1];
+                u32 nv = (u32)*v * 10 + (ch - '0');
+                *v = (u16)(nv > PMAX ? PMAX : nv);
+            }
             return;
         }
-        if (ch == ';') {
+        if (ch == ';' || ch == ':') {
             if (!t->nparam) { t->nparam = 1; t->param[0] = 0; }
-            if (t->nparam < 6) { t->param[t->nparam++] = 0; }
+            if (t->nparam < NPAR) {
+                if (ch == ':') t->sub |= (u16)(1u << t->nparam);
+                t->param[t->nparam] = 0;
+            }
+            if (t->nparam <= NPAR) t->nparam++;
             return;
         }
+        if (ch >= '<' && ch <= '?') { t->priv = ch; return; }
+        if (ch >= 0x20 && ch <= 0x2F) { t->inter = 1; return; }
+        if (ch == 27) { t->esc = E_ESC; return; }
         t->esc = 0;
-        if (ch >= 0x40 && ch <= 0x7E)
+        if (ch >= 0x40 && ch <= 0x7E && !t->inter) {
+            if (t->nparam > NPAR) t->nparam = NPAR;
             csi(t, vis, (char)ch);
-        return;
+        }
+        return;                                         /* with an intermediate, or a byte that ends it badly: swallowed */
     }
+control:
     switch (ch) {
-    case 27: t->esc = 1; return;
+    case 27: t->esc = E_ESC; return;
     case '\n': t->cx = 0; t->wrap = 0; linefeed(t, vis); return;     /* newline = CR+LF on output, as ttys do */
     case '\r': t->cx = 0; t->wrap = 0; return;
     case '\b': if (t->cx) t->cx--; t->wrap = 0; return;
     case '\t': t->cx = (t->cx + 8) & ~7; if (t->cx >= COLS) t->cx = COLS - 1; t->wrap = 0; return;
     case 7: beep(880, 80); return;                      /* bell */
     }
-    if (ch < 32)
+    if (ch < 32 || t->esc)
         return;
     if (t->wrap) {                                      /* deferred wrap, as terminals do */
         t->cx = 0;

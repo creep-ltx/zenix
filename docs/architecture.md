@@ -815,13 +815,20 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
   NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100: cursor motion, erase, insert/delete, scroll regions,
   bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position. Arrows and function keys
-  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it.
+  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it. The escape parser follows
+  ECMA-48 (DESIGN D14): a CSI sequence is parameter bytes 0x30-0x3F (up to 16 parameters kept, each clamped at 9999;
+  `:` sub-parameters as in `38:5:196`), intermediate bytes 0x20-0x2F and a final byte 0x40-0x7E; a sequence it does
+  not know is swallowed whole, never printed; a private marker (`?`, `>`, `=`, `<`) makes it a private sequence, of
+  which only `?25` (`h`/`l`, the cursor) is acted on; OSC and the other control strings (window titles) are swallowed up
+  to BEL or `ESC \`, `ESC ( B` and the like up to their final byte; CAN and SUB cancel a sequence; a control character
+  inside one acts and the sequence goes on (tools/term-test.sh, on the host).
 - **Display** (`gfx.c`): 640 pixels wide hires, one bitplane, the whole screen text (grey on black). `gfx_init`
   measures the beam's last line for about 60 ms (E-clock timed): above 280 (312 on PAL) the display is 256 lines,
   32 rows; else (262 on NTSC) 200 lines, 25 rows and `DIWSTOP` to match, so no row is hidden below the picture. A
   two-colour **Copper list** points at the text; scrolling just moves the Copper's bitplane pointer at vertical
   blank; when the 2-screen buffer wraps, the **blitter** copies the visible rows back to the top (identical pixels,
-  so there is no visible switch). Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
+  so there is no visible switch; every wait for the blitter gives up after 500 ms and says so once on the log).
+  Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
   before the OS is killed. A kernel panic turns it white on dark red.
 - **Input path: interrupts queue, `kwork` works** (`kernel/main.c`, audit B4/B5). The interrupt handlers do
   only what cannot wait: the keyboard handler (`kbd_isr`) reads the byte, answers the keyboard's handshake and puts

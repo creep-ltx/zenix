@@ -111,11 +111,25 @@ int gfx_font_init(u32 gfxbase)
 
 /* ---- blitter ---- */
 
+/* Every wait on hardware has a timeout (CLAUDE.md): the longest blit (the copy-back, under 1000 rows of 80 bytes per
+ * plane) takes a few tens of ms; 500 ms (in E-clock ticks) means the blitter is stuck. Said once on the serial port
+ * and the log, then the drawing goes on (it may be wrong; the machine keeps running). */
+#define BLIT_TIMEOUT (ECLOCK_PAL / 2)
+static int blit_stuck;
+
 static void blit_wait(void)
 {
     (void)DMACONR;
+    if (!(DMACONR & DMAB_BLTBUSY))
+        return;
+    u32 t0 = hr_time(), n = 0;
     while (DMACONR & DMAB_BLTBUSY)
-        ;
+        if ((++n & 63) == 0 && (u32)(hr_time() - t0) > BLIT_TIMEOUT) {
+            if (!blit_stuck++)
+                kprintf("gfx: the blitter did not finish in 500 ms (DMACONR %x): drawing goes on without waiting\n",
+                        (u32)DMACONR);
+            return;
+        }
 }
 
 /* copy `words` 16-bit words, chip to chip, no overlap */
