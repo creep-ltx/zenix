@@ -185,7 +185,7 @@ ext2 volume before the first change and clean again one second after the last on
 idle switch-off costs nothing), never over a half-done change; boot checks a marked root with `fsck.ext2 -y` while a
 read-only server serves it, then starts the writable one; `mount -a` checks a marked volume of `/etc/fstab`. No new
 system call or message. The full design: [d17-ext2-clean-mark.md](d17-ext2-clean-mark.md).
-## D18. The 2 MB diet (approved by the owner 2026-10-26; built on branch diet)
+## D18. The 2 MB diet (approved by the owner 2026-10-26; built on branch diet, one commit per step)
 **Why.** The stock A1200 (2 MB of chip RAM, no fast RAM) is the floor Zenix stays on as long as possible, and one login
 left 1,151 KB free where Workbench 3.1 leaves 1,737 KB (FS-UAE, 2026-10-26). **How**, each step taking nothing the user
 feels: (1) without fast RAM the console shows 8 colours (3 planes, 120 KB of screen) instead of 16, and
@@ -203,8 +203,16 @@ its pid), so init knows the console's session; nothing on the disk (no utmp). On
 left before, the interactive shell makes its own and the terminal's foreground, and a non-interactive shell stays in
 the group login made. (4) Smaller stacks for init (4 KB) and diskd (8 KB), where 16 KB were reserved and under 400
 bytes are used (measured), fsd's two block-sized static buffers dropped, the floppy's verify buffer allocated with the
-floppy's other buffers. Measured before and after on the 2 MB and 1 MB chip-only machines: see features.md "Memory"
-and limits.md.
+floppy's other buffers. **Measured** (FS-UAE, `free` with one login): 2 MB chip-only 1151 -> 1332 KB, 1 MB
+chip-only 254 -> 395 KB (four sessions instead of three; a session 78 KB instead of 110); each step's share in
+features.md. **Not taken**, and why: the kernel's fixed tables for 32 processes (about 15 KB: halving them would be
+felt with ten consoles in use, and a dynamic table is a kernel change of its own); fewer scrollback lines (felt); the
+7 KB glyph table for more than one plane (drawing speed); libz's 4 KB output buffer in every program (output speed,
+and every program would need a change); the double-height screen buffer (the owner waits for a real-68020 scroll
+test); fsd's 16 KB stack (its path walk recurses up to 9 symlink levels); **the embedded server images** (fsd,
+diskd, boot and zfsd: 79 KB of the kernel image stay in memory, and each running server is a copy; zfsd's 37 KB are
+never used with an ext2 root): the biggest remaining win, but it needs execute-in-place or zfsd from the disk, a
+loader change with its own design note and reviews.
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
