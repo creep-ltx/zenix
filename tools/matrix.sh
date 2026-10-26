@@ -15,7 +15,15 @@ for n in $CONFS; do
     f=fsuae/$n.fs-uae; [ -f "$f" ] || f=fsuae/matrix/$n.fs-uae
     rm -f $BD/zenix.hdf $BD/zenix-rdb.hdf
     make -s BUILD=$BD $BD/zenix.hdf $BD/zenix-rdb.hdf $BD/zenix-ram.adf >$OUT/build.log 2>&1 || { echo "FAIL $n: build failed:"; grep -v 'RWX permissions' $OUT/build.log | tail -15; exit 1; }
-    tools/run-test.sh "$f" 95 tools/tests/matrix-test.txt > $OUT/$n.log 2>&1
+    # Two machines are expected not to reach every text the script waits for, so their scripts say so (a `wait`
+    # that times out fails the test, tools/serial-tap.py): the 68000 refuses to start (it only waits for that),
+    # and with 1 MB of chip RAM the fourth console's login prompt may never come (`waitopt`; checked below).
+    case $n in
+    a600-68000) printf 'wait needs a 68020 90\nsleep 2\nstop\n' >$OUT/$n.txt ;;
+    *chip1m*) sed '/^send \\x1d4$/{n;s/^wait /waitopt /}' tools/tests/matrix-test.txt >$OUT/$n.txt ;;
+    *) cp tools/tests/matrix-test.txt $OUT/$n.txt ;;
+    esac
+    tools/run-test.sh "$f" 95 $OUT/$n.txt > $OUT/$n.log 2>&1
     if [ "$n" = a600-68000 ]; then
         grep -q 'needs a 68020' $OUT/$n.log && echo "PASS $n (refuses cleanly)" || echo "FAIL $n"
         continue

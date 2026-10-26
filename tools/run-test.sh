@@ -54,7 +54,16 @@ done
 wait $EMU 2>/dev/null || true
 rm -f "$SERIAL.stop"
 kill $TAP 2>/dev/null || true
+wait $TAP 2>/dev/null || true          # the tap says whether the run ended during a wait before it exits
 echo "=== serial output ($CONF, ${SECS}s):"
 tr -d '\r' < "$LOG" | sed 's/\x1b\[[0-9;:]*m//g'                         # colour codes (DESIGN D14) are not text
-grep -h '^serial-tap: wait' "$DIR/tap.out" 2>/dev/null || true      # a script's `wait` that timed out says so here
+# A script's `wait` that timed out, or that was still waiting when the run ended, is a failure (audit 2026-10-26 F7):
+# the tap's "FAIL: serial-tap: ..." lines go here, at the end of the output, and this script exits 3. With
+# ZENIX_TIMEOUTS set (make check) the tap also adds them to that file, and check.sh fails the test whatever the test
+# script makes of the output. A `waitopt` that timed out is allowed and only said.
+rc=0
+grep -q '^serial-tap: \(optional\|the run ended during an optional\)\|^FAIL: serial-tap: ' "$DIR/tap.out" 2>/dev/null && echo   # own lines
+grep -h '^serial-tap: \(optional\|the run ended during an optional\)' "$DIR/tap.out" 2>/dev/null || true
+if grep -q '^FAIL: serial-tap: ' "$DIR/tap.out" 2>/dev/null; then grep -h '^FAIL: serial-tap: ' "$DIR/tap.out"; rc=3; fi
 rm -rf "$DIR"                                                         # the config copy, the log, FS-UAE's save states
+exit $rc

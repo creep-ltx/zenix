@@ -13,10 +13,15 @@ debugfs -R "stat /tests/badzexe11" $BD/zenix.hdf 2>/dev/null | grep -q 'Mode:  0
 cat > $OUT/script.txt <<EOS
 wait zenix:/# 90
 sleep 1
-send sh /tests/mem.sh > /tmp/mem.out 2>&1; echo finished-mem\r
-wait (?m)^finished-mem$ ${MEM_WAIT:-200}
+send sh /tests/mem.sh > /tmp/mem.out 2>&1; sync; echo finished-mem\r
+wait (?m)^finished-mem$ ${MEM_WAIT:-330}
+stop
 EOS
-tools/run-test.sh fsuae/a1200-020-fast.fs-uae $(( ${MEM_WAIT:-200} + 30 )) $OUT/script.txt > $OUT/run.log 2>&1
+# The time limit, measured 2026-10-26 (audit F7): mem.sh takes about 210 s in FS-UAE (A1200, 68EC020, no FPU), 165 s
+# of it awk's 20000 string assignments (the loop's numbers are soft-float doubles: about 8 ms a round); the old
+# limit of 200 s timed out every run. 330 s leaves room for a busy machine; the run stops as soon as the script is
+# done (after a sync), so the limit costs nothing when all is well.
+tools/run-test.sh fsuae/a1200-020-fast.fs-uae $(( ${MEM_WAIT:-330} + 30 )) $OUT/script.txt > $OUT/run.log 2>&1
 debugfs -R "cat /tmp/mem.out" $BD/zenix.hdf > $OUT/mem.out 2>/dev/null
 cat $OUT/mem.out
 ok=$(grep -c ' ok$' $OUT/mem.out); bad=$(grep -c 'FAILED' $OUT/mem.out)

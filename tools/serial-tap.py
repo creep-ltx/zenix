@@ -20,10 +20,23 @@ Optional argv[3]: a keystroke script driven while logging. Lines:
                        at once (audit 2026-10-26 F1). After a `send` without
                        a line end (a key, a half-typed line) the echo counts.
                        The last word is the timeout in seconds if it is a
-                       number (default 60). On a timeout the script goes on,
-                       and the tap prints "serial-tap: wait timed out:
-                       <regex>" on its output. With ZENIX_TAP_TRACE=FILE set,
-                       each wait that matched writes how long it took to FILE.
+                       number (default 60). A timeout is a failure (audit
+                       2026-10-26 F7): the script goes on, the tap prints
+                       "FAIL: serial-tap: wait timed out after N s: <regex>"
+                       on its output and, with ZENIX_TIMEOUTS=FILE set (make
+                       check sets it for every job), adds that line to FILE;
+                       tools/run-test.sh then exits 3 and make check fails the
+                       test. The run ending (the tap stopped) while a wait is
+                       still waiting is the same failure ("the run ended
+                       during a wait"). With ZENIX_TAP_TRACE=FILE set, each
+                       wait that matched writes how long it took to FILE.
+    waitopt <regex> [timeout]
+                       as `wait`, but the text may never come: a test where
+                       it not coming is a correct result (a machine that
+                       refuses to start, a login that runs out of memory).
+                       A timeout says "serial-tap: optional wait timed out
+                       (allowed): <regex>" and is no failure; the test itself
+                       checks what happened instead.
     waitecho <regex> [timeout]
                        as `wait`, but the echo of the line counts too (the
                        old rule): for a test that checks what was echoed.
@@ -48,6 +61,7 @@ import os
 import pty
 import re
 import select
+import signal
 import sys
 import termios
 import threading
@@ -87,10 +101,31 @@ def wait_start(echo):
 TRACE = os.environ.get("ZENIX_TAP_TRACE")      # a file: each wait's time and where its search started go there
 
 
-def wait_for(pattern, timeout, echo=False):
+TIMEOUTS = os.environ.get("ZENIX_TIMEOUTS")   # a file: every unexpected timeout is added there (make check reads it)
+pending = None                  # the wait the script is in: (regex, optional), for a run that ends during it
+
+
+def fail_wait(text):
+    line = f"FAIL: serial-tap: {text}"
+    print(line, flush=True)
+    if TIMEOUTS:
+        with open(TIMEOUTS, "a") as f:
+            f.write(line + "\n")
+
+
+def wait_for(pattern, timeout, echo=False, optional=False):
+    global pending
     rx = re.compile(pattern.encode("latin1"))
     t0 = time.time()
     end = t0 + timeout
+    pending = (pattern, optional)
+    try:
+        return wait_loop(rx, pattern, t0, end, timeout, echo, optional)
+    finally:
+        pending = None
+
+
+def wait_loop(rx, pattern, t0, end, timeout, echo, optional):
     with cond:
         while True:
             start = wait_start(echo)
@@ -102,7 +137,10 @@ def wait_for(pattern, timeout, echo=False):
                 return True
             left = end - time.time()
             if left <= 0:
-                print(f"serial-tap: wait timed out: {pattern}", flush=True)
+                if optional:
+                    print(f"serial-tap: optional wait timed out (allowed): {pattern}", flush=True)
+                else:
+                    fail_wait(f"wait timed out after {timeout:g} s: {pattern}")
                 return False
             cond.wait(min(left, 0.5))
 
@@ -153,14 +191,14 @@ def run_script(path):
             shot(line[5:].strip())
         elif line.startswith("sleep "):
             time.sleep(float(line[6:]))
-        elif line.startswith("wait ") or line.startswith("waitecho "):
-            echo = line.startswith("waitecho ")
-            arg = line[9:] if echo else line[5:]
+        elif line.startswith(("wait ", "waitecho ", "waitopt ")):
+            cmd, arg = line.split(" ", 1)
             words = arg.rsplit(" ", 1)
             if len(words) == 2 and re.fullmatch(r"[0-9]+(\.[0-9]*)?", words[1]):
-                wait_for(words[0], float(words[1]), echo)
+                arg, secs = words[0], float(words[1])
             else:
-                wait_for(arg, 60.0, echo)
+                secs = 60.0
+            wait_for(arg, secs, cmd == "waitecho", cmd == "waitopt")
         elif line.startswith("send "):
             text = line[5:].encode().decode("unicode_escape").encode("latin1")
             last_eol = max(text.rfind(b"\r"), text.rfind(b"\n"))
@@ -179,6 +217,18 @@ def run_script(path):
             f.write("END\n")                # the script is done: shot.py may end the run
 
 
+def on_term(signum, frame):
+    """Stopped (the run is over): a wait still waiting never saw its text, which is the same failure as a timeout."""
+    p = pending
+    if p is not None:
+        if p[1]:
+            print(f"serial-tap: the run ended during an optional wait (allowed): {p[0]}", flush=True)
+        else:
+            fail_wait(f"the run ended during a wait: {p[0]}")
+    os._exit(0)
+
+
+signal.signal(signal.SIGTERM, on_term)
 threading.Thread(target=greet, daemon=True).start()
 if script:
     threading.Thread(target=run_script, args=(script,), daemon=True).start()
