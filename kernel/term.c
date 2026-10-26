@@ -181,6 +181,17 @@ void term_scroll_view(int delta)
     }
 }
 
+void term_redraw(void)
+{
+    struct term *t = get(con_cur);
+    if (t->back)
+        show_back(t);
+    else {
+        redraw_all(t);
+        cursor(t, 1);
+    }
+}
+
 int term_back(void) { return wsp[con_cur] ? wsp[con_cur]->back : 0; }
 
 /* the console on the screen asked for cursor-key mode (kbd.c sends ESC O A for the arrows then) */
@@ -618,13 +629,6 @@ void con_switch(int w)
     if (w == con_cur)
         return;
     con_cur = w;
-    if (gfx_up()) {
-        struct term *t = get(w);
-        if (t->back)
-            show_back(t);
-        else {
-            redraw_all(t);
-            cursor(t, 1);
-        }
-    }
+    if (gfx_up())
+        term_redraw();
 }

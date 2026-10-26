@@ -145,8 +145,11 @@ int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
 int gfx_up(void);
 void gfx_panic(void);            /* panic with the display up: dark red background, white text, the text stays */
-extern int gfx_depth;            /* bitplanes: 1, 3 or 4 (DESIGN D14; 0: no display) */
+extern int gfx_depth;            /* bitplanes: 1 to 4 (DESIGN D14; 0: no display) */
 extern const u16 gfx_palette[16];       /* the 16 ANSI colours, 12 bits */
+extern const u16 gfx_palette2[4];       /* the four colours of 2 planes */
+int gfx_set_colours(int colours);       /* SYS_console CON_COLOURS: 2, 4, 8, 16 (0: ask) -> the colours shown, or -errno */
+void term_redraw(void);                 /* the console shown, drawn again from its grid (a new depth) */
 /* colour: foreground in the low nibble, background in the high one (0x07: grey on black) */
 void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour);
 void gfx_scroll(u8 colour);             /* the whole screen up a row; the new row takes colour's background */
@@ -755,6 +758,8 @@ int tty_of(const struct proc *p);
 #define SYS_sigreturn   86   /* the frame the entry was given: back from a handler (returns the frame's d0) */
 #define SYS_alarm       87   /* ticks (0: off) -> ticks the previous alarm had left */
 #define SYS_setpgid     88   /* pid (0: self), pgid (0: pid): oneself or one's own children */
+#define SYS_console     89   /* op (CON_*), value: the text console's settings (the 2 MB diet, D14 section 11) */
+#define CON_COLOURS     1    /* value 2, 4, 8 or 16: set (root only); 0: ask -> the colours shown now */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

@@ -31,12 +31,13 @@ for n in $CONFS; do
     ok=1
     for want in 'M0 ok' ; do :; done
     grep -q 'display: 640x' $OUT/$n.log || ok=0           # 640x256 on PAL, 640x200 on NTSC
-    # the depth by the machine (DESIGN D14): AGA with fast RAM or 2 MB chip 4 planes at FMODE 3, OCS/ECS with fast
-    # RAM 3, chip RAM only below 2 MB 1
-    case $n in *chip1m*) d="1 bitplane";; a3000*) d="3 bitplanes";; *) d="4 bitplanes";; esac
+    # the depth by the machine (DESIGN D14 section 11): AGA with fast RAM 4 planes at FMODE 3, OCS/ECS with fast RAM 3,
+    # 2 MB of chip RAM and no fast RAM 3 (on AGA at FMODE 3), chip RAM only below 2 MB 1
+    nofast=0; grep -q '^fast_memory = 0' "$f" && nofast=1
+    case $n in *chip1m*) d="1 bitplane";; a3000*) d="3 bitplanes";; *) [ $nofast = 1 ] && d="3 bitplanes" || d="4 bitplanes";; esac
     case $n in *ntsc*) grep -q "display: 640x200, $d, 80x25 text" $OUT/$n.log || ok=0;;
                *) grep -q "display: 640x256, $d, 80x32 text" $OUT/$n.log || ok=0;; esac
-    case $d in 4*) grep -q 'display: AGA chips, 4 bitplanes at 64-bit fetch (FMODE 3)' $OUT/$n.log || ok=0;; esac
+    case $n$d in a3000*) ;; *[34]\ bitplanes) grep -q "display: AGA chips, $d at 64-bit fetch (FMODE 3)" $OUT/$n.log || ok=0;; esac
     grep -q '^ *4 *15 *85$' $OUT/$n.log || ok=0
     grep -q '^ok$' $OUT/$n.log || ok=0
     grep -q 'hello from pid' $OUT/$n.log || ok=0

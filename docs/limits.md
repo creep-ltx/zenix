@@ -89,8 +89,10 @@ pointers.
   console first scrolls), a cooked tty line of 511 characters (a key past that rings the bell, and at its end the whole line is refused with
   "tty: the line was too long": nothing of it is handed on, also when the shell's editor took over halfway).
 - The screen (DESIGN D14, architecture.md section 11): twice the screen's height in chip RAM, 40 KB at 1 bitplane,
-  120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; 4 planes only on AGA with fast RAM
-  or 2 MB of chip RAM, 3 on OCS/ECS with fast RAM, else 1.
+  80 KB at 2, 120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; by default 4 planes
+  only on AGA with fast RAM, 3 on OCS/ECS with fast RAM and on every machine with 2 MB of chip RAM and no fast RAM,
+  else 1; `/etc/console` chooses 2, 4, 8 or 16 colours (4 planes only on AGA), at init's start, if the chip RAM is
+  there.
 - Services (DESIGN D11, architecture.md section 9): 12 entries; a program and its arguments of at most 6 words in 79
   characters (the text is copied into 80 bytes with its end); at most 10 services beside diskd and the root, but the
   8 mounts include the root, so at most 7 mounted filesystems besides it; a registration

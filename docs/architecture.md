@@ -612,14 +612,15 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 85 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-88, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 86 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-89, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
 `update`), services (`svc`), memory (`memalloc memfree meminfo`),
-time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`), environment (`envset
+time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`, and `console`, the
+display's colours: D14 note section 11), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
 ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`blk_read blk_write blk_flush blk_size blk_ram fd_info fd_rw`).
@@ -1075,21 +1076,29 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **Display** (`gfx.c`, DESIGN D14): 640 pixels wide hires, the whole screen text. `gfx_init`
   measures the beam's last line for about 60 ms (E-clock timed): above 280 (312 on PAL) the display is 256 lines,
   32 rows; else (262 on NTSC) 200 lines, 25 rows and `DIWSTOP` to match, so no row is hidden below the picture.
-  **How many bitplanes** the machine decides at boot, because the display takes chip-bus time from the CPU: **AGA**
-  (Lisa's id register `DENISEID` reads `$F8`, 16 reads alike) with fast RAM or 2 MB of chip RAM: **4 planes, 16
-  colours, fetched 64 bits at a time (FMODE 3)**, which costs the 40 bus slots per line that one plane costs at the
-  16-bit fetch (never 4 planes at FMODE 0: that takes every slot of the visible lines); **OCS/ECS with fast RAM: 3
-  planes**, 8 colours (a bright foreground is the colour plus bold, bright black is grey); **otherwise 1 plane**, grey
-  on black (the colours are not shown, inverse is the glyph inverted). `make GFXDEPTH=1|3|4` builds a kernel that
-  uses that depth (the screenshot tests; 4 only on AGA). If chip RAM is short the next smaller depth is used. The boot
-  log says which: `display: AGA chips, 4 bitplanes at 64-bit fetch (FMODE 3)` and `display: 640x256, 4 bitplanes,
-  80x32 text`. At FMODE 3 the fetch window is `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0 (one plane at the old
-  fetch uses `$3C`/`$D4`): found by the screenshot test of `termtest columns` (all 80 columns, the edges exactly where
-  one plane puts them, nothing repeated; knowledge base `amiga/zenix-colour-console.md`), not yet seen on the A1200.
+  **How many bitplanes** the machine decides at boot, because the display takes chip-bus time from the CPU and chip
+  RAM (the 2 MB diet, DESIGN D18; D14 note section 11): **AGA** (Lisa's id register `DENISEID` reads `$F8`, 16 reads
+  alike) **with fast RAM: 4 planes, 16 colours, fetched 64 bits at a time (FMODE 3)**, which costs the 40 bus slots
+  per line that one plane costs at the 16-bit fetch (never 4 planes at FMODE 0: that takes every slot of the visible
+  lines); **OCS/ECS with fast RAM, and any machine with 2 MB of chip RAM and no fast RAM: 3 planes**, 8 colours (a
+  bright foreground is the colour plus bold, bright black is grey); **otherwise 1 plane**, grey on black (the colours
+  are not shown, inverse is the glyph inverted). **2 planes** (only by the setting) show 4 colours: black, red (red,
+  yellow, magenta), cyan (green, blue, cyan) and grey, bright as bold. On AGA every depth above one plane is fetched
+  at FMODE 3 (3 planes 30 slots a line, 2 planes 20); one plane keeps the 16-bit fetch. `make GFXDEPTH=1|2|3|4`
+  builds a kernel that uses that depth (the screenshot tests; 4 only on AGA). If chip RAM is short the next smaller
+  depth is used. The boot log says which: `display: AGA chips, 4 bitplanes at 64-bit fetch (FMODE 3)` and `display:
+  640x256, 4 bitplanes, 80x32 text`. **The setting:** `/etc/console`'s line `colours N` (2, 4, 8 or 16), read by
+  `init` at its start (man/init.txt), switches the display with `SYS_console` (`CON_COLOURS`, root only): the new
+  buffer and Copper list are allocated first (no chip RAM: -ENOMEM, nothing changes), the new list is pointed at with
+  interrupts masked, the Copper takes it at the next vertical blank, a frame later (100 ms timeout) the old ones are
+  freed and the console shown is drawn again from its grid; the log says the new depth. At FMODE 3 the fetch window
+  is `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0 at every depth (one plane at the old fetch uses `$3C`/`$D4`): found
+  by the screenshot test of `termtest columns` (all 80 columns, the edges exactly where one plane puts them, nothing
+  repeated; knowledge base `amiga/zenix-colour-console.md`), not yet seen on the A1200.
   The planes are **interleaved** (the planes of a line follow each other, 80 bytes each; modulo (N-1) x 80), so one
   pointer serves all planes and whole lines are cleared or copied with one blit per plane or one blit. The
   **Copper list** writes FMODE, `BPLCON3` = `$0C00` and `BPLCON4` = `$0011` (AGA only: a previous program's
-  colour-index XOR survives a warm reset), `BPLCON0`-`2`, the modulos, the fetch window and the 2/8/16 colours (12
+  colour-index XOR survives a warm reset), `BPLCON0`-`2`, the modulos, the fetch window and the 2/4/8/16 colours (12
   bits) every frame, then WAITs for line `$20` (before the picture on the `$2C` and `$38` builds, PAL and NTSC) and
   moves the plane pointers. Scrolling moves those pointers at vertical blank, written only while the beam is before
   line `$1C` (else at the next vertical blank), so all planes move together; when the 2-screen buffer wraps, the
@@ -1271,9 +1280,11 @@ outputs (`tools/cmds-test.sh`).
   Caps Lock and key repeat. `tools/diag-test.sh` checks the boot stage colours (test builds that stop at each
   stage; the screenshot's pixel colour), the split and red-bar panic screens, and the previous-boot log across a
   warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `tools/colour-test.sh` checks the
-  colour console by screenshots at 1, 3 and 4 bitplanes (`make GFXDEPTH=n`): `termtest columns` decoded cell by cell
-  (all 80 columns, the edges where one plane has them), the 16 colours against the palette, a screen after `termtest
-  scroll` pixel-identical to a redraw from the grid, the scrollback's colours; a serial script's `shot NAME` line
+  colour console by screenshots at 1, 2, 3 and 4 bitplanes (`make GFXDEPTH=n`): `termtest columns` decoded cell by
+  cell (all 80 columns, the edges where one plane has them), the 16 colours against the palette, a screen after
+  `termtest scroll` pixel-identical to a redraw from the grid, the scrollback's colours; and `/etc/console`'s setting
+  on the A1200 without fast RAM (4 and 16 colours switched to and checked the same way, a wrong value refused); a
+  serial script's `shot NAME` line
   takes a screenshot when the script gets there (`shot.py`, `serial-tap.py`). `make BUILD=/tmp/x` builds everything
   in another directory (the kernel finds `stage0.bin` and the built-in servers through `-I$(BUILD)`).
   `tools/zenixboot-test.sh` boots with no floppy: Kickstart 3.1 on an A1200 (68EC020, and a 68040), Kickstart 3.2

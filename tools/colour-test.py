@@ -7,7 +7,8 @@
                                         "x0 x1 yc h"; with EDGES (another run's geometry, one plane) the edges must
                                         be the same pixels
   colour-test.py palette SHOT GEOM DEPTH  `termtest colours`: the 16 blocks of rows 3-4 against kernel/gfx.c's
-                                        palette as DEPTH planes show it (4: all 16; 3: colour & 7; 1: none, black)
+                                        palette as DEPTH planes show it (4: all 16; 3: colour & 7; 2: the four
+                                        colours by gfx.c's map2; 1: none, black)
   colour-test.py same A B               the two screenshots are identical (an incremental screen = a redraw)
   colour-test.py rows SHOT GEOM DEPTH   `termtest scroll` scrolled back a page: the first 31 rows hold "line N" in
                                         colour (N % 7) + 1 with N counting up (the scrollback keeps the colours)
@@ -23,10 +24,29 @@ from PIL import Image
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def rgb12(v):
+    return tuple(((int(v, 16) >> s) & 15) * 17 for s in (8, 4, 0))
+
+
 def palette():
     text = open(os.path.join(ROOT, "kernel", "gfx.c")).read()
     body = re.search(r"gfx_palette\[16\] = \{([^}]*)\}", text).group(1)
-    return [tuple(((int(v, 16) >> s) & 15) * 17 for s in (8, 4, 0)) for v in re.findall(r"0x[0-9A-Fa-f]+", body)]
+    return [rgb12(v) for v in re.findall(r"0x[0-9A-Fa-f]+", body)]
+
+
+def shown(depth):
+    """the colour each of the 16 indices shows as at DEPTH planes (as a background; 1 plane: black)"""
+    text = open(os.path.join(ROOT, "kernel", "gfx.c")).read()
+    pal = palette()
+    if depth == 4:
+        return pal
+    if depth == 3:
+        return [pal[i & 7] for i in range(16)]
+    if depth == 2:
+        m = [int(v) for v in re.search(r"map2\[8\] = \{([^}]*)\}", text).group(1).split(",")]
+        p2 = [rgb12(v) for v in re.findall(r"0x[0-9A-Fa-f]+", re.search(r"gfx_palette2\[4\] = \{([^}]*)\}", text).group(1))]
+        return [p2[m[i & 7]] for i in range(16)]
+    return [(0, 0, 0)] * 16
 
 
 def load(path):
@@ -95,9 +115,10 @@ def main():
     if what == "palette":
         im, px, _ = load(sys.argv[2])
         geom = [float(v) for v in open(sys.argv[3]).readline().split()]
-        depth, pal, bad = int(sys.argv[4]), palette(), 0
+        depth, bad = int(sys.argv[4]), 0
+        sh = shown(depth)
         for i in range(16):
-            want = pal[i] if depth == 4 else pal[i & 7] if depth == 3 else (0, 0, 0)
+            want = sh[i]
             for row in (2, 3):
                 got = px[cell(geom, row, 5 * i + 2)]
                 if not near(got, want):
@@ -114,7 +135,8 @@ def main():
     if what == "rows":
         im, px, _ = load(sys.argv[2])
         geom = [float(v) for v in open(sys.argv[3]).readline().split()]
-        depth, pal = int(sys.argv[4]), palette()
+        depth = int(sys.argv[4])
+        pal = shown(depth)
         seq = []
         for row in range(31):                     # the colour of the word "line": its brightest non-black pixels
             counts = {}
@@ -129,15 +151,13 @@ def main():
                         counts[p] = counts.get(p, 0) + 1
             if not counts:
                 print(f"rows: row {row + 1} has no text"); return 1
-            p = max(counts, key=counts.get)
-            idx = [i for i in range(1, 8) if near(p, pal[i])]
-            if not idx:
-                print(f"rows: row {row + 1}: colour {p} is none of the colours 1-7"); return 1
-            seq.append(idx[0])
-        bad = [r for r in range(1, 31) if seq[r] != seq[r - 1] % 7 + 1]
-        print("rows: colours", "".join(str(c) for c in seq))
-        if bad:
-            print(f"rows: the colour does not count up at rows {[r + 1 for r in bad]}"); return 1
+            seq.append(max(counts, key=counts.get))
+        # the rows count up through the colours 1-7 (as DEPTH planes show them) from some start
+        starts = [k for k in range(7) if all(near(seq[r], pal[(k + r) % 7 + 1]) for r in range(31))]
+        names = "".join(str(next((i for i in range(1, 8) if near(c, pal[i])), 0)) for c in seq)
+        print("rows: colours", names)
+        if not starts:
+            print("rows: the colours do not count up 1-7 as these planes show them"); return 1
         return 0
     if what == "pixel":
         im, px, _ = load(sys.argv[2])

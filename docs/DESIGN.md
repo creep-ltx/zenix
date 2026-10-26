@@ -158,11 +158,12 @@ The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 3, 2026
 ## D14. The colour console (approved by the owner 2026-10-25; reviewed; built and merged 2026-10-26)
 **Why.** Colours in the text console, as every Unix terminal has: `ls`, `grep`, the prompt, `less`, and programs using
 the standard ANSI colour codes. **How.** More bitplanes behind the same text console, chosen by the machine at boot (4
-planes and 16 colours on AGA at the 64-bit fetch, which costs the chip bus what one plane did; 3 and 8 colours on
-OCS/ECS with fast RAM; 1, today's look, on chip-only machines below 2 MB; no runtime setting yet), a colour byte per
+planes and 16 colours on AGA with fast RAM at the 64-bit fetch, which costs the chip bus what one plane did; 3 and 8
+colours on OCS/ECS with fast RAM and, since the 2 MB diet (D18), on every machine with 2 MB of chip RAM and no fast
+RAM; 1, today's look, on chip-only machines below 2 MB; `/etc/console` chooses 2, 4, 8 or 16), a colour byte per
 cell and in the scrollback, the ANSI codes in term.c (256 and true colour mapped to the nearest of 16), region scrolls
 by blitter, `ls`/`grep --color` with GNU's bytes. The full design and what the build changed:
-[d14-colour-console.md](d14-colour-console.md) (section 10).
+[d14-colour-console.md](d14-colour-console.md) (sections 10 and 11).
 ## D15. Zenix updates itself (approved by the owner 2026-10-24; design note revision 3 after two reviews: ready to build)
 **Why.** No more SD card swaps and `dd` on the PC (which also reset the owner's settings). **How.** One update bundle on
 BOOT:; zenixboot (still in AmigaOS) installs the new kernel and keeps the old one, and hands the root packages to Zenix
@@ -184,6 +185,26 @@ ext2 volume before the first change and clean again one second after the last on
 idle switch-off costs nothing), never over a half-done change; boot checks a marked root with `fsck.ext2 -y` while a
 read-only server serves it, then starts the writable one; `mount -a` checks a marked volume of `/etc/fstab`. No new
 system call or message. The full design: [d17-ext2-clean-mark.md](d17-ext2-clean-mark.md).
+## D18. The 2 MB diet (approved by the owner 2026-10-26; built on branch diet)
+**Why.** The stock A1200 (2 MB of chip RAM, no fast RAM) is the floor Zenix stays on as long as possible, and one login
+left 1,151 KB free where Workbench 3.1 leaves 1,737 KB (FS-UAE, 2026-10-26). **How**, each step taking nothing the user
+feels: (1) without fast RAM the console shows 8 colours (3 planes, 120 KB of screen) instead of 16, and
+`/etc/console` chooses 2, 4, 8 or 16 at the next boot (one new call, `SYS_console`; D14 note section 11); (2) fsd's
+block cache is one block of memory sized by the machine (as before with fast RAM, 24 KB without; it was grown in
+chunks that left a third of it unused); (3) **login steps aside**: Zenix has no `exec`, so a login used to wait for the
+whole session to hand init the shell's end. Now login spawns the shell as before (as the user, in the user's
+directory, with the user's environment: only the process that has become the user can start the shell as the user)
+and then ends with the second argument of `SYS_exit` naming that child: the kernel makes it its parent's child
+(init's), as if init had started it, and tells init at once if it has already ended. Linux's `CLONE_PARENT` and the
+Unix exec chain getty -> login -> shell keep the same shape: init waits for the session itself, a logout is the
+shell's end, init starts a new login on that console. login's exit status says which child it handed over (bit 30 plus
+its pid), so init knows the console's session; nothing on the disk (no utmp). Only init's own login does it (`login
+--init`): a login typed in a shell still waits for its shell. Process groups (D16) do not change: login's group is
+left before, the interactive shell makes its own and the terminal's foreground, and a non-interactive shell stays in
+the group login made. (4) Smaller stacks for init (4 KB) and diskd (8 KB), where 16 KB were reserved and under 400
+bytes are used (measured), fsd's two block-sized static buffers dropped, the floppy's verify buffer allocated with the
+floppy's other buffers. Measured before and after on the 2 MB and 1 MB chip-only machines: see features.md "Memory"
+and limits.md.
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).

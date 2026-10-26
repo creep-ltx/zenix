@@ -183,6 +183,8 @@ static inline int sys_alarm(u32 ticks) { return sys3(87, ticks, 0, 0); }       /
 static inline int sys_setpgid(int pid, int pg) { return sys3(88, (u32)pid, (u32)pg, 0); }
 static inline int sys_killsig(int pid, int sig) { return sys3(24, (u32)pid, (u32)sig, 1); }   /* pid 0: own group, -g: group g */
 static inline int sys_setfgpg(int pg) { return sys3(23, (u32)pg, 1, 0); }     /* the tty's foreground: process group pg */
+#define CON_COLOURS 1           /* sys_console: value 2, 4, 8 or 16 (root), 0 asks -> the colours shown now */
+static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 0); }   /* the 2 MB diet (D14 section 11) */
 #define SIGHUP   1
 #define SIGINT   2
 #define SIGQUIT  3

@@ -29,8 +29,40 @@ static void start(int n, int again)
     sys_close(fd);
 }
 
+/* /etc/console (D14 section 11): "colours N" (2, 4, 8 or 16; "colors" too) sets the text console's colours, read
+ * once here, before anything else takes chip RAM; no file, no such line or "auto": the machine's default. Read at
+ * every start of init, so a change counts from the next boot. */
+static void console_setup(void)
+{
+    char b[512];
+    int fd = sys_open("/etc/console", O_RDONLY), n = fd < 0 ? 0 : sys_read(fd, b, sizeof b - 1);
+    if (fd >= 0) sys_close(fd);
+    if (n <= 0) return;
+    b[n] = 0;
+    for (char *l = b, *e; *l; l = e) {
+        for (e = l; *e && *e != '\n'; e++)
+            ;
+        if (*e) *e++ = 0;
+        char *w = l, *v;
+        while (*w == ' ' || *w == '\t') w++;
+        if (!*w || *w == '#') continue;
+        for (v = w; *v && *v != ' ' && *v != '\t'; v++)
+            ;
+        if (*v) *v++ = 0;
+        while (*v == ' ' || *v == '\t') v++;
+        if (strcmp(w, "colours") && strcmp(w, "colors")) { printf("init: /etc/console: unknown setting %s\n", w); continue; }
+        if (!strncmp(v, "auto", 4)) continue;
+        int c = atoi(v), r = c ? sys_console(CON_COLOURS, c) : -EINVAL;
+        if (r == -EINVAL) printf("init: /etc/console: colours %s: 2, 4, 8 or 16 (or auto)\n", v);
+        else if (r < 0) printf("init: /etc/console: colours %d: %s, staying at %d\n", c, zstrerror(r), sys_console(CON_COLOURS, 0));
+        else if (r != c) printf("init: /etc/console: colours %d: this machine shows %d\n", c, r);
+    }
+    oflush();
+}
+
 int main(void)
 {
+    console_setup();
     int fd = sys_open("/etc/motd", 0);
     if (fd >= 0) {
         char b[256]; int n;

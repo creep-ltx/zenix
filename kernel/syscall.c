@@ -603,6 +603,11 @@ void syscall_c(u32 *rb)
     case SYS_setpgid:
         r = (s32)sig_setpgid((int)a1, (int)a2);
         break;
+    case SYS_console:                   /* the 2 MB diet: /etc/console's colours, set by init (root) */
+        r = -EINVAL;
+        if (a1 == CON_COLOURS)
+            r = a2 && current->uid != 0 ? -EPERM : gfx_set_colours((int)a2);
+        break;
     case SYS_getpriority:
         r = (s32)do_priority(0, a1, a2, 0);
         break;
