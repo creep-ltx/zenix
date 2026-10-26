@@ -214,3 +214,12 @@ why:
   measurements (the owner's DoM weekend).
 
 Last checked against the code: 2026-10-26.
+
+## Owner decision (2026-10-26): fewer colours by default without fast RAM
+
+Measured the same day on a 2 MB chip-only A1200 (FS-UAE, Kickstart 3.1): Workbench 3.1 from floppy leaves 1,737 KB free
+(4 colours, 40 KB of screen); Zenix with one login 1,126 KB, of which the 16-colour double-height screen is 160 KB. The
+owner: "just like in AmigaOS, the Workbench is 4 colours as a default, but most users change it to 8 or 16". So: without
+fast RAM the default becomes **3 planes, 8 colours** (the ANSI eight; bright shown as bold, as on OCS/ECS), with fast RAM
+16 as now, and a setting (2/4/8/16 colours, read at boot) replaces section 3's "no runtime setting". Built after D16
+with the rest of the 2 MB diet (disk cache by memory size, login stepping aside).

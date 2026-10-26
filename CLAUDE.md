@@ -44,6 +44,7 @@ DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved
 **`useradd` and `userdel` approved (owner 2026-10-26):** small commands for root (ideas list), built at once.
 **`sudo` approved (owner 2026-10-26, "with users added we also need a sudo command"):** the group wheel, own password, with `gpasswd` and `useradd -G`.
 **Rescue when a boot repair fails approved (owner 2026-10-26):** after D16: a root that fsck.ext2 cannot repair is mounted read-only and boot offers 1 continue read-only (default after 30 s), 2 read-write anyway, 3 rescue shell with the repair commands listed, 4 reboot; `man rescue`. As AmigaOS does with a disk that cannot be validated.
+**The 2 MB diet approved (owner 2026-10-26):** after D16: without fast RAM the console defaults to 8 colours (3 planes; 16 with fast RAM); a setting (2/4/8/16 colours, at the next boot, as Workbench's ScreenMode prefs) lets the user choose; the disk cache sized by the machine's memory; login steps aside for the shell. Measured 2026-10-26: Workbench 3.1 on a 2 MB chip-only A1200 leaves 1,737 KB free, Zenix with one login 1,126 KB. Halving the double-height screen buffer: decided after a real-68020 scroll test.
 **Colour console approved (owner 2026-10-25):** colours in the text console (ANSI colours, for `ls`, `grep`, the prompt,
 `less`); a design note first (a DESIGN number, reviewed), then built. **The shell's memory** (a fix, audit 2026-10-25
 'found while fixing'): sh grabs a fixed arena of 64-256 KB per shell and parses a whole script at once; make it grow on
