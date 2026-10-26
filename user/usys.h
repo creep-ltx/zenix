@@ -164,4 +164,5 @@ struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };
 #define UPDNOTE_DONE      1u    /* NOTE kinds: zup installed the root half (or it was installed already) */
 #define UPDNOTE_FAILED    2u    /* zup refused the bundle or rolled the root back */
 #define UPDNOTE_CONFIRMED 3u    /* login's prompt is up on console 1: this kernel works (login.c) */
+#define UPDNOTE_ROOTFAILED 4u   /* the kernel makes a CONFIRMED over a FAILED of the same version this (audit3 B1) */
 static inline int sys_update(u32 op, u32 a, u32 b) { return sys3(82, op, a, b); }

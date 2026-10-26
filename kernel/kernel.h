@@ -61,8 +61,9 @@ void klog_write(const char *s, u32 n);        /* a service's output (FT_KLOG): i
  * kind, ~(magic + kind), 0. The same numbers are in boot/bootmenu.c. */
 #define BOOTNOTE_OFF     0xF0u
 /* the update note (DESIGN D15): four longs at UPDNOTE_OFF in the same spare bytes (outside every sum, before the boot
- * note): magic, kind (1 done, 2 failed, 3 confirmed), version, ~(magic + kind + version). zenixboot reads it before
- * the kernel starts and clears it; klog_init clears it when this boot writes slot 0, which comes before every write */
+ * note): magic, kind (1 done, 2 failed, 3 confirmed, 4 confirmed but the root half failed), version, ~(magic + kind +
+ * version). zenixboot reads it before the kernel starts and clears it; klog_init clears it at every start (before
+ * every write), so it says what this boot did */
 #define UPDNOTE_OFF      0xE0u
 #define UPDNOTE_MAGIC    0x5A55504Eu          /* "ZUPN" */
 #define BOOTNOTE_MAGIC   0x5A4E5854u          /* "ZNXT" */
@@ -117,7 +118,9 @@ void upd_release(void);
 #define UPD_RELEASE   2                 /* root: the bundle's memory back to the pool */
 #define UPD_NOTE      3                 /* root: kind (UPDNOTE_*), version -> the update note */
 #define UPD_F_ROLLBACK 1u               /* bootinfo flags: "Zenix (previous)" (zenixboot PREVIOUS) */
+#define UPDNOTE_FAILED    2u
 #define UPDNOTE_CONFIRMED 3u
+#define UPDNOTE_ROOTFAILED 4u           /* CONFIRMED over a FAILED (or ROOTFAILED) of the same version (audit3 B1) */
 long updnote_set(u32 kind, u32 version);        /* serial.c: klog area +0xE0, for zenixboot's next start */
 extern u32 boot_ram_pa, boot_ram_size;
 void *mem_alloc(u32 n, u32 flags, u32 owner);   /* 0 if n is 0, above MEM_ALLOC_MAX, or does not fit */

@@ -205,10 +205,12 @@ the boot note, never only the note's 16 bytes: exec writes an 8-byte free-memory
 remainder an allocation leaves, which was slot 0's first text bytes; a slot rejected for that showed an older boot as
 the previous one (`tools/zenixboot-test.sh bootmenu`). zenixboot rounds the chip top as the kernel does
 (`MaxLocMem & ~0xFFF`). **The update note** (D15) lies at `+0xE0`-`+0xEF`, in slot 0's header padding (outside every
-sum, before the boot note at `+0xF0`): magic `ZUPN`, kind (1 done, 2 failed - written by zup -, 3 confirmed -
-written by `login` when its prompt is up on console 1), a version, and `~(magic + kind + version)`. zenixboot reads
-it at the next start and clears it; `klog_init` clears it when this boot writes slot 0, which comes before every
-write of it. This boot writes the other slot (boot number + 1), so the previous log stays where it is
+sum, before the boot note at `+0xF0`): magic `ZUPN`, kind (1 done, 2 failed - written by zup, or by `boot` when
+`/sbin/zup` is missing or did not end well -, 3 confirmed - written by `login` when its prompt is up on console 1 -,
+4 confirmed but the root half failed: the kernel makes a confirmation over a failed note of the same version that, so
+login never erases zup's failure, audit3 B1), a version, and `~(magic + kind + version)`. zenixboot reads it at the
+next start and clears it; `klog_init` clears it at every start, before every write of it, so it says what this boot
+did. This boot writes the other slot (boot number + 1), so the previous log stays where it is
 and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
 at ...` and "no log from a previous boot", "damaged (checksum)" or the previous boot's last 20 lines, each starting
 with a `>`, between `=== previous boot (N) ended here ...` (with or without a kernel panic) and `=== end of the
@@ -595,7 +597,8 @@ bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the b
 at most the size given in `b`: the bundle's address and size - 0 when there is none -, its flags, the running kernel's
 version number and string from the `ZVER` record; anyone); `UPD_RELEASE` gives the bundle's memory back to the pool
 (root; `boot` calls it after zup, whatever zup did); `UPD_NOTE` (root) writes the update note (kind 1 done, 2 failed,
-3 confirmed, and a version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version
+3 confirmed, 4 confirmed but the root half failed - what a 3 over a 2 or 4 of the same version becomes -, and a
+version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version
 from it. The bundle is read in place and never passed to a system call: it is no process's memory (-EFAULT). Test
 builds only: `DIAG=-DDIAG_TRIAL=1` panics instead of confirming (and the panic resets the machine), `=2` resets
 without confirming, `=3` never confirms (tools/update-test.sh).

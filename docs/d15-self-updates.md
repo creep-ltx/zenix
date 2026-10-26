@@ -185,10 +185,11 @@ success).
 | A cold start during the trial | no evidence: the new kernel boots, with "Zenix V was installed and not yet confirmed; if it misbehaves, choose Zenix (previous)" |
 | The root half fails | zup rolls the root back and says so; new kernel with old root is legal |
 
-- **The update note** (16 bytes: magic, kind - done / failed / confirmed, version, check sum) lies at **klog area +0xE0
-  to +0xEF**, in the padding after slot 0's header words (outside every sum) and before the boot note at +0xF0. `klog_init`
-  clears it when this boot writes slot 0, which is fine: zenixboot reads it before the kernel starts, and zup and init
-  write it after `klog_init`. zenixboot reads it only if its own `AllocAbs` of the area succeeded, uses chip top rounded
+- **The update note** (16 bytes: magic, kind - done / failed / confirmed, and since audit3 B1 "confirmed, but the root
+  half failed", which the kernel writes when a confirmation meets a failed note of the same version -, version, check
+  sum) lies at **klog area +0xE0 to +0xEF**, in the padding after slot 0's header words (outside every sum) and before
+  the boot note at +0xF0. `klog_init` clears it at every start (since audit3 B1; before, only when this boot wrote slot
+  0), which is fine: zenixboot reads it before the kernel starts, and zup, boot and login write it after `klog_init`. zenixboot reads it only if its own `AllocAbs` of the area succeeded, uses chip top rounded
   as the kernel does (`MaxLocMem & ~0xFFF`; today it does not round), and clears it after acting on it. bootmenu leaves it
   alone.
 - **The klog slot choice** (found by the review: bootmenu damages slot 0's first text bytes on every run, an existing

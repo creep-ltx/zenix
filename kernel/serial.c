@@ -368,6 +368,7 @@ void klog_init(const struct bootinfo *bi)
         prev_text = kprev && text_valid(kprev);
         kl = kprev == s0 ? s1 : s0;
         memset(kl, 0, KLOG_HDR + KLOG_SIZE);
+        memset((u8 *)lo + UPDNOTE_OFF, 0, 16);  /* the update note says what this boot did (zenixboot read it) */
         kl->size = KLOG_SIZE;
     }
     kl->magic = KLOG_MAGIC;
@@ -389,12 +390,17 @@ long bootnote_set(u32 kind)
     return 0;
 }
 
-/* the update note (D15): what zup did and whether this boot came up (login on console 1), for zenixboot */
+/* the update note (D15): what zup did and whether this boot came up (login on console 1), for zenixboot. A
+ * confirmation never erases a failed root half of the same version (audit3 B1): it becomes ROOTFAILED, so zenixboot
+ * keeps the bundle and offers it again instead of retiring it */
 long updnote_set(u32 kind, u32 version)
 {
     if (!klog_area_pa)
         return -ENODEV;
     volatile u32 *n = (volatile u32 *)(klog_area_pa + UPDNOTE_OFF);
+    if (kind == UPDNOTE_CONFIRMED && n[0] == UPDNOTE_MAGIC && n[3] == ~(n[0] + n[1] + n[2]) && n[2] == version &&
+        (n[1] == UPDNOTE_FAILED || n[1] == UPDNOTE_ROOTFAILED))
+        kind = UPDNOTE_ROOTFAILED;
     n[0] = UPDNOTE_MAGIC;
     n[1] = kind;
     n[2] = version;

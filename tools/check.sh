@@ -31,7 +31,7 @@ LONGEST="update-test svc-test matrix diag-test colour-test cmds2-test pure-test 
 declare -A SPLIT
 SPLIT[svc-test]="a z b n r d|o zo u l|f s h t dmg"
 SPLIT[colour-test]="1 4|3"                     # the 1-plane run first: its edges are the 4-plane run's reference
-SPLIT[update-test]="install bad|cold previous|panic hang|powercut"
+SPLIT[update-test]="install bad|cold previous|panic hang|powercut|refused nozup"
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh
 m1=""; m2=""; for ((i = 0; i < ${#m[@]}; i++)); do if ((i % 2)); then m2="$m2 ${m[i]}"; else m1="$m1 ${m[i]}"; fi; done
 SPLIT[matrix]="${m1# }|${m2# }"

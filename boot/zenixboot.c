@@ -24,7 +24,7 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 #include "../user/sha256.h"
 
-#define ZB_VERSION "0.2b1"
+#define ZB_VERSION "0.2b2"
 #define ZB_DATE "26.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: zenixboot " ZB_VERSION " (" ZB_DATE ")";
 
@@ -42,6 +42,7 @@ static const char version[] __attribute__((used, section(".text.start"))) = "$VE
 #define UPDNOTE_MAGIC   0x5A55504Eu     /* "ZUPN" */
 #define UPDNOTE_FAILED  2u
 #define UPDNOTE_CONFIRMED 3u
+#define UPDNOTE_ROOTFAILED 4u   /* it came up, but its root half failed (audit3 B1): the bundle is kept */
 #define UPD_F_ROLLBACK  1u
 #define BI_UPD          0x78            /* bootinfo: bundle address, size, flags */
 #define ZUP_HDR 96
@@ -572,6 +573,11 @@ static void update_half(int prev_asked)
         if (n && n[1] == UPDNOTE_CONFIRMED && n[2] == st.version) {
             note_clear();
             retire("came up (its login prompt on console 1)");
+        } else if (n && n[1] == UPDNOTE_ROOTFAILED && n[2] == st.version) {
+            note_clear();                   /* the kernel works, the root half was not installed: still the trial */
+            st.handovers = 0;               /* (a sign of trouble: the 3-start rule counts from here) */
+            say("zenixboot: update: Zenix %ld came up, but its root half was not installed (see dmesg -p in Zenix):"
+                " the bundle is kept and goes to Zenix again\n", (long)st.version, 0, 0);
         } else if (last && last > st.lastboot && (reason == KLOG_END_PANIC || reason == KLOG_END_RUNNING)) {
             if (n && n[1] == UPDNOTE_FAILED && n[2] == st.version)
                 say("zenixboot: its root half failed (see dmesg -p in Zenix)\n", 0, 0, 0);

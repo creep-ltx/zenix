@@ -639,7 +639,7 @@ void syscall_c(u32 *rb)
                 break;
             }
 #endif
-            r = a2 >= 1 && a2 <= UPDNOTE_CONFIRMED ? (s32)updnote_set(a2, a3) : -EINVAL;
+            r = a2 >= 1 && a2 <= UPDNOTE_ROOTFAILED ? (s32)updnote_set(a2, a3) : -EINVAL;
         }
         else
             r = -EINVAL;

@@ -32,8 +32,11 @@ DESCRIPTION
     still working after 20 minutes is stopped (the next start finishes
     its work). Whatever zup did, boot then gives the update bundle's
     memory back (SYS_update RELEASE). With no /sbin/zup, boot says so only
-    when an update is waiting. boot's stack is 4 KB (it needs under 500
-    bytes): it stays in memory for ever.
+    when an update is waiting. With an update waiting, a missing /sbin/zup
+    or one that crashed, was stopped or failed leaves the update note
+    "failed" for the bundle's version, so zenixboot(8) does not retire
+    the bundle. boot's stack is 4 KB (it needs under 500 bytes): it stays
+    in memory for ever.
     Then it registers the services listed in /etc/svctab (below) and
     starts /bin/init on console 1 and waits for it. Should init
     ever end, boot says so ("boot: /bin/init ended (status N), starting it

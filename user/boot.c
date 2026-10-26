@@ -53,21 +53,25 @@ static void svctab(void)
 
 /* /sbin/zup at every start, before anything else uses the root (it does nothing without a bundle, a journal or a
  * way back to take). A zup still working after a minute is reported, one still working after 20 is stopped (the
- * journal finishes its work at the next start); the bundle's memory is given back whatever zup did (RELEASE) */
+ * journal finishes its work at the next start); the bundle's memory is given back whatever zup did (RELEASE). With a
+ * bundle, a missing /sbin/zup or one that did not end well (crashed, stopped, failed) leaves the update note FAILED
+ * for the bundle's version (audit3 B1): login's confirmation then keeps zenixboot from retiring the bundle */
 static void num(u32 v) { char n[12], *p = n + sizeof n; *--p = 0; do *--p = (char)('0' + v % 10); while ((v /= 10) > 0); say(p); }
 static void update(void)
 {
     char *argv[] = { "/sbin/zup", 0 };
-    int pid = sys_spawn(argv[0], argv, 0);
-    for (u32 t = 1; pid >= 0 && sys_waitnb(pid) == -2; t++) {     /* t: tenths of a second */
+    int pid = sys_spawn(argv[0], argv, 0), st = 0;
+    for (u32 t = 1; pid >= 0 && (st = sys_waitnb(pid)) == -2; t++) {     /* t: tenths of a second */
         sys_sleep(10);
         if (t == 600) say("boot: /sbin/zup is still working (an update)\n");
-        if (t == 12000) { say("boot: /sbin/zup stopped after 20 min; the next start finishes its work\n"); sys_kill(pid); sys_wait(pid); }
+        if (t == 12000) { say("boot: /sbin/zup stopped after 20 min; the next start finishes its work\n"); sys_kill(pid); st = sys_wait(pid); break; }
     }
-    if (pid < 0) {
-        struct uupdate u;
-        if (sys_update(UPD_INFO, (u32)&u, sizeof u) == 0 && (u.size || u.flags))
-            say("boot: no /sbin/zup: the update is not installed\n");
+    struct uupdate u;
+    int have = sys_update(UPD_INFO, (u32)&u, sizeof u) == 0;
+    if (have && pid < 0 && (u.size || u.flags)) say("boot: no /sbin/zup: the update is not installed\n");
+    if (have && u.addr && u.size >= 16 && (pid < 0 || st != 0)) {
+        const unsigned char *h = (const unsigned char *)u.addr;       /* the bundle header's version (big-endian, +12): read, never passed */
+        sys_update(UPD_NOTE, UPDNOTE_FAILED, (u32)h[12] << 24 | (u32)h[13] << 16 | (u32)h[14] << 8 | h[15]);
     }
     sys_update(UPD_RELEASE, 0, 0);
 }
