@@ -160,7 +160,7 @@ The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 3, 2026
 the standard ANSI colour codes. **How.** More bitplanes behind the same text console (16 colours on AGA, 8 on OCS/ECS,
 a setting from 1 to 4 planes; 1 keeps today's look and speed), a colour byte per cell and in the scrollback, the ANSI
 codes in term.c (256 and true colour mapped to the nearest of 16). The full design: [d14-colour-console.md](d14-colour-console.md).
-## D15. Zenix updates itself (approved by the owner 2026-10-24; design note revision 2 after the first review, awaiting the second)
+## D15. Zenix updates itself (approved by the owner 2026-10-24; design note revision 3 after two reviews: ready to build)
 **Why.** No more SD card swaps and `dd` on the PC (which also reset the owner's settings). **How.** One update bundle on
 BOOT:; zenixboot (still in AmigaOS) installs the new kernel and keeps the old one, and hands the root packages to Zenix
 in memory, as it already does for a RAM disk; Zenix's installer applies them transactionally (a journal, rename-over,

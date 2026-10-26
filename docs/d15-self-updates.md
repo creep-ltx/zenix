@@ -1,12 +1,16 @@
-# D15: Zenix updates itself (design note, revision 2)
+# D15: Zenix updates itself (design note, revision 3)
 
-Status: **revised after the first review (2026-10-26), awaiting the second.** Approved by the owner on 2026-10-24
+Status: **ready to build (revision 3, 2026-10-26), after two independent reviews.** Approved by the owner on 2026-10-24
 ("Zenix installing updates by itself, no card swaps"), in the order of work after D14 (ROADMAP). Built on the approved
 versioning model (ROADMAP, "Versions and updates") and on D13's safe replacement of running programs. The short version
 is in [DESIGN.md](DESIGN.md) D15. Revision 2 takes in every finding of the first review: a crash-safe ext2 rename first
 (a bug found in today's code), the rule that the kernel is never older than the root, a rollback that works with older
 kernels, no result block, careful FFS writes, the blob's memory given back, frozen kernel-written structs, a three-way
-compare for settings files, and the boot-time cost of checking.
+compare for settings files, and the boot-time cost of checking. Revision 3 takes in the second review: a normal
+power-off never counts as a failed start (no automatic rollback without evidence), the boot half is idempotent and never
+loses the real previous kernel, the update note's exact place, a named system call with the kernel's version, the
+bundle's memory reserved and freed through the allocator, zup updating itself first, FFS details (a subdirectory,
+`Info()`, deleting rename targets, the order for "previous"), menu traps, and the rename and frozen-list gaps.
 
 ## 1. The goal
 
@@ -67,20 +71,35 @@ power cut (section 8).
     older `ps`'s 40-byte buffer. Fixed next, before D15: the size-passing calls.)*
   - the program start contract (the stack at entry, `a5`), the ZEXE and ZEX2 formats (the loader keeps both for ever);
   - the bootinfo layout and the klog/boot-note layout (zenixboot and bootmenu against the kernel);
-  - the `/etc` formats base programs read (svctab, fstab, passwd, group).
+  - the `/etc` formats base programs read (svctab, fstab, passwd, group);
+  - the service manager's interface: `SVC_*` operation numbers and limits (`SVC_TEXT` 80, `SVC_SAVED` 512, `SVC_MIDREQ`,
+    exit status 86 for a damaged table), the port names (`disk`, `fs`, `fs.*`) and the built-in `@name` programs;
+  - the tty mode bits (`TTY_RAW`, `TTY_NOSIG`), `O_*` flags and mode bits, the spawn limits (argument count and bytes),
+    exit and wait status conventions (139 for a fault, the console status of `waitcon`);
+  - the boot note's kinds and `SYS_reboot`'s arguments (bootmenu is never updated by a bundle), the klog layout and its
+    flags;
+  - D15's own: the bootinfo bundle fields, the update note, the state file, the bundle header and manifest formats.
+  The kernel-internal file kinds are not on the list; signal numbers join it when signals come.
   libz is linked into each program, so it needs no rule of its own.
-- **zup itself stays a v1 ZEXE** using only calls and structs that existed when D15 shipped, so it runs on every
-  D15-aware kernel (section 9).
+- **zup itself stays a v1 ZEXE** (its libz code included) using only calls and structs that existed when D15 shipped,
+  so it runs on every D15-aware kernel; a test runs the current zup on the first D15 kernel, kept as a fixture.
+- **zup updates itself first:** the zup that applies bundle V is V-1's (the root is not updated yet), so it installs its
+  own package first and then runs the new `/sbin/zup` for the rest (legal: kernel V is already running). The bundle and
+  manifest formats are frozen anyway.
 - **The database** (`/var/lib/zpkg/`): plain text, one manifest per installed package.
 
 ## 5. Installing safely (the root half)
 
 - **Before D15: ext2 rename-over made crash-safe** (a bug in today's code, found by the review): `ext2_rename` today
   unlinks the target first, so a power cut can lose `/bin/sh`, or leave two names sharing one inode that a later
-  cleanup frees. Fixed the Linux way: raise the moving inode's link count, rewrite the target entry's inode in place
-  (one block write), remove the source entry, lower the count, drop the old target inode. Tested by killing the server
+  cleanup frees. Fixed the Linux way: raise the moving inode's link count (also when the new name does not exist yet,
+  zup's `.zup-new` to a new file), rewrite the target entry's inode number **and its file-type byte** in place (one
+  block write), remove the source entry, lower the count, drop the old target inode. Tested by killing the server
   after each block write and running `e2fsck -fn` (at worst a leaked inode, never a missing or shared one). ZenixFS's
-  rename is checked the same way.
+  rename is atomic by its commits, with one exception fixed too: when the replaced target loses its last link,
+  `inode_destroy` may commit in the middle of the rename (zenixfs.c, `f_map_clear_from`), recording "target gone, source
+  still under the old name"; the target is destroyed after the new entry is in place (orphaned first). zup is safe
+  either way, because the prev/ link keeps the target's count above 0.
 - **The journal** (`/var/lib/zpkg/journal`), written and synced before anything changes: the files the update replaces,
   adds and removes. The previous version of each replaced or removed file is kept by **hard link** in
   `/var/cache/zpkg/prev/` (no copying; `FS_LINK` exists), so the space check counts only the new files and the journal.
@@ -95,57 +114,95 @@ power cut (section 8).
   back (the hard links put back). When both names point to the same inode, it deletes nothing. The previous `prev/` set
   is deleted only after the new install has committed.
 - **Sync** once after the journal and once after the commit record (writes are already write-through).
+- **Only the root filesystem:** zup touches nothing else (`/home` is mounted later by init, and the prev/ links must
+  be on the same filesystem).
+- **When `boot` runs zup:** after the root is mounted, before the service table and `/bin/init`; also when a journal
+  exists without a bundle (to finish or roll back). `/sbin/zup` missing: `boot` says so and goes on. `boot` waits for zup
+  with a long limit and a message, so a hung zup is reported instead of hanging the start silently.
 - **The result is shown where the owner sees it:** init or login prints the one-line result after the motd until it has
   been seen (on console 1 it would otherwise scroll away).
 
 ## 6. The boot half (zenixboot), written carefully
 
-- **FFS keeps metadata in its buffers:** after each write step zenixboot sends `ACTION_FLUSH` to BOOT:'s handler (DoPkt,
-  AmigaDOS Manual 3rd ed., packet 27) and waits for the reply, and again before switching AmigaOS off. *(The knowledge
-  base has a verified case of a closed file's header still in buffers.)*
-- **The order, so a valid kernel is always findable:** write `zenix.new` from the bundle; read it back and check its
-  SHA; flush; delete `zenix.old`; rename `zenix` -> `zenix.old`, flush; rename `zenix.new` -> `zenix`, flush. Free space on
-  BOOT: is checked first.
+- **A subdirectory:** the bundle, the kernels and the state file live in `BOOT:Zenix/` (zenixboot looks for
+  `Zenix/zenix` first, then `zenix` next to itself, as today). FFS's hash chains run through other files' header blocks
+  in the same directory, so renames in BOOT:'s root could rewrite the S, C and bootmenu headers; the subdirectory keeps
+  them out of the way. The owner's first D15 card package moves the kernel there.
+- **Before any write:** `Info()` on BOOT:; if it is validating or write-protected, or the space is short (peak:
+  `zenix` + `zenix.old` + `zenix.new` + the bundle + the state file, plus header and extension blocks), the update is
+  skipped for this start with a message (it cannot be renamed `.bad` then, and is not re-hashed every start: the state
+  file remembers "skipped, reason").
+- **FFS keeps metadata in its buffers:** after each write step zenixboot sends `ACTION_FLUSH` (packet 27; the Guru Book
+  21.2.5.3: synchronous, writes all buffers) with DoPkt to `GetDeviceProc("BOOT:")`'s port and waits for the reply, and
+  again before switching AmigaOS off.
+- **Idempotent:** if the state file says V's boot half is done, or `zenix` matches the bundle's kernel SHA, the kernel
+  steps are skipped. **`zenix.old` is never touched twice for one V,** and never deleted while `zenix` is missing.
+- **The order for a new V:** write `zenix.new`; read it back and check its SHA; flush; delete `zenix.old`; rename
+  `zenix` -> `zenix.old`, flush; rename `zenix.new` -> `zenix`, flush. AmigaDOS `Rename` fails when the target exists, so
+  old `.bad`, `.done`, `.rejected` and `zenix.rejected` are deleted before each rename.
+- **The state file** changes on trial starts: written as `.new` then renamed (or two copies with a sum), flushed after.
 - **The start rule:** try `zenix`; if it is missing or bad, a checked `zenix.new`, then `zenix.old`; the one used is
   named on screen and serial.
 - **A bad bundle** is renamed `.bad`, the reason printed, and the boot carries on with the installed system.
-- **zenixboot updates itself only** after running `zenixboot.new CHECK` successfully; **CHECK never writes**; a start
-  with `RAM=` ignores any bundle (a RAM root would lose the root half).
-- **bootmenu is never updated by a bundle:** it runs first on BOOT:, and a broken one would also block AmigaOS (only
-  Kickstart's Early Startup menu would be left). It is updated by hand, with the owner, when needed.
-- **A small state file on BOOT:** (`zenix-update.state`): the version being tried and a try counter (section 8).
+- **zenixboot and bootmenu are never updated by a bundle in this version:** bootmenu runs first and a broken one would
+  also block AmigaOS; zenixboot has no copy in place between two renames. Both are updated by hand, with the owner.
+  **CHECK never writes**; a start with `RAM=` ignores any bundle (a RAM root would lose the root half).
 
 ## 7. The kernel's part, and the memory
 
-- **The bundle has its own bootinfo fields** (+0x78 address, +0x7C size, +0x80 flags, inside the 1 KB table below
-  hwinfo at +0x100), **not** the RAM-disk slot: an older kernel or diskd/rootpick would otherwise mount the bundle as the
-  root. Old kernels ignore the new fields safely. `SYS_blk_ram` never returns the bundle.
-- The kernel keeps the bundle's memory out of the pools (as the RAM disk's) and offers it read-only to `boot`/zup;
-  when zup is done, **the range goes back to the memory pool** (`add_range`) and the fields are cleared. Without that a
-  2 MB A1200 would lose about 600 KB until the next reset.
+- **The bundle has its own bootinfo fields** (+0x78 address, +0x7C size, +0x80 flags; bootinfo ends at 0x77, the 1 KB
+  table is cleared by both loaders, so old loaders leave zeros), **not** the RAM-disk slot (an older kernel or
+  diskd/rootpick would mount the bundle as the root). Old kernels ignore the new fields. `SYS_blk_ram` never returns it.
+- **The kernel checks the fields at `mem_init`:** inside one bootinfo memory region, 16-byte aligned, not overlapping
+  0-0x2000, the kernel, the klog area or the RAM disk; otherwise ignored with a message.
+- **The memory:** reserved at `mem_init` as a used block inside the pool (a small `mem_reserve`), and given back with
+  the normal `mem_free` when zup is done, so it merges with its neighbours and needs no range slot (today `add_range`
+  silently drops a 17th range: not used).
+- **One new system call, `SYS_update` (82, claimed in CLAUDE.md):** `INFO` (the bundle's address, size and flags, and
+  **the running kernel's version**, which today exists only as a fixed string in `uname`), `RELEASE` (give the memory
+  back; `boot` calls it after zup ends, even if zup crashed), `NOTE` (write the update note or the confirmation). There
+  is no MMU, so "read-only" is a rule: zup reads the bundle directly into its own buffers and **never passes a bundle
+  pointer to a system call** (`user_ok_rd` would refuse it with -EFAULT).
 - zenixboot loads the bundle into **fast RAM first** (today's `alloc_safe` tries chip first; changed for the bundle).
-- The flags carry "roll back" when the owner chose "Zenix (previous)".
+- The flags carry "roll back" when the owner chose "Zenix (previous)"; zup also compares the running kernel's version
+  with the root's base (after "previous", a root newer than the kernel), which backs up the flag.
 
 ## 8. Failures, and the way back
+
+**Only evidence counts.** A normal power-off is how an Amiga session ends, and it wipes chip RAM; so a cold start with
+no valid klog proves nothing, and **never triggers a rollback**. Evidence is what a warm reset leaves: the trial boot's
+klog with reason PANIC, or with reason RUNNING and no confirmation (a hang the owner reset). **Confirmation** is console
+1's login prompt being up (set through `SYS_update NOTE` by init), not zup's "done" (a hang after zup must not count as
+success).
 
 | Case | What happens |
 |---|---|
 | Bundle copy cut off | `.part` name or bad checksum: renamed `.bad`, said on screen and serial, the installed system boots |
-| zenixboot cut off mid-install | the section 6 order and start rule: always a valid kernel, named on screen; BOOT: may need validation (FFS's validator, harmless) |
+| zenixboot cut off mid-install | the section 6 order, idempotence and start rule: always a valid kernel, the real previous one kept |
 | Power cut during the root half | the journal plus the crash-safe rename: finished or rolled back at the next start |
-| The new kernel panics | warm reset: zenixboot reads the klog header (reason PANIC; it already reserves that area) and offers "previous" as the default |
-| The new kernel hangs, then a power cycle | the try counter on BOOT:: the first unconfirmed start offers "previous" with "new" as default, the second defaults to "previous" with rollback |
-| The root half fails | zup rolls the root back and says so; new kernel with old root is legal; the try counter stops retrying after two |
+| The new kernel panics, then a warm reset | zenixboot reads the klog (reason PANIC, in the trial) and asks, with its own timed question, "Zenix V crashed - start the previous version? (Y in 10 s)", default **previous** |
+| The new kernel hangs, the owner resets | the klog shows RUNNING without confirmation: the same question, default **previous** |
+| A cold start during the trial | no evidence: the new kernel boots, with "Zenix V was installed and not yet confirmed; if it misbehaves, choose Zenix (previous)" |
+| The root half fails | zup rolls the root back and says so; new kernel with old root is legal |
 
-- **An update note** of 16 bytes next to the boot note in the klog header: Zenix sets "V done" or "V failed". It
-  survives warm resets and `reboot` (verified on the A1200 for the boot note, 2026-10-24); bootmenu leaves it alone when
-  it clears its own note. zenixboot reads it at the next start, retires the bundle (renames it `.done`) and resets the
-  counter. If a power cycle loses the note, the same bundle is offered again and zup does nothing (already installed).
-- **"Zenix (previous)":** a line in the owner's `S:BootMenu.conf`, `Zenix (previous) = run SYS:zenixboot PREVIOUS`,
-  added by hand in the owner's first D15 card package. zenixboot then uses `zenix.old`, sets the rollback flag, renames
-  the bundle `.rejected`, and makes the old kernel the default again (`zenix` <- old, the rejected one to
-  `zenix.rejected`); after that there is no "previous" until the next update. zup, run by that kernel's `boot`, decides
-  **from the root's own database** whether anything needs rolling back, so it is safe whether or not the root half ran.
+- **The update note** (16 bytes: magic, kind - done / failed / confirmed, version, check sum) lies at **klog area +0xE0
+  to +0xEF**, in the padding after slot 0's header words (outside every sum) and before the boot note at +0xF0. `klog_init`
+  clears it when this boot writes slot 0, which is fine: zenixboot reads it before the kernel starts, and zup and init
+  write it after `klog_init`. zenixboot reads it only if its own `AllocAbs` of the area succeeded, uses chip top rounded
+  as the kernel does (`MaxLocMem & ~0xFFF`; today it does not round), and clears it after acting on it. bootmenu leaves it
+  alone.
+- **The klog slot choice** (found by the review: bootmenu damages slot 0's first text bytes on every run, an existing
+  bug fixed before D15): the kernel and zenixboot choose the slot and read the reason from the header sum and the boot
+  number only; the text sum decides only whether the text is shown.
+- **The bundle is retired** (renamed `.done`) after the first confirmed start, or after 3 handovers without evidence of
+  failure.
+- **"Zenix (previous)":** a line in the owner's `S:BootMenu.conf`, **after** the normal Zenix line (bootmenu sends
+  `reboot`/`bootzenix` to the first `run ...zenixboot` entry): `Zenix (previous) = run SYS:zenixboot PREVIOUS`, added by
+  hand in the owner's first D15 card package. zenixboot then: renames the bundle `.rejected` **first** (so a cut never
+  re-applies it), then makes the old kernel the default again (`zenix` -> `zenix.rejected`, `zenix.old` -> `zenix`,
+  flushing between), and sets the rollback flag; with no `zenix.old`, it says so clearly and boots the installed one.
+  zup, run by that kernel's `boot`, decides **from the root's own database** (and the version comparison) whether to roll
+  back. After that there is no "previous" until the next update.
 - **Said openly:** the way back works only to a kernel that is itself D15-aware. The first D15 update has no menu way
   back; the way back then is the card on the PC, as today.
 
@@ -182,16 +239,21 @@ file instead of hashing `zenix` every time); the signature is checked once per t
 
 ## 12. Order of work
 
-0. Before D15 (found bugs, fixed first): the crash-safe ext2 rename (and ZenixFS checked); the size-passing calls for
-   every kernel-written struct; the frozen-interface rule in CLAUDE.md.
+0. Before D15 (found bugs, fixed first): the crash-safe ext2 rename (new-name case and file-type byte included) and the
+   ZenixFS mid-rename commit; the size-passing calls for every kernel-written struct; the klog slot choice by header sum
+   and bootmenu's whole-area `AllocAbs` (bootmenu fixed in the source; installed by hand with the owner); the
+   frozen-interface rule in CLAUDE.md.
 1. The bundle format, `tools/mkzup.py`, packages from the build; host tests.
-2. zup (journal, hard-link previous versions, rename-over, three-way compare, unclean mark, rollback, already-installed);
-   host tests.
-3. The kernel: the bundle's bootinfo fields, read-only access for `boot`/zup, the memory given back; `boot` runs zup.
-4. zenixboot: check, the careful FFS order with flushes, the start rule, `.part`/`.bad`/`.done`/`.rejected`, the state
-   file and try counter, the update note, `PREVIOUS`; fast RAM first.
-5. The emulator tests.
-6. Docs; the owner's first D15 card package (with the "previous" menu line), with the owner.
+2. zup (journal, hard-link previous versions, rename-over, three-way compare, unclean mark, rollback, already-installed,
+   self-update first); host tests.
+3. The kernel: the version, `SYS_update` (INFO/RELEASE/NOTE), the bundle's bootinfo fields checked and reserved; `boot`
+   runs zup and calls RELEASE; init writes the confirmation.
+4. zenixboot: `BOOT:Zenix/`, `Info()`, check, the careful FFS order with flushes, idempotence, the start rule,
+   `.part`/`.bad`/`.done`/`.rejected`, the state file, the update note and klog evidence, the timed question,
+   `PREVIOUS`; fast RAM first; rounded chip top.
+5. The emulator tests (section 11, plus: cold starts never roll back; the re-offered bundle keeps the real previous
+   kernel; `PREVIOUS` cut after the bundle rename).
+6. Docs; the owner's first D15 card package (`BOOT:Zenix/`, the "previous" menu line, the fixed bootmenu), with the owner.
 7. Signatures (Ed25519, a small public-domain implementation checked against its test vectors; measured on a 68020).
 
 ## 13. The first review's answers to the open questions
