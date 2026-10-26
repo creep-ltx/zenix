@@ -170,7 +170,7 @@ in memory, as it already does for a RAM disk; Zenix's installer applies them tra
 the previous version kept, the owner's changed settings never overwritten); the boot menu's "Zenix (previous)" goes
 back. The same bundle and installer serve the serial cable and the network later (`zpkg`). The full design:
 [d15-self-updates.md](d15-self-updates.md).
-## D16. Events and signals (roadmap block 2, the first item; design note awaiting two reviews)
+## D16. Events and signals (roadmap block 2, the first item; design note revision 2 after the first review, awaiting the second)
 **Why.** A process can wait for only one thing at a time, every I/O event wakes every waiting process, and there are no
 Unix signals (no handlers for Ctrl-C, no SIGCHLD, SIGALRM or SIGPIPE): the network, telnet and ported programs need
 all three. **How.** Exec's signal bits underneath (a pending and a waiting word per process, one AND decides a wake-up,

@@ -1,112 +1,184 @@
-# D16: events and signals (design note, revision 1)
+# D16: events and signals (design note, revision 2)
 
-Status: **proposed, awaiting two independent reviews** (deep core: the scheduler's waits and the way into user code).
-The first item of roadmap block 2 ("Zenix reaches the world"), in the order of work the owner approved on 2026-10-25;
-the network, telnet and every interactive program after it need it. The short version is in [DESIGN.md](DESIGN.md) D16.
-Facts about today's code are *read* from main (2026-10-26).
+Status: **revised after the first review (2026-10-26), awaiting the second** (deep core: the scheduler's waits and the
+way into user code). The first item of roadmap block 2 ("Zenix reaches the world"), in the order of work the owner
+approved on 2026-10-25. The short version is in [DESIGN.md](DESIGN.md) D16. Facts about today's code are *read* from
+main (2026-10-26). Revision 2 takes in the first review: sigreturn masks the status register, the level-2 interrupt
+saves every register, Exec's order for waiting (no check under masked interrupts), compatible `kill`, real process
+groups (fixing ^C in pipelines), which signals interrupt what, slot masks instead of waiter lists, fixed event bits,
+alarm as a kernel deadline, `SA_RESTART`, and Exec's single entry point for handlers.
 
 ## 1. The problem
 
-1. **A process can wait for only one thing at a time:** one port, a timer, one child, or one pipe/tty (`block_io`).
-   A terminal program cannot wait for the keyboard *and* the serial port (`cu` uses two processes for that, D12); a
-   network program cannot wait for several connections; the shell polls the tty's interrupt flag (`tty_take_intr`).
-2. **`wake_io()` wakes every process waiting for any I/O** on every pipe or tty event (proc.c); each wakes, checks and
-   sleeps again.
-3. **There are no Unix signals:** `kill` sets a flag that ends the process (or stops it, for ^Z), with no handlers, so
-   programs cannot clean up on Ctrl-C, catch a child's exit, set an alarm, or notice a closed pipe (`SIGPIPE`). Ported
-   programs (block 3, newlib) expect `signal`/`sigaction`, `select`/`poll`, `alarm`.
+1. **A process can wait for only one thing at a time:** one port, a timer, one child, or one pipe/tty (`block_io`). A
+   terminal program cannot wait for the keyboard *and* the serial port (`cu` uses two processes, D12); a network program
+   cannot wait for several connections; the shell polls the tty's interrupt flag (`tty_take_intr`).
+2. **`wake_io()` wakes every process waiting for any I/O** on every pipe or tty event.
+3. **No Unix signals:** `kill` sets a flag that ends (or, for ^Z, stops) a process; no handlers, no SIGCHLD, SIGALRM or
+   SIGPIPE. Ported programs (block 3) expect `signal`/`sigaction`, `select`/`poll`, `alarm`.
+4. **^C in a pipeline stops only its last program** (found by the review): the tty's foreground is one pid (`tty->fg`),
+   which the shell sets to the pipeline's last process, so in `sleep 100 | cat` ^C leaves `sleep` running.
 
-## 2. The idea: Exec's signal bits underneath, Unix on top
+## 2. The idea: Exec's model underneath, Unix on top
 
-AmigaOS Exec solved waiting for many things with **signal bits** (ROM Kernel Reference Manual: Exec, "Signals":
-`AllocSignal`, `Signal`, `Wait` and the mask `Wait` returns): each task has a word of *pending* bits and a word of bits
-it *waits for*; any event sets its bit; one AND decides every wake-up. D16 builds Zenix's waiting on that, then puts
-the Unix interfaces on top of it:
+AmigaOS Exec waits on **signal bits** (ROM Kernel Reference Manual: Exec, "Signals" and "Waiting for a signal"): a task
+has pending bits and bits it waits for, an event sets its bit, `Wait` returns the bits that fired and clears them, and
+signals are held until the task waits. Exec also runs a task's **exception code** through one entry point when chosen
+signals arrive (RKM Exec, "Exceptions": `tc_ExceptCode`, `tc_SigExcept`). D16 uses both ideas:
 
-- **Event bits (kernel, new):** per process `ev_pending` and `ev_wait` (32 bits each). Every source a process may wait
-  for gets one bit, which the process assigns: a file descriptor's readiness (readable, writable), a port with
-  messages, a timer, child exit, a console switch. An event ORs the bit into `ev_pending`; if `ev_pending & ev_wait`
-  is non-zero and the process is blocked, it becomes ready. A wait with the AND already non-zero returns at once, so no
-  wake-up is ever lost (the check and the block happen with interrupts masked: audit B5's rule).
-- **Per-object waiters:** each pipe end, tty and the serial device records which processes wait on it and with which
-  bit, so an event wakes exactly those (problem 2). A small fixed list per object (4 entries), overflowing to today's
-  wake-all behaviour, said in limits.md.
-- **`poll` and `select` (libz, on one new system call):** `SYS_evwait` takes an array of (fd, events) and a timeout,
-  registers the bits, waits once, returns the ready set. `select` is a thin layer over `poll` in libz.
-- **Unix signals for programs:** numbers and meanings as Linux (SIGHUP 1, SIGINT 2, SIGQUIT 3, SIGKILL 9, SIGUSR1 10,
-  SIGUSR2 12, SIGPIPE 13, SIGALRM 14, SIGTERM 15, SIGCHLD 17, SIGCONT 18, SIGSTOP 19, SIGTSTP 20, SIGTTIN 21, SIGTTOU
-  22, SIGWINCH 28); a pending-signal word and a blocked mask per process; actions default / ignore / a handler.
+- **Fixed event bits, per process** (kernel): I/O ready, a signal arrived, the timer, a child changed state, a console
+  switch, a message on an owned port. No bit allocator. `poll` rescans its file descriptors (at most 16, `NFD`) after
+  each wake, which it must do anyway to fill in the results.
+- **Slot masks on objects:** every pipe end, tty, the serial device and every port carries a 32-bit mask of the
+  *process slots* waiting on it (`NPROC` is 32), so registering is one OR and there is no overflow. A waker readies only
+  a process that is in the event-wait state with `ev_pending & ev_wait` non-zero; a stale bit (a process that left or
+  died) is harmless, and `ready()` is never called here on a stopped or sleeping process. Every wait re-checks in a
+  loop. Plain blocking `read`/`write` register the same way, so `wake_io` and `nio` go. Ports keep their single
+  `waiter` alongside.
+- **One system call for waiting, `SYS_evwait`:** an array of (fd, events) and a timeout. `poll` and `select` are libz.
 
-## 3. Delivering a signal to a handler (without an MMU)
+## 3. Waiting without lost wake-ups (Exec's order)
 
-- **When:** on the way back to user mode (the end of a system call, or the level-2 interrupt that cut into user code:
-  the places where `resched()` already runs), if a pending, unblocked signal has a handler.
-- **How:** the kernel pushes a **signal frame** on the process's *user* stack: the saved user registers (d0-d7, a0-a6,
-  sr, pc), the signal number and the old blocked mask; it sets the blocked mask to include the signal (and the
-  handler's `sa_mask`), sets `a5` to the process's data base (D13: a pure program's handler needs it; the kernel keeps
-  it in `struct proc`), and continues at a **trampoline** in libz that calls the handler and then `SYS_sigreturn`, which
-  restores the frame. The frame is checked on return (it lies in the process's own stack, its saved `sr` has the
-  supervisor bit clear): a damaged frame kills the process.
-- **Stack space:** the frame is about 80 bytes; delivery checks the stack guard first and kills with "stack overflow
-  in a signal" rather than writing below the guard.
-- **Interrupted system calls** return `-EINTR` (`SA_RESTART` is not offered in revision 1; libz's wrappers do not retry
-  silently). The calls that block (read, write on pipes/ttys, wait, sleep, `SYS_evwait`, message calls) are listed.
-- **Message calls (D1/D11):** a client blocked in a server call is not interrupted mid-request (the server is working
-  for it; D11's rule "a kill acts only between requests" stays): the signal is delivered when the call returns.
+Zenix's rule is that interrupts only queue; every producer of an event (tty input, ^C/^Z, serial bytes, pipes, console
+switches) runs in process context at the four `kwork` points, and the kernel is never preempted. So:
+1. register on every object and clear the bit;
+2. check readiness **with interrupts on** (a tty's line check walks up to 1 KB; masking that would overrun Paula's
+   one-byte receive buffer at 115200 baud);
+3. with interrupts masked, **only** test `ev_pending & ev_wait` and set the state.
+The producer sets the bit and readies the process under the same mask (`ready()` already masks). This also covers a
+check that itself blocks, such as a socket served by a user-space network server later. **The rule for new drivers:**
+the network interrupt only queues; `kwork` produces the event.
 
-## 4. What changes for today's mechanisms
+**Timeouts:** an `evwait` with a timeout blocks as `P_SLEEP` with `ev_wait` set (as `ipc_recv`'s timed wait does);
+without one, in a new event-wait state. **`alarm`** is a per-process kernel deadline that joins `wake_min`, so it fires
+even in CPU-bound code.
 
-| Today | With D16 |
-|---|---|
-| `kill(pid)` sets `killed` | `kill(pid, sig)`; SIGKILL keeps today's `killed` path exactly; other signals go through pending/handlers; the old one-argument form (signal 0 in the second argument, which old programs pass) means SIGTERM, which ends a program with no handler as today |
-| ^C: kill the foreground job, or set the tty's `intr` flag for the shell | ^C sends SIGINT to the foreground process group (today's `setfg` group); the shell has a handler; `intr` polling goes; `TTY_NOSIG` keeps ^C as a byte |
-| ^Z: `proc_stop` | SIGTSTP to the foreground group; default action stop (today's path); a handler may catch it |
-| a child's exit wakes a `wait` | also SIGCHLD (default: ignore) and its event bit |
-| `cu` uses two processes | may use one with `poll` (kept two until tested) |
-| D11 services | SIGKILL as today (between requests); servers ignore other signals unless they install handlers |
+## 4. Signals
 
-**Frozen interfaces (CLAUDE.md):** the signal numbers and their default actions, the signal frame layout and
-`SYS_sigreturn`'s contract, `poll`'s event bits (Linux values) join the list.
+- **Numbers and meanings as Linux:** SIGHUP 1, SIGINT 2, SIGQUIT 3, SIGKILL 9, SIGUSR1 10, SIGUSR2 12, SIGPIPE 13,
+  SIGALRM 14, SIGTERM 15, SIGCHLD 17, SIGCONT 18, SIGSTOP 19, SIGTSTP 20, SIGTTIN 21, SIGTTOU 22, SIGWINCH 28.
+  **Reserved, not generated in revision 1:** SIGWINCH (consoles have a fixed size; telnet's window-size option later),
+  SIGHUP (telnet hang-up or logout later; `cu` has no carrier detect), SIGTTIN/SIGTTOU, SIGQUIT.
+- **Faults** (SIGSEGV, SIGBUS, SIGILL, SIGFPE) stay "killed, status 139" with no handlers in revision 1.
+- **SIGKILL and SIGSTOP** can never be caught, blocked or ignored.
+- **Per process (kernel):** pending, blocked, caught, ignored and restart masks, one `sa_mask` per signal (32 words),
+  and **one entry point** (Exec's model): the handler table itself lives in libz, so the kernel needs no per-signal
+  handler addresses or checks, and `struct proc` grows by about 160 bytes instead of 290.
+- **Default actions:** terminate (through `proc_kill`, so the G3/G4 rules, D11's kill rules and `kill_now` apply
+  unchanged), stop (today's `proc_stop`), continue, ignore. A numbered death gives the wait status 128+n (143 TERM, 137
+  KILL, 141 PIPE): new values, not changed ones. **Init (pid 1)** is never ended by a default action.
+- **What interrupts a blocking call:** a signal wakes or interrupts a call **only if it will run a handler**. Ignored and
+  default-ignore signals (SIGCHLD, SIGWINCH) wake nothing; blocked ones stay pending (a default-terminate signal
+  unblocked later becomes a `proc_kill` then). A write that already moved bytes returns the count. No handler runs once
+  `killed` or `exiting` is set. The blocking sites are listed in the build (tty reads, pipe reads and writes, the serial
+  device, `sleep`, `wait`, `ipc_recv` for servers that install handlers - `-EINTR` gets a defined meaning there - and the
+  service manager's waits).
+- **A client in a server call** is protected by G4's rule (`kill_now` waits while `wait_msg` is set): the signal is
+  delivered when the call returns.
+- **`SA_RESTART` is offered:** on 020-060 a TRAP's stacked PC is the next instruction and `trap #0` is 2 bytes, so a
+  restart is `pc -= 2` with `d0` = the original call number (saved at entry). Never for `sleep` and `evwait` (as Linux).
+- **SIGCHLD:** default keeps zombies for `wait`; an explicit `SIG_IGN` reaps automatically (POSIX); also sent when a
+  child stops (the shell's `ST_STOPPED`).
+- **A stopped process:** a default-terminate signal ends it (as today); a caught one waits for SIGCONT; SIGCONT always
+  continues it, then runs its handler.
+- **SIGPIPE** changes what old programs see on writing to a closed pipe: today `-EPIPE`, afterwards death with 141.
+  Accepted (it is what every Unix does; the shell's pipelines rely on it).
 
-## 5. New system calls (to claim in CLAUDE.md first)
+## 5. Delivering a signal to the handler
 
-`SYS_evwait` (poll), `SYS_sigaction`, `SYS_sigprocmask`, `SYS_sigreturn`, `SYS_alarm` (or a timer through
-`evwait`'s timeout and a SIGALRM bit), and `SYS_kill` extended in a compatible way (section 4). Numbers from 83 on.
+- **Where:** one function, `sig_deliver(registers)`, runs as the very last step before returning to user mode on both
+  paths: at the end of a system call (after `proc_kill_now`, after the result is stored, so the frame saves `-EINTR`),
+  and on every return path of the level-2 interrupt when it cut into user code (including the early `schedule(); return`
+  paths). **The level-2 entry saves all 15 registers** like the system-call entry and passes the block to C (today it
+  saves only d0-d1/a0-a1, so a CPU-bound program could never receive a handler; the cost is about 11 more longs each way
+  per tick, roughly 0.1-0.2% of a 14 MHz 68020, an estimate). No other return to user mode needs it.
+- **A stop asked by the process itself** (`kill(getpid(), SIGSTOP)` from a SIGTSTP handler) is acted on at once: the end
+  of a system call schedules when `stop_req` is set.
+- **The frame** is written on the process's user stack after checking `user_ok_wr` over its whole length and the stack
+  guard (else "stack overflow in a signal", killed): a size word first (frozen, grows at the end), the saved d0-d7,
+  a0-a6, the user PC and condition codes, the signal number and the old blocked mask. No FPU state: programs are built
+  `-msoft-float`. **The kernel never copies or writes a format word:** it edits the PC and the condition codes of the
+  format-0 frame already on its stack (TRAP and interrupts give format 0 with "PC = next instruction" on 020-060, MC68060
+  UM 8.4.1).
+- **Into user code:** `a5` = the process's data base (D13; 0 for v1 programs, harmless since all registers are restored
+  after), the PC = the process's entry point (registered once by libz at start-up, like Linux's `sa_restorer`), the
+  signal number in a register; the blocked mask gains the signal and its `sa_mask`. libz's entry calls the handler from
+  its table, then `SYS_sigreturn`.
+- **`sigreturn` checks (a forged frame can do no more than the process could do anyway):** the frame lies in the
+  process's memory (`user_ok_rd` over its whole length **before** the kernel reads it: a read of non-existent memory in
+  supervisor mode is a bus error, a panic); the PC is even (else killed); **the status register is never taken from the
+  frame: only its condition codes** (`sr = frame & 0x001F`, the upper byte always 0, as Linux m68k does). A forged SR of
+  0x0700 would otherwise run user code with every interrupt masked, and one with the M bit (0x1000) would make the next
+  trap use an undefined master stack on 020-040.
 
-## 6. Programs that change
+## 6. Process groups
 
-- **sh:** SIGINT/SIGCHLD handlers replace the `intr` polling; `trap` (the shell builtin) for scripts; job control as
-  today but through SIGTSTP/SIGCONT/SIGCHLD.
-- **kill, pgrep's -signal, timeout:** signal names and numbers.
-- **less, edit:** clean up the terminal on SIGINT/SIGTERM.
-- **cu:** optionally one process with `poll`.
-- **New:** `sleep` with SIGALRM is not needed; `trap` in sh; man pages for signal(7)-style overview.
+- **`pgid`** in `struct proc`, inherited at spawn; **`SYS_setpgid`**: a parent sets its child's group just after spawn
+  (there is no `fork`).
+- **The tty's foreground becomes a group:** `setfg(pid)` keeps its frozen meaning ("this one process"); the group
+  meaning comes through a new argument old callers pass as 0 (or a new number). When nobody is in the foreground the
+  tty still sets `intr`, so an old shell's `SYS_ttyintr` keeps working.
+- **^C sends SIGINT to the foreground group, ^Z SIGTSTP**: every process of a pipeline (fixes problem 4).
+- **Sessions, controlling terminals other than consoles, SIGHUP on hang-up** come with telnet's pseudo-terminal design
+  (block 2), not here.
 
-## 7. Tests
+## 7. Compatible `kill`
 
-- Host: the bit logic (no lost wake-up under every interleaving of event and wait, with a model of the interrupt mask).
-- Emulator: `poll` on a pipe, the tty and a timeout together; ^C runs a handler (a test program prints and exits);
-  SIGCHLD; SIGALRM; SIGPIPE on writing to a closed pipe; a handler in a pure program (D13: `a5` right); a damaged
-  signal frame kills; a signal during a server call is delivered after it; nested signals masked; `trap` in sh compared
-  with bash; every existing test (job control especially) unchanged.
-- The stack guard with a signal arriving near the stack's end.
+- Old callers pass 0 in the second and third argument (`sys_kill(pid)` has been `sys3(24, pid, 0, 0)` in every version
+  of `usys.h`). The **old form** (third argument 0) stays exactly as today: `proc_kill`, status 130, D11's second-kill and
+  5-second rules (tests and the frozen wait statuses depend on it).
+- The **new form** sets the third argument to 1; then the second is the signal number, and **0 means "does it exist?"**
+  (POSIX `kill(pid, 0)`, which ports use constantly): no signal is sent.
+- **Groups:** `kill(0, sig)` is the caller's group, `kill(-pgid, sig)` a group; `may_signal` applies to each member.
 
-## 8. Order of work
+## 8. System calls (claimed in CLAUDE.md before building)
 
-1. Event bits and per-object waiters in the kernel (`wake_io` replaced); `SYS_evwait`; `poll`/`select` in libz; tests.
-2. Signals: pending/blocked words, `sigaction`, `sigprocmask`, delivery frame and trampoline, `sigreturn`, `kill` with
-   numbers, ^C/^Z as SIGINT/SIGTSTP, SIGCHLD, SIGPIPE, SIGALRM; tests.
-3. Programs: sh (`trap`, handlers instead of polling), kill/pgrep/timeout, less/edit clean-up; docs.
+`SYS_evwait`, `SYS_sigaction` (a pointer to a struct with its size, under the "grow at the end" rule: three-argument
+calls cannot carry handler, mask, flags), `SYS_sigprocmask`, `SYS_sigreturn`, `SYS_alarm`, `SYS_setpgid`, and the
+compatible `kill` and `setfg` extensions. **Frozen from then on:** the signal numbers and default actions, the frame
+layout and `sigreturn`'s contract, `poll`'s event bits (Linux values), the 128+n statuses.
 
-## 9. Open questions for the reviews
+## 9. Programs that change
 
-1. One event bit per fd/event pair assigned per `poll` call (kernel-managed, temporary), or bits a program allocates
-   and keeps (Exec's `AllocSignal`)? Proposed: temporary per call for `poll`; a later `kqueue`-like registration may
-   keep them.
-2. `SA_RESTART`: offer it now (bash and many ports expect it), or EINTR only?
-3. Process groups and sessions: today's `setfg` group is enough for ^C/^Z; is `setpgid`/`setsid` needed now for the
-   shell's job control with signals, or with telnet's logins (block 2)?
-4. Kernel size: the frame code, the calls and the per-object waiters are estimated at 2-3 KB of the 8 KB left on the RAM
-   floppy; enough?
+- **sh:** a SIGINT and a SIGCHLD handler replace the `intr` polling (with `SA_RESTART`, so the line editor is not
+  interrupted by every child's exit); each pipeline gets its own group (`setpgid`) and becomes the foreground group;
+  `trap` for scripts, compared with bash.
+- **kill, pgrep, timeout:** signal names and numbers (`kill -TERM`, `kill -0`).
+- **less, edit:** restore the terminal on SIGINT/SIGTERM; on SIGTSTP restore it, stop, and redraw on SIGCONT.
+- **cu:** may become one process with `poll` (kept as two until tested).
+
+## 10. Tests
+
+- **Host:** the event logic under every interleaving of producer and waiter (a model of the mask and `kwork`), no lost
+  wake-up; slot masks with stale bits; `sigreturn`'s checks (a forged SR of 0x0700 or 0x1000 is masked, an odd PC kills,
+  a frame outside the process is refused before it is read).
+- **Emulator:** `poll` on a pipe, the tty and a timeout together; ^C runs a handler; **^C reaches every process of a
+  pipeline**; SIGCHLD (and auto-reap with `SIG_IGN`); SIGALRM in a CPU-bound loop; SIGPIPE; `kill(pid, 0)` only probes; an
+  old-form kill still gives 130; `SA_RESTART` on a tty read; a handler in a pure program (`a5`); a signal during a server
+  call is delivered after it; nested signals masked; a stopped process and SIGCONT; `trap` in sh compared with bash; a
+  signal arriving near the stack's end; every existing test unchanged.
+
+## 11. Kernel size
+
+The RAM-floppy kernel has 8008 bytes left (`make` prints it). The reviewer's prototype of the signal core alone is
+about 1.2 KB at -O2; with `evwait`, the waiter masks, restart, groups, `alarm` and the blocking sites the estimate is
+**3.5-4.5 KB**. It fits; the new code is built `-Os`. The network driver (block 2) and later work need room too: if the
+measured size passes 4 KB, the next step frees room first (more cold files at `-Os`, measured).
+
+## 12. Order of work
+
+1. Event bits, slot masks and the Exec-order wait; `wake_io` and `nio` replaced; `SYS_evwait`; `poll`/`select` in libz;
+   host and emulator tests.
+2. Process groups (`pgid`, `setpgid`, the group foreground, ^C/^Z to the group).
+3. Signals: the masks and entry point, delivery on both return paths (the level-2 entry saving all registers),
+   `sigreturn` with its checks, `sigaction`/`sigprocmask`, compatible `kill`, SIGCHLD/SIGPIPE/SIGALRM, `SA_RESTART`.
+4. Programs: sh (`trap`, handlers, groups), kill/pgrep/timeout, less/edit; docs; the frozen list in CLAUDE.md.
+
+## 13. The first review's answers to the open questions
+
+1. Event bits: fixed per process, no per-fd bits; `poll` rescans (section 2).
+2. `SA_RESTART`: offered now (section 4).
+3. Process groups: needed now (section 6); sessions and SIGHUP with telnet.
+4. Size: 3.5-4.5 KB of the 8 KB left (section 11).
 
 Last checked against the code: 2026-10-26.
