@@ -68,7 +68,7 @@ int fd_install(struct proc *p, struct file *f)
     return -EMFILE;
 }
 
-static long pipe_read(struct file *f, void *buf, u32 n)
+__attribute__((optimize("O2"))) static long pipe_read(struct file *f, void *buf, u32 n)
 {
     struct pipe *p = f->pipe;
     u8 *d = buf;
@@ -91,7 +91,7 @@ static long pipe_read(struct file *f, void *buf, u32 n)
     }
 }
 
-static long pipe_write(struct file *f, const void *buf, u32 n)
+__attribute__((optimize("O2"))) static long pipe_write(struct file *f, const void *buf, u32 n)
 {
     struct pipe *p = f->pipe;
     const u8 *s = buf;

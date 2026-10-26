@@ -247,5 +247,9 @@ Built on branch `d16` (2026-10-26), in this order:
    `ready_force` (`kernel/proc.c`). `sigtest stopsrv` (`tools/signal-test.sh`) stops a server in receive, calls it,
    and checks that the client still waits a second later and the server is still stopped; on the old kernel the server
    answered at once (checked: the check fails there).
+2. **Room first (rule 14, section 11):** the kernel had 5736 bytes left on the RAM floppy (179200 bytes) after step 1.
+   `tty.c` and `vfs.c` are now built `-Os` (measured: tty 1628 bytes, vfs 2556 bytes smaller), with the pipes' copy
+   loops kept at `-O2` by an attribute (136 bytes): 9784 bytes left (169416 bytes). The scheduler, `ipc.c`, `main.c`
+   (the interrupt entries) and `syscall.c` stay `-O2`.
 
 Last checked against the code: 2026-10-26.

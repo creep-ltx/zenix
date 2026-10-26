@@ -140,6 +140,12 @@ KOPT_rtc := -Os
 KOPT_kbd := -Os
 KOPT_gfx := -Os
 KOPT_term := -Os
+# DESIGN D16 rule 14 (room for events and signals, measured 2026-10-26): tty.c (line discipline at typing speed) and
+# vfs.c (dispatch and path routing; the time goes to the servers) at -Os save 4048 bytes of the RAM floppy's kernel; the
+# pipes' copy loops (pipe_read, pipe_write) keep -O2 through an attribute (136 bytes). The scheduler, ipc.c and the
+# interrupt entries stay -O2.
+KOPT_tty := -Os
+KOPT_vfs := -Os
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
