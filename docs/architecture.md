@@ -139,7 +139,8 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    disk server and the root filesystem server as services (section 9, "The service manager"): its first call to
    `disk` starts `diskd` (pid 2), it picks the root device and its server from the superblock, and its first call to
    `fs` starts `fsd` or `zfsd` (pid 3); it runs `/sbin/zup` (D15: an update's root half, a journal a power cut left, or the way back; boot waits, says so after a
-minute and stops it after 20, then gives the bundle's memory back with `SYS_update RELEASE`); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
+minute and stops it after 20 - every process named zup, also the second one a new zup runs, audit3 B4 -, then, when
+none runs any more, gives the bundle's memory back with `SYS_update RELEASE`); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
    starts `login` on console 1 (section 11).
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)
@@ -609,7 +610,8 @@ version number and string from the `ZVER` record; anyone); `UPD_RELEASE` gives t
 version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version
 from it. The bundle is read in place and never passed to a system call: it is no process's memory (-EFAULT). Test
 builds only: `DIAG=-DDIAG_TRIAL=1` panics instead of confirming (and the panic resets the machine), `=2` resets
-without confirming, `=3` never confirms (tools/update-test.sh).
+without confirming, `=3` never confirms (tools/update-test.sh); `UDIAG=-DDIAG_SLOWZUP` (the programs' flags) gives
+boot a 4-minute limit for zup and makes a zup started as the second stage hang (update-test's `slowzup`).
 
 **Priorities** (section 6): `SYS_getpriority(which, who)` and `SYS_setpriority(which, who, nice)`, POSIX's calls.
 `PRIO_PROCESS`: who is a pid, 0 the caller; `PRIO_USER`: every process whose real uid is who (0: the caller's);

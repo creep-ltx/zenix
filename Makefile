@@ -32,6 +32,9 @@ export ZVNUM ZVSTR
 DIAG    ?=
 CFLAGS  += $(DIAG)
 ASFLAGS += $(DIAG)
+# the same for the programs: UDIAG=-DDIAG_SLOWZUP (boot's short zup time limit and a stage-2 zup that hangs: the
+# update test's slowzup build)
+UDIAG   ?=
 # libgcc's 64-bit helpers (__udivdi3, __muldi3) in the default multilib use the 64-bit mulu.l/divu.l themselves; the
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
@@ -47,6 +50,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           nice renice priotest reboot cu awk svctest zup
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
+UCFLAGS += $(UDIAG)
 # Stack sizes written into each program's ZEXE header (the loader gives this much; no guard below it). Default 16 KB;
 # these need more (measured with -fstack-usage, docs/limits.md): sh's recursive parser and runner (its own depth
 # guard, STK_LIMIT, keeps to 16 KB and the rest is margin), gzip's deflate (about 12 KB of frames in one chain), edit.

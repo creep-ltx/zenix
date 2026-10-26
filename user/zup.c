@@ -1035,6 +1035,9 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "-l")) return list();
     if (argc > 1 && !stage2) { printf("usage: zup [-l]   (boot runs zup at every start; see man zup)\n"); return 2; }
     if (sys_getuid() != 0) { printf("zup: only root installs updates\n"); return 1; }
+#ifdef DIAG_SLOWZUP     /* test builds (tools/update-test.sh slowzup): a stage 2 that hangs, for boot's time limit */
+    if (stage2) { sys_write(1, "zup: diag: DIAG_SLOWZUP: stage 2 hangs\n", 39); for (;;) sys_sleep(100); }
+#endif
     struct uupdate u;
     memset(&u, 0, sizeof u);
     if (sys_update(UPD_INFO, (u32)&u, sizeof u) < 0) return 0;      /* a kernel without updates: nothing to do */

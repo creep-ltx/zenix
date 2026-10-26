@@ -22,12 +22,14 @@
 #   refused      a bundle zup refuses (it needs a newer base than any): the kernel comes up and confirms, but the
 #                bundle is kept (not .done) and handed over again at the next start, where zup refuses it again
 #   nozup        a root without /sbin/zup: boot says so and leaves the note FAILED; the bundle is kept the same way
+#   slowzup      a test build (UDIAG=-DDIAG_SLOWZUP: boot's limit 4 min, the bundle's zup hangs as stage 2): boot stops
+#                both zups and gives the bundle's memory back only after that (audit3 B4); no zup runs at the prompt
 # usage: tools/update-test.sh [setup...]     (ZENIX_SERIAL, ZENIX_OUT, ZENIX_BUILD as the other tests)
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-update.XXXXXX)}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-update-serial}
-SETUPS="${*:-install cold panic hang previous powercut bad refused nozup}"
+SETUPS="${*:-install cold panic hang previous powercut bad refused nozup slowzup}"
 BG=; [ $# = 0 ] && BG=1                 # all of them: side by side (each takes an emulator slot); named ones: in turn
 V1=$(sed -n 's/^#define ZENIX_VNUM \([0-9]*\)u$/\1/p' kernel/version.h); V2=$((V1 + 101))
 make -s BUILD=$BD $BD/zenixboot $BD/kernel.bin $BD/zenix.hdf $BD/pkg/list >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL build"; exit 1; }
@@ -48,6 +50,11 @@ python3 tools/mkzup.py repack $P utils /bin/hello=$OUT/hello2 >/dev/null || { ec
 for k in b2 b2t1 b2t2 b2t3; do
     python3 tools/mkzup.py bundle $OUT/$k.zup --kernel $OUT/$k/kernel.bin $P zup base utils man >/dev/null || { echo "FAIL bundle $k"; exit 1; }
 done
+make -s BUILD=$OUT/b2s ZVNUM=$V2 UDIAG=-DDIAG_SLOWZUP $OUT/b2s/kernel.bin $OUT/b2s/pkg/list >>$OUT/make.log 2>&1 ||
+    { echo "FAIL build slowzup"; exit 1; }
+rm -rf $OUT/pkgs; mkdir -p $OUT/pkgs; cp $P/* $OUT/pkgs/; cp $OUT/b2s/pkg/zup.* $OUT/pkgs/
+python3 tools/mkzup.py bundle $OUT/b2s.zup --kernel $OUT/b2s/kernel.bin $OUT/pkgs zup base utils man >/dev/null ||
+    { echo "FAIL bundle b2s"; exit 1; }
 python3 tools/mkzup.py bundle $OUT/b2min.zup --kernel $OUT/b2/kernel.bin --min 4000000000 $P zup base utils man >/dev/null ||
     { echo "FAIL bundle b2min"; exit 1; }
 # the owner's root: this build's, with a line added to /etc/passwd
@@ -279,6 +286,20 @@ EOF
     check $n "... the new kernel runs, a shell prompt" "$(grep -aq "^Zenix 0\.2 ($V2) m68k" $OUT/$n/1.txt && grep -aq '^zbok$' $OUT/$n/1.txt && echo ok || echo bad)"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
 }
+setup_slowzup() {
+    local n=slowzup
+    disk $n $OUT/b2s.zup || { check $n "the disk" bad; return; }
+    printf '%s\n%s\nsleep 2\nsend echo ==ps; ps; echo ==pse; echo zb\\x6fk\\r\nsleep 4\nstop\n' 'wait boot: /sbin/zup stopped 900' "$S_PROMPT" >$OUT/$n/s1.txt
+    run $n 1 900 $OUT/$n/s1.txt
+    check $n "zup installed the new zup (its manifest), which hangs as stage 2; boot stops after its limit" \
+        "$([ "$(inorder $n 1 '^zup: diag: DIAG_SLOWZUP: stage 2 hangs' 'boot: /sbin/zup stopped after')" = ok ] &&
+           rfile $n 1 /var/lib/zpkg/zup.manifest | grep -q "^version $V2 " && echo ok || echo bad)"
+    check $n "... the bundle's memory is given back only after both zups are stopped" \
+        "$(inorder $n 1 'boot: /sbin/zup stopped after' "update: the bundle's [0-9]+ bytes are free again" 'zenix:/#')"
+    check $n "... no zup runs at the prompt (ps)" "$(awk '$0 == "==ps" { f = 1; next } $0 == "==pse" { f = 0 } f' $OUT/$n/1.txt | grep -aqE ' zup$' && echo bad || { grep -aqx '==pse' $OUT/$n/1.txt && echo ok || echo bad; })"
+    check $n "... a shell prompt" "$(has $n 1 '^zbok$')"
+    check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
+}
 
 one() {
     case $1 in
@@ -290,6 +311,7 @@ one() {
     powercut) setup_powercut ;;
     bad) setup_bad ;;
     refused) setup_rootfail refused $OUT/b2min.zup 'zup: the bundle needs base 4000000000 or newer' ;;
+    slowzup) setup_slowzup ;;
     nozup) ROOTIMG=$OUT/root-nozup.img setup_rootfail nozup $OUT/b2.zup 'boot: no /sbin/zup: the update is not installed' ;;
     *) echo "FAIL unknown setup $1" >$OUT/$1.res ;;
     esac
