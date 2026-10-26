@@ -27,8 +27,11 @@ DESCRIPTION
        SHA-256 of the bundle's table and of every part, that it is not
        older than what is installed, that its base packages are not newer
        than the running kernel (the kernel always goes first), the
-       dependencies, and the free space for what it will write. A
-       refused bundle changes nothing. Packages whose version is
+       dependencies, and the free space for what it will write; every
+       path is absolute, without . or .. parts (also at its end), and
+       every package name (also a dependency's) is only a-z, 0-9 and
+       + . - (it becomes a file name in /var/lib/zpkg). A refused bundle
+       changes nothing. Packages whose version is
        installed already are skipped;
        if all are, zup says so and does nothing. A newer zup is installed
        first, on its own, and then runs for the rest.

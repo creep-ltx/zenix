@@ -121,6 +121,18 @@ cp -r $U/p2 $U/p2dep; python3 tools/mkzup.py pkg $U/p2dep utils $V2 0.2 --dep ba
 for b in 0 1 2; do eval v=\$V$b; python3 tools/mkzup.py bundle $U/b$b.zup --kernel $U/kernel$v $U/p$b zup base utils >/dev/null; done
 python3 tools/mkzup.py bundle $U/b2dep.zup --kernel $U/kernel$V2 $U/p2dep zup base utils >/dev/null
 python3 tools/mkzup.py bundle $U/b2min.zup --kernel $U/kernel$V2 --min 2026102650 $U/p2 zup base utils >/dev/null
+# audit3 B6: a final . or .. in an entry's path, and package names with a / or capitals (mkzup.py refuses to make
+# them, so the manifests are edited by hand)
+for v in "dotdot:d 755 0 0 /bin/.." "dot:l ls /etc/." ; do
+    n=${v%%:*}; rm -rf $U/p2$n; cp -r $U/p2 $U/p2$n; printf '%s\n' "${v#*:}" >>$U/p2$n/utils.manifest
+    python3 tools/mkzup.py bundle $U/b2$n.zup --kernel $U/kernel$V2 $U/p2$n zup base utils >/dev/null
+done
+rm -rf $U/p2name; cp -r $U/p2 $U/p2name; mkdir -p $U/p2name/x
+sed 's/^name utils$/name x\/utils/' $U/p2/utils.manifest >$U/p2name/x/utils.manifest; cp $U/p2/utils.tgz $U/p2name/x/utils.tgz
+python3 tools/mkzup.py bundle $U/b2name.zup --kernel $U/kernel$V2 $U/p2name zup base x/utils >/dev/null
+rm -rf $U/p2cap; cp -r $U/p2 $U/p2cap
+sed 's/^depends base /depends Base /' $U/p2/utils.manifest >$U/p2cap/utils.manifest
+python3 tools/mkzup.py bundle $U/b2cap.zup --kernel $U/kernel$V2 $U/p2cap zup base utils >/dev/null
 python3 -I - $U <<'PYEOF'
 import sys, struct
 t = sys.argv[1]
@@ -168,7 +180,8 @@ printf 'owner:x:1000:100::/home/owner:/bin/sh\n' >>$R/etc/passwd; rm $R/etc/grou
 snap $R >$U/s1; cp -a $R $U/r1; cp $U/fsclean $U/fsclean1
 for v in "b2bad:SHA-256 does not match" "b2short:the bundle is .* bytes, its header says" "b0:older than the installed base" \
          "b2dep:needs base 2026102799 or newer" "b2min:needs base 2026102650 or newer" "b2:K$V1:newer than the running kernel" \
-         "b2:F5:not enough space on the root"; do
+         "b2:F5:not enough space on the root" "b2dotdot:a bad entry (d)" "b2dot:a bad entry (l)" \
+         "b2name:pkg/x/utils: a bad package name" "b2cap:a bad line (depends)"; do
     b=${v%%:*}; want=${v#*:}; k=$V2; e=()
     case "$want" in K*) k=${want%%:*}; k=${k#K}; want=${want#*:} ;; F*) e=(ZUP_FREE_KB=${want%%:*}); e=(ZUP_FREE_KB=5); want=${want#*:} ;; esac
     rm -f $U/trace
