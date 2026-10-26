@@ -488,11 +488,14 @@ long vfs_open(const char *path, int flags)
     if (ino < 0)
         return ino;                         /* the server's errno: -ENOENT, -EACCES, -EEXIST (O_CREAT|O_EXCL) ... */
     if (wr) {
-        if (exec_busy(m, &st)) {
+        /* with O_TRUNC the check came before the open, which has truncated the file already: a load that began
+         * since is not refused afterwards (that answered -ETXTBSY for a file already emptied, audit3 B5); it is
+         * marked stale and a segment listed since is unlisted, so nothing read while the file changed is shared */
+        if (!(flags & O_TRUNC) && exec_busy(m, &st)) {
             fs_call_on(m, FS_CLOSE, (u32)ino, 0, 0, 0);
             return -ETXTBSY;
         }
-        changed(m, ino);                    /* a segment of it listed since the check (O_TRUNC) is never reused */
+        changed(m, ino);
     }
     struct file *f = file_new(FT_INODE);
     if (!f) {

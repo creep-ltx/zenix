@@ -885,8 +885,10 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   segment (section 4) is found only while the kernel has seen nothing that could have changed its file. Opening a
   file for writing (`O_WRONLY` or `O_RDWR`) fails with -ETXTBSY (26, "text file busy") while a segment of it is in
   memory or a load of it is in progress (with `O_TRUNC` the kernel asks the server for the file's status before the
-  open, since the server truncates in it - only while something of that mount is loaded; without, it checks the
-  open's answer and closes it again); so a program is updated the Unix way, a new file renamed over the old name, and
+  open, since the server truncates in it - only while something of that mount is loaded - and that check is the
+  answer: a load that began between it and the open is marked stale and a segment listed meanwhile unlisted, never
+  refused after the file is already emptied, audit3 B5; without `O_TRUNC` it checks the open's answer and closes it
+  again); so a program is updated the Unix way, a new file renamed over the old name, and
   running processes keep the old code. A spawn of a file that is open for writing loads a private copy. unlink,
   rename, link and symlink are path-only in the kernel, so while something of that mount is loaded the kernel first
   asks the server which inode the affected name leads to (`FS_LSTAT`: the name removed, the one renamed over, a

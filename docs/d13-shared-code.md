@@ -289,7 +289,8 @@ What the build did differently from sections 1-13, and why; each item names the 
   segment is "busy" when its whole key matches the file's status (inode, size, time, generation), so an unlinked
   program's inode number given to a new file does not make that file busy. Gap, said openly: a load or a listing that
   happens between that `FS_STAT` and the truncating `FS_OPEN` cannot be refused any more; it is unlisted or marked stale
-  (never reused), but the file is already truncated. `O_TRUNC` without write access truncates nothing in either server
+  (never reused), and since audit3 B5 the open then succeeds (it answered -ETXTBSY for a file the server had already
+  truncated); such a load reads a file being rewritten, as a spawn of a file open for writing does. `O_TRUNC` without write access truncates nothing in either server
   and is not checked. **Generations** come from one counter (`gen_last`), set on every mount and on every
   `svc_handover` of a port that a mount uses (also the first start: harmless). `umount` needs no rule of its own: the
   slot's next mount has a new generation. **`ps`** got a SHR(K) column after MEM(K) (the tests that read `ps` lines
