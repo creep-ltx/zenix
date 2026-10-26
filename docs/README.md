@@ -59,7 +59,7 @@ folder for FS-UAE's save states (a floppy's writes are kept there under the conf
 
 **The gate: `make check`** (also `make test`, `tools/check.sh`). It builds every image once and keeps a copy, runs
 the host tests (seconds), then the emulator tests side by side, up to `ZENIX_EMU_SLOTS` (6) at once and the longest
-first, each with its own serial port, output directory and copy of the build directory (`ZENIX_BUILD`: the tests
+first (`svc-test` and `matrix` as three and two jobs, each with some of their parts), each with its own serial port, output directory and copy of the build directory (`ZENIX_BUILD`: the tests
 write to their disks, so none shares an image file), and prints a table in the order of the list (test, PASS/FAIL,
 time, details; the logs stay in `/tmp/zenix-check.*`, a failed test's images too). It fails if any test fails. A full
 run takes about 35 minutes (2026-10-26: svc-test alone takes that long; the tests add up to 2 h 45 min). Every test script reads its build
