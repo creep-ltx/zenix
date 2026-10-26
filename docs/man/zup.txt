@@ -47,8 +47,10 @@ DESCRIPTION
     is written next to it as PATH.new; one the owner deleted is not
     brought back.
 
-    The result is one line in /var/lib/zpkg/result, and a note for
-    zenixboot in the kernel log's area (done or failed).
+    boot(8) runs zup at every start, after the root is mounted and before
+    anything else. The result is one line in /var/lib/zpkg/result, which
+    login(1) shows after the next login (then it is removed), and a note
+    for zenixboot in the kernel log's area (done or failed).
 
 OPTIONS
     -l      list the installed packages and their versions, and whether

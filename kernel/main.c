@@ -93,6 +93,9 @@ void panic(const char *why)
     kprintf("*** stopped. Photo, then Ctrl-Amiga-Amiga: the next boot shows this again\n");
     panic_printing = 0;
     serial_flush();             /* TX ring won't drain with ints off */
+#ifdef DIAG_TRIAL
+    machine_reset();            /* test builds (tools/update-test.sh): the warm reset an owner would do */
+#endif
     if (gfx_up() && !panic_noscreen)
         gfx_panic();            /* the background turns dark red, the text stays */
     else

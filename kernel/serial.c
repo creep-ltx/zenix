@@ -389,6 +389,19 @@ long bootnote_set(u32 kind)
     return 0;
 }
 
+/* the update note (D15): what zup did and whether this boot came up (login on console 1), for zenixboot */
+long updnote_set(u32 kind, u32 version)
+{
+    if (!klog_area_pa)
+        return -ENODEV;
+    volatile u32 *n = (volatile u32 *)(klog_area_pa + UPDNOTE_OFF);
+    n[0] = UPDNOTE_MAGIC;
+    n[1] = kind;
+    n[2] = version;
+    n[3] = ~(UPDNOTE_MAGIC + kind + version);
+    return 0;
+}
+
 void klog_set_reason(u32 r)
 {
     if (!kl)

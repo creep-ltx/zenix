@@ -7,8 +7,11 @@ SYNOPSIS
     uname
 
 DESCRIPTION
-    Prints a fixed line naming the system, its version and architecture:
-    "Zenix 0.2 m68k (68020+, no MMU)". There are no options.
+    Prints a line naming the system, the running kernel's version (its
+    string and its number, from SYS_update INFO) and the architecture:
+    "Zenix 0.2 (2026102600) m68k (68020+, no MMU)". On a kernel older
+    than 2026-10-26 (no SYS_update) the line is "Zenix 0.2 m68k (68020+,
+    no MMU)". There are no options.
 
 SEE ALSO
     hostname(1), uptime(1)

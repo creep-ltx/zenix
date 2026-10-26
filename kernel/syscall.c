@@ -612,6 +612,38 @@ void syscall_c(u32 *rb)
         r = (s32)svc_sys(a1, op == SVC_SELF ? 0 : name, text);
         break;
     }
+    case SYS_update:                    /* D15: INFO (anyone), RELEASE and NOTE (root) */
+        if (a1 == UPD_INFO) {
+            if (UOKS(n, a2, a3, sizeof(struct uupdate), sizeof(struct uupdate))) {
+                struct uupdate u = { upd_pa, upd_size, upd_flags, zver.vnum, { 0 } };
+                memcpy(u.kver, zver.vstr, 16);
+                memcpy((void *)a2, &u, (u32)n);
+                r = 0;
+            }
+        } else if (current->uid != 0)
+            r = -EPERM;
+        else if (a1 == UPD_RELEASE) {
+            upd_release();
+            r = 0;
+        } else if (a1 == UPD_NOTE) {
+#ifdef DIAG_TRIAL       /* test builds (tools/update-test.sh): a trial kernel that fails where it would confirm */
+            if (a2 == UPDNOTE_CONFIRMED) {
+                kprintf("diag: DIAG_TRIAL=%u: not confirming\n", DIAG_TRIAL);
+                if (DIAG_TRIAL == 1)
+                    panic("test panic (DIAG_TRIAL)");           /* the panic resets the machine in this build */
+                if (DIAG_TRIAL == 2) {
+                    serial_flush();
+                    machine_reset();                            /* a hang the owner reset: the log says RUNNING */
+                }
+                r = 0;
+                break;
+            }
+#endif
+            r = a2 >= 1 && a2 <= UPDNOTE_CONFIRMED ? (s32)updnote_set(a2, a3) : -EINVAL;
+        }
+        else
+            r = -EINVAL;
+        break;
     case SYS_kill: {
         struct proc *p = proc_by_pid((int)a1);
         if (!(r = may_signal(p)))

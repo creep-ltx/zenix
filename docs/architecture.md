@@ -131,7 +131,8 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    caches, display, clock and disk, then creates one process from its image: `boot` (pid 1). `boot` registers the
    disk server and the root filesystem server as services (section 9, "The service manager"): its first call to
    `disk` starts `diskd` (pid 2), it picks the root device and its server from the superblock, and its first call to
-   `fs` starts `fsd` or `zfsd` (pid 3); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
+   `fs` starts `fsd` or `zfsd` (pid 3); it runs `/sbin/zup` (D15: an update's root half, a journal a power cut left, or the way back; boot waits, says so every
+minute and stops it after 20, then gives the bundle's memory back with `SYS_update RELEASE`); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
    starts `login` on console 1 (section 11).
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)
@@ -196,7 +197,11 @@ damaged (checksum): not shown"). The boot menu (`boot/bootmenu.c`) `AllocAbs()`e
 the boot note, never only the note's 16 bytes: exec writes an 8-byte free-memory header at the start of the free
 remainder an allocation leaves, which was slot 0's first text bytes; a slot rejected for that showed an older boot as
 the previous one (`tools/zenixboot-test.sh bootmenu`). zenixboot rounds the chip top as the kernel does
-(`MaxLocMem & ~0xFFF`). This boot writes the other slot (boot number + 1), so the previous log stays where it is
+(`MaxLocMem & ~0xFFF`). **The update note** (D15) lies at `+0xE0`-`+0xEF`, in slot 0's header padding (outside every
+sum, before the boot note at `+0xF0`): magic `ZUPN`, kind (1 done, 2 failed - written by zup -, 3 confirmed -
+written by `login` when its prompt is up on console 1), a version, and `~(magic + kind + version)`. zenixboot reads
+it at the next start and clears it; `klog_init` clears it when this boot writes slot 0, which comes before every
+write of it. This boot writes the other slot (boot number + 1), so the previous log stays where it is
 and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
 at ...` and "no log from a previous boot", "damaged (checksum)" or the previous boot's last 20 lines, each starting
 with a `>`, between `=== previous boot (N) ended here ...` (with or without a kernel panic) and `=== end of the
@@ -426,6 +431,12 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
 
 The pools leave out low chip RAM (`0`-`0x1FFF`: vectors, boot tables), the kernel, the RAM disk and the kernel
 log's area at the top of chip RAM (section 3, "Previous-boot log").
+**An update bundle** zenixboot left in memory (bootinfo `+0x78` address, `+0x7C` size, `+0x80` flags; D15) is checked
+at `mem_init`: 16-byte aligned, it and the 16 bytes before it inside one bootinfo region, clear of `0`-`0x2000`, the
+kernel, the klog area and the RAM disk, and in free memory; else it is ignored with a message ("update: the bundle at
+... is ignored: ..."). It is then **a block in use inside the pool** (`upd_reserve`: its header is the 16 bytes before
+the bundle; a free remainder smaller than two headers is taken into the block), so `SYS_update RELEASE` gives it
+back with the normal `mem_free` and it merges with its neighbours (no range slot: `add_range` keeps 16).
 
 A process's own memory is **one block**: image + BSS + stack + the argument area (a ZEX2 program's: its data part,
 section 4). The kernel stack (4 KB) is a second block. Both are owned by the pid and freed together. The code of a
@@ -517,11 +528,12 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 78 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-80, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 79 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-82, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
-index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority`), the machine (`reboot`), memory (`memalloc memfree meminfo`),
+index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority`), the machine (`reboot`,
+`update`), services (`svc`), memory (`memalloc memfree meminfo`),
 time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
@@ -564,6 +576,15 @@ stopped; each server has 5 s to answer its `FS_SYNC`, then the tick resets the m
 name, audit A7), notes "rebooted" in the log for the next boot (`dmesg -p`), and resets the machine as exec's ColdReboot does
 (RESET and JMP to the ROM's start in one long word). A note of 1 (AmigaOS) or 2 (Zenix) is first left in the spare
 bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the boot menu (`man/bootmenu.txt`).
+
+**Updates** (D15, section 3 "Updates"): `SYS_update(op, a, b)` (82). `UPD_INFO` fills `struct uupdate` (32 bytes, frozen,
+at most the size given in `b`: the bundle's address and size - 0 when there is none -, its flags, the running kernel's
+version number and string from the `ZVER` record; anyone); `UPD_RELEASE` gives the bundle's memory back to the pool
+(root; `boot` calls it after zup, whatever zup did); `UPD_NOTE` (root) writes the update note (kind 1 done, 2 failed,
+3 confirmed, and a version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version
+from it. The bundle is read in place and never passed to a system call: it is no process's memory (-EFAULT). Test
+builds only: `DIAG=-DDIAG_TRIAL=1` panics instead of confirming (and the panic resets the machine), `=2` resets
+without confirming, `=3` never confirms (tools/update-test.sh).
 
 **Priorities** (section 6): `SYS_getpriority(which, who)` and `SYS_setpriority(which, who, nice)`, POSIX's calls.
 `PRIO_PROCESS`: who is a pid, 0 the caller; `PRIO_USER`: every process whose real uid is who (0: the caller's);

@@ -69,6 +69,87 @@ static void add_minus(u32 lo, u32 hi, int chip, const u32 ex[][2], int nex)
     add_range(lo, hi, chip);
 }
 
+/* DESIGN D15: the bundle's place, checked (it comes from zenixboot, but a damaged table must not make the kernel give
+ * away memory it uses): one region holds it and the 16 bytes before it (its block header), 16-byte aligned, clear of
+ * low memory, the kernel, the klog area and the RAM disk. Then it is a block in use inside the pool, given back by
+ * upd_release with the normal mem_free (it merges with its neighbours; no range slot is used). */
+u32 upd_pa, upd_size, upd_flags;
+static void *upd_blk;
+
+static int inside(u32 a, u32 b, u32 lo, u32 hi) { return a < hi && lo < b; }
+
+static void upd_reserve(const struct bootinfo *bi, const u32 ex[][2], int nex)
+{
+    u32 a = bi->upd_pa, n = bi->upd_size, lo = a - HDR, hi = (a + n + 15) & ~15u;
+    const char *why = 0;
+    int in = 0;
+    upd_flags = bi->upd_flags;
+    if (!a && !n)
+        return;
+    for (int i = 0; i < bi->nregions && i < 8; i++)
+        if ((bi->r[i].attrs & (MEMF_CHIP | MEMF_FAST)) && bi->r[i].lower <= lo && hi <= bi->r[i].upper && lo < hi)
+            in = 1;
+    if ((a & 15) || !n || n > MEM_ALLOC_MAX || a < 0x2000 + HDR || hi < a)
+        why = "a bad address or size";
+    else if (!in)
+        why = "not inside one memory region";
+    for (int i = 0; !why && i < nex; i++)
+        if (inside(lo, hi, ex[i][0], ex[i][1]))
+            why = "it overlaps the kernel, the klog area, low memory or the RAM disk";
+    struct range *r = 0;
+    struct mblk *b = 0;
+    for (int i = 0; !why && i < nranges; i++)
+        if (lo >= ranges[i].lo && hi <= ranges[i].hi)
+            r = &ranges[i];
+    if (!why && r)                              /* the free block that holds it (at mem_init: the range's only one) */
+        for (b = (struct mblk *)r->lo; b && !((u32)b <= lo && hi <= (u32)b + SZ(b)); b = next_of(r, b))
+            ;
+    if (!why && (!b || USED(b)))
+        why = "not in free memory";
+    if (why) {
+        kprintf("update: the bundle at %p (%u bytes) is ignored: %s\n", a, n, why);
+        return;
+    }
+    u32 end = (u32)b + SZ(b);
+    if (lo - (u32)b < 2 * HDR)                  /* no room for a free block before it: the block starts at b */
+        lo = (u32)b;
+    if (end - hi < 2 * HDR)
+        hi = end;
+    struct mblk *u = (struct mblk *)lo, *nx;
+    if (lo > (u32)b) {
+        b->size = lo - (u32)b;
+        u->prev = b->size;
+    }
+    u->size = (hi - lo) | 1;
+    u->owner = 0;
+    u->magic = MAGIC;
+    if (hi < end) {
+        struct mblk *t = (struct mblk *)hi;
+        t->size = end - hi;
+        t->prev = hi - lo;
+        t->owner = 0;
+        t->magic = MAGIC;
+        if ((nx = next_of(r, t)))
+            nx->prev = SZ(t);
+    } else if ((nx = next_of(r, u)))
+        nx->prev = hi - lo;
+    freeb[r->chip] -= hi - lo;
+    upd_blk = u + 1;
+    upd_pa = a;
+    upd_size = n;
+    kprintf("update: a bundle of %u bytes at %p, kept for zup%s\n", n, a, upd_flags & UPD_F_ROLLBACK ? "; previous version asked for" : "");
+}
+
+void upd_release(void)
+{
+    if (upd_blk) {
+        mem_free(upd_blk);
+        kprintf("update: the bundle's %u bytes are free again\n", upd_size);
+    }
+    upd_blk = 0;
+    upd_pa = upd_size = upd_flags = 0;
+}
+
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
 {
     /* low chip RAM (vectors, bootinfo, bootblock scratch) and the kernel */
@@ -84,6 +165,7 @@ void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
         if (r->attrs & (MEMF_CHIP | MEMF_FAST))
             add_minus(r->lower, r->upper, (r->attrs & MEMF_CHIP) != 0, ex, nex);
     }
+    upd_reserve(bi, ex, nex);
 }
 
 /* A header that is not ours, or a size that does not lead to the next block inside the range, means something

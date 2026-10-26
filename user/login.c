@@ -4,8 +4,20 @@
  * that user and returns when it ends (init starts login again). With -f the password is not asked (root's own call,
  * or the /etc/autologin convenience on console 1: a file naming the user to log in without asking). Every console has
  * its own login (init), so several sessions can be open at once. */
+/* the last update's one-line result (zup, DESIGN D15), shown once after a login on any console, then removed */
+static void update_result(void)
+{
+    int fd = sys_open("/var/lib/zpkg/result", O_RDONLY);
+    if (fd < 0) return;
+    char b[256]; int n = sys_read(fd, b, sizeof b);
+    sys_close(fd);
+    if (n > 0) sys_write(1, b, (u32)n);
+    sys_unlink("/var/lib/zpkg/result");
+}
+
 static int session(const struct pw *p)
 {
+    update_result();
     setenv("USER", p->name, 1); setenv("LOGNAME", p->name, 1); setenv("HOME", p->home, 1); setenv("SHELL", p->shell, 1);
     setenv("PATH", "/bin", 1);
     sys_setgid(p->gid);
@@ -31,6 +43,10 @@ int main(int argc, char **argv)
     if (!name[0] && !force && console1) {                       /* autologin (console 1 only): the first line of /etc/autologin */
         int fd = sys_open("/etc/autologin", O_RDONLY);
         if (fd >= 0) { int n = sys_read(fd, name, 31); sys_close(fd); if (n < 0) n = 0; name[n] = 0; char *nl = strchr(name, '\n'); if (nl) *nl = 0; if (name[0]) force = autologin = 1; }
+    }
+    if (console1) {                                             /* the login prompt is up on console 1: this boot works */
+        struct uupdate u;                                       /* (the confirmation zenixboot waits for, DESIGN D15) */
+        if (sys_update(UPD_INFO, (u32)&u, sizeof u) == 0) sys_update(UPD_NOTE, UPDNOTE_CONFIRMED, u.kvnum);
     }
     for (int tries = 0; tries < 5; ) {
         if (!name[0]) {
