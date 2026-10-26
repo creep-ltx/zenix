@@ -31,7 +31,7 @@ def kickstart_dir():
     return os.path.expanduser(os.environ.get("ZENIX_KICKSTART_DIR") or DEFAULT_KICKSTART_DIR)
 
 
-def resolve(text, serial=None, build=None):
+def resolve(text, serial=None, build=None, states=None):
     kdir = kickstart_dir()
     text = text.replace("$ZENIX_KICKSTART_DIR", kdir)
     serial = serial or os.environ.get("ZENIX_SERIAL")
@@ -39,29 +39,60 @@ def resolve(text, serial=None, build=None):
         text = text.replace("/tmp/zenix-serial", serial)
     build = (build or os.environ.get("ZENIX_BUILD") or os.path.join(ROOT, "build")).rstrip("/") + "/"
     text = re.sub(r"(\.\./)+build/", lambda m: build, text)
+    if states and not re.search(r"^save_states_dir *=", text, re.M):
+        # FS-UAE keeps a floppy's writes (its save-state overlay) under the config's name, in one folder for all
+        # runs: two runs of the same config name would read each other's. Each run gets a folder of its own.
+        text = text.rstrip("\n") + f"\nsave_states_dir = {states}\n"
     for rom in re.findall(r"^kickstart_file *= *(.+?) *$", text, re.M):
         if not os.path.isfile(rom):
             raise ConfError(f"Kickstart ROM {rom} not found: set ZENIX_KICKSTART_DIR to the directory that holds it")
     return text
 
 
-# One FS-UAE on this machine at a time: a second one quits or spoils both runs, and other projects use FS-UAE too. Every
-# emulator run of every tree takes this lock (tools/run-test.sh with flock, the cage rig's runs here), then waits until
-# no other FS-UAE runs, and lets go when its run ends. Nothing waits while holding the lock but for a running FS-UAE,
-# which ends on its own: no two trees can wait for each other.
+# Up to ZENIX_EMU_SLOTS (default 6) FS-UAEs at once, each with its own serial port and images (tools/run-test.sh says
+# more). A run takes the first free slot - lock file /tmp/zenix-emulator.lock (slot 0, the one other projects on this
+# machine take with flock) or /tmp/zenix-emulator.lock.N - and holds it until its run ends. No run waits for anything
+# but a free slot (and a load of 16 or less), so no two trees can wait for each other.
 EMULATOR_LOCK = os.environ.get("ZENIX_EMU_LOCK", "/tmp/zenix-emulator.lock")
+_held = None                        # the slot this process holds (emulator_slot), so a Cage inside it takes no second one
+
+
+class _Slot:
+    def __init__(self, f):
+        self.f = f
+
+    def close(self):
+        global _held
+        if self.f:
+            self.f.close()
+            self.f = None
+            if _held is self:
+                _held = None
 
 
 def emulator_slot():
-    """take the machine's emulator lock and wait for no running FS-UAE; close the returned file to let go"""
+    """take a free emulator slot (waiting while none is free or the load is above 16); close() the result to let go.
+    A process that already holds one gets a handle that lets go of nothing: take the slot before starting the serial
+    tap, so the tap's script and the timings start with the emulator, not with the wait."""
     import fcntl
-    import subprocess
     import time
-    f = open(EMULATOR_LOCK, "a")
-    fcntl.flock(f, fcntl.LOCK_EX)
-    while subprocess.run(["pgrep", "-x", "fs-uae"], stdout=subprocess.DEVNULL).returncode == 0:
-        time.sleep(5)
-    return f
+    global _held
+    if _held:
+        return _Slot(None)
+    n = max(1, int(os.environ.get("ZENIX_EMU_SLOTS") or 6))
+    while True:
+        for i in range(n):
+            f = open(EMULATOR_LOCK if i == 0 else f"{EMULATOR_LOCK}.{i}", "a")
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                f.close()
+                continue
+            while float(open("/proc/loadavg").read().split()[0]) > 16:
+                time.sleep(30)
+            _held = _Slot(f)
+            return _held
+        time.sleep(2)
 
 
 def load_cage():
@@ -71,7 +102,7 @@ def load_cage():
     sys.path.insert(0, os.path.expanduser(rig))
     from maker.cage_rig import Cage as RigCage
 
-    class Cage(RigCage):            # the rig's session, holding the emulator lock from its start to its end
+    class Cage(RigCage):            # the rig's session, holding an emulator slot from its start to its end
         def __init__(self, *args, **kw):
             self._slot = emulator_slot()
             try:
@@ -96,7 +127,8 @@ def main():
     if len(sys.argv) != 3:
         sys.exit(__doc__)
     try:
-        text = resolve(open(sys.argv[1]).read())
+        dst = os.path.abspath(sys.argv[2])
+        text = resolve(open(sys.argv[1]).read(), states=os.path.splitext(dst)[0] + ".states")
     except ConfError as e:
         sys.exit(f"fsuae_conf: {e}")
     with open(sys.argv[2], "w") as f:

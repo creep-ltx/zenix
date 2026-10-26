@@ -90,6 +90,18 @@ int main(int argc, char **argv)
     char *q = malloc(100);
     check("a freed small block is reused", p && p == q);
 
+    /* many small blocks: they fill the 4 KB first chunk and the growing ones after it (16, 64 KB), stay apart and
+     * keep their contents; freed, they are used again */
+    static char *sm[600]; int nsm = 0, apart = 1;
+    while (nsm < 600 && (sm[nsm] = malloc(100))) { memset(sm[nsm], nsm & 0xFF, 100); nsm++; }
+    for (int i = 0; i < nsm; i++) for (int j = 0; j < 100; j++) if (sm[i][j] != (char)(i & 0xFF)) apart = 0;
+    check("600 small blocks across several chunks keep their contents", nsm == 600 && apart);
+    for (int i = 0; i < nsm; i++) free(sm[i]);
+    char *again1 = malloc(100);
+    int reused = 0; for (int i = 0; i < nsm; i++) if (sm[i] == again1) reused = 1;
+    check("... and are used again after free", reused);
+    free(again1);
+
     /* the largest small block (32 KB: it needs a chunk bigger than the first one) */
     char *l = malloc(32768);
     if (l) { memset(l, 1, 32768); free(l); }

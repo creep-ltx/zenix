@@ -4,15 +4,16 @@
 # reaches the serial port, ~. ends cu and the console's copy on the serial port comes back. tools/cu-test.py types and
 # plays the PC; the results are read here from the serial log and the disk image. ZENIX_SERIAL=/tmp/name: own port.
 cd "$(dirname "$0")/.." || exit 1
-make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 export ZENIX_OUT=${ZENIX_OUT:-/tmp/zenix-cu}; OUT=$ZENIX_OUT; rm -rf $OUT; mkdir -p $OUT
 SERIAL=${ZENIX_SERIAL:-/tmp/zenix-serial}
 ZENIX_SERIAL=$SERIAL python3 tools/fsuae_conf.py fsuae/a1200-020-fast.fs-uae $OUT/cu.fs-uae || exit 1
 python3 tools/cu-test.py $OUT/cu.fs-uae "$SERIAL" > $OUT/run.log 2>&1
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
-got=$(debugfs -R "cat /tmp/cu.out" build/zenix.hdf 2>/dev/null | tr -d '\r')
+got=$(debugfs -R "cat /tmp/cu.out" $BD/zenix.hdf 2>/dev/null | tr -d '\r')
 log=$(tr -d '\r' < $OUT/serial.log)
 echo "$got" | grep -q 'Connected to /dev/ttyS0' && check "cu opens /dev/ttyS0" ok || check "cu opens /dev/ttyS0" bad
 echo "$got" | grep -q 'hello-from-pc' && check "the other computer's line reaches cu's screen" ok || check "the other computer's line reaches cu's screen" bad

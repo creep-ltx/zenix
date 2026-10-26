@@ -919,7 +919,8 @@ environment, buffered line reader, a regex engine from the CUtils project).
 Every block has an 8-byte header: its capacity and a tag (small in use, big in use, free). Blocks of up to 32 KB
 come in size classes of 16, 32, 64 ... 32768 bytes (the header on top, so the usual power-of-two buffer fills its
 class), cut from chunks the kernel gives: the first
-chunk is 32 KB, each next one twice the last up to 512 KB (smaller when memory is short), so even a program that
+chunk is 4 KB (so a program that needs little holds little: `login` waiting for its shell, the servers), each next
+one four times the last up to 512 KB (4, 16, 64, 256, 512 KB; smaller when memory is short), so even a program that
 needs megabytes uses few regions. A freed small block goes on its class's free list and is used again (O(1), no
 coalescing); an empty class carves a free block of a larger class before taking new chunk space; small blocks are never given
 back to the kernel (that happens when the program ends). A bigger block gets a region of its own, and `free` gives
@@ -931,13 +932,20 @@ enough, else copies only the old block's bytes. `xmalloc` ends the program with 
 shell, and a script was read and parsed whole). Tokens, the parsed tree and expansions come from a stack of chunks
 taken with `SYS_memalloc`: an 8 KB first chunk that stays, and more while a command needs them (at least 16 KB, each
 four times the last, so few regions; a command substitution's output is gathered in a `malloc` buffer and copied
-in once). Every command, loop round and pipeline takes a mark and releases it when done;
+in once; an expanded here-document and the joined value of an assignment are built in the arena directly, with no
+fixed buffer and no length limit). The word being expanded stays in two fixed 4 KB buffers (its characters and their
+quote marks: a word is at most 4095 characters), with a third for a case pattern's marks: the expander's results go to
+the arena while a word is built, so a buffer taken there would stay until the command ends, one per word. Every
+command, loop round and pipeline takes a mark and releases it when done;
 releasing gives back the chunks taken after the mark except one kept as a spare, and between the commands of a script
 and at the prompt the spare goes back too, so an idle shell holds only the first chunk. A file of commands (`sh file`,
 `. file`, `/etc/profile`, `~/.shrc`) is read 512 bytes at a time on a descriptor above 9 (out of the way of `N>&M`)
 and run one complete command at a time: lines are added until the lexer and the parser no longer ask for more (an
 open quote, a here-document without its end, an `if` without `fi`, a line ending in `\`, `|` or `&&`), the command
-runs, and its memory is released before the next is read. Functions keep their text on the heap (they are parsed again
+runs, and its memory is released before the next is read. The interactive prompt asks the same question of what was
+typed (`cmd_incomplete`: lexed and parsed in the arena, then released): while the command is unfinished it prints PS2
+and adds the next line (at most 2047 bytes in all); a syntax error is not unfinished and is reported at once.
+Functions keep their text on the heap (they are parsed again
 at each call), so they outlive the command that defined them. When the kernel gives no more memory the shell says
 "out of memory" and ends (status 2). Variables, aliases, history and functions live on the heap (`malloc`).
 
@@ -986,7 +994,7 @@ outputs (`tools/cmds-test.sh`).
   ZenixFS-root ones: A1200 stock (68EC020, 2 MB chip), with 4 or 8 MB fast RAM, 1 MB chip only, NTSC, with a
   68030, 68040 or 68060, an RDB disk, a RAM-disk boot with no disk, an A3000 (SCSI), two 68030 development setups
   (A1200- and A4000-class), and a 68000 that must be refused cleanly. Each boots, runs a short session and logs in
-  on console 2. Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go
+  on consoles 2, 3 and 4 (the 1 MB chip-only one must refuse the fourth with init's "out of memory"). Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go
   (docs/README.md, "Testing"); the Kickstart files come from `ZENIX_KICKSTART_DIR` (`tools/fsuae_conf.py`).
 - Source layout: `boot/` bootblock, zenixboot and the hand-over code they share, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
   `link/` linker script, `tools/` build and test scripts, `rootfs/` files copied to the root disk, `fsuae/` emulator

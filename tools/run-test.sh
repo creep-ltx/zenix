@@ -15,12 +15,26 @@ LOG="$DIR/serial.log"
 SERIAL="${ZENIX_SERIAL:-/tmp/zenix-serial}"
 python3 "$(dirname "$0")/fsuae_conf.py" "$CONF" "$DIR/test.fs-uae"
 CONF="$DIR/test.fs-uae"
-# One FS-UAE on this machine at a time (a second one quits or spoils both runs; other projects use it too): every
-# emulator run of every tree takes this lock until its run ends (tools/fsuae_conf.py, emulator_slot), then waits for
-# any other FS-UAE to end. Nothing holding the lock waits for anything but a running FS-UAE: no two trees deadlock.
-exec 9>>"${ZENIX_EMU_LOCK:-/tmp/zenix-emulator.lock}"
-flock 9
-while pgrep -x fs-uae >/dev/null; do sleep 5; done
+# Up to ZENIX_EMU_SLOTS (default 6) FS-UAEs run on this machine at once, each with its own serial port and images
+# (several runs sharing a port or an image file spoil each other; FS-UAE itself runs side by side fine). A run takes
+# the first free slot, a lock file it holds until its run ends: slot 0 is /tmp/zenix-emulator.lock (other projects on
+# this machine take that one with `flock /tmp/zenix-emulator.lock ...` and keep working unchanged), slot N is
+# /tmp/zenix-emulator.lock.N. No run waits for anything but a free slot (and a load of 16 or less): no deadlock.
+# tools/fsuae_conf.py (emulator_slot) does the same for the cage-rig runs.
+LOCK="${ZENIX_EMU_LOCK:-/tmp/zenix-emulator.lock}"
+NSLOTS="${ZENIX_EMU_SLOTS:-6}"
+while :; do
+    i=0
+    while [ $i -lt "$NSLOTS" ]; do
+        f="$LOCK"; [ $i = 0 ] || f="$LOCK.$i"
+        exec 9>>"$f"
+        if flock -n 9; then break 2; fi
+        exec 9>&-
+        i=$((i + 1))
+    done
+    sleep 2
+done
+while awk '{ exit !($1 > 16) }' /proc/loadavg; do sleep 30; done       # the machine is busy: wait, holding the slot
 
 python3 "$(dirname "$0")/serial-tap.py" "$SERIAL" "$LOG" $SCRIPT >"$DIR/tap.out" 2>&1 9>&- &
 TAP=$!
@@ -34,3 +48,4 @@ kill $TAP 2>/dev/null || true
 echo "=== serial output ($CONF, ${SECS}s):"
 tr -d '\r' < "$LOG"
 grep -h '^serial-tap: wait' "$DIR/tap.out" 2>/dev/null || true      # a script's `wait` that timed out says so here
+rm -rf "$DIR"                                                         # the config copy, the log, FS-UAE's save states

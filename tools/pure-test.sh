@@ -21,10 +21,11 @@
 #      echoed into a file by a shell
 # tools/pure-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
 PARTS=" ${*:-p m s} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
-make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-pure}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-pure-serial}
 pass=1
@@ -58,7 +59,7 @@ codekb() { python3 -c 'import struct, sys; print(struct.unpack(">I", open(sys.ar
 if want_part p; then
 run p fsuae/a1200-020-fast.fs-uae 360 tools/tests/pure-test.txt
 L=p
-CK=$(codekb build/crash.pzx)
+CK=$(codekb $BD/crash.pzx)
 cmp_ "one process of a ZEX2 program: its code is shared code" "$(S $L one)" -gt "$(S $L base)"
 cmp_ "... nothing saved yet" "$(V $L one)" -eq "$(V $L base)"
 cmp_ "two processes: still one copy" "$(S $L two)" -eq "$(S $L one)"
@@ -103,7 +104,7 @@ fi
 if want_part m; then
 head -c 901120 /dev/zero > "$OUT/df1.adf"
 mke2fs -q -t ext2 -E revision=0 -b 1024 -F "$OUT/df1.adf" >/dev/null 2>&1 || { echo "FAIL mke2fs"; exit 1; }
-debugfs -w -R "write build/hello.pzx hp" "$OUT/df1.adf" >/dev/null 2>&1
+debugfs -w -R "write $BD/hello.pzx hp" "$OUT/df1.adf" >/dev/null 2>&1
 debugfs -w -R "set_inode_field hp mode 0100755" "$OUT/df1.adf" >/dev/null 2>&1
 sed "s#^floppy_drive_0 = .*#&\nfloppy_drive_1 = $OUT/df1.adf\nfloppy_drive_count = 2#" fsuae/a1200-020-fast.fs-uae > "$OUT/m.fs-uae"
 run m "$OUT/m.fs-uae" 120 tools/tests/pure-mount-test.txt
@@ -114,8 +115,8 @@ fi
 
 if want_part s; then
 run s fsuae/a1200-020-fast.fs-uae 200 tools/tests/pure-shells-test.txt
-SK=$(codekb build/sh.zx); LK=$(codekb build/login.zx)
-both=$(python3 -c 'import struct, sys; print(sum(struct.unpack(">I", open(f, "rb").read()[8:12])[0] for f in sys.argv[1:]))' build/sh.zx build/login.zx)
+SK=$(codekb $BD/sh.zx); LK=$(codekb $BD/login.zx)
+both=$(python3 -c 'import struct, sys; print(sum(struct.unpack(">I", open(f, "rb").read()[8:12])[0] for f in sys.argv[1:]))' $BD/sh.zx $BD/login.zx)
 cmp_ "one session: sh and login are the shared code" "$(S s s1)" -eq $((both / 1024))
 cmp_ "... nothing saved yet" "$(V s s1)" -eq 0
 cmp_ "a second login (console 2): no new copy" "$(S s s2)" -eq "$(S s s1)"

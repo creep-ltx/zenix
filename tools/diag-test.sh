@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
 WHAT=${1:-all}
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-diag-serial}
-OUT=$(mktemp -d /tmp/zenix-diag.XXXXXX)
+OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-diag.XXXXXX)}; mkdir -p "$OUT"
 KICK=$(sed -n 's/^kickstart_file = //p' fsuae/a1200-020-fast.fs-uae | tail -n 1)
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
@@ -77,7 +77,9 @@ sweep() {
     pkill -KILL -f -- "fs-uae $OUT/" 2>/dev/null; pkill -KILL -f -- "cage -- .* $OUT/" 2>/dev/null
     return 0
 }
-trap 'sweep' EXIT
+# the test builds (about 25 MB each) go when the script ends; the logs, configs and screenshots stay
+unbuild() { for d in "$OUT"/*/; do [ -f "${d%/}.build.log" ] && rm -rf "$d"; done; return 0; }
+trap 'sweep; unbuild' EXIT
 trap 'exit 130' INT TERM HUP
 shot() { timeout -k 20 1800 python3 tools/shot.py "$@" >/dev/null 2>&1; sweep; }
 

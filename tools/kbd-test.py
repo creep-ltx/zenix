@@ -26,6 +26,7 @@ log = os.path.join(out, "serial.log")
 os.makedirs(out, exist_ok=True)
 script = os.path.join(out, "script.txt")
 open(script, "w").write("sleep 1\n")
+slot = fsuae_conf.emulator_slot()     # before the tap: its script and the timings start with the emulator
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"), link, log, script],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(1)

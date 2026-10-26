@@ -48,13 +48,23 @@ configs. `--staged` also checks what is about to be committed (a changed program
 ## Testing
 Nothing counts as done until a test checks it. The tests run FS-UAE headless (never on the screen), from scripts typed
 into the serial port (`tools/serial-tap.py`: `sleep`, `send` and `wait REGEX [timeout]`, which waits for the output).
-Only one FS-UAE can run on a machine, so every emulator run (`tools/run-test.sh`, and the cage rig's through
-`tools/fsuae_conf.py`) first takes the lock `/tmp/zenix-emulator.lock` (`ZENIX_EMU_LOCK`), waits until no other FS-UAE
-runs (another project's too), and lets go when its run ends: test scripts of several trees take turns, run by run.
+Several FS-UAEs run side by side on one machine as long as each has **its own serial port and its own image files**
+(runs that shared a port or an image spoiled each other; that, not FS-UAE, was why only one ran at a time before
+2026-10-26). Every emulator run (`tools/run-test.sh`, and the cage rig's through `tools/fsuae_conf.py`) takes one of
+`ZENIX_EMU_SLOTS` (default 6) slots, a lock file it holds until its run ends: slot 0 is `/tmp/zenix-emulator.lock`
+(`ZENIX_EMU_LOCK`), slot N is `/tmp/zenix-emulator.lock.N`; a run takes the first free one, waits only while all are
+taken (or while the machine's 1-minute load is above 16), never for another FS-UAE. Another project on the same PC
+takes slot 0 with `flock /tmp/zenix-emulator.lock COMMAND` and keeps one place in the pool. Each run also gets its own
+folder for FS-UAE's save states (a floppy's writes are kept there under the config's name, which runs share).
 
-**The gate: `make check`** (also `make test`, `tools/check.sh`). It builds every image, runs the host tests (seconds),
-then the emulator tests one after another (about 1.5 hours), each with its own serial port and output directory, and
-prints a table (test, PASS/FAIL, time, details; the logs stay in `/tmp/zenix-check.*`). It fails if any test fails.
+**The gate: `make check`** (also `make test`, `tools/check.sh`). It builds every image once and keeps a copy, runs
+the host tests (seconds), then the emulator tests side by side, up to `ZENIX_EMU_SLOTS` (6) at once and the longest
+first (`svc-test` and `matrix` as three and two jobs, each with some of their parts), each with its own serial port,
+output directory and copy of the build directory (`ZENIX_BUILD`: the tests write to their disks, so none shares an
+image file), and prints a table in the order of the list (test, PASS/FAIL, time, details; the logs stay in
+`/tmp/zenix-check.*`, a failed test's images too). It fails if any test fails. A full run took 26 minutes on
+2026-10-26 (the tests' own times add up to 2 h 44 min). Every test script reads its build directory from
+`ZENIX_BUILD` (default `build/`) and its output directory from `ZENIX_OUT`, so it can run beside others.
 `tools/check.sh host` runs only the host tests, `tools/check.sh NAME...` only the named ones (e.g. `matrix users-test`).
 Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (shown as skipped).
 
@@ -83,8 +93,9 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default
 FS-UAE's own Kickstarts folder, `Documents/FS-UAE/Kickstarts` in your home directory); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
 fills it in, with the build directory and the serial port). kbd-test, cu-test, diag-test and the screenshots
-(`tools/shot.py`) also need the headless cage rig: `ZENIX_CAGE_RIG` names its directory. A single test:
-`ZENIX_SERIAL=/tmp/NAME tools/users-test.sh` (a serial port of its own, so it can run beside another session's test);
-one emulator run at a time per session. `make run` boots a window for a person, never for a test.
+(`tools/shot.py`) also need the headless cage rig: `ZENIX_CAGE_RIG` names its directory. A single test
+beside others: `ZENIX_SERIAL=/tmp/NAME ZENIX_BUILD=/tmp/NAME-build ZENIX_OUT=/tmp/NAME-out tools/users-test.sh` (its own
+serial port, a copy of `build/` and an output folder; without `ZENIX_BUILD` it uses `build/` of the tree, which only
+one test at a time may do). `make run` boots a window for a person, never for a test.
 
-Last checked against the code: 2026-10-23.
+Last checked against the code: 2026-10-26.

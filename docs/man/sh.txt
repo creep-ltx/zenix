@@ -83,7 +83,12 @@ VARIABLES THE SHELL USES
     PATH (default /bin)  HOME  USER  HOSTNAME  IFS  PWD  OLDPWD  TERM
     LINES (from the terminal: 32 on PAL, 25 on NTSC)  COLUMNS
     PS1 (the prompt: \w directory, \W its name, \u user, \h host,
-        \$ # or $, \n)   PS2 (the continuation prompt)
+        \$ # or $, \n)   PS2 (the continuation prompt, default "> ")
+    At the prompt, a command that is not finished yet (an open quote or
+    here-document, if without fi, a loop without done, case without esac,
+    a function, { or ( without its end, a line ending in | && || or a
+    backslash) is continued on the next line after PS2, as in bash; Ctrl+C
+    there drops it. A command typed this way is at most 2047 bytes.
     Start-up files: /etc/profile and ~/.shrc (read by an interactive shell).
     ~/.shrc is read only if it belongs to the effective user or to root, so
     a shell that runs as root never runs another user's start-up commands.
@@ -120,7 +125,8 @@ NOTES
     have run. A word longer than 4095 characters, more than 8 here-documents
     on one line, more than 64 local variables or more than 16 aliases
     expanding into each other are errors (status 1, or 2 for the
-    here-documents), never a silent cut. An alias is not expanded again inside
+    here-documents), never a silent cut. A here-document's text after
+    expansion has no length limit. An alias is not expanded again inside
     its own expansion (alias a=b b=a ends with "a: command not found", as
     bash). Arithmetic nested too deeply is an error. Each round of a loop
     gives back what it used, so a long while-read loop runs in the same

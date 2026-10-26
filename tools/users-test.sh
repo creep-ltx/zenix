@@ -8,8 +8,9 @@
 # safety, exclusive here-document and mktemp files, the autologin warning; and batch E's: a login on console 2 (as
 # that user), less in a pipe reading console 2's keys, type-ahead, the consoles' login prompts, permission texts.
 cd "$(dirname "$0")/.." || exit 1
-make -s all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
-rm -f build/zenix.hdf; make -s build/zenix.hdf >/dev/null 2>&1
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${USERS_OUT:-${ZENIX_OUT:-/tmp/zenix-users}}; mkdir -p $OUT
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae 320 tools/tests/users-test.txt 2>&1 | sed 's/\x1b\[K//g' > $OUT/run.log
 pass=1

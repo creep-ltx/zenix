@@ -1024,6 +1024,9 @@ static long arith(const char *text) { ar_p = text; return ar_or(); }
 static int run_capture(const char *cmd, char **out);   /* $(...) */
 static int run_string(const char *text);
 
+/* The word being expanded (its characters and which of them were quoted). Fixed, not in the arena: the expander puts
+ * its results (fields, glob matches, variable names) in the arena while a word is built, so a buffer taken there
+ * could not be given back before the command ends, one per word. */
 #define FMAX 4096
 static char fbuf[FMAX]; static u8 fq[FMAX]; static u32 fn; static int fhas;
 static struct words *ex_w;
@@ -1395,30 +1398,42 @@ static void expand_word(const char *w, struct words *out)
     field_end();
 }
 
-/* expand without splitting or globbing (assignments, redirection targets, here-documents) */
+/* expand without splitting or globbing (assignments, redirection targets, a case word): the fields joined by a
+ * space, in the arena */
 static char *expand_plain(const char *w)
 {
-    static char out[FMAX];
-    u32 olen = 0;
     struct words f; wv_init(&f, 8);
-    /* reuse the quote-aware expander but join the fields with a space */
-    expand_word(w, &f);
+    expand_word(w, &f);                     /* reuse the quote-aware expander, then join its fields */
+    if (f.n == 1) return f.v[0];            /* already in the arena */
+    u32 len = 1;
+    for (int k = 0; k < f.n; k++) len += strlen(f.v[k]) + 1;
+    char *out = aalloc(len), *o = out;
     for (int k = 0; k < f.n; k++) {
         u32 l = strlen(f.v[k]);
-        if (olen + l + 2 >= sizeof out) { errm("a word is longer than 4095 characters", 0); ex_error = 1; break; }
-        memcpy(out + olen, f.v[k], l); olen += l;
-        if (k + 1 < f.n) out[olen++] = ' ';
+        memcpy(o, f.v[k], l); o += l;
+        if (k + 1 < f.n) *o++ = ' ';
     }
-    out[olen] = 0;
-    return adup(out);
+    *o = 0;
+    return out;
 }
 
-/* here-document bodies: $-expansion, no quote processing */
+/* here-document bodies: $-expansion, no quote processing. Built in the arena: room for the body as it is, and twice
+ * as much whenever a value does not fit (the smaller copies go with the command), so there is no length limit. */
+static char *hd_room(char *out, u32 olen, u32 *cap, u32 need)
+{
+    if (olen + need < *cap) return out;
+    u32 nc = *cap * 2;
+    while (olen + need >= nc) nc *= 2;
+    char *nb = aalloc(nc);
+    memcpy(nb, out, olen); *cap = nc;
+    return nb;
+}
 static char *expand_heredoc(const char *body)
 {
-    static char out[FMAX];
-    u32 olen = 0;
-    for (int i = 0; body[i] && olen < FMAX - 8;) {
+    u32 cap = strlen(body) + 16, olen = 0;
+    char *out = aalloc(cap);
+    for (int i = 0; body[i];) {
+        out = hd_room(out, olen, &cap, 2);
         if (body[i] == '\\' && (body[i + 1] == '$' || body[i + 1] == '\\' || body[i + 1] == '`')) { out[olen++] = body[i + 1]; i += 2; continue; }
         if (body[i] == '$') {
             char tmp[16]; const char *v = 0; int e = i;
@@ -1427,13 +1442,13 @@ static char *expand_heredoc(const char *body)
             else if (c == '?' || c == '$' || c == '#' || c == '!' || (c >= '0' && c <= '9')) { v = special_param(c, tmp); e = i + 2; }
             else if (is_name_c((unsigned char)c, 1)) { e = i + 1; while (is_name_c((unsigned char)body[e], 0)) e++; char *nm = adupn(body + i + 1, (u32)(e - i - 1)); v = var_get(nm); }
             else { out[olen++] = '$'; i++; continue; }
-            if (v) { u32 l = strlen(v); if (olen + l < FMAX - 8) { memcpy(out + olen, v, l); olen += l; } }
+            if (v) { u32 l = strlen(v); out = hd_room(out, olen, &cap, l); memcpy(out + olen, v, l); olen += l; }
             i = e; continue;
         }
         out[olen++] = body[i++];
     }
     out[olen] = 0;
-    return adup(out);
+    return out;
 }
 
 /* ================================================================ running commands */
@@ -2521,6 +2536,22 @@ static void run_startup_file(const char *path)
     if (fd >= 0) run_file(fd, 1);
 }
 
+/* Is the text so far the start of a command that is not finished yet? 0: no (it is run; a syntax error is reported
+ * then); 1: an open quote or here-document, an if, loop, case, function or group without its end, or a last line that
+ * ends in | && ||; 2: it ends in a backslash (the next line joins this one). The prompt then asks for more (PS2).
+ * Lexed and parsed in the arena, which is given back. */
+static int cmd_incomplete(const char *text)
+{
+    char *mark = abrk;
+    u32 n = strlen(text), bs = 0;
+    while (bs < n && text[n - 1 - bs] == '\\') bs++;
+    if (bs & 1) return 2;
+    int rc = lex(text), more = rc == 1;
+    if (!rc && ntoks) { perr = 0; lex_incomplete = 0; more = !parse_list(0) && lex_incomplete; }
+    arel(mark);
+    return more;
+}
+
 static void interactive_loop(void)
 {
     static char line[LMAX], full[2048];
@@ -2534,16 +2565,17 @@ static void interactive_loop(void)
         if (n == -1) break;
         if (n == -2 || !line[0]) continue;
         strcpy(full, line);
-        for (;;) {                                           /* keep reading while the command is incomplete */
-            int rc = lex(full);
-            if (rc != 1) break;
+        for (;;) {                       /* keep reading (PS2) while the command is incomplete, as a script's reader does */
+            int more = cmd_incomplete(full);
+            if (!more) break;
             int pl2; char *p2 = expand_prompt(var_get("PS2") ? var_get("PS2") : "> ", &pl2);
             int m = readline(p2, pl2, line, LMAX);
-            if (m < 0) { full[0] = 0; break; }
-            u32 l = strlen(full); if (l + strlen(line) + 2 >= sizeof full) break;
-            if (l && full[l - 1] == '\\') full[l - 1] = 0;   /* a trailing backslash joins lines */
+            if (m < 0) { full[0] = 0; break; }               /* Ctrl-C or Ctrl-D: the unfinished command is dropped */
+            u32 l = strlen(full);
+            if (more == 2) l--;                              /* a trailing backslash joins the lines */
             else full[l++] = '\n';
-            strcpy(full + l - (full[l - 1] == 0 ? 0 : 0), line);
+            if (l + strlen(line) + 1 > sizeof full) { errm("command too long", "the limit is 2047 bytes"); full[0] = 0; last_status = 2; break; }
+            strcpy(full + l, line);
         }
         if (!full[0]) continue;
         hist_add(full);

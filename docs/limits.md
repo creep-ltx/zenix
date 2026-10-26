@@ -94,7 +94,7 @@ pointers.
   parameters, and no limit on a script's length (it is read and run a command at a time). They grow in its arena,
   which starts at 8 KB and takes more from the kernel while a command needs it (chunks of at least 16 KB, each
   four times the last, so the 8 memory regions a process may have reach several MB), given back when the
-  command is done; when the kernel has no more: "sh: out of memory" and that shell ends (status 2); a word or an expanded here-document of at most 4095 characters (longer is an error, status 1);
+  command is done; when the kernel has no more: "sh: out of memory" and that shell ends (status 2); a word of at most 4095 characters (longer is an error, status 1; an expanded here-document has no limit: it is built in the arena);
   at most 8 here-documents on one line, 16 nested alias expansions, 64 `local` variables in the running functions,
   128 variables, 48 aliases and 48 functions, 200 history lines (a recalled line is cut to the 478 characters the
   editor holds, with the bell).
@@ -106,16 +106,19 @@ pointers.
   main 5.4 KB (`mkfs.ext2` main was 8.5 KB; 0.3 KB since its two 4 KB blocks are static, 2026-10-25); the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
   about 1430).
-- A login session (login, the shell and its work area) needs about 185 KB (293 KB before the shell memory fix of
-  2026-10-25): a machine with 1 MB of chip RAM and no fast RAM has room for two; on a third console init says "cannot start
-  /bin/login: out of memory" (the matrix checks both; that message was lost before 2026-10-25, init never flushed it).
+- A login session (login, the shell and its work area) needs about 110 KB (measured 2026-10-26 in FS-UAE as the drop
+  in `free` when a second console logs in on a 2 MB chip-only A1200: 170 KB before malloc's first chunk went from 32 KB
+  to 4 KB and the shell's two 4 KB expansion buffers moved to its arena; 293 KB before the shell memory fix of
+  2026-10-25): a machine with 1 MB of chip RAM and no fast RAM has room for three; on a fourth console init says
+  "cannot start /bin/login: out of memory" (the matrix checks both; that message was lost before 2026-10-25, init
+  never flushed it).
 - Shared code (DESIGN D13, architecture.md section 4): at most 8 segments (`NSEG`) at a time; a ninth program with
   shared code runs as a private copy. A ZEX2 program's address table is at most 32 KB (16-bit offsets: a larger one
   is a link error).
 - Memory per process: at most 8 extra regions at a time (`SYS_memalloc`), each at most 64 MB. `malloc` keeps blocks of
-  up to 32 KB in a few growing chunks (32 KB, 64 KB, ... 512 KB each) and gives every bigger block a region of its
-  own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with two chunks
-  in use, gets 6); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
+  up to 32 KB in a few growing chunks (4 KB, 16 KB, 64 KB, 256 KB, then 512 KB each) and gives every bigger block a
+  region of its own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with
+  four chunks in use, gets 4); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
 - Paths: the directory tools report a joined path longer than a system call takes (63 bytes) instead of cutting it.
 - Timer tick 100 Hz to within the E-clock's resolution (latch 7093 on PAL, 709,379 Hz: 99.997 Hz; 7158 on NTSC,

@@ -18,14 +18,15 @@
 #                root in RAM)
 # usage: tools/zenixboot-test.sh [setup...]     (ZENIX_SERIAL, ZENIX_OUT as the other tests)
 cd "$(dirname "$0")/.." || exit 1
-make -s build/zenix-boot.hdf build/zenix-card.img build/zenix.adf build/root-ram.img >/dev/null 2>&1 || { echo "FAIL build"; exit 1; }
+BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
+make -s BUILD=$BD $BD/zenix-boot.hdf $BD/zenix-card.img $BD/zenix.adf $BD/root-ram.img >/dev/null 2>&1 || { echo "FAIL build"; exit 1; }
 OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-zenixboot.XXXXXX)}; mkdir -p "$OUT"
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-zenixboot-serial}
 KDIR=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import fsuae_conf; print(fsuae_conf.kickstart_dir())')
 K32=${ZENIX_KICK32:-$KDIR/kick32-a1200.rom}
 K205=${ZENIX_KICK205:-$KDIR/kick205-a600.rom}
 SETUPS="${*:-a1200-31 a1200-040 a1200-32 a600-205 a600-68000 card-root errors}"
-B=$(pwd)/build
+B=$(cd "$BD" && pwd)
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 has() { grep -aq -- "$2" "$OUT/$1.log" && echo ok || echo bad; }
@@ -70,7 +71,7 @@ joystick_port_1 = none
 EOF
 }
 
-run() {     # name seconds [keyscript] (run-test.sh waits for the machine's one emulator slot)
+run() {     # name seconds [keyscript] (run-test.sh waits for a free emulator slot)
     tools/run-test.sh "$OUT/$1.fs-uae" "$2" $3 >"$OUT/$1.log" 2>&1
 }
 
