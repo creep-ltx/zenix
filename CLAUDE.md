@@ -28,6 +28,7 @@ DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved
 `awk` (owner 2026-10-24: finish the parked `user/awk.c` now, while D11 is built).
 **`useradd` and `userdel` approved (owner 2026-10-26):** small commands for root (ideas list), built at once.
 **`sudo` approved (owner 2026-10-26, "with users added we also need a sudo command"):** the group wheel, own password, with `gpasswd` and `useradd -G`.
+**Rescue when a boot repair fails approved (owner 2026-10-26):** after D16: a root that fsck.ext2 cannot repair is mounted read-only and boot offers 1 continue read-only (default after 30 s), 2 read-write anyway, 3 rescue shell with the repair commands listed, 4 reboot; `man rescue`. As AmigaOS does with a disk that cannot be validated.
 **Colour console approved (owner 2026-10-25):** colours in the text console (ANSI colours, for `ls`, `grep`, the prompt,
 `less`); a design note first (a DESIGN number, reviewed), then built. **The shell's memory** (a fix, audit 2026-10-25
 'found while fixing'): sh grabs a fixed arena of 64-256 KB per shell and parses a whole script at once; make it grow on
