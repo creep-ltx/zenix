@@ -13,7 +13,8 @@
 #      host's e2fsck finds the root clean
 #   o  the ext2 root's restart (step 3): a deleted file held open reads the same bytes after fsd restarted, and its
 #      space comes back at its last close (the open counts came from the kernel, SVC_OPENS); rm after a restart frees
-#      space; fsd killed twice in the middle of a copy: the next one marks the volume "needs a check" (the host's
+#      space; fsd killed in the middle of a copy (killed again, at most 3 times, until the log says "during
+#      request": a kill can land between two requests): the next one marks the volume "needs a check" (the host's
 #      dumpe2fs: not clean)
 #   zo the same on the ZenixFS root, and a file created less than 3 s before zfsd died (not committed) is gone for its
 #      open file: the read fails and never reaches the next new file
@@ -160,6 +161,10 @@ rx   o "a deleted file held open reads the same after fsd restarted" ".*svctest 
 rx   o "... the restart happened meanwhile" "svc: fs: started @fsd \\(pid [0-9]+, for pid [0-9]+ [a-z]+\\)"
 free_grew o "... its space came back at its last close" f1 f2 100
 free_grew o "rm after a restart gives the space back" f3 f4 100
+# a kill can land while fsd is idle between requests (about 2% of runs, audit3 T1): correctly no mark then, so the
+# script kills again (at most 3 times) until the log says "during request", and only then is the mark required
+rx   o "fsd killed in the middle of a request (within 3 tries)" "midreq-tries=[123]"
+rx   o "... the log says so" ".*svc: fs: fsd \(pid [0-9]+\) ended, status [0-9]+, during request [0-9]+ for pid [0-9]+"
 line o "fsd killed in the middle of a change: the next one says the volume needs a check" "fsd: ide0 was being changed when its server ended: check it with fsck.ext2"
 line o "the script ran to the end" "svc-o-done"
 if dumpe2fs -h "$OUT/root.hdf" 2>/dev/null | grep -q '^Filesystem state: *not clean'; then echo "PASS ... the host sees the state bit cleared (dumpe2fs: not clean)"; else echo "FAIL ... the host sees the state bit cleared (dumpe2fs: not clean)"; pass=0; fi
