@@ -113,9 +113,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - **Structs the kernel or a server writes into a program's memory** (`ustat`, `uproc`, `ustatfs`, `udirent`,
   `umountinfo`, `diskinfo`, the `SYS_meminfo` words) grow only at the end, and the caller passes its buffer size and
   gets at most that many bytes: `SYS_stat`/`lstat`/`fstat`/`readdir`/`procinfo`/`statfs`/`mountinfo` take it in their
-  third argument, `SYS_meminfo` in its second; size 0 (every program built before D15) gets the struct's first size
-  (`uproc`: 32 bytes), a size below that is -EINVAL; `DISK_INFOSZ`/`DISK_LISTSZ` take it in `a[2]` (the old
-  `DISK_INFO`/`DISK_LIST` write the first 80 bytes). The structs servers answer in (`ustat`, `udirent`, `ustatfs`)
+  third argument, `SYS_meminfo` in its second; size 0 (every program built before D15) gets the struct's first size,
+  a frozen constant, never `sizeof` (`kernel/kernel.h` `*_FIRST`: `ustat` 28, `udirent` 72, `umountinfo` 88,
+  `uupdate` 32, `uproc` 32, `ustatfs` 20, `SYS_meminfo` 16; `tools/usize-test.sh`), a size below that is -EINVAL;
+  `DISK_INFOSZ`/`DISK_LISTSZ` take it in `a[2]` (the old `DISK_INFO`/`DISK_LIST` write the first 80 bytes). The structs servers answer in (`ustat`, `udirent`, `ustatfs`)
   are frozen at their size in the message protocol: a bigger one needs a new message type. libz passes `sizeof`.
 - **Frozen:** the program start contract (the stack at entry, `a5`); the ZEXE and ZEX2 formats (the loader keeps both
   for ever); the bootinfo layout; the klog area and boot-note layout and the klog flags (zenixboot and bootmenu

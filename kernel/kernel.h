@@ -288,6 +288,21 @@ struct uproc {                  /* returned by SYS_procinfo */
     u32 shared;                 /* D13: bytes of shared code it runs (one copy for all its users; not in mem) */
 };
 #define UPROC_FIRST 32          /* its first size (pid .. name): what a caller passing size 0 gets (D15 step 0) */
+/* the first sizes of the other structs written into a program's memory (frozen, audit3 B3: never sizeof, which
+ * grows with the struct): what a caller passing size 0 (every program built before D15) gets. Checked against the
+ * structs' first fields in syscall.c (_Static_assert) and by tools/usize-test.sh */
+#define USTAT_FIRST      28     /* ino .. links */
+#define UDIRENT_FIRST    72     /* ino, type, name[64] */
+#define UMOUNTINFO_FIRST 88     /* path[48] .. type[8] */
+#define UUPDATE_FIRST    32     /* addr .. kver[16] */
+#define USTATFS_FIRST    20     /* struct ustatfs (fsproto.h) */
+#define UMEMINFO_FIRST   16     /* SYS_meminfo's four words */
+/* how many bytes a caller with a buffer of GIVEN bytes gets of a struct whose first size is FIRST and whose size is
+ * NOW: 0 (given) -> first, below first -> 0 (refused), else at most now */
+static inline u32 usize_n(u32 given, u32 first, u32 now)
+{
+    return !given ? first : given < first ? 0 : given < now ? given : now;
+}
 
 /* proc.c */
 #define NPROC 32                /* 10 consoles with a login and a shell each, the servers, init and the commands they run */

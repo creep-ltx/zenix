@@ -568,7 +568,10 @@ program sends itself are not checked by the servers (limits.md): a program that 
 **A struct written into a program never overruns its buffer** (D15 step 0, the frozen-interface rule in CLAUDE.md):
 `stat`, `lstat`, `fstat`, `readdir`, `procinfo`, `statfs` and `mountinfo` take the caller's buffer size in their third
 argument, `meminfo` in its second (libz passes `sizeof`). Every program built before this passed 0 there, and 0 means
-the struct's first size; a size below it is -EINVAL; a bigger one gets at most the kernel's own struct (`usize` in
+the struct's first size - a frozen constant in kernel.h (`USTAT_FIRST` 28, `UDIRENT_FIRST` 72, `UMOUNTINFO_FIRST` 88,
+`UUPDATE_FIRST` 32, `UPROC_FIRST` 32, `USTATFS_FIRST` 20, `UMEMINFO_FIRST` 16), checked against the structs' first
+fields by `_Static_assert` and by the host test `tools/usize-test.sh` (audit3 B3: four calls passed `sizeof`, which
+would have grown with the struct); a size below it is -EINVAL; a bigger one gets at most the kernel's own struct (`usize` in
 syscall.c). The disk server does the same for `DISK_INFOSZ`/`DISK_LISTSZ` (size in `a[2]`; the old `DISK_INFO` and
 `DISK_LIST` write the first 80 bytes of `struct diskinfo`, their callers never set `a[2]`). Tested by `badptr` (memtest):
 an old 40-byte `uproc` buffer with a guard after it gets 32 bytes; the old kernel wrote 44.

@@ -28,10 +28,14 @@ static __attribute__((noinline)) int copy_str(char *dst, u32 uptr, u32 max)
  * caller's buffer. The caller passes its buffer's size in an argument every libz before D15 passed as 0; 0 means the
  * struct's first size (it only ever grows at its end), a size below that is refused, a bigger one gets at most the
  * kernel's own size. sizes = first << 16 | now. The bytes the caller gets, or -EINVAL / -EFAULT */
+_Static_assert(__builtin_offsetof(struct ustat, links) + 4 == USTAT_FIRST, "ustat's first size is frozen");
+_Static_assert(__builtin_offsetof(struct udirent, name) + 64 == UDIRENT_FIRST, "udirent's first size is frozen");
+_Static_assert(__builtin_offsetof(struct umountinfo, type) + 8 == UMOUNTINFO_FIRST, "umountinfo's first size is frozen");
+_Static_assert(__builtin_offsetof(struct uupdate, kver) + 16 == UUPDATE_FIRST, "uupdate's first size is frozen");
+_Static_assert(__builtin_offsetof(struct uproc, name) + 16 == UPROC_FIRST, "uproc's first size is frozen");
 static __attribute__((noinline)) s32 usize(u32 p, u32 given, u32 sizes)
 {
-    u32 first = sizes >> 16, now = sizes & 0xFFFF;
-    u32 n = !given ? first : given < first ? 0 : given < now ? given : now;
+    u32 n = usize_n(given, sizes >> 16, sizes & 0xFFFF);
     return !n ? -EINVAL : user_ok_wr(current, p, n) ? (s32)n : -EFAULT;
 }
 
@@ -278,7 +282,7 @@ void syscall_c(u32 *rb)
         r = (s32)ipc_replyrecv((struct umsg *)a1, (s32)a2, (int)a3);
         break;
     case SYS_statfs:
-        if (UOKS(n, a1, a3, 20, 20))      /* the server writes struct ustatfs (frozen in fsproto.h) */
+        if (UOKS(n, a1, a3, USTATFS_FIRST, 20))      /* the server writes struct ustatfs (frozen in fsproto.h) */
             r = (s32)vfs_statfs((void *)a1, a2);       /* a2 = the n-th mount, as SYS_mountinfo counts (0 = the root) */
         break;
     case SYS_mount: {                   /* root only */
@@ -303,7 +307,7 @@ void syscall_c(u32 *rb)
         break;
     }
     case SYS_mountinfo:
-        if (UOKS(n, a2, a3, sizeof(struct umountinfo), sizeof(struct umountinfo)))
+        if (UOKS(n, a2, a3, UMOUNTINFO_FIRST, sizeof(struct umountinfo)))
             r = (s32)vfs_mountinfo(a1, (struct umountinfo *)a2);
         break;
     case SYS_blk_flush:
@@ -385,7 +389,7 @@ void syscall_c(u32 *rb)
     }
     case SYS_lstat: {
         char path[64];
-        if (CSTR(path, a1) && UOKS(n, a2, a3, sizeof(struct ustat), sizeof(struct ustat)))
+        if (CSTR(path, a1) && UOKS(n, a2, a3, USTAT_FIRST, sizeof(struct ustat)))
             r = (s32)vfs_path1(FS_LSTAT, path, a2, 0);
         break;
     }
@@ -451,17 +455,17 @@ void syscall_c(u32 *rb)
             r = (s32)vfs_lseek(f, (s32)a2, a3);
         break;
     case SYS_readdir:
-        if (GETFD(f, a1) && UOKS(n, a2, a3, sizeof(struct udirent), sizeof(struct udirent)))
+        if (GETFD(f, a1) && UOKS(n, a2, a3, UDIRENT_FIRST, sizeof(struct udirent)))
             r = (s32)vfs_readdir(f, (struct udirent *)a2);
         break;
     case SYS_stat: {
         char path[64];
-        if (CSTR(path, a1) && UOKS(n, a2, a3, sizeof(struct ustat), sizeof(struct ustat)))
+        if (CSTR(path, a1) && UOKS(n, a2, a3, USTAT_FIRST, sizeof(struct ustat)))
             r = (s32)vfs_stat(path, (struct ustat *)a2);
         break;
     }
     case SYS_fstat:
-        if (GETFD(f, a1) && UOKS(n, a2, a3, sizeof(struct ustat), sizeof(struct ustat)))
+        if (GETFD(f, a1) && UOKS(n, a2, a3, USTAT_FIRST, sizeof(struct ustat)))
             r = (s32)vfs_fstat(f, (struct ustat *)a2);
         break;
     case SYS_chdir: {
@@ -555,7 +559,7 @@ void syscall_c(u32 *rb)
         }
         break;
     case SYS_meminfo:
-        if (UOKS(n, a1, a2, 16, 16)) {      /* chip free, fast free, shared code in memory, what sharing saves */
+        if (UOKS(n, a1, a2, UMEMINFO_FIRST, 16)) {      /* chip free, fast free, shared code in memory, what sharing saves */
             mem_stats(&((u32 *)a1)[0], &((u32 *)a1)[1]);
             seg_stats(&((u32 *)a1)[2], &((u32 *)a1)[3]);
             r = 0;
@@ -614,7 +618,7 @@ void syscall_c(u32 *rb)
     }
     case SYS_update:                    /* D15: INFO (anyone), RELEASE and NOTE (root) */
         if (a1 == UPD_INFO) {
-            if (UOKS(n, a2, a3, sizeof(struct uupdate), sizeof(struct uupdate))) {
+            if (UOKS(n, a2, a3, UUPDATE_FIRST, sizeof(struct uupdate))) {
                 struct uupdate u = { upd_pa, upd_size, upd_flags, zver.vnum, { 0 } };
                 memcpy(u.kver, zver.vstr, 16);
                 memcpy((void *)a2, &u, (u32)n);
