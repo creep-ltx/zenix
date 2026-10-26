@@ -136,6 +136,7 @@ void term_putc(int con, char c);
 void term_write(int con, const char *s, u32 n);
 void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
 int term_back(void);
+int term_ckm(void);                     /* the console on the screen wants ESC O A arrows (DECCKM) */
 int term_size(void);                    /* rows << 16 | columns */
 void con_switch(int con);               /* show console con (1..NCONS); an unused one asks init for a login */
 int con_in_use(int con);                /* is a live process's controlling tty this console? */

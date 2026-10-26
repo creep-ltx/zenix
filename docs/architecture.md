@@ -813,13 +813,31 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   meanwhile as a half line goes into the queue as it is (before, `tty_setmode` dropped it: `rm /etc/motd` typed
   during a slow command arrived as `c/motd`).
 - **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
-  NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100: cursor motion, erase, insert/delete, scroll regions,
+  NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100/xterm: cursor motion, erase, insert/delete, scroll regions,
   bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position. Arrows and function keys
-  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it. The escape parser follows
+  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it. **Colours** (DESIGN D14):
+  each cell has a character, an attribute byte and a colour byte (foreground in the low nibble, background in the
+  high one; grey on black is `0x07`). SGR `30-37`/`40-47`, `90-97`/`100-107`, `39`/`49`; `0` and a bare `ESC[m` reset
+  everything (so does `ESC c`); `1` is bold and never changes the colour; `38;5;n`/`48;5;n` (xterm's 256: the 16, a
+  6x6x6 cube, 24 greys) and `38;2;r;g;b`/`48;2;...` (also with `:`, with or without a colour space) are shown as the
+  nearest of the 16 (by distance in RGB to the palette); `2 3 5 8 9` are ignored. How a colour looks depends on the
+  depth (Display, below). **Erase takes the background colour** (as Linux and xterm): erased cells and the rows a
+  scroll brings in get the default foreground on the current background. **Region scrolls are blitter work:** `CSI
+  S/T/L/M`, `ESC M` and line feeds inside a scroll region move the region's rows with one blitter copy and fill the new
+  rows with one blitter fill (before, the CPU redrew every row of the region); whole erased rows (`ESC[2J`, `ESC[J`,
+  `ESC[2K`) are blitter fills too. `ESC 7`/`ESC 8` save and restore the colours and attributes with the cursor (as
+  xterm). **The scrollback** keeps each line's characters and one colour byte per cell, inverse folded in (foreground
+  and background swapped when the line is pushed): 200 lines x 80 x 2 = 32 KB per console, allocated when the console
+  first scrolls; bold and underline are not kept there. **Cursor-key mode** (DECCKM, `ESC[?1h`/`ESC[?1l`, per console,
+  reset by `ESC c`): `kbd.c` sends the unmodified arrows as `ESC O A`..`ESC O D` while it is set (programs on another
+  computer over `cu` switch it on). The cursor is the cell drawn inverse; where foreground and background are the same
+  it uses the default colours so it stays visible. `term.c` is built `-Os`, its per-character path `-O2`. Verified on
+  the host (`tools/term-test.sh`: each escape's colours, the mappings, BCE, region scrolls as blitter calls, the
+  scrollback's colour byte, DECCKM, and a fuzz after which the screen always equals the grid, PAL and NTSC). The escape parser follows
   ECMA-48 (DESIGN D14): a CSI sequence is parameter bytes 0x30-0x3F (up to 16 parameters kept, each clamped at 9999;
   `:` sub-parameters as in `38:5:196`), intermediate bytes 0x20-0x2F and a final byte 0x40-0x7E; a sequence it does
   not know is swallowed whole, never printed; a private marker (`?`, `>`, `=`, `<`) makes it a private sequence, of
-  which only `?25` (`h`/`l`, the cursor) is acted on; OSC and the other control strings (window titles) are swallowed up
+  which only `?25` (the cursor) and `?1` (DECCKM) with `h`/`l` are acted on; OSC and the other control strings (window titles) are swallowed up
   to BEL or `ESC \`, `ESC ( B` and the like up to their final byte; CAN and SUB cancel a sequence; a control character
   inside one acts and the sequence goes on (tools/term-test.sh, on the host).
 - **Display** (`gfx.c`, DESIGN D14): 640 pixels wide hires, the whole screen text. `gfx_init`

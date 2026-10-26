@@ -89,7 +89,7 @@ built. Last checked against the code: 2026-10-23.
 |---|---|---|
 | 640x256 (PAL) or 640x200 (NTSC, measured at boot) hires planar display, all text, blitter-assisted scrolling; 4 bitplanes on AGA (64-bit fetch, FMODE 3), 3 on OCS/ECS with fast RAM, 1 on chip-only machines below 2 MB (DESIGN D14) | verified (the matrix, NTSC included, checks the depth on every machine; the FMODE 3 fetch window by a screenshot of `termtest columns`); **not yet on the A1200** | architecture.md section 11 |
 | ROM Topaz 8 font from the Kickstart in use at boot | read (every test boots with it; no test compares the glyphs) | |
-| 80x32 text (80x25 on NTSC), ANSI/VT100 (cursor, erase, insert/delete, scroll regions, bold/underline/inverse) | the size verified (the matrix); the escape codes read (`termtest` draws them, no test compares the screen) | man/termtest.txt |
+| 80x32 text (80x25 on NTSC), ANSI/VT100/xterm (cursor, erase, insert/delete, scroll regions, bold/underline/inverse); an ECMA-48 escape parser that swallows what it does not know | the size verified (the matrix); the escape codes verified on the host against a model display (`tools/term-test.sh`) | man/termtest.txt |
 | Scrollback 200 lines per console: Amiga+Up/Down a screenful, Amiga+Shift+Up/Down a line, in every mode, also at the shell's prompt (a console key like Amiga+F1..F10, as Linux's Shift+PageUp: programs never see it; every Amiga keyboard has these keys) | verified in FS-UAE (`tools/kbd-test.sh`: Amiga+Up at the prompt shows older lines, Amiga+Down returns) | |
 | Ten virtual consoles, Amiga+F1..F10, each with its own `login` (started when the console is first shown, again after a logout); the controlling tty of a process is its console (`ls \| less` on console 2 reads console 2's keys) | verified in FS-UAE (`tools/kbd-test.sh`, `tools/users-test.sh`, the matrix) | architecture.md section 11, man/init.txt |
 | Type-ahead kept when a program switches the tty to raw mode | verified (`tools/users-test.sh`) | architecture.md section 11 |
@@ -98,7 +98,8 @@ built. Last checked against the code: 2026-10-23.
 | Amiga keyboard, handshake timed by the E-clock, taken by its own CIA interrupt, one handshake at start, lost-sync/overflow codes forget held keys; serial console mirror (115200 baud; waits for the port only once something was received, else drops and counts) | verified (the keyboard tests); the keyboard's own codes read | architecture.md section 11 |
 | Reset warning: Ctrl+Amiga+Amiga on a keyboard that sends it holds the reset while init syncs the disks (at most 8 s) | verified in FS-UAE (`tools/diag-test.sh`: its keyboard sends the warning; the sync's line is in the next boot's previous-boot lines); whether the A1200's keyboard sends it is unknown | architecture.md section 11 |
 | Keymaps with AmigaOS's four layers (plain, Shift, Alt, Shift+Alt): Swedish (`sv`, the AmigaOS "s" layout) and US; Caps Lock; key repeat | verified in FS-UAE (`tools/kbd-test.sh`) | architecture.md section 11 |
-| Colours, UTF-8, display server with a drawing API, a mouse pointer | planned | ROADMAP.md phase 5 |
+| Colours (DESIGN D14): the 16 ANSI colours in the console (SGR 30-37, 40-47, 90-97, 100-107, 39, 49; 256 and true colour shown as the nearest of the 16), erase with the background colour, region scrolls by blitter, the scrollback keeps colours, `ESC 7/8` with colours, cursor-key mode (DECCKM) | verified on the host (`tools/term-test.sh`); on the display: depends on the depth (1 plane shows none, 3 planes 8) | architecture.md section 11 |
+| UTF-8, display server with a drawing API, a mouse pointer | planned | ROADMAP.md phase 5 |
 
 ## Shell
 Line editing, history (`~/.sh_history`) with Ctrl-R search, tab completion, variables and the environment, quoting,

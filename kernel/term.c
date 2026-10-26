@@ -3,12 +3,14 @@
 
 /* Virtual consoles, as on Linux: NCONS (10) of them, /dev/tty1 .. /dev/tty10,
  * switched with Amiga+F1..F10. Each has its own text grid (80 columns, all the
- * rows of the screen: 32 on PAL, 25 on NTSC, with attributes), its own
- * scrollback and its own tty. Only the current console is drawn; switching
- * redraws from the grid. The terminal understands the usual ANSI/VT100
- * sequences (cursor movement, erase, insert/delete line and character,
- * scroll regions, bold/underline/inverse) so ordinary programs and editors
- * work. A console's grid and scrollback are allocated when it is first used. */
+ * rows of the screen: 32 on PAL, 25 on NTSC, with attributes and colours), its
+ * own scrollback and its own tty. Only the current console is drawn; switching
+ * redraws from the grid. The terminal understands the usual ANSI/VT100/xterm
+ * sequences (cursor movement, erase, insert/delete line and character, scroll
+ * regions, bold/underline/inverse, the 16 colours; 256 and true colours are
+ * shown as the nearest of the 16) so ordinary programs and editors work. Erased
+ * cells take the current background colour, as on Linux and xterm. A console's
+ * grid and scrollback are allocated when it is first used. */
 
 #define HLINES 200                      /* scrollback lines per console */
 
@@ -24,12 +26,16 @@
 #define A_INV 1
 #define A_UND 2
 #define A_BOLD 4
+#define CO_DEF 0x07                     /* colour byte: foreground in the low nibble, background in the high one */
 
 struct term {
     u8 ch[TROWS_MAX][COLS];
     u8 at[TROWS_MAX][COLS];
+    u8 co[TROWS_MAX][COLS];
     int cx, cy, sx, sy;                 /* cursor and its saved position */
-    u8 attr;                            /* attributes for new characters */
+    u8 attr, colour;                    /* attributes and colours for new characters */
+    u8 sattr, scolour;                  /* saved with the cursor by ESC 7 */
+    u8 ckm;                             /* cursor-key mode (DECCKM, ESC[?1h): arrows are sent as ESC O A */
     int top, bot;                       /* scroll region (rows, inclusive) */
     int wrap;                           /* last column written: wrap before the next character */
     int curvis;
@@ -37,8 +43,8 @@ struct term {
     u8 nparam;                          /* parameters seen (up to NPAR are kept) */
     u16 sub;                            /* bit i: parameter i came after ':' (a sub-parameter, 38:5:196) */
     u16 param[NPAR];
-    u8 (*hist)[COLS];                   /* scrollback: the oldest line is hist[(hhead - hn) mod HLINES] */
-    int hn, hhead;
+    u8 (*hist)[COLS];                   /* scrollback: the oldest line is hist[(hhead - hn) mod HLINES]; its colours */
+    int hn, hhead;                      /* are hist[HLINES + the same index] (inverse folded in) */
     int back;                           /* lines scrolled back (0 = live) */
 };
 
@@ -50,8 +56,11 @@ static void reset_term(struct term *t)
 {
     memset(t->ch, ' ', sizeof t->ch);
     memset(t->at, 0, sizeof t->at);
+    memset(t->co, CO_DEF, sizeof t->co);
     t->cx = t->cy = t->sx = t->sy = 0;
-    t->attr = 0;
+    t->attr = t->sattr = 0;
+    t->colour = t->scolour = CO_DEF;
+    t->ckm = 0;
     t->top = 0;
     t->bot = trows - 1;
     t->wrap = 0;
@@ -71,9 +80,12 @@ static struct term *get(int w)
     return wsp[w];
 }
 
+/* the colour of an erased cell: the default foreground on the current background */
+static u8 bce(struct term *t) { return (u8)((t->colour & 0xF0) | (CO_DEF & 0x0F)); }
+
 static void draw(struct term *t, int y, int x)
 {
-    gfx_cell(y, x, t->ch[y][x], t->at[y][x], 0x07);
+    gfx_cell(y, x, t->ch[y][x], t->at[y][x], t->co[y][x]);
 }
 
 static void cursor(struct term *t, int on)
@@ -81,60 +93,60 @@ static void cursor(struct term *t, int on)
     if (!t->curvis || t->back)
         return;
     if (on)
-        gfx_cell(t->cy, t->cx, t->ch[t->cy][t->cx], t->at[t->cy][t->cx] ^ A_INV, 0x07);
+        gfx_cell(t->cy, t->cx, t->ch[t->cy][t->cx], t->at[t->cy][t->cx] ^ A_INV, t->co[t->cy][t->cx]);
     else
         draw(t, t->cy, t->cx);
 }
 
-static void draw_row(struct term *t, int y)
-{
-    for (int x = 0; x < COLS; x++)
-        draw(t, y, x);
-}
-
 static void redraw_all(struct term *t)
 {
-    gfx_clear_text(0x07);
+    gfx_clear_text(CO_DEF);
     for (int y = 0; y < trows; y++)
         for (int x = 0; x < COLS; x++)
-            if (t->ch[y][x] != ' ' || t->at[y][x])
+            if (t->ch[y][x] != ' ' || t->at[y][x] || t->co[y][x] != CO_DEF)
                 draw(t, y, x);
 }
 
 /* ---- scrollback ---- */
 
-static void hist_push(struct term *t, const u8 *line)
+static void hist_push(struct term *t, int y)
 {
     if (!t->hist) {
-        t->hist = kmalloc(HLINES * COLS);
+        t->hist = kmalloc(2 * HLINES * COLS);
         if (!t->hist)
             return;
         t->hn = t->hhead = 0;
     }
-    memcpy(t->hist[t->hhead], line, COLS);
+    u8 *c = t->hist[HLINES + t->hhead];
+    memcpy(t->hist[t->hhead], t->ch[y], COLS);
+    for (int x = 0; x < COLS; x++) {                    /* one colour byte: inverse is kept as swapped colours */
+        u8 v = t->co[y][x];
+        if (t->at[y][x] & A_INV)
+            v = (v & 15) == v >> 4 ? 0x70 : (u8)(v << 4 | v >> 4);
+        c[x] = v;
+    }
     t->hhead = (t->hhead + 1) % HLINES;
     if (t->hn < HLINES)
         t->hn++;
 }
 
-/* a line of the composite (scrollback then grid): index 0 is the oldest */
-static const u8 *comp_line(struct term *t, int k, int *from_grid)
-{
-    *from_grid = k >= t->hn;
-    if (k >= t->hn)
-        return t->ch[k - t->hn];
-    return t->hist[(t->hhead - t->hn + k + HLINES * 2) % HLINES];
-}
-
 static void show_back(struct term *t)
 {
-    gfx_clear_text(0x07);
+    gfx_clear_text(CO_DEF);
     for (int r = 0; r < trows; r++) {
-        int from_grid;
-        const u8 *l = comp_line(t, t->hn - t->back + r, &from_grid);
+        int k = t->hn - t->back + r;                    /* in the composite (scrollback then grid), 0 the oldest */
+        if (k >= t->hn) {
+            int y = k - t->hn;
+            for (int x = 0; x < COLS; x++)
+                if (t->ch[y][x] != ' ' || t->at[y][x] || t->co[y][x] != CO_DEF)
+                    gfx_cell(r, x, t->ch[y][x], t->at[y][x], t->co[y][x]);
+            continue;
+        }
+        int h = (t->hhead - t->hn + k + HLINES * 2) % HLINES;
+        const u8 *l = t->hist[h], *c = t->hist[HLINES + h];
         for (int x = 0; x < COLS; x++)
-            if (l[x] != ' ')
-                gfx_cell(r, x, l[x], 0, 0x07);
+            if (l[x] != ' ' || c[x] != CO_DEF)
+                gfx_cell(r, x, l[x], 0, c[x]);
     }
 }
 
@@ -169,36 +181,61 @@ void term_scroll_view(int delta)
 
 int term_back(void) { return wsp[con_cur] ? wsp[con_cur]->back : 0; }
 
+/* the console on the screen asked for cursor-key mode (kbd.c sends ESC O A for the arrows then) */
+int term_ckm(void) { return wsp[con_cur] ? wsp[con_cur]->ckm : 0; }
+
 /* ---- scrolling inside the region ---- */
 
-static void scroll_up(struct term *t, int vis)          /* the region moves up one line */
+static void blank_rows(struct term *t, int y, int n)
 {
-    int full = (t->top == 0 && t->bot == trows - 1);
-    if (full)
-        hist_push(t, t->ch[0]);
-    memmove(t->ch[t->top], t->ch[t->top + 1], (u32)(t->bot - t->top) * COLS);
-    memmove(t->at[t->top], t->at[t->top + 1], (u32)(t->bot - t->top) * COLS);
-    memset(t->ch[t->bot], ' ', COLS);
-    memset(t->at[t->bot], 0, COLS);
-    if (!vis)
-        return;
-    if (full) {
-        gfx_scroll(0x07);                                   /* the Copper pointer moves: no copying */
+    memset(t->ch[y], ' ', (u32)n * COLS);
+    memset(t->at[y], 0, (u32)n * COLS);
+    memset(t->co[y], bce(t), (u32)n * COLS);
+}
+
+static void move_rows(struct term *t, int dst, int src, int n)
+{
+    memmove(t->ch[dst], t->ch[src], (u32)n * COLS);
+    memmove(t->at[dst], t->at[src], (u32)n * COLS);
+    memmove(t->co[dst], t->co[src], (u32)n * COLS);
+}
+
+/* rows top..bot move up (dir 1) or down (dir 0) by n; the rows that come in are blank with the background colour.
+ * On the screen one blitter copy and one fill. */
+static void region_move(struct term *t, int vis, int top, int n, int up)
+{
+    int h = t->bot - top + 1;
+    if (n > h) n = h;
+    if (n <= 0) return;
+    if (up) {
+        move_rows(t, top, top + n, h - n);
+        blank_rows(t, t->bot - n + 1, n);
     } else {
-        for (int y = t->top; y <= t->bot; y++)
-            draw_row(t, y);
+        move_rows(t, top + n, top, h - n);
+        blank_rows(t, top, n);
+    }
+    if (vis) {
+        if (up) {
+            gfx_move_rows(top, top + n, h - n);
+            gfx_fill_rows(t->bot - n + 1, n, bce(t));
+        } else {
+            gfx_move_rows(top + n, top, h - n);
+            gfx_fill_rows(top, n, bce(t));
+        }
     }
 }
 
-static void scroll_down(struct term *t, int vis)        /* the region moves down one line */
+static void scroll_up(struct term *t, int vis)          /* the region moves up one line */
 {
-    memmove(t->ch[t->top + 1], t->ch[t->top], (u32)(t->bot - t->top) * COLS);
-    memmove(t->at[t->top + 1], t->at[t->top], (u32)(t->bot - t->top) * COLS);
-    memset(t->ch[t->top], ' ', COLS);
-    memset(t->at[t->top], 0, COLS);
+    if (t->top != 0 || t->bot != trows - 1) {
+        region_move(t, vis, t->top, 1, 1);
+        return;
+    }
+    hist_push(t, 0);
+    move_rows(t, 0, 1, trows - 1);
+    blank_rows(t, trows - 1, 1);
     if (vis)
-        for (int y = t->top; y <= t->bot; y++)
-            draw_row(t, y);
+        gfx_scroll(bce(t));                             /* the Copper pointer moves: no copying */
 }
 
 static void linefeed(struct term *t, int vis)
@@ -211,9 +248,17 @@ static void linefeed(struct term *t, int vis)
 
 static void clear_cells(struct term *t, int vis, int y, int x0, int x1)       /* [x0,x1) */
 {
+    if (x0 == 0 && x1 == COLS) {
+        blank_rows(t, y, 1);
+        if (vis)
+            gfx_fill_rows(y, 1, bce(t));
+        return;
+    }
+    u8 c = bce(t);
     for (int x = x0; x < x1; x++) {
         t->ch[y][x] = ' ';
         t->at[y][x] = 0;
+        t->co[y][x] = c;
         if (vis)
             draw(t, y, x);
     }
@@ -221,20 +266,25 @@ static void clear_cells(struct term *t, int vis, int y, int x0, int x1)       /*
 
 static void erase_screen(struct term *t, int vis, int mode)
 {
-    if (mode == 2) {
-        memset(t->ch, ' ', sizeof t->ch);
-        memset(t->at, 0, sizeof t->at);
+    if (mode == 2 || mode == 3) {
+        blank_rows(t, 0, trows);
         if (vis)
-            gfx_clear_text(0x07);
+            gfx_clear_text(bce(t));
         return;
     }
     if (mode == 0) {
         clear_cells(t, vis, t->cy, t->cx, COLS);
-        for (int y = t->cy + 1; y < trows; y++)
-            clear_cells(t, vis, y, 0, COLS);
+        if (t->cy + 1 < trows) {
+            blank_rows(t, t->cy + 1, trows - t->cy - 1);
+            if (vis)
+                gfx_fill_rows(t->cy + 1, trows - t->cy - 1, bce(t));
+        }
     } else {
-        for (int y = 0; y < t->cy; y++)
-            clear_cells(t, vis, y, 0, COLS);
+        if (t->cy) {
+            blank_rows(t, 0, t->cy);
+            if (vis)
+                gfx_fill_rows(0, t->cy, bce(t));
+        }
         clear_cells(t, vis, t->cy, 0, t->cx + 1);
     }
 }
@@ -246,7 +296,80 @@ static int arg(struct term *t, int i, int def)
 
 static int clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-static void csi(struct term *t, int vis, char c)
+/* the nearest of the 16 colours (gfx_palette, 12 bits) to an 8-bit r, g, b */
+static int nearest(int r, int g, int b)
+{
+    int best = 0;
+    u32 bd = ~0u;
+    for (int i = 0; i < 16; i++) {
+        u16 p = gfx_palette[i];
+        int dr = r - (p >> 8 & 15) * 17, dg = g - (p >> 4 & 15) * 17, db = b - (p & 15) * 17;
+        u32 d = (u32)(dr * dr + dg * dg + db * db);
+        if (d < bd) bd = d, best = i;
+    }
+    return best;
+}
+
+/* xterm's 256 colours: 0-15 the 16, 16-231 a 6x6x6 cube, 232-255 greys */
+static int map256(int n)
+{
+    static const u8 lev[6] = { 0, 95, 135, 175, 215, 255 };
+    if (n < 16) return n;
+    if (n < 232) { n -= 16; return nearest(lev[n / 36], lev[n / 6 % 6], lev[n % 6]); }
+    if (n < 256) { int v = 8 + 10 * (n - 232); return nearest(v, v, v); }
+    return -1;
+}
+
+/* SGR (CSI ... m): attributes and colours. 38/48 take 5;n (256 colours) or 2;r;g;b (true colour), also with ':'
+ * (38:5:n, 38:2::r:g:b), shown as the nearest of the 16. Bold stays bold (it never brightens the colour). 2 3 5 8 9
+ * and other codes are ignored. */
+static void sgr(struct term *t)
+{
+    int n = t->nparam ? t->nparam : 1;
+    if (!t->nparam) t->param[0] = 0;
+    for (int i = 0; i < n; i++) {
+        int p = t->param[i];
+        if (t->sub >> i & 1)
+            continue;                                   /* a sub-parameter nobody took */
+        if (p == 0) { t->attr = 0; t->colour = CO_DEF; }
+        else if (p == 1) t->attr |= A_BOLD;
+        else if (p == 4) t->attr = (i + 1 < n && (t->sub >> (i + 1) & 1) && !t->param[i + 1]) ?
+                                   (u8)(t->attr & ~A_UND) : (u8)(t->attr | A_UND);     /* 4:0 is "no underline" */
+        else if (p == 7) t->attr |= A_INV;
+        else if (p == 22) t->attr &= (u8)~A_BOLD;
+        else if (p == 24) t->attr &= (u8)~A_UND;
+        else if (p == 27) t->attr &= (u8)~A_INV;
+        else if (p >= 30 && p <= 37) t->colour = (u8)((t->colour & 0xF0) | (p - 30));
+        else if (p == 39) t->colour = (u8)((t->colour & 0xF0) | (CO_DEF & 15));
+        else if (p >= 40 && p <= 47) t->colour = (u8)((t->colour & 0x0F) | (p - 40) << 4);
+        else if (p == 49) t->colour = (u8)((t->colour & 0x0F) | (CO_DEF & 0xF0));
+        else if (p >= 90 && p <= 97) t->colour = (u8)((t->colour & 0xF0) | (p - 90 + 8));
+        else if (p >= 100 && p <= 107) t->colour = (u8)((t->colour & 0x0F) | (p - 100 + 8) << 4);
+        else if (p == 38 || p == 48) {
+            int k = i + 1, c = -1, colon = k < n && (t->sub >> k & 1);
+            if (k < n && t->param[k] == 5 && k + 1 < n) {
+                c = map256(t->param[k + 1]);
+                i = k + 1;
+            } else if (k < n && t->param[k] == 2) {
+                int r = k + 1;
+                if (colon && k + 4 < n && (t->sub >> (k + 4) & 1))
+                    r++;                                /* 38:2:<colour space>:r:g:b */
+                if (r + 2 < n) {
+                    c = nearest(t->param[r] > 255 ? 255 : t->param[r], t->param[r + 1] > 255 ? 255 : t->param[r + 1],
+                                t->param[r + 2] > 255 ? 255 : t->param[r + 2]);
+                    i = r + 2;
+                } else
+                    i = n;
+            }
+            while (i + 1 < n && (t->sub >> (i + 1) & 1))
+                i++;                                    /* the rest of a ':' group */
+            if (c >= 0)
+                t->colour = p == 38 ? (u8)((t->colour & 0xF0) | c) : (u8)((t->colour & 0x0F) | c << 4);
+        }
+    }
+}
+
+static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
 {
     int n = arg(t, 0, 1);
     if (t->priv && c != 'h' && c != 'l')
@@ -273,33 +396,17 @@ static void csi(struct term *t, int vis, char c)
         else clear_cells(t, vis, t->cy, 0, COLS);
         break;
     }
-    case 'L': case 'M': {                               /* insert / delete lines at the cursor */
+    case 'L': case 'M':                                 /* insert / delete lines at the cursor */
         if (t->cy < t->top || t->cy > t->bot) break;
-        int save = t->top;
-        t->top = t->cy;
-        for (int i = 0; i < n; i++) {
-            if (c == 'L') scroll_down(t, vis);
-            else {
-                int full = 0;
-                (void)full;
-                memmove(t->ch[t->top], t->ch[t->top + 1], (u32)(t->bot - t->top) * COLS);
-                memmove(t->at[t->top], t->at[t->top + 1], (u32)(t->bot - t->top) * COLS);
-                memset(t->ch[t->bot], ' ', COLS);
-                memset(t->at[t->bot], 0, COLS);
-                if (vis)
-                    for (int y = t->top; y <= t->bot; y++)
-                        draw_row(t, y);
-            }
-        }
-        t->top = save;
+        region_move(t, vis, t->cy, n, c == 'M');
         t->cx = 0;
         break;
-    }
     case 'P': {                                         /* delete characters */
         if (n > COLS - t->cx) n = COLS - t->cx;
         memmove(&t->ch[t->cy][t->cx], &t->ch[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
         memmove(&t->at[t->cy][t->cx], &t->at[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
-        for (int x = COLS - n; x < COLS; x++) { t->ch[t->cy][x] = ' '; t->at[t->cy][x] = 0; }
+        memmove(&t->co[t->cy][t->cx], &t->co[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
+        for (int x = COLS - n; x < COLS; x++) { t->ch[t->cy][x] = ' '; t->at[t->cy][x] = 0; t->co[t->cy][x] = bce(t); }
         if (vis) for (int x = t->cx; x < COLS; x++) draw(t, t->cy, x);
         break;
     }
@@ -307,15 +414,21 @@ static void csi(struct term *t, int vis, char c)
         if (n > COLS - t->cx) n = COLS - t->cx;
         memmove(&t->ch[t->cy][t->cx + n], &t->ch[t->cy][t->cx], (u32)(COLS - t->cx - n));
         memmove(&t->at[t->cy][t->cx + n], &t->at[t->cy][t->cx], (u32)(COLS - t->cx - n));
-        for (int x = t->cx; x < t->cx + n; x++) { t->ch[t->cy][x] = ' '; t->at[t->cy][x] = 0; }
+        memmove(&t->co[t->cy][t->cx + n], &t->co[t->cy][t->cx], (u32)(COLS - t->cx - n));
+        for (int x = t->cx; x < t->cx + n; x++) { t->ch[t->cy][x] = ' '; t->at[t->cy][x] = 0; t->co[t->cy][x] = bce(t); }
         if (vis) for (int x = t->cx; x < COLS; x++) draw(t, t->cy, x);
         break;
     }
     case 'X':                                           /* erase characters */
         clear_cells(t, vis, t->cy, t->cx, t->cx + n > COLS ? COLS : t->cx + n);
         break;
-    case 'S': for (int i = 0; i < n; i++) scroll_up(t, vis); break;
-    case 'T': for (int i = 0; i < n; i++) scroll_down(t, vis); break;
+    case 'S':                                           /* scroll up: the whole screen into the scrollback, as a */
+        if (t->top == 0 && t->bot == trows - 1)         /* line feed at the bottom would */
+            for (int i = 0; i < n && i < trows; i++) scroll_up(t, vis);
+        else
+            region_move(t, vis, t->top, n, 1);
+        break;
+    case 'T': region_move(t, vis, t->top, n, 0); break;
     case 'r': {                                         /* scroll region */
         int tp = arg(t, 0, 1) - 1, bt = arg(t, 1, trows) - 1;
         if (tp >= 0 && bt < trows && tp < bt) { t->top = tp; t->bot = bt; }
@@ -324,23 +437,13 @@ static void csi(struct term *t, int vis, char c)
     }
     case 's': t->sx = t->cx; t->sy = t->cy; break;
     case 'u': t->cx = t->sx; t->cy = t->sy; break;
-    case 'm':
-        if (!t->nparam) t->attr = 0;
-        for (int i = 0; i < t->nparam; i++) {
-            int p = t->param[i];
-            if (p == 0) t->attr = 0;
-            else if (p == 1) t->attr |= A_BOLD;
-            else if (p == 4) t->attr |= A_UND;
-            else if (p == 7) t->attr |= A_INV;
-            else if (p == 22) t->attr &= (u8)~A_BOLD;
-            else if (p == 24) t->attr &= (u8)~A_UND;
-            else if (p == 27) t->attr &= (u8)~A_INV;
-            /* colours (30-47, 90-107) are accepted and ignored: one bitplane */
-        }
-        break;
+    case 'm': sgr(t); break;
     case 'h': case 'l':
-        if (t->priv == '?' && t->nparam && t->param[0] == 25)
-            t->curvis = (c == 'h');
+        if (t->priv == '?')
+            for (int i = 0; i < t->nparam; i++) {
+                if (t->param[i] == 25) t->curvis = (c == 'h');
+                else if (t->param[i] == 1) t->ckm = (c == 'h');     /* DECCKM */
+            }
         break;
     case 'n':
         if (t->nparam && t->param[0] == 6) {            /* cursor position report */
@@ -360,8 +463,9 @@ static void csi(struct term *t, int vis, char c)
     }
 }
 
-/* one character; the caller hides and redraws the cursor around a batch */
-static void put1(struct term *t, int vis, u8 ch)
+/* one character; the caller hides and redraws the cursor around a batch. term.c is built -Os (DESIGN D14: room on the
+ * RAM floppy); this, every character's path, -O2, with the escape sequences (csi) kept out of it. */
+static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
 {
     if (t->esc) {
         if (ch == 0x18 || ch == 0x1A) {                 /* CAN, SUB: the sequence is cancelled */
@@ -383,14 +487,14 @@ static void put1(struct term *t, int vis, u8 ch)
             case 27: t->esc = E_ESC; return;
             case '[': t->esc = E_CSI; t->nparam = 0; t->priv = 0; t->inter = 0; t->sub = 0; t->param[0] = 0; return;
             case ']': case 'P': case '_': case '^': case 'X': t->esc = E_STR; return;
-            case '7': t->sx = t->cx; t->sy = t->cy; return;
-            case '8': t->cx = t->sx; t->cy = t->sy; t->wrap = 0; return;
+            case '7': t->sx = t->cx; t->sy = t->cy; t->sattr = t->attr; t->scolour = t->colour; return;
+            case '8': t->cx = t->sx; t->cy = t->sy; t->attr = t->sattr; t->colour = t->scolour; t->wrap = 0; return;
             case 'D': linefeed(t, vis); return;
             case 'E': t->cx = 0; linefeed(t, vis); return;
             case 'M':
-                if (t->cy == t->top) scroll_down(t, vis); else if (t->cy > 0) t->cy--;
+                if (t->cy == t->top) region_move(t, vis, t->top, 1, 0); else if (t->cy > 0) t->cy--;
                 return;
-            case 'c': reset_term(t); if (vis) gfx_clear_text(0x07); return;
+            case 'c': reset_term(t); if (vis) gfx_clear_text(CO_DEF); return;
             }
             if (ch >= 0x20 && ch <= 0x2F)               /* ESC ( B and the like: swallowed up to the final byte */
                 t->esc = E_ESCI;
@@ -450,6 +554,7 @@ control:
     }
     t->ch[t->cy][t->cx] = ch;
     t->at[t->cy][t->cx] = t->attr;
+    t->co[t->cy][t->cx] = t->colour;
     if (vis)
         draw(t, t->cy, t->cx);
     if (t->cx == COLS - 1)

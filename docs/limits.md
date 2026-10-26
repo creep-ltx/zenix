@@ -81,7 +81,8 @@ pointers.
   (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
   at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
   -ENAMETOOLONG beyond, never cut), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
-  NTSC), 200 scrollback lines per console, a cooked tty line of 255 characters (the bell for more).
+  NTSC), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
+  console first scrolls), a cooked tty line of 255 characters (the bell for more).
 - The screen (DESIGN D14, architecture.md section 11): twice the screen's height in chip RAM, 40 KB at 1 bitplane,
   120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; 4 planes only on AGA with fast RAM
   or 2 MB of chip RAM, 3 on OCS/ECS with fast RAM, else 1.

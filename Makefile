@@ -123,6 +123,7 @@ KOPT_a3000 := -Os
 KOPT_rtc := -Os
 KOPT_kbd := -Os
 KOPT_gfx := -Os
+KOPT_term := -Os
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
