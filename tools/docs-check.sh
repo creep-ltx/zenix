@@ -65,6 +65,9 @@ stray=$(git ls-files '*.md' '*.txt' | grep -v '^docs/\|^rootfs/\|^tools/tests/\|
 if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
     if [ "$1" = "--staged" ]; then range=(--cached); else range=("${2:-HEAD}~1" "${2:-HEAD}"); fi
     changed=$(git diff "${range[@]}" --name-only)
+    # DOCS_NO_BEHAVIOUR="reason": the program changes alter no behaviour (a compiler warning, a comment), so no page or
+    # feature line needs to change; the reason is printed, so it shows in the log of whoever commits
+    if [ -n "${DOCS_NO_BEHAVIOUR:-}" ]; then echo "docs-check: no behaviour change claimed: $DOCS_NO_BEHAVIOUR"; changed=$(echo "$changed" | grep -v '^user/.*\.c$\|^boot/zenixboot'); fi
     for c in $changed; do
         case "$c" in
         user/*.c)

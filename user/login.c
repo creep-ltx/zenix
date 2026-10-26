@@ -11,7 +11,7 @@ static int session(const struct pw *p)
     sys_setgid(p->gid);
     sys_setuid(p->uid);
     sys_chdir(p->home);
-    char *argv[] = { p->shell, 0 };
+    char *argv[] = { (char *)p->shell, 0 };          /* spawn only reads argv */
     int pid = sys_spawn(p->shell, argv, 0);
     if (pid < 0) { fprintf(2, "login: cannot start %s: %s\n", p->shell, zwhy("failed")); return 1; }
     sys_setfg(0);
