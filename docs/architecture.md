@@ -871,7 +871,10 @@ registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10), asks 
 registered with `-fsck`, a read-only server that leaves the device to `/bin/fsck.ext2 -y DEVICE`, which boot runs
 and waits for at most 20 minutes; then `FS_QUIT` to it and `fs` registered with `-root` again, so the next call starts
 the writable server; the kernel forgets that a service served when its program text changes, so a writable root
-server that fails to start is still D11's panic), runs `/sbin/zup`, registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
+server that fails to start is still D11's panic; a root fsck.ext2 could not repair, or could not check, stays with
+the read-only check server while boot asks on console 1 - go on read-only (the default after 30 s), read-write, a
+rescue shell as root, or reboot: D17's owner decision, man/rescue.txt), runs `/sbin/zup` (not on a read-only root),
+registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
 [ARGUMENTS]` a line, man/boot.txt; a bad line is reported on console 1 and skipped), then spawns `/bin/init` on console 1 and waits for it; should init
 end, it says so and starts it again. (It exists because the idle process cannot block on a message.) The logins on the
 consoles are init's work (section 11, man/init.txt).

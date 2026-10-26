@@ -1,0 +1,84 @@
+RESCUE(8)		Zenix manual
+
+NAME
+    rescue - what to do when the disk check at boot cannot repair the root
+
+DESCRIPTION
+    When Zenix was switched off while it wrote to the disk, the root (the
+    disk Zenix runs from) is marked "not cleanly unmounted", and boot
+    checks and repairs it with fsck.ext2 before anything else uses it. Most
+    of the time that is all: a few lines on the screen, then the login.
+
+    Some damage fsck.ext2 does not repair, because a half-done repair
+    could make it worse: two files claiming the same block, a damaged
+    directory, a block number outside the disk. A check can also fail for
+    want of memory. Then boot mounts the root read-only, so nothing more
+    is written to it, and asks (as AmigaOS does with a disk that cannot
+    be validated):
+
+      1  go on read-only (the default in 30 seconds)
+      2  go on read-write anyway (risky: the damage can grow)
+      3  a rescue shell as root
+      4  reboot
+
+    Press the number; nothing else is needed. With nobody there, the
+    machine goes on read-only after 30 seconds, so it still comes up.
+
+THE CHOICES
+    1  Read-only. Everything works that only reads: logins, programs,
+       looking at files, copying them to another disk. Nothing can be
+       saved on the root ("read-only file system"); /tmp is on the root
+       too. The next start checks the root again.
+    2  Read-write, as if nothing were wrong. The files that are fine can
+       be used as usual, but writing may spread the damage (a block two
+       files share is changed for both). Only for an emergency, after a
+       copy of what matters.
+    3  A shell as root on console 1, with the root still read-only. boot
+       lists the repair commands. When the shell ends (exit), boot looks
+       at the root again: marked clean (repaired) it goes on read-write
+       at once, otherwise it asks again.
+    4  Reboot: the check runs again at the next start.
+
+WHAT TO DO, STEP BY STEP
+    Copy files to safety first. Before trying anything else, put what
+    you cannot lose somewhere else: a floppy or another partition. In the
+    rescue shell (or after choice 1): mount the other disk (mount(8)),
+    then cp(1) the files there. The root being read-only cannot hurt.
+
+    Check the disk again. "fsck.ext2 DEVICE" (the device boot named, for
+    example ide0p2) checks once more and changes nothing; it says what
+    it found and why it would not repair it. "fsck.ext2 -y DEVICE"
+    repairs what it can; it still refuses the damage it does not
+    understand, and changes nothing then.
+
+    The thorough way. What fsck.ext2 refuses, e2fsck repairs: it is the
+    full checker of Linux's ext2 tools (e2fsprogs). Zenix does not have
+    it yet. Two ways to run it:
+
+    - On a PC: take the card or disk out, put it in a PC with Linux (or
+      any system with e2fsprogs) and run "e2fsck -f /dev/sdXN" on the
+      Zenix root partition (not on the card's AmigaOS partitions). It
+      asks before each repair; "e2fsck -fy" says yes to all. Put the
+      card back and start Zenix.
+    - The RAM-disk Zenix: boot the floppy image zenix-ram.adf. It runs
+      from a RAM disk, so the hard disk is not in use, and its
+      fsck.ext2 can check and repair the disk's root like any other
+      device (with the same limits as above).
+
+    After a repair the next start finds the root clean and goes on as
+    usual. Files the repair found without a name are in /lost+found,
+    named by their inode number (#1234): look at them with less(1) and
+    give them their names back with mv(1).
+
+NOTES
+    The root is mounted read-only by the same server that served it for
+    the check (fsd -fsck): programs see a read-only filesystem, and
+    fsck.ext2 may still open the device. boot does not install an update
+    on a read-only root (it waits for the next start). A root marked
+    "has errors" by another system is refused before all this, as before
+    (use e2fsck on a PC). Only the root gets these choices; a volume of
+    /etc/fstab that cannot be repaired is mounted as it is and stays
+    marked (mount(8)).
+
+SEE ALSO
+    fsck.ext2(1), boot(8), mount(8), reboot(8), zenixboot(8)

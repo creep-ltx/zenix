@@ -56,6 +56,7 @@ spot-checked against the code that day.
 | [sudo](man/sudo.txt) | run one command as root: members of the group wheel, with their own password |
 | [dd](man/dd.txt), [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [mkfs.zenixfs](man/mkfs.zenixfs.txt), [fsck.zenixfs](man/fsck.zenixfs.txt), [sync](man/sync.txt), [reboot](man/reboot.txt) | disks |
 | [zup](man/zup.txt) | install the root half of an update (`/sbin/zup`, DESIGN D15) |
+| [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
 | [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd or zfsd) |
 
 ## Internals and test programs

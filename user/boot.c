@@ -10,7 +10,8 @@
  * server as services (the kernel starts a service when it is first called, and again after it died); its own first
  * calls start them: rootpick's DISK_LIST starts diskd, the root inode (SYS_mountinfo) starts the root server. An ext2
  * root not marked clean is checked first (DESIGN D17): served read-only, /bin/fsck.ext2 -y on it, then the writable
- * server. Then it runs /sbin/zup (DESIGN D15: an update's root half, or what a power cut left), gives the update bundle's memory back,
+ * server; a root the check could not repair stays read-only unless the owner chooses otherwise (rescue(), man
+ * rescue). Then it runs /sbin/zup (DESIGN D15: an update's root half, or what a power cut left), gives the update bundle's memory back,
  * registers the services listed in /etc/svctab and starts /bin/init on console 1 and waits for it; should init ever
  * end, it says so and starts it again. */
 
@@ -79,10 +80,10 @@ static int zups(int kill)               /* how many processes named zup are aliv
         }
     return n;
 }
-static void update(void)
+static void update(int ro)
 {
     char *argv[] = { "/sbin/zup", 0 };
-    int pid = sys_spawn(argv[0], argv, 0), st = 0, done = pid < 0;
+    int pid = ro ? -EROFS : sys_spawn(argv[0], argv, 0), st = 0, done = pid < 0;
     for (u32 t = 1; ; t++) {            /* t: tenths of a second */
         if (!done && (st = sys_waitnb(pid)) != -2) done = 1;
         if (done && !zups(0)) break;
@@ -98,7 +99,8 @@ static void update(void)
     }
     struct uupdate u;
     int have = sys_update(UPD_INFO, (u32)&u, sizeof u) == 0;
-    if (have && pid < 0 && (u.size || u.flags)) say("boot: no /sbin/zup: the update is not installed\n");
+    if (have && pid < 0 && (u.size || u.flags))
+        say(ro ? "boot: the root is read-only: the update is not installed\n" : "boot: no /sbin/zup: the update is not installed\n");
     if (have && u.addr && u.size >= 16 && (pid < 0 || st != 0)) {
         const unsigned char *h = (const unsigned char *)u.addr;       /* the bundle header's version (big-endian, +12): read, never passed */
         sys_update(UPD_NOTE, UPDNOTE_FAILED, (u32)h[12] << 24 | (u32)h[13] << 16 | (u32)h[14] << 8 | h[15]);
@@ -110,13 +112,61 @@ static void update(void)
  * marked and is checked again at the next start) */
 static int wait_limited(int pid)
 {
-    if (pid < 0) { say("boot: cannot start /bin/fsck.ext2: the root is not checked\n"); return 0; }
+    if (pid < 0) { say("boot: cannot start /bin/fsck.ext2: the root is not checked\n"); return -1; }
     for (u32 t = 1; ; t++) {
         int st = sys_waitnb(pid);
         if (st != -2) return st;
         sys_sleep(10);
         if (t == ZUP_SAY) say("boot: fsck.ext2 is still working\n");
         if (t == ZUP_STOP) { sys_kill(pid); return sys_wait(pid); }
+    }
+}
+
+/* D17's owner decision (2026-10-26): a root fsck.ext2 could not repair (or could not check) stays served read-only by
+ * the check server, and the console offers what AmigaOS offers for a disk it cannot validate; a key, or 1 after 30 s
+ * (an unattended machine still comes up). 1 if the root stays read-only, 0 for the writable server (choice 2, or a root
+ * the rescue shell left marked clean). man rescue explains the steps. */
+static int rescue(const char *dev)
+{
+    for (;;) {
+        say("boot: the root could not be repaired and is mounted read-only. Choose (man rescue):\n"
+            "  1  go on read-only (the default in 30 seconds)\n"
+            "  2  go on read-write anyway (risky: the damage can grow)\n"
+            "  3  a rescue shell as root\n"
+            "  4  reboot\n");
+        sys_ttymode(TTY_RAW);                   /* one key, no Return */
+        char k = '1';
+        for (u32 end = sys_ticks() + 3000;;) {
+            int left = (int)(end - sys_ticks());
+            struct pollfd pf = { 0, POLLIN, 0 };
+            if (left <= 0) break;
+            if (sys_evwait(&pf, 1, left) > 0 && sys_read(0, &k, 1) == 1 && k >= '1' && k <= '4') break;
+            k = '1';
+        }
+        sys_ttymode(0);
+        char e[2] = { k, '\n' };
+        sys_write(1, e, 2);
+        if (k == '1') { say("boot: going on with the root read-only\n"); return 1; }
+        if (k == '2') { say("boot: going on with the root read-write\n"); return 0; }
+        if (k == '4') { sys_reboot(0); continue; }
+        say("boot: a shell as root; the root stays read-only. Repair commands:\n  fsck.ext2 ");
+        say(dev);
+        say("      check again, changing nothing\n  fsck.ext2 -y ");
+        say(dev);
+        say("   repair what it can\n  mount, cp          copy files to safety (another disk) first\n"
+            "  exit               back to these choices\n");
+        static const char env[] = "PATH=/bin\0HOME=/\0USER=root\0LOGNAME=root\0SHELL=/bin/sh\0";
+        sys_envset(env, sizeof env);            /* for the shell; boot's own stays empty after it */
+        char *sa[] = { "/bin/sh", 0 };
+        int pid = sys_spawn(sa[0], sa, 0);
+        sys_envset(0, 0);
+        if (pid < 0) say("boot: cannot start /bin/sh\n");
+        else sys_wait(pid);
+        char id[64];
+        if (vol_id(dport, dev, id) == 1 && (vol_state & 1)) {   /* repaired in the shell: no question */
+            say("boot: the root is marked clean now: going on read-write\n");
+            return 0;
+        }
     }
 }
 
@@ -138,6 +188,7 @@ int main(void)
     sys_svc_register("fs", prog, -10);
     struct umountinfo mi;
     sys_mountinfo(0, &mi);                      /* the root inode: the first call to "fs" starts the root server */
+    int ro = 0;
     if (check) {                                /* served read-only, the device shared: fsck.ext2 -y on it */
         say("boot: the root was not shut down cleanly: fsck.ext2 -y ");
         say(dev);
@@ -147,15 +198,19 @@ int main(void)
         if (st > 1) {                           /* 0 clean, 1 repaired: fsck.ext2 said so itself */
             say("boot: fsck.ext2 ended with status ");
             num((u32)st);
-            say(": the root is used as it is and stays marked \"needs a check\"\n");
+            say("\n");
         }
-        struct umsg q;
-        q.type = FS_QUIT;                       /* the check server lets the device go and ends (a stop, not a crash) */
-        sys_call(sys_port_find("fs"), &q);
-        memcpy(w, "-root", 5);                  /* the writable server from now on (a new text: a first start) */
-        sys_svc_register("fs", prog, -10);
+        if (st < 0 || st > 1)
+            ro = rescue(dev);
+        if (!ro) {
+            struct umsg q;
+            q.type = FS_QUIT;                   /* the check server lets the device go and ends (a stop, not a crash) */
+            sys_call(sys_port_find("fs"), &q);
+            memcpy(w, "-root", 5);              /* the writable server from now on (a new text: a first start) */
+            sys_svc_register("fs", prog, -10);
+        }
     }
-    update();                                   /* an update's root half (D15), before the root is used */
+    update(ro);                                 /* an update's root half (D15), before the root is used */
     svctab();                                   /* the services that live on the disk: started when first called */
     char *argv[] = { "/bin/init", 0 };
     for (;;) {

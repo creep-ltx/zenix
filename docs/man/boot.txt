@@ -34,9 +34,20 @@ DESCRIPTION
     stops that server (FS_QUIT) and registers fs with -root again: the
     next call starts the writable server. fsck.ext2 still working after
     a minute is reported, after 20 minutes it is stopped. If it ends
-    with a status above 1 ("boot: fsck.ext2 ended with status N: the root
-    is used as it is and stays marked") or cannot be started, boot goes
-    on with the writable root, which is checked again at the next start.
+    with a status above 1 ("boot: fsck.ext2 ended with status N": damage
+    it does not repair, out of memory, stopped) or cannot be started,
+    the check server keeps serving the root read-only and boot asks on
+    console 1 (rescue(8) explains each choice):
+      1  go on read-only (the default in 30 seconds, so a machine nobody
+         watches still comes up)
+      2  go on read-write anyway (the writable server, as after a check)
+      3  a rescue shell as root, the root still read-only, with the
+         repair commands listed; when it ends, a root that is now marked
+         clean goes on read-write at once, otherwise boot asks again
+      4  reboot
+    One key, no Return. On a read-only root boot installs no update (an
+    update waiting is said and left for the next start). Either way the
+    root stays marked and is checked again at the next start.
     Then it runs /sbin/zup (zup(8)) and waits for it: zup installs the
     root half of an update zenixboot left in memory, finishes or rolls
     back what a power cut left, or puts the previous version back; with
@@ -53,7 +64,7 @@ DESCRIPTION
     update waiting, a missing /sbin/zup or one that crashed, was stopped
     or failed leaves the update note "failed" for the bundle's version,
     so zenixboot(8) does not retire the bundle. boot's stack is 4 KB (it
-    needs under 500 bytes): it stays in memory for ever.
+    needs under 600 bytes): it stays in memory for ever.
     Then it registers the services listed in /etc/svctab (below) and
     starts /bin/init on console 1 and waits for it. Should init
     ever end, boot says so ("boot: /bin/init ended (status N), starting it
@@ -87,4 +98,4 @@ NOTES
     (dmesg, "svc:" lines).
 
 SEE ALSO
-    init(8), diskd(8), mount(8), dmesg(1)
+    init(8), diskd(8), mount(8), dmesg(1), rescue(8), fsck.ext2(1)

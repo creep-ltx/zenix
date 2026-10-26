@@ -32,7 +32,9 @@ DESCRIPTION
     The root is checked by boot at the start when it was not shut down
     cleanly, and a volume /etc/fstab lists by mount -a (DESIGN D17,
     docs/d17-ext2-clean-mark.md); to check it at any other time, boot
-    from other media.
+    from other media. When boot's check cannot repair the root, the root
+    stays read-only and fsck.ext2 may be run on it from the rescue shell
+    boot offers (rescue(8)).
 
 OPTIONS
     -y    repair what can be repaired
