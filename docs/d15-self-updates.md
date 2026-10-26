@@ -307,7 +307,11 @@ Built as sections 3-8 say, with these differences (each a decision made while bu
     reset from outside; 2: reset without confirming, a hang the owner reset; 3: never confirm), and the serial tap's
     `stop` kills the emulator (a power cut, or the end of a script). The fixture of section 4 (today's zup on the
     first D15 kernel) waits for a second kernel version: the first D15 kernel is this one.
-13. **Not built (steps 6 and 7):** the owner's first D15 card package (moving the kernel to `BOOT:Zenix/`, the
+13. **Memory:** the D15 kernel code (about 2.3 KB) and boot's update loop cost the 1 MB chip-only A1200 (the
+    matrix's `a1200-chip1m`) its third login session (226 KB free became 223). `boot`'s stack went from 16 KB to
+    4 KB (its frames are under 500 bytes, measured with `-fstack-usage`; boot never ends), the bundle check is
+    compiled for size: 235 KB free, three sessions again.
+14. **Not built (steps 6 and 7):** the owner's first D15 card package (moving the kernel to `BOOT:Zenix/`, the
     "previous" menu line) and signatures.
 
 Built and tested 2026-10-26 (read from the code; every test named above passed in FS-UAE, not on hardware).

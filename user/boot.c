@@ -52,23 +52,22 @@ static void svctab(void)
 }
 
 /* /sbin/zup at every start, before anything else uses the root (it does nothing without a bundle, a journal or a
- * way back to take). A hung zup is reported every minute and given up after 20 (the journal finishes it at the next
- * start); the bundle's memory is given back whatever zup did (SYS_update RELEASE) */
+ * way back to take). A zup still working after a minute is reported, one still working after 20 is stopped (the
+ * journal finishes its work at the next start); the bundle's memory is given back whatever zup did (RELEASE) */
 static void num(u32 v) { char n[12], *p = n + sizeof n; *--p = 0; do *--p = (char)('0' + v % 10); while ((v /= 10) > 0); say(p); }
 static void update(void)
 {
-    struct uupdate u;
-    if (sys_update(UPD_INFO, (u32)&u, sizeof u) < 0) return;      /* (a kernel always has it: boot is part of it) */
     char *argv[] = { "/sbin/zup", 0 };
-    int pid = sys_spawn("/sbin/zup", argv, 0);
+    int pid = sys_spawn(argv[0], argv, 0);
+    for (u32 t = 1; pid >= 0 && sys_waitnb(pid) == -2; t++) {     /* t: tenths of a second */
+        sys_sleep(10);
+        if (t == 600) say("boot: /sbin/zup is still working (an update)\n");
+        if (t == 12000) { say("boot: /sbin/zup stopped after 20 min; the next start finishes its work\n"); sys_kill(pid); sys_wait(pid); }
+    }
     if (pid < 0) {
-        if (u.size || (u.flags & UPD_F_ROLLBACK)) say("boot: no /sbin/zup: the update (or the way back) is not installed\n");
-    } else {
-        for (u32 t = 1; sys_waitnb(pid) == -2; t++) {         /* t: tenths of a second */
-            sys_sleep(10);
-            if (t % 600 == 0) { say("boot: /sbin/zup is still working ("); num(t / 600); say(" min)\n"); }
-            if (t == 20 * 600) { say("boot: /sbin/zup did not end in 20 min: stopped; the next start finishes it\n"); sys_kill(pid); sys_wait(pid); break; }
-        }
+        struct uupdate u;
+        if (sys_update(UPD_INFO, (u32)&u, sizeof u) == 0 && (u.size || u.flags))
+            say("boot: no /sbin/zup: the update is not installed\n");
     }
     sys_update(UPD_RELEASE, 0, 0);
 }

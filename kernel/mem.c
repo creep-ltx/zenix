@@ -78,7 +78,7 @@ static void *upd_blk;
 
 static int inside(u32 a, u32 b, u32 lo, u32 hi) { return a < hi && lo < b; }
 
-static void upd_reserve(const struct bootinfo *bi, const u32 ex[][2], int nex)
+__attribute__((cold, noinline, optimize("Os"))) static void upd_reserve(const struct bootinfo *bi, const u32 ex[][2], int nex)
 {
     u32 a = bi->upd_pa, n = bi->upd_size, lo = a - HDR, hi = (a + n + 15) & ~15u;
     const char *why = 0;
@@ -140,7 +140,7 @@ static void upd_reserve(const struct bootinfo *bi, const u32 ex[][2], int nex)
     kprintf("update: a bundle of %u bytes at %p, kept for zup%s\n", n, a, upd_flags & UPD_F_ROLLBACK ? "; previous version asked for" : "");
 }
 
-void upd_release(void)
+__attribute__((cold, optimize("Os"))) void upd_release(void)
 {
     if (upd_blk) {
         mem_free(upd_blk);
