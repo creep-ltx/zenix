@@ -306,6 +306,13 @@ Built on branch `d16` (2026-10-26), in this order:
   before the shell runs again (only possible if the shell's slice ends there) leaves them in the shell's group.
   Found while testing: a background pipeline's earlier stages stayed zombies until the shell ended (only the last
   one was waited for); they are now reaped with the job.
+- *Memory on a small machine (found by the matrix's 1 MB chip-only A1200, which must hold three sessions):* D16 took
+  about 7 KB more RAM (the larger `struct proc` in 32 slots, the kernel, the shell's code), and the third session no
+  longer started (223 KB free after boot instead of main's 229). The per-signal `sa_mask` table is now allocated (128
+  bytes from the kernel heap) only by a program that sets a mask, and - not D16's own, but the simplest large saving -
+  each process's environment moved from a fixed 1 KB array in every process slot (32 KB of BSS) to a block of its own
+  memory of the size it needs: 254 KB free after boot, three sessions again (the fourth still does not fit, as the
+  test wants). The kernel image grew by 448 bytes for both: 4696 bytes left on the RAM floppy.
 - *Not done (as the note says):* SIGHUP on hang-up, sessions, SIGTTIN/SIGTTOU, SIGWINCH, fault handlers; `ps` shows no
   PGID column (`uproc` carries it).
 

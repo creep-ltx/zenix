@@ -110,6 +110,12 @@ long sig_action(u32 sig, u32 uact)
     const struct usigaction *a = (const struct usigaction *)uact;
     if (a->size < USIGACT_FIRST || (a->flags & ~SA_RESTART))
         return -EINVAL;
+    u32 mask = a->mask & ~SIG_UNCATCHABLE;
+    if (mask && !c->sig_mask) {         /* the masks' table, at the first one (most programs never set one) */
+        if (!(c->sig_mask = kmalloc(NSIG * 4)))
+            return -ENOMEM;
+        memset(c->sig_mask, 0, NSIG * 4);
+    }
     if (a->handler > 1) {               /* caught: the entry is registered (or was by an earlier call) and checked */
         u32 e = a->entry ? a->entry : c->sig_entry;
         if (!e || (e & 1) || !user_ok_rd(c, e, 2))
@@ -124,7 +130,8 @@ long sig_action(u32 sig, u32 uact)
         else
             c->sig_ign &= ~b;
     }
-    c->sig_mask[sig] = a->mask & ~SIG_UNCATCHABLE;
+    if (c->sig_mask)
+        c->sig_mask[sig] = mask;
     if (a->flags & SA_RESTART)
         c->sig_rest |= b;
     else
@@ -249,7 +256,7 @@ void sig_deliver(u32 *rb, u32 nr)
     sf->ccr = *(u16 *)fr & 0x1F;
     sf->sig = (u32)sig;
     sf->blocked = c->sig_block;
-    c->sig_block = (c->sig_block | b | c->sig_mask[sig]) & ~SIG_UNCATCHABLE;
+    c->sig_block = (c->sig_block | b | (c->sig_mask ? c->sig_mask[sig] : 0)) & ~SIG_UNCATCHABLE;
     set_usp(f);
     rb[0] = (u32)sig;                   /* d0: the signal, a0: the frame (passed back to sigreturn), a5: D13's base */
     rb[8] = f;

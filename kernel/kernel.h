@@ -426,7 +426,9 @@ struct proc {                   /* start.S relies on the first three: */
     u8 stop_req, stop_rep;      /* stop asked for (acted on when the process next runs); the parent has been told it is stopped */
     int priv;                   /* may use the raw disk (the filesystem server) */
     u16 uid, ruid, gid, umask;  /* effective and real user id, group id (inherited; a set-user-id program changes only uid); the filesystem server enforces the permissions */
-    char env[ENVMAX];           /* environment: NAME=value NUL ... NUL NUL; inherited by children */
+    char *env;                  /* environment: NAME=value NUL ... NUL NUL, envlen bytes (at most ENVMAX) in a block
+                                 * the process owns (freed with it); inherited by children. Was a 1 KB array in every
+                                 * slot: 32 KB of BSS, given back for D16's memory (2026-10-26) */
     u16 envlen;
     struct proc *rnext;         /* run queue link */
     u8 queued;                  /* on the run queue (of level qlevel) */
@@ -452,7 +454,8 @@ struct proc {                   /* start.S relies on the first three: */
     u32 sig_pend, sig_block;    /* signals (bit n: signal n) pending, blocked */
     u32 sig_catch, sig_ign, sig_rest;   /* handled by its program, ignored, restarted after the handler (SA_RESTART) */
     u32 sig_entry;              /* the program's entry for handlers (libz), registered by sigaction */
-    u32 sig_mask[32];           /* per signal: what is blocked while its handler runs (sa_mask) */
+    u32 *sig_mask;              /* per signal: what is blocked while its handler runs (sa_mask); NSIG words from the
+                                 * kernel heap at the first sigaction with a mask (0: all empty; 4 KB of BSS saved) */
     u32 alarm_at;               /* alarm: SIGALRM at this tick (while alarm_on) */
     int pgid;                   /* process group (inherited; no parent: its own pid) */
     u8 alarm_on;

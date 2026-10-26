@@ -603,6 +603,10 @@ pattern (section 6).
   memory owned by the pid, and wakes a waiting parent. A zombie nobody will wait for (its parent is gone or is
   itself a zombie) is freed by the idle loop, by every process exit and before a spawn looks for a free slot, so
   a busy machine that never idles does not fill its table with them.
+- A process's environment (at most 1 KB, `ENVMAX`) is a block of its own memory, copied from its parent's at spawn
+  and replaced by `SYS_envset` (since 2026-10-26; it was a 1 KB array in each of the 32 slots, 32 KB of kernel BSS on
+  every machine). The handlers' `sa_mask` table (D16, 128 bytes) is taken from the kernel heap only by a program that
+  sets a mask.
 - Each process has 16 file descriptors; the system has 64 open-file slots (a slot's reference count is 16 bits)
   and 16 message ports.
 

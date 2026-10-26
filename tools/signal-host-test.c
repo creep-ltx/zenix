@@ -68,6 +68,7 @@ u32 get_usp(void) { return usp_reg; }
 void set_usp(u32 u) { usp_reg = u; }
 void kprintf(const char *fmt, ...) { (void)fmt; }
 int may_signal(const struct proc *p) { return p->uid == 7 ? -EACCES : 0; }
+void *kmalloc(u32 n) { static u32 pool[64]; return n <= sizeof pool ? pool : 0; }
 struct proc *proc_by_pid(int pid) { for (int i = 0; i < NPROC; i++) if (procs[i].state && procs[i].pid == pid) return &procs[i]; return 0; }
 static int data_ready;                  /* the object of the interleaving test: a tty with a line or not */
 static u32 obj_mask;
@@ -248,6 +249,8 @@ int main(void)
     c->ustk = 0x20002000; c->base = 0x20001000; c->span = 0x5000;
     c->sig_entry = 0x20001100; c->a5 = 0x20001800;
     c->sig_catch = SIGBIT(SIGUSR1); c->sig_pend = SIGBIT(SIGUSR1); c->sig_rest = SIGBIT(SIGUSR1);
+    static u32 masks[NSIG];
+    c->sig_mask = masks;
     c->sig_mask[SIGUSR1] = SIGBIT(SIGUSR2) | SIGBIT(SIGKILL);
     c->sig_intr = 1;
     u32 rb[17];

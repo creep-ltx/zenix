@@ -501,7 +501,9 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     u32 span = ((memsz + 15) & ~15u) + ((stack + 15) & ~15u) + argsz;
     u8 *base = mem_alloc(span, 0, (u32)pid);
     u32 *ks = mem_alloc(KSTACK, 0, (u32)pid);
-    if (!base || !ks) {
+    u32 envlen = parent ? parent->envlen : 0;
+    char *env = envlen ? mem_alloc(envlen, 0, (u32)pid) : 0;      /* the parent cannot change it while it spawns */
+    if (!base || !ks || (envlen && !env)) {
         mem_free_owner((u32)pid);
         seg_put(seg);
         return -ENOMEM;
@@ -589,9 +591,10 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     }
     p->blevel = p->prio = NICE_LEVEL(p->nice);
     if (suid >= 0) p->uid = (u16)suid;                 /* set-user-id program: runs as its owner */
-    if (parent) {
-        memcpy(p->env, parent->env, parent->envlen);
-        p->envlen = parent->envlen;
+    if (env) {
+        memcpy(env, parent->env, envlen);
+        p->env = env;
+        p->envlen = (u16)envlen;
     }
     if (parent)
         memcpy(p->cwd, parent->cwd, sizeof p->cwd);
@@ -838,6 +841,8 @@ void proc_exit(int code)
         p->alarm_on = 0;
         ntimer--;
     }
+    kfree(p->sig_mask);                 /* D16: the handlers' masks (no handler runs once exiting) */
+    p->sig_mask = 0;
     for (int i = 1; i < NPROC; i++) {   /* rule 12: its stopped children go on, and SIGHUP ends them by default */
         struct proc *c = &procs[i];
         if (c->ppid == p->pid && (c->state == P_STOP || c->stop_req)) {

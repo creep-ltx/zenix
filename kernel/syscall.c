@@ -340,12 +340,18 @@ void syscall_c(u32 *rb)
     case SYS_ttyinfo:
         r = term_size();
         break;
-    case SYS_envset:
+    case SYS_envset:                    /* a new block of the caller's (proc.c), then the old one goes */
         r = -E2BIG;
         if (a2 <= ENVMAX && UOKR(a1, a2)) {
-            memcpy(current->env, (const void *)a1, a2);
-            current->envlen = (u16)a2;
-            r = 0;
+            char *e = a2 ? mem_alloc(a2, 0, (u32)current->pid) : 0;
+            r = -ENOMEM;
+            if (e || !a2) {
+                memcpy(e, (const void *)a1, a2);
+                mem_free(current->env);
+                current->env = e;
+                current->envlen = (u16)a2;
+                r = 0;
+            }
         }
         break;
     case SYS_envget:
