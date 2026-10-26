@@ -4,7 +4,7 @@ NAME
     login - log in on a console
 
 SYNOPSIS
-    login [-f] [user]
+    login [--init] [-f] [user]
 
 DESCRIPTION
     init runs login on every console that is in use (see init(8)): on
@@ -13,8 +13,14 @@ DESCRIPTION
     login asks for a user name (shown as it is typed, with the console's
     usual line editing) and a password (typing is not echoed), checks them
     against /etc/passwd, sets USER, LOGNAME, HOME, SHELL and PATH, goes to
-    the home directory and runs the user's shell as that user. When the
-    shell ends, login ends and init starts it again.
+    the home directory and runs the user's shell as that user.
+
+    Started by init (--init), login steps aside once the shell runs: it
+    ends and hands the shell to init, so a session keeps no login process
+    in memory (about 30 KB, on a 2 MB Amiga without fast RAM worth having).
+    When the shell ends (logout, or exit), init starts a new login on that
+    console. Typed in a shell, login waits for the shell it started and
+    then ends, back to the shell it was typed in.
 
     A user whose password field is empty is not asked for a password. With -f
     the password is not asked at all. On console 1 only, a user named in
@@ -28,10 +34,11 @@ DESCRIPTION
 
     Every console has its own login, so several users (or one user several
     times) can be logged in at once, one on each console. Each session
-    costs about 110 KB (login, the shell and its work area): a machine with
-    only 1 MB of chip RAM and no fast RAM has room for three. When memory is
-    short a login says "login: cannot start /bin/sh: out of memory" (or
-    init, on the console: "init: cannot start /bin/login: out of memory").
+    costs about 78 KB (the shell and its work area; the shell's code is
+    shared by all sessions): a machine with only 1 MB of chip RAM and no
+    fast RAM has room for four. When memory is short a login says "login:
+    cannot start /bin/sh: out of memory" (or init, on the console: "init:
+    cannot start /bin/login: out of memory").
 
     Updates (zup(8)): after a successful login, the one-line result of
     the last update (/var/lib/zpkg/result) is shown once and removed. On
@@ -42,6 +49,11 @@ DESCRIPTION
     root half of the same version (the kernel keeps both facts), so
     zenixboot keeps such a bundle and offers it again.
 
+OPTIONS
+    --init  init's own login: hand the shell to init and end (above)
+    -f      do not ask for the password (root only in practice: login
+            must run as root to become another user)
+
 FILES
     /etc/passwd   name:hash:uid:gid:comment:home:shell
     /etc/group    name::gid:members
@@ -51,7 +63,11 @@ FILES
 NOTES
     login is a process group of its own (DESIGN D16), so kill 0 in a
     session never reaches init; the shell it starts makes its own group
-    the terminal's foreground.
+    the terminal's foreground. The hand-over is SYS_exit's second argument
+    (the shell's pid; DESIGN D18): ps then shows the shell with init as
+    its parent, and no login. login's exit status says which shell it
+    handed over (bit 30 plus its pid). Nothing is written to the disk: Zenix
+    keeps no list of who is logged in (no utmp).
     Five wrong tries end the program (init starts it again). login knows
     console 1 by its standard input (fstat of a console gives its number).
     With no MMU any program can still read any memory, so login is

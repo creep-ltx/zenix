@@ -1033,7 +1033,16 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   desktop features, ROADMAP phase 5). `init` keeps a `login` on every console that has been shown, like a getty:
   console 1 at boot, console N the first time it is shown (`con_switch` sees nobody whose controlling tty it is,
   sets a bit in `con_want` and readies init, which waits in `SYS_wait` with `WAIT_CONSOLE` - Linux's autovt does the
-  same), and a login that ends is started again. So a console costs memory only once it is used.
+  same), and a session that ends is followed by a new login. So a console costs memory only once it is used. **A
+  login steps aside** (the 2 MB diet, DESIGN D18): Zenix has no `exec`, so the shell is a new process, and only a
+  process that has become the user can start it as the user; init's login (`login --init`) spawns the shell and then
+  ends through `SYS_exit` with its second argument naming the shell, which `proc_handover` makes init's child first
+  (Linux's `CLONE_PARENT`, after the fact; a child that has already ended or stopped is posted to init at once). Its
+  status, `ST_HANDED` (bit 30) plus the shell's pid, tells init the console's session goes on in that child; a
+  logout is the shell's end. A session holds no login process (30 KB, and login's 13 KB of shared code once no
+  console waits at a prompt); nothing is written to the disk (no utmp). `init`'s `waitcon` takes one ended child per
+  call and answers its status: the one console whose process is no longer there (wait says -1) gets that status, the
+  others' are asked for one by one.
 - **tty** (`tty.c`): one per console, line discipline in the kernel: echo, backspace, `^U`, `^C` (SIGINT to the
   foreground: a process group or, in the old form of `SYS_setfg`, one process; nobody, or a group with no living
   member: `intr` is set for a shell that polls `ttyintr`), `^Z` (SIGTSTP the same way), `^D`; Tab is kept in the line (Backspace
@@ -1302,7 +1311,8 @@ outputs (`tools/cmds-test.sh`).
   ZenixFS-root ones: A1200 stock (68EC020, 2 MB chip), with 4 or 8 MB fast RAM, 1 MB chip only, NTSC, with a
   68030, 68040 or 68060, an RDB disk, a RAM-disk boot with no disk, an A3000 (SCSI), two 68030 development setups
   (A1200- and A4000-class), and a 68000 that must be refused cleanly. Each boots, runs a short session and logs in
-  on consoles 2, 3 and 4 (the 1 MB chip-only one must refuse the fourth with init's "out of memory"). Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go
+  on consoles 2, 3 and 4 (the 1 MB chip-only one goes on to 5 and 6, where memory runs out: init or login must say
+  so). Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go
   (docs/README.md, "Testing"); the Kickstart files come from `ZENIX_KICKSTART_DIR` (`tools/fsuae_conf.py`).
 - Source layout: `boot/` bootblock, zenixboot and the hand-over code they share, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
   `link/` linker script, `tools/` build and test scripts, `rootfs/` files copied to the root disk, `fsuae/` emulator
@@ -1324,8 +1334,8 @@ outputs (`tools/cmds-test.sh`).
   the owner of the file or of the directory remove or rename entries. New files belong to the caller and get
   `0666 & ~umask` (directories `0777 & ~umask`). A refusal returns -EACCES (13) to the caller.
 - `login` (run by `init` on each console, section 11) authenticates against `/etc/passwd`, drops root and starts
-  the shell. Every console has its own login, so several users (or one user several times) can be logged in at
-  once; nothing in the kernel records a "session".
+  the shell, then hands it to init and ends (DESIGN D18). Every console has its own login, so several users (or one
+  user several times) can be logged in at once; nothing in the kernel records a "session".
 - **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill` - each member of a group, D16 -, `SYS_jobctl`,
   `SYS_setfg` and `SYS_setpriority` on another process): root may signal
   any process but the idle one; others only a process whose real or effective uid equals their real or effective

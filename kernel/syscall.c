@@ -198,7 +198,9 @@ void syscall_c(u32 *rb)
     }
     current->sig_intr = 0;              /* set only by a blocking site of this call that gave up for a handler (D16) */
     switch (nr) {
-    case SYS_exit:
+    case SYS_exit:                      /* a2 (D18): a child handed to the parent first (login stepping aside) */
+        if (a2)
+            proc_handover((int)a2);
         proc_exit((int)a1);
     case SYS_write:
         if (GETFD(f, a1) && UOKR(a2, a3))

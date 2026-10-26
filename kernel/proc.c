@@ -865,6 +865,21 @@ void proc_exit(int code)
         ;
 }
 
+/* SYS_exit's second argument (the 2 MB diet, DESIGN D18: login steps aside): the caller's child `pid` becomes the
+ * caller's parent's child, as if the parent had started it (Linux's CLONE_PARENT, after the fact); one that has
+ * already ended or stopped is told to the new parent at once. Not a child of the caller, or no parent: nothing. */
+void proc_handover(int pid)
+{
+    struct proc *c = proc_by_pid(pid), *par = proc_by_pid(current->ppid);
+    if (!c || c == current || c->ppid != current->pid || !par || par->state == P_ZOMBIE)
+        return;
+    c->ppid = par->pid;
+    if (c->state == P_ZOMBIE || c->state == P_STOP) {
+        ev_post(par, EV_CHILD);
+        sig_send(par, SIGCHLD);
+    }
+}
+
 /* wait for a child; returns its exit code and releases it, -1 if none. With WAIT_CONSOLE (root, init) it also returns
  * ST_CONSOLE + n when console n was shown with nobody on it (con_switch), so that init starts a login there. */
 int proc_wait(int pid, int flags)

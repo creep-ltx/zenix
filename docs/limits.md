@@ -123,12 +123,13 @@ pointers.
   main 5.4 KB (`mkfs.ext2` main was 8.5 KB; 0.3 KB since its two 4 KB blocks are static, 2026-10-25); the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
   about 1430).
-- A login session (login, the shell and its work area) needs about 110 KB (measured 2026-10-26 in FS-UAE as the drop
-  in `free` when a second console logs in on a 2 MB chip-only A1200: 170 KB before malloc's first chunk went from 32 KB
-  to 4 KB and the shell's two 4 KB expansion buffers moved to its arena; 293 KB before the shell memory fix of
-  2026-10-25): a machine with 1 MB of chip RAM and no fast RAM has room for three; on a fourth console init says
-  "cannot start /bin/login: out of memory" (the matrix checks both; that message was lost before 2026-10-25, init
-  never flushed it).
+- A login session (the shell and its work area; the login steps aside once the shell runs, DESIGN D18) needs about
+  78 KB (measured 2026-10-26 in FS-UAE as the drop in `free` when a second console logs in on a 2 MB chip-only A1200:
+  110 KB while the login stayed, 170 KB before malloc's first chunk went from 32 KB to 4 KB and the shell's two 4 KB
+  expansion buffers moved to its arena; 293 KB before the shell memory fix of 2026-10-25): a machine with 1 MB of
+  chip RAM and no fast RAM has room for four (three before D18); on the next console login says "cannot start
+  /bin/sh: out of memory" or init "cannot start /bin/login: out of memory" (the matrix checks both; that message was
+  lost before 2026-10-25, init never flushed it).
 - Shared code (DESIGN D13, architecture.md section 4): at most 8 segments (`NSEG`) at a time; a ninth program with
   shared code runs as a private copy. A ZEX2 program's address table is at most 32 KB (16-bit offsets: a larger one
   is a link error).

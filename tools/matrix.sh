@@ -17,10 +17,13 @@ for n in $CONFS; do
     make -s BUILD=$BD $BD/zenix.hdf $BD/zenix-rdb.hdf $BD/zenix-ram.adf >$OUT/build.log 2>&1 || { echo "FAIL $n: build failed:"; grep -v 'RWX permissions' $OUT/build.log | tail -15; exit 1; }
     # Two machines are expected not to reach every text the script waits for, so their scripts say so (a `wait`
     # that times out fails the test, tools/serial-tap.py): the 68000 refuses to start (it only waits for that),
-    # and with 1 MB of chip RAM the fourth console's login prompt may never come (`waitopt`; checked below).
+    # and with 1 MB of chip RAM the script goes on to consoles 5 and 6, whose login prompt may never come
+    # (`waitopt`; checked below): memory runs out there.
     case $n in
     a600-68000) printf 'wait needs a 68020 90\nsleep 2\nstop\n' >$OUT/$n.txt ;;
-    *chip1m*) sed '/^send \\x1d4$/{n;s/^wait /waitopt /}' tools/tests/matrix-test.txt >$OUT/$n.txt ;;
+    *chip1m*) { cat tools/tests/matrix-test.txt
+                for c in 5 6; do printf 'send \\x1d%s\nwaitopt zenix login: 30\nsend root\\r\nsleep 6\nsend echo con%sok\\r\nsleep 2\n' $c $c; done
+                printf 'send \\x1d1\nsleep 2\n'; } >$OUT/$n.txt ;;
     *) cp tools/tests/matrix-test.txt $OUT/$n.txt ;;
     esac
     tools/run-test.sh "$f" 95 $OUT/$n.txt > $OUT/$n.log 2>&1
@@ -47,13 +50,12 @@ for n in $CONFS; do
     grep -q 'Filesystem  1K-blocks' $OUT/$n.log || ok=0
     grep -q 'zenix login: ' $OUT/$n.log || ok=0   # console 2 shows its own login prompt
     grep -q '^con2ok$' $OUT/$n.log || ok=0   # ... and a login there gives a shell
-    grep -q '^con3ok$' $OUT/$n.log || ok=0   # 1 MB chip only too: room for three sessions (the shell's arena and
-                                             # malloc start small and grow on demand, man/login.txt)
-    if [ "$n" = a1200-chip1m ]; then              # ... but not four: init (or login) says so
-        grep -qE 'init: cannot start /bin/login.*out of memory|login: cannot start /bin/sh: out of memory' $OUT/$n.log || ok=0
-        grep -q '^con4ok$' $OUT/$n.log && ok=0
-    else
-        grep -q '^con4ok$' $OUT/$n.log || ok=0
+    grep -q '^con3ok$' $OUT/$n.log || ok=0
+    grep -q '^con4ok$' $OUT/$n.log || ok=0   # 1 MB chip only too: room for four sessions (the shell's arena and
+                                             # malloc start small and grow on demand; no login stays, DESIGN D18)
+    if [ "$n" = a1200-chip1m ]; then              # ... and where memory runs out (console 5 or 6), init or login says so
+        grep -q '^con6ok$' $OUT/$n.log ||
+            grep -qE 'init: cannot start /bin/login.*out of memory|login: cannot start /bin/sh: out of memory' $OUT/$n.log || ok=0
     fi
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"

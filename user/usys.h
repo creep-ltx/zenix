@@ -30,6 +30,10 @@ struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 
 #define S_IFLNK 0120000
 
 static inline void sys_exit(int c) { sys3(1, (u32)c, 0, 0); for (;;); }
+/* end, the child `pid` handed to our parent first (DESIGN D18: login stepping aside for init); login's status then is
+ * ST_HANDED + that pid, so init knows the console's session goes on in it */
+static inline void sys_exit_handing(int c, int pid) { sys3(1, (u32)c, (u32)pid, 0); for (;;); }
+#define ST_HANDED 0x40000000
 static inline int sys_write(int fd, const void *p, u32 n) { return sys3(2, (u32)fd, (u32)p, n); }
 static inline void sys_yield(void) { sys3(3, 0, 0, 0); }
 static inline int sys_getpid(void) { return sys3(4, 0, 0, 0); }

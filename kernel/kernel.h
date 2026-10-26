@@ -473,6 +473,7 @@ int proc_spawn(const char *path, char *const *argv, int argc,
 int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv, int tty);   /* no parent; console tty, 0: the kernel log */
 void schedule(void);
 void proc_exit(int code) __attribute__((noreturn));
+void proc_handover(int pid);           /* SYS_exit's second argument: the caller's child becomes its parent's (D18) */
 #define WAIT_NOHANG   1       /* proc_wait flag: -2 if children exist but none has exited */
 #define WAIT_UNTRACED 2       /* proc_wait flag: also report a child that has stopped, once (as ST_STOPPED) */
 #define ST_STOPPED    0x114   /* proc_wait result for a stopped child (0x100 + 20, the SIGTSTP number) */
@@ -669,7 +670,7 @@ u16 tty_poll(int tty);                  /* D16: POLLIN when a read would not wai
 int tty_of(const struct proc *p);
 
 /* syscalls: TRAP #0, number in d0, args d1-d3, result in d0 */
-#define SYS_exit    1
+#define SYS_exit    1    /* status; a2 (DESIGN D18): a child's pid, made the parent's child first (0: none) */
 #define SYS_write   2
 #define SYS_yield   3
 #define SYS_getpid  4

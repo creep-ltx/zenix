@@ -18,9 +18,13 @@ DESCRIPTION
     - another console gets one the first time it is shown with nobody on
       it (the kernel tells init, as Linux's autovt does), so an unused
       console costs no memory;
-    - when a login ends (the user logged out), init prints "init: session
-      ended, starting another" on that console and starts a new login
-      there after half a second.
+    - a login that lets a user in (login --init) starts the user's shell
+      and hands it to init, then ends: init now waits for the shell
+      itself, so a session keeps no login in memory;
+    - when a session ends (the shell ended: the user logged out), init
+      prints "init: session ended, starting another" on that console and
+      starts a new login there after half a second; a login that gives up
+      (five wrong tries) is started again the same way.
 
     Each login runs with its console as standard input, output and error,
     which makes that console its controlling tty and its shell's.
