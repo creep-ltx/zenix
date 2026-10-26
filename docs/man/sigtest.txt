@@ -1,0 +1,22 @@
+SIGTEST(1)		Zenix manual
+
+NAME
+    sigtest - test the kernel's events and signals
+
+SYNOPSIS
+    sigtest CHECK...
+
+DESCRIPTION
+    A test program for DESIGN D16 (docs/d16-events-and-signals.md). Each
+    check starts child processes (sigtest itself, with an argument that
+    begins with _) and prints one line, "sigtest CHECK: PASS (...)" or
+    "sigtest CHECK: FAIL (...)", with what it saw:
+
+    stopsrv  a server stopped (job control) while it waits in receive
+             does not answer a message that arrives meanwhile; after
+             SIGCONT it does (D16 rule 2)
+
+    tools/signal-test.sh runs them in the emulator.
+
+EXIT STATUS
+    The number of checks that failed.

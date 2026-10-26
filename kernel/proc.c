@@ -66,11 +66,13 @@ static inline void want_switch(const struct proc *p)
         need_resched = 1;
 }
 
-/* make a blocked process runnable (never call this on the running one) */
-void ready(struct proc *p)
+/* make a blocked process runnable (never call this on the running one). ready() leaves a stopped process stopped
+ * (DESIGN D16 section 14 rule 2): a waker - a message for a server stopped in receive (the port's waiter still names
+ * it), a reply, a timer - must not run it; only proc_cont and proc_kill end a stop, through ready_force. */
+static void ready_(struct proc *p, int force)
 {
     u16 s = irq_save();                 /* interrupts wake processes too */
-    if (p->state != P_READY && p->state != P_FREE && p->state != P_ZOMBIE) {
+    if (p->state != P_READY && p->state != P_FREE && p->state != P_ZOMBIE && (force || p->state != P_STOP)) {
         if (p->state == P_SLEEP)
             nsleep--;
         else if (p->state == P_IO)
@@ -83,6 +85,8 @@ void ready(struct proc *p)
     }
     irq_restore(s);
 }
+void ready(struct proc *p) { ready_(p, 0); }
+static void ready_force(struct proc *p) { ready_(p, 1); }
 
 /* the effective level of p becomes l: a queued p moves to that level's list; a client in a call passes the change on
  * to the server of its request (fsd calling diskd for a client: the chain is short, depth caps it) */
@@ -795,7 +799,7 @@ void proc_cont(struct proc *p)
 {
     p->stop_req = 0;
     if (p->state == P_STOP)
-        ready(p);
+        ready_force(p);
 }
 
 void proc_kill(struct proc *p)
@@ -808,7 +812,7 @@ void proc_kill(struct proc *p)
     }
     if (p->state == P_STOP || p->state == P_IO || p->state == P_SLEEP || p->state == P_WAIT ||
         (p->state == P_MSG && !p->wait_msg))        /* a server in recv, not a client in call */
-        ready(p);
+        ready_force(p);
 }
 
 void proc_exit(int code)

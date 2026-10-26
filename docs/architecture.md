@@ -625,7 +625,9 @@ every process is checked before any is changed.
 thing a process can be told: **stop and continue** (job control). Ctrl-Z on a terminal (`kernel/tty.c`) or `SYS_jobctl`
 (pid, 0 = stop, 1 = continue) calls `proc_stop`, which sets `stop_req` and wakes the process if it is blocked; at its
 next return from `schedule()` it turns itself into `P_STOP`, tells a waiting parent, and is not scheduled again until
-`proc_cont`. `SYS_wait` with flag 2 (`WAIT_UNTRACED`) reports a stopped child once, as `ST_STOPPED` (0x114); flag 4
+`proc_cont`: no other wake-up runs a stopped process (`ready()` leaves it stopped; only `proc_cont` and `proc_kill`
+end a stop, DESIGN D16 rule 2), so a server stopped while it waited in receive does not answer a message that arrives
+meanwhile. `SYS_wait` with flag 2 (`WAIT_UNTRACED`) reports a stopped child once, as `ST_STOPPED` (0x114); flag 4
 (`WAIT_CONSOLE`, root only: init) also returns `ST_CONSOLE` + n (0x200 + n) when console n was shown with nobody on it,
 so init starts a login there (section 11). A client
 inside a call to a server is never stopped until the reply arrives (the server holds pointers into its memory).

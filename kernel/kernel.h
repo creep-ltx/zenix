@@ -412,7 +412,7 @@ static inline int stack_user_suspect(const struct proc *p, u32 usp)
     return p->ustk && (usp < p->ustk + 16 || usp > p->base + p->span || *(const u32 *)(unsigned long)p->ustk != STACK_GUARD0);
 }
 void wake_io(void);
-void ready(struct proc *p);         /* make a blocked process runnable */
+void ready(struct proc *p);         /* make a blocked process runnable; a stopped one stays stopped (D16 rule 2) */
 extern int nsleep;
 void block_io(void);
 void proc_kill(struct proc *p);       /* killed: 1 a kill, 2 a fault (139), 3 a second kill (at once) */

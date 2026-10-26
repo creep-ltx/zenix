@@ -239,4 +239,13 @@ measured size passes 4 KB, the next step frees room first (more cold files at `-
     timeout) keep working and move to the group form. Noted for the shell's plan: sh does not stop a loop when its child
     died from ^C (status 130), unlike bash.
 
+## 15. As built
+
+Built on branch `d16` (2026-10-26), in this order:
+
+1. **Rule 2, on its own:** `ready()` leaves a `P_STOP` process stopped; `proc_cont` and `proc_kill` end a stop through
+   `ready_force` (`kernel/proc.c`). `sigtest stopsrv` (`tools/signal-test.sh`) stops a server in receive, calls it,
+   and checks that the client still waits a second later and the server is still stopped; on the old kernel the server
+   answered at once (checked: the check fails there).
+
 Last checked against the code: 2026-10-26.

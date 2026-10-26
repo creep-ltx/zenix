@@ -1,0 +1,6 @@
+wait zenix:/# 90
+sleep 1
+send sigtest stopsrv; echo sigtest-end-$((40+2))\r
+wait sigtest-end-42 120
+sleep 1
+stop
