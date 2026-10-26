@@ -19,6 +19,7 @@
 | [d15-self-updates.md](d15-self-updates.md) | DESIGN D15's design note: Zenix updates itself (the bundle on BOOT:, zenixboot's half and Zenix's installer, the journal and rollback, later serial and network). Revision 3 after two reviews: ready to build. |
 | [d16-events-and-signals.md](d16-events-and-signals.md) | DESIGN D16's design note: waiting for many things at once (Exec-style event bits, `poll`/`select`) and Unix signals with handlers. Revision 3 after two reviews; built on branch d16 (section 15, "As built"). |
 | [d17-ext2-clean-mark.md](d17-ext2-clean-mark.md) | DESIGN D17's design note: the ext2 clean mark while a volume is in use and the check of a marked root at boot (audit 2026-10-26 F5, F6). Revision 2 after two reviews; built. |
+| [d19-network.md](d19-network.md) | DESIGN D19's design note: the network (netd with lwIP, driver processes, SLIP, BSD sockets as files, DHCP/DNS, random numbers, zfsd out of the kernel image to make room). Revision 1, under review. |
 | [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D13 and where each one stands. |
 | [d11-service-manager.md](d11-service-manager.md) | The full design note of DESIGN D11, the service manager (servers started on first use and started again when they die): approved; built: steps 0-5 (the core) merged, steps 6-9 (mounts, `/etc/svctab`, the servers' output in the kernel log) on branch d11; section 15 says where the code differs. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
