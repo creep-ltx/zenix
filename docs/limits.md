@@ -116,7 +116,8 @@ pointers.
   2; a recalled history line cut to 478 the same; longer commands go on over several lines with a final backslash,
   at most 2047 bytes).
 - awk: a `printf`/`sprintf` field width or precision of at most 4096 ("field width too large", status 2).
-- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
+- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit`, 4 KB for
+  `boot` and `init`, 8 KB for `diskd` (the last three live for ever and use under 700 bytes: DESIGN D18; the
   Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
   pattern (architecture.md section 6). Measured with `-fstack-usage`
   (2026-10-23): the largest single frames are `man` 6.1 KB, miniz's Huffman table builder 5.6 KB (gzip), `fsck.ext2`

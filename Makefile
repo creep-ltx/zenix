@@ -62,6 +62,11 @@ STACK_awk := 65536
 # boot (pid 1, built into the kernel image) lives for ever: its frames are under 500 bytes (-fstack-usage, 2026-10-26),
 # so 4 KB, the loader's least; it gave back the memory D15 cost in 1 MB of chip RAM (three sessions again)
 STACK_boot := 4096
+# the 2 MB diet (DESIGN D18): init and diskd live for ever too and use under 700 bytes of stack (measured 2026-10-26
+# in FS-UAE: the deepest byte written after a boot, logins on two consoles, ls -l, df, mount); init's frames are its
+# 512-byte /etc/console buffer and printf, diskd has no recursion: 4 KB and 8 KB (16 before)
+STACK_init := 4096
+STACK_diskd := 8192
 # every program links only the parts of libz it calls (libz is built one section per function)
 ULDFLAGS := -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)

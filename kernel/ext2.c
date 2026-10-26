@@ -689,15 +689,21 @@ int ext2_set_clean(int clean)
     return bwrite_copy(blk, base + 58, b, 2) ? -EIO : (int)(st & 1u);
 }
 
+/* the first clear bit from first_bit on, set; searched in the cached block itself (a 4 KB copy was kept for it before:
+ * the 2 MB diet, DESIGN D18), the pointer used only before the write's own lookup */
+static u8 zbuf[4096];                   /* zeros for a new block or inode (one buffer for both: D18) */
+
 static int bitmap_alloc(u32 bm_blk, u32 nbits, u32 first_bit)
 {
-    static u8 bm[4096];
-    if (bread_copy(bm_blk, 0, bm, bsize))
+    const u8 *bm = bptr(bm_blk);
+    if (!bm)
         return -1;
+    if (nbits > 8 * bsize)
+        nbits = 8 * bsize;
     for (u32 i = first_bit; i < nbits; i++)
         if (!(bm[i / 8] & (1u << (i % 8)))) {
-            bm[i / 8] |= (u8)(1u << (i % 8));
-            if (bwrite_copy(bm_blk, i / 8, &bm[i / 8], 1))
+            u8 v = (u8)(bm[i / 8] | (1u << (i % 8)));
+            if (bwrite_copy(bm_blk, i / 8, &v, 1))
                 return -1;
             return (int)i;
         }
@@ -730,9 +736,8 @@ static u32 alloc_block(u32 goal_group)
         if (bit < 0)
             continue;
         u32 blk = g * blocks_per_group + first_data_block + (u32)bit;
-        static u8 zero[4096];
-        memset(zero, 0, bsize);
-        if (bwrite_copy(blk, 0, zero, bsize) || gd_add(g, 12, -1) || sb_add(12, -1))
+        memset(zbuf, 0, bsize);
+        if (bwrite_copy(blk, 0, zbuf, bsize) || gd_add(g, 12, -1) || sb_add(12, -1))
             return 0;
         return blk;
     }
@@ -1253,16 +1258,15 @@ static int new_inode(struct inode *out, u32 mode, int is_dir)
     if (!ino)
         return -ENOSPC;                 /* no free inode */
     u32 grp = (ino - 1) / ninodes_per_group, idx = (ino - 1) % ninodes_per_group, itable;
-    static u8 zero[4096];
     if (gd_get(grp, 8, 4, &itable)) {
         free_inode(ino, is_dir);
         return -EIO;
     }
     u32 pos = idx * inode_size;
-    memset(zero, 0, inode_size);
+    memset(zbuf, 0, inode_size);
     if (inode_size > 128)
-        wr16(zero + 128, (u16)extra_isize);     /* i_extra_isize as the superblock wants it */
-    if (bwrite_copy(itable + pos / bsize, pos % bsize, zero, inode_size)) {
+        wr16(zbuf + 128, (u16)extra_isize);     /* i_extra_isize as the superblock wants it */
+    if (bwrite_copy(itable + pos / bsize, pos % bsize, zbuf, inode_size)) {
         free_inode(ino, is_dir);
         return -EIO;
     }

@@ -64,6 +64,8 @@ static struct {
 } drv[4];
 static mfm_u16 *raw;                    /* chip RAM, RAW_BUF_WORDS words */
 static mfm_u8 *cache;                   /* 11 sectors of the track in "ctrack" */
+static mfm_u8 *keep;                    /* a written track's sectors, to verify (allocated with cache: 5.5 KB of BSS
+                                         * on every machine before, used or not; the 2 MB diet, DESIGN D18) */
 static int cdrive = -1, ctrack = -1;
 static u16 cmask;                       /* which sectors of the cached track are valid */
 static volatile int busy;
@@ -348,13 +350,12 @@ static int write_track(int d, int track)
     }
     if (r)
         return -1;
-    static mfm_u8 keep[11 * 512];                       /* check what really got onto the disk */
-    memcpy(keep, cache, sizeof keep);
+    memcpy(keep, cache, 11 * 512);                      /* check what really got onto the disk */
     cmask = 0;
     if (read_track(d, track, 0x7FF))
         return -1;
     int differ = 0;
-    for (u32 i = 0; i < sizeof keep; i++)
+    for (u32 i = 0; i < 11 * 512; i++)
         differ |= keep[i] ^ cache[i];
     if (differ) {
         kprintf("floppy: df%d track %d: verify after write failed\n", d, track);
@@ -372,8 +373,8 @@ int fd_rw(u32 d, u32 lba, u32 count, void *buf, int write)
         return -1;
     if (!raw)
         raw = mem_alloc(RAW_BUF_WORDS * 2, MEM_CHIP, 0);
-    if (!cache)
-        cache = kmalloc(11 * 512);
+    if (!cache && (cache = kmalloc(2 * 11 * 512)))
+        keep = cache + 11 * 512;
     if (!raw || !cache)
         return -1;
     busy = 1;

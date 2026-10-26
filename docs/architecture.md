@@ -243,7 +243,9 @@ middle buttons; a joystick in port 2 is decoded from JOY1DAT. `SYS_input` (74) c
 The internal and external drives df0-df3: CIA-B port B selects, steps and starts the motor, CIA-A port A reports
 ready, track 0, write protect and disk change; Paula reads and writes whole tracks by DMA (sync word 0x4489,
 WORDSYNC on read, precompensation from cylinder 40 on write) into a chip-RAM buffer. `mfm.h` codes and decodes
-AmigaDOS tracks (11 sectors of 512 bytes, odd/even bit blocks, XOR checksums); one decoded track is kept as a cache,
+AmigaDOS tracks (11 sectors of 512 bytes, odd/even bit blocks, XOR checksums); one decoded track is kept as a cache
+(allocated at the first floppy request, with the copy a write is verified against: 11 KB, none on a machine that never
+uses the floppy, DESIGN D18),
 with a mask of which of its sectors are valid. Waits use `hr_time()` (the CIA-B E-clock counter, section 2). The
 100 Hz tick turns idle motors off after 3 s. System calls 76 `SYS_fd_info` and 77 `SYS_fd_rw`, for the disk server
 only: `diskd` offers the drives as `df0`-`df3` (df0 probed at start, the others on first use); `dd` copies to and
