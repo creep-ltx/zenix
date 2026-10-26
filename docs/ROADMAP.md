@@ -88,7 +88,9 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    fonts, the BBS window size, downloads), `wget`, an NFS client; a Wasabi-like remote control (early: it lets the A1200
    be tested remotely); `zpkg` with its repository on the owner's NAS. A security audit. Then **the Zenix demo floppy**
    (owner 2026-10-25, in the spirit of the 1999 QNX demo disk): one 880 KB Amiga floppy that boots into Zenix with the
-   network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5.
+   network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5. The model (owner 2026-10-26): KolibriOS, a
+   desktop, network and programs on one 1.44 MB floppy; as there, the programs are packed on the disk and unpacked
+   when they start, which is what makes a desktop edition fit 880 KB.
 3. **A terminal you can live in:** a fuller C library (newlib); D13 stage 2 (shared libraries) decided; the text-UI
    library, then Sumi, Maki, Markdown and `zc`; UTF-8 in the console. Audit; then a first public pre-release (0.1),
    with the owner's yes.
