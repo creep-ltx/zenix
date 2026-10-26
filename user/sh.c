@@ -2555,7 +2555,7 @@ static int run_builtin(char **argv, int argc)
             if (argv[i][0] == '%') { j = atoi(argv[i] + 1); if (j < 1 || j > MAXJOBS || !jobs[j - 1].used) { errm(argv[i], "no such job"); rc = 1; continue; }
                                      target = jobs[j - 1].pgid ? -jobs[j - 1].pgid : jobs[j - 1].pid; }
             else { char *e; target = (int)strtol(argv[i], &e, 10); if (*e || !argv[i][0]) { errm(argv[i], "arguments must be process or job IDs"); rc = 1; continue; } }
-            if (kill(target, sig) < 0) { errm(argv[i], zwhy("no such process")); rc = 1; continue; }
+            if (kill(target, sig) < 0) { errm(argv[i], zerrno == EPERM ? zstrerror(EPERM) : zwhy("no such process")); rc = 1; continue; }
             for (int k = 0; k < MAXJOBS; k++)
                 if (jobs[k].used && (k + 1 == j || jobs[k].pid == target || (jobs[k].pgid && -jobs[k].pgid == target))) {
                     if (sig == SIGSTOP || sig == SIGTSTP) jobs[k].stopped = 1;

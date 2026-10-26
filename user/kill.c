@@ -30,7 +30,7 @@ int main(int argc, char **argv)
         char *e;
         int pid = (int)strtol(argv[i], &e, 10);
         if (*e || !argv[i][0]) { fprintf(2, "kill: %s: not a process ID\n", argv[i]); rc = 1; continue; }
-        if (kill(pid, sig) < 0) { fprintf(2, "kill: %s: %s\n", argv[i], zwhy("no such process")); rc = 1; }
+        if (kill(pid, sig) < 0) { fprintf(2, "kill: %s: %s\n", argv[i], zerrno == EPERM ? zstrerror(EPERM) : zwhy("no such process")); rc = 1; }
     }
     return rc;
 }
