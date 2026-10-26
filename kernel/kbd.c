@@ -427,8 +427,8 @@ void kbd_work(void)
         rw_told = 1;
         kprintf("kbd: reset warning (Ctrl-Amiga-Amiga): syncing the disks before the reset\n");
         for (int i = 1; i < NPROC; i++)         /* init does it, in its own context (kbd_reset_flush) */
-            if (procs[i].state == P_WAIT && procs[i].wait_con)
-                ready(&procs[i]);
+            if (procs[i].wait_con)
+                ev_post(&procs[i], EV_CON);
     }
     u32 lost = kq_lost;
     if (lost != kq_lost_told) {

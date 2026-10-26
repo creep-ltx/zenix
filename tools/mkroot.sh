@@ -18,11 +18,12 @@ if [ -z "$NOTESTS" ] && [ -f "$B/hello.zx" ]; then
     python3 "$(dirname "$0")/mkbadzexe.py" "$B/hello.zx" "$T/tests" >/dev/null && chmod 755 "$T"/tests/badzexe*
 fi
 # programs with shared code for the D13 tests (tools/pure-test.sh), only in the test directory (not commands): hello
-# and crash built as ZEX2, a second hello whose text says HELLO (an updated program), and the corrupt ZEX2 files
+# and crash built as ZEX2 (and sigtest, for D16's handlers in shared code: tools/signal-test.sh), a second hello whose text says HELLO (an updated program), and the corrupt ZEX2 files
 # (NOPURE=1: not these, the mount tests' small floppy has no room)
 if [ -z "$NOTESTS" ] && [ -z "$NOPURE" ] && [ -f "$B/hello.pzx" ] && [ -f "$B/crash.pzx" ]; then
     cp "$B/hello.pzx" "$T/tests/hellopure"
     cp "$B/crash.pzx" "$T/tests/crashpure"
+    [ -f "$B/sigtest.pzx" ] && cp "$B/sigtest.pzx" "$T/tests/sigtestpure" && chmod 755 "$T/tests/sigtestpure"   # D16: handlers in shared code
     python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); assert d.count(b"hello from pid") == 1
 open(sys.argv[2], "wb").write(d.replace(b"hello from pid", b"HELLO from pid"))' "$B/hello.pzx" "$T/tests/hellopure2"
     python3 "$(dirname "$0")/mkbadzexe.py" "$B/hello.pzx" "$T/tests" >/dev/null

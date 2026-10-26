@@ -17,7 +17,7 @@ int main(int argc, char **argv)
         char *sh[] = { "/bin/sh", "-c", cmd, 0 };
         int pid = sys_spawn("/bin/sh", sh, 0);
         if (pid < 0) { fprintf(2, "watch: cannot run sh\n"); return 1; }
-        sys_setfg(pid); sys_wait(pid); sys_setfg(sys_getpid());   /* keep the terminal, so Ctrl+C ends watch itself */
+        sys_wait(pid);                  /* the command is in watch's group (the job's): Ctrl+C ends both (DESIGN D16) */
         sys_sleep((u32)secs * 100);
     }
 }

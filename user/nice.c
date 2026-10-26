@@ -38,8 +38,6 @@ int main(int argc, char **argv)
     else if (!path_find(argv[i], path, sizeof path)) { fprintf(2, "nice: %s: not found\n", argv[i]); return 127; }
     int pid = sys_spawn(path, argv + i, 0);
     if (pid < 0) { fprintf(2, "nice: %s: %s\n", argv[i], zwhy("cannot run")); return 126; }
-    sys_setfg(pid);
-    int st = sys_wait(pid);
-    sys_setfg(0);
+    int st = sys_wait(pid);             /* the command is in our job's group, the terminal's foreground (DESIGN D16) */
     return st;
 }

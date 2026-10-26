@@ -11,10 +11,10 @@ users_d_checks() {
     none() { if grep -aqxF -- "$2" "$L"; then echo "FAIL $pre$1"; bad=1; else echo "PASS $pre$1"; fi; }
     line "autologin warns that root has no password" "login: warning: root has no password and /etc/autologin logs in without asking; set passwords with passwd and remove /etc/autologin before trusting this system"
     line "raw messages, reserved ports, system processes, clock, serial copy, O_EXCL (badptr ipc)" "badptr: ipc all ok"
-    line "a user cannot kill a system process (kill 1, the shell's kill)" "sh: 1: permission denied"
+    line "a user cannot kill a system process (kill 1, the shell's kill: EPERM, as POSIX since D16)" "sh: 1: operation not permitted"
     line "... and kill says so in its status" "kill-1=1"
     line "a user cannot kill another user's process" "kill-other=1"
-    rx   "... with permission denied" "sh: [0-9]+: permission denied"
+    rx   "... with operation not permitted" "sh: [0-9]+: operation not permitted"
     line "a user cannot open the raw disk" "dd: cannot open ide0"
     line "a user cannot set the clock" "date: cannot set the clock: permission denied"
     line "su resets PATH and HOME" "P=/bin H=/"

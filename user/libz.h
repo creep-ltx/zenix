@@ -72,3 +72,38 @@ void oputc(int c);
 int oprintf(const char *fmt, ...);
 void oflush(void);
 void _zexit(int status) __attribute__((noreturn));
+
+/* signals and waiting for several things (DESIGN D16, docs/d16-events-and-signals.md); numbers in usys.h */
+typedef void (*sighandler_t)(int);
+#define SIG_DFL ((sighandler_t)0)
+#define SIG_IGN ((sighandler_t)1)
+#define SIG_ERR ((sighandler_t)-1)
+typedef u32 sigset_t;
+struct sigaction { sighandler_t sa_handler; sigset_t sa_mask; int sa_flags; };
+int sigaction(int sig, const struct sigaction *act, struct sigaction *old);
+sighandler_t signal(int sig, sighandler_t h);  /* BSD style, as glibc: the handler stays, calls restart (SA_RESTART) */
+int sigprocmask(int how, const sigset_t *set, sigset_t *old);
+#define sigemptyset(s)    (*(s) = 0, 0)
+#define sigfillset(s)     (*(s) = ~1u, 0)
+#define sigaddset(s, n)   (*(s) |= 1u << (n), 0)
+#define sigdelset(s, n)   (*(s) &= ~(1u << (n)), 0)
+#define sigismember(s, n) ((*(s) >> (n)) & 1)
+int kill(int pid, int sig);                     /* pid 0: own group, -g: group g; sig 0: does it exist? */
+int raise(int sig);
+unsigned alarm(unsigned seconds);               /* the seconds the previous alarm had left */
+int pause(void);                                /* until a handler ran: -1, zerrno EINTR */
+int setpgid(int pid, int pgid);
+int getpgid(int pid);                           /* 0: the caller */
+int getpgrp(void);
+int tcsetpgrp(int fd, int pgrp);                /* the foreground process group of the caller's terminal */
+int poll(struct pollfd *fds, u32 n, int ms);    /* ms -1: no limit; also ports (POLLPORT) */
+#define FD_SETSIZE 32
+typedef struct { u32 bits; } fd_set;
+#define FD_ZERO(s)     ((s)->bits = 0)
+#define FD_SET(n, s)   ((s)->bits |= 1u << (n))
+#define FD_CLR(n, s)   ((s)->bits &= ~(1u << (n)))
+#define FD_ISSET(n, s) (((s)->bits >> (n)) & 1)
+struct timeval { long tv_sec, tv_usec; };
+int select(int nfds, fd_set *rd, fd_set *wr, fd_set *ex, struct timeval *tv);
+int zsig_num(const char *name);                 /* "TERM", "SIGTERM" or "15" -> 15; -1 if unknown */
+const char *zsig_name(int sig);                 /* 15 -> "TERM"; 0 if none */

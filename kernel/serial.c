@@ -148,7 +148,7 @@ void serial_work(void)
     int rxq_took = 0;
     if (serdev) {                       /* the bytes wait in the ring for serdev_read; wake its reader */
         if (rxq_tail != rxq_head)
-            wake_io();
+            ev_wake(&serdev_wait);
         u32 lost = rxq_lost;
         if (lost != rxq_lost_told) {
             kprintf("serial: %u bytes lost (input ring full)\n", lost - rxq_lost_told);
@@ -223,6 +223,15 @@ void serdev_close(void)
     serdev = 0;
 }
 
+u32 serdev_wait;                        /* D16: the slots waiting for received bytes (event.c) */
+
+/* poll (D16): POLLIN when bytes wait; always writable (the tick empties the send ring: rule 11) */
+u16 serdev_poll(void)
+{
+    ev_arm(&serdev_wait);
+    return (u16)(POLLOUT | (rxq_tail != rxq_head ? POLLIN : 0));
+}
+
 u32 serdev_take(u8 *buf, u32 n)
 {
     u32 got = 0;
@@ -255,8 +264,11 @@ __attribute__((optimize("Os"))) long serdev_write(const u8 *buf, u32 n)
             break;
         if (i != i0)
             since = ticks;                      /* progress: the 2 s count again */
-        if (current->killed)
+        if (current->killed || SIG_DUE(current)) {     /* a kill, or a handler (D16): what was written so far */
+            if (!i && !current->killed)
+                current->sig_intr = 1;
             return i ? (long)i : -EINTR;
+        }
         if ((s32)(ticks - since) >= (s32)SERDEV_STALL) {
             kprintf("serial: /dev/ttyS0: the port took nothing for 2 s: write failed\n");
             return i ? (long)i : -EIO;

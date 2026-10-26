@@ -51,7 +51,11 @@ pointers.
   Partition tables: an RDB or a PC MBR (primary entries; verified in FS-UAE with disk images). The Emu68 boot card
   holds Emu68 and the Kickstart ROM in its FAT partition: never write to it without a plan. Not done: extended
   partitions, GPT, the 50 MHz high-speed mode, eMMC. Until then: RAM-disk root from the floppy.
-- Signals and handlers, process groups, `/proc`; supplementary groups; a shadow password file (`/etc/passwd` is
+- Signals (DESIGN D16) have no SIGSEGV/SIGBUS handlers (a fault ends the program, 139), no sessions, no controlling
+  terminals other than the consoles and no SIGHUP on a hang-up (with telnet's pseudo-terminals, later); SIGQUIT,
+  SIGTTIN, SIGTTOU and SIGWINCH are never generated; `poll` takes at most 32 items, `select` 32 descriptors; a signal
+  frame needs 84 bytes of stack and leaves 512 bytes above the stack guard, or the process is killed.
+- `/proc`; supplementary groups; a shadow password file (`/etc/passwd` is
   world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.

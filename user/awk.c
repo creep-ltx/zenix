@@ -1440,7 +1440,7 @@ static __attribute__((noinline)) struct val do_builtin(struct node *n)
     case B_SYSTEM: {
         const char *cmd = to_str(ARG(0)); flush_all_output();
         int pid = spawn_sh(cmd, 0, 1); if (pid < 0) return vnum(-1);
-        sys_setfg(pid); int st = sys_wait(pid); sys_setfg(sys_getpid());
+        int st = sys_wait(pid);         /* the command is in awk's group (the job's): ^C reaches both (DESIGN D16) */
         return vnum(st);
     }
     case B_CLOSE: {

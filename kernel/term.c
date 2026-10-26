@@ -612,8 +612,8 @@ void con_switch(int w)
     if (!con_in_use(w)) {
         con_want |= (u16)(1u << w);
         for (int i = 1; i < NPROC; i++)
-            if (procs[i].state == P_WAIT && procs[i].wait_con)
-                ready(&procs[i]);
+            if (procs[i].wait_con)
+                ev_post(&procs[i], EV_CON);     /* D16: init's wait (WAIT_CONSOLE) */
     }
     if (w == con_cur)
         return;

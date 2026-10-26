@@ -203,8 +203,8 @@ static void irq_other_report(void)
  * being re-entered, so tty, terminal, heap and blitter state are only ever changed by one piece of code at a time.
  * This also closes the lost wakeup (B5): a reader that finds no line and then blocks (tty_read; init's proc_wait for a
  * console that wants a login) is kernel code with none of the four points between its check and its block, so kwork -
- * the only producer of input and of console requests - cannot run there; input that arrives meanwhile waits in the ring and its wake_io() comes
- * after the reader is P_IO. A new call of kwork() must keep it that way. */
+ * the only producer of input and of console requests - cannot run there; input that arrives meanwhile waits in the ring and
+ * its wake-up (ev_wake, D16) comes after the reader blocked. A new call of kwork() must keep it that way. */
 volatile int kwork_pending;
 
 void kwork(void)
@@ -222,8 +222,12 @@ void kwork(void)
     busy = 0;
 }
 
-void irq2_c(u32 sr)
+/* the level-2 interrupt (start.S saves every register: rb is d0-d7, a0-a6, then the CPU's frame, its SR first). When
+ * it cut into user code it ends like a system call (D16 section 5): sig_deliver acts on a kill, a stop and a handler
+ * on every way back to user mode, so an alarm ends a CPU-bound program and a handler can run in one */
+void irq2_c(u32 *rb)
 {
+    u32 sr = *(u16 *)(rb + 15);
     u8 icr = CIAA(CIA_ICR);             /* read acknowledges the CIA */
     INTREQ = INTF_PORTS;
     if (!(icr & 0x1F))
@@ -236,8 +240,8 @@ void irq2_c(u32 sr)
         audio_tick();
         input_poll();
         fd_tick();
-        if (nsleep && (s32)(ticks - wake_min) >= 0)
-            need_resched = 1;           /* a sleeper is due: schedule() (or the next return to user mode) wakes it */
+        if (ntimer && (s32)(ticks - wake_min) >= 0)
+            need_resched = 1;           /* a sleeper or an alarm is due: schedule() (or the next return to user mode) */
     }
     if (!(sr & 0x2000)) {               /* we interrupted user mode: no kernel code is running */
         if (current->pid != 0 && !current->killed) {
@@ -247,7 +251,7 @@ void irq2_c(u32 sr)
                 stack_fail(current, bad);
                 irq_restore(0x2000);
                 schedule();             /* it dies there (or when it next runs) */
-                return;
+                goto user;
             }
         }
         if (kwork_pending) {
@@ -255,11 +259,18 @@ void irq2_c(u32 sr)
             kwork();
             if (current->killed || current->stop_req) {
                 schedule();             /* Ctrl-C / Ctrl-Z of the running program: it ends or stops now */
-                return;
+                goto user;
             }
         }
     }
     sched_tick((u16)sr, icr & 1);       /* the tick counts the slice in any mode; a switch only when user code was cut */
+    if (sr & 0x2000)
+        return;
+user:
+    if (SIG_WORK(current)) {
+        irq_restore(0x2000);
+        sig_deliver(rb, 0);
+    }
 }
 
 /* The E-clock (crystal / 40) of this machine: 709379 Hz on PAL, 715909 on NTSC, from the Agnus/Alice id's NTSC bit

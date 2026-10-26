@@ -548,6 +548,29 @@ static int quit_ok(void)
     return a == 'n';
 }
 
+/* signals (DESIGN D16): the terminal is left as it was found whatever ends or stops the editor. SIGINT, SIGTERM,
+ * SIGHUP: cooked mode back, the screen cleared, then the end (128 + the signal; unsaved changes are lost, as in nano
+ * without its backup file). SIGTSTP (a kill: Ctrl+Z is undo here): the same, then it stops; SIGCONT: raw mode again and
+ * the screen drawn anew. */
+static void leave_screen(void) { sys_ttymode(0); oputs("\033[2J\033[H"); oflush(); }
+static void on_end(int sig) { leave_screen(); sys_exit(128 + sig); }
+static void on_tstp(int sig)
+{
+    leave_screen();
+    signal(sig, SIG_DFL);
+    sigset_t m = 1u << sig;
+    sigprocmask(SIG_UNBLOCK, &m, 0);
+    raise(sig);                         /* stops here, until SIGCONT */
+    signal(sig, on_tstp);
+}
+static void on_cont(int sig)
+{
+    (void)sig;
+    sys_ttymode(TTY_RAW | TTY_NOSIG);
+    oputs("\033[2J\033[H");
+    shadow_valid = 0;
+    render();
+}
 int main(int argc, char **argv)
 {
     int goto_line = 0, i = 1;
@@ -567,6 +590,8 @@ int main(int argc, char **argv)
     if (goto_line > 0) { cy = goto_line - 1; clamp_cursor(); }
     if (!sys_isatty(0)) { fprintf(2, "edit: standard input is not a terminal\n"); return 1; }
     sys_ttymode(TTY_RAW | TTY_NOSIG);
+    signal(SIGINT, on_end); signal(SIGTERM, on_end); signal(SIGHUP, on_end);
+    signal(SIGTSTP, on_tstp); signal(SIGCONT, on_cont);
     oputs("\033[2J\033[H"); shadow_valid = 0;
     int want = -1;                                              /* the visual column to return to when moving up and down */
     for (;;) {
@@ -641,8 +666,7 @@ int main(int argc, char **argv)
         }
     }
 done:
-    sys_ttymode(0);
-    oputs("\033[2J\033[H");
-    oflush();
+    signal(SIGTSTP, SIG_DFL); signal(SIGCONT, SIG_DFL);
+    leave_screen();
     return 0;
 }

@@ -33,7 +33,7 @@ L=$OUT/mount.log
 has() { if tr -d '\r' < $L | grep -aqE -- "$2"; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 has "a mount's server runs with no parent at nice -10 (two fsd lines)" '^ +[0-9]+ +0 +[0-9]+ +-10 [a-z]+ +[0-9]+ +[0-9]+ fsd$'
 [ "$(tr -d '\r' < $L | grep -acE '^ +[0-9]+ +0 +[0-9]+ +-10 [a-z]+ +[0-9]+ +[0-9]+ fsd$')" -ge 2 ] && check "... the root's and the mount's" ok || check "... the root's and the mount's" bad
-has "the mount's server killed: the log says it ended" '^svc: fs\.ide0p1: fsd \(pid [0-9]+\) ended, status 130$'
+has "the mount's server killed: the log says it ended" '^svc: fs\.ide0p1: fsd \(pid [0-9]+\) ended, status 143$'
 has "... and the next use started it again" '^svc: fs\.ide0p1: started @fsd \(pid [0-9]+, for pid [0-9]+ cat\)$'
 has "... a file written before the kill reads back" '^(.*# )?kept-across$'
 has "umount ends it for good (only the root's fsd left)" '^(.*# )?fsd-left=1$'

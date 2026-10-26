@@ -10,7 +10,7 @@ static int show(const char *name)
     char *av[3] = { "less", path, 0 };
     int pid = sys_spawn("/bin/less", av, 0);
     if (pid < 0) { fprintf(2, "man: cannot run the pager\n"); return 1; }
-    sys_setfg(pid); int rc = sys_wait(pid); sys_setfg(0);
+    int rc = sys_wait(pid);             /* the pager is in our job's group, the terminal's foreground (DESIGN D16) */
     return rc;
 }
 static int keyword(const char *w)

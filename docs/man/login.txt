@@ -49,6 +49,9 @@ FILES
     /var/lib/zpkg/result
 
 NOTES
+    login is a process group of its own (DESIGN D16), so kill 0 in a
+    session never reaches init; the shell it starts makes its own group
+    the terminal's foreground.
     Five wrong tries end the program (init starts it again). login knows
     console 1 by its standard input (fstat of a console gives its number).
     With no MMU any program can still read any memory, so login is

@@ -10,7 +10,9 @@ Zenix code is never written from anything but these descriptions, the public man
 Facts about Zenix below were read from main on 2026-10-23; check them again before acting.
 
 ## 1. Signal bits per process: wait for many things at once
-**Today:** a process waits on one thing at a time: one port, a timer, or one child. The only combination is
+**Done** as DESIGN D16 (2026-10-26: fixed event bits per process, slot masks on objects, `SYS_evwait`, `poll`,
+`select`, Unix signals; docs/d16-events-and-signals.md). The idea as it was written:
+**Then:** a process waits on one thing at a time: one port, a timer, or one child. The only combination is
 receive-with-timeout. There is no `select`/`poll`, and the shell polls the tty's interrupt flag.
 
 **Idea:** each process gets two 32-bit words, *pending* and *waiting for*. Every source it cares about gets one bit,
@@ -149,7 +151,7 @@ proprietary, so from them only the documented behaviour (the ROM Kernel Manuals;
 |---|---|---|---|
 | Scheduling | **Exec** | Priorities: the highest ready process runs, round robin within a priority. First thing to build after the halt (small, makes the terminal and servers feel quick); with a fairness test | **done** (D10, 2026-10-24) |
 | Servers and priorities | **QNX** | Priority inheritance: a server handling a message runs at its client's priority, so a high-priority program is never stuck behind a low one's request | **done** (D10, 2026-10-24) |
-| Waiting | **Exec** | Signal bits per process (section 1 above); `select`/`poll` built on them | one source at a time |
+| Waiting | **Exec** | Signal bits per process (section 1 above); `select`/`poll` built on them | **done** (D16, 2026-10-26) |
 | Event API for programs | **BSD** | kqueue-style: register many events once, get the ready ones in one call (a thin layer on the signal bits) | - |
 | Messages | **QNX / Minix 3** | Synchronous send/receive/reply, pointers not copies | **done** |
 | Reliability | **Minix 3** | The reincarnation server: a supervisor restarts a crashed server or driver (fsd, diskd, the network server) instead of the system stopping | a dead server stays dead |
@@ -192,7 +194,7 @@ own wish: a terminal good enough to run Claude Code from the A1200), otherwise a
 foundation is named.
 
 **Foundations that most of the list depends on** (each is its own decision):
-newlib, a fuller C library (porting) · signal bits and `select`/`poll` (item 1 above) · shared libraries · a shared
+newlib, a fuller C library (porting) · signal bits and `select`/`poll` (item 1 above; done, D16) · shared libraries · a shared
 text-UI library (full-screen tools) · the TCP/IP server [approved, after D11 and self-updates] · a display server and a
 sound server (phase 5) · the service manager [approved: D11, being built].
 

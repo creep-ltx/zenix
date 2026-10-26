@@ -1,6 +1,6 @@
 # D16: events and signals (design note, revision 3)
 
-Status: **ready to build (revision 3, 2026-10-26), after two independent reviews** (deep core: the scheduler's waits and the
+Status: **built on branch `d16` (2026-10-26; section 15, "As built"); revision 3 after two independent reviews** (deep core: the scheduler's waits and the
 way into user code). The first item of roadmap block 2 ("Zenix reaches the world"), in the order of work the owner
 approved on 2026-10-25. The short version is in [DESIGN.md](DESIGN.md) D16. Facts about today's code are *read* from
 main (2026-10-26). Revision 2 takes in the first review: sigreturn masks the status register, the level-2 interrupt
@@ -238,5 +238,82 @@ measured size passes 4 KB, the next step frees room first (more cold files at `-
     empty; `kill(-1, sig)` gives -EINVAL. Old programs that call `setfg(child)` then `setfg(0)` (man, time, nice,
     timeout) keep working and move to the group form. Noted for the shell's plan: sh does not stop a loop when its child
     died from ^C (status 130), unlike bash.
+
+## 15. As built
+
+Built on branch `d16` (2026-10-26), in this order:
+
+1. **Rule 2, on its own:** `ready()` leaves a `P_STOP` process stopped; `proc_cont` and `proc_kill` end a stop through
+   `ready_force` (`kernel/proc.c`). `sigtest stopsrv` (`tools/signal-test.sh`) stops a server in receive, calls it,
+   and checks that the client still waits a second later and the server is still stopped; on the old kernel the server
+   answered at once (checked: the check fails there).
+2. **Room first (rule 14, section 11):** the kernel had 5736 bytes left on the RAM floppy (179200 bytes) after step 1.
+   `tty.c` and `vfs.c` are now built `-Os` (measured: tty 1628 bytes, vfs 2556 bytes smaller), with the pipes' copy
+   loops kept at `-O2` by an attribute (136 bytes): 9784 bytes left (169416 bytes). The scheduler, `ipc.c`, `main.c`
+   (the interrupt entries) and `syscall.c` stay `-O2`.
+3. **D16 itself**, as sections 2-9 and the 15 rules say: `kernel/event.c` and `kernel/signal.c` (both `-Os`), the
+   blocking sites in `tty.c`, `vfs.c` (pipes, `/dev/ttyS0`), `proc.c` (`wait`), `ipc.c` (an untimed receive) and
+   `syscall.c` (`sleep`), the level-2 entry saving all registers (`start.S`, `irq2_c` in `main.c`), system calls 83-88
+   (`evwait`, `sigaction`, `sigprocmask`, `sigreturn`, `alarm`, `setpgid`) and the new forms of `kill` and `setfg`;
+   libz's POSIX layer (`sigaction`, `signal`, `sigprocmask`, `kill`, `raise`, `alarm`, `pause`, `setpgid`,
+   `getpgid`, `tcsetpgrp`, `poll`, `select`, `zsig_num`/`zsig_name`) and its entry `_zsigentry`. **Size:** the kernel
+   grew by 4640 bytes (169416 to 174056 of 179200): 5144 bytes left on the RAM floppy.
+4. **Programs:** `sh` (rules 7, 9, 10, 15: its own group, a group per job joined right after each spawn, the job's
+   group the foreground only after all joined, SIGINT and SIGTSTP caught - not ignored, so children start with the
+   defaults -, no SIGCHLD handler, `fg`/`bg` send SIGCONT, `kill` with names, numbers, `%job` as the job's group and
+   `-l`, `trap` for signals as bash); `login` makes its own group; `kill`, `pkill` and `timeout` take signal names
+   (SIGTERM by default); `less` and `edit` leave the screen on SIGINT/SIGTERM/SIGHUP and SIGTSTP and draw it again on
+   SIGCONT (`less` also stops its job on Ctrl+Z); `zup` ignores SIGPIPE; `man`, `time`, `nice`, `timeout`, `sudo`,
+   `awk`'s `system()`, `watch`, `su` and `login` no longer set the foreground themselves (rule 15: their commands are in
+   the job's group). `cu` stays two processes.
+5. **Tests:** `tools/signal-host-test.sh` (the core against a model of the scheduler, with every interleaving of a
+   producer and a waiter; checked to fail when the masked test or the stale-bit fix below is taken out) and
+   `tools/signal-test.sh` in FS-UAE (`sigtest`'s 17 checks, 9 of them again as a ZEX2 program, then the shell, `less`
+   and `edit`); `trap` and `kill -l` compared with bash in `rootfs/tests/cmds.sh`.
+
+**Deviations and decisions made while building** (each local; none changes a rule):
+- *Event bits:* four are enough - `EV_IO` (any registered object, ports included: a port carries a slot mask like the
+  others), `EV_SIG`, `EV_CHILD`, `EV_CON`; the timer is the timed wait itself (`P_SLEEP` with `ev_wait`).
+- *A stale `EV_SIG` (found by the emulator test):* a signal's wake-up left `EV_SIG` pending, and every later wait
+  returned at once - `sleep` then looped in the kernel and the machine hung. `ev_block` now clears `EV_SIG` under the
+  mask before its test; signals are tested by themselves there (`SIG_DUE`), so nothing is lost. The host test checks it.
+- *`sleep` and `wait` are event waits:* `SYS_sleep` waits for `EV_SIG` in a timed wait (a handler ends it with
+  -EINTR; never restarted), `wait` waits for `EV_CHILD` (and `EV_CON` for init). Rule 1's "plain sleep" is read as the
+  kernel's own `sleep_until` waits (the service manager's, `/dev/ttyS0`'s write), which keep `ev_wait` 0 and so are
+  never cut by a handler (rule 4). `P_WAIT` and `P_IO` are no longer entered; `procinfo` reports `P_EV` as one of them,
+  so `ps` and every older program see the numbers they know.
+- *A timed receive* is not woken by a signal (its `ev_wait` stays 0, rule 1); its handler runs when it returns (a
+  message or the deadline). An untimed one gives -EINTR (restarted with `SA_RESTART`).
+- *SIGKILL acts at once*, as D11's second kill (`killed` 3), still waiting for a server call's reply (G4).
+- *`wait` gives -ECHILD* only to a parent that ignores SIGCHLD (rule 10); every other caller still gets -1 when it has
+  no children (the frozen wait convention).
+- *The `kill` command's default is SIGTERM* (status 143), as POSIX; `svc-test` and `mounttest` expected 130 where they
+  end a server with the shell's `kill` and now expect 143. The old form of the system call (`sys_kill`, programs built
+  before D16, `svctest`) still gives 130. A refusal of the new form is -EPERM, as POSIX ("operation not permitted";
+  `users-test` expected the old form's "permission denied").
+- *A group with only a zombie member still exists* for `setpgid`, so a pipeline whose first stage already ended can
+  still be joined by the later ones.
+- *Process 1 is protected from default stops too*, not only from default ends.
+- *A bad frame given to `sigreturn` kills the process* (139, with "bad signal frame at ADDR: killed"), as an odd PC
+  does; it is never read first.
+- *The frame* holds a7 as well (the stack pointer before the frame, which is aligned down): 84 bytes. The entry gets
+  the frame's address in a0 and gives it back as `sigreturn`'s argument. One handler is sent per return to user mode;
+  the next pending one at the end of that handler's `sigreturn`.
+- *`sigaction` accepts only `SA_RESTART`* in its flags (anything else -EINVAL, so later flags keep their meaning);
+  `evwait` takes at most 32 items.
+- *Rule 14's "one-word test"* is `SIG_WORK`: pending-and-not-blocked, `killed` and `stop_req` (three loads, inline).
+- *The shell's groups:* a stage joins its job's group right after its spawn, so a stage that starts its own children
+  before the shell runs again (only possible if the shell's slice ends there) leaves them in the shell's group.
+  Found while testing: a background pipeline's earlier stages stayed zombies until the shell ended (only the last
+  one was waited for); they are now reaped with the job.
+- *Memory on a small machine (found by the matrix's 1 MB chip-only A1200, which must hold three sessions):* D16 took
+  about 7 KB more RAM (the larger `struct proc` in 32 slots, the kernel, the shell's code), and the third session no
+  longer started (223 KB free after boot instead of main's 229). The per-signal `sa_mask` table is now allocated (128
+  bytes from the kernel heap) only by a program that sets a mask, and - not D16's own, but the simplest large saving -
+  each process's environment moved from a fixed 1 KB array in every process slot (32 KB of BSS) to a block of its own
+  memory of the size it needs: 254 KB free after boot, three sessions again (the fourth still does not fit, as the
+  test wants). The kernel image grew by 448 bytes for both: 4696 bytes left on the RAM floppy.
+- *Not done (as the note says):* SIGHUP on hang-up, sessions, SIGTTIN/SIGTTOU, SIGWINCH, fault handlers; `ps` shows no
+  PGID column (`uproc` carries it).
 
 Last checked against the code: 2026-10-26.

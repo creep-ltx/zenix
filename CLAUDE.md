@@ -114,7 +114,8 @@ unseen). So:
 | 80 `reboot` (save the disks, reset; optionally leave the boot menu a one-shot choice) | main, 2026-10-24 |
 | 81 `svc` (DESIGN D11, the service manager: register, remove, self, save, load, opens) | main, merged 2026-10-25 |
 | 82 `update` (DESIGN D15: INFO, RELEASE, NOTE) | built on branch d15, 2026-10-26 |
-| **next free: 83** | |
+| 83 `evwait`, 84 `sigaction`, 85 `sigprocmask`, 86 `sigreturn`, 87 `alarm`, 88 `setpgid` (DESIGN D16); `kill`'s third argument 1 (the new form: a signal, groups) and `setfg`'s second argument 1 (a process group) | built on branch d16, 2026-10-26 |
+| **next free: 89** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
 zup's "needs a check" mark), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
@@ -152,8 +153,17 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   not repeated: every program is built and shipped together with the kernel (no released program reads `mem` with
   the old meaning; `ps` and `free` show it), and it still means "the memory this process owns". Any later change is
   a new field.
-- Not on the list: the kernel's internal file kinds. Signal numbers join it when signals come. libz is linked into
-  each program, so it needs no rule of its own.
+- **D16 (events and signals, 2026-10-26):** the signal numbers and their default actions (Linux's); the 128 + n wait
+  statuses; the signal frame (`struct sigframe`, first size `SIGFRAME_FIRST` 84: size, d0-d7, a0-a7, PC, condition
+  codes, signal, blocked mask) and `sigreturn`'s contract (the frame's address in a0 to the entry, back in d1; only
+  the condition codes taken; returns the frame's d0); `struct usigaction` (first size `USIGACT_FIRST` 20: size,
+  handler 0/1/other, mask, flags, entry) and `sigaction`'s answer (0 default, 1 ignored, 2 caught); `SA_RESTART`
+  (Linux's value); `struct upollfd` (Linux's `pollfd`), the `POLL*` bits (Linux's values) and `POLLPORT` 0x4000;
+  `SIG_BLOCK`/`SIG_UNBLOCK`/`SIG_SETMASK` 0/1/2; `uproc.pgid` at the end of `uproc`; a process in the kernel's
+  event wait reported by `procinfo` as state 3 (waiting for a child) or 4 (I/O), never a new number; `ST_STOPPED`
+  0x114 for every stop; `PRIO_PGRP` stays -EINVAL. The kernel's event bits (`EV_*`) are internal.
+- Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
+  own.
 
 ## Rules for code (each one was a real bug found on 2026-10-22)
 Real hardware and Emu68 (details: knowledge base `amiga/emu68-jit-cache-rules.md`):

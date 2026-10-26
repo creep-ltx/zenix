@@ -66,6 +66,6 @@ int main(int argc, char **argv)
     char **av = shell ? sav : argv + i;
     int pid = sys_spawn(cmd, av, 0);
     if (pid < 0) { fprintf(2, "sudo: cannot start %s: %s\n", cmd, zwhy("error")); return 1; }
-    sys_setfg(pid); int rc = sys_wait(pid); sys_setfg(0);
+    int rc = sys_wait(pid);             /* the command is in our job's group: ^C reaches it (DESIGN D16) */
     return rc;
 }

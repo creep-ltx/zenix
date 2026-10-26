@@ -39,6 +39,8 @@ EXIT STATUS
     not found.
 
 NOTES
+    The command runs in nice's process group, the shell's job: Ctrl+C
+    and Ctrl+Z reach both.
     The command is looked up in $PATH like the shell does. There is no
     CPU-time accounting, so a lower priority means "runs when nothing
     better is ready", not "a smaller share" as on Linux: a busy program

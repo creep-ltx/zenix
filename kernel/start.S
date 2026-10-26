@@ -142,18 +142,16 @@ exc_common:
     jsr     exc_c
 6:  bra.s   6b                      /* exc_c does not return in M0 */
 
-/* Level 2 autovector: CIA-A (timer tick). Passes the interrupted SR so
- * the scheduler only preempts user-mode code. After the 4 saved
- * registers the CPU frame is at 16(%sp): sr.w, pc.l, fmt.w. */
+/* Level 2 autovector: CIA-A (timer tick, keyboard). Saves every register like the system-call entry (DESIGN D16
+ * section 5: a handler can then be sent to from a tick that cut into user code, sig_deliver editing the block) and
+ * passes the block: d0-d7/a0-a6 ascending, the CPU frame (sr.w, pc.l, fmt.w) at +60. */
     .globl  irq2_entry
 irq2_entry:
-    movem.l %d0-%d1/%a0-%a1,-(%sp)
-    moveq   #0,%d0
-    move.w  16(%sp),%d0
-    move.l  %d0,-(%sp)
+    movem.l %d0-%d7/%a0-%a6,-(%sp)
+    move.l  %sp,-(%sp)
     jsr     irq2_c
     addq.l  #4,%sp
-    movem.l (%sp)+,%d0-%d1/%a0-%a1
+    movem.l (%sp)+,%d0-%d7/%a0-%a6
     rte
 
 /* Level 3 autovector: vertical blank (applies Copper-list scroll updates) */
@@ -274,6 +272,11 @@ ints_off:
 get_usp:
     move.l  %usp,%a0
     move.l  %a0,%d0
+    rts
+    .globl  set_usp
+set_usp:
+    move.l  4(%sp),%a0
+    move.l  %a0,%usp
     rts
     .globl  cpu_idle
 cpu_idle:
