@@ -155,11 +155,14 @@ data. D3 left room for this in the program format. D13 builds it: one copy of th
 register, as gcc's `-msep-data`/`-mid-shared-library` for no-MMU systems), libz as the first shared library. It comes
 before the self-updates (so they ship the final format), newlib and the network (which make programs much larger).
 The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 3, 2026-10-25, after a first review and a second look: stage 1 makes `sh` and `login` pure; ready to build).
-## D14. The colour console (approved by the owner 2026-10-25; design note reviewed, revision 2 ready to build)
+## D14. The colour console (approved by the owner 2026-10-25; reviewed; built 2026-10-26 on branch `d14`)
 **Why.** Colours in the text console, as every Unix terminal has: `ls`, `grep`, the prompt, `less`, and programs using
-the standard ANSI colour codes. **How.** More bitplanes behind the same text console (16 colours on AGA, 8 on OCS/ECS,
-a setting from 1 to 4 planes; 1 keeps today's look and speed), a colour byte per cell and in the scrollback, the ANSI
-codes in term.c (256 and true colour mapped to the nearest of 16). The full design: [d14-colour-console.md](d14-colour-console.md).
+the standard ANSI colour codes. **How.** More bitplanes behind the same text console, chosen by the machine at boot (4
+planes and 16 colours on AGA at the 64-bit fetch, which costs the chip bus what one plane did; 3 and 8 colours on
+OCS/ECS with fast RAM; 1, today's look, on chip-only machines below 2 MB; no runtime setting yet), a colour byte per
+cell and in the scrollback, the ANSI codes in term.c (256 and true colour mapped to the nearest of 16), region scrolls
+by blitter, `ls`/`grep --color` with GNU's bytes. The full design and what the build changed:
+[d14-colour-console.md](d14-colour-console.md) (section 10).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
