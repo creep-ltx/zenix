@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "fsproto.h"
+#include "version.h"
+
+/* The version record (DESIGN D15): "ZVER", the number, the string. tools/mkzup.py finds it in the kernel image and
+ * refuses a bundle whose number is not the kernel's; SYS_update INFO reports it. Frozen layout. */
+static const struct { char magic[4]; u32 vnum; char vstr[16]; } zver __attribute__((used, aligned(4))) =
+    { { 'Z', 'V', 'E', 'R' }, ZENIX_VNUM, ZENIX_VSTR };
 
 /* copy a NUL-terminated string from user memory, bounds-checked: 0, -EFAULT (outside what the caller may read: its
  * own memory or its shared code, D13) or -ENAMETOOLONG (longer than max - 1: a path given to a system call is at most

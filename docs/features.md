@@ -133,3 +133,4 @@ and deep nesting stop with a message and that a long loop keeps memory flat. See
 | The machine matrix (`tools/matrix.sh`, architecture.md section 13), benchmark with the CIA E-clock (`bench`) | verified |
 | Commands compared against GNU (`tools/cmds-test.sh`) | verified |
 | Documentation check (`tools/docs-check.sh`) | verified |
+| Update bundles and packages (DESIGN D15): `make packages`, `make bundle` (`tools/mkzup.py`; formats in architecture.md section 3, "Updates"); the full root images carry the package database | verified on the host (`tools/zup-host-test.sh`: the packages hold what their manifests say, every kind of damaged bundle refused) |

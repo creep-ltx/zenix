@@ -21,6 +21,12 @@ CFLAGS  += -DDIW_V=$(DIWV)
 GFXDEPTH ?=
 CFLAGS  += $(if $(GFXDEPTH),-DGFX_DEPTH=$(GFXDEPTH))
 ASFLAGS := -m68020-60 -x assembler-with-cpp -c
+# the version (kernel/version.h, DESIGN D15): a test build may give its own number and string (ZVNUM=2026102701
+# ZVSTR=0.2-test, in a build directory of its own: not tracked as a dependency); tools/mkzup.py reads them too
+ZVNUM ?=
+ZVSTR ?=
+CFLAGS  += $(if $(ZVNUM),-DZENIX_VNUM_SET=$(ZVNUM)u) $(if $(ZVSTR),'-DZENIX_VSTR_SET="$(ZVSTR)"')
+export ZVNUM ZVSTR
 # test builds only (audit A11/A12, docs/pi-first-boot.md): DIAG=-DDIAG_STOP=N hangs at boot stage N (its colour stays),
 # DIAG=-DDIAG_PANIC=N panics there. Use a build directory of its own (make BUILD=/tmp/x DIAG=...): flags are not tracked.
 DIAG    ?=
@@ -298,9 +304,20 @@ PUREAPPS := sh login
 $(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
 	cp $< $@
 
+# ---- updates (DESIGN D15, docs/d15-self-updates.md): the packages of a build and the bundle zenixboot installs ----
+# build/pkg/NAME.manifest + NAME.tgz for the standard packages (tools/mkzup.py says which files each holds); the full
+# root images get their manifests in /var/lib/zpkg (tools/mkroot.sh), so the first update knows what is installed.
+packages: $(BUILD)/pkg/list
+$(BUILD)/pkg/list: $(USERZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+	python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
+# the bundle: the kernel and every package (copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
+bundle: $(BUILD)/zenix-update.zup
+$(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py
+	python3 tools/mkzup.py bundle $@ --kernel $(BUILD)/kernel.bin $(BUILD)/pkg $$(cat $(BUILD)/pkg/list)
+
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
-$(BUILD)/zenix.hdf: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
-	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)"
+$(BUILD)/zenix.hdf: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS)"
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
 $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
@@ -324,8 +341,8 @@ $(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkca
 	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
 # the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
 # ext2 root with every program (written to a card by tools/write-card.sh)
-$(BUILD)/root-card.img: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py
-	tools/mkroot.sh $@ $(BUILD) "$(UAPPS)" 512M 8192
+$(BUILD)/root-card.img: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS)" 512M 8192
 $(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
 	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img
 
@@ -346,4 +363,4 @@ clean:
 
 .SECONDARY:
 .DELETE_ON_ERROR:           # a recipe that fails leaves no half-written target behind for the next make to trust
-.PHONY: all run test check clean
+.PHONY: all run test check clean packages bundle

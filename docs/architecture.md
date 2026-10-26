@@ -270,6 +270,32 @@ Every stage logs with `kprintf`. Only SD cards (CM4 Lite) are handled, not eMMC.
 DMA-like access (the VideoCore reads it from RAM), so its cache line is cleaned and dropped with the 68040
 `cpushl`/`cinvl` that Emu68 translates.
 
+### Updates (DESIGN D15, docs/d15-self-updates.md)
+
+Zenix updates itself from a **bundle** (`.zup`) that reaches the boot partition. The version lives in one place,
+`kernel/version.h`: a number that orders versions (`YYYYMMDDNN`, the date and a count within the day) and a string
+for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the number, the string, in
+`kernel/syscall.c`). All formats below are frozen (CLAUDE.md): they only grow, at the end.
+
+- **Packages** (`make packages`, `tools/mkzup.py`): `build/pkg/NAME.manifest` and `NAME.tgz`. The manifest is text,
+  one item a line: `zpkg 1`, `name NAME`, `version NUMBER STRING`, `group base` (the packages that move as one),
+  `depends NAME NUMBER` (at least that version), then the entries: `f MODE UID GID SHA256 SIZE /PATH` (a file),
+  `c ...` (the same for a config file the owner may edit), `l TARGET /PATH` (a symbolic link), `d MODE UID GID /PATH`
+  (a directory). Words a later format adds are ignored by older readers. A path is at most 55 bytes (with
+  `.zup-new` it fits a system call's 63). The `.tgz` is a gzip'd ustar archive of the `f` and `c` files in manifest
+  order. The standard packages: **zup** (`/sbin/zup`), **base** (`init`, `login`, `sh`, `mount`, the config files
+  `/etc/svctab`, `passwd`, `group`, `fstab`, `motd`; `/etc/autologin` belongs to the test images and is never
+  shipped), **utils** (every other command, the links such as `more`), **man** (the manual pages). The full root
+  images (`zenix.hdf`, the SD card's root) carry the manifests of what they hold in `/var/lib/zpkg/`.
+- **The bundle** (`make bundle`: `build/zenix-update.zup`), big-endian: a 96-byte header (`ZUP1`, format 1, header
+  size 96, version number, version string[16], date `YYYYMMDD`, the lowest installed base version it applies to
+  (0: any), channel[8], table-of-contents offset 96 and entry count (1-64), total size (at most 16 MB), flags 0, and
+  at +64 the SHA-256 over header bytes 0-63 followed by the table), the table (80 bytes an entry: name[40]
+  NUL-terminated, `boot/...` or `pkg/...` of `[A-Za-z0-9._-]`; offset; size; SHA-256), then the parts, each at a
+  16-byte boundary: `boot/zenix` (the kernel; `mkzup.py` refuses one that does not carry the bundle's version) and
+  `pkg/NAME.manifest` + `pkg/NAME.tgz` for each package. Every count, size and offset is range-checked by every
+  reader (`tools/zup-host-test.sh` feeds each kind of damage).
+
 ## 4. Executables: ZEXE and relocation
 
 No MMU means no per-process virtual addresses, so a program must run wherever it happens to be loaded.
