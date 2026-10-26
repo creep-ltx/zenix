@@ -16,7 +16,7 @@
 | [zenixfs-format.md](zenixfs-format.md) | ZenixFS's exact on-disk format, version 1. |
 | [d13-shared-code.md](d13-shared-code.md) | DESIGN D13's design note: one copy in memory of a program's code and of shared libraries, how (gcc's separate-data mode, a base register), the file format, the loader, safety, the measurements it must pass. Revision 3 after two reviews: ready to build. |
 | [d14-colour-console.md](d14-colour-console.md) | DESIGN D14's design note: colours in the text console (bitplanes by machine, a setting, the ANSI codes, the programs that use colour, tests). Revision 2 after its review: ready to build. |
-| [d15-self-updates.md](d15-self-updates.md) | DESIGN D15's design note: Zenix updates itself (the bundle on BOOT:, zenixboot's half and Zenix's installer, the journal and rollback, later serial and network). Awaiting two reviews. |
+| [d15-self-updates.md](d15-self-updates.md) | DESIGN D15's design note: Zenix updates itself (the bundle on BOOT:, zenixboot's half and Zenix's installer, the journal and rollback, later serial and network). Revision 2 after the first review; awaiting the second. |
 | [DESIGN.md](DESIGN.md) | The numbered design decisions D1-D13 and where each one stands. |
 | [d11-service-manager.md](d11-service-manager.md) | The full design note of DESIGN D11, the service manager (servers started on first use and started again when they die): approved; built: steps 0-5 (the core) merged, steps 6-9 (mounts, `/etc/svctab`, the servers' output in the kernel log) on branch d11; section 15 says where the code differs. |
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
