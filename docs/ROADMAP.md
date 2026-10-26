@@ -166,6 +166,10 @@ DESIGN.md D9).
   grows. What is true today: the kernel refuses a 68000/68010 (the code needs a 68020+); everything boots and passes the
   matrix on a stock 68EC020 with 2 MB chip RAM and no fast RAM, and on 1 MB chip-only with two login sessions (one before the shell memory fix of 2026-10-25). Until the
   owner decides, keep it running on those, and say in a change's notes when it costs memory or speed on them.
+  **The owner, 2026-10-26:** the stock A1200 (2 MB chip, no fast RAM) stays a supported machine for as long as it is
+  possible without sacrificing Zenix's goals; no sloppiness that pushes it out early. A desktop and all features may
+  realistically need 4 MB fast RAM; raising the minimum is the owner's decision, brought to them with measurements
+  when a feature cannot fit, never done quietly. Big features may need more while the base system keeps fitting.
 
 - ZenixFS name: a Western Digital project already uses "ZenixFS" (RocksDB on zoned SSDs); decide if that matters.
 - How much POSIX: `fork` is not possible without an MMU; `vfork`/`spawn` only. Programs that need `fork` are out.

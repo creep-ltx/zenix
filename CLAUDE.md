@@ -26,6 +26,8 @@ must **take little**: disk, RAM, floppy. Where the two pull apart, take the midd
 - **The three test machines (owner, 2026-10-26):** the stock A1200 (68EC020 14 MHz, 2 MB chip RAM only, no fast RAM:
   the floor for memory and speed; 1,132 KB free with one login, measured), the A1200 with the Apollo 1260 (68060
   80 MHz, 64 MB fast), and the PiStorm (Emu68). No other memory expansion exists.
+  **The stock A1200 stays supported as long as possible (owner 2026-10-26):** raising the minimum (perhaps 4 MB fast for
+  the desktop) is the owner's call, brought with measurements, never done quietly.
 - **Measure, do not guess:** sizes in every build (the RAM-floppy count, `usize-test`); speed on a real 68020 (the stock
   A1200, the 060), never Emu68's JIT or an emulator alone; a change that costs speed or size says how much.
 
