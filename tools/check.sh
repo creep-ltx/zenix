@@ -9,13 +9,13 @@
 #   tools/check.sh NAME...         only these (names as in the table, e.g. matrix users-test)
 # A test fails if it exits non-zero or prints a line starting with FAIL (matrix.sh reports per machine that way).
 # Not run, on purpose: stage0-68k-test when the Python module unicorn is missing (named as skipped), audio/klog/joystick (weak or
-# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test and diag-test,
+# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test, diag-test and colour-test,
 # ZENIX_CAGE_RIG. A new emulator test starts only while the machine's 1-minute load is 16 or less; every FS-UAE run
 # also takes one of the machine's emulator slots (tools/run-test.sh), shared with other sessions on this PC.
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
 HOST="docs-check mkzexe-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test serial-test term-test mem-test a3000-test stage0-test stage0-68k-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test prio-test kbd-test cu-test diag-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test prio-test kbd-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
 host) LIST="$HOST" ;;
@@ -27,9 +27,10 @@ JOBS=${ZENIX_EMU_SLOTS:-6}
 # The emulator tests start longest first (from a run on 2026-10-26), so the long ones do not end up last. The two
 # longest run as several jobs at once, each with some of the test's parts (the script's arguments; | between jobs);
 # the table still shows one line per test (its time: the jobs' times added up).
-LONGEST="svc-test matrix diag-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
+LONGEST="svc-test matrix diag-test colour-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
 declare -A SPLIT
 SPLIT[svc-test]="a z b n r d|o zo u l|f s h t dmg"
+SPLIT[colour-test]="1 4|3"                     # the 1-plane run first: its edges are the 4-plane run's reference
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh
 m1=""; m2=""; for ((i = 0; i < ${#m[@]}; i++)); do if ((i % 2)); then m2="$m2 ${m[i]}"; else m1="$m1 ${m[i]}"; fi; done
 SPLIT[matrix]="${m1# }|${m2# }"

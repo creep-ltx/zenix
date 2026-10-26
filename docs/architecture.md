@@ -1029,7 +1029,11 @@ outputs (`tools/cmds-test.sh`).
   `tools/kbd-test.sh` presses keys on the emulated keyboard (wtype in the cage rig) and checks the keymap layers,
   Caps Lock and key repeat. `tools/diag-test.sh` checks the boot stage colours (test builds that stop at each
   stage; the screenshot's pixel colour), the split and red-bar panic screens, and the previous-boot log across a
-  warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `make BUILD=/tmp/x` builds everything
+  warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `tools/colour-test.sh` checks the
+  colour console by screenshots at 1, 3 and 4 bitplanes (`make GFXDEPTH=n`): `termtest columns` decoded cell by cell
+  (all 80 columns, the edges where one plane has them), the 16 colours against the palette, a screen after `termtest
+  scroll` pixel-identical to a redraw from the grid, the scrollback's colours; a serial script's `shot NAME` line
+  takes a screenshot when the script gets there (`shot.py`, `serial-tap.py`). `make BUILD=/tmp/x` builds everything
   in another directory (the kernel finds `stage0.bin` and the built-in servers through `-I$(BUILD)`).
   `tools/zenixboot-test.sh` boots with no floppy: Kickstart 3.1 on an A1200 (68EC020, and a 68040), Kickstart 3.2
   and 2.05 (an A600 with a 68020 and chip RAM only) when those ROMs are given, a 68000 that zenixboot must refuse, and
