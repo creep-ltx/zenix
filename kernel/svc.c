@@ -486,8 +486,9 @@ long svc_sys(u32 op, const char *name, const char *text)
         s->essential = eq(name, "disk") || eq(name, "fs");
     }
     if (s->nwords != n || differ(s->prog, t, (u32)k)) {
-        s->starts = 0;                          /* a new program: its counters start again */
-        s->ends = 0;
+        s->starts = 0;                          /* a new program: its counters start again, and it has not served */
+        s->ends = 0;                            /* (boot's root check swaps -fsck for -root: D17 4) */
+        s->served = 0;
     }
     if (s->state == SV_GIVENUP) {               /* registered again: tried again */
         s->state = SV_STOPPED;

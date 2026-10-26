@@ -10,7 +10,9 @@
  * mount -a                   mount everything listed in /etc/fstab (init does this at boot)
  * TYPE is ext2 or zenixfs; without -t it is read from the partition's type in the RDB.
  * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs or auto (from the partition type), OPTIONS =
- * "defaults" or a comma list; "noauto" leaves the line out of mount -a. Lines starting with # and blank lines are ignored. */
+ * "defaults" or a comma list; "noauto" leaves the line out of mount -a. Lines starting with # and blank lines are ignored.
+ * An ext2 volume not marked clean (a power cut while it was written, DESIGN D17) is checked first by mount -a
+ * (fsck.ext2 -y, as Linux's fsck pass at boot); a plain mount only warns. */
 
 static int disk_info(const char *dev, struct diskinfo *di)
 {
@@ -40,12 +42,12 @@ static void list(void)
 /* mount DEV on DIR; type 0 = from the partition. The server is a service (DESIGN D11 6.4): fs.DEV is registered with the
  * kernel's built-in server for the type and the volume id, at nice -10; the kernel's first call to it (the root inode,
  * in SYS_mount) starts it, and a call after it died starts it again. Returns 0, or 1 after printing why not. */
-static int mount_one(const char *dev, const char *dir, const char *type)
+static int mount_one(const char *dev, const char *dir, const char *type, int fsck)
 {
     struct diskinfo di;
     struct umountinfo mi;
     char pname[16], id[64], prog[SVC_TEXT_MAX];
-    vol_id(sys_port_find("disk"), dev, id);                /* its DISK_OPEN also probes a floppy drive past df0 */
+    int vt = vol_id(sys_port_find("disk"), dev, id);       /* its DISK_OPEN also probes a floppy drive past df0 */
     if (disk_info(dev, &di) < 0) { printf("mount: no such device: %s\n", dev); return 1; }
     if (di.mounted) { printf("mount: %s is already in use\n", dev); return 1; }
     if (!type) {
@@ -57,6 +59,16 @@ static int mount_one(const char *dev, const char *dir, const char *type)
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
     for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++)
         if (!strcmp(mi.port, pname)) { printf("mount: %s is already mounted on %s\n", dev, mi.path); return 1; }
+    if (!z && vt == 1 && !(vol_state & 1)) {               /* not marked clean: a cut while it was written */
+        if (!fsck) printf("mount: %s was not unmounted cleanly: check it (umount it, then fsck.ext2 -y %s)\n", dev, dev);
+        else {
+            printf("mount: %s was not unmounted cleanly: fsck.ext2 -y %s\n", dev, dev);
+            char *fa[] = { "/bin/fsck.ext2", "-y", (char *)dev, 0 };
+            int pid = sys_spawn(fa[0], fa, 0), st = pid < 0 ? pid : sys_wait(pid);
+            if (pid < 0 || st > 1)
+                printf("mount: %s could not be repaired (fsck.ext2: %d): mounted as it is, still marked \"needs a check\"\n", dev, st);
+        }
+    }
     strcpy(prog, z ? "@zfsd " : "@fsd ");
     strcat(prog, dev); strcat(prog, " "); strcat(prog, pname); strcat(prog, " -id "); strcat(prog, id);
     int r = sys_svc_register(pname, prog, -10);
@@ -101,7 +113,7 @@ static int mount_all(void)
             }
             if (nf >= 2 && !(f[3] && strstr(f[3], "noauto"))) {
                 const char *type = (nf >= 3 && strcmp(f[2], "auto")) ? f[2] : 0;
-                if (mount_one(f[0], f[1], type)) bad = 1;
+                if (mount_one(f[0], f[1], type, 1)) bad = 1;
             } else if (nf < 2) { printf("mount: bad line in /etc/fstab: %s\n", line); bad = 1; }
         }
         *eol = save;
@@ -124,5 +136,5 @@ int main(int argc, char **argv)
     if (all) return mount_all();
     if (argc == 1) { list(); return 0; }
     if (!dev || !dir) { printf("usage: mount [-t ext2|zenixfs] DEVICE DIR     mount -a     mount (list)\n"); return 2; }
-    return mount_one(dev, dir, type);
+    return mount_one(dev, dir, type, 0);
 }

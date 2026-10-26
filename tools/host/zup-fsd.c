@@ -22,13 +22,13 @@ int zfs_mount(void)
     ext2_busy = open_busy;
     const char *c = getenv("ZUP_DISKCUT");
     if (c && *c) { hostdisk_limit = (unsigned long)atol(c); hostdisk_die = 1; }
-    if (try_mount("hd0", EXT2_RW)) { fprintf(stderr, "zup-fsd: the image is not a writable ext2 volume\n"); exit(2); }
+    if (try_mount("hd0", EXT2_RW, 0)) { fprintf(stderr, "zup-fsd: the image is not a writable ext2 volume\n"); exit(2); }
     return 0;
 }
 /* after another process (a spawned zup) changed the image: forget every cached block, mount again */
 void zfs_remount(void)
 {
-    if (try_mount("hd0", EXT2_RW)) { fprintf(stderr, "zup-fsd: the image cannot be mounted again\n"); exit(2); }
+    if (try_mount("hd0", EXT2_RW, 0)) { fprintf(stderr, "zup-fsd: the image cannot be mounted again\n"); exit(2); }
 }
 unsigned long zfs_writes(void) { return hostdisk_writes; }
 

@@ -827,7 +827,7 @@ static int recover(void)
     u32 len;
     char *t = slurp(JOURNAL, &len);
     if (!t) return 0;
-    say("a journal from an install that did not end: finishing it or rolling it back (the root stays marked \"needs a check\")");
+    say("a journal from an install that did not end: finishing it or rolling it back");
     u32 v = 0, tn = 0; int undo = 0;
     int ended = len >= 4 && !strcmp(t + len - 4, "end\n");
     int committed = strstr(t, "\ncommit\n") != 0, rolling = strstr(t, "\nrollback\n") != 0;

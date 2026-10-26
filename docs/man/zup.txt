@@ -48,8 +48,8 @@ DESCRIPTION
     too. ext2 has no journal of its own: a cut inside one block-writing
     step can leave a leak (a link count one too high, blocks or an inode
     nothing names), never a lost or shared block; zup does not repair
-    leaks, fsck.ext2 or the PC's e2fsck does (Zenix cannot check its own
-    mounted root yet).
+    leaks: boot checks the marked root with fsck.ext2 at the next start,
+    before zup finishes or rolls back the install (DESIGN D17).
 
     Config files (marked in a package's manifest: /etc/passwd, group,
     fstab, svctab, motd) are compared three ways: one the owner never

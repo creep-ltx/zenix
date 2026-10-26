@@ -2,13 +2,15 @@
 #pragma GCC optimize("Os")              /* embedded in the kernel image: size first */
 #include "libz.h"
 #include "../kernel/diskproto.h"
+#include "../kernel/fsproto.h"
 #include "rdb.h"
 #include "rootpick.h"
 #include "volid.h"
 /* Built into the kernel image: the starter, pid 1 (DESIGN D11). It registers the disk server and the root filesystem
  * server as services (the kernel starts a service when it is first called, and again after it died); its own first
- * calls start them: rootpick's DISK_LIST starts diskd, the root inode (SYS_mountinfo) starts the root server. Then it
- * runs /sbin/zup (DESIGN D15: an update's root half, or what a power cut left), gives the update bundle's memory back,
+ * calls start them: rootpick's DISK_LIST starts diskd, the root inode (SYS_mountinfo) starts the root server. An ext2
+ * root not marked clean is checked first (DESIGN D17): served read-only, /bin/fsck.ext2 -y on it, then the writable
+ * server. Then it runs /sbin/zup (DESIGN D15: an update's root half, or what a power cut left), gives the update bundle's memory back,
  * registers the services listed in /etc/svctab and starts /bin/init on console 1 and waits for it; should init ever
  * end, it says so and starts it again. */
 
@@ -104,6 +106,20 @@ static void update(void)
     sys_update(UPD_RELEASE, 0, 0);
 }
 
+/* fsck.ext2 at boot (D17): its status; a word after 1 minute, stopped after 20 (a cut check is safe: the root stays
+ * marked and is checked again at the next start) */
+static int wait_limited(int pid)
+{
+    if (pid < 0) { say("boot: cannot start /bin/fsck.ext2: the root is not checked\n"); return 0; }
+    for (u32 t = 1; ; t++) {
+        int st = sys_waitnb(pid);
+        if (st != -2) return st;
+        sys_sleep(10);
+        if (t == ZUP_SAY) say("boot: fsck.ext2 is still working\n");
+        if (t == ZUP_STOP) { sys_kill(pid); return sys_wait(pid); }
+    }
+}
+
 int main(void)
 {
     sys_svc_register("disk", "@diskd", -10);
@@ -113,13 +129,32 @@ int main(void)
     const char *dev = rp.have_ram ? "ram0" : rp.found ? rp.name : "ide0";
     char id[64], prog[SVC_TEXT_MAX];
     int type = vol_id(dport, dev, id);   /* which server, from the superblock: a bare disk needs no trial start */
+    int check = type == 1 && !rp.have_ram && !(vol_state & 1);   /* ext2 not marked clean: a cut while writing (D17) */
     strcpy(prog, type == 2 ? "@zfsd " : "@fsd ");
     strcat(prog, dev);
-    strcat(prog, " fs -root -id ");
+    char *w = prog + strlen(prog) + 4;          /* the -root word, or -fsck for the check (the same length) */
+    strcat(prog, check ? " fs -fsck -id " : " fs -root -id ");
     strcat(prog, id);
     sys_svc_register("fs", prog, -10);
     struct umountinfo mi;
     sys_mountinfo(0, &mi);                      /* the root inode: the first call to "fs" starts the root server */
+    if (check) {                                /* served read-only, the device shared: fsck.ext2 -y on it */
+        say("boot: the root was not shut down cleanly: fsck.ext2 -y ");
+        say(dev);
+        say("\n");
+        char *fa[] = { "/bin/fsck.ext2", "-y", (char *)dev, 0 };
+        int st = wait_limited(sys_spawn(fa[0], fa, 0));
+        if (st > 1) {                           /* 0 clean, 1 repaired: fsck.ext2 said so itself */
+            say("boot: fsck.ext2 ended with status ");
+            num((u32)st);
+            say(": the root is used as it is and stays marked \"needs a check\"\n");
+        }
+        struct umsg q;
+        q.type = FS_QUIT;                       /* the check server lets the device go and ends (a stop, not a crash) */
+        sys_call(sys_port_find("fs"), &q);
+        memcpy(w, "-root", 5);                  /* the writable server from now on (a new text: a first start) */
+        sys_svc_register("fs", prog, -10);
+    }
     update();                                   /* an update's root half (D15), before the root is used */
     svctab();                                   /* the services that live on the disk: started when first called */
     char *argv[] = { "/bin/init", 0 };

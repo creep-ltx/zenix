@@ -6,7 +6,10 @@
  * Checks an unmounted ext2 filesystem the way e2fsck does and, with -y, repairs
  * what it safely can: block and inode bitmaps, free counts, link counts,
  * directory entries pointing at unused inodes, '..' entries, file type bytes, and
- * orphaned inodes (moved to /lost+found as #inode).
+ * orphaned inodes (moved to /lost+found as #inode; an empty one is cleared, as
+ * e2fsck does). After attaching orphans it checks again by itself (at most 3 runs).
+ * With -y, when nothing is left to repair, it marks the volume clean (the
+ * superblock's state, bit 0) as its very last write, after a flush (DESIGN D17).
  * It first checks without writing. If it finds anything it cannot repair (duplicate
  * or out-of-range block pointers, an invalid mode, a damaged directory block, a limit
  * of its own) it repairs NOTHING, says so and exits with 4: a half-done repair could
@@ -35,6 +38,8 @@ static u32 *dirlist; static u32 ndirs, dircap;
 static u32 *orphan; static u32 norphans;
 static u32 nfiles;
 static int errors, fixed, unfixable;
+static u32 now;                          /* the deletion time of a cleared inode */
+static u32 wfail;                        /* repair writes that failed */
 
 #define MAXORPHANS 512
 
@@ -49,7 +54,9 @@ int fs_blk_write(u32 lba, u32 count, const void *buf)
     struct umsg m;
     if (!fix) return -1;                 /* the check pass never writes */
     m.type = DISK_WRITE; m.a[0] = (u32)h; m.a[1] = lba; m.a[2] = count; m.a[3] = (u32)buf;
-    return sys_call(port, &m);
+    int r = sys_call(port, &m);
+    if (r) wfail++;                      /* a repair that did not reach the disk: never marked clean */
+    return r;
 }
 
 static u32 L32(const u8 *p) { return p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24; }
@@ -109,6 +116,32 @@ static void walk_tree(u32 blk, int level)
             if (b) walk_tree(b, level - 1);
         }
     }
+}
+
+/* the logical index after the last mapped data block under tree node blk (level 0: a data block), whose first is base */
+static u32 last_end(u32 blk, int level, u32 base)
+{
+    static u8 lb[3][4096];
+    if (!blk || blk >= nblocks) return 0;
+    if (!level) return base + 1;
+    u8 *t = lb[level - 1];
+    if (rblk(blk, t)) return 0;
+    u32 per = bsize / 4, span = 1;
+    for (int k = 1; k < level; k++) span *= per;
+    for (u32 i = per; i-- > 0;) {
+        u32 e = last_end(L32(t + i * 4), level - 1, base + i * span);
+        if (e) return e;
+    }
+    return 0;
+}
+static u32 file_end(const u8 *in)                        /* blocks a file maps, up to its last one */
+{
+    u32 per = bsize / 4, e;
+    if ((e = last_end(L32(in + 40 + 14 * 4), 3, 12 + per + per * per))) return e;
+    if ((e = last_end(L32(in + 40 + 13 * 4), 2, 12 + per))) return e;
+    if ((e = last_end(L32(in + 40 + 12 * 4), 1, 12))) return e;
+    for (int i = 12; i-- > 0;) if (L32(in + 40 + i * 4)) return (u32)i + 1;
+    return 0;
 }
 
 static void walk_inode(const u8 *in, u32 ino, int (*cb)(u32, int, u32))
@@ -233,6 +266,18 @@ static int take_inode(u32 ino)
     in = inode_ptr(ino, 0);
     if (!in) return -1;
     u32 want = cur_blocks * spb;
+    if (t == 0100000 && !L32(in + 108)) {   /* a write cut after its blocks, before the size: as e2fsck, the
+                                                         * size reaches the last block (the F5 order leaves no other) */
+        u32 end = file_end(copy), size = L32(in + 4);
+        if (end && size < (end - 1) * bsize) {
+            problem("  inode %u: i_size is %u, should be %u", ino, size, end * bsize);
+            in = inode_ptr(ino, 0);
+            if (!in) return -1;
+            if (fix) { S32(in + 4, end * bsize); put_inode_dirty(); fixed++; }
+        }
+        in = inode_ptr(ino, 0);
+        if (!in) return -1;
+    }
     if (L32(in + 28) != want) {
         problem("  inode %u: i_blocks is %u, should be %u", ino, L32(in + 28), want);
         if (fix) { S32(in + 28, want); put_inode_dirty(); fixed++; }
@@ -440,6 +485,8 @@ static int run(void)
                     u32 o2 = L16(db + 4);
                     if (o2 + 12 <= bsize && L16(db + o2 + 4) >= 8 && db[o2 + 6] == 2) {
                         if (dotdot[dino] <= ninodes && links[dotdot[dino]] > 0) links[dotdot[dino]]--;
+                        u8 *pin = inode_ptr(parent[dino], 0);     /* the new parent's count up first, the old */
+                        if (pin) { S16(pin + 26, L16(pin + 26) + 1); put_inode_dirty(); }   /* one's down in pass 4 */
                         S32(db + o2, parent[dino]);
                         wblk(blk, db);
                         if (links[parent[dino]] < 65535) links[parent[dino]]++;
@@ -453,6 +500,17 @@ static int run(void)
     /* orphans: inodes in use that no reachable directory names */
     for (u32 ino = first_ino; ino <= ninodes; ino++) {
         if (!tb(usedi, ino)) continue;
+        if (!tb(isdir, ino) && links[ino] == 0) {
+            u8 *in = inode_ptr(ino, 0);
+            if (!in) return 8;
+            if ((L16(in) & 0170000) == 0100000 && !L32(in + 4) && !L32(in + 28) && !L32(in + 104)) {   /* an empty file: cleared */
+                problem("  inode %u is in use but not reachable from any directory, and empty: cleared", ino);
+                if (fix) { S16(in + 26, 0); S32(in + 20, now ? now : 1); put_inode_dirty(); fixed++; }
+                cb_(usedi, ino);                         /* the inode first, its bitmap bit in pass 5 (the F5 order) */
+                nfiles--;
+                continue;
+            }
+        }
         if (tb(isdir, ino) ? !tb(reach, ino) : links[ino] == 0) {
             problem("  inode %u is in use but not reachable from any directory", ino);
             if (norphans < MAXORPHANS) orphan[norphans] = ino;
@@ -466,7 +524,6 @@ static int run(void)
 
     /* ---- pass 4: link counts ---- */
     printf("Pass 4: Checking reference counts\n");
-    int relink = 0;
     for (u32 ino = 2; ino <= ninodes; ino++) {
         if (!tb(usedi, ino) || (ino < first_ino && ino != 2)) continue;
         u8 *in = inode_ptr(ino, 0);
@@ -476,32 +533,6 @@ static int run(void)
             problem("  inode %u: link count is %u, should be %u", ino, lc, (u32)links[ino]);
             if (fix) { S16(in + 26, links[ino]); put_inode_dirty(); fixed++; }
         }
-    }
-    if (fix && norphans && !unfixable) {
-        /* attach orphans to /lost+found using the filesystem library */
-        if (ext2_mount()) { printf("fsck.ext2: cannot attach orphans (mount failed)\n"); unfixable++; }
-        else {
-            struct inode lf, root;
-            if (ext2_iget(2, &root) || ext2_lookup(&root, "lost+found", 10, &(u32){0}) ) {
-                if (ext2_mkdir(&root, "lost+found")) printf("fsck.ext2: cannot create /lost+found\n");
-            }
-            if (!ext2_namei("/lost+found", 2, &lf, 0)) {
-                for (u32 k = 0; k < norphans; k++) {
-                    char name[16];
-                    u32 v = orphan[k]; int n = 0; char t[12];
-                    do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v);
-                    name[0] = '#';
-                    for (int j = 0; j < n; j++) name[1 + j] = t[n - 1 - j];
-                    name[1 + n] = 0;
-                    if (!ext2_link(&lf, name, orphan[k])) { printf("  attached inode %u as /lost+found/%s\n", orphan[k], name); fixed++; relink = 1; }
-                    if (ext2_iget(lf.ino, &lf)) break;
-                }
-            }
-        }
-    }
-    if (relink) {
-        printf("fsck.ext2: orphans attached: run fsck.ext2 -y again to settle the link counts\n");
-        return 1;
     }
 
     /* ---- pass 5: bitmaps and counts ---- */
@@ -556,6 +587,47 @@ static int run(void)
         if (bsize == 1024) { fs_blk_write(2, 2, sb); }
         else if (!rblk(0, blk0)) { memcpy(blk0 + 1024, sb, 1024); wblk(0, blk0); }
     }
+    int relink = 0;
+    if (fix && norphans && !unfixable) {
+        /* attach orphans to /lost+found using the filesystem library, after pass 5: it allocates from repaired bitmaps */
+        if (ext2_mount()) { printf("fsck.ext2: cannot attach orphans (mount failed)\n"); unfixable++; }
+        else {
+            struct inode lf, root;
+            if (ext2_iget(2, &root) || ext2_lookup(&root, "lost+found", 10, &(u32){0}) ) {
+                if (ext2_mkdir(&root, "lost+found")) printf("fsck.ext2: cannot create /lost+found\n");
+            }
+            if (!ext2_namei("/lost+found", 2, &lf, 0)) {
+                for (u32 k = 0; k < norphans; k++) {
+                    char name[16];
+                    u32 v = orphan[k]; int n = 0; char t[12];
+                    do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v);
+                    name[0] = '#';
+                    for (int j = 0; j < n; j++) name[1 + j] = t[n - 1 - j];
+                    name[1 + n] = 0;
+                    if (!ext2_link(&lf, name, orphan[k])) { printf("  attached inode %u as /lost+found/%s\n", orphan[k], name); fixed++; relink = 1; }
+                    if (ext2_iget(lf.ino, &lf)) break;
+                }
+            }
+        }
+    }
+    if (relink) return 1;                                    /* main runs it again: the counts and bitmaps */
+    return 0;
+}
+
+/* the volume marked clean: everything written so far made durable first, then the state's bit 0, then a flush */
+static int disk_flush(void)
+{
+    struct umsg m;
+    m.type = DISK_FLUSH; m.a[0] = (u32)h;
+    int r = sys_call(port, &m);
+    return r == -95 ? 0 : r;                 /* a disk that cannot flush has had everything sent to it */
+}
+static int mark_clean(void)
+{
+    fix = 1;
+    if (disk_flush() < 0 || fs_blk_read(2, 2, sb)) return -1;
+    S16(sb + 58, L16(sb + 58) | 1);
+    if (fs_blk_write(2, 2, sb) || disk_flush() < 0) return -1;
     return 0;
 }
 
@@ -622,8 +694,9 @@ int main(int argc, char **argv)
     }
 
     printf("fsck.ext2: %s: %u blocks of %u bytes, %u groups, %u inodes%s\n", dev, nblocks, bsize, ngroups, ninodes, want_fix ? " (repair mode)" : "");
+    now = (u32)sys_time();
     fix = 0;                                         /* first a check that writes nothing */
-    int r = run();
+    int r = run(), total = 0;
     if (r) return r;
     if (want_fix && errors && unfixable) {
         printf("fsck.ext2: %u problem(s) cannot be repaired safely: nothing was changed (use e2fsck)\n", unfixable);
@@ -632,13 +705,25 @@ int main(int argc, char **argv)
     if (want_fix && errors) {
         printf("fsck.ext2: repairing\n");
         fix = 1;
-        r = run();
+        for (int k = 0; ; k++) {                     /* orphans attached: again, for their counts and the bitmaps */
+            r = run();
+            total += fixed;
+            if (r != 1) break;
+            if (k == 2) { printf("fsck.ext2: orphans attached, but their counts did not settle in 3 runs\n"); return 4; }
+            printf("fsck.ext2: orphans attached to /lost+found: checking again\n");
+        }
         if (r) return r;
+        if (wfail) { printf("fsck.ext2: %u repair write(s) failed: the volume stays marked\n", wfail); return 8; }
+        fix = 0;                                     /* proof: a run that writes nothing finds nothing */
+        printf("fsck.ext2: checking the repair\n");
+        if ((r = run())) return r;
+        if (errors) { printf("fsck.ext2: %u problem(s) left after the repair (use e2fsck)\n", errors); return 4; }
     }
     printf("fsck.ext2: %s: %u files, %u/%u blocks used\n", dev, nfiles, nblocks - (L32(sb + 12)), nblocks);
     if (unfixable) { printf("fsck.ext2: %u problem(s) could not be repaired\n", unfixable); return 4; }
-    if (errors && !fix) { printf("fsck.ext2: %u problem(s) found: run with -y to repair\n", errors); return 4; }
-    if (fixed) { printf("fsck.ext2: %u repair(s) made\n", fixed); return 1; }
+    if (errors && !want_fix) { printf("fsck.ext2: %u problem(s) found: run with -y to repair\n", errors); return 4; }
+    if (want_fix && mark_clean()) { printf("fsck.ext2: %s: could not mark it clean (a write or flush failed)\n", dev); return 8; }
+    if (total) { printf("fsck.ext2: %u repair(s) made\n", total); return 1; }
     printf("fsck.ext2: clean\n");
     return 0;
 }

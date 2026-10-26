@@ -24,6 +24,19 @@ DESCRIPTION
                 (user/volid.h, the same code mount(8) uses for the
                 filesystems it mounts). Asking for the root inode starts
                 it.
+    An ext2 root (not the RAM disk) whose superblock does not say
+    "cleanly unmounted" (a power cut within a second of writing, or
+    during an install) is checked first (DESIGN D17): fs is registered
+    with -fsck instead of -root (the server serves the root read-only and
+    leaves the device to fsck.ext2), boot prints "boot: the root was not
+    shut down cleanly: fsck.ext2 -y DEVICE" and runs /bin/fsck.ext2 -y
+    DEVICE, whose own lines say what it found and repaired. Then boot
+    stops that server (FS_QUIT) and registers fs with -root again: the
+    next call starts the writable server. fsck.ext2 still working after
+    a minute is reported, after 20 minutes it is stopped. If it ends
+    with a status above 1 ("boot: fsck.ext2 ended with status N: the root
+    is used as it is and stays marked") or cannot be started, boot goes
+    on with the writable root, which is checked again at the next start.
     Then it runs /sbin/zup (zup(8)) and waits for it: zup installs the
     root half of an update zenixboot left in memory, finishes or rolls
     back what a power cut left, or puts the previous version back; with

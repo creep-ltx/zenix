@@ -737,9 +737,19 @@ device"). A floppy without a uuid is not served again after a restart (it may ha
 first request and rebuilds its open counts, so a deleted file held open keeps its data and frees its space at its last
 close; if its predecessor ended in the middle of a request it clears the superblock's "cleanly unmounted" state bit
 (Linux and e2fsck then check the volume; Zenix keeps writing) and says "DEV was being changed when its server
-ended: check it with fsck.ext2". `FS_MARK` (root only, D15) sets or clears that bit on request and answers the
-state before: zup marks the root while it installs. `zfsd` does not know `FS_MARK` (-ENOSYS): ZenixFS commits
-atomically.
+ended: check it with fsck.ext2".
+**The clean mark (DESIGN D17, docs/d17-ext2-clean-mark.md).** On a writable ext2 volume fsd clears that bit (written
+and flushed) before the first request that may write after a clean moment (`FS_WRITE CHMOD CHOWN UTIMES LINK SYMLINK
+MKDIR UNLINK RMDIR RENAME`, `FS_OPEN` with `O_CREAT`/`O_TRUNC`, `FS_CLOSE` while an orphan is open; the request
+fails with -EIO, changing nothing, if the mark cannot be written), and sets it again between requests 1 s after the
+last such request (a timed `SYS_recv`), at `FS_SYNC` and at `FS_QUIT`, after a flush - but never while an open file's
+last name has gone (an orphan), while zup holds the mark, or when the volume needs a check: it was not clean when this
+server mounted it, a crash in a request, a failed block write, or damage met (`ext2_ndamage`). So the bit never says
+clean while the volume holds a half-done change. `FS_MARK` (root only, D15): 1 holds the mark (zup, while it
+installs), 0 lets it go; both answer 1 if the volume needed no check before (fsd's own short mark does not count),
+and 0 never clears a real need. With `-fsck` (boot's check of the root) fsd applies the root's rules but serves the
+volume read-only on a plain device handle, so `fsck.ext2` may open it raw. `zfsd` does not know `FS_MARK` (-ENOSYS):
+ZenixFS commits atomically.
 A mounted filesystem's server is the same built-in image, registered by `mount` (the mount table, below). It answers
 `FS_ROOT` (root inode, device and type names) and `FS_QUIT` (umount: sync, release the device, exit). Two filesystem
 servers are built into the kernel image, `fsd` (ext2) and `zfsd` (ZenixFS); there is no other copy of them. **Which one serves the root** is boot's choice
@@ -784,7 +794,11 @@ working directory reached through a symbolic link behaves as its text says once 
 ### boot - the starter (`user/boot.c`)
 pid 1, the only process the kernel creates itself. It registers `disk` -> `@diskd` (nice -10), picks the root (above),
 registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10), asks for the root inode (`SYS_mountinfo`
-0: the first call to `fs` starts the root server), registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
+0: the first call to `fs` starts the root server), checks an ext2 root that is not marked clean (DESIGN D17: `fs` first
+registered with `-fsck`, a read-only server that leaves the device to `/bin/fsck.ext2 -y DEVICE`, which boot runs
+and waits for at most 20 minutes; then `FS_QUIT` to it and `fs` registered with `-root` again, so the next call starts
+the writable server; the kernel forgets that a service served when its program text changes, so a writable root
+server that fails to start is still D11's panic), runs `/sbin/zup`, registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
 [ARGUMENTS]` a line, man/boot.txt; a bad line is reported on console 1 and skipped), then spawns `/bin/init` on console 1 and waits for it; should init
 end, it says so and starts it again. (It exists because the idle process cannot block on a message.) The logins on the
 consoles are init's work (section 11, man/init.txt).
@@ -892,9 +906,10 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   count one too high, an unnamed inode or directory, blocks or inodes marked in use that nothing holds, free counts a
   little off: space lost until `fsck.ext2` or `e2fsck` gives it back. Tested on the host by cutting the disk after
   each of an update's 2200 block writes (`tools/zup-host-test.sh` section 3, `tools/e2safe.py` sorts e2fsck's findings
-  into leaks and the rest). An ext2 volume is not marked "needs a check" while it is mounted (only by a server that
-  ended in a request, and by zup while it installs), so a cut in ordinary use leaves its leaks on a volume that says
-  clean (F6). ZenixFS's rename is one commit, and an old target that loses its
+  into leaks and the rest). Such a cut leaves the volume marked "not cleanly unmounted" (the clean mark, section 9,
+  DESIGN D17): boot checks a marked root with `fsck.ext2 -y` at the next start, `mount -a` a marked volume of
+  `/etc/fstab`, and `fsck.ext2` repairs every leak a cut leaves in one run (`tools/zup-host-test.sh`,
+  `tools/ext2-host-test.sh`, `tools/rootcheck-test.sh`). ZenixFS's rename is one commit, and an old target that loses its
   last link is freed only after the new entry is in place (freeing a big file may commit on the way).
 - Not done: moving directories between parents (rename answers -EXDEV, so `mv` copies), triple-indirect files, a
   journal.

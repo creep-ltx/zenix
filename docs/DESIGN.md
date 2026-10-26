@@ -176,6 +176,13 @@ Unix signals (no handlers for Ctrl-C, no SIGCHLD, SIGALRM or SIGPIPE): the netwo
 all three. **How.** Exec's signal bits underneath (a pending and a waiting word per process, one AND decides a wake-up,
 no lost wake-ups), per-object waiters, `poll`/`select` on one new call, and Unix signals with handlers delivered through
 a frame on the user stack and a libz trampoline. The full design: [d16-events-and-signals.md](d16-events-and-signals.md).
+## D17. The ext2 clean mark and the check at boot (audit 2026-10-26 F5, F6; design note revision 2 after two reviews; built on branch fsck)
+**Why.** ext2 has no journal: a power cut while it is written leaves leaks (since F5 never worse), but Zenix never
+marked a volume "not cleanly unmounted" during use and never repaired one by itself. **How.** fsd marks a writable
+ext2 volume before the first change and clean again one second after the last one (AmigaOS FFS's bitmap rule, so an
+idle switch-off costs nothing), never over a half-done change; boot checks a marked root with `fsck.ext2 -y` while a
+read-only server serves it, then starts the writable one; `mount -a` checks a marked volume of `/etc/fstab`. No new
+system call or message. The full design: [d17-ext2-clean-mark.md](d17-ext2-clean-mark.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).

@@ -36,7 +36,12 @@ DESCRIPTION
     extents, 64bit, flex_bg, ...) is refused and the features are named;
     one with an ext3 journal, an unknown read-only feature or the "has
     errors" state is mounted read-only with a line saying why (every write
-    fails, EROFS). Details: docs/architecture.md section 10.
+    fails, EROFS). Details: docs/architecture.md section 10. A volume that
+    was not unmounted cleanly (a power cut while it was written) is
+    checked first by mount -a: "mount: DEV was not unmounted cleanly:
+    fsck.ext2 -y DEV", then fsck.ext2's lines; one fsck.ext2 cannot
+    repair is mounted as it is and stays marked. A plain mount only warns
+    (umount it, then run fsck.ext2 -y). DESIGN D17.
     ZenixFS: changes are kept in memory and committed atomically three
     seconds after the first change, at sync(1) and at umount, so a power
     cut leaves the volume as it was at the last commit (docs/zenixfs.md).

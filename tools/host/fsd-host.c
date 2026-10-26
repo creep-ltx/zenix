@@ -14,6 +14,10 @@
  *   as UID GID              later requests come from this user
  *   raw on|off              later requests come as a user's own SYS_call (no UMSG_KERNEL), not from the kernel
  *   utimes P T | chown P UID GID     FS_UTIMES (T "now" = FS_UTIME_NOW) | FS_CHOWN
+ *   state                   the clean mark (DESIGN D17): the state's bit 0 on the image, and fsd's marked, need, hold,
+ *                           orphans and the block writes it made outside the mark
+ *   idle                    what fsd does 1 s after the last change (the quiet moment)
+ * At the end a line "unmarked-writes N" if fsd wrote a block while the volume was not marked (never right).
  * open FLAGS also take x (O_EXCL).
  * An inode argument "%N" is the inode number the N-th successful open returned.
  * Every command prints one line "CMD -> RESULT ...". Used by tools/ext2-host-test.sh. */
@@ -65,7 +69,7 @@ int main(void)
         int r = 0;
         struct ustat st;
         if (!strcmp(cmd, "mount")) {
-            r = try_mount("hd0", a && !strcmp(a, "root") ? EXT2_RW : EXT2_ANY);
+            r = try_mount("hd0", a && !strcmp(a, "root") ? EXT2_RW : EXT2_ANY, 0);
             printf("mount -> %d%s\n", r, ext2_readonly ? " readonly" : "");
             continue;
         }
@@ -116,10 +120,22 @@ int main(void)
         else if (!strcmp(cmd, "writes")) { extern unsigned long hostdisk_writes; printf("writes -> %lu\n", hostdisk_writes); continue; }
         else if (!strcmp(cmd, "sync")) r = req(FS_SYNC, 0, 0, 0, 0);
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);
-        else if (!strcmp(cmd, "unclean")) r = ext2_mark_unclean();     /* what a restarted fsd does after a crash */
+        else if (!strcmp(cmd, "unclean")) {                             /* what a restarted fsd does after a crash */
+            fsd_marking = 1; r = ext2_mark_unclean(); fsd_marking = 0;
+            if (!r) need = marked = 1;
+        }
         else if (!strcmp(cmd, "mark")) r = req(FS_MARK, (u32)atoi(a), 0, 0, 0);   /* FS_MARK (D15): 1 = needs a check, 0 = clean */
+        else if (!strcmp(cmd, "idle")) { quiet(); r = marked; }
+        else if (!strcmp(cmd, "state")) {
+            unsigned char sec[512];
+            r = fs_blk_read(2, 1, sec);
+            printf("state -> %d marked %d need %d hold %d orphans %d unmarked %lu\n", r ? -1 : sec[58] & 1, marked, need, hold,
+                   norphans, fsd_unmarked_writes);
+            continue;
+        }
         else { printf("%s -> unknown command\n", cmd); continue; }
         printf("%s -> %d\n", cmd, r);
     }
+    if (fsd_unmarked_writes) printf("unmarked-writes %lu\n", fsd_unmarked_writes);
     return 0;
 }

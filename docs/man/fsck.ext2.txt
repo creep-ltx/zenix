@@ -10,9 +10,16 @@ DESCRIPTION
     Checks an UNMOUNTED ext2 filesystem the way e2fsck does, in five passes,
     and reports what is wrong. With -y it repairs what it safely can:
     block and inode bitmaps, free counts, link counts, directory entries
-    pointing at unused inodes, ".." entries, file type bytes, and orphaned
-    inodes (moved to /lost+found as #inode). By default (or with -n) it only
-    reports.
+    pointing at unused inodes, ".." entries, file type bytes, a file's
+    size that stops before its last block (as e2fsck: the size reaches it),
+    and orphaned inodes (moved to /lost+found as #inode; an empty file
+    nothing names is cleared instead, as e2fsck -p does). After attaching
+    orphans it checks again by itself, at most 3 runs. A repair ends with
+    a run that writes nothing and must find nothing; only then, and when
+    the volume was clean from the start, -y marks it "cleanly unmounted"
+    (the superblock's state, as its very last write, after a flush). A
+    power cut during a repair leaves it marked, and the next run finishes
+    the work. By default (or with -n) it only reports and never writes.
     It always checks first without writing. If it finds damage it cannot
     repair - duplicate or out-of-range block pointers, an invalid mode, a
     damaged directory block, a damaged resize inode, more than 512
@@ -21,8 +28,11 @@ DESCRIPTION
     An inode that looks used but is free in the inode bitmap counts as a
     file only if a directory names it (its bit is then set again).
     Directories are followed through all levels of indirect blocks.
-    A device that the system has mounted is refused by the disk server; to
-    check the root disk, boot from other media.
+    A device that the system has mounted is refused by the disk server.
+    The root is checked by boot at the start when it was not shut down
+    cleanly, and a volume /etc/fstab lists by mount -a (DESIGN D17,
+    docs/d17-ext2-clean-mark.md); to check it at any other time, boot
+    from other media.
 
 OPTIONS
     -y    repair what can be repaired
@@ -30,7 +40,8 @@ OPTIONS
 
 EXIT STATUS
     0 clean, 1 repaired, 4 errors remain, 8 operational error (cannot open,
-    not ext2), 2 usage error.
+    not ext2, out of memory, a repair write or the final mark failed),
+    2 usage error.
 
 NOTES
     Block sizes up to 4096 are supported, and the features of a modern
@@ -44,4 +55,4 @@ NOTES
     with a non-zero status; nothing is cut short silently.
 
 SEE ALSO
-    mkfs.ext2(1), fdisk(1), df(1)
+    mkfs.ext2(1), fdisk(1), df(1), mount(8), sync(1)
