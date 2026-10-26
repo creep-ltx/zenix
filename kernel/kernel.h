@@ -123,14 +123,20 @@ int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
 int gfx_up(void);
 void gfx_panic(void);            /* panic with the display up: dark red background, white text, the text stays */
-void gfx_cell(int row, int col, u8 ch, u8 attr);
-void gfx_scroll(void);
-void gfx_clear_text(void);
+extern int gfx_depth;            /* bitplanes: 1, 3 or 4 (DESIGN D14; 0: no display) */
+extern const u16 gfx_palette[16];       /* the 16 ANSI colours, 12 bits */
+/* colour: foreground in the low nibble, background in the high one (0x07: grey on black) */
+void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour);
+void gfx_scroll(u8 colour);             /* the whole screen up a row; the new row takes colour's background */
+void gfx_clear_text(u8 colour);
+void gfx_fill_rows(int row, int n, u8 colour);  /* n rows take colour's background (the blitter) */
+void gfx_move_rows(int dst, int src, int n);    /* n rows from src to dst, overlapping or not (the blitter) */
 void gfx_vblank(void);
 void term_putc(int con, char c);
 void term_write(int con, const char *s, u32 n);
 void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
 int term_back(void);
+int term_ckm(void);                     /* the console on the screen wants ESC O A arrows (DECCKM) */
 int term_size(void);                    /* rows << 16 | columns */
 void con_switch(int con);               /* show console con (1..NCONS); an unused one asks init for a login */
 int con_in_use(int con);                /* is a live process's controlling tty this console? */

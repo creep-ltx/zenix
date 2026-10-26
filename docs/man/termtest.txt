@@ -4,7 +4,7 @@ NAME
     termtest - terminal feature test
 
 SYNOPSIS
-    termtest
+    termtest [columns|colours|scroll]
 
 DESCRIPTION
     Draws a test page: bold, underline and inverse text, a 36-column box
@@ -13,6 +13,16 @@ DESCRIPTION
     switches the terminal to raw mode and shows each key you press as the
     escape code or byte received (arrows, function keys, Delete). Press q to
     quit. A development tool.
+
+    The other pages are for the screenshot tests (tools/colour-test.sh):
+    termtest columns: rows 1-7 number the 80 columns in binary (a lit
+    cell is a set bit, row 1 the lowest), row 8 is lit across all 80; q
+    quits. termtest colours: the 16 colours as blocks (rows 3-4, five
+    columns each) and as text on black and on white, with bold, underline
+    and inverse, a 256-colour and a true-colour sample; q quits. termtest
+    scroll: 100 coloured lines (every fifth erased to the line's end with
+    a background colour), then a scroll region with inserted and deleted
+    lines; it ends by itself.
 
 SEE ALSO
     clear(1), edit(1)

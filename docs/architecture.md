@@ -813,16 +813,64 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   meanwhile as a half line goes into the queue as it is (before, `tty_setmode` dropped it: `rm /etc/motd` typed
   during a slow command arrived as `c/motd`).
 - **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
-  NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100: cursor motion, erase, insert/delete, scroll regions,
+  NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100/xterm: cursor motion, erase, insert/delete, scroll regions,
   bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position. Arrows and function keys
-  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it.
-- **Display** (`gfx.c`): 640 pixels wide hires, one bitplane, the whole screen text (grey on black). `gfx_init`
+  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it and `TERM=xterm-16color`
+  (xterm's keys and 16 colours; it was `vt100`; over a serial line the other side's getty picks `TERM`). Programs
+  colour their output by one libz rule (`color_auto`: the output is a terminal, `TERM` set and not `dumb`,
+  `NO_COLOR` not set): `ls` and `grep` (`--color=auto|always|never`, GNU's bytes), the shell's default prompt,
+  `edit`'s status line; `less` passes colour codes through. **Colours** (DESIGN D14):
+  each cell has a character, an attribute byte and a colour byte (foreground in the low nibble, background in the
+  high one; grey on black is `0x07`). SGR `30-37`/`40-47`, `90-97`/`100-107`, `39`/`49`; `0` and a bare `ESC[m` reset
+  everything (so does `ESC c`); `1` is bold and never changes the colour; `38;5;n`/`48;5;n` (xterm's 256: the 16, a
+  6x6x6 cube, 24 greys) and `38;2;r;g;b`/`48;2;...` (also with `:`, with or without a colour space) are shown as the
+  nearest of the 16 (by distance in RGB to the palette); `2 3 5 8 9` are ignored. How a colour looks depends on the
+  depth (Display, below). **Erase takes the background colour** (as Linux and xterm): erased cells and the rows a
+  scroll brings in get the default foreground on the current background. **Region scrolls are blitter work:** `CSI
+  S/T/L/M`, `ESC M` and line feeds inside a scroll region move the region's rows with one blitter copy and fill the new
+  rows with one blitter fill (before, the CPU redrew every row of the region); whole erased rows (`ESC[2J`, `ESC[J`,
+  `ESC[2K`) are blitter fills too. `ESC 7`/`ESC 8` save and restore the colours and attributes with the cursor (as
+  xterm). **The scrollback** keeps each line's characters and one colour byte per cell, inverse folded in (foreground
+  and background swapped when the line is pushed): 200 lines x 80 x 2 = 32 KB per console, allocated when the console
+  first scrolls; bold and underline are not kept there. **Cursor-key mode** (DECCKM, `ESC[?1h`/`ESC[?1l`, per console,
+  reset by `ESC c`): `kbd.c` sends the unmodified arrows as `ESC O A`..`ESC O D` while it is set (programs on another
+  computer over `cu` switch it on). The cursor is the cell drawn inverse; where foreground and background are the same
+  it uses the default colours so it stays visible. `term.c` is built `-Os`, its per-character path `-O2`. Verified on
+  the host (`tools/term-test.sh`: each escape's colours, the mappings, BCE, region scrolls as blitter calls, the
+  scrollback's colour byte, DECCKM, and a fuzz after which the screen always equals the grid, PAL and NTSC). The escape parser follows
+  ECMA-48 (DESIGN D14): a CSI sequence is parameter bytes 0x30-0x3F (up to 16 parameters kept, each clamped at 9999;
+  `:` sub-parameters as in `38:5:196`), intermediate bytes 0x20-0x2F and a final byte 0x40-0x7E; a sequence it does
+  not know is swallowed whole, never printed; a private marker (`?`, `>`, `=`, `<`) makes it a private sequence, of
+  which only `?25` (the cursor) and `?1` (DECCKM) with `h`/`l` are acted on; OSC and the other control strings (window titles) are swallowed up
+  to BEL or `ESC \`, `ESC ( B` and the like up to their final byte; CAN and SUB cancel a sequence; a control character
+  inside one acts and the sequence goes on (tools/term-test.sh, on the host).
+- **Display** (`gfx.c`, DESIGN D14): 640 pixels wide hires, the whole screen text. `gfx_init`
   measures the beam's last line for about 60 ms (E-clock timed): above 280 (312 on PAL) the display is 256 lines,
-  32 rows; else (262 on NTSC) 200 lines, 25 rows and `DIWSTOP` to match, so no row is hidden below the picture. A
-  two-colour **Copper list** points at the text; scrolling just moves the Copper's bitplane pointer at vertical
-  blank; when the 2-screen buffer wraps, the **blitter** copies the visible rows back to the top (identical pixels,
-  so there is no visible switch). Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
-  before the OS is killed. A kernel panic turns it white on dark red.
+  32 rows; else (262 on NTSC) 200 lines, 25 rows and `DIWSTOP` to match, so no row is hidden below the picture.
+  **How many bitplanes** the machine decides at boot, because the display takes chip-bus time from the CPU: **AGA**
+  (Lisa's id register `DENISEID` reads `$F8`, 16 reads alike) with fast RAM or 2 MB of chip RAM: **4 planes, 16
+  colours, fetched 64 bits at a time (FMODE 3)**, which costs the 40 bus slots per line that one plane costs at the
+  16-bit fetch (never 4 planes at FMODE 0: that takes every slot of the visible lines); **OCS/ECS with fast RAM: 3
+  planes**, 8 colours (a bright foreground is the colour plus bold, bright black is grey); **otherwise 1 plane**, grey
+  on black (the colours are not shown, inverse is the glyph inverted). `make GFXDEPTH=1|3|4` builds a kernel that
+  uses that depth (the screenshot tests; 4 only on AGA). If chip RAM is short the next smaller depth is used. The boot
+  log says which: `display: AGA chips, 4 bitplanes at 64-bit fetch (FMODE 3)` and `display: 640x256, 4 bitplanes,
+  80x32 text`. At FMODE 3 the fetch window is `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0 (one plane at the old
+  fetch uses `$3C`/`$D4`): found by the screenshot test of `termtest columns` (all 80 columns, the edges exactly where
+  one plane puts them, nothing repeated; knowledge base `amiga/zenix-colour-console.md`), not yet seen on the A1200.
+  The planes are **interleaved** (the planes of a line follow each other, 80 bytes each; modulo (N-1) x 80), so one
+  pointer serves all planes and whole lines are cleared or copied with one blit per plane or one blit. The
+  **Copper list** writes FMODE, `BPLCON3` = `$0C00` and `BPLCON4` = `$0011` (AGA only: a previous program's
+  colour-index XOR survives a warm reset), `BPLCON0`-`2`, the modulos, the fetch window and the 2/8/16 colours (12
+  bits) every frame, then WAITs for line `$20` (before the picture on the `$2C` and `$38` builds, PAL and NTSC) and
+  moves the plane pointers. Scrolling moves those pointers at vertical blank, written only while the beam is before
+  line `$1C` (else at the next vertical blank), so all planes move together; when the 2-screen buffer wraps, the
+  **blitter** copies the visible rows back to the top (identical pixels, so there is no visible switch; every wait
+  for the blitter gives up after 500 ms and says so once on the log). A glyph line is drawn by the CPU, one byte per
+  plane: `(glyph & m1) ^ m2` (m1 set where the foreground and background bits differ, m2 where the background bit is
+  set); with more than one plane the glyphs are kept a second time with each line repeated in all four bytes of a
+  long (7 KB), so a line is one read. Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
+  before the OS is killed. A kernel panic turns the background dark red and every other colour white.
 - **Input path: interrupts queue, `kwork` works** (`kernel/main.c`, audit B4/B5). The interrupt handlers do
   only what cannot wait: the keyboard handler (`kbd_isr`) reads the byte, answers the keyboard's handshake and puts
   the raw code into a 128-slot ring; the serial handler (`serial_rx_isr`, level 5) moves each byte from Paula into a
@@ -975,7 +1023,8 @@ outputs (`tools/cmds-test.sh`).
   `tools/mkadf.py` refuses an image that is over and says by how much. The kernel is built with `-O2`, except the five
   truly cold drivers - `floppy`, `emmc`, `a3000`, `rtc` and `kbd` (every wait in them is timed by the E-clock or a timer)
   - which are built with `-Os` (`KOPT_*` in the Makefile, DESIGN D13 step 0: about 6.8 KB smaller); the floppy's MFM
-  track coding (`mfm.h`) keeps `-O2` through a pragma in `floppy.c`.
+  track coding (`mfm.h`) keeps `-O2` through a pragma in `floppy.c`. `gfx` is built with `-Os` too (DESIGN D14: its
+  set-up code), its glyph drawing with `-O2` (a function attribute).
 - Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
   device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
   emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,
@@ -984,7 +1033,11 @@ outputs (`tools/cmds-test.sh`).
   `tools/kbd-test.sh` presses keys on the emulated keyboard (wtype in the cage rig) and checks the keymap layers,
   Caps Lock and key repeat. `tools/diag-test.sh` checks the boot stage colours (test builds that stop at each
   stage; the screenshot's pixel colour), the split and red-bar panic screens, and the previous-boot log across a
-  warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `make BUILD=/tmp/x` builds everything
+  warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `tools/colour-test.sh` checks the
+  colour console by screenshots at 1, 3 and 4 bitplanes (`make GFXDEPTH=n`): `termtest columns` decoded cell by cell
+  (all 80 columns, the edges where one plane has them), the 16 colours against the palette, a screen after `termtest
+  scroll` pixel-identical to a redraw from the grid, the scrollback's colours; a serial script's `shot NAME` line
+  takes a screenshot when the script gets there (`shot.py`, `serial-tap.py`). `make BUILD=/tmp/x` builds everything
   in another directory (the kernel finds `stage0.bin` and the built-in servers through `-I$(BUILD)`).
   `tools/zenixboot-test.sh` boots with no floppy: Kickstart 3.1 on an A1200 (68EC020, and a 68040), Kickstart 3.2
   and 2.05 (an A600 with a 68020 and chip RAM only) when those ROMs are given, a 68000 that zenixboot must refuse, and

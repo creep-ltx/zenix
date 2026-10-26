@@ -19,6 +19,12 @@ KEYS
     A short text is just printed. When the output is not a terminal, less
     acts like cat.
 
+    Colour codes (SGR: ESC [ ... m, as ls --color and grep --color write
+    them) pass through to the terminal, as GNU less -R does, and take no
+    room on the line; each row ends with the colours reset, and a row that
+    continues a long line starts with the line's colours. Other control
+    characters are shown as ^X (ESC as ^[).
+
 NOTES
     An access the user is not allowed is reported as "permission denied".
     Running out of memory is reported ("out of memory") and ends the command

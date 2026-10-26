@@ -14,13 +14,13 @@ python3 tools/cu-test.py $OUT/cu.fs-uae "$SERIAL" > $OUT/run.log 2>&1
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 got=$(debugfs -R "cat /tmp/cu.out" $BD/zenix.hdf 2>/dev/null | tr -d '\r')
-log=$(tr -d '\r' < $OUT/serial.log)
+log=$(tr -d '\r' < $OUT/serial.log | sed 's/\x1b\[[0-9;:]*[mK]//g')
 echo "$got" | grep -q 'Connected to /dev/ttyS0' && check "cu opens /dev/ttyS0" ok || check "cu opens /dev/ttyS0" bad
 echo "$got" | grep -q 'hello-from-pc' && check "the other computer's line reaches cu's screen" ok || check "the other computer's line reaches cu's screen" bad
 # the serial log holds what Zenix sent; from the typed cu command on: cu's "abc" + CR comes first, alone (the
 # console's copy is off while cu runs, so neither the PC's line nor cu's screen output is echoed back), then the
 # console's copy again (the prompt, "echo back", "back"). The host test (serial-test.sh) checks the kernel log too.
-after=$(printf '%s\n' "$log" | sed 's/\x1b\[K//g' | sed -n '/cu > \/tmp\/cu\.out$/,$p' | sed 1d)
+after=$(printf '%s\n' "$log" | sed 's/\x1b\[[0-9;:]*[mK]//g' | sed -n '/cu > \/tmp\/cu\.out$/,$p' | sed 1d)
 first=$(printf '%s\n' "$after" | head -1)
 case "$first" in abc*) check "keys typed in cu reach the serial port (and nothing else while cu runs)" ok ;;
     *) check "keys typed in cu reach the serial port (first line after cu: '$first')" bad ;; esac

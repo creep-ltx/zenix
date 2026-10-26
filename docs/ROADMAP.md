@@ -128,7 +128,7 @@ any desktop:
   `while`, functions), globbing, aliases, job control, `2>` and here-documents, a profile file. Lessons from
   the csh project (best of bash, zsh and fish).
 - *Terminal:* arrow, Home/End and function keys as standard escape codes, scrollback, text styles (bold,
-  inverse, underline), colours decided deliberately (the display is one bitplane now), UTF-8 later.
+  inverse, underline), colours (DESIGN D14: 16 on AGA, 8 on OCS/ECS with fast RAM), UTF-8 later.
 - *Users:* multi-user with the honest no-MMU limit (DESIGN.md D8): uids, permission checks in the filesystem server,
   `login`, `su`, `chown`, `/etc/passwd`.
 - *C library and kernel:* full printf, stdio, `qsort`, `strtol`, time functions, `getenv`, signals, `kill`,

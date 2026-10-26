@@ -5,7 +5,7 @@
 # usage: source it, then  users_d_checks LOG [prefix]   -> PASS/FAIL lines; returns 1 if any failed
 users_d_checks() {
     local log=$1 pre=$2 bad=0 L
-    L=$(mktemp); tr -d '\r' < "$log" | sed 's/\x1b\[K//g' > "$L"
+    L=$(mktemp); tr -d '\r' < "$log" | sed 's/\x1b\[[0-9;:]*[mK]//g' > "$L"
     line() { if grep -aqxF -- "$2" "$L"; then echo "PASS $pre$1"; else echo "FAIL $pre$1"; bad=1; fi; }
     rx() { if grep -aqxE -- "$2" "$L"; then echo "PASS $pre$1"; else echo "FAIL $pre$1"; bad=1; fi; }
     none() { if grep -aqxF -- "$2" "$L"; then echo "FAIL $pre$1"; bad=1; else echo "PASS $pre$1"; fi; }

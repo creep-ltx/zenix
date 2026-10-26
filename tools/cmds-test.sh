@@ -7,7 +7,8 @@ BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every tes
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-cmds}; mkdir -p $OUT
-( cd rootfs/home/t && LC_ALL=C bash ../../tests/cmds.sh "$PWD" > $OUT/expected.txt 2>&1 )
+# GNU ls and grep with their built-in colours (the colour lines compare bytes; DESIGN D14)
+( cd rootfs/home/t && env -u LS_COLORS -u GREP_COLORS -u GREP_COLOR LC_ALL=C bash ../../tests/cmds.sh "$PWD" > $OUT/expected.txt 2>&1 )
 cat > $OUT/script.txt <<EOS
 wait zenix:/# 90
 sleep 1

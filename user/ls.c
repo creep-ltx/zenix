@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "pw.h"
-/* ls [-aAldRFht rSs1] [file...]: list files. In a terminal the names come in columns; -l is the long form. */
-static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty, printed_any;
+/* ls [-aAldRFht rSs1] [--color[=WHEN]] [file...]: list files. In a terminal the names come in columns; -l is the long
+ * form. Names are coloured as GNU ls colours them with LS_COLORS unset (the same bytes), by default when the output
+ * is a terminal (libz color_auto; GNU's own default is never). */
+static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty, printed_any, color, color_lead;
 struct ent { char name[64]; struct ustat st; char link[64]; int islink; };
 static const char *const mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 static int leap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
@@ -49,6 +51,23 @@ static char suffix(const struct ent *e)
     u32 t = e->st.mode & S_IFMT;
     return t == S_IFDIR ? '/' : (e->st.mode & 0111) ? '*' : 0;
 }
+/* GNU's colours for a name (dircolors' defaults): directories (sticky, other-writable), links, set-user/group-id and
+ * executable files; 0 for none */
+static const char *lscolor(const struct ent *e)
+{
+    u32 m = e->st.mode, t = m & S_IFMT;
+    if (e->islink) return "01;36";
+    if (t == S_IFDIR) return (m & 01002) == 01002 ? "30;42" : (m & 2) ? "34;42" : (m & 01000) ? "37;44" : "01;34";
+    if (t == S_IFREG) return (m & 04000) ? "37;41" : (m & 02000) ? "30;43" : (m & 0111) ? "01;32" : 0;
+    return 0;
+}
+static void putname(const struct ent *e)
+{
+    const char *c = color ? lscolor(e) : 0;
+    if (!c) { oputs(e->name); return; }
+    if (!color_lead) { oputs("\033[0m"); color_lead = 1; }    /* GNU: a reset once, before the first coloured name */
+    oputs("\033["); oputs(c); oputc('m'); oputs(e->name); oputs("\033[0m");
+}
 static void show(struct ent *v, int n)
 {
     qsort(v, (u32)n, sizeof(struct ent), cmp);
@@ -68,21 +87,22 @@ static void show(struct ent *v, int n)
             { char nb[1], un[32], gn[32]; strcpy(un, pw_name(v[i].st.uid, nb)); strcpy(gn, gr_name(v[i].st.gid, nb));
               oprintf("%s", un); for (u32 k = strlen(un); k < wu; k++) oputc(' '); oputc(' ');
               oprintf("%s", gn); for (u32 k = strlen(gn); k < wg; k++) oputc(' '); oputc(' '); }
-            for (u32 k = strlen(sz); k < ws; k++) oputc(' '); oprintf("%s %s %s", sz, dt, v[i].name);
+            for (u32 k = strlen(sz); k < ws; k++) oputc(' ');
+            oprintf("%s %s ", sz, dt); putname(&v[i]);
             char sf = suffix(&v[i]); if (sf && !v[i].islink) oputc(sf);
             if (v[i].islink) { oputs(" -> "); oputs(v[i].link); }
             oputc('\n');
         }
         return;
     }
-    if (!tty || o_1) { for (int i = 0; i < n; i++) { oputs(v[i].name); char sf = suffix(&v[i]); if (sf) oputc(sf); oputc('\n'); } return; }
+    if (!tty || o_1) { for (int i = 0; i < n; i++) { putname(&v[i]); char sf = suffix(&v[i]); if (sf) oputc(sf); oputc('\n'); } return; }
     int w = 0; for (int i = 0; i < n; i++) { int l = (int)strlen(v[i].name) + (suffix(&v[i]) ? 1 : 0); if (l > w) w = l; }
     w += 2; int cols = 80 / w; if (cols < 1) cols = 1;
     int rows = (n + cols - 1) / cols;
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
             int i = c * rows + r; if (i >= n) break;
-            oputs(v[i].name); char sf = suffix(&v[i]); int l = (int)strlen(v[i].name) + (sf ? 1 : 0); if (sf) oputc(sf);
+            putname(&v[i]); char sf = suffix(&v[i]); int l = (int)strlen(v[i].name) + (sf ? 1 : 0); if (sf) oputc(sf);
             if (c * rows + r + rows < n) for (int k = l; k < w; k++) oputc(' ');
         }
         oputc('\n');
@@ -136,9 +156,16 @@ static int list(const char *path, int top)
 }
 int main(int argc, char **argv)
 {
-    int i = 1, rc = 0;
+    int i = 1, rc = 0, cmode = 2;
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         if (!strcmp(argv[i], "--")) { i++; break; }
+        if (argv[i][1] == '-') {
+            int m = color_arg(argv[i], 1);
+            if (m == -2) { fprintf(2, "ls: invalid argument for --color: %s (always, never or auto)\n", argv[i]); return 2; }
+            if (m < 0) { fprintf(2, "ls: unknown option %s\n", argv[i]); return 2; }
+            cmode = m;
+            continue;
+        }
         for (const char *p = argv[i] + 1; *p; p++) {
             switch (*p) { case 'a': o_a = 1; break; case 'A': o_A = 1; break; case 'l': o_l = 1; break; case 'd': o_d = 1; break; case 'R': o_R = 1; break;
                 case 'F': o_F = 1; break; case 'h': o_h = 1; break; case 't': o_t = 1; break; case 'r': o_r = 1; break; case 'S': o_S = 1; break; case '1': o_1 = 1; break; case 's': break;
@@ -146,6 +173,7 @@ int main(int argc, char **argv)
         }
     }
     tty = sys_isatty(1);
+    color = cmode == 2 ? color_auto(1) : cmode;
     int n = argc - i; multi = n > 1;
     if (!n) { rc = list(".", 1); oflush(); return rc; }
     /* operands: everything that is not a directory is listed together first, sorted; then each directory */

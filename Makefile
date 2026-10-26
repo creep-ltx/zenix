@@ -16,6 +16,10 @@ CFLAGS  := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 DIWV    ?= 0x2C
 CFLAGS  += -DDIW_V=$(DIWV)
+# the display's bitplanes (DESIGN D14): empty = chosen by the machine at boot; GFXDEPTH=1, 3 or 4 for the screenshot
+# test builds (4 only on AGA). Not tracked as a dependency: use a build directory of its own (make BUILD=/tmp/x ...).
+GFXDEPTH ?=
+CFLAGS  += $(if $(GFXDEPTH),-DGFX_DEPTH=$(GFXDEPTH))
 ASFLAGS := -m68020-60 -x assembler-with-cpp -c
 # test builds only (audit A11/A12, docs/pi-first-boot.md): DIAG=-DDIAG_STOP=N hangs at boot stage N (its colour stays),
 # DIAG=-DDIAG_PANIC=N panics there. Use a build directory of its own (make BUILD=/tmp/x DIAG=...): flags are not tracked.
@@ -118,6 +122,8 @@ KOPT_emmc := -Os
 KOPT_a3000 := -Os
 KOPT_rtc := -Os
 KOPT_kbd := -Os
+KOPT_gfx := -Os
+KOPT_term := -Os
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld

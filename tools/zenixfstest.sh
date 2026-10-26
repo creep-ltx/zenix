@@ -11,7 +11,7 @@ OUT=${ZENIX_OUT:-/tmp/zenix-zenixfstest}; mkdir -p $OUT
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 dd if=/dev/zero of=$BD/scratch.hdf bs=1M count=16 status=none
-ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh fsuae/mounts.fs-uae 330 tools/tests/zenixfs-test.txt 2>&1 | tr -d '\r' | sed 's/\x1b\[K//g' > $OUT/run.log
+ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh fsuae/mounts.fs-uae 330 tools/tests/zenixfs-test.txt 2>&1 | tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g' > $OUT/run.log
 # the log also holds the keystrokes the test typed, so a check must match a whole OUTPUT line, never a substring of the typing
 wantline() { if grep -aqx -- "$2" $OUT/run.log; then check "$1" ok; else check "$1" bad; fi; }
 wantre() { if grep -aqE -- "$2" $OUT/run.log; then check "$1" ok; else check "$1" bad; fi; }

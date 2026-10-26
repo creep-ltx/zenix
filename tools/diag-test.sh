@@ -117,7 +117,7 @@ if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
     build normal ""
     conf "$OUT/reset.fs-uae" "$OUT/normal/zenix-ram.adf"
     RESET_AT=38 shot "$OUT/reset.fs-uae" tools/tests/diag-reset-test.txt "$OUT/reset" 36 66 78
-    L=$OUT/reset.log; tr -d '\r' < "$OUT/reset.serial.log" > "$L"
+    L=$OUT/reset.log; tr -d '\r' < "$OUT/reset.serial.log" | sed 's/\x1b\[[0-9;:]*[mK]//g' > "$L"
     grep -q '^klog: no log from a previous boot' "$L" && check "cold start: no previous log" ok || check "cold start: no previous log" bad
     grep -q '^dmesg: no log from a previous boot' "$L" && check "dmesg -p says so on a cold start" ok || check "dmesg -p says so on a cold start" bad
     [ "$(grep -c '^Zenix - 68020+' "$L")" = 2 ] && check "the warm reset booted Zenix again" ok || check "the warm reset booted Zenix again" bad
@@ -134,7 +134,7 @@ if [ "$WHAT" = reset ] || [ "$WHAT" = all ]; then
     build panic11 "-DDIAG_PANIC=11" DIWV=0x38      # the picture starts lower: FS-UAE's screenshot shows its top rows
     conf "$OUT/preset.fs-uae" "$OUT/panic11/zenix-ram.adf"
     ZOOMOUT=0 RESET_AT=28,58 shot "$OUT/preset.fs-uae" "$OUT/idle.txt" "$OUT/preset" 26 56 86
-    L=$OUT/preset.log; tr -d '\r' < "$OUT/preset.serial.log" > "$L"
+    L=$OUT/preset.log; tr -d '\r' < "$OUT/preset.serial.log" | sed 's/\x1b\[[0-9;:]*[mK]//g' > "$L"
     bg=$(pixel "$OUT/preset-26.png" 0.02)
     near "$bg" 800 && check "panic after the boot: the background turns dark red" ok || check "panic after the boot: dark red background (got $bg, see $OUT/preset-26.png)" bad
     grep -q '^=== previous boot (1) ended here with a kernel panic' "$L" && check "next boot: ended with a kernel panic" ok || check "next boot: ended with a kernel panic" bad
@@ -148,7 +148,7 @@ if [ "$WHAT" = stack ] || [ "$WHAT" = all ]; then
     build stack "-DSTACK_TEST"
     conf "$OUT/stack.fs-uae" "$OUT/stack/zenix-ram.adf"
     RESET_AT=56 shot "$OUT/stack.fs-uae" tools/tests/diag-stack-test.txt "$OUT/stack" 50 95
-    L=$OUT/stack.log; tr -d '\r' < "$OUT/stack.serial.log" > "$L"
+    L=$OUT/stack.log; tr -d '\r' < "$OUT/stack.serial.log" | sed 's/\x1b\[[0-9;:]*[mK]//g' > "$L"
     grep -q '^\[kernel\] pid [0-9]* (crash) overflowed its kernel stack: killed' "$L" &&
         check "a damaged kernel-stack guard: the process is killed with the message" ok ||
         check "a damaged kernel-stack guard: the process is killed with the message" bad

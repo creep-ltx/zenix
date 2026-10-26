@@ -2496,10 +2496,12 @@ static void init_vars(void)
 {
     static const char *const defs[][2] = {
         { "PATH", "/bin" }, { "HOME", "/home" }, { "USER", "root" }, { "HOSTNAME", "zenix" }, { "SHELL", "/bin/sh" },
-        { "TERM", "vt100" }, { "COLUMNS", "80" }, { 0, 0 } };
+        { "TERM", "xterm-16color" }, { "COLUMNS", "80" }, { 0, 0 } };     /* the console: xterm's keys, 16 colours (D14) */
     for (int i = 0; defs[i][0]; i++) if (!var_get(defs[i][0])) var_set(defs[i][0], defs[i][1], 1);
     if (!var_get("LINES")) { char b[12]; int ti = sys_ttyinfo(); utoa(ti > 0 ? (u32)ti >> 16 : 25, b); var_set("LINES", b, 1); }   /* 32 PAL, 25 NTSC */
-    if (!var_get("PS1")) var_set("PS1", "\\h:\\w\\$ ", 0);
+    if (!var_get("PS1")) {              /* the host green and the directory blue where colour is wanted (D14) */
+        var_set("PS1", color_rule(1, var_get("TERM"), var_get("NO_COLOR")) ? "\\[\\e[01;32m\\]\\h\\[\\e[0m\\]:\\[\\e[01;34m\\]\\w\\[\\e[0m\\]\\$ " : "\\h:\\w\\$ ", 0);
+    }
     if (!var_get("PS2")) var_set("PS2", "> ", 0);
     if (!var_get("IFS")) var_set("IFS", " \t\n", 0);
     var_set("PWD", cwd_now(), 1);

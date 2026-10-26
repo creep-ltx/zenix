@@ -45,7 +45,7 @@ make -s BUILD=$BD all $BD/zenix-zroot.hdf $BD/zenix-ram.adf >/dev/null 2>&1 || {
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-svc-serial}
 pass=1
-clean() { tr -d '\r' | sed 's/\x1b\[K//g'; }
+clean() { tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g'; }
 run() {    # run NAME CONFIG SECONDS SCRIPT
     ZENIX_SERIAL=$SER tools/run-test.sh "$2" "$3" "$4" 2>&1 | clean > "$OUT/$1.log"
 }

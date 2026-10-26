@@ -143,6 +143,8 @@ static int special_key(u8 code)
         if (raw) {                                              /* programs get xterm's modified arrows: ESC[1;5A */
             char seq[8] = "\033[";
             int n = 2;
+            if (!mods && term_ckm())
+                seq[1] = 'O';                                   /* cursor-key mode (DECCKM, ESC[?1h): ESC O A */
             if (mods) { seq[n++] = '1'; seq[n++] = ';'; seq[n++] = (char)('1' + mods); }
             seq[n++] = arrow[code - 0x4C];
             seq[n] = 0;

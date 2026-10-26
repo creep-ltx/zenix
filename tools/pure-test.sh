@@ -29,7 +29,7 @@ rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1 || { echo "
 OUT=${ZENIX_OUT:-/tmp/zenix-pure}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-pure-serial}
 pass=1
-clean() { tr -d '\r' | sed 's/\x1b\[K//g'; }
+clean() { tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g'; }
 run() {    # run NAME CONFIG SECONDS SCRIPT
     ZENIX_SERIAL=$SER tools/run-test.sh "$2" "$3" "$4" 2>&1 | clean > "$OUT/$1.log"
 }

@@ -1,6 +1,7 @@
 # D14: the colour console (design note, revision 2)
 
-Status: **ready to build (revision 2, 2026-10-25), after its independent review** (a feature: one review). Revision 2
+Status: **built (2026-10-26, branch `d14`; section 10 says where the build differs)**; revision 2 (2026-10-25) was
+ready to build after its independent review (a feature: one review). Revision 2
 takes in every finding: FMODE 3 is a condition, not an option; AGA detection and registers; a 12-bit palette; the
 scrollback number corrected; the default by memory too; the Copper list; background-colour erase; region scrolls by
 blitter; a hardened escape parser; the test harness; `TERM=xterm-16color` with cursor-key mode; no runtime setting yet.
@@ -159,4 +160,57 @@ affordable; machines with less than 2 MB of chip RAM and no fast RAM stay at 1 p
 The "no desktop features in the text console" rule is kept: 16 colours, a palette and a depth are what the Linux
 console has; no bar, themes or menus.
 
-Last checked against the code: 2026-10-25.
+## 10. As built (2026-10-26, branch `d14`)
+
+Steps 0-5 are built as section 8 orders them (one commit each). Where the build differs from the sections above, and
+why:
+
+- **FMODE 3's values:** `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0, modulo (N-1) x 80 with no adjustment. Found by
+  the screenshot test (`termtest columns`, `tools/colour-test.sh`): 0..79 decoded in order and the 4-plane picture
+  pixel-identical to the 1-plane `$3C`/`$D4` one; `$38`/`$D0`, `$28`/`$A8`, `$30`/`$B0`, `$38`/`$B8`, `$40`/`$C0` and
+  `$38`/`$B0` all gave repeated 64-pixel blocks. **Seen in FS-UAE only;** the A1200 (the PiStorm drives the real
+  chipset) must confirm them before the 4-plane default is trusted there (knowledge base
+  `amiga/zenix-colour-console.md`).
+- **The Copper list writes more every frame** than section 4 lists: also `BPLCON1`, `BPLCON2`, both modulos and the
+  fetch window, so nothing a previous program left in those registers matters either.
+- **AGA detection:** the low byte of `DENISEID` must be exactly `$F8` in all of 16 reads (not only its low nibble):
+  a Lisa revision that reads otherwise gets 3 planes at the old fetch, which is safe.
+- **`make GFXDEPTH=4` on OCS/ECS gives 3; `GFXDEPTH=3` on AGA uses the 16-bit fetch** (as OCS/ECS would). If the chip
+  RAM for the screen is not there, the next smaller depth is tried (4, 3, then 1).
+- **3 planes: bright black (8) is shown as grey (7)**, not as black plus bold, which would be invisible on the black
+  background; the other bright colours are the colour plus bold as section 3 says.
+- **Drawing:** gcc 15 at `-O2` turned the byte replication of "the glyph read as two longwords" into a 32-bit multiply
+  and kept masks on the stack. So with more than one plane a second glyph table holds each line already in all four
+  bytes of a long (7 KB, built at boot), and one small function per depth takes the masks as arguments: per glyph line
+  one long read, an AND, an EOR and a byte store per plane.
+- **Room on the RAM floppy:** step 1 and 2 cost 4.3 KB of kernel at `-O2`; `gfx.c` and `term.c` are now built `-Os`
+  with the drawing and the per-character path `-O2` (a function attribute). The kernel is 176440 of 179200 bytes after
+  D14 (2760 left; 4584 before it).
+- **The scrollback's 32 KB** are allocated when the console first scrolls, as the 16 KB were (not when it is first
+  used).
+- **`NO_COLOR`** counts when it is set to something (no-color.org's own rule: an empty value is as unset).
+- **The `auto` helper** is `color_auto(fd)` in libz with `color_rule(fd, term, no_color)` under it (the shell passes its
+  own variables) and `color_arg()` for `--color[=WHEN]` (also `--colour`, and GNU's yes/no/force/none/tty/if-tty);
+  `ls --color` alone means always, `grep --color` alone auto, as in GNU.
+- **`grep`, found while comparing bytes with GNU:** it printed no `--` between groups of context lines (GNU does, also
+  between files and with `-A0`); added. `-o` looked for the next match in the rest of the line as if it were a new line,
+  so `^` matched again; it now searches from the offset.
+- **`less`** ends each row with a colour reset and starts a long line's continuation rows with the line's codes. Into a
+  pipe or file it now writes every byte unchanged, as its page always said ("acts like cat") and GNU less does; before,
+  it wrapped long lines and showed control characters as `^X` there too (found by the byte comparison with GNU).
+- **`edit`'s status line** is written as the inverse of blue on white, so it is white on blue with colours and still
+  inverse on a 1-plane display, which shows no colours.
+- **`gfx_panic`** makes every colour but the background white (text on a coloured background then sits in a white
+  block).
+- **The harness change** went into the commit with the coloured prompt (section 7; section 8 lists it under step 3):
+  `serial-tap.py`'s `wait`, `run-test.sh`'s output and every script's cleaning strip `ESC[...m`; `colour-test.sh`
+  checks the raw bytes. A script line `shot NAME` (serial-tap.py with shot.py) takes a screenshot when the script gets
+  there.
+- **Tests:** `tools/term-test.sh` (host), `tools/colour-test.sh` (screenshots at 1, 3 and 4 planes), the colour lines
+  of `rootfs/tests/cmds.sh` (byte for byte against GNU), the matrix (the depth on every machine); a 1-plane D14 build's
+  `termtest` page is pixel-identical to the one before D14. The full suite passed at the default depth (`make check`,
+  2026-10-26, 28 min 15 s).
+- Not built here, as decided: the runtime setting (system call 82), 24-bit palettes, line drawing for `ESC ( 0`, the A1200
+  measurements (the owner's DoM weekend).
+
+Last checked against the code: 2026-10-26.

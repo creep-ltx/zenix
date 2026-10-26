@@ -4,8 +4,10 @@
 the headless backend, nothing appears on the desktop), type into the serial
 port with a script (tools/serial-tap.py format) and save screenshots.
 
-usage: shot.py config.fs-uae script.txt out_prefix t1 [t2 ...]
- -> out_prefix-<t>.png for each time t (seconds after start)
+usage: shot.py config.fs-uae script.txt out_prefix [t1 t2 ...]
+ -> out_prefix-<t>.png for each time t (seconds after start), and out_prefix-<name>.png for each `shot <name>` line
+ of the script (serial-tap.py: taken when the script gets there, so it waits for what the screen shows, not for a
+ time); with shot lines the run ends when the script does (or at SHOT_LIMIT).
 ZENIX_SERIAL=/tmp/name: a private serial port (the config is always copied and filled in by fsuae_conf.py, as run-test.sh does).
 RESET_AT=s[,s...]: press Ctrl + Left Amiga + Right Amiga (a warm reset) at those times (tools/diag-test.sh).
 SHOT_LIMIT=s: end the run (and its cage and FS-UAE) at most s seconds after the emulator started (default: the last
@@ -43,15 +45,19 @@ conf = prefix + ".fs-uae"
 open(conf, "w").write(text)
 resets = sorted(float(t) for t in os.environ.get("RESET_AT", "").split(",") if t)
 slot = fsuae_conf.emulator_slot()     # before the tap: its script and the timings start with the emulator
+req = prefix + ".req"                 # the script's `shot NAME` requests (serial-tap.py)
+open(req, "w").close()
+shots_in_script = any(line.startswith("shot ") for line in open(script))
 tap = subprocess.Popen([sys.executable, os.path.join(here, "serial-tap.py"),
                         serial, log, script],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       env=dict(os.environ, ZENIX_SHOT_REQ=os.path.abspath(req)))
 time.sleep(1)
 t0 = time.time()
 try:
     with Cage(["fs-uae", conf]) as cage:
         last = max(times + resets) if times or resets else 0
-        signal.alarm(max(1, int(float(os.environ.get("SHOT_LIMIT", last + 30)))))
+        signal.alarm(max(1, int(float(os.environ.get("SHOT_LIMIT", 600 if shots_in_script else last + 30)))))
         time.sleep(6)
         for _ in range(int(os.environ.get("ZOOMOUT", "2"))):   # FS-UAE: Shift+F11 pads the viewport
             subprocess.run(["wtype", "-M", "shift", "-k", "F11", "-m", "shift"],
@@ -90,6 +96,21 @@ try:
                 subprocess.run(["wtype", "-P", "Control_L", "-s", "150", "-P", "Super_L", "-s", "150",
                                 "-P", "Super_R", "-s", "700", "-p", "Super_R", "-p", "Super_L", "-p", "Control_L"],
                                env=cage._env(), check=False)
+        done, ended = 0, not shots_in_script      # the script's shot requests, until it says END
+        while not ended:
+            for name in open(req).read().split("\n")[done:-1]:
+                done += 1
+                if name == "END":
+                    ended = True
+                    break
+                cage.screenshot(f"{prefix}-{name}.png")
+                open(f"{req}.{name}", "w").close()
+            time.sleep(0.2)
 finally:
     signal.alarm(0)
     tap.terminate()
+    for f in [req] + [f"{req}.{n}" for n in open(req).read().split()]:
+        try:
+            os.unlink(f)
+        except OSError:
+            pass

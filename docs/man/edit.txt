@@ -37,6 +37,10 @@ NOTES
     not yet saved are lost.
     It uses all the rows of the terminal: 30 text rows on a PAL screen, 23
     on NTSC (the other two are the title and the status line).
+    The status line is white on blue where colours are wanted (the rule of
+    ls --color=auto: a terminal, TERM set and not "dumb", NO_COLOR not
+    set), else inverse; a one-plane display, which shows no colours, shows
+    it inverse either way.
 
 SEE ALSO
     less(1), sh(1)

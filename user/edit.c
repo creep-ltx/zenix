@@ -312,6 +312,7 @@ static int save_file(const char *path)
 /* ------------------------------------------------------------ the screen: only changed rows are sent */
 struct cell_row { char c[SCR_COLS + 1]; unsigned char inv[SCR_COLS]; };
 static struct cell_row shadow[TEXT_ROWS_MAX + 2], cur_row;
+static int use_color;                   /* the status line in colour (inv 2) */
 static int shadow_valid;
 
 static void flush_row(int r, const struct cell_row *want)
@@ -320,7 +321,7 @@ static void flush_row(int r, const struct cell_row *want)
     char pos[16]; snprintf(pos, sizeof pos, "\033[%d;1H", r + 1); oputs(pos);
     int cur = 0;
     for (int i = 0; i < SCR_COLS; i++) {
-        if (want->inv[i] != cur) { oputs(want->inv[i] ? "\033[7m" : "\033[0m"); cur = want->inv[i]; }
+        if (want->inv[i] != cur) { oputs(want->inv[i] == 2 ? "\033[0;7;34;107m" : want->inv[i] ? "\033[0;7m" : "\033[0m"); cur = want->inv[i]; }
         oputc((unsigned char)want->c[i]);
     }
     if (cur) oputs("\033[0m");
@@ -371,13 +372,15 @@ static void render(void)
         }
         flush_row(r, &cur_row);
     }
-    /* status line */
-    blank_row(&cur_row, 1);
+    /* status line: white on blue where colour is wanted (libz color_auto), else inverse; the blue is written as an
+     * inverse of blue on white, so a one-plane display, which shows no colours, still shows it inverse */
+    int sl = use_color ? 2 : 1;
+    blank_row(&cur_row, sl);
     char st[SCR_COLS + 1];
     int n = snprintf(st, sizeof st, " %s%s", filename[0] ? filename : "(no name)", modified ? " [modified]" : "");
-    put_str(&cur_row, 0, st, n, 1);
+    put_str(&cur_row, 0, st, n, sl);
     n = snprintf(st, sizeof st, "line %d/%d  col %d  Ctrl+S save  Ctrl+Q quit  F1 help ", cy + 1, nL, cc + 1);
-    put_str(&cur_row, SCR_COLS - n > 0 ? SCR_COLS - n : 0, st, n, 1);
+    put_str(&cur_row, SCR_COLS - n > 0 ? SCR_COLS - n : 0, st, n, sl);
     flush_row(text_rows, &cur_row);
     /* message line */
     blank_row(&cur_row, 0);
@@ -554,6 +557,7 @@ int main(int argc, char **argv)
         if (argv[i][0] == '+' && isdigit((unsigned char)argv[i][1])) goto_line = atoi(argv[i] + 1);
         else if (!filename[0]) { strncpy(filename, argv[i], 127); filename[127] = 0; }
     }
+    use_color = color_auto(1);
     lines_reserve(1); memset(&L[0], 0, sizeof L[0]); nL = 1;
     if (filename[0]) {
         struct ustat st;

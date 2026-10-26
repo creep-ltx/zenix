@@ -9,12 +9,16 @@ Optional argv[3]: a keystroke script driven while logging. Lines:
     wait <regex> [timeout]
                        wait until the serial output received since the last
                        `send` (or since the start) matches the Python regular
-                       expression (carriage returns and ESC[K removed first;
+                       expression (carriage returns, ESC[K and the colour
+                       codes ESC[...m removed first;
                        the echo of the typed line counts too, so pick a
                        pattern the echo cannot match). The last word is the
                        timeout in seconds if it is a number (default 60). On
                        a timeout the script goes on, and the tap prints
                        "serial-tap: wait timed out: <regex>" on its output.
+    shot <name>        (under tools/shot.py) take a screenshot now: shot.py saves
+                       it as <prefix>-<name>.png; the script goes on when it
+                       is saved (at most 30 s). Without shot.py: nothing.
 
 After every boot the tap sends one harmless byte pair, 0x1D '.' (the kernel's
 test hook with a letter that is no command), half a second after the kernel's
@@ -54,12 +58,15 @@ mark = 0                        # where the output since the last `send` starts
 cond = threading.Condition()
 
 
+SGR = re.compile(rb"\x1b\[[0-9;:]*[mK]")   # colour codes and erase-to-end-of-line: not part of the text waited for
+
+
 def wait_for(pattern, timeout):
     rx = re.compile(pattern.encode("latin1"))
     end = time.time() + timeout
     with cond:
         while True:
-            text = bytes(received[mark:]).replace(b"\r", b"").replace(b"\x1b[K", b"")
+            text = SGR.sub(b"", bytes(received[mark:]).replace(b"\r", b""))
             if rx.search(text):
                 return True
             left = end - time.time()
@@ -91,11 +98,26 @@ def greet():
             os.write(master, b"\x1d.")
 
 
+SHOT_REQ = os.environ.get("ZENIX_SHOT_REQ")     # set by shot.py: screenshot requests go there, one name a line
+
+
+def shot(name):
+    if not SHOT_REQ:
+        return
+    with open(SHOT_REQ, "a") as f:
+        f.write(name + "\n")
+    end = time.time() + 30
+    while not os.path.exists(f"{SHOT_REQ}.{name}") and time.time() < end:
+        time.sleep(0.2)
+
+
 def run_script(path):
     global mark
     for line in open(path):
         line = line.rstrip("\n")
-        if line.startswith("sleep "):
+        if line.startswith("shot "):
+            shot(line[5:].strip())
+        elif line.startswith("sleep "):
             time.sleep(float(line[6:]))
         elif line.startswith("wait "):
             words = line[5:].rsplit(" ", 1)
@@ -111,6 +133,9 @@ def run_script(path):
                 for ch in text.encode("latin1"):    # trickle like a human types
                     os.write(master, bytes([ch]))
                     time.sleep(0.02)
+    if SHOT_REQ:
+        with open(SHOT_REQ, "a") as f:
+            f.write("END\n")                # the script is done: shot.py may end the run
 
 
 threading.Thread(target=greet, daemon=True).start()

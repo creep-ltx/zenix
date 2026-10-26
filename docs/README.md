@@ -74,7 +74,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | docs-check | the documentation rules above |
 | ext2-host-test, disk-host-test | the ext2 server, `fsck.ext2`, `mkfs.ext2`, `fdisk` and `diskd` built for the PC, against image files and `e2fsck`, with a fuzz loop |
 | zenixfs-test | `make -C zenixfs test`: the ZenixFS library on the PC (random operations, power cuts, damaged blocks) |
-| mfm-test, emmc-test, serial-test, mem-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console and `/dev/ttyS0`, the kernel allocator around 1 GB (`MEM_LOW1G`), A3000 SCSI and Pi device-tree code against models |
+| mfm-test, emmc-test, serial-test, term-test, mem-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console and `/dev/ttyS0`, the terminal's escape parser and colours (`kernel/term.c` against a model of the display), the kernel allocator around 1 GB (`MEM_LOW1G`), A3000 SCSI and Pi device-tree code against models |
 | mkzexe-test | the ZEX2 program format of shared code (DESIGN D13): `tools/mkzexe.py` classifies each relocation by its target (a `.data` pointer into constants to code, a table slot of a BSS array to data) and refuses a reference from the shared code into data, a value equal to `text_size`, an undefined weak and an absolute symbol |
 | matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch) |
 | cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
@@ -83,6 +83,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | cu-test | `cu` and `/dev/ttyS0` (DESIGN D12): the other computer's line reaches cu, keys reach the port, `~.` ends it, the console's copy comes back |
 | prio-test | priorities (D10): nice/renice for a user and for root, PRI/NI in `ps`, `priotest` (equal priorities take turns per slice, a higher one wins, wake-up, priority inheritance; a kernel built without inheritance must fail that check) |
 | diag-test | the boot colours, the panic screens, the previous-boot log across a warm reset; the stack guard's kernel-stack checks (a `STACK_TEST` build) |
+| colour-test | the colour console (DESIGN D14) by screenshots at 1, 3 and 4 bitplanes: `termtest columns` (all 80 columns, the edges where one plane has them: FMODE 3's fetch window), the 16 colours against the palette, a screen after `termtest scroll` (blitter scrolls, region moves, background-colour erases, the copy-back) pixel-identical to a redraw from the grid, the scrollback keeping colours |
 | floppy-test | two floppy drives: whole-disk reads, a write and its read-back, the image file on the host afterwards |
 | memtest | the allocator, deep directory walks, corrupt program files refused |
 | mounttest, zenixfstest | mounting ext2 and ZenixFS, `fsck`, nested mounts |
@@ -93,7 +94,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 
 What the tests need: FS-UAE, and the Kickstart ROM files in the directory named by `ZENIX_KICKSTART_DIR` (default
 FS-UAE's own Kickstarts folder, `Documents/FS-UAE/Kickstarts` in your home directory); the configs in `fsuae/` name no path of their own (`tools/fsuae_conf.py`
-fills it in, with the build directory and the serial port). kbd-test, cu-test, diag-test and the screenshots
+fills it in, with the build directory and the serial port). kbd-test, cu-test, diag-test, colour-test and the screenshots
 (`tools/shot.py`) also need the headless cage rig: `ZENIX_CAGE_RIG` names its directory. A single test
 beside others: `ZENIX_SERIAL=/tmp/NAME ZENIX_BUILD=/tmp/NAME-build ZENIX_OUT=/tmp/NAME-out tools/users-test.sh` (its own
 serial port, a copy of `build/` and an output folder; without `ZENIX_BUILD` it uses `build/` of the tree, which only
