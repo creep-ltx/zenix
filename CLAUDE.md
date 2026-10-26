@@ -26,6 +26,7 @@ Rebooting between the systems (owner 2026-10-24): `bootzenix` in AmigaOS, `reboo
 through a one-shot note the boot menu reads. Later (not now): a Wasabi-like remote-access daemon for Zenix (needs the network driver).
 DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved, docs/d11-service-manager.md).
 `awk` (owner 2026-10-24: finish the parked `user/awk.c` now, while D11 is built).
+**`useradd` and `userdel` approved (owner 2026-10-26):** small commands for root (ideas list), built at once.
 **Colour console approved (owner 2026-10-25):** colours in the text console (ANSI colours, for `ls`, `grep`, the prompt,
 `less`); a design note first (a DESIGN number, reviewed), then built. **The shell's memory** (a fix, audit 2026-10-25
 'found while fixing'): sh grabs a fixed arena of 64-256 KB per shell and parses a whole script at once; make it grow on
