@@ -16,6 +16,8 @@ DESCRIPTION
     set-user-id root.
 
 NOTES
+    The new shell makes a process group of its own and the terminal's
+    foreground (as every interactive sh); su waits for it.
     The caller's PATH and HOME are not kept on purpose: a shell running as
     root must not find the caller's programs first or read the caller's
     ~/.shrc (sh(1) also reads a ~/.shrc only if it belongs to the user the

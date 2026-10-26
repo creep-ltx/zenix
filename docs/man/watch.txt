@@ -15,6 +15,8 @@ EXIT STATUS
 
 
 NOTES
+    The command runs in watch's process group, the shell's job: Ctrl+C
+    ends both.
     The command may be any length: nothing of it is cut.
 SEE ALSO
     sleep(1)

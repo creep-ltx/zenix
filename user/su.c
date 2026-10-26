@@ -26,6 +26,5 @@ int main(int argc, char **argv)
     char *av[] = { p.shell, 0 };
     int pid = sys_spawn(p.shell, av, 0);
     if (pid < 0) { fprintf(2, "su: cannot start %s\n", p.shell); return 1; }
-    sys_setfg(0);
-    return sys_wait(pid);
+    return sys_wait(pid);               /* the shell makes its own group the terminal's foreground (DESIGN D16) */
 }

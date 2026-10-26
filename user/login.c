@@ -26,8 +26,7 @@ static int session(const struct pw *p)
     char *argv[] = { (char *)p->shell, 0 };          /* spawn only reads argv */
     int pid = sys_spawn(p->shell, argv, 0);
     if (pid < 0) { fprintf(2, "login: cannot start %s: %s\n", p->shell, zwhy("failed")); return 1; }
-    sys_setfg(0);
-    sys_wait(pid);
+    sys_wait(pid);                      /* the shell makes its own group the terminal's foreground (DESIGN D16) */
     return 0;
 }
 
@@ -36,6 +35,7 @@ int main(int argc, char **argv)
     int force = 0, autologin = 0, i = 1;
     char name[32] = "", pass[100];
     struct pw p;
+    setpgid(0, 0);                      /* a group of its own (DESIGN D16 rule 7): `kill 0` in a session never reaches init */
     if (i < argc && !strcmp(argv[i], "-f")) { force = 1; i++; }
     if (i < argc) strncpy(name, argv[i], 31);
     struct ustat ts;

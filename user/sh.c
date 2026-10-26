@@ -1471,14 +1471,64 @@ static int exec_node(struct node *n);
 static int env_dirty = 1;
 static char *exit_trap;                 /* trap '...' EXIT: run when the shell ends */
 
+/* ---- signals and job control (DESIGN D16) ----
+ * An interactive shell is a process group of its own (rule 7) and puts every job - a command or a pipeline, in the
+ * foreground or in the background - in a group of its own, the first process's pid, joined right after each spawn;
+ * a foreground job's group becomes the terminal's foreground only after every member joined, and the shell's own
+ * group is the foreground again when the job ends or stops. So ^C and ^Z reach every process of a pipeline and nothing
+ * else. ^C while the shell itself runs (a loop of builtins) is a SIGINT to the shell: its handler only sets a flag
+ * (interrupted), checked between commands. SIGTSTP is caught with a handler that does nothing, so ^Z never stops the
+ * shell (caught, not ignored: its children start with the default). No SIGCHLD handler (rule 10): jobs are reaped by
+ * polling at the prompt, and nothing prints into the line editor. A non-interactive shell (a script, sh -c) does none
+ * of this: its commands stay in its group, the job its interactive parent made. trap: a caught signal only sets a bit;
+ * its commands run at the next safe point, between commands (run_traps), as bash does. */
+static int my_pgid;                     /* the interactive shell's own group */
+static char *traps[NSIG];               /* trap 'commands' SIGNAL */
+static volatile u32 trap_pending;
+static volatile int interrupted;
+static void on_signal(int sig)
+{
+    if (sig == SIGINT && interactive && !traps[SIGINT]) interrupted = 1;
+    else trap_pending |= 1u << sig;
+}
+static void on_tstp(int sig) { (void)sig; }
+static void sh_catch(int sig, sighandler_t h)
+{
+    struct sigaction a; a.sa_handler = h; a.sa_mask = 0; a.sa_flags = SA_RESTART;
+    sigaction(sig, &a, 0);
+}
+static int run_traps(void)
+{
+    if (!trap_pending) return 0;
+    int saved = last_status, ran = 0;
+    for (int sig = 1; sig < NSIG; sig++) {
+        if (!(trap_pending & (1u << sig))) continue;
+        trap_pending &= ~(1u << sig);
+        if (!traps[sig]) continue;
+        char *t = adup(traps[sig]);
+        run_string(t);
+        ran = 1;
+        if (!exit_requested) last_status = saved;           /* bash: $? is kept across a trap */
+    }
+    return ran;
+}
+static int last_pg;                     /* the group of the job started last */
+static int bg_pids[8], bg_np;           /* the processes of the pipeline started last in the background */
+static void job_join(int pid, int pg)   /* pid joins group pg (its own when pg is pid) */
+{
+    if (interactive && pid > 0) { setpgid(pid, pg); last_pg = pg; }
+}
+
 #define MAXJOBS 16
-static struct job { int pid; char *cmd; u8 used, done, stopped; int status; int pids[8], np; } jobs[MAXJOBS];
+static struct job { int pid, pgid; char *cmd; u8 used, done, stopped; int status; int pids[8], np; } jobs[MAXJOBS];
 static int add_job(int pid, const char *cmd)
 {
-    for (int i = 0; i < MAXJOBS; i++) if (!jobs[i].used) { jobs[i].used = 1; jobs[i].done = 0; jobs[i].stopped = 0; jobs[i].pid = pid; jobs[i].pids[0] = pid; jobs[i].np = 1; jobs[i].cmd = pdup(cmd); return i + 1; }
+    for (int i = 0; i < MAXJOBS; i++) if (!jobs[i].used) { jobs[i].used = 1; jobs[i].done = 0; jobs[i].stopped = 0; jobs[i].pid = pid; jobs[i].pgid = interactive ? last_pg : 0; jobs[i].pids[0] = pid; jobs[i].np = 1; jobs[i].cmd = pdup(cmd); return i + 1; }
     return 0;
 }
 static int cur_job;             /* the job most recently started or stopped (what fg and bg use without an argument) */
+/* a finished job's other processes (a pipeline's earlier stages): their zombies go too (they were left before D16) */
+static void job_reap_rest(struct job *j) { for (int k = 0; k < j->np; k++) if (j->pids[k] != j->pid) sys_waitnb(j->pids[k]); }
 static void reap_jobs(int announce)
 {
     for (int i = 0; i < MAXJOBS; i++) {
@@ -1487,6 +1537,7 @@ static void reap_jobs(int announce)
             int r = sys_waitnb(jobs[i].pid);
             if (r == -2) continue;
             jobs[i].done = 1; jobs[i].status = r;
+            job_reap_rest(&jobs[i]);
         }
         if (announce && jobs[i].done) {
             char b[16]; outs("["); utoa((u32)i + 1, b); outs(b); outs("]  Done      "); outs(jobs[i].cmd); outs("\n");
@@ -1595,17 +1646,17 @@ static int start_program(char **argv)
     return pid;
 }
 
-/* wait for a foreground job (a pipeline's processes); the last one holds the terminal, so Ctrl-Z stops that one and
- * the shell stops the others. A stopped job is kept in the job table (fg and bg bring it back). job: its number when it
- * is being brought back to the foreground, else 0. */
-static int fg_wait(int *pids, int np, const char *name, int job)
+/* wait for a foreground job (a pipeline's processes, group pg); its group holds the terminal, so Ctrl-Z stops all of
+ * them (the shell stops any that had not joined yet). A stopped job is kept in the job table (fg and bg bring it back).
+ * job: its number when it is being brought back to the foreground, else 0. */
+static int fg_wait(int pg, int *pids, int np, const char *name, int job)
 {
-    sys_setfg(pids[np - 1]);
+    if (interactive) sys_setfgpg(pg);
     int st = sys_waitu(pids[np - 1]);
-    sys_setfg(0);
+    if (interactive) sys_setfgpg(my_pgid);
     if (st == ST_STOPPED) {
         for (int i = 0; i < np - 1; i++) sys_jobctl(pids[i], 0);
-        if (!job) job = add_job(pids[np - 1], name);
+        if (!job) { last_pg = pg; job = add_job(pids[np - 1], name); }
         if (job) {
             struct job *j = &jobs[job - 1];
             j->stopped = 1; j->done = 0; j->np = np > 8 ? 8 : np;
@@ -1620,7 +1671,7 @@ static int fg_wait(int *pids, int np, const char *name, int job)
     if (st == 139) { errs("["); errs(name); errs(" crashed]\n"); }
     return st;
 }
-static int wait_fg(int pid, const char *name) { return fg_wait(&pid, 1, name, 0); }
+static int wait_fg(int pid, const char *name) { return fg_wait(pid, &pid, 1, name, 0); }
 
 /* ---- builtins ---- */
 static int is_builtin(const char *n);
@@ -1651,6 +1702,7 @@ static int run_words(char **argv, int argc, int *pidout, int background)
     if (is_builtin(argv[0])) return run_builtin(argv, argc);
     int pid = start_program(argv);
     if (pid < 0) return -pid;
+    job_join(pid, pid);
     if (pidout) *pidout = pid;
     if (background) return 0;
     return wait_fg(pid, argv[0]);
@@ -1796,12 +1848,13 @@ static int run_pipeline(struct node *p, int background, int *pidout)
         int pid = spawn_stage(p->cmds[i], 0);
         rs_restore(&rs);
         prev = pp[0];
-        if (pid >= 0) pids[np++] = pid;
+        if (pid >= 0) { job_join(pid, np ? pids[0] : pid); pids[np++] = pid; }
     }
     if (prev >= 0) sys_close(prev);
     if (np == 0) { arel(mark); return 1; }
     if (pidout) *pidout = pids[np - 1];
-    int st = background ? 0 : fg_wait(pids, np, p->src ? p->src : "pipeline", 0);
+    if (background) { bg_np = np > 8 ? 8 : np; for (int i = 0; i < bg_np; i++) bg_pids[i] = np > 8 ? pids[np - bg_np + i] : pids[i]; }
+    int st = background ? 0 : fg_wait(pids[0], pids, np, p->src ? p->src : "pipeline", 0);
     arel(mark);
     return st;
 }
@@ -1851,12 +1904,10 @@ static int run_function(struct func *f, char **argv, int argc)
     return st;
 }
 
-static int interrupted;
 static int check_intr(void)
 {
-    if (!interactive) return 0;
-    if (sys_ttyintr()) interrupted = 1;
-    return interrupted;
+    run_traps();
+    return interactive && interrupted;
 }
 
 static int cond_true(struct node *c) { return exec_node(c) == 0; }
@@ -1894,12 +1945,14 @@ static int exec_node(struct node *n)
                 if (!a->redirs || !apply_redirs(a->redirs, &rs)) { pid = start_program(argv); if (pid < 0) pid = 0; }
                 rs_restore(&rs);
             } else pid = spawn_stage(a, 1);
-        } else if (a->type == N_PIPE) { run_pipeline(a, 1, &pid); }
-        else pid = spawn_stage(a, 1);
+            job_join(pid, pid);
+        } else if (a->type == N_PIPE) { bg_np = 0; run_pipeline(a, 1, &pid); }
+        else { pid = spawn_stage(a, 1); job_join(pid, pid); }
         arel(mark);
         if (pid > 0) {
             last_bg = pid;
             int j = add_job(pid, a->src ? a->src : "job");
+            if (j && a->type == N_PIPE && bg_np) { jobs[j - 1].np = bg_np; for (int i = 0; i < bg_np; i++) jobs[j - 1].pids[i] = bg_pids[i]; }
             cur_job = j;
             if (interactive) { char b[16]; outs("["); utoa((u32)j, b); outs(b); outs("] "); utoa((u32)pid, b); outs(b); outs("\n"); }
         }
@@ -1979,6 +2032,7 @@ static int exec_node(struct node *n)
         char *argv[5] = { "sh", "-c", subshell_text(inner), 0, 0 };
         if (env_dirty) { env_sync(); env_dirty = 0; }
         int pid = sys_spawn("/bin/sh", argv, 0);
+        job_join(pid, pid);
         st = pid < 0 ? 126 : wait_fg(pid, "subshell");
         arel(mark);
         break;
@@ -2305,6 +2359,47 @@ static int job_pid(const char *a)
     return atoi(a);
 }
 
+/* trap [-l | -p] | trap [ACTION] SIGNAL... (as bash): ACTION is commands to run when the signal comes, '' to ignore
+ * it, - (or none, with one signal) for the default; EXIT (0) runs when the shell ends. KILL and STOP cannot be
+ * trapped. With no arguments (or -p) the traps are listed the way they can be read back. */
+static int do_trap(char **argv, int argc)
+{
+    if (argc == 2 && !strcmp(argv[1], "-l")) {
+        for (int i = 1; i < NSIG; i++) { char b[8]; utoa((u32)i, b); outs(b); outs(") SIG"); outs(zsig_name(i)); outs(i % 4 ? "\t" : "\n"); }
+        outs("\n"); return 0;
+    }
+    if (argc == 1 || !strcmp(argv[1], "-p")) {          /* trap [-p [SIGNAL...]] */
+        u32 want = argc > 2 ? 0 : ~0u;
+        for (int i = 2; i < argc; i++) { int k = !strcmp(argv[i], "EXIT") ? 0 : zsig_num(argv[i]); if (k < 0) { errm("trap", "invalid signal specification"); return 1; } want |= 1u << k; }
+        if (exit_trap && (want & 1)) { outs("trap -- '"); outs(exit_trap); outs("' EXIT\n"); }
+        for (int i = 1; i < NSIG; i++) {
+            struct sigaction o;
+            if (!(want & (1u << i)) || (!traps[i] && (sigaction(i, 0, &o) || o.sa_handler != SIG_IGN))) continue;
+            outs("trap -- '"); if (traps[i]) outs(traps[i]); outs("' SIG"); outs(zsig_name(i)); outs("\n");
+        }
+        return 0;
+    }
+    int a = 1;
+    if (!strcmp(argv[a], "--")) a++;
+    if (a >= argc) return 0;
+    const char *action = argv[a];
+    int first = a + 1;                                  /* the first signal */
+    if (argc - a == 1 || isdigit((unsigned char)action[0])) { action = "-"; first = a; }   /* trap SIGNAL...: reset */
+    int rc = 0;
+    for (int i = first; i < argc; i++) {
+        int sig = !strcmp(argv[i], "EXIT") ? 0 : zsig_num(argv[i]);
+        if (sig < 0 || sig == SIGKILL || sig == SIGSTOP) { errm("trap", "invalid signal specification"); rc = 1; continue; }
+        if (sig == 0) { free(exit_trap); exit_trap = strcmp(action, "-") && action[0] ? pdup(action) : 0; continue; }
+        free(traps[sig]); traps[sig] = 0;
+        if (!strcmp(action, "-")) {                         /* the default: the shell's own handling where it has one */
+            if (interactive && (sig == SIGINT || sig == SIGTSTP)) sh_catch(sig, sig == SIGTSTP ? on_tstp : on_signal);
+            else signal(sig, SIG_DFL);
+        } else if (!action[0]) signal(sig, SIG_IGN);
+        else { traps[sig] = pdup(action); sh_catch(sig, on_signal); }
+    }
+    return rc;
+}
+
 static int run_builtin(char **argv, int argc)
 {
     const char *n = argv[0];
@@ -2320,21 +2415,14 @@ static int run_builtin(char **argv, int argc)
         struct job *jb = &jobs[j - 1];
         outs(jb->cmd); outs(fg ? "\n" : " &\n");
         jb->stopped = 0;
-        for (int i = 0; i < jb->np; i++) sys_jobctl(jb->pids[i], 1);
+        int pg = jb->pgid ? jb->pgid : jb->pids[0];
+        if (fg && interactive) sys_setfgpg(pg);          /* the terminal first, so its SIGCONT handler may draw */
+        if (!jb->pgid || kill(-jb->pgid, SIGCONT)) for (int i = 0; i < jb->np; i++) sys_jobctl(jb->pids[i], 1);   /* SIGCONT (rule 9) */
         if (!fg) { cur_job = j; return 0; }
         int pids[8], np = jb->np; for (int i = 0; i < np; i++) pids[i] = jb->pids[i];
-        return fg_wait(pids, np, jb->cmd, j);
+        return fg_wait(pg, pids, np, jb->cmd, j);
     }
-    if (!strcmp(n, "trap")) {                                  /* trap 'commands' EXIT   (only EXIT / 0 is supported) */
-        if (argc == 1) { if (exit_trap) { outs("trap -- '"); outs(exit_trap); outs("' EXIT\n"); } return 0; }
-        if (argc == 2 && !strcmp(argv[1], "-")) { exit_trap = 0; return 0; }
-        if (argc < 3) { errm("trap", "usage: trap 'commands' EXIT"); return 2; }
-        for (int i = 2; i < argc; i++) {
-            if (!strcmp(argv[i], "EXIT") || !strcmp(argv[i], "0")) { free(exit_trap); exit_trap = argv[1][0] ? pdup(argv[1]) : 0; }
-            else if (strcmp(argv[i], "INT") && strcmp(argv[i], "TERM") && strcmp(argv[i], "HUP")) { errm(argv[i], "unsupported signal for trap"); return 1; }
-        }
-        return 0;
-    }
+    if (!strcmp(n, "trap")) return do_trap(argv, argc);
     if (!strcmp(n, "umask")) {
         if (argc > 1) { u32 v = 0; for (const char *c = argv[1]; *c; c++) { if (*c < '0' || *c > '7') { errm("umask", "bad mask"); return 1; } v = v * 8 + (u32)(*c - '0'); } sys_umask(v); return 0; }
         u32 m = (u32)sys_umask(0); sys_umask(m);
@@ -2443,24 +2531,36 @@ static int run_builtin(char **argv, int argc)
         return 0;
     }
     if (!strcmp(n, "wait")) {
-        if (argc > 1) { int pid = job_pid(argv[1]); if (pid <= 0) return 127; int st = sys_wait(pid); for (int i = 0; i < MAXJOBS; i++) if (jobs[i].used && jobs[i].pid == pid) { free(jobs[i].cmd); jobs[i].used = 0; } return st; }
-        for (int i = 0; i < MAXJOBS; i++) if (jobs[i].used) { if (!jobs[i].done) sys_wait(jobs[i].pid); free(jobs[i].cmd); jobs[i].used = 0; }
+        if (argc > 1) { int pid = job_pid(argv[1]); if (pid <= 0) return 127; int st = sys_wait(pid); for (int i = 0; i < MAXJOBS; i++) if (jobs[i].used && jobs[i].pid == pid) { job_reap_rest(&jobs[i]); free(jobs[i].cmd); jobs[i].used = 0; } return st; }
+        for (int i = 0; i < MAXJOBS; i++) if (jobs[i].used) { if (!jobs[i].done) sys_wait(jobs[i].pid); job_reap_rest(&jobs[i]); free(jobs[i].cmd); jobs[i].used = 0; }
         return 0;
     }
-    if (!strcmp(n, "kill")) {
-        int rc = 0, op = 2;                              /* 0 stop, 1 continue, 2 end it */
-        for (int i = 1; i < argc; i++) {
-            if (argv[i][0] == '-' && argv[i][1]) {
-                const char *sg = argv[i] + 1;
-                if (!strcmp(sg, "s") && i + 1 < argc) sg = argv[++i];
-                if (!strcmp(sg, "STOP") || !strcmp(sg, "TSTP") || !strcmp(sg, "SIGSTOP") || !strcmp(sg, "19") || !strcmp(sg, "20")) op = 0;
-                else if (!strcmp(sg, "CONT") || !strcmp(sg, "SIGCONT") || !strcmp(sg, "18")) op = 1;
-                else op = 2;
-                continue;
-            }
-            int pid = job_pid(argv[i]);
-            if (pid <= 0 || (op == 2 ? sys_kill(pid) : sys_jobctl(pid, op)) < 0) { errm(argv[i], zwhy("no such process")); rc = 1; continue; }
-            for (int j = 0; j < MAXJOBS; j++) if (jobs[j].used && jobs[j].pid == pid && op < 2) { jobs[j].stopped = op == 0; for (int q = 0; q < jobs[j].np; q++) sys_jobctl(jobs[j].pids[q], op); }
+    if (!strcmp(n, "kill")) {                            /* kill [-s SIG | -SIG] pid | %job | -pgid ... ; kill -l */
+        int rc = 0, sig = SIGTERM, i = 1;
+        if (i < argc && !strcmp(argv[i], "-l")) {
+            if (i + 1 < argc) { int k = atoi(argv[i + 1]); if (k > 128) k -= 128; const char *nm = zsig_name(k); if (!nm) { errm(argv[i + 1], "invalid signal"); return 1; } outs(nm); outs("\n"); return 0; }
+            for (int k = 1; k < NSIG; k++) { outs(zsig_name(k)); outs(k + 1 < NSIG ? " " : "\n"); }
+            return 0;
+        }
+        if (i < argc && argv[i][0] == '-' && argv[i][1] && strcmp(argv[i], "--")) {
+            const char *sg = argv[i] + 1;
+            if (!strcmp(sg, "s") && i + 1 < argc) sg = argv[++i];
+            if ((sig = zsig_num(sg)) < 0) { errm(sg, "invalid signal specification"); return 1; }
+            i++;
+        }
+        if (i < argc && !strcmp(argv[i], "--")) i++;
+        if (i >= argc) { errm("kill", "usage: kill [-s SIGNAL | -SIGNAL] pid | %job ..."); return 2; }
+        for (; i < argc; i++) {
+            int j = 0, target;
+            if (argv[i][0] == '%') { j = atoi(argv[i] + 1); if (j < 1 || j > MAXJOBS || !jobs[j - 1].used) { errm(argv[i], "no such job"); rc = 1; continue; }
+                                     target = jobs[j - 1].pgid ? -jobs[j - 1].pgid : jobs[j - 1].pid; }
+            else { char *e; target = (int)strtol(argv[i], &e, 10); if (*e || !argv[i][0]) { errm(argv[i], "arguments must be process or job IDs"); rc = 1; continue; } }
+            if (kill(target, sig) < 0) { errm(argv[i], zwhy("no such process")); rc = 1; continue; }
+            for (int k = 0; k < MAXJOBS; k++)
+                if (jobs[k].used && (k + 1 == j || jobs[k].pid == target || (jobs[k].pgid && -jobs[k].pgid == target))) {
+                    if (sig == SIGSTOP || sig == SIGTSTP) jobs[k].stopped = 1;
+                    else if (sig == SIGCONT) jobs[k].stopped = 0;
+                }
         }
         return rc;
     }
@@ -2614,9 +2714,9 @@ static void interactive_loop(void)
         if (!full[0]) continue;
         hist_add(full);
         interrupted = 0;
-        sys_ttyintr();
         last_status = run_string(full);
         if (interrupted) { outs("\r\n"); last_status = 130; }
+        run_traps();
         loop_break = loop_continue = 0;
         if (exit_requested) break;
     }
@@ -2652,6 +2752,11 @@ static int shell_main(int argc, char **argv)
         return exit_requested ? last_status : st;
     }
     interactive = 1;
+    setpgid(0, 0);                                      /* a group of its own (rule 7), the terminal's foreground */
+    my_pgid = shell_pid;
+    sh_catch(SIGINT, on_signal);
+    sh_catch(SIGTSTP, on_tstp);
+    sys_setfgpg(my_pgid);
     run_startup_file("/etc/profile");
     { char p[160]; const char *h = var_get("HOME"); strncpy(p, h ? h : "/", 150); p[150] = 0; u32 l = strlen(p); if (l && p[l - 1] != '/') p[l++] = '/'; strcpy(p + l, ".shrc");
       struct ustat st;                    /* only a ~/.shrc of the effective user (or root): never another user's commands as root */

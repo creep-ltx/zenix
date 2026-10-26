@@ -4,16 +4,22 @@ NAME
     timeout - run a command with a time limit
 
 SYNOPSIS
-    timeout seconds command [argument...]
+    timeout [-s SIGNAL] seconds command [argument...]
 
 DESCRIPTION
-    Runs the command and ends it if it is still running after the number of
-    seconds. The command is found through $PATH, as the shell does, unless
-    it contains a slash.
+    Runs the command and sends it SIGNAL (SIGTERM if none is named; a name
+    or a number, as kill(1) takes them) if it is still running after the
+    number of seconds. The command is found through $PATH, as the shell
+    does, unless it contains a slash. It runs in timeout's own process
+    group (the shell's job), so Ctrl+C reaches both.
 
 EXIT STATUS
-    The command's own status; 124 if it was ended for taking too long;
-    127 if it is not found or cannot be run.
+    The command's own status; 124 if the time ran out; 127 if it is not
+    found or cannot be run; 2 for a wrong signal or too few arguments.
+
+NOTES
+    A command that catches or ignores the signal goes on running; timeout
+    waits for it (timeout -s KILL ends any).
 
 SEE ALSO
     kill(1), time(1)

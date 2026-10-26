@@ -4,11 +4,12 @@ NAME
     pgrep - find processes by name
 
 SYNOPSIS
-    pgrep [-lx] name   /   pkill [-x] name
+    pgrep [-lx] name   /   pkill [-SIGNAL] [-x] name
 
 DESCRIPTION
     pgrep prints the ids of processes whose program name contains name (-x:
-    is exactly name; -l: also the name). pkill ends them. Neither matches
+    is exactly name; -l: also the name). pkill sends them SIGTERM (or
+    the SIGNAL named, as kill(1)). Neither matches
     itself or the shell that started it. Exit status 0 if any process
     matched.
 

@@ -1,34 +1,51 @@
 KILL(1)		Zenix manual
 
 NAME
-    kill - end, stop or continue a process
+    kill - send a signal to a process or a process group
 
 SYNOPSIS
-    kill [-s NAME | -NAME] pid...
+    kill [-s NAME | -NAME | -N] pid...
+    kill -l [N]
 
 DESCRIPTION
-    Ends each process. -STOP (or -TSTP) stops it and -CONT continues it, as
-    Ctrl+Z and fg do; every other signal name or number ends it, because
-    there are no signal handlers yet. kill -l lists the names. The shell
-    also has a kill that understands %n job numbers.
+    Sends each process a signal: SIGTERM if none is named. NAME is a
+    signal's name with or without SIG (TERM, SIGTERM) or its number (15),
+    as on Linux. A program may catch a signal (a handler), ignore it or
+    leave it to its default: most end the program (status 128 + the
+    number: 143 for TERM, 130 for INT, 137 for KILL), STOP and TSTP stop
+    it, CONT continues it, CHLD and WINCH do nothing. KILL and STOP can
+    never be caught, blocked or ignored.
+
+    A pid below -1 is a process group (-PGID: every process in it), 0 the
+    caller's own group. -0 sends nothing: it only checks that the process
+    exists and may be signalled. kill -l lists the names; kill -l N names
+    signal N (N may be an exit status, 128 + the number). The shell's own
+    kill does the same and also takes %n job numbers (a job's whole group).
 
     Who may: root any process; everyone else only processes whose real or
     effective user id is their own (or their own children), never the
-    built-in servers (diskd, fsd, zfsd, boot). A refusal says "permission
-    denied". The same rule decides who may stop and continue a process and
-    which processes a shell may make the foreground of its terminal.
+    built-in servers (diskd, fsd, zfsd, boot). A refusal says "operation
+    not permitted". The same rule decides who may stop and continue a
+    process and which processes a shell may make the foreground of its
+    terminal. Process 1 (boot) is never ended or stopped by a signal's
+    default action.
 
-    A process in the middle of a message call ends when the call is done.
-    A server killed while it serves a request ends between requests, so a
-    change on the disk is never cut in half; a second kill, or one still
-    waiting after 5 seconds, ends it at once (a hung server). A service
-    (diskd, the root's and the mounts' filesystem servers, those of
-    /etc/svctab) killed this way is started again by the next call to it
-    (DESIGN D11): kill is how root restarts one. dmesg shows the end and
-    the start.
+    A process in the middle of a message call gets the signal when the
+    call is done. A server ended this way while it serves a request ends
+    between requests, so a change on the disk is never cut in half; a
+    second signal, KILL, or one still waiting after 5 seconds ends it at
+    once (a hung server). A service (diskd, the root's and the mounts'
+    filesystem servers, those of /etc/svctab) ended this way is started
+    again by the next call to it (DESIGN D11): kill is how root restarts
+    one. dmesg shows the end and the start.
 
 EXIT STATUS
-    0, 1 if a process does not exist or may not be signalled.
+    0, 1 if a process does not exist or may not be signalled, 2 for a
+    wrong signal or no pid.
+
+NOTES
+    Programs built before signals (DESIGN D16) use the old form of the
+    system call, which ends a process with status 130 as before.
 
 SEE ALSO
-    sh(1), ps(1), pgrep(1)
+    sh(1), ps(1), pgrep(1), timeout(1)

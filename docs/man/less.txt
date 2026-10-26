@@ -26,6 +26,9 @@ KEYS
     characters are shown as ^X (ESC as ^[).
 
 NOTES
+    Ctrl+Z stops less (and the command it pages for, its whole job: man
+    too) with the screen left tidy; fg brings it back drawn anew. SIGINT,
+    SIGTERM and SIGHUP put the terminal back before it ends.
     An access the user is not allowed is reported as "permission denied".
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.

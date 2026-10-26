@@ -33,6 +33,10 @@ FILES
     when you save.
 
 NOTES
+    Signals (DESIGN D16): SIGTSTP (kill -TSTP; Ctrl+Z is undo here) leaves
+    the screen and stops the editor, fg (SIGCONT) draws it again; SIGINT,
+    SIGTERM and SIGHUP put the terminal back and end it (status 128 + the
+    signal), unsaved changes are lost.
     Running out of memory ends the editor with "edit: out of memory"; changes
     not yet saved are lost.
     It uses all the rows of the terminal: 30 text rows on a PAL screen, 23

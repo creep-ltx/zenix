@@ -23,6 +23,8 @@ EXAMPLES
     man -k sort
 
 NOTES
+    The pager runs in man's own process group, the shell's job: Ctrl+C
+    and Ctrl+Z reach both.
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.
 

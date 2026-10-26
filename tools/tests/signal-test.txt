@@ -17,5 +17,53 @@ sleep 1
 send xyz\r
 wait sigtest select: 30
 sleep 1
+send sleep 100 | sleep 101\r
+sleep 2
+send \x03
+sleep 1
+send echo pipe-sleeps=$(ps | grep -c sleep)\r
+wait (?m)^pipe-sleeps=[0-9] 20
+send sigtest _jobber\r
+wait (?m)^sigtest: jobber ready 20
+sleep 1
+send \x1a
+wait (?m)^\[1\]\+ +Stopped 20
+send bg\r
+wait sigtest: CONT handler ran 20
+send fg\r
+sleep 2
+send \x03
+sleep 1
+send echo jobber-status=$?\r
+wait (?m)^jobber-status= 10
+send sigtest _intr\r
+wait (?m)^sigtest: waiting for \^C 20
+sleep 1
+send \x03
+wait (?m)^sigtest: INT handler ran 10
+send echo intr-status=$?\r
+wait (?m)^intr-status= 10
+send man sh\r
+sleep 4
+send \x1a
+wait (?m)^\[1\]\+ +Stopped +man 20
+send jobs; fg\r
+sleep 3
+send q
+sleep 2
+send echo less-status=$?\r
+wait (?m)^less-status= 10
+send (sleep 3; kill -TSTP $(pgrep -x edit)) & edit /tmp/e.txt\r
+wait (?m)Stopped +edit 30
+send fg\r
+sleep 3
+send \x11
+sleep 2
+send echo edit-status=$?\r
+wait (?m)^edit-status= 10
+send sleep 1 | sleep 300 & sleep 2; kill %1; sleep 1; echo group-left=$(ps | grep sleep | grep -vc zombie) zombies=$(ps | grep -c zombie)\r
+wait (?m)^group-left=[0-9] 20
+send echo zombies-after=$(ps | grep -c zombie)\r
+wait (?m)^zombies-after= 20
 sleep 1
 stop

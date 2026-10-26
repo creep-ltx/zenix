@@ -73,12 +73,12 @@ line a "the log: fsd started for boot" "svc: fs: started @fsd (pid 3, for pid 1 
 line a "root cannot create the registered port fs" "svctest port fs: -16"
 line a "... nor disk" "svctest port disk: -16"
 rx   a "an unregistered fs.* name is still root's to create" "svctest port fs\.x: [0-9]+"
-line a "fsd killed while idle: the log says it ended" "svc: fs: fsd (pid 3) ended, status 130"
+line a "fsd killed while idle: the log says it ended" "svc: fs: fsd (pid 3) ended, status 143"
 rx   a "... and the next use started it again" "svc: fs: started @fsd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
 same a "... files are there after the restart" n1 n2
 line a "... the root is still writable (the restart used -root)" "write-ok"
 rx   a "... the new fsd runs at nice -10" " +[0-9]{2,} +0 +8 +-10 msg +[0-9]+ +[0-9]+ fsd"
-line a "diskd killed while idle: the log says it ended" "svc: disk: diskd (pid 2) ended, status 130"
+line a "diskd killed while idle: the log says it ended" "svc: disk: diskd (pid 2) ended, status 143"
 rx   a "... and the next use started it again" "svc: disk: started @diskd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
 same a "... files are there after the restart" n1 n3
 line a "the script ran to the end" "svc-a-done"
@@ -89,7 +89,7 @@ if want_part z; then
 run z fsuae/zroot.fs-uae 120 tools/tests/svc-zroot-test.txt
 rx   z "zfsd serves the ZenixFS root as pid 3" " +3 +0 +8 +-10 msg +[0-9]+ +[0-9]+ zfsd"
 none z "no fsd serves the root on a ZenixFS boot (the fsd in ps is fstab's ext2 mount)" "svc: fs: started @fsd.*"
-line z "zfsd killed while idle: the log says it ended" "svc: fs: zfsd (pid 3) ended, status 130"
+line z "zfsd killed while idle: the log says it ended" "svc: fs: zfsd (pid 3) ended, status 143"
 rx   z "... and the next use started it again" "svc: fs: started @zfsd \(pid [0-9]+, for pid [0-9]+ [a-z]+\)"
 same z "... files are there after the restart" n1 n2
 line z "... the root is still writable" "write-ok"
@@ -139,7 +139,7 @@ rx   d "diskd killed while idle comes back" "svc: disk: started @diskd \(pid [0-
 if [ "$(grep -acx 'svctest raw ide0: -16' "$OUT/d.log")" -ge 2 ]; then echo "PASS ... the claims survived: still refused after the restart"; else echo "FAIL ... the claims survived: still refused after the restart"; pass=0; fi
 line d "... and mount says the root's device is in use" "mount: ide0 is already in use"
 rx   d "a floppy probed on demand (df1) keeps its handle across the restart" ".*svctest hold df1: handle [0-9]+, read 0, after the wait 0"
-rx   d "diskd killed twice during a copy ends at once" "svc: disk: diskd \(pid [0-9]+\) ended, status 130(, during request [0-9]+ for pid [0-9]+)?"
+rx   d "diskd killed twice during a copy ends at once" "svc: disk: diskd \(pid [0-9]+\) ended, status 143(, during request [0-9]+ for pid [0-9]+)?"
 line d "... the copy is right (cmp)" "cmp-ok"
 line d "the script ran to the end" "svc-d-done"
 if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean after the restarts"; else echo "FAIL the host's e2fsck finds the root clean after the restarts (see $OUT/e2fsck.log)"; pass=0; fi

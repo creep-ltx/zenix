@@ -58,6 +58,12 @@ t case2;      n=5; case $n in [0-9]) echo digit;; *) echo no;; esac; case abc in
 t trim;       v=archive.tar.gz; echo ${v%.gz} ${v%%.*} ${v#*.} ${v##*.} ${v#arch} ${v/tar/TAR} ${v//a/A} ${v:3} ${v:3:4} ${#v}; p=/usr/local/bin/tool; echo ${p##*/} ${p%/*} ${p%%/*} ${p#/}
 t brace;      echo {a,b,c}x; echo pre{1,2}post; echo {1..5}; echo {a..e}; echo {01..03}; echo {1..10..3}; echo x{a,b}{1,2}; echo {5..1}; echo {,a}b; echo '{a,b}'; echo "{a,b}"; echo ${HOME:+{1,2}} | wc -w
 t trap;       (trap 'echo trapped' EXIT; echo body); echo after
+# signals (DESIGN D16): trap's commands run after the command that let the signal in; '' ignores, - resets
+t trap-sig;   trap 'echo got USR1' USR1; kill -USR1 $$; echo after-usr1; kill -s USR1 $$; trap -p USR1; trap - USR1; trap -p USR1; echo reset
+t trap-ign;   trap '' USR2; kill -USR2 $$; echo usr2-ignored; trap -p USR2; trap - USR2
+t trap-term;  trap 'echo got TERM' TERM; kill $$; echo after-term; trap TERM; trap -p TERM; echo end
+t trap-loop;  n=0; trap 'n=$((n + 1))' USR1; for i in 1 2 3; do kill -USR1 $$; done; echo n=$n; trap - USR1
+t kill-names; kill -l 15; kill -l 143; kill -l 9; kill -0 $$; echo probe=$?; kill -9999 $$ 2>/dev/null; echo bad=$?
 t tac;        tac fruit.txt; printf 'a\nb\nc\n' | tac; printf 'one\ntwo' | tac | od -c 2>/dev/null | head -n 0
 t rev;        rev fruit.txt | head -n 3; echo abc | rev
 t nl;         nl fruit.txt | head -n 4; nl -ba -w3 -s: fruit.txt | head -n 3; nl -n rz -w4 text.txt | head -n 2; nl -n ln -w3 -i5 -v10 fruit.txt | head -n 3

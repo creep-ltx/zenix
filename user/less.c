@@ -155,6 +155,33 @@ static void help(void)
     oflush();
     read_key();
 }
+/* signals (DESIGN D16): the terminal is left as it was found whatever ends or stops less. SIGINT, SIGTERM, SIGHUP:
+ * cooked mode back, the cursor on the last line, then the end (128 + the signal). SIGTSTP (Ctrl+Z, which less sends its
+ * job itself, or a kill): the same, then it stops; SIGCONT: raw mode again and the page drawn anew. */
+static void leave_screen(void)
+{
+    sys_ttymode(0);
+    oputs("\033[H"); for (int r = 0; r < ROWS - 1; r++) oputs("\033[B");
+    oputs("\r\033[K");
+    oflush();
+}
+static void on_end(int sig) { leave_screen(); sys_exit(128 + sig); }
+static void on_tstp(int sig)
+{
+    leave_screen();
+    signal(sig, SIG_DFL);
+    sigset_t m = 1u << sig;
+    sigprocmask(SIG_UNBLOCK, &m, 0);
+    raise(sig);                         /* stops here, until SIGCONT */
+    signal(sig, on_tstp);
+}
+static void on_cont(int sig)
+{
+    (void)sig;
+    sys_ttymode(TTY_RAW | TTY_NOSIG);
+    oputs("\033[2J");
+    draw(0);
+}
 int main(int argc, char **argv)
 {
     int i = 1;
@@ -184,6 +211,8 @@ int main(int argc, char **argv)
     tty_fd = sys_open("/dev/tty", O_RDONLY);
     if (tty_fd < 0) { fprintf(2, "less: no terminal\n"); return 1; }
     sys_ttymode(TTY_RAW | TTY_NOSIG);
+    signal(SIGINT, on_end); signal(SIGTERM, on_end); signal(SIGHUP, on_end);
+    signal(SIGTSTP, on_tstp); signal(SIGCONT, on_cont);
     oputs("\033[2J");
     draw(0);
     for (;;) {
@@ -205,6 +234,7 @@ int main(int argc, char **argv)
         case 'n': search(1, 1); continue;
         case 'N': search(-1, 1); continue;
         case 'h': case 'H': oputs("\033[2J"); help(); oputs("\033[2J"); draw(0); continue;
+        case 26: kill(0, SIGTSTP); continue;                       /* Ctrl+Z: the whole job stops (man too) */
         default: continue;
         }
         (void)maxtop; (void)old;
@@ -213,9 +243,7 @@ int main(int argc, char **argv)
         draw(0);
     }
 done:
-    sys_ttymode(0);
-    oputs("\033[H"); for (int r = 0; r < ROWS - 1; r++) oputs("\033[B");
-    oputs("\r\033[K");
-    oflush();
+    signal(SIGTSTP, SIG_DFL); signal(SIGCONT, SIG_DFL);
+    leave_screen();
     return 0;
 }

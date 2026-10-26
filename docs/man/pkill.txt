@@ -1,16 +1,18 @@
 PKILL(1)		Zenix manual
 
 NAME
-    pkill - end processes by name
+    pkill - send a signal to processes by name
 
 SYNOPSIS
-    pkill [-x] name
+    pkill [-SIGNAL] [-x] name
 
 DESCRIPTION
-    Same program as pgrep(1) (a link to it): ends the matching processes.
+    Same program as pgrep(1) (a link to it): sends the matching processes
+    SIGNAL (a name or a number, as kill(1) takes them), SIGTERM if none is
+    named.
 
 EXIT STATUS
     0 if a process matched, 1 if none did, 2 for a wrong option.
 
 SEE ALSO
-    pgrep(1)
+    pgrep(1), kill(1)

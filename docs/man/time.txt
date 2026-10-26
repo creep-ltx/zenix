@@ -11,6 +11,8 @@ DESCRIPTION
     real MmS.mmms.
 
 NOTES
+    The command runs in time's own process group, the shell's job: Ctrl+C
+    reaches both (no time is printed then).
     Only wall-clock time: the kernel does not count CPU time per process
     yet. The command is looked up in /bin unless it has a slash.
 

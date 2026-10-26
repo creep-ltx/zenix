@@ -78,6 +78,8 @@ EXAMPLES
     ls -l | awk '{ print $5, $NF }'      sizes and names
 
 NOTES
+    system() runs the command in awk's process group (the shell's job):
+    Ctrl+C reaches both.
     Numbers are doubles computed in software (Zenix uses no FPU), so heavy
     arithmetic is slow on a real 68020. Whole numbers print in full up to
     16 digits (as gawk); larger ones use CONVFMT/OFMT (%.6g). The stack is

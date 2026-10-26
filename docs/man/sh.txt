@@ -94,11 +94,12 @@ BUILTINS
     alias [name=value]  unalias name  history [-c]  source file (or . file)
     read [-p prompt] name...  shift [n] (n >= 0)  return  break  continue
     jobs
-    fg [%n]  bg [%n]  wait [pid|%n]  kill [-STOP|-CONT] pid|%n  type name
+    fg [%n]  bg [%n]  wait [pid|%n]  kill [-SIGNAL] pid|%n|-pgid  kill -l
+    type name
     test expr (or [ expr ])  true false :  echo [-ne]  pwd  eval
     local NAME[=value] (in a function only: the old value comes back when
     the function returns, as in bash)
-    help  umask [mask]  trap 'commands' EXIT
+    help  umask [mask]  trap ['commands' | '' | -] SIGNAL...  trap [-p]
     test: -e -f -d -r -w -x -s -z -n -L, = != -eq -ne -lt -le -gt -ge,
           ! -a -o ( )
 
@@ -126,12 +127,26 @@ VARIABLES THE SHELL USES
 
 JOBS
     command &   runs in the background; jobs lists them (Running, Stopped,
-    Done); wait waits; kill %1 ends one. Ctrl+C ends the program in the
-    foreground (and a loop the shell itself is running). Ctrl+Z stops the
-    program in the foreground and gives the prompt back: bg lets it run on in
-    the background, fg brings it back to the foreground (the job is %n from
-    jobs; without a number the most recent one). A pipeline stops and
-    continues as a whole.
+    Done); wait waits; kill %1 sends SIGTERM to one (kill -NAME %1 another
+    signal). An interactive shell puts every job (a command or a whole
+    pipeline) in a process group of its own and makes it the terminal's
+    foreground while it runs, so Ctrl+C (SIGINT) and Ctrl+Z (SIGTSTP) reach
+    every process of it and nothing else; Ctrl+C during a loop the shell
+    itself is running stops the loop. Ctrl+Z stops the job and gives the
+    prompt back: bg lets it run on in the background, fg brings it back to
+    the foreground (both send SIGCONT; the job is %n from jobs; without a
+    number the most recent one). A program may catch these signals (less
+    and edit leave the screen tidy and draw it again when continued). The
+    shell itself is its own group and is never stopped by Ctrl+Z.
+
+SIGNALS
+    trap 'commands' SIGNAL... runs the commands when the signal arrives,
+    after the command that is running ends (as bash); $? is kept. trap ''
+    SIGNAL ignores it (also in the commands the shell starts), trap -
+    SIGNAL (or trap SIGNAL) puts the default back; EXIT (0) runs when the
+    shell ends. trap and trap -p [SIGNAL...] list them, trap -l the names.
+    SIGNAL is a name (INT, SIGINT) or a number; KILL and STOP cannot be
+    trapped.
 
 NOTES
     There is no fork. A builtin, a function or a ( ) group in a pipeline, and
@@ -140,7 +155,9 @@ NOTES
     sees what the parent sees; changes it makes stay in the child. The shell
     keeps within its 16 KB stack and answers "nested too deeply" instead of
     running over it (a function that calls itself without end).
-    trap handles only EXIT (0); other signals are not delivered to the shell.
+    Unlike bash, a loop does not stop when a command in it was ended by
+    Ctrl+C (status 130). A script or sh -c is not interactive: its commands
+    stay in its own group (the job its parent shell made).
     Brace and pattern text inside quotes is literal. Not done: [[ ]], arrays,
     history expansion (!!), here-strings, process substitution, getopts.
     An error says why: "permission denied", "no such file or directory",
