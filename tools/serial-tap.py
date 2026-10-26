@@ -16,6 +16,9 @@ Optional argv[3]: a keystroke script driven while logging. Lines:
                        timeout in seconds if it is a number (default 60). On
                        a timeout the script goes on, and the tap prints
                        "serial-tap: wait timed out: <regex>" on its output.
+    stop               end the emulator now, as a power cut would (tools/run-test.sh
+                       kills FS-UAE when the tap leaves <serial port>.stop); also
+                       to end a run as soon as its script is done
     shot <name>        (under tools/shot.py) take a screenshot now: shot.py saves
                        it as <prefix>-<name>.png; the script goes on when it
                        is saved (at most 30 s). Without shot.py: nothing.
@@ -115,6 +118,9 @@ def run_script(path):
     global mark
     for line in open(path):
         line = line.rstrip("\n")
+        if line.strip() == "stop":
+            open(link + ".stop", "w").close()
+            return
         if line.startswith("shot "):
             shot(line[5:].strip())
         elif line.startswith("sleep "):
