@@ -939,7 +939,14 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **ext2**, revision 0/1, inodes of 128 bytes or more, 1, 2 or 4 KB blocks, read **and write** (bitmaps, group
   descriptors, direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast
   symlinks). Little-endian on disk, swapped on read/write of metadata. Write-through block cache with an MRU/hash
-  lookup. Directory entries are parsed in place in the cache.
+  lookup and least-recently-used replacement; directory entries are parsed in place in the cache. **The cache's size
+  by the machine** (the 2 MB diet, DESIGN D18): one region of memory, allocated at the first block read after a
+  mount: with fast RAM 48 blocks (as before), without fast RAM 24 KB (24 blocks of 1 KB), never fewer than 12 blocks.
+  Measured on the host (a session's requests: logins, `ls -l /bin` twice, ten program loads, 20 files written and
+  removed; sectors read): 1 KB blocks 751 with 48 blocks, 943 with 24; 4 KB blocks 723 with 48, 1307 with 12 (3315
+  with 8, hence the floor); without the program loads 65 and 85. The extra reads are programs read again that 48
+  blocks still held. Before, each block was a separate `malloc`, whose growing chunks held 84 KB for 48 KB of
+  blocks; fsd on the 2 MB A1200 without fast RAM went from 148 KB to 87 KB.
 - **ext2: what is mounted** (`ext2_mount_as`, kernel/ext2.c). Refused: revision above 1, blocks above 4 KB, a
   superblock or group table that does not add up (sizes, inode count, every group's bitmaps and inode table inside
   its group), and every INCOMPAT feature except `filetype` - extents, 64bit, flex_bg, meta_bg, needs_recovery,

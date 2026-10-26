@@ -38,7 +38,7 @@ static inline u16 le16(u16 v) { return (u16)((v >> 8) | (v << 8)); }
 #define EIO_ (-5)
 #define EROFS_ (-30)
 
-#define NBUF 48
+#define NBUF 48                         /* cache slots at most (one block each) */
 static inline u32 strlen_(const char *s) { u32 n = 0; while (s[n]) n++; return n; }
 static inline int strcmp_(const char *a, const char *b)
 {
@@ -51,7 +51,11 @@ static inline int memcmp_(const void *a, const void *b, u32 n)
     while (n--) { if (*p != *q) return *p - *q; p++; q++; }
     return 0;
 }
-static struct { u32 blk, stamp; u8 *data; } buf[NBUF];
+static struct { u32 blk, stamp; u8 *data; } buf[NBUF];   /* blk 0xFFFFFFFF: an empty slot (stamp 0) */
+static u8 *pool;                        /* the slots' blocks: one allocation, made at the first block read */
+static u32 nbuf;                        /* slots in the pool */
+u32 ext2_cache_bytes;                   /* the cache's size, set by the server before the mount (the 2 MB diet, DESIGN
+                                         * D18: by the machine's memory); 0: NBUF blocks */
 static u32 stamp;
 static int last_slot;
 static u8 hashslot[64];                 /* blk & 63 -> slot that probably holds it */
@@ -87,13 +91,36 @@ static int damaged(const char *what, u32 v)
 
 static void cache_drop(void)            /* forget every cached block (a new device, maybe another block size) */
 {
+    if (pool)
+        fs_free(pool);
+    pool = 0;
+    nbuf = 0;
     for (int i = 0; i < NBUF; i++) {
-        if (buf[i].data)
-            fs_free(buf[i].data);
-        buf[i].data = 0;
         buf[i].blk = 0xFFFFFFFF;
+        buf[i].stamp = 0;
     }
     last_slot = 0;
+}
+
+/* the cache's blocks in one piece (malloc's chunks, grown block by block, held a third more than the blocks): as
+ * many as ext2_cache_bytes holds, at least 12 (with 8, `ls -l` on a 4 KB-block volume read 4.6 times as much as
+ * with 48: the inode table, the directory and the program reading them evict each other; DESIGN D18), at most NBUF;
+ * fewer while memory is short (at least 2: a request holds at most one block pointer at a time, so 2 serve, slowly) */
+static int cache_setup(void)
+{
+    u32 n = ext2_cache_bytes ? ext2_cache_bytes / bsize : NBUF;
+    if (n < 12)
+        n = 12;
+    if (n > NBUF)
+        n = NBUF;
+    while (!(pool = fs_alloc(n * bsize)) && n > 2)
+        n /= 2;
+    if (!pool)
+        return -1;
+    nbuf = n;
+    for (u32 i = 0; i < n; i++)
+        buf[i].data = pool + i * bsize;
+    return 0;
 }
 
 /* returns the cache slot holding block blk (loading it), or -1.
@@ -109,35 +136,30 @@ static int bfind(u32 blk)
         return -1;
     }
     stamp++;
-    if (buf[last_slot].data && buf[last_slot].blk == blk) {
+    if (buf[last_slot].blk == blk) {    /* an empty slot's 0xFFFFFFFF is never a block number (above) */
         buf[last_slot].stamp = stamp;
         return last_slot;
     }
     int h = hashslot[blk & 63];
-    if (buf[h].data && buf[h].blk == blk) {
+    if (buf[h].blk == blk) {
         buf[h].stamp = stamp;
         return last_slot = h;
     }
-    for (int i = 0; i < NBUF; i++) {
-        if (buf[i].data && buf[i].blk == blk) {
+    if (!pool && cache_setup())
+        return -1;
+    for (int i = 0; i < (int)nbuf; i++) {
+        if (buf[i].blk == blk) {
             buf[i].stamp = stamp;
             hashslot[blk & 63] = (u8)i;
             return last_slot = i;
         }
-        if (!buf[i].data) {
-            victim = i;
-            oldest = 0;
-        } else if (buf[i].stamp < oldest) {
+        if (buf[i].stamp < oldest) {    /* the least recently used; an empty slot (0) first */
             oldest = buf[i].stamp;
             victim = i;
         }
     }
-    if (!buf[victim].data) {
-        buf[victim].data = fs_alloc(bsize);
-        if (!buf[victim].data)
-            return -1;
-    }
     buf[victim].blk = 0xFFFFFFFF;
+    buf[victim].stamp = 0;
     if (fs_blk_read(part_lba + blk * sectors_per_block, sectors_per_block,
                     buf[victim].data))
         return -1;

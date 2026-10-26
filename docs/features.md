@@ -60,6 +60,7 @@ built. Last checked against the code: 2026-10-23.
 | Feature | Status | Details |
 |---|---|---|
 | ext2 (revision 0/1, 1-4 KB blocks) read and write, clean under host `e2fsck`; modern `mke2fs -t ext2` volumes too; ext3 read-only, ext4 refused | verified (FS-UAE; host test `tools/ext2-host-test.sh`) | architecture.md section 10 |
+| ext2's block cache sized by the machine (DESIGN D18): 48 blocks with fast RAM, 24 KB (at least 12 blocks) without; one region, allocated at the first read | verified (`tools/ext2-host-test.sh` passes with either size, `HOSTDISK_NOFAST`; reads measured on the host, architecture.md section 10; fsd 148 -> 87 KB on the 2 MB A1200 in FS-UAE) | architecture.md section 10 |
 | A damaged ext2 disk fails requests, never crashes the server (fuzzed) | verified on the host (`tools/ext2-host-test.sh`) | architecture.md section 10 |
 | Files up to double-indirect size, growing directories, rename | verified (FS-UAE write tests; the double-indirect size on the host, `tools/ext2-host-test.sh`: a 300 KB file on 1 KB blocks, `e2fsck` clean) | |
 | Hard links, symbolic links (incl. fast symlinks), chmod, utimes | verified | |

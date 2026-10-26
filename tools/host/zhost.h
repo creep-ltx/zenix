@@ -31,6 +31,7 @@ struct umsg *sys_replyrecv(struct umsg *m, int r, int port);
 int sys_reply(struct umsg *m, int r);
 void sys_sleep(u32 ticks);
 u32 sys_ticks(void);
+int sys_meminfo(u32 out[4]);                      /* hostdisk.c: fast RAM free 0 with HOSTDISK_NOFAST (fsd's cache, D18) */
 long sys_time(void);
 void *xmalloc(u32 n);
 /* the disk server's privileged calls (tools/host/diskd-host.c provides them) */

@@ -61,6 +61,7 @@ int main(void)
     char line[1024];
     disk_port = 1;
     ext2_busy = open_busy;
+    cache_by_memory();                                    /* HOSTDISK_NOFAST: as on a machine without fast RAM */
     static char big[1 << 20];
     while (fgets(line, sizeof line, stdin)) {
         line[strcspn(line, "\n")] = 0;

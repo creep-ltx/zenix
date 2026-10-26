@@ -4,7 +4,8 @@
 #   - what is mounted: modern mke2fs ext2 (1 KB and 4 KB blocks) read-write, ext3 read-only, ext4 refused, errors
 #     read-only, unknown read-only feature read-only; the root rule refuses all but plain writable ext2;
 #   - a workload on revision 0 and modern ext2 (fast/slow symlinks removed, hard links, an htree directory changed,
-#     a big file) and host e2fsck -fn clean afterwards;
+#     a big file) and host e2fsck -fn clean afterwards; the same with the small block cache of a machine without fast
+#     RAM (DESIGN D18): the same answers;
 #   - an open file that is unlinked keeps its data until the close, and its number is not reused meanwhile;
 #   - the permission rules of audit D: set-group-id directories, a non-owner write clears set-user-id, utimes, chmod
 #     and set-group-id, O_EXCL, and that raw messages from a user (not from the kernel) are refused;
@@ -108,6 +109,7 @@ for img in rev0 plain plain4k; do
     mke2fs -q -F -t ext2 $o -d $T/src $T/w-$img.img 16M || exit 1
     [ $img = rev0 ] || e2fsck -fyD $T/w-$img.img >/dev/null 2>&1    # index the big directory (htree)
     [ $img = plain ] && { debugfs -R "stat /idx" $T/w-$img.img 2>/dev/null | grep -q "Flags: 0x1000" && check "the test directory is an htree (dir_index) directory" ok || check "the test directory is an htree directory" bad; }
+    cp $T/w-$img.img $T/s-$img.img                    # (the same image for the small cache's run below)
     fsd $T/w-$img.img $T/work.txt $T/out
     sed -i "/^ls -> /s/^\(.\{60\}\).*/\1.../" $T/out
     ok=ok
@@ -120,6 +122,15 @@ for img in rev0 plain plain4k; do
     check "workload on $img ext2 (symlinks, links, big file, htree directory)" $ok
     [ $ok = ok ] || cat $T/out
     clean $T/w-$img.img && check "host e2fsck -fn clean after the workload ($img)" ok || { check "host e2fsck -fn clean after the workload ($img)" bad; cat $T/e2fsck.log; }
+    cp $T/out $T/out-$img
+done
+# the small block cache of a machine without fast RAM (DESIGN D18: 24 KB, at least 12 blocks): the same answers, the
+# same image
+for img in plain plain4k; do
+    HOSTDISK_NOFAST=1 fsd $T/s-$img.img $T/work.txt $T/out
+    sed -i "/^ls -> /s/^\(.\{60\}\).*/\1.../" $T/out
+    cmp -s $T/out $T/out-$img && clean $T/s-$img.img && check "the small cache (no fast RAM): the workload's answers the same, e2fsck -fn clean ($img)" ok ||
+        { check "the small cache (no fast RAM): the workload's answers the same, e2fsck -fn clean ($img)" bad; diff $T/out-$img $T/out | head; }
 done
 debugfs -R "stat /idx" $T/w-plain.img 2>/dev/null | grep -q "Flags: 0x0" && check "a changed htree directory lost its index flag" ok || check "a changed htree directory lost its index flag" bad
 
