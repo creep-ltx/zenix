@@ -323,8 +323,12 @@ must first read Amiga partitions and LhA/LZX archives, where demos live). Three 
 3. **A demo browser**: a text-UI list of the demos found, with their group, year and machine needs (AGA, memory), and
    one key to run.
 
-Honest limits: a demo may overwrite all of chip RAM, so the dependable way back is a quick reboot into Zenix (seconds on
-a PiStorm); a return without a reboot needs Zenix kept wholly in fast RAM and is a later refinement. Demos that fail on
+Getting back: a well-behaved executable demo returns to the system just as it returns to Workbench under AmigaOS: it
+gets its chip RAM through `AllocMem` (the demo layer hands it out of Zenix's own free memory, so Zenix's screen and code
+are never given away), saves the system's view, interrupts and DMA settings, and puts them back at the end, which puts
+Zenix's console back. While the demo runs Zenix is paused (the clock is caught up after; serial input in that time may
+be lost). Only demos that also do not return under AmigaOS (writing anywhere in memory without asking, ending in a
+reset, booting from their own disk) need a reboot into Zenix to get back (seconds on a PiStorm). Demos that fail on
 very fast CPUs (Emu68) fail the same way under AmigaOS; Zenix cannot change that. The wider question, AmigaOS shell
 programs (a dos/exec layer, as amitools' vamos does on the PC) and window programs (a whole second system, AROS-sized),
 was discussed the same day: shell programs are realistic later, window programs are left to the dual boot.
