@@ -86,18 +86,24 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 2. **Zenix reaches the world:** signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
    server, DHCP, DNS); `ping`, `telnet` (made for BBSes, the owner's daily use: ANSI colours, the PC character set and Amiga
    fonts, the BBS window size, downloads), `wget`, an NFS client; a Wasabi-like remote control (early: it lets the A1200
-   be tested remotely); `zpkg` with its repository on the owner's NAS. A security audit. Then **the Zenix demo floppy**
+   be tested remotely); **one small crypto library** (owner 2026-10-26: "I need to be able to SSH into my Linux machine,
+   properly"): modern, small and constant-time, e.g. BearSSL (MIT) for TLS and Dropbear's client (MIT) for SSH, with
+   Ed25519/X25519/ChaCha20 (fast without an FPU or AES hardware) and a real random source; it also signs `zpkg`'s
+   packages; then `ssh` (a proper client, keys, known hosts) and HTTPS for `wget`; `zpkg` with its repository on the
+   owner's NAS. A security audit. Then **the Zenix demo floppy**
    (owner 2026-10-25, in the spirit of the 1999 QNX demo disk): one 880 KB Amiga floppy that boots into Zenix with the
    network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5. The model (owner 2026-10-26): KolibriOS, a
    desktop, network and programs on one 1.44 MB floppy; as there, the programs are packed on the disk and unpacked
    when they start, which is what makes a desktop edition fit 880 KB.
 3. **A terminal you can live in:** a fuller C library (newlib); D13 stage 2 (shared libraries) decided; the text-UI
-   library, then Sumi, Maki, Markdown and `zc`; UTF-8 in the console. Audit; then a first public pre-release (0.1),
+   library, then Sumi, Maki, Markdown and `zc`; UTF-8 in the console; PC (CP437) and other bitmap fonts for the console
+   (the PC set comes earlier, with telnet); a text-only e-mail client (IMAP/SMTP over TLS; owner 2026-10-26). Audit; then a first public pre-release (0.1),
    with the owner's yes.
 4. **The Amiga world:** FAT, FFS/OFS, then PFS3; LhA/LZX unpacking; ZenixFS as the root on real hardware; the
    installer. Audit, with the filesystems fuzzed against damaged disks.
 5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
-   viewers, preferences; the demo floppy's desktop edition. Audit.
+   viewers, preferences; TrueType fonts (owner 2026-10-26; rendered once per size into bitmap fonts and cached, so a
+   68020 without an FPU pays only once; also usable by the console); the demo floppy's desktop edition. Audit.
 6. **Sound and hardware:** a Paula server, `play`, a MOD player; optional memory protection on CPUs with an MMU; USB,
    RTG, faster IDE, CD. Audit.
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full
