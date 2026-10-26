@@ -927,17 +927,31 @@ static void free_tree(u32 blk, int level, u32 *budget)
     free_block(blk);
 }
 
+/* The blocks of an inode are given back in two steps, in the order a power cut can survive (audit 2026-10-26 F5):
+ * first the inode is written without them (forget_data and release_acl, then ext2_iput), then the blocks
+ * are freed in the bitmaps from a copy of the old map (free_data, drop_acl). A cut in between leaves blocks marked in
+ * use that no inode holds (a leak fsck gives back), never a block marked free that an inode still points at (the next
+ * file would get it too). */
+
 /* free the data blocks of a regular file, directory or slow symbolic link (never block[] of a fast symlink or a
- * device: that is text / device numbers). The extended-attribute block, if any, stays: see release_acl. */
-static void free_data(struct inode *in)
+ * device: that is text / device numbers), as OLD (a copy of the inode before forget_data) holds them */
+static void free_data(const struct inode *old)
+{
+    if (has_block_map(old)) {
+        u32 budget = old->nblocks / (bsize / 512) + 1;  /* no more blocks than the inode says it has */
+        for (int i = 0; i < 12; i++)
+            free_tree(old->block[i], 0, &budget);
+        free_tree(old->block[12], 1, &budget);
+        free_tree(old->block[13], 2, &budget);
+        free_tree(old->block[14], 3, &budget);
+    }
+}
+
+/* the inode without its data blocks (in memory; the caller writes it). The extended-attribute block, if any, stays:
+ * see release_acl */
+static void forget_data(struct inode *in)
 {
     if (has_block_map(in)) {
-        u32 budget = in->nblocks / (bsize / 512) + 1;   /* no more blocks than the inode says it has */
-        for (int i = 0; i < 12; i++)
-            free_tree(in->block[i], 0, &budget);
-        free_tree(in->block[12], 1, &budget);
-        free_tree(in->block[13], 2, &budget);
-        free_tree(in->block[14], 3, &budget);
         for (int i = 0; i < 15; i++)
             in->block[i] = 0;
         in->nblocks = in->acl ? bsize / 512 : 0;
@@ -946,14 +960,22 @@ static void free_data(struct inode *in)
     }
 }
 
-/* the inode's extended-attribute block: one reference less, freed with the last one */
-static void release_acl(struct inode *in)
+/* the inode without its extended-attribute block (in memory); the block itself goes in drop_acl */
+static u32 release_acl(struct inode *in)
 {
     u32 b = in->acl;
     if (!b)
-        return;
+        return 0;
     in->acl = 0;
     in->nblocks = in->nblocks >= bsize / 512 ? in->nblocks - bsize / 512 : 0;
+    return b;
+}
+
+/* one reference less on an extended-attribute block, freed with the last one */
+static void drop_acl(u32 b)
+{
+    if (!b)
+        return;
     u8 h[8];
     if (b < first_data_block || b >= total_blocks || bread_copy(b, 0, h, 8) || rd32(h) != XATTR_MAGIC) {
         damaged("extended attribute block", b);
@@ -974,20 +996,30 @@ int ext2_truncate(struct inode *in)
         return EROFS_;
     if (!S_ISREG(in->mode))
         return -EISDIR;
-    free_data(in);
+    struct inode old = *in;
+    forget_data(in);
     in->mtime = fs_now();
-    return ext2_iput(in);
+    int r = ext2_iput(in);
+    if (r)
+        return r;                       /* the inode still holds its blocks: none is freed */
+    free_data(&old);
+    return 0;
 }
 
-/* an inode with no names left: give its blocks and number back */
+/* an inode with no names left: give its blocks and number back (the inode is written empty first, see above; its
+ * number is freed last, so a cut leaves at worst a leaked inode and leaked blocks) */
 static void release(struct inode *in)
 {
     int is_dir = S_ISDIR(in->mode);
-    free_data(in);
-    release_acl(in);
+    struct inode old = *in;
+    forget_data(in);
+    u32 acl = release_acl(in);
     in->links = 0;
     in->mtime = fs_now();
-    ext2_iput(in);
+    if (ext2_iput(in))
+        return;                         /* not written: everything stays allocated (a leak, never a block in two files) */
+    free_data(&old);
+    drop_acl(acl);
     free_inode(in->ino, is_dir);
 }
 
@@ -1279,11 +1311,21 @@ int ext2_mkdir(struct inode *dir, const char *name)
     dbuf[21] = '.';
     if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d))
         return -EIO;
-    if ((r = dir_add(dir, name, len, d.ino, d.mode)))
-        return r;
+    /* the parent's count first (the new ".." counts there), then the entry: a cut in between leaves the parent's
+     * count one too high and an unnamed directory (leaks fsck finds), never a count below the names (F5) */
     dir->links++;
     dir->mtime = fs_now();
-    return ext2_iput(dir);
+    if ((r = ext2_iput(dir)))
+        return r;
+    if ((r = dir_add(dir, name, len, d.ino, d.mode))) {
+        if (ext2_iget(dir->ino, dir) == 0) {    /* dir_add may have rewritten it (index flag, a new block) */
+            dir->links--;
+            ext2_iput(dir);
+        }
+        release(&d);                            /* the new directory has no name: its block and number go back */
+        return r;
+    }
+    return 0;
 }
 
 int ext2_unlink(struct inode *dir, const char *name)
@@ -1325,6 +1367,9 @@ int ext2_rmdir(struct inode *dir, const char *name)
     if (ino == 2)
         return -EBUSY;                  /* the root */
     if (!dir_is_empty(&in))
+        return -ENOTEMPTY;
+    if (in.links > 2)                   /* an unnamed subdirectory (a power cut in its mkdir or rmdir) still has its ".."
+                                         * here: removing this one would leave that ".." naming a free inode (F5) */
         return -ENOTEMPTY;
     if ((r = dir_remove(dir, name, len, &ino)))
         return r;

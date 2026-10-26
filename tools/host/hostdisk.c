@@ -16,6 +16,7 @@ static unsigned long long start_sec;
 static u32 nsec;
 unsigned long hostdisk_writes;                  /* sectors written so far */
 unsigned long hostdisk_limit = ~0ul;            /* fail writes after this many sectors (a disk that dies) */
+int hostdisk_die;                               /* ... or, set, end the program there (exit 99: a power cut) */
 
 int hostdisk_use(const char *path, u32 start, u32 sectors)
 {
@@ -70,7 +71,10 @@ int sys_call(int port, struct umsg *m)
             if (be) for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]);
             return 0;
         }
-        if (hostdisk_writes + n > hostdisk_limit) return -1;
+        if (hostdisk_writes + n > hostdisk_limit) {
+            if (hostdisk_die) _exit(99);        /* a whole request is written or none of it */
+            return -1;
+        }
         hostdisk_writes += n;
         if (be) for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]);
         int r = pwrite(fd, (const void *)m->a[3], (size_t)n * 512, off) == (ssize_t)n * 512 ? 0 : -1;

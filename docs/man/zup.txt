@@ -44,6 +44,12 @@ DESCRIPTION
     over PATH (a running program keeps running), then the undo record
     and the commit are written, older prev sets are removed and the root
     is marked clean again. A power cut leaves it marked "needs a check".
+    The result line (/var/lib/zpkg/result) is written under that mark
+    too. ext2 has no journal of its own: a cut inside one block-writing
+    step can leave a leak (a link count one too high, blocks or an inode
+    nothing names), never a lost or shared block; zup does not repair
+    leaks, fsck.ext2 or the PC's e2fsck does (Zenix cannot check its own
+    mounted root yet).
 
     Config files (marked in a package's manifest: /etc/passwd, group,
     fstab, svctab, motd) are compared three ways: one the owner never
@@ -80,7 +86,8 @@ NOTES
     checksums catch damage, not a deliberate fake. The formats (bundle,
     manifest, journal) are described in docs/architecture.md section 3,
     "Updates". Verified on the PC (tools/zup-host-test.sh: refusals, the
-    three-way compare, a power cut before each change, the way back).
+    three-way compare, a power cut before each change, the way back; and on
+    the real ext2 server, a power cut after each block write).
     A test build (UDIAG=-DDIAG_SLOWZUP) hangs when it runs as the second
     stage, for boot's time-limit test (tools/update-test.sh slowzup).
     Every message is on the console the moment zup says it (one write

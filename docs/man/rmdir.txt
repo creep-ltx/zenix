@@ -16,7 +16,10 @@ EXIT STATUS
 NOTES
     An access the user is not allowed is reported as "permission denied".
     A directory with entries says "not empty"; any other failure gives its
-    reason.
+    reason. On ext2 an empty directory whose link count says it still has a
+    subdirectory (one a power cut left without a name) also says "not
+    empty": removing it would leave that subdirectory's ".." pointing at
+    nothing. fsck.ext2 or e2fsck repairs the count.
 
 SEE ALSO
     mkdir(1), rm(1)

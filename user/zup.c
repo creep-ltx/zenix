@@ -1016,15 +1016,19 @@ static int install(struct bundle *b, u32 kvnum, int stage2)
     return 0;
 }
 
+/* the result line, written under the "needs a check" mark like every other change zup makes: rewriting the file
+ * frees and allocates blocks, and a power cut in the middle must not leave its leak on a volume marked clean (F5) */
 static void save_result(void)
 {
     if (!result[0]) return;
+    int wasclean = fs_mark(1) == 1;
     mkdirs(DB);
     u32 n = strlen(result);
     result[n] = '\n';
     write_file(RESULT, result, n + 1);
     result[n] = 0;
     sys_sync();
+    if (wasclean) fs_mark(0);
 }
 
 static int list(void)

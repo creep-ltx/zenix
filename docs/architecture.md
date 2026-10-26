@@ -884,7 +884,17 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   file-type byte, one block write) or the new entry added, the old entry removed, the count lowered, and only then the
   old target's inode dropped. A cut between any two writes leaves at worst a count one too high or a nameless inode
   (`fsck` fixes both), never a missing name. Tested on the host by cutting the disk after every block write
-  (`tools/ext2-host-test.sh`, then `e2fsck -fn`). ZenixFS's rename is one commit, and an old target that loses its
+  (`tools/ext2-host-test.sh`, then `e2fsck -fn`). **The same rule for every request (audit 2026-10-26 F5): a power
+  cut leaves only leaks**, never a block or inode in use marked free, a count below its names or a `..` naming a free
+  inode: freeing a file's blocks (delete, truncate) writes the inode without them first and frees them in the bitmaps
+  after, its number last; `mkdir` raises the parent's count before adding the entry; `rmdir` refuses (-ENOTEMPTY) a
+  directory whose count says a subdirectory still points at it (one a cut left unnamed). What a cut can leave is a
+  count one too high, an unnamed inode or directory, blocks or inodes marked in use that nothing holds, free counts a
+  little off: space lost until `fsck.ext2` or `e2fsck` gives it back. Tested on the host by cutting the disk after
+  each of an update's 2200 block writes (`tools/zup-host-test.sh` section 3, `tools/e2safe.py` sorts e2fsck's findings
+  into leaks and the rest). An ext2 volume is not marked "needs a check" while it is mounted (only by a server that
+  ended in a request, and by zup while it installs), so a cut in ordinary use leaves its leaks on a volume that says
+  clean (F6). ZenixFS's rename is one commit, and an old target that loses its
   last link is freed only after the new entry is in place (freeing a big file may commit on the way).
 - Not done: moving directories between parents (rename answers -EXDEV, so `mv` copies), triple-indirect files, a
   journal.

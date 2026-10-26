@@ -17,7 +17,8 @@
 #                log is evidence, the 10 s question defaults to the previous version, both halves go back
 #   previous     "Zenix (previous)" after a cut right after its first step (the bundle renamed .rejected): the old
 #                kernel the default again, the root rolled back
-#   powercut     the emulator killed while zup installs: the next start finishes it or rolls it back and installs
+#   powercut     the emulator killed while zup installs: the next start finishes it or rolls it back and installs;
+#                the root has at worst leaks (tools/e2safe.py) and stays marked "needs a check"
 #   bad          a damaged bundle and a .part: both renamed .bad, the installed system starts
 #   refused      a bundle zup refuses (it needs a newer base than any): the kernel comes up and confirms, but the
 #                bundle is kept (not .done) and handed over again at the next start, where zup refuses it again
@@ -109,6 +110,11 @@ check() { if [ "$3" = ok ]; then echo "PASS $1: $2"; else echo "FAIL $1: $2"; fi
 has() { grep -aqE -- "$3" $OUT/$1/$2.txt && echo ok || echo bad; }
 same() { cmp -s "$1" "$2" && echo ok || echo bad; }
 rootok() { e2fsck -fn $OUT/$1/root-$2.img >$OUT/$1/e2fsck-$2.log 2>&1 && echo ok || echo bad; }
+rootleak() {  # NAME RUN: e2fsck -fn clean, or it finds only leaks and the volume is marked not clean
+    e2fsck -fn $OUT/$1/root-$2.img >$OUT/$1/e2fsck-$2.log 2>&1 && { echo ok; return; }
+    python3 -I tools/e2safe.py $OUT/$1/e2fsck-$2.log >$OUT/$1/e2safe-$2.log &&
+        dumpe2fs -h $OUT/$1/root-$2.img 2>/dev/null | grep -q '^Filesystem state: *not clean' && echo ok || echo bad
+}
 rfile() { debugfs -R "cat $3" $OUT/$1/root-$2.img 2>/dev/null; }
 rhas() { debugfs -R "stat $3" $OUT/$1/root-$2.img 2>/dev/null | grep -q '^Inode:' && echo yes || echo no; }
 inorder() {   # NAME RUN REGEX...: the lines appear in this order
@@ -244,11 +250,16 @@ setup_powercut() {
     check $n "the emulator killed while zup installs (a journal left; cut ${d}s into it)" "$([ "$(rhas $n 1 /var/lib/zpkg/journal)" = yes ] && echo ok || echo bad)"
     printf '%s\nsleep 2\nsend uname; grep -c owner /etc/passwd; ls /etc/passwd.new; hello | head -1; echo zb\\x6fk\\r\nsleep 4\nstop\n' "$S_PROMPT" >$OUT/$n/s2.txt
     run $n 2 900 $OUT/$n/s2.txt
-    check $n "the next start: the journal finished or rolled back, then installed" \
-        "$(inorder $n 2 'a journal from an install that did not end' '(finished the install of|rolled the unfinished install of) '$V2 "update: the bundle's [0-9]+ bytes are free again")"
+    # a cut while the journal itself was written (it is written and synced before any change) leaves one without its
+    # "end" line: "cut short, nothing had been changed" is then the right answer, and the install follows
+    check $n "the next start: the journal finished, rolled back or found cut short, then installed" \
+        "$(inorder $n 2 'a journal from an install that did not end' '(finished the install of|rolled the unfinished install of) '$V2'|the journal was cut short: nothing had been changed' "update: the bundle's [0-9]+ bytes are free again")"
     check $n "... the root is the new version" "$(grep -aqx 1 $OUT/$n/2.txt && grep -aq '^/etc/passwd.new' $OUT/$n/2.txt && grep -aq 'HELLO from pid' $OUT/$n/2.txt && echo ok || echo bad)"
     check $n "... no journal left, no .zup-new" "$([ "$(rhas $n 2 /var/lib/zpkg/journal)" = no ] && ! debugfs -R 'ls -l /bin' $OUT/$n/root-2.img 2>/dev/null | grep -q zup-new && echo ok || echo bad)"
-    check $n "the root: e2fsck -fn clean" "$(rootok $n 2)"
+    # ext2 has no journal: the cut may land inside a request that writes several blocks (most of zup's are), and
+    # what is left must be a leak only (tools/e2safe.py; audit 2026-10-26 F5), on a root still marked "needs a check"
+    check $n "the root after the cut and after the next start: e2fsck -fn clean, or at worst leaks with the root marked \"needs a check\"" \
+        "$([ "$(rootleak $n 1)" = ok ] && [ "$(rootleak $n 2)" = ok ] && echo ok || echo bad)"
 }
 setup_bad() {
     local n=bad

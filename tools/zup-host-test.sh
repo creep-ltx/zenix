@@ -186,7 +186,8 @@ for v in "b2bad:SHA-256 does not match" "b2short:the bundle is .* bytes, its hea
     case "$want" in K*) k=${want%%:*}; k=${k#K}; want=${want#*:} ;; F*) e=(ZUP_FREE_KB=${want%%:*}); e=(ZUP_FREE_KB=5); want=${want#*:} ;; esac
     rm -f $U/trace
     zup $R $k $U/$b.zup "${e[@]}" >$U/out 2>&1; rc=$?
-    [ $rc = 1 ] && grep -q "$want" $U/out && snap $R | cmp -s - $U/s1 && [ -z "$(leftovers $R)" ] && ! grep -q "^rename\|^link\|^mark" $U/trace &&
+    [ $rc = 1 ] && grep -q "$want" $U/out && snap $R | cmp -s - $U/s1 && [ -z "$(leftovers $R)" ] && ! grep -q "^rename\|^link" $U/trace &&
+        [ "$(cat $U/fsclean)" = 1 ] &&
         grep -q "^note 2 " $U/trace && grep -q "was not installed: " $R/var/lib/zpkg/result &&
         check "refused before any change ($b${e:+, a small disk}): '$want'" ok || { check "refused before any change ($b): '$want'" bad; cat $U/out; }
 done
@@ -264,6 +265,54 @@ zup $U/c $V2 $U/b2.zup >/dev/null 2>&1
 snap $U/c | cmp -s - $U/s2 && check "after the rollback the bundle installs again (the new version)" ok || check "after the rollback the bundle installs again" bad
 env ZUP_ROOT=$U/c $U/zup >$U/out 2>&1; rc=$?
 [ $rc = 0 ] && [ ! -s $U/out ] && check "a kernel without SYS_update: zup does nothing and says nothing" ok || check "a kernel without SYS_update: nothing" bad
+
+# ---- 3. zup on the real ext2 code (audit 2026-10-26 F5) ----
+# zup's calls served by user/fsd.c and kernel/ext2.c on an image (tools/host/zup-ext2.c, zup-fsd.c); the power goes
+# after every block write of the update (a whole block reaches the disk or none of it), then zup again (the next
+# start: the journal), then the bundle again. ext2 has no journal of its own, so a cut inside one request may leave
+# a half-done change: it must only ever be a leak (tools/e2safe.py: a count too high, an unnamed inode, blocks or
+# inodes marked in use that nothing holds), never a block in use marked free, a count below its names or a ".."
+# naming a free inode; the volume stays marked "needs a check" whenever e2fsck finds something; the end is the new
+# version. On the old code (blocks freed before the inode let go of them, mkdir's parent count raised after the
+# entry, rmdir of a directory an unnamed subdirectory still points at) about 25 of the 2200 cuts were not leaks.
+X=$T/x; mkdir -p $X
+R2="-Dsys_call=hd_sys_call -Dsys_port_find=hd_port_find"
+XF="-m32 -DZHOST -std=gnu11 -O1 -g -Wall -Wextra -Wno-format-truncation -Wno-unused-parameter -Wno-sign-compare -Wno-missing-field-initializers"
+gcc $XF -DFSD $R2 -c -o $X/fsd.o tools/host/zup-fsd.c 2>$X/cc.log && gcc $XF -DFSD $R2 -c -o $X/hd.o tools/host/hostdisk.c 2>>$X/cc.log &&
+    gcc $XF -DFSD -c -o $X/ext2.o kernel/ext2.c 2>>$X/cc.log &&
+    gcc $XF -Iuser/miniz -o $X/zup user/zup.c user/sha256.c user/miniz/miniz_tinfl.c tools/host/zup-ext2.c $X/fsd.o $X/hd.o $X/ext2.o 2>>$X/cc.log &&
+    check "zup builds for the PC on the ext2 server" ok || { check "zup builds for the PC on the ext2 server" bad; cat $X/cc.log; }
+xz() { env HOSTDISK=$1 ZUP_KVNUM=$V2 ZUP_SELF=$X/zup "${@:2}" $X/zup; }
+xcat() { debugfs -R "cat $2" $1 2>/dev/null; }
+mke2fs -q -F -t ext2 -b 1024 -N 256 -d $U/r1 $X/base.img 4M && e2fsck -fn $X/base.img >/dev/null 2>&1 ||
+    check "the ext2 image of the old version" bad
+xnew() { [ "$(xcat $1 /bin/sh)" = "sh2 contents" ] && [ "$(xcat $1 /sbin/zup)" = "zup2 contents" ] && xcat $1 /etc/motd | cmp -s - $S/motd2 &&
+         xcat $1 /etc/passwd.new | cmp -s - $S/passwd2 && [ -z "$(xcat $1 /var/lib/zpkg/journal)" ] && ! debugfs -R 'stat /var/lib/zpkg/journal' $1 2>/dev/null | grep -q '^Inode:'; }
+cp $X/base.img $X/t.img
+xz $X/t.img ZUP_BUNDLE=$U/b2.zup >$X/out 2>&1 && e2fsck -fn $X/t.img >$X/e2.log 2>&1 && xnew $X/t.img &&
+    dumpe2fs -h $X/t.img 2>/dev/null | grep -q '^Filesystem state: *clean$' &&
+    check "the update on ext2 without a cut: the new version, e2fsck clean, the volume clean again" ok || { check "the update on ext2 without a cut" bad; cat $X/out $X/e2.log; }
+n=0; cuts=0; leaks=0; bad=0; rc=99
+while [ $rc = 99 ] && [ $n -le 20000 ]; do
+    cp $X/base.img $X/t.img
+    xz $X/t.img ZUP_BUNDLE=$U/b2.zup ZUP_DISKCUT=$n >/dev/null 2>&1; rc=$?
+    if [ $rc = 99 ]; then
+        cuts=$((cuts + 1))
+        for step in "the next start" "the bundle again"; do
+            if [ "$step" = "the next start" ]; then xz $X/t.img >$X/out 2>&1; else xz $X/t.img ZUP_BUNDLE=$U/b2.zup >$X/out 2>&1; fi
+            if e2fsck -fn $X/t.img >$X/e2.log 2>&1; then :; else
+                [ "$step" = "the next start" ] && leaks=$((leaks + 1))
+                python3 -I tools/e2safe.py $X/e2.log >$X/why || { bad=$((bad + 1)); echo "  cut after $n sectors, $step: $(head -2 $X/why | tr '\n' ' ')"; }
+                dumpe2fs -h $X/t.img 2>/dev/null | grep -q '^Filesystem state: *not clean' || { bad=$((bad + 1)); echo "  cut after $n sectors, $step: e2fsck finds something, but the volume is marked clean"; }
+            fi
+        done
+        xnew $X/t.img || { bad=$((bad + 1)); echo "  cut after $n sectors: not the new version after the bundle again"; }
+    fi
+    n=$((n + 2))
+done
+[ $rc = 0 ] && [ $cuts -gt 1000 ] && [ $bad = 0 ] &&
+    check "a power cut after each of the update's $cuts block writes on ext2, then zup and the bundle again: at worst leaks (after $leaks cuts), marked \"needs a check\", the new version in the end" ok ||
+    check "power cuts on ext2 ($bad bad, $cuts cuts, last zup $rc)" bad
 
 echo "zup-host-test: $pass passed, $fail failed"
 [ $fail = 0 ]

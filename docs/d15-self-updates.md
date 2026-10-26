@@ -283,7 +283,15 @@ Built as sections 3-8 say, with these differences (each a decision made while bu
 4. **`FS_MARK` (message 25)** is new: no message let a program set or clear the "needs a check" bit. It answers the
    state before, so zup only marks clean what was clean. ZenixFS does not know it (-ENOSYS): its commits are atomic.
    After a power cut the root **stays** marked "needs a check" (the recovery does not clear it): a block write may
-   have been cut too, which only fsck sees.
+   have been cut too, which only fsck sees. **What a cut leaves (audit 2026-10-26 F5, measured on the host: a cut
+   after each of an update's 2200 block writes):** most of zup's requests write several blocks (a link: the count,
+   then the entry; a file: blocks, then the inode), so about 4 cuts in 5 leave a **leak**: a count one too high, an
+   unnamed inode, blocks or inodes marked in use that nothing holds. ext2's write order makes sure it is never worse
+   (never a block marked free that a file holds, a count below its names, a `..` naming a free inode; fixed in F5).
+   zup does not repair leaks: they are anonymous (a block nobody holds has no name in the journal), so only a whole
+   check finds them, and Zenix cannot check its mounted root yet. Every change zup makes, the result line
+   included, is under the mark, so a leak is never left on a root marked clean. A check of the root at the start when
+   it is marked is a later design step (proposed in F5).
 5. **boot runs zup at every start**, not only with a bundle or a journal: the version comparison (a base newer than
    the kernel, after "previous") needs it. With nothing to do zup ends at once (not measured on hardware).
 6. **The confirmation is written by `login`**, not init: login knows it is on console 1 and when its prompt (or the
