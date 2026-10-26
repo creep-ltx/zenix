@@ -203,7 +203,11 @@ boot number and reason are used, and its text is shown only if the ring's sum ma
 damaged (checksum): not shown"). The boot menu (`boot/bootmenu.c`) `AllocAbs()`es the whole area to read and clear
 the boot note, never only the note's 16 bytes: exec writes an 8-byte free-memory header at the start of the free
 remainder an allocation leaves, which was slot 0's first text bytes; a slot rejected for that showed an older boot as
-the previous one (`tools/zenixboot-test.sh bootmenu`). zenixboot rounds the chip top as the kernel does
+the previous one (`tools/zenixboot-test.sh bootmenu`). Its `AllocAbs()` and `FreeMem()` run under `Forbid()` (audit3
+B8): `FreeMem()` writes such a header at the area's start (slot 0's magic and size) unless the free memory below ends
+there, and with no other task taking that memory in between it merges back; it writes one there only when a free
+block already began at the area, whose header was in those bytes before. (Restoring the 8 bytes afterwards, as the
+audit proposed, would overwrite that header and break AmigaOS's memory list.) zenixboot rounds the chip top as the kernel does
 (`MaxLocMem & ~0xFFF`). **The update note** (D15) lies at `+0xE0`-`+0xEF`, in slot 0's header padding (outside every
 sum, before the boot note at `+0xF0`): magic `ZUPN`, kind (1 done, 2 failed - written by zup, or by `boot` when
 `/sbin/zup` is missing or did not end well -, 3 confirmed - written by `login` when its prompt is up on console 1 -,
