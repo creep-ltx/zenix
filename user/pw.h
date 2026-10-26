@@ -13,7 +13,11 @@ int gr_bygid(u32 gid, struct gr *out);
 const char *pw_name(u32 uid, char *buf);                /* name, or the number as text when unknown */
 const char *gr_name(u32 gid, char *buf);
 int read_secret(const char *prompt, char *buf, int max);
-char *pw_slurp(const char *path, int *len);             /* the whole file, malloc'd (free it), NUL-terminated; 0 if unreadable */
+char *pw_slurp(const char *path, int *len);              /* the whole file, malloc'd (free it), NUL-terminated; 0 if unreadable */
+int pw_replace(const char *who, const char *path, const char *data, u32 len, u32 mode);   /* PATH.new, then rename over: 0 or -1 (said) */
+int gr_has(const char *list, const char *name);         /* NAME in a comma-separated member list */
+void gr_drop(char *list, const char *name);             /* take NAME out of such a list, in place */
+int gr_edit(const char *who, const char *group, const char *name, int add);   /* /etc/group: member in/out; 0 or -1 (said) */
 static inline void fputs(const char *s, int fd) { sys_write(fd, s, strlen(s)); }
 static inline void *memchr(const void *s, int c, u32 n) { const unsigned char *p = s; while (n--) { if (*p == (unsigned char)c) return (void *)p; p++; } return 0; }
 /* sha.c */

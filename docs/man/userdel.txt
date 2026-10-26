@@ -1,0 +1,35 @@
+USERDEL(8)			Zenix manual
+
+NAME
+    userdel - remove a user
+
+SYNOPSIS
+    userdel [-r] name
+
+DESCRIPTION
+    Removes NAME's line from /etc/passwd and takes the name out of every
+    member list in /etc/group. With -r the home directory is removed too
+    (with rm -r). Only root may remove users; a user with number 0 (root)
+    cannot be removed.
+
+    Both files are rewritten safely: the new contents go to FILE.new,
+    which is then renamed over the old file.
+
+OPTIONS
+    -r    also remove the home directory (not when it is / or relative)
+
+EXAMPLES
+    userdel anna
+    userdel -r anna
+
+EXIT STATUS
+    0, 1 for an unknown user, a root account, a file that cannot be
+    written or a caller who is not root, 2 for bad arguments.
+
+NOTES
+    Files the user owns outside the home directory are kept (with the old
+    user number), and a user's running programs are not stopped. A line of
+    /etc/group longer than 255 characters is kept unchanged.
+
+SEE ALSO
+    useradd(8), passwd(1), rm(1)

@@ -1,0 +1,48 @@
+SUDO(8)			Zenix manual
+
+NAME
+    sudo - run a command as root (or as another user)
+
+SYNOPSIS
+    sudo [-u user] command [arg...]
+    sudo [-u user] -s
+    sudo [-u user] -i
+
+DESCRIPTION
+    Runs COMMAND as root, or as USER with -u, and waits for it. -s starts
+    the target's shell instead; -i does the same in the target's home
+    directory.
+
+    Who may use it: root, and the members of the group "wheel" (listed in
+    its member list in /etc/group, or having it as their main group). They
+    give their OWN password, not root's, with three tries; an account with
+    an empty password is not asked, a locked one ("*") never passes. The
+    shipped system has "user" in wheel. Others are refused.
+
+    The command gets the target's USER, LOGNAME, HOME and SHELL, PATH=/bin,
+    and no IFS, ENV or CDPATH from the caller (as with su(1)); TERM and the
+    rest of the environment stay. A command name without '/' is looked for
+    in /bin. sudo is installed set-user-id root.
+
+EXAMPLES
+    sudo useradd -G wheel adam      add a user who may also use sudo
+    sudo -u guest ls /home/guest
+    sudo -s                         a root shell
+
+EXIT STATUS
+    The command's own status; 1 when sudo refuses (not in wheel, wrong
+    password, unknown user) and 127 when the command is not found.
+
+NOTES
+    There is no /etc/sudoers: membership of wheel is the whole rule, and
+    the password is asked every time (it is not remembered for a while).
+    Add someone with "gpasswd -a NAME wheel", remove them with
+    "gpasswd -d NAME wheel".
+
+    Zenix runs without an MMU, so users and permissions keep people and
+    programs from changing each other's files by mistake, through every
+    file and system call; they cannot stop a program written to poke
+    another's memory.
+
+SEE ALSO
+    su(1), gpasswd(8), useradd(8), passwd(1), id(1)

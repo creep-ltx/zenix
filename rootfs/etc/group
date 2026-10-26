@@ -1,2 +1,3 @@
 root::0:root
+wheel::10:user
 users::100:user,guest
