@@ -5,7 +5,8 @@
 #   - the good one: a .data pointer into constants is in the to-code list, a .data pointer into BSS and the table slot
 #     of a BSS array in the to-data list, the slot of a constant in the to-code list, the header adds up;
 #   - refused, each with its reason and the symbol named: an absolute reference from code to data (shared-to-data), a
-#     PC-relative one, a value equal to text_size, an undefined weak symbol, an absolute symbol.
+#     PC-relative one, a value equal to text_size, an undefined weak symbol, an absolute symbol;
+#   - the kernel's relocation table by distance (--delta): the same image and the same offsets as the plain table.
 #   tools/mkzexe-test.sh            (BUILD=dir to build in another directory; default a temporary one)
 cd "$(dirname "$0")/.." || exit 1
 OUT=$(mktemp -d /tmp/zenix-mkzexe.XXXXXX)
@@ -139,6 +140,33 @@ extern char hwreg[];
 int main(void) { return hwreg[0]; }
 EOF
 prog abs "$OUT/abs.c" -Wl,--defsym=hwreg=0xDFF000 && refused abs "an absolute symbol" "absolute symbol hwreg"
+
+# the kernel's relocation table by distance (--delta, docs/d13-shared-code.md section 10): the same image as with the
+# plain table, and the distances decode to exactly the plain table's offsets (start.S's loop does the same decoding;
+# every emulator test boots it)
+make -s BUILD="$B" "$B/kernel.elf" >>"$OUT/make.log" 2>&1 || { cat "$OUT/make.log"; echo "FAIL build kernel"; exit 1; }
+TOOLPREFIX=$PFX tools/mkzexe.py "$B/kernel.elf" "$OUT/k-plain.bin" >/dev/null && TOOLPREFIX=$PFX tools/mkzexe.py --delta "$B/kernel.elf" "$OUT/k-delta.bin" >/dev/null &&
+python3 -I - "$OUT/k-plain.bin" "$OUT/k-delta.bin" <<'EOF' && ok "the kernel's relocations by distance: the same image, the same offsets, a quarter of the size" || bad "the kernel's relocations by distance"
+import sys, struct
+p, d = (open(f, "rb").read() for f in sys.argv[1:3])
+isz, = struct.unpack(">I", p[8:12])
+assert p[:16] == d[:16] and p[20:isz] == d[20:isz], "the images differ"
+n, off = struct.unpack(">II", p[16:24])
+plain = [struct.unpack(">I", p[off + 4 * i:off + 4 * i + 4])[0] for i in range(n)]
+nl, doff = struct.unpack(">II", d[16:24])
+t = d[doff:]
+assert len(t) == 4 * nl and nl * 4 <= len(d) - doff, "nreloc is not the table's length in longwords"
+pos, i, got = 0, 0, []
+while t[i]:
+    b = t[i]; i += 1
+    if b & 0x80:
+        b = (b & 0x7F) << 16 | t[i] << 8 | t[i + 1]; i += 2
+    pos += 2 * b; got.append(pos)
+assert got == plain, "the offsets differ"
+assert not any(t[i + 1:]), "padding is not zero"
+assert len(t) * 3 < len(plain) * 4, "not smaller"
+print(len(plain), "relocations,", len(t), "bytes instead of", 4 * len(plain))
+EOF
 
 [ $pass = 1 ] && { echo "mkzexe-test: all passed"; exit 0; }
 echo "mkzexe-test: FAILED"; exit 1

@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "fsproto.h"
+#include "version.h"
+
+/* The version record (DESIGN D15): "ZVER", the number, the string. tools/mkzup.py finds it in the kernel image and
+ * refuses a bundle whose number is not the kernel's; SYS_update INFO reports it. Frozen layout. */
+static const struct { char magic[4]; u32 vnum; char vstr[16]; } zver __attribute__((used, aligned(4))) =
+    { { 'Z', 'V', 'E', 'R' }, ZENIX_VNUM, ZENIX_VSTR };
 
 /* copy a NUL-terminated string from user memory, bounds-checked: 0, -EFAULT (outside what the caller may read: its
  * own memory or its shared code, D13) or -ENAMETOOLONG (longer than max - 1: a path given to a system call is at most
@@ -606,6 +612,38 @@ void syscall_c(u32 *rb)
         r = (s32)svc_sys(a1, op == SVC_SELF ? 0 : name, text);
         break;
     }
+    case SYS_update:                    /* D15: INFO (anyone), RELEASE and NOTE (root) */
+        if (a1 == UPD_INFO) {
+            if (UOKS(n, a2, a3, sizeof(struct uupdate), sizeof(struct uupdate))) {
+                struct uupdate u = { upd_pa, upd_size, upd_flags, zver.vnum, { 0 } };
+                memcpy(u.kver, zver.vstr, 16);
+                memcpy((void *)a2, &u, (u32)n);
+                r = 0;
+            }
+        } else if (current->uid != 0)
+            r = -EPERM;
+        else if (a1 == UPD_RELEASE) {
+            upd_release();
+            r = 0;
+        } else if (a1 == UPD_NOTE) {
+#ifdef DIAG_TRIAL       /* test builds (tools/update-test.sh): a trial kernel that fails where it would confirm */
+            if (a2 == UPDNOTE_CONFIRMED) {
+                kprintf("diag: DIAG_TRIAL=%u: not confirming\n", DIAG_TRIAL);
+                if (DIAG_TRIAL == 1)
+                    panic("test panic (DIAG_TRIAL)");           /* the panic resets the machine in this build */
+                if (DIAG_TRIAL == 2) {
+                    serial_flush();
+                    machine_reset();                            /* a hang the owner reset: the log says RUNNING */
+                }
+                r = 0;
+                break;
+            }
+#endif
+            r = a2 >= 1 && a2 <= UPDNOTE_CONFIRMED ? (s32)updnote_set(a2, a3) : -EINVAL;
+        }
+        else
+            r = -EINVAL;
+        break;
     case SYS_kill: {
         struct proc *p = proc_by_pid((int)a1);
         if (!(r = may_signal(p)))

@@ -99,6 +99,23 @@ zb_os:
     movem.l (%sp)+,%d2-%d7/%a2-%a6
     rts
 
+/* long zb_dopkt(void *dosbase, void *port, long action): dos.library DoPkt (-240) with all five arguments 0 (d3-d7);
+ * waits for the handler's reply. Used for ACTION_FLUSH (boot/zenixboot.c, D15). */
+    .globl  zb_dopkt
+zb_dopkt:
+    movem.l %d2-%d7/%a2-%a6,-(%sp)  /* 44 bytes; the arguments start at 48(%sp) */
+    move.l  48(%sp),%a6
+    move.l  52(%sp),%d1
+    move.l  56(%sp),%d2
+    moveq   #0,%d3
+    moveq   #0,%d4
+    moveq   #0,%d5
+    moveq   #0,%d6
+    moveq   #0,%d7
+    jsr     -240(%a6)
+    movem.l (%sp)+,%d2-%d7/%a2-%a6
+    rts
+
 /* void zb_serial(const char *fmt, long *args): the same text on the serial port (exec's RawDoFmt and RawPutChar,
  * after RawIOInit in zb_main), so that a boot can be followed with a cable, or by a test in the emulator */
     .globl  zb_serial

@@ -32,15 +32,27 @@ _entry:
     move.w  #DIAG_YELLOW,0xDFF180   /* stage 4 */
     DIAGSTOP(4)
     lea     _start(%pc),%a5         /* a5 = where we really are */
-    move.l  16(%a5),%d1             /* nreloc */
+    move.l  16(%a5),%d1             /* the table's length in longwords (tools/mkzexe.py --delta) */
     beq.s   2f
     move.l  20(%a5),%d0
-    lea     (%a5,%d0.l),%a0         /* relocation table */
+    lea     (%a5,%d0.l),%a0         /* relocation table: byte distances from one relocated word to the next */
+    move.l  %a5,%a1                 /* the next word to relocate: distances count from the image's start */
     move.l  %a5,%d2
-1:  move.l  (%a0)+,%d0
-    add.l   %d2,(%a5,%d0.l)
-    subq.l  #1,%d1
-    bne.s   1b
+1:  moveq   #0,%d0
+    move.b  (%a0)+,%d0              /* 1-127: a distance in 2-byte units; 0: the end */
+    beq.s   5f
+    bpl.s   3f
+    and.b   #0x7F,%d0               /* bit 7: the top 7 bits of 23, the low 16 follow */
+    swap    %d0
+    move.b  (%a0)+,%d1
+    lsl.w   #8,%d1
+    move.b  (%a0)+,%d1
+    move.w  %d1,%d0
+3:  add.l   %d0,%a1
+    add.l   %d0,%a1
+    add.l   %d2,(%a1)
+    bra.s   1b
+5:
     /* The relocation loop wrote into code. Nothing below may run from a stale instruction cache (or a stale Emu68
      * translation): flush, then reach the next instruction through a register jump so the pipeline / the JIT
      * fetches the patched bytes. CPU type from bootinfo (0x1000, AttnFlags): the bootblock filled it. A 68000 has

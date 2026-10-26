@@ -48,7 +48,8 @@ configs. `--staged` also checks what is about to be committed (a changed program
 
 ## Testing
 Nothing counts as done until a test checks it. The tests run FS-UAE headless (never on the screen), from scripts typed
-into the serial port (`tools/serial-tap.py`: `sleep`, `send` and `wait REGEX [timeout]`, which waits for the output).
+into the serial port (`tools/serial-tap.py`: `sleep`, `send` and `wait REGEX [timeout]`, which waits for the output;
+`stop` kills the emulator at once, a power cut or the end of a script).
 Several FS-UAEs run side by side on one machine as long as each has **its own serial port and its own image files**
 (runs that shared a port or an image spoiled each other; that, not FS-UAE, was why only one ran at a time before
 2026-10-26). Every emulator run (`tools/run-test.sh`, and the cage rig's through `tools/fsuae_conf.py`) takes one of
@@ -73,6 +74,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 |---|---|
 | docs-check | the documentation rules above |
 | ext2-host-test, disk-host-test | the ext2 server, `fsck.ext2`, `mkfs.ext2`, `fdisk` and `diskd` built for the PC, against image files and `e2fsck`, with a fuzz loop |
+| zup-host-test | the updates (DESIGN D15) on the PC: the packages and the bundle of the build (`tools/mkzup.py`), every kind of damaged bundle refused; `zup` built for the PC: refusals before any change, a power cut before each change, the three-way compare of config files, the way back |
 | zenixfs-test | `make -C zenixfs test`: the ZenixFS library on the PC (random operations, power cuts, damaged blocks) |
 | mfm-test, emmc-test, serial-test, term-test, mem-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console and `/dev/ttyS0`, the terminal's escape parser and colours (`kernel/term.c` against a model of the display), the kernel allocator around 1 GB (`MEM_LOW1G`), A3000 SCSI and Pi device-tree code against models |
 | mkzexe-test | the ZEX2 program format of shared code (DESIGN D13): `tools/mkzexe.py` classifies each relocation by its target (a `.data` pointer into constants to code, a table slot of a BSS array to data) and refuses a reference from the shared code into data, a value equal to `text_size`, an undefined weak and an absolute symbol |
@@ -89,6 +91,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | mounttest, zenixfstest | mounting ext2 and ZenixFS, `fsck`, nested mounts |
 | edit-regress, disktools, mbr-test | the editor; `fdisk`/`mkfs`/`fsck` on scratch disks; PC partition tables |
 | zenixboot-test | booting with no floppy: Kickstart boots the FFS partition, zenixboot starts Zenix on its IDE root; zenixboot's error paths; Kickstart 3.2 and 2.05 only when `ZENIX_KICK32` / `ZENIX_KICK205` name those ROMs (else SKIP) |
+| update-test | Zenix updating itself (DESIGN D15) in FS-UAE: zenixboot installs a bundle's kernel (the FFS steps in their order, flushed), zup the root half (the owner's passwd kept), the memory given back, shells working; the confirmation and `.done`; the bundle offered again; a cold start in the trial; a panic and a hang then the question and both halves back; PREVIOUS after a cut; a power cut during zup; damaged bundles |
 | pure-test | shared program code (DESIGN D13): one copy for one, two and four processes (`free`, `ps`), the first ending and the last freeing it, two started at once, a crash in one, literals in system calls (a read into one refused), text file busy, an update renamed over a running program, a private copy of a file open for writing, a new generation after a server restart and after a remount, a damaged copy found and not used again, corrupt ZEX2 files refused; `sh` and `login` shared by four consoles' sessions and by `sh -c` shells, a session ending while the others run |
 | svc-test | the service manager (DESIGN D11): boot's pids, restarts of diskd, fsd and zfsd, the bootable root, no root, the RAM floppy, diskd's saved table, open files across a restart, a dd copy, limits and back-off, the deadline, a call whose start fails (stop, kill, the loader's priority), reboot with a dead server and with one that hangs, a damaged table (a test build) |
 

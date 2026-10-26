@@ -4,7 +4,7 @@ NAME
     zenixboot - start Zenix from AmigaOS, from files on a disk partition
 
 SYNOPSIS
-    zenixboot [KERNEL] [RAM=FILE] [CHECK]
+    zenixboot [KERNEL] [RAM=FILE] [CHECK] [PREVIOUS]
 
 DESCRIPTION
     zenixboot is an AmigaOS program, not a Zenix one. It boots Zenix on an
@@ -48,14 +48,78 @@ DESCRIPTION
     data cache off (as after a reset) and its MMU off (SetPatch's CPU
     library switches it on; Zenix runs without one).
 
+UPDATES
+    With a directory Zenix/ next to zenixboot holding the kernel
+    (Zenix/zenix; the boot partition of a card made for updates), the
+    kernel is taken from there and zenixboot installs updates (DESIGN
+    D15, zup(8)). Without one it takes "zenix" next to itself, as before,
+    and does nothing about updates. An update is a bundle copied to
+    Zenix/zenix-update.zup (always as zenix-update.zup.part first, then
+    renamed: a .part is a copy that was cut off and is renamed .bad).
+
+    A new bundle is read whole into memory (fast RAM first) and checked:
+    every count, size and offset, the SHA-256 of its table and of every
+    part. A bad one is renamed zenix-update.bad with the reason, and the
+    installed system starts; one older than the installed version too.
+    Before any write Info() must say the volume is validated and has room
+    for one more kernel, else the update waits for a later start. Then,
+    in this order, each step flushed (ACTION_FLUSH to the volume's
+    handler, which replies when FFS has written its buffers): the state
+    file (installing), zenix.new written, read back and checked, the old
+    zenix.old deleted, zenix renamed zenix.old, zenix.new renamed zenix,
+    the state file (trial). A cut anywhere is repaired by the next start:
+    a zenix that is the bundle's kernel already is not written again,
+    zenix.old is never touched twice for one version and never deleted
+    while zenix is missing. Every rename deletes its target first (an
+    AmigaDOS Rename fails when the target exists).
+
+    The bundle then goes to the new kernel in memory for its root half
+    (bootinfo +0x78), at every start of the trial; zup installs it once.
+    The trial ends when the update note in the kernel log's area (top of
+    chip RAM) says the new version came up (login's prompt on console 1):
+    the bundle is renamed zenix-update.done. It also ends after 3 starts
+    with no sign of trouble. A bundle offered again after that is renamed
+    .done at once; the previous kernel stays zenix.old.
+
+    Only evidence counts. When a warm reset follows a trial boot whose log
+    ended with a panic, or that was still running and never confirmed
+    (a hang the owner reset), zenixboot asks "Zenix V crashed - start the
+    previous version? (Y in 10 s)"; Y, Return or no key in 10 seconds
+    starts the previous version, N the new one. A cold start (switched
+    off: chip RAM is gone) proves nothing and never goes back; it says
+    "Zenix V was installed and not yet confirmed; if it misbehaves, choose
+    Zenix (previous)".
+
+    Going back (PREVIOUS, or Y to the question): the bundle is renamed
+    zenix-update.rejected first (a cut never applies it again), zenix
+    becomes zenix.rejected and zenix.old becomes zenix, flushed between,
+    and the kernel is told "previous" (a flag in bootinfo): zup puts the
+    root's previous version back too. With no zenix.old zenixboot says so
+    and starts the installed kernel. After that there is no previous
+    version until the next update.
+
+    The start rule: Zenix/zenix; if it is missing or not a kernel, a
+    zenix.new with the state's SHA-256, then zenix.old; the one used is
+    named on the screen and the serial port. The state file Zenix/state
+    (text: version, the kernel's SHA-256, the phase - installing, trial,
+    confirmed, rejected -, handovers, the last boot number) is written as
+    state.new and renamed; a start that finds only state.new uses it.
+    zenixboot and bootmenu are never updated by a bundle. CHECK writes
+    nothing; RAM= ignores a waiting bundle (its root half needs the disk's
+    root).
+
 ARGUMENTS
-    KERNEL      the kernel image to start; default "zenix" in the
-                directory zenixboot itself is in (PROGDIR:)
+    KERNEL      the kernel image to start; default Zenix/zenix (the start
+                rule above), else "zenix" in the directory zenixboot
+                itself is in (PROGDIR:). With KERNEL nothing about updates
+                is done
     RAM=FILE    also load FILE as the RAM disk (an ext2 image such as
                 build/root-ram.img); Zenix then uses it as its root
     CHECK       do everything up to switching AmigaOS off (load, check,
                 collect the tables, choose where the kernel will run),
-                say so, and return to AmigaOS
+                say so, and return to AmigaOS; nothing is written
+    PREVIOUS    go back to the previous version (UPDATES above): the
+                boot menu's "Zenix (previous)" line
 
 EXAMPLES
     SYS:zenixboot
@@ -92,9 +156,11 @@ NOTES
     (make build/zenix-card.img for an Emu68 SD card, build/zenix-boot.hdf
     for an IDE or CF disk); tools/write-card.sh writes the SD card.
 
-    Verified in FS-UAE (tools/zenixboot-test.sh); not yet run on a real
-    Amiga. Not verified: whether an RTG card gives the monitor back to the
-    chipset when no screen is shown.
+    Verified in FS-UAE (tools/zenixboot-test.sh; updates:
+    tools/update-test.sh); not yet run on a real Amiga. Not verified:
+    whether an RTG card gives the monitor back to the chipset when no
+    screen is shown.
 
 SEE ALSO
-    docs/how-it-works.md, docs/pi-first-boot.md, diskd(8), fdisk(1)
+    zup(8), bootmenu(8), docs/how-it-works.md, docs/pi-first-boot.md,
+    diskd(8), fdisk(1)

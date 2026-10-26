@@ -31,8 +31,9 @@ fi
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2
-    cp "$B/$p.zx" "$T/bin/$name"
-    chmod 755 "$T/bin/$name"
+    dir=bin; [ "$p" = zup ] && { dir=sbin; mkdir -p "$T/sbin"; }  # the updater (DESIGN D15) is /sbin/zup
+    cp "$B/$p.zx" "$T/$dir/$name"
+    chmod 755 "$T/$dir/$name"
 done
 if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small install / test images)
     mkdir -p "$T/usr/man"
@@ -43,6 +44,13 @@ if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small i
 fi
 ln -s less "$T/bin/more"
 ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"; ln -s pgrep "$T/bin/pkill"; ln -s reboot "$T/bin/bootamigaos"   # more is less
+# the package database (DESIGN D15): the manifest of every package of this build (make packages) whose files this
+# image holds exactly as the manifest says, so the first update knows what is installed (tools/mkzup.py installdb).
+# PKGDB=1: the full images only (the Makefile sets it for zenix.hdf and root-card.img)
+if [ -n "$PKGDB" ] && [ -f "$B/pkg/list" ]; then
+    mkdir -p "$T/var/lib/zpkg" "$T/var/cache/zpkg"
+    python3 "$(dirname "$0")/mkzup.py" installdb "$T" "$B/pkg" "$T/var/lib/zpkg"
+fi
 rm -f "$TMPOUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features
 # ownership and modes under fakeroot, so the image holds uid 0 (not whoever runs the build): root owns everything,

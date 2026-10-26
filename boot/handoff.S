@@ -25,6 +25,8 @@
  *   +12 u32 GfxBase (the kernel finds ROM Topaz 8 through it, 0 if unavailable)
  *   +16 {u32 attrs, u32 lower, u32 upper}[8]
  *   +112 u32 ramdisk address, +116 u32 ramdisk size (0 if there is none)
+ *   +120 u32 update bundle address, +124 its size, +128 flags (DESIGN D15: zenixboot's; 0 from the bootblock, whose
+ *        table is cleared memory)
  *
  * hwinfo (kernel/hwinfo.h, 408 bytes) follows at +0x100 (0x1100 for the kernel): the Pi hardware addresses, filled
  * in by stage0. Together they take 0x1000-0x1297; the kernel keeps 0-0x1FFF out of its memory pools.

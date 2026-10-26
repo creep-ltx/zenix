@@ -33,10 +33,18 @@ DESCRIPTION
     short a login says "login: cannot start /bin/sh: out of memory" (or
     init, on the console: "init: cannot start /bin/login: out of memory").
 
+    Updates (zup(8)): after a successful login, the one-line result of
+    the last update (/var/lib/zpkg/result) is shown once and removed. On
+    console 1, when login starts (its prompt is about to be shown, or the
+    autologin runs), it tells the kernel that this boot came up
+    (SYS_update NOTE "confirmed"): zenixboot(8) then takes a newly
+    installed version as working.
+
 FILES
     /etc/passwd   name:hash:uid:gid:comment:home:shell
     /etc/group    name::gid:members
     /etc/autologin
+    /var/lib/zpkg/result
 
 NOTES
     Five wrong tries end the program (init starts it again). login knows

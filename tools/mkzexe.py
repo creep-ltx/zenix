@@ -15,6 +15,12 @@ After the image: nreloc big-endian u32 offsets of 32-bit words that hold
 link-time (base 0) addresses; the loader adds the load address to each.
 Only R_68K_32 needs relocating; PC-relative references stay valid.
 
+The kernel image (--delta, kernel.bin only; start.S relocates it): the table is a byte stream of the distances
+between successive relocated words, in units of 2 bytes, from offset 0: a byte 1-127 is one distance; a byte with
+bit 7 set is the top 7 bits of a 23-bit distance whose low 16 bits follow (big-endian); a 0 byte ends the table.
+The stream is padded with zeros to a multiple of 4, and nreloc is its length in longwords (so a loader that checks
+nreloc * 4 against the file - zenixboot - accepts it). About a quarter of the plain table's size.
+
 ZEX2 (DESIGN D13, docs/d13-shared-code.md section 4): a program with shared code. Linked with link/pure.ld from
 objects built with -msep-data (tools/purecc.sh): code and constants first (the shared part, one copy for every
 process running the program), then, from text_size (16-aligned), the data part: the address table .got, .got.plt,
@@ -51,9 +57,31 @@ def run(*a):
     return subprocess.run(a, check=True, capture_output=True, text=True).stdout
 
 
+def delta_table(relocs):
+    """the kernel's relocation table as byte distances (see the module text)"""
+    t = bytearray()
+    pos = 0
+    for r in relocs:
+        d = r - pos
+        if d <= 0 or d & 1 or d // 2 >= 1 << 23:
+            sys.exit(f"relocation at {r:#x}: distance {d} cannot be coded")
+        d //= 2
+        if d < 128:
+            t.append(d)
+        else:
+            t += bytes((0x80 | d >> 16, (d >> 8) & 0xFF, d & 0xFF))
+        pos = r
+    t.append(0)
+    while len(t) % 4:
+        t.append(0)
+    return bytes(t)
+
+
 def main():
-    elf, out = sys.argv[1:3]
-    stack = int(sys.argv[3]) if len(sys.argv) > 3 else STACK_DEFAULT
+    args = [a for a in sys.argv[1:] if a != "--delta"]
+    delta = "--delta" in sys.argv[1:]
+    elf, out = args[0:2]
+    stack = int(args[2]) if len(args) > 2 else STACK_DEFAULT
     subprocess.run([PFX + "objcopy", "-O", "binary", elf, out + ".img"], check=True)
     img = bytearray(open(out + ".img", "rb").read())
     if img[4:8] == b"ZEX2":
@@ -95,18 +123,18 @@ def main():
         img.append(0)
     image_size = len(img)
     reloc_off = image_size
-    table = b"".join(struct.pack(">I", r) for r in relocs)
+    table = delta_table(relocs) if delta else b"".join(struct.pack(">I", r) for r in relocs)
     total = image_size + len(table)
     mem_size = max(bss_end, total)
     mem_size = (mem_size + 3) & ~3
     img[8:12] = struct.pack(">I", image_size)
     img[12:16] = struct.pack(">I", mem_size)
-    img[16:20] = struct.pack(">I", len(relocs))
+    img[16:20] = struct.pack(">I", len(table) // 4 if delta else len(relocs))
     img[20:24] = struct.pack(">I", reloc_off)
     img[24:28] = struct.pack(">I", stack)
     img[28:32] = struct.pack(">I", syms.get("stage0_blob", 0))
     open(out, "wb").write(bytes(img) + table)
-    print(f"{out}: image {image_size}B, {len(relocs)} relocs, mem {mem_size}B")
+    print(f"{out}: image {image_size}B, {len(relocs)} relocs{f' ({len(table)} bytes, by distance)' if delta else ''}, mem {mem_size}B")
 
 
 # ---- ZEX2 ----

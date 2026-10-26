@@ -37,6 +37,7 @@ extern int ext2_readonly;    /* the mounted volume is read-only: writes fail wit
 extern const char *ext2_why; /* why the last mount was refused or read-only */
 extern int (*ext2_busy)(u32 ino);   /* set by the server: is the inode open? Its deletion then waits for ext2_release */
 int ext2_mark_unclean(void); /* clear the "cleanly unmounted" state bit (a restart after a crash mid-request, D11) */
+int ext2_set_clean(int clean); /* FS_MARK (D15): the clean bit set or cleared; the bit before (1 clean), or -EROFS/-EIO */
 int ext2_release(u32 ino);   /* the last close of an inode that lost its last name while open: free it now */
 int ext2_iget(u32 ino, struct inode *out);
 u32 ext2_bmap(const struct inode *in, u32 n);

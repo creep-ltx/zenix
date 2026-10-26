@@ -125,13 +125,21 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    the illegal and line-F vectors caught), all of which a running AmigaOS may have changed and a floppy boot never
    has. It is built with the same m68k-elf compiler as the kernel (no Amiga toolchain): linked like a Zenix program
    and wrapped into an AmigaOS hunk executable by `tools/mkhunk.py`. Details and limits: man/zenixboot.txt.
+   **Updates, the boot half** (D15, "Updates" below): with `Zenix/` next to zenixboot it takes the kernel from there by
+   the start rule (`zenix`, a `zenix.new` with the state's SHA-256, `zenix.old`), installs a bundle's kernel in the
+   careful FFS order (each step followed by `ACTION_FLUSH`, DoPkt to `GetDeviceProc("PROGDIR:")`'s port, which FFS
+   answers once its buffers are written), keeps `Zenix/state`, puts the bundle (loaded fast RAM first, 16-aligned with
+   16 bytes free before it) into bootinfo `+0x78`/`+0x7C` and the rollback flag into `+0x80`, and follows the trial
+   through the update note and the previous boot's klog header (evidence: reason PANIC, or RUNNING without
+   confirmation, in a boot after its last handover; a cold start is none).
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
    `kmain()`.
 4. `kmain` reads the previous boot's log (below), then starts the serial port, vector table, memory manager,
    caches, display, clock and disk, then creates one process from its image: `boot` (pid 1). `boot` registers the
    disk server and the root filesystem server as services (section 9, "The service manager"): its first call to
    `disk` starts `diskd` (pid 2), it picks the root device and its server from the superblock, and its first call to
-   `fs` starts `fsd` or `zfsd` (pid 3); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
+   `fs` starts `fsd` or `zfsd` (pid 3); it runs `/sbin/zup` (D15: an update's root half, a journal a power cut left, or the way back; boot waits, says so after a
+minute and stops it after 20, then gives the bundle's memory back with `SYS_update RELEASE`); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
    starts `login` on console 1 (section 11).
 
 ### Boot stage colours (`kernel/diag.h`, audit A11)
@@ -196,7 +204,11 @@ damaged (checksum): not shown"). The boot menu (`boot/bootmenu.c`) `AllocAbs()`e
 the boot note, never only the note's 16 bytes: exec writes an 8-byte free-memory header at the start of the free
 remainder an allocation leaves, which was slot 0's first text bytes; a slot rejected for that showed an older boot as
 the previous one (`tools/zenixboot-test.sh bootmenu`). zenixboot rounds the chip top as the kernel does
-(`MaxLocMem & ~0xFFF`). This boot writes the other slot (boot number + 1), so the previous log stays where it is
+(`MaxLocMem & ~0xFFF`). **The update note** (D15) lies at `+0xE0`-`+0xEF`, in slot 0's header padding (outside every
+sum, before the boot note at `+0xF0`): magic `ZUPN`, kind (1 done, 2 failed - written by zup -, 3 confirmed -
+written by `login` when its prompt is up on console 1), a version, and `~(magic + kind + version)`. zenixboot reads
+it at the next start and clears it; `klog_init` clears it when this boot writes slot 0, which comes before every
+write of it. This boot writes the other slot (boot number + 1), so the previous log stays where it is
 and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
 at ...` and "no log from a previous boot", "damaged (checksum)" or the previous boot's last 20 lines, each starting
 with a `>`, between `=== previous boot (N) ended here ...` (with or without a kernel panic) and `=== end of the
@@ -270,6 +282,57 @@ Every stage logs with `kprintf`. Only SD cards (CM4 Lite) are handled, not eMMC.
 DMA-like access (the VideoCore reads it from RAM), so its cache line is cleaned and dropped with the 68040
 `cpushl`/`cinvl` that Emu68 translates.
 
+### Updates (DESIGN D15, docs/d15-self-updates.md)
+
+Zenix updates itself from a **bundle** (`.zup`) that reaches the boot partition. The version lives in one place,
+`kernel/version.h`: a number that orders versions (`YYYYMMDDNN`, the date and a count within the day) and a string
+for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the number, the string, in
+`kernel/syscall.c`). All formats below are frozen (CLAUDE.md): they only grow, at the end.
+
+- **Packages** (`make packages`, `tools/mkzup.py`): `build/pkg/NAME.manifest` and `NAME.tgz`. The manifest is text,
+  one item a line: `zpkg 1`, `name NAME`, `version NUMBER STRING`, `group base` (the packages that move as one),
+  `depends NAME NUMBER` (at least that version), then the entries: `f MODE UID GID SHA256 SIZE /PATH` (a file),
+  `c ...` (the same for a config file the owner may edit), `l TARGET /PATH` (a symbolic link), `d MODE UID GID /PATH`
+  (a directory). Words a later format adds are ignored by older readers. A path is at most 55 bytes (with
+  `.zup-new` it fits a system call's 63). The `.tgz` is a gzip'd ustar archive of the `f` and `c` files in manifest
+  order. The standard packages: **zup** (`/sbin/zup`), **base** (`init`, `login`, `sh`, `mount`, the config files
+  `/etc/svctab`, `passwd`, `group`, `fstab`, `motd`; `/etc/autologin` belongs to the test images and is never
+  shipped), **utils** (every other command, the links such as `more`), **man** (the manual pages). The full root
+  images (`zenix.hdf`, the SD card's root) carry the manifests of what they hold in `/var/lib/zpkg/`.
+- **The bundle** (`make bundle`: `build/zenix-update.zup`), big-endian: a 96-byte header (`ZUP1`, format 1, header
+  size 96, version number, version string[16], date `YYYYMMDD`, the lowest installed base version it applies to
+  (0: any), channel[8], table-of-contents offset 96 and entry count (1-64), total size (at most 16 MB), flags 0, and
+  at +64 the SHA-256 over header bytes 0-63 followed by the table), the table (80 bytes an entry: name[40]
+  NUL-terminated, `boot/...` or `pkg/...` of `[A-Za-z0-9._-]`; offset; size; SHA-256), then the parts, each at a
+  16-byte boundary: `boot/zenix` (the kernel; `mkzup.py` refuses one that does not carry the bundle's version) and
+  `pkg/NAME.manifest` + `pkg/NAME.tgz` for each package. Every count, size and offset is range-checked by every
+  reader (`tools/zup-host-test.sh` feeds each kind of damage).
+- **The state file** `BOOT:Zenix/state` (zenixboot's, text): `zenixboot-state 1`, `version V`, `kernelsha HEX`, `phase
+  installing|trial|confirmed|rejected`, `handovers N`, `lastboot N` (the newest klog boot number at the last
+  handover), `end`; unknown lines ignored, one without `end` is not used. Written as `state.new`, flushed, `state`
+  deleted, `state.new` renamed, flushed; a start that finds only `state.new` reads it. The files beside it:
+  `zenix`, `zenix.new`, `zenix.old`, `zenix.rejected`, `zenix-update.zup` (`.part` while copied, `.bad`, `.done`,
+  `.rejected`). The bootinfo fields: `+0x78` the bundle's address (16-aligned), `+0x7C` its size (0: none), `+0x80`
+  flags (bit 0: going back, "Zenix (previous)").
+- **zup** (`user/zup.c`, `/sbin/zup`, man/zup.txt) installs the packages of a bundle onto the root, as one
+  transaction: `/var/lib/zpkg/journal` (text: `zupj 1`, `target VERSION T`, one line an operation - `OP LINK MODE UID
+  GID SHA TARGET OLD PATH`, `-` where nothing applies; OP is `R` replace, `A` add, `D` delete, `l` new link, `L`
+  changed link, `u` removed link; LINK `T.N` names the hard link of the previous file in
+  `/var/cache/zpkg/prev-VERSION/f/` - then `end`; `commit` or `rollback` appended later) written and synced first,
+  the root marked "needs a check" (`FS_MARK`), the previous files hard-linked, the new ones written as
+  `PATH.zup-new`, read back against their SHA-256, owner then mode set, renamed over; then
+  `prev-VERSION/log.T` (the same lines: the undo record), `commit`, the older prev sets removed, the journal removed,
+  the root clean again. At the next start a journal is finished (every new file complete and checked) or rolled back
+  (the hard links put back; a name already on the old inode is left alone); one cut while it was written (no `end`)
+  had changed nothing. A journal `undo VERSION` is a rollback to the previous version (from the logs of
+  prev-VERSION, last change first) and is repeated to its end after a cut. A newer `zup` package is installed in its
+  own transaction first and the new `/sbin/zup -2` does the rest (transaction 2 of the same version). Config files
+  (`c`) are replaced only when their SHA-256 is the installed manifest's (the owner never changed them), else written
+  as `PATH.new`; one the owner deleted is not brought back; a file the new version no longer lists is removed (a
+  config file never). The database is the installed manifests, `/var/lib/zpkg/NAME.manifest`; the one-line result
+  goes to `/var/lib/zpkg/result`. Built for the PC with `tools/host/zup-host.c` (the same system calls on a directory,
+  a power cut before any chosen change) for `tools/zup-host-test.sh`.
+
 ## 4. Executables: ZEXE and relocation
 
 No MMU means no per-process virtual addresses, so a program must run wherever it happens to be loaded.
@@ -295,7 +358,12 @@ word in the relocation table. Reading can block (messages to the file system ser
 only after the image is in place and nothing blocks after that; two programs may be loading at the same time (the two
 stages of a pipeline). Only `R_68K_32` relocations are needed (PC-relative code stays valid), and
 debug-section relocations must be skipped (their offsets are not addresses). The kernel itself uses the same
-format and the same loop (in `start.S`). Programs declare their stack size in the header: 16 KB unless the
+header, with one difference in its table (`tools/mkzexe.py --delta`, kernel.bin only; docs/d13-shared-code.md section
+10): the relocations are a byte stream of distances from one relocated word to the next in 2-byte units (a byte 1-127;
+bit 7 set: the top 7 bits of a 23-bit distance whose low 16 follow; 0 ends it), padded to 4 bytes, and `nreloc` is the
+stream's length in longwords, so zenixboot's check of `nreloc * 4` against the file holds. `start.S` decodes it; it is
+about a quarter of the plain table (2932 bytes instead of 11576 on 2026-10-26). `tools/mkzexe-test.sh` checks that
+both tables give the same image and the same offsets. Programs declare their stack size in the header: 16 KB unless the
 Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB; the numbers and how they were measured
 are in limits.md). A guard pattern lies at the bottom of every stack (section 6). There is no shared-library format yet; programs are linked
 statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).
@@ -377,6 +445,12 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
 
 The pools leave out low chip RAM (`0`-`0x1FFF`: vectors, boot tables), the kernel, the RAM disk and the kernel
 log's area at the top of chip RAM (section 3, "Previous-boot log").
+**An update bundle** zenixboot left in memory (bootinfo `+0x78` address, `+0x7C` size, `+0x80` flags; D15) is checked
+at `mem_init`: 16-byte aligned, it and the 16 bytes before it inside one bootinfo region, clear of `0`-`0x2000`, the
+kernel, the klog area and the RAM disk, and in free memory; else it is ignored with a message ("update: the bundle at
+... is ignored: ..."). It is then **a block in use inside the pool** (`upd_reserve`: its header is the 16 bytes before
+the bundle; a free remainder smaller than two headers is taken into the block), so `SYS_update RELEASE` gives it
+back with the normal `mem_free` and it merges with its neighbours (no range slot: `add_range` keeps 16).
 
 A process's own memory is **one block**: image + BSS + stack + the argument area (a ZEX2 program's: its data part,
 section 4). The kernel stack (4 KB) is a second block. Both are owned by the pid and freed together. The code of a
@@ -468,11 +542,12 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 78 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-80, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 79 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-82, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
-index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority`), the machine (`reboot`), memory (`memalloc memfree meminfo`),
+index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority`), the machine (`reboot`,
+`update`), services (`svc`), memory (`memalloc memfree meminfo`),
 time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
@@ -515,6 +590,15 @@ stopped; each server has 5 s to answer its `FS_SYNC`, then the tick resets the m
 name, audit A7), notes "rebooted" in the log for the next boot (`dmesg -p`), and resets the machine as exec's ColdReboot does
 (RESET and JMP to the ROM's start in one long word). A note of 1 (AmigaOS) or 2 (Zenix) is first left in the spare
 bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the boot menu (`man/bootmenu.txt`).
+
+**Updates** (D15, section 3 "Updates"): `SYS_update(op, a, b)` (82). `UPD_INFO` fills `struct uupdate` (32 bytes, frozen,
+at most the size given in `b`: the bundle's address and size - 0 when there is none -, its flags, the running kernel's
+version number and string from the `ZVER` record; anyone); `UPD_RELEASE` gives the bundle's memory back to the pool
+(root; `boot` calls it after zup, whatever zup did); `UPD_NOTE` (root) writes the update note (kind 1 done, 2 failed,
+3 confirmed, and a version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version
+from it. The bundle is read in place and never passed to a system call: it is no process's memory (-EFAULT). Test
+builds only: `DIAG=-DDIAG_TRIAL=1` panics instead of confirming (and the panic resets the machine), `=2` resets
+without confirming, `=3` never confirms (tools/update-test.sh).
 
 **Priorities** (section 6): `SYS_getpriority(which, who)` and `SYS_setpriority(which, who, nice)`, POSIX's calls.
 `PRIO_PROCESS`: who is a pid, 0 the caller; `PRIO_USER`: every process whose real uid is who (0: the caller's);
@@ -640,7 +724,9 @@ device"). A floppy without a uuid is not served again after a restart (it may ha
 first request and rebuilds its open counts, so a deleted file held open keeps its data and frees its space at its last
 close; if its predecessor ended in the middle of a request it clears the superblock's "cleanly unmounted" state bit
 (Linux and e2fsck then check the volume; Zenix keeps writing) and says "DEV was being changed when its server
-ended: check it with fsck.ext2".
+ended: check it with fsck.ext2". `FS_MARK` (root only, D15) sets or clears that bit on request and answers the
+state before: zup marks the root while it installs. `zfsd` does not know `FS_MARK` (-ENOSYS): ZenixFS commits
+atomically.
 A mounted filesystem's server is the same built-in image, registered by `mount` (the mount table, below). It answers
 `FS_ROOT` (root inode, device and type names) and `FS_QUIT` (umount: sync, release the device, exit). Two filesystem
 servers are built into the kernel image, `fsd` (ext2) and `zfsd` (ZenixFS); there is no other copy of them. **Which one serves the root** is boot's choice

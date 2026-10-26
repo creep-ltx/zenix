@@ -1,6 +1,6 @@
 # D15: Zenix updates itself (design note, revision 3)
 
-Status: **ready to build (revision 3, 2026-10-26), after two independent reviews.** Approved by the owner on 2026-10-24
+Status: **steps 1-5 built on branch d15 (2026-10-26; section 14, "As built"); revision 3, after two independent reviews.** Approved by the owner on 2026-10-24
 ("Zenix installing updates by itself, no card swaps"), in the order of work after D14 (ROADMAP). Built on the approved
 versioning model (ROADMAP, "Versions and updates") and on D13's safe replacement of running programs. The short version
 is in [DESIGN.md](DESIGN.md) D15. Revision 2 takes in every finding of the first review: a crash-safe ext2 rename first
@@ -263,5 +263,57 @@ file instead of hashing `zenix` every time); the signature is checked once per t
 2. Separate bootinfo fields, not a kind word in the RAM-disk slot (section 7).
 3. Logged-in users: zup runs at boot, before any login; later, non-base live with a warning, base never live.
 4. The key: section 3.
+
+## 14. As built (steps 1-5, branch d15, 2026-10-26)
+
+Built as sections 3-8 say, with these differences (each a decision made while building, with its reason):
+
+1. **The version** is a number `YYYYMMDDNN` and a string in `kernel/version.h` (one place); the kernel image carries
+   both in a 24-byte `ZVER` record, `mkzup.py` refuses a bundle whose kernel carries another number, and the update
+   note's version is the kernel's. A test build sets its own (`make ZVNUM=... ZVSTR=...`).
+2. **The kernel size:** step 3 did not fit the 2152 bytes left on the RAM floppy (the bundle check and reserve alone
+   took about 1.7 KB), so the byte-distance relocation table of docs/d13-shared-code.md section 10 came first, as
+   its own commit: 8620 bytes saved; 8440 left after step 3.
+3. **Packages:** `zup` is a package of its own (group base) so that it can install itself first; `base` is init,
+   login, sh, mount and the config files svctab, passwd, group, fstab, motd; `utils` every other command and the
+   links; `man` the pages. `/etc/autologin` is never shipped (it belongs to the test images: an update must not bring
+   back an autologin the owner removed). The bundle carries no `boot/zenixboot`: zenixboot never installs one
+   (section 6); the format allows any `boot/` name for a later version.
+4. **`FS_MARK` (message 25)** is new: no message let a program set or clear the "needs a check" bit. It answers the
+   state before, so zup only marks clean what was clean. ZenixFS does not know it (-ENOSYS): its commits are atomic.
+   After a power cut the root **stays** marked "needs a check" (the recovery does not clear it): a block write may
+   have been cut too, which only fsck sees.
+5. **boot runs zup at every start**, not only with a bundle or a journal: the version comparison (a base newer than
+   the kernel, after "previous") needs it. With nothing to do zup ends at once (not measured on hardware).
+6. **The confirmation is written by `login`**, not init: login knows it is on console 1 and when its prompt (or the
+   autologin) comes; init only starts it. **The result line** is shown by login after a successful login on any
+   console, then removed (on console 1 that is after the motd); init printing it too showed it twice in a row.
+7. **ACTION_FLUSH** goes to `GetDeviceProc("PROGDIR:")`'s port (the volume zenixboot and `Zenix/` are on), not
+   `"BOOT:"`: the boot volume's name is the owner's choice; it is the same handler.
+8. **Evidence** also needs the klog slot's boot number to be newer than the one zenixboot recorded at its last
+   handover (`lastboot` in the state file), so a log from before the trial never counts.
+9. **Bundles offered again:** after "done" one is renamed `.done` at once without being handed over (re-applying is
+   harmless, but hashing it costs a start); one older than the installed version is renamed `.bad` (a bundle never
+   takes the kernel back; that is "previous"); a rejected one offered again is installed again (an explicit act).
+10. **zup's second stage checks the whole bundle again** (it does not trust the old zup's check): a self-update costs
+    a second SHA-256 pass. **The rollback** uses the undo logs of `prev-V` (one per transaction: zup's own and the
+    rest), last change first, as its own journal (`undo V`), repeated to its end after a cut.
+11. **Found by the emulator, fixed:** zup wrote a manifest straight from the bundle (-EFAULT: the bundle is no
+    process's memory; the host shim now refuses such pointers as Zenix does); the space check counted every file of
+    every package instead of what the plan writes.
+12. **Tests:** the host tests (`tools/zup-host-test.sh`) cut the power before each of the update's 197 changes and of
+    the rollback's 46; the emulator tests (`tools/update-test.sh`) need trial kernels that fail where they would
+    confirm, so test builds have `DIAG_TRIAL` (1: panic, and the panic resets the machine, since FS-UAE cannot be
+    reset from outside; 2: reset without confirming, a hang the owner reset; 3: never confirm), and the serial tap's
+    `stop` kills the emulator (a power cut, or the end of a script). The fixture of section 4 (today's zup on the
+    first D15 kernel) waits for a second kernel version: the first D15 kernel is this one.
+13. **Memory:** the D15 kernel code (about 2.3 KB) and boot's update loop cost the 1 MB chip-only A1200 (the
+    matrix's `a1200-chip1m`) its third login session (226 KB free became 223). `boot`'s stack went from 16 KB to
+    4 KB (its frames are under 500 bytes, measured with `-fstack-usage`; boot never ends), the bundle check is
+    compiled for size: 235 KB free, three sessions again.
+14. **Not built (steps 6 and 7):** the owner's first D15 card package (moving the kernel to `BOOT:Zenix/`, the
+    "previous" menu line) and signatures.
+
+Built and tested 2026-10-26 (read from the code; every test named above passed in FS-UAE, not on hardware).
 
 Last checked against the code: 2026-10-26.

@@ -17,6 +17,6 @@ char *pw_slurp(const char *path, int *len);             /* the whole file, mallo
 static inline void fputs(const char *s, int fd) { sys_write(fd, s, strlen(s)); }
 static inline void *memchr(const void *s, int c, u32 n) { const unsigned char *p = s; while (n--) { if (*p == (unsigned char)c) return (void *)p; p++; } return 0; }
 /* sha.c */
-void sha256(const void *data, u32 len, unsigned char out[32]);
+#include "sha256.h"
 void pw_hash(const char *password, const char *salt, char *out);      /* out: "ROUNDS$salt$hex" (at least 100 bytes) */
 int pw_check(const char *password, const char *stored);                /* 1 = right password (or none needed) */

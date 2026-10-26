@@ -42,8 +42,17 @@ sleep 1
 # Render offscreen: no window to steal focus (or get closed mid-test).
 # Override with SDL_VIDEODRIVER=wayland when a visible window is wanted
 # (e.g. for grim screenshots).
+# A script's `stop` (tools/serial-tap.py) leaves $SERIAL.stop: FS-UAE is killed at once (a power cut, or simply the end).
+rm -f "$SERIAL.stop"
 SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
-timeout "$SECS" fs-uae "$CONF" >/dev/null 2>&1 9>&- || true
+timeout "$SECS" fs-uae "$CONF" >/dev/null 2>&1 9>&- &
+EMU=$!
+while kill -0 $EMU 2>/dev/null; do
+    if [ -e "$SERIAL.stop" ]; then pkill -KILL -P $EMU 2>/dev/null; break; fi
+    sleep 0.2
+done
+wait $EMU 2>/dev/null || true
+rm -f "$SERIAL.stop"
 kill $TAP 2>/dev/null || true
 echo "=== serial output ($CONF, ${SECS}s):"
 tr -d '\r' < "$LOG" | sed 's/\x1b\[[0-9;:]*m//g'                         # colour codes (DESIGN D14) are not text

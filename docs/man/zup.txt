@@ -1,0 +1,83 @@
+ZUP(8)			Zenix manual
+
+NAME
+    zup - install the root half of a Zenix update
+
+SYNOPSIS
+    zup
+    zup -l
+
+DESCRIPTION
+    zup installs the programs and files of an update onto the root
+    filesystem. An update arrives as a bundle on the boot partition;
+    zenixboot(8) installs its kernel, and the new kernel hands the bundle
+    to zup in memory. zup needs a kernel that knows updates (SYS_update,
+    Zenix 0.2 of 2026-10-26 and later); on an older one it does nothing.
+    Only root runs it. It does, in this order:
+
+    1. A journal left by a power cut (/var/lib/zpkg/journal): the install
+       it describes is finished, if every new file is there, complete and
+       checked, or else rolled back. Never anything in between.
+    2. A way back: when "Zenix (previous)" was chosen in the boot menu,
+       or the running kernel is older than the installed base packages,
+       the files of the previous version are put back from
+       /var/cache/zpkg/prev-VERSION, and that set is removed: there is
+       no "previous" again until the next update.
+    3. A bundle: everything is checked before anything changes - the
+       SHA-256 of the bundle's table and of every part, that it is not
+       older than what is installed, that its base packages are not newer
+       than the running kernel (the kernel always goes first), the
+       dependencies, and the free space for what it will write. A
+       refused bundle changes nothing. Packages whose version is
+       installed already are skipped;
+       if all are, zup says so and does nothing. A newer zup is installed
+       first, on its own, and then runs for the rest.
+
+    An install is one transaction: the journal is written and synced
+    first, the root is marked "needs a check" (ext2), every file that is
+    replaced or removed is kept by a hard link in the prev set (no copy),
+    each new file is written as PATH.zup-new, read back and checked
+    against its SHA-256, its owner set and then its mode, and renamed
+    over PATH (a running program keeps running), then the undo record
+    and the commit are written, older prev sets are removed and the root
+    is marked clean again. A power cut leaves it marked "needs a check".
+
+    Config files (marked in a package's manifest: /etc/passwd, group,
+    fstab, svctab, motd) are compared three ways: one the owner never
+    changed is replaced; one the owner changed stays, and the new version
+    is written next to it as PATH.new; one the owner deleted is not
+    brought back.
+
+    boot(8) runs zup at every start, after the root is mounted and before
+    anything else. The result is one line in /var/lib/zpkg/result, which
+    login(1) shows after the next login (then it is removed), and a note
+    for zenixboot in the kernel log's area (done or failed).
+
+OPTIONS
+    -l      list the installed packages and their versions, and whether
+            a previous version is kept
+
+FILES
+    /sbin/zup                   the program (package zup)
+    /var/lib/zpkg/NAME.manifest the installed packages (plain text)
+    /var/lib/zpkg/journal       an install in progress
+    /var/lib/zpkg/result        the last result, until it was seen
+    /var/cache/zpkg/prev-V/     the files the install of V replaced
+
+EXIT STATUS
+    0 when there was nothing to do or everything worked, 1 when a bundle
+    was refused or an install was rolled back, 2 for a wrong argument.
+
+NOTES
+    The bundle lies in memory that is no process's own: zup copies what it
+    writes through its own buffers (a system call would refuse a pointer
+    into the bundle). Only the root filesystem is changed; /home and other
+    mounts are not touched. Signatures are not checked yet: whoever can
+    write the boot partition can replace the kernel anyway, and the
+    checksums catch damage, not a deliberate fake. The formats (bundle,
+    manifest, journal) are described in docs/architecture.md section 3,
+    "Updates". Verified on the PC (tools/zup-host-test.sh: refusals, the
+    three-way compare, a power cut before each change, the way back).
+
+SEE ALSO
+    zenixboot(8), boot(8), docs/d15-self-updates.md

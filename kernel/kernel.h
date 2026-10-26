@@ -22,6 +22,8 @@ struct bootinfo {
     u32 font;                   /* unused for now */
     struct bootregion r[8];
     u32 ram_pa, ram_size;       /* ramdisk loaded by the bootblock, 0 if none */
+    u32 upd_pa, upd_size;       /* +0x78, +0x7C: an update bundle zenixboot left in memory for zup (DESIGN D15), 0 if none */
+    u32 upd_flags;              /* +0x80: UPD_F_*; an older loader leaves all three 0 (the table is cleared) */
 };
 
 /* serial.c */
@@ -58,6 +60,11 @@ void klog_write(const char *s, u32 n);        /* a service's output (FT_KLOG): i
  * area's first header, BOOTNOTE_OFF from the area's start (the top of chip RAM - KLOG_AREA_SIZE). Four longs: magic,
  * kind, ~(magic + kind), 0. The same numbers are in boot/bootmenu.c. */
 #define BOOTNOTE_OFF     0xF0u
+/* the update note (DESIGN D15): four longs at UPDNOTE_OFF in the same spare bytes (outside every sum, before the boot
+ * note): magic, kind (1 done, 2 failed, 3 confirmed), version, ~(magic + kind + version). zenixboot reads it before
+ * the kernel starts and clears it; klog_init clears it when this boot writes slot 0, which comes before every write */
+#define UPDNOTE_OFF      0xE0u
+#define UPDNOTE_MAGIC    0x5A55504Eu          /* "ZUPN" */
 #define BOOTNOTE_MAGIC   0x5A4E5854u          /* "ZNXT" */
 #define BOOTNOTE_AMIGAOS 1u
 #define BOOTNOTE_ZENIX   2u
@@ -102,6 +109,16 @@ void irq_other_c(u32 fv);
 #define MEM_FASTONLY 2u         /* fast RAM only, fail rather than use chip */
 #define MEM_LOW1G    4u         /* fast RAM ending below 1 GB: what the Pi 4's VideoCore can read (the mailbox) */
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem);
+/* DESIGN D15: the update bundle zenixboot left in memory (bootinfo +0x78..+0x80), checked and reserved by mem_init as
+ * a block in use, given back by SYS_update RELEASE; SYS_update itself is in syscall.c */
+extern u32 upd_pa, upd_size, upd_flags;
+void upd_release(void);
+#define UPD_INFO      1                 /* struct uupdate (usys.h; at most the size given) */
+#define UPD_RELEASE   2                 /* root: the bundle's memory back to the pool */
+#define UPD_NOTE      3                 /* root: kind (UPDNOTE_*), version -> the update note */
+#define UPD_F_ROLLBACK 1u               /* bootinfo flags: "Zenix (previous)" (zenixboot PREVIOUS) */
+#define UPDNOTE_CONFIRMED 3u
+long updnote_set(u32 kind, u32 version);        /* serial.c: klog area +0xE0, for zenixboot's next start */
 extern u32 boot_ram_pa, boot_ram_size;
 void *mem_alloc(u32 n, u32 flags, u32 owner);   /* 0 if n is 0, above MEM_ALLOC_MAX, or does not fit */
 #define MEM_ALLOC_MAX 0x7FFF0000u       /* no block size near 4 GB: the rounding in mem_alloc cannot wrap */
@@ -259,6 +276,7 @@ struct file {
 };
 struct umountreq { const char *path, *port, *dev, *type; };   /* SYS_mount: a filesystem server's port goes on a directory */
 struct umountinfo { char path[48], port[16], dev[16], type[8]; };   /* SYS_mountinfo */
+struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };   /* SYS_update INFO (D15; frozen, grows at the end) */
 struct uproc {                  /* returned by SYS_procinfo */
     u32 pid, ppid, state, mem;
     char name[16];
@@ -612,6 +630,7 @@ int tty_of(const struct proc *p);
 #define SYS_setpriority 79   /* which, who, nice: anyone lowers their own processes, only root raises */
 #define SYS_reboot      80   /* note (0, BOOTNOTE_AMIGAOS, BOOTNOTE_ZENIX): root only; sync, stop disk writes, reset */
 #define SYS_svc         81   /* op (SVC_*), arg, buffer: the service manager (D11, svc.c) */
+#define SYS_update      82   /* op (UPD_*), a, b: the update bundle, the kernel's version, the update note (D15) */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

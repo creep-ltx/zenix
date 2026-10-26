@@ -62,7 +62,11 @@ S:BOOTMENU.CONF
                                     Workbench's colours, the default)
         AmigaOS = partition DH0
         Zenix = run SYS:zenixboot
+        Zenix (previous) = run SYS:zenixboot PREVIOUS
         AmigaOS rescue shell = shell
+    The "Zenix (previous)" line (zenixboot(8), UPDATES) must come after
+    the normal Zenix line: a note and bootzenix start the first "run
+    ...zenixboot" entry.
 
 NOTES
     Needs Kickstart 2.04 or newer and a 68020 or better (the build is the

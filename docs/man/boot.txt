@@ -24,6 +24,16 @@ DESCRIPTION
                 (user/volid.h, the same code mount(8) uses for the
                 filesystems it mounts). Asking for the root inode starts
                 it.
+    Then it runs /sbin/zup (zup(8)) and waits for it: zup installs the
+    root half of an update zenixboot left in memory, finishes or rolls
+    back what a power cut left, or puts the previous version back; with
+    nothing to do it ends at once. A zup still working after a minute
+    is reported ("boot: /sbin/zup is still working (an update)") and one
+    still working after 20 minutes is stopped (the next start finishes
+    its work). Whatever zup did, boot then gives the update bundle's
+    memory back (SYS_update RELEASE). With no /sbin/zup, boot says so only
+    when an update is waiting. boot's stack is 4 KB (it needs under 500
+    bytes): it stays in memory for ever.
     Then it registers the services listed in /etc/svctab (below) and
     starts /bin/init on console 1 and waits for it. Should init
     ever end, boot says so ("boot: /bin/init ended (status N), starting it
