@@ -56,8 +56,12 @@ int sys_open(const char *p, int fl)
 }
 int sys_close(int fd) { return close(fd) < 0 ? err() : 0; }
 int sys_read(int fd, void *b, u32 n) { ssize_t r = read(fd, b, n); return r < 0 ? err() : (int)r; }
+static void *bundle;
+static long bundle_len;
 int sys_write(int fd, const void *b, u32 n)
 {
+    if (bundle && (const char *)b < (const char *)bundle + bundle_len && (const char *)b + n > (const char *)bundle)
+        return -EFAULT;                                 /* as on Zenix: the bundle is no process's memory */
     if (fd > 2) change("write", "", 0);
     ssize_t r = write(fd, b, n);
     return r < 0 ? err() : (int)r;
@@ -123,7 +127,6 @@ int sys_call(int port, struct umsg *m)
     if (f) { fputc(m->a[0] ? '0' : '1', f); fclose(f); }
     return was;
 }
-static void *bundle;
 int sys_update(u32 op, u32 a, u32 b2)
 {
     init();
@@ -144,7 +147,7 @@ int sys_update(u32 op, u32 a, u32 b2)
             if (!bundle) bundle = malloc((size_t)n + 1);
             if (fread(bundle, 1, (size_t)n, f) != (size_t)n) { fclose(f); return -EIO; }
             fclose(f);
-            u->addr = (u32)bundle; u->size = (u32)n;
+            u->addr = (u32)bundle; u->size = (u32)n; bundle_len = n;
         }
         return 0;
     }

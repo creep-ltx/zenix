@@ -27,8 +27,9 @@ DESCRIPTION
        SHA-256 of the bundle's table and of every part, that it is not
        older than what is installed, that its base packages are not newer
        than the running kernel (the kernel always goes first), the
-       dependencies, and the free space. A refused bundle changes
-       nothing. Packages whose version is installed already are skipped;
+       dependencies, and the free space for what it will write. A
+       refused bundle changes nothing. Packages whose version is
+       installed already are skipped;
        if all are, zup says so and does nothing. A newer zup is installed
        first, on its own, and then runs for the rest.
 
@@ -68,13 +69,15 @@ EXIT STATUS
     was refused or an install was rolled back, 2 for a wrong argument.
 
 NOTES
-    Only the root filesystem is changed; /home and other mounts are not
-    touched. Signatures are not checked yet: whoever can write the boot
-    partition can replace the kernel anyway, and the checksums catch
-    damage, not a deliberate fake. The formats (bundle, manifest,
-    journal) are described in docs/architecture.md section 3, "Updates".
-    Verified on the PC (tools/zup-host-test.sh: refusals, the three-way
-    compare, a power cut before each change, the way back).
+    The bundle lies in memory that is no process's own: zup copies what it
+    writes through its own buffers (a system call would refuse a pointer
+    into the bundle). Only the root filesystem is changed; /home and other
+    mounts are not touched. Signatures are not checked yet: whoever can
+    write the boot partition can replace the kernel anyway, and the
+    checksums catch damage, not a deliberate fake. The formats (bundle,
+    manifest, journal) are described in docs/architecture.md section 3,
+    "Updates". Verified on the PC (tools/zup-host-test.sh: refusals, the
+    three-way compare, a power cut before each change, the way back).
 
 SEE ALSO
     zenixboot(8), boot(8), docs/d15-self-updates.md

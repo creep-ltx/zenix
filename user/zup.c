@@ -698,7 +698,16 @@ static int write_manifests(void)
         u8 h[32];
         int r;
         if (zupnew(nw, o->path)) return -ENAMETOOLONG;
-        if ((r = write_file(nw, o->pk->man, o->pk->manlen)) < 0) { say("%s: cannot write it (%d)", nw, r); return r; }
+        /* through our own buffer: the bundle is no process's memory, a system call refuses it (-EFAULT) */
+        int fd = sys_open(nw, O_WRONLY | O_CREAT | O_TRUNC);
+        r = fd < 0 ? fd : 0;
+        for (u32 at = 0; !r && at < o->pk->manlen; at += sizeof iobuf) {
+            u32 k = o->pk->manlen - at < sizeof iobuf ? o->pk->manlen - at : sizeof iobuf;
+            memcpy(iobuf, o->pk->man + at, k);
+            r = write_all(fd, iobuf, k);
+        }
+        if (fd >= 0) sys_close(fd);
+        if (r < 0) { say("%s: cannot write it (%d)", nw, r); return r; }
         if (sha_file(nw, h) || memcmp(h, o->sha, 32)) { say("%s: what was written does not read back right", nw); return -EIO; }
         sys_chown(nw, 0, 0);
         sys_chmod(nw, 0644);
@@ -939,17 +948,6 @@ static int install(struct bundle *b, u32 kvnum, int stage2)
         if (!strcmp(k->name, "zup")) need_zup = 1;
     }
     if (!ntodo) { say("version %u is installed already: nothing to do", b->vnum); return 1; }
-    /* space: the new files and the manifests (the old ones stay as prev links until the next update commits) */
-    u32 need = 0, files = 0;
-    for (int i = 0; i < ntodo; i++) {
-        need += todo[i]->manlen + 1024;
-        for (int e = 0; e < todo[i]->nent; e++) { need += todo[i]->ent[e].size + 1024; files++; }
-    }
-    struct ustatfs fs;
-    if (sys_statfs(&fs) == 0 && fs.bsize >= 1024 && (fs.bfree * (fs.bsize / 1024) < need / 1024 + 64 || fs.ffree < files + 16)) {
-        say("not enough space on the root: %u KB and %u files needed", need / 1024 + 64, files + 16);
-        return -ENOSPC;
-    }
     target_v = b->vnum;
     set_prevdir(target_v);
     tnum = 1;
@@ -958,6 +956,20 @@ static int install(struct bundle *b, u32 kvnum, int stage2)
         struct ustat st;
         snprintf(t, sizeof t, "/log.%u", tnum);
         if (pjoin(p, prevdir, t) || sys_stat(p, &st) < 0) break;
+    }
+    /* space: what the plan writes (new files and manifests; the old ones stay as prev links until the next update) */
+    nops = 0; nkept = 0;
+    for (int i = 0; i < ntodo; i++) { int r = plan_pkg(todo[i]); if (r) return r; }
+    u32 need = 0;
+    for (int i = 0; i < nops; i++)
+        if (ops[i].op == 'R' || ops[i].op == 'A') {
+            struct ent *e = ops[i].mpath ? find_ent(ops[i].pk, ops[i].mpath) : 0;
+            need += (e ? e->size : ops[i].pk->manlen) + 1024;
+        }
+    struct ustatfs fs;
+    if (sys_statfs(&fs) == 0 && fs.bsize >= 1024 && (fs.bfree * (fs.bsize / 1024) < need / 1024 + 64 || fs.ffree < (u32)nops + 16)) {
+        say("not enough space on the root: %u KB and %d files needed", need / 1024 + 64, nops + 16);
+        return -ENOSPC;
     }
     if (need_zup && !stage2 && ntodo > 1) {             /* zup first, then the new zup does the rest */
         struct pkg *z[1];
@@ -973,9 +985,6 @@ static int install(struct bundle *b, u32 kvnum, int stage2)
         int st = sys_wait(pid);
         return st == 0 ? 2 : st == 1 ? 3 : -EIO;        /* 2/3: the new zup did the rest (and wrote the result) */
     }
-    nops = 0; nkept = 0;
-    for (int i = 0; i < ntodo; i++) { int r = plan_pkg(todo[i]); if (r) return r; }
-    if (!nops) { say("version %u: every file is in place already", b->vnum); }
     say("installing %u (%s): %d packages, %d changes", b->vnum, b->vstr, ntodo, nops);
     int r = run_transaction(todo, ntodo);
     if (r) { say("the install of %u failed (%d) and was rolled back", b->vnum, r); return r; }
