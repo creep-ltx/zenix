@@ -407,6 +407,26 @@ char *getenv(const char *name)
     for (int i = 0; env_ptrs[i]; i++) if (!strncmp(env_ptrs[i], name, l) && env_ptrs[i][l] == '=') return env_ptrs[i] + l + 1;
     return 0;
 }
+/* Colours (DESIGN D14): `auto` means colour when fd is a terminal, TERM is set and not "dumb", and NO_COLOR is not set
+ * to something (no-color.org) - one rule for every program */
+int color_rule(int fd, const char *term, const char *no_color)
+{
+    return sys_isatty(fd) == 1 && term && *term && strcmp(term, "dumb") && !(no_color && *no_color);
+}
+int color_auto(int fd) { return color_rule(fd, getenv("TERM"), getenv("NO_COLOR")); }
+int color_arg(const char *arg, int bare)
+{
+    const char *w;
+    if (!strncmp(arg, "--colour", 8)) w = arg + 8;
+    else if (!strncmp(arg, "--color", 7)) w = arg + 7;
+    else return -1;
+    if (!*w) return bare;
+    if (*w++ != '=') return -1;
+    if (!strcmp(w, "always") || !strcmp(w, "yes") || !strcmp(w, "force")) return 1;
+    if (!strcmp(w, "never") || !strcmp(w, "no") || !strcmp(w, "none")) return 0;
+    if (!strcmp(w, "auto") || !strcmp(w, "tty") || !strcmp(w, "if-tty")) return 2;
+    return -2;
+}
 int unsetenv(const char *name)
 {
     env_load();

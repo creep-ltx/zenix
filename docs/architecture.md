@@ -815,7 +815,11 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
   NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100/xterm: cursor motion, erase, insert/delete, scroll regions,
   bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position. Arrows and function keys
-  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it. **Colours** (DESIGN D14):
+  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it and `TERM=xterm-16color`
+  (xterm's keys and 16 colours; it was `vt100`; over a serial line the other side's getty picks `TERM`). Programs
+  colour their output by one libz rule (`color_auto`: the output is a terminal, `TERM` set and not `dumb`,
+  `NO_COLOR` not set): `ls` and `grep` (`--color=auto|always|never`, GNU's bytes), the shell's default prompt,
+  `edit`'s status line; `less` passes colour codes through. **Colours** (DESIGN D14):
   each cell has a character, an attribute byte and a colour byte (foreground in the low nibble, background in the
   high one; grey on black is `0x07`). SGR `30-37`/`40-47`, `90-97`/`100-107`, `39`/`49`; `0` and a bare `ESC[m` reset
   everything (so does `ESC c`); `1` is bold and never changes the colour; `38;5;n`/`48;5;n` (xterm's 256: the 16, a

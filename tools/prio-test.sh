@@ -11,7 +11,7 @@ BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every tes
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-prio}; mkdir -p $OUT
-tools/run-test.sh fsuae/a1200-020-fast.fs-uae 170 tools/tests/prio-test.txt 2>&1 | sed 's/\x1b\[K//g' | tr -d '\r' > $OUT/run.log
+tools/run-test.sh fsuae/a1200-020-fast.fs-uae 170 tools/tests/prio-test.txt 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' | tr -d '\r' > $OUT/run.log
 pass=1
 line() { if grep -aqxF -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 rx()   { if grep -aqxE -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
@@ -40,7 +40,7 @@ done
 # the same inheritance check in a kernel built without inheritance: it must fail there
 NB=$OUT/noinherit
 if make -s BUILD=$NB DIAG=-DNO_PRIO_INHERIT all >/dev/null 2>&1; then
-    ZENIX_BUILD=$NB tools/run-test.sh fsuae/a1200-020-fast.fs-uae 50 tools/tests/prio-noinherit-test.txt 2>&1 | sed 's/\x1b\[K//g' | tr -d '\r' > $OUT/noinherit.log
+    ZENIX_BUILD=$NB tools/run-test.sh fsuae/a1200-020-fast.fs-uae 50 tools/tests/prio-noinherit-test.txt 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' | tr -d '\r' > $OUT/noinherit.log
     l=$(grep -a "^priotest inherit: " $OUT/noinherit.log | head -1)
     case "$l" in *": FAIL"*) echo "PASS without inheritance the client is held up: ${l#priotest inherit: FAIL }" ;;
                  *) echo "FAIL the check did not see a kernel without inheritance: ${l:-no result}"; pass=0 ;; esac

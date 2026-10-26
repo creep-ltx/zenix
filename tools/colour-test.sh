@@ -10,6 +10,9 @@
 #    background-colour erases, a scroll region with inserted and deleted lines): the screen afterwards must be the
 #    very picture a redraw from the grid gives (the scrollback one line up and back down redraws) - no garbage
 #  - scrolled back a page: the rows keep their colours (3 and 4 planes)
+#  - edit's status line: white on blue (3 and 4 planes), inverse (1 plane: the colours are written as an inverse)
+#  - on the serial port, raw: the prompt's colour codes; less showing a line with colour codes and 79 visible
+#    characters as one row, the codes passed on (zero width, as GNU less -R)
 # usage: tools/colour-test.sh [DEPTH...]      (default 1 3 4; the 1-plane run comes first: its edges are the reference)
 cd "$(dirname "$0")/.." || exit 1
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-colour-serial}
@@ -48,6 +51,15 @@ sleep 3
 shot back
 send \x1dD
 sleep 1
+send edit\r
+sleep 4
+shot edit
+send \x11
+sleep 2
+send printf '\\033[31mxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\033[0myyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\\nSECOND\\n' > /tmp/l.txt; seq 1 40 >> /tmp/l.txt; less /tmp/l.txt\r
+sleep 4
+send q
+sleep 2
 EOF
 
 for d in $DEPTHS; do
@@ -59,7 +71,7 @@ for d in $DEPTHS; do
     want="$d bitplane"; [ $d = 1 ] || want="$d bitplanes"
     tr -d '\r' < "$OUT/d$d.serial.log" | grep -q "display: 640x256, $want, 80x32 text"
     check "$d planes: the kernel says so on the log" $?
-    for s in columns colours scrolled redrawn back; do
+    for s in columns colours scrolled redrawn back edit; do
         [ -f "$OUT/d$d-$s.png" ] || { echo "FAIL $d planes: no screenshot $s (see $OUT/d$d.serial.log)"; pass=0; continue 2; }
     done
     ref=""; [ $d = 1 ] || [ ! -f "$OUT/edges1" ] || ref="$OUT/edges1"
@@ -70,7 +82,11 @@ for d in $DEPTHS; do
     ct same "$OUT/d$d-scrolled.png" "$OUT/d$d-redrawn.png"; check "$d planes: after termtest scroll the screen is what a redraw from the grid gives" $?
     if [ $d != 1 ]; then
         ct rows "$OUT/d$d-back.png" "$OUT/geom$d" $d; check "$d planes: scrolled back a page, every row keeps its colour" $?
+        ct pixel "$OUT/d$d-edit.png" "$OUT/geom$d" 31 20 45E; check "$d planes: edit's status line is blue" $?
+    else
+        ct pixel "$OUT/d$d-edit.png" "$OUT/geom$d" 31 20 BBB; check "$d planes: edit's status line is inverse" $?
     fi
+    ct serial "$OUT/d$d.serial.log"; check "$d planes: the prompt's colour codes and less's zero-width codes on the serial port" $?
 done
 echo "logs and screenshots: $OUT"
 exit $((1 - pass))

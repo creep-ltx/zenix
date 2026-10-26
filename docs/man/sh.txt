@@ -80,10 +80,17 @@ BUILTINS
           ! -a -o ( )
 
 VARIABLES THE SHELL USES
-    PATH (default /bin)  HOME  USER  HOSTNAME  IFS  PWD  OLDPWD  TERM
+    PATH (default /bin)  HOME  USER  HOSTNAME  IFS  PWD  OLDPWD
+    TERM (default xterm-16color: the console speaks xterm's keys and 16
+        colours; over a serial line the other computer's getty sets it)
+    NO_COLOR (set to something: no colours from ls, grep, edit or the
+        prompt; no-color.org)
     LINES (from the terminal: 32 on PAL, 25 on NTSC)  COLUMNS
     PS1 (the prompt: \w directory, \W its name, \u user, \h host,
-        \$ # or $, \n)   PS2 (the continuation prompt, default "> ")
+        \$ # or $, \n, \e ESC, \[ \] around codes that take no room;
+        default \h:\w\$ with the host green and the directory blue on a
+        terminal with colours - the rule of ls --color=auto)
+    PS2 (the continuation prompt, default "> ")
     At the prompt, a command that is not finished yet (an open quote or
     here-document, if without fi, a loop without done, case without esac,
     a function, { or ( without its end, a line ending in | && || or a

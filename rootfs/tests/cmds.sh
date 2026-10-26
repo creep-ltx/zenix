@@ -104,3 +104,11 @@ printf 'echo "n=$# last=${400}"\nf() { echo "f sees $x"; }\nf\necho "sum=$x"\n' 
 t sh-long;    sh $L; echo "rc=$? lines=$(wc -l < $L) longest=$(awk '{ if (length($0) > m) m = length($0) } END { print m }' $L)"
 H=$T/hd.sh; echo 'cat <<EOF | wc -c' > $H; i=0; while [ $i -lt 40 ]; do echo '$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y' >> $H; i=$((i + 1)); done; echo EOF >> $H
 t hd-long;    y=abcdefgh; . $H
+# colours (DESIGN D14): GNU's exact bytes with --color=always (cmds-test runs the host's ls and grep with LS_COLORS and
+# GREP_COLORS unset); auto into a file or a pipe gives none
+C=$T/col; mkdir -p $C/dir $C/sticky; touch $C/file $C/exe $C/suid; chmod +x $C/exe; chmod 4755 $C/suid; chmod 1777 $C/sticky; ln -s file $C/link
+t color-ls;   (cd $C && ls --color=always; ls --color=always -F; ls --color=always -d dir file exe; ls --color=always file; ls --color=auto; ls --color=never -F; ls --color | head -2)
+t color-grep; grep --color=always apple fruit.txt; grep --color=always -n -i A fruit.txt text.txt; grep --color=always -c apple fruit.txt text.txt; grep --color=always -o 'a[a-z]*' fruit.txt; grep --color=always -v apple fruit.txt
+t color-grep2; grep --color=always -l apple fruit.txt text.txt; grep --color=always -w -F the text.txt; grep --color=always 'x*' colon.txt | head -2; grep --color=auto apple fruit.txt; grep --color apple fruit.txt | wc -c
+t grep-groups; grep -E -n -A1 'apple|cherry' fruit.txt; grep --colour=always -n -B1 cherry fruit.txt; grep --color=always -A0 an fruit.txt text.txt; grep -C1 -n o text.txt
+t color-less; grep --color=always -n apple fruit.txt | less; ls --color=always $C | less

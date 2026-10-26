@@ -48,6 +48,12 @@ int path_find(const char *name, char *out, u32 max);   /* a program by name thro
 char *bre_to_ere(const char *bre);   /* a basic regular expression in the extended syntax of regex.c (malloc'd) */
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
+/* colours (DESIGN D14): color_auto(fd): colour is wanted (fd a terminal, TERM set and not "dumb", NO_COLOR not set);
+ * color_arg(arg, bare): --color / --colour [=WHEN]: 0 never, 1 always, 2 auto (bare: `bare`), -1 not such an option,
+ * -2 an unknown WHEN */
+int color_auto(int fd);
+int color_rule(int fd, const char *term, const char *no_color);   /* the same rule with these values (sh: its variables) */
+int color_arg(const char *arg, int bare);
 extern char **environ;
 int getpriority(int which, int who);            /* POSIX: the nice value (-20..19); -1 and zerrno set on failure */
 int setpriority(int which, int who, int nice);  /* POSIX: 0, or -1 and zerrno (EACCES: only root may raise) */

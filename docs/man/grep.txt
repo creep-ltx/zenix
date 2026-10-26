@@ -5,7 +5,7 @@ NAME
 
 SYNOPSIS
     grep [-ivnclLoqhHrEFwxs] [-A n] [-B n] [-C n] [-e pattern]
-         pattern [file...]
+         [--color[=when]] pattern [file...]
 
 DESCRIPTION
     Reads each file (or the standard input; a file named "-" is the
@@ -37,7 +37,20 @@ OPTIONS
     -A n     also print n lines after each match
     -B n     also print n lines before each match
     -C n     both: n lines before and after
-    Context lines use "-" after the name/number instead of ":".
+    Context lines use "-" after the name/number instead of ":", and a
+    line "--" goes between groups of lines that are not next to each other
+    (also between files), as GNU grep does.
+    --color[=when], --colour[=when]
+             colour matches, file names, line numbers and separators:
+             when is auto (the default, also --color alone: only when the
+             output is a terminal, TERM is set and not "dumb" and NO_COLOR
+             is not set), always (yes, force) or never (no, none)
+
+COLOURS
+    The colours and the bytes are GNU grep's with GREP_COLORS unset: a
+    match bold red (ESC [ 01;31m ESC [ K, the match, ESC [ m ESC [ K),
+    file names 35, line numbers 32, separators and "--" 36. Empty matches
+    are not coloured. GREP_COLORS is not read.
 
 EXAMPLES
     grep -n zenix README         matches with line numbers
@@ -52,6 +65,8 @@ EXIT STATUS
     a match).
 
 NOTES
+    The default is --color=auto, a deliberate difference: GNU grep's own
+    default is never (distributions turn auto on with an alias).
     Back-references (\1) are not supported. The pattern engine does not
     backtrack, so a hard pattern cannot hang.
     A file that cannot be read says why ("no such file or directory",

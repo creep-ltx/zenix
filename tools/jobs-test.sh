@@ -8,7 +8,7 @@ BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every tes
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-jobs}; mkdir -p $OUT
-tools/run-test.sh fsuae/a1200-020-fast.fs-uae 130 tools/tests/jobs-test.txt 2>&1 | sed 's/\x1b\[K//g' > $OUT/run.log
+tools/run-test.sh fsuae/a1200-020-fast.fs-uae 130 tools/tests/jobs-test.txt 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' > $OUT/run.log
 pass=1
 want() { if grep -aqF -- "$2" $OUT/run.log; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 want "^Z stops the foreground program" "Stopped    sleep"

@@ -4,7 +4,8 @@
 /* less [file...]   (also installed as more)
  * Keys: Space/f page down, b page up, Enter/j/Down line down, k/Up line up, d/u half page, g/Home top, G/End bottom,
  * / pattern search, ? backward search, n/N next/previous match, h help, q quit.
- * Short files are just printed. Text from a pipe works: the keys come from /dev/tty. */
+ * Short files are just printed. Text from a pipe works: the keys come from /dev/tty. Colour codes (SGR, ESC [ ... m)
+ * pass through, as GNU less -R does, and take no room on the line; other control characters are shown as ^X. */
 static int ROWS = 25;                   /* the terminal's rows (main asks the kernel: 32 PAL, 25 NTSC) */
 static char *text; static u32 tlen, tcap;
 struct row { u32 off; unsigned short len; };
@@ -22,6 +23,14 @@ static void add_row(u32 off, u32 len)
     if (nrows == rcap) { u32 nc = rcap ? rcap * 2 : 512; struct row *nr = realloc(rows, nc * sizeof *nr); if (!nr) { fprintf(2, "less: out of memory\n"); _zexit(1); } rows = nr; rcap = nc; }
     rows[nrows].off = off; rows[nrows].len = (unsigned short)len; nrows++;
 }
+/* the length of a colour code (ESC [ digits ; : m) at text[i], else 0 */
+static u32 sgr_len(u32 i, u32 end)
+{
+    if (text[i] != 27 || i + 2 >= end || text[i + 1] != '[') return 0;
+    u32 k = i + 2;
+    while (k < end && ((text[k] >= '0' && text[k] <= '9') || text[k] == ';' || text[k] == ':')) k++;
+    return k < end && text[k] == 'm' ? k + 1 - i : 0;
+}
 /* split the text into screen rows: lines of up to 80 columns, tabs to the next multiple of 8 */
 static void layout(void)
 {
@@ -30,6 +39,8 @@ static void layout(void)
     while (i < tlen) {
         u32 start = i, col = 0;
         while (i < tlen && text[i] != '\n') {
+            u32 sl = sgr_len(i, tlen);
+            if (sl) { i += sl; continue; }                  /* a colour code: no width */
             u32 w = text[i] == '\t' ? 8 - (col % 8) : ((unsigned char)text[i] < 32 ? 2u : 1u);
             if (col + w > 80 && col > 0) { add_row(start, i - start); start = i; col = 0; }
             col += w; i++;
@@ -38,15 +49,23 @@ static void layout(void)
         if (i < tlen) i++;                                  /* the newline */
     }
 }
+/* a row; a row that continues a long line first gets the colour codes of the line's earlier rows, and every row
+ * ends with the colours reset, so a colour never runs into the rows below or the status line */
 static void put_row(const struct row *r)
 {
-    u32 col = 0;
-    for (u32 k = 0; k < r->len; k++) {
-        unsigned char c = (unsigned char)text[r->off + k];
+    u32 col = 0, ls = r->off, end = r->off + r->len;
+    while (ls > 0 && text[ls - 1] != '\n') ls--;
+    int coloured = 0;
+    for (u32 k = ls; k < r->off; k++) { u32 sl = sgr_len(k, r->off); if (sl) { oputn(text + k, sl); k += sl - 1; coloured = 1; } }
+    for (u32 k = r->off; k < end; k++) {
+        unsigned char c = (unsigned char)text[k];
+        u32 sl = sgr_len(k, end);
+        if (sl) { oputn(text + k, sl); k += sl - 1; coloured = 1; continue; }
         if (c == '\t') { do { oputc(' '); col++; } while (col % 8); }
         else if (c < 32) { oputc('^'); oputc(c + 64); col += 2; }
         else { oputc(c); col++; }
     }
+    if (coloured) oputs("\033[m");
 }
 static int row_matches(u32 r)
 {
@@ -155,8 +174,9 @@ int main(int argc, char **argv)
         }
     }
     if (!tlen) return 0;
+    if (!tty_out) { oputn(text, tlen); oflush(); return 0; }       /* not a terminal: as cat, every byte unchanged */
     layout();
-    if (!tty_out || nrows <= (u32)(ROWS - 1)) {                    /* not a terminal, or it all fits: just print it */
+    if (nrows <= (u32)(ROWS - 1)) {                                 /* it all fits: just print it */
         for (u32 r = 0; r < nrows; r++) { put_row(&rows[r]); oputc('\n'); }
         oflush();
         return 0;

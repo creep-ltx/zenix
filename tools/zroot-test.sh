@@ -17,7 +17,7 @@ FSTAB_FILE=$OUT/fstab MOUNTDIRS=data EXTRA="$OUT/data.img:ext2:data" tools/mkroo
 SER=${ZENIX_SERIAL:-/tmp/zenixfs-serial}
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
-clean() { tr -d '\r' | sed 's/\x1b\[K//g'; }
+clean() { tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g'; }
 ZENIX_SERIAL=$SER tools/run-test.sh fsuae/zroot.fs-uae 110 tools/tests/zroot-test.txt 2>&1 | clean > $OUT/boot1.log
 grep -aqE '^ide0p1 +/ +zenixfs ' $OUT/boot1.log && check "the root filesystem is ZenixFS (mount)" ok || check "the root filesystem is ZenixFS (mount)" bad
 grep -aqE '^ide0p2 +/data +ext2 ' $OUT/boot1.log && check "/etc/fstab mounted the second partition at boot" ok || check "/etc/fstab mounted the second partition at boot" bad

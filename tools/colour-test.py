@@ -152,7 +152,7 @@ def main():
         ok = True
         if b"\x1b[01;32mzenix\x1b[0m:\x1b[01;34m/\x1b[0m# " not in raw:
             print("serial: the prompt's colour codes are not on the serial port"); ok = False
-        if not re.search(rb"\x1b\[31mx{40}\x1b\[0my{39}\x1b\[m\x1b\[K\r\nSECOND", raw):
+        if not re.search(rb"\x1b\[31mx{40}\x1b\[0my{39}\x1b\[m\x1b\[K\r*\nSECOND", raw):
             print("serial: less did not show the coloured 79-column line as one row with its codes"); ok = False
         if ok:
             print("serial: the prompt's codes; less passes colour codes on and counts them as no width")

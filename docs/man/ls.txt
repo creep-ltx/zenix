@@ -4,7 +4,7 @@ NAME
     ls - list files and directories
 
 SYNOPSIS
-    ls [-aAldRFhtrSs1] [file...]
+    ls [-aAldRFhtrSs1] [--color[=when]] [file...]
 
 DESCRIPTION
     Lists the named files and directories (the current directory if none is
@@ -32,8 +32,23 @@ OPTIONS
     -r    reverse the sort order
     -1    one name per line even on a terminal
     -s    accepted and ignored
+    --color[=when], --colour[=when]
+          colour the names: when is auto (the default: only when the
+          output is a terminal, TERM is set and not "dumb" and NO_COLOR is
+          not set), always (also --color alone, yes, force) or never (no,
+          none)
 
     Options can be combined (ls -laR). "--" ends the options.
+
+COLOURS
+    The colours and the bytes are GNU ls's with LS_COLORS unset:
+    directories bold blue (01;34), symbolic links bold cyan (01;36),
+    executable files bold green (01;32), set-user-id files 37;41,
+    set-group-id files 30;43, sticky directories 37;44, other-writable
+    directories 34;42 (30;42 if also sticky). A coloured name is ESC [ code
+    m, the name, ESC [ 0 m; ESC [ 0 m comes once before the first one. The
+    target of a link (-l) and the -F marks are not coloured. LS_COLORS is
+    not read.
 
 LONG FORMAT
     -rwxr-xr-x 1 root root 5120 Oct 22 12:51 sh
@@ -46,6 +61,8 @@ EXAMPLES
     ls -d */               only the directories here
 
 NOTES
+    The default is --color=auto, a deliberate difference: GNU ls's own
+    default is never (distributions turn auto on with an alias).
     A directory of any size is listed: the names are kept in memory, and
     if memory runs out ls says "out of memory" and exits with 1.
     An access the user is not allowed is reported as "permission denied".

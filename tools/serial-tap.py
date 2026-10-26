@@ -9,7 +9,8 @@ Optional argv[3]: a keystroke script driven while logging. Lines:
     wait <regex> [timeout]
                        wait until the serial output received since the last
                        `send` (or since the start) matches the Python regular
-                       expression (carriage returns and ESC[K removed first;
+                       expression (carriage returns, ESC[K and the colour
+                       codes ESC[...m removed first;
                        the echo of the typed line counts too, so pick a
                        pattern the echo cannot match). The last word is the
                        timeout in seconds if it is a number (default 60). On
@@ -57,12 +58,15 @@ mark = 0                        # where the output since the last `send` starts
 cond = threading.Condition()
 
 
+SGR = re.compile(rb"\x1b\[[0-9;:]*[mK]")   # colour codes and erase-to-end-of-line: not part of the text waited for
+
+
 def wait_for(pattern, timeout):
     rx = re.compile(pattern.encode("latin1"))
     end = time.time() + timeout
     with cond:
         while True:
-            text = bytes(received[mark:]).replace(b"\r", b"").replace(b"\x1b[K", b"")
+            text = SGR.sub(b"", bytes(received[mark:]).replace(b"\r", b""))
             if rx.search(text):
                 return True
             left = end - time.time()

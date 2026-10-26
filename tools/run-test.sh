@@ -46,6 +46,6 @@ SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
 timeout "$SECS" fs-uae "$CONF" >/dev/null 2>&1 9>&- || true
 kill $TAP 2>/dev/null || true
 echo "=== serial output ($CONF, ${SECS}s):"
-tr -d '\r' < "$LOG"
+tr -d '\r' < "$LOG" | sed 's/\x1b\[[0-9;:]*m//g'                         # colour codes (DESIGN D14) are not text
 grep -h '^serial-tap: wait' "$DIR/tap.out" 2>/dev/null || true      # a script's `wait` that timed out says so here
 rm -rf "$DIR"                                                         # the config copy, the log, FS-UAE's save states
