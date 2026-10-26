@@ -292,7 +292,7 @@ static int blocked(int s, u32 lba, u32 n, u32 pid)
 
 static int handle(struct umsg *m)
 {
-    if (m->uid != 0 && m->type != DISK_LIST && m->type != DISK_INFO)
+    if (m->uid != 0 && m->type != DISK_LIST && m->type != DISK_INFO && m->type != DISK_LISTSZ && m->type != DISK_INFOSZ)
         return -EACCES;                 /* raw sectors bypass every file permission: root only (the filesystem servers are root) */
     switch (m->type) {
     case DISK_OPEN: {
@@ -332,16 +332,23 @@ static int handle(struct umsg *m)
         return m->type == DISK_READ ? sys_blk_read(lba, n, (void *)m->a[3])
                                     : sys_blk_write(lba, n, (const void *)m->a[3]);
     }
-    case DISK_INFO:
-        if (m->a[0] >= MAXDEV || !used[m->a[0]]) return -EBADF;
-        holder((int)m->a[0]);
-        memcpy((void *)m->a[1], &dev[m->a[0]], sizeof(struct diskinfo));
+    case DISK_INFO: case DISK_INFOSZ: case DISK_LIST: case DISK_LISTSZ: {
+        /* the struct goes into the caller's buffer: the SZ forms pass its size (a smaller buffer than the first 80
+         * bytes is refused), the old forms get the first 80 bytes (frozen interfaces, CLAUDE.md) */
+        u32 n = m->type == DISK_INFOSZ || m->type == DISK_LISTSZ ? m->a[2] : DISKINFO_FIRST, h;
+        if (n < DISKINFO_FIRST) return -EINVAL;
+        if (n > sizeof(struct diskinfo)) n = sizeof(struct diskinfo);
+        if (m->type == DISK_INFO || m->type == DISK_INFOSZ) {
+            if (m->a[0] >= MAXDEV || !used[m->a[0]]) return -EBADF;
+            h = m->a[0];
+        } else {
+            if (m->a[0] >= (u32)norder) return -ENODEV;        /* past the end of the list */
+            h = order[m->a[0]];
+        }
+        holder((int)h);
+        memcpy((void *)m->a[1], &dev[h], n);
         return 0;
-    case DISK_LIST:
-        if (m->a[0] >= (u32)norder) return -ENODEV;            /* past the end of the list */
-        holder(order[m->a[0]]);
-        memcpy((void *)m->a[1], &dev[order[m->a[0]]], sizeof(struct diskinfo));
-        return 0;
+    }
     case DISK_FLUSH:
         if (m->a[0] >= MAXDEV || !used[m->a[0]]) return -EBADF;
         if (phys[m->a[0]] != 0) return 0;                           /* RAM disk, floppy: nothing to flush */

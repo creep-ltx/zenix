@@ -20,7 +20,7 @@ static int open_ep(struct ep *e, const char *name, int write, u32 seek)
         int h = sys_call(port, &m);
         if (h >= 0) {
             struct diskinfo di;
-            m.type = DISK_INFO; m.a[0] = (u32)h; m.a[1] = (u32)&di;
+            m.type = DISK_INFOSZ; m.a[0] = (u32)h; m.a[1] = (u32)&di; m.a[2] = sizeof di;
             if (sys_call(port, &m) < 0) return -1;
             e->dev = 1; e->h = h; e->sectors = di.sectors;
             if (bs % 512) { fprintf(2, "dd: the block size for a disk must be a multiple of 512\n"); return -1; }

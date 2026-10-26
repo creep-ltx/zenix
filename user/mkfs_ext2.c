@@ -67,7 +67,7 @@ int main(int argc, char **argv)
     m.type = DISK_OPEN; m.a[0] = (u32)dev; m.a[1] = DISK_RAW;
     h = sys_call(port, &m);
     struct diskinfo di;
-    m.type = DISK_INFO; m.a[0] = (u32)h; m.a[1] = (u32)&di;
+    m.type = DISK_INFOSZ; m.a[0] = (u32)h; m.a[1] = (u32)&di; m.a[2] = sizeof di;
     if (h < 0 || sys_call(port, &m) < 0) { printf("mkfs.ext2: cannot open %s (mounted, or no such device)\n", dev); return 1; }
     if (di.maxsect) maxsect = di.maxsect;
     if (!strcmp(dev, "ide0") && di.start == 0 && di.dostype == 0)

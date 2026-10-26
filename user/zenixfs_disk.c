@@ -15,7 +15,7 @@ int zdisk_open(const char *name, unsigned flags)
     m.type = DISK_OPEN; m.a[0] = (u32)name; m.a[1] = flags;
     handle = disk_call(dport, &m);
     if (handle < 0) return -1;
-    m.type = DISK_INFO; m.a[0] = (u32)handle; m.a[1] = (u32)&di;
+    m.type = DISK_INFOSZ; m.a[0] = (u32)handle; m.a[1] = (u32)&di; m.a[2] = sizeof di;
     if (disk_call(dport, &m) < 0) { handle = -1; return -1; }
     nsect = di.sectors; dtype = di.dostype; caps = di.caps;
     return 0;

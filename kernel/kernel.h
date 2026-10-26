@@ -266,6 +266,7 @@ struct uproc {                  /* returned by SYS_procinfo */
     u32 pri;                    /* the effective level now, 0 (highest) .. 31; PRI_IDLE for pid 0 */
     u32 shared;                 /* D13: bytes of shared code it runs (one copy for all its users; not in mem) */
 };
+#define UPROC_FIRST 32          /* its first size (pid .. name): what a caller passing size 0 gets (D15 step 0) */
 
 /* proc.c */
 #define NPROC 32                /* 10 consoles with a login and a shell each, the servers, init and the commands they run */

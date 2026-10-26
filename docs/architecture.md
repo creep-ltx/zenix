@@ -482,8 +482,15 @@ only) where the kernel, or a server answering for it, writes into the caller's m
 stdio array. So a literal path works, and a `read` into a literal fails with -EFAULT instead of changing the code every
 process running the program runs. `blk_read` and `fd_rw` stay unchecked (privileged, as before). Raw messages a
 program sends itself are not checked by the servers (limits.md): a program that sends them stays ZEXE.
-`SYS_procinfo` fills `struct uproc`, which has a field `shared` since D13 (an interface change: the struct grew by
-4 bytes, so a program built before it passes a buffer too small at the end of its block): `mem` is the memory the
+**A struct written into a program never overruns its buffer** (D15 step 0, the frozen-interface rule in CLAUDE.md):
+`stat`, `lstat`, `fstat`, `readdir`, `procinfo`, `statfs` and `mountinfo` take the caller's buffer size in their third
+argument, `meminfo` in its second (libz passes `sizeof`). Every program built before this passed 0 there, and 0 means
+the struct's first size; a size below it is -EINVAL; a bigger one gets at most the kernel's own struct (`usize` in
+syscall.c). The disk server does the same for `DISK_INFOSZ`/`DISK_LISTSZ` (size in `a[2]`; the old `DISK_INFO` and
+`DISK_LIST` write the first 80 bytes of `struct diskinfo`, their callers never set `a[2]`). Tested by `badptr` (memtest):
+an old 40-byte `uproc` buffer with a guard after it gets 32 bytes; the old kernel wrote 44.
+`SYS_procinfo` fills `struct uproc` (32 bytes at first: pid to name; D10 appended `nice` and `pri`, D13 `shared`; a
+caller passing size 0 gets the first 32): `mem` is the memory the
 process owns (a private copy of code included), `shared` the bytes of shared code it runs (`ps` shows them as
 SHR). `SYS_meminfo` fills four words: chip free, fast free, the bytes of shared code in memory, and what sharing saves
 (for each segment, its size times its users beyond the first); `free` prints the last two. Strings are copied into kernel buffers with bounds; a path

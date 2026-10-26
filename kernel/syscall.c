@@ -18,6 +18,17 @@ static __attribute__((noinline)) int copy_str(char *dst, u32 uptr, u32 max)
     return -ENAMETOOLONG;
 }
 
+/* Frozen interfaces (CLAUDE.md): a struct the kernel or a server writes into a program's memory never overruns the
+ * caller's buffer. The caller passes its buffer's size in an argument every libz before D15 passed as 0; 0 means the
+ * struct's first size (it only ever grows at its end), a size below that is refused, a bigger one gets at most the
+ * kernel's own size. sizes = first << 16 | now. The bytes the caller gets, or -EINVAL / -EFAULT */
+static __attribute__((noinline)) s32 usize(u32 p, u32 given, u32 sizes)
+{
+    u32 first = sizes >> 16, now = sizes & 0xFFFF;
+    u32 n = !given ? first : given < first ? 0 : given < now ? given : now;
+    return !n ? -EINVAL : user_ok_wr(current, p, n) ? (s32)n : -EFAULT;
+}
+
 static struct file *getfd(u32 fd)
 {
     return fd < NFD ? current->fd[fd] : 0;
@@ -162,6 +173,9 @@ void syscall_c(u32 *rb)
 #define UOKW(p, n)    (user_ok_wr(current, p, n) || ((r = -EFAULT), 0))
 #define UOKR(p, n)    (user_ok_rd(current, p, n) || ((r = -EFAULT), 0))
 #define GETFD(f_, fd) (((f_) = getfd(fd)) || ((r = -EBADF), 0))
+    /* a struct written into the caller's buffer p of size given (usize): n_ the bytes it gets */
+#define UOKS(n_, p, given, first, now) (((n_) = usize(p, given, (first) << 16 | (now))) > 0 || ((r = (n_)), 0))
+    s32 n;
 
     {   /* the stack guard (proc.c) at every system call: the quick check, the full one if it fails (the register block
          * is the kernel stack pointer) */
@@ -258,7 +272,7 @@ void syscall_c(u32 *rb)
         r = (s32)ipc_replyrecv((struct umsg *)a1, (s32)a2, (int)a3);
         break;
     case SYS_statfs:
-        if (UOKW(a1, 20))
+        if (UOKS(n, a1, a3, 20, 20))      /* the server writes struct ustatfs (frozen in fsproto.h) */
             r = (s32)vfs_statfs((void *)a1, a2);       /* a2 = the n-th mount, as SYS_mountinfo counts (0 = the root) */
         break;
     case SYS_mount: {                   /* root only */
@@ -283,7 +297,7 @@ void syscall_c(u32 *rb)
         break;
     }
     case SYS_mountinfo:
-        if (UOKW(a2, sizeof(struct umountinfo)))
+        if (UOKS(n, a2, a3, sizeof(struct umountinfo), sizeof(struct umountinfo)))
             r = (s32)vfs_mountinfo(a1, (struct umountinfo *)a2);
         break;
     case SYS_blk_flush:
@@ -365,7 +379,7 @@ void syscall_c(u32 *rb)
     }
     case SYS_lstat: {
         char path[64];
-        if (CSTR(path, a1) && UOKW(a2, sizeof(struct ustat)))
+        if (CSTR(path, a1) && UOKS(n, a2, a3, sizeof(struct ustat), sizeof(struct ustat)))
             r = (s32)vfs_path1(FS_LSTAT, path, a2, 0);
         break;
     }
@@ -431,18 +445,17 @@ void syscall_c(u32 *rb)
             r = (s32)vfs_lseek(f, (s32)a2, a3);
         break;
     case SYS_readdir:
-        if (GETFD(f, a1) && UOKW(a2, sizeof(struct udirent)))
+        if (GETFD(f, a1) && UOKS(n, a2, a3, sizeof(struct udirent), sizeof(struct udirent)))
             r = (s32)vfs_readdir(f, (struct udirent *)a2);
         break;
     case SYS_stat: {
         char path[64];
-        if (CSTR(path, a1) &&
-            UOKW(a2, sizeof(struct ustat)))
+        if (CSTR(path, a1) && UOKS(n, a2, a3, sizeof(struct ustat), sizeof(struct ustat)))
             r = (s32)vfs_stat(path, (struct ustat *)a2);
         break;
     }
     case SYS_fstat:
-        if (GETFD(f, a1) && UOKW(a2, sizeof(struct ustat)))
+        if (GETFD(f, a1) && UOKS(n, a2, a3, sizeof(struct ustat), sizeof(struct ustat)))
             r = (s32)vfs_fstat(f, (struct ustat *)a2);
         break;
     case SYS_chdir: {
@@ -517,9 +530,9 @@ void syscall_c(u32 *rb)
         r = (s32)ticks;
         break;
     case SYS_procinfo:
-        if ((a1 < NPROC || ((r = -EINVAL), 0)) && UOKW(a2, sizeof(struct uproc))) {
+        if ((a1 < NPROC || ((r = -EINVAL), 0)) && UOKS(n, a2, a3, UPROC_FIRST, sizeof(struct uproc))) {
             struct proc *p = &procs[a1];
-            struct uproc *u = (struct uproc *)a2;
+            struct uproc uu, *u = &uu;
             u->pid = (u32)p->pid;
             u->ppid = (u32)p->ppid;
             u->state = (u32)p->state;
@@ -531,11 +544,12 @@ void syscall_c(u32 *rb)
             memcpy(u->name, p->name, 16);
             u->nice = p->nice;
             u->pri = p->prio;
+            memcpy((void *)a2, u, (u32)n);
             r = 0;
         }
         break;
     case SYS_meminfo:
-        if (UOKW(a1, 16)) {                 /* chip free, fast free, shared code in memory, what sharing saves */
+        if (UOKS(n, a1, a2, 16, 16)) {      /* chip free, fast free, shared code in memory, what sharing saves */
             mem_stats(&((u32 *)a1)[0], &((u32 *)a1)[1]);
             seg_stats(&((u32 *)a1)[2], &((u32 *)a1)[3]);
             r = 0;

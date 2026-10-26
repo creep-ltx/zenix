@@ -39,13 +39,13 @@ static int rd(unsigned lba, void *buf)
 static int dlist(u32 i, struct diskinfo *d)
 {
     struct umsg m;
-    m.type = DISK_LIST; m.a[0] = i; m.a[1] = (u32)d;
+    m.type = DISK_LISTSZ; m.a[0] = i; m.a[1] = (u32)d; m.a[2] = sizeof *d;
     return sys_call(port, &m);
 }
 static int dinfo(int hd, struct diskinfo *d)
 {
     struct umsg m;
-    m.type = DISK_INFO; m.a[0] = (u32)hd; m.a[1] = (u32)d;
+    m.type = DISK_INFOSZ; m.a[0] = (u32)hd; m.a[1] = (u32)d; m.a[2] = sizeof *d;
     return sys_call(port, &m);
 }
 
