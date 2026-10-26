@@ -15,6 +15,7 @@ static int vol_call(int port, u32 type, u32 a0, u32 a1, u32 a2, void *a3)
     return r == -ECONNRESET ? sys_call(port, &m) : r;     /* a diskd that ended while serving it (diskcall.h) */
 }
 
+static __attribute__((unused)) unsigned char vol_state;    /* ext2: the superblock's state (s_state) vol_look read */
 /* the filesystem on DEV: 1 ext2 (magic at byte 1080, uuid at 1128), 2 ZenixFS ("ZNFS" at byte 32, uuid at 68), 0
  * neither; *di its disk server entry, uuid its id (zeros if none or neither) */
 static __attribute__((unused)) int vol_look(int port, const char *dev, struct diskinfo *di, unsigned char *uuid)
@@ -27,6 +28,7 @@ static __attribute__((unused)) int vol_look(int port, const char *dev, struct di
     if (vol_call(port, DISK_READ, (u32)h, 2, 1, sec) == 0 && sec[56] == 0x53 && sec[57] == 0xEF) {
         type = 1;
         memcpy(uuid, sec + 104, 16);
+        vol_state = sec[58];                        /* s_state's low byte: bit 0 clean, bit 1 errors (DESIGN D17) */
     } else if (vol_call(port, DISK_READ, (u32)h, 0, 1, sec) == 0 && !memcmp(sec + 32, "ZNFS", 4)) {
         type = 2;
         memcpy(uuid, sec + 68, 16);

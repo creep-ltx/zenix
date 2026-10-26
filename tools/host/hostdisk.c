@@ -2,7 +2,8 @@
 /* The disk server's messages (kernel/diskproto.h) answered from an image file, for host builds of the Zenix
  * filesystem code. One device: the whole image (or the part given by HOSTDISK_START/HOSTDISK_SECTORS, in sectors).
  * The image comes from the environment variable HOSTDISK or from hostdisk_use(). Counts every write so a test can
- * check that a read-only mount wrote nothing. */
+ * check that a read-only mount wrote nothing. HOSTDISK_CUT=N: a power cut after N sectors written (exit 99);
+ * HOSTDISK_COUNT: the sectors written are said at the end. */
 #include "zhost.h"
 #include "../../kernel/diskproto.h"
 #include <fcntl.h>
@@ -31,6 +32,7 @@ int hostdisk_use(const char *path, u32 start, u32 sectors)
     return 0;
 }
 
+static void say_writes(void) { fprintf(stderr, "hostdisk-writes %lu\n", hostdisk_writes); }
 static void lazy_open(void)
 {
     if (fd >= 0) return;
@@ -40,6 +42,9 @@ static void lazy_open(void)
         fprintf(stderr, "hostdisk: set HOSTDISK to an image file\n");
         exit(9);
     }
+    const char *c = getenv("HOSTDISK_CUT");             /* a power cut after this many sectors written (exit 99) */
+    if (c && *c) { hostdisk_limit = (unsigned long)atol(c); hostdisk_die = 1; }
+    if (getenv("HOSTDISK_COUNT")) atexit(say_writes);   /* "hostdisk-writes N" on stderr at the end */
 }
 
 int sys_call(int port, struct umsg *m)

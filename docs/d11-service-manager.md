@@ -366,7 +366,8 @@ record means diskd's memory was overwritten, which without an MMU nothing contai
   read-only mount, `kernel/ext2.c`, and which would make the next boot refuse it as the root). Linux and the host's
   `e2fsck` then know to check it; Zenix's own root pick is unaffected. Whether it then keeps writing or turns read-only
   is the owner's choice (open question 1); the default is to keep writing, with "fsd: DEV was being changed when its
-  server ended: check it with fsck.ext2" in the log.
+  server ended: check it with fsck.ext2" in the log. (Since DESIGN D17 the volume then stays marked until it is
+  checked: boot checks a marked root with `fsck.ext2 -y` at the next start.)
 
 **zfsd / mount.zenixfs (ZenixFS).** Copy-on-write with atomic commits (zenixfs.md, Z1): the new server mounts the last
 commit and the volume is consistent. Lost: changes not yet committed, up to 3 seconds of them, which the clients were
@@ -744,7 +745,7 @@ final pass: how-it-works.md, kill, ps, DESIGN.md). All of it is on main (merged 
   `ZENIXFS_MNT_READONLYISH`; the library gained `zenixfs_orphans_keep` and `zenixfs_ino_floor`.
 - *Step 3:* "the previous server ended in the middle of a request" is any request (`SVC_SELF` bit 16), not only one
   that changes the volume: the kernel does not sort the types, and a needless "needs a check" mark costs only a
-  check. `fsd.c` is now built with `-Os` (ext2.c already was). The fault rule of step 1 is now: no process ends inside
+  check (since D17 a check at the next start). `fsd.c` is now built with `-Os` (ext2.c already was). The fault rule of step 1 is now: no process ends inside
   a message call, also not for a fault (the list of program loads is linked through the kernel stacks).
 - *Not tested (step 3):* a partition renamed or moved while its server is stopped - `fdisk` refuses to change a disk
   whose partition is mounted, so it cannot happen to the root in a running system; the place-first rule is tested with

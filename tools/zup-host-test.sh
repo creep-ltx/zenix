@@ -282,6 +282,8 @@ gcc $XF -DFSD $R2 -c -o $X/fsd.o tools/host/zup-fsd.c 2>$X/cc.log && gcc $XF -DF
     gcc $XF -DFSD -c -o $X/ext2.o kernel/ext2.c 2>>$X/cc.log &&
     gcc $XF -Iuser/miniz -o $X/zup user/zup.c user/sha256.c user/miniz/miniz_tinfl.c tools/host/zup-ext2.c $X/fsd.o $X/hd.o $X/ext2.o 2>>$X/cc.log &&
     check "zup builds for the PC on the ext2 server" ok || { check "zup builds for the PC on the ext2 server" bad; cat $X/cc.log; }
+gcc -m32 -DZHOST -DFSD -std=gnu11 -O1 -o $X/fsck user/fsck_ext2.c tools/host/hostdisk.c kernel/ext2.c 2>>$X/cc.log ||
+    check "fsck.ext2 builds for the PC" bad
 xz() { env HOSTDISK=$1 ZUP_KVNUM=$V2 ZUP_SELF=$X/zup "${@:2}" $X/zup; }
 xcat() { debugfs -R "cat $2" $1 2>/dev/null; }
 mke2fs -q -F -t ext2 -b 1024 -N 256 -d $U/r1 $X/base.img 4M && e2fsck -fn $X/base.img >/dev/null 2>&1 ||
@@ -292,12 +294,18 @@ cp $X/base.img $X/t.img
 xz $X/t.img ZUP_BUNDLE=$U/b2.zup >$X/out 2>&1 && e2fsck -fn $X/t.img >$X/e2.log 2>&1 && xnew $X/t.img &&
     dumpe2fs -h $X/t.img 2>/dev/null | grep -q '^Filesystem state: *clean$' &&
     check "the update on ext2 without a cut: the new version, e2fsck clean, the volume clean again" ok || { check "the update on ext2 without a cut" bad; cat $X/out $X/e2.log; }
-n=0; cuts=0; leaks=0; bad=0; rc=99
+n=0; cuts=0; leaks=0; bad=0; rc=99; fbad=0; fixed=0
 while [ $rc = 99 ] && [ $n -le 20000 ]; do
     cp $X/base.img $X/t.img
     xz $X/t.img ZUP_BUNDLE=$U/b2.zup ZUP_DISKCUT=$n >/dev/null 2>&1; rc=$?
     if [ $rc = 99 ]; then
         cuts=$((cuts + 1))
+        # the next start's check (DESIGN D17): fsck.ext2 -y on the cut image, one run: e2fsck clean, the state clean
+        if ! e2fsck -fn $X/t.img >/dev/null 2>&1; then
+            cp $X/t.img $X/f.img; HOSTDISK=$X/f.img $X/fsck -y hd0 >$X/fsck.log 2>&1; frc=$?; fixed=$((fixed + 1))
+            { [ $frc -le 1 ] && e2fsck -fn $X/f.img >/dev/null 2>&1 && dumpe2fs -h $X/f.img 2>/dev/null | grep -q '^Filesystem state: *clean$'; } ||
+                { fbad=$((fbad + 1)); echo "  cut after $n sectors: fsck.ext2 -y status $frc did not leave it clean"; }
+        fi
         for step in "the next start" "the bundle again"; do
             if [ "$step" = "the next start" ]; then xz $X/t.img >$X/out 2>&1; else xz $X/t.img ZUP_BUNDLE=$U/b2.zup >$X/out 2>&1; fi
             if e2fsck -fn $X/t.img >$X/e2.log 2>&1; then :; else
@@ -313,6 +321,9 @@ done
 [ $rc = 0 ] && [ $cuts -gt 1000 ] && [ $bad = 0 ] &&
     check "a power cut after each of the update's $cuts block writes on ext2, then zup and the bundle again: at worst leaks (after $leaks cuts), marked \"needs a check\", the new version in the end" ok ||
     check "power cuts on ext2 ($bad bad, $cuts cuts, last zup $rc)" bad
+[ $rc = 0 ] && [ $fixed -gt 100 ] && [ $fbad = 0 ] &&
+    check "each of the $fixed cuts that left something is repaired by one fsck.ext2 -y: e2fsck -fn clean, marked clean (DESIGN D17)" ok ||
+    check "fsck.ext2 -y after the update's cuts: $fbad of $fixed not repaired in one run" bad
 
 echo "zup-host-test: $pass passed, $fail failed"
 [ $fail = 0 ]

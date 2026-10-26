@@ -24,7 +24,7 @@ gcc $CF $SAN -o $T/fsck user/fsck_ext2.c tools/host/hostdisk.c kernel/ext2.c || 
 gcc $CF -o $T/mkfs user/mkfs_ext2.c tools/host/hostdisk.c || { echo "FAIL build mkfs"; exit 1; }
 pass=0; fail=0
 check() { if [ "$2" = ok ]; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
-fsd() { HOSTDISK=$1 $T/fsd < $2 > $3 2>&1; }
+fsd() { HOSTDISK=$1 $T/fsd < $2 > $3 2>&1; grep '^unmarked-writes' $3 | sed "s#^#$(basename $2): #" >> $T/unmarked; }   # (D17: never)
 clean() { e2fsck -fn "$1" > $T/e2fsck.log 2>&1; }
 
 # ---- 1. what is mounted ----
@@ -59,13 +59,17 @@ cp $T/plain.img $T/uc.img; printf 'mount\nunclean\n' > $T/uc.txt; fsd $T/uc.img 
 grep -q "unclean -> 0" $T/out && dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *not clean' && check "the needs-a-check mark: 0, and the host sees the volume not clean" ok || { check "the needs-a-check mark: 0, and the host sees the volume not clean" bad; cat $T/out; }
 cp $T/ext3.img $T/uc.img; fsd $T/uc.img $T/uc.txt $T/out
 grep -q "unclean -> -30" $T/out && check "... on a read-only mount it is refused with -EROFS" ok || { check "... on a read-only mount it is refused with -EROFS" bad; cat $T/out; }
-# FS_MARK (DESIGN D15: zup marks the root "needs a check" while it installs): the bit before is answered; clean again
-cp $T/plain.img $T/uc.img; printf 'mount\nmark 1\nmark 1\n' > $T/mk.txt; fsd $T/uc.img $T/mk.txt $T/out
-grep -q "^mark -> 1$" $T/out && grep -q "^mark -> 0$" $T/out && dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *not clean' &&
-    check "FS_MARK 1: the state before (clean, then not), and the host sees the volume not clean" ok || { check "FS_MARK 1: the state before, the host sees it not clean" bad; cat $T/out; }
-printf 'mount\nmark 0\n' > $T/mk.txt; fsd $T/uc.img $T/mk.txt $T/out
-grep -q "^mark -> 0$" $T/out && dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *clean' && clean $T/uc.img &&
-    check "FS_MARK 0: clean again (e2fsck -fn agrees)" ok || { check "FS_MARK 0: clean again" bad; cat $T/out; }
+# FS_MARK (DESIGN D15: zup marks the root "needs a check" while it installs): the state before is answered ("needed no
+# check": 1); FS_MARK 0 takes the mark back and the volume is clean again at once (DESIGN D17 5)
+cp $T/plain.img $T/uc.img; printf 'mount\nmark 1\nmark 1\nstate\nmark 0\nstate\n' > $T/mk.txt; fsd $T/uc.img $T/mk.txt $T/out
+grep -q "^mark -> 1$" $T/out && [ "$(grep -c '^mark -> 0$' $T/out)" = 2 ] && grep -q '^state -> 0 ' $T/out && grep -q '^state -> 1 ' $T/out &&
+    dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *clean' && clean $T/uc.img &&
+    check "FS_MARK 1: the state before (clean, then not), marked on the disk; FS_MARK 0: clean again (e2fsck -fn agrees)" ok || { check "FS_MARK 1 / 0" bad; cat $T/out; }
+# a volume that was not clean when it was mounted needs a check: FS_MARK 0 does not clear that (D17 5)
+printf 'mount\nmark 1\n' > $T/mk.txt; fsd $T/uc.img $T/mk.txt $T/out
+printf 'mount\nmark 0\nsync\n' > $T/mk.txt; fsd $T/uc.img $T/mk.txt $T/out
+grep -q "^mark -> 0$" $T/out && dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *not clean' &&
+    check "FS_MARK 0 on a volume mounted not clean: it answers 0 and the volume stays marked" ok || { check "FS_MARK 0 on a volume mounted not clean" bad; cat $T/out; }
 rm -f $T/uc.img
 
 # ---- 2. a workload, then host e2fsck ----
@@ -315,7 +319,7 @@ PY
     0) fz_fixed=$((fz_fixed+1)); e2fsck -fn $T/fk.img > $T/fk-e2.log 2>&1 || {
          fz_disagree=$((fz_disagree+1)); after=$(grep -ciE "\? no|ignored" $T/fk-e2.log)
          [ "$after" -gt "$before" ] && { fz_worse=$((fz_worse+1)); echo "  fsck round $i: e2fsck problems $before -> $after"; cp $T/fk.img /tmp/zext2-fsck-worse-$i.img; }; } ;;
-    4) fz_refused=$((fz_refused+1)); [ $n = 0 ] && [ "$s0" != "$(sha256sum < $T/fk.img)" ] && fz_changed=$((fz_changed+1)) ;;
+    4) fz_refused=$((fz_refused+1)); [ $n = 0 ] && grep -q 'nothing was changed' $T/fk.log && [ "$s0" != "$(sha256sum < $T/fk.img)" ] && fz_changed=$((fz_changed+1)) ;;
     8|1) ;;
     *) fz_crash=$((fz_crash+1)); echo "  fsck round $i: exit $rc"; grep -m3 -E "ERROR|runtime error" $T/fk.log; cp $T/fk.img /tmp/zext2-fsck-crash-$i.img ;;
     esac
@@ -433,6 +437,107 @@ PY
 done
 echo "  fuzz: $mounted of $ROUNDS damaged images mounted, damage reported in $noticed"
 [ $crash = 0 ] && [ $hang = 0 ] && check "fuzz: $ROUNDS damaged images, no crash, no hang, no out-of-bounds access (ASan+UBSan)" ok || check "fuzz: $crash crashes, $hang hangs in $ROUNDS rounds" bad
+
+# ---- the clean mark (DESIGN D17, audit 2026-10-26 F6) ----
+# st IMG: the state word's bit 0 on the image (1 clean)
+st() { dumpe2fs -h "$1" 2>/dev/null | grep -q '^Filesystem state: *clean' && echo 1 || echo 0; }
+bits() { sed -n 's/^state -> \([0-9]\).*/\1/p' "$1" | tr -d '\n'; }
+cp $T/plain.img $T/cm.img
+printf 'mount\nstate\nopen /a r\nstat /\nls /\nstate\nopen /f wc\nstate\nwrite %%1 0 hello\nsync\nstate\n' > $T/cm.txt
+fsd $T/cm.img $T/cm.txt $T/out
+[ "$(bits $T/out)" = "1101" ] && [ "$(st $T/cm.img)" = 1 ] && clean $T/cm.img &&
+    check "the mark: reads leave the volume clean, the first change marks it on the disk, sync makes it clean again" ok || { check "the mark: reads, a change, sync" bad; cat $T/out; }
+printf 'mount\nopen /g wc\nwrite %%1 0 data\nstate\nidle\nstate\n' > $T/cm.txt; fsd $T/cm.img $T/cm.txt $T/out
+[ "$(bits $T/out)" = "01" ] && [ "$(st $T/cm.img)" = 1 ] &&
+    check "the mark: the quiet moment after a change makes it clean again" ok || { check "the mark: the quiet moment" bad; cat $T/out; }
+printf 'mount\nopen /o wc\nwrite %%1 0 orphan\nunlink /o\nsync\nidle\nstate\nclose %%1\nsync\nstate\n' > $T/cm.txt; fsd $T/cm.img $T/cm.txt $T/out
+[ "$(sed -n 's/^state -> \([0-9]\) .* orphans \([0-9]\).*/\1\2/p' $T/out | tr -d '\n')" = "0110" ] && [ "$(st $T/cm.img)" = 1 ] && clean $T/cm.img &&
+    check "the mark: an open file whose last name went keeps the volume marked through sync, until its close" ok || { check "the mark: an open orphan" bad; cat $T/out; }
+cp $T/cm.img $T/cm-o.img; printf 'mount\nopen /o2 wc\nwrite %%1 0 orphan\nunlink /o2\nsync\n' > $T/cm.txt; fsd $T/cm-o.img $T/cm.txt $T/out
+[ "$(st $T/cm-o.img)" = 0 ] && ! e2fsck -fn $T/cm-o.img >/dev/null 2>&1 &&
+    check "... a cut with the orphan open: e2fsck finds it, and the volume says not clean" ok || { check "... a cut with the orphan open" bad; cat $T/out; }
+cp $T/cm.img $T/cm-e.img; printf 'mount\ncut 0\nopen /h wc\nsync\nstate\n' > $T/cm.txt; fsd $T/cm-e.img $T/cm.txt $T/out
+grep -q '^open -> -5$' $T/out && grep -q '^state -> 1 marked 0 need 1' $T/out && [ "$(st $T/cm-e.img)" = 1 ] && clean $T/cm-e.img &&
+    check "the mark: when the mark cannot be written the request changes nothing (-EIO), and fsd keeps a need for a check" ok || { check "the mark: a mark that cannot be written" bad; cat $T/out; }
+cp $T/cm.img $T/cm-f.img; printf 'mount\nmkdir /n\nsync\ncut 2\nopen /n/x wc\nwrite %%1 0 @5000\nsync\nidle\nstate\n' > $T/cm.txt; fsd $T/cm-f.img $T/cm.txt $T/out
+[ "$(st $T/cm-f.img)" = 0 ] && grep -q '^state -> 0 marked 1 need 1' $T/out &&
+    check "the mark: a block write that fails in the middle of a request: the volume stays marked, sync and the quiet moment do not clean it" ok || { check "the mark: a failed write mid-request" bad; cat $T/out; }
+cp $T/cm.img $T/cm-m.img; printf 'mount\nmark 1\ncut 0\nopen /z wc\nmark 0\nsync\nidle\nstate\n' > $T/cm.txt; fsd $T/cm-m.img $T/cm.txt $T/out
+[ "$(st $T/cm-m.img)" = 0 ] && grep -q '^mark -> 1$' $T/out &&
+    check "FS_MARK 0 does not clean a volume that needs a check for another reason (marked by a crash during the install)" ok || { check "FS_MARK 0 after a crash mark" bad; cat $T/out; }
+
+# a workload cut by a power cut after every block write: wherever e2fsck finds anything, the volume says not clean
+# (D17's invariant, with quiet moments and syncs inside the workload). On the old code the volume always said clean.
+cat > $T/wl.txt <<'EOF'
+mount
+mkdir /w
+open /w/a wc
+write %1 0 @3000
+close %1
+idle
+open /w/b wc
+write %2 0 @20000
+link /w/b /w/c
+rename /w/a /w/d
+sync
+symlink /w/d /w/s
+open /w/d rw
+unlink /w/d
+write %3 0 more
+close %3
+idle
+open /w/b wt
+write %4 0 short
+unlink /w/c
+mkdir /w2
+rename /w/b /w2/b
+unlink /w/s
+rmdir /w
+idle
+writes
+EOF
+mke2fs -q -F -t ext2 -b 1024 -N 128 $T/wl-base.img 2M
+cp $T/wl-base.img $T/wl.img; HOSTDISK=$T/wl.img $T/fsd < $T/wl.txt > $T/wl.out 2>&1
+total=$(sed -n 's/^writes -> //p' $T/wl.out); wl_bad=0; wl_cuts=0; wl_leaks=0
+clean $T/wl.img && [ "$(st $T/wl.img)" = 1 ] || { check "the workload without a cut: e2fsck clean, the state clean" bad; cat $T/wl.out; }
+fk_bad=0; fk_runs=0; fk_cut_bad=0; fk_cut_runs=0
+for n in $(seq 0 2 $((total + 2))); do
+    cp $T/wl-base.img $T/wl.img
+    { echo mount; echo "cut $n"; sed 1d $T/wl.txt; } > $T/wlc.txt
+    HOSTDISK=$T/wl.img $T/fsd < $T/wlc.txt > $T/wlc.out 2>&1
+    grep -h '^unmarked-writes' $T/wlc.out >> $T/unmarked
+    wl_cuts=$((wl_cuts + 1))
+    e2fsck -fn $T/wl.img > $T/wl-e2.log 2>&1 && continue
+    wl_leaks=$((wl_leaks + 1))
+    [ "$(st $T/wl.img)" = 0 ] || { wl_bad=$((wl_bad + 1)); echo "  cut after $n sectors: e2fsck finds something on a volume that says clean"; }
+    # fsck.ext2 -y repairs it in one run and marks it clean (D17 4)
+    cp $T/wl.img $T/wl-cut.img
+    fk_runs=$((fk_runs + 1))
+    HOSTDISK=$T/wl.img $T/fsck -y hd0 > $T/fk1.log 2>&1; rc=$?
+    { [ $rc -le 1 ] && e2fsck -fn $T/wl.img > $T/fk-e2.log 2>&1 && [ "$(st $T/wl.img)" = 1 ]; } ||
+        { fk_bad=$((fk_bad + 1)); echo "  workload cut after $n: fsck.ext2 -y status $rc, state $(st $T/wl.img)"; }
+    # a cut inside fsck.ext2's own repair, after each of its writes (the first few leaky images): never marked clean
+    # early, and the next run finishes it
+    [ $fk_runs -le 5 ] || continue
+    fw=$(HOSTDISK_COUNT=1 HOSTDISK=$T/wl-cut.img $T/fsck -y hd0 2>&1 | sed -n 's/^hostdisk-writes //p'); cp $T/wl-cut.img $T/wl.img
+    for k in $(seq 0 2 $((fw + 2))); do
+        cp $T/wl-cut.img $T/wl.img
+        HOSTDISK=$T/wl.img HOSTDISK_CUT=$k $T/fsck -y hd0 > /dev/null 2>&1
+        fk_cut_runs=$((fk_cut_runs + 1))
+        if [ "$(st $T/wl.img)" = 1 ] && ! e2fsck -fn $T/wl.img >/dev/null 2>&1; then fk_cut_bad=$((fk_cut_bad + 1)); echo "  fsck cut after $k sectors: marked clean, but not clean"; fi
+        HOSTDISK=$T/wl.img $T/fsck -y hd0 > $T/fk2.log 2>&1; rc=$?
+        { [ $rc -le 1 ] && e2fsck -fn $T/wl.img >/dev/null 2>&1 && [ "$(st $T/wl.img)" = 1 ]; } || { fk_cut_bad=$((fk_cut_bad + 1)); echo "  fsck cut after $k sectors: the next run did not finish it (status $rc)"; }
+    done
+done
+[ -n "$total" ] && [ $wl_cuts -gt 20 ] && [ $wl_leaks -gt 3 ] && [ $wl_bad = 0 ] &&
+    check "a workload cut after each of its $total sectors written ($wl_cuts cuts, $wl_leaks left something): never on a volume that says clean" ok ||
+    check "workload cuts: $wl_bad left something on a volume that says clean ($wl_cuts cuts, $wl_leaks leaky)" bad
+[ $fk_runs -gt 3 ] && [ $fk_bad = 0 ] &&
+    check "fsck.ext2 -y repairs each of the $fk_runs leaky cuts in one run: e2fsck -fn clean, the state clean" ok || check "fsck.ext2 -y after workload cuts: $fk_bad of $fk_runs not repaired in one run" bad
+[ $fk_cut_runs -gt 10 ] && [ $fk_cut_bad = 0 ] &&
+    check "fsck.ext2 cut after each of its repair writes ($fk_cut_runs cuts): never marked clean early, the next run finishes" ok || check "fsck.ext2 cut inside its repair: $fk_cut_bad bad of $fk_cut_runs" bad
+# every block write fsd made in all of these tests was inside the mark (fs_blk_write counts the others)
+[ ! -s $T/unmarked ] && check "every block write fsd made in these tests came after the mark (a host-build count)" ok || { check "block writes outside the mark" bad; sort $T/unmarked | uniq -c | head; }
 
 echo "ext2-host-test: $pass passed, $fail failed"
 [ $fail = 0 ] || exit 1

@@ -110,6 +110,7 @@ power cut (section 8).
   never changed it), it is replaced; otherwise the new one is written as `path.new` and the owner is told. A base change
   that needs a new config line must never depend on the owner merging a `.new`.
 - **The volume is marked "needs a check"** (`ext2_mark_unclean`) during the install, and clean again at the commit.
+  (Since D17, `FS_MARK`; the next start checks a marked root with `fsck.ext2 -y` before zup runs.)
 - **A power cut:** at the next boot zup finds the journal and finishes (every new file complete and checked) or rolls
   back (the hard links put back). When both names point to the same inode, it deletes nothing. The previous `prev/` set
   is deleted only after the new install has committed.
@@ -283,7 +284,9 @@ Built as sections 3-8 say, with these differences (each a decision made while bu
 4. **`FS_MARK` (message 25)** is new: no message let a program set or clear the "needs a check" bit. It answers the
    state before, so zup only marks clean what was clean. ZenixFS does not know it (-ENOSYS): its commits are atomic.
    After a power cut the root **stays** marked "needs a check" (the recovery does not clear it): a block write may
-   have been cut too, which only fsck sees. **What a cut leaves (audit 2026-10-26 F5, measured on the host: a cut
+   have been cut too, which only fsck sees. (Since D17 boot checks and repairs that root before zup's recovery, and
+   the answer means "needed no check": fsd's own short mark while it writes does not count, docs/d17-ext2-clean-mark.md
+   section 5.) **What a cut leaves (audit 2026-10-26 F5, measured on the host: a cut
    after each of an update's 2200 block writes):** most of zup's requests write several blocks (a link: the count,
    then the entry; a file: blocks, then the inode), so about 4 cuts in 5 leave a **leak**: a count one too high, an
    unnamed inode, blocks or inodes marked in use that nothing holds. ext2's write order makes sure it is never worse

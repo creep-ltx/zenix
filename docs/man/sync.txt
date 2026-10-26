@@ -14,6 +14,11 @@ DESCRIPTION
     every write already). ZenixFS commits its pending changes (with the same
     flush around the commit record, see docs/zenixfs.md). umount does the
     same before it lets go of the device.
+    An ext2 volume is marked "not cleanly unmounted" on the disk before the
+    first change after a clean moment; sync (like reboot, the reset warning
+    and umount, and by itself one second after the last change) marks it
+    clean again when it can: not while a deleted file is still open, nor
+    when the volume needs a check (DESIGN D17).
 
 NOTES
     A disk whose drive does not know the flush command has no flush

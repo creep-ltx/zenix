@@ -63,6 +63,7 @@ static u32 gd_blk;                      /* first block of the group descriptor t
 static u32 rev, f_compat, f_incompat, f_rocompat, first_ino, extra_isize;
 static int mounted;
 int ext2_readonly;                      /* mounted read-only: every write is refused (EROFS) */
+int ext2_clean;                         /* the state's bit 0 ("cleanly unmounted") when it was mounted (D17) */
 const char *ext2_why = "";              /* why the last mount was refused or made read-only */
 int (*ext2_busy)(u32 ino);              /* set by the server: is this inode open? (its deletion then waits for the close) */
 
@@ -76,10 +77,10 @@ int (*ext2_busy)(u32 ino);              /* set by the server: is this inode open
 #define XATTR_MAGIC         0xEA020000u
 
 /* a damaged disk: say what, at most 20 times (a badly damaged disk must not flood the screen) */
-static u32 ndamage;
+u32 ext2_ndamage;                       /* damage met since the mount (fsd: the volume needs a check, D17) */
 static int damaged(const char *what, u32 v)
 {
-    if (ndamage++ < 20)
+    if (ext2_ndamage++ < 20)
         fs_log("ext2: damaged: %s %u\n", what, v);
     return EIO_;
 }
@@ -231,7 +232,7 @@ int ext2_mount_as(int mode)
     mounted = 0;
     ext2_readonly = 0;
     ext2_why = "";
-    ndamage = 0;
+    ext2_ndamage = 0;
     cache_drop();
     total_blocks = 0;
     if (fs_blk_read(part_lba + 2, 2, sb))
@@ -321,6 +322,7 @@ int ext2_mount_as(int mode)
         readonly("read-only: ext3 journal (Zenix does not write journals)");
     if (rd16(sb + 58) & 2)
         readonly("read-only: the filesystem has errors (run fsck.ext2 on it)");
+    ext2_clean = rd16(sb + 58) & 1;
     if (ext2_readonly && mode == EXT2_RW) {
         ext2_readonly = 0;
         total_blocks = 0;

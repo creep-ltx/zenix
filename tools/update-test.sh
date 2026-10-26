@@ -17,8 +17,9 @@
 #                log is evidence, the 10 s question defaults to the previous version, both halves go back
 #   previous     "Zenix (previous)" after a cut right after its first step (the bundle renamed .rejected): the old
 #                kernel the default again, the root rolled back
-#   powercut     the emulator killed while zup installs: the next start finishes it or rolls it back and installs;
-#                the root has at worst leaks (tools/e2safe.py) and stays marked "needs a check"
+#   powercut     the emulator killed while zup installs: the root has at worst leaks (tools/e2safe.py), marked
+#                "needs a check"; the next start checks and repairs it (DESIGN D17), then finishes the install or rolls
+#                it back and installs; the root is then e2fsck clean
 #   bad          a damaged bundle and a .part: both renamed .bad, the installed system starts
 #   refused      a bundle zup refuses (it needs a newer base than any): the kernel comes up and confirms, but the
 #                bundle is kept (not .done) and handed over again at the next start, where zup refuses it again
@@ -257,9 +258,12 @@ setup_powercut() {
     check $n "... the root is the new version" "$(grep -aqx 1 $OUT/$n/2.txt && grep -aq '^/etc/passwd.new' $OUT/$n/2.txt && grep -aq 'HELLO from pid' $OUT/$n/2.txt && echo ok || echo bad)"
     check $n "... no journal left, no .zup-new" "$([ "$(rhas $n 2 /var/lib/zpkg/journal)" = no ] && ! debugfs -R 'ls -l /bin' $OUT/$n/root-2.img 2>/dev/null | grep -q zup-new && echo ok || echo bad)"
     # ext2 has no journal: the cut may land inside a request that writes several blocks (most of zup's are), and
-    # what is left must be a leak only (tools/e2safe.py; audit 2026-10-26 F5), on a root still marked "needs a check"
-    check $n "the root after the cut and after the next start: e2fsck -fn clean, or at worst leaks with the root marked \"needs a check\"" \
-        "$([ "$(rootleak $n 1)" = ok ] && [ "$(rootleak $n 2)" = ok ] && echo ok || echo bad)"
+    # what is left must be a leak only (tools/e2safe.py; audit 2026-10-26 F5), on a root marked "needs a check"; the
+    # next start checks and repairs it before zup's recovery runs (DESIGN D17), so then it is clean
+    check $n "the root after the cut: e2fsck -fn clean, or at worst leaks with the root marked \"needs a check\"" "$(rootleak $n 1)"
+    check $n "the next start checks the root with fsck.ext2 before zup's recovery" \
+        "$(inorder $n 2 'boot: the root was not shut down cleanly: fsck.ext2 -y' 'fsck.ext2: ([0-9]+ repair\(s\) made|clean)$' 'zup: a journal from an install that did not end')"
+    check $n "... and after it the root is e2fsck -fn clean (not only leaks)" "$(rootok $n 2)"
 }
 setup_bad() {
     local n=bad

@@ -13,6 +13,22 @@
 static int disk_port, fs_dev = -1;
 static char devname[16];
 static int quitting;
+/* The clean mark (DESIGN D17, docs/d17-ext2-clean-mark.md): bit 0 of the superblock's state is cleared on the disk
+ * (and flushed) before the first change after a clean moment, and set again 1 s after the last change, at FS_SYNC and
+ * at FS_QUIT - only between requests, with no orphan open, and when nothing keeps the volume marked. Between two
+ * requests the volume is consistent (write-through, the F5 write order), so the bit never says clean over a half-done
+ * change; a failed write or damage met (a request that may have stopped half way) is a need for a check. */
+static int marked;                      /* bit 0 is clear on the disk */
+static int need;                        /* it needs a check (sticky): mounted not clean, a crash in a request, a
+                                         * failed write, damage met */
+static int hold;                        /* zup's FS_MARK 1, until its FS_MARK 0 */
+static int norphans;                    /* open inodes whose last name went (kept until their last close) */
+static u32 changed_at;                  /* the tick of the last writing request */
+#define QUIET_TICKS 100                 /* 1 s after the last change: clean again (AmigaOS FFS's bitmap timer) */
+#ifdef ZHOST
+int fsd_marking;                        /* host tests: a block write outside the mark is counted */
+unsigned long fsd_unmarked_writes;
+#endif
 
 static int disk_rw(u32 op, u32 lba, u32 count, const void *buf)
 {
@@ -21,7 +37,15 @@ static int disk_rw(u32 op, u32 lba, u32 count, const void *buf)
     return disk_call(disk_port, &m);
 }
 int fs_blk_read(u32 lba, u32 count, void *buf) { return disk_rw(DISK_READ, lba, count, buf); }
-int fs_blk_write(u32 lba, u32 count, const void *buf) { return disk_rw(DISK_WRITE, lba, count, buf); }
+int fs_blk_write(u32 lba, u32 count, const void *buf)
+{
+#ifdef ZHOST
+    if (!marked && !fsd_marking) fsd_unmarked_writes++;
+#endif
+    int r = disk_rw(DISK_WRITE, lba, count, buf);
+    if (r) need = 1;                    /* a request may have stopped half way */
+    return r;
+}
 
 static int disk_open(const char *name, u32 flags)
 {
@@ -37,8 +61,9 @@ static void disk_unmount(int h)
 }
 
 /* A device is opened plain to read its superblock and only mounted (made ours alone) once ext2_mount_as accepts it.
- * mode EXT2_RW: refuse a volume Zenix could only read (the root must be writable); EXT2_ANY: read-only is allowed. */
-static int try_mount(const char *name, int mode)
+ * mode EXT2_RW: refuse a volume Zenix could only read (the root must be writable); EXT2_ANY: read-only is allowed.
+ * share: served read-only on the plain handle, so fsck.ext2 may open the device raw (the root's check, D17). */
+static int try_mount(const char *name, int mode, int share)
 {
     fs_dev = disk_open(name, 0);
     if (fs_dev < 0 || !ext2_probe()) return -1;
@@ -46,10 +71,12 @@ static int try_mount(const char *name, int mode)
         printf("fsd: %s: %s\n", name, ext2_why);
         return -1;
     }
+    strncpy(devname, name, sizeof devname - 1);
+    need = marked = !ext2_readonly && !share && !ext2_clean;   /* not clean already: it needs a check (D17) */
+    if (share) { ext2_readonly = 1; return 0; }
     int h = disk_open(name, DISK_MOUNT);
     if (h < 0) return -1;
     fs_dev = h;
-    strncpy(devname, name, sizeof devname - 1);
     return 0;
 }
 
@@ -58,9 +85,15 @@ static int try_mount(const char *name, int mode)
  * reused the number. After a crash such an inode is left with no links: fsck.ext2 (or e2fsck) frees it. */
 #define NOPEN 96                                      /* the kernel's file table (NFILE 64) plus programs being loaded */
 static struct { u32 ino, count; } opens[NOPEN];
+#define ORPHAN 0x80000000u                            /* in count: its last name went while it was open (D17) */
+/* ext2.c asks this exactly when an inode loses its last name: an open one is kept and becomes an orphan */
 static int open_busy(u32 ino)
 {
-    for (int i = 0; i < NOPEN; i++) if (opens[i].count && opens[i].ino == ino) return 1;
+    for (int i = 0; i < NOPEN; i++)
+        if (opens[i].count && opens[i].ino == ino) {
+            if (!(opens[i].count & ORPHAN)) { opens[i].count |= ORPHAN; norphans++; }
+            return 1;
+        }
     return 0;
 }
 static int open_ref(u32 ino)
@@ -87,9 +120,40 @@ static void open_unref(u32 ino)
 {
     for (int i = 0; i < NOPEN; i++)
         if (opens[i].count && opens[i].ino == ino) {
-            if (--opens[i].count == 0 && !ext2_readonly) ext2_release(ino);   /* frees it only if it has no names */
+            if (--opens[i].count & ~ORPHAN) return;
+            if (opens[i].count) norphans--;
+            opens[i].count = 0;
+            if (!ext2_readonly) ext2_release(ino);  /* frees it only if it has no names */
             return;
         }
+}
+
+/* the clean bit written and made durable: 0, or -EIO */
+static int set_bit(int clean)
+{
+#ifdef ZHOST
+    fsd_marking = 1;
+#endif
+    int r = ext2_set_clean(clean);
+#ifdef ZHOST
+    fsd_marking = 0;
+#endif
+    return r < 0 || disk_flush() < 0 ? -EIO : 0;
+}
+static int mark(void)                   /* before a change: "not clean" on the disk first */
+{
+    if (!marked) {
+        if (set_bit(0)) return -EIO;
+        marked = 1;
+    }
+    return 0;
+}
+static int cleanable(void) { return marked && !need && !hold && !norphans && !ext2_ndamage; }
+static void quiet(void)                 /* between requests: clean again, if nothing keeps it marked */
+{
+    if (!cleanable()) return;
+    if (disk_flush() < 0 || set_bit(1)) need = 1;       /* the disk failed: it stays marked */
+    else marked = 0;
 }
 
 static void fill_stat(const struct inode *in, struct ustat *st)
@@ -200,8 +264,10 @@ static int handle1(struct umsg *m)
     case FS_CLOSE:
         open_unref(m->a[0]);
         return 0;
-    case FS_SYNC:
-        return disk_flush() < 0 ? -EIO : 0;           /* writes went straight to the disk; the drive's cache is left */
+    case FS_SYNC:                                     /* writes went straight to the disk; the drive's cache is left */
+        r = disk_flush();
+        quiet();                                      /* reboot and the reset warning sync: the volume clean again */
+        return r < 0 ? -EIO : 0;
     case FS_CHMOD:
         if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
         if (!owner_only(&in)) return -EACCES;
@@ -267,12 +333,17 @@ static int handle1(struct umsg *m)
         if (!dir_may(&dir) || !dir_may(&dir2) || !sticky_ok(&dir, name) || !sticky_ok(&dir2, name2)) return -EACCES;
         return ext2_rename(&dir, name, &dir2, name2);
     case FS_MARK:                                       /* root only (handle): zup's "needs a check" mark (D15) */
-        return ext2_set_clean(m->a[0] == 0);
+        r = !need && !hold && !ext2_ndamage;            /* the state before: did it need a check (D17 5) */
+        hold = m->a[0] != 0;                            /* (never clears need) */
+        if (hold && mark()) return -EIO;
+        quiet();
+        return r;
     }
     return -ENOSYS;
 }
 
-/* requests that change the volume: refused at once on a read-only mount (ext2.c also refuses every block write) */
+/* requests that change the volume: refused at once on a read-only mount (ext2.c also refuses every block write).
+ * Those, FS_OPEN with O_CREAT or O_TRUNC and a close while an orphan is open may write: the mark comes first. */
 static int changes(const struct umsg *m)
 {
     switch (m->type) {
@@ -282,25 +353,37 @@ static int changes(const struct umsg *m)
     return 0;
 }
 
+static int writes(const struct umsg *m)
+{
+    if (m->type == FS_OPEN) return (m->a[2] & (O_CREAT | O_TRUNC)) != 0;
+    if (m->type == FS_CLOSE) return norphans;
+    return m->type != FS_MARK && changes(m);
+}
+
 static int handle(struct umsg *m)
 {
     if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -EACCES; /* raw IPC from a user: inode numbers would bypass every check */
     if (ext2_readonly && changes(m)) return -EROFS;
+    if (!ext2_readonly && writes(m)) {
+        if (mark()) return -EIO;                        /* the mark could not be written: nothing is changed */
+        changed_at = sys_ticks();
+    }
     ext2_uid = m->uid; ext2_gid = m->gid; ext2_umask = m->umask;
     ext2_enforce = 1; ext2_denied = 0;
     int r = handle1(m);
     return r < 0 && ext2_denied ? -EACCES : r;
 }
 
-/* fsd DEVICE PORTNAME [-root] [-id ID]   the ext2 filesystem on DEVICE, served on port PORTNAME. Built into the kernel
- * and started as a service (DESIGN D11): boot registers the root's ("fs", -root: it must be writable, as the root is
- * - a refused or read-only volume, ext3, ext4, errors, is never the root); mount registers a mount's ("fs.DEVICE"). */
+/* fsd DEVICE PORTNAME [-root|-fsck] [-id ID]   the ext2 filesystem on DEVICE, served on port PORTNAME. Built into the
+ * kernel and started as a service (DESIGN D11): boot registers the root's ("fs", -root: it must be writable, as the root
+ * is - a refused or read-only volume, ext3, ext4, errors, is never the root); mount registers a mount's ("fs.DEVICE").
+ * -fsck: the root's rules, but served read-only without taking the device, while boot runs fsck.ext2 on it (D17). */
 int main(int argc, char **argv)
 {
     ext2_busy = open_busy;
     disk_port = sys_port_find("disk");                /* a registered service: calling it starts diskd if need be */
-    int root = argc > 3 && !strcmp(argv[3], "-root");
-    if (argc < 3) { printf("usage: fsd DEVICE PORT [-root] [-id ID]\n"); return 2; }
+    int share = argc > 3 && !strcmp(argv[3], "-fsck"), root = share || (argc > 3 && !strcmp(argv[3], "-root"));
+    if (argc < 3) { printf("usage: fsd DEVICE PORT [-root|-fsck] [-id ID]\n"); return 2; }
     const char *pname = argv[2], *dev = argv[1], *who = root ? "fsd" : pname;
     char name[16];
     int self = sys_svc_self(), restart = (self & 0xFFFF) > 1;
@@ -308,13 +391,14 @@ int main(int argc, char **argv)
         if (vol_find(disk_port, dev, argv[argc - 1], name, who, restart)) return 1;
         dev = name;
     }
-    if (try_mount(dev, root ? EXT2_RW : EXT2_ANY)) {
+    if (try_mount(dev, root ? EXT2_RW : EXT2_ANY, share)) {
         if (root) printf("fsd: no writable ext2 filesystem on %s for the root\n", dev);
         else printf("%s: %s is not an ext2 filesystem Zenix can mount, or is in use\n", who, dev);
         return 1;
     }
     if ((self & SVC_MIDREQ) && !ext2_readonly) {        /* ext2 has no journal: the change may be half done (D11 5.4) */
         int e = ext2_mark_unclean();
+        need = marked = 1;
         printf("%s: %s was being changed when its server ended: check it with fsck.ext2\n", who, dev);
         if (e < 0)
             printf("%s: %s: could not mark it \"needs a check\" on the disk (error %d): run fsck.ext2 by hand\n", who, dev, e);
@@ -324,21 +408,42 @@ int main(int argc, char **argv)
     if (restart) {                                      /* the inodes the kernel holds open on us (D11 5.4) */
         static u32 ino[160];
         int n = sys_svc_opens(ino, sizeof ino);
-        for (int i = 0; i < n; i++) open_ref(ino[i]);
+        for (int i = 0; i < n; i++) {
+            struct inode t;
+            open_ref(ino[i]);
+            if (!ext2_iget(ino[i], &t) && !t.links) open_busy(ino[i]);  /* an orphan of the server before */
+        }
         if (n < 0) printf("%s: %s: restart: the open files are unknown (%d): space of deleted open files stays used until fsck.ext2\n", who, dev, n);
     }
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {
         int r = handle(m);
-        if (quitting) {                                 /* umount: flush, answer, then let go of the device */
+        if (quitting) {                                 /* umount: flush, mark clean, answer, then let go of the device */
             for (int i = 0; i < NOPEN; i++)             /* nothing is open at umount; deletions still waiting are done */
-                if (opens[i].count && !ext2_readonly) { opens[i].count = 0; ext2_release(opens[i].ino); }
+                if ((opens[i].count & ORPHAN) && !mark()) {  /* (only a writable volume has orphans) */
+                    opens[i].count = 0;
+                    norphans--;
+                    ext2_release(opens[i].ino);
+                }
             disk_flush();
+            quiet();
             sys_reply(m, r);
             disk_unmount(fs_dev);
             return 0;
         }
-        m = sys_replyrecv(m, r, port);                  /* reply and wait in one trap */
+        u32 age = sys_ticks() - changed_at;
+        if (cleanable() && age >= QUIET_TICKS)          /* 1 s after the last change, also under a stream of reads */
+            quiet();
+        if (!cleanable()) {
+            m = sys_replyrecv(m, r, port);              /* reply and wait in one trap */
+            continue;
+        }
+        sys_reply(m, r);                                /* marked by us: the next request, or the clean moment */
+        m = sys_recv(port, 1 + QUIET_TICKS - age);
+        if (!m) {
+            quiet();
+            m = sys_recv(port, 1);
+        }
     }
     return 1;
 }
