@@ -126,6 +126,11 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `O_*` flags and mode bits, the spawn limits (argument count and bytes), exit and wait status conventions (139 for a
   fault, `waitcon`'s console status); the boot note's kinds and `SYS_reboot`'s arguments; D15's own formats (the
   bootinfo bundle fields, the update note, the state file, the bundle header and manifest, zup's journal and undo logs).
+- **One accepted change of meaning (audit3 B7, 2026-10-26):** `uproc.mem` counts a process's memory regions
+  (`memalloc`) and a private code copy since D13; before, only its load block (image, data, stack). Accepted once,
+  not repeated: every program is built and shipped together with the kernel (no released program reads `mem` with
+  the old meaning; `ps` and `free` show it), and it still means "the memory this process owns". Any later change is
+  a new field.
 - Not on the list: the kernel's internal file kinds. Signal numbers join it when signals come. libz is linked into
   each program, so it needs no rule of its own.
 

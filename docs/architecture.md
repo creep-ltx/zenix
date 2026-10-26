@@ -577,7 +577,8 @@ syscall.c). The disk server does the same for `DISK_INFOSZ`/`DISK_LISTSZ` (size 
 an old 40-byte `uproc` buffer with a guard after it gets 32 bytes; the old kernel wrote 44.
 `SYS_procinfo` fills `struct uproc` (32 bytes at first: pid to name; D10 appended `nice` and `pri`, D13 `shared`; a
 caller passing size 0 gets the first 32): `mem` is the memory the
-process owns (a private copy of code included), `shared` the bytes of shared code it runs (`ps` shows them as
+process owns (since D13 its `memalloc` regions and a private code copy too; before, only its load block - image,
+data, stack: an accepted one-time change of meaning, audit3 B7 and CLAUDE.md "Frozen interfaces"), `shared` the bytes of shared code it runs (`ps` shows them as
 SHR). `SYS_meminfo` fills four words: chip free, fast free, the bytes of shared code in memory, and what sharing saves
 (for each segment, its size times its users beyond the first); `free` prints the last two. Strings are copied into kernel buffers with bounds; a path
 argument longer than 63 bytes is -ENAMETOOLONG.
