@@ -28,7 +28,9 @@ DESCRIPTION
         next boot finds it there. This is how to see why a boot froze or
         panicked. While booting, the kernel already shows its last 20 lines
         (marked "> ") between "=== previous boot (N) ended here" and
-        "=== end of the previous boot's log ===".
+        "=== end of the previous boot's log ===". If the previous boot's
+        log text fails its checksum, the kernel says only how that boot
+        ended ("its log text is damaged") and -p finds no log.
 
 EXIT STATUS
     0, or 1 for -p when there is no log from a previous boot (after a power

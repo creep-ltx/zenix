@@ -1,0 +1,10 @@
+wait zenix:/# 150
+sleep 2
+send reboot\r
+wait (?m)^klog: boot [0-9]+, 150
+wait zenix:/# 120
+sleep 2
+send echo prevkernel=$(dmesg -p | grep -c '^kernel: [0-9]* bytes at')\r
+sleep 3
+send echo zb\x6fk\r
+sleep 2

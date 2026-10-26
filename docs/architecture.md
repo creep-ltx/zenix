@@ -189,9 +189,15 @@ neither the boot tables nor the kernel/RAM-disk load buffer can land on it, and 
 pool. Layout: two slots, each a 256-byte header (magic `ZKLG`, ring size, boot number, characters logged, a sum over
 the 8 KB ring, the reason the boot ended - running or panic -, and a sum over the header) and the 8 KB ring. Both sums
 are updated with every character (interrupts masked, O(1)), so a slot is consistent between any two characters.
-`klog_init()`, the first call in `kmain`, checks both slots before anything is printed; the valid one with the higher
-boot number is the previous boot's, and this boot writes the other slot (boot number + 1), so the previous log stays
-where it is and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
+`klog_init()`, the first call in `kmain`, checks both slots before anything is printed. A slot counts by its header
+alone (magic, size, header sum: D15 step 0); the valid one with the higher boot number is the previous boot's, its
+boot number and reason are used, and its text is shown only if the ring's sum matches too (else "its log text is
+damaged (checksum): not shown"). The boot menu (`boot/bootmenu.c`) `AllocAbs()`es the whole area to read and clear
+the boot note, never only the note's 16 bytes: exec writes an 8-byte free-memory header at the start of the free
+remainder an allocation leaves, which was slot 0's first text bytes; a slot rejected for that showed an older boot as
+the previous one (`tools/zenixboot-test.sh bootmenu`). zenixboot rounds the chip top as the kernel does
+(`MaxLocMem & ~0xFFF`). This boot writes the other slot (boot number + 1), so the previous log stays where it is
+and costs the kernel no memory. Once the display is up, `klog_show_prev()` prints `klog: boot N, log kept
 at ...` and "no log from a previous boot", "damaged (checksum)" or the previous boot's last 20 lines, each starting
 with a `>`, between `=== previous boot (N) ended here ...` (with or without a kernel panic) and `=== end of the
 previous boot's log ===`. `SYS_klog` with bit 31 set in the offset (`KLOG_PREV`) reads the previous slot (`dmesg -p`).

@@ -471,36 +471,41 @@ static void boot_partition(const char *name)
     Permit();
 }
 
-static u32 *note_addr(void)
+/* the klog area (the note lies inside it). The whole area is taken with AllocAbs(), never just the note's 16 bytes:
+ * exec writes a free-memory header (8 bytes) at the start of whatever free remainder an allocation leaves, and a
+ * remainder starting at the note's end was slot 0's first text bytes, which FreeMem() then left damaged. The area
+ * ends at the (rounded) top of chip RAM, so taking all of it leaves no remainder inside it */
+static u32 *klog_area(void)
 {
-    u32 top = EXEC_L(0x3E) & ~0xFFFu;                   /* MaxLocMem: the end of chip RAM */
-    return (u32 *)(top - KLOG_AREA_SIZE + BOOTNOTE_OFF);
+    u32 top = EXEC_L(0x3E) & ~0xFFFu;                   /* MaxLocMem: the end of chip RAM, rounded as the kernel does */
+    return (u32 *)(top - KLOG_AREA_SIZE);
 }
+#define NOTE(a) ((u32 *)((u8 *)(a) + BOOTNOTE_OFF))
 
 /* take the note if there is one: its kind, or 0 */
 static u32 note_take(void)
 {
-    u32 *n = note_addr();
-    u32 *a = (u32 *)AllocAbs(16, n);
+    u32 *a = (u32 *)AllocAbs(KLOG_AREA_SIZE, klog_area());
     if (!a)
         return 0;                                       /* in use by AmigaOS: no note can be there */
-    u32 kind = 0;
+    u32 *n = NOTE(a), kind = 0;
     if (n[0] == BOOTNOTE_MAGIC && n[2] == ~(BOOTNOTE_MAGIC + n[1]) &&
         (n[1] == BOOTNOTE_AMIGAOS || n[1] == BOOTNOTE_ZENIX))
         kind = n[1];
     n[0] = n[1] = n[2] = n[3] = 0;
-    FreeMem(a, 16);
+    FreeMem(a, KLOG_AREA_SIZE);
     return kind;
 }
 
 /* started as "bootzenix" (or "bootamigaos"): leave the note and reboot */
 static long note_reboot(u32 kind)
 {
-    u32 *n = note_addr();
-    if (!AllocAbs(16, n)) {
+    u32 *a = (u32 *)AllocAbs(KLOG_AREA_SIZE, klog_area());
+    if (!a) {
         puts_("bootmenu: the memory for the boot note is in use; reboot and choose in the menu\n");
         return 10;
     }
+    u32 *n = NOTE(a);
     n[0] = BOOTNOTE_MAGIC;
     n[1] = kind;
     n[2] = ~(BOOTNOTE_MAGIC + kind);

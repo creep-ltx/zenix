@@ -47,9 +47,11 @@ REBOOTING BETWEEN THE SYSTEMS
     menu then starts the first "run ...zenixboot" entry at once, without
     a countdown. Zenix's "reboot amigaos" (reboot(8)) leaves "next boot:
     AmigaOS", and the menu starts the first "partition" entry. The note
-    is read only after AllocAbs() on its 16 bytes succeeded (memory in
-    use by AmigaOS is never read or written) and is cleared when read, so
-    the boot after shows the menu again.
+    is read only after AllocAbs() on the whole 16.5 KB log area succeeded
+    (memory in use by AmigaOS is never read or written; the whole area,
+    because exec writes a free-memory header at the start of what an
+    allocation leaves free, which would land in Zenix's log) and is
+    cleared when read, so the boot after shows the menu again.
 
 S:BOOTMENU.CONF
     One setting or entry per line; "#" starts a comment line, unknown lines

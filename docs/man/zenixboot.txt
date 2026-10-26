@@ -21,7 +21,8 @@ DESCRIPTION
     on the floppy, build/kernel.bin, called "zenix" on the boot partition)
     and the optional RAM-disk image, collects the CPU type, the memory list
     and the Pi's hardware addresses (stage0, under Emu68), keeps the top
-    16.5 KB of chip RAM free for the kernel log, switches AmigaOS off and
+    16.5 KB of chip RAM free for the kernel log (below exec's MaxLocMem
+    rounded down to 4 KB, as the kernel counts), switches AmigaOS off and
     jumps to the kernel. Zenix then finds its root filesystem by itself:
     the RAM disk if one was given, else the first ext2 or ZenixFS
     partition (docs/architecture.md section 9).

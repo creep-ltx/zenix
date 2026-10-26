@@ -13,19 +13,23 @@
 #   card-root    Zenix's side of the SD card image (build/zenix-card.img, which FS-UAE's Kickstart cannot boot: it has
 #                no Emu68 driver for MBR 0x76): booted from the floppy, the disk server must list the FAT, the 0x76
 #                container, the FFS partition inside it and the ext2 partition, and the root must be the ext2 one
+#   bootmenu     A1200 3.1, the boot menu's disk: S:Startup-Sequence runs bootmenu, whose default entry (after 1 s)
+#                runs zenixboot; Zenix's `reboot` goes through the menu again, and the second boot must show the first
+#                as the previous one (`dmesg -p`): the menu takes the whole klog area, so the free-memory header exec
+#                writes after an allocation never lands in a log slot (D15 step 0)
 #   errors       A1200 3.1, a Startup-Sequence that runs zenixboot five times: a missing kernel, two bad RAM disks
 #                (each an error, back to AmigaOS), CHECK (loads, checks, returns), then RAM=ramdisk (Zenix with its
 #                root in RAM)
 # usage: tools/zenixboot-test.sh [setup...]     (ZENIX_SERIAL, ZENIX_OUT as the other tests)
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
-make -s BUILD=$BD $BD/zenix-boot.hdf $BD/zenix-card.img $BD/zenix.adf $BD/root-ram.img >/dev/null 2>&1 || { echo "FAIL build"; exit 1; }
+make -s BUILD=$BD $BD/zenix-boot.hdf $BD/bootmenu $BD/zenix-card.img $BD/zenix.adf $BD/root-ram.img >/dev/null 2>&1 || { echo "FAIL build"; exit 1; }
 OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-zenixboot.XXXXXX)}; mkdir -p "$OUT"
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-zenixboot-serial}
 KDIR=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import fsuae_conf; print(fsuae_conf.kickstart_dir())')
 K32=${ZENIX_KICK32:-$KDIR/kick32-a1200.rom}
 K205=${ZENIX_KICK205:-$KDIR/kick205-a600.rom}
-SETUPS="${*:-a1200-31 a1200-040 a1200-32 a600-205 a600-68000 card-root errors}"
+SETUPS="${*:-a1200-31 a1200-040 a1200-32 a600-205 a600-68000 card-root errors bootmenu}"
 B=$(cd "$BD" && pwd)
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
@@ -47,6 +51,13 @@ if command -v xdftool >/dev/null; then       # a second opinion on the FFS write
     xdftool "$B/zenix-boot.hdf" open part=ZB0 + read zenix "$OUT/zenix.back" >/dev/null 2>&1 && cmp -s "$OUT/zenix.back" "$B/kernel.bin" \
         && check "xdftool reads the kernel back from the FFS boot partition" ok || check "xdftool reads the kernel back from the FFS boot partition" bad
 fi
+
+# the disk of the "bootmenu" setup: the menu, its configuration (Zenix first, after 1 s), zenixboot, the kernel, the root
+printf 'SYS:bootmenu\n' >"$OUT/bm-ss"
+printf 'timeout 1\ndefault 1\nZenix = run SYS:zenixboot\nShell = shell\n' >"$OUT/bm-conf"
+python3 tools/mkffs.py "$OUT/bm-ffs.img" 16632K ZenixBoot "$OUT/bm-ss=S/Startup-Sequence" "$OUT/bm-conf=S/BootMenu.conf" \
+    "$B/bootmenu=bootmenu" "$B/zenixboot=zenixboot" "$B/kernel.bin=zenix" >/dev/null || { echo "FAIL mkffs (bootmenu)"; exit 1; }
+python3 tools/mkcard.py ide "$OUT/bootmenu.hdf" "$OUT/bm-ffs.img" "$B/zenix.hdf" >/dev/null || { echo "FAIL mkcard (bootmenu)"; exit 1; }
 
 FLOPPY=; HDTYPE=
 conf() {    # name model rom cpu fast hdf (FLOPPY, HDTYPE: extra lines)
@@ -119,6 +130,15 @@ for s in $SETUPS; do
         check "$s: CHECK loads and checks everything and returns" "$(has $s 'CHECK: everything is loaded and checked')"
         check "$s: then RAM=ramdisk boots Zenix with its root in RAM" \
             "$(grep -aq 'and the RAM disk ramdisk' "$OUT/$s.log" && grep -aq '^ram0  .* mounted' "$OUT/$s.log" && echo ok || echo bad)"
+        check "$s: a shell prompt" "$(has $s '^zbok$')" ;;
+    bootmenu)
+        conf $s A1200 '$ZENIX_KICKSTART_DIR/kicka1200.rom' "" 4096 "$OUT/bootmenu.hdf"; run $s 300 tools/tests/bootmenu-test.txt
+        tr -d '\r' <"$OUT/$s.log" | sed 's/\x1b\[[0-9;:]*[mK]//g' >"$OUT/$s.txt"
+        check "$s: two boots through the menu" "$([ "$(grep -ac 'zenixboot 0.1b1: loading zenix (' "$OUT/$s.txt")" -ge 2 ] && echo ok || echo bad)"
+        check "$s: the second boot is boot 2 and shows boot 1 as the previous one, ended with reboot" \
+            "$(grep -aq '^klog: boot 2, ' "$OUT/$s.txt" && grep -aq '^=== previous boot (1) ended here with reboot' "$OUT/$s.txt" && echo ok || echo bad)"
+        check "$s: no damaged log reported" "$(grep -aq 'damaged' "$OUT/$s.txt" && echo bad || echo ok)"
+        check "$s: dmesg -p has boot 1's whole log (its kernel line)" "$(grep -aq '^prevkernel=1$' "$OUT/$s.txt" && echo ok || echo bad)"
         check "$s: a shell prompt" "$(has $s '^zbok$')" ;;
     *) echo "FAIL unknown setup $s" ; pass=0 ;;
     esac
