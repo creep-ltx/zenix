@@ -86,7 +86,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch) |
 | cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
 | users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root |
-| jobs-test, kbd-test | job control and history search; the keyboard (keymaps, repeat, consoles, scrollback) |
+| jobs-test, kbd-test | job control and history search, long typed lines (kept whole up to the limits, refused with a message past them); the keyboard (keymaps, repeat, consoles, scrollback) |
 | cu-test | `cu` and `/dev/ttyS0` (DESIGN D12): the other computer's line reaches cu, keys reach the port, `~.` ends it, the console's copy comes back |
 | prio-test | priorities (D10): nice/renice for a user and for root, PRI/NI in `ps`, `priotest` (equal priorities take turns per slice, a higher one wins, wake-up, priority inheritance; a kernel built without inheritance must fail that check) |
 | diag-test | the boot colours, the panic screens, the previous-boot log across a warm reset; the stack guard's kernel-stack checks (a `STACK_TEST` build) |

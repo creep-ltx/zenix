@@ -932,8 +932,12 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   same), and a login that ends is started again. So a console costs memory only once it is used.
 - **tty** (`tty.c`): one per console, line discipline in the kernel: echo, backspace, `^U`, `^C` (kills the
   foreground process; if nobody is foreground the shell polls `ttyintr`), `^D`; Tab is kept in the line (Backspace
-  over it moves back one column on the screen; the line itself is right). A cooked line holds 255 characters:
-  more ring the bell and are not taken. `TTY_RAW` / `TTY_NOSIG` modes for editors and pagers. **Type-ahead is
+  over it moves back one column on the screen; the line itself is right). A cooked line holds 511 characters
+  (more than the shell's line editor, 478, so a line typed ahead for the shell is never cut here): a key past that
+  rings the bell and marks the line too long, and at its end the whole line is refused with "tty: the line was too
+  long ... not taken", never handed on cut; the mark outlives a switch to raw mode, so the rest of such a line typed
+  after the shell's editor took over is refused too (audit 2026-10-26 F2: a 260-character line typed ahead lost its
+  middle, `break` arrived as `ak`). `TTY_RAW` / `TTY_NOSIG` modes for editors and pagers. **Type-ahead is
   kept**: when a program switches the tty to raw mode (the shell's line editor after a command), what was typed
   meanwhile as a half line goes into the queue as it is (before, `tty_setmode` dropped it: `rm /etc/motd` typed
   during a slow command arrived as `c/motd`).

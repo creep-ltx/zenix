@@ -354,17 +354,23 @@ static int isearch(char *buf, int max, int *lenp, int *posp)
 }
 
 /* a history entry into the line: an entry longer than the line (a multi-line command can be 2 KB) is cut, and the
- * bell says so */
-static void hist_copy(char *buf, const char *h, int max)
+ * bell says so; returns 1 when it was cut (the line then does not run: see readline) */
+static int hist_copy(char *buf, const char *h, int max)
 {
     u32 n = strlen(h);
-    if (n > (u32)max - 2) { n = (u32)max - 2; outs("\a"); }
+    int cut = 0;
+    if (n > (u32)max - 2) { n = (u32)max - 2; outs("\a"); cut = 1; }
     memcpy(buf, h, n); buf[n] = 0;
+    return cut;
 }
 
+/* The line holds max - 2 characters (LMAX: 478). A key typed into a full line is not taken: the bell, and the line
+ * is marked too long (`over`); Enter then does not run it but says so and returns -3 (audit 2026-10-26 F2: the
+ * excess used to vanish without a sound on the serial port, and the cut line ran). A recalled history entry that
+ * was cut is marked the same way. Emptying the line (Ctrl+U at its end, deleting it all) clears the mark. */
 static int readline(const char *prompt, int plen, char *buf, int max)
 {
-    int len = 0, pos = 0, scroll = 0, hidx = nhist, tabs = 0;
+    int len = 0, pos = 0, scroll = 0, hidx = nhist, tabs = 0, over = 0, saved_over = 0;
     static char saved[LMAX];
     buf[0] = 0;
     sys_ttymode(TTY_RAW | TTY_NOSIG);
@@ -400,7 +406,13 @@ static int readline(const char *prompt, int plen, char *buf, int max)
         if (c != 9) tabs = 0;
         switch (c) {
         case 13: case 10:
-            outs("\r\n"); sys_ttymode(0); buf[len] = 0; return len;
+            outs("\r\n"); sys_ttymode(0); buf[len] = 0;
+            if (over) {
+                char n[12]; utoa((u32)max - 2, n);
+                outs("sh: the line was too long (more than "); outs(n); outs(" characters): not run\r\n");
+                buf[0] = 0; return -3;
+            }
+            return len;
         case 3:                                                 /* Ctrl-C: cancel the line */
             outs("^C\r\n"); sys_ttymode(0); buf[0] = 0; return -2;
         case 4:                                                 /* Ctrl-D: end of input, or delete */
@@ -427,14 +439,14 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             break;
         case 16:                                                /* history: previous */
             if (hidx > 0) {
-                if (hidx == nhist) { memcpy(saved, buf, (u32)len + 1); }
-                hidx--; hist_copy(buf, hist[hidx], max); len = pos = (int)strlen(buf);
+                if (hidx == nhist) { memcpy(saved, buf, (u32)len + 1); saved_over = over; }
+                hidx--; over = hist_copy(buf, hist[hidx], max); len = pos = (int)strlen(buf);
             }
             break;
         case 14:                                                /* history: next */
             if (hidx < nhist) {
                 hidx++;
-                if (hidx == nhist) strcpy(buf, saved); else hist_copy(buf, hist[hidx], max);
+                if (hidx == nhist) { strcpy(buf, saved); over = saved_over; } else over = hist_copy(buf, hist[hidx], max);
                 len = pos = (int)strlen(buf);
             }
             break;
@@ -467,8 +479,11 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             if (c >= 32 && len < max - 2) {
                 memmove(buf + pos + 1, buf + pos, (u32)(len - pos + 1));
                 buf[pos++] = (char)c; len++;
+            } else if (c >= 32) {
+                outs("\a"); over = 1;                  /* the line is full: not taken, and Enter will not run it */
             }
         }
+        if (!len) over = 0;
         if (again_tab) tabs = 1;
         redraw(prompt, plen, buf, len, pos, &scroll);
     }
@@ -2565,6 +2580,7 @@ static void interactive_loop(void)
         char *prompt = expand_prompt(ps ? ps : "$ ", &plen);
         int n = readline(prompt, plen, line, LMAX);
         if (n == -1) break;
+        if (n == -3) { last_status = 2; continue; }          /* too long: readline said so, nothing runs */
         if (n == -2 || !line[0]) continue;
         strcpy(full, line);
         for (;;) {                       /* keep reading (PS2) while the command is incomplete, as a script's reader does */
