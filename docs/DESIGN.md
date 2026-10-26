@@ -160,6 +160,13 @@ The full design is in [d13-shared-code.md](d13-shared-code.md) (revision 3, 2026
 the standard ANSI colour codes. **How.** More bitplanes behind the same text console (16 colours on AGA, 8 on OCS/ECS,
 a setting from 1 to 4 planes; 1 keeps today's look and speed), a colour byte per cell and in the scrollback, the ANSI
 codes in term.c (256 and true colour mapped to the nearest of 16). The full design: [d14-colour-console.md](d14-colour-console.md).
+## D15. Zenix updates itself (approved by the owner 2026-10-24; design note awaiting two reviews)
+**Why.** No more SD card swaps and `dd` on the PC (which also reset the owner's settings). **How.** One update bundle on
+BOOT:; zenixboot (still in AmigaOS) installs the new kernel and keeps the old one, and hands the root packages to Zenix
+in memory, as it already does for a RAM disk; Zenix's installer applies them transactionally (a journal, rename-over,
+the previous version kept, the owner's changed settings never overwritten); the boot menu's "Zenix (previous)" goes
+back. The same bundle and installer serve the serial cable and the network later (`zpkg`). The full design:
+[d15-self-updates.md](d15-self-updates.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
