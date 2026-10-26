@@ -106,16 +106,19 @@ pointers.
   main 5.4 KB (`mkfs.ext2` main was 8.5 KB; 0.3 KB since its two 4 KB blocks are static, 2026-10-25); the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
   about 1430).
-- A login session (login, the shell and its work area) needs about 185 KB (293 KB before the shell memory fix of
-  2026-10-25): a machine with 1 MB of chip RAM and no fast RAM has room for two; on a third console init says "cannot start
-  /bin/login: out of memory" (the matrix checks both; that message was lost before 2026-10-25, init never flushed it).
+- A login session (login, the shell and its work area) needs about 110 KB (measured 2026-10-26 in FS-UAE as the drop
+  in `free` when a second console logs in on a 2 MB chip-only A1200: 170 KB before malloc's first chunk went from 32 KB
+  to 4 KB and the shell's two 4 KB expansion buffers moved to its arena; 293 KB before the shell memory fix of
+  2026-10-25): a machine with 1 MB of chip RAM and no fast RAM has room for three; on a fourth console init says
+  "cannot start /bin/login: out of memory" (the matrix checks both; that message was lost before 2026-10-25, init
+  never flushed it).
 - Shared code (DESIGN D13, architecture.md section 4): at most 8 segments (`NSEG`) at a time; a ninth program with
   shared code runs as a private copy. A ZEX2 program's address table is at most 32 KB (16-bit offsets: a larger one
   is a link error).
 - Memory per process: at most 8 extra regions at a time (`SYS_memalloc`), each at most 64 MB. `malloc` keeps blocks of
-  up to 32 KB in a few growing chunks (32 KB, 64 KB, ... 512 KB each) and gives every bigger block a region of its
-  own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with two chunks
-  in use, gets 6); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
+  up to 32 KB in a few growing chunks (4 KB, 16 KB, 64 KB, 256 KB, then 512 KB each) and gives every bigger block a
+  region of its own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with
+  four chunks in use, gets 4); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
 - Paths: the directory tools report a joined path longer than a system call takes (63 bytes) instead of cutting it.
 - Timer tick 100 Hz to within the E-clock's resolution (latch 7093 on PAL, 709,379 Hz: 99.997 Hz; 7158 on NTSC,

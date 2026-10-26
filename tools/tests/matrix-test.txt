@@ -30,5 +30,11 @@ send root\r
 sleep 6
 send echo con3ok\r
 sleep 2
+send \x1d4
+wait zenix login: 30
+send root\r
+sleep 6
+send echo con4ok\r
+sleep 2
 send \x1d1
 sleep 2

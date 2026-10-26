@@ -68,8 +68,9 @@ int atoi(const char *s)
  * whether it is a small block in use, a big block in use or a free block.
  *  - Small blocks hold 16, 32, 64 ... 32768 bytes (size classes; the header comes on top, so a request of exactly a
  *    power of two, as buffers and doubling arrays usually are, fills its class). They are cut from chunks the kernel
- *    gives: the first is 32 KB, each next one twice the last, up to 512 KB (smaller if memory is short), so a program
- *    that needs a lot still uses few regions. A freed small block goes on its class's free list and is used again;
+ *    gives: the first is 4 KB (a program that needs little, such as login waiting for its shell, holds little), each
+ *    next one four times the last, up to 512 KB (smaller if memory is short), so a program that needs a lot still
+ *    uses few regions (4 + 16 + 64 + 256 + 512 KB in five). A freed small block goes on its class's free list and is used again;
  *    it is never given back to the kernel (that happens when the program ends). O(1), no coalescing; a class that is
  *    empty carves a block of a larger class before taking new chunk space.
  *  - Bigger blocks get a region of their own, and free() gives exactly those back with SYS_memfree.
@@ -81,7 +82,7 @@ int atoi(const char *s)
 #define NCLASS    12                    /* capacities 16 << 0 .. 16 << 11 = 32 KB */
 #define CAP(k)    (16u << (k))
 #define BLK(k)    (CAP(k) + 8u)         /* a class's block: capacity + header */
-#define CHUNK_MIN 32768u
+#define CHUNK_MIN 4096u
 #define CHUNK_MAX (512u * 1024)
 #define MALLOC_MAX 0x3FFFFFF0u          /* a request above this is refused (no size arithmetic below can wrap) */
 struct mhdr { u32 cap, tag; };
@@ -126,7 +127,7 @@ static struct mhdr *small_get(int k)
         if (!c && !(c = sys_memalloc(want = sz))) return 0;             /* last try: just this block */
         carve(chunk, left);                             /* the old chunk's end, before it is forgotten */
         chunk = c; left = want;
-        if (next_chunk < CHUNK_MAX) next_chunk *= 2;
+        if (want >= next_chunk) next_chunk = want < CHUNK_MAX / 4 ? want * 4 : CHUNK_MAX;   /* not after a short one */
     }
     h = (struct mhdr *)chunk; chunk += sz; left -= sz;
     return h;

@@ -15,7 +15,7 @@ for n in $CONFS; do
     f=fsuae/$n.fs-uae; [ -f "$f" ] || f=fsuae/matrix/$n.fs-uae
     rm -f $BD/zenix.hdf $BD/zenix-rdb.hdf
     make -s BUILD=$BD $BD/zenix.hdf $BD/zenix-rdb.hdf $BD/zenix-ram.adf >$OUT/build.log 2>&1 || { echo "FAIL $n: build failed:"; grep -v 'RWX permissions' $OUT/build.log | tail -15; exit 1; }
-    tools/run-test.sh "$f" 85 tools/tests/matrix-test.txt > $OUT/$n.log 2>&1
+    tools/run-test.sh "$f" 95 tools/tests/matrix-test.txt > $OUT/$n.log 2>&1
     if [ "$n" = a600-68000 ]; then
         grep -q 'needs a 68020' $OUT/$n.log && echo "PASS $n (refuses cleanly)" || echo "FAIL $n"
         continue
@@ -33,12 +33,14 @@ for n in $CONFS; do
     grep -q 'Zenix 0.2' $OUT/$n.log || ok=0
     grep -q 'Filesystem  1K-blocks' $OUT/$n.log || ok=0
     grep -q 'zenix login: ' $OUT/$n.log || ok=0   # console 2 shows its own login prompt
-    grep -q '^con2ok$' $OUT/$n.log || ok=0   # ... and a login there gives a shell (1 MB chip only too: room for two
-                                             # sessions since the shell's arena grows on demand, man/login.txt)
-    if [ "$n" = a1200-chip1m ]; then              # ... but not three: init (or login) says so
+    grep -q '^con2ok$' $OUT/$n.log || ok=0   # ... and a login there gives a shell
+    grep -q '^con3ok$' $OUT/$n.log || ok=0   # 1 MB chip only too: room for three sessions (the shell's arena and
+                                             # malloc start small and grow on demand, man/login.txt)
+    if [ "$n" = a1200-chip1m ]; then              # ... but not four: init (or login) says so
         grep -qE 'init: cannot start /bin/login.*out of memory|login: cannot start /bin/sh: out of memory' $OUT/$n.log || ok=0
+        grep -q '^con4ok$' $OUT/$n.log && ok=0
     else
-        grep -q '^con3ok$' $OUT/$n.log || ok=0
+        grep -q '^con4ok$' $OUT/$n.log || ok=0
     fi
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"

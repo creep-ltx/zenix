@@ -28,8 +28,8 @@ DESCRIPTION
 
     Every console has its own login, so several users (or one user several
     times) can be logged in at once, one on each console. Each session
-    costs about 185 KB (login, the shell and its work area): a machine with
-    only 1 MB of chip RAM and no fast RAM has room for two. When memory is
+    costs about 110 KB (login, the shell and its work area): a machine with
+    only 1 MB of chip RAM and no fast RAM has room for three. When memory is
     short a login says "login: cannot start /bin/sh: out of memory" (or
     init, on the console: "init: cannot start /bin/login: out of memory").
 
