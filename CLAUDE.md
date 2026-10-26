@@ -99,7 +99,9 @@ Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_
 zup's "needs a check" mark), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
 Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main); `ETXTBSY` 26 (D13, "text file busy": a running
-shared program opened for writing; claimed 2026-10-25, Linux's number). Port names registered as services (D11):
+shared program opened for writing; claimed 2026-10-25, Linux's number). Update note kinds (D15, frozen, append-only):
+1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). Port names
+registered as services (D11):
 `disk`, `fs`, `fs.*`; `ping` (the test service).
 
 ## Frozen interfaces (D15 step 0, 2026-10-26; checked in every review)
