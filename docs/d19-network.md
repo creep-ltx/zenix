@@ -1,0 +1,699 @@
+# D19: the network (design note, revision 2)
+
+Status: **design only, revision 2 after two independent reviews (section 13), not built.** Roadmap block 2, "Zenix
+reaches the world": the network, the CM4's Ethernet, TCP/IP as a server, DHCP, DNS, `ping`; telnet, the crypto
+library, ssh, HTTPS, NFS, remote control and `zpkg` come after it. A deep core change (a kernel file kind, new system
+calls, a message family, the way servers are loaded). The short version is DESIGN.md D19. Facts about today's code are
+*read* from main at 7b5149d (2026-10-26); sizes marked *measured* were compiled here; everything else is an estimate
+and says so. Section 3 (servers from the disk) is independent of the network and is built and merged first.
+
+## 1. What the owner gets, in plain words
+
+- Zenix talks TCP/IP: `ping`, then `telnet` to BBSes, later ssh, wget, NFS, a remote control, `zpkg`.
+- **Every Amiga can join**, also the stock A1200 with no expansion: through the serial cable to a PC (SLIP), where a
+  small program on the PC (no root needed) gives the Amiga the PC's network and the internet. The PiStorm A1200 uses
+  the CM4's own Ethernet port.
+- **It costs nothing when it is not used.** The network server is a program on the disk that starts the first time a
+  program opens a socket, and the kernel image gets *smaller* (section 3: the ZenixFS server leaves it): about 30 KB
+  more free memory on every machine that does not use the network.
+- **Unix as people know it:** BSD sockets, `/etc/network/interfaces`, `/etc/hosts`, `/etc/resolv.conf`, `ifconfig`,
+  `route`, `ping`, `netstat`, `host`.
+
+## 2. Where the network lives
+
+### 2.1 The options
+
+| | A. In the kernel | B. One server, drivers inside it | **C. One server, small driver processes below it (SANA-II-like)** |
+|---|---|---|---|
+| Resident cost | 60-90 KB always in memory and on every boot floppy | 0 when unused | 0 when unused |
+| A bug in the stack | crashes the kernel | crashes the server; D11 starts it again | the same; a driver bug ends only the driver |
+| Drivers nobody has | always | every driver in every netd (15-25 KB, *estimate*) | only the machine's own |
+| Speed | best | one message per socket call | the same, plus one call per batch of frames |
+| ROADMAP principle 1 ("the network ... are servers behind named ports") | no | yes | yes |
+
+**Decision: C.** One TCP/IP server, `netd` (port `net`, a D11 service, `/sbin/netd`), and one small user-mode driver
+process per kind of hardware (`/sbin/net/genet`, later `a2065`, `ne2000`, ...), as AmigaOS has one stack and a SANA-II
+device per card. **Two parts are not hardware drivers and live inside netd**, as in Linux and BSD where they are line
+disciplines of the stack: **SLIP** (later PPP), a framing over the kernel's serial device `/dev/ttyS0` (D12), and
+**loopback**. The rule: *code that touches device registers is a driver process; a link protocol over an existing
+Zenix device is part of netd.* So a stock A1200 on SLIP runs one process, netd.
+
+**User-mode drivers are a second driver model, on purpose:** the block drivers (IDE, SD, floppy, A3000 SCSI) stay in
+the kernel because the root needs them before any program can run. Every driver *not* needed to reach the root (the
+network now; USB and the sound server later) is a user-mode process; the kernel gives it only what user mode cannot do
+(cache instructions, interrupts, a claim on the hardware, memory that outlives a crash: section 5.1). That rule goes
+into DESIGN.md with D19.
+
+**Not taken:** a `/net` filesystem served by netd over the `FS_*` protocol (Plan 9 style): a blocking read would wait
+*inside* netd's message call, where ^C cannot reach it (G4, D16 section 4), and `poll` does not see readiness a file
+server knows. A kernel file kind with one multiplexed call is the right shape (section 4).
+
+### 2.2 Which TCP/IP code
+
+| | Own stack | **lwIP 2.2** | uIP 1.0 | picoTCP |
+|---|---|---|---|---|
+| Licence | ours | BSD-3: GPL-2 compatible (*read*, COPYING) | BSD-3 | GPL-2.0 only: compatible, but archived, no security fixes |
+| Code (m68k, -Os) | 15-25 KB, *estimate* | **48.8 KB** with Ethernet/ARP, DHCP, DNS (*measured*, below) | 5-10 KB | similar to lwIP |
+| TCP quality | months of work, every bug remote | 20+ years in products: windows, retransmit timers, congestion control, keepalive, backlog, reassembly | one segment in flight per connection | full |
+| Single-threaded server | yes | yes: `NO_SYS=1`, raw API | yes | yes |
+| Maintained | by us | yes (2.2.1) | no | no |
+
+**Decision: lwIP 2.2.x**, `NO_SYS=1`, raw (callback) API only (its `sockets`/`netconn` layers need threads: Zenix's
+sockets are a kernel file kind, section 4), IPv4, IPv6 off (+33 KB; a later option). lwIP goes into `net/lwip/` with
+its BSD-3 headers and a README naming the version and **the local patches**, each small and kept as a patch file:
+pool limits that hold with heap allocation (9.4), random ephemeral ports (9.3). Our port layer (`net/port/`:
+`arch/cc.h`, `lwipopts.h`, `sys_now`, the checksum and copy in assembler) beside it. Asserts keep every check but
+report only the line number (`LWIP_PLATFORM_ASSERT`: "safety stays", without 7 KB of message strings).
+
+*Measured 2026-10-26* (lwIP STABLE-2_2_1_RELEASE, `m68k-elf-gcc -m68020-60 -Os -ffunction-sections -msoft-float`,
+`size` summed over the *unlinked* objects, so an upper bound before `--gc-sections`; re-measured linked at step 4): core
+IPv4 + TCP + UDP + ICMP + raw + `slipif` 42,617 bytes with lwIP's assert strings; with `ethernet`, `etharp`, `dhcp`,
+`dns` and no `acd` **55,964**, and **48,836 with line-number asserts** (43,976 with no asserts at all, not taken); IPv6
+adds about 33 KB. Of the 48.8 KB, DHCP + ARP + Ethernet are 10.4 KB that a SLIP-only machine carries unused:
+**accepted**, so one netd serves every machine and an update never needs to know which build a machine runs; a split
+is possible later if a measurement on the stock A1200 asks for it. Reassembly stays (`IP_REASSEMBLY`), sending
+fragments goes (`IP_FRAG 0`, 0.7 KB); `raw` stays (ping).
+
+**Speed** (*estimates*, measured later on the stock A1200 and the 060, never Emu68): TCP input or output roughly
+2,000-4,000 instructions a segment; on a 14 MHz 68EC020 from chip RAM with the checksum in an `addx.l` loop and one copy
+each way, about 2 ms per 1,460-byte segment: a ceiling of 500-700 KB/s, far above SLIP (11.5 KB/s) or a PCMCIA NE2000.
+A key typed in telnet costs a few hundred microseconds. Hot loops (checksum, copies, SLIP's byte loop) assembler or
+`-O2`; the rest `-Os`.
+
+### 2.3 netd and its drivers
+
+Zenix's calls are synchronous; two processes calling each other deadlock. So **netd never calls a driver; a driver is
+netd's client** (as fsd is diskd's), and **a driver reaches netd only through the kernel**:
+
+- **`SYS_drv DRV_ATTACH` and `DRV_XFER`**: the kernel checks the driver's block (D13 section 5: pointers and sizes) and
+  sends it to `net` as a kernel message (`UMSG_KERNEL`) that **never starts a server** (`SVC_NS_SKIP`): an orphaned
+  driver whose netd is gone gets -ECONNRESET, it never starts a second netd that would start a second driver for the
+  same card. `ATTACH` says who the driver is (`eth0`, the MAC, the MTU, the receive buffers it wants, DMA rules,
+  checksum offload) and gets the interface number and its buffers (2.4). `XFER` carries, *in*, the receive buffers the
+  driver filled (number, length, flags), the send buffers it finished, the link state, counters; *out* (netd writes
+  into the block), frames to send (number, pieces, checksum request: a frame may be a chain of up to 4 pieces, else
+  netd copies it into one buffer) and empty receive buffers. One call per batch, never per frame.
+- **The doorbell:** netd starts each driver as its child (`SYS_spawn`) with a pipe as its standard input and writes one
+  byte when it has work and has not rung since the driver's last `XFER` (the pipe never holds more than one byte, so
+  the write never blocks). The driver waits with `poll` on the pipe and its hardware event (5.4) or a timer. **netd
+  ignores SIGPIPE** (a dead driver's pipe must not end netd); a driver that sees POLLHUP on the pipe knows netd is gone,
+  stops its hardware and exits. (Signals were the other doorbell: they need a handler and cut every wait with -EINTR.)
+- **Supervision:** netd is the drivers' parent: on a driver's end (SIGCHLD, D16; the handler only sets a flag) it
+  marks the interface down, logs the line in D11's format (`net: eth0: /sbin/net/genet (pid N) ended, status S`) and
+  starts it again with D11's numbers (1, 2, 4 s back-off, given up after 5 ends in 60 s). This is not a second service
+  manager: D11 starts a server by a *call to* it, and nobody calls a driver; netd keeps its helpers as `init` keeps a
+  login on each console. DESIGN gets the rule "a server may supervise its own helper processes, with D11's numbers".
+- **Who is a driver:** netd answers `NETDRV_*` only from a pid in its own spawn list (pids are never reused,
+  `proc.c`), and checks every buffer number, piece, length and count (a driver is trusted code; a wrong number fails
+  the frame, never netd). A driver is ZEXE v1 (D13's raw-message rule needs no exception: it sends no raw messages).
+
+### 2.4 Buffers, and DMA that outlives its owner
+
+netd lends every frame buffer to the driver: empty ones to fill, full ones to send. A copying driver (NE2000 and
+CS8900A by PIO, the A2065 from its board memory, plipbox through the CIA) copies straight into netd's buffer; a DMA
+driver lets the hardware write into it. No frame is copied twice. A frame lent for sending is held (`pbuf_ref`) until
+the driver reports it done, so a TCP retransmit never rewrites a header still in the ring (lwIP's
+`tcp_output_segment_busy` relies on that). A zero-copy receive uses lwIP's custom pbufs, whose free gives the buffer
+back to the ring.
+
+**DMA is the dangerous case** (GENET; any later bus-master card): without an MMU, hardware that keeps writing after
+its driver or netd died writes into memory the kernel has given to someone else. So:
+1. **A claim:** `DRV_CLAIM` (the hardware table's GENET base, or a board from the board list) makes the driver the
+   only owner of that device; a second claim is -EBUSY. A claim ends only after its quiesce has run (3).
+2. **DMA memory belongs to the claim, not to a process:** `DRV_DMAMEM` gives a region (fast RAM, 64-byte aligned,
+   whole cache lines) owned by the claim (an owner value that is no pid, as D13's `SEG_OWNER`): netd's buffers for a
+   DMA interface are made in it (netd may read and write it: one address space). Neither netd's nor the driver's end
+   frees it.
+3. **A quiesce program:** with the claim the driver registers a short list of register writes that stop the device
+   (GENET: receive and transmit DMA off, UMAC receive and transmit off; the same small language as the interrupt check,
+   5.4). The kernel runs it **when the driver ends, and when netd ends**, before anything of either is freed, then
+   detaches the driver's interrupt program and frees the claim's region. A new driver's `DRV_CLAIM` resets the device
+   anyway.
+4. netd never reuses a buffer lent to a dead driver; it frees them with the claim.
+
+**No network buffer needs chip RAM** (no Amiga network hardware uses the chipset's DMA); buffers come from fast RAM when
+there is any, else chip RAM. On the PiStorm the Pi's DMA reaches only Emu68's RAM, which is all of its fast RAM
+(knowledge base `amiga/emu68-network-usb-rtg-hardware.md` section 1).
+
+## 3. The kernel's RAM-floppy limit: servers from the disk (independent; built and merged first)
+
+### 3.1 Today (*measured*, `make BUILD=...` at 7b5149d)
+
+The RAM floppy (`zenix-ram.adf`) holds the bootblock, the kernel and a 704 KB RAM disk in 880 KB, so the kernel may be
+at most 179,200 bytes; it is 176,144 (3,056 left). 80,624 bytes of it are four server images (`kernel/embed.S`: fsd
+28,676, zfsd 36,688, diskd 9,360, boot 5,900). They stay in memory with the kernel, and each running server is a second
+copy (D18's "not taken" list asked for "its own design note and reviews": this section). D11 already starts a service
+from a file (an absolute path, read as root). `root-ram.img` has 203 free 1 KB blocks, `root-mount.img` 37 (and 27 free
+inodes).
+
+### 3.2 What must stay built in
+
+To read the root, Zenix needs the disk server and the root's filesystem server before any file can be read, and D11
+starts them again after a crash from the image in the kernel: **the restart lifeline must not need the disk it
+serves.** So `diskd`, `fsd` (ext2: the root of the RAM floppy, the SD card and every image the owner uses) and `boot`
+(pid 1) stay built in. **zfsd leaves the kernel**: only a ZenixFS mount or a ZenixFS root needs it, never the owner's
+card or the RAM floppy.
+
+### 3.3 The change (step 1)
+
+1. **D11 6.4's own rule** ("a filesystem type with no built-in image is a file service, registered by `mount` with its
+   path"): `mount` registers `/sbin/zfsd DEVICE fs.DEVICE -id ID` (user/mount.c). The frozen built-in name `@zfsd` keeps
+   working for an older `mount` through **one fixed alias** in svc.c's image table (`@zfsd` = the file `/sbin/zfsd`),
+   not a general fallback (no `@NAME` to path rule, so nothing like `@../x` can arise). D11 5.1's "a mount's restart
+   needs no disk read" stays true for ext2 mounts and becomes a read from the root for ZenixFS mounts; d11's note, the
+   svctab comment and CLAUDE.md's frozen-list wording say so.
+2. `kernel/embed.S` loses zfsd: **the kernel image shrinks by 36,688 bytes**, and every machine has 36 KB more free
+   memory. `/sbin/zfsd` is installed on every root image (the base package, D15).
+3. **The RAM disks are sized per image:** `zenix-mount.adf` (the mount tests) gets a larger RAM disk of its own to carry
+   `/sbin/zfsd` (36 data blocks and an indirect block: exactly its 37 free blocks today, so it needs more), while
+   `zenix-ram.adf` keeps 704 KB (a RAM disk stays resident on a RAM-floppy boot, which the demo floppy will be). The
+   freed bytes are kernel headroom: about 39 KB, of which the network's kernel part takes 5-6.5 KB (7.1).
+4. **A ZenixFS root** needs zfsd before any file can be read. Today only the FS-UAE tests boot one (`zroot`, svc-test's
+   `z`/`zo` parts); no real machine does. The build makes `kernel-zfs.bin` (fsd, zfsd, diskd, boot: about 181 KB with
+   the network's part, too big for a RAM floppy, so on a kernel-only `zenix-zfs.adf`) for those tests. **They then test
+   a test-only kernel, not the shipped one** (said in their scripts). **zup refuses a bundle whose kernel has no server
+   for the running root's type** (the kernel's image list in its version record; D15's formats grow at the end), so an
+   update can never make a ZenixFS-root machine unbootable. When block 4 makes a ZenixFS root real, its own decision
+   picks the variant in the bundle or a boot module (zenixboot handing the root's server to the kernel, as it hands the
+   RAM disk). **Owner question 5.**
+5. The network is never built in: `/sbin/netd` and `/sbin/net/*` are files from the start.
+
+**Not taken:** running fsd, diskd and boot in place from the kernel image (ZEX2 execute-in-place, about 44 KB): the
+pristine image is the restart lifeline, and a stray write would damage the only copy; freeing boot's 5.9 KB image after
+its start (a hole in the kernel's reserved range, a small win for its own change); compressing the images (a
+decompressor in the boot path, D13 section 10).
+
+## 4. The programming interface: BSD sockets
+
+### 4.1 A socket is a file descriptor
+
+A new kernel file kind, **`FT_SOCK`** (internal, not frozen), next to pipes and ttys in `vfs.c`, and a mode type
+**`S_IFSOCK` 0140000** for `fstat` (Linux's value; mode bits are frozen, so it is claimed). Each socket has a kernel
+object, a **ksock** (`NSOCK` 32: its index and a generation name it to netd; netd's ready bits; the D16 waiter slot
+mask; a reference count; the epoch, 4.3; the send and receive timeouts). `read`, `write`, `close`, `dup`, `dup2`,
+spawn's standard files (an `accept`ed socket handed to a child, as inetd does) and `poll`/`select` work as on a pipe.
+netd always names sockets by the kernel's (index, generation); for `accept` the kernel takes a free ksock (and checks a
+free fd) first and passes it in the request. A few ksocks are kept for root (so two users cannot take every socket),
+and `limits.md` gets `NSOCK`, `NFD` 16 per process and `NFILE` 64 shared with every file.
+
+**`O_NONBLOCK`** does not exist in Zenix yet: it becomes a file-table flag (Linux's value 0x800, octal 04000, claimed: `O_*` are
+frozen) set by `socket(..., SOCK_NONBLOCK)` or libz's `fcntl(F_SETFL)`, meaning the same for sockets now and pipes
+later. `FIONREAD` and `FIONBIO` (ported code uses them) are `SYS_sock` ops.
+
+### 4.2 System calls (three new numbers, 90-92 today; claimed in CLAUDE.md before building)
+
+- **`SYS_sock` (op, fd, request)**: every BSD socket call, multiplexed like Linux's `socketcall`. Ops (frozen,
+  append-only): `SOCKET`, `BIND`, `CONNECT`, `LISTEN`, `ACCEPT`, `SENDTO`, `RECVFROM`, `SHUTDOWN`, `GETSOCKOPT`,
+  `SETSOCKOPT`, `GETSOCKNAME`, `GETPEERNAME`, `IOCTL` (`FIONREAD`, `FIONBIO`), `RESOLVE` (4.5), `IFLIST`, `IFSET`,
+  `ROUTE`, `NETSTAT` (section 6). `request` points to a **`struct usockreq`** (first size `USOCKREQ_FIRST` 32,
+  frozen; buffer, length, flags, address, address-length pointer, level, option, value, value-length pointer). **The
+  kernel copies the request** (its first size, or the caller's if bigger) into the message, so netd never reads it
+  again from user memory, and checks every pointer in it by a small per-op table of directions (`user_ok_rd` for what
+  netd reads, `user_ok_wr` for what it writes, both for in/out lengths; D13 section 5): an address length is clamped to
+  `min(*addrlen, 28)` for the check and the write and the true length is returned (programs pass `sizeof(struct
+  sockaddr_storage)` = 128); a buffer over 64 KB is clamped (a blocking stream send loops, 4.3). netd reads and writes
+  the program's buffers in place: **no copy in the kernel**; the kernel clamps every count netd returns to what it
+  checked. (TCP keeps sent data until it is acknowledged, so netd copies once into its send buffer and once out of its
+  receive buffer: the minimum.)
+- **`SYS_netsrv` (op, a, b)**: only for the process the kernel started for `net`: `NETSRV_HELLO` (the current epoch,
+  4.3), `NETSRV_READY` (a list of (index, generation, bits), `user_ok_rd`, at most `NSOCK` items) and `NETSRV_REPLY`
+  (reply to a message *and* set its ksock's bits in one trap: 4.3 rule 1).
+- **`SYS_drv` (op, a, b)**: for drivers: only a child of the running `net` server, and for claim-bound ops only the
+  claim's holder (enforced by the kernel through `ppid` and svc's pid; not merely root, so no sudo session installs an
+  interrupt program). Ops: `DRV_HWINFO` (a copy of the hardware table, `kernel/hwinfo.h`, with `HWINFO_FIRST` and the
+  caller's size: user-visible from now on, so it grows at the end: new fields from `reserved[5]`, then only after
+  `board[]`), `DRV_CLAIM`, `DRV_DMAMEM`, `DRV_QUIESCE`, `DRV_CACHE` (clean, or clean+invalidate, a range inside the
+  claim's DMA region; an "invalidate" is done on whole 64-byte lines only, and partial lines at the edges are cleaned
+  and invalidated, never just invalidated: CLAUDE.md's never-`cinva` rule; `cpushl` per line on 040/060 and Emu68, the
+  Emu68 range opcode with `HW_RANGEOPS`; nothing on 020/030, whose data cache Zenix keeps off), `DRV_ATTACH`,
+  `DRV_XFER` (2.3), later `DRV_IRQ` (5.4).
+
+**Messages:** `NET_*` (kernel to netd, 1-63) and `NETDRV_*` (drivers' blocks the kernel forwards, from 64) in a new
+`kernel/netproto.h`, frozen and append-only like `fsproto.h`, non-overlapping because both arrive on one port. Port
+name `net` (claimed). **Error numbers** (Linux's values, claimed): `ENOTSOCK` 88, `EDESTADDRREQ` 89, `EMSGSIZE` 90,
+`EPROTOTYPE` 91, `ENOPROTOOPT` 92, `EPROTONOSUPPORT` 93, `EAFNOSUPPORT` 97, `EADDRINUSE` 98, `EADDRNOTAVAIL` 99,
+`ENETDOWN` 100, `ENETUNREACH` 101, `ECONNABORTED` 103, `ENOBUFS` 105, `EISCONN` 106, `ENOTCONN` 107, `ETIMEDOUT` 110,
+`ECONNREFUSED` 111, `EHOSTUNREACH` 113, `EALREADY` 114, `EINPROGRESS` 115. `ECONNRESET` 104 now has its Unix meaning
+too ("reset by the peer") besides D11's "the server is gone": on a socket the server's absence is reported as
+`ENETDOWN` instead (4.3), so a program can tell them apart.
+
+### 4.3 Blocking, readiness, netd's end: the rules (binding for the build, as D16 section 14)
+
+1. **netd's bits are the only truth, and they change only inside netd's own system calls.** The kernel never clears or
+   sets a ksock's bits by itself. Every reply that can change a socket's state is a `NETSRV_REPLY` (reply and new bits
+   in one trap); changes that come from the network are pushed with `NETSRV_READY` once per turn of netd's loop.
+   So a reply of -EAGAIN always arrives together with the bits that say "not ready".
+2. **netd never keeps a caller waiting**: every `NET_*` request is answered at once, done or -EAGAIN. A client in a
+   message call cannot be interrupted (G4), so waiting inside netd would make ^C useless.
+3. **The kernel's blocking loop** (in `sock.c`, D16's primitives):
+   ```
+   for (;;) {
+       ev_arm(ksock)                       register on the slot mask, clear EV_IO
+       if (epoch dead) return -ENETDOWN (send: and SIGPIPE rules as below)
+       if (bits & needed) or nonblocking:
+           r = call netd                   an EV_IO posted meanwhile stays pending (ev_post does not ready P_MSG)
+           if r != -EAGAIN or nonblocking: return r (after the partial-count rule)
+           continue                        to the top, not straight to the wait
+       ev_block(timeout)                   -EINTR on a caught signal; SO_RCVTIMEO/SO_SNDTIMEO: -EAGAIN at the deadline
+   }
+   ```
+4. **Partial sends:** a blocking stream send queues the whole buffer in pieces (at most 64 KB a message); after progress
+   a signal or timeout returns the count with no restart flag (`pipe_write`'s rule, vfs.c), so `SA_RESTART` never sends
+   the start again. A send on a connection the other side closed gives -EPIPE and SIGPIPE (as a pipe), unless
+   `MSG_NOSIGNAL`.
+5. **`SA_RESTART`** as Linux (`man 7 signal`): `accept`, `recv`, `send`, `connect` restart; not when the socket has a
+   timeout set (`SO_RCVTIMEO`/`SO_SNDTIMEO`), never `poll`/`select`.
+6. **`connect`:** the first message is `CONNECT`; a blocking connect then waits for POLLOUT|POLLERR and asks the result
+   with `GETSOCKOPT SO_ERROR`, never sends `CONNECT` again (a second `tcp_connect` would fail). An interrupted connect
+   returns -EINTR and the connection goes on (POSIX); a restarted one only waits. Non-blocking: -EINPROGRESS.
+7. **`accept`:** a free fd and a free ksock are reserved before `ACCEPT` is sent and given back on -EAGAIN, -EINTR or a
+   kill.
+8. **`poll`/`select`** read the bits like a pipe's: no message. netd reports POLLOUT only when at least one MSS (or a
+   third of the send buffer) is free, not at one byte.
+9. **The epoch:** a kernel counter `net_epoch` in `sock.c` (not the service's start count, which D11 resets when the
+   program text changes), raised **when netd ends**. netd learns it with `NETSRV_HELLO` and returns it in every reply
+   that creates a socket (`SOCKET`, `ACCEPT`, `RESOLVE`); the kernel keeps a new ksock only if that epoch is the live
+   one, else it frees it and answers -ENETDOWN itself. netd answers any (index, generation) it does not know with
+   -ENETDOWN: requests queued at netd's death go to the next netd (D11), and this is how they fail.
+10. **netd's end** (`sock_server_gone()`, called from svc.c's end of the `net` entry's server, before its memory is
+   freed, after the drivers' quiesce of 2.4): the epoch is raised; every ksock of the old epoch is marked dead
+   (POLLERR|POLLHUP) and **its waiters are woken** (`ev_wake`), so a blocked `recv` or `accept` returns -ENETDOWN at
+   once; any later call on it fails the same way; only `close` succeeds. A netd restart loses every connection, as a
+   reboot of a router would.
+11. **Close:** a ksock's last close sends `NET_CLOSE` **only if its epoch is live**, as a call that never starts or
+   waits for a server (`SVC_NS_SKIP`, not `FS_CLOSE`'s `SVC_NS_CLOSE`, which would make a dying process wait up to
+   30 s for a loading netd that never knew the socket); the ksock is freed after the reply.
+12. **"Given up"** (5 ends of netd in 60 s, D11): socket calls get -ENETDOWN; `ifup` or `ifconfig ... up` (root)
+   registers `net` again and says so. D11's limits are not frozen, so a later timed retry for `net` alone stays
+   possible; a remote packet that crashes netd five times is otherwise a remote "network off" until root acts (9.2).
+
+The host model of these rules (8.1) runs every interleaving of a reply, a push, a waiter and netd's end.
+
+### 4.4 libz
+
+`socket`, `bind`, `connect`, `listen`, `accept`, `send`, `sendto`, `recv`, `recvfrom`, `shutdown`, `getsockopt`,
+`setsockopt`, `getsockname`, `getpeername`, `fcntl` (`F_GETFL`/`F_SETFL`), `ioctl` (the two above), `inet_pton`,
+`inet_ntop`, `htons` and friends, `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, with BSD/Linux structures and
+constants (`AF_INET` 2, `SOCK_STREAM` 1, `SOCK_DGRAM` 2, Linux's `SOL_SOCKET`/`SO_*` values), so ported programs need no
+changes. Each is a few lines over `SYS_sock`; `--gc-sections` keeps them out of programs that do not use them.
+
+### 4.5 Names
+
+Lookups happen in netd, not in each program (one resolver and one cache, golden path "no copies"): `getaddrinfo` parses
+numbers itself, else `SOCK_RESOLVE` makes a ksock that becomes readable when the answer is in (the same interruptible
+wait), reads the addresses and closes it. netd answers from `/etc/hosts`, its cache, then DNS (6.2).
+
+## 5. Drivers
+
+### 5.1 The interface that fits every card
+
+| Shape | Cards | What the driver does with netd's buffers | Interrupt |
+|---|---|---|---|
+| DMA into host memory | CM4 GENET | posts them (from `DRV_DMAMEM`) in the ring, `DRV_CACHE` around each transfer | GIC via level 6, or polled |
+| Buffer memory on the card | A2065 (LANCE, 32 KB on the board), Ariadne (PCnet-ISA) | copies from the card's memory into them | INT2 (shared) |
+| Programmed I/O | NE2000 (PCMCIA), CS8900A (clockport), plipbox (parallel port) | reads/writes the data register into them | INT2/INT6; the CIA FLAG for plipbox |
+
+A user process reaches device registers by plain pointers (no MMU); the kernel gives a driver only the claim, the DMA
+memory, the quiesce, the cache instructions (privileged) and interrupts. The 68k data cache is off on every Zenix
+machine (`start.S`), so register access needs no cache rules on a real Amiga; on Emu68 the device windows are mapped
+uncached.
+
+### 5.2 (a) The CM4's Ethernet under Emu68: GENET v5 (`/sbin/net/genet`)
+
+*Read* from the knowledge base (`amiga/emu68-network-usb-rtg-hardware.md`, `emu68-driver-stack-why-fast.md`,
+`zenix-pi-drivers-progress.md`: rondoval's `emu68-genet-driver`, Linux's and U-Boot's `bcmgenet`), not run:
+- **Where it is:** stage0 reads Emu68's device tree while AmigaOS lives and fills the hardware table: `genet` (the base
+  after Emu68 rewrote `/scb`'s ranges: 0xF7580000 on Emu68 1.1, 0xFD580000 seen on 1.0.7, *verified on the A1200
+  2026-10-23*: never hard-coded), `genet_irq0/1`, `phy_addr`, `mac` (`local-mac-address`).
+- **Bring-up** (U-Boot's and Linux's order): flush the receive buffer, UMAC soft reset, MIB reset, RBUF control with
+  the 64-byte status block on and EEE off (EEE breaks reception), the MAC, the rings (256 descriptors in the register
+  window, default queue 16), the PHY through GENET's MDIO (a BCM54xx, RGMII with receive delay), link, DMA on. Every
+  stage logs a line, every wait has an E-clock timeout (CLAUDE.md).
+- **Memory:** frames 2 KB in the claim's DMA region, 64-byte aligned (every received frame starts with the status
+  block). The 68k address is the DMA address (the SD driver's mailbox works that way on the A1200, *verified
+  2026-10-24*; GENET's path is *read*).
+- **Caches:** the ARM's data cache is not coherent with DMA: receive buffers cleaned+invalidated before posting and
+  invalidated (whole lines) after; frames to send cleaned before the descriptor. With `HW_RANGEOPS` the driver issues
+  the range opcodes itself (AmigaOS drivers do it from task code, which runs in user mode, so they should work from a
+  Zenix process): **to check first on the A1200 with a one-page test program, on the owner's weekend checklist of
+  2026-10-30/31**, because its answer shapes `DRV_CACHE`; else `DRV_CACHE`.
+- **Polled first:** the rings are checked at every wake-up (the doorbell; a 10 ms timer while up; no sleep while the
+  last turn moved frames). A 256-entry ring holds 2.5 ms of a full gigabit line and Emu68 empties it in microseconds:
+  enough for telnet, ssh, wget. The interrupt (5.4) after measurements; on Emu68 it is silenced at GENET's own
+  interrupt mask, never at the GIC (Emu68 owns IAR/EOIR).
+- **Offloads later** (transmit checksum, receive full-frame checksum).
+- **Effort** (*proposed*): ~800-1,000 lines, plus a host model like `tools/emmc-fake.h` (GENET's registers and rings)
+  so the bring-up order and the ring arithmetic are tested on the PC before the A1200.
+
+### 5.3 (b) SLIP over the serial port, for every Amiga (inside netd)
+
+- netd opens `/dev/ttyS0` (D12: root only, one opener) and runs lwIP's `slipif` (RFC 1055, MTU 1006, MSS 966), 115,200
+  baud 8N1, no handshake. Reads with `poll` in netd's main loop. **While SLIP is up the port is the network's:** no `cu`,
+  and the kernel log stays in `dmesg` but not on the wire (D12). **Owner question 3.**
+- **netd never blocks on the port:** the kernel's serial write waits tick by tick when the 4 KB send ring is full
+  (`serial.c`), and its `poll` always says writable. So the kernel gets a truthful POLLOUT for `/dev/ttyS0` (free room
+  in the send ring; D16 rule 11 changes for this device only, a correction, not a new meaning for programs that wrote
+  before) and netd writes at most that much, keeping the rest of a frame in its own queue. The receive ring is 1 KB
+  (89 ms of SLIP), so netd's turn must stay short: no file reads in the request path (6.1).
+- **The PC side** (`tools/host/zenix-slirp`, GPL-2.0-only): reads SLIP from a serial port or pty and gives each IP
+  packet to libslirp (QEMU's user-mode network, BSD-3): NAT to the PC's network and the internet, DNS, port forwards
+  (bound to 127.0.0.1 unless asked), **no root**; Zenix is 10.0.2.15, the gateway 10.0.2.2, DNS 10.0.2.3. It passes
+  every byte that is not a SLIP frame to a log (the kernel's lines reach the wire again when netd closes the port).
+  libslirp needs GLib, so the tool is not one standalone binary unless linked statically: **owner question 4.** A PC
+  with `slattach` needs nothing Zenix-specific: plain SLIP.
+- **PPP later:** lwIP's PPP (30-40 KB, *estimate*) has pppd-derived files whose licence notices must be checked
+  against GPL-2 first. SLIP needs none of it.
+
+### 5.4 Interrupts for drivers (with the first interrupt-driven driver)
+
+Amiga interrupt lines are shared and level-triggered (INT2 with CIA-A, the keyboard, Gayle's IDE; INT6 with CIA-B and,
+on Emu68, every ARM interrupt), and the line must be quiet before the interrupt returns. As Linux's UIO: **the kernel
+silences the device, the driver handles it.** `DRV_IRQ` attaches a check-and-silence program: at most 8 steps of
+read-a-register / test-bits / write-a-register, **no jumps backwards**, every address inside the claimed register
+window or board (a bus error in supervisor mode would be a kernel crash), run after the kernel's own sources. When it
+claims an interrupt, the kernel posts the driver's event (D16: interrupts only queue, `kwork` wakes). **Storm guard:**
+too many level-2 or level-6 interrupts in a row that nobody claimed turns the attached programs off and logs it (Linux's
+"nobody cared"). Detached at the driver's end, after the quiesce. A CIA source (plipbox's FLAG on CIA-A, read-to-clear
+and shared with the keyboard) is a fixed source the kernel's own CIA handler passes on. Designed in detail with the
+first interrupt-driven driver.
+
+### 5.5 (c) Later: plipbox, NE2000, CS8900A, A2065, Ariadne
+
+All fit 5.1. plipbox (knowledge base `zenix-hardware-driver-survey.md`) needs the CIA FLAG source and the kernel to own
+the CIA register bits it shares with the serial lines; NE2000 on PCMCIA needs Gayle's PCMCIA I/O window; CS8900A is PIO
+on the clockport; A2065 and Ariadne are Zorro II boards in the hardware table's board list (FS-UAE's A2065 appears there
+as manufacturer 0x202, product 112, *verified 2026-10-26*, 8.2). A polled A2065 driver needs no interrupt design.
+
+## 6. Configuration, DHCP, DNS, commands
+
+### 6.1 Files (new `/etc` formats, frozen once shipped; unknown words reported and ignored)
+
+- **`/etc/network/interfaces`**, a small subset of Debian's format: `auto IFACE`, `iface IFACE inet dhcp|static`, and
+  in a stanza `driver NAME [ARGS]` (Zenix's word: `genet`, `slip /dev/ttyS0 115200`; NAME has no `/` and means
+  `/sbin/net/NAME`), `address A/PREFIX`, `gateway G`, `pointopoint P`, `mtu N`, `hostname H`. netd uses the file only
+  if it is owned by root and not writable by group or others (it starts programs as root from it). Example:
+  ```
+  auto eth0
+  iface eth0 inet dhcp
+      driver genet
+
+  iface sl0 inet static
+      driver slip /dev/ttyS0 115200
+      address 10.0.2.15/24
+      gateway 10.0.2.2
+  ```
+- **`/etc/resolv.conf`** (`nameserver`, `search`) and **`/etc/hosts`**, standard. DHCP's DNS servers stay in netd's
+  memory and show in `ifconfig` (nothing written behind the owner's back).
+- **Read at netd's start and on `ifup`/`ifconfig` (a reload), never per request** (a file read from a floppy takes
+  hundreds of milliseconds, and netd's turn must stay short).
+- **A static address:** the `inet static` stanza, or `ifconfig eth0 192.168.1.50/24` and `route add default
+  192.168.1.1` (root; until netd's next start).
+
+### 6.2 DHCP and DNS live in netd
+
+lwIP's DHCP client and DNS client (cache, random query ids, `LWIP_DNS_SECURE`) run in netd: they need its timers, a
+lease belongs to the interface, and a separate `dhcpcd` would be one more process on a 2 MB machine. The ARP probe of an
+offered address (`acd`) is left out. When a lease is lost or the address changes, lwIP ends the connections bound to the
+old address (`tcp_netif_ip_addr_changed`); programs see `ECONNABORTED`.
+
+### 6.3 Bringing the network up
+
+- **boot registers `net` itself** (`net` -> `/sbin/netd`, nice 0, when `/sbin/netd` exists), as it registers `disk` and
+  `fs`: not a line in `/etc/svctab`, because D15 never makes a new feature depend on the owner merging a config
+  `.new` (d15-self-updates.md, config files), and an owner who edited svctab would get no network. One held slot, no
+  memory until used.
+- **Nice 0, not the servers' -10:** clients lift netd to their own level anyway (priority inheritance, D10); at -10, a
+  flood from the LAN or a netd bug would starve every shell on a 14 MHz machine, `kill` included. netd also yields
+  after a fixed amount of work per turn.
+- netd **opens its port before** it brings interfaces up (D11's 30 s start deadline), then reads
+  `/etc/network/interfaces` and brings up the `auto` ones.
+- At boot **`init` starts `ifup -a` without waiting for it** when the file has an `auto` line (that call starts netd;
+  logins never wait for a DHCP lease or a missing cable). A machine without the file never starts netd.
+
+### 6.4 Commands (each with its page, `commands.md`, `features.md`, in its build step)
+
+- **`ifconfig`** (BSD/Roadshow style; `ifup` and `ifdown` are names of the same program, as `more` is of `less`): show
+  interfaces (address, MAC, MTU, link, lease, DNS, counters), `up`/`down`, an address; root for changes; returns once
+  the interface is configured, not when a lease arrives.
+- **`route`**: show, `add default GW`, `del`.
+- **`ping`**: ICMP echo over Linux-style unprivileged ICMP datagram sockets; netd sets each socket's echo id itself,
+  sends only echo requests on it and gives replies only to the socket with that id. Today's `ping`/`pingd` (the message
+  test programs, D11's test service) become `msgping`/`msgpingd` in step 0; the port name `ping` stays.
+- **`netstat`** (`-t -u -l -a`): `SOCK_NETSTAT`'s `unetstat` rows (first size `UNETSTAT_FIRST` 40, frozen; the caller's
+  buffer size).
+- **`host NAME`**: a lookup through netd.
+
+### 6.5 Who calls whom (a rule added to D11's list)
+
+netd calls only the root's filesystem server `fs` (its config files, spawning drivers) and the kernel; never a `fs.*`
+mount; drivers reach only `net` (through the kernel). So **no server that netd's files depend on may call `net`**: no
+root filesystem over the network. A later NFS client is a filesystem server that calls `net`, which changes D11's
+"filesystem servers call only diskd": allowed for mounts only, decided with NFS.
+
+## 7. Size and memory budgets
+
+### 7.1 The kernel (always resident; *estimates* at -Os unless measured)
+
+| Part | Size |
+|---|---|
+| `FT_SOCK`, ksocks, `SYS_sock` with its pointer table and request copy, the blocking loop, `poll`'s socket case, SIGPIPE, the epoch and `sock_server_gone`, `NET_CLOSE` | 3-4 KB |
+| `SYS_netsrv` | 0.3 KB |
+| `SYS_drv`: hwinfo, claims, DMA regions, quiesce run, cache ranges (the interrupt programs later, ~0.5 KB) | 0.8 KB |
+| The entropy pool (BLAKE2s ~1 KB, ChaCha20 616 bytes *measured* at -Os), `/dev/urandom`, `/dev/random` | 1.7-2 KB |
+| The `@zfsd` alias, `O_NONBLOCK`, `S_IFSOCK`, `ttyS0`'s truthful POLLOUT | 0.2 KB |
+| boot: registering `net`, the seed file (boot.zx is inside the kernel image) | 0.3 KB |
+| **Total** | **6-7.5 KB**, against **36,688 bytes** zfsd frees |
+| Data: 32 ksocks (~24 bytes each), the pool, claims | ~1 KB |
+
+New kernel code is `-Os` in its own files (`sock.c`, `random.c`, `drv.c`); only the ready-bit test on the poll path
+is inline.
+
+### 7.2 A machine that does not use the network (the stock A1200 as the owner runs it today)
+
+**About 28-30 KB more free memory than today**: the kernel grows by 6-7.5 KB of code and 1 KB of data, and the
+36,688-byte zfsd image is no longer resident. netd is never loaded. The disk holds `/sbin/netd` and the pages.
+
+### 7.3 A machine that does (*estimates*, measured at steps 5 and 8)
+
+| | Stock A1200, SLIP | PiStorm or a 060, Ethernet |
+|---|---|---|
+| netd code: lwIP 48.8 KB (*measured*, unlinked), netd's own 10-15 KB (config, ops, hosts and cache, the driver protocol, SipHash ISN, ChaCha20, netstat, ICMP sockets), libz ~6 KB | ~65-70 KB | ~65-70 KB |
+| netd data, sized by the machine as fsd's cache (D18): pool limits 9.4 | 16-24 KB: MSS 966, window 2 x MSS, 4 KB send buffer, 8 TCP connections, 16 buffers | 100-200 KB: MSS 1460, window 16-32 KB, 64-128 receive buffers |
+| netd stack + kernel stack | 8 + 4 KB | 8 + 4 KB |
+| Driver | none | GENET ~10 KB code, 4 + 4 KB stacks, its DMA region |
+| **Total** | **~100 KB** of 1,332 KB free with one login (D18, *measured* in FS-UAE) | ~200-300 KB |
+
+The 1 MB chip-only matrix machine (395 KB free, D18) can run netd on SLIP with a session less; the matrix says so.
+netd's memory comes in a few large regions (`SYS_memalloc`, 8 per process).
+
+### 7.4 The demo floppy (roadmap block 2's end)
+
+One 880 KB RAM floppy with the network, telnet and a web fetcher: netd (~65-70 KB), the commands and their pages must
+fit its RAM disk, which stays resident on a 2 MB machine. With zenix-ram.adf's RAM disk at 704 KB and 203 free blocks
+today, it does not fit as plain files: the demo floppy needs the packed programs the roadmap plans for it (programs
+unpacked when they start). Its own step after this note, measured.
+
+## 8. Tests
+
+### 8.1 On the PC
+
+- **netd on the host** (as `zup-host`, D15): lwIP and netd built for Linux against a fake of the kernel's socket layer,
+  SLIP over a socketpair to `zenix-slirp`: TCP to a host echo server, UDP, DNS from a test resolver, ICMP, netd's end
+  and restart. No root.
+- **The rules of 4.3 in a model** (as `tools/signal-host-test.c`): every interleaving of a reply, a push, a waiter, a
+  signal and netd's end; no lost wake-up, no spin (a client better placed than netd with a stale bit must block).
+- **lwIP's unit tests** (`test/unit`) with Zenix's `lwipopts.h` and the local patches.
+- **Fuzzing** the input path (lwIP's `test/fuzz`), one run at a time with a memory limit (this machine's rule).
+- **GENET's register and ring model** with the driver, including a quiesce while DMA runs.
+- **zfsd's move:** none needed on the host; the size counts in every build.
+
+### 8.2 In FS-UAE
+
+- **Loopback first** (no hardware): sockets, `poll`, blocking and ^C, `SA_RESTART`, partial sends, `O_NONBLOCK`,
+  SIGPIPE, an accepted socket given to a child, many connections, a SYN flood against the pool limits, netd killed
+  (every blocked call returns -ENETDOWN at once, the next call starts a new netd), five kills (given up, `ifup` brings it
+  back), bind below 1024 refused to a user, raw messages to `net` refused, a ZEX2 program's literal as a receive buffer
+  (-EFAULT), `netstat`.
+- **SLIP:** FS-UAE's serial port is a pty; `zenix-slirp` on it. The rig types into the same port, so a SLIP test runs
+  its commands from a script started at boot, ends with `ifdown sl0` and prints its results; `zenix-slirp` passes the
+  console's bytes to the tap. Checks: `ping 10.0.2.2`, TCP through a forward, DNS, a 100 KB transfer compared by
+  checksum, noise on the line (bad frames dropped and counted).
+- **Ethernet in the emulator:** FS-UAE 3.2.35 emulates an **A2065** (`network_card = a2065`, slirp inside; *verified
+  2026-10-26*: on the A1200 config it appears in Zenix's board list as 0x202/112 at 0xE90000, 64 KB; its DHCP is not
+  yet checked). With a polled A2065 driver, ARP, DHCP, the driver protocol, a driver crash and its restart run in
+  `make check`. **Owner question 2.**
+- **The driver protocol before any card:** a fake driver (test image only) that answers ARP and ICMP itself, killed
+  mid-transfer; a second claim of one device refused.
+- **zfsd from the disk** (step 1): the mount tests (a ZenixFS mount from `/sbin/zfsd`, a killed zfsd started again from
+  the file), the ZenixFS-root tests on `zenix-zfs.adf`, `free` showing the 36 KB, zup refusing a bundle without the
+  root's server.
+
+### 8.3 Only on the real machines
+
+GENET at all; the range opcodes from user mode; SLIP at 115,200 through Paula on a 14 MHz 68EC020 while the display and
+the disk work (overruns); the speed table (ping round trip, TCP over SLIP and over loopback as the stack's CPU cost) on
+the stock A1200, the 060 and the PiStorm, labelled by machine; the entropy sources' real behaviour.
+
+## 9. Security
+
+### 9.1 What the server and the kernel check
+
+- netd answers `NET_*` only with `UMSG_KERNEL`, `NETDRV_*` only from its own children (pid list) through `SYS_drv`;
+  anything else -EACCES.
+- **Ports below 1024: root only** (the effective uid the kernel stamps, as Linux). Raw IP sockets: root only. ICMP
+  datagram sockets: echo only (6.4). Interfaces, routes, addresses: root. `SO_REUSEADDR` never shares a port between
+  different uids.
+- No listening service by default; no firewall in revision 1 (lwIP's input hook is where one would go: knowledge base
+  `amiga/lwip-amiga-firewall.md`).
+- Everything from the network is untrusted: lwIP's parsing, fuzzed (8.1); netd's own parsing (config, driver blocks)
+  range-checks every number.
+
+### 9.2 What a system without an MMU can and cannot promise
+
+Can: a program uses the network only through the kernel's checks (its own fds and buffers, root for low ports and
+configuration); a crash of netd or a driver is contained (the quiesce, 2.4) and restarted. **Cannot:** any program can
+read or write netd's memory (other users' connection data) and poke the card's registers: users are a convenience, not
+protection (D8, limits.md). A remote bug in netd's parsing has the whole machine's rights (no MMU, no non-executable
+memory), and five remote crashes in a minute switch the network off until root acts (4.3 rule 12). So: lwIP rather than
+new code, the fuzzing, the pool limits, few listening services, and the security audit at block 2's end.
+
+### 9.3 Random numbers
+
+**Uses:** TCP's initial sequence numbers (RFC 6528: SipHash-2-4 keyed with 128 random bits over the connection's
+addresses and ports, plus a 4 µs clock made of the E-clock and the tick; `LWIP_HOOK_TCP_ISN`; SipHash is smaller than
+contrib `tcp_isn`'s MD5), ephemeral ports (lwIP picks them **sequentially** after one random start, `tcp_new_port` and
+`udp_new_port`: a local patch makes each one random, RFC 6056), DNS query ids and ports, later the crypto library.
+
+**The kernel's pool:** samples are accumulated with **BLAKE2s** and output comes from **ChaCha20 with fast key
+erasure**, as Linux since 5.17; **`/dev/urandom`** never blocks; **`/dev/random`** blocks until the pool was first
+seeded with an estimated 256 bits, then is the same, and polls readable from then on (Linux since 5.6). Samples are
+mixed in batches (per tick, or when the ring fills), never one hash per event.
+
+**netd's keys:** netd seeds its ChaCha20 (`LWIP_RAND`) and its ISN key from `/dev/urandom` *before* `lwip_init`, and
+**polls `/dev/random`**: when it becomes readable (seeded) netd takes fresh keys; it reseeds every few minutes after.
+So keys from an early boot are replaced as soon as the pool is real.
+
+**Sources, and what each is credited:**
+- **Credited** (a clock independent of the Amiga's crystal): key presses and releases (the keyboard's own controller,
+  1 bit each), bytes from the far end of the serial line (the other machine's clock; sampled per SLIP frame, half a
+  bit), the floppy's index pulse while the motor runs (motor speed jitter), and on Emu68 the Pi's hardware generator
+  (BCM2711 RNG200, when stage0 finds it: a field of the hardware table's reserved words), fully.
+- **Mixed but credited 0:** network frames (partly timed by an attacker, and sampled on a tick that comes from the same
+  crystal as the beam under a polled driver), disk and SD completions (clocked by the chipset), mouse movement, a hash
+  of not-yet-used chip RAM at a cold start.
+- The sample is the **beam position** (`VHPOSR`, one chip-bus read): the CIA E-clock is the same crystal and a slow
+  access. Interrupt handlers only store the 16-bit sample in a small ring.
+- **The seed file** `/var/lib/random-seed` (root, mode 600): read at boot and at once rewritten and synced; **credited
+  only after that rewrite reached a writable, persistent root** (never on a RAM-disk root, a read-only or rescue root,
+  where the same seed would come back every boot) and only if the boot that wrote it had itself been seeded (a flag in
+  the file). Written again at `reboot` and shutdown. **No image ever ships one:** `mkroot` and the bundle refuse a seed
+  file (every copy of an image, a card or the demo floppy would share it).
+
+### 9.4 lwIP's limits (a SYN flood must not eat netd)
+
+lwIP's pools would hold their limits only as static arrays; with heap allocation (`MEMP_MEM_MALLOC`, needed to size
+them by machine) `memp_malloc` ignores the counts. So a local patch counts each pool against the limits netd sets at
+start (by machine memory): TCP connections, TIME_WAIT (killed oldest first when full), reassembly, out-of-order segments
+(`TCP_OOSEQ_MAX_PBUFS`/`BYTES`, `IP_REASS_MAX_PBUFS`), a capped receive queue per UDP socket, and per listener a capped
+backlog (`TCP_LISTEN_BACKLOG`, `tcp_backlog_delayed`).
+
+### 9.5 lwIP's raw-API rules for the builder (`NO_SYS=1`)
+
+`sys_check_timeouts()` every turn, `sys_timeouts_sleeptime()` as the `evwait` timeout; no lwIP call from a signal
+handler (they only set flags); in a `tcp_err` callback the pcb is already gone; `tcp_close` may fail with ERR_MEM
+(retry, or `tcp_abort`); `tcp_listen` returns a new pcb and frees the old; `tcp_recved` only after the program took the
+data, and a receive callback that cannot queue returns ERR_MEM (lwIP keeps the data); `tcp_write` with COPY, ERR_MEM
+becomes a partial count or -EAGAIN; `SO_REUSE` on, so a restarted server binds while TIME_WAITs exist.
+
+## 10. Build order (each step small, merged with its tests; the full suite before each merge)
+
+Almost every step touches the shared files (`kernel/kernel.h`, `Makefile`'s `UAPPS` and images, `user/usys.h`,
+`user/libz.*`): **the steps are the main session's** (CLAUDE.md "Sessions"). A side session can take only the host-only
+parts: the lwIP import with the host netd and its tests, `zenix-slirp`, the GENET model.
+
+0. **`ping`/`pingd` become `msgping`/`msgpingd`** (`UAPPS`, `MOUNTAPPS`, tests, pages). Test: the D11 suites unchanged.
+1. **zfsd from the disk** (section 3; its own DESIGN line, merged first): mount registers `/sbin/zfsd`, the `@zfsd`
+   alias, zfsd out of `kernel.bin`, per-image RAM disks, `kernel-zfs.bin`/`zenix-zfs.adf`, zup's root-server check.
+   Tests: 8.2 "zfsd from the disk", the RAM-floppy count.
+2. **Random numbers** (9.3): pool, sources, devices, the seed file in boot and reboot, `mkroot`'s refusal. Tests: host
+   (BLAKE2s and ChaCha20 against RFC 7693/8439 vectors, the crediting rules), FS-UAE (two boots differ; the seed file
+   rewritten; `/dev/random` waits on a fresh image until keys are typed; a RAM-disk root never credits its seed).
+3. **The kernel's socket layer** (4.1-4.3, `O_NONBLOCK`, `S_IFSOCK`, the error numbers) with a small test server in
+   place of netd (`socktestd`: answers from a table, pushes bits, dies on command). Tests: the 4.3 model; FS-UAE:
+   blocking, ^C, `SA_RESTART`, partial sends, `poll`, SIGPIPE, -ENETDOWN on its death with waiters woken, the
+   no-start close, pointer checks, the clamps.
+4. **netd with lwIP, loopback only**, libz's socket calls, `netstat`; sizes measured linked. Tests: host netd; 8.2
+   "loopback".
+5. **SLIP, `/etc/network/interfaces`, `ifconfig`/`ifup`/`ifdown`, `route`, `ping`, `zenix-slirp`, boot's `net`, init's
+   `ifup -a`, ttyS0's POLLOUT.** Tests: 8.1, 8.2 "SLIP". **First thing the owner can use:** the stock A1200 on the cable.
+6. **DNS, `host`, `getaddrinfo` by name**; DHCP code in. Tests: host, and FS-UAE through slirp's DNS.
+7. **The driver protocol** (`SYS_drv`: claim, DMA memory, quiesce, cache, attach, xfer; doorbell, supervision) with the
+   fake driver. Tests: 8.2 "driver protocol", a driver killed, a second claim refused, bad buffer numbers refused.
+8. **(owner question 2)** a polled **A2065** driver: Ethernet, ARP and DHCP in `make check`.
+9. **GENET** (polled): the host model, then the A1200 checklist (link, DHCP from the owner's router, ping, telnet to a
+   BBS, the speed table). **The CM4's Ethernet in daily use.**
+10. Interrupts (`DRV_IRQ`, 5.4) with whichever driver needs them first, measured.
+11. A focused audit of the network (security first), its findings fixed; then telnet (its own note: pseudo-terminals,
+   SIGHUP, the BBS terminal), the crypto library, ssh, wget, NFS, the remote control, `zpkg`, in the roadmap's order.
+
+## 11. Open questions for the owner
+
+1. **Order:** the roadmap names the CM4's Ethernet first; the note builds the stack and SLIP first (steps 3-6), because
+   GENET can only be tested on the A1200 and needs the stack under it anyway, and SLIP works on every Amiga and in
+   the emulator. The CM4's Ethernet comes at step 9 (8 with the A2065). Fine?
+2. **An A2065 driver before GENET** (step 8), as the emulator's Ethernet, so the Ethernet half is checked by every
+   `make check`; or later in the card order?
+3. **SLIP takes the stock A1200's only serial port:** while the network runs over the cable there is no `cu` and no
+   serial log. Acceptable (the network gives telnet and later ssh to the PC instead)?
+4. **The PC-side helper** `zenix-slirp` (no root on the PC) needs the PC's libslirp and GLib: a normal Linux program, or
+   one standalone binary (static linking, bigger)? Or no helper, and set up `slattach` + NAT as root on the PC?
+5. **ZenixFS as the root becomes test-only until block 4** (the shipped kernel no longer carries zfsd; updates refuse to
+   break a ZenixFS-root machine). CLAUDE.md lists "then ZenixFS as root" among the goals after the first boot: fine to
+   wait for block 4?
+6. **Licence notices:** lwIP (BSD-3) asks that its notice travels with binaries (miniz's MIT notice too, already
+   shipped without it). Proposed: a `/usr/share/licenses/` folder on every image and in the bundle. Fine?
+7. **lwIP itself** (BSD, 48.8 KB, loaded only while the network runs) instead of writing our own TCP/IP: the technical
+   call is made; said here because it is the biggest outside code Zenix would take in.
+
+## 12. Measurements behind this note
+
+lwIP sizes: section 2.2 (*measured* 2026-10-26 by this note's author and again by the architecture review, the same
+method). The kernel and image numbers: 3.1 (*measured* by the architecture review, `make` at 7b5149d). ChaCha20's block
+at -Os: 616 bytes (*measured*, the architecture review). FS-UAE's A2065: 8.2 (*verified*). Everything else in sections 7 and 2.2 is an
+estimate and is measured at its build step.
+
+## 13. Reviews
+
+Two independent reviews of revision 1 (2026-10-26), both read-only; every finding is worked in above.
+
+**Protocol, robustness, security** (the stack's and the kernel's side, read against ipc.c, svc.c, event.c, signal.c,
+vfs.c, proc.c, serial.c and lwIP 2.2.1): *blockers* - stale ready bits could spin a better-placed client or lose a
+wake-up (4.3 rules 1-3); nothing woke socket waiters when netd died (rule 10); the epoch used D11's start count, which
+resets, and requests queued at netd's death reach the next netd (rule 9); a driver's raw call to a stopped `net` would
+*start* a new netd (2.3: drivers go through `SYS_drv`, no-start); DMA kept writing after its owner's death (2.4:
+claims, DMA memory owned by the claim, quiesce). *Should fix* - partial sends and `SA_RESTART`, connect and accept loops,
+`NET_CLOSE` as `SVC_NS_SKIP`, address-length clamping and the request copied by the kernel, netd at nice -10 starving
+shells, `MEMP_MEM_MALLOC` losing lwIP's limits, lwIP's raw-API rules, netd blocking on the serial port and on files,
+SIGPIPE ending netd, "given up" (-ENETDOWN, `ifup` re-registers) and the error numbers, entropy credit for
+attacker-timed and replayable inputs (BLAKE2s mixer), netd's keys before the pool is seeded, sequential ephemeral
+ports, bounds for interrupt programs, `SYS_drv` limited to netd's children. *Minor* - drivers by pid, ICMP ids, root's
+share of ksocks, names with `/`, slirp forwards on 127.0.0.1, kernel lines on the wire after `ifdown`, `O_NONBLOCK` and
+the ioctls, drivers stay ZEXE.
+
+**Architecture, frozen interfaces, size, loading** (with measurements at 7b5149d): *blocker* - DMA into freed memory
+(the same as above). *Should fix* - `net` in `/etc/svctab` breaks D15's config rule (boot registers it); a general
+`@NAME` fallback is a second way next to D11 6.4's file-service rule (mount registers the path, one alias); a ZenixFS
+root and updates (zup's check, `zenix-zfs.adf`, test-only kernel said, owner question 5); `root-mount.img` has exactly
+zero blocks to spare for zfsd (RAM disks per image); the size table (acd counted, 7 KB of assert strings, 10.4 KB of
+Ethernet code on SLIP machines accepted, netd's own 10-15 KB, unlinked figures); ready-bit ownership (the same as the
+first review's blocker); the demo floppy (7.4); the Sessions rule (all steps main's); owner decisions not listed (serial
+port, licence notices, GLib, ZenixFS root, the order). *Minor* - the frozen items named one by one (op numbers, first
+sizes, message ranges, `S_IFSOCK`, the device names, the file formats, hwinfo now user-visible), D11's capacity
+(NSVC 12: disk, fs, 7 mounts, net, ping: one spare), netd's call graph (6.5), `ifup -a` not waiting, the second driver
+model and the supervision rule said in DESIGN, the `/net` filesystem in "not taken", stale wording.
+
+Revision 2 changes no part of the overall design (one lwIP server on demand, user-mode driver processes as its
+clients, SLIP inside netd, sockets as a kernel file kind blocking in the kernel, zfsd off the kernel image); both
+reviewers judged that shape sound.
+
+Last checked against the code: 2026-10-26.
