@@ -11,6 +11,8 @@ section 3, "Updates"). The bundle and the manifest are frozen formats (CLAUDE.md
   mkzup.py bundle OUT --kernel FILE [--version V --vstr S --date YYYYMMDD --channel C --min V] PKGDIR NAME...
         a bundle: the kernel as boot/zenix and the named packages (each pkg/NAME.manifest + pkg/NAME.tgz); the
         version defaults to the packages' and must be the one the kernel image carries (its "ZVER" record)
+  mkzup.py repack PKGDIR NAME /PATH=HOSTFILE...   rebuild package NAME with these files' contents (a new path is
+                                         added as a file, mode 755) - for test bundles that change something
   mkzup.py check FILE                    every range and SHA-256 of a bundle; exit 1 with the reason if one is wrong
   mkzup.py list FILE                     the header and the parts
   mkzup.py installdb STAGE PKGDIR DEST   the manifests of the packages whose every entry is in the staging tree STAGE
@@ -307,6 +309,24 @@ def installdb(stage, pkgdir, dest):
     return got
 
 
+def repack(pkgdir, name, repl):
+    m = parse_manifest(open(os.path.join(pkgdir, name + ".manifest"), "rb").read())
+    tar = tarfile.open(fileobj=io.BytesIO(gzip.decompress(open(os.path.join(pkgdir, name + ".tgz"), "rb").read())))
+    with tempfile.TemporaryDirectory() as t:
+        ents = []
+        for kind, mode, uid, gid, digest, size, path, target in m["entries"]:
+            src = target
+            if kind in "fc":
+                src = repl.pop(path, None)
+                if src is None:
+                    src = os.path.join(t, str(len(ents)))
+                    open(src, "wb").write(tar.extractfile(path[1:]).read())
+            ents.append((kind, mode, uid, gid, src, path))
+        for path, src in repl.items():
+            ents.append(("f", 0o755, 0, 0, src, path))
+        make_package(pkgdir, name, m["vnum"], m["vstr"], ents, m["group"], m["deps"])
+
+
 def main(a):
     if len(a) >= 3 and a[0] == "packages":
         std_packages(a[1], a[2])
@@ -330,6 +350,8 @@ def main(a):
                 die("bad entry %r" % a[i])
             i += 1
         make_package(out, name, vnum, vstr, ents, group, deps)
+    elif len(a) >= 3 and a[0] == "repack":
+        repack(a[1], a[2], dict(x.split("=", 1) for x in a[3:]))
     elif len(a) >= 2 and a[0] == "bundle":
         out, kernel, opts, rest = a[1], None, {}, []
         i = 2

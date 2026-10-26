@@ -125,6 +125,13 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    the illegal and line-F vectors caught), all of which a running AmigaOS may have changed and a floppy boot never
    has. It is built with the same m68k-elf compiler as the kernel (no Amiga toolchain): linked like a Zenix program
    and wrapped into an AmigaOS hunk executable by `tools/mkhunk.py`. Details and limits: man/zenixboot.txt.
+   **Updates, the boot half** (D15, "Updates" below): with `Zenix/` next to zenixboot it takes the kernel from there by
+   the start rule (`zenix`, a `zenix.new` with the state's SHA-256, `zenix.old`), installs a bundle's kernel in the
+   careful FFS order (each step followed by `ACTION_FLUSH`, DoPkt to `GetDeviceProc("PROGDIR:")`'s port, which FFS
+   answers once its buffers are written), keeps `Zenix/state`, puts the bundle (loaded fast RAM first, 16-aligned with
+   16 bytes free before it) into bootinfo `+0x78`/`+0x7C` and the rollback flag into `+0x80`, and follows the trial
+   through the update note and the previous boot's klog header (evidence: reason PANIC, or RUNNING without
+   confirmation, in a boot after its last handover; a cold start is none).
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls
    `kmain()`.
 4. `kmain` reads the previous boot's log (below), then starts the serial port, vector table, memory manager,
@@ -300,6 +307,13 @@ for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the num
   16-byte boundary: `boot/zenix` (the kernel; `mkzup.py` refuses one that does not carry the bundle's version) and
   `pkg/NAME.manifest` + `pkg/NAME.tgz` for each package. Every count, size and offset is range-checked by every
   reader (`tools/zup-host-test.sh` feeds each kind of damage).
+- **The state file** `BOOT:Zenix/state` (zenixboot's, text): `zenixboot-state 1`, `version V`, `kernelsha HEX`, `phase
+  installing|trial|confirmed|rejected`, `handovers N`, `lastboot N` (the newest klog boot number at the last
+  handover), `end`; unknown lines ignored, one without `end` is not used. Written as `state.new`, flushed, `state`
+  deleted, `state.new` renamed, flushed; a start that finds only `state.new` reads it. The files beside it:
+  `zenix`, `zenix.new`, `zenix.old`, `zenix.rejected`, `zenix-update.zup` (`.part` while copied, `.bad`, `.done`,
+  `.rejected`). The bootinfo fields: `+0x78` the bundle's address (16-aligned), `+0x7C` its size (0: none), `+0x80`
+  flags (bit 0: going back, "Zenix (previous)").
 - **zup** (`user/zup.c`, `/sbin/zup`, man/zup.txt) installs the packages of a bundle onto the root, as one
   transaction: `/var/lib/zpkg/journal` (text: `zupj 1`, `target VERSION T`, one line an operation - `OP LINK MODE UID
   GID SHA TARGET OLD PATH`, `-` where nothing applies; OP is `R` replace, `A` add, `D` delete, `l` new link, `L`

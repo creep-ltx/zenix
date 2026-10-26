@@ -93,9 +93,12 @@ $(BUILD)/zenixboot-start.o: boot/zenixboot-start.S boot/handoff.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/zenixboot.bo: boot/zenixboot.c | $(BUILD)
 	$(CC) $(CFLAGS) -Os -c $< -o $@
-$(BUILD)/zenixboot.elf: $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo link/user.ld
+$(BUILD)/zenixboot.bo: user/sha256.h
+$(BUILD)/sha256.bo: user/sha256.c user/sha256.h | $(BUILD)
+	$(CC) $(CFLAGS) -Os -c $< -o $@
+$(BUILD)/zenixboot.elf: $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo $(BUILD)/sha256.bo link/user.ld
 	$(CC) $(CFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
-	    $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo $(LIBGCC) -o $@
+	    $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo $(BUILD)/sha256.bo $(LIBGCC) -o $@
 $(BUILD)/zenixboot.zx: $(BUILD)/zenixboot.elf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@
@@ -202,11 +205,12 @@ $(BUILD)/gzip.uelf: $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl
 	    $(BUILD)/crt0.o $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 # zup (DESIGN D15, /sbin/zup): inflate (miniz) and SHA-256 (sha.c)
+$(BUILD)/sha256.uo $(BUILD)/sha256.po: user/sha256.h
 $(BUILD)/zup.uo: user/zup.c user/libz.h user/usys.h user/sha256.h kernel/fsproto.h | $(BUILD)
 	$(CC) $(UCFLAGS) $(MINIZ_CFLAGS) -c $< -o $@
-$(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+$(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
-	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 # programs that look up users and groups (/etc/passwd, /etc/group), and those that also check passwords
 PWAPPS := ls id whoami chown renice
@@ -214,9 +218,9 @@ AUTHAPPS := login su passwd sha256sum
 $(PWAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $< $(BUILD)/pw.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
-$(AUTHAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+$(AUTHAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
-	    $(BUILD)/crt0.o $< $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+	    $(BUILD)/crt0.o $< $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/pw.uo $(BUILD)/sha.uo: $(BUILD)/%.uo: user/%.c user/pw.h user/sha256.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@
 
@@ -301,8 +305,8 @@ $(BUILD)/%.pzx: $(BUILD)/%.puelf tools/mkzexe.py tools/check-68020-60.sh Makefil
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
 # login also links the user and password parts (pure builds of them: pw.po, sha.po)
-$(BUILD)/login.puelf: $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
-	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/libz.po $(LIBGCC) -o $@
+$(BUILD)/login.puelf: $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/sha256.po $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
+	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/sha256.po $(BUILD)/libz.po $(LIBGCC) -o $@
 $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po: user/pw.h
 # DESIGN D13 stage 1: these commands are installed as programs with shared code (one copy of sh's and login's code
 # for every console's session). Nothing they do sends raw messages (limits.md); sh.c and login.c were checked with

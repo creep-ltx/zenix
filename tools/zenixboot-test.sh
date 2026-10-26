@@ -88,7 +88,7 @@ run() {     # name seconds [keyscript] (run-test.sh waits for a free emulator sl
 
 booted() {  # name: the whole chain, from the Startup-Sequence to a shell on the IDE root
     local n=$1
-    check "$n: Kickstart ran the Startup-Sequence, zenixboot loaded the kernel" "$(has $n 'zenixboot 0.1b1: loading zenix (')"
+    check "$n: Kickstart ran the Startup-Sequence, zenixboot loaded the kernel" "$(has $n 'zenixboot [0-9.b]*: loading zenix (')"
     check "$n: the kernel started" "$(has $n 'kernel: [0-9]* bytes at')"
     check "$n: fdisk lists the FFS boot partition and the ext2 root" \
         "$(grep -aq '^ide0p1 *ZB0 .*other boot' "$OUT/$n.log" && grep -aq '^ide0p2 *ZR0 .*ext2 mounted' "$OUT/$n.log" && echo ok || echo bad)"
@@ -134,7 +134,7 @@ for s in $SETUPS; do
     bootmenu)
         conf $s A1200 '$ZENIX_KICKSTART_DIR/kicka1200.rom' "" 4096 "$OUT/bootmenu.hdf"; run $s 300 tools/tests/bootmenu-test.txt
         tr -d '\r' <"$OUT/$s.log" | sed 's/\x1b\[[0-9;:]*[mK]//g' >"$OUT/$s.txt"
-        check "$s: two boots through the menu" "$([ "$(grep -ac 'zenixboot 0.1b1: loading zenix (' "$OUT/$s.txt")" -ge 2 ] && echo ok || echo bad)"
+        check "$s: two boots through the menu" "$([ "$(grep -ac 'zenixboot [0-9.b]*: loading zenix (' "$OUT/$s.txt")" -ge 2 ] && echo ok || echo bad)"
         check "$s: the second boot is boot 2 and shows boot 1 as the previous one, ended with reboot" \
             "$(grep -aq '^klog: boot 2, ' "$OUT/$s.txt" && grep -aq '^=== previous boot (1) ended here with reboot' "$OUT/$s.txt" && echo ok || echo bad)"
         check "$s: no damaged log reported" "$(grep -aq 'damaged' "$OUT/$s.txt" && echo bad || echo ok)"

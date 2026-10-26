@@ -94,7 +94,8 @@ pointers.
   inode numbers from the kernel (more than the 64 open files and 32 program loads there can be).
 - Updates (DESIGN D15, architecture.md section 3, "Updates"): a bundle of at most 16 MB and 64 parts, 16 packages,
   8 dependencies a package, 1024 changes in one install, paths in a package of at most 55 bytes (with `.zup-new` a
-  system call's 63), a manifest or a journal of at most 1 MB.
+  system call's 63), a manifest or a journal of at most 1 MB. zenixboot: the trial ends after 3 starts without a sign
+  of trouble; its question waits 10 s; boot gives zup 20 minutes.
 - Priorities (DESIGN D10, architecture.md section 6): 32 levels; nice -20..19 (a value outside is taken as the nearest
   end); a 50 ms slice; the built-in servers at nice -10; priority inheritance passes along a chain of at most 8 servers.
 - The shell: no fixed count of arguments, glob matches, words, pipeline stages, `for` items or positional

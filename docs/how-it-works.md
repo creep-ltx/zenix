@@ -25,14 +25,20 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    the same tables, stage0, the same kernel home, the same colours (blue while reading, cyan, magenta). A problem
    before that point is printed and leaves AmigaOS running. Because a running AmigaOS may have more switched on than
    a fresh floppy boot, it also stops the floppy motors, shows no screen, resets the display registers and switches a
-   68040/060's data cache and MMU off. From step 3 on the two paths are the same.
+   68040/060's data cache and MMU off. With the kernel in a directory `Zenix/` next to it, zenixboot also does **the
+   boot half of an update** (DESIGN D15, man/zenixboot.txt "UPDATES"): a bundle `Zenix/zenix-update.zup` is checked
+   whole, its kernel installed as `zenix` with the old one kept as `zenix.old` (each step flushed to the disk), and
+   the bundle left in memory for the new kernel (bootinfo `+0x78`); at the next starts it reads the update note and
+   the previous boot's log to end the trial, or to offer the previous version after a crash. From step 3 on the two
+   paths are the same.
 3. **`start.S`**: the kernel image is a ZEXE; the first code walks its own relocation table adding the real load
    address, flushes the instruction cache (the patched words must not run from a stale cache or an Emu68
    translation), clears BSS, and refuses to continue on a 68000 (serial message, orange over red).
 4. **`kmain`** (`kernel/main.c`), in order: the kernel log (`klog_init`: a log left by the previous boot at the
    top of chip RAM is found, and this boot writes the other of the two slots there); serial port (so there is always a console); font pointer extracted
    *before* the memory manager touches RAM; vector table (`VBR` set; exceptions, the four interrupt levels and
-   `TRAP #0`); memory manager built from bootinfo with the kernel, low chip RAM and the RAM-disk excluded; a
+   `TRAP #0`); memory manager built from bootinfo with the kernel, low chip RAM and the RAM-disk excluded (and an
+   update bundle zenixboot left, checked and reserved as a block in use); a
    memory self-test; instruction cache on; the E-clock counter (PAL or NTSC crystal, from the Agnus/Alice id);
    display (the beam's line count picks 32 or 25 text rows; Copper list, bitplane, font); the previous boot's last lines
    if there was one (`klog_show_prev`); real-time clock if present;
@@ -50,7 +56,9 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    last one can be a root). boot picks the root (a RAM disk; else the bootable partition; else the first ext2 or
    ZenixFS one; else the bare disk), reads its superblock to tell ext2 from ZenixFS and its volume id, and registers
    `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...`. Asking for the root inode starts that server (pid 3); from
-   then on the kernel log is no longer mirrored on the screen. boot registers the services of `/etc/svctab` (nothing
+   then on the kernel log is no longer mirrored on the screen. boot runs `/sbin/zup` and waits (D15: the root half of
+   an update, or what a power cut left; with nothing to do it ends at once) and gives the bundle's memory back. boot
+   registers the services of `/etc/svctab` (nothing
    is started for them yet), then `spawn("/bin/init")` and waits for it.
    `spawn` itself is messages to `fsd`: the kernel's `proc_spawn` opens the file (`fs_exec_open`) and reads it
    straight into the new process's memory.

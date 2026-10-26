@@ -88,7 +88,7 @@ grep -qx base.manifest $T/db && grep -qx utils.manifest $T/db && grep -qx man.ma
 # ---- 2. zup on the PC ----
 U=$T/u; mkdir -p $U
 gcc -m32 -DZHOST -std=gnu11 -O1 -g -Wall -Wextra -Wno-format-truncation -fsanitize=address,undefined -fno-omit-frame-pointer \
-    -Iuser/miniz -o $U/zup user/zup.c user/sha.c user/miniz/miniz_tinfl.c tools/host/zup-host.c 2>$U/cc.log &&
+    -Iuser/miniz -o $U/zup user/zup.c user/sha256.c user/miniz/miniz_tinfl.c tools/host/zup-host.c 2>$U/cc.log &&
     ! grep -q 'warning' $U/cc.log && check "zup builds for the PC without a warning" ok || { check "zup builds for the PC without a warning" bad; cat $U/cc.log; }
 export ZUP_SELF=$U/zup ASAN_OPTIONS=detect_leaks=0
 V0=2026102500; V1=2026102600; V2=2026102701
