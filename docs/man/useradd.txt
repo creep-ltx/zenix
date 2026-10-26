@@ -1,0 +1,46 @@
+USERADD(8)			Zenix manual
+
+NAME
+    useradd - add a user
+
+SYNOPSIS
+    useradd [-u uid] [-g group] [-d home] [-s shell] [-c comment] [-M] name
+
+DESCRIPTION
+    Adds a line for NAME to /etc/passwd and makes the home directory,
+    owned by the new user, mode 700. The password is empty until it is set
+    with passwd(1). Only root may add users.
+
+    /etc/passwd is rewritten safely: the new contents go to
+    /etc/passwd.new, which is then renamed over the old file, so a power
+    cut leaves either the old or the new file, never half of one.
+
+OPTIONS
+    -u uid      the user number (0-65535); default the lowest free number
+                from 1000
+    -g group    the main group, by name or number; default "users"
+    -d home     the home directory (absolute); default /home/NAME
+    -s shell    the login shell; default /bin/sh
+    -c comment  the full name or other text
+    -M          make no home directory
+
+EXAMPLES
+    useradd anna                    then: passwd anna
+    useradd -c "Anna Berg" -g users anna
+    useradd -M -u 2000 -s /bin/sh backup
+
+EXIT STATUS
+    0, 1 when the user exists, the number is taken, the group is unknown,
+    a file cannot be written or the caller is not root, 2 for bad
+    arguments or a bad name.
+
+NOTES
+    A name is 1-31 characters of a-z, 0-9, _ and -, starting with a letter
+    or _. The home, shell and comment may not contain ':' or a newline and
+    are at most 63, 31 and 47 characters. The new user is not added to any
+    group's member list in /etc/group (the main group is in /etc/passwd).
+    An existing home directory is left as it is. /etc/passwd is read whole,
+    at most 64 KB. There is no /etc/skel: the home starts empty.
+
+SEE ALSO
+    userdel(8), passwd(1), login(1), su(1), id(1)

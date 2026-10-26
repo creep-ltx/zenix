@@ -140,3 +140,22 @@ int read_secret(const char *prompt, char *buf, int max)
     fputs("\n", 1);
     return rc;
 }
+
+/* replace a whole file safely: write PATH.new, set its mode, then rename it over PATH (atomic: the rename is crash-safe
+ * on ext2 and ZenixFS). 0, or -1 after a message naming WHO. */
+int pw_replace(const char *who, const char *path, const char *data, u32 len, u32 mode)
+{
+    char tmp[64];
+    if (strlen(path) + 5 > sizeof tmp) { fprintf(2, "%s: %s: path too long\n", who, path); return -1; }
+    strcpy(tmp, path); strcat(tmp, ".new");
+    int fd = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC);
+    if (fd < 0 || sys_write(fd, data, len) != (int)len) {
+        fprintf(2, "%s: %s: %s\n", who, tmp, zwhy("cannot write"));
+        if (fd >= 0) { sys_close(fd); sys_unlink(tmp); }
+        return -1;
+    }
+    sys_close(fd);
+    sys_chmod(tmp, mode);
+    if (sys_rename(tmp, path) < 0) { fprintf(2, "%s: cannot replace %s: %s\n", who, path, zwhy("failed")); sys_unlink(tmp); return -1; }
+    return 0;
+}
