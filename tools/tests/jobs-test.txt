@@ -40,3 +40,61 @@ send \x12alp\r
 sleep 3
 send \x12bet\x12\r
 sleep 3
+send if true\r
+sleep 1
+send then echo if-$((1+1))\r
+sleep 1
+send fi\r
+sleep 2
+send i=0; while [ $i -lt 2 ]\r
+sleep 1
+send do i=$((i+1))\r
+sleep 1
+send done; echo while-$i\r
+sleep 2
+send for x in a b\r
+sleep 1
+send do echo for-$x$x\r
+sleep 1
+send done\r
+sleep 2
+send case k in\r
+sleep 1
+send k) echo case-$((3*3)) ;;\r
+sleep 1
+send esac\r
+sleep 2
+send f() {\r
+sleep 1
+send echo fn-$1$1\r
+sleep 1
+send }\r
+sleep 1
+send f 5\r
+sleep 2
+send { echo grp-$((6+1))\r
+sleep 1
+send }\r
+sleep 2
+send ( echo sub-$((4*2))\r
+sleep 1
+send )\r
+sleep 2
+send echo pipe-xyz |\r
+sleep 1
+send tr a-z A-Z\r
+sleep 2
+send echo back\\\r
+sleep 1
+send slash-$((5+5))\r
+sleep 2
+send if true\r
+sleep 1
+send \x03
+sleep 1
+send echo dropped-$((4+5))\r
+sleep 2
+send fi\r
+sleep 1
+send echo after-$((0+1)) ps2-count\r
+sleep 2

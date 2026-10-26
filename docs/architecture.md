@@ -937,7 +937,10 @@ and at the prompt the spare goes back too, so an idle shell holds only the first
 `. file`, `/etc/profile`, `~/.shrc`) is read 512 bytes at a time on a descriptor above 9 (out of the way of `N>&M`)
 and run one complete command at a time: lines are added until the lexer and the parser no longer ask for more (an
 open quote, a here-document without its end, an `if` without `fi`, a line ending in `\`, `|` or `&&`), the command
-runs, and its memory is released before the next is read. Functions keep their text on the heap (they are parsed again
+runs, and its memory is released before the next is read. The interactive prompt asks the same question of what was
+typed (`cmd_incomplete`: lexed and parsed in the arena, then released): while the command is unfinished it prints PS2
+and adds the next line (at most 2047 bytes in all); a syntax error is not unfinished and is reported at once.
+Functions keep their text on the heap (they are parsed again
 at each call), so they outlive the command that defined them. When the kernel gives no more memory the shell says
 "out of memory" and ends (status 2). Variables, aliases, history and functions live on the heap (`malloc`).
 

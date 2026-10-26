@@ -83,7 +83,12 @@ VARIABLES THE SHELL USES
     PATH (default /bin)  HOME  USER  HOSTNAME  IFS  PWD  OLDPWD  TERM
     LINES (from the terminal: 32 on PAL, 25 on NTSC)  COLUMNS
     PS1 (the prompt: \w directory, \W its name, \u user, \h host,
-        \$ # or $, \n)   PS2 (the continuation prompt)
+        \$ # or $, \n)   PS2 (the continuation prompt, default "> ")
+    At the prompt, a command that is not finished yet (an open quote or
+    here-document, if without fi, a loop without done, case without esac,
+    a function, { or ( without its end, a line ending in | && || or a
+    backslash) is continued on the next line after PS2, as in bash; Ctrl+C
+    there drops it. A command typed this way is at most 2047 bytes.
     Start-up files: /etc/profile and ~/.shrc (read by an interactive shell).
     ~/.shrc is read only if it belongs to the effective user or to root, so
     a shell that runs as root never runs another user's start-up commands.

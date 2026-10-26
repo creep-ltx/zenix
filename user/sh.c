@@ -2521,6 +2521,22 @@ static void run_startup_file(const char *path)
     if (fd >= 0) run_file(fd, 1);
 }
 
+/* Is the text so far the start of a command that is not finished yet? 0: no (it is run; a syntax error is reported
+ * then); 1: an open quote or here-document, an if, loop, case, function or group without its end, or a last line that
+ * ends in | && ||; 2: it ends in a backslash (the next line joins this one). The prompt then asks for more (PS2).
+ * Lexed and parsed in the arena, which is given back. */
+static int cmd_incomplete(const char *text)
+{
+    char *mark = abrk;
+    u32 n = strlen(text), bs = 0;
+    while (bs < n && text[n - 1 - bs] == '\\') bs++;
+    if (bs & 1) return 2;
+    int rc = lex(text), more = rc == 1;
+    if (!rc && ntoks) { perr = 0; lex_incomplete = 0; more = !parse_list(0) && lex_incomplete; }
+    arel(mark);
+    return more;
+}
+
 static void interactive_loop(void)
 {
     static char line[LMAX], full[2048];
@@ -2534,16 +2550,17 @@ static void interactive_loop(void)
         if (n == -1) break;
         if (n == -2 || !line[0]) continue;
         strcpy(full, line);
-        for (;;) {                                           /* keep reading while the command is incomplete */
-            int rc = lex(full);
-            if (rc != 1) break;
+        for (;;) {                       /* keep reading (PS2) while the command is incomplete, as a script's reader does */
+            int more = cmd_incomplete(full);
+            if (!more) break;
             int pl2; char *p2 = expand_prompt(var_get("PS2") ? var_get("PS2") : "> ", &pl2);
             int m = readline(p2, pl2, line, LMAX);
-            if (m < 0) { full[0] = 0; break; }
-            u32 l = strlen(full); if (l + strlen(line) + 2 >= sizeof full) break;
-            if (l && full[l - 1] == '\\') full[l - 1] = 0;   /* a trailing backslash joins lines */
+            if (m < 0) { full[0] = 0; break; }               /* Ctrl-C or Ctrl-D: the unfinished command is dropped */
+            u32 l = strlen(full);
+            if (more == 2) l--;                              /* a trailing backslash joins the lines */
             else full[l++] = '\n';
-            strcpy(full + l - (full[l - 1] == 0 ? 0 : 0), line);
+            if (l + strlen(line) + 1 > sizeof full) { errm("command too long", "the limit is 2047 bytes"); full[0] = 0; last_status = 2; break; }
+            strcpy(full + l, line);
         }
         if (!full[0]) continue;
         hist_add(full);
