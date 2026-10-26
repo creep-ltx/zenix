@@ -152,3 +152,16 @@ static inline int sys_svc_load(void *buf, u32 n) { return sys3(81, SVC_LOAD, (u3
 #define SVC_OPENS    6
 #define SVC_MIDREQ   0x10000    /* in sys_svc_self(): the server's last end was in the middle of a request */
 static inline int sys_svc_opens(u32 *ino, u32 bytes) { return sys3(81, SVC_OPENS, (u32)ino, bytes); }   /* how many */
+/* updates (DESIGN D15, docs/d15-self-updates.md): INFO fills struct uupdate (at most the size given: frozen, grows at
+ * the end) with the bundle zenixboot left in memory (0 = none), its flags and the running kernel's version; RELEASE
+ * gives the bundle's memory back (root); NOTE leaves zenixboot the update note: a kind and a version (root). The
+ * bundle is read in place and never passed to a system call (it is not the caller's memory: -EFAULT). */
+struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };
+#define UPD_INFO      1
+#define UPD_RELEASE   2
+#define UPD_NOTE      3
+#define UPD_F_ROLLBACK 1u       /* flags: the owner chose "Zenix (previous)" (zenixboot PREVIOUS) */
+#define UPDNOTE_DONE      1u    /* NOTE kinds: zup installed the root half (or it was installed already) */
+#define UPDNOTE_FAILED    2u    /* zup refused the bundle or rolled the root back */
+#define UPDNOTE_CONFIRMED 3u    /* login's prompt is up on console 1: this kernel works (login.c) */
+static inline int sys_update(u32 op, u32 a, u32 b) { return sys3(82, op, a, b); }

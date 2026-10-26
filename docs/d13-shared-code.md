@@ -4,7 +4,7 @@ Status: **ready to build (revision 3, 2026-10-25),** after a first review and a 
 by the owner on 2026-10-24 as the step after D11 and before the self-updates; the owner's standing order of 2026-10-24
 says to build it without waiting for them, the A1200 measurements excepted. The short version is in
 [DESIGN.md](DESIGN.md) D13. Facts marked *measured* were taken with the project's own cross compiler (gcc 16.1,
-`m68k-elf`) on the real build: all 111 programs and the two filesystem servers built with `-msep-data` through the Makefile (2026-10-25). Clock counts
+`m68k-elf`) on the real build: all the programs of that day (111) and the two filesystem servers built with `-msep-data` through the Makefile (2026-10-25). Clock counts
 come from the MC68020 User's Manual's tables (*from the manual*); nothing here is timed in an emulator.
 
 What changed from revision 1 (the review's findings, all accepted): the kernel's pointer checks (section 5, a blocker
@@ -92,7 +92,7 @@ Zenix from the DoM, the same `bench` and text-tool runs are timed there,** the f
   process, so they are applied once when the segment loads (libgcc's `__clz_tab` and `$_exception_handler` in seven
   programs). **Stage 1 refuses every relocation placed in the shared part:** in `sh` and `login` the only ones are
   `crt0`'s three, which disappear with `_zstart` (section 8), so the "applied once" class waits until a libgcc user
-  goes pure. Shared-to-data is refused in any case; in all 111 programs and the servers that is `awk`'s soft-float `_fpCCR` and `crt0`'s
+  goes pure. Shared-to-data is refused in any case; in all the programs of that day (111) and the servers that is `awk`'s soft-float `_fpCCR` and `crt0`'s
   `_zargv` (below).
 - **The kernel checks every relocation**: its place lies in the part it claims, its target class matches, its value
   lies inside that part. Nothing in a header is trusted (audit B7).
@@ -244,7 +244,7 @@ compressing the kernel (a decompressor in the boot path is the most work).
 2. The kernel: `user_ok_rd`/`wr` at the 21 sites, segments and references, the v2 loader, `a5`, the checksum, mount
    generations, `ETXTBSY` and the invalidation; v1 programs unchanged. Tested with a pure build of `hello` placed in
    the test image only (not a new command).
-3. a. `crt0` with `_zstart` for all 111 programs; `make check`.
+3. a. `crt0` with `_zstart` for all the programs (111 on 2026-10-25); `make check`.
    b. `sh` and `login` pure: separate pure builds of crt0, libz, `pw.uo` and `sha.uo` (the header lengths differ);
       a `-Wwrite-strings` review of both (a pure program writing into its own literal would corrupt every shell; the 8
       warnings found so far only read); the emulator tests of section 11.

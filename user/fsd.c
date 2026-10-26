@@ -266,6 +266,8 @@ static int handle1(struct umsg *m)
             (r = parent((const char *)m->a[1], m->a[2], &dir2, name2))) return r;
         if (!dir_may(&dir) || !dir_may(&dir2) || !sticky_ok(&dir, name) || !sticky_ok(&dir2, name2)) return -EACCES;
         return ext2_rename(&dir, name, &dir2, name2);
+    case FS_MARK:                                       /* root only (handle): zup's "needs a check" mark (D15) */
+        return ext2_set_clean(m->a[0] == 0);
     }
     return -ENOSYS;
 }
@@ -275,7 +277,7 @@ static int changes(const struct umsg *m)
 {
     switch (m->type) {
     case FS_WRITE: case FS_CHMOD: case FS_CHOWN: case FS_UTIMES: case FS_LINK: case FS_SYMLINK:
-    case FS_MKDIR: case FS_UNLINK: case FS_RMDIR: case FS_RENAME: return 1;
+    case FS_MKDIR: case FS_UNLINK: case FS_RMDIR: case FS_RENAME: case FS_MARK: return 1;
     }
     return 0;
 }

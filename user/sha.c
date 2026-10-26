@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#ifdef ZHOST
+#include "../tools/host/zup-host.h"     /* the host build of zup (tools/zup-host-test.sh) */
+#else
 #include "pw.h"
+#endif
 
 /* SHA-256 (FIPS 180-4) and the password hash built on it. The stored form is "ROUNDS$salt$hex": hex of SHA-256
  * applied ROUNDS times, starting from salt + password. New hashes use PW_ROUNDS; the older form "salt$hex" (no round
@@ -37,20 +41,49 @@ static void block(u32 h[8], const unsigned char *p)
     h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
 }
 
-void sha256(const void *data, u32 len, unsigned char out[32])
+/* streaming: init, any number of updates, final (zup hashes files and parts piece by piece) */
+void sha256_init(struct sha256 *c)
 {
-    u32 h[8] = { 0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19 };
+    static const u32 h0[8] = { 0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19 };
+    memcpy(c->h, h0, sizeof h0);
+    c->len = 0;
+    c->n = 0;
+}
+
+void sha256_update(struct sha256 *c, const void *data, u32 len)
+{
     const unsigned char *p = data;
-    u32 n = len;
-    while (n >= 64) { block(h, p); p += 64; n -= 64; }
+    c->len += len;
+    if (c->n) {
+        while (len && c->n < 64) { c->buf[c->n++] = *p++; len--; }
+        if (c->n < 64) return;
+        block(c->h, c->buf);
+        c->n = 0;
+    }
+    while (len >= 64) { block(c->h, p); p += 64; len -= 64; }
+    memcpy(c->buf, p, len);
+    c->n = len;
+}
+
+void sha256_final(struct sha256 *c, unsigned char out[32])
+{
+    u32 len = c->len, n = c->n;
     unsigned char tail[128]; memset(tail, 0, sizeof tail);
-    memcpy(tail, p, n); tail[n] = 0x80;
+    memcpy(tail, c->buf, n); tail[n] = 0x80;
     u32 tl = n < 56 ? 64 : 128;
     u32 bits_hi = len >> 29, bits_lo = len << 3;
     tail[tl-8] = (unsigned char)(bits_hi >> 24); tail[tl-7] = (unsigned char)(bits_hi >> 16); tail[tl-6] = (unsigned char)(bits_hi >> 8); tail[tl-5] = (unsigned char)bits_hi;
     tail[tl-4] = (unsigned char)(bits_lo >> 24); tail[tl-3] = (unsigned char)(bits_lo >> 16); tail[tl-2] = (unsigned char)(bits_lo >> 8); tail[tl-1] = (unsigned char)bits_lo;
-    block(h, tail); if (tl == 128) block(h, tail + 64);
-    for (int i = 0; i < 8; i++) { out[4*i] = (unsigned char)(h[i] >> 24); out[4*i+1] = (unsigned char)(h[i] >> 16); out[4*i+2] = (unsigned char)(h[i] >> 8); out[4*i+3] = (unsigned char)h[i]; }
+    block(c->h, tail); if (tl == 128) block(c->h, tail + 64);
+    for (int i = 0; i < 8; i++) { out[4*i] = (unsigned char)(c->h[i] >> 24); out[4*i+1] = (unsigned char)(c->h[i] >> 16); out[4*i+2] = (unsigned char)(c->h[i] >> 8); out[4*i+3] = (unsigned char)c->h[i]; }
+}
+
+void sha256(const void *data, u32 len, unsigned char out[32])
+{
+    struct sha256 c;
+    sha256_init(&c);
+    sha256_update(&c, data, len);
+    sha256_final(&c, out);
 }
 
 static void hash_rounds(const char *password, const char *salt, u32 rounds, unsigned char x[32])

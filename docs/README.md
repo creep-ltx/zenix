@@ -73,7 +73,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 |---|---|
 | docs-check | the documentation rules above |
 | ext2-host-test, disk-host-test | the ext2 server, `fsck.ext2`, `mkfs.ext2`, `fdisk` and `diskd` built for the PC, against image files and `e2fsck`, with a fuzz loop |
-| zup-host-test | the updates (DESIGN D15) on the PC: the packages and the bundle of the build (`tools/mkzup.py`), every kind of damaged bundle refused |
+| zup-host-test | the updates (DESIGN D15) on the PC: the packages and the bundle of the build (`tools/mkzup.py`), every kind of damaged bundle refused; `zup` built for the PC: refusals before any change, a power cut before each change, the three-way compare of config files, the way back |
 | zenixfs-test | `make -C zenixfs test`: the ZenixFS library on the PC (random operations, power cuts, damaged blocks) |
 | mfm-test, emmc-test, serial-test, term-test, mem-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console and `/dev/ttyS0`, the terminal's escape parser and colours (`kernel/term.c` against a model of the display), the kernel allocator around 1 GB (`MEM_LOW1G`), A3000 SCSI and Pi device-tree code against models |
 | mkzexe-test | the ZEX2 program format of shared code (DESIGN D13): `tools/mkzexe.py` classifies each relocation by its target (a `.data` pointer into constants to code, a table slot of a BSS array to data) and refuses a reference from the shared code into data, a value equal to `text_size`, an undefined weak and an absolute symbol |

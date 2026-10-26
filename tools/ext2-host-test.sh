@@ -59,6 +59,13 @@ cp $T/plain.img $T/uc.img; printf 'mount\nunclean\n' > $T/uc.txt; fsd $T/uc.img 
 grep -q "unclean -> 0" $T/out && dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *not clean' && check "the needs-a-check mark: 0, and the host sees the volume not clean" ok || { check "the needs-a-check mark: 0, and the host sees the volume not clean" bad; cat $T/out; }
 cp $T/ext3.img $T/uc.img; fsd $T/uc.img $T/uc.txt $T/out
 grep -q "unclean -> -30" $T/out && check "... on a read-only mount it is refused with -EROFS" ok || { check "... on a read-only mount it is refused with -EROFS" bad; cat $T/out; }
+# FS_MARK (DESIGN D15: zup marks the root "needs a check" while it installs): the bit before is answered; clean again
+cp $T/plain.img $T/uc.img; printf 'mount\nmark 1\nmark 1\n' > $T/mk.txt; fsd $T/uc.img $T/mk.txt $T/out
+grep -q "^mark -> 1$" $T/out && grep -q "^mark -> 0$" $T/out && dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *not clean' &&
+    check "FS_MARK 1: the state before (clean, then not), and the host sees the volume not clean" ok || { check "FS_MARK 1: the state before, the host sees it not clean" bad; cat $T/out; }
+printf 'mount\nmark 0\n' > $T/mk.txt; fsd $T/uc.img $T/mk.txt $T/out
+grep -q "^mark -> 0$" $T/out && dumpe2fs -h $T/uc.img 2>/dev/null | grep -q '^Filesystem state: *clean' && clean $T/uc.img &&
+    check "FS_MARK 0: clean again (e2fsck -fn agrees)" ok || { check "FS_MARK 0: clean again" bad; cat $T/out; }
 rm -f $T/uc.img
 
 # ---- 2. a workload, then host e2fsck ----

@@ -40,5 +40,8 @@
 #define FS_QUIT    23  /* sync, release the device, reply 0, exit: sent by umount */
 #define FS_CLOSE   24  /* a0 ino: the kernel let go of an inode FS_OPEN gave it (one per successful FS_OPEN). An inode
                         * unlinked while open is freed at its last FS_CLOSE, not at the unlink */
+#define FS_MARK    25  /* a0 1: mark the volume "needs a check" (ext2: s_state's clean bit cleared), 0: clean again; -> the
+                        * state before (1 clean, 0 not) or -errno. Root only (raw IPC); zup marks the root while it installs
+                        * (DESIGN D15). ZenixFS commits atomically: its server does not know it (-ENOSYS), and zup goes on */
 struct fsinfo { char dev[16]; char type[8]; };
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

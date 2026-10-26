@@ -295,6 +295,24 @@ for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the num
   16-byte boundary: `boot/zenix` (the kernel; `mkzup.py` refuses one that does not carry the bundle's version) and
   `pkg/NAME.manifest` + `pkg/NAME.tgz` for each package. Every count, size and offset is range-checked by every
   reader (`tools/zup-host-test.sh` feeds each kind of damage).
+- **zup** (`user/zup.c`, `/sbin/zup`, man/zup.txt) installs the packages of a bundle onto the root, as one
+  transaction: `/var/lib/zpkg/journal` (text: `zupj 1`, `target VERSION T`, one line an operation - `OP LINK MODE UID
+  GID SHA TARGET OLD PATH`, `-` where nothing applies; OP is `R` replace, `A` add, `D` delete, `l` new link, `L`
+  changed link, `u` removed link; LINK `T.N` names the hard link of the previous file in
+  `/var/cache/zpkg/prev-VERSION/f/` - then `end`; `commit` or `rollback` appended later) written and synced first,
+  the root marked "needs a check" (`FS_MARK`), the previous files hard-linked, the new ones written as
+  `PATH.zup-new`, read back against their SHA-256, owner then mode set, renamed over; then
+  `prev-VERSION/log.T` (the same lines: the undo record), `commit`, the older prev sets removed, the journal removed,
+  the root clean again. At the next start a journal is finished (every new file complete and checked) or rolled back
+  (the hard links put back; a name already on the old inode is left alone); one cut while it was written (no `end`)
+  had changed nothing. A journal `undo VERSION` is a rollback to the previous version (from the logs of
+  prev-VERSION, last change first) and is repeated to its end after a cut. A newer `zup` package is installed in its
+  own transaction first and the new `/sbin/zup -2` does the rest (transaction 2 of the same version). Config files
+  (`c`) are replaced only when their SHA-256 is the installed manifest's (the owner never changed them), else written
+  as `PATH.new`; one the owner deleted is not brought back; a file the new version no longer lists is removed (a
+  config file never). The database is the installed manifests, `/var/lib/zpkg/NAME.manifest`; the one-line result
+  goes to `/var/lib/zpkg/result`. Built for the PC with `tools/host/zup-host.c` (the same system calls on a directory,
+  a power cut before any chosen change) for `tools/zup-host-test.sh`.
 
 ## 4. Executables: ZEXE and relocation
 
@@ -666,7 +684,9 @@ device"). A floppy without a uuid is not served again after a restart (it may ha
 first request and rebuilds its open counts, so a deleted file held open keeps its data and frees its space at its last
 close; if its predecessor ended in the middle of a request it clears the superblock's "cleanly unmounted" state bit
 (Linux and e2fsck then check the volume; Zenix keeps writing) and says "DEV was being changed when its server
-ended: check it with fsck.ext2".
+ended: check it with fsck.ext2". `FS_MARK` (root only, D15) sets or clears that bit on request and answers the
+state before: zup marks the root while it installs. `zfsd` does not know `FS_MARK` (-ENOSYS): ZenixFS commits
+atomically.
 A mounted filesystem's server is the same built-in image, registered by `mount` (the mount table, below). It answers
 `FS_ROOT` (root inode, device and type names) and `FS_QUIT` (umount: sync, release the device, exit). Two filesystem
 servers are built into the kernel image, `fsd` (ext2) and `zfsd` (ZenixFS); there is no other copy of them. **Which one serves the root** is boot's choice

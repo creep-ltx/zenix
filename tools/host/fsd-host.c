@@ -117,6 +117,7 @@ int main(void)
         else if (!strcmp(cmd, "sync")) r = req(FS_SYNC, 0, 0, 0, 0);
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);
         else if (!strcmp(cmd, "unclean")) r = ext2_mark_unclean();     /* what a restarted fsd does after a crash */
+        else if (!strcmp(cmd, "mark")) r = req(FS_MARK, (u32)atoi(a), 0, 0, 0);   /* FS_MARK (D15): 1 = needs a check, 0 = clean */
         else { printf("%s -> unknown command\n", cmd); continue; }
         printf("%s -> %d\n", cmd, r);
     }
