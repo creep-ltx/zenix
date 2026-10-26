@@ -141,7 +141,7 @@ RAMDISK_K := 704
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
-	tools/mkzexe.py $< $@
+	tools/mkzexe.py --delta $< $@
 	@s=$$(wc -c < $@); echo "$@: $$s of $(KERNEL_MAX) bytes, $$(($(KERNEL_MAX) - s)) left for the kernel on the RAM floppy"; \
 	    [ $$s -le $(KERNEL_MAX) ] || echo "$@: WARNING: $$((s - $(KERNEL_MAX))) bytes too big for the RAM floppy (zenix-ram.adf)"
 

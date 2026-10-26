@@ -339,7 +339,12 @@ word in the relocation table. Reading can block (messages to the file system ser
 only after the image is in place and nothing blocks after that; two programs may be loading at the same time (the two
 stages of a pipeline). Only `R_68K_32` relocations are needed (PC-relative code stays valid), and
 debug-section relocations must be skipped (their offsets are not addresses). The kernel itself uses the same
-format and the same loop (in `start.S`). Programs declare their stack size in the header: 16 KB unless the
+header, with one difference in its table (`tools/mkzexe.py --delta`, kernel.bin only; docs/d13-shared-code.md section
+10): the relocations are a byte stream of distances from one relocated word to the next in 2-byte units (a byte 1-127;
+bit 7 set: the top 7 bits of a 23-bit distance whose low 16 follow; 0 ends it), padded to 4 bytes, and `nreloc` is the
+stream's length in longwords, so zenixboot's check of `nreloc * 4` against the file holds. `start.S` decodes it; it is
+about a quarter of the plain table (2932 bytes instead of 11576 on 2026-10-26). `tools/mkzexe-test.sh` checks that
+both tables give the same image and the same offsets. Programs declare their stack size in the header: 16 KB unless the
 Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB; the numbers and how they were measured
 are in limits.md). A guard pattern lies at the bottom of every stack (section 6). There is no shared-library format yet; programs are linked
 statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).

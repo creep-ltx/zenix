@@ -217,7 +217,7 @@ interrupt, `kwork`), `syscall.c` (every system call), `tty.c` (every console wri
 gfx, mem, proc and ipc. So no speed check is needed for this step.
 
 Later, if needed: a byte-delta relocation table for the kernel (11,628 bytes today, about 8 KB smaller, about 20 bytes
-more in `start.S`), usable for v2 programs and the built-in images too; and a smaller `RAMDISK_K` as v2 files shrink.
+more in `start.S`; **built 2026-10-26 for D15**, kernel.bin only: 8620 bytes saved, architecture.md section 4), usable for v2 programs and the built-in images too; and a smaller `RAMDISK_K` as v2 files shrink.
 Rejected: moving zfsd off the RAM floppy (the mount tests need it, and the RAM root has too few free blocks for it);
 compressing the kernel (a decompressor in the boot path is the most work).
 
