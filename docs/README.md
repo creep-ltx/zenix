@@ -50,7 +50,9 @@ configs. `--staged` also checks what is about to be committed (a changed program
 ## Testing
 Nothing counts as done until a test checks it. The tests run FS-UAE headless (never on the screen), from scripts typed
 into the serial port (`tools/serial-tap.py`: `sleep`, `send` and `wait REGEX [timeout]`, which waits for the output;
-`stop` kills the emulator at once, a power cut or the end of a script).
+after a `send` that ends a line only the output after that line's echo counts, so waiting for the prompt waits for the
+next one, not the one the line editor redrew while typing; `waitecho` lets the echo count too; `stop` kills the
+emulator at once, a power cut or the end of a script).
 Several FS-UAEs run side by side on one machine as long as each has **its own serial port and its own image files**
 (runs that shared a port or an image spoiled each other; that, not FS-UAE, was why only one ran at a time before
 2026-10-26). Every emulator run (`tools/run-test.sh`, and the cage rig's through `tools/fsuae_conf.py`) takes one of
@@ -78,6 +80,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | zup-host-test | the updates (DESIGN D15) on the PC: the packages and the bundle of the build (`tools/mkzup.py`), every kind of damaged bundle refused; `zup` built for the PC: refusals before any change, a power cut before each change, the three-way compare of config files, the way back |
 | zenixfs-test | `make -C zenixfs test`: the ZenixFS library on the PC (random operations, power cuts, damaged blocks) |
 | mfm-test, emmc-test, serial-test, term-test, mem-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console and `/dev/ttyS0`, the terminal's escape parser and colours (`kernel/term.c` against a model of the display), the kernel allocator around 1 GB (`MEM_LOW1G`), A3000 SCSI and Pi device-tree code against models |
+| tap-test | the serial tap's `wait` (`tools/serial-tap.py`, against a fake shell that redraws its prompt with each key): after a typed line it waits for the next prompt, not the one in the echo; `waitecho` and a half-typed line still match the echo |
 | usize-test | the frozen first sizes of the structs the kernel writes into a program (a size-0 caller gets each one's first size, also when the struct grows; every system call passes its frozen constant) |
 | mkzexe-test | the ZEX2 program format of shared code (DESIGN D13): `tools/mkzexe.py` classifies each relocation by its target (a `.data` pointer into constants to code, a table slot of a BSS array to data) and refuses a reference from the shared code into data, a value equal to `text_size`, an undefined weak and an absolute symbol |
 | matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch) |
