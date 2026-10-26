@@ -92,7 +92,9 @@ run i1 $img 200 $OUT/i1.txt
 ok "i: killed 4 s after the last write (only reads since): the root says clean" "$(isclean $img)"
 ok "i: ... e2fsck -fn clean, the file there" "$([ "$(e2clean $img)" = ok ] && [ "$(debugfs -R 'cat /tmp/idle' $img 2>/dev/null)" = idle-file ] && echo ok || echo bad)"
 img=$OUT/i2.hdf; cp $BD/zenix.hdf $img
-printf '%s\nsend echo reboot-file > /tmp/rb; reboot\\r\nwait reboot: filesystems synced 30\nstop\n' "$P" > $OUT/i2.txt
+# (the same FS-UAE buffer: killed the moment the message is out, a busy machine lost the clean mark's sector once in
+# make check, 2026-10-26; three seconds let the reset's own disk reads write it out, as a real drive has it already)
+printf '%s\nsend echo reboot-file > /tmp/rb; reboot\\r\nwait reboot: filesystems synced 30\nsleep 3\nstop\n' "$P" > $OUT/i2.txt
 run i2 $img 200 $OUT/i2.txt
 ok "i: reboot right after a write: the root is clean when the reset comes" "$([ "$(isclean $img)" = ok ] && [ "$(debugfs -R 'cat /tmp/rb' $img 2>/dev/null)" = reboot-file ] && echo ok || echo bad)"
 ok "i: ... e2fsck -fn clean" "$(e2clean $img)"
