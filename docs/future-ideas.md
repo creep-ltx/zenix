@@ -303,3 +303,28 @@ the Zenix build. It must be **one mechanism with the approved self-updates** (Ze
 D11): the self-update is designed as the first part of it (the kernel, the boot files and the system as packages, with
 the old version kept to boot back to from the menu), so there is never a second way to update. Needs: the network,
 checksums on every package (sha256sum exists), and a design note before any code.
+
+## Amiga demos on Zenix (the owner's wish, 2026-10-26; an idea, not approved as a feature)
+
+Choosing a demo from one's own collection in Zenix and watching it run on the real hardware. A demo does not want an
+operating system, it wants the machine: Zenix's part is to hand it over cleanly and to get it back. After block 4 (Zenix
+must first read Amiga partitions and LhA/LZX archives, where demos live). Three steps, smallest first:
+
+1. **Executable demos** (the files in a demo archive). At start-up they ask AmigaOS for a few things (memory, loading
+   their files, the graphics chips: `OwnBlitter`, `LoadView(NULL)`, `WaitTOF`, `Forbid`/`Disable`), then switch the
+   system off and use the hardware directly. A small *demo layer* answers those calls (dozens of functions, not the
+   thousands a full AmigaOS layer needs), moves Zenix's screen, copper list and interrupts out of the way, and gives the
+   demo the chip RAM. A clean-room job: written from the public interface documentation (the autodocs and manuals),
+   never from AmigaOS source.
+2. **Disk demos** (ADF images with their own track loaders). They read the floppy hardware directly, so running one from
+   a file needs a patch that sends its disk reads to memory. WHDLoad has such patches ("slaves") for thousands of demos
+   and games and their interface is published: Zenix could offer that interface and use the patches the user downloads.
+   A bigger job. (On a machine with a floppy or a Gotek, booting the disk itself already works without Zenix.)
+3. **A demo browser**: a text-UI list of the demos found, with their group, year and machine needs (AGA, memory), and
+   one key to run.
+
+Honest limits: a demo may overwrite all of chip RAM, so the dependable way back is a quick reboot into Zenix (seconds on
+a PiStorm); a return without a reboot needs Zenix kept wholly in fast RAM and is a later refinement. Demos that fail on
+very fast CPUs (Emu68) fail the same way under AmigaOS; Zenix cannot change that. The wider question, AmigaOS shell
+programs (a dos/exec layer, as amitools' vamos does on the PC) and window programs (a whole second system, AROS-sized),
+was discussed the same day: shell programs are realistic later, window programs are left to the dual boot.
