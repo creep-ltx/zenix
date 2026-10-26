@@ -14,6 +14,21 @@ current work list), then `docs/architecture.md` for the part you touch.
   matters on it first. Zenix runs on it since 2026-10-23; real-hardware time is scarce, so every build sent there must be
   ready for it.
 
+## Speed and size: the golden path (owner, 2026-10-26, for the whole system, not only the kernel)
+Zenix must **feel snappy**, like AmigaOS on low-powered machines: a key, a command, a window answers at once. And it
+must **take little**: disk, RAM, floppy. Where the two pull apart, take the middle road:
+- **Fast where the user feels it:** input to screen, the console, task switches and messages, starting a program,
+  reading files, the shell's prompt. These get the careful code (asm in hot loops, -O2) and a measured budget.
+- **Small everywhere else:** cold code at -Os, no copies (shared code, D13), no feature that costs every user for a
+  few, load on demand, packed files where it pays (the demo floppy).
+- **Safety stays:** the checks (pointers, stack guards, owners of memory, the clean mark) are Zenix's edge over AmigaOS;
+  make them cheap, never drop them for speed.
+- **The three test machines (owner, 2026-10-26):** the stock A1200 (68EC020 14 MHz, 2 MB chip RAM only, no fast RAM:
+  the floor for memory and speed; 1,132 KB free with one login, measured), the A1200 with the Apollo 1260 (68060
+  80 MHz, 64 MB fast), and the PiStorm (Emu68). No other memory expansion exists.
+- **Measure, do not guess:** sizes in every build (the RAM-floppy count, `usize-test`); speed on a real 68020 (the stock
+  A1200, the 060), never Emu68's JIT or an emulator alone; a change that costs speed or size says how much.
+
 ## Current focus (2026-10-22): hardening, then the first real boot
 **FEATURE HALT (decided by the owner, 2026-10-22): no new features - no new commands, system calls, drivers,
 options or programs.** Only fixes from `docs/audit-2026-10-22.md`, tests that check them, and documentation
@@ -28,6 +43,8 @@ DESIGN D11 service manager (owner 2026-10-24: design reviewed twice and approved
 `awk` (owner 2026-10-24: finish the parked `user/awk.c` now, while D11 is built).
 **`useradd` and `userdel` approved (owner 2026-10-26):** small commands for root (ideas list), built at once.
 **`sudo` approved (owner 2026-10-26, "with users added we also need a sudo command"):** the group wheel, own password, with `gpasswd` and `useradd -G`.
+**Rescue when a boot repair fails approved (owner 2026-10-26):** after D16: a root that fsck.ext2 cannot repair is mounted read-only and boot offers 1 continue read-only (default after 30 s), 2 read-write anyway, 3 rescue shell with the repair commands listed, 4 reboot; `man rescue`. As AmigaOS does with a disk that cannot be validated.
+**The 2 MB diet approved (owner 2026-10-26):** after D16: without fast RAM the console defaults to 8 colours (3 planes; 16 with fast RAM); a setting (2/4/8/16 colours, at the next boot, as Workbench's ScreenMode prefs) lets the user choose; the disk cache sized by the machine's memory; login steps aside for the shell. Measured 2026-10-26: Workbench 3.1 on a 2 MB chip-only A1200 leaves 1,737 KB free, Zenix with one login 1,126 KB. Halving the double-height screen buffer: decided after a real-68020 scroll test.
 **Colour console approved (owner 2026-10-25):** colours in the text console (ANSI colours, for `ls`, `grep`, the prompt,
 `less`); a design note first (a DESIGN number, reviewed), then built. **The shell's memory** (a fix, audit 2026-10-25
 'found while fixing'): sh grabs a fixed arena of 64-256 KB per shell and parses a whole script at once; make it grow on

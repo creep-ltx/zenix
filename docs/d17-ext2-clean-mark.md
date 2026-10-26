@@ -309,3 +309,10 @@ the same mechanisms D11 and D15 already use, the old and new programs meeting sa
   rootcheck-test 20 of 20 in FS-UAE (on main's code parts r and b fail 10 of 12); update-test powercut 7 of 7.
 
 Last checked against the code: 2026-10-26.
+
+## Owner decision (2026-10-26): a repair that fails
+
+Replaces "used read-write after a message": the root is mounted read-only and boot offers four choices: continue
+read-only (the default after 30 s, so an unattended machine still comes up), continue read-write anyway (risky), a
+rescue shell as root with the repair commands listed, or reboot; a manual page `rescue` explains each step. As AmigaOS
+does with a disk that cannot be validated. To be built after D16.

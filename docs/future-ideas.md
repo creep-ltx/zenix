@@ -334,3 +334,27 @@ reset, booting from their own disk) need a reboot into Zenix to get back (second
 very fast CPUs (Emu68) fail the same way under AmigaOS; Zenix cannot change that. The wider question, AmigaOS shell
 programs (a dos/exec layer, as amitools' vamos does on the PC) and window programs (a whole second system, AROS-sized),
 was discussed the same day: shell programs are realistic later, window programs are left to the dual boot.
+
+## Amiga programs on Zenix: the Wine route (the owner's wish, 2026-10-26; a long-term idea, not approved as a feature)
+
+The owner: not the highest priority, but even a small share (10%, 40%: examples, not goals) of Amiga programs
+working unlocks a large software library.
+After the demos above (easier, first). The idea, as Wine does for Windows: rewrite only the core parts that clash with
+Zenix and load everything else unchanged from the machine. MUI, ReAction and GadTools sit on top of intuition,
+graphics, layers, exec and dos; graphics, layers, intuition and the input/timer devices are in the owner's own
+Kickstart ROM and mostly talk to the chips, which are really there (no emulation). Zenix writes:
+
+- **its own exec** (tasks as Zenix processes, memory, messages, libraries and devices, signals on D16's event bits),
+  laid out like the real one inside, since ROM modules and programs read ExecBase fields, not only call functions;
+- **files:** its own dos, or the ROM's dos with a small filesystem handler that serves Zenix files (likely smaller);
+- **the glue:** the ROM modules started from their resident tags on that exec; the interrupt server lists shared with
+  Zenix's interrupts; the screen and keyboard switched between the Zenix console and the Amiga screens (as Amiga-M).
+
+No memory protection between programs, as on AmigaOS, so shared structures and messages work as expected. Clean room:
+written from the public autodocs and manuals, the user's own ROM at run time, never AmigaOS source. Steps, each
+visible: (1) a shell program runs (exec and dos only; the "shell programs" level discussed the same day); (2) the
+ROM's graphics opens a screen and draws; (3) intuition opens a window, the mouse works; (4) GadTools, ReAction, MUI.
+Hard parts: exec's private fields, interrupt sharing, the screen switch, Kickstart versions (3.1, 3.2, 3.2.3).
+Size estimate (proposed): 15,000-25,000 lines, about half of Zenix's 37,500 lines of system code on 2026-10-26; the
+long part is the compatibility hunt afterwards, months of small fixes, as with Wine. MorphOS runs old Amiga programs in
+a similar way.
