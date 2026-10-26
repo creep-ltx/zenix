@@ -14,6 +14,18 @@ current work list), then `docs/architecture.md` for the part you touch.
   matters on it first. Zenix runs on it since 2026-10-23; real-hardware time is scarce, so every build sent there must be
   ready for it.
 
+## Speed and size: the golden path (owner, 2026-10-26, for the whole system, not only the kernel)
+Zenix must **feel snappy**, like AmigaOS on low-powered machines: a key, a command, a window answers at once. And it
+must **take little**: disk, RAM, floppy. Where the two pull apart, take the middle road:
+- **Fast where the user feels it:** input to screen, the console, task switches and messages, starting a program,
+  reading files, the shell's prompt. These get the careful code (asm in hot loops, -O2) and a measured budget.
+- **Small everywhere else:** cold code at -Os, no copies (shared code, D13), no feature that costs every user for a
+  few, load on demand, packed files where it pays (the demo floppy).
+- **Safety stays:** the checks (pointers, stack guards, owners of memory, the clean mark) are Zenix's edge over AmigaOS;
+  make them cheap, never drop them for speed.
+- **Measure, do not guess:** sizes in every build (the RAM-floppy count, `usize-test`); speed on a real 68020 (the stock
+  A1200, the 060), never Emu68's JIT or an emulator alone; a change that costs speed or size says how much.
+
 ## Current focus (2026-10-22): hardening, then the first real boot
 **FEATURE HALT (decided by the owner, 2026-10-22): no new features - no new commands, system calls, drivers,
 options or programs.** Only fixes from `docs/audit-2026-10-22.md`, tests that check them, and documentation
