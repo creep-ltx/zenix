@@ -1,12 +1,13 @@
-# D16: events and signals (design note, revision 2)
+# D16: events and signals (design note, revision 3)
 
-Status: **revised after the first review (2026-10-26), awaiting the second** (deep core: the scheduler's waits and the
+Status: **ready to build (revision 3, 2026-10-26), after two independent reviews** (deep core: the scheduler's waits and the
 way into user code). The first item of roadmap block 2 ("Zenix reaches the world"), in the order of work the owner
 approved on 2026-10-25. The short version is in [DESIGN.md](DESIGN.md) D16. Facts about today's code are *read* from
 main (2026-10-26). Revision 2 takes in the first review: sigreturn masks the status register, the level-2 interrupt
 saves every register, Exec's order for waiting (no check under masked interrupts), compatible `kill`, real process
 groups (fixing ^C in pipelines), which signals interrupt what, slot masks instead of waiter lists, fixed event bits,
-alarm as a kernel deadline, `SA_RESTART`, and Exec's single entry point for handlers.
+alarm as a kernel deadline, `SA_RESTART`, and Exec's single entry point for handlers. Revision 3 adds the second
+review's exact rules (section 14), which the build follows where they are more precise than the sections above.
 
 ## 1. The problem
 
@@ -66,7 +67,8 @@ even in CPU-bound code.
   handler addresses or checks, and `struct proc` grows by about 160 bytes instead of 290.
 - **Default actions:** terminate (through `proc_kill`, so the G3/G4 rules, D11's kill rules and `kill_now` apply
   unchanged), stop (today's `proc_stop`), continue, ignore. A numbered death gives the wait status 128+n (143 TERM, 137
-  KILL, 141 PIPE): new values, not changed ones. **Init (pid 1)** is never ended by a default action.
+  KILL, 141 PIPE): new values, not changed ones. **pid 1 is `boot`** (the built-in starter, which restarts `/bin/init`): never ended by a default action;
+  the old form of `kill` keeps root's power to end it, as today (section 14, rule 6).
 - **What interrupts a blocking call:** a signal wakes or interrupts a call **only if it will run a handler**. Ignored and
   default-ignore signals (SIGCHLD, SIGWINCH) wake nothing; blocked ones stay pending (a default-terminate signal
   unblocked later becomes a `proc_kill` then). A write that already moved bytes returns the count. No handler runs once
@@ -180,5 +182,61 @@ measured size passes 4 KB, the next step frees room first (more cold files at `-
 2. `SA_RESTART`: offered now (section 4).
 3. Process groups: needed now (section 6); sessions and SIGHUP with telnet.
 4. Size: 3.5-4.5 KB of the 8 KB left (section 11).
+
+## 14. Exact rules from the second review (binding for the build)
+
+1. **The wake rule:** a waker readies a process only if `(state == P_EV || (state == P_SLEEP && ev_wait)) && (ev_pending &
+   ev_wait)`; `ev_wait` is 0 at every other time (plain `sleep`, ipc's timed receive). The masked test in step 3 of the
+   wait also refuses to block when `killed`, `stop_req`, or a caught unblocked signal is pending. `proc_kill`,
+   `proc_stop` and `sig_send` list the new `P_EV` state wherever they list `P_IO` today.
+2. **`ready()` itself refuses `P_STOP`** (`proc_cont` and `proc_kill` use a forcing variant). This also fixes a bug that
+   exists today: `proc_stop` readies a server sitting in receive, it becomes stopped inside `schedule`, but the port's
+   `waiter` still names it and `ipc_enqueue` readies it, so a stopped server runs. Fixed in the build's first commit.
+3. **Alarm:** one count of timers (sleepers plus alarms) gates the tick's scan, and the scan covers every live process
+   with an alarm set. On both return paths `sig_deliver` first acts on `killed` (with `kill_now`: exit) and `stop_req`
+   (schedule), then runs a handler, so a default SIGALRM ends a CPU-bound process.
+4. **Restart is decided by a flag, not by the value -EINTR:** `sig_intr`, set only by a blocking site that gave up
+   because of a signal, and only on the system-call path. Never restarted: `sleep`, `evwait`, a timed `ipc_recv` (a
+   restart would start its deadline again). The service manager's waits (loading, the deadline, registration) are not
+   interrupted by caught signals, only by a kill, like a server call (G4); otherwise a handler would make `open` or
+   `spawn` fail while a server loads.
+5. **`sigreturn`:** returns the frame's `d0` (the system call's result store would otherwise overwrite it); sets the
+   live user stack pointer with a new `set_usp` (not `current->usp`, which `switch_to` only uses at a switch); finds the
+   frame through the address the kernel passed to the entry in a register and libz passes back; the restored blocked
+   mask never contains SIGKILL or SIGSTOP. **The frame:** aligned down to 4 bytes; refused if it would leave less than
+   512 bytes above the stack guard for the handler ("stack overflow in a signal", killed). **The entry** is registered in
+   the first `sigaction` (a field of its struct), checked there (even, inside the process by `user_ok_rd`), written in C
+   or in assembler with only pc-relative branches and `a5`-relative data (D13: no relocation in the shared part); `a5`
+   comes from `current->a5`.
+6. **pid 1 is `boot`**, protected from default actions; the old form of `kill` may still end it (root only), as today.
+7. **Process groups:** the tty stores whether its foreground is a single pid or a group (so a group's leader exiting
+   first, as in `cat f | less`, does not take ^C away from the rest); ^C to a group with no living member sets `intr`;
+   every process starts in a sensible group: a process with no parent (`boot`, the D11 servers) gets its own pid as
+   pgid, and `login` and each interactive `sh` make their own group (else `kill 0` from a root shell would reach init and
+   every login); the shell sets the foreground group only after every member joined; `setpgid` on a child that is already
+   a zombie succeeds; `setpgid` only on oneself or one's own children.
+8. **Frozen additions:** `ST_STOPPED` stays 0x114 for every stop, SIGSTOP included; getpriority's `PRIO_PGRP` keeps
+   answering -EINVAL; a pgid for `ps` goes at the end of `uproc`.
+9. **`SYS_jobctl`** (the shell's `fg`/`bg`) means SIGSTOP/SIGCONT, so SIGCONT handlers (the redraw in `less`/`edit`) run.
+10. **SIGCHLD ignored:** automatic reaping in `proc_reap_orphans`, which treats "the parent ignores SIGCHLD" like "no
+    parent"; `wait` then returns -ECHILD when nothing is left. **The shell installs no reaping SIGCHLD handler** (at most
+    a flag): reaping in a handler would race with `fg_wait`, and printing would cut into the line editor and PS2.
+11. **SIGPIPE:** `zup` ignores it (D15: `zup | less` and quitting `less` must not end an update half-way). The serial
+    device and the ttys are reported always writable by `poll` (the tick empties their send rings).
+12. **Stopped children of an exiting process** get SIGCONT and SIGHUP (the default ends them) in `proc_exit`, so they do
+    not stay stopped for ever.
+13. **Producers (the full list for the build), each setting the bit and readying under the mask:** `tty_input`,
+    `tty_setmode`, `tty_inject`, `serial_work`, the pipes and `file_close`, the stop path in `schedule` and `proc_exit`
+    (for the parent), `con_switch`, `ipc_enqueue`, `sig_send`, the alarm (inside `wake_sleepers`, masked). Not all run at
+    the `kwork` points (pipes, kill, a child's exit or stop, messages and `sig_send` run in the producer's own system
+    call); all are safe by the same rule. `proc_exit`'s own `wake_io` goes.
+14. **Size:** the reviewers' prototype of the core is 2.3 KB at -Os; with the blocking sites, the tty/pipe/serial changes,
+    the new calls and the level-2 entry, expect **4-5 KB of the 8 KB left**. The new code lives in its own `-Os` files
+    (`signal.c`, `event.c`), with only the one-word "anything to deliver?" test inline on the return paths. If the
+    measured size passes 4 KB, room is freed first (more cold kernel files at `-Os`, measured), as section 11 says.
+15. **Group kill results:** 0 if at least one process got the signal, -EPERM if none was allowed, -ESRCH if the group is
+    empty; `kill(-1, sig)` gives -EINVAL. Old programs that call `setfg(child)` then `setfg(0)` (man, time, nice,
+    timeout) keep working and move to the group form. Noted for the shell's plan: sh does not stop a loop when its child
+    died from ^C (status 130), unlike bash.
 
 Last checked against the code: 2026-10-26.
