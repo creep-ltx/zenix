@@ -102,3 +102,5 @@ printf 'cat <<-E\n\tindented\n\tE\ncat <<"Q"\nfi done esac } ) \x27 " $x\nQ\n' >
 printf 'y=from-long2\n' > $T/long2.sh; echo ". $T/long2.sh; echo \$y" >> $L; echo set -- $(seq 1000 1399) >> $L
 printf 'echo "n=$# last=${400}"\nf() { echo "f sees $x"; }\nf\necho "sum=$x"\n' >> $L
 t sh-long;    sh $L; echo "rc=$? lines=$(wc -l < $L) longest=$(awk '{ if (length($0) > m) m = length($0) } END { print m }' $L)"
+H=$T/hd.sh; echo 'cat <<EOF | wc -c' > $H; i=0; while [ $i -lt 40 ]; do echo '$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y' >> $H; i=$((i + 1)); done; echo EOF >> $H
+t hd-long;    y=abcdefgh; . $H

@@ -94,7 +94,7 @@ pointers.
   parameters, and no limit on a script's length (it is read and run a command at a time). They grow in its arena,
   which starts at 8 KB and takes more from the kernel while a command needs it (chunks of at least 16 KB, each
   four times the last, so the 8 memory regions a process may have reach several MB), given back when the
-  command is done; when the kernel has no more: "sh: out of memory" and that shell ends (status 2); a word or an expanded here-document of at most 4095 characters (longer is an error, status 1);
+  command is done; when the kernel has no more: "sh: out of memory" and that shell ends (status 2); a word of at most 4095 characters (longer is an error, status 1; an expanded here-document has no limit: it is built in the arena);
   at most 8 here-documents on one line, 16 nested alias expansions, 64 `local` variables in the running functions,
   128 variables, 48 aliases and 48 functions, 200 history lines (a recalled line is cut to the 478 characters the
   editor holds, with the bell).

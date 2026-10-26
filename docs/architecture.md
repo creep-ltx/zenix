@@ -931,7 +931,11 @@ enough, else copies only the old block's bytes. `xmalloc` ends the program with 
 shell, and a script was read and parsed whole). Tokens, the parsed tree and expansions come from a stack of chunks
 taken with `SYS_memalloc`: an 8 KB first chunk that stays, and more while a command needs them (at least 16 KB, each
 four times the last, so few regions; a command substitution's output is gathered in a `malloc` buffer and copied
-in once). Every command, loop round and pipeline takes a mark and releases it when done;
+in once; an expanded here-document and the joined value of an assignment are built in the arena directly, with no
+fixed buffer and no length limit). The word being expanded stays in two fixed 4 KB buffers (its characters and their
+quote marks: a word is at most 4095 characters), with a third for a case pattern's marks: the expander's results go to
+the arena while a word is built, so a buffer taken there would stay until the command ends, one per word. Every
+command, loop round and pipeline takes a mark and releases it when done;
 releasing gives back the chunks taken after the mark except one kept as a spare, and between the commands of a script
 and at the prompt the spare goes back too, so an idle shell holds only the first chunk. A file of commands (`sh file`,
 `. file`, `/etc/profile`, `~/.shrc`) is read 512 bytes at a time on a descriptor above 9 (out of the way of `N>&M`)
