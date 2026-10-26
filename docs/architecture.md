@@ -885,8 +885,12 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   open, since the server truncates in it - only while something of that mount is loaded; without, it checks the
   open's answer and closes it again); so a program is updated the Unix way, a new file renamed over the old name, and
   running processes keep the old code. A spawn of a file that is open for writing loads a private copy. unlink,
-  rename, link and symlink are path-only in the kernel, so after each the mount's segments leave the list and its
-  loads in progress are marked stale (never listed); running processes keep theirs. Every mount, and every start of a
+  rename, link and symlink are path-only in the kernel, so while something of that mount is loaded the kernel first
+  asks the server which inode the affected name leads to (`FS_LSTAT`: the name removed, the one renamed over, a
+  link's new name) and afterwards unlists that inode's segments and marks its loads stale (its number may be given
+  to a new file); the rest of the mount keeps sharing (audit3 B2: every rm unlisted the whole mount, so the next
+  shell loaded a private copy). The renamed file keeps its inode and contents, so its segments stay right; running
+  processes keep theirs. Every mount, and every start of a
   mount's filesystem server by the service manager (`svc_handover`, `vfs_server_started`: a restarted ZenixFS server
   drops what it had not committed and could bring back older contents under the same inode, size and time), gives the
   mount a new generation, part of the key. Every spawn still opens the file through the server (execute permission,

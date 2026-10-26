@@ -136,6 +136,9 @@ that goes through it, and refuses the rest:
 - **Names that change:** unlink, rename, link and symlink are path-only in the kernel (vfs.c), so it cannot tell which
   inode they touch; each drops every unused-for-lookup segment of that mount from the table (running users keep theirs).
   This also covers an unlinked inode number being reused for a new file.
+  **Changed by audit3 B2 (2026-10-26):** dropping the whole mount made sharing worthless after any `rm` on the root, so
+  while something of the mount is loaded the kernel now asks the server first (`FS_LSTAT` of the name removed, renamed
+  over, or linked to) and drops only that inode's segments (architecture.md section 10).
 - **The key:** (mount slot, the mount's generation, inode, size, modification time). The **mount generation is new**
   (a field in `struct mount`): it changes on every mount *and* whenever the mount's filesystem server is restarted by
   the service manager (D11), because a restarted ZenixFS server drops uncommitted changes and could bring back older
