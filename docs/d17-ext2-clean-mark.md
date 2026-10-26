@@ -251,8 +251,8 @@ a ZenixFS root (`fsck.zenixfs` stays a tool for damage).
 
 ## 12. Open points for the owner (not blocking)
 
-- A root fsck.ext2 cannot repair (duplicate blocks, a damaged directory) is used read-write after a message, as today.
-  Linux stops in a maintenance shell instead; a Zenix maintenance mode is a feature for later.
+- A root fsck.ext2 cannot repair (duplicate blocks, a damaged directory) was used read-write after a message; decided
+  by the owner (2026-10-26, the section at the end): read-only and four choices, built.
 - The check's time on the real machine, especially a repaired 3 GB `/home` after a cut (section 6), to be measured.
 - fsck.ext2 now clears empty unattached files instead of putting them in `/lost+found`, as e2fsck -p does.
 
@@ -316,3 +316,27 @@ Replaces "used read-write after a message": the root is mounted read-only and bo
 read-only (the default after 30 s, so an unattended machine still comes up), continue read-write anyway (risky), a
 rescue shell as root with the repair commands listed, or reboot; a manual page `rescue` explains each step. As AmigaOS
 does with a disk that cannot be validated. To be built after D16.
+
+**As built (2026-10-26, branch `diet`):**
+- **When:** fsck.ext2 ends with a status above 1 (4: damage it does not repair; 8: out of memory or a read error; a
+  check stopped after 20 minutes) or cannot be started. Section 4 step 4's "goes on with the writable root" is gone.
+- **Read-only is the check server itself:** `@fsd ... -fsck` keeps serving (read-only, the device not claimed), so
+  nothing new was needed and fsck.ext2 may open the device from the rescue shell. The writable server is started only
+  for choice 2 (or a root the rescue shell left clean): `FS_QUIT` and `-root`, as after a successful check.
+- **The question** (`user/boot.c`, `rescue()`): four lines on console 1, one key in raw mode (no Return), waited for
+  with `SYS_evwait` on standard input and a 30 s deadline; any other key is ignored. 3 spawns `/bin/sh` as root with
+  `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL` set for it (boot's own environment stays empty) and lists the commands
+  with the root's device name; when the shell ends, boot reads the superblock again (`vol_id`): marked clean, it goes
+  on read-write without asking, else the four lines again. 4 is `SYS_reboot` (the next start checks and asks again).
+- **On a read-only root boot installs no update:** zup is not started; with a bundle waiting, boot says so and
+  marks the update note failed for it, so zenixboot keeps the bundle for the next start.
+- **Size:** `boot` 4572 -> 5332 bytes; the kernel image 3056 bytes short of the RAM floppy's limit afterwards.
+- **Tests** (`tools/rootcheck-test.sh` part u, FS-UAE, a root whose `/etc/motd` and `/etc/passwd` share a block,
+  marked not clean): nobody answers, read-only after 30 s (a write refused, reading works, the image byte for byte
+  unchanged); 2: read-write (a file written and read back, the root still marked); 3: a root shell, the commands
+  listed, fsck.ext2 checks the read-only root and says it cannot repair it (status 4), a write refused, exit brings
+  the question back, 1 goes on; 4: reboot, the next start asks again. Not tested: the rescue shell leaving the root
+  clean (Zenix has no tool that repairs what fsck.ext2 refuses; the path is a superblock read and the same writable
+  start as choice 2).
+- **The manual page** `rescue(8)`: the choices, copying files to safety first, checking again, the thorough way
+  (e2fsck on a PC, or the RAM-disk Zenix's fsck.ext2), `/lost+found`.

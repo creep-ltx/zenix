@@ -5,13 +5,17 @@
 /* Display: 640 pixels wide hires, the whole screen text: 32 rows of 8 lines on a PAL display (256 lines), 25 on NTSC
  * (200 lines); gfx_init measures which one the machine shows (the beam's last line), so no row is ever hidden below
  * the picture. How many bitplanes (DESIGN D14) depends on the machine, because the display takes chip-bus time from
- * the CPU, which shares chip RAM on a stock A1200:
- *   - AGA (Lisa's id) with fast RAM or 2 MB of chip RAM: 4 planes, 16 colours, fetched 64 bits at a time (FMODE 3),
- *     which costs the same 40 bus slots per line as one plane at the old 16-bit fetch. Never 4 planes at FMODE 0:
- *     that takes every slot of the visible lines from the CPU.
- *   - OCS/ECS with fast RAM: 3 planes, 8 colours (a bright colour is shown as the colour plus bold).
+ * the CPU, which shares chip RAM on a stock A1200, and takes chip RAM (docs/d14-colour-console.md section 11):
+ *   - AGA (Lisa's id) with fast RAM: 4 planes, 16 colours, fetched 64 bits at a time (FMODE 3), which costs the same
+ *     40 bus slots per line as one plane at the old 16-bit fetch. Never 4 planes at FMODE 0: that takes every slot
+ *     of the visible lines from the CPU.
+ *   - OCS/ECS with fast RAM, and every machine with 2 MB of chip RAM and no fast RAM: 3 planes, 8 colours (a bright
+ *     colour is shown as the colour plus bold); on AGA at FMODE 3 too (30 slots), elsewhere at the 16-bit fetch.
  *   - otherwise (chip RAM only, less than 2 MB): 1 plane, grey on black, as before D14.
- * make GFXDEPTH=1|3|4 builds a kernel that uses that depth wherever it can (the screenshot tests).
+ * /etc/console's "colours N" (2, 4, 8 or 16) changes it once the root is up (init, SYS_console: gfx_set_colours).
+ * 2 planes, 4 colours: black, red (for red, yellow, magenta), cyan (for green, blue, cyan) and grey, bright as bold.
+ * One plane is always fetched 16 bits at a time (as verified on the A1200); 2 to 4 on AGA at FMODE 3.
+ * make GFXDEPTH=1|2|3|4 builds a kernel that uses that depth wherever it can (the screenshot tests).
  * The planes are interleaved: the planes of a line lie one after another (80 bytes each), so one base pointer serves
  * all planes and a clear or copy of whole lines is one blit. Scrolling the text is a pointer bump in the Copper list,
  * applied at vertical blank; only when the window reaches the end of the buffer (twice the screen's height) does the
@@ -27,7 +31,7 @@
 #define DIW_V 0x2C
 #endif
 #ifndef GFX_DEPTH
-#define GFX_DEPTH 0                     /* 0: chosen by the machine (gfx_init); make GFXDEPTH=n sets 1, 3 or 4 */
+#define GFX_DEPTH 0                     /* 0: chosen by the machine (gfx_init); make GFXDEPTH=n sets 1, 2, 3 or 4 */
 #endif
 /* hires at FMODE 3 (64-bit fetch): the fetch window and scroll delay that show all 640 pixels, found by the screenshot
  * test (tools/colour-test.sh: all 80 columns visible, the first and the last distinct, nothing repeated); knowledge
@@ -53,7 +57,7 @@
 #define BUFL    (2 * TROWS_MAX * 8)
 
 int trows = TROWS_MAX;                  /* text rows on this display: 32 (PAL) or 25 (NTSC) */
-int gfx_depth;                          /* bitplanes: 1, 3 or 4 (0: no display) */
+int gfx_depth;                          /* bitplanes: 1 to 4 (0: no display) */
 static int dlines = 256;                /* display lines: 8 * trows */
 static u32 lstride;                     /* bytes per display line: 80 per plane */
 static int aga;
@@ -71,6 +75,9 @@ const u16 gfx_palette[16] = {
     0x000, 0xC22, 0x2B2, 0xBB2, 0x45E, 0xB3B, 0x2BB, 0xBBB,
     0x666, 0xF66, 0x6F6, 0xFF6, 0x88F, 0xF7F, 0x6FF, 0xFFF,
 };
+/* 2 planes: what each of the eight ANSI colours becomes (warm ones red, cool ones cyan), and the four colours shown */
+static const u8 map2[8] = { 0, 1, 2, 1, 2, 1, 2, 3 };
+const u16 gfx_palette2[4] = { 0x000, 0xC22, 0x2BB, 0xBBB };
 
 /* ---- font from the ROM ---- */
 
@@ -234,7 +241,7 @@ static const u32 expand[16] = {
 /* a background colour as this depth shows it */
 static u32 bg_of(u8 colour)
 {
-    return gfx_depth == 1 ? 0 : gfx_depth == 3 ? (colour >> 4) & 7u : colour >> 4;
+    return gfx_depth == 1 ? 0 : gfx_depth == 2 ? map2[(colour >> 4) & 7u] : gfx_depth == 3 ? (colour >> 4) & 7u : colour >> 4;
 }
 
 /* attr bits: 1 inverse, 2 underline, 4 bold; colour: foreground in the low nibble, background in the high one. One
@@ -285,6 +292,16 @@ static HOT void draw3(u8 *p, const u32 *g, u32 m1, u32 m2)
     }
 }
 
+static HOT void draw2(u8 *p, const u32 *g, u32 m1, u32 m2)
+{
+    for (int y = 0; y < 8; y++) {
+        u32 v = ((g[y] & m1) ^ m2) >> 16;
+        p[STRIDE] = (u8)v;
+        p[0] = (u8)(v >> 8);
+        p += 2 * STRIDE;
+    }
+}
+
 static HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
 {
     int gi = (ch < 32 ? '?' : ch) - 32;
@@ -293,17 +310,19 @@ static HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
         return;
     }
     u32 fg = colour & 15, bg = colour >> 4;
-    if (gfx_depth == 3) {
+    if (gfx_depth < 4) {
         if (fg >= 8) {
             fg = fg == 8 ? 7 : fg & 7;
             attr |= 4;
         }
         bg &= 7;
+        if (gfx_depth == 2)
+            fg = map2[fg], bg = map2[bg];
     }
     if (attr & 1) {
         u32 t = fg;
         if (fg == bg)
-            t = 7, bg = 0;
+            t = gfx_depth == 2 ? 3 : 7, bg = 0;
         fg = bg;
         bg = t;
     }
@@ -322,8 +341,10 @@ static HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
     }
     if (gfx_depth == 4)
         draw4(p, g, expand[fg ^ bg], expand[bg]);
-    else
+    else if (gfx_depth == 3)
         draw3(p, g, expand[fg ^ bg], expand[bg]);
+    else
+        draw2(p, g, expand[fg ^ bg], expand[bg]);
 }
 
 static u8 *line_at(int l) { return tbuf + (u32)l * lstride; }
@@ -423,8 +444,8 @@ static int lisa(void)
     return v == 0xF8;
 }
 
-/* the depth for this machine (D14's default): AGA with fast RAM or 2 MB of chip RAM: 4; OCS/ECS with fast RAM: 3;
- * otherwise 1. GFX_DEPTH (make GFXDEPTH=n) asks for one: 4 only on AGA (else 3), 3 anywhere. */
+/* the depth for this machine (D14's default, section 11): AGA with fast RAM: 4; fast RAM on OCS/ECS, or 2 MB of chip
+ * RAM and no fast RAM: 3; otherwise 1. GFX_DEPTH (make GFXDEPTH=n) asks for one: 4 only on AGA (else 3). */
 static int pick_depth(void)
 {
     const struct bootinfo *bi = (const struct bootinfo *)0x1000;
@@ -436,13 +457,62 @@ static int pick_depth(void)
         } else if (bi->r[i].attrs & MEMF_FAST)
             fast = 1;
     }
-    if (GFX_DEPTH == 1 || GFX_DEPTH == 3)
+    if (GFX_DEPTH >= 1 && GFX_DEPTH <= 3)
         return GFX_DEPTH;
     if (GFX_DEPTH == 4)
         return aga ? 4 : 3;
-    if (aga)
-        return fast || chip2m ? 4 : 1;
-    return fast ? 3 : 1;
+    if (fast)
+        return aga ? 4 : 3;
+    return chip2m ? 3 : 1;
+}
+
+/* the Copper list for `depth` planes into l (COP_BYTES of chip RAM); the indices of its colours and pointers */
+#define COP_BYTES 160
+static void build_cop(volatile u16 *l, int depth, int *col, int *ptr)
+{
+    int f3 = aga && depth > 1;          /* more than one plane on AGA: always at FMODE 3 */
+    u16 mod = (u16)((u32)STRIDE * (u32)depth - STRIDE + (f3 ? F3_MODADJ : 0));
+    volatile u16 *c = l;
+#define MOVE(r, v) (*c++ = (u16)(r), *c++ = (u16)(v))
+    if (aga) {                          /* written every frame: a previous program's values survive a warm reset */
+        MOVE(0x1FC, f3 ? F3_FMODE : 0);       /* FMODE: 64-bit bitplane fetch */
+        MOVE(0x106, 0x0C00);            /* BPLCON3: colour bank 0, LOCT 0 */
+        MOVE(0x10C, 0x0011);            /* BPLCON4: no BPLAM colour-index XOR, sprite palettes as after reset */
+    }
+    MOVE(0x100, 0x8200 | (depth << 12));        /* BPLCON0: hires, N planes, colour burst */
+    MOVE(0x102, f3 ? F3_BPLCON1 : 0);
+    MOVE(0x104, 0);
+    MOVE(0x108, mod);
+    MOVE(0x10A, mod);
+    MOVE(0x092, f3 ? F3_DDFSTRT : 0x3C);
+    MOVE(0x094, f3 ? F3_DDFSTOP : 0xD4);
+    *col = (int)(c - l);
+    for (int i = 0; i < (1 << depth); i++)
+        MOVE(0x180 + 2 * i, depth == 1 ? (i ? gfx_palette[7] : 0) : depth == 2 ? gfx_palette2[i] : gfx_palette[i]);
+    *c++ = (u16)(COP_WAIT_LINE << 8 | 1);       /* WAIT for line COP_WAIT_LINE */
+    *c++ = 0xFFFE;
+    *ptr = (int)(c - l);
+    for (int k = 0; k < depth; k++)
+        MOVE(0x0E0 + 4 * k, 0), MOVE(0x0E2 + 4 * k, 0);
+    *c++ = 0xFFFF;
+    *c++ = 0xFFFE;
+#undef MOVE
+}
+
+/* the glyphs kept four times in a long, for more than one plane (7 KB): 0 when out of memory */
+static u32 *make_rglyph(void)
+{
+    u32 *r = kmalloc(sizeof glyphs * 4);
+    if (r)
+        for (u32 i = 0; i < sizeof glyphs; i++)
+            r[i] = ((const u8 *)glyphs)[i] * 0x01010101u;
+    return r;
+}
+
+static void say_depth(void)
+{
+    kprintf("display: %s chips, %d bitplane%s%s\n", aga ? "AGA" : "OCS/ECS", gfx_depth, gfx_depth > 1 ? "s" : "",
+            aga && gfx_depth > 1 ? " at 64-bit fetch (FMODE 3)" : "");
 }
 
 int gfx_init(void)
@@ -454,7 +524,7 @@ int gfx_init(void)
     }
     kprintf("display: beam's last line %d: %s, %d text rows\n", fl, trows == 25 ? "NTSC" : "PAL", trows);
     aga = lisa();
-    cop = mem_alloc(160, MEM_CHIP, 0);
+    cop = mem_alloc(COP_BYTES, MEM_CHIP, 0);
     if (!cop)
         return -1;
     for (gfx_depth = pick_depth(); ; gfx_depth = gfx_depth == 4 ? 3 : 1) {      /* too little chip RAM: fewer planes */
@@ -465,48 +535,16 @@ int gfx_init(void)
     }
     if (!tbuf)
         return -1;
-    if (gfx_depth > 1) {
-        rglyph = kmalloc(sizeof glyphs * 4);
-        if (!rglyph) {
-            mem_free(tbuf);
-            gfx_depth = 1;
-            lstride = STRIDE;
-            tbuf = mem_alloc((u32)BUFL * lstride, MEM_CHIP, 0);
-            if (!tbuf)
-                return -1;
-        } else
-            for (u32 i = 0; i < sizeof glyphs; i++)
-                rglyph[i] = ((const u8 *)glyphs)[i] * 0x01010101u;
+    if (gfx_depth > 1 && !(rglyph = make_rglyph())) {
+        mem_free(tbuf);
+        gfx_depth = 1;
+        lstride = STRIDE;
+        tbuf = mem_alloc((u32)BUFL * lstride, MEM_CHIP, 0);
+        if (!tbuf)
+            return -1;
     }
-    int f3 = gfx_depth == 4;            /* 4 planes only ever at FMODE 3 */
-    kprintf("display: %s chips, %d bitplane%s%s\n", aga ? "AGA" : "OCS/ECS", gfx_depth, gfx_depth > 1 ? "s" : "",
-            f3 ? " at 64-bit fetch (FMODE 3)" : "");
-    u16 mod = (u16)(lstride - STRIDE + (f3 ? F3_MODADJ : 0));
-    volatile u16 *c = cop;
-#define MOVE(r, v) (*c++ = (u16)(r), *c++ = (u16)(v))
-    if (aga) {                          /* written every frame: a previous program's values survive a warm reset */
-        MOVE(0x1FC, f3 ? F3_FMODE : 0);       /* FMODE: 64-bit bitplane fetch */
-        MOVE(0x106, 0x0C00);            /* BPLCON3: colour bank 0, LOCT 0 */
-        MOVE(0x10C, 0x0011);            /* BPLCON4: no BPLAM colour-index XOR, sprite palettes as after reset */
-    }
-    MOVE(0x100, 0x8200 | (gfx_depth << 12));    /* BPLCON0: hires, N planes, colour burst */
-    MOVE(0x102, f3 ? F3_BPLCON1 : 0);
-    MOVE(0x104, 0);
-    MOVE(0x108, mod);
-    MOVE(0x10A, mod);
-    MOVE(0x092, f3 ? F3_DDFSTRT : 0x3C);
-    MOVE(0x094, f3 ? F3_DDFSTOP : 0xD4);
-    cop_col = (int)(c - cop);
-    for (int i = 0; i < (1 << gfx_depth); i++)
-        MOVE(0x180 + 2 * i, gfx_depth == 1 ? (i ? gfx_palette[7] : 0) : gfx_palette[i]);
-    *c++ = (u16)(COP_WAIT_LINE << 8 | 1);       /* WAIT for line COP_WAIT_LINE */
-    *c++ = 0xFFFE;
-    cop_ptr = (int)(c - cop);
-    for (int k = 0; k < gfx_depth; k++)
-        MOVE(0x0E0 + 4 * k, 0), MOVE(0x0E2 + 4 * k, 0);
-    *c++ = 0xFFFF;
-    *c++ = 0xFFFE;
-#undef MOVE
+    say_depth();
+    build_cop(cop, gfx_depth, &cop_col, &cop_ptr);
     off = 0;
     cop_point(0);
     hw_off = 0;
@@ -523,6 +561,74 @@ int gfx_init(void)
     INTENA = INTF_SETCLR | INTF_VERTB;
     up = 1;
     return 0;
+}
+
+/* /etc/console's setting (init, SYS_console; D14 section 11): show `colours` (2, 4, 8, 16) from now on. The new
+ * buffer and Copper list come first (no memory: -ENOMEM, the display stays as it is); the switch is one register
+ * write with interrupts masked, which the Copper takes at the next vertical blank; one frame later (a timeout of
+ * 100 ms: the beam may not move) the old ones are freed and the console shown is drawn again from its grid. Returns
+ * the colours shown now. 16 on OCS/ECS (no 64-bit fetch, never 4 planes at the 16-bit one) gives 8. */
+int gfx_set_colours(int colours)
+{
+    int d = colours == 2 ? 1 : colours == 4 ? 2 : colours == 8 ? 3 : colours == 16 ? 4 : 0;
+    if (!d)
+        return colours ? -EINVAL : 1 << gfx_depth;
+    if (!up)
+        return -ENODEV;
+    if (d == 4 && !aga)
+        d = 3;
+    if (d == gfx_depth)
+        return 1 << d;
+    u32 *rg = rglyph;
+    u32 ls = (u32)STRIDE * (u32)d;
+    volatile u16 *nc = mem_alloc(COP_BYTES, MEM_CHIP, 0);
+    u8 *nb = mem_alloc((u32)BUFL * ls, MEM_CHIP, 0);
+    if (d > 1 && !rg)
+        rg = make_rglyph();
+    if (!nc || !nb || (d > 1 && !rg)) {
+        mem_free((void *)nc);
+        mem_free(nb);
+        if (rg != rglyph)
+            kfree(rg);
+        return -ENOMEM;
+    }
+    int col, ptr;
+    build_cop(nc, d, &col, &ptr);
+    memset(nb, 0, (u32)BUFL * ls);
+    blit_wait();
+    volatile u16 *oc = cop;
+    u8 *ob = tbuf;
+    u16 s = irq_save();
+    tbuf = nb;
+    cop = nc;
+    gfx_depth = d;
+    lstride = ls;
+    rglyph = rg;
+    cop_col = col;
+    cop_ptr = ptr;
+    off = 0;
+    cop_point(0);
+    hw_off = 0;
+    COP1LCH = (u16)((u32)nc >> 16);
+    COP1LCL = (u16)(u32)nc;
+    irq_restore(s);
+    u32 t0 = hr_time(), n = 0;          /* a vertical blank: the beam's line number goes down once */
+    int last = (int)((VPOSL >> 8) & 0x1FF);
+    while ((u32)(hr_time() - t0) < ECLOCK_PAL / 10 && ++n < 2000000u) {
+        int v = (int)((VPOSL >> 8) & 0x1FF);
+        if (v < last)
+            break;
+        last = v;
+    }
+    mem_free((void *)oc);
+    mem_free(ob);
+    if (d == 1) {                       /* one plane draws from the plain glyphs */
+        kfree(rglyph);
+        rglyph = 0;
+    }
+    say_depth();
+    term_redraw();
+    return 1 << d;
 }
 
 int gfx_up(void) { return up; }

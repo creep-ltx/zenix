@@ -1,6 +1,7 @@
 # D14: the colour console (design note, revision 2)
 
-Status: **built (2026-10-26, branch `d14`; section 10 says where the build differs)**; revision 2 (2026-10-25) was
+Status: **built (2026-10-26, branch `d14`; section 10 says where the build differs; section 11 the setting and the
+default without fast RAM, the 2 MB diet, branch `diet`)**; revision 2 (2026-10-25) was
 ready to build after its independent review (a feature: one review). Revision 2
 takes in every finding: FMODE 3 is a condition, not an option; AGA detection and registers; a 12-bit palette; the
 scrollback number corrected; the default by memory too; the Copper list; background-colour erase; region scrolls by
@@ -223,3 +224,43 @@ owner: "just like in AmigaOS, the Workbench is 4 colours as a default, but most 
 fast RAM the default becomes **3 planes, 8 colours** (the ANSI eight; bright shown as bold, as on OCS/ECS), with fast RAM
 16 as now, and a setting (2/4/8/16 colours, read at boot) replaces section 3's "no runtime setting". Built after D16
 with the rest of the 2 MB diet (disk cache by memory size, login stepping aside).
+
+## 11. The colour setting and the default without fast RAM (2026-10-26, built with the 2 MB diet)
+
+The owner's decision above, as built (branch `diet`):
+
+- **The default by machine:** AGA with fast RAM: 4 planes (16 colours) at FMODE 3, as before; OCS/ECS with fast RAM:
+  3 planes; **2 MB of chip RAM and no fast RAM: 3 planes (8 colours)**, 120 KB of screen instead of 160; less than
+  2 MB of chip RAM and no fast RAM: 1 plane (the 1-plane rule stays). On AGA every depth above one plane is fetched
+  64 bits at a time (FMODE 3, the same display values as at 4 planes; the screenshot test checks 2 and 3 planes too):
+  3 planes then cost 30 bus slots a line, 2 planes 20, against 40 for one plane at the 16-bit fetch, which one plane
+  keeps (it is what the A1200 has shown since 2026-10-23). On OCS/ECS, 2 and 3 planes use the 16-bit fetch.
+- **2 planes, 4 colours** (new): black, red, cyan and grey. The eight ANSI colours fold onto them by warmth (red,
+  yellow, magenta: red; green, blue, cyan: cyan; white: grey); bright colours are bold, bright black is grey, as at
+  3 planes. Like Workbench's four colours, enough to tell a directory from a program.
+- **The setting: `/etc/console`, a line `colours N`** (2, 4, 8 or 16; `colors` is the same, `auto` or no line: the
+  machine's default; `#` comments), read by **init** when it starts, before `/etc/motd` and the first login, so a
+  change counts from the next boot, as Workbench's ScreenMode preferences do. The shipped file has `colours auto`
+  and says what each choice costs. Why there: the file is on the root, which every boot path reaches (the floppy's
+  bootblock, zenixboot and the boot menu all hand over the same frozen bootinfo, which has no room for settings); init
+  runs once per boot before any session, while chip RAM is still in one piece; boot itself lives in the kernel image,
+  which has no room to spare.
+- **System call 89 `SYS_console`** (op, value): op 1 (`CON_COLOURS`) with 2, 4, 8 or 16 switches the display (root
+  only), with 0 only asks; the answer is the colours shown now, -EINVAL for any other value, -ENOMEM when the chip RAM
+  for the new screen is not there (the display stays as it was), -ENODEV without a display. 16 on OCS/ECS gives 8
+  (never 4 planes at the 16-bit fetch). It replaces section 3's "no runtime setting" and its proposed number 82
+  (taken by D15). Frozen once merged: the number, op 1 and its values.
+- **The switch** follows section 3's safe sequence: the new screen buffer and Copper list are allocated first (the old
+  ones stay until the end, so a failure changes nothing), the blitter is waited for, the new list is pointed at with
+  interrupts masked (the Copper takes it at the next vertical blank), one frame is waited for (timeout 100 ms), the old
+  buffer and list are freed and the console shown is drawn again from its grid (its scrollback keeps its colours).
+  The kernel says the new depth on the log (`display: AGA chips, 2 bitplanes at 64-bit fetch (FMODE 3)`); init says
+  when a value is wrong or cannot be had.
+- **Memory:** the screen takes 40, 80, 120 or 160 KB of chip RAM for 2, 4, 8 or 16 colours; the 7 KB glyph table for
+  more than one plane is freed again at one plane.
+- **Tests:** `tools/colour-test.sh` runs 1, 2, 3 and 4 planes (all 80 columns, the pixels at the edges where one plane
+  has them, the colour page, scrolling, scrollback, edit's status line) and the setting on the A1200 without fast RAM
+  (`colours 4` and `16` switch and the pages are right afterwards, `colours 7` is refused); the matrix checks each
+  machine's default.
+- **Seen in FS-UAE only:** FMODE 3 at 2 and 3 planes, like the 4-plane values; the A1200 confirms them on the owner's
+  weekend, with the speed of each depth.

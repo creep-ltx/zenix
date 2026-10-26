@@ -24,6 +24,7 @@ static int need;                        /* it needs a check (sticky): mounted no
 static int hold;                        /* zup's FS_MARK 1, until its FS_MARK 0 */
 static int norphans;                    /* open inodes whose last name went (kept until their last close) */
 static u32 changed_at;                  /* the tick of the last writing request */
+#define CACHE_CHIPONLY (24 * 1024)      /* the block cache on a machine without fast RAM (DESIGN D18: I/O measured) */
 #define QUIET_TICKS 100                 /* 1 s after the last change: clean again (AmigaOS FFS's bitmap timer) */
 #ifdef ZHOST
 int fsd_marking;                        /* host tests: a block write outside the mark is counted */
@@ -378,6 +379,14 @@ static int handle(struct umsg *m)
  * kernel and started as a service (DESIGN D11): boot registers the root's ("fs", -root: it must be writable, as the root
  * is - a refused or read-only volume, ext3, ext4, errors, is never the root); mount registers a mount's ("fs.DEVICE").
  * -fsck: the root's rules, but served read-only without taking the device, while boot runs fsck.ext2 on it (D17). */
+/* the block cache by the machine (the 2 MB diet, DESIGN D18): no fast RAM, 24 KB; with fast RAM 48 blocks, as before */
+static void cache_by_memory(void)
+{
+    u32 mi[4];
+    if (sys_meminfo(mi) == 0 && mi[1] == 0)
+        ext2_cache_bytes = CACHE_CHIPONLY;
+}
+
 int main(int argc, char **argv)
 {
     ext2_busy = open_busy;
@@ -387,6 +396,7 @@ int main(int argc, char **argv)
     const char *pname = argv[2], *dev = argv[1], *who = root ? "fsd" : pname;
     char name[16];
     int self = sys_svc_self(), restart = (self & 0xFFFF) > 1;
+    cache_by_memory();
     if (argc > 4 && !strcmp(argv[argc - 2], "-id")) {      /* the volume by its place and uuid (volid.h) */
         if (vol_find(disk_port, dev, argv[argc - 1], name, who, restart)) return 1;
         dev = name;

@@ -1,28 +1,38 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
-# The colour console (DESIGN D14) in FS-UAE through the cage rig (tools/shot.py: nothing on the desktop), at 1, 3 and
-# 4 bitplanes (test builds with make GFXDEPTH=n DIWV=0x38, on the A1200 with fast RAM; 3 planes there use the
-# OCS/ECS fetch). For each depth, screenshots taken when the script gets there (tools/colour-test.py checks them):
+# The colour console (DESIGN D14) in FS-UAE through the cage rig (tools/shot.py: nothing on the desktop), at 1, 2, 3
+# and 4 bitplanes (test builds with make GFXDEPTH=n DIWV=0x38, on the A1200 with fast RAM; 2 to 4 planes there at
+# AGA's 64-bit fetch, FMODE 3). For each depth, screenshots taken when the script gets there (tools/colour-test.py
+# checks them):
 #  - `termtest columns`: all 80 columns visible, in order, nothing repeated, and the picture's edges the very pixels
 #    one plane has (at 4 planes this is the test of FMODE 3's fetch window)
-#  - `termtest colours`: the 16 colour blocks against the palette (3 planes: colour & 7; 1 plane: no colours)
+#  - `termtest colours`: the 16 colour blocks against the palette (3 planes: colour & 7; 2: the four colours; 1 plane:
+#    no colours)
 #  - `termtest scroll` (coloured lines scrolling the screen three times, so the blitter copies the rows back,
 #    background-colour erases, a scroll region with inserted and deleted lines): the screen afterwards must be the
 #    very picture a redraw from the grid gives (the scrollback one line up and back down redraws) - no garbage
 #  - scrolled back a page: the rows keep their colours (3 and 4 planes)
-#  - edit's status line: white on blue (3 and 4 planes), inverse (1 plane: the colours are written as an inverse)
+#  - edit's status line: white on blue (3 and 4 planes; 2: on cyan), inverse (1 plane: the colours are written as an
+#    inverse)
 #  - on the serial port, raw: the prompt's colour codes; less showing a line with colour codes and 79 visible
 #    characters as one row, the codes passed on (zero width, as GNU less -R)
-# usage: tools/colour-test.sh [DEPTH...]      (default 1 3 4; the 1-plane run comes first: its edges are the reference)
+# The setting (D14 section 11, /etc/console read by init), on the A1200 without fast RAM (8 colours by default), with the
+# default depth's build (DIWV=0x38 only): "colours 4" switches to 2 planes and "colours 16" to 4 (the kernel says so,
+# and the colour page and a scrolled-back page are what those planes show: the switch draws the console again), and
+# "colours 7" is refused with a message, the 3 planes staying.
+# usage: tools/colour-test.sh [DEPTH...] [s4 s16 s7]   (default 1 2 3 4 s4 s16 s7; the 1-plane run comes first: its
+#        edges are the reference)
 cd "$(dirname "$0")/.." || exit 1
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-colour-serial}
 OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-colour.XXXXXX)}; mkdir -p "$OUT"
-DEPTHS=${*:-1 3 4}
+ARGS=${*:-1 2 3 4 s4 s16 s7}
+DEPTHS=$(for a in $ARGS; do case $a in s*) ;; *) echo $a;; esac; done)
+SETS=$(for a in $ARGS; do case $a in s*) echo ${a#s};; esac; done)
 pass=1
 check() { if [ "$2" = 0 ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 ct() { python3 tools/colour-test.py "$@"; }
 # the test builds (about 25 MB each) go when the script ends; the logs, configs and screenshots stay
-trap 'for d in $DEPTHS; do rm -rf "$OUT/d$d"; done' EXIT
+trap 'for d in $DEPTHS; do rm -rf "$OUT/d$d"; done; rm -rf "$OUT/ds"' EXIT
 
 cat > "$OUT/script.txt" <<'EOF'
 wait zenix:/# 120
@@ -80,13 +90,74 @@ for d in $DEPTHS; do
     [ $d = 1 ] && head -1 "$OUT/geom$d" > "$OUT/edges1"
     ct palette "$OUT/d$d-colours.png" "$OUT/geom$d" $d; check "$d planes: termtest colours: the 16 blocks as $d planes show them" $?
     ct same "$OUT/d$d-scrolled.png" "$OUT/d$d-redrawn.png"; check "$d planes: after termtest scroll the screen is what a redraw from the grid gives" $?
-    if [ $d != 1 ]; then
+    if [ $d = 2 ]; then
+        ct rows "$OUT/d$d-back.png" "$OUT/geom$d" $d; check "$d planes: scrolled back a page, every row keeps its colour" $?
+        ct pixel "$OUT/d$d-edit.png" "$OUT/geom$d" 31 20 2BB; check "$d planes: edit's status line is cyan (blue's stand-in)" $?
+    elif [ $d != 1 ]; then
         ct rows "$OUT/d$d-back.png" "$OUT/geom$d" $d; check "$d planes: scrolled back a page, every row keeps its colour" $?
         ct pixel "$OUT/d$d-edit.png" "$OUT/geom$d" 31 20 45E; check "$d planes: edit's status line is blue" $?
     else
         ct pixel "$OUT/d$d-edit.png" "$OUT/geom$d" 31 20 BBB; check "$d planes: edit's status line is inverse" $?
     fi
     ct serial "$OUT/d$d.serial.log"; check "$d planes: the prompt's colour codes and less's zero-width codes on the serial port" $?
+done
+# ---- the setting: /etc/console on the A1200 without fast RAM ----
+cat > "$OUT/sscript.txt" <<'EOF'
+wait zenix:/# 120
+sleep 1
+send termtest columns\r
+sleep 5
+shot columns
+send q
+sleep 2
+send termtest colours\r
+sleep 5
+shot colours
+send q
+sleep 2
+send termtest scroll\r
+wait zenix:/# 120
+sleep 3
+send \x1dU
+sleep 3
+shot back
+send \x1dD
+sleep 1
+send free\r
+sleep 3
+EOF
+if [ -n "$SETS" ]; then
+    B=$OUT/ds
+    make -s -j8 BUILD="$B" DIWV=0x38 "$B/zenix.adf" "$B/zenix.hdf" >"$OUT/ds.build.log" 2>&1 ||
+        { echo "FAIL build of the default-depth kernel:"; grep -v 'RWX permissions' "$OUT/ds.build.log" | tail -15; pass=0; SETS=""; }
+    cp "$B/zenix.hdf" "$OUT/ds-clean.hdf"
+fi
+for c in $SETS; do
+    cp "$OUT/ds-clean.hdf" "$B/zenix.hdf"
+    printf '# a test of the setting\ncolours %s\n' $c > "$OUT/console$c"
+    debugfs -w -R "rm /etc/console" "$B/zenix.hdf" >/dev/null 2>&1
+    debugfs -w -R "write $OUT/console$c /etc/console" "$B/zenix.hdf" >/dev/null 2>&1
+    ZENIX_BUILD="$B" python3 tools/fsuae_conf.py fsuae/a1200-020.fs-uae "$OUT/s$c.fs-uae" || exit 1
+    ZOOMOUT=0 SHOT_LIMIT=400 timeout -k 20 900 python3 tools/shot.py "$OUT/s$c.fs-uae" "$OUT/sscript.txt" "$OUT/s$c" >/dev/null 2>&1
+    log=$(tr -d '\r' < "$OUT/s$c.serial.log")
+    echo "$log" | grep -q "display: 640x256, 3 bitplanes, 80x32 text"
+    check "colours $c: without fast RAM the kernel starts with 3 planes (8 colours)" $?
+    case $c in 4) d=2;; 16) d=4;; *) d=3;; esac
+    if [ $d = 3 ]; then
+        echo "$log" | grep -q "init: /etc/console: colours 7: 2, 4, 8 or 16 (or auto)" && ! echo "$log" | grep -q "display: AGA chips, [124] bitplane"
+        check "colours $c: init says the value is wrong, the 3 planes stay" $?
+        continue
+    fi
+    echo "$log" | grep -q "display: AGA chips, $d bitplanes at 64-bit fetch (FMODE 3)"
+    check "colours $c: init switches the display to $d planes (the kernel says so)" $?
+    for s in columns colours back; do
+        [ -f "$OUT/s$c-$s.png" ] || { echo "FAIL colours $c: no screenshot $s (see $OUT/s$c.serial.log)"; pass=0; continue 2; }
+    done
+    ref=""; [ ! -f "$OUT/edges1" ] || ref="$OUT/edges1"
+    ct columns "$OUT/s$c-columns.png" $ref > "$OUT/sgeom$c"; check "colours $c: all 80 columns after the switch ($(head -1 "$OUT/sgeom$c"))" $?
+    ct palette "$OUT/s$c-colours.png" "$OUT/sgeom$c" $d; check "colours $c: termtest colours as $d planes show them" $?
+    ct rows "$OUT/s$c-back.png" "$OUT/sgeom$c" $d; check "colours $c: scrolled back a page, every row keeps its colour" $?
+    echo "$log" | grep -a "chip RAM free" | tail -1 | sed "s/^/  colours $c: /"
 done
 echo "logs and screenshots: $OUT"
 exit $((1 - pass))

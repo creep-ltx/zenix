@@ -21,7 +21,7 @@ want /tmp/k2.txt "41423163640a" "Caps Lock on letters only, Shift inverts it"
 n=$(get /tmp/k3.txt | tr -cd z | wc -c)
 if [ "$n" -ge 10 ] && [ "$n" -le 40 ]; then echo "PASS key repeat ($n z's from a 1.2 s hold)"; else echo "FAIL key repeat: $n z's"; pass=0; fi
 if [ "$(get /tmp/k4.txt)" = "typed during output" ]; then echo "PASS keys typed during heavy output arrive"; else echo "FAIL typed during output: got '$(get /tmp/k4.txt)'"; pass=0; fi
-if [ "$(get /tmp/k6.txt | grep -c .)" = "2" ]; then echo "PASS Amiga+F2: console 2 has its own login (two logins run)"; else echo "FAIL Amiga+F2: logins running: '$(get /tmp/k6.txt)'"; pass=0; fi
+if [ "$(get /tmp/k6.txt | grep -c .)" = "1" ]; then echo "PASS Amiga+F2: console 2 has its own login, and its shell started a job"; else echo "FAIL Amiga+F2: console 2's sleep: '$(get /tmp/k6.txt)'"; pass=0; fi
 if debugfs -R "stat /tmp/k7.txt" $BD/zenix.hdf 2>/dev/null | grep -q 'Size: 0$'; then echo "PASS Amiga+F1: back on console 1 (its shell has no jobs; console 2's has one)"; else echo "FAIL Amiga+F1: jobs '$(get /tmp/k7.txt)' (or no file)"; pass=0; fi
 if get /tmp/k5.txt | grep -q 'lost\|queue full'; then echo "FAIL the kernel log reports lost input: $(get /tmp/k5.txt | grep 'lost\|queue full')"; pass=0
 elif get /tmp/k5.txt | grep -q 'Zenix'; then echo "PASS no input lost (kernel log)"; else echo "FAIL no kernel log in k5.txt"; pass=0; fi

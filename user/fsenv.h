@@ -11,8 +11,15 @@ typedef int s32;
 #endif
 #include "../kernel/ext2.h"
 
+#ifdef ZHOST
 static inline void *fs_alloc(u32 n) { return malloc(n); }
 static inline void fs_free(void *p) { free(p); }
+#else
+/* the block cache's one allocation (DESIGN D18): a region of its own, exactly its size (malloc would round 24 KB up
+ * to its 32 KB class and take a 64 KB chunk for it) */
+static inline void *fs_alloc(u32 n) { return sys_memalloc(n); }
+static inline void fs_free(void *p) { sys_memfree(p); }
+#endif
 static inline u32 fs_ticks(void) { return sys_ticks(); }
 static inline u32 fs_time(void) { return (u32)sys_time(); }
 int fs_blk_read(u32 lba, u32 count, void *buf);

@@ -3,7 +3,8 @@
  * filesystem code. One device: the whole image (or the part given by HOSTDISK_START/HOSTDISK_SECTORS, in sectors).
  * The image comes from the environment variable HOSTDISK or from hostdisk_use(). Counts every write so a test can
  * check that a read-only mount wrote nothing. HOSTDISK_CUT=N: a power cut after N sectors written (exit 99);
- * HOSTDISK_COUNT: the sectors written are said at the end. */
+ * HOSTDISK_COUNT: the sectors written (and, on a second line, read) are said at the end. HOSTDISK_NOFAST: sys_meminfo
+ * says there is no fast RAM (fsd's small block cache, DESIGN D18). */
 #include "zhost.h"
 #include "../../kernel/diskproto.h"
 #include <fcntl.h>
@@ -32,7 +33,8 @@ int hostdisk_use(const char *path, u32 start, u32 sectors)
     return 0;
 }
 
-static void say_writes(void) { fprintf(stderr, "hostdisk-writes %lu\n", hostdisk_writes); }
+unsigned long hostdisk_reads;                   /* sectors read so far */
+static void say_writes(void) { fprintf(stderr, "hostdisk-writes %lu\nhostdisk-reads %lu\n", hostdisk_writes, hostdisk_reads); }
 static void lazy_open(void)
 {
     if (fd >= 0) return;
@@ -44,7 +46,7 @@ static void lazy_open(void)
     }
     const char *c = getenv("HOSTDISK_CUT");             /* a power cut after this many sectors written (exit 99) */
     if (c && *c) { hostdisk_limit = (unsigned long)atol(c); hostdisk_die = 1; }
-    if (getenv("HOSTDISK_COUNT")) atexit(say_writes);   /* "hostdisk-writes N" on stderr at the end */
+    if (getenv("HOSTDISK_COUNT")) atexit(say_writes);   /* "hostdisk-writes N", "hostdisk-reads N" on stderr at the end */
 }
 
 int sys_call(int port, struct umsg *m)
@@ -72,6 +74,7 @@ int sys_call(int port, struct umsg *m)
         off_t off = (off_t)((start_sec + lba) * 512);
         u32 *w = (u32 *)m->a[3];
         if (m->type == DISK_READ) {
+            hostdisk_reads += n;
             if (pread(fd, (void *)m->a[3], (size_t)n * 512, off) != (ssize_t)n * 512) return -1;
             if (be) for (u32 i = 0; i < n * 128; i++) w[i] = __builtin_bswap32(w[i]);
             return 0;
@@ -98,5 +101,10 @@ int sys_reply(struct umsg *m, int r) { (void)m; (void)r; return 0; }
 void sys_sleep(u32 t) { (void)t; }
 static u32 host_ticks;
 u32 sys_ticks(void) { return host_ticks += 1; }
+int sys_meminfo(u32 out[4])
+{
+    out[0] = 1u << 20; out[1] = getenv("HOSTDISK_NOFAST") ? 0 : 4u << 20; out[2] = out[3] = 0;
+    return 0;
+}
 long sys_time(void) { return 1761190000; }
 void *xmalloc(u32 n) { void *p = malloc(n); if (!p) { fprintf(stderr, "out of memory\n"); exit(1); } return p; }

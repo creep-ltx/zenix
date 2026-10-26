@@ -115,7 +115,9 @@ unseen). So:
 | 81 `svc` (DESIGN D11, the service manager: register, remove, self, save, load, opens) | main, merged 2026-10-25 |
 | 82 `update` (DESIGN D15: INFO, RELEASE, NOTE) | built on branch d15, 2026-10-26 |
 | 83 `evwait`, 84 `sigaction`, 85 `sigprocmask`, 86 `sigreturn`, 87 `alarm`, 88 `setpgid` (DESIGN D16); `kill`'s third argument 1 (the new form: a signal, groups) and `setfg`'s second argument 1 (a process group) | built on branch d16, 2026-10-26 |
-| **next free: 89** | |
+| `exit`'s second argument (DESIGN D18: a child's pid, made the caller's parent's child first; login steps aside for init) | built on branch diet, 2026-10-26 |
+| 89 `console` (the 2 MB diet, DESIGN D18: op 1 `CON_COLOURS`, the display's colours 2/4/8/16, 0 asks; D14 note section 11) | built on branch diet, 2026-10-26 |
+| **next free: 90** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
 zup's "needs a check" mark), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
@@ -146,7 +148,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `SVC_*` numbers and limits (`SVC_TEXT` 80, `SVC_SAVED` 512, `SVC_MIDREQ`, exit status 86 for a damaged table), the
   port names (`disk`, `fs`, `fs.*`) and the built-in `@name` programs; the tty mode bits (`TTY_RAW`, `TTY_NOSIG`),
   `O_*` flags and mode bits, the spawn limits (argument count and bytes), exit and wait status conventions (139 for a
-  fault, `waitcon`'s console status); the boot note's kinds and `SYS_reboot`'s arguments; D15's own formats (the
+  fault, `waitcon`'s console status, login's `ST_HANDED` (bit 30) plus the handed shell's pid, D18); the boot note's kinds and `SYS_reboot`'s arguments; D15's own formats (the
   bootinfo bundle fields, the update note, the state file, the bundle header and manifest, zup's journal and undo logs).
 - **One accepted change of meaning (audit3 B7, 2026-10-26):** `uproc.mem` counts a process's memory regions
   (`memalloc`) and a private code copy since D13; before, only its load block (image, data, stack). Accepted once,

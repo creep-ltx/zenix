@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "pw.h"
-/* login [-f] [user]: start a session on this console. Asks for the name and password, then runs the user's shell as
- * that user and returns when it ends (init starts login again). With -f the password is not asked (root's own call,
- * or the /etc/autologin convenience on console 1: a file naming the user to log in without asking). Every console has
- * its own login (init), so several sessions can be open at once. */
+/* login [--init] [-f] [user]: start a session on this console. Asks for the name and password, then runs the user's
+ * shell as that user. Run by hand, it returns when the shell ends. Run by init (--init), it steps aside once the shell
+ * runs (the 2 MB diet, DESIGN D18): it ends and hands the shell to init, which then waits for the session itself and
+ * starts a new login when it ends; so a session holds no login process. With -f the password is not asked (root's own
+ * call, or the /etc/autologin convenience on console 1: a file naming the user to log in without asking). Every console
+ * has its own login (init), so several sessions can be open at once. */
+static int handover;
 /* the last update's one-line result (zup, DESIGN D15), shown once after a login on any console, then removed */
 static void update_result(void)
 {
@@ -26,6 +29,8 @@ static int session(const struct pw *p)
     char *argv[] = { (char *)p->shell, 0 };          /* spawn only reads argv */
     int pid = sys_spawn(p->shell, argv, 0);
     if (pid < 0) { fprintf(2, "login: cannot start %s: %s\n", p->shell, zwhy("failed")); return 1; }
+    if (handover)                       /* init's login: the shell becomes init's child, login ends (DESIGN D18) */
+        sys_exit_handing(ST_HANDED | pid, pid);
     sys_wait(pid);                      /* the shell makes its own group the terminal's foreground (DESIGN D16) */
     return 0;
 }
@@ -36,6 +41,7 @@ int main(int argc, char **argv)
     char name[32] = "", pass[100];
     struct pw p;
     setpgid(0, 0);                      /* a group of its own (DESIGN D16 rule 7): `kill 0` in a session never reaches init */
+    if (i < argc && !strcmp(argv[i], "--init")) { handover = 1; i++; }
     if (i < argc && !strcmp(argv[i], "-f")) { force = 1; i++; }
     if (i < argc) strncpy(name, argv[i], 31);
     struct ustat ts;

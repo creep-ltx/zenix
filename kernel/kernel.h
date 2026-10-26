@@ -145,8 +145,11 @@ int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
 int gfx_up(void);
 void gfx_panic(void);            /* panic with the display up: dark red background, white text, the text stays */
-extern int gfx_depth;            /* bitplanes: 1, 3 or 4 (DESIGN D14; 0: no display) */
+extern int gfx_depth;            /* bitplanes: 1 to 4 (DESIGN D14; 0: no display) */
 extern const u16 gfx_palette[16];       /* the 16 ANSI colours, 12 bits */
+extern const u16 gfx_palette2[4];       /* the four colours of 2 planes */
+int gfx_set_colours(int colours);       /* SYS_console CON_COLOURS: 2, 4, 8, 16 (0: ask) -> the colours shown, or -errno */
+void term_redraw(void);                 /* the console shown, drawn again from its grid (a new depth) */
 /* colour: foreground in the low nibble, background in the high one (0x07: grey on black) */
 void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour);
 void gfx_scroll(u8 colour);             /* the whole screen up a row; the new row takes colour's background */
@@ -470,6 +473,7 @@ int proc_spawn(const char *path, char *const *argv, int argc,
 int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int priv, int tty);   /* no parent; console tty, 0: the kernel log */
 void schedule(void);
 void proc_exit(int code) __attribute__((noreturn));
+void proc_handover(int pid);           /* SYS_exit's second argument: the caller's child becomes its parent's (D18) */
 #define WAIT_NOHANG   1       /* proc_wait flag: -2 if children exist but none has exited */
 #define WAIT_UNTRACED 2       /* proc_wait flag: also report a child that has stopped, once (as ST_STOPPED) */
 #define ST_STOPPED    0x114   /* proc_wait result for a stopped child (0x100 + 20, the SIGTSTP number) */
@@ -666,7 +670,7 @@ u16 tty_poll(int tty);                  /* D16: POLLIN when a read would not wai
 int tty_of(const struct proc *p);
 
 /* syscalls: TRAP #0, number in d0, args d1-d3, result in d0 */
-#define SYS_exit    1
+#define SYS_exit    1    /* status; a2 (DESIGN D18): a child's pid, made the parent's child first (0: none) */
 #define SYS_write   2
 #define SYS_yield   3
 #define SYS_getpid  4
@@ -755,6 +759,8 @@ int tty_of(const struct proc *p);
 #define SYS_sigreturn   86   /* the frame the entry was given: back from a handler (returns the frame's d0) */
 #define SYS_alarm       87   /* ticks (0: off) -> ticks the previous alarm had left */
 #define SYS_setpgid     88   /* pid (0: self), pgid (0: pid): oneself or one's own children */
+#define SYS_console     89   /* op (CON_*), value: the text console's settings (the 2 MB diet, D14 section 11) */
+#define CON_COLOURS     1    /* value 2, 4, 8 or 16: set (root only); 0: ask -> the colours shown now */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

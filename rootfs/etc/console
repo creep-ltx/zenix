@@ -1,0 +1,6 @@
+# The text console's colours, read by init at every start (man init).
+# colours 2, 4, 8 or 16: fewer colours leave more chip RAM free (the screen
+# takes 40, 80, 120 or 160 KB) and cost the processor less on a machine
+# without fast RAM. auto (or no line): the machine decides - 16 with fast
+# RAM (8 on an OCS or ECS Amiga), 8 with 2 MB of chip RAM only, 2 with less.
+colours auto

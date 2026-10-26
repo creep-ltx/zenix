@@ -243,7 +243,9 @@ middle buttons; a joystick in port 2 is decoded from JOY1DAT. `SYS_input` (74) c
 The internal and external drives df0-df3: CIA-B port B selects, steps and starts the motor, CIA-A port A reports
 ready, track 0, write protect and disk change; Paula reads and writes whole tracks by DMA (sync word 0x4489,
 WORDSYNC on read, precompensation from cylinder 40 on write) into a chip-RAM buffer. `mfm.h` codes and decodes
-AmigaDOS tracks (11 sectors of 512 bytes, odd/even bit blocks, XOR checksums); one decoded track is kept as a cache,
+AmigaDOS tracks (11 sectors of 512 bytes, odd/even bit blocks, XOR checksums); one decoded track is kept as a cache
+(allocated at the first floppy request, with the copy a write is verified against: 11 KB, none on a machine that never
+uses the floppy, DESIGN D18),
 with a mask of which of its sectors are valid. Waits use `hr_time()` (the CIA-B E-clock counter, section 2). The
 100 Hz tick turns idle motors off after 3 s. System calls 76 `SYS_fd_info` and 77 `SYS_fd_rw`, for the disk server
 only: `diskd` offers the drives as `df0`-`df3` (df0 probed at start, the others on first use); `dd` copies to and
@@ -612,14 +614,15 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 85 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-88, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 86 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-89, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
 `update`), services (`svc`), memory (`memalloc memfree meminfo`),
-time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`), environment (`envset
+time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`, and `console`, the
+display's colours: D14 note section 11), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
 ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`blk_read blk_write blk_flush blk_size blk_ram fd_info fd_rw`).
@@ -868,7 +871,10 @@ registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10), asks 
 registered with `-fsck`, a read-only server that leaves the device to `/bin/fsck.ext2 -y DEVICE`, which boot runs
 and waits for at most 20 minutes; then `FS_QUIT` to it and `fs` registered with `-root` again, so the next call starts
 the writable server; the kernel forgets that a service served when its program text changes, so a writable root
-server that fails to start is still D11's panic), runs `/sbin/zup`, registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
+server that fails to start is still D11's panic; a root fsck.ext2 could not repair, or could not check, stays with
+the read-only check server while boot asks on console 1 - go on read-only (the default after 30 s), read-write, a
+rescue shell as root, or reboot: D17's owner decision, man/rescue.txt), runs `/sbin/zup` (not on a read-only root),
+registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
 [ARGUMENTS]` a line, man/boot.txt; a bad line is reported on console 1 and skipped), then spawns `/bin/init` on console 1 and waits for it; should init
 end, it says so and starts it again. (It exists because the idle process cannot block on a message.) The logins on the
 consoles are init's work (section 11, man/init.txt).
@@ -938,7 +944,14 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **ext2**, revision 0/1, inodes of 128 bytes or more, 1, 2 or 4 KB blocks, read **and write** (bitmaps, group
   descriptors, direct/indirect/double-indirect blocks, growing directories, rename, hard and symbolic links, fast
   symlinks). Little-endian on disk, swapped on read/write of metadata. Write-through block cache with an MRU/hash
-  lookup. Directory entries are parsed in place in the cache.
+  lookup and least-recently-used replacement; directory entries are parsed in place in the cache. **The cache's size
+  by the machine** (the 2 MB diet, DESIGN D18): one region of memory, allocated at the first block read after a
+  mount: with fast RAM 48 blocks (as before), without fast RAM 24 KB (24 blocks of 1 KB), never fewer than 12 blocks.
+  Measured on the host (a session's requests: logins, `ls -l /bin` twice, ten program loads, 20 files written and
+  removed; sectors read): 1 KB blocks 751 with 48 blocks, 943 with 24; 4 KB blocks 723 with 48, 1307 with 12 (3315
+  with 8, hence the floor); without the program loads 65 and 85. The extra reads are programs read again that 48
+  blocks still held. Before, each block was a separate `malloc`, whose growing chunks held 84 KB for 48 KB of
+  blocks; fsd on the 2 MB A1200 without fast RAM went from 148 KB to 87 KB.
 - **ext2: what is mounted** (`ext2_mount_as`, kernel/ext2.c). Refused: revision above 1, blocks above 4 KB, a
   superblock or group table that does not add up (sizes, inode count, every group's bitmaps and inode table inside
   its group), and every INCOMPAT feature except `filetype` - extents, 64bit, flex_bg, meta_bg, needs_recovery,
@@ -1025,7 +1038,16 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   desktop features, ROADMAP phase 5). `init` keeps a `login` on every console that has been shown, like a getty:
   console 1 at boot, console N the first time it is shown (`con_switch` sees nobody whose controlling tty it is,
   sets a bit in `con_want` and readies init, which waits in `SYS_wait` with `WAIT_CONSOLE` - Linux's autovt does the
-  same), and a login that ends is started again. So a console costs memory only once it is used.
+  same), and a session that ends is followed by a new login. So a console costs memory only once it is used. **A
+  login steps aside** (the 2 MB diet, DESIGN D18): Zenix has no `exec`, so the shell is a new process, and only a
+  process that has become the user can start it as the user; init's login (`login --init`) spawns the shell and then
+  ends through `SYS_exit` with its second argument naming the shell, which `proc_handover` makes init's child first
+  (Linux's `CLONE_PARENT`, after the fact; a child that has already ended or stopped is posted to init at once). Its
+  status, `ST_HANDED` (bit 30) plus the shell's pid, tells init the console's session goes on in that child; a
+  logout is the shell's end. A session holds no login process (30 KB, and login's 13 KB of shared code once no
+  console waits at a prompt); nothing is written to the disk (no utmp). `init`'s `waitcon` takes one ended child per
+  call and answers its status: the one console whose process is no longer there (wait says -1) gets that status, the
+  others' are asked for one by one.
 - **tty** (`tty.c`): one per console, line discipline in the kernel: echo, backspace, `^U`, `^C` (SIGINT to the
   foreground: a process group or, in the old form of `SYS_setfg`, one process; nobody, or a group with no living
   member: `intr` is set for a shell that polls `ttyintr`), `^Z` (SIGTSTP the same way), `^D`; Tab is kept in the line (Backspace
@@ -1075,21 +1097,29 @@ target). What they still do differently, by capability: ext2 cannot move a direc
 - **Display** (`gfx.c`, DESIGN D14): 640 pixels wide hires, the whole screen text. `gfx_init`
   measures the beam's last line for about 60 ms (E-clock timed): above 280 (312 on PAL) the display is 256 lines,
   32 rows; else (262 on NTSC) 200 lines, 25 rows and `DIWSTOP` to match, so no row is hidden below the picture.
-  **How many bitplanes** the machine decides at boot, because the display takes chip-bus time from the CPU: **AGA**
-  (Lisa's id register `DENISEID` reads `$F8`, 16 reads alike) with fast RAM or 2 MB of chip RAM: **4 planes, 16
-  colours, fetched 64 bits at a time (FMODE 3)**, which costs the 40 bus slots per line that one plane costs at the
-  16-bit fetch (never 4 planes at FMODE 0: that takes every slot of the visible lines); **OCS/ECS with fast RAM: 3
-  planes**, 8 colours (a bright foreground is the colour plus bold, bright black is grey); **otherwise 1 plane**, grey
-  on black (the colours are not shown, inverse is the glyph inverted). `make GFXDEPTH=1|3|4` builds a kernel that
-  uses that depth (the screenshot tests; 4 only on AGA). If chip RAM is short the next smaller depth is used. The boot
-  log says which: `display: AGA chips, 4 bitplanes at 64-bit fetch (FMODE 3)` and `display: 640x256, 4 bitplanes,
-  80x32 text`. At FMODE 3 the fetch window is `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0 (one plane at the old
-  fetch uses `$3C`/`$D4`): found by the screenshot test of `termtest columns` (all 80 columns, the edges exactly where
-  one plane puts them, nothing repeated; knowledge base `amiga/zenix-colour-console.md`), not yet seen on the A1200.
+  **How many bitplanes** the machine decides at boot, because the display takes chip-bus time from the CPU and chip
+  RAM (the 2 MB diet, DESIGN D18; D14 note section 11): **AGA** (Lisa's id register `DENISEID` reads `$F8`, 16 reads
+  alike) **with fast RAM: 4 planes, 16 colours, fetched 64 bits at a time (FMODE 3)**, which costs the 40 bus slots
+  per line that one plane costs at the 16-bit fetch (never 4 planes at FMODE 0: that takes every slot of the visible
+  lines); **OCS/ECS with fast RAM, and any machine with 2 MB of chip RAM and no fast RAM: 3 planes**, 8 colours (a
+  bright foreground is the colour plus bold, bright black is grey); **otherwise 1 plane**, grey on black (the colours
+  are not shown, inverse is the glyph inverted). **2 planes** (only by the setting) show 4 colours: black, red (red,
+  yellow, magenta), cyan (green, blue, cyan) and grey, bright as bold. On AGA every depth above one plane is fetched
+  at FMODE 3 (3 planes 30 slots a line, 2 planes 20); one plane keeps the 16-bit fetch. `make GFXDEPTH=1|2|3|4`
+  builds a kernel that uses that depth (the screenshot tests; 4 only on AGA). If chip RAM is short the next smaller
+  depth is used. The boot log says which: `display: AGA chips, 4 bitplanes at 64-bit fetch (FMODE 3)` and `display:
+  640x256, 4 bitplanes, 80x32 text`. **The setting:** `/etc/console`'s line `colours N` (2, 4, 8 or 16), read by
+  `init` at its start (man/init.txt), switches the display with `SYS_console` (`CON_COLOURS`, root only): the new
+  buffer and Copper list are allocated first (no chip RAM: -ENOMEM, nothing changes), the new list is pointed at with
+  interrupts masked, the Copper takes it at the next vertical blank, a frame later (100 ms timeout) the old ones are
+  freed and the console shown is drawn again from its grid; the log says the new depth. At FMODE 3 the fetch window
+  is `DDFSTRT` `$38`, `DDFSTOP` `$C0`, `BPLCON1` 0 at every depth (one plane at the old fetch uses `$3C`/`$D4`): found
+  by the screenshot test of `termtest columns` (all 80 columns, the edges exactly where one plane puts them, nothing
+  repeated; knowledge base `amiga/zenix-colour-console.md`), not yet seen on the A1200.
   The planes are **interleaved** (the planes of a line follow each other, 80 bytes each; modulo (N-1) x 80), so one
   pointer serves all planes and whole lines are cleared or copied with one blit per plane or one blit. The
   **Copper list** writes FMODE, `BPLCON3` = `$0C00` and `BPLCON4` = `$0011` (AGA only: a previous program's
-  colour-index XOR survives a warm reset), `BPLCON0`-`2`, the modulos, the fetch window and the 2/8/16 colours (12
+  colour-index XOR survives a warm reset), `BPLCON0`-`2`, the modulos, the fetch window and the 2/4/8/16 colours (12
   bits) every frame, then WAITs for line `$20` (before the picture on the `$2C` and `$38` builds, PAL and NTSC) and
   moves the plane pointers. Scrolling moves those pointers at vertical blank, written only while the beam is before
   line `$1C` (else at the next vertical blank), so all planes move together; when the 2-screen buffer wraps, the
@@ -1271,9 +1301,11 @@ outputs (`tools/cmds-test.sh`).
   Caps Lock and key repeat. `tools/diag-test.sh` checks the boot stage colours (test builds that stop at each
   stage; the screenshot's pixel colour), the split and red-bar panic screens, and the previous-boot log across a
   warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `tools/colour-test.sh` checks the
-  colour console by screenshots at 1, 3 and 4 bitplanes (`make GFXDEPTH=n`): `termtest columns` decoded cell by cell
-  (all 80 columns, the edges where one plane has them), the 16 colours against the palette, a screen after `termtest
-  scroll` pixel-identical to a redraw from the grid, the scrollback's colours; a serial script's `shot NAME` line
+  colour console by screenshots at 1, 2, 3 and 4 bitplanes (`make GFXDEPTH=n`): `termtest columns` decoded cell by
+  cell (all 80 columns, the edges where one plane has them), the 16 colours against the palette, a screen after
+  `termtest scroll` pixel-identical to a redraw from the grid, the scrollback's colours; and `/etc/console`'s setting
+  on the A1200 without fast RAM (4 and 16 colours switched to and checked the same way, a wrong value refused); a
+  serial script's `shot NAME` line
   takes a screenshot when the script gets there (`shot.py`, `serial-tap.py`). `make BUILD=/tmp/x` builds everything
   in another directory (the kernel finds `stage0.bin` and the built-in servers through `-I$(BUILD)`).
   `tools/zenixboot-test.sh` boots with no floppy: Kickstart 3.1 on an A1200 (68EC020, and a 68040), Kickstart 3.2
@@ -1284,7 +1316,8 @@ outputs (`tools/cmds-test.sh`).
   ZenixFS-root ones: A1200 stock (68EC020, 2 MB chip), with 4 or 8 MB fast RAM, 1 MB chip only, NTSC, with a
   68030, 68040 or 68060, an RDB disk, a RAM-disk boot with no disk, an A3000 (SCSI), two 68030 development setups
   (A1200- and A4000-class), and a 68000 that must be refused cleanly. Each boots, runs a short session and logs in
-  on consoles 2, 3 and 4 (the 1 MB chip-only one must refuse the fourth with init's "out of memory"). Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go
+  on consoles 2, 3 and 4 (the 1 MB chip-only one goes on to 5 and 6, where memory runs out: init or login must say
+  so). Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go
   (docs/README.md, "Testing"); the Kickstart files come from `ZENIX_KICKSTART_DIR` (`tools/fsuae_conf.py`).
 - Source layout: `boot/` bootblock, zenixboot and the hand-over code they share, `kernel/` the kernel and its protocol headers, `user/` programs and libc,
   `link/` linker script, `tools/` build and test scripts, `rootfs/` files copied to the root disk, `fsuae/` emulator
@@ -1306,8 +1339,8 @@ outputs (`tools/cmds-test.sh`).
   the owner of the file or of the directory remove or rename entries. New files belong to the caller and get
   `0666 & ~umask` (directories `0777 & ~umask`). A refusal returns -EACCES (13) to the caller.
 - `login` (run by `init` on each console, section 11) authenticates against `/etc/passwd`, drops root and starts
-  the shell. Every console has its own login, so several users (or one user several times) can be logged in at
-  once; nothing in the kernel records a "session".
+  the shell, then hands it to init and ends (DESIGN D18). Every console has its own login, so several users (or one
+  user several times) can be logged in at once; nothing in the kernel records a "session".
 - **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill` - each member of a group, D16 -, `SYS_jobctl`,
   `SYS_setfg` and `SYS_setpriority` on another process): root may signal
   any process but the idle one; others only a process whose real or effective uid equals their real or effective

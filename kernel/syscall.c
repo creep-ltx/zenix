@@ -198,7 +198,9 @@ void syscall_c(u32 *rb)
     }
     current->sig_intr = 0;              /* set only by a blocking site of this call that gave up for a handler (D16) */
     switch (nr) {
-    case SYS_exit:
+    case SYS_exit:                      /* a2 (D18): a child handed to the parent first (login stepping aside) */
+        if (a2)
+            proc_handover((int)a2);
         proc_exit((int)a1);
     case SYS_write:
         if (GETFD(f, a1) && UOKR(a2, a3))
@@ -602,6 +604,11 @@ void syscall_c(u32 *rb)
         break;
     case SYS_setpgid:
         r = (s32)sig_setpgid((int)a1, (int)a2);
+        break;
+    case SYS_console:                   /* the 2 MB diet: /etc/console's colours, set by init (root) */
+        r = -EINVAL;
+        if (a1 == CON_COLOURS)
+            r = a2 && current->uid != 0 ? -EPERM : gfx_set_colours((int)a2);
         break;
     case SYS_getpriority:
         r = (s32)do_priority(0, a1, a2, 0);

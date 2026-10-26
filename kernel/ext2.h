@@ -36,6 +36,7 @@ int ext2_mount_as(int mode); /* 0, or -1 (refused: ext2_why says why) */
 extern int ext2_readonly;    /* the mounted volume is read-only: writes fail with -30 (EROFS) */
 extern const char *ext2_why; /* why the last mount was refused or read-only */
 extern int ext2_clean;       /* the superblock's state bit 0 ("cleanly unmounted") at the mount (DESIGN D17) */
+extern u32 ext2_cache_bytes; /* the block cache's size (set before the mount; 0: 48 blocks): fsd, by memory (D18) */
 extern u32 ext2_ndamage;     /* damage met since the mount ("ext2: damaged: ..."): fsd then keeps it marked (D17) */
 extern int (*ext2_busy)(u32 ino);   /* set by the server: is the inode open? Its deletion then waits for ext2_release */
 int ext2_mark_unclean(void); /* clear the "cleanly unmounted" state bit (a restart after a crash mid-request, D11) */

@@ -89,8 +89,10 @@ pointers.
   console first scrolls), a cooked tty line of 511 characters (a key past that rings the bell, and at its end the whole line is refused with
   "tty: the line was too long": nothing of it is handed on, also when the shell's editor took over halfway).
 - The screen (DESIGN D14, architecture.md section 11): twice the screen's height in chip RAM, 40 KB at 1 bitplane,
-  120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; 4 planes only on AGA with fast RAM
-  or 2 MB of chip RAM, 3 on OCS/ECS with fast RAM, else 1.
+  80 KB at 2, 120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; by default 4 planes
+  only on AGA with fast RAM, 3 on OCS/ECS with fast RAM and on every machine with 2 MB of chip RAM and no fast RAM,
+  else 1; `/etc/console` chooses 2, 4, 8 or 16 colours (4 planes only on AGA), at init's start, if the chip RAM is
+  there.
 - Services (DESIGN D11, architecture.md section 9): 12 entries; a program and its arguments of at most 6 words in 79
   characters (the text is copied into 80 bytes with its end); at most 10 services beside diskd and the root, but the
   8 mounts include the root, so at most 7 mounted filesystems besides it; a registration
@@ -114,19 +116,21 @@ pointers.
   2; a recalled history line cut to 478 the same; longer commands go on over several lines with a final backslash,
   at most 2047 bytes).
 - awk: a `printf`/`sprintf` field width or precision of at most 4096 ("field width too large", status 2).
-- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
+- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit`, 4 KB for
+  `boot` and `init`, 8 KB for `diskd` (the last three live for ever and use under 700 bytes: DESIGN D18; the
   Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
   pattern (architecture.md section 6). Measured with `-fstack-usage`
   (2026-10-23): the largest single frames are `man` 6.1 KB, miniz's Huffman table builder 5.6 KB (gzip), `fsck.ext2`
   main 5.4 KB (`mkfs.ext2` main was 8.5 KB; 0.3 KB since its two 4 KB blocks are static, 2026-10-25); the directory walkers use 72-170 bytes per directory level (they used
   1.4-2.7 KB: `tar c` 2724, `diff -r` 2580, `chown -R` 2460, `cp -r` 1732, `mv` 1696, `du`/`rm -r`/`grep -r`/`find`
   about 1430).
-- A login session (login, the shell and its work area) needs about 110 KB (measured 2026-10-26 in FS-UAE as the drop
-  in `free` when a second console logs in on a 2 MB chip-only A1200: 170 KB before malloc's first chunk went from 32 KB
-  to 4 KB and the shell's two 4 KB expansion buffers moved to its arena; 293 KB before the shell memory fix of
-  2026-10-25): a machine with 1 MB of chip RAM and no fast RAM has room for three; on a fourth console init says
-  "cannot start /bin/login: out of memory" (the matrix checks both; that message was lost before 2026-10-25, init
-  never flushed it).
+- A login session (the shell and its work area; the login steps aside once the shell runs, DESIGN D18) needs about
+  78 KB (measured 2026-10-26 in FS-UAE as the drop in `free` when a second console logs in on a 2 MB chip-only A1200:
+  110 KB while the login stayed, 170 KB before malloc's first chunk went from 32 KB to 4 KB and the shell's two 4 KB
+  expansion buffers moved to its arena; 293 KB before the shell memory fix of 2026-10-25): a machine with 1 MB of
+  chip RAM and no fast RAM has room for four (three before D18); on the next console login says "cannot start
+  /bin/sh: out of memory" or init "cannot start /bin/login: out of memory" (the matrix checks both; that message was
+  lost before 2026-10-25, init never flushed it).
 - Shared code (DESIGN D13, architecture.md section 4): at most 8 segments (`NSEG`) at a time; a ninth program with
   shared code runs as a private copy. A ZEX2 program's address table is at most 32 KB (16-bit offsets: a larger one
   is a link error).

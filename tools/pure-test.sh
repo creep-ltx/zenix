@@ -14,8 +14,9 @@
 #      names the other one still running it), and is not used again; the corrupt ZEX2 files are refused with reasons;
 #      a ZEXE program still runs
 #   m  a remount in the same slot: the same file (inode, size, time) on a floppy mounted again is not reused
-#   s  sh and login are ZEX2 (stage 1): one session's sh and login are the shared code; logins on consoles 2, 3 and 4
-#      add no copy (free: what sharing saves grows by sh + login each; ps: SHR for every sh and login); sh -c shells
+#   s  sh and login are ZEX2 (stage 1): one session's sh is the shared code (login steps aside once the shell runs,
+#      DESIGN D18: no login process stays); logins on consoles 2, 3 and 4 add no copy (free: what sharing saves grows
+#      by sh each; ps: SHR for every sh, no login); a login waiting on a console is shared code too; sh -c shells
 #      share it too; idle shells hold little memory (ps MEM at most 112 KB: the arena grows and shrinks), also right
 #      after a command that needed a big arena; an rm, mv or ln elsewhere on the mount keeps the sharing; a session that ends (console 2, then console 1's own) leaves the others running; a literal
 #      echoed into a file by a shell
@@ -115,16 +116,19 @@ fi
 
 if want_part s; then
 run s fsuae/a1200-020-fast.fs-uae 200 tools/tests/pure-shells-test.txt
-SK=$(codekb $BD/sh.zx); LK=$(codekb $BD/login.zx)
+SK=$(codekb $BD/sh.zx)
 both=$(python3 -c 'import struct, sys; print(sum(struct.unpack(">I", open(f, "rb").read()[8:12])[0] for f in sys.argv[1:]))' $BD/sh.zx $BD/login.zx)
-cmp_ "one session: sh and login are the shared code" "$(S s s1)" -eq $((both / 1024))
+cmp_ "one session: sh is the shared code (login stepped aside)" "$(S s s1)" -eq "$SK"
 cmp_ "... nothing saved yet" "$(V s s1)" -eq 0
 cmp_ "a second login (console 2): no new copy" "$(S s s2)" -eq "$(S s s1)"
-cmp_ "... sharing saves its sh and login" "$(V s s2)" -eq $((both / 1024))
+cmp_ "... sharing saves its sh" "$(V s s2)" -eq "$SK"
 cmp_ "four logins (consoles 1-4): still one copy" "$(S s s4)" -eq "$(S s s1)"
-cmp_ "... sharing saves three sessions' code" "$(V s s4)" -eq $((3 * both / 1024))
+cmp_ "... sharing saves three sessions' code" "$(V s s4)" -eq $((3 * SK))
 scount s s4 s4b "ps shows the shared code for each of the four shells ($SK KB)" 4 " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +$SK sh"
-scount s s4 s4b "... and for each of the four logins ($LK KB)" 4 " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +$LK login"
+scount s s4 s4b "... and no login process stays (DESIGN D18)" 0 ".* login"
+# the shells' parent is init (login handed each to it): ps's PPID column is init's pid
+INIT=$(awk '$0 == "==s4" { f = 1; next } $0 == "==s4b" { f = 0 } f && $NF == "init" { print $1 }' "$OUT/s.log" | head -n 1)
+scount s s4 s4b "... each of the four shells is init's child (PPID ${INIT:-?})" 4 " +[0-9]+ +${INIT:-x} +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +$SK sh"
 # the shell's arena (audit 2026-10-25, found while fixing): an idle shell holds only its first 8 KB chunk, so its MEM
 # (data and BSS, its 24 KB stack, the arena, malloc's first 32 KB chunk) stays small: 100 KB measured on 2026-10-25;
 # with the old fixed arena (an eighth of free memory, up to 256 KB) it was about 290. The limit: 112 KB.
@@ -141,10 +145,10 @@ cmp_ "after an rm, mv and ln in /tmp (the same mount) a new sh -c still shares t
 cmp_ "... sharing saves its sh too" "$(V s rm)" -gt "$(V s s4)"
 rx   s "console 2's shell ran before it ended" ".*alive-on-2"
 rx   s "a session ended: console 3's shell still runs" ".*alive-on-3"
-cmp_ "... still one copy" "$(S s s3)" -eq "$(S s s1)"
+cmp_ "... still one copy of sh, and the new login waiting on console 2 is shared code too" "$(S s s3)" -eq $((both / 1024))
 line s "a shell writes a literal into a file" "a literal"
 rx   s "console 1's (the first) session ended and came back: console 3's shell still runs" ".*alive-after-the-first"
-cmp_ "... still one copy" "$(S s s5)" -eq "$(S s s1)"
+cmp_ "... still one copy (sh, and console 2's waiting login)" "$(S s s5)" -eq $((both / 1024))
 line s "the script ran to the end" "pure-s-done"
 fi
 

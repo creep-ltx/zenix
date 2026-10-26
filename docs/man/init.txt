@@ -7,7 +7,8 @@ SYNOPSIS
     started by boot; not run by hand
 
 DESCRIPTION
-    /bin/init is started by boot(8) on console 1. It prints /etc/motd, runs
+    /bin/init is started by boot(8) on console 1. It first sets the
+    console's colours from /etc/console (below), then prints /etc/motd, runs
     "mount -a" if there is an /etc/fstab (so the filesystems listed there
     are mounted before anyone can log in), and then looks after the ten
     virtual consoles (/dev/tty1 .. /dev/tty10, Amiga+F1 .. Amiga+F10), like
@@ -17,12 +18,38 @@ DESCRIPTION
     - another console gets one the first time it is shown with nobody on
       it (the kernel tells init, as Linux's autovt does), so an unused
       console costs no memory;
-    - when a login ends (the user logged out), init prints "init: session
-      ended, starting another" on that console and starts a new login
-      there after half a second.
+    - a login that lets a user in (login --init) starts the user's shell
+      and hands it to init, then ends: init now waits for the shell
+      itself, so a session keeps no login in memory;
+    - when a session ends (the shell ended: the user logged out), init
+      prints "init: session ended, starting another" on that console and
+      starts a new login there after half a second; a login that gives up
+      (five wrong tries) is started again the same way.
 
     Each login runs with its console as standard input, output and error,
     which makes that console its controlling tty and its shell's.
+
+THE CONSOLE'S COLOURS
+    /etc/console holds the text console's settings, one per line (# starts
+    a comment). Today there is one:
+
+    colours N   2, 4, 8 or 16 colours ("colors" is the same; "auto", or no
+                line, lets the machine decide: 16 with fast RAM on an AGA
+                Amiga, 8 with fast RAM on OCS/ECS and on any machine with
+                2 MB of chip RAM and no fast RAM, 2 below that).
+
+    Fewer colours leave more chip RAM free: the screen takes 40, 80, 120 or
+    160 KB for 2, 4, 8 or 16 colours, and on a machine without fast RAM
+    the display also takes less of the chip bus the processor runs from.
+    With 4 colours the console shows black, red, cyan and grey (red stands
+    for red, yellow and magenta, cyan for green, blue and cyan); with 8 a
+    bright colour is shown bold; with 2, grey on black. init reads the file
+    once when it starts, so a change counts from the next boot (as
+    Workbench's ScreenMode preferences). A value it cannot use is said on
+    console 1: "init: /etc/console: colours 7: 2, 4, 8 or 16 (or auto)";
+    16 on an OCS or ECS Amiga gives 8; without the chip RAM for the new
+    screen the console stays as it was and init says so. The kernel says
+    the new depth in its log (dmesg): "display: AGA chips, 2 bitplanes ...".
 
 NOTES
     init waits for both kinds of event in one call (wait with the
@@ -31,6 +58,9 @@ NOTES
     output: "init: cannot start /bin/login: out of memory". On console 1
     it tries again every 5 seconds; another console gets a new try the
     next time it is shown.
+
+FILES
+    /etc/console, /etc/motd, /etc/fstab
 
 SEE ALSO
     boot(8), login(1), mount(8)
