@@ -139,7 +139,7 @@ Disks and data:
   machine's 1-minute load is above 16.
 - Before committing: `make` (all images, including `build/zenix-ram.adf`), the tests for what you touched, and
   `tools/docs-check.sh --staged` (must say `docs-check: ok`). Before a merge or a hardware build: `make check` (every
-  strong test, a table, about 35 minutes with 6 at once; docs/README.md "Testing"). Do not edit the tree while it
+  strong test, a table, about 26 minutes with 6 at once; docs/README.md "Testing"). Do not edit the tree while it
   runs (the tests read their scripts and `rootfs/` from it).
 - The repository names no path of this PC. On the owner's PC the tests need (in the environment of every test run):
   `ZENIX_KICKSTART_DIR` and `ZENIX_CAGE_RIG` (their values are in the owner's private notes, not here); `TOOLPREFIX` defaults to
