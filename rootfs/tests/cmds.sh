@@ -102,6 +102,11 @@ printf 'cat <<-E\n\tindented\n\tE\ncat <<"Q"\nfi done esac } ) \x27 " $x\nQ\n' >
 printf 'y=from-long2\n' > $T/long2.sh; echo ". $T/long2.sh; echo \$y" >> $L; echo set -- $(seq 1000 1399) >> $L
 printf 'echo "n=$# last=${400}"\nf() { echo "f sees $x"; }\nf\necho "sum=$x"\n' >> $L
 t sh-long;    sh $L; echo "rc=$? lines=$(wc -l < $L) longest=$(awk '{ if (length($0) > m) m = length($0) } END { print m }' $L)"
+# commands from a pipe or a file (audit 2026-10-26 F4): not interactive (no prompts, no line editor), read a command
+# at a time, so a command run gets the rest of the input (from a pipe the shell reads one byte at a time)
+t sh-stdin;   printf 'read x\nhello\necho "got $x"\n' | sh; printf 'echo a\ncat\nrest 1\nrest 2\n' | sh; printf 'echo one\necho two\nexit 3\necho never\n' | sh; echo "rc=$?"
+t sh-stdin2;  printf 'if true\nthen echo multi\nfi\nfor i in 1 2; do echo i$i; done\ncat <<E\nhere doc\nE\nread a b\nx y z\necho "$b|$a"\n' | sh 2>&1; printf 'echo syntax (\necho never\n' | sh 2>/dev/null; echo "rc=$?"
+t sh-stdin-file; printf 'read x\nhello\necho "got $x"\ncat\nlast line\n' > $T/in.sh; sh < $T/in.sh; printf 'echo first\nread y\nsecond\necho "y=$y"\n' > $T/in2.sh; sh < $T/in2.sh
 H=$T/hd.sh; echo 'cat <<EOF | wc -c' > $H; i=0; while [ $i -lt 40 ]; do echo '$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y$y' >> $H; i=$((i + 1)); done; echo EOF >> $H
 t hd-long;    y=abcdefgh; . $H
 # colours (DESIGN D14): GNU's exact bytes with --color=always (cmds-test runs the host's ls and grep with LS_COLORS and

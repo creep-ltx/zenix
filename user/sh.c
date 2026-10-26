@@ -2058,12 +2058,12 @@ static int run_string(const char *text)
  * as much as reading it once: a here-document only at its end line, an open quote only at a line with a quote or a
  * bracket, an open if/loop/case/function/group only at a line with a closing word or bracket (or after a line that
  * ends in | && ||). */
-struct sreader { int fd, eof; u32 rpos, rlen; char rbuf[512]; };
+struct sreader { int fd, eof, one, seek; u32 rpos, rlen; char rbuf[512]; };
 static int sr_getc(struct sreader *r)
 {
     if (r->rpos == r->rlen) {
         if (r->eof) return -1;
-        int n = sys_read(r->fd, r->rbuf, sizeof r->rbuf);
+        int n = sys_read(r->fd, r->rbuf, r->one ? 1 : sizeof r->rbuf);
         if (n <= 0) { r->eof = 1; return -1; }
         r->rpos = 0; r->rlen = (u32)n;
     }
@@ -2087,10 +2087,21 @@ static int ends_in_op(const char *b, u32 n)         /* the text ends in | && || 
     while (n && is_space(b[n - 1])) n--;
     return n && b[n - 1] == '|' ? 1 : (n >= 2 && b[n - 1] == '&' && b[n - 2] == '&');
 }
-static int run_file(int fd, int top)
+/* in: fd is the shell's own standard input (commands from a pipe or a file, not a terminal: sh_main). It stays fd 0
+ * and open, and the commands the shell runs read the rest of it, as with bash: from a pipe (or anything that cannot
+ * seek) the shell reads one byte at a time, so it never takes more than the command it runs next; from a file it
+ * reads a buffer and, before each command runs, seeks back to the end of that command (the offset is shared with
+ * the command's fd 0). */
+static int run_fd(int fd, int top, int in)
 {
     struct sreader *r = aalloc(sizeof *r);
-    r->fd = dup_high(fd); if (r->fd < 0) r->fd = fd; else sys_close(fd);   /* out of the way of N>&M (fds 3-9) */
+    r->one = r->seek = 0;
+    if (in) {
+        struct ustat sb;
+        r->fd = fd;
+        if (sys_fstat(fd, &sb) == 0 && (sb.mode & S_IFMT) == S_IFREG && sys_lseek(fd, 0, 1) >= 0) r->seek = 1;
+        else r->one = 1;
+    } else { r->fd = dup_high(fd); if (r->fd < 0) r->fd = fd; else sys_close(fd); }  /* out of the way of N>&M (fds 3-9) */
     r->eof = 0; r->rpos = r->rlen = 0;
     char *base = abrk;
     int st = last_status;
@@ -2147,13 +2158,18 @@ static int run_file(int fd, int top)
             break;
         }
         if (done) break;
+        if (r->seek && r->rpos < r->rlen) {             /* the command's fd 0 starts after its own text */
+            sys_lseek(r->fd, -(int)(r->rlen - r->rpos), 1);
+            r->rpos = r->rlen = 0;
+        }
         if (tree) st = exec_node(tree);
         if (exit_requested || loop_break || loop_continue || func_return || interrupted) break;
     }
     arel(base);
-    sys_close(r->fd);
+    if (!in) sys_close(r->fd);
     return st;
 }
+static int run_file(int fd, int top) { return run_fd(fd, top, 0); }
 
 /* ================================================================ builtins */
 static const char *const bnames[] = {
@@ -2616,15 +2632,23 @@ static int shell_main(int argc, char **argv)
     shell_pid = sys_getpid();
     import_environment();
     init_vars();
-    int ai = 1; char *cmdstr = 0, *script = 0;
-    if (argc > 1 && !strcmp(argv[1], "-c")) { if (argc < 3) { errm("-c", "needs a command"); return 2; } cmdstr = argv[2]; ai = 3; if (ai < argc) { arg0 = argv[ai]; ai++; } }
-    else if (argc > 1) { script = argv[1]; arg0 = argv[1]; ai = 2; }
+    int ai = 1, force_i = 0; char *cmdstr = 0, *script = 0;
+    if (ai < argc && !strcmp(argv[ai], "-i")) { force_i = 1; ai++; }     /* interactive even without a terminal */
+    if (ai < argc && !strcmp(argv[ai], "-c")) { if (ai + 1 >= argc) { errm("-c", "needs a command"); return 2; } cmdstr = argv[ai + 1]; ai += 2; if (ai < argc) { arg0 = argv[ai]; ai++; } }
+    else if (ai < argc) { script = argv[ai]; arg0 = argv[ai]; ai++; }
     if (ai < argc) { pos_arg = argv + ai; npos = argc - ai; }      /* the shell's own arguments: they live as long as it */
     if (cmdstr) { int st = run_string(cmdstr); return exit_requested ? last_status : st; }
     if (script) {
         int fd = sys_open(script, O_RDONLY);
         if (fd < 0) { errm(script, zwhy("cannot open")); return 127; }
         int st = run_file(fd, 1);
+        return exit_requested ? last_status : st;
+    }
+    /* Commands from standard input. As bash: interactive (prompts, the line editor, history, the start-up files,
+     * job messages) only when standard input and standard error are terminals, or with -i; otherwise the input is
+     * read like a script, a command at a time, so the commands it runs read the rest of it (run_fd). */
+    if (!force_i && !(sys_isatty(0) == 1 && sys_isatty(2) == 1)) {
+        int st = run_fd(0, 1, 1);
         return exit_requested ? last_status : st;
     }
     interactive = 1;

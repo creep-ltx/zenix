@@ -59,6 +59,10 @@ want "gpasswd -d" "gp-del=0"
 want "gpasswd -d of a non-member" "gp-del-again=1"
 want "gpasswd needs root" "gp-user=1"
 want "userdel takes fay out of wheel" "wheel::10:user"
+want "a shell reading a pipe prints no prompt (F4)" "pipe-out=via-pipe"
+want "sh -i prints its prompt even so" "sh-i-prompt=yes"
+want "... and runs the command" "sh-i-out=1"
+grep -aq 'zenix:' $OUT/ua.out && { echo "FAIL a prompt in the output of the piped shells (F4)"; pass=0; } || echo "PASS no prompt in the output of the piped su and sh (F4)"
 want "the script ran to the end" "useradd-done"
 debugfs -R "cat /etc/passwd" $BD/zenix.hdf 2>/dev/null | cmp -s - rootfs/etc/passwd && echo "PASS /etc/passwd is as shipped again" || { echo "FAIL /etc/passwd differs from rootfs"; pass=0; }
 e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck.log 2>&1 && echo "PASS host e2fsck clean" || { echo "FAIL e2fsck"; pass=0; }
