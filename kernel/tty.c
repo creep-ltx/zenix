@@ -15,13 +15,20 @@
 
 #define NTTY (NCONS + 1)
 #define QSZ 1024
-#define LSZ 256                         /* a cooked line holds 255 characters; more ring the bell and are not taken */
+/* A cooked line holds 511 characters: more than the 478 the shell's line editor holds, so a line typed ahead for the
+ * shell (while a command runs, the tty is cooked) is never cut here. A key typed into a full line rings the bell and
+ * marks the line too long (`over`); at its end the whole line is refused with a message, never handed on cut (audit
+ * 2026-10-26 F2: a 260-character line typed ahead lost its middle, `break` arrived as `ak`). The mark outlives a
+ * switch to raw mode: the rest of that line, typed after the shell's editor took over, is refused too, so no tail of
+ * it runs as a command. */
+#define LSZ 512
 
 struct tty {
     u8 q[QSZ];
     u16 qhead, qtail;
     u8 line[LSZ];
     u16 llen;
+    u8 over;                    /* the line being typed was too long: refused at its end */
     int eof_pending;
     int fg;
     int mode;                   /* TTY_RAW, TTY_NOSIG */
@@ -58,7 +65,7 @@ static void commit(struct tty *t, u8 c);
 void tty_setmode(int tty, int mode, int owner)
 {
     struct tty *t = get(tty);
-    if ((mode & TTY_RAW) && !(t->mode & TTY_RAW)) {
+    if ((mode & TTY_RAW) && !(t->mode & TTY_RAW) && !t->over) {
         for (u16 k = 0; k < t->llen; k++)
             commit(t, t->line[k]);
         if (t->llen)
@@ -150,12 +157,32 @@ static void erase1(int i)
     out(i, '\b'); out(i, ' '); out(i, '\b');
 }
 
+/* the end of a line that was too long: nothing of it is handed on, and the console says so */
+static void refuse_line(int i, struct tty *t)
+{
+    static const char msg[] = "tty: the line was too long (more than 511 characters): not taken\n";
+    if (t->mode & TTY_RAW)
+        out(i, '\n');                      /* raw: the program's own echo did not end the line */
+    for (const char *m = msg; *m; m++)
+        out(i, *m);
+    t->llen = 0;
+    t->over = 0;
+}
+
 /* one typed byte, from kwork (serial_work or kbd_work): process context, never an interrupt */
 void tty_input(u8 c)
 {
     int i = con_cur;
     struct tty *t = get(i);
     if (t->mode & TTY_RAW) {                /* the program does its own editing */
+        if (t->over && c != 3) {            /* the rest of a line too long, typed ahead: refused up to its end */
+            if (c == '\r' || c == '\n')
+                refuse_line(i, t);
+            else if (c >= 32)
+                out(i, '\a');
+            return;
+        }
+        t->over = 0;
         if (c == 3 && !(t->mode & TTY_NOSIG)) {
             struct proc *p = t->fg ? proc_by_pid(t->fg) : 0;
             if (p)
@@ -173,6 +200,7 @@ void tty_input(u8 c)
     if (c == 3) {                           /* ^C */
         out(i, '^'); out(i, 'C'); out(i, '\n');
         t->llen = 0;
+        t->over = 0;
         struct proc *p = t->fg ? proc_by_pid(t->fg) : 0;
         if (p)
             proc_kill(p);
@@ -192,6 +220,10 @@ void tty_input(u8 c)
         return;
     }
     if (c == 4) {                           /* ^D */
+        if (t->over) {
+            refuse_line(i, t);
+            return;
+        }
         if (t->llen == 0)
             t->eof_pending = 1;
         else {
@@ -214,10 +246,15 @@ void tty_input(u8 c)
             t->llen--;
             erase1(i);
         }
+        t->over = 0;
         return;
     }
     if (c == '\n') {
         out(i, '\n');
+        if (t->over) {
+            refuse_line(i, t);
+            return;
+        }
         for (u16 k = 0; k < t->llen; k++)
             commit(t, t->line[k]);
         commit(t, '\n');
@@ -226,11 +263,13 @@ void tty_input(u8 c)
         return;
     }
     if (c >= 32 || c == '\t') {
-        if (t->llen < LSZ - 1) {
+        if (t->llen < LSZ - 1 && !t->over) {
             t->line[t->llen++] = c;
             out(i, (char)c);
-        } else
-            beep(880, 40);                  /* the line is full: say so (the bell), do not take it */
+        } else {
+            out(i, '\a');                   /* the line is full: the bell (on the screen and the serial port) */
+            t->over = 1;
+        }
     }
 }
 

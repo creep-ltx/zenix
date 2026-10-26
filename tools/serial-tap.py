@@ -10,12 +10,23 @@ Optional argv[3]: a keystroke script driven while logging. Lines:
                        wait until the serial output received since the last
                        `send` (or since the start) matches the Python regular
                        expression (carriage returns, ESC[K and the colour
-                       codes ESC[...m removed first;
-                       the echo of the typed line counts too, so pick a
-                       pattern the echo cannot match). The last word is the
-                       timeout in seconds if it is a number (default 60). On
-                       a timeout the script goes on, and the tap prints
-                       "serial-tap: wait timed out: <regex>" on its output.
+                       codes ESC[...m removed first). After a `send` that
+                       ends a line (its text holds \r or \n), only the output
+                       after the echo of that line counts: from the first
+                       line feed that arrives after the tap typed the last
+                       \r or \n of the text. The shell's line editor redraws
+                       the prompt with each key, so the echo holds the prompt
+                       and the typed text, and a wait for either would match
+                       at once (audit 2026-10-26 F1). After a `send` without
+                       a line end (a key, a half-typed line) the echo counts.
+                       The last word is the timeout in seconds if it is a
+                       number (default 60). On a timeout the script goes on,
+                       and the tap prints "serial-tap: wait timed out:
+                       <regex>" on its output. With ZENIX_TAP_TRACE=FILE set,
+                       each wait that matched writes how long it took to FILE.
+    waitecho <regex> [timeout]
+                       as `wait`, but the echo of the line counts too (the
+                       old rule): for a test that checks what was echoed.
     stop               end the emulator now, as a power cut would (tools/run-test.sh
                        kills FS-UAE when the tap leaves <serial port>.stop); also
                        to end a run as soon as its script is done
@@ -58,19 +69,36 @@ print(f"serial tap: {link} -> {os.ttyname(slave)}, logging to {log}", flush=True
 
 received = bytearray()          # everything logged, for `wait`
 mark = 0                        # where the output since the last `send` starts
+eol_at = None                   # the last `send` ended a line: where the output was when its last \r/\n was typed
 cond = threading.Condition()
 
 
 SGR = re.compile(rb"\x1b\[[0-9;:]*[mK]")   # colour codes and erase-to-end-of-line: not part of the text waited for
 
 
-def wait_for(pattern, timeout):
+def wait_start(echo):
+    """Where the output a `wait` searches starts (cond held): None while the echo of the typed line has not ended."""
+    if echo or eol_at is None:
+        return mark
+    lf = received.find(b"\n", eol_at)
+    return None if lf < 0 else lf + 1
+
+
+TRACE = os.environ.get("ZENIX_TAP_TRACE")      # a file: each wait's time and where its search started go there
+
+
+def wait_for(pattern, timeout, echo=False):
     rx = re.compile(pattern.encode("latin1"))
-    end = time.time() + timeout
+    t0 = time.time()
+    end = t0 + timeout
     with cond:
         while True:
-            text = SGR.sub(b"", bytes(received[mark:]).replace(b"\r", b""))
-            if rx.search(text):
+            start = wait_start(echo)
+            text = b"" if start is None else SGR.sub(b"", bytes(received[start:]).replace(b"\r", b""))
+            if start is not None and rx.search(text):
+                if TRACE:
+                    with open(TRACE, "a") as f:
+                        f.write(f"wait {pattern!r}: matched after {time.time() - t0:.1f} s, searching from byte {start}\n")
                 return True
             left = end - time.time()
             if left <= 0:
@@ -115,7 +143,7 @@ def shot(name):
 
 
 def run_script(path):
-    global mark
+    global mark, eol_at
     for line in open(path):
         line = line.rstrip("\n")
         if line.strip() == "stop":
@@ -125,18 +153,25 @@ def run_script(path):
             shot(line[5:].strip())
         elif line.startswith("sleep "):
             time.sleep(float(line[6:]))
-        elif line.startswith("wait "):
-            words = line[5:].rsplit(" ", 1)
+        elif line.startswith("wait ") or line.startswith("waitecho "):
+            echo = line.startswith("waitecho ")
+            arg = line[9:] if echo else line[5:]
+            words = arg.rsplit(" ", 1)
             if len(words) == 2 and re.fullmatch(r"[0-9]+(\.[0-9]*)?", words[1]):
-                wait_for(words[0], float(words[1]))
+                wait_for(words[0], float(words[1]), echo)
             else:
-                wait_for(line[5:], 60.0)
+                wait_for(arg, 60.0, echo)
         elif line.startswith("send "):
-            text = line[5:].encode().decode("unicode_escape")
+            text = line[5:].encode().decode("unicode_escape").encode("latin1")
+            last_eol = max(text.rfind(b"\r"), text.rfind(b"\n"))
             with cond:
                 mark = len(received)
+                eol_at = None
             with send_lock:
-                for ch in text.encode("latin1"):    # trickle like a human types
+                for i, ch in enumerate(text):       # trickle like a human types
+                    if i == last_eol:
+                        with cond:
+                            eol_at = len(received)   # its echo's line feed comes after this
                     os.write(master, bytes([ch]))
                     time.sleep(0.02)
     if SHOT_REQ:

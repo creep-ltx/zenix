@@ -296,6 +296,8 @@ setup_slowzup() {
            rfile $n 1 /var/lib/zpkg/zup.manifest | grep -q "^version $V2 " && echo ok || echo bad)"
     check $n "... the bundle's memory is given back only after both zups are stopped" \
         "$(inorder $n 1 'boot: /sbin/zup stopped after' "update: the bundle's [0-9]+ bytes are free again" 'zenix:/#')"
+    check $n "... both zups' last messages are on the console before boot stopped them (stage 1's progress, stage 2's message through printf)" \
+        "$(inorder $n 1 '^zup: installing zup '$V2' first' '^zup: diag: DIAG_SLOWZUP: stage 2 hangs' 'boot: /sbin/zup stopped after')"
     check $n "... no zup runs at the prompt (ps)" "$(awk '$0 == "==ps" { f = 1; next } $0 == "==pse" { f = 0 } f' $OUT/$n/1.txt | grep -aqE ' zup$' && echo bad || { grep -aqx '==pse' $OUT/$n/1.txt && echo ok || echo bad; })"
     check $n "... a shell prompt" "$(has $n 1 '^zbok$')"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"

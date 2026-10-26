@@ -82,7 +82,8 @@ pointers.
   at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
   -ENAMETOOLONG beyond, never cut), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
   NTSC), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
-  console first scrolls), a cooked tty line of 255 characters (the bell for more).
+  console first scrolls), a cooked tty line of 511 characters (a key past that rings the bell, and at its end the whole line is refused with
+  "tty: the line was too long": nothing of it is handed on, also when the shell's editor took over halfway).
 - The screen (DESIGN D14, architecture.md section 11): twice the screen's height in chip RAM, 40 KB at 1 bitplane,
   120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; 4 planes only on AGA with fast RAM
   or 2 MB of chip RAM, 3 on OCS/ECS with fast RAM, else 1.
@@ -104,8 +105,10 @@ pointers.
   four times the last, so the 8 memory regions a process may have reach several MB), given back when the
   command is done; when the kernel has no more: "sh: out of memory" and that shell ends (status 2); a word of at most 4095 characters (longer is an error, status 1; an expanded here-document has no limit: it is built in the arena);
   at most 8 here-documents on one line, 16 nested alias expansions, 64 `local` variables in the running functions,
-  128 variables, 48 aliases and 48 functions, 200 history lines (a recalled line is cut to the 478 characters the
-  editor holds, with the bell).
+  128 variables, 48 aliases and 48 functions, 200 history lines; a typed line of 478 characters (the line editor: a
+  key past that rings the bell, and Enter then does not run the line but says "sh: the line was too long", status
+  2; a recalled history line cut to 478 the same; longer commands go on over several lines with a final backslash,
+  at most 2047 bytes).
 - awk: a `printf`/`sprintf` field width or precision of at most 4096 ("field width too large", status 2).
 - Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit` (the
   Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard

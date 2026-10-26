@@ -41,6 +41,9 @@ static int failed;              /* an error was reported: the exit status */
 static char result[200];        /* the one-line result for init and login (RESULT) */
 static char lastmsg[160];       /* the last thing said: the reason a refusal gives in the result */
 
+/* Every message goes out the moment it is said: libz's printf writes each call with one write() (only oputs and
+ * oprintf collect output), so a zup that is stopped or loses its power has shown all it said (audit 2026-10-26 F3:
+ * checked, it was never buffered; tools/update-test.sh slowzup checks the messages of the zups boot stopped). */
 static void say(const char *fmt, ...)
 {
     va_list ap;
@@ -1049,7 +1052,8 @@ int main(int argc, char **argv)
     if (argc > 1 && !stage2) { printf("usage: zup [-l]   (boot runs zup at every start; see man zup)\n"); return 2; }
     if (sys_getuid() != 0) { printf("zup: only root installs updates\n"); return 1; }
 #ifdef DIAG_SLOWZUP     /* test builds (tools/update-test.sh slowzup): a stage 2 that hangs, for boot's time limit */
-    if (stage2) { sys_write(1, "zup: diag: DIAG_SLOWZUP: stage 2 hangs\n", 39); for (;;) sys_sleep(100); }
+    if (stage2) { say("diag: DIAG_SLOWZUP: stage 2 hangs"); for (;;) sys_sleep(100); }   /* say, as every message: the
+                                                                 * slowzup test sees it after boot stopped this zup */
 #endif
     struct uupdate u;
     memset(&u, 0, sizeof u);

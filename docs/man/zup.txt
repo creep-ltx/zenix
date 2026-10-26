@@ -83,6 +83,10 @@ NOTES
     three-way compare, a power cut before each change, the way back).
     A test build (UDIAG=-DDIAG_SLOWZUP) hangs when it runs as the second
     stage, for boot's time-limit test (tools/update-test.sh slowzup).
+    Every message is on the console the moment zup says it (one write
+    each, nothing kept back), so a zup that boot stops after its time
+    limit, or a power cut, has shown its last line. The messages are not
+    in the kernel log (dmesg): they are zup's output on console 1.
 
 SEE ALSO
     zenixboot(8), boot(8), docs/d15-self-updates.md

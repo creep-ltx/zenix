@@ -18,7 +18,8 @@ LINE EDITING
     Ctrl+W   cut the word before         Ctrl+T   swap two characters
     Up, Down (Ctrl+P, Ctrl+N)   earlier and later commands; the history is
              kept in ~/.sh_history (a command longer than the 478
-             characters the line holds comes back cut, with the bell)
+             characters the line holds comes back cut, with the bell,
+             and does not run)
     Tab      complete a command, a file name or a $variable; twice lists
              the choices
     Ctrl+R   search the history backwards as you type; Ctrl+R again goes to
@@ -27,6 +28,12 @@ LINE EDITING
     Ctrl+L   clear the screen            Ctrl+C   cancel the line
     What is typed while a command runs is kept and appears at the next
     prompt (as on a Unix tty).
+    A line holds 478 characters. A key typed past that rings the bell and
+    is not taken, and Enter then does not run the line: "sh: the line was
+    too long (more than 478 characters): not run", status 2. Go on over
+    several lines with a backslash at the end of each (2047 bytes in all).
+    A line typed ahead while a command runs is refused the same way past
+    the tty's 511 characters ("tty: the line was too long").
 
 LANGUAGE
     Commands:   name arg...   a program found in $PATH, a builtin, a
