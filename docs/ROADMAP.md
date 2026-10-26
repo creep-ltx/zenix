@@ -84,7 +84,8 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 1. **Foundations finished (the week of 2026-10-26):** D13 shared code; the shell's memory fix; the colour console;
    the self-updates. Audit.
 2. **Zenix reaches the world:** signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
-   server, DHCP, DNS); `ping`, `telnet`, `wget`, an NFS client; a Wasabi-like remote control (early: it lets the A1200
+   server, DHCP, DNS); `ping`, `telnet` (made for BBSes, the owner's daily use: ANSI colours, the PC character set and Amiga
+   fonts, the BBS window size, downloads), `wget`, an NFS client; a Wasabi-like remote control (early: it lets the A1200
    be tested remotely); `zpkg` with its repository on the owner's NAS. A security audit. Then **the Zenix demo floppy**
    (owner 2026-10-25, in the spirit of the 1999 QNX demo disk): one 880 KB Amiga floppy that boots into Zenix with the
    network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5.
