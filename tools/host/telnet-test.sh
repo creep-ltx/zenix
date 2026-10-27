@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # telnet's host tests (DESIGN D20 8.1, step 0 of section 9), on the PC only, no emulator, no root:
 #   tools/host/telnet-test.sh [PART...]    parts: font core sim zmodem (default: all of them)
-#                                          fuzz [SECONDS]: telnet's core under libFuzzer (not in the default run)
+#                                          fuzz [SECONDS]: telnet's core, then the Zmodem engine with the download
+#                                          rules, under libFuzzer, half the time each (not in the default run)
 # font    tools/mkpsf.py checks Linux's font_8x8.c and writes the PSF1 font (2,052 bytes, 36 04, mode 0, height 8)
 # core    net/telnet/ on the PC: the decoder and encoder, RFC 1143 option negotiation, NAWS, TTYPE, the three modes'
 #         filters (music strings as SyncTERM, FF, SUB, iCE, the font switch, 0x9B and the Amiga console's codes, UTF-8
@@ -104,25 +105,37 @@ PY
     then say "core PASS"; else bad "core (the FAIL lines above)"; fi
 }
 
-# libFuzzer, one process at a time with a memory limit (this PC's rule: knowledge base claude-code/, memory)
-part_fuzz() {
-    local secs=$1 d="$OUT/fuzz" FCC=${FUZZCC:-clang} fl="-fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined"
-    command -v "$FCC" >/dev/null || { bad "fuzz needs clang (libFuzzer)"; return; }
+# libFuzzer, one process at a time with a memory limit (this PC's rule: knowledge base claude-code/, memory): telnet's
+# core for half the time, then the Zmodem engine with the download rules (rz and sz meet a board's bytes too)
+fuzz_one() {    # fuzz_one NAME SECONDS SOURCES...
+    local name=$1 secs=$2 d="$OUT/fuzz/$1" FCC=${FUZZCC:-clang} fl="-fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined"
+    shift 2
     mkdir -p "$d/corpus" "$d/artifacts" "$d/seeds"
-    $FCC $HCFLAGS $fl -o "$d/telnet-fuzz" tools/host/telnet-fuzz.c net/telnet/*.c || { bad "telnet-fuzz does not build"; return; }
-    # seeds: each mode with negotiation, music, the font switch, the Amiga console's codes, UTF-8
-    printf '\x11\x07\xff\xfd\x18\xff\xfa\x18\x01\xff\xf0\xff\xfb\x01\xff\xfd\x1f\x1b[NCDE\x0e\x1b[ D' >"$d/seeds/pc"
-    printf '\x12\x03\x9b0 q\x9b80u\x9b0 p\x1b[0;42 D\x0c\x1a\x1b[?33h\x1b[=2M\x1b[MABC' >"$d/seeds/amiga"
-    printf '\x03\x40\xc3\xa5\xe2\x94\x80\xff\xff\x1b[31m\r\x00' >"$d/seeds/unix"
-    say "fuzz: $secs s, one process, 2 GB memory limit (log $d/fuzz.log)"
-    if nice "$d/telnet-fuzz" -max_total_time="$secs" -rss_limit_mb=2048 -malloc_limit_mb=512 -max_len=8192 -timeout=10 \
+    $FCC $HCFLAGS $fl -o "$d/$name" "$@" || { bad "$name does not build"; return 1; }
+    say "fuzz $name: $secs s, one process, 2 GB memory limit (log $d/fuzz.log)"
+    if nice "$d/$name" -max_total_time="$secs" -rss_limit_mb=2048 -malloc_limit_mb=512 -max_len=8192 -timeout=10 \
             -artifact_prefix="$d/artifacts/" -print_final_stats=1 "$d/corpus" "$d/seeds" >"$d/fuzz.log" 2>&1; then
-        say "fuzz: $(grep -a 'stat::number_of_executed_units' "$d/fuzz.log" | awk '{ print $2 }') inputs run, $(ls "$d/corpus" | wc -l) in the corpus, $(grep -a 'cov:' "$d/fuzz.log" | tail -1 | sed 's/.*cov: \([0-9]*\).*/\1/') edges covered"
-        say "fuzz PASS: nothing found"
+        say "fuzz $name: $(grep -a 'stat::number_of_executed_units' "$d/fuzz.log" | awk '{ print $2 }') inputs run, $(ls "$d/corpus" | wc -l) in the corpus, $(grep -a 'cov:' "$d/fuzz.log" | tail -1 | sed 's/.*cov: \([0-9]*\).*/\1/') edges covered: nothing found"
     else
         grep -a 'ERROR\|SUMMARY\|Test unit written' "$d/fuzz.log" | head -20
-        bad "fuzz found something: $d/artifacts"
+        bad "fuzz $name found something: $d/artifacts"
+        return 1
     fi
+}
+part_fuzz() {
+    local secs=$1 half
+    half=$(( (secs + 1) / 2 ))
+    command -v "${FUZZCC:-clang}" >/dev/null || { bad "fuzz needs clang (libFuzzer)"; return; }
+    mkdir -p "$OUT/fuzz/telnet-fuzz/seeds" "$OUT/fuzz/zmodem-fuzz/seeds"
+    # seeds: each mode with negotiation, music, the font switch, the Amiga console's codes, UTF-8
+    printf '\x11\x07\xff\xfd\x18\xff\xfa\x18\x01\xff\xf0\xff\xfb\x01\xff\xfd\x1f\x1b[NCDE\x0e\x1b[ D' >"$OUT/fuzz/telnet-fuzz/seeds/pc"
+    printf '\x12\x03\x9b0 q\x9b80u\x9b0 p\x1b[0;42 D\x0c\x1a\x1b[?33h\x1b[=2M\x1b[MABC' >"$OUT/fuzz/telnet-fuzz/seeds/amiga"
+    printf '\x03\x40\xc3\xa5\xe2\x94\x80\xff\xff\x1b[31m\r\x00' >"$OUT/fuzz/telnet-fuzz/seeds/unix"
+    $HOSTCC $HCFLAGS -o "$OUT/zmodem-seeds" tools/host/zmodem-test.c user/xfer/detect.c user/xfer/rzrules.c &&
+        "$OUT/zmodem-seeds" seeds "$OUT/fuzz/zmodem-fuzz/seeds" || { bad "the Zmodem seeds"; return; }
+    fuzz_one telnet-fuzz "$half" tools/host/telnet-fuzz.c net/telnet/*.c &&
+    fuzz_one zmodem-fuzz "$half" tools/host/zmodem-fuzz.c user/xfer/zmodem.c user/xfer/rzrules.c &&
+        say "fuzz PASS: nothing found"
 }
 
 parts=("$@")

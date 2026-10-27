@@ -861,9 +861,54 @@ static void choose_rules(void)
     }
 }
 
+/* zmodem-test seeds DIR: sessions written by the engine's own writers, as seeds for tools/host/zmodem-fuzz.c (its
+ * first byte: 0 receive, 4 receive with a part there; 1 send, after a ZRINIT and ZRPOS script) */
+static void seeds(const char *dir)
+{
+    static const unsigned char d[100] = { 1, 2, 3, 0x18, 0x7f, 0xff, '\r', 0x11 };
+    char p[2048];
+    FILE *f;
+    int i;
+    for (i = 0; i < 3; i++) {
+        s_begin();
+        if (i == 2) {                   /* what a receiver says: ZRINIT, ZRPOS 0, ZCRC, ZRINIT, ZFIN */
+            pos_hdr(&zs, 0);
+            zs.hdr[3] = CANFDX | CANOVIO | CANFC32;
+            send_hex(&zs, ZRINIT);
+            pos_hdr(&zs, 0);
+            send_hex(&zs, ZRPOS);
+            pos_hdr(&zs, 0);
+            send_hex(&zs, ZRINIT);
+            pos_hdr(&zs, 0);
+            send_hex(&zs, ZFIN);
+            flush(&zs);
+        } else {
+            s_file("seed.bin\0" "100 0 100644 0 1", 25);
+            if (i == 1) {
+                pos_hdr(&zs, 0x12345678);
+                send_bin(&zs, ZCRC);
+            }
+            s_data(0, d, 100);
+            s_eof(100);
+            s_fin("OOprompt");
+        }
+        snprintf(p, sizeof p, "%s/zseed%d", dir, i);
+        f = fopen(p, "wb");
+        if (!f)
+            continue;
+        fputc(i == 0 ? 0 : i == 1 ? 4 : 1, f);
+        fwrite(script, 1, nscript, f);
+        fclose(f);
+    }
+}
+
 int main(int argc, char **argv)
 {
     int quick = argc > 4 && !strcmp(argv[4], "quick");
+    if (argc == 3 && !strcmp(argv[1], "seeds")) {
+        seeds(argv[2]);
+        return 0;
+    }
     signal(SIGPIPE, SIG_IGN);
     setvbuf(stdout, NULL, _IOLBF, 0);
     if (argc < 4) {
