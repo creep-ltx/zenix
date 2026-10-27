@@ -25,7 +25,7 @@ for f in docs/man/*.txt; do
     n=$(basename "$f" .txt)
     grep -q "man/$n.txt" docs/commands.md || bad "docs/commands.md does not link $f"
     awk -v f="$f" 'length($0) > 78 { print "docs-check: " f ":" FNR " is longer than 78 columns"; exit 1 }' "$f" || fail=1
-    head -1 "$f" | grep -q "([18])" || bad "$f: first line must look like NAME(1)<tab>Zenix manual"
+    head -1 "$f" | grep -q "([148])" || bad "$f: first line must look like NAME(1)<tab>Zenix manual (sections 1, 4 devices, 8)"
 done
 [ -f docs/features.md ] || bad "docs/features.md is missing"
 
