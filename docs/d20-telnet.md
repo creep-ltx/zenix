@@ -606,3 +606,10 @@ Revision 2 changes no part of the overall shape (one telnet process filtering a 
 per-console font and rules loaded on demand, Zmodem in `rz`/`sz`, ptys later as their own step).
 
 Last checked against the code: 2026-10-27 (main at f03180e).
+
+## Owner decisions (2026-10-27)
+
+"Yes to all" for section 12's questions: (1) the client first, the server later (home network only, off by default);
+(2) 8 colours stay the default on the stock A1200, telnet mentions `colours 16` once; (3) the board is told 80x32;
+(4) a phone book, after downloads work; (5) Zmodem only, others if a board needs them; (6) Amiga-board mode by default,
+`-p` for PC boards; (7) Topaz from the ROM only.
