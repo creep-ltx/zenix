@@ -15,7 +15,7 @@ void netd_size_entry(void)
         (fn)netd_ioctl, (fn)netd_close, (fn)netd_resolve, (fn)netd_bits, (fn)netd_changed,
         (fn)netd_parse_interfaces, (fn)netd_parse_resolv, (fn)netd_hosts_load, (fn)netd_config_trusted,
         (fn)netd_if_up, (fn)netd_if_down, (fn)netd_route_default, (fn)netd_set_dns, (fn)netd_if_info,
-        (fn)netd_netstat, (fn)netd_get_stats,
+        (fn)netd_netstat, (fn)netd_get_stats, (fn)netd_route_get, (fn)netd_if_addr,
     };
     int i;
     for (i = 0; i < (int)(sizeof keep / sizeof keep[0]); i++) keep[i]();

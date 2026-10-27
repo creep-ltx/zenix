@@ -6,10 +6,11 @@
  *
  *   zenix-slirp [options] DEVICE        DEVICE: a serial port (set to raw 8N1, no handshake) or a pty's path
  *   zenix-slirp [options] --pty LINK    make a pty and put a symbolic link to its far end at LINK (FS-UAE's
- *                                       serial_port), as tools/serial-tap.py does
+ *                                       serial_port), as tools/serial-tap.py does; what goes to the Amiga is
+ *                                       paced to the -b speed there, as a real cable would carry it
  *   zenix-slirp [options] --fd N        an inherited descriptor (the host tests: a socketpair)
  * Options:
- *   -b BAUD             the serial port's speed (default 115200)
+ *   -b BAUD             the serial port's speed (default 115200; with --pty the pace of the bytes to the Amiga)
  *   -f tcp|udp:[ADDR:]HOSTPORT:GUESTPORT
  *                       a port forward from the PC to the Amiga, bound to 127.0.0.1 unless ADDR is given
  *                       (several -f allowed); e.g. -f tcp:2323:23 for telnet
@@ -182,10 +183,27 @@ static void line_pause(void)
     }
 }
 
+/* A pty has no baud rate: what is written reaches the emulator at once, far faster than the cable it stands for, and
+ * a real Amiga's 1 KB receive ring would never see such a burst. So on a pty (--pty) the line is paced to its speed
+ * (-b, 10 bits a byte): a bucket of at most 32 bytes, filled as the time passes (D19 step 5, the FS-UAE tests) */
+static long pace_bps;
+static double pace_tokens;
+static int64_t pace_last;
+static size_t pace_allow(void)
+{
+    int64_t t = now_ms();
+    if (!pace_bps) return (size_t)-1;
+    pace_tokens += (double)(t - pace_last) * pace_bps / 1000.0;
+    pace_last = t;
+    if (pace_tokens > 32) pace_tokens = 32;
+    return (size_t)pace_tokens;
+}
+
 static void tx_flush(void)
 {
-    while (txn) {
-        ssize_t w = write(line, tx, txn);
+    size_t allow = pace_allow();
+    while (txn && allow) {
+        ssize_t w = write(line, tx, txn < allow ? txn : allow);
         if (w < 0) {
             if (errno == EAGAIN || errno == EINTR) return;
             say("write to the line: %s", strerror(errno));
@@ -194,6 +212,8 @@ static void tx_flush(void)
         }
         memmove(tx, tx + w, txn - w);
         txn -= w;
+        allow -= (size_t)w;
+        if (pace_bps) pace_tokens -= (double)w;
     }
 }
 
@@ -425,7 +445,7 @@ int main(int argc, char **argv)
     else if (logname && !(logf = fopen(logname, "a"))) { say("%s: %s", logname, strerror(errno)); return 1; }
     if (!(tx = malloc(TXMAX))) { say("out of memory"); return 1; }
 
-    if (pty) line = open_pty(pty);
+    if (pty) { line = open_pty(pty); pace_bps = baud / 10; pace_last = now_ms(); }
     else if (dev) line = open_device(dev, baud);
     else line = fdarg;
     fcntl(line, F_SETFL, fcntl(line, F_GETFL) | O_NONBLOCK);
@@ -462,6 +482,7 @@ int main(int argc, char **argv)
             if (tm->at_ms >= 0 && (uint32_t)(tm->at_ms > t ? tm->at_ms - t : 0) < timeout)
                 timeout = tm->at_ms > t ? (uint32_t)(tm->at_ms - t) : 0;
         if (rxn && timeout > TEXT_PAUSE_MS / 2) timeout = TEXT_PAUSE_MS / 2;
+        if (txn && pace_bps && timeout > 2) timeout = 2;           /* the paced line: the next bytes soon */
         npfd = 0;
         lidx = add_poll(line, SLIRP_POLL_IN | (txn ? SLIRP_POLL_OUT : 0), NULL);
         slirp_pollfds_fill_socket(slirp, &timeout, add_poll, NULL);
@@ -482,7 +503,7 @@ int main(int argc, char **argv)
             say("the line closed");
             break;
         }
-        if (r > 0 && (pfd[lidx].revents & POLLOUT)) tx_flush();
+        if ((r > 0 && (pfd[lidx].revents & POLLOUT)) || (txn && pace_bps)) tx_flush();
         t = now_ms();
         for (tm = timers; tm; tm = tm->next)
             if (tm->at_ms >= 0 && tm->at_ms <= t) { tm->at_ms = -1; slirp_handle_timer(slirp, tm->id, tm->cb_opaque); break; }

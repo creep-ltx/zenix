@@ -1,0 +1,11 @@
+IFUP(8)			Zenix manual
+
+NAME
+    ifup - bring network interfaces up
+
+DESCRIPTION
+    Another name for ifconfig(8) (a link to it): ifup -a, ifup IFACE.
+    See ifconfig(8).
+
+SEE ALSO
+    ifconfig(8)

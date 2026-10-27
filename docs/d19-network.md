@@ -2,8 +2,8 @@
 
 Status: **design, revision 2 after two independent reviews (section 13); step 1 (section 3, zfsd out of the kernel
 image) built on branch zfout 2026-10-27; steps 0, 2 and 3 (msgping, random numbers, the kernel's socket layer with a
-test server) built on branch n023 2026-10-27; step 4 (netd over the loopback) on branch n45 2026-10-27 (section 14, "As
-built"); the rest not built.** Roadmap block 2, "Zenix
+test server) built on branch n023 2026-10-27; steps 4 and 5 (netd over the loopback; SLIP, the interfaces, ping) on branch n45
+2026-10-27 (section 14, "As built"); the rest not built.** Roadmap block 2, "Zenix
 reaches the world": the network, the CM4's Ethernet, TCP/IP as a server, DHCP, DNS, `ping`; telnet, the crypto
 library, ssh, HTTPS, NFS, remote control and `zpkg` come after it. A deep core change (a kernel file kind, new system
 calls, a message family, the way servers are loaded). The short version is DESIGN.md D19. Facts about today's code are
@@ -948,6 +948,80 @@ names many perm asm`, `netstat -a`/`-tl`/plain against a listener, a connection 
 killed while a child waits in `recv`: `ENETDOWN` after 1 tick, the next socket starts netd in epoch 2, which serves; ^C
 on a waiting `accept`; the log lines; e2fsck. l: 4 MB of fast RAM, the large profile, twelve connections);
 `tools/host/net-test.sh` (unchanged, passing; its size part assembles `m68k.S`).
+
+### Step 5: SLIP, the interfaces and their commands (branch n45, 2026-10-27)
+
+SLIP on `/dev/ttyS0` through lwIP's `slipif` in netd (the host-only parts' core: `iface.c`), `/etc/network/interfaces`
+read by netd, `ifconfig`/`ifup`/`ifdown` (one program, `user/ifconfig.c`; the other names are links, as `more` is
+`less`), `route`, `ping`, `init`'s `ifup -a`, `/dev/ttyS0`'s truthful POLLOUT and writes that never wait, and the
+FS-UAE test through `zenix-slirp`. The owner's how-to: `docs/network-serial.md`. Local choices:
+
+1. **The wire formats** (frozen, `kernel/netproto.h`; each asked on any socket of the caller's that netd knows, as
+   `SOCK_NETSTAT`): `SOCK_IFLIST` fills `struct unetif` rows (first size `UNETIF_FIRST` 64: name, address, netmask,
+   gateway, MTU, flags `NETIF_UP/LINK/LOOPBACK/DEFAULT`, six counters, the two name servers; the row size in
+   `flags`); `SOCK_IFSET` takes a `struct unetifreq` (first size 32: name, `NETIFREQ_UP` from the file, `DOWN`,
+   `ADDR` with an address and netmask; the name "" means every `auto` interface for UP and every one but the loopback
+   for DOWN); `SOCK_ROUTE` a `struct uroute` (first size 32: `ROUTE_GET` writes the default gateway and its
+   interface back, `ROUTE_ADD`, `ROUTE_DEL`). IFSET and the route changes are root's (-EPERM, `nettest perm`).
+2. **When interfaces come up:** netd brings up the `auto` ones at its start, after its port (6.3), so a netd started
+   again after a crash brings SLIP back by itself; `init` starts `ifup -a` without waiting when the file has an `auto`
+   line (it reads the file 128 bytes at a time: no BSS for init, which lives for ever), which starts netd at boot.
+   `ifup` is the reload (6.1): netd reads `/etc/hosts`, `/etc/resolv.conf` and `/etc/network/interfaces` again; for
+   `ifup -a` an interface already up is no error. The file is used only if root owns it and nobody else may write it
+   (otherwise -EACCES, said by `ifup`). netd's core got two small functions for the commands: `netd_route_get` (the
+   default route and its interface) and `netd_if_addr` (`ifconfig IFACE ADDRESS/PREFIX`).
+3. **"Given up" (4.3 rule 12):** root's `ifup` or `ifconfig IFACE up` whose socket call gets -ENETDOWN registers `net`
+   as `/sbin/netd` again (when the file exists) and says so, then tries once more.
+4. **`ping`** times the round trip with the E-clock counted at the PAL rate (NTSC reads under 1% long: said in its
+   page); `-i` below 0.2 s is root's; no TTL (an ICMP socket gives none). **`route`** shows the default route and one
+   route per interface's net, and changes only the default.
+5. **`/dev/ttyS0`** (kernel, +180 bytes): `POLLOUT` when 1 KB of the 4 KB send ring is free; a poll that found less
+   leaves a flag, and the drain in the idle loop that makes the room asks kwork, whose `serial_work` wakes the waiter.
+   With `O_NONBLOCK` a write takes what fits (-EAGAIN for nothing) and a read with nothing received answers -EAGAIN.
+   Every older program keeps its meaning (they never set `O_NONBLOCK`; only `POLLOUT` became truthful, as 5.3 says).
+   `tools/serial-test.sh` checks both on the host model of Paula. SLIP runs at 115,200 only: another speed in the
+   `driver slip` line is -EINVAL (Zenix's port has one speed, D12).
+6. **netd's heap on Zenix** (found measuring step 5): with SLIP up netd held 176 KB on the stock A1200, because
+   libz's `malloc` rounds each block up to a power of two and grows in chunks of 4, 16 and 64 KB (84 KB for a 24 KB
+   heap). netd now takes its buffers from regions of its own (first fit, neighbours joined on free; each a quarter of
+   the profile's limit, at least 8 KB, taken when needed, at most 5), and reads its configuration files into regions
+   given back at once: **115 KB with SLIP up** (99 KB on the loopback). `net/port/port.c`'s counted heap calls
+   `netd_heap_alloc` on Zenix and `malloc` on the PC (a two-line change to the host-only parts' port).
+7. **Choice 12 of the host-only parts, the FS-UAE SLIP test** (`tools/slip-test.sh`): `zenix-slirp --pty` owns
+   FS-UAE's serial port (`tools/run-test.sh` with `ZENIX_NOTAP=1` starts no serial-tap); nothing is typed, so the
+   image carries `/etc/network/interfaces`, `/etc/resolv.conf` and an `/etc/profile` that runs `/tests/slip.sh` once
+   at the autologin; the results are files read from the image afterwards (debugfs). **The console's bytes reach the
+   test through `zenix-slirp --log`**: after `ifdown sl0` the console's copy is on the wire again and the profile
+   prints a marker, which the test waits for in that log before it stops the emulator. The PC's servers (TCP echo,
+   UDP echo, a source of 100 KB, a DNS server for `amiga.zenix.test`) and zenix-slirp run in a user and network
+   namespace (`tools/slip-host.py`, as `tools/host/net-test.sh` does): no root, nothing leaves the PC.
+8. **zenix-slirp paces a pty to the line's speed** (`-b`, default 115,200): found by the test: a pty has no baud rate,
+   FS-UAE took the PC's bytes far faster than a cable, and Zenix's 1 KB receive ring lost about a fifth of them (TCP
+   at 0.7-1 KB/s, retransmitting). Paced, the test moves 100 KB at 7-8.4 KB/s (*in the emulator*). A real serial
+   port paces itself; the host tests' socketpair (`--fd`) is not paced.
+9. **A step 4 bug found here** (commit 4b5177b): netd polled its port with `POLLPORT` alone; `evwait` masks the
+   answer with the events asked, so `POLLIN` never came back and every request waited for netd's timer (up to 1 s:
+   ping 2 s on the loopback, the 100 KB loopback echo 100 s). Now `POLLPORT | POLLIN`: 12.5 ms on the loopback, the
+   echo 5 s.
+10. **DNS through 10.0.2.3 works already** (netd's core has lwIP's resolver; `getaddrinfo` asks netd): the test looks
+   up a name from the PC's test DNS server through slirp's 10.0.2.3, and an unknown name gives `EAI_NONAME`. Step 6
+   keeps `host`, DHCP and the DNS tests of its own.
+11. **Bytes the receive ring still loses:** in one run 90 of 122,634 (0.07%), while `nettest` compared 100 KB byte by
+   byte at netd's level (netd waited for its time slice of 50 ms, and its turn took the rest of the ring's 89 ms).
+   TCP sends them again; the test allows at most 1% and reports the count. The real A1200's numbers are 8.3's (the
+   ring is 1 KB: a larger one costs every machine its kernel memory, not decided here).
+
+Sizes (*measured* 2026-10-27): the kernel 150,356 -> 150,536 bytes (28,664 left on the RAM floppy, 4,088 on the mount
+tests' floppy: no RAM-disk change needed); netd 72,392 bytes of code (the files 80,900); `ifconfig` 13,196 bytes,
+`route` 9,668, `ping` 14,160; `init` 9,092 -> 9,928 bytes (`ifup -a`). **Free memory with one login, the network
+unused** (the matrix, `free`, main at ab941b6 against this branch): 2 MB chip-only 1,351 -> 1,350 KB, 1 MB chip-only
+414 -> 413 KB (the kernel's 292 bytes and init's 836). **Free memory with one login and SLIP up** (`free` and `ps` in FS-UAE): 2 MB chip-only
+1,161 KB free, netd 115 KB; 1 MB chip-only 232 KB free, netd 107 KB (the 1 MB machine runs netd on SLIP with room
+to spare for one session). Tests: `tools/slip-test.sh` (s: the stock A1200: sl0 up at boot, `ifconfig`, `route`,
+`ping -c 3 10.0.2.2`, `ping 127.0.0.1`, `nettest slip`: 10 KB TCP echo, 100 KB checked byte by byte, UDP echo, DNS
+through 10.0.2.3, the counters, `ifdown sl0` giving the port back, the log, the ring's losses, e2fsck; m: 1 MB, ping
+and the memory), `tools/serial-test.sh` (the port's POLLOUT and writes that never wait), `tools/netd-test.sh` (`nettest
+perm`: a user may not change interfaces or routes), `tools/host/net-test.sh`, cu-test (the port's POLLOUT for `cu`).
 
 ### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
 

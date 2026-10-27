@@ -30,8 +30,12 @@ DESCRIPTION
     names     inet_pton, inet_ntop, inet_aton, inet_addr, inet_ntoa;
               getaddrinfo with a number and a service name, "localhost"
               from /etc/hosts, an unknown name, AI_NUMERICHOST
-    many      six connections at once
-    perm      root may bind port 80, a user may not; SOCK_RAW is refused
+    many      connections until netd's limit (12 at most; the small
+              profile allows 4 over the loopback, each takes two TCP
+              ends): the next is refused at once ("no buffer space"),
+              and every one made works
+    perm      root may bind port 80, a user may not, nor change the
+              interfaces or the routes; SOCK_RAW is refused
     down      netd killed while a child waits in recv: the child gets
               ENETDOWN at once; the next socket starts a new netd that
               serves a new connection
@@ -43,13 +47,17 @@ DESCRIPTION
     listen    a listener on port 7010 with one connection to it and a
               UDP socket on 127.0.0.1:7011, kept for 30 seconds (for
               netstat)
+    slip      through SLIP to the PC's test servers (tools/slip-test.sh,
+              on 10.0.2.2): 10 KB echoed by TCP port 7100, 100 KB from
+              port 7102 checked byte by byte, datagrams echoed by UDP
+              port 7101, amiga.zenix.test looked up through 10.0.2.3
 
 EXIT STATUS
     The number of checks that failed.
 
 NOTES
-    A test program, run by tools/netd-test.sh in the emulator. The ports
-    7001-7011 must be free.
+    A test program, run by tools/netd-test.sh and tools/slip-test.sh in
+    the emulator. The ports 7001-7011 must be free.
 
 SEE ALSO
     netd(8), netstat(1), socktest(1)

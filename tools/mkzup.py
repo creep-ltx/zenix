@@ -151,7 +151,7 @@ BASE_PROGS = ["init", "login", "sh", "mount"]
 BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console", "hosts"]   # /etc/autologin is the test images' own: never shipped
 SETUID = {"su", "sudo", "passwd"}
 LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), ("chown", "/bin/chgrp"),
-         ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos")]
+         ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos"), ("ifconfig", "/bin/ifup"), ("ifconfig", "/bin/ifdown")]
 SBIN = {"zup"}
 BASE_SBIN = ["zfsd", "netd"]              # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
 # the licence notices of the code from other projects (owner decision, DESIGN D19 2026-10-27), as tools/mkroot.sh

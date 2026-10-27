@@ -60,7 +60,7 @@ pointers.
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
 - A graphical programs API, a mouse pointer (the mouse is only read, `input`; untested), sound beyond the bell, a
-  network card (the network runs over the loopback, and SLIP from D19 step 5), USB, RTG. The floppy driver is experimental: DD disks only (an HD drive or disk is not recognised), no drive-type
+  network card (the network runs over the loopback and SLIP; drivers from D19 step 7), DHCP (step 6), USB, RTG. The floppy driver is experimental: DD disks only (an HD drive or disk is not recognised), no drive-type
   ID, never run on a real drive or a Gotek.
 - Display server (the terminal and the consoles are inside the kernel; workspaces and a bar come with the desktop),
   index server for `locate`/`fzf`.
@@ -156,6 +156,12 @@ pointers.
   over a limit is refused at once (-ENOBUFS). At most 8 requests a turn; `/etc/hosts` at most 64 names and 16 KB (so
   `/etc/resolv.conf`), 2 name servers; a lookup answers at most 4 addresses; `netstat` shows at most 64 rows.
   `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL).
+- SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
+  MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the
+  wire). The kernel's receive ring is 1 KB (89 ms of SLIP): when netd cannot read for longer (a busy program at its
+  level) bytes are lost and counted in `dmesg`, and TCP sends them again. At most 4 interfaces with the loopback;
+  `/etc/network/interfaces` holds at most 4 stanzas (the rest reported); only the default route can be set
+  (`route`); `ping` sends at most 1,400 data bytes, at most 5 a second for users.
 - Random numbers (DESIGN D19 9.3, architecture.md section 3): a read or write of `/dev/random` or `/dev/urandom` moves
   at most 4,096 bytes (a short count, as Linux); `/dev/random` waits for 256 credited bits (on a fresh machine that
   is 256 key presses and releases, or the seed file at the next start); a sample ring of 32 entries (a full one drops

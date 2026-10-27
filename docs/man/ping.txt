@@ -1,0 +1,44 @@
+PING(1)			Zenix manual
+
+NAME
+    ping - ask another machine for an echo
+
+SYNOPSIS
+    ping [-q] [-c COUNT] [-i SECONDS] [-s SIZE] [-W SECONDS] HOST
+
+DESCRIPTION
+    Sends ICMP echo requests to HOST (a name or an address) once a
+    second and prints each answer with its round trip time:
+
+        PING 10.0.2.2 (10.0.2.2): 56 data bytes
+        64 bytes from 10.0.2.2: icmp_seq=1 time=24.4 ms
+
+    until ^C or COUNT requests, then a summary: requests sent, answers
+    received, the share lost, and the shortest, average and longest
+    round trip. No root is needed: ping uses an ICMP datagram socket, as
+    Linux's ping does, on which the network server, netd(8), sets the
+    echo id and the checksum and delivers only that socket's answers.
+
+OPTIONS
+    -c COUNT    stop after COUNT requests (and the last answer, or -W)
+    -i SECONDS  the time between requests (default 1; tenths allowed;
+                below 0.2 only for root)
+    -s SIZE     the data bytes in each request (default 56, at most
+                1400; the round trip is measured only with 4 or more)
+    -W SECONDS  how long to wait for the last answer (default 2)
+    -q          only the summary
+
+EXAMPLES
+    ping -c 3 10.0.2.2      the PC at the other end of the SLIP cable
+
+EXIT STATUS
+    0 if an answer came, 1 if none did, 2 for an error (no network, an
+    unknown name, wrong arguments).
+
+NOTES
+    The time comes from the E-clock and is counted at the PAL rate
+    (on an NTSC machine it reads under 1% long). No TTL, no record
+    route, no flood mode, no IPv6.
+
+SEE ALSO
+    ifconfig(8), route(8), netd(8)

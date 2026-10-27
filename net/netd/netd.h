@@ -177,6 +177,10 @@ int netd_config_trusted(unsigned long mode, unsigned uid);
 int netd_if_up(const struct netd_ifcfg *ifc);       /* SLIP here; a driver's interface through the driver protocol later */
 int netd_if_down(const char *name);
 int netd_route_default(unsigned long gw);           /* network order; 0 removes it */
+/* the default route now: its gateway (0: none) and the interface it leaves by (D19 step 5, route) */
+int netd_route_get(unsigned long *gw, char name[NETD_IFNAME]);
+/* a new address (and netmask, 0: keep it) on an interface that is up (D19 6.1: ifconfig IFACE ADDRESS/PREFIX) */
+int netd_if_addr(const char *name, unsigned long addr, unsigned long mask);
 int netd_set_dns(const unsigned long *servers, int n);
 struct netd_ifinfo {
     char name[NETD_IFNAME];

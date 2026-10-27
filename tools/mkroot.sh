@@ -52,6 +52,7 @@ if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small i
 fi
 ln -s less "$T/bin/more"
 ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"; ln -s pgrep "$T/bin/pkill"; ln -s reboot "$T/bin/bootamigaos"   # more is less
+ln -s ifconfig "$T/bin/ifup"; ln -s ifconfig "$T/bin/ifdown"     # ifup and ifdown are ifconfig (DESIGN D19 6.4)
 # the package database (DESIGN D15): the manifest of every package of this build (make packages) whose files this
 # image holds exactly as the manifest says, so the first update knows what is installed (tools/mkzup.py installdb).
 # PKGDB=1: the full images only (the Makefile sets it for zenix.hdf and root-card.img)

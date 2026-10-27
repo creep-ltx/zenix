@@ -23,9 +23,9 @@
 #define SOCK_IOCTL       13     /* option: FIONREAD (val -> an int written) or FIONBIO (val -> an int read; the kernel's) */
 #define SOCK_RESOLVE     14     /* buf, len: a name; the socket becomes a lookup: readable when the answer is in, recv
                                  * then gives up to 4 IPv4 addresses (4 bytes each) or the error (DESIGN D19 4.5) */
-#define SOCK_IFLIST      15     /* (section 6, step 5) */
-#define SOCK_IFSET       16
-#define SOCK_ROUTE       17
+#define SOCK_IFLIST      15     /* buf, len: struct unetif rows; flags: the row size (0 = UNETIF_FIRST) -> rows */
+#define SOCK_IFSET       16     /* buf: struct unetifreq (root) */
+#define SOCK_ROUTE       17     /* buf: struct uroute, read and written back (changes: root) */
 #define SOCK_NETSTAT     18     /* buf, len: struct unetstat rows; flags: the row size (0 = UNETSTAT_FIRST) -> rows */
 #define SOCK_OPS         18
 #define NET_CLOSE        19     /* message only: the last close of a socket (a no-start call, rule 11) */
@@ -113,3 +113,42 @@ struct unetstat {
     u32 reserved[3];
 };
 #define UNETSTAT_FIRST 40
+
+/* SOCK_IFLIST's rows (frozen, first size UNETIF_FIRST): one per interface netd has */
+struct unetif {
+    char name[8];
+    u32 addr, mask, gw;         /* network order */
+    unsigned short mtu, flags;  /* NETIF_* */
+    u32 rx_frames, tx_frames, rx_bytes, tx_bytes, rx_bad, tx_drop;
+    u32 dns[2];                 /* the name servers netd uses (the same in every row; 0: none) */
+    u32 reserved[2];
+};
+#define UNETIF_FIRST 64
+#define NETIF_UP       1
+#define NETIF_LINK     2        /* the line is there (SLIP: the port is open) */
+#define NETIF_LOOPBACK 4
+#define NETIF_DEFAULT  8        /* the default route leaves through it */
+
+/* SOCK_IFSET's request (frozen, first size UNETIFREQ_FIRST: len): root only */
+struct unetifreq {
+    char name[8];               /* "": every interface with an "auto" line (UP), every one but the loopback (DOWN) */
+    u32 op;                     /* NETIFREQ_* */
+    u32 addr, mask;             /* NETIFREQ_ADDR, network order */
+    u32 reserved[3];
+};
+#define UNETIFREQ_FIRST 32
+#define NETIFREQ_UP   1         /* as its stanza in /etc/network/interfaces says (the files read again) */
+#define NETIFREQ_DOWN 2
+#define NETIFREQ_ADDR 3         /* a new address (and netmask, 0: keep it) on an interface that is up */
+
+/* SOCK_ROUTE's request (frozen, first size UROUTE_FIRST: len), written back */
+struct uroute {
+    u32 op;                     /* ROUTE_* */
+    u32 gw;                     /* network order; ROUTE_GET: the default gateway (0: none) */
+    char name[8];               /* ROUTE_GET: the interface it leaves by */
+    u32 reserved[4];
+};
+#define UROUTE_FIRST 32
+#define ROUTE_GET 0
+#define ROUTE_ADD 1             /* root: the default route through gw */
+#define ROUTE_DEL 2             /* root: no default route */

@@ -10,7 +10,10 @@ DESCRIPTION
     /bin/init is started by boot(8) on console 1. It first sets the
     console's colours from /etc/console (below), then prints /etc/motd, runs
     "mount -a" if there is an /etc/fstab (so the filesystems listed there
-    are mounted before anyone can log in), and then looks after the ten
+    are mounted before anyone can log in), starts "ifup -a" without
+    waiting for it if /etc/network/interfaces has an "auto" line (the
+    network, ifconfig(8): no login waits for a cable), and then looks
+    after the ten
     virtual consoles (/dev/tty1 .. /dev/tty10, Amiga+F1 .. Amiga+F10), like
     a Unix init with a getty on each terminal:
 
@@ -63,4 +66,4 @@ FILES
     /etc/console, /etc/motd, /etc/fstab
 
 SEE ALSO
-    boot(8), login(1), mount(8)
+    boot(8), login(1), mount(8), ifconfig(8)

@@ -17,9 +17,19 @@ DESCRIPTION
     every pointer and does every wait, and netd answers each request at
     once, so ^C and poll work on sockets as on pipes.
 
-    What it carries: TCP, UDP, ICMP echo sockets (for every user) and
-    the loopback 127.0.0.1. Names come from /etc/hosts, then DNS (the
-    name servers of /etc/resolv.conf). Ports below 1024 are root's.
+    What it carries: TCP, UDP, ICMP echo sockets (ping(1), for every
+    user), the loopback 127.0.0.1, and SLIP on the serial port: the
+    interfaces of /etc/network/interfaces (ifconfig(8); the cable to a
+    PC: docs/network-serial.md). Names come from /etc/hosts, then DNS
+    (the name servers of /etc/resolv.conf). Ports below 1024, the
+    interfaces and the routes are root's.
+
+    At its start netd opens its port, then reads /etc/hosts,
+    /etc/resolv.conf and /etc/network/interfaces (the last only if root
+    owns it and nobody else may write it) and brings up the interfaces
+    with an "auto" line; ifup reads them again. SLIP opens /dev/ttyS0
+    without ever waiting on it: what does not fit the port's send ring
+    waits in netd's own queue.
 
     Its buffers are sized by the machine, once at its start:
       small   less than 2 MB of free fast RAM (the stock A1200):
@@ -30,8 +40,8 @@ DESCRIPTION
     The kernel log says which (dmesg: "netd: serving net, epoch N, small
     profile (24 KB of buffers)").
 
-    It reads /etc/hosts and /etc/resolv.conf at its start, never for a
-    request (a floppy read would stall the network).
+    The files are never read for a request other than ifup's (a floppy
+    read would stall the network).
 
     When netd ends (a crash, a kill), every socket of it fails at once
     with "network is down" (ENETDOWN), and a program waiting on one
@@ -45,6 +55,7 @@ FILES
     /etc/hosts               addresses and names: "127.0.0.1 localhost",
                              an address and its names a line
     /etc/resolv.conf         name servers: "nameserver 10.0.2.3" lines
+    /etc/network/interfaces  the interfaces (ifconfig(8))
     /usr/share/licenses/lwIP lwIP's licence
 
 NOTES
@@ -54,4 +65,4 @@ NOTES
     cannot starve the shells. Its log lines go to the kernel log.
 
 SEE ALSO
-    netstat(1), nettest(1), boot(8), svctest(1)
+    ifconfig(8), route(8), ping(1), netstat(1), nettest(1), boot(8)

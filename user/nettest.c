@@ -321,14 +321,31 @@ static void c_perm(void)
     int st = pid > 0 ? sys_wait(pid) : -1;
     int raw = socket(AF_INET, SOCK_RAW, 1), e = zerrno;
     result("perm", !root && st == EACCES && raw < 0 && e == EPROTONOSUPPORT,
-           "root binds port 80 %s; a user: %s; a raw socket: %s", root ? "NOT" : "yes", zstrerror(st), zstrerror(e));
+           "root binds port 80 %s; a user: %s, and may not change interfaces or routes%s; a raw socket: %s",
+           root ? "NOT" : "yes", zstrerror(st), st == 99 ? " (WRONG: allowed)" : "", zstrerror(e));
 }
 static int bind80(void)
 {
     sys_setuid(1000);
     int s = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in a = sin(INADDR_ANY, 80);
-    return bind(s, SA(a), sizeof a) ? zerrno : 0;
+    int e = bind(s, SA(a), sizeof a) ? zerrno : 0;
+    /* the interfaces and the routes are root's too (D19 9.1) */
+    struct unetifreq q;
+    struct uroute rt;
+    struct usockreq r;
+    memset(&q, 0, sizeof q);
+    q.op = NETIFREQ_DOWN;
+    memset(&r, 0, sizeof r);
+    r.buf = (u32)&q;
+    r.len = sizeof q;
+    int e2 = sys_sock(SOCK_IFSET | (u32)sizeof r << 16, s, &r);
+    memset(&rt, 0, sizeof rt);
+    rt.op = ROUTE_DEL;
+    r.buf = (u32)&rt;
+    r.len = sizeof rt;
+    int e3 = sys_sock(SOCK_ROUTE | (u32)sizeof r << 16, s, &r);
+    return e2 != -EPERM || e3 != -EPERM ? 99 : e;
 }
 
 /* netd killed: a blocked recv returns ENETDOWN at once; the next socket starts a new netd (D19 4.3 rules 9, 10) */
@@ -450,13 +467,79 @@ static void c_asm(void)
            n, bad, cn, cbad, tc, ta, tm, tma, tn, tna);
 }
 
+/* ---- through SLIP to the PC (tools/slip-test.sh; the PC's servers: tools/slip-host.py on 10.0.2.2) ---- */
+static int dial_to(u32 addr, int port)
+{
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in a = sin(addr, port);
+    if (s >= 0 && connect(s, SA(a), sizeof a)) { int e = zerrno; sys_close(s); zerrno = e; return -1; }
+    return s;
+}
+#define PC 0x0a000202u                          /* 10.0.2.2: zenix-slirp's gateway, the PC */
+static void c_slip(void)
+{
+    /* TCP echo: 10 KB in 1,000-byte pieces */
+    int s = dial_to(PC, 7100), ok = s >= 0;
+    static char out[1000], in[1000];
+    u32 t0 = sys_ticks(), total = 0;
+    for (u32 k = 0; ok && k < 10; k++) {
+        for (u32 i = 0; i < sizeof out; i++) out[i] = (char)pattern(total + i, 5);
+        ok = send(s, out, sizeof out, 0) == (int)sizeof out && recv_all(s, in, sizeof in) == (int)sizeof in && !memcmp(in, out, sizeof in);
+        total += sizeof out;
+    }
+    if (s >= 0) sys_close(s);
+    result("sliptcp", ok, "10 KB echoed by 10.0.2.2:7100 in %u ticks%s", sys_ticks() - t0, ok ? "" : ": WRONG");
+    /* 100 KB from the PC, checked byte by byte (its pattern) */
+    s = dial_to(PC, 7102);
+    u32 want = 102400, got = 0, bad = 0;
+    t0 = sys_ticks();
+    if (s >= 0 && send(s, "102400\n", 7, 0) == 7) {
+        static char b[2048];
+        int r;
+        while ((r = recv(s, b, sizeof b, 0)) > 0) {
+            for (int i = 0; i < r; i++) if ((unsigned char)b[i] != pattern(got + (u32)i, 11)) bad++;
+            got += (u32)r;
+        }
+    }
+    u32 t = sys_ticks() - t0;
+    if (s >= 0) sys_close(s);
+    result("slipget", got == want && !bad, "%u of %u bytes from 10.0.2.2:7102, %u wrong, in %u ticks (%u bytes/s in this "
+           "emulator)", got, want, bad, t, t ? got * 100 / t : 0);
+    /* UDP echo */
+    int u = socket(AF_INET, SOCK_DGRAM, 0), n = 0;
+    struct sockaddr_in to = sin(PC, 7101);
+    static const u32 sizes[] = { 1, 100, 500, 900 };
+    for (u32 k = 0; u >= 0 && k < 4; k++) {
+        for (u32 i = 0; i < sizes[k]; i++) out[i] = (char)pattern(i, k + 20);
+        int r = -1;
+        for (int tries = 0; tries < 3 && r != (int)sizes[k]; tries++) {
+            sendto(u, out, sizes[k], 0, SA(to), sizeof to);
+            struct pollfd p = { u, POLLIN, 0 };
+            r = poll(&p, 1, 3000) == 1 ? recv(u, in, sizeof in, 0) : -1;
+        }
+        if (r == (int)sizes[k] && !memcmp(in, out, sizes[k])) n++;
+    }
+    if (u >= 0) sys_close(u);
+    result("slipudp", n == 4, "%d of 4 datagrams (1 to 900 bytes) echoed by 10.0.2.2:7101", n);
+    /* a name through 10.0.2.3 (slirp's DNS, which asks the PC's test server) */
+    struct addrinfo h, *r = 0, *r2 = 0;
+    memset(&h, 0, sizeof h);
+    h.ai_socktype = SOCK_STREAM;
+    int g = getaddrinfo("amiga.zenix.test", 0, &h, &r), g2 = getaddrinfo("nothing.zenix.test", 0, &h, &r2);
+    int dns = !g && r && ((struct sockaddr_in *)r->ai_addr)->sin_addr.s_addr == htonl(0x0a010203);
+    freeaddrinfo(r);
+    freeaddrinfo(r2);
+    result("slipdns", dns && g2 == EAI_NONAME, "amiga.zenix.test: %s; nothing.zenix.test: %s",
+           dns ? "10.1.2.3" : gai_strerror(g), gai_strerror(g2));
+}
+
 int main(int argc, char **argv)
 {
     strcpy(self, "/bin/nettest");
     if (argc >= 5 && !strcmp(argv[1], "serve")) return serve(argv[2], atoi(argv[3]), argv[4]);
     if (argc == 2 && !strcmp(argv[1], "_recv")) { char b; return recv(0, &b, 1, 0) < 0 ? zerrno : 0; }
     if (argc == 2 && !strcmp(argv[1], "_bind80")) return bind80();
-    if (argc < 2) { fprintf(2, "usage: nettest CHECK... (tcp udp poll nonblock names many perm down asm hang listen)\n"); return 2; }
+    if (argc < 2) { fprintf(2, "usage: nettest CHECK... (tcp udp poll nonblock names many perm down asm hang listen slip)\n"); return 2; }
     for (int i = 1; i < argc; i++) {
         const char *c = argv[i];
         if (!strcmp(c, "tcp")) c_tcp();
@@ -470,6 +553,7 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "asm")) c_asm();
         else if (!strcmp(c, "hang")) c_hang();
         else if (!strcmp(c, "listen")) c_listen();
+        else if (!strcmp(c, "slip")) c_slip();
         else { printf("nettest: no check %s\n", c); fails++; }
         oflush();
     }

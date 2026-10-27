@@ -14,13 +14,24 @@ unsigned long netd_mem_used, netd_mem_limit;
 
 u32_t sys_now(void) { return (u32_t)netd_os_now_ms(); }
 
-/* every block carries its size in front, so the count is exact; 8 bytes keep the 8-byte alignment of the heap */
+/* every block carries its size in front, so the count is exact; 8 bytes keep the 8-byte alignment of the heap.
+ * The blocks come from the C library on the PC, and on Zenix from netd's own regions (net/netd/main.c: sized by the
+ * limit, not libz's growing chunks, which would hold 84 KB for a 24 KB heap) */
+#ifdef NETD_HOST
+#define heap_alloc malloc
+#define heap_free free
+#else
+void *netd_heap_alloc(unsigned long n);
+void netd_heap_free(void *p);
+#define heap_alloc netd_heap_alloc
+#define heap_free netd_heap_free
+#endif
 #define HDR 8
 void *netd_malloc(unsigned long n)
 {
     unsigned char *p;
     if (n > 0x7fffff00ul || (netd_mem_limit && netd_mem_used + n + HDR > netd_mem_limit)) return NULL;
-    p = malloc(n + HDR);
+    p = heap_alloc(n + HDR);
     if (!p) return NULL;
     *(unsigned long *)p = n;
     netd_mem_used += n + HDR;
@@ -40,5 +51,5 @@ void netd_free(void *v)
     if (!p) return;
     p -= HDR;
     netd_mem_used -= *(unsigned long *)p + HDR;
-    free(p);
+    heap_free(p);
 }

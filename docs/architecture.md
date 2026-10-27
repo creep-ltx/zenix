@@ -549,7 +549,9 @@ pattern (section 6).
   `SYS_evwait` waits for several at once: up to 32 items { fd, events, revents } (Linux's `struct pollfd` and bits)
   and a timeout in ticks (-1: none, 0: only look); an item with `POLLPORT` names a port the caller owns (`POLLIN`: a
   message is queued). It returns how many items are ready, 0 at the timeout, -EINTR when a handler is due (never
-  restarted). ttys and `/dev/ttyS0` are always writable (the tick empties their send rings); files and `/dev/null`
+  restarted). ttys are always writable (the tick empties their send rings); `/dev/ttyS0` is writable when 1 KB of its
+  4 KB send ring is free (DESIGN D19 5.3: a truthful `POLLOUT` for netd; the drain that makes the room wakes the
+  waiter through kwork); files and `/dev/null`
   never wait; a pipe's read end gives `POLLHUP` when no writer is left, its write end `POLLERR` when no reader is.
   libz's `poll` (milliseconds) and `select` (`fd_set` of 32) are built on it.
 - **Signals** (DESIGN D16, `kernel/signal.c`). Linux's numbers and default actions (frozen): HUP 1, INT 2, QUIT 3,
@@ -1074,7 +1076,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   (console 1, the same rule), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
   is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
   receive ring for its reader; a write waits for room in the 4 KB send ring a tick at a time, so the machine runs on,
-  and ends on a kill or after 2 s in which the port took nothing (logged: what was written, or -EIO), audit A5),
+  and ends on a kill or after 2 s in which the port took nothing (logged: what was written, or -EIO), audit A5; with
+  `O_NONBLOCK` (netd's SLIP, DESIGN D19 5.3) a write takes what fits now (-EAGAIN for nothing) and a read with nothing
+  received answers -EAGAIN),
   `/dev/null`, `/dev/zero`, `/dev/urandom` and `/dev/random` (section 3, "Random numbers"; `O_NONBLOCK` makes
   `/dev/random` answer -EAGAIN while it would wait). `fstat` of a console gives its number in `st_ino` (the
   `ustat` has no device field; `login` uses it to apply `/etc/autologin` to console 1 only).
@@ -1120,9 +1124,17 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   of changed bits (`NETSRV_READY`), one `evwait` on the port, the serial lines and the timer, and at most 8 requests a
   turn, each answered at once with `NETSRV_REPLY`. It answers only `UMSG_KERNEL` messages (-EACCES otherwise).
   `SOCK_RESOLVE` turns the program's socket into a lookup (its name in `buf`); `SOCK_NETSTAT` fills `struct
-  unetstat` rows (first size 40). It ignores SIGPIPE. 66,482 bytes of code, 13 KB of data, an 8 KB stack (105 KB in
-  `ps` on the stock A1200 while it serves); `tools/netd-test.sh` runs it over the loopback in FS-UAE,
-  `tools/host/net-test.sh` its core on the PC. libz's BSD calls are in `user/socket.h`.
+  unetstat` rows (first size 40); `SOCK_IFLIST` `struct unetif` rows (first size 64), `SOCK_IFSET` (root) a `struct
+  unetifreq` (up from `/etc/network/interfaces`, read again; down; an address), `SOCK_ROUTE` a `struct uroute` (the
+  default route: get, and root's add and delete). At its start, after the port, it reads `/etc/network/interfaces`
+  (only if root's and writable by root alone) and brings up the `auto` interfaces; `init` also starts `ifup -a`
+  without waiting when the file has an `auto` line. SLIP (step 5) is lwIP's `slipif` on `/dev/ttyS0` opened with
+  `O_NONBLOCK`: netd reads what came and writes what fits, keeping the rest of a frame in its own 4 KB queue. Its
+  buffers come from regions of its own (first fit, joined on free; each a quarter of the profile's limit, at least 8
+  KB, taken when needed), not libz's malloc, whose power-of-two classes and 4/16/64 KB chunks held 84 KB for the 24 KB
+  heap. It ignores SIGPIPE. 72,392 bytes of code, 13 KB of data, an 8 KB stack (99 KB in `ps` on the stock A1200
+  after the loopback tests, 115 KB with SLIP up); `tools/netd-test.sh` runs it over the loopback in FS-UAE,
+  `tools/slip-test.sh` over SLIP to `zenix-slirp`, `tools/host/net-test.sh` its core on the PC. libz's BSD calls are in `user/socket.h`.
 - **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
   `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**
   shows console 1-10 (Linux: Alt+F1..); plain F-keys stay with the programs and send their escape codes; other
