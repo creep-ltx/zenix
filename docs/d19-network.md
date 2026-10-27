@@ -863,6 +863,44 @@ call; a handler's -EINTR and the restart rule; the deadline; the server's end wa
 -ENETDOWN, a stale epoch's socket dropped, NET_CLOSE as a no-start call, a partial send's count, accept's
 reservations, a restarted connect sending no second CONNECT, poll without a message, SYS_netsrv's checks);
 `tools/sock-test.sh` in FS-UAE (socktest's checks against socktestd, ^C on a blocked recv, the log of the server's
-death and restart in epoch 2, e2fsck).
+death and restart in epoch 2, e2fsck). **Checked against the host-only parts' `net/netd/netd.h` and their binding
+choices** (merged from main): sockets named by (index, generation) as `a[0]`'s low 8 and next 16 bits; ACCEPT's
+reserved socket is `netreq.newsock`; the timeouts are the kernel's (their choice 6: netd answers -ENOPROTOOPT if one
+reaches it, and none does); ready bits only from socket state, truthful in every reply (their choice 10, rule 1);
+`SOCK_RAW` -EPROTONOSUPPORT is netd's answer. Step 4's message loop adapts the wire fields to netd's calls (FIONREAD's
+`int` to `netd_ioctl`'s `long`, RESOLVE's name in `buf`). The 4.3 model their section leaves to step 3 is
+`tools/sock-host-test.sh`.
 
 Last checked against the code: 2026-10-27.
+
+### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
+
+lwIP 2.2.1 (STABLE-2_2_1_RELEASE) in `net/lwip/` (upstream files unchanged in the first commit; two local patches in
+`net/lwip/patches`, applied in the tree with a test that each is still applied: `0001` a count limit for heap-backed
+pools (9.4), `0002` random ephemeral ports, RFC 6056); Zenix's port in `net/port/` (lwipopts.h: IPv4, TCP, UDP, ICMP,
+raw, DHCP, DNS with `LWIP_DNS_SECURE` 7, ARP, SLIP MTU 1006, loopback; no IPv6, ACD or `IP_FRAG`, reassembly on; a counted
+heap with a byte cap via `MEM_CUSTOM_ALLOCATOR`; ChaCha20 with fast key erasure for `LWIP_RAND`; SipHash-2-4 ISNs,
+RFC 6528); netd's core in `net/netd/` (`netd.h`), plain C without system calls, shared by netd and the host tests.
+Measured m68k -Os: lwIP 47,656 bytes unlinked; with the port 50,044; netd's core + lwIP + port linked 59,388 of text.
+Tests: `tools/host/net-test.sh` (in `check.sh host`): 46 netd-host checks over SLIP to zenix-slirp in `unshare -rnm`,
+lwIP's own unit tests (83 run, 7 skipped for options Zenix turns off, 2 more for the patches), zenix-slirp's own test;
+the libFuzzer harness `tools/host/lwip-fuzz/` (SLIP, Ethernet, DHCP; pools and heap must return to their start): its
+first minute found two leaks in netd's interface shutdown (slipif reads END after ESC as data; `netif_remove` leaves
+the loopback queue), both fixed; a 900 s run of 6.9 million inputs found nothing more.
+
+Choices where the note was silent (binding for the main line unless changed here): (1) netd's core lives in
+`net/netd/`; the wire protocol (NET_* numbers, `usockreq`, the epoch) is the main line's. (2) A name lookup answers up to
+4 IPv4 addresses (4 bytes each, network order); a missing name and no answer are both -ENOENT. (3) Window, send buffer,
+out-of-order and reassembly limits are variables set per machine profile; `TCP_SND_QUEUELEN` stays the constant 64.
+(4) Profiles: large machines 32 TCP connections, 16 KB send buffer, a 200 KB heap; small machines a 24 KB heap with small
+backlogs and UDP queues; which machine gets which profile is decided in step 4 with measurements (chip-only = small).
+(5) `SOCK_RAW` gives -EPROTONOSUPPORT for now. (6) Socket timeouts are the kernel's; netd answers -ENOPROTOOPT if one
+reaches it. (7) An ICMP socket's getsockname gives the echo id as the port, as Linux. (8) Config files: IPv6 lines in
+`hosts`/`resolv.conf` and an ignored stanza's lines are skipped silently; `iface lo inet loopback` is reported as an
+unknown method (loopback needs no stanza). (9) SLIP interfaces are static (no DHCP over SLIP); drivers other than slip
+give -ENODEV until the driver protocol (step 7). (10) Ready bits come only from socket state: -EAGAIN always comes with
+"not ready"; POLLOUT = one MSS or a third of the send buffer free. (11) With ACD off, lwIP sends a gratuitous ARP on
+interface up and on a DHCP bind. (12) zenix-slirp writes the console bytes to `--log`; how the FS-UAE SLIP tests hand
+them to serial-tap is step 5's choice. (13) netd's OS layer writes to `/dev/ttyS0` without waiting (at most the free
+room), as 5.3. Not done here: the m68k assembler checksum/copy (step 4, needs m68k execution), the GENET model (follows
+step 9's register layer), the 4.3 rules model (step 3).

@@ -1,0 +1,34 @@
+lwIP for Zenix
+=============
+
+What this is: the TCP/IP code of netd, Zenix's network server (DESIGN D19, docs/d19-network.md section 2.2).
+Upstream: lwIP 2.2.1, git tag STABLE-2_2_1_RELEASE (commit 77dcd25, "Prepare 2.2.1 release"),
+https://github.com/lwip-tcpip/lwip. Licence: BSD-3-Clause, in COPYING (it must travel with every binary
+that contains lwIP: owner decision 6 of 2026-10-27).
+
+Only the files Zenix builds or tests were taken, unchanged except for the local patches below:
+  src/core/*.c            def dns inet_chksum init ip mem memp netif pbuf raw stats sys tcp tcp_in tcp_out
+                          timeouts udp
+  src/core/ipv4/*.c       dhcp etharp icmp ip4 ip4_addr ip4_frag (no acd, autoip, igmp)
+  src/netif/              ethernet.c slipif.c
+  src/include/lwip/       every header except apps/ (several are included whatever the options say)
+  src/include/netif/      etharp.h ethernet.h slipif.h ppp/ppp_opts.h ppp_impl.h pppoe.h (included
+                          whatever PPP_SUPPORT says; empty without PPP)
+  test/unit/              lwip_check.h and the suites for the parts Zenix uses (core tcp udp ip4 etharp dhcp)
+  test/fuzz/              README and the sample inputs (seeds for tools/host/lwip-fuzz)
+Not taken: IPv6, PPP, the sockets/netconn layers (they need threads), the apps, contrib/.
+
+Zenix's own files live beside this folder, never in it: net/port/ (lwipopts.h, arch/cc.h, the random numbers
+and the ISN hook), net/netd/ (netd's own code). The tests are tools/host/net-test.sh.
+
+Local patches (patches/, each small; the files in src/ are upstream plus these, in this order;
+tools/host/net-test.sh checks that every patch is still applied):
+  0001-memp-count-limits.patch   pools allocated from the heap (MEMP_MEM_MALLOC) keep a limit: memp_malloc
+                                 counts each pool and fails at memp_limit[type], which netd sets at start by the
+                                 machine's memory (D19 9.4). Upstream ignores the counts with MEMP_MEM_MALLOC.
+  0002-random-ephemeral-ports.patch
+                                 tcp_new_port and udp_new_port pick every ephemeral port at random (RFC 6056),
+                                 not one random start and then sequential (D19 9.3).
+
+A new lwIP release: take the same files from it, apply the patches (patch -p1 in this folder), run
+tools/host/net-test.sh, and change the version above.

@@ -9,6 +9,7 @@ zenix/
 ├── kernel/      the kernel: C and 68k assembler
 ├── user/        every program and server that runs on Zenix
 ├── zenixfs/     the ZenixFS library, its host tools and tests
+├── net/         the network (DESIGN D19): lwIP, its Zenix port, netd's core
 ├── rootfs/      files copied onto the Zenix root disk (/etc, test scripts)
 ├── link/        linker scripts (kernel, programs, stage0)
 ├── tools/       image builders, the emulator rig and every test
@@ -56,6 +57,14 @@ zenix/
   [commands.md](commands.md).
 - **Taken from other projects:** `miniz/` (for `gzip`) and `regex.c` (from CUtils), both MIT.
 
+## net/: the network (DESIGN D19, docs/d19-network.md)
+
+| Folder | What it is |
+|---|---|
+| `lwip/` | lwIP 2.2.1 (BSD-3, `COPYING`): only the files netd builds or tests, unchanged but for the local patches in `lwip/patches/`; `lwip/README` names the version, the files and the patches |
+| `port/` | Zenix's port of lwIP: `lwipopts.h` (the configuration), `arch/cc.h`, the counted heap and the limits set by the machine (`port.c`), ChaCha20 and the SipHash ISNs (`rand.c`), stand-in C headers for the Zenix build (`shim/`) |
+| `netd/` | netd's core: sockets, SLIP and loopback, names, the configuration files, the limits (`netd.h` is its interface); plain C with no system call, so netd's main program and the PC tests use the same files |
+
 ## tools/: building and testing
 
 | What | Files |
@@ -64,5 +73,6 @@ zenix/
 | Images | `mkzexe.py` (ELF to ZEXE), `mkadf.py`, `mkroot.sh`, `mkdisk.py`, `mkrdb.py`, `mkmbr.py`, `mkcard.py`, `mkdualcard.sh` (the dual-boot SD card), `write-card.sh` (writes a card safely) |
 | The emulator rig | `fsuae_conf.py` (writes a configuration), `run-test.sh`, `serial-tap.py` (types a script into the serial port and waits for answers), `shot.py` (screenshots) |
 | Emulator tests | `*-test.sh` and the scripts they type, in `tools/tests/` |
-| Host tests | `host/` (the disk and ext2 servers built for the PC), `*-test.c` (drivers against software models of the hardware) |
+| Host tests | `host/` (the disk and ext2 servers built for the PC; the network's tests, `host/net-test.sh`: lwIP's unit tests, netd on the PC against `zenix-slirp`, the fuzzer), `*-test.c` (drivers against software models of the hardware) |
+| The PC's end of the SLIP line | `host/zenix-slirp/` (`zenix-slirp`: SLIP to libslirp, no root; needs libslirp and GLib) |
 | Rules | `docs-check.sh` (the documentation stays in step with the code), `check-68020-60.sh` (no instruction a 68060 lacks) |
