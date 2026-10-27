@@ -151,6 +151,7 @@ SETUID = {"su", "sudo", "passwd"}
 LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), ("chown", "/bin/chgrp"),
          ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos")]
 SBIN = {"zup"}
+BASE_SBIN = ["zfsd"]                      # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
 
 
 def binname(p):
@@ -172,6 +173,8 @@ def std_packages(build, uapps):
                                               ("f", 0o755, 0, 0, zx("zup"), "/sbin/zup")], group="base")
         names.insert(0, "zup")
     base = dirs + [("f", 0o755, 0, 0, zx(p), "/bin/" + p) for p in BASE_PROGS]
+    # the servers that live on the disk (DESIGN D19 step 1: /sbin/zfsd, which mount starts for a ZenixFS volume)
+    base += [("d", 0o755, 0, 0, None, "/sbin")] + [("f", 0o755, 0, 0, zx(p), "/sbin/" + p) for p in BASE_SBIN]
     base += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", c), "/etc/" + c) for c in BASE_CONFIG]
     make_package(out, "base", vnum, vstr, base, group="base", deps=[("zup", vnum)] if "zup" in names else [])
     utils = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p))

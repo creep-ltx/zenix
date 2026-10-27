@@ -3,9 +3,12 @@
 # ZenixFS as the ROOT filesystem, in the emulator. Boot 1: root is ZenixFS (mount/df), files, links, a bigger file, sync.
 # Boot 2 (same disk): the data is there after a reboot; then the users-and-permissions test of tools/users-test.sh runs
 # against the ZenixFS root. Finally the host checks the root partition with zenixfs-tool.
+# It boots the TEST-ONLY kernel kernel-zfs (zenix-zfs.adf, fsuae/zroot.fs-uae): since DESIGN D19 step 1 the shipped
+# kernel has no ZenixFS server built in, so a ZenixFS root is test-only until roadmap block 4; this tests that kernel,
+# not the shipped one.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
-make -s BUILD=$BD all $BD/zenix.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+make -s BUILD=$BD all $BD/zenix.adf $BD/zenix-zfs.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "host tool build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-zroot}; mkdir -p $OUT
 # the root disk: ZenixFS root + a second partition (ext2, empty) that /etc/fstab mounts on /data at boot
@@ -13,7 +16,7 @@ rm -f $BD/zenix-zroot.hdf $OUT/data.img
 mke2fs -q -t ext2 -E revision=0 -b 1024 -F $OUT/data.img 2M || { echo "mke2fs failed"; exit 1; }
 printf '# test fstab\nide0p2  /data  auto  defaults\n' > $OUT/fstab
 make -s BUILD=$BD $BD/zenix-zroot.hdf >/dev/null 2>&1    # makes the plain one (also builds the programs); then ours replaces it
-FSTAB_FILE=$OUT/fstab MOUNTDIRS=data EXTRA="$OUT/data.img:ext2:data" tools/mkroot-zenixfs.sh $BD/zenix-zroot.hdf $BD "$(make -s BUILD=$BD -f Makefile --eval 'pa:;@echo $(UAPPS)' pa 2>/dev/null)" 8 >/dev/null || { echo "zroot disk build failed"; exit 1; }
+FSTAB_FILE=$OUT/fstab MOUNTDIRS=data EXTRA="$OUT/data.img:ext2:data" tools/mkroot-zenixfs.sh $BD/zenix-zroot.hdf $BD "$(make -s BUILD=$BD -f Makefile --eval 'pa:;@echo $(UAPPS) $(SBINAPPS)' pa 2>/dev/null)" 8 >/dev/null || { echo "zroot disk build failed"; exit 1; }
 SER=${ZENIX_SERIAL:-/tmp/zenixfs-serial}
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }

@@ -415,11 +415,21 @@ static void restart_opens(const char *who)
 
 int main(int argc, char **argv)
 {
-    if (argc < 3) { printf("usage: zfsd DEVICE PORT [-root] [-id ID]\n"); return 2; }
-    const char *pname = argv[2], *dev = argv[1], *who = pname[2] ? pname : "zfsd";
+    if (argc < 2) { printf("usage: zfsd DEVICE [PORT] [-root] [-id ID]\n"); return 2; }
+    /* PORT left out (mount since DESIGN D19 step 1: "/sbin/zfsd DEVICE -id ID" fits the 80 bytes a service's program
+     * may have, SVC_TEXT, where the port word would not): fs.DEVICE, the name mount gives the mount's service */
+    char pbuf[16];
+    const char *pname = argv[2], *dev = argv[1];
+    if (argc == 2 || argv[2][0] == '-') {
+        strcpy(pbuf, "fs.");
+        strncpy(pbuf + 3, dev, 12);
+        pbuf[15] = 0;
+        pname = pbuf;
+    }
+    const char *who = pname[2] ? pname : "zfsd";
     char name[16];
     int restart = (sys_svc_self() & 0xFFFF) > 1;
-    if (argc > 4 && !strcmp(argv[argc - 2], "-id")) {      /* the volume by its place and uuid (volid.h) */
+    if (argc >= 4 && !strcmp(argv[argc - 2], "-id")) {     /* the volume by its place and uuid (volid.h) */
         if (vol_find(sys_port_find("disk"), dev, argv[argc - 1], name, who, restart)) return 1;
         dev = name;
     }

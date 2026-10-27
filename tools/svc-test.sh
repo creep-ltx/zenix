@@ -3,7 +3,10 @@
 # The service manager (DESIGN D11, docs/d11-service-manager.md section 9) in the emulator, headless. Boots:
 #   a  the normal ext2 root: boot 1, diskd 2, fsd 3, no zfsd; registered names are refused to root too; fsd and diskd
 #      killed while idle come back on the next use (the root is still writable: the restart used -root), dmesg says so
-#   z  the ZenixFS root (zenix-zroot.hdf): zfsd serves it as pid 3, and comes back after a kill
+#   z  the ZenixFS root (zenix-zroot.hdf, booted with the test-only kernel kernel-zfs, zenix-zfs.adf: the shipped kernel
+#      has no ZenixFS server since DESIGN D19 step 1): zfsd serves it as pid 3, and comes back after a kill
+#   zs the same ZenixFS root with the shipped kernel: the kernel says it has no ZenixFS server and stops with the panic
+#      (never a deadlock on /sbin/zfsd, which only the root's own server could read)
 #   b  two ext2 partitions, the second marked bootable: it is the root (rootpick's rule, fsd no longer picks)
 #   n  a disk with no filesystem and no RAM disk: the panic text at once
 #   r  the RAM floppy with no hard disk: ram0 is the root
@@ -16,7 +19,7 @@
 #      space; fsd killed in the middle of a copy (killed again, at most 3 times, until the log says "during
 #      request": a kill can land between two requests): the next one marks the volume "needs a check" (the host's
 #      dumpe2fs: not clean)
-#   zo the same on the ZenixFS root, and a file created less than 3 s before zfsd died (not committed) is gone for its
+#   zo the same on the ZenixFS root (kernel-zfs), and a file created less than 3 s before zfsd died (not committed) is gone for its
 #      open file: the read fails and never reaches the next new file
 #   u  a dd copy of the root partition beside it (the same uuid): the restart serves the original (the place first)
 #   l  the limits (step 4) with pingd as a file service: started on demand at its nice, a quit is a stop and the next
@@ -40,9 +43,9 @@
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
-PARTS=" ${*:-a z b n r d o zo u l f s h t dmg} "
+PARTS=" ${*:-a z zs b n r d o zo u l f s h t dmg} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
-make -s BUILD=$BD all $BD/zenix-zroot.hdf $BD/zenix-ram.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
+make -s BUILD=$BD all $BD/zenix-zroot.hdf $BD/zenix-ram.adf $BD/zenix-zfs.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-svc-serial}
 pass=1
@@ -57,8 +60,9 @@ same() {   # same LOG WHAT KEY1 KEY2: two "KEY=N" lines hold the same number
     local a b; a=$(grep -aoxE "$3=[0-9]+" "$OUT/$1.log" | head -1); b=$(grep -aoxE "$4=[0-9]+" "$OUT/$1.log" | head -1)
     if [ -n "$a" ] && [ "${a#*=}" = "${b#*=}" ]; then echo "PASS $2 (${a#*=})"; else echo "FAIL $2 ($a $b)"; pass=0; fi
 }
-conf() {   # conf NAME HDF: the fast A1200 with another hard disk
-    sed "s#^hard_drive_0 = .*#hard_drive_0 = $2#" fsuae/a1200-020-fast.fs-uae > "$OUT/$1.fs-uae"
+conf() {   # conf NAME HDF [FLOPPY]: the fast A1200 with another hard disk (and another boot floppy)
+    sed "s#^hard_drive_0 = .*#hard_drive_0 = $2#; s#^floppy_drive_0 = .*#floppy_drive_0 = ${3:-../build/zenix.adf}#" \
+        fsuae/a1200-020-fast.fs-uae > "$OUT/$1.fs-uae"
 }
 
 # ---- a: the normal root ----
@@ -94,6 +98,15 @@ rx   z "... and the next use started it again" "svc: fs: started @zfsd \(pid [0-
 same z "... files are there after the restart" n1 n2
 line z "... the root is still writable" "write-ok"
 line z "the script ran to the end" "svc-z-done"
+line z "... booted by the test-only kernel (zenix-zfs.adf)" "svc: fs: started @zfsd (pid 3, for pid 1 boot)"
+fi
+
+# ---- zs: the ZenixFS root with the shipped kernel (no ZenixFS server built in, DESIGN D19 step 1) ----
+if want_part zs; then
+conf zs ../build/zenix-zroot.hdf
+run zs "$OUT/zs.fs-uae" 40 ""
+line zs "the kernel says it has no ZenixFS server for the root" "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the test kernel kernel-zfs (DESIGN D19)"
+line zs "... and stops at once with the panic (no deadlock on /sbin/zfsd)" "*** kernel panic: svc: cannot start an essential server"
 fi
 
 # ---- b: the bootable flag picks the root ----
@@ -174,7 +187,7 @@ fi
 # ---- zo: the ZenixFS root's restart rules ----
 if want_part zo; then
 cp $BD/zenix-zroot.hdf "$OUT/zroot.hdf"
-conf zo "$OUT/zroot.hdf"
+conf zo "$OUT/zroot.hdf" ../build/zenix-zfs.adf
 run zo "$OUT/zo.fs-uae" 200 tools/tests/svc-zopen-test.txt
 rx   zo "a deleted file held open (an orphan) reads the same after zfsd restarted" ".*svctest keep /tmp/keep: read 4096, deleted 0, again 4096: the same bytes"
 free_grew zo "... and is freed at its last close" f1 f2 100

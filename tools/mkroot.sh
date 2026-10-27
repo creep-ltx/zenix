@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name>.
+# Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name> (zup and zfsd as /sbin/<name>).
 # usage: mkroot.sh out.hdf builddir "prog prog ..."
 set -e
 OUT="$1"; B="$2"; PROGS="$3"; SIZE="${4:-8M}"; INODES="${5:-512}"
@@ -32,7 +32,7 @@ fi
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2
-    dir=bin; [ "$p" = zup ] && { dir=sbin; mkdir -p "$T/sbin"; }  # the updater (DESIGN D15) is /sbin/zup
+    dir=bin; case $p in zup|zfsd) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15) and the ZenixFS server (D19)
     cp "$B/$p.zx" "$T/$dir/$name"
     chmod 755 "$T/$dir/$name"
 done

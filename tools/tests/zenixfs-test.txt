@@ -82,6 +82,16 @@ send wc /mnt/seq.txt\r
 sleep 5
 send ls /mnt\r
 sleep 3
+send kill $(pgrep zfsd); sleep 2; cat /mnt/dir2/b.txt; echo kill-$(echo done)\r
+sleep 8
+send umount /mnt\r
+sleep 4
+send svctest reg fs.ide0p2 -10 @zfsd ide0p2 fs.ide0p2\r
+sleep 2
+send svctest mount fs.ide0p2 /mnt\r
+sleep 6
+send cat /mnt/dir2/b.txt; echo alias-$(echo done)\r
+sleep 3
 send umount /mnt\r
 sleep 4
 send fsck.zenixfs ide0p2\r

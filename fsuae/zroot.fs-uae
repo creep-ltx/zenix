@@ -1,11 +1,12 @@
 # Zenix on an A1200 with 4 MB fast RAM whose ROOT filesystem is ZenixFS (partition 1 of build/zenix-zroot.hdf, RDB type zenixfs).
+# Booted by the test-only kernel with the ZenixFS server built in (zenix-zfs.adf, DESIGN D19 step 1).
 [fs-uae]
 accuracy = 1
 amiga_model = A1200
 kickstart_file = $ZENIX_KICKSTART_DIR/kicka1200.rom
 chip_memory = 2048
 fast_memory = 4096
-floppy_drive_0 = ../build/zenix.adf
+floppy_drive_0 = ../build/zenix-zfs.adf
 floppy_drive_speed = 0
 serial_port = /tmp/zenix-serial
 uae_serial_direct = true
