@@ -29,7 +29,7 @@ int main(int argc, char **argv)
         }
     }
     if (sys_geteuid() == 0)
-        seed_store(seed_pool_ready() ? SEED_F_SEEDED : 0);     /* a read-only root: nothing written, no harm */
+        seed_store(seed_pool_ready() ? SEED_F_SEEDED : 0, 0);     /* a read-only root: nothing written, no harm */
     int r = sys_reboot(note);
     const char *t = zstrerror(r);
     fprintf(2, "reboot: %s\n", r == -EPERM ? "only root may reboot" : t ? t : "failed");

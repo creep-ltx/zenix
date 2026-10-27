@@ -123,7 +123,8 @@ cmp_ "... nothing saved yet" "$(V s s1)" -eq 0
 cmp_ "a second login (console 2): no new copy" "$(S s s2)" -eq "$(S s s1)"
 cmp_ "... sharing saves its sh" "$(V s s2)" -eq "$SK"
 cmp_ "four logins (consoles 1-4): still one copy" "$(S s s4)" -eq "$(S s s1)"
-cmp_ "... sharing saves three sessions' code" "$(V s s4)" -eq $((3 * SK))
+SK3=$(python3 -c 'import struct, sys; print(3 * struct.unpack(">I", open(sys.argv[1], "rb").read()[8:12])[0] // 1024)' $BD/sh.zx)
+cmp_ "... sharing saves three sessions' code" "$(V s s4)" -eq "$SK3"     # free rounds the sum, not each copy
 scount s s4 s4b "ps shows the shared code for each of the four shells ($SK KB)" 4 " +[0-9]+ +[0-9]+ +[0-9]+ +-?[0-9]+ [a-z]+ +[0-9]+ +$SK sh"
 scount s s4 s4b "... and no login process stays (DESIGN D18)" 0 ".* login"
 # the shells' parent is init (login handed each to it): ps's PPID column is init's pid

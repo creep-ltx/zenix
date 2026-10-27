@@ -41,8 +41,10 @@ static __attribute__((unused)) int seed_load(unsigned char *seed, int *flags)
     return 1;
 }
 
-/* a new seed from /dev/urandom into the file, synced: 0, or negative */
-static int seed_store(int flags)
+/* a new seed from /dev/urandom into the file (sync: and synced, as boot needs before it credits): 0, or negative.
+ * reboot passes 0: SYS_reboot syncs itself, each server at most 5 s, where a plain sync would wait for ever on a hung
+ * one */
+static int seed_store(int flags, int sync)
 {
     unsigned char b[SEED_FILE];
     memcpy(b, "ZRS1", 4);
@@ -63,7 +65,7 @@ static int seed_store(int flags)
     r = sys_write(fd, b, SEED_FILE) == SEED_FILE ? 0 : -EIO;
     sys_close(fd);
     memset(b, 0, sizeof b);
-    return r ? r : sys_sync();
+    return r ? r : sync ? sys_sync() : 0;
 }
 
 /* is the pool seeded (would /dev/random answer without waiting)? */

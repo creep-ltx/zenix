@@ -192,7 +192,7 @@ static void seed_start(int persistent)
         return;
     }
     int nf = seed_flags(seed_pool_ready(), ok, fl, persistent);
-    int wrote = seed_store(nf) == 0;
+    int wrote = seed_store(nf, 1) == 0;
     if (!wrote)
         say("boot: cannot rewrite " SEED_PATH "\n");
     seeded_file = wrote && nf;
@@ -218,7 +218,7 @@ static int wait_init(int pid, int persistent)
             p.events = POLLIN;
             p.revents = 0;
             if (sys_evwait(&p, 1, 6000) == 1) {         /* a minute at most, then a look at init */
-                if (seed_store(SEED_F_SEEDED) == 0)
+                if (seed_store(SEED_F_SEEDED, 1) == 0)
                     seeded_file = 1;
                 break;
             }
