@@ -8,7 +8,7 @@ section 3, "Updates"). The bundle and the manifest are frozen formats (CLAUDE.md
   mkzup.py pkg OUTDIR NAME VNUM VSTR [--group G] [--dep NAME:VNUM]... ENTRY...
         one package from explicit entries (the tests): f:MODE:UID:GID:SRC:/PATH (a file), c:... (a config file the
         owner may edit), l:TARGET:/PATH (a symbolic link), d:MODE:UID:GID:/PATH (a directory)
-  mkzup.py bundle OUT --kernel FILE [--version V --vstr S --date YYYYMMDD --channel C --min V] PKGDIR NAME...
+  mkzup.py bundle OUT --kernel FILE [--version V --vstr S --date YYYYMMDD --channel C (default test; release channels: testing, stable) --min V] PKGDIR NAME...
         a bundle: the kernel as boot/zenix and the named packages (each pkg/NAME.manifest + pkg/NAME.tgz); the
         version defaults to the packages' and must be the one the kernel image carries (its "ZVER" record)
   mkzup.py repack PKGDIR NAME /PATH=HOSTFILE...   rebuild package NAME with these files' contents (a new path is
@@ -221,7 +221,7 @@ def kernel_version(img):
     return None, None
 
 
-def make_bundle(out, kernel, pkgdir, names, vnum=None, vstr=None, date=None, channel="testing", minv=0, nocheck=False):
+def make_bundle(out, kernel, pkgdir, names, vnum=None, vstr=None, date=None, channel="test", minv=0, nocheck=False):
     parts = []
     kimg = open(kernel, "rb").read()
     parts.append((b"boot/zenix", kimg))
@@ -383,7 +383,7 @@ def main(a):
         if "kernel" not in opts or not rest:
             die("bundle OUT --kernel FILE PKGDIR NAME...")
         make_bundle(out, opts["kernel"], rest[0], rest[1:], int(opts["version"]) if "version" in opts else None,
-                    opts.get("vstr"), int(opts["date"]) if "date" in opts else None, opts.get("channel", "testing"),
+                    opts.get("vstr"), int(opts["date"]) if "date" in opts else None, opts.get("channel", "test"),
                     int(opts.get("min", 0)), "nocheck" in opts)
     elif len(a) == 2 and a[0] in ("check", "list"):
         try:
