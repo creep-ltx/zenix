@@ -111,6 +111,7 @@ unsigned long netd_turn(void)
     sys_check_timeouts();
     netd_in_timers = 0;
     netd_sock_turn();
+    netd_drv_turn();
     netd_if_turn();                 /* what the timers and the loopback sent */
     t = sys_timeouts_sleeptime();
     {

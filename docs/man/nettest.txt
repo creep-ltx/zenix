@@ -51,6 +51,9 @@ DESCRIPTION
     down      netd killed while a child waits in recv: the child gets
               ENETDOWN at once; the next socket starts a new netd that
               serves a new connection
+    drvperm   the drivers' system call (SYS_drv) is refused to a program
+              that is not netd's child, root included, and a raw
+              message to net shaped as a driver's transfer is refused
     giveup    netd killed until the kernel gives it up (five ends in a
               minute): then a socket says "network is down" at once
               (root's ifup -a brings it back: tools/netd-test.sh)

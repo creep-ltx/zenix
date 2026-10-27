@@ -182,14 +182,54 @@ int netd_route_default(unsigned long gw);           /* network order; 0 removes 
 int netd_route_get(unsigned long *gw, char name[NETD_IFNAME]);
 /* a new address (and netmask, 0: keep it) on an interface that is up (D19 6.1: ifconfig IFACE ADDRESS/PREFIX) */
 int netd_if_addr(const char *name, unsigned long addr, unsigned long mask);
-int netd_set_dns(const unsigned long *servers, int n);
+int netd_set_dns(const unsigned long *servers, int n);   /* resolv.conf's (they win over DHCP's) */
+void netd_dns_servers(unsigned long out[2]);        /* the name servers in use now (network order; 0: none) */
 struct netd_ifinfo {
     char name[NETD_IFNAME];
     unsigned long addr, mask, gateway;  /* network order */
     unsigned short mtu, up, link;
     unsigned long rx_frames, tx_frames, rx_bytes, tx_bytes, rx_bad, tx_drop;
+    unsigned char ether, dhcp;          /* a driver's Ethernet interface; its address from DHCP */
+    unsigned char hwaddr[6];
+    unsigned long lease;                /* seconds left of the DHCP lease (0: none yet) */
+    unsigned long dhcp_server;          /* network order */
+    unsigned long rx_drop;              /* frames received and dropped for want of memory */
 };
 int netd_if_info(int i, struct netd_ifinfo *out);   /* 0 for interface i, -ENOENT past the last */
+/* ---- drivers' interfaces (D19 2.3, 2.4; step 7): what the driver protocol (kernel/netproto.h NETDRV_*, adapted by
+ * netd's main program) carries, as plain arguments. A handle names a driver's interface from its attach on ---- */
+#define NETD_DRV_MAXBUF 32              /* = DRV_MAXBUF: receive buffers a driver may have */
+#define NETD_DRV_BATCH  16              /* = DRV_BATCH: entries of each kind in one transfer */
+struct netd_drvattach {
+    unsigned char mac[6];
+    unsigned mtu, nrx;                  /* 576..1500; 1..NETD_DRV_MAXBUF */
+    int dma, link;                      /* the buffers in the driver's DMA memory (dmamem, dmalen: room for nrx receive
+                                         * buffers and NETD_DRV_BATCH send buffers); the link is up */
+    void *dmamem;
+    unsigned long dmalen;
+};
+/* the driver of the stanza c attached: its interface comes up (static, or DHCP started). The buffers it is lent:
+ * *nbuf of *bufsize bytes at bufs[]. -> the handle, or -EEXIST, -EINVAL, -ENOSPC, -ENOMEM */
+int netd_drv_attach(const struct netd_ifcfg *c, const struct netd_drvattach *a, unsigned *bufsize, unsigned *nbuf,
+                    void **bufs);
+/* one transfer, in: a buffer filled with a frame (it is netd's then), a sent frame's tag, the link, the hardware's
+ * counts. A wrong number or length is refused (-EINVAL), counted and logged: it fails that frame, never netd */
+int netd_drv_rx(int h, unsigned num, unsigned len);
+int netd_drv_done(int h, unsigned tag);
+void netd_drv_link(int h, int up);
+void netd_drv_count(int h, unsigned long bad, unsigned long drop, unsigned long txerr);
+/* out: buffers given back (empty, the driver's again), frames to send (the oldest first) */
+int netd_drv_freed(int h, unsigned short *num, int max);
+struct netd_frame { unsigned short tag, npieces; struct { void *addr; unsigned long len; } piece[4]; };
+int netd_drv_tx(int h, struct netd_frame *f, int max);
+int netd_drv_pending(int h);            /* frames to send or buffers to give back: ring the driver's doorbell */
+void netd_drv_gone(int h);              /* the driver ended or was stopped: its interface goes; its buffers are never
+                                         * lent again (netd's own memory is freed when the stack lets go of the last) */
+void netd_drv_turn(void);               /* once a turn: a DHCP interface with its lease becomes the default route */
+/* the OS layer's memory for the buffers (not counted in lwIP's heap: the driver's fixed cost) */
+void *netd_os_alloc(unsigned long n);
+void netd_os_free(void *p);
+
 /* netstat (6.4): one row per socket and per lwIP connection; the frozen unetstat layout is the main line's */
 struct netd_connrow {
     unsigned char proto;                /* NETD_IPPROTO_TCP, _UDP, _ICMP */

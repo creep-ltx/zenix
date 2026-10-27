@@ -51,12 +51,21 @@ static void show(const struct unetif *e)
 {
     char a[16], m[16], g[16];
     ip(a, e->addr); ip(m, e->mask); ip(g, e->gw);
-    oprintf("%s: flags=<%s%s%s%s>  mtu %u\n", e->name, e->flags & NETIF_UP ? "UP" : "DOWN",
-            e->flags & NETIF_LOOPBACK ? ",LOOPBACK" : ",POINTOPOINT", e->flags & NETIF_LINK ? ",RUNNING" : "",
-            e->flags & NETIF_DEFAULT ? ",DEFAULT" : "", e->mtu);
+    oprintf("%s: flags=<%s%s%s%s%s>  mtu %u\n", e->name, e->flags & NETIF_UP ? "UP" : "DOWN",
+            e->flags & NETIF_LOOPBACK ? ",LOOPBACK" : e->flags & NETIF_ETHER ? ",BROADCAST" : ",POINTOPOINT",
+            e->flags & NETIF_LINK ? ",RUNNING" : "", e->flags & NETIF_DEFAULT ? ",DEFAULT" : "",
+            e->flags & NETIF_DHCP ? ",DHCP" : "", e->mtu);
+    if (e->flags & NETIF_ETHER)
+        oprintf("        ether %02x:%02x:%02x:%02x:%02x:%02x\n", e->hwaddr[0], e->hwaddr[1], e->hwaddr[2], e->hwaddr[3],
+                e->hwaddr[4], e->hwaddr[5]);
     oprintf("        inet %s  netmask %s", a, m);
     if (e->gw) oprintf("  gateway %s", g);
-    oprintf("\n        RX frames %u  bytes %u  bad %u\n", e->rx_frames, e->rx_bytes, e->rx_bad);
+    if (e->flags & NETIF_DHCP) {
+        ip(g, e->dhcp_server);
+        if (e->lease) oprintf("\n        lease %u s left, from %s", e->lease, g);
+        else oprintf("\n        no lease yet (DHCP asking)");
+    }
+    oprintf("\n        RX frames %u  bytes %u  bad %u  dropped %u\n", e->rx_frames, e->rx_bytes, e->rx_bad, e->rx_drop);
     oprintf("        TX frames %u  bytes %u  dropped %u\n", e->tx_frames, e->tx_bytes, e->tx_drop);
 }
 
@@ -86,11 +95,29 @@ static int list(int s, const char *only)
     return 0;
 }
 
+/* ifup IFACE of a driver's interface: its driver has started; wait (here, not in netd) until it has attached */
+static int wait_attached(int s, const char *name)
+{
+    static struct unetif rows[8];
+    struct usockreq r;
+    for (int t = 0; t < 100; t++) {
+        memset(&r, 0, sizeof r);
+        r.buf = (u32)rows;
+        r.len = sizeof rows;
+        r.flags = sizeof rows[0];
+        int n = sys_sock(SOCK_IFLIST | (u32)sizeof r << 16, s, &r);
+        for (int i = 0; i < n; i++) if (!strcmp(rows[i].name, name)) return 0;
+        sys_sleep(10);
+    }
+    fprintf(2, "%s: %s: its driver did not attach within 10 s (dmesg says why)\n", prog, name);
+    return 1;
+}
+
 static const char *why(int e)
 {
     if (e == -EEXIST) return "already up";
-    if (e == -ENOENT) return "not in /etc/network/interfaces (or not up)";
-    if (e == -ENODEV) return "its driver is not there yet (only slip, DESIGN D19)";
+    if (e == -ENOENT) return "not in /etc/network/interfaces (or not up), or no such driver in /sbin/net";
+    if (e == -ENODEV) return "no such driver";
     if (e == -EPERM) return "only root may change the network";
     if (e == -EACCES) return "/etc/network/interfaces must belong to root and be writable by root alone";
     return zstrerror(e);
@@ -116,6 +143,7 @@ static int updown(int argc, char **argv, int up)
         if (argv[i][0] == '-') continue;
         int r = ifset(s, argv[i], up ? NETIFREQ_UP : NETIFREQ_DOWN, 0, 0);
         if (r < 0) { fprintf(2, "%s: %s: %s\n", prog, argv[i], why(r)); bad = 1; }
+        else if (up && wait_attached(s, argv[i])) bad = 1;
     }
     sys_close(s);
     return bad;
@@ -178,6 +206,7 @@ int main(int argc, char **argv)
         fprintf(2, "ifconfig: %s: %s\n", name, why(r));
         return 1;
     }
+    if (up == 1 && !r && wait_attached(s, name)) return 1;
     if (have && (r = ifset(s, name, NETIFREQ_ADDR, a, m)) < 0) {
         fprintf(2, "ifconfig: %s: %s\n", name, why(r));
         return 1;

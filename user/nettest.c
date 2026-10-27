@@ -682,6 +682,30 @@ static void c_giveup(void)
            zstrerror(e2));
 }
 
+/* the drivers' system call is for the network server's children only, root included; a raw message that looks like a
+ * driver's block reaches netd only as the kernel's (D19 2.3, 9.1) */
+static void c_drvperm(void)
+{
+    static char buf[512];
+    static struct udrvxfer x;
+    memset(&x, 0, sizeof x);
+    x.size = sizeof x;
+    int a = sys_drv(DRV_HWINFO, (u32)buf, sizeof buf), b = sys_drv(DRV_CLAIM, 0xe90000, 0);
+    int c = sys_drv(DRV_XFER, (u32)&x, sizeof x), d = sys_drv(DRV_DMAMEM, 1, 4096);
+    int s = socket(AF_INET, SOCK_DGRAM, 0);                /* netd running */
+    struct umsg m;
+    memset(&m, 0, sizeof m);
+    m.type = NETDRV_XFER;
+    m.a[0] = (u32)sys_getpid();
+    m.a[1] = (u32)&x;
+    m.a[2] = sizeof x;
+    int port = sys_port_find("net"), e = port < 0 ? port : sys_call(port, &m);
+    if (s >= 0) sys_close(s);
+    result("drvperm", a == -EPERM && b == -EPERM && c == -EPERM && d == -EPERM && (e == -EACCES || e == -EPERM),
+           "SYS_drv from a program that is not netd's child: hardware table %d, claim %d, transfer %d, DMA memory %d; a "
+           "raw message to net shaped as a transfer: %d", a, b, c, d, e);
+}
+
 /* ---- through SLIP to the PC (tools/slip-test.sh; the PC's servers: tools/slip-host.py on 10.0.2.2) ---- */
 static int dial_to(u32 addr, int port)
 {
@@ -821,7 +845,7 @@ int main(int argc, char **argv)
     if (argc == 4 && !strcmp(argv[1], "_reader")) return reader_main(atoi(argv[2]), atoi(argv[3]));
     if (argc == 3 && !strcmp(argv[1], "_close")) return close_main(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "_sendpipe")) return sendpipe_main(atoi(argv[2]));
-    if (argc < 2) { fprintf(2, "usage: nettest CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n"); return 2; }
+    if (argc < 2) { fprintf(2, "usage: nettest CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup drvperm asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n"); return 2; }
     for (int i = 1; i < argc; i++) {
         const char *c = argv[i];
         if (!strcmp(c, "tcp")) c_tcp();
@@ -836,6 +860,7 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "sigpipe")) c_sigpipe();
         else if (!strcmp(c, "down")) c_down();
         else if (!strcmp(c, "giveup")) c_giveup();
+        else if (!strcmp(c, "drvperm")) c_drvperm();
         else if (!strcmp(c, "asm")) c_asm();
         else if (!strcmp(c, "hang")) c_hang();
         else if (!strcmp(c, "listen")) c_listen();

@@ -3,7 +3,8 @@
 Status: **design, revision 2 after two independent reviews (section 13); step 1 (section 3, zfsd out of the kernel
 image) built on branch zfout 2026-10-27; steps 0, 2 and 3 (msgping, random numbers, the kernel's socket layer with a
 test server) built on branch n023 2026-10-27; steps 4 and 5 (netd over the loopback; SLIP, the interfaces, ping) on branch n45
-2026-10-27 (section 14, "As built"); the rest not built.** Roadmap block 2, "Zenix
+2026-10-27; steps 6-8 (names, the driver protocol, the A2065) on branch n678 2026-10-27 (section 14, "As built");
+steps 9-11 not built.** Roadmap block 2, "Zenix
 reaches the world": the network, the CM4's Ethernet, TCP/IP as a server, DHCP, DNS, `ping`; telnet, the crypto
 library, ssh, HTTPS, NFS, remote control and `zpkg` come after it. A deep core change (a kernel file kind, new system
 calls, a message family, the way servers are loaded). The short version is DESIGN.md D19. Facts about today's code are
@@ -1067,6 +1068,72 @@ Tests: `tools/host/net-test.sh` (the search domain; a name the test resolver nev
 one -ENOENT); `tools/slip-test.sh` s through slirp's DNS: `host amiga.zenix.test`, `host amiga` (the search domain),
 `host localhost` (`/etc/hosts`), `host nothing.zenix.test` ("not found"), `host slow.zenix.test` (the PC's test
 server never answers: "no answer from the name servers"). Sizes: `host` 10,900 bytes; netd +200 bytes.
+
+### Step 7: the driver protocol (branch n678, 2026-10-27)
+
+Sections 2.3 and 2.4 as written: `kernel/drv.c` (`SYS_drv` 92), the blocks in `kernel/netproto.h`, netd's side in
+`net/netd/iface.c` (the frames and buffers: core, host-built) and `net/netd/main.c` (the processes, the doorbell, the
+supervision, the wire blocks), the drivers' shared code in `net/drv/drv.h` and the test driver `net/drv/fake.c`.
+Local choices the note left open:
+
+1. **The ops' arguments.** `DRV_CLAIM` takes the device's register base (GENET's base, a 64 KB window; or a Zorro
+   board's address and size from the board list; a RAM board is refused) and answers a claim number 1-4.
+   `DRV_DMAMEM (claim, bytes)`: one region a claim, at most 4 MB, cleared, owned by `0x80000100 + claim` (no pid, as
+   `SEG_OWNER`). `DRV_QUIESCE (claim, struct udrvquiesce *)`: up to 8 steps, each a write or a read-modify-write of 1,
+   2 or 4 bytes, aligned, inside the window (the interrupt check of 5.4 will add a test step to the same language).
+   `DRV_CACHE` takes `DRVC_CLEAN` or `DRVC_INVAL` in the op word's second byte; the invalidate is always a clean and
+   invalidate (Emu68's range opcode `0xF460 0x1800`, or `cpushl` every 16 bytes), so nothing is ever dropped unwritten;
+   on a machine without Emu68 it does nothing (Zenix keeps a 68k's data cache off). `DRV_HWINFO` copies at most the
+   caller's size of the table; `HWINFO_FIRST` 408 (the table today; it grows at its end from here: first from
+   `reserved[]`, then after `board[]`).
+2. **Who may call:** a child of the running `net` server (`svc_pid`); anyone else -EPERM, root too. When no `net`
+   server runs every call is -ECONNRESET, so an orphaned driver learns netd is gone as the note says (a new netd is
+   not its parent: -EPERM, which the drivers also take as "netd is gone").
+3. **The blocks** (frozen, first sizes `UDRVATTACH_FIRST` 180, `UDRVXFER_FIRST` 872): each says its own size, which must
+   equal the call's (`b`) and be at least the first size; the kernel checks the whole block is the driver's memory and
+   sends `NETDRV_ATTACH` 64 / `NETDRV_XFER` 65 with a[0] the driver's pid, a[1] the block, a[2] its size, as a call that
+   never starts a server (`SVC_NS_SKIP`); netd answers with `NETSRV_REPLY` (an unanswered call is -ECONNRESET).
+   `DRV_MAXBUF` 32 receive buffers, `DRV_BATCH` 16 entries of each kind a transfer, frames of up to 4 pieces.
+4. **Buffers:** 1,536 bytes each (64-byte lines, a 1,514-byte frame). Receive: zero copy into lwIP (a custom pbuf
+   whose free gives the buffer back) while at most half the buffers are held by the stack, else a copy into a pool
+   buffer and the buffer back at once; a DMA interface always copies (its buffers lie in the claim's region, which the
+   kernel frees when the driver ends: no frame in the stack may point there). Send: up to 4 pieces of netd's pbufs,
+   held (`pbuf_ref`) until their tag comes back, a longer chain copied into one; a DMA interface's frames are copied
+   into its 16 send buffers in the region (after the receive buffers). netd queues at most 32 frames a driver (16 for
+   DMA) and refuses the next (ERR_MEM, counted as dropped). Non-DMA buffers are a region of netd's own
+   (`sys_memalloc`), outside lwIP's capped heap: the driver's fixed cost, freed when the driver is gone and the stack
+   holds none.
+5. **Supervision:** the restart waits 0 s after the first end, 0 after the second, 1, 2 and 4 s after the next (D11's
+   "the start after the 2nd, 3rd and 4th end waits 1, 2 and 4 s"); the fifth end in 60 s gives the driver up until
+   `ifup` (which starts it with fresh counts). The driver gets the interface's name as its first argument and the
+   rest of the `driver` line after it. `ifdown` closes the doorbell (the driver stops its device and ends; the kernel
+   stops it anyway). `ifup IFACE` waits (in `ifconfig`, not in netd) up to 10 s for the driver to attach.
+6. **A wrong number from a driver** (a buffer it does not hold, a length over the buffer or under 14, a tag netd did not
+   give) fails that entry only; it is counted in the interface's bad frames and the first four a driver start are
+   logged ("netd: eth0: the driver gave a buffer that is not its own: 40: ignored").
+7. **DHCP's code** (section 10's step 6): lwIP's client on `inet dhcp` stanzas of drivers' interfaces. lwIP's own
+   handling of the name servers is off (`LWIP_DHCP_MAX_DNS_SERVERS` 0): option 6 is still asked for and reaches netd
+   through `LWIP_HOOK_DHCP_PARSE_OPTION`, and netd uses DHCP's servers only when `/etc/resolv.conf` names none (6.1:
+   nothing written behind the owner's back). A DHCP interface with its lease becomes the default route when none is.
+   `struct unetif` grows (`hwaddr` where `reserved` was, then past the first size `lease`, `dhcp_server`, `rx_drop`;
+   flags `NETIF_ETHER` 16, `NETIF_DHCP` 32) and `ifconfig` shows them.
+8. **The fake driver** is built (`build/drv-fake.zx`) but on no image: `tools/drv-test.sh` writes it to `/sbin/net/fake`
+   on its own image. Shipped drivers are the Makefile's `NETDRVS`, built as `drv-NAME` and installed as
+   `/sbin/net/NAME` on every full root image and in the base package.
+
+Sizes (*measured* 2026-10-27): `drv.o` 1,741 bytes of code and 624 of data (the note's estimate 0.8 KB: the checks of
+the quiesce steps, the cache loop and the log lines are the rest); **the kernel 150,536 -> 152,472 bytes** (26,728 left
+on the RAM floppy, 2,152 on the mount tests' floppy); netd +3.4 KB of code (the driver interfaces, DHCP's glue);
+`fake` 10,848 bytes. Tests: `tools/drv-test.sh` (FS-UAE, the stock A1200 with FS-UAE's A2065 board so a claim has a
+device: two fake drivers, one with DMA memory; ping through both; the DMA one's kernel checks: a second claim and a
+second region -EBUSY, a quiesce step outside the window -EINVAL, a cache call outside the region -EFAULT, another's
+claim -EPERM, a short hardware table -EINVAL, a transfer before the attach -ENOTCONN; `nettest drvperm`: `SYS_drv`
+-EPERM for root's own program, a raw message to `net` shaped as a transfer -EACCES; the bad driver's three wrong
+numbers logged and refused; a driver killed mid-ping, logged, started again; the DMA driver killed: "drv: claim of
+0xe90000 (pid N) released (the driver ended): 2 quiesce steps run, its DMA memory freed"; five ends: given up, `ifup
+eth0` brings it back; netd killed: the claims released ("the network server ended"), both drivers see the doorbell
+close and end, `ifup -a` brings everything back); `tools/host/net-test.sh` (lwIP's DHCP tests with the request list
+unchanged, netd's core built on the PC).
 
 ### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
 

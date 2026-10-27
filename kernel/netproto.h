@@ -121,13 +121,21 @@ struct unetif {
     unsigned short mtu, flags;  /* NETIF_* */
     u32 rx_frames, tx_frames, rx_bytes, tx_bytes, rx_bad, tx_drop;
     u32 dns[2];                 /* the name servers netd uses (the same in every row; 0: none) */
-    u32 reserved[2];
+    unsigned char hwaddr[6];    /* the MAC address (Ethernet; 0 for SLIP and the loopback) (D19 step 7, was reserved) */
+    unsigned short pad;
+    /* past the first size (D19 step 7; the caller's row size in flags): */
+    u32 lease;                  /* seconds left of a DHCP lease (0: none) */
+    u32 dhcp_server;            /* the DHCP server that gave it, network order */
+    u32 rx_drop;                /* frames received and dropped for want of memory */
+    u32 reserved[1];
 };
 #define UNETIF_FIRST 64
 #define NETIF_UP       1
 #define NETIF_LINK     2        /* the line is there (SLIP: the port is open) */
 #define NETIF_LOOPBACK 4
 #define NETIF_DEFAULT  8        /* the default route leaves through it */
+#define NETIF_ETHER   16        /* an Ethernet interface (a driver's, D19 step 7): it has hwaddr */
+#define NETIF_DHCP    32        /* its address comes from DHCP (inet dhcp) */
 
 /* SOCK_IFSET's request (frozen, first size UNETIFREQ_FIRST: len): root only */
 struct unetifreq {
@@ -152,3 +160,89 @@ struct uroute {
 #define ROUTE_GET 0
 #define ROUTE_ADD 1             /* root: the default route through gw */
 #define ROUTE_DEL 2             /* root: no default route */
+
+/* ---- the drivers (DESIGN D19 2.3, 2.4, 5; step 7): SYS_drv (op, a, b), only for a child of the running network
+ * server (-EPERM for anyone else; -ECONNRESET when no network server runs: an orphaned driver learns so), and the blocks the kernel forwards to "net" as NETDRV_* messages (a[0] the driver's pid, a[1] the block in
+ * the driver's memory, a[2] its size; a call that never starts a server: an orphaned driver gets -ECONNRESET).
+ * netd answers them with NETSRV_REPLY as it does the NET_* requests ---- */
+#define DRV_HWINFO   1          /* a: buffer, b: its size (0 = HWINFO_FIRST) -> bytes copied of the hardware table
+                                 * (kernel/hwinfo.h); -ENODEV without one */
+#define DRV_CLAIM    2          /* a: a device's register base the hardware table names (genet, or a board's address;
+                                 * never a RAM board) -> the claim (1..): the caller is its only owner; -EBUSY when
+                                 * someone holds it */
+#define DRV_DMAMEM   3          /* a: claim, b: bytes -> the address of the claim's DMA region (64-byte aligned, whole
+                                 * 64-byte lines, cleared, fast RAM when there is any); one region a claim. It
+                                 * belongs to the claim, not to a process: freed only when the claim ends */
+#define DRV_QUIESCE  4          /* a: claim, b: struct udrvquiesce * -> 0: the register writes that stop the device,
+                                 * run by the kernel when the driver ends and when the network server ends, before
+                                 * anything of either is freed (then the DMA region is freed and the claim ends) */
+#define DRV_CACHE    5          /* op | DRVC_* << 8, a: address, b: length, inside the caller's DMA region: the data
+                                 * cache written back (and dropped) over whole 64-byte lines. Nothing to do on a 68k
+                                 * (Zenix keeps the data cache off); on Emu68 the ARM's cache */
+#define DRV_ATTACH   6          /* a: struct udrvattach *, b: its size -> the interface number; netd fills the block */
+#define DRV_XFER     7          /* a: struct udrvxfer *, b: its size -> 0; netd reads and writes the block */
+#define DRVC_CLEAN   1          /* frames the device will read: written back */
+#define DRVC_INVAL   2          /* buffers the device wrote: written back and dropped (never dropped unwritten) */
+
+#define NETDRV_ATTACH 64        /* the kernel to netd: a driver's DRV_ATTACH */
+#define NETDRV_XFER   65        /* a driver's DRV_XFER */
+
+/* DRV_QUIESCE's program (frozen): at most DRV_QSTEPS steps, run in order, no jumps; every address inside the
+ * claim's register window, aligned to its size (1, 2 or 4 bytes) */
+#define DRV_QSTEPS 8
+struct udrvstep {
+    unsigned char op, size;     /* DRVS_*; 1, 2, 4 */
+    unsigned short pad;
+    u32 addr, mask, value;
+};
+#define DRVS_WRITE 1            /* *addr = value */
+#define DRVS_RMW   2            /* *addr = (*addr & ~mask) | value */
+struct udrvquiesce { u32 n; struct udrvstep step[DRV_QSTEPS]; };
+
+/* DRV_ATTACH's block (frozen, first size UDRVATTACH_FIRST; the caller's size in size and b). The driver says who it
+ * is; netd lends it its receive buffers (all empty, the driver's to fill) and answers with the interface number */
+#define DRV_MAXBUF 32
+struct udrvattach {
+    u32 size;                   /* this block's size (sizeof) */
+    char name[8];               /* the interface ("eth0": netd gives the name as the driver's first argument) */
+    unsigned char mac[6];       /* its hardware address */
+    unsigned short mtu;         /* the largest packet without the Ethernet header (1500) */
+    u32 flags;                  /* DRVA_* */
+    u32 nrx;                    /* receive buffers it wants (1..DRV_MAXBUF) */
+    u32 claim;                  /* DRVA_DMA: the claim whose DMA region (dma, dmalen) holds the buffers */
+    u32 dma, dmalen;
+    /* written by netd: */
+    u32 ifindex;                /* the interface number (also the call's answer) */
+    u32 bufsize;                /* every buffer's bytes */
+    u32 nbuf;                   /* buffers lent: buf[0..nbuf-1] */
+    u32 buf[DRV_MAXBUF];        /* their addresses (a buffer's number is its index here) */
+};
+#define UDRVATTACH_FIRST 180
+#define DRVA_DMA  1             /* the device reads and writes host memory: netd makes the buffers in the DMA region
+                                 * (nrx receive buffers, then DRV_BATCH send buffers) and copies every frame */
+#define DRVA_LINK 2             /* the link is up now */
+
+/* DRV_XFER's block (frozen, first size UDRVXFER_FIRST): one call a batch, never one a frame. In: the frames received
+ * (the buffer's number and length: the buffer is netd's from here), the frames sent (their tags), the link, the
+ * hardware's counts; out (netd writes): buffers given back (empty, the driver's again), frames to send (up to 4
+ * pieces each, in netd's memory or, with DRVA_DMA, one piece in a send buffer of the DMA region; a frame's memory is
+ * netd's until its tag comes back), and whether netd has more */
+#define DRV_BATCH 16
+struct udrvframe {
+    unsigned short tag, npieces;    /* the tag to give back in done[] when it is sent; 1..4 pieces */
+    u32 flags;                  /* none yet (a checksum request later) */
+    struct { u32 addr, len; } piece[4];
+};
+struct udrvxfer {
+    u32 size;                   /* this block's size (sizeof) */
+    u32 link;                   /* in: 1 the link is up, 0 down */
+    u32 nrx, ndone;             /* in: entries in rx[] and done[] */
+    u32 rx_bad, rx_drop, tx_err;    /* in: the hardware's counts since the last DRV_XFER (added up by netd) */
+    u32 nfree, ntx;             /* out: entries in freed[] and tx[] */
+    u32 more;                   /* out: 1 if netd has more to send or give back: call again without waiting */
+    struct { unsigned short num, len; u32 flags; } rx[DRV_BATCH];
+    unsigned short done[DRV_BATCH];
+    unsigned short freed[DRV_BATCH];
+    struct udrvframe tx[DRV_BATCH];
+};
+#define UDRVXFER_FIRST 872

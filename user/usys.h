@@ -222,3 +222,4 @@ static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 
 #define S_IFSOCK 0140000        /* fstat's type of a socket */
 static inline int sys_sock(u32 op, int fd, void *req) { return sys3(90, op, (u32)fd, (u32)req); }
 static inline int sys_netsrv(u32 op, u32 a, u32 b) { return sys3(91, op, a, b); }
+static inline int sys_drv(u32 op, u32 a, u32 b) { return sys3(92, op, a, b); }   /* DESIGN D19 step 7: the network's drivers (DRV_*, netproto.h) */

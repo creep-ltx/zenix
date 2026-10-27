@@ -162,6 +162,13 @@ pointers.
   level) bytes are lost and counted in `dmesg`, and TCP sends them again. At most 4 interfaces with the loopback;
   `/etc/network/interfaces` holds at most 4 stanzas (the rest reported); only the default route can be set
   (`route`); `ping` sends at most 1,400 data bytes, at most 5 a second for users.
+- The network's drivers (DESIGN D19 step 7, architecture.md section 11): 4 claims on the whole machine, one DMA region
+  a claim of at most 4 MB, a quiesce program of at most 8 steps (no reads, no tests, no jumps); a driver has at most
+  32 receive buffers of 1,536 bytes (frames of at most 1,514 bytes: an MTU of 576 to 1,500), at most 16 entries of
+  each kind in one transfer, a frame to send in at most 4 pieces; netd keeps at most 32 frames queued or out with a
+  driver (16 for a DMA one) and drops the next (TCP sends it again). Drivers are polled (no interrupts yet, D19 5.4).
+  A driver that ends 5 times in 60 s is given up until `ifup`; `ifup IFACE` waits at most 10 s for its driver to
+  attach. One search domain, used only for a name without a dot.
 - Random numbers (DESIGN D19 9.3, architecture.md section 3): a read or write of `/dev/random` or `/dev/urandom` moves
   at most 4,096 bytes (a short count, as Linux); `/dev/random` waits for 256 credited bits (on a fresh machine that
   is 256 key presses and releases, or the seed file at the next start); a sample ring of 32 entries (a full one drops

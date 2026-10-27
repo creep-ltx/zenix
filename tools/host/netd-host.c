@@ -109,6 +109,8 @@ long netd_os_write(int h, const void *buf, unsigned long n)
     return r;
 }
 void netd_os_close(int h) { close(h); }
+void *netd_os_alloc(unsigned long n) { return malloc(n); }
+void netd_os_free(void *p) { free(p); }
 static int config_mode;
 static char logbuf[4096];
 void netd_os_log(const char *line)

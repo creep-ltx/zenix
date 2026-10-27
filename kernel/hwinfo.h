@@ -55,3 +55,6 @@ struct hwinfo {
     unsigned int reserved[4];
     struct hwboard board[HW_MAXBOARDS];
 };
+/* User-visible since DESIGN D19 step 7 (SYS_drv DRV_HWINFO gives drivers a copy, at most the caller's size): it grows
+ * only at the end from here, new fields first from reserved[], then after board[]; its first size is frozen */
+#define HWINFO_FIRST 408

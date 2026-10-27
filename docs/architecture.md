@@ -639,10 +639,9 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 88 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-91, of which 39, 40 and 68 are unused; 92 is claimed for the
-network's drivers, DESIGN D19 step 7; the next free number is claimed in CLAUDE.md first): the network (`sock`,
-`netsrv`: section 11, "Sockets"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 89 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-92, of which 39, 40 and 68 are unused; the next free number is
+claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
@@ -1135,6 +1134,32 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   heap. It ignores SIGPIPE. 72,392 bytes of code, 13 KB of data, an 8 KB stack (99 KB in `ps` on the stock A1200
   after the loopback tests, 115 KB with SLIP up); `tools/netd-test.sh` runs it over the loopback in FS-UAE,
   `tools/slip-test.sh` over SLIP to `zenix-slirp`, `tools/host/net-test.sh` its core on the PC. libz's BSD calls are in `user/socket.h`.
+- **The network's drivers** (DESIGN D19 2.3, 2.4, step 7; `kernel/drv.c`, `kernel/netproto.h`): code that touches a
+  network card's registers is a user process, `/sbin/net/NAME IFACE [ARGS]` (`net/drv/NAME.c`), which netd starts as
+  its child for an `/etc/network/interfaces` stanza whose `driver` is not `slip`, with a pipe as its standard input:
+  the doorbell (netd writes a byte when it has frames to send or buffers to give back and has not rung since the
+  driver's last transfer; netd ignores SIGPIPE; POLLHUP tells the driver netd is gone). **`SYS_drv` (92)** is only for
+  a child of the running `net` server (-EPERM otherwise, root included; -ECONNRESET when none runs): `DRV_HWINFO` (a
+  copy of the hardware table, first size `HWINFO_FIRST` 408: user-visible now, it grows at its end), `DRV_CLAIM` (a
+  device the table names, GENET's base or a Zorro board's, never a RAM board: the only owner, a second claim -EBUSY;
+  4 claims), `DRV_DMAMEM` (one region a claim, 64-byte aligned, whole lines, at most 4 MB, owned by the claim: neither
+  netd's nor the driver's end frees it), `DRV_QUIESCE` (at most 8 register writes or read-modify-writes inside the
+  claimed window, aligned), `DRV_CACHE` (write back, or write back and drop, whole 64-byte lines of the caller's DMA
+  region: nothing on a 68k, whose data cache Zenix keeps off; Emu68's range opcodes with `HW_RANGEOPS`, else `cpushl`
+  per line; never a bare invalidate), and `DRV_ATTACH`/`DRV_XFER`, which the kernel checks (the block in the driver's
+  memory, its size at least the first size and saying so) and sends to `net` as `NETDRV_ATTACH` (64) and
+  `NETDRV_XFER` (65), kernel messages that never start a server (a[0] the driver's pid). **When a driver ends, and
+  when netd ends**, `proc_exit` first runs the claim's quiesce program, then frees its DMA region and ends the claim
+  ("drv: claim of ... released" in the log), before anything of either process is freed. netd answers only its own
+  children (its list of pids), checks every buffer number, length and tag (a wrong one fails that entry, counted and
+  logged, never netd), lends the driver its receive buffers (zero copy into lwIP while at most half are held by the
+  stack, else copied; always copied for a DMA interface, whose buffers lie in the DMA region), lends frames to send as
+  up to 4 pieces held until their tag comes back (or copied into a send buffer of the DMA region), one batch of up to
+  16 each way a call. netd supervises its drivers with D11's numbers (an end logged as "net: IFACE: /sbin/net/NAME
+  (pid N) ended, status S", the interface down, started again after 0, 0, 1, 2, 4 s, given up after 5 ends in 60 s
+  until `ifup`). DHCP (lwIP's client, no ARP probe) for an `inet dhcp` stanza; its name servers are used when
+  `/etc/resolv.conf` names none and are shown by `ifconfig` with the lease. 1,741 bytes of kernel code;
+  `tools/drv-test.sh` tests it in FS-UAE with the test driver `fake` (answers ARP and ICMP itself, test images only).
 - **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
   `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**
   shows console 1-10 (Linux: Alt+F1..); plain F-keys stay with the programs and send their escape codes; other

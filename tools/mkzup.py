@@ -180,6 +180,10 @@ def std_packages(build, uapps):
     # the servers that live on the disk (DESIGN D19: /sbin/zfsd, which mount starts for a ZenixFS volume; /sbin/netd,
     # which the kernel starts at the first socket call)
     base += [("d", 0o755, 0, 0, None, "/sbin")] + [("f", 0o755, 0, 0, zx(p), "/sbin/" + p) for p in BASE_SBIN]
+    # the network's drivers (DESIGN D19 step 7: the Makefile's NETDRVS, built as drv-NAME), /sbin/net/NAME
+    drvs = os.environ.get("NETDRVS", "").split()
+    if drvs:
+        base += [("d", 0o755, 0, 0, None, "/sbin/net")] + [("f", 0o755, 0, 0, zx("drv-" + d), "/sbin/net/" + d) for d in drvs]
     base += [("d", 0o755, 0, 0, None, d) for d in ("/usr", "/usr/share", "/usr/share/licenses")]
     base += [("f", 0o644, 0, 0, os.path.join(ROOT, f), "/usr/share/licenses/" + n) for f, n in LICENSES]
     base += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", c), "/etc/" + c) for c in BASE_CONFIG]

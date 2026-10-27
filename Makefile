@@ -39,7 +39,7 @@ UDIAG   ?=
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch msgpingd msgping socktestd socktest bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
@@ -74,10 +74,16 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4). Not commands: no page.
 SBINAPPS := zfsd netd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
+# the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
+# net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
+# TESTDRVS only built: the driver protocol's test driver, which tools/drv-test.sh puts on its own image
+NETDRVS :=
+TESTDRVS := fake
+NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 # programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
 
-all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf
+all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf $(TESTDRVS:%=$(BUILD)/drv-%.zx)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -162,6 +168,8 @@ KOPT_signal := -Os
 KOPT_random := -Os
 # DESIGN D19 4.1-4.3: the socket layer (the time goes to the network server): -Os in its own file
 KOPT_sock := -Os
+# DESIGN D19 step 7: the drivers' system call (claims, DMA memory, quiesce, the blocks to netd): cold, -Os
+KOPT_drv := -Os
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
@@ -362,6 +370,10 @@ $(BUILD)/netd.uelf: $(NETDOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 $(BUILD)/nettest.uelf: $(BUILD)/nettest.uo $(BUILD)/np-m68k.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/nettest.uo $(BUILD)/np-m68k.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/nettest.uo $(BUILD)/netstat.uo $(BUILD)/ifconfig.uo $(BUILD)/route.uo $(BUILD)/ping.uo $(BUILD)/host.uo: user/socket.h kernel/netproto.h
+$(BUILD)/drv-%.uo: net/drv/%.c net/drv/drv.h kernel/netproto.h kernel/hwinfo.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+# a driver's frames are its stack's few hundred bytes (the transfer block is static): 8 KB
+STACK_drv-fake := 8192
 # netd's stack: lwIP's deepest chain (a segment in, its answer out) and the log's formatting (D19 7.3: 8 KB)
 STACK_netd := 8192
 
@@ -408,25 +420,25 @@ $(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
 # build/pkg/NAME.manifest + NAME.tgz for the standard packages (tools/mkzup.py says which files each holds); the full
 # root images get their manifests in /var/lib/zpkg (tools/mkroot.sh), so the first update knows what is installed.
 packages: $(BUILD)/pkg/list
-$(BUILD)/pkg/list: $(USERZX) $(SBINZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
-	python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
+$(BUILD)/pkg/list: $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the bundle: the kernel and every package (copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
 bundle: $(BUILD)/zenix-update.zup
 $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py
 	python3 tools/mkzup.py bundle $@ --kernel $(BUILD)/kernel.bin $(BUILD)/pkg $$(cat $(BUILD)/pkg/list)
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
-$(BUILD)/zenix.hdf: $(USERZX) $(SBINZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
-	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS)"
+$(BUILD)/zenix.hdf: $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)"
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
 $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
 	python3 tools/mkrdb.py $< $@
 
 # the same root disk with ZenixFS as the root filesystem instead of ext2 (needs the host tool: make -C zenixfs build/zenixfs-tool)
-$(BUILD)/zenix-zroot.hdf: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot-zenixfs.sh tools/mkrdb.py tools/mkman.py $(wildcard zenixfs/*.c zenixfs/*.h zenixfs/tools/*.c)
+$(BUILD)/zenix-zroot.hdf: $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs -type f) tools/mkroot-zenixfs.sh tools/mkrdb.py tools/mkman.py $(wildcard zenixfs/*.c zenixfs/*.h zenixfs/tools/*.c)
 	make -s -C zenixfs build/zenixfs-tool
-	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS)" 8
+	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 8
 
 # ---- booting without a floppy (zenixboot; docs/how-it-works.md, docs/pi-first-boot.md) ----
 # The AmigaDOS boot volume Kickstart starts from: S/Startup-Sequence (one line), zenixboot, the kernel as "zenix".
@@ -441,8 +453,8 @@ $(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkca
 	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
 # the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
 # ext2 root with every program (written to a card by tools/write-card.sh)
-$(BUILD)/root-card.img: $(USERZX) $(SBINZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
-	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS)" 512M 8192
+$(BUILD)/root-card.img: $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 512M 8192
 $(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
 	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img
 

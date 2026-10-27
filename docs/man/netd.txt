@@ -46,6 +46,21 @@ DESCRIPTION
     The files are never read for a request other than ifup's (a floppy
     read would stall the network).
 
+    Network cards are run by drivers: small programs in /sbin/net that
+    netd starts for a stanza of /etc/network/interfaces whose "driver"
+    is not slip (/sbin/net/NAME IFACE ARGS), as its own children. A
+    driver claims its card, borrows netd's buffers and moves frames in
+    batches; netd rings it (a byte on a pipe) when it has work. When a
+    driver ends, netd logs it ("net: eth0: /sbin/net/a2065 (pid N)
+    ended, status S"), takes the interface down and starts the driver
+    again (after 0, 0, 1, 2, 4 seconds); the fifth end within a minute
+    gives the driver up until ifup. The kernel stops the card (the
+    driver's quiesce program) whenever a driver or netd ends, before
+    any of their memory is freed ("drv: claim of ... released" in the
+    log). An "inet dhcp" stanza asks a DHCP server for its address,
+    netmask, gateway and name servers; DHCP's name servers are used
+    only when /etc/resolv.conf names none.
+
     When netd ends (a crash, a kill), every socket of it fails at once
     with "network is down" (ENETDOWN), and a program waiting on one
     wakes up; the next socket call starts a new netd. Connections are
@@ -59,13 +74,16 @@ FILES
                              an address and its names a line
     /etc/resolv.conf         name servers: "nameserver 10.0.2.3" lines
     /etc/network/interfaces  the interfaces (ifconfig(8))
+    /sbin/net/NAME           the drivers (a2065(4))
     /usr/share/licenses/lwIP lwIP's licence
 
 NOTES
     No IPv6, no firewall, no raw IP sockets (SOCK_RAW: "protocol not
     supported"); ICMP sockets send echo requests only. netd runs at
     nice 0 (not -10 as the disk servers): a flood from the network
-    cannot starve the shells. Its log lines go to the kernel log.
+    cannot starve the shells. Its log lines go to the kernel log, and
+    so do its drivers'. Drivers are polled (no interrupts yet); no ARP
+    probe of a DHCP address.
 
 SEE ALSO
     ifconfig(8), route(8), ping(1), netstat(1), nettest(1), boot(8)

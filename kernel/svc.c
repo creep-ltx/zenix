@@ -413,6 +413,14 @@ int svc_is(const char *name)
     return i >= 0 && eq(ports[i].name, name);
 }
 
+int svc_pid(const char *name)
+{
+    for (int i = 0; i < NSVC; i++)
+        if (svcs[i].state == SV_RUNNING && ports[i].used && eq(ports[i].name, name))
+            return svcs[i].pid;
+    return 0;
+}
+
 /* SVC_SAVE / SVC_LOAD: the small table a server leaves for its next start (diskd's slots and claims, D11 5.4). Only
  * the process the kernel started for an entry; the table is kept while the entry exists. */
 long svc_data(u32 op, void *buf, u32 len)

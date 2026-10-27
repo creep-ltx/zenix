@@ -46,6 +46,9 @@ long netd_os_write(int h, const void *buf, unsigned long n)
     return r == -EAGAIN || r == -EINTR ? 0 : r;
 }
 void netd_os_close(int h) { sys_close(h); }
+/* a driver's buffers: a region of their own (freed whole when the interface and the stack are done with them) */
+void *netd_os_alloc(unsigned long n) { return sys_memalloc((u32)n); }
+void netd_os_free(void *p) { sys_memfree(p); }
 
 /* ---- netd's heap (net/port/port.c counts and caps it): first fit in a few regions of its own, each a quarter of the
  * limit (at least 8 KB), taken when needed: libz's malloc would round every block up to a power of two and grow in
@@ -147,6 +150,206 @@ static void reseed(const char *dev)
     last_seed = sys_ticks();
 }
 
+/* ---- drivers (D19 2.3): each a child of netd, /sbin/net/NAME IFACE [ARGS], with a pipe as its standard input: the
+ * doorbell (one byte when netd has work for it and has not rung since its last DRV_XFER; netd ignores SIGPIPE, and
+ * the driver takes POLLHUP on the pipe as netd's end). netd supervises them as init does a console's login, with
+ * D11's numbers: an end is logged, the interface goes down, the driver starts again after 0, 0, 1, 2, 4 s, and the
+ * fifth end in 60 s gives it up until ifup ---- */
+#define NDRV NETD_IFMAX
+#define DRV_WINDOW 6000u                /* ends are counted in 60 s (ticks) */
+static struct drv {
+    int used;                           /* a stanza with a driver other than slip, brought up */
+    struct netd_ifcfg cfg;
+    int pid;                            /* the running driver, 0: none */
+    int bell, rung;                     /* the doorbell's write end; rung since the driver's last DRV_XFER */
+    int h;                              /* its interface (netd_drv_attach), -1 before the attach */
+    int ends, givenup, stopping;
+    u32 win, start_at;                  /* the 60 s window; when to start it again (0: not waiting) */
+} drvs[NDRV];
+static volatile int child_ended;
+static void on_child(int sig) { (void)sig; child_ended = 1; }
+
+static struct drv *drv_named(const char *name)
+{
+    for (int i = 0; i < NDRV; i++) if (drvs[i].used && !strcmp(drvs[i].cfg.name, name)) return &drvs[i];
+    return 0;
+}
+static struct drv *drv_of_pid(int pid)
+{
+    for (int i = 0; i < NDRV; i++) if (drvs[i].used && drvs[i].pid == pid && pid > 0) return &drvs[i];
+    return 0;
+}
+static int drv_spawn(struct drv *d)
+{
+    char path[48], args[64], *argv[8];
+    int p[2], n = 0;
+    snprintf(path, sizeof path, "/sbin/net/%s", d->cfg.driver);
+    strncpy(args, d->cfg.args, sizeof args - 1);
+    args[sizeof args - 1] = 0;
+    argv[n++] = path;
+    argv[n++] = d->cfg.name;
+    for (char *w = args; *w && n < 7;) {        /* the rest of the driver line, word by word */
+        while (*w == ' ') *w++ = 0;
+        if (!*w) break;
+        argv[n++] = w;
+        while (*w && *w != ' ') w++;
+    }
+    argv[n] = 0;
+    if (sys_pipe(p) < 0) return -EMFILE;
+    int io[3] = { p[0], 1, 2 };                 /* its output is netd's: the kernel log */
+    int pid = sys_spawn(path, argv, io);
+    sys_close(p[0]);
+    if (pid < 0) { sys_close(p[1]); return pid; }
+    d->pid = pid;
+    d->bell = p[1];
+    d->rung = 0;
+    d->h = -1;
+    d->start_at = 0;
+    printf("net: %s: started %s (pid %d)\n", d->cfg.name, path, pid);
+    return 0;
+}
+/* ifup of a stanza with a driver: its process starts; the interface appears when it attaches */
+static long drv_up(const struct netd_ifcfg *c)
+{
+    struct drv *d = drv_named(c->name);
+    if (strchr(c->driver, '/') || !c->driver[0]) return -EINVAL;   /* NAME means /sbin/net/NAME (6.1) */
+    if (d && (d->pid || d->start_at) && !d->givenup) return -EEXIST;
+    if (!d)
+        for (int i = 0; i < NDRV && !d; i++) if (!drvs[i].used) d = &drvs[i];
+    if (!d) return -ENOSPC;
+    memset(d, 0, sizeof *d);
+    d->used = 1;
+    d->cfg = *c;
+    d->h = -1;
+    long r = drv_spawn(d);
+    if (r < 0) d->used = 0;
+    return r;
+}
+/* the driver's interface goes and the driver stops: its doorbell closes (POLLHUP: it stops its device and ends; the
+ * kernel stops the device anyway when it ends, D19 2.4) */
+static void drv_down(struct drv *d)
+{
+    if (d->h >= 0) netd_drv_gone(d->h);
+    d->h = -1;
+    if (d->bell > 0) sys_close(d->bell);
+    d->bell = 0;
+    d->stopping = d->pid != 0;
+    d->start_at = 0;
+    if (!d->pid) d->used = 0;
+}
+/* SIGCHLD came: which drivers ended (the handler only sets the flag, D19 2.3) */
+static void drv_reap(void)
+{
+    child_ended = 0;
+    for (int i = 0; i < NDRV; i++) {
+        struct drv *d = &drvs[i];
+        if (!d->used || !d->pid) continue;
+        int st = sys_waitnb(d->pid);
+        if (st == -2) continue;
+        printf("net: %s: /sbin/net/%s (pid %d) ended, status %d\n", d->cfg.name, d->cfg.driver, d->pid, st);
+        d->pid = 0;
+        if (d->h >= 0) netd_drv_gone(d->h);
+        d->h = -1;
+        if (d->bell > 0) sys_close(d->bell);
+        d->bell = 0;
+        if (d->stopping) { d->used = 0; continue; }
+        u32 now = sys_ticks();
+        if (!d->ends || now - d->win >= DRV_WINDOW) { d->win = now; d->ends = 0; }
+        if (++d->ends >= 5) {
+            printf("net: %s: /sbin/net/%s given up after 5 ends in 60 s (ifup %s starts it again)\n", d->cfg.name,
+                   d->cfg.driver, d->cfg.name);
+            d->givenup = 1;
+            continue;
+        }
+        u32 back = d->ends >= 2 ? 100u << (d->ends - 2) : 0;
+        d->start_at = (now + back) | 1;
+        if (back) printf("net: %s: start %d in %u s\n", d->cfg.name, d->ends + 1, back / 100);
+    }
+}
+/* drivers due to start again; the ticks until the next one (0x7fffffff: none) */
+static u32 drv_starts(void)
+{
+    u32 now = sys_ticks(), next = 0x7fffffff;
+    for (int i = 0; i < NDRV; i++) {
+        struct drv *d = &drvs[i];
+        if (!d->used || !d->start_at) continue;
+        u32 left = d->start_at - now;
+        if ((int)left <= 0) {
+            d->start_at = 0;
+            if (drv_spawn(d) < 0) {
+                printf("net: %s: cannot start /sbin/net/%s\n", d->cfg.name, d->cfg.driver);
+                d->used = 0;
+            }
+        } else if (left < next) next = left;
+    }
+    return next;
+}
+static void drv_bells(void)
+{
+    for (int i = 0; i < NDRV; i++) {
+        struct drv *d = &drvs[i];
+        if (d->used && d->pid && d->h >= 0 && !d->rung && d->bell > 0 && netd_drv_pending(d->h)) {
+            sys_write(d->bell, "!", 1);         /* never blocks: at most a byte or two in the pipe */
+            d->rung = 1;
+        }
+    }
+}
+
+/* NETDRV_ATTACH: the driver of one of netd's stanzas says who it is (the kernel checked the block's place and size) */
+static long do_attach(struct umsg *m)
+{
+    struct drv *d = drv_of_pid((int)m->a[0]);
+    struct udrvattach *a = (struct udrvattach *)m->a[1];
+    struct netd_drvattach na;
+    void *bufs[NETD_DRV_MAXBUF];
+    unsigned bs, nb;
+    if (!d) return -EACCES;                     /* not one of netd's drivers (D19 9.1) */
+    if (d->h >= 0) return -EEXIST;
+    if (strncmp(a->name, d->cfg.name, sizeof a->name)) return -EINVAL;
+    memset(&na, 0, sizeof na);
+    memcpy(na.mac, a->mac, 6);
+    na.mtu = a->mtu;
+    na.nrx = a->nrx;
+    na.dma = (a->flags & DRVA_DMA) != 0;
+    na.link = (a->flags & DRVA_LINK) != 0;
+    na.dmamem = (void *)a->dma;
+    na.dmalen = a->dmalen;
+    int h = netd_drv_attach(&d->cfg, &na, &bs, &nb, bufs);
+    if (h < 0) return h;
+    d->h = h;                                   /* a good start does not clear the end count: the window does (D11) */
+    a->ifindex = (u32)h + 1;
+    a->bufsize = bs;
+    a->nbuf = nb;
+    for (u32 k = 0; k < nb; k++) a->buf[k] = (u32)bufs[k];
+    return (long)a->ifindex;
+}
+/* NETDRV_XFER: one batch each way; every number in it is checked by the core (a wrong one fails that entry) */
+static long do_xfer(struct umsg *m)
+{
+    struct drv *d = drv_of_pid((int)m->a[0]);
+    struct udrvxfer *x = (struct udrvxfer *)m->a[1];
+    static struct netd_frame fr[DRV_BATCH];
+    if (!d) return -EACCES;
+    if (d->h < 0) return -ENOTCONN;
+    if (x->nrx > DRV_BATCH || x->ndone > DRV_BATCH) return -EINVAL;
+    d->rung = 0;
+    netd_drv_link(d->h, x->link != 0);
+    netd_drv_count(d->h, x->rx_bad, x->rx_drop, x->tx_err);
+    for (u32 k = 0; k < x->ndone; k++) netd_drv_done(d->h, x->done[k]);
+    for (u32 k = 0; k < x->nrx; k++) netd_drv_rx(d->h, x->rx[k].num, x->rx[k].len);
+    x->nfree = (u32)netd_drv_freed(d->h, x->freed, DRV_BATCH);
+    x->ntx = (u32)netd_drv_tx(d->h, fr, DRV_BATCH);
+    for (u32 k = 0; k < x->ntx; k++) {
+        struct udrvframe *o = &x->tx[k];
+        memset(o, 0, sizeof *o);
+        o->tag = fr[k].tag;
+        o->npieces = fr[k].npieces;
+        for (int j = 0; j < fr[k].npieces; j++) { o->piece[j].addr = (u32)fr[k].piece[j].addr; o->piece[j].len = (u32)fr[k].piece[j].len; }
+    }
+    x->more = (u32)netd_drv_pending(d->h);
+    return 0;
+}
+
 /* ---- the configuration files (D19 6.1): read at the start (and on a reload), never per request ---- */
 #define CONF_MAX 16384
 static char *slurp(const char *path, unsigned long *len)
@@ -201,7 +404,7 @@ static long if_up(const char *name)
     for (int i = 0; i < conf.nifs; i++) {
         struct netd_ifcfg *c = &conf.ifs[i];
         if (name[0] ? strcmp(c->name, name) : !c->is_auto) continue;
-        e = netd_if_up(c);
+        e = strcmp(c->driver, "slip") ? drv_up(c) : netd_if_up(c);
         if (e < 0 && !(e == -EEXIST && !name[0])) {
             printf("netd: %s would not come up: %s\n", c->name, zstrerror((int)e));
             if (!r) r = e;
@@ -213,7 +416,12 @@ static long if_up(const char *name)
 static long if_down(const char *name)
 {
     struct netd_ifinfo f;
-    if (name[0]) return netd_if_down(name);
+    struct drv *d;
+    if (name[0]) {
+        if ((d = drv_named(name)) && (d->pid || d->start_at || d->givenup)) { drv_down(d); return 0; }
+        return netd_if_down(name);
+    }
+    for (int i = 0; i < NDRV; i++) if (drvs[i].used && !drvs[i].stopping) drv_down(&drvs[i]);
     for (int i = 0; netd_if_info(i, &f) == 0;)
         if (strcmp(f.name, "lo") && netd_if_down(f.name) == 0) i = 0;    /* the list changed: from the start */
         else i++;
@@ -245,7 +453,9 @@ static long do_iflist(struct netreq *q)
     struct netd_ifinfo f;
     unsigned long gw;
     char dn[NETD_IFNAME];
+    unsigned long dns_now[2];
     if (rs < UNETIF_FIRST || rs > 4096) return -EINVAL;
+    netd_dns_servers(dns_now);
     netd_route_get(&gw, dn);
     for (int i = 0; (n + 1) * rs <= q->len && netd_if_info(i, &f) == 0; i++, n++) {
         struct unetif u;
@@ -261,8 +471,13 @@ static long do_iflist(struct netreq *q)
         u.rx_frames = f.rx_frames; u.tx_frames = f.tx_frames;
         u.rx_bytes = f.rx_bytes; u.tx_bytes = f.tx_bytes;
         u.rx_bad = f.rx_bad; u.tx_drop = f.tx_drop;
-        u.dns[0] = conf.ndns > 0 ? conf.dns[0] : 0;
-        u.dns[1] = conf.ndns > 1 ? conf.dns[1] : 0;
+        u.flags |= (unsigned short)((f.ether ? NETIF_ETHER : 0) | (f.dhcp ? NETIF_DHCP : 0));
+        u.dns[0] = dns_now[0];
+        u.dns[1] = dns_now[1];
+        memcpy(u.hwaddr, f.hwaddr, 6);
+        u.lease = f.lease;
+        u.dhcp_server = f.dhcp_server;
+        u.rx_drop = f.rx_drop;
         memset(o, 0, rs);
         memcpy(o, &u, rs < sizeof u ? rs : sizeof u);
     }
@@ -327,6 +542,8 @@ static long do_netstat(struct netreq *q)
  * than the lengths the kernel checked (netreq's len, alen, vlen) */
 static long serve(struct umsg *m)
 {
+    if (m->type == NETDRV_ATTACH) return do_attach(m);
+    if (m->type == NETDRV_XFER) return do_xfer(m);
     struct netreq *q = (struct netreq *)m->a[1];
     struct usockreq *r = &q->r;
     unsigned i = NAME_IDX(m->a[0]), g = NAME_GEN(m->a[0]), al = q->alen;
@@ -407,7 +624,8 @@ static void answer(struct umsg *m)
         return;
     }
     r = serve(m);
-    if (m->type == SOCK_SOCKET) b = netd_bits(NAME_IDX(m->a[0]), NAME_GEN(m->a[0]));
+    if (m->type >= NETDRV_ATTACH) b = 0;        /* a driver's block: no socket */
+    else if (m->type == SOCK_SOCKET) b = netd_bits(NAME_IDX(m->a[0]), NAME_GEN(m->a[0]));
     else {
         b = m->type == NET_CLOSE ? 0 : netd_bits(NAME_IDX(m->a[0]), NAME_GEN(m->a[0]));
         if (m->type == SOCK_ACCEPT && r >= 0) {
@@ -439,6 +657,7 @@ int main(void)
     struct netd_limits lim;
     unsigned char s[48];
     signal(SIGPIPE, SIG_IGN);                   /* a dead driver's pipe must not end netd (D19 2.3) */
+    signal(SIGCHLD, on_child);                  /* a driver ended: the handler only sets a flag */
     port = sys_port_create("net");              /* the port first: the kernel's start deadline (D19 6.3) */
     if (port < 0) {
         printf("netd: port net: %s\n", zstrerror(port));
@@ -466,6 +685,10 @@ int main(void)
            prof == NETD_PROFILE_LARGE ? "large" : "small", (u32)(lim.heap / 1024));
     for (;;) {
         unsigned long ms = netd_turn();
+        if (child_ended) drv_reap();
+        u32 dn = drv_starts();
+        if (dn != 0x7fffffff && ms > dn * 10) ms = dn * 10;
+        drv_bells();
         push();
         struct pollfd pf[2 + NETD_IFMAX];
         int h[NETD_IFMAX], ww[NETD_IFMAX], nh = netd_wait_handles(h, ww, NETD_IFMAX), np = 0;
