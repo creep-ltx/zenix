@@ -45,7 +45,7 @@ zenix/
 | Input | `kbd.c` (keyboard, keymaps, console keys), `input.c` (mouse and joystick) |
 | Disks | `blk.c` (picks the disk), `ide.c` (Gayle and A4000 IDE), `emmc.c` (the Pi's SD card), `a3000.c` (A3000 SCSI), `floppy.c` |
 | Other hardware | `serial.c` (serial port, kernel log, `/dev/ttyS0`), `rtc.c` (battery clock), `audio.c` (the bell) |
-| Shared definitions | `kernel.h` (system call numbers, limits), `fsproto.h` and `diskproto.h` (the server protocols), `hw.h`, `hwinfo.h`, `diag.h` (boot colours) |
+| Shared definitions | `kernel.h` (system call numbers, limits), `clock.h` (the wall clock behind `SYS_time`), `fsproto.h` and `diskproto.h` (the server protocols), `hw.h`, `hwinfo.h`, `diag.h` (boot colours) |
 | Built-in servers | `embed.S` puts `diskd`, `fsd` and `boot` inside the kernel image (and `zfsd` in the test-only `kernel-zfs.bin`; the shipped system has it as `/sbin/zfsd`, DESIGN D19) |
 
 ## user/: programs and servers

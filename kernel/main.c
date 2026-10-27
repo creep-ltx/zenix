@@ -7,7 +7,7 @@
 
 static u32 vector_table[256] __attribute__((aligned(4)));
 volatile u32 ticks;
-u32 time_base;                  /* seconds since 1970 at tick 0: set by date -s (an RTC will set it at boot) */
+struct wclock wclock;           /* the wall clock (clock.h): the battery clock at boot, date -s; counted by the tick */
 
 void *memset(void *d, int c, unsigned long n)
 {
@@ -77,7 +77,7 @@ static int panic_printing, panic_noscreen;
 static void panic_begin(void)
 {
     ints_off();
-    serdev_close();                     /* the panic text goes on the wire also while a program has /dev/ttyS0 (A10) */
+    serdev_drop();                      /* the panic text goes on the wire also while a program has /dev/ttyS0 (A10) */
     klog_set_reason(KLOG_END_PANIC);
     if (panic_printing) {
         klog_mirror_off();
@@ -240,6 +240,7 @@ void irq2_c(u32 *rb)
         kbd_isr();                      /* only queues the code */
     if (icr & 1) {
         ticks++;
+        wclock_tick(&wclock);
         kbd_tick();
         audio_tick();
         input_poll();
@@ -384,6 +385,9 @@ static const char *cpu_name(u16 attn)
 
 void kmain(struct bootinfo *bi)
 {
+#ifdef DIAG_TICKS0
+    ticks = DIAG_TICKS0;                /* test builds (tools/time-test.sh): the tick count starts near its wrap */
+#endif
     klog_init(bi);                      /* before anything prints: the previous boot's log is read from there */
     diag_stage(6, DIAG_GREEN);
     serial_init();
@@ -443,7 +447,7 @@ void kmain(struct bootinfo *bi)
     klog_show_prev();                           /* how the previous boot ended (A12), on the screen if it is up */
     diag_stage(DIAG_DISPLAY_UP, 0);
 
-    { u32 t = rtc_read(); if (t) time_base = t - ticks / 100; }
+    { u32 t = rtc_read(); if (t) wclock_set(&wclock, t); }      /* interrupts are still off here */
     if (blk_init() && !bi->ram_size)
         panic("no disk and no ramdisk");
     proc_init();
@@ -474,16 +478,38 @@ void kmain(struct bootinfo *bi)
     }
 }
 
+/* Overlapping copies (the console's grid on every scroll: three moves of 31 rows of 80 bytes). Both ends 4-aligned
+ * (the distance then a multiple of 4): long words, a quarter of the bus accesses of a byte loop, which on a machine
+ * without fast RAM is most of a scroll's time (D20 section 6's As built); otherwise bytes */
 void *memmove(void *d, const void *s, unsigned long n)
 {
     u8 *p = d;
     const u8 *q = s;
+    int lw = n >= 8 && !(((u32)p | (u32)q) & 3);
     if (p < q) {
+        if (lw) {
+            u32 *pl = (u32 *)p;
+            const u32 *ql = (const u32 *)q;
+            for (unsigned long k = n >> 2; k; k--)
+                *pl++ = *ql++;
+            p = (u8 *)pl;
+            q = (const u8 *)ql;
+            n &= 3;
+        }
         while (n--)
             *p++ = *q++;
-    } else {
+    } else if (p != q) {
         p += n;
         q += n;
+        if (lw) {
+            for (unsigned long k = n & 3; k; k--)       /* the tail first: both ends have the same offset in a long */
+                *--p = *--q;
+            u32 *pl = (u32 *)p;
+            const u32 *ql = (const u32 *)q;
+            for (unsigned long k = n >> 2; k; k--)
+                *--pl = *--ql;
+            return d;
+        }
         while (n--)
             *--p = *--q;
     }

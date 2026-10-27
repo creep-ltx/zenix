@@ -211,6 +211,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   the caller's own in its foreground, or root's) and the errors -EBADF, -ENOTTY, -EPERM, -ENODEV, -EFAULT, -EINVAL,
   -ENOMEM; font and rules dropped when their last setter ends, kept by `ESC c`; the PC font's file format (PSF1) and
   path `/usr/share/consolefonts/cp437-8x8.psf` (full images and the base package).
+- **`SYS_time` (audit 2026-10-26 F8, 2026-10-27):** its 32 bits are **unsigned** seconds since 1970 (UTC), good until
+  2106 (the bits never changed; every caller reads them as `u32`), and they never jump back when the tick count wraps
+  (`kernel/clock.h`); `SYS_settime` takes the same unsigned number.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

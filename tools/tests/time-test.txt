@@ -1,0 +1,7 @@
+wait zenix:/# 120
+sleep 1
+send uptime; date -s "2040-01-01 00:00:00"; date +%s\r
+sleep 2
+send for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do echo t=`date +%s`; uptime; sleep 4; done; echo ==do""ne\r
+wait ==done 150
+stop

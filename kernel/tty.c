@@ -144,10 +144,14 @@ static void out(int i, char c)
         serial_putc(c);
 }
 
-/* Drawing a big write takes long on a slow machine (seconds for 4 KB on a 68020 with chip RAM only), and input is
- * only taken by kwork: so a write is drawn in pieces, and between two pieces - the terminal is in a consistent state
- * there, and no check-then-block is pending - queued input is handled (echo, Ctrl-C: a killed writer stops at once).
- * This keeps the input rings from overflowing while a program prints a lot. */
+/* Drawing a big write takes long on a slow machine (in FS-UAE's stock A1200 a 256-byte piece of short lines took
+ * 100-350 ms, nearly all of it the scrolls), and input is only taken by kwork: so a write is drawn in pieces, and
+ * between two pieces - the terminal is in a consistent state there, and no check-then-block is pending - queued
+ * input is handled (echo, Ctrl-C: a killed writer stops at once), and a process it woke that is better than the
+ * writer (or of its level, once the writer's slice is over) runs: a yield point, as at the end of a system call. A
+ * piece is at most 256 bytes and ends early after 10-20 ms of drawing when input waits or someone better is ready
+ * (term_write_some), so netd, woken by SLIP's bytes, runs within about one piece and the serial port's receive ring
+ * does not overflow while a program prints a lot (DESIGN D20 section 6, step 2). */
 #define TTY_WPIECE 256
 
 long tty_write(int i, const void *buf, u32 n)
@@ -156,13 +160,16 @@ long tty_write(int i, const void *buf, u32 n)
     u32 done = 0;
     while (done < n) {
         u32 k = n - done > TTY_WPIECE ? TTY_WPIECE : n - done;
-        term_write(i, s + done, k);         /* the screen: cursor handled once per piece */
+        k = term_write_some(i, s + done, k);    /* the screen: cursor handled once per piece */
         if (i == con_cur && tty_mirror)
             for (u32 j = 0; j < k; j++)
                 serial_putc(s[done + j]);
         done += k;
-        if (done < n && kwork_pending) {
-            kwork();
+        if (done < n) {
+            if (kwork_pending)
+                kwork();
+            if (need_resched)
+                resched();                  /* the yield point: a better process (netd for SLIP) runs now */
             if (current->killed)
                 break;
         }

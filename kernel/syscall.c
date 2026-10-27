@@ -423,14 +423,17 @@ void syscall_c(u32 *rb)
             r = (s32)vfs_link(nr == SYS_link ? FS_LINK : FS_SYMLINK, p1, p2);
         break;
     }
-    case SYS_time:
-        r = (s32)(time_base + ticks / 100);
+    case SYS_time:                      /* unsigned seconds since 1970, the 32 bits as they are (clock.h, audit F8) */
+        r = (s32)wclock_now(&wclock);
         break;
-    case SYS_settime:                   /* root only */
+    case SYS_settime: {                 /* root only */
         if (current->uid != 0) { r = -EACCES; break; }
-        time_base = a1 - ticks / 100;
+        u16 s = irq_save();             /* the tick may not count a second between the read and the write */
+        wclock_set(&wclock, a1);
+        irq_restore(s);
         r = 0;
         break;
+    }
     case SYS_getuid: r = current->ruid; break;
     case SYS_geteuid: r = current->uid; break;
     case SYS_getgid: r = current->gid; break;

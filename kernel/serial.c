@@ -127,11 +127,23 @@ void serial_flush(void)
 /* Receive: the RBF interrupt (level 5) drains Paula's 1-byte buffer (HRM: read SERDATR, then reset INTF_RBF to
  * avoid overrun) into a ring, and that is all it does (audit B4). serial_work, in process context, hands the bytes
  * to the tty and runs the test hook. One producer, one consumer: the interrupt writes the slot and then moves head,
- * serial_work reads the slot and then moves tail, so no lock is needed. 1024 bytes are about 90 ms of input at
- * 115200 baud; serial_work runs at least every tick while a program computes, and at once when the machine is idle
- * or a system call ends. A full ring drops the byte and counts it (serial_work reports it on the kernel log). */
+ * serial_work reads the slot and then moves tail, so no lock is needed. The console's ring is 1 KB, about 90 ms of
+ * input at 115200 baud; serial_work runs at least every tick while a program computes, and at once when the machine is
+ * idle or a system call ends. While a program owns the port (/dev/ttyS0: SLIP, cu) the ring is bigger, allocated at
+ * the open and freed at the close (nothing for a machine that never opens the port), so that it holds everything TCP
+ * can have on its way to the machine while netd does not run - the receive window, twice for SLIP's escapes, plus
+ * the headers - and drawing a long screen never loses a byte of a call (DESIGN D20 section 6, step 3): 4 KB for
+ * netd's small profile (the stock A1200: a window of 2 x 966 bytes), 32 KB where netd takes its large one (2 MB of
+ * free fast RAM, net/netd/main.c LARGE_FAST: a 16 KB window), memory to spare there.
+ * A full ring drops the byte and counts it (serial_work reports it on the kernel log). */
 #define RXQ 1024
-static volatile u8 rxq[RXQ];
+#define RXQ_DEV 4096
+#define RXQ_DEV_LARGE 32768u
+#define RXQ_LARGE_FAST (2u << 20)               /* netd's LARGE_FAST (D19 7.3): the same free fast RAM */
+static volatile u8 rxq_con[RXQ];
+static volatile u8 *volatile rxq = rxq_con;    /* the ring in use, and its size - 1 (a power of two) */
+static volatile u16 rxq_mask = RXQ - 1;
+static u8 *rxq_dev;                             /* /dev/ttyS0's ring, while open (0: none, or no memory) */
 static volatile u16 rxq_head, rxq_tail;
 static volatile u32 rxq_lost;
 static u32 rxq_lost_told;
@@ -141,7 +153,7 @@ void serial_rx_isr(void)
     while (INTREQR & INTF_RBF) {
         u8 c = SERDATR & 0xFF;
         INTREQ = INTF_RBF;
-        u16 h = rxq_head, nh = (u16)((h + 1) % RXQ);
+        u16 h = rxq_head, nh = (u16)((h + 1) & rxq_mask);
         if (nh == rxq_tail) {
             rxq_lost++;
             continue;
@@ -178,7 +190,7 @@ void serial_work(void)
         rxq_took = 1;
         u16 t = rxq_tail;
         u8 c = rxq[t];
-        rxq_tail = (u16)((t + 1) % RXQ);
+        rxq_tail = (u16)((t + 1) & rxq_mask);
         if (hot) {
             hot = 0;
             if (c >= '0' && c <= '9')
@@ -228,15 +240,41 @@ long serdev_open(void)
 {
     if (serdev)
         return -EBUSY;
+    u32 chip, fast, size = RXQ_DEV;
+    mem_stats(&chip, &fast);
+    if (fast >= RXQ_LARGE_FAST)
+        size = RXQ_DEV_LARGE;
+    u8 *ring = kmalloc(size);           /* said while the log still reaches the wire */
+    if (!ring)
+        kprintf("serial: no memory for /dev/ttyS0's %u-byte receive ring: the console's %u bytes are used\n", size, RXQ);
     serdev = 1;
     u16 s = irq_save();
-    rxq_tail = rxq_head;                /* what arrived before is the console's, not the program's */
+    if (ring) {
+        rxq = ring;
+        rxq_mask = (u16)(size - 1);
+    }
+    rxq_tail = rxq_head = 0;            /* what arrived before is the console's, not the program's */
     irq_restore(s);
+    rxq_dev = ring;
     return 0;
+}
+
+/* a panic (main.c panic_begin): the port is the kernel's again at once; no memory is touched */
+void serdev_drop(void)
+{
+    serdev = 0;
 }
 
 void serdev_close(void)
 {
+    u16 s = irq_save();
+    rxq = rxq_con;                      /* the console's ring again; what was left is the program's: dropped */
+    rxq_mask = RXQ - 1;
+    rxq_tail = rxq_head = 0;
+    irq_restore(s);
+    if (rxq_dev)
+        kfree(rxq_dev);
+    rxq_dev = 0;
     serdev = 0;
 }
 
@@ -263,7 +301,7 @@ u32 serdev_take(u8 *buf, u32 n)
     while (got < n && rxq_tail != rxq_head) {
         u16 t = rxq_tail;
         buf[got++] = rxq[t];
-        rxq_tail = (u16)((t + 1) % RXQ);
+        rxq_tail = (u16)((t + 1) & rxq_mask);
     }
     return got;
 }

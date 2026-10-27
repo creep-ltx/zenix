@@ -23,6 +23,10 @@ struct gfont { int id; int freed; };    /* DESIGN D20: a loaded font, as an id (
 static const struct gfont *shown_font;
 static u8 scr_font[TROWS_MAX][COLS];    /* the font each cell was drawn in (0: Topaz) */
 static long blits, cells;
+volatile u32 ticks;                     /* the kernel's tick, input waiting, a better process ready (term_write_some) */
+volatile int kwork_pending;
+volatile u8 need_resched;
+static u32 tick_per_cell;
 int gfx_up(void) { return up; }
 static void inside(int row, int n, const char *what)
 {
@@ -37,6 +41,7 @@ void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour)
     scr_co[row][col] = colour;
     scr_font[row][col] = (u8)(shown_font ? shown_font->id : 0);
     cells++;
+    ticks += tick_per_cell;             /* drawing takes time (term_write_some's bound) */
 }
 /* a filled cell: blank, the background colour (its foreground cannot be seen: kept as the default) */
 static void fill(int row, int n, u8 colour)
@@ -454,6 +459,31 @@ int main(void)
         if (i % 97 == 0 && !T()->esc && !screen_is_grid()) { fuzz_ok = 0; printf("      after piece %d\n", i); }
     }
     EXPECT_TRUE(fuzz_ok, "... and 200000 with every console rule set (D20)");
+
+    /* D20 section 6: a tty write's piece (term_write_some) ends early once two ticks of drawing have passed while
+     * input waits or a better process is ready; the screen is then the same as after one whole write */
+    trows = 32;
+    reset();
+    term_conop(OP(CON_RULES, 1), 0, CONR_ALL);
+    static char line[300];
+    for (int i = 0; i < 299; i++) line[i] = (char)('a' + i % 26);
+    tick_per_cell = 1;
+    u32 got = term_write_some(1, line, 256);
+    EXPECT_TRUE(got == 256, "a piece with nobody waiting: all 256 bytes drawn");
+    reset();
+    kwork_pending = 1;
+    got = term_write_some(1, line, 256);
+    EXPECT_TRUE(got >= 1 && got <= 2, "input waiting: the piece ends after two ticks of drawing (a byte or two here)");
+    EXPECT_TRUE(screen_is_grid(), "... the screen is consistent there (the cursor drawn)");
+    kwork_pending = 0;
+    need_resched = 1;
+    u32 got2 = term_write_some(1, line + got, 254);
+    EXPECT_TRUE(got2 >= 1 && got2 <= 2, "a better process ready: the same");
+    need_resched = 0;
+    term_write_some(1, line + got + got2, 299 - got - got2);
+    EXPECT_TRUE(!strncmp(row(0), line, 80) && !strncmp(row(3), line + 240, 59) && screen_is_grid(),
+                "the rest drawn later: the screen as from one write");
+    tick_per_cell = 0;
 
     if (bad) { printf("term-test: %d FAILED\n", bad); return 1; }
     printf("term-test: all passed\n");

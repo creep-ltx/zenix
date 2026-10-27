@@ -6,10 +6,17 @@
  * wait for the reader.
  * Build and run: tools/serial-test.sh */
 #include <stdio.h>
+#include <stdlib.h>
 #define SERIAL_HOST_TEST 1
 #include "../kernel/serial.c"
 
 volatile int kwork_pending;
+static int nomem;                                   /* kmalloc fails (the 4 KB ring of /dev/ttyS0) */
+static unsigned long allocs, frees;
+void *kmalloc(u32 n) { if (nomem) return 0; allocs++; return malloc(n); }
+void kfree(void *p) { frees++; free(p); }
+static u32 fast_free;                               /* the machine's free fast RAM (the ring's size follows it) */
+void mem_stats(u32 *chip, u32 *fast) { *chip = 1u << 20; *fast = fast_free; }
 int trows = 32;
 u16 irq_save(void) { return 0; }
 void irq_restore(u16 sr) { (void)sr; }
@@ -102,6 +109,17 @@ int main(void)
     EXPECT_TRUE(typed == t0 && woken, "a received byte is not typed into the console; the reader is woken");
     EXPECT_TRUE(serdev_take(got, 8) == 1 && got[0] == 'k', "... and the program reads it");
 
+    /* 4b. while the port is a program's its receive ring is 4 KB (DESIGN D20 section 6): 5000 bytes arrive while the
+     * reader does not run, 4095 wait for it in order, the rest are lost and counted */
+    EXPECT_TRUE(allocs == 1 && rxq_dev, "the open allocated /dev/ttyS0's receive ring");
+    for (int i = 0; i < 5000; i++) { fake_rx = (u8)(i * 7); serial_rx_isr(); }
+    static u8 rb[5000];
+    u32 nr = serdev_take(rb, sizeof rb), inorder = 1;
+    for (u32 i = 0; i < nr; i++) if (rb[i] != (u8)(i * 7)) inorder = 0;
+    EXPECT_TRUE(nr == 4095 && inorder, "4 KB ring: 4095 of 5000 unread bytes kept, in order (the console's ring kept 1023)");
+    EXPECT_TRUE(rxq_lost == 905, "... the 905 that did not fit are counted as lost");
+    rxq_lost_told = rxq_lost;
+
     /* 5. a write with the send ring full (audit A5): it waits by ticks, never spinning; a port that takes nothing for
      * 2 s fails the write; a kill ends the wait */
     static u8 big[10000];
@@ -139,7 +157,7 @@ int main(void)
     EXPECT_TRUE(fake_nsent == s0 + 4095, "... and those bytes go out");
 
     /* 6. a panic while the port is a program's (audit A10): panic_begin (main.c) takes the port back first */
-    serdev_close();                                       /* what panic_begin does */
+    serdev_drop();                                        /* what panic_begin does */
     kprintf("*** kernel panic: a test\n");
     drain_all();
     EXPECT_TRUE(sent_has("*** kernel panic: a test"), "a panic's text reaches the wire although /dev/ttyS0 was open");
@@ -149,6 +167,25 @@ int main(void)
     drain_all();
     EXPECT_TRUE(fake_nsent == s0 + 1 && serdev_open() == 0, "after the close the console copy is back, and it opens again");
     serdev_close();
+    EXPECT_TRUE(allocs == 2 && frees == 2 && !rxq_dev && rxq == rxq_con, "each close freed the ring; the console's is back");
+    for (int i = 0; i < 2000; i++) { fake_rx = 'a'; serial_rx_isr(); }
+    EXPECT_TRUE(((rxq_head - rxq_tail) & rxq_mask) == 1023, "... and it holds 1023 bytes, as before");
+    rxq_tail = rxq_head; rxq_lost_told = rxq_lost;
+    /* no memory for the 4 KB ring: the port opens with the console's 1 KB one, and the log says so */
+    nomem = 1;
+    s0 = fake_nsent;
+    EXPECT_TRUE(serdev_open() == 0 && !rxq_dev && rxq_mask == 1023, "no memory: /dev/ttyS0 still opens, with the 1 KB ring");
+    serdev_close();
+    drain_all();
+    EXPECT_TRUE(sent_has("no memory for /dev/ttyS0's 4096-byte receive ring"), "... said on the log");
+    nomem = 0;
+    /* with netd's large profile's fast RAM (2 MB free) the ring is 32 KB */
+    fast_free = 4u << 20;
+    EXPECT_TRUE(serdev_open() == 0 && rxq_dev && rxq_mask == 32767, "2 MB of free fast RAM: a 32 KB ring");
+    for (int i = 0; i < 40000; i++) { fake_rx = 'b'; serial_rx_isr(); }
+    EXPECT_TRUE(((rxq_head - rxq_tail) & rxq_mask) == 32767, "... it holds 32767 unread bytes");
+    serdev_close();
+    fast_free = 0;
     printf(bad ? "FAILED\n" : "all ok\n");
     return bad != 0;
 }

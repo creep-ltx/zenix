@@ -1,15 +1,18 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* telnet HOST [PORT]: a terminal to another computer over the network (DESIGN D20, docs/man/telnet.txt). Step 2: the
- * Unix mode (-x), xterm-like. One process, one loop: poll on the socket and the keys (D16); the protocol, the stream
- * filter and the key translation are telnet's core (net/telnet/, shared with the PC tests). The console draws: in the
- * Unix mode it gets CONR_LFONLY (SYS_console CON_RULES on standard output); when that is refused (standard output is a
- * file, a pipe), telnet says so once and goes on. Ctrl-] opens the local prompt.
+/* telnet HOST [PORT]: a terminal to another computer over the network (DESIGN D20, docs/man/telnet.txt). Three modes
+ * (D20 3.5): an Amiga board (-a, the default: Latin-1 in the console's Topaz, 0x9B as CSI and the Amiga console's own
+ * codes), a PC board (-p: CP437 through the PC font, /usr/share/consolefonts/cp437-8x8.psf, loaded with SYS_console
+ * CON_FONT) and a Unix host (-x, xterm-like). One process, one loop: poll on the socket and the keys (D16); the
+ * protocol, the stream filter and the key translation are telnet's core (net/telnet/, shared with the PC tests). The
+ * console draws, with the mode's rules (CON_RULES on standard output, D20 4.3); when the console refuses the rules or
+ * the font (standard output is a file, a pipe; no memory), telnet says so once and goes on: in the PC mode CP437 is
+ * then shown as its nearest Latin-1 characters. Ctrl-] opens the local prompt.
  * The SLIP plan (D20 section 6): the screen is written at most 256 bytes a call and telnet runs one nice level lower
  * than it was started at, so a woken netd (nice 0) takes the CPU at the next return to user mode. */
 #include "socket.h"
 #include "../net/telnet/telnet.h"
 
-static int sock = -1, eof_keys, quit, rules_ok, rules_old, raw_on, echo_note;
+static int sock = -1, eof_keys, quit, rules_ok, rules_old, raw_on, echo_note, font_note, font_on, ice_on, ice_opt;
 static int esc_key = 0x1D;                      /* Ctrl-] */
 static const char *host;
 static struct tn tn;
@@ -48,30 +51,111 @@ static void answer(void *u, const unsigned char *b, long n)   /* the filter's an
     }
 }
 
-/* the console: raw keys, LF without CR (CONR_LFONLY); undone on the way out and at a suspend */
+/* the console's rules for each mode (D20 3.5), and the bits telnet changes (the rest are left as they were) */
+#define RULES_MINE (CONR_PCCTRL | CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_ICE | CONR_CGAPAL | CONR_LFONLY)
+static u32 mode_rules(int m)
+{
+    if (m == TN_UNIX)
+        return CONR_LFONLY;
+    u32 r = CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_CGAPAL | (ice_on ? CONR_ICE : 0);
+    return m == TN_PC ? r | CONR_PCCTRL | CONR_LFONLY : r;
+}
+
+#define PCFONT "/usr/share/consolefonts/cp437-8x8.psf"
+static unsigned char psf[2052 + 1];
+
+/* the PC font on the console (PC mode) or not (the others); refused: the PC mode shows CP437 as Latin-1. Dropped
+ * by telnet itself (the end, z, the prompt) the screen is cleared first: the board's bytes would be junk in Topaz
+ * (4.2); dropped at the board's own font switch, the screen is left as the board draws it next (clear 0) */
+static int drop_clears = 1;
+static void font_set(int want)
+{
+    if (!want) {
+        if (font_on) {
+            if (drop_clears)
+                sys_write(1, "\033[2J\033[H", 7);
+            sys_confont(1, 0, 0);
+        }
+        font_on = 0;
+        tf.fallback = 0;
+        return;
+    }
+    if (font_on)
+        return;
+    int r = -ENOENT, fd = sys_open(PCFONT, O_RDONLY);
+    if (fd >= 0) {
+        int n = sys_read(fd, psf, sizeof psf);
+        sys_close(fd);
+        r = n < 0 ? n : sys_confont(1, psf, (u32)n);
+    }
+    font_on = r >= 0;
+    tf.fallback = !font_on;
+    if (!font_on && !font_note++)
+        fprintf(2, "telnet: the PC font is not available here (%s): CP437 is shown as its nearest Latin-1 characters\r\n",
+                zstrerror(r));
+}
+
+/* the console as the mode wants it: rules and font; the bits before are kept for the end */
+static void mode_apply(void)
+{
+    int r = sys_conrules(1, mode_rules(tn.mode), RULES_MINE);
+    if (r >= 0 && !rules_ok)
+        rules_old = r;
+    rules_ok = r >= 0;
+    if (!rules_ok && !echo_note++)
+        fprintf(2, "telnet: the console's rules are not available here (%s): the screen is drawn without them\r\n",
+                zstrerror(r));
+    font_set(tn.mode == TN_PC);
+}
+
+/* the console: raw keys, the mode's rules and font; undone on the way out and at a suspend */
 static void term_on(void)
 {
     if (sys_isatty(0)) {
         sys_ttymode(TTY_RAW | TTY_NOSIG);       /* every key, Ctrl-C included, goes to the other side */
         raw_on = 1;
     }
-    int r = sys_conrules(1, CONR_LFONLY, CONR_LFONLY);
-    rules_ok = r >= 0;
-    if (rules_ok)
-        rules_old = r;
-    else if (!echo_note++)
-        fprintf(2, "telnet: the console's rules are not available here (%s): line ends are drawn as they come\r\n",
-                zstrerror(r));
+    mode_apply();
 }
 
 static void term_off(void)
 {
+    font_set(0);
     if (rules_ok)
-        sys_conrules(1, rules_old & CONR_LFONLY, CONR_LFONLY);
+        sys_conrules(1, (u32)rules_old & RULES_MINE, RULES_MINE);
     rules_ok = 0;
     if (raw_on)
         sys_ttymode(0);
     raw_on = 0;
+}
+
+/* a mode chosen at the prompt (the screen cleared first) or by the board's font switch (the filter switched itself) */
+static void mode_to(int m, int from_board)
+{
+    if (!from_board) {
+        if (m == tn.mode)
+            return;
+        tf_flush(&tf);
+        tf_setmode(&tf, m);
+        if (!font_on)
+            sys_write(1, "\033[2J\033[H", 7);
+    }
+    tn.mode = m;                                /* the keys follow (the terminal type was told once, at the start) */
+    drop_clears = !from_board;
+    mode_apply();
+    drop_clears = 1;
+}
+
+/* the filter's events: iCE switched by the board (CSI ? 33 h/l), the board's font switch */
+static void tf_event(void *u, int ev, int arg)
+{
+    (void)u;
+    if (ev == TF_EV_ICE) {
+        ice_on = arg || ice_opt;
+        if (rules_ok)
+            sys_conrules(1, ice_on ? CONR_ICE : 0, CONR_ICE);
+    } else if (ev == TF_EV_MODE)
+        mode_to(arg, 1);
 }
 
 static void keys_out(const unsigned char *k, long n)
@@ -95,7 +179,8 @@ static void keys_out(const unsigned char *k, long n)
 static void menu(void)
 {
     int rows = sys_ttyinfo() >> 16;
-    printf("\0337\033[%d;1H\033[m\033[2Ktelnet> q quit, z suspend, ^] send ^], Return back: ", rows ? rows : 25);
+    printf("\0337\033[%d;1H\033[m\033[2Ktelnet> q quit, z suspend, a/p/x Amiga/PC/Unix, ^] itself, Return back: ",
+           rows ? rows : 25);
     char c = 0;
     if (sys_read(0, &c, 1) != 1) c = 'q';
     printf("\033[2K\0338");
@@ -106,6 +191,8 @@ static void menu(void)
         printf("\r\n");
         sys_killsig(sys_getpid(), SIGTSTP);     /* the shell's job control; it goes on here after fg */
         term_on();
+    } else if (c == 'a' || c == 'p' || c == 'x') {
+        mode_to(c == 'a' ? TN_AMIGA : c == 'p' ? TN_PC : TN_UNIX, 0);
     } else if (c == esc_key) {
         unsigned char k = (unsigned char)c;
         keys_out(&k, 1);
@@ -133,20 +220,20 @@ static void keys_in(void)
 
 static int usage(void)
 {
-    fprintf(2, "usage: telnet [-x] [-r] [-e CHAR|none] HOST [PORT]\n");
+    fprintf(2, "usage: telnet [-a|-p|-x] [-i] [-r] [-e CHAR|none] HOST [PORT]\n");
     return 2;
 }
 
 int main(int argc, char **argv)
 {
-    int mode = TN_UNIX, rawtcp = 0, i = 1;
+    int mode = TN_AMIGA, rawtcp = 0, i = 1;
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         const char *o = argv[i];
         if (!strcmp(o, "-x")) mode = TN_UNIX;
-        else if (!strcmp(o, "-a") || !strcmp(o, "-p")) {
-            fprintf(2, "telnet: %s: the BBS modes are not built yet (DESIGN D20 step 3); -x is the Unix mode\n", o);
-            return 2;
-        } else if (!strcmp(o, "-r")) rawtcp = 1;
+        else if (!strcmp(o, "-a")) mode = TN_AMIGA;
+        else if (!strcmp(o, "-p")) mode = TN_PC;
+        else if (!strcmp(o, "-i")) ice_opt = 1;
+        else if (!strcmp(o, "-r")) rawtcp = 1;
         else if (!strcmp(o, "-e") && i + 1 < argc) {
             const char *e = argv[++i];
             if (!strcmp(e, "none")) esc_key = -1;
@@ -192,7 +279,15 @@ int main(int argc, char **argv)
     tn_init(&tn, port);
     tf.put = screen;
     tf.answer = answer;
+    tf.event = tf_event;
     tf_init(&tf, mode);
+    ice_on = ice_opt;
+    if (mode != TN_UNIX && sys_isatty(1)) {     /* the owner's rule: said once, at the start of a call */
+        int col = sys_console(CON_COLOURS, 0);
+        if (col > 0 && col < 16)                /* the screen takes 40 KB a plane: 16 colours are 4 planes */
+            printf("telnet: %d colours: ANSI art loses its shading; `colours 16` in /etc/console shows it fully "
+                   "(%d KB more chip RAM)\n", col, 40 * (col == 8 ? 1 : col == 4 ? 2 : 3));
+    }
     term_on();
 
     static unsigned char in[1024], data[1024];
