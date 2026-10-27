@@ -1,0 +1,15 @@
+OpenSSH's bcrypt_pbkdf for Zenix
+================================
+
+What this is: the key derivation of passphrase-protected OpenSSH private keys ("bcrypt", openssh-key-v1), which
+neither BearSSL nor Monocypher has (DESIGN D21, docs/d21-crypto-ssh-https.md sections 3.2 and 4.4). Upstream:
+OpenSSH portable, tag V_10_6_P1 (commit 4cdb6b6), https://github.com/openssh/openssh-portable, the files
+openbsd-compat/blowfish.c (BSD-3-Clause, no advertising clause; Niels Provos), openbsd-compat/blf.h (same) and
+openbsd-compat/bcrypt_pbkdf.c (ISC; Ted Unangst). Their licences are in the files' own headers.
+
+Files taken, unchanged: blowfish.c blf.h bcrypt_pbkdf.c.
+Beside them, Zenix's (GPL-2.0-only): includes.h and crypto_api.h, the two headers the files expect from OpenSSH,
+mapping SHA-512 to Monocypher's crypto_sha512, explicit_bzero/freezero to wiping, and the HAVE_ switches.
+
+Used only by ssh and ssh-keygen, in the step that reads passphrases (D21 section 10, step 3b). The tests are
+tools/host/crypto-test.sh (OpenSSH's own ssh-keygen makes protected keys; net/ssh/ reads them).
