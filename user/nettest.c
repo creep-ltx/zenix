@@ -714,7 +714,9 @@ static int dial_to(u32 addr, int port)
     if (s >= 0 && connect(s, SA(a), sizeof a)) { int e = zerrno; sys_close(s); zerrno = e; return -1; }
     return s;
 }
-#define PC 0x0a000202u                          /* 10.0.2.2: zenix-slirp's gateway, the PC */
+static u32 PC = 0x0a000202u;                    /* 10.0.2.2: zenix-slirp's gateway, the PC; -p ADDR: another (the LAN) */
+static u32 getsize = 102400;                    /* slipget's bytes; -n BYTES */
+static char pcname[16] = "10.0.2.2";
 static void c_sliptcp(void)                     /* TCP echo: 10 KB in 1,000-byte pieces */
 {
     int s = dial_to(PC, 7100), ok = s >= 0;
@@ -726,13 +728,15 @@ static void c_sliptcp(void)                     /* TCP echo: 10 KB in 1,000-byte
         total += sizeof out;
     }
     if (s >= 0) sys_close(s);
-    result("sliptcp", ok, "10 KB echoed by 10.0.2.2:7100 in %u ticks%s", sys_ticks() - t0, ok ? "" : ": WRONG");
+    result("sliptcp", ok, "10 KB echoed by %s:7100 in %u ticks%s", pcname, sys_ticks() - t0, ok ? "" : ": WRONG");
 }
 static void c_slipget(void)                     /* 100 KB from the PC, checked byte by byte (its pattern) */
 {
     int s = dial_to(PC, 7102);
-    u32 want = 102400, got = 0, bad = 0, t0 = sys_ticks();
-    if (s >= 0 && send(s, "102400\n", 7, 0) == 7) {
+    u32 want = getsize, got = 0, bad = 0, t0 = sys_ticks();
+    char req[16];
+    int rl = snprintf(req, sizeof req, "%u\n", want);
+    if (s >= 0 && send(s, req, (u32)rl, 0) == rl) {
         static char b[2048];
         int r;
         while ((r = recv(s, b, sizeof b, 0)) > 0) {
@@ -742,8 +746,8 @@ static void c_slipget(void)                     /* 100 KB from the PC, checked b
     }
     u32 t = sys_ticks() - t0;
     if (s >= 0) sys_close(s);
-    result("slipget", got == want && !bad, "%u of %u bytes from 10.0.2.2:7102, %u wrong, in %u ticks (%u bytes/s in this "
-           "emulator)", got, want, bad, t, t ? got * 100 / t : 0);
+    result("slipget", got == want && !bad, "%u of %u bytes from %s:7102, %u wrong, in %u ticks (%u bytes/s on this "
+           "machine)", got, want, pcname, bad, t, t ? got / t * 100 + got % t * 100 / t : 0);
 }
 static void c_slipudp(void)                     /* UDP echo */
 {
@@ -762,7 +766,7 @@ static void c_slipudp(void)                     /* UDP echo */
         if (r == (int)sizes[k] && !memcmp(in, out, sizes[k])) n++;
     }
     if (u >= 0) sys_close(u);
-    result("slipudp", n == 4, "%d of 4 datagrams (1 to 900 bytes) echoed by 10.0.2.2:7101", n);
+    result("slipudp", n == 4, "%d of 4 datagrams (1 to 900 bytes) echoed by %s:7101", n, pcname);
 }
 static void c_slipdns(void)                     /* a name through 10.0.2.3 (slirp's DNS, which asks the PC's test server) */
 {
@@ -845,8 +849,17 @@ int main(int argc, char **argv)
     if (argc == 4 && !strcmp(argv[1], "_reader")) return reader_main(atoi(argv[2]), atoi(argv[3]));
     if (argc == 3 && !strcmp(argv[1], "_close")) return close_main(atoi(argv[2]));
     if (argc == 3 && !strcmp(argv[1], "_sendpipe")) return sendpipe_main(atoi(argv[2]));
-    if (argc < 2) { fprintf(2, "usage: nettest CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup drvperm asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n"); return 2; }
-    for (int i = 1; i < argc; i++) {
+    int first = 1;
+    while (first + 1 < argc && argv[first][0] == '-') {            /* -p ADDR: the PC's test servers; -n BYTES: slipget's size */
+        if (!strcmp(argv[first], "-p") && inet_pton(AF_INET, argv[first + 1], &PC) == 1) {
+            strncpy(pcname, argv[first + 1], sizeof pcname - 1);
+            PC = ntohl(PC);
+        } else if (!strcmp(argv[first], "-n") && atoi(argv[first + 1]) > 0) getsize = (u32)atoi(argv[first + 1]);
+        else { fprintf(2, "nettest: %s %s: not an address or a size\n", argv[first], argv[first + 1]); return 2; }
+        first += 2;
+    }
+    if (argc < first + 1) { fprintf(2, "usage: nettest [-p ADDR] [-n BYTES] CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup drvperm asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n"); return 2; }
+    for (int i = first; i < argc; i++) {
         const char *c = argv[i];
         if (!strcmp(c, "tcp")) c_tcp();
         else if (!strcmp(c, "udp")) c_udp();

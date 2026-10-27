@@ -1,0 +1,79 @@
+GENET(4)		Zenix manual
+
+NAME
+    genet - the Ethernet port of a Raspberry Pi CM4 (or Pi 4) on a
+    PiStorm
+
+SYNOPSIS
+    /sbin/net/genet IFACE [cache=kernel|cache=user] [noselftest]
+                              (started by netd(8), never by hand)
+
+    In /etc/network/interfaces:
+        auto eth0
+        iface eth0 inet dhcp
+            driver genet
+
+DESCRIPTION
+    The driver of the CM4's own Ethernet port (Broadcom GENET v5 with a
+    BCM54213PE PHY, 10/100/1000 Mbit/s) when Zenix runs on a PiStorm
+    under Emu68. netd starts it for a stanza whose driver is genet and
+    restarts it when it ends. It takes the chip's address, the PHY's
+    address and the MAC address from the hardware table the boot read
+    from Emu68's device tree, claims the chip (no other driver may touch
+    it), gives the kernel a program that stops the chip's DMA (the
+    kernel runs it when the driver or netd ends), resets the chip, and
+    starts the PHY's negotiation.
+
+    The chip writes received frames straight into netd's buffers and
+    reads the frames to send from them, by DMA, in memory that belongs
+    to the claim. The Pi's cache does not see the chip's DMA, so the
+    driver cleans and drops cache lines around every frame: with
+    Emu68's cache range instructions from the driver itself when the
+    Emu68 on the card has them and they work outside the kernel (a
+    child process tries them first), else through the kernel. A
+    self-test then sends four frames to itself inside the chip and
+    checks them byte by byte; if they come back wrong it uses the
+    kernel's way, and if they are wrong that way too it refuses (the
+    DMA could not be trusted). The log says which way it took.
+
+    Polled (no interrupts yet): it looks at the chip again at once
+    while frames move, then after 10 ms, and every 20 ms when idle;
+    the PHY every 100 ms; netd's doorbell wakes it when there is a
+    frame to send. The link's speed and duplex are set as the PHY
+    negotiated them; ifconfig shows the link.
+
+OPTIONS
+    Words after "driver genet" in the stanza:
+    cache=kernel   always the kernel's cache calls (skips the test of
+                   the range instructions)
+    cache=user     the range instructions without trying them first
+    noselftest     no loopback self-test (if it fails on a chip that
+                   works anyway)
+
+DIAGNOSTICS
+    In the kernel log (dmesg), as "genet: IFACE: ...": "no GENET in
+    the hardware table" (not a Pi 4 or CM4 under Emu68: it ends, and
+    netd gives it up after five tries); "GENET v5.N at ADDRESS"; "PHY
+    ID at MDIO address N (BCM54213PE): negotiating"; "trying Emu68's
+    cache range opcodes in user mode in a child" and its answer (a
+    child killed with vector 11 there is expected when they need the
+    kernel); "self-test: 4 frames through the loopback, checked byte by
+    byte" or what went wrong; "cache calls: ..."; "link up: N Mbit/s,
+    full duplex", "link down"; "the send DMA is stuck" or "the receive
+    DMA's index is wrong", then "the chip reset and started again";
+    "the doorbell closed (ifdown, or netd is gone): the chip stopped".
+    Every wait on the chip has a time limit and says what it waited
+    for.
+
+NOTES
+    Not yet tried on the real A1200 (the owner's checklist is
+    docs/a1200-checklist-network.md): tested on the PC against a model
+    of the chip and the PHY (tools/genet-test.sh) and, in FS-UAE, only
+    that it refuses cleanly where there is no GENET. No interrupts, no
+    checksum offload, no multicast, no promiscuous mode, no jumbo
+    frames (at most 1,500 bytes of packet). Only GENET v5 (Pi 4, CM4,
+    Pi 400); a PHY that is not a Broadcom BCM54xx is used with its
+    clock delays as it has them.
+
+SEE ALSO
+    netd(8), ifconfig(8), a2065(4), ping(1)

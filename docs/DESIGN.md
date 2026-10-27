@@ -213,7 +213,7 @@ test); fsd's 16 KB stack (its path walk recurses up to 9 symlink levels); **the 
 diskd, boot and zfsd: 79 KB of the kernel image stay in memory, and each running server is a copy; zfsd's 37 KB are
 never used with an ext2 root): the biggest remaining win, but it needs execute-in-place or zfsd from the disk, a
 loader change with its own design note and reviews (zfsd from the disk: D19 step 1, built).
-## D19. The network (roadmap block 2; design note revision 2 after two reviews; step 1 built 2026-10-27, the rest not)
+## D19. The network (roadmap block 2; design note revision 2 after two reviews; steps 0-9 built 2026-10-27, step 9 not yet on the A1200)
 **Why.** Zenix must reach the world: `ping`, telnet to BBSes, ssh, wget, NFS, a remote control, `zpkg`. **How.** One
 TCP/IP server, `netd` (lwIP 2.2, BSD-3, `NO_SYS`, raw API), a service boot registers, loaded from the disk by the
 first socket call; small user-mode driver processes as its clients through the kernel (the CM4's GENET; an A2065 for

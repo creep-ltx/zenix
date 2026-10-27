@@ -64,7 +64,7 @@ zenix/
 |---|---|
 | `lwip/` | lwIP 2.2.1 (BSD-3, `COPYING`): only the files netd builds or tests, unchanged but for the local patches in `lwip/patches/`; `lwip/README` names the version, the files and the patches |
 | `port/` | Zenix's port of lwIP: `lwipopts.h` (the configuration), `arch/cc.h`, the counted heap and the limits set by the machine (`port.c`), ChaCha20 and the SipHash ISNs (`rand.c`), the checksum and the copy in 68020 assembler (`m68k.S`), stand-in C headers for the Zenix build (`shim/`) |
-| `drv/` | the network's drivers, user processes netd starts as `/sbin/net/NAME` (`drv.h`: what they share): `a2065.c` (the Commodore A2065, polled), `fake.c` (the driver protocol's test driver, test images only) |
+| `drv/` | the network's drivers, user processes netd starts as `/sbin/net/NAME` (`drv.h`: what they share): `a2065.c` (the Commodore A2065, polled), `genet.c` (the CM4's Ethernet under Emu68, polled; the chip and its PHY in `genet-core.c` and `genet.h`, shared with the PC test against a model of the chip, `tools/genet-model.h`), `fake.c` (the driver protocol's test driver, test images only) |
 | `netd/` | netd's core: sockets, SLIP and loopback, names, the configuration files, the limits (`netd.h` is its interface); plain C with no system call, so netd's main program and the PC tests use the same files. `main.c` is netd's main program on Zenix (`/sbin/netd`): the operating system layer and the message loop |
 
 ## tools/: building and testing
