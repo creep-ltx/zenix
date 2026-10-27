@@ -405,6 +405,10 @@ void kmain(struct bootinfo *bi)
                 (hwi->flags & HW_RANGEOPS) ? ", cache range opcodes" : "", hwi->soc_base);
         kprintf("pi: emmc %p mailbox %p gpio %p genet %p gic %p/%p\n", hwi->emmc, hwi->mailbox, hwi->gpio,
                 hwi->genet, hwi->gic_dist, hwi->gic_cpu);
+        if (hwi->genet_stop & (GSTOP_RX | GSTOP_TX | GSTOP_SLOW | GSTOP_NOTV5))   /* stage0's stop (D19 14, step 9) */
+            kprintf("pi: genet: %s%s%s%s\n", (hwi->genet_stop & GSTOP_NOTV5) ? "not a GENET v5, left alone" :
+                    "stopped the DMA a previous owner left running:", (hwi->genet_stop & GSTOP_RX) ? " receive" : "",
+                    (hwi->genet_stop & GSTOP_TX) ? " send" : "", (hwi->genet_stop & GSTOP_SLOW) ? " (slow to stop)" : "");
     }
 
     if (hwi->magic == HWINFO_MAGIC)

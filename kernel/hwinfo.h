@@ -12,10 +12,20 @@
  */
 #define HWINFO_ADDR     0x1100          /* in the low chip RAM the kernel never hands out; the bootblock copies the table here after the takeover */
 #define HWINFO_MAGIC    0x5A485731      /* "ZHW1" */
+#define HWINFO_DRYRUN   0x5A485744      /* "ZHWD": put in the magic word by a caller that may still go back to AmigaOS
+                                         * (zenixboot CHECK): stage0 then fills the table but writes no hardware */
 
 #define HW_DT           0x01            /* devicetree.resource found: running under Emu68 */
 #define HW_BCM2711      0x02            /* /scb present: Pi 4 / CM4 */
 #define HW_RANGEOPS     0x04            /* /emu68 dcache-range-ops == 1: LINE-F cache range opcodes exist */
+
+/* hwinfo.genet_stop (boot/genet-stop.h, DESIGN D19 14: the warm start from AmigaOS) */
+#define GSTOP_DONE      0x01            /* a GENET v5 was found and stopped: interrupts masked, the MAC and both DMAs off */
+#define GSTOP_RX        0x02            /* its receive DMA was running (AmigaOS's driver left it on) */
+#define GSTOP_TX        0x04            /* its send DMA was running */
+#define GSTOP_MAC       0x08            /* the MAC's receive or send was on */
+#define GSTOP_SLOW      0x10            /* the DMA did not say "stopped" within 100 ms */
+#define GSTOP_NOTV5     0x20            /* the address held no GENET v5: nothing written */
 
 #define HW_MAXBOARDS 16
 
@@ -52,7 +62,9 @@ struct hwinfo {
     unsigned int nboards;       /* Zorro boards AmigaOS configured (expansion.library), valid entries in board[] */
     unsigned int rng200;        /* the BCM2711's random number generator (RNG200, "brcm,bcm2711-rng200" in /soc), 0 if
                                  * none: credited fully by the entropy pool (DESIGN D19 9.3) */
-    unsigned int reserved[4];
+    unsigned int genet_stop;    /* what stage0 did to a GENET a previous owner may have left running: GSTOP_* bits, 0 if
+                                 * there was none (or a dry run); the driver and the boot log say it */
+    unsigned int reserved[3];
     struct hwboard board[HW_MAXBOARDS];
 };
 /* User-visible since DESIGN D19 step 7 (SYS_drv DRV_HWINFO gives drivers a copy, at most the caller's size): it grows

@@ -176,6 +176,14 @@ product, type, serial number, base address, size), copied from `expansion.librar
 card without any autoconfig code of its own. On a machine without Emu68 (or FS-UAE) the Pi part of the table is
 empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and the boards (`zorro: ...`).
 
+The one piece of hardware stage0 touches: **a GENET a previous owner left running** (AmigaOS's `genet.device` before
+`bootzenix` or a warm reset may leave its DMA writing into memory Zenix is about to own). When the table names a
+GENET v5, stage0 masks its interrupts, turns the MAC's receive off, stops both DMA engines, waits (at most 100 ms of
+the beam's clock) until they say stopped, then turns the MAC's send off (`boot/genet-stop.h`, shared with the PC
+test against the chip model); what it found goes into `genet_stop` (the next reserved word, `GSTOP_*` bits) and
+`kmain` logs `pi: genet: ...` when the DMA was running. A caller that may still go back to AmigaOS (`zenixboot
+CHECK`) puts `HWINFO_DRYRUN` in the magic word first, and stage0 then writes no hardware (DESIGN D19 14, step 9).
+
 ### Random numbers (`kernel/random.c`, DESIGN D19 9.3)
 
 The kernel's entropy pool, as Linux since 5.17: samples are accumulated with BLAKE2s (RFC 7693) and output comes from

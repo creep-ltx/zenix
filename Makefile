@@ -97,7 +97,7 @@ $(BUILD)/bootblock.bin: $(BUILD)/bootblock.elf
 
 # stage0: reads the Pi's hardware addresses from Emu68's device tree while AmigaOS is alive. Position
 # independent (-mpcrel), no data, no relocations; embedded in the kernel image (start.S) and called by the bootblock.
-$(BUILD)/stage0.o: boot/stage0.c kernel/hwinfo.h boot/dtapi_amiga.h | $(BUILD)
+$(BUILD)/stage0.o: boot/stage0.c boot/genet-stop.h net/drv/genet.h kernel/hwinfo.h boot/dtapi_amiga.h | $(BUILD)
 	$(CC) -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib -Os -Wall -Wextra -mpcrel \
 	    -fno-asynchronous-unwind-tables -c $< -o $@
 	@test -z "$$($(TOOLPREFIX)readelf -r $@ | grep -E "R_68K_(32|16|8|GOT|PLT)")" || { echo "stage0 must have no absolute relocations"; exit 1; }

@@ -15,11 +15,23 @@ one. About 20 minutes. Photograph the screen where it says **photo**; write down
 - A network cable from the PiStorm's Ethernet socket to the router (the same as AmigaOS uses).
 - The PC is on and the Claude session on it knows you are testing (it starts the PC's side for step 7).
 
-## 1. Start Zenix from cold
+## 1. Start Zenix from AmigaOS, the everyday way
 
-Switch the A1200 **off**, wait 5 seconds, switch it on, and pick Zenix in the boot menu. (Why from cold: AmigaOS's
-network driver may leave the chip running when the Amiga is reset; from cold it never ran. Step 9 tries the other way.)
-Log in as root.
+Boot AmigaOS with its network running (as every day: Roadshow up, the cable in), then start Zenix with `bootzenix`.
+Log in as root, then:
+```
+dmesg | grep pi:
+```
+**Photo.** AmigaOS's network driver may leave the chip writing received frames into memory after the reset; since
+2026-10-27 the start stops the chip's DMA before Zenix uses that memory (`zenixboot` 0.2b4 or the floppy's bootblock,
+through the kernel's stage0). Look for:
+- `pi: genet: stopped the DMA a previous owner left running: receive send` (or only `receive`, or only `send`): the
+  stop found the chip running and stopped it. **Note** the line.
+- No `pi: genet:` line at all: the chip was already quiet (AmigaOS's driver stopped it at the reset). Also fine.
+- `(slow to stop)` at its end, or `not a GENET v5, left alone`: **photo**, and tell the session; then carry on.
+
+Anything odd later (a crash, a frozen screen, wrong output in `ls -R /`): switch off, and do step 9 (from cold) to
+tell the two apart.
 
 ## 2. The driver's start
 
@@ -120,14 +132,11 @@ These are the PiStorm's figures (Emu68), labelled so: not a real 68020's speed.
 
 Not yet: `telnet` comes with its own design note after the network's audit (D19 step 11). Skip.
 
-## 9. Optional, last: starting Zenix from a running AmigaOS
+## 9. Only if step 1 or later went wrong: start Zenix from cold
 
-Only if everything above worked and there is nothing on Zenix's disk you would miss. Boot AmigaOS with its network
-running (as every day), then start Zenix with `bootzenix`. Use Zenix for 5 minutes with the cable in (`ls -R /`,
-`ping -c 20` the router). **Note** whether anything odd happens (a crash, a frozen screen, wrong output): AmigaOS's
-network driver may leave the chip writing into memory after the reset, which Zenix cannot stop before its own driver
-starts. If anything odd happens, switch off, and tell the session: this is a known open point (d19-network.md 14,
-step 9).
+Switch the A1200 **off**, wait 5 seconds, switch it on, pick Zenix in the boot menu, and do steps 2-5 again. From cold
+AmigaOS's network never ran, so nothing can be left running: if the trouble is gone this way, it came from the warm
+start. **Note** which way showed the trouble, and tell the session (d19-network.md 14, step 9, "the warm start").
 
 ## What to send back
 

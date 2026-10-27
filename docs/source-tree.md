@@ -27,6 +27,7 @@ zenix/
 | `zenixboot.c`, `zenixboot-start.S` | The same from a hard disk, CF or SD card: an AmigaOS program the boot partition's Startup-Sequence runs |
 | `handoff.S` | The hand-over both paths share: switch AmigaOS off, copy the kernel to its home, jump |
 | `stage0.c` | Under Emu68: reads the Pi's device tree so the kernel can find the SD card and the Pi's hardware |
+| `genet-stop.h` | stage0's stop of the CM4's Ethernet DMA that AmigaOS may leave running (shared with `tools/genet-test.c`) |
 | `bootmenu.c`, `bootmenu-start.S` | The boot menu (AmigaOS or Zenix), and `bootzenix`, which reboots straight into Zenix |
 
 ## kernel/: the kernel

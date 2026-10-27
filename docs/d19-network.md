@@ -1248,9 +1248,47 @@ driver or netd ends, but not at the **handover from AmigaOS**: when the owner st
 (`bootzenix`, or a warm reset), AmigaOS's `genet.device` may leave the receive DMA running into its old rings, which
 are Zenix's memory after the takeover, until the ring fills (rondoval's current driver stops it in a reset handler;
 whether the owner's driver stack 2.0.0 does is not known). Zenix's driver resets the chip only when it starts, and a
-machine without `driver genet` never does. Proposed: stage0 (which already reads GENET's address while AmigaOS lives,
-before the takeover) writes 0 to the two DMA control registers, a few bytes in the kernel image. Until then the
-checklist starts Zenix from cold, and tries the warm way last.
+machine without `driver genet` never does. Built on branch t12 (2026-10-27), below.
+
+**The warm start (branch t12, 2026-10-27; not yet run on the A1200).** stage0 stops a GENET a previous owner left
+running (`boot/genet-stop.h`, shared with the PC test), after it has filled the table, while AmigaOS still lives and
+before the copier moves the kernel: so on both boot paths (the floppy's bootblock and `zenixboot`), and on machines
+without `driver genet`. Choices:
+1. **What it writes, in Linux's teardown order** (`bcmgenet.c`): both interrupt masks set and the pending bits
+   cleared, the UniMAC's receive off (no new frame enters), `RDMA_CTRL` then `TDMA_CTRL` 0 (offsets 0x3044 and
+   0x5044: the engines' registers after 256 descriptors of 12 bytes and 17 rings of 0x40, from 0x2000 and 0x4000;
+   the same as `net/drv/genet.h` and Linux's v4/v5 layout), a wait until both engines say stopped, then the UniMAC's
+   send off. **Why the MAC too:** with its receive off no frame is half-way into the DMA when the engine stops; the
+   driver's reset clears it anyway. **Why the interrupts:** Emu68 owns the GIC; a GENET interrupt left pending and
+   unmasked by AmigaOS's driver must never reach a Zenix that has no handler for it (the driver masks them too, but
+   only when it starts). The PHY, the rings and the link are left alone (no renegotiation; the driver resets).
+2. **Only a GENET v5:** the revision register is read first; anything else at that address gets no write
+   (`GSTOP_NOTV5`).
+3. **The wait** is timed by the beam's line (VPOSR/VHPOSR, 64 us a line on PAL and NTSC; never an empty loop), at most
+   100 ms as the driver's own, with a read count only as a net for a beam that does not move; a timeout is recorded.
+4. **zenixboot CHECK** goes back to AmigaOS, so it must not stop AmigaOS's network: it writes `HWINFO_DRYRUN` ("ZHWD")
+   into the table's magic word before the call, and stage0 then fills the table and writes no hardware (zenixboot
+   0.2b4; an older zenixboot's CHECK would stop the chip: only a test run, and AmigaOS's network comes back with its
+   next start). The kernel never sees the dry-run magic (stage0 writes `HWINFO_MAGIC`).
+5. **Said at boot:** `hwinfo.genet_stop` (the first of the table's reserved words, `GSTOP_*` bits: done, receive was
+   on, send was on, the MAC was on, slow, not v5) and the kernel's log line `pi: genet: stopped the DMA a previous
+   owner left running: receive send` when it found one running, so the owner's checklist can see it.
+6. **Not covered:** frames the old DMA writes between the reset and stage0 (AmigaOS's own boot and `zenixboot`
+   reading its files) land in AmigaOS's memory of that moment, as on any warm reset of AmigaOS itself; and a live
+   `genet.device` (zenixboot run from a Workbench with the network up) re-enabling its DMA in the few ms before
+   AmigaOS is switched off. A stop in the kernel's first instructions as well was not added (it would come after the
+   copier, so later than stage0's, and it costs the kernel bytes).
+
+Sizes (*measured*): stage0 2,757 -> 3,095 bytes (+338, inside the kernel image); the kernel image with the log line
+152,472 -> 153,044 bytes (+572): 26,156 bytes left on the RAM floppy, 1,580 on the mount tests' floppy.
+Tests: `tools/genet-test.sh` section 13 (a previous owner's rings posted, a frame waiting to go out, nobody taking
+frames: after stage0's stop no descriptor write and no frame sent while 60 frames arrive; then Zenix's driver starts
+on that chip and frames flow; a second stop finds nothing running; a DMA that never says stopped ends the wait after
+100 ms of the beam's clock; not a v5: nothing written; checked to fail without the stop), `tools/stage0-test.sh` (the
+stop's register writes and bits, the dry run writes nothing, no GENET nothing), `tools/stage0-68k-test.py` (the real
+68k code under unicorn: the little-endian writes land as meant, the dry run leaves the window byte for byte as it
+was). The owner's checklist starts from AmigaOS with `bootzenix` again and says what to look for
+([a1200-checklist-network.md](a1200-checklist-network.md) step 1; from cold is step 9, the fallback).
 
 Sizes (*measured* 2026-10-27): `/sbin/net/genet` 16,016 bytes (mem 22,864 with its 8 KB stack); its DMA region 72 KB
 (netd's 32 receive and 16 send buffers; the self-test uses the same memory before the attach); the kernel unchanged
