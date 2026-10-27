@@ -256,6 +256,9 @@ noted in 5.4.
 - **Loads nest at most two deep**, and every case fits: a file service read from the root while the root server is
   stopped (1: the file service, 2: `@fsd`/`@zfsd` from the image); a mount whose server is stopped (1: the image, no
   disk read at all, because mounts are registered as images, 6.4). A third level fails with -ECONNRESET and is logged.
+  **Since D19 step 1** a ZenixFS mount's server is the file `/sbin/zfsd`: its restart reads the root (1: zfsd, 2: the
+  root's `@fsd` if that is stopped too); a file service that lives *on* a ZenixFS mount, started while both that
+  mount's and the root's servers are stopped, would need three levels and fails once (logged; the next call works).
   The kernel stack (4 KB) must hold two levels of `call()` + a spawn + filesystem calls: measured with
   `-fstack-usage` in build step 1.
 
@@ -470,7 +473,11 @@ and the `mount.TYPE` naming in `user/mount.c` (no test script names them; `/etc/
 for future types** (D5's optional FAT module): a filesystem type with no built-in image is a file service
 (`/sbin/fs.TYPE`, say), registered by `mount` with its path; mounting and restarting it then needs the root
 filesystem server again (nesting depth 2: the file, then the root image), and it is a decision for that module
-whether its server goes into the kernel image instead.
+whether its server goes into the kernel image instead. **ZenixFS is the first such type (D19 step 1, 2026-10-27):**
+`mount` registers `/sbin/zfsd DEVICE -id ID` (the port word left out: with the path it would not fit the 80 bytes;
+zfsd names its port `fs.DEVICE`), so "a mount's restart needs no disk read" holds for ext2 mounts only; the frozen
+built-in name `@zfsd` stays as one fixed alias to that file in the kernel's image table (an older `mount`), never for
+the root (docs/d19-network.md section 3 and its "As built").
 
 ### 6.5 Zero copy
 Nothing is copied by D11. A message still lives in its client's memory; a queued message survives a restart only
@@ -716,7 +723,8 @@ final pass: how-it-works.md, kill, ps, DESIGN.md). All of it is on main (merged 
   174264 bytes before D11, 173012 after step 1.
 - *The volume id* is written `START,SIZE,UUID` (hex) after `-id`; the medium comes from the device name's prefix
   (`ide0`, `ram0`, `dfN`), so the longest registration, a mount's `@zfsd ide0p19 fs.ide0p19 -id ...`, fits the 80
-  bytes.
+  bytes (since D19 step 1 a ZenixFS mount is `/sbin/zfsd ide0p19 -id ...`, without the port word, which then would
+  not fit).
 - *File services* can already be registered and loaded (as root, the nesting limit) in step 1: the tests of steps 4
   and 5 need a non-essential service (`pingd`). Step 7 adds only `/etc/svctab`.
 - *The back-off and the deadline* are in step 1 (the note lists them there; step 4 adds the give-up and the tests).

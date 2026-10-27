@@ -212,8 +212,8 @@ and every program would need a change); the double-height screen buffer (the own
 test); fsd's 16 KB stack (its path walk recurses up to 9 symlink levels); **the embedded server images** (fsd,
 diskd, boot and zfsd: 79 KB of the kernel image stay in memory, and each running server is a copy; zfsd's 37 KB are
 never used with an ext2 root): the biggest remaining win, but it needs execute-in-place or zfsd from the disk, a
-loader change with its own design note and reviews.
-## D19. The network (roadmap block 2; design note revision 2 after two reviews; not built)
+loader change with its own design note and reviews (zfsd from the disk: D19 step 1, built).
+## D19. The network (roadmap block 2; design note revision 2 after two reviews; step 1 built 2026-10-27, the rest not)
 **Why.** Zenix must reach the world: `ping`, telnet to BBSes, ssh, wget, NFS, a remote control, `zpkg`. **How.** One
 TCP/IP server, `netd` (lwIP 2.2, BSD-3, `NO_SYS`, raw API), a service boot registers, loaded from the disk by the
 first socket call; small user-mode driver processes as its clients through the kernel (the CM4's GENET; an A2065 for
@@ -222,11 +222,14 @@ call, a socket a kernel file kind that blocks in the kernel, polls and takes sig
 netd changes and an epoch that ends every socket when netd ends; claims, DMA memory and a quiesce so hardware never
 writes into freed memory; a kernel entropy pool with `/dev/urandom` and `/dev/random`. **Two rules for the design**:
 every driver not needed to reach the root (the network, later USB and sound) is a user-mode process (block drivers
-stay in the kernel); a server may supervise its own helper processes, with D11's numbers. **First, on its own:** zfsd
-leaves the kernel image (mount registers `/sbin/zfsd`, D11 6.4; `@zfsd` an alias): 36 KB smaller, 36 KB more free
-memory. The full design: [d19-network.md](d19-network.md).
+stay in the kernel); a server may supervise its own helper processes, with D11's numbers. **First, on its own (step 1,
+built on branch zfout 2026-10-27):** zfsd leaves the kernel image (mount registers `/sbin/zfsd`, D11 6.4; `@zfsd` one
+alias to that file, never for the root); the kernel 176,144 -> 139,644 bytes, free memory with one login +36 KB
+(*measured* in FS-UAE: 2 MB chip-only 1329 -> 1365 KB, 1 MB 392 -> 428 KB); **a ZenixFS root is test-only** until roadmap
+block 4 (the test kernel `kernel-zfs.bin`; zenixboot refuses an update that would take its server away; owner question
+5 of the note still open). The full design: [d19-network.md](d19-network.md).
 ## Where the decisions stand (2026-10-24)
-D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers, built into the kernel image. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
+D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers; fsd and diskd are built into the kernel image, zfsd is the file `/sbin/zfsd` since D19 step 1. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
 D3 relocating loader, no fork: done (ZEXE format, tools/mkzexe.py); shared libraries not started.
 D4 planar display server: not started; the kernel draws ten text consoles through Copper + blitter; a client API is not designed.
