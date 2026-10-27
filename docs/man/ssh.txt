@@ -1,0 +1,69 @@
+SSH(1)			Zenix manual
+
+NAME
+    ssh - a secure shell on another computer
+
+SYNOPSIS
+    ssh [-p PORT] [-l USER] [-i KEY] [-e CHAR|none] [-t|-T] [-v]
+        [user@]host [command...]
+
+DESCRIPTION
+    ssh logs in to host (OpenSSH's sshd, such as a Linux PC) over an
+    encrypted connection and runs a shell there, or command. With a
+    shell (and standard input a terminal) the console becomes the other
+    computer's terminal: xterm-like (TERM xterm-16color, the window size
+    80x32 on PAL), every key goes there (Ctrl-C and Ctrl-Z included),
+    Swedish letters as UTF-8, and UTF-8 from the other side is shown in
+    Latin-1 (other characters as ?), as telnet -x does. With a command,
+    no terminal is asked for (-t asks anyway), and the command's output
+    comes byte for byte, so ssh host cat file > copy works.
+
+    Logins, in OpenSSH's order: the key ~/.ssh/id_ed25519 (or -i KEY),
+    if there is one, then the server's keyboard-interactive and password
+    questions (asked on the terminal, not echoed).
+
+    The host's key: the first time, ssh shows its fingerprint and asks
+    yes/no/[fingerprint] (compare it with the fingerprint the host shows:
+    on a Linux PC, ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub);
+    the key is then kept in ~/.ssh/known_hosts ([host]:port for a port
+    other than 22). Root's /etc/ssh/ssh_known_hosts is read too. A host
+    whose key differs from the one known is refused, with the file and
+    line to remove (ssh-keygen -R host).
+
+    Escape keys, after Return: ~. closes the connection, ~^Z suspends ssh
+    (fg brings it back), ~? lists them, ~~ sends ~.
+
+OPTIONS
+    -p PORT     the port (22)
+    -l USER     the user there (else user@, else your own name)
+    -i KEY      the private key file (OpenSSH's format, Ed25519)
+    -e CHAR     another escape character (^X for a control key); none
+                turns it off
+    -t, -T      ask for a terminal, or never
+    -v          each step with its time, and the key exchanges done
+
+EXIT STATUS
+    The remote command's exit status; 255 for ssh's own errors and after
+    ~. (as OpenSSH's ssh).
+
+NOTES
+    Algorithms: curve25519-sha256 key exchange with OpenSSH's strict key
+    exchange (a server without it is refused), ssh-ed25519 host keys,
+    chacha20-poly1305@openssh.com; Ed25519 user keys only (no RSA or
+    ECDSA keys yet; no ~/.ssh/config yet). A key with a passphrase is
+    unlocked before connecting (bcrypt: minutes on a 68020). No port or
+    agent forwarding, no X11, no scp or sftp yet.
+    On a 14 MHz 68020 the key exchange takes seconds; the progress line
+    "ssh: key exchange..." says so. ssh runs one priority level below
+    where it was started (nice 1), so the network and the other consoles
+    keep up; a busy program at nice 0 on another console slows ssh down.
+    Without an MMU any program on the machine can read any memory: do not
+    run programs you do not trust while logged in to something that
+    matters. The private key file must be readable only by you (mode
+    600): a key open to others is ignored, as OpenSSH does.
+    The PC: sshd switched on and the Amiga's ~/.ssh/id_ed25519.pub in the
+    PC's ~/.ssh/authorized_keys; over Ethernet the PC's firewall must let
+    the Amiga in on port 22 (ufw allow from ADDRESS to any port 22).
+
+SEE ALSO
+    ssh-keygen(1), telnet(1), docs/d21-crypto-ssh-https.md

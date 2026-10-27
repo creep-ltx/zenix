@@ -170,6 +170,14 @@ void free(void *p)
 }
 /* realloc: in place when the block is already big enough, else a new block with the old contents (only as many
  * bytes as the old block holds) and the old one freed. On failure the old block is left as it was. */
+/* zeroed n * size bytes; NULL when the product overflows or there is no memory (OpenSSH's bcrypt_pbkdf, D21) */
+void *calloc(unsigned long n, unsigned long size)
+{
+    if (size && n > 0xFFFFFFFFu / size) return 0;
+    void *p = malloc((u32)(n * size));
+    if (p) memset(p, 0, n * size);
+    return p;
+}
 void *realloc(void *p, unsigned long n)
 {
     if (!p) return malloc((u32)n);

@@ -1,0 +1,37 @@
+CRYPTOTEST(1)		Zenix manual
+
+NAME
+    cryptotest - test and time the crypto library on this machine
+
+SYNOPSIS
+    cryptotest
+    cryptotest time [N]
+    cryptotest mul
+
+DESCRIPTION
+    A test program for DESIGN D21 (docs/d21-crypto-ssh-https.md, step 2).
+    Without arguments it checks the crypto library's known answers on
+    this CPU: X25519 both ways (BearSSL's and Monocypher's, RFC 7748, the
+    all-zero results refused), Ed25519 (RFC 8032), ChaCha20, Poly1305 and
+    the AEAD (RFC 8439), SHA-256, SHA-512 and HMAC (FIPS 180, RFC 4231),
+    and ssh's chacha20-poly1305 packets. A wrong answer prints a FAIL
+    line; the last line is "cryptotest: N checks, F failed: ok" (or FAIL).
+
+    time [N] times each operation by the E-clock, the best of N runs (3
+    when not given): BearSSL's and Monocypher's X25519 side by side,
+    Ed25519 signing and verifying, chacha20-poly1305 sealing and opening
+    16 KB, SHA-256 of 16 KB.
+
+    mul times 100,000 muls.l and mulu.w multiplies with the operands 0,
+    1, all ones and random, and says whether the time depends on them
+    (the side-channel check of D21 9.2).
+
+EXIT STATUS
+    0 when every known answer is right, 1 otherwise, 2 for a usage error.
+
+NOTES
+    An emulator's times are not the machine's: the figures that decide
+    D21's choices come from the real stock A1200 and the 68060.
+
+SEE ALSO
+    ssh(1), ssh-keygen(1), docs/a1200-checklist-network.md

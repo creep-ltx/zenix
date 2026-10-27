@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz
+          rz cryptotest ssh ssh-keygen
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -382,6 +382,60 @@ $(BUILD)/telnet.uo: user/telnet.c net/telnet/telnet.h user/xfer/xfer.h user/sock
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/telnet.uelf: $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/xf-detect.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/xf-detect.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# the crypto library (DESIGN D21 3.5, docs/d21-crypto-ssh-https.md): BearSSL and Monocypher (only the files used,
+# crypto/*/README) and Zenix's crypto/zc/, as one archive linked with --gc-sections into the programs that use it
+# (cryptotest, ssh, ssh-keygen). Cold code at -Os; the files a handshake waits on at -O2 (D21 3.6 step 1: the curve25519
+# and Ed25519 arithmetic, the i15 Montgomery multiply, P-256, ChaCha20, Poly1305, SHA-2)
+CRYPTO_SRCS := $(sort $(wildcard crypto/zc/*.c)) crypto/monocypher/monocypher.c crypto/monocypher/monocypher-ed25519.c \
+               $(sort $(shell find crypto/bearssl/src -name '*.c')) crypto/openssh/blowfish.c crypto/openssh/bcrypt_pbkdf.c
+CRYPTO_O2 := crypto/monocypher/monocypher.c crypto/monocypher/monocypher-ed25519.c crypto/bearssl/src/ec/ec_c25519_m15.c \
+             crypto/bearssl/src/int/i15_montmul.c crypto/bearssl/src/ec/ec_p256_m15.c crypto/bearssl/src/symcipher/chacha20_ct.c \
+             crypto/bearssl/src/symcipher/poly1305_ctmul32.c crypto/bearssl/src/hash/sha2small.c crypto/bearssl/src/hash/sha2big.c
+CRYPTO_DEF := -DBR_LE_UNALIGNED=0 -DBR_BE_UNALIGNED=0 -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0 \
+              -Icrypto/bearssl/inc -Icrypto/bearssl/src -Icrypto/openssh
+CRYPTO_OBJS := $(patsubst %.c,$(BUILD)/cr/%.o,$(CRYPTO_SRCS))
+$(BUILD)/cr/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) -m68020-60 -msoft-float -ffunction-sections -fdata-sections -fno-common -g $(CRYPTO_DEF) \
+	    $(if $(filter $<,$(CRYPTO_O2)),-O2,-Os) -c $< -o $@
+$(BUILD)/libcrypto.a: $(CRYPTO_OBJS) Makefile
+	rm -f $@
+	$(TOOLPREFIX)ar rcs $@ $(CRYPTO_OBJS)
+$(BUILD)/cryptotest.uo: user/cryptotest.c tools/host/crypto-vectors.h crypto/zc/zc.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
+$(BUILD)/cryptotest.uelf: $(BUILD)/cryptotest.uo $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/cryptotest.uo $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
+STACK_cryptotest := 24576
+# ssh and ssh-keygen (DESIGN D21 4, docs/man/ssh.txt): ssh's core in net/ssh/ (system-call free, shared with the PC
+# tests) over the library, and telnet's Unix-mode filter and keys (net/telnet/)
+SSHCORE := auth channel config keys knownhosts transport wire
+SSHOBJS := $(SSHCORE:%=$(BUILD)/cr/net/ssh/%.o)
+$(BUILD)/cr/net/ssh/%.o: net/ssh/%.c net/ssh/ssh.h net/ssh/ssh_int.h
+	@mkdir -p $(dir $@)
+	$(CC) -m68020-60 -msoft-float -ffunction-sections -fdata-sections -fno-common -g $(CRYPTO_DEF) -Os -c $< -o $@
+$(BUILD)/ssh.uo $(BUILD)/ssh-keygen.uo: $(BUILD)/%.uo: user/%.c net/ssh/ssh.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
+$(BUILD)/ssh.uelf: $(BUILD)/ssh.uo $(BUILD)/pw.uo $(SSHOBJS) $(TNOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/ssh.uo $(BUILD)/pw.uo $(SSHOBJS) $(TNOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/ssh-keygen.uelf: $(BUILD)/ssh-keygen.uo $(SSHOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/ssh-keygen.uo $(SSHOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
+STACK_ssh := 16384
+# ssh is a program with shared code (D13, D21 3.5: one copy of its ~100 KB for every session): pure builds of the
+# library, the core and telnet's filter (tools/purecc.sh), linked as ssh.pzx and installed as ssh (PUREAPPS)
+CRYPTO_POBJS := $(patsubst %.c,$(BUILD)/crp/%.o,$(CRYPTO_SRCS))
+SSHPOBJS := $(SSHCORE:%=$(BUILD)/crp/net/ssh/%.o) $(patsubst %,$(BUILD)/crp/net/telnet/%.o,proto filter keys cp437)
+$(BUILD)/crp/%.o: %.c tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) -m68020-60 -msoft-float -ffunction-sections -fdata-sections -fno-common -g $(CRYPTO_DEF) \
+	    $(if $(filter $<,$(CRYPTO_O2) net/telnet/filter.c),-O2,-Os) -c $< -o $@
+$(BUILD)/libcrypto-pure.a: $(CRYPTO_POBJS) Makefile
+	rm -f $@
+	$(TOOLPREFIX)ar rcs $@ $(CRYPTO_POBJS)
+$(BUILD)/ssh.po: user/ssh.c net/ssh/ssh.h user/pw.h user/libz.h user/usys.h tools/purecc.sh | $(BUILD)
+	tools/purecc.sh $(CC) $(UCFLAGS) -Os -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
+$(BUILD)/ssh.puelf: $(BUILD)/ssh.po $(BUILD)/pw.po $(SSHPOBJS) $(BUILD)/libcrypto-pure.a $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
+	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/ssh.po $(BUILD)/pw.po $(SSHPOBJS) $(BUILD)/libcrypto-pure.a $(BUILD)/libz.po $(LIBGCC) -o $@
+STACK_ssh-keygen := 16384
 # rz and sz (DESIGN D20 5, docs/man/rz.txt; sz is a link to rz): the Zmodem engine (user/xfer/, CTerm's, MIT) at -O2
 # (every byte of a transfer goes through it), the download rules (rzrules.c, shared with the PC tests) and rz.c cold
 XFEROBJS := $(BUILD)/xf-zmodem.no $(BUILD)/xf-detect.no $(BUILD)/xf-rzrules.no
@@ -436,9 +490,9 @@ $(BUILD)/login.puelf: $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/
 	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po $(BUILD)/sha256.po $(BUILD)/libz.po $(LIBGCC) -o $@
 $(BUILD)/login.po $(BUILD)/pw.po $(BUILD)/sha.po: user/pw.h
 # DESIGN D13 stage 1: these commands are installed as programs with shared code (one copy of sh's and login's code
-# for every console's session). Nothing they do sends raw messages (limits.md); sh.c and login.c were checked with
-# -Wwrite-strings: no write into a literal.
-PUREAPPS := sh login
+# for every console's session; ssh: one copy for every ssh session, D21 3.5). Nothing they do sends raw messages
+# (limits.md); sh.c, login.c and ssh.c were checked with -Wwrite-strings: no write into a literal.
+PUREAPPS := sh login ssh
 $(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
 	cp $< $@
 

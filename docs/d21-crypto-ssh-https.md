@@ -1,6 +1,6 @@
 # D21: the crypto library, `ssh` and HTTPS (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 15), nothing built.** Roadmap block 2 (owner
+Status: **design, revision 2 after two independent reviews (section 15); steps 0-3 built ("As built" at the end: steps 0-1 by the side helper, 2-3 on branch m4, 2026-10-27); step 2's time table and the X25519 choice wait for the owner's A1200 and 060.** Roadmap block 2 (owner
 2026-10-26: "I need to be able to SSH into my Linux machine, properly"): "one small crypto library: modern, small and
 constant-time, e.g. BearSSL (MIT) for TLS and Dropbear's client (MIT) for SSH, with Ed25519/X25519/ChaCha20 and a real
 random source; it also signs `zpkg`'s packages; then `ssh` (a proper client, keys, known hosts) and HTTPS for
@@ -738,3 +738,62 @@ refused; (12) limits: bcrypt rounds at most 1024, at most 8 keyboard-interactive
 chain; (13) the X.509 wrapper refuses "no time" itself (BearSSL would quietly use `time()`); (14) sshd in the tests
 runs under `unshare --map-root-user --map-auto -nm`; (15) fuzz builds use `-fno-sanitize=function`. For step 3: the
 caller keeps calling `ssh_write` until it returns 0 before it polls.
+
+## As built: step 2, `cryptotest` (branch m4, 2026-10-27; the A1200's and the 060's table not yet made)
+
+The library for Zenix programs: the Makefile builds `crypto/` (BearSSL's 60 files, Monocypher, OpenSSH's bcrypt files,
+`crypto/zc/`) into `build/libcrypto.a`, linked with `--gc-sections`; -O2 for the files a handshake waits on (3.6
+step 1: Monocypher, `ec_c25519_m15`, `i15_montmul`, `ec_p256_m15`, `chacha20_ct`, `poly1305_ctmul32`, SHA-2), -Os for
+the rest; the same `BR_*` defines as the PC tests (no unaligned access, no system random source). The programs include
+the library's headers through `net/port/shim` (libz is the C library: no newlib header clashes); libz gained `calloc`
+(bcrypt's). `check-68020-60` passes over `cryptotest`, `ssh` and `ssh-keygen`.
+
+`user/cryptotest.c` (`docs/man/cryptotest.txt`): the known answers from `tools/host/crypto-vectors.h` (the PC tests'
+file, one copy): 83 checks (X25519 both ways with the all-zero cases, RFC 8032, RFC 8439, FIPS 180, RFC 4231, ssh's
+packets); `cryptotest time [N]` by the E-clock (its rate measured against the tick); `cryptotest mul` (9.2: 100,000
+`muls.l` and `mulu.w` with four operand classes). **Choices:** the 1,000-iteration X25519 check stays on the PC (minutes
+on a 68020); no assembler and no X25519 switch yet: the note waits for the real machines' table (the weekend checklist,
+`a1200-checklist-network.md` section 10), so `zc_x25519` stays BearSSL's.
+
+**FS-UAE's figures (the emulated 68EC020 of the stock A1200; an emulator's, NOT the machine's):** X25519 BearSSL 4.84 s,
+Monocypher 8.17 s; Ed25519 sign 3.37 s, verify 11.18 s; chacha20-poly1305 16 KB/s; SHA-256 31 KB/s; `muls.l` and
+`mulu.w` the same time for every operand (spread 0%: FS-UAE does not model data-dependent multiply times, so this says
+nothing about the real 020). Size: `cryptotest` 78,368 bytes. **Tests:** `tools/crypto68k-test.sh` (in `make check`):
+the known answers on the 020 (stock A1200), 030, 040 and 060 machines, all pass; on the 020 the time and multiplier
+runs complete.
+
+## As built: step 3, `ssh-keygen` and `ssh` (branch m4, 2026-10-27; not yet run on the A1200)
+
+`user/ssh.c` (`docs/man/ssh.txt`) over `net/ssh/` and the library, `user/ssh-keygen.c` (`docs/man/ssh-keygen.txt`).
+As 4.2-4.5 say: step 3's algorithm column; OpenSSH's files; trust on first use (`yes/no/[fingerprint]`, read on
+`/dev/tty`), a changed or revoked key refused with the file, line and `ssh-keygen -R`; `/etc/ssh/ssh_known_hosts` read
+when the user's file does not know the host; the Unix mode's console rule `CONR_LFONLY` and telnet's Unix filter and
+keys when a terminal is asked for and the output is the console, the bytes untouched otherwise (`ssh host cat f > g`);
+`TTY_RAW | TTY_NOSIG` while a terminal session runs; OpenSSH's escapes `~.` `~^Z` `~?` `~~` after Return; nice 1;
+256-byte screen writes; `ssh_write` called until it takes nothing before each poll (the step-1 choice); the key wiped
+once the session is open; `-v` prints each step with its time since boot. Choices where the note was silent:
+1. **The identity:** `-i KEY`, else `~/.ssh/id_ed25519` when it exists; a key file open to group or others is ignored
+   with OpenSSH's "UNPROTECTED PRIVATE KEY FILE" warning; a passphrase is asked on the terminal before connecting.
+2. **A terminal** when no command is given and standard input is a terminal (`-t` forces, `-T` never), as OpenSSH.
+3. **`ssh-keygen`:** `-t ed25519 -f -C -N -a -q`, `-l`, `-y` (`-P` for a protected key), `-R HOST` (known_hosts, the old
+   file as `.old`); an existing key file is never overwritten; `~/.ssh` made 700, the key written 600 before its
+   secret goes in, `.pub` 644; the comment `$USER@$HOSTNAME`.
+4. **`ssh` is a program with shared code** (D13 ZEX2, as 3.5 says: `PUREAPPS`): a pure build of the library, the core
+   and telnet's filter through `tools/purecc.sh` (`build/libcrypto-pure.a`); no table form purecc refuses appeared.
+
+**Sizes (*measured*):** `ssh` 103,200 bytes of shared code, 1,716 of data and 30 KB of other memory per process (the
+plain build was 102,468 bytes); `ps` during a session: 113 KB own plus 100 KB shared; `ssh-keygen` 54,148 bytes. The
+kernel is unchanged by this step. **Memory on the stock A1200** (2 MB chip RAM, FS-UAE, the A2065 with DHCP, one
+login, one ssh session): **850 KB free** (the note's estimate was about 1,020 KB: ssh's receive buffer grows to the
+35,000-byte packet, its static buffers and the A2065's netd count too). **Times (FS-UAE's emulated 68EC020, an
+emulator's):** a key login 26 s from the start to the session (key exchange to host key verified 22 s, the signed
+publickey request 4 s); 1 MB through the session in about 140 s (about 7.5 KB/s, the CPU decrypting) with the
+server's rekey in the middle.
+**Tests:** `tools/ssh-test.sh` (FS-UAE, in `make check`; `tools/ssh-ns.py` runs two OpenSSH sshds in a user, mount and
+network namespace, `unshare --map-root-user --map-auto -nm`): `ssh-keygen` makes root's key (mode 600, OpenSSH's public
+line); the first `ssh` asks about the unknown host (answered yes), logs in with the password and appends the Amiga's
+key to the PC's `authorized_keys`; a key login (sshd's log: "Accepted publickey") runs a command whose exit status 7
+comes back; 1 MB from the PC byte for byte (compared on the PC and by `sha256sum` on Zenix) with the server's rekey
+(`RekeyLimit 1M`, two key exchanges); a host whose key differs from known_hosts refused (exit 255, no login on that
+sshd); an interactive shell (a command, Ctrl-C to a remote `sleep`, `free` and `ps` on console 2), `~.` (exit 255).
+SLIP was not tried (the A2065 path covers the protocol; over SLIP the 11.5 KB/s line is the limit): left for the A1200.

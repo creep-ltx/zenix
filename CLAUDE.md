@@ -221,6 +221,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   -EAGAIN), any other bit -EINVAL; `rz`/`sz`'s standard input and output contract (lrzsz's; `sz` a link to `rz`); the
   phone book `~/.phonebook` (`NAME HOST [PORT] [amiga|pc|unix] [ice]`, `#` comments, unknown words ignored with a
   word). Not frozen: `rz -T`'s standard-error form (telnet and rz ship together), the options.
+- **D21 steps 2-3 (cryptotest, ssh, branch m4, 2026-10-27):** ssh's files are OpenSSH's (`~/.ssh/id_ed25519` and
+  `.pub`, `~/.ssh/known_hosts`, root's `/etc/ssh/ssh_known_hosts`), followed, not ours to freeze; ssh's exit status
+  (the remote command's, 255 its own) as OpenSSH's.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

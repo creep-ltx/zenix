@@ -141,6 +141,56 @@ Switch the A1200 **off**, wait 5 seconds, switch it on, pick Zenix in the boot m
 AmigaOS's network never ran, so nothing can be left running: if the trouble is gone this way, it came from the warm
 start. **Note** which way showed the trouble, and tell the session (d19-network.md 14, step 9, "the warm start").
 
+## 10. The crypto timings (DESIGN D21 step 2; on the stock A1200 and on the A1200 with the Apollo 060)
+
+These numbers decide which X25519 code ssh uses and whether assembler is needed; FS-UAE's figures do not count. On
+each machine, as root, after a cold start (nothing else running):
+```
+cryptotest
+cryptotest time 3
+cryptotest mul
+```
+**Photo** each screen. `cryptotest` must end `0 failed: ok`. From `cryptotest time 3` **note** every `time` line
+(X25519 BearSSL and Monocypher, Ed25519 sign and verify, chacha20-poly1305, SHA-256). From `cryptotest mul` **note**
+the two summary lines: "the same time for every operand" is what we hope for; "THE TIME DEPENDS ON THE OPERANDS" means
+the 020's multiplier leaks timing, and the session switches BearSSL to its constant-time multiply.
+
+| Measurement | Stock A1200 | Apollo 060 |
+|---|---|---|
+| X25519 BearSSL | ms | ms |
+| X25519 Monocypher | ms | ms |
+| Ed25519 sign / verify | ms / ms | ms / ms |
+| chacha20-poly1305 seal 16 KB | KB/s | KB/s |
+| muls.l / mulu.w: same time for every operand? | | |
+
+## 11. ssh to the PC (DESIGN D21 step 3)
+
+On the PC (once): sshd must be running (`sudo systemctl enable --now sshd`). Over Ethernet (the PiStorm) the PC's
+firewall must let the Amiga in: `sudo ufw allow from 192.168.x.y to any port 22 proto tcp` (the Amiga's address from
+`ifconfig eth0`). Over the serial cable and SLIP the PC is `10.0.2.2` and no firewall rule is needed. Write down the
+PC's key fingerprint: `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`.
+
+On the Amiga, as the user who will log in:
+```
+ssh-keygen
+cat ~/.ssh/id_ed25519.pub
+```
+`ssh-keygen` makes the Amiga's own key (no passphrase, it asks nothing). The second line
+shows the public key, one line starting `ssh-ed25519`. Put that line into the PC's `~/.ssh/authorized_keys`, the easy
+way with the PC's password once:
+```
+ssh you@192.168.x.10 'mkdir -p .ssh; cat >> .ssh/authorized_keys' < ~/.ssh/id_ed25519.pub
+```
+The first connection shows the PC's fingerprint and asks: compare it with the one you wrote down, then type `yes`.
+Then log in with the key:
+```
+ssh you@192.168.x.10
+```
+**Note** how many seconds from Return to the PC's prompt (on the stock A1200 the key exchange takes a while; `ssh -v`
+shows each step with its time: **photo** that once). In the session try `ls --color`, `top`, `nano` or `less`, a
+Swedish letter, Ctrl-C on a `sleep 100`; leave with Return, `~`, `.`. **Note** `free` on another console (Amiga+F2)
+while the session is up. If the PC says "Permission denied (publickey)", check the line in `authorized_keys`.
+
 ## What to send back
 
 The photos, the notes, and the speed table. Nothing on the card needs changing by hand; the session reads the rest

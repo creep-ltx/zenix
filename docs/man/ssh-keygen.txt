@@ -1,0 +1,46 @@
+SSH-KEYGEN(1)		Zenix manual
+
+NAME
+    ssh-keygen - make and look at ssh keys
+
+SYNOPSIS
+    ssh-keygen [-t ed25519] [-f FILE] [-C COMMENT] [-N PASS] [-a ROUNDS] [-q]
+    ssh-keygen -l [-f FILE]
+    ssh-keygen -y [-f FILE] [-P PASS]
+    ssh-keygen -R HOST [-f FILE]
+
+DESCRIPTION
+    Without -l, -y or -R, ssh-keygen makes a new Ed25519 key pair: FILE
+    (~/.ssh/id_ed25519 when not given; ~/.ssh is made with mode 700) holds
+    the private key in OpenSSH's format, mode 600, and FILE.pub the one
+    line public key to put in another computer's ~/.ssh/authorized_keys.
+    An existing FILE is never overwritten. The key is made from
+    /dev/random (on a fresh machine it may wait for the random pool:
+    type on the keyboard). The comment is user@host unless -C gives one.
+
+    -l prints the fingerprint of a key (private or .pub): "256
+    SHA256:... comment (ED25519)". -y prints the public key line of a
+    private key. -R HOST removes HOST's lines (also [HOST]:port) from
+    known_hosts (~/.ssh/known_hosts, or FILE), keeping the old file as
+    FILE.old.
+
+OPTIONS
+    -t ed25519  the only key type
+    -f FILE     the key file (or the known_hosts file with -R)
+    -C COMMENT  the key's comment
+    -N PASS     protect the new key with a passphrase (none by default)
+    -P PASS     the passphrase of the key -l or -y reads
+    -a ROUNDS   bcrypt rounds for -N (16, OpenSSH's; 1-1024)
+    -q          say nothing
+
+EXIT STATUS
+    0 on success, 1 on failure, 2 for a usage error.
+
+NOTES
+    A passphrase is slow on a 68020 (bcrypt: minutes at 16 rounds) and
+    protects the key on a lost card, not the key in memory: without an
+    MMU any program can read it. Hashed known_hosts names are not removed
+    by -R.
+
+SEE ALSO
+    ssh(1), docs/d21-crypto-ssh-https.md

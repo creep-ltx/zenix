@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 127 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 130 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -70,6 +70,8 @@ spot-checked against the code that day.
 | [host](man/host.txt) | look a name up (`/etc/hosts`, then DNS) |
 | [telnet](man/telnet.txt) | a terminal to another computer over the network: Amiga and PC boards, Unix hosts, Zmodem, a phone book (DESIGN D20) |
 | [rz, sz](man/rz.txt) | receive and send files with Zmodem over standard input and output (DESIGN D20) |
+| [ssh](man/ssh.txt) | a secure shell on another computer (OpenSSH's sshd): keys, known hosts, ~. (DESIGN D21) |
+| [ssh-keygen](man/ssh-keygen.txt) | make the Amiga's ssh key; fingerprints, public key lines, known_hosts entries removed (DESIGN D21) |
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
 | [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 | [genet](man/genet.txt) | not a command: the Ethernet driver of a Raspberry Pi CM4 or Pi 4 under Emu68 (`/sbin/net/genet`), started by netd |
@@ -80,11 +82,11 @@ spot-checked against the code that day.
 [msgping](man/msgping.txt), [msgpingd](man/msgpingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt),
 [priotest](man/priotest.txt), [svctest](man/svctest.txt), [sigtest](man/sigtest.txt),
 [socktest](man/socktest.txt), [socktestd](man/socktestd.txt) (the socket layer and its test server, DESIGN D19),
-[nettest](man/nettest.txt) (the network over the loopback, D19).
+[nettest](man/nettest.txt) (the network over the loopback, D19), [cryptotest](man/cryptotest.txt) (the crypto library's known answers and times, D21).
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 127 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 130 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

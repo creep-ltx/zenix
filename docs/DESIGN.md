@@ -230,7 +230,7 @@ block 4 (the test kernel `kernel-zfs.bin`; zenixboot refuses an update that woul
 5 of the note still open). The full design: [d19-network.md](d19-network.md).
 ## D20. telnet, the BBS terminal and pseudo-terminals (D19 step 11; design note revision 2 after independent reviews; steps 0-5 built: the console's font and rules (t12), telnet's modes (t3), Zmodem and the phone book (m4), 2026-10-27)
 **Why.** The owner's daily use of the Amiga is telnet to BBSes. **How.** One `telnet` process (`poll` on the socket and the tty; BINARY, ECHO, SGA, TERMINAL-TYPE, NAWS 80 x 32) whose PC, Amiga and Unix modes translate keys and filter the stream, while the console draws (a CP437 font and seven board rules per console, loaded on demand by two `SYS_console` ops that name the console by a file descriptor); Zmodem by `rz`/`sz` (CTerm's engine), started by itself; pseudo-terminals, SIGHUP and a telnet server later, as a step of their own. The full design: [d20-telnet.md](d20-telnet.md).
-## D21. The crypto library, `ssh` and HTTPS (roadmap block 2; design note revision 2 after two reviews, nothing built)
+## D21. The crypto library, `ssh` and HTTPS (roadmap block 2; design note revision 2 after two reviews; steps 0-3 built: the library and ssh's core on the PC, `cryptotest`, `ssh` and `ssh-keygen` (branch m4, 2026-10-27); the A1200's time table pending)
 **Why.** The owner must reach the Linux PC properly by ssh, `wget` needs HTTPS, and updates and packages need
 signatures (D15 step 7). **How.** One static library, `crypto/`: BearSSL (MIT; TLS 1.2, X.509, RSA, ECDSA, AES, its
 16-bit-multiply code that suits every 68020-68060) and Monocypher (CC0; Ed25519, ChaCha20-Poly1305; X25519 from whichever of the two is faster on a
