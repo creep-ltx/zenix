@@ -5,18 +5,26 @@ section 3, "Updates"). The bundle and the manifest are frozen formats (CLAUDE.md
 
   mkzup.py packages BUILD "UAPPS"        the standard packages from a build: BUILD/pkg/NAME.manifest + NAME.tgz
                                          (zup, base, utils, man; the version from kernel/version.h, or ZVNUM/ZVSTR)
-  mkzup.py pkg OUTDIR NAME VNUM VSTR [--group G] [--dep NAME:VNUM]... ENTRY...
+  mkzup.py pkg OUTDIR NAME VNUM VSTR [--group G] [--dep NAME:VNUM]... [--desc TEXT] [--takes NAME]... ENTRY...
         one package from explicit entries (the tests): f:MODE:UID:GID:SRC:/PATH (a file), c:... (a config file the
         owner may edit), l:TARGET:/PATH (a symbolic link), d:MODE:UID:GID:/PATH (a directory)
   mkzup.py bundle OUT --kernel FILE [--version V --vstr S --date YYYYMMDD --channel C (default test; release channels: testing, stable) --min V] PKGDIR NAME...
         a bundle: the kernel as boot/zenix and the named packages (each pkg/NAME.manifest + pkg/NAME.tgz); the
-        version defaults to the packages' and must be the one the kernel image carries (its "ZVER" record)
+        version defaults to the packages' and must be the one the kernel image carries (its "ZVER" record);
+        --base-only refuses a package that is not in the group "base" (DESIGN D22 3.1: a system bundle carries the
+        base group only; tools/mkrepo.py always asks for it)
+  mkzup.py bundle OUT --no-kernel [--channel C --min V --date YYYYMMDD] PKGDIR NAME
+        a package bundle (DESIGN D22 3.1): exactly one package, no kernel; the version and its string are the
+        package's, the minimum base its "depends base" line's (else 0) unless --min says
   mkzup.py repack PKGDIR NAME /PATH=HOSTFILE...   rebuild package NAME with these files' contents (a new path is
                                          added as a file, mode 755) - for test bundles that change something
   mkzup.py check FILE                    every range and SHA-256 of a bundle; exit 1 with the reason if one is wrong
   mkzup.py list FILE                     the header and the parts
   mkzup.py installdb STAGE PKGDIR DEST   the manifests of the packages whose every entry is in the staging tree STAGE
                                          as the manifest says, into DEST (/var/lib/zpkg of a root image; mkroot.sh)
+
+Manifest lines added by DESIGN D22 (growth; older readers ignore them): "desc TEXT" (one line, at most 72
+printable characters) and "takes OTHER" (8.4.4), after the dependencies.
 
 Bundle (big-endian): a 96-byte header ("ZUP1", format 1, header size 96, version number, version string[16], date,
 minimum installed base version, channel[8], TOC offset, TOC entries, total size, flags 0, SHA-256 over header bytes
@@ -72,15 +80,30 @@ def check_path(p):
 
 
 # ---- packages ----
-def make_package(outdir, name, vnum, vstr, entries, group=None, deps=()):
+NAME_PKG_RE = re.compile(r'^[a-z0-9][a-z0-9.+-]{0,23}$')
+DESC_RE = re.compile(r'^[\x20-\x7e]{1,72}$')
+BASE_GROUP = "base"
+
+
+def make_package(outdir, name, vnum, vstr, entries, group=None, deps=(), desc=None, takes=()):
     """entries: (kind, mode, uid, gid, src or link target, path); kind f c l d. Writes NAME.manifest and NAME.tgz."""
-    if not re.match(r'^[a-z0-9][a-z0-9.+-]{0,23}$', name):
+    if not NAME_PKG_RE.match(name):
         die("bad package name %r" % name)
     lines = ["zpkg 1", "name %s" % name, "version %d %s" % (vnum, vstr)]
     if group:
         lines.append("group %s" % group)
     for d, v in deps:
         lines.append("depends %s %d" % (d, v))
+    if desc is not None:
+        if not DESC_RE.match(desc) or desc != desc.strip():
+            die("%s: bad desc %r (one line, 1-72 printable characters, D22 3.3)" % (name, desc))
+        lines.append("desc %s" % desc)
+    for t in takes:
+        if not NAME_PKG_RE.match(t) or t == name:
+            die("%s: bad takes %r" % (name, t))
+        if group == BASE_GROUP:
+            die("%s: a base-group package never takes another's files (D22 8.4.4)" % name)
+        lines.append("takes %s" % t)
     tbuf = io.BytesIO()
     tar = tarfile.open(fileobj=tbuf, mode="w", format=tarfile.USTAR_FORMAT)
     seen = set()
@@ -122,7 +145,7 @@ def parse_manifest(text):
     lines = text.decode().split("\n")
     if lines[0] != "zpkg 1":
         raise ValueError("not a zpkg 1 manifest")
-    m = {"deps": [], "entries": [], "group": None}
+    m = {"deps": [], "entries": [], "group": None, "desc": None, "takes": []}
     for ln in lines[1:]:
         if not ln:
             continue
@@ -135,6 +158,10 @@ def parse_manifest(text):
             m["group"] = w[1]
         elif w[0] == "depends":
             m["deps"].append((w[1], int(w[2])))
+        elif w[0] == "desc":
+            m["desc"] = ln[5:]
+        elif w[0] == "takes":
+            m["takes"].append(w[1])
         elif w[0] in ("f", "c"):
             m["entries"].append((w[0], int(w[1], 8), int(w[2]), int(w[3]), w[4], int(w[5]), w[6], None))
         elif w[0] == "d":
@@ -221,25 +248,52 @@ def kernel_version(img):
     return None, None
 
 
-def make_bundle(out, kernel, pkgdir, names, vnum=None, vstr=None, date=None, channel="test", minv=0, nocheck=False):
+def make_bundle(out, kernel, pkgdir, names, vnum=None, vstr=None, date=None, channel="test", minv=None, nocheck=False,
+                base_only=False):
+    """kernel None: a package bundle (D22 3.1), exactly one package"""
     parts = []
-    kimg = open(kernel, "rb").read()
-    parts.append((b"boot/zenix", kimg))
+    kimg = None
+    if kernel is not None:
+        kimg = open(kernel, "rb").read()
+        parts.append((b"boot/zenix", kimg))
+    elif len(names) != 1:
+        die("a package bundle (--no-kernel) holds exactly one package (D22 3.1)")
     mans = []
     for n in names:
         man = open(os.path.join(pkgdir, n + ".manifest"), "rb").read()
         mans.append(parse_manifest(man))
+        if base_only and kimg is not None and mans[-1]["group"] != BASE_GROUP:
+            die("%s is not in the group base: a system bundle carries the base group only (D22 3.1)" % n)
         parts.append((("pkg/%s.manifest" % n).encode(), man))
         parts.append((("pkg/%s.tgz" % n).encode(), open(os.path.join(pkgdir, n + ".tgz"), "rb").read()))
+    if kimg is None:
+        m = mans[0]
+        if vnum is None:
+            vnum = m["vnum"]
+        if vstr is None:
+            vstr = m["vstr"]
+        if minv is None:
+            minv = dict(m["deps"]).get(BASE_GROUP, 0)
     if vnum is None:
         vnum = max([m["vnum"] for m in mans] or [version_h()[0]])
     if vstr is None:
         vstr = ([m["vstr"] for m in mans if m["vnum"] == vnum] or [version_h()[1]])[0]
-    kv, _ = kernel_version(kimg)
-    if kv != vnum and not nocheck:
-        die("the kernel carries version %s, the bundle is %d (build it with the same version)" % (kv, vnum))
+    if kimg is not None:
+        kv, _ = kernel_version(kimg)
+        if kv != vnum and not nocheck:
+            die("the kernel carries version %s, the bundle is %d (build it with the same version)" % (kv, vnum))
     if date is None:
         date = vnum // 100
+    blob = bundle_bytes(parts, vnum, vstr, date, minv or 0, channel)
+    with open(out, "wb") as f:
+        f.write(blob)
+    print("%s: bundle %d (%s), %d parts, %d bytes" % (out, vnum, vstr, len(parts), len(blob)))
+
+
+def bundle_bytes(parts, vnum, vstr, date, minv, channel):
+    """parts [(name bytes, data)] -> the bundle's bytes (the layout in the module's text)"""
+    if len(vstr.encode()) > 15 or len(channel.encode()) > 7:
+        die("version string %r or channel %r too long" % (vstr, channel))
     toc_size = TOCE * len(parts)
     off = (HDR + toc_size + 15) & ~15
     toc = b""
@@ -262,9 +316,7 @@ def make_bundle(out, kernel, pkgdir, names, vnum=None, vstr=None, date=None, cha
     assert len(blob) == total
     if total > MAXSIZE:
         die("the bundle is %d bytes, more than %d" % (total, MAXSIZE))
-    with open(out, "wb") as f:
-        f.write(blob)
-    print("%s: bundle %d (%s), %d parts, %d bytes" % (out, vnum, vstr, len(parts), total))
+    return blob
 
 
 def read_bundle(data):
@@ -342,7 +394,7 @@ def repack(pkgdir, name, repl):
             ents.append((kind, mode, uid, gid, src, path))
         for path, src in repl.items():
             ents.append(("f", 0o755, 0, 0, src, path))
-        make_package(pkgdir, name, m["vnum"], m["vstr"], ents, m["group"], m["deps"])
+        make_package(pkgdir, name, m["vnum"], m["vstr"], ents, m["group"], m["deps"], m["desc"], m["takes"])
 
 
 def main(a):
@@ -350,11 +402,15 @@ def main(a):
         std_packages(a[1], a[2])
     elif len(a) >= 5 and a[0] == "pkg":
         out, name, vnum, vstr = a[1], a[2], int(a[3]), a[4]
-        group, deps, ents = None, [], []
+        group, deps, ents, desc, takes = None, [], [], None, []
         i = 5
         while i < len(a):
             if a[i] == "--group":
                 group = a[i + 1]; i += 2; continue
+            if a[i] == "--desc":
+                desc = a[i + 1]; i += 2; continue
+            if a[i] == "--takes":
+                takes.append(a[i + 1]); i += 2; continue
             if a[i] == "--dep":
                 d, v = a[i + 1].split(":"); deps.append((d, int(v))); i += 2; continue
             w = a[i].split(":")
@@ -367,7 +423,7 @@ def main(a):
             else:
                 die("bad entry %r" % a[i])
             i += 1
-        make_package(out, name, vnum, vstr, ents, group, deps)
+        make_package(out, name, vnum, vstr, ents, group, deps, desc, takes)
     elif len(a) >= 3 and a[0] == "repack":
         repack(a[1], a[2], dict(x.split("=", 1) for x in a[3:]))
     elif len(a) >= 2 and a[0] == "bundle":
@@ -376,15 +432,15 @@ def main(a):
         while i < len(a):
             if a[i] in ("--kernel", "--version", "--vstr", "--date", "--channel", "--min"):
                 opts[a[i][2:]] = a[i + 1]; i += 2
-            elif a[i] == "--no-version-check":
-                opts["nocheck"] = 1; i += 1
+            elif a[i] in ("--no-version-check", "--no-kernel", "--base-only"):
+                opts[a[i][2:]] = 1; i += 1
             else:
                 rest.append(a[i]); i += 1
-        if "kernel" not in opts or not rest:
-            die("bundle OUT --kernel FILE PKGDIR NAME...")
-        make_bundle(out, opts["kernel"], rest[0], rest[1:], int(opts["version"]) if "version" in opts else None,
+        if ("kernel" in opts) == ("no-kernel" in opts) or not rest:
+            die("bundle OUT --kernel FILE PKGDIR NAME...  or  bundle OUT --no-kernel PKGDIR NAME")
+        make_bundle(out, opts.get("kernel"), rest[0], rest[1:], int(opts["version"]) if "version" in opts else None,
                     opts.get("vstr"), int(opts["date"]) if "date" in opts else None, opts.get("channel", "test"),
-                    int(opts.get("min", 0)), "nocheck" in opts)
+                    int(opts["min"]) if "min" in opts else None, "no-version-check" in opts, "base-only" in opts)
     elif len(a) == 2 and a[0] in ("check", "list"):
         try:
             hdr, parts = read_bundle(open(a[1], "rb").read())
