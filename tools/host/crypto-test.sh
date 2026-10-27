@@ -60,6 +60,12 @@ part_vectors() {
     build_test || return
     if "$OUT/crypto-test" "${1:-vectors}" >"$OUT/vectors.log" 2>&1; then say "vectors PASS: $(tail -1 "$OUT/vectors.log")"
     else grep -a '^FAIL\|ERROR\|runtime error' "$OUT/vectors.log" | head -30; bad "vectors (log $OUT/vectors.log)"; fi
+    # zc_x25519() and zc_x25519_public() as they are when D21 step 2 picks Monocypher's X25519
+    # shellcheck disable=SC2086
+    $HOSTCC $HCFLAGS $SAN $BRDEF $CINC -DZC_X25519_MONOCYPHER -o "$OUT/crypto-test-mono" tools/host/crypto-test.c $LIB_SRCS ||
+        { bad "crypto-test (ZC_X25519_MONOCYPHER) does not build"; return; }
+    if "$OUT/crypto-test-mono" vectors >"$OUT/vectors-mono.log" 2>&1; then say "vectors PASS with ZC_X25519_MONOCYPHER"
+    else grep -a '^FAIL' "$OUT/vectors-mono.log" | head; bad "vectors with ZC_X25519_MONOCYPHER (log $OUT/vectors-mono.log)"; fi
 }
 
 # fetch_git DIR URL REV: a clone of URL at REV in DIR (once); 1 when it cannot be had
@@ -166,8 +172,91 @@ part_anchors() {
     else bad "anchors (the FAIL lines above)"; fi
 }
 
+# libFuzzer, one harness at a time with a memory limit (this PC's rule: knowledge base claude-code/): every parser of
+# tools/host/crypto-fuzz.c, SECONDS shared out evenly; the seeds come from crypto-test.py (real keys, files, chains)
+FUZZ_TARGETS="sshkex sshpkt sshopen keys kh config clean sig anchors x509 tls"
+part_fuzz() {
+    # (-fno-sanitize=function: BearSSL calls its vtables' functions through pointers whose context argument has
+    # another struct type, as its object style does everywhere; clang's check flags each call, gcc has no such check)
+    local secs=$1 n=0 t each FCC=${FUZZCC:-clang}
+    local fl="-fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined -fno-sanitize=function"
+    local fd="$OUT/fuzz" found=0
+    command -v "$FCC" >/dev/null || { skip fuzz "clang (libFuzzer) is missing"; return; }
+    build_test || return
+    for t in $FUZZ_TARGETS; do n=$((n + 1)); done
+    each=$(( (secs + n - 1) / n ))
+    mkdir -p "$fd"
+    python3 -I tools/mkanchors.py "$fd/mozilla.anchors" >/dev/null || { bad "fuzz: mkanchors"; return; }
+    [ -f "$OUT/chain.seed" ] || part_anchors >/dev/null
+    python3 -I tools/host/crypto-test.py "$OUT/crypto-test" seeds "$fd" "$fd/mozilla.anchors" || { bad "fuzz: the seeds"; return; }
+    [ -f "$OUT/chain.seed" ] && mkdir -p "$fd/x509/seeds" && cp "$OUT/chain.seed" "$fd/x509/seeds/chain"
+    for t in $FUZZ_TARGETS; do
+        local d="$fd/$t" T
+        T=$(echo "$t" | tr a-z A-Z)
+        mkdir -p "$d/corpus" "$d/artifacts" "$d/seeds"
+        # shellcheck disable=SC2086
+        $FCC $HCFLAGS $fl $BRDEF $CINC -Icrypto/openssh -DFUZZ_$T -DSSH_KEY_ROUNDS_MAX=2 -o "$d/fuzz" \
+            tools/host/crypto-fuzz.c $SSHC_SRCS $LIB_SRCS 2>"$d/build.log" || { cat "$d/build.log" | tail -5; bad "fuzz $t does not build"; continue; }
+        say "fuzz $t: $each s, one process, 2 GB memory limit (log $d/fuzz.log)"
+        if CRYPTO_FUZZ_ANCHORS="$fd/mozilla.anchors" nice "$d/fuzz" -max_total_time="$each" -rss_limit_mb=2048 \
+                -malloc_limit_mb=512 -max_len=16384 -timeout=20 -artifact_prefix="$d/artifacts/" -print_final_stats=1 \
+                "$d/corpus" "$d/seeds" >"$d/fuzz.log" 2>&1; then
+            say "fuzz $t: $(grep -a 'stat::number_of_executed_units' "$d/fuzz.log" | awk '{ print $2 }') inputs run, $(ls "$d/corpus" | wc -l) in the corpus, $(grep -a 'cov:' "$d/fuzz.log" | tail -1 | sed 's/.*cov: \([0-9]*\).*/\1/') edges: nothing found"
+        else
+            grep -a 'ERROR\|SUMMARY\|Test unit written\|==ERROR' "$d/fuzz.log" | head -12
+            bad "fuzz $t found something: $d/artifacts"
+            found=1
+        fi
+    done
+    [ $found = 0 ] && say "fuzz PASS: nothing found"
+}
+
+# m68k sizes (D21 7.1): every source compiled for -m68020-60 at -Os and at -O2, then one program per row linked with
+# --gc-sections from tools/host/crypto-size/entry.c; the libz stand-ins (stubs.c) are counted apart; each program
+# also goes through tools/check-68020-60.sh (no 64-bit multiply or divide: the 68060 has none)
+SIZE_ROWS="X25519_MONO X25519_BEAR ED25519_VERIFY SIG SSH_PRIMS SSH_STEP3 SSH TLS TLS_X509"
+part_size() {
+    local tp=${TOOLPREFIX:-}
+    [ -z "$tp" ] && { if command -v m68k-elf-gcc >/dev/null; then tp=m68k-elf-; else tp=$HOME/opt/m68k-elf/bin/m68k-elf-; fi; }
+    command -v "${tp}gcc" >/dev/null || { skip size "no m68k cross compiler (${tp}gcc; set TOOLPREFIX)"; return; }
+    local opt d f o objs row lib total stubs sshtext
+    # libgcc from the 68060 multilib, as the Makefile takes it (the default one uses the 64-bit mulu.l/divu.l itself)
+    lib=$("${tp}gcc" -mcpu=68060 -msoft-float -print-libgcc-file-name)
+    for opt in Os O2; do
+        d="$OUT/m68k-$opt"
+        rm -rf "$d"; mkdir -p "$d"
+        objs=""
+        for f in $LIB_SRCS $SSHC_SRCS; do
+            o="$d/$(echo "$f" | tr / -).o"
+            # shellcheck disable=SC2086
+            "${tp}gcc" -m68020-60 -msoft-float -$opt -ffunction-sections -fdata-sections -Wall $BRDEF $CINC \
+                -Icrypto/openssh -c "$f" -o "$o" 2>>"$d/build.log" || { tail -5 "$d/build.log"; bad "m68k -$opt: $f"; return; }
+            objs="$objs $o"
+        done
+        "${tp}gcc" -m68020-60 -msoft-float -$opt -ffunction-sections -c tools/host/crypto-size/stubs.c -o "$d/stubs.o" || { bad "m68k stubs"; return; }
+        stubs=$("${tp}size" "$d/stubs.o" | awk 'NR == 2 { print $1, $2 + $3 }')
+        for row in $SIZE_ROWS; do
+            # shellcheck disable=SC2086
+            "${tp}gcc" -m68020-60 -msoft-float -$opt -ffunction-sections -fdata-sections $BRDEF $CINC -DROW_$row \
+                -c tools/host/crypto-size/entry.c -o "$d/entry-$row.o" &&
+            "${tp}gcc" -m68020-60 -msoft-float -nostdlib -nostartfiles -Wl,--gc-sections -Wl,-e,_start \
+                -Wl,-Map,"$d/$row.map" -o "$d/$row.elf" "$d/stubs.o" "$d/entry-$row.o" $objs "$lib" 2>>"$d/build.log" ||
+                { tail -5 "$d/build.log"; bad "m68k -$opt: row $row does not link"; continue; }
+            total=$("${tp}size" "$d/$row.elf" | awk 'NR == 2 { printf "%d %d", $1, $2 + $3 }')
+            # net/ssh/'s share: its .text input sections in the memory map (not the discarded list before it)
+            sshtext=$(awk '/^Linker script and memory map/ { on = 1 } !on { next }
+                           /^ \.text/ && NF == 4 && $4 ~ /net-ssh-/ { s += strtonum($3) } /^ \.text/ && NF == 1 { sec = 1; next }
+                           sec && NF == 3 && $3 ~ /net-ssh-/ { s += strtonum($2) } { sec = 0 } END { print s + 0 }' "$d/$row.map")
+            printf 'crypto-test: size -%s %-15s code %6d%s, data+bss %d (the libz stand-ins not counted)\n' "$opt" "$row" \
+                $(( ${total% *} - ${stubs% *} )) "$([ "$sshtext" -gt 0 ] && echo " (net/ssh/ $sshtext)")" $(( ${total#* } - ${stubs#* } ))
+            TOOLPREFIX=$tp tools/check-68020-60.sh "$d/$row.elf" || bad "m68k -$opt: row $row has 64-bit multiplies or divides"
+        done
+    done
+    say "size PASS (code: text bytes of the linked program without the stand-ins; libgcc included)"
+}
+
 parts=("$@")
-[ ${#parts[@]} = 0 ] && parts=(vectors upstream wycheproof openssl ssh sign anchors)
+[ ${#parts[@]} = 0 ] && parts=(vectors upstream wycheproof openssl ssh sign anchors size)
 for ((i = 0; i < ${#parts[@]}; i++)); do
     p=${parts[i]}
     case "$p" in
@@ -179,6 +268,8 @@ for ((i = 0; i < ${#parts[@]}; i++)); do
     ssh) part_ssh ;;
     sign) part_sign ;;
     anchors) part_anchors ;;
+    size) part_size ;;
+    fuzz) if [[ "${parts[i + 1]:-}" =~ ^[0-9]+$ ]]; then part_fuzz "${parts[i + 1]}"; i=$((i + 1)); else part_fuzz 660; fi ;;
     *) echo "crypto-test: no part called $p"; exit 2 ;;
     esac
 done

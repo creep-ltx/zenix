@@ -192,7 +192,9 @@ long ssh_clean(char *dst, const char *src, long n);
 #define SSH_KEY_ECIPHER  -6             /* a cipher or key derivation other than aes256-ctr with bcrypt */
 #define SSH_KEY_ESPACE   -7             /* the work or output buffer is too small */
 #define SSH_KEY_EROUNDS  -8             /* bcrypt rounds outside 1..SSH_KEY_ROUNDS_MAX */
+#ifndef SSH_KEY_ROUNDS_MAX
 #define SSH_KEY_ROUNDS_MAX 1024         /* OpenSSH's default is 16 (minutes on a stock A1200, D21 4.4) */
+#endif
 #define SSH_KEY_WORK     4096           /* work space for an Ed25519 key file */
 
 /* Read an OpenSSH private key file (text, n bytes): the Ed25519 key into sk (seed, public half), its comment into

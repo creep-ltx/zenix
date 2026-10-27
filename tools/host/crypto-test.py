@@ -9,6 +9,7 @@
   crypto-test.py ORACLE anchors X509TEST OUTDIR
                                           tools/mkanchors.py and the X.509 wrapper (tools/host/x509-test.c) with a
                                           test CA made here, and every Mozilla root looked up in the anchors file
+  crypto-test.py ORACLE seeds FUZZDIR [ANCHORS]  the seed inputs of tools/host/crypto-fuzz.c's harnesses
   crypto-test.py ORACLE sign OUTDIR       tools/zsign.py (OpenSSL) and the library's .sig check both ways (D21 6)
   crypto-test.py ORACLE openssl [N]       differential runs against the PC's OpenSSL (Python's cryptography module and
                                           hashlib, which use it): N random cases of each (default 200)
@@ -452,6 +453,7 @@ def sign(o, out):
 # ---- tools/mkanchors.py, the anchors file and the X.509 wrapper (D21 8.1-8.2) ----
 def anchors(x509test, out):
     import datetime
+    import struct
     import shutil
     from cryptography import x509
     from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
@@ -597,6 +599,8 @@ def anchors(x509test, out):
         elif not got.startswith("0 "):
             bad += 1
     result("x509: 200 damaged anchors files: errors or the right answer, no crash (%d refused)" % bad, True, 200, crashes)
+    seed = b"".join(struct.pack(">H", len(open(files[n], "rb").read())) + open(files[n], "rb").read() for n in ("leaf", "inter"))
+    open(os.path.join(out, "chain.seed"), "wb").write(seed)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -639,6 +643,85 @@ def realroots(x509test, out):
     result("mkanchors.py on Mozilla's roots: each root found by its name hash, key and name as OpenSSL reads them", True, n, bad)
 
 
+# ---- seeds for the fuzz harnesses (tools/host/crypto-fuzz.c) ----
+def seeds(o, out, anchors_file):
+    import struct
+    import shutil
+    import tempfile
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    def put(target, name, data):
+        d = os.path.join(out, target, "seeds")
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, name), "wb").write(data)
+
+    st = lambda b: struct.pack(">I", len(b)) + b
+    nl = lambda *names: st(",".join(names).encode())
+    def plain(payload):
+        pad = 8 - (5 + len(payload)) % 8
+        if pad < 4:
+            pad += 8
+        return struct.pack(">IB", 1 + len(payload) + pad, pad) + payload + bytes(pad)
+    kexinit = (bytes([20]) + bytes(16) + nl("mlkem768x25519-sha256", "curve25519-sha256", "ext-info-s",
+               "kex-strict-s-v00@openssh.com") + nl("rsa-sha2-512", "ssh-ed25519") + nl("chacha20-poly1305@openssh.com") * 2 +
+               nl("umac-64-etm@openssh.com") * 2 + nl("none", "zlib@openssh.com") * 2 + nl() * 2 + bytes(5))
+    pk = bytes(range(32))
+    blob = st(b"ssh-ed25519") + st(pk)
+    reply = bytes([31]) + st(blob) + st(bytes(range(9, 41))) + st(st(b"ssh-ed25519") + st(bytes(64)))
+    put("sshkex", "openssh", b"SSH-2.0-OpenSSH_10.6\r\n" + plain(kexinit) + plain(reply) + plain(bytes([21])))
+    put("sshkex", "preamble", b"Welcome\r\nto the box\nSSH-2.0-x\r\n" + plain(kexinit))
+    put("sshkex", "debug", b"SSH-1.99-y\r\n" + plain(bytes([4, 1]) + st(b"hello") + st(b"")))
+    msgs = {
+        "service": [bytes([6]) + st(b"ssh-userauth")],
+        "failure": [bytes([51]) + nl("publickey", "keyboard-interactive", "password") + b"\0",
+                    bytes([53]) + st(b"Banner\r\n\x1b[31m") + st(b"")],
+        "pkok": [bytes([60]) + st(b"ssh-ed25519") + st(blob), bytes([52])],
+        "info": [bytes([60]) + st(b"name") + st(b"instr") + st(b"") + struct.pack(">I", 2) + st(b"Password: ") + b"\0" +
+                 st(b"Code: ") + b"\1"],
+        "ext": [bytes([7]) + struct.pack(">I", 1) + st(b"server-sig-algs") + st(b"ssh-ed25519,rsa-sha2-512"), bytes([52])],
+        "open": [bytes([91]) + struct.pack(">IIII", 0, 5, 100000, 32768), bytes([99]) + struct.pack(">I", 0),
+                 bytes([99]) + struct.pack(">I", 0)],
+        "data": [bytes([94]) + struct.pack(">I", 0) + st(b"hello world\r\n"), bytes([95]) + struct.pack(">II", 0, 1) + st(b"err"),
+                 bytes([93]) + struct.pack(">II", 0, 1000), bytes([98]) + struct.pack(">I", 0) + st(b"exit-status") + b"\0" +
+                 struct.pack(">I", 3), bytes([96]) + struct.pack(">I", 0), bytes([97]) + struct.pack(">I", 0)],
+        "global": [bytes([80]) + st(b"keepalive@openssh.com") + b"\1", bytes([98]) + struct.pack(">I", 0) +
+                   st(b"keepalive@openssh.com") + b"\1", bytes([2]) + st(b""), bytes([3]) + struct.pack(">I", 7)],
+        "rekey": [kexinit, reply, bytes([21])],
+        "disconnect": [bytes([1]) + struct.pack(">I", 11) + st(b"bye \x1b[2J") + st(b"")],
+    }
+    for i, (nm, ps) in enumerate(msgs.items()):
+        for where in range(9):
+            put("sshpkt", "%s-%d" % (nm, where), bytes([where]) + b"".join(struct.pack(">H", len(p_)) + p_ for p_ in ps))
+    put("sshopen", "zeros", bytes(64))
+    with tempfile.TemporaryDirectory(prefix="c01-seeds.") as t:
+        for nm, extra in (("plain", []), ("pw", ["-N", "pass phrase", "-a", "2"])):
+            k = os.path.join(t, nm)
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-f", k] + (extra or ["-N", ""]), check=True)
+            put("keys", nm, (b"P" if extra else b"-") + open(k, "rb").read())
+            put("keys", nm + ".pub", open(k + ".pub", "rb").read())
+            if nm == "plain":
+                put("kh", "lines", b"pc.lan,10.0.0.1 " + open(k + ".pub", "rb").read() + b"@revoked * " +
+                    open(k + ".pub", "rb").read() + b"[pc.lan]:2222 " + open(k + ".pub", "rb").read())
+                h = os.path.join(t, "kh")
+                open(h, "wb").write(b"pc.lan " + open(k + ".pub", "rb").read())
+                subprocess.run(["ssh-keygen", "-q", "-H", "-f", h], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                put("kh", "hashed", open(h, "rb").read())
+    put("config", "sample", b"Port 2200\nHost pc pc.* !x\n HostName=1.2.3.4\n User \"me\"\n IdentityFile ~/.ssh/k\n"
+        b"ServerAliveInterval 30\nMatch all\nHost *\n Port 22\n")
+    put("clean", "utf8", "plain \t\n\r\n\x1b[31m é € 😀 \u009b".encode() + b"\xc0\xaf\xed\xa0\x80\xff")
+    sig = bytes.fromhex(o.ask("sig_make", bytes([5] * 32), "bundle", bytes([0x11] * 32)))
+    put("sig", "good", sig)
+    put("sig", "der", bytes.fromhex("3006020101020101") + bytes(96))
+    if anchors_file and os.path.exists(anchors_file):
+        put("anchors", "mozilla", open(anchors_file, "rb").read())
+        put("x509", "empty", b"")
+    test_chain = os.path.join(out, "chain.seed")
+    if os.path.exists(test_chain):
+        put("x509", "chain", open(test_chain, "rb").read())
+    put("tls", "hello", bytes.fromhex("160303002a020000260303") + bytes(32) + bytes([0]) + bytes.fromhex("cca8") + bytes([0]))
+    put("tls", "alert", bytes.fromhex("15030300020228"))
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
@@ -650,6 +733,8 @@ def main():
         realroots(sys.argv[3], sys.argv[4])
     elif sys.argv[2] == "sign":
         sign(o, sys.argv[3])
+    elif sys.argv[2] == "seeds":
+        seeds(o, sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
     elif sys.argv[2] == "openssl":
         openssl(o, int(sys.argv[3]) if len(sys.argv) > 3 else 200)
     else:

@@ -60,11 +60,13 @@ int zc_x25519(unsigned char out[32], const unsigned char scalar[32], const unsig
 
 void zc_x25519_public(unsigned char pub[32], const unsigned char scalar[32])
 {
-#ifdef ZC_X25519_MONOCYPHER
-    crypto_x25519_public_key(pub, scalar);
-#else
     static const unsigned char base[32] = { 9 };
 
-    (void)zc_x25519_bearssl(pub, scalar, base);  /* 9 is of prime order: never zero for a clamped scalar */
+    /* the ladder over the base point 9 (of prime order: never zero for a clamped scalar); not Monocypher's
+       crypto_x25519_public_key, which works in Edwards space since f5f0a19 and pulls 4.8 KB of m68k code more */
+#ifdef ZC_X25519_MONOCYPHER
+    (void)zc_x25519_monocypher(pub, scalar, base);
+#else
+    (void)zc_x25519_bearssl(pub, scalar, base);
 #endif
 }

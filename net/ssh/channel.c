@@ -194,7 +194,7 @@ int chan_packet(struct ssh *s, unsigned type, struct rd *r)
         long n;
         const unsigned char *d = rd_str(r, &n);
 
-        if (r->bad || s->ch_step != C_RUN) {
+        if (r->bad || s->ch_step < C_PTY) {        /* (data may come before the shell's reply: RFC 4254) */
             ssh_fail(s, "damaged or early channel data");
             return 1;
         }
