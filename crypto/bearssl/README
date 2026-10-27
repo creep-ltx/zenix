@@ -1,0 +1,38 @@
+BearSSL for Zenix
+=================
+
+What this is: the TLS 1.2, X.509, RSA/ECDSA verification, AES-GCM, SHA-1/2, HMAC and HMAC-DRBG part of Zenix's
+crypto library (DESIGN D21, docs/d21-crypto-ssh-https.md section 3.2). Upstream: BearSSL, git commit 7bea48e
+(2026-04-06, "Fixed bug in handling incoming records with invalid length"), https://www.bearssl.org/git/BearSSL.
+Licence: MIT, in LICENSE (upstream's LICENSE.txt, renamed: the project keeps .txt and .md files in docs/ only);
+it travels with every binary that contains BearSSL.
+
+Only the files Zenix uses were taken, unchanged (no local patches yet):
+  inc/                    every public header (bearssl.h includes them all)
+  src/                    config.h inner.h
+  src/aead/               gcm
+  src/codec/              ccopy dec32be dec64be enc32be enc64be pemdec
+  src/ec/                 ec_all_m15 ec_c25519_m15 ec_p256_m15 ec_prime_i15 ec_secp256r1 ec_secp384r1
+                          ec_secp521r1 ecdsa_atr ecdsa_i15_bits ecdsa_i15_vrfy_asn1 ecdsa_i15_vrfy_raw
+  src/hash/               ghash_ctmul32 multihash sha1 sha2big sha2small
+  src/int/                i15_add i15_bitlen i15_decmod i15_decode i15_encode i15_fmont i15_iszero
+                          i15_modpow i15_modpow2 i15_montmul i15_muladd i15_ninv15 i15_rshift i15_sub i15_tmont
+  src/mac/                hmac
+  src/rand/               hmac_drbg sysrng (sysrng only links; Zenix builds set BR_USE_URANDOM=0 and
+                          BR_USE_GETENTROPY=0 and inject 32 bytes from /dev/random, D21 section 5)
+  src/rsa/                rsa_i15_pkcs1_vrfy rsa_i15_pub rsa_pkcs1_sig_unpad
+  src/ssl/                prf prf_sha256 prf_sha384 ssl_client ssl_engine ssl_hs_client ssl_rec_chapol
+                          ssl_rec_gcm
+  src/symcipher/          aes_ct aes_ct_ctr aes_ct_ctrcbc aes_ct_enc chacha20_ct poly1305_ctmul32
+  src/x509/               x509_decoder x509_minimal
+The implementations are the ones D21 3.2 names: aes_ct, ghash_ctmul32, poly1305_ctmul32 (32x32->32 products
+only), rsa_i15, ec_p256_m15, ec_prime_i15, ec_c25519_m15 (through ec_all_m15), ecdsa_i15. The list is what a
+program using all of D21's BearSSL parts links (the TLS 1.2 client of 3.3, x509_minimal and the decoder, PEM,
+ssh's step-3b set: RSA and P-256 verification, AES-GCM, AES-CTR for key files, HMAC-SHA1 for hashed known_hosts).
+Not taken: the T0 compiler and its .t0 sources (ssl_hs_client.c and x509_minimal.c are its output, kept as
+upstream ships them), the other implementations, the server side, samples, tools and tests.
+
+Zenix's own code lives beside this folder, never in it: crypto/zc/. The tests are tools/host/crypto-test.sh
+(it checks every file here against the pinned upstream commit when the upstream tree is at hand: BEARSSL_SRC).
+
+A new BearSSL commit: take the same files from it, run tools/host/crypto-test.sh, and change the commit above.
