@@ -1,3 +1,7 @@
 bcm2711-rpi-cm4.dtb: the Raspberry Pi Compute Module 4 device tree from the Emu68 PiStorm32-lite release
 (the Linux kernel's bcm2711-rpi-cm4.dts, GPL-2.0, compiled). Used by tools/stage0-test.sh and
 tools/stage0-68k-test.py; they apply Emu68's "ranges" rewriting before testing.
+
+bbs-sim/welcome.ans, bbs-sim/amiga.asc: a CP437 ANSI screen and a Latin-1 Amiga screen drawn for the telnet tests
+(DESIGN D20 8.1), made for this repository (GPL-2.0-only as the rest); tools/bbs-sim.py sends them. Real art packs
+are copyrighted and never committed.

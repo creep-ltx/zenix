@@ -1,7 +1,7 @@
 # D20: telnet, the BBS terminal and pseudo-terminals (design note, revision 2)
 
 Status: **design, revision 2 after independent reviews (section 13); step 1 (the console's font and rules) built on
-branch t12 2026-10-27 (section 14), the rest not built.** D19 section 10 step 11: "telnet
+branch t12 2026-10-27 ("As built" at the end, after step 0's PC-side parts), the rest not built.** D19 section 10 step 11: "telnet
 (its own note: pseudo-terminals, SIGHUP, the BBS terminal)". Roadmap block 2: `telnet` "made for BBSes, the owner's
 daily use: ANSI colours, the PC character set and Amiga fonts, the BBS window size, downloads". The short version is
 DESIGN.md D20. Facts about today's code are *read* from main at f03180e (2026-10-27); facts about boards and terminals
@@ -615,9 +615,32 @@ Last checked against the code: 2026-10-27 (main at f03180e).
 (4) a phone book, after downloads work; (5) Zmodem only, others if a board needs them; (6) Amiga-board mode by default,
 `-p` for PC boards; (7) Topaz from the ROM only.
 
-## 14. As built
+## As built: step 0, the PC-side parts (side helper, merged 2026-10-27; reviewed by the main session)
 
-### Step 1: the console's font and rules (branch t12, 2026-10-27; not yet run on the A1200)
+Built: `tools/font_8x8.c` (Linux's, GPL-2.0, unchanged but for a source comment) and `tools/mkpsf.py` (checks every
+glyph, writes the 2,052-byte PSF1, mode 0, height 8); the Zmodem engine in `user/xfer/` (`zmodem.c`, `xfer.h`,
+`detect.c` from CTerm commit 1cbb967, MIT; Zenix changes marked "Zenix:": the ZCRC question and answer for resume
+(`wresume`), `escctl` for `-e`, and a fix for CTerm's wait for an XON that ZACK never sends, which held uploads at
+32 KB/s); the download rules in `user/xfer/rzrules.c/.h` (no system calls); telnet's core in `net/telnet/` (`proto.c`,
+`filter.c`, `keys.c`, `cp437.c`; no system calls, no memory of its own, about 5 KB of 68k code at -Os);
+`tools/bbs-sim.py` with self-made art in `tools/testdata/bbs-sim/`. Tests: `tools/host/telnet-test.sh` (in `check.sh
+host`; 279 checks: the core 66, the simulator calls in three modes, Zmodem 105 against lsz/lrz incl. a bad line both
+ways; needs lsz/lrz on PATH or `LRZSZ_DIR`, like `ZENIX_KICKSTART_DIR`); fuzzing (`fuzz [SECONDS]`, not in the default
+run): 30 minutes, 15.0 million telnet inputs and 2.3 million Zmodem inputs, nothing found.
+
+Choices where the note was silent (binding for steps 1-5 unless changed here): (1) names starting with `.` are refused,
+control characters become `_`, names are capped at 246 bytes so `NAME.999.part` fits 255; (2) the rules live in
+`user/xfer/rzrules.c` so the PC tests run the same code; (3) `detect.c` (`zm_detect`, `split_detect`) is part of the
+engine, for telnet's autostart; (4) the engine is not "unchanged": the three Zenix changes above; (5) a music string
+at its 1,024-byte cap ends there and later bytes are text; (6) the `CSI 0 SP q` answer uses an 8-bit 0x9B, as CTerm and
+the Amiga console, and `CSI SP q` with no number is answered too; (7) `CSI n SP p` with n non-zero turns the cursor on;
+(8) `CSI ? 33 h/l` alone is swallowed, mixed with other modes the event fires and the sequence passes; (9) CAN or SUB
+inside an escape sequence drops both; (10) an IAC command inside SB drops the SB and acts on the command, options 40 and
+up are refused without state; (11) the PC fallback's look-alikes for the smiley-row glyphs are the side helper's
+choice; (12) the font file's build rule, its path in the root image and its licence notice are the main line's (step 1).
+A future `telnetd` needs its own accept rules (`proto.c`'s are the client's).
+
+## As built: step 1, the console's font and rules (branch t12, 2026-10-27; not yet run on the A1200)
 
 Built as 4.2-4.5 say: `SYS_console` ops `CON_FONT` 2 and `CON_RULES` 3 with the descriptor in the op word, the
 seven `CONR_*` rules in `term.c`, the shown console's font and palette in `gfx.c`, the release at a process's end
