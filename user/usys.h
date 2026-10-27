@@ -216,3 +216,9 @@ static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 
 #define SIG_UNBLOCK 1
 #define SIG_SETMASK 2
 #define SA_RESTART  0x10000000
+/* DESIGN D19, the network: the raw calls (the BSD functions over them are libz's, step 4); ops and structs in
+ * kernel/netproto.h */
+#define O_NONBLOCK 0x800        /* never wait (sockets, /dev/random) */
+#define S_IFSOCK 0140000        /* fstat's type of a socket */
+static inline int sys_sock(u32 op, int fd, void *req) { return sys3(90, op, (u32)fd, (u32)req); }
+static inline int sys_netsrv(u32 op, u32 a, u32 b) { return sys3(91, op, a, b); }

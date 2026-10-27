@@ -123,16 +123,24 @@ unseen). So:
 | 83 `evwait`, 84 `sigaction`, 85 `sigprocmask`, 86 `sigreturn`, 87 `alarm`, 88 `setpgid` (DESIGN D16); `kill`'s third argument 1 (the new form: a signal, groups) and `setfg`'s second argument 1 (a process group) | built on branch d16, 2026-10-26 |
 | `exit`'s second argument (DESIGN D18: a child's pid, made the caller's parent's child first; login steps aside for init) | built on branch diet, 2026-10-26 |
 | 89 `console` (the 2 MB diet, DESIGN D18: op 1 `CON_COLOURS`, the display's colours 2/4/8/16, 0 asks; D14 note section 11) | built on branch diet, 2026-10-26 |
-| **next free: 90** | |
+| 90 `sock` (DESIGN D19: every BSD socket call: op `SOCK_*` plus the request size << 16, fd, `struct usockreq`), 91 `netsrv` (the network server: `NETSRV_HELLO`, `READY`, `REPLY`), 92 `drv` (the network's drivers, step 7: claimed, not built) | main, branch n023, 2026-10-27 |
+| **next free: 93** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
-Message types claimed so far: `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
+Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
+numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*` from 64 (the drivers' blocks, step 7);
+`FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
 zup's "needs a check" mark), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
-Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main); `ETXTBSY` 26 (D13, "text file busy": a running
+Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main; on a socket also "reset by the peer", D19); D19's
+network numbers (Linux's, main, 2026-10-27): `ENOTSOCK` 88, `EDESTADDRREQ` 89, `EMSGSIZE` 90, `EPROTOTYPE` 91,
+`ENOPROTOOPT` 92, `EPROTONOSUPPORT` 93, `EAFNOSUPPORT` 97, `EADDRINUSE` 98, `EADDRNOTAVAIL` 99, `ENETDOWN` 100,
+`ENETUNREACH` 101, `ECONNABORTED` 103, `ENOBUFS` 105, `EISCONN` 106, `ENOTCONN` 107, `ETIMEDOUT` 110, `ECONNREFUSED`
+111, `EHOSTUNREACH` 113, `EALREADY` 114, `EINPROGRESS` 115; `ETXTBSY` 26 (D13, "text file busy": a running
 shared program opened for writing; claimed 2026-10-25, Linux's number). Update note kinds (D15, frozen, append-only):
 1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). Port names
 registered as services (D11):
-`disk`, `fs`, `fs.*`; `ping` (the test service, served by `msgpingd` since D19 step 0).
+`disk`, `fs`, `fs.*`; `ping` (the test service, served by `msgpingd` since D19 step 0); `net` (D19, the network server:
+reserved for root like `fs` and `disk`; `socktestd` serves it in the tests until netd).
 
 ## Frozen interfaces (D15 step 0, 2026-10-26; checked in every review)
 Updates install a new kernel before the programs (docs/d15-self-updates.md 2 and 4), so an older program always meets
@@ -153,7 +161,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   against the kernel); the `/etc` formats base programs read (svctab, fstab, passwd, group); the service manager's
   `SVC_*` numbers and limits (`SVC_TEXT` 80, `SVC_SAVED` 512, `SVC_MIDREQ`, exit status 86 for a damaged table), the
   port names (`disk`, `fs`, `fs.*`) and the built-in `@name` programs (`@zfsd` is an alias to `/sbin/zfsd` since D19 step 1); the tty mode bits (`TTY_RAW`, `TTY_NOSIG`),
-  `O_*` flags and mode bits, the spawn limits (argument count and bytes), exit and wait status conventions (139 for a
+  `O_*` flags and mode bits (`O_NONBLOCK` 0x800 and `S_IFSOCK` 0140000 since D19), the spawn limits (argument count and bytes), exit and wait status conventions (139 for a
   fault, `waitcon`'s console status, login's `ST_HANDED` (bit 30) plus the handed shell's pid, D18); the boot note's kinds and `SYS_reboot`'s arguments; D15's own formats (the
   bootinfo bundle fields, the update note, the state file, the bundle header and manifest, zup's journal and undo logs).
 - **One accepted change of meaning (audit3 B7, 2026-10-26):** `uproc.mem` counts a process's memory regions
@@ -170,6 +178,12 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `SIG_BLOCK`/`SIG_UNBLOCK`/`SIG_SETMASK` 0/1/2; `uproc.pgid` at the end of `uproc`; a process in the kernel's
   event wait reported by `procinfo` as state 3 (waiting for a child) or 4 (I/O), never a new number; `ST_STOPPED`
   0x114 for every stop; `PRIO_PGRP` stays -EINVAL. The kernel's event bits (`EV_*`) are internal.
+- **D19 (the network, 2026-10-27):** `kernel/netproto.h`: the `SOCK_*` op numbers and which request fields each
+  uses, `struct usockreq` (first size `USOCKREQ_FIRST` 32; the request size in `SYS_sock`'s op word, 0 = 32), the
+  `NET_*` messages (a[0] the socket's name, a[1] a `struct netreq`; the reply's a[2] bits, a[3] epoch; `NET_CLOSE`
+  a no-start call), `struct netreq`, `SYS_netsrv`'s ops and `struct unetready`, the Linux constants there (`AF_INET`,
+  `SOCK_*`, `SOL_SOCKET`, `SO_*`, `MSG_*`, `FIONREAD`, `FIONBIO`); the random seed file's format (`user/randseed.h`:
+  `ZRS1`, flags, 32 bytes) and root's write to `/dev/random` crediting it.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

@@ -48,6 +48,8 @@ __attribute__((noinline)) void file_close(struct file *f)
         fs_call_on(f->fs, FS_CLOSE, f->ino, 0, 0, 0);
     if (f->type == FT_SERIAL)
         serdev_close();
+    if (f->type == FT_SOCK)
+        sock_release(f->ino);               /* NET_CLOSE while its epoch lives (D19 rule 11) */
     struct pipe *pp = (f->type == FT_PIPE_R || f->type == FT_PIPE_W) ? f->pipe : 0;
     if (pp) {
         if (f->type == FT_PIPE_R)
@@ -148,6 +150,8 @@ u16 vfs_poll(struct file *f)
         return !p->readers ? POLLERR : p->count < sizeof p->buf ? POLLOUT : 0;
     case FT_RANDOM:
         return rnd_poll((int)f->off);
+    case FT_SOCK:
+        return sock_poll(f);            /* the server's bits, no message (D19 rule 8) */
     }
     return POLLIN | POLLOUT;
 }
@@ -571,6 +575,12 @@ long vfs_fstat(struct file *f, struct ustat *st)
             st->ino = f->off;               /* a console's number (1..NCONS): the ustat has no device field */
         return 0;
     }
+    if (f->type == FT_SOCK) {               /* DESIGN D19: S_IFSOCK, as Linux shows a socket */
+        memset(st, 0, sizeof *st);
+        st->mode = S_IFSOCK | 0777;
+        st->links = 1;
+        return 0;
+    }
     if (f->type != FT_INODE)
         return -EINVAL;                     /* a pipe: no stat */
     return fs_call_on(f->fs, FS_FSTAT, f->ino, (u32)st, 0, 0);
@@ -742,7 +752,9 @@ long vfs_read(struct file *f, void *buf, u32 n)
         memset(buf, 0, n);
         return (long)n;
     case FT_RANDOM:
-        return rnd_read((int)f->off, 0, buf, n);
+        return rnd_read((int)f->off, (f->flags & O_NONBLOCK) != 0, buf, n);
+    case FT_SOCK:
+        return sock_rw(f, buf, n, 0);
     case FT_PIPE_W:
         return -EBADF;
     case FT_INODE: {
@@ -775,7 +787,8 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return (long)n;                     /* the bit bucket */
     case FT_RANDOM:
         return rnd_write((int)f->off, buf, n);   /* mixed; root's write to /dev/random credits it (random.c) */
-
+    case FT_SOCK:
+        return sock_rw(f, (void *)buf, n, 1);
     case FT_INODE: {
         if (!(f->flags & (O_WRONLY | O_RDWR)))
             return -EBADF;                  /* opened for reading only */

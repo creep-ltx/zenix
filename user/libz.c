@@ -527,6 +527,16 @@ static const struct { unsigned char e; const char *text; } errtext[] = {
     { ERANGE, "result out of range" }, { ENAMETOOLONG, "file name too long" }, { ENOSYS, "not implemented" },
     { ENOTEMPTY, "directory not empty" }, { ELOOP, "too many levels of symbolic links" },
     { EOPNOTSUPP, "operation not supported" },
+    /* the network's (DESIGN D19) */
+    { ENOTSOCK, "not a socket" }, { EDESTADDRREQ, "destination address required" }, { EMSGSIZE, "message too long" },
+    { EPROTOTYPE, "protocol wrong type for socket" }, { ENOPROTOOPT, "protocol not available" },
+    { EPROTONOSUPPORT, "protocol not supported" }, { EAFNOSUPPORT, "address family not supported" },
+    { EADDRINUSE, "address already in use" }, { EADDRNOTAVAIL, "cannot assign requested address" },
+    { ENETDOWN, "network is down" }, { ENETUNREACH, "network is unreachable" },
+    { ECONNABORTED, "connection aborted" }, { ECONNRESET, "connection reset" }, { ENOBUFS, "no buffer space available" },
+    { EISCONN, "already connected" }, { ENOTCONN, "not connected" }, { ETIMEDOUT, "connection timed out" },
+    { ECONNREFUSED, "connection refused" }, { EHOSTUNREACH, "no route to host" },
+    { EALREADY, "operation already in progress" }, { EINPROGRESS, "operation in progress" },
 };
 /* strerror: the text of an error number (positive or negative), 0 if it has none */
 const char *zstrerror(int e)

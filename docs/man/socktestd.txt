@@ -1,0 +1,31 @@
+SOCKTESTD(8)		Zenix manual
+
+NAME
+    socktestd - the socket layer's test server
+
+SYNOPSIS
+    svctest reg net 0 /bin/socktestd
+
+DESCRIPTION
+    A test server in the network server's place on port "net" (DESIGN
+    D19 step 3): the kernel starts it at the first socket call, as it
+    will start netd. It answers the kernel's requests from a small table
+    as netd does: every request at once, done or -EAGAIN, with the
+    socket's new ready bits in the same call; changes to other sockets
+    are pushed once a turn. Its network is a loopback of stream sockets
+    on port numbers: a connect to a port someone listens on makes a pair
+    the listener accepts; a socket holds up to 512 bytes its peer sent,
+    so a bigger send waits for the reader. A connect to port 8000 or
+    above completes a second later (-EINPROGRESS first). Commands
+    (setsockopt at level 0x7A7A): 1 crash at once in the middle of the
+    request, 2 the next receive answers a far too big count, 3 end
+    cleanly, 4 (getsockopt) the number of requests answered. A socket it
+    does not know is -ENETDOWN; a message that is not the kernel's is
+    -EACCES. Its output goes to the kernel log ("socktestd: serving net,
+    epoch N").
+
+NOTES
+    A test program; the real server is netd (D19 step 4).
+
+SEE ALSO
+    socktest(1), svctest(1)

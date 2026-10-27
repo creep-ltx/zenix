@@ -18,7 +18,7 @@ The documentation must keep saying this.
 
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a
 system process, cannot set the clock, cannot talk to the filesystem or disk server directly (the servers answer only
-the kernel and root; the names `fs`, `fs.*` and `disk` are reserved for root), cannot open another user's console
+the kernel and root; the names `fs`, `fs.*`, `disk` and `net` are reserved for root), cannot open another user's console
 (`/dev/ttyN`: root, or the console one is on), and `su`, `tar x`, `find -delete`, here-documents and `mktemp` do not hand one user's
 files or environment to another (architecture.md section 14). What they cannot cover: a program written to cheat
 can still overwrite a message after the kernel stamped it, or any memory at all.
@@ -143,6 +143,11 @@ pointers.
   four chunks in use, gets 4); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
 - Paths: the directory tools report a joined path longer than a system call takes (63 bytes) instead of cutting it.
+- Sockets (DESIGN D19, architecture.md section 11): 32 kernel sockets for the whole machine, the last 4 only for root
+  (-ENFILE beyond); each is also one of the 64 open files and one of a process's 16 fds; a buffer is checked and
+  sent at most 64 KB a message (a blocking stream send loops, a datagram over 64 KB is -EMSGSIZE); an address at most
+  28 bytes (the true length is still returned), an option's value at most 64; `SO_RCVTIMEO`/`SO_SNDTIMEO` in ticks
+  (10 ms). No network server yet (D19 step 4): without `net` registered every socket call is -ENETDOWN.
 - Random numbers (DESIGN D19 9.3, architecture.md section 3): a read or write of `/dev/random` or `/dev/urandom` moves
   at most 4,096 bytes (a short count, as Linux); `/dev/random` waits for 256 credited bits (on a fresh machine that
   is 256 key presses and releases, or the seed file at the next start); a sample ring of 32 entries (a full one drops

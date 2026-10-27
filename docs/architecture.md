@@ -637,9 +637,10 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 86 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-89, of which 39, 40 and 68 are unused; the next free number is
-claimed in CLAUDE.md first): files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 88 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-91, of which 39, 40 and 68 are unused; 92 is claimed for the
+network's drivers, DESIGN D19 step 7; the next free number is claimed in CLAUDE.md first): the network (`sock`,
+`netsrv`: section 11, "Sockets"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
@@ -761,7 +762,8 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   always clears it). The filesystem servers answer only messages with `UMSG_KERNEL`, or from root; the disk server
   only root (and `DISK_LIST`/`DISK_INFO` for anyone). A registered service name (`disk`, `fs`) is created only by the
   process the kernel started for it: anyone else, root too, gets -EBUSY, also after a crash. The names `fs.*`
-  (mounts) not registered as services are reserved: only root may create them (`port_create` answers -EACCES), so a
+  (mounts) and `net` (the network server, DESIGN D19: the kernel sends it every socket call) not registered as
+  services are reserved: only root may create them (`port_create` answers -EACCES), so a
   dead server's name cannot be taken over by a normal user. Audit D, D11.
 - 28 port slots: the first 12 are the held ports of the services (one per entry, never given to another port), the
   other 16 ordinary ones, so creating ports until the ordinary ones run out cannot stop a service.
@@ -1073,8 +1075,38 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
   receive ring for its reader; a write waits for room in the 4 KB send ring a tick at a time, so the machine runs on,
   and ends on a kill or after 2 s in which the port took nothing (logged: what was written, or -EIO), audit A5),
-  `/dev/null`, `/dev/zero`, `/dev/urandom` and `/dev/random` (section 3, "Random numbers"). `fstat` of a console gives its number in `st_ino` (the
+  `/dev/null`, `/dev/zero`, `/dev/urandom` and `/dev/random` (section 3, "Random numbers"; `O_NONBLOCK` makes
+  `/dev/random` answer -EAGAIN while it would wait). `fstat` of a console gives its number in `st_ino` (the
   `ustat` has no device field; `login` uses it to apply `/etc/autologin` to console 1 only).
+- **Sockets** (`kernel/sock.c`, DESIGN D19 sections 4.1-4.3; the protocol in `kernel/netproto.h`): a socket is a file
+  (`FT_SOCK`, `fstat` gives `S_IFSOCK`, 0140000) whose kernel object, a ksock (32, `NSOCK`; the last 4 only for root),
+  names it to the network server on port `net` by its index and a generation. `read`, `write`, `close`, `dup`,
+  `dup2`, a spawned child's standard files and `poll`/`select` work as on a pipe. Every BSD call is `SYS_sock` (90:
+  op | request size << 16, fd, `struct usockreq`, first size 32): the kernel copies the request and checks each
+  pointer by the op's directions (`user_ok_rd` where the server reads, `user_ok_wr` where it writes; an address
+  length clamped to 28 for the check, the true one returned; a buffer to 64 KB) and sends a `NET_*` message (the op's
+  number; `NET_CLOSE` 19) whose `a[1]` is a `struct netreq` on the caller's kernel stack; the server reads and writes
+  the program's buffers in place, and every count it returns is clamped to what was checked. The server never keeps
+  a caller waiting (rule 2): it answers done or -EAGAIN with `SYS_netsrv` (91) `NETSRV_REPLY`, which sets the socket's
+  ready bits in the same trap (rule 1); `NETSRV_READY` pushes other sockets' bits once a turn; `NETSRV_HELLO` gives it
+  the epoch. Only the process the kernel started for `net` may use `SYS_netsrv` (-EPERM), and `net` is a reserved
+  port name (root only). The waiting is the kernel's (`sock_req`, rule 3): a call that needs data or room waits in
+  the event wait until the bits say so (^C and handlers reach it: -EINTR, restarted by `SA_RESTART` unless
+  `SO_RCVTIMEO`/`SO_SNDTIMEO` is set, which the kernel keeps: -EAGAIN at the deadline), then asks the server; after an
+  -EAGAIN it starts again at the top, so a push during the call is never lost and a stale bit costs one call. A
+  blocking stream send queues the whole buffer in pieces of at most 64 KB, and after progress a signal or timeout
+  returns the count (no restart); -EPIPE (and a dead network) sends SIGPIPE unless `MSG_NOSIGNAL`. `connect` sends
+  `CONNECT` once; a blocking one waits for POLLOUT or POLLERR and asks `SO_ERROR` (interrupted: -EINTR, the connection
+  goes on; restarted: it only waits); non-blocking: -EINPROGRESS. `accept` and `socket` reserve a ksock, a file and a
+  free fd first and give them back on -EAGAIN, -EINTR or a kill. `O_NONBLOCK` (0x800, a file flag: `SOCK_NONBLOCK`,
+  `FIONBIO`) and `MSG_DONTWAIT` never wait. A reply the server did not give (it is gone, cannot be started, was given
+  up, or no `net` is registered) is -ENETDOWN, never a peer's -ECONNRESET. **The epoch** (`net_epoch`, rules 9-10):
+  raised when the `net` server ends (svc.c calls `sock_server_gone` before its memory is freed); every socket of the
+  old epoch is dead at once (POLLERR|POLLHUP, its waiters woken, every call -ENETDOWN, only `close` works) and a new
+  socket is kept only if the server's reply carries the live epoch. The last close sends `NET_CLOSE` only while the
+  socket's epoch lives, as a no-start call (it never starts or waits for a server). Until netd exists (D19 step 4)
+  the test server `socktestd` serves `net` in the tests. 3,987 bytes of code at -Os, 1 KB of data; `tools/sock-host-test.sh` runs
+  the rules' interleavings on the PC, `tools/sock-test.sh` the calls in FS-UAE.
 - **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
   `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**
   shows console 1-10 (Linux: Alt+F1..); plain F-keys stay with the programs and send their escape codes; other
@@ -1405,7 +1437,7 @@ outputs (`tools/cmds-test.sh`).
   is always allowed. `SYS_settime` and `SYS_ttymirror` are root only.
 - **Raw messages** (section 8): the filesystem servers do nothing for a message that did not come from the kernel
   unless it is root's, so a user cannot read or write by inode number, open files without the kernel's open-file
-  table, or send `FS_QUIT`; the disk server serves root only; `fs`, `fs.*` and `disk` are names only root can take.
+  table, or send `FS_QUIT`; the disk server serves root only; `fs`, `fs.*`, `disk` and `net` are names only root can take.
   `proc_spawn` takes the set-user-id bit only from the server of the mount table (the port it routes the path to;
   a port of that name can only be root's).
 - **The filesystem rules** added by audit D (kernel/fsperm.h rules 5, 7, 9, 10, in both servers): a set-group-id

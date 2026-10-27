@@ -1,7 +1,8 @@
 # D19: the network (design note, revision 2)
 
 Status: **design, revision 2 after two independent reviews (section 13); step 1 (section 3, zfsd out of the kernel
-image) built on branch zfout 2026-10-27 (section 14, "As built"); the rest not built.** Roadmap block 2, "Zenix
+image) built on branch zfout 2026-10-27; steps 0, 2 and 3 (msgping, random numbers, the kernel's socket layer with a
+test server) built on branch n023 2026-10-27 (section 14, "As built"); the rest not built.** Roadmap block 2, "Zenix
 reaches the world": the network, the CM4's Ethernet, TCP/IP as a server, DHCP, DNS, `ping`; telnet, the crypto
 library, ssh, HTTPS, NFS, remote control and `zpkg` come after it. A deep core change (a kernel file kind, new system
 calls, a message family, the way servers are loaded). The short version is DESIGN.md D19. Facts about today's code are
@@ -813,5 +814,55 @@ the emulated keyboard seed it and the reader gets its bytes; boot rewrites the f
 s: the next boot credits it, `/dev/random` answers at once, the file is rewritten, `/dev/urandom` differs from the
 first boot's. r: the RAM floppy with a seed (flag 1) on its RAM disk never credits it); `stage0-test` (the RNG200's
 address from the CM4's device tree).
+
+### Step 3: the kernel's socket layer (branch n023, 2026-10-27)
+
+Sections 4.1-4.3 with the test server: `kernel/sock.c` (ksocks, `SYS_sock`, `SYS_netsrv`, the blocking loop, the
+epoch and `sock_server_gone`, `NET_CLOSE`), `kernel/netproto.h` (the frozen protocol), `FT_SOCK`, `O_NONBLOCK` 0x800,
+`S_IFSOCK` 0140000, the network's error numbers (`kernel/errno.h`, their texts in libz), `net` a reserved port name,
+`user/socktestd.c` in netd's place. Local choices the note left open:
+
+1. **`struct usockreq` is 32 bytes as the note says, with its nine fields:** `level` and `option` are 16 bits each
+   (`buf len flags addr alen level:option val vlen`). Every length is behind a pointer (`alen`, `vlen`, BSD's
+   `socklen_t *`): bind, connect and sendto read it, accept, recvfrom, getsockname and getsockopt also write it, so
+   one field serves both and the kernel's direction table covers it. Which fields each op uses is listed in
+   netproto.h (`SOCKET`: level the domain, flags the type and `SOCK_NONBLOCK`, option the protocol).
+2. **"Its first size, or the caller's if bigger":** the caller's request size rides in `SYS_sock`'s op word
+   (`op | size << 16`, 0 = 32, below 32 -EINVAL), as every other frozen struct passes its size.
+3. **The messages:** `NET_*` are the `SOCK_*` op numbers (1-18), `NET_CLOSE` 19. A request carries the socket's
+   name (index | generation << 8) in `a[0]` and a `struct netreq` (the copied request, the reserved new socket's name,
+   the clamped lengths, the caller's pid, uid, gid) in `a[1]`; netd writes the socket's new bits into `a[2]` (ACCEPT:
+   the new socket's in the upper 16) and its epoch into `a[3]`, then `NETSRV_REPLY`. The kernel applies the bits to
+   the socket it recorded for the caller's call (a per-process note), never to a name read back from the message.
+4. **"Answered" versus "the server is gone":** `NETSRV_REPLY` marks the message (`UMSG_NETREPLY`, internal); a call
+   that comes back unmarked (the server died in it, could not start, was given up, or no `net` is registered) is
+   -ENETDOWN, so a peer's -ECONNRESET passes through unchanged. netd must therefore answer every kernel request with
+   `NETSRV_REPLY` (a plain `SYS_reply` reads as no answer); a non-kernel message it answers -EACCES with either.
+5. **No reference count in the ksock:** a socket is one `struct file`, whose count already covers `dup`, `dup2` and
+   spawn's standard files; its last close is `file_close`'s (`sock_release`).
+6. **The kernel keeps `SO_RCVTIMEO`/`SO_SNDTIMEO`** (set and get, `struct timeval` in ticks) and `FIONBIO` (the file's
+   `O_NONBLOCK`) to itself; `FIONREAD`, `SO_ERROR` and the rest go to netd. A connect whose `SO_SNDTIMEO` runs out
+   returns -EINPROGRESS and goes on (Linux).
+7. **SIGPIPE:** a send that netd answers -EPIPE, or on a dead socket (the pseudo-code's "send: and SIGPIPE rules"),
+   sends SIGPIPE unless `MSG_NOSIGNAL`, then -EPIPE or -ENETDOWN; after progress the count comes back and no signal.
+8. **Checks in Linux's order:** the descriptor (-EBADF, -ENOTSOCK) before the pointers (-EFAULT); a datagram send
+   over 64 KB is -EMSGSIZE (only a stream send loops). `MSG_WAITALL` is netd's to honour, not the kernel's loop's.
+9. **`O_NONBLOCK`** is a file flag set by `SOCK_NONBLOCK`, `FIONBIO`, accept's flags or `open` (it makes
+   `/dev/random` answer -EAGAIN too); libz's `fcntl` comes with libz's socket calls (step 4), as do the BSD functions:
+   the step-3 programs call `sys_sock` (usys.h) directly.
+10. **`SYS_drv` 92** is claimed (CLAUDE.md) but not in kernel.h until step 7, so the call counts stay true.
+11. **A test client:** besides `socktestd` (the note's test server), `socktest` holds the checks (as `sigtest` does
+    D16's), both with pages. `socktestd`'s network is a loopback of stream sockets on port numbers (a 512-byte buffer
+    a socket, so a big send waits: partial sends), slow connects on ports 8000 and up, and commands for its death, an
+    inflated count and its request count.
+
+Sizes (*measured* 2026-10-27): `sock.o` 3,987 bytes of code and 1,028 of data (the note's estimate 3-4 KB plus 0.3); the
+kernel image 145,588 -> 150,244 bytes (RAM floppy: 28,956 left; the mount tests' floppy 4,380). Tests: `tools/sock-host-test.sh` (the 4.3 model: a push before the call,
+between the check and the masked test, during the server's turn and while asleep, never lost; a stale bit costs one
+call; a handler's -EINTR and the restart rule; the deadline; the server's end waking a waiter, its death mid-request
+-ENETDOWN, a stale epoch's socket dropped, NET_CLOSE as a no-start call, a partial send's count, accept's
+reservations, a restarted connect sending no second CONNECT, poll without a message, SYS_netsrv's checks);
+`tools/sock-test.sh` in FS-UAE (socktest's checks against socktestd, ^C on a blocked recv, the log of the server's
+death and restart in epoch 2, e2fsck).
 
 Last checked against the code: 2026-10-27.
