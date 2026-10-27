@@ -715,3 +715,12 @@ Revision 2 keeps the shape of revision 1 (a static signed repository, package bu
 system updates only through D15 by the slot); both reviewers judged that shape sound.
 
 Last checked against the code: 2026-10-27 (main at 4f21bc2).
+
+## Owner decisions (2026-10-27)
+
+The owner delegated section 10's questions ("I let you decide those things, but decide it good and professional"). The
+main session took all seven recommendations, each re-weighed: (1) the update slot, with every check of section 13;
+(2) packages by family; (3) the 60-day expiry with a weekly re-sign (long enough for a PC away for weeks, short enough
+to bound a replayed old list); (4) stable from GitHub Pages over HTTPS, testing from the NAS over plain HTTP, both signed;
+(5) `zpkg -Syu` again after a system restart, automatic later; (6) no install scripts; (7) the previous version kept for
+`zpkg --back`.
