@@ -44,6 +44,12 @@ done
 lic() { mkdir -p "$T/usr/share/licenses"; cp "$(dirname "$0")/../$1" "$T/usr/share/licenses/$2"; }
 case " $PROGS " in *" netd "*) lic net/lwip/COPYING lwIP;; esac
 case " $PROGS " in *" gzip "*|*" zup "*) lic user/miniz/LICENSE miniz;; esac
+# the PC font (DESIGN D20 4.2) on the full images (those with manual pages), with its notice, as the base package
+if [ -z "$NOMAN" ] && [ -f "$B/cp437-8x8.psf" ]; then
+    mkdir -p "$T/usr/share/consolefonts"
+    cp "$B/cp437-8x8.psf" "$T/usr/share/consolefonts/"
+    lic tools/font_8x8.COPYING font_8x8
+fi
 if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small install / test images)
     mkdir -p "$T/usr/man"
     cp "$(dirname "$0")/../docs/man/"*.txt "$T/usr/man/"      # the manual pages live in docs/man

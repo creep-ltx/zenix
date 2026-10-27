@@ -681,9 +681,13 @@ rules were each caught), `tools/colour-test.sh` with `termtest pcfont` (a test f
 every cell's 8 x 8 pixels matched at 1, 2, 3 and 4 planes: the 256 glyphs, CLRHOME, WRAPNOW, LFONLY, the CGA palette,
 the bright foreground and iCE background as each depth shows them; console 2 meanwhile in Zenix's palette; back on
 console 1 the page again; at 3 planes root's switch to 16 colours under the page; the kernel dropping font and rules
-when termtest ends without cleaning up; `q` clearing the screen before the drop). The real CP437 font
-(`cp437-8x8.psf`, the side helper's `tools/mkpsf.py`) is not on the images yet: it comes with the merge of step 0,
-and `termtest pcfont FILE` plus `colour-test.py pcfont ... PSF` compare its glyphs the same way.
+when termtest ends without cleaning up; `q` clearing the screen before the drop). **Step 0's choice 12, the font file:** `make` builds `build/cp437-8x8.psf` from
+`tools/font_8x8.c` with `tools/mkpsf.py`; it goes on the full root images (those with manual pages: `zenix.hdf`,
+`root-card.img`; not the RAM floppies) and into the base package as `/usr/share/consolefonts/cp437-8x8.psf`, with its
+notice `/usr/share/licenses/font_8x8` (`tools/font_8x8.COPYING`: Linux's font, GPL-2.0). colour-test loads it at 4
+planes (`termtest pcfont /usr/share/consolefonts/cp437-8x8.psf`) and matches every one of the 256 cells against the
+file's own bitmaps (bytes with identical bitmaps count as one, and the three shades and the full block as one: their
+one-pixel checkerboards blur together in the scaled screenshot); Topaz on the same page fails that check.
 
 **Step 2 not started here:** it is telnet in the Unix mode over `net/telnet/`, the core the side helper builds in step
 0 (branch t0); building it before that merge would mean a second telnet core.

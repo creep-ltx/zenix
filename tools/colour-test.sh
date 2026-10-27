@@ -21,7 +21,8 @@
 #    foreground and the iCE background as the planes show them; console 2 meanwhile in Zenix's palette (termtest
 #    colours there); back on console 1 the page as before; at 3 planes root's switch to 16 colours while the page is
 #    shown (the font's table built, the page as 4 planes show it); `x` (termtest ends without cleaning up): the kernel
-#    drops the font and the rules (Zenix's palette, Topaz); `q`: the screen cleared before the font goes
+#    drops the font and the rules (Zenix's palette, Topaz); `q`: the screen cleared before the font goes; at 4 planes
+#    the real CP437 font from the disk, every glyph against its bitmap
 # The setting (D14 section 11, /etc/console read by init), on the A1200 without fast RAM (8 colours by default), with the
 # default depth's build (DIWV=0x38 only): "colours 4" switches to 2 planes and "colours 16" to 4 (the kernel says so,
 # and the colour page and a scrolled-back page are what those planes show: the switch draws the console again), and
@@ -84,6 +85,8 @@ pcscript() {   # the D20 part of a depth's script; at 3 planes root switches to 
         'send termtest colours\r' 'sleep 5' 'shot pccon2' 'send q' 'sleep 2' 'send \x1d1' 'sleep 3' 'shot pcback'
     [ "$1" = 3 ] && printf '%s\n' 'send 6' 'sleep 4' 'shot pc16'
     printf '%s\n' 'send x' 'sleep 4' 'shot pcgone' 'send termtest pcfont\r' 'sleep 5' 'send q' 'sleep 4' 'shot pcquit'
+    [ "$1" = 4 ] && printf '%s\n' 'send termtest pcfont /usr/share/consolefonts/cp437-8x8.psf\r' 'sleep 5' 'shot pccp437' \
+        'send q' 'sleep 3'
 }
 for d in $DEPTHS; do
     B=$OUT/d$d
@@ -129,6 +132,10 @@ for d in $DEPTHS; do
     fi
     ct pcgone "$OUT/d$d-pcgone.png" "$OUT/geom$d" $gd; check "$d planes: termtest ended without cleaning up: the kernel dropped its font and rules" $?
     ct cleared "$OUT/d$d-pcquit.png" "$OUT/geom$d"; check "$d planes: termtest's q: the screen cleared, then the font dropped" $?
+    if [ $d = 4 ]; then
+        [ -f "$OUT/d$d-pccp437.png" ] && ct pcfont "$OUT/d$d-pccp437.png" "$OUT/geom$d" 4 "$B/cp437-8x8.psf"
+        check "4 planes: the CP437 font from the disk (/usr/share/consolefonts), every glyph against its bitmap" $?
+    fi
 done
 # ---- the setting: /etc/console on the A1200 without fast RAM ----
 cat > "$OUT/sscript.txt" <<'EOF'

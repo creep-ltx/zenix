@@ -16,9 +16,10 @@
   colour-test.py serial LOG             the raw serial bytes: the prompt's colour codes, and less showing a line
                                         with colour codes and 79 visible characters as one row, the codes passed on
   colour-test.py pcfont SHOT GEOM DEPTH [PSF]   `termtest pcfont` (DESIGN D20 step 1): every cell's 8 x 8 pixels
-                                        against the loaded font (PSF, or termtest's own test font): the 256 bytes as
-                                        glyphs, CLRHOME, WRAPNOW, LFONLY; the colour blocks in the CGA palette, the
-                                        bright foreground and iCE background, as DEPTH planes show them
+                                        against termtest's own test font: the 256 bytes as glyphs, CLRHOME, WRAPNOW,
+                                        LFONLY; the colour blocks in the CGA palette, the bright foreground and iCE
+                                        background, as DEPTH planes show them. With PSF (the real font loaded): the
+                                        256 bytes against its glyphs only
   colour-test.py pcgone SHOT GEOM DEPTH  the same page after termtest ended without cleaning up: the kernel dropped
                                         the font (the grid no longer in it) and the rules (Zenix's palette again)
   colour-test.py cleared SHOT GEOM      rows 3-29 empty (termtest cleared the screen before it dropped the font)
@@ -128,7 +129,12 @@ class Cells:
 ACTS = (0, 7, 8, 9, 10, 13, 27)
 
 
-def pcfont(cells, depth, glyphs):
+SHADES = (0xB0, 0xB1, 0xB2, 0xDB)                  # CP437's shades and full block: one-pixel checkerboards blur together
+
+
+def pcfont(cells, depth, glyphs, real=False):
+    """real: a PSF font's own glyphs, checked on the 256 bytes only (the rules are the test font's checks); bytes whose
+    bitmaps are the same count as one, and the shades as one (the screenshot is scaled and smoothed)"""
     bad = []
     blank = [0] * 8
     acts = list(range(1, 256)) + [256]               # 256: an empty cell (an erase, or a space not drawn again); NUL is
@@ -138,10 +144,12 @@ def pcfont(cells, depth, glyphs):
         r, c = 2 + b // 16, b % 16
         got = cells.glyph(r, c, g, acts)[0]
         if b in ACTS or b == 32:
-            if got not in (32, 256):
+            if got not in (32, 256) and g[got] != blank:
                 bad.append(f"cell {r + 1},{c + 1} (byte {b}, which acts): looks like byte {got}, not a space")
-        elif got != b:
+        elif got != b and not (real and (g[got] == g[b] or (got in SHADES and b in SHADES))):
             bad.append(f"cell {r + 1},{c + 1}: looks like byte {got} ({cells.bits(r, c)}), not byte {b}")
+    if real:
+        return bad
     if not is_(0, 0, ord("H")):
         bad.append("CLRHOME: no H at 1,1")
     if is_(4, 4, ord("Z")):
@@ -309,10 +317,13 @@ def main():
         depth = int(sys.argv[4])
         glyphs = font(sys.argv[5] if len(sys.argv) > 5 else None)
         if what == "pcfont":
-            bad = pcfont(cells, depth, glyphs)
+            real = len(sys.argv) > 5
+            bad = pcfont(cells, depth, glyphs, real)
             for b in bad[:12]:
                 print("pcfont:", b)
-            if not bad:
+            if not bad and real:
+                print(f"pcfont: the 256 bytes drawn in {sys.argv[5]}'s glyphs")
+            elif not bad:
                 print(f"pcfont: 256 glyphs, CLRHOME, WRAPNOW, LFONLY, the CGA palette, bright and iCE as {depth} planes show them")
             return 1 if bad else 0
         same = sum(1 for b in range(256) if b not in ACTS and cells.bits(2 + b // 16, b % 16) == glyphs[b])   # exact only

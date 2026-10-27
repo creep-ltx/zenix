@@ -1,0 +1,5 @@
+cp437-8x8.psf (/usr/share/consolefonts) is made from Linux's lib/fonts/font_8x8.c
+(generated there by cpi2fnt from a DOS code-page font), licensed GPL-2.0
+(SPDX-License-Identifier: GPL-2.0), the same licence as Zenix. The source is
+in the Zenix repository as tools/font_8x8.c; the font is built from it by
+tools/mkpsf.py (DESIGN D20 4.2).

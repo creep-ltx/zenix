@@ -207,7 +207,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   2,052 bytes; meaning "8-bit mode: each byte one glyph of this font, no UTF-8 while loaded"), `CON_RULES` 3 (a2 bits,
   a3 mask, 0 asks, answers the bits before); the `CONR_*` bits 1-64 and their meanings; the target rules (a console,
   the caller's own in its foreground, or root's) and the errors -EBADF, -ENOTTY, -EPERM, -ENODEV, -EFAULT, -EINVAL,
-  -ENOMEM; font and rules dropped when their last setter ends, kept by `ESC c`.
+  -ENOMEM; font and rules dropped when their last setter ends, kept by `ESC c`; the PC font's file format (PSF1) and
+  path `/usr/share/consolefonts/cp437-8x8.psf` (full images and the base package).
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 
