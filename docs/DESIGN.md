@@ -230,6 +230,15 @@ block 4 (the test kernel `kernel-zfs.bin`; zenixboot refuses an update that woul
 5 of the note still open). The full design: [d19-network.md](d19-network.md).
 ## D20. telnet, the BBS terminal and pseudo-terminals (D19 step 11; design note revision 2 after independent reviews, nothing built)
 **Why.** The owner's daily use of the Amiga is telnet to BBSes. **How.** One `telnet` process (`poll` on the socket and the tty; BINARY, ECHO, SGA, TERMINAL-TYPE, NAWS 80 x 32) whose PC, Amiga and Unix modes translate keys and filter the stream, while the console draws (a CP437 font and seven board rules per console, loaded on demand by two `SYS_console` ops that name the console by a file descriptor); Zmodem by `rz`/`sz` (CTerm's engine), started by itself; pseudo-terminals, SIGHUP and a telnet server later, as a step of their own. The full design: [d20-telnet.md](d20-telnet.md).
+## D21. The crypto library, `ssh` and HTTPS (roadmap block 2; design note revision 2 after two reviews, nothing built)
+**Why.** The owner must reach the Linux PC properly by ssh, `wget` needs HTTPS, and updates and packages need
+signatures (D15 step 7). **How.** One static library, `crypto/`: BearSSL (MIT; TLS 1.2, X.509, RSA, ECDSA, AES, its
+16-bit-multiply code that suits every 68020-68060) and Monocypher (CC0; Ed25519, ChaCha20-Poly1305; X25519 from whichever of the two is faster on a
+68020, measured first), assembler only where measured to pay; Zenix's own small ssh client (`net/ssh/`, OpenSSH's file formats, D20's Unix-mode
+keys and filter shared) instead of a Dropbear port; randomness only from `/dev/random`; Ed25519 signatures in detached
+`.sig` files over D15's header digest, verified by zenixboot (once per bundle) and `zpkg`; root certificates as a compact
+anchors file, the time from the battery clock, SNTP and a floor. No kernel change. The full design:
+[d21-crypto-ssh-https.md](d21-crypto-ssh-https.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers; fsd and diskd are built into the kernel image, zfsd is the file `/sbin/zfsd` since D19 step 1. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
