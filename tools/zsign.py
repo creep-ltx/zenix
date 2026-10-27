@@ -26,7 +26,8 @@ The TEST key pair (6.3) is never in the repository: it is made at build or test 
 TESTDIR/zenix-test.key (mode 600) and TESTDIR/zenix-test.pub; TESTDIR is $ZSIGN_TEST_DIR, else build/sign-test in the
 repository. Test builds trust that public half, so a test bundle made in one build tree verifies in that tree.
 Channels (decided 2026-10-27): test bundles carry the channel "test"; "testing" and "stable" are release channels,
-and a release bundle is never signed with the test key.
+and a release bundle is never signed with the test key; nor is a package list ("zpkgindex", D22 5.1) whose header
+names a release channel (a "zpkgindex" list without a channel line is refused).
 """
 import hashlib
 import os
@@ -109,7 +110,24 @@ def digest(path, kind):
         d = hashlib.sha256(data[:64] + data[mkzup.HDR:mkzup.HDR + mkzup.TOCE * ntoc]).digest()
         assert d == data[64:96]          # (read_bundle compared it)
         return kind, d, hdr["channel"]
-    return kind, hashlib.sha256(data).digest(), None
+    return kind, hashlib.sha256(data).digest(), index_channels(data)
+
+
+def index_channels(data):
+    """the channel(s) a zpkg package list names in its header (D22 3.3: the lines before the first "pkg"); a file
+    that is not a "zpkgindex" list names none"""
+    lines = data.split(b"\n")
+    if not lines[0].startswith(b"zpkgindex "):
+        return None
+    chans = []
+    for ln in lines[1:]:
+        if ln.startswith(b"pkg ") or ln == b"pkg":
+            break
+        if ln.startswith(b"channel "):
+            chans.append(ln[8:].decode(errors="replace"))
+    if not chans:
+        die("a zpkgindex list without a channel line (D22 3.3)")
+    return chans
 
 
 def message(kind, d):
@@ -121,8 +139,10 @@ def sign(path, key, kind):
         die("no signing key %s (D15: kept outside every repository)" % key)
     kind, d, channel = digest(path, kind)
     pub = raw_public(key, private=True)
-    if channel in RELEASE_CHANNELS and os.path.exists(TEST_PUB) and pub == raw_public(TEST_PUB):
-        die("%s is a release bundle (channel %s): refusing to sign it with the test key" % (path, channel))
+    chans = channel if isinstance(channel, list) else [channel]
+    for c in chans:
+        if c in RELEASE_CHANNELS and os.path.exists(TEST_PUB) and pub == raw_public(TEST_PUB):
+            die("%s is a release %s (channel %s): refusing to sign it with the test key" % (path, kind, c))
     with tempfile.TemporaryDirectory(prefix="zsign.") as t:
         m = os.path.join(t, "msg")
         open(m, "wb").write(message(kind, d))
