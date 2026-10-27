@@ -239,6 +239,18 @@ keys and filter shared) instead of a Dropbear port; randomness only from `/dev/r
 `.sig` files over D15's header digest, verified by zenixboot (once per bundle) and `zpkg`; root certificates as a compact
 anchors file, the time from the battery clock, SNTP and a floor. No kernel change. The full design:
 [d21-crypto-ssh-https.md](d21-crypto-ssh-https.md).
+## D22. `zpkg`, the package manager (the owner's wish 2026-10-24; design note revision 2 after two reviews, nothing built)
+**Why.** Installing and updating programs and Zenix itself the way Arch's `pacman` does (`-S`, `-Ss`, `-Syu`, `-R`,
+`-Rns`, which package owns which file), as **one mechanism with the self-updates** (D15). **How.** A static
+repository (plain files: the owner's NAS for testing over HTTP, GitHub Pages for stable over HTTPS): immutable package
+files in `pool/` that are D15 bundles without a kernel, a signed package list per channel (`index-SERIAL` with D21's
+signature, a serial against replay, an expiry against a frozen mirror) and a one-line `latest`. `zpkg` fetches,
+checks and decides; **`/sbin/zup` stays the only installer** (two new modes: a package from a file, a removal; its
+journal, prev links, three-way compare and recovery unchanged); D15's manifests stay the database. The system (the
+kernel and the base group, the only content of a system bundle) is never installed live: zpkg writes its signed bundle into an update slot file on the
+boot partition, zenixboot takes it from there at the restart and D15 runs as built ("Zenix (previous)" the way
+back). A package's way back is its previous version in the download cache. The full design:
+[d22-zpkg.md](d22-zpkg.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers; fsd and diskd are built into the kernel image, zfsd is the file `/sbin/zfsd` since D19 step 1. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
