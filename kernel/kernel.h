@@ -721,7 +721,7 @@ int tty_of(const struct proc *p);
 #define SYS_pipe    17
 #define SYS_memalloc 18
 #define SYS_memfree  19
-#define SYS_ticks   20
+#define SYS_ticks   20   /* 0 -> the 100 Hz tick count (wraps); 1 -> whole seconds since boot (unsigned, F9) */
 #define SYS_procinfo 21
 #define SYS_meminfo 22
 #define SYS_setfg   23

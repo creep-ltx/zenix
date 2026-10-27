@@ -387,6 +387,8 @@ void kmain(struct bootinfo *bi)
 {
 #ifdef DIAG_TICKS0
     ticks = DIAG_TICKS0;                /* test builds (tools/time-test.sh): the tick count starts near its wrap */
+    wclock.secs = DIAG_TICKS0 / WCLOCK_HZ;      /* and the seconds since boot with it: a machine up that long (F9) */
+    wclock.sub = DIAG_TICKS0 % WCLOCK_HZ;
 #endif
     klog_init(bi);                      /* before anything prints: the previous boot's log is read from there */
     diag_stage(6, DIAG_GREEN);
