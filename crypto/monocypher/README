@@ -1,0 +1,20 @@
+Monocypher for Zenix
+====================
+
+What this is: Ed25519 (signing and verification, with SHA-512), X25519, ChaCha20 and Poly1305 for Zenix's crypto
+library (DESIGN D21, docs/d21-crypto-ssh-https.md section 3.2). Upstream: Monocypher, git commit f5f0a19
+(2026-10-20, "Skip field inversion in signature check"; 4.0.3 plus later commits, among them 55158d3 "Fix timing
+leak in constant time comparisons"), https://github.com/LoupVaillant/Monocypher. Licence: BSD-2-Clause OR
+CC0-1.0, in LICENCE (upstream's LICENCE.md; AUTHORS is upstream's AUTHORS.md: renamed, the project keeps .md
+files in docs/ only). Zenix uses it under CC0 (D21 3.2), and ships the notice anyway.
+
+Files taken, unchanged:
+  monocypher.c monocypher.h                 from src/ (and LICENCE, AUTHORS)
+  monocypher-ed25519.c monocypher-ed25519.h from src/optional/ (SHA-512, HMAC-SHA-512, Ed25519)
+Not taken: the tests, the documentation, the speed programs.
+
+Zenix's own code lives beside this folder, never in it: crypto/zc/. Link with --gc-sections (the whole of
+monocypher.c is about 59 KB of m68k code: Argon2, BLAKE2b, Elligator are never linked unless called).
+The tests are tools/host/crypto-test.sh.
+
+A new Monocypher commit: take the same files from it, run tools/host/crypto-test.sh, and change the commit above.

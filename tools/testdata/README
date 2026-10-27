@@ -5,3 +5,4 @@ tools/stage0-68k-test.py; they apply Emu68's "ranges" rewriting before testing.
 bbs-sim/welcome.ans, bbs-sim/amiga.asc: a CP437 ANSI screen and a Latin-1 Amiga screen drawn for the telnet tests
 (DESIGN D20 8.1), made for this repository (GPL-2.0-only as the rest); tools/bbs-sim.py sends them. Real art packs
 are copyrighted and never committed.
+
