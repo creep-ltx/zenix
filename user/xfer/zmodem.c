@@ -4,8 +4,8 @@
  * the owner's AmigaOS terminal; the MIT notice is at the end of this file).
  * Zenix's changes (DESIGN D20 5), each marked "Zenix:": a part from an
  * earlier try is gone on from only after ZCRC says it is the same file
- * (XferIO wresume); a sender answers a receiver's ZCRC; xfer_crc32; no wait
- * for an XON after a hex header's LF.
+ * (XferIO wresume); a sender answers a receiver's ZCRC; escctl (-e);
+ * xfer_crc32; no wait for an XON after a hex header's LF.
  *
  * zmodem - Zmodem both ways, from Chuck Forsberg's description (1988),
  * with the traps BBX's Go version met against lrzsz written down in
@@ -603,7 +603,7 @@ static int zm_send_(struct Z *z, unsigned char *blk, XferIO *io,
 static void send_zrinit(struct Z *z)
 {
     pos_hdr(z, 0);
-    z->hdr[3] = CANFDX | CANOVIO | CANFC32;
+    z->hdr[3] = CANFDX | CANOVIO | CANFC32 | (z->io->escctl ? ESCCTL : 0);
     send_hex(z, ZRINIT);
 }
 
@@ -884,7 +884,7 @@ static int zm_send_(struct Z *z, unsigned char *blk, XferIO *io,
     }
     rxbuf = (unsigned long)z->hdr[0] | ((unsigned long)z->hdr[1] << 8);
     z->use32 = (z->hdr[3] & CANFC32) != 0;
-    z->escctl = (z->hdr[3] & ESCCTL) != 0;
+    z->escctl = (z->hdr[3] & ESCCTL) != 0 || io->escctl;  /* Zenix: -e */
 
     for (fi = 0; fi < npaths; fi++) {
         unsigned long size = 0, pos = 0, acked = 0, sentq = 0;

@@ -51,6 +51,16 @@ EOF
     then say "font PASS (PSF1, 2,052 bytes)"; else bad "font"; fi
 }
 
+part_sim() {
+    find_lrzsz || return
+    if python3 tools/bbs-sim.py --self-test --lsz "$LSZ" --lrz "$LRZ"; then say "sim: the simulator's self-test PASS"
+    else bad "bbs-sim.py --self-test"; return; fi
+    $HOSTCC $HCFLAGS $SAN -o "$OUT/telnet-client" tools/host/telnet-client.c net/telnet/*.c user/xfer/zmodem.c \
+        user/xfer/detect.c user/xfer/rzrules.c || { bad "telnet-client does not build"; return; }
+    if python3 tools/host/telnet-sim-test.py "$OUT/telnet-client" "$LSZ" "$LRZ" "$OUT/sim"; then say "sim PASS"
+    else bad "sim (the FAIL lines above; the calls' files in $OUT/sim)"; fi
+}
+
 part_zmodem() {
     find_lrzsz || return
     $HOSTCC $HCFLAGS $SAN -o "$OUT/zmodem-test" tools/host/zmodem-test.c user/xfer/detect.c user/xfer/rzrules.c ||
@@ -116,12 +126,13 @@ part_fuzz() {
 }
 
 parts=("$@")
-[ ${#parts[@]} = 0 ] && parts=(font core zmodem)
+[ ${#parts[@]} = 0 ] && parts=(font core sim zmodem)
 for ((i = 0; i < ${#parts[@]}; i++)); do
     p=${parts[i]}
     case "$p" in
     font) part_font ;;
     core) part_core ;;
+    sim) part_sim ;;
     zmodem) part_zmodem ;;
     fuzz) if [[ "${parts[i + 1]:-}" =~ ^[0-9]+$ ]]; then part_fuzz "${parts[i + 1]}"; i=$((i + 1)); else part_fuzz 60; fi ;;
     *) echo "telnet-test: no part called $p"; exit 2 ;;

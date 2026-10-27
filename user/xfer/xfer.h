@@ -4,7 +4,8 @@
  * owner's AmigaOS terminal, MIT licence: see the notice at the end of
  * zmodem.c). Zenix's changes (DESIGN D20 5): only Zmodem is kept (CTerm's
  * Xmodem, Ymodem and Hydra are later, owner question 5); wresume (a part is
- * gone on from only when it is the same file, by ZCRC) and xfer_crc32 added.
+ * gone on from only when it is the same file, by ZCRC), escctl (-e) and
+ * xfer_crc32 added.
  *
  * xfer - file transfers with a host (Zmodem first): the protocol engine
  * knows nothing of the system. It talks to the host and to files through
@@ -63,6 +64,11 @@ struct XferIO {
      * (what the host sent after the session, a BBS prompt): for the
      * screen. May be called more than once, in order; may be NULL. */
     void (*rest)(void *u, const unsigned char *b, long n);
+    /* (Zenix) 1: every control character escaped, as lrzsz's -e - a
+     * receiver asks the sender for it in ZRINIT (ESCCTL), a sender does it
+     * whatever the receiver says. For a telnet line without BINARY, where
+     * CR NUL is folded to CR (DESIGN D20 5). */
+    int escctl;
 };
 
 /* The start of a Zmodem session in what the host sent: 1 the host sends
