@@ -65,7 +65,7 @@ DESCRIPTION
            file. On ZenixFS a server that died before its next
            commit took the file with it: the read fails, and it never
            reads another file that got the same number.
-    mount  puts the server already running on port PORT (pingd -fs) on
+    mount  puts the server already running on port PORT (msgpingd -fs) on
            the directory DIR as a filesystem (root): a reboot must not
            wait for a server that never answers its sync.
 
@@ -75,4 +75,4 @@ EXIT STATUS
     0, or 2 for a usage error.
 
 SEE ALSO
-    boot(8), ping(1), pingd(1)
+    boot(8), msgping(1), msgpingd(1)

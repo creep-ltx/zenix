@@ -620,6 +620,12 @@ void syscall_c(u32 *rb)
         if (a1 == CON_COLOURS)
             r = a2 && current->uid != 0 ? -EPERM : gfx_set_colours((int)a2);
         break;
+    case SYS_sock:                      /* D19: every BSD socket call (sock.c) */
+        r = (s32)sock_sys(a1, a2, a3);
+        break;
+    case SYS_netsrv:                    /* D19: the network server's own calls */
+        r = (s32)netsrv_sys(a1, a2, a3);
+        break;
     case SYS_getpriority:
         r = (s32)do_priority(0, a1, a2, 0);
         break;

@@ -1,7 +1,8 @@
 # D19: the network (design note, revision 2)
 
 Status: **design, revision 2 after two independent reviews (section 13); step 1 (section 3, zfsd out of the kernel
-image) built on branch zfout 2026-10-27 (section 14, "As built"); the rest not built.** Roadmap block 2, "Zenix
+image) built on branch zfout 2026-10-27; steps 0, 2 and 3 (msgping, random numbers, the kernel's socket layer with a
+test server) built on branch n023 2026-10-27 (section 14, "As built"); the rest not built.** Roadmap block 2, "Zenix
 reaches the world": the network, the CM4's Ethernet, TCP/IP as a server, DHCP, DNS, `ping`; telnet, the crypto
 library, ssh, HTTPS, NFS, remote control and `zpkg` come after it. A deep core change (a kernel file kind, new system
 calls, a message family, the way servers are loaded). The short version is DESIGN.md D19. Facts about today's code are
@@ -708,6 +709,16 @@ program in the repository; (5) a ZenixFS root is test-only until block 4; (6) li
 and bundle; (7) lwIP as the TCP/IP code.
 ## 14. As built
 
+### Step 0: `msgping` and `msgpingd` (branch n023, 2026-10-27)
+
+`ping` and `pingd` (the message test client and server) are now `msgping` and `msgpingd`: `user/msgping.c` and
+`user/msgpingd.c`, `UAPPS`, their pages, `commands.md`, `source-tree.md`, `limits.md`'s raw-message list, the svctab
+example and every test script (svc-test, cmds2-test, the mount test's file services). The port name `ping` and the
+service name in D11's log lines (`svc: ping: ...`) stay; `msgping` prints `msgping: ...`. The older notes (D11, D13,
+the audits) keep the old names as history. `MOUNTAPPS` never held them: the mount test only registers
+`/bin/msgpingd` under ten names (the service table's capacity) and never starts it, so its list is unchanged. Tests:
+svc-test and cmds2-test.
+
 ### Step 1: zfsd from the disk (branch zfout, 2026-10-27)
 
 What section 3.3 asked for, with three local corrections where the note did not fit the code:
@@ -765,6 +776,106 @@ The rest as the note says:
 - **A limit found:** a file service that lives *on* a ZenixFS mount, started while both that mount's and the root's
   servers are stopped, needs three nested loads and fails once (D11's two-level limit, logged; the next call works).
   Noted in d11-service-manager.md 5.1.
+
+### Step 2: random numbers (branch n023, 2026-10-27)
+
+Section 9.3 as written: `kernel/random.c` (BLAKE2s pool, ChaCha20 with fast key erasure, `/dev/urandom` never waits,
+`/dev/random` waits for 256 credited bits and then polls readable), the sources, the seed file in boot and `reboot`,
+and the refusal in `mkroot.sh`, `mkroot-zenixfs.sh` and `mkzup.py`. Local choices the note left open:
+
+1. **How a seed is credited:** root's write to `/dev/random` credits 8 bits a byte; anyone's write to either device
+   mixes without credit (Linux's write never credits; its RNDADDENTROPY ioctl needs a call Zenix does not have, and a
+   new system call for it was not worth a number). boot does the rule (`user/randseed.h`, host-tested).
+2. **The seed file's format:** 40 bytes, `ZRS1`, a flags byte (bit 0: from a seeded pool), three zero bytes, 32 bytes
+   of seed (256 bits, the seeding threshold). Root's, mode 600. Frozen once shipped, like the `/etc` formats.
+3. **When the file is written:** at every start (the rule of 9.3), **and once more when the pool is first seeded**
+   (boot waits for init with `evwait` on `/dev/random`, a minute at a time: a machine switched off without `reboot`
+   otherwise kept an uncreditable seed for ever; meanwhile `ps` shows boot as "sleep", a timed event wait, where it
+   showed "wait"; signal-test counted every line with "sleep" in it and now counts processes named sleep). `reboot`
+   writes it before the reset, without a sync of its own (`SYS_reboot` syncs, each server at most 5 s; a plain sync
+   waited for ever on a server that never answers: svc-test h). **Not at the reset warning:**
+   the kernel syncs there inside init's wait and writes no files; the start and the first seeding cover it.
+4. **The sources:** a key press or release 1 bit (`kbd_isr`, every raw code below 0x78); "bytes from the far end of
+   the serial line, per SLIP frame": every received `0xC0` (SLIP's END) half a bit, in the receive interrupt, so it
+   holds before netd exists and costs nothing per ordinary byte; the floppy's index pulse 1 bit, seen as CIA-B's FLG
+   flag in the driver's polled wait for a track's DMA (the note's "while the motor runs": the driver polls, so only
+   while it reads or writes a track; CIA-B's interrupts stay off); the RNG200 32 bits a word (stage0 finds
+   `brcm,bcm2711-rng200` under `/soc`, `hwinfo.rng200` from the first reserved word; the kernel switches it on and takes
+   up to 8 words a turn while unseeded, polled once a second from the tick; a repeated word ends its credit; *read*,
+   not run). Mixed at 0: disk and SD completions (`blk_read`/`blk_write`), mouse counter changes (the tick), the boot's
+   clocks and boot information, one word of every 4 KB of chip RAM below 2 MB. Network frames: with netd (step 4).
+5. **Limits:** a read or write moves at most 4,096 bytes a call; the sample ring holds 32.
+6. **`O_NONBLOCK`** (step 3) applies to `/dev/random` too (-EAGAIN while unseeded).
+
+Sizes (*measured* 2026-10-27): `random.o` 3,655 bytes of code, 268 of data (the note's estimate 1.7-2 KB was for
+the hashes alone: the devices, the ring, the RNG200 and the log lines are the rest); boot.zx 5,900 -> 6,600 bytes
+(inside the kernel image). **Kernel image 139,644 -> 145,588 bytes** (RAM floppy: 33,612 left; the mount tests'
+floppy 9,036). Tests: `tools/random-host-test.sh` (BLAKE2s: RFC 7693 appendix B and the appendix E self-test;
+ChaCha20: RFC 8439 2.3.2 and A.1 #1, #2; the crediting and seed rules; mkroot and mkzup refuse a seed);
+`tools/random-test.sh` in FS-UAE (f: a fresh image's seed file, mode 600, flag 0; `/dev/random` waits; keys typed on
+the emulated keyboard seed it and the reader gets its bytes; boot rewrites the file with flag 1; `reboot` writes it.
+s: the next boot credits it, `/dev/random` answers at once, the file is rewritten, `/dev/urandom` differs from the
+first boot's. r: the RAM floppy with a seed (flag 1) on its RAM disk never credits it); `stage0-test` (the RNG200's
+address from the CM4's device tree).
+
+### Step 3: the kernel's socket layer (branch n023, 2026-10-27)
+
+Sections 4.1-4.3 with the test server: `kernel/sock.c` (ksocks, `SYS_sock`, `SYS_netsrv`, the blocking loop, the
+epoch and `sock_server_gone`, `NET_CLOSE`), `kernel/netproto.h` (the frozen protocol), `FT_SOCK`, `O_NONBLOCK` 0x800,
+`S_IFSOCK` 0140000, the network's error numbers (`kernel/errno.h`, their texts in libz), `net` a reserved port name,
+`user/socktestd.c` in netd's place. Local choices the note left open:
+
+1. **`struct usockreq` is 32 bytes as the note says, with its nine fields:** `level` and `option` are 16 bits each
+   (`buf len flags addr alen level:option val vlen`). Every length is behind a pointer (`alen`, `vlen`, BSD's
+   `socklen_t *`): bind, connect and sendto read it, accept, recvfrom, getsockname and getsockopt also write it, so
+   one field serves both and the kernel's direction table covers it. Which fields each op uses is listed in
+   netproto.h (`SOCKET`: level the domain, flags the type and `SOCK_NONBLOCK`, option the protocol).
+2. **"Its first size, or the caller's if bigger":** the caller's request size rides in `SYS_sock`'s op word
+   (`op | size << 16`, 0 = 32, below 32 -EINVAL), as every other frozen struct passes its size.
+3. **The messages:** `NET_*` are the `SOCK_*` op numbers (1-18), `NET_CLOSE` 19. A request carries the socket's
+   name (index | generation << 8) in `a[0]` and a `struct netreq` (the copied request, the reserved new socket's name,
+   the clamped lengths, the caller's pid, uid, gid) in `a[1]`; netd writes the socket's new bits into `a[2]` (ACCEPT:
+   the new socket's in the upper 16) and its epoch into `a[3]`, then `NETSRV_REPLY`. The kernel applies the bits to
+   the socket it recorded for the caller's call (a per-process note), never to a name read back from the message.
+4. **"Answered" versus "the server is gone":** `NETSRV_REPLY` marks the message (`UMSG_NETREPLY`, internal); a call
+   that comes back unmarked (the server died in it, could not start, was given up, or no `net` is registered) is
+   -ENETDOWN, so a peer's -ECONNRESET passes through unchanged. netd must therefore answer every kernel request with
+   `NETSRV_REPLY` (a plain `SYS_reply` reads as no answer); a non-kernel message it answers -EACCES with either.
+5. **No reference count in the ksock:** a socket is one `struct file`, whose count already covers `dup`, `dup2` and
+   spawn's standard files; its last close is `file_close`'s (`sock_release`).
+6. **The kernel keeps `SO_RCVTIMEO`/`SO_SNDTIMEO`** (set and get, `struct timeval` in ticks) and `FIONBIO` (the file's
+   `O_NONBLOCK`) to itself; `FIONREAD`, `SO_ERROR` and the rest go to netd. A connect whose `SO_SNDTIMEO` runs out
+   returns -EINPROGRESS and goes on (Linux).
+7. **SIGPIPE:** a send that netd answers -EPIPE, or on a dead socket (the pseudo-code's "send: and SIGPIPE rules"),
+   sends SIGPIPE unless `MSG_NOSIGNAL`, then -EPIPE or -ENETDOWN; after progress the count comes back and no signal.
+8. **Checks in Linux's order:** the descriptor (-EBADF, -ENOTSOCK) before the pointers (-EFAULT); a datagram send
+   over 64 KB is -EMSGSIZE (only a stream send loops). `MSG_WAITALL` is netd's to honour, not the kernel's loop's.
+9. **`O_NONBLOCK`** is a file flag set by `SOCK_NONBLOCK`, `FIONBIO`, accept's flags or `open` (it makes
+   `/dev/random` answer -EAGAIN too); libz's `fcntl` comes with libz's socket calls (step 4), as do the BSD functions:
+   the step-3 programs call `sys_sock` (usys.h) directly.
+10. **`SYS_drv` 92** is claimed (CLAUDE.md) but not in kernel.h until step 7, so the call counts stay true.
+11. **A test client:** besides `socktestd` (the note's test server), `socktest` holds the checks (as `sigtest` does
+    D16's), both with pages. `socktestd`'s network is a loopback of stream sockets on port numbers (a 512-byte buffer
+    a socket, so a big send waits: partial sends), slow connects on ports 8000 and up, and commands for its death, an
+    inflated count and its request count.
+
+Sizes (*measured* 2026-10-27): `sock.o` 3,987 bytes of code and 1,028 of data (the note's estimate 3-4 KB plus 0.3); the
+kernel image 145,588 -> 150,244 bytes (RAM floppy: 28,956 left; the mount tests' floppy 4,380). **Free memory with
+one login** after steps 2 and 3 (`free`, FS-UAE matrix, *measured* 2026-10-27): 2 MB chip-only 1365 -> 1351 KB, 1 MB
+chip-only 428 -> 414 KB (the kernel's 10.6 KB of code, its 1.3 KB of new data and boot's 0.7 KB). The mount tests'
+floppy has 4,380 bytes of kernel headroom left: step 4 must count on that (its RAM disk can shrink by a few KB). Tests: `tools/sock-host-test.sh` (the 4.3 model: a push before the call,
+between the check and the masked test, during the server's turn and while asleep, never lost; a stale bit costs one
+call; a handler's -EINTR and the restart rule; the deadline; the server's end waking a waiter, its death mid-request
+-ENETDOWN, a stale epoch's socket dropped, NET_CLOSE as a no-start call, a partial send's count, accept's
+reservations, a restarted connect sending no second CONNECT, poll without a message, SYS_netsrv's checks);
+`tools/sock-test.sh` in FS-UAE (socktest's checks against socktestd, ^C on a blocked recv, the log of the server's
+death and restart in epoch 2, e2fsck). **Checked against the host-only parts' `net/netd/netd.h` and their binding
+choices** (merged from main): sockets named by (index, generation) as `a[0]`'s low 8 and next 16 bits; ACCEPT's
+reserved socket is `netreq.newsock`; the timeouts are the kernel's (their choice 6: netd answers -ENOPROTOOPT if one
+reaches it, and none does); ready bits only from socket state, truthful in every reply (their choice 10, rule 1);
+`SOCK_RAW` -EPROTONOSUPPORT is netd's answer. Step 4's message loop adapts the wire fields to netd's calls (FIONREAD's
+`int` to `netd_ioctl`'s `long`, RESOLVE's name in `buf`). The 4.3 model their section leaves to step 3 is
+`tools/sock-host-test.sh`.
 
 Last checked against the code: 2026-10-27.
 

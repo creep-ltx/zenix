@@ -1,0 +1,52 @@
+SOCKTEST(1)		Zenix manual
+
+NAME
+    socktest - test the kernel's sockets
+
+SYNOPSIS
+    socktest CHECK...
+
+DESCRIPTION
+    A test program for the kernel's socket layer (DESIGN D19 step 3,
+    docs/d19-network.md section 4). It needs socktestd(8) serving the
+    port "net" (as root: svctest reg net 0 /bin/socktestd). Each check
+    starts its other ends (socktest itself, with an argument that begins
+    with _) and prints lines "socktest NAME: PASS (...)" or "socktest
+    NAME: FAIL (...)" with what it saw:
+
+    basic    a connected pair: fstat says socket; data both ways with
+             send/recv and read/write; FIONREAD; an address length of
+             1000 into a 28-byte region (checked as 28, the true length
+             returned); a buffer length far over 64 KB (checked as 64
+             KB); a count the server inflates is clamped
+    ptr      bad pointers (the buffer, the request, a length's pointer)
+             give -EFAULT; a non-socket -ENOTSOCK, no fd -EBADF, an
+             unknown op -EINVAL
+    block    accept and recv wait for the other end; few requests to the
+             server while they wait (no spinning)
+    poll     poll wakes on the server's push, without a request
+    restart  SA_RESTART restarts a recv; without it -EINTR; with
+             SO_RCVTIMEO never restarted; the timeout gives -EAGAIN
+    partial  a big send that a signal cuts gives the count queued so far,
+             the rest follows in order; O_NONBLOCK and MSG_DONTWAIT
+    connect  a blocking connect waits for the server; non-blocking gives
+             -EINPROGRESS, then POLLOUT and SO_ERROR 0; interrupted
+             -EINTR (the connection goes on); restarted it only waits
+    sigpipe  the end of file after the peer closed; a send then gives
+             -EPIPE with MSG_NOSIGNAL and ends the sender (141) without
+    down     the server crashes in a request: that request and a child
+             blocked in recv (on a socket handed to it) get -ENETDOWN at
+             once; the old sockets are dead; closing them starts nothing;
+             a new socket starts the server again
+    hang     blocks in recv until ^C (tools/sock-test.sh types it)
+
+EXIT STATUS
+    The number of checks that failed.
+
+NOTES
+    Calls the kernel's SYS_sock directly: libz's BSD socket functions
+    come with the network server (D19 step 4). Ports 7001-7100 and 8100
+    are used; tools/sock-test.sh runs every check in the emulator.
+
+SEE ALSO
+    socktestd(8), svctest(1), sigtest(1)

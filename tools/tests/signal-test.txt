@@ -21,7 +21,7 @@ send sleep 100 | sleep 101\r
 sleep 2
 send \x03
 sleep 1
-send echo pipe-sleeps=$(ps | grep -c sleep)\r
+send echo pipe-sleeps=$(ps | grep -c ' sleep$')\r
 wait (?m)^pipe-sleeps=[0-9] 20
 send sigtest _jobber\r
 wait (?m)^sigtest: jobber ready 20
@@ -61,7 +61,7 @@ send \x11
 sleep 2
 send echo edit-status=$?\r
 wait (?m)^edit-status= 10
-send sleep 1 | sleep 300 & sleep 2; kill %1; sleep 1; echo group-left=$(ps | grep sleep | grep -vc zombie) zombies=$(ps | grep -c zombie)\r
+send sleep 1 | sleep 300 & sleep 2; kill %1; sleep 1; echo group-left=$(ps | grep ' sleep$' | grep -vc zombie) zombies=$(ps | grep -c zombie)\r
 wait (?m)^group-left=[0-9] 20
 send echo zombies-after=$(ps | grep -c zombie)\r
 wait (?m)^zombies-after= 20

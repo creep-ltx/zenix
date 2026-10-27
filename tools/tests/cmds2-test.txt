@@ -27,7 +27,7 @@ sleep 3
 send mkdir /tmp/many; cd /tmp/many; touch f0; seq 1 449 | sed 's/^/f/' | xargs -n 1 ln f0; cd /; echo lsn=$(ls /tmp/many | wc -l) lsa=$(ls -a /tmp/many | wc -l) lsl=$(ls -l /tmp/many | grep -c 'f449$'); rm -r /tmp/many\r
 wait lsn=[0-9]+ lsa 180
 sleep 2
-send pingd & sleep 1; ping 500\r
+send msgpingd & sleep 1; msgping 500\r
 wait round.trips.in 60
 sleep 2
 send touch /tmp/bench; bench > /tmp/b1; rm /tmp/bench; bench > /tmp/b2; echo bench f1=$(grep -c FAILED /tmp/b1) f2=$(grep -c FAILED /tmp/b2); grep 'small files' /tmp/b1\r

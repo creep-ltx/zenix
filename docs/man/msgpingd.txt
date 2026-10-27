@@ -1,0 +1,32 @@
+MSGPINGD(1)		Zenix manual
+
+NAME
+    msgpingd - test message server
+
+SYNOPSIS
+    msgpingd [-port NAME] [-call NAME] [-fs | -fsbad] [count]
+
+DESCRIPTION
+    Creates a message port named "ping" and answers the requests of
+    msgping(1): type 1 adds two numbers, type 2 converts a string to upper
+    case IN PLACE in the client's memory (showing that messages pass
+    pointers, not copies), type 3 answers with what the service manager
+    told it at its start (the start count, plus 65536 if the last server
+    ended in the middle of a request), type 7 waits a second and then
+    crashes (an illegal instruction: for the service manager's tests),
+    type 9 ends the server. It also ends after serving count requests if
+    given. Start it in the background:  msgpingd &
+    -port NAME  serve port NAME instead of "ping".
+    -call NAME  call port NAME once before opening its own port (a server
+                whose start needs another service; D11's tests use it to
+                make a cycle).
+    -fs         be a filesystem server that hangs: it answers the request
+                for its root directory, never answers a sync, ends at the
+                quit of umount and refuses the rest (svctest mount puts
+                it on a directory; the reboot test uses it).
+    -fsbad      the same, but the request for its root fails too: a
+                mount that fails must end its server.
+    A development tool; see docs/architecture.md, "Ports and messages".
+
+SEE ALSO
+    msgping(1), bench(1)

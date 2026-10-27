@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "fsproto.h"
+#include "random.h"
 
 static struct file files[NFILE];
 static int strcmp_(const char *a, const char *b)
@@ -47,6 +48,8 @@ __attribute__((noinline)) void file_close(struct file *f)
         fs_call_on(f->fs, FS_CLOSE, f->ino, 0, 0, 0);
     if (f->type == FT_SERIAL)
         serdev_close();
+    if (f->type == FT_SOCK)
+        sock_release(f->ino);               /* NET_CLOSE while its epoch lives (D19 rule 11) */
     struct pipe *pp = (f->type == FT_PIPE_R || f->type == FT_PIPE_W) ? f->pipe : 0;
     if (pp) {
         if (f->type == FT_PIPE_R)
@@ -145,6 +148,10 @@ u16 vfs_poll(struct file *f)
     case FT_PIPE_W:
         ev_arm(&p->wwait);
         return !p->readers ? POLLERR : p->count < sizeof p->buf ? POLLOUT : 0;
+    case FT_RANDOM:
+        return rnd_poll((int)f->off);
+    case FT_SOCK:
+        return sock_poll(f);            /* the server's bits, no message (D19 rule 8) */
     }
     return POLLIN | POLLOUT;
 }
@@ -458,7 +465,8 @@ long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
 
 /* the few device files: /dev/tty (this process's controlling tty), /dev/console (console 1), /dev/tty1 .. /dev/tty10
  * (the virtual consoles: root, or a process whose controlling tty it is - nobody reads another user's keys),
- * /dev/ttyS0 (the serial port, DESIGN D12), /dev/null, /dev/zero */
+ * /dev/ttyS0 (the serial port, DESIGN D12), /dev/null, /dev/zero, /dev/urandom and /dev/random (DESIGN D19 9.3,
+ * random.c: off 1 waits until the pool is seeded) */
 static long open_device(const char *path, int flags)
 {
     int type = 0, con = 0;
@@ -473,6 +481,8 @@ static long open_device(const char *path, int flags)
     }
     else if (!strcmp_(path, "/dev/null")) type = FT_NULL;
     else if (!strcmp_(path, "/dev/zero")) type = FT_ZERO;
+    else if (!strcmp_(path, "/dev/urandom")) type = FT_RANDOM;
+    else if (!strcmp_(path, "/dev/random")) { type = FT_RANDOM; con = 1; }
     else {
         if (!strcmp_(path, "/dev/console"))
             con = 1;
@@ -556,12 +566,19 @@ long vfs_stat(const char *path, struct ustat *st)
 
 long vfs_fstat(struct file *f, struct ustat *st)
 {
-    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL || f->type == FT_KLOG) {
+    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL || f->type == FT_KLOG ||
+        f->type == FT_RANDOM) {
         memset(st, 0, sizeof *st);
         st->mode = 020666;
         st->links = 1;
         if (f->type == FT_TTY)
             st->ino = f->off;               /* a console's number (1..NCONS): the ustat has no device field */
+        return 0;
+    }
+    if (f->type == FT_SOCK) {               /* DESIGN D19: S_IFSOCK, as Linux shows a socket */
+        memset(st, 0, sizeof *st);
+        st->mode = S_IFSOCK | 0777;
+        st->links = 1;
         return 0;
     }
     if (f->type != FT_INODE)
@@ -734,6 +751,10 @@ long vfs_read(struct file *f, void *buf, u32 n)
     case FT_ZERO:
         memset(buf, 0, n);
         return (long)n;
+    case FT_RANDOM:
+        return rnd_read((int)f->off, (f->flags & O_NONBLOCK) != 0, buf, n);
+    case FT_SOCK:
+        return sock_rw(f, buf, n, 0);
     case FT_PIPE_W:
         return -EBADF;
     case FT_INODE: {
@@ -764,6 +785,10 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return (long)n;
     case FT_NULL: case FT_ZERO:
         return (long)n;                     /* the bit bucket */
+    case FT_RANDOM:
+        return rnd_write((int)f->off, buf, n);   /* mixed; root's write to /dev/random credits it (random.c) */
+    case FT_SOCK:
+        return sock_rw(f, (void *)buf, n, 1);
     case FT_INODE: {
         if (!(f->flags & (O_WRONLY | O_RDWR)))
             return -EBADF;                  /* opened for reading only */

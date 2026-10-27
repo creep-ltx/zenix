@@ -22,14 +22,14 @@
 #   zo the same on the ZenixFS root (kernel-zfs), and a file created less than 3 s before zfsd died (not committed) is gone for its
 #      open file: the read fails and never reaches the next new file
 #   u  a dd copy of the root partition beside it (the same uuid): the restart serves the original (the place first)
-#   l  the limits (step 4) with pingd as a file service: started on demand at its nice, a quit is a stop and the next
+#   l  the limits (step 4) with msgpingd as a file service: started on demand at its nice, a quit is a stop and the next
 #      call starts it again; five crashes in a request (-104 each) with the back-off (the 3rd, 4th, 5th call wait 1, 2,
 #      4 s more), then given up: -104 at once; registering again clears it; a start-up calling its own port fails at
 #      once; a loader killed in its back-off passes the role on (the next call works); a cycle of two services fails
 #      after the 30 s deadline
 #   s  the sync paths (step 5): reboot with the root server dead and a loader asleep in a 4 s back-off: the sync skips
 #      the dead server at once (no error), the machine resets and boots again
-#   h  reboot with a filesystem server that never answers its sync (pingd -fs, audit A7): after 5 s the machine is
+#   h  reboot with a filesystem server that never answers its sync (msgpingd -fs, audit A7): after 5 s the machine is
 #      reset anyway, the log names the server, and it boots again
 #   t  /etc/svctab (step 7): a service listed there starts on the first call at its nice; ping's quit is a stop and
 #      the next ping starts it again; a missing program fails at once each time, logged, never counted (no give-up);
@@ -214,12 +214,12 @@ fi
 if want_part l; then
 run l fsuae/a1200-020-fast.fs-uae 260 tools/tests/svc-limit-test.txt
 line l "registering a file service" "svctest reg ping: 0"
-line l "... no pingd before the first call" "before=0"
+line l "... no msgpingd before the first call" "before=0"
 rx   l "... the first call starts it" ".*svctest call ping 1: 0 in [0-9]+ ms"
-rx   l "... at its nice (0)" " +[0-9]+ +0 +16 +0 [a-z]+ +[0-9]+ +[0-9]+ pingd"
-rx   l "... the log names the start" "svc: ping: started /bin/pingd \(pid [0-9]+, for pid [0-9]+ svctest\)"
-rx   l "a quit while idle is a stop" "svc: ping: pingd \(pid [0-9]+\) stopped"
-line l "... no pingd after it" "after-quit=0"
+rx   l "... at its nice (0)" " +[0-9]+ +0 +16 +0 [a-z]+ +[0-9]+ +[0-9]+ msgpingd"
+rx   l "... the log names the start" "svc: ping: started /bin/msgpingd \(pid [0-9]+, for pid [0-9]+ svctest\)"
+rx   l "a quit while idle is a stop" "svc: ping: msgpingd \(pid [0-9]+\) stopped"
+line l "... no msgpingd after it" "after-quit=0"
 rx   l "a crash in a request: the client gets -104" ".*svctest call ping 7: -104 in [0-9]+ ms"
 L=$OUT/l.log
 t=$(tr -d '\r' < "$L" | grep -ao 'svctest call ping 7: -104 in [0-9]* ms' | grep -o '[0-9]* ms' | tr -d ' ms' | tr '\n' ' ')
@@ -233,7 +233,7 @@ if [ "$(grep -ac 'svctest call ping 1: 0 in' "$L")" -ge 3 ]; then echo "PASS reg
 line l "a start-up that calls its own port fails at once" "svc: own: its own server called it before it opened its port"
 rx   l "... and its caller gets -104" ".*svctest call own 1: -104 in [0-9]+ ms"
 rx   l "a loader killed in its back-off: the next call works" ".*svctest call k 1: 0 in [0-9]+ ms"
-rx   l "a cycle of two services: the deadline ends it" "svc: c[12]: pingd did not open its port in 30 s"
+rx   l "a cycle of two services: the deadline ends it" "svc: c[12]: msgpingd did not open its port in 30 s"
 rx   l "... and the caller gets -104 after about 30 s" ".*svctest call c1 1: -104 in (29|3[0-9])[0-9]{3} ms"
 line l "the script ran to the end" "svc-l-done"
 fi
@@ -289,13 +289,13 @@ cp $BD/zenix.hdf "$OUT/root.hdf"
 conf t "$OUT/root.hdf"
 run t "$OUT/t.fs-uae" 160 tools/tests/svc-tab-test.txt
 line t "a bad line is reported and skipped" "boot: /etc/svctab: line skipped: bad"
-rx   t "... no pingd before the first call" "(.*# )?before=0"
+rx   t "... no msgpingd before the first call" "(.*# )?before=0"
 rx   t "the first call starts it" ".*svctest call ping 1: 0 in [0-9]+ ms"
-rx   t "... at the nice from the table (5)" " +[0-9]+ +0 +[0-9]+ +5 [a-z]+ +[0-9]+ +[0-9]+ pingd"
-rx   t "... the log names the start" "svc: ping: started /bin/pingd \(pid [0-9]+, for pid [0-9]+ svctest\)"
-rx   t "ping's quit is a stop" ".*svc: ping: pingd \(pid [0-9]+\) stopped"
+rx   t "... at the nice from the table (5)" " +[0-9]+ +0 +[0-9]+ +5 [a-z]+ +[0-9]+ +[0-9]+ msgpingd"
+rx   t "... the log names the start" "svc: ping: started /bin/msgpingd \(pid [0-9]+, for pid [0-9]+ svctest\)"
+rx   t "ping's quit is a stop" ".*svc: ping: msgpingd \(pid [0-9]+\) stopped"
 rx   t "... none left after it" "(.*# )?after-quit=0"
-if [ "$(grep -ac 'svc: ping: started /bin/pingd' "$OUT/t.log")" -ge 3 ]; then echo "PASS ... the next ping starts it again"; else echo "FAIL ... the next ping starts it again"; pass=0; fi
+if [ "$(grep -ac 'svc: ping: started /bin/msgpingd' "$OUT/t.log")" -ge 3 ]; then echo "PASS ... the next ping starts it again"; else echo "FAIL ... the next ping starts it again"; pass=0; fi
 if [ "$(grep -acE '.*svctest call gone 1: -104 in [0-9] ms' "$OUT/t.log")" -ge 3 ]; then echo "PASS a missing program fails at once, every time"; else echo "FAIL a missing program fails at once, every time"; pass=0; fi
 rx   t "... the log says why" "svc: gone: cannot start /bin/nosuchprog \(error -2\)"
 none t "... and it is never counted (no give-up)" "svc: gone: given up.*"

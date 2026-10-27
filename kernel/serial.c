@@ -5,6 +5,7 @@
 #else
 #include "hw.h"
 #endif
+#include "random.h"
 
 /* TX: ring buffer with opportunistic draining - console output never
  * waits for the wire. Every drain pops only what Paula's transmit
@@ -137,6 +138,8 @@ void serial_rx_isr(void)
         rxq[h] = c;
         rxq_head = nh;
         kwork_pending = 1;
+        if (c == 0xC0)
+            rnd_event(RND_CR_SLIP);     /* a SLIP frame's end: the far machine's clock (D19 9.3) */
     }
 }
 

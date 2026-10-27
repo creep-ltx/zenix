@@ -1,0 +1,47 @@
+RANDOM(4)		Zenix manual
+
+NAME
+    random, urandom - random numbers from the kernel
+
+SYNOPSIS
+    /dev/urandom
+    /dev/random
+
+DESCRIPTION
+    Reading either device gives random bytes from the kernel's generator
+    (DESIGN D19): its samples are mixed with BLAKE2s, its output comes
+    from ChaCha20 and every read replaces the key. /dev/urandom never
+    waits. /dev/random waits until the pool has been seeded with an
+    estimated 256 bits, then is the same as /dev/urandom, and poll(2)
+    reports it readable from then on. A read moves at most 4096 bytes.
+
+    What counts (credited): key presses and releases (one bit each), the
+    end of a SLIP frame received on the serial port (half a bit), the
+    floppy's index pulse while a track is read (a bit), the Raspberry
+    Pi's hardware generator under Emu68, and the seed file at boot.
+    Disk completions, mouse movement, the clocks and chip RAM at a cold
+    start are mixed in but count for nothing.
+
+    Writing to either device mixes the bytes in without credit; only
+    root's write to /dev/random credits them (8 bits a byte): boot(8)
+    uses it for the seed file.
+
+FILES
+    /var/lib/random-seed  a seed for the next start: boot(8) mixes it
+                  in, writes a new one and syncs it before it credits
+                  the old one (only on a writable disk root, and only a
+                  seed written by a boot whose pool was seeded); boot
+                  writes it again when the pool is first seeded, and
+                  reboot(8) before the reset. No image ships one:
+                  mkroot and the update bundles refuse it.
+
+NOTES
+    On a fresh machine (no seed file yet) /dev/random waits until about
+    128 keys have been typed; a RAM-disk root never credits its seed, so
+    there it waits for keys at every boot. The kernel log says when the
+    pool was seeded ("random: pool seeded (N bits) after T s"). The
+    reset warning (Ctrl-Amiga-Amiga) writes no seed: boot's write at the
+    start and at the first seeding cover it.
+
+SEE ALSO
+    boot(8), reboot(8)

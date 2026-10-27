@@ -52,6 +52,9 @@ if [ -n "$PKGDB" ] && [ -f "$B/pkg/list" ]; then
     mkdir -p "$T/var/lib/zpkg" "$T/var/cache/zpkg"
     python3 "$(dirname "$0")/mkzup.py" installdb "$T" "$B/pkg" "$T/var/lib/zpkg"
 fi
+# no image ever ships a random seed (DESIGN D19 9.3): every copy of it (a card, the demo floppy) would start with the
+# same one. Boot writes the machine's own at its first start.
+if [ -e "$T/var/lib/random-seed" ]; then echo "mkroot.sh: refusing to put a random seed (var/lib/random-seed) on an image" >&2; exit 1; fi
 rm -f "$TMPOUT"
 # revision 0: the original ext2, 128-byte inodes, no optional features
 # ownership and modes under fakeroot, so the image holds uid 0 (not whoever runs the build): root owns everything,

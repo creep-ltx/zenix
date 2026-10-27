@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 117 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 119 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -56,18 +56,20 @@ spot-checked against the code that day.
 | [sudo](man/sudo.txt) | run one command as root: members of the group wheel, with their own password |
 | [dd](man/dd.txt), [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [mkfs.zenixfs](man/mkfs.zenixfs.txt), [fsck.zenixfs](man/fsck.zenixfs.txt), [sync](man/sync.txt), [reboot](man/reboot.txt) | disks |
 | [zup](man/zup.txt) | install the root half of an update (`/sbin/zup`, DESIGN D15) |
+| [random](man/random.txt) | not a command: `/dev/random` and `/dev/urandom`, the kernel's random numbers, and the seed file (DESIGN D19) |
 | [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
 | [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd or zfsd) |
 
 ## Internals and test programs
 [init](man/init.txt), [boot](man/boot.txt), [diskd](man/diskd.txt) (the built-in start-up programs);
 [hello](man/hello.txt), [spin](man/spin.txt), [crash](man/crash.txt), [badptr](man/badptr.txt),
-[ping](man/ping.txt), [pingd](man/pingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt),
-[priotest](man/priotest.txt), [svctest](man/svctest.txt), [sigtest](man/sigtest.txt).
+[msgping](man/msgping.txt), [msgpingd](man/msgpingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt),
+[priotest](man/priotest.txt), [svctest](man/svctest.txt), [sigtest](man/sigtest.txt),
+[socktest](man/socktest.txt), [socktestd](man/socktestd.txt) (the socket layer and its test server, DESIGN D19).
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 117 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 119 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

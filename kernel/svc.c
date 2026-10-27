@@ -355,6 +355,8 @@ void svc_exit(struct proc *p)
         if ((s->state != SV_STARTING && s->state != SV_RUNNING) || s->pid != p->pid)
             continue;
         struct port *pt = &ports[i];
+        if (eq(pt->name, "net"))
+            sock_server_gone();                 /* D19 rule 10: its sockets die and their waiters wake, now */
         pt->owner = 0;                          /* back to held: the queued messages wait for the next server */
         pt->op = 0;
         pt->waiter = 0;
@@ -403,6 +405,12 @@ static int mine(void)                   /* the entry whose started (or running) 
         if ((svcs[i].state == SV_STARTING || svcs[i].state == SV_RUNNING) && svcs[i].pid == current->pid)
             return i;
     return -1;
+}
+
+int svc_is(const char *name)
+{
+    int i = mine();
+    return i >= 0 && eq(ports[i].name, name);
 }
 
 /* SVC_SAVE / SVC_LOAD: the small table a server leaves for its next start (diskd's slots and claims, D11 5.4). Only

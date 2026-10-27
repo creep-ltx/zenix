@@ -18,7 +18,7 @@ The documentation must keep saying this.
 
 What the permissions do cover (audit D): a user cannot kill, stop or take over the terminal of another user's or a
 system process, cannot set the clock, cannot talk to the filesystem or disk server directly (the servers answer only
-the kernel and root; the names `fs`, `fs.*` and `disk` are reserved for root), cannot open another user's console
+the kernel and root; the names `fs`, `fs.*`, `disk` and `net` are reserved for root), cannot open another user's console
 (`/dev/ttyN`: root, or the console one is on), and `su`, `tar x`, `find -delete`, here-documents and `mktemp` do not hand one user's
 files or environment to another (architecture.md section 14). What they cannot cover: a program written to cheat
 can still overwrite a message after the kernel stamped it, or any memory at all.
@@ -35,9 +35,9 @@ nothing but good behaviour keeps a program from writing into it: the kernel refu
 (`user_ok_wr`), but a program writing through a stray pointer changes the code its other processes run. The checksum
 finds that at the next start (a fresh copy is loaded) and when a process running it faults (the log names the
 processes still running the damaged copy); those go on running it - nothing can stop them without an MMU. **Raw
-messages** a program sends itself (`SYS_call`) carry pointers the servers write through without a check (pingd,
+messages** a program sends itself (`SYS_call`) carry pointers the servers write through without a check (msgpingd,
 diskd's `DISK_INFO`/`DISK_LIST`, root's raw filesystem requests): a program that sends raw messages (bench, badptr,
-dd, fsck.ext2, fdisk, ping, mount, pingd, mkfs.ext2, priotest, svctest) must stay ZEXE until the servers check
+dd, fsck.ext2, fdisk, msgping, mount, msgpingd, mkfs.ext2, priotest, svctest) must stay ZEXE until the servers check
 pointers.
 
 ## Not done yet (the plan: ROADMAP.md)
@@ -143,6 +143,18 @@ pointers.
   four chunks in use, gets 4); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
 - Paths: the directory tools report a joined path longer than a system call takes (63 bytes) instead of cutting it.
+- Sockets (DESIGN D19, architecture.md section 11): 32 kernel sockets for the whole machine, the last 4 only for root
+  (-ENFILE beyond); each is also one of the 64 open files and one of a process's 16 fds; a buffer is checked and
+  sent at most 64 KB a message (a blocking stream send loops, a datagram over 64 KB is -EMSGSIZE); an address at most
+  28 bytes (the true length is still returned), an option's value at most 64; `SO_RCVTIMEO`/`SO_SNDTIMEO` in ticks
+  (10 ms). No network server yet (D19 step 4): without `net` registered every socket call is -ENETDOWN.
+- Random numbers (DESIGN D19 9.3, architecture.md section 3): a read or write of `/dev/random` or `/dev/urandom` moves
+  at most 4,096 bytes (a short count, as Linux); `/dev/random` waits for 256 credited bits (on a fresh machine that
+  is 256 key presses and releases, or the seed file at the next start); a sample ring of 32 entries (a full one drops
+  samples, which then earn nothing); the generator takes a new key from the pool at most once a minute once seeded.
+  The seed file is written at every start, at the pool's first seeding and by `reboot`, not at the reset warning
+  (the kernel syncs there, it does not write files). The floppy's index pulse is credited only while the driver waits
+  for a track (it polls). The sources' real behaviour on the A1200 and the RNG200 are not yet verified there.
 - Timer tick 100 Hz to within the E-clock's resolution (latch 7093 on PAL, 709,379 Hz: 99.997 Hz; 7158 on NTSC,
   715,909 Hz: 100.001 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers chained, an E-clock count
   that wraps after about 1.7 hours (`bench` converts it with the PAL rate).

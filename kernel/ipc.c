@@ -21,11 +21,11 @@ static int strncmp_(const char *a, const char *b, int n)
 }
 
 /* Reserved port names (audit D): "fs" (the root filesystem), "fs.*" (mounted filesystems, named by mount) and "disk"
- * belong to the system: only root may create them, so a normal user cannot put a fake server in their place, also
- * not after the real one died. */
+ * belong to the system, and "net" (the network server, DESIGN D19: the kernel sends it every socket call): only root may
+ * create them, so a normal user cannot put a fake server in their place, also not after the real one died. */
 static int reserved(const char *n)
 {
-    return (n[0] == 'f' && n[1] == 's' && (!n[2] || n[2] == '.')) || !strncmp_(n, "disk", 16);
+    return (n[0] == 'f' && n[1] == 's' && (!n[2] || n[2] == '.')) || !strncmp_(n, "disk", 16) || !strncmp_(n, "net", 16);
 }
 
 /* A port number is (generation << 8) | slot. Each create of a slot counts its generation up, so a number someone kept
@@ -274,7 +274,7 @@ struct umsg *ipc_recv(int port, int wait)
 
 /* m comes from user space (a server's reply): it is looked up among the requests that are really in flight before
  * anything in it is read, so a stray or forged pointer cannot make the kernel read or write elsewhere */
-long ipc_reply(struct umsg *m, s32 result)
+struct proc *ipc_client(struct umsg *m)
 {
     struct proc *c = 0;
     if (m)
@@ -284,6 +284,13 @@ long ipc_reply(struct umsg *m, s32 result)
                 break;
             }
     if (!c || m->client != c || m->state != MSG_SERVING || m->server != current->pid)
+        return 0;
+    return c;
+}
+
+long ipc_reply(struct umsg *m, s32 result)
+{
+    if (!ipc_client(m))
         return -EINVAL;
     ipc_finish(m, result);
     if (current->prio < current->blevel)        /* the boost from this client ends with the reply */

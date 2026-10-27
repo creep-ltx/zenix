@@ -8,8 +8,11 @@ SYNOPSIS
     bootamigaos
 
 DESCRIPTION
-    reboot does what pressing Ctrl-Amiga-Amiga does on a keyboard that
-    sends the reset warning: every filesystem is synced, disk writes are
+    reboot first writes a new random seed into /var/lib/random-seed
+    (random(4)), so what this session gathered is in the next start's
+    pool (marked creditable when the pool was seeded). Then it does
+    what pressing Ctrl-Amiga-Amiga does on a keyboard that sends the
+    reset warning: every filesystem is synced, disk writes are
     stopped, and the machine is reset. The next boot's log (dmesg -p)
     says that the previous boot ended with reboot. A filesystem server
     that is not running at that moment (it crashed and nobody needed it
@@ -39,4 +42,4 @@ NOTES
     the disk the note is simply not read.
 
 SEE ALSO
-    bootmenu(8), sync(1), dmesg(1)
+    bootmenu(8), sync(1), dmesg(1), random(4)

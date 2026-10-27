@@ -49,7 +49,7 @@ zenix/
 ## user/: programs and servers
 
 - **Servers:** `diskd.c` (disks and partitions), `fsd.c` (ext2), `zenixfsd.c` (ZenixFS), `boot.c` (starts init),
-  `init.c` (logins on the consoles), `pingd.c` (the message benchmark's partner).
+  `init.c` (logins on the consoles), `msgpingd.c` (the message benchmark's partner).
 - **The C library:** `libz.c`, `libz.h`, `usys.h` (system call wrappers), `crt0.S` (program start-up). Zenix has its
   own small library, not newlib.
 - **The shell:** `sh.c`.

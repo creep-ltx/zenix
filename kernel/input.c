@@ -11,6 +11,7 @@
  */
 #include "kernel.h"
 #include "hw.h"
+#include "random.h"
 
 #define JOY0DAT REG16(0xDFF00A)
 #define JOY1DAT REG16(0xDFF00C)
@@ -37,6 +38,8 @@ void input_poll(void)
     if (!inited)
         return;
     u16 j0 = JOY0DAT, j1 = JOY1DAT;
+    if (j0 != last0)
+        rnd_isr(j0, 0);                  /* mouse movement: mixed, never credited (D19 9.3) */
     dx += (signed char)((j0 & 0xFF) - (last0 & 0xFF));
     dy += (signed char)((j0 >> 8) - (last0 >> 8));
     last0 = j0;

@@ -261,7 +261,7 @@ union zhdr { struct zexe v1; struct zex2 v2; };
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16
 #define NFILE 64
-enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG };   /* FT_KLOG: a service's output, into the kernel log (D11) */
+enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM, FT_SOCK };   /* FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19; FT_SOCK: a socket (ino: its ksock), D19 */
 struct pipe {
     u8 buf[2048];
     u16 rd, wr, count;
@@ -274,6 +274,8 @@ struct pipe {
 #define O_CREAT  0x40
 #define O_TRUNC  0x200
 #define O_APPEND 0x400
+#define O_NONBLOCK 0x800                /* DESIGN D19: never wait (sockets, /dev/random; pipes later). Linux's value */
+#define S_IFSOCK 0140000                /* DESIGN D19: fstat's type of a socket (Linux's value) */
 struct file {
     u8 type;
     u16 refs;                   /* fds and processes sharing it: up to NPROC * NFD = 512, so not a byte */
@@ -560,6 +562,8 @@ void ipc_unqueue(struct port *p, struct umsg *m);
 void ipc_finish(struct umsg *m, s32 result);
 int ipc_serving(int pid);                      /* is pid serving a request now? */
 #define UMSG_KERNEL 1
+#define UMSG_NETREPLY 2                 /* D19: answered by the network server's NETSRV_REPLY (sock.c), internal */
+struct proc *ipc_client(struct umsg *m);       /* the client of m if it is in flight and served by current, else 0 */
 struct umsg *ipc_recv(int port, int wait);
 struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port);
 long ipc_reply(struct umsg *m, s32 result);
@@ -589,6 +593,17 @@ void svc_hurry(void);                   /* the reset warning or reboot began: no
 void svc_born(int pid);                 /* proc_load made the server of the load under way in current */
 long svc_sys(u32 op, const char *name, const char *text);
 long svc_data(u32 op, void *buf, u32 len);   /* SVC_SAVE, SVC_LOAD */
+int svc_is(const char *name);           /* is current the process the kernel started (or runs) for that service? */
+
+/* sock.c: sockets (DESIGN D19, docs/d19-network.md 4.1-4.3; the protocol in netproto.h) */
+#define NSOCK 32                        /* kernel socket objects, shared by every process (a few kept for root) */
+long sock_sys(u32 opw, u32 fd, u32 ureq);
+long netsrv_sys(u32 op, u32 a, u32 b);
+long sock_rw(struct file *f, void *buf, u32 n, int write);
+u16 sock_poll(struct file *f);
+void sock_release(u32 i);               /* the socket file's last close */
+void sock_server_gone(void);            /* the "net" server ended (svc.c): a new epoch, every socket dead */
+extern u32 net_epoch;
 
 /* vfs.c */
 struct file *file_new(int type);
@@ -761,6 +776,9 @@ int tty_of(const struct proc *p);
 #define SYS_setpgid     88   /* pid (0: self), pgid (0: pid): oneself or one's own children */
 #define SYS_console     89   /* op (CON_*), value: the text console's settings (the 2 MB diet, D14 section 11) */
 #define CON_COLOURS     1    /* value 2, 4, 8 or 16: set (root only); 0: ask -> the colours shown now */
+/* DESIGN D19, the network (docs/d19-network.md section 4.2; ops and structs in netproto.h) */
+#define SYS_sock        90   /* op (SOCK_*) | request size << 16, fd, struct usockreq * -> per op */
+#define SYS_netsrv      91   /* op (NETSRV_*), a, b: only the network server */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

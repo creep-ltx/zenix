@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+# Host test of the socket layer's rules (DESIGN D19 4.3: kernel/sock.c with kernel/event.c against a model of the
+# scheduler and the network server): tools/sock-host-test.sh
+set -e
+cd "$(dirname "$0")/.."
+mkdir -p build
+cc -m32 -Wall -Wextra -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast -Wno-builtin-declaration-mismatch -O1 -g -fsanitize=undefined -fno-sanitize=alignment -o build/sock-host-test tools/sock-host-test.c
+build/sock-host-test

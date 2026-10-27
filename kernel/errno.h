@@ -39,5 +39,26 @@
 #define ENOSYS       38     /* no such system call / not implemented */
 #define ENOTEMPTY    39     /* directory not empty */
 #define ELOOP        40     /* too many symbolic links */
+#define ENOTSOCK     88     /* not a socket (DESIGN D19: the network's numbers, Linux's values) */
+#define EDESTADDRREQ 89     /* destination address required */
+#define EMSGSIZE     90     /* message too long */
+#define EPROTOTYPE   91     /* protocol wrong type for socket */
+#define ENOPROTOOPT  92     /* protocol not available (an unknown socket option) */
+#define EPROTONOSUPPORT 93  /* protocol not supported */
 #define EOPNOTSUPP   95     /* operation not supported (here) */
-#define ECONNRESET  104     /* the server is gone: it died while serving, could not be started, or was given up (D11) */
+#define EAFNOSUPPORT 97     /* address family not supported */
+#define EADDRINUSE   98     /* address already in use */
+#define EADDRNOTAVAIL 99    /* cannot assign the requested address */
+#define ENETDOWN    100     /* the network is down: no network server, it ended, or it was given up (on a socket) */
+#define ENETUNREACH 101     /* network is unreachable */
+#define ECONNABORTED 103    /* connection aborted (the address it was bound to went away) */
+#define ECONNRESET  104     /* the server is gone: it died while serving, could not be started, or was given up (D11);
+                             * on a socket: reset by the peer (the server's absence is ENETDOWN there, D19) */
+#define ENOBUFS     105     /* no buffer space (the network server's limits) */
+#define EISCONN     106     /* already connected */
+#define ENOTCONN    107     /* not connected */
+#define ETIMEDOUT   110     /* connection timed out */
+#define ECONNREFUSED 111    /* connection refused */
+#define EHOSTUNREACH 113    /* no route to host */
+#define EALREADY    114     /* a connect is already under way */
+#define EINPROGRESS 115     /* the connect goes on (a non-blocking socket) */

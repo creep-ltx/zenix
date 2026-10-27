@@ -11,13 +11,13 @@
 # if a `wait` in one of its serial scripts timed out or was cut short by the end of the run (ZENIX_TIMEOUTS,
 # tools/serial-tap.py; a `waitopt` may time out).
 # Not run, on purpose: stage0-68k-test when the Python module unicorn is missing (named as skipped), audio/klog/joystick (weak or
-# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test, diag-test and colour-test,
-# ZENIX_CAGE_RIG. A new emulator test starts only while the machine's 1-minute load is 16 or less; every FS-UAE run
+# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test, diag-test, colour-test and
+# random-test, ZENIX_CAGE_RIG. A new emulator test starts only while the machine's 1-minute load is 16 or less; every FS-UAE run
 # also takes one of the machine's emulator slots (tools/run-test.sh), shared with other sessions on this PC.
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
-HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test serial-test term-test mem-test a3000-test stage0-test stage0-68k-test net-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test"
+HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test serial-test term-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
 host) LIST="$HOST" ;;
@@ -102,7 +102,7 @@ row() {
 }
 
 for t in $LIST; do
-    case "$t" in docs-check|zenixfs-test|stage0-68k-test) ;; *) [ -x "tools/$t.sh" ] || { echo "check: no test called $t"; exit 2; } ;; esac
+    case "$t" in docs-check|zenixfs-test|stage0-68k-test|net-test) ;; *) [ -x "tools/$t.sh" ] || { echo "check: no test called $t"; exit 2; } ;; esac
 done
 T0=$(date +%s)
 hostl=""; emul=""
