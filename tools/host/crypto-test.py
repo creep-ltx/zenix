@@ -6,6 +6,7 @@
                                           there by crypto-test.sh the first time: X25519 (the all-zero results must be
                                           refused), Ed25519, ChaCha20-Poly1305 (both implementations), AES-GCM, ECDSA
                                           P-256 (DER and raw) and P-384, RSA PKCS#1 v1.5 2048 and 4096, HMAC-SHA-256
+  crypto-test.py ORACLE sign OUTDIR       tools/zsign.py (OpenSSL) and the library's .sig check both ways (D21 6)
   crypto-test.py ORACLE openssl [N]       differential runs against the PC's OpenSSL (Python's cryptography module and
                                           hashlib, which use it): N random cases of each (default 200)
 
@@ -338,12 +339,121 @@ def openssl(o, count):
     result("ECDSA P-256/P-384/P-521 verification (i15, m15) against OpenSSL", True, 9 * max(3, count // 20), bad)
 
 
+# ---- tools/zsign.py and the library's .sig check (D21 6.1-6.3) ----
+def sign(o, out):
+    import struct
+    import shutil
+    import tempfile
+    here = os.path.dirname(os.path.abspath(__file__))
+    zsign = os.path.join(here, "..", "zsign.py")
+    tkey = os.path.join(here, "..", "testdata", "sign", "zenix-test.key")
+    tpub = os.path.join(here, "..", "testdata", "sign", "zenix-test.pub")
+    d = os.path.join(out, "sign")
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+
+    def zs(*a):
+        r = subprocess.run([sys.executable, "-I", zsign] + list(a), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return r.returncode, (r.stdout + r.stderr).decode(errors="replace")
+
+    def raw(pem, private=False):
+        a = ["openssl", "pkey", "-in", pem, "-pubout", "-outform", "DER"] if private else \
+            ["openssl", "pkey", "-pubin", "-in", pem, "-outform", "DER"]
+        return subprocess.run(a, stdout=subprocess.PIPE, check=True).stdout[12:]
+
+    def bundle(path, channel, part=b"kernel bytes"):
+        # a small ZUP1 bundle as tools/mkzup.py lays it out (header, table, one part at a 16-byte boundary)
+        toc_end = 96 + 80
+        off = (toc_end + 15) & ~15
+        toc = struct.pack(">40sII32s", b"boot/zenix", off, len(part), hashlib.sha256(part).digest())
+        total = off + len(part) + ((-len(part)) & 15)
+        head = struct.pack(">4sIII16sII8sIIII", b"ZUP1", 1, 96, 1001, b"1.0.1", 20261027, 0, channel.encode(), 96, 1,
+                           total, 0)
+        blob = head + hashlib.sha256(head + toc).digest() + toc
+        blob += bytes(off - len(blob)) + part + bytes((-len(part)) & 15)
+        open(path, "wb").write(blob)
+        return hashlib.sha256(head + toc).digest()
+
+    ok = lambda name, c, detail="": result(name, True, 1, [] if c else [detail])
+    tp = raw(tpub)
+    rkey, rpub = os.path.join(d, "release.key"), os.path.join(d, "release.pub")
+    subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519", "-out", rkey], check=True, stderr=subprocess.PIPE)
+    subprocess.run(["openssl", "pkey", "-in", rkey, "-pubout", "-out", rpub], check=True)
+    rp = raw(rpub)
+    b = os.path.join(d, "test.zup")
+    dg = bundle(b, "test")
+    rc, msg = zs("sign", "--key", tkey, b)
+    s = open(b + ".sig", "rb").read() if rc == 0 else b""
+    ok("zsign: a test bundle signed with the test key, 80 bytes, ZSG1 1 1 0 0, its key id", rc == 0 and len(s) == 80 and
+       s[:8] == b"ZSG1\1\1\0\0" and s[8:16] == hashlib.sha256(tp).digest()[:8], msg)
+    rc, msg = zs("verify", "--pub", tpub, b)
+    ok("zsign: OpenSSL verifies it", rc == 0 and "good signature" in msg, msg)
+    ok("library: zc_sig_verify takes it (the digest it computed itself, key 0)",
+       o.ask("sig_verify", "bundle", dg, s, tp) == "0 0")
+    ok("library: another label (index) fails", o.ask("sig_verify", "index", dg, s, tp) == "%d -1" % -3)
+    ok("library: another key only: unknown key id", o.ask("sig_verify", "bundle", dg, s, rp) == "%d -1" % -2)
+    ok("library: the second of two keys", o.ask("sig_verify", "bundle", dg, s, rp, tp) == "0 1")
+    data = bytearray(open(b, "rb").read())
+    data[15] ^= 1                                       # the version number in the header
+    data[64:96] = hashlib.sha256(bytes(data[:64]) + bytes(data[96:176])).digest()
+    open(b + "2", "wb").write(bytes(data))
+    shutil.copy(b + ".sig", b + "2.sig")
+    rc, msg = zs("verify", "--pub", tpub, b + "2")
+    dg2 = hashlib.sha256(bytes(data[:64]) + bytes(data[96:176])).digest()
+    ok("a changed version (the header's digest recomputed): OpenSSL and the library refuse", rc != 0 and "BAD" in msg and
+       o.ask("sig_verify", "bundle", dg2, s, tp) == "%d -1" % -3, msg)
+    data[40] ^= 1                                       # the channel byte, the digest not recomputed
+    open(b + "2", "wb").write(bytes(data))
+    rc, msg = zs("verify", "--pub", tpub, b + "2")
+    ok("a damaged bundle (header digest wrong) is refused before any signature", rc != 0 and "SHA-256" in msg, msg)
+    rel = os.path.join(d, "release.zup")
+    dg = bundle(rel, "stable")
+    rc, msg = zs("sign", "--key", tkey, rel)
+    ok("zsign refuses to sign a release bundle (stable) with the test key", rc != 0 and "test key" in msg and
+       not os.path.exists(rel + ".sig"), msg)
+    bundle(rel, "testing")
+    rc, msg = zs("sign", "--key", tkey, rel)
+    ok("... and a testing-channel bundle (testing is a release channel, 6.3)", rc != 0 and "test key" in msg, msg)
+    dg = bundle(rel, "stable")
+    rc, msg = zs("sign", "--key", rkey, rel)
+    s = open(rel + ".sig", "rb").read() if rc == 0 else b""
+    ok("a release bundle signed with a release key; the library verifies it with the release key, not the test key",
+       rc == 0 and o.ask("sig_verify", "bundle", dg, s, rp) == "0 0" and
+       o.ask("sig_verify", "bundle", dg, s, tp) == "%d -1" % -2, msg)
+    idx = os.path.join(d, "index")
+    open(idx, "wb").write(b"zpkg index\nbase 1001 ...\n")
+    rc, msg = zs("sign", "--key", tkey, idx)
+    ok("an index needs --kind", rc != 0 and "--kind" in msg, msg)
+    rc, msg = zs("sign", "--key", tkey, "--kind", "index", idx)
+    s = open(idx + ".sig", "rb").read() if rc == 0 else b""
+    dg = hashlib.sha256(open(idx, "rb").read()).digest()
+    ok("an index: SHA-256 of the whole file under \"Zenix package index v1\"; OpenSSL and the library",
+       rc == 0 and zs("verify", "--kind", "index", "--pub", tpub, idx)[0] == 0 and
+       o.ask("sig_verify", "index", dg, s, tp) == "0 0", msg)
+    # and back: the library signs (Monocypher), OpenSSL verifies; Ed25519 is deterministic, so both sign alike
+    seed = os.urandom(32)
+    der = bytes.fromhex("302e020100300506032b657004220420") + seed
+    pk = os.path.join(d, "lib.key")
+    subprocess.run(["openssl", "pkey", "-inform", "DER", "-out", pk], input=der, check=True)
+    subprocess.run(["openssl", "pkey", "-in", pk, "-pubout", "-out", pk + ".pub"], check=True)
+    dg = bundle(b, "test", b"other bytes")
+    libsig = bytes.fromhex(o.ask("sig_make", seed, "bundle", dg))
+    open(b + ".sig", "wb").write(libsig)
+    rc, msg = zs("verify", "--pub", pk + ".pub", b)
+    ok("the library's .sig verified by OpenSSL", rc == 0, msg)
+    zs("sign", "--key", pk, b)
+    ok("OpenSSL's and the library's .sig are the same bytes", open(b + ".sig", "rb").read() == libsig)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     o = Oracle(sys.argv[1])
     if sys.argv[2] == "wycheproof":
         wycheproof(o, sys.argv[3])
+    elif sys.argv[2] == "sign":
+        sign(o, sys.argv[3])
     elif sys.argv[2] == "openssl":
         openssl(o, int(sys.argv[3]) if len(sys.argv) > 3 else 200)
     else:

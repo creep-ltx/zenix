@@ -714,6 +714,27 @@ static int oracle(void)
             mn = zc_ssh_mpint(mp, A);
             zc_ssh_kdf(D, (size_t)atoi(w[5]), mp, mn, B, w[4][0], C);
             hexout(D, (size_t)atoi(w[5])); putchar('\n');
+        } else if (!strcmp(w[0], "sig_verify") && nw >= 5) {    /* bundle|index DIGEST SIG PUB... -> rc which */
+            unsigned char pubs[4][32];
+            int np = 0, which, i, bad = 0;
+            const char *label = !strcmp(w[1], "bundle") ? ZC_SIG_LABEL_BUNDLE : ZC_SIG_LABEL_INDEX;
+            an = H(2, A); bn = H(3, B);
+            for (i = 4; i < nw && np < 4; i++)
+                if (unhex(pubs[np++], 32, w[i]) != 32) bad = 1;
+            if (an != 32 || bn < 0 || bad) { puts("ERR"); continue; }
+            r = zc_sig_verify(B, (size_t)bn, label, A, (const unsigned char (*)[32])pubs, np, &which);
+            printf("%d %d\n", r, which);
+        } else if (!strcmp(w[0], "sig_make") && nw == 4) {      /* SEED bundle|index DIGEST -> the 80-byte .sig */
+            unsigned char sk[64], pk[32], msg[ZC_SIG_LABELMAX + 33], sig[80];
+            int mn;
+            an = H(1, A); bn = H(3, B);
+            if (an != 32 || bn != 32) { puts("ERR"); continue; }
+            crypto_ed25519_key_pair(sk, pk, A);
+            mn = zc_sig_message(msg, !strcmp(w[2], "bundle") ? ZC_SIG_LABEL_BUNDLE : ZC_SIG_LABEL_INDEX, B);
+            memcpy(sig, "ZSG1\1\1\0\0", 8);
+            zc_sig_keyid(sig + 8, pk);
+            crypto_ed25519_sign(sig + 16, sk, msg, (size_t)mn);
+            hexout(sig, 80); putchar('\n');
         } else if (!strcmp(w[0], "aes_ctr") && nw == 4) {       /* KEY IV16 DATA: 128-bit big-endian counter */
             br_aes_ct_ctrcbc_keys ck;
             an = H(1, A); bn = H(2, B); cn = H(3, C);

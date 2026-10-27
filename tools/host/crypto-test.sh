@@ -150,8 +150,15 @@ part_ssh() {
     else grep -a '^FAIL\|Traceback\|Error' "$OUT/ssh-test.log" | head -20; bad "ssh against sshd (log $OUT/ssh-test.log, sshd's in $OUT/ssh/)"; fi
 }
 
+part_sign() {
+    command -v openssl >/dev/null || { skip sign "no openssl (tools/zsign.py signs with it)"; return; }
+    build_test || return
+    if python3 -I tools/host/crypto-test.py "$OUT/crypto-test" sign "$OUT"; then say "sign PASS"
+    else bad "sign (the FAIL lines above)"; fi
+}
+
 parts=("$@")
-[ ${#parts[@]} = 0 ] && parts=(vectors upstream wycheproof openssl ssh)
+[ ${#parts[@]} = 0 ] && parts=(vectors upstream wycheproof openssl ssh sign)
 for ((i = 0; i < ${#parts[@]}; i++)); do
     p=${parts[i]}
     case "$p" in
@@ -161,6 +168,7 @@ for ((i = 0; i < ${#parts[@]}; i++)); do
     wycheproof) part_wycheproof ;;
     openssl) part_openssl ;;
     ssh) part_ssh ;;
+    sign) part_sign ;;
     *) echo "crypto-test: no part called $p"; exit 2 ;;
     esac
 done
