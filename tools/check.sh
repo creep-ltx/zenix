@@ -31,16 +31,16 @@ JOBS=${ZENIX_EMU_SLOTS:-6}
 # the table still shows one line per test (its time: the jobs' times added up).
 LONGEST="update-test rootcheck-test svc-test matrix diag-test colour-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
 declare -A SPLIT
-SPLIT[svc-test]="a z b n r d|o zo u l|f s h t dmg"
+SPLIT[svc-test]="a z zs b n r d|o zo u l|f s h t dmg"
 SPLIT[colour-test]="1 4 2|3 s4 s16 s7"    # the 1-plane run first (its edges are the reference); s*: the setting (D18)
 SPLIT[rootcheck-test]="r b|i h|u"                   # u: the choices when a repair fails (man rescue)
-SPLIT[update-test]="install bad|cold previous|panic hang|powercut slowzup|refused nozup"
+SPLIT[update-test]="install bad|cold previous|panic hang|powercut slowzup|refused nozup|zfsroot"
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh
 m1=""; m2=""; for ((i = 0; i < ${#m[@]}; i++)); do if ((i % 2)); then m2="$m2 ${m[i]}"; else m1="$m1 ${m[i]}"; fi; done
 SPLIT[matrix]="${m1# }|${m2# }"
 
 echo "check: building every image (log $RUN/build.log)"
-if ! make -s all build/zenix-ram.adf build/zenix-mount.adf >"$RUN/build.log" 2>&1 ||
+if ! make -s all build/zenix-ram.adf build/zenix-mount.adf build/zenix-zfs.adf >"$RUN/build.log" 2>&1 ||
    ! make -s -C zenixfs build/zenixfs-tool >>"$RUN/build.log" 2>&1; then
     grep -v 'RWX permissions' "$RUN/build.log" | tail -20
     echo "check: build FAILED"; exit 1

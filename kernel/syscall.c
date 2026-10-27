@@ -4,9 +4,19 @@
 #include "version.h"
 
 /* The version record (DESIGN D15): "ZVER", the number, the string. tools/mkzup.py finds it in the kernel image and
- * refuses a bundle whose number is not the kernel's; SYS_update INFO reports it. Frozen layout. */
-static const struct { char magic[4]; u32 vnum; char vstr[16]; } zver __attribute__((used, aligned(4))) =
-    { { 'Z', 'V', 'E', 'R' }, ZENIX_VNUM, ZENIX_VSTR };
+ * refuses a bundle whose number is not the kernel's; SYS_update INFO reports it. Frozen layout, grown at its end
+ * (DESIGN D19 step 1): "ZSRV" and the root filesystems this kernel has a server built in for (ZVER_ROOT_*), which
+ * zenixboot reads to refuse an update whose kernel cannot serve the machine's root. A record without "ZSRV" is
+ * older: every kernel before it served both ext2 and ZenixFS. */
+#define ZVER_ROOT_EXT2    1u
+#define ZVER_ROOT_ZENIXFS 2u
+#ifdef KERNEL_ZFSD
+#define ZVER_ROOTS (ZVER_ROOT_EXT2 | ZVER_ROOT_ZENIXFS)
+#else
+#define ZVER_ROOTS ZVER_ROOT_EXT2
+#endif
+static const struct { char magic[4]; u32 vnum; char vstr[16]; char smagic[4]; u32 roots; } zver
+    __attribute__((used, aligned(4))) = { { 'Z', 'V', 'E', 'R' }, ZENIX_VNUM, ZENIX_VSTR, { 'Z', 'S', 'R', 'V' }, ZVER_ROOTS };
 
 /* copy a NUL-terminated string from user memory, bounds-checked: 0, -EFAULT (outside what the caller may read: its
  * own memory or its shared code, D13) or -ENAMETOOLONG (longer than max - 1: a path given to a system call is at most

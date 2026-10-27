@@ -61,6 +61,12 @@ UPDATES
     every count, size and offset, the SHA-256 of its table and of every
     part. A bad one is renamed zenix-update.bad with the reason, and the
     installed system starts; one older than the installed version too.
+    So is one whose kernel cannot serve the machine's root: when the
+    installed kernel says it serves ZenixFS roots (the test-only
+    kernel-zfs; the shipped kernel has no ZenixFS server, DESIGN D19) and
+    the bundle's kernel says it does not. Each kernel says so in its
+    version record (ZVER, then ZSRV and the list); an older record says
+    nothing, and nothing is refused for it.
     Before any write Info() must say the volume is validated and has room
     for one more kernel, else the update waits for a later start. Then,
     in this order, each step flushed (ACTION_FLUSH to the volume's
