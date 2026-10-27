@@ -3,17 +3,19 @@
 /* sha256sum [file...]: the SHA-256 of each file (or standard input), as sha256sum prints it */
 static int sum(int fd, const char *name)
 {
-    static unsigned char *data; static u32 cap;
-    u32 n = 0; int r;
-    if (!data) { cap = 65536; data = malloc(cap); }
-    if (!data) return -1;
-    for (;;) {
-        if (n + 4096 > cap) { unsigned char *nd = realloc(data, cap * 2); if (!nd) return -1; data = nd; cap *= 2; }
-        if ((r = sys_read(fd, data + n, 4096)) <= 0) break;
-        n += (u32)r;
+    static unsigned char buf[4096];             /* a piece at a time: any size of file (it read the whole file into
+                                                 * memory before, and a file over the free memory gave nothing) */
+    struct sha256 c;
+    int r;
+    sha256_init(&c);
+    while ((r = sys_read(fd, buf, sizeof buf)) > 0)
+        sha256_update(&c, buf, (u32)r);
+    if (r < 0) {
+        fprintf(2, "sha256sum: %s: %s\n", name, zstrerror(r) ? zstrerror(r) : "cannot read");
+        return -1;
     }
     unsigned char h[32];
-    sha256(data, n, h);
+    sha256_final(&c, h);
     static const char hex[] = "0123456789abcdef";
     char s[65];
     for (int i = 0; i < 32; i++) { s[2*i] = hex[h[i] >> 4]; s[2*i+1] = hex[h[i] & 15]; }

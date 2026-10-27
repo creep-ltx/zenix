@@ -12,11 +12,10 @@ DESCRIPTION
     spaces, the name. The same function hashes passwords (see passwd(1)).
 
 NOTES
-    Reads the whole file into memory first, so a file must fit in RAM.
-    The output equals the host's sha256sum on the files that were compared.
-    An access the user is not allowed is reported as "permission denied".
-    Running out of memory is reported ("out of memory") and ends the command
-    with a non-zero status; nothing is cut short silently.
+    Reads a file 4 KB at a time, so any size of file is summed in a few KB
+    of memory. The output equals the host's sha256sum on the files that
+    were compared. An access the user is not allowed is reported as
+    "permission denied"; a read error is reported and gives status 1.
 
 EXIT STATUS
     0, 1 if a file cannot be read.

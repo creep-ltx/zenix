@@ -3,7 +3,7 @@
 """A BBS for telnet's tests (DESIGN D20 8.1): a telnet server that negotiates as a board does and records what the
 client asked and answered, then sends test screens on command, and runs Zmodem with the real lsz/lrz.
     bbs-sim.py [--host ADDR] [--port N] [--record FILE] [--ready FILE] [--files DIR] [--upload DIR]
-               [--lsz PATH] [--lrz PATH] [--refuse-binary] [--iac-delay MS] [--once]
+               [--lsz PATH] [--lrz PATH] [--refuse-binary] [--iac-delay MS] [--once] [--window N]
     bbs-sim.py --self-test [--lsz PATH --lrz PATH]
 It listens on ADDR:N (127.0.0.1, 2323; port 0 picks one and writes it to the READY file, which is written when it
 listens) and serves one caller at a time until killed (--once: one call). Nothing leaves the PC; no root.
@@ -33,7 +33,10 @@ Commands, typed as a line ending in CR (or LF) - each screen ends with CR LF "<<
   art       the hand-made CP437 screen (tools/testdata/bbs-sim/welcome.ans)
   amigaart  the hand-made Latin-1 screen (tools/testdata/bbs-sim/amiga.asc)
   ttype     TTYPE SEND once more                           bye       the board hangs up
-  sz [-e] [-r] NAME...   the board sends files from --files with lsz (-e: escape controls; -r: ask for a resume)
+  sz [-e] [-r] NAME...   the board sends files from --files with lsz (-e: escape controls; -r: ask for a resume;
+                         with --window N, lsz -w N: at most N bytes not acknowledged, as a board over TCP should
+                         send: without it lsz writes a whole file into its socket buffers and waits only 10 s for
+                         the receiver's answer after the end, which a slow receiver cannot give in time)
   rz [-e]                the board receives into --upload with lrz
 The screens are made here or drawn for the test (tools/testdata/bbs-sim/): never real art packs (they are
 copyrighted; local art may be used by hand, never committed). EXPECT below says what a D20 filter makes of each."""
@@ -270,7 +273,8 @@ class Call:
         flags = [w for w in words[1:] if w.startswith("-")]
         names = [w for w in words[1:] if not w.startswith("-")]
         if words[0] == "sz":
-            argv = [prog, "-b", "-q"] + flags + [os.path.join(self.a.files, n) for n in names]
+            argv = [prog, "-b", "-q"] + (["-w", str(self.a.window)] if self.a.window else []) + flags + \
+                [os.path.join(self.a.files, n) for n in names]
             cwd = None
         else:
             os.makedirs(self.a.upload, exist_ok=True)
@@ -325,6 +329,7 @@ class Call:
         self.send(b"\r\n<<END %s>>\r\n" % words[0].encode())
 
     def command(self, line):
+        line = line.lstrip(b"\x18\x08")              # a cancelled transfer's CANs and BSs, as boards ignore them
         words = line.decode("latin-1").split()
         self.log(ev="line", text=line.decode("latin-1"))
         if not words:
@@ -617,6 +622,7 @@ def main():
     p.add_argument("--refuse-binary", action="store_true")
     p.add_argument("--iac-delay", type=int, default=300)
     p.add_argument("--once", action="store_true")
+    p.add_argument("--window", type=int, default=0)
     p.add_argument("--self-test", action="store_true")
     a = p.parse_args()
     if a.self_test:

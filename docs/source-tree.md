@@ -9,7 +9,8 @@ zenix/
 ├── kernel/      the kernel: C and 68k assembler
 ├── user/        every program and server that runs on Zenix
 ├── zenixfs/     the ZenixFS library, its host tools and tests
-├── net/         the network (DESIGN D19): lwIP, its Zenix port, netd's core
+├── net/         the network (DESIGN D19): lwIP, its Zenix port, netd's core, telnet's and ssh's cores
+├── crypto/      the crypto library (DESIGN D21): BearSSL, Monocypher, OpenSSH's bcrypt, Zenix's zc/
 ├── rootfs/      files copied onto the Zenix root disk (/etc, test scripts)
 ├── link/        linker scripts (kernel, programs, stage0)
 ├── tools/       image builders, the emulator rig and every test
@@ -58,7 +59,8 @@ zenix/
 - **Commands:** one file per program, `NAME.c`, each with a manual page in `docs/man/NAME.txt`. The list:
   [commands.md](commands.md).
 - **Taken from other projects:** `miniz/` (for `gzip`) and `regex.c` (from CUtils), both MIT; `xfer/` (DESIGN D20 5:
-  the Zmodem engine from CTerm, MIT, with Zenix's download rules in `rzrules.c`; for `rz`/`sz`, not built yet).
+  the Zmodem engine from CTerm, MIT, notice `xfer/LICENSE`, with Zenix's download rules in `rzrules.c`; for `rz`/`sz`,
+  `rz.c`, which telnet starts by itself).
 
 ## net/: the network (DESIGN D19, docs/d19-network.md)
 
@@ -68,7 +70,20 @@ zenix/
 | `port/` | Zenix's port of lwIP: `lwipopts.h` (the configuration), `arch/cc.h`, the counted heap and the limits set by the machine (`port.c`), ChaCha20 and the SipHash ISNs (`rand.c`), the checksum and the copy in 68020 assembler (`m68k.S`), stand-in C headers for the Zenix build (`shim/`) |
 | `drv/` | the network's drivers, user processes netd starts as `/sbin/net/NAME` (`drv.h`: what they share): `a2065.c` (the Commodore A2065, polled), `genet.c` (the CM4's Ethernet under Emu68, polled; the chip and its PHY in `genet-core.c` and `genet.h`, shared with the PC test against a model of the chip, `tools/genet-model.h`), `fake.c` (the driver protocol's test driver, test images only) |
 | `telnet/` | telnet's core (DESIGN D20): the protocol with RFC 1143's options (`proto.c`), the BBS and Unix stream filter (`filter.c`), the key translation (`keys.c`), the CP437 tables (`cp437.c`); `telnet.h` is its interface; plain C with no system call, shared by `user/telnet.c` and the PC tests (`tools/host/telnet-test.sh`) |
+| `ssh/` | ssh's core (DESIGN D21 4): the transport with strict key exchange, the packets, the logins, the session channel, OpenSSH's key files, known_hosts, the config subset and the text cleaner; `ssh.h` is its interface; no system calls, shared by `user/ssh.c`, `user/ssh-keygen.c` and the PC tests |
 | `netd/` | netd's core: sockets, SLIP and loopback, names, the configuration files, the limits (`netd.h` is its interface); plain C with no system call, so netd's main program and the PC tests use the same files. `main.c` is netd's main program on Zenix (`/sbin/netd`): the operating system layer and the message loop |
+
+## crypto/: the crypto library (DESIGN D21, docs/d21-crypto-ssh-https.md)
+
+| Folder | What it is |
+|---|---|
+| `bearssl/` | BearSSL at 7bea48e (MIT): only the files used, unchanged (`README`): TLS 1.2, X.509, RSA, ECDSA, AES, SHA-2, ChaCha20, Poly1305, X25519 |
+| `monocypher/` | Monocypher at f5f0a19 (CC0 chosen): Ed25519, ChaCha20, Poly1305, X25519 |
+| `openssh/` | OpenSSH's `blowfish.c` and `bcrypt_pbkdf.c` (key passphrases), unchanged, with two shim headers |
+| `zc/` | Zenix's own: wiping, the random generator, X25519 with the all-zero check, ssh's packet framing and key derivation, the signature file, the X.509 wrapper and trust anchors |
+
+The Makefile builds them into `build/libcrypto.a` (and a pure copy for `ssh`), linked with `--gc-sections` into
+`cryptotest`, `ssh` and `ssh-keygen`.
 
 ## tools/: building and testing
 

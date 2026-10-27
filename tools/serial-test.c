@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #define SERIAL_HOST_TEST 1
 #include "../kernel/serial.c"
+#include "../user/klogread.h"
 
 volatile int kwork_pending;
 static int nomem;                                   /* kmalloc fails (the 4 KB ring of /dev/ttyS0) */
@@ -47,6 +48,10 @@ static int sent_has(const char *s)
         if (!memcmp(fake_sent + i, s, n)) return 1;
     return 0;
 }
+static char kgot[4 * KLOG_SIZE];
+static unsigned kgot_n;
+static void take(const char *s, unsigned n) { while (n-- && kgot_n < sizeof kgot) kgot[kgot_n++] = *s++; }
+static int rd_klog(unsigned off, void *b, unsigned n) { return (int)klog_read(off, b, n); }
 static void drain_all(void) { fake_wire_period = 1; serial_flush(); fake_look(); }
 
 int main(void)
@@ -186,6 +191,29 @@ int main(void)
     EXPECT_TRUE(((rxq_head - rxq_tail) & rxq_mask) == 32767, "... it holds 32767 unread bytes");
     serdev_close();
     fast_free = 0;
+
+    /* the kernel log after its ring wrapped (audit 2026-10-26 F10): dmesg's reading (user/klogread.h) gives the
+     * 8 KB held exactly once, in order; the old reading (from 0, adding what came) repeats the oldest chunk */
+    static char area[KLOG_HDR + KLOG_SIZE], want[KLOG_SIZE], buf[512];
+    struct klog_hdr *save = kl;
+    kl = (struct klog_hdr *)area;
+    kl->size = KLOG_SIZE;
+    for (u32 i = 0; i < 20000; i++) {           /* 20,000 characters logged: the oldest held is 11,808 */
+        char c = (char)('A' + (i * 7 + i / 97) % 26);
+        KTEXT(kl)[kl->total % KLOG_SIZE] = c;
+        kl->total++;
+        if (i >= 20000 - KLOG_SIZE) want[i - (20000 - KLOG_SIZE)] = c;
+    }
+    EXPECT_TRUE(klog_read(KLOG_OLDEST, buf, 1) == 20000 - KLOG_SIZE, "KLOG_OLDEST: the offset of the oldest character held");
+    EXPECT_TRUE(klog_read(KLOG_OLDEST | KLOG_PREV, buf, 1) == 0, "... and 0 for a previous boot that is not there");
+    kgot_n = 0;
+    unsigned n = klog_dump(rd_klog, 0, take, buf, sizeof buf);
+    EXPECT_TRUE(n == KLOG_SIZE && kgot_n == KLOG_SIZE && !memcmp(kgot, want, KLOG_SIZE),
+                "dmesg's reading: the 8 KB held, once, in order (F10)");
+    u32 off = 0; int k; kgot_n = 0;              /* the old dmesg: from 0, adding what came */
+    while ((k = (int)klog_read(off, buf, sizeof buf)) > 0) { take(buf, (unsigned)k); off += (u32)k; }
+    EXPECT_TRUE(kgot_n > KLOG_SIZE, "the old reading repeated the oldest chunk (the bug this fixes)");
+    kl = save;
     printf(bad ? "FAILED\n" : "all ok\n");
     return bad != 0;
 }

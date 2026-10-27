@@ -216,8 +216,9 @@ serial cable (scroll back with Amiga+Up). **The servers' output** (D11 step 8): 
 gets, as its standard input, output and error, a file of type `FT_KLOG`: what it writes goes through `kputc` like
 `kprintf` (the serial port, the ring, the screen while mirrored); reading it gives end of file. So after the boot no
 server message appears on a console; `mount` says "see dmesg" when a server did not start. `boot` itself (and so
-`init`) keeps console 1. `SYS_klog` (73: offset, buffer, length) reads the ring;
-`dmesg` prints it. A panic or an exception in the kernel switches the mirror on again, so its text reaches the
+`init`) keeps console 1. `SYS_klog` (73: offset, buffer, length) reads the ring (an offset below the oldest character
+held reads from it; with `KLOG_OLDEST` 0x40000000 in the offset it answers that oldest offset, audit 2026-10-26 F10);
+`dmesg` prints it from there (`user/klogread.h`). A panic or an exception in the kernel switches the mirror on again, so its text reaches the
 screen, and records the reason in the log before the machine stops.
 
 **Previous-boot log (audit A12).** The log lives in the top 16.5 KB of chip RAM (`KLOG_AREA_SIZE` = `0x4200` below the
@@ -561,6 +562,9 @@ pattern (section 6).
   4 KB send ring is free (DESIGN D19 5.3: a truthful `POLLOUT` for netd; the drain that makes the room wakes the
   waiter through kwork); files and `/dev/null`
   never wait; a pipe's read end gives `POLLHUP` when no writer is left, its write end `POLLERR` when no reader is.
+  `SYS_pipe`'s second argument (0 for every older caller) may be `O_NONBLOCK` (Linux's `pipe2`, both ends; DESIGN D20
+  step 4, so telnet never blocks writing into `rz`): a read of an empty pipe gives -EAGAIN, a write what fits or
+  -EAGAIN; other flags -EINVAL.
   libz's `poll` (milliseconds) and `select` (`fd_set` of 32) are built on it.
 - **Signals** (DESIGN D16, `kernel/signal.c`). Linux's numbers and default actions (frozen): HUP 1, INT 2, QUIT 3,
   KILL 9, USR1 10, USR2 12, PIPE 13, ALRM 14, TERM 15, CHLD 17, CONT 18, STOP 19, TSTP 20, TTIN 21, TTOU 22, WINCH 28;
@@ -654,7 +658,7 @@ rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
 `update`), services (`svc`), memory (`memalloc memfree meminfo`),
-time (`ticks hrtime time settime`; `time` is the seconds since 1970 as an **unsigned** 32-bit number, good until
+time (`ticks hrtime time settime`; `ticks` with 0 is the 100 Hz tick count, a 32-bit number that wraps after 497 days, and with 1 the whole seconds since boot, the clock's own count that wraps after 136 years (`uptime`; audit 2026-10-26 F9); `time` is the seconds since 1970 as an **unsigned** 32-bit number, good until
 2106: the base the battery clock or `settime` gave plus the whole seconds the tick counts itself, `kernel/clock.h`, so
 it does not jump back when the 32-bit tick count wraps after 497 days; audit 2026-10-26 F8), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`, and `console`, the
 display's colours: D14 note section 11), environment (`envset

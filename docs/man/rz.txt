@@ -1,0 +1,54 @@
+RZ(1)			Zenix manual
+
+NAME
+    rz, sz - receive and send files with Zmodem
+
+SYNOPSIS
+    rz [-e] [-q] [-T] [-d DIR]
+    sz [-e] [-q] [-T] FILE...
+
+DESCRIPTION
+    rz receives files the other side sends with Zmodem; sz sends FILEs to
+    a Zmodem receiver on the other side. Both talk to the other side over
+    their standard input and output, as lrzsz's rz and sz do, so they work
+    under telnet (which starts them by itself when a board starts a
+    transfer), and over any line a program gives them. sz is a link to
+    rz.
+
+    Where a download goes: the current directory (or DIR with -d). The
+    name the other side gives is cleaned: a name that begins with a dot
+    (.profile) or is empty is refused, control characters become _, a
+    long name is shortened in front of its extension (paths are at most
+    63 bytes). A file is written as NAME.part and renamed to NAME when
+    it is whole. An existing NAME is never overwritten: the same size is
+    the same file and is skipped; another file is saved as NAME.1,
+    NAME.2 ... A NAME.part from an earlier try that is shorter than the
+    file is gone on from only when the sender's CRC of that many bytes
+    (Zmodem's ZCRC) says it is the same file; otherwise the part is kept
+    and the file comes whole under the next free name.
+
+    Progress and what happened to each file go to standard error.
+
+OPTIONS
+    -e      escape every control character (a telnet line without its
+            binary mode, where CR NUL would be folded)
+    -q      quiet: only errors
+    -T      telnet's form of standard error: "P text" progress lines,
+            "M text" messages, and "R n" with n bytes that came after the
+            session (for the screen)
+    -d DIR  (rz) receive into DIR
+
+EXIT STATUS
+    0 when every file went well (a skipped identical file counts as
+    well), 1 when a transfer was cancelled or failed or a file was
+    refused, 2 for a usage error.
+
+NOTES
+    Zmodem only (no Xmodem, Ymodem or Hydra). Ctrl-C (SIGINT, SIGTERM)
+    cancels: the other side gets Zmodem's ten CANs and a partial download
+    stays as NAME.part. A full disk ends the transfer with the reason and
+    keeps the part. The protocol engine is CTerm's (MIT licence, notice
+    in /usr/share/licenses/zmodem).
+
+SEE ALSO
+    telnet(1), cu(1), docs/d20-telnet.md

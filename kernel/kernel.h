@@ -55,6 +55,7 @@ void klog_write(const char *s, u32 n);        /* a service's output (FT_KLOG): i
  * this one ended */
 #define KLOG_AREA_SIZE  0x4200
 #define KLOG_PREV       0x80000000u           /* SYS_klog offset flag: read the previous boot's log (dmesg -p) */
+#define KLOG_OLDEST     0x40000000u           /* SYS_klog offset flag: answer the offset of the oldest byte held (audit F10) */
 #define KLOG_END_RUNNING 0u                   /* why a boot ended, kept in the log header for the next boot */
 #define KLOG_END_PANIC   1u
 #define KLOG_END_REBOOT  2u                   /* the reboot system call */
@@ -285,7 +286,7 @@ struct pipe {
 #define O_CREAT  0x40
 #define O_TRUNC  0x200
 #define O_APPEND 0x400
-#define O_NONBLOCK 0x800                /* DESIGN D19: never wait (sockets, /dev/random; pipes later). Linux's value */
+#define O_NONBLOCK 0x800                /* DESIGN D19: never wait (sockets, /dev/random; pipes from SYS_pipe's flags, D20 step 4). Linux's value */
 #define S_IFSOCK 0140000                /* DESIGN D19: fstat's type of a socket (Linux's value) */
 struct file {
     u8 type;
@@ -681,7 +682,7 @@ long vfs_unlink(const char *path);
 long vfs_rmdir(const char *path);
 long vfs_rename(const char *from, const char *to);
 long vfs_readdir(struct file *f, struct udirent *out);
-long vfs_pipe(int fds[2]);
+long vfs_pipe(int fds[2], u32 flags);   /* flags: 0 or O_NONBLOCK (both ends) */
 
 /* tty.c */
 void tty_init(void);
@@ -718,10 +719,10 @@ int tty_of(const struct proc *p);
 #define SYS_fstat   14
 #define SYS_chdir   15
 #define SYS_getcwd  16
-#define SYS_pipe    17
+#define SYS_pipe    17   /* int fds[2], flags (0, or O_NONBLOCK for both ends: Linux's pipe2; D20 step 4) */
 #define SYS_memalloc 18
 #define SYS_memfree  19
-#define SYS_ticks   20
+#define SYS_ticks   20   /* 0 -> the 100 Hz tick count (wraps); 1 -> whole seconds since boot (unsigned, F9) */
 #define SYS_procinfo 21
 #define SYS_meminfo 22
 #define SYS_setfg   23

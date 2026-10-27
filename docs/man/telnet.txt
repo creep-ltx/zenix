@@ -4,7 +4,8 @@ NAME
     telnet - a terminal to another computer over the network
 
 SYNOPSIS
-    telnet [-a|-p|-x] [-i] [-r] [-e CHAR|none] HOST [PORT]
+    telnet [-a|-p|-x] [-i] [-r] [-d DIR] [-e CHAR|none] HOST|NAME [PORT]
+    telnet
 
 DESCRIPTION
     telnet connects to HOST (a name or an address) on PORT (23 when not
@@ -44,8 +45,28 @@ DESCRIPTION
 
     Ctrl-] opens a prompt on the bottom row: q closes the connection, z
     suspends telnet (fg brings it back), a, p and x switch to the Amiga,
-    PC or Unix mode (the screen is cleared), Ctrl-] sends Ctrl-] itself,
-    Return goes back.
+    PC or Unix mode (the screen is cleared), d receives files now (a
+    board that starts Zmodem without its start header), u sends files
+    (asked for on the bottom row), Ctrl-] sends Ctrl-] itself, Return
+    goes back.
+
+    Downloads and uploads (Zmodem): when the board starts sending, telnet
+    starts rz(1) by itself and the files go to the directory telnet was
+    started in (or DIR with -d), with rz's rules: never over an existing
+    file, NAME.part until whole, a broken download gone on from only
+    when it is the same file, names beginning with a dot refused. When
+    the board waits for files, telnet asks "send which files?" on the
+    bottom row (names separated by spaces; Return with none, or Esc,
+    tells the board no) and starts sz(1). Progress is shown on the bottom
+    row, what happened to each file as a line. Ctrl-X five times, or
+    Ctrl-] and c, cancels a transfer. Without the binary mode (a board
+    that refuses it) every control character is escaped (rz -e, sz -e).
+
+    The phone book: ~/.phonebook, one place a line,
+        NAME HOST [PORT] [amiga|pc|unix] [ice]
+    (# starts a comment; PORT 23 when not given; the mode the default
+    when not given). telnet NAME calls it (the name in any case); a PORT
+    or mode given on the command line wins. telnet alone lists the book.
 
 OPTIONS
     -a          the Amiga board mode (the default)
@@ -53,19 +74,25 @@ OPTIONS
     -x          the Unix mode
     -i          iCE colours from the start
     -r          a plain TCP connection: no telnet protocol at all (as nc)
+    -d DIR      downloads go to DIR (not the current directory)
     -e CHAR     another escape key: a character, or ^X for a control key;
                 none turns it off
 
 EXIT STATUS
     0 when the connection ended (closed by the other side, or q), 1 when
     it could not be made (no such host, refused, the network down), 2 for
-    a usage error.
+    a usage error (and telnet alone).
 
 NOTES
-    No downloads yet (Zmodem is DESIGN D20's next step), no telnet server,
-    no phone book. The console's font and rules are telnet's while it
-    runs: they are put back when it ends or is suspended (the screen is
-    cleared before the PC font goes, as its bytes would be junk in Topaz).
+    Zmodem only (no Xmodem, Ymodem or Hydra); no telnet server. Bytes the
+    board sends right after a transfer, before rz or sz has read them,
+    may be lost from the screen. A board whose sender sends without a
+    window (lsz without -w) may give up before the Amiga has received
+    the end of a big file; what came is kept as NAME.part, and the next
+    try goes on from it. The console's font and rules are
+    telnet's while it runs: they are put back when it ends or is
+    suspended (the screen is cleared before the PC font goes, as its
+    bytes would be junk in Topaz).
     Only Topaz from the ROM is used for Amiga boards (no other Amiga
     fonts are shipped). PC art was drawn for 8x16 cells: in the console's
     8x8 cells it looks as in the PC's 50-line mode. At 8 colours a bright
@@ -84,4 +111,4 @@ NOTES
     Unencrypted: for the home network and for boards.
 
 SEE ALSO
-    cu(1), host(1), ifconfig(1), docs/d20-telnet.md
+    rz(1), cu(1), host(1), ifconfig(1), docs/d20-telnet.md

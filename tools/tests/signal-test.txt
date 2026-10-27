@@ -1,6 +1,6 @@
 wait zenix:/# 90
 sleep 1
-send sigtest stopsrv handler block ignore kill alarm restart chld pipe poll group cont srvcall stack forged; echo sigtest-end-$((40+2))\r
+send sigtest stopsrv handler block ignore kill alarm restart chld pipe pipenb poll group cont srvcall stack forged; echo sigtest-end-$((40+2))\r
 wait sigtest-end-42 240
 sleep 1
 send /tests/sigtestpure handler block ignore alarm restart chld cont srvcall forged | sed 's/^sigtest /pure /'; echo pure-end-$((40+3))\r

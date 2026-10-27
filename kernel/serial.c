@@ -538,9 +538,15 @@ static u32 ring_read(const struct klog_hdr *h, u32 off, char *buf, u32 n)
     return got;
 }
 
-/* SYS_klog: this boot's log; with KLOG_PREV set in off, the previous boot's (nothing if there is none) */
+/* SYS_klog: this boot's log; with KLOG_PREV set in off, the previous boot's (nothing if there is none); with
+ * KLOG_OLDEST the offset of the oldest character still held (0 until the ring has wrapped). An offset below that reads
+ * from it, so a reader must know where it is: user/klogread.h */
 u32 klog_read(u32 off, char *buf, u32 n)
 {
+    if (off & KLOG_OLDEST) {                /* where the log held starts (audit F10: a reader below it is moved there) */
+        const struct klog_hdr *h = off & KLOG_PREV ? (prev_text ? kprev : 0) : kl;
+        return h && h->total > h->size ? h->total - h->size : 0;
+    }
     if (off & KLOG_PREV)
         return prev_text ? ring_read(kprev, off & ~KLOG_PREV, buf, n) : 0;
     return kl ? ring_read(kl, off, buf, n) : 0;

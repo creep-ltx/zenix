@@ -44,6 +44,7 @@ done
 lic() { mkdir -p "$T/usr/share/licenses"; cp "$(dirname "$0")/../$1" "$T/usr/share/licenses/$2"; }
 case " $PROGS " in *" netd "*) lic net/lwip/COPYING lwIP;; esac
 case " $PROGS " in *" gzip "*|*" zup "*) lic user/miniz/LICENSE miniz;; esac
+case " $PROGS " in *" rz "*) lic user/xfer/LICENSE zmodem;; esac
 # the PC font (DESIGN D20 4.2) on the full images (those with manual pages), with its notice, as the base package
 if [ -z "$NOMAN" ] && [ -f "$B/cp437-8x8.psf" ]; then
     mkdir -p "$T/usr/share/consolefonts"
@@ -60,6 +61,7 @@ fi
 ln -s less "$T/bin/more"
 ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"; ln -s pgrep "$T/bin/pkill"; ln -s reboot "$T/bin/bootamigaos"   # more is less
 ln -s ifconfig "$T/bin/ifup"; ln -s ifconfig "$T/bin/ifdown"     # ifup and ifdown are ifconfig (DESIGN D19 6.4)
+ln -s rz "$T/bin/sz"                                              # sz is rz (DESIGN D20 5)
 # the package database (DESIGN D15): the manifest of every package of this build (make packages) whose files this
 # image holds exactly as the manifest says, so the first update knows what is installed (tools/mkzup.py installdb).
 # PKGDB=1: the full images only (the Makefile sets it for zenix.hdf and root-card.img)

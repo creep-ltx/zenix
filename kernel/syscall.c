@@ -525,7 +525,7 @@ void syscall_c(u32 *rb)
     case SYS_pipe:
         if (UOKW(a1, 8)) {
             int fds[2];
-            if ((r = (s32)vfs_pipe(fds)) == 0) {
+            if ((r = (s32)vfs_pipe(fds, a2)) == 0) {
                 ((u32 *)a1)[0] = (u32)fds[0];
                 ((u32 *)a1)[1] = (u32)fds[1];
                 r = 0;
@@ -557,8 +557,9 @@ void syscall_c(u32 *rb)
                 break;
             }
         break;
-    case SYS_ticks:
-        r = (s32)ticks;
+    case SYS_ticks:                     /* a1 0: the 100 Hz tick count (wraps after 497 days); 1: whole seconds since boot
+                                         * (clock.h's own count, wraps after 136 years; audit 2026-10-26 F9) */
+        r = a1 == 0 ? (s32)ticks : a1 == 1 ? (s32)wclock.secs : -EINVAL;
         break;
     case SYS_procinfo:
         if ((a1 < NPROC || ((r = -EINVAL), 0)) && UOKS(n, a2, a3, UPROC_FIRST, sizeof(struct uproc))) {

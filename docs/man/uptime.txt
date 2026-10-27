@@ -7,8 +7,10 @@ SYNOPSIS
     uptime
 
 DESCRIPTION
-    Prints "up h:mm:ss", counted from the 100 Hz timer tick since the kernel
-    started. There is no load average.
+    Prints "up h:mm:ss", the whole seconds since the kernel started (the
+    kernel counts them with its 100 Hz tick; the count goes on past 497
+    days, where the 32-bit tick count wraps, and wraps only after 136
+    years). There is no load average.
 
 SEE ALSO
     date(1)
