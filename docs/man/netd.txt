@@ -29,7 +29,10 @@ DESCRIPTION
     owns it and nobody else may write it) and brings up the interfaces
     with an "auto" line; ifup reads them again. SLIP opens /dev/ttyS0
     without ever waiting on it: what does not fit the port's send ring
-    waits in netd's own queue.
+    waits in netd's own queue. SLIP has no checksum of its own, so netd
+    checks every frame from the line (the IPv4 header and the TCP, UDP
+    or ICMP sum): a frame damaged by noise is counted (ifconfig's "bad")
+    and dropped.
 
     Its buffers are sized by the machine, once at its start:
       small   less than 2 MB of free fast RAM (the stock A1200):

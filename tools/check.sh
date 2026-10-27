@@ -36,7 +36,7 @@ SPLIT[svc-test]="a z zs b n r d|o zo u l|f s h t dmg"
 SPLIT[colour-test]="1 4 2|3 s4 s16 s7"    # the 1-plane run first (its edges are the reference); s*: the setting (D18)
 SPLIT[rootcheck-test]="r b|i h|u"                   # u: the choices when a repair fails (man rescue)
 SPLIT[netd-test]="s|l"                              # the stock A1200 (small profile) and 4 MB of fast RAM
-SPLIT[slip-test]="s|m"                              # 2 MB and 1 MB of chip RAM
+SPLIT[slip-test]="s|m|n"                            # 2 MB and 1 MB of chip RAM; noise and a flood
 SPLIT[update-test]="install bad|cold previous|panic hang|powercut slowzup|refused nozup|zfsroot"
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh
 m1=""; m2=""; for ((i = 0; i < ${#m[@]}; i++)); do if ((i % 2)); then m2="$m2 ${m[i]}"; else m1="$m1 ${m[i]}"; fi; done

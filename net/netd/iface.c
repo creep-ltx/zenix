@@ -10,6 +10,8 @@
 #include "lwip/dns.h"
 #include "lwip/sio.h"
 #include "lwip/pbuf.h"
+#include "lwip/inet_chksum.h"
+#include "lwip/prot/ip4.h"
 #include "netif/slipif.h"
 #include "netd_int.h"
 
@@ -27,7 +29,7 @@ struct nif {
     unsigned char *txq;
     unsigned long txn;
     int overflow;
-    unsigned long rx_frames, tx_frames, rx_bytes, tx_bytes, tx_drop;
+    unsigned long rx_frames, tx_frames, rx_bytes, tx_bytes, tx_drop, rx_bad;
 };
 static struct nif nifs[NETD_IFMAX];
 
@@ -71,9 +73,37 @@ static err_t slip_out(struct netif *n, struct pbuf *p, const ip4_addr_t *ip)
     if (e == ERR_OK) { f->tx_frames++; f->tx_bytes += p->tot_len; }
     return e;
 }
+/* SLIP has no checksum of its own (RFC 1055): a byte changed, lost or added on the line, or noise between two ENDs,
+ * reaches netd as a frame. So each one is checked here first (D19 8.2, "noise on the line"): a whole IPv4 packet (its
+ * header's checksum, its length the frame's) and, unless it is a fragment, its TCP, UDP or ICMP checksum. A damaged
+ * frame is counted (ifconfig's "bad") and dropped. lwIP checks the same sums again: at SLIP's 11.5 KB/s the second
+ * sum costs little, and it keeps lwIP unchanged */
+static int frame_ok(struct pbuf *p)
+{
+    unsigned char h[60];
+    unsigned hl, tl, proto, ok = 1;
+    ip4_addr_t src, dst;
+    if (p->tot_len < IP_HLEN || pbuf_copy_partial(p, h, IP_HLEN, 0) != IP_HLEN || (h[0] >> 4) != 4) return 0;
+    hl = (h[0] & 15) * 4u;
+    tl = (unsigned)h[2] << 8 | h[3];
+    if (hl < IP_HLEN || tl < hl || tl != p->tot_len || pbuf_copy_partial(p, h, (u16_t)hl, 0) != hl) return 0;
+    if (inet_chksum(h, (u16_t)hl) != 0) return 0;
+    if ((h[6] & 0x3f) || h[7]) return 1;            /* a fragment: its transport sum is checked after reassembly */
+    proto = h[9];
+    if (proto != IP_PROTO_TCP && proto != IP_PROTO_UDP && proto != IP_PROTO_ICMP) return 1;
+    if (proto == IP_PROTO_UDP && tl - hl >= 8 && !pbuf_get_at(p, (u16_t)(hl + 6)) && !pbuf_get_at(p, (u16_t)(hl + 7))) return 1;
+    memcpy(&src, h + 12, 4);
+    memcpy(&dst, h + 16, 4);
+    pbuf_remove_header(p, hl);
+    if (proto == IP_PROTO_ICMP) ok = inet_chksum_pbuf(p) == 0;
+    else ok = inet_chksum_pseudo(p, (u8_t)proto, (u16_t)(tl - hl), &src, &dst) == 0;
+    pbuf_add_header(p, hl);
+    return ok;
+}
 static err_t slip_in(struct pbuf *p, struct netif *n)
 {
     struct nif *f = nif_of(n);
+    if (f && !frame_ok(p)) { f->rx_bad++; pbuf_free(p); return ERR_OK; }
     if (f) { f->rx_frames++; f->rx_bytes += p->tot_len; }
     return ip_input(p, n);
 }
@@ -292,7 +322,7 @@ int netd_if_info(int i, struct netd_ifinfo *o)
         if (f) {
             strncpy(o->name, f->name, NETD_IFNAME - 1);
             o->rx_frames = f->rx_frames; o->tx_frames = f->tx_frames;
-            o->rx_bytes = f->rx_bytes; o->tx_bytes = f->tx_bytes; o->tx_drop = f->tx_drop;
+            o->rx_bytes = f->rx_bytes; o->tx_bytes = f->tx_bytes; o->tx_drop = f->tx_drop; o->rx_bad = f->rx_bad;
         } else if (is_loop(n)) strcpy(o->name, "lo");
         else { o->name[0] = n->name[0]; o->name[1] = n->name[1]; o->name[2] = (char)('0' + n->num % 10); }
         o->addr = ip4_addr_get_u32(netif_ip4_addr(n));

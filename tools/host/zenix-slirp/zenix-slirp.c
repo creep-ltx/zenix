@@ -14,6 +14,8 @@
  *   -f tcp|udp:[ADDR:]HOSTPORT:GUESTPORT
  *                       a port forward from the PC to the Amiga, bound to 127.0.0.1 unless ADDR is given
  *                       (several -f allowed); e.g. -f tcp:2323:23 for telnet
+ *   --damage N          the tests' noise on the line (tools/slip-test.sh n): in every Nth frame to the Amiga one
+ *                       byte is changed, and before every Nth one three bytes of garbage go out between two ENDs
  *   --log FILE          where the bytes that are not SLIP frames go (Zenix's console lines before and after the
  *                       network): appended to FILE, "-" for standard output; default standard error
  *   -v                  a line for every frame and every dropped one
@@ -54,7 +56,8 @@ static int line = -1, verbose;
 static FILE *logf;
 static Slirp *slirp;
 static volatile sig_atomic_t stop;
-static unsigned long n_in, n_out, n_bad, n_text, n_drop;
+static unsigned long n_in, n_out, n_bad, n_text, n_drop, n_damaged, n_garbage;
+static unsigned long damage;            /* --damage N: noise in every Nth frame to the Amiga (0: none) */
 
 /* ---- the line ---- */
 static uint8_t rx[RXMAX];
@@ -220,12 +223,26 @@ static void tx_flush(void)
 static void slip_send(const uint8_t *p, size_t n)
 {
     size_t i, need = 2 * n + 2;
-    if (txn + need > TXMAX) { n_drop++; if (verbose) say("line busy: frame of %zu bytes dropped", n); return; }
+    size_t start;
+    if (txn + need + 4 > TXMAX) { n_drop++; if (verbose) say("line busy: frame of %zu bytes dropped", n); return; }
+    if (damage && n_out % damage == damage / 2) {      /* garbage between two ENDs: a "frame" of three bytes */
+        tx[txn++] = SLIP_END; tx[txn++] = 0x7e; tx[txn++] = 0x3f; tx[txn++] = 0x21;
+        n_garbage++;
+    }
     tx[txn++] = SLIP_END;
+    start = txn;
     for (i = 0; i < n; i++) {
         if (p[i] == SLIP_END) { tx[txn++] = SLIP_ESC; tx[txn++] = SLIP_ESC_END; }
         else if (p[i] == SLIP_ESC) { tx[txn++] = SLIP_ESC; tx[txn++] = SLIP_ESC_ESC; }
         else tx[txn++] = p[i];
+    }
+    if (damage && n_out % damage == 0 && txn > start) {  /* one byte changed (not an escape), never into END or ESC */
+        size_t at = start + (n_out / damage * 7919) % (txn - start);
+        if (tx[at] != SLIP_ESC && (at == start || tx[at - 1] != SLIP_ESC)) {
+            uint8_t c = tx[at] ^ 0x24;
+            tx[at] = c == SLIP_END || c == SLIP_ESC ? c ^ 1 : c;
+            n_damaged++;
+        }
     }
     tx[txn++] = SLIP_END;
     n_out++;
@@ -408,7 +425,7 @@ static int forward(const char *spec)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: zenix-slirp [-b BAUD] [-f tcp|udp:[ADDR:]HOSTPORT:GUESTPORT]... [--log FILE] [-v]\n"
+    fprintf(stderr, "usage: zenix-slirp [-b BAUD] [-f tcp|udp:[ADDR:]HOSTPORT:GUESTPORT]... [--log FILE] [--damage N] [-v]\n"
                     "                   DEVICE | --pty LINK | --fd N\n");
     exit(2);
 }
@@ -432,6 +449,7 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "-b") && i + 1 < argc) baud = atol(argv[++i]);
         else if (!strcmp(argv[i], "-f") && i + 1 < argc) { if (nfwd == 32) usage(); fwd[nfwd++] = argv[++i]; }
         else if (!strcmp(argv[i], "--log") && i + 1 < argc) logname = argv[++i];
+        else if (!strcmp(argv[i], "--damage") && i + 1 < argc) damage = strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--pty") && i + 1 < argc) pty = argv[++i];
         else if (!strcmp(argv[i], "--fd") && i + 1 < argc) fdarg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-v")) verbose++;
@@ -511,6 +529,7 @@ int main(int argc, char **argv)
     }
     if (rxn && !rx_frame_mode) text_out(rx, rxn);
     say("frames in %lu, out %lu; damaged %lu, dropped %lu; console bytes %lu", n_in, n_out, n_bad, n_drop, n_text);
+    if (damage) say("noise sent: %lu frames changed, %lu garbage frames", n_damaged, n_garbage);
     slirp_cleanup(slirp);
     if (pty) unlink(pty);
     return 0;

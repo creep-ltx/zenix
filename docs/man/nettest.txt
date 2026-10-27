@@ -36,9 +36,24 @@ DESCRIPTION
               and every one made works
     perm      root may bind port 80, a user may not, nor change the
               interfaces or the routes; SOCK_RAW is refused
+    restart   SA_RESTART against netd: a recv and an accept that an
+              alarm's handler interrupts go on; without SA_RESTART, or
+              with SO_RCVTIMEO set, recv says "interrupted"; a send that
+              waited from its start goes on and sends all, in order
+    partial   a 30,000-byte send to a reader that waits 2 s, interrupted
+              by an alarm after part of it went: the count so far comes
+              back (no restart), the rest is sent after, and the reader
+              gets every byte once, in order
+    sigpipe   the peer closed: recv says end of file; sends with
+              MSG_NOSIGNAL say "connection reset", then "broken pipe";
+              without it the sender ends by SIGPIPE (141); with SIGPIPE
+              ignored it gets "broken pipe"
     down      netd killed while a child waits in recv: the child gets
               ENETDOWN at once; the next socket starts a new netd that
               serves a new connection
+    giveup    netd killed until the kernel gives it up (five ends in a
+              minute): then a socket says "network is down" at once
+              (root's ifup -a brings it back: tools/netd-test.sh)
     asm       netd's checksum and copy in assembler against C, for
               every alignment and many lengths, and their speed in this
               machine's E-clock counts (an emulator's counts are not a
@@ -48,16 +63,23 @@ DESCRIPTION
               UDP socket on 127.0.0.1:7011, kept for 30 seconds (for
               netstat)
     slip      through SLIP to the PC's test servers (tools/slip-test.sh,
-              on 10.0.2.2): 10 KB echoed by TCP port 7100, 100 KB from
-              port 7102 checked byte by byte, datagrams echoed by UDP
-              port 7101, amiga.zenix.test looked up through 10.0.2.3
+              on 10.0.2.2): the four checks below
+    sliptcp   10 KB echoed by TCP port 7100
+    slipget   100 KB from port 7102, checked byte by byte
+    slipudp   datagrams echoed by UDP port 7101
+    slipdns   amiga.zenix.test looked up through 10.0.2.3
+    slipflood a SYN flood: four listeners (ports 7200-7203) that never
+              accept, while the PC opens 400 connections to them; 100
+              sleeps of 20 ms timed meanwhile, /bin/true started; netd
+              must not end, its memory stays in its profile, and a
+              connection to the PC works afterwards
 
 EXIT STATUS
     The number of checks that failed.
 
 NOTES
     A test program, run by tools/netd-test.sh and tools/slip-test.sh in
-    the emulator. The ports 7001-7011 must be free.
+    the emulator. The ports 7001-7014 must be free.
 
 SEE ALSO
     netd(8), netstat(1), socktest(1)

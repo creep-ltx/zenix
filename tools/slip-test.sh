@@ -11,6 +11,11 @@
 # parts: zenix-slirp's --log is how the console's bytes reach the test). The results are read from the disk image.
 #   tools/slip-test.sh [PART...]    s: the stock A1200 (2 MB chip RAM), everything above
 #                                   m: 1 MB of chip RAM: SLIP up, ping, free and ps (the memory with the network)
+#                                   n: noise and a flood (D19 8.2): zenix-slirp damages every 20th frame to the Amiga
+#                                      and sends garbage between frames (--damage); the 100 KB still arrive whole,
+#                                      the damaged frames are counted (ifconfig's "bad"), netd never ends; then a SYN
+#                                      flood from the PC on four listeners that never accept (nettest slipflood): the
+#                                      pool limits hold, the machine stays responsive
 # Needs zenix-slirp's libslirp and GLib (pkg-config slirp) and unprivileged user namespaces, as tools/host/net-test.sh.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -36,9 +41,10 @@ run() {
     local conf=$1 secs=$2 rc=$OUT/resolv.conf host
     rm -f $OUT/console.log $OUT/ready "$SERIAL"
     echo "nameserver 127.0.0.1" > $rc
+    # shellcheck disable=SC2086
     unshare -rnm bash -c 'ip link set lo up && echo "0 0" >/proc/sys/net/ipv4/ping_group_range &&
         mount --bind "$0" /etc/resolv.conf && exec python3 -I "$@"' "$rc" "$PWD/tools/slip-host.py" "$OUT/zenix-slirp" \
-        "$SERIAL" "$OUT/console.log" "$OUT/ready" > $OUT/host.log 2>&1 &
+        "$SERIAL" "$OUT/console.log" "$OUT/ready" $ZS_OPTS > $OUT/host.log 2>&1 &
     host=$!
     for _ in $(seq 100); do [ -e $OUT/ready ] && break; sleep 0.1; done
     [ -e $OUT/ready ] || { echo "FAIL the PC's side did not start: $(cat $OUT/host.log)"; pass=0; kill $host; return 1; }
@@ -133,8 +139,38 @@ EOS
     echo "slip-test: memory with SLIP up (1 MB chip RAM): $(grep -a 'chip RAM free' $OUT/m-free.txt); netd: $(grep -a ' netd$' $OUT/m-ps.txt | tr -s ' ')"
 }
 
-[ $# = 0 ] && set -- s m
+part_n() {
+    cat > $OUT/slip.sh <<'EOS'
+sleep 2
+nettest slipget > /tmp/sl-nt.txt 2>&1
+ifconfig sl0 > /tmp/sl-ifc.txt 2>&1
+nettest slipflood >> /tmp/sl-nt.txt 2>&1; echo nt=$? >> /tmp/sl-nt.txt
+ps > /tmp/sl-ps.txt
+ifdown sl0
+dmesg | grep -E 'netd|svc: net|serial' > /tmp/sl-k.txt
+sync
+EOS
+    image
+    ZS_OPTS="--damage 20 -f tcp:7200:7200 -f tcp:7201:7201 -f tcp:7202:7202 -f tcp:7203:7203" run fsuae/a1200-020.fs-uae 400
+    local f c line bad
+    for f in nt ifc ps k; do get /tmp/sl-$f.txt > $OUT/n-$f.txt; done
+    for c in slipget slipflood; do
+        line=$(grep -a "^nettest $c: " $OUT/n-nt.txt | head -1)
+        case "$line" in *": PASS "*) echo "PASS $c ${line#*PASS }" ;; "") echo "FAIL $c: no result"; pass=0 ;; *) echo "FAIL $c ${line#*: }"; pass=0 ;; esac
+    done
+    bad=$(grep -aoE 'bad [0-9]+' $OUT/n-ifc.txt | awk '{ print $2 }')
+    echo "slip-test: $(grep -a 'noise sent' $OUT/host.log | sed 's/^zenix-slirp: //')"
+    if [ -n "$bad" ] && [ "$bad" -gt 0 ]; then echo "PASS the damaged frames are counted: sl0 $(grep -a 'RX frames' $OUT/n-ifc.txt | tr -s ' ')"
+    else echo "FAIL no damaged frame counted: $(cat $OUT/n-ifc.txt)"; pass=0; fi
+    if ! grep -aqE 'svc: net: .*ended' $OUT/n-k.txt && [ "$(grep -ac 'netd: serving net' $OUT/n-k.txt)" = 1 ]; then
+        echo "PASS netd never ended (one start in the log)"
+    else echo "FAIL netd ended: $(grep -a 'svc: net\|serving' $OUT/n-k.txt)"; pass=0; fi
+    echo "slip-test: netd after the flood: $(grep -a ' netd$' $OUT/n-ps.txt | tr -s ' ')"
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck.log 2>&1 && echo "PASS the host's e2fsck finds the root clean" || { echo "FAIL e2fsck"; pass=0; }
+}
+
+[ $# = 0 ] && set -- s m n
 for p in "$@"; do
-    case $p in s|m) "part_$p" ;; *) echo "slip-test: unknown part $p"; exit 2 ;; esac
+    case $p in s|m|n) "part_$p" ;; *) echo "slip-test: unknown part $p"; exit 2 ;; esac
 done
 exit $((1 - pass))

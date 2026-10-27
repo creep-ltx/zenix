@@ -1023,6 +1023,28 @@ through 10.0.2.3, the counters, `ifdown sl0` giving the port back, the log, the 
 and the memory), `tools/serial-test.sh` (the port's POLLOUT and writes that never wait), `tools/netd-test.sh` (`nettest
 perm`: a user may not change interfaces or routes), `tools/host/net-test.sh`, cu-test (the port's POLLOUT for `cu`).
 
+### The tests steps 4 and 5 left open (branch n678, 2026-10-27)
+
+8.2's loopback list had four items tested only against `socktestd` or not at all; now against the real netd:
+- **`SA_RESTART`, partial sends, SIGPIPE** (`nettest restart partial sigpipe`, netd-test s): a recv and an accept an
+  alarm interrupts go on with `SA_RESTART`, say EINTR without it or with `SO_RCVTIMEO`; a send that waited from its
+  start goes on and sends all in order; a 30,000-byte send interrupted after progress returns the count (6,028 in the
+  run), the rest follows, the reader sees each byte once; a closed peer: EOF, then (as Linux) "connection reset" once
+  and "broken pipe", SIGPIPE ends a sender (141), an ignoring one gets EPIPE.
+- **Five kills** (`nettest giveup`, then root's `ifup -a`): the kernel logs "svc: net: given up after 5 ends in 60 s",
+  a socket gets ENETDOWN at once, `ifup` registers `/sbin/netd` again and says so, and `nettest tcp` passes after.
+- **Noise on the SLIP line** (slip-test n): `zenix-slirp --damage 20` changes one byte in every 20th frame to the
+  Amiga and sends three bytes of garbage between two ENDs before every 20th. **Found:** netd had no count of damaged
+  frames (`ifconfig`'s "bad" was always 0: lwIP drops a bad sum silently). netd now checks each SLIP frame itself
+  (`iface.c` `frame_ok`: the IPv4 header's sum and length, and the TCP, UDP or ICMP sum unless a fragment), counts a
+  bad one and drops it; lwIP checks the sums again (at SLIP's 11.5 KB/s the second sum costs little, and lwIP stays
+  unchanged). In the run: 13 bad frames counted, the 100 KB whole (3.9 KB/s in the emulator), netd never ended.
+- **A SYN flood** (`nettest slipflood`, slip-test n): four listeners (backlog 255, the profile's cap 4) that never
+  accept, while the PC opens 400 connections to them through `zenix-slirp`'s forwards (each a SYN to the Amiga,
+  retransmitted by slirp). The small profile's 8 TCP connections held (7 got through the backlogs, plus the
+  control connection), netd's memory stayed 108 KB, netd never ended; meanwhile 100 sleeps of 20 ms took 19 ms on
+  average and 49 at most, `/bin/true` ran in 40 ms (emulator figures), and a connection to the PC worked after.
+
 ### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
 
 lwIP 2.2.1 (STABLE-2_2_1_RELEASE) in `net/lwip/` (upstream files unchanged in the first commit; two local patches in

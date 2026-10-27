@@ -2,16 +2,19 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """The PC's side of the SLIP test (tools/slip-test.sh, DESIGN D19 8.2 "SLIP"), run inside a user and network
 namespace (unshare -rnm: no root, nothing leaves the PC) whose /etc/resolv.conf names 127.0.0.1:
-    slip-host.py ZENIX-SLIRP SERIAL-LINK CONSOLE-LOG READY-FILE
+    slip-host.py ZENIX-SLIRP SERIAL-LINK CONSOLE-LOG READY-FILE [ZENIX-SLIRP-OPTION...]
 It starts the servers the Amiga reaches through zenix-slirp's gateway 10.0.2.2 (which is this namespace's
 127.0.0.1): a TCP echo server on port 7100, a UDP echo server on 7101, a TCP source on 7102 (a line "N\\n" asks for
 N bytes of a known pattern, then it closes), and a DNS server on 127.0.0.1:53 (slirp's 10.0.2.3 asks it) that knows
-amiga.zenix.test = 10.1.2.3. Then zenix-slirp on a new pty linked at SERIAL-LINK (FS-UAE's serial port), the bytes
+amiga.zenix.test = 10.1.2.3, and a flood control on TCP 7103: a line "flood PORT PORTS N" makes it open N connections,
+spread over PORTS ports from PORT on, to this PC's 127.0.0.1 (zenix-slirp's forwards to the Amiga, -f, among the
+options: each connection becomes a SYN to the Amiga), hold them 20 s, close them and answer "done N". Then zenix-slirp on a new pty linked at SERIAL-LINK (FS-UAE's serial port), the bytes
 that are not SLIP (Zenix's console) appended to CONSOLE-LOG. It writes READY-FILE when all of that is up and runs
 until it is killed (zenix-slirp with it)."""
 import os, signal, socket, struct, subprocess, sys, threading, time
 
 zs, link, log, ready = sys.argv[1:5]
+extra = sys.argv[5:]
 
 
 def pattern(i):
@@ -86,11 +89,38 @@ def resolver(names):
     threading.Thread(target=run, daemon=True).start()
 
 
+def flood(c):
+    with c:
+        line = b""
+        while not line.endswith(b"\n"):
+            d = c.recv(64)
+            if not d:
+                return
+            line += d
+        _, port, ports, n = line.split()
+        port, ports, n = int(port), int(ports), int(n)
+        socks = []
+        for i in range(n):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setblocking(False)
+            try:
+                s.connect_ex(("127.0.0.1", port + i % ports))
+            except OSError:
+                pass
+            socks.append(s)
+            time.sleep(0.005)
+        time.sleep(20)
+        for s in socks:
+            s.close()
+        c.sendall(b"done %d\n" % len(socks))
+
+
 tcp_server(7100, echo)
+tcp_server(7103, flood)
 tcp_server(7102, source)
 udp_echo(7101)
 resolver({"amiga.zenix.test": "10.1.2.3"})
-p = subprocess.Popen([zs, "--pty", link, "--log", log])
+p = subprocess.Popen([zs, "--pty", link, "--log", log] + extra)
 signal.signal(signal.SIGTERM, lambda *a: (p.terminate(), sys.exit(0)))
 for _ in range(100):
     if os.path.islink(link):

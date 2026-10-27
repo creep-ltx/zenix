@@ -10,7 +10,7 @@ static int fails;
 
 static void result(const char *name, int ok, const char *fmt, ...)
 {
-    char buf[200];
+    char buf[320];
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
@@ -467,6 +467,221 @@ static void c_asm(void)
            n, bad, cn, cbad, tc, ta, tm, tma, tn, tna);
 }
 
+/* ---- signals and the real netd (D19 4.3 rules 4, 5): SA_RESTART, partial sends, SIGPIPE ---- */
+static volatile int hits;
+static void on_alarm(int sig) { (void)sig; hits++; }
+static void catch_alarm(int flags)
+{
+    struct sigaction a;
+    memset(&a, 0, sizeof a);
+    a.sa_handler = on_alarm;
+    a.sa_flags = flags;
+    sigaction(SIGALRM, &a, 0);
+    hits = 0;
+}
+static void uncatch_alarm(void) { sys_alarm(0); signal(SIGALRM, SIG_DFL); }
+static int listen_on(int port, int backlog)
+{
+    int l = socket(AF_INET, SOCK_STREAM, 0), one = 1;
+    struct sockaddr_in a = sin(INADDR_ANY, port);
+    setsockopt(l, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    if (l < 0 || bind(l, SA(a), sizeof a) || listen(l, backlog)) { if (l >= 0) sys_close(l); return -1; }
+    return l;
+}
+/* a child: nettest _late PORT D1 D2: after D1 ticks connect, after D2 more send "late", then wait for the close */
+static int start_late(int port, int d1, int d2)
+{
+    char p[8], a[8], b[8];
+    snprintf(p, sizeof p, "%d", port); snprintf(a, sizeof a, "%d", d1); snprintf(b, sizeof b, "%d", d2);
+    char *argv[] = { "nettest", "_late", p, a, b, 0 };
+    return spawn(argv, -1);
+}
+static int late_main(int port, int d1, int d2)
+{
+    sys_sleep((u32)d1);
+    int s = dial(port);
+    if (s < 0) return 90;
+    sys_sleep((u32)d2);
+    send(s, "late", 4, 0);
+    char c;
+    recv(s, &c, 1, 0);
+    return 0;
+}
+static void c_restart(void)
+{
+    int l = listen_on(7012, 4), pid, b, n;
+    char buf[8];
+    if (l < 0) { result("restart", 0, "listen: %s", zwhy("?")); return; }
+    /* recv: SA_RESTART lets it go on to the data; without it EINTR; with a receive timeout never restarted */
+    catch_alarm(SA_RESTART);
+    pid = start_late(7012, 0, 100);
+    b = accept(l, 0, 0);
+    sys_alarm(30);
+    n = recv(b, buf, sizeof buf, 0);
+    int r1 = n == 4 && hits == 1;
+    sys_close(b); sys_wait(pid);
+    catch_alarm(0);
+    pid = start_late(7012, 0, 100);
+    b = accept(l, 0, 0);
+    sys_alarm(30);
+    n = recv(b, buf, sizeof buf, 0);
+    int e2 = n < 0 ? zerrno : 0, r2 = n < 0 && e2 == EINTR && hits == 1;
+    sys_close(b); sys_wait(pid);
+    catch_alarm(SA_RESTART);
+    pid = start_late(7012, 0, 100);
+    b = accept(l, 0, 0);
+    struct timeval tv = { 3, 0 };
+    setsockopt(b, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    sys_alarm(30);
+    n = recv(b, buf, sizeof buf, 0);
+    int e3 = n < 0 ? zerrno : 0, r3 = n < 0 && e3 == EINTR && hits == 1;
+    sys_close(b); sys_wait(pid);
+    /* accept: the alarm comes while it waits for a connection; restarted, it gets the one that comes later */
+    catch_alarm(SA_RESTART);
+    pid = start_late(7012, 100, 0);
+    sys_alarm(30);
+    b = accept(l, 0, 0);
+    int r4 = b >= 0 && hits == 1;
+    if (b >= 0) sys_close(b);
+    sys_wait(pid);
+    /* send: the send buffer full before the call, so the alarm comes before any progress: restarted, it sends all
+     * once the reader reads (never the start twice: the reader checks the order) */
+    int r5 = 0, m = -1, st = -1;
+    char *argv[] = { "nettest", "_reader", "7012", "200", 0 };
+    pid = spawn(argv, -1);
+    b = accept(l, 0, 0);
+    if (b >= 0) {
+        static char d[256];
+        u32 sent = 0;
+        int k;
+        fcntl(b, F_SETFL, O_NONBLOCK);
+        for (;;) {
+            for (k = 0; k < (int)sizeof d; k++) d[k] = (char)pattern(sent + (u32)k, 9);
+            k = send(b, d, sizeof d, 0);
+            if (k <= 0) break;
+            sent += (u32)k;
+        }
+        fcntl(b, F_SETFL, 0);
+        catch_alarm(SA_RESTART);
+        sys_alarm(30);
+        for (k = 0; k < (int)sizeof d; k++) d[k] = (char)pattern(sent + (u32)k, 9);
+        m = send(b, d, sizeof d, 0);
+        shutdown(b, SHUT_WR);
+        st = sys_wait(pid);
+        r5 = m == (int)sizeof d && hits == 1 && st == 0;
+        sys_close(b);
+    }
+    uncatch_alarm();
+    sys_close(l);
+    result("restart", r1 && r2 && r3 && r4 && r5, "recv with SA_RESTART %s; without: %s; with SO_RCVTIMEO: %s; accept %s; "
+           "a send that waited from its start %s (%d, reader %d)", r1 ? "went on to the data" : "WRONG", zstrerror(e2),
+           zstrerror(e3), r4 ? "went on to the connection" : "WRONG", r5 ? "went on and sent all, in order" : "WRONG", m, st);
+}
+/* a child: nettest _reader PORT DELAY: connect, after DELAY ticks read to the end; exit 0 when every byte is the
+ * pattern (seed 9) in order, else 91; prints nothing */
+static int reader_main(int port, int delay)
+{
+    int s = dial(port);
+    if (s < 0) return 90;
+    sys_sleep((u32)delay);
+    static char b[1024];
+    u32 got = 0;
+    int r, bad = 0;
+    while ((r = recv(s, b, sizeof b, 0)) > 0) {
+        for (int i = 0; i < r; i++) if ((unsigned char)b[i] != pattern(got + (u32)i, 9)) bad++;
+        got += (u32)r;
+    }
+    char c[12];
+    snprintf(c, sizeof c, "%u", got);
+    send(s, c, strlen(c), 0);                       /* the count back to the sender (it shut down only its writing) */
+    return bad ? 91 : 0;
+}
+static void c_partial(void)
+{
+    enum { N = 30000 };
+    static char d[N];
+    for (u32 i = 0; i < N; i++) d[i] = (char)pattern(i, 9);
+    int l = listen_on(7013, 2);
+    char *argv[] = { "nettest", "_reader", "7013", "200", 0 };
+    int pid = spawn(argv, -1), b = l >= 0 ? accept(l, 0, 0) : -1, n = -1, m = -1, st = -1, h = 0;
+    char cnt[12];
+    memset(cnt, 0, sizeof cnt);
+    if (b >= 0) {
+        catch_alarm(SA_RESTART);
+        sys_alarm(50);                              /* the reader reads nothing for 2 s: the send stops part way */
+        n = send(b, d, N, 0);
+        h = hits;
+        if (n > 0) m = send(b, d + n, (u32)(N - n), 0);    /* the rest, once the reader reads */
+        shutdown(b, SHUT_WR);
+        recv_all(b, cnt, sizeof cnt - 1);
+        st = sys_wait(pid);
+        uncatch_alarm();
+        sys_close(b);
+    }
+    if (l >= 0) sys_close(l);
+    result("partial", n > 0 && n < N && h == 1 && m == N - n && st == 0 && atoi(cnt) == N,
+           "a %d-byte send gave %d after the alarm (handler %d), the rest %d; the reader got %s bytes, %s", N, n, h, m,
+           cnt, st == 0 ? "each once, in order" : "WRONG");
+}
+static int close_main(int port) { int s = dial(port); return s < 0 ? 90 : 0; }   /* connect and end: its socket closes */
+static int sendpipe_main(int ign)       /* fd 0: a socket whose peer is gone; send without MSG_NOSIGNAL */
+{
+    if (ign) signal(SIGPIPE, SIG_IGN);
+    for (int k = 0; k < 50; k++) {
+        if (send(0, "x", 1, 0) < 0) return zerrno;
+        sys_sleep(2);
+    }
+    return 0;
+}
+static void c_sigpipe(void)
+{
+    int l = listen_on(7014, 2);
+    char *argv[] = { "nettest", "_close", "7014", 0 };
+    int pid = spawn(argv, -1), b = l >= 0 ? accept(l, 0, 0) : -1;
+    sys_wait(pid);
+    char c;
+    int eof = b >= 0 ? recv(b, &c, 1, 0) : -1, e = 0, k, first = 0;
+    /* the peer's socket is closed: the first send is taken, the peer answers with a reset, then EPIPE (as Linux) */
+    for (k = 0; k < 50 && b >= 0; k++) {
+        if (send(b, "x", 1, MSG_NOSIGNAL) < 0) { e = zerrno; if (!first) first = e; if (e == EPIPE) break; }
+        sys_sleep(2);
+    }
+    int io[3] = { b, 1, 2 };
+    char *a1[] = { "nettest", "_sendpipe", "0", 0 }, *a2[] = { "nettest", "_sendpipe", "1", 0 };
+    int p1 = sys_spawn(self, a1, io), s1 = p1 > 0 ? sys_wait(p1) : -1;
+    int p2 = sys_spawn(self, a2, io), s2 = p2 > 0 ? sys_wait(p2) : -1;
+    if (b >= 0) sys_close(b);
+    if (l >= 0) sys_close(l);
+    result("sigpipe", eof == 0 && e == EPIPE && s1 == 128 + SIGPIPE && s2 == EPIPE,
+           "recv after the peer closed: %d; sends with MSG_NOSIGNAL: %s first, %s after %d tries; without it the sender "
+           "ended with %d; with SIGPIPE ignored it got %s", eof, zstrerror(first), zstrerror(e), k, s1, zstrerror(s2));
+}
+
+/* five ends of netd in a minute (D19 4.3 rule 12): netd killed until the kernel gives the service up; then a socket
+ * gets ENETDOWN at once (root's ifup brings it back: tools/netd-test.sh runs that next) */
+static void c_giveup(void)
+{
+    int kills = 0, s = -1, e = 0;
+    for (int k = 0; k < 7; k++) {
+        s = socket(AF_INET, SOCK_STREAM, 0);       /* starts netd (after D11's back-off) */
+        if (s < 0) { e = zerrno; break; }
+        int np = netd_pid();
+        sys_close(s);
+        s = -1;
+        if (np <= 0) break;
+        sys_killsig(np, SIGKILL);
+        kills++;
+        for (int t = 0; t < 200 && netd_pid() == np; t++) sys_sleep(1);
+    }
+    u32 t0 = sys_ticks();
+    int s2 = socket(AF_INET, SOCK_DGRAM, 0), e2 = s2 < 0 ? zerrno : 0;
+    u32 t = sys_ticks() - t0;
+    if (s2 >= 0) sys_close(s2);
+    result("giveup", e == ENETDOWN && kills >= 1 && kills <= 5 && e2 == ENETDOWN && t < 20,
+           "netd killed %d times, then a socket: %s; the next one too, after %u ticks: %s", kills, zstrerror(e), t,
+           zstrerror(e2));
+}
+
 /* ---- through SLIP to the PC (tools/slip-test.sh; the PC's servers: tools/slip-host.py on 10.0.2.2) ---- */
 static int dial_to(u32 addr, int port)
 {
@@ -476,9 +691,8 @@ static int dial_to(u32 addr, int port)
     return s;
 }
 #define PC 0x0a000202u                          /* 10.0.2.2: zenix-slirp's gateway, the PC */
-static void c_slip(void)
+static void c_sliptcp(void)                     /* TCP echo: 10 KB in 1,000-byte pieces */
 {
-    /* TCP echo: 10 KB in 1,000-byte pieces */
     int s = dial_to(PC, 7100), ok = s >= 0;
     static char out[1000], in[1000];
     u32 t0 = sys_ticks(), total = 0;
@@ -489,10 +703,11 @@ static void c_slip(void)
     }
     if (s >= 0) sys_close(s);
     result("sliptcp", ok, "10 KB echoed by 10.0.2.2:7100 in %u ticks%s", sys_ticks() - t0, ok ? "" : ": WRONG");
-    /* 100 KB from the PC, checked byte by byte (its pattern) */
-    s = dial_to(PC, 7102);
-    u32 want = 102400, got = 0, bad = 0;
-    t0 = sys_ticks();
+}
+static void c_slipget(void)                     /* 100 KB from the PC, checked byte by byte (its pattern) */
+{
+    int s = dial_to(PC, 7102);
+    u32 want = 102400, got = 0, bad = 0, t0 = sys_ticks();
     if (s >= 0 && send(s, "102400\n", 7, 0) == 7) {
         static char b[2048];
         int r;
@@ -505,7 +720,10 @@ static void c_slip(void)
     if (s >= 0) sys_close(s);
     result("slipget", got == want && !bad, "%u of %u bytes from 10.0.2.2:7102, %u wrong, in %u ticks (%u bytes/s in this "
            "emulator)", got, want, bad, t, t ? got * 100 / t : 0);
-    /* UDP echo */
+}
+static void c_slipudp(void)                     /* UDP echo */
+{
+    static char out[1000], in[1000];
     int u = socket(AF_INET, SOCK_DGRAM, 0), n = 0;
     struct sockaddr_in to = sin(PC, 7101);
     static const u32 sizes[] = { 1, 100, 500, 900 };
@@ -521,7 +739,9 @@ static void c_slip(void)
     }
     if (u >= 0) sys_close(u);
     result("slipudp", n == 4, "%d of 4 datagrams (1 to 900 bytes) echoed by 10.0.2.2:7101", n);
-    /* a name through 10.0.2.3 (slirp's DNS, which asks the PC's test server) */
+}
+static void c_slipdns(void)                     /* a name through 10.0.2.3 (slirp's DNS, which asks the PC's test server) */
+{
     struct addrinfo h, *r = 0, *r2 = 0;
     memset(&h, 0, sizeof h);
     h.ai_socktype = SOCK_STREAM;
@@ -533,13 +753,75 @@ static void c_slip(void)
            dns ? "10.1.2.3" : gai_strerror(g), gai_strerror(g2));
 }
 
+/* a SYN flood from the PC (D19 8.2, 9.4): four listeners that never accept, the PC opens hundreds of connections to
+ * them through zenix-slirp's forwards (ports 7200-7203), so SYNs come as fast as the line carries them. The pool limits
+ * must hold (netd's memory stays in its profile, netd never ends) and the machine must stay responsive: sleeps of 20
+ * ms measured on the E-clock meanwhile, and a program started and waited for. After it, a connection to the PC works */
+static u32 netd_mem(void)
+{
+    struct uproc p;
+    for (u32 i = 1; sys_procinfo(i, &p) >= 0; i++)
+        if (p.state && p.state != 5 && !strcmp(p.name, "netd")) return p.mem;
+    return 0;
+}
+static void c_slipflood(void)
+{
+    int l[4], np = netd_pid(), nl = 0;
+    u32 m0 = netd_mem();
+    for (int k = 0; k < 4; k++) if ((l[k] = listen_on(7200 + k, 255)) >= 0) nl++;
+    int ctl = dial_to(PC, 7103);
+    char rep[64];
+    memset(rep, 0, sizeof rep);
+    if (ctl < 0 || send(ctl, "flood 7200 4 400\n", 17, 0) != 17) {
+        result("slipflood", 0, "the PC's flood control: %s", zwhy("?"));
+        return;
+    }
+    sys_sleep(200);                             /* the flood under way */
+    u32 worst = 0, sum = 0, t0;
+    for (int k = 0; k < 100; k++) {
+        t0 = sys_hrtime();
+        sys_sleep(2);
+        u32 d = (sys_hrtime() - t0) / 709;      /* milliseconds (PAL's E-clock; NTSC reads 1% long) */
+        sum += d;
+        if (d > worst) worst = d;
+    }
+    char *tv[] = { "true", 0 };
+    t0 = sys_hrtime();
+    int tp = sys_spawn("/bin/true", tv, 0), ts = tp > 0 ? sys_wait(tp) : -1;
+    u32 tt = (sys_hrtime() - t0) / 709, mf = netd_mem();
+    struct pollfd p = { ctl, POLLIN, 0 };
+    if (poll(&p, 1, 90000) == 1) recv(ctl, rep, sizeof rep - 1, 0);
+    sys_close(ctl);
+    for (char *q = rep; *q; q++) if (*q == '\n') *q = 0;
+    int acc = 0;
+    for (int k = 0; k < 4; k++) {               /* the connections that got through the backlogs: taken and closed */
+        if (l[k] < 0) continue;
+        fcntl(l[k], F_SETFL, O_NONBLOCK);
+        for (int c; (c = accept(l[k], 0, 0)) >= 0; acc++) sys_close(c);
+        sys_close(l[k]);
+    }
+    int s = dial_to(PC, 7100), ok = s >= 0;
+    char e[4];
+    ok = ok && send(s, "ping", 4, 0) == 4 && recv_all(s, e, 4) == 4 && !memcmp(e, "ping", 4);
+    if (s >= 0) sys_close(s);
+    int np2 = netd_pid();
+    result("slipflood", nl == 4 && !strncmp(rep, "done", 4) && np2 == np && worst < 500 && ts == 0 && tt < 3000 && ok,
+           "4 listeners, the PC: %s; meanwhile 100 sleeps of 20 ms took %u ms on average, %u at most; /bin/true ran in %u ms; "
+           "netd %d -> %d, %u KB -> %u KB; %d connections came through the backlogs; afterwards a connection to the PC %s",
+           rep[0] ? rep : "no answer", sum / 100, worst, tt, np, np2, m0 / 1024, mf / 1024, acc, ok ? "works" : "FAILED");
+}
+
 int main(int argc, char **argv)
 {
     strcpy(self, "/bin/nettest");
     if (argc >= 5 && !strcmp(argv[1], "serve")) return serve(argv[2], atoi(argv[3]), argv[4]);
     if (argc == 2 && !strcmp(argv[1], "_recv")) { char b; return recv(0, &b, 1, 0) < 0 ? zerrno : 0; }
     if (argc == 2 && !strcmp(argv[1], "_bind80")) return bind80();
-    if (argc < 2) { fprintf(2, "usage: nettest CHECK... (tcp udp poll nonblock names many perm down asm hang listen slip)\n"); return 2; }
+    if (argc == 5 && !strcmp(argv[1], "_late")) return late_main(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
+    if (argc == 4 && !strcmp(argv[1], "_reader")) return reader_main(atoi(argv[2]), atoi(argv[3]));
+    if (argc == 3 && !strcmp(argv[1], "_close")) return close_main(atoi(argv[2]));
+    if (argc == 3 && !strcmp(argv[1], "_sendpipe")) return sendpipe_main(atoi(argv[2]));
+    if (argc < 2) { fprintf(2, "usage: nettest CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n"); return 2; }
     for (int i = 1; i < argc; i++) {
         const char *c = argv[i];
         if (!strcmp(c, "tcp")) c_tcp();
@@ -549,11 +831,20 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "names")) c_names();
         else if (!strcmp(c, "many")) c_many();
         else if (!strcmp(c, "perm")) c_perm();
+        else if (!strcmp(c, "restart")) c_restart();
+        else if (!strcmp(c, "partial")) c_partial();
+        else if (!strcmp(c, "sigpipe")) c_sigpipe();
         else if (!strcmp(c, "down")) c_down();
+        else if (!strcmp(c, "giveup")) c_giveup();
         else if (!strcmp(c, "asm")) c_asm();
         else if (!strcmp(c, "hang")) c_hang();
         else if (!strcmp(c, "listen")) c_listen();
-        else if (!strcmp(c, "slip")) c_slip();
+        else if (!strcmp(c, "slip")) { c_sliptcp(); c_slipget(); c_slipudp(); c_slipdns(); }
+        else if (!strcmp(c, "sliptcp")) c_sliptcp();
+        else if (!strcmp(c, "slipget")) c_slipget();
+        else if (!strcmp(c, "slipudp")) c_slipudp();
+        else if (!strcmp(c, "slipdns")) c_slipdns();
+        else if (!strcmp(c, "slipflood")) c_slipflood();
         else { printf("nettest: no check %s\n", c); fails++; }
         oflush();
     }
