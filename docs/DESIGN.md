@@ -251,6 +251,18 @@ kernel and the base group, the only content of a system bundle) is never install
 boot partition, zenixboot takes it from there at the restart and D15 runs as built ("Zenix (previous)" the way
 back). A package's way back is its previous version in the download cache. The full design:
 [d22-zpkg.md](d22-zpkg.md).
+## D23. The NFS client (roadmap block 2; design note revision 2 after two reviews; nothing built)
+**Why.** Mount the owner's NAS (or a Linux PC) as a directory: `ls`, `cp`, running programs from it. **How.** NFSv3
+over TCP (MOUNT v3 and the portmapper to find mountd; no UDP, no NFSv4), AUTH_SYS from a privileged source port; one
+server process per mount, `/sbin/nfscd`, a file service registered by `mount -t nfs HOST:/EXPORT DIR` as `fs.nfsN`
+(D11 6.4; the host resolved by nfscd at each connect, the export's root handle kept in D11's saved table to check a
+restart), which calls `net` (the one change to D11's "filesystem servers call only diskd" rule; NFS mounts are refused
+on `/`, `/bin`, `/sbin`, `/etc`, so netd never reaches one) and never blocks: many requests in flight on one connection,
+NFS handles mapped to the kernel's 32-bit inode numbers, close-to-open caching, UNSTABLE writes kept until a COMMIT with
+an unchanged verifier, `FS_CLOSE` answered at once, `mount -a` never waiting for a NAS, always `nosuid`. "Hard" mounts
+by default, made killable by two small kernel changes: **the cancel mark** (`UMSG_CANCEL` on the requests of a killed
+client, `POLLPRI` on the server's port) and **the reboot sync** (network mounts synced last, `FS_SYNC` bounded). The
+full design: [d23-nfs.md](d23-nfs.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers; fsd and diskd are built into the kernel image, zfsd is the file `/sbin/zfsd` since D19 step 1. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
