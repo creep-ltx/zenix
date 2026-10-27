@@ -694,3 +694,11 @@ client on D20's terminal code, `/dev/random` only, detached Ed25519 signatures, 
 judged that shape sound, the architecture reviewer approving once the D15 joint was fixed.
 
 Last checked against the code: 2026-10-27 (main at f10de79).
+
+## Owner decisions (2026-10-27)
+
+"Yes" to every recommendation of the owner questions: (1) TLS 1.2 now, 1.3 only if a site needs it; (2) the Amiga
+gets its own ssh key; (3) no passphrase by default, optional; (4) the clock from the internet when the network comes up,
+the battery clock first; (5) HTTPS may take up to a minute on the stock A1200; (6) `zpkg` over plain HTTP with signed
+packages, HTTPS optional; (7) unsigned update bundles refused once signing ships, test builds excepted; (8) `scp`/`sftp`
+after ssh is in daily use.
