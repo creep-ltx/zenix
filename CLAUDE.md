@@ -132,7 +132,7 @@ Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main); `ETXTBSY` 26 
 shared program opened for writing; claimed 2026-10-25, Linux's number). Update note kinds (D15, frozen, append-only):
 1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). Port names
 registered as services (D11):
-`disk`, `fs`, `fs.*`; `ping` (the test service).
+`disk`, `fs`, `fs.*`; `ping` (the test service, served by `msgpingd` since D19 step 0).
 
 ## Frozen interfaces (D15 step 0, 2026-10-26; checked in every review)
 Updates install a new kernel before the programs (docs/d15-self-updates.md 2 and 4), so an older program always meets

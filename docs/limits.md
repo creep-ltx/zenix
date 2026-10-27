@@ -35,9 +35,9 @@ nothing but good behaviour keeps a program from writing into it: the kernel refu
 (`user_ok_wr`), but a program writing through a stray pointer changes the code its other processes run. The checksum
 finds that at the next start (a fresh copy is loaded) and when a process running it faults (the log names the
 processes still running the damaged copy); those go on running it - nothing can stop them without an MMU. **Raw
-messages** a program sends itself (`SYS_call`) carry pointers the servers write through without a check (pingd,
+messages** a program sends itself (`SYS_call`) carry pointers the servers write through without a check (msgpingd,
 diskd's `DISK_INFO`/`DISK_LIST`, root's raw filesystem requests): a program that sends raw messages (bench, badptr,
-dd, fsck.ext2, fdisk, ping, mount, pingd, mkfs.ext2, priotest, svctest) must stay ZEXE until the servers check
+dd, fsck.ext2, fdisk, msgping, mount, msgpingd, mkfs.ext2, priotest, svctest) must stay ZEXE until the servers check
 pointers.
 
 ## Not done yet (the plan: ROADMAP.md)

@@ -1,11 +1,11 @@
 sleep 22
-send pingd &\r
+send msgpingd &\r
 sleep 2
 send ps\r
 sleep 2
-send ping 2000\r
+send msgping 2000\r
 sleep 8
 send ps\r
 sleep 2
-send ping\r
+send msgping\r
 sleep 2

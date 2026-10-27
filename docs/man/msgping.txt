@@ -1,0 +1,27 @@
+MSGPING(1)		Zenix manual
+
+NAME
+    msgping - test message client
+
+SYNOPSIS
+    msgping [rounds]
+
+DESCRIPTION
+    Talks to msgpingd(1) through its message port "ping": calls it to add
+    40+2, has it edit a string in this program's own memory, then times
+    rounds message round trips (default 1000) with the E-clock (as bench(1)
+    does) and prints the total and the time of one round trip in
+    microseconds, and finally tells the server to quit. This is not the
+    network's ping: it measures Zenix's own messages between two programs
+    on one machine (it was called ping before the network, DESIGN D19).
+
+OUTPUT
+    msgping: 1000 round trips in 3012 us, 3.0 us each
+
+NOTES
+    The microseconds assume the PAL E-clock (709379 Hz); on an NTSC machine
+    (715909 Hz) they read about 1% high. Times measured in an emulator are
+    not hardware times.
+
+SEE ALSO
+    msgpingd(1), bench(1)

@@ -76,7 +76,7 @@ DESCRIPTION
 FILES
     /etc/svctab   services whose programs live on the disk, one a line:
                     PORT  NICE  PROGRAM [ARGUMENTS]
-                  for example "ping 0 /bin/pingd". PROGRAM is an absolute
+                  for example "ping 0 /bin/msgpingd". PROGRAM is an absolute
                   path (read as root when the service starts) or a
                   built-in image (@diskd, @fsd; @zfsd starts /sbin/zfsd
                   in the shipped kernel); at most 6 words in 80 bytes;

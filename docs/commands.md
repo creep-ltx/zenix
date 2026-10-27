@@ -62,7 +62,7 @@ spot-checked against the code that day.
 ## Internals and test programs
 [init](man/init.txt), [boot](man/boot.txt), [diskd](man/diskd.txt) (the built-in start-up programs);
 [hello](man/hello.txt), [spin](man/spin.txt), [crash](man/crash.txt), [badptr](man/badptr.txt),
-[ping](man/ping.txt), [pingd](man/pingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt),
+[msgping](man/msgping.txt), [msgpingd](man/msgpingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt),
 [priotest](man/priotest.txt), [svctest](man/svctest.txt), [sigtest](man/sigtest.txt).
 
 ## Run on AmigaOS, not on Zenix

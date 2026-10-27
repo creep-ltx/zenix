@@ -708,6 +708,16 @@ program in the repository; (5) a ZenixFS root is test-only until block 4; (6) li
 and bundle; (7) lwIP as the TCP/IP code.
 ## 14. As built
 
+### Step 0: `msgping` and `msgpingd` (branch n023, 2026-10-27)
+
+`ping` and `pingd` (the message test client and server) are now `msgping` and `msgpingd`: `user/msgping.c` and
+`user/msgpingd.c`, `UAPPS`, their pages, `commands.md`, `source-tree.md`, `limits.md`'s raw-message list, the svctab
+example and every test script (svc-test, cmds2-test, the mount test's file services). The port name `ping` and the
+service name in D11's log lines (`svc: ping: ...`) stay; `msgping` prints `msgping: ...`. The older notes (D11, D13,
+the audits) keep the old names as history. `MOUNTAPPS` never held them: the mount test only registers
+`/bin/msgpingd` under ten names (the service table's capacity) and never starts it, so its list is unchanged. Tests:
+svc-test and cmds2-test.
+
 ### Step 1: zfsd from the disk (branch zfout, 2026-10-27)
 
 What section 3.3 asked for, with three local corrections where the note did not fit the code:

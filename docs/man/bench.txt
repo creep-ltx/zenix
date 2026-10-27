@@ -30,4 +30,4 @@ DESCRIPTION
     Amiga and write the result down with the date.
 
 SEE ALSO
-    ping(1), uptime(1)
+    msgping(1), uptime(1)
