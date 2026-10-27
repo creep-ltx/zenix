@@ -40,6 +40,7 @@ void serial_puts(const char *s);
  * 0x1d hook are off the wire and received bytes wait for serdev_read */
 long serdev_open(void);                 /* -EBUSY when it is open already */
 void serdev_close(void);
+void serdev_drop(void);                /* a panic: the port is the kernel's again, no memory touched */
 u32 serdev_take(u8 *buf, u32 n);        /* bytes received so far (0: none yet) */
 long serdev_write(const u8 *buf, u32 n, int nonblock);  /* all of it, waiting by ticks; on a kill or a 2 s stall the count, or
                                                          * -EINTR/-EIO; nonblock: what fits now, or -EAGAIN */
@@ -168,6 +169,7 @@ void gfx_move_rows(int dst, int src, int n);    /* n rows from src to dst, overl
 void gfx_vblank(void);
 void term_putc(int con, char c);
 void term_write(int con, const char *s, u32 n);
+u32 term_write_some(int con, const char *s, u32 n);   /* tty_write: may stop early to let input and others run (D20 6) */
 void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
 int term_back(void);
 int term_ckm(void);                     /* the console on the screen wants ESC O A arrows (DECCKM) */
@@ -671,7 +673,8 @@ long vfs_umount(const char *path);
 long vfs_mountinfo(u32 index, struct umountinfo *out);
 long vfs_path1(u32 op, const char *p, u32 a2, u32 a3);   /* chmod/utimes/lstat/readlink on a path */
 long vfs_link(u32 op, const char *a, const char *b);
-extern u32 time_base;
+#include "clock.h"
+extern struct wclock wclock;        /* SYS_time, SYS_settime (main.c, clock.h) */
 long vfs_sync(int reboot);             /* 1: SYS_reboot, each server at most 5 s (then the tick resets) */
 long vfs_mkdir(const char *path);
 long vfs_unlink(const char *path);

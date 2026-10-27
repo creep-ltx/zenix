@@ -23,6 +23,13 @@
   colour-test.py pcgone SHOT GEOM DEPTH  the same page after termtest ended without cleaning up: the kernel dropped
                                         the font (the grid no longer in it) and the rules (Zenix's palette again)
   colour-test.py cleared SHOT GEOM      rows 3-29 empty (termtest cleared the screen before it dropped the font)
+  colour-test.py bbsgrid SHOT GEOM PSF ROW   telnet -p showing tools/bbs-sim.py's grid from text row ROW (1-based): 16
+                                        rows "%X: " and 16 bytes, every cell against the PSF font's glyph (D20 step 3)
+  colour-test.py bbscolours SHOT GEOM DEPTH ROW   bbs-sim's colours screen from ROW in a BBS mode: dark, bright (SGR 1
+                                        with CONR_BRIGHT), "1 then" and the backgrounds in the CGA palette as DEPTH
+                                        planes show them
+  colour-test.py bbssame A GEOMA ROWA B GEOMB ROWB N   N text rows of A from ROWA have the same glyph shapes as B's
+                                        from ROWB (Topaz: telnet's Amiga mode against the plain console)
 Each prints what it found and exits 1 on a failure."""
 import os
 import re
@@ -337,6 +344,60 @@ def main():
         if not bad:
             print(f"pcgone: the font dropped ({same} cells look like it), Zenix's palette again")
         return 1 if bad else 0
+    if what == "bbsgrid":
+        cells = Cells(sys.argv[2], [float(v) for v in open(sys.argv[3]).readline().split()])
+        g, top = font(sys.argv[4]) + [[0] * 8], int(sys.argv[5]) - 1
+        acts = {0, 7, 8, 9, 10, 12, 13, 26, 27}     # bbs-sim sends a space for these (they act)
+        bad = []
+        for r in range(16):
+            want = [ord(c) for c in "%X: " % r] + [32 if r * 16 + c in acts else r * 16 + c for c in range(16)]
+            for c, b in enumerate(want):
+                got = cells.glyph(top + r, c, g, range(1, 257))[0]
+                if b == 32:
+                    ok = got in (32, 256) or g[got] == g[256]
+                else:
+                    ok = got == b or g[got] == g[b] or (got in SHADES and b in SHADES)
+                if not ok:
+                    bad.append(f"cell {top + r + 1},{c + 1}: looks like byte {got}, not {b}")
+        for x in bad[:12]:
+            print("bbsgrid:", x)
+        if not bad:
+            print(f"bbsgrid: the 16 rows of 1-255 in {sys.argv[4]}'s glyphs from row {top + 1}")
+        return 1 if bad else 0
+    if what == "bbscolours":
+        cells = Cells(sys.argv[2], [float(v) for v in open(sys.argv[3]).readline().split()])
+        depth, top = int(sys.argv[4]), int(sys.argv[5]) - 1
+        pal = cga(depth)
+        bad = []
+        for i in range(8):
+            r = top + i
+            bright = pal[i + 8] if depth == 4 else pal[7 if i == 0 else i]   # 3 planes: the colour, bold (gfx.c)
+            for what_, col, want, fg in (("dark", 1, pal[i], 1), ("bright", 9, bright, 1), ("1 then", 19, bright, 1),
+                                         ("bg", 28, pal[i], 0)):
+                if fg and what_ == "dark" and i == 0:
+                    continue                     # black on black
+                # a word's colour: its brightest pixel (Topaz's thin strokes are smoothed below their colour in the
+                # scaled screenshot); a background: the middle of the cell
+                got = (max((cells.at(r, c, j, k) for c in range(col, col + 5) for j in range(8) for k in range(8)), key=sum)
+                       if fg else cells.at(r, col, 5, 4))
+                if not near(got, want, 40):
+                    bad.append(f"line {i} {what_} (cell {r + 1},{col + 1}): {got}, wanted {want}")
+        for x in bad[:12]:
+            print("bbscolours:", x)
+        if not bad:
+            print(f"bbscolours: dark, bright, 1-then and backgrounds in the CGA palette as {depth} planes show them")
+        return 1 if bad else 0
+    if what == "bbssame":
+        a = Cells(sys.argv[2], [float(v) for v in open(sys.argv[3]).readline().split()])
+        b = Cells(sys.argv[5], [float(v) for v in open(sys.argv[6]).readline().split()])
+        ra, rb, n = int(sys.argv[4]) - 1, int(sys.argv[7]) - 1, int(sys.argv[8])
+        nb = lambda x, y: sum(bin(p ^ q).count("1") for p, q in zip(x, y))
+        diff = [(r, c) for r in range(n) for c in range(80) if nb(a.bits(ra + r, c), b.bits(rb + r, c)) > 2]   # 2 of 64
+        # pixels: the screenshot is scaled and smoothed, and the two pages have different palettes
+        lit = sum(1 for r in range(n) for c in range(80) if any(a.bits(ra + r, c)))
+        if diff or lit < 40:
+            print(f"bbssame: {len(diff)} cells differ (first {diff[:6]}), {lit} cells lit"); return 1
+        print(f"bbssame: {n} rows, {lit} cells drawn, the same glyphs"); return 0
     print(__doc__); return 2
 
 

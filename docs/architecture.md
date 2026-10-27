@@ -654,7 +654,9 @@ rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
 events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), the machine (`reboot`,
 `update`), services (`svc`), memory (`memalloc memfree meminfo`),
-time (`ticks hrtime time settime`), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`, and `console`, the
+time (`ticks hrtime time settime`; `time` is the seconds since 1970 as an **unsigned** 32-bit number, good until
+2106: the base the battery clock or `settime` gave plus the whole seconds the tick counts itself, `kernel/clock.h`, so
+it does not jump back when the 32-bit tick count wraps after 497 days; audit 2026-10-26 F8), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`, and `console`, the
 display's colours: D14 note section 11), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
@@ -1082,7 +1084,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
   (console 1, the same rule), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
   is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
-  receive ring for its reader; a write waits for room in the 4 KB send ring a tick at a time, so the machine runs on,
+  receive ring for its reader - a ring of its own, allocated at the open and freed at the close: 4 KB, or 32 KB with
+  2 MB of free fast RAM (netd's large profile), so it holds all that TCP's window lets the far side send while netd
+  does not run (DESIGN D20 section 6; the console's own ring stays 1 KB); a write waits for room in the 4 KB send ring a tick at a time, so the machine runs on,
   and ends on a kill or after 2 s in which the port took nothing (logged: what was written, or -EIO), audit A5; with
   `O_NONBLOCK` (netd's SLIP, DESIGN D19 5.3) a write takes what fits now (-EAGAIN for nothing) and a read with nothing
   received answers -EAGAIN),
@@ -1309,9 +1313,13 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   the log line for an unexpected interrupt vector - and is called from exactly four places: the idle loop; the end of every system call; the level-2
   interrupt when it cut into **user** mode (then no kernel code is running at all, because the kernel is never
   preempted; the mask is lowered to 0 first, and if Ctrl-C or Ctrl-Z hit the running program it is rescheduled
-  at once so it ends or stops); and between the 256-byte pieces of a long terminal write (`tty_write`: drawing
+  at once so it ends or stops); and between the pieces of a long terminal write (`tty_write`: drawing
   4 KB can take seconds on a 68020 with chip RAM only, and the rings would overflow; the terminal is consistent
-  there, and a writer killed by Ctrl-C stops at once). An interrupt that cuts into kernel code (a system call, or `kwork` itself) never
+  there, and a writer killed by Ctrl-C stops at once). A piece is at most 256 bytes and ends early once 10-20 ms
+  (two ticks) of drawing have passed while input waits or a better process is ready (`term_write_some`); between
+  pieces `tty_write` also acts on `need_resched` as a return to user mode does (`resched`: a strictly better process
+  runs now, one of the writer's level when its slice is over) - the only place a system call gives the CPU away
+  without blocking, so netd, woken by SLIP's bytes, runs within about one piece (DESIGN D20 section 6). An interrupt that cuts into kernel code (a system call, or `kwork` itself) never
   calls it, and a `busy` flag keeps it from being re-entered, so the tty queue and line, the terminal grids, the
   blitter and the heap (the first use of a console allocates its tty and terminal) are only ever changed by one
   piece of code at a time. Lost wakeups (B5) cannot happen: `tty_read` and init's `proc_wait` (`WAIT_CONSOLE`) test

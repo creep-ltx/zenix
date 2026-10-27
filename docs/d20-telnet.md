@@ -1,7 +1,7 @@
 # D20: telnet, the BBS terminal and pseudo-terminals (design note, revision 2)
 
-Status: **design, revision 2 after independent reviews (section 13); step 1 (the console's font and rules) built on
-branch t12 2026-10-27 ("As built" at the end, after step 0's PC-side parts), the rest not built.** D19 section 10 step 11: "telnet
+Status: **design, revision 2 after independent reviews (section 13); steps 0-3 built (step 1 and 2 on branch t12,
+step 3 and section 6's SLIP fix on branch t3, 2026-10-27; "As built" at the end); Zmodem (step 4) not built.** D19 section 10 step 11: "telnet
 (its own note: pseudo-terminals, SIGHUP, the BBS terminal)". Roadmap block 2: `telnet` "made for BBSes, the owner's
 daily use: ANSI colours, the PC character set and Amiga fonts, the BBS window size, downloads". The short version is
 DESIGN.md D20. Facts about today's code are *read* from main at f03180e (2026-10-27); facts about boards and terminals
@@ -721,3 +721,68 @@ drawing a write, which no priority can interrupt (section 6). So section 6's ste
 between pieces when a strictly better process is ready, is likely needed: the main session's decision, after the
 same measurement on the stock A1200 (the emulator's 68020 and chip-bus timing are not the machine's).
 
+
+## As built: section 6, the SLIP losses found and fixed (branch t3, 2026-10-27; FS-UAE figures, not yet the A1200)
+
+**The cause, measured** (a test kernel with counters, `bbs-test` part s's 100 grid screens, about 35 KB a call, on
+FS-UAE's stock A1200, 8 colours unless said): the serial interrupt kept running and filling the 1 KB ring (no Paula
+overrun), and at every overflow netd had been woken already (ready) but was not running: the CPU was in a console
+write. A 256-byte piece of short lines took 100-350 ms (most over 200 ms; max 294-350 ms at 1, 3 and 4 planes alike),
+against the ring's 89 ms. The long part was not the blitter but the scroll's copy of the character grid: of 31 s of
+drawing a call, 21.8 s went to `memmove` of the grid's three 31 x 80-byte arrays at each of the 1,800 scrolls (12 ms
+each, a byte loop on chip RAM), 2.7 s to the blitter (1.5 ms a scroll). So telnet's nice 1 could not help (the time
+was inside one write), as step 2 saw.
+
+**Each fix measured alone** (bytes lost per call / time of a call; before: 6-11 KB lost, 47-59 s):
+
+| Change | Lost | Time | Note |
+|---|---|---|---|
+| `memmove` by long words (`main.c`) | still lost (8-9 overflows) | 38-41 s | drawing 31.3 -> 15.9 s, a scroll's grid copy 12 -> 3.5 ms |
+| a yield point in `tty_write` (below) | still lost (10-11) | 47 s | pieces at most 83 ms; netd still late |
+| both, the 1 KB ring | still lost (9-11) | 34-35 s | |
+| `/dev/ttyS0`'s 4 KB ring alone | **none** (high water 1,943) | 42-43 s | TCP's window bounds what can arrive |
+| all three (built) | **none** (high water 1,431-1,442) | 28-31 s | at 2 colours 25 s, at 16 colours 29 s |
+| all three, A1200 with 4 MB fast RAM (netd's large profile, 16 KB window), 4 KB ring | lost at nice 0 (high water 4,096) | 22 s | |
+| the same with the 32 KB ring | **none** (high water 4,458) | 22 s | |
+
+**What was built (all three, the main line's kernel):**
+1. **The ring follows TCP's window** (`serial.c`): while a program owns `/dev/ttyS0` the receive ring is its own,
+   allocated at the open and freed at the close: 4 KB (netd's small profile: the 2 x 966-byte window, twice for
+   SLIP's escapes, plus headers) or 32 KB with 2 MB of free fast RAM (netd's large profile, 16 KB window). The far
+   side cannot send more than the window while netd does not answer, so a full ring needs more than TCP allows. No
+   memory: the console's 1 KB ring, said on the log. A machine that never opens the port pays nothing.
+2. **A yield point in a console write** (section 6's step 2; `tty.c`, `term.c`): a piece is at most 256 bytes and ends
+   early once two ticks (10-20 ms) of drawing have passed while input waits or a better process is ready
+   (`term_write_some`); between pieces `tty_write` runs `kwork` and acts on `need_resched` as the end of a system call
+   does (`resched`). With telnet at nice 1, netd runs within one piece; at equal levels at the slice end.
+3. **The console's scroll twice as fast on chip RAM** (`memmove` copies aligned blocks by long words): `bench`'s 300
+   lines of 79 characters, FS-UAE stock A1200, 3 planes: 30,471 / 30,702 -> 23,012 / 23,134 us a line (-25%).
+
+Sizes: the kernel 154,944 -> 155,720 bytes (with F8's clock and step 3: +776); 4 KB (or 32 KB) only while SLIP or `cu`
+runs. Tests: `bbs-test` part s now fails on any lost byte; `serial-test` (the 4 KB and 32 KB rings, the console's
+ring back after the close, no memory), `term-test` (a piece ends early and the screen is the same as from one
+write). The owner's A1200 measurement (8.3) still decides whether anything else is needed; on a real 68020 the scroll
+should be faster than FS-UAE's, never slower.
+
+## As built: step 3, the BBS modes (branch t3, 2026-10-27; not yet run on the A1200)
+
+`user/telnet.c` over the step-0 core: `-a` (the default now, the owner's decision 6), `-p`, `-x`, `-i`; the modes'
+rules as 3.5's table (PC 111, Amiga 46, Unix 64); the PC font loaded from `/usr/share/consolefonts/cp437-8x8.psf` with
+`CON_FONT` on standard output, dropped at the end, at `z` and at a mode switch with the screen cleared first; the
+filter's events (iCE from `CSI ? 33 h/l`, the board's font switch); the prompt's `a`/`p`/`x`; the note "`colours 16` in
+/etc/console shows it fully (N KB more chip RAM)" once at the start of a board call on a console with fewer than 16
+colours (the owner's decision 2). Choices where the note was silent:
+1. **A board's own font switch does not clear the screen** (4.2's last sentence): the font goes or comes and the board
+   draws on; telnet's own switches (prompt, end, `z`) clear first.
+2. **The rules telnet owns are all seven bits** (mask 127): it sets exactly its mode's bits and puts back what was
+   there before at the end and at `z`.
+3. **The colours note** names the chip RAM the screen would take more (40 KB a plane: 40 at 8 colours, 80 at 4, 120 at
+   2), on a console only (not into a file); at 16 colours nothing is said.
+4. **The fallback** (standard output not a console, or no memory for the font): each refusal said once on standard
+   error, CP437 then written as its nearest Latin-1 (the core's table); the call goes on.
+5. Zmodem (`rz`/`sz`, step 4) is not in this step.
+
+**Sizes:** `/bin/telnet` 21,600 -> 23,032 bytes. **Tests:** `tools/bbs-test.sh` parts b (stock A1200, 3 planes) and
+b16 (4 MB fast RAM, 4 planes) over the A2065 with screenshots: 32 checks each (the README's list), all passing; the
+Del key's `ESC[3~` is not typed there (serial input arrives a byte at a time and the core maps Del only when the
+sequence is whole in one read, as the keyboard gives it; the core's own test covers it).

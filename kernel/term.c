@@ -606,19 +606,31 @@ control:
     }
 }
 
-void term_write(int w, const char *s, u32 n)
+/* Draw s; bounded: stop early once two ticks (10-20 ms) have passed while input waits or a better process is ready,
+ * and say how many bytes were taken (tty_write then lets kwork and that process run: D20 section 6) */
+static u32 write_(int w, const char *s, u32 n, int bounded)
 {
     struct term *t = get(w);
     int vis = (w == con_cur) && gfx_up();
+    u32 i = 0, t0 = ticks;
     if (t->back)
         leave_back(t, vis);                             /* output brings the live screen back */
     if (vis)
         cursor(t, 0);
-    for (u32 i = 0; i < n; i++)
-        put1(t, vis, (u8)s[i]);
+    while (i < n) {
+        put1(t, vis, (u8)s[i++]);
+        if (bounded && (u32)(ticks - t0) >= 2 && (kwork_pending || need_resched))
+            break;
+    }
     if (vis)
         cursor(t, 1);
+    return i;
 }
+
+void term_write(int w, const char *s, u32 n) { write_(w, s, n, 0); }
+
+/* a tty write's piece (tty.c): at least one byte, perhaps fewer than n (above) */
+u32 term_write_some(int w, const char *s, u32 n) { return write_(w, s, n, 1); }
 
 /* kernel log text onto the visible console (kprintf mirror during boot) */
 void term_log(const char *s, u32 n)

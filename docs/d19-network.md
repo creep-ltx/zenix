@@ -360,7 +360,8 @@ uncached.
   (`serial.c`), and its `poll` always says writable. So the kernel gets a truthful POLLOUT for `/dev/ttyS0` (free room
   in the send ring; D16 rule 11 changes for this device only, a correction, not a new meaning for programs that wrote
   before) and netd writes at most that much, keeping the rest of a frame in its own queue. The receive ring is 1 KB
-  (89 ms of SLIP), so netd's turn must stay short: no file reads in the request path (6.1).
+  (89 ms of SLIP), so netd's turn must stay short: no file reads in the request path (6.1). (Since D20: 4 KB or
+  32 KB while the port is open, section 14 step 5 item 11.)
 - **The PC side** (`tools/host/zenix-slirp`, GPL-2.0-only): reads SLIP from a serial port or pty and gives each IP
   packet to libslirp (QEMU's user-mode network, BSD-3): NAT to the PC's network and the internet, DNS, port forwards
   (bound to 127.0.0.1 unless asked), **no root**; Zenix is 10.0.2.15, the gateway 10.0.2.2, DNS 10.0.2.3. It passes
@@ -1011,7 +1012,11 @@ FS-UAE test through `zenix-slirp`. The owner's how-to: `docs/network-serial.md`.
 11. **Bytes the receive ring still loses:** in one run 90 of 122,634 (0.07%), while `nettest` compared 100 KB byte by
    byte at netd's level (netd waited for its time slice of 50 ms, and its turn took the rest of the ring's 89 ms).
    TCP sends them again; the test allows at most 1% and reports the count. The real A1200's numbers are 8.3's (the
-   ring is 1 KB: a larger one costs every machine its kernel memory, not decided here).
+   ring is 1 KB: a larger one costs every machine its kernel memory, not decided here). **Since D20 (branch t3,
+   2026-10-27):** `/dev/ttyS0` has a receive ring of its own while open, sized to hold TCP's whole window (4 KB, or
+   32 KB with netd's large profile), allocated at the open: nothing lost while telnet drew 35 KB screens in FS-UAE,
+   where 6-11 KB a call were lost before; the measurements and the console's yield point: d20-telnet.md, "As built:
+   section 6".
 
 Sizes (*measured* 2026-10-27): the kernel 150,356 -> 150,536 bytes (28,664 left on the RAM floppy, 4,088 on the mount
 tests' floppy: no RAM-disk change needed); netd 72,392 bytes of code (the files 80,900); `ifconfig` 13,196 bytes,

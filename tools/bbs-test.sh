@@ -149,8 +149,8 @@ e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck.log 2>&1 && echo "PASS the host's e2fsck 
 
 # s: over SLIP on the stock A1200 (the serial port is the network's: nothing typed; /etc/profile runs the script once):
 # 100 grid screens (about 36 KB) drawn on the console through telnet, four calls: telnet's own nice 1, nice 0 (nice -n
-# -1) twice, nice 1 again: the bytes the serial port lost (its 1 KB ring, D20 section 6) and the time, counted for each;
-# emulator figures only
+# -1) twice, nice 1 again: no byte may be lost on the serial port's receive ring (D20 section 6: the yield points in a
+# console write and /dev/ttyS0's 4 KB ring); the time is counted for each (emulator figures only)
 part_s() {
     pkg-config --exists slirp || { echo "FAIL libslirp (with GLib) is not installed: pkg-config slirp fails"; pass=0; return; }
     make -s -C tools/host/zenix-slirp OUT="$OUT" >/dev/null || { echo "FAIL zenix-slirp does not build"; pass=0; return; }
@@ -224,6 +224,9 @@ ends = [any(r["ev"] == "end" for r in c) for c in calls]
 drawn = not any("not available" in rd(f"e{i}") for i in range(1, 5))
 ok = drawn and all(f"st{i}=0" in rd(str(i)) for i in range(1, 5)) and grids == [100] * 4 and all(ends)
 print(("PASS" if ok else "FAIL") + f" over SLIP: four calls of 100 grid screens each drawn through telnet, the board's bye ended each (grids {grids})")
+lossless = all(x == 0 for x in d)
+print(("PASS" if lossless else "FAIL") + f" over SLIP: no byte lost on the serial port's receive ring while telnet drew (DESIGN D20 section 6: {d})")
+ok = ok and lossless
 print(f"over SLIP (FS-UAE, the stock A1200, an emulator figure): bytes lost on the serial ring, calls in the order nice 1,"
       f" 0, 0, 1: {d} (nice 1: {d[0] + d[3]}, nice 0: {d[1] + d[2]}); times {[t[0] if t else '?' for t in times]}")
 sys.exit(0 if ok else 1)
@@ -231,8 +234,165 @@ PY
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-s.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (s)" || { echo "FAIL e2fsck (s)"; pass=0; }
 }
 
-[ $# = 0 ] && set -- e s
+# b, b16: the BBS modes (D20 step 3) over the A2065, with screenshots (tools/shot.py, the cage rig): b on the stock
+# A1200 (2 MB chip RAM, 8 colours: 3 planes), b16 on the A1200 with 4 MB fast RAM (16 colours: 4 planes). Three calls:
+# -p (the PC mode), the default (the Amiga mode), -p into a file (the fallback). Checked: what telnet handed the console
+# (its copy on the serial port) against bbs-sim's EXPECT for each screen and mode (music, iCE, FF, SUB, the Amiga
+# codes, the font switch); the board's record (TERMINAL-TYPE ANSI, NAWS 80x32, the keys per mode: Backspace BS,
+# a-ring 0x86 in CP437 or 0xE5 in Latin-1; the Amiga window bounds answer); the console's rules while each
+# mode runs (termtest rules from console 2: PC 111, Amiga 46; none after); the "colours 16" note once a call at fewer
+# than 16 colours, never at 16; the escape prompt's mode switch; the fallback (CP437 as Latin-1 in the file, said
+# once). The screenshots: the PC grid in the CP437 font's glyphs (every cell), the colours in the CGA palette (both
+# BBS modes, bright by CONR_BRIGHT), and the Amiga mode's Latin-1 screen in the same Topaz glyphs as the plain console.
+part_b() {
+    local tag=$1 conf=$2 depth=$3 col=$4
+    [ -n "$ZENIX_CAGE_RIG" ] || { echo "FAIL ($tag) ZENIX_CAGE_RIG is not set (the screenshots need the cage rig)"; pass=0; return; }
+    # a build of its own with the display window colour-test uses (DIWV=0x38: every row inside FS-UAE's picture)
+    local BD0=$BD; BD=$OUT/bbuild-$tag
+    make -s -j8 BUILD=$BD DIWV=0x38 $BD/zenix.adf $BD/zenix.hdf >$OUT/bbuild-$tag.log 2>&1 ||
+        { echo "FAIL ($tag) the DIWV=0x38 build"; BD=$BD0; pass=0; return; }
+    debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
+    printf 'auto eth0\niface eth0 inet dhcp\n    driver a2065\n' > $OUT/interfaces
+    put $OUT/interfaces /etc/network/interfaces 644
+    printf 'sleep 4\necho grid\nsleep 3\necho bye\nsleep 2\n' > $OUT/keys3.sh
+    put $OUT/keys3.sh /tests/keys3.sh 755
+    python3 -c 'import sys; sys.stdout.buffer.write(bytes(range(0x20, 0x7F)) + b"\r\n" + bytes(range(0xA0, 0x100)) + b"\r\n")' > $OUT/latin1.txt
+    put $OUT/latin1.txt /tests/latin1.txt 644
+    local L='for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do ifconfig eth0 2>/dev/null | grep -q "lease [0-9]" && break; sleep 1; done'
+    {
+        printf '%s\n' 'wait zenix:/# 120' 'sleep 1' "send $L; echo ==u\"\"p\\r" 'wait ==up 60'
+        printf '%s\n' 'send termtest columns\r' 'sleep 5' 'shot columns' 'send q' 'sleep 2'
+        # call 1: the PC mode
+        printf '%s\n' 'send telnet -p -e ^E 10.0.2.2 2323; echo stp=$?\r' 'wait <<END hello>> 40' 'sleep 2'
+        for w in ff grid; do printf '%s\n' "send $w\\r" "wait <<END $w>> 30"; done
+        printf '%s\n' 'sleep 3' 'shot pcgrid'
+        for w in ff colours; do printf '%s\n' "send $w\\r" "wait <<END $w>> 30"; done
+        printf '%s\n' 'sleep 3' 'shot pccolours'
+        for w in ice music sub; do printf '%s\n' "send $w\\r" "wait <<END $w>> 30"; done
+        printf '%s\n' 'send x\x7f\xe5\r' 'wait <<END unknown>> 30'
+        printf '%s\n' 'send \x1d2' 'wait zenix login: 30' 'send root\r' 'sleep 4' 'send termtest rules /dev/tty1; free\r' 'sleep 5' \
+            'send \x1d1' 'sleep 2' 'send \x05' 'wait telnet> 15' 'send a' 'sleep 3'
+        for w in amiga font; do printf '%s\n' "send $w\\r" "wait <<END $w>> 30"; done
+        printf '%s\n' 'send \x05' 'wait telnet> 15' 'send q' 'wait stp= 30'
+        # call 2: the default, the Amiga mode
+        printf '%s\n' 'send telnet -e ^E 10.0.2.2 2323; echo sta=$?\r' 'wait <<END hello>> 40' 'sleep 2'
+        for w in ff latin1; do printf '%s\n' "send $w\\r" "wait <<END $w>> 30"; done
+        printf '%s\n' 'sleep 3' 'shot amlatin1'
+        for w in ff colours; do printf '%s\n' "send $w\\r" "wait <<END $w>> 30"; done
+        printf '%s\n' 'sleep 3' 'shot amcolours'
+        for w in amiga amigaart music; do printf '%s\n' "send $w\\r" "wait <<END $w>> 30"; done
+        printf '%s\n' 'send x\x7f\xe5\r' 'wait <<END unknown>> 30'
+        printf '%s\n' 'send \x1d2' 'sleep 3' 'send termtest rules /dev/tty1\r' 'sleep 4' 'send \x1d1' 'sleep 2' \
+            'send bye\r' 'wait sta= 30'
+        printf '%s\n' 'send clear; cat /tests/latin1.txt\r' 'sleep 4' 'shot catlatin1'
+        # call 3: the PC mode into a file
+        printf '%s\n' 'send sh /tests/keys3.sh | telnet -p 10.0.2.2 2323 > /tmp/t3-out.txt 2> /tmp/t3-err.txt; echo stf=$?\r' \
+            'wait stf= 60' 'send termtest rules /dev/tty1\r' 'sleep 3' \
+            'send dmesg > /tmp/t3-k.txt; sync; echo ==do""ne\r' 'wait ==done 30'
+    } > $OUT/b-$tag.txt
+    sed '/^\[fs-uae\]/a network_card = a2065' $conf > "$OUT/b-$tag.fs-uae"
+    rm -f $OUT/bready $OUT/brecord-$tag.jsonl $OUT/b-$tag-*.png
+    ZENIX_BUILD=$BD python3 tools/fsuae_conf.py "$OUT/b-$tag.fs-uae" "$OUT/b-$tag.conf.fs-uae" || { pass=0; BD=$BD0; return; }
+    ZENIX_BUILD=$BD unshare -rnm bash -c 'ip link set lo up || exit 9
+        python3 -I tools/bbs-sim.py --port 2323 --record "$1/brecord-$4.jsonl" --ready "$1/bready" > "$1/bbbs-$4.log" 2>&1 &
+        srv=$!
+        for i in $(seq 100); do [ -e "$1/bready" ] && break; sleep 0.1; done
+        ZOOMOUT=0 SHOT_LIMIT=700 timeout -k 20 900 python3 tools/shot.py "$2" "$3" "$1/b-$4"; r=$?
+        kill $srv 2>/dev/null; wait $srv 2>/dev/null
+        exit $r' bbs "$OUT" "$OUT/b-$tag.conf.fs-uae" "$OUT/b-$tag.txt" "$tag" > $OUT/b-$tag.log 2>&1
+    for f in out err k; do get /tmp/t3-$f.txt > $OUT/b-$tag-$f.txt; done
+    python3 - "$OUT" "$tag" "$depth" "$col" <<'PY' || pass=0
+import importlib.util, json, re, sys
+out, tag, depth, col = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+spec = importlib.util.spec_from_file_location("bbs_sim", "tools/bbs-sim.py")
+sim = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sim)
+log = open(f"{out}/b-{tag}.serial.log", "rb").read()
+rec = [json.loads(l) for l in open(f"{out}/brecord-{tag}.jsonl") if l.strip()]
+calls, cur = [], None
+for r in rec:
+    if r["ev"] == "call":
+        cur = []; calls.append(cur)
+    elif cur is not None:
+        cur.append(r)
+bad = 0
+def check(ok, what, detail=""):
+    global bad
+    print(("PASS " if ok else "FAIL ") + f"({tag}) " + what + ("" if ok else ": " + str(detail)[:300]))
+    bad += not ok
+ev = lambda c, n: [r for r in c if r["ev"] == n]
+check(len(calls) == 3, "three calls reached the board", len(calls))
+def screen(name, nth):
+    """the bytes telnet handed the console for the nth time the board sent screen `name` (its copy on the serial
+    port, from the END line before it, which may also hold the prompt or another console's output: the screen is its
+    end; the console copy turns LF into CR LF, so CRs are not compared)"""
+    ends = [m.end() for m in re.finditer(rb"<<END [a-z0-9]+>>\r*\n", log)]
+    hits = [m.start() for m in re.finditer(rb"\r*\n<<END " + name.encode() + rb">>", log)]
+    if len(hits) <= nth:
+        return None
+    end = hits[nth]
+    start = max(e for e in ends if e <= end)
+    return log[start:end].replace(b"\r", b"")
+for name, mode, nth in (("ice", "pc", 0), ("music", "pc", 0), ("sub", "pc", 0), ("ff", "pc", 0), ("grid", "pc", 0),
+                        ("amiga", "amiga", 0), ("font", "amiga", 0), ("amiga", "amiga", 1), ("amigaart", "amiga", 0),
+                        ("music", "amiga", 1), ("latin1", "amiga", 0)):
+    want = sim.expect(name, mode)[0].replace(b"\r", b"")
+    got = screen(name, nth)
+    check(got is not None and got.endswith(want), f"{mode} mode: the console got bbs-sim's EXPECT for '{name}'", (got, want))
+c1, c2 = (calls + [[], []])[:2]
+check([r["name"] for r in ev(c1, "ttype")][:1] == ["ANSI"] and [r["name"] for r in ev(c2, "ttype")][:1] == ["ANSI"],
+      "TERMINAL-TYPE ANSI in both BBS modes", (ev(c1, "ttype"), ev(c2, "ttype")))
+check(any(r["cols"] == 80 and r["rows"] == 32 for r in ev(c2, "naws")), "NAWS 80 x 32", ev(c2, "naws"))
+k1 = "".join(r["hex"] for r in ev(c1, "keys"))
+k2 = "".join(r["hex"] for r in ev(c2, "keys"))
+check("7808860d" in k1, "PC mode keys: x, Backspace as BS, a-ring as CP437 0x86, Return", k1[-200:])
+check("7808e50d" in k2, "Amiga mode keys: x, Backspace as BS, a-ring as Latin-1 0xE5, Return", k2[-200:])
+w1, w2 = ev(c1, "wbr"), ev(c2, "wbr")
+check(any(r["answer"] == "\x9b1;1;32;80 r" for r in w1) and any(r["answer"] == "\x9b1;1;32;80 r" for r in w2),
+      "the Amiga window bounds (CSI 0 SP q) answered 1;1;32;80 (after the prompt's switch to the Amiga mode too)", (w1, w2))
+rules = [int(x) for x in re.findall(rb"rules (\d+)", log)]
+check(rules[:3] == [111, 46, 0], "the console's rules: PC mode 111, Amiga mode 46, none after the calls", rules)
+note = rb"telnet: %d colours: ANSI art loses its shading; `colours 16` in /etc/console shows it fully" % col
+n = log.count(note) if col < 16 else log.count(b"`colours 16`")
+check(n == (2 if col < 16 else 0), f"the colours note: once a call on the console at {col} colours" if col < 16 else
+      "no colours note at 16 colours", n)
+check(b"telnet> " in log and b"stp=0" in log and b"sta=0" in log, "the escape prompt; both calls ended with status 0")
+o = open(f"{out}/b-{tag}-out.txt", "rb").read()
+e = open(f"{out}/b-{tag}-err.txt", "rb").read()
+m = re.search(rb"8: (.{16})", o)
+check(bool(m) and m.group(1) == bytes([0xC7, 0xFC, 0xE9, 0xE2, 0xE4, 0xE0, 0xE5, 0xE7, 0xEA, 0xEB, 0xE8, 0xEF, 0xEE, 0xEC, 0xC4, 0xC5]),
+      "the PC mode into a file: CP437 shown as Latin-1 (row 8 of the grid)", m.group(1) if m else o[-200:])
+m = re.search(rb"B: (.{16})", o)
+check(bool(m) and m.group(1)[:5] == b"###|+", "... box characters and shades as + | #", m.group(1) if m else "")
+check(e.count(b"the PC font is not available here") == 1 and e.count(b"rules are not available here") == 1 and b"stf=0" in log,
+      "... the font and the rules refused there: each said once, the call works", e)
+k = open(f"{out}/b-{tag}-k.txt", errors="replace").read()
+check("[kernel]" not in k, "no process faulted", k[-300:])
+sys.exit(1 if bad else 0)
+PY
+    local G=$OUT/b-$tag
+    for s in columns pcgrid pccolours amlatin1 amcolours catlatin1; do
+        [ -f "$G-$s.png" ] || { echo "FAIL ($tag) no screenshot $s (see $G.serial.log)"; pass=0; BD=$BD0; return; }
+    done
+    python3 tools/colour-test.py columns $G-columns.png > $G.geom || { echo "FAIL ($tag) termtest columns: $(cat $G.geom)"; pass=0; BD=$BD0; return; }
+    ctb() { local r; python3 tools/colour-test.py "$@" > $G.r; r=$?; tail -1 $G.r; return $r; }   # the status, then its line
+    m=$(ctb bbsgrid $G-pcgrid.png $G.geom $BD/cp437-8x8.psf 3); check "($tag) PC mode: the grid in the CP437 font: $m" $(( $? == 0 ))
+    m=$(ctb bbscolours $G-pccolours.png $G.geom $depth 3); check "($tag) PC mode: $m" $(( $? == 0 ))
+    m=$(ctb bbscolours $G-amcolours.png $G.geom $depth 3); check "($tag) Amiga mode: $m" $(( $? == 0 ))
+    m=$(ctb bbssame $G-amlatin1.png $G.geom 3 $G-catlatin1.png $G.geom 1 4)
+    check "($tag) Amiga mode: Latin-1 in Topaz, as the plain console draws it: $m" $(( $? == 0 ))
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-b.log 2>&1 && echo "PASS ($tag) the host's e2fsck finds the root clean" || { echo "FAIL ($tag) e2fsck"; pass=0; }
+    rm -rf $BD; BD=$BD0
+}
+
+[ $# = 0 ] && set -- e s b b16
 for p in "$@"; do
-    case $p in e|s) "part_$p" ;; *) echo "bbs-test: unknown part $p"; exit 2 ;; esac
+    case $p in
+    e|s) "part_$p" ;;
+    b) part_b b fsuae/a1200-020.fs-uae 3 8 ;;
+    b16) part_b b16 fsuae/a1200-020-fast.fs-uae 4 16 ;;
+    *) echo "bbs-test: unknown part $p"; exit 2 ;;
+    esac
 done
 exit $((1 - pass))

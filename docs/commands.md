@@ -68,7 +68,7 @@ spot-checked against the code that day.
 | [ping](man/ping.txt) | ICMP echo, no root needed |
 | [netstat](man/netstat.txt) | the network's connections and listening sockets (`-tuwla`) |
 | [host](man/host.txt) | look a name up (`/etc/hosts`, then DNS) |
-| [telnet](man/telnet.txt) | a terminal to another computer over the network (DESIGN D20; the Unix mode so far) |
+| [telnet](man/telnet.txt) | a terminal to another computer over the network: Amiga and PC boards, Unix hosts (DESIGN D20) |
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
 | [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 | [genet](man/genet.txt) | not a command: the Ethernet driver of a Raspberry Pi CM4 or Pi 4 under Emu68 (`/sbin/net/genet`), started by netd |

@@ -338,7 +338,7 @@ void rnd_tick(void)
 void rnd_init(const struct bootinfo *bi)
 {
     b2s_init(&pool, 32, 0, 0);
-    u32 t[4] = { hr_time(), ticks, time_base, VPOSL };
+    u32 t[4] = { hr_time(), ticks, wclock.base + wclock.secs, VPOSL };
     b2s_update(&pool, t, sizeof t);
     b2s_update(&pool, bi, sizeof *bi);
     u32 top = 0;
