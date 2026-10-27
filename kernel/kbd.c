@@ -2,6 +2,7 @@
 /* The keymap tables below were generated from xkeyboard-config (MIT/X11 licence); its notice is above them. */
 #include "kernel.h"
 #include "hw.h"
+#include "random.h"
 
 /* Amiga keyboard: bytes arrive in CIA-A's serial shift register (SP/CNT
  * pins), raising ICR bit 3. Data is rotated and inverted on the wire;
@@ -312,6 +313,8 @@ void kbd_isr(void)
     kq[h] = code;
     kq_head = nh;
     kwork_pending = 1;
+    if ((code & 0x7F) < 0x78)
+        rnd_event(RND_CR_KEY);          /* a key press or release: the keyboard's own clock (D19 9.3) */
 }
 
 /* K2 (hand-off note): at start the keyboard may still be waiting for the answer to a byte nobody took (the CIA's

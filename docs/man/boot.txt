@@ -67,13 +67,24 @@ DESCRIPTION
     or failed leaves the update note "failed" for the bundle's version,
     so zenixboot(8) does not retire the bundle. boot's stack is 4 KB (it
     needs under 600 bytes): it stays in memory for ever.
+    Then it takes the random seed (random(4)): the seed in
+    /var/lib/random-seed is mixed into the pool; on a writable disk root
+    a new seed is written there and synced, and only then is the old one
+    credited, if the boot that wrote it had a seeded pool. A RAM-disk,
+    read-only or rescue root never credits it ("boot: random seed not
+    credited (the root is a RAM disk or read-only)"), nor does a seed
+    from an unseeded boot ("boot: random seed mixed, not credited").
     Then it registers the services listed in /etc/svctab (below) and
-    starts /bin/init on console 1 and waits for it. Should init
+    starts /bin/init on console 1 and waits for it; while the pool is
+    not yet seeded it also waits for that (a minute at a time) and then
+    writes the seed file once more. Should init
     ever end, boot says so ("boot: /bin/init ended (status N), starting it
     again") and starts it again a second later. It exists because the idle
     process cannot wait for messages.
 
 FILES
+    /var/lib/random-seed  the random seed (random(4)): root's, mode 600,
+                  written at every start; never shipped on an image.
     /etc/svctab   services whose programs live on the disk, one a line:
                     PORT  NICE  PROGRAM [ARGUMENTS]
                   for example "ping 0 /bin/msgpingd". PROGRAM is an absolute
@@ -101,4 +112,5 @@ NOTES
     (dmesg, "svc:" lines).
 
 SEE ALSO
-    init(8), diskd(8), mount(8), dmesg(1), rescue(8), fsck.ext2(1)
+    init(8), diskd(8), mount(8), dmesg(1), rescue(8), fsck.ext2(1),
+    random(4)

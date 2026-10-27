@@ -15,6 +15,7 @@
  */
 #include "kernel.h"
 #include "hw.h"
+#include "random.h"
 /* This file is built with -Os (Makefile, KOPT_floppy: cold code, every wait timed); the MFM track coding is the one
  * loop that touches every word of a track, so it keeps -O2 */
 #pragma GCC push_options
@@ -280,11 +281,15 @@ static int dma(int write, int words, int cyl)
     DSKLEN = len;
     DSKLEN = len;                                       /* the second write starts the DMA */
     u32 t0 = now(), limit = eclock_hz / 1000 * ((write ? 20u : 300u) + (u32)words * 32u * 11u / 10000u);
-    while (!(INTREQR & INTF_DSKBLK))
+    (void)CIAB(CIA_ICR);                                /* an index pulse from before: not this wait's */
+    while (!(INTREQR & INTF_DSKBLK)) {
+        if (CIAB(CIA_ICR) & 0x10)                       /* FLG: the index pulse (CIA-B interrupts are never enabled, */
+            rnd_event(RND_CR_FLOPPY);                   /* its flags are free): when it came is the motor's jitter */
         if ((u32)(now() - t0) > limit) {
             DSKLEN = 0x4000;
             return -1;
         }
+    }
     if (write)
         wait_ms(WRITE_TAIL_MS);                         /* the last bits are still on their way to the head */
     DSKLEN = 0x4000;

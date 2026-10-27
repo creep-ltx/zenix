@@ -6,14 +6,15 @@
 #include "rdb.h"
 #include "rootpick.h"
 #include "volid.h"
+#include "randseed.h"
 /* Built into the kernel image: the starter, pid 1 (DESIGN D11). It registers the disk server and the root filesystem
  * server as services (the kernel starts a service when it is first called, and again after it died); its own first
  * calls start them: rootpick's DISK_LIST starts diskd, the root inode (SYS_mountinfo) starts the root server. An ext2
  * root not marked clean is checked first (DESIGN D17): served read-only, /bin/fsck.ext2 -y on it, then the writable
  * server; a root the check could not repair stays read-only unless the owner chooses otherwise (rescue(), man
  * rescue). Then it runs /sbin/zup (DESIGN D15: an update's root half, or what a power cut left), gives the update bundle's memory back,
- * registers the services listed in /etc/svctab and starts /bin/init on console 1 and waits for it; should init ever
- * end, it says so and starts it again. */
+ * takes the random seed (DESIGN D19 9.3, randseed.h), registers the services listed in /etc/svctab and starts /bin/init
+ * on console 1 and waits for it; should init ever end, it says so and starts it again. */
 
 static int dport;
 static void say(const char *s) { sys_write(1, s, strlen(s)); }   /* no printf: it would double boot's size */
@@ -170,6 +171,69 @@ static int rescue(const char *dev)
     }
 }
 
+/* the seed file at the start (randseed.h): the old seed into the pool, a new one into the file, the old one credited
+ * only by the rule. persistent: the root is a writable disk (not a RAM disk, not read-only or a rescue root) */
+static int seeded_file;                 /* the file already holds a seed from a seeded pool */
+static void seed_start(int persistent)
+{
+    unsigned char old[SEED_BYTES];
+    int fl = 0, ok = seed_load(old, &fl);
+    if (ok) {
+        int u = sys_open("/dev/urandom", O_WRONLY);
+        if (u >= 0) {
+            sys_write(u, old, SEED_BYTES);      /* mixed, uncredited */
+            sys_close(u);
+        }
+    }
+    if (!persistent) {
+        if (ok)
+            say("boot: random seed not credited (the root is a RAM disk or read-only)\n");
+        memset(old, 0, sizeof old);
+        return;
+    }
+    int nf = seed_flags(seed_pool_ready(), ok, fl, persistent);
+    int wrote = seed_store(nf) == 0;
+    if (!wrote)
+        say("boot: cannot rewrite " SEED_PATH "\n");
+    seeded_file = wrote && nf;
+    if (seed_credit(ok, fl, persistent, wrote)) {
+        int r = sys_open("/dev/random", O_WRONLY);      /* root's write to /dev/random credits it */
+        if (r >= 0) {
+            sys_write(r, old, SEED_BYTES);
+            sys_close(r);
+        }
+    } else if (ok)
+        say("boot: random seed mixed, not credited (from an unseeded boot)\n");
+    memset(old, 0, sizeof old);
+}
+
+/* wait for init, and meanwhile for the pool's first seeding: then the file gets a seed from a seeded pool (a machine
+ * switched off without reboot still has one at its next start) */
+static int wait_init(int pid, int persistent)
+{
+    if (persistent && !seeded_file) {
+        struct pollfd p;
+        p.fd = sys_open("/dev/random", O_RDONLY);
+        while (p.fd >= 0) {
+            p.events = POLLIN;
+            p.revents = 0;
+            if (sys_evwait(&p, 1, 6000) == 1) {         /* a minute at most, then a look at init */
+                if (seed_store(SEED_F_SEEDED) == 0)
+                    seeded_file = 1;
+                break;
+            }
+            int st = sys_waitnb(pid);
+            if (st != -2) {
+                sys_close(p.fd);
+                return st;
+            }
+        }
+        if (p.fd >= 0)
+            sys_close(p.fd);
+    }
+    return sys_wait(pid);
+}
+
 int main(void)
 {
     sys_svc_register("disk", "@diskd", -10);
@@ -211,12 +275,14 @@ int main(void)
         }
     }
     update(ro);                                 /* an update's root half (D15), before the root is used */
+    int persistent = !rp.have_ram && !ro;
+    seed_start(persistent);
     svctab();                                   /* the services that live on the disk: started when first called */
     char *argv[] = { "/bin/init", 0 };
     for (;;) {
         int pid = sys_spawn("/bin/init", argv, 0);
         if (pid < 0) { say("boot: cannot start /bin/init\n"); sys_sleep(500); continue; }
-        int st = sys_wait(pid);
+        int st = wait_init(pid, persistent);
         say("boot: /bin/init ended (status ");
         num((u32)st);
         say("), starting it again\n");

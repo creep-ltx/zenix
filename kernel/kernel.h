@@ -261,7 +261,7 @@ union zhdr { struct zexe v1; struct zex2 v2; };
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16
 #define NFILE 64
-enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG };   /* FT_KLOG: a service's output, into the kernel log (D11) */
+enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM };   /* FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19 */
 struct pipe {
     u8 buf[2048];
     u16 rd, wr, count;

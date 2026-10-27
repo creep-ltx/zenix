@@ -50,6 +50,8 @@ struct hwinfo {
     unsigned int vc4_base;      /* /emu68 vc4-mem: RAM reserved as the graphics framebuffer */
     unsigned int vc4_size;
     unsigned int nboards;       /* Zorro boards AmigaOS configured (expansion.library), valid entries in board[] */
-    unsigned int reserved[5];
+    unsigned int rng200;        /* the BCM2711's random number generator (RNG200, "brcm,bcm2711-rng200" in /soc), 0 if
+                                 * none: credited fully by the entropy pool (DESIGN D19 9.3) */
+    unsigned int reserved[4];
     struct hwboard board[HW_MAXBOARDS];
 };

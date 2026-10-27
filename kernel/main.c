@@ -3,6 +3,7 @@
 #include "hw.h"
 #include "hwinfo.h"
 #include "diag.h"
+#include "random.h"
 
 static u32 vector_table[256] __attribute__((aligned(4)));
 volatile u32 ticks;
@@ -217,6 +218,7 @@ void kwork(void)
         kwork_pending = 0;              /* cleared before the work: input queued during it asks for another round */
         serial_work();
         kbd_work();
+        rnd_work();                     /* the entropy samples into the pool (D19) */
         irq_other_report();
     }
     busy = 0;
@@ -240,6 +242,7 @@ void irq2_c(u32 *rb)
         audio_tick();
         input_poll();
         fd_tick();
+        rnd_tick();
         if (ntimer && (s32)(ticks - wake_min) >= 0)
             need_resched = 1;           /* a sleeper or an alarm is due: schedule() (or the next return to user mode) */
     }
@@ -421,6 +424,7 @@ void kmain(struct bootinfo *bi)
     kprintf("cache: instruction cache on (data cache off: no MMU to keep DMA coherent)\n");
     diag_stage(9, DIAG_WHITE);
     eclock_init();                              /* hr_time() from here on (gfx_init measures the frame with it) */
+    rnd_init(bi);                               /* the entropy pool (D19): chip RAM is still as the cold start left it */
     if (font_ok && gfx_init() == 0) {
         klog_to_screen();                       /* the boot messages so far, then the rest as they come */
         kprintf("display: 640x%d, %d bitplane%s, %dx%d text, ROM Topaz 8\n", trows * 8, gfx_depth,

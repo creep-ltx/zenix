@@ -182,6 +182,9 @@ void stage0_fill(struct ctx *c, struct hwinfo *hw)
         }
     }
 
+    if ((k = dt_open(c, "/soc")) && (k = child_compat(c, k, "brcm,bcm2711-rng200")))
+        hw->rng200 = translate(c, "/soc", regaddr(c, k));
+
     if ((k = alias(c, "ethernet0"))) {
         void *p;
         hw->genet = translate(c, "/scb", regaddr(c, k));

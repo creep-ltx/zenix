@@ -776,4 +776,42 @@ The rest as the note says:
   servers are stopped, needs three nested loads and fails once (D11's two-level limit, logged; the next call works).
   Noted in d11-service-manager.md 5.1.
 
+### Step 2: random numbers (branch n023, 2026-10-27)
+
+Section 9.3 as written: `kernel/random.c` (BLAKE2s pool, ChaCha20 with fast key erasure, `/dev/urandom` never waits,
+`/dev/random` waits for 256 credited bits and then polls readable), the sources, the seed file in boot and `reboot`,
+and the refusal in `mkroot.sh`, `mkroot-zenixfs.sh` and `mkzup.py`. Local choices the note left open:
+
+1. **How a seed is credited:** root's write to `/dev/random` credits 8 bits a byte; anyone's write to either device
+   mixes without credit (Linux's write never credits; its RNDADDENTROPY ioctl needs a call Zenix does not have, and a
+   new system call for it was not worth a number). boot does the rule (`user/randseed.h`, host-tested).
+2. **The seed file's format:** 40 bytes, `ZRS1`, a flags byte (bit 0: from a seeded pool), three zero bytes, 32 bytes
+   of seed (256 bits, the seeding threshold). Root's, mode 600. Frozen once shipped, like the `/etc` formats.
+3. **When the file is written:** at every start (the rule of 9.3), **and once more when the pool is first seeded**
+   (boot waits for init with `evwait` on `/dev/random`, a minute at a time): a machine switched off without `reboot`
+   otherwise kept an uncreditable seed for ever. `reboot` writes it before the reset. **Not at the reset warning:**
+   the kernel syncs there inside init's wait and writes no files; the start and the first seeding cover it.
+4. **The sources:** a key press or release 1 bit (`kbd_isr`, every raw code below 0x78); "bytes from the far end of
+   the serial line, per SLIP frame": every received `0xC0` (SLIP's END) half a bit, in the receive interrupt, so it
+   holds before netd exists and costs nothing per ordinary byte; the floppy's index pulse 1 bit, seen as CIA-B's FLG
+   flag in the driver's polled wait for a track's DMA (the note's "while the motor runs": the driver polls, so only
+   while it reads or writes a track; CIA-B's interrupts stay off); the RNG200 32 bits a word (stage0 finds
+   `brcm,bcm2711-rng200` under `/soc`, `hwinfo.rng200` from the first reserved word; the kernel switches it on and takes
+   up to 8 words a turn while unseeded, polled once a second from the tick; a repeated word ends its credit; *read*,
+   not run). Mixed at 0: disk and SD completions (`blk_read`/`blk_write`), mouse counter changes (the tick), the boot's
+   clocks and boot information, one word of every 4 KB of chip RAM below 2 MB. Network frames: with netd (step 4).
+5. **Limits:** a read or write moves at most 4,096 bytes a call; the sample ring holds 32.
+6. **`O_NONBLOCK`** (step 3) applies to `/dev/random` too (-EAGAIN while unseeded).
+
+Sizes (*measured* 2026-10-27): `random.o` 3,655 bytes of code, 268 of data (the note's estimate 1.7-2 KB was for
+the hashes alone: the devices, the ring, the RNG200 and the log lines are the rest); boot.zx 5,900 -> 6,600 bytes
+(inside the kernel image). **Kernel image 139,644 -> 145,588 bytes** (RAM floppy: 33,612 left; the mount tests'
+floppy 9,036). Tests: `tools/random-host-test.sh` (BLAKE2s: RFC 7693 appendix B and the appendix E self-test;
+ChaCha20: RFC 8439 2.3.2 and A.1 #1, #2; the crediting and seed rules; mkroot and mkzup refuse a seed);
+`tools/random-test.sh` in FS-UAE (f: a fresh image's seed file, mode 600, flag 0; `/dev/random` waits; keys typed on
+the emulated keyboard seed it and the reader gets its bytes; boot rewrites the file with flag 1; `reboot` writes it.
+s: the next boot credits it, `/dev/random` answers at once, the file is rewritten, `/dev/urandom` differs from the
+first boot's. r: the RAM floppy with a seed (flag 1) on its RAM disk never credits it); `stage0-test` (the RNG200's
+address from the CM4's device tree).
+
 Last checked against the code: 2026-10-27.

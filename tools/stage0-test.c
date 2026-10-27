@@ -77,6 +77,7 @@ int main(int argc, char **argv)
     CHECK("emmc", hw.emmc, 0xF2340000);
     CHECK("gic_dist", hw.gic_dist, 0xF5841000);
     CHECK("gic_cpu", hw.gic_cpu, 0xF5842000);
+    CHECK("rng200", hw.rng200, 0xF2104000);         /* /soc/rng@7e104000 (DESIGN D19 9.3) */
     CHECK("genet", hw.genet, 0xF7580000);
     CHECK("genet_irq0", hw.genet_irq0, 0x9d);
     CHECK("genet_irq1", hw.genet_irq1, 0x9e);

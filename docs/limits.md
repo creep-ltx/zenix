@@ -143,6 +143,13 @@ pointers.
   four chunks in use, gets 4); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
 - Paths: the directory tools report a joined path longer than a system call takes (63 bytes) instead of cutting it.
+- Random numbers (DESIGN D19 9.3, architecture.md section 3): a read or write of `/dev/random` or `/dev/urandom` moves
+  at most 4,096 bytes (a short count, as Linux); `/dev/random` waits for 256 credited bits (on a fresh machine that
+  is 256 key presses and releases, or the seed file at the next start); a sample ring of 32 entries (a full one drops
+  samples, which then earn nothing); the generator takes a new key from the pool at most once a minute once seeded.
+  The seed file is written at every start, at the pool's first seeding and by `reboot`, not at the reset warning
+  (the kernel syncs there, it does not write files). The floppy's index pulse is credited only while the driver waits
+  for a track (it polls). The sources' real behaviour on the A1200 and the RNG200 are not yet verified there.
 - Timer tick 100 Hz to within the E-clock's resolution (latch 7093 on PAL, 709,379 Hz: 99.997 Hz; 7158 on NTSC,
   715,909 Hz: 100.001 Hz); the high-resolution clock (`SYS_hrtime`) is CIA-B's two timers chained, an E-clock count
   that wraps after about 1.7 hours (`bench` converts it with the PAL rate).

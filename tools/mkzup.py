@@ -64,6 +64,8 @@ def sha(data):
 
 
 def check_path(p):
+    if p == "/var/lib/random-seed":     # DESIGN D19 9.3: a seed shipped in a bundle would be every machine's
+        die("refusing to put a random seed (%s) in a package" % p)
     if (not PATH_RE.match(p) or '//' in p or '/./' in p or '/../' in p or p.endswith('/') or p.endswith('/.') or
             p.endswith('/..') or len(p) > PATHMAX):
         die("bad path %r (absolute, [A-Za-z0-9._+/-], at most %d bytes)" % (p, PATHMAX))

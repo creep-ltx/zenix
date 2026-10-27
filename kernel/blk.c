@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "random.h"
 
 /* The raw disk behind the "ide0" name of the disk server: a Gayle IDE drive when there is one, else the
  * SD card of a Raspberry Pi 4 / CM4 under Emu68 (emmc.c), else the Amiga 3000's SCSI disk (a3000.c). */
@@ -29,14 +30,18 @@ u32 blk_sectors(void)
 
 int blk_read(u32 lba, u32 count, void *buf)
 {
-    return which == B_EMMC ? emmc_read(lba, count, buf) : which == B_A3000 ? a3000_read(lba, count, buf) : ide_read(lba, count, buf);
+    int r = which == B_EMMC ? emmc_read(lba, count, buf) : which == B_A3000 ? a3000_read(lba, count, buf) : ide_read(lba, count, buf);
+    rnd_event(0);                       /* a disk completion: mixed, never credited (the chipset's clock, D19 9.3) */
+    return r;
 }
 
 int blk_write(u32 lba, u32 count, const void *buf)
 {
     if (disk_frozen)
         return -1;                      /* the reset warning's flush is done: nothing new may start (kbd.c) */
-    return which == B_EMMC ? emmc_write(lba, count, buf) : which == B_A3000 ? a3000_write(lba, count, buf) : ide_write(lba, count, buf);
+    int r = which == B_EMMC ? emmc_write(lba, count, buf) : which == B_A3000 ? a3000_write(lba, count, buf) : ide_write(lba, count, buf);
+    rnd_event(0);
+    return r;
 }
 
 /* make every earlier write durable: 0, or negative if the drive cannot (the disk server then reports no flush

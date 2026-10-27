@@ -169,11 +169,34 @@ rewritten `ranges` and stores, in the `struct hwinfo` the bootblock passes in `a
 runs): flags (`HW_DT` under Emu68, `HW_BCM2711` on a
 Pi 4/CM4, `HW_RANGEOPS` if Emu68 has the cache range opcodes), the peripheral base, mailbox, EMMC2 (SD), GPIO,
 GENET Ethernet (registers, two GIC interrupt numbers, PHY address, MAC), GIC-400 distributor and CPU interface,
-and the graphics memory Emu68 reserved. It also holds the **Zorro boards** AmigaOS configured (up to 16: manufacturer,
+the RNG200 random number generator (`brcm,bcm2711-rng200` under `/soc`, `rng200`, from the first of the table's
+reserved words: DESIGN D19 9.3) and the graphics memory Emu68 reserved. It also holds the **Zorro boards** AmigaOS configured (up to 16: manufacturer,
 product, type, serial number, base address, size), copied from `expansion.library`'s ConfigDev list with
 `FindConfigDev`; that works on every Amiga, with or without Emu68, and is how a future Zorro card driver finds its
 card without any autoconfig code of its own. On a machine without Emu68 (or FS-UAE) the Pi part of the table is
 empty (`flags == 0`, addresses 0); `kmain` prints the Pi part (`pi: ...`) and the boards (`zorro: ...`).
+
+### Random numbers (`kernel/random.c`, DESIGN D19 9.3)
+
+The kernel's entropy pool, as Linux since 5.17: samples are accumulated with BLAKE2s (RFC 7693) and output comes from
+ChaCha20 (RFC 8439) with fast key erasure (every read replaces the key with the first half of a fresh block). Interrupt
+handlers only store a 16-bit sample, the beam position (`VHPOSR`), in a 32-slot ring with the credit it earns;
+`kwork` mixes the ring into the pool (`rnd_work`). BLAKE2s keeps its own 64-byte block, so a compression runs once a
+block is full: samples are mixed in batches. **Credited** (eighths of a bit): a key press or release 8 (the keyboard's
+own controller has its own clock), a received `0xC0` (the end of a SLIP frame: the far machine's clock) 4, the
+floppy's index pulse seen while the driver waits for a track's DMA (the CIA-B FLG flag; CIA-B's interrupts are never
+enabled) 8, a word from the Pi's RNG200 (when stage0 found it; a word repeated stops its credit) 256, root's write to
+`/dev/random` 64 a byte (the seed file). **Mixed, credited 0:** disk and SD completions (`blk.c`), mouse movement,
+the boot's clocks, the boot information and one word of every 4 KB of chip RAM (as a cold start left it), anyone's
+write to `/dev/urandom`. At 256 credited bits the pool is **seeded** (`random: pool seeded (N bits) after T s, last
+by ...` in the log): the generator takes a new key from the pool (a hash of the pool keys the generator, another
+re-keys the pool), and `/dev/random`'s waiters are woken. Before that every read takes a new key from what the pool
+has; after it, at most once a minute. **`/dev/urandom`** never waits; **`/dev/random`** waits until the pool is
+seeded (a handler: -EINTR, restarted with `SA_RESTART`; `O_NONBLOCK`: -EAGAIN), then is the same, and polls readable
+from then on. A read or write moves at most 4,096 bytes (limits.md). The **seed file** `/var/lib/random-seed` is boot's
+(section 9: `user/randseed.h`) and `reboot`'s; no image ships one (`mkroot.sh`, `mkroot-zenixfs.sh` and `mkzup.py`
+refuse it). Size: 3,655 bytes of code and 268 of data; the host test (`tools/random-host-test.sh`) checks BLAKE2s and
+ChaCha20 against the RFCs' vectors and the crediting rules.
 
 ### Kernel log (`kernel/serial.c`, `dmesg`)
 
@@ -889,7 +912,12 @@ the writable server; the kernel forgets that a service served when its program t
 server that fails to start is still D11's panic; a root fsck.ext2 could not repair, or could not check, stays with
 the read-only check server while boot asks on console 1 - go on read-only (the default after 30 s), read-write, a
 rescue shell as root, or reboot: D17's owner decision, man/rescue.txt), runs `/sbin/zup` (not on a read-only root),
-registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
+takes the random seed (DESIGN D19 9.3, `user/randseed.h`: the old seed in `/var/lib/random-seed` is mixed into the pool
+through `/dev/urandom`; on a writable disk root a new seed is written and synced, and only then is the old one
+credited, by root's write to `/dev/random`, if its flag says the boot that wrote it had a seeded pool; never on a
+RAM-disk, read-only or rescue root; while it waits for init it also waits, a minute at a time, for the pool's first
+seeding, and then writes the file once more, flag set, so a machine switched off without `reboot` keeps a creditable
+seed), registers the services of `/etc/svctab` (one `PORT NICE PROGRAM
 [ARGUMENTS]` a line, man/boot.txt; a bad line is reported on console 1 and skipped), then spawns `/bin/init` on console 1 and waits for it; should init
 end, it says so and starts it again. (It exists because the idle process cannot block on a message.) The logins on the
 consoles are init's work (section 11, man/init.txt).
@@ -1045,7 +1073,7 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
   receive ring for its reader; a write waits for room in the 4 KB send ring a tick at a time, so the machine runs on,
   and ends on a kill or after 2 s in which the port took nothing (logged: what was written, or -EIO), audit A5),
-  `/dev/null`, `/dev/zero`. `fstat` of a console gives its number in `st_ino` (the
+  `/dev/null`, `/dev/zero`, `/dev/urandom` and `/dev/random` (section 3, "Random numbers"). `fstat` of a console gives its number in `st_ino` (the
   `ustat` has no device field; `login` uses it to apply `/etc/autologin` to console 1 only).
 - **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
   `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**

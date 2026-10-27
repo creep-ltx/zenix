@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
 #include "fsproto.h"
+#include "random.h"
 
 static struct file files[NFILE];
 static int strcmp_(const char *a, const char *b)
@@ -145,6 +146,8 @@ u16 vfs_poll(struct file *f)
     case FT_PIPE_W:
         ev_arm(&p->wwait);
         return !p->readers ? POLLERR : p->count < sizeof p->buf ? POLLOUT : 0;
+    case FT_RANDOM:
+        return rnd_poll((int)f->off);
     }
     return POLLIN | POLLOUT;
 }
@@ -458,7 +461,8 @@ long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
 
 /* the few device files: /dev/tty (this process's controlling tty), /dev/console (console 1), /dev/tty1 .. /dev/tty10
  * (the virtual consoles: root, or a process whose controlling tty it is - nobody reads another user's keys),
- * /dev/ttyS0 (the serial port, DESIGN D12), /dev/null, /dev/zero */
+ * /dev/ttyS0 (the serial port, DESIGN D12), /dev/null, /dev/zero, /dev/urandom and /dev/random (DESIGN D19 9.3,
+ * random.c: off 1 waits until the pool is seeded) */
 static long open_device(const char *path, int flags)
 {
     int type = 0, con = 0;
@@ -473,6 +477,8 @@ static long open_device(const char *path, int flags)
     }
     else if (!strcmp_(path, "/dev/null")) type = FT_NULL;
     else if (!strcmp_(path, "/dev/zero")) type = FT_ZERO;
+    else if (!strcmp_(path, "/dev/urandom")) type = FT_RANDOM;
+    else if (!strcmp_(path, "/dev/random")) { type = FT_RANDOM; con = 1; }
     else {
         if (!strcmp_(path, "/dev/console"))
             con = 1;
@@ -556,7 +562,8 @@ long vfs_stat(const char *path, struct ustat *st)
 
 long vfs_fstat(struct file *f, struct ustat *st)
 {
-    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL || f->type == FT_KLOG) {
+    if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL || f->type == FT_KLOG ||
+        f->type == FT_RANDOM) {
         memset(st, 0, sizeof *st);
         st->mode = 020666;
         st->links = 1;
@@ -734,6 +741,8 @@ long vfs_read(struct file *f, void *buf, u32 n)
     case FT_ZERO:
         memset(buf, 0, n);
         return (long)n;
+    case FT_RANDOM:
+        return rnd_read((int)f->off, 0, buf, n);
     case FT_PIPE_W:
         return -EBADF;
     case FT_INODE: {
@@ -764,6 +773,9 @@ long vfs_write(struct file *f, const void *buf, u32 n)
         return (long)n;
     case FT_NULL: case FT_ZERO:
         return (long)n;                     /* the bit bucket */
+    case FT_RANDOM:
+        return rnd_write((int)f->off, buf, n);   /* mixed; root's write to /dev/random credits it (random.c) */
+
     case FT_INODE: {
         if (!(f->flags & (O_WRONLY | O_RDWR)))
             return -EBADF;                  /* opened for reading only */

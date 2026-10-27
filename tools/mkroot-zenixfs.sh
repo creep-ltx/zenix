@@ -27,6 +27,8 @@ if [ -z "$NOMAN" ]; then
     rm -rf "$T/usr/man.gen"
 fi
 [ -n "$FSTAB_FILE" ] && cp "$FSTAB_FILE" "$T/etc/fstab"
+# no image ever ships a random seed (DESIGN D19 9.3, as tools/mkroot.sh)
+if [ -e "$T/var/lib/random-seed" ]; then echo "mkroot-zenixfs.sh: refusing to put a random seed (var/lib/random-seed) on an image" >&2; exit 1; fi
 for d in $MOUNTDIRS; do mkdir -p "$T/$d"; done
 ln -s less "$T/bin/more"
 ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"
