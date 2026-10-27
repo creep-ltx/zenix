@@ -77,8 +77,30 @@ part_size() {
     say "size PASS"
 }
 
+# in_netns CMD...: CMD in a new user and network namespace (no root needed, nothing leaves the PC), with the
+# loopback up, /etc/resolv.conf naming 127.0.0.1 (where the tests' resolvers listen, port 53), and ICMP echo
+# sockets allowed (libslirp answers a ping to the gateway with one)
+in_netns() {
+    local rc="$OUT/resolv.conf"
+    echo "nameserver 127.0.0.1" >"$rc"
+    unshare -rnm bash -c 'ip link set lo up && echo "0 0" >/proc/sys/net/ipv4/ping_group_range && mount --bind "$0" /etc/resolv.conf && exec "$@"' "$rc" "$@"
+}
+have_slirp() {
+    pkg-config --exists slirp || { bad "libslirp (with GLib) is not installed: pkg-config slirp fails"; return 1; }
+    unshare -rn true 2>/dev/null || { bad "unprivileged user namespaces are off (unshare -rn)"; return 1; }
+    command -v ip >/dev/null || { bad "no ip command (iproute2) for the test namespace"; return 1; }
+}
+build_slirp() {
+    make -s -C tools/host/zenix-slirp OUT="$PWD/$OUT" CFLAGS="-O1 -g -Wall -Wextra -Werror $SAN" ||
+        { bad "zenix-slirp does not build"; return 1; }
+}
+
+part_slirp() {
+    have_slirp && build_slirp || return
+    if in_netns python3 -I tools/host/zenix-slirp-test.py "$OUT/zenix-slirp" "$OUT"; then say "slirp PASS"
+    else bad "zenix-slirp-test"; fi
+}
 part_netd() { say "netd: not built yet"; }
-part_slirp() { say "slirp: not built yet"; }
 part_fuzz() { say "fuzz: not built yet"; }
 
 if [ $# = 0 ]; then set -- patches rand unit netd slirp size; fi
