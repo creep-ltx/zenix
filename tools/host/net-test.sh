@@ -61,6 +61,7 @@ part_unit() {
     done
 }
 
+NETD_SRC="net/netd/core.c net/netd/sock.c net/netd/iface.c net/netd/config.c"
 part_size() {
     local tp=${TOOLPREFIX:-}
     [ -z "$tp" ] && { if command -v m68k-elf-gcc >/dev/null; then tp=m68k-elf-; else tp=$HOME/opt/m68k-elf/bin/m68k-elf-; fi; }
@@ -74,6 +75,20 @@ part_size() {
     done
     "${tp}size" -t $objs >"$d/size.txt"
     say "size: lwIP and its port for m68k at -Os, unlinked (text data bss): $(tail -1 "$d/size.txt" | awk '{ print $1, $2, $3 }')"
+    # linked with netd's core, --gc-sections keeping what netd's calls reach (tools/host/net-size)
+    local nobjs="" lib
+    for f in $NETD_SRC tools/host/net-size/entry.c tools/host/net-size/stubs.c; do
+        "${tp}gcc" -m68020-60 -Os -msoft-float -ffreestanding -fno-builtin -nostdlib -ffunction-sections -fdata-sections \
+            -Wall -Inet/port/shim -Inet/port -I$LW/include -c "$f" -o "$d/n-$(basename "$f" .c).o" || { bad "m68k: $f"; return; }
+        nobjs="$nobjs $d/n-$(basename "$f" .c).o"
+    done
+    lib=$("${tp}gcc" -m68020-60 -msoft-float -print-libgcc-file-name)
+    "${tp}gcc" -m68020-60 -msoft-float -nostdlib -nostartfiles -Wl,--gc-sections -Wl,-e,netd_size_entry \
+        -Wl,-Map,"$d/netd.map" -o "$d/netd-size.elf" $objs $nobjs "$lib" || { bad "m68k: netd does not link"; return; }
+    local total stubs
+    total=$("${tp}size" "$d/netd-size.elf" | awk 'NR == 2 { print $1, $2, $3 }')
+    stubs=$("${tp}size" "$d/n-stubs.o" "$d/n-entry.o" | awk 'NR > 1 { t += $1 } END { print t }')
+    say "size: netd's core + lwIP + the port for m68k at -Os, linked (text data bss): $total; of the text $stubs are the stand-ins for libz and the OS layer"
     say "size PASS"
 }
 
@@ -100,7 +115,6 @@ part_slirp() {
     if in_netns python3 -I tools/host/zenix-slirp-test.py "$OUT/zenix-slirp" "$OUT"; then say "slirp PASS"
     else bad "zenix-slirp-test"; fi
 }
-NETD_SRC="net/netd/core.c net/netd/sock.c net/netd/iface.c net/netd/config.c"
 part_netd() {
     $HOSTCC $HCFLAGS $SAN -pthread -o "$OUT/netd-host" tools/host/netd-host.c $NETD_SRC $LWIP_SRC $PORT_SRC ||
         { bad "netd-host does not build"; return; }
@@ -112,7 +126,26 @@ part_netd() {
         grep -c '^ok' "$OUT/netd-host.log" | sed 's/^/net-test: netd: checks passed: /'; say "netd PASS"
     else grep -a '^FAIL\|ERROR\|netd-host:' "$OUT/netd-host.log" | head -40; bad "netd-host (log $OUT/netd-host.log, netd's own $OUT/netd-host.netd.log)"; fi
 }
-part_fuzz() { say "fuzz: not built yet"; }
+# libFuzzer, one process at a time with a memory limit (this PC's rule: knowledge base claude-code/, memory)
+part_fuzz() {
+    local secs=$1 d="$OUT/fuzz" FCC=${FUZZCC:-clang} fl="-fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined"
+    command -v "$FCC" >/dev/null || { bad "fuzz needs clang (libFuzzer)"; return; }
+    mkdir -p "$d/corpus" "$d/artifacts"
+    $FCC $HCFLAGS $fl -DNETD_HOST_OPTS='"fuzz-opts.h"' -Itools/host/lwip-fuzz -Dnetd_rand=netd_chacha_rand \
+        -c net/port/rand.c -o "$d/rand.o" &&
+    $FCC $HCFLAGS $fl -DNETD_HOST_OPTS='"fuzz-opts.h"' -Itools/host/lwip-fuzz -o "$d/lwip-fuzz" \
+        tools/host/lwip-fuzz/lwip-fuzz.c $NETD_SRC $LWIP_SRC net/port/port.c "$d/rand.o" || { bad "lwip-fuzz does not build"; return; }
+    python3 -I tools/host/lwip-fuzz/seeds.py net/lwip/test/fuzz/inputs "$d/seeds" >/dev/null || { bad "fuzz seeds"; return; }
+    say "fuzz: $secs s, one process, 2 GB memory limit (log $d/fuzz.log)"
+    if nice "$d/lwip-fuzz" -max_total_time="$secs" -rss_limit_mb=2048 -malloc_limit_mb=512 -max_len=4096 -timeout=10 \
+            -artifact_prefix="$d/artifacts/" -print_final_stats=1 "$d/corpus" "$d/seeds" >"$d/fuzz.log" 2>&1; then
+        say "fuzz: $(grep -a 'stat::number_of_executed_units' "$d/fuzz.log" | awk '{ print $2 }') inputs run, $(ls "$d/corpus" | wc -l) in the corpus, $(grep -a 'cov:' "$d/fuzz.log" | tail -1 | sed 's/.*cov: \([0-9]*\).*/\1/') edges covered"
+        say "fuzz PASS: nothing found"
+    else
+        grep -a 'ERROR\|SUMMARY\|lwip-fuzz:\|Test unit written' "$d/fuzz.log" | head -20
+        bad "fuzz found something: $d/artifacts"
+    fi
+}
 
 if [ $# = 0 ]; then set -- patches rand unit netd slirp size; fi
 while [ $# -gt 0 ]; do

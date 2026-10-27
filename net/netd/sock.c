@@ -277,18 +277,36 @@ static void listener_unqueue(struct nsock *s)
     s->listener = NULL;
     s->pending = 0;
 }
+/* a pcb waiting to be closed that lwIP ends itself (a reset, a time out, killed for memory) leaves the list */
+static void cb_closing_err(void *arg, err_t err)
+{
+    struct tcp_pcb **slot = arg;
+    (void)err;
+    if (slot) *slot = NULL;
+}
 static void tcp_close_or_queue(struct tcp_pcb *pcb)
 {
     int i;
     if (tcp_close(pcb) == ERR_OK) return;
-    for (i = 0; i < CLOSING_MAX; i++) if (!closing[i]) { closing[i] = pcb; return; }
+    for (i = 0; i < CLOSING_MAX; i++)
+        if (!closing[i]) {
+            closing[i] = pcb;
+            tcp_arg(pcb, &closing[i]);
+            tcp_err(pcb, cb_closing_err);
+            return;
+        }
     tcp_abort(pcb);                     /* no room to wait: a reset instead of a FIN */
 }
 void netd_sock_turn(void)
 {
     int i;
-    for (i = 0; i < CLOSING_MAX; i++)
-        if (closing[i] && tcp_close(closing[i]) == ERR_OK) closing[i] = NULL;
+    for (i = 0; i < CLOSING_MAX; i++) {
+        struct tcp_pcb *p = closing[i];
+        if (!p) continue;
+        tcp_err(p, NULL);
+        if (tcp_close(p) == ERR_OK) { closing[i] = NULL; continue; }
+        tcp_err(p, cb_closing_err);
+    }
 }
 
 /* ---- ICMP echo sockets (6.4): netd sets the echo id; replies go only to the socket with that id ---- */
@@ -865,7 +883,9 @@ int netd_netstat(struct netd_connrow *rows, int max)
     for (li = 0; li < 3; li++) {
         struct tcp_pcb *p;
         for (p = *lists[li]; p && n < max; p = p->next) {
-            struct nsock *s = p->callback_arg;
+            /* the argument is a socket only while netd's own callbacks are set (a pcb waiting to close has another) */
+            struct nsock *s = p->state == LISTEN ? (((struct tcp_pcb_listen *)p)->accept == cb_accept ? p->callback_arg : NULL)
+                                                 : (p->errf == cb_err ? p->callback_arg : NULL);
             struct netd_connrow *r = &rows[n++];
             memset(r, 0, sizeof *r);
             r->proto = NETD_IPPROTO_TCP;

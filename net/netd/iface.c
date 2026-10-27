@@ -195,13 +195,17 @@ int netd_if_down(const char *name)
     for (i = 0; i < NETD_IFMAX; i++) {
         struct nif *f = &nifs[i];
         if (!f->used || strcmp(f->name, name)) continue;
-        /* a frame half received: an END hands it to an input that drops it, so slipif frees its buffer */
+        /* a frame half received: ENDs hand it to an input that drops it, so slipif frees its buffers; two, because
+         * after an ESC slipif takes the first END as data (found by tools/host/lwip-fuzz: two pbufs lost) */
         f->netif.input = drop_in;
-        f->rx[0] = 0xC0;
+        f->rx[0] = f->rx[1] = 0xC0;
         f->rxpos = 0;
-        f->rxlen = 1;
+        f->rxlen = 2;
         slipif_poll(&f->netif);
         netif_set_down(&f->netif);
+        /* packets to itself wait in the interface's loopback queue, which netif_remove leaves behind (found by
+         * tools/host/lwip-fuzz): with the interface down they are only dropped */
+        netif_poll(&f->netif);
         netif_remove(&f->netif);            /* ends the connections bound to its address (6.2) */
         mem_free(f->netif.state);           /* slipif's own data (it has no function to free it) */
         netd_os_close(f->handle);
