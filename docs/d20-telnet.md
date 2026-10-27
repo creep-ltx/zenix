@@ -668,7 +668,8 @@ section 11 ("A console's font and rules"). Choices where the note was silent:
 
 **Sizes (*measured*):** the kernel image 153,044 -> 154,944 bytes (+1,900; after the warm-start fix of D19 14, which
 was +572): 24,256 bytes left on the RAM floppy, 7,872 on the mount tests' floppy. Per console 20 bytes; a loaded font
-2 KB, plus 8 KB above one plane. **Speed, FS-UAE only** (the A1200 020 without fast RAM, 3 planes, `bench`, two runs
+2 KB, plus 8 KB above one plane. **Free memory with one login** (the full `make check`'s matrix, FS-UAE): 2 MB
+chip-only 1,347 -> 1,345 KB, 1 MB chip-only 410 -> 408 KB (the kernel's growth with the warm-start fix). **Speed, FS-UAE only** (the A1200 020 without fast RAM, 3 planes, `bench`, two runs
 each, an emulator figure, not a 68020's): printing 300 lines of 79 characters 29,430 -> 30,705 us a line (+4%); the
 null system call moved 77 -> 80 us as well with no change in its path, so part of it is code layout; to be measured on
 the stock A1200. **Tests:** `tools/term-test.sh` (95 checks: each op's checks and errors, -EBADF,
