@@ -350,15 +350,23 @@ def sign(o, out):
     import tempfile
     here = os.path.dirname(os.path.abspath(__file__))
     zsign = os.path.join(here, "..", "zsign.py")
-    tkey = os.path.join(here, "..", "testdata", "sign", "zenix-test.key")
-    tpub = os.path.join(here, "..", "testdata", "sign", "zenix-test.pub")
     d = os.path.join(out, "sign")
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
+    tdir = os.path.join(d, "sign-test")         # the TEST pair, made here by zsign.py testkey (never in git)
+    tkey, tpub = os.path.join(tdir, "zenix-test.key"), os.path.join(tdir, "zenix-test.pub")
+    env = dict(os.environ, ZSIGN_TEST_DIR=tdir)
 
     def zs(*a):
-        r = subprocess.run([sys.executable, "-I", zsign] + list(a), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        r = subprocess.run([sys.executable, "-I", zsign] + list(a), stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         return r.returncode, (r.stdout + r.stderr).decode(errors="replace")
+
+    rc, msg = zs("testkey")
+    ok0 = rc == 0 and os.path.exists(tkey) and (os.stat(tkey).st_mode & 0o777) == 0o600
+    result("zsign testkey makes the TEST pair when missing, the key mode 600", True, 1, [] if ok0 else [msg])
+    k1 = open(tkey, "rb").read() if ok0 else b""
+    zs("testkey")
+    result("zsign testkey keeps an existing pair", True, 1, [] if open(tkey, "rb").read() == k1 else ["remade"])
 
     def raw(pem, private=False):
         a = ["openssl", "pkey", "-in", pem, "-pubout", "-outform", "DER"] if private else \

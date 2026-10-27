@@ -7,10 +7,11 @@ since 1.1.1); the key never enters the build or the repository.
   zsign.py sign [--key KEY] [--kind bundle|index] FILE        FILE.sig, 80 bytes
   zsign.py verify --pub PUB [--pub PUB]... [--kind K] FILE [SIG]  checked with OpenSSL against the given keys
   zsign.py keyid PUB                                            the key id (8 bytes, hex) the .sig names
+  zsign.py testkey                                              the TEST key pair, made when missing (below)
 
 KEY: a PKCS#8 PEM Ed25519 private key; by default ~/.config/zenix-signing/zenix-release.key (D15: mode 600, outside
 every repository, with an offline backup). PUB: the public half (SubjectPublicKeyInfo PEM), as in tools/keys/ and
-tools/testdata/sign/. A new release key: openssl genpkey -algorithm ed25519 -out KEY && chmod 600 KEY, and the
+by zsign.py testkey (the TEST pair, below). A new release key: openssl genpkey -algorithm ed25519 -out KEY && chmod 600 KEY, and the
 public half with openssl pkey -in KEY -pubout -out PUB.
 
 The kind: a file starting with "ZUP1" is a bundle, anything else needs --kind. What is signed (6.1) is the label, a
@@ -21,7 +22,11 @@ NUL and the 32-byte SHA-256 the verifier computes itself:
 The .sig (6.2): "ZSG1", format 1, algorithm 1 (Ed25519), two zero bytes, the key id (the first 8 bytes of SHA-256 of
 the 32-byte public key), the 64-byte signature.
 
-A release bundle (channel stable or testing, 6.3) is never signed with the test key (tools/testdata/sign/).
+The TEST key pair (6.3) is never in the repository: it is made at build or test time, when missing, as
+TESTDIR/zenix-test.key (mode 600) and TESTDIR/zenix-test.pub; TESTDIR is $ZSIGN_TEST_DIR, else build/sign-test in the
+repository. Test builds trust that public half, so a test bundle made in one build tree verifies in that tree.
+Channels (decided 2026-10-27): test bundles carry the channel "test"; "testing" and "stable" are release channels,
+and a release bundle is never signed with the test key.
 """
 import hashlib
 import os
@@ -35,7 +40,9 @@ import mkzup  # noqa: E402  (the bundle checks, shared with the bundle builder)
 
 LABELS = {"bundle": b"Zenix bundle signature v1", "index": b"Zenix package index v1"}
 RELEASE_CHANNELS = ("stable", "testing")
-TEST_PUB = os.path.join(HERE, "testdata", "sign", "zenix-test.pub")
+TEST_DIR = os.environ.get("ZSIGN_TEST_DIR") or os.path.join(os.path.dirname(HERE), "build", "sign-test")
+TEST_KEY = os.path.join(TEST_DIR, "zenix-test.key")
+TEST_PUB = os.path.join(TEST_DIR, "zenix-test.pub")
 DEFAULT_KEY = os.path.join(os.path.expanduser("~"), ".config", "zenix-signing", "zenix-release.key")
 ED25519_SPKI = bytes.fromhex("302a300506032b6570032100")      # the DER prefix of an Ed25519 public key
 
@@ -58,6 +65,27 @@ def raw_public(pem_path, private=False):
     if rc != 0 or len(out) != 44 or not out.startswith(ED25519_SPKI):
         die("%s: not an Ed25519 %s key (%s)" % (pem_path, "private" if private else "public", err.strip()[-200:]))
     return out[12:]
+
+
+def testkey():
+    """the TEST pair in TEST_DIR, made when missing; returns (key, pub)"""
+    if not (os.path.exists(TEST_KEY) and os.path.exists(TEST_PUB)):
+        os.makedirs(TEST_DIR, exist_ok=True)
+        tmp = TEST_KEY + ".part"
+        old = os.umask(0o077)
+        try:
+            rc, _, err = openssl("genpkey", "-algorithm", "ed25519", "-out", tmp)
+        finally:
+            os.umask(old)
+        if rc != 0:
+            die("openssl genpkey: %s" % err.strip()[-200:])
+        os.chmod(tmp, 0o600)
+        rc, _, err = openssl("pkey", "-in", tmp, "-pubout", "-out", TEST_PUB + ".part")
+        if rc != 0:
+            die("openssl pkey: %s" % err.strip()[-200:])
+        os.replace(tmp, TEST_KEY)
+        os.replace(TEST_PUB + ".part", TEST_PUB)
+    return TEST_KEY, TEST_PUB
 
 
 def keyid(pub):
@@ -151,6 +179,9 @@ def main(a):
         sign(rest[0], key, kind)
     elif cmd == "verify" and len(rest) in (1, 2) and pubs:
         sys.exit(verify(rest[0], rest[1] if len(rest) == 2 else rest[0] + ".sig", pubs, kind))
+    elif cmd == "testkey" and not rest:
+        k, p = testkey()
+        print("%s %s (key %s)" % (k, p, keyid(raw_public(p)).hex()))
     elif cmd == "keyid" and len(rest) == 1:
         print(keyid(raw_public(rest[0])).hex())
     else:

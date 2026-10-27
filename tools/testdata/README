@@ -6,7 +6,3 @@ bbs-sim/welcome.ans, bbs-sim/amiga.asc: a CP437 ANSI screen and a Latin-1 Amiga 
 (DESIGN D20 8.1), made for this repository (GPL-2.0-only as the rest); tools/bbs-sim.py sends them. Real art packs
 are copyrighted and never committed.
 
-sign/zenix-test.key, sign/zenix-test.pub: the Ed25519 TEST signing key pair of DESIGN D21 6.3, made for this
-repository with openssl genpkey (2026-10-27). The private half is public on purpose, a test fixture: test builds
-and tools/host/crypto-test.sh sign with it; release builds never trust it, and tools/zsign.py refuses to sign a
-release bundle (channel stable or testing) with it. The release keys are the owner's, never in the repository.
