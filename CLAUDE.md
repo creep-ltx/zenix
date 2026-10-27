@@ -102,6 +102,11 @@ unseen). So:
   ZenixFS library and host tools in `zenixfs/`, a host-side driver model test). It merges main into its branch every
   day and is merged back within a few days, not weeks. If it needs a shared-file change, it asks the main session
   (a message to it) or puts the change in one small, separate commit that is merged first.
+- **Coherence first (owner 2026-10-27):** parallel work is allowed only while the system stays one coherent design.
+  The first Zenix run had many sessions each inventing their own solution; never again. A side helper builds only what
+  an approved design note assigns to it (D19 section 10: the host-only parts), with the note's names, formats and
+  interfaces; a question the note does not answer goes to the main session, never a local invention. The main session
+  reviews every side branch against the note before merging, as it does its own.
 - Existing branches (`drivers`, `zenixfs`, `floppy`) are merged in this order: main's own staged work, `drivers`,
   `zenixfs`, `floppy`. After every merge: rebuild every image, check the floppy sizes, run the tests.
 - Never `git stash`, `git checkout .`, `git reset --hard` or `git add -A` in a shared tree. Commit your own files by
