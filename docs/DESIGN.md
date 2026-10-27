@@ -239,7 +239,7 @@ keys and filter shared) instead of a Dropbear port; randomness only from `/dev/r
 `.sig` files over D15's header digest, verified by zenixboot (once per bundle) and `zpkg`; root certificates as a compact
 anchors file, the time from the battery clock, SNTP and a floor. No kernel change. The full design:
 [d21-crypto-ssh-https.md](d21-crypto-ssh-https.md).
-## D22. `zpkg`, the package manager (the owner's wish 2026-10-24; design note revision 1, to be reviewed twice, nothing built)
+## D22. `zpkg`, the package manager (the owner's wish 2026-10-24; design note revision 2 after two reviews, nothing built)
 **Why.** Installing and updating programs and Zenix itself the way Arch's `pacman` does (`-S`, `-Ss`, `-Syu`, `-R`,
 `-Rns`, which package owns which file), as **one mechanism with the self-updates** (D15). **How.** A static
 repository (plain files: the owner's NAS for testing over HTTP, GitHub Pages for stable over HTTPS): immutable package
