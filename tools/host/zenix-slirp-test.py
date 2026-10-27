@@ -142,7 +142,8 @@ def main():
     err = open(os.path.join(logdir, "zenix-slirp-test.stderr"), "w")
     if os.path.exists(log):
         os.unlink(log)
-    p = subprocess.Popen([zs] + (["-v"] if os.environ.get("ZS_V") else []) + ["--fd", str(b.fileno()), "--log", log], pass_fds=[b.fileno()], stderr=err)
+    p = subprocess.Popen([zs] + (["-v"] if os.environ.get("ZS_V") else []) +
+                         ["-f", "tcp:2323:23", "--fd", str(b.fileno()), "--log", log], pass_fds=[b.fileno()], stderr=err)
     b.close()
     line = Line(a)
     # a frame at once, before libslirp's first turn of its loop: its socket must not expire on the spot (a bug once:
@@ -192,6 +193,14 @@ def main():
         f = line.wait(lambda f: f[9] == 6 and f[40:] == b"tcp through slirp")
         ok(f is not None, "TCP: the echo server's answer")
         line.send(slip(tcp(AMIGA, 41000, GW, 7778, isn + 18, srv + 18, 0x14)))   # RST: done
+
+    # a port forward: a program on the PC connects to 127.0.0.1:2323, the Amiga sees a SYN for its port 23
+    c = socket.socket()
+    c.settimeout(5)
+    threading.Thread(target=lambda: c.connect_ex(("127.0.0.1", 2323)), daemon=True).start()
+    f = line.wait(lambda f: f[9] == 6 and (f[33] & 0x12) == 0x02 and struct.unpack("!H", f[22:24])[0] == 23)
+    ok(f is not None and socket.inet_ntoa(f[16:20]) == AMIGA, "-f tcp:2323:23: a connection to 127.0.0.1:2323 reaches the Amiga's port 23")
+    c.close()
 
     # console text after the network (netd closed the port): after a pause, without an END
     time.sleep(0.2)
