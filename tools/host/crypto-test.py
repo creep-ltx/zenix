@@ -442,6 +442,25 @@ def sign(o, out):
     ok("an index: SHA-256 of the whole file under \"Zenix package index v1\"; OpenSSL and the library",
        rc == 0 and zs("verify", "--kind", "index", "--pub", tpub, idx)[0] == 0 and
        o.ask("sig_verify", "index", dg, s, tp) == "0 0", msg)
+    # D22 5.1: a package list of a release channel is never signed with the test key (as release bundles)
+    for chan in ("testing", "stable"):
+        lst = os.path.join(d, "index-" + chan)
+        open(lst, "wb").write(b"zpkgindex 1\nchannel %s\nserial 2026110301\npkg awk\nchannel test\n" % chan.encode())
+        rc, msg = zs("sign", "--key", tkey, "--kind", "index", lst)
+        ok("zsign refuses to sign a %s package list with the test key" % chan, rc != 0 and "test key" in msg and
+           not os.path.exists(lst + ".sig"), msg)
+        rc, msg = zs("sign", "--key", rkey, "--kind", "index", lst)
+        ok("... and signs it with a release key", rc == 0 and os.path.getsize(lst + ".sig") == 80, msg)
+    lst = os.path.join(d, "index-test")
+    open(lst, "wb").write(b"zpkgindex 1\nchannel test\nserial 2026110301\npkg awk\nchannel stable\n")
+    rc, msg = zs("sign", "--key", tkey, "--kind", "index", lst)
+    ok("a test-channel package list is signed with the test key (a block's own words are not the header)", rc == 0, msg)
+    open(lst, "wb").write(b"zpkgindex 1\nchannel test\nchannel stable\nserial 2026110301\n")
+    rc, msg = zs("sign", "--key", tkey, "--kind", "index", lst + "")
+    ok("a list naming a release channel in a second channel line is refused with the test key", rc != 0 and "test key" in msg, msg)
+    open(lst, "wb").write(b"zpkgindex 1\nserial 2026110301\npkg awk\n")
+    rc, msg = zs("sign", "--key", tkey, "--kind", "index", lst)
+    ok("a zpkgindex list without a channel line is refused", rc != 0 and "channel" in msg, msg)
     # and back: the library signs (Monocypher), OpenSSL verifies; Ed25519 is deterministic, so both sign alike
     seed = os.urandom(32)
     der = bytes.fromhex("302e020100300506032b657004220420") + seed

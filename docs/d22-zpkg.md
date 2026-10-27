@@ -724,3 +724,35 @@ main session took all seven recommendations, each re-weighed: (1) the update slo
 to bound a replayed old list); (4) stable from GitHub Pages over HTTPS, testing from the NAS over plain HTTP, both signed;
 (5) `zpkg -Syu` again after a system restart, automatic later; (6) no install scripts; (7) the previous version kept for
 `zpkg --back`.
+
+## As built: steps 2-3, the PC-side parts (side helper, merged 2026-10-27; reviewed by the main session)
+
+Built: `tools/zsign.py` refuses to sign a `zpkgindex` list naming `testing` or `stable` with the TEST key, and a list with
+no channel line; `tools/mkzup.py` gains `bundle --no-kernel` (a package bundle), `--base-only` (opt-in until step 4
+makes it the Makefile's default), and `desc`/`takes` lines; `tools/mkrepo.py` (`add`, `promote`, `resign`, `snapshot`,
+`prune`, `check`, `installdb`) with the layout of section 2 (`latest` written last, 24 bytes); the system-call-free
+cores `user/zpkg/` (`index.c` the list, `latest` and trust rules; `resolve.c`; `ffsslot.c` the slot's read-only FFS walk
+and in-place write) and `net/http/` (URLs, at most 3 redirects and never https to http, GET, a streaming response parser
+with a 4 KB header limit, Content-Length or chunked with overflow checks, the resume rule); m68k -Os: 5.5, 4.1, 4.0 and
+3.5 KB, no 64-bit multiplies, libz only. Tests: `tools/host/zpkg-test.sh` (in `check.sh host`; core 174, repo 56, a
+differential test of the C and Python list parsers on 3,000 damaged lists, slot 71 on DOS\1 and DOS\3 images with 23
+kinds of damage refused, net 40 in `unshare -rnm`); fuzzing 15 minutes in two runs (found: the HTTP parser's byte count
+on an error, and in review a `-Syuu` upgrade planned before a downgrade that removes what it needs; both fixed), the
+second run of about 260 million inputs found nothing.
+
+Choices where the note was silent (binding unless changed here): (1) inside the base group, dependencies on other
+base-group packages are masked like `depends base`; (2) **other dependencies (main session, 2026-10-27):** a package's
+`depends X BUILD` is rewritten by mkrepo to X's version as published in the pool at that time (the newest version of X
+in the channel), so an unchanged X keeps its older version and the dependent package still resolves; mkrepo refuses only
+if X is not in the pool at all; (3) a package without `depends base` gets the current base as its header minimum, no
+line added; (4) `--base-only` opt-in until step 4; (5) base-group blocks in the list have no `file` line; (6) a package
+dropped from a build is dropped from the channel's list, and an unchanged build writes no new serial; (7) `snapshot`
+copies `latest` too; (8) `prune` keeps each channel's last two lists (a cached `latest` may name the previous one);
+(9) a list date before the previous list's or more than 400 days after it is refused (a parameter); (10) a fresh machine
+accepts a serial at or above the floor, a machine with a stored list only a higher one; (11) limits: at most 8
+dependencies and 8 `takes` lines a block, version strings 1-15 printable characters, `desc` 1-72; (12) slot: whole
+blocks from 1 KB to 16 MB, a bitmap extension block refused until an image covers it, block size and reserved blocks
+passed in until `user/rdb.h` carries them (the main line's change), "exactly one slot" a machine-level check, and **the
+control block's field layout is defined by the main line in step 7 before it ships**; (13) HTTP: relative and `//host`
+Locations are not followed, Content-Length with chunked or any other transfer coding is refused, the per-file time
+limit belongs to the socket layer (step 5); (14) `user/zpkgfmt.c` and its fuzz harness are the main line's step 1.
