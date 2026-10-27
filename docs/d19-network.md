@@ -1,6 +1,7 @@
 # D19: the network (design note, revision 2)
 
-Status: **design only, revision 2 after two independent reviews (section 13), not built.** Roadmap block 2, "Zenix
+Status: **design, revision 2 after two independent reviews (section 13); step 1 (section 3, zfsd out of the kernel
+image) built on branch zfout 2026-10-27 (section 14, "As built"); the rest not built.** Roadmap block 2, "Zenix
 reaches the world": the network, the CM4's Ethernet, TCP/IP as a server, DHCP, DNS, `ping`; telnet, the crypto
 library, ssh, HTTPS, NFS, remote control and `zpkg` come after it. A deep core change (a kernel file kind, new system
 calls, a message family, the way servers are loaded). The short version is DESIGN.md D19. Facts about today's code are
@@ -157,7 +158,8 @@ card or the RAM floppy.
 ### 3.3 The change (step 1)
 
 1. **D11 6.4's own rule** ("a filesystem type with no built-in image is a file service, registered by `mount` with its
-   path"): `mount` registers `/sbin/zfsd DEVICE fs.DEVICE -id ID` (user/mount.c). The frozen built-in name `@zfsd` keeps
+   path"): `mount` registers `/sbin/zfsd DEVICE fs.DEVICE -id ID` (user/mount.c; as built without the port word, which
+   does not fit the 80 bytes: section 14). The frozen built-in name `@zfsd` keeps
    working for an older `mount` through **one fixed alias** in svc.c's image table (`@zfsd` = the file `/sbin/zfsd`),
    not a general fallback (no `@NAME` to path rule, so nothing like `@../x` can arise). D11 5.1's "a mount's restart
    needs no disk read" stays true for ext2 mounts and becomes a read from the root for ZenixFS mounts; d11's note, the
@@ -171,9 +173,9 @@ card or the RAM floppy.
 4. **A ZenixFS root** needs zfsd before any file can be read. Today only the FS-UAE tests boot one (`zroot`, svc-test's
    `z`/`zo` parts); no real machine does. The build makes `kernel-zfs.bin` (fsd, zfsd, diskd, boot: about 181 KB with
    the network's part, too big for a RAM floppy, so on a kernel-only `zenix-zfs.adf`) for those tests. **They then test
-   a test-only kernel, not the shipped one** (said in their scripts). **zup refuses a bundle whose kernel has no server
-   for the running root's type** (the kernel's image list in its version record; D15's formats grow at the end), so an
-   update can never make a ZenixFS-root machine unbootable. When block 4 makes a ZenixFS root real, its own decision
+   a test-only kernel, not the shipped one** (said in their scripts). **The update refuses a bundle whose kernel has no
+   server for the running root's type** (the kernel's image list in its version record; D15's formats grow at the end),
+   so an update can never make a ZenixFS-root machine unbootable (built in zenixboot, not zup: section 14). When block 4 makes a ZenixFS root real, its own decision
    picks the variant in the bundle or a boot module (zenixboot handing the root's server to the kernel, as it hands the
    RAM disk). **Owner question 5.**
 5. The network is never built in: `/sbin/netd` and `/sbin/net/*` are files from the start.
@@ -704,3 +706,64 @@ The owner answered section 11 with "Yes" to every recommendation: (1) the stack 
 (2) the A2065 driver early; (3) SLIP may take the stock A1200's only serial port; (4) `zenix-slirp` an ordinary Linux
 program in the repository; (5) a ZenixFS root is test-only until block 4; (6) licence notices travel with every image
 and bundle; (7) lwIP as the TCP/IP code.
+## 14. As built
+
+### Step 1: zfsd from the disk (branch zfout, 2026-10-27)
+
+What section 3.3 asked for, with three local corrections where the note did not fit the code:
+
+1. **`mount` registers `/sbin/zfsd DEVICE -id ID`, without the port word.** The note's `/sbin/zfsd DEVICE fs.DEVICE
+   -id ID` is 82 bytes for `ide0p2` (the volume id alone is 50), over the frozen 80-byte program text (`SVC_TEXT`,
+   at most 79 characters). zfsd now takes its port as optional (`zfsd DEVICE [PORT] [-root] [-id ID]`; left out, or a
+   word starting with `-` in its place: `fs.DEVICE`, named as `mount` names it), so the old form still works.
+2. **The alias** (`kernel/svc.c`): `@zfsd` with no built-in zfsd starts the file `/sbin/zfsd` with the same
+   arguments; **never for an essential entry** (`disk`, `fs`): the root's file could only be read through the server
+   being started (the loader would wait on its own port for ever). The shipped kernel on a ZenixFS root therefore
+   says "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the test kernel kernel-zfs (DESIGN
+   D19)" and stops with D11's panic "cannot start an essential server" (`svc-test` zs).
+3. **The update refusal is zenixboot's, not zup's.** zenixboot installs the kernel before Zenix runs; zup runs
+   *under* the new kernel, so a new kernel that cannot serve the root never reaches zup. So: the version record
+   grows at its end (`ZVER`, number, string, then `ZSRV` and a word of the roots the kernel serves: 1 ext2, 2 ZenixFS;
+   the shipped kernel says 1, kernel-zfs 3), and zenixboot refuses a bundle (renamed `.bad`, the reason said, the
+   installed kernel starts) whose kernel says it has no ZenixFS server **when the installed kernel says it has one**.
+   The installed kernel stands for the root's type, which zenixboot cannot read (an ext2 or ZenixFS partition behind
+   AmigaOS's devices); a machine runs kernel-zfs only for a ZenixFS root. A record without `ZSRV` (every kernel before
+   step 1) is no evidence and refuses nothing: no real machine runs a ZenixFS root (3.3 item 4), and on such a machine
+   the kernel's own stop above plus D15's evidence rule ("crashed - start the previous version?", default previous,
+   after the warm reset) is the way back. zenixboot 0.2b3.
+
+The rest as the note says:
+- `kernel/embed.S` carries zfsd only with `-DKERNEL_ZFSD`. **Kernel image 176,144 -> 139,644 bytes** (the RAM-floppy
+  count: 3,056 -> 39,556 bytes left), *measured* 2026-10-27; zfsd.zx 36,688 -> 36,764 bytes (the optional port).
+- **Free memory with one login** (`free`, FS-UAE, the matrix machines, *measured* 2026-10-27): 2 MB chip-only
+  1329 -> 1365 KB, 1 MB chip-only 392 -> 428 KB (36 KB each, as the note estimated; the boot pool 1807 -> 1843 and
+  783 -> 819 KB).
+- `/sbin/zfsd` (`SBINAPPS` in the Makefile; not a command, no page) is on `zenix.hdf`, `root-card.img`,
+  `zenix-zroot.hdf` and the mount tests' image, and in the base package (`tools/mkzup.py`), so an update brings it
+  with the kernel that needs it. Not on the RAM floppy's image (no `mount` there). Between the boot half and the root
+  half (a root half that failed: legal, D15) a ZenixFS mount does not start ("svc: fs.DEVICE: cannot start
+  /sbin/zfsd (error -2)" in dmesg) until `/sbin/zfsd` is installed.
+- **RAM disks per image:** `zenix-ram.adf` keeps 704 KB; `zenix-mount.adf` 728 KB (`RAMDISK_MOUNT_K`): 23 blocks and
+  25 inodes free with `/sbin/zfsd` on it (37 blocks before, without it), and a kernel limit of 154,624 bytes
+  (14,980 left), printed by every build.
+- **`kernel-zfs.bin`** (176,420 bytes) on the kernel-only floppy `zenix-zfs.adf`: `embed.S`, `svc.c` and `syscall.c`
+  built again with `-DKERNEL_ZFSD` (`zfs-*.o`). `fsuae/zroot.fs-uae` and svc-test's `zo` boot it; `zroot-test`,
+  `svc-test` z and zo say in their scripts that they test that kernel, not the shipped one.
+- **Tests:** `zenixfstest` (mount starts `/sbin/zfsd`; zfsd killed, started again from the file, the volume reads
+  back; `@zfsd` registered the old way starts the file and serves), `mounttest` unchanged, `svc-test` z (kernel-zfs),
+  zs (the shipped kernel on a ZenixFS root: the message and the panic), zo; `zroot-test` with kernel-zfs; `update-test`
+  zfsroot (a machine with kernel-zfs: a bundle with the shipped kernel refused and renamed `.bad`, the installed kernel
+  starts; a bundle with a kernel-zfs of the new version installed); `zup-host-test` (base now holds `/sbin/zfsd`);
+  the matrix (free memory above); the full `make check`.
+- **What changes for a ZenixFS root** (owner question 5 still open): it is test-only. The shipped kernel no longer
+  boots one; only `kernel-zfs.bin` does. A ZenixFS **mount** on an ext2 root works as before, its server read from
+  `/sbin/zfsd`. When block 4 makes a ZenixFS root real, its decision picks the bundle variant or a boot module (3.3
+  item 4).
+- **Not changed, said here:** CLAUDE.md's frozen list names "the built-in `@name` programs"; `@zfsd` stays a valid
+  name (the alias), so the frozen meaning holds; the wording there ("`@zfsd` is an alias to `/sbin/zfsd` since D19")
+  is for the main session to add, as that file is its own.
+- **A limit found:** a file service that lives *on* a ZenixFS mount, started while both that mount's and the root's
+  servers are stopped, needs three nested loads and fails once (D11's two-level limit, logged; the next call works).
+  Noted in d11-service-manager.md 5.1.
+
+Last checked against the code: 2026-10-27.

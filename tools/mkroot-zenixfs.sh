@@ -15,8 +15,9 @@ cp -r "$HERE/../rootfs/." "$T/"
 mkdir -p "$T/bin" "$T/tmp" "$T/home/user" "$T/home/guest"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
-    cp "$B/$p.zx" "$T/bin/$name"
-    chmod 755 "$T/bin/$name"
+    dir=bin; [ "$p" = zfsd ] && { dir=sbin; mkdir -p "$T/sbin"; }     # the ZenixFS server for mounts (DESIGN D19)
+    cp "$B/$p.zx" "$T/$dir/$name"
+    chmod 755 "$T/$dir/$name"
 done
 if [ -z "$NOMAN" ]; then
     mkdir -p "$T/usr/man"

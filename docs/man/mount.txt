@@ -23,14 +23,16 @@ DESCRIPTION
 
     The filesystem's server is a service (DESIGN D11): mount reads the
     device's volume id (where it is and its superblock's uuid) and
-    registers the service fs.DEVICE with the server built into the kernel
-    for the type - fsd for ext2, zfsd for ZenixFS, the same programs that
-    serve the root - at priority -10. The kernel's first call to it starts
+    registers the service fs.DEVICE with the server for the type, at
+    priority -10: for ext2 fsd, built into the kernel (the program that
+    serves the root); for ZenixFS the file /sbin/zfsd (DESIGN D19), read
+    from the root when it starts. The kernel's first call to it starts
     the server; should it crash or be killed, the next use of the
-    filesystem starts it again (from the kernel, no disk read), and it
-    finds its volume by the id (a floppy without a uuid is then refused: it
-    may have been swapped; mount it again). The servers' own messages and
-    the service lines are in dmesg(1).
+    filesystem starts it again (fsd from the kernel, no disk read; zfsd
+    from /sbin/zfsd again), and it finds its volume by the id (a floppy
+    without a uuid is then refused: it may have been swapped; mount it
+    again). The servers' own messages and the service lines are in
+    dmesg(1).
 
     ext2: a volume with an INCOMPAT feature other than filetype (ext4:
     extents, 64bit, flex_bg, ...) is refused and the features are named;
@@ -80,7 +82,9 @@ NOTES
     service is removed again.
     ZenixFS names longer than 63 bytes (possible on a volume written
     elsewhere) are not listed by ls; they can still be opened by name.
-    Only types with a server in the kernel can be mounted (ext2, zenixfs).
+    Only types with a server can be mounted (ext2, zenixfs). A ZenixFS
+    mount needs /sbin/zfsd on the root: without it the server does not
+    start ("cannot start /sbin/zfsd" in dmesg).
     It asks the disk server for a device's details with DISK_INFOSZ or
     DISK_LISTSZ and its buffer's size, so a newer disk server never
     writes past it (the frozen-interface rule, CLAUDE.md).

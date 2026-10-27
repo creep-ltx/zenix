@@ -55,7 +55,8 @@ Read architecture.md first for the parts. Everything here is *read* from the sou
    it lists the FAT partition, the 0x76 container, the FFS boot partition inside it and the ext2 partition; only the
    last one can be a root). boot picks the root (a RAM disk; else the bootable partition; else the first ext2 or
    ZenixFS one; else the bare disk), reads its superblock to tell ext2 from ZenixFS and its volume id, and registers
-   `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...`. Asking for the root inode starts that server (pid 3); from
+   `fs` -> `@fsd DEVICE fs -root -id ID` (or `@zfsd ...` for a ZenixFS root, only in the test kernel kernel-zfs:
+   DESIGN D19). Asking for the root inode starts that server (pid 3); from
    then on the kernel log is no longer mirrored on the screen. boot runs `/sbin/zup` and waits (D15: the root half of
    an update, or what a power cut left; with nothing to do it ends at once) and gives the bundle's memory back. boot
    registers the services of `/etc/svctab` (nothing

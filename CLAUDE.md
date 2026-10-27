@@ -152,7 +152,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   for ever); the bootinfo layout; the klog area and boot-note layout and the klog flags (zenixboot and bootmenu
   against the kernel); the `/etc` formats base programs read (svctab, fstab, passwd, group); the service manager's
   `SVC_*` numbers and limits (`SVC_TEXT` 80, `SVC_SAVED` 512, `SVC_MIDREQ`, exit status 86 for a damaged table), the
-  port names (`disk`, `fs`, `fs.*`) and the built-in `@name` programs; the tty mode bits (`TTY_RAW`, `TTY_NOSIG`),
+  port names (`disk`, `fs`, `fs.*`) and the built-in `@name` programs (`@zfsd` is an alias to `/sbin/zfsd` since D19 step 1); the tty mode bits (`TTY_RAW`, `TTY_NOSIG`),
   `O_*` flags and mode bits, the spawn limits (argument count and bytes), exit and wait status conventions (139 for a
   fault, `waitcon`'s console status, login's `ST_HANDED` (bit 30) plus the handed shell's pid, D18); the boot note's kinds and `SYS_reboot`'s arguments; D15's own formats (the
   bootinfo bundle fields, the update note, the state file, the bundle header and manifest, zup's journal and undo logs).

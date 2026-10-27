@@ -40,8 +40,9 @@ static void list(void)
 }
 
 /* mount DEV on DIR; type 0 = from the partition. The server is a service (DESIGN D11 6.4): fs.DEV is registered with the
- * kernel's built-in server for the type and the volume id, at nice -10; the kernel's first call to it (the root inode,
- * in SYS_mount) starts it, and a call after it died starts it again. Returns 0, or 1 after printing why not. */
+ * server for the type (ext2: the kernel's built-in fsd; ZenixFS: the file /sbin/zfsd, DESIGN D19) and the volume id, at
+ * nice -10; the kernel's first call to it (the root inode, in SYS_mount) starts it, and a call after it died starts it
+ * again. Returns 0, or 1 after printing why not. */
 static int mount_one(const char *dev, const char *dir, const char *type, int fsck)
 {
     struct diskinfo di;
@@ -69,8 +70,12 @@ static int mount_one(const char *dev, const char *dir, const char *type, int fsc
                 printf("mount: %s could not be repaired (fsck.ext2: %d): mounted as it is, still marked \"needs a check\"\n", dev, st);
         }
     }
-    strcpy(prog, z ? "@zfsd " : "@fsd ");
-    strcat(prog, dev); strcat(prog, " "); strcat(prog, pname); strcat(prog, " -id "); strcat(prog, id);
+    /* ext2: the built-in fsd. ZenixFS: the file /sbin/zfsd (DESIGN D19 step 1; D11 6.4's file service), without the
+     * port word (zfsd names it fs.DEVICE itself): the path and the volume id leave no room for it in SVC_TEXT */
+    strcpy(prog, z ? "/sbin/zfsd " : "@fsd ");
+    strcat(prog, dev);
+    if (!z) { strcat(prog, " "); strcat(prog, pname); }
+    strcat(prog, " -id "); strcat(prog, id);
     int r = sys_svc_register(pname, prog, -10);
     if (r < 0) {
         printf(r == -EBUSY ? "mount: too many filesystems mounted\n" : "mount: cannot register the server of %s (%d)\n", dev, r);

@@ -70,6 +70,10 @@ STACK_diskd := 8192
 # every program links only the parts of libz it calls (libz is built one section per function)
 ULDFLAGS := -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
+# servers that live on the disk as files (DESIGN D19 step 1), installed as /sbin/NAME on every full root image and in
+# the base package: the ZenixFS server, which mount registers as a file service (D11 6.4). Not commands: no page.
+SBINAPPS := zfsd
+SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
 
@@ -161,13 +165,37 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 	    $(KOBJS) $(LIBGCC) -o $@
 # The RAM floppy (zenix-ram.adf) holds the bootblock (1 KB), the kernel and the RAM disk (RAMDISK_K KB) in 880 KB: the
 # kernel may grow to KERNEL_MAX bytes. Every build says how much is left; tools/mkadf.py refuses an image that is over.
+# The mount tests' floppy (zenix-mount.adf) has a RAM disk of its own size (RAMDISK_MOUNT_K: it carries /sbin/zfsd,
+# DESIGN D19 step 1), so its kernel limit is lower; the build says that one too.
 RAMDISK_K := 704
+RAMDISK_MOUNT_K := 728
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
+KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py --delta $< $@
-	@s=$$(wc -c < $@); echo "$@: $$s of $(KERNEL_MAX) bytes, $$(($(KERNEL_MAX) - s)) left for the kernel on the RAM floppy"; \
-	    [ $$s -le $(KERNEL_MAX) ] || echo "$@: WARNING: $$((s - $(KERNEL_MAX))) bytes too big for the RAM floppy (zenix-ram.adf)"
+	@s=$$(wc -c < $@); echo "$@: $$s of $(KERNEL_MAX) bytes, $$(($(KERNEL_MAX) - s)) left for the kernel on the RAM floppy" \
+	    "($$(($(KERNEL_MAX_MOUNT) - s)) on the mount tests' floppy)"; \
+	    [ $$s -le $(KERNEL_MAX) ] || echo "$@: WARNING: $$((s - $(KERNEL_MAX))) bytes too big for the RAM floppy (zenix-ram.adf)"; \
+	    [ $$s -le $(KERNEL_MAX_MOUNT) ] || echo "$@: WARNING: $$((s - $(KERNEL_MAX_MOUNT))) bytes too big for the mount tests' floppy (zenix-mount.adf)"
+
+# The test-only kernel (DESIGN D19 step 1): the same kernel with the ZenixFS server built in, for the emulator tests
+# that boot a ZenixFS root (zroot-test, svc-test z and zo). A ZenixFS root needs its server before any file can be read,
+# and the shipped kernel no longer carries one. Too big for a RAM floppy: on a kernel-only floppy, zenix-zfs.adf.
+# Updates never install it over a ZenixFS root's kernel by mistake: zenixboot reads the kernel's root list (ZSRV).
+KZOBJS := $(subst $(BUILD)/embed.o,$(BUILD)/zfs-embed.o,$(subst $(BUILD)/svc.o,$(BUILD)/zfs-svc.o,$(subst $(BUILD)/syscall.o,$(BUILD)/zfs-syscall.o,$(KOBJS))))
+$(BUILD)/zfs-%.o: kernel/%.c $(wildcard kernel/*.h) | $(BUILD)
+	$(CC) $(CFLAGS) $(KOPT_$*) -DKERNEL_ZFSD -c $< -o $@
+$(BUILD)/zfs-embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx $(BUILD)/zfsd.zx | $(BUILD)
+	$(CC) $(ASFLAGS) -DKERNEL_ZFSD -Wa,-I$(BUILD) $< -o $@
+$(BUILD)/kernel-zfs.elf: $(KZOBJS) link/kernel.ld
+	$(CC) $(CFLAGS) -nostartfiles -T link/kernel.ld -Wl,--build-id=none -Wl,-q \
+	    $(KZOBJS) $(LIBGCC) -o $@
+$(BUILD)/kernel-zfs.bin: $(BUILD)/kernel-zfs.elf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py --delta $< $@
+$(BUILD)/zenix-zfs.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel-zfs.bin tools/mkadf.py
+	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel-zfs.bin $@
 
 # the standard floppy carries only the bootblock and the kernel (the root filesystem is on the disk)
 $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
@@ -181,15 +209,15 @@ RAMAPPS := init login sh ls cat echo pwd ps free wc hello crash uname df fdisk m
 # the mount tests (tools/mounttest.sh) boot their own small floppy: the standard RAM image is full
 MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount \
              mkfs_zenixfs fsck_zenixfs su id whoami chmod touch wc head tail ps stat uname sleep true false env passwd \
-             kill pgrep grep dmesg svctest
+             kill pgrep grep dmesg svctest zfsd
 
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.
 $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" $(RAMDISK_K)K 128
 
-$(BUILD)/root-mount.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
-	NOMAN=1 NOPURE=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" $(RAMDISK_K)K 128
+$(BUILD)/root-mount.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
+	NOMAN=1 NOPURE=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" $(RAMDISK_MOUNT_K)K 128
 
 $(BUILD)/zenix-mount.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-mount.img tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-mount.img
@@ -270,7 +298,7 @@ $(BUILD)/fsd.zx: $(BUILD)/fsd.uelf tools/mkzexe.py tools/check-68020-60.sh
 $(BUILD)/boot.uo: user/rootpick.h user/volid.h user/rdb.h kernel/diskproto.h
 $(BUILD)/diskd.uo: user/say.h user/rdb.h kernel/diskproto.h
 $(BUILD)/fsd.uo: user/volid.h user/diskcall.h kernel/diskproto.h kernel/fsproto.h
-$(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx $(BUILD)/zfsd.zx | $(BUILD)
+$(BUILD)/embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx | $(BUILD)
 	$(CC) $(ASFLAGS) -Wa,-I$(BUILD) $< -o $@
 
 # ---- ZenixFS: the library (zenixfs/zenixfs.c, also built for the host) as a Zenix program part, its tools and server ----
@@ -340,7 +368,7 @@ $(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
 # build/pkg/NAME.manifest + NAME.tgz for the standard packages (tools/mkzup.py says which files each holds); the full
 # root images get their manifests in /var/lib/zpkg (tools/mkroot.sh), so the first update knows what is installed.
 packages: $(BUILD)/pkg/list
-$(BUILD)/pkg/list: $(USERZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+$(BUILD)/pkg/list: $(USERZX) $(SBINZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the bundle: the kernel and every package (copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
 bundle: $(BUILD)/zenix-update.zup
@@ -348,17 +376,17 @@ $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py
 	python3 tools/mkzup.py bundle $@ --kernel $(BUILD)/kernel.bin $(BUILD)/pkg $$(cat $(BUILD)/pkg/list)
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs
-$(BUILD)/zenix.hdf: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
-	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS)"
+$(BUILD)/zenix.hdf: $(USERZX) $(SBINZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS)"
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
 $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
 	python3 tools/mkrdb.py $< $@
 
 # the same root disk with ZenixFS as the root filesystem instead of ext2 (needs the host tool: make -C zenixfs build/zenixfs-tool)
-$(BUILD)/zenix-zroot.hdf: $(USERZX) $(shell find rootfs -type f) tools/mkroot-zenixfs.sh tools/mkrdb.py tools/mkman.py $(wildcard zenixfs/*.c zenixfs/*.h zenixfs/tools/*.c)
+$(BUILD)/zenix-zroot.hdf: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot-zenixfs.sh tools/mkrdb.py tools/mkman.py $(wildcard zenixfs/*.c zenixfs/*.h zenixfs/tools/*.c)
 	make -s -C zenixfs build/zenixfs-tool
-	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS)" 8
+	tools/mkroot-zenixfs.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS)" 8
 
 # ---- booting without a floppy (zenixboot; docs/how-it-works.md, docs/pi-first-boot.md) ----
 # The AmigaDOS boot volume Kickstart starts from: S/Startup-Sequence (one line), zenixboot, the kernel as "zenix".
@@ -373,8 +401,8 @@ $(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkca
 	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
 # the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
 # ext2 root with every program (written to a card by tools/write-card.sh)
-$(BUILD)/root-card.img: $(USERZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
-	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS)" 512M 8192
+$(BUILD)/root-card.img: $(USERZX) $(SBINZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS)" 512M 8192
 $(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
 	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img
 

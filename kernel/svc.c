@@ -3,7 +3,7 @@
 #include "kernel.h"
 
 /* The service manager (DESIGN D11, docs/d11-service-manager.md). A service is a port name with a program: a built-in
- * image (@diskd, @fsd, @zfsd) or a file. A registered name always has its port (a held slot, ipc.c); the first call to
+ * image (@diskd, @fsd; @zfsd only in the test kernel kernel-zfs) or a file. A registered name always has its port (a held slot, ipc.c); the first call to
  * it, with no server running, makes the CALLER load the server in its own context (no loader process to deadlock
  * with); the new process takes the port over with port_create. When the server dies its port goes back to held: the
  * request it was serving fails with -ECONNRESET, the queued ones wait for the next server, which the first queued
@@ -31,10 +31,20 @@ static struct svc {
     u32 savedlen;
 } svcs[NSVC];
 
-extern const char fsd_blob[], fsd_blob_end[], diskd_blob[], diskd_blob_end[], zfsd_blob[], zfsd_blob_end[];
+extern const char fsd_blob[], fsd_blob_end[], diskd_blob[], diskd_blob_end[];
+#ifdef KERNEL_ZFSD
+extern const char zfsd_blob[], zfsd_blob_end[];
+#endif
 static const struct image { char name[6]; u8 priv; const char *s, *e; } images[] = {
-    { "diskd", 1, diskd_blob, diskd_blob_end }, { "fsd", 0, fsd_blob, fsd_blob_end }, { "zfsd", 0, zfsd_blob, zfsd_blob_end },
+    { "diskd", 1, diskd_blob, diskd_blob_end }, { "fsd", 0, fsd_blob, fsd_blob_end },
+#ifdef KERNEL_ZFSD
+    { "zfsd", 0, zfsd_blob, zfsd_blob_end },
+#endif
 };
+/* The one alias (DESIGN D19 step 1): zfsd left the kernel image and is the file /sbin/zfsd (D11 6.4's file service),
+ * but @zfsd is a frozen built-in name an older mount registers. With no built-in zfsd, @zfsd starts that file. Never
+ * for an essential entry (disk, fs: the root): the file would be read through the server being started. */
+static const char zfsd_file[] = "/sbin/zfsd";
 
 static int eq(const char *a, const char *b)
 {
@@ -146,9 +156,19 @@ static int spawn(struct svc *s)
     int pid = -ENOENT;
     if (text[0] == '@') {
         argv[0] = text + 1;
-        for (u32 k = 0; k < sizeof images / sizeof images[0]; k++)
-            if (eq(images[k].name, argv[0]))
+        u32 k = 0;
+        for (; k < sizeof images / sizeof images[0]; k++)
+            if (eq(images[k].name, argv[0])) {
                 pid = proc_spawn_image(images[k].s, (u32)(images[k].e - images[k].s), argv, s->nwords, images[k].priv, 0);
+                break;
+            }
+        if (k == sizeof images / sizeof images[0] && eq(argv[0], "zfsd")) {
+            if (s->essential)
+                kprintf("svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the test kernel "
+                        "kernel-zfs (DESIGN D19)\n");
+            else
+                pid = proc_spawn(zfsd_file, argv, s->nwords, 0, 0, 0);
+        }
     } else {
         pid = proc_spawn(text, argv, s->nwords, 0, 0, 0);   /* tty 0: output to the kernel log */
     }

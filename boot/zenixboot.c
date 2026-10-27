@@ -24,8 +24,8 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 #include "../user/sha256.h"
 
-#define ZB_VERSION "0.2b2"
-#define ZB_DATE "26.10.2026"
+#define ZB_VERSION "0.2b3"
+#define ZB_DATE "27.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: zenixboot " ZB_VERSION " (" ZB_DATE ")";
 
 /* the same numbers as boot/handoff.S */
@@ -442,6 +442,49 @@ static const char *bundle_check(const u8 *p, u32 len, int full)
     bunv = be32(p + 12);
     return 0;
 }
+/* The roots a kernel can serve (DESIGN D19 step 1): its version record "ZVER" (kernel/syscall.c), grown by "ZSRV" and
+ * a mask (1 ext2, 2 ZenixFS). The shipped kernel has no ZenixFS server built in; only the test-only kernel-zfs has.
+ * ROOTS_NONE: no record found; ROOTS_OLD: a record from before ZSRV (that kernel carried both servers, but it never
+ * said so on purpose, so it is no evidence of a ZenixFS root). */
+#define ROOTS_ZENIXFS 2u
+#define ROOTS_NONE 0x80000000u
+#define ROOTS_OLD  0x40000000u
+static u32 roots_in(const u8 *p, u32 n, u32 *at)
+{
+    for (u32 i = 0; i + 32 <= n; i++)
+        if (p[i] == 'Z' && memeq(p + i, "ZVER", 4)) {
+            if (at) *at = i;
+            return memeq(p + i + 24, "ZSRV", 4) ? be32(p + i + 28) & 0xFFFFu : ROOTS_OLD;
+        }
+    if (at) *at = n > 31 ? n - 31 : 0;      /* where the next piece must start searching again */
+    return ROOTS_NONE;
+}
+static u32 roots_of_file(const char *name)
+{
+    static u8 win[4096 + 32];
+    long fh = Open(name, MODE_OLDFILE), n;
+    u32 keep = 0, r = ROOTS_NONE, at;
+    if (!fh) return ROOTS_NONE;
+    while (r == ROOTS_NONE && (n = Read(fh, win + keep, 4096)) > 0) {
+        u32 total = keep + (u32)n;
+        r = roots_in(win, total, &at);
+        keep = total - at;                  /* the last 31 bytes: a record that straddles two pieces */
+        memcpy(win, win + at, keep);        /* forward: safe, the target lies below */
+    }
+    Close(fh);
+    return r;
+}
+/* an update must never make a ZenixFS-root machine unbootable: a machine that runs a kernel which says it serves
+ * ZenixFS roots (the test kernel kernel-zfs) gets no kernel that says it cannot. 0, or the reason */
+static const char *roots_check(void)
+{
+    u32 have = roots_of_file("zenix"), want = roots_in(bkern, bkernsize, 0);
+    if ((have & (ROOTS_NONE | ROOTS_OLD)) || !(have & ROOTS_ZENIXFS))
+        return 0;                           /* no evidence of a ZenixFS root */
+    if (!(want & (ROOTS_NONE | ROOTS_OLD)) && !(want & ROOTS_ZENIXFS))
+        return "its kernel has no ZenixFS server, and this machine runs a kernel for a ZenixFS root (kernel-zfs)";
+    return 0;
+}
 /* the whole file into memory, fast RAM first */
 static const char NOMEM[] = "not enough memory for it";
 static const char *bundle_load(long size)
@@ -620,6 +663,7 @@ static void update_half(int prev_asked)
         say("zenixboot: update: version %ld in trial: the bundle goes to Zenix again\n", (long)v, 0, 0);
         return;
     }
+    if ((why = roots_check())) { bundle_bad(why); return; }
     if ((why = volume_check(bkernsize))) {
         say("zenixboot: update: version %ld not installed this time: %s\n", (long)v, (long)why, 0);
         bundle_free();

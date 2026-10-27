@@ -23,7 +23,9 @@ DESCRIPTION
                 looks for its volume by place, the uuid confirming it
                 (user/volid.h, the same code mount(8) uses for the
                 filesystems it mounts). Asking for the root inode starts
-                it.
+                it. @zfsd (a ZenixFS root) is only in the test-only kernel
+                kernel-zfs (DESIGN D19): the shipped kernel has no ZenixFS
+                server built in, says so and stops with a panic.
     An ext2 root (not the RAM disk) whose superblock does not say
     "cleanly unmounted" (a power cut within a second of writing, or
     during an install) is checked first (DESIGN D17): fs is registered
@@ -76,9 +78,10 @@ FILES
                     PORT  NICE  PROGRAM [ARGUMENTS]
                   for example "ping 0 /bin/pingd". PROGRAM is an absolute
                   path (read as root when the service starts) or a
-                  built-in image (@diskd, @fsd, @zfsd); at most 6 words in
-                  80 bytes; NICE -20..19. Lines starting with # and empty
-                  lines are skipped. Nothing is started at boot: the first
+                  built-in image (@diskd, @fsd; @zfsd starts /sbin/zfsd
+                  in the shipped kernel); at most 6 words in 80 bytes;
+                  NICE -20..19. Lines starting with # and empty lines are
+                  skipped. Nothing is started at boot: the first
                   call to PORT starts the program, and the next call after
                   it ended starts it again (a server that ends with status
                   0 while idle has simply stopped). There is no start-at-

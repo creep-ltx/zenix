@@ -78,8 +78,9 @@ shows the difference: 50 calls took 87 ms with inheritance and 1481 ms without (
 
 ## The disk servers are built into the kernel image
 
-**What we do.** `diskd`, `fsd`, `zfsd` and the starter `boot` are inside the kernel file and start before any disk is
-read. Everything else is loaded from the disk.
+**What we do.** `diskd`, `fsd` and the starter `boot` are inside the kernel file and start before any disk is
+read. Everything else is loaded from the disk, also the ZenixFS server `zfsd` (DESIGN D19: only a ZenixFS mount needs
+it, never the ext2 root, so it no longer takes 36 KB of every machine's memory).
 
 **Why.** To read programs from a disk you need the disk and filesystem servers, so they cannot come from that disk.
 They still run as ordinary user-mode processes with their own ports. Only their *delivery* is special.

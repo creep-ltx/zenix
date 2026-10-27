@@ -1,7 +1,7 @@
 # ZenixFS - the native Zenix filesystem (design 2026-10-22; built; status last checked 2026-10-23)
 
 **Status (2026-10-23):** the format is final for version 1 (`zenixfs-format.md`). The library in `zenixfs/` runs on the host and **inside Zenix**
-(the `zfsd` server that `mount` starts, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the mount table); ZenixFS can be the root filesystem (*verified* in FS-UAE: `tools/zroot-test.sh`). *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
+(the `zfsd` server that `mount` starts, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the mount table); ZenixFS can be the root filesystem (*verified* in FS-UAE: `tools/zroot-test.sh`), **test-only** since DESIGN D19 step 1: only the test kernel `kernel-zfs.bin` carries zfsd built in, the shipped system has it as the file `/sbin/zfsd` for mounts. *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
 `fsck` clean, remount; power-cut replay (every prefix of the recorded writes plus random subsets inside each flush epoch) always mounts, passes `fsck`, equals a committed state and is never
 older than a durable commit - also on a volume of several map pages with one page in RAM; 600 random bit flips in metadata are detected or harmless; directory hash chains; full volume; orphans.
 The tests were checked by mutation (no flush before the commit record, reuse of blocks freed in the same transaction: both make the power-cut test fail).

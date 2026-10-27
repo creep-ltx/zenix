@@ -24,11 +24,11 @@ DESCRIPTION
 
     Who may: root any process; everyone else only processes whose real or
     effective user id is their own (or their own children), never the
-    built-in servers (diskd, fsd, zfsd, boot). A refusal says "operation
-    not permitted". The same rule decides who may stop and continue a
-    process and which processes a shell may make the foreground of its
-    terminal. Process 1 (boot) is never ended or stopped by a signal's
-    default action.
+    servers the kernel started (diskd, fsd, zfsd, boot). A refusal says
+    "operation not permitted". The same rule decides who may stop and
+    continue a process and which processes a shell may make the
+    foreground of its terminal. Process 1 (boot) is never ended or
+    stopped by a signal's default action.
 
     A process in the middle of a message call gets the signal when the
     call is done. A server ended this way while it serves a request ends

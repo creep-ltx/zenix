@@ -138,7 +138,7 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    caches, display, clock and disk, then creates one process from its image: `boot` (pid 1). `boot` registers the
    disk server and the root filesystem server as services (section 9, "The service manager"): its first call to
    `disk` starts `diskd` (pid 2), it picks the root device and its server from the superblock, and its first call to
-   `fs` starts `fsd` or `zfsd` (pid 3); it runs `/sbin/zup` (D15: an update's root half, a journal a power cut left, or the way back; boot waits, says so after a
+   `fs` starts `fsd` (or `zfsd`, in the test-only kernel kernel-zfs: section 9) (pid 3); it runs `/sbin/zup` (D15: an update's root half, a journal a power cut left, or the way back; boot waits, says so after a
 minute and stops it after 20 - every process named zup, also the second one a new zup runs, audit3 B4 -, then, when
 none runs any more, gives the bundle's memory back with `SYS_update RELEASE`); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
    starts `login` on console 1 (section 11).
@@ -402,7 +402,7 @@ in the shared part, a PC-relative reference between the two parts (shared code r
 `text_size` (it could be either part), an undefined weak or an absolute symbol, a table slot no relocation names, a
 writable section in the shared part. `tools/mkzexe-test.sh` (host) checks this. The new magic means a kernel that
 does not know ZEX2 refuses such a file as "not a Zenix program" instead of starting it wrongly. The programs built
-into the kernel (diskd, fsd, zfsd, boot) stay ZEXE; a ZEX2 file is loaded only from a filesystem.
+into the kernel (diskd, fsd, boot; zfsd in the test kernel kernel-zfs) and `/sbin/zfsd` stay ZEXE; a ZEX2 file is loaded only from a filesystem.
 
 **Loading a ZEX2 program** (`proc_load`, `fill_v2` in `kernel/proc.c`; the segments in `kernel/seg.c`). The header is
 checked as a ZEXE one is (`zex2_bad`: the shared part 16-aligned, holding the header and inside the file; the data
@@ -823,19 +823,30 @@ installs), 0 lets it go; both answer 1 if the volume needed no check before (fsd
 and 0 never clears a real need. With `-fsck` (boot's check of the root) fsd applies the root's rules but serves the
 volume read-only on a plain device handle, so `fsck.ext2` may open it raw. `zfsd` does not know `FS_MARK` (-ENOSYS):
 ZenixFS commits atomically.
-A mounted filesystem's server is the same built-in image, registered by `mount` (the mount table, below). It answers
-`FS_ROOT` (root inode, device and type names) and `FS_QUIT` (umount: sync, release the device, exit). Two filesystem
-servers are built into the kernel image, `fsd` (ext2) and `zfsd` (ZenixFS); there is no other copy of them. **Which one serves the root** is boot's choice
+A mounted filesystem's server is registered by `mount` (the mount table, below). It answers
+`FS_ROOT` (root inode, device and type names) and `FS_QUIT` (umount: sync, release the device, exit). `fsd` (ext2) is
+built into the kernel image, and so is no other filesystem server: **`zfsd` (ZenixFS) is the file `/sbin/zfsd`** (DESIGN
+D19 step 1), on every full root image and in the base package; only the test-only kernel `kernel-zfs.bin` (below)
+carries a second copy inside. **Which one serves the root** is boot's choice
 (`user/rootpick.h`): a RAM disk is the root; else the bootable ext2/zenixfs partition; else the first one of those;
 else the bare disk; boot reads the device's superblock (ext2 magic at byte 1080, ZenixFS `ZNFS` at byte 32) and
 registers `fs` with that server and device, so only one root server is ever started. `init` runs `mount -a` (from
-`/etc/fstab`) before login.
+`/etc/fstab`) before login. **A ZenixFS root is test-only** (until roadmap block 4): its server must run before any file
+can be read, so it needs the kernel with zfsd built in, `kernel-zfs.bin` on the kernel-only floppy `zenix-zfs.adf`
+(the emulator tests `zroot-test`, `svc-test` z and zo; they test that kernel, not the shipped one). The shipped
+kernel, booted on a ZenixFS root, says "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the test
+kernel kernel-zfs" and stops with the panic "cannot start an essential server" (`@zfsd` never starts the file for the
+root: that file could only be read through the server being started). zenixboot never installs a kernel without a
+ZenixFS server over one with it (section 13, the version record).
 
 ### zfsd - the ZenixFS server (`user/zenixfsd.c` + `zenixfs/zenixfs.c`, port `fs` or `fs.DEVICE`)
 The same library that the host tests run (`zenixfs/`, compiled with `-DZENIXFS_FREESTANDING`; `user/zenixfs_env.h`), over the
 disk server (`user/zenixfs_disk.c`: filesystem blocks of 1-4 KB as 2-8 sector calls plus `DISK_FLUSH`). Same protocol and the same
 permission rules as the ext2 server. Changes commit three seconds after the first one, at `FS_SYNC` and at `FS_QUIT`.
-It takes the same `-root -id` arguments as fsd and prints as `zfsd` (the root's) or as its port name (a mount's). **A restarted zfsd** mounts the
+It takes the same `-root -id` arguments as fsd and prints as `zfsd` (the root's) or as its port name (a mount's); the
+port word may be left out (`zfsd DEVICE -id ID`: the port is `fs.DEVICE`), which is how `mount` registers it, because
+`/sbin/zfsd`, the device, the port and the 50-byte volume id would not fit the 80 bytes of a service's program text
+(`SVC_TEXT`). **A restarted zfsd** mounts the
 last commit keeping the orphans (`ZENIXFS_MNT_READONLYISH`), rebuilds its open counts from `SVC_OPENS`, frees only
 the orphans nobody holds (`zenixfs_orphans_keep`) and sets the next inode number to at least the committed one +
 65536 and above every number the kernel holds (`zenixfs_ino_floor`, committed before the first request): a file
@@ -846,14 +857,17 @@ allocates only at mount (block cache, bitmaps, three scratch blocks), so a runni
 ### The mount table (`kernel/vfs.c`)
 Entry 0 is the root (port `fs`); `SYS_mount` puts a server's port on a directory (8 entries, the root
 included). **Mounts are services** (D11 6.4): `mount DEVICE DIR` reads the device's volume id (as boot does),
-registers `fs.DEVICE` -> `@fsd DEVICE fs.DEVICE -id ID` or `@zfsd ...` at nice -10 and calls `SYS_mount`, whose first
-call to the port (`FS_ROOT`) starts the server in `mount`'s context; a mount whose server died is started again by
-its next use, from the kernel image (no disk read). A failed mount removes its entry again. `umount` (`vfs_umount`)
+registers `fs.DEVICE` -> `@fsd DEVICE fs.DEVICE -id ID` (ext2) or `/sbin/zfsd DEVICE -id ID` (ZenixFS, a file
+service, D11 6.4) at nice -10 and calls `SYS_mount`, whose first call to the port (`FS_ROOT`) starts the server in
+`mount`'s context; a mount whose server died is started again by its next use: fsd from the kernel image (no disk
+read), zfsd from `/sbin/zfsd` on the root (a read through `fs`; with the root's server stopped, the loads nest two
+deep, D11 5.1). **The one alias:** `@zfsd` is a frozen built-in name an older `mount` registers; in a kernel without a
+built-in zfsd it starts the file `/sbin/zfsd` (`kernel/svc.c`), never for the essential entries `disk` and `fs`. A failed mount removes its entry again. `umount` (`vfs_umount`)
 removes the entry *before* it sends `FS_QUIT` (a no-start call), so the server's end is final; the held slot is free
 again when the server's port closes, and a registration that finds its name or every slot still being given back
 waits up to 2 s for it (an `umount` followed at once by a `mount`). A mounted filesystem is not essential: given up,
-it stays mounted and answers -EIO until `umount`. A future filesystem type with no built-in image would be a file
-service (`/sbin/fs.TYPE`), not built. With only the
+it stays mounted and answers -EIO until `umount`. A filesystem type with no built-in image is a file service, as
+ZenixFS is now. With only the
 root mounted, paths go to its server untouched. Otherwise the kernel makes every path absolute and normalised as text
 (working-directory text + path, `.` and `..` removed; `path_abs`, the one normaliser, also used for the
 working-directory text itself and for mount points; at most 159 bytes, `FS_PATHMAX` in fsproto.h, longer is
@@ -866,7 +880,8 @@ working directory reached through a symbolic link behaves as its text says once 
 
 ### boot - the starter (`user/boot.c`)
 pid 1, the only process the kernel creates itself. It registers `disk` -> `@diskd` (nice -10), picks the root (above),
-registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10), asks for the root inode (`SYS_mountinfo`
+registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10; `@zfsd` only in the test kernel kernel-zfs,
+above), asks for the root inode (`SYS_mountinfo`
 0: the first call to `fs` starts the root server), checks an ext2 root that is not marked clean (DESIGN D17: `fs` first
 registered with `-fsck`, a read-only server that leaves the device to `/bin/fsck.ext2 -y DEVICE`, which boot runs
 and waits for at most 20 minutes; then `FS_QUIT` to it and `fs` registered with `-root` again, so the next call starts
@@ -882,7 +897,8 @@ consoles are init's work (section 11, man/init.txt).
 ### The service manager (`kernel/svc.c`, DESIGN D11)
 The full design is docs/d11-service-manager.md; what is built (steps 0-8 of its build order: the core, the mounts,
 `/etc/svctab` and the servers' output in the kernel log):
-- **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`, `@zfsd`, each with its own `priv`
+- **A service** is a port name with a program: a built-in image (`@diskd`, `@fsd`; `@zfsd` in kernel-zfs only, else the
+  alias to `/sbin/zfsd`; each with its own `priv`
   bit) or an absolute path, at most 6 words in 80 bytes, and a nice. `SYS_svc` (81): `SVC_REGISTER` and `SVC_REMOVE`
   (root), `SVC_SELF` (how many times the caller's entry was started). 12 entries (`NSVC`); `disk` and `fs` are
   *essential* (set by the kernel for these names).
@@ -1287,7 +1303,18 @@ outputs (`tools/cmds-test.sh`).
   `build/zenix.hdf` (ext2 root disk) and, as a separate dev/test build, `build/zenix-ram.adf` (the same plus a RAM
   root image). That floppy holds the bootblock, the kernel and the 704 KB RAM disk (`RAMDISK_K` in the Makefile), so
   the kernel may be at most 179200 bytes (`KERNEL_MAX`): every build of `kernel.bin` prints how much is left, and
-  `tools/mkadf.py` refuses an image that is over and says by how much. The kernel is built with `-O2`, except the five
+  `tools/mkadf.py` refuses an image that is over and says by how much. The mount tests' floppy `zenix-mount.adf` has a
+  RAM disk of its own size (`RAMDISK_MOUNT_K`, 728 KB: it carries `/sbin/zfsd`), so its limit is lower
+  (`KERNEL_MAX_MOUNT`, 154624 bytes); the size line says that one too. Since DESIGN D19 step 1 (zfsd out of the image)
+  the kernel is 139644 bytes (176144 before), measured 2026-10-27.
+- **The test-only kernel** `kernel-zfs.bin` (`make build/kernel-zfs.bin`, `build/zenix-zfs.adf`, a kernel-only floppy):
+  the same sources with `-DKERNEL_ZFSD` for `embed.S`, `svc.c` and `syscall.c` (objects `zfs-*.o`), so zfsd is built
+  in again (176420 bytes, too big for a RAM floppy). Only for the emulator tests that boot a ZenixFS root.
+- **The version record** (`kernel/syscall.c`, DESIGN D15, frozen, grown at its end by D19): `ZVER`, the version
+  number, the 16-byte string, then `ZSRV` and a word of the roots the kernel has a server built in for (1 ext2, 2
+  ZenixFS: the shipped kernel 1, kernel-zfs 3). zenixboot refuses a bundle whose kernel says it has no ZenixFS server
+  when the installed kernel says it has one (`roots_check`, docs/man/zenixboot.txt); a record without `ZSRV` (every
+  kernel before D19) is no evidence and refuses nothing. The kernel is built with `-O2`, except the five
   truly cold drivers - `floppy`, `emmc`, `a3000`, `rtc` and `kbd` (every wait in them is timed by the E-clock or a timer)
   - which are built with `-Os` (`KOPT_*` in the Makefile, DESIGN D13 step 0: about 6.8 KB smaller); the floppy's MFM
   track coding (`mfm.h`) keeps `-O2` through a pragma in `floppy.c`. `gfx` is built with `-Os` too (DESIGN D14: its
@@ -1344,7 +1371,8 @@ outputs (`tools/cmds-test.sh`).
 - **Processes** (one rule, `may_signal` in syscall.c, for `SYS_kill` - each member of a group, D16 -, `SYS_jobctl`,
   `SYS_setfg` and `SYS_setpriority` on another process): root may signal
   any process but the idle one; others only a process whose real or effective uid equals their real or effective
-  uid, or their own child, and never a built-in server (started from the kernel image: diskd, fsd, zfsd, boot) or a
+  uid, or their own child, and never a server with no parent (ppid 0: diskd, fsd, boot from the kernel image, and every service's server the kernel
+  started, `/sbin/zfsd` too) or a
   privileged process. A refusal is -EACCES (-EPERM in `kill`'s new form, as POSIX), no such process -ESRCH. `SYS_setfg` works on the caller's own terminal, 0 (nobody)
   is always allowed. `SYS_settime` and `SYS_ttymirror` are root only.
 - **Raw messages** (section 8): the filesystem servers do nothing for a message that did not come from the kernel

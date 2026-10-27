@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
 # ZenixFS in the emulator: partition, mkfs.zenixfs, mount next to an ext2 mount, files / links / rename / a 100 KB file,
-# unmount, remount, fsck.zenixfs; then the HOST checks the same partition with zenixfs-tool (independent implementation
+# unmount, remount, zfsd (the file /sbin/zfsd, DESIGN D19) killed and started again, the old name @zfsd, fsck.zenixfs; then the HOST checks the same partition with zenixfs-tool (independent implementation
 # of the check: the same library source, but a different program, block device and compiler).
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
@@ -11,7 +11,7 @@ OUT=${ZENIX_OUT:-/tmp/zenix-zenixfstest}; mkdir -p $OUT
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
 dd if=/dev/zero of=$BD/scratch.hdf bs=1M count=16 status=none
-ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh fsuae/mounts.fs-uae 330 tools/tests/zenixfs-test.txt 2>&1 | tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g' > $OUT/run.log
+ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh fsuae/mounts.fs-uae 380 tools/tests/zenixfs-test.txt 2>&1 | tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g' > $OUT/run.log
 # the log also holds the keystrokes the test typed, so a check must match a whole OUTPUT line, never a substring of the typing
 wantline() { if grep -aqx -- "$2" $OUT/run.log; then check "$1" ok; else check "$1" bad; fi; }
 wantre() { if grep -aqE -- "$2" $OUT/run.log; then check "$1" ok; else check "$1" bad; fi; }
@@ -28,6 +28,15 @@ wantre "mv across mounts leaves the file on the ext2 side" '^ *hello-zenixfs$'
 wantre "pwd inside the mounted filesystem" '^/mnt/dir2$'
 wantre "data survives unmount and mount (wc again)" '^ *20000 +20000 +108894 /mnt/seq.txt$'
 wantline "fsck.zenixfs reports clean" "fsck.zenixfs: clean"
+# zfsd is a file since DESIGN D19 step 1: mount registers /sbin/zfsd (D11 6.4's file service), a killed one starts again
+# from the file, and the frozen built-in name @zfsd an older mount registers starts the same file (the one alias)
+wantre "mount starts the ZenixFS server from the file /sbin/zfsd" '^svc: fs\.ide0p2: started /sbin/zfsd \(pid [0-9]+, for pid [0-9]+ mount\)$'
+wantre "zfsd killed: the log says it ended" '^svc: fs\.ide0p2: zfsd \(pid [0-9]+\) ended, status 143$'
+wantre "... and the next use started it again from /sbin/zfsd" '^svc: fs\.ide0p2: started /sbin/zfsd \(pid [0-9]+, for pid [0-9]+ cat\)$'
+before() { sed -n "/^$1\$/q;p" $OUT/run.log | tail -4 | grep -aqx "$2" && echo ok || echo bad; }
+check "... the file reads back through the restarted zfsd" "$(before kill-done hello-zenixfs)"
+wantre "the old built-in name @zfsd starts /sbin/zfsd (the alias)" '^svc: fs\.ide0p2: started @zfsd \(pid [0-9]+, for pid [0-9]+ svctest\)$'
+check "... and serves the volume" "$(before alias-done hello-zenixfs)"
 # the host looks at the partition: find the superblock ('ZNFS' at byte 32 of its first block) on the scratch disk
 python3 - "$BD/scratch.hdf" <<'PY' > $OUT/offset.txt
 import sys

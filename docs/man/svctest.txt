@@ -32,7 +32,8 @@ DESCRIPTION
            SECONDS seconds. The services' held ports are not among
            them, so root can still mount meanwhile.
     reg    registers the service NAME (root): PROGRAM is a built-in
-           image (@diskd, @fsd, @zfsd) or an absolute path, NICE the
+           image (@diskd, @fsd, @zfsd: /sbin/zfsd unless built in) or
+           an absolute path, NICE the
            server's priority. The first call to NAME starts it.
     rm     removes the service NAME (root).
     call   makes one call to the port NAME with message type TYPE (and
