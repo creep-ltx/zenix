@@ -1,6 +1,7 @@
 # D20: telnet, the BBS terminal and pseudo-terminals (design note, revision 2)
 
-Status: **design, revision 2 after independent reviews (section 13), nothing built.** D19 section 10 step 11: "telnet
+Status: **design, revision 2 after independent reviews (section 13); step 1 (the console's font and rules) built on
+branch t12 2026-10-27 (section 14), the rest not built.** D19 section 10 step 11: "telnet
 (its own note: pseudo-terminals, SIGHUP, the BBS terminal)". Roadmap block 2: `telnet` "made for BBSes, the owner's
 daily use: ANSI colours, the PC character set and Amiga fonts, the BBS window size, downloads". The short version is
 DESIGN.md D20. Facts about today's code are *read* from main at f03180e (2026-10-27); facts about boards and terminals
@@ -613,3 +614,54 @@ Last checked against the code: 2026-10-27 (main at f03180e).
 (2) 8 colours stay the default on the stock A1200, telnet mentions `colours 16` once; (3) the board is told 80x32;
 (4) a phone book, after downloads work; (5) Zmodem only, others if a board needs them; (6) Amiga-board mode by default,
 `-p` for PC boards; (7) Topaz from the ROM only.
+
+## 14. As built
+
+### Step 1: the console's font and rules (branch t12, 2026-10-27; not yet run on the A1200)
+
+Built as 4.2-4.5 say: `SYS_console` ops `CON_FONT` 2 and `CON_RULES` 3 with the descriptor in the op word, the
+seven `CONR_*` rules in `term.c`, the shown console's font and palette in `gfx.c`, the release at a process's end
+(`term_release` in `proc_exit`), `term_panic` before a panic draws. How it works and the checks: architecture.md
+section 11 ("A console's font and rules"). Choices where the note was silent:
+1. **No descriptor** in the op word for `CON_FONT`/`CON_RULES`: -EBADF (as any missing descriptor); `CON_COLOURS`
+   with a descriptor: -EINVAL (its op word stays exactly 1).
+2. **"The caller's own console, in its foreground, or root":** root's call on its **own** console must be in the
+   foreground too; on another console root needs no foreground (it is not root's terminal). A tty with no foreground
+   set (a program started without job control) counts as the caller's. Asking the rules (mask 0) is allowed in the
+   background (it changes nothing).
+3. **The colour rules** are a per-console or-mask on stored colours (`cor`: 0x08 bright foreground, 0x80 bright
+   background), saved by `ESC 7`, cleared by SGR 0, 22 (bright) and 25 (iCE) and when its rule is dropped; erased cells
+   take the bright background too (iCE). `ESC c` clears the mask but never the font or the rules.
+4. **`CONR_PCCTRL`** stores a control only outside an escape sequence; inside one a control acts (BEL, BS, HT, LF, CR)
+   or is dropped as before, and CAN/SUB still cancel it. `CONR_CLRHOME` homes on `ESC[2J` only (not 0, 1 or 3).
+5. **The CGA palette** is written into the Copper list's colour moves in the vertical blank (with the plane pointers,
+   only while the beam is before the list's WAIT); `build_cop` takes it for a new depth. 1 and 2 planes keep their
+   fixed colours.
+6. **Fonts and depth changes:** every loaded font is on a list; `gfx_set_colours` builds their four-bytes tables
+   before switching above one plane (no memory: -ENOMEM, nothing changes) and frees them at one plane.
+7. **The mount tests' floppy:** its RAM disk had 3 free blocks, not the 23 section 6 counted (programs grew since
+   D19 step 1), so taking 8 KB needed room: that image now carries no `/tests` scripts (`NOTESTS=1`; the mount tests
+   run none of them) and its RAM disk is 720 KB (`RAMDISK_MOUNT_K`), 82 blocks free.
+
+**Sizes (*measured*):** the kernel image 153,044 -> 154,944 bytes (+1,900; after the warm-start fix of D19 14, which
+was +572): 24,256 bytes left on the RAM floppy, 7,872 on the mount tests' floppy. Per console 20 bytes; a loaded font
+2 KB, plus 8 KB above one plane. **Speed, FS-UAE only** (the A1200 020 without fast RAM, 3 planes, `bench`, two runs
+each, an emulator figure, not a 68020's): printing 300 lines of 79 characters 29,430 -> 30,705 us a line (+4%); the
+null system call moved 77 -> 80 us as well with no change in its path, so part of it is code layout; to be measured on
+the stock A1200. **Tests:** `tools/term-test.sh` (95 checks: each op's checks and errors, -EBADF,
+-ENOTTY, -EPERM for another console and for a background job, -EINVAL for unknown bits and every bad PSF1 field,
+-EFAULT, -ENOMEM with nothing changed, -ENODEV; a load redraws in the font, a second setter replaces it and owns it, the
+former owner's end leaves it, the owner's end drops it and redraws in Topaz, a console switch shows each console's
+font and palette, root sets another console; each rule's stored cells with and without it; the scrollback keeps the
+bright colours after the rule is gone; `term_panic`; 200,000 random pieces with every rule set; mutations of four
+rules were each caught), `tools/colour-test.sh` with `termtest pcfont` (a test font whose glyphs name their byte,
+every cell's 8 x 8 pixels matched at 1, 2, 3 and 4 planes: the 256 glyphs, CLRHOME, WRAPNOW, LFONLY, the CGA palette,
+the bright foreground and iCE background as each depth shows them; console 2 meanwhile in Zenix's palette; back on
+console 1 the page again; at 3 planes root's switch to 16 colours under the page; the kernel dropping font and rules
+when termtest ends without cleaning up; `q` clearing the screen before the drop). The real CP437 font
+(`cp437-8x8.psf`, the side helper's `tools/mkpsf.py`) is not on the images yet: it comes with the merge of step 0,
+and `termtest pcfont FILE` plus `colour-test.py pcfont ... PSF` compare its glyphs the same way.
+
+**Step 2 not started here:** it is telnet in the Unix mode over `net/telnet/`, the core the side helper builds in step
+0 (branch t0); building it before that merge would mean a second telnet core.
+

@@ -151,6 +151,14 @@ extern const u16 gfx_palette[16];       /* the 16 ANSI colours, 12 bits */
 extern const u16 gfx_palette2[4];       /* the four colours of 2 planes */
 int gfx_set_colours(int colours);       /* SYS_console CON_COLOURS: 2, 4, 8, 16 (0: ask) -> the colours shown, or -errno */
 void term_redraw(void);                 /* the console shown, drawn again from its grid (a new depth) */
+/* DESIGN D20: a console's loaded 8-bit font (256 glyphs of 8 x 8, PSF1) and the console rules */
+struct gfont;
+struct gfont *gfx_font_new(const u8 *glyphs);   /* 2,048 bytes copied (and the table for planes) -> 0 no memory */
+void gfx_font_free(struct gfont *f);
+void gfx_show(const struct gfont *f, int cga);  /* the shown console's font (0: Topaz) and palette (1: CGA's) */
+long term_conop(u32 op, u32 a2, u32 a3);        /* SYS_console CON_FONT / CON_RULES (op word with the descriptor) */
+void term_release(int pid);             /* a process ends: the fonts and rules it set are dropped */
+void term_panic(void);                  /* a panic: the shown console back to Topaz and no rules, before it draws */
 /* colour: foreground in the low nibble, background in the high one (0x07: grey on black) */
 void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour);
 void gfx_scroll(u8 colour);             /* the whole screen up a row; the new row takes colour's background */
@@ -686,6 +694,7 @@ int tty_take_intr(int tty);             /* and clear: was ^C typed with nobody t
 long tty_write(int tty, const void *buf, u32 n);
 void tty_setfg(int tty, int id, int group);   /* the foreground: a pid, or (group) a process group; 0 nobody */
 int tty_fgpid(int tty);                 /* the foreground's pid when it is a single process, else 0 */
+int tty_in_fg(int tty, const struct proc *p);   /* p is the tty's foreground (its group, or it), or nobody is set */
 u16 tty_poll(int tty);                  /* D16: POLLIN when a read would not wait (registers the caller); POLLOUT */
 int tty_of(const struct proc *p);
 
@@ -781,6 +790,19 @@ int tty_of(const struct proc *p);
 #define SYS_setpgid     88   /* pid (0: self), pgid (0: pid): oneself or one's own children */
 #define SYS_console     89   /* op (CON_*), value: the text console's settings (the 2 MB diet, D14 section 11) */
 #define CON_COLOURS     1    /* value 2, 4, 8 or 16: set (root only); 0: ask -> the colours shown now */
+/* DESIGN D20 4.5 (frozen): the op word is op | (fd + 1) << 8; the ops below name their console by that descriptor
+ * (a console that is the caller's controlling tty, where it is in the foreground, or any console for root) */
+#define CON_FD_SHIFT    8
+#define CON_FONT        2    /* a2 PSF1 data (mode 0, height 8, 2,052 bytes), a3 its size; a2 0 drops it -> 0 */
+#define CON_RULES       3    /* a2 the new bits, a3 the mask of bits to change (0 asks) -> the bits before */
+#define CONR_PCCTRL     1    /* bytes 1-31 but BEL BS HT LF CR ESC stored and drawn as glyphs; NUL ignored */
+#define CONR_WRAPNOW    2    /* writing the last column wraps at once */
+#define CONR_CLRHOME    4    /* ESC[2J also homes the cursor */
+#define CONR_BRIGHT     8    /* SGR 1 is the bright foreground (colour + 8), not bold; 22 and 0 end it */
+#define CONR_ICE        16   /* SGR 5 and 6 the bright background (colour + 8), 25 ends it */
+#define CONR_CGAPAL     32   /* the CGA/VGA palette while this console is shown */
+#define CONR_LFONLY     64   /* LF moves down one row, same column (no CR) */
+#define CONR_ALL        127
 /* DESIGN D19, the network (docs/d19-network.md section 4.2; ops and structs in netproto.h) */
 #define SYS_sock        90   /* op (SOCK_*) | request size << 16, fd, struct usockreq * -> per op */
 #define SYS_netsrv      91   /* op (NETSRV_*), a, b: only the network server */

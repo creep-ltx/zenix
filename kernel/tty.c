@@ -112,6 +112,11 @@ void tty_setfg(int tty, int id, int group)
     t->fg_grp = (u8)(id && group);
 }
 int tty_fgpid(int tty) { struct tty *t = get(tty); return t->fg_grp ? 0 : t->fg; }
+int tty_in_fg(int tty, const struct proc *p)
+{
+    struct tty *t = get(tty);
+    return !t->fg || (t->fg_grp ? p->pgid == t->fg : p->pid == t->fg);
+}
 
 /* ^C, ^Z: the signal to the foreground (a group: every member, rule 7). 1 if someone got it; nobody in the foreground
  * (or a group with no living member) and ^C: intr is set, which an old shell polls (SYS_ttyintr) */

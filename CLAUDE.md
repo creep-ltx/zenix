@@ -124,6 +124,7 @@ unseen). So:
 | 83 `evwait`, 84 `sigaction`, 85 `sigprocmask`, 86 `sigreturn`, 87 `alarm`, 88 `setpgid` (DESIGN D16); `kill`'s third argument 1 (the new form: a signal, groups) and `setfg`'s second argument 1 (a process group) | built on branch d16, 2026-10-26 |
 | `exit`'s second argument (DESIGN D18: a child's pid, made the caller's parent's child first; login steps aside for init) | built on branch diet, 2026-10-26 |
 | 89 `console` (the 2 MB diet, DESIGN D18: op 1 `CON_COLOURS`, the display's colours 2/4/8/16, 0 asks; D14 note section 11) | built on branch diet, 2026-10-26 |
+| 89 `console`'s op word `op \| (fd + 1) << 8` (0 above the op: no descriptor, only `CON_COLOURS`), op 2 `CON_FONT` (a PSF1 font for that console, null drops), op 3 `CON_RULES` (bits, mask; `CONR_*` 1-64) (DESIGN D20 4.5) | main, branch t12, 2026-10-27 |
 | 90 `sock` (DESIGN D19: every BSD socket call: op `SOCK_*` plus the request size << 16, fd, `struct usockreq`), 91 `netsrv` (the network server: `NETSRV_HELLO`, `READY`, `REPLY`), 92 `drv` (the network's drivers: `DRV_*` ops 1-7, `HWINFO` .. `XFER`; built on branch n678 2026-10-27) | main, branch n023, 2026-10-27 |
 | **next free: 93** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
@@ -201,6 +202,12 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   (the warm start, branch t12) `hwinfo.genet_stop` (the next reserved word) and its `GSTOP_*` bits 1-32, and
   `HWINFO_DRYRUN` ("ZHWD") in the hwinfo magic from a caller that may return to AmigaOS (zenixboot CHECK): stage0
   writes no hardware then.
+- **D20 (telnet's console, step 1, 2026-10-27):** `SYS_console`'s op word `op | (fd + 1) << 8` (0 above the op: no
+  descriptor, only `CON_COLOURS`); `CON_FONT` 2 (a2 PSF1 data, a3 its size; a2 0 drops it; PSF1 mode 0, height 8,
+  2,052 bytes; meaning "8-bit mode: each byte one glyph of this font, no UTF-8 while loaded"), `CON_RULES` 3 (a2 bits,
+  a3 mask, 0 asks, answers the bits before); the `CONR_*` bits 1-64 and their meanings; the target rules (a console,
+  the caller's own in its foreground, or root's) and the errors -EBADF, -ENOTTY, -EPERM, -ENODEV, -EFAULT, -EINVAL,
+  -ENOMEM; font and rules dropped when their last setter ends, kept by `ESC c`.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

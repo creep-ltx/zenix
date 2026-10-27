@@ -75,6 +75,11 @@ const u16 gfx_palette[16] = {
     0x000, 0xC22, 0x2B2, 0xBB2, 0x45E, 0xB3B, 0x2BB, 0xBBB,
     0x666, 0xF66, 0x6F6, 0xFF6, 0x88F, 0xF7F, 0x6FF, 0xFFF,
 };
+/* the CGA/VGA palette in SGR order (DESIGN D20 4.3, CONR_CGAPAL: the palette BBS art is drawn in; brown, not yellow) */
+static const u16 cga_palette[16] = {
+    0x000, 0xA00, 0x0A0, 0xA50, 0x00A, 0xA0A, 0x0AA, 0xAAA,
+    0x555, 0xF55, 0x5F5, 0xFF5, 0x55F, 0xF5F, 0x5FF, 0xFFF,
+};
 /* 2 planes: what each of the eight ANSI colours becomes (warm ones red, cool ones cyan), and the four colours shown */
 static const u8 map2[8] = { 0, 1, 2, 1, 2, 1, 2, 3 };
 const u16 gfx_palette2[4] = { 0x000, 0xC22, 0x2BB, 0xBBB };
@@ -254,6 +259,20 @@ static u32 bg_of(u8 colour)
 #define HOT __attribute__((optimize("O2")))     /* gfx.c is built -Os (cold set-up code); drawing is not */
 static u32 *rglyph;                     /* [224][8], with more than one plane */
 
+/* A console's loaded 8-bit font (DESIGN D20 4.2: CON_FONT, each byte one of its 256 glyphs, indexed by the byte), with
+ * its own four-bytes table while there is more than one plane. Only the shown console is drawn, so one pointer says
+ * whose glyphs put_glyph takes (0: the ROM's Topaz, indexed byte - 32, a byte below 32 drawn as '?'). Every font is
+ * on a list, so a depth change builds or frees their tables with Topaz's. */
+struct gfont {
+    struct gfont *next;
+    u32 *r;                             /* [256][8], with more than one plane */
+    u8 g[256][8];
+};
+static struct gfont *fonts;
+static const struct gfont *sfont;
+static int scga;                        /* the shown console asked for the CGA palette (CONR_CGAPAL) */
+static volatile int pal_dirty;          /* the Copper list's colours are to be written at the next vertical blank */
+
 static HOT void draw1(u8 *p, const u8 *g, u32 attr, u32 x)
 {
     for (int y = 0; y < 8; y++) {
@@ -304,9 +323,10 @@ static HOT void draw2(u8 *p, const u32 *g, u32 m1, u32 m2)
 
 static HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
 {
-    int gi = (ch < 32 ? '?' : ch) - 32;
+    const struct gfont *f = sfont;
+    int gi = f ? ch : (ch < 32 ? '?' : ch) - 32;
     if (gfx_depth == 1) {
-        draw1(p, glyphs[gi], attr, (attr & 1) ? 0xFF : 0);
+        draw1(p, f ? f->g[gi] : glyphs[gi], attr, (attr & 1) ? 0xFF : 0);
         return;
     }
     u32 fg = colour & 15, bg = colour >> 4;
@@ -326,7 +346,7 @@ static HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
         fg = bg;
         bg = t;
     }
-    const u32 *g = rglyph + gi * 8;
+    const u32 *g = (f ? f->r : rglyph) + gi * 8;
     u32 tmp[8];
     if (attr & 6) {
         for (int y = 0; y < 8; y++) {
@@ -386,12 +406,24 @@ static void cop_point(int o)
 /* vertical-blank interrupt: apply a scroll. The Copper moves the pointers after its WAIT for line COP_WAIT_LINE, so
  * they are written only while the beam is well before it (else at the next vertical blank): the planes, and the high
  * and low words of each pointer, always move together. */
+/* colour i of the Copper list at `depth` planes: one plane grey on black, two the four colours, more the shown
+ * console's palette (Zenix's, or CGA's for a console with CONR_CGAPAL) */
+static u16 colour_of(int i, int depth)
+{
+    return depth == 1 ? (i ? gfx_palette[7] : 0) : depth == 2 ? gfx_palette2[i] : (scga ? cga_palette : gfx_palette)[i];
+}
+
 void gfx_vblank(void)
 {
     int o = off;
-    if (up && o != hw_off && (int)((VPOSL >> 8) & 0x1FF) < COP_WAIT_LINE - 4) {
+    if (up && (o != hw_off || pal_dirty) && (int)((VPOSL >> 8) & 0x1FF) < COP_WAIT_LINE - 4) {
         cop_point(o);
         hw_off = o;
+        if (pal_dirty) {
+            pal_dirty = 0;
+            for (int i = 0; i < (1 << gfx_depth); i++)
+                cop[cop_col + 2 * i + 1] = colour_of(i, gfx_depth);
+        }
     }
 }
 
@@ -488,7 +520,7 @@ static void build_cop(volatile u16 *l, int depth, int *col, int *ptr)
     MOVE(0x094, f3 ? F3_DDFSTOP : 0xD4);
     *col = (int)(c - l);
     for (int i = 0; i < (1 << depth); i++)
-        MOVE(0x180 + 2 * i, depth == 1 ? (i ? gfx_palette[7] : 0) : depth == 2 ? gfx_palette2[i] : gfx_palette[i]);
+        MOVE(0x180 + 2 * i, colour_of(i, depth));
     *c++ = (u16)(COP_WAIT_LINE << 8 | 1);       /* WAIT for line COP_WAIT_LINE */
     *c++ = 0xFFFE;
     *ptr = (int)(c - l);
@@ -499,14 +531,67 @@ static void build_cop(volatile u16 *l, int depth, int *col, int *ptr)
 #undef MOVE
 }
 
-/* the glyphs kept four times in a long, for more than one plane (7 KB): 0 when out of memory */
-static u32 *make_rglyph(void)
+/* glyph lines kept four times in a long, for more than one plane (Topaz's 7 KB, a loaded font's 8 KB): 0 when out
+ * of memory */
+static u32 *make_r(const u8 *g, u32 n)
 {
-    u32 *r = kmalloc(sizeof glyphs * 4);
+    u32 *r = kmalloc(n * 4);
     if (r)
-        for (u32 i = 0; i < sizeof glyphs; i++)
-            r[i] = ((const u8 *)glyphs)[i] * 0x01010101u;
+        for (u32 i = 0; i < n; i++)
+            r[i] = g[i] * 0x01010101u;
     return r;
+}
+static u32 *make_rglyph(void) { return make_r(glyphs[0], sizeof glyphs); }
+
+/* every loaded font's table freed (one plane draws from the plain glyphs) */
+static void fonts_flat(void)
+{
+    for (struct gfont *f = fonts; f; f = f->next) {
+        kfree(f->r);
+        f->r = 0;
+    }
+}
+
+struct gfont *gfx_font_new(const u8 *g)
+{
+    struct gfont *f = kmalloc(sizeof *f);
+    if (!f)
+        return 0;
+    memcpy(f->g, g, sizeof f->g);
+    f->r = 0;
+    if (gfx_depth > 1 && !(f->r = make_r(f->g[0], sizeof f->g))) {
+        kfree(f);
+        return 0;
+    }
+    f->next = fonts;
+    fonts = f;
+    return f;
+}
+
+void gfx_font_free(struct gfont *f)
+{
+    if (!f)
+        return;
+    if (sfont == f)
+        sfont = 0;
+    for (struct gfont **pp = &fonts; *pp; pp = &(*pp)->next)
+        if (*pp == f) {
+            *pp = f->next;
+            break;
+        }
+    kfree(f->r);
+    kfree(f);
+}
+
+/* the console shown changed, or its font or rules did: its glyphs from now on, its palette at the next vertical blank */
+void gfx_show(const struct gfont *f, int cga)
+{
+    sfont = f;
+    cga = cga != 0;
+    if (cga != scga) {
+        scga = cga;
+        pal_dirty = 1;
+    }
 }
 
 static void say_depth(void)
@@ -585,11 +670,17 @@ int gfx_set_colours(int colours)
     u8 *nb = mem_alloc((u32)BUFL * ls, MEM_CHIP, 0);
     if (d > 1 && !rg)
         rg = make_rglyph();
-    if (!nc || !nb || (d > 1 && !rg)) {
+    int fok = 1;                        /* a loaded font's table too (D20), built before anything changes */
+    for (struct gfont *f = fonts; d > 1 && f && fok; f = f->next)
+        if (!f->r && !(f->r = make_r(f->g[0], sizeof f->g)))
+            fok = 0;
+    if (!nc || !nb || (d > 1 && !rg) || !fok) {
         mem_free((void *)nc);
         mem_free(nb);
         if (rg != rglyph)
             kfree(rg);
+        if (gfx_depth == 1)
+            fonts_flat();               /* the tables just built: one plane keeps none */
         return -ENOMEM;
     }
     int col, ptr;
@@ -625,6 +716,7 @@ int gfx_set_colours(int colours)
     if (d == 1) {                       /* one plane draws from the plain glyphs */
         kfree(rglyph);
         rglyph = 0;
+        fonts_flat();
     }
     say_depth();
     term_redraw();
@@ -641,6 +733,7 @@ void gfx_panic(void)
 {
     if (!up)
         return;
+    sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable) */
     cop_point(off);
     cop[cop_col + 1] = 0x800;
     for (int i = 1; i < (1 << gfx_depth); i++)

@@ -77,12 +77,95 @@ static void scroll(void)
     printf(ESC "[r" ESC "[31;1H" ESC "[42m" ESC "[J" ESC "[m");
 }
 
+/* DESIGN D20 step 1: a console's loaded font and the BBS rules (tools/colour-test.sh). FILE is a PSF1 font; without
+ * one a test font made here: glyph b shows its two hex digits as bits two pixels wide (lines 1-3 and 4-6), so a
+ * screenshot names every cell's glyph. On fd 1 (the console): the font, then every rule but LFONLY; drawn (rows 1-based):
+ *   1      'H' after a 'Z' at 5,5 and ESC[2J (CONR_CLRHOME: the cursor went home)
+ *   3-18   bytes 16r .. 16r + 15 in columns 1-16 (CONR_PCCTRL: the controls are glyphs; BEL BS HT LF CR ESC and NUL,
+ *          which act, as spaces)
+ *   20-21  the 16 colours as blocks of 5 columns (ESC[40-47m, ESC[100-107m: CONR_CGAPAL's palette)
+ *   23     ESC[1;31m R, ESC[0;31m r (CONR_BRIGHT: R bright red, not bold); ESC[5;44m and two spaces, ESC[0;44m and two
+ *          (CONR_ICE: a bright blue background, then the plain one), at columns 1-6
+ *   24-26  80 W, then CR LF and X (CONR_WRAPNOW: row 25 stays empty, X at 26,1)
+ *   27-28  with CONR_LFONLY: A, LF, B (B at 28,2)
+ * Keys: q cleans up (the screen cleared, the font and rules dropped) and ends; x ends at once (the kernel drops them);
+ * 2 4 8 6 switch the display to 2, 4, 8, 16 colours (root). */
+static unsigned char *psf_file(const char *path)
+{
+    static unsigned char b[2052];
+    if (!path) {
+        b[0] = 0x36; b[1] = 0x04; b[2] = 0; b[3] = 8;
+        static const unsigned char wide[16] = { 0x00, 0x03, 0x0C, 0x0F, 0x30, 0x33, 0x3C, 0x3F,
+                                                0xC0, 0xC3, 0xCC, 0xCF, 0xF0, 0xF3, 0xFC, 0xFF };
+        for (int c = 0; c < 256; c++) {         /* lines 1-3 the high nibble, 4-6 the low one, each bit 2 pixels */
+            unsigned char *g = b + 4 + 8 * c;
+            g[1] = g[2] = g[3] = wide[c >> 4];
+            g[4] = g[5] = g[6] = wide[c & 15];
+        }
+        return b;
+    }
+    int fd = sys_open(path, O_RDONLY);
+    if (fd < 0) { fprintf(2, "termtest: %s: %s\n", path, zstrerror(fd)); return 0; }
+    int n = sys_read(fd, b, sizeof b);
+    sys_close(fd);
+    if (n != (int)sizeof b) { fprintf(2, "termtest: %s: not a 2,052-byte PSF1 font\n", path); return 0; }
+    return b;
+}
+
+static int pcfont(const char *path)
+{
+    unsigned char *f = psf_file(path);
+    if (!f) return 1;
+    int r = sys_confont(1, f, 2052);
+    if (r < 0) { fprintf(2, "termtest: CON_FONT: %s\n", zstrerror(r)); return 1; }
+    u32 all = CONR_PCCTRL | CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_ICE | CONR_CGAPAL;
+    r = sys_conrules(1, all, all | CONR_LFONLY);
+    if (r < 0) { fprintf(2, "termtest: CON_RULES: %s\n", zstrerror(r)); sys_confont(1, 0, 0); return 1; }
+    printf(ESC "[?25l" ESC "[m" ESC "[5;5HZ" ESC "[2JH");
+    for (int row = 0; row < 16; row++) {
+        unsigned char l[16];
+        printf(ESC "[%d;1H", row + 3);
+        for (int c = 16 * row; c < 16 * row + 16; c++) {
+            int acts = c == 0 || c == 7 || c == 8 || c == 9 || c == 10 || c == 13 || c == 27;
+            l[c - 16 * row] = acts ? ' ' : (unsigned char)c;
+        }
+        sys_write(1, l, sizeof l);
+    }
+    for (int r2 = 20; r2 <= 21; r2++) {
+        printf(ESC "[%d;1H", r2);
+        for (int i = 0; i < 16; i++) printf(ESC "[%dm     ", i < 8 ? 40 + i : 100 + i - 8);
+        printf(ESC "[m");
+    }
+    printf(ESC "[23;1H" ESC "[1;31mR" ESC "[0;31mr" ESC "[5;44m  " ESC "[0;44m  " ESC "[m");
+    printf(ESC "[24;1H%s\r\nX", "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW");
+    sys_conrules(1, CONR_LFONLY, CONR_LFONLY);
+    printf(ESC "[27;1HA\nB");
+    sys_conrules(1, 0, CONR_LFONLY);
+    printf(ESC "[30;1H");
+    sys_ttymode(TTY_RAW);
+    for (;;) {
+        char b[8];
+        int n = sys_read(0, b, sizeof b);
+        if (n <= 0 || b[0] == 'q') break;
+        if (b[0] == 'x') return 0;              /* the kernel drops the font and the rules (D20 4.2) */
+        int c = b[0] == '2' ? 2 : b[0] == '4' ? 4 : b[0] == '8' ? 8 : b[0] == '6' ? 16 : 0;
+        if (c && (r = sys_console(CON_COLOURS, c)) < 0)
+            fprintf(2, "termtest: colours %d: %s\n", c, zstrerror(r));
+    }
+    sys_ttymode(0);
+    printf(ESC "[m" ESC "[2J" ESC "[H" ESC "[?25h");       /* cleared before the font goes (D20 4.2) */
+    sys_conrules(1, 0, CONR_PCCTRL | CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_ICE | CONR_CGAPAL | CONR_LFONLY);
+    sys_confont(1, 0, 0);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 1 && !strcmp(argv[1], "pcfont")) return pcfont(argc > 2 ? argv[2] : 0);
     if (argc > 1 && !strcmp(argv[1], "columns")) { columns(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "colours")) { colours(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "scroll")) { scroll(); return 0; }
-    if (argc > 1) { fprintf(2, "usage: termtest [columns|colours|scroll]\n"); return 2; }
+    if (argc > 1) { fprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]]\n"); return 2; }
     int sz = sys_ttyinfo();
     printf(ESC "[2J" ESC "[H");
     printf(ESC "[7m Zenix terminal test " ESC "[0m  size %dx%d\n", sz & 0xFFFF, sz >> 16);

@@ -178,9 +178,10 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 # The RAM floppy (zenix-ram.adf) holds the bootblock (1 KB), the kernel and the RAM disk (RAMDISK_K KB) in 880 KB: the
 # kernel may grow to KERNEL_MAX bytes. Every build says how much is left; tools/mkadf.py refuses an image that is over.
 # The mount tests' floppy (zenix-mount.adf) has a RAM disk of its own size (RAMDISK_MOUNT_K: it carries /sbin/zfsd,
-# DESIGN D19 step 1), so its kernel limit is lower; the build says that one too.
+# DESIGN D19 step 1), so its kernel limit is lower; the build says that one too. Its RAM disk carries no test
+# scripts (NOTESTS=1: the mount tests run none of /tests); that made room for D20 step 1's 8 KB (3 blocks were free).
 RAMDISK_K := 704
-RAMDISK_MOUNT_K := 728
+RAMDISK_MOUNT_K := 720
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh
@@ -229,7 +230,7 @@ $(BUILD)/root-ram.img: $(USERZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(RAMAPPS)" $(RAMDISK_K)K 128
 
 $(BUILD)/root-mount.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh Makefile
-	NOMAN=1 NOPURE=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" $(RAMDISK_MOUNT_K)K 128
+	NOMAN=1 NOPURE=1 NOTESTS=1 tools/mkroot.sh $@ $(BUILD) "$(MOUNTAPPS)" $(RAMDISK_MOUNT_K)K 128
 
 $(BUILD)/zenix-mount.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-mount.img tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-mount.img

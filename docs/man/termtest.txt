@@ -4,7 +4,7 @@ NAME
     termtest - terminal feature test
 
 SYNOPSIS
-    termtest [columns|colours|scroll]
+    termtest [columns|colours|scroll|pcfont [FILE]]
 
 DESCRIPTION
     Draws a test page: bold, underline and inverse text, a 36-column box
@@ -22,7 +22,15 @@ DESCRIPTION
     and inverse, a 256-colour and a true-colour sample; q quits. termtest
     scroll: 100 coloured lines (every fifth erased to the line's end with
     a background colour), then a scroll region with inserted and deleted
-    lines; it ends by itself.
+    lines; it ends by itself. termtest pcfont: loads FILE (a PSF1 font)
+    or a test font of its own (each glyph shows its byte's two hex digits
+    as wide bits) as the console's font, sets the BBS rules and draws all
+    256 bytes as glyphs, the CGA palette's 16 blocks, a bright and an iCE
+    sample, a wrapped full row and a line feed without carriage return
+    (the rows are listed in user/termtest.c); q clears the screen, drops
+    the font and the rules and quits, x quits at once (the kernel then
+    drops them), 2 4 8 6 switch the display to 2, 4, 8 or 16 colours
+    (root).
 
 SEE ALSO
     clear(1), edit(1)

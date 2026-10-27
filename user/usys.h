@@ -189,6 +189,18 @@ static inline int sys_killsig(int pid, int sig) { return sys3(24, (u32)pid, (u32
 static inline int sys_setfgpg(int pg) { return sys3(23, (u32)pg, 1, 0); }     /* the tty's foreground: process group pg */
 #define CON_COLOURS 1           /* sys_console: value 2, 4, 8 or 16 (root), 0 asks -> the colours shown now */
 static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 0); }   /* the 2 MB diet (D14 section 11) */
+/* DESIGN D20 4.5: a console's 8-bit font and rules, the console named by a descriptor (op | (fd + 1) << 8) */
+#define CON_FONT 2              /* a PSF1 font (mode 0, height 8, 2,052 bytes) for the console; a null pointer drops it */
+#define CON_RULES 3             /* the rules: bits, mask of the bits to change (0 asks) -> the bits before */
+#define CONR_PCCTRL 1           /* bytes 1-31 but BEL BS HT LF CR ESC are glyphs */
+#define CONR_WRAPNOW 2          /* the last column wraps at once */
+#define CONR_CLRHOME 4          /* ESC[2J homes the cursor */
+#define CONR_BRIGHT 8           /* SGR 1 is the bright foreground, not bold */
+#define CONR_ICE 16             /* SGR 5 and 6 the bright background */
+#define CONR_CGAPAL 32          /* the CGA palette while shown */
+#define CONR_LFONLY 64          /* LF without CR */
+static inline int sys_confont(int fd, const void *psf, u32 n) { return sys3(89, CON_FONT | (u32)(fd + 1) << 8, (u32)psf, n); }
+static inline int sys_conrules(int fd, u32 bits, u32 mask) { return sys3(89, CON_RULES | (u32)(fd + 1) << 8, bits, mask); }
 #define SIGHUP   1
 #define SIGINT   2
 #define SIGQUIT  3

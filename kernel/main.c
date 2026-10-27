@@ -82,8 +82,10 @@ static void panic_begin(void)
     if (panic_printing) {
         klog_mirror_off();
         panic_noscreen = 1;
-    } else if (gfx_up() && !panic_noscreen)
+    } else if (gfx_up() && !panic_noscreen) {
+        term_panic();                   /* D20: Topaz and no console rules before the text is drawn */
         klog_mirror_on();
+    }
     panic_printing = 1;
 }
 

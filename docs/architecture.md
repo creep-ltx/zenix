@@ -1266,6 +1266,36 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   set); with more than one plane the glyphs are kept a second time with each line repeated in all four bytes of a
   long (7 KB), so a line is one read. Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
   before the OS is killed. A kernel panic turns the background dark red and every other colour white.
+- **A console's font and rules for BBS terminals** (DESIGN D20 4.2-4.5, `SYS_console`'s ops 2 and 3, step 1 built on
+  branch t12 2026-10-27). The op word is `op | (fd + 1) << 8`: the console is named by a descriptor (`FT_TTY` with a
+  console number, else -ENOTTY; none, -EBADF), which must be the caller's controlling tty with the caller in its
+  foreground (`tty_in_fg`: the foreground group or process, or none set; only asking the rules is allowed in the
+  background) or any console for root (-EPERM otherwise); no display -ENODEV; `CON_COLOURS` takes no descriptor.
+  **`CON_FONT`** (a2 the data, a3 its size; a2 0 drops it) loads a PSF1 font checked as untrusted (inside the
+  caller's memory, -EFAULT; magic `36 04`, mode 0, height 8, exactly 2,052 bytes, -EINVAL): `gfx_font_new` copies the
+  2,048 glyph bytes and, above one plane, builds its four-bytes table (8 KB; -ENOMEM: nothing changes). Meaning, frozen:
+  an 8-bit mode, each byte one of its 256 glyphs, no UTF-8 while it is loaded. `gfx.c` keeps one pointer, the
+  **shown console's font** (0: Topaz, indexed byte - 32 with bytes below 32 drawn `?`; a loaded font indexed by the
+  byte), set by `term_redraw` (every console switch and depth change goes through it) and when the shown console's
+  font changes; the grid holds bytes, so a load or a drop redraws the console in the new glyphs. Every loaded font is
+  on a list so `gfx_set_colours` builds their tables before a switch above one plane (no memory: -ENOMEM, nothing
+  changes) and frees them at one plane. **`CON_RULES`** (a2 the bits, a3 the mask to change; 0 only asks; unknown
+  bits -EINVAL) answers the bits before. The seven rules act where `term.c` already branches: `CONR_PCCTRL` 1 (bytes
+  1-31 but BEL BS HT LF CR ESC stored and drawn as glyphs; inside a sequence a control still acts or is dropped; NUL
+  ignored), `CONR_WRAPNOW` 2 (the last column wraps at once), `CONR_CLRHOME` 4 (`ESC[2J` homes), `CONR_BRIGHT` 8 (SGR 1
+  sets the bright foreground, not bold), `CONR_ICE` 16 (SGR 5 and 6 the bright background, 25 ends it),
+  `CONR_CGAPAL` 32 (the CGA palette while the console is shown: written into the Copper list's colour moves at the
+  next vertical blank, as the plane pointers; no effect at 1 and 2 planes), `CONR_LFONLY` 64 (LF without CR). The
+  colour rules act **when a cell is stored**: a per-console mask (`cor`: 0x08 bright foreground, 0x80 bright
+  background, saved by `ESC 7`, cleared by SGR 0/22/25 and when its rule goes) is or-ed into the colour byte, so the
+  grid, the scrollback and redraws hold the bright colours and dropping a rule changes no cell. **Owners:** the last
+  setter of a font, and of the rules, owns it; `proc_exit` calls `term_release`, which drops the font (the console
+  redrawn in Topaz) and clears the rules of a process that owned them; `ESC c` resets neither. **A panic** first
+  sets the shown console back to Topaz, no rules and Zenix's palette (`term_panic` in `panic_begin`; `gfx_panic` sets
+  the shown font to Topaz too), so the panic text is always readable. Memory: 20 bytes per console, a loaded font
+  2 KB plus 8 KB above one plane, only while loaded; the kernel image +1,900 bytes. Tests: `tools/term-test.sh` (each
+  rule's stored cells, the ops' checks and errors, owners, the palette at a switch, the panic reset, a fuzz with every
+  rule), `tools/colour-test.sh` (`termtest pcfont`'s screenshots at 1-4 planes; section 13).
 - **Input path: interrupts queue, `kwork` works** (`kernel/main.c`, audit B4/B5). The interrupt handlers do
   only what cannot wait: the keyboard handler (`kbd_isr`) reads the byte, answers the keyboard's handshake and puts
   the raw code into a 128-slot ring; the serial handler (`serial_rx_isr`, level 5) moves each byte from Paula into a
@@ -1451,7 +1481,10 @@ outputs (`tools/cmds-test.sh`).
   warm reset (Ctrl+Amiga+Amiga pressed through wtype; `shot.py` `RESET_AT=`). `tools/colour-test.sh` checks the
   colour console by screenshots at 1, 2, 3 and 4 bitplanes (`make GFXDEPTH=n`): `termtest columns` decoded cell by
   cell (all 80 columns, the edges where one plane has them), the 16 colours against the palette, a screen after
-  `termtest scroll` pixel-identical to a redraw from the grid, the scrollback's colours; and `/etc/console`'s setting
+  `termtest scroll` pixel-identical to a redraw from the grid, the scrollback's colours; `termtest pcfont` (DESIGN D20:
+  every cell's 8 x 8 pixels matched against the loaded test font, the BBS rules, the CGA palette, a console switch
+  away and back, at 3 planes root's switch to 16 colours under the page, the kernel dropping font and rules when
+  termtest ends without cleaning up, the screen cleared before a drop); and `/etc/console`'s setting
   on the A1200 without fast RAM (4 and 16 colours switched to and checked the same way, a wrong value refused); a
   serial script's `shot NAME` line
   takes a screenshot when the script gets there (`shot.py`, `serial-tap.py`). `make BUILD=/tmp/x` builds everything
