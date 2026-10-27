@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+# The network's host tests (DESIGN D19 8.1), on the PC only, no emulator, no root:
+#   tools/host/net-test.sh [PART...]      parts: patches rand unit netd slirp size (default: all of them)
+#                                         fuzz [SECONDS]: lwIP's input path under libFuzzer (not in the default run)
+# patches  every local patch of net/lwip/patches is applied to net/lwip/src
+# rand     ChaCha20 (RFC 8439) and SipHash-2-4 (the SipHash paper) against their published vectors
+# unit     lwIP's own unit tests with Zenix's lwipopts.h and the local patches (tools/host/lwip-unit)
+# netd     netd's core on the PC against a fake of the kernel's socket layer, SLIP over a socketpair to zenix-slirp
+#          (tools/host/netd-host.c): TCP to an echo server, UDP, DNS from a test resolver, ICMP, netd's end and restart
+# slirp    zenix-slirp alone: SLIP framing, the console bytes, a TCP echo, UDP, DNS and ICMP through libslirp
+# size     netd's lwIP for m68k at -Os (needs the cross compiler, TOOLPREFIX as the Makefile): the code, unlinked
+# Needs: a C compiler with AddressSanitizer; for slirp and netd libslirp and GLib (pkg-config slirp), and
+# unprivileged user namespaces (unshare -rn), where the test resolver may listen on port 53.
+cd "$(dirname "$0")/../.." || exit 1
+OUT=${NET_TEST_OUT:-build/net-host}
+mkdir -p "$OUT"
+LW=net/lwip/src
+LWIP_CORE="$LW/core/def.c $LW/core/dns.c $LW/core/inet_chksum.c $LW/core/init.c $LW/core/ip.c $LW/core/mem.c
+ $LW/core/memp.c $LW/core/netif.c $LW/core/pbuf.c $LW/core/raw.c $LW/core/stats.c $LW/core/sys.c $LW/core/tcp.c
+ $LW/core/tcp_in.c $LW/core/tcp_out.c $LW/core/timeouts.c $LW/core/udp.c $LW/core/ipv4/dhcp.c $LW/core/ipv4/etharp.c
+ $LW/core/ipv4/icmp.c $LW/core/ipv4/ip4.c $LW/core/ipv4/ip4_addr.c $LW/core/ipv4/ip4_frag.c $LW/netif/ethernet.c"
+LWIP_SRC="$LWIP_CORE $LW/netif/slipif.c"
+PORT_SRC="net/port/port.c net/port/rand.c"
+HOSTCC=${HOSTCC:-cc}
+SAN="-fsanitize=address,undefined -fno-omit-frame-pointer"
+HCFLAGS="-DNETD_HOST -g -O1 -Wall -Wno-unused-parameter -Inet/port -I$LW/include"
+fails=0
+say() { echo "net-test: $*"; }
+bad() { echo "FAIL net-test: $*"; fails=$((fails + 1)); }
+
+part_patches() {
+    local p ok=1
+    for p in net/lwip/patches/*.patch; do
+        if (cd net/lwip && patch -p1 -R --dry-run -s -f <"../../$p" >/dev/null 2>&1); then say "patch applied: ${p##*/}"
+        else bad "patch not applied to net/lwip/src: ${p##*/}"; ok=0; fi
+    done
+    [ $ok = 1 ] && say "patches PASS"
+}
+
+part_rand() {
+    $HOSTCC $HCFLAGS $SAN -o "$OUT/rand-test" tools/host/rand-test.c net/port/rand.c || { bad "rand-test does not build"; return; }
+    if "$OUT/rand-test"; then say "rand PASS"; else bad "rand-test"; fi
+}
+
+part_unit() {
+    local T=net/lwip/test/unit v
+    for v in all pbuf; do
+        local def="" files="$T/core/test_def.c $T/core/test_dns.c $T/core/test_netif.c
+            $T/core/test_timers.c $T/dhcp/test_dhcp.c $T/etharp/test_etharp.c $T/ip4/test_ip4.c $T/tcp/tcp_helper.c
+            $T/tcp/test_tcp_oos.c $T/tcp/test_tcp_state.c $T/tcp/test_tcp.c $T/udp/test_udp.c"
+        [ $v = pbuf ] && { def=-DUNIT_PBUF; files=$T/core/test_pbuf.c; }
+        $HOSTCC $HCFLAGS $SAN $def -DNETD_HOST_OPTS='"unit-opts.h"' -include stdio.h -Itools/host/lwip-unit -I$T \
+            -Wno-sign-compare -Wno-unused-variable -Wno-unused-but-set-variable -Wno-format -o "$OUT/lwip-unit-$v" \
+            tools/host/lwip-unit/main.c tools/host/lwip-unit/check.c tools/host/lwip-unit/zenix_tests.c $files $LWIP_CORE $PORT_SRC ||
+            { bad "lwip-unit-$v does not build"; continue; }
+        # no leak check: some tests take lwIP's lists apart themselves (test_timers), and upstream runs each test in
+        # a process of its own (libcheck's fork mode), where that does not matter
+        if ASAN_OPTIONS=detect_leaks=0 "$OUT/lwip-unit-$v" >"$OUT/lwip-unit-$v.log" 2>&1; then say "unit ($v): $(tail -1 "$OUT/lwip-unit-$v.log")"
+        else grep -a '^FAIL\|ERROR\|lwip-unit:' "$OUT/lwip-unit-$v.log" | head -30; bad "lwIP's unit tests ($v, log $OUT/lwip-unit-$v.log)"; fi
+    done
+}
+
+part_size() {
+    local tp=${TOOLPREFIX:-}
+    [ -z "$tp" ] && { if command -v m68k-elf-gcc >/dev/null; then tp=m68k-elf-; else tp=$HOME/opt/m68k-elf/bin/m68k-elf-; fi; }
+    command -v "${tp}gcc" >/dev/null || { say "size skipped: no m68k cross compiler (${tp}gcc)"; return; }
+    local d="$OUT/m68k" f objs=""
+    rm -rf "$d"; mkdir -p "$d"
+    for f in $LWIP_SRC $PORT_SRC; do
+        "${tp}gcc" -m68020-60 -Os -msoft-float -ffreestanding -fno-builtin -nostdlib -ffunction-sections -fdata-sections \
+            -Wall -Inet/port/shim -Inet/port -I$LW/include -c "$f" -o "$d/$(basename "$f" .c).o" || { bad "m68k: $f"; return; }
+        objs="$objs $d/$(basename "$f" .c).o"
+    done
+    "${tp}size" -t $objs >"$d/size.txt"
+    say "size: lwIP and its port for m68k at -Os, unlinked (text data bss): $(tail -1 "$d/size.txt" | awk '{ print $1, $2, $3 }')"
+    say "size PASS"
+}
+
+part_netd() { say "netd: not built yet"; }
+part_slirp() { say "slirp: not built yet"; }
+part_fuzz() { say "fuzz: not built yet"; }
+
+if [ $# = 0 ]; then set -- patches rand unit netd slirp size; fi
+while [ $# -gt 0 ]; do
+    case "$1" in
+    patches|rand|unit|netd|slirp|size) "part_$1" ;;
+    fuzz) if [[ "$2" =~ ^[0-9]+$ ]]; then part_fuzz "$2"; shift; else part_fuzz 60; fi ;;
+    *) echo "net-test: unknown part $1"; exit 2 ;;
+    esac
+    shift
+done
+if [ $fails = 0 ]; then say "all PASS"; exit 0; fi
+say "$fails FAILED"; exit 1

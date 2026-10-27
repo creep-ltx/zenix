@@ -139,6 +139,11 @@ struct memp_malloc_helper
 #endif /* MEM_USE_POOLS */
 
 void  memp_init(void);
+#if MEMP_MEM_MALLOC && defined(MEMP_MEM_MALLOC_LIMIT) && MEMP_MEM_MALLOC_LIMIT
+/* Zenix local patch 0001: the limit and the count of each pool (memp.c) */
+extern u16_t memp_limit[MEMP_MAX];
+extern u16_t memp_count[MEMP_MAX];
+#endif
 
 #if MEMP_OVERFLOW_CHECK
 void *memp_malloc_fn(memp_t type, const char* file, const int line);

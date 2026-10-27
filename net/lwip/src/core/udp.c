@@ -102,6 +102,11 @@ udp_new_port(void)
   u16_t n = 0;
   struct udp_pcb *pcb;
 
+#if defined(LWIP_RANDOMIZE_EACH_LOCAL_PORT) && LWIP_RANDOMIZE_EACH_LOCAL_PORT
+  /* Zenix local patch 0002: every ephemeral port starts the search at a random place (RFC 6056, algorithm 1);
+   * the loop below adds one */
+  udp_port = (u16_t)(UDP_ENSURE_LOCAL_PORT_RANGE(LWIP_RAND()) - 1);
+#endif
 again:
   if (udp_port++ == UDP_LOCAL_PORT_RANGE_END) {
     udp_port = UDP_LOCAL_PORT_RANGE_START;

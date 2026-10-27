@@ -12,7 +12,8 @@ Only the files Zenix builds or tests were taken, unchanged except for the local 
   src/core/ipv4/*.c       dhcp etharp icmp ip4 ip4_addr ip4_frag (no acd, autoip, igmp)
   src/netif/              ethernet.c slipif.c
   src/include/lwip/       every header except apps/ (several are included whatever the options say)
-  src/include/netif/      etharp.h ethernet.h slipif.h
+  src/include/netif/      etharp.h ethernet.h slipif.h ppp/ppp_opts.h ppp_impl.h pppoe.h (included
+                          whatever PPP_SUPPORT says; empty without PPP)
   test/unit/              lwip_check.h and the suites for the parts Zenix uses (core tcp udp ip4 etharp dhcp)
   test/fuzz/              README and the sample inputs (seeds for tools/host/lwip-fuzz.c)
 Not taken: IPv6, PPP, the sockets/netconn layers (they need threads), the apps, contrib/.

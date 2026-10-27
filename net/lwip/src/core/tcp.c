@@ -1018,6 +1018,11 @@ tcp_new_port(void)
   u16_t n = 0;
   struct tcp_pcb *pcb;
 
+#if defined(LWIP_RANDOMIZE_EACH_LOCAL_PORT) && LWIP_RANDOMIZE_EACH_LOCAL_PORT
+  /* Zenix local patch 0002: every ephemeral port starts the search at a random place (RFC 6056, algorithm 1),
+   * not one random start and then the next port each time; the loop below adds one */
+  tcp_port = (u16_t)(TCP_ENSURE_LOCAL_PORT_RANGE(LWIP_RAND()) - 1);
+#endif
 again:
   tcp_port++;
   if (tcp_port == TCP_LOCAL_PORT_RANGE_END) {

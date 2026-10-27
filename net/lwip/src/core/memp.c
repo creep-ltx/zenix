@@ -83,6 +83,19 @@ const struct memp_desc *const memp_pools[MEMP_MAX] = {
 #include "lwip/priv/memp_std.h"
 };
 
+#if MEMP_MEM_MALLOC && defined(MEMP_MEM_MALLOC_LIMIT) && MEMP_MEM_MALLOC_LIMIT
+/* Zenix local patch 0001: with MEMP_MEM_MALLOC the pools come from the heap and upstream ignores their sizes.
+ * Count every pool and refuse an element past memp_limit[type], which memp_init sets to the pool's MEMP_NUM_*
+ * and the application may change at any time after lwip_init() (a lower limit than the count frees nothing,
+ * it only refuses new elements). */
+static const u16_t memp_num_default[MEMP_MAX] = {
+#define LWIP_MEMPOOL(name,num,size,desc) (num),
+#include "lwip/priv/memp_std.h"
+};
+u16_t memp_limit[MEMP_MAX];
+u16_t memp_count[MEMP_MAX];
+#endif
+
 #ifdef LWIP_HOOK_FILENAME
 #include LWIP_HOOK_FILENAME
 #endif
@@ -228,6 +241,10 @@ memp_init(void)
   /* for every pool: */
   for (i = 0; i < LWIP_ARRAYSIZE(memp_pools); i++) {
     memp_init_pool(memp_pools[i]);
+#if MEMP_MEM_MALLOC && defined(MEMP_MEM_MALLOC_LIMIT) && MEMP_MEM_MALLOC_LIMIT
+    memp_limit[i] = memp_num_default[i];
+    memp_count[i] = 0;
+#endif
 
 #if LWIP_STATS && MEMP_STATS
     lwip_stats.memp[i] = memp_pools[i]->stats;
@@ -346,10 +363,24 @@ memp_malloc_fn(memp_t type, const char *file, const int line)
   memp_overflow_check_all();
 #endif /* MEMP_OVERFLOW_CHECK >= 2 */
 
+#if MEMP_MEM_MALLOC && defined(MEMP_MEM_MALLOC_LIMIT) && MEMP_MEM_MALLOC_LIMIT
+  if (memp_count[type] >= memp_limit[type]) {
+#if MEMP_STATS
+    memp_pools[type]->stats->err++;
+#endif
+    LWIP_DEBUGF(MEMP_DEBUG | LWIP_DBG_LEVEL_SERIOUS, ("memp_malloc: pool %d at its limit\n", (int)type));
+    return NULL;
+  }
+#endif
 #if !MEMP_OVERFLOW_CHECK
   memp = do_memp_malloc_pool(memp_pools[type]);
 #else
   memp = do_memp_malloc_pool_fn(memp_pools[type], file, line);
+#endif
+#if MEMP_MEM_MALLOC && defined(MEMP_MEM_MALLOC_LIMIT) && MEMP_MEM_MALLOC_LIMIT
+  if (memp != NULL) {
+    memp_count[type]++;
+  }
 #endif
 
   return memp;
@@ -438,6 +469,10 @@ memp_free(memp_t type, void *mem)
 #endif
 
   do_memp_free_pool(memp_pools[type], mem);
+#if MEMP_MEM_MALLOC && defined(MEMP_MEM_MALLOC_LIMIT) && MEMP_MEM_MALLOC_LIMIT
+  LWIP_ASSERT("memp_free: pool count", memp_count[type] > 0);
+  memp_count[type]--;
+#endif
 
 #ifdef LWIP_HOOK_MEMP_AVAILABLE
   if (old_first == NULL) {
