@@ -10,7 +10,8 @@ amiga.zenix.test = 10.1.2.3 and never answers slow.zenix.test, and a flood contr
 spread over PORTS ports from PORT on, to this PC's 127.0.0.1 (zenix-slirp's forwards to the Amiga, -f, among the
 options: each connection becomes a SYN to the Amiga), hold them 20 s, close them and answer "done N". Then zenix-slirp on a new pty linked at SERIAL-LINK (FS-UAE's serial port), the bytes
 that are not SLIP (Zenix's console) appended to CONSOLE-LOG. It writes READY-FILE when all of that is up and runs
-until it is killed (zenix-slirp with it)."""
+until it is killed (zenix-slirp with it). ZENIX-SLIRP "-": the servers alone (SERIAL-LINK and CONSOLE-LOG unused), for
+tools/eth-test.sh, where FS-UAE's A2065 and its own slirp reach them."""
 import os, signal, socket, struct, subprocess, sys, threading, time
 
 zs, link, log, ready = sys.argv[1:5]
@@ -122,6 +123,11 @@ tcp_server(7103, flood)
 tcp_server(7102, source)
 udp_echo(7101)
 resolver({"amiga.zenix.test": "10.1.2.3"})
+if zs == "-":                           # the servers only (tools/eth-test.sh: FS-UAE's own slirp is the PC's side)
+    open(ready, "w").write("ready\n")
+    signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
+    while True:
+        time.sleep(3600)
 p = subprocess.Popen([zs, "--pty", link, "--log", log] + extra)
 signal.signal(signal.SIGTERM, lambda *a: (p.terminate(), sys.exit(0)))
 for _ in range(100):

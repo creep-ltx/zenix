@@ -108,7 +108,7 @@
 #define LWIP_DHCP_MAX_DNS_SERVERS       0
 #define DHCP_ADD_EXTRA_REQUEST_OPTIONS  , 6
 #define LWIP_HOOK_DHCP_PARSE_OPTION(netif, dhcp, state, msg, msg_type, option, len, pbuf, offset) \
-        do { LWIP_UNUSED_ARG(msg); netd_dhcp_option(netif, msg_type, option, len, pbuf, offset); } while (0)
+        do { LWIP_UNUSED_ARG(msg); LWIP_UNUSED_ARG(netif); netd_dhcp_option(dhcp, msg_type, option, len, pbuf, offset); } while (0)
 
 /* DNS (6.2): netd answers /etc/hosts itself; lwIP keeps the cache */
 #define DNS_TABLE_SIZE                  8

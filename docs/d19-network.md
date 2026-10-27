@@ -1135,6 +1135,39 @@ eth0` brings it back; netd killed: the claims released ("the network server ende
 close and end, `ifup -a` brings everything back); `tools/host/net-test.sh` (lwIP's DHCP tests with the request list
 unchanged, netd's core built on the PC).
 
+### Step 8: the A2065 driver, Ethernet in `make check` (branch n678, 2026-10-27)
+
+`net/drv/a2065.c` (`/sbin/net/a2065`, `docs/man/a2065.txt`), polled, as 5.5 says. **FS-UAE gives the A2065 a working
+network without root:** `network_card = a2065` alone uses FS-UAE's built-in slirp (its log says the backend and the
+MAC); slirp's DHCP server gives 10.0.2.15/24, the gateway 10.0.2.2 and the name server 10.0.2.3, and 10.0.2.2 reaches
+the PC's 127.0.0.1. No tap, no uaenet, no `slirp_*` option needed. Local choices:
+
+1. **The board** (read from the Am7990 data sheet's layout and Linux's `a2065.c` for the board's addresses, byte order
+   and MAC; the code is this file's own): the LANCE's RDP at +0x4000, RAP at +0x4002, 32 KB of RAM at +0x8000 that the
+   LANCE sees at 0x8000; CSR3 `BSWP`; the MAC in the initialisation block with each byte pair swapped; 16 receive and
+   4 send descriptors of 1,536-byte buffers in the board's RAM. MAC 00:80:10 + the board's serial number (FS-UAE's:
+   00:80:10:32:33:34).
+2. **No DMA region:** the LANCE writes only its own RAM, so the driver claims the board, registers a quiesce program
+   (RAP 0, then `STOP` in CSR0), copies frames between the board's RAM and netd's buffers, and takes no `DRV_DMAMEM`.
+3. **Sending:** netd's frames are copied into a free send descriptor as soon as there is one, and their tags go back at
+   once (netd may reuse the memory); frames waiting for a descriptor stay netd's until then. Short frames padded to 60.
+4. **Polling:** no sleep while frames moved in the last turn, then 1 tick, then 2 ticks when idle; netd's doorbell
+   wakes it for a frame to send. A LANCE that stopped (CSR0 `STOP` or `MERR`) is started again and said so.
+5. **Found by the test** (fixed here): DHCP's name servers never reached netd, because lwIP's `ip_current_netif()`
+   is not set for a DHCP reply that arrives before the interface has an address (the hook's `netif` was NULL); netd
+   now finds the interface by its DHCP client (`netif_dhcp_data`). netd logs the lease ("netd: eth0: DHCP gave
+   10.0.2.15") and its loss. And step 7's driver interfaces moved out of netd's BSS (12 KB every machine paid, also
+   on SLIP) into one region a driver, taken at its attach (a process has 8 regions; netd's heap takes up to 5).
+
+Sizes (*measured* 2026-10-27): `a2065` 8,752 bytes (7,776 of code); netd 83,628 bytes of code, 14.8 KB of BSS (step 5:
+72,392 and 13 KB; DHCP, ARP and Ethernet are now reached, and the driver interfaces); the kernel unchanged by this step.
+Memory on the stock A1200 (2 MB chip RAM, FS-UAE, `free` with one login): Ethernet up with DHCP 1,120 KB free, netd
+125 KB, the driver 21 KB. Tests: `tools/eth-test.sh` (FS-UAE in a user and network namespace with the PC's test servers
+of `slip-host.py`, nothing leaves the PC: DHCP's address, route and name server, ping 10.0.2.2, 10 KB TCP echo, 100 KB
+checked byte by byte at 41 KB/s *in the emulator*, UDP, `host` through DHCP's name server with no `/etc/resolv.conf`,
+the driver killed: the LANCE stopped by the kernel, restarted, DHCP again, ping; `ifdown`: the driver stops the LANCE
+and ends); `tools/drv-test.sh` and `tools/host/net-test.sh` again.
+
 ### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
 
 lwIP 2.2.1 (STABLE-2_2_1_RELEASE) in `net/lwip/` (upstream files unchanged in the first commit; two local patches in

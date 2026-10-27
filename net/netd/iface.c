@@ -28,7 +28,7 @@ struct nif {
     struct netif netif;
     int used, handle;                   /* handle: SLIP's serial port */
     struct drvif *drv;                  /* a driver's interface (Ethernet); 0 for SLIP */
-    unsigned char dhcp;                 /* its address comes from DHCP */
+    unsigned char dhcp, leased;         /* its address comes from DHCP; the lease is logged */
     u32_t dhcp_dns[2];                  /* the name servers the DHCP server named (network order) */
     char name[NETD_IFNAME];
     netif_output_fn slip_output;        /* slipif's own output, called after the room check */
@@ -419,20 +419,21 @@ struct drvif {
     int used, dead;                     /* dead: the driver ended; kept while the stack still holds its buffers */
     struct nif *f;
     unsigned nbuf, bufsize, held, dma, ntxq;
-    unsigned char *mem;                 /* netd's own memory for the buffers (0: in the DMA region) */
+    unsigned char *mem;                 /* netd's own memory for the buffers, after this struct in its region (0: DMA) */
     unsigned char *dmatx;               /* DMA: the send buffers */
     unsigned long seq;
     int reports;                        /* wrong numbers logged so far (at most a few a driver) */
     struct dbuf b[NETD_DRV_MAXBUF];
     struct txslot tx[TXQ];
 };
-static struct drvif drvifs[NETD_IFMAX * 2];
+/* taken when a driver attaches, not in netd's BSS: a SLIP-only machine pays nothing for them */
+static struct drvif *drvifs[NETD_IFMAX * 2];
 
 static void drv_free_mem(struct drvif *d)
 {
-    if (d->mem) netd_os_free(d->mem);
-    d->mem = NULL;
-    d->used = 0;
+    int i;
+    for (i = 0; i < NETD_IFMAX * 2; i++) if (drvifs[i] == d) drvifs[i] = NULL;
+    netd_os_free(d);                    /* the struct and the buffers: one region (a process has 8, netd's heap 5) */
 }
 static void dbuf_free(struct pbuf *p)
 {
@@ -491,16 +492,21 @@ int netd_drv_attach(const struct netd_ifcfg *c, const struct netd_drvattach *a, 
     struct drvif *d = NULL;
     ip4_addr_t ad, m, g;
     unsigned i, bs = 1536;              /* a frame of 1514 bytes, rounded to whole 64-byte lines */
+    int slot;
     for (i = 0; i < NETD_IFMAX; i++) if (nifs[i].used && !strcmp(nifs[i].name, c->name)) return -EEXIST;
     if (a->nrx < 1 || a->nrx > NETD_DRV_MAXBUF || a->mtu < 576 || a->mtu > 1500) return -EINVAL;
     if (c->method == NETD_INET_STATIC && !c->addr) return -EINVAL;
     if (a->dma && (!a->dmamem || ((unsigned long)a->dmamem & 63) ||
                    a->dmalen < (unsigned long)(a->nrx + NETD_DRV_BATCH) * bs)) return -EINVAL;
     for (i = 0; i < NETD_IFMAX; i++) if (!nifs[i].used) { f = &nifs[i]; break; }
-    for (i = 0; i < NETD_IFMAX * 2; i++) if (!drvifs[i].used) { d = &drvifs[i]; break; }
-    if (!f || !d) return -ENOSPC;
+    for (i = 0; i < NETD_IFMAX * 2; i++) if (!drvifs[i]) break;
+    if (!f || i == NETD_IFMAX * 2) return -ENOSPC;
+    unsigned long head = (sizeof *d + 63) & ~63ul;
+    if (!(d = netd_os_alloc(head + (a->dma ? 0 : (unsigned long)a->nrx * bs)))) return -ENOMEM;
     memset(f, 0, sizeof *f);
     memset(d, 0, sizeof *d);
+    drvifs[i] = d;
+    slot = (int)i;
     d->nbuf = a->nrx;
     d->bufsize = bs;
     d->dma = a->dma != 0;
@@ -509,7 +515,7 @@ int netd_drv_attach(const struct netd_ifcfg *c, const struct netd_drvattach *a, 
         d->dmatx = (unsigned char *)a->dmamem + (unsigned long)a->nrx * bs;
         for (i = 0; i < d->nbuf; i++) d->b[i].p = (unsigned char *)a->dmamem + (unsigned long)i * bs;
     } else {
-        if (!(d->mem = netd_os_alloc((unsigned long)d->nbuf * bs))) return -ENOMEM;
+        d->mem = (unsigned char *)d + head;
         for (i = 0; i < d->nbuf; i++) d->b[i].p = d->mem + (unsigned long)i * bs;
     }
     for (i = 0; i < d->nbuf; i++) {
@@ -550,13 +556,13 @@ int netd_drv_attach(const struct netd_ifcfg *c, const struct netd_drvattach *a, 
     *nbuf = d->nbuf;
     netd_logf("netd: %s up: %02x:%02x:%02x:%02x:%02x:%02x, %s, %u buffers%s", f->name, a->mac[0], a->mac[1], a->mac[2],
               a->mac[3], a->mac[4], a->mac[5], f->dhcp ? "DHCP" : "static", d->nbuf, d->dma ? " in its DMA memory" : "");
-    return (int)(d - drvifs);
+    return slot;
 }
 
 static struct drvif *drv_get(int h)
 {
-    if (h < 0 || h >= NETD_IFMAX * 2 || !drvifs[h].used || drvifs[h].dead) return NULL;
-    return &drvifs[h];
+    if (h < 0 || h >= NETD_IFMAX * 2 || !drvifs[h] || drvifs[h]->dead) return NULL;
+    return drvifs[h];
 }
 
 int netd_drv_rx(int h, unsigned num, unsigned len)
@@ -695,10 +701,13 @@ void netd_drv_gone(int h)
 
 /* DHCP's name servers (lwIP's own handling is off, LWIP_DHCP_MAX_DNS_SERVERS 0: they never replace resolv.conf's):
  * option 6 of an ACK, kept by the interface (net/port/netd_hooks.h) */
-void netd_dhcp_option(struct netif *n, int msg_type, int option, int len, struct pbuf *p, int offset)
+void netd_dhcp_option(struct dhcp *dh, int msg_type, int option, int len, struct pbuf *p, int offset)
 {
-    struct nif *f = nif_of(n);
+    struct nif *f = NULL;
     u32_t d[2] = { 0, 0 };
+    int i;
+    /* the interface is the one whose DHCP client this is (lwIP's current netif is not set before the address is) */
+    for (i = 0; i < NETD_IFMAX; i++) if (nifs[i].used && netif_dhcp_data(&nifs[i].netif) == dh) f = &nifs[i];
     if (!f || option != 6 || msg_type != 5 || len < 4) return;  /* DHCP_OPTION_DNS_SERVER in a DHCP_ACK */
     pbuf_copy_partial(p, d, (u16_t)(len >= 8 ? 8 : 4), (u16_t)offset);
     f->dhcp_dns[0] = d[0];
@@ -712,7 +721,14 @@ void netd_drv_turn(void)
     int i;
     for (i = 0; i < NETD_IFMAX; i++) {
         struct nif *f = &nifs[i];
-        if (f->used && f->dhcp && dhcp_supplied_address(&f->netif) && (!netif_default || !netif_is_up(netif_default)))
+        if (!f->used || !f->dhcp) continue;
+        if (dhcp_supplied_address(&f->netif) != f->leased) {
+            const ip4_addr_t *a = netif_ip4_addr(&f->netif);
+            f->leased = (unsigned char)dhcp_supplied_address(&f->netif);
+            if (f->leased) netd_logf("netd: %s: DHCP gave %u.%u.%u.%u", f->name, ip4_addr1_16(a), ip4_addr2_16(a), ip4_addr3_16(a), ip4_addr4_16(a));
+            else netd_logf("netd: %s: the DHCP lease is gone", f->name);
+        }
+        if (f->leased && (!netif_default || !netif_is_up(netif_default)))
             netif_set_default(&f->netif);
     }
 }
