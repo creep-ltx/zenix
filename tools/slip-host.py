@@ -6,7 +6,7 @@ namespace (unshare -rnm: no root, nothing leaves the PC) whose /etc/resolv.conf 
 It starts the servers the Amiga reaches through zenix-slirp's gateway 10.0.2.2 (which is this namespace's
 127.0.0.1): a TCP echo server on port 7100, a UDP echo server on 7101, a TCP source on 7102 (a line "N\\n" asks for
 N bytes of a known pattern, then it closes), and a DNS server on 127.0.0.1:53 (slirp's 10.0.2.3 asks it) that knows
-amiga.zenix.test = 10.1.2.3, and a flood control on TCP 7103: a line "flood PORT PORTS N" makes it open N connections,
+amiga.zenix.test = 10.1.2.3 and never answers slow.zenix.test, and a flood control on TCP 7103: a line "flood PORT PORTS N" makes it open N connections,
 spread over PORTS ports from PORT on, to this PC's 127.0.0.1 (zenix-slirp's forwards to the Amiga, -f, among the
 options: each connection becomes a SYN to the Amiga), hold them 20 s, close them and answer "done N". Then zenix-slirp on a new pty linked at SERIAL-LINK (FS-UAE's serial port), the bytes
 that are not SLIP (Zenix's console) appended to CONSOLE-LOG. It writes READY-FILE when all of that is up and runs
@@ -80,6 +80,8 @@ def resolver(names):
                 i += 1 + q[i]
             question = q[12:i + 5]
             name = ".".join(labels).lower()
+            if name == "slow.zenix.test":
+                continue                    # never answered: the Amiga's resolver must give up (no answer)
             if name in names:
                 ans = b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4) + socket.inet_aton(names[name])
                 r = struct.pack("!HHHHHH", qid, 0x8180, 1, 1, 0, 0) + question + ans

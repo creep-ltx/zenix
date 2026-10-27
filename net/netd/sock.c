@@ -834,6 +834,16 @@ int netd_close(unsigned idx, unsigned gen)
 }
 
 /* ---- names (4.5) ---- */
+static char search[64];                 /* resolv.conf's search domain ("" none) */
+int netd_set_search(const char *domain)
+{
+    if (strlen(domain) >= sizeof search) return -EINVAL;
+    strcpy(search, domain);
+    return 0;
+}
+/* lwIP gives no answer as NULL whether the name server said "no such name" or never answered. Only its timer gives up
+ * (dns_tmr, inside sys_check_timeouts); an answer arrives from the line. So the core's turn says which it is in */
+int netd_in_timers;
 static void dns_done(const char *name, const ip_addr_t *ip, void *arg)
 {
     mem_ptr_t v = (mem_ptr_t)arg;
@@ -842,7 +852,7 @@ static void dns_done(const char *name, const ip_addr_t *ip, void *arg)
     if (!s || s->kind != K_RESOLVE || s->resolved) return;
     s->resolved = 1;
     if (ip) { s->res[0] = ip4_addr_get_u32(ip_2_ip4(ip)); s->nres = 1; }
-    else s->err = ENOENT;               /* lwIP tells a missing name from no answer apart in neither case */
+    else s->err = netd_in_timers ? ETIMEDOUT : ENOENT;
 }
 
 int netd_resolve(unsigned idx, unsigned gen, const char *name, unsigned uid)
@@ -859,10 +869,21 @@ int netd_resolve(unsigned idx, unsigned gen, const char *name, unsigned uid)
     s->idx = (u16_t)idx; s->gen = (u16_t)gen;
     slots[idx].s = s;
     slots[idx].gen = (u16_t)gen;
+    /* a name without a dot gets resolv.conf's search domain (glibc's ndots 1, the search list cut to one domain):
+     * /etc/hosts is asked with the name as given and with the domain, DNS with the domain only */
+    char full[DNS_MAX_NAME_LENGTH];
+    const char *dn = name;
+    if (search[0] && !strchr(name, '.') && strlen(name) + 1 + strlen(search) < sizeof full) {
+        strcpy(full, name);
+        strcat(full, ".");
+        strcat(full, search);
+        dn = full;
+    }
     if (netd_parse_ip4(name, &a)) { s->res[0] = a; s->nres = 1; s->resolved = 1; }
-    else if ((n = netd_hosts_find(name, s->res, NETD_RESOLVE_MAX)) > 0) { s->nres = (unsigned char)n; s->resolved = 1; }
+    else if ((n = netd_hosts_find(name, s->res, NETD_RESOLVE_MAX)) > 0 ||
+             (dn != name && (n = netd_hosts_find(dn, s->res, NETD_RESOLVE_MAX)) > 0)) { s->nres = (unsigned char)n; s->resolved = 1; }
     else {
-        e = dns_gethostbyname(name, &ip, dns_done, (void *)(mem_ptr_t)(idx << 16 | (gen & 0xffff)));
+        e = dns_gethostbyname(dn, &ip, dns_done, (void *)(mem_ptr_t)(idx << 16 | (gen & 0xffff)));
         if (e == ERR_OK) { s->res[0] = ip4_addr_get_u32(ip_2_ip4(&ip)); s->nres = 1; s->resolved = 1; }
         else if (e != ERR_INPROGRESS) {
             s->resolved = 1;

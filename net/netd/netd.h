@@ -134,10 +134,11 @@ int netd_getname(unsigned idx, unsigned gen, int peer, void *addr, unsigned *add
 int netd_ioctl(unsigned idx, unsigned gen, unsigned long req, long *val);
 int netd_close(unsigned idx, unsigned gen);
 /* Name lookups (4.5): a socket that becomes readable when the answer is in; netd_recv then gives up to
- * NETD_RESOLVE_MAX IPv4 addresses, 4 bytes each in network order, or -ENOENT (no such name), -ETIMEDOUT (no
- * answer), -ENETDOWN (no name server). Numbers ("10.0.2.2") are answered at once. Order: /etc/hosts, the cache,
- * DNS. */
+ * NETD_RESOLVE_MAX IPv4 addresses, 4 bytes each in network order, or -ENOENT (no such name: the name server said
+ * so), -ETIMEDOUT (no answer from any name server), -ENETDOWN (no name server). Numbers ("10.0.2.2") are answered at
+ * once. Order: /etc/hosts, the cache, DNS. A name without a dot gets the search domain (netd_set_search) */
 int netd_resolve(unsigned idx, unsigned gen, const char *name, unsigned uid);
+int netd_set_search(const char *domain);       /* resolv.conf's search (or domain) word; "" none */
 
 unsigned netd_bits(unsigned idx, unsigned gen);     /* the socket's ready bits now (also what the next push compares) */
 struct netd_ready { unsigned short idx, gen, bits; };

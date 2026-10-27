@@ -1045,6 +1045,29 @@ perm`: a user may not change interfaces or routes), `tools/host/net-test.sh`, cu
   control connection), netd's memory stayed 108 KB, netd never ended; meanwhile 100 sleeps of 20 ms took 19 ms on
   average and 49 at most, `/bin/true` ran in 40 ms (emulator figures), and a connection to the PC worked after.
 
+### Step 6: names, `host` (branch n678, 2026-10-27)
+
+Most of step 6 was in already (step 5's choice 10: lwIP's resolver in netd, `getaddrinfo` through `SOCK_RESOLVE`). What
+this step added, and its local choices:
+
+1. **`host NAME...`** (`user/host.c`): BIND's output ("NAME has address A", "Host NAME not found"), exit 1 when a name
+   was not found, 2 for wrong arguments. No reverse lookups (lwIP's resolver asks for A records only: an address as
+   NAME is refused and said so), no record types, no server on the command line.
+2. **"No such name" and "no answer" told apart** (binding choice 2 of the host-only parts changed here): lwIP calls
+   back with NULL for both. Only its timer gives up on a server (`dns_tmr`, inside `sys_check_timeouts`), while a
+   server's "no such name" arrives with a frame, so netd's turn marks the timers (`netd_in_timers`) and a lookup
+   ending there is -ETIMEDOUT, otherwise -ENOENT; libz turns them into `EAI_AGAIN` and `EAI_NONAME`. No lwIP patch.
+3. **`/etc/resolv.conf`'s `search`** (or `domain`) was parsed but never used: a name without a dot now gets that
+   domain (glibc's `ndots` 1; only the first domain; a dotted name never gets one). `/etc/hosts` is asked with the
+   name as given and with the domain, DNS with the domain only (`netd_set_search`).
+4. **DHCP's code** went in with the driver interfaces (step 7: it needs an Ethernet interface) and is tested over the
+   A2065 (step 8), as section 10 says.
+
+Tests: `tools/host/net-test.sh` (the search domain; a name the test resolver never answers is -ETIMEDOUT, a missing
+one -ENOENT); `tools/slip-test.sh` s through slirp's DNS: `host amiga.zenix.test`, `host amiga` (the search domain),
+`host localhost` (`/etc/hosts`), `host nothing.zenix.test` ("not found"), `host slow.zenix.test` (the PC's test
+server never answers: "no answer from the name servers"). Sizes: `host` 10,900 bytes; netd +200 bytes.
+
 ### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
 
 lwIP 2.2.1 (STABLE-2_2_1_RELEASE) in `net/lwip/` (upstream files unchanged in the first commit; two local patches in

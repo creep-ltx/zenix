@@ -107,7 +107,9 @@ unsigned long netd_turn(void)
     u32_t t;
     netd_if_turn();
     netif_poll_all();               /* the loopback interface's queue */
+    netd_in_timers = 1;             /* a name lookup that ends here got no answer (sock.c, dns_done) */
     sys_check_timeouts();
+    netd_in_timers = 0;
     netd_sock_turn();
     netd_if_turn();                 /* what the timers and the loopback sent */
     t = sys_timeouts_sleeptime();

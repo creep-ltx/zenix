@@ -178,6 +178,7 @@ static void load_config(void)
     memset(&conf, 0, sizeof conf);
     if ((t = slurp("/etc/resolv.conf", &n))) { netd_parse_resolv(t, n, &conf); sys_memfree(t); }
     netd_set_dns(conf.dns, conf.ndns);
+    netd_set_search(conf.search);
     ifs_state = -ENOENT;
     if (sys_stat("/etc/network/interfaces", &st) < 0) return;
     if (!netd_config_trusted(st.mode, st.uid)) {

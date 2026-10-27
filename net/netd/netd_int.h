@@ -18,6 +18,7 @@ void netd_mem_refused(void);
 /* sock.c */
 void netd_sock_init(void);
 void netd_sock_turn(void);                     /* the closes that waited for memory */
+extern int netd_in_timers;                     /* inside lwIP's timers (a DNS lookup ending there timed out) */
 
 /* iface.c */
 void netd_if_init(void);

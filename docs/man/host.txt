@@ -1,0 +1,38 @@
+HOST(1)		Zenix manual
+
+NAME
+    host - look a name up
+
+SYNOPSIS
+    host NAME...
+
+DESCRIPTION
+    Asks the network server, netd(8), for each NAME's addresses and
+    prints them as BIND's host does:
+
+        amiga.zenix.test has address 10.1.2.3
+
+    netd answers from /etc/hosts first, then its cache, then the name
+    servers: those of /etc/resolv.conf, or, when it names none, those a
+    DHCP server gave (ifconfig(8) shows which). A NAME without a dot gets
+    the "search" domain of /etc/resolv.conf: with "search zenix.test",
+    host amiga asks for amiga.zenix.test (and /etc/hosts for both).
+
+EXIT STATUS
+    0 if every NAME was found; 1 if one was not (the reason on standard
+    error, or "Host NAME not found" on standard output when a name
+    server said there is no such name); 2 for wrong arguments.
+
+    The reasons: "no answer from the name servers" (none answered after
+    netd's retries, about 10 s); "no name server (/etc/resolv.conf), or
+    the network server is not running".
+
+NOTES
+    IPv4 addresses (A records) only, at most four a name. No reverse
+    lookups (an address as NAME is refused), no other record types (MX,
+    TXT), no choice of server on the command line: netd's resolver
+    (lwIP's) asks only for addresses. Only the first search domain is
+    used, and a name with a dot is never given one.
+
+SEE ALSO
+    ping(1), ifconfig(8), netd(8)

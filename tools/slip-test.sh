@@ -5,7 +5,8 @@
 # into it: the image carries /etc/network/interfaces (auto sl0, static 10.0.2.15), /etc/resolv.conf (10.0.2.3) and an
 # /etc/profile that runs /tests/slip.sh once at the autologin. init's `ifup -a` brings sl0 up at boot; the script
 # runs ifconfig, route, ping 10.0.2.2, nettest's checks through the PC (TCP echo, 100 KB from a server checked by
-# its sum, UDP echo, a name from the PC's test DNS server through 10.0.2.3), netstat, free and ps, then `ifdown sl0`,
+# its sum, UDP echo, a name from the PC's test DNS server through 10.0.2.3), host(1) (a name, the search domain, a
+# missing name, one nobody answers), netstat, free and ps, then `ifdown sl0`,
 # and prints a marker: with netd off the port the console's copy reaches the wire again, and zenix-slirp passes it
 # (as every byte that is not a SLIP frame) to its log, where this script waits for it (choice 12 of the host-only
 # parts: zenix-slirp's --log is how the console's bytes reach the test). The results are read from the disk image.
@@ -62,7 +63,7 @@ image() {   # the test image: the network configured, the script run once at the
     debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
     debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
     printf 'auto sl0\niface sl0 inet static\n    driver slip /dev/ttyS0 115200\n    address 10.0.2.15/24\n    gateway 10.0.2.2\n' > $OUT/interfaces
-    printf 'nameserver 10.0.2.3\n' > $OUT/resolv
+    printf 'nameserver 10.0.2.3\nsearch zenix.test\n' > $OUT/resolv
     printf 'if [ ! -e /tmp/slip-ran ]; then\n  touch /tmp/slip-ran\n  sh /tests/slip.sh > /tmp/slip.out 2>&1\n  echo slip-test-""done\nfi\n' > $OUT/profile
     put $OUT/interfaces /etc/network/interfaces 644
     put $OUT/resolv /etc/resolv.conf 644
@@ -78,6 +79,10 @@ route > /tmp/sl-route.txt 2>&1
 ping -c 3 10.0.2.2 > /tmp/sl-ping.txt 2>&1; echo ping=$? >> /tmp/sl-ping.txt
 ping -c 3 -i 0.2 127.0.0.1 > /tmp/sl-pinglo.txt 2>&1
 nettest slip > /tmp/sl-nt.txt 2>&1; echo nt=$? >> /tmp/sl-nt.txt
+host amiga.zenix.test > /tmp/sl-host.txt 2>&1; echo st=$? >> /tmp/sl-host.txt
+host amiga localhost >> /tmp/sl-host.txt 2>&1; echo st=$? >> /tmp/sl-host.txt
+host nothing.zenix.test >> /tmp/sl-host.txt 2>&1; echo st=$? >> /tmp/sl-host.txt
+host slow.zenix.test >> /tmp/sl-host.txt 2>&1; echo st=$? >> /tmp/sl-host.txt
 free > /tmp/sl-free.txt; ps > /tmp/sl-ps.txt
 ifconfig sl0 > /tmp/sl-ifc2.txt 2>&1
 ifdown sl0; echo ifdown=$? > /tmp/sl-down.txt
@@ -88,7 +93,7 @@ EOS
     image
     run fsuae/a1200-020.fs-uae 300
     local f
-    for f in ifc route ping pinglo nt free ps ifc2 down k; do get /tmp/sl-$f.txt > $OUT/sl-$f.txt; done
+    for f in ifc route ping pinglo nt host free ps ifc2 down k; do get /tmp/sl-$f.txt > $OUT/sl-$f.txt; done
     if grep -aq '^sl0: flags=<UP,POINTOPOINT,RUNNING,DEFAULT>  mtu 1006' $OUT/sl-ifc.txt &&
        grep -aq 'inet 10.0.2.15  netmask 255.255.255.0  gateway 10.0.2.2' $OUT/sl-ifc.txt &&
        grep -aq '^lo: flags=<UP,LOOPBACK,RUNNING>' $OUT/sl-ifc.txt && grep -aq '^nameservers 10.0.2.3' $OUT/sl-ifc.txt; then
@@ -108,6 +113,10 @@ EOS
         line=$(grep -a "^nettest $c: " $OUT/sl-nt.txt | head -1)
         case "$line" in *": PASS "*) echo "PASS $c ${line#*PASS }" ;; "") echo "FAIL $c: no result"; pass=0 ;; *) echo "FAIL $c ${line#*: }"; pass=0 ;; esac
     done
+    # host(1) through slirp's DNS (D19 step 6): a name, the search domain, /etc/hosts, a missing name, no answer
+    if [ "$(tr '\n' '|' < $OUT/sl-host.txt)" = "amiga.zenix.test has address 10.1.2.3|st=0|amiga has address 10.1.2.3|localhost has address 127.0.0.1|st=0|Host nothing.zenix.test not found|st=1|host: slow.zenix.test: no answer from the name servers|st=1|" ]; then
+        echo "PASS host: a name through 10.0.2.3, the search domain (amiga), /etc/hosts, a missing name, a name nobody answers"
+    else echo "FAIL host: $(cat $OUT/sl-host.txt)"; pass=0; fi
     grep -aq 'RX frames [1-9]' $OUT/sl-ifc2.txt && echo "PASS sl0's counters: $(grep -a 'RX frames' $OUT/sl-ifc2.txt | tr -s ' ')" || { echo "FAIL sl0's counters: $(cat $OUT/sl-ifc2.txt)"; pass=0; }
     grep -aqx 'ifdown=0' $OUT/sl-down.txt && ! grep -aq '^sl0' $OUT/sl-down.txt && echo "PASS ifdown sl0, and the port is the console's again (the marker reached the log)" ||
         { echo "FAIL ifdown: $(cat $OUT/sl-down.txt)"; pass=0; }
