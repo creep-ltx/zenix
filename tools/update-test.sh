@@ -147,7 +147,7 @@ sleep 2
 send \x1d1
 sleep 1
 send cp /bin/sh /tmp/sh.new && chmod 755 /tmp/sh.new && mv /tmp/sh.new /bin/sh && echo renamed-\$((2+2))\r
-sleep 3
+wait (?m)^renamed-4 60
 send \x1d2
 sleep 1
 send echo c2-\$((2+3)); ls /etc/motd\r

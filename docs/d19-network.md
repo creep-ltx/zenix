@@ -789,8 +789,11 @@ and the refusal in `mkroot.sh`, `mkroot-zenixfs.sh` and `mkzup.py`. Local choice
 2. **The seed file's format:** 40 bytes, `ZRS1`, a flags byte (bit 0: from a seeded pool), three zero bytes, 32 bytes
    of seed (256 bits, the seeding threshold). Root's, mode 600. Frozen once shipped, like the `/etc` formats.
 3. **When the file is written:** at every start (the rule of 9.3), **and once more when the pool is first seeded**
-   (boot waits for init with `evwait` on `/dev/random`, a minute at a time): a machine switched off without `reboot`
-   otherwise kept an uncreditable seed for ever. `reboot` writes it before the reset. **Not at the reset warning:**
+   (boot waits for init with `evwait` on `/dev/random`, a minute at a time: a machine switched off without `reboot`
+   otherwise kept an uncreditable seed for ever; meanwhile `ps` shows boot as "sleep", a timed event wait, where it
+   showed "wait"; signal-test counted every line with "sleep" in it and now counts processes named sleep). `reboot`
+   writes it before the reset, without a sync of its own (`SYS_reboot` syncs, each server at most 5 s; a plain sync
+   waited for ever on a server that never answers: svc-test h). **Not at the reset warning:**
    the kernel syncs there inside init's wait and writes no files; the start and the first seeding cover it.
 4. **The sources:** a key press or release 1 bit (`kbd_isr`, every raw code below 0x78); "bytes from the far end of
    the serial line, per SLIP frame": every received `0xC0` (SLIP's END) half a bit, in the receive interrupt, so it
@@ -857,7 +860,10 @@ epoch and `sock_server_gone`, `NET_CLOSE`), `kernel/netproto.h` (the frozen prot
     inflated count and its request count.
 
 Sizes (*measured* 2026-10-27): `sock.o` 3,987 bytes of code and 1,028 of data (the note's estimate 3-4 KB plus 0.3); the
-kernel image 145,588 -> 150,244 bytes (RAM floppy: 28,956 left; the mount tests' floppy 4,380). Tests: `tools/sock-host-test.sh` (the 4.3 model: a push before the call,
+kernel image 145,588 -> 150,244 bytes (RAM floppy: 28,956 left; the mount tests' floppy 4,380). **Free memory with
+one login** after steps 2 and 3 (`free`, FS-UAE matrix, *measured* 2026-10-27): 2 MB chip-only 1365 -> 1351 KB, 1 MB
+chip-only 428 -> 414 KB (the kernel's 10.6 KB of code, its 1.3 KB of new data and boot's 0.7 KB). The mount tests'
+floppy has 4,380 bytes of kernel headroom left: step 4 must count on that (its RAM disk can shrink by a few KB). Tests: `tools/sock-host-test.sh` (the 4.3 model: a push before the call,
 between the check and the masked test, during the server's turn and while asleep, never lost; a stale bit costs one
 call; a handler's -EINTR and the restart rule; the deadline; the server's end waking a waiter, its death mid-request
 -ENETDOWN, a stale epoch's socket dropped, NET_CLOSE as a no-start call, a partial send's count, accept's
