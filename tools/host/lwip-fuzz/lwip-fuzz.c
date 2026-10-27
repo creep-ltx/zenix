@@ -54,6 +54,8 @@ long netd_os_read(int h, void *buf, unsigned long n)
 }
 long netd_os_write(int h, const void *buf, unsigned long n) { (void)h; (void)buf; return (long)n; }
 void netd_os_close(int h) { (void)h; }
+void *netd_os_alloc(unsigned long n) { return malloc(n); }
+void netd_os_free(void *p) { free(p); }
 void netd_os_log(const char *line) { if (getenv("FUZZ_LOG")) fprintf(stderr, "%s\n", line); }
 void netd_os_fatal(void) { fprintf(stderr, "netd_os_fatal: an lwIP check failed\n"); abort(); }
 

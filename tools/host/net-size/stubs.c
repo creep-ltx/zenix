@@ -21,6 +21,8 @@ int netd_os_serial_open(const char *dev, unsigned long baud) { (void)dev; (void)
 long netd_os_read(int h, void *buf, unsigned long n) { (void)h; (void)buf; (void)n; return 0; }
 long netd_os_write(int h, const void *buf, unsigned long n) { (void)h; (void)buf; return (long)n; }
 void netd_os_close(int h) { (void)h; }
+void *netd_os_alloc(unsigned long n) { (void)n; return 0; }
+void netd_os_free(void *p) { (void)p; }
 void netd_os_log(const char *line) { (void)line; }
 void netd_os_fatal(void) { for (;;) ; }
 unsigned long netd_os_now_ms(void) { return 0; }

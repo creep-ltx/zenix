@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 124 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 125 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -67,7 +67,9 @@ spot-checked against the code that day.
 | [route](man/route.txt) | show the routes, set or remove the default gateway |
 | [ping](man/ping.txt) | ICMP echo, no root needed |
 | [netstat](man/netstat.txt) | the network's connections and listening sockets (`-tuwla`) |
+| [host](man/host.txt) | look a name up (`/etc/hosts`, then DNS) |
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
+| [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 
 ## Internals and test programs
 [init](man/init.txt), [boot](man/boot.txt), [diskd](man/diskd.txt) (the built-in start-up programs);
@@ -79,7 +81,7 @@ spot-checked against the code that day.
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 124 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 125 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

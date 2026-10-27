@@ -30,7 +30,7 @@ part_s() {
     cat > $OUT/s.txt <<'EOS'
 wait zenix:/# 90
 sleep 1
-send nettest tcp udp poll nonblock names many perm asm > /tmp/nt.out 2>&1; echo nt=$? >> /tmp/nt.out; echo checks-do""ne\r
+send nettest tcp udp poll nonblock names many perm restart partial sigpipe asm > /tmp/nt.out 2>&1; echo nt=$? >> /tmp/nt.out; echo checks-do""ne\r
 wait checks-done 400
 send nettest listen > /tmp/nl.out &\r
 sleep 2
@@ -45,15 +45,17 @@ wait (?m)^hang: waiting 60
 sleep 2
 send \x03
 sleep 2
-send echo hang-st=$? > /tmp/nh.txt; dmesg | grep 'svc: net' > /tmp/nk.txt; dmesg | grep netd: >> /tmp/nk.txt; ps > /tmp/nps.txt; free > /tmp/nfree.txt; sync; echo all-do""ne\r
+send echo hang-st=$? > /tmp/nh.txt; nettest giveup > /tmp/ng.out 2>&1; ifup -a 2> /tmp/ng-ifup.txt; echo ifup=$? >> /tmp/ng-ifup.txt; nettest tcp >> /tmp/ng.out 2>&1; echo give-do""ne\r
+wait give-done 240
+send dmesg | grep 'svc: net' > /tmp/nk.txt; dmesg | grep netd: >> /tmp/nk.txt; ps > /tmp/nps.txt; free > /tmp/nfree.txt; sync; echo all-do""ne\r
 wait all-done 30
 stop
 EOS
-    ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 700 $OUT/s.txt > $OUT/s.log 2>&1
+    ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 800 $OUT/s.txt > $OUT/s.log 2>&1
     local rc=$?
     [ $rc = 0 ] || { echo "FAIL s: the script (run-test.sh exit $rc)"; grep 'serial-tap' $OUT/s.log; pass=0; }
     get /tmp/nt.out > $OUT/nt.out
-    check_lines $OUT/nt.out tcp udp poll nonblock names many perm asm
+    check_lines $OUT/nt.out tcp udp poll nonblock names many perm restart partial sigpipe asm
     grep -aqx 'nt=0' $OUT/nt.out && echo "PASS nettest ended with status 0" || { echo "FAIL nettest's status: $(grep -a '^nt=' $OUT/nt.out)"; pass=0; }
     grep -aq '^nettest many: PASS (4 connections at once, the next refused: no buffer space' $OUT/nt.out &&
         echo "PASS the small profile's limit: 8 TCP ends (4 loopback connections), the next socket refused at once" ||
@@ -80,6 +82,15 @@ EOS
     grep -aqE 'netd: serving net, epoch 1, small profile' <<<"$k" && echo "PASS ... with the small profile on 2 MB of chip RAM" || { echo "FAIL the profile: $k"; pass=0; }
     grep -aqE 'svc: net: netd \(pid [0-9]+\) ended, status 137' <<<"$k" && echo "PASS the kill is in the log" || { echo "FAIL the kill's log line: $k"; pass=0; }
     grep -aqE 'netd: serving net, epoch 2' <<<"$k" && echo "PASS the next socket started netd again, epoch 2" || { echo "FAIL the new epoch: $k"; pass=0; }
+    # five ends in a minute (D19 4.3 rule 12): given up, sockets get ENETDOWN, root's ifup registers netd again
+    get /tmp/ng.out > $OUT/ng.out
+    check_lines $OUT/ng.out giveup
+    grep -aqE 'svc: net: given up after 5 ends in 60 s' <<<"$k" && echo "PASS the kernel gave the network server up (the log)" || { echo "FAIL no 'given up' in the log"; pass=0; }
+    local gi; gi=$(get /tmp/ng-ifup.txt)
+    if grep -aq 'the network server was not running: registered /sbin/netd again' <<<"$gi" && grep -aqx 'ifup=0' <<<"$gi" &&
+       [ "$(grep -ac '^nettest tcp: PASS' $OUT/ng.out)" = 1 ]; then
+        echo "PASS root's ifup -a registered netd again, and the network serves (nettest tcp)"
+    else echo "FAIL ifup after giving up: $gi // $(grep -a '^nettest tcp' $OUT/ng.out)"; pass=0; fi
     get /tmp/nps.txt > $OUT/ps.txt; get /tmp/nfree.txt > $OUT/free.txt
     echo "netd-test: netd in ps (2 MB chip RAM): $(grep -a ' netd' $OUT/ps.txt | head -1)"
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck.log 2>&1 && echo "PASS the host's e2fsck finds the root clean" || { echo "FAIL e2fsck"; pass=0; }

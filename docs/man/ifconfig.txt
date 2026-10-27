@@ -12,16 +12,19 @@ SYNOPSIS
 
 DESCRIPTION
     The network server, netd(8), has the loopback lo (127.0.0.1) and the
-    interfaces /etc/network/interfaces describes; today that is SLIP on
-    the serial port (the cable to a PC: docs/network-serial.md). ifconfig
-    shows them; root changes them. ifup and ifdown are other names of the
-    same program.
+    interfaces /etc/network/interfaces describes: SLIP on the serial
+    port (the cable to a PC: docs/network-serial.md) and Ethernet cards,
+    each run by its driver in /sbin/net (a2065(4)). ifconfig shows them;
+    root changes them. ifup and ifdown are other names of the same
+    program.
 
-    ifconfig            every interface: its flags (UP, RUNNING, LOOPBACK
-                        or POINTOPOINT, DEFAULT when the default route
-                        leaves through it), MTU, address, netmask,
-                        gateway, frames and bytes received and sent, bad
-                        frames and dropped ones; then the name servers
+    ifconfig            every interface: its flags (UP, RUNNING, LOOPBACK,
+                        POINTOPOINT or BROADCAST (Ethernet), DEFAULT when
+                        the default route leaves through it, DHCP), MTU,
+                        the MAC address (ether), address, netmask,
+                        gateway, the DHCP lease left and its server,
+                        frames and bytes received and sent, bad frames
+                        and dropped ones; then the name servers
     ifconfig IFACE      that one
     ifconfig IFACE up   brings it up as its stanza in the file says (as
                         ifup IFACE)
@@ -35,7 +38,9 @@ DESCRIPTION
     ifdown -a           takes down every interface but the loopback
 
     ifup reads /etc/network/interfaces, /etc/resolv.conf and /etc/hosts
-    again first. It returns as soon as the interface is configured.
+    again first. It returns as soon as the interface is configured: for
+    a card, when its driver has started and attached (at most 10 s),
+    not when a DHCP lease arrives (ifconfig shows "no lease yet").
 
 /ETC/NETWORK/INTERFACES
     A small part of Debian's format; netd uses it only if root owns it
@@ -45,16 +50,21 @@ DESCRIPTION
 
     auto IFACE          bring IFACE up at boot (and with ifup -a)
     iface IFACE inet static
+    iface IFACE inet dhcp
                         a stanza: the lines after it, indented, belong
-                        to it
+                        to it; dhcp asks a DHCP server for the address,
+                        netmask, gateway and name servers (cards only)
         driver slip DEVICE [BAUD]
                         SLIP on a serial device: /dev/ttyS0, at 115200
                         (the only speed of Zenix's serial port)
+        driver NAME [ARGS]
+                        a card: netd starts /sbin/net/NAME IFACE ARGS
+                        (NAME without a /), e.g. "driver a2065"
         address A/PREFIX    the address and the size of the net
         gateway G       the default route
         pointopoint P   the far end, when it is not on the net
         mtu N           at most 1006 on SLIP
-        hostname H      the machine's name (sent with DHCP later)
+        hostname H      the machine's name (sent with DHCP)
 
     The SLIP example (the PC runs zenix-slirp):
 
@@ -65,7 +75,11 @@ DESCRIPTION
             gateway 10.0.2.2
 
     With /etc/resolv.conf holding "nameserver 10.0.2.3", names are
-    looked up through the PC too.
+    looked up through the PC too. An Ethernet card with DHCP:
+
+        auto eth0
+        iface eth0 inet dhcp
+            driver a2065
 
 EXIT STATUS
     0 if everything asked was done; 1 if something was not (said on
@@ -75,13 +89,12 @@ EXIT STATUS
 NOTES
     While SLIP is up, the serial port is the network's: no cu(1), and
     the kernel's log stays in dmesg instead of going out on the cable;
-    ifdown gives the port back. Only SLIP and the loopback exist today:
-    a stanza with another driver says "its driver is not there yet", and
-    "inet dhcp" is for those later drivers (SLIP has no DHCP). If the
-    network server was given up (five crashes in a minute), root's ifup
-    or ifconfig ... up registers it again and says so. No MAC address,
-    no aliases, no IPv6; ifconfig cannot change the MTU of a running
-    interface.
+    ifdown gives the port back. SLIP has no DHCP. A driver that ends
+    five times in a minute is given up (dmesg says so) until ifup. If
+    the network server was given up (five crashes in a minute), root's
+    ifup or ifconfig ... up registers it again and says so. No aliases,
+    no IPv6, no ARP probe of a DHCP address; ifconfig cannot change the
+    MTU or the MAC address of a running interface.
 
 SEE ALSO
     netd(8), route(8), ping(1), netstat(1), init(8)

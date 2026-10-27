@@ -826,6 +826,7 @@ void proc_exit(int code)
     ints_off();
     struct proc *p = current;
     p->exiting = 1;
+    drv_exit(p);                        /* D19 2.4: a device it claimed is stopped before anything of it is freed */
     seg_put(p->seg);                    /* D13: after exc_c's crash check; the last user frees the code */
     if (p->seg)
         p->csize = 0;

@@ -595,6 +595,7 @@ void svc_born(int pid);                 /* proc_load made the server of the load
 long svc_sys(u32 op, const char *name, const char *text);
 long svc_data(u32 op, void *buf, u32 len);   /* SVC_SAVE, SVC_LOAD */
 int svc_is(const char *name);           /* is current the process the kernel started (or runs) for that service? */
+int svc_pid(const char *name);          /* the running server of a service (its port open), 0 if none */
 
 /* sock.c: sockets (DESIGN D19, docs/d19-network.md 4.1-4.3; the protocol in netproto.h) */
 #define NSOCK 32                        /* kernel socket objects, shared by every process (a few kept for root) */
@@ -605,6 +606,9 @@ u16 sock_poll(struct file *f);
 void sock_release(u32 i);               /* the socket file's last close */
 void sock_server_gone(void);            /* the "net" server ended (svc.c): a new epoch, every socket dead */
 extern u32 net_epoch;
+/* drv.c: the network's drivers (DESIGN D19 2.3, 2.4; DRV_* in netproto.h) */
+long drv_sys(u32 op, u32 a, u32 b);
+void drv_exit(struct proc *p);          /* p is dying: its claims end (the network server's end ends them all) */
 
 /* vfs.c */
 struct file *file_new(int type);
@@ -780,6 +784,7 @@ int tty_of(const struct proc *p);
 /* DESIGN D19, the network (docs/d19-network.md section 4.2; ops and structs in netproto.h) */
 #define SYS_sock        90   /* op (SOCK_*) | request size << 16, fd, struct usockreq * -> per op */
 #define SYS_netsrv      91   /* op (NETSRV_*), a, b: only the network server */
+#define SYS_drv         92   /* op (DRV_*), a, b: only the network server's children, its drivers (drv.c) */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

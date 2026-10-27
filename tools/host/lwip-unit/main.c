@@ -30,6 +30,13 @@ u32_t lwip_sys_now;
 int tcpip_thread_poll_one(void) { return 0; }      /* NO_SYS: nothing is ever queued for a tcpip thread */
 unsigned long netd_os_now_ms(void) { return lwip_sys_now; }
 unsigned long netd_os_clock4us(void) { return lwip_sys_now * 250; }
+struct dhcp;
+struct pbuf;
+/* DHCP's name servers go to netd (net/netd/iface.c), which these tests do not build: nobody keeps them here */
+void netd_dhcp_option(struct dhcp *n, int msg_type, int option, int len, struct pbuf *p, int offset)
+{
+    (void)n; (void)msg_type; (void)option; (void)len; (void)p; (void)offset;
+}
 void netd_lwip_assert(int line)
 {
     ck_fail_at("lwIP", line, "assertion failed in lwIP (line number only)", (const char *)NULL);

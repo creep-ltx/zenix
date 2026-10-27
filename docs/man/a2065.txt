@@ -1,0 +1,49 @@
+A2065(4)		Zenix manual
+
+NAME
+    a2065 - the Commodore A2065 Ethernet board
+
+SYNOPSIS
+    /sbin/net/a2065 IFACE     (started by netd(8), never by hand)
+
+    In /etc/network/interfaces:
+        auto eth0
+        iface eth0 inet dhcp
+            driver a2065
+
+DESCRIPTION
+    The driver of Commodore's A2065, a Zorro II Ethernet board (10
+    Mbit/s, an AMD Am7990 LANCE with 32 KB of its own memory). netd
+    starts it for a stanza whose driver is a2065 and restarts it when
+    it ends. It finds the board in the list of Zorro boards the boot
+    took from AmigaOS, claims it (no other driver may touch it), and
+    gives the kernel a program that stops the LANCE: the kernel runs it
+    when the driver or netd ends. The MAC address is Commodore's
+    00:80:10 and the board's serial number (ifconfig shows it).
+
+    The LANCE moves frames between the cable and the board's memory;
+    the driver copies them between that memory and netd's buffers, in
+    batches. It is polled (no interrupts yet): it looks at the board
+    again at once while frames move, then after 10 ms, and every 20 ms
+    when idle; netd's doorbell wakes it when there is a frame to send.
+
+    FS-UAE emulates the board (network_card = a2065, with its own
+    user-mode NAT behind it: DHCP gives 10.0.2.15, the gateway is
+    10.0.2.2, the name server 10.0.2.3), so the tests run the Ethernet
+    path in the emulator (tools/eth-test.sh).
+
+DIAGNOSTICS
+    In the kernel log (dmesg), as "a2065: IFACE: ...": no A2065 in the
+    board list; the claim refused (another driver has the board); "the
+    LANCE did not finish its initialisation in 200 ms (CSR0 x)"; "the
+    LANCE stopped (CSR0 x): starting it again"; "the doorbell closed
+    (ifdown, or netd is gone): the LANCE stopped".
+
+NOTES
+    Polled, so it costs a little time even when idle while the
+    interface is up. No multicast, no promiscuous mode, no Ameristar
+    or other LANCE boards (Ariadne, a later driver). Not yet tried on a
+    real A2065: only in FS-UAE.
+
+SEE ALSO
+    netd(8), ifconfig(8), ping(1)

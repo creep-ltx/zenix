@@ -109,6 +109,8 @@ long netd_os_write(int h, const void *buf, unsigned long n)
     return r;
 }
 void netd_os_close(int h) { close(h); }
+void *netd_os_alloc(unsigned long n) { return malloc(n); }
+void netd_os_free(void *p) { free(p); }
 static int config_mode;
 static char logbuf[4096];
 void netd_os_log(const char *line)
@@ -182,6 +184,7 @@ static int netd_main(void)
     netd_parse_resolv(cfg_resolv, strlen(cfg_resolv), &c);
     netd_hosts_load(cfg_hosts, strlen(cfg_hosts));
     netd_set_dns(c.dns, c.ndns);
+    netd_set_search(c.search);
     for (i = 0; i < c.nifs; i++)
         if (c.ifs[i].is_auto && netd_if_up(&c.ifs[i])) fprintf(stderr, "netd: %s would not come up\n", c.ifs[i].name);
     for (;;) {
@@ -416,7 +419,7 @@ static void start_netd(const char *ifc)
         close(sp[0]);
         kfd = sp[1];
         cfg_if = ifc;
-        cfg_resolv = "nameserver 10.0.2.3\noptions edns0\n";
+        cfg_resolv = "nameserver 10.0.2.3\noptions edns0\nsearch zenix.test\n";
         cfg_hosts = "127.0.0.1 localhost\n::1 localhost\n10.9.9.9 fromhosts.zenix.test fromhosts\n";
         _exit(netd_main());
     }
@@ -477,6 +480,7 @@ static void *resolver(void *a)
             memcpy(name + nl, q + i + 1, q[i]); nl += q[i]; i += 1 + q[i];
         }
         name[nl] = 0;
+        if (!strcasecmp(name, "slow.zenix.test")) continue;     /* never answered: netd must give up (-ETIMEDOUT) */
         found = !strcasecmp(name, "amiga.zenix.test");
         memcpy(r, q, (size_t)i + 5);
         r[2] = 0x81; r[3] = found ? 0x80 : 0x83;
@@ -612,6 +616,10 @@ static void test_dns(void)
     ok(r == 4 && a[0] == 10 && a[1] == 9, "DNS: /etc/hosts first (%ld)", r);
     r = k_resolve("10.0.2.99", a, 1000);
     ok(r == 4 && a[3] == 99, "DNS: a number is answered at once");
+    r = k_resolve("amiga", a, 8000);
+    ok(r == 4 && a[0] == 10 && a[3] == 3, "DNS: a name without a dot gets the search domain (amiga.zenix.test) (%ld)", r);
+    r = k_resolve("slow.zenix.test", a, 30000);
+    ok(r == -ETIMEDOUT, "DNS: a name no server answers is -ETIMEDOUT, not -ENOENT (%ld)", r);
 }
 
 static void test_icmp(void)
