@@ -31,6 +31,7 @@ static struct {
     unsigned tslot;
     int stuck_tx;                       /* the send DMA never moves */
     int no_loopback;                    /* the local loopback does nothing */
+    int dma_hang;                       /* the DMA engines never say "stopped" */
     int faults, dma_writes;
     int expect_cache_faults;            /* a test that breaks the cache calls on purpose */
     /* the memory: what the CPU sees (cache and RAM together), RAM, the CPU's view at its last cache call, and the
@@ -341,7 +342,7 @@ static uint32_t m_rd(uint32_t off)
     if (off >= GN_WINDOW || (off & 3)) { FAULT("a read outside the window: %x", off); return 0; }
     m_step();
     switch (off) {
-    case RDMA_STATUS: return *m_reg(RDMA_CTRL) & DMA_EN ? 0 : DMA_DISABLED;
+    case RDMA_STATUS: return *m_reg(RDMA_CTRL) & DMA_EN || M.dma_hang ? 0 : DMA_DISABLED;
     case TDMA_STATUS: return *m_reg(TDMA_CTRL) & DMA_EN ? 0 : DMA_DISABLED;
     case RDMA_PROD_INDEX: return (uint32_t)M.rdisc << 16 | M.rprod;
     case RDMA_CONS_INDEX: return M.rcons;

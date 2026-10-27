@@ -23,7 +23,15 @@ typedef unsigned char u8;
 #include "../tools/dtapi_host.h"
 #else
 #include "dtapi_amiga.h"
+/* the GENET's registers are little-endian 32-bit words; the 68k reads them byte-swapped (Emu68 maps them as they are) */
+static u32 swap32(u32 v) { __asm__("rol.w #8,%0\n\tswap %0\n\trol.w #8,%0" : "+d"(v)); return v; }
+static u32 gs_rd(u32 base, u32 off) { return swap32(*(volatile u32 *)(base + off)); }
+static void gs_wr(u32 base, u32 off, u32 v) { *(volatile u32 *)(base + off) = swap32(v); }
+/* the beam's line (VPOSR/VHPOSR, 0xDFF004: V8 in bit 16, V7-V0 in bits 15-8): moves every 64 us on PAL and NTSC */
+static u32 gs_clock(void) { return *(volatile u32 *)0xDFF004 >> 8 & 0x1FF; }
 #endif
+struct udrvquiesce;
+#include "genet-stop.h"
 
 static u32 cell(const void *v, u32 i)
 {
@@ -205,6 +213,12 @@ void stage0_fill(struct ctx *c, struct hwinfo *hw)
     }
 }
 
+/* the hardware stage0 touches (only when the caller is not a dry run): a GENET a previous owner left running */
+void stage0_stop(struct hwinfo *hw, int dry)
+{
+    if (hw->genet && !dry)                      /* stopped before Zenix's memory is used (DESIGN D19 14, step 9) */
+        hw->genet_stop = genet_stop(hw->genet);
+}
 
 #ifndef HOST_TEST
 /* exec.library OpenResource (-498) and OpenLibrary (-552): name in a1, (version 0 in d0), result in d0.
@@ -233,6 +247,7 @@ static void *exec_open_library(void *execbase, const char *name)
  * is alive; it lands at HWINFO_ADDR when the kernel runs) */
 void stage0_main(void *execbase, struct hwinfo *hw)
 {
+    int dry = hw->magic == HWINFO_DRYRUN;       /* zenixboot CHECK: it goes back to AmigaOS, so no hardware is touched */
     u8 *z = (u8 *)hw;
     for (unsigned i = 0; i < sizeof *hw; i++)
         z[i] = 0;
@@ -245,6 +260,7 @@ void stage0_main(void *execbase, struct hwinfo *hw)
     c.db = exec_open_resource(execbase, "devicetree.resource");
     if (c.db)
         stage0_fill(&c, hw);                    /* not Emu68: the rest of the table stays empty */
+    stage0_stop(hw, dry);
 }
 
 /* entry: saves what the C code may not preserve, passes (ExecBase, table in a1) */

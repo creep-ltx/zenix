@@ -615,10 +615,11 @@ void syscall_c(u32 *rb)
     case SYS_setpgid:
         r = (s32)sig_setpgid((int)a1, (int)a2);
         break;
-    case SYS_console:                   /* the 2 MB diet: /etc/console's colours, set by init (root) */
-        r = -EINVAL;
-        if (a1 == CON_COLOURS)
+    case SYS_console:                   /* the 2 MB diet: /etc/console's colours, set by init (root); D20: a */
+        if (a1 == CON_COLOURS)          /* console's font and rules, named by a descriptor in the op word */
             r = a2 && current->uid != 0 ? -EPERM : gfx_set_colours((int)a2);
+        else
+            r = (s32)term_conop(a1, a2, a3);
         break;
     case SYS_sock:                      /* D19: every BSD socket call (sock.c) */
         r = (s32)sock_sys(a1, a2, a3);

@@ -1,6 +1,7 @@
 # D20: telnet, the BBS terminal and pseudo-terminals (design note, revision 2)
 
-Status: **design, revision 2 after independent reviews (section 13), nothing built.** D19 section 10 step 11: "telnet
+Status: **design, revision 2 after independent reviews (section 13); step 1 (the console's font and rules) built on
+branch t12 2026-10-27 ("As built" at the end, after step 0's PC-side parts), the rest not built.** D19 section 10 step 11: "telnet
 (its own note: pseudo-terminals, SIGHUP, the BBS terminal)". Roadmap block 2: `telnet` "made for BBSes, the owner's
 daily use: ANSI colours, the PC character set and Amiga fonts, the BBS window size, downloads". The short version is
 DESIGN.md D20. Facts about today's code are *read* from main at f03180e (2026-10-27); facts about boards and terminals
@@ -638,3 +639,85 @@ inside an escape sequence drops both; (10) an IAC command inside SB drops the SB
 up are refused without state; (11) the PC fallback's look-alikes for the smiley-row glyphs are the side helper's
 choice; (12) the font file's build rule, its path in the root image and its licence notice are the main line's (step 1).
 A future `telnetd` needs its own accept rules (`proto.c`'s are the client's).
+
+## As built: step 1, the console's font and rules (branch t12, 2026-10-27; not yet run on the A1200)
+
+Built as 4.2-4.5 say: `SYS_console` ops `CON_FONT` 2 and `CON_RULES` 3 with the descriptor in the op word, the
+seven `CONR_*` rules in `term.c`, the shown console's font and palette in `gfx.c`, the release at a process's end
+(`term_release` in `proc_exit`), `term_panic` before a panic draws. How it works and the checks: architecture.md
+section 11 ("A console's font and rules"). Choices where the note was silent:
+1. **No descriptor** in the op word for `CON_FONT`/`CON_RULES`: -EBADF (as any missing descriptor); `CON_COLOURS`
+   with a descriptor: -EINVAL (its op word stays exactly 1).
+2. **"The caller's own console, in its foreground, or root":** root's call on its **own** console must be in the
+   foreground too; on another console root needs no foreground (it is not root's terminal). A tty with no foreground
+   set (a program started without job control) counts as the caller's. Asking the rules (mask 0) is allowed in the
+   background (it changes nothing).
+3. **The colour rules** are a per-console or-mask on stored colours (`cor`: 0x08 bright foreground, 0x80 bright
+   background), saved by `ESC 7`, cleared by SGR 0, 22 (bright) and 25 (iCE) and when its rule is dropped; erased cells
+   take the bright background too (iCE). `ESC c` clears the mask but never the font or the rules.
+4. **`CONR_PCCTRL`** stores a control only outside an escape sequence; inside one a control acts (BEL, BS, HT, LF, CR)
+   or is dropped as before, and CAN/SUB still cancel it. `CONR_CLRHOME` homes on `ESC[2J` only (not 0, 1 or 3).
+5. **The CGA palette** is written into the Copper list's colour moves in the vertical blank (with the plane pointers,
+   only while the beam is before the list's WAIT); `build_cop` takes it for a new depth. 1 and 2 planes keep their
+   fixed colours.
+6. **Fonts and depth changes:** every loaded font is on a list; `gfx_set_colours` builds their four-bytes tables
+   before switching above one plane (no memory: -ENOMEM, nothing changes) and frees them at one plane.
+7. **The mount tests' floppy:** its RAM disk had 3 free blocks, not the 23 section 6 counted (programs grew since
+   D19 step 1), so taking 8 KB needed room: that image now carries no `/tests` scripts (`NOTESTS=1`; the mount tests
+   run none of them) and its RAM disk is 720 KB (`RAMDISK_MOUNT_K`), 82 blocks free.
+
+**Sizes (*measured*):** the kernel image 153,044 -> 154,944 bytes (+1,900; after the warm-start fix of D19 14, which
+was +572): 24,256 bytes left on the RAM floppy, 7,872 on the mount tests' floppy. Per console 20 bytes; a loaded font
+2 KB, plus 8 KB above one plane. **Free memory with one login** (the full `make check`'s matrix, FS-UAE): 2 MB
+chip-only 1,347 -> 1,345 KB, 1 MB chip-only 410 -> 408 KB (the kernel's growth with the warm-start fix). **Speed, FS-UAE only** (the A1200 020 without fast RAM, 3 planes, `bench`, two runs
+each, an emulator figure, not a 68020's): printing 300 lines of 79 characters 29,430 -> 30,705 us a line (+4%); the
+null system call moved 77 -> 80 us as well with no change in its path, so part of it is code layout; to be measured on
+the stock A1200. **Tests:** `tools/term-test.sh` (95 checks: each op's checks and errors, -EBADF,
+-ENOTTY, -EPERM for another console and for a background job, -EINVAL for unknown bits and every bad PSF1 field,
+-EFAULT, -ENOMEM with nothing changed, -ENODEV; a load redraws in the font, a second setter replaces it and owns it, the
+former owner's end leaves it, the owner's end drops it and redraws in Topaz, a console switch shows each console's
+font and palette, root sets another console; each rule's stored cells with and without it; the scrollback keeps the
+bright colours after the rule is gone; `term_panic`; 200,000 random pieces with every rule set; mutations of four
+rules were each caught), `tools/colour-test.sh` with `termtest pcfont` (a test font whose glyphs name their byte,
+every cell's 8 x 8 pixels matched at 1, 2, 3 and 4 planes: the 256 glyphs, CLRHOME, WRAPNOW, LFONLY, the CGA palette,
+the bright foreground and iCE background as each depth shows them; console 2 meanwhile in Zenix's palette; back on
+console 1 the page again; at 3 planes root's switch to 16 colours under the page; the kernel dropping font and rules
+when termtest ends without cleaning up; `q` clearing the screen before the drop). **Step 0's choice 12, the font file:** `make` builds `build/cp437-8x8.psf` from
+`tools/font_8x8.c` with `tools/mkpsf.py`; it goes on the full root images (those with manual pages: `zenix.hdf`,
+`root-card.img`; not the RAM floppies) and into the base package as `/usr/share/consolefonts/cp437-8x8.psf`, with its
+notice `/usr/share/licenses/font_8x8` (`tools/font_8x8.COPYING`: Linux's font, GPL-2.0). colour-test loads it at 4
+planes (`termtest pcfont /usr/share/consolefonts/cp437-8x8.psf`) and matches every one of the 256 cells against the
+file's own bitmaps (bytes with identical bitmaps count as one, and the three shades and the full block as one: their
+one-pixel checkerboards blur together in the scaled screenshot); Topaz on the same page fails that check.
+
+## As built: step 2, telnet in the Unix mode (branch t12, 2026-10-27; not yet run on the A1200)
+
+`user/telnet.c` over the core in `net/telnet/` (step 0), `docs/man/telnet.txt`. One process: `poll` on the socket and
+the keys; the decoder, the filter (the Unix mode: UTF-8 to Latin-1) and the key translation are the core's; the
+console gets `CONR_LFONLY` on standard output for the call (the bits before put back at the end and at `z`); Ctrl-]
+opens the prompt on the bottom row (`q`, `z` then `fg`, Ctrl-] itself, Return). Choices where the note was silent:
+1. **`-a` and `-p` are refused** ("not built yet") until step 3, and the Unix mode is the default until then; the
+   owner's default (the Amiga mode) comes with step 3. Options are not frozen (section 10).
+2. **The SLIP plan is in from step 2:** the screen is written at most 256 bytes a call, and telnet lowers its own
+   priority by one level from where it was started (`nice -n -1 telnet` gives the old behaviour, for the measurement);
+   section 6's steps 2 and 3 wait for the A1200's figures.
+3. **Keys from a pipe or a file:** at their end telnet stops reading keys and keeps the call until the other side
+   closes it (as `nc`). A board that disappears without its close reaching the Amiga leaves telnet waiting (Ctrl-] q);
+   seen in FS-UAE when the simulator closed with keys still unread (its Linux socket then resets, and slirp does not
+   pass that on): the test's keys now wait for the negotiation.
+4. **Exit status:** 0 after a close by either side, 1 when no connection was made, 2 for wrong arguments; the escape
+   key `-e ^X` / `-e C` / `-e none`.
+
+**Sizes (*measured*):** `/bin/telnet` 20,044 bytes (26,936 in memory at its start; `ps` shows 46 KB during a call,
+its buffers included), the core about 5 KB of it; the kernel unchanged by this step. **Memory:** the stock A1200 (2 MB chip RAM, FS-UAE,
+the A2065 with DHCP) has 1,027 KB free during a call. **Tests:** `tools/bbs-test.sh` (FS-UAE, in `make check`): part e
+over the A2065, 16 checks (the README's list); part s over SLIP: four calls of 100 grid screens (about 36 KB each),
+drawn on the console, in the order nice 1, 0, 0, 1, all whole (TCP resends what the ring lost).
+
+**The SLIP measurement (FS-UAE, the stock A1200: an emulator figure, not the A1200's).** Bytes the serial port's 1 KB
+ring lost while telnet drew: 6,103, 5,676, 11,339, 11,414 (nice 1: 17,517; nice 0: 17,015), each call 49-64 s for about
+36 KB (under 1 KB/s against SLIP's 11.5). **Telnet's nice 1 made no difference here**: the time goes to the kernel
+drawing a write, which no priority can interrupt (section 6). So section 6's step 2, a yield point in `tty_write`
+between pieces when a strictly better process is ready, is likely needed: the main session's decision, after the
+same measurement on the stock A1200 (the emulator's 68020 and chip-bus timing are not the machine's).
+

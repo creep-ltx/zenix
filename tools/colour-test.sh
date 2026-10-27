@@ -16,6 +16,13 @@
 #    inverse)
 #  - on the serial port, raw: the prompt's colour codes; less showing a line with colour codes and 79 visible
 #    characters as one row, the codes passed on (zero width, as GNU less -R)
+#  - DESIGN D20 step 1, a console's font and rules: `termtest pcfont` (its own test font, whose glyphs name
+#    themselves): all 256 bytes drawn in the loaded font, CLRHOME, WRAPNOW, LFONLY, the CGA palette, the bright
+#    foreground and the iCE background as the planes show them; console 2 meanwhile in Zenix's palette (termtest
+#    colours there); back on console 1 the page as before; at 3 planes root's switch to 16 colours while the page is
+#    shown (the font's table built, the page as 4 planes show it); `x` (termtest ends without cleaning up): the kernel
+#    drops the font and the rules (Zenix's palette, Topaz); `q`: the screen cleared before the font goes; at 4 planes
+#    the real CP437 font from the disk, every glyph against its bitmap
 # The setting (D14 section 11, /etc/console read by init), on the A1200 without fast RAM (8 colours by default), with the
 # default depth's build (DIWV=0x38 only): "colours 4" switches to 2 planes and "colours 16" to 4 (the kernel says so,
 # and the colour page and a scrolled-back page are what those planes show: the switch draws the console again), and
@@ -72,12 +79,22 @@ send q
 sleep 2
 EOF
 
+pcscript() {   # the D20 part of a depth's script; at 3 planes root switches to 16 colours while the page is shown
+    cat "$OUT/script.txt"
+    printf '%s\n' 'send termtest pcfont\r' 'sleep 5' 'shot pcfont' 'send \x1d2' 'wait zenix login: 30' 'send root\r' 'sleep 4' \
+        'send termtest colours\r' 'sleep 5' 'shot pccon2' 'send q' 'sleep 2' 'send \x1d1' 'sleep 3' 'shot pcback'
+    [ "$1" = 3 ] && printf '%s\n' 'send 6' 'sleep 4' 'shot pc16'
+    printf '%s\n' 'send x' 'sleep 4' 'shot pcgone' 'send termtest pcfont\r' 'sleep 5' 'send q' 'sleep 4' 'shot pcquit'
+    [ "$1" = 4 ] && printf '%s\n' 'send termtest pcfont /usr/share/consolefonts/cp437-8x8.psf\r' 'sleep 5' 'shot pccp437' \
+        'send q' 'sleep 3'
+}
 for d in $DEPTHS; do
     B=$OUT/d$d
+    pcscript $d > "$OUT/script$d.txt"
     make -s -j8 BUILD="$B" GFXDEPTH=$d DIWV=0x38 "$B/zenix.adf" "$B/zenix.hdf" >"$OUT/d$d.build.log" 2>&1 ||
         { echo "FAIL build of the $d-plane kernel:"; grep -v 'RWX permissions' "$OUT/d$d.build.log" | tail -15; pass=0; continue; }
     ZENIX_BUILD="$B" python3 tools/fsuae_conf.py fsuae/a1200-020-fast.fs-uae "$OUT/d$d.fs-uae" || exit 1
-    ZOOMOUT=0 SHOT_LIMIT=400 timeout -k 20 900 python3 tools/shot.py "$OUT/d$d.fs-uae" "$OUT/script.txt" "$OUT/d$d" >/dev/null 2>&1
+    ZOOMOUT=0 SHOT_LIMIT=480 timeout -k 20 900 python3 tools/shot.py "$OUT/d$d.fs-uae" "$OUT/script$d.txt" "$OUT/d$d" >/dev/null 2>&1
     want="$d bitplane"; [ $d = 1 ] || want="$d bitplanes"
     tr -d '\r' < "$OUT/d$d.serial.log" | grep -q "display: 640x256, $want, 80x32 text"
     check "$d planes: the kernel says so on the log" $?
@@ -100,6 +117,25 @@ for d in $DEPTHS; do
         ct pixel "$OUT/d$d-edit.png" "$OUT/geom$d" 31 20 BBB; check "$d planes: edit's status line is inverse" $?
     fi
     ct serial "$OUT/d$d.serial.log"; check "$d planes: the prompt's colour codes and less's zero-width codes on the serial port" $?
+    for s in pcfont pccon2 pcback pcgone pcquit; do
+        [ -f "$OUT/d$d-$s.png" ] || { echo "FAIL $d planes: no screenshot $s (see $OUT/d$d.serial.log)"; pass=0; continue 2; }
+    done
+    ct pcfont "$OUT/d$d-pcfont.png" "$OUT/geom$d" $d
+    check "$d planes: termtest pcfont: the loaded font's 256 glyphs and the BBS rules (D20)" $?
+    ct palette "$OUT/d$d-pccon2.png" "$OUT/geom$d" $d; check "$d planes: console 2 meanwhile: Zenix's palette, Topaz" $?
+    ct pcfont "$OUT/d$d-pcback.png" "$OUT/geom$d" $d; check "$d planes: back on console 1: its font and palette again" $?
+    gd=$d
+    if [ $d = 3 ]; then
+        gd=4
+        [ -f "$OUT/d$d-pc16.png" ] && ct pcfont "$OUT/d$d-pc16.png" "$OUT/geom$d" 4
+        check "3 planes: root switches to 16 colours under the page: the font and the rules as 4 planes show them" $?
+    fi
+    ct pcgone "$OUT/d$d-pcgone.png" "$OUT/geom$d" $gd; check "$d planes: termtest ended without cleaning up: the kernel dropped its font and rules" $?
+    ct cleared "$OUT/d$d-pcquit.png" "$OUT/geom$d"; check "$d planes: termtest's q: the screen cleared, then the font dropped" $?
+    if [ $d = 4 ]; then
+        [ -f "$OUT/d$d-pccp437.png" ] && ct pcfont "$OUT/d$d-pccp437.png" "$OUT/geom$d" 4 "$B/cp437-8x8.psf"
+        check "4 planes: the CP437 font from the disk (/usr/share/consolefonts), every glyph against its bitmap" $?
+    fi
 done
 # ---- the setting: /etc/console on the A1200 without fast RAM ----
 cat > "$OUT/sscript.txt" <<'EOF'

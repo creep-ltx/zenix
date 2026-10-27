@@ -859,6 +859,7 @@ void proc_exit(int code)
         sig_send(par, SIGCHLD);
     }
     tty_release(p->pid);
+    term_release(p->pid);               /* D20: the console fonts and rules it set */
     ipc_proc_exit(p->pid);
     proc_reap_orphans();                /* its zombie children have nobody to wait for them now */
     schedule();

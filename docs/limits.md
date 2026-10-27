@@ -95,7 +95,8 @@ pointers.
   80 KB at 2, 120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; by default 4 planes
   only on AGA with fast RAM, 3 on OCS/ECS with fast RAM and on every machine with 2 MB of chip RAM and no fast RAM,
   else 1; `/etc/console` chooses 2, 4, 8 or 16 colours (4 planes only on AGA), at init's start, if the chip RAM is
-  there.
+  there. A console's loaded font (DESIGN D20, `CON_FONT`): one per console, PSF1 of exactly 256 glyphs of 8 x 8 (no
+  512-glyph fonts, no Unicode table, no other height), 2 KB plus 8 KB with more than one plane while it is loaded.
 - Services (DESIGN D11, architecture.md section 9): 12 entries; a program and its arguments of at most 6 words in 79
   characters (the text is copied into 80 bytes with its end); at most 10 services beside diskd and the root, but the
   8 mounts include the root, so at most 7 mounted filesystems besides it; a registration

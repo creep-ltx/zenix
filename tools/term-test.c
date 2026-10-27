@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include "../kernel/term.c"
 
 /* ---- the model display: a cell per position (character, attributes, colours), as the planes would show it ---- */
@@ -18,6 +19,9 @@ int gfx_depth = 4;
 const u16 gfx_palette[16] = { 0x000, 0xC22, 0x2B2, 0xBB2, 0x45E, 0xB3B, 0x2BB, 0xBBB, 0x666, 0xF66, 0x6F6, 0xFF6, 0x88F, 0xF7F, 0x6FF, 0xFFF };
 static int up = 1;
 static u8 scr_ch[TROWS_MAX][COLS], scr_at[TROWS_MAX][COLS], scr_co[TROWS_MAX][COLS];
+struct gfont { int id; int freed; };    /* DESIGN D20: a loaded font, as an id (see gfx_font_new below) */
+static const struct gfont *shown_font;
+static u8 scr_font[TROWS_MAX][COLS];    /* the font each cell was drawn in (0: Topaz) */
 static long blits, cells;
 int gfx_up(void) { return up; }
 static void inside(int row, int n, const char *what)
@@ -31,6 +35,7 @@ void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour)
     scr_ch[row][col] = ch;
     scr_at[row][col] = attr;
     scr_co[row][col] = colour;
+    scr_font[row][col] = (u8)(shown_font ? shown_font->id : 0);
     cells++;
 }
 /* a filled cell: blank, the background colour (its foreground cannot be seen: kept as the default) */
@@ -81,6 +86,39 @@ void beep(u32 hz, u32 ms) { (void)hz; (void)ms; bells++; }
 static char injected[64];
 static int injected_to;
 void tty_inject(int tty, const char *s) { injected_to = tty; strncat(injected, s, sizeof injected - strlen(injected) - 1); }
+
+/* DESIGN D20: the fonts (an id each, so a drawn cell says in whose glyphs), the shown font and palette, the caller */
+static struct gfont fontpool[64];
+static int nfonts, font_nomem, live_fonts;
+static int shown_cga, shows;
+struct gfont *gfx_font_new(const u8 *g)
+{
+    if (font_nomem || nfonts >= 64) return 0;
+    struct gfont *f = &fontpool[nfonts];
+    f->id = g[8 * 'A'] ? g[8 * 'A'] : nfonts + 1;       /* the test's fonts carry their id in glyph A's first line */
+    nfonts++;
+    live_fonts++;
+    return f;
+}
+void gfx_font_free(struct gfont *f)
+{
+    if (!f) return;
+    if (f->freed) { printf("FAIL: a font freed twice\n"); exit(1); }
+    if (shown_font == f) { printf("FAIL: the shown font freed\n"); exit(1); }
+    f->freed = 1;
+    live_fonts--;
+}
+void gfx_show(const struct gfont *f, int cga)
+{
+    if (f && f->freed) { printf("FAIL: a freed font shown\n"); exit(1); }
+    shown_font = f; shown_cga = cga != 0; shows++;
+}
+static struct proc me;
+struct proc *current = &me;
+static int fg_ok = 1, uok = 1;
+int tty_of(const struct proc *p) { return p->ctty; }
+int tty_in_fg(int tty, const struct proc *p) { (void)tty; (void)p; return fg_ok; }
+int user_ok_rd(const struct proc *p, u32 ptr, u32 len) { (void)p; (void)ptr; (void)len; return uok; }
 
 static int bad;
 #define EXPECT_TRUE(c, msg) do { if (!(c)) { printf("FAIL: %s\n", msg); bad++; } else printf("ok:   %s\n", msg); } while (0)
@@ -238,6 +276,153 @@ int main(void)
     out("\033c"); EXPECT_TRUE(term_ckm() == 0, "... ESC c resets it");
     out("\033[1h"); EXPECT_TRUE(term_ckm() == 0, "... ESC[1h (no ?) is not DECCKM");
 
+    /* ---- DESIGN D20 step 1: the console rules, a console's font, the ops ---- */
+    static struct file ttyf[NCONS + 1], filef;
+    for (int i = 1; i <= NCONS; i++) { ttyf[i].type = FT_TTY; ttyf[i].off = (u32)i; }
+    filef.type = FT_INODE;
+    me.pid = 50; me.ctty = 1; me.uid = 1000;
+    me.fd[1] = &ttyf[1]; me.fd[2] = &filef; me.fd[3] = &ttyf[2];
+    #define OP(op, fd) ((u32)(op) | (u32)((fd) + 1) << CON_FD_SHIFT)
+    u8 *psf = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);   /* a u32 address, */
+    if (psf == MAP_FAILED) { printf("FAIL: mmap\n"); return 1; }                                    /* as on the Amiga */
+    psf[0] = 0x36; psf[1] = 0x04; psf[2] = 0; psf[3] = 8;
+    #define PSF(id) (psf[4 + 8 * 'A'] = (id), (u32)(unsigned long)psf)
+    reset();
+    EXPECT_TRUE(term_conop(CON_RULES, 1, 1) == -EBADF && term_conop(CON_FONT, PSF(1), 2052) == -EBADF,
+                "the font and rules ops without a descriptor in the op word: -EBADF");
+    EXPECT_TRUE(term_conop(OP(CON_RULES, 2), 1, 1) == -ENOTTY && term_conop(OP(CON_FONT, 2), PSF(1), 2052) == -ENOTTY &&
+                term_conop(OP(CON_RULES, 9), 0, 0) == -EBADF, "a descriptor that is a file: -ENOTTY; none open: -EBADF");
+    EXPECT_TRUE(term_conop(OP(4, 1), 0, 0) == -EINVAL && term_conop(OP(CON_COLOURS, 1), 0, 0) == -EINVAL,
+                "an unknown op, and CON_COLOURS with a descriptor: -EINVAL");
+    EXPECT_TRUE(term_conop(OP(CON_RULES, 3), 1, 1) == -EPERM && term_conop(OP(CON_FONT, 3), PSF(1), 2052) == -EPERM,
+                "another console than the caller's own (not root): -EPERM");
+    fg_ok = 0;
+    EXPECT_TRUE(term_conop(OP(CON_RULES, 1), 1, 1) == -EPERM && term_conop(OP(CON_FONT, 1), PSF(1), 2052) == -EPERM &&
+                term_conop(OP(CON_RULES, 1), 0, 0) == 0, "a background job: -EPERM (it may only ask the rules)");
+    fg_ok = 1;
+    EXPECT_TRUE(term_conop(OP(CON_RULES, 1), 128, 128) == -EINVAL && term_conop(OP(CON_RULES, 1), 0, 256) == -EINVAL &&
+                T()->rules == 0, "unknown rule bits: -EINVAL, nothing changes");
+    up = 0;
+    EXPECT_TRUE(term_conop(OP(CON_RULES, 1), 1, 1) == -ENODEV, "no display: -ENODEV");
+    up = 1;
+    EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(1), 2051) == -EINVAL, "a font of 2,051 bytes: -EINVAL");
+    psf[0] = 0x37; EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(1), 2052) == -EINVAL, "a font with the wrong magic: -EINVAL"); psf[0] = 0x36;
+    psf[2] = 1; EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(1), 2052) == -EINVAL, "PSF1 mode 1 (512 glyphs): -EINVAL"); psf[2] = 0;
+    psf[3] = 16; EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(1), 2052) == -EINVAL, "height 16: -EINVAL"); psf[3] = 8;
+    uok = 0; EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(1), 2052) == -EFAULT, "the font outside the caller's memory: -EFAULT"); uok = 1;
+    font_nomem = 1; EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(1), 2052) == -ENOMEM && !T()->font, "no memory for the font: -ENOMEM, nothing changes"); font_nomem = 0;
+    EXPECT_TRUE(nfonts == 0, "... and no font was made for any refused call");
+
+    /* the font: loaded, the screen redrawn in it; replaced (last setter wins); its owner's end drops it */
+    out("abc\033[31mdef");
+    int s0 = shows;
+    EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(11), 2052) == 0 && shown_font && shown_font->id == 11 && shows > s0 &&
+                scr_font[0][0] == 11 && scr_font[0][5] == 11 && screen_is_grid(), "CON_FONT: the console redrawn in the new font");
+    out("g");
+    EXPECT_TRUE(scr_font[0][6] == 11, "... and new text drawn in it");
+    me.pid = 51;
+    EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(12), 2052) == 0 && shown_font->id == 12 && live_fonts == 1 && T()->fowner == 51,
+                "a second CON_FONT replaces it (the old one freed) and its caller is the owner now");
+    term_release(50);
+    EXPECT_TRUE(T()->font && shown_font->id == 12, "the former owner's end leaves the font");
+    con_switch(2);
+    EXPECT_TRUE(!shown_font, "console 2 shown: Topaz");
+    con_switch(1);
+    EXPECT_TRUE(shown_font && shown_font->id == 12 && scr_font[0][0] == 12, "console 1 again: its font, everything redrawn in it");
+    term_write(2, "x", 1);
+    EXPECT_TRUE(shown_font->id == 12, "output on console 2 meanwhile changes nothing on screen");
+    out("\033c");
+    EXPECT_TRUE(T()->font && shown_font->id == 12, "ESC c keeps the font");
+    out("ab");
+    term_release(51);
+    EXPECT_TRUE(!T()->font && !shown_font && live_fonts == 0 && scr_font[0][0] == 0 && screen_is_grid(),
+                "its owner's end drops it: the console redrawn in Topaz");
+    me.pid = 50;
+    EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(13), 2052) == 0 && term_conop(OP(CON_FONT, 1), 0, 0) == 0 && !shown_font &&
+                live_fonts == 0, "CON_FONT with a null pointer drops it");
+    me.uid = 0; me.ctty = 2;
+    EXPECT_TRUE(term_conop(OP(CON_FONT, 1), PSF(14), 2052) == 0 && shown_font && shown_font->id == 14,
+                "root sets the font of a console that is not its own");
+    me.uid = 1000; me.ctty = 1;
+    term_release(50);
+
+    /* the rules: asked, set with a mask, the bits before answered; dropped at the owner's end */
+    reset();
+    EXPECT_TRUE(term_conop(OP(CON_RULES, 1), 0, 0) == 0, "CON_RULES with mask 0 asks: none set");
+    EXPECT_TRUE(term_conop(OP(CON_RULES, 1), CONR_PCCTRL | CONR_LFONLY, CONR_ALL) == 0 &&
+                term_conop(OP(CON_RULES, 1), CONR_WRAPNOW, CONR_WRAPNOW | CONR_LFONLY) == (CONR_PCCTRL | CONR_LFONLY) &&
+                T()->rules == (CONR_PCCTRL | CONR_WRAPNOW), "the mask changes only its bits; the answer is the bits before");
+    { u8 b[] = { 'A', 1, 3, 0, 0x0E, 0x1F, 7, 'B', 0x1A, 'C' }; int b0 = bells; outn((const char *)b, sizeof b);
+      EXPECT_TRUE(scr_ch[0][0] == 'A' && scr_ch[0][1] == 1 && scr_ch[0][2] == 3 && scr_ch[0][3] == 0x0E && scr_ch[0][4] == 0x1F &&
+                  scr_ch[0][5] == 'B' && scr_ch[0][6] == 0x1A && scr_ch[0][7] == 'C' && bells == b0 + 1 && screen_is_grid(),
+                  "CONR_PCCTRL: 0x01-0x1F stored and drawn as glyphs (SUB too, outside a sequence); NUL ignored, BEL rings"); }
+    out("\r\033[1;2\030X\033[\001m");
+    EXPECT_TRUE(scr_ch[0][0] == 'X' && scr_ch[0][1] == 1, "... CAN still cancels a sequence; a control inside one is not stored");
+    reset(); term_conop(OP(CON_RULES, 1), CONR_WRAPNOW, CONR_ALL);
+    for (int i = 0; i < COLS; i++) out("W");
+    out("\r\nX");
+    EXPECT_TRUE(T()->cy == 2 && scr_ch[2][0] == 'X' && !row(1)[0] && screen_is_grid(), "CONR_WRAPNOW: a full row wraps at once (CR LF then leaves a blank row)");
+    reset(); term_conop(OP(CON_RULES, 1), 0, CONR_ALL);
+    for (int i = 0; i < COLS; i++) out("W");
+    out("\r\nX");
+    EXPECT_TRUE(T()->cy == 1 && scr_ch[1][0] == 'X', "... without it the wrap waits (CR LF goes to the next row)");
+    reset(); out("\033[5;5HZ\033[2JH");
+    EXPECT_TRUE(scr_ch[4][5] == 'H', "ESC[2J leaves the cursor (xterm)");
+    reset(); term_conop(OP(CON_RULES, 1), CONR_CLRHOME, CONR_ALL); out("\033[5;5HZ\033[2JH\033[5;5H\033[JQ");
+    EXPECT_TRUE(scr_ch[0][0] == 'H' && scr_ch[4][4] == 'Q', "CONR_CLRHOME: ESC[2J homes the cursor (ESC[J does not)");
+    reset(); term_conop(OP(CON_RULES, 1), CONR_BRIGHT, CONR_ALL);
+    out("\033[1;31mA\033[22mB\033[1mC\033[0;30;1mD\033[39mE\033[0;93;1mF\033[mG");
+    EXPECT_TRUE(co_at(0, 0) == 0x09 && !(T()->at[0][0] & A_BOLD) && co_at(0, 1) == 0x01 && co_at(0, 2) == 0x09 &&
+                co_at(0, 3) == 0x08 && co_at(0, 4) == 0x0F && co_at(0, 5) == 0x0B && co_at(0, 6) == 0x07 && screen_is_grid(),
+                "CONR_BRIGHT: SGR 1 stores the bright foreground (1;30 is dark grey), never bold; 22 and 0 end it");
+    out("\033[1;32m\0337\033[0m\0338H");
+    EXPECT_TRUE(co_at(0, 7) == 0x0A, "... ESC 7 / ESC 8 keep the bright flag");
+    reset(); term_conop(OP(CON_RULES, 1), CONR_ICE, CONR_ALL);
+    out("\033[5;44mA\033[25mB\033[6;41mC\033[0mD\033[5;46m\033[K");
+    EXPECT_TRUE(co_at(0, 0) == 0xC7 && co_at(0, 1) == 0x47 && co_at(0, 2) == 0x97 && co_at(0, 3) == 0x07 &&
+                co_at(0, 79) == 0xE7 && screen_is_grid(), "CONR_ICE: SGR 5 and 6 store the bright background (erases too), 25 and 0 end it");
+    reset(); term_conop(OP(CON_RULES, 1), 0, CONR_ALL);
+    out("\033[5;44mA\033[1;31mB");
+    EXPECT_TRUE(co_at(0, 0) == 0x47 && co_at(0, 1) == 0x41 && (T()->at[0][1] & A_BOLD), "... without the rules: 5 ignored, 1 bold (D14)");
+    reset(); term_conop(OP(CON_RULES, 1), CONR_LFONLY, CONR_ALL);
+    out("AB\nC\r\nD");
+    EXPECT_TRUE(scr_ch[1][2] == 'C' && scr_ch[2][0] == 'D' && screen_is_grid(), "CONR_LFONLY: LF moves down in the same column");
+    reset(); term_conop(OP(CON_RULES, 1), 0, CONR_ALL);
+    out("AB\nC");
+    EXPECT_TRUE(scr_ch[1][0] == 'C', "... without it LF is CR LF (the Amiga console's, Zenix's)");
+    /* the colours are stored: the scrollback and a redraw keep them after the rule is gone */
+    reset(); term_conop(OP(CON_RULES, 1), CONR_BRIGHT | CONR_ICE, CONR_ALL);
+    out("\033[1;5;31;44mbright\n");
+    term_conop(OP(CON_RULES, 1), 0, CONR_ALL);
+    EXPECT_TRUE(co_at(0, 0) == 0xC9 && T()->cor == 0, "dropping the rules changes no cell, and ends the bright flags");
+    for (int i = 0; i < 40; i++) out("filler\n");
+    term_scroll_view(10);                               /* 42 lines on 32 rows: "bright" is the 10th line back */
+    EXPECT_TRUE(!strcmp(row(0), "bright") && scr_co[0][0] == 0xC9, "the scrollback keeps the bright colours");
+    term_scroll_view(-10);
+    /* the palette: CONR_CGAPAL asks for it while its console is shown */
+    reset();
+    term_conop(OP(CON_RULES, 1), CONR_CGAPAL, CONR_ALL);
+    EXPECT_TRUE(shown_cga == 1, "CONR_CGAPAL: the CGA palette at once on the shown console");
+    con_switch(2); EXPECT_TRUE(shown_cga == 0, "console 2 shown: Zenix's palette");
+    me.uid = 0;
+    term_conop(OP(CON_RULES, 3), CONR_CGAPAL, CONR_CGAPAL);
+    EXPECT_TRUE(shown_cga == 1, "root sets CONR_CGAPAL on the shown console 2 (not its own): the palette follows");
+    term_conop(OP(CON_RULES, 3), 0, CONR_CGAPAL);
+    me.uid = 1000;
+    con_switch(1); EXPECT_TRUE(shown_cga == 1, "console 1 again: CGA's");
+    out("\033c"); EXPECT_TRUE(T()->rules == CONR_CGAPAL, "ESC c keeps the rules");
+    term_release(50);
+    EXPECT_TRUE(T()->rules == 0 && shown_cga == 0 && !T()->rowner, "the setter's end drops the rules: Zenix's palette again");
+    /* a panic: Topaz and no rules on the shown console */
+    term_conop(OP(CON_FONT, 1), PSF(15), 2052);
+    term_conop(OP(CON_RULES, 1), CONR_ALL, CONR_ALL);
+    term_panic();
+    EXPECT_TRUE(!shown_font && !shown_cga && T()->rules == 0, "term_panic: Topaz, Zenix's palette, no rules (the panic text is readable)");
+    out("x\n");
+    EXPECT_TRUE(scr_font[T()->cy - 1][0] == 0, "... and the text after it is drawn in Topaz");
+    term_release(50);
+    EXPECT_TRUE(live_fonts == 0, "the font itself is dropped when its owner ends");
+
     /* a fuzz: random sequences and text, after each piece the screen must show the grid */
     reset();
     static const char *const bits[] = { "\033[", "\033]", "\033", ";", ":", "1", "2", "5", "38", "48", "7", "?", ">",
@@ -258,6 +443,17 @@ int main(void)
         if (i % 89 == 0 && !T()->esc && !screen_is_grid()) { fuzz_ok = 0; printf("      after piece %d\n", i); }
     }
     EXPECT_TRUE(fuzz_ok, "... and 100000 on an NTSC screen (25 rows)");
+    trows = 32;
+    reset();
+    term_conop(OP(CON_RULES, 1), CONR_ALL, CONR_ALL);   /* D20: every rule set */
+    static const char *const bbs[] = { "\001", "\x0e", "\x1a", "\x1f", "\x7f", "\xb0", "\033[1m", "\033[5m", "\033[6m",
+        "\033[25m", "\033[22m", "\033[2J", "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW" };
+    for (int i = 0; i < 200000 && fuzz_ok; i++) {
+        int k = rand() % (int)(sizeof bits / sizeof bits[0] + sizeof bbs / sizeof bbs[0]);
+        out(k < (int)(sizeof bits / sizeof bits[0]) ? bits[k] : bbs[k - (int)(sizeof bits / sizeof bits[0])]);
+        if (i % 97 == 0 && !T()->esc && !screen_is_grid()) { fuzz_ok = 0; printf("      after piece %d\n", i); }
+    }
+    EXPECT_TRUE(fuzz_ok, "... and 200000 with every console rule set (D20)");
 
     if (bad) { printf("term-test: %d FAILED\n", bad); return 1; }
     printf("term-test: all passed\n");

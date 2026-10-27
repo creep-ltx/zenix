@@ -24,7 +24,7 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 #include "../user/sha256.h"
 
-#define ZB_VERSION "0.2b3"
+#define ZB_VERSION "0.2b4"
 #define ZB_DATE "27.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: zenixboot " ZB_VERSION " (" ZB_DATE ")";
 
@@ -45,6 +45,7 @@ static const char version[] __attribute__((used, section(".text.start"))) = "$VE
 #define UPDNOTE_ROOTFAILED 4u   /* it came up, but its root half failed (audit3 B1): the bundle is kept */
 #define UPD_F_ROLLBACK  1u
 #define BI_UPD          0x78            /* bootinfo: bundle address, size, flags */
+#define HWINFO_DRYRUN   0x5A485744u     /* kernel/hwinfo.h: "ZHWD" in the hwinfo magic, stage0 writes no hardware */
 #define ZUP_HDR 96
 #define ZUP_TOCE 80
 #define ZUP_MAX (16u << 20)
@@ -814,6 +815,8 @@ int zb_main(void)
     }
 
     colour(DIAG_CYAN);                   /* stage 2: stage0 and the memory list, AmigaOS still alive */
+    if (check)                          /* CHECK goes back to AmigaOS: stage0 must not stop its Ethernet (the GENET) */
+        *(u32 *)(table + 0x100) = HWINFO_DRYRUN;
     u32 h2 = zb_tables(table, buf, k512);
     if (h2 != home) {
         display_back();

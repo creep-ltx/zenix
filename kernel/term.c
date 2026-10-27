@@ -10,7 +10,12 @@
  * regions, bold/underline/inverse, the 16 colours; 256 and true colours are
  * shown as the nearest of the 16) so ordinary programs and editors work. Erased
  * cells take the current background colour, as on Linux and xterm. A console's
- * grid and scrollback are allocated when it is first used. */
+ * grid and scrollback are allocated when it is first used.
+ *
+ * For BBS terminals (DESIGN D20 4.2-4.5) a console may get a loaded 8-bit font (CON_FONT: each byte one glyph of it)
+ * and seven rules (CON_RULES, CONR_*), each set by a program through a descriptor of that console and dropped when its
+ * last setter ends. The colour rules act when a cell is stored: the colour byte in the grid (and the scrollback)
+ * already holds the bright foreground or background, so redraws and console switches stay right. */
 
 #define HLINES 200                      /* scrollback lines per console */
 
@@ -47,6 +52,11 @@ struct term {
     int hn, hhead;                      /* are hist[HLINES + the same index] (inverse folded in) */
     int back;                           /* lines scrolled back (0 = live) */
     u8 con;                             /* its console's number: where its answers (ESC[6n) go */
+    u8 rules;                           /* CONR_* (D20 4.3) */
+    u8 cor, scor;                       /* or-ed into stored colours: 0x08 bright (CONR_BRIGHT's SGR 1), 0x80 iCE's
+                                         * bright background (SGR 5); scor saved by ESC 7 */
+    struct gfont *font;                 /* a loaded 8-bit font (CON_FONT), 0: Topaz */
+    int fowner, rowner;                 /* who set the font, the rules: dropped when that process ends */
 };
 
 static struct term *wsp[NCONS + 1];
@@ -67,6 +77,7 @@ static void reset_term(struct term *t)
     t->wrap = 0;
     t->curvis = 1;
     t->esc = 0;
+    t->cor = t->scor = 0;               /* ESC c keeps the font and the rules (D20 4.2), not their colour flags */
 }
 
 static struct term *get(int w)
@@ -83,7 +94,7 @@ static struct term *get(int w)
 }
 
 /* the colour of an erased cell: the default foreground on the current background */
-static u8 bce(struct term *t) { return (u8)((t->colour & 0xF0) | (CO_DEF & 0x0F)); }
+static u8 bce(struct term *t) { return (u8)(((t->colour | t->cor) & 0xF0) | (CO_DEF & 0x0F)); }
 
 static void draw(struct term *t, int y, int x)
 {
@@ -184,6 +195,7 @@ void term_scroll_view(int delta)
 void term_redraw(void)
 {
     struct term *t = get(con_cur);
+    gfx_show(t->font, t->rules & CONR_CGAPAL);          /* its font and palette (D20): a switch, a new depth */
     if (t->back)
         show_back(t);
     else {
@@ -334,8 +346,8 @@ static int map256(int n)
 }
 
 /* SGR (CSI ... m): attributes and colours. 38/48 take 5;n (256 colours) or 2;r;g;b (true colour), also with ':'
- * (38:5:n, 38:2::r:g:b), shown as the nearest of the 16. Bold stays bold (it never brightens the colour). 2 3 5 8 9
- * and other codes are ignored. */
+ * (38:5:n, 38:2::r:g:b), shown as the nearest of the 16. Bold stays bold (it never brightens the colour) unless the
+ * console has CONR_BRIGHT; 5 and 6 are the bright background with CONR_ICE. 2 3 5 8 9 and other codes are ignored. */
 static void sgr(struct term *t)
 {
     int n = t->nparam ? t->nparam : 1;
@@ -344,12 +356,17 @@ static void sgr(struct term *t)
         int p = t->param[i];
         if (t->sub >> i & 1)
             continue;                                   /* a sub-parameter nobody took */
-        if (p == 0) { t->attr = 0; t->colour = CO_DEF; }
-        else if (p == 1) t->attr |= A_BOLD;
+        if (p == 0) { t->attr = 0; t->colour = CO_DEF; t->cor = 0; }
+        else if (p == 1) {
+            if (t->rules & CONR_BRIGHT) t->cor |= 0x08;         /* D20: the bright foreground, not bold */
+            else t->attr |= A_BOLD;
+        }
+        else if ((p == 5 || p == 6) && (t->rules & CONR_ICE)) t->cor |= 0x80;     /* iCE: the bright background */
+        else if (p == 25) t->cor &= (u8)~0x80;
         else if (p == 4) t->attr = (i + 1 < n && (t->sub >> (i + 1) & 1) && !t->param[i + 1]) ?
                                    (u8)(t->attr & ~A_UND) : (u8)(t->attr | A_UND);     /* 4:0 is "no underline" */
         else if (p == 7) t->attr |= A_INV;
-        else if (p == 22) t->attr &= (u8)~A_BOLD;
+        else if (p == 22) { t->attr &= (u8)~A_BOLD; t->cor &= (u8)~0x08; }
         else if (p == 24) t->attr &= (u8)~A_UND;
         else if (p == 27) t->attr &= (u8)~A_INV;
         else if (p >= 30 && p <= 37) t->colour = (u8)((t->colour & 0xF0) | (p - 30));
@@ -401,7 +418,11 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
         t->cy = clamp(arg(t, 0, 1) - 1, 0, trows - 1);
         t->cx = clamp(arg(t, 1, 1) - 1, 0, COLS - 1);
         break;
-    case 'J': erase_screen(t, vis, t->nparam ? t->param[0] : 0); break;
+    case 'J':
+        erase_screen(t, vis, t->nparam ? t->param[0] : 0);
+        if ((t->rules & CONR_CLRHOME) && t->nparam && t->param[0] == 2)
+            t->cx = t->cy = 0;                          /* D20: as ANSI.SYS and BBS terminals */
+        break;
     case 'K': {
         int m = t->nparam ? t->param[0] : 0;
         if (m == 0) clear_cells(t, vis, t->cy, t->cx, COLS);
@@ -500,8 +521,8 @@ static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
             case 27: t->esc = E_ESC; return;
             case '[': t->esc = E_CSI; t->nparam = 0; t->priv = 0; t->inter = 0; t->sub = 0; t->param[0] = 0; return;
             case ']': case 'P': case '_': case '^': case 'X': t->esc = E_STR; return;
-            case '7': t->sx = t->cx; t->sy = t->cy; t->sattr = t->attr; t->scolour = t->colour; return;
-            case '8': t->cx = t->sx; t->cy = t->sy; t->attr = t->sattr; t->colour = t->scolour; t->wrap = 0; return;
+            case '7': t->sx = t->cx; t->sy = t->cy; t->sattr = t->attr; t->scolour = t->colour; t->scor = t->cor; return;
+            case '8': t->cx = t->sx; t->cy = t->sy; t->attr = t->sattr; t->colour = t->scolour; t->cor = t->scor; t->wrap = 0; return;
             case 'D': linefeed(t, vis); return;
             case 'E': t->cx = 0; linefeed(t, vis); return;
             case 'M':
@@ -552,14 +573,19 @@ static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
 control:
     switch (ch) {
     case 27: t->esc = E_ESC; return;
-    case '\n': t->cx = 0; t->wrap = 0; linefeed(t, vis); return;     /* newline = CR+LF on output, as ttys do */
+    case '\n':                                          /* newline = CR+LF on output, as ttys do; LF alone with */
+        if (!(t->rules & CONR_LFONLY))                  /* CONR_LFONLY (D20), as xterm and ANSI.SYS */
+            t->cx = 0;
+        t->wrap = 0;
+        linefeed(t, vis);
+        return;
     case '\r': t->cx = 0; t->wrap = 0; return;
     case '\b': if (t->cx) t->cx--; t->wrap = 0; return;
     case '\t': t->cx = (t->cx + 8) & ~7; if (t->cx >= COLS) t->cx = COLS - 1; t->wrap = 0; return;
     case 7: beep(880, 80); return;                      /* bell */
     }
-    if (ch < 32 || t->esc)
-        return;
+    if (ch < 32 && (t->esc || !ch || !(t->rules & CONR_PCCTRL)))
+        return;                                         /* CONR_PCCTRL (D20): the other controls are glyphs */
     if (t->wrap) {                                      /* deferred wrap, as terminals do */
         t->cx = 0;
         linefeed(t, vis);
@@ -567,13 +593,17 @@ control:
     }
     t->ch[t->cy][t->cx] = ch;
     t->at[t->cy][t->cx] = t->attr;
-    t->co[t->cy][t->cx] = t->colour;
+    t->co[t->cy][t->cx] = t->colour | t->cor;
     if (vis)
         draw(t, t->cy, t->cx);
-    if (t->cx == COLS - 1)
-        t->wrap = 1;
-    else
+    if (t->cx != COLS - 1)
         t->cx++;
+    else if (!(t->rules & CONR_WRAPNOW))
+        t->wrap = 1;
+    else {                                              /* CONR_WRAPNOW (D20): ANSI.SYS and the Amiga console */
+        t->cx = 0;
+        linefeed(t, vis);
+    }
 }
 
 void term_write(int w, const char *s, u32 n)
@@ -631,4 +661,110 @@ void con_switch(int w)
     con_cur = w;
     if (gfx_up())
         term_redraw();
+}
+
+/* ---- DESIGN D20 4.5: a console's font and rules (SYS_console CON_FONT, CON_RULES) ---- */
+
+/* the font dropped: the console drawn again in Topaz when it is shown (its bytes are Latin-1 again) */
+static void font_drop(struct term *t)
+{
+    if (!t->font)
+        return;
+    struct gfont *f = t->font;
+    t->font = 0;
+    t->fowner = 0;
+    if (t->con == con_cur && gfx_up())
+        term_redraw();
+    gfx_font_free(f);
+}
+
+static void rules_set(struct term *t, u8 r)
+{
+    u8 old = t->rules;
+    t->rules = r;
+    if (!(r & CONR_BRIGHT)) { t->cor &= (u8)~0x08; t->scor &= (u8)~0x08; }
+    if (!(r & CONR_ICE)) { t->cor &= (u8)~0x80; t->scor &= (u8)~0x80; }
+    if (((old ^ r) & CONR_CGAPAL) && t->con == con_cur)
+        gfx_show(t->font, r & CONR_CGAPAL);
+}
+
+/* op word: op | (fd + 1) << 8. The descriptor must be a console that is the caller's controlling tty, with the caller
+ * in its foreground (asking the rules excepted), or root's on any console; a display must be there. */
+long term_conop(u32 op, u32 a2, u32 a3)
+{
+    u32 fd = (op >> CON_FD_SHIFT) - 1;
+    op &= (1u << CON_FD_SHIFT) - 1;
+    if (op != CON_FONT && op != CON_RULES)
+        return -EINVAL;
+    struct file *f = fd < NFD ? current->fd[fd] : 0;
+    if (!f)
+        return -EBADF;
+    if (f->type != FT_TTY || f->off < 1 || f->off > NCONS)
+        return -ENOTTY;
+    int con = (int)f->off, own = con == tty_of(current);
+    if (!own && current->uid != 0)
+        return -EPERM;
+    if (own && !(op == CON_RULES && !a3) && !tty_in_fg(con, current))
+        return -EPERM;                                  /* a background job never changes the screen */
+    if (!gfx_up())
+        return -ENODEV;
+    struct term *t = get(con);
+    if (op == CON_RULES) {
+        if ((a2 | a3) & ~(u32)CONR_ALL)
+            return -EINVAL;                             /* unknown bits: later bits keep their meaning */
+        u8 old = t->rules;
+        if (a3) {
+            rules_set(t, (u8)((old & ~a3) | (a2 & a3)));
+            t->rowner = t->rules ? current->pid : 0;
+        }
+        return old;
+    }
+    if (!a2) {
+        font_drop(t);
+        return 0;
+    }
+    if (a3 != 2052)                                     /* PSF1: 4 bytes of header, 256 glyphs of 8 bytes */
+        return -EINVAL;
+    if (!user_ok_rd(current, a2, a3))
+        return -EFAULT;
+    const u8 *p = (const u8 *)a2;
+    if (p[0] != 0x36 || p[1] != 0x04 || p[2] != 0 || p[3] != 8)
+        return -EINVAL;                                 /* magic, mode 0 (256 glyphs, no Unicode table), height 8 */
+    struct gfont *nf = gfx_font_new(p + 4);
+    if (!nf)
+        return -ENOMEM;
+    struct gfont *of = t->font;
+    t->font = nf;
+    t->fowner = current->pid;                           /* one owner: the last setter */
+    if (con == con_cur)
+        term_redraw();                                  /* the grid holds bytes: everything in the new font */
+    gfx_font_free(of);
+    return 0;
+}
+
+void term_release(int pid)
+{
+    for (int i = 1; i <= NCONS; i++) {
+        struct term *t = wsp[i];
+        if (!t)
+            continue;
+        if (t->rowner == pid) {
+            rules_set(t, 0);
+            t->rowner = 0;
+        }
+        if (t->fowner == pid)
+            font_drop(t);
+    }
+}
+
+/* a panic draws into the shown console: Topaz and no rules, whatever a board set (D20 4.2) */
+void term_panic(void)
+{
+    struct term *t = wsp[con_cur];
+    if (t) {
+        t->rules = 0;
+        t->cor = 0;
+        t->wrap = 0;
+    }
+    gfx_show(0, 0);
 }

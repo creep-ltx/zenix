@@ -155,7 +155,8 @@ LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), 
 SBIN = {"zup"}
 BASE_SBIN = ["zfsd", "netd"]              # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
 # the licence notices of the code from other projects (owner decision, DESIGN D19 2026-10-27), as tools/mkroot.sh
-LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz")]
+LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("tools/font_8x8.COPYING", "font_8x8")]
+FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
 
 
 def binname(p):
@@ -186,6 +187,8 @@ def std_packages(build, uapps):
         base += [("d", 0o755, 0, 0, None, "/sbin/net")] + [("f", 0o755, 0, 0, zx("drv-" + d), "/sbin/net/" + d) for d in drvs]
     base += [("d", 0o755, 0, 0, None, d) for d in ("/usr", "/usr/share", "/usr/share/licenses")]
     base += [("f", 0o644, 0, 0, os.path.join(ROOT, f), "/usr/share/licenses/" + n) for f, n in LICENSES]
+    base += [("d", 0o755, 0, 0, None, "/usr/share/consolefonts"),
+             ("f", 0o644, 0, 0, os.path.join(build, FONT), "/usr/share/consolefonts/" + FONT)]
     base += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", c), "/etc/" + c) for c in BASE_CONFIG]
     make_package(out, "base", vnum, vstr, base, group="base", deps=[("zup", vnum)] if "zup" in names else [])
     utils = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p))

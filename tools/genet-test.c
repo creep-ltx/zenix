@@ -49,6 +49,13 @@ static int logged(const char *s)
 
 #include "../net/drv/genet-core.c"
 
+/* stage0's stop of a GENET a previous owner left running (boot/genet-stop.h): the registers as the chip means them,
+ * the beam's line moving every 64 us of the model's clock */
+static u32 gs_rd(u32 base, u32 off) { (void)base; return m_rd(off); }
+static void gs_wr(u32 base, u32 off, u32 v) { (void)base; m_wr(off, v); }
+static u32 gs_clock(void) { M.us += 20; return M.us / 64; }
+#include "../boot/genet-stop.h"
+
 static int bad;
 #define CHECK(c, ...) do { if (!(c)) { printf("FAIL: " __VA_ARGS__); printf("\n"); bad++; } else { printf("ok:   " __VA_ARGS__); printf("\n"); } } while (0)
 
@@ -371,6 +378,58 @@ int main(void)
     nexp = ngot = wrong = 0;
     for (int i = 0; i < 10; i++) { seed = seed * 69069 + 1; wire_in(200, seed, 1, 0); turn(); }
     CHECK(logged("not a Broadcom PHY") && M.garbled == 10 && wrong, "the model garbles frames when the RGMII delays are wrong (a PHY the driver does not know)");
+
+    /* 13. a previous owner left the DMA running (AmigaOS's genet.device before bootzenix): its rings posted, a frame
+     * waiting to go out, nobody taking frames any more. stage0's stop: no descriptor write and no frame sent after it,
+     * however much arrives; then Zenix's driver takes the chip over as usual */
+    m_init();
+    bring_up(1);
+    wait_link(1);
+    nexp = ngot = wrong = 0;
+    for (int i = 0; i < 10; i++) { seed = seed * 69069 + 1; wire_in(300, seed, 1, 0); turn(); }
+    M.stuck_tx = 1;                     /* a frame in the send ring that has not gone yet */
+    netd_send(300, 4321);
+    seed = seed * 69069 + 1;
+    wire_in(500, seed, 1, 0);           /* one frame lands before the stop (the owner is gone: never taken) */
+    M.nout = 0;
+    int w1 = M.dma_writes;
+    uint16_t p1 = M.rprod, c1 = M.tcons;
+    nlog = 0;
+    u32 st = genet_stop(g.base);
+    int writes_at_stop = M.dma_writes;
+    M.stuck_tx = 0;                     /* the send DMA could move now: it must not */
+    for (int i = 0; i < 60; i++) { seed = seed * 69069 + 1; wire_in(64 + seed % 1400, seed, 2, 0); m_step(); }
+    CHECK(st == (GSTOP_DONE | GSTOP_RX | GSTOP_TX | GSTOP_MAC) && w1 > 0 && writes_at_stop == w1 && M.dma_writes == w1 &&
+          M.rprod == p1 && M.tcons == c1 && !M.nout && !(M.R[RDMA_CTRL / 4] & DMA_EN) && !(M.R[TDMA_CTRL / 4] & DMA_EN) &&
+          !(M.R[UMAC_CMD / 4] & (CMD_RX_EN | CMD_TX_EN)) && M.R[(INTRL2_0 + INTRL2_CPU_MASK_SET) / 4] == 0xffffffff &&
+          M.R[(INTRL2_1 + INTRL2_CPU_MASK_SET) / 4] == 0xffffffff && !M.faults,
+          "a previous owner left the DMA running: after stage0's stop (%x) no descriptor write and no frame sent, 60 frames on the wire", st);
+    M.nin = 0;                          /* what came while the MAC's receive was off is gone (the model keeps it queued) */
+    nlog = 0;
+    bring_up(1);                        /* Zenix's driver later: the chip as it finds it after the stop */
+    wait_link(1);
+    nexp = ngot = wrong = 0;
+    for (int i = 0; i < 30; i++) { seed = seed * 69069 + 1; wire_in(600, seed, 1, 0); if (i % 3 == 0) netd_send(400, seed); turn(); }
+    for (int i = 0; i < 5; i++) turn();
+    CHECK(ngot == nexp && ngot == 30 && !wrong && !M.faults, "and Zenix's driver starts on that chip: frames flow again");
+    /* a chip already stopped (a cold start): only "done"; a DMA that never says stopped: 100 ms, then "slow" */
+    CHECK(genet_stop(g.base) == (GSTOP_DONE | GSTOP_RX | GSTOP_TX | GSTOP_MAC) && genet_stop(g.base) == GSTOP_DONE,
+          "stopped twice: the second time there was nothing running");
+    m_init();
+    bring_up(1);
+    M.dma_hang = 1;
+    u32 us0 = M.us;
+    st = genet_stop(g.base);
+    CHECK(st == (GSTOP_DONE | GSTOP_RX | GSTOP_TX | GSTOP_SLOW) && M.us - us0 >= 99000 && M.us - us0 < 120000,
+          "a DMA that never says stopped: the wait ends after 100 ms of the beam's clock (%u us), said", (unsigned)(M.us - us0));
+    M.dma_hang = 0;
+    /* not a GENET v5 at that address: nothing written */
+    m_init();
+    bring_up(1);
+    wait_link(1);
+    M.R[SYS_REV_CTRL / 4] = 0x05020000;
+    st = genet_stop(g.base);
+    CHECK(st == GSTOP_NOTV5 && (M.R[RDMA_CTRL / 4] & DMA_EN) && (M.R[UMAC_CMD / 4] & CMD_RX_EN), "not a GENET v5 there: nothing written");
 
     printf("%s: %d failed\n", bad ? "genet-test FAILED" : "genet-test passed", bad);
     return bad != 0;

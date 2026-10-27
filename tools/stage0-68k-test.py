@@ -174,11 +174,28 @@ BOARDS = [  # type, product, er_flags, cd_flags, manufacturer, serial, addr, siz
 ]
 
 
-def run(blob_bytes, base, root, with_dt=True, with_boards=True):
+GENET = 0xF7580000
+
+
+def genet_window():
+    """A GENET v5 as AmigaOS's driver leaves it: both DMA engines on ring 16, the MAC receiving and sending; the
+    registers little-endian, as the 68k sees them through Emu68. The DMA status says stopped (the wait ends at once)."""
+    w = bytearray(0x10000)
+    for off, v in ((0x0000, 0x06010000), (0x3044, 0x20001), (0x5044, 0x20001), (0x3048, 1), (0x5048, 1), (0x0808, 0xB)):
+        struct.pack_into("<I", w, off, v)
+    return w
+
+
+def run(blob_bytes, base, root, with_dt=True, with_boards=True, dry=False):
     uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
     if UC_CPU_M68K_M68020 is not None:
         uc.ctl_set_cpu_model(UC_CPU_M68K_M68020) if hasattr(uc, "ctl_set_cpu_model") else None
     uc.mem_map(0, 0x2000)                                        # low RAM with the hwinfo table
+    uc.mem_map(GENET, 0x10000)                                   # the GENET's registers (Emu68's /scb window)
+    uc.mem_write(GENET, bytes(genet_window()))
+    uc.mem_map(0xDFF000, 0x1000)                                 # the custom chips (the beam's line, VPOSR/VHPOSR)
+    if dry:                                                      # zenixboot CHECK: "ZHWD" in the magic word
+        uc.mem_write(HWINFO, struct.pack(">I", 0x5A485744))
     uc.mem_map(0x00200000, 0x00600000)                          # code, exec, resource, stack
     img = Image(TREE_BASE)
     lay_out(img, root)
@@ -322,7 +339,12 @@ def run(blob_bytes, base, root, with_dt=True, with_boards=True):
         raise SystemExit("stage0 did not finish")
     bad = [hex(r) for r, v in marks.items() if uc.reg_read(r) != v]
     tbl = bytes(uc.mem_read(HWINFO, 408))
+    state["genet"] = bytes(uc.mem_read(GENET, 0x10000))
     return tbl, state, uc.reg_read(UC_M68K_REG_A6), uc.reg_read(UC_M68K_REG_A7), bad
+
+
+def greg(st, off):
+    return struct.unpack_from("<I", st["genet"], off)[0]
 
 
 def main():
@@ -371,7 +393,18 @@ def main():
         check("a6 at calls", int(st["a6_ok"]), 1)
         check("a6 on return", a6, EXEC_BASE)
         check("saved regs", len(bad), 0)
+        check("genet_stop", struct.unpack(">I", tbl[72:76])[0], 0x0F)   # done, receive, send and the MAC were on
+        check("RDMA_CTRL", greg(st, 0x3044), 0)
+        check("TDMA_CTRL", greg(st, 0x5044), 0)
+        check("UMAC_CMD", greg(st, 0x0808), 0x8)
+        check("INTRL2 masks", greg(st, 0x0210) & greg(st, 0x0250), 0xFFFFFFFF)
         print("   calls:", st["calls"])
+    print("--- a dry run (zenixboot CHECK goes back to AmigaOS): the table filled, the GENET left running")
+    tbl, st, a6, sp, bad = run(blob, 0x00200000, root, dry=True)
+    check("magic", struct.unpack(">I", tbl[:4])[0], 0x5A485731)
+    check("genet", struct.unpack(">I", tbl[24:28])[0], 0xF7580000)
+    check("genet_stop", struct.unpack(">I", tbl[72:76])[0], 0)
+    check("GENET", int(st["genet"] == bytes(genet_window())), 1)
     print("--- no devicetree.resource (plain Amiga), the boards are still listed")
     tbl, st, a6, sp, bad = run(blob, 0x00200000, root, with_dt=False)
     magic, flags = struct.unpack(">II", tbl[:8])
@@ -379,6 +412,7 @@ def main():
     check("flags", flags, 0)
     check("emmc", struct.unpack(">I", tbl[16:20])[0], 0)
     check("nboards", struct.unpack(">I", tbl[64:68])[0], 2)
+    check("GENET", int(st["genet"] == bytes(genet_window())), 1)
     print("--- no expansion.library")
     tbl, st, a6, sp, bad = run(blob, 0x00200000, root, with_dt=False, with_boards=False)
     check("nboards", struct.unpack(">I", tbl[64:68])[0], 0)

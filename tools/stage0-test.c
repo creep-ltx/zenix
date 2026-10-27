@@ -8,6 +8,20 @@
 #include <stdlib.h>
 #include <string.h>
 #define HOST_TEST 1
+typedef unsigned int u32;
+/* a GENET's register window as a previous owner left it (the receive and send DMA on, the MAC on), and the beam */
+static u32 genet_regs[0x10000 / 4], genet_at, genet_writes;
+static u32 gs_rd(u32 base, u32 off) { return base == genet_at ? genet_regs[off / 4] : 0xdeadbeef; }
+static void gs_wr(u32 base, u32 off, u32 v)
+{
+    if (base != genet_at) { printf("a write outside the GENET: %x+%x\n", base, off); genet_writes += 1000; return; }
+    genet_regs[off / 4] = v;
+    genet_writes++;
+    if (off == 0x3044 && !(v & 1)) genet_regs[0x3048 / 4] |= 1;   /* the DMA says stopped */
+    if (off == 0x5044 && !(v & 1)) genet_regs[0x5048 / 4] |= 1;
+}
+static u32 beam;
+static u32 gs_clock(void) { return ++beam; }
 #include "../boot/stage0.c"
 
 static u32 start_map = 0xf20 / 2;
@@ -98,6 +112,24 @@ int main(int argc, char **argv)
     CHECK("b1 product", hw.board[1].product, 0x21);
     CHECK("b1 addr", hw.board[1].addr, 0x40000000);
     CHECK("b1 size", hw.board[1].size, 0x00010000);
+
+    /* the GENET a previous owner left running: stopped, unless the caller is a dry run (zenixboot CHECK) */
+    genet_at = hw.genet;
+    genet_regs[0] = 0x06010000;                                 /* SYS_REV_CTRL: v5.1 */
+    genet_regs[0x3044 / 4] = genet_regs[0x5044 / 4] = 0x20001;  /* RDMA_CTRL, TDMA_CTRL: ring 16, on */
+    genet_regs[0x808 / 4] = 0xb;                                /* UMAC_CMD: 1000 Mbit/s, receive and send on */
+    stage0_stop(&hw, 1);
+    CHECK("dry run", genet_writes << 8 | hw.genet_stop, 0);
+    stage0_stop(&hw, 0);
+    CHECK("genet_stop", hw.genet_stop, GSTOP_DONE | GSTOP_RX | GSTOP_TX | GSTOP_MAC);
+    CHECK("RDMA_CTRL", genet_regs[0x3044 / 4], 0);
+    CHECK("TDMA_CTRL", genet_regs[0x5044 / 4], 0);
+    CHECK("UMAC_CMD", genet_regs[0x808 / 4], 0x8);
+    CHECK("INTRL2 mask", genet_regs[0x210 / 4] & genet_regs[0x250 / 4], 0xffffffff);
+    CHECK("writes", genet_writes, 8);
+    hw.genet = 0; hw.genet_stop = 0; genet_writes = 0;
+    stage0_stop(&hw, 0);
+    CHECK("no genet", genet_writes << 8 | hw.genet_stop, 0);
     printf(fails ? "FAILED (%d)\n" : "all ok\n", fails);
     return fails != 0;
 }

@@ -15,6 +15,14 @@
   colour-test.py pixel SHOT GEOM ROW COL RGB   the middle of text cell ROW, COL (1-based) has the 12-bit colour RGB
   colour-test.py serial LOG             the raw serial bytes: the prompt's colour codes, and less showing a line
                                         with colour codes and 79 visible characters as one row, the codes passed on
+  colour-test.py pcfont SHOT GEOM DEPTH [PSF]   `termtest pcfont` (DESIGN D20 step 1): every cell's 8 x 8 pixels
+                                        against termtest's own test font: the 256 bytes as glyphs, CLRHOME, WRAPNOW,
+                                        LFONLY; the colour blocks in the CGA palette, the bright foreground and iCE
+                                        background, as DEPTH planes show them. With PSF (the real font loaded): the
+                                        256 bytes against its glyphs only
+  colour-test.py pcgone SHOT GEOM DEPTH  the same page after termtest ended without cleaning up: the kernel dropped
+                                        the font (the grid no longer in it) and the rules (Zenix's palette again)
+  colour-test.py cleared SHOT GEOM      rows 3-29 empty (termtest cleared the screen before it dropped the font)
 Each prints what it found and exits 1 on a failure."""
 import os
 import re
@@ -47,6 +55,128 @@ def shown(depth):
         p2 = [rgb12(v) for v in re.findall(r"0x[0-9A-Fa-f]+", re.search(r"gfx_palette2\[4\] = \{([^}]*)\}", text).group(1))]
         return [p2[m[i & 7]] for i in range(16)]
     return [(0, 0, 0)] * 16
+
+
+def cga(depth):
+    """the CGA palette (CONR_CGAPAL) as DEPTH planes show it: 2 planes and 1 plane are not changed by it"""
+    text = open(os.path.join(ROOT, "kernel", "gfx.c")).read()
+    pal = [rgb12(v) for v in re.findall(r"0x[0-9A-Fa-f]+", re.search(r"cga_palette\[16\] = \{([^}]*)\}", text).group(1))]
+    if depth == 4:
+        return pal
+    if depth == 3:
+        return [pal[i & 7] for i in range(16)]
+    return shown(depth)
+
+
+def font(path):
+    """256 glyphs of 8 rows: a PSF1 file's, or termtest's test font (the byte's two hex digits as bits 2 pixels wide)"""
+    if path:
+        d = open(path, "rb").read()
+        assert d[:4] == b"\x36\x04\x00\x08" and len(d) == 2052, "not a PSF1 font of mode 0, height 8"
+        return [list(d[4 + 8 * c:12 + 8 * c]) for c in range(256)]
+    wide = [sum(3 << (2 * k) for k in range(4) if n >> k & 1) for n in range(16)]
+    return [[0, wide[c >> 4], wide[c >> 4], wide[c >> 4], wide[c & 15], wide[c & 15], wide[c & 15], 0] for c in range(256)]
+
+
+class Cells:
+    """the pixels of text cells, from a columns geometry"""
+    def __init__(self, path, geom):
+        self.im, self.px, _ = load(path)
+        self.x0, self.x1, self.yc, self.h = geom
+        self.w = (self.x1 - self.x0 + 1) / 80
+
+    def at(self, row, col, j, k):
+        """pixel k of glyph line j in cell (row, col), 0-based"""
+        top = self.yc - (7 - row) * self.h - self.h / 2
+        return self.px[int(self.x0 + (col + (k + 0.5) / 8) * self.w), int(top + (j + 0.5) * self.h / 8)]
+
+    def levels(self, row, col):
+        """the cell's 8 x 8 pixels as brightness 0..1 of the cell's brightest, each read at the pixel's middle between
+        the four nearest screen pixels (the screenshot is scaled by about 1.28 x 2.56 and smoothed)"""
+        top = self.yc - (7 - row) * self.h - self.h / 2
+        def b(x, y):
+            xi, yi = int(x - 0.5), int(y - 0.5)
+            fx, fy = x - 0.5 - xi, y - 0.5 - yi
+            q = lambda a, c: sum(self.px[a, c])
+            return ((q(xi, yi) * (1 - fx) + q(xi + 1, yi) * fx) * (1 - fy) +
+                    (q(xi, yi + 1) * (1 - fx) + q(xi + 1, yi + 1) * fx) * fy)
+        v = [[b(self.x0 + (col + (k + 0.5) / 8) * self.w, top + (j + 0.5) * self.h / 8) for k in range(8)] for j in range(8)]
+        ref = max(max(r) for r in v)
+        return [[x / ref if ref >= 150 else 0 for x in r] for r in v]
+
+    def glyph(self, row, col, glyphs, among=range(256)):
+        """the glyph of `among` that the cell looks most like, and how far the next best was"""
+        v = self.levels(row, col)
+        def d(b):
+            return sum((v[j][k] - (glyphs[b][j] >> (7 - k) & 1)) ** 2 for j in range(8) for k in range(8))
+        ds = sorted((d(b), b) for b in among)
+        return ds[0][1], (ds[1][0] - ds[0][0]) if len(ds) > 1 else 99
+
+    def bits(self, row, col):
+        return [sum(1 << (7 - k) for k in range(8) if r[k] > 0.5) for r in self.levels(row, col)]
+
+    def fg(self, row, col):
+        """the most common lit colour in a cell"""
+        n = {}
+        for j in range(8):
+            for k in range(8):
+                p = self.at(row, col, j, k)
+                if sum(p) > 60:
+                    n[p] = n.get(p, 0) + 1
+        return max(n, key=n.get) if n else (0, 0, 0)
+
+
+ACTS = (0, 7, 8, 9, 10, 13, 27)
+
+
+SHADES = (0xB0, 0xB1, 0xB2, 0xDB)                  # CP437's shades and full block: one-pixel checkerboards blur together
+
+
+def pcfont(cells, depth, glyphs, real=False):
+    """real: a PSF font's own glyphs, checked on the 256 bytes only (the rules are the test font's checks); bytes whose
+    bitmaps are the same count as one, and the shades as one (the screenshot is scaled and smoothed)"""
+    bad = []
+    blank = [0] * 8
+    acts = list(range(1, 256)) + [256]               # 256: an empty cell (an erase, or a space not drawn again); NUL is
+    g = glyphs + [blank]                             # never stored
+    is_ = lambda r, c, b: cells.glyph(r, c, g, acts)[0] == b
+    for b in range(256):
+        r, c = 2 + b // 16, b % 16
+        got = cells.glyph(r, c, g, acts)[0]
+        if b in ACTS or b == 32:
+            if got not in (32, 256) and g[got] != blank:
+                bad.append(f"cell {r + 1},{c + 1} (byte {b}, which acts): looks like byte {got}, not a space")
+        elif got != b and not (real and (g[got] == g[b] or (got in SHADES and b in SHADES))):
+            bad.append(f"cell {r + 1},{c + 1}: looks like byte {got} ({cells.bits(r, c)}), not byte {b}")
+    if real:
+        return bad
+    if not is_(0, 0, ord("H")):
+        bad.append("CLRHOME: no H at 1,1")
+    if is_(4, 4, ord("Z")):
+        bad.append("CLRHOME: the Z at 5,5 was not erased")
+    if not all(is_(23, c, ord("W")) for c in range(80)):
+        bad.append("WRAPNOW: row 24 is not 80 W")
+    if is_(24, 0, ord("X")) or not is_(25, 0, ord("X")):
+        bad.append("WRAPNOW: X is not at 26,1 after a blank row 25")
+    if not is_(26, 0, ord("A")) or not is_(27, 1, ord("B")):
+        bad.append("LFONLY: B is not at 28,2 under A")
+    want = cga(depth)
+    for i in range(16):
+        for row in (19, 20):
+            got = cells.at(row, 5 * i + 2, 5, 4)
+            if not near(got, want[i]):
+                bad.append(f"CGA palette: block {i} row {row + 1}: {got}, wanted {want[i]}")
+    bright = {4: want[9], 3: want[1]}.get(depth, want[1] if depth == 2 else rgb12("BBB"))
+    plain = want[1] if depth > 1 else rgb12("BBB")
+    if not near(cells.fg(22, 0), bright):
+        bad.append(f"BRIGHT: R is {cells.fg(22, 0)}, wanted {bright}")
+    if not near(cells.fg(22, 1), plain):
+        bad.append(f"BRIGHT: r is {cells.fg(22, 1)}, wanted {plain}")
+    ice = want[12] if depth == 4 else want[4]
+    for c, w in ((2, ice), (3, ice), (4, want[4]), (5, want[4])):
+        if not near(cells.at(22, c, 5, 4), w):
+            bad.append(f"iCE: cell 23,{c + 1} background {cells.at(22, c, 5, 4)}, wanted {w}")
+    return bad
 
 
 def load(path):
@@ -177,6 +307,36 @@ def main():
         if ok:
             print("serial: the prompt's codes; less passes colour codes on and counts them as no width")
         return 0 if ok else 1
+    if what in ("pcfont", "pcgone", "cleared"):
+        geom = [float(v) for v in open(sys.argv[3]).readline().split()]
+        cells = Cells(sys.argv[2], geom)
+        if what == "cleared":
+            lit = [r + 1 for r in range(2, 29) for c in range(80) if any(sum(cells.at(r, c, j, 4)) > 60 for j in (1, 4, 6))]
+            print("cleared: rows 3-29 empty" if not lit else f"cleared: something on rows {sorted(set(lit))[:8]}")
+            return 1 if lit else 0
+        depth = int(sys.argv[4])
+        glyphs = font(sys.argv[5] if len(sys.argv) > 5 else None)
+        if what == "pcfont":
+            real = len(sys.argv) > 5
+            bad = pcfont(cells, depth, glyphs, real)
+            for b in bad[:12]:
+                print("pcfont:", b)
+            if not bad and real:
+                print(f"pcfont: the 256 bytes drawn in {sys.argv[5]}'s glyphs")
+            elif not bad:
+                print(f"pcfont: 256 glyphs, CLRHOME, WRAPNOW, LFONLY, the CGA palette, bright and iCE as {depth} planes show them")
+            return 1 if bad else 0
+        same = sum(1 for b in range(256) if b not in ACTS and cells.bits(2 + b // 16, b % 16) == glyphs[b])   # exact only
+        sh, bad = shown(depth), 0
+        for i in range(16):
+            got = cells.at(19, 5 * i + 2, 5, 4)
+            if not near(got, sh[i]):
+                print(f"pcgone: block {i}: {got}, wanted Zenix's {sh[i]}"); bad += 1
+        if same > 8:
+            print(f"pcgone: {same} cells still in the loaded font"); bad += 1
+        if not bad:
+            print(f"pcgone: the font dropped ({same} cells look like it), Zenix's palette again")
+        return 1 if bad else 0
     print(__doc__); return 2
 
 
