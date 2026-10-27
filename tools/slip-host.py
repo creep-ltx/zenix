@@ -11,10 +11,14 @@ spread over PORTS ports from PORT on, to this PC's 127.0.0.1 (zenix-slirp's forw
 options: each connection becomes a SYN to the Amiga), hold them 20 s, close them and answer "done N". Then zenix-slirp on a new pty linked at SERIAL-LINK (FS-UAE's serial port), the bytes
 that are not SLIP (Zenix's console) appended to CONSOLE-LOG. It writes READY-FILE when all of that is up and runs
 until it is killed (zenix-slirp with it). ZENIX-SLIRP "-": the servers alone (SERIAL-LINK and CONSOLE-LOG unused), for
-tools/eth-test.sh, where FS-UAE's A2065 and its own slirp reach them."""
+tools/eth-test.sh, where FS-UAE's A2065 and its own slirp reach them. SLIP_HOST_ADDR (default 127.0.0.1): the address
+the TCP and UDP servers listen on; another one (the PC's LAN address, for the A1200 checklist of the CM4's Ethernet:
+`SLIP_HOST_ADDR=192.168.1.10 tools/slip-host.py - none none /tmp/ready` outside any namespace) leaves the DNS server
+out (port 53 needs root outside the namespace)."""
 import os, signal, socket, struct, subprocess, sys, threading, time
 
 zs, link, log, ready = sys.argv[1:5]
+ADDR = os.environ.get("SLIP_HOST_ADDR", "127.0.0.1")
 extra = sys.argv[5:]
 
 
@@ -25,7 +29,7 @@ def pattern(i):
 def tcp_server(port, handle):
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("127.0.0.1", port))
+    s.bind((ADDR, port))
     s.listen(8)
 
     def run():
@@ -58,7 +62,7 @@ def source(c):
 
 def udp_echo(port):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("127.0.0.1", port))
+    s.bind((ADDR, port))
 
     def run():
         while True:
@@ -122,7 +126,8 @@ tcp_server(7100, echo)
 tcp_server(7103, flood)
 tcp_server(7102, source)
 udp_echo(7101)
-resolver({"amiga.zenix.test": "10.1.2.3"})
+if ADDR == "127.0.0.1":
+    resolver({"amiga.zenix.test": "10.1.2.3"})
 if zs == "-":                           # the servers only (tools/eth-test.sh: FS-UAE's own slirp is the PC's side)
     open(ready, "w").write("ready\n")
     signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))

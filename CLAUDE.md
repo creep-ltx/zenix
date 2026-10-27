@@ -197,6 +197,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   where `reserved` was; past the first size `lease`, `dhcp_server`, `rx_drop`; `NETIF_ETHER` 16, `NETIF_DHCP` 32);
   `SYS_drv`'s -EPERM (anyone but netd's children) and -ECONNRESET (no netd); the driver contract `/sbin/net/NAME IFACE
   ARGS` with a pipe as standard input for the doorbell.
+  Since step 9: `/sbin/net/genet` in `NETDRVS` and its `driver` line words `cache=kernel`, `cache=user`, `noselftest`.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

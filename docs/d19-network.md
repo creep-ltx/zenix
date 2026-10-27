@@ -3,8 +3,9 @@
 Status: **design, revision 2 after two independent reviews (section 13); step 1 (section 3, zfsd out of the kernel
 image) built on branch zfout 2026-10-27; steps 0, 2 and 3 (msgping, random numbers, the kernel's socket layer with a
 test server) built on branch n023 2026-10-27; steps 4 and 5 (netd over the loopback; SLIP, the interfaces, ping) on branch n45
-2026-10-27; steps 6-8 (names, the driver protocol, the A2065) on branch n678 2026-10-27 (section 14, "As built");
-steps 9-11 not built.** Roadmap block 2, "Zenix
+2026-10-27; steps 6-8 (names, the driver protocol, the A2065) on branch n678 2026-10-27; step 9 (the CM4's Ethernet,
+GENET) on branch n9 2026-10-27, tested against a model, not yet on the A1200 (section 14, "As built"); steps 10-11 not
+built.** Roadmap block 2, "Zenix
 reaches the world": the network, the CM4's Ethernet, TCP/IP as a server, DHCP, DNS, `ping`; telnet, the crypto
 library, ssh, HTTPS, NFS, remote control and `zpkg` come after it. A deep core change (a kernel file kind, new system
 calls, a message family, the way servers are loaded). The short version is DESIGN.md D19. Facts about today's code are
@@ -1176,6 +1177,92 @@ network unused** (the matrix, `free`): 2 MB chip-only 1,350 -> 1,347 KB, 1 MB ch
 116 KB), the A2065 with DHCP 1,120 KB (netd 125 KB, the driver 21 KB). **Found by the full suite:** `zenix.hdf`'s 512
 inodes ran out (cmds2-test makes 150 files and got "no space left" at the 147th once `host`, its page, `a2065`'s page
 and `/sbin/net/a2065` were added): the image now has 1,024 inodes (Makefile).
+
+### Step 9: the CM4's Ethernet, GENET v5 (branch n9, 2026-10-27; not yet run on the A1200)
+
+`/sbin/net/genet` (`net/drv/genet.c`, `docs/man/genet.txt`), polled, as 5.2 says; the chip and its PHY in
+`net/drv/genet-core.c` and `genet.h`, plain C whose register access, clock, cache calls and log come from the file that
+includes it, so the same code runs on Zenix and against the model on the PC (`tools/genet-model.h`, the host test
+`tools/genet-test.sh`). **Sources** (written down as the note asked): the register layout, the bring-up order and the
+ring arithmetic from Linux's `drivers/net/ethernet/broadcom/genet/` (`bcmgenet.c`, `bcmgenet.h`, `bcmmii.c`; GPL-2.0)
+and U-Boot's `drivers/net/bcmgenet.c` (GPL-2.0+, the simplest polled GENET v5 driver, the Pi 4's); the BCM54xx's
+registers from Linux's `include/linux/brcmphy.h` and `drivers/net/phy/broadcom.c`; rondoval's `emu68-genet-driver`
+(GPL-2.0+ and MPL-2.0 OR GPL-2.0+ by file, its LICENSE read: usable under GPL-2) read for what Emu68 needs: the
+registers that survive a reset (RBUF/TBUF control and energy), the "rxid" delay split, the masks, the pre-reset
+quiesce. No code was taken: the facts are the hardware's, the code is this project's. How Emu68 maps the Pi's
+peripherals, what stage0 collects (`genet`, `genet_irq0/1`, `phy_addr`, `mac`, `HW_RANGEOPS`) and the cache opcodes:
+knowledge base `amiga/emu68-network-usb-rtg-hardware.md`, `emu68-driver-stack-why-fast.md`; the PHY is on the CM4
+module itself (the carrier, the PiStorm32-lite, has the socket). Local choices:
+
+1. **No receive status block** (5.2 said "the 64-byte status block on"): netd lends a DMA interface 1,536-byte buffers
+   and reads a frame from the buffer's first byte (step 7, frozen: `udrvxfer`'s rx entries have no offset). With the
+   status block the frame would start at +64 and a full frame would not fit. So `RBUF_64B_EN` and `RBUF_ALIGN_2B` are
+   cleared (both survive a reset), the length and the error bits come from the descriptor, the chip strips the CRC
+   (`CMD_CRC_FWD` clear), and `UMAC_MAX_FRAME_LEN` is 1,536. The chip writes straight into netd's buffers in the
+   claim's region and reads netd's send buffers there: no copy in the driver (netd copies once each way, step 7's
+   choice 4). Checksum offload (5.2 "later") would need the status block, so a buffer offset in the protocol: its own
+   change when it comes.
+2. **Ring 16, 32 receive and 16 send descriptors** of the 256 in the window (`DRV_MAXBUF` and netd's 16 DMA send
+   buffers). The chip's 16-bit indexes cannot be set, so the driver follows them (Linux's way); a slot without a buffer
+   is kept from the chip by starting the consumer index that many behind. 32 frames are 390 us of a full gigabit line:
+   a polled driver may drop a burst (counted as `rx_drop`, from the chip's discard count); TCP's window (16-32 KB on a
+   large machine, 11-22 segments) stays inside it.
+3. **The cache calls, both ways, chosen at the start and logged** (the note's open question): with `HW_RANGEOPS` the
+   driver first spawns itself as a child (`genet --probe-rangeops`) that runs the clean and clean-and-invalidate range
+   opcodes on its own buffer: if Emu68 refuses them in user mode the kernel kills the child (vector 11, logged), not
+   the driver. If the child ends 0 the driver issues the opcodes itself; otherwise, and on an Emu68 without them, it
+   uses `DRV_CACHE` (one system call a buffer). Then a **self-test**: four frames of a pattern sent to itself through
+   the UniMAC's local loopback, with the receive buffers first filled with a stale value through the cache, and checked
+   byte by byte; a cache call that does nothing shows up as wrong frames (the model proves it). Wrong with the
+   opcodes: the kernel's calls and the test again; wrong with the kernel's too: the driver refuses (the DMA cannot be
+   trusted); nothing back at all (a chip whose loopback does nothing): no verdict, the kernel's calls. Options in the
+   `driver` line: `cache=kernel`, `cache=user`, `noselftest` (unknown words logged and ignored).
+4. **The RGMII delays ("rgmii-rxid")**: the PHY delays the receive clock (AUX_CTL MISC `RGMII_SKEW_EN`), not the send
+   clock (shadow CLK_CTL `GTXCLK_EN` cleared); the MAC delays the send clock (`ID_MODE_DIS` clear), as Linux and
+   rondoval; U-Boot sets `ID_MODE_DIS` and relies on the PHY's state, which a driver before us may have changed.
+   AutogrEEEn off. Only for a Broadcom BCM54xx (the OUI): another PHY keeps its delays (logged).
+5. **The PHY:** the device tree's MDIO address (`phy_addr`), else (0xFF, or nobody answers there: logged) the first
+   address that answers; reset at every start (so a driver restart renegotiates: about 2-3 s without a link);
+   advertised 10/100 half and full and 1000 full, no pause frames (the MAC ignores them); looked at every 100 ms, with
+   BMSR read twice (its link bit is latched low), so a drop and a return at another speed between two looks is seen.
+   The MAC's speed, duplex and `RGMII_LINK` follow the link; without a link frames to send come back at once as errors.
+6. **The MAC address:** the device tree's (`hwinfo.mac`), else what the chip's `UMAC_MAC0/1` hold (logged), else the
+   driver refuses. The receive filter (MDF): broadcast and our own address.
+7. **Polled, interrupts masked at the chip** (`INTRL2_0/1` masks all set at every reset, and in the quiesce): never
+   at the GIC (Emu68 owns it, 5.2).
+8. **The quiesce program** (6 of the 8 steps): receive DMA off, send DMA off, the MAC's send and receive off, the RGMII
+   link flag off, both interrupt masks full; the values in the register's own byte order (the kernel stores the 68k
+   way).
+9. **A stuck send DMA** (frames out a second with no progress while the link is up) or an index that cannot be right:
+   the driver resets and restarts the chip itself (the frames' tags back as errors, every buffer posted again, the
+   link kept), logged; ending would cost a PHY renegotiation.
+10. **Waits**: MDIO 20 ms, the PHY's reset 500 ms, the DMA stopping 100 ms, the self-test 200 ms; each one logs what it
+   waited for. Short settling delays (10 us in Linux) are one tick (10 ms): the driver is in user mode, at start only.
+11. **The speed table's tools** (8.3; the checklist's step 7): `nettest -p ADDR` reaches the PC's test servers on the
+   LAN (default 10.0.2.2), `-n BYTES` sets `slipget`'s size, and `tools/slip-host.py` listens on `SLIP_HOST_ADDR`
+   (the DNS test server only on 127.0.0.1, inside the namespace). The owner's checklist:
+   [a1200-checklist-network.md](a1200-checklist-network.md).
+
+**An open point found (not built here, for the main session's decision):** the note's 2.4 stops the chip when a
+driver or netd ends, but not at the **handover from AmigaOS**: when the owner starts Zenix from a running AmigaOS
+(`bootzenix`, or a warm reset), AmigaOS's `genet.device` may leave the receive DMA running into its old rings, which
+are Zenix's memory after the takeover, until the ring fills (rondoval's current driver stops it in a reset handler;
+whether the owner's driver stack 2.0.0 does is not known). Zenix's driver resets the chip only when it starts, and a
+machine without `driver genet` never does. Proposed: stage0 (which already reads GENET's address while AmigaOS lives,
+before the takeover) writes 0 to the two DMA control registers, a few bytes in the kernel image. Until then the
+checklist starts Zenix from cold, and tries the warm way last.
+
+Sizes (*measured* 2026-10-27): `/sbin/net/genet` 16,016 bytes (mem 22,864 with its 8 KB stack); its DMA region 72 KB
+(netd's 32 receive and 16 send buffers; the self-test uses the same memory before the attach); the kernel unchanged
+(152,472 bytes: no kernel change in this step, so the mount tests' floppy keeps its 2,152 bytes). Tests:
+`tools/genet-test.sh` (on the PC, 36 checks: a GENET v4 refused; the reset undoing a used chip's status blocks, pad,
+EEE and interrupts; the RGMII and PHY delays; the MAC, filter and rings; the link at 1000, then pulled, at 100, and
+dropped and back at 10 between two looks; 3,000 frames in (filtered, broadcast, random sizes) and 600 out, compared
+byte by byte with the 16-bit indexes wrapping; a slow netd (32 wait, the chip drops 18, counted); bad frames; a stuck
+send DMA and a wrong index (restarts); the quiesce program in the middle of traffic, run as the kernel runs it; the
+self-test right, wrong with cache calls that do nothing, and silent without a loopback; the PHY elsewhere and absent;
+the model garbling frames when the delays are wrong); `tools/eth-test.sh` g (FS-UAE, no GENET: the driver says so and
+ends, touches nothing, netd gives it up after five ends and keeps serving).
 
 ### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
 

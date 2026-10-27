@@ -9,7 +9,10 @@
 # the PC. A script started from the console checks: the lease (ifconfig), the route, ping 10.0.2.2, TCP echo, 100 KB
 # checked byte by byte, UDP, a name through DHCP's name server (host), the driver killed (netd starts it again, DHCP
 # again, ping works), ifdown (the LANCE stopped, the claim released). Results are files read from the image.
-#   tools/eth-test.sh [PART...]      e: all of the above (the only part)
+# Part g (DESIGN D19 step 9): the CM4's Ethernet driver /sbin/net/genet where there is no GENET (the normal case in
+# the emulator: no Emu68, so the hardware table names none): it says so and ends without touching anything (no
+# claim), netd starts it again and gives it up after 5 ends, the rest of the network (the loopback) keeps working.
+#   tools/eth-test.sh [PART...]      e: the A2065 (all of the above), g: genet without a GENET
 # Needs unprivileged user namespaces (unshare -rn), as slip-test.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -110,8 +113,47 @@ EOS
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck.log 2>&1 && echo "PASS the host's e2fsck finds the root clean" || { echo "FAIL e2fsck"; pass=0; }
 }
 
-[ $# = 0 ] && set -- e
+part_g() {
+    rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
+    printf 'auto eth0\niface eth0 inet dhcp\n    driver genet\n' > $OUT/interfaces-g
+    put $OUT/interfaces-g /etc/network/interfaces 644
+    cat > $OUT/genet.sh <<'EOS'
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    dmesg | grep -q 'genet given up' && break
+    sleep 1
+done
+ifconfig > /tmp/g-ifc.txt 2>&1; echo st=$? >> /tmp/g-ifc.txt
+ping -c 2 127.0.0.1 > /tmp/g-ping.txt 2>&1; echo st=$? >> /tmp/g-ping.txt
+dmesg > /tmp/g-k.txt
+sync
+EOS
+    put $OUT/genet.sh /tests/genet.sh 755
+    cat > $OUT/g.txt <<'EOS'
+wait zenix:/# 90
+sleep 1
+send sh /tests/genet.sh > /tmp/g.out 2>&1; echo genet-do""ne\r
+wait genet-done 120
+stop
+EOS
+    ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 200 "$OUT/g.txt" > $OUT/g.log 2>&1
+    local rc=$? f k=$OUT/g-k.txt ok n
+    [ $rc = 0 ] || { echo "FAIL g: the run (exit $rc)"; tail -3 $OUT/g.log; pass=0; }
+    for f in ifc ping k; do get /tmp/g-$f.txt > $OUT/g-$f.txt; done
+    n=$(grep -ac 'genet: eth0: no GENET in the hardware table (this is not a Pi 4 or CM4 under Emu68)' $k)
+    ok=0; [ "$n" = 5 ] && [ "$(grep -acE 'net: eth0: /sbin/net/genet \(pid [0-9]+\) ended, status 1$' $k)" = 5 ] &&
+        grep -aq 'net: eth0: /sbin/net/genet given up after 5 ends in 60 s (ifup eth0 starts it again)' $k && ok=1
+    check "genet without a GENET: \"no GENET in the hardware table\" and status 1, five times, then given up ($n lines)" $ok "$(grep -a 'genet\|eth0' $k | tail -12)"
+    ok=0; ! grep -aq 'drv: pid\|drv: claim\|\[kernel\]' $k && ! grep -aq '^eth0' $OUT/g-ifc.txt && grep -aqx 'st=0' $OUT/g-ifc.txt && ok=1
+    check "it touched nothing: no claim, no fault, no eth0" $ok "$(grep -a 'drv:\|kernel' $k | tail -5; cat $OUT/g-ifc.txt)"
+    ok=0; grep -aq '2 packets transmitted, 2 received, 0% packet loss' $OUT/g-ping.txt && ok=1
+    check "netd still serves: ping 127.0.0.1" $ok "$(cat $OUT/g-ping.txt)"
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-g.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (g)" || { echo "FAIL e2fsck (g)"; pass=0; }
+}
+
+[ $# = 0 ] && set -- e g
 for p in "$@"; do
-    case $p in e) "part_$p" ;; *) echo "eth-test: unknown part $p"; exit 2 ;; esac
+    case $p in e|g) "part_$p" ;; *) echo "eth-test: unknown part $p"; exit 2 ;; esac
 done
 exit $((1 - pass))

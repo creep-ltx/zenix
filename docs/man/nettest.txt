@@ -4,7 +4,7 @@ NAME
     nettest - test the network over the loopback
 
 SYNOPSIS
-    nettest CHECK...
+    nettest [-p ADDR] [-n BYTES] CHECK...
     nettest serve tcp|udp PORT echo|sink
 
 DESCRIPTION
@@ -66,9 +66,12 @@ DESCRIPTION
               UDP socket on 127.0.0.1:7011, kept for 30 seconds (for
               netstat)
     slip      through SLIP to the PC's test servers (tools/slip-test.sh,
-              on 10.0.2.2): the four checks below
+              on 10.0.2.2, or -p ADDR: a PC on the LAN running
+              tools/slip-host.py with SLIP_HOST_ADDR, as the A1200
+              checklist for the CM4's Ethernet does): the checks below
     sliptcp   10 KB echoed by TCP port 7100
-    slipget   100 KB from port 7102, checked byte by byte
+    slipget   100 KB from port 7102, checked byte by byte, and the
+              bytes a second (-n BYTES: another amount)
     slipudp   datagrams echoed by UDP port 7101
     slipdns   amiga.zenix.test looked up through 10.0.2.3
     slipflood a SYN flood: four listeners (ports 7200-7203) that never
