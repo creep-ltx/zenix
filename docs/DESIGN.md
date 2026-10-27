@@ -263,6 +263,19 @@ an unchanged verifier, `FS_CLOSE` answered at once, `mount -a` never waiting for
 by default, made killable by two small kernel changes: **the cancel mark** (`UMSG_CANCEL` on the requests of a killed
 client, `POLLPRI` on the server's port) and **the reboot sync** (network mounts synced last, `FS_SYNC` bounded). The
 full design: [d23-nfs.md](d23-nfs.md).
+## D24. The remote control, `wasabid` (roadmap block 2; design note revision 2 after two reviews; nothing built)
+**Why.** Test Zenix on the real A1200 with nobody at it, and let the owner's tools (the `wasabi` command, its Python
+API, its MCP server for Claude, the apps) drive Zenix as they drive AmigaOS. **How.** `/sbin/wasabid` speaks the owner's
+Wasabi protocol version 1 (frames, `caps`, discovery) and offers what fits Zenix: files (regular files only; network
+mounts through a killable helper), `RUN` with two slots and live output, `PS`/`KILL`, the kernel log as `DEBUG`,
+`HEALTH`, `REBOOT` (to Zenix or AmigaOS, through `reboot`, guarded), the console as pixels (`GRAB`, `SUM`) and as text
+(a new `TEXT` that can wait for a pattern), keys; at most 4 connections within the 16 descriptors a process has; on its
+own TCP port 1236 (the A1200's AmigaOS Wasabi is pinned encrypted on 1234); plain with a key of its own on the home
+network first, encryption a later step. Five small root-only kernel interfaces (`SYS_console` ops `CON_READ`,
+`CON_LINE`, `CON_INPUT` named by a console's descriptor, the kernel keeping the display's layout; `SYS_klog`'s
+`KLOG_TOTAL`; `/dev/kmsg`). **A D11 decision:** servers nobody calls (network listeners) are kept alive by init, the
+lines of `/etc/daemons` with D11's numbers (amends D11 1 and 4.4, D19 2.3; closes D20 7.2's open point). The full
+design: [d24-remote.md](d24-remote.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers; fsd and diskd are built into the kernel image, zfsd is the file `/sbin/zfsd` since D19 step 1. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
