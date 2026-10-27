@@ -216,8 +216,9 @@ serial cable (scroll back with Amiga+Up). **The servers' output** (D11 step 8): 
 gets, as its standard input, output and error, a file of type `FT_KLOG`: what it writes goes through `kputc` like
 `kprintf` (the serial port, the ring, the screen while mirrored); reading it gives end of file. So after the boot no
 server message appears on a console; `mount` says "see dmesg" when a server did not start. `boot` itself (and so
-`init`) keeps console 1. `SYS_klog` (73: offset, buffer, length) reads the ring;
-`dmesg` prints it. A panic or an exception in the kernel switches the mirror on again, so its text reaches the
+`init`) keeps console 1. `SYS_klog` (73: offset, buffer, length) reads the ring (an offset below the oldest character
+held reads from it; with `KLOG_OLDEST` 0x40000000 in the offset it answers that oldest offset, audit 2026-10-26 F10);
+`dmesg` prints it from there (`user/klogread.h`). A panic or an exception in the kernel switches the mirror on again, so its text reaches the
 screen, and records the reason in the log before the machine stops.
 
 **Previous-boot log (audit A12).** The log lives in the top 16.5 KB of chip RAM (`KLOG_AREA_SIZE` = `0x4200` below the

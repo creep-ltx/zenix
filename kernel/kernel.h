@@ -55,6 +55,7 @@ void klog_write(const char *s, u32 n);        /* a service's output (FT_KLOG): i
  * this one ended */
 #define KLOG_AREA_SIZE  0x4200
 #define KLOG_PREV       0x80000000u           /* SYS_klog offset flag: read the previous boot's log (dmesg -p) */
+#define KLOG_OLDEST     0x40000000u           /* SYS_klog offset flag: answer the offset of the oldest byte held (audit F10) */
 #define KLOG_END_RUNNING 0u                   /* why a boot ended, kept in the log header for the next boot */
 #define KLOG_END_PANIC   1u
 #define KLOG_END_REBOOT  2u                   /* the reboot system call */

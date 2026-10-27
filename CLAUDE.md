@@ -224,6 +224,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - **D21 steps 2-3 (cryptotest, ssh, branch m4, 2026-10-27):** ssh's files are OpenSSH's (`~/.ssh/id_ed25519` and
   `.pub`, `~/.ssh/known_hosts`, root's `/etc/ssh/ssh_known_hosts`), followed, not ours to freeze; ssh's exit status
   (the remote command's, 255 its own) as OpenSSH's.
+- **`SYS_klog`'s `KLOG_OLDEST` (audit F10, branch m4, 2026-10-27):** bit 0x40000000 in the offset answers the offset
+  of the oldest character the ring holds (0 before a wrap; with `KLOG_PREV` the previous boot's); offsets below it read
+  from it, as always.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 
