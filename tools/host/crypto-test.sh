@@ -157,8 +157,17 @@ part_sign() {
     else bad "sign (the FAIL lines above)"; fi
 }
 
+part_anchors() {
+    python3 -c 'import cryptography' 2>/dev/null || { skip anchors "Python's cryptography module is missing (it makes the test CA)"; return; }
+    build_test || return
+    # shellcheck disable=SC2086
+    $HOSTCC $HCFLAGS $SAN $BRDEF $CINC -o "$OUT/x509-test" tools/host/x509-test.c $LIB_SRCS || { bad "x509-test does not build"; return; }
+    if python3 -I tools/host/crypto-test.py "$OUT/crypto-test" anchors "$OUT/x509-test" "$OUT"; then say "anchors PASS"
+    else bad "anchors (the FAIL lines above)"; fi
+}
+
 parts=("$@")
-[ ${#parts[@]} = 0 ] && parts=(vectors upstream wycheproof openssl ssh sign)
+[ ${#parts[@]} = 0 ] && parts=(vectors upstream wycheproof openssl ssh sign anchors)
 for ((i = 0; i < ${#parts[@]}; i++)); do
     p=${parts[i]}
     case "$p" in
@@ -169,6 +178,7 @@ for ((i = 0; i < ${#parts[@]}; i++)); do
     openssl) part_openssl ;;
     ssh) part_ssh ;;
     sign) part_sign ;;
+    anchors) part_anchors ;;
     *) echo "crypto-test: no part called $p"; exit 2 ;;
     esac
 done

@@ -6,6 +6,9 @@
                                           there by crypto-test.sh the first time: X25519 (the all-zero results must be
                                           refused), Ed25519, ChaCha20-Poly1305 (both implementations), AES-GCM, ECDSA
                                           P-256 (DER and raw) and P-384, RSA PKCS#1 v1.5 2048 and 4096, HMAC-SHA-256
+  crypto-test.py ORACLE anchors X509TEST OUTDIR
+                                          tools/mkanchors.py and the X.509 wrapper (tools/host/x509-test.c) with a
+                                          test CA made here, and every Mozilla root looked up in the anchors file
   crypto-test.py ORACLE sign OUTDIR       tools/zsign.py (OpenSSL) and the library's .sig check both ways (D21 6)
   crypto-test.py ORACLE openssl [N]       differential runs against the PC's OpenSSL (Python's cryptography module and
                                           hashlib, which use it): N random cases of each (default 200)
@@ -446,12 +449,205 @@ def sign(o, out):
     shutil.rmtree(d, ignore_errors=True)
 
 
+# ---- tools/mkanchors.py, the anchors file and the X.509 wrapper (D21 8.1-8.2) ----
+def anchors(x509test, out):
+    import datetime
+    import shutil
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
+    here = os.path.dirname(os.path.abspath(__file__))
+    mk = os.path.join(here, "..", "mkanchors.py")
+    d = os.path.join(out, "anchors")
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    days = (now.date() - datetime.date(1970, 1, 1)).days + 719528
+    secs = now.hour * 3600 + now.minute * 60 + now.second
+
+    def name(cn):
+        return x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn), x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Zenix test")])
+
+    def cert(subj, key, issuer, ikey, ca, days_from=-1, days_to=30, san=None, eku="server", h=hashes.SHA256(), pss=False, big=0):
+        b = (x509.CertificateBuilder().subject_name(name(subj)).issuer_name(name(issuer)).public_key(key.public_key())
+             .serial_number(x509.random_serial_number()).not_valid_before(now + datetime.timedelta(days=days_from))
+             .not_valid_after(now + datetime.timedelta(days=days_to))
+             .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True))
+        if ca:
+            b = b.add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
+        else:
+            b = b.add_extension(x509.KeyUsage(True, False, True, False, False, False, False, False, False), critical=True)
+        if san:
+            b = b.add_extension(x509.SubjectAlternativeName([x509.DNSName(n) for n in san]), critical=False)
+        if eku == "server":
+            b = b.add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH, ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+        elif eku == "client":
+            b = b.add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+        if big:
+            b = b.add_extension(x509.UnrecognizedExtension(x509.ObjectIdentifier("1.3.6.1.4.1.99999.1"), os.urandom(big)), critical=False)
+        kw = {"rsa_padding": padding.PSS(mgf=padding.MGF1(h), salt_length=32)} if pss else {}
+        return b.sign(ikey, h, **kw)
+
+    def save(c, nm):
+        p = os.path.join(d, nm + ".der")
+        open(p, "wb").write(c.public_bytes(serialization.Encoding.DER))
+        return p
+
+    def pem(c, nm):
+        p = os.path.join(d, nm + ".pem")
+        open(p, "wb").write(c.public_bytes(serialization.Encoding.PEM))
+        return p
+
+    rk = rsa.generate_private_key(65537, 4096)
+    root = cert("Zenix Test Root R", rk, "Zenix Test Root R", rk, True, -10, 3650)
+    ik = rsa.generate_private_key(65537, 2048)
+    inter = cert("Zenix Test Inter R", ik, "Zenix Test Root R", rk, True, -10, 1000)
+    lk = rsa.generate_private_key(65537, 2048)
+    leaf = cert("test.zenix", lk, "Zenix Test Inter R", ik, False, san=["test.zenix", "*.wild.zenix"])
+    erk = ec.generate_private_key(ec.SECP384R1())
+    eroot = cert("Zenix Test Root E", erk, "Zenix Test Root E", erk, True, -10, 3650, h=hashes.SHA384())
+    eik = ec.generate_private_key(ec.SECP384R1())
+    einter = cert("Zenix Test Inter E", eik, "Zenix Test Root E", erk, True, -10, 1000, h=hashes.SHA384())
+    elk = ec.generate_private_key(ec.SECP256R1())
+    eleaf = cert("test.zenix", elk, "Zenix Test Inter E", eik, False, san=["test.zenix"], h=hashes.SHA384())
+    other = rsa.generate_private_key(65537, 2048)
+    oroot = cert("Zenix Other Root", other, "Zenix Other Root", other, True, -10, 3650)
+    oinner = cert("Zenix Test Inter R", ik, "Zenix Other Root", other, True, -10, 1000)
+    files = {n: save(c, n) for n, c in (("root", root), ("inter", inter), ("leaf", leaf), ("eroot", eroot),
+                                         ("einter", einter), ("eleaf", eleaf), ("oinner", oinner))}
+    files["expired"] = save(cert("test.zenix", lk, "Zenix Test Inter R", ik, False, -30, -1, san=["test.zenix"]), "expired")
+    files["future"] = save(cert("test.zenix", lk, "Zenix Test Inter R", ik, False, 2, 30, san=["test.zenix"]), "future")
+    files["client"] = save(cert("test.zenix", lk, "Zenix Test Inter R", ik, False, san=["test.zenix"], eku="client"), "client")
+    files["noeku"] = save(cert("test.zenix", lk, "Zenix Test Inter R", ik, False, san=["test.zenix"], eku=None), "noeku")
+    files["pss"] = save(cert("test.zenix", lk, "Zenix Test Inter R", ik, False, san=["test.zenix"], pss=True), "pss")
+    # SHA-1: Python's module will not sign with it; OpenSSL's command line still does
+    kp, ip_, cp = os.path.join(d, "lk.pem"), os.path.join(d, "ik.pem"), os.path.join(d, "inter.pem")
+    open(kp, "wb").write(lk.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    open(ip_, "wb").write(ik.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    pem(inter, "inter")
+    subprocess.run(["openssl", "req", "-new", "-key", kp, "-subj", "/CN=test.zenix/O=Zenix test", "-out", kp + ".csr"],
+                   check=True, stderr=subprocess.PIPE)
+    ext = os.path.join(d, "ext")
+    open(ext, "w").write("subjectAltName=DNS:test.zenix\nbasicConstraints=critical,CA:FALSE\n")
+    r = subprocess.run(["openssl", "x509", "-req", "-in", kp + ".csr", "-CA", cp, "-CAkey", ip_, "-sha1", "-days", "30",
+                        "-extfile", ext, "-outform", "DER", "-out", os.path.join(d, "sha1.der")],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    files["sha1"] = os.path.join(d, "sha1.der") if r.returncode == 0 else None
+    wk = rsa.generate_private_key(65537, 1024)
+    files["weak"] = save(cert("test.zenix", wk, "Zenix Test Inter R", ik, False, san=["test.zenix"]), "weak")
+    files["fat"] = save(cert("test.zenix", lk, "Zenix Test Inter R", ik, False, san=["test.zenix"], big=15000), "fat")
+    nas = rsa.generate_private_key(65537, 2048)
+    files["nas"] = save(cert("nas.lan", nas, "nas.lan", nas, False, san=["nas.lan"]), "nas")
+    an = os.path.join(d, "test.anchors")
+    r = subprocess.run([sys.executable, "-I", mk, "--no-certdata", "--pem", pem(root, "root"), "--pem", pem(eroot, "eroot"), an],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result("mkanchors.py with a test CA (RSA-4096 and P-384 roots)", r.returncode == 0 and b"2 anchors" in r.stdout, 1,
+           [] if r.returncode == 0 else [r.stdout])
+
+    def chain(names, server="test.zenix", anchorfile=an, local=(), t=(days, secs)):
+        a = [x509test, "chain", anchorfile, server, str(t[0]), str(t[1])]
+        for l in local:
+            a += ["-l", files[l]]
+        a += [files[n] for n in names]
+        r = subprocess.run(a, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return r.stdout.decode().strip() if r.returncode == 0 else "crash %d %s" % (r.returncode, r.stderr[-300:])
+
+    cases = [
+        ("an RSA chain (RSA-2048 leaf, RSA-2048 intermediate, RSA-4096 root)", ["leaf", "inter"], {}, "0 key"),
+        ("an ECDSA chain (P-256 leaf, P-384 intermediate and root)", ["eleaf", "einter"], {}, "0 key"),
+        ("the root sent too", ["leaf", "inter", "root"], {}, "0 key"),
+        ("a wildcard name", ["leaf", "inter"], {"server": "a.wild.zenix"}, "0 key"),
+        ("the wrong name", ["leaf", "inter"], {"server": "other.zenix"}, "56 nokey"),
+        ("expired", ["expired", "inter"], {}, "54 nokey"),
+        ("not yet valid", ["future", "inter"], {}, "54 nokey"),
+        ("an unknown CA", ["leaf", "oinner"], {}, "62 nokey"),
+        ("a missing intermediate", ["leaf"], {}, "62 nokey"),
+        ("no serverAuth in the Extended Key Usage", ["client", "inter"], {}, "1001 nokey"),
+        ("no Extended Key Usage at all", ["noeku", "inter"], {}, "0 key"),
+        ("RSA-PSS (BearSSL has none)", ["pss", "inter"], {}, "nokey"),
+        ("SHA-1 (never set up)", ["sha1", "inter"], {}, "nokey"),
+        ("an RSA-1024 leaf (minrsa 2048)", ["weak", "inter"], {}, "60 nokey"),
+        ("a chain over 16 KB", ["fat", "inter"], {}, "1002 nokey"),
+        ("nine certificates", ["leaf"] + ["inter"] * 8, {}, "1002 nokey"),
+        ("an empty anchors file name: no anchors", ["leaf", "inter"], {"anchorfile": "-"}, "62 nokey"),
+        ("the owner's self-signed certificate in /etc/ssl/local (not a CA)", ["nas"],
+         {"server": "nas.lan", "anchorfile": "-", "local": ["nas"]}, "0 key"),
+        ("a clock long before the certificates (day 700,000)", ["leaf", "inter"], {"t": (700000, 0)}, "54 nokey"),
+    ]
+    for nm, names, kw, want in cases:
+        if any(files.get(n) is None for n in names):
+            print("SKIPPED crypto-test.py: x509: %s (OpenSSL would not make the certificate)" % nm)
+            continue
+        got = chain(names, **kw)
+        ok = got == want or (want == "nokey" and got.endswith(" nokey") and not got.startswith("0 "))
+        result("x509: %s -> %s" % (nm, want), True, 1, [] if ok else [got])
+    # a damaged anchors file: every byte flipped in turn somewhere in the header and index must give an error or the
+    # right answer, never a crash (the sanitizers watch)
+    blob = open(an, "rb").read()
+    bad, crashes = 0, []
+    for i in range(0, min(len(blob), 200)):
+        b2 = bytearray(blob)
+        b2[i] ^= 0xFF
+        p = os.path.join(d, "bad.anchors")
+        open(p, "wb").write(bytes(b2))
+        got = chain(["leaf", "inter"], anchorfile=p)
+        if got.startswith("crash"):
+            crashes.append((i, got))
+        elif not got.startswith("0 "):
+            bad += 1
+    result("x509: 200 damaged anchors files: errors or the right answer, no crash (%d refused)" % bad, True, 200, crashes)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def realroots(x509test, out):
+    """every root of tools/certdata in the anchors file, found by its name hash, with the key OpenSSL reads"""
+    import warnings
+    warnings.simplefilter("ignore")             # (a few old roots have serial numbers RFC 5280 now forbids)
+    import hashlib as hl
+    from cryptography import x509
+    from cryptography.hazmat.primitives.asymmetric import rsa, ec
+    from cryptography.hazmat.primitives import serialization
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.join(here, ".."))
+    import mkanchors
+    import collections
+    an = os.path.join(out, "mozilla.anchors")
+    r = subprocess.run([sys.executable, "-I", os.path.join(here, "..", "mkanchors.py"), an], stdout=subprocess.PIPE)
+    print("crypto-test.py: %s" % r.stdout.decode().strip())
+    st = collections.defaultdict(int)
+    roots = mkanchors.from_certdata(mkanchors.DEFAULT_CERTDATA, st)
+    bad, n = [], 0
+    curves = {"secp256r1": 23, "secp384r1": 24, "secp521r1": 25}
+    for label, der in roots:
+        c = x509.load_der_x509_certificate(der)
+        subj = c.subject.public_bytes()
+        k = c.public_key()
+        if isinstance(k, rsa.RSAPublicKey):
+            nums = k.public_numbers()
+            want = "rsa %s %s" % (nums.n.to_bytes((nums.n.bit_length() + 7) // 8, "big").hex(),
+                                  nums.e.to_bytes((nums.e.bit_length() + 7) // 8, "big").hex())
+        elif isinstance(k, ec.EllipticCurvePublicKey) and k.curve.name in curves:
+            want = "ec %d %s" % (curves[k.curve.name], k.public_bytes(serialization.Encoding.X962,
+                                                                     serialization.PublicFormat.UncompressedPoint).hex())
+        else:
+            continue
+        n += 1
+        got = subprocess.run([x509test, "lookup", an, hl.sha256(subj).digest()[:8].hex()], stdout=subprocess.PIPE).stdout.decode()
+        if (want + " " + subj.hex() + " 1") not in got.split("\n"):
+            bad.append(label)
+    result("mkanchors.py on Mozilla's roots: each root found by its name hash, key and name as OpenSSL reads them", True, n, bad)
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     o = Oracle(sys.argv[1])
     if sys.argv[2] == "wycheproof":
         wycheproof(o, sys.argv[3])
+    elif sys.argv[2] == "anchors":
+        anchors(sys.argv[3], sys.argv[4])
+        realroots(sys.argv[3], sys.argv[4])
     elif sys.argv[2] == "sign":
         sign(o, sys.argv[3])
     elif sys.argv[2] == "openssl":
