@@ -189,6 +189,13 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   null value pointer answers the O_NONBLOCK flag; the `/etc/network/interfaces` subset (D19) and `/etc/hosts`,
   `/etc/resolv.conf`; `/dev/ttyS0`'s truthful POLLOUT (1 KB of the send ring free) and O_NONBLOCK reads/writes (the
   planned exception to D16 rule 11 for this one device); boot's `net` -> `/sbin/netd` at nice 0.
+  Since steps 6-8: `SYS_drv`'s `DRV_*` ops 1-7, `DRVC_CLEAN` 1 / `DRVC_INVAL` 2; `struct udrvattach` (first size 180)
+  and `udrvxfer` (872), each stating its own size; `udrvstep`/`udrvquiesce` (8 steps, `DRVS_WRITE` 1, `DRVS_RMW` 2);
+  `DRV_MAXBUF` 32, `DRV_BATCH` 16, `DRVA_DMA` 1, `DRVA_LINK` 2; the NETDRV message layout (a[0] the driver's pid, a[1]
+  the block, a[2] its size); `HWINFO_FIRST` 408 (the hardware table grows only at its end); `unetif`'s growth (`hwaddr`
+  where `reserved` was; past the first size `lease`, `dhcp_server`, `rx_drop`; `NETIF_ETHER` 16, `NETIF_DHCP` 32);
+  `SYS_drv`'s -EPERM (anyone but netd's children) and -ECONNRESET (no netd); the driver contract `/sbin/net/NAME IFACE
+  ARGS` with a pipe as standard input for the doorbell.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 
