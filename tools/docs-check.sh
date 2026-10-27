@@ -70,6 +70,7 @@ if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
     if [ -n "${DOCS_NO_BEHAVIOUR:-}" ]; then echo "docs-check: no behaviour change claimed: $DOCS_NO_BEHAVIOUR"; changed=$(echo "$changed" | grep -v '^user/.*\.c$\|^boot/zenixboot'); fi
     for c in $changed; do
         case "$c" in
+        user/xfer/*) ;;          # the transfer engine and its file rules (DESIGN D20 5): a library, no page of its own
         user/*.c)
             b=$(basename "$c" .c); n=$(echo "$b" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
             case "$b" in libz|regex|miniz|fsd|pw|sha|sha256|zenixfsd|zenixfs_disk) continue;; esac     # libraries and servers: no page of their own
