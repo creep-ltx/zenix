@@ -118,6 +118,12 @@
 #define LWIP_PROVIDE_ERRNO              0
 #define LWIP_ERRNO_STDINCLUDE           0
 
+/* the checksum and the copy in 68020 assembler (net/port/m68k.S); the host build uses lwIP's C and memcpy */
+#ifndef NETD_HOST
+#define LWIP_CHKSUM                     netd_chksum
+#define MEMCPY(dst, src, len)           netd_copy(dst, src, len)
+#endif
+
 /* the host build of the tests may change a few of these (tools/host/net-test.sh); never the Zenix build */
 #ifdef NETD_HOST_OPTS
 #include NETD_HOST_OPTS

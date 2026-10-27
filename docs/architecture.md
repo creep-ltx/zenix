@@ -1104,9 +1104,25 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   raised when the `net` server ends (svc.c calls `sock_server_gone` before its memory is freed); every socket of the
   old epoch is dead at once (POLLERR|POLLHUP, its waiters woken, every call -ENETDOWN, only `close` works) and a new
   socket is kept only if the server's reply carries the live epoch. The last close sends `NET_CLOSE` only while the
-  socket's epoch lives, as a no-start call (it never starts or waits for a server). Until netd exists (D19 step 4)
-  the test server `socktestd` serves `net` in the tests. 3,987 bytes of code at -Os, 1 KB of data; `tools/sock-host-test.sh` runs
+  socket's epoch lives, as a no-start call (it never starts or waits for a server). `FIONBIO` with no value pointer
+  answers the file's `O_NONBLOCK` (1 or 0: libz's `fcntl(F_GETFL)`). The test server `socktestd` serves `net` in
+  `tools/sock-test.sh` (registered over netd). 3,987 bytes of code at -Os, 1 KB of data; `tools/sock-host-test.sh` runs
   the rules' interleavings on the PC, `tools/sock-test.sh` the calls in FS-UAE.
+- **The network server, netd** (`/sbin/netd`, DESIGN D19 step 4; `docs/man/netd.txt`): boot registers `net` as
+  `/sbin/netd` at nice 0 when the file exists (not a line in `/etc/svctab`: an edited svctab cannot lose it), and the
+  kernel starts it at the first socket call; a machine that never opens a socket never loads it. netd is lwIP 2.2.1
+  (`net/lwip`, BSD-3, raw API, `NO_SYS`), its port (`net/port`: `lwipopts.h`, ChaCha20 and SipHash, the checksum and
+  the copy in 68020 assembler, `m68k.S`) and netd's core (`net/netd`: sockets, interfaces, names, configuration, the
+  same C as the host tests) with its main program (`net/netd/main.c`): it opens the port, takes the epoch
+  (`NETSRV_HELLO`), seeds its keys from `/dev/urandom` (fresh ones when `/dev/random` becomes readable and every 5
+  minutes), reads `/etc/hosts` and `/etc/resolv.conf`, picks its buffers by the machine (small below 2 MB of free fast
+  RAM: 8 TCP ends, 24 KB of buffers; large: 32 TCP ends, 200 KB), then loops: lwIP's timers and the loopback, the push
+  of changed bits (`NETSRV_READY`), one `evwait` on the port, the serial lines and the timer, and at most 8 requests a
+  turn, each answered at once with `NETSRV_REPLY`. It answers only `UMSG_KERNEL` messages (-EACCES otherwise).
+  `SOCK_RESOLVE` turns the program's socket into a lookup (its name in `buf`); `SOCK_NETSTAT` fills `struct
+  unetstat` rows (first size 40). It ignores SIGPIPE. 66,482 bytes of code, 13 KB of data, an 8 KB stack (105 KB in
+  `ps` on the stock A1200 while it serves); `tools/netd-test.sh` runs it over the loopback in FS-UAE,
+  `tools/host/net-test.sh` its core on the PC. libz's BSD calls are in `user/socket.h`.
 - **Virtual consoles** (owner's decision 2026-10-23: the text console behaves like Unix/Linux): ten, `/dev/tty1` ..
   `/dev/tty10`, each with its own text grid, scrollback and tty, allocated when first used. **Amiga+F1 .. Amiga+F10**
   shows console 1-10 (Linux: Alt+F1..); plain F-keys stay with the programs and send their escape codes; other

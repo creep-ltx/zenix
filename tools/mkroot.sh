@@ -1,6 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name> (zup and zfsd as /sbin/<name>).
+# Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name> (zup, zfsd and netd as
+# /sbin/<name>), and the licence notices of the code from other projects in /usr/share/licenses.
 # usage: mkroot.sh out.hdf builddir "prog prog ..."
 set -e
 OUT="$1"; B="$2"; PROGS="$3"; SIZE="${4:-8M}"; INODES="${5:-512}"
@@ -32,10 +33,16 @@ fi
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2
-    dir=bin; case $p in zup|zfsd) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15) and the ZenixFS server (D19)
+    dir=bin; case $p in zup|zfsd|netd) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15), the servers (D19)
     cp "$B/$p.zx" "$T/$dir/$name"
     chmod 755 "$T/$dir/$name"
 done
+# the notices the licences of lwIP (BSD-3, in netd) and miniz (MIT, in gzip and zup) ask to travel with the programs
+# (owner decision, DESIGN D19 2026-10-27): on every image that carries one of those programs; the base package
+# carries them too (tools/mkzup.py)
+lic() { mkdir -p "$T/usr/share/licenses"; cp "$(dirname "$0")/../$1" "$T/usr/share/licenses/$2"; }
+case " $PROGS " in *" netd "*) lic net/lwip/COPYING lwIP;; esac
+case " $PROGS " in *" gzip "*|*" zup "*) lic user/miniz/LICENSE miniz;; esac
 if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small install / test images)
     mkdir -p "$T/usr/man"
     cp "$(dirname "$0")/../docs/man/"*.txt "$T/usr/man/"      # the manual pages live in docs/man

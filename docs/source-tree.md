@@ -50,7 +50,7 @@ zenix/
 
 - **Servers:** `diskd.c` (disks and partitions), `fsd.c` (ext2), `zenixfsd.c` (ZenixFS), `boot.c` (starts init),
   `init.c` (logins on the consoles), `msgpingd.c` (the message benchmark's partner).
-- **The C library:** `libz.c`, `libz.h`, `usys.h` (system call wrappers), `crt0.S` (program start-up). Zenix has its
+- **The C library:** `libz.c`, `libz.h`, `usys.h` (system call wrappers), `socket.h` (the BSD socket calls, DESIGN D19), `crt0.S` (program start-up). Zenix has its
   own small library, not newlib.
 - **The shell:** `sh.c`.
 - **Commands:** one file per program, `NAME.c`, each with a manual page in `docs/man/NAME.txt`. The list:
@@ -62,8 +62,8 @@ zenix/
 | Folder | What it is |
 |---|---|
 | `lwip/` | lwIP 2.2.1 (BSD-3, `COPYING`): only the files netd builds or tests, unchanged but for the local patches in `lwip/patches/`; `lwip/README` names the version, the files and the patches |
-| `port/` | Zenix's port of lwIP: `lwipopts.h` (the configuration), `arch/cc.h`, the counted heap and the limits set by the machine (`port.c`), ChaCha20 and the SipHash ISNs (`rand.c`), stand-in C headers for the Zenix build (`shim/`) |
-| `netd/` | netd's core: sockets, SLIP and loopback, names, the configuration files, the limits (`netd.h` is its interface); plain C with no system call, so netd's main program and the PC tests use the same files |
+| `port/` | Zenix's port of lwIP: `lwipopts.h` (the configuration), `arch/cc.h`, the counted heap and the limits set by the machine (`port.c`), ChaCha20 and the SipHash ISNs (`rand.c`), the checksum and the copy in 68020 assembler (`m68k.S`), stand-in C headers for the Zenix build (`shim/`) |
+| `netd/` | netd's core: sockets, SLIP and loopback, names, the configuration files, the limits (`netd.h` is its interface); plain C with no system call, so netd's main program and the PC tests use the same files. `main.c` is netd's main program on Zenix (`/sbin/netd`): the operating system layer and the message loop |
 
 ## tools/: building and testing
 

@@ -73,6 +73,8 @@ part_size() {
             -Wall -Inet/port/shim -Inet/port -I$LW/include -c "$f" -o "$d/$(basename "$f" .c).o" || { bad "m68k: $f"; return; }
         objs="$objs $d/$(basename "$f" .c).o"
     done
+    "${tp}gcc" -m68020-60 -x assembler-with-cpp -c net/port/m68k.S -o "$d/m68k.o" || { bad "m68k: net/port/m68k.S"; return; }
+    objs="$objs $d/m68k.o"
     "${tp}size" -t $objs >"$d/size.txt"
     say "size: lwIP and its port for m68k at -Os, unlinked (text data bss): $(tail -1 "$d/size.txt" | awk '{ print $1, $2, $3 }')"
     # linked with netd's core, --gc-sections keeping what netd's calls reach (tools/host/net-size)

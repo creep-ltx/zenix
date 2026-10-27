@@ -2,7 +2,8 @@
 
 Status: **design, revision 2 after two independent reviews (section 13); step 1 (section 3, zfsd out of the kernel
 image) built on branch zfout 2026-10-27; steps 0, 2 and 3 (msgping, random numbers, the kernel's socket layer with a
-test server) built on branch n023 2026-10-27 (section 14, "As built"); the rest not built.** Roadmap block 2, "Zenix
+test server) built on branch n023 2026-10-27; step 4 (netd over the loopback) on branch n45 2026-10-27 (section 14, "As
+built"); the rest not built.** Roadmap block 2, "Zenix
 reaches the world": the network, the CM4's Ethernet, TCP/IP as a server, DHCP, DNS, `ping`; telnet, the crypto
 library, ssh, HTTPS, NFS, remote control and `zpkg` come after it. A deep core change (a kernel file kind, new system
 calls, a message family, the way servers are loaded). The short version is DESIGN.md D19. Facts about today's code are
@@ -878,6 +879,75 @@ reaches it, and none does); ready bits only from socket state, truthful in every
 `tools/sock-host-test.sh`.
 
 Last checked against the code: 2026-10-27.
+
+### Step 4: netd with lwIP over the loopback (branch n45, 2026-10-27)
+
+netd is `/sbin/netd`: lwIP and its port (`net/lwip`, `net/port`), the core of the host-only parts (`net/netd`, unchanged:
+the same files the host tests build) and **`net/netd/main.c`**, netd's main program on Zenix (the OS
+layer the core asks for: the clocks, the serial port, the log; and the message loop). boot registers `net` as
+`/sbin/netd` at nice 0 when the file exists (before `/etc/svctab`, which may still name another program for it);
+the kernel starts it at the first socket call. libz has the BSD calls (`user/socket.h`), `netstat` shows netd's table,
+`nettest` holds the checks (as `socktest` does step 3's). Local choices:
+
+1. **The message loop:** each turn runs `netd_turn` (lwIP's timers, the loopback, the lines), pushes the changed bits
+   (`NETSRV_READY`), waits in one `evwait` on the port (`POLLPORT`), the serial lines and `/dev/random` (until the pool
+   is seeded) for the core's next timer (milliseconds rounded up to ticks), then answers at most **8 requests** before
+   the next turn (the note's "a fixed amount of work per turn"). Every kernel request is answered with `NETSRV_REPLY`
+   (its result, the socket's bits in `a[2]`, ACCEPT's new socket's in the upper 16, the epoch in `a[3]`); a message
+   without `UMSG_KERNEL` gets -EACCES. The wire fields are adapted to the core's calls: FIONREAD's `long` to the
+   program's `int`; addresses and values in place, the true lengths written back through `alen`/`vlen`.
+2. **`SOCK_RESOLVE` turns the program's socket into the lookup** (its name in `buf`, `len` bytes, no NUL needed): netd
+   gives up the socket it knew under that (index, generation) and starts the lookup under the same name, which becomes
+   readable when the answer is in. libz's `getaddrinfo` does that on a `SOCK_DGRAM` socket of its own, then `recv` (the
+   interruptible wait), then `close`. Services are numbers or a built-in table of twelve names (no `/etc/services`).
+3. **`SOCK_NETSTAT`** fills `struct unetstat` rows (first size `UNETSTAT_FIRST` 40, frozen: proto, TCP state with
+   BSD's numbers, local and remote address and port, receive and send queues, the owner's uid; the row size the
+   caller knows in `flags`, 0 = 40), on any socket of the caller's that netd knows. So `netstat` opens a socket, which
+   starts netd if it was not running: said in its page.
+4. **`fcntl`:** `F_SETFL` sets or clears `O_NONBLOCK` through `FIONBIO`; `F_GETFL` needs the flag back, which no call
+   gave: **`FIONBIO` with no value pointer now answers the file's `O_NONBLOCK`** (1 or 0; before, -EFAULT: a new
+   meaning only where every older call failed, the frozen rule). On other files `F_GETFL` says `O_RDWR` and `F_SETFL`
+   refuses `O_NONBLOCK` (-EINVAL: pipes later, 4.1); `F_GETFD`/`F_SETFD` answer 0 (no exec).
+5. **More Linux constants in `netproto.h`** (appended, frozen as the rest): `AF_UNSPEC`, `IPPROTO_IP/ICMP/TCP/UDP`,
+   `SO_REUSEADDR/TYPE/BROADCAST/SNDBUF/RCVBUF/KEEPALIVE`, `TCP_NODELAY`, `SHUT_*`.
+6. **The machine profiles** (binding choice 4 left the boundary to this step): **large when at least 2 MB of fast RAM
+   is free at netd's start, else small** (chip RAM alone is always small). *Measured* in FS-UAE (`ps` after the tests):
+   netd takes 105 KB with the small profile on the 2 MB chip-only machine and 169 KB with the large one on 4 MB of fast
+   RAM (twelve connections open; its buffers grow on demand up to the profile's cap of 24 or 200 KB). At the boundary
+   the large profile costs at most about 280 KB of 2 MB; the small one keeps 1,209 KB free with one login on the stock
+   A1200 while netd serves. The small profile allows 8 TCP ends: 4 loopback connections (each takes two), the next
+   socket refused at once with -ENOBUFS (`nettest many`).
+7. **The assembler (2.2), measured:** `net/port/m68k.S` has the checksum (lwIP's `LWIP_CHKSUM`, 32 bytes a turn with
+   `addx.l`) and the copy (lwIP's `MEMCPY`: the destination aligned, then 32 bytes a turn; the source read whole even
+   when misaligned, which the 68020 does in hardware and libz's `memcpy` cannot assume: it copies such a buffer byte by
+   byte). `nettest asm` checks both against C (1,206 checksum and 3,200 copy cases, every alignment) and times them:
+   in FS-UAE's 68020 (an emulator's figure, not a real Amiga's speed), the checksum of 1,460-byte segments 7.7 times
+   faster than a C loop at -Os (86,276 against 666,096 E-clock counts), the copy 2.9 times faster than libz's on a
+   misaligned buffer (22,676 against 65,371) and 1.7 times on an aligned one (16,290 against 28,044). It pays, so both
+   are in. SLIP's byte loop (`slipif.c`, `iface.c`) is built at -O2, the rest of netd at -Os. The host build keeps
+   lwIP's C (`NETD_HOST`).
+8. **The clocks:** `sys_now` is the tick (10 ms); RFC 6528's 4 µs clock is the E-clock shifted by 2 (5.6 µs PAL).
+9. **Keys:** 48 bytes from `/dev/urandom` before `lwip_init`; `/dev/random` polled until readable, then fresh keys
+   from it; every 5 minutes fresh keys from `/dev/urandom`.
+10. **Configuration at the start:** `/etc/hosts` (now shipped: `127.0.0.1 localhost`, a base config file) and
+   `/etc/resolv.conf`, at most 16 KB each.
+11. **Licence notices** (owner decision 6): `/usr/share/licenses/lwIP` and `miniz` on every image that carries netd or
+   gzip/zup (`tools/mkroot.sh`, `mkroot-zenixfs.sh`), and in the base package (`tools/mkzup.py`). The RAM floppy and
+   the mount tests' floppy carry neither program, so neither notice (the mount floppy had 4 free blocks).
+12. **`EAGAIN`'s text** in libz is Linux's, "resource temporarily unavailable" (it said "too many processes", spawn's
+   old meaning; sockets made it common).
+
+Sizes (*measured* 2026-10-27, linked): **netd 66,482 bytes of code, 24 of data, 13,056 of BSS**, the file 74,112 bytes
+(the note's estimate 65-70 KB); of the code, lwIP with the port and netd's core are 59,498 linked on their own
+(`tools/host/net-test.sh size`), libz and the main program the rest. Stack 8 KB (the deepest frames, `-fstack-usage`:
+libz's formatting 560 bytes, the parsers 496, the main loop 304). The kernel grew by 112 bytes (boot's registration
+and the `FIONBIO` question): **150,356 bytes, 28,844 left on the RAM floppy, 4,268 on the mount tests' floppy** (no
+RAM-disk change needed). A machine that never opens a socket never loads netd: its free memory changes only by those
+112 bytes. Tests: `tools/netd-test.sh` (FS-UAE; s: the stock A1200, the small profile: `nettest tcp udp poll nonblock
+names many perm asm`, `netstat -a`/`-tl`/plain against a listener, a connection and a UDP socket, `nettest down`: netd
+killed while a child waits in `recv`: `ENETDOWN` after 1 tick, the next socket starts netd in epoch 2, which serves; ^C
+on a waiting `accept`; the log lines; e2fsck. l: 4 MB of fast RAM, the large profile, twelve connections);
+`tools/host/net-test.sh` (unchanged, passing; its size part assembles `m68k.S`).
 
 ### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
 

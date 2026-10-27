@@ -21,11 +21,12 @@
 #define SOCK_GETSOCKNAME 11     /* addr, alen (in and out) */
 #define SOCK_GETPEERNAME 12     /* addr, alen (in and out) */
 #define SOCK_IOCTL       13     /* option: FIONREAD (val -> an int written) or FIONBIO (val -> an int read; the kernel's) */
-#define SOCK_RESOLVE     14     /* (DESIGN D19 4.5, step 6) */
+#define SOCK_RESOLVE     14     /* buf, len: a name; the socket becomes a lookup: readable when the answer is in, recv
+                                 * then gives up to 4 IPv4 addresses (4 bytes each) or the error (DESIGN D19 4.5) */
 #define SOCK_IFLIST      15     /* (section 6, step 5) */
 #define SOCK_IFSET       16
 #define SOCK_ROUTE       17
-#define SOCK_NETSTAT     18     /* (step 4) */
+#define SOCK_NETSTAT     18     /* buf, len: struct unetstat rows; flags: the row size (0 = UNETSTAT_FIRST) -> rows */
 #define SOCK_OPS         18
 #define NET_CLOSE        19     /* message only: the last close of a socket (a no-start call, rule 11) */
 
@@ -78,4 +79,37 @@ struct unetready { u32 sock, bits; };
 #define MSG_DONTWAIT 0x40
 #define MSG_NOSIGNAL 0x4000
 #define FIONREAD     0x541B
-#define FIONBIO      0x5421
+#define FIONBIO      0x5421     /* val -> an int read (set or clear O_NONBLOCK); val 0: the answer is the flag now (1, 0) */
+
+/* more of Linux's values (D19 step 4): libz's BSD calls and netd use them */
+#define AF_UNSPEC    0
+#define IPPROTO_IP   0
+#define IPPROTO_ICMP 1
+#define IPPROTO_TCP  6
+#define IPPROTO_UDP 17
+#define SO_REUSEADDR 2
+#define SO_TYPE      3
+#define SO_BROADCAST 6
+#define SO_SNDBUF    7
+#define SO_RCVBUF    8
+#define SO_KEEPALIVE 9
+#define TCP_NODELAY  1          /* level IPPROTO_TCP */
+#define SHUT_RD      0
+#define SHUT_WR      1
+#define SHUT_RDWR    2
+
+/* SOCK_NETSTAT's rows (frozen, first size UNETSTAT_FIRST; the request's flags give the row size the caller knows,
+ * 0 = UNETSTAT_FIRST, len the buffer's bytes): one row per TCP connection or listener (TIME_WAIT ones too), UDP socket
+ * and ICMP echo socket; the answer is the number of rows written */
+struct unetstat {
+    unsigned char proto, state; /* IPPROTO_TCP, _UDP, _ICMP; TCP's state: 0 CLOSED, 1 LISTEN, 2 SYN_SENT, 3 SYN_RCVD,
+                                 * 4 ESTABLISHED, 5 FIN_WAIT_1, 6 FIN_WAIT_2, 7 CLOSE_WAIT, 8 CLOSING, 9 LAST_ACK,
+                                 * 10 TIME_WAIT (BSD's numbers) */
+    unsigned short lport;       /* the local port (ICMP: the echo id), host order */
+    u32 laddr, raddr;           /* network order */
+    unsigned short rport, pad;
+    u32 rxq, txq;               /* bytes received and not yet read; sent and not yet acknowledged */
+    u32 uid;                    /* the socket's owner (0 for a connection no socket holds any more) */
+    u32 reserved[3];
+};
+#define UNETSTAT_FIRST 40

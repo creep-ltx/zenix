@@ -277,6 +277,9 @@ int main(void)
     update(ro);                                 /* an update's root half (D15), before the root is used */
     int persistent = !rp.have_ram && !ro;
     seed_start(persistent);
+    struct ustat st;                            /* the network server (DESIGN D19 6.3): not in svctab, so no edited */
+    if (sys_stat("/sbin/netd", &st) >= 0)       /* svctab can lose it; started at the first socket call, nice 0 */
+        sys_svc_register("net", "/sbin/netd", 0);
     svctab();                                   /* the services that live on the disk: started when first called */
     char *argv[] = { "/bin/init", 0 };
     for (;;) {

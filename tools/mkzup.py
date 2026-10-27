@@ -148,12 +148,14 @@ def parse_manifest(text):
 # The standard packages (section 4 of the design note). Ownership and modes as tools/mkroot.sh gives them on the
 # images (root owns everything; su, sudo and passwd set-user-id root; /etc/passwd and /etc/group 644).
 BASE_PROGS = ["init", "login", "sh", "mount"]
-BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console"]   # /etc/autologin is the test images' own: never shipped
+BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console", "hosts"]   # /etc/autologin is the test images' own: never shipped
 SETUID = {"su", "sudo", "passwd"}
 LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), ("chown", "/bin/chgrp"),
          ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos")]
 SBIN = {"zup"}
-BASE_SBIN = ["zfsd"]                      # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
+BASE_SBIN = ["zfsd", "netd"]              # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
+# the licence notices of the code from other projects (owner decision, DESIGN D19 2026-10-27), as tools/mkroot.sh
+LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz")]
 
 
 def binname(p):
@@ -175,8 +177,11 @@ def std_packages(build, uapps):
                                               ("f", 0o755, 0, 0, zx("zup"), "/sbin/zup")], group="base")
         names.insert(0, "zup")
     base = dirs + [("f", 0o755, 0, 0, zx(p), "/bin/" + p) for p in BASE_PROGS]
-    # the servers that live on the disk (DESIGN D19 step 1: /sbin/zfsd, which mount starts for a ZenixFS volume)
+    # the servers that live on the disk (DESIGN D19: /sbin/zfsd, which mount starts for a ZenixFS volume; /sbin/netd,
+    # which the kernel starts at the first socket call)
     base += [("d", 0o755, 0, 0, None, "/sbin")] + [("f", 0o755, 0, 0, zx(p), "/sbin/" + p) for p in BASE_SBIN]
+    base += [("d", 0o755, 0, 0, None, d) for d in ("/usr", "/usr/share", "/usr/share/licenses")]
+    base += [("f", 0o644, 0, 0, os.path.join(ROOT, f), "/usr/share/licenses/" + n) for f, n in LICENSES]
     base += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", c), "/etc/" + c) for c in BASE_CONFIG]
     make_package(out, "base", vnum, vstr, base, group="base", deps=[("zup", vnum)] if "zup" in names else [])
     utils = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p))

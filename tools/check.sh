@@ -17,7 +17,7 @@
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
 HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test serial-test term-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
 host) LIST="$HOST" ;;
@@ -34,6 +34,7 @@ declare -A SPLIT
 SPLIT[svc-test]="a z zs b n r d|o zo u l|f s h t dmg"
 SPLIT[colour-test]="1 4 2|3 s4 s16 s7"    # the 1-plane run first (its edges are the reference); s*: the setting (D18)
 SPLIT[rootcheck-test]="r b|i h|u"                   # u: the choices when a repair fails (man rescue)
+SPLIT[netd-test]="s|l"                              # the stock A1200 (small profile) and 4 MB of fast RAM
 SPLIT[update-test]="install bad|cold previous|panic hang|powercut slowzup|refused nozup|zfsroot"
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh
 m1=""; m2=""; for ((i = 0; i < ${#m[@]}; i++)); do if ((i % 2)); then m2="$m2 ${m[i]}"; else m1="$m1 ${m[i]}"; fi; done

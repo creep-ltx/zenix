@@ -24,4 +24,10 @@ extern unsigned long netd_mem_used, netd_mem_limit;
 unsigned long netd_os_now_ms(void);
 unsigned long netd_os_clock4us(void);
 
+/* the hot loops in assembler (net/port/m68k.S, D19 2.2); the host build of the tests keeps lwIP's own C */
+#ifndef NETD_HOST
+unsigned short netd_chksum(const void *data, int len);
+void *netd_copy(void *dst, const void *src, unsigned long n);
+#endif
+
 #endif
