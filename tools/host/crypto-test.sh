@@ -127,8 +127,31 @@ part_openssl() {
     esac
 }
 
+# net/ssh/: its parsers and refusals alone, then the PC client over it against a real OpenSSH sshd in a user, mount
+# and network namespace (tools/host/ssh-test.py; --map-auto maps /etc/subuid's range, which sshd's privilege
+# separation needs: setgroups is refused in a namespace that maps one uid only)
+SSHC_SRCS="$SSH_SRCS $BCRYPT_SRCS"
+part_ssh() {
+    # shellcheck disable=SC2086
+    $HOSTCC $HCFLAGS $SAN $BRDEF $CINC -Icrypto/openssh -o "$OUT/ssh-core-test" tools/host/ssh-core-test.c $SSHC_SRCS $LIB_SRCS &&
+    $HOSTCC $HCFLAGS $SAN $BRDEF $CINC -Icrypto/openssh -o "$OUT/ssh-client" tools/host/ssh-client.c $SSHC_SRCS $LIB_SRCS ||
+        { bad "the ssh tests do not build"; return; }
+    if "$OUT/ssh-core-test" >"$OUT/ssh-core.log" 2>&1; then say "ssh: $(tail -1 "$OUT/ssh-core.log")"
+    else grep -a '^FAIL\|ERROR\|runtime error' "$OUT/ssh-core.log" | head -20; bad "ssh-core-test (log $OUT/ssh-core.log)"; return; fi
+    local t
+    for t in sshd ssh-keygen openssl ip mount; do
+        command -v "$t" >/dev/null || [ -x "/usr/bin/$t" ] || { skip ssh "no $t on this PC for the sshd tests"; return; }
+    done
+    unshare --map-root-user --map-auto -nm true 2>/dev/null ||
+        { skip ssh "unshare --map-root-user --map-auto fails (newuidmap and an /etc/subuid range are needed)"; return; }
+    if unshare --map-root-user --map-auto -nm python3 -I tools/host/ssh-test.py "$OUT/ssh-client" "$OUT" >"$OUT/ssh-test.log" 2>&1; then
+        while IFS= read -r l; do skip ssh-part "${l#SKIPPED ssh-test: }"; done < <(grep -a '^SKIPPED' "$OUT/ssh-test.log")
+        say "ssh PASS: $(grep -ac '^PASS' "$OUT/ssh-test.log") checks against OpenSSH's sshd ($(/usr/bin/sshd -V 2>&1 | head -1))"
+    else grep -a '^FAIL\|Traceback\|Error' "$OUT/ssh-test.log" | head -20; bad "ssh against sshd (log $OUT/ssh-test.log, sshd's in $OUT/ssh/)"; fi
+}
+
 parts=("$@")
-[ ${#parts[@]} = 0 ] && parts=(vectors upstream wycheproof openssl)
+[ ${#parts[@]} = 0 ] && parts=(vectors upstream wycheproof openssl ssh)
 for ((i = 0; i < ${#parts[@]}; i++)); do
     p=${parts[i]}
     case "$p" in
@@ -137,6 +160,7 @@ for ((i = 0; i < ${#parts[@]}; i++)); do
     upstream) part_upstream ;;
     wycheproof) part_wycheproof ;;
     openssl) part_openssl ;;
+    ssh) part_ssh ;;
     *) echo "crypto-test: no part called $p"; exit 2 ;;
     esac
 done

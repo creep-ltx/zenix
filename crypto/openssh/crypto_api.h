@@ -4,5 +4,9 @@
 #define ZENIX_OPENSSH_CRYPTO_API_H
 #include "../monocypher/monocypher-ed25519.h"
 #define crypto_hash_sha512_BYTES 64U
-#define crypto_hash_sha512(out, in, n) (crypto_sha512((out), (const uint8_t *)(in), (n)), 0)
+static inline int crypto_hash_sha512(unsigned char *out, const void *in, unsigned long long n)
+{
+    crypto_sha512(out, (const uint8_t *)in, (size_t)n);
+    return 0;
+}
 #endif
