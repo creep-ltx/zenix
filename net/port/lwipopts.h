@@ -78,7 +78,7 @@
 /* TCP: MSS 1460 on Ethernet (the interface's MTU makes it 966 on SLIP: TCP_CALCULATE_EFF_SEND_MSS); the window and
  * the send buffer are netd's numbers for the machine (7.3: 2 x MSS and 4 KB on the stock A1200, 16-32 KB on
  * Ethernet machines), so they are variables (no window scaling: at most 64 KB). lwIP's compile-time checks of
- * these sizes cannot see variables: netd_set_limits() makes the same checks at start (LWIP_DISABLE_TCP_SANITY_CHECKS) */
+ * these sizes cannot see variables: netd_init() makes the same checks at start (core.c) (LWIP_DISABLE_TCP_SANITY_CHECKS) */
 #define TCP_MSS                         1460
 #define TCP_CALCULATE_EFF_SEND_MSS      1
 #define LWIP_WND_SCALE                  0

@@ -4,7 +4,7 @@
 #ifndef ZENIX_NETD_PORT_H
 #define ZENIX_NETD_PORT_H
 
-/* lwIP's sizes that netd sets at start by the machine's memory (netd_set_limits, net/netd/limits.c); lwipopts.h
+/* lwIP's sizes that netd sets at start by the machine's memory (netd_init, net/netd/core.c); lwipopts.h
  * names them in TCP_WND, TCP_SND_BUF, TCP_OOSEQ_*_LIMIT and IP_REASS_MAX_PBUFS. Plain variables, not a struct:
  * lwIP tests some of these names in #if lines, where an identifier counts as 0 and a '.' is an error. */
 extern unsigned short netd_tcp_wnd;      /* the receive window of every TCP connection, bytes */
