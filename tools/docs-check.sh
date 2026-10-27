@@ -6,7 +6,7 @@
 #   tools/docs-check.sh --commit REV   the same check for a commit already made (e.g. after a merge: --commit HEAD)
 # Rules (see CLAUDE.md): every program has a manual page in docs/man and a row in docs/commands.md; manual pages
 # fit 78 columns; docs/features.md exists; no documentation files outside docs/ (README.md and CLAUDE.md excepted);
-# docs/README.md lists every docs/*.md; every relative link in README.md and docs/*.md leads to a file; the counts
+# docs/README.md lists every docs/*.md; no merge conflict markers in tracked files; every relative link in README.md and docs/*.md leads to a file; the counts
 # the documents state - "N programs", "N commands", "N system calls", "N emulated setups" (the audit, a record of
 # its day, excepted) - match the Makefile's UAPPS, the SYS_ numbers in kernel/kernel.h and the matrix configs;
 # with --staged, a changed program (zenixboot, the AmigaOS boot program in boot/, too) needs its manual page changed in
@@ -28,6 +28,10 @@ for f in docs/man/*.txt; do
     head -1 "$f" | grep -q "([148])" || bad "$f: first line must look like NAME(1)<tab>Zenix manual (sections 1, 4 devices, 8)"
 done
 [ -f docs/features.md ] || bad "docs/features.md is missing"
+# no merge conflict markers left in any tracked text file (a conflicted merge was once committed and pushed, 2026-10-27)
+for f in $(git ls-files -- '*.md' '*.txt' '*.c' '*.h' '*.S' '*.sh' '*.py' Makefile); do
+    /usr/bin/grep -qE '^(<<<<<<< |>>>>>>> )' "$f" && bad "$f: merge conflict markers"
+done
 
 # docs/README.md is the index of every document
 for f in docs/*.md; do
