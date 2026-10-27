@@ -184,6 +184,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   a no-start call), `struct netreq`, `SYS_netsrv`'s ops and `struct unetready`, the Linux constants there (`AF_INET`,
   `SOCK_*`, `SOL_SOCKET`, `SO_*`, `MSG_*`, `FIONREAD`, `FIONBIO`); the random seed file's format (`user/randseed.h`:
   `ZRS1`, flags, 32 bytes) and root's write to `/dev/random` crediting it.
+  Since steps 4-5: `struct unetstat` (first size 40), `unetif` (64), `unetifreq` (32), `uroute` (32); `FIONBIO` with a
+  null value pointer answers the O_NONBLOCK flag; the `/etc/network/interfaces` subset (D19) and `/etc/hosts`,
+  `/etc/resolv.conf`; `/dev/ttyS0`'s truthful POLLOUT (1 KB of the send ring free) and O_NONBLOCK reads/writes (the
+  planned exception to D16 rule 11 for this one device); boot's `net` -> `/sbin/netd` at nice 0.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 
