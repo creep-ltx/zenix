@@ -1168,6 +1168,15 @@ checked byte by byte at 41 KB/s *in the emulator*, UDP, `host` through DHCP's na
 the driver killed: the LANCE stopped by the kernel, restarted, DHCP again, ping; `ifdown`: the driver stops the LANCE
 and ends); `tools/drv-test.sh` and `tools/host/net-test.sh` again.
 
+**After steps 6-8, measured 2026-10-27** (the full `make check`, FS-UAE): the kernel 152,472 bytes (RAM floppy 26,728
+left; **the mount tests' floppy 2,152 left**, still positive, so its RAM disk was not shrunk; the next kernel growth
+of about 2 KB must take 8 KB from `RAMDISK_MOUNT_K`, which has 23 free blocks). **Free memory with one login, the
+network unused** (the matrix, `free`): 2 MB chip-only 1,350 -> 1,347 KB, 1 MB chip-only 413 -> 410 KB (the kernel's
+1.9 KB of code and 0.6 KB of data). **With the network up** on the 2 MB chip-only machine: SLIP 1,159 KB free (netd
+116 KB), the A2065 with DHCP 1,120 KB (netd 125 KB, the driver 21 KB). **Found by the full suite:** `zenix.hdf`'s 512
+inodes ran out (cmds2-test makes 150 files and got "no space left" at the 147th once `host`, its page, `a2065`'s page
+and `/sbin/net/a2065` were added): the image now has 1,024 inodes (Makefile).
+
 ### As built: the host-only parts (side helper, merged 2026-10-27; reviewed by the main session)
 
 lwIP 2.2.1 (STABLE-2_2_1_RELEASE) in `net/lwip/` (upstream files unchanged in the first commit; two local patches in
