@@ -697,3 +697,10 @@ clients, SLIP inside netd, sockets as a kernel file kind blocking in the kernel,
 reviewers judged that shape sound.
 
 Last checked against the code: 2026-10-26.
+
+## Owner decisions (2026-10-27)
+
+The owner answered section 11 with "Yes" to every recommendation: (1) the stack and SLIP first, the CM4 Ethernet after;
+(2) the A2065 driver early; (3) SLIP may take the stock A1200's only serial port; (4) `zenix-slirp` an ordinary Linux
+program in the repository; (5) a ZenixFS root is test-only until block 4; (6) licence notices travel with every image
+and bundle; (7) lwIP as the TCP/IP code.
