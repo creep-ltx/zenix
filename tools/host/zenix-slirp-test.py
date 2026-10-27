@@ -145,9 +145,14 @@ def main():
     p = subprocess.Popen([zs] + (["-v"] if os.environ.get("ZS_V") else []) + ["--fd", str(b.fileno()), "--log", log], pass_fds=[b.fileno()], stderr=err)
     b.close()
     line = Line(a)
+    # a frame at once, before libslirp's first turn of its loop: its socket must not expire on the spot (a bug once:
+    # libslirp's clock was still 0 when the first frame opened a socket)
+    line.send(slip(udp(AMIGA, 39999, GW, 7777, b"first frame")))
+    f = line.wait(lambda f: len(f) > 28 and f[9] == 17 and f[28:] == b"first frame")
+    ok(f is not None, "UDP echo for the very first frame after the start")
     time.sleep(0.3)
 
-    # console text before the network starts, without a line end at the end (a prompt)
+    # console text (before the network starts, and between frames), without a line end at the end (a prompt)
     line.send(b"zenix: kernel line one\r\nlogin: ")
     time.sleep(0.4)
     # a damaged frame (binary, not IPv4) between two ENDs
@@ -196,7 +201,7 @@ def main():
     p.wait(timeout=10)
     err.close()
     con = open(log, "rb").read()
-    ok(b"kernel line one" in con and b"login: " in con, "console text before the frames reaches the log")
+    ok(b"kernel line one" in con and b"login: " in con, "console text between frames reaches the log")
     ok(b"kernel line two" in con, "console text after the frames (no END) reaches the log after a pause")
     ok(b"hello over slip" not in con and b"\x99\x88" not in con, "no frame and no damaged frame in the console log")
     st = open(os.path.join(logdir, "zenix-slirp-test.stderr")).read()

@@ -134,7 +134,9 @@ static void segment_done(void)
     }
     if (!bad && !esc && ipv4_ok(d, n)) {
         n_in++;
-        if (verbose) say("frame in, %d bytes", n);
+        if (verbose) say("frame in, %d bytes, protocol %u, to %u.%u.%u.%u port %u", n, d[9], d[16], d[17], d[18], d[19],
+                         n >= 24 && (d[9] == 6 || d[9] == 17) ? (unsigned)d[22] << 8 | d[23] : 0);
+        if (verbose > 1) { int k; for (k = 0; k < n; k++) fprintf(stderr, "%02x", d[k]); fprintf(stderr, "\n"); }
         to_slirp(d, n);
     } else if (mostly_text(rx, rxn)) text_out(rx, rxn);
     else {
@@ -231,7 +233,8 @@ static void arp_reply(const uint8_t *req)
  * first frame to the Amiga is not lost waiting for an ARP answer */
 static void arp_announce(void)
 {
-    uint8_t f[42];
+    uint8_t f[60];                      /* an Ethernet frame's minimum, padded */
+    memset(f, 0, sizeof f);
     memset(f, 0xff, 6);
     memcpy(f + 6, guest_mac, 6);
     f[12] = 0x08; f[13] = 0x06;
@@ -246,9 +249,13 @@ static slirp_ssize_t cb_send(const void *buf, size_t len, void *opaque)
 {
     const uint8_t *f = buf;
     (void)opaque;
+    if (verbose > 1) say("slirp sends %zu bytes, type %02x%02x", len, len > 13 ? f[12] : 0, len > 13 ? f[13] : 0);
     if (len < 14) return len;
     if (f[12] == 0x08 && f[13] == 0x06) {
-        if (len >= 42 && f[20] == 0 && f[21] == 1) arp_reply(f);
+        if (len >= 42 && f[20] == 0 && f[21] == 1) {
+            if (verbose) say("ARP: slirp asks for %u.%u.%u.%u", f[38], f[39], f[40], f[41]);
+            arp_reply(f);
+        }
     } else if (f[12] == 0x08 && f[13] == 0x00 && len >= 34) {
         /* the IP packet without the Ethernet padding (frames are at least 60 bytes) */
         size_t n = (size_t)f[16] << 8 | f[17];
@@ -407,7 +414,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--log") && i + 1 < argc) logname = argv[++i];
         else if (!strcmp(argv[i], "--pty") && i + 1 < argc) pty = argv[++i];
         else if (!strcmp(argv[i], "--fd") && i + 1 < argc) fdarg = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "-v")) verbose = 1;
+        else if (!strcmp(argv[i], "-v")) verbose++;
         else if (argv[i][0] == '-') usage();
         else if (!dev) dev = argv[i];
         else usage();
@@ -460,6 +467,9 @@ int main(int argc, char **argv)
         slirp_pollfds_fill_socket(slirp, &timeout, add_poll, NULL);
         r = poll(pfd, npfd, (int)timeout);
         if (r < 0 && errno != EINTR) { say("poll: %s", strerror(errno)); break; }
+        /* libslirp first: it brings its clock up to date here, and a socket it opens for a frame from the line
+         * takes its expiry time from that clock (with the clock still at 0 the socket would expire at once) */
+        slirp_pollfds_poll(slirp, r < 0, get_revents, NULL);
         if (r > 0 && (pfd[lidx].revents & POLLIN)) {
             uint8_t buf[4096];
             ssize_t n = read(line, buf, sizeof buf);
@@ -473,7 +483,6 @@ int main(int argc, char **argv)
             break;
         }
         if (r > 0 && (pfd[lidx].revents & POLLOUT)) tx_flush();
-        slirp_pollfds_poll(slirp, r < 0, get_revents, NULL);
         t = now_ms();
         for (tm = timers; tm; tm = tm->next)
             if (tm->at_ms >= 0 && tm->at_ms <= t) { tm->at_ms = -1; slirp_handle_timer(slirp, tm->id, tm->cb_opaque); break; }

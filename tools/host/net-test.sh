@@ -23,7 +23,7 @@ LWIP_CORE="$LW/core/def.c $LW/core/dns.c $LW/core/inet_chksum.c $LW/core/init.c 
 LWIP_SRC="$LWIP_CORE $LW/netif/slipif.c"
 PORT_SRC="net/port/port.c net/port/rand.c"
 HOSTCC=${HOSTCC:-cc}
-SAN="-fsanitize=address,undefined -fno-omit-frame-pointer"
+SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
 HCFLAGS="-DNETD_HOST -g -O1 -Wall -Wno-unused-parameter -Inet/port -I$LW/include"
 fails=0
 say() { echo "net-test: $*"; }
@@ -100,7 +100,18 @@ part_slirp() {
     if in_netns python3 -I tools/host/zenix-slirp-test.py "$OUT/zenix-slirp" "$OUT"; then say "slirp PASS"
     else bad "zenix-slirp-test"; fi
 }
-part_netd() { say "netd: not built yet"; }
+NETD_SRC="net/netd/core.c net/netd/sock.c net/netd/iface.c net/netd/config.c"
+part_netd() {
+    $HOSTCC $HCFLAGS $SAN -pthread -o "$OUT/netd-host" tools/host/netd-host.c $NETD_SRC $LWIP_SRC $PORT_SRC ||
+        { bad "netd-host does not build"; return; }
+    if "$OUT/netd-host" --config >"$OUT/netd-host-config.log" 2>&1; then say "netd: $(tail -1 "$OUT/netd-host-config.log")"
+    else cat "$OUT/netd-host-config.log"; bad "netd's configuration parsers"; fi
+    have_slirp && build_slirp || return
+    rm -f "$OUT"/netd-host.*.log "$OUT/netd-host.console"
+    if in_netns "$OUT/netd-host" "$OUT/zenix-slirp" "$OUT" >"$OUT/netd-host.log" 2>&1; then
+        grep -c '^ok' "$OUT/netd-host.log" | sed 's/^/net-test: netd: checks passed: /'; say "netd PASS"
+    else grep -a '^FAIL\|ERROR\|netd-host:' "$OUT/netd-host.log" | head -40; bad "netd-host (log $OUT/netd-host.log, netd's own $OUT/netd-host.netd.log)"; fi
+}
 part_fuzz() { say "fuzz: not built yet"; }
 
 if [ $# = 0 ]; then set -- patches rand unit netd slirp size; fi
