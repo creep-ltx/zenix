@@ -759,7 +759,9 @@ was inside one write), as step 2 saw.
    lines of 79 characters, FS-UAE stock A1200, 3 planes: 30,471 / 30,702 -> 23,012 / 23,134 us a line (-25%).
 
 Sizes: the kernel 154,944 -> 155,720 bytes (with F8's clock and step 3: +776); 4 KB (or 32 KB) only while SLIP or `cu`
-runs. Tests: `bbs-test` part s now fails on any lost byte; `serial-test` (the 4 KB and 32 KB rings, the console's
+runs. **Free memory with one login** (the full `make check`'s matrix, FS-UAE): 2 MB chip-only 1,345 -> 1,344 KB, 1 MB
+chip-only 408 -> 407 KB; during a board call on the stock A1200 (A2065) 1,023 KB. In that run part s lost nothing in
+all four calls (27.8, 31.1, 28.6, 28.2 s). Tests: `bbs-test` part s now fails on any lost byte; `serial-test` (the 4 KB and 32 KB rings, the console's
 ring back after the close, no memory), `term-test` (a piece ends early and the screen is the same as from one
 write). The owner's A1200 measurement (8.3) still decides whether anything else is needed; on a real 68020 the scroll
 should be faster than FS-UAE's, never slower.
