@@ -1,0 +1,54 @@
+TELNET(1)		Zenix manual
+
+NAME
+    telnet - a terminal to another computer over the network
+
+SYNOPSIS
+    telnet [-x] [-r] [-e CHAR|none] HOST [PORT]
+
+DESCRIPTION
+    telnet connects to HOST (a name or an address) on PORT (23 when not
+    given) and makes the console a terminal there: every key goes to the
+    other computer (Ctrl-C included), and what it sends is shown. The
+    window size (80x32 on PAL, 80x25 on NTSC) and the terminal type are
+    told to the other side.
+
+    This version has the Unix mode (-x, the only one yet): an xterm-like
+    terminal for a Unix login. The terminal type is XTERM-16COLOR, the
+    Return key sends CR, Backspace DEL, the arrows and function keys as
+    the console gives them, Swedish letters as UTF-8; UTF-8 from the other
+    side is shown in Latin-1 (other characters as ?). While it runs the
+    console moves down one row on a line feed without going back to the
+    first column, as xterm does (the console rule CONR_LFONLY).
+
+    Ctrl-] opens a prompt on the bottom row: q closes the connection, z
+    suspends telnet (fg brings it back), Ctrl-] sends Ctrl-] itself,
+    Return goes back.
+
+OPTIONS
+    -x          the Unix mode (the default for now)
+    -r          a plain TCP connection: no telnet protocol at all (as nc)
+    -e CHAR     another escape key: a character, or ^X for a control key;
+                none turns it off
+
+EXIT STATUS
+    0 when the connection ended (closed by the other side, or q), 1 when
+    it could not be made (no such host, refused, the network down), 2 for
+    a usage error.
+
+NOTES
+    -a and -p, the BBS modes (Amiga boards with Topaz, PC boards with the
+    CP437 font, ANSI art, Zmodem downloads) are DESIGN D20's next steps
+    and are refused for now. No telnet server, no phone book yet.
+    telnet runs one priority level below where it was started (nice 1),
+    and writes the screen 256 bytes at a time, so the network keeps up
+    over SLIP while a big screen is drawn.
+    When the standard output is not the console (telnet host > file), the
+    console's rule is not set (said once) and the call goes on. When the
+    keys come from a pipe or a file, telnet keeps the call until the other
+    side closes it. A computer that disappears without closing the
+    connection leaves telnet waiting: Ctrl-] q.
+    Unencrypted: for the home network and for boards.
+
+SEE ALSO
+    cu(1), host(1), ifconfig(1), docs/d20-telnet.md

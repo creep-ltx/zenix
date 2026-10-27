@@ -47,7 +47,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host
+          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -371,6 +371,16 @@ $(BUILD)/netd.uelf: $(NETDOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 $(BUILD)/nettest.uelf: $(BUILD)/nettest.uo $(BUILD)/np-m68k.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/nettest.uo $(BUILD)/np-m68k.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/nettest.uo $(BUILD)/netstat.uo $(BUILD)/ifconfig.uo $(BUILD)/route.uo $(BUILD)/ping.uo $(BUILD)/host.uo: user/socket.h kernel/netproto.h
+# telnet (DESIGN D20, docs/man/telnet.txt) over telnet's core in net/telnet/ (no system calls, shared with the PC tests,
+# tools/host/telnet-test.sh): the protocol, the keys and the tables cold (-Os), the stream filter every byte (-O2)
+TNOBJS := $(BUILD)/tn-proto.no $(BUILD)/tn-filter.no $(BUILD)/tn-keys.no $(BUILD)/tn-cp437.no
+TNOPT_filter := -O2
+$(BUILD)/tn-%.no: net/telnet/%.c net/telnet/telnet.h | $(BUILD)
+	$(CC) $(UCFLAGS) $(if $(TNOPT_$*),$(TNOPT_$*),-Os) -c $< -o $@
+$(BUILD)/telnet.uo: user/telnet.c net/telnet/telnet.h user/socket.h kernel/netproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/telnet.uelf: $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/drv-%.uo: net/drv/%.c net/drv/drv.h kernel/netproto.h kernel/hwinfo.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 # a driver's frames are its stack's few hundred bytes (the transfer block is static): 8 KB

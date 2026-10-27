@@ -4,7 +4,7 @@ NAME
     termtest - terminal feature test
 
 SYNOPSIS
-    termtest [columns|colours|scroll|pcfont [FILE]]
+    termtest [columns|colours|scroll|pcfont [FILE]|rules TTY]
 
 DESCRIPTION
     Draws a test page: bold, underline and inverse text, a 36-column box
@@ -30,7 +30,9 @@ DESCRIPTION
     (the rows are listed in user/termtest.c); q clears the screen, drops
     the font and the rules and quits, x quits at once (the kernel then
     drops them), 2 4 8 6 switch the display to 2, 4, 8 or 16 colours
-    (root).
+    (root). termtest rules TTY: prints the console rules (CON_RULES
+    bits) of the console TTY, such as /dev/tty1 (root, for another
+    console), for telnet's tests.
 
 SEE ALSO
     clear(1), edit(1)

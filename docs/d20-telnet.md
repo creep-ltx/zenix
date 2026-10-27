@@ -689,6 +689,34 @@ planes (`termtest pcfont /usr/share/consolefonts/cp437-8x8.psf`) and matches eve
 file's own bitmaps (bytes with identical bitmaps count as one, and the three shades and the full block as one: their
 one-pixel checkerboards blur together in the scaled screenshot); Topaz on the same page fails that check.
 
-**Step 2 not started here:** it is telnet in the Unix mode over `net/telnet/`, the core the side helper builds in step
-0 (branch t0); building it before that merge would mean a second telnet core.
+## As built: step 2, telnet in the Unix mode (branch t12, 2026-10-27; not yet run on the A1200)
+
+`user/telnet.c` over the core in `net/telnet/` (step 0), `docs/man/telnet.txt`. One process: `poll` on the socket and
+the keys; the decoder, the filter (the Unix mode: UTF-8 to Latin-1) and the key translation are the core's; the
+console gets `CONR_LFONLY` on standard output for the call (the bits before put back at the end and at `z`); Ctrl-]
+opens the prompt on the bottom row (`q`, `z` then `fg`, Ctrl-] itself, Return). Choices where the note was silent:
+1. **`-a` and `-p` are refused** ("not built yet") until step 3, and the Unix mode is the default until then; the
+   owner's default (the Amiga mode) comes with step 3. Options are not frozen (section 10).
+2. **The SLIP plan is in from step 2:** the screen is written at most 256 bytes a call, and telnet lowers its own
+   priority by one level from where it was started (`nice -n -1 telnet` gives the old behaviour, for the measurement);
+   section 6's steps 2 and 3 wait for the A1200's figures.
+3. **Keys from a pipe or a file:** at their end telnet stops reading keys and keeps the call until the other side
+   closes it (as `nc`). A board that disappears without its close reaching the Amiga leaves telnet waiting (Ctrl-] q);
+   seen in FS-UAE when the simulator closed with keys still unread (its Linux socket then resets, and slirp does not
+   pass that on): the test's keys now wait for the negotiation.
+4. **Exit status:** 0 after a close by either side, 1 when no connection was made, 2 for wrong arguments; the escape
+   key `-e ^X` / `-e C` / `-e none`.
+
+**Sizes (*measured*):** `/bin/telnet` 20,044 bytes (26,936 in memory at its start; `ps` shows 46 KB during a call,
+its buffers included), the core about 5 KB of it; the kernel unchanged by this step. **Memory:** the stock A1200 (2 MB chip RAM, FS-UAE,
+the A2065 with DHCP) has 1,027 KB free during a call. **Tests:** `tools/bbs-test.sh` (FS-UAE, in `make check`): part e
+over the A2065, 16 checks (the README's list); part s over SLIP: four calls of 100 grid screens (about 36 KB each),
+drawn on the console, in the order nice 1, 0, 0, 1, all whole (TCP resends what the ring lost).
+
+**The SLIP measurement (FS-UAE, the stock A1200: an emulator figure, not the A1200's).** Bytes the serial port's 1 KB
+ring lost while telnet drew: 6,103, 5,676, 11,339, 11,414 (nice 1: 17,517; nice 0: 17,015), each call 49-64 s for about
+36 KB (under 1 KB/s against SLIP's 11.5). **Telnet's nice 1 made no difference here**: the time goes to the kernel
+drawing a write, which no priority can interrupt (section 6). So section 6's step 2, a yield point in `tty_write`
+between pieces when a strictly better process is ready, is likely needed: the main session's decision, after the
+same measurement on the stock A1200 (the emulator's 68020 and chip-bus timing are not the machine's).
 

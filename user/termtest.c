@@ -162,10 +162,17 @@ static int pcfont(const char *path)
 int main(int argc, char **argv)
 {
     if (argc > 1 && !strcmp(argv[1], "pcfont")) return pcfont(argc > 2 ? argv[2] : 0);
+    if (argc == 3 && !strcmp(argv[1], "rules")) {          /* the rules of another console (root): D20's tests */
+        int fd = sys_open(argv[2], O_RDWR);
+        int r = fd < 0 ? fd : sys_conrules(fd, 0, 0);
+        if (r < 0) { fprintf(2, "termtest: %s: %s\n", argv[2], zstrerror(r)); return 1; }
+        printf("rules %d\n", r);
+        return 0;
+    }
     if (argc > 1 && !strcmp(argv[1], "columns")) { columns(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "colours")) { colours(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "scroll")) { scroll(); return 0; }
-    if (argc > 1) { fprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]]\n"); return 2; }
+    if (argc > 1) { fprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY]\n"); return 2; }
     int sz = sys_ttyinfo();
     printf(ESC "[2J" ESC "[H");
     printf(ESC "[7m Zenix terminal test " ESC "[0m  size %dx%d\n", sz & 0xFFFF, sz >> 16);
