@@ -280,7 +280,7 @@ int main(void)
         push();
         struct pollfd pf[2 + NETD_IFMAX];
         int h[NETD_IFMAX], ww[NETD_IFMAX], nh = netd_wait_handles(h, ww, NETD_IFMAX), np = 0;
-        pf[np].fd = port; pf[np].events = POLLPORT; pf[np].revents = 0; np++;
+        pf[np].fd = port; pf[np].events = POLLPORT | POLLIN; pf[np].revents = 0; np++;
         for (int k = 0; k < nh; k++) {
             pf[np].fd = h[k];
             pf[np].events = (short)(POLLIN | (ww[k] ? POLLOUT : 0));
