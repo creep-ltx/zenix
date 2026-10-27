@@ -525,7 +525,7 @@ void syscall_c(u32 *rb)
     case SYS_pipe:
         if (UOKW(a1, 8)) {
             int fds[2];
-            if ((r = (s32)vfs_pipe(fds)) == 0) {
+            if ((r = (s32)vfs_pipe(fds, a2)) == 0) {
                 ((u32 *)a1)[0] = (u32)fds[0];
                 ((u32 *)a1)[1] = (u32)fds[1];
                 r = 0;

@@ -323,6 +323,30 @@ static int pipew_main(const char *ign)
     int r = sys_write(1, "abc", 3);
     return r == -EPIPE ? 0 : 9;
 }
+/* SYS_pipe's O_NONBLOCK (Linux's pipe2, D20 step 4): an empty read -EAGAIN, a write what fits (2 KB) then -EAGAIN,
+ * the reader then gets the bytes, a pipe made without it still waits (poll says so), other flags -EINVAL */
+static void t_pipenb(void)
+{
+    static char buf[3000];
+    int f[2], g[2];
+    int bad = sys_pipe2(f, 0x40);               /* O_CREAT is no pipe flag */
+    if (sys_pipe2(f, O_NONBLOCK) < 0) { result("pipenb", 0, "no pipe"); return; }
+    int r0 = sys_read(f[0], buf, 10);
+    memset(buf, 'x', sizeof buf);
+    int w1 = sys_write(f[1], buf, sizeof buf), w2 = sys_write(f[1], buf, 1);
+    int r1 = sys_read(f[0], buf, sizeof buf), r2 = sys_read(f[0], buf, 10);
+    sys_close(f[1]);
+    int r3 = sys_read(f[0], buf, 10);          /* no writer: the end */
+    sys_close(f[0]);
+    sys_pipe(g);
+    struct pollfd p = { g[0], POLLIN, 0 };
+    int pl = sys_evwait(&p, 1, 0);              /* an ordinary pipe: nothing to read, nothing said */
+    sys_close(g[0]); sys_close(g[1]);
+    result("pipenb", bad == -EINVAL && r0 == -EAGAIN && w1 == 2048 && w2 == -EAGAIN && r1 == 2048 && r2 == -EAGAIN &&
+           r3 == 0 && pl == 0, "flags 0x40 %d, empty read %d, write 3000: %d then %d, read %d then %d, end %d, poll %d",
+           bad, r0, w1, w2, r1, r2, r3, pl);
+}
+
 static void t_pipe(void)
 {
     int st[2];
@@ -629,7 +653,7 @@ int main(int argc, char **argv)
     static const struct { const char *name; void (*fn)(void); } checks[] = {
         { "stopsrv", t_stopsrv }, { "handler", t_handler }, { "block", t_block }, { "ignore", t_ignore },
         { "kill", t_kill }, { "alarm", t_alarm }, { "restart", t_restart }, { "ttyread", t_ttyread },
-        { "chld", t_chld }, { "pipe", t_pipe }, { "poll", t_poll }, { "select", t_select }, { "group", t_group },
+        { "chld", t_chld }, { "pipe", t_pipe }, { "pipenb", t_pipenb }, { "poll", t_poll }, { "select", t_select }, { "group", t_group },
         { "cont", t_cont }, { "srvcall", t_srvcall }, { "stack", t_stack }, { "forged", t_forged },
     };
     for (int i = 1; i < argc; i++) {

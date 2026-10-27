@@ -96,6 +96,8 @@ __attribute__((optimize("O2"))) static long pipe_read(struct file *f, void *buf,
         }
         if (!p->writers)
             return 0;                       /* end of file */
+        if (f->flags & O_NONBLOCK)
+            return -EAGAIN;                 /* SYS_pipe's O_NONBLOCK: never wait */
         long e = ev_block(EV_IO, 0, 0, 1);
         if (e)
             return e;
@@ -121,6 +123,8 @@ __attribute__((optimize("O2"))) static long pipe_write(struct file *f, const voi
             continue;
         }
         ev_wake(&p->rwait);
+        if (f->flags & O_NONBLOCK)
+            return put ? (long)put : -EAGAIN;   /* what fitted, or nothing (SYS_pipe's O_NONBLOCK) */
         ev_arm(&p->wwait);
         if (p->count < sizeof p->buf || !p->readers)
             continue;
@@ -156,8 +160,10 @@ u16 vfs_poll(struct file *f)
     return POLLIN | POLLOUT;
 }
 
-long vfs_pipe(int fds[2])
+long vfs_pipe(int fds[2], u32 flags)
 {
+    if (flags & ~(u32)O_NONBLOCK)
+        return -EINVAL;                 /* pipe2's flags: only O_NONBLOCK (both ends, as Linux) */
     struct pipe *p = kmalloc(sizeof *p);
     struct file *r = file_new(FT_PIPE_R), *w = file_new(FT_PIPE_W);
     if (!p || !r || !w) {
@@ -169,6 +175,7 @@ long vfs_pipe(int fds[2])
     memset(p, 0, sizeof *p);
     p->readers = p->writers = 1;
     r->pipe = w->pipe = p;
+    r->flags = w->flags = (u16)flags;
     fds[0] = fd_install(current, r);
     fds[1] = fd_install(current, w);
     if (fds[0] < 0 || fds[1] < 0) {

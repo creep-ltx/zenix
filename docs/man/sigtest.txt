@@ -36,6 +36,9 @@ DESCRIPTION
     pipe     writing to a pipe nobody reads ends the writer (141);
              ignored, the write fails with EPIPE; zup -l into a closed
              pipe ends normally (zup ignores SIGPIPE)
+    pipenb   a pipe made with O_NONBLOCK (SYS_pipe's flags): an empty
+             read and a write into a full pipe give EAGAIN, a write gives
+             what fits (2 KB); other flags EINVAL; an ordinary pipe waits
     poll     poll on a pipe and a port with a timeout: the timeout, the
              pipe, the port; a closed pipe gives POLLHUP, an unused fd
              POLLNVAL

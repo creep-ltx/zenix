@@ -1,7 +1,8 @@
 # D20: telnet, the BBS terminal and pseudo-terminals (design note, revision 2)
 
-Status: **design, revision 2 after independent reviews (section 13); steps 0-3 built (step 1 and 2 on branch t12,
-step 3 and section 6's SLIP fix on branch t3, 2026-10-27; "As built" at the end); Zmodem (step 4) not built.** D19 section 10 step 11: "telnet
+Status: **design, revision 2 after independent reviews (section 13); steps 0-5 built (step 1 and 2 on branch t12,
+step 3 and section 6's SLIP fix on branch t3, steps 4 and 5 (Zmodem, the phone book) on branch m4, 2026-10-27; "As
+built" at the end); step 6 is the owner's (the real machines).** D19 section 10 step 11: "telnet
 (its own note: pseudo-terminals, SIGHUP, the BBS terminal)". Roadmap block 2: `telnet` "made for BBSes, the owner's
 daily use: ANSI colours, the PC character set and Amiga fonts, the BBS window size, downloads". The short version is
 DESIGN.md D20. Facts about today's code are *read* from main at f03180e (2026-10-27); facts about boards and terminals
@@ -788,3 +789,57 @@ colours (the owner's decision 2). Choices where the note was silent:
 b16 (4 MB fast RAM, 4 planes) over the A2065 with screenshots: 32 checks each (the README's list), all passing; the
 Del key's `ESC[3~` is not typed there (serial input arrives a byte at a time and the core maps Del only when the
 sequence is whole in one read, as the keyboard gives it; the core's own test covers it).
+
+## As built: steps 4 and 5, Zmodem and the phone book (branch m4, 2026-10-27; not yet run on the A1200)
+
+**rz and sz** (`user/rz.c`, one program, `sz` a link to it as `ifup` is `ifconfig`; `docs/man/rz.txt`) over the step-0
+engine (`user/xfer/zmodem.c` at -O2, `detect.c`) and the download rules (`user/xfer/rzrules.c`), given Zenix's file
+calls; lrzsz's standard input and output contract (frozen, section 10). **telnet** finds a start in the raw bytes
+(`split_detect`, `zm_detect`), hands the start and every byte after it to the program, and relays the socket through
+its decoder and encoder; the escape prompt's `d` and `u`; `-d DIR`. The phone book `~/.phonebook`. Choices where the
+note was silent:
+1. **Three pipes, the board's side never blocking telnet:** the program's standard input is a pipe made with
+   `O_NONBLOCK` (a new flag of `SYS_pipe`, Linux's `pipe2`, both ends; append-only: every older caller passes 0), so
+   telnet never waits writing into it while the program waits writing to telnet; telnet reads the socket only when
+   what it holds for the program is written (TCP's window holds the board back). Standard output to the board,
+   standard error in `rz -T`'s form: `P text` progress (the bottom row, `Zmodem: NAME: N of M bytes (P%)`, twice a
+   second), `M text` messages (a line on the screen: done, skipped, saved as NAME.1, refused, resumed), `R n` and n
+   bytes the engine read after the session (the board's prompt after `OO`, for the screen). Bytes that reach the pipe
+   after the program's last read are lost (said in the page).
+2. **Upload:** the board's ZRINIT opens "Zmodem upload: send which files?" on the bottom row (a line of names
+   separated by spaces; Backspace, Esc/Ctrl-C/Ctrl-X cancel); none: ten CANs to the board. The engine sends to the
+   ZRINIT telnet hands it (no 10 s wait).
+3. **Cancel:** Ctrl-X five times or Ctrl-] then `c`: SIGTERM to the program, whose engine sends Zmodem's ten CANs and
+   keeps the part (`NAME.part`); killed after 5 s if it has not ended (then telnet sends the CANs). The board's sender
+   has written ahead (its socket buffers held over 100 KB in the test), so telnet then drops what still comes until a
+   second of silence (at most a minute), keeping only the bytes after the last ZDLE (the board's prompt): seen in
+   FS-UAE as minutes of binary drawn on the console before this rule.
+4. **Names:** paths are at most 63 bytes (`ZPATH_MAX`), so a longer name is shortened in front of its extension to 54
+   bytes (room for `.999.part`). A skipped identical file is not a failure (exit status 0); a refused name is.
+5. **`-e`** per direction, as the PC client: `rz -e` when the board's BINARY is off, `sz -e` when ours is.
+6. **The phone book** (owner decision 4): `~/.phonebook` (`$HOME/.phonebook`; root's `/.phonebook`), one place a line:
+   `NAME HOST [PORT] [amiga|pc|unix] [ice]`, `#` comments, words separated by spaces or tabs; a name matches in any
+   case, the first line wins; a PORT or mode on the command line wins over the book's; an unknown word is said with its
+   line and ignored; `telnet` alone prints the usage and the book. The file's format is frozen once shipped
+   (CLAUDE.md).
+7. **A board's sender without a window (found in the test):** lrzsz's `lsz` without `-w` writes a whole file into its
+   socket buffers at once (1 MB in 0.05 s on the PC) and after ZEOF waits only 10 s for the receiver's ZRINIT; a
+   receiver at 16 KB/s behind those buffers cannot answer in time, and lsz gives up ("Transfer incomplete", exit 128)
+   although every byte arrives (*measured* on the PC with a reader throttled to 16 KB/s: fails without `-w`, whole with
+   `-w 16384`). lrzsz ignores the buffer size a receiver gives in ZRINIT (that code is `#if 0` in `lsz.c`), so the
+   receiver cannot prevent it. The simulator's boards in part z send with `--window 16384` (`lsz -w`), as a board over
+   TCP should; a real board that does not may fail big downloads on the stock A1200: to be seen on the owner's boards.
+
+**Sizes (*measured*):** `/bin/telnet` 23,032 -> 28,392 bytes (48 KB in memory with its buffers); `/bin/rz` 22,828 bytes
+(29 KB at its start, plus the engine's 15 KB while it runs); the kernel 155,764 -> 155,860 bytes (+96, the pipe flag):
+23,340 bytes left on the RAM floppy, 6,956 on the mount tests' floppy. **Memory:** the stock A1200 (2 MB chip RAM,
+FS-UAE, A2065) has 1,147 KB free after the calls. **Speed (FS-UAE, an emulator figure):** a 1 MB download over the
+A2065 about 16 KB/s on the emulated 68EC020 (the progress line's steps); to be measured on the A1200.
+**Tests:** `tools/bbs-test.sh` part z (FS-UAE, the stock A1200, the A2065, against the simulator's real lsz and lrz,
+`LRZSZ_DIR`): downloads byte for byte; the same file already there skipped; another file of the same name kept and the
+download saved as NAME.1; `.profile` refused and nothing written; a `.part` of the same file resumed after ZCRC; another
+file's `.part` not spliced (kept, the file came whole as NAME.1); a 1 MB download cancelled with Ctrl-X five times, its
+`.part` kept, then resumed after ZCRC and whole; two uploads asked for on the bottom row (a Backspace in the line),
+whole on the board; a board refusing BINARY (`rz -e`, `sz -e`), CR NUL intact; `telnet NAME` for both boards from
+`/.phonebook` (the PC mode from the book), the book listed, its unknown word said. `sigtest pipenb` (signal-test):
+the pipe flag's -EAGAIN, partial write and -EINVAL.

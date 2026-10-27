@@ -216,6 +216,11 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   (`kernel/clock.h`); `SYS_settime` takes the same unsigned number. `SYS_ticks`'s argument (audit F9, 2026-10-27): 0
   the 100 Hz tick count (wraps after 497 days), 1 the whole seconds since boot (unsigned, the clock's own count),
   others -EINVAL.
+- **D20 steps 4-5 (Zmodem and the phone book, branch m4, 2026-10-27):** `SYS_pipe`'s second argument (0 for every
+  older caller): 0, or `O_NONBLOCK` for both ends (Linux's `pipe2`; an empty read -EAGAIN, a write what fits or
+  -EAGAIN), any other bit -EINVAL; `rz`/`sz`'s standard input and output contract (lrzsz's; `sz` a link to `rz`); the
+  phone book `~/.phonebook` (`NAME HOST [PORT] [amiga|pc|unix] [ice]`, `#` comments, unknown words ignored with a
+  word). Not frozen: `rz -T`'s standard-error form (telnet and rz ship together), the options.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

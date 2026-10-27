@@ -11,7 +11,7 @@ rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-signal}; mkdir -p $OUT
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae 420 tools/tests/signal-test.txt 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' | tr -d '\r' > $OUT/run.log
 pass=1
-for t in stopsrv handler block ignore kill alarm restart chld pipe poll group cont srvcall stack forged ttyread select; do
+for t in stopsrv handler block ignore kill alarm restart chld pipe pipenb poll group cont srvcall stack forged ttyread select; do
     l=$(grep -a "^sigtest $t: " $OUT/run.log | head -1)
     case "$l" in *": PASS"*) echo "PASS ${l#sigtest }" ;; *) echo "FAIL sigtest $t: ${l:-no result}"; pass=0 ;; esac
 done

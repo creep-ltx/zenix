@@ -228,7 +228,7 @@ alias to that file, never for the root); the kernel 176,144 -> 139,644 bytes, fr
 (*measured* in FS-UAE: 2 MB chip-only 1329 -> 1365 KB, 1 MB 392 -> 428 KB); **a ZenixFS root is test-only** until roadmap
 block 4 (the test kernel `kernel-zfs.bin`; zenixboot refuses an update that would take its server away; owner question
 5 of the note still open). The full design: [d19-network.md](d19-network.md).
-## D20. telnet, the BBS terminal and pseudo-terminals (D19 step 11; design note revision 2 after independent reviews; step 1, the console's font and rules, built on branch t12 2026-10-27)
+## D20. telnet, the BBS terminal and pseudo-terminals (D19 step 11; design note revision 2 after independent reviews; steps 0-5 built: the console's font and rules (t12), telnet's modes (t3), Zmodem and the phone book (m4), 2026-10-27)
 **Why.** The owner's daily use of the Amiga is telnet to BBSes. **How.** One `telnet` process (`poll` on the socket and the tty; BINARY, ECHO, SGA, TERMINAL-TYPE, NAWS 80 x 32) whose PC, Amiga and Unix modes translate keys and filter the stream, while the console draws (a CP437 font and seven board rules per console, loaded on demand by two `SYS_console` ops that name the console by a file descriptor); Zmodem by `rz`/`sz` (CTerm's engine), started by itself; pseudo-terminals, SIGHUP and a telnet server later, as a step of their own. The full design: [d20-telnet.md](d20-telnet.md).
 ## D21. The crypto library, `ssh` and HTTPS (roadmap block 2; design note revision 2 after two reviews, nothing built)
 **Why.** The owner must reach the Linux PC properly by ssh, `wget` needs HTTPS, and updates and packages need

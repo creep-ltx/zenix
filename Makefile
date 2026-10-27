@@ -47,7 +47,8 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet
+          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
+          rz
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -377,10 +378,20 @@ TNOBJS := $(BUILD)/tn-proto.no $(BUILD)/tn-filter.no $(BUILD)/tn-keys.no $(BUILD
 TNOPT_filter := -O2
 $(BUILD)/tn-%.no: net/telnet/%.c net/telnet/telnet.h | $(BUILD)
 	$(CC) $(UCFLAGS) $(if $(TNOPT_$*),$(TNOPT_$*),-Os) -c $< -o $@
-$(BUILD)/telnet.uo: user/telnet.c net/telnet/telnet.h user/socket.h kernel/netproto.h user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -Os -c $< -o $@
-$(BUILD)/telnet.uelf: $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
-	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/telnet.uo: user/telnet.c net/telnet/telnet.h user/xfer/xfer.h user/socket.h kernel/netproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/telnet.uelf: $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/xf-detect.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/xf-detect.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# rz and sz (DESIGN D20 5, docs/man/rz.txt; sz is a link to rz): the Zmodem engine (user/xfer/, CTerm's, MIT) at -O2
+# (every byte of a transfer goes through it), the download rules (rzrules.c, shared with the PC tests) and rz.c cold
+XFEROBJS := $(BUILD)/xf-zmodem.no $(BUILD)/xf-detect.no $(BUILD)/xf-rzrules.no
+XFOPT_zmodem := -O2
+$(BUILD)/xf-%.no: user/xfer/%.c user/xfer/xfer.h user/xfer/rzrules.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Inet/port/shim $(if $(XFOPT_$*),$(XFOPT_$*),-Os) -c $< -o $@
+$(BUILD)/rz.uo: user/rz.c user/xfer/xfer.h user/xfer/rzrules.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/rz.uelf: $(BUILD)/rz.uo $(XFEROBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/rz.uo $(XFEROBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/drv-%.uo: net/drv/%.c net/drv/drv.h kernel/netproto.h kernel/hwinfo.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 # a driver's frames are its stack's few hundred bytes (the transfer block is static): 8 KB

@@ -386,10 +386,187 @@ PY
     rm -rf $BD; BD=$BD0
 }
 
-[ $# = 0 ] && set -- e s b b16
+# z: Zmodem (D20 step 4) and the phone book (step 5) over the A2065 on the stock A1200 (2 MB chip RAM), against the
+# simulator's real lsz and lrz (LRZSZ_DIR or PATH, as tools/host/telnet-test.sh). Two boards: 2323 with BINARY, 2324
+# refusing it (rz -e / sz -e then), both called by name from root's phone book (/.phonebook). Downloads into /dl:
+# two files whole (every byte value, CR NUL), the same file already there skipped, another file of the same name
+# saved as NAME.1 (the old one untouched), a leading-dot name refused, a .part of the same file resumed only after
+# ZCRC, another file's .part not spliced (kept, the file as NAME.1), a 1 MB download cancelled with Ctrl-X five times
+# (its .part kept) and then resumed after ZCRC, whole; uploads asked for when the board's lrz starts, the files
+# compared on the board. Checked byte for byte against the PC's files.
+part_z() {
+    local LSZ LRZ
+    if [ -n "${LRZSZ_DIR:-}" ]; then LSZ="$LRZSZ_DIR/lsz"; LRZ="$LRZSZ_DIR/lrz"
+    elif command -v lsz >/dev/null; then LSZ=$(command -v lsz); LRZ=$(command -v lrz)
+    elif command -v lrzsz-sz >/dev/null; then LSZ=$(command -v lrzsz-sz); LRZ=$(command -v lrzsz-rz); fi
+    [ -x "$LSZ" ] && [ -x "$LRZ" ] || { echo "FAIL (z) lrzsz not found: lsz/lrz on PATH or LRZSZ_DIR"; pass=0; return; }
+    rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "mkdir /dl" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /dl uid 0" $BD/zenix.hdf >/dev/null 2>&1
+    printf 'auto eth0\niface eth0 inet dhcp\n    driver a2065\n' > $OUT/interfaces
+    put $OUT/interfaces /etc/network/interfaces 644
+    local F=$OUT/zfiles; rm -rf $F $OUT/zup $OUT/zup2 $OUT/zdl; mkdir -p $F $OUT/zup $OUT/zup2 $OUT/zdl
+    python3 - "$F" "$OUT" <<'PY'
+import os, random, sys
+f, out = sys.argv[1], sys.argv[2]
+r = random.Random(20261027)
+w = lambda n, b: open(os.path.join(f, n), "wb").write(b)
+w("random.bin", bytes(r.getrandbits(8) for _ in range(150000)))
+w("bytes.bin", bytes(range(256)) * 64 + b"\r\x00\r\n\x18\x18B00\xff\xff\x11\x13" * 500)
+w("same.txt", b"the same file on both sides\n" * 40)
+w("other.txt", b"the board's other.txt\n" * 30)
+w(".profile", b"echo a board must never write this\n")
+w("resume.bin", bytes(r.getrandbits(8) for _ in range(120000)))
+w("splice.bin", bytes(r.getrandbits(8) for _ in range(90000)))
+w("big.bin", bytes(r.getrandbits(8) for _ in range(1 << 20)))
+w("nob.bin", bytes(range(256)) * 200 + b"\r\x00" * 300)
+d = open(os.path.join(f, "resume.bin"), "rb").read()
+open(os.path.join(out, "z-resume.part"), "wb").write(d[:50000])               # the same file: resumed
+open(os.path.join(out, "z-splice.part"), "wb").write(b"another file" * 3000)   # not this file: never spliced
+open(os.path.join(out, "z-same.txt"), "wb").write(open(os.path.join(f, "same.txt"), "rb").read())
+open(os.path.join(out, "z-other.txt"), "wb").write(b"Zenix's own other.txt\n")
+open(os.path.join(out, "z-up.bin"), "wb").write(bytes(r.getrandbits(8) for _ in range(100000)))
+open(os.path.join(out, "z-up2.txt"), "wb").write(b"\xff\xff\r\x00 two IACs, CR NUL\r\n" * 200)
+open(os.path.join(out, "z-book"), "w").write("# the test boards\nsim   10.0.2.2 2323 amiga\nnob 10.0.2.2  2324 pc gizmo\n")
+PY
+    put $OUT/z-resume.part /dl/resume.bin.part 644
+    put $OUT/z-splice.part /dl/splice.bin.part 644
+    put $OUT/z-same.txt /dl/same.txt 644
+    put $OUT/z-other.txt /dl/other.txt 644
+    put $OUT/z-up.bin /up.bin 644
+    put $OUT/z-up2.txt /up2.txt 644
+    put $OUT/z-book /.phonebook 644
+    local L='for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do ifconfig eth0 2>/dev/null | grep -q "lease [0-9]" && break; sleep 1; done'
+    cat > $OUT/z.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send $L; echo ==u""p\r
+wait ==up 60
+send telnet; echo stl=\$?\r
+wait stl= 20
+send cd /dl; telnet -e ^E sim; echo stz=\$?\r
+wait <<END hello>> 40
+sleep 1
+send sz random.bin bytes.bin same.txt other.txt .profile\r
+wait <<END sz>> 240
+send sz resume.bin splice.bin\r
+wait <<END sz>> 240
+send sz big.bin\r
+waitecho big\.bin: [0-9]+ of 1048576 120
+sleep 2
+send \x18\x18\x18\x18\x18
+wait <<END sz>> 60
+send sz big.bin\r
+wait <<END sz>> 400
+send rz\r
+waitecho send which files 60
+send /up.bin /u\x7fup2.txt\r
+wait <<END rz>> 240
+send bye\r
+wait stz= 30
+send telnet -e ^E nob; echo stn=\$?\r
+wait <<END hello>> 40
+sleep 1
+send sz nob.bin\r
+wait <<END sz>> 240
+send rz\r
+waitecho send which files 60
+send /up2.txt\r
+wait <<END rz>> 240
+send bye\r
+wait stn= 30
+send cd /; ls -a /dl > /tmp/z-ls.txt; free > /tmp/z-free.txt; dmesg > /tmp/z-k.txt; sync; echo ==do""ne\r
+wait ==done 30
+stop
+EOS
+    sed '/^\[fs-uae\]/a network_card = a2065' fsuae/a1200-020.fs-uae > "$OUT/a1200-a2065.fs-uae"
+    rm -f $OUT/zready $OUT/zready2 $OUT/zrecord.jsonl $OUT/zrecord2.jsonl
+    ZENIX_BUILD=$BD unshare -rnm bash -c 'ip link set lo up || exit 9
+        python3 -I tools/bbs-sim.py --port 2323 --window 16384 --record "$1/zrecord.jsonl" --ready "$1/zready" --files "$1/zfiles" \
+            --upload "$1/zup" --lsz "$4" --lrz "$5" > "$1/zbbs.log" 2>&1 &
+        a=$!
+        python3 -I tools/bbs-sim.py --port 2324 --window 16384 --refuse-binary --record "$1/zrecord2.jsonl" --ready "$1/zready2" \
+            --files "$1/zfiles" --upload "$1/zup2" --lsz "$4" --lrz "$5" > "$1/zbbs2.log" 2>&1 &
+        b=$!
+        for i in $(seq 100); do [ -e "$1/zready" ] && [ -e "$1/zready2" ] && break; sleep 0.1; done
+        tools/run-test.sh "$2" 1500 "$3"; r=$?
+        kill $a $b 2>/dev/null; wait $a $b 2>/dev/null
+        exit $r' bbs "$OUT" "$OUT/a1200-a2065.fs-uae" "$OUT/z.txt" "$LSZ" "$LRZ" > $OUT/z.log 2>&1
+    local rc=$?
+    [ $rc = 0 ] || { echo "FAIL (z) the run (exit $rc)"; grep -a 'FAIL' $OUT/z.log | head -5; pass=0; }
+    for f in ls free k; do get /tmp/z-$f.txt > $OUT/z-$f.txt; done
+    local n
+    for n in random.bin bytes.bin same.txt other.txt other.txt.1 resume.bin splice.bin.part splice.bin.1 big.bin \
+             nob.bin profile .profile big.bin.part resume.bin.part; do
+        rm -f "$OUT/zdl/$n"; debugfs -R "dump /dl/$n $OUT/zdl/$n" $BD/zenix.hdf >/dev/null 2>&1
+        debugfs -R "stat /dl/$n" $BD/zenix.hdf 2>/dev/null | grep -q Inode || rm -f "$OUT/zdl/$n"
+    done
+    python3 - "$OUT" <<'PY' || pass=0
+import hashlib, json, os, re, sys
+out = sys.argv[1]
+log = open(out + "/z.log", "rb").read()
+F, D = out + "/zfiles", out + "/zdl"
+sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest() if os.path.exists(p) else None
+rd = lambda p: open(p, "rb").read() if os.path.exists(p) else None
+bad = 0
+def check(ok, what, detail=""):
+    global bad
+    print(("PASS " if ok else "FAIL ") + "(z) " + what + ("" if ok else ": " + str(detail)[:300]))
+    bad += not ok
+def rec(n):
+    return [json.loads(l) for l in open(out + n) if l.strip()]
+r1, r2 = rec("/zrecord.jsonl"), rec("/zrecord2.jsonl")
+x1 = [r for r in r1 if r["ev"] == "xfer"]
+x2 = [r for r in r2 if r["ev"] == "xfer"]
+check(b"the phone book (/.phonebook):" in log and re.search(rb"sim +10\.0\.2\.2 2323 amiga", log) is not None
+      and b"stl=2" in log, "telnet alone: the usage and the phone book listed, exit 2")
+check(b"unknown word gizmo" in log, "the phone book's unknown word said and ignored")
+check(sum(1 for r in r1 if r["ev"] == "call") == 1 and sum(1 for r in r2 if r["ev"] == "call") == 1,
+      "telnet sim and telnet nob called the boards by name (ports 2323 and 2324)")
+check(any(r["ev"] == "ttype" and r["name"] == "ANSI" for r in r2), "... nob's mode from the book (pc: TERMINAL-TYPE ANSI)")
+for n in ("random.bin", "bytes.bin"):
+    check(sha(f"{D}/{n}") == sha(f"{F}/{n}"), f"download: {n} whole, byte for byte")
+check(b"same.txt: the same file is here already" in log and sha(f"{D}/same.txt") == sha(f"{F}/same.txt"),
+      "the same file already there: skipped")
+check(rd(f"{D}/other.txt") == b"Zenix's own other.txt\n" and sha(f"{D}/other.txt.1") == sha(f"{F}/other.txt")
+      and b"saved as other.txt.1" in log, "another file of that name: never overwritten, the download is other.txt.1")
+check(not os.path.exists(f"{D}/.profile") and not os.path.exists(f"{D}/profile") and b".profile: refused" in log,
+      "a leading-dot name (.profile): refused, nothing written")
+check(sha(f"{D}/resume.bin") == sha(f"{F}/resume.bin") and not os.path.exists(f"{D}/resume.bin.part")
+      and b"resume.bin: going on from resume.bin.part (the same file: CRC checked)" in log,
+      "a .part of the same file: resumed after ZCRC, whole")
+check(rd(f"{D}/splice.bin.part") == b"another file" * 3000 and sha(f"{D}/splice.bin.1") == sha(f"{F}/splice.bin")
+      and b"splice.bin.part is not the same file" in log,
+      "another file's .part: not spliced (kept), the file came whole as splice.bin.1")
+check(b"Zmodem: cancelled" in log, "Ctrl-X five times: the download cancelled")
+check(sha(f"{D}/big.bin") == sha(f"{F}/big.bin") and not os.path.exists(f"{D}/big.bin.part")
+      and b"big.bin: going on from big.bin.part (the same file: CRC checked)" in log,
+      "the cancelled 1 MB download resumed after ZCRC, whole")
+u = [r for r in x1 if r["cmd"] == "rz"]
+check(len(u) == 1 and u[0]["rc"] == 0 and u[0]["files"].get("up.bin") == sha(out + "/z-up.bin")
+      and u[0]["files"].get("up2.txt") == sha(out + "/z-up2.txt"), "upload: up.bin and up2.txt whole on the board", u)
+check(len(x1) == 5 and all(r["rc"] == 0 for i, r in enumerate(x1) if i != 2),
+      "lsz/lrz on the board ended well (but the cancelled one)", x1)
+check(sha(f"{D}/nob.bin") == sha(f"{F}/nob.bin"), "without BINARY (rz -e): nob.bin whole (CR NUL intact)")
+u2 = [r for r in x2 if r["cmd"] == "rz"]
+check(len(u2) == 1 and u2[0]["rc"] == 0 and u2[0]["files"].get("up2.txt") == sha(out + "/z-up2.txt"),
+      "without BINARY (sz -e): up2.txt whole on the board", u2)
+check(b"stz=0" in log and b"stn=0" in log, "both calls ended with status 0")
+k = open(out + "/z-k.txt", errors="replace").read()
+check("[kernel]" not in k, "no process faulted", k[-300:])
+m = re.search(r"chip RAM free[^\n]*", open(out + "/z-free.txt", errors="replace").read())
+print("(z) memory after the calls (2 MB chip RAM, A2065):", m.group(0) if m else "?")
+sys.exit(1 if bad else 0)
+PY
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-z.log 2>&1 && echo "PASS (z) the host's e2fsck finds the root clean" || { echo "FAIL (z) e2fsck"; pass=0; }
+}
+
+[ $# = 0 ] && set -- e s b b16 z
 for p in "$@"; do
     case $p in
-    e|s) "part_$p" ;;
+    e|s|z) "part_$p" ;;
     b) part_b b fsuae/a1200-020.fs-uae 3 8 ;;
     b16) part_b b16 fsuae/a1200-020-fast.fs-uae 4 16 ;;
     *) echo "bbs-test: unknown part $p"; exit 2 ;;

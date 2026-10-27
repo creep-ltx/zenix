@@ -58,7 +58,8 @@ zenix/
 - **Commands:** one file per program, `NAME.c`, each with a manual page in `docs/man/NAME.txt`. The list:
   [commands.md](commands.md).
 - **Taken from other projects:** `miniz/` (for `gzip`) and `regex.c` (from CUtils), both MIT; `xfer/` (DESIGN D20 5:
-  the Zmodem engine from CTerm, MIT, with Zenix's download rules in `rzrules.c`; for `rz`/`sz`, not built yet).
+  the Zmodem engine from CTerm, MIT, notice `xfer/LICENSE`, with Zenix's download rules in `rzrules.c`; for `rz`/`sz`,
+  `rz.c`, which telnet starts by itself).
 
 ## net/: the network (DESIGN D19, docs/d19-network.md)
 

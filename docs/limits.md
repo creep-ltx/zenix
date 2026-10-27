@@ -156,7 +156,8 @@ pointers.
   in all; with more, 32 ends, 8 listeners, 16 UDP sockets, 16 KB windows and send buffers, 200 KB in all. A socket
   over a limit is refused at once (-ENOBUFS). At most 8 requests a turn; `/etc/hosts` at most 64 names and 16 KB (so
   `/etc/resolv.conf`), 2 name servers; a lookup answers at most 4 addresses; `netstat` shows at most 64 rows.
-  `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL).
+  `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL); a pipe is non-blocking only when
+  made so (`sys_pipe2(fds, O_NONBLOCK)`, both ends).
 - SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
   MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the
   wire). The kernel's receive ring is 1 KB (89 ms of SLIP): when netd cannot read for longer (a busy program at its

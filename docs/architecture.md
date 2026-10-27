@@ -561,6 +561,9 @@ pattern (section 6).
   4 KB send ring is free (DESIGN D19 5.3: a truthful `POLLOUT` for netd; the drain that makes the room wakes the
   waiter through kwork); files and `/dev/null`
   never wait; a pipe's read end gives `POLLHUP` when no writer is left, its write end `POLLERR` when no reader is.
+  `SYS_pipe`'s second argument (0 for every older caller) may be `O_NONBLOCK` (Linux's `pipe2`, both ends; DESIGN D20
+  step 4, so telnet never blocks writing into `rz`): a read of an empty pipe gives -EAGAIN, a write what fits or
+  -EAGAIN; other flags -EINVAL.
   libz's `poll` (milliseconds) and `select` (`fd_set` of 32) are built on it.
 - **Signals** (DESIGN D16, `kernel/signal.c`). Linux's numbers and default actions (frozen): HUP 1, INT 2, QUIT 3,
   KILL 9, USR1 10, USR2 12, PIPE 13, ALRM 14, TERM 15, CHLD 17, CONT 18, STOP 19, TSTP 20, TTIN 21, TTOU 22, WINCH 28;

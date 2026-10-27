@@ -128,9 +128,12 @@ nettest tcp
 
 These are the PiStorm's figures (Emu68), labelled so: not a real 68020's speed.
 
-## 8. Telnet to a BBS (later)
+## 8. Telnet to a BBS
 
-Not yet: `telnet` comes with its own design note after the network's audit (D19 step 11). Skip.
+`telnet` is built (DESIGN D20, [telnet](man/telnet.txt)): `telnet bbs.example.org 2323` (`-p` for a PC board). A
+download from the board starts by itself (Zmodem); files land in the directory you started telnet in. **Note** how a
+screen looks and how long a 1 MB download takes (the bottom row shows the progress). A phone book saves typing: a line
+`name host port amiga` (or `pc`) in `~/.phonebook`, then `telnet name`.
 
 ## 9. Only if step 1 or later went wrong: start Zenix from cold
 
