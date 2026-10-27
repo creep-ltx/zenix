@@ -517,7 +517,7 @@ static const struct { unsigned char e; const char *text; } errtext[] = {
     { EPERM, "operation not permitted" }, { ENOENT, "no such file or directory" }, { ESRCH, "no such process" },
     { EINTR, "interrupted" }, { EIO, "input/output error" }, { ENXIO, "no such device" },
     { E2BIG, "argument list too long" }, { ENOEXEC, "not a Zenix program" }, { EBADF, "bad file descriptor" },
-    { ECHILD, "no child process" }, { EAGAIN, "too many processes" }, { ENOMEM, "out of memory" },
+    { ECHILD, "no child process" }, { EAGAIN, "resource temporarily unavailable" }, { ENOMEM, "out of memory" },
     { EACCES, "permission denied" }, { EFAULT, "bad address" }, { EBUSY, "device or resource busy" },
     { EEXIST, "file exists" }, { EXDEV, "cross-device link" }, { ENODEV, "no such device" },
     { ENOTDIR, "not a directory" }, { EISDIR, "is a directory" }, { EINVAL, "invalid argument" },
@@ -784,4 +784,285 @@ int zsig_num(const char *s)
     if (!strncmp(s, "SIG", 3)) s += 3;
     for (int i = 1; i < NSIG; i++) if (!strcmp(s, signames[i])) return i;
     return -1;
+}
+
+/* ---------------------------------------------------------------- BSD sockets (DESIGN D19 4.4, user/socket.h)
+ * Each call fills a struct usockreq and makes one SYS_sock; the kernel checks every pointer and waits (D19 4.3). */
+#include "socket.h"
+static int sk(u32 op, int fd, struct usockreq *r)
+{
+    int v = sys_sock(op | (u32)sizeof *r << 16, fd, r);
+    return v < 0 ? -1 : v;
+}
+#define SKREQ(r) struct usockreq r; memset(&r, 0, sizeof r)
+int socket(int domain, int type, int protocol)
+{
+    SKREQ(r);
+    if ((u32)domain > 0xFFFF || (u32)protocol > 0xFFFF) { zerrno = EINVAL; return -1; }
+    r.level = (unsigned short)domain;
+    r.flags = (u32)type;
+    r.option = (unsigned short)protocol;
+    return sk(SOCK_SOCKET, 0, &r);
+}
+static int sk_addr(u32 op, int fd, const struct sockaddr *a, socklen_t *len)
+{
+    SKREQ(r);
+    r.addr = (u32)a;
+    r.alen = (u32)len;
+    return sk(op, fd, &r);
+}
+int bind(int fd, const struct sockaddr *a, socklen_t len) { return sk_addr(SOCK_BIND, fd, a, &len); }
+int connect(int fd, const struct sockaddr *a, socklen_t len) { return sk_addr(SOCK_CONNECT, fd, a, &len); }
+int getsockname(int fd, struct sockaddr *a, socklen_t *len) { return sk_addr(SOCK_GETSOCKNAME, fd, a, len); }
+int getpeername(int fd, struct sockaddr *a, socklen_t *len) { return sk_addr(SOCK_GETPEERNAME, fd, a, len); }
+int listen(int fd, int backlog)
+{
+    SKREQ(r);
+    r.len = backlog < 0 ? 0 : (u32)backlog;
+    return sk(SOCK_LISTEN, fd, &r);
+}
+int accept4(int fd, struct sockaddr *a, socklen_t *len, int flags)
+{
+    SKREQ(r);
+    r.addr = (u32)a;
+    r.alen = a ? (u32)len : 0;
+    r.flags = (u32)flags;
+    return sk(SOCK_ACCEPT, fd, &r);
+}
+int accept(int fd, struct sockaddr *a, socklen_t *len) { return accept4(fd, a, len, 0); }
+int sendto(int fd, const void *buf, u32 n, int flags, const struct sockaddr *a, socklen_t len)
+{
+    SKREQ(r);
+    r.buf = (u32)buf;
+    r.len = n;
+    r.flags = (u32)flags;
+    if (a) { r.addr = (u32)a; r.alen = (u32)&len; }
+    return sk(SOCK_SENDTO, fd, &r);
+}
+int send(int fd, const void *buf, u32 n, int flags) { return sendto(fd, buf, n, flags, 0, 0); }
+int recvfrom(int fd, void *buf, u32 n, int flags, struct sockaddr *a, socklen_t *len)
+{
+    SKREQ(r);
+    r.buf = (u32)buf;
+    r.len = n;
+    r.flags = (u32)flags;
+    if (a) { r.addr = (u32)a; r.alen = (u32)len; }
+    return sk(SOCK_RECVFROM, fd, &r);
+}
+int recv(int fd, void *buf, u32 n, int flags) { return recvfrom(fd, buf, n, flags, 0, 0); }
+int shutdown(int fd, int how)
+{
+    SKREQ(r);
+    r.flags = (u32)how;
+    return sk(SOCK_SHUTDOWN, fd, &r);
+}
+static int sk_opt(u32 op, int fd, int level, int opt, const void *val, socklen_t *len)
+{
+    SKREQ(r);
+    if ((u32)level > 0xFFFF || (u32)opt > 0xFFFF) { zerrno = ENOPROTOOPT; return -1; }
+    r.level = (unsigned short)level;
+    r.option = (unsigned short)opt;
+    r.val = (u32)val;
+    r.vlen = (u32)len;
+    return sk(op, fd, &r);
+}
+int getsockopt(int fd, int level, int opt, void *val, socklen_t *len) { return sk_opt(SOCK_GETSOCKOPT, fd, level, opt, val, len); }
+int setsockopt(int fd, int level, int opt, const void *val, socklen_t len) { return sk_opt(SOCK_SETSOCKOPT, fd, level, opt, val, &len); }
+static int sk_ioctl(int fd, u32 req, void *p)
+{
+    SKREQ(r);
+    r.option = (unsigned short)req;
+    r.val = (u32)p;
+    return sk(SOCK_IOCTL, fd, &r);
+}
+int ioctl(int fd, unsigned long req, ...)
+{
+    va_list ap;
+    va_start(ap, req);
+    void *p = va_arg(ap, void *);
+    va_end(ap);
+    if (req != FIONREAD && req != FIONBIO) { zerrno = ENOTTY; return -1; }
+    if (!p) { zerrno = EFAULT; return -1; }
+    return sk_ioctl(fd, (u32)req, p);
+}
+int fcntl(int fd, int cmd, ...)
+{
+    int arg = 0;
+    if (cmd == F_SETFL || cmd == F_SETFD) { va_list ap; va_start(ap, cmd); arg = va_arg(ap, int); va_end(ap); }
+    if (cmd == F_GETFD || cmd == F_SETFD) { struct ustat st; return sys_fstat(fd, &st) < 0 ? -1 : 0; }
+    if (cmd != F_GETFL && cmd != F_SETFL) { zerrno = EINVAL; return -1; }
+    int on = (arg & O_NONBLOCK) != 0;
+    int v = sk_ioctl(fd, FIONBIO, cmd == F_GETFL ? 0 : &on);    /* FIONBIO with no value asks (netproto.h) */
+    if (v >= 0) return cmd == F_GETFL ? O_RDWR | (v ? O_NONBLOCK : 0) : 0;
+    if (zerrno != ENOTSOCK) return -1;
+    if (cmd == F_GETFL) return O_RDWR;                          /* other files: no flag to report yet */
+    if (on) { zerrno = EINVAL; return -1; }                     /* O_NONBLOCK on pipes and ttys: not yet (D19 4.1) */
+    return 0;
+}
+
+/* addresses as text */
+int inet_pton(int af, const char *s, void *dst)
+{
+    if (af != AF_INET) { zerrno = EAFNOSUPPORT; return -1; }
+    unsigned char a[4];
+    for (int i = 0; i < 4; i++) {
+        u32 v = 0, nd = 0;
+        while (*s >= '0' && *s <= '9') {
+            if (nd && !v) return 0;                     /* no leading zeros, as glibc */
+            v = v * 10 + (u32)(*s++ - '0');
+            if (++nd > 3 || v > 255) return 0;
+        }
+        if (!nd || *s != (i < 3 ? '.' : 0)) return 0;
+        a[i] = (unsigned char)v;
+        s++;
+    }
+    memcpy(dst, a, 4);
+    return 1;
+}
+const char *inet_ntop(int af, const void *src, char *dst, socklen_t size)
+{
+    const unsigned char *a = src;
+    char t[16];
+    if (af != AF_INET) { zerrno = EAFNOSUPPORT; return 0; }
+    int n = snprintf(t, sizeof t, "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
+    if ((u32)n >= size) { zerrno = 28; return 0; }      /* ENOSPC */
+    memcpy(dst, t, (u32)n + 1);
+    return dst;
+}
+int inet_aton(const char *s, struct in_addr *out)
+{
+    u32 part[4], n = 0;
+    for (;;) {
+        if (!isdigit((unsigned char)*s)) return 0;
+        char *e;
+        unsigned long v = strtoul(s, &e, 0);
+        if (e == s || n == 4) return 0;
+        part[n++] = (u32)v;
+        s = e;
+        if (*s == '.') { s++; continue; }
+        if (*s && !isspace((unsigned char)*s)) return 0;
+        break;
+    }
+    u32 v = part[n - 1], max = n == 1 ? 0xFFFFFFFFu : n == 2 ? 0xFFFFFFu : n == 3 ? 0xFFFFu : 0xFFu;
+    if (v > max) return 0;
+    for (u32 i = 0; i + 1 < n; i++) {
+        if (part[i] > 255) return 0;
+        v |= part[i] << (24 - 8 * i);
+    }
+    if (out) out->s_addr = htonl(v);
+    return 1;
+}
+in_addr_t inet_addr(const char *s)
+{
+    struct in_addr a;
+    return inet_aton(s, &a) ? a.s_addr : INADDR_NONE;
+}
+char *inet_ntoa(struct in_addr a)
+{
+    static char b[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &a, b, sizeof b);
+    return b;
+}
+
+/* names (DESIGN D19 4.5) */
+static const struct { const char *name; unsigned short port; } services[] = {
+    { "echo", 7 }, { "ftp", 21 }, { "ssh", 22 }, { "telnet", 23 }, { "smtp", 25 }, { "domain", 53 }, { "http", 80 },
+    { "pop3", 110 }, { "nntp", 119 }, { "ntp", 123 }, { "imap", 143 }, { "https", 443 },
+};
+/* a name looked up by netd: up to 4 addresses into a[], their count, or an EAI_* error */
+static int resolve(const char *name, u32 *a)
+{
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return zerrno == ENETDOWN ? EAI_FAIL : EAI_SYSTEM;
+    SKREQ(r);
+    r.buf = (u32)name;
+    r.len = strlen(name);
+    int n = sk(SOCK_RESOLVE, s, &r);
+    if (n >= 0) n = recv(s, a, 16, 0);
+    int e = zerrno;
+    sys_close(s);
+    if (n > 0) return n / 4;
+    zerrno = e;
+    if (n == 0 || e == ENOENT) return EAI_NONAME;
+    if (e == ETIMEDOUT || e == EAGAIN) return EAI_AGAIN;
+    if (e == ENOMEM || e == ENOBUFS) return EAI_MEMORY;
+    return e == EINTR ? EAI_SYSTEM : EAI_FAIL;
+}
+int getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res)
+{
+    int flags = hints ? hints->ai_flags : 0, fam = hints ? hints->ai_family : AF_UNSPEC;
+    int type = hints ? hints->ai_socktype : 0, proto = hints ? hints->ai_protocol : 0;
+    u32 addr[4];
+    int na = 1;
+    *res = 0;
+    if (flags & ~(AI_PASSIVE | AI_CANONNAME | AI_NUMERICHOST | AI_NUMERICSERV)) return EAI_BADFLAGS;
+    if (fam != AF_UNSPEC && fam != AF_INET) return EAI_FAMILY;
+    if (type && type != SOCK_STREAM && type != SOCK_DGRAM) return EAI_SOCKTYPE;
+    if (!node && !service) return EAI_NONAME;
+    u32 port = 0;
+    if (service && *service) {
+        char *e;
+        port = strtoul(service, &e, 10);
+        if (*e || !isdigit((unsigned char)*service)) {
+            if (flags & AI_NUMERICSERV) return EAI_NONAME;
+            u32 i = 0;
+            while (i < sizeof services / sizeof services[0] && strcmp(services[i].name, service)) i++;
+            if (i == sizeof services / sizeof services[0]) return EAI_SERVICE;
+            port = services[i].port;
+        } else if (port > 65535) return EAI_SERVICE;
+    }
+    struct in_addr in;
+    if (!node) addr[0] = htonl(flags & AI_PASSIVE ? INADDR_ANY : INADDR_LOOPBACK);
+    else if (inet_aton(node, &in)) addr[0] = in.s_addr;
+    else if (flags & AI_NUMERICHOST) return EAI_NONAME;
+    else if ((na = resolve(node, addr)) < 0) return na;
+    struct addrinfo **tail = res;
+    for (int i = 0; i < na; i++)
+        for (int t = SOCK_STREAM; t <= SOCK_DGRAM; t++) {
+            if (type && type != t) continue;
+            struct addrinfo *ai = malloc(sizeof *ai + sizeof(struct sockaddr_in));
+            if (!ai) { freeaddrinfo(*res); *res = 0; return EAI_MEMORY; }
+            struct sockaddr_in *sin = (struct sockaddr_in *)(ai + 1);
+            memset(ai, 0, sizeof *ai + sizeof *sin);
+            sin->sin_family = AF_INET;
+            sin->sin_port = htons((unsigned short)port);
+            sin->sin_addr.s_addr = addr[i];
+            ai->ai_family = AF_INET;
+            ai->ai_socktype = t;
+            ai->ai_protocol = proto ? proto : t == SOCK_STREAM ? IPPROTO_TCP : IPPROTO_UDP;
+            ai->ai_addrlen = sizeof *sin;
+            ai->ai_addr = (struct sockaddr *)sin;
+            if ((flags & AI_CANONNAME) && !*res && node && !(ai->ai_canonname = strdup(node))) {
+                free(ai);
+                return EAI_MEMORY;
+            }
+            *tail = ai;
+            tail = &ai->ai_next;
+        }
+    return 0;
+}
+void freeaddrinfo(struct addrinfo *ai)
+{
+    while (ai) {
+        struct addrinfo *n = ai->ai_next;
+        free(ai->ai_canonname);
+        free(ai);
+        ai = n;
+    }
+}
+const char *gai_strerror(int e)
+{
+    switch (e) {
+    case 0: return "success";
+    case EAI_BADFLAGS: return "bad value for ai_flags";
+    case EAI_NONAME: return "name or service not known";
+    case EAI_AGAIN: return "temporary failure in name resolution";
+    case EAI_FAIL: return "non-recoverable failure in name resolution";
+    case EAI_FAMILY: return "address family not supported";
+    case EAI_SOCKTYPE: return "socket type not supported";
+    case EAI_SERVICE: return "service not supported for this socket type";
+    case EAI_MEMORY: return "out of memory";
+    case EAI_SYSTEM: return zwhy("system error");
+    }
+    return "unknown error";
 }

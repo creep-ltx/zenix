@@ -238,6 +238,37 @@ int netd_route_default(unsigned long gw)
     return -ENETUNREACH;
 }
 
+int netd_route_get(unsigned long *gw, char name[NETD_IFNAME])
+{
+    struct netif *n = netif_default;
+    struct nif *f;
+    *gw = 0;
+    name[0] = 0;
+    if (!n || !netif_is_up(n)) return 0;
+    *gw = ip4_addr_get_u32(netif_ip4_gw(n));
+    f = nif_of(n);
+    if (f) strncpy(name, f->name, NETD_IFNAME - 1);
+    else if (is_loop(n)) strcpy(name, "lo");
+    return 0;
+}
+
+int netd_if_addr(const char *name, unsigned long addr, unsigned long mask)
+{
+    int i;
+    ip4_addr_t a, m;
+    for (i = 0; i < NETD_IFMAX; i++) {
+        struct nif *f = &nifs[i];
+        if (!f->used || strcmp(f->name, name)) continue;
+        ip4_addr_set_u32(&a, addr);
+        if (mask) ip4_addr_set_u32(&m, mask); else ip4_addr_copy(m, *netif_ip4_netmask(&f->netif));
+        netif_set_addr(&f->netif, &a, &m, netif_ip4_gw(&f->netif));  /* ends the connections on the old address (6.2) */
+        netd_logf("netd: %s: address %u.%u.%u.%u", f->name, ip4_addr1_16(&a), ip4_addr2_16(&a), ip4_addr3_16(&a),
+                  ip4_addr4_16(&a));
+        return 0;
+    }
+    return -ENOENT;
+}
+
 int netd_set_dns(const unsigned long *servers, int n)
 {
     int i;

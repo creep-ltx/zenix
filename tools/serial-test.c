@@ -89,7 +89,7 @@ int main(void)
     kprintf("log line while the port is a program's\n");
     drain_all();
     EXPECT_TRUE(fake_nsent == s0, "while open: no console copy and no kernel log on the wire");
-    EXPECT_TRUE(serdev_write((const u8 *)"h\n", 2) == 2, "a write to the port takes every byte");
+    EXPECT_TRUE(serdev_write((const u8 *)"h\n", 2, 0) == 2, "a write to the port takes every byte");
     drain_all();
     EXPECT_TRUE(fake_nsent == s0 + 2 && fake_sent[s0] == 'h' && fake_sent[s0 + 1] == '\n',
                 "the program's bytes go out as they are (no CR added)");
@@ -108,20 +108,35 @@ int main(void)
     memset(big, 'z', sizeof big);
     fake_wire_period = 3;                                 /* slower than the writer: the ring fills */
     s0 = fake_nsent; sleeps = 0;
-    EXPECT_TRUE(serdev_write(big, sizeof big) == (long)sizeof big, "a slow port: a 10000-byte write takes them all");
+    EXPECT_TRUE(serdev_write(big, sizeof big, 0) == (long)sizeof big, "a slow port: a 10000-byte write takes them all");
     drain_all();
     EXPECT_TRUE(fake_nsent == s0 + sizeof big, "... every byte reached the wire");
     fake_wire_period = 0; fake_tbe = 0;                   /* Paula takes nothing any more */
     u32 t0k = ticks; sleeps = 0;
-    long w1 = serdev_write(big, sizeof big);
+    long w1 = serdev_write(big, sizeof big, 0);
     EXPECT_TRUE(w1 == 4095, "a stuck port: the write returns what fitted the ring (4095)");
     EXPECT_TRUE(ticks - t0k >= 200 && ticks - t0k <= 202 && sleeps >= 200, "... after waiting 2 s, a tick at a time");
     t0k = ticks;
-    EXPECT_TRUE(serdev_write(big, 10) == -EIO && ticks - t0k >= 200, "... the next write fails with -EIO after 2 s");
+    EXPECT_TRUE(serdev_write(big, 10, 0) == -EIO && ticks - t0k >= 200, "... the next write fails with -EIO after 2 s");
     me.killed = 1; t0k = ticks;
-    EXPECT_TRUE(serdev_write(big, 10) == -EINTR && ticks == t0k, "a kill ends the wait at once (-EINTR)");
+    EXPECT_TRUE(serdev_write(big, 10, 0) == -EINTR && ticks == t0k, "a kill ends the wait at once (-EINTR)");
     me.killed = 0;
+    /* 5b. DESIGN D19 5.3: netd's writes (O_NONBLOCK) never wait, and poll says truthfully when there is room */
+    t0k = ticks; sleeps = 0;
+    EXPECT_TRUE(serdev_write(big, 10, 1) == -EAGAIN && ticks == t0k && !sleeps, "O_NONBLOCK, the ring full: -EAGAIN at once");
+    EXPECT_TRUE(!(serdev_poll() & POLLOUT), "... and poll says not writable");
+    kwork_pending = 0; woken = 0;
     fake_tbe = 1; drain_all();
+    EXPECT_TRUE(kwork_pending, "the drain that makes room asks kwork");
+    serial_work();
+    EXPECT_TRUE(woken, "... which wakes the writer");
+    EXPECT_TRUE(serdev_poll() & POLLOUT, "an empty ring: writable");
+    fake_wire_period = 0; fake_tbe = 0;                   /* stuck again: a big write fills the ring */
+    s0 = fake_nsent;
+    long nb = serdev_write(big, sizeof big, 1);
+    EXPECT_TRUE(nb == 4095 && ticks == t0k && !sleeps, "O_NONBLOCK: a big write takes what fits (4095) and never waits");
+    fake_tbe = 1; drain_all();
+    EXPECT_TRUE(fake_nsent == s0 + 4095, "... and those bytes go out");
 
     /* 6. a panic while the port is a program's (audit A10): panic_begin (main.c) takes the port back first */
     serdev_close();                                       /* what panic_begin does */

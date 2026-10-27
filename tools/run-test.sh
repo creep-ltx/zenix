@@ -36,9 +36,14 @@ while :; do
 done
 while awk '{ exit !($1 > 16) }' /proc/loadavg; do sleep 30; done       # the machine is busy: wait, holding the slot
 
-python3 "$(dirname "$0")/serial-tap.py" "$SERIAL" "$LOG" $SCRIPT >"$DIR/tap.out" 2>&1 9>&- &
-TAP=$!
-sleep 1
+# ZENIX_NOTAP=1: the caller has put something else on the serial port already (tools/slip-test.sh: zenix-slirp, whose
+# log holds the console's bytes); the run ends at the timeout or when the caller leaves <serial port>.stop
+TAP=
+if [ -z "$ZENIX_NOTAP" ]; then
+    python3 "$(dirname "$0")/serial-tap.py" "$SERIAL" "$LOG" $SCRIPT >"$DIR/tap.out" 2>&1 9>&- &
+    TAP=$!
+    sleep 1
+fi
 # Render offscreen: no window to steal focus (or get closed mid-test).
 # Override with SDL_VIDEODRIVER=wayland when a visible window is wanted
 # (e.g. for grim screenshots).
@@ -53,10 +58,9 @@ while kill -0 $EMU 2>/dev/null; do
 done
 wait $EMU 2>/dev/null || true
 rm -f "$SERIAL.stop"
-kill $TAP 2>/dev/null || true
-wait $TAP 2>/dev/null || true          # the tap says whether the run ended during a wait before it exits
+if [ -n "$TAP" ]; then kill $TAP 2>/dev/null || true; wait $TAP 2>/dev/null || true; fi   # the tap says whether the run ended during a wait
 echo "=== serial output ($CONF, ${SECS}s):"
-tr -d '\r' < "$LOG" | sed 's/\x1b\[[0-9;:]*m//g'                         # colour codes (DESIGN D14) are not text
+if [ -f "$LOG" ]; then tr -d '\r' < "$LOG" | sed 's/\x1b\[[0-9;:]*m//g'; fi   # colour codes (DESIGN D14) are not text
 # A script's `wait` that timed out, or that was still waiting when the run ended, is a failure (audit 2026-10-26 F7):
 # the tap's "FAIL: serial-tap: ..." lines go here, at the end of the output, and this script exits 3. With
 # ZENIX_TIMEOUTS set (make check) the tap also adds them to that file, and check.sh fails the test whatever the test

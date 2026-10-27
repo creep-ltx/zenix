@@ -1,0 +1,52 @@
+NETSTAT(1)		Zenix manual
+
+NAME
+    netstat - show the network's connections and listening sockets
+
+SYNOPSIS
+    netstat [-tuwlan]
+
+DESCRIPTION
+    Lists the TCP connections, UDP sockets and ICMP echo sockets of the
+    network server, netd(8), one line each, with Linux's columns:
+
+    Proto           tcp, udp or icmp (ping's sockets)
+    Recv-Q          bytes received and not yet read by the program
+    Send-Q          bytes sent and not yet acknowledged by the other end
+    Local Address   address:port (for icmp the echo id in the port's
+                    place); 0.0.0.0 is every address of the machine
+    Foreign Address the other end; *:  for none
+    State           TCP's state: LISTEN, SYN_SENT, SYN_RECV,
+                    ESTABLISHED, FIN_WAIT1, FIN_WAIT2, CLOSE_WAIT,
+                    CLOSING, LAST_ACK, TIME_WAIT, CLOSED
+    User            the socket's owner (root for a connection that no
+                    program holds any more, such as one in TIME_WAIT)
+
+    Without -l or -a, the connections only; listening TCP sockets and
+    UDP sockets with no other end are servers.
+
+OPTIONS
+    -t    TCP only (with -u or -w: those too)
+    -u    UDP only
+    -w    ICMP echo sockets only
+    -l    servers only
+    -a    servers and connections
+    -n    accepted: addresses are always shown as numbers
+
+EXAMPLES
+    netstat -tl         what listens for TCP connections
+    netstat -a          everything
+
+EXIT STATUS
+    0, or 1 if the network server cannot be reached, 2 for a wrong
+    option.
+
+NOTES
+    netstat asks netd through a socket, so it starts the network server
+    if it is not running yet (any socket call does: DESIGN D19). At
+    most 64 lines are shown; netstat says so when there are more. There
+    are no routing tables (-r), no interface counters (-i) and no
+    program names (-p).
+
+SEE ALSO
+    netd(8), nettest(1)

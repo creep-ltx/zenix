@@ -398,6 +398,8 @@ long sock_sys(u32 opw, u32 fd, u32 ureq)
         if (f->type != FT_SOCK || f->ino >= NSOCK)
             return -ENOTSOCK;
     }
+    if (op == SOCK_IOCTL && q.r.option == FIONBIO && !q.r.val)
+        return (f->flags & O_NONBLOCK) != 0;    /* asks (libz's fcntl F_GETFL): an error before step 4 */
     u8 d = dirs[op];
     if (d & (D_ADDRR | D_ADDRW)) {
         if (q.r.addr || q.r.alen) {

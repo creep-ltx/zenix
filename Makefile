@@ -47,7 +47,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest
+          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -72,7 +72,7 @@ ULDFLAGS := -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-se
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # servers that live on the disk as files (DESIGN D19 step 1), installed as /sbin/NAME on every full root image and in
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4). Not commands: no page.
-SBINAPPS := zfsd
+SBINAPPS := zfsd netd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
@@ -266,7 +266,7 @@ $(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(
 	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 # programs that look up users and groups (/etc/passwd, /etc/group), and those that also check passwords
-PWAPPS := ls id whoami chown renice useradd userdel gpasswd
+PWAPPS := ls id whoami chown renice useradd userdel gpasswd netstat
 AUTHAPPS := login su sudo passwd sha256sum
 $(PWAPPS:%=$(BUILD)/%.uelf): $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/pw.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
@@ -328,6 +328,42 @@ $(BUILD)/fsck_zenixfs.uelf: $(BUILD)/fsck_zenixfs.uo $(ZENIXFS_OBJS) $(BUILD)/cr
 $(BUILD)/mkfs_zenixfs.zx $(BUILD)/fsck_zenixfs.zx: %.zx: %.uelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ 32768
+
+# ---- netd (DESIGN D19 step 4, docs/man/netd.txt): the network server, /sbin/netd, loaded from the disk the first time
+# a program opens a socket. lwIP 2.2.1 (net/lwip, BSD-3: its notice ships as /usr/share/licenses/lwIP), its port
+# (net/port: lwipopts.h, the random numbers, the checksum and the copy in 68020 assembler) and netd's core and main
+# program (net/netd). Cold code at -Os; SLIP's byte loop (slipif.c, iface.c) at -O2 (the golden path). ----
+LWIPSRC := net/lwip/src
+LWIP_CORE := def dns inet_chksum init ip mem memp netif pbuf raw stats sys tcp tcp_in tcp_out timeouts udp
+LWIP_IPV4 := dhcp etharp icmp ip4 ip4_addr ip4_frag
+NETDOBJS := $(LWIP_CORE:%=$(BUILD)/lw-%.no) $(LWIP_IPV4:%=$(BUILD)/lw-%.no) $(BUILD)/lw-ethernet.no $(BUILD)/lw-slipif.no \
+            $(BUILD)/np-port.no $(BUILD)/np-rand.no $(BUILD)/np-m68k.no \
+            $(BUILD)/nd-core.no $(BUILD)/nd-sock.no $(BUILD)/nd-iface.no $(BUILD)/nd-config.no $(BUILD)/nd-main.no
+NETCFLAGS := $(UCFLAGS) -Os -Inet/port/shim -Inet/port -I$(LWIPSRC)/include -Wno-unused-parameter -Wno-sign-compare \
+             -Wno-implicit-fallthrough
+NETHDRS := $(wildcard net/port/*.h net/port/arch/*.h net/netd/*.h) kernel/netproto.h user/libz.h user/usys.h
+NOPT_slipif := -O2
+NOPT_iface := -O2
+$(BUILD)/lw-%.no: $(LWIPSRC)/core/%.c $(NETHDRS) | $(BUILD)
+	$(CC) $(NETCFLAGS) $(NOPT_$*) -c $< -o $@
+$(BUILD)/lw-%.no: $(LWIPSRC)/core/ipv4/%.c $(NETHDRS) | $(BUILD)
+	$(CC) $(NETCFLAGS) $(NOPT_$*) -c $< -o $@
+$(BUILD)/lw-%.no: $(LWIPSRC)/netif/%.c $(NETHDRS) | $(BUILD)
+	$(CC) $(NETCFLAGS) $(NOPT_$*) -c $< -o $@
+$(BUILD)/np-%.no: net/port/%.c $(NETHDRS) | $(BUILD)
+	$(CC) $(NETCFLAGS) $(NOPT_$*) -c $< -o $@
+$(BUILD)/np-m68k.no: net/port/m68k.S | $(BUILD)
+	$(CC) $(ASFLAGS) $< -o $@
+$(BUILD)/nd-%.no: net/netd/%.c $(NETHDRS) | $(BUILD)
+	$(CC) $(NETCFLAGS) $(NOPT_$*) -c $< -o $@
+$(BUILD)/netd.uelf: $(NETDOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(NETDOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+# nettest checks netd's assembler against C (nettest asm)
+$(BUILD)/nettest.uelf: $(BUILD)/nettest.uo $(BUILD)/np-m68k.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/nettest.uo $(BUILD)/np-m68k.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/nettest.uo $(BUILD)/netstat.uo $(BUILD)/ifconfig.uo $(BUILD)/route.uo $(BUILD)/ping.uo: user/socket.h kernel/netproto.h
+# netd's stack: lwIP's deepest chain (a segment in, its answer out) and the log's formatting (D19 7.3: 8 KB)
+STACK_netd := 8192
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)

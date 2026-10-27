@@ -742,6 +742,8 @@ long vfs_read(struct file *f, void *buf, u32 n)
             u32 got = serdev_take(buf, n);
             if (got)
                 return (long)got;
+            if (f->flags & O_NONBLOCK)
+                return -EAGAIN;             /* netd (D19 5.3) */
             long e = ev_block(EV_IO, 0, 0, 1);
             if (e)
                 return e;
@@ -779,7 +781,7 @@ long vfs_write(struct file *f, const void *buf, u32 n)
     case FT_PIPE_W:
         return pipe_write(f, buf, n);
     case FT_SERIAL:
-        return serdev_write(buf, n);
+        return serdev_write(buf, n, (f->flags & O_NONBLOCK) != 0);
     case FT_KLOG:
         klog_write(buf, n);                 /* a service's output: in dmesg, not on a console */
         return (long)n;

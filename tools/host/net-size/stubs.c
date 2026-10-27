@@ -14,6 +14,8 @@ char *strcat(char *d, const char *s) { (void)s; return d; }
 char *strchr(const char *s, int c) { (void)c; return (char *)s; }
 void *malloc(u32 n) { (void)n; return 0; }
 void free(void *p) { (void)p; }
+void *netd_heap_alloc(unsigned long n) { (void)n; return 0; }
+void netd_heap_free(void *p) { (void)p; }
 int vsnprintf(char *buf, u32 max, const char *fmt, va_list ap) { (void)buf; (void)max; (void)fmt; (void)ap; return 0; }
 int netd_os_serial_open(const char *dev, unsigned long baud) { (void)dev; (void)baud; return 0; }
 long netd_os_read(int h, void *buf, unsigned long n) { (void)h; (void)buf; (void)n; return 0; }

@@ -1,8 +1,8 @@
 # Command reference
 
-Zenix has 119 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 124 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
-`more`, `pkill`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
+`more`, `pkill`, `ifup`, `ifdown`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
 root disk gets them in `/usr/man` (below). `man -k` reads the line after `NAME` ("name - summary").
 
@@ -60,16 +60,26 @@ spot-checked against the code that day.
 | [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
 | [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd or zfsd) |
 
+## The network
+| Command | Summary |
+|---|---|
+| [ifconfig](man/ifconfig.txt) ([ifup](man/ifup.txt), [ifdown](man/ifdown.txt)) | the network's interfaces: show them, bring them up and down, an address; `/etc/network/interfaces` |
+| [route](man/route.txt) | show the routes, set or remove the default gateway |
+| [ping](man/ping.txt) | ICMP echo, no root needed |
+| [netstat](man/netstat.txt) | the network's connections and listening sockets (`-tuwla`) |
+| [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
+
 ## Internals and test programs
 [init](man/init.txt), [boot](man/boot.txt), [diskd](man/diskd.txt) (the built-in start-up programs);
 [hello](man/hello.txt), [spin](man/spin.txt), [crash](man/crash.txt), [badptr](man/badptr.txt),
 [msgping](man/msgping.txt), [msgpingd](man/msgpingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt),
 [priotest](man/priotest.txt), [svctest](man/svctest.txt), [sigtest](man/sigtest.txt),
-[socktest](man/socktest.txt), [socktestd](man/socktestd.txt) (the socket layer and its test server, DESIGN D19).
+[socktest](man/socktest.txt), [socktestd](man/socktestd.txt) (the socket layer and its test server, DESIGN D19),
+[nettest](man/nettest.txt) (the network over the loopback, D19).
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 119 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 124 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

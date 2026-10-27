@@ -42,10 +42,21 @@ int serial_tx_pending(void)
     return txtail != txhead;
 }
 
+/* /dev/ttyS0's POLLOUT (DESIGN D19 5.3): writable when this much of the send ring is free. A poll that found less
+ * leaves serdev_full; the drain that makes the room asks serial_work (kwork) to wake the waiters */
+#define SERDEV_ROOM 1024u
+static volatile u8 serdev_full, serdev_roomy;
+static u32 tx_room(void) { return (u32)((txtail - txhead - 1) & 4095); }
+
 void serial_tx_drain(void)
 {
     u16 s = irq_save();
     tx_drain_locked();
+    if (serdev_full && tx_room() >= SERDEV_ROOM) {
+        serdev_full = 0;
+        serdev_roomy = 1;
+        kwork_pending = 1;
+    }
     irq_restore(s);
 }
 
@@ -149,9 +160,12 @@ void serial_work(void)
 {
     static int hot;
     int rxq_took = 0;
-    if (serdev) {                       /* the bytes wait in the ring for serdev_read; wake its reader */
-        if (rxq_tail != rxq_head)
+    if (serdev) {                       /* the bytes wait in the ring for serdev_read; wake its reader (and a writer
+                                         * waiting for room, D19 5.3) */
+        if (rxq_tail != rxq_head || serdev_roomy) {
+            serdev_roomy = 0;
             ev_wake(&serdev_wait);
+        }
         u32 lost = rxq_lost;
         if (lost != rxq_lost_told) {
             kprintf("serial: %u bytes lost (input ring full)\n", lost - rxq_lost_told);
@@ -228,11 +242,19 @@ void serdev_close(void)
 
 u32 serdev_wait;                        /* D16: the slots waiting for received bytes (event.c) */
 
-/* poll (D16): POLLIN when bytes wait; always writable (the tick empties the send ring: rule 11) */
+/* poll (D16): POLLIN when bytes wait; POLLOUT when the send ring has SERDEV_ROOM free (DESIGN D19 5.3: a truthful
+ * POLLOUT for this device, so netd's writes never wait; before D19 it was always writable) */
 u16 serdev_poll(void)
 {
     ev_arm(&serdev_wait);
-    return (u16)(POLLOUT | (rxq_tail != rxq_head ? POLLIN : 0));
+    u16 b = rxq_tail != rxq_head ? POLLIN : 0;
+    u16 s = irq_save();
+    if (tx_room() >= SERDEV_ROOM)
+        b |= POLLOUT;
+    else
+        serdev_full = 1;
+    irq_restore(s);
+    return b;
 }
 
 u32 serdev_take(u8 *buf, u32 n)
@@ -250,7 +272,7 @@ u32 serdev_take(u8 *buf, u32 n)
  * ring), never spinning with the machine stopped (audit A5); a kill ends the wait, and so do 2 s in which the port
  * took nothing (Paula wedged: logged): what was written so far, or -EINTR / -EIO if nothing */
 #define SERDEV_STALL 200u
-__attribute__((optimize("Os"))) long serdev_write(const u8 *buf, u32 n)
+__attribute__((optimize("Os"))) long serdev_write(const u8 *buf, u32 n, int nonblock)
 {
     u32 i = 0, since = ticks;
     while (i < n) {
@@ -265,6 +287,8 @@ __attribute__((optimize("Os"))) long serdev_write(const u8 *buf, u32 n)
         irq_restore(s);
         if (i == n)
             break;
+        if (nonblock)                           /* O_NONBLOCK (netd, D19 5.3): what fitted, never a wait */
+            return i ? (long)i : -EAGAIN;
         if (i != i0)
             since = ticks;                      /* progress: the 2 s count again */
         if (current->killed || SIG_DUE(current)) {     /* a kill, or a handler (D16): what was written so far */

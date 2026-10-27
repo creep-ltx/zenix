@@ -59,8 +59,8 @@ pointers.
   world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
-- A graphical programs API, a mouse pointer (the mouse is only read, `input`; untested), sound beyond the bell, network,
-  USB, RTG. The floppy driver is experimental: DD disks only (an HD drive or disk is not recognised), no drive-type
+- A graphical programs API, a mouse pointer (the mouse is only read, `input`; untested), sound beyond the bell, a
+  network card (the network runs over the loopback and SLIP; drivers from D19 step 7), DHCP (step 6), USB, RTG. The floppy driver is experimental: DD disks only (an HD drive or disk is not recognised), no drive-type
   ID, never run on a real drive or a Gotek.
 - Display server (the terminal and the consoles are inside the kernel; workspaces and a bar come with the desktop),
   index server for `locate`/`fzf`.
@@ -147,7 +147,21 @@ pointers.
   (-ENFILE beyond); each is also one of the 64 open files and one of a process's 16 fds; a buffer is checked and
   sent at most 64 KB a message (a blocking stream send loops, a datagram over 64 KB is -EMSGSIZE); an address at most
   28 bytes (the true length is still returned), an option's value at most 64; `SO_RCVTIMEO`/`SO_SNDTIMEO` in ticks
-  (10 ms). No network server yet (D19 step 4): without `net` registered every socket call is -ENETDOWN.
+  (10 ms). Without `net` registered (no `/sbin/netd`) every socket call is -ENETDOWN.
+- The network server, netd (DESIGN D19 step 4, man/netd.txt): IPv4 only, no raw IP sockets, no firewall; its buffers
+  are fixed at its start by the machine: below 2 MB of free fast RAM (the stock A1200) 8 TCP connection ends (a
+  loopback connection takes two; TIME_WAIT ones are given up first when full), 4 listening sockets, 8 UDP and ICMP
+  sockets, a 1,932-byte window, a 4 KB send buffer each, 8 datagrams or 4 KB queued per UDP socket, 24 KB of buffers
+  in all; with more, 32 ends, 8 listeners, 16 UDP sockets, 16 KB windows and send buffers, 200 KB in all. A socket
+  over a limit is refused at once (-ENOBUFS). At most 8 requests a turn; `/etc/hosts` at most 64 names and 16 KB (so
+  `/etc/resolv.conf`), 2 name servers; a lookup answers at most 4 addresses; `netstat` shows at most 64 rows.
+  `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL).
+- SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
+  MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the
+  wire). The kernel's receive ring is 1 KB (89 ms of SLIP): when netd cannot read for longer (a busy program at its
+  level) bytes are lost and counted in `dmesg`, and TCP sends them again. At most 4 interfaces with the loopback;
+  `/etc/network/interfaces` holds at most 4 stanzas (the rest reported); only the default route can be set
+  (`route`); `ping` sends at most 1,400 data bytes, at most 5 a second for users.
 - Random numbers (DESIGN D19 9.3, architecture.md section 3): a read or write of `/dev/random` or `/dev/urandom` moves
   at most 4,096 bytes (a short count, as Linux); `/dev/random` waits for 256 credited bits (on a fresh machine that
   is 256 key presses and releases, or the seed file at the next start); a sample ring of 32 entries (a full one drops

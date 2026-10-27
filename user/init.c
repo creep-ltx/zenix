@@ -61,6 +61,24 @@ static void console_setup(void)
     oflush();
 }
 
+/* /etc/network/interfaces has an "auto" line (its first word is auto): read in small pieces, init lives for ever */
+static int auto_iface(void)
+{
+    char b[128];
+    int fd = sys_open("/etc/network/interfaces", O_RDONLY), n, k = 0;   /* k: letters of "auto" seen, -1: not this line */
+    if (fd < 0) return 0;
+    while ((n = sys_read(fd, b, sizeof b)) > 0)
+        for (int i = 0; i < n; i++) {
+            char c = b[i];
+            if (c == '\n') k = 0;
+            else if (k == 4 && (c == ' ' || c == '\t')) { sys_close(fd); return 1; }
+            else if (k >= 0 && k < 4 && c == "auto"[k]) k++;
+            else if (!(k == 0 && (c == ' ' || c == '\t'))) k = -1;
+        }
+    sys_close(fd);
+    return 0;
+}
+
 int main(void)
 {
     console_setup();
@@ -76,6 +94,10 @@ int main(void)
         char *ma[] = { "/bin/mount", "-a", 0 };
         int mp = sys_spawn("/bin/mount", ma, 0);
         if (mp >= 0) sys_wait(mp);
+    }
+    if (auto_iface()) {                                 /* the network (DESIGN D19 6.3): started, never waited for */
+        char *ia[] = { "/bin/ifup", "-a", 0 };
+        sys_spawn("/bin/ifup", ia, 0);
     }
     sys_setfg(0);
     int again = 0;

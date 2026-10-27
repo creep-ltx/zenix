@@ -1,0 +1,87 @@
+IFCONFIG(8)		Zenix manual
+
+NAME
+    ifconfig, ifup, ifdown - the network's interfaces
+
+SYNOPSIS
+    ifconfig [-a]
+    ifconfig IFACE
+    ifconfig IFACE [ADDRESS[/PREFIX]] [netmask MASK] [up | down]
+    ifup -a | IFACE...
+    ifdown -a | IFACE...
+
+DESCRIPTION
+    The network server, netd(8), has the loopback lo (127.0.0.1) and the
+    interfaces /etc/network/interfaces describes; today that is SLIP on
+    the serial port (the cable to a PC: docs/network-serial.md). ifconfig
+    shows them; root changes them. ifup and ifdown are other names of the
+    same program.
+
+    ifconfig            every interface: its flags (UP, RUNNING, LOOPBACK
+                        or POINTOPOINT, DEFAULT when the default route
+                        leaves through it), MTU, address, netmask,
+                        gateway, frames and bytes received and sent, bad
+                        frames and dropped ones; then the name servers
+    ifconfig IFACE      that one
+    ifconfig IFACE up   brings it up as its stanza in the file says (as
+                        ifup IFACE)
+    ifconfig IFACE down takes it down (as ifdown IFACE)
+    ifconfig IFACE 10.0.2.16/24
+                        a new address (and netmask) on an interface that
+                        is up, until netd starts again; connections on
+                        the old address end
+    ifup -a             brings up every interface with an "auto" line
+                        (init(8) does this at boot, without waiting)
+    ifdown -a           takes down every interface but the loopback
+
+    ifup reads /etc/network/interfaces, /etc/resolv.conf and /etc/hosts
+    again first. It returns as soon as the interface is configured.
+
+/ETC/NETWORK/INTERFACES
+    A small part of Debian's format; netd uses it only if root owns it
+    and nobody else may write it (it starts programs as root from it).
+    # starts a comment. A word netd does not know is reported in the
+    kernel log (dmesg) and ignored.
+
+    auto IFACE          bring IFACE up at boot (and with ifup -a)
+    iface IFACE inet static
+                        a stanza: the lines after it, indented, belong
+                        to it
+        driver slip DEVICE [BAUD]
+                        SLIP on a serial device: /dev/ttyS0, at 115200
+                        (the only speed of Zenix's serial port)
+        address A/PREFIX    the address and the size of the net
+        gateway G       the default route
+        pointopoint P   the far end, when it is not on the net
+        mtu N           at most 1006 on SLIP
+        hostname H      the machine's name (sent with DHCP later)
+
+    The SLIP example (the PC runs zenix-slirp):
+
+        auto sl0
+        iface sl0 inet static
+            driver slip /dev/ttyS0 115200
+            address 10.0.2.15/24
+            gateway 10.0.2.2
+
+    With /etc/resolv.conf holding "nameserver 10.0.2.3", names are
+    looked up through the PC too.
+
+EXIT STATUS
+    0 if everything asked was done; 1 if something was not (said on
+    standard error: not root, no such stanza, already up, ...); 2 for
+    wrong arguments.
+
+NOTES
+    While SLIP is up, the serial port is the network's: no cu(1), and
+    the kernel's log stays in dmesg instead of going out on the cable;
+    ifdown gives the port back. Only SLIP and the loopback exist today:
+    a stanza with another driver says "its driver is not there yet", and
+    "inet dhcp" is for those later drivers (SLIP has no DHCP). If the
+    network server was given up (five crashes in a minute), root's ifup
+    or ifconfig ... up registers it again and says so. No MAC address,
+    no aliases, no IPv6; ifconfig cannot change the MTU of a running
+    interface.
+
+SEE ALSO
+    netd(8), route(8), ping(1), netstat(1), init(8)

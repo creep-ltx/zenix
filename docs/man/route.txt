@@ -1,0 +1,41 @@
+ROUTE(8)		Zenix manual
+
+NAME
+    route - show or change the network's routes
+
+SYNOPSIS
+    route [-n]
+    route add default [gw] GATEWAY
+    route del default
+
+DESCRIPTION
+    The network server, netd(8), sends a packet to its own net through
+    the interface that is on it, and everything else to the default
+    gateway. route shows that table, Linux style:
+
+        Destination     Gateway         Genmask         Flags Iface
+        0.0.0.0         10.0.2.2        0.0.0.0         UG    sl0
+        10.0.2.0        0.0.0.0         255.255.255.0   U     sl0
+        127.0.0.0       0.0.0.0         255.0.0.0       U     lo
+
+    Flags: U the route is up, G it goes through a gateway.
+
+    route add default GATEWAY (root) makes GATEWAY the default route, on
+    the interface whose net holds it (on SLIP, the far end may be outside
+    the net: the SLIP interface then); route del default (root) removes
+    it. The change lasts until netd starts again or the interface comes
+    up again; the lasting one is the "gateway" line of
+    /etc/network/interfaces (ifconfig(8)).
+
+OPTIONS
+    -n    accepted: addresses are always shown as numbers
+
+EXIT STATUS
+    0, 1 if it could not be done (said), 2 for wrong arguments.
+
+NOTES
+    Only the default route can be changed: no routes to other nets, no
+    metrics, no "reject" routes.
+
+SEE ALSO
+    ifconfig(8), netd(8), ping(1)

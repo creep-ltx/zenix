@@ -1,0 +1,2 @@
+# /etc/hosts: addresses and names, looked up before DNS (netd reads it at its start: hosts(5))
+127.0.0.1	localhost

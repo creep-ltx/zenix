@@ -1,0 +1,63 @@
+NETTEST(1)		Zenix manual
+
+NAME
+    nettest - test the network over the loopback
+
+SYNOPSIS
+    nettest CHECK...
+    nettest serve tcp|udp PORT echo|sink
+
+DESCRIPTION
+    A test program for the network server, netd(8), and libz's BSD
+    socket calls (DESIGN D19 step 4). Each check starts the servers it
+    needs (nettest itself, as "nettest serve ...") on 127.0.0.1 and
+    prints "nettest CHECK: PASS (...)" or "nettest CHECK: FAIL (...)"
+    with what it saw:
+
+    tcp       100 KB echoed in 1,000-byte pieces, the same bytes back;
+              getpeername and getsockname; 65,000 bytes in one blocking
+              send to a server that counts and sums them, shutdown, the
+              count and sum back, then the end of the stream
+    udp       datagrams of 1 to 1,400 bytes echoed whole, from the
+              server's address; a datagram longer than the buffer is
+              cut and the rest dropped
+    poll      poll waits its time when there is nothing to read, says
+              writable at once, wakes on the echo; FIONREAD; select
+    nonblock  fcntl F_GETFL and F_SETFL O_NONBLOCK; accept and recv
+              then say "try again"; a non-blocking connect, POLLOUT and
+              SO_ERROR; accept4 with SOCK_NONBLOCK; on a terminal
+              F_SETFL O_NONBLOCK is refused (not yet)
+    names     inet_pton, inet_ntop, inet_aton, inet_addr, inet_ntoa;
+              getaddrinfo with a number and a service name, "localhost"
+              from /etc/hosts, an unknown name, AI_NUMERICHOST
+    many      connections until netd's limit (12 at most; the small
+              profile allows 4 over the loopback, each takes two TCP
+              ends): the next is refused at once ("no buffer space"),
+              and every one made works
+    perm      root may bind port 80, a user may not, nor change the
+              interfaces or the routes; SOCK_RAW is refused
+    down      netd killed while a child waits in recv: the child gets
+              ENETDOWN at once; the next socket starts a new netd that
+              serves a new connection
+    asm       netd's checksum and copy in assembler against C, for
+              every alignment and many lengths, and their speed in this
+              machine's E-clock counts (an emulator's counts are not a
+              real Amiga's speed)
+    hang      prints "hang: waiting" and waits in accept (for ^C)
+    listen    a listener on port 7010 with one connection to it and a
+              UDP socket on 127.0.0.1:7011, kept for 30 seconds (for
+              netstat)
+    slip      through SLIP to the PC's test servers (tools/slip-test.sh,
+              on 10.0.2.2): 10 KB echoed by TCP port 7100, 100 KB from
+              port 7102 checked byte by byte, datagrams echoed by UDP
+              port 7101, amiga.zenix.test looked up through 10.0.2.3
+
+EXIT STATUS
+    The number of checks that failed.
+
+NOTES
+    A test program, run by tools/netd-test.sh and tools/slip-test.sh in
+    the emulator. The ports 7001-7011 must be free.
+
+SEE ALSO
+    netd(8), netstat(1), socktest(1)

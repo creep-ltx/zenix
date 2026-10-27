@@ -15,10 +15,16 @@ cp -r "$HERE/../rootfs/." "$T/"
 mkdir -p "$T/bin" "$T/tmp" "$T/home/user" "$T/home/guest"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
-    dir=bin; [ "$p" = zfsd ] && { dir=sbin; mkdir -p "$T/sbin"; }     # the ZenixFS server for mounts (DESIGN D19)
+    dir=bin; case $p in zup|zfsd|netd) dir=sbin; mkdir -p "$T/sbin";; esac   # the updater, the servers (DESIGN D19)
     cp "$B/$p.zx" "$T/$dir/$name"
     chmod 755 "$T/$dir/$name"
 done
+# the notices the licences of lwIP (BSD-3, in netd) and miniz (MIT, in gzip and zup) ask to travel with the programs
+# (owner decision, DESIGN D19 2026-10-27): on every image that carries one of those programs; the base package
+# carries them too (tools/mkzup.py)
+lic() { mkdir -p "$T/usr/share/licenses"; cp "$HERE/../$1" "$T/usr/share/licenses/$2"; }
+case " $PROGS " in *" netd "*) lic net/lwip/COPYING lwIP;; esac
+case " $PROGS " in *" gzip "*|*" zup "*) lic user/miniz/LICENSE miniz;; esac
 if [ -z "$NOMAN" ]; then
     mkdir -p "$T/usr/man"
     cp "$HERE/../docs/man/"*.txt "$T/usr/man/"
@@ -32,6 +38,7 @@ if [ -e "$T/var/lib/random-seed" ]; then echo "mkroot-zenixfs.sh: refusing to pu
 for d in $MOUNTDIRS; do mkdir -p "$T/$d"; done
 ln -s less "$T/bin/more"
 ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"
+ln -s ifconfig "$T/bin/ifup"; ln -s ifconfig "$T/bin/ifdown"
 # modes (the tool keeps the modes of the host files; everything is owned by root unless set below)
 chmod 1777 "$T/tmp"
 chmod 4755 "$T/bin/su" "$T/bin/passwd"

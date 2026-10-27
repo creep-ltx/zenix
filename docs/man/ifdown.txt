@@ -1,0 +1,11 @@
+IFDOWN(8)		Zenix manual
+
+NAME
+    ifdown - take network interfaces down
+
+DESCRIPTION
+    Another name for ifconfig(8) (a link to it): ifdown -a, ifdown IFACE.
+    See ifconfig(8).
+
+SEE ALSO
+    ifconfig(8)
