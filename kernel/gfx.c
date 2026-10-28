@@ -368,11 +368,26 @@ static HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
 }
 
 static u8 *line_at(int l) { return tbuf + (u32)l * lstride; }
+/* gfx_cell's addresses without a multiply (the 68020's muls.l costs up to 44 cycles, and gcc turns shift-and-add back
+ * into one): `top` is the drawing window's first line, `rowoff` each text row's byte offset from it (DESIGN D28 15) */
+static u8 *top;
+static u32 rowoff[TROWS_MAX];
+static void set_off(int o)              /* the drawing window moves (off), or tbuf/lstride changed */
+{
+    off = o;
+    top = line_at(o);
+}
+static void set_rows(void)              /* lstride changed: each text row is 8 lines */
+{
+    u32 a = 0;
+    for (int r = 0; r < TROWS_MAX; r++, a += 8 * lstride)
+        rowoff[r] = a;
+}
 
 HOT void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour)
 {
     if (up)
-        put_glyph(line_at(off + row * 8) + col, ch, attr, colour);
+        put_glyph(top + rowoff[row] + col, ch, attr, colour);
 }
 
 /* rows [row, row + n) of the screen take the background colour of `colour` */
@@ -432,10 +447,10 @@ void gfx_scroll(u8 colour)
     if (!up)
         return;
     if (off + 8 + dlines <= BUFL) {
-        off += 8;
+        set_off(off + 8);
     } else {                            /* end of buffer: copy rows 1.. back to the top */
         blit_copy(line_at(off + 8), tbuf, (u32)(trows - 1) * 8 * (u32)gfx_depth);
-        off = 0;
+        set_off(0);
     }
     blit_fill(line_at(off + (trows - 1) * 8), 8, bg_of(colour));
     blit_wait();
@@ -445,7 +460,7 @@ void gfx_clear_text(u8 colour)
 {
     if (!up)
         return;
-    off = 0;
+    set_off(0);
     blit_fill(tbuf, (u32)dlines, bg_of(colour));
     blit_wait();
 }
@@ -630,7 +645,8 @@ int gfx_init(void)
     }
     say_depth();
     build_cop(cop, gfx_depth, &cop_col, &cop_ptr);
-    off = 0;
+    set_rows();
+    set_off(0);
     cop_point(0);
     hw_off = 0;
     memset(tbuf, 0, (u32)BUFL * lstride);
@@ -697,7 +713,8 @@ int gfx_set_colours(int colours)
     rglyph = rg;
     cop_col = col;
     cop_ptr = ptr;
-    off = 0;
+    set_rows();
+    set_off(0);
     cop_point(0);
     hw_off = 0;
     COP1LCH = (u16)((u32)nc >> 16);
@@ -734,6 +751,7 @@ void gfx_panic(void)
     if (!up)
         return;
     sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable) */
+    top = line_at(off);                 /* a fault inside set_off may have left top behind off */
     cop_point(off);
     cop[cop_col + 1] = 0x800;
     for (int i = 1; i < (1 << gfx_depth); i++)

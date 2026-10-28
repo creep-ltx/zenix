@@ -152,5 +152,6 @@ echo "check summary ($(date '+%Y-%m-%d %H:%M'), $((W / 60)) min $((W % 60)) s, u
 printf '%-16s %-8s %6s  %s\n' test result time detail
 failed=0
 for t in $LIST; do row "$t" || failed=$((failed + 1)); done
-[ $failed = 0 ] && { echo "check: all passed"; exit 0; }
+# every test passed: its working folders go (2 GB or more a run fill the shared /tmp); the .log/.res files stay
+[ $failed = 0 ] && { find "$RUN" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +; echo "check: all passed"; exit 0; }
 echo "check: $failed FAILED"; exit 1

@@ -480,6 +480,10 @@ screen line on the stock A1200.
   - a per-row byte-offset table in `gfx.c`, rebuilt at a depth change, and the scroll offset kept in bytes;
   - `bench` before and after on the A1200.
   It speeds up today's console whether D28 comes or not.
+- **Done (main, 2026-10-28):** `rowx` in `term.c` and `top`/`rowoff` in `gfx.c` (kept by `set_off`/`set_rows`;
+  `gfx_panic` recomputes `top`); no `muls.l` left on the per-character path (objdump), the kernel 140 bytes bigger,
+  `tools/check-68020-60.sh` clean, one independent review. `sh`'s Del key is code 0x100, so a typed 0x80 is text
+  (`cmds2-test`). The stack spills and the A1200 `bench` timing are still open.
 
 **The Unicode path** (an estimate from the prototype's code, to be timed):
 - decoding: about 20 instructions;

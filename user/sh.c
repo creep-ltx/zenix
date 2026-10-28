@@ -368,6 +368,7 @@ static int hist_copy(char *buf, const char *h, int max)
  * is marked too long (`over`); Enter then does not run it but says so and returns -3 (audit 2026-10-26 F2: the
  * excess used to vanish without a sound on the serial port, and the cut line ran). A recalled history entry that
  * was cut is marked the same way. Emptying the line (Ctrl+U at its end, deleting it all) clears the mark. */
+#define K_DEL 0x100     /* readline's code for the Del key (ESC [ 3 ~): outside every byte value */
 static int readline(const char *prompt, int plen, char *buf, int max)
 {
     int len = 0, pos = 0, scroll = 0, hidx = nhist, tabs = 0, over = 0, saved_over = 0;
@@ -376,8 +377,9 @@ static int readline(const char *prompt, int plen, char *buf, int max)
     sys_ttymode(TTY_RAW | TTY_NOSIG);
     redraw(prompt, plen, buf, len, pos, &scroll);
     for (;;) {
-        unsigned char c;
-        if (sys_read(0, &c, 1) != 1) { sys_ttymode(0); return -1; }
+        unsigned char ch;
+        if (sys_read(0, &ch, 1) != 1) { sys_ttymode(0); return -1; }
+        int c = ch;                     /* a key code: the byte, or K_DEL (above every byte: 0x80 is a UTF-8 byte) */
         int again_tab = 0;
         if (c == 27) {
             unsigned char s1, s2 = 0;
@@ -395,7 +397,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
                 else if (s2 == 'D') c = 2;                     /* left = Ctrl-B */
                 else if (s2 == 'H') c = 1;                     /* Home */
                 else if (s2 == 'F') c = 5;                     /* End */
-                else if (s2 == '~') { c = num == 1 || num == 7 ? 1 : num == 4 || num == 8 ? 5 : num == 3 ? 4 : 0; if (num == 3) c = 0x80; }
+                else if (s2 == '~') { c = num == 1 || num == 7 ? 1 : num == 4 || num == 8 ? 5 : num == 3 ? 4 : 0; if (num == 3) c = K_DEL; }
                 else c = 0;
                 if (!c) continue;
             } else if (s1 == 'b') { while (pos > 0 && is_space(buf[pos - 1])) pos--; while (pos > 0 && !is_space(buf[pos - 1])) pos--; redraw(prompt, plen, buf, len, pos, &scroll); continue; }
@@ -418,7 +420,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
         case 4:                                                 /* Ctrl-D: end of input, or delete */
             if (len == 0) { outs("\r\n"); sys_ttymode(0); return -1; }
             /* fall through */
-        case 0x80:                                              /* Del */
+        case K_DEL:                                             /* Del */
             if (pos < len) { memmove(buf + pos, buf + pos + 1, (u32)(len - pos)); len--; }
             break;
         case 127: case 8:
