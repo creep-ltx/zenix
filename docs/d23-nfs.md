@@ -717,3 +717,11 @@ stack; `mount` 15.5 KB; the kernel unchanged by step 2 (160,888 bytes on the dis
 ## Owner decisions (2026-10-28)
 
 The owner answered "Yes" to every recommendation of this note's questions.
+
+## Main session, 2026-10-28: steps 1-2 merged
+
+- **Memory:** nfscd at 112 KB idle on the stock A1200 is too much for the golden path: step 3 makes the small
+  profile's rsize/wsize 4 KB (about 25 KB less) and re-measures; 9.2 is amended then.
+- **`SO_LINGER {1,0}`** (an abortive close, D19 interface growth) is added to netd in step 3, before writes rely on
+  the duplicate request cache's "same port on reconnect".
+- **wasabid's refusal of nfs files** stays until D24's `--file` helper is built (D24 step 3 or later).
