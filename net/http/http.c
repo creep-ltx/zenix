@@ -58,6 +58,19 @@ static int path_ok(const char *s)
     return n <= HTTP_PATHMAX;
 }
 
+/* the path into d without a fragment ("#..." is never sent, RFC 3986 3.5); HTTP_EINVAL when it is not one */
+static int set_path(char *d, const char *s)
+{
+    size_t n = 0;
+    if (!path_ok(s))
+        return HTTP_EINVAL;
+    while (s[n] && s[n] != '#')
+        n++;
+    memcpy(d, s, n);
+    d[n] = 0;
+    return 0;
+}
+
 int http_url_parse(struct http_url *u, const char *s)
 {
     const char *h, *e, *c;
@@ -87,10 +100,7 @@ int http_url_parse(struct http_url *u, const char *s)
     u->host[c - h] = 0;
     if (!*e)
         e = "/";
-    if (!path_ok(e))
-        return HTTP_EINVAL;
-    strcpy(u->path, e);
-    return 0;
+    return set_path(u->path, e);
 }
 
 int http_is_redirect(int st)
@@ -112,10 +122,7 @@ int http_redirect(struct http_url *u, const char *loc, int *hops)
         return 0;
     }
     if (loc[0] == '/' && loc[1] != '/') {
-        if (!path_ok(loc))
-            return HTTP_EINVAL;
-        strcpy(u->path, loc);
-        return 0;
+        return set_path(u->path, loc);
     }
     return HTTP_EPERM;                  /* relative or scheme-relative: not followed */
 }
@@ -272,6 +279,8 @@ static int header_line(struct http_resp *r, char *l)
         if (r->has_range || strncmp(v, "bytes ", 6))
             return HTTP_EPROTO;
         v += 6;
+        if (v[0] == '*' && v[1] == '/')     /* a 416's form (an asterisk, then /TOTAL): no range */
+            return dec(v + 2, e, &a) ? HTTP_EPROTO : 0;
         for (d = v; *d && *d != '-'; d++)
             ;
         for (s = d; *s && *s != '/'; s++)
