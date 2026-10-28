@@ -143,7 +143,7 @@ kh = rd(out + "/kh-after")
 check(re.search(rb"^\[10\.0\.2\.2\]:2223 ssh-ed25519 \S+\n\[10\.0\.2\.2\]:2222 ssh-ed25519 ", kh, re.M) is not None,
       "a known_hosts without its last line end: the new key went on a line of its own (audit 2026-10-28 S16)", kh)
 f = log[log.find(b"/etc/ssh/ssh_known_hosts; ssh -p 2222"):]
-check(b"IS REVOKED: refused" in f and b"sf=255" in f and b"ssh-keygen -R" not in f[:f.find(b"sf=")],
+check(b"IS REVOKED: refused" in f and b"\nsf=255" in f and b"ssh-keygen -R" not in f[:f.find(b"\nsf=")],
       "a key the user trusts but root's ssh_known_hosts revokes: refused, and no advice to remove the line (S15)", f[:600])
 khf = rd(out + "/kh-final")
 check(b"@revoked [10.0.2.2]:2222" in khf and b"sg=0" in log and b"marked line" in log and b"sh=255" in log and
