@@ -313,7 +313,8 @@ def std_packages(build, uapps):
                 ents += mandirs + [("f", 0o644, 0, 0, pages["wasabid.txt"], "/usr/man/wasabid.txt")]
                 taken.add("wasabid.txt")
             make_package(out, "wasabid", vnum, vstr, ents, deps=[("base", vnum)],
-                         desc="the remote control daemon (the Wasabi protocol), off by default")
+                         desc="the remote control daemon (the Wasabi protocol), off by default",
+                         takes=("utils", "man"))      # as every family: the split's rule (D22 8.4.4)
             names.append("wasabid")
         rest = sorted(f for f in pages if f not in taken)
         make_package(out, "base-man", vnum, vstr, mandirs + [("f", 0o644, 0, 0, pages[f], "/usr/man/" + f) for f in rest],
