@@ -295,6 +295,11 @@ long svc_call(int i, struct umsg *m, int ns)
         kprintf("svc: %s: its own server called it before it opened its port\n", ports[i].name);
         return -ECONNRESET;                     /* it would wait for itself */
     }
+    if (s->state == SV_LOADING && s->pid == current->pid) {     /* audit F14: reading the program needs the service */
+        current->wait_msg = 0;
+        kprintf("svc: %s: its program is read through the service itself\n", ports[i].name);
+        return -ECONNRESET;                     /* its loader would wait for itself, with no deadline */
+    }
     if (s->state == SV_STOPPED && !ns && !disk_frozen) {     /* once disk writes are stopped nothing is started */
         long r = load(i, m);
         if (r)
