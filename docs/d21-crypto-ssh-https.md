@@ -916,3 +916,22 @@ over `net/sntp/` and `zc_clock`, with the main session's decisions above:
 
 **Sizes (*measured*, m68k):** `wget` 114,884 bytes (code 114,864, BSS 13,044; plus about 57 KB allocated for an https
 URL); `sntp` 15,420. Neither links `time`, `__divdi3` or `__moddi3`.
+
+## Main session, 2026-10-28: step 7 finished (branch clock)
+
+- **The trusted clock in the kernel:** `SYS_ticks` 2 answers `CLOCK_RTC` 1 (the battery clock set the time at boot)
+  and `CLOCK_NET` 2; `SYS_settime`'s second argument 1 adds `CLOCK_NET`, 0 (`date -s`, every older caller) clears
+  both. `sntp` passes 1 only for an answer that raised the floor (inside the guard): the liar 500 days ahead sets the
+  clock *untrusted*, so neither `wget`'s "not before" nor `reboot`'s floor leans on it. Frozen (CLAUDE.md).
+- **`ifup -a`** (root, as init at boot) starts `/bin/sntp` when `/etc/sntp` exists, not waited for, its report to
+  `/dev/null`, its errors to ifup's standard error. **`reboot`** raises `/var/lib/clock` to now when a bit is set and
+  now is past the file. The file's reading and writing are one copy, `user/clockfile.c`, for both programs.
+- **Images and the base package** carry `/etc/ssl/anchors` (built from `tools/certdata` by `tools/mkanchors.py`: 117
+  roots, 52,231 bytes), an empty `/etc/ssl/local/`, and the notices of BearSSL, Monocypher and certdata (MPL-2.0,
+  `tools/certdata.COPYING`); BearSSL's and Monocypher's were missing from images with `ssh` (D19's "notices in every
+  image" rule). The separate `ca-certificates` package comes with zpkg's package families (D22).
+- **Decided:** `wget -c` keeps refusing a 200 answer (the file is left as it was), the older GNU wget's rule, not
+  1.25's restart from nothing: a resume never destroys what was there. `wget` runs one nice level lower, as `ssh`.
+- Tested in `tools/wget-test.sh`: after sntp's accepted answer wget trusts the clock; the liar's answer and
+  `date -s` clear the mark; a reboot after `sntp -r` raises the floor back to the true time.
+

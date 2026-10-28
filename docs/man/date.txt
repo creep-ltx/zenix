@@ -11,7 +11,8 @@ DESCRIPTION
     Prints the current date and time in UTC (Zenix has no time zones). The
     clock starts from the Amiga's battery clock if one is present; otherwise
     it starts at 1970 and must be set. With -s the clock is set (for this
-    session; it is not written back to the battery clock). The date can be
+    session; it is not written back to the battery clock, and wget(1)
+    and reboot(8) no longer trust the clock this boot). The date can be
     followed by a time, or the letter T may replace the space.
 
     The default output looks like "Thu Oct 22 12:51:22 UTC 2026". A format

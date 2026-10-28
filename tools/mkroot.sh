@@ -51,6 +51,13 @@ if [ -z "$NOMAN" ] && [ -f "$B/cp437-8x8.psf" ]; then
     cp "$B/cp437-8x8.psf" "$T/usr/share/consolefonts/"
     lic tools/font_8x8.COPYING font_8x8
 fi
+# the root certificates (DESIGN D21 8.1) and the owner's own folder for more, on the full images, as the base package
+if [ -z "$NOMAN" ] && [ -f "$B/anchors" ]; then
+    mkdir -p "$T/etc/ssl/local"
+    cp "$B/anchors" "$T/etc/ssl/anchors"
+    lic tools/certdata.COPYING certdata
+fi
+case " $PROGS " in *" ssh "*|*" wget "*|*" cryptotest "*) lic crypto/bearssl/LICENSE BearSSL; lic crypto/monocypher/LICENCE Monocypher;; esac
 if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small install / test images)
     mkdir -p "$T/usr/man"
     cp "$(dirname "$0")/../docs/man/"*.txt "$T/usr/man/"      # the manual pages live in docs/man

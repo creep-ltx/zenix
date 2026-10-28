@@ -64,13 +64,17 @@ EXIT STATUS
     several failures the lowest of 2-8 is given (GNU wget's rule).
 
 NOTES
-    Certificates need the date. Until the kernel can tell wget that its
-    clock was set from the battery clock or by sntp(8) this boot, wget
-    never trusts the clock: it says once "the clock is not set:
+    Certificates need the date. wget trusts the clock only when the
+    kernel says it was set this boot by the battery clock or by sntp(8)
+    with an answer its guard accepted (a time set with date -s is not
+    trusted). Otherwise it says once "the clock is not set:
     certificate dates checked only against DATE" and judges the expiry
     against the floor (the build date or /var/lib/clock, the newer),
     and does not check "not valid before". A certificate that expired
     before the floor is refused.
+
+    wget runs one nice level lower than it was started with, as ssh(1)
+    does, so the network and the other consoles keep up.
 
     On a 14 MHz 68020 the TLS handshake is public-key arithmetic: half
     a minute for a site with RSA certificates, more than a minute with

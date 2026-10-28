@@ -726,7 +726,9 @@ int tty_of(const struct proc *p);
 #define SYS_pipe    17   /* int fds[2], flags (0, or O_NONBLOCK for both ends: Linux's pipe2; D20 step 4) */
 #define SYS_memalloc 18
 #define SYS_memfree  19
-#define SYS_ticks   20   /* 0 -> the 100 Hz tick count (wraps); 1 -> whole seconds since boot (unsigned, F9) */
+#define SYS_ticks   20   /* 0 -> the 100 Hz tick count (wraps); 1 -> whole seconds since boot (unsigned, F9); 2 -> CLOCK_* bits */
+#define CLOCK_RTC   1    /* SYS_ticks 2: the battery clock set the time at boot (D21 8.3) */
+#define CLOCK_NET   2    /* SYS_ticks 2: set this boot from a checked source (SYS_settime's second argument 1: sntp) */
 #define SYS_procinfo 21
 #define SYS_meminfo 22
 #define SYS_setfg   23
@@ -760,7 +762,7 @@ int tty_of(const struct proc *p);
 #define SYS_utimes      56   /* path, modification time */
 #define SYS_lstat       57   /* like stat, but a final symbolic link is not followed */
 #define SYS_time        58   /* seconds since 1970 (UTC) */
-#define SYS_settime     59
+#define SYS_settime     59   /* t, 0 (clears the CLOCK_* bits) or 1 (from a checked source: sets CLOCK_NET) */
 #define SYS_isatty      60
 #define SYS_getuid      61
 #define SYS_getgid      62
