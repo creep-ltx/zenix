@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "fsproto.h"                     /* UMSG_CANCEL (D23) */
 
 /* Named ports with synchronous calls. See kernel.h for the model.
  * A client in P_MSG is woken only by the reply (or by its server dying),
@@ -147,14 +148,22 @@ void ipc_enqueue(struct port *p, struct umsg *m, int front)
     ev_wake(&p->evw);                           /* and whoever polls the port (D16) */
 }
 
-/* SYS_evwait on a port (D16, POLLPORT): POLLIN when a message is queued; only the owner may wait on it */
-u16 port_poll(int port)
+/* SYS_evwait on a port (D16, POLLPORT): POLLIN when a message is queued; only the owner may wait on it. POLLPRI (D23
+ * 5.2) while a message sent to it was cancelled since the owner last saw one: reported only to an evwait that asks
+ * for it (ev), which takes it as seen. A plain receive does not: a cancel of a request the server already holds, made
+ * between its poll and its receive, is still reported by its next poll. */
+u16 port_poll(int port, u16 ev)
 {
     struct port *p = port_of(port);
     if (!p || p->owner != current->pid)
         return POLLNVAL;
     ev_arm(&p->evw);
-    return p->head ? POLLIN : 0;
+    u16 r = p->head ? POLLIN : 0;
+    if ((ev & POLLPRI) && p->ncancel != p->nseen) {
+        p->nseen = p->ncancel;
+        r |= POLLPRI;
+    }
+    return r;
 }
 
 void ipc_unqueue(struct port *p, struct umsg *m)
@@ -184,6 +193,25 @@ void ipc_cancel(struct proc *p)
         if (q) {
             ipc_unqueue(pt, m);
             ipc_finish(m, -EINTR);
+        }
+    }
+    irq_restore(s);
+}
+
+/* D23 5.1: p was killed (proc_kill) while it waits in a server call: its message (in p's memory, valid while it waits)
+ * gets UMSG_CANCEL and the called port's cancel count grows, waking the server's evwait (POLLPRI). Nothing else: the
+ * client still waits for the reply (G4), and the server answers when it no longer uses the buffers. Not while p is
+ * exiting (proc_exit's closes are answered at once, and must reach the server as they are). Any context. */
+void ipc_cancel_mark(struct proc *p)
+{
+    u16 s = irq_save();
+    struct umsg *m = p->wait_msg;
+    if (m && !p->exiting && m->state != MSG_DONE && !(m->kflags & UMSG_CANCEL)) {
+        m->kflags |= UMSG_CANCEL;
+        struct port *pt = port_of(p->wait_port);
+        if (pt) {
+            pt->ncancel++;
+            ev_wake(&pt->evw);
         }
     }
     irq_restore(s);
@@ -224,6 +252,9 @@ static long call(int port, struct umsg *m, u16 kflags, int ns)
     m->uid = current->svc_depth ? 0 : current->uid; m->gid = current->svc_depth ? 0 : current->gid;
     m->umask = current->umask;
     m->kflags = kflags;                         /* a user's SYS_call can never claim to be the kernel */
+    if (current->killed && !current->exiting)
+        m->kflags |= UMSG_CANCEL;               /* D23 5.1: a call made after the kill (O_TRUNC's open, unlink's second
+                                                 * step, sync's next mount) is cancelled from the start */
     m->server = 0;
     m->result = 0;
     current->wait_port = port;

@@ -17,6 +17,10 @@ SYNOPSIS
     svctest reboot PID
     svctest lost FILE SECONDS [PID]
     svctest mount PORT DIR
+    svctest serve PORT TYPE
+    svctest catch FILE
+    svctest trunc FILE
+    svctest unlink FILE
 
 DESCRIPTION
     A test program for the service manager (DESIGN D11,
@@ -68,11 +72,27 @@ DESCRIPTION
     mount  puts the server already running on port PORT (msgpingd -fs) on
            the directory DIR as a filesystem (root): a reboot must not
            wait for a server that never answers its sync.
+    serve  is a filesystem server on port PORT (root) that holds every
+           request until its client is killed (DESIGN D23 step 1).
+           FS_ROOT names the type TYPE (nfs: a network mount, synced
+           last); FS_CLOSE, FS_SYNC (its a0 printed) and FS_QUIT
+           (ends it) are answered at once. It waits for its port with
+           POLLPRI; when it is told of a cancel it answers the held
+           requests marked cancelled: a stat 0 (a server that ignores
+           the mark), anything else -4 (EINTR). A request that comes
+           marked already is answered -4 at once. Each step prints a
+           line "svctest serve: ...".
+    catch  catches SIGINT, then opens FILE: a caught signal must not
+           cancel the open; kill -9 does.
+    trunc  opens FILE for writing with O_TRUNC (the kernel's stat, then
+           its open) and prints the result.
+    unlink deletes FILE (the kernel's lstat, then its unlink) and prints
+           the result.
 
     tools/svc-test.sh and tools/mounttest.sh use it in the emulator.
 
 EXIT STATUS
-    0, or 2 for a usage error.
+    0, or 2 for a usage error (serve: 1 if its port cannot be made).
 
 SEE ALSO
     boot(8), msgping(1), msgpingd(1)

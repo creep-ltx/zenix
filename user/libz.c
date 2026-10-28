@@ -545,6 +545,7 @@ static const struct { unsigned char e; const char *text; } errtext[] = {
     { EISCONN, "already connected" }, { ENOTCONN, "not connected" }, { ETIMEDOUT, "connection timed out" },
     { ECONNREFUSED, "connection refused" }, { EHOSTUNREACH, "no route to host" },
     { EALREADY, "operation already in progress" }, { EINPROGRESS, "operation in progress" },
+    { ESTALE, "stale file handle" },
 };
 /* strerror: the text of an error number (positive or negative), 0 if it has none */
 const char *zstrerror(int e)

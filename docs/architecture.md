@@ -590,7 +590,8 @@ pattern (section 6).
   and `wait` wait this way, so the old `wake_io` (which woke every process waiting for any I/O) is gone.
   `SYS_evwait` waits for several at once: up to 32 items { fd, events, revents } (Linux's `struct pollfd` and bits)
   and a timeout in ticks (-1: none, 0: only look); an item with `POLLPORT` names a port the caller owns (`POLLIN`: a
-  message is queued). It returns how many items are ready, 0 at the timeout, -EINTR when a handler is due (never
+  message is queued; `POLLPRI`, when asked for: a message sent to it was cancelled since the last `POLLPRI` it
+  reported, DESIGN D23, below). It returns how many items are ready, 0 at the timeout, -EINTR when a handler is due (never
   restarted). ttys are always writable (the tick empties their send rings); `/dev/ttyS0` is writable when 1 KB of its
   4 KB send ring is free (DESIGN D19 5.3: a truthful `POLLOUT` for netd; the drain that makes the room wakes the
   waiter through kwork); files and `/dev/null`
@@ -737,7 +738,7 @@ EPERM there).
 
 **Reboot**: `SYS_reboot(note)`, root only, does what the reset warning does (every filesystem synced, disk writes
 stopped; each server has 5 s to answer its `FS_SYNC`, then the tick resets the machine anyway and logs the server's
-name, audit A7), notes "rebooted" in the log for the next boot (`dmesg -p`), and resets the machine as exec's ColdReboot does
+name, audit A7; the network mounts are synced last, with `FS_SYNC`'s a0 1, "answer within 2 s", DESIGN D23 5.4), notes "rebooted" in the log for the next boot (`dmesg -p`), and resets the machine as exec's ColdReboot does
 (RESET and JMP to the ROM's start in one long word). A note of 1 (AmigaOS) or 2 (Zenix) is first left in the spare
 bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the boot menu (`man/bootmenu.txt`).
 
@@ -798,6 +799,17 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   until a message or the deadline, whichever comes first, instead of polling. A server that installs a signal
   handler (DESIGN D16) gets -EINTR from an untimed `recv` when a handler is due (restarted with `SA_RESTART`); a timed
   one is never cut. A port's owner may also wait for it among other things with `SYS_evwait` (`POLLPORT`).
+- **A killed client is marked (DESIGN D23 5.1-5.2).** A client waiting in a call cannot be woken by anything but the
+  reply (G4: the server may still use its buffers). When it is killed (`kill -9`, or a signal whose default action
+  ends it: Ctrl-C for `cat`; never a caught signal, D16 4), the kernel sets `UMSG_CANCEL` (4) in its message's
+  `kflags` and counts a cancel on the called port; every call a killed process makes after that (an `O_TRUNC` open's
+  `FS_OPEN` after its `FS_STAT`, an unlink's `FS_UNLINK`, sync's next mount) carries the bit from the start. A server
+  that polls its port with `POLLPRI` sees the count grow (one report per change: the report takes it as seen; a plain
+  `recv` does not, so a cancel between a server's poll and its receive is still reported) and may answer such a
+  request -EINTR at once; one that ignores the bit (fsd, zfsd, diskd, netd: their requests end in milliseconds)
+  answers as before. The client still waits for that answer, then ends; the call is never restarted. The calls of
+  `proc_exit` (the closes) are never marked. nfscd answers -EINTR, so a program on a NAS that is off stops at
+  Ctrl-C or `kill -9` (`tools/svc-test.sh c`).
 - If a server dies, the request it was serving fails with -ECONNRESET ("the server is gone", errno 104; the kernel's
   file calls turn it into -EIO for programs). A service's port (section 9, "The service manager") goes back to
   *held*: its queued requests wait for the next server, which the first of them starts. Any other port is closed, its
@@ -1050,7 +1062,9 @@ The full design is docs/d11-service-manager.md; what is built (steps 0-8 of its 
 - **No-start calls.** `FS_CLOSE` (from `file_close` and the end of a program load) and every call made by a dying
   process never start a server: dropped while the entry is stopped, queued while it is loading or starting.
 - **The reset warning and `reboot`** (step 5): `FS_SYNC` and `FS_QUIT` are no-start calls that skip a server that
-  is not running (it has nothing to write); a live one may still start diskd to flush, with no back-off: loaders
+  is not running (it has nothing to write); `vfs_sync` syncs the local mounts first and the network mounts (a server
+  that said type `nfs` in `FS_ROOT`'s `fsinfo`) last, those two with `FS_SYNC` a0 1 ("bounded": they answer within
+  2 s, DESIGN D23 5.4), so a NAS that is off never leaves a local mount unsynced; a live one may still start diskd to flush, with no back-off: loaders
   asleep in a back-off are woken (`svc_hurry`). Once `disk_frozen` is set nothing is started any more.
 - **Loads nest at most two deep** (a file service read while the root server is stopped); a third level fails with
   -ECONNRESET. Kernel stack: the deepest such chain is about 2.1 KB of the 4 KB (`-fstack-usage` sums, 2026-10-24).

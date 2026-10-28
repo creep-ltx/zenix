@@ -643,6 +643,25 @@ temporary file; (c) **CHOWN** is checked locally as fsperm rule 5 (root only), a
 (116) is claimed in step 1 and replaces -EIO for stale handles; (e) messages stay queued in nfscd while `NFS_P_TAKE` is
 clear, as the host client does; (f) `mount.c` turns a checked mount's error numbers into messages.
 
+## As built: step 1, the two kernel changes (branch nfs12, 2026-10-28)
+
+Built as 5.1, 5.2 and 5.4 say (`kernel/ipc.c` `ipc_cancel_mark`, `call()`, `port_poll`; `proc_kill`; `vfs_sync`),
+tested in FS-UAE by `tools/svc-test.sh c` with `svctest serve`, a server that holds every request until it is cancelled.
+What the text did not settle, decided conservatively:
+
+- **A plain `recv` does not take a cancel as seen;** only an `evwait` that asked for `POLLPRI` and reported it does
+  (5.2 said "or its next `ipc_recv`"). Otherwise a kill between nfscd's poll and its receive would be swallowed for a
+  request nfscd already holds. A server that never polls (fsd) only lets the port's count grow.
+- **`proc_exit`'s calls are never marked** (the closes of a killed program): they must reach the server as they are,
+  and nfscd answers `FS_CLOSE` at once anyway (7.3).
+- **A service port's count is taken as seen when a new server takes the port over** (its queued cancelled messages
+  come to it marked; nothing it holds yet).
+- **The network flag** is the type the server gives in `FS_ROOT`'s `fsinfo` (`nfs`), at the mount and at a later
+  first `FS_ROOT`; not the type `mount` passes.
+- **`ESTALE` 116** is claimed (errno.h, libz's text "stale file handle"); the core's `NFS_ESTALE` now uses it.
+- **Size:** the kernel grew by 480 bytes (`kernel.bin` 160,332 -> 160,812 on the disk; section 9.1 estimated ~300):
+  2,004 bytes left on the mount tests' floppy, 18,388 on the RAM floppy.
+
 ## Owner decisions (2026-10-28)
 
 The owner answered "Yes" to every recommendation of this note's questions.

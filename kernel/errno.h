@@ -62,5 +62,7 @@
 #define EHOSTUNREACH 113    /* no route to host */
 #define EALREADY    114     /* a connect is already under way */
 #define EINPROGRESS 115     /* the connect goes on (a non-blocking socket) */
+#define ESTALE      116     /* stale file handle (D23: an NFS file the server no longer knows, or one opened before
+                             * nfscd started again) */
 /* 1024 .. 1279 are reserved: no errno goes there. -1024 .. -1279 is the filesystem servers' FS_LINKED answer to the
  * kernel (DESIGN D26, kernel/fsproto.h), never seen by a program. */

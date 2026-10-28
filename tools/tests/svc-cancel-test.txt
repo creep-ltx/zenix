@@ -1,0 +1,18 @@
+wait zenix:/# 90
+send mkdir -p /tmp/c /tmp/l; svctest serve fs.c nfs & sleep 1; svctest serve fs.l test & sleep 1; svctest mount fs.c /tmp/c; svctest mount fs.l /tmp/l; echo c0-$(echo up)\r
+wait c0-up 20
+send cat /tmp/c/f & p=$!; sleep 1; kill -INT $p; wait $p; echo c1-status=$?\r
+wait c1-status 20
+send cat /tmp/c/f & p=$!; sleep 1; kill -9 $p; wait $p; echo c2-status=$?\r
+wait c2-status 20
+send svctest catch /tmp/c/g & p=$!; sleep 1; kill -INT $p; sleep 2; echo c3-$(echo mark); kill -9 $p; wait $p; echo c3-status=$?\r
+wait c3-status 20
+send svctest unlink /tmp/c/u & p=$!; sleep 1; kill -INT $p; wait $p; echo c4-status=$?\r
+wait c4-status 20
+send svctest trunc /tmp/c/t & p=$!; sleep 1; kill -INT $p; wait $p; echo c5-status=$?\r
+wait c5-status 20
+send sleep 2; echo c6-$(echo quiet); sync; echo c7-$(echo synced)\r
+wait c7-synced 20
+send reboot\r
+wait klog: boot 2 60
+sleep 3

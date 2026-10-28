@@ -81,6 +81,7 @@ static inline int sys_rename(const char *a, const char *b) { return sys3(28, (u3
 
 struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, kflags; u32 client_; };
 #define UMSG_KERNEL 1     /* kflags: the kernel sent this message for a system call (servers trust only these, and root) */
+#define UMSG_CANCEL 4     /* kflags: its client was killed while waiting (DESIGN D23, kernel/fsproto.h): -EINTR is allowed */
 #define UMSG_LINKS 8      /* kflags: the kernel takes the FS_LINKED answer (DESIGN D26, kernel/fsproto.h); only it sets it */
 static inline int sys_port_create(const char *n) { return sys3(29, (u32)n, 0, 0); }
 static inline int sys_port_find(const char *n) { return sys3(30, (u32)n, 0, 0); }
@@ -184,6 +185,7 @@ static inline int sys_update(u32 op, u32 a, u32 b) { return sys3(82, op, a, b); 
 /* events and signals (DESIGN D16, docs/d16-events-and-signals.md; libz.h has the POSIX calls on top of these) */
 struct pollfd { int fd; short events, revents; };
 #define POLLIN   0x0001         /* Linux's values */
+#define POLLPRI  0x0002         /* on a port (D23): a message sent to it was cancelled (UMSG_CANCEL) since the last POLLPRI */
 #define POLLOUT  0x0004
 #define POLLERR  0x0008
 #define POLLHUP  0x0010

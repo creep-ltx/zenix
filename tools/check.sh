@@ -35,7 +35,7 @@ JOBS=${ZENIX_EMU_SLOTS:-6}
 # the table still shows one line per test (its time: the jobs' times added up).
 LONGEST="ssh-test wget-test zpkg-emu-test remote-test update-test rootcheck-test svc-test matrix crypto68k-test diag-test colour-test bbs-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
 declare -A SPLIT
-SPLIT[svc-test]="a z zs b n r d|o zo u l|f s h t dmg"
+SPLIT[svc-test]="a z zs b n r d|o zo u l|f s h t dmg c"
 SPLIT[colour-test]="1 4 2|3 s4 s16 s7"    # the 1-plane run first (its edges are the reference); s*: the setting (D18)
 SPLIT[rootcheck-test]="r b|i h|u"                   # u: the choices when a repair fails (man rescue)
 SPLIT[netd-test]="s|l"                              # the stock A1200 (small profile) and 4 MB of fast RAM
