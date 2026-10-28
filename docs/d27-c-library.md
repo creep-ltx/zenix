@@ -567,3 +567,7 @@ how Zenix's own programs reach it: they keep libz's lighter way of writing outpu
 them about 120 bytes each instead of 2 KB; and it decides the text-UI library's stage 2 question now.
 
 Last checked against the code: 2026-10-28 (main at 722d6f6).
+
+## Owner decisions (2026-10-28)
+
+The owner answered **yes to every question above** (2026-10-28, "I think yes for all questions"): Ahiru and the CFile core it uses may be published in Zenix's tree under MIT; the owner's programs keep one source for AmigaOS and Zenix, each in its own repository, and Zenix carries a copy. This is the yes to the note: built in block 3's order (after block 2's audit).
