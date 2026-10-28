@@ -71,20 +71,11 @@ static int set_path(char *d, const char *s)
     return 0;
 }
 
-int http_url_parse(struct http_url *u, const char *s)
+/* the part after "scheme://": HOST[:PORT][/PATH] into u, whose tls and default port are set */
+static int parse_authority(struct http_url *u, const char *h)
 {
-    const char *h, *e, *c;
+    const char *e, *c;
     unsigned long port;
-    memset(u, 0, sizeof *u);
-    if (!strncmp(s, "http://", 7)) {
-        h = s + 7;
-        u->port = 80;
-    } else if (!strncmp(s, "https://", 8)) {
-        h = s + 8;
-        u->tls = 1;
-        u->port = 443;
-    } else
-        return HTTP_EINVAL;
     for (e = h; *e && *e != '/'; e++)
         ;
     for (c = h; c < e && *c != ':'; c++)
@@ -101,6 +92,21 @@ int http_url_parse(struct http_url *u, const char *s)
     if (!*e)
         e = "/";
     return set_path(u->path, e);
+}
+
+int http_url_parse(struct http_url *u, const char *s)
+{
+    memset(u, 0, sizeof *u);
+    if (!strncmp(s, "http://", 7)) {
+        u->port = 80;
+        return parse_authority(u, s + 7);
+    }
+    if (!strncmp(s, "https://", 8)) {
+        u->tls = 1;
+        u->port = 443;
+        return parse_authority(u, s + 8);
+    }
+    return HTTP_EINVAL;
 }
 
 int http_is_redirect(int st)
@@ -125,6 +131,81 @@ int http_redirect(struct http_url *u, const char *loc, int *hops)
         return set_path(u->path, loc);
     }
     return HTTP_EPERM;                  /* relative or scheme-relative: not followed */
+}
+
+/* RFC 3986 5.2.4: the "." and ".." segments of the absolute path p[0..n) taken out, in place; the new length */
+static size_t dot_segments(char *p, size_t n)
+{
+    char *in = p, *end = p + n, *out = p;
+    while (in < end) {                  /* in is at a '/' */
+        char *s = in + 1, *e = s;
+        while (e < end && *e != '/')
+            e++;
+        if ((e - s == 1 && s[0] == '.') || (e - s == 2 && s[0] == '.' && s[1] == '.')) {
+            if (e - s == 2)
+                while (out > p && *--out != '/')
+                    ;                   /* the last segment written goes */
+            if (e == end)
+                *out++ = '/';           /* "/a/.." is "/", "/a/." is "/a/" */
+        } else {
+            memmove(out, in, (size_t)(e - in));
+            out += e - in;
+        }
+        in = e;
+    }
+    return (size_t)(out - p);
+}
+
+int http_redirect_rel(struct http_url *u, const char *loc, int *hops)
+{
+    struct http_url n;
+    const char *c;
+    size_t ln, base, k, q;
+    if (!strncmp(loc, "http://", 7) || !strncmp(loc, "https://", 8))
+        return http_redirect(u, loc, hops);
+    if (++*hops > HTTP_MAXREDIR)
+        return HTTP_ELOOP;
+    for (c = loc; (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '+' ||
+                  *c == '-' || *c == '.'; c++)
+        ;
+    if (*c == ':' && c > loc && !(loc[0] >= '0' && loc[0] <= '9'))
+        return HTTP_EINVAL;             /* another scheme (ftp:, mailto:...): nothing this client fetches */
+    n = *u;
+    if (loc[0] == '/' && loc[1] == '/') {   /* "//HOST[:PORT]/PATH": the same scheme, so never https to http */
+        n.port = n.tls ? 443 : 80;
+        if (parse_authority(&n, loc + 2))
+            return HTTP_EINVAL;
+        for (q = 0; n.path[q] && n.path[q] != '?'; q++)
+            ;
+        k = dot_segments(n.path, q);
+        memmove(n.path + k, n.path + q, strlen(n.path + q) + 1);
+        *u = n;
+        return 0;
+    }
+    for (ln = 0; loc[ln] && loc[ln] != '#'; ln++)
+        ;                               /* the fragment is never sent */
+    for (base = 0; u->path[base] && u->path[base] != '?'; base++)
+        ;
+    if (ln == 0)
+        return 0;                       /* the same resource again (RFC 3986 5.2.2: an empty reference) */
+    if (loc[0] == '/')
+        base = 0;                       /* an absolute path */
+    else if (loc[0] != '?')
+        while (base > 0 && u->path[base - 1] != '/')
+            base--;                     /* merged with the base's directory (5.2.3); a query keeps the whole path */
+    if (base + ln > HTTP_PATHMAX)
+        return HTTP_EINVAL;
+    memcpy(n.path, u->path, base);
+    memcpy(n.path + base, loc, ln);
+    n.path[base + ln] = 0;
+    for (q = 0; n.path[q] && n.path[q] != '?'; q++)
+        ;
+    k = dot_segments(n.path, q);
+    memmove(n.path + k, n.path + q, base + ln - q + 1);
+    if (!path_ok(n.path))
+        return HTTP_EINVAL;
+    memcpy(u->path, n.path, strlen(n.path) + 1);
+    return 0;
 }
 
 struct out {

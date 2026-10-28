@@ -12,7 +12,8 @@
 #         folder, never in git): RSA, ECDSA, RSA-4096 and P-384 chains, SNI, expired, not yet valid, wrong name,
 #         unknown root, missing intermediate, no serverAuth, a chain too long, a TLS 1.3-only server, the floor
 #         without a trusted clock, the owner's own root, RSA chosen when a server has both, keep-alive, session
-#         resumption counted, redirects (3 at most, never https to http), resume, truncation, a slow server
+#         resumption counted, redirects (3 at most, never https to http, relative and //host), resume (a 200 after
+#         -c refused), truncation, a slow server
 # sntp    tools/host/sntp-client.c (the core over UDP) against tls-test.py's SNTP server with true, false and
 #         hostile answers; the floor never moved by a lying one
 # size    m68k -Os linked sizes (D21 7.1's way): the TLS client with the glue, wget's core with net/http/, sntp's

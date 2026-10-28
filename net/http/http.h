@@ -39,6 +39,10 @@ struct http_url {
 int http_url_parse(struct http_url *u, const char *s);
 /* follow a Location (an absolute http(s) URL or an absolute path) from u; *hops counts (at most 3) */
 int http_redirect(struct http_url *u, const char *location, int *hops);
+/* the same, and also every relative reference (RFC 3986 5.2: "x/y", "../y", "?q", "//HOST[:PORT]/PATH" with the
+ * same scheme), resolved against u with "." and ".." taken out: wget's (GNU wget follows them); zpkg keeps
+ * http_redirect's refusal. Another scheme (ftp:...) is HTTP_EINVAL */
+int http_redirect_rel(struct http_url *u, const char *location, int *hops);
 /* is the status one http_redirect follows (301, 302, 303, 307, 308)? */
 int http_is_redirect(int status);
 /* the GET request for u into buf (cap bytes); from > 0 asks for "bytes=FROM-"; close asks the server to close.
