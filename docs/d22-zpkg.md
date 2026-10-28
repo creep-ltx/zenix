@@ -985,3 +985,11 @@ All tests pass after the fixes (`tools/zup-host-test.sh` 107, `tools/ext2-host-t
   `--ignore-expiry`, `-U` with a bad `.sig`, the refusals, e2fsck after); `s` SLIP (-Sy, -S with a dependency, -Rns,
   e2fsck); `m` the 1 MB machine (above). In `tools/check.sh` as `zpkg-emu-test` (parts e|s|m). Not yet: the emulator
   killed during a live install (the host tests cut before every change and after every block write instead).
+
+## Main session, 2026-10-28: steps 1, 4, 5 merged
+
+- **The 1 MB chip-only machine** (not one of the owner's machines) does not run `zpkg` with the network up (about
+  104 KB free over SLIP, 77 KB with the A2065; zpkg needs 160 KB and says so, changing nothing). Accepted: such a
+  machine updates through a D15 bundle copied onto it. netd's memory is not reopened for it.
+- Open, not blocking: `--back` from the repository's pool (a list word naming older versions) and the FS-UAE power cut
+  during a live install (8.2); the host tests cut before every change and after every block write meanwhile.
