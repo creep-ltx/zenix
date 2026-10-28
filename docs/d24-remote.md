@@ -654,3 +654,12 @@ a nice that could wrap, `O_RDWR`, the files' modes on the image, a comment on th
 Left as they are: a daemon whose exit status is -1 or -2 (negative statuses look like `waitnb`'s own answers, an old
 trap of init's sessions too: a kernel mask to 0-255 would end it); `/dev/kmsg`'s bytes reach the serial port
 unfiltered and at its speed, as a service's output does.
+
+## Main session, 2026-10-28: steps 1-2 merged
+
+- **libz's allocator** (power-of-two classes, 4x chunk growth) costs the daemons dearly on small machines: wasabid and
+  netd keep their own heaps for now. The allocator's policy is decided once, for every program, in D27 step 1 (the
+  allocator moves into the C library's port there), measured, not here.
+- **The 1 MB machine** (not one of the owner's) is not a target for a command through wasabid with a login.
+- **Exit statuses -1/-2 taken for waitnb's own answers** (init's old trap): a frozen convention, so no kernel mask now;
+  it goes on block 2's security audit as an item to weigh (a new wait form would be the additive fix).
