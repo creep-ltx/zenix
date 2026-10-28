@@ -90,7 +90,7 @@ The Makefile builds them into `build/libcrypto.a` (and a pure copy for `ssh`), l
 | What | Files |
 |---|---|
 | The gate | `check.sh` (`make check`: every test, a table at the end) |
-| Images | `mkzexe.py` (ELF to ZEXE), `mkadf.py`, `mkroot.sh`, `mkdisk.py`, `mkrdb.py`, `mkmbr.py`, `mkcard.py`, `mkdualcard.sh` (the dual-boot SD card), `write-card.sh` (writes a card safely) |
+| Images | `mkzexe.py` (ELF to ZEXE), `mkadf.py`, `mkroot.sh`, `mkdisk.py`, `mkrdb.py`, `mkmbr.py`, `mkcard.py`, `mkdualcard.sh` (the dual-boot SD card), `write-card.sh` (writes a card safely), `mkcardpkg.sh` (the owner's card package), `mkdom.sh` (the DoM image), `write-root.sh` and `cardroot.py` (a new root onto the dual card's partition 3, the owner's settings carried) |
 | The emulator rig | `fsuae_conf.py` (writes a configuration), `run-test.sh`, `serial-tap.py` (types a script into the serial port and waits for answers), `shot.py` (screenshots) |
 | Emulator tests | `*-test.sh` and the scripts they type, in `tools/tests/` |
 | Host tests | `host/` (the disk and ext2 servers built for the PC; the network's tests, `host/net-test.sh`: lwIP's unit tests, netd on the PC against `zenix-slirp`, the fuzzer), `*-test.c` (drivers against software models of the hardware) |
