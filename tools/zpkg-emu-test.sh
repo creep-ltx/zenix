@@ -148,7 +148,7 @@ full = part == "e"
 w = sec("sy")
 if part == "m" and "KB of memory are free" in w:
     # the 1 MB machine with SLIP up has about 100 KB left (netd and the login); zpkg must say so and change nothing
-    check(st("sy") == 1 and re.search(r"only \d+ KB of memory are free", w) and "/usr/share/extra/readme" not in sec("s1"),
+    check(st("sy") == 1 and re.search(r"only \d+ KB of memory are free", w) and "extra: a test package" not in sec("s1"),
           "1 MB of chip RAM: too little memory left with the network up: zpkg says so and changes nothing", w)
     m = re.search(r"only (\d+) KB", w)
     print("zpkg-test m: free memory with SLIP up and one login on 1 MB of chip RAM: %s KB (zpkg asks for 160)" % (m.group(1) if m else "?"))
