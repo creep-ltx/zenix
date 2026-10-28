@@ -112,16 +112,18 @@ static void tell_conn(int err)
     }
 }
 
-/* the same privileged source port on every reconnect (3.2, 3.4: the NAS's duplicate request cache matches it);
- * another one only when that one is really taken: netd has no abortive close (SO_LINGER), so the port of a
- * connection still closing (to the portmapper, to mountd) is in use for a while, at bind or at connect */
+/* the same privileged source port on every reconnect (3.2, 3.4: the NAS's duplicate request cache matches it):
+ * every connection closes by abort (SO_LINGER {1, 0}: a reset, no FIN_WAIT or TIME_WAIT), so its port is free again
+ * at once; another port only when that one is really taken (by another program) */
 static int bind_connect(void)
 {
     struct sockaddr_in a;
+    struct linger lg = { 1, 0 };
     int on = 1;
     sock = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (sock < 0) return -zerrno;
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
+    setsockopt(sock, SOL_SOCKET, SO_LINGER, &lg, sizeof lg);
     memset(&a, 0, sizeof a);
     a.sin_family = AF_INET;
     a.sin_port = htons((unsigned short)srcport);
@@ -170,7 +172,7 @@ int nfs_connect(int p)
 
 void nfs_disconnect(void)
 {
-    sock_close(&sock);                           /* netd has no abortive close (SO_LINGER): a plain close */
+    sock_close(&sock);                           /* an abort: SO_LINGER {1, 0} (bind_connect) */
     sock_close(&rsock);
     conn_wait = conn_done = 0;
 }
@@ -336,11 +338,6 @@ int main(int argc, char **argv)
     memcpy(host, src, (u32)(colon - src));
     struct nfs_opts o;
     if (nfs_codes_parse(codes, &o)) { say("unknown option codes: ", codes); return 2; }
-    /* D23 step 2 serves reading only: writes come with step 3's tests (o: every changing request is -EROFS) */
-    static char ro[48];
-    strncpy(ro, codes ? codes : "", sizeof ro - 2);
-    strcat(ro, "o");
-    codes = ro;
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
     read_groups();
     port = sys_port_create(pname);
@@ -406,7 +403,7 @@ int main(int argc, char **argv)
                 getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &l);
                 conn_wait = 0;
                 if (err) sock_close(&sock);
-                if (err == EADDRINUSE || err == -EADDRINUSE) {      /* the source port still closing: the next */
+                if (err == EADDRINUSE || err == -EADDRINUSE) {      /* the source port taken: the next */
                     srcport = srcport >= 1023 ? 665 : srcport + 1;
                     do_connect();
                 } else tell_conn(err > 0 ? -err : err);

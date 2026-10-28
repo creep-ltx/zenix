@@ -1,6 +1,6 @@
 # D23: the NFS client (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 15); steps 0-2 built (the core, the cancel mark, nfscd reading: the as-built sections at the end).** Roadmap block 2, "Zenix
+Status: **design, revision 2 after two independent reviews (section 15); steps 0-4 built (the core, the cancel mark, nfscd reading, writing, users and nosuid: the as-built sections at the end).** Roadmap block 2, "Zenix
 reaches the world": "an NFS client". It mounts a directory the owner's NAS (or any Linux PC) exports, so `ls /nas`,
 `cp`, `less` and running a program from there work as on a local disk. It is a filesystem server like `zfsd` (D11 6.4's
 "file service" rule), the first one that talks to the network instead of `diskd`, so it answers D19 6.5's open point
@@ -422,13 +422,21 @@ Zenix. Device, fifo and socket files on the NAS are shown with their type and ca
 
 | | Small profile (netd's rule: chip RAM only, or less than 2 MB of fast RAM free) | Large profile |
 |---|---|---|
-| rsize/wsize | 8 KB | 32 KB (the NAS's preference is 1 MB; Zenix's buffers decide) |
-| receive buffer (one record) + send buffer | 9 + 9 KB | 33 + 33 KB |
-| data cache | 32 KB | together with the unsaved cap at most an eighth of the fast RAM free at the start, and at most 1 MB |
+| rsize/wsize | 4 KB (amended at step 3: 8 KB cost too much, below) | 32 KB (the NAS's preference is 1 MB; Zenix's buffers decide) |
+| receive buffer (one record) + send buffer | 5 + 5 KB | 33 + 33 KB |
+| data cache | 16 KB (4 pieces) | together with the unsaved cap at most an eighth of the fast RAM free at the start, and at most 1 MB |
 | unsaved buffer (cap) | 32 KB | (above) |
 | handle table and name cache, readdir tables | 256 entries ~20 KB, 8 tables ~4 KB | 2,048 entries ~160 KB, 64 tables |
 | stack | 8 KB | 8 KB |
-| **Total, one mount** (with the code) | **~70 KB idle, ~150 KB at most** (the caches and buffers grow as used) | up to ~1.3 MB on a machine with 8 MB free, less on smaller ones |
+| **Total, one mount** (with the code) | **~70 KB idle, ~150 KB at most** (the caches and buffers grow as used); *measured* at step 3: 106 KB idle, 122 KB after reading, 122 KB after writing (below) | up to ~1.3 MB on a machine with 8 MB free, less on smaller ones |
+
+**Amended at step 3 (the main session, 2026-10-28; *measured in FS-UAE*, the stock A1200, `ps`):** step 2's 8 KB
+transfers held 112 KB idle and 144 KB after reading; with 4 KB transfers (the buffers 5 + 5 KB, the data cache 16 KB)
+and libz's heap regions sized for four 4 KB pieces (16,416 bytes: at 16,400 the fourth piece took a region of its own,
+16 KB for 4), nfscd holds 106 KB mounted and idle, 122 KB after reading (the data cache full) and 122 KB after
+writing 108 KB. The rest is the code (54,120 bytes of text, 9.4 KB of data and bss: estimated 30-36 KB in 9.1) and its
+8 KB stack (about 72 KB), the tables (about 25 KB) and the buffers. Free chip RAM with one login, the A2065's driver
+and netd: 996 KB with the mount idle, 820 KB after writing (the emulator's figures).
 
 On the stock A1200 with SLIP up (1,159 KB free with one login, netd 116 KB: D19, *measured in FS-UAE*) one NFS mount
 leaves about 1,010-1,090 KB free; a second mount pays its code again (~35 KB more). The 1 MB chip-only machine (232 KB
@@ -725,3 +733,47 @@ The owner answered "Yes" to every recommendation of this note's questions.
 - **`SO_LINGER {1,0}`** (an abortive close, D19 interface growth) is added to netd in step 3, before writes rely on
   the duplicate request cache's "same port on reconnect".
 - **wasabid's refusal of nfs files** stays until D24's `--file` helper is built (D24 step 3 or later).
+
+## As built: steps 3 and 4, writing, users and nosuid (branch nfs34, 2026-10-28)
+
+Built: **nfscd no longer adds `o`**, so the core's writes (section 7, `net/nfs/write.c` since step 0) reach the NAS;
+`-o ro` is the only read-only mount. The main session's two decisions: **the small profile's 4 KB transfers** (9.2,
+amended and measured above) and **netd's `SO_LINGER`** (Linux's 13 and `struct linger`, D19 growth: `{1, 0}` closes by
+an abort, a reset with no FIN_WAIT or TIME_WAIT, so the port is free at once); nfscd sets `{1, 0}` on every connection,
+so a reconnect comes from the same source port and the NAS's duplicate request cache can answer a resent REMOVE or
+RENAME (3.4). Two decisions of 2026-10-28 that waited for writes: **(b) the silly rename** and **(c) CHOWN for root
+only** (fsperm rule 5; the NAS decides too). `nosuid` (8.3) was in the core since step 0 (no set-user-id or
+set-group-id bit in any `ustat`, `CHMOD` with them -EPERM); step 4 tests it on Zenix. Tests: `tools/nfs-emu-test.sh`
+parts **w** (e's writes and h with writes), **r** (reboot) and **u** (users), each its own boot; the host's
+`nfs-sim-test` scenario `silly` and more checks in `users` and `cache`, unfs3's run (an open file unlinked on a real
+server), `netd-host`'s `linger` checks (`tools/host/net-test.sh`).
+
+Decided where the note was silent:
+
+- **A longer linger** (`{1, N}`, N > 0) is kept (`getsockopt` answers it) but not waited for: a close never blocks in
+  netd (D19 rule 11); the data goes out after the close as without the option. Linux would block `close`.
+- **The silly rename** (Linux's): an `UNLINK`, or a `RENAME` over a name, of a regular file with one link that the
+  kernel holds open (`FS_OPEN` counted against `FS_CLOSE`) renames it first to `.nfs` + 8 hex digits of its fileid + 4
+  of a counter in the same directory, after a `LOOKUP` shows that name free (8 tries, then -EBUSY), so it never
+  replaces a file. A name not in the name cache is looked up first (one more call), so an open file is never missed.
+  The stand-in is removed after the file's last close, once its unsaved data is committed; `FS_QUIT` removes the closed
+  ones before `UMNT` (within its 10 s). At most 8 at once (`NSILLY`): more are removed at once, logged once (their
+  readers then get -ESTALE, step 2's behaviour). Unlinking a stand-in while it is open is -EBUSY (Linux's). A stand-in
+  stays on the NAS when nfscd is killed or crashes, as on Linux after a crash; a later `rm` removes it. A cancelled
+  `UNLINK` whose `RENAME` was already sent still gets its stand-in (the entry is the rename's, not the request's); a
+  connection that breaks while such a `RENAME` is out with nobody waiting takes the stand-in as made (its names lived in
+  the request), and the later `REMOVE` finds out (a missing name is not logged). The stand-in name is not frozen.
+- **CHOWN**: the kernel already refuses a non-root `chown` (-EACCES, `SYS_chown`); nfscd's -EPERM for a request stamped
+  with another uid is the server's own check, as fsd's.
+- **The same source port** cannot be seen across slirp's NAT in FS-UAE (each connection is a new port on the PC), so
+  `netd-host` checks `SO_LINGER` itself (a plain close leaves the same connection -EADDRINUSE while the peer is open;
+  `{1, 0}` resets it and the port is bound and connected again at once) and FS-UAE checks that no connection fails with
+  "address in use".
+- `tools/host/net-test.sh` with an absolute `NET_TEST_OUT` built zenix-slirp into the source tree (`$PWD/$OUT`): fixed
+  (found while testing).
+- **Part r** uses an ext2 floppy (`df1`) as the local mount after the NFS one; part **u** the shipped users `user`
+  (1000) and `guest` (1001) and the test server's squash (`.ctl-squash-1026-100`, DSM's "map all users"); the
+  set-user-id program is `id` (mode 4755, root's) on the share, and the same file copied to the root runs as root.
+
+Sizes: nfscd 54,120 bytes of text (+2,526 for the silly rename and CHOWN's check), 9,456 of bss; netd +226 bytes;
+libz's region heap unchanged in code; the kernel unchanged (160,888 bytes on the disk).

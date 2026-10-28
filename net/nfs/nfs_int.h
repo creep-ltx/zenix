@@ -11,6 +11,7 @@
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
+typedef int8_t s8;
 typedef int16_t s16;
 typedef int32_t s32;
 typedef uint64_t u64;
@@ -142,6 +143,7 @@ struct res {
 #define NF_REF 8                         /* referenced since the clock hand passed */
 #define NF_USED 16                       /* the slot holds a file */
 #define NF_COMMIT 32                     /* a commit is wanted (the last close, 7.3) */
+#define NF_SILLY 64                      /* unlinked while open: renamed to .nfsXXXX, removed at its last close */
 #define NODE_FH 36                       /* a handle up to this long lives in the node itself */
 struct node {
     u32 ino;
@@ -194,6 +196,8 @@ struct op {
     u32 rb_base, rb_next, rb_mask;       /* READ: the blocks (ops.c read_go) */
     u64 rb_end;
     u32 wlen, wok, werr_at;              /* WRITE: bytes copied; answered; the first failed piece's offset */
+    s8 sil;                              /* UNLINK, RENAME: the silly-rename entry it made, -1 none */
+    u8 stries;                           /* silly names tried */
 };
 #define OPF_FRESH 1                      /* its node's attributes were fetched in this request */
 #define OPF_WAITMOUNT 2                  /* waits for the mount (lazy) */
@@ -201,6 +205,7 @@ struct op {
 #define OPF_CANCEL 8
 #define OPF_LINKS 16                     /* D26: the kernel takes FS_LINKED (UMSG_LINKS): no link is followed */
 #define OPF_RO 32                        /* D26: a read-only mount's refusal waits until the walk found no link */
+#define OPF_UCHK 64                      /* UNLINK, RENAME: the target name was looked up (is it an open file?) */
 
 /* ---- the calls on the wire (3.4) ---- */
 #define C_FREE 0
@@ -229,6 +234,20 @@ struct call {
 #define CP_PIECE 201                     /* an unsaved piece's WRITE */
 #define CP_COMMIT 202
 #define CP_UMNT 203
+#define CP_SRENAME 204                   /* the silly rename of an unlinked open file (cseq: its entry) */
+#define CP_SREMOVE 205                   /* its removal after the last close */
+
+/* ---- unlinked open files (the main session's decision (b), 2026-10-28: Linux's "silly rename") ----
+ * An UNLINK (or a RENAME over) of a regular file the kernel holds open renames it to .nfsXXXXXXXXYYYY in its
+ * directory instead; the last FS_CLOSE (and its unsaved data committed) removes it. The file node and the directory
+ * are pinned while the entry lives. */
+#define NSILLY 8
+#define SILLY_NAME 16                    /* ".nfs" + 8 + 4 hex digits */
+struct silly { u16 node, dir; u8 state, cred, len; char name[SILLY_NAME + 1]; };   /* state: SL_* */
+#define SL_FREE 0
+#define SL_RENAMING 1                    /* its RENAME is out */
+#define SL_LIVE 2                        /* renamed; removed once closed and saved */
+#define SL_REMOVING 3
 
 /* ---- the unsaved buffer (7.1) ---- */
 #define PS_COPY 1                        /* bytes are being copied in (waits for room) */
@@ -318,6 +337,9 @@ struct nfs {
     u32 quit_at;                         /* FS_QUIT: when its commits give up */
     s16 quitop;
     u8 logged_full;
+    struct silly silly[NSILLY];
+    u16 sillyctr;
+    u8 nsilly, logged_silly;
 };
 extern struct nfs N;
 
@@ -377,6 +399,9 @@ void ops_timers(u32 now);
 u32 ops_next(u32 now);
 void ops_notanswering(void);
 void ops_poke(void);
+void silly_reply(struct call *c, struct res *r);   /* CP_SRENAME, CP_SREMOVE */
+void silly_kick(void);                   /* remove the unlinked files that are closed and saved */
+int silly_left(void);                    /* entries still on the NAS (FS_QUIT waits for them) */
 /* write.c */
 int wr_start(int o);                     /* FS_WRITE: copy, send */
 void wr_piece_reply(struct call *c, struct res *r);

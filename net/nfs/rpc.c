@@ -288,6 +288,10 @@ static void broken(int counts)
         if (c->state != C_SENT) continue;
         out = 1;
         if (c->op < 0 && c->purpose < CP_MOUNT) { call_free((int)i); continue; }   /* nobody waits for it */
+        if (c->op < 0 && c->purpose == CP_SRENAME) {     /* its names were its request's: not sent again, the */
+            fail_call((int)i, -ECONNABORTED);           /* stand-in name is taken as made (its removal finds out) */
+            continue;
+        }
         if (counts && ++c->brk >= 2) {
             lg("a request broke the connection twice: given up (-EIO)", 0, -1, 0);
             fail_call((int)i, -EIO);
@@ -333,6 +337,7 @@ void call_done(int i, struct res *r)
     case CP_UMNT: umount_reply(c, r); break;
     case CP_PIECE: wr_piece_reply(c, r); break;
     case CP_COMMIT: wr_commit_reply(c, r); break;
+    case CP_SRENAME: case CP_SREMOVE: silly_reply(c, r); break;
     default:
         if (c->op >= 0) op_reply(c->op, c, r);
         else N.st.dropped_late++;

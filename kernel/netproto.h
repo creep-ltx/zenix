@@ -93,6 +93,7 @@ struct unetready { u32 sock, bits; };
 #define SO_SNDBUF    7
 #define SO_RCVBUF    8
 #define SO_KEEPALIVE 9
+#define SO_LINGER   13          /* struct linger (user/socket.h); {1, 0}: close by abort (D23 step 3) */
 #define TCP_NODELAY  1          /* level IPPROTO_TCP */
 #define SHUT_RD      0
 #define SHUT_WR      1

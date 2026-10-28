@@ -125,7 +125,10 @@ EOF
     chk "^stat newdir/ln -> 0 .*size=100000"
     chk "^open newdir/x.txt wcx -> -17"
     chk "^chmod newdir/x.txt 600 -> 0"
-    chk "^ls newdir -> 0 entries=4"
+    # x.txt is still open (the script never closes it): its unlink renamed it to a .nfs name (silly rename)
+    chk "^ls newdir -> 0 entries=5"
+    chk '^  \.nfs[0-9a-f]\{12\} '
+    ls -A "$d/export/newdir" | /usr/bin/grep -q '^\.nfs[0-9a-f]\{12\}$' || { bad "unfs3: the open, unlinked file's .nfs name is not on the disk"; okk=0; }
     chk "^sync -> 0"
     chk "^quit -> 0"
     /usr/bin/grep -q '^FAIL\|AddressSanitizer\|runtime error' "$o" && { bad "unfs3: the client reported a fault"; okk=0; }

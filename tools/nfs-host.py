@@ -11,10 +11,15 @@ file", then acted on half a second later):
     .ctl-prog2         /export/prog is replaced by the second program (a change made on the PC)
     .ctl-rootchange    another export at the same address (its handles change)
     .ctl-restart       the NAS restarts (a new write verifier; what was not committed is lost)
-Usage: nfs-host.py OUTDIR PROG1 PROG2 [--nfs 2049]
+    .ctl-blackrestart-N  nothing is answered for N seconds, then the NAS restarts (a write during the stop)
+    .ctl-squash-U-G    every user and root act as user U, group G (DSM's "map all users"); .ctl-nosquash ends it
+    .ctl-dump-NAME     the tree into OUTDIR/tree-NAME.txt: one line a file, "path type mode uid gid size md5
+                       committed-md5" (directories and links: "-" for the sums; a link's target after "->")
+Usage: nfs-host.py OUTDIR PROG1 PROG2 [PROG3] [--nfs 2049]   (PROG3: /export/suidid, mode 4755, root's)
 Writes OUTDIR/ready when it serves, OUTDIR/big.bin (the 100 KB file, for the checksums) and OUTDIR/ctl.log (one line
 a command).
 """
+import hashlib
 import importlib.util
 import os
 import sys
@@ -49,10 +54,20 @@ class TestSim(sim_mod.Sim):
         with open(os.path.join(self.out, "ctl.log"), "a") as f:
             f.write("%.1f %s\n" % (time.time(), cmd))
         word, _, n = cmd.partition("-")
-        secs = float(n) if n else 0
+        secs = float(n) if n.replace(".", "").isdigit() else 0
         if word == "blackhole":
             self.fault("blackhole", 1)
             threading.Timer(secs, self.end_blackhole).start()
+        elif word == "blackrestart":
+            self.fault("blackhole", 1)
+            threading.Timer(secs, self.end_blackhole, args=(True,)).start()
+        elif word == "squash":
+            u, _, g = n.partition("-")
+            self.fault("squash", (int(u), int(g)))
+        elif word == "nosquash":
+            self.fault("squash", None)
+        elif word == "dump":
+            self.dump(n)
         elif word == "down":
             self.fault("down")
             threading.Timer(secs, self.fault, args=("up",)).start()
@@ -64,10 +79,33 @@ class TestSim(sim_mod.Sim):
         elif word == "restart":
             self.fault("restart")
 
-    def end_blackhole(self):
+    def end_blackhole(self, restart=False):
         with self.lock:
             self.faults.pop("blackhole", None)
+            if restart:
+                self.fault("restart")                   # a new verifier, the uncommitted data lost, connections reset
         self.close_all()                                # the half-open connections are reset: the client reconnects
+
+    def dump(self, name):
+        lines = []
+        with self.lock:
+            def walk(ino, path):
+                for n in sorted(ino.entries):
+                    c = self.inodes[ino.entries[n]]
+                    p = path + "/" + n.decode("utf-8", "replace")
+                    if c.type == sim_mod.NF3REG:
+                        sums = "%s %s" % (hashlib.md5(bytes(c.data)).hexdigest(), hashlib.md5(bytes(c.committed)).hexdigest())
+                    elif c.type == sim_mod.NF3LNK:
+                        sums = "- - -> " + c.target.decode("utf-8", "replace")
+                    else:
+                        sums = "- -"
+                    lines.append("%s %d %o %d %d %d %s" % (p, c.type, c.mode, c.uid, c.gid,
+                                                           len(c.data) if c.type == sim_mod.NF3REG else 0, sums))
+                    if c.type == sim_mod.NF3DIR:
+                        walk(c, p)
+            walk(self.inodes[self.root], "")
+        with open(os.path.join(self.out, "tree-%s.txt" % name), "w") as f:
+            f.write("\n".join(lines) + "\n")
 
 
 def main():
@@ -91,6 +129,9 @@ def main():
     s.put_file("åäö.txt", "räksmörgås\n".encode())
     with open(prog1, "rb") as f:
         s.put_file("prog", f.read(), mode=0o755)
+    if len(a) > 3 and not a[3].startswith("--"):
+        with open(a[3], "rb") as f:
+            s.put_file("suidid", f.read(), mode=0o4755, uid=0, gid=0)
     open(os.path.join(out, "ready"), "w").close()
     print("nfs-host: serving", s.ports, flush=True)
     while True:
