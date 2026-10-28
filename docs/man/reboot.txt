@@ -10,7 +10,10 @@ SYNOPSIS
 DESCRIPTION
     reboot first writes a new random seed into /var/lib/random-seed
     (random(4)), so what this session gathered is in the next start's
-    pool (marked creditable when the pool was seeded). Then it does
+    pool (marked creditable when the pool was seeded), and, when the
+    clock is trusted (set this boot by the battery clock or by sntp(8)),
+    raises the certificate time's floor in /var/lib/clock to now. Then
+    it does
     what pressing Ctrl-Amiga-Amiga does on a keyboard that sends the
     reset warning: every filesystem is synced, disk writes are
     stopped, and the machine is reset. The next boot's log (dmesg -p)

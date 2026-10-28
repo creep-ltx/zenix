@@ -119,6 +119,12 @@ static inline int sys_utimes(const char *p, u32 t) { return sys3(56, (u32)p, t, 
 static inline int sys_lstat(const char *p, struct ustat *st) { return sys3(57, (u32)p, (u32)st, sizeof *st); }
 static inline u32 sys_time(void) { return (u32)sys3(58, 0, 0, 0); }
 static inline int sys_settime(u32 t) { return sys3(59, t, 0, 0); }
+/* from a checked source (sntp): the kernel marks the clock CLOCK_NET (D21 8.3) */
+static inline int sys_settime_checked(u32 t) { return sys3(59, t, 1, 0); }
+#define CLOCK_RTC 1     /* sys_clockbits: the battery clock set the time at boot */
+#define CLOCK_NET 2     /* sys_clockbits: set this boot from a checked source (sntp) */
+/* who set the time this boot: CLOCK_RTC, CLOCK_NET (negative from a kernel before them) */
+static inline int sys_clockbits(void) { return sys3(20, 2, 0, 0); }
 static inline int sys_isatty(int fd) { return sys3(60, (u32)fd, 0, 0); }
 static inline int sys_getuid(void) { return sys3(61, 0, 0, 0); }
 static inline int sys_getgid(void) { return sys3(62, 0, 0, 0); }

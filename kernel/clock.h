@@ -13,6 +13,7 @@ struct wclock {
     u32 base;                   /* seconds since 1970 at boot (whatever secs counted is taken off when set) */
     volatile u32 secs;          /* whole seconds since boot */
     volatile u8 sub;            /* ticks into the current second, 0-99 */
+    u8 trust;                   /* CLOCK_RTC, CLOCK_NET (kernel.h): who set the time this boot; SYS_ticks 2 */
 };
 
 #define WCLOCK_HZ 100           /* the tick's rate (main.c's CIA-A timer A) */

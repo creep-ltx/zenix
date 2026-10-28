@@ -82,7 +82,9 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   a write there would land in a chip register: hand-off note C1); the clock then counts only if its seconds are seen
   ticking. The RP5C01 is read with its timer stopped (bank 0, MODE 0) and restarted after, so a read at a rollover
   cannot mix old and new digits (hand-off note C4). Seen in FS-UAE (the boot log's `clock:` line); no test compares
-  it.
+  it. A time read from it marks the clock `CLOCK_RTC`; `SYS_settime` with its second argument 1 (sntp's guarded
+  answer, DESIGN D21 8.3) adds `CLOCK_NET`, with 0 (`date -s`) clears both; `SYS_ticks` 2 answers the bits (wget
+  trusts the clock's dates, reboot raises `/var/lib/clock`, only while one is set; `tools/wget-test.sh`).
 - Storage: Gayle IDE (A600/A1200/A4000) with an RDB partition table, or a **RAM disk** that the bootblock reads
   from the floppy into memory (for machines with no IDE disk, e.g. a PiStorm A1200 booted from a Gotek), or the
   **SD card of a Raspberry Pi 4 / CM4 under Emu68** (PiStorm; `kernel/emmc.c`, see below - host-tested, and

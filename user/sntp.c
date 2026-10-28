@@ -10,13 +10,14 @@
 #include "../net/sntp/sntp.h"
 #include "../crypto/zc/zc_clock.h"
 #include "builddate.h"
+#include "clockfile.h"
 
-/* Was the battery clock read at boot (so the guard compares with it)? The kernel has no way to say yet (the main
- * line's proposal: SYS_ticks argument 2's CLOCK_RTC bit); until it has, no: an answer raises the floor only when it
- * is at most 400 days past it (sntp_judge). */
+/* Was the battery clock read at boot (so the guard compares with it; SYS_ticks 2)? If not, an answer raises the floor
+ * only when it is at most 400 days past it (sntp_judge). */
 static int have_rtc(void)
 {
-    return 0;
+    int b = sys_clockbits();
+    return b > 0 && (b & CLOCK_RTC);
 }
 
 static void civil(u32 t, char *out, u32 cap)
@@ -45,35 +46,6 @@ static void warn(void *u, int line, const char *what)
 {
     (void)u;
     fprintf(2, "sntp: /etc/sntp line %d: %s (ignored)\n", line, what);
-}
-
-/* the floor file: 0 and *t, or -1 when there is none that reads */
-static int read_floor(uint32_t *t)
-{
-    char b[ZC_CLOCK_LINE];
-    int fd = sys_open(ZC_CLOCK_PATH, O_RDONLY), n;
-    if (fd < 0)
-        return -1;
-    n = sys_read(fd, b, sizeof b);
-    sys_close(fd);
-    return n > 0 && zc_clock_parse(b, (size_t)n, t) == 0 ? 0 : -1;
-}
-
-/* /var/lib/clock := t (written beside, then renamed: never half a line); 0 or a negative error */
-static int write_floor(uint32_t t)
-{
-    static const char tmp[] = ZC_CLOCK_PATH ".new";
-    char b[ZC_CLOCK_LINE];
-    int n = zc_clock_line(b, t), fd = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC), w;
-    if (fd < 0)
-        return fd;
-    w = sys_write(fd, b, (u32)n);
-    sys_close(fd);
-    if (w != n || (w = sys_chmod(tmp, 0644)) < 0 || (w = sys_rename(tmp, ZC_CLOCK_PATH)) < 0) {
-        sys_unlink(tmp);
-        return w < 0 ? w : -EIO;
-    }
-    return 0;
 }
 
 static u32 now_ms(void)
@@ -182,7 +154,7 @@ int main(int argc, char **argv)
         return 1;
     }
     if (reset) {
-        int e = write_floor(ZENIX_BUILD_DATE);
+        int e = clockfile_write(ZENIX_BUILD_DATE);
         civil(ZENIX_BUILD_DATE, d1, sizeof d1);
         if (e < 0) {
             fprintf(2, "sntp: cannot write %s: %s\n", ZC_CLOCK_PATH, zstrerror(e) ? zstrerror(e) : "failed");
@@ -204,7 +176,7 @@ int main(int argc, char **argv)
         fprintf(2, "sntp: /etc/sntp names no server\n");
         return 1;
     }
-    floor = zc_clock_floor(ZENIX_BUILD_DATE, read_floor(&file) == 0, file);
+    floor = zc_clock_floor(ZENIX_BUILD_DATE, clockfile_read(&file) == 0, file);
     start = now_ms();
     deadline = start + SNTP_MAXWAIT * 1000;
     for (i = 0; i < c.n; i++) {
@@ -222,13 +194,15 @@ int main(int argc, char **argv)
             fprintf(2, "sntp: %s: its time %s is before the floor %s: refused\n", c.host[i], d1, d2);
             continue;
         }
-        if (sys_settime(t) < 0) {
+        /* only an answer that passed the guard marks the clock trusted (CLOCK_NET): the rest clears the marks, so
+         * neither wget's "not before" nor reboot's floor ever leans on an answer the guard did not accept */
+        if ((j & SNTP_RAISE ? sys_settime_checked(t) : sys_settime(t)) < 0) {
             fprintf(2, "sntp: cannot set the clock: %s\n", zwhy("refused"));
             return 1;
         }
         printf("sntp: the clock set from %s: %s (it was %ld s off)\n", c.host[i], d1, (long)t - (long)was);
         if (j & SNTP_RAISE) {
-            int e = write_floor(t);     /* t is past the floor (sntp_judge): the file only rises */
+            int e = clockfile_write(t);     /* t is past the floor (sntp_judge): the file only rises */
             if (e < 0)
                 fprintf(2, "sntp: cannot write %s: %s\n", ZC_CLOCK_PATH, zstrerror(e) ? zstrerror(e) : "failed");
         } else {

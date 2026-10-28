@@ -184,7 +184,9 @@ SBIN = {"zup"}
 BASE_SBIN = ["zfsd", "netd"]              # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
 # the licence notices of the code from other projects (owner decision, DESIGN D19 2026-10-27), as tools/mkroot.sh
 LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("tools/font_8x8.COPYING", "font_8x8"),
-            ("user/xfer/LICENSE", "zmodem")]
+            ("user/xfer/LICENSE", "zmodem"), ("crypto/bearssl/LICENSE", "BearSSL"), ("crypto/monocypher/LICENCE", "Monocypher"),
+            ("tools/certdata.COPYING", "certdata")]
+ANCHORS = "anchors"                       # DESIGN D21 8.1: build/anchors (tools/mkanchors.py) as /etc/ssl/anchors
 FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
 
 
@@ -218,6 +220,8 @@ def std_packages(build, uapps):
     base += [("f", 0o644, 0, 0, os.path.join(ROOT, f), "/usr/share/licenses/" + n) for f, n in LICENSES]
     base += [("d", 0o755, 0, 0, None, "/usr/share/consolefonts"),
              ("f", 0o644, 0, 0, os.path.join(build, FONT), "/usr/share/consolefonts/" + FONT)]
+    base += [("d", 0o755, 0, 0, None, "/etc/ssl"), ("d", 0o755, 0, 0, None, "/etc/ssl/local"),
+             ("f", 0o644, 0, 0, os.path.join(build, ANCHORS), "/etc/ssl/" + ANCHORS)]
     base += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", c), "/etc/" + c) for c in BASE_CONFIG]
     make_package(out, "base", vnum, vstr, base, group="base", deps=[("zup", vnum)] if "zup" in names else [])
     utils = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p))
