@@ -23,13 +23,31 @@
  * At the end a line "unmarked-writes N" if fsd wrote a block while the volume was not marked (never right).
  * open FLAGS also take x (O_EXCL).
  * An inode argument "%N" is the inode number the N-th successful open returned.
- * Every command prints one line "CMD -> RESULT ...". Used by tools/ext2-host-test.sh. */
+ * Every command prints one line "CMD -> RESULT ...". Used by tools/ext2-host-test.sh.
+ * Built with -DZFSD it drives the ZenixFS server (user/zenixfsd.c, zenixfs/zenixfs.c) on a ZenixFS image instead: the
+ * same commands but cut, unclean, mark, idle and state (ext2's clean mark), "mount" ignores root (tools/zfsd-host-test.sh). */
+#ifdef ZFSD                                               /* -DZFSD: the ZenixFS server (user/zenixfsd.c) instead */
+#include "zhost.h"
+struct udirent { u32 ino; u32 type; char name[64]; };    /* usys.h's (zhost.h has none; ext2.h is not included) */
+struct ustat { u32 ino, mode, size, mtime; u32 uid, gid, links; };
+static inline long sys3(u32 nr, u32 a, u32 b, u32 c) { (void)nr; (void)a; (void)b; (void)c; return 0; }   /* main only */
+#define main fsd_main
+#include "../../user/zenixfsd.c"
+#undef main
+int sys_svc_self(void) { return 1; }
+#else
 #define main fsd_main
 #include "../../user/fsd.c"
 #undef main
-int sys_svc_self(void) { return 1; }                      /* a first start: no restart rules */
+int sys_svc_self(void) { return 1; }
+#endif                      /* a first start: no restart rules */
 int sys_svc_opens(u32 *ino, u32 bytes) { (void)ino; (void)bytes; return 0; }
 
+#ifdef ZFSD
+#define CWD ROOT                                          /* the working directory of relative paths: the root */
+#else
+#define CWD 2
+#endif
 static unsigned cur_uid, cur_gid, raw, links;
 static int opened[100], nopened;
 static u32 num(const char *s) { return s && s[0] == '%' && atoi(s + 1) > 0 && atoi(s + 1) <= nopened ? (u32)opened[atoi(s + 1) - 1] : (u32)atoi(s ? s : "0"); }
@@ -62,9 +80,11 @@ static u32 flags_of(const char *s)
 int main(void)
 {
     char line[1024];
+#ifndef ZFSD
     disk_port = 1;
     ext2_busy = open_busy;
     cache_by_memory();                                    /* HOSTDISK_NOFAST: as on a machine without fast RAM */
+#endif
     static char big[1 << 20];
     while (fgets(line, sizeof line, stdin)) {
         line[strcspn(line, "\n")] = 0;
@@ -73,9 +93,15 @@ int main(void)
         int r = 0;
         struct ustat st;
         if (!strcmp(cmd, "mount")) {
+#ifdef ZFSD
+            r = try_mount("hd0", 0);
+            printf("mount -> %d\n", r);
+            continue;
+#else
             r = try_mount("hd0", a && !strcmp(a, "root") ? EXT2_RW : EXT2_ANY, 0);
             printf("mount -> %d%s\n", r, ext2_readonly ? " readonly" : "");
             continue;
+#endif
         }
         if (!strcmp(cmd, "raw")) { raw = a && !strcmp(a, "on"); printf("raw -> %u\n", raw); continue; }
         if (!strcmp(cmd, "links")) { links = a && !strcmp(a, "on"); printf("links -> %u\n", links); continue; }
@@ -85,7 +111,7 @@ int main(void)
         if (b && strlen(b) < sizeof pb && strcmp(cmd, "chmod") && strcmp(cmd, "utimes") && strcmp(cmd, "chown") &&
             strcmp(cmd, "open") && strcmp(cmd, "write") && strcmp(cmd, "read") && strcmp(cmd, "as")) { strcpy(pb, b); b = pb; }
         if (!strcmp(cmd, "as")) { cur_uid = (unsigned)atoi(a); cur_gid = (unsigned)atoi(b); printf("as -> %u %u\n", cur_uid, cur_gid); continue; }
-        if (!strcmp(cmd, "open")) { r = req(FS_OPEN, (u32)a, 2, flags_of(b ? b : "r"), (u32)&st); if (r > 0 && nopened < 100) opened[nopened++] = r; }
+        if (!strcmp(cmd, "open")) { r = req(FS_OPEN, (u32)a, CWD, flags_of(b ? b : "r"), (u32)&st); if (r > 0 && nopened < 100) opened[nopened++] = r; }
         else if (!strcmp(cmd, "close")) r = req(FS_CLOSE, num(a), 0, 0, 0);
         else if (!strcmp(cmd, "write")) {
             const char *t = c ? c : "";
@@ -99,25 +125,25 @@ int main(void)
             if (r > 0) { big[r] = 0; printf("read -> %d %s\n", r, r <= 200 ? big : "(long)"); continue; }
         } else if (!strcmp(cmd, "fstat") || !strcmp(cmd, "stat") || !strcmp(cmd, "lstat")) {
             r = !strcmp(cmd, "fstat") ? req(FS_FSTAT, num(a), (u32)&st, 0, 0)
-                                      : req(!strcmp(cmd, "stat") ? FS_STAT : FS_LSTAT, (u32)a, 2, (u32)&st, 0);
+                                      : req(!strcmp(cmd, "stat") ? FS_STAT : FS_LSTAT, (u32)a, CWD, (u32)&st, 0);
             if (r == 0) { printf("%s -> 0 ino %u mode %o size %u links %u uid %u gid %u mtime %u\n", cmd, st.ino, st.mode, st.size, st.links, st.uid, st.gid, st.mtime); continue; }
         }
-        else if (!strcmp(cmd, "chdir")) r = req(FS_CHDIR, (u32)a, 2, 0, 0);
-        else if (!strcmp(cmd, "unlink")) r = req(FS_UNLINK, (u32)a, 2, 0, 0);
-        else if (!strcmp(cmd, "rmdir")) r = req(FS_RMDIR, (u32)a, 2, 0, 0);
-        else if (!strcmp(cmd, "mkdir")) r = req(FS_MKDIR, (u32)a, 2, 0, 0);
-        else if (!strcmp(cmd, "symlink")) r = req(FS_SYMLINK, (u32)a, (u32)b, 2, 0);
-        else if (!strcmp(cmd, "link")) r = req(FS_LINK, (u32)a, (u32)b, 2, 0);
-        else if (!strcmp(cmd, "rename")) r = req(FS_RENAME, (u32)a, (u32)b, 2, 0);
-        else if (!strcmp(cmd, "chmod")) r = req(FS_CHMOD, (u32)a, 2, (u32)strtol(b, 0, 8), 0);
-        else if (!strcmp(cmd, "utimes")) r = req(FS_UTIMES, (u32)a, 2, !strcmp(b, "now") ? FS_UTIME_NOW : (u32)atoi(b), 0);
-        else if (!strcmp(cmd, "chown")) { char *g = strtok(c, " "); r = req(FS_CHOWN, (u32)a, 2, (u32)atoi(b), g ? (u32)atoi(g) : 0xFFFFFFFFu); }
+        else if (!strcmp(cmd, "chdir")) r = req(FS_CHDIR, (u32)a, CWD, 0, 0);
+        else if (!strcmp(cmd, "unlink")) r = req(FS_UNLINK, (u32)a, CWD, 0, 0);
+        else if (!strcmp(cmd, "rmdir")) r = req(FS_RMDIR, (u32)a, CWD, 0, 0);
+        else if (!strcmp(cmd, "mkdir")) r = req(FS_MKDIR, (u32)a, CWD, 0, 0);
+        else if (!strcmp(cmd, "symlink")) r = req(FS_SYMLINK, (u32)a, (u32)b, CWD, 0);
+        else if (!strcmp(cmd, "link")) r = req(FS_LINK, (u32)a, (u32)b, CWD, 0);
+        else if (!strcmp(cmd, "rename")) r = req(FS_RENAME, (u32)a, (u32)b, CWD, 0);
+        else if (!strcmp(cmd, "chmod")) r = req(FS_CHMOD, (u32)a, CWD, (u32)strtol(b, 0, 8), 0);
+        else if (!strcmp(cmd, "utimes")) r = req(FS_UTIMES, (u32)a, CWD, !strcmp(b, "now") ? FS_UTIME_NOW : (u32)atoi(b), 0);
+        else if (!strcmp(cmd, "chown")) { char *g = strtok(c, " "); r = req(FS_CHOWN, (u32)a, CWD, (u32)atoi(b), g ? (u32)atoi(g) : 0xFFFFFFFFu); }
         else if (!strcmp(cmd, "readlink")) {
-            r = req(FS_READLINK, (u32)a, 2, (u32)big, 255);
+            r = req(FS_READLINK, (u32)a, CWD, (u32)big, 255);
             if (r > 0) { big[r] = 0; printf("readlink -> %d %s\n", r, big); continue; }
         } else if (!strcmp(cmd, "ls")) {
             struct ustat ds;
-            int ino = req(FS_OPEN, (u32)a, 2, O_RDONLY, (u32)&ds);
+            int ino = req(FS_OPEN, (u32)a, CWD, O_RDONLY, (u32)&ds);
             if (ino < 0) { printf("ls -> %d\n", ino); continue; }
             u32 cookie = 0, n = 0;
             struct udirent e;
@@ -131,6 +157,9 @@ int main(void)
         else if (!strcmp(cmd, "writes")) { extern unsigned long hostdisk_writes; printf("writes -> %lu\n", hostdisk_writes); continue; }
         else if (!strcmp(cmd, "sync")) r = req(FS_SYNC, 0, 0, 0, 0);
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);
+#ifdef ZFSD
+        else if (!strcmp(cmd, "dirty")) { printf("dirty -> %d\n", dirty); continue; }   /* changes not yet committed */
+#else
         else if (!strcmp(cmd, "unclean")) {                             /* what a restarted fsd does after a crash */
             fsd_marking = 1; r = ext2_mark_unclean(); fsd_marking = 0;
             if (!r) need = marked = 1;
@@ -144,6 +173,7 @@ int main(void)
                    norphans, fsd_unmarked_writes);
             continue;
         }
+#endif
         else { printf("%s -> unknown command\n", cmd); continue; }
         if (fsl_is(r)) {                                  /* D26: which argument was rewritten, and to what */
             int one = (-r - FS_LINKED) & FSL_A1;
@@ -153,6 +183,8 @@ int main(void)
         }
         printf("%s -> %d\n", cmd, r);
     }
+#ifndef ZFSD
     if (fsd_unmarked_writes) printf("unmarked-writes %lu\n", fsd_unmarked_writes);
+#endif
     return 0;
 }

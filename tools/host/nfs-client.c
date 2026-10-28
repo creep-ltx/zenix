@@ -14,6 +14,8 @@
  *   utimes P T|now | statfs | sync [1] | quit
  *   as UID GID [G...]          later requests come from this user (supplementary groups G)
  *   raw on|off                 later requests come as a user's own SYS_call (no UMSG_KERNEL)
+ *   links on|off               later requests carry UMSG_LINKS (DESIGN D26): an FS_LINKED answer prints
+ *                              "CMD -> -102N a0|a1 TEXT"; any path buffer changed otherwise is a FAIL line
  *   bg CMD...                  start a request without waiting; "id N" (its id) is printed
  *   wait ID                    wait for that request's answer
  *   cancel ID                  the message gets UMSG_CANCEL: nfs_cancel
@@ -81,11 +83,30 @@ void nfs_save(const void *buf, uint32_t n)
 }
 
 #define NANS 256
-static struct { uint32_t id; long res; int done; } ans[NANS];
+/* D26: a request's path (and FS_SYMLINK's target) buffers as sent: an answer may change only the one its FS_LINKED says */
+static struct { uint32_t id; long res; int done; uint32_t type; char *p[2]; char was[2][FS_PATHMAX + 1]; } ans[NANS];
+static int path_args(uint32_t type)              /* bit 0: a0 is a path (or target text), bit 1: a1 */
+{
+    switch (type) {
+    case FS_OPEN: case FS_STAT: case FS_LSTAT: case FS_CHDIR: case FS_MKDIR: case FS_UNLINK: case FS_RMDIR:
+    case FS_CHMOD: case FS_CHOWN: case FS_UTIMES: case FS_READLINK: return 1;
+    case FS_RENAME: case FS_LINK: case FS_SYMLINK: return 3;
+    }
+    return 0;
+}
 static uint32_t next_id = 1;
 void nfs_answer(uint32_t id, long result)
 {
-    for (int i = 0; i < NANS; i++) if (ans[i].id == id && !ans[i].done) { ans[i].res = result; ans[i].done = 1; return; }
+    for (int i = 0; i < NANS; i++) if (ans[i].id == id && !ans[i].done) {
+        ans[i].res = result; ans[i].done = 1;
+        int may = fsl_is(result) ? ((-result - FS_LINKED) & FSL_A1 ? 1 : 0) : -1;
+        if (fsl_is(result) && !fsl_ok(ans[i].type, (unsigned)(-result - FS_LINKED)))
+            printf("FAIL request %u (type %u): FS_LINKED bits %ld outside the table\n", id, ans[i].type, -result - FS_LINKED);
+        for (int k = 0; k < 2; k++)
+            if (ans[i].p[k] && k != may && strcmp(ans[i].p[k], ans[i].was[k]))
+                printf("FAIL request %u (type %u, answer %ld): its a%d changed to \"%s\"\n", id, ans[i].type, result, k, ans[i].p[k]);
+        return;
+    }
     printf("FAIL an answer for an unknown request %u\n", id);
 }
 
@@ -166,7 +187,7 @@ static void turn(int ms)
 }
 
 /* ---- the kernel's side ---- */
-static uint16_t cuid, cgid, cumask = 022, raw, ngroups;
+static uint16_t cuid, cgid, cumask = 022, raw, links, ngroups;
 static uint32_t groups[NFS_NGROUPS];
 
 static uint32_t send_req(uint32_t type, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, int cancelled)
@@ -176,12 +197,16 @@ static uint32_t send_req(uint32_t type, uintptr_t a0, uintptr_t a1, uintptr_t a2
     r.id = next_id++;
     r.type = type; r.a[0] = a0; r.a[1] = a1; r.a[2] = a2; r.a[3] = a3;
     r.uid = cuid; r.gid = cgid; r.umask = cumask;
-    r.kflags = (raw ? 0 : NFS_REQ_KERNEL) | (cancelled ? NFS_REQ_CANCEL : 0);
+    r.kflags = (raw ? 0 : NFS_REQ_KERNEL) | (cancelled ? NFS_REQ_CANCEL : 0) | (links ? NFS_REQ_LINKS : 0);
     r.ngroups = ngroups; memcpy(r.groups, groups, sizeof groups);
     int i;
     for (i = 0; i < NANS; i++) if (!ans[i].id) break;
     if (i == NANS) { printf("FAIL too many requests in the test\n"); exit(1); }
-    ans[i].id = r.id; ans[i].done = 0;
+    ans[i].id = r.id; ans[i].done = 0; ans[i].type = type;
+    for (int k = 0; k < 2; k++) {
+        ans[i].p[k] = (path_args(type) >> k & 1) && r.a[k] ? (char *)r.a[k] : 0;
+        if (ans[i].p[k]) snprintf(ans[i].was[k], sizeof ans[i].was[k], "%s", ans[i].p[k]);
+    }
     /* as nfscd: a message stays queued on the port while the core has no free slot (NFS_P_TAKE); FS_CLOSE and a
      * cancelled message are taken at once (they need none) */
     uint32_t t, start = nfs_now();
@@ -224,8 +249,17 @@ static uint32_t fnv(const unsigned char *b, long n)
     for (long i = 0; i < n; i++) h = (h ^ b[i]) * 16777619u;
     return h;
 }
+static char *lastp[2];                           /* the last request's path buffers (FS_LINKED's TEXT) */
+static int plinked(const char *what, long r)
+{
+    if (!fsl_is(r)) return 0;
+    int k = (-r - FS_LINKED) & FSL_A1;
+    printf("%s -> %ld a%d %s\n", what, r, k, lastp[k] ? lastp[k] : "?");
+    return 1;
+}
 static void pstat(const char *what, long r, struct ustat_ *st)
 {
+    if (plinked(what, r)) return;
     if (r < 0) printf("%s -> %ld\n", what, r);
     else printf("%s -> %ld ino=%u mode=%o size=%u uid=%u gid=%u links=%u\n", what, r, st->ino, st->mode, st->size,
                 st->uid, st->gid, st->links);
@@ -319,6 +353,7 @@ static void do_cmd(char *line, int bg, int cancelled)
     int handled = 1;
     if (v[1]) snprintf(P(0), 256, "%s", v[1]);
     if (v[2]) snprintf(P(1), 256, "%s", v[2]);
+    lastp[0] = P(0); lastp[1] = P(1);
     if (!strcmp(c, "mount")) {
         static struct fsinfo fi;
         id = send_req(FS_ROOT, (uintptr_t)(bg ? &((typeof(bgs[0]) *)keep)->fi : &fi), 0, 0, 0, cancelled);
@@ -340,7 +375,7 @@ static void do_cmd(char *line, int bg, int cancelled)
         static char lb[512];
         memset(lb, 0, sizeof lb);
         id = send_req(FS_READLINK, (uintptr_t)P(0), 2, (uintptr_t)lb, 255, cancelled);
-        if (!bg) { r = wait_for(id); if (r >= 0) printf("%s -> %ld %.*s\n", line, r, (int)r, lb); else printf("%s -> %ld\n", line, r); return; }
+        if (!bg) { r = wait_for(id); if (plinked(line, r)) return; if (r >= 0) printf("%s -> %ld %.*s\n", line, r, (int)r, lb); else printf("%s -> %ld\n", line, r); return; }
     } else if (!strcmp(c, "read") && n >= 4) {
         long len = atol(v[3]);
         if (len > (long)sizeof bigbuf) len = sizeof bigbuf;
@@ -439,7 +474,7 @@ static void do_cmd(char *line, int bg, int cancelled)
     if (handled) {
         if (bg) { printf("%s -> id %u\n", line, id); return; }
         r = wait_for(id);
-        printf("%s -> %ld\n", line, r);
+        if (!plinked(line, r)) printf("%s -> %ld\n", line, r);
         return;
     }
     if (!strcmp(c, "wait") && n >= 2) {
@@ -461,6 +496,7 @@ static void do_cmd(char *line, int bg, int cancelled)
         printf("%s -> ok\n", line);
     } else if (!strcmp(c, "umask") && n >= 2) { cumask = (uint16_t)strtoul(v[1], 0, 8); printf("%s -> ok\n", line); }
     else if (!strcmp(c, "raw") && n >= 2) { raw = !strcmp(v[1], "on"); printf("%s -> ok\n", line); }
+    else if (!strcmp(c, "links") && n >= 2) { links = !strcmp(v[1], "on"); printf("%s -> ok\n", line); }
     else if (!strcmp(c, "kill")) { nfs_kill(); printf("kill -> ok\n"); }
     else if (!strcmp(c, "poll")) { uint32_t t; int b = nfs_poll(&t); printf("poll -> %d\n", b); }
     else if (!strcmp(c, "stats")) {

@@ -1020,9 +1020,12 @@ is put after the link's directory inside the volume (without its leading `/`), a
 An empty target is -ENOENT, a NUL in one -EIO, a target over 255 bytes or a TEXT over 159 -ENAMETOOLONG. The decision
 comes first: the ext2 server (fsd) walks a changing request's paths before its read-only refusal and its clean mark
 (D17), so a `chmod` through a link out of a read-only volume is bounced, not refused, and a bounced request writes
-nothing; a permission failure met before the link stays -EACCES, and the -EACCES mapping never touches the answer.
-Without the bit, or for a relative path, every server follows links inside its own volume as before (an old kernel, a
-root program's raw request). Verified by the host tests (`tools/ext2-host-test.sh`).
+nothing; the ZenixFS server (zfsd) walks before it changes anything anyway; nfscd's core answers it at the first
+`READLINK`, writes TEXT into the client's buffer only at the answer (never after a cancel or a kill), and on a read-only
+mount refuses a changing request only after its walk. A permission failure met before the link stays -EACCES, and the
+-EACCES mapping never touches the answer. Without the bit, or for a relative path, every server follows links inside
+its own volume as before (an old kernel, a root program's raw request). Verified by the host tests
+(`tools/ext2-host-test.sh`, `zenixfs/tests/zfsd-test.sh`, nfs-sim-test's `links`, `nfs-fuzz`).
 
 ## 10. The filesystem
 

@@ -264,6 +264,71 @@ def t_basic():
     sim.stop()
 
 
+def t_links():
+    """DESIGN D26: with UMSG_LINKS the core follows no link and answers FS_LINKED (TEXT in the client's buffer at the
+    answer only); a read-only mount refuses only after the walk; without the bit, or for a relative path, as before"""
+    sim = new_sim()
+    sim.mkdir("d")
+    sim.mkdir("d/sub")
+    sim.put_file("d/sub/f", b"F")
+    sim.symlink("d/abs", "/etc/motd")
+    sim.symlink("d/rel", "../x/y")
+    sim.symlink("d/s2", "sub")
+    sim.symlink("d/long", "/" + "r" * 255)
+    sim.symlink("d/l150", "/" + "p" * 149)
+    sim.symlink("d/empty", "")
+    sim.symlink("d/nul", "a\0b")
+    c = Client()
+    c.cmd("mount")
+    c.cmd("links on")
+    want = [("stat /d/abs/x", "-1024 a0 /etc/motd/x"), ("stat /d/abs", "-1024 a0 /etc/motd"),
+            ("open /d/abs r", "-1026 a0 /etc/motd"), ("open /d/abs/m r", "-1024 a0 /etc/motd/m"),
+            ("open /d/abs wc", "-1026 a0 /etc/motd"), ("open /d/abs/q wcx", "-1024 a0 /etc/motd/q"),
+            ("stat /d/rel/z", "-1024 a0 d/../x/y/z"), ("chdir /d/s2", "-1024 a0 d/sub"),
+            ("mkdir /d/s2/new", "-1024 a0 d/sub/new"), ("unlink /d/s2/f", "-1024 a0 d/sub/f"),
+            ("rmdir /d/s2/x", "-1024 a0 d/sub/x"), ("rename /d/sub/f /d/s2/g", "-1025 a1 d/sub/g"),
+            ("rename /d/s2/f /d/sub/g", "-1024 a0 d/sub/f"), ("link /d/abs /d/sub/h", "-1024 a0 /etc/motd"),
+            ("link /d/sub/f /d/s2/h", "-1025 a1 d/sub/h"), ("symlink some/target /d/s2/l", "-1025 a1 d/sub/l"),
+            ("chmod /d/abs 600", "-1024 a0 /etc/motd"), ("chown /d/abs 5 5", "-1024 a0 /etc/motd"),
+            ("utimes /d/abs 1000", "-1024 a0 /etc/motd"), ("stat /d/l150/x", "-1024 a0 /" + "p" * 149 + "/x"),
+            ("stat /d/l150/xyzxyzxyzx", "-36"), ("stat /d/long/x", "-36"), ("stat /d/empty/x", "-2"),
+            ("stat /d/nul/x", "-5"), ("stat d/abs/x", "-2"), ("readlink /d/abs", "9 /etc/motd")]
+    for cmd, w in want:
+        r = c.cmd(cmd)
+        ok(r == w, "links: %s: %s (want %s)" % (cmd, r, w))
+    ok(c.cmd("open /d/abs wcx") == "-17", "links: O_CREAT|O_EXCL on a link: -EEXIST")
+    ok(field(c.cmd("lstat /d/abs"), "mode") == "120777", "links: lstat is not followed")
+    ok(sim.path("d/sub/f") and not sim.path("d/sub/new") and not sim.path("d/sub/g") and not sim.path("d/sub/h") and
+       not sim.path("d/sub/l") and not sim.path("etc"), "links: the bounced requests changed nothing on the NAS")
+    sim.fault("delay", 800)                      # a cancel while the READLINK is out: -EINTR, the buffer untouched
+    rid = c.cmd("bg stat /d/abs/c").split()[-1]
+    c.cmd("sleep 100")
+    c.cmd("cancel " + rid)
+    ok(res(c.cmd("wait " + rid)) == -4, "links: a cancelled request: -EINTR (and its buffer unchanged: no FAIL line)")
+    sim.fault("delay", 0)
+    c.cmd("sleep 1000")
+    c.cmd("links off")
+    ok(res(c.cmd("stat /d/s2/f")) == 0, "links off: followed inside the export as before")
+    ok(res(c.cmd("stat /d/abs/x")) == -2, "links off: an absolute target from the export's root as before")
+    c.cmd("quit")
+    c.end()
+    c = Client("-c", "o")                        # read-only: FS_LINKED before EROFS
+    c.cmd("mount")
+    c.cmd("links on")
+    for cmd, w in [("chmod /d/abs 600", "-1024 a0 /etc/motd"), ("mkdir /d/s2/q", "-1024 a0 d/sub/q"),
+                   ("open /d/abs/x wc", "-1024 a0 /etc/motd/x"), ("rename /d/sub/f /d/s2/g", "-1025 a1 d/sub/g"),
+                   ("mkdir /d/q", "-30"), ("chmod /d/sub 700", "-30"), ("open /d/sub/f w", "-30"),
+                   ("rename /d/sub/f /d/sub/g", "-30")]:
+        r = c.cmd(cmd)
+        ok(r == w, "read-only, links: %s: %s (want %s)" % (cmd, r, w))
+    c.cmd("links off")
+    ok(c.cmd("chmod /d/abs 600") == "-30", "read-only without the bit: refused at once as before")
+    ok(not sim.path("d/q") and sim.path("d/sub").mode == 0o755, "read-only: nothing changed")
+    c.cmd("quit")
+    c.end()
+    sim.stop()
+
+
 def t_bigdir():
     sim = new_sim()
     sim.mkdir("many")
@@ -767,7 +832,7 @@ SCENARIOS = {
     "large": t_large,
     "basic": t_basic, "bigdir": t_bigdir, "faults": t_faults, "restart": t_restart, "drc": t_drc, "stale": t_stale,
     "saved": t_restart_saved, "bad": t_bad_replies, "hard": t_hard_soft, "quit": t_quit_dead, "lazy": t_lazy,
-    "cancel": t_cancel, "users": t_users, "cache": t_cache, "parallel": t_parallel,
+    "cancel": t_cancel, "links": t_links, "users": t_users, "cache": t_cache, "parallel": t_parallel,
 }
 
 

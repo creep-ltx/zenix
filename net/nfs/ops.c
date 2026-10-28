@@ -6,7 +6,9 @@
  *
  * The path walk: LOOKUP per name not in the name cache (a cached name is used when the directory's search right is
  * known for the caller), symbolic links followed by READLINK at most 8 deep, absolute targets from the export's root,
- * ".." never above it, a link target plus the rest of the path at most FS_PATHMAX.
+ * ".." never above it, a link target plus the rest of the path at most FS_PATHMAX. With UMSG_LINKS (DESIGN D26) and an
+ * absolute path no link is followed: the first READLINK's target gives the FS_LINKED answer, its TEXT written into the
+ * client's buffer only in op_finish (never after a cancel or a kill); a read-only mount refuses only after the walk.
  */
 #include "nfs_int.h"
 
@@ -57,6 +59,11 @@ void op_finish(int o, long result)
     if (op->cred != 0xFF) cred_put(op->cred);
     op->used = 0;
     N.st.ops++;
+    if (fsl_is(result) && op->lwalk) {           /* D26: TEXT into the client's buffer, only now, at the answer */
+        int a1 = op->type == FS_SYMLINK || op->lwalk == 2;
+        char *dst = (char *)op->a[a1];
+        if (dst) memcpy(dst, op->w[op->lwalk - 1].buf, strlen(op->w[op->lwalk - 1].buf) + 1);
+    }
     nfs_answer(op->id, result);                  /* the link to the message is cut here (4.3) */
 }
 
@@ -225,6 +232,19 @@ static int walk_reply(int o, struct call *c)
     if (R->has_attr) node_attr(c->node, &R->attr);
     if (R->err) { op->err = R->err; return -1; }
     u32 tl = R->count, rest = c->count;
+    if ((op->flags & OPF_LINKS) && w->buf[0] == '/') {     /* D26: the kernel follows it: TEXT, -FS_LINKED */
+        char t[FS_PATHMAX + 1];                  /* built aside, then over the walk's own copy of the path */
+        u32 e = w->pos;
+        while (w->buf[e] && w->buf[e] != '/') e++;
+        int r = fsl_text(t, w->buf, w->pos, e, (const char *)R->data, tl);
+        if (r) { op->err = r; return -1; }
+        int a1 = op->type == FS_SYMLINK || c->walk == 1;
+        int last = op->type == FS_OPEN && !w->buf[rest];
+        memcpy(w->buf, t, strlen(t) + 1);
+        op->lwalk = (u8)(c->walk + 1);
+        op->err = -(FS_LINKED + (a1 ? FSL_A1 : 0) + (last ? FSL_LAST : 0));
+        return -1;
+    }
     for (u32 i = 0; i < tl; i++) if (!R->data[i]) { op->err = -EIO; return -1; }
     u32 rl = (u32)strlen(w->buf + rest);
     if (!tl) { op->err = -ENOENT; return -1; }
@@ -281,6 +301,14 @@ static void statfs_answer(uintptr_t dst)
 
 /* ---- the requests ---- */
 static void run(int o);
+
+/* D26: a read-only mount's refusal of a changing request with UMSG_LINKS, once its walks met no link */
+static int ro_gate(int o)
+{
+    if (!(N.ops[o].flags & OPF_RO)) return 0;
+    op_finish(o, -EROFS);
+    return 1;
+}
 
 static int wait_mount(int o)
 {
@@ -350,7 +378,10 @@ void op_start(int o)
         u32 t = op->type;
         if (t == FS_WRITE || t == FS_MKDIR || t == FS_UNLINK || t == FS_RMDIR || t == FS_RENAME || t == FS_LINK ||
             t == FS_SYMLINK || t == FS_CHMOD || t == FS_CHOWN || t == FS_UTIMES ||
-            (t == FS_OPEN && (op->a[2] & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)))) { op_finish(o, -EROFS); return; }
+            (t == FS_OPEN && (op->a[2] & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC)))) {
+            if (!(op->flags & OPF_LINKS) || t == FS_WRITE) { op_finish(o, -EROFS); return; }
+            op->flags |= OPF_RO;                 /* D26: after the walk, which may answer FS_LINKED first */
+        }
     }
     run(o);
 }
@@ -520,6 +551,7 @@ static void run(int o)
                 op->step = 2;
                 /* fall through */
             case 2: {
+                if (ro_gate(o)) return;
                 int r = need_attr2(o, op->node, 1);   /* every open asks again: close-to-open (6.1) */
                 op->step = 3;
                 if (r) return;
@@ -548,6 +580,7 @@ static void run(int o)
                 continue;
             }
             case 10: {                           /* create: the walk left the directory and the name */
+                if (ro_gate(o)) return;
                 struct walk *w = &op->w[0];
                 const char *name = w->buf + w->pos;
                 if (!w->nlen || is_dotname(name, w->nlen)) { op_finish(o, -EEXIST); return; }
@@ -719,6 +752,7 @@ static void run(int o)
             if (op->step == 1) {
                 if (walk_run(o, 0)) return;
                 if (op->err) continue;
+                if (ro_gate(o)) return;
                 struct walk *w = &op->w[0];
                 const char *name = w->buf + w->pos;
                 if (!w->nlen || is_dotname(name, w->nlen)) {
@@ -760,6 +794,7 @@ static void run(int o)
             if (op->step == 2) {
                 if (walk_run(o, 1)) return;
                 if (op->err) continue;
+                if (ro_gate(o)) return;
                 struct walk *w0 = &op->w[0], *w1 = &op->w[1];
                 const char *n1 = w1->buf + w1->pos;
                 if (!w1->nlen || is_dotname(n1, w1->nlen)) { op_finish(o, op->type == FS_LINK ? -EEXIST : -EINVAL); return; }
@@ -791,6 +826,7 @@ static void run(int o)
             if (op->step == 1) {
                 if (walk_run(o, 0)) return;
                 if (op->err) continue;
+                if (ro_gate(o)) return;
                 op->node = op->w[0].node;
                 memset(&op->sa, 0, sizeof op->sa);
                 if (op->type == FS_CHMOD) { op->sa.set_mode = 1; op->sa.mode = (u32)op->a[2] & 07777; }

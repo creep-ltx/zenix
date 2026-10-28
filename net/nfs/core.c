@@ -329,6 +329,7 @@ void nfs_request(const struct nfs_req *r)
     memcpy(op->a, r->a, sizeof op->a);
     op->uid = r->uid; op->gid = r->gid; op->umask = r->umask;
     op->cred = (u8)cr;
+    if (r->kflags & NFS_REQ_LINKS) op->flags |= OPF_LINKS;
     op->node = op->node2 = N_NONE;
     op_start(o);
 out:

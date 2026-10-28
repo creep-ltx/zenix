@@ -1,5 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
+#ifdef ZHOST
+#include "../tools/host/zhost.h"           /* the host tests (tools/host/fsd-host.c built with -DZFSD) */
+#else
 #include "libz.h"
+#endif
 #include "../kernel/diskproto.h"
 #include "zenixfs_disk.h"
 #include "diskcall.h"
