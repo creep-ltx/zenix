@@ -92,7 +92,11 @@ NOTES
     try goes on from it. The console's font and rules are
     telnet's while it runs: they are put back when it ends or is
     suspended (the screen is cleared before the PC font goes, as its
-    bytes would be junk in Topaz).
+    bytes would be junk in Topaz). The board's colours, scroll region,
+    hidden cursor and an escape sequence it left open end there too.
+    A board that reads nothing of what telnet sends: the escape key
+    ends the call at once (other keys typed then are dropped), and
+    after 60 s without room telnet ends it by itself.
     Only Topaz from the ROM is used for Amiga boards (no other Amiga
     fonts are shipped). PC art was drawn for 8x16 cells: in the console's
     8x8 cells it looks as in the PC's 50-line mode. At 8 colours a bright

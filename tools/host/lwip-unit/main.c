@@ -33,9 +33,9 @@ unsigned long netd_os_clock4us(void) { return lwip_sys_now * 250; }
 struct dhcp;
 struct pbuf;
 /* DHCP's name servers go to netd (net/netd/iface.c), which these tests do not build: nobody keeps them here */
-void netd_dhcp_option(struct dhcp *n, int msg_type, int option, int len, struct pbuf *p, int offset)
+void netd_dhcp_option(struct dhcp *n, int state, int msg_type, int option, int len, struct pbuf *p, int offset)
 {
-    (void)n; (void)msg_type; (void)option; (void)len; (void)p; (void)offset;
+    (void)n; (void)state; (void)msg_type; (void)option; (void)len; (void)p; (void)offset;
 }
 void netd_lwip_assert(int line)
 {

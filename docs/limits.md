@@ -148,13 +148,15 @@ pointers.
   (-ENFILE beyond); each is also one of the 64 open files and one of a process's 16 fds; a buffer is checked and
   sent at most 64 KB a message (a blocking stream send loops, a datagram over 64 KB is -EMSGSIZE); an address at most
   28 bytes (the true length is still returned), an option's value at most 64; `SO_RCVTIMEO`/`SO_SNDTIMEO` in ticks
-  (10 ms). Without `net` registered (no `/sbin/netd`) every socket call is -ENETDOWN.
+  (10 ms), at most about 248 days (a longer one is cut to that). Without `net` registered (no `/sbin/netd`) every
+  socket call is -ENETDOWN.
 - The network server, netd (DESIGN D19 step 4, man/netd.txt): IPv4 only, no raw IP sockets, no firewall; its buffers
   are fixed at its start by the machine: below 2 MB of free fast RAM (the stock A1200) 8 TCP connection ends (a
   loopback connection takes two; TIME_WAIT ones are given up first when full), 4 listening sockets, 8 UDP and ICMP
   sockets, a 1,932-byte window, a 4 KB send buffer each, 8 datagrams or 4 KB queued per UDP socket, 24 KB of buffers
   in all; with more, 32 ends, 8 listeners, 16 UDP sockets, 16 KB windows and send buffers, 200 KB in all. A socket
-  over a limit is refused at once (-ENOBUFS). At most 8 requests a turn; `/etc/hosts` at most 64 names and 16 KB (so
+  over a limit is refused at once (-ENOBUFS). The users other than root together hold at most all TCP ends but 2
+  and all UDP sockets but 4 (6 and 4 on the stock A1200), so root's servers always find one. At most 8 requests a turn; `/etc/hosts` at most 64 names and 16 KB (so
   `/etc/resolv.conf`), 2 name servers; a lookup answers at most 4 addresses; `netstat` shows at most 64 rows.
   `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL); a pipe is non-blocking only when
   made so (`sys_pipe2(fds, O_NONBLOCK)`, both ends).

@@ -75,8 +75,8 @@ static int answer(const unsigned char *f, unsigned n)
 /* the kernel's refusals (dma: the caller holds a claim) */
 static void checks(int claim, u32 base, u32 dma, u32 dmalen)
 {
-    char line[200];
-    struct udrvquiesce bad;
+    char line[260];
+    struct udrvquiesce bad, wrap;
     memset(&bad, 0, sizeof bad);
     bad.n = 1;
     bad.step[0].op = DRVS_WRITE;
@@ -85,6 +85,10 @@ static void checks(int claim, u32 base, u32 dma, u32 dmalen)
     int again = sys_drv(DRV_CLAIM, base, 0);
     int dma2 = sys_drv(DRV_DMAMEM, (u32)claim, 4096);
     int qout = sys_drv(DRV_QUIESCE, (u32)claim, (u32)&bad);
+    wrap = bad;                                                 /* audit 2026-10-28 S5: addr + size wraps to 0 */
+    wrap.step[0].size = 4;
+    wrap.step[0].addr = 0xFFFFFFFCu;
+    int qwrap = sys_drv(DRV_QUIESCE, (u32)claim, (u32)&wrap);
     int cin = sys_drv(DRV_CACHE | DRVC_CLEAN << 8, dma + 100, 200);
     int cout = sys_drv(DRV_CACHE | DRVC_CLEAN << 8, dma + dmalen - 8, 64);
     int other = sys_drv(DRV_DMAMEM, (u32)claim + 1, 4096);
@@ -94,11 +98,12 @@ static void checks(int claim, u32 base, u32 dma, u32 dmalen)
     memset(&x, 0, sizeof x);
     x.size = sizeof x;
     int early = sys_drv(DRV_XFER, (u32)&x, sizeof x);
-    int ok = again == -EBUSY && dma2 == -EBUSY && qout == -EINVAL && !cin && cout == -EFAULT && other == -EPERM &&
+    int ok = again == -EBUSY && dma2 == -EBUSY && qout == -EINVAL && qwrap == -EINVAL && !cin && cout == -EFAULT && other == -EPERM &&
              hsmall == -EINVAL && early == -ENOTCONN;
     snprintf(line, sizeof line, "kernel checks %s (a second claim %d, a second DMA region %d, a quiesce step outside "
-             "the window %d, cache inside %d, outside %d, a claim not ours %d, a short hardware table %d, a transfer "
-             "before the attach %d)", ok ? "PASS" : "FAIL", again, dma2, qout, cin, cout, other, hsmall, early);
+             "the window %d, one that wraps %d, cache inside %d, outside %d, a claim not ours %d, a short hardware table %d, "
+             "a transfer before the attach %d)", ok ? "PASS" : "FAIL", again, dma2, qout, qwrap, cin, cout, other, hsmall,
+             early);
     drv_out(ifn, line);
 }
 

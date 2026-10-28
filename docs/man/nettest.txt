@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     nettest [-p ADDR] [-n BYTES] CHECK...
     nettest serve tcp|udp PORT echo|sink
+    nettest serve tcp PORT flood
 
 DESCRIPTION
     A test program for the network server, netd(8), and libz's BSD
@@ -82,6 +83,10 @@ DESCRIPTION
 
 EXIT STATUS
     The number of checks that failed.
+
+    nettest serve tcp PORT flood plays a hostile telnet board for
+    tools/bbs-test.sh: it sends IAC DO 200 over and over to its first
+    caller and never reads, until the caller is gone or 120 s pass.
 
 NOTES
     A test program, run by tools/netd-test.sh and tools/slip-test.sh in

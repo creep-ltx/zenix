@@ -7,7 +7,9 @@
 # authorized_keys; then a login with that key runs a command (its exit status 7 comes back); 1 MB from the PC through
 # the session, byte for byte, with the server's rekey (RekeyLimit 1M); a host whose key differs from known_hosts is
 # refused (exit 255); an interactive shell with a terminal: a command, Ctrl-C to a remote sleep, free and ps on
-# console 2 while the session is up (the memory), ~. ends it. Needs sshd, ssh-keygen and openssl on the PC and
+# console 2 while the session is up (the memory), ~. ends it; a known_hosts without its last line end (the new key on a
+# line of its own); root's @revoked refuses a key the user trusts, and ssh-keygen -R keeps an @revoked line (audit
+# 2026-10-28 S15, S16). Needs sshd, ssh-keygen and openssl on the PC and
 # unprivileged user namespaces with an /etc/subuid range (newuidmap).
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -36,7 +38,11 @@ mkd /etc/network 755; mkd /dl 755; mkd /.ssh 700
 printf 'auto eth0\niface eth0 inet dhcp\n    driver a2065\n' > $OUT/interfaces
 put $OUT/interfaces /etc/network/interfaces 644
 put $OUT/seed /tests/seed 600
-echo "[10.0.2.2]:2223 $(cut -d' ' -f1,2 $T/hostkey.pub)" > $OUT/known_hosts   # port 2223 shows hostkey2: changed
+# port 2223 shows hostkey2: changed. No line end after it: the key ssh adds must still go on a line of its own (S16)
+printf '%s' "[10.0.2.2]:2223 $(cut -d' ' -f1,2 $T/hostkey.pub)" > $OUT/known_hosts
+echo "@revoked [10.0.2.2]:2222 $(cut -d' ' -f1,2 $T/hostkey.pub)" > $OUT/revoked        # audit 2026-10-28 S15
+put $OUT/revoked /tests/revoked 644
+mkd /etc/ssh 755
 put $OUT/known_hosts /.ssh/known_hosts 644
 L='for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do ifconfig eth0 2>/dev/null | grep -q "lease [0-9]" && break; sleep 1; done'
 { printf '%s\n' 'wait zenix:/# 120' 'sleep 1' "send $L; echo ==u\"\"p\\r" 'wait ==up 60'
@@ -80,6 +86,12 @@ waitecho Connection to 10.0.2.2 closed 60
 sleep 2
 send echo se=$?\r
 wait se= 30
+send cp /.ssh/known_hosts /tmp/kh1; cp /tests/revoked /etc/ssh/ssh_known_hosts; ssh -p 2222 root@10.0.2.2 true; echo sf=$?\r
+wait sf= 300
+send rm /etc/ssh/ssh_known_hosts; cat /tests/revoked >> /.ssh/known_hosts; ssh-keygen -R '[10.0.2.2]:2222'; echo sg=$?\r
+wait sg= 60
+send ssh -p 2222 root@10.0.2.2 true; echo sh=$?\r
+wait sh= 300
 send dmesg > /tmp/s-k.txt; sync; echo ==do""ne\r
 wait ==done 30
 stop
@@ -91,7 +103,8 @@ ZENIX_BUILD=$BD unshare --map-root-user --map-auto -nm python3 -I tools/ssh-ns.p
 rc=$?
 [ $rc = 0 ] || { echo "FAIL the run (exit $rc)"; grep -a 'FAIL\|ssh-ns' $OUT/s.log | head -5; pass=0; }
 for f in v1 v2 k; do get /tmp/s-$f.txt > $OUT/s-$f.txt; done
-get /.ssh/known_hosts > $OUT/kh-after
+get /tmp/kh1 > $OUT/kh-after
+get /.ssh/known_hosts > $OUT/kh-final
 get /.ssh/id_ed25519.pub > $OUT/id.pub
 debugfs -R "stat /.ssh/id_ed25519" $BD/zenix.hdf 2>/dev/null | grep -o 'Mode: *[0-7]*' > $OUT/idmode
 debugfs -R "dump /dl/big.bin $OUT/big.got" $BD/zenix.hdf >/dev/null 2>&1
@@ -126,6 +139,16 @@ m = re.search(rb"ssh: (\d+) key exchange", v2)
 check(m is not None and int(m.group(1)) >= 2, "... with the server's rekey after 1 MB (RekeyLimit 1M)", m.group(0) if m else v2[-200:])
 check(b"HAS CHANGED: refused" in log and b"sd=255" in log and b"Accepted" not in other,
       "a host whose key differs from known_hosts: refused, exit 255, no login")
+kh = rd(out + "/kh-after")
+check(re.search(rb"^\[10\.0\.2\.2\]:2223 ssh-ed25519 \S+\n\[10\.0\.2\.2\]:2222 ssh-ed25519 ", kh, re.M) is not None,
+      "a known_hosts without its last line end: the new key went on a line of its own (audit 2026-10-28 S16)", kh)
+f = log[log.find(b"/etc/ssh/ssh_known_hosts; ssh -p 2222"):]
+check(b"IS REVOKED: refused" in f and b"sf=255" in f and b"ssh-keygen -R" not in f[:f.find(b"sf=")],
+      "a key the user trusts but root's ssh_known_hosts revokes: refused, and no advice to remove the line (S15)", f[:600])
+khf = rd(out + "/kh-final")
+check(b"@revoked [10.0.2.2]:2222" in khf and b"sg=0" in log and b"marked line" in log and b"sh=255" in log and
+      log.count(b"IS REVOKED: refused") >= 2,
+      "ssh-keygen -R keeps the @revoked line (as OpenSSH): the host stays refused (S15)", khf)
 check(b"hi-42" in log and b"after-2" in log, "an interactive shell with a terminal: a command, Ctrl-C to a remote sleep")
 check(b"Connection to 10.0.2.2 closed." in log and b"se=255" in log, "~. ends the session (exit 255, as OpenSSH)")
 k = rd(out + "/s-k.txt").decode(errors="replace")

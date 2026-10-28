@@ -32,6 +32,8 @@ static void term_off(void)
     raw_on = 0;
 }
 
+static unsigned char sk[64];            /* the identity's private key, wiped on every way out (audit 2026-10-28 S18) */
+
 static void die(const char *fmt, ...)
 {
     char m[200];
@@ -42,6 +44,7 @@ static void die(const char *fmt, ...)
     term_off();
     fprintf(2, "\r\nssh: %s\n", m);
     ssh_wipe(&s);
+    zc_wipe(sk, sizeof sk);
     sys_exit(255);
 }
 
@@ -183,30 +186,39 @@ static void hostkey(void)
     snprintf(kh, sizeof kh, "%s/known_hosts", home_ssh);
     char *t = readfile(kh, &n, 1 << 20);
     int r = ssh_kh_check(t ? t : "", n, host, port, s.hostkey, s.hostkeylen, &line);
+    int needs_nl = t && n > 0 && t[n - 1] != '\n';    /* a file without its last line end: a new line goes after one */
     free(t);
     ssh_fingerprint(fp, s.hostkey, s.hostkeylen);
-    if (r == SSH_KH_UNKNOWN || r == SSH_KH_OTHERTYPE) {
-        char *g = readfile("/etc/ssh/ssh_known_hosts", &n2, 1 << 20);
-        int r2 = ssh_kh_check(g ? g : "", n2, host, port, s.hostkey, s.hostkeylen, &line2);
-        free(g);
-        if (r2 == SSH_KH_OK || r2 == SSH_KH_CHANGED || r2 == SSH_KH_REVOKED) {
-            r = r2;
-            line = line2;
-            strcpy(kh, "/etc/ssh/ssh_known_hosts");
-        }
+    /* both files, as OpenSSH: a key revoked in either is refused (audit 2026-10-28 S15: root's revocation did not
+     * count once the user's own file knew the key); otherwise known in either is known, then changed in either */
+    char *g = readfile("/etc/ssh/ssh_known_hosts", &n2, 1 << 20);
+    int r2 = ssh_kh_check(g ? g : "", n2, host, port, s.hostkey, s.hostkeylen, &line2);
+    free(g);
+    if (r != SSH_KH_REVOKED && (r2 == SSH_KH_REVOKED || (r != SSH_KH_OK && (r2 == SSH_KH_OK ||
+        (r != SSH_KH_CHANGED && r2 == SSH_KH_CHANGED))))) {
+        r = r2;
+        line = line2;
+        strcpy(kh, "/etc/ssh/ssh_known_hosts");
     }
     if (r == SSH_KH_OK) {
         ssh_hostkey(&s, 1);
         return;
     }
-    if (r == SSH_KH_CHANGED || r == SSH_KH_REVOKED) {
+    if (r == SSH_KH_CHANGED) {
         fprintf(2, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
-                   "ssh: THE HOST KEY OF %s %s\n"
+                   "ssh: THE HOST KEY OF %s HAS CHANGED: refused\n"
                    "Someone could be listening, or the host was set up again.\n"
                    "The key it sent: ED25519 %s\n"
                    "The key known: %s line %ld. If the change is right, remove that line\n"
-                   "(ssh-keygen -R %s) and connect again.\n",
-                host, r == SSH_KH_CHANGED ? "HAS CHANGED: refused" : "IS REVOKED: refused", fp, kh, line, host);
+                   "(ssh-keygen -R %s) and connect again.\n", host, fp, kh, line, host);
+        ssh_hostkey(&s, 0);
+        die("host key verification failed");
+    }
+    if (r == SSH_KH_REVOKED) {          /* never "remove that line": that would undo the revocation (S15) */
+        fprintf(2, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
+                   "ssh: THE HOST KEY OF %s IS REVOKED: refused\n"
+                   "The key it sent: ED25519 %s is marked @revoked in %s line %ld.\n"
+                   "A revoked key is never accepted.\n", host, fp, kh, line);
         ssh_hostkey(&s, 0);
         die("host key verification failed");
     }
@@ -231,6 +243,8 @@ static void hostkey(void)
     long ln = ssh_kh_line(l, sizeof l, host, port, s.hostkey, s.hostkeylen);
     sys_mkdir(home_ssh);
     int fd = ln > 0 ? sys_open(kh, O_WRONLY | O_CREAT | O_APPEND) : -1;
+    if (fd >= 0 && needs_nl && strcmp(kh, "/etc/ssh/ssh_known_hosts"))
+        sys_write(fd, "\n", 1);         /* else the new line glued onto the last one spoilt both (S16) */
     if (fd < 0 || sys_write(fd, l, (u32)ln) != (int)ln)
         fprintf(2, "ssh: could not add the key to %s\n", kh);
     else
@@ -239,8 +253,7 @@ static void hostkey(void)
     ssh_hostkey(&s, 1);
 }
 
-/* ---- the identity: -i, else ~/.ssh/id_ed25519 if it is there ---- */
-static unsigned char sk[64];
+/* ---- the identity: -i, else ~/.ssh/id_ed25519 if it is there (sk: above die) ---- */
 static int load_key(const char *path, int must)
 {
     struct ustat st;
@@ -557,6 +570,7 @@ int main(int argc, char **argv)
     if (s.state == SSH_ST_FAILED) {
         fprintf(2, "ssh: %s\n", s.err);
         ssh_wipe(&s);
+        zc_wipe(sk, sizeof sk);
         return 255;
     }
     if (verbose)

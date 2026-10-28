@@ -26,9 +26,10 @@ DESCRIPTION
     yes/no/[fingerprint] (compare it with the fingerprint the host shows:
     on a Linux PC, ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub);
     the key is then kept in ~/.ssh/known_hosts ([host]:port for a port
-    other than 22). Root's /etc/ssh/ssh_known_hosts is read too. A host
-    whose key differs from the one known is refused, with the file and
-    line to remove (ssh-keygen -R host).
+    other than 22). Root's /etc/ssh/ssh_known_hosts is read too, always:
+    a key marked @revoked in either file is refused. A host whose key
+    differs from the one known is refused, with the file and line to
+    remove (ssh-keygen -R host).
 
     Escape keys, after Return: ~. closes the connection, ~^Z suspends ssh
     (fg brings it back), ~? lists them, ~~ sends ~.

@@ -33,6 +33,7 @@ Commands, typed as a line ending in CR (or LF) - each screen ends with CR LF "<<
   art       the hand-made CP437 screen (tools/testdata/bbs-sim/welcome.ans)
   amigaart  the hand-made Latin-1 screen (tools/testdata/bbs-sim/amiga.asc)
   ttype     TTYPE SEND once more                           bye       the board hangs up
+  hostile   hangs up leaving its terminal state: black on black, a scroll region, the cursor hidden, ESC[6n, ESC] open
   sz [-e] [-r] NAME...   the board sends files from --files with lsz (-e: escape controls; -r: ask for a resume;
                          with --window N, lsz -w N: at most N bytes not acknowledged, as a board over TCP should
                          send: without it lsz writes a whole file into its socket buffers and waits only 10 s for
@@ -345,6 +346,10 @@ class Call:
             self.send(b"<<END ttype>>\r\n")
         elif w in ("sz", "rz"):
             self.transfer(words)
+        elif w == "hostile":        # audit 2026-10-28 S12: hangs up leaving black on black, a 2-row scroll region, the
+            # cursor hidden, cursor-key mode, an ESC[6n whose answer nobody reads and a title string never ended
+            self.raw(b"\x1b[30;40m\x1b[?25l\x1b[?1h\x1b[3;4r\x1b[6n\x1b]0;never ended")
+            return False
         elif w == "bye":
             self.send(b"Goodbye.\r\n")
             return False

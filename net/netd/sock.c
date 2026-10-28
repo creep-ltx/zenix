@@ -163,14 +163,37 @@ int netd_changed(struct netd_ready *out, int max)
 }
 
 /* ---- memory of a socket ---- */
+/* lwIP's TCP and UDP pools are everyone's: the users other than root together may hold all but a few of them, so
+ * root's servers and its own connections always find one (as the kernel's NSOCK_ROOT; audit 2026-10-28 S3: one user's
+ * eight sockets took every TCP end of the stock A1200). UDP keeps two more back: DHCP's and DNS's own. */
+static unsigned users_tcp, users_udp;
+static unsigned *users_count(int kind, unsigned uid)
+{
+    if (!uid) return NULL;
+    return kind == K_TCP ? &users_tcp : kind == K_UDP ? &users_udp : NULL;
+}
+static unsigned users_cap(int kind)
+{
+    unsigned n = kind == K_TCP ? netd_lim.tcp_pcbs : netd_lim.udp_pcbs, keep = kind == K_TCP ? 2 : 4;
+    return n > keep ? n - keep : 1;
+}
+static void sock_free(struct nsock *s)
+{
+    unsigned *c = users_count(s->kind, s->uid);
+    if (c && *c) (*c)--;
+    netd_free(s);
+}
 static struct nsock *new_sock(int kind, unsigned uid)
 {
+    unsigned *c = users_count(kind, uid);
+    if (c && *c >= users_cap(kind)) return NULL;
     struct nsock *s = netd_malloc(sizeof *s);
     if (!s) { netd_mem_refused(); return NULL; }
     memset(s, 0, sizeof *s);
     s->kind = (unsigned char)kind;
     s->uid = uid;
     s->dq_tail = &s->dq;
+    if (c) (*c)++;
     return s;
 }
 static void free_dgrams(struct nsock *s)
@@ -192,6 +215,16 @@ static err_t cb_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
     if (!p) { s->eof = 1; return ERR_OK; }              /* the peer's FIN */
     if (s->shut_rd) { tcp_recved(pcb, p->tot_len); pbuf_free(p); return ERR_OK; }
     if (s->rx) pbuf_cat(s->rx, p); else s->rx = p;      /* bounded by the window: tcp_recved comes after the read */
+    /* the window bounds bytes, not buffers: tiny segments each held a whole receive buffer until the program read
+     * them, and a peer sending 16 one-byte segments took every buffer of the stock A1200 (audit 2026-10-28 S4). A
+     * chain of more than 4 buffers that are mostly empty is copied into one block of netd's heap */
+    {
+        u16_t n = pbuf_clen(s->rx);
+        if (n > 4 && s->rx->tot_len < (u32_t)n * 256) {
+            struct pbuf *q = pbuf_clone(PBUF_RAW, PBUF_RAM, s->rx);
+            if (q) { pbuf_free(s->rx); s->rx = q; }
+        }
+    }
     return ERR_OK;
 }
 static err_t cb_sent(void *arg, struct tcp_pcb *pcb, u16_t len)
@@ -217,7 +250,7 @@ static void cb_err(void *arg, err_t err)
     if (s->pending) {                   /* died before the program accepted it */
         listener_unqueue(s);
         if (s->rx) pbuf_free(s->rx);
-        netd_free(s);
+        sock_free(s);
         return;
     }
     if (s->tstate == T_CONNECTING) s->err = err == ERR_RST ? ECONNREFUSED : ETIMEDOUT;
@@ -385,11 +418,11 @@ int netd_socket(unsigned idx, unsigned gen, int domain, int type, int protocol, 
     if (!s) return -ENOBUFS;
     if (kind == K_TCP) {
         s->tcp = tcp_new();
-        if (!s->tcp) { netd_free(s); netd_mem_refused(); return -ENOBUFS; }
+        if (!s->tcp) { sock_free(s); netd_mem_refused(); return -ENOBUFS; }
         tcp_set_callbacks(s);
     } else if (kind == K_UDP) {
         s->udp = udp_new();
-        if (!s->udp) { netd_free(s); netd_mem_refused(); return -ENOBUFS; }
+        if (!s->udp) { sock_free(s); netd_mem_refused(); return -ENOBUFS; }
         udp_recv(s->udp, udp_recv_cb, s);
     } else {
         int tries;
@@ -397,7 +430,7 @@ int netd_socket(unsigned idx, unsigned gen, int domain, int type, int protocol, 
             u16_t id = (u16_t)netd_rand();
             if (id && !icmp_by_id(id)) { s->icmp_id = id; break; }
         }
-        if (!s->icmp_id) { netd_free(s); return -EADDRINUSE; }
+        if (!s->icmp_id) { sock_free(s); return -EADDRINUSE; }
     }
     s->idx = (u16_t)idx; s->gen = (u16_t)gen;
     slots[idx].s = s;
@@ -494,7 +527,9 @@ int netd_listen(unsigned idx, unsigned gen, int backlog)
         e = tcp_bind(s->tcp, IP_ADDR_ANY, 0);
         if (e != ERR_OK) return lwip_errno(e);
     }
-    s->acq = netd_malloc((unsigned long)backlog * sizeof *s->acq);
+    /* room for the cap, not this backlog: a second listen() may raise the backlog up to it, and cb_accept fills
+     * acq up to acq_max (audit 2026-10-28 S1: a listen(1) then listen(16) wrote past a block sized for 1) */
+    s->acq = netd_malloc((unsigned long)netd_lim.backlog * sizeof *s->acq);
     if (!s->acq) { netd_mem_refused(); return -ENOBUFS; }
     l = tcp_listen_with_backlog_and_err(s->tcp, (u8_t)backlog, &e);
     if (!l) { netd_free(s->acq); s->acq = NULL; return lwip_errno(e); }
@@ -807,7 +842,7 @@ int netd_close(unsigned idx, unsigned gen)
                 struct nsock *c = s->acq[i];
                 if (c->tcp) { tcp_detach(c->tcp); tcp_abort(c->tcp); }
                 if (c->rx) pbuf_free(c->rx);
-                netd_free(c);
+                sock_free(c);
             }
             netd_free(s->acq);
             if (s->tcp) { tcp_arg(s->tcp, NULL); tcp_accept(s->tcp, NULL); tcp_close_or_queue(s->tcp); }
@@ -829,7 +864,7 @@ int netd_close(unsigned idx, unsigned gen)
     case K_RESOLVE:
         break;                          /* an answer still coming finds no socket (its generation) */
     }
-    netd_free(s);
+    sock_free(s);
     return 0;
 }
 

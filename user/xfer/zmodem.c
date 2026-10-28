@@ -769,6 +769,12 @@ static int zm_receive_(struct Z *z, XferIO *io, const unsigned char *pre,
                     send_pos(z, ZRPOS, have);
                     break;
                 }
+                if (size && have + (unsigned long)z->dlen > size) {
+                    /* more than the sender said the file has: a board filling the disk (audit 2026-10-28 S14);
+                     * what came is kept as the part, the session ends */
+                    io->show(io->u, name, have, size, 3);
+                    goto fail;
+                }
                 if (z->dlen &&
                     io->wwrite(io->u, f, z->data, z->dlen) != z->dlen) {
                     io->show(io->u, name, have, size, 3);

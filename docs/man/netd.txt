@@ -41,7 +41,9 @@ DESCRIPTION
       large   2 MB of free fast RAM or more: 32 connections, 16 KB
               windows and send buffers, 200 KB of buffers in all
     The kernel log says which (dmesg: "netd: serving net, epoch N, small
-    profile (24 KB of buffers)").
+    profile (24 KB of buffers)"). The users other than root together get
+    all TCP connections but 2 and all UDP sockets but 4 (6 and 4 on the
+    small profile): root's servers always find one.
 
     The files are never read for a request other than ifup's (a floppy
     read would stall the network).

@@ -20,14 +20,46 @@ static const char *host, *dldir;
 static struct tn tn;
 static struct tf tf;
 
+/* Everything to the other side goes through here. A board that stops reading (or floods requests telnet must answer)
+ * fills the send buffer: a blocking send then held telnet inside the decoder, where the keys were never read and the
+ * escape key did nothing (audit 2026-10-28 S11). So the send never blocks: while the buffer is full telnet waits for
+ * room and for the keys; the escape key ends the call (other keys typed then are dropped), and a board that takes
+ * nothing for 60 s ends it too. */
+#define STALL_SECS 60
 static void sendall(void *u, const unsigned char *b, long n)
 {
     (void)u;
-    while (n > 0) {
-        int w = send(sock, b, (u32)n, 0);
-        if (w <= 0) { quit = 1; return; }       /* the connection is gone: the loop ends */
-        b += w;
-        n -= w;
+    int stalled = 0;
+    while (n > 0 && !quit) {
+        int w = send(sock, b, (u32)n, MSG_DONTWAIT);
+        if (w > 0) {
+            b += w;
+            n -= w;
+            stalled = 0;
+            continue;
+        }
+        if (w == 0 || zerrno != EAGAIN) { quit = 1; return; }  /* the connection is gone: the loop ends */
+        struct pollfd p[2];
+        p[0].fd = sock; p[0].events = POLLOUT; p[0].revents = 0;
+        p[1].fd = 0; p[1].events = POLLIN; p[1].revents = 0;
+        int r = poll(p, eof_keys ? 1 : 2, 1000);
+        if (r == 0 && ++stalled >= STALL_SECS) {
+            fprintf(2, "\r\ntelnet: %s has read nothing for %d s: the call is ended\r\n", host, STALL_SECS);
+            quit = 1;
+            return;
+        }
+        if (r > 0 && !eof_keys && p[1].revents) {
+            unsigned char k[64];
+            int m = sys_read(0, k, sizeof k);
+            if (m <= 0)
+                eof_keys = 1;
+            for (int i = 0; i < m; i++)
+                if (k[i] == esc_key) {
+                    fprintf(2, "\r\ntelnet: %s is not reading what is sent: the call is ended\r\n", host);
+                    quit = 2;
+                    return;
+                }
+        }
     }
 }
 
@@ -122,6 +154,10 @@ static void term_on(void)
 
 static void term_off(void)
 {
+    /* the board's terminal state ends with the call (audit 2026-10-28 S12): a string left open (ESC ] with no end
+     * swallowed everything after it), its colours (black on black), scroll region, hidden cursor, cursor-key mode */
+    if (raw_on && sys_isatty(1))
+        sys_write(1, TN_TERM_RESET, sizeof TN_TERM_RESET - 1);
     font_set(0);
     if (rules_ok)
         sys_conrules(1, (u32)rules_old & RULES_MINE, RULES_MINE);
@@ -738,6 +774,14 @@ int main(int argc, char **argv)
             keys_in();
     }
     tf_flush(&tf);
+    if (raw_on && !eof_keys) {                  /* keys and the console's answers (ESC[6n) not yet read: never the
+                                                 * shell's (audit 2026-10-28 S12: "1;1R" at the next prompt) */
+        struct pollfd k;
+        unsigned char b[64];
+        k.fd = 0; k.events = POLLIN; k.revents = 0;
+        while (poll(&k, 1, 0) > 0 && sys_read(0, b, sizeof b) > 0)
+            k.revents = 0;
+    }
     term_off();
     sys_close(sock);
     printf(quit == 2 ? "\r\nConnection closed.\n" : "\r\nConnection closed by %s.\n", host);

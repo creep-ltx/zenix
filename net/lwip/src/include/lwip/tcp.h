@@ -382,6 +382,9 @@ struct tcp_pcb {
   /* KEEPALIVE counter */
   u8_t keep_cnt_sent;
 
+  /* Zenix local patch 0003: tcp_ticks + 1 when the last ACK to an out-of-window segment of length 0 went out */
+  u32_t oow_ack_tick;
+
 #if LWIP_WND_SCALE
   u8_t snd_scale;
   u8_t rcv_scale;

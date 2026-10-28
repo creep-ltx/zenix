@@ -29,7 +29,10 @@ void tty_input(u8 c) { (void)c; typed++; }
 static int woken;
 void ev_wake(u32 *mask) { (void)mask; woken++; }     /* D16: the reader's slot mask */
 void ev_arm(u32 *mask) { (void)mask; }
-void rnd_event(u32 credit8) { (void)credit8; }      /* D19: the entropy pool */
+static u32 rnd_samples, rnd_credit;                 /* D19: the entropy pool's samples and credit (eighths) */
+void rnd_event(u32 credit8) { rnd_samples++; rnd_credit += credit8; }
+static int net_pid;                                 /* the running netd (D11), 0 none */
+int svc_pid(const char *name) { (void)name; return net_pid; }
 /* the scheduler, for a write that waits (audit A5): each sleep is one tick, and the tick drains the ring */
 volatile u32 ticks;
 static struct proc me;
@@ -191,6 +194,26 @@ int main(void)
     EXPECT_TRUE(((rxq_head - rxq_tail) & rxq_mask) == 32767, "... it holds 32767 unread bytes");
     serdev_close();
     fast_free = 0;
+
+    /* audit 2026-10-28 S8: SLIP's frame ends earn credit only on netd's port, after data, once a tick */
+    me.pid = 7;
+    rnd_samples = rnd_credit = 0;
+    EXPECT_TRUE(serdev_open() == 0, "/dev/ttyS0 opened by a program that is not netd (cu, telnet's rz)");
+    for (int i = 0; i < 512; i++) { fake_rx = 0xC0; serial_rx_isr(); ticks++; }
+    EXPECT_TRUE(rnd_samples == 512 && rnd_credit == 0, "... 512 bytes 0xC0 are mixed and credited nothing");
+    serdev_close();
+    net_pid = 7;
+    rnd_samples = rnd_credit = 0;
+    EXPECT_TRUE(serdev_open() == 0, "/dev/ttyS0 opened by netd (SLIP)");
+    for (int i = 0; i < 512; i++) { fake_rx = 0xC0; serial_rx_isr(); }
+    EXPECT_TRUE(rnd_credit == 0, "... 512 bytes 0xC0 in a row (END END ...): no credit");
+    for (int i = 0; i < 100; i++) { fake_rx = 'x'; serial_rx_isr(); fake_rx = 0xC0; serial_rx_isr(); }
+    EXPECT_TRUE(rnd_credit == RND_CR_SLIP, "... 100 frames in one tick: credited once");
+    for (int i = 0; i < 10; i++) { ticks++; fake_rx = 'x'; serial_rx_isr(); fake_rx = 0xC0; serial_rx_isr(); fake_rx = 0xC0; serial_rx_isr(); }
+    EXPECT_TRUE(rnd_credit == 11 * RND_CR_SLIP, "... a frame a tick: each end credited once (the second END not)");
+    serdev_close();
+    net_pid = 0;
+    me.pid = 0;
 
     /* the kernel log after its ring wrapped (audit 2026-10-26 F10): dmesg's reading (user/klogread.h) gives the
      * 8 KB held exactly once, in order; the old reading (from 0, adding what came) repeats the oldest chunk */

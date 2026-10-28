@@ -148,6 +148,10 @@ static volatile u16 rxq_head, rxq_tail;
 static volatile u32 rxq_lost;
 static u32 rxq_lost_told;
 
+static u8 serdev_slip;                   /* /dev/ttyS0 is netd's (SLIP): its frame ends earn credit */
+static u8 rx_prev;
+static u32 rx_cr_tick;
+
 void serial_rx_isr(void)
 {
     while (INTREQR & INTF_RBF) {
@@ -161,8 +165,18 @@ void serial_rx_isr(void)
         rxq[h] = c;
         rxq_head = nh;
         kwork_pending = 1;
-        if (c == 0xC0)
-            rnd_event(RND_CR_SLIP);     /* a SLIP frame's end: the far machine's clock (D19 9.3) */
+        /* a SLIP frame's end: the far machine's clock (D19 9.3). Credited only while netd owns the port (a board
+         * or a Zmodem file may send runs of 0xC0 to cu or telnet's rz), only after a byte of data (not the second END
+         * of END END), at most once a tick: back-to-back bytes arrive at the sender's fixed byte rate, so their beam
+         * positions follow from each other (audit 2026-10-28 S8: 512 0xC0 bytes seeded the pool in 44 ms). Every
+         * other 0xC0 is mixed for nothing. */
+        if (c == 0xC0) {
+            int cr = serdev_slip && rx_prev != 0xC0 && ticks != rx_cr_tick;
+            if (cr)
+                rx_cr_tick = ticks;
+            rnd_event(cr ? RND_CR_SLIP : 0);
+        }
+        rx_prev = c;
     }
 }
 
@@ -248,6 +262,7 @@ long serdev_open(void)
     if (!ring)
         kprintf("serial: no memory for /dev/ttyS0's %u-byte receive ring: the console's %u bytes are used\n", size, RXQ);
     serdev = 1;
+    serdev_slip = svc_pid("net") == current->pid;
     u16 s = irq_save();
     if (ring) {
         rxq = ring;
@@ -276,6 +291,7 @@ void serdev_close(void)
         kfree(rxq_dev);
     rxq_dev = 0;
     serdev = 0;
+    serdev_slip = 0;
 }
 
 u32 serdev_wait;                        /* D16: the slots waiting for received bytes (event.c) */

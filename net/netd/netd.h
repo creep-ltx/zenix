@@ -109,6 +109,9 @@ struct netd_limits {
 #define NETD_PROFILE_SMALL 0        /* the stock A1200 on SLIP: 7.3's left column */
 #define NETD_PROFILE_LARGE 1        /* a machine with fast RAM and Ethernet: the right column */
 void netd_limits_profile(struct netd_limits *l, int profile);
+/* DHCP option 6 of a message in lwIP's DHCP state `state`: how many name servers are taken (into out, network order);
+ * only from an ACK lwIP itself takes in that state (audit 2026-10-28 S9) */
+int netd_dhcp_dns_take(int state, int msg_type, const unsigned char *b, int len, unsigned long out[2]);
 int netd_init(const struct netd_limits *l, const unsigned char seed[48]);   /* 0, or -EINVAL for bad limits */
 void netd_reseed(const unsigned char seed[48]);     /* fresh keys (/dev/random became readable, or every few minutes) */
 /* One turn of the main loop: read the lines, run lwIP's timers and the loopback, send what waits. Returns the

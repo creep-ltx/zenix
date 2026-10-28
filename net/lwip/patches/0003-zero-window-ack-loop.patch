@@ -1,0 +1,36 @@
+--- a/src/core/tcp_in.c
++++ b/src/core/tcp_in.c
+@@ -1894,8 +1894,19 @@
+   } else {
+     /* Segments with length 0 is taken care of here. Segments that
+        fall out of the window are ACKed. */
+-    if (!TCP_SEQ_BETWEEN(seqno, pcb->rcv_nxt, pcb->rcv_nxt + pcb->rcv_wnd - 1)) {
+-      tcp_ack_now(pcb);
++    /* Zenix local patch 0003: with a zero window, a segment of length 0 at rcv_nxt is acceptable (RFC 9293 3.10.7.4,
++     * the first case of the acceptability test): without this, two lwIP ends with zero windows (over the loopback:
++     * a telnet answering a board that floods it, nobody reading) ACKed each other's ACKs for ever, inside one
++     * netif_poll, and netd never answered again (audit 2026-10-28 S22). Found in FS-UAE with a packet log */
++    if (!(pcb->rcv_wnd == 0 && seqno == pcb->rcv_nxt) &&
++        !TCP_SEQ_BETWEEN(seqno, pcb->rcv_nxt, pcb->rcv_nxt + pcb->rcv_wnd - 1)) {
++      /* and such ACKs at most once a slow-timer tick (500 ms) per connection, as Linux's tcp_invalid_ratelimit:
++       * two ends whose zero-window probes advanced snd_nxt past each other's window otherwise ACK each other's
++       * pure ACKs (each out of the other's window) for ever */
++      if (pcb->oow_ack_tick != tcp_ticks + 1) {
++        pcb->oow_ack_tick = tcp_ticks + 1;
++        tcp_ack_now(pcb);
++      }
+     }
+   }
+ }
+--- a/src/include/lwip/tcp.h
++++ b/src/include/lwip/tcp.h
+@@ -382,6 +382,9 @@
+   /* KEEPALIVE counter */
+   u8_t keep_cnt_sent;
+ 
++  /* Zenix local patch 0003: tcp_ticks + 1 when the last ACK to an out-of-window segment of length 0 went out */
++  u32_t oow_ack_tick;
++
+ #if LWIP_WND_SCALE
+   u8_t snd_scale;
+   u8_t rcv_scale;

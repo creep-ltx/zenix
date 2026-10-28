@@ -26,4 +26,21 @@ elif grep -q 'refusing to put a random seed' "$T/zup.log"; then
 else
     echo "FAIL mkzup.py: $(cat "$T/zup.log")"; pass=0
 fi
+# mkcard.py leaves a seed off the card (audit 2026-10-28 S10: FS-UAE boots build/zenix.hdf in place and may write one)
+mkdir -p "$T/rt/var/lib" "$T/rt/etc" && echo seed > "$T/rt/var/lib/random-seed" && echo x > "$T/rt/etc/keep"
+mke2fs -q -t ext2 -b 1024 -d "$T/rt" "$T/root.img" 4M >/dev/null 2>&1 && python3 tools/mkffs.py "$T/boot.img" 504K ZenixBoot "$T/rt/etc/keep=keep" >/dev/null 2>&1 ||
+    { echo "FAIL could not make the test images"; pass=0; }
+if python3 tools/mkcard.py ide "$T/card.hdf" "$T/boot.img" "$T/root.img" >"$T/card.log" 2>&1 &&
+   grep -q 'left off the card' "$T/card.log" && debugfs -R "stat /var/lib/random-seed" "$T/root.img" 2>/dev/null | grep -q Inode: &&
+   python3 tools/mkcard.py sd "$T/card.img" "$T/boot.img" "$T/root.img" >>"$T/card.log" 2>&1 &&
+   ! cmp -s "$T/card.img" /dev/null; then
+    off=$(python3 -c 'import struct,sys; d=open(sys.argv[1],"rb").read(512); print(struct.unpack("<I", d[446+32+8:446+32+12])[0]*512)' "$T/card.img")
+    dd if="$T/card.img" of="$T/p3.img" bs=1024 skip=$((off / 1024)) count=4096 status=none
+    if debugfs -R "stat /var/lib/random-seed" "$T/p3.img" 2>&1 | grep -q 'File not found' &&
+       debugfs -R "cat /etc/keep" "$T/p3.img" 2>/dev/null | grep -qx x; then
+        echo "PASS mkcard.py leaves a root's random seed off the card (the root itself unchanged)"
+    else echo "FAIL mkcard.py put the seed on the card: $(debugfs -R 'ls -l /var/lib' "$T/p3.img" 2>&1 | tail -3)"; pass=0; fi
+else
+    echo "FAIL mkcard.py with a seeded root: $(cat "$T/card.log")"; pass=0
+fi
 exit $((1 - pass))

@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include "../kernel/term.c"
+#include "../net/telnet/telnet.h"
 
 /* ---- the model display: a cell per position (character, attributes, colours), as the planes would show it ---- */
 int trows = 32;
@@ -484,6 +485,20 @@ int main(void)
     EXPECT_TRUE(!strncmp(row(0), line, 80) && !strncmp(row(3), line + 240, 59) && screen_is_grid(),
                 "the rest drawn later: the screen as from one write");
     tick_per_cell = 0;
+
+    /* audit 2026-10-28 S12: what telnet writes at a call's end undoes what a board left: an open OSC string, black on
+     * black, a two-row scroll region, a hidden cursor, cursor-key mode; the cursor stays where it was */
+    reset();
+    out("\033[5;7H\033[30;40m\033[?25l\033[?1h\033[3;4r\033[5;7H\033]0;title never ended");
+    {
+        struct term *t = T();
+        int x0 = t->cx, y0 = t->cy;
+        out(TN_TERM_RESET);
+        out("ok");
+        EXPECT_TRUE(t->esc == 0 && t->attr == 0 && t->colour == CO_DEF && t->curvis && !t->ckm && t->top == 0 &&
+                    t->bot == trows - 1 && !strcmp(row(y0) + x0, "ok"),
+                    "telnet's reset after a hostile board: string ended, colours, scroll region, cursor, keys; in place");
+    }
 
     if (bad) { printf("term-test: %d FAILED\n", bad); return 1; }
     printf("term-test: all passed\n");

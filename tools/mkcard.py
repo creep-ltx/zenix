@@ -42,10 +42,35 @@ def write_sparse(f, offset, data):
             f.write(chunk)
 
 
+SEED = "/var/lib/random-seed"
+
+
+def has_seed(root):
+    """the root holds a random seed (DESIGN D19 9.3): an emulator booted it in place (fsuae/*.fs-uae boot
+    build/zenix.hdf) and wrote its seed there; a card made from it would credit that seed on every machine"""
+    r = subprocess.run(["debugfs", "-R", f"stat {SEED}", root], capture_output=True, text=True)
+    if r.returncode != 0 and "Inode:" not in r.stdout:
+        sys.exit(f"mkcard.py: debugfs cannot read {root}: {r.stderr.strip()}")
+    return "Inode:" in r.stdout
+
+
 def main():
     if len(sys.argv) != 5 or sys.argv[1] not in ("sd", "ide"):
         sys.exit(__doc__)
     kind, out, boot, root = sys.argv[1:]
+    with tempfile.TemporaryDirectory() as t:
+        if has_seed(root):      # audit 2026-10-28 S10: the seed is removed from a copy, never put on the card
+            copy = os.path.join(t, "root.img")
+            subprocess.run(["cp", "--sparse=always", root, copy], check=True)
+            subprocess.run(["debugfs", "-w", "-R", f"rm {SEED}", copy], check=True, capture_output=True)
+            if has_seed(copy):
+                sys.exit(f"mkcard.py: could not remove {SEED} from the copy of {root}")
+            print(f"mkcard.py: {root} holds {SEED} (an emulator booted it): left off the card")
+            root = copy
+        build(kind, out, boot, root)
+
+
+def build(kind, out, boot, root):
     if kind == "ide":
         rdb(out, f"{boot}:ffs:ZB0:boot", f"{root}:ext2:ZR0:nomount")
         print(f"{out}: RDB: ZB0 = FFS boot partition (zenixboot), ZR0 = ext2 root, {os.path.getsize(out) // 1024} KB")

@@ -428,7 +428,9 @@ static void dispatch(struct ssh *s, const unsigned char *pay, long n, unsigned l
     r.p = pay + 1;
     r.n = n - 1;
     r.bad = 0;
-    if (s->ignore_next && type >= 30 && type <= 49) {
+    /* a wrong guess's packet: a key exchange message; during the first exchange only one curve25519's own (30, 31)
+     * could be it, any other goes on to the strict rule below (audit 2026-10-28 S20: a type 40 was skipped there) */
+    if (s->ignore_next && type >= 30 && type <= 49 && (s->kex_count || type <= 31)) {
         s->ignore_next = 0;
         return;
     }

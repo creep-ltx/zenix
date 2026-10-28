@@ -15,6 +15,7 @@
 #include "lwip/prot/ip4.h"
 #include "lwip/etharp.h"
 #include "lwip/dhcp.h"
+#include "lwip/prot/dhcp.h"
 #include "netif/ethernet.h"
 #include "netif/slipif.h"
 #include "netd_int.h"
@@ -701,17 +702,41 @@ void netd_drv_gone(int h)
 
 /* DHCP's name servers (lwIP's own handling is off, LWIP_DHCP_MAX_DNS_SERVERS 0: they never replace resolv.conf's):
  * option 6 of an ACK, kept by the interface (net/port/netd_hooks.h) */
-void netd_dhcp_option(struct dhcp *dh, int msg_type, int option, int len, struct pbuf *p, int offset)
+/* Whether an ACK's name servers (the option's first 8 bytes, len of them) are taken, and which (network order, 0 for
+ * none): only in the states where lwIP itself takes that ACK. The hook runs while lwIP parses the options, before it
+ * looks at its state: a forged ACK with the xid of the last REQUEST (which every machine on the LAN saw) was ignored
+ * by lwIP after the lease was bound, but its name servers were used (audit 2026-10-28 S9). An address no name server
+ * can have (0, 127/8, multicast and above) is dropped. */
+int netd_dhcp_dns_take(int state, int msg_type, const unsigned char *b, int len, unsigned long out[2])
+{
+    int i, n = 0;
+    out[0] = out[1] = 0;
+    if (msg_type != 5 || len < 4) return 0;                     /* DHCP_ACK */
+    if (state != DHCP_STATE_REQUESTING && state != DHCP_STATE_REBOOTING && state != DHCP_STATE_RENEWING &&
+        state != DHCP_STATE_REBINDING) return 0;
+    for (i = 0; i < 2 && (i + 1) * 4 <= len; i++) {
+        const unsigned char *a = b + i * 4;
+        if (a[0] == 0 || a[0] == 127 || a[0] >= 224) continue;
+        memcpy(&out[n], a, 4);                                  /* network order, as lwIP's u32_t addresses */
+        n++;
+    }
+    return n;
+}
+
+void netd_dhcp_option(struct dhcp *dh, int state, int msg_type, int option, int len, struct pbuf *p, int offset)
 {
     struct nif *f = NULL;
-    u32_t d[2] = { 0, 0 };
+    unsigned char b[8];
+    unsigned long d[2];
     int i;
     /* the interface is the one whose DHCP client this is (lwIP's current netif is not set before the address is) */
     for (i = 0; i < NETD_IFMAX; i++) if (nifs[i].used && netif_dhcp_data(&nifs[i].netif) == dh) f = &nifs[i];
-    if (!f || option != 6 || msg_type != 5 || len < 4) return;  /* DHCP_OPTION_DNS_SERVER in a DHCP_ACK */
-    pbuf_copy_partial(p, d, (u16_t)(len >= 8 ? 8 : 4), (u16_t)offset);
-    f->dhcp_dns[0] = d[0];
-    f->dhcp_dns[1] = d[1];
+    if (!f || option != 6 || len < 4) return;                   /* DHCP_OPTION_DNS_SERVER */
+    memset(b, 0, sizeof b);
+    pbuf_copy_partial(p, b, (u16_t)(len >= 8 ? 8 : 4), (u16_t)offset);
+    if (!netd_dhcp_dns_take(state, msg_type, b, len >= 8 ? 8 : 4, d)) return;
+    f->dhcp_dns[0] = (u32_t)d[0];
+    f->dhcp_dns[1] = (u32_t)d[1];
     dns_apply();
 }
 

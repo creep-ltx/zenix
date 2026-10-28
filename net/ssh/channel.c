@@ -97,6 +97,11 @@ void chan_after_kex(struct ssh *s)
     }
     if (s->state >= SSH_ST_OPEN)
         adjust(s);
+    /* asked for while the exchange ran: dropped before, so a remote `cat > f` whose input ended then never ended
+     * (audit 2026-10-28 S17) */
+    if (s->pend_winch) { s->pend_winch = 0; ssh_winsize(s, s->cols, s->rows); }
+    if (s->pend_eof) { s->pend_eof = 0; ssh_eof(s); }
+    if (s->pend_close) { s->pend_close = 0; ssh_close(s); }
 }
 
 static void deliver(struct ssh *s, int ext, const unsigned char *d, long n)
@@ -269,6 +274,8 @@ void ssh_eof(struct ssh *s)
 {
     struct wr *w;
 
+    if (s->state == SSH_ST_SESSION && !s->ch_eof_out && s->in_kex)
+        s->pend_eof = 1;
     if (s->state != SSH_ST_SESSION || s->ch_eof_out || s->in_kex)
         return;
     w = pkt_begin(s, M_CHANNEL_EOF);
@@ -283,6 +290,8 @@ void ssh_close(struct ssh *s)
 {
     struct wr *w;
 
+    if (s->state == SSH_ST_SESSION && !s->ch_close_out && s->in_kex)
+        s->pend_close = 1;
     if (s->state != SSH_ST_SESSION || s->ch_close_out || s->in_kex)
         return;
     w = pkt_begin(s, M_CHANNEL_CLOSE);
@@ -299,6 +308,8 @@ void ssh_winsize(struct ssh *s, int cols, int rows)
 
     s->cols = cols;
     s->rows = rows;
+    if (s->state == SSH_ST_SESSION && s->pty && s->in_kex)
+        s->pend_winch = 1;
     if (s->state != SSH_ST_SESSION || !s->pty || s->in_kex)
         return;
     w = pkt_begin(s, M_CHANNEL_REQUEST);
