@@ -101,6 +101,12 @@ int sys_statfs(struct ustatfs *f)
 }
 int sys_getuid(void) { return 0; }
 int sys_getpid(void) { return (int)getpid(); }
+int sys_mountinfo(u32 i, struct umountinfo *m)
+{
+    if (i) return -1;
+    memset(m, 0, sizeof *m); strcpy(m->path, "/"); strcpy(m->type, "ext2");
+    return 0;
+}
 int sys_lseek(int fd, int off, int whence) { off_t r = lseek(fd, off, whence); return r < 0 ? err() : (int)r; }
 int sys_fstat(int fd, struct ustat *s) { struct stat st; if (fstat(fd, &st) < 0) return err(); fill(s, &st); return 0; }
 static int *pids, npids;

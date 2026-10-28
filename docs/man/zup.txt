@@ -77,14 +77,19 @@ DESCRIPTION
     one (unless -d) or needs a newer base or another package first; the
     file is a system bundle (those go through zenixboot); a new system
     is on trial (not confirmed yet); another zup or zpkg is changing
-    packages (/var/lib/zpkg/lock). Removing refuses a package another
-    installed package needs. A config file the owner changed is kept as
-    PATH.save when its package is removed (-n deletes it too; an older
-    PATH.save is never replaced: the removal is refused until it is moved
-    away). Directories a removed package listed are removed when empty
-    and no other package lists them. Ctrl-C, hangups and kill's TERM are
-    ignored while zup works. The file is read twice, never held in
-    memory: its SHA-256 first, then unpacked.
+    packages (/var/lib/zpkg/lock); a manifest lists a path twice, a
+    name ending in .zup-new, .new or .save (zup's own), a link target of
+    other characters than A-Z a-z 0-9 . _ + / -, or more than 2,048
+    entries; a path is on another mount; a downgrade would leave an
+    installed package without the version it needs. A system update's
+    unfinished journal is left to the next start ("restart first").
+    Removing refuses a package another installed package needs. A config
+    file the owner changed is kept as PATH.save when its package is
+    removed (-n deletes it too; an older PATH.save is never replaced: the
+    removal is refused until it is moved away). Directories a removed
+    package listed are removed when empty and no other package lists them.
+    Ctrl-C, hangups and kill's TERM are ignored while zup works. The file
+    is read twice, never held in memory: its SHA-256 first, then unpacked.
 
     boot(8) runs zup at every start, after the root is mounted and before
     anything else. The result is one line in /var/lib/zpkg/result, which

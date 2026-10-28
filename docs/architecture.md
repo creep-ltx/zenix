@@ -337,12 +337,20 @@ for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the num
   one item a line: `zpkg 1`, `name NAME`, `version NUMBER STRING`, `group base` (the packages that move as one),
   `depends NAME NUMBER` (at least that version), then the entries: `f MODE UID GID SHA256 SIZE /PATH` (a file),
   `c ...` (the same for a config file the owner may edit), `l TARGET /PATH` (a symbolic link), `d MODE UID GID /PATH`
-  (a directory). Words a later format adds are ignored by older readers. A path is at most 55 bytes (with
+  (a directory); since D22 also `desc TEXT` (one line) and `takes OTHER` (8.4.4). Words a later format adds are
+  ignored by older readers. A path is at most 55 bytes (with
   `.zup-new` it fits a system call's 63). The `.tgz` is a gzip'd ustar archive of the `f` and `c` files in manifest
   order. The standard packages: **zup** (`/sbin/zup`), **base** (`init`, `login`, `sh`, `mount`, the config files
   `/etc/svctab`, `passwd`, `group`, `fstab`, `motd`; `/etc/autologin` belongs to the test images and is never
-  shipped), **utils** (every other command, the links such as `more`), **man** (the manual pages). The full root
-  images (`zenix.hdf`, the SD card's root) carry the manifests of what they hold in `/var/lib/zpkg/`.
+  shipped; the servers on the disk, the network drivers, the licences, the console font, the root certificates) -
+  these two are the group base, which moves only with the system (zpkg in D22 step 5 joins it) - and, since D22
+  step 4 (8.4.4), the families (`tools/mkzup.py` FAMILIES: coreutils, textutils, grep, sed, awk, pager, shadow,
+  nettools, ssh, zenix-tests and others, about 26), each with its programs, links and manual pages, and **base-man**
+  (the pages of the base programs and of what is not a command); every family `takes utils` and `man`, the one-piece
+  packages of the D15 bundles, and base-man `takes man`, so a machine installed before the split moves over one
+  family at a time, live. The full root images (`zenix.hdf`, the SD card's root) carry the manifests of what they
+  hold in `/var/lib/zpkg/`. **The system bundle** (`make bundle`) carries the kernel and the base group only (D22
+  3.1, `mkzup.py bundle --base-only`); the families are installed live (`zup -f`, zpkg).
 - **The bundle** (`make bundle`: `build/zenix-update.zup`), big-endian: a 96-byte header (`ZUP1`, format 1, header
   size 96, version number, version string[16], date `YYYYMMDD`, the lowest installed base version it applies to
   (0: any), channel[8], table-of-contents offset 96 and entry count (1-64), total size (at most 16 MB), flags 0, and

@@ -39,7 +39,7 @@ for n in open(os.path.join(b, "pkg", "list")).read().split():
 print("ok")
 EOF
 grep -q '^c 644 0 0 [0-9a-f]* [0-9]* /etc/passwd$' $B/pkg/base.manifest && ! grep -q 'autologin' $B/pkg/*.manifest &&
-    grep -q '^f 4755 0 0 .* /bin/su$' $B/pkg/utils.manifest && grep -q '^l less /bin/more$' $B/pkg/utils.manifest &&
+    grep -q '^f 4755 0 0 .* /bin/su$' $B/pkg/shadow.manifest && grep -q '^l less /bin/more$' $B/pkg/pager.manifest &&
     check "base: /etc/passwd is a config file, /etc/autologin is never shipped; su is set-user-id; more is a link" ok ||
     check "base: /etc/passwd is a config file, /etc/autologin is never shipped; su is set-user-id; more is a link" bad
 # packages are reproducible: the same build gives the same bytes (mtime 0, no names in the gzip header)
@@ -82,8 +82,37 @@ done
 python3 tools/mkzup.py bundle $T/wrongv.zup --kernel $B/kernel.bin --version 2026102699 $B/pkg base >$T/out 2>&1
 [ $? = 1 ] && grep -q "the kernel carries version" $T/out && check "a bundle whose kernel carries another version is refused" ok || { check "a bundle whose kernel carries another version is refused" bad; cat $T/out; }
 debugfs -R "ls /var/lib/zpkg" $B/zenix.hdf 2>/dev/null | tr -s ' ' '\n' >$T/db
-grep -qx base.manifest $T/db && grep -qx utils.manifest $T/db && grep -qx man.manifest $T/db &&
-    check "the full root image holds the package database (/var/lib/zpkg)" ok || { check "the full root image holds the package database" bad; cat $T/db; }
+grep -qx base.manifest $T/db && grep -qx coreutils.manifest $T/db && grep -qx base-man.manifest $T/db && ! grep -qx 'utils.manifest\|man.manifest' $T/db &&
+    [ "$(grep -c '\.manifest$' $T/db)" = "$(wc -w <$B/pkg/list)" ] &&
+    check "the full root image holds the package database (/var/lib/zpkg): every package of the build, no utils or man" ok || { check "the full root image holds the package database" bad; cat $T/db; }
+# the split by family (DESIGN D22 8.4.4): every file of the build in exactly one package, each family taking utils
+# and man, base-man taking man, every manual page somewhere; the system bundle carries the base group only (3.1)
+python3 -I - "$B" <<'EOF' >$T/out 2>&1 && check "the packages by family: every file in exactly one package; families take utils and man, base-man takes man; every page shipped" ok || { check "the packages by family" bad; cat $T/out; }
+import sys, os
+sys.path.insert(0, "tools"); import mkzup
+b = sys.argv[1]
+names = open(os.path.join(b, "pkg", "list")).read().split()
+owner = {}
+for n in names:
+    m = mkzup.parse_manifest(open(os.path.join(b, "pkg", n + ".manifest"), "rb").read())
+    base = m["group"] == "base"
+    assert base == (n in ("zup", "base", "zpkg")), n
+    if not base:
+        assert m["takes"] == (["man"] if n == "base-man" else ["utils", "man"]), (n, m["takes"])
+        assert m["desc"], n
+    for e in m["entries"]:
+        if e[0] != "d":
+            assert e[6] not in owner, (e[6], owner.get(e[6]), n)
+            owner[e[6]] = n
+for f in os.listdir(os.path.join("docs", "man")):
+    assert "/usr/man/" + f in owner, f
+assert sum(1 for p in owner if p.startswith("/bin/")) >= 120, len(owner)
+print("ok")
+EOF
+python3 tools/mkzup.py list $B/zenix-update.zup >$T/out 2>&1
+nbase=$(tr ' ' '\n' <$B/pkg/list | grep -cx 'zup\|base\|zpkg')
+grep -q 'pkg/zup.manifest' $T/out && grep -q 'pkg/base.manifest' $T/out && [ "$(grep -c 'pkg/.*\.manifest' $T/out)" = "$nbase" ] &&
+    check "the build's system bundle carries the kernel and the base group only (zup, base and zpkg)" ok || { check "the system bundle is base-only" bad; cat $T/out; }
 
 # ---- 2. zup on the PC ----
 U=$T/u; mkdir -p $U
@@ -152,7 +181,7 @@ for dp, dn, fn in sorted(os.walk(r)):
     if rel.startswith("/var/cache/zpkg"): continue
     for n in sorted(fn + [d for d in dn if os.path.islink(os.path.join(dp, d))]):
         p = os.path.join(dp, n); q = rel.rstrip("/") + "/" + n
-        if q in ("/var/lib/zpkg/result", "/var/lib/zpkg/lock") or q.startswith("/var/cache/zpkg/"): continue
+        if q in ("/var/lib/zpkg/result", "/var/lib/zpkg/lock") or q.startswith("/var/lib/zpkg/lock.") or q.startswith("/var/cache/zpkg/"): continue
         if os.path.islink(p): print("l", q, os.readlink(p))
         else: print("f", q, oct(os.stat(p).st_mode & 0o7777), hashlib.sha256(open(p, "rb").read()).hexdigest())
     for n in dn:
@@ -241,6 +270,18 @@ done
     check "a power cut before each of the $nch changes, then zup: old ($seen_old), old with the new zup ($seen_mid) or new ($seen_new), never between; the bundle again: new" ok ||
     check "power cuts during the update ($bad bad)" bad
 
+# the same cuts, then straight away the start with the bundle (the recovery and the install in one run, review
+# 2026-10-28: what the recovery puts back must be read again before the install decides)
+bad=0
+for ((n = 1; n <= nch + 1; n++)); do
+    rm -rf $U/c; cp -a $U/r1 $U/c; cp $U/fsclean1 $U/fsclean
+    zup $U/c $V2 $U/b2.zup ZUP_CUT=$n >/dev/null 2>&1
+    zup $U/c $V2 $U/b2.zup >/dev/null 2>&1
+    snap $U/c | cmp -s - $U/s2 && [ -z "$(leftovers $U/c)" ] || { bad=$((bad + 1)); echo "cut $n, then the bundle at once: not the new version"; }
+done
+[ $bad = 0 ] && check "a power cut before each change, then at once a start with the bundle: the new version every time" ok ||
+    check "cuts then the bundle at once ($bad bad)" bad
+
 # "Zenix (previous)": the old kernel runs with the rollback flag; and the same without the flag (the kernel is older
 # than the base); then nothing more to roll back
 rm -rf $U/c; cp -a $U/r2 $U/c; rm -f $U/trace
@@ -307,6 +348,23 @@ qpkg stray $V3 f:755:0:0:$S/ed1:/bin/stray
 qpkg dirclash $V3 d:755:0:0:/bin/ed
 qpkg takebase $V3 --takes base f:755:0:0:$S/sh3:/bin/sh
 qpkg needdep $V3 --dep nothere:1 f:755:0:0:$S/ed1:/bin/needdep
+qpkg ancestor $V3 l:/tmp:/var/cache
+# the reviews' attacks (2026-10-28), made by hand (mkzup.py refuses to make them): zup's own names, a path twice, a
+# link target "-", a tar member bigger than its manifest says
+qedit() {      # NAME LINE...: package NAME-V3 with these lines added to its manifest (or, with SED=expr, edited)
+    local n=$1; shift
+    rm -rf $Q/$n; mkdir -p $Q/$n
+    python3 tools/mkzup.py pkg $Q/$n $n $V3 0.3 f:755:0:0:$S/ed1:/bin/$n >/dev/null
+    for l in "$@"; do printf '%s\n' "$l" >>$Q/$n/$n.manifest; done
+    [ -n "${SED:-}" ] && sed -i "$SED" $Q/$n/$n.manifest
+    python3 tools/mkzup.py bundle $U/pool/$n-$V3.zup --no-kernel --min $V3 $Q/$n $n >/dev/null || echo "qedit $n: mkzup failed"
+}
+qedit zupnew "l ../../sbin/zup /bin/p.zup-new"
+qedit dotnew "l ed /etc/edrc.new"
+qedit twice "l ed /bin/twice"
+qedit dash "l - /bin/dashlink"
+SED='s/^\(f 755 0 0 [0-9a-f]*\) [0-9]* /\1 3 /' qedit tarsize
+qpkg edext4 $V3 --dep ed:$V4 f:755:0:0:$S/edext:/bin/edext4
 rm -rf $Q/newer; mkdir -p $Q/newer; python3 tools/mkzup.py pkg $Q/newer newer $V3 0.3 f:755:0:0:$S/ed1:/bin/newer >/dev/null
 python3 tools/mkzup.py bundle $U/pool/newer-$V3.zup --no-kernel --min $V4 $Q/newer newer >/dev/null
 cp $U/b3.zup $U/pool/system.zup
@@ -385,14 +443,15 @@ for v in "kernelish:in the group base" "zpkg:in the group base" "clash:/bin/ed b
          "sneaky:a package may not write there" "viasym:/opt is a symbolic link" "stray:/bin/stray exists and belongs to no package" \
          "dirclash:a directory in one package and not in ed" "takebase:takes base, a base-group package" \
          "needdep:needs nothing" "newer:needs base $V4 or newer" "system:a system bundle" "damaged:SHA-256 does not match" \
-         "T:a new system is on trial"; do
+         "T:a new system is on trial" "ancestor:a package may not write there" "zupnew:a name zup keeps for itself" \
+         "dotnew:a name zup keeps for itself" "twice:/bin/twice is listed twice" "dash:a bad entry (l)"; do
     n=${v%%:*}; want=${v#*:}; e=()
     [ $n = needdep ] && want="needs nothere 1 or newer"
     [ $n = T ] && { n=ed-$V3; e=(ZUP_FLAGS=2); } || { [ -f $U/pool/$n.zup ] || n=$n-$V3; }
     rm -f $U/trace
     zl $L "${e[@]}" -f $(pf $n) >$U/out 2>&1; rc=$?
     [ $rc = 1 ] && grep -q "$want" $U/out && snap $L | cmp -s - $U/sR && pvsnap $L | cmp -s - $U/pR && lockfree $L &&
-        ! grep -q "^rename\|^link\|^open-write /var/lib/zpkg/journal" $U/trace &&
+        ! grep -v "zpkg/lock" $U/trace | grep -q "^rename\|^link\|^open-write /var/lib/zpkg/journal" &&
         check "zup -f refused before any change ($n${e:+, during a trial}): '$want'" ok || { check "zup -f refused ($n): '$want'" bad; cat $U/out; }
 done
 for v in "base:in the group base" "zup:in the group base" "nothere:nothere is not installed" "../x:not a package name"; do
@@ -404,6 +463,17 @@ done
 zl $L -f $(pf edext-$V3) >/dev/null 2>&1; zl $L -r ed >$U/out 2>&1; rc=$?
 [ $rc = 1 ] && grep -q "edext needs ed: refused" $U/out && [ -f $L/bin/ed ] && zl $L -r edext >/dev/null 2>&1 && [ ! -e $L/bin/edext ] && [ ! -e $L/var/lib/zpkg/edext.manifest ] &&
     check "zup -r refuses a package another one needs (named); removing that one first works" ok || { check "zup -r and dependents" bad; cat $U/out; }
+zl $L -f $(pf edext4-$V3) >/dev/null 2>&1; zl $L -f $(pf ed-$V3) -d >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "edext4 needs ed $V4 or newer: the downgrade to $V3 is refused" $U/out && [ "$(cat $L/bin/ed)" = "ed2 contents" ] &&
+    zl $L -r edext4 >/dev/null 2>&1 && check "zup -f -d refuses a downgrade another package needs the newer version of" ok || { check "a downgrade and its dependents" bad; cat $U/out; }
+zl $L -f $(pf tarsize-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "its archive's size is not its manifest's" $U/out && snap $L | cmp -s - $U/sR && lockfree $L &&
+    check "a tar member bigger than its manifest says: stopped there, rolled back, nothing changed" ok || { check "a tar member's size" bad; cat $U/out; }
+printf 'zupj 1\ntarget %s 1 1\nA - 644 0 0 - - - /bin/sysfile\nend\n' $V3 >$L/var/lib/zpkg/journal
+zl $L -f $(pf coreutils-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "a system update is unfinished: restart first" $U/out && [ -f $L/var/lib/zpkg/journal ] && [ ! -e $L/var/lib/zpkg/coreutils.manifest ] &&
+    check "zup -f leaves a system update's journal to the next start (its result is boot's)" ok || { check "zup -f and a system journal" bad; cat $U/out; }
+rm -f $L/var/lib/zpkg/journal
 rm -f $L/opt $L/bin/stray; rmdir $L/sbin 2>/dev/null; snap $L | cmp -s - $U/sE4 || { check "the root after the refusals is E4 again" bad; snap $L | diff $U/sE4 - | head; }
 # the lock
 mkdir -p $U/lk; cp "$(command -v sleep)" $U/lk/zup; cp "$(command -v sleep)" $U/lk/zpkg
@@ -414,7 +484,7 @@ zl $L -f $(pf coreutils-$V3) >$U/out 2>&1; rc=$?
     check "a second zup is refused while the lock's holder lives" ok || { check "a second zup refused while one runs" bad; cat $U/out; }
 printf '999999\n' >$L/var/lib/zpkg/lock
 zl $L -f $(pf coreutils-$V3) >$U/out 2>&1; rc=$?
-[ $rc = 1 ] && grep -q "another zup (pid $lp) is still changing packages" $U/out && [ ! -e $L/var/lib/zpkg/coreutils.manifest ] &&
+[ $rc = 1 ] && grep -q "another zup or zpkg (pid $lp) is still changing packages" $U/out && [ ! -e $L/var/lib/zpkg/coreutils.manifest ] &&
     check "a dead holder's lock is not taken over while another zup still lives (one zpkg left behind)" ok || { check "a stale lock with a zup still running" bad; cat $U/out; }
 kill $lp; wait $lp 2>/dev/null
 cat >$U/lk/zpkg <<EOF
@@ -506,6 +576,87 @@ env ZUP_ROOT=$L ZUP_KVNUM=$V2 ZUP_FLAGS=1 $U/zup >$U/out 2>&1; rc=$?
     [ "$(cat $L/bin/ls)" = "ls3 contents" ] && [ -f $L/var/lib/zpkg/textutils.manifest ] && [ ! -e $L/var/lib/zpkg/utils.manifest ] && [ -f $L/var/lib/zpkg/edcfg.manifest ] &&
     [ ! -e $L/var/cache/zpkg/prev-$V3 ] && lockfree $L &&
     check "Zenix (previous) after live transactions: base and zup back to $V2, the live-installed packages untouched" ok || { check "the D15 way back after live transactions" bad; cat $U/out; }
+
+# ---- 2c. the split on a machine installed before it (D22 8.4.4, step 4) ----
+# This build's programs as the D15 bundles shipped them (zup, base, utils, man), installed from an empty root; a family
+# refused while the prev set holds utils; then the base-only system update; then every family and base-man by zup -f:
+# utils and man are gone, every file is as it was, the prev set untouched.
+M=$U/mig; rm -rf $M; mkdir -p $M/pool $M/r/bin $M/r/etc     # an image has /bin and /etc (mkroot.sh)
+python3 -I - "$B" $M <<'PYEOF' >$M/prep.log 2>&1 || { echo "FAIL the split's preparation"; cat $M/prep.log; }
+import sys, os, io, gzip, tarfile, struct, tempfile
+sys.path.insert(0, "tools"); import mkzup
+b, m = sys.argv[1], sys.argv[2]
+names = open(os.path.join(b, "pkg", "list")).read().split()
+man = {n: mkzup.parse_manifest(open(os.path.join(b, "pkg", n + ".manifest"), "rb").read()) for n in names}
+v0 = man["base"]["vnum"]; v1 = v0 + 1
+data = {}
+for n in names:
+    tar = tarfile.open(fileobj=io.BytesIO(gzip.decompress(open(os.path.join(b, "pkg", n + ".tgz"), "rb").read())))
+    for mem in tar.getmembers():
+        data["/" + mem.name] = tar.extractfile(mem).read()
+src = tempfile.mkdtemp(dir=m)
+def ents(entries, only=None):
+    out = []
+    for kind, mode, uid, gid, digest, size, path, target in entries:
+        if only and not only(kind, path):
+            continue
+        if kind in "fc":
+            f = os.path.join(src, str(len(os.listdir(src))))
+            open(f, "wb").write(data[path])
+            out.append((kind, mode, uid, gid, f, path))
+        elif kind == "l":
+            out.append(("l", 0o777, 0, 0, target, path))
+        else:
+            out.append(("d", mode, uid, gid, None, path))
+    return out
+def write(dirn, n, v, entries, **kw):
+    mkzup.make_package(os.path.join(m, dirn), n, v, "0.2", entries, **kw)
+for k, v in ((0, v0), (1, v1)):
+    open(os.path.join(m, "kernel%d" % k), "wb").write(b"\0" * 64 + b"ZVER" + struct.pack(">I", v) + b"0.2".ljust(16, b"\0") + b"k")
+    write("p%d" % k, "zup", v, ents(man["zup"]["entries"]), group="base")
+    write("p%d" % k, "base", v, ents(man["base"]["entries"]), group="base", deps=[("zup", v)])
+if "zpkg" in man:                                       # zpkg joins the base group with the system update
+    write("p1", "zpkg", v1, ents(man["zpkg"]["entries"]), group="base", deps=[("zup", v1)])
+fam = [n for n in names if n not in ("zup", "base", "zpkg")]
+utils, pages, seen = [], [("d", 0o755, 0, 0, None, "/usr"), ("d", 0o755, 0, 0, None, "/usr/man")], set()
+for n in fam:
+    for e in ents(man[n]["entries"]):
+        if e[5] in seen: continue
+        seen.add(e[5])
+        if e[5].startswith("/usr/man/"): pages.append(e)
+        elif e[0] != "d": utils.append(e)
+write("p0", "utils", v0, utils, deps=[("base", v0)])
+write("p0", "man", v0, pages)
+for n in fam:
+    mm = man[n]
+    write("f", n, v1, ents(mm["entries"]), deps=[("base", v1)], desc=mm["desc"], takes=mm["takes"])
+open(os.path.join(m, "versions"), "w").write("%d %d\n%s\n" % (v0, v1, " ".join(fam)))
+PYEOF
+read -r MV0 MV1 <$M/versions; MFAM=$(sed -n 2p $M/versions)
+python3 tools/mkzup.py bundle $M/old.zup --kernel $M/kernel0 $M/p0 zup base utils man >/dev/null &&
+    python3 tools/mkzup.py bundle $M/new.zup --kernel $M/kernel1 --base-only $M/p1 $(cd $M/p1 && ls *.manifest | sed 's/\.manifest$//') >/dev/null || echo "FAIL the split's bundles"
+mkdir -p $M/r/var/cache/zpkg/pkg
+for n in $MFAM; do python3 tools/mkzup.py bundle $M/r/var/cache/zpkg/pkg/$n.zup --no-kernel --min $MV1 $M/f $n >/dev/null || echo "FAIL bundle $n"; done
+echo 1 >$U/fsclean
+env ZUP_ROOT=$M/r ZUP_KVNUM=$MV0 ZUP_BUNDLE=$M/old.zup $U/zup >$M/out 2>&1 && [ -f $M/r/var/lib/zpkg/utils.manifest ] && [ -f $M/r/var/lib/zpkg/man.manifest ] &&
+    check "the split: this build as the D15 bundles shipped it (zup, base, utils, man) installed on an empty root" ok || { check "the split: the old install" bad; tail $M/out; }
+mfiles() { (cd $1 && find bin sbin etc usr \( -type f -o -type l \) -printf '%p %m %l\n' | sort; find bin sbin etc usr -type f | sort | xargs sha256sum); }
+mfiles $M/r >$M/files0
+env ZUP_ROOT=$M/r ZUP_KVNUM=$MV0 $U/zup -f /var/cache/zpkg/pkg/coreutils.zup >$M/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "part of the previous system" $M/out && check "the split: a family is refused while the prev set holds utils" ok || { check "the split: refused before the base-only update" bad; cat $M/out; }
+env ZUP_ROOT=$M/r ZUP_KVNUM=$MV1 ZUP_BUNDLE=$M/new.zup $U/zup >$M/out 2>&1 && ls $M/r/var/cache/zpkg | grep -qx "prev-$MV1" &&
+    ! grep -q "utils.manifest\|man.manifest" $M/r/var/cache/zpkg/prev-$MV1/log.* &&
+    check "the split: the base-only system update; its prev set holds no utils or man" ok || { check "the split: the base-only update" bad; tail $M/out; }
+pvm=$(python3 -I $U/prevsnap.py $M/r/var/cache/zpkg/prev-$MV1)
+bad=0
+for n in $MFAM; do
+    env ZUP_ROOT=$M/r ZUP_KVNUM=$MV1 $U/zup -f /var/cache/zpkg/pkg/$n.zup >$M/out 2>&1 || { bad=$((bad + 1)); echo "  zup -f $n:"; tail -3 $M/out; }
+done
+ls $M/r/var/lib/zpkg | grep '\.manifest$' | sed 's/\.manifest$//' | sort >$M/db
+printf '%s\n' $(cd $M/p1 && ls *.manifest | sed 's/\.manifest$//') $MFAM | sort >$M/dbwant
+[ $bad = 0 ] && cmp -s $M/db $M/dbwant && mfiles $M/r | grep -v zpkg | cmp -s - <(grep -v zpkg $M/files0) && { ! grep -qw zpkg $B/pkg/list || [ -f $M/r/bin/zpkg ]; } && [ "$(python3 -I $U/prevsnap.py $M/r/var/cache/zpkg/prev-$MV1)" = "$pvm" ] && lockfree $M/r &&
+    check "the split: each of the $(echo $MFAM | wc -w) families and base-man by zup -f: utils and man gone, every file as it was (zpkg new with the system), the prev set untouched" ok ||
+    { check "the split: the families ($bad failed)" bad; diff $M/db $M/dbwant; mfiles $M/r | diff $M/files0 - | head; }
 
 # ---- 3. zup on the real ext2 code (audit 2026-10-26 F5) ----
 # zup's calls served by user/fsd.c and kernel/ext2.c on an image (tools/host/zup-ext2.c, zup-fsd.c); the power goes

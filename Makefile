@@ -536,7 +536,8 @@ $(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
 	cp $< $@
 
 # ---- updates (DESIGN D15, docs/d15-self-updates.md): the packages of a build and the bundle zenixboot installs ----
-# build/pkg/NAME.manifest + NAME.tgz for the standard packages (tools/mkzup.py says which files each holds); the full
+# build/pkg/NAME.manifest + NAME.tgz for the standard packages (tools/mkzup.py says which files each holds: the base
+# group, the families and base-man, DESIGN D22 8.4.4); the full
 # root images get their manifests in /var/lib/zpkg (tools/mkroot.sh), so the first update knows what is installed.
 packages: $(BUILD)/pkg/list
 # the PC font (DESIGN D20 4.2: telnet's PC boards load it with CON_FONT): from Linux's font_8x8.c, on the full root
@@ -548,10 +549,12 @@ $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 	python3 tools/mkpsf.py tools/font_8x8.c $@
 $(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
-# the bundle: the kernel and every package (copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
+# the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
+# zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
+BASEPKGS := zup base
 bundle: $(BUILD)/zenix-update.zup
 $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py
-	python3 tools/mkzup.py bundle $@ --kernel $(BUILD)/kernel.bin $(BUILD)/pkg $$(cat $(BUILD)/pkg/list)
+	python3 tools/mkzup.py bundle $@ --base-only --kernel $(BUILD)/kernel.bin $(BUILD)/pkg $(BASEPKGS)
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 1,024 inodes (512 ran out with the
 # network's files in D19 step 8: cmds2-test makes 150 files)

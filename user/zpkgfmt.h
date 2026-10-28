@@ -14,6 +14,8 @@
 #define ZF_HDR      96                  /* the bundle header */
 #define ZF_TOCE     80                  /* one table-of-contents entry: name[40], offset, size, SHA-256 */
 #define ZF_MAXTOC   64
+#define ZF_MAXENT   2048                /* entries of one manifest (a limit that is hit is said) */
+#define ZF_MANMAX   (256u << 10)        /* a manifest's bytes */
 
 struct zf_ent {                         /* one f, c, d or l line */
     char kind;
@@ -46,6 +48,8 @@ int zf_name_ok(const char *p);          /* a package name: [a-z0-9][a-z0-9+.-]*,
 int zf_parse_sha(const char *s, unsigned char out[32]);     /* 64 lowercase hex characters and the end: 0, else -1 */
 void zf_put_sha(char *out, const unsigned char h[32]);      /* 64 characters and a NUL */
 unsigned zf_num(const char *s, int base, int *bad);
+int zf_target_ok(const char *t);        /* a link target: [A-Za-z0-9._+/-], 1-54 bytes, not "-" */
+int zf_reserved(const char *p);         /* ends in .zup-new, .new or .save: zup's own names, never an entry */
 /* text: a manifest (malloc'd, NUL-terminated; kept by the pkg, which points into it). 0, or -EINVAL / -ENOMEM with
  * the reason said; where names it in the messages */
 int zf_manifest_parse(struct zf_pkg *p, char *text, unsigned len, const char *where);

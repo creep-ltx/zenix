@@ -4,7 +4,8 @@
 section 3, "Updates"). The bundle and the manifest are frozen formats (CLAUDE.md): they only grow, at the end.
 
   mkzup.py packages BUILD "UAPPS"        the standard packages from a build: BUILD/pkg/NAME.manifest + NAME.tgz
-                                         (zup, base, utils, man; the version from kernel/version.h, or ZVNUM/ZVSTR)
+                                         (zup and base, the base group; the families of FAMILIES and base-man,
+                                         DESIGN D22 8.4.4; the version from kernel/version.h, or ZVNUM/ZVSTR)
   mkzup.py pkg OUTDIR NAME VNUM VSTR [--group G] [--dep NAME:VNUM]... [--desc TEXT] [--takes NAME]... ENTRY...
         one package from explicit entries (the tests): f:MODE:UID:GID:SRC:/PATH (a file), c:... (a config file the
         owner may edit), l:TARGET:/PATH (a symbolic link), d:MODE:UID:GID:/PATH (a directory)
@@ -77,6 +78,8 @@ def check_path(p):
     if (not PATH_RE.match(p) or '//' in p or '/./' in p or '/../' in p or p.endswith('/') or p.endswith('/.') or
             p.endswith('/..') or len(p) > PATHMAX):
         die("bad path %r (absolute, [A-Za-z0-9._+/-], at most %d bytes)" % (p, PATHMAX))
+    if p.endswith((".zup-new", ".new", ".save")):   # zup's own names beside a path (user/zpkgfmt.c zf_reserved)
+        die("%s: .zup-new, .new and .save are names zup keeps for itself" % p)
 
 
 # ---- packages ----
@@ -115,7 +118,7 @@ def make_package(outdir, name, vnum, vstr, entries, group=None, deps=(), desc=No
         if kind == 'd':
             lines.append("d %o %d %d %s" % (mode, uid, gid, path))
         elif kind == 'l':
-            if not re.match(r'^[A-Za-z0-9._+/-]+$', src) or len(src) > PATHMAX:
+            if not re.match(r'^[A-Za-z0-9._+/-]+$', src) or len(src) > PATHMAX - 1 or src == "-":
                 die("bad link target %r" % src)
             lines.append("l %s %s" % (src, path))
         elif kind in 'fc':
@@ -181,6 +184,44 @@ LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), 
          ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos"), ("ifconfig", "/bin/ifup"), ("ifconfig", "/bin/ifdown"),
          ("rz", "/bin/sz")]
 SBIN = {"zup"}
+OWN_PKG = {"zpkg"}                        # a base-group package of its own (DESIGN D22 step 5): /bin/zpkg, /etc/zpkg.conf
+# The packages by family (DESIGN D22 8.4.4, owner decision 2): every command outside the base group belongs to exactly
+# one family (a program in UAPPS that none names is refused: add it here), with its links and its manual pages. Each
+# family "takes" the old one-piece packages utils and man, so a machine installed before the split moves over one
+# family at a time, live (zup -f), after the base-only system update that brought the takes-aware zup. The pages of
+# the base group's programs and the pages of no program go to base-man (not in the base group: it takes from man).
+FAMILIES = [
+    ("coreutils", "basic file and directory commands", "ls cat cp mv rm mkdir rmdir touch ln readlink chmod chown stat "
+                  "pwd basename dirname realpath mktemp du df tree"),
+    ("findutils", "find files and run commands on lists of them", "find xargs"),
+    ("archive", "tar and gzip archives", "tar gzip"),
+    ("grep", "search text (POSIX extended expressions)", "grep"),
+    ("sed", "the stream editor", "sed"),
+    ("awk", "pattern scanning and text processing (POSIX awk)", "awk"),
+    ("textutils", "filters for text: sort, cut, head, wc and others", "sort uniq cut tr tee head tail tac rev nl wc "
+                  "fold expand paste comm"),
+    ("diffutils", "compare and dump files", "diff cmp hexdump"),
+    ("hashutils", "checksums and encodings", "base64 md5sum sha256sum"),
+    ("shellutils", "small commands for the shell and scripts", "echo printf seq yes expr true false env printenv which "
+                   "sleep date cal clear time timeout watch"),
+    ("sysinfo", "who and what: uname, id, hostname, uptime", "uname whoami id hostname uptime"),
+    ("procps", "processes and memory: ps, kill, nice", "ps free kill pgrep nice renice"),
+    ("sysutils", "the console, the kernel log, the disks' sync, restart", "dmesg input beep sync reboot"),
+    ("pager", "less and man, the pager and the manual reader", "less man"),
+    ("edit", "the text editor", "edit"),
+    ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
+    ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
+                  "fsck_zenixfs umount"),
+    ("cu", "a terminal on another computer through the serial port", "cu"),
+    ("zmodem", "receive and send files with Zmodem (rz, sz)", "rz"),
+    ("nettools", "the network's interfaces, routes, ping, netstat, host", "ifconfig route ping netstat host"),
+    ("telnet", "a terminal to another computer over the network", "telnet"),
+    ("ssh", "the secure shell and its keys", "ssh ssh-keygen"),
+    ("wget", "fetch files over HTTP and HTTPS", "wget"),
+    ("sntp", "set the clock from the network", "sntp"),
+    ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
+                    "socktestd socktest bench termtest priotest svctest sigtest nettest cryptotest boot diskd"),
+]
 BASE_SBIN = ["zfsd", "netd"]              # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
 # the licence notices of the code from other projects (owner decision, DESIGN D19 2026-10-27), as tools/mkroot.sh
 LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("tools/font_8x8.COPYING", "font_8x8"),
@@ -203,11 +244,15 @@ def std_packages(build, uapps):
         if p not in progs:
             die("%s is not in UAPPS" % p)
     dirs = [("d", 0o755, 0, 0, None, d) for d in ("/var", "/var/lib", "/var/lib/zpkg", "/var/cache", "/var/cache/zpkg")]
-    names = ["base", "utils", "man"]
+    names = ["base"]
     if "zup" in progs:
         make_package(out, "zup", vnum, vstr, [("d", 0o755, 0, 0, None, "/sbin"),
                                               ("f", 0o755, 0, 0, zx("zup"), "/sbin/zup")], group="base")
         names.insert(0, "zup")
+    if "zpkg" in progs:
+        make_package(out, "zpkg", vnum, vstr, [("f", 0o755, 0, 0, zx("zpkg"), "/bin/zpkg"),
+                                               ("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", "zpkg.conf"), "/etc/zpkg.conf")],
+                     group="base", deps=[("zup", vnum)] if "zup" in progs else [])
     base = dirs + [("f", 0o755, 0, 0, zx(p), "/bin/" + p) for p in BASE_PROGS]
     # the servers that live on the disk (DESIGN D19: /sbin/zfsd, which mount starts for a ZenixFS volume; /sbin/netd,
     # which the kernel starts at the first socket call)
@@ -224,10 +269,8 @@ def std_packages(build, uapps):
              ("f", 0o644, 0, 0, os.path.join(build, ANCHORS), "/etc/ssl/" + ANCHORS)]
     base += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", c), "/etc/" + c) for c in BASE_CONFIG]
     make_package(out, "base", vnum, vstr, base, group="base", deps=[("zup", vnum)] if "zup" in names else [])
-    utils = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p))
-             for p in progs if p not in BASE_PROGS and p not in SBIN]
-    utils += [("l", 0o777, 0, 0, t, p) for t, p in LINKS]
-    make_package(out, "utils", vnum, vstr, utils, deps=[("base", vnum)])
+    if "zpkg" in progs:
+        names.append("zpkg")
     # the manual pages, as mkroot.sh installs them: docs/man, and a generated page for a program without one
     with tempfile.TemporaryDirectory() as t:
         subprocess.run([sys.executable, os.path.join(HERE, "mkman.py"), os.path.join(t, "gen")] + progs, check=True,
@@ -237,9 +280,40 @@ def std_packages(build, uapps):
             for f in os.listdir(d):
                 if f.endswith(".txt"):
                     pages[f] = os.path.join(d, f)
-        man = [("d", 0o755, 0, 0, None, "/usr"), ("d", 0o755, 0, 0, None, "/usr/man")]
-        man += [("f", 0o644, 0, 0, pages[f], "/usr/man/" + f) for f in sorted(pages)]
-        make_package(out, "man", vnum, vstr, man)
+        mandirs = [("d", 0o755, 0, 0, None, "/usr"), ("d", 0o755, 0, 0, None, "/usr/man")]
+        fam_of = {}
+        for fam, _, members in FAMILIES:
+            for p in members.split():
+                if p in fam_of:
+                    die("%s is in two families (%s, %s)" % (p, fam_of[p], fam))
+                fam_of[p] = fam
+        rest = [p for p in progs if p not in BASE_PROGS and p not in SBIN and p not in OWN_PKG and p not in fam_of]
+        if rest:
+            die("programs in no family (tools/mkzup.py FAMILIES): %s" % " ".join(rest))
+        taken = set()
+        for fam, desc, members in FAMILIES:
+            mine = [p for p in members.split() if p in progs]
+            if not mine:
+                continue
+            ents = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p)) for p in mine]
+            links = [(t, p) for t, p in LINKS if t in mine]
+            ents += [("l", 0o777, 0, 0, t, p) for t, p in links]
+            mypages = sorted({binname(p) + ".txt" for p in mine} | {os.path.basename(p) + ".txt" for t, p in links})
+            mypages = [f for f in mypages if f in pages]
+            taken.update(mypages)
+            if mypages:
+                ents += mandirs + [("f", 0o644, 0, 0, pages[f], "/usr/man/" + f) for f in mypages]
+            make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)], desc=desc, takes=("utils", "man"))
+            names.append(fam)
+        rest = sorted(f for f in pages if f not in taken)
+        make_package(out, "base-man", vnum, vstr, mandirs + [("f", 0o644, 0, 0, pages[f], "/usr/man/" + f) for f in rest],
+                     deps=[("base", vnum)], desc="the manual pages of the base system and of what is not a command",
+                     takes=("man",))
+        names.append("base-man")
+    for f in os.listdir(out):           # a package an older build made and this one does not (utils, man): gone
+        n, ext = os.path.splitext(f)
+        if ext in (".manifest", ".tgz") and n not in names:
+            os.unlink(os.path.join(out, f))
     open(os.path.join(out, "list"), "w").write(" ".join(names) + "\n")
     print("%s: packages %s, version %d (%s)" % (out, " ".join(names), vnum, vstr))
 

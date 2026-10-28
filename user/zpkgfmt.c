@@ -48,6 +48,23 @@ int zf_name_ok(const char *p)
         if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '+' || *p == '.' || *p == '-')) return 0;
     return 1;
 }
+/* a link's target: [A-Za-z0-9._+/-], 1-54 bytes, not "-" (the journal's word for "none", review 2026-10-28) */
+int zf_target_ok(const char *t)
+{
+    unsigned n = strlen(t);
+    if (!n || n >= ZF_PMAX - 9 || !strcmp(t, "-")) return 0;
+    for (; *t; t++)
+        if (!isalnum(*t) && !strchr("._+/-", *t)) return 0;
+    return 1;
+}
+/* the names zup itself makes beside a path: never a package's own entry (review 2026-10-28: a package listing
+ * X.zup-new could aim zup's writes through a link of its own) */
+int zf_reserved(const char *p)
+{
+    unsigned n = strlen(p);
+    return (n > 8 && !strcmp(p + n - 8, ".zup-new")) || (n > 4 && !strcmp(p + n - 4, ".new")) ||
+           (n > 5 && !strcmp(p + n - 5, ".save"));
+}
 unsigned zf_num(const char *s, int base, int *bad)
 {
     char *e;
@@ -106,9 +123,13 @@ int zf_manifest_parse(struct zf_pkg *p, char *text, unsigned len, const char *wh
                 }
             } else {
                 if (nw != 3) bad = 1;
-                else { x.target = w[1]; x.path = w[2]; if (strlen(x.target) >= ZF_PMAX - 9) bad = 1; }
+                else { x.target = w[1]; x.path = w[2]; if (!zf_target_ok(x.target)) bad = 1; }
             }
             if (bad || !zf_path_ok(x.path) || (x.mode & ~07777u)) { zf_say("%s: a bad entry (%s)", where, w[0]); return -EINVAL; }
+            if (zf_reserved(x.path)) { zf_say("%s: %s: a name zup keeps for itself (.zup-new, .new, .save)", where, x.path); return -EINVAL; }
+            if (p->nent == ZF_MAXENT) { zf_say("%s: more than %d entries", where, ZF_MAXENT); return -EINVAL; }
+            for (int i = 0; i < p->nent; i++)
+                if (!strcmp(p->ent[i].path, x.path)) { zf_say("%s: %s is listed twice", where, x.path); return -EINVAL; }
             if (p->nent == cap) {
                 cap = cap ? cap * 2 : 64;
                 struct zf_ent *ne = realloc(p->ent, (unsigned)cap * sizeof *ne);

@@ -42,6 +42,8 @@ struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };
 struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, kflags; u32 client_; };
 struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };
+struct umountinfo { char path[48], port[16], dev[16], type[8]; };
+int sys_mountinfo(u32 i, struct umountinfo *m);   /* the root only (-1 past it) */
 struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 shared; u32 pgid; };
 #define UPD_INFO      1
 #define UPD_RELEASE   2

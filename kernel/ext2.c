@@ -1365,15 +1365,14 @@ int ext2_mkdir(struct inode *dir, const char *name)
     dbuf[19] = file_type(S_IFDIR);
     dbuf[20] = '.';
     dbuf[21] = '.';
-    if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d))
-        return -EIO;
+    if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d)) {
+        release(&d);
+        r = -EIO;
+        goto undo;
+    }
     if ((r = dir_add(dir, name, len, d.ino, d.mode))) {
-        if (ext2_iget(dir->ino, dir) == 0) {    /* dir_add may have rewritten it (index flag, a new block) */
-            dir->links--;
-            ext2_iput(dir);
-        }
-        release(&d);                            /* the new directory has no name: its block and number go back */
-        return r;
+        release(&d);                            /* the new directory has no name: its block and number go back, */
+        goto undo;                              /* then the parent's count (never a ".." it does not count) */
     }
     return 0;
 undo:

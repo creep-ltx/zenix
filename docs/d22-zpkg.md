@@ -907,3 +907,46 @@ word, and that "no floor" is the right call. Its findings, all taken in above:
   with `.save`), the commit line included, then the next start: old or new exactly, `prev-V` byte for byte; "Zenix
   (previous)" after live transactions; on the real ext2 server a cut after each block write of `-f` (506 cuts) and
   `-r` (378): at worst leaks, marked, `prev-V` untouched.
+- **The base-only system update and the split (8.4.4, the rest of step 4):** `make bundle` now passes `--base-only`
+  with the base group (`zup base`; zpkg joins in step 5): the system bundle is 400,784 bytes (was 932,864). `make
+  packages` makes the families of `tools/mkzup.py` FAMILIES (26: coreutils, findutils, archive, grep, sed, awk,
+  textutils, diffutils, hashutils, shellutils, sysinfo, procps, sysutils, pager, edit, shadow, disktools, cu, zmodem,
+  nettools, telnet, ssh, wget, sntp, zenix-tests; each with a `desc`, its programs, links and pages, `depends base`,
+  `takes utils` and `takes man`) and base-man (`takes man`); a program in no family stops the build; packages an
+  older build left in `build/pkg` are removed. `tools/update-test.sh` builds its own test bundles with zup, base and
+  zenix-tests (the D15 path itself still takes any package; 16 packages a bundle is zup's limit). Tested on the host
+  (section 2c of `tools/zup-host-test.sh`): this build packed as the D15 bundles shipped it (zup, base, utils, man)
+  installed on an empty root, a family refused while the prev set holds utils, the base-only update, then the 26
+  families and base-man by `zup -f`: utils and man gone, every file as before, the prev set untouched.
+  **Choices (conservative):** `boot` and `diskd` go to zenix-tests (the kernel carries its own copies; the files on
+  the disk are not what runs); the man program goes with less (pager); a page that is no program's goes to base-man.
+
+### Reviews of step 4 (two independent read-only reviews, 2026-10-28) and what changed
+
+*Correctness and power cuts:* (blocker) the boot run read base's manifest into zup's table before `recover()`, so a
+recovery that put base back left a stale version for the install (it said "installed already"): the table is now
+emptied after `recover()`, and a new host test cuts before each change and then starts straight away with the
+bundle. (should fix) the lock's marks could clear the "needs a check" mark under another zup's transaction: the
+lock file's writes no longer touch zup's mark (one request each, which fsd's own clean mark covers; only the holder
+marks); the pid was written after the `O_EXCL` create, so a reader could see an empty lock: now `lock.PID` is written
+and linked to `lock`; a stale lock is taken over only while no other zup or zpkg lives; a boot run that cannot take
+the lock for another reason than a living holder goes on (nothing else runs at boot); `zup -f`/`-r` refuse to
+finish a system update's journal ("restart first": its result is boot's). (minor) mkdir's failure path now frees
+the new directory before lowering the parent's count; `X`'s undo sets owner and mode again (a cut between) and
+records the directory's own mode; old link targets are read from the disk for `u` (as for `L`) and must be
+journal-safe words; `takes` keeps the taken package's directory lines; `M` operations come first in the plan; a
+damaged live journal keeps its previous files in `live.damaged`.
+*Security and refusals:* (blocker) a package could name `PATH.zup-new` (a link of its own) and aim zup's writes,
+`chmod` and `chown` through it at a base file: the names `.zup-new`, `.new` and `.save` are refused in every manifest
+(user/zpkgfmt.c, and mkzup), every `.zup-new` is made anew with `O_EXCL` after an unlink, and only a regular file of
+zup's own is chowned, chmodded or renamed. (should fix) a path listed twice, a link target `-` or with other
+characters than mkzup's, more than 2,048 entries: refused by the parser; a tar member must have its manifest's size
+and the archive may not inflate past its manifest's sizes; a package whose installed manifest says `group base` is
+refused too; a sibling zup under the same parent is refused; a downgrade (`-d`) is refused while an installed
+package needs the newer version, and a `takes` that empties a package something needs; the larger of the header's
+minimum and `depends base` is checked against the effective base. (minor) a path that is an ancestor of the database
+or the cache, or on another mount, is refused, and removals get the symbolic-link check too; SIGQUIT and SIGTSTP are
+ignored as well; a system bundle that would take a path an installed package outside it owns is refused (the boot
+run). Not changed: `SYS_procinfo` carries no owner, so a user's program named zup or zpkg can make zup wait (never
+go ahead); owners and set-user-id bits are the repository's policy (mkrepo), not zup's.
+All tests pass after the fixes (`tools/zup-host-test.sh` 107, `tools/ext2-host-test.sh` 82).
