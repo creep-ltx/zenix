@@ -64,7 +64,7 @@ void kprintf(const char *fmt, ...) { (void)fmt; }
 int user_ok_wr(const struct proc *p, u32 ptr, u32 len) { (void)p; return ptr >= 0x1000 || !len; }
 int user_ok_rd(const struct proc *p, u32 ptr, u32 len) { return user_ok_wr(p, ptr, len); }
 static int sigs[NSIG];
-u16 port_poll(int port) { (void)port; return POLLNVAL; }
+u16 port_poll(int port, u16 ev) { (void)port; (void)ev; return POLLNVAL; }
 u16 vfs_poll(struct file *f) { return sock_poll(f); }
 void sig_send(struct proc *p, int sig) { (void)p; sigs[sig]++; }
 
