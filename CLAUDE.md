@@ -265,6 +265,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   ("a message sent to it was cancelled since you last saw POLLPRI"; reported only when asked for, and the report takes
   it as seen); `FS_SYNC`'s a0 (1 "bounded": answer within 2 s; any other value as 0) and `vfs_sync`'s order (network mounts,
   by `fsinfo.type` `nfs`, last); `ESTALE` 116.
+- **D23 step 2 (nfscd, branch nfs12, 2026-10-28):** `/etc/fstab`'s type `nfs` with `HOST:/EXPORT` and mount's NFS
+  options (`hard`, `soft`, `timeo=`, `retrans=`, `ro`, `sync`, `actimeo=`); the service names `fs.nfs0` .. `fs.nfs7`
+  and the program text `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` with its codes (`h s tN rN o y aN l`, append-only);
+  nfscd's saved record (`NFS1`, the root's handle and fileid, at most 77 bytes).
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

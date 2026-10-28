@@ -222,7 +222,7 @@ FAMILIES = [
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
                     "socktestd socktest bench termtest priotest svctest sigtest nettest cryptotest boot diskd"),
 ]
-BASE_SBIN = ["zfsd", "netd"]              # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
+BASE_SBIN = ["zfsd", "netd", "nfscd"]              # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
 # the licence notices of the code from other projects (owner decision, DESIGN D19 2026-10-27), as tools/mkroot.sh
 LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("tools/font_8x8.COPYING", "font_8x8"),
             ("user/xfer/LICENSE", "zmodem"), ("crypto/bearssl/LICENSE", "BearSSL"), ("crypto/monocypher/LICENCE", "Monocypher"),

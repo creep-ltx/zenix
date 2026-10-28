@@ -14,5 +14,10 @@ DESCRIPTION
     options. A filesystem whose server does not answer is listed with
     "cannot read the filesystem".
 
+NOTES
+    An NFS mount (DESIGN D23) shows at most 4 TB (its counts are capped
+    below 4 TB in 1 KB units), and while the NAS does not answer the last
+    sizes it gave.
+
 SEE ALSO
     du(1), free(1), mount(8)

@@ -24,65 +24,10 @@ void wsb_os_log(const char *line)
     b[n++] = '\n';
     sys_write(2, b, n);                 /* one write: a whole line in the kernel log */
 }
-/* The core's heap, as netd's (D19): libz's malloc rounds a block up to a power of two and grows its chunks four times
- * over (4, 16, 64, 128 KB), which held 112 KB in `ps` for one connection (measured in FS-UAE, step 1). Here: first fit
- * in regions of 16 KB taken from the kernel when needed and given back when empty, neighbours joined on free; a block
- * over a region's size is a region of its own. At most 6 regions (a process has 8, D11's NREG). */
-#define RSZ 16384u
-#define NRG 6
-#define BUSE 1u                          /* a block's size word: bit 0 in use, bit 1 a region of its own */
-#define BOWN 2u
-static char *rg[NRG];                   /* each starts with its first block's header */
-static u32 bsz(const u32 *h) { return h[0] & ~3u; }
-void *wsb_os_alloc(uint32_t n)
-{
-    u32 need = ((n ? n : 1) + 4 + 7) & ~7u;
-    if (need > RSZ) {
-        u32 *h = sys_memalloc(need);
-        if (!h) return 0;
-        h[0] = need | BUSE | BOWN;
-        return h + 1;
-    }
-    for (int pass = 0; pass < 2; pass++)
-        for (int r = 0; r < NRG; r++) {
-            if (!rg[r]) {
-                if (!pass || !(rg[r] = sys_memalloc(RSZ))) continue;
-                *(u32 *)rg[r] = RSZ;    /* one free block, the whole region */
-            }
-            for (u32 o = 0; o < RSZ; o += bsz((u32 *)(rg[r] + o))) {
-                u32 *h = (u32 *)(rg[r] + o), sz = bsz(h);
-                if ((h[0] & BUSE) || sz < need) continue;
-                if (sz - need >= 16) {  /* split: the rest stays free */
-                    *(u32 *)((char *)h + need) = sz - need;
-                    sz = need;
-                }
-                h[0] = sz | BUSE;
-                return h + 1;
-            }
-        }
-    return 0;
-}
-void wsb_os_free(void *p)
-{
-    u32 *h = (u32 *)p - 1;
-    if (!p) return;
-    if (h[0] & BOWN) { sys_memfree(h); return; }
-    h[0] &= ~BUSE;
-    for (int r = 0; r < NRG; r++) {
-        if (!rg[r] || (char *)h < rg[r] || (char *)h >= rg[r] + RSZ) continue;
-        for (u32 o = 0; o < RSZ; ) {     /* join every run of free neighbours */
-            u32 *a = (u32 *)(rg[r] + o), *b;
-            while (!(a[0] & BUSE) && o + bsz(a) < RSZ && !((b = (u32 *)((char *)a + bsz(a)))[0] & BUSE))
-                a[0] = bsz(a) + bsz(b);
-            o += bsz(a);
-        }
-        if (*(u32 *)rg[r] == RSZ) {     /* all of it free again: back to the kernel */
-            sys_memfree(rg[r]);
-            rg[r] = 0;
-        }
-        return;
-    }
-}
+/* The core's heap: libz's region heap (rheap_alloc), not malloc: malloc rounds a block up to a power of two and grows its
+ * chunks four times over, which held 112 KB in `ps` for one connection (measured in FS-UAE, D24 step 1) */
+void *wsb_os_alloc(uint32_t n) { return rheap_alloc(n); }
+void wsb_os_free(void *p) { rheap_free(p); }
 const char *wsb_os_strerror(int e) { return zstrerror(e); }
 
 int wsb_os_poll(struct wsb_pollfd *f, int n, int ms)

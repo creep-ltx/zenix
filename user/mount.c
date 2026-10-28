@@ -7,8 +7,9 @@
 
 /* mount                      list the mounted filesystems
  * mount [-t TYPE] DEVICE DIR  serve DEVICE with the filesystem server for TYPE (a service, fs.DEVICE) and put it on DIR
+ * mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR   an NFS export (DESIGN D23): the service fs.nfsN, served by /sbin/nfscd
  * mount -a                   mount everything listed in /etc/fstab (init does this at boot)
- * TYPE is ext2 or zenixfs; without -t it is read from the partition's type in the RDB.
+ * TYPE is ext2, zenixfs or nfs; without -t it is read from the partition's type in the RDB (a HOST:/EXPORT is nfs).
  * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs or auto (from the partition type), OPTIONS =
  * "defaults" or a comma list; "noauto" leaves the line out of mount -a. Lines starting with # and blank lines are ignored.
  * An ext2 volume not marked clean (a power cut while it was written, DESIGN D17) is checked first by mount -a
@@ -56,7 +57,7 @@ static int mount_one(const char *dev, const char *dir, const char *type, int fsc
         if (!type) { printf("mount: cannot tell the type of %s; use -t ext2 or -t zenixfs\n", dev); return 1; }
     }
     int z = !strcmp(type, "zenixfs");
-    if (!z && strcmp(type, "ext2")) { printf("mount: unknown type %s (ext2 or zenixfs)\n", type); return 1; }
+    if (!z && strcmp(type, "ext2")) { printf("mount: unknown type %s (ext2, zenixfs or nfs)\n", type); return 1; }
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
     for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++)
         if (!strcmp(mi.port, pname)) { printf("mount: %s is already mounted on %s\n", dev, mi.path); return 1; }
@@ -91,6 +92,115 @@ static int mount_one(const char *dev, const char *dir, const char *type, int fsc
     return 0;
 }
 
+/* ---- NFS (DESIGN D23 4.1) ---- */
+/* the options as nfscd's codes: h/s hard or soft, tN timeo seconds, rN retrans, o read-only, y sync, aN actimeo, l
+ * lazy; the defaults (hard, timeo=30, retrans=3, rw) are left out. 0, or 1 after printing why not */
+static int nfs_codes(const char *opts, int lazy, char *codes)
+{
+    char buf[96], *p = buf;
+    int n = 0;
+    codes[0] = 0;
+    strncpy(buf, opts ? opts : "", sizeof buf - 1);
+    buf[sizeof buf - 1] = 0;
+    while (*p) {
+        char *e = p;
+        while (*e && *e != ',') e++;
+        char save = *e; *e = 0;
+        const char *v = strchr(p, '=');
+        u32 num = v ? (u32)atoi(v + 1) : 0;
+        int okv = v && v[1] >= '0' && v[1] <= '9';
+        char c[12]; c[0] = 0;
+        if (!strcmp(p, "soft")) strcpy(c, "s");
+        else if (!strcmp(p, "hard") || !strcmp(p, "rw") || !strcmp(p, "defaults") || !strcmp(p, "noauto") ||
+                 !strcmp(p, "async") || !*p) ;
+        else if (!strcmp(p, "ro")) strcpy(c, "o");
+        else if (!strcmp(p, "sync")) strcpy(c, "y");
+        else if (!strncmp(p, "timeo=", 6) && okv && num >= 1 && num <= 600) { if (num != 30) sprintf(c, "t%u", num); }
+        else if (!strncmp(p, "retrans=", 8) && okv && num >= 1 && num <= 100) { if (num != 3) sprintf(c, "r%u", num); }
+        else if (!strncmp(p, "actimeo=", 8) && okv && num <= 3600) sprintf(c, "a%u", num);
+        else { printf("mount: unknown NFS option %s (hard, soft, timeo=S, retrans=N, ro, rw, sync, actimeo=S)\n", p); return 1; }
+        if (n + strlen(c) >= 32) { printf("mount: too many NFS options\n"); return 1; }
+        strcpy(codes + n, c); n += strlen(c);
+        *e = save;
+        p = *e ? e + 1 : e;
+    }
+    if (lazy) { codes[n++] = 'l'; codes[n] = 0; }
+    return 0;
+}
+
+/* a network mount never goes where netd and nfscd read their own files (4.2: no cycle netd -> nfscd -> netd) */
+static int nfs_refused(const char *dir)
+{
+    static const char *const no[] = { "/bin", "/sbin", "/etc" };
+    if (!strcmp(dir, "/")) return 1;
+    for (u32 i = 0; i < 3; i++) {
+        u32 l = strlen(no[i]);
+        if (!strncmp(dir, no[i], l) && (dir[l] == 0 || dir[l] == '/')) return 1;
+    }
+    return 0;
+}
+
+static void nfs_why(const char *src, int r)
+{
+    const char *w = r == -ETIMEDOUT ? "the NAS did not answer" :
+                    r == -EACCES || r == -EPERM ? "the NAS refused the mount (its export rules)" :
+                    r == -ENOENT ? "the NAS has no such export" :
+                    r == -ECONNREFUSED ? "the NAS refused the connection (is NFS on?)" :
+                    r == -EHOSTUNREACH || r == -ENETUNREACH ? "the NAS cannot be reached" :
+                    r == -ENETDOWN ? "the network is down" :
+                    r == -EIO ? "its server did not start" : 0;
+    if (w) printf("mount: %s: %s (see dmesg)\n", src, w);
+    else printf("mount: %s: %s (see dmesg)\n", src, zstrerror(r) ? zstrerror(r) : "refused");
+}
+
+/* mount -t nfs HOST:/EXPORT DIR: fs.nfsN -> "/sbin/nfscd nfsN HOST:/EXPORT [CODES]" at nice -10 (D11 6.4). A hand mount
+ * reaches the NAS before it answers (a typo or a firewall is said at once); mount -a's are lazy (l): the boot never
+ * waits for a NAS, a cable or a lease */
+static int mount_nfs(const char *src, const char *dir, const char *opts, int lazy)
+{
+    char codes[40], prog[SVC_TEXT_MAX], pname[16], dev[8], real[160];
+    const char *c = strchr(src, ':');
+    if (!c || c == src || c[1] != '/') { printf("mount: %s: not HOST:/EXPORT\n", src); return 1; }
+    if (nfs_codes(opts, lazy, codes)) return 1;
+    if (zrealpath(dir, real, sizeof real) < 0) strncpy(real, dir, sizeof real - 1), real[sizeof real - 1] = 0;
+    if (nfs_refused(real)) {
+        printf("mount: %s: an NFS mount may not be on /, /bin, /sbin, /etc or below them\n", dir);
+        return 1;
+    }
+    int k = 0;
+    for (; k < 8; k++) {
+        strcpy(dev, "nfs"); dev[3] = (char)('0' + k); dev[4] = 0;
+        strcpy(pname, "fs."); strcat(pname, dev);
+        if (sys_port_find(pname) < 0) break;
+    }
+    if (k == 8) { printf("mount: too many NFS mounts (nfs0 .. nfs7 are in use)\n"); return 1; }
+    u32 room = SVC_TEXT_MAX - 1 - strlen("/sbin/nfscd nfs0 ") - (codes[0] ? strlen(codes) + 1 : 0);
+    if (strlen(src) > room) {
+        printf("mount: %s: too long for the service table: at most %u characters\n", src, room);
+        return 1;
+    }
+    strcpy(prog, "/sbin/nfscd "); strcat(prog, dev); strcat(prog, " "); strcat(prog, src);
+    if (codes[0]) { strcat(prog, " "); strcat(prog, codes); }
+    int r = sys_svc_register(pname, prog, -10);
+    if (r < 0) {
+        printf(r == -EBUSY ? "mount: too many filesystems mounted\n" : "mount: cannot register the server of %s (%d)\n", src, r);
+        return 1;
+    }
+    struct umountreq rq = { dir, pname, dev, "nfs" };
+    if ((r = sys_mount(&rq)) < 0) {
+        if (r == -ENOENT || r == -ENOTDIR || r == -EBUSY || r == -EACCES) {
+            /* the kernel's own refusals come before the server is asked; the server's come from its FS_ROOT */
+            struct ustat st;
+            if (sys_stat(dir, &st) < 0 || (st.mode & 0170000) != 0040000 || r == -EBUSY)
+                printf("mount: cannot mount %s on %s: %s\n", src, dir, zwhy("refused"));
+            else nfs_why(src, r);
+        } else nfs_why(src, r);
+        sys_svc_remove(pname);
+        return 1;
+    }
+    return 0;
+}
+
 /* mount -a: the lines of /etc/fstab */
 static int mount_all(void)
 {
@@ -118,7 +228,7 @@ static int mount_all(void)
             }
             if (nf >= 2 && !(f[3] && strstr(f[3], "noauto"))) {
                 const char *type = (nf >= 3 && strcmp(f[2], "auto")) ? f[2] : 0;
-                if (mount_one(f[0], f[1], type, 1)) bad = 1;
+                if (type && !strcmp(type, "nfs") ? mount_nfs(f[0], f[1], f[3], 1) : mount_one(f[0], f[1], type, 1)) bad = 1;
             } else if (nf < 2) { printf("mount: bad line in /etc/fstab: %s\n", line); bad = 1; }
         }
         *eol = save;
@@ -129,17 +239,24 @@ static int mount_all(void)
 
 int main(int argc, char **argv)
 {
-    const char *type = 0, *dev = 0, *dir = 0;
+    const char *type = 0, *dev = 0, *dir = 0, *opts = 0;
     int all = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-a")) all = 1;
         else if (!strcmp(argv[i], "-t") && i + 1 < argc) type = argv[++i];
+        else if (!strcmp(argv[i], "-o") && i + 1 < argc) opts = argv[++i];
         else if (!dev) dev = argv[i];
         else if (!dir) dir = argv[i];
         else dev = 0;
     }
     if (all) return mount_all();
     if (argc == 1) { list(); return 0; }
-    if (!dev || !dir) { printf("usage: mount [-t ext2|zenixfs] DEVICE DIR     mount -a     mount (list)\n"); return 2; }
+    if (!dev || !dir) {
+        printf("usage: mount [-t ext2|zenixfs] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
+               "       mount -a     mount (list)\n");
+        return 2;
+    }
+    if ((type && !strcmp(type, "nfs")) || (!type && strstr(dev, ":/"))) return mount_nfs(dev, dir, opts, 0);
+    if (opts) { printf("mount: -o is for NFS mounts only\n"); return 2; }
     return mount_one(dev, dir, type, 0);
 }

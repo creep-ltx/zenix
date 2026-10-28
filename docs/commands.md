@@ -59,7 +59,7 @@ spot-checked against the code that day.
 | [zpkg](man/zpkg.txt) | the package manager: `-Syu`, `-S`, `-R`, `-Q`, `-U`, signed lists and packages over HTTP (DESIGN D22) |
 | [random](man/random.txt) | not a command: `/dev/random` and `/dev/urandom`, the kernel's random numbers, and the seed file (DESIGN D19) |
 | [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
-| [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd or zfsd) |
+| [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd, zfsd, or nfscd for a NAS's folder over NFS, DESIGN D23)|
 
 ## The network
 | Command | Summary |
@@ -78,6 +78,7 @@ spot-checked against the code that day.
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
 | [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 | [genet](man/genet.txt) | not a command: the Ethernet driver of a Raspberry Pi CM4 or Pi 4 under Emu68 (`/sbin/net/genet`), started by netd |
+| [nfscd](man/nfscd.txt) | not a command: an NFS mount's server (`/sbin/nfscd`, DESIGN D23), started by the kernel for `mount -t nfs`; its manual is mount's |
 | [wasabid](man/wasabid.txt) | not a command: the remote control daemon (`/sbin/wasabid`, DESIGN D24), the owner's Wasabi protocol on TCP 1236; off until root writes `/etc/wasabid.conf`, kept running by init through `/etc/daemons` |
 
 ## Internals and test programs

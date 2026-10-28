@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     mount
     mount [-t type] device dir
+    mount [-t nfs] [-o options] host:/export dir
     mount -a
 
 DESCRIPTION
@@ -48,9 +49,44 @@ DESCRIPTION
     seconds after the first change, at sync(1) and at umount, so a power
     cut leaves the volume as it was at the last commit (docs/zenixfs.md).
 
+    NFS (DESIGN D23): mount -t nfs nas:/volume1/zenix /nas puts a
+    directory that a NAS or a Linux PC exports on dir (NFSv3 over TCP;
+    -t nfs may be left out when the source has the form host:/export).
+    The host is a name (/etc/hosts, then DNS) or an address, looked up
+    again at every connection. Its server is /sbin/nfscd, one for each
+    NFS mount, registered as the service fs.nfs0 .. fs.nfs7 (mount takes
+    the first free one; the list shows that name and the type nfs; the
+    source is in nfscd's first line in dmesg). A hand mount reaches the
+    NAS before it answers, so a typo or a firewall is said at once
+    ("the NAS did not answer", "the NAS refused the mount (its export
+    rules)", "the NAS has no such export"; the details are nfscd's lines
+    in dmesg). Options (-o, comma-separated, as on Linux):
+      hard       the default: a request is tried until the NAS answers;
+                 programs wait while it is off. Ctrl-C ends a program
+                 waiting there (one that catches Ctrl-C, as the editor
+                 does: kill -9). dmesg says "the NAS is not answering,
+                 still trying" and later "the NAS answers again".
+      soft       a request fails with an I/O error after the retries
+                 (programs that do not expect errors may lose data).
+      timeo=S    seconds without an answer before a retry (default 30).
+      retrans=N  the retries of a soft mount (default 3).
+      ro         read-only.
+      sync       each write is on the NAS's disk when it returns.
+      actimeo=S  file and directory attributes are trusted for S
+                 seconds (0: asked every time; default 3-60).
+      rw, defaults, async: accepted, the defaults.
+    While the NAS does not answer, mount's list, df and sync never wait
+    (the last known sizes; sync tells of unsaved data in dmesg).
+    An NFS mount may not be on /, /bin, /sbin, /etc or anything below
+    them: the network's own programs and files live there. In
+    /etc/fstab the type is nfs (options: those of -o); mount -a mounts
+    such a line without contacting the NAS (the first use does), so a
+    boot never waits for a NAS, a cable or the network.
+
     mount -a mounts everything listed in /etc/fstab; init runs it at boot.
     Each line is "device dir type options" (fields separated by spaces or
-    tabs): type is ext2, zenixfs or auto (read from the partition type);
+    tabs): type is ext2, zenixfs, nfs (device host:/export) or auto (read
+    from the partition type);
     options is defaults, or a comma list in which "noauto" leaves the line
     out of mount -a. Lines starting with # and empty lines are ignored.
     A line that fails is reported and the others are still mounted.
@@ -61,6 +97,8 @@ EXAMPLES
     mount -t ext2 ide0p2 /mnt/sub
     mount
     echo 'ide0p2 /data auto defaults' >> /etc/fstab
+    mount -t nfs nas:/volume1/zenix /nas
+    mount -t nfs -o soft,timeo=10 192.0.2.20:/export /mnt
 
 EXIT STATUS
     0, 1 on an error (no such device, already in use or mounted, unknown
@@ -93,13 +131,31 @@ NOTES
     service is removed again.
     ZenixFS names longer than 63 bytes (possible on a volume written
     elsewhere) are not listed by ls; they can still be opened by name.
-    Only types with a server can be mounted (ext2, zenixfs). A ZenixFS
+    Only types with a server can be mounted (ext2, zenixfs, nfs). A ZenixFS
     mount needs /sbin/zfsd on the root: without it the server does not
     start ("cannot start /sbin/zfsd" in dmesg).
+    NFS: reading only, for now (DESIGN D23 step 2): every change on an
+    NFS mount is "read-only file system" until writing is built (step
+    3). The NAS decides who may do what: NFSv3 trusts the uid the Amiga
+    sends, so export the folder only to the Amiga's address and map
+    every user to one NAS user (d23-nfs.md 8). Nothing on the wire is
+    encrypted: the home network only. Set-user-id bits on the NAS are
+    never honoured. Files of 4 GB or more cannot be opened; names
+    longer than 63 bytes are not listed. A symbolic link on the NAS
+    with an absolute target is followed from Zenix's / (as a Linux
+    client does). A program changed on the NAS within the same second
+    and to the same size as the copy in memory is not seen as changed.
+    The NAS must accept a client on an unprivileged port when the
+    Amiga is behind NAT (SLIP, the emulator): Linux's export option
+    "insecure", the Synology's "allow connections from non-privileged
+    ports". A host:/export may be up to 62 characters (fewer with
+    options): the service table's room. A file that was open when
+    nfscd was started again (a crash, or kill -9) answers "stale file
+    handle" until it is closed; open it again.
     It asks the disk server for a device's details with DISK_INFOSZ or
     DISK_LISTSZ and its buffer's size, so a newer disk server never
     writes past it (the frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
-    umount(8), fdisk(1), df(1), dmesg(1), mkfs.ext2(1), mkfs.zenixfs(1),
-    boot(8)
+    umount(8), nfscd(8), fdisk(1), df(1), dmesg(1), mkfs.ext2(1),
+    mkfs.zenixfs(1), boot(8)

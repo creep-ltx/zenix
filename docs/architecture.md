@@ -941,6 +941,28 @@ created in the seconds before the crash (not committed) is gone, its open file r
 never handed to another file. The library
 allocates only at mount (block cache, bitmaps, three scratch blocks), so a running server needs no more memory.
 
+### nfscd - an NFS mount's server (`user/nfscd.c` + `net/nfs/`, port `fs.nfs0` .. `fs.nfs7`, DESIGN D23)
+`mount -t nfs HOST:/EXPORT DIR` registers `fs.nfsN` -> `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` at nice -10 (a file
+service, D11 6.4; the options as one word of codes: `s` soft, `tN` timeo, `rN` retrans, `o` read-only, `y` sync, `aN`
+actimeo, `l` lazy, which `mount -a` adds). The NFS client is the core in `net/nfs/` (no system calls; the same files
+are the PC tests', `tools/host/nfs-test.sh`): NFSv3 over one TCP connection (RFC 1813, the portmapper for mountd,
+AUTH_SYS with the request's uid, gid and the groups `/etc/group` gave at the start), the handle table (inode numbers
+from the fileids, the root always 2), the attribute, name and data caches, every `FS_*` request as a small state
+machine. `user/nfscd.c` is its OS layer: one `evwait` on the port (`POLLPORT | POLLPRI`, `POLLIN` while it can hold
+one more), the socket and a name lookup (`SOCK_RESOLVE`, at each connect); the messages it holds are known to the core
+only by an id, and the link is cut at the reply. A message the core has no slot for waits in nfscd (8 at most);
+`FS_CLOSE` and a cancelled message go to the core at once. On `POLLPRI` every held message newly marked
+`UMSG_CANCEL` is cancelled in the core (a killed client: -EINTR within one turn). `hard` (default): a request is tried
+until the NAS answers; `soft`: -EIO after the retries; while the NAS is "not answering" `STATFS`, the root's stat and
+`FS_SYNC` answer from the cache at once. It binds a privileged source port (665-1023, random at its start, the next
+one when the last connection's port is still closing: netd has no abortive close). At its first contact it saves the
+export's root handle in its saved table (`SVC_SAVE`); a restarted nfscd refuses another export ("mount it again") and
+answers the numbers the kernel holds (`SVC_OPENS`) -ESTALE until they are closed. Killed (its `evwait` answers
+-EINTR): every held request -EIO, then it ends. Its heap is libz's region heap with a cap (small profile 160 KB); the
+tables and the two 9 KB buffers are one block. **Step 2 serves reading only:** nfscd adds `o` itself, so every change is
+-EROFS until D23 step 3. Memory, small profile (the stock A1200, FS-UAE, `ps`): 112 KB mounted and idle, 144 KB after
+reading (the data cache full); 51,616 bytes of image. `tools/nfs-emu-test.sh`.
+
 ### The mount table (`kernel/vfs.c`)
 Entry 0 is the root (port `fs`); `SYS_mount` puts a server's port on a directory (8 entries, the root
 included). **Mounts are services** (D11 6.4): `mount DEVICE DIR` reads the device's volume id (as boot does),
