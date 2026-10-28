@@ -4,3 +4,11 @@ sleep 10
 send nice -n -20 sh -c 'sleep 1.5; umount /f; echo um=$?' & time /f/awk -f /tmp/p.awk; wait; umount /f; echo um2=$?; echo load-$(echo done)\r
 wait load-done 90
 sleep 1
+# F13's cost (informative): 200 stats through a mount as a user (one extra FS_LSTAT on the root's server each), the
+# same without crossing a mount, and through the mount as root (no extra call)
+send mount -t ext2 df1 /f; ls /f >/dev/null; su user\r
+sleep 4
+send echo m-user-mnt; time sh -c 'for i in $(seq 200); do test -e /f/awk; done'; echo m-user-root; time sh -c 'for i in $(seq 200); do test -e /bin/sh; done'; exit\r
+sleep 40
+send echo m-root-mnt; time sh -c 'for i in $(seq 200); do test -e /f/awk; done'; umount /f; echo meas-$(echo done)\r
+wait meas-done 60

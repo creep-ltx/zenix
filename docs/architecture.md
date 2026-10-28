@@ -914,7 +914,16 @@ root mounted, paths go to its server untouched. Otherwise the kernel makes every
 working-directory text itself and for mount points; at most 159 bytes, `FS_PATHMAX` in fsproto.h, longer is
 -ENAMETOOLONG and never cut: before, the working directory text was cut at 95 characters, so relative paths could
 act on the wrong directory once something was mounted), picks the longest mount point that prefixes it and hands the server
-the rest as a path inside that filesystem together with that filesystem's root inode as the working directory. Each
+the rest as a path inside that filesystem together with that filesystem's root inode as the working directory. A
+path that crosses into a mount also needs search (x) permission on every directory above the mount point, which lie on
+the parent volume (audit F13, as on Linux): for a caller other than root the kernel asks the parent's server for the
+mount point itself (`FS_LSTAT` with the caller's ids, whose walk checks each directory), up through nested mounts to
+the root (`mount_search` in vfs.c); any error refuses the path. A success is cached per mount for one user and group
+until a request that can change who may search (`FS_CHMOD`, `FS_CHOWN`, `FS_RENAME`, `FS_RMDIR`, `FS_UNLINK`), a mount,
+an umount or a server start (measured in FS-UAE: uncached 1.7 ms more a call, +38% on a stat through a mount; cached
+no measurable cost). Not seen: changes root makes behind the kernel's back (raw IPC to a server, writing the device).
+Since the check works on the absolute path text, a working directory inside a mount is checked again on every relative
+path (stricter than Linux, which checks only when the directory is entered). Each
 open file remembers its mount. `link` and `rename` across two mounts fail. `umount` is refused while a process has its
 working directory or an open file inside, or another mount lies below. Caveat: because `..` is resolved on the text, a
 working directory reached through a symbolic link behaves as its text says once a second filesystem is mounted.
