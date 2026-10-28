@@ -1134,7 +1134,8 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   two left a `..` the parent did not count, which an rmdir of the parent then left naming a free inode); `rmdir` refuses (-ENOTEMPTY) a
   directory whose count says a subdirectory still points at it (one a cut left unnamed). What a cut can leave is a
   count one too high, an unnamed inode or directory, blocks or inodes marked in use that nothing holds, free counts a
-  little off: space lost until `fsck.ext2` or `e2fsck` gives it back. Tested on the host by cutting the disk after
+  little off: space lost until `fsck.ext2` or `e2fsck` gives it back. A deleted inode's dtime is never below the
+  inode count (e2fsck reads such a value as an orphan-list link; a clock never set writes times near 1970). Tested on the host by cutting the disk after
   each of an update's 2200 block writes and of a live `zup -f` and `zup -r` (`tools/zup-host-test.sh` section 3, `tools/e2safe.py` sorts e2fsck's findings
   into leaks and the rest). Such a cut leaves the volume marked "not cleanly unmounted" (the clean mark, section 9,
   DESIGN D17): boot checks a marked root with `fsck.ext2 -y` at the next start, `mount -a` a marked volume of

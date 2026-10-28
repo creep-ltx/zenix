@@ -950,3 +950,38 @@ ignored as well; a system bundle that would take a path an installed package out
 run). Not changed: `SYS_procinfo` carries no owner, so a user's program named zup or zpkg can make zup wait (never
 go ahead); owners and set-user-id bits are the repository's policy (mkrepo), not zup's.
 All tests pass after the fixes (`tools/zup-host-test.sh` 107, `tools/ext2-host-test.sh` 82).
+
+## As built: step 5, zpkg (main line, branch zpkg1, 2026-10-28)
+
+- `user/zpkg.c` (`/bin/zpkg`, man/zpkg.txt) over the cores of steps 2-3, `user/zpkgfmt.c` and Ed25519: `-Sy`,
+  `-Syu`, `-Syuu`, `-S`, `-Sw`, `-Ss`, `-Si`, `-Sc`, `-Q`, `-Qi`, `-Ql`, `-Qo`, `-Qu`, `-R`/`-Rs`/`-Rn`, `-U`,
+  `--back`, `--snapshot`, `--ignore-expiry`, `--reset-serial`, `--ram`; plain HTTP with time limits (connect 15 s,
+  silence 60 s, a total per file of 2 min plus 1 s a KB), keep-alive, redirects (never to https), resume from
+  `.part`; the order of 4.3 (resolve; download and check everything; the manifests' dependencies and `takes` against
+  the list, file conflicts across the set; then one `zup -f` or `zup -r` per package); the deps file; the lock as
+  zup's (linked whole, a stale holder only while no other zup or zpkg lives); the running programs of an updated
+  package named; a newer system downloaded and checked, and the owner told to copy it to BOOT: until the slot comes
+  (step 7). The package `zpkg` joins the base group (`/bin/zpkg`, `/etc/zpkg.conf` as a config file naming no server,
+  D22 7.6); `make bundle` carries zup, base and zpkg. The trusted keys are built in (`tools/zsign.py cheader`: the
+  TEST key in a test build, `RELEASE=1` the release keys of `tools/keys/`).
+- **Choices (conservative):** `-U` copies the file and its `.sig` into the root-only cache before it checks them
+  (nobody can change the file between the check and zup) and takes only a whole path; `--back` looks in the cache
+  only (the list names no older versions; the pool fallback of 7.5 needs a list word, left open); zpkg asks for 160
+  KB free before a change; the kernel's own processes (boot, diskd) are not named as running old versions.
+- **Found and fixed on the way:** the resolver never set its depth counter (`user/zpkg/resolve.c`, the S21 guard):
+  on the 68020 the first `-S` said "more than 64 deep"; kernel/ext2.c wrote a deleted inode's dtime from a clock
+  never set (near 1970), below the inode count, which e2fsck takes for an orphan-list link: now never below it.
+- Sizes (*measured*): `/bin/zpkg` 89,936 bytes (text 82,678, bss 33,520: Ed25519 and SHA-512 about 20 KB, the HTTP
+  core, the list parser and resolver, libz's printf); `/sbin/zup` 56,920 (text 50,734); the system bundle 453,504
+  bytes (the kernel, zup, base, zpkg). The RAM floppy's kernel: 159,924 of 179,200 bytes (19,276 left; 2,892 on the
+  mount tests' floppy).
+- **Memory (FS-UAE, *measured*, not hardware):** the stock A1200 (2 MB chip): 1,014 KB free after the run, about 540
+  KB free while zpkg and zup install one package; over SLIP 598 KB. **The 1 MB chip-only machine cannot run zpkg with
+  the network up:** with SLIP up and one login about 104 KB are free (netd's pools take the rest), so zpkg refuses
+  with its memory message and changes nothing (`zpkg-emu-test.sh m` checks exactly that). An owner's question
+  (below in the hand-back), not decided here.
+- Tests (`tools/zpkg-emu-test.sh`, *verified* in FS-UAE): `e` the A2065, 22 checks (every operation above, a replay
+  skipped, a damaged mirror refused and the next used, a cut download resumed, an expired list and
+  `--ignore-expiry`, `-U` with a bad `.sig`, the refusals, e2fsck after); `s` SLIP (-Sy, -S with a dependency, -Rns,
+  e2fsck); `m` the 1 MB machine (above). In `tools/check.sh` as `zpkg-emu-test` (parts e|s|m). Not yet: the emulator
+  killed during a live install (the host tests cut before every change and after every block write instead).

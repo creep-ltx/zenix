@@ -8,6 +8,9 @@ since 1.1.1); the key never enters the build or the repository.
   zsign.py verify --pub PUB [--pub PUB]... [--kind K] FILE [SIG]  checked with OpenSSL against the given keys
   zsign.py keyid PUB                                            the key id (8 bytes, hex) the .sig names
   zsign.py testkey                                              the TEST key pair, made when missing (below)
+  zsign.py cheader OUT [--release]                              zpkg's built-in keys as a C header (D21 6.3): the
+                                                                TEST public key (made when missing), or with
+                                                                --release every tools/keys/zenix-release-*.pub
 
 KEY: a PKCS#8 PEM Ed25519 private key; by default ~/.config/zenix-signing/zenix-release.key (D15: mode 600, outside
 every repository, with an offline backup). PUB: the public half (SubjectPublicKeyInfo PEM), as in tools/keys/ and
@@ -87,6 +90,30 @@ def testkey():
         os.replace(tmp, TEST_KEY)
         os.replace(TEST_PUB + ".part", TEST_PUB)
     return TEST_KEY, TEST_PUB
+
+
+def cheader(out, release):
+    """zpkg's trusted keys (D21 6.3: release builds the release keys, test builds the test key), rewritten only when
+    they change"""
+    if release:
+        kd = os.path.join(HERE, "keys")
+        pubs = sorted(os.path.join(kd, f) for f in (os.listdir(kd) if os.path.isdir(kd) else [])
+                      if f.startswith("zenix-release-") and f.endswith(".pub"))
+        if not pubs:
+            die("a release build needs tools/keys/zenix-release-*.pub (the public halves)")
+    else:
+        pubs = [testkey()[1]]
+    raw = [raw_public(p) for p in pubs[:4]]
+    text = "/* made by tools/zsign.py cheader: zpkg's built-in public keys (DESIGN D21 6.3) */\n"
+    text += "#define ZPKG_KEYCLASS %d                 /* ZP_KEY_%s */\n" % (2 if release else 1, "RELEASE" if release else "TEST")
+    text += "#define ZPKG_NKEYS %d\n" % len(raw)
+    text += "static const unsigned char zpkg_keys[ZPKG_NKEYS][32] = {\n"
+    for r in raw:
+        text += "    { " + ", ".join("0x%02x" % b for b in r) + " },\n"
+    text += "};\n"
+    if not (os.path.exists(out) and open(out).read() == text):
+        open(out + ".new", "w").write(text)
+        os.replace(out + ".new", out)
 
 
 def keyid(pub):
@@ -202,6 +229,8 @@ def main(a):
     elif cmd == "testkey" and not rest:
         k, p = testkey()
         print("%s %s (key %s)" % (k, p, keyid(raw_public(p)).hex()))
+    elif cmd == "cheader" and len(rest) in (1, 2) and (len(rest) == 1 or rest[1] == "--release"):
+        cheader(rest[0], len(rest) == 2)
     elif cmd == "keyid" and len(rest) == 1:
         print(keyid(raw_public(rest[0])).hex())
     else:

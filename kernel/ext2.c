@@ -843,7 +843,9 @@ int ext2_iput(const struct inode *in)
     wr32(raw + 8, in->mtime);           /* atime */
     wr32(raw + 12, in->mtime);          /* ctime */
     wr32(raw + 16, in->mtime);
-    wr32(raw + 20, in->links ? 0 : in->mtime);     /* dtime of a deleted inode */
+    /* dtime of a deleted inode: e2fsck takes a dtime below the inode count for an orphan-list link, so a clock that
+     * was never set (near 1970, a machine without a battery clock) must not write one (found by zpkg's FS-UAE test) */
+    wr32(raw + 20, in->links ? 0 : in->mtime > ninodes ? in->mtime : ninodes + 1);
     wr16(raw + 24, in->gid);
     wr16(raw + 26, in->links);
     wr32(raw + 28, in->nblocks);

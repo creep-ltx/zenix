@@ -201,6 +201,7 @@ static int setup(struct rs *r, const struct zp_world *w, struct zp_plan *pl, con
     r->pl = pl;
     r->why = why ? why : &dummy;
     r->flags = flags;
+    r->depth = 0;                   /* (was left unset: found by zpkg's first run on the 68020, D22 step 5) */
     pl->step = malloc(sizeof *pl->step * (size_t)cap);
     r->mark = malloc((size_t)(w->ix->npkg + 1));
     r->stepof = malloc(sizeof *r->stepof * (size_t)(w->ix->npkg + 1));

@@ -245,7 +245,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   each request may rewrite (`fsl_ok`, `kernel/fsproto.h`). A server without the bit follows links as before.
 - **D22 (zpkg, 2026-10-28):** `UPD_F_TRIAL` 2 in the bootinfo and `uupdate` flags; the manifest line `takes OTHER`;
   zup's journal line `live 1 NAME` and the live-only operations `S`, `M`, `X`; `/var/cache/zpkg/live/` and
-  `/var/lib/zpkg/lock` (a pid and a newline); `zup -f`/`-r`'s command line is between programs of one base version
+  `/var/lib/zpkg/lock` (a pid and a newline, linked whole from `lock.PID`); zpkg's `/etc/zpkg.conf` (the words
+  `channel`, `server`, `hold`, `cache`; others ignored), `/var/lib/zpkg/deps` (a name a line) and `sync/CHANNEL.index`
+  with its `.sig`; zpkg's built-in keys by build kind (D21 6.3); `zup -f`/`-r`'s command line is between programs of one base version
   and not frozen (docs/d22-zpkg.md section 10).
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
