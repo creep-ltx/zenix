@@ -47,7 +47,10 @@ NOTES
     Zmodem only (no Xmodem, Ymodem or Hydra). Ctrl-C (SIGINT, SIGTERM)
     cancels: the other side gets Zmodem's ten CANs and a partial download
     stays as NAME.part. A full disk ends the transfer with the reason and
-    keeps the part. The protocol engine is CTerm's (MIT licence, notice
+    keeps the part; so does a sender that sends more than the size it
+    gave for the file (the part holds at most that size). A refused name
+    is shown with its control characters as ?.
+    The protocol engine is CTerm's (MIT licence, notice
     in /usr/share/licenses/zmodem).
 
 SEE ALSO

@@ -427,7 +427,9 @@ long sock_sys(u32 opw, u32 fd, u32 ureq)
     }
     if (op == SOCK_SOCKET) {
         int again;
-        u32 t = q.r.flags & 0xFF;
+        u32 t = q.r.flags & 0xF;
+        if (q.r.flags & ~(0xFu | SOCK_NONBLOCK | SOCK_CLOEXEC))
+            return -EINVAL;             /* as Linux; netd reads the type as these 4 bits too (audit 2026-10-28 S7) */
         return new_sock(SOCK_SOCKET, -1, &q, (q.r.flags & SOCK_NONBLOCK) != 0, t == SOCK_STREAM, &again);
     }
     int i = (int)f->ino;
@@ -450,7 +452,9 @@ long sock_sys(u32 opw, u32 fd, u32 ureq)
         }
         if (tv[1] >= 1000000)
             return -EINVAL;
-        *t = tv[0] > 40000000 ? 0xFFFFFFF0u : tv[0] * 100 + (tv[1] + 9999) / 10000;
+        /* at most 2^31 - 16 ticks (248 days): the wait's deadline test is signed, so a longer one (the old cap
+         * 0xFFFFFFF0) was over at once (audit 2026-10-28 S6) */
+        *t = tv[0] > 21000000 ? 0x7FFFFFF0u : tv[0] * 100 + (tv[1] + 9999) / 10000;
         return 0;
     }
     if (op == SOCK_IOCTL && q.r.option == FIONBIO) {

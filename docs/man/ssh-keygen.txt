@@ -22,7 +22,8 @@ DESCRIPTION
     SHA256:... comment (ED25519)". -y prints the public key line of a
     private key. -R HOST removes HOST's lines (also [HOST]:port) from
     known_hosts (~/.ssh/known_hosts, or FILE), keeping the old file as
-    FILE.old.
+    FILE.old; marked lines (@revoked, @cert-authority) are kept, as
+    OpenSSH does: a revocation is undone only by editing the file.
 
 OPTIONS
     -t ed25519  the only key type

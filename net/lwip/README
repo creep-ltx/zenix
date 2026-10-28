@@ -29,6 +29,12 @@ tools/host/net-test.sh checks that every patch is still applied):
   0002-random-ephemeral-ports.patch
                                  tcp_new_port and udp_new_port pick every ephemeral port at random (RFC 6056),
                                  not one random start and then sequential (D19 9.3).
+  0003-zero-window-ack-loop.patch
+                                 tcp_receive takes a segment of length 0 at rcv_nxt as acceptable when the window
+                                 is 0 (RFC 9293 3.10.7.4), and answers out-of-window segments of length 0 with
+                                 at most one ACK a slow-timer tick per connection (a field in struct tcp_pcb), as
+                                 Linux's tcp_invalid_ratelimit; upstream ACKed every one, so two lwIP ends with
+                                 zero windows ACKed each other for ever over the loopback (audit 2026-10-28 S22).
 
 A new lwIP release: take the same files from it, apply the patches (patch -p1 in this folder), run
 tools/host/net-test.sh, and change the version above.

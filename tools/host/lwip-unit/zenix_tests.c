@@ -5,6 +5,8 @@
 #include "lwip/tcp.h"
 #include "lwip/udp.h"
 #include "lwip/stats.h"
+#include "lwip/prot/tcp.h"
+#include "tcp/tcp_helper.h"
 
 Suite *zenix_suite(void);
 
@@ -70,11 +72,51 @@ START_TEST(test_zenix_random_ports)
 }
 END_TEST
 
+#ifndef UNIT_PBUF                       /* the pbuf build has no tcp_helper.c */
+/* 0003: with a zero window, an ACK of length 0 at rcv_nxt is acceptable and gets no ACK back (two such ends ACKed
+ * each other for ever over the loopback: security audit 2026-10-28 S22); one past rcv_nxt still gets one, but at
+ * most one such ACK each 500 ms */
+START_TEST(test_zenix_zero_window_ack)
+{
+    struct test_tcp_counters counters;
+    struct test_tcp_txcounters txc;
+    struct netif netif;
+    struct tcp_pcb *pcb;
+    struct pbuf *p;
+    LWIP_UNUSED_ARG(_i);
+    test_tcp_init_netif(&netif, &txc, &test_local_ip, &test_netmask);
+    memset(&counters, 0, sizeof counters);
+    pcb = test_tcp_new_counters_pcb(&counters);
+    fail_unless(pcb != NULL);
+    tcp_set_state(pcb, ESTABLISHED, &test_local_ip, &test_remote_ip, TEST_LOCAL_PORT, TEST_REMOTE_PORT);
+    pcb->rcv_wnd = 0;                   /* the program read nothing: the window is closed */
+    p = tcp_create_rx_segment_wnd(pcb, NULL, 0, 0, 0, TCP_ACK, 0);
+    fail_unless(p != NULL);
+    txc.num_tx_calls = 0;
+    test_tcp_input(p, &netif);
+    fail_unless(txc.num_tx_calls == 0, "an ACK at rcv_nxt into a zero window was answered (%u)", txc.num_tx_calls);
+    p = tcp_create_rx_segment_wnd(pcb, NULL, 0, 3, 0, TCP_ACK, 0);
+    fail_unless(p != NULL);
+    test_tcp_input(p, &netif);
+    fail_unless(txc.num_tx_calls == 1, "a segment past a zero window gets an ACK (%u)", txc.num_tx_calls);
+    p = tcp_create_rx_segment_wnd(pcb, NULL, 0, 3, 0, TCP_ACK, 0);
+    fail_unless(p != NULL);
+    test_tcp_input(p, &netif);
+    fail_unless(txc.num_tx_calls == 1, "a second one in the same 500 ms gets none (%u)", txc.num_tx_calls);
+    tcp_abort(pcb);
+}
+END_TEST
+#endif
+
 static void setup(void) { lwip_check_ensure_no_alloc(SKIP_POOL(MEMP_SYS_TIMEOUT)); }
 static void teardown(void) { lwip_check_ensure_no_alloc(SKIP_POOL(MEMP_SYS_TIMEOUT)); }
 
 Suite *zenix_suite(void)
 {
-    testfunc tests[] = { TESTFUNC(test_zenix_memp_limit), TESTFUNC(test_zenix_random_ports) };
+    testfunc tests[] = { TESTFUNC(test_zenix_memp_limit), TESTFUNC(test_zenix_random_ports),
+#ifndef UNIT_PBUF
+                         TESTFUNC(test_zenix_zero_window_ack)
+#endif
+    };
     return create_suite("ZENIX", tests, sizeof tests / sizeof tests[0], setup, teardown);
 }

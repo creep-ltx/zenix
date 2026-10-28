@@ -159,7 +159,8 @@ pkg telnet
   installed through the `system` bundle.
 - **Size for 150 packages:** about 180 bytes a block (one SHA-256 in hex is 64 of them, `desc` 40-70) and a 100-byte
   header: **about 27 KB**; 3-4 s over SLIP, under a second over Ethernet. Not compressed. zpkg refuses a list over
-  256 KB, a `latest` over 64 bytes and a `.sig` that is not exactly 80 bytes.
+  256 KB, a `latest` over 64 bytes and a `.sig` that is not exactly 80 bytes; the resolver refuses dependencies more
+  than 64 deep (audit 2026-10-28 S21: it recurses a link at a time on a stack without a guard).
 - **What the signature covers:** SHA-256 of the whole file (D21 6.1, unchanged), verified **before** a line is parsed.
 
 ### 3.4 Versions: who gives them (new in revision 2)

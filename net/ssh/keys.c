@@ -72,8 +72,10 @@ int ssh_key_read(const char *text, long n, const char *pass, unsigned char sk[64
     if (!e)
         return SSH_KEY_EFORMAT;
     bn = ssh_b64_decode(work, worklen, b, e - b);
-    if (bn < 0)
-        return bn == -1 && (e - b) / 4 * 3 > worklen ? SSH_KEY_ESPACE : SSH_KEY_EFORMAT;
+    if (bn < 0) {                       /* what was decoded before the bad character is wiped too (S18) */
+        rc = bn == -1 && (e - b) / 4 * 3 > worklen ? SSH_KEY_ESPACE : SSH_KEY_EFORMAT;
+        goto out;
+    }
     if (bn < (long)sizeof MAGIC || memcmp(work, MAGIC, sizeof MAGIC)) {
         rc = SSH_KEY_ENOTKEY;
         goto out;

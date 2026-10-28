@@ -74,14 +74,17 @@ static void quiesce(const struct claim *c)
     }
 }
 
-/* the claim ends: the device stopped first, then its DMA memory freed */
+/* the claim ends: the device stopped first; its DMA memory is given to the driver's process, freed with the rest of
+ * it when its zombie is reaped (audit 2026-10-28 S2). Not at once: when a driver ends, netd learns it only at its next
+ * wait for its children, and until then it may still copy a frame into the send buffers there; when netd ends, the
+ * driver still runs until it sees its doorbell close and may still touch the region. */
 static void release(struct claim *c, const char *why)
 {
     quiesce(c);
     if (c->blk)
-        mem_free(c->blk);
+        mem_set_owner(c->blk, (u32)c->pid);
     kprintf("drv: claim of %p (pid %d) released (%s): %u quiesce steps run%s\n", c->base, c->pid, why, c->nq,
-            c->blk ? ", its DMA memory freed" : "");
+            c->blk ? ", its DMA memory freed when the driver is reaped" : "");
     memset(c, 0, sizeof *c);
 }
 
@@ -235,7 +238,7 @@ long drv_sys(u32 opw, u32 a, u32 b)
         for (u32 k = 0; k < q.n; k++) {
             const struct udrvstep *s = &q.step[k];
             if ((s->op != DRVS_WRITE && s->op != DRVS_RMW) || (s->size != 1 && s->size != 2 && s->size != 4) ||
-                (s->addr & (s->size - 1)) || s->addr < c->base || s->addr + s->size > c->base + c->size)
+                (s->addr & (s->size - 1)) || s->addr < c->base || s->addr - c->base > c->size - s->size)
                 return -EINVAL;         /* a bus error here would be a kernel crash: only the claimed window */
         }
         memcpy(c->q, q.step, sizeof c->q);

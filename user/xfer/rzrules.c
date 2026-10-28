@@ -113,7 +113,15 @@ void *rz_wopen(struct rz_dl *d, const char *name, unsigned long size, char *made
     if (have)
         *have = 0;
     if (rz_clean(name, d->name, sizeof d->name)) {
-        say(d, RZ_SAY_REFUSED, name, 0);
+        /* said with its controls as '?' (the sender's bytes: rz's status lines are one a line, audit 2026-10-28 S13) */
+        char shown[RZ_NAMEMAX + 1];
+        int i;
+        for (i = 0; name && name[i] && i < RZ_NAMEMAX; i++) {
+            unsigned char c = (unsigned char)name[i];
+            shown[i] = (char)(c < 0x20 || c == 0x7F || (c >= 0x80 && c < 0xA0) ? '?' : c);
+        }
+        shown[i] = 0;
+        say(d, RZ_SAY_REFUSED, shown, 0);
         return 0;
     }
     r = rz_choose(d->name, size, 0, have ? 0 : RZF_NORESUME, d->fs->look, d->fs->u, d->target, sizeof d->target,

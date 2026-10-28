@@ -115,7 +115,7 @@ static int remove_host(const char *file, const char *hostname)
         return die(zwhy("cannot read"), file);
     char *out = malloc((u32)n + 1);
     long o = 0;
-    int removed = 0;
+    int removed = 0, marked = 0;
     if (!out)
         return die("out of memory", 0);
     for (char *l = t; *l;) {
@@ -138,12 +138,19 @@ static int remove_host(const char *file, const char *hostname)
                 q = c + 1;
             }
         }
+        if (hit && *l == '@') {         /* @revoked, @cert-authority: kept, as OpenSSH (audit 2026-10-28 S15) */
+            marked++;
+            hit = 0;
+        }
         if (hit) removed++;
         else { memcpy(out + o, l, (u32)len); o += len; }
         l += len;
     }
+    if (marked)
+        printf("# Host %s: %d marked line%s (@revoked, @cert-authority) kept\n", hostname, marked, marked == 1 ? "" : "s");
     if (!removed) {
-        printf("Host %s not found in %s\n", hostname, file);
+        if (!marked)
+            printf("Host %s not found in %s\n", hostname, file);
         return 1;
     }
     char old[ZPATH_MAX];
@@ -234,7 +241,7 @@ int main(int argc, char **argv)
     zc_rng_wipe(&rng);
     if (!quiet)
         printf("Generating public/private ed25519 key pair.\n");
-    crypto_ed25519_key_pair(sk, pk, sd);
+    crypto_ed25519_key_pair(sk, pk, sd);   /* (it wipes the seed itself) */
     if (*pass && !quiet)
         printf("Protecting it with the passphrase (bcrypt, %d rounds: this takes a while)...\n", rounds);
     static char text[2048], line[512], pubname[ZPATH_MAX];

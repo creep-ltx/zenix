@@ -132,8 +132,10 @@ its driver or netd died writes into memory the kernel has given to someone else.
 3. **A quiesce program:** with the claim the driver registers a short list of register writes that stop the device
    (GENET: receive and transmit DMA off, UMAC receive and transmit off; the same small language as the interrupt check,
    5.4). The kernel runs it **when the driver ends, and when netd ends**, before anything of either is freed, then
-   detaches the driver's interrupt program and frees the claim's region. A new driver's `DRV_CLAIM` resets the device
-   anyway.
+   detaches the driver's interrupt program and ends the claim. The claim's region is handed to the driver's process
+   and freed when its zombie is reaped (audit 2026-10-28 S2): netd learns of a driver's end only at its next wait for
+   its children and may copy a frame into the region until then; after netd's end the driver runs until it sees its
+   doorbell close. A new driver's `DRV_CLAIM` resets the device anyway.
 4. netd never reuses a buffer lent to a dead driver; it frees them with the claim.
 
 **No network buffer needs chip RAM** (no Amiga network hardware uses the chipset's DMA); buffers come from fast RAM when
@@ -800,8 +802,10 @@ and the refusal in `mkroot.sh`, `mkroot-zenixfs.sh` and `mkzup.py`. Local choice
    waited for ever on a server that never answers: svc-test h). **Not at the reset warning:**
    the kernel syncs there inside init's wait and writes no files; the start and the first seeding cover it.
 4. **The sources:** a key press or release 1 bit (`kbd_isr`, every raw code below 0x78); "bytes from the far end of
-   the serial line, per SLIP frame": every received `0xC0` (SLIP's END) half a bit, in the receive interrupt, so it
-   holds before netd exists and costs nothing per ordinary byte; the floppy's index pulse 1 bit, seen as CIA-B's FLG
+   the serial line, per SLIP frame": a received `0xC0` (SLIP's END) half a bit, in the receive interrupt, costing
+   nothing per ordinary byte; since audit 2026-10-28 S8 only while netd holds `/dev/ttyS0`, only an END after a byte
+   of data, and at most one a tick (back-to-back bytes come at the sender's fixed rate; a board could send 0xC0 runs
+   to `cu` or `rz`), every other `0xC0` mixed for nothing; the floppy's index pulse 1 bit, seen as CIA-B's FLG
    flag in the driver's polled wait for a track's DMA (the note's "while the motor runs": the driver polls, so only
    while it reads or writes a track; CIA-B's interrupts stay off); the RNG200 32 bits a word (stage0 finds
    `brcm,bcm2711-rng200` under `/soc`, `hwinfo.rng200` from the first reserved word; the kernel switches it on and takes

@@ -147,6 +147,7 @@ struct ssh {
     int ch_step;                        /* the channel's sequence (channel.c) */
     int ch_eof_out, ch_eof_in, ch_close_out, ch_close_in;
     int pend_gfail, pend_cfail;         /* request failures owed, held back during a rekey */
+    int pend_winch, pend_eof, pend_close;   /* asked for during a rekey: sent after it (audit 2026-10-28 S17) */
     int pw_tries;                       /* passwords sent (three, as OpenSSH's NumberOfPasswordPrompts) */
     struct ssh_wr w;
 };

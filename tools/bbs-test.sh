@@ -9,7 +9,10 @@
 # UTF-8); CONR_LFONLY set on console 1 while telnet runs (termtest rules from console 2, with free and ps: the memory
 # while a call is up); the escape prompt (here -e ^E: 0x1D is the serial port's own hook), z then fg, q; the board
 # hanging up ("Connection closed by"); telnet with a pipe for keys and a file for the screen (the console's rules
-# refused: said once, the call works); a refused port (exit 1). Needs unprivileged user namespaces, as eth-test.
+# refused: said once, the call works); a refused port (exit 1); a board that floods requests and reads nothing
+# (nettest serve flood on the Amiga's loopback, as the emulator's slirp takes any amount from the PC side: the escape
+# key still ends the call) and one that hangs up mid-state (the console reset, its ESC[6n answer not left for the
+# shell; audit 2026-10-28 S11, S12). Needs unprivileged user namespaces, as eth-test.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
@@ -82,6 +85,20 @@ send sh /tests/keys.sh | telnet -x 10.0.2.2 2323 > /tmp/t-out.txt 2> /tmp/t-err.
 wait st2= 60
 send telnet -x 10.0.2.2 2399; echo st3=\$?\r
 wait st3= 60
+send nettest serve tcp 2324 flood & sleep 1; telnet -x -e ^E 127.0.0.1 2324; echo st5=\$?\r
+wait Connected to 30
+sleep 40
+send \x05
+wait is not reading what is sent 30
+wait st5= 20
+send telnet -x 10.0.2.2 2323\r
+wait Connected to 30
+sleep 3
+send hostile\r
+wait Connection closed by 30
+sleep 2
+send echo st6=\$?\r
+wait st6= 20
 send termtest rules /dev/tty1\r
 sleep 2
 send dmesg > /tmp/t-k.txt; sync; echo ==do""ne\r
@@ -118,7 +135,7 @@ def check(ok, what, detail=""):
     bad += not ok
 first = calls[0] if calls else []
 ev = lambda c, n: [r for r in c if r["ev"] == n]
-check(len(calls) == 3, "three calls reached the board (the refused port none)", len(calls))
+check(len(calls) == 4, "four calls reached the board (the refused port none)", len(calls))
 check([r["name"] for r in ev(first, "ttype")][:2] == ["XTERM-16COLOR", "XTERM-16COLOR"], "TERMINAL-TYPE: XTERM-16COLOR, twice when asked twice", ev(first, "ttype"))
 check(any(r["cols"] == 80 and r["rows"] == 32 for r in ev(first, "naws")), "NAWS: 80 x 32 (PAL)", ev(first, "naws"))
 ag = ev(first, "agreed")[-1] if ev(first, "agreed") else {}
@@ -135,6 +152,13 @@ o, e = open(out + "/t-out.txt", "rb").read(), open(out + "/t-err.txt", "rb").rea
 check(b"<<END unix>>" in o and b"Connection closed by 10.0.2.2." in o and b"st2=0" in log, "keys from a pipe, the screen into a file: the call works, the board's bye ends it", o[-200:])
 check(e.count(b"console's rules are not available") == 1, "... the console's rules refused there: said once", e)
 check(b"st3=1" in log and b"10.0.2.2 port 2399" in log, "a refused port: said, exit 1")
+check(b"is not reading what is sent: the call is ended" in log and b"st5=0" in log,
+      "a board that floods requests and reads nothing: the escape key still ends the call (audit 2026-10-28 S11)")
+h = log.rfind(b"never ended")             # the board's last bytes (telnet does not echo the command typed)
+# the console's copy on the serial port leaves SGR out: the rest of TN_TERM_RESET (term-test checks the colours)
+check(h > 0 and log.find(b"\x18\x1b7\x1b[r\x1b8\x1b[?25h\x1b[?1l", h) > 0 and b"st6=0" in log[h:],
+      "a board that hangs up mid-state: telnet resets the console (string, colours, region, cursor) and the ESC[6n "
+      "answer never reaches the shell (st6=0) (audit 2026-10-28 S12)", log[h:h + 400] if h > 0 else "")
 check(b"Connection closed by 10.0.2.2." in log and b"st4=0" in log, "the board hangs up (bye): Connection closed by 10.0.2.2., exit 0")
 check(re.findall(rb"rules (\d+)", log)[-1:] == [b"0"], "after telnet the console's rules are back to none")
 m = re.search(rb"chip RAM free[^\n]*", log)

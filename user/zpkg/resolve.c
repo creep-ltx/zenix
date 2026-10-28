@@ -17,7 +17,9 @@ struct rs {
     int *stepof;                    /* per list block: its step's index, -1 none */
     const char **why;
     unsigned flags;
+    int depth;                      /* visits under way (audit 2026-10-28 S21: no stack guard, no deeper than this) */
 };
+#define ZP_MAXDEPTH 64
 
 static const struct zp_inst *inst_find(const struct zp_world *w, const char *name)
 {
@@ -117,6 +119,9 @@ static int visit(struct rs *r, const struct zp_pkg *p, int asdep, const char **w
         return fail(r, ZP_ELOOP, "the dependencies go round in a loop", p->name, 0);
     if (p->base)
         return fail(r, ZP_EPERM, "is part of the system: it comes only with the system update (zpkg -Syu)", p->name, 0);
+    if (r->depth >= ZP_MAXDEPTH)    /* a chain of 32,768 in a 256 KB list ran the 16 KB stack over (no MMU) */
+        return fail(r, ZP_ELOOP, "the dependencies go more than 64 deep", p->name, 0);
+    r->depth++;
     r->mark[k] = 1;
     for (i = 0; i < p->ndep; i++) {
         const struct zp_dep *d = zp_pkg_dep(ix, p, i);
@@ -164,6 +169,7 @@ static int visit(struct rs *r, const struct zp_pkg *p, int asdep, const char **w
         }
     }
     r->mark[k] = 2;
+    r->depth--;
     if (!in)
         kind = ZP_STEP_INSTALL;
     else if (p->vnum > in->vnum)

@@ -75,6 +75,7 @@ if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
     for c in $changed; do
         case "$c" in
         user/xfer/*) ;;          # the transfer engine and its file rules (DESIGN D20 5): a library, no page of its own
+        user/zpkg/*) ;;          # zpkg's core (DESIGN D22): a library of the coming zpkg, no page of its own yet
         user/*.c)
             b=$(basename "$c" .c); n=$(echo "$b" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
             case "$b" in libz|regex|miniz|fsd|pw|sha|sha256|zenixfsd|zenixfs_disk) continue;; esac     # libraries and servers: no page of their own

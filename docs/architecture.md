@@ -191,7 +191,8 @@ ChaCha20 (RFC 8439) with fast key erasure (every read replaces the key with the 
 handlers only store a 16-bit sample, the beam position (`VHPOSR`), in a 32-slot ring with the credit it earns;
 `kwork` mixes the ring into the pool (`rnd_work`). BLAKE2s keeps its own 64-byte block, so a compression runs once a
 block is full: samples are mixed in batches. **Credited** (eighths of a bit): a key press or release 8 (the keyboard's
-own controller has its own clock), a received `0xC0` (the end of a SLIP frame: the far machine's clock) 4, the
+own controller has its own clock), a received `0xC0` (the end of a SLIP frame: the far machine's clock; only on netd's port, after data, once a
+tick) 4, the
 floppy's index pulse seen while the driver waits for a track's DMA (the CIA-B FLG flag; CIA-B's interrupts are never
 enabled) 8, a word from the Pi's RNG200 (when stage0 found it; a word repeated stops its credit) 256, root's write to
 `/dev/random` 64 a byte (the seed file). **Mixed, credited 0:** disk and SD completions (`blk.c`), mouse movement,
@@ -1159,14 +1160,16 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   copy of the hardware table, first size `HWINFO_FIRST` 408: user-visible now, it grows at its end), `DRV_CLAIM` (a
   device the table names, GENET's base or a Zorro board's, never a RAM board: the only owner, a second claim -EBUSY;
   4 claims), `DRV_DMAMEM` (one region a claim, 64-byte aligned, whole lines, at most 4 MB, owned by the claim: neither
-  netd's nor the driver's end frees it), `DRV_QUIESCE` (at most 8 register writes or read-modify-writes inside the
+  netd's nor the driver's end frees it before the driver is reaped), `DRV_QUIESCE` (at most 8 register writes or read-modify-writes inside the
   claimed window, aligned), `DRV_CACHE` (write back, or write back and drop, whole 64-byte lines of the caller's DMA
   region: nothing on a 68k, whose data cache Zenix keeps off; Emu68's range opcodes with `HW_RANGEOPS`, else `cpushl`
   per line; never a bare invalidate), and `DRV_ATTACH`/`DRV_XFER`, which the kernel checks (the block in the driver's
   memory, its size at least the first size and saying so) and sends to `net` as `NETDRV_ATTACH` (64) and
   `NETDRV_XFER` (65), kernel messages that never start a server (a[0] the driver's pid). **When a driver ends, and
-  when netd ends**, `proc_exit` first runs the claim's quiesce program, then frees its DMA region and ends the claim
-  ("drv: claim of ... released" in the log), before anything of either process is freed. netd answers only its own
+  when netd ends**, `proc_exit` first runs the claim's quiesce program, then ends the claim ("drv: claim of ...
+  released" in the log), before anything of either process is freed; the DMA region is handed to the driver's process
+  and freed when its zombie is reaped (netd's wait for it, or the orphan reaping after netd's end: netd may still copy
+  a frame into it until it has reaped the driver, audit 2026-10-28 S2). netd answers only its own
   children (its list of pids), checks every buffer number, length and tag (a wrong one fails that entry, counted and
   logged, never netd), lends the driver its receive buffers (zero copy into lwIP while at most half are held by the
   stack, else copied; always copied for a DMA interface, whose buffers lie in the DMA region), lends frames to send as

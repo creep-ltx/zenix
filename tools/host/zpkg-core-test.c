@@ -319,6 +319,33 @@ static const char *show(const struct zp_plan *pl)
 }
 
 #define LIST(body) HEAD body
+/* audit 2026-10-28 S21: a chain of dependencies deeper than 64 is refused (the resolver recursed once a link, and a
+ * 256 KB list holds a chain of 32,768: the 16 KB stack has no guard); 60 deep still plans */
+static void deep_chain(void)
+{
+    static char text[16384];
+    struct zp_index save = rix;
+    struct zp_plan pl;
+    const char *why;
+    int rc, i;
+    for (int depth = 60; depth <= 70; depth += 10) {
+        strcpy(text, HEAD);
+        for (i = 0; i < depth; i++) {
+            char l[200];
+            snprintf(l, sizeof l, "pkg d%d\nversion 5 v\nfile d%d-5.zup 200 " SHA "\nsize 1\n", i, i);
+            strcat(text, l);
+            if (i + 1 < depth) { snprintf(l, sizeof l, "depends d%d 1\n", i + 1); strcat(text, l); }
+        }
+        if ((rc = zp_index_parse(&rix, text, strlen(text), &why)) != 0) { CHECK(0, "deep list: %s", why); break; }
+        rc = plan("d0", 0, 0, &pl, 0, 0, 2026102600, &why);
+        if (depth == 60) CHECK(rc == 0 && pl.n == 60, "-S d0: a chain 60 deep plans (%d)", rc);
+        else CHECK(rc == ZP_ELOOP, "-S d0: a chain 70 deep is refused, never recursed through (%d)", rc);
+        zp_plan_free(&pl);
+        zp_index_free(&rix);
+    }
+    rix = save;
+}
+
 static void t_resolve(void)
 {
     static char text[8192];
@@ -358,6 +385,7 @@ static void t_resolve(void)
     CHECK(rc == ZP_ELOOP, "-S a: a loop is refused (%d)", rc);
     rc = plan("self", 0, 0, &pl, 0, 0, 2026102600, &why);
     CHECK(rc == ZP_ELOOP && !strcmp(pl.bad, "self"), "-S self: depends on itself");
+    deep_chain();
     rc = plan("c", 0, 0, &pl, 0, 0, 2026102600, &why);
     CHECK(rc == ZP_ENOENT && !strcmp(pl.bad, "c") && !strcmp(pl.bad2, "nothere"), "-S c: a missing dependency, named");
     rc = plan("e", 0, 0, &pl, 0, 0, 2026102600, &why);

@@ -10,8 +10,9 @@
  * the ring into the pool. BLAKE2s keeps its own 64-byte block buffer, so mixing a sample is a copy and a compression
  * runs only once a block is full: samples are mixed in batches, never one hash per event.
  * Credited, in eighths of a bit: a key press or release 8 (the keyboard's own controller has its own clock), the end
- * of a SLIP frame received (0xC0, the far machine's clock) 4, the floppy's index pulse while the motor runs 8 (motor
- * speed jitter), the Pi's RNG200 (when stage0 found it) 32 a word. Mixed but credited 0: disk and SD completions,
+ * of a SLIP frame received (0xC0, the far machine's clock; netd's port only, after data, once a tick: serial.c) 4, the
+ * floppy's index pulse while the motor runs 8 (motor speed jitter), the Pi's RNG200 (when stage0 found it) 32 bits
+ * (256 eighths) a word. Mixed but credited 0: disk and SD completions,
  * mouse movement, the boot's clocks and a sparse hash of chip RAM, anything a program writes to /dev/urandom.
  * Root's write to /dev/random credits 8 bits (64 eighths) a byte: the seed file at boot (user/randseed.h decides
  * when; never on a RAM-disk, read-only or rescue root).

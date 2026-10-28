@@ -97,6 +97,12 @@ def wy_ed25519(o, d):
             if r != want:
                 bad.append((t["tcId"], t["result"], r))
     result("Wycheproof Ed25519 verification (Monocypher)", True, n, bad)
+    # audit 2026-10-28 S19: small-order keys and R refused (the identity as both: S = 0 verified any message)
+    ident = "01" + "00" * 31
+    sbad = [x for x in (("identity", ident, ident + "00" * 32),
+                        ("order 8", "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05", ident + "00" * 32))
+            if o.ask("ed25519_verify", x[1], "6869", x[2]) != "0"]
+    result("Ed25519: small-order public keys and R refused", True, 2, sbad)
 
 
 def wy_aead(o, d, name, cmd):

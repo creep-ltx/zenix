@@ -77,6 +77,28 @@ static u32 pattern(u32 i, u32 seed) { return (i * 2654435761u + seed) >> 13 & 0x
 /* ---- the servers: nettest serve tcp|udp PORT echo|sink ----
  * tcp echo: every byte back, up to 16 clients at once (poll); tcp sink: at the end of a client's data, its count and
  * the sum of its bytes (8 bytes); udp echo: every datagram back to its sender */
+/* "flood": a hostile telnet board (audit 2026-10-28 S11): IAC DO 200 over and over to the first caller, never
+ * reading; ends when the caller is gone, or after 120 s */
+static int flood(int l)
+{
+    static unsigned char b[900];
+    int c = accept(l, 0, 0);
+    u32 end = sys_ticks() + 12000;
+    if (c < 0) return 1;
+    for (int i = 0; i < (int)sizeof b; i += 3) { b[i] = 255; b[i + 1] = 253; b[i + 2] = 200; }
+    while ((int)(sys_ticks() - end) < 0) {
+        int w = send(c, b, sizeof b, MSG_DONTWAIT);
+        if (w < 0 && zerrno != EAGAIN) break;
+        if (w < 0) {
+            struct pollfd q = { c, POLLOUT, 0 };
+            poll(&q, 1, 1000);
+            if (q.revents & (POLLERR | POLLHUP)) break;
+        }
+    }
+    sys_close(c);
+    return 0;
+}
+
 static int serve(const char *proto, int port, const char *mode)
 {
     int udp = !strcmp(proto, "udp"), sink = !strcmp(mode, "sink");
@@ -89,6 +111,8 @@ static int serve(const char *proto, int port, const char *mode)
         return 1;
     }
     static char buf[2048];
+    if (!udp && !strcmp(mode, "flood"))
+        return flood(l);
     if (udp)
         for (;;) {
             struct sockaddr_in from;

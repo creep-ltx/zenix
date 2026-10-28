@@ -282,6 +282,35 @@ int main(void)
     ticks = 1000;
     if (!setjmp(out)) r = do_recv(fd);
     EXPECT(!hung && r == -EAGAIN && ticks >= 1040, "SO_RCVTIMEO: -EAGAIN at the deadline");
+    /* audit 2026-10-28 S7: unknown type bits are -EINVAL (netd took 0x21 for a stream, the kernel for none) */
+    clear();
+    {
+        struct usockreq q;
+        memset(&q, 0, sizeof q);
+        q.level = AF_INET;
+        q.flags = 0x21;
+        long sr = sock_sys(SOCK_SOCKET, 0, (u32)&q);
+        q.flags = SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC;
+        long sr2 = sock_sys(SOCK_SOCKET, 0, (u32)&q);
+        EXPECT(sr == -EINVAL && sr2 >= 0, "socket type 0x21: -EINVAL; SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC works");
+    }
+    /* audit 2026-10-28 S6: a timeout of 2^31 ticks or more (248 days, 0xFFFFFFF0 for "about forever") was already
+     * over when the wait began: -EAGAIN at once */
+    clear();
+    fd = newsock();
+    {
+        static u32 tv[2] = { 50000000, 0 };
+        static u32 tvlen = 8;
+        struct usockreq q;
+        memset(&q, 0, sizeof q);
+        q.level = SOL_SOCKET; q.option = SO_RCVTIMEO; q.val = (u32)tv; q.vlen = (u32)&tvlen;
+        long sr = sock_sys(SOCK_SETSOCKOPT, (u32)fd, (u32)&q);
+        ticks = 1000;
+        blocks = 0;
+        if (!setjmp(out)) r = do_recv(fd);
+        EXPECT(sr == 0 && !hung && r == -EAGAIN && blocks == 1 && ticks - 1000 >= 0x7F000000u,
+               "SO_RCVTIMEO of 50,000,000 s: waits (about 248 days, the most), not -EAGAIN at once");
+    }
 
     /* the server's end wakes every waiter; the dead socket answers -ENETDOWN without a message */
     clear();

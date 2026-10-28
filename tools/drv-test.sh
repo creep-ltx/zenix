@@ -100,9 +100,9 @@ EOS
     ok=0; grep -aqE 'net: eth0: /sbin/net/fake \(pid [0-9]+\) ended, status 137' $k && grep -aqE '[1-9][0-9]* received' $OUT/d-pingk.txt &&
         grep -aq '2 packets transmitted, 2 received, 0% packet loss' $OUT/d-ping2.txt && ok=1
     check "a driver killed in the middle of a ping: its end logged, started again, ping works again ($(grep -a 'packets transmitted' $OUT/d-pingk.txt))" $ok "$(cat $OUT/d-pingk.txt $OUT/d-ping2.txt; grep -a 'net: eth0' $k)"
-    ok=0; grep -aqE 'drv: claim of 0x?e90000 \(pid [0-9]+\) released \(the driver ended\): 2 quiesce steps run, its DMA memory freed' $k &&
+    ok=0; grep -aqE 'drv: claim of 0x?e90000 \(pid [0-9]+\) released \(the driver ended\): 2 quiesce steps run, its DMA memory freed when the driver is reaped' $k &&
         grep -aq '2 packets transmitted, 2 received, 0% packet loss' $OUT/d-ping3.txt && ok=1
-    check "the DMA driver killed: its claim released (the device stopped, the DMA memory freed), started again, ping works" $ok "$(grep -a 'drv:' $k; cat $OUT/d-ping3.txt)"
+    check "the DMA driver killed: its claim released (the device stopped, the DMA memory kept until netd reaps the driver, audit 2026-10-28 S2), started again, ping works" $ok "$(grep -a 'drv:' $k; cat $OUT/d-ping3.txt)"
     ok=0; grep -aq 'net: eth0: /sbin/net/fake given up after 5 ends in 60 s' $k && grep -aqx 'st=1' $OUT/d-gone.txt &&
         grep -aqx 'st=0' $OUT/d-ifup.txt && grep -aq '2 received, 0% packet loss' $OUT/d-ping4.txt && ok=1
     check "five ends in a minute: the driver given up; ifup eth0 starts it again and ping works" $ok "$(grep -a 'net: eth0' $k | tail -8; cat $OUT/d-gone.txt $OUT/d-ifup.txt $OUT/d-ping4.txt)"

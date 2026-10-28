@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include "../../net/netd/netd.h"
 #include "../../net/port/netd_port.h"
 
@@ -450,6 +451,29 @@ static void *tcp_echo(void *a)
     }
     return NULL;
 }
+/* port 7779: 40 bytes, one a segment, 10 ms apart (audit 2026-10-28 S4: each tiny segment held a whole receive
+ * buffer until the program read it, and 16 of them took the stock A1200's every buffer) */
+static void *tcp_drip_conn(void *a)
+{
+    int c = (int)(long)a, one = 1, i;
+    setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+    for (i = 0; i < 40; i++) { if (send(c, "d", 1, MSG_NOSIGNAL) != 1) break; usleep(10000); }
+    usleep(3000000);
+    close(c);
+    return NULL;
+}
+static void *tcp_drip(void *a)
+{
+    int l = (int)(long)a;
+    for (;;) {
+        pthread_t t;
+        int c = accept(l, NULL, NULL);
+        if (c < 0) continue;
+        pthread_create(&t, NULL, tcp_drip_conn, (void *)(long)c);
+        pthread_detach(t);
+    }
+    return NULL;
+}
 static void *udp_echo(void *a)
 {
     int s = (int)(long)a;
@@ -602,6 +626,22 @@ static void test_udp_slip(void)
     k_close(s);
 }
 
+static void test_drip(void)
+{
+    int s = k_socket(NETD_SOCK_STREAM, 0, 1000), u = k_socket(NETD_SOCK_DGRAM, 0, 1000), i, got = 0;
+    char b[64];
+    long r;
+    ok(s >= 0 && k_connect(s, "10.0.2.2", 7779, 5000) == 0, "drip: connect to the server that sends a byte at a time");
+    for (i = 0; i < 40; i++) k_wait(25, 0);    /* the 40 segments arrive; nobody reads them yet */
+    ok(k_sendto(u, "still there", 11, "10.0.2.2", 7777) == 11, "drip: a UDP datagram out meanwhile");
+    r = k_recv(u, b, sizeof b, 1, 3000);
+    ok(r == 11, "drip: its echo comes back while 40 one-byte segments wait unread (receive buffers left) (%ld)", r);
+    while (got < 40 && (r = k_recv(s, b, sizeof b, 1, 3000)) > 0) got += (int)r;
+    ok(got == 40, "drip: then all 40 bytes are read (%d)", got);
+    k_close(u);
+    k_close(s);
+}
+
 static void test_dns(void)
 {
     unsigned char a[16];
@@ -678,6 +718,67 @@ static void test_rules(void)
     k_close(s);
 }
 
+/* audit 2026-10-28 S1: listen(1) then listen(4) raised the backlog but kept the queue sized for 1, and the accepted
+ * connections were written past its end (netd's heap; ASan stops netd here on the old code) */
+static void test_relisten(void)
+{
+    int l, c[2], a[2], i, nc = 0, na = 0;   /* 5 TCP ends: within a user's 6 */
+    l = k_socket(NETD_SOCK_STREAM, 0, 1000);
+    k_bind(l, "127.0.0.1", 5003, 1000);
+    kq.a = 1;
+    ok(k_call(OP_LISTEN, (unsigned)l) == 0, "relisten: listen with a backlog of 1");
+    kq.a = 4;
+    ok(k_call(OP_LISTEN, (unsigned)l) == 0, "relisten: listen again with a backlog of 4");
+    for (i = 0; i < 2; i++) {
+        c[i] = k_socket(NETD_SOCK_STREAM, 0, 1000);
+        kq.alen = 16; mk_sin(kq.addr, "127.0.0.1", 5003);
+        if (c[i] >= 0 && k_call(OP_CONNECT, (unsigned)c[i]) == -EINPROGRESS) nc++;
+        for (int w = 0; w < 6; w++) k_wait(50, 0);
+    }
+    while (na < 2 && (a[na] = k_accept(l, 500)) >= 0) na++;
+    ok(nc == 2 && na == 2, "relisten: 2 connections queued and accepted after the backlog grew (%d, %d)", nc, na);
+    for (i = 0; i < na; i++) k_close(a[i]);
+    for (i = 0; i < 2; i++) if (c[i] >= 0) k_close(c[i]);
+    k_close(l);
+    {
+        int s = k_socket(NETD_SOCK_STREAM, 0, 1000);
+        ok(s >= 0 && kconn >= 0, "relisten: netd still answers afterwards (%d)", s);
+        if (s >= 0) k_close(s);
+    }
+    for (i = 0; i < 20; i++) k_wait(50, 0);
+}
+
+/* both ends of a loopback connection send and nobody reads (a telnet answering a board that floods it, both on the
+ * Amiga): netd must go on answering */
+static void test_loop_full(void)
+{
+    static unsigned char b[900];
+    int l, c, a, i, w;
+    long r, sa = 0, sc = 0;
+    for (i = 0; i < (int)sizeof b; i += 3) { b[i] = 255; b[i + 1] = 253; b[i + 2] = 200; }
+    l = k_socket(NETD_SOCK_STREAM, 0, 1000);
+    k_bind(l, "127.0.0.1", 5004, 1000);
+    kq.a = 1;
+    k_call(OP_LISTEN, (unsigned)l);
+    c = k_socket(NETD_SOCK_STREAM, 0, 1000);
+    r = k_connect(c, "127.0.0.1", 5004, 3000);
+    a = k_accept(l, 3000);
+    ok(r == 0 && a >= 0, "loop full: connected (%ld, %d)", r, a);
+    for (i = 0; i < 200; i++) {
+        if ((r = k_send(a, b, sizeof b, 0)) > 0) sa += r;
+        for (w = 0; w < 300; w++)       /* telnet answers each request on its own: 3 bytes a send */
+            if ((r = k_send(c, b, 3, 0)) > 0) sc += r;
+        for (w = 0; w < 2; w++) k_wait(5, 0);
+    }
+    kq.len = 0;
+    r = k_call(OP_STATS, (unsigned)NETD_NSOCK);
+    ok(r >= 0 && kconn >= 0, "loop full: netd answers after both ends filled (%ld; sent %ld and %ld)", r, sa, sc);
+    k_close(c);
+    k_close(a);
+    k_close(l);
+    for (i = 0; i < 20; i++) k_wait(50, 0);
+}
+
 static void test_limits(void)
 {
     int l, c[12], a[12], i, nc = 0, na = 0, refused = 0, n;
@@ -709,6 +810,19 @@ static void test_limits(void)
         if (c[n] < 0) { refused = c[n]; break; }
     }
     ok(refused == -ENOBUFS && n <= 8, "limits: %d TCP sockets, then -ENOBUFS (the pool holds 8 with TIME_WAITs) (%d)", n, refused);
+    {   /* audit 2026-10-28 S3: the users together leave root two TCP ends and two UDP ones */
+        int r0 = k_socket(NETD_SOCK_STREAM, 0, 0), u[12], nu, ru = 0, r1;
+        ok(n == 6 && r0 >= 0, "limits: a user's TCP sockets stop at 6, root still gets one (%d, %d)", n, r0);
+        for (nu = 0; nu < 12; nu++) {
+            u[nu] = k_socket(NETD_SOCK_DGRAM, 0, 1000);
+            if (u[nu] < 0) { ru = u[nu]; break; }
+        }
+        r1 = k_socket(NETD_SOCK_DGRAM, 0, 0);
+        ok(ru == -ENOBUFS && nu == 4 && r1 >= 0, "limits: a user's UDP sockets stop at 4, root still gets one (%d, %d, %d)", nu, ru, r1);
+        for (i = 0; i < nu; i++) k_close(u[i]);
+        if (r0 >= 0) k_close(r0);
+        if (r1 >= 0) k_close(r1);
+    }
     for (i = 0; i < n; i++) k_close(c[i]);
     kq.len = 0;
     k_call(OP_STATS, (unsigned)NETD_NSOCK);
@@ -813,6 +927,17 @@ static int config_test(void)
         "iface eth1 inet static\n"
         "    driver ../evil\n"
         "    address 192.168.1.300/24\n";
+    {   /* audit 2026-10-28 S9: DHCP's name servers only from an ACK lwIP takes (states 1 REQUESTING, 3 REBOOTING,
+         * 4 REBINDING, 5 RENEWING; 10 BOUND ignores ACKs), never 0, 127/8 or multicast */
+        static const unsigned char ns[8] = { 10, 0, 2, 3, 127, 0, 0, 1 }, ns2[8] = { 10, 0, 2, 3, 192, 168, 1, 1 };
+        unsigned long d[2];
+        ok(netd_dhcp_dns_take(10, 5, ns2, 8, d) == 0, "dhcp: an ACK in BOUND (forged, lwIP ignores it): its name servers are not taken");
+        ok(netd_dhcp_dns_take(1, 2, ns2, 8, d) == 0, "dhcp: an OFFER's name servers are not taken");
+        ok(netd_dhcp_dns_take(1, 5, ns2, 8, d) == 2 && !memcmp(&d[0], ns2, 4) && !memcmp(&d[1], ns2 + 4, 4),
+           "dhcp: an ACK while REQUESTING: both taken");
+        ok(netd_dhcp_dns_take(5, 5, ns, 8, d) == 1 && !memcmp(&d[0], ns, 4) && d[1] == 0,
+           "dhcp: an ACK while RENEWING: 127.0.0.1 dropped, the other taken");
+    }
     memset(&c, 0, sizeof c);
     logbuf[0] = 0;
     n = netd_parse_interfaces(ifc, strlen(ifc), &c);
@@ -858,6 +983,7 @@ int main(int argc, char **argv)
     setvbuf(stdout, NULL, _IOLBF, 0);
     serve(SOCK_STREAM, 7778, tcp_echo);
     serve(SOCK_DGRAM, 7777, udp_echo);
+    serve(SOCK_STREAM, 7779, tcp_drip);
     serve(SOCK_DGRAM, 53, resolver);
 
     /* the SLIP line: one end to zenix-slirp, the other kept for every netd this test starts */
@@ -887,8 +1013,11 @@ int main(int argc, char **argv)
     test_icmp();
     test_dns();
     test_tcp_slip();
+    test_drip();
     test_rules();
     test_netstat();
+    test_relisten();
+    test_loop_full();
     test_limits();
     test_ifinfo();
     test_netd_end(ifc);

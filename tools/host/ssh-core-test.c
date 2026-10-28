@@ -196,6 +196,20 @@ static void test_keys(void)
             z &= work[i] == 0;
         check(z, "keys: the work space is wiped after reading");
     }
+    {   /* audit 2026-10-28 S18: a bad base64 character late in an unprotected key: the seed decoded before it is
+         * wiped from the work space too */
+        static char t2[4096];
+        long i, at = n - 60;
+        int z = 1;
+
+        memcpy(t2, text, (size_t)n);
+        while (at > 0 && t2[at] == '\n') at--;
+        t2[at] = '*';
+        r = ssh_key_read(t2, n, 0, sk2, 0, 0, work, sizeof work);
+        for (i = 0; i < (long)sizeof work; i++)
+            z &= work[i] == 0;
+        check(r == SSH_KEY_EFORMAT && z, "keys: a bad base64 character refused, the work space wiped");
+    }
     text[60] = text[60] == 'A' ? 'B' : 'A';            /* a changed character inside the base64 */
     r = ssh_key_read(text, n, 0, sk2, 0, 0, work, sizeof work);
     check(r != SSH_KEY_OK, "keys: a changed file refused");
@@ -259,6 +273,92 @@ static void start(struct ssh *s, struct zc_rng *r, unsigned char *rb, unsigned c
     ssh_start(s);
 }
 
+void chan_after_kex(struct ssh *s);     /* net/ssh/ssh_int.h: the end of a key exchange */
+
+/* audit 2026-10-28 S17: the end of the input, the channel's close and a window change asked for while a rekey runs
+ * were dropped (a remote `cat > f` whose input ended then never ended); they are sent when the exchange ends */
+static void test_owed(void)
+{
+    static struct ssh s;
+    static unsigned char rb[SSH_RBUF_MIN], sb[SSH_SBUF_MIN];
+    struct zc_rng r;
+    long at;
+    int types[4], nt = 0;
+
+    start(&s, &r, rb, sb);
+    s.state = SSH_ST_SESSION;
+    s.pty = 1;
+    s.in_kex = 1;
+    s.kex_count = 1;
+    nsent = 0;
+    ssh_winsize(&s, 80, 32);
+    ssh_eof(&s);
+    ssh_close(&s);
+    check(nsent == 0 && !s.ch_eof_out && !s.ch_close_out, "owed: nothing sent during a rekey");
+    s.in_kex = 0;
+    chan_after_kex(&s);
+    for (at = 0; at + 6 <= nsent && nt < 4; ) {        /* plain packets: length, padding length, type */
+        long len = (long)sent[at] << 24 | (long)sent[at + 1] << 16 | sent[at + 2] << 8 | sent[at + 3];
+        types[nt++] = sent[at + 5];
+        at += 4 + len;
+    }
+    check(nt == 3 && types[0] == 98 && types[1] == 96 && types[2] == 97 && s.ch_eof_out && s.ch_close_out,
+          "owed: after the rekey the window change, EOF and close go out, in that order");
+}
+
+/* a plain packet around a payload (no keys yet): length, padding length, payload, padding to a multiple of 8 */
+static long plain_pkt(unsigned char *o, const unsigned char *pay, long n)
+{
+    long pad = 8 - (5 + n) % 8, len;
+
+    if (pad < 4) pad += 8;
+    len = 1 + n + pad;
+    o[0] = (unsigned char)(len >> 24); o[1] = (unsigned char)(len >> 16); o[2] = (unsigned char)(len >> 8); o[3] = (unsigned char)len;
+    o[4] = (unsigned char)pad;
+    memcpy(o + 5, pay, (size_t)n);
+    memset(o + 5 + n, 0, (size_t)pad);
+    return 4 + len;
+}
+static long put_nl(unsigned char *o, const char *s)
+{
+    long n = (long)strlen(s);
+
+    o[0] = 0; o[1] = 0; o[2] = (unsigned char)(n >> 8); o[3] = (unsigned char)n;
+    memcpy(o + 4, s, (size_t)n);
+    return 4 + n;
+}
+
+/* audit 2026-10-28 S20: a server's KEXINIT that says a guessed packet follows, and guesses wrong; during the first
+ * exchange only a curve25519 message may be skipped as the guess: a type 40 there is the strict rule's (fatal) */
+static void test_wrong_guess(void)
+{
+    static struct ssh s;
+    static unsigned char rb[SSH_RBUF_MIN], sb[SSH_SBUF_MIN], pay[600], in[800];
+    static const char *lists[10] = { "sntrup761x25519-sha512,curve25519-sha256,kex-strict-s-v00@openssh.com",
+        "ssh-ed25519", "chacha20-poly1305@openssh.com", "chacha20-poly1305@openssh.com", "hmac-sha2-256",
+        "hmac-sha2-256", "none", "none", "", "" };
+    struct zc_rng r;
+    long n = 0, k, i;
+
+    start(&s, &r, rb, sb);
+    pay[n++] = 20;
+    memset(pay + n, 0x55, 16);
+    n += 16;
+    for (i = 0; i < 10; i++)
+        n += put_nl(pay + n, lists[i]);
+    pay[n++] = 1;                       /* first_kex_packet_follows */
+    memset(pay + n, 0, 4);
+    n += 4;
+    memcpy(in, "SSH-2.0-X\r\n", 11);
+    k = 11 + plain_pkt(in + 11, pay, n);
+    ssh_input(&s, in, k);
+    check(s.state != SSH_ST_FAILED && s.ignore_next, "wrong guess: KEXINIT taken, the guess to be skipped");
+    pay[0] = 40;
+    k = plain_pkt(in, pay, 1);
+    ssh_input(&s, in, k);
+    check(s.state == SSH_ST_FAILED && strstr(s.err, "strict"), "wrong guess: a type 40 as the guess is refused (strict key exchange)");
+}
+
 static void test_core(void)
 {
     static struct ssh s;
@@ -311,6 +411,8 @@ int main(void)
     test_config();
     test_keys();
     test_core();
+    test_owed();
+    test_wrong_guess();
     printf("ssh-core-test: %d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }

@@ -539,6 +539,95 @@ static void leading_dot(void)
     CHECK(exists("%s/down/%s", "text.txt"), "leading dot: the next file came");
 }
 
+/* audit 2026-10-28 S14: a sender that sends more than its ZFILE said (a hostile board filling the disk): made here
+ * with the engine's own framing, written at once into the line, the receiver's answers read and dropped. The
+ * download ends at the size said, the part is kept, the session is cancelled */
+static struct { unsigned char b[65536]; long n; } forged;
+static void forge_put(void *u, const unsigned char *b, long n)
+{
+    (void)u;
+    if (forged.n + n <= (long)sizeof forged.b) { memcpy(forged.b + forged.n, b, (size_t)n); forged.n += n; }
+}
+static void sends_more(void)
+{
+    static struct Z z;
+    static unsigned char data[20000];
+    XferIO fio;
+    struct Line l;
+    int sv[2], i, got;
+    char p[2048];
+    pid_t c;
+    memset(&fio, 0, sizeof fio);
+    fio.put = forge_put;
+    memset(&z, 0, sizeof z);
+    z.io = &fio;
+    z.use32 = 1;
+    forged.n = 0;
+    crc_init();
+    for (i = 0; i < (int)sizeof data; i++) data[i] = (unsigned char)(i * 7 + 3);
+    pos_hdr(&z, 0);
+    send_hex(&z, ZRQINIT);
+    pos_hdr(&z, 0);
+    send_bin(&z, ZFILE);
+    send_data(&z, (const unsigned char *)"liar.bin\0" "15000 0 100644", 23, ZCRCW);
+    pos_hdr(&z, 0);
+    send_bin(&z, ZDATA);
+    for (i = 0; i < (int)sizeof data; i += 1000) send_data(&z, data + i, 1000, i + 1000 < (int)sizeof data ? ZCRCG : ZCRCE);
+    pos_hdr(&z, sizeof data);
+    send_bin(&z, ZEOF);
+    pos_hdr(&z, 0);
+    send_hex(&z, ZFIN);
+    flush(&z);
+    fresh_down();
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv)) { CHECK(0, "sends more: socketpair"); return; }
+    c = fork();
+    if (c == 0) {
+        unsigned char junk[4096];
+        long off = 0, w;
+        close(sv[0]);
+        fcntl(sv[1], F_SETFL, O_NONBLOCK);
+        while (off < forged.n) {        /* the stream, and the answers read and dropped meanwhile */
+            struct pollfd q = { sv[1], POLLOUT | POLLIN, 0 };
+            poll(&q, 1, 1000);
+            while (read(sv[1], junk, sizeof junk) > 0) {}
+            if ((w = write(sv[1], forged.b + off, (size_t)(forged.n - off))) > 0) off += w;
+        }
+        fcntl(sv[1], F_SETFL, 0);
+        while (read(sv[1], junk, sizeof junk) > 0) {}
+        _exit(0);
+    }
+    close(sv[1]);
+    line_init(&l, "");
+    snprintf(l.down, sizeof l.down, "%s/down", DIR);
+    l.fd = sv[0];
+    {
+        XferIO io = io_for(&l);
+        alarm(60);
+        got = receive_from(&l, &io);
+        alarm(0);
+    }
+    close(sv[0]);
+    waitpid(c, NULL, 0);
+    snprintf(p, sizeof p, "%s/down/liar.bin.part", DIR);
+    CHECK(got == -1 && !exists("%s/down/%s", "liar.bin") && fsize(p) >= 0 && fsize(p) <= 15000,
+          "sends more than its ZFILE said: ended at the size said (the part kept), never written past it");
+}
+
+/* audit 2026-10-28 S13: a refused name is said with its control characters made harmless: rz's -T lines to telnet
+ * are one a line, and ".\nR 9999\nM evil.lha: done" forged two of them */
+static void refused_name_said_clean(void)
+{
+    struct Line l;
+    char made[64];
+    unsigned long have;
+    line_init(&l, "");
+    snprintf(l.down, sizeof l.down, "%s/down", DIR);
+    CHECK(rz_wopen(&l.dl, ".\nR 9999\nM evil.lha: 51234 bytes, done\x1b[2J", 10, made, sizeof made, &have) == NULL,
+          "a hostile name beginning with '.': refused");
+    CHECK(!strchr(l.said, '\x1b') && strchr(l.said, '\n') == l.said + strlen(l.said) - 1 &&
+          strstr(l.said, ".?R 9999?M evil.lha") != NULL, "... said on one line, its controls shown as '?'");
+}
+
 /* our sender answers lrz's ZCRC (lrz -r with a part of the same file): only the rest is sent */
 static void lrz_resume(void)
 {
@@ -941,6 +1030,8 @@ int main(int argc, char **argv)
     splice_refused();
     no_overwrite();
     leading_dot();
+    refused_name_said_clean();
+    sends_more();
     lrz_resume();
     prompt_after();
     ends_inside("ZFILE, data, ZFIN", 200);

@@ -28,6 +28,10 @@
 #define TO_TTYPE  24                    /* RFC 1091 */
 #define TO_NAWS   31                    /* RFC 1073 */
 
+/* what telnet writes to the console when a call ends or is suspended (audit 2026-10-28 S12): CAN ends a string or
+ * sequence the board left open, then plain colours, the whole screen as the scroll region (ESC 7/8 around it: ESC[r
+ * homes the cursor), the cursor shown, normal cursor keys */
+#define TN_TERM_RESET "\030\033[0m\0337\033[r\0338\033[?25h\033[?1l"
 #define TN_NOPT   40                    /* options with a state (every one above is below this); others are refused */
 #define TN_SBMAX  64                    /* a longer subnegotiation is dropped whole */
 

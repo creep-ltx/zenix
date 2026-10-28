@@ -351,7 +351,9 @@ NETDOBJS := $(LWIP_CORE:%=$(BUILD)/lw-%.no) $(LWIP_IPV4:%=$(BUILD)/lw-%.no) $(BU
             $(BUILD)/nd-core.no $(BUILD)/nd-sock.no $(BUILD)/nd-iface.no $(BUILD)/nd-config.no $(BUILD)/nd-main.no
 NETCFLAGS := $(UCFLAGS) -Os -Inet/port/shim -Inet/port -I$(LWIPSRC)/include -Wno-unused-parameter -Wno-sign-compare \
              -Wno-implicit-fallthrough
-NETHDRS := $(wildcard net/port/*.h net/port/arch/*.h net/netd/*.h) kernel/netproto.h user/libz.h user/usys.h
+NETHDRS := $(wildcard net/port/*.h net/port/arch/*.h net/netd/*.h $(LWIPSRC)/include/lwip/*.h \
+                      $(LWIPSRC)/include/lwip/priv/*.h $(LWIPSRC)/include/lwip/prot/*.h $(LWIPSRC)/include/netif/*.h) \
+           kernel/netproto.h user/libz.h user/usys.h
 NOPT_slipif := -O2
 NOPT_iface := -O2
 $(BUILD)/lw-%.no: $(LWIPSRC)/core/%.c $(NETHDRS) | $(BUILD)
