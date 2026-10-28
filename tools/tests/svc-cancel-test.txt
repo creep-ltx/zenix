@@ -11,6 +11,8 @@ send svctest unlink /tmp/c/u & p=$!; sleep 1; kill -INT $p; wait $p; echo c4-sta
 wait c4-status 20
 send svctest trunc /tmp/c/t & p=$!; sleep 1; kill -INT $p; wait $p; echo c5-status=$?\r
 wait c5-status 20
+send cat /tmp/c/o & p=$!; sleep 1; kill -INT $p; wait $p; echo c8-status=$?\r
+wait c8-status 20
 send sleep 2; echo c6-$(echo quiet); sync; echo c7-$(echo synced)\r
 wait c7-synced 20
 send reboot\r

@@ -260,9 +260,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `--trial`, `--port`). The Wasabi protocol itself is the Wasabi project's (its PROTOCOL.md), followed, not ours.
 - **D23 step 1 (the cancel mark, branch nfs12, 2026-10-28):** `UMSG_CANCEL` 4 (set by the kernel only, for a client
   killed while it waits and on every call a killed process makes after; never for a caught signal, never on
-  `proc_exit`'s calls; never cleared; a server may answer -EINTR, the call is never restarted); `POLLPRI` 2 on a port
+  `proc_exit`'s calls or `FS_CLOSE`; never cleared; a server may answer -EINTR, the call is never restarted; `FS_QUIT`
+  is carried out marked or not, a bounded `FS_SYNC` ignores it, diskd ignores it); `POLLPRI` 2 on a port
   ("a message sent to it was cancelled since you last saw POLLPRI"; reported only when asked for, and the report takes
-  it as seen); `FS_SYNC`'s a0 (0 as before, 1 "bounded": answer within 2 s) and `vfs_sync`'s order (network mounts,
+  it as seen); `FS_SYNC`'s a0 (1 "bounded": answer within 2 s; any other value as 0) and `vfs_sync`'s order (network mounts,
   by `fsinfo.type` `nfs`, last); `ESTALE` 116.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.

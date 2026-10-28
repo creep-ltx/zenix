@@ -659,8 +659,21 @@ What the text did not settle, decided conservatively:
 - **The network flag** is the type the server gives in `FS_ROOT`'s `fsinfo` (`nfs`), at the mount and at a later
   first `FS_ROOT`; not the type `mount` passes.
 - **`ESTALE` 116** is claimed (errno.h, libz's text "stale file handle"); the core's `NFS_ESTALE` now uses it.
-- **Size:** the kernel grew by 480 bytes (`kernel.bin` 160,332 -> 160,812 on the disk; section 9.1 estimated ~300):
-  2,004 bytes left on the mount tests' floppy, 18,388 on the RAM floppy.
+- **`FS_CLOSE` is never marked** (any close, not only `proc_exit`'s: the kernel has already dropped its file, so a
+  close answered -EINTR would leak the open in the server); **`FS_QUIT` is carried out marked or not**, dropping what
+  it could not save; **a bounded `FS_SYNC` ignores the mark** (a killed `reboot` must not lose the 2 s of commits);
+  diskd ignores it (a killed server's own calls may carry it). All four are in the frozen text (`fsproto.h`).
+- **A loader killed while it reads the program** (its reads are now cancelled) passes the load to the next client,
+  as one killed in its back-off does, instead of "cannot start" failing the whole queue.
+- **Size:** the kernel grew by 556 bytes (`kernel.bin` 160,332 -> 160,888 on the disk; section 9.1 estimated ~300):
+  1,928 bytes left on the mount tests' floppy, 18,312 on the RAM floppy.
+
+One independent read-only review (2026-10-28): no blocker. Its should-fix findings are fixed: `FS_CLOSE` marked by
+`call()` (now never), a killed `reboot` cutting the bounded sync short (the sync ignores the mark), a killed loader
+failing the queue (it passes the load on), and test gaps (kill -9's mark, a cancelled read whose exit close must come
+unmarked: `svc-test.sh c`). Minor ones fixed: comments (POLLPRI also for queued messages; loads and watches),
+`FS_SYNC` a0 "any other value as 0", `mt->net` set only after a root, architecture.md's wording. Not tested in FS-UAE,
+said: the handover's reset of the seen count and "a plain receive does not take it as seen" (read in the code).
 
 ## Owner decisions (2026-10-28)
 

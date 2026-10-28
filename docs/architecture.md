@@ -807,8 +807,9 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   that polls its port with `POLLPRI` sees the count grow (one report per change: the report takes it as seen; a plain
   `recv` does not, so a cancel between a server's poll and its receive is still reported) and may answer such a
   request -EINTR at once; one that ignores the bit (fsd, zfsd, diskd, netd: their requests end in milliseconds)
-  answers as before. The client still waits for that answer, then ends; the call is never restarted. The calls of
-  `proc_exit` (the closes) are never marked. nfscd answers -EINTR, so a program on a NAS that is off stops at
+  answers as before. The client still waits for that answer, then ends; the call is never restarted. `FS_CLOSE`
+  (and every call of `proc_exit`) is never marked; `FS_QUIT` is carried out marked or not; a bounded `FS_SYNC`
+  ignores the bit. nfscd answers -EINTR, so a program on a NAS that is off stops at
   Ctrl-C or `kill -9` (`tools/svc-test.sh c`).
 - If a server dies, the request it was serving fails with -ECONNRESET ("the server is gone", errno 104; the kernel's
   file calls turn it into -EIO for programs). A service's port (section 9, "The service manager") goes back to
@@ -1063,8 +1064,8 @@ The full design is docs/d11-service-manager.md; what is built (steps 0-8 of its 
   process never start a server: dropped while the entry is stopped, queued while it is loading or starting.
 - **The reset warning and `reboot`** (step 5): `FS_SYNC` and `FS_QUIT` are no-start calls that skip a server that
   is not running (it has nothing to write); `vfs_sync` syncs the local mounts first and the network mounts (a server
-  that said type `nfs` in `FS_ROOT`'s `fsinfo`) last, those two with `FS_SYNC` a0 1 ("bounded": they answer within
-  2 s, DESIGN D23 5.4), so a NAS that is off never leaves a local mount unsynced; a live one may still start diskd to flush, with no back-off: loaders
+  that said type `nfs` in `FS_ROOT`'s `fsinfo`) last; at `reboot` and the reset warning the network mounts get
+  `FS_SYNC` a0 1 ("bounded": they answer within 2 s, DESIGN D23 5.4), so a NAS that is off never leaves a local mount unsynced; a live one may still start diskd to flush, with no back-off: loaders
   asleep in a back-off are woken (`svc_hurry`). Once `disk_frozen` is set nothing is started any more.
 - **Loads nest at most two deep** (a file service read while the root server is stopped); a third level fails with
   -ECONNRESET. Kernel stack: the deepest such chain is about 2.1 KB of the 4 KB (`-fstack-usage` sums, 2026-10-24).

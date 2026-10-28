@@ -28,7 +28,7 @@
  *                                  uncommitted seconds: an error, never another file)
  *   svctest serve PORT TYPE        a filesystem server on PORT that holds every request until it is cancelled (DESIGN
  *                                  D23 step 1): FS_ROOT 2 (fsinfo type TYPE: "nfs" makes it a network mount), FS_CLOSE
- *                                  0, FS_SYNC 0 (its a0 said), FS_QUIT ends it. Polls its port with POLLPRI; on it, the
+ *                                  0 (said), FS_SYNC 0 (its a0 said), FS_QUIT ends it, FS_OPEN of /o 5. Polls its port with POLLPRI; on it, the
  *                                  held requests marked UMSG_CANCEL are answered: a stat 0 (a server that ignores the
  *                                  mark), anything else -EINTR. A request that comes marked is answered -EINTR at once
  *   svctest catch FILE             catch SIGINT, then open FILE: a caught signal must not cancel the open (D16 4)
@@ -79,7 +79,15 @@ static int serve(const char *name, const char *type)
             strcpy(fi->dev, "svct");
             strncpy(fi->type, type, sizeof fi->type - 1);
             r = 2;
-        } else if (m->type == FS_CLOSE) r = 0;
+        } else if (m->type == FS_CLOSE) {
+            printf("svctest serve: close %u%s\n", m->a[0], m->kflags & UMSG_CANCEL ? " came marked" : "");
+            r = 0;
+        } else if (m->type == FS_OPEN && !(m->kflags & UMSG_CANCEL) && !strcmp((const char *)m->a[0], "/o")) {
+            u32 *u = (u32 *)m->a[3];            /* /o opens (a file of 10 bytes): its reads are held */
+            memset(u, 0, 28);
+            u[0] = 5; u[1] = 0100644; u[2] = 10; u[6] = 1;
+            r = 5;
+        }
         else if (m->type == FS_SYNC) { printf("svctest serve: %s sync a0=%u\n", name, m->a[0]); r = 0; }
         else if (m->type == FS_QUIT) { sys_reply(m, 0); return 0; }
         else if (m->kflags & UMSG_CANCEL) {

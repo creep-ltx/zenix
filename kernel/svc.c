@@ -244,6 +244,11 @@ static long load(int i, struct umsg *m)
         pass_load(i);
         return -ECONNRESET;
     }
+    if (pid < 0 && current->killed) {          /* killed while it read the program (its calls are cancelled, D23):
+                                                 * not the program's fault: the next client loads */
+        pass_load(i);
+        return -ECONNRESET;
+    }
     if (pid < 0) {                              /* not counted: no program ran */
         kprintf("svc: %s: cannot start %s (error %d)\n", ports[i].name, s->prog, pid);
         if (s->essential && !s->served)

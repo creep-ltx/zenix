@@ -1072,12 +1072,12 @@ long vfs_mount(const struct umountreq *r)
     struct fsinfo fi;
     memset(&fi, 0, sizeof fi);
     long root = fs_call_on(free, FS_ROOT, (u32)&fi, 0, 0, 0);
-    mt->net = (u8)net_type(&fi);
     if (root <= 0) {
         fs_call_on(free, FS_QUIT, 0, 0, 0, 0);     /* a server that runs but gave no root lets its device go (A9) */
         mt->used = 0;
         return root < 0 ? root : -EIO;
     }
+    mt->net = (u8)net_type(&fi);
     mt->root = (u32)root;
     nmnt++;
     perm_epoch++;                       /* F13: a new mount can sit between a mount and its parent */

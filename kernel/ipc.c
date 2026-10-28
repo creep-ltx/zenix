@@ -198,7 +198,8 @@ void ipc_cancel(struct proc *p)
     irq_restore(s);
 }
 
-/* D23 5.1: p was killed (proc_kill) while it waits in a server call: its message (in p's memory, valid while it waits)
+/* D23 5.1: p was killed (proc_kill) while it waits in a server call (or in a D11 load or watch for one: a message not
+ * queued yet is marked too, and its held port counts a cancel, which the next server's handover takes as seen): its message (in p's memory, valid while it waits)
  * gets UMSG_CANCEL and the called port's cancel count grows, waking the server's evwait (POLLPRI). Nothing else: the
  * client still waits for the reply (G4), and the server answers when it no longer uses the buffers. Not while p is
  * exiting (proc_exit's closes are answered at once, and must reach the server as they are). Any context. */
@@ -252,7 +253,7 @@ static long call(int port, struct umsg *m, u16 kflags, int ns)
     m->uid = current->svc_depth ? 0 : current->uid; m->gid = current->svc_depth ? 0 : current->gid;
     m->umask = current->umask;
     m->kflags = kflags;                         /* a user's SYS_call can never claim to be the kernel */
-    if (current->killed && !current->exiting)
+    if (current->killed && !current->exiting && ns != SVC_NS_CLOSE)
         m->kflags |= UMSG_CANCEL;               /* D23 5.1: a call made after the kill (O_TRUNC's open, unlink's second
                                                  * step, sync's next mount) is cancelled from the start */
     m->server = 0;

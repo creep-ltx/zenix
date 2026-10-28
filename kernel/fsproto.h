@@ -27,7 +27,8 @@
 #define FS_STATFS  12  /* a0 struct ustatfs* -> 0 */
 #define FS_SYNC    13  /* everything written so far is on the medium when this returns (DISK_FLUSH of the device).
                         * a0 (D23 5.4, 0 from every older caller): 1 "bounded": answer within 2 s with what could be saved
-                        * (a network mount at a reboot or the reset warning; local servers may ignore it) */
+                        * (a network mount at a reboot or the reset warning; local servers may ignore it); any other value
+                        * as 0. A bounded sync is never cut short by UMSG_CANCEL */
 #define FS_CHMOD   14  /* a0 path, a1 cwd ino, a2 mode */
 #define FS_LINK    15  /* a0 existing path, a1 new path, a2 cwd ino: a hard link */
 #define FS_SYMLINK 16  /* a0 target text, a1 link path, a2 cwd ino */
@@ -70,7 +71,9 @@ struct fsinfo { char dev[16]; char type[8]; };
  * (kill -9, or a signal whose default action ends it; never for a caught signal) while it waited, or the message was
  * sent by a process already killed. The client still waits for the reply (G4). A server may answer -EINTR once it no
  * longer uses the client's buffers; one that ignores the bit answers as before. The kernel never restarts the call.
- * Its server's evwait sees POLLPRI on the port (kernel.h) when a message it already holds is marked. */
+ * FS_CLOSE is never marked; FS_QUIT is carried out marked or not (a marked one may drop what it could not save yet);
+ * a bounded FS_SYNC (a0 1) ignores the bit. A server's own calls (fsd's to diskd) may carry it: diskd ignores it.
+ * Its server's evwait sees POLLPRI on the port (kernel.h) when a message sent to it (queued or held) is marked. */
 #define UMSG_CANCEL  4
 #define FS_LINKED    1024       /* the answer -(FS_LINKED + bits); -1024 .. -1027 used, -1024 .. -1279 reserved */
 #define FS_LINKED_END 1279      /* the reserved range's end: no errno goes there (kernel/errno.h) */
