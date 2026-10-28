@@ -197,7 +197,7 @@ check(st("s4") == 1 and "kiss of death DENY" in w, "sntp: a kiss of death obeyed
 w = part_of("s5")
 bdate = int(re.search(r"ZENIX_BUILD_DATE (\d+)", rd(BD + "/builddate.h").decode()).group(1))
 check(st("s5") == 0 and clock_after("s5") == bdate and "reset to the build date" in w, "sntp -r: the floor back at the build date", w)
-w = part_of("s6"); g = answered("good")
+w = part_of("s6"); g = answered("good", 1)
 check(st("s6") == 0 and g and date_after("s6") and abs(date_after("s6") - g) <= 20 and clock_after("s6") and
       abs(clock_after("s6") - g) <= 5, "sntp: the clock set back from the true server, the floor raised again", w)
 check(st("s7") == 2, "sntp: a wrong option: exit 2", part_of("s7"))
