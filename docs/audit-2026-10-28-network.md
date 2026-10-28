@@ -99,7 +99,14 @@ Left open, each with a proposal:
   (a pipeline stage, a background job). Test: cmds-test's `sh-compound-redir` lines (foreground, `&`, pipelines,
   loops, if, case, a function body, a here-document), compared with bash.
 - **O11 two tests that sometimes fail** (D23 steps 3-4's full run, 2026-10-28; both passed alone): `svc-test` part c
-  ("the program ends at once") and `remote-test` part c (a wasabid PUT check). Make them deterministic.
+  ("the program ends at once") and `remote-test` part c (a wasabid PUT check). Make them deterministic. **Fixed
+  2026-10-28:** svc-test c killed after a fixed `sleep 1` (a client not yet at the server under load) and echoed the
+  status while `svctest serve` was still printing (sh's echo writes a word and its line end apart, so a server line
+  could land inside `cN-status=...`, and with kill -9 the program ends before the server answers): the script now
+  waits for the server's own lines ("PORT ready", "type N held", then its last line of each step) before the kill
+  and before the echo. remote-test c's cut PUT could reach the daemon after the GET and LS that check it (a .wsb-
+  file of a transfer started late): the PUT and 8 KB go first, the reset only once LS shows its temporary file, then
+  the GET waits out "busy". Test: 6 runs of each part side by side with the fix (3 + 3 at once, twice), all passed.
 - **O12 a 4 KB buffer nfscd never uses** (libz's stdout buffer, per mount): drop it with D27's port (block 3).
 - **O8 Zmodem has no cap on files per session** (judged acceptable): a board can offer thousands of honest small
   files; the disk filling up ends it, as with any download the user lets run. A cap would be a new option (the

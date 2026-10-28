@@ -122,10 +122,23 @@ def part_c(c):
     o, _, _ = sh(c, "ls -l /tmp/prog")
     ok(o.startswith("-rwxr-xr-x"), "a new Zenix program is 0755 (%r)" % o)
     ok(put(c, "/tmp/keep", b"old contents") == "OK", "PUT of a small file")
+    # the cut (audit O11): the daemon must be inside the PUT before the reset, or the GET and LS below could run before
+    # it has even read the PUT and see nothing of it, or a .wsb- file of a transfer it starts after them. So the PUT and
+    # its first 8 KB go first, the reset only once LS shows its temporary file; then getfile waits until the daemon has
+    # seen the reset (no longer "busy")
     k = conn()
     k.s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))   # the close is a reset: cut now
-    put(k, "/tmp/keep", os.urandom(100 * 1024), cut=True)
-    got, e = getfile(c, "/tmp/keep")
+    k.send(wc.PUT, struct.pack(">II", 100 * 1024, 0xFFFFFFFF) + S("/tmp/keep"))
+    k.send(wc.DATA, os.urandom(8192))
+    t0, inside = time.time(), False
+    while not inside and time.time() - t0 < T:
+        got, e = c.data(wc.LS, S("/tmp"))
+        inside = e is None and b".wsb-" in got
+        if not inside:
+            time.sleep(0.5)
+    ok(inside, "a PUT being sent has its temporary .wsb- file beside the target")
+    k.close()
+    got, e = getfile(c, "/tmp/keep", limit=T)
     ok(got == b"old contents", "a PUT cut half-way leaves the old file (%r %r)" % (got[:20], e))
     got, e = c.data(wc.LS, S("/tmp"))
     ok(e is None and b".wsb-" not in got, "... and no temporary .wsb- file")

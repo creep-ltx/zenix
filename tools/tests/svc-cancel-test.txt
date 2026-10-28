@@ -1,17 +1,45 @@
 wait zenix:/# 90
-send mkdir -p /tmp/c /tmp/l; svctest serve fs.c nfs & sleep 1; svctest serve fs.l test & sleep 1; svctest mount fs.c /tmp/c; svctest mount fs.l /tmp/l; echo c0-$(echo up)\r
+send mkdir -p /tmp/c /tmp/l; svctest serve fs.c nfs &\r
+wait svctest serve: fs.c ready 30
+send svctest serve fs.l test &\r
+wait svctest serve: fs.l ready 30
+send svctest mount fs.c /tmp/c; svctest mount fs.l /tmp/l; echo c0-$(echo up)\r
 wait c0-up 20
-send cat /tmp/c/f & p=$!; sleep 1; kill -INT $p; wait $p; echo c1-status=$?\r
+send cat /tmp/c/f & p=$!\r
+wait svctest serve: type 1 held 30
+send kill -INT $p; wait $p; s=$?\r
+wait svctest serve: POLLPRI, 1 held cancelled 30
+send echo c1-status=$s\r
 wait c1-status 20
-send cat /tmp/c/f & p=$!; sleep 1; kill -9 $p; wait $p; echo c2-status=$?\r
+send cat /tmp/c/f & p=$!\r
+wait svctest serve: type 1 held 30
+send kill -9 $p; wait $p; s=$?\r
+wait svctest serve: POLLPRI, 1 held cancelled 30
+send echo c2-status=$s\r
 wait c2-status 20
-send svctest catch /tmp/c/g & p=$!; sleep 1; kill -INT $p; sleep 2; echo c3-$(echo mark); kill -9 $p; wait $p; echo c3-status=$?\r
+send svctest catch /tmp/c/g & p=$!\r
+wait svctest serve: type 1 held 30
+send kill -INT $p; sleep 2; echo c3-$(echo mark); kill -9 $p; wait $p; s=$?\r
+wait svctest serve: POLLPRI, 1 held cancelled 30
+send echo c3-status=$s\r
 wait c3-status 20
-send svctest unlink /tmp/c/u & p=$!; sleep 1; kill -INT $p; wait $p; echo c4-status=$?\r
+send svctest unlink /tmp/c/u & p=$!\r
+wait svctest serve: type 19 held 30
+send kill -INT $p; wait $p; s=$?\r
+wait svctest serve: type 9 came cancelled 30
+send echo c4-status=$s\r
 wait c4-status 20
-send svctest trunc /tmp/c/t & p=$!; sleep 1; kill -INT $p; wait $p; echo c5-status=$?\r
+send svctest trunc /tmp/c/t & p=$!\r
+wait svctest serve: type 4 held 30
+send kill -INT $p; wait $p; s=$?\r
+wait svctest serve: type 1 came cancelled 30
+send echo c5-status=$s\r
 wait c5-status 20
-send cat /tmp/c/o & p=$!; sleep 1; kill -INT $p; wait $p; echo c8-status=$?\r
+send cat /tmp/c/o & p=$!\r
+wait svctest serve: type 2 held 30
+send kill -INT $p; wait $p; s=$?\r
+wait svctest serve: close 5 30
+send echo c8-status=$s\r
 wait c8-status 20
 send sleep 2; echo c6-$(echo quiet); sync; echo c7-$(echo synced)\r
 wait c7-synced 20
