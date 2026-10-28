@@ -152,7 +152,7 @@ for dp, dn, fn in sorted(os.walk(r)):
     if rel.startswith("/var/cache/zpkg"): continue
     for n in sorted(fn + [d for d in dn if os.path.islink(os.path.join(dp, d))]):
         p = os.path.join(dp, n); q = rel.rstrip("/") + "/" + n
-        if q in ("/var/lib/zpkg/result",) or q.startswith("/var/cache/zpkg/"): continue
+        if q in ("/var/lib/zpkg/result", "/var/lib/zpkg/lock") or q.startswith("/var/cache/zpkg/"): continue
         if os.path.islink(p): print("l", q, os.readlink(p))
         else: print("f", q, oct(os.stat(p).st_mode & 0o7777), hashlib.sha256(open(p, "rb").read()).hexdigest())
     for n in dn:
@@ -266,6 +266,247 @@ snap $U/c | cmp -s - $U/s2 && check "after the rollback the bundle installs agai
 env ZUP_ROOT=$U/c $U/zup >$U/out 2>&1; rc=$?
 [ $rc = 0 ] && [ ! -s $U/out ] && check "a kernel without SYS_update: zup does nothing and says nothing" ok || check "a kernel without SYS_update: nothing" bad
 
+# ---- 2b. live transactions: zup -f FILE and zup -r NAME (DESIGN D22 4.2) ----
+# From the update above (V2: zup, base, utils; prev-V2's undo logs hold utils), a base-only system update V3 first,
+# then packages installed, upgraded, taken over and removed one transaction each, under the lock, never touching the
+# prev set; every refusal changes nothing; a power cut before each change of -f, a takes hand-over and -r (with a
+# .save), then zup at the next start: the old state or the new one exactly, prev-V3 byte for byte as it was.
+V3=2026102800; V4=2026102900
+python3 -I - $U $V3 <<'PYEOF'
+import sys, struct
+t, v = sys.argv[1], sys.argv[2]
+open("%s/kernel%s" % (t, v), "wb").write(b"\0" * 64 + b"ZVER" + struct.pack(">I", int(v)) + b"0.3".ljust(16, b"\0") + v.encode())
+PYEOF
+for f in zup3 sh3 ed1 ed2 edhelp edtutor ls3 edext; do printf '%s contents\n' $f >$S/$f; done
+printf 'set prompt\n' >$S/edrc1; printf 'set prompt\nset verbose\n' >$S/edrc2; printf 'keys 1\n' >$S/edk1; printf 'cfg 3\n' >$S/edrc3
+python3 tools/mkzup.py pkg $U/p3 zup $V3 0.3 --group base d:755:0:0:/sbin f:755:0:0:$S/zup3:/sbin/zup >/dev/null
+python3 tools/mkzup.py pkg $U/p3 base $V3 0.3 --group base --dep zup:$V3 $D f:755:0:0:$S/init:/bin/init f:755:0:0:$S/sh3:/bin/sh \
+    c:644:0:0:$S/passwd2:/etc/passwd c:644:0:0:$S/motd2:/etc/motd c:644:0:0:$S/group2:/etc/group c:644:0:0:$S/fstab:/etc/fstab >/dev/null
+python3 tools/mkzup.py bundle $U/b3.zup --kernel $U/kernel$V3 --base-only $U/p3 zup base >/dev/null
+Q=$U/q; mkdir -p $Q $U/pool
+qpkg() {       # NAME VNUM [mkzup pkg options and entries...]: a package bundle in $U/pool/NAME-VNUM.zup
+    local n=$1 v=$2; shift 2
+    rm -rf $Q/$n; mkdir -p $Q/$n
+    python3 tools/mkzup.py pkg $Q/$n $n $v 0.3 "$@" >/dev/null && python3 tools/mkzup.py bundle $U/pool/$n-$v.zup --no-kernel --min $V3 $Q/$n $n >/dev/null ||
+        echo "qpkg $n $v: mkzup failed"
+}
+EDD="d:755:0:0:/usr d:755:0:0:/usr/share d:755:0:0:/usr/share/ed"
+qpkg ed $V3 --dep base:$V3 $EDD f:755:0:0:$S/ed1:/bin/ed c:644:0:0:$S/edrc1:/etc/edrc c:644:0:0:$S/edk1:/etc/edkeys f:644:0:0:$S/edhelp:/usr/share/ed/help l:ed:/bin/red
+qpkg ed $V4 --dep base:$V3 $EDD f:755:0:0:$S/ed2:/bin/ed c:644:0:0:$S/edrc2:/etc/edrc c:644:0:0:$S/edk1:/etc/edkeys f:644:0:0:$S/edtutor:/usr/share/ed/tutor l:ed:/bin/red
+qpkg utils $V3 --dep base:$V3 f:755:0:0:$S/ls3:/bin/ls
+qpkg coreutils $V3 --dep base:$V3 --takes utils f:755:0:0:$S/ls3:/bin/ls l:sh:/bin/more
+qpkg textutils $V3 --dep base:$V3 --takes utils f:4755:0:0:$S/su:/bin/su f:755:0:0:$S/new2:/bin/new f:644:0:0:$S/big2:/bin/big l:ls:/bin/list
+qpkg edcfg $V3 --dep base:$V3 --takes ed c:644:0:0:$S/edrc3:/etc/edrc
+qpkg edext $V3 --dep ed:$V3 f:755:0:0:$S/edext:/bin/edext
+qpkg kernelish $V3 --group base f:755:0:0:$S/ed1:/bin/kernelish                # refusals
+qpkg zpkg $V3 f:755:0:0:$S/ed1:/bin/zpkgx
+qpkg clash $V3 f:755:0:0:$S/ed1:/bin/ed
+qpkg sneaky $V3 f:644:0:0:$S/ed1:/var/lib/zpkg/base.manifest
+qpkg viasym $V3 f:755:0:0:$S/ed1:/opt/evil
+qpkg stray $V3 f:755:0:0:$S/ed1:/bin/stray
+qpkg dirclash $V3 d:755:0:0:/bin/ed
+qpkg takebase $V3 --takes base f:755:0:0:$S/sh3:/bin/sh
+qpkg needdep $V3 --dep nothere:1 f:755:0:0:$S/ed1:/bin/needdep
+rm -rf $Q/newer; mkdir -p $Q/newer; python3 tools/mkzup.py pkg $Q/newer newer $V3 0.3 f:755:0:0:$S/ed1:/bin/newer >/dev/null
+python3 tools/mkzup.py bundle $U/pool/newer-$V3.zup --no-kernel --min $V4 $Q/newer newer >/dev/null
+cp $U/b3.zup $U/pool/system.zup
+python3 -I - $U/pool/ed-$V3.zup $U/pool/damaged.zup <<'PYEOF'
+import sys, struct
+d = bytearray(open(sys.argv[1], "rb").read())
+n = struct.unpack(">I", d[52:56])[0]
+for i in range(n):
+    name, off, size = struct.unpack(">40sII", d[96 + 80 * i:96 + 80 * i + 48])
+    if name.rstrip(b"\0").endswith(b".tgz"): d[off + size // 2] ^= 0x10
+open(sys.argv[2], "wb").write(d)
+PYEOF
+cat >$U/prevsnap.py <<'PYEOF'
+import os, sys, hashlib
+r = sys.argv[1]
+for dp, dn, fn in sorted(os.walk(r)):
+    dn.sort()
+    for n in sorted(fn):
+        p = os.path.join(dp, n); st = os.lstat(p)
+        print(p[len(r):], st.st_nlink > 1, oct(st.st_mode), hashlib.sha256(open(p, "rb").read()).hexdigest())
+PYEOF
+pvsnap() { python3 -I $U/prevsnap.py $1/var/cache/zpkg/prev-$V3; }
+# zl ROOT [VAR=VALUE...] ARGS...: zup with a running kernel V3 (the pool is copied into the root's cache)
+zl() {
+    local r=$1; shift
+    local e=(); while [[ "${1:-}" == *=* ]]; do e+=("$1"); shift; done
+    mkdir -p $r/var/cache/zpkg/pkg; cp -n $U/pool/*.zup $r/var/cache/zpkg/pkg/
+    env ZUP_ROOT=$r ZUP_KVNUM=$V3 ZUP_TRACE=$U/trace "${e[@]}" $U/zup "$@"
+}
+pf() { echo /var/cache/zpkg/pkg/$1.zup; }
+L=$U/l; rm -rf $L; cp -a $U/r2 $L; cp $U/fsclean2 $U/fsclean
+zl $L -f $(pf utils-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "utils is part of the previous system the boot menu can go back to" $U/out && [ -f $L/var/lib/zpkg/utils.manifest ] &&
+    grep -q "^name utils" $L/var/lib/zpkg/utils.manifest &&
+    check "zup -f refuses a package the newest prev set's undo logs hold (utils, from the D15 bundles): the way back stays whole" ok ||
+    { check "zup -f refuses a package in the prev set" bad; cat $U/out; }
+env ZUP_ROOT=$L ZUP_KVNUM=$V3 ZUP_BUNDLE=$U/b3.zup $U/zup >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && [ "$(cat $L/bin/sh)" = "sh3 contents" ] && [ "$(ls $L/var/cache/zpkg | grep prev-)" = "prev-$V3" ] &&
+    ! grep -q "utils.manifest" $L/var/cache/zpkg/prev-$V3/log.* && [ "$(cat $L/bin/ls)" = "ls2 contents" ] &&
+    check "a base-only system update (zup and base, D22 3.1): its prev set holds no utils, utils stays as it was" ok || { check "a base-only system update" bad; cat $U/out; }
+cp -a $L $U/S0; snap $L >$U/sS0; pvsnap $L >$U/pS0; cp $U/fsclean $U/fsclean3
+lockfree() { [ ! -e $1/var/lib/zpkg/lock ] && [ ! -e $1/var/lib/zpkg/journal ] && [ -z "$(find $1 -name '*.zup-new')" ]; }
+rm -f $U/trace
+zl $L -f $(pf ed-$V3) >$U/out 2>&1; rc=$?
+ok=ok
+[ $rc = 0 ] && [ "$(cat $L/bin/ed)" = "ed1 contents" ] && [ "$(readlink $L/bin/red)" = ed ] && cmp -s $L/etc/edrc $S/edrc1 && [ -f $L/usr/share/ed/help ] || ok=bad
+grep -q "^name ed$" $L/var/lib/zpkg/ed.manifest && grep -q "^version $V3 " $L/var/lib/zpkg/ed.manifest && lockfree $L || ok=bad
+pvsnap $L | cmp -s - $U/pS0 && [ ! -e $L/var/cache/zpkg/live ] && [ "$(cat $U/fsclean)" = 1 ] && ! grep -q "^note\|^open-write /var/lib/zpkg/result" $U/trace || ok=bad
+grep -q "^open-write /var/lib/zpkg/lock" $U/trace && grep -q "^link /bin/ed\|^rename /bin/ed.zup-new /bin/ed$" $U/trace || ok=bad
+check "zup -f: a new package installed (files, link, config, its manifest), under the lock; prev-$V3 untouched, live/ gone, no note, no result, the volume clean" $ok
+[ $ok = ok ] || cat $U/out
+cp -a $L $U/E3; snap $L >$U/sE3
+rm -f $U/trace
+zl $L -f $(pf ed-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && grep -q "ed $V3 is installed already: nothing to do" $U/out && snap $L | cmp -s - $U/sE3 && lockfree $L &&
+    check "the same package again: \"installed already\", nothing changed" ok || { check "the same package again" bad; cat $U/out; }
+printf 'my own line\n' >>$L/etc/edrc; cp -a $L $U/E3e; snap $L >$U/sE3e
+zl $L -f $(pf ed-$V4) >$U/out 2>&1; rc=$?
+ok=ok
+[ $rc = 0 ] && [ "$(cat $L/bin/ed)" = "ed2 contents" ] && grep -q "my own line" $L/etc/edrc && cmp -s $L/etc/edrc.new $S/edrc2 && [ ! -e $L/usr/share/ed/help ] &&
+    [ -f $L/usr/share/ed/tutor ] && grep -q "kept your /etc/edrc" $U/out && lockfree $L && pvsnap $L | cmp -s - $U/pS0 || ok=bad
+check "zup -f: an upgrade (a file changed, one gone, one new; the owner's config kept, the new one as .new); prev-$V3 untouched" $ok
+[ $ok = ok ] || cat $U/out
+cp -a $L $U/E4; snap $L >$U/sE4
+zl $L -f $(pf ed-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "older than the installed" $U/out && snap $L | cmp -s - $U/sE4 && lockfree $L &&
+    check "zup -f: an older version is refused without -d, nothing changed" ok || { check "an older version refused" bad; cat $U/out; }
+zl $L -f $(pf ed-$V3) -d >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && [ "$(cat $L/bin/ed)" = "ed1 contents" ] && [ -f $L/usr/share/ed/help ] && grep -q "^version $V3 " $L/var/lib/zpkg/ed.manifest &&
+    zl $L -f $(pf ed-$V4) >/dev/null 2>&1 && snap $L | cmp -s - $U/sE4 &&
+    check "zup -f -d: the downgrade zpkg asked for; then the upgrade again gives the same root" ok || { check "zup -f -d" bad; cat $U/out; }
+# refusals: each before any change (the root, prev-V3 and the lock as they were)
+mkdir -p $L/sbin; ln -s /sbin $L/opt; printf 'stray\n' >$L/bin/stray
+snap $L >$U/sR; pvsnap $L >$U/pR
+for v in "kernelish:in the group base" "zpkg:in the group base" "clash:/bin/ed belongs to package ed" \
+         "sneaky:a package may not write there" "viasym:/opt is a symbolic link" "stray:/bin/stray exists and belongs to no package" \
+         "dirclash:a directory in one package and not in ed" "takebase:takes base, a base-group package" \
+         "needdep:needs nothing" "newer:needs base $V4 or newer" "system:a system bundle" "damaged:SHA-256 does not match" \
+         "T:a new system is on trial"; do
+    n=${v%%:*}; want=${v#*:}; e=()
+    [ $n = needdep ] && want="needs nothere 1 or newer"
+    [ $n = T ] && { n=ed-$V3; e=(ZUP_FLAGS=2); } || { [ -f $U/pool/$n.zup ] || n=$n-$V3; }
+    rm -f $U/trace
+    zl $L "${e[@]}" -f $(pf $n) >$U/out 2>&1; rc=$?
+    [ $rc = 1 ] && grep -q "$want" $U/out && snap $L | cmp -s - $U/sR && pvsnap $L | cmp -s - $U/pR && lockfree $L &&
+        ! grep -q "^rename\|^link\|^open-write /var/lib/zpkg/journal" $U/trace &&
+        check "zup -f refused before any change ($n${e:+, during a trial}): '$want'" ok || { check "zup -f refused ($n): '$want'" bad; cat $U/out; }
+done
+for v in "base:in the group base" "zup:in the group base" "nothere:nothere is not installed" "../x:not a package name"; do
+    n=${v%%:*}; want=${v#*:}
+    zl $L -r $n >$U/out 2>&1; rc=$?
+    [ $rc = 1 ] && grep -q "$want" $U/out && snap $L | cmp -s - $U/sR && lockfree $L &&
+        check "zup -r refused ($n): '$want'" ok || { check "zup -r refused ($n): '$want'" bad; cat $U/out; }
+done
+zl $L -f $(pf edext-$V3) >/dev/null 2>&1; zl $L -r ed >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "edext needs ed: refused" $U/out && [ -f $L/bin/ed ] && zl $L -r edext >/dev/null 2>&1 && [ ! -e $L/bin/edext ] && [ ! -e $L/var/lib/zpkg/edext.manifest ] &&
+    check "zup -r refuses a package another one needs (named); removing that one first works" ok || { check "zup -r and dependents" bad; cat $U/out; }
+rm -f $L/opt $L/bin/stray; rmdir $L/sbin 2>/dev/null; snap $L | cmp -s - $U/sE4 || { check "the root after the refusals is E4 again" bad; snap $L | diff $U/sE4 - | head; }
+# the lock
+mkdir -p $U/lk; cp "$(command -v sleep)" $U/lk/zup; cp "$(command -v sleep)" $U/lk/zpkg
+$U/lk/zup 30 & lp=$!
+printf '%d\n' $lp >$L/var/lib/zpkg/lock
+zl $L -f $(pf coreutils-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "another zup (pid $lp) is changing packages" $U/out && [ "$(cat $L/var/lib/zpkg/lock)" = $lp ] && [ ! -e $L/var/lib/zpkg/coreutils.manifest ] &&
+    check "a second zup is refused while the lock's holder lives" ok || { check "a second zup refused while one runs" bad; cat $U/out; }
+printf '999999\n' >$L/var/lib/zpkg/lock
+zl $L -f $(pf coreutils-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "another zup (pid $lp) is still changing packages" $U/out && [ ! -e $L/var/lib/zpkg/coreutils.manifest ] &&
+    check "a dead holder's lock is not taken over while another zup still lives (one zpkg left behind)" ok || { check "a stale lock with a zup still running" bad; cat $U/out; }
+kill $lp; wait $lp 2>/dev/null
+cat >$U/lk/zpkg <<EOF
+#!/usr/bin/env bash
+printf '%d\n' \$\$ >$L/var/lib/zpkg/lock
+env ZUP_ROOT=$L ZUP_KVNUM=$V3 $U/zup -f $(pf coreutils-$V3)
+rc=\$?
+rm -f $L/var/lib/zpkg/lock
+exit \$rc
+EOF
+chmod +x $U/lk/zpkg
+$U/lk/zpkg >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && [ "$(cat $L/bin/ls)" = "ls3 contents" ] && [ -f $L/var/lib/zpkg/coreutils.manifest ] &&
+    check "zup -f under its parent zpkg's lock (the parent's pid in it)" ok || { check "zup -f under its parent's lock" bad; cat $U/out; }
+rm -rf $L; cp -a $U/E4 $L
+printf '999999\n' >$L/var/lib/zpkg/lock
+zl $L -f $(pf coreutils-$V3) >$U/out 2>&1; rc=$?
+ok=ok
+[ $rc = 0 ] && lockfree $L && [ "$(cat $L/bin/ls)" = "ls3 contents" ] && [ "$(readlink $L/bin/more)" = sh ] || ok=bad
+grep -q "^f .* /bin/ls$" $L/var/lib/zpkg/coreutils.manifest && ! grep -q " /bin/ls$\| /bin/more$" $L/var/lib/zpkg/utils.manifest && grep -q " /bin/su$" $L/var/lib/zpkg/utils.manifest || ok=bad
+[ -n "$(find $L/var/cache/zpkg -maxdepth 1 -name live)" ] && ok=bad
+pvsnap $L | cmp -s - $U/pS0 || ok=bad
+check "a stale lock (a dead pid) is taken over; takes: coreutils takes /bin/ls and /bin/more from utils (utils's manifest rewritten in the same transaction)" $ok
+[ $ok = ok ] || cat $U/out
+cp -a $L $U/C1; snap $L >$U/sC1
+zl $L -f $(pf textutils-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && [ ! -e $L/var/lib/zpkg/utils.manifest ] && [ "$(stat -c %a $L/bin/su)" = 4755 ] && cmp -s $L/bin/big $S/big2 && [ "$(readlink $L/bin/list)" = ls ] &&
+    grep -q " /bin/su$" $L/var/lib/zpkg/textutils.manifest &&
+    check "takes: textutils takes the rest of utils; utils's manifest goes with its last entry" ok || { check "takes the rest of utils" bad; cat $U/out; }
+zl $L -f $(pf edcfg-$V3) >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && grep -q "my own line" $L/etc/edrc && cmp -s $L/etc/edrc.new $S/edrc3 && ! grep -q " /etc/edrc$" $L/var/lib/zpkg/ed.manifest &&
+    grep -q "^c .* /etc/edrc$" $L/var/lib/zpkg/edcfg.manifest &&
+    check "takes a config file: compared with the taken package's entry (the owner's change kept, the new one as .new)" ok || { check "takes a config file" bad; cat $U/out; }
+zl $L -r ed >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && [ ! -e $L/bin/ed ] && [ ! -L $L/bin/red ] && [ ! -e $L/etc/edkeys ] && [ -f $L/etc/edrc ] && [ ! -e $L/usr/share/ed ] && [ ! -e $L/usr ] &&
+    [ ! -e $L/var/lib/zpkg/ed.manifest ] && lockfree $L && pvsnap $L | cmp -s - $U/pS0 &&
+    check "zup -r: files, link and the unchanged config gone, a taken config stays, its empty directories gone; prev-$V3 untouched" ok || { check "zup -r" bad; cat $U/out; ls -R $L/usr 2>&1 | head; }
+cp -a $L $U/C3
+rm -rf $L; cp -a $U/E4 $L
+zl $L -r ed >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && [ ! -e $L/etc/edrc ] && grep -q "my own line" $L/etc/edrc.save && [ ! -e $L/etc/edkeys ] && [ -f $L/etc/edrc.new ] &&
+    grep -q "kept your changed /etc/edrc as .save" $U/out &&
+    check "zup -r: a config file the owner changed is kept as PATH.save" ok || { check "zup -r with .save" bad; cat $U/out; }
+cp -a $L $U/Rs; snap $L >$U/sRs
+rm -rf $L; cp -a $U/E4 $L; printf 'old save\n' >$L/etc/edrc.save
+zl $L -r ed >$U/out 2>&1; rc=$?
+[ $rc = 1 ] && grep -q "/etc/edrc.save exists: move it away first" $U/out && [ -f $L/bin/ed ] && grep -q "old save" $L/etc/edrc.save &&
+    check "zup -r never replaces an older .save (refused, nothing changed)" ok || { check "zup -r and an older .save" bad; cat $U/out; }
+rm -rf $L; cp -a $U/E4 $L
+zl $L -r ed -n >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && [ ! -e $L/etc/edrc ] && [ ! -e $L/etc/edrc.save ] &&
+    check "zup -r -n: the changed config file deleted too" ok || { check "zup -r -n" bad; cat $U/out; }
+
+# a power cut before each change, then zup at the next start: the old root or the new one, never between; prev-V3
+# byte for byte (the commit line included: the cut after it too); the lock and journal gone after the start that
+# finishes or rolls back; the same operation again: the new root
+livecuts() {   # NAME FROMDIR TOSNAP ARGS...
+    local name=$1 from=$2 to=$3; shift 3
+    local n nch bad=0 o=0 nw=0
+    rm -rf $L; cp -a $from $L; rm -f $U/trace
+    zl $L "$@" >/dev/null 2>&1
+    nch=$(grep -cv '^spawn\|^note' $U/trace)
+    snap $from >$U/cfrom
+    for ((n = 1; n <= nch + 1; n++)); do
+        rm -rf $L; cp -a $from $L; cp $U/fsclean3 $U/fsclean
+        zl $L ZUP_CUT=$n "$@" >/dev/null 2>&1
+        env ZUP_ROOT=$L ZUP_KVNUM=$V3 $U/zup >$U/out 2>&1
+        snap $L >$U/sc
+        if cmp -s $U/sc $U/cfrom; then o=$((o + 1)); elif cmp -s $U/sc $to; then nw=$((nw + 1)); else bad=$((bad + 1)); echo "  $name cut $n: neither old nor new"; diff $U/cfrom $U/sc | head -6; fi
+        pvsnap $L | cmp -s - $U/pS0 || { bad=$((bad + 1)); echo "  $name cut $n: prev-$V3 changed"; }
+        [ ! -e $L/var/lib/zpkg/journal ] && [ -z "$(find $L -name '*.zup-new')" ] || { bad=$((bad + 1)); echo "  $name cut $n: a journal or .zup-new left"; }
+        zl $L "$@" >/dev/null 2>&1
+        snap $L | cmp -s - $to && lockfree $L && pvsnap $L | cmp -s - $U/pS0 || { bad=$((bad + 1)); echo "  $name cut $n: not the new root after the operation again"; }
+    done
+    [ $bad = 0 ] && [ $o -gt 0 ] && [ $nw -gt 0 ] &&
+        check "a power cut before each of the $nch changes of $name, then the next start: old ($o) or new ($nw), prev-$V3 untouched; then again: new" ok ||
+        check "power cuts during $name ($bad bad)" bad
+}
+livecuts "zup -f (a new package)" $U/S0 $U/sE3 -f $(pf ed-$V3)
+livecuts "zup -f (an upgrade with a kept config)" $U/E3e $U/sE4 -f $(pf ed-$V4)
+livecuts "zup -f (a takes hand-over)" $U/E4 $U/sC1 -f $(pf coreutils-$V3)
+livecuts "zup -r (with a .save)" $U/E4 $U/sRs -r ed
+
+# the system's way back after live transactions: "Zenix (previous)" puts base and zup back to V2 from prev-V3; what
+# zup -f and -r did stays (D22 4.4: the two never touch the same package)
+rm -rf $L; cp -a $U/C3 $L
+env ZUP_ROOT=$L ZUP_KVNUM=$V2 ZUP_FLAGS=1 $U/zup >$U/out 2>&1; rc=$?
+[ $rc = 0 ] && [ "$(cat $L/bin/sh)" = "sh2 contents" ] && [ "$(cat $L/sbin/zup)" = "zup2 contents" ] && grep -q "^version $V2 " $L/var/lib/zpkg/base.manifest &&
+    [ "$(cat $L/bin/ls)" = "ls3 contents" ] && [ -f $L/var/lib/zpkg/textutils.manifest ] && [ ! -e $L/var/lib/zpkg/utils.manifest ] && [ -f $L/var/lib/zpkg/edcfg.manifest ] &&
+    [ ! -e $L/var/cache/zpkg/prev-$V3 ] && lockfree $L &&
+    check "Zenix (previous) after live transactions: base and zup back to $V2, the live-installed packages untouched" ok || { check "the D15 way back after live transactions" bad; cat $U/out; }
+
 # ---- 3. zup on the real ext2 code (audit 2026-10-26 F5) ----
 # zup's calls served by user/fsd.c and kernel/ext2.c on an image (tools/host/zup-ext2.c, zup-fsd.c); the power goes
 # after every block write of the update (a whole block reaches the disk or none of it), then zup again (the next
@@ -324,6 +565,50 @@ done
 [ $rc = 0 ] && [ $fixed -gt 100 ] && [ $fbad = 0 ] &&
     check "each of the $fixed cuts that left something is repaired by one fsck.ext2 -y: e2fsck -fn clean, marked clean (DESIGN D17)" ok ||
     check "fsck.ext2 -y after the update's cuts: $fbad of $fixed not repaired in one run" bad
+
+# live transactions on the real ext2 code (D22 4.2, 8.1): a power cut after each block write of zup -f (a new
+# package) and of zup -r (with a .save), then the next start, then the same operation again: at worst leaks, marked
+# "needs a check" whenever e2fsck finds something, prev-V3 as it was, the new state in the end
+xl() { local img=$1; shift; local e=(); while [[ "${1:-}" == *=* ]]; do e+=("$1"); shift; done
+       env HOSTDISK=$img ZUP_KVNUM=$V3 ZUP_SELF=$X/zup "${e[@]}" $X/zup "$@"; }
+xprev() { for f in $(debugfs -R "ls /var/cache/zpkg/prev-$V3" $1 2>/dev/null | tr -s ' ' '\n' | grep '^log'); do xcat $1 /var/cache/zpkg/prev-$V3/$f; done
+          debugfs -R "ls /var/cache/zpkg/prev-$V3/f" $1 2>/dev/null | tr -s ' ' '\n' | grep -v '^$' | sort; }
+xed_new() { [ "$(xcat $1 /bin/ed)" = "ed1 contents" ] && xcat $1 /var/lib/zpkg/ed.manifest | grep -q '^name ed$' && [ -z "$(xcat $1 /var/lib/zpkg/journal)" ]; }
+xrm_new() { [ -z "$(xcat $1 /bin/ed)" ] && [ -z "$(xcat $1 /var/lib/zpkg/ed.manifest)" ] && xcat $1 /etc/edrc.save | grep -q 'my own line' && [ -z "$(xcat $1 /var/lib/zpkg/journal)" ]; }
+for c in "f:S0:xed_new:-f /var/cache/zpkg/pkg/ed-$V3.zup" "r:E4:xrm_new:-r ed"; do
+    IFS=: read -r cn from fn args <<<"$c"
+    rm -rf $X/stage; cp -a $U/$from $X/stage; mkdir -p $X/stage/var/cache/zpkg/pkg; cp $U/pool/ed-$V3.zup $X/stage/var/cache/zpkg/pkg/
+    mke2fs -q -F -t ext2 -b 1024 -N 512 -d $X/stage $X/lbase.img 8M && e2fsck -fn $X/lbase.img >/dev/null 2>&1 || check "the ext2 image for zup -$cn" bad
+    xprev $X/lbase.img >$X/prev0
+    cp $X/lbase.img $X/t.img
+    # shellcheck disable=SC2086
+    xl $X/t.img $args >$X/out 2>&1 && e2fsck -fn $X/t.img >$X/e2.log 2>&1 && $fn $X/t.img && xprev $X/t.img | cmp -s - $X/prev0 &&
+        dumpe2fs -h $X/t.img 2>/dev/null | grep -q '^Filesystem state: *clean$' &&
+        check "zup -$cn on ext2 without a cut: done, e2fsck clean, prev-$V3 as it was, the volume clean again" ok || { check "zup -$cn on ext2 without a cut" bad; cat $X/out $X/e2.log; }
+    n=0; cuts=0; leaks=0; bad=0; rc=99
+    while [ $rc = 99 ] && [ $n -le 5000 ]; do
+        cp $X/lbase.img $X/t.img
+        # shellcheck disable=SC2086
+        xl $X/t.img ZUP_DISKCUT=$n $args >/dev/null 2>&1; rc=$?
+        if [ $rc = 99 ]; then
+            cuts=$((cuts + 1))
+            for step in "the next start" "the operation again"; do
+                # shellcheck disable=SC2086
+                if [ "$step" = "the next start" ]; then xl $X/t.img >$X/out 2>&1; else xl $X/t.img $args >$X/out 2>&1; fi
+                if ! e2fsck -fn $X/t.img >$X/e2.log 2>&1; then
+                    [ "$step" = "the next start" ] && leaks=$((leaks + 1))
+                    python3 -I tools/e2safe.py $X/e2.log >$X/why || { bad=$((bad + 1)); echo "  zup -$cn, cut after $n sectors, $step: $(head -2 $X/why | tr '\n' ' ')"; }
+                    dumpe2fs -h $X/t.img 2>/dev/null | grep -q '^Filesystem state: *not clean' || { bad=$((bad + 1)); echo "  zup -$cn, cut after $n sectors, $step: e2fsck finds something, but the volume is marked clean"; }
+                fi
+            done
+            $fn $X/t.img && xprev $X/t.img | cmp -s - $X/prev0 || { bad=$((bad + 1)); echo "  zup -$cn, cut after $n sectors: not the new state, or prev-$V3 changed"; }
+        fi
+        n=$((n + 1))
+    done
+    [ $rc = 0 ] && [ $cuts -gt 50 ] && [ $bad = 0 ] &&
+        check "zup -$cn on ext2: a power cut after each of its $cuts block writes, then the next start and again: at worst leaks (after $leaks cuts), marked \"needs a check\", prev-$V3 untouched, the new state in the end" ok ||
+        check "zup -$cn: power cuts on ext2 ($bad bad, $cuts cuts, last zup $rc)" bad
+done
 
 echo "zup-host-test: $pass passed, $fail failed"
 [ $fail = 0 ]

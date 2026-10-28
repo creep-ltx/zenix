@@ -6,7 +6,9 @@
  *   ZUP_BUNDLE  a bundle file SYS_update INFO reports as in memory (unset: none); ZUP_FLAGS its flags
  *   ZUP_KVNUM   the running kernel's version (unset: a kernel without SYS_update, -ENOSYS)
  *   ZUP_CUT=N   the power goes before the Nth change (write, rename, link, unlink, mkdir, chmod, chown, sync, mark)
- *   ZUP_TRACE   a file: each change, one line ("rename /a /b"); ZUP_SELF: this program, for /sbin/zup's spawn */
+ *   ZUP_TRACE   a file: each change, one line ("rename /a /b"); ZUP_SELF: this program, for /sbin/zup's spawn
+ * The processes (SYS_procinfo, for zup's lock) are the PC's own, from /proc: a program called zup or zpkg there is
+ * a zup or zpkg to it. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +42,7 @@ struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };
 struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, kflags; u32 client_; };
 struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };
+struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 shared; u32 pgid; };
 #define UPD_INFO      1
 #define UPD_RELEASE   2
 #define UPD_NOTE      3
@@ -68,6 +71,10 @@ int sys_readlink(const char *p, char *b, u32 max);
 int sys_sync(void);
 int sys_statfs(struct ustatfs *f);
 int sys_getuid(void);
+int sys_getpid(void);
+int sys_procinfo(u32 i, struct uproc *p);   /* the PC's processes (/proc), slot i from 1 */
+int sys_lseek(int fd, int off, int whence);
+int sys_fstat(int fd, struct ustat *s);
 int sys_spawn(const char *path, char *const *argv, const int *stdio);
 int sys_wait(int pid);
 int sys_port_find(const char *n);

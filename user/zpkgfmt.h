@@ -9,6 +9,7 @@
 
 #define ZF_MAXPKG   16                  /* packages in one bundle */
 #define ZF_MAXDEP   8                   /* dependencies of one package */
+#define ZF_MAXTAKES 8                   /* takes lines of one package (DESIGN D22 8.4.4) */
 #define ZF_PMAX     64                  /* every path given to a system call is at most 63 bytes */
 #define ZF_HDR      96                  /* the bundle header */
 #define ZF_TOCE     80                  /* one table-of-contents entry: name[40], offset, size, SHA-256 */
@@ -25,6 +26,7 @@ struct zf_pkg {
     char *name, *vstr, *group, *text;
     unsigned vnum, textlen;
     int ndep; char *dep[ZF_MAXDEP]; unsigned depv[ZF_MAXDEP];
+    int ntakes; char *takes[ZF_MAXTAKES];  /* takes OTHER (D22 8.4.4: its files become this package's) */
     int nent; struct zf_ent *ent;
     const unsigned char *tgz; unsigned tgzlen;      /* the parts, in the bundle (zf_bundle_parse) */
     const unsigned char *man; unsigned manlen;

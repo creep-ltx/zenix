@@ -1332,16 +1332,25 @@ int ext2_mkdir(struct inode *dir, const char *name)
         return -EEXIST;
     if (dir->links >= 65000)
         return -EMLINK;
-    int r = new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1);
+    /* the parent's count first (the new ".." counts there), before the new directory's ".." exists, then the entry: a
+     * cut anywhere leaves the parent's count one too high and perhaps an unnamed directory (leaks fsck finds), never
+     * a ".." the parent does not count, which a later rmdir of the parent would leave naming a free inode (F5; found
+     * by D22's live transactions, whose rollback removes the directories they made) */
+    dir->links++;
+    dir->mtime = fs_now();
+    int r = ext2_iput(dir);
     if (r)
         return r;
+    if ((r = new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1)))
+        goto undo;
     inherit_group(&d, dir);
     u32 blk = bmap_alloc(&d, 0);
     if (!blk) {
         d.links = 0;
         ext2_iput(&d);
         free_inode(d.ino, 1);
-        return -ENOSPC;
+        r = -ENOSPC;
+        goto undo;
     }
     d.size = bsize;
     memset(dbuf, 0, bsize);
@@ -1358,12 +1367,6 @@ int ext2_mkdir(struct inode *dir, const char *name)
     dbuf[21] = '.';
     if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d))
         return -EIO;
-    /* the parent's count first (the new ".." counts there), then the entry: a cut in between leaves the parent's
-     * count one too high and an unnamed directory (leaks fsck finds), never a count below the names (F5) */
-    dir->links++;
-    dir->mtime = fs_now();
-    if ((r = ext2_iput(dir)))
-        return r;
     if ((r = dir_add(dir, name, len, d.ino, d.mode))) {
         if (ext2_iget(dir->ino, dir) == 0) {    /* dir_add may have rewritten it (index flag, a new block) */
             dir->links--;
@@ -1373,6 +1376,12 @@ int ext2_mkdir(struct inode *dir, const char *name)
         return r;
     }
     return 0;
+undo:
+    if (ext2_iget(dir->ino, dir) == 0) {        /* no new directory: the parent's count back */
+        dir->links--;
+        ext2_iput(dir);
+    }
+    return r;
 }
 
 int ext2_unlink(struct inode *dir, const char *name)

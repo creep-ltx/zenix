@@ -868,3 +868,42 @@ word, and that "no floor" is the right call. Its findings, all taken in above:
   (manifests, and bundles read in pieces as `zup -f` will): 10 million inputs in 120 s, nothing found.
 - `UPD_F_TRIAL` 2 claimed (CLAUDE.md; `kernel/kernel.h`, `user/usys.h`): the kernel keeps that one bit after
   `UPD_RELEASE`, so zpkg, which runs after boot gave the bundle back, still sees it. zenixboot sets it from step 7.
+
+## As built: step 4, zup's live transactions (main line, branch zpkg1, 2026-10-28)
+
+- `zup -f FILE [-d]` and `zup -r NAME [-n]` (man/zup.txt) in zup's one engine, every rule of 4.2: the lock (taken by
+  zup itself with `O_EXCL`, or held by its parent; a dead holder's lock is stale only while no other zup lives, so a
+  zup left running after its zpkg died is never taken for a cut one; made and removed under the "needs a check" mark;
+  the boot run takes it only for a journal or a way back without a bundle in memory, since with a bundle nothing else
+  runs); `live 1 NAME` before the operations, `live/`, no undo log, no result, no note, a commit and a recovery that
+  never touch `prev-*`; versions (`-d`; the header's minimum against the smaller of the installed base and the
+  running kernel); never the base group (group and name), never a package in the newest prev set's logs, never during
+  a trial (`UPD_F_TRIAL`); paths owned by another package (directories shared, `takes` excepted), under the
+  database or the cache, below a symbolic link; `takes` with the taken entry in the three-way compare and the taken
+  manifest rewritten (or removed) in the same transaction; `.save` (`S`). The file is streamed: header and table,
+  the manifest copied and parsed, the tgz's SHA-256 a piece at a time, then inflated from the file in 4 KB pieces.
+  The change table and the installed-manifest table grow as needed: zup's bss 97,142 -> 19,690 bytes.
+- **Choices where the note was silent (conservative):** (1) an existing file or link no package owns is a conflict
+  (pacman's rule; 4.2 named only owned paths); (2) a removal is refused while any installed package depends on the
+  package (zpkg removes dependents first), not only a base-group one; (3) an older `PATH.save` is never replaced: the
+  removal is refused until it is moved; (4) two more live-only operations, `M` (a new directory, removed by a
+  rollback) and `X` (a removed package's directory, removed if empty, put back by a rollback), so a rollback leaves
+  no directory behind and a cut after the commit leaves none either; (5) the lock's parent rule uses the parent's pid
+  from `SYS_procinfo` (not an argument); (6) a damaged installed manifest stops every live change ("the package
+  database cannot be read"); the boot run keeps D15's behaviour; (7) a base-group package with `takes` is refused in
+  a system bundle too; (8) zup -f and -r refuse to run on a kernel without `SYS_update` and on a root without
+  `/var/lib/zpkg` ("no package database here").
+- **Found and fixed on the way (kernel/ext2.c):** `mkdir` wrote the new directory (with its `..`) before raising the
+  parent's count; a cut in between, then an rmdir of the parent before `fsck` (a live rollback removing the directory
+  it made), left that `..` naming a free inode, the kind of damage F5 rules out. The count is raised first now.
+- Sizes (*measured*): `zup` text 40,520 -> 47,288 bytes at -Os (zup.c is cold code: -Os now, it was -O2), bss
+  97,142 -> 19,690; `/sbin/zup` 45,228 -> 52,988 bytes; the kernel +40 bytes.
+- Tests (`tools/zup-host-test.sh`, all passing, *verified*): D15's 48 unchanged, plus 44: the base-only system
+  update, a first install, "installed already", an upgrade with a kept config, older refused and `-d`, 13 refusals of
+  `-f` and 4 of `-r` each checked to change nothing (root, `prev-V` and the lock), a removal refused for a dependent,
+  the lock held by a living zup, a stale lock with another zup alive, the parent's lock, a stale lock taken over,
+  `takes` (part of a package, the rest of it, a config file), `-r` with `.save`, `-n`, an older `.save`; a power cut
+  before each change of four live operations (`-f` new, `-f` upgrade with a kept config, a `takes` hand-over, `-r`
+  with `.save`), the commit line included, then the next start: old or new exactly, `prev-V` byte for byte; "Zenix
+  (previous)" after live transactions; on the real ext2 server a cut after each block write of `-f` (506 cuts) and
+  `-r` (378): at worst leaks, marked, `prev-V` untouched.

@@ -273,7 +273,7 @@ $(BUILD)/sha256.uo $(BUILD)/sha256.po: user/sha256.h
 $(BUILD)/zpkgfmt.uo: user/zpkgfmt.c user/zpkgfmt.h user/sha256.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 $(BUILD)/zup.uo: user/zup.c user/zpkgfmt.h user/libz.h user/usys.h user/sha256.h kernel/fsproto.h | $(BUILD)
-	$(CC) $(UCFLAGS) $(MINIZ_CFLAGS) -c $< -o $@
+	$(CC) $(UCFLAGS) -Os $(MINIZ_CFLAGS) -c $< -o $@
 $(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@

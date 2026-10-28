@@ -6,6 +6,8 @@ NAME
 SYNOPSIS
     zup
     zup -l
+    zup -f FILE [-d]
+    zup -r NAME [-n]
 
 DESCRIPTION
     zup installs the programs and files of an update onto the root
@@ -57,6 +59,33 @@ DESCRIPTION
     is written next to it as PATH.new; one the owner deleted is not
     brought back.
 
+    One package at a time (zpkg(8) runs these; DESIGN D22): zup -f
+    installs one package file (a bundle holding one package and no
+    kernel) and zup -r removes one package, each as one transaction of
+    its own, with the same journal, checks and power-cut safety. They are
+    "live": the files they replace are kept in /var/cache/zpkg/live/
+    only until the commit, and they never touch a prev set, so the
+    system's way back ("Zenix (previous)") stays whole. zup refuses, and
+    changes nothing, when: a package of the group base (zup, zpkg, base)
+    is named - those change only with the system, at a restart; the
+    package is part of the previous system the boot menu can go back to
+    (until the next system update); a path belongs to another package
+    (directories may be shared; "takes OTHER" in the manifest hands
+    OTHER's files over in the same transaction), exists and belongs to no
+    package, lies under /var/lib/zpkg or /var/cache/zpkg, or has a
+    symbolic link on its way; the version is older than the installed
+    one (unless -d) or needs a newer base or another package first; the
+    file is a system bundle (those go through zenixboot); a new system
+    is on trial (not confirmed yet); another zup or zpkg is changing
+    packages (/var/lib/zpkg/lock). Removing refuses a package another
+    installed package needs. A config file the owner changed is kept as
+    PATH.save when its package is removed (-n deletes it too; an older
+    PATH.save is never replaced: the removal is refused until it is moved
+    away). Directories a removed package listed are removed when empty
+    and no other package lists them. Ctrl-C, hangups and kill's TERM are
+    ignored while zup works. The file is read twice, never held in
+    memory: its SHA-256 first, then unpacked.
+
     boot(8) runs zup at every start, after the root is mounted and before
     anything else. The result is one line in /var/lib/zpkg/result, which
     login(1) shows after the next login (then it is removed), and a note
@@ -65,6 +94,11 @@ DESCRIPTION
 OPTIONS
     -l      list the installed packages and their versions, and whether
             a previous version is kept
+    -f FILE install the one package in FILE (zpkg checks its signature
+            first; zup checks every SHA-256 again)
+    -d      with -f: an older version too (zpkg --back)
+    -r NAME remove the package NAME
+    -n      with -r: a changed config file is deleted, not kept as .save
 
 FILES
     /sbin/zup                   the program (package zup)
@@ -72,10 +106,14 @@ FILES
     /var/lib/zpkg/journal       an install in progress
     /var/lib/zpkg/result        the last result, until it was seen
     /var/cache/zpkg/prev-V/     the files the install of V replaced
+    /var/cache/zpkg/live/       the files -f or -r replaced, until the commit
+    /var/lib/zpkg/lock          the pid of the zup or zpkg that changes
+                                packages (a dead one's is stale)
 
 EXIT STATUS
     0 when there was nothing to do or everything worked, 1 when a bundle
-    was refused or an install was rolled back, 2 for a wrong argument.
+    or a package was refused or an install was rolled back, 2 for a wrong
+    argument.
 
 NOTES
     zup ignores SIGPIPE: zup | less, and quitting less early, never ends
@@ -89,7 +127,11 @@ NOTES
     manifest, journal) are described in docs/architecture.md section 3,
     "Updates". Verified on the PC (tools/zup-host-test.sh: refusals, the
     three-way compare, a power cut before each change, the way back; and on
-    the real ext2 server, a power cut after each block write).
+    the real ext2 server, a power cut after each block write; the same
+    for -f, -r and a takes hand-over, with the prev set checked byte for
+    byte). A zup -f or -r cut by a power cut is finished or rolled back
+    by zup at the next start (its messages say which; it leaves no result
+    line and no note: zpkg can simply run again).
     A test build (UDIAG=-DDIAG_SLOWZUP) hangs when it runs as the second
     stage, for boot's time-limit test (tools/update-test.sh slowzup).
     Every message is on the console the moment zup says it (one write

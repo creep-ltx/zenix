@@ -82,6 +82,10 @@ int zf_manifest_parse(struct zf_pkg *p, char *text, unsigned len, const char *wh
             if (p->ndep == ZF_MAXDEP) { zf_say("%s: more than %d dependencies", where, ZF_MAXDEP); return -EINVAL; }
             p->dep[p->ndep] = w[1]; p->depv[p->ndep++] = zf_num(w[2], 10, &bad);
             if (!zf_name_ok(w[1])) bad = 1;
+        } else if (!strcmp(w[0], "takes") && nw == 2) {                 /* D22 8.4.4 (growth: older zups ignore it) */
+            if (p->ntakes == ZF_MAXTAKES) { zf_say("%s: more than %d takes lines", where, ZF_MAXTAKES); return -EINVAL; }
+            p->takes[p->ntakes++] = w[1];
+            if (!zf_name_ok(w[1])) bad = 1;
         } else if ((!strcmp(w[0], "f") || !strcmp(w[0], "c") || !strcmp(w[0], "d") || !strcmp(w[0], "l")) && nw >= 3) {
             struct zf_ent x;
             memset(&x, 0, sizeof x);
@@ -117,6 +121,8 @@ int zf_manifest_parse(struct zf_pkg *p, char *text, unsigned len, const char *wh
         if (bad) { zf_say("%s: a bad line (%s)", where, w[0]); return -EINVAL; }
     }
     if (!p->name || !p->vstr || !p->vnum) { zf_say("%s: no name or version", where); return -EINVAL; }
+    for (int i = 0; i < p->ntakes; i++)
+        if (!strcmp(p->takes[i], p->name)) { zf_say("%s: takes itself", where); return -EINVAL; }
     return 0;
 }
 struct zf_ent *zf_find_ent(struct zf_pkg *p, const char *path)
