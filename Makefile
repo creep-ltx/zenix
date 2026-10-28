@@ -115,17 +115,19 @@ $(BUILD)/stage0.bin: $(BUILD)/stage0.elf tools/check-68020-60.sh
 # zenixboot: the AmigaOS program that boots Zenix from files on a hard disk, CF or SD card partition
 # (docs/man/zenixboot.txt). Built with the same m68k-elf compiler as the kernel, freestanding (it calls AmigaOS through
 # one assembly stub), linked like a Zenix program and then wrapped into an AmigaOS hunk executable by tools/mkhunk.py,
-# so it needs no Amiga toolchain. It shares the hand-over code with the bootblock (boot/handoff.S).
+# so it needs no Amiga toolchain. It shares the hand-over code with the bootblock (boot/handoff.S). It checks a bundle's
+# signature (DESIGN D21 6.4) with the crypto library's zc_sig_verify against the build's keys ($(BUILD)/zpkgkeys.h,
+# below: the TEST key, or with RELEASE=1 the release keys).
 $(BUILD)/zenixboot-start.o: boot/zenixboot-start.S boot/handoff.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
-$(BUILD)/zenixboot.bo: boot/zenixboot.c | $(BUILD)
-	$(CC) $(CFLAGS) -Os -c $< -o $@
+$(BUILD)/zenixboot.bo: boot/zenixboot.c $(BUILD)/zpkgkeys.h crypto/zc/zc.h | $(BUILD)
+	$(CC) $(CFLAGS) -Os -I$(BUILD) -c $< -o $@
 $(BUILD)/zenixboot.bo: user/sha256.h
 $(BUILD)/sha256.bo: user/sha256.c user/sha256.h | $(BUILD)
 	$(CC) $(CFLAGS) -Os -c $< -o $@
-$(BUILD)/zenixboot.elf: $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo $(BUILD)/sha256.bo link/user.ld
+$(BUILD)/zenixboot.elf: $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo $(BUILD)/sha256.bo $(BUILD)/libcrypto.a link/user.ld
 	$(CC) $(CFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
-	    $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo $(BUILD)/sha256.bo $(LIBGCC) -o $@
+	    $(BUILD)/zenixboot-start.o $(BUILD)/zenixboot.bo $(BUILD)/sha256.bo $(BUILD)/libcrypto.a $(LIBGCC) -o $@
 $(BUILD)/zenixboot.zx: $(BUILD)/zenixboot.elf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@
@@ -503,8 +505,13 @@ $(BUILD)/sntp.uo: net/sntp/sntp.h
 # in (tools/zsign.py cheader: the TEST key, or with RELEASE=1 tools/keys/zenix-release-*.pub, D21 6.3)
 ZPKGOBJS := $(BUILD)/cr/user/zpkg/index.o $(BUILD)/cr/user/zpkg/resolve.o $(BUILD)/cr/net/http/http.o $(BUILD)/zpkgfmt.uo \
             $(BUILD)/sha256.uo $(BUILD)/cr/crypto/zc/zc_clock.o
+# RELEASE_KEYS: where the release public keys are (default tools/keys; the tests give a folder of their own)
+RELEASE_KEYS ?= tools/keys
+ifneq ($(filter-out 1,$(RELEASE)),)
+$(error RELEASE=1 makes a release build; leave it out for a test build (RELEASE=$(RELEASE) means neither))
+endif
 $(BUILD)/zpkgkeys.h: tools/zsign.py FORCE | $(BUILD)
-	@python3 tools/zsign.py cheader $@ $(if $(RELEASE),--release)
+	@python3 tools/zsign.py cheader $@ $(if $(RELEASE),--release $(RELEASE_KEYS))
 $(BUILD)/cr/user/zpkg/index.o $(BUILD)/cr/user/zpkg/resolve.o: user/zpkg/zpkg.h
 $(BUILD)/zpkg.uo: user/zpkg.c $(BUILD)/zpkgkeys.h $(BUILD)/builddate.h user/zpkg/zpkg.h user/zpkgfmt.h net/http/http.h crypto/zc/zc.h crypto/zc/zc_clock.h user/socket.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
@@ -590,10 +597,19 @@ $(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
 # zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
+# Signed (DESIGN D21 6.3, tools/zsign.py) into zenix-update.zup.sig: a test build's bundle carries the channel "test"
+# and the TEST key's signature (build/sign-test, made when missing, never committed); with RELEASE=1 the channel
+# CHANNEL (default testing) and the release key SIGNKEY (default zsign.py's, outside every repository).
 BASEPKGS := zup base zpkg
+CHANNEL ?= testing
+SIGNKEY ?=
 bundle: $(BUILD)/zenix-update.zup
-$(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py
-	python3 tools/mkzup.py bundle $@ --base-only --kernel $(BUILD)/kernel.bin $(BUILD)/pkg $(BASEPKGS)
+$(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py tools/zsign.py
+	python3 tools/mkzup.py bundle $@ --base-only --kernel $(BUILD)/kernel.bin $(if $(RELEASE),--channel $(CHANNEL)) \
+	    $(BUILD)/pkg $(BASEPKGS)
+	k="$(if $(RELEASE),$(SIGNKEY),$$(python3 tools/zsign.py testkey | cut -d' ' -f1))"; \
+	    [ -n "$(RELEASE)" ] || [ -n "$$k" ] || { echo "the test key is missing" >&2; exit 1; }; \
+	    python3 tools/zsign.py sign $${k:+--key "$$k"} $@ >/dev/null
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 1,024 inodes (512 ran out with the
 # network's files in D19 step 8: cmds2-test makes 150 files)

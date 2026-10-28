@@ -8,9 +8,10 @@ since 1.1.1); the key never enters the build or the repository.
   zsign.py verify --pub PUB [--pub PUB]... [--kind K] FILE [SIG]  checked with OpenSSL against the given keys
   zsign.py keyid PUB                                            the key id (8 bytes, hex) the .sig names
   zsign.py testkey                                              the TEST key pair, made when missing (below)
-  zsign.py cheader OUT [--release]                              zpkg's built-in keys as a C header (D21 6.3): the
-                                                                TEST public key (made when missing), or with
-                                                                --release every tools/keys/zenix-release-*.pub
+  zsign.py cheader OUT [--release [DIR]]                        the built-in keys of zpkg and zenixboot as a C
+                                                                header (D21 6.3): the TEST public key (made when
+                                                                missing), or with --release every
+                                                                zenix-release-*.pub of DIR (default tools/keys)
 
 KEY: a PKCS#8 PEM Ed25519 private key; by default ~/.config/zenix-signing/zenix-release.key (D15: mode 600, outside
 every repository, with an offline backup). PUB: the public half (SubjectPublicKeyInfo PEM), as in tools/keys/ and
@@ -92,19 +93,21 @@ def testkey():
     return TEST_KEY, TEST_PUB
 
 
-def cheader(out, release):
-    """zpkg's trusted keys (D21 6.3: release builds the release keys, test builds the test key), rewritten only when
-    they change"""
+def cheader(out, release, keydir=None):
+    """the trusted keys of zpkg and zenixboot (D21 6.3: release builds the release keys, test builds the test key),
+    rewritten only when they change"""
     if release:
-        kd = os.path.join(HERE, "keys")
+        kd = keydir or os.path.join(HERE, "keys")
         pubs = sorted(os.path.join(kd, f) for f in (os.listdir(kd) if os.path.isdir(kd) else [])
                       if f.startswith("zenix-release-") and f.endswith(".pub"))
         if not pubs:
-            die("a release build needs tools/keys/zenix-release-*.pub (the public halves)")
+            die("a release build needs %s/zenix-release-*.pub (the public halves)" % kd)
     else:
         pubs = [testkey()[1]]
     raw = [raw_public(p) for p in pubs[:4]]
-    text = "/* made by tools/zsign.py cheader: zpkg's built-in public keys (DESIGN D21 6.3) */\n"
+    if len(pubs) > 4:
+        die("more than 4 release keys in %s (D21 6.3: current and next)" % kd)
+    text = "/* made by tools/zsign.py cheader: the built-in public keys of zpkg and zenixboot (DESIGN D21 6.3) */\n"
     text += "#define ZPKG_KEYCLASS %d                 /* ZP_KEY_%s */\n" % (2 if release else 1, "RELEASE" if release else "TEST")
     text += "#define ZPKG_NKEYS %d\n" % len(raw)
     text += "static const unsigned char zpkg_keys[ZPKG_NKEYS][32] = {\n"
@@ -229,8 +232,8 @@ def main(a):
     elif cmd == "testkey" and not rest:
         k, p = testkey()
         print("%s %s (key %s)" % (k, p, keyid(raw_public(p)).hex()))
-    elif cmd == "cheader" and len(rest) in (1, 2) and (len(rest) == 1 or rest[1] == "--release"):
-        cheader(rest[0], len(rest) == 2)
+    elif cmd == "cheader" and len(rest) in (1, 2, 3) and (len(rest) == 1 or rest[1] == "--release"):
+        cheader(rest[0], len(rest) >= 2, rest[2] if len(rest) == 3 else None)
     elif cmd == "keyid" and len(rest) == 1:
         print(keyid(raw_public(rest[0])).hex())
     else:

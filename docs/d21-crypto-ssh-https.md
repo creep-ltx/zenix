@@ -935,3 +935,62 @@ URL); `sntp` 15,420. Neither links `time`, `__divdi3` or `__moddi3`.
 - Tested in `tools/wget-test.sh`: after sntp's accepted answer wget trusts the clock; the liar's answer and
   `date -s` clear the mark; a reboot after `sntp -r` raises the floor back to the true time.
 
+
+## As built: step 5, signatures (branch sig5, 2026-10-28; not yet on the A1200)
+
+- **zenixboot 0.3b1** (`boot/zenixboot.c`, man/zenixboot.txt "SIGNATURES") checks in 6.4's order: the sizes and the
+  table, the digest computed over header bytes 0-63 and the table and compared with bytes 64-95 (the version used
+  must be the checked header's); the two checks that only refuse or wait (the kernel serves this root, the volume has
+  room: review, so a full BOOT: costs no check at every start); the channel against
+  the build's key class; `Zenix/zenix-update.zup.sig` (exactly 80 bytes) verified with `zc_sig_verify` over that
+  computed digest; then every part's SHA-256. Every refusal goes through `bundle_bad()` (`.bad`, its `.sig` `.bad.sig`,
+  the reason on the screen and the serial line); no change to the update note. On success it names the key and the
+  time ("signed by release key 1a2b3c4d5e6f7081 (checked in 7.84 s)": that one is FS-UAE's, an emulator's figure; the
+  A1200's is for the weekend list). The `.sig` follows the bundle (`.done.sig`, `.rejected.sig`, `.bad.sig`; the
+  bundle is renamed first, so a cut leaves at worst a `.sig` without a bundle, which nothing uses); a cut-off
+  `.sig.part` is deleted, and a cut-off bundle `.part` takes its `.sig` along to `.bad.sig`.
+- **Once per bundle:** the verified digest goes into the state file as `sigdigest HEX`; a later start of the same
+  trial (same version, phase trial) with the same computed digest neither verifies again nor re-hashes the parts.
+  Any other case (a cut while installing, a different bundle of the same version) is verified in full.
+- **Keys:** zenixboot includes the same generated header as zpkg (`build/zpkgkeys.h`, `tools/zsign.py cheader`): a test
+  build trusts only the TEST key and takes only the channel `test`; `make RELEASE=1` trusts only
+  `$(RELEASE_KEYS)/zenix-release-*.pub` (default `tools/keys/`, at most 4) and takes only `stable` and `testing`, as
+  zpkg's class rule. `UNSIGNED_OK` (an argument) lets a test build take a bundle with no `.sig` (said on the screen; a
+  `.sig` that is there must verify); a release build says it ignores it.
+- **The stack:** the check runs on a 6 KB stack of its own (`zb_onstack`, exec `StackSwap`, in
+  `boot/zenixboot-start.S`). *Measured* with gcc's `-fcallgraph-info=su`: the check's deepest chain is 2,412 bytes
+  (`zc_sig_verify` 168, `crypto_ed25519_check` 352, `crypto_eddsa_check_equation` 1,136, down to `fe_mul` 332);
+  zenixboot's own deepest chain stays 1,068 bytes on the shell's stack. Together they would have been about 3.5 KB
+  plus AmigaOS's own frames on the boot shell's default 4 KB stack: too close, so the swap. The swapped stack is
+  filled with a pattern; zenixboot reports the high-water mark and refuses the bundle when the lowest 512 bytes were
+  touched (review: no MMU, so a later library change must not overrun silently). FS-UAE's run reports 2,406 bytes
+  used for a good signature (exec's `StackSwap` writes a mark of its own at the lowest bytes: the count starts above
+  16).
+- **Size (*measured*):** the AmigaOS executable is 53,112 bytes (was 23,780); its code 43,858 bytes (was 15,838):
+  Monocypher's Ed25519 and SHA-512 at -O2 (the library's own build, no second copy), BearSSL's SHA-256 for the key id,
+  and the glue. The `bundle` rule signs (`zenix-update.zup.sig`: the TEST key, or with `RELEASE=1` the channel
+  `CHANNEL`, default `testing`, and `SIGNKEY`, default zsign.py's release key).
+- **zpkg's cable path** (6.5; D22 7.6: `rz` receives, `zpkg -U` checks before anything is stored or installed) was
+  built in D22 step 5; `zpkg-emu-test.sh e` now also checks a file without a `.sig` and one signed by a key the build
+  does not know (both refused). The licences: `crypto/openssh/LICENCE` (the two notices of the bcrypt files, copied
+  from their headers) joins `mkzup.py`'s `LICENSES` and `mkroot.sh`'s list as `/usr/share/licenses/OpenSSH-bcrypt`;
+  the card package carries BearSSL's and Monocypher's notices for zenixboot (`amiga/zenixpkg/licenses/`).
+- **Tests** (`tools/update-test.sh`, *verified* in FS-UAE): `sig` (a release build of zenixboot with a release key made
+  for the test: no `.sig`, a damaged one, the TEST key's signature over a release bundle, a test bundle and
+  `UNSIGNED_OK` refused; a test build refuses an unsigned bundle and takes one with `UNSIGNED_OK`; the release-signed
+  bundle installed); every other setup's bundle signed with the TEST key; `install`, `bad`, `panic`/`hang` check the
+  `.sig`'s renames; `cold`, `refused` and `nozup` check that a trial's later starts do not verify again.
+- **The card package** (`tools/mkcardpkg.sh`, docs/card-package.md): the trial bundle comes with its `.sig`, the
+  README's step 4 copies the `.sig` first. Found and fixed on the way: the trial bundle carried every package (31),
+  more than a bundle's 16, so zup refused its root half since D22 step 5's families; it now carries the base group
+  only, as `make bundle`. `tools/cardpkg-test.sh card` passes again (13 checks, the trial installed with the test
+  key's signature, confirmed, "Zenix (previous)"). `RELEASE=1` makes the owner's package; without it the package is a TEST
+  package and says so in its first lines. **The owner's real package needs the release key first** (D15/6.3: made
+  by the owner on the PC, `~/.config/zenix-signing/`, mode 600, an offline backup; its public half in `tools/keys/`):
+  it does not exist yet, so only test packages have been built.
+- **Review** (one independent read-only review of zenixboot's check, 2026-10-28): no blocker, no path that installs
+  or hands over an unverified bundle. Fixed: the volume and roots checks moved before the signature, the checked
+  header's version required, the stack guard; an orphaned `.sig` renamed `.bad.sig`, `retire` also moves a lone
+  `.sig`, the bundle rule refuses an empty test key, `RELEASE` other than 1 is an error. Accepted: a stored
+  `sigdigest` is not tied to the key set (a key dropped from a hand-installed zenixboot during a trial lets that one
+  trial's bundle go on being handed over; zenixboot is changed only by hand, with the owner).

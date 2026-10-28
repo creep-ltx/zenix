@@ -55,6 +55,8 @@ DESCRIPTION
     -U FILE  install a package file (a .zup and its .sig beside it, e.g.
              received with rz): copied into the cache first, its
              signature checked, then installed. Give the whole path.
+             A file without its .sig, or signed by a key this build
+             does not trust, is refused and nothing is kept.
     --back NAME
              put the newest cached version older than the installed one
              back (asks first; --yes does not ask)

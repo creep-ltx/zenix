@@ -5,7 +5,8 @@ What this is: the key derivation of passphrase-protected OpenSSH private keys ("
 neither BearSSL nor Monocypher has (DESIGN D21, docs/d21-crypto-ssh-https.md sections 3.2 and 4.4). Upstream:
 OpenSSH portable, tag V_10_6_P1 (commit 4cdb6b6), https://github.com/openssh/openssh-portable, the files
 openbsd-compat/blowfish.c (BSD-3-Clause, no advertising clause; Niels Provos), openbsd-compat/blf.h (same) and
-openbsd-compat/bcrypt_pbkdf.c (ISC; Ted Unangst). Their licences are in the files' own headers.
+openbsd-compat/bcrypt_pbkdf.c (ISC; Ted Unangst). Their licences are in the files' own headers; LICENCE has both
+notices, copied from them, for the installed systems' /usr/share/licenses/OpenSSH-bcrypt.
 
 Files taken, unchanged: blowfish.c blf.h bcrypt_pbkdf.c.
 Beside them, Zenix's (GPL-2.0-only): includes.h and crypto_api.h, the two headers the files expect from OpenSSH,

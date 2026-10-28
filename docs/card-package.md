@@ -16,14 +16,22 @@ file in `/etc`). From then on every update is a bundle copied to `BOOT:Zenix/` f
 on it; a dual-boot layout needs the AmigaOS partitions, which only the card has. It has the same boot menu and the same
 `Zenix/` place as the card, so updates work the same way there.
 
+**Signatures (DESIGN D21 step 5):** the package's zenixboot checks the signature of every update. `RELEASE=1
+tools/mkcardpkg.sh` makes the owner's package: its zenixboot trusts only the release keys in `tools/keys/` and the
+trial bundle is signed with the release key (kept outside every repository, D21 6.3). Without `RELEASE=1` it is a
+test package: its zenixboot trusts this tree's TEST key (`build/sign-test`, made on the PC that built it and lost with
+`make clean`), and the README's first lines say "A TEST PACKAGE". A test package never goes onto the owner's card:
+that zenixboot would refuse every update not signed on that one PC.
+
 Tested in FS-UAE by `tools/cardpkg-test.sh` (the steps below on an emulated copy of the card's layout, the trial
 update and "Zenix (previous)", the DoM on a stock A1200 and a 68060). Not yet done on the real card or a real DoM.
 
 <!-- package -->
 ## What this package does
 
-1. Brings the new Zenix to the boot partition (BOOT:): the kernel in a folder `Zenix`, a new `zenixboot`, the fixed
-   boot menu, and a new menu line "Zenix (previous)" (going back after an update).
+1. Brings the new Zenix to the boot partition (BOOT:): the kernel in a folder `Zenix`, a new `zenixboot` (it checks
+   the signature of every update and refuses one that is not signed by the key it knows), the fixed boot menu, and a
+   new menu line "Zenix (previous)" (going back after an update).
 2. Puts the new Zenix root on the card's partition 3, from the PC. Your users, passwords and `/home` stay. Partitions
    1 (Emu68), 2 (AmigaOS) and 4 (`/home`) are not touched; the old root is saved first.
 3. Optional: tries a real update the new way (copy one file, reboot), and the way back.
@@ -107,17 +115,21 @@ with this version; `free` shows the memory. **Note** the `free` line. If `/home`
 
 ## Step 4 (optional, 10 minutes): an update the new way, and back
 
-This tries what every later update will do: copy one file from AmigaOS, reboot.
+This tries what every later update will do: copy the update and its signature from AmigaOS, reboot. The new
+zenixboot refuses an update without its signature (`zenix-update.zup.sig`), so the signature is copied first.
 
 1. In AmigaOS (choose AmigaOS in the menu, or `reboot amigaos` in Zenix):
    ```
+   Copy RAM:zenixpkg/try/zenix-update.zup.sig BOOT:Zenix/zenix-update.zup.sig.part
+   Rename BOOT:Zenix/zenix-update.zup.sig.part BOOT:Zenix/zenix-update.zup.sig
    Copy RAM:zenixpkg/try/zenix-update.zup BOOT:Zenix/zenix-update.zup.part
    Rename BOOT:Zenix/zenix-update.zup.part BOOT:Zenix/zenix-update.zup
    bootzenix
    ```
    (If RAM: was emptied by a restart, copy the `try` folder to the Amiga again first.)
-2. zenixboot says it installs the new version, flushes after each step, and starts it; Zenix installs the rest
-   (`zup: installed Zenix ...`). At the prompt: `uname` must name the trial version (it ends in `-try`). **Photo**.
+2. zenixboot checks the signature (a few seconds; it names the key and the time: **note** the time), says it installs
+   the new version, flushes after each step, and starts it; Zenix installs the rest (`zup: installed Zenix ...`). At
+   the prompt: `uname` must name the trial version (it ends in `-try`). **Photo**.
 3. `reboot zenix`: zenixboot says the version "came up" and renames the bundle `zenix-update.done`. **Photo**.
 4. The way back: `reboot`, and choose **Zenix (previous)** in the menu. zenixboot says it goes back; Zenix puts the
    old files back. `uname` must name this README's version again (no `-try`). **Photo**.

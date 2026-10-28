@@ -58,6 +58,7 @@ if [ -z "$NOMAN" ] && [ -f "$B/anchors" ]; then
     lic tools/certdata.COPYING certdata
 fi
 case " $PROGS " in *" ssh "*|*" wget "*|*" cryptotest "*) lic crypto/bearssl/LICENSE BearSSL; lic crypto/monocypher/LICENCE Monocypher;; esac
+case " $PROGS " in *" ssh "*|*" ssh-keygen "*) lic crypto/openssh/LICENCE OpenSSH-bcrypt;; esac
 if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small install / test images)
     mkdir -p "$T/usr/man"
     cp "$(dirname "$0")/../docs/man/"*.txt "$T/usr/man/"      # the manual pages live in docs/man

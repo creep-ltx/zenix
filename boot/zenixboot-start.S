@@ -138,6 +138,39 @@ zb_putch:                           /* d0 = the character (RawDoFmt ends with a 
     movem.l (%sp)+,%d0-%d1/%a0-%a1/%a6
 1:  rts
 
+/* long zb_onstack(long (*fn)(void *), void *arg, void *lower, unsigned long size): fn(arg) on a stack of its own
+ * (exec StackSwap, V37), and back; returns fn's result. For the signature check (DESIGN D21 6.4, 6.6): its frames
+ * are more than the boot shell's default stack can be trusted to hold. The StackSwapStruct lies on the old stack
+ * and a4 points to it on both (StackSwap swaps its contents with the task's stack bounds, so the second call puts
+ * the old ones back); size is a multiple of 4. */
+    .globl  zb_onstack
+zb_onstack:
+    movem.l %d2-%d7/%a2-%a6,-(%sp)  /* 44 bytes; the arguments start at 48(%sp) */
+    move.l  48(%sp),%a2             /* fn */
+    move.l  52(%sp),%a3             /* arg */
+    move.l  56(%sp),%d2             /* lower */
+    move.l  60(%sp),%d3             /* size */
+    lea     -12(%sp),%sp
+    move.l  %sp,%a4
+    move.l  %d2,(%a4)               /* stk_Lower */
+    add.l   %d2,%d3
+    move.l  %d3,4(%a4)              /* stk_Upper */
+    move.l  %d3,8(%a4)              /* stk_Pointer: the new stack starts at its top */
+    move.l  4.w,%a6
+    move.l  %a4,%a0
+    jsr     -732(%a6)               /* StackSwap: on the new stack from here */
+    move.l  %a3,-(%sp)
+    jsr     (%a2)
+    addq.l  #4,%sp
+    move.l  %d0,%d4
+    move.l  4.w,%a6
+    move.l  %a4,%a0
+    jsr     -732(%a6)               /* StackSwap: the old stack again */
+    move.l  %d4,%d0
+    lea     12(%sp),%sp
+    movem.l (%sp)+,%d2-%d7/%a2-%a6
+    rts
+
 /* unsigned long zb_tables(void *table, void *buffer, unsigned long ksize): AmigaOS still alive. Fills the bootinfo
  * and hwinfo table, runs stage0, picks the kernel's home and returns it (handoff_tables, as the bootblock does). */
     .globl  zb_tables
