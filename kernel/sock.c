@@ -39,6 +39,41 @@ u32 net_epoch = 1;
  * kernel's own record, never from names in the message the server could have changed */
 static u32 call_name[NPROC], call_new[NPROC];
 
+/* The watchdog (audit O9). The server never keeps a caller waiting (rule 2), so a server that runs on and on without
+ * a single reply while calls wait for it is stuck (S22 was such a loop, inside lwIP), and so is one that sleeps while
+ * they wait (they wake it: a message wakes its port's waiter and its event wait). The tick counts, while calls are in
+ * flight, the ticks the server held the CPU (NET_HUNG_CPU) or slept (NET_HUNG_IDLE) since its last reply; at either
+ * bound the kernel kills it, as a crash ends it: the epoch rises, every waiter gets -ENETDOWN, D11 starts it again at
+ * the next socket. Only its own time counts, never a wait for the CPU: a busy machine (higher priority programs, a
+ * stock A1200 under load) only makes the count slower, it never trips it. */
+#define NET_HUNG_CPU  1000u             /* 10 s of the server's own CPU time without a reply */
+#define NET_HUNG_IDLE 3000u             /* 30 s asleep without a reply while calls wait */
+static struct proc *net_srv;            /* the running server (sock_server_started), 0 when none */
+static u32 net_inflight, net_cpu, net_idle;
+static u8 net_hung;                     /* the watchdog ended it: 1 running, 2 asleep (sock_server_gone says so) */
+
+void sock_server_started(void)
+{
+    net_srv = current;
+    net_cpu = net_idle = 0;
+}
+
+void sock_tick(void)                    /* the level-2 interrupt, every tick: counts only */
+{
+    struct proc *n = net_srv;
+    if (!n || !net_inflight || n->killed)
+        return;
+    if (n == current)
+        net_cpu++;
+    else if (n->state == P_SLEEP || n->state == P_EV)
+        net_idle++;
+    if (net_cpu >= NET_HUNG_CPU || net_idle >= NET_HUNG_IDLE) {
+        net_hung = net_cpu >= NET_HUNG_CPU ? 1 : 2;
+        proc_kill(n);
+        proc_kill(n);                   /* twice: at once, also in the middle of a request (D11 5.6) */
+    }
+}
+
 static u32 sname(int i) { return (u32)i | (u32)ks[i].gen << 8; }
 
 /* the ksock a name gives, if it is one in use (live or pending), else 0 */
@@ -88,14 +123,27 @@ static long net_call(u32 type, u32 name, struct netreq *q, int ns, struct umsg *
     int port = port_find("net");
     if (port < 0)
         return -ENETDOWN;               /* no network service registered */
+    if (!ns && current->killed)
+        return -EINTR;                  /* a killed caller sends nothing more (its NET_CLOSEs still go) */
     memset(m, 0, sizeof *m);
     m->type = type;
     m->a[0] = name;
     m->a[1] = (u32)q;
     call_name[current - procs] = name;
+    u16 s = irq_save();
+    if (!net_inflight++)
+        net_cpu = net_idle = 0;         /* the watchdog counts from the first call in flight */
+    irq_restore(s);
+    current->msg_cancel = (u8)!ns;      /* a kill takes it back while it is queued (O9); NET_CLOSE always goes */
     long r = ipc_kcall(port, m, ns);
+    current->msg_cancel = 0;
+    s = irq_save();
+    net_inflight--;
+    irq_restore(s);
     call_name[current - procs] = 0;
-    return (m->kflags & UMSG_NETREPLY) ? r : -ENETDOWN;
+    if (m->kflags & UMSG_NETREPLY)
+        return r;
+    return r == -EINTR ? -EINTR : -ENETDOWN;    /* taken back by a kill (ipc_cancel), or the server is gone */
 }
 
 /* the blocking loop (rule 3): need is what the call waits for (0: it never waits); POLLERR and POLLHUP always end the
@@ -150,6 +198,12 @@ void sock_release(u32 i)
  * are woken (rule 10). Pending ones are decided by their reply's epoch */
 void sock_server_gone(void)
 {
+    if (net_hung)
+        kprintf("svc: net: %s (pid %d) answered nothing in %u s %s while calls waited: ended (audit O9)\n",
+                current->name, current->pid, (net_hung == 1 ? NET_HUNG_CPU : NET_HUNG_IDLE) / 100,
+                net_hung == 1 ? "of its own time" : "asleep");
+    net_hung = 0;
+    net_srv = 0;
     net_epoch++;
     for (int i = 0; i < NSOCK; i++) {
         struct ksock *k = &ks[i];
@@ -521,5 +575,6 @@ long netsrv_sys(u32 op, u32 a, u32 b)
             set_bits(call_new[ci], m->a[2] >> 16);
     }
     m->kflags |= UMSG_NETREPLY;
+    net_cpu = net_idle = 0;             /* an answer: the watchdog counts again from here */
     return ipc_reply(m, (s32)b);
 }

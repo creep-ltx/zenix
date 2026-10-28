@@ -78,7 +78,16 @@ Left open, each with a proposal:
   reply in `ipc_kcall`, and a kill does not end that wait. D11 restarts a server that ends, but not one that loops.
   Proposal (with D23's killable wait for a dead NAS, the same mechanism): a kill cancels a socket call still waiting
   for netd's reply, and a watchdog notices a netd that answers nothing for many seconds and restarts it (the epoch
-  rules already cover a restart).
+  rules already cover a restart). **Fixed (branch f13, 2026-10-28; D19 rule 13):** a kill takes back a socket call
+  still queued on the server (`ipc_cancel`; a call being served is never taken back, the server uses the caller's
+  memory in place), and the tick's watchdog kills a server that, while calls wait, ran 10 s of its own CPU time or
+  slept 30 s without a reply (only its own time counts, so a loaded machine never trips it); its end is a crash's.
+  Measured in FS-UAE first: netd's longest stretch without a reply while calls waited was 8 CPU ticks and 9 asleep
+  (netd-test, eth-test, bbs-test's flood, ssh-test). Kernel +912 bytes. Test: `tools/sock-test.sh` with socktestd's new
+  commands 5 (runs on between requests, as S22) and 6 (runs on inside a request): kill -9 ends a queued call in 8
+  ticks, ^C with status 130; the watchdog ends the server after about 11 s, the queued call is answered by the next
+  one, a killed caller inside the hung request ends with it, the log says so twice, the server comes back in epoch 4.
+  With the old kernel the script hung at the first kill.
 - **O8 Zmodem has no cap on files per session** (judged acceptable): a board can offer thousands of honest small
   files; the disk filling up ends it, as with any download the user lets run. A cap would be a new option (the
   feature halt).

@@ -169,6 +169,26 @@ void ipc_unqueue(struct port *p, struct umsg *m)
     m->next = 0;
 }
 
+/* audit O9: a kill takes back p's call (P_MSG, msg_cancel: a socket call) while its message is still queued on a
+ * running server: the server never saw it, so nothing of the caller's is in use; the call returns -EINTR and the kill
+ * ends the process at the end of its system call. A message being served is never taken back (the server reads and
+ * writes the caller's memory in place): the network watchdog bounds that wait (sock.c). From proc_kill, any context. */
+void ipc_cancel(struct proc *p)
+{
+    u16 s = irq_save();
+    struct umsg *m = p->wait_msg, *q;
+    struct port *pt = port_of(p->wait_port);
+    if (p->state == P_MSG && p->msg_cancel && m && m->state == MSG_QUEUED && pt && pt->op) {
+        for (q = pt->head; q && q != m; q = q->next)
+            ;
+        if (q) {
+            ipc_unqueue(pt, m);
+            ipc_finish(m, -EINTR);
+        }
+    }
+    irq_restore(s);
+}
+
 /* wait for the reply to m; a client woken to load or to watch for a held port does that first (svc.c) */
 long ipc_wait(struct umsg *m)
 {

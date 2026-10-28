@@ -1135,7 +1135,12 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   raised when the `net` server ends (svc.c calls `sock_server_gone` before its memory is freed); every socket of the
   old epoch is dead at once (POLLERR|POLLHUP, its waiters woken, every call -ENETDOWN, only `close` works) and a new
   socket is kept only if the server's reply carries the live epoch. The last close sends `NET_CLOSE` only while the
-  socket's epoch lives, as a no-start call (it never starts or waits for a server). `FIONBIO` with no value pointer
+  socket's epoch lives, as a no-start call (it never starts or waits for a server). **A stuck server** (audit O9, D19
+  rule 13): a kill (kill -9, ^C) takes back a socket call whose message is still queued on the server (`ipc_cancel`:
+  the server never saw it; -EINTR, then the process ends); a message being served is never taken back. The tick's
+  watchdog (`sock_tick`) counts, while calls are in flight, the server's own CPU ticks and its ticks asleep since its
+  last reply; at 10 s of CPU or 30 s asleep the kernel kills it as a crash ends it (the log names it, the epoch
+  rises, D11 starts it again; queued calls go to the new server). `FIONBIO` with no value pointer
   answers the file's `O_NONBLOCK` (1 or 0: libz's `fcntl(F_GETFL)`). The test server `socktestd` serves `net` in
   `tools/sock-test.sh` (registered over netd). 3,987 bytes of code at -Os, 1 KB of data; `tools/sock-host-test.sh` runs
   the rules' interleavings on the PC, `tools/sock-test.sh` the calls in FS-UAE.

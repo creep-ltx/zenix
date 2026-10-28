@@ -295,6 +295,24 @@ too ("reset by the peer") besides D11's "the server is gone": on a socket the se
    registers `net` again and says so. D11's limits are not frozen, so a later timed retry for `net` alone stays
    possible; a remote packet that crashes netd five times is otherwise a remote "network off" until root acts (9.2).
 
+13. **A stuck netd** (audit 2026-10-28 O9, added 2026-10-28): rule 2 makes any wait for netd's reply short, so a
+   netd that gives no reply for long while calls wait is broken (S22 was a loop inside lwIP). (a) A kill (kill -9,
+   ^C's default action) takes back a call whose message is still **queued** on netd (`ipc_cancel`, from `proc_kill`):
+   netd never saw it, nothing of the caller's is in use; the call returns -EINTR and the process ends. A message netd
+   is **serving** is never taken back (netd reads and writes the caller's memory in place; without an MMU that memory
+   must live until netd is done or dead), and `NET_CLOSE` is never taken back (netd must forget the socket). (b) The
+   watchdog: the tick counts, while any call is in flight, the ticks netd itself held the CPU and the ticks it slept
+   (P_SLEEP, P_EV: a queued message wakes it, so sleeping is a bug) since its last `NETSRV_REPLY`. At 1,000 CPU ticks
+   (10 s) or 3,000 asleep (30 s) the kernel kills netd twice (at once, also inside a request), and its end is a crash's:
+   the epoch rises, served calls fail with -ENETDOWN, queued ones wait for the next netd (rule 9), D11 counts the end
+   and starts netd at the next socket. The log: "svc: net: netd (pid N) answered nothing in 10 s of its own time
+   while calls waited: ended (audit O9)". Only netd's own time counts, never a wait for the CPU, so a loaded machine
+   (higher-priority programs, the stock A1200 busy) makes the count slower and never trips it. *Measured* in FS-UAE
+   (netd-test, eth-test, bbs-test with its flood, ssh-test, 2026-10-28): netd's longest stretch without a reply while
+   calls waited was 8 ticks of CPU and 9 ticks asleep, so the bounds leave a margin of more than 100 (a real 68020
+   without fast RAM is a few times slower: still far inside). A netd stuck in a message call of its own (a hung
+   filesystem) is not counted and not ended; D11's rules keep netd's own calls short (6.5).
+
 The host model of these rules (8.1) runs every interleaving of a reply, a push, a waiter and netd's end.
 
 ### 4.4 libz

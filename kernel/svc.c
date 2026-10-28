@@ -337,6 +337,8 @@ int svc_handover(int i)
     s->state = SV_RUNNING;
     s->served = 1;
     vfs_server_started(p->name);                /* D13: its mounts' code segments are not reused */
+    if (eq(p->name, "net"))
+        sock_server_started();                  /* the network watchdog watches this one (audit O9) */
     if (eq(p->name, "fs"))
         klog_mirror_off();                      /* the root is up: from here the screen belongs to the programs */
     wake(s->watcher);
