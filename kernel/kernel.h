@@ -568,7 +568,9 @@ int port_slot(const char *name);                /* the slot of a port by name, -
 int port_find(const char *name);
 struct proc *port_owner(int port);             /* the process that owns a port, 0 if none */
 long ipc_call(int port, struct umsg *m);       /* SYS_call: kflags 0 */
-long ipc_kcall(int port, struct umsg *m, int ns);   /* the kernel's own requests (vfs.c): kflags UMSG_KERNEL; ns: SVC_NS_* */
+/* the kernel's own requests (vfs.c, sock.c, drv.c): kflags UMSG_KERNEL | KFL (0, or UMSG_LINKS from vfs.c, DESIGN
+ * D26); ns: SVC_NS_*. D23's UMSG_CANCEL is ORed in by call() itself, never passed here (agreed in D26 step 0) */
+long ipc_kcall(int port, struct umsg *m, int ns, u16 kfl);
 long ipc_wait(struct umsg *m);                 /* the caller's m is queued: wait for the reply (and take a D11 role) */
 void ipc_enqueue(struct port *p, struct umsg *m, int front);
 void ipc_unqueue(struct port *p, struct umsg *m);
@@ -577,6 +579,7 @@ void ipc_finish(struct umsg *m, s32 result);
 int ipc_serving(int pid);                      /* is pid serving a request now? */
 #define UMSG_KERNEL 1
 #define UMSG_NETREPLY 2                 /* D19: answered by the network server's NETSRV_REPLY (sock.c), internal */
+/* 4 UMSG_CANCEL (D23, planned); 8 UMSG_LINKS (D26) in fsproto.h, where the servers see it */
 struct proc *ipc_client(struct umsg *m);       /* the client of m if it is in flight and served by current, else 0 */
 struct umsg *ipc_recv(int port, int wait);
 struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port);

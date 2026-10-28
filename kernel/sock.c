@@ -135,7 +135,7 @@ static long net_call(u32 type, u32 name, struct netreq *q, int ns, struct umsg *
         net_cpu = net_idle = 0;         /* the watchdog counts from the first call in flight */
     irq_restore(s);
     current->msg_cancel = (u8)!ns;      /* a kill takes it back while it is queued (O9); NET_CLOSE always goes */
-    long r = ipc_kcall(port, m, ns);
+    long r = ipc_kcall(port, m, ns, 0);
     current->msg_cancel = 0;
     s = irq_save();
     net_inflight--;

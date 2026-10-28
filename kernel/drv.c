@@ -158,7 +158,7 @@ static long forward(u32 type, u32 blk, u32 size, u32 first)
     m.a[0] = (u32)current->pid;
     m.a[1] = blk;
     m.a[2] = size;
-    long r = ipc_kcall(port, &m, SVC_NS_SKIP);
+    long r = ipc_kcall(port, &m, SVC_NS_SKIP, 0);
     return (m.kflags & UMSG_NETREPLY) ? r : -ECONNRESET;
 }
 

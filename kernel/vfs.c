@@ -232,7 +232,7 @@ __attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 
      * must never load a program; FS_SYNC and FS_QUIT skip a server that is not running (it has nothing to write: an
      * ext2 one wrote through, a dead ZenixFS one's uncommitted changes are gone, a starting one wrote nothing yet) */
     int ns = type == FS_CLOSE ? SVC_NS_CLOSE : type == FS_SYNC || type == FS_QUIT ? SVC_NS_SKIP : 0;
-    long r = ipc_kcall(mt->port, &m, ns);
+    long r = ipc_kcall(mt->port, &m, ns, 0);
     if (r == -ECONNRESET) {             /* the server is gone (D11), or its port closed or its slot reused (G1, A11) */
         mt->port = -1;                  /* look it up again next time */
         r = ns == SVC_NS_SKIP ? 0 : -EIO;   /* programs see an I/O error, as before; a sync or quit skipped a server

@@ -136,6 +136,11 @@ numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*
 `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
 zup's "needs a check" mark), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
+`struct umsg`'s `kflags` bits: 1 `UMSG_KERNEL`, 2 `UMSG_NETREPLY` (internal), 4 `UMSG_CANCEL` (D23, planned), 8
+`UMSG_LINKS` (D26, branch d26, 2026-10-28: only the kernel sets it, through `ipc_kcall`'s kflags argument; `call()`
+ORs D23's `UMSG_CANCEL` in itself). Answers in `kernel/fsproto.h`: a value or -errno; -1024 .. -1279 reserved (no
+errno goes there, `kernel/errno.h`), of which `FS_LINKED` + `FSL_*` (`FSL_A1` 1, `FSL_LAST` 2: -1024 .. -1027) for a
+sender that set `UMSG_LINKS` (D26, branch d26, 2026-10-28).
 Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main; on a socket also "reset by the peer", D19); D19's
 network numbers (Linux's, main, 2026-10-27): `ENOTSOCK` 88, `EDESTADDRREQ` 89, `EMSGSIZE` 90, `EPROTOTYPE` 91,
 `ENOPROTOOPT` 92, `EPROTONOSUPPORT` 93, `EAFNOSUPPORT` 97, `EADDRINUSE` 98, `EADDRNOTAVAIL` 99, `ENETDOWN` 100,
@@ -227,6 +232,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - **`SYS_klog`'s `KLOG_OLDEST` (audit F10, branch m4, 2026-10-27):** bit 0x40000000 in the offset answers the offset
   of the oldest character the ring holds (0 before a wrap; with `KLOG_PREV` the previous boot's); offsets below it read
   from it, as always.
+- **D26 (symbolic links across mounts, 2026-10-28):** `UMSG_LINKS` 8 and its meaning; the `FS_LINKED` answer
+  -(1024 + bits), `FSL_A1` 1, `FSL_LAST` 2, the reserved -1024 .. -1279; TEXT's form (absolute T + rest, or the link's
+  directory without its leading `/` + T + rest; NUL-terminated, at most `FS_PATHMAX`); the table of which argument
+  each request may rewrite (`fsl_ok`, `kernel/fsproto.h`). A server without the bit follows links as before.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 
