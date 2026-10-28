@@ -6,13 +6,16 @@
  *   write INO OFF TEXT      FS_WRITE ("TEXT" may be @N: N bytes of a pattern)
  *   read INO OFF N          FS_READ, prints what came back
  *   fstat INO | stat PATH | lstat PATH
- *   unlink P | rmdir P | mkdir P | symlink TARGET P | link OLD NEW | rename OLD NEW | readlink P | chmod P MODE
+ *   chdir P | unlink P | rmdir P | mkdir P | symlink TARGET P | link OLD NEW | rename OLD NEW | readlink P | chmod P MODE
  *   ls PATH                 every entry (FS_READDIR)
  *   sync | quit             FS_SYNC | FS_QUIT
  *   writes                  the sectors written to the image so far (hostdisk_writes)
  *   cut N                   a power cut: only N more sectors reach the image, every later write fails
  *   as UID GID              later requests come from this user
  *   raw on|off              later requests come as a user's own SYS_call (no UMSG_KERNEL), not from the kernel
+ *   links on|off            later requests carry UMSG_LINKS (DESIGN D26): an FS_LINKED answer prints
+ *                           "CMD -> -102N a0|a1 TEXT" with the rewritten argument; the paths are copied into
+ *                           FS_PATHMAX buffers of their own first (as the kernel's), always
  *   utimes P T | chown P UID GID     FS_UTIMES (T "now" = FS_UTIME_NOW) | FS_CHOWN
  *   state                   the clean mark (DESIGN D17): the state's bit 0 on the image, and fsd's marked, need, hold,
  *                           orphans and the block writes it made outside the mark
@@ -27,7 +30,7 @@
 int sys_svc_self(void) { return 1; }                      /* a first start: no restart rules */
 int sys_svc_opens(u32 *ino, u32 bytes) { (void)ino; (void)bytes; return 0; }
 
-static unsigned cur_uid, cur_gid, raw;
+static unsigned cur_uid, cur_gid, raw, links;
 static int opened[100], nopened;
 static u32 num(const char *s) { return s && s[0] == '%' && atoi(s + 1) > 0 && atoi(s + 1) <= nopened ? (u32)opened[atoi(s + 1) - 1] : (u32)atoi(s ? s : "0"); }
 
@@ -38,7 +41,7 @@ static int req(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
     m.type = type; m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
     m.uid = (unsigned short)cur_uid; m.gid = (unsigned short)cur_gid; m.umask = 022;
     m.from = 7;
-    m.kflags = raw ? 0 : UMSG_KERNEL;
+    m.kflags = raw ? 0 : UMSG_KERNEL | (links ? UMSG_LINKS : 0);
     return handle(&m);
 }
 
@@ -75,6 +78,12 @@ int main(void)
             continue;
         }
         if (!strcmp(cmd, "raw")) { raw = a && !strcmp(a, "on"); printf("raw -> %u\n", raw); continue; }
+        if (!strcmp(cmd, "links")) { links = a && !strcmp(a, "on"); printf("links -> %u\n", links); continue; }
+        static char pa[FS_PATHMAX], pb[FS_PATHMAX];      /* the kernel's buffers: a server may write TEXT there */
+        char *a0 = a, *b0 = b;
+        if (a && strlen(a) < sizeof pa) { strcpy(pa, a); a = pa; }
+        if (b && strlen(b) < sizeof pb && strcmp(cmd, "chmod") && strcmp(cmd, "utimes") && strcmp(cmd, "chown") &&
+            strcmp(cmd, "open") && strcmp(cmd, "write") && strcmp(cmd, "read") && strcmp(cmd, "as")) { strcpy(pb, b); b = pb; }
         if (!strcmp(cmd, "as")) { cur_uid = (unsigned)atoi(a); cur_gid = (unsigned)atoi(b); printf("as -> %u %u\n", cur_uid, cur_gid); continue; }
         if (!strcmp(cmd, "open")) { r = req(FS_OPEN, (u32)a, 2, flags_of(b ? b : "r"), (u32)&st); if (r > 0 && nopened < 100) opened[nopened++] = r; }
         else if (!strcmp(cmd, "close")) r = req(FS_CLOSE, num(a), 0, 0, 0);
@@ -93,6 +102,7 @@ int main(void)
                                       : req(!strcmp(cmd, "stat") ? FS_STAT : FS_LSTAT, (u32)a, 2, (u32)&st, 0);
             if (r == 0) { printf("%s -> 0 ino %u mode %o size %u links %u uid %u gid %u mtime %u\n", cmd, st.ino, st.mode, st.size, st.links, st.uid, st.gid, st.mtime); continue; }
         }
+        else if (!strcmp(cmd, "chdir")) r = req(FS_CHDIR, (u32)a, 2, 0, 0);
         else if (!strcmp(cmd, "unlink")) r = req(FS_UNLINK, (u32)a, 2, 0, 0);
         else if (!strcmp(cmd, "rmdir")) r = req(FS_RMDIR, (u32)a, 2, 0, 0);
         else if (!strcmp(cmd, "mkdir")) r = req(FS_MKDIR, (u32)a, 2, 0, 0);
@@ -135,6 +145,12 @@ int main(void)
             continue;
         }
         else { printf("%s -> unknown command\n", cmd); continue; }
+        if (fsl_is(r)) {                                  /* D26: which argument was rewritten, and to what */
+            int one = (-r - FS_LINKED) & FSL_A1;
+            const char *now = one ? b : a;
+            printf("%s -> %d %s %s%s\n", cmd, r, one ? "a1" : "a0", now, (one ? a : b) && strcmp(one ? a : b, one ? a0 : b0) ? " (other changed)" : "");
+            continue;
+        }
         printf("%s -> %d\n", cmd, r);
     }
     if (fsd_unmarked_writes) printf("unmarked-writes %lu\n", fsd_unmarked_writes);

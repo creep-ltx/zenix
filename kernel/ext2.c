@@ -564,8 +564,17 @@ int ext2_access(const struct inode *in, int want)       /* want: FSP_R, FSP_W, F
     return ok;
 }
 
+/* DESIGN D26: with ext2_stoplinks set (fsd, for a request with UMSG_LINKS) a walk of an absolute path follows no
+ * symbolic link: at the first one it would follow it answers -FS_LINKED and leaves where (the link's name at
+ * [ext2_lk_s, ext2_lk_e) of the path walked, ext2_lk_path, and its inode) for the server,
+ * which builds the continuation from the request's own path (kernel/fsproto.h) */
+int ext2_stoplinks;
+const char *ext2_lk_path;
+u32 ext2_lk_s, ext2_lk_e, ext2_lk_ino;
+
 int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int follow_last)
 {
+    const char *start = path;
     u32 cur = (path[0] == '/') ? 2 : cwd;
     struct inode in;
     int r;
@@ -597,6 +606,11 @@ int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int f
         while (*rest == '/')
             rest++;
         if (S_ISLNK(nin.mode) && (*rest || follow_last)) {
+            if (ext2_stoplinks && start[0] == '/') {
+                ext2_lk_path = start; ext2_lk_s = (u32)(path - start); ext2_lk_e = (u32)(e - start);
+                ext2_lk_ino = next;
+                return -FS_LINKED;
+            }
             char target[256];
             if (nin.size > 255)
                 return -ENAMETOOLONG;           /* audit F15: never follow a prefix of a longer target */
@@ -1244,8 +1258,11 @@ int ext2_namei_parent(const char *path, u32 cwd, struct inode *dir, char *name)
         p[slash] = 0;
         if (slash > 1 && p[slash - 1] == '/')
             p[slash - 1] = 0;
-        if ((r = ext2_namei(p[0] ? p : "/", cwd, dir, 0)))
+        if ((r = ext2_namei(p[0] ? p : "/", cwd, dir, 0))) {
+            if (r == -FS_LINKED)
+                ext2_lk_path = path;    /* p is a copy of PATH's start: the same offsets in the original */
             return r;
+        }
     }
     return S_ISDIR(dir->mode) ? 0 : -ENOTDIR;
 }

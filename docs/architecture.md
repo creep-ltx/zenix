@@ -1009,6 +1009,20 @@ the disk or a damaged volume -EIO, any permission refusal -EACCES, an unknown re
 symbolic link that points nowhere is -ENOENT in both (no second entry of that name; Linux would create the
 target). What they still do differently, by capability: ext2 cannot move a directory to another parent (-EXDEV, so
 `mv` copies it) nor rename over an existing directory (-EISDIR); ZenixFS does both.
+**Symbolic links for the kernel (DESIGN D26, `FS_LINKED`, kernel/fsproto.h).** A request whose kflags carry
+`UMSG_LINKS` (only the kernel sets it, only with absolute, normalised paths in its own `FS_PATHMAX` buffers) is walked
+without following any symbolic link: at the first one the walk would follow (in the middle of the path, or the last
+name of `FS_OPEN`, `FS_STAT`, `FS_CHDIR`, `FS_CHMOD`, `FS_CHOWN`, `FS_UTIMES` and `FS_LINK`'s existing name) the
+server writes the continuation TEXT over that path argument and answers -(1024 + bits): `FSL_A1` when it was a[1]
+(`FS_RENAME` and `FS_LINK`'s new name, always `FS_SYMLINK`'s path; never `FS_SYMLINK`'s target text), `FSL_LAST` when
+an `FS_OPEN`'s link was the original path's last name. TEXT is the target plus the rest of the path; a relative target
+is put after the link's directory inside the volume (without its leading `/`), and the server does not normalise it.
+An empty target is -ENOENT, a NUL in one -EIO, a target over 255 bytes or a TEXT over 159 -ENAMETOOLONG. The decision
+comes first: the ext2 server (fsd) walks a changing request's paths before its read-only refusal and its clean mark
+(D17), so a `chmod` through a link out of a read-only volume is bounced, not refused, and a bounced request writes
+nothing; a permission failure met before the link stays -EACCES, and the -EACCES mapping never touches the answer.
+Without the bit, or for a relative path, every server follows links inside its own volume as before (an old kernel, a
+root program's raw request). Verified by the host tests (`tools/ext2-host-test.sh`).
 
 ## 10. The filesystem
 
