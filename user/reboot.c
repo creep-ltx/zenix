@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "libz.h"
 #include "randseed.h"
+#include "clockfile.h"
 /* reboot [amigaos|zenix]: save the disks and reset the Amiga (root only). With a system named - or started as
  * "bootamigaos" - the boot menu (boot/bootmenu.c) starts that system at once instead of showing the menu. First a
  * new random seed goes into /var/lib/random-seed (DESIGN D19 9.3, randseed.h): what this session gathered is in the
- * next start's pool. */
+ * next start's pool; and a trusted clock (the battery clock or sntp's guarded answer this boot) raises the
+ * certificate time's floor in /var/lib/clock (DESIGN D21 8.3; a hand-set time never does). */
 int main(int argc, char **argv)
 {
     const char *me = argv[0], *p;
@@ -28,8 +30,13 @@ int main(int argc, char **argv)
             return 2;
         }
     }
-    if (sys_geteuid() == 0)
+    if (sys_geteuid() == 0) {
         seed_store(seed_pool_ready() ? SEED_F_SEEDED : 0, 0);     /* a read-only root: nothing written, no harm */
+        int b = sys_clockbits();
+        uint32_t now = sys_time(), file;
+        if (b > 0 && (b & (CLOCK_RTC | CLOCK_NET)) && (clockfile_read(&file) < 0 || now > file))
+            clockfile_write(now);                                   /* the floor only rises; a failure is no harm */
+    }
     int r = sys_reboot(note);
     const char *t = zstrerror(r);
     fprintf(2, "reboot: %s\n", r == -EPERM ? "only root may reboot" : t ? t : "failed");

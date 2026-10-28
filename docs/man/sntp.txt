@@ -50,8 +50,10 @@ NOTES
     Plain SNTP: the answer is not signed, so a machine on the path can
     lie about the time (the floor's rules limit what that does to
     certificate checks). One answer, not an average; no slewing, no
-    daemon. Until the kernel can tell sntp whether a battery clock was
-    read at boot, sntp takes the 400-day rule.
+    daemon. Without a battery clock read at boot, sntp takes the 400-day
+    rule. Only an answer that raises the floor marks the clock trusted
+    for wget(1) and reboot(8); any other answer it sets clears the mark.
+    ifup -a starts sntp at boot when /etc/sntp exists.
 
 SEE ALSO
     date(1), wget(1), ifconfig(8)

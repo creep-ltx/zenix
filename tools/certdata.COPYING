@@ -1,0 +1,9 @@
+/etc/ssl/anchors, the root certificates Zenix trusts for TLS servers, is made by
+tools/mkanchors.py from Mozilla's certdata.txt (NSS lib/ckfw/builtins/certdata.txt).
+
+That file is subject to the terms of the Mozilla Public License, v. 2.0. If a
+copy of the MPL was not distributed with this file, you can obtain one at
+https://mozilla.org/MPL/2.0/.
+
+The exact certdata.txt used, its source form, is in the Zenix source tree as
+tools/certdata.

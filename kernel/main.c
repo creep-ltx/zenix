@@ -451,7 +451,7 @@ void kmain(struct bootinfo *bi)
     klog_show_prev();                           /* how the previous boot ended (A12), on the screen if it is up */
     diag_stage(DIAG_DISPLAY_UP, 0);
 
-    { u32 t = rtc_read(); if (t) wclock_set(&wclock, t); }      /* interrupts are still off here */
+    { u32 t = rtc_read(); if (t) { wclock_set(&wclock, t); wclock.trust = CLOCK_RTC; } }  /* interrupts are still off here */
     if (blk_init() && !bi->ram_size)
         panic("no disk and no ramdisk");
     proc_init();

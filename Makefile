@@ -453,7 +453,14 @@ FORCE:
 # TLS glue (crypto/zc/zc_tls.c), a plain program (not pure: D21 3.5); sntp (D21 8.3, docs/man/sntp.txt) over
 # net/sntp/ and the clock file's code (crypto/zc/zc_clock.c). The cores are system-call free (tools/host/tls-test.sh)
 WGETOBJS := $(BUILD)/cr/user/wget/plan.o $(BUILD)/cr/net/http/http.o
-SNTPOBJS := $(BUILD)/cr/net/sntp/sntp.o
+SNTPOBJS := $(BUILD)/cr/net/sntp/sntp.o $(BUILD)/clockfile.uo
+# /var/lib/clock's reading and writing, one copy for sntp and reboot (reboot raises the floor from a trusted clock)
+CLOCKOBJS := $(BUILD)/clockfile.uo $(BUILD)/cr/crypto/zc/zc_clock.o
+$(BUILD)/clockfile.uo: user/clockfile.c user/clockfile.h crypto/zc/zc_clock.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/reboot.uo $(BUILD)/sntp.uo: user/clockfile.h
+$(BUILD)/reboot.uelf: $(BUILD)/reboot.uo $(CLOCKOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/reboot.uo $(CLOCKOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/cr/user/wget/plan.o: user/wget/wget.h net/http/http.h
 $(BUILD)/cr/net/http/http.o: net/http/http.h
 $(BUILD)/cr/net/sntp/sntp.o: net/sntp/sntp.h
@@ -531,9 +538,12 @@ $(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
 packages: $(BUILD)/pkg/list
 # the PC font (DESIGN D20 4.2: telnet's PC boards load it with CON_FONT): from Linux's font_8x8.c, on the full root
 # images and in the base package as /usr/share/consolefonts/cp437-8x8.psf with its notice (tools/font_8x8.COPYING)
+# the root certificates (DESIGN D21 8.1): /etc/ssl/anchors on the full images and in the base package
+$(BUILD)/anchors: tools/certdata tools/mkanchors.py | $(BUILD)
+	python3 tools/mkanchors.py $@ >/dev/null
 $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 	python3 tools/mkpsf.py tools/font_8x8.c $@
-$(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+$(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the bundle: the kernel and every package (copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
 bundle: $(BUILD)/zenix-update.zup
@@ -542,7 +552,7 @@ $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 1,024 inodes (512 ran out with the
 # network's files in D19 step 8: cmds2-test makes 150 files)
-$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
 	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 8M 1024
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
@@ -567,7 +577,7 @@ $(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkca
 	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
 # the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
 # ext2 root with every program (written to a card by tools/write-card.sh)
-$(BUILD)/root-card.img: $(BUILD)/cp437-8x8.psf $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+$(BUILD)/root-card.img: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
 	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 512M 8192
 $(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
 	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img

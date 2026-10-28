@@ -50,18 +50,22 @@ cd /dl
 echo ==w10; wget -O u1 https://unknown.test/small.txt; echo w10=$?
 echo ==w11; wget -O u2 https://wrong.test/small.txt; echo w11=$?
 echo ==w12; wget -O u3 https://local.test/small.txt; echo w12=$?
-mkdir /etc/ssl/local; cp /tests/owner.pem /etc/ssl/local/owner.pem
+mkdir -p /etc/ssl/local; cp /tests/owner.pem /etc/ssl/local/owner.pem
 echo ==w13; wget -O u4 https://local.test/small.txt; echo w13=$?; sha256sum u4
 echo ==w14; wget https://rsa.test/missing; echo w14=$?; ls missing
 echo ==w15; wget -q -O q.txt http://rsa.test/small.txt; echo w15=$?
 echo 'server 10.0.2.2' > /etc/sntp
 echo ==s1; wget -q -O /dev/null http://10.0.2.2:8080/mode/good; sntp; echo s1=$?; date +%s; cat /var/lib/clock
+echo ==t1; wget -O t1.txt https://rsa.test/small.txt; echo t1=$?
 echo ==s2; wget -q -O /dev/null http://10.0.2.2:8080/mode/liar-future; sntp; echo s2=$?; date +%s; cat /var/lib/clock
+echo ==t2; wget -O t2.txt https://rsa.test/small.txt; echo t2=$?
 echo ==s3; wget -q -O /dev/null http://10.0.2.2:8080/mode/liar-past; sntp; echo s3=$?; date +%s; cat /var/lib/clock
 echo ==s4; wget -q -O /dev/null http://10.0.2.2:8080/mode/kod; sntp; echo s4=$?
 echo ==s5; sntp -r; echo s5=$?; cat /var/lib/clock
 echo ==s6; wget -q -O /dev/null http://10.0.2.2:8080/mode/good; sntp; echo s6=$?; date +%s; cat /var/lib/clock
 echo ==s7; sntp -x; echo s7=$?
+echo ==t3; date -s '2030-01-01 00:00:00' >/dev/null; wget -O t3.txt https://rsa.test/small.txt; echo t3=$?
+echo ==t4; sntp >/dev/null; sntp -r >/dev/null; echo t4=$?; cat /var/lib/clock
 echo ==mem; free; ps
 echo ==end
 dmesg > /tmp/wg-k.txt
@@ -72,6 +76,9 @@ wait zenix:/# 120
 sleep 1
 send sh /tests/wg.sh > /tmp/wg.out 2>&1; echo wg-do""ne\r
 wait wg-done 2400
+send reboot\r
+wait klog: boot 2 120
+wait zenix:/# 120
 stop
 EOS
 cat > $OUT/inner.sh <<'EOS'
@@ -190,10 +197,22 @@ check(st("s4") == 1 and "kiss of death DENY" in w, "sntp: a kiss of death obeyed
 w = part_of("s5")
 bdate = int(re.search(r"ZENIX_BUILD_DATE (\d+)", rd(BD + "/builddate.h").decode()).group(1))
 check(st("s5") == 0 and clock_after("s5") == bdate and "reset to the build date" in w, "sntp -r: the floor back at the build date", w)
-w = part_of("s6"); g = answered("good")
+w = part_of("s6"); g = answered("good", 1)
 check(st("s6") == 0 and g and date_after("s6") and abs(date_after("s6") - g) <= 20 and clock_after("s6") and
       abs(clock_after("s6") - g) <= 5, "sntp: the clock set back from the true server, the floor raised again", w)
 check(st("s7") == 2, "sntp: a wrong option: exit 2", part_of("s7"))
+nots = "the clock is not set: certificate dates checked only against"
+w = part_of("t1")
+check(st("t1") == 0 and nots not in w, "the kernel's mark (SYS_ticks 2): after sntp's guarded answer wget trusts the clock", w)
+w = part_of("t2")
+check(st("t2") == 0 and nots in w, "the liar's time (outside the guard) clears the mark: wget trusts the clock no more", w)
+w = part_of("t3")
+check(st("t3") == 0 and nots in w, "a hand-set time (date -s) clears the mark", w)
+w = part_of("t4")
+fin = re.search(r"^zenix-clock 1 (\d+)$", rd(out + "/clock.final").decode(errors="replace"), re.M)
+check(st("t4") == 0 and clock_after("t4") == bdate and fin and g and abs(int(fin.group(1)) - g) <= 600,
+      "reboot raises the floor from a trusted clock (the floor at the build date before, the true time after)",
+      (w, rd(out + "/clock.final"), g))
 k = rd(out + "/k.out").decode(errors="replace")
 check("==end" in log and "[kernel]" not in k, "the script ran to its end, no process faulted", k[-300:])
 m = re.search(r"^==mem\n(.*?)(?=^==)", log, re.S | re.M)

@@ -123,6 +123,20 @@ static const char *why(int e)
     return zstrerror(e);
 }
 
+/* ifup -a (root, as init does at boot): the auto interfaces are up, so set the clock from the network (DESIGN D21
+ * 8.3) if /etc/sntp names servers: sntp runs on its own (it retries for 10 s while an address is still coming from
+ * DHCP), never waited for; its report goes nowhere, its errors to ifup's standard error */
+static void start_sntp(void)
+{
+    static char *sa[] = { "/bin/sntp", 0 };
+    struct ustat st;
+    int io[3] = { 0, -1, 2 };
+    if (sys_geteuid() != 0 || sys_stat("/etc/sntp", &st) < 0 || sys_stat("/bin/sntp", &st) < 0) return;
+    if ((io[1] = sys_open("/dev/null", O_WRONLY)) < 0) return;
+    sys_spawn("/bin/sntp", sa, io);
+    sys_close(io[1]);
+}
+
 /* ifup / ifdown [-a | IFACE...] */
 static int updown(int argc, char **argv, int up)
 {
@@ -138,6 +152,7 @@ static int updown(int argc, char **argv, int up)
     if (all) {
         int r = ifset(s, "", up ? NETIFREQ_UP : NETIFREQ_DOWN, 0, 0);
         if (r < 0) { fprintf(2, "%s -a: %s\n", prog, why(r)); bad = 1; }
+        else if (up) start_sntp();
     }
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-') continue;

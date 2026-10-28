@@ -428,8 +428,10 @@ void syscall_c(u32 *rb)
         break;
     case SYS_settime: {                 /* root only */
         if (current->uid != 0) { r = -EACCES; break; }
+        if (a2 > 1) { r = -EINVAL; break; }     /* a2 (0 for every older caller): 1 = from a checked source (D21 8.3) */
         u16 s = irq_save();             /* the tick may not count a second between the read and the write */
         wclock_set(&wclock, a1);
+        wclock.trust = a2 ? (u8)(wclock.trust | CLOCK_NET) : 0;    /* a hand-set time (date -s) is trusted by no one */
         irq_restore(s);
         r = 0;
         break;
@@ -558,8 +560,9 @@ void syscall_c(u32 *rb)
             }
         break;
     case SYS_ticks:                     /* a1 0: the 100 Hz tick count (wraps after 497 days); 1: whole seconds since boot
-                                         * (clock.h's own count, wraps after 136 years; audit 2026-10-26 F9) */
-        r = a1 == 0 ? (s32)ticks : a1 == 1 ? (s32)wclock.secs : -EINVAL;
+                                         * (clock.h's own count, wraps after 136 years; audit 2026-10-26 F9); 2: who set
+                                         * the time this boot, the CLOCK_* bits (D21 8.3) */
+        r = a1 == 0 ? (s32)ticks : a1 == 1 ? (s32)wclock.secs : a1 == 2 ? (s32)wclock.trust : -EINVAL;
         break;
     case SYS_procinfo:
         if ((a1 < NPROC || ((r = -EINVAL), 0)) && UOKS(n, a2, a3, UPROC_FIRST, sizeof(struct uproc))) {

@@ -32,12 +32,12 @@ static void say(const char *fmt, ...)
 }
 
 /* ---- the clock (D21 8.3) ---- */
-/* Is the clock trusted this boot (the battery clock read at boot, or sntp's guarded answer)? The kernel has no way to
- * say yet (the main line's proposal: SYS_ticks argument 2's CLOCK_RTC and CLOCK_NET bits); until it has, never: the
+/* Is the clock trusted this boot (the battery clock read at boot, or sntp's guarded answer: SYS_ticks 2)? If not, the
  * certificates' "not after" is judged against the floor and "not before" skipped (zc_clock.h). */
 static int clock_trusted(void)
 {
-    return 0;
+    int b = sys_clockbits();
+    return b > 0 && (b & (CLOCK_RTC | CLOCK_NET));
 }
 
 /* the floor: the newer of the build date (the commit's, builddate.h) and /var/lib/clock */
@@ -599,6 +599,10 @@ int main(int argc, char **argv)
     quiet = o.quiet;
     C.fd = -1;
     signal(SIGPIPE, SIG_IGN);
+    int pr = getpriority(PRIO_PROCESS, 0);      /* one level lower, as ssh: the handshake's arithmetic takes up to a
+                                                 * minute on a 68020, netd keeps up, other consoles stay snappy */
+    if (pr < 19)
+        setpriority(PRIO_PROCESS, 0, pr + 1);
     clk.trusted = clock_trusted();
     clk.floor = clock_floor();
     for (i = 0; i < o.nurl; i++)

@@ -34,7 +34,10 @@ DESCRIPTION
                         is up, until netd starts again; connections on
                         the old address end
     ifup -a             brings up every interface with an "auto" line
-                        (init(8) does this at boot, without waiting)
+                        (init(8) does this at boot, without waiting);
+                        as root, then starts sntp(8) on its own (not
+                        waited for, its report thrown away) when
+                        /etc/sntp exists
     ifdown -a           takes down every interface but the loopback
 
     ifup reads /etc/network/interfaces, /etc/resolv.conf and /etc/hosts
