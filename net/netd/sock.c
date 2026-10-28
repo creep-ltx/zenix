@@ -22,6 +22,8 @@ struct nsock {
     u16_t idx, gen;
     unsigned char kind, tstate;
     unsigned char eof, shut_rd, shut_wr, wblocked, pending, nodelay, broadcast;
+    unsigned char linger_on;            /* SO_LINGER (D23 step 3): with linger 0 the close is an abort (a reset) */
+    unsigned short linger;
     unsigned uid;
     int err;                            /* the error SO_ERROR (and the next call) reports, positive */
     struct tcp_pcb *tcp;
@@ -754,6 +756,14 @@ int netd_getsockopt(unsigned idx, unsigned gen, int level, int opt, void *val, u
                                      s->udp ? ip_get_option(s->udp, SOF_REUSEADDR) != 0 : 0);
         case NETD_SO_KEEPALIVE: return put_int(val, len, s->tcp ? ip_get_option(s->tcp, SOF_KEEPALIVE) != 0 : 0);
         case NETD_SO_BROADCAST: return put_int(val, len, s->broadcast);
+        case NETD_SO_LINGER: {
+            int l[2];
+            if (!val || !len || *len < 8) return -EINVAL;
+            l[0] = s->linger_on; l[1] = s->linger;
+            memcpy(val, l, 8);
+            *len = 8;
+            return 0;
+        }
         case NETD_SO_RCVBUF: return put_int(val, len, s->kind == K_TCP ? netd_tcp_wnd : (int)netd_lim.udp_rxq_bytes);
         case NETD_SO_SNDBUF: return put_int(val, len, s->kind == K_TCP ? netd_tcp_snd_buf : 65535);
         }
@@ -780,6 +790,15 @@ int netd_setsockopt(unsigned idx, unsigned gen, int level, int opt, const void *
             if (v) ip_set_option(s->tcp, SOF_KEEPALIVE); else ip_reset_option(s->tcp, SOF_KEEPALIVE);
             return 0;
         case NETD_SO_BROADCAST: s->broadcast = v != 0; return 0;
+        case NETD_SO_LINGER: {          /* struct linger { l_onoff, l_linger } (Linux's); D19 growth, D23 step 3 */
+            int l[2];
+            if (len < 8) return -EINVAL;
+            memcpy(l, val, 8);
+            if (l[1] < 0) l[1] = 0;
+            s->linger_on = l[0] != 0;
+            s->linger = (unsigned short)(l[1] > 65535 ? 65535 : l[1]);
+            return 0;
+        }
         case NETD_SO_RCVBUF: case NETD_SO_SNDBUF: return 0;     /* the machine's numbers stay (7.3) */
         }
         return -ENOPROTOOPT;
@@ -850,7 +869,11 @@ int netd_close(unsigned idx, unsigned gen)
             tcp_detach(s->tcp);
             /* data not read: lwIP answers the close with a reset (its window is not whole), as Linux does */
             if (s->rx) { pbuf_free(s->rx); s->rx = NULL; }
-            tcp_close_or_queue(s->tcp);
+            /* SO_LINGER {1, 0}: an abort, as Linux: a reset, no FIN_WAIT or TIME_WAIT, the port free at once (nfscd
+             * reconnects from the same port for the NAS's duplicate request cache, D23 3.4). A longer linger is not
+             * waited for (a close never blocks in netd, rule 11): the data goes out after the close, as without it */
+            if (s->linger_on && !s->linger) tcp_abort(s->tcp);
+            else tcp_close_or_queue(s->tcp);
         }
         if (s->rx) pbuf_free(s->rx);
         break;

@@ -65,6 +65,7 @@
 #define NETD_SO_SNDBUF    7
 #define NETD_SO_RCVBUF    8
 #define NETD_SO_KEEPALIVE 9
+#define NETD_SO_LINGER   13
 #define NETD_TCP_NODELAY  1
 #define NETD_MSG_PEEK     0x2
 #define NETD_SHUT_RD      0

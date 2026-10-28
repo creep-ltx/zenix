@@ -718,6 +718,63 @@ static void test_rules(void)
     k_close(s);
 }
 
+/* SO_LINGER {1, 0} (D23 step 3): the close is an abort, so the same source port can be bound again at once (nfscd's
+ * reconnect for the NAS's duplicate request cache, D23 3.4); a plain close keeps the port while the peer is open */
+static long k_setint2(int s, int opt, int a, int b, unsigned n)
+{
+    int v[2] = { a, b };
+    kq.a = NETD_SOL_SOCKET; kq.b = opt; kq.len = n; memcpy(kq.data, v, n);
+    return k_call(OP_SETOPT, (unsigned)s);
+}
+static void test_linger(void)
+{
+    int l, c, a = -1, c2, a2 = -1;
+    long r;
+    char b[8];
+    l = k_socket(NETD_SOCK_STREAM, 0, 1000);
+    k_bind(l, "127.0.0.1", 5005, 1000);
+    kq.a = 4;
+    k_call(OP_LISTEN, (unsigned)l);
+    /* a plain close: FIN_WAIT while the peer is open, the port still taken */
+    c = k_socket(NETD_SOCK_STREAM, 0, 1000);
+    k_setint2(c, NETD_SO_REUSEADDR, 1, 0, 4);
+    ok(k_bind(c, "127.0.0.1", 5006, 1000) == 0 && k_connect(c, "127.0.0.1", 5005, 3000) == 0 && (a = k_accept(l, 3000)) >= 0,
+       "linger: a connection from port 5006");
+    k_close(c);
+    c2 = k_socket(NETD_SOCK_STREAM, 0, 1000);
+    k_setint2(c2, NETD_SO_REUSEADDR, 1, 0, 4);
+    r = k_bind(c2, "127.0.0.1", 5006, 1000);
+    if (!r) r = k_connect(c2, "127.0.0.1", 5005, 3000);
+    ok(r == -EADDRINUSE, "linger: after a plain close the same connection cannot be made again while the peer is open (%ld)", r);
+    k_close(c2);
+    if (a >= 0) k_close(a);
+    /* SO_LINGER {1, 0}: an abort */
+    c = k_socket(NETD_SOCK_STREAM, 0, 1000);
+    ok(k_setint2(c, NETD_SO_LINGER, 1, 0, 4) == -EINVAL, "linger: SO_LINGER needs a struct linger (8 bytes): -EINVAL");
+    k_setint2(c, NETD_SO_REUSEADDR, 1, 0, 4);
+    ok(k_setint2(c, NETD_SO_LINGER, 1, 0, 8) == 0, "linger: SO_LINGER {1, 0} set");
+    kq.a = NETD_SOL_SOCKET; kq.b = NETD_SO_LINGER; kq.len = 8;
+    {
+        int v[2] = { 9, 9 };
+        r = k_call(OP_GETOPT, (unsigned)c);
+        if (!r) memcpy(v, kp.data, 8);
+        ok(r == 0 && v[0] == 1 && v[1] == 0, "linger: getsockopt answers {1, 0} (%ld: %d %d)", r, v[0], v[1]);
+    }
+    ok(k_bind(c, "127.0.0.1", 5007, 1000) == 0 && k_connect(c, "127.0.0.1", 5005, 3000) == 0 && (a = k_accept(l, 3000)) >= 0,
+       "linger: a connection from port 5007");
+    k_close(c);
+    r = k_recv(a, b, sizeof b, 1, 3000);
+    ok(r == -ECONNRESET, "linger: the peer sees a reset, not the end of the stream (%ld)", r);
+    k_close(a);
+    c2 = k_socket(NETD_SOCK_STREAM, 0, 1000);
+    k_setint2(c2, NETD_SO_REUSEADDR, 1, 0, 4);
+    ok(k_bind(c2, "127.0.0.1", 5007, 1000) == 0 && k_connect(c2, "127.0.0.1", 5005, 3000) == 0 && (a2 = k_accept(l, 3000)) >= 0,
+       "linger: the same port 5007 bound and connected again at once");
+    k_close(c2);
+    if (a2 >= 0) k_close(a2);
+    k_close(l);
+}
+
 /* audit 2026-10-28 S1: listen(1) then listen(4) raised the backlog but kept the queue sized for 1, and the accepted
  * connections were written past its end (netd's heap; ASan stops netd here on the old code) */
 static void test_relisten(void)
@@ -1017,6 +1074,7 @@ int main(int argc, char **argv)
     test_rules();
     test_netstat();
     test_relisten();
+    test_linger();
     test_loop_full();
     test_limits();
     test_ifinfo();

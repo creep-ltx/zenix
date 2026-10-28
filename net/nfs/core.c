@@ -123,7 +123,8 @@ int nfs_init(const struct nfs_conf *c)
     struct prof *p = &N.pf;
     N.o_large = c->large;
     if (!c->large) {
-        p->rsize = p->wsize = 8192; p->nnodes = 64; p->nnames = 64; p->nrdt = 8; p->ndc = 4; p->cap = 32768;
+        /* 4 KB transfers (the main session, 2026-10-28: 8 KB cost ~25 KB more on the stock A1200, 9.2) */
+        p->rsize = p->wsize = 4096; p->nnodes = 64; p->nnames = 64; p->nrdt = 8; p->ndc = 4; p->cap = 32768;
         p->nops = 8; p->npieces = 32; p->ncreds = 8;
     } else {
         u32 cb = c->cache_bytes ? c->cache_bytes : 256 * 1024;
@@ -318,7 +319,7 @@ void nfs_request(const struct nfs_req *r)
     if (!(r->kflags & NFS_REQ_KERNEL) && r->uid != 0) { nfs_answer(r->id, -EACCES); goto out; }   /* 4.3 */
     if (r->type == FS_CLOSE) {                   /* answered at once, never waits for the network (7.3) */
         int n = node_find((u32)r->a[0]);
-        if (n >= 0) { node_close((u16)n); wr_closed((u16)n); }
+        if (n >= 0) { node_close((u16)n); wr_closed((u16)n); if (N.nsilly) silly_kick(); }
         nfs_answer(r->id, 0);
         goto out;
     }
@@ -339,6 +340,7 @@ void nfs_request(const struct nfs_req *r)
     op->cred = (u8)cr;
     if (r->kflags & NFS_REQ_LINKS) op->flags |= OPF_LINKS;
     op->node = op->node2 = N_NONE;
+    op->sil = -1;
     op_start(o);
     if (cancelled && N.ops[o].used && N.ops[o].id == r->id) nfs_cancel(r->id);   /* FS_QUIT: quit, dropping the rest */
 out:
@@ -360,6 +362,7 @@ void nfs_tick(void)
     rpc_timers(now);
     ops_timers(now);
     wr_timers(now);
+    if (N.nsilly) silly_kick();
     rpc_kick();
 }
 

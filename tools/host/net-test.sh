@@ -15,6 +15,7 @@
 cd "$(dirname "$0")/../.." || exit 1
 OUT=${NET_TEST_OUT:-build/net-host}
 mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)     # absolute: zenix-slirp's make runs in its own folder (an absolute NET_TEST_OUT broke it)
 LW=net/lwip/src
 LWIP_CORE="$LW/core/def.c $LW/core/dns.c $LW/core/inet_chksum.c $LW/core/init.c $LW/core/ip.c $LW/core/mem.c
  $LW/core/memp.c $LW/core/netif.c $LW/core/pbuf.c $LW/core/raw.c $LW/core/stats.c $LW/core/sys.c $LW/core/tcp.c
@@ -108,7 +109,7 @@ have_slirp() {
     command -v ip >/dev/null || { bad "no ip command (iproute2) for the test namespace"; return 1; }
 }
 build_slirp() {
-    make -s -C tools/host/zenix-slirp OUT="$PWD/$OUT" CFLAGS="-O1 -g -Wall -Wextra -Werror $SAN" ||
+    make -s -C tools/host/zenix-slirp OUT="$OUT" CFLAGS="-O1 -g -Wall -Wextra -Werror $SAN" ||
         { bad "zenix-slirp does not build"; return 1; }
 }
 

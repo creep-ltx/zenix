@@ -954,14 +954,20 @@ only by an id, and the link is cut at the reply. A message the core has no slot 
 `FS_CLOSE` and a cancelled message go to the core at once. On `POLLPRI` every held message newly marked
 `UMSG_CANCEL` is cancelled in the core (a killed client: -EINTR within one turn). `hard` (default): a request is tried
 until the NAS answers; `soft`: -EIO after the retries; while the NAS is "not answering" `STATFS`, the root's stat and
-`FS_SYNC` answer from the cache at once. It binds a privileged source port (665-1023, random at its start, the next
-one when the last connection's port is still closing: netd has no abortive close). At its first contact it saves the
+`FS_SYNC` answer from the cache at once. It binds a privileged source port (665-1023, random at its start) and closes
+every connection by abort (`SO_LINGER {1, 0}`), so each reconnect comes from the same port (the NAS's duplicate
+request cache matches it, D23 3.4); the next port only when another program holds that one. Writes (D23 7): `FS_WRITE`
+is copied into the unsaved buffer (32 KB on the small profile) and sent as UNSTABLE `WRITE`s, answered when the NAS
+has every piece; a `COMMIT` with the same write verifier drops them (5 s after a file's last write, at its last close,
+`FS_SYNC`, `FS_QUIT`, a full buffer); a changed verifier sends them again. A regular file the kernel holds open that
+is unlinked or renamed over is renamed `.nfsXXXXXXXXXXXX` in its directory first and removed after its last close and
+commit (Linux's "silly rename"; at most 8 at once, more are removed at once). `CHOWN` is root's only (fsperm rule 5);
+set-user-id and set-group-id are never shown and never set (nosuid). At its first contact it saves the
 export's root handle in its saved table (`SVC_SAVE`); a restarted nfscd refuses another export ("mount it again") and
 answers the numbers the kernel holds (`SVC_OPENS`) -ESTALE until they are closed. Killed (its `evwait` answers
 -EINTR): every held request -EIO, then it ends. Its heap is libz's region heap with a cap (small profile 160 KB); the
-tables and the two 9 KB buffers are one block. **Step 2 serves reading only:** nfscd adds `o` itself, so every change is
--EROFS until D23 step 3. Memory, small profile (the stock A1200, FS-UAE, `ps`): 112 KB mounted and idle, 144 KB after
-reading (the data cache full); 51,616 bytes of image. `tools/nfs-emu-test.sh`.
+tables and the two 5 KB buffers are one block (the small profile reads and writes 4 KB pieces). Memory: d23-nfs.md 9.2
+(measured). `tools/nfs-emu-test.sh`.
 
 ### The mount table (`kernel/vfs.c`)
 Entry 0 is the root (port `fs`); `SYS_mount` puts a server's port on a directory (8 entries, the root
@@ -1280,7 +1286,9 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   `O_NONBLOCK`: netd reads what came and writes what fits, keeping the rest of a frame in its own 4 KB queue. Its
   buffers come from regions of its own (first fit, joined on free; each a quarter of the profile's limit, at least 8
   KB, taken when needed), not libz's malloc, whose power-of-two classes and 4/16/64 KB chunks held 84 KB for the 24 KB
-  heap. It ignores SIGPIPE. 72,392 bytes of code, 13 KB of data, an 8 KB stack (99 KB in `ps` on the stock A1200
+  heap. It ignores SIGPIPE. `SO_LINGER` (Linux's 13, `struct linger`, D23 step 3): `{1, 0}` makes the close an abort
+  (a reset: no FIN_WAIT or TIME_WAIT, the port free at once); a longer linger is kept for `getsockopt` but not waited
+  for (a close never blocks in netd). 72,392 bytes of code, 13 KB of data, an 8 KB stack (99 KB in `ps` on the stock A1200
   after the loopback tests, 115 KB with SLIP up); `tools/netd-test.sh` runs it over the loopback in FS-UAE,
   `tools/slip-test.sh` over SLIP to `zenix-slirp`, `tools/host/net-test.sh` its core on the PC. libz's BSD calls are in `user/socket.h`.
 - **The network's drivers** (DESIGN D19 2.3, 2.4, step 7; `kernel/drv.c`, `kernel/netproto.h`): code that touches a

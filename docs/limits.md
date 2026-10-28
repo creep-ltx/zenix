@@ -109,9 +109,10 @@ pointers.
 - NFS (DESIGN D23, architecture.md section 9 "nfscd"): 8 NFS mounts at most (nfs0 .. nfs7, within the 7 mounts);
   `HOST:/EXPORT` at most 62 characters with no options (the service text); files below 4 GB, offsets below 2 GB;
   names up to 63 bytes listed; 16 supplementary groups a user, 32 users with groups (read at nfscd's start); the
-  small profile (chip RAM only, or under 2 MB of fast RAM free): 8 KB reads and writes, 64 files in the handle table,
-  a 32 KB data cache, 8 requests at once plus 8 waiting in nfscd; the large: 32 KB, 256 files, 32 requests; a heap
-  cap of 160 KB (small) or the cache and 1 MB (large); counts in `df` capped below 4 TB.
+  small profile (chip RAM only, or under 2 MB of fast RAM free): 4 KB reads and writes, 64 files in the handle table,
+  a 16 KB data cache, 32 KB of unsaved written data, 8 requests at once plus 8 waiting in nfscd; the large: 32 KB,
+  256 files, 32 requests; a heap cap of 160 KB (small) or the cache and 1 MB (large); counts in `df` capped below
+  4 TB; 8 unlinked open files kept under `.nfs` names at once (more are removed at once).
 - Updates (DESIGN D15, architecture.md section 3, "Updates"): a bundle of at most 16 MB and 64 parts, 16 packages,
   8 dependencies a package, 1024 changes in one install, paths in a package of at most 55 bytes (with `.zup-new` a
   system call's 63), a manifest or a journal of at most 1 MB. zenixboot: the trial ends after 3 starts without a sign

@@ -134,13 +134,22 @@ NOTES
     Only types with a server can be mounted (ext2, zenixfs, nfs). A ZenixFS
     mount needs /sbin/zfsd on the root: without it the server does not
     start ("cannot start /sbin/zfsd" in dmesg).
-    NFS: reading only, for now (DESIGN D23 step 2): every change on an
-    NFS mount is "read-only file system" until writing is built (step
-    3). The NAS decides who may do what: NFSv3 trusts the uid the Amiga
-    sends, so export the folder only to the Amiga's address and map
-    every user to one NAS user (d23-nfs.md 8). Nothing on the wire is
-    encrypted: the home network only. Set-user-id bits on the NAS are
-    never honoured. Files of 4 GB or more cannot be opened; names
+    NFS writes: a write returns once the NAS holds the bytes; they are
+    saved on its disk within 5 s, at the file's last close, at sync and
+    at umount, and sent again if the NAS restarted before that. A save
+    that fails after the file was closed is told only in dmesg. A file
+    removed (or renamed over) while a program has it open is renamed
+    .nfs followed by 12 hex digits in its directory and removed after
+    its last close, as Linux does; that name cannot be removed while
+    the file is open ("device or resource busy"). A crash of nfscd
+    leaves such names on the NAS. Only root may chown. The NAS decides
+    who may do what: NFSv3 trusts the uid the Amiga sends, so export
+    the folder only to the Amiga's address and map every user to one
+    NAS user (d23-nfs.md 8). Nothing on the wire is encrypted: the home
+    network only. Set-user-id and set-group-id bits on the NAS are never
+    honoured (a program runs as its caller, ls shows no s) and cannot
+    be set (chmod 4755: "operation not permitted"). Files of 4 GB or
+    more cannot be opened; names
     longer than 63 bytes are not listed. A symbolic link on the NAS
     with an absolute target is followed from Zenix's / (as a Linux
     client does). A program changed on the NAS within the same second

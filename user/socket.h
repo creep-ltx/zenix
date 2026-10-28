@@ -15,6 +15,7 @@ typedef u32 in_addr_t;
 struct in_addr { in_addr_t s_addr; };                       /* network order */
 struct sockaddr { sa_family_t sa_family; char sa_data[14]; };
 struct sockaddr_in { sa_family_t sin_family; in_port_t sin_port; struct in_addr sin_addr; unsigned char sin_zero[8]; };
+struct linger { int l_onoff, l_linger; };                  /* SO_LINGER: {1, 0} closes by a reset */
 struct sockaddr_storage { sa_family_t ss_family; char ss_pad[126]; };  /* 128 bytes, as Linux */
 #define INADDR_ANY       ((in_addr_t)0x00000000)
 #define INADDR_LOOPBACK  ((in_addr_t)0x7f000001)

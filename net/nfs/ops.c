@@ -19,11 +19,13 @@ void node_close(u16 i);
 /* the purposes of an op's calls */
 enum { PU_LOOKUP = 1, PU_WREADLINK, PU_WACCESS, PU_GETATTR, PU_ACCESS, PU_CREATE, PU_LOOKUP2, PU_SETATTR, PU_TRUNC,
        PU_READ, PU_READLINK, PU_MKDIR, PU_REMOVE, PU_RMDIR, PU_RENAME, PU_LINK, PU_SYMLINK, PU_READDIR, PU_FSSTAT,
-       PU_SATTR };
+       PU_SATTR, PU_ULOOKUP, PU_SLOOKUP };
 
 #define ST_DONE 255
 
 static struct res *R;                            /* the answer being handled (op_reply) */
+static void run(int o);
+static void silly_free(int e);
 
 /* ---- small helpers ---- */
 static int issue(int o, int proc, u16 node, int purpose)
@@ -54,6 +56,13 @@ void op_finish(int o, long result)
     struct op *op = &N.ops[o];
     if (!op->used) return;
     rpc_drop_op(o);
+    if (op->sil >= 0) {                          /* a silly rename not under way: its entry goes (one out keeps it) */
+        int out = 0;
+        for (u32 i = 0; i < N.pf.ncalls; i++)
+            if (N.calls[i].state != C_FREE && N.calls[i].purpose == CP_SRENAME && N.calls[i].cseq == (u32)op->sil) out = 1;
+        if (!out) silly_free(op->sil);
+        op->sil = -1;
+    }
     for (u32 i = 0; i < N.pf.npieces; i++) if (N.pieces[i].op == o) N.pieces[i].op = -1;
     while (op->npins) unpin(op, op->pins[0]);
     if (op->cred != 0xFF) cred_put(op->cred);
@@ -87,6 +96,136 @@ static int acc_known(u16 n, u16 key)
 }
 
 static int is_dotname(const char *s, u32 n) { return (n == 1 && s[0] == '.') || (n == 2 && s[0] == '.' && s[1] == '.'); }
+
+/* ---- unlinked open files: the silly rename (decision (b) of the main session; nfs_int.h) ---- */
+static void silly_free(int e)
+{
+    struct silly *sl = &N.silly[e];
+    if (sl->state == SL_FREE) return;
+    node_unpin(sl->node);
+    node_unpin(sl->dir);
+    cred_put(sl->cred);
+    sl->state = SL_FREE;
+    if (N.nsilly) N.nsilly--;
+}
+
+int silly_left(void) { return N.nsilly; }
+
+static void hex(char *d, u32 v, int n) { while (n--) { d[n] = "0123456789abcdef"[v & 15]; v >>= 4; } }
+
+/* before an UNLINK, or a RENAME over a name: is the target a regular file the kernel holds open (and its only
+ * link)? Then it is renamed .nfsXXXXXXXXYYYY first (a name the NAS does not have) and removed at its last close.
+ * 0: go on with the request's own call; 1: wait (or answered); -1: op->err is set */
+static int silly_phase(int o, u16 dir, const char *name, u32 nlen, int notnode)
+{
+    struct op *op = &N.ops[o];
+    if (op->pos == 9) return 0;
+    if (op->pos == 0) {
+        int child = op->node != N_NONE ? op->node : name_get(dir, name, nlen);
+        if (child < 0 && !(op->flags & OPF_UCHK)) {      /* not known here: ask (an unknown name may be open too) */
+            op->flags |= OPF_UCHK;
+            int c = issue(o, P3_LOOKUP, dir, PU_ULOOKUP);
+            if (c < 0) return -1;
+            N.calls[c].name = name; N.calls[c].nlen = (u16)nlen;
+            return 1;
+        }
+        struct node *p = child >= 0 ? &N.nodes[child] : 0;
+        if (!p || child == notnode || !p->opens || p->a.type != NF3REG || p->a.nlink > 1) { op->pos = 9; return 0; }
+        if (p->flags & NF_SILLY) { op_finish(o, -EBUSY); return 1; }   /* as Linux: the stand-in name stays */
+        int e = -1;
+        for (int i = 0; i < NSILLY; i++) if (N.silly[i].state == SL_FREE) { e = i; break; }
+        if (e < 0) {
+            if (!N.logged_silly) lg("more than 8 unlinked open files: one is removed at once (its readers get -ESTALE)", 0, -1, 0);
+            N.logged_silly = 1;
+            op->pos = 9;
+            return 0;
+        }
+        struct silly *sl = &N.silly[e];
+        memset(sl, 0, sizeof *sl);
+        sl->node = (u16)child; sl->dir = dir; sl->state = SL_RENAMING; sl->len = SILLY_NAME;
+        sl->cred = op->cred; N.creds[op->cred].refs++;
+        node_pin(sl->node); node_pin(dir);
+        N.nsilly++;
+        op->sil = (s8)e;
+        op->pos = 1;
+    }
+    struct silly *sl = &N.silly[op->sil];
+    if (op->pos == 1) {                          /* a name the NAS does not have: LOOKUP it first */
+        if (++op->stries > 8) { op_finish(o, -EBUSY); return 1; }
+        memcpy(sl->name, ".nfs", 4);
+        hex(sl->name + 4, (u32)N.nodes[sl->node].fileid, 8);
+        hex(sl->name + 12, (N.seed >> 7) ^ ++N.sillyctr, 4);
+        sl->name[SILLY_NAME] = 0;
+        int c = issue(o, P3_LOOKUP, dir, PU_SLOOKUP);
+        if (c < 0) return -1;
+        N.calls[c].name = sl->name; N.calls[c].nlen = SILLY_NAME;
+        op->pos = 2;
+        return 1;
+    }
+    if (op->pos == 3) {                          /* free: rename to it (its answer goes to silly_reply) */
+        int c = call_new(PG_NFS, P3_RENAME, o, CP_SRENAME, op->cred);
+        if (c < 0) { lg("too many calls at once: a request fails (-ENOMEM)", 0, -1, 0); op->err = -ENOMEM; return -1; }
+        struct call *k = &N.calls[c];
+        k->node = dir; k->name = name; k->nlen = (u16)nlen;
+        k->node2 = dir; k->name2 = sl->name; k->nlen2 = SILLY_NAME;
+        k->cseq = (u32)op->sil;
+        op->pos = 4;
+    }
+    return 1;
+}
+
+/* the silly rename's and the removal's answers */
+void silly_reply(struct call *c, struct res *r)
+{
+    int e = (int)c->cseq;
+    if (e < 0 || e >= NSILLY) return;
+    struct silly *sl = &N.silly[e];
+    node_wcc(c->node, r, 1);
+    if (c->purpose == CP_SREMOVE) {
+        if (r->err && r->err != -ENOENT) lg("could not remove the unlinked open file ", sl->name, -r->err, " (an error from the NAS)");
+        name_del(sl->dir, sl->name, sl->len);
+        struct node *p = nd(sl->node);
+        if (p) p->flags &= (u8)~(NF_SILLY | NF_ATTR);
+        silly_free(e);
+        ops_poke();
+        return;
+    }
+    int o = c->op;
+    struct op *op = o >= 0 && N.ops[o].used && N.ops[o].sil == e ? &N.ops[o] : 0;
+    if (r->err && r->err != -ECONNABORTED) {     /* not renamed: the entry goes; the request has the error */
+        silly_free(e);
+        if (op) { op->sil = -1; op->err = r->err; }
+    } else {                                     /* renamed (or not known: the connection broke without its op) */
+        sl->state = SL_LIVE;
+        N.nodes[sl->node].flags |= NF_SILLY;
+        if (op) {
+            name_del(c->node, c->name, c->nlen);
+            name_put(sl->dir, sl->name, sl->len, sl->node);
+            op->sil = -1;
+            op->pos = 9;
+            if (op->type == FS_UNLINK) { op_finish(o, 0); ops_poke(); return; }   /* the name is gone: done */
+        } else node_dirchanged(sl->dir);
+    }
+    if (op && !op->inflight) run(o);
+    ops_poke();
+}
+
+/* the files whose last close came and whose data is saved: removed now */
+void silly_kick(void)
+{
+    if (N.mstate != MS_UP) return;
+    for (int e = 0; e < NSILLY; e++) {
+        struct silly *sl = &N.silly[e];
+        if (sl->state != SL_LIVE) continue;
+        struct node *p = &N.nodes[sl->node];
+        if (p->opens || p->unsaved) continue;
+        int c = call_new(PG_NFS, P3_REMOVE, -1, CP_SREMOVE, sl->cred);
+        if (c < 0) return;
+        N.calls[c].node = sl->dir; N.calls[c].name = sl->name; N.calls[c].nlen = sl->len;
+        N.calls[c].cseq = (u32)e;
+        sl->state = SL_REMOVING;
+    }
+}
 
 /* ---- the walk ---- */
 static int walk_begin(int o, int wi, uintptr_t path, uintptr_t cwd, int flags)
@@ -761,6 +900,16 @@ static void run(int o)
                     return;
                 }
                 op->node2 = w->node;
+                op->step = 3;
+            }
+            if (op->step == 3) {
+                struct walk *w = &op->w[0];
+                const char *name = w->buf + w->pos;
+                if (op->type == FS_UNLINK) {             /* an open file is renamed instead (silly rename) */
+                    int r = silly_phase(o, op->node2, name, w->nlen, -1);
+                    if (r < 0) continue;
+                    if (r) return;
+                }
                 memset(&op->sa, 0, sizeof op->sa);
                 int proc = op->type == FS_MKDIR ? P3_MKDIR : op->type == FS_UNLINK ? P3_REMOVE :
                            op->type == FS_RMDIR ? P3_RMDIR : P3_SYMLINK;
@@ -798,10 +947,22 @@ static void run(int o)
                 struct walk *w0 = &op->w[0], *w1 = &op->w[1];
                 const char *n1 = w1->buf + w1->pos;
                 if (!w1->nlen || is_dotname(n1, w1->nlen)) { op_finish(o, op->type == FS_LINK ? -EEXIST : -EINVAL); return; }
-                int c;
                 if (op->type == FS_RENAME) {
                     const char *n0 = w0->buf + w0->pos;
                     if (!w0->nlen || is_dotname(n0, w0->nlen)) { op_finish(o, -EINVAL); return; }
+                }
+                op->step = 4;
+            }
+            if (op->step == 4) {
+                struct walk *w0 = &op->w[0], *w1 = &op->w[1];
+                const char *n1 = w1->buf + w1->pos;
+                int c;
+                if (op->type == FS_RENAME) {
+                    const char *n0 = w0->buf + w0->pos;
+                    /* a name renamed over an open file: that file is renamed out of the way first (silly rename) */
+                    int r = silly_phase(o, w1->node, n1, w1->nlen, name_get(w0->node, n0, w0->nlen));
+                    if (r < 0) continue;
+                    if (r) return;
                     c = issue(o, P3_RENAME, w0->node, PU_RENAME);
                     if (c < 0) continue;
                     N.calls[c].name = n0; N.calls[c].nlen = w0->nlen;
@@ -819,6 +980,7 @@ static void run(int o)
         case FS_CHMOD: case FS_CHOWN: case FS_UTIMES:
             if (op->step == 0) {
                 if (op->type == FS_CHMOD && (op->a[2] & 06000)) { op_finish(o, -EPERM); return; }   /* nosuid (8.3) */
+                if (op->type == FS_CHOWN && op->uid != 0) { op_finish(o, -EPERM); return; }   /* fsperm rule 5; the NAS too */
                 int e = walk_begin(o, 0, op->a[0], op->a[1], WALK_FOLLOW);
                 if (e) { op_finish(o, e); return; }
                 op->step = 1;
@@ -912,12 +1074,18 @@ static void run(int o)
         case FS_QUIT:
             if (op->step == 0) { op->step = 1; if (N.mstate == MS_UP) wr_commit_all(0); }
             if (op->step == 1) {
-                if (N.unsaved_bytes && N.mstate == MS_UP && !N.notans) { wr_commit_all(0); op->flags |= OPF_WAITROOM; return; }
+                if ((N.unsaved_bytes || N.nsilly) && N.mstate == MS_UP && !N.notans) {
+                    wr_commit_all(0);
+                    silly_kick();
+                    op->flags |= OPF_WAITROOM;
+                    return;
+                }
                 op->step = 50;
             }
             if (op->step == 50) {
                 if (N.unsaved_bytes)
                     lg("umount: ", 0, (long)(N.unsaved_bytes + 1023) / 1024, " KB not saved on the NAS");
+                if (N.nsilly) lg("umount: ", 0, N.nsilly, " unlinked files stay on the NAS as .nfs* names");
                 op->step = 52;
                 if (N.mstate == MS_UP && N.mport && !N.notans && call_new(PG_MOUNT, MNT_UMNT, o, CP_UMNT, 0) >= 0) {
                     op->step = 51;
@@ -976,6 +1144,23 @@ void op_reply(int o, struct call *c, struct res *r)
         op->step = (op->a[2] & O_EXCL) ? 12 : 30;
         break;
     }
+    case PU_ULOOKUP: {                           /* is the target an open file? */
+        if (r->has_dattr) node_attr(c->node, &r->dattr);
+        if (r->err) {
+            if (r->err == -ENOENT && op->type == FS_RENAME) { op->pos = 9; break; }   /* nothing to rename over */
+            op->err = r->err;
+            break;
+        }
+        int n = r->has_fh && r->has_attr ? node_get(r->fh, r->fhlen, &r->attr) : -1;
+        if (n >= 0) { op->node = (u16)n; pin(op, op->node); name_put(c->node, c->name, c->nlen, (u16)n); }
+        else op->pos = 9;                        /* no room to know it: as before (removed at once) */
+        break;
+    }
+    case PU_SLOOKUP:                             /* the silly name: free, or taken (another one) */
+        if (r->err == -ENOENT) op->pos = 3;
+        else if (r->err) op->err = r->err;
+        else op->pos = 1;
+        break;
     case PU_LOOKUP2: {
         if (r->err) { op->err = r->err; break; }
         int n = r->has_fh && r->has_attr ? node_get(r->fh, r->fhlen, &r->attr) : -1;

@@ -269,6 +269,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   options (`hard`, `soft`, `timeo=`, `retrans=`, `ro`, `sync`, `actimeo=`); the service names `fs.nfs0` .. `fs.nfs7`
   and the program text `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` with its codes (`h s tN rN o y aN l`, append-only);
   nfscd's saved record (`NFS1`, the root's handle and fileid, at most 77 bytes).
+- **D23 step 3 (writes, branch nfs34, 2026-10-28):** `SO_LINGER` 13 at `SOL_SOCKET` with `struct linger` (Linux's
+  `{l_onoff, l_linger}`, 8 bytes; shorter -EINVAL): `{1, 0}` closes by an abort (a reset, the port free at once); a
+  longer linger is answered by `getsockopt` but never waited for. Not frozen: the `.nfs` stand-in names.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

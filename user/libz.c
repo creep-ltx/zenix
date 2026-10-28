@@ -507,7 +507,7 @@ char **_zargv;
  * block over a region's size is a region of its own. At most 6 regions (a process has 8, D11's NREG). malloc rounds a
  * block up to a power of two and grows its chunks four times over, which held 112 KB in wasabid's `ps` for one
  * connection where this holds 88 KB (measured in FS-UAE, D24 step 1). */
-#define RH_RSZ 16400u                       /* 16 KB and room for two 8 KB blocks with their headers */
+#define RH_RSZ 16416u                       /* 16 KB and room for four 4 KB blocks (nfscd's pieces, D23) or two 8 KB ones with their headers */
 #define RH_NRG 6
 #define RH_BUSE 1u                          /* a block's size word: bit 0 in use, bit 1 a region of its own */
 #define RH_BOWN 2u

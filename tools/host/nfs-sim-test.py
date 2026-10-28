@@ -747,6 +747,8 @@ def t_users():
     ok(res(c.cmd("open grp640 r")) > 0, "with the supplementary group 50: opened")
     c.cmd("as 1000 100")
     ok(res(c.cmd("open pub/mine wc")) > 0 and sim.path("pub/mine").uid == 1000, "a file made by user 1000 is 1000's on the NAS")
+    ok(res(c.cmd("chown pub/mine 1001 4294967295")) == -1 and sim.path("pub/mine").uid == 1000,
+       "chown by a user: -EPERM (fsperm rule 5, before the NAS)")
     c.cmd("as 0 0")
     ok(res(c.cmd("open root600 r")) > 0, "root opens it")
     sim.fault("squash", (1026, 100))
@@ -765,7 +767,7 @@ def t_cache():
     ino = res(c.cmd("open dc.txt r"))
     c.cmd("read %d 0 100" % ino)
     n0 = len([e for e in sim.log if e[0] == sim_mod.NFS_PROG])
-    for off in (100, 200, 4000):
+    for off in (100, 200, 3900):                  # within the first 4 KB piece (the small profile's rsize)
         c.cmd("read %d %d 100" % (ino, off))
     n1 = len([e for e in sim.log if e[0] == sim_mod.NFS_PROG])
     ok(n1 == n0, "small reads of a cached piece need no call (%d calls)" % (n1 - n0))
@@ -828,11 +830,74 @@ def t_large():
     sim.stop()
 
 
+def t_silly():
+    """an unlinked open file (the main session's decision (b)): renamed .nfsXXXX, removed at the last close; the
+    small profile's 4 KB transfers"""
+    sim = new_sim()
+    sim.put_file("tmp.txt", b"temporary data\n")
+    sim.put_file("old", b"old file\n")
+    sim.put_file("new", b"new file\n")
+    sim.put_file("two", b"two links\n")
+    c = Client()
+    c.cmd("mount")
+
+    def sillies():
+        return sorted(n.decode() for n in sim.inodes[sim.root].entries if n.startswith(b".nfs"))
+    ino = res(c.cmd("open tmp.txt r"))
+    ok(ino > 0, "open tmp.txt")
+    ok(res(c.cmd("unlink tmp.txt")) == 0 and not sim.path("tmp.txt"), "unlink of an open file: its name is gone")
+    sl = sillies()
+    ok(len(sl) == 1 and len(sl[0]) == 16, "... it is renamed to a .nfs name on the NAS: %s" % sl)
+    r = c.cmd("read %d 0 100" % ino)
+    ok("text=temporary data" in r, "... and the open file still reads: " + r)
+    ok(res(c.cmd("unlink %s" % (sl[0] if sl else "x"))) == -16, "the stand-in name cannot be unlinked while open: -EBUSY")
+    ok(res(c.cmd("close %d" % ino)) == 0, "the last close")
+    c.cmd("sleep 300")
+    ok(sillies() == [], "... removes the stand-in from the NAS: %s" % sillies())
+    # written, unlinked, closed: the data is committed before the removal
+    w = res(c.cmd("open made wc"))
+    c.cmd("write %d 0 @20000:z" % w)
+    nw = len([e for e in sim.log if e[0] == sim_mod.NFS_PROG and e[1] == 7])
+    ok(nw == 5, "the small profile writes 4 KB pieces: 20000 bytes in %d WRITEs" % nw)
+    ok(res(c.cmd("unlink made")) == 0 and len(sillies()) == 1, "an unlinked file that is still being written: renamed")
+    c.cmd("close %d" % w)
+    c.cmd("sleep 500")
+    ncommit = len([e for e in sim.log if e[0] == sim_mod.NFS_PROG and e[1] == 21])
+    ok(sillies() == [] and ncommit >= 1, "... committed, then removed at its last close (%d COMMITs)" % ncommit)
+    # renamed over while open
+    o = res(c.cmd("open old r"))
+    ok(res(c.cmd("rename new old")) == 0 and bytes(sim.path("old").data) == b"new file\n" and len(sillies()) == 1,
+       "a file renamed over an open one: the open one becomes a .nfs name first")
+    r = c.cmd("read %d 0 100" % o)
+    ok("text=old file" in r, "... and still reads its own data: " + r)
+    c.cmd("close %d" % o)
+    c.cmd("sleep 300")
+    ok(sillies() == [], "... removed at its close")
+    # not open, or more links: removed at once
+    ok(res(c.cmd("link two two2")) == 0, "a second link")
+    t = res(c.cmd("open two r"))
+    ok(res(c.cmd("unlink two")) == 0 and sillies() == [] and sim.path("two2"), "an open file with another link: removed at once")
+    c.cmd("close %d" % t)
+    ok(res(c.cmd("unlink two2")) == 0 and sillies() == [], "a closed file: removed at once")
+    ok(res(c.cmd("unlink nothere")) == -2, "unlink of a missing name: -ENOENT")
+    ok(res(c.cmd("rename nothere x")) == -2, "rename of a missing name: -ENOENT")
+    # quit with a stand-in still open is not possible (the kernel refuses umount while files are open); a stand-in
+    # whose close came is removed before the UMNT
+    q = res(c.cmd("open new2 wc"))
+    c.cmd("write %d 0 data" % q)
+    c.cmd("unlink new2")
+    c.cmd("close %d" % q)
+    ok(res(c.cmd("quit")) == 0 and sillies() == [], "quit: the stand-in removed first: %s" % sillies())
+    c.end()
+    sim.stop()
+
+
 SCENARIOS = {
     "large": t_large,
     "basic": t_basic, "bigdir": t_bigdir, "faults": t_faults, "restart": t_restart, "drc": t_drc, "stale": t_stale,
     "saved": t_restart_saved, "bad": t_bad_replies, "hard": t_hard_soft, "quit": t_quit_dead, "lazy": t_lazy,
     "cancel": t_cancel, "links": t_links, "users": t_users, "cache": t_cache, "parallel": t_parallel,
+    "silly": t_silly,
 }
 
 

@@ -80,6 +80,7 @@ if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
         user/*.c)
             b=$(basename "$c" .c); n=$(echo "$b" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
             case "$b" in libz|regex|miniz|fsd|pw|clockfile|sha|sha256|zenixfsd|zenixfs_disk|zpkgfmt) continue;; esac     # libraries and servers: no page of their own
+            [ "$b" = nfscd ] && n=mount     # an NFS mount's server (D23): described in mount's page
             # a change of the licence line only changes no behaviour
             [ -z "$(git diff "${range[@]}" -U0 -- "$c" | grep '^[-+]' | grep -v '^+++\|^---\|SPDX-License-Identifier')" ] && continue
             echo "$changed" | grep -qx "docs/man/$n.txt" || bad "$c changed but docs/man/$n.txt was not updated in this commit"

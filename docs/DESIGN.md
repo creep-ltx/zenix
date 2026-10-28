@@ -251,7 +251,7 @@ kernel and the base group, the only content of a system bundle) is never install
 boot partition, zenixboot takes it from there at the restart and D15 runs as built ("Zenix (previous)" the way
 back). A package's way back is its previous version in the download cache. The full design:
 [d22-zpkg.md](d22-zpkg.md).
-## D23. The NFS client (roadmap block 2; design note revision 2 after two reviews; nothing built)
+## D23. The NFS client (roadmap block 2; design note revision 2 after two reviews; steps 0-4 built: reading, writing, users and nosuid)
 **Why.** Mount the owner's NAS (or a Linux PC) as a directory: `ls`, `cp`, running programs from it. **How.** NFSv3
 over TCP (MOUNT v3 and the portmapper to find mountd; no UDP, no NFSv4), AUTH_SYS from a privileged source port; one
 server process per mount, `/sbin/nfscd`, a file service registered by `mount -t nfs HOST:/EXPORT DIR` as `fs.nfsN`
