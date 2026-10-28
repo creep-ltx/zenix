@@ -93,7 +93,11 @@ Left open, each with a proposal:
   With the old kernel the script hung at the first kill.
 - **O10 sh: `( list ) > file &` is a syntax error** (found by D23 steps 3-4's tests, 2026-10-28): the shell stops a
   script with "syntax error near unexpected token" at a subshell with a redirection put in the background; `sh -c
-  '...' > file &` works. A bug to fix next.
+  '...' > file &` works. **Fixed 2026-10-28:** the parser read no redirections after any compound command (a subshell,
+  a group, a loop, if, case), so `( list ) > file`, `{ list; } 2>&1 | cmd` and `done < file` all stopped the script;
+  they are now kept on the compound command's node, applied around all of it, and part of its text for a child shell
+  (a pipeline stage, a background job). Test: cmds-test's `sh-compound-redir` lines (foreground, `&`, pipelines,
+  loops, if, case, a function body, a here-document), compared with bash.
 - **O11 two tests that sometimes fail** (D23 steps 3-4's full run, 2026-10-28; both passed alone): `svc-test` part c
   ("the program ends at once") and `remote-test` part c (a wasabid PUT check). Make them deterministic.
 - **O12 a 4 KB buffer nfscd never uses** (libz's stdout buffer, per mount): drop it with D27's port (block 3).

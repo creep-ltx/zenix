@@ -81,6 +81,8 @@ LANGUAGE
                 N>&M for fds 0-9 (3>&1 1>&2 2>&3 swaps; fd 3 is closed
                 again afterwards)
                 <<WORD (a here-document; <<-WORD strips tabs)
+                after a compound command too, for all of it:
+                ( a; b ) > file &   { a; } 2>&1 | b   done < file
     Conditions: if list; then list; elif list; then list; else list; fi
     Choices:    case word in pattern|pattern) list ;; ... esac
                 (patterns are wildcards; the first that matches runs)
@@ -184,8 +186,7 @@ NOTES
     bash). Arithmetic nested too deeply is an error. Each round of a loop
     gives back what it used, so a long while-read loop runs in the same
     memory.
-    Not done: redirections after a compound command (done < file), and
-    redirections of fds 3-9 to files (only N>&M).
+    Not done: redirections of fds 3-9 to files (only N>&M).
     A here-document is kept in /tmp/.shPID_XXXXXXXX (random letters),
     created exclusively and readable only by the user, and removed when
     the command ends.
