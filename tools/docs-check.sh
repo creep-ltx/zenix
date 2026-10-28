@@ -63,6 +63,11 @@ cnt=$( { count programs '(^|[ (])[0-9]+ programs\b' "$nprog"; count programs '(^
 [ -z "$cnt" ] || { echo "$cnt"; fail=1; }
 
 # documentation files must live in docs/ (or be file system content / test inputs / archived)
+# CLAUDE.md's rules point into these files (moved out of it on 2026-10-28): they must exist and stay named there
+for f in docs/decisions.md docs/claims.md docs/frozen-interfaces.md; do
+    [ -f "$f" ] || bad "$f is missing (CLAUDE.md points to it)"
+    grep -qF "$f" CLAUDE.md || bad "CLAUDE.md no longer names $f"
+done
 stray=$(git ls-files '*.md' '*.txt' | grep -v '^docs/\|^rootfs/\|^tools/tests/\|^archive/\|^README.md$\|^CLAUDE.md$')
 [ -z "$stray" ] || bad "documentation outside docs/: $stray"
 

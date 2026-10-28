@@ -7,6 +7,9 @@
 | [architecture.md](architecture.md) | How Zenix is put together: the layers, the kernel, memory, processes, messages, the servers, the filesystems, the terminal and display, the build and the tests. |
 | [how-it-works.md](how-it-works.md) | Walk-throughs: from power-on to a shell prompt, what happens inside `cat file | grep x`, what happens when a program crashes. |
 | [features.md](features.md) | The one list of what Zenix can do, with the status of each feature (verified / read / planned). |
+| [decisions.md](decisions.md) | Every feature the owner approved, in order, with its conditions (the record behind CLAUDE.md "What is approved"). |
+| [claims.md](claims.md) | The numbers in use or reserved: system calls, message types, ports, error numbers; claim one here before using it. |
+| [frozen-interfaces.md](frozen-interfaces.md) | What never changes meaning (system calls, structs, messages, file and config formats): read before changing an interface. |
 | [limits.md](limits.md) | What is missing, what is unmeasured, the hard numbers (limits), and the honest no-MMU limit. |
 | [commands.md](commands.md) | The command index (every program, with a link to its manual page in `man/`, the pages `man` shows). |
 | [vs-amigaos.md](vs-amigaos.md) | Zenix next to AmigaOS: what is the same, what is different, what Zenix gives up and gains. |
