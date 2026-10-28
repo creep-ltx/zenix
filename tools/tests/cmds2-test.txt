@@ -36,5 +36,11 @@ sleep 2
 send awk 'BEGIN { printf "%5000d\n", 1 }'; echo awkrc=$?; awk 'BEGIN { printf "%.*f\n", 9999, 1 }'; echo awkrc2=$?\r
 wait awkrc2=[0-9] 30
 sleep 1
+send echo utf=$(echo a\xc3\x80b | wc -c)\r
+wait utf=[0-9] 30
+sleep 1
+send echo delAX\x1b[D\x1b[3~=ok\r
+wait delA 30
+sleep 1
 send sh /tests/batch-e.sh > /tmp/be.out 2>&1; sync; echo finished-be\r
 sleep 330

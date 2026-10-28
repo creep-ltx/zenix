@@ -96,9 +96,17 @@ static struct term *get(int w)
 /* the colour of an erased cell: the default foreground on the current background */
 static u8 bce(struct term *t) { return (u8)(((t->colour | t->cor) & 0xF0) | (CO_DEF & 0x0F)); }
 
+/* Each row's first cell in the grids, as a table: indexing [y][x] costs a 32-bit multiply by COLS on every character
+ * (gcc, tuned for the 060, makes even shift-and-add one), up to 44 cycles on a 68020 (DESIGN D28 15) */
+#define R4(r) (r) * COLS, ((r) + 1) * COLS, ((r) + 2) * COLS, ((r) + 3) * COLS
+static const u16 rowx[TROWS_MAX] = { R4(0), R4(4), R4(8), R4(12), R4(16), R4(20), R4(24), R4(28) };
+#undef R4
+_Static_assert(TROWS_MAX == 32, "rowx has 32 rows");
+
 static void draw(struct term *t, int y, int x)
 {
-    gfx_cell(y, x, t->ch[y][x], t->at[y][x], t->co[y][x]);
+    u32 o = rowx[y] + (u32)x;
+    gfx_cell(y, x, ((u8 *)t->ch)[o], ((u8 *)t->at)[o], ((u8 *)t->co)[o]);
 }
 
 static void cursor(struct term *t, int on)
@@ -591,11 +599,12 @@ control:
         linefeed(t, vis);
         t->wrap = 0;
     }
-    t->ch[t->cy][t->cx] = ch;
-    t->at[t->cy][t->cx] = t->attr;
-    t->co[t->cy][t->cx] = t->colour | t->cor;
+    u32 o = rowx[t->cy] + (u32)t->cx;
+    ((u8 *)t->ch)[o] = ch;
+    ((u8 *)t->at)[o] = t->attr;
+    ((u8 *)t->co)[o] = t->colour | t->cor;
     if (vis)
-        draw(t, t->cy, t->cx);
+        gfx_cell(t->cy, t->cx, ch, t->attr, ((u8 *)t->co)[o]);
     if (t->cx != COLS - 1)
         t->cx++;
     else if (!(t->rules & CONR_WRAPNOW))
