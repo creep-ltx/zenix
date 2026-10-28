@@ -30,6 +30,18 @@ static int vstr_ok(const char *s)
     return n >= 1 && n <= ZP_VSTRMAX;
 }
 
+int zp_snapshot_name_ok(const char *s)
+{
+    size_t n = 0;
+    for (; *s; s++, n++) {
+        int an = (*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') || (*s >= '0' && *s <= '9');
+        if (!an && (n == 0 || (*s != '.' && *s != '_' && *s != '-')))
+            return 0;
+    }
+    /* NAME.part is a cut run's folder (mkrepo), never a snapshot */
+    return n >= 1 && n <= ZP_SNAPMAX && !(n >= 5 && !strcmp(s - 5, ".part"));
+}
+
 static int sha_ok(const char *s)
 {
     int i;
@@ -164,7 +176,7 @@ int zp_index_parse(struct zp_index *ix, char *text, size_t len, const char **why
     char *l, *e;
     struct zp_pkg *cur = 0;
     static const char *dummy;
-    enum { H_CHANNEL = 1, H_SERIAL = 2, H_DATE = 4, H_EXPIRES = 8, H_SYSTEM = 16 };
+    enum { H_CHANNEL = 1, H_SERIAL = 2, H_DATE = 4, H_EXPIRES = 8, H_SYSTEM = 16, H_SNAPSHOT = 32 };
     enum { P_VERSION = 1, P_GROUP = 2, P_FILE = 4, P_SIZE = 8, P_DESC = 16 };
     unsigned char *pflags = 0;
 
@@ -238,6 +250,11 @@ int zp_index_parse(struct zp_index *ix, char *text, size_t len, const char **why
                     BAD("a bad channel line");
                 ix->channel = w[1];
                 have |= H_CHANNEL;
+            } else if (!strcmp(w[0], "snapshot")) {
+                if (nw != 2 || (have & H_SNAPSHOT) || !zp_snapshot_name_ok(w[1]))
+                    BAD("a bad snapshot line");
+                ix->snapshot = w[1];
+                have |= H_SNAPSHOT;
             } else if (!strcmp(w[0], "serial") || !strcmp(w[0], "date") || !strcmp(w[0], "expires")) {
                 int bit = w[0][0] == 's' ? H_SERIAL : w[0][0] == 'd' ? H_DATE : H_EXPIRES;
                 zp_u32 *v = bit == H_SERIAL ? &ix->serial : bit == H_DATE ? &ix->date : &ix->expires;
@@ -389,15 +406,30 @@ zp_u32 zp_today(const struct zp_trust *t)
     return t->clock > t->clockfloor ? t->clock : t->clockfloor;
 }
 
+/* D22 amendment 1: a snapshot's list only for that snapshot, by name; a channel's list never carries the line */
+static int snap_fits(const struct zp_index *ix, const struct zp_trust *t, const char **why)
+{
+    if (t->snapshot && (!ix->snapshot || strcmp(ix->snapshot, t->snapshot)))
+        { *why = "the package list is not the snapshot asked for"; return ZP_ESNAPSHOT; }
+    if (!t->snapshot && ix->snapshot)
+        { *why = "the package list is a snapshot's, not the channel's"; return ZP_ESNAPSHOT; }
+    return 0;
+}
+
 int zp_index_usable(const struct zp_index *ix, const struct zp_trust *t, unsigned *warn, const char **why)
 {
     zp_u32 today = zp_today(t);
     long dd = zp_days(ix->date), dt = zp_days(today);
     static const char *dummy;
     unsigned w = 0;
+    int rc;
     if (!why)
         why = &dummy;
-    if (t->flags & ZP_T_SNAPSHOT)
+    if (warn)
+        *warn = 0;
+    if ((rc = snap_fits(ix, t, why)))
+        return rc;
+    if (t->snapshot)
         w |= ZP_W_UNCHECKED;
     else if (today > ix->expires) {
         if (!(t->flags & ZP_T_IGNORE_EXPIRY)) {
@@ -430,17 +462,22 @@ int zp_index_check(const struct zp_index *ix, const struct zp_trust *t, unsigned
         { *why = "the package list is of another channel"; return ZP_ECHANNEL; }
     if (cls != t->keyclass)
         { *why = "the package list's channel does not fit the key that signed it"; return ZP_ECLASS; }
+    if ((i = snap_fits(ix, t, why)))
+        return i;
     for (i = 0; i < ix->npkg; i++)
         if (ix->pkg[i].vnum > vmax)
             vmax = ix->pkg[i].vnum;
-    if (!(t->flags & ZP_T_SNAPSHOT)) {
-        if (ix->serial / 100 > ix->date)
-            { *why = "the package list's serial is above its own date's"; return ZP_ESERIAL; }
-        if (ix->serial < vmax)
-            { *why = "the package list's serial is below a version it names"; return ZP_ESERIAL; }
-        if (t->stored ? ix->serial <= t->stored : ix->serial < t->floor)
-            { *why = "an older package list (a replay, or a mirror that is behind)"; return ZP_EREPLAY; }
-    }
+    /* the list's own shape, a snapshot's too (it is a channel's list with one line more) */
+    if (ix->serial / 100 > ix->date)
+        { *why = "the package list's serial is above its own date's"; return ZP_ESERIAL; }
+    if (ix->serial < vmax)
+        { *why = "the package list's serial is below a version it names"; return ZP_ESERIAL; }
+    if (t->snapshot) {
+        /* a snapshot is old on purpose: no floor; its name binds it, and once stored it never changes */
+        if (t->stored && ix->serial != t->stored)
+            { *why = "the snapshot is not the one stored before (its serial changed)"; return ZP_EREPLAY; }
+    } else if (t->stored ? ix->serial <= t->stored : ix->serial < t->floor)
+        { *why = "an older package list (a replay, or a mirror that is behind)"; return ZP_EREPLAY; }
     return zp_index_usable(ix, t, warn, why);
 }
 

@@ -6,7 +6,8 @@
                                                  changed (3.4), the pool files, a new list, everything signed
   mkrepo.py promote REPO FROM TO [OPTIONS]       a new TO list naming exactly FROM's pool files (testing -> stable)
   mkrepo.py resign REPO CHANNEL [OPTIONS]        the same files under a new serial, date and expiry (the weekly run)
-  mkrepo.py snapshot REPO CHANNEL NAME           snapshots/NAME/: a copy of the channel's list, its .sig and latest
+  mkrepo.py snapshot REPO CHANNEL NAME [--key K] snapshots/NAME/: the channel's current list with "snapshot NAME"
+                                                 added, signed, and its latest (amendment 1: the name is signed)
   mkrepo.py prune REPO                           the pool down to what a list or snapshot names plus the previous
                                                  version of every package; each channel's lists but the last two
   mkrepo.py check REPO [--pub PUB]... [--test-pub PUB]... [--today YYYYMMDD]
@@ -58,7 +59,7 @@ NAME_RE = re.compile(r'^[a-z0-9][a-z0-9.+-]{0,23}$')
 VSTR_RE = re.compile(r'^[\x21-\x7e]{1,15}$')
 SHA_RE = re.compile(r'^[0-9a-f]{64}$')
 NUM_RE = re.compile(r'^[0-9]{1,10}$')
-SNAP_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$')
+SNAP_RE = re.compile(r'^(?!.*\.part\Z)[A-Za-z0-9][A-Za-z0-9._-]{0,31}\Z')    # NAME.part: a cut run's folder
 
 
 def die(msg):
@@ -133,12 +134,16 @@ def parse_index(data):
             ix["order"].append(a[0])
             continue
         if cur is None:
-            if k in ("channel", "serial", "date", "expires", "system") and k in ix:
+            if k in ("channel", "snapshot", "serial", "date", "expires", "system") and k in ix:
                 raise Bad("%s: twice" % where)
             if k == "channel":
                 if len(a) != 1:
                     raise Bad(where)
                 ix["channel"] = a[0]
+            elif k == "snapshot":                      # amendment 1: the snapshot this list is
+                if len(a) != 1 or not SNAP_RE.match(a[0]):
+                    raise Bad(where)
+                ix["snapshot"] = a[0]
             elif k in ("serial", "date", "expires"):
                 if len(a) != 1:
                     raise Bad(where)
@@ -205,8 +210,9 @@ def parse_index(data):
 
 def index_text(ix):
     s = ix["system"]
-    out = ["zpkgindex 1", "channel %s" % ix["channel"], "serial %d" % ix["serial"], "date %d" % ix["date"],
-           "expires %d" % ix["expires"],
+    out = ["zpkgindex 1", "channel %s" % ix["channel"]] + \
+        (["snapshot %s" % ix["snapshot"]] if ix.get("snapshot") else []) + \
+        ["serial %d" % ix["serial"], "date %d" % ix["date"], "expires %d" % ix["expires"],
            "system %d %s %s %d %s min %d" % (s["vnum"], s["vstr"], s["file"], s["fsize"], s["sha"], s["min"])]
     for n in sorted(ix["pkgs"]):
         p = ix["pkgs"][n]
@@ -484,21 +490,36 @@ def resign(repo, channel, opts):
     publish(repo, channel, {"channel": channel, "system": ix["system"], "pkgs": ix["pkgs"]}, ix, opts)
 
 
-def snapshot(repo, channel, name):
+def snapshot(repo, channel, name, opts):
+    """amendment 1 (audit 2026-10-28 O1): the snapshot's list is the channel's current list with "snapshot NAME" after
+    its channel line, everything else as it is (serial, date, expiry, every block), signed anew; so a list fetched
+    for --snapshot NAME is that snapshot's and no other signed list (an older channel list, another snapshot)"""
     if not SNAP_RE.match(name):
         die("bad snapshot name %r" % name)
+    if channel not in RELEASE:
+        die("a snapshot is of a release channel (%s), not %r" % (", ".join(RELEASE), channel))
+    check_key(channel, opts["key"])
     serial, ix = current(repo, channel)
     if ix is None:
         die("%s has no list" % channel)
     d = os.path.join(repo, "snapshots", name)
     if os.path.exists(d):
-        die("snapshots/%s exists" % name)
+        die("snapshots/%s exists: a snapshot's name is never used again" % name)
+    ix["snapshot"] = name
+    data = index_text(ix)
+    back = parse_index(data)                            # what is written must be what zpkg reads, the same list
+    if back.get("snapshot") != name or {k: v for k, v in back.items() if k != "snapshot"} != \
+            {k: v for k, v in ix.items() if k != "snapshot"}:
+        die("the snapshot's list does not read back as the channel's list")
+    shutil.rmtree(d + ".part", ignore_errors=True)
     os.makedirs(d + ".part")
-    src = chdir_of(repo, channel)
-    for f in ("index-%d" % serial, "index-%d.sig" % serial, "latest"):
-        shutil.copyfile(os.path.join(src, f), os.path.join(d + ".part", f))
+    p = os.path.join(d + ".part", "index-%d" % serial)
+    write_new(p, data)
+    sign(p, opts["key"], "index")
+    with open(os.path.join(d + ".part", "latest"), "wb") as f:
+        f.write(latest_text(serial))
     os.rename(d + ".part", d)
-    print("snapshots/%s: %s's list %d" % (name, channel, serial))
+    print("snapshots/%s: %s's list %d, signed with its name" % (name, channel, serial))
 
 
 def lists(repo):
@@ -577,6 +598,10 @@ def check(repo, pubs, tpubs, today):
     say = lambda m: probs.append(m)
     pool = os.path.join(repo, "pool")
     seen = {}
+    sd = os.path.join(repo, "snapshots")
+    for s in sorted(os.listdir(sd)) if os.path.isdir(sd) else []:
+        if s.endswith(".part"):
+            say("snapshots/%s: a cut snapshot run's folder (remove it, or run snapshot again)" % s)
     for where, d, snap in lists(repo):
         chan = os.path.basename(d) if not snap else None
         try:
@@ -603,6 +628,11 @@ def check(repo, pubs, tpubs, today):
             say("%s: channel %s" % (where, ix["channel"]))
         if chan is not None and ix["channel"] != chan:
             say("%s: the list says channel %s" % (where, ix["channel"]))
+        # amendment 1: a snapshot's list names its own directory; a channel's list names no snapshot
+        if snap and ix.get("snapshot") != os.path.basename(d):
+            say("%s: the list says snapshot %s" % (where, ix.get("snapshot", "(none)")))
+        if not snap and "snapshot" in ix:
+            say("%s: a channel's list says snapshot %s" % (where, ix["snapshot"]))
         if ix["serial"] != serial:
             say("%s: latest says %d, the list %d" % (where, serial, ix["serial"]))
         if ix["serial"] > ix["date"] * 100 + 99:
@@ -735,7 +765,7 @@ def main(a):
     elif c == "resign" and len(rest) == 3:
         resign(rest[1], rest[2], opts)
     elif c == "snapshot" and len(rest) == 4:
-        snapshot(rest[1], rest[2], rest[3])
+        snapshot(rest[1], rest[2], rest[3], opts)
     elif c == "prune" and len(rest) == 2:
         prune(rest[1])
     elif c == "check" and len(rest) == 2:

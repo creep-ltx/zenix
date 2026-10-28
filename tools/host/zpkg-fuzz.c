@@ -52,12 +52,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     memcpy(t, data, size);
     if (zp_index_parse(&ix, t, size, &why) == 0) {
 #ifdef FUZZ_INDEX
-        struct zp_trust tr = { ix.channel, zp_channel_class(ix.channel), 0, 0, 20261101, 20261026, 0 };
+        struct zp_trust tr = { ix.channel, zp_channel_class(ix.channel), 0, 0, 20261101, 20261026, 0, 0 };
         unsigned w;
         unsigned char d[32];
         volatile size_t sink = 0;
         zp_index_check(&ix, &tr, &w, &why);
-        tr.flags = ZP_T_SNAPSHOT;
+        tr.snapshot = ix.snapshot ? ix.snapshot : "x";
+        tr.channel = 0;
         zp_index_check(&ix, &tr, &w, &why);
         for (int i = 0; i < ix.npkg; i++) {
             const struct zp_pkg *p = &ix.pkg[i];
