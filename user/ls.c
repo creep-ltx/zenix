@@ -113,7 +113,8 @@ static void fill(struct ent *e, const char *path)
     if (sys_lstat(path, &e->st) < 0) memset(&e->st, 0, sizeof e->st);
     e->islink = (e->st.mode & S_IFMT) == S_IFLNK;
     e->link[0] = 0;
-    if (e->islink) { int n = sys_readlink(path, e->link, 63); if (n < 0) n = 0; e->link[n] = 0; }
+    if (e->islink) { int n = sys_readlink(path, e->link, 63); if (n < 0) n = 0; e->link[n] = 0;
+                     if (n == 63 && (u32)e->st.size > 63) memcpy(e->link + 60, "...", 3); }   /* a longer target: shown cut */
 }
 static int list(const char *path, int top)
 {

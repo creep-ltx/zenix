@@ -22,7 +22,9 @@ static int resolve(const char *in, char *out, int depth)
             struct ustat st;
             if (sys_lstat(acc[0] ? acc : "/", &st) == 0 && (st.mode & S_IFMT) == S_IFLNK) {
                 if (depth > 8) return -1;
-                char tgt[160]; int n = sys_readlink(acc, tgt, sizeof tgt - 1); if (n < 0) return -1; tgt[n] = 0;
+                char tgt[160]; int n = sys_readlink(acc, tgt, sizeof tgt - 1); if (n < 0) return -1;
+                if (n == (int)sizeof tgt - 1) return -1;    /* a longer target (F15): "cannot resolve", never a prefix */
+                tgt[n] = 0;
                 char *sl = strrchr(acc, '/'); *sl = 0;                  /* the directory part, then the link text relative to it */
                 char joined[300]; if (tgt[0] == '/') snprintf(joined, sizeof joined, "%s", tgt); else snprintf(joined, sizeof joined, "%s/%s", acc[0] ? acc : "/", tgt);
                 *e = save; char rest[300]; snprintf(rest, sizeof rest, "%s%s", joined, e);

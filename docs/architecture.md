@@ -1040,7 +1040,9 @@ target). What they still do differently, by capability: ext2 cannot move a direc
   (length, name length, inode number) wherever they are parsed, freeing a block or inode that is out of range or
   already free is refused (reported as `ext2: damaged: ...`, at most 20 lines per mount) instead of corrupting the
   counters, and freeing a file visits at most as many blocks as the inode says it owns. Fast symbolic links and
-  device inodes keep text and device numbers in the block array: they are never freed as blocks.
+  device inodes keep text and device numbers in the block array: they are never freed as blocks. A path is followed
+  through a symbolic link of at most 255 bytes; a longer target (a volume written elsewhere) is -ENAMETOOLONG, never a
+  prefix of it (audit F15; the ZenixFS server the same). `readlink` hands back a target of any length.
 - Verified against the host's `e2fsck -fn` after scripted write sessions, and byte-for-byte file checksums; on the
   host by `tools/ext2-host-test.sh` (the server, `fsck.ext2` and `mkfs.ext2` built for the PC against image files:
   modern ext2/ext3/ext4 images, a workload then `e2fsck -fn`, and a bounded fuzz loop of damaged images under

@@ -39,7 +39,9 @@ EXAMPLES
 
 NOTES
     Hard links are stored as separate files. Device files and sparse files
-    are not supported. Owners are recorded as numbers.
+    are not supported. Owners are recorded as numbers. A symbolic link whose
+    target is longer than 100 bytes (the header's field) is reported and
+    skipped, never stored cut short.
     An access the user is not allowed is reported as "permission denied".
     Directories with any number of entries are walked, as deep as paths go. A
     path longer than 63 bytes (what a system call takes) is reported ("path

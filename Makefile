@@ -223,7 +223,7 @@ RAMAPPS := init login sh ls cat echo pwd ps free wc hello crash uname df fdisk m
 # the mount tests (tools/mounttest.sh) boot their own small floppy: the standard RAM image is full
 MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount \
              mkfs_zenixfs fsck_zenixfs su id whoami chmod touch wc head tail ps stat uname sleep true false env passwd \
-             kill pgrep grep dmesg svctest zfsd
+             kill pgrep grep dmesg svctest zfsd readlink realpath tar tree
 
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.

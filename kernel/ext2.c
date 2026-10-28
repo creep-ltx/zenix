@@ -598,6 +598,8 @@ int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int f
             rest++;
         if (S_ISLNK(nin.mode) && (*rest || follow_last)) {
             char target[256];
+            if (nin.size > 255)
+                return -ENAMETOOLONG;           /* audit F15: never follow a prefix of a longer target */
             int n = ext2_readlink(&nin, target, 255);
             if (n < 0)
                 return n;

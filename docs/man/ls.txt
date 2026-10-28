@@ -68,7 +68,8 @@ NOTES
     An access the user is not allowed is reported as "permission denied".
     With -R, directories are walked as deep as paths go. A
     path longer than 63 bytes (what a system call takes) is reported ("path
-    too long") and skipped, never cut short.
+    too long") and skipped, never cut short. With -l a link target longer
+    than 63 bytes is shown cut, ending in "...".
 
 EXIT STATUS
     0 success, 1 a file or directory could not be found or opened (or

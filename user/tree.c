@@ -6,7 +6,8 @@ static int o_a, o_d, rc; static long ndirs, nfiles;
 static int cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 static void __attribute__((noinline)) show_link(const char *child)
 {
-    char t[160]; int n = sys_readlink(child, t, sizeof t - 1); if (n > 0) { t[n] = 0; printf(" -> %s", t); }
+    char t[160]; int n = sys_readlink(child, t, sizeof t - 1);
+    if (n > 0) { t[n] = 0; if (n == (int)sizeof t - 1) memcpy(t + n - 3, "...", 3); printf(" -> %s", t); }   /* longer: shown cut */
 }
 static void walk(const char *path, const char *prefix)
 {

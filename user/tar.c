@@ -40,6 +40,7 @@ static void __attribute__((noinline)) add_link(const char *path, const struct us
 {
     char l[102]; int n = sys_readlink(path, l, sizeof l - 1);
     if (n < 0) { fprintf(2, "tar: %s: %s\n", path, zwhy("cannot read the link")); add_rc = 1; return; }
+    if (n > 100) { fprintf(2, "tar: %s: link target longer than 100 bytes (the tar header's limit): skipped\n", path); add_rc = 1; return; }
     l[n] = 0;
     write_header(path, st, '2', l, 0);
 }
