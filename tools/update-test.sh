@@ -261,7 +261,8 @@ setup_powercut() {
     check $n "the next start: the journal finished, rolled back or found cut short, then installed" \
         "$(inorder $n 2 'a journal from an install that did not end' '(finished the install of|rolled the unfinished install of) '$V2'|the journal was cut short: nothing had been changed' "update: the bundle's [0-9]+ bytes are free again")"
     check $n "... the root is the new version" "$(grep -aqx 1 $OUT/$n/2.txt && grep -aq '^/etc/passwd.new' $OUT/$n/2.txt && grep -aq 'HELLO from pid' $OUT/$n/2.txt && echo ok || echo bad)"
-    check $n "... no journal left, no .zup-new" "$([ "$(rhas $n 2 /var/lib/zpkg/journal)" = no ] && ! debugfs -R 'ls -l /bin' $OUT/$n/root-2.img 2>/dev/null | grep -q zup-new && echo ok || echo bad)"
+    # (debugfs also lists a removed name that opens a directory block, with inode 0: not a file, skipped)
+    check $n "... no journal left, no .zup-new" "$([ "$(rhas $n 2 /var/lib/zpkg/journal)" = no ] && ! debugfs -R 'ls -l /bin' $OUT/$n/root-2.img 2>/dev/null | awk '$1 != 0' | grep -q zup-new && echo ok || echo bad)"
     # ext2 has no journal: the cut may land inside a request that writes several blocks (most of zup's are), and
     # what is left must be a leak only (tools/e2safe.py; audit 2026-10-26 F5), on a root marked "needs a check"; the
     # next start checks and repairs it before zup's recovery runs (DESIGN D17), so then it is clean
