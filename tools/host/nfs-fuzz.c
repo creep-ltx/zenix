@@ -51,7 +51,8 @@ long nfs_send(const void *b, long n)
 }
 
 #define NREQ 64
-static struct { uint32_t id; int done, used; unsigned char buf[9000]; char path[2][64]; uint32_t ck; } rq[NREQ];
+/* the paths are FS_PATHMAX buffers, as the kernel's: with UMSG_LINKS (DESIGN D26) an answer may write TEXT there */
+static struct { uint32_t id, type; int done, used; unsigned char buf[9000]; char path[2][FS_PATHMAX]; char was[2][FS_PATHMAX]; uint32_t ck; } rq[NREQ];
 static uint32_t next_id = 1;
 void nfs_answer(uint32_t id, long result)
 {
@@ -60,6 +61,17 @@ void nfs_answer(uint32_t id, long result)
         if (rq[i].used && rq[i].id == id) {
             if (rq[i].done) { fprintf(stderr, "request %u answered twice\n", id); abort(); }
             rq[i].done = 1;
+            /* D26: only an FS_LINKED answer may change a path, only the argument its bits name, as the table says, and
+             * TEXT ends within FS_PATHMAX; a link answer only to a request that asked (the kflags in the type's top) */
+            int k = fsl_is(result) ? ((-result - FS_LINKED) & FSL_A1) : -1;
+            if (fsl_is(result) && (!(rq[i].type & 0x80000000u) || !fsl_ok(rq[i].type & 0xFFFF, (unsigned)(-result - FS_LINKED)) ||
+                                   !memchr(rq[i].path[k], 0, FS_PATHMAX))) {
+                fprintf(stderr, "request %u: an FS_LINKED answer %ld it may not have\n", id, result); abort();
+            }
+            for (int j = 0; j < 2; j++)
+                if (j != k && memcmp(rq[i].path[j], rq[i].was[j], FS_PATHMAX)) {
+                    fprintf(stderr, "request %u: its a%d changed (answer %ld)\n", id, j, result); abort();
+                }
             return;
         }
     fprintf(stderr, "an answer for a request never sent (%u)\n", id);
@@ -135,14 +147,17 @@ static int new_req(uint32_t type, unsigned a)
     int i;
     for (i = 0; i < NREQ; i++) if (!rq[i].used || rq[i].done) break;
     if (i == NREQ) return -1;
-    static const char *paths[] = { "a", "d/b", "/x/y/z", "ln", "..", "a/../b", "" };
+    static const char *paths[] = { "a", "d/b", "/x/y/z", "ln", "..", "a/../b", "", "/ln/q", "/d/ln" };
     memset(&rq[i], 0, sizeof rq[i]);
     rq[i].used = 1; rq[i].id = next_id++;
-    snprintf(rq[i].path[0], 64, "%s", paths[a % 7]);
-    snprintf(rq[i].path[1], 64, "%s", paths[(a / 7) % 7]);
+    snprintf(rq[i].path[0], FS_PATHMAX, "%s", paths[a % 9]);
+    snprintf(rq[i].path[1], FS_PATHMAX, "%s", paths[(a / 9) % 9]);
+    memcpy(rq[i].was, rq[i].path, sizeof rq[i].was);
     struct nfs_req r;
     memset(&r, 0, sizeof r);
-    r.id = rq[i].id; r.type = type; r.kflags = NFS_REQ_KERNEL; r.uid = (uint16_t)(a & 1 ? 1000 : 0); r.gid = 100;
+    int links = (a >> 6 & 1) != 0;                    /* D26: the kernel's UMSG_LINKS on some requests */
+    rq[i].type = type | (links ? 0x80000000u : 0);
+    r.id = rq[i].id; r.type = type; r.kflags = NFS_REQ_KERNEL | (links ? NFS_REQ_LINKS : 0); r.uid = (uint16_t)(a & 1 ? 1000 : 0); r.gid = 100;
     uintptr_t buf = (uintptr_t)rq[i].buf, p0 = (uintptr_t)rq[i].path[0], p1 = (uintptr_t)rq[i].path[1];
     static const uint32_t inos[5] = { 2, 1234, 500, 501, 0x80000001u };   /* the root, the seeds' files, a probe */
     uint32_t ino = inos[a % 5];

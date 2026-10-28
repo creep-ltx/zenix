@@ -926,9 +926,35 @@ an umount or a server start (measured in FS-UAE: uncached 1.7 ms more a call, +3
 no measurable cost). Not seen: changes root makes behind the kernel's back (raw IPC to a server, writing the device).
 Since the check works on the absolute path text, a working directory inside a mount is checked again on every relative
 path (stricter than Linux, which checks only when the directory is entered). Each
-open file remembers its mount. `link` and `rename` across two mounts fail. `umount` is refused while a process has its
-working directory or an open file inside, or another mount lies below. Caveat: because `..` is resolved on the text, a
-working directory reached through a symbolic link behaves as its text says once a second filesystem is mounted.
+open file remembers its mount (the one its links led to). `link` and `rename` across two mounts fail (-EXDEV, decided by
+the textual mounts when they differ: `mv /usr/bin/a /bin/b` with `/bin -> /usr/bin` copies, a named deviation from
+Linux). `umount` is refused while a process has its working directory or an open file inside, or another mount lies
+below.
+**Symbolic links across mounts (DESIGN D26, docs/d26-links-across-mounts.md).** The kernel follows every link of a
+path it copied: each path argument of a system call has a walk state on the caller's kernel stack (`struct pwalk`: the
+mount, its instance number, which changes only on `mount`, the working-directory inode, the server's path, a link
+count). The request carries `UMSG_LINKS`; a server answers `FS_LINKED` at the first link (section "What the two
+filesystem servers answer"), and the kernel checks the answer against the table (`fsl_ok`), stops with -EINTR for a
+killed caller, counts the link (more than 40 in one path, Linux's limit, is -ELOOP), checks that the mount is the same
+instance (else -EIO: an `umount` came between), normalises the text (from `/` when absolute, from the mount point
+when relative), picks the mount again (with F13's search check) and sends the same request again. So `..` at a mount
+point is the mount point's parent, as on Linux; a `..` written directly after a link is still taken on the text
+before the link (`/bin/../etc` is `/etc` with `/bin -> /usr/bin`; Linux gives `/usr/etc`). Two calls on one path use
+one state: an `O_TRUNC` open's `FS_STAT` (on a copy of the state, adopted when it succeeds) and its `FS_OPEN`, and
+`FS_LSTAT` before an unlink, a rename, a link or a symlink (D13's checks: while anything is loaded from any mount,
+the resolved mount's inode is unlisted or found busy). An open whose last name was a link (`FSL_LAST`) drops `O_CREAT`
+for the rest of the call (a link to nothing stays -ENOENT); before each restart of an open a text under `/dev/` tries
+the kernel's devices first. `chdir` and `mount` always copy and resolve, with only the root mounted too: the working
+directory's text is the resolved one (`pwd` after `cd` through a link shows where it leads, as Linux's `getcwd`), and a
+mount point is recorded resolved (its checks, `/` and 47 bytes, on that text). `umount` matches the normalised text
+against the table first, asking no server (a stopped or hung mount); only when nothing matches does it resolve the
+directory part and join the last name, so it works by both names. An `FS_LINKED` a request did not ask for is -EIO
+(`fs_call_on`). With only the root mounted every other path still goes to the root's server untouched, which follows
+links inside its volume: so a few answers depend on whether anything is mounted (a link to `/dev/null` works only with
+a mount; `..` after a link is physical with only the root, textual with mounts). A link on one volume can point at
+another volume's files (a removable volume, an NFS export): the checks are the caller's, so it gives nobody rights they
+lack, but a root program that trusts a volume's names can be steered. Kernel stack: the deepest chain (`vfs_rename`:
+two states and their buffers, the normaliser's scratch, the message) is measured in the note's section 14.
 
 ### boot - the starter (`user/boot.c`)
 pid 1, the only process the kernel creates itself. It registers `disk` -> `@diskd` (nice -10), picks the root (above),
@@ -1011,6 +1037,23 @@ the disk or a damaged volume -EIO, any permission refusal -EACCES, an unknown re
 symbolic link that points nowhere is -ENOENT in both (no second entry of that name; Linux would create the
 target). What they still do differently, by capability: ext2 cannot move a directory to another parent (-EXDEV, so
 `mv` copies it) nor rename over an existing directory (-EISDIR); ZenixFS does both.
+**Symbolic links for the kernel (DESIGN D26, `FS_LINKED`, kernel/fsproto.h).** A request whose kflags carry
+`UMSG_LINKS` (only the kernel sets it, only with absolute, normalised paths in its own `FS_PATHMAX` buffers) is walked
+without following any symbolic link: at the first one the walk would follow (in the middle of the path, or the last
+name of `FS_OPEN`, `FS_STAT`, `FS_CHDIR`, `FS_CHMOD`, `FS_CHOWN`, `FS_UTIMES` and `FS_LINK`'s existing name) the
+server writes the continuation TEXT over that path argument and answers -(1024 + bits): `FSL_A1` when it was a[1]
+(`FS_RENAME` and `FS_LINK`'s new name, always `FS_SYMLINK`'s path; never `FS_SYMLINK`'s target text), `FSL_LAST` when
+an `FS_OPEN`'s link was the original path's last name. TEXT is the target plus the rest of the path; a relative target
+is put after the link's directory inside the volume (without its leading `/`), and the server does not normalise it.
+An empty target is -ENOENT, a NUL in one -EIO, a target over 255 bytes or a TEXT over 159 -ENAMETOOLONG. The decision
+comes first: the ext2 server (fsd) walks a changing request's paths before its read-only refusal and its clean mark
+(D17), so a `chmod` through a link out of a read-only volume is bounced, not refused, and a bounced request writes
+nothing; the ZenixFS server (zfsd) walks before it changes anything anyway; nfscd's core answers it at the first
+`READLINK`, writes TEXT into the client's buffer only at the answer (never after a cancel or a kill), and on a read-only
+mount refuses a changing request only after its walk. A permission failure met before the link stays -EACCES, and the
+-EACCES mapping never touches the answer. Without the bit, or for a relative path, every server follows links inside
+its own volume as before (an old kernel, a root program's raw request). Verified by the host tests
+(`tools/ext2-host-test.sh`, `zenixfs/tests/zfsd-test.sh`, nfs-sim-test's `links`, `nfs-fuzz`).
 
 ## 10. The filesystem
 

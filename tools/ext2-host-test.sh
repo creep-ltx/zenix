@@ -547,6 +547,132 @@ done
     check "fsck.ext2 -y repairs each of the $fk_runs leaky cuts in one run: e2fsck -fn clean, the state clean" ok || check "fsck.ext2 -y after workload cuts: $fk_bad of $fk_runs not repaired in one run" bad
 [ $fk_cut_runs -gt 10 ] && [ $fk_cut_bad = 0 ] &&
     check "fsck.ext2 cut after each of its repair writes ($fk_cut_runs cuts): never marked clean early, the next run finishes" ok || check "fsck.ext2 cut inside its repair: $fk_cut_bad bad of $fk_cut_runs" bad
+# ---- D26: the FS_LINKED answer (symbolic links across mounts, docs/d26-links-across-mounts.md 4) ----
+mke2fs -q -F -t ext2 -b 1024 $T/ln.img 8M
+L150=$(printf 'p%.0s' $(seq 1 150)); L158=$(printf 'q%.0s' $(seq 1 158))
+cat > $T/ln0.txt <<EOF
+mount
+mkdir /d
+mkdir /d/sub
+open /d/sub/f wc
+close %1
+symlink /etc/motd /d/abs
+symlink ../x/y /d/rel
+symlink sub /d/s2
+symlink /$L150 /d/l150
+symlink /$L158 /d/l158
+symlink /tmp /d/fast
+mkdir /nox
+symlink /d /nox/in
+chmod /nox 700
+sync
+EOF
+fsd $T/ln.img $T/ln0.txt $T/out
+debugfs -w -R "symlink /d/l256 /$(printf 'r%.0s' $(seq 1 255))" $T/ln.img >/dev/null 2>&1
+debugfs -w -R "sif /d/fast size 0" $T/ln.img >/dev/null 2>&1                 # an empty target
+debugfs -w -R "symlink /d/nul /ab" $T/ln.img >/dev/null 2>&1
+debugfs -w -R "sif /d/nul size 6" $T/ln.img >/dev/null 2>&1                  # "/ab" and three NULs from the inode
+cp $T/ln.img $T/ln-base.img
+cat > $T/ln1.txt <<EOF
+mount
+links on
+stat /d/abs/x
+stat /d/abs
+lstat /d/abs
+readlink /d/abs
+open /d/abs r
+open /d/abs/m/n r
+open /d/abs wc
+open /d/abs/q wcx
+stat /d/rel/z
+chdir /d/s2
+mkdir /d/s2/new
+unlink /d/s2/f
+rmdir /d/s2/x
+rename /d/sub/f /d/s2/g
+rename /d/s2/f /d/sub/g
+link /d/abs /d/sub/h
+link /d/sub/f /d/s2/h
+symlink some/target /d/s2/l
+chmod /d/abs 600
+chown /d/abs 5 5
+utimes /d/abs 1000
+stat /d/l150
+stat /d/l150/x
+stat /d/l158/x
+stat /d/l256/x
+stat /d/fast/x
+stat /d/nul/x
+stat d/abs/x
+writes
+state
+ls /d/sub
+open /d/abs wcx
+links off
+stat /d/abs/x
+stat /d/s2/f
+readlink /d/l256
+EOF
+fsd $T/ln.img $T/ln1.txt $T/out
+want=$(cat <<EOF
+links -> 1
+stat -> -1024 a0 /etc/motd/x
+stat -> -1024 a0 /etc/motd
+lstat -> 0 ino
+readlink -> 9 /etc/motd
+open -> -1026 a0 /etc/motd
+open -> -1024 a0 /etc/motd/m/n
+open -> -1026 a0 /etc/motd
+open -> -1024 a0 /etc/motd/q
+stat -> -1024 a0 d/../x/y/z
+chdir -> -1024 a0 d/sub
+mkdir -> -1024 a0 d/sub/new
+unlink -> -1024 a0 d/sub/f
+rmdir -> -1024 a0 d/sub/x
+rename -> -1025 a1 d/sub/g
+rename -> -1024 a0 d/sub/f
+link -> -1024 a0 /etc/motd
+link -> -1025 a1 d/sub/h
+symlink -> -1025 a1 d/sub/l
+chmod -> -1024 a0 /etc/motd
+chown -> -1024 a0 /etc/motd
+utimes -> -1024 a0 /etc/motd
+stat -> -1024 a0 /$L150
+stat -> -1024 a0 /$L150/x
+stat -> -36
+stat -> -36
+stat -> -2
+stat -> -5
+stat -> -2
+EOF
+)
+got=$(grep -v '^ext2:\|^mount\|^writes\|^state\|^ls ->\|^links -> 0' $T/out | sed 's/^\(lstat -> 0 ino\).*/\1/' | head -29)
+[ "$got" = "$want" ] && check "D26: FS_LINKED for every request of the table: TEXT, the bits, S and E of a parent walk, absolute and relative targets, 150/158/256-byte and empty and NUL targets, a relative path answered as today" ok ||
+    { check "D26: the FS_LINKED answers" bad; diff <(echo "$want") <(echo "$got"); }
+grep -q '^writes -> 0$' $T/out && grep -q '^state -> 1 marked 0' $T/out && grep -q '^ls -> . .. f (3, 0)$' $T/out && grep -q '^open -> -17$' $T/out &&
+    check "D26: the bounced requests (mkdir, unlink, rename, link, symlink, chmod, chown, utimes, O_CREAT) wrote nothing, not even the mark; O_CREAT|O_EXCL on a link is -EEXIST" ok ||
+    { check "D26: bounced requests write nothing" bad; grep '^writes\|^state\|^ls' $T/out; }
+tail -3 $T/out | tr '\n' '|' | grep -q '^stat -> -2|stat -> 0 ino [0-9]* mode 100644.*|readlink -> 255 /rrr' &&
+    check "D26: without the bit, links are followed inside the volume as before (and a 255-byte target reads whole)" ok ||
+    { check "D26: without the bit, today's answers" bad; tail -3 $T/out; }
+# the read-only volume: the answer comes before EROFS, and nothing is written
+cp $T/ln-base.img $T/lnro.img; debugfs -w -R "ssv state 3" $T/lnro.img >/dev/null 2>&1; sum1=$(sha256sum < $T/lnro.img)
+printf 'mount\nlinks on\nchmod /d/abs 600\nmkdir /d/s2/q\nopen /d/abs/x wc\nmkdir /d/q\nchmod /d/sub 700\n' > $T/ln2.txt
+fsd $T/lnro.img $T/ln2.txt $T/out
+[ "$(grep -v '^ext2:' $T/out | sed -n 3,7p | tr '\n' '|')" = "chmod -> -1024 a0 /etc/motd|mkdir -> -1024 a0 d/sub/q|open -> -1024 a0 /etc/motd/x|mkdir -> -30|chmod -> -30|" ] &&
+    grep -q '^mount -> 0 readonly' $T/out && [ "$sum1" = "$(sha256sum < $T/lnro.img)" ] &&
+    check "D26: on a read-only volume FS_LINKED comes before EROFS (chmod, mkdir, O_CREAT), the rest is EROFS, the image unchanged" ok ||
+    { check "D26: read-only volume and FS_LINKED" bad; cat $T/out; }
+# permissions: a link in a directory without x is not read (-EACCES, not mapped onto FS_LINKED or the other way)
+cp $T/ln-base.img $T/lnp.img
+printf 'mount\nlinks on\nas 1000 100\nstat /nox/in/sub\nrename /nox/in/a /d/s2/b\nas 0 0\nstat /nox/in/sub\n' > $T/ln3.txt
+fsd $T/lnp.img $T/ln3.txt $T/out
+[ "$(grep -v '^ext2:\|^mount\|^links\|^as' $T/out | tr '\n' '|')" = "stat -> -13|rename -> -13|stat -> -1024 a0 /d/sub|" ] &&
+    check "D26: a user cannot read a link in a directory without x (-EACCES); root gets the FS_LINKED answer" ok ||
+    { check "D26: permissions before FS_LINKED" bad; cat $T/out; }
+for f in fast nul; do debugfs -w -R "rm /d/$f" $T/ln.img >/dev/null 2>&1; debugfs -w -R "rm /d/$f" $T/lnp.img >/dev/null 2>&1; done   # the two made invalid on purpose
+clean $T/ln.img && clean $T/lnp.img && check "D26: e2fsck -fn clean after the FS_LINKED tests" ok || { check "D26: e2fsck after the FS_LINKED tests" bad; cat $T/e2fsck.log; }
+
 # every block write fsd made in all of these tests was inside the mark (fs_blk_write counts the others)
 [ ! -s $T/unmarked ] && check "every block write fsd made in these tests came after the mark (a host-build count)" ok || { check "block writes outside the mark" bad; sort $T/unmarked | uniq -c | head; }
 

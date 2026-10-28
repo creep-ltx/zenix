@@ -1,5 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
+#ifdef ZHOST
+#include "../tools/host/zhost.h"           /* the host tests (tools/host/fsd-host.c built with -DZFSD) */
+#else
 #include "libz.h"
+#endif
 #include "../kernel/fsproto.h"
 #include "../kernel/diskproto.h"
 #include "../kernel/fsperm.h"
@@ -45,6 +49,13 @@ static int is_lnk(const struct zenixfs_inode *in) { return (in->mode & ZENIXFS_S
 /* ---- paths ---- */
 /* resolve PATH starting at directory CWD (or the root if it begins with /); symbolic links are followed (not the last one
  * unless follow_last). Every directory searched needs x. Returns 0 and the inode, or a negative number. */
+/* DESIGN D26: with stoplinks set (a request with UMSG_LINKS) a walk of an absolute path follows no link: at the first one
+ * it would follow it answers -FS_LINKED and leaves where (the path, the link's name [lk_s, lk_e), its inode) for
+ * linked(), which builds the continuation from the request's own path */
+static int stoplinks;
+static const char *lk_path;
+static uint32_t lk_s, lk_e, lk_ino;
+
 static int namei(uint32_t cwd, const char *path, int follow_last, int depth, uint32_t *out)
 {
     uint32_t cur = path[0] == '/' ? ROOT : cwd;
@@ -69,6 +80,10 @@ static int namei(uint32_t cwd, const char *path, int follow_last, int depth, uin
         struct zenixfs_inode in;
         if ((r = zenixfs_getattr(fs, ino, &in))) return r;
         if (is_lnk(&in) && (!last || follow_last)) {
+            if (stoplinks && path[0] == '/') {
+                lk_path = path; lk_s = (uint32_t)(p - path); lk_e = (uint32_t)(e - path); lk_ino = ino;
+                return -FS_LINKED;
+            }
             char target[256];
             if (in.size > 255) return -ENAMETOOLONG;    /* audit F15: never follow a prefix of a longer target */
             int n = zenixfs_readlink(fs, ino, target, 255);
@@ -102,7 +117,9 @@ static int parent(uint32_t cwd, const char *path, uint32_t *dir, const char **na
     if (s == 0) { dpath[0] = '.'; dpath[1] = 0; }
     *name = path + s;
     *len = n - s;
-    return namei(cwd, dpath, 1, 0, dir);
+    int r = namei(cwd, dpath, 1, 0, dir);
+    if (r == -FS_LINKED) lk_path = path;              /* dpath is a copy of PATH's start: the same offsets */
+    return r;
 }
 
 static int dir_may(uint32_t dir)                  /* add or remove entries: w and x */
@@ -207,7 +224,8 @@ static int handle1(struct umsg *m)
         u32 flags = m->a[2];
         int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
         if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {   /* exclusive: the name must not exist, not even as a link */
-            if (!namei(m->a[1], path, 0, 0, &ino)) return -EEXIST;
+            if (!(r = namei(m->a[1], path, 0, 0, &ino))) return -EEXIST;
+            if (r == -FS_LINKED) return r;
             if (denied) return -EACCES;
         }
         r = namei(m->a[1], path, 1, 0, &ino);
@@ -366,13 +384,36 @@ static int handle1(struct umsg *m)
     return -ENOSYS;
 }
 
+/* the FS_LINKED answer (kernel/fsproto.h): the continuation written over the path argument the walk stopped in. Every
+ * request walks before it changes anything, so a bounced one changed nothing */
+static int linked(struct umsg *m)
+{
+    int a1 = (m->type == FS_RENAME || m->type == FS_LINK || m->type == FS_SYMLINK) && lk_path == (const char *)m->a[1];
+    char *p = (char *)m->a[a1];
+    struct zenixfs_inode l;
+    char t[256], out[FS_PATHMAX];
+    int r = zenixfs_getattr(fs, lk_ino, &l);
+    if (r) return r;
+    if (l.size > 255) return -ENAMETOOLONG;
+    int n = zenixfs_readlink(fs, lk_ino, t, 255);
+    if (n < 0) return n;
+    if ((r = fsl_text(out, p, lk_s, lk_e, t, (unsigned)n))) return r;
+    uint32_t e = lk_e;
+    while (p[e] == '/') e++;
+    int last = m->type == FS_OPEN && !p[e];           /* the link was the last name of the original path */
+    strcpy(p, out);
+    return -(FS_LINKED + (a1 ? FSL_A1 : 0) + (last ? FSL_LAST : 0));
+}
+
 static int handle(struct umsg *m)
 {
     if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -EACCES; /* raw IPC from a user: inode numbers would bypass every check */
     cuid = m->uid; cgid = m->gid; cumask = m->umask;
     denied = 0;
+    stoplinks = (m->kflags & UMSG_LINKS) != 0;
     zenixfs_set_time(fs, sys_time());
     int r = handle1(m);
+    if (r == -FS_LINKED) return linked(m);
     return r < 0 && denied ? -EACCES : r;
 }
 

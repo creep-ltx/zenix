@@ -19,6 +19,7 @@ build/zenixfs-tool: tools/zenixfs-tool.c tools/zenixfs-carve.c tools/zenixfs-car
 test: build/ztest build/zenixfs-tool
 	build/ztest
 	bash tests/tool-test.sh build/zenixfs-tool
+	bash tests/zfsd-test.sh build/zenixfs-tool
 	python3 tests/corrupt-lab.py --check
 
 # a 32 MB example image holding the Zenix docs, to look at with build/zenixfs-tool

@@ -4,7 +4,7 @@ NAME
     msgpingd - test message server
 
 SYNOPSIS
-    msgpingd [-port NAME] [-call NAME] [-fs | -fsbad] [count]
+    msgpingd [-port NAME] [-call NAME] [-fs | -fsbad | -fslinked] [count]
 
 DESCRIPTION
     Creates a message port named "ping" and answers the requests of
@@ -26,6 +26,13 @@ DESCRIPTION
                 it on a directory; the reboot test uses it).
     -fsbad      the same, but the request for its root fails too: a
                 mount that fails must end its server.
+    -fslinked   a filesystem server that gives DESIGN D26's "the path
+                continues elsewhere" answer wrongly: to an open (but of
+                its root and of /f) with bits no one-path request may
+                have, to a read and a directory read, which never ask for
+                it, and unchanged to the rest; it answers its root, a
+                sync, a close and the quit (the kernel must refuse the
+                wrong ones with an I/O error: tools/mounttest.sh).
     A development tool; see docs/architecture.md, "Ports and messages".
 
 SEE ALSO

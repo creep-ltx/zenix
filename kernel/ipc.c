@@ -245,7 +245,7 @@ static long call(int port, struct umsg *m, u16 kflags, int ns)
 long ipc_call(int port, struct umsg *m) { return call(port, m, 0, 0); }
 /* the kernel's requests on behalf of the current process (its ids are stamped as usual): the filesystem servers do
  * inode-number operations (FS_READ, FS_WRITE, FS_CLOSE, ...) only for these, or for root */
-long ipc_kcall(int port, struct umsg *m, int ns) { return call(port, m, UMSG_KERNEL, ns); }
+long ipc_kcall(int port, struct umsg *m, int ns, u16 kfl) { return call(port, m, (u16)(UMSG_KERNEL | kfl), ns); }
 
 /* wait: 0 = do not wait (0 if nothing is queued), 1 = wait for a message, N > 1 = wait at most N-1 ticks (then 0).
  * A timed wait sleeps as P_SLEEP with the port's waiter set, so either a message (ipc_call readies the waiter) or

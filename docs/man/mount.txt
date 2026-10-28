@@ -69,10 +69,21 @@ EXIT STATUS
 
 NOTES
     Once something is mounted, paths are resolved as text for the mount
-    table: "." and ".." are removed from the path before it is looked up, so
-    a working directory reached through a symbolic link behaves as its text
-    says. Hard links and renames across two mounts fail. Only the first 8
-    mounts fit, and 12 services in all (the disk and root servers included):
+    table: "." and ".." are removed from the path before it is looked up,
+    and the kernel follows every symbolic link itself, into a mount and out
+    of one (DESIGN D26). The mount point is recorded with its links
+    followed (mount through /tmp/l with /tmp/l -> /tmp/mp lists /tmp/mp),
+    so mount -l and umount see where it really is; a link to / or to a mount
+    point is "device or resource busy", as / is. ".." written directly after
+    a link is taken on the text (/bin/../etc is /etc with /bin -> /usr/bin;
+    Linux gives /usr/etc). Hard links and renames across two mounts fail,
+    decided by the names as written when they name two mounts (mv then
+    copies). netd's files may lead through links into a disk mount, never
+    into a network mount (netd would wait for itself). A link on a mounted
+    volume can point at files elsewhere: the permissions checked are always
+    the caller's, but mount only volumes whose names root may trust. Only
+    the first 8 mounts fit, and 12 services in all (the disk and root
+    servers included):
     beyond that mount says "too many filesystems mounted". A mount does not
     survive a reboot unless it is in /etc/fstab.
     A mount the kernel refuses says why (for example "not a directory",

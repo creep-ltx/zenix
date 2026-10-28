@@ -291,7 +291,7 @@ links from the root into `/usr` need **the kernel to follow symbolic links acros
 mount answers ENOENT: a limit fixed for every Zenix). A setup script asks the keyboard (`CON_KEYMAP`, root only) and
 finds the network card. *Prototype*: everything fits with about 50 KB free. The owner's approval of the note approves
 its features (note section 12). The full design: [d25-demo-floppy.md](d25-demo-floppy.md).
-## D26. Symbolic links across mounts (audit 2026-10-26 F12; design note revision 2 after four reviews, nothing built)
+## D26. Symbolic links across mounts (audit 2026-10-26 F12; design note revision 2 after four reviews; built on branch d26, 2026-10-28)
 **Why.** A symbolic link is followed only inside its own filesystem, so a link into another mount answers ENOENT (and
 an absolute target on any mount but the root is resolved from that volume's root); Linux follows it, and D25's links
 from the RAM root into `/usr` need it. **How.** When a path request's path is a kernel copy (always while more than the root is mounted, and for

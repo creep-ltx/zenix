@@ -208,7 +208,8 @@ static int handle1(struct umsg *m)
         u32 flags = m->a[2];
         int writing = (flags & (O_WRONLY | O_RDWR)) != 0;
         if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {   /* exclusive: the name must not exist, not even as a link */
-            if (!ext2_namei_ex(path, m->a[1], &in, 0, 0)) return -EEXIST;
+            if (!(r = ext2_namei_ex(path, m->a[1], &in, 0, 0))) return -EEXIST;
+            if (r == -FS_LINKED) return r;
             if (ext2_denied) return -EACCES;
         }
         if ((r = ext2_namei(path, m->a[1], &in, 0))) {
@@ -361,17 +362,76 @@ static int writes(const struct umsg *m)
     return m->type != FS_MARK && changes(m);
 }
 
+/* DESIGN D26: the walks a request that changes something makes, without changing anything: -FS_LINKED if one meets a
+ * link to follow (the kernel's UMSG_LINKS), else anything (handle1 walks again and gives its own answer) */
+static int prewalk(struct umsg *m)
+{
+    struct inode in;
+    char name[64];
+    const char *a0 = (const char *)m->a[0], *a1 = (const char *)m->a[1];
+    int r = 0;
+    switch (m->type) {
+    case FS_OPEN:
+        return (m->a[2] & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL) ? ext2_namei_ex(a0, m->a[1], &in, 0, 0)
+                                                                     : ext2_namei(a0, m->a[1], &in, 0);
+    case FS_CHMOD: case FS_CHOWN: case FS_UTIMES:
+        return ext2_namei(a0, m->a[1], &in, 0);
+    case FS_MKDIR: case FS_UNLINK: case FS_RMDIR:
+        return parent(a0, m->a[1], &in, name);
+    case FS_LINK:
+        r = ext2_namei(a0, m->a[2], &in, 0);
+        break;
+    case FS_RENAME:
+        r = parent(a0, m->a[2], &in, name);
+        break;
+    case FS_SYMLINK:
+        break;
+    default:
+        return 0;
+    }
+    return r ? r : parent(a1, m->a[2], &in, name);
+}
+
+/* the FS_LINKED answer (kernel/fsproto.h): the continuation written over the path argument the walk stopped in */
+static int linked(struct umsg *m)
+{
+    int a1 = (m->type == FS_RENAME || m->type == FS_LINK || m->type == FS_SYMLINK) && ext2_lk_path == (const char *)m->a[1];
+    char *p = (char *)m->a[a1];
+    struct inode l;
+    char t[256], out[FS_PATHMAX];
+    int r = ext2_iget(ext2_lk_ino, &l);
+    if (r) return r;
+    if (l.size > 255) return -ENAMETOOLONG;
+    int n = ext2_readlink(&l, t, 255);
+    if (n < 0) return n;
+    if ((r = fsl_text(out, p, ext2_lk_s, ext2_lk_e, t, (unsigned)n))) return r;
+    u32 e = ext2_lk_e;
+    while (p[e] == '/') e++;
+    int last = m->type == FS_OPEN && !p[e];             /* the link was the last name of the original path */
+    strcpy(p, out);
+    return -(FS_LINKED + (a1 ? FSL_A1 : 0) + (last ? FSL_LAST : 0));
+}
+
 static int handle(struct umsg *m)
 {
     if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -EACCES; /* raw IPC from a user: inode numbers would bypass every check */
+    ext2_uid = m->uid; ext2_gid = m->gid; ext2_umask = m->umask;
+    ext2_enforce = 1; ext2_denied = 0;
+    ext2_stoplinks = (m->kflags & UMSG_LINKS) != 0;
+    int r;
+    /* D26: the answer "this path continues elsewhere" comes before the read-only refusal and the clean mark */
+    if (ext2_stoplinks && (ext2_readonly ? changes(m) : writes(m)) && (r = prewalk(m)) == -FS_LINKED)
+        goto out;
+    ext2_denied = 0;
     if (ext2_readonly && changes(m)) return -EROFS;
     if (!ext2_readonly && writes(m)) {
         if (mark()) return -EIO;                        /* the mark could not be written: nothing is changed */
         changed_at = sys_ticks();
     }
-    ext2_uid = m->uid; ext2_gid = m->gid; ext2_umask = m->umask;
-    ext2_enforce = 1; ext2_denied = 0;
-    int r = handle1(m);
+    r = handle1(m);
+out:
+    if (r == -FS_LINKED)
+        return linked(m);
     return r < 0 && ext2_denied ? -EACCES : r;
 }
 

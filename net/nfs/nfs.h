@@ -42,6 +42,7 @@ void nfs_save(const void *buf, uint32_t n);
 #define NFS_SAVEMAX 80                           /* the saved table's record (of D11's 512) */
 #define NFS_REQ_KERNEL 1                         /* kflags: UMSG_KERNEL (the kernel sent it for a system call) */
 #define NFS_REQ_CANCEL 4                         /* kflags: UMSG_CANCEL (D23 12, proposed value 4) */
+#define NFS_REQ_LINKS 8                          /* kflags: UMSG_LINKS (DESIGN D26): answer FS_LINKED, kernel/fsproto.h */
 
 struct nfs_req {                                 /* a Zenix request: the message's fields, pointers as they are */
     uint32_t id;                                 /* the OS layer's id for it (the message); nfs_answer gives it back */

@@ -23,6 +23,13 @@ EXIT STATUS
 
 NOTES
     The root filesystem cannot be unmounted.
+    dir is first matched as written (made absolute) against the mount
+    table, asking no filesystem server, so a mount whose server hangs or
+    was stopped is unmounted all the same. Only when nothing matches are
+    the symbolic links of its directory part followed (DESIGN D26): a mount
+    made through /tmp/l/mp with /tmp/l -> /tmp/real is unmounted by either
+    name. Its last name is taken as it is: umount of a link to a mount
+    point says "is not a mount point".
     The messages: "is busy", "is not a mount point", or the reason the
     kernel gave.
 

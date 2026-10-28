@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
+#include "errno.h"
 /* Messages between the kernel and the filesystem server ("fs" port).
- * type = op, a[0..3] = arguments, result = value or -1 (-5 = server gone).
+ * type = op, a[0..3] = arguments, result = a value >= 0 or -errno (kernel/errno.h; -EIO: the server is gone), or, only
+ * for a sender that set UMSG_LINKS, the FS_LINKED answer below.
  * All pointers are plain addresses: no MMU, the server reads and writes
  * the caller's buffers in place.
  * Who may send them: the kernel (struct umsg kflags UMSG_KERNEL, set only by ipc_kcall for a system call, with the
@@ -46,4 +48,56 @@
                         * (D17) is not "a need for a check", and 0 never clears a real one (a crash in a request, a failed
                         * write). ZenixFS commits atomically: its server does not know it (-ENOSYS), and zup goes on */
 struct fsinfo { char dev[16]; char type[8]; };
+
+/* DESIGN D26 (symbolic links across mounts, docs/d26-links-across-mounts.md 4; append-only, frozen):
+ * UMSG_LINKS, a bit of struct umsg's kflags (1 UMSG_KERNEL, 2 UMSG_NETREPLY internal, 4 UMSG_CANCEL D23, 8 this):
+ * "the sender takes the FS_LINKED answer, and its path arguments are kernel FS_PATHMAX buffers holding absolute,
+ * normalised paths". Only the kernel sets it (ipc_kcall's kflags); a program's SYS_call never carries it.
+ * With it, a server follows no symbolic link: at the first one its walk would follow (in the middle of a path, or the
+ * last name of a request that follows it: FS_OPEN, FS_STAT, FS_CHDIR, FS_CHMOD, FS_CHOWN, FS_UTIMES, FS_LINK's
+ * existing name) it answers -(FS_LINKED + FSL_* bits) and writes TEXT, "this path continues at TEXT", NUL-terminated,
+ * at most FS_PATHMAX bytes, into that path argument's buffer. From the request's original path P, the link's name
+ * P[S..E) and its target T: an absolute T gives T + P[E..], a relative one P[1..S) + T + P[E..] (from the volume's
+ * root, without the leading /). The server does not normalise it. An empty T is -ENOENT, a NUL in T -EIO, T over 255
+ * bytes or a TEXT too long -ENAMETOOLONG. The decision comes before anything else of the request (fsd: before its
+ * read-only refusal and its clean mark): a bounced request changes nothing. A server answers it only when the bit is
+ * set and P starts with /; without the bit it follows links inside its volume as always (old kernels, raw requests).
+ * The kernel turns an FS_LINKED answer it did not ask for into -EIO (vfs.c fs_call_on). */
+#define UMSG_LINKS   8
+#define FS_LINKED    1024       /* the answer -(FS_LINKED + bits); -1024 .. -1027 used, -1024 .. -1279 reserved */
+#define FS_LINKED_END 1279      /* the reserved range's end: no errno goes there (kernel/errno.h) */
+#define FSL_A1       1          /* the path in a[1] was rewritten (FS_RENAME, FS_LINK; always FS_SYMLINK), else a[0] */
+#define FSL_LAST     2          /* the link was the last name of the original path: meaningful for FS_OPEN only */
+static inline int fsl_is(long r) { return r <= -FS_LINKED && r >= -FS_LINKED_END; }
+/* which path argument an FS_LINKED answer may rewrite (the table of D26 4, the same in the servers and the kernel):
+ * 1 if BITS is allowed for request TYPE */
+static inline int fsl_ok(unsigned type, unsigned bits)
+{
+    if (bits & ~(unsigned)(FSL_A1 | FSL_LAST)) return 0;
+    switch (type) {
+    case FS_OPEN: case FS_STAT: case FS_LSTAT: case FS_CHDIR: case FS_MKDIR: case FS_UNLINK: case FS_RMDIR:
+    case FS_CHMOD: case FS_CHOWN: case FS_UTIMES: case FS_READLINK:
+        return !(bits & FSL_A1);                /* a0 only; FSL_LAST is ignored but for FS_OPEN */
+    case FS_RENAME: case FS_LINK:
+        return 1;                               /* a0, or a1 with FSL_A1 */
+    case FS_SYMLINK:
+        return (bits & FSL_A1) != 0;            /* a1 only: a0 is the target text, never rewritten */
+    }
+    return 0;                                   /* no path argument */
+}
+/* a server's TEXT (above) into OUT (FS_PATHMAX bytes, not overlapping P or T): P the request's original path, the
+ * link's name P[s..e), its target T of n bytes (no NUL needed). 0, or -ENOENT, -EIO, -ENAMETOOLONG */
+static inline int fsl_text(char *out, const char *p, unsigned s, unsigned e, const char *t, unsigned n)
+{
+    unsigned k = 0, i;
+    if (!n) return -ENOENT;
+    if (n > 255) return -ENAMETOOLONG;
+    for (i = 0; i < n; i++) if (!t[i]) return -EIO;
+    if (t[0] != '/')
+        for (i = 1; i < s; i++) { if (k >= FS_PATHMAX - 1) return -ENAMETOOLONG; out[k++] = p[i]; }
+    for (i = 0; i < n; i++) { if (k >= FS_PATHMAX - 1) return -ENAMETOOLONG; out[k++] = t[i]; }
+    for (i = e; p[i]; i++) { if (k >= FS_PATHMAX - 1) return -ENAMETOOLONG; out[k++] = p[i]; }
+    out[k] = 0;
+    return 0;
+}
 struct ustatfs { unsigned bsize, blocks, bfree, files, ffree; };

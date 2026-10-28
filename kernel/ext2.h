@@ -62,6 +62,9 @@ int ext2_link(struct inode *dir, const char *name, u32 ino);
 int ext2_statfs(u32 *bs, u32 *blocks, u32 *bfree, u32 *files, u32 *ffree);
 int ext2_namei_ex(const char *path, u32 cwd, struct inode *out, int depth, int follow_last);
 int ext2_readlink(const struct inode *in, char *buf, u32 max);
+extern int ext2_stoplinks;                  /* DESIGN D26: stop at the first link of an absolute path (-FS_LINKED) */
+extern const char *ext2_lk_path;            /* ... and where: the path walked, the link's name [s, e), its inode */
+extern u32 ext2_lk_s, ext2_lk_e, ext2_lk_ino;
 int ext2_chmod(u32 ino, u32 mode);
 int ext2_chown(u32 ino, u32 uid, u32 gid);
 int ext2_access(const struct inode *in, int want);

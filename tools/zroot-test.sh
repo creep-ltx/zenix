@@ -29,10 +29,15 @@ grep -aqx 'data-persist' $OUT/boot1.log && check "the fstab-mounted ext2 partiti
 grep -aqE '^ *5000 +5000 +23893 /big.txt$' $OUT/boot1.log && check "a 23 KB file is written" ok || check "a 23 KB file is written" bad
 grep -aqx 'persist-me' $OUT/boot1.log && check "a file is read back through a symbolic link" ok || check "a file is read back through a symbolic link" bad
 grep -aqx 'SYNC-DONE' $OUT/boot1.log && check "sync returns" ok || check "sync returns" bad
-ZENIX_SERIAL=$SER tools/run-test.sh fsuae/zroot.fs-uae 60 tools/tests/zroot-test2.txt 2>&1 | clean > $OUT/boot2.log
+ZENIX_SERIAL=$SER tools/run-test.sh fsuae/zroot.fs-uae 90 tools/tests/zroot-test2.txt 2>&1 | clean > $OUT/boot2.log
 grep -aqx 'data-persist' $OUT/boot2.log && check "the fstab mount and its data are there after a reboot" ok || check "the fstab mount and its data are there after a reboot" bad
 grep -aqx 'persist-me' $OUT/boot2.log && grep -aqx 'inner' $OUT/boot2.log && check "files are there after a reboot" ok || check "files are there after a reboot" bad
 grep -aqE '^ *5000 +5000 +23893 /big.txt$' $OUT/boot2.log && check "the bigger file is there after a reboot" ok || check "the bigger file is there after a reboot" bad
+# DESIGN D26 test 16: symbolic links between the ZenixFS root and the ext2 mount (cases 1-3)
+for q in "q1=data-persist:a link on the ZenixFS root to a file on the ext2 mount" "q2=persist-me:a link on the ext2 mount with an absolute target on the ZenixFS root" \
+         "q3=persist-me:a relative link at the mount's root climbing out" "q3b=data-persist:a relative link on the root passing the mount point"; do
+    grep -aqx "${q%%:*}" $OUT/boot2.log && check "D26 16: ${q#*:}" ok || check "D26 16: ${q#*:}" bad
+done
 # users and permissions: main's test script and expectations, on this root
 ZENIX_SERIAL=$SER tools/run-test.sh fsuae/zroot.fs-uae 320 tools/tests/users-test.txt 2>&1 | clean > $OUT/users.log
 want() { if grep -aqF -- "$2" $OUT/users.log; then check "users: $1" ok; else check "users: $1" bad; fi; }

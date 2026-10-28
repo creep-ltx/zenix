@@ -81,6 +81,7 @@ static inline int sys_rename(const char *a, const char *b) { return sys3(28, (u3
 
 struct umsg { struct umsg *next; int from, server; u32 state; int result; u32 type; u32 a[4]; unsigned short uid, gid, umask, kflags; u32 client_; };
 #define UMSG_KERNEL 1     /* kflags: the kernel sent this message for a system call (servers trust only these, and root) */
+#define UMSG_LINKS 8      /* kflags: the kernel takes the FS_LINKED answer (DESIGN D26, kernel/fsproto.h); only it sets it */
 static inline int sys_port_create(const char *n) { return sys3(29, (u32)n, 0, 0); }
 static inline int sys_port_find(const char *n) { return sys3(30, (u32)n, 0, 0); }
 static inline int sys_call(int port, struct umsg *m) { return sys3(31, (u32)port, (u32)m, 0); }

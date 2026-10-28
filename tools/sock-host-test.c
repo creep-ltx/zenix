@@ -151,9 +151,9 @@ static void serve(void *arg)
     default: reply(m, 0, POLLOUT);
     }
 }
-long ipc_kcall(int port, struct umsg *m, int ns)
+long ipc_kcall(int port, struct umsg *m, int ns, u16 kfl)
 {
-    (void)port;
+    (void)port; (void)kfl;
     calls++;
     if (m->type < 32) ncalls[m->type]++;
     last_ns = ns;

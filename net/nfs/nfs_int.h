@@ -187,6 +187,7 @@ struct op {
     u8 inflight;                         /* its calls not answered yet */
     u16 node, node2;                     /* the request's target(s) */
     struct walk w[2];
+    u8 lwalk;                            /* D26: 1 + the walk whose buf holds the FS_LINKED TEXT, 0 none */
     struct sattr sa;
     u8 cverf[8];                         /* CREATE EXCLUSIVE's verifier */
     u32 pos;                             /* READDIR: the position asked; SYNC: the sequence it covers */
@@ -198,6 +199,8 @@ struct op {
 #define OPF_WAITMOUNT 2                  /* waits for the mount (lazy) */
 #define OPF_WAITROOM 4                   /* a WRITE waiting for room in the unsaved buffer */
 #define OPF_CANCEL 8
+#define OPF_LINKS 16                     /* D26: the kernel takes FS_LINKED (UMSG_LINKS): no link is followed */
+#define OPF_RO 32                        /* D26: a read-only mount's refusal waits until the walk found no link */
 
 /* ---- the calls on the wire (3.4) ---- */
 #define C_FREE 0

@@ -2235,7 +2235,7 @@ static const char *const bnames[] = {
 static int is_builtin(const char *n) { for (int i = 0; bnames[i]; i++) if (!strcmp(bnames[i], n)) return 1; return 0; }
 static int builtin_names(const char **out, int max) { int n = 0; while (bnames[n] && n < max) { out[n] = bnames[n]; n++; } return n; }
 
-static const char *cwd_now(void) { static char b[128]; if (sys_getcwd(b, sizeof b) < 0) strcpy(b, "/"); return b; }
+static const char *cwd_now(void) { static char b[160];   /* FS_PATHMAX: a resolved working directory (D26) */ if (sys_getcwd(b, sizeof b) < 0) strcpy(b, "/"); return b; }
 
 static void set_pwd(const char *old)
 {
@@ -2436,7 +2436,7 @@ static int run_builtin(char **argv, int argc)
     if (!strcmp(n, "read")) return do_read(argv, argc);
     if (!strcmp(n, "cd")) {
         const char *d = argc > 1 ? argv[1] : var_get("HOME");
-        char old[128]; strcpy(old, cwd_now());
+        char old[160]; strcpy(old, cwd_now());
         if (d && !strcmp(d, "-")) { d = var_get("OLDPWD"); if (d) { outs(d); outs("\n"); } }
         if (!d) { errm("cd", "no directory"); return 1; }
         if (sys_chdir(d) < 0) { errm(d, zwhy("no such directory")); return 1; }
@@ -2587,7 +2587,7 @@ static char *expand_prompt(const char *ps, int *vislen)
         if (*p != '\\') { out[o++] = *p; if (!hidden) vis++; continue; }
         p++;
         if (!*p) break;
-        const char *add = 0; char tmp[130];
+        const char *add = 0; char tmp[162];   /* "~" + a working directory of up to 159 bytes (D26) */
         switch (*p) {
         case 'w': case 'W': {
             const char *c = cwd_now();
