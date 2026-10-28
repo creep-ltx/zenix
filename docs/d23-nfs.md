@@ -642,3 +642,7 @@ Linux's "silly rename" (`.nfsXXXX`, removed at the last close), because Unix pro
 temporary file; (c) **CHOWN** is checked locally as fsperm rule 5 (root only), and the NAS decides too; (d) `ESTALE`
 (116) is claimed in step 1 and replaces -EIO for stale handles; (e) messages stay queued in nfscd while `NFS_P_TAKE` is
 clear, as the host client does; (f) `mount.c` turns a checked mount's error numbers into messages.
+
+## Owner decisions (2026-10-28)
+
+The owner answered "Yes" to every recommendation of this note's questions.

@@ -635,3 +635,8 @@ interfaces and the stock A1200. What they found and what revision 2 did:
 16. D13 details (members checked, ETXTBSY, the 255x cap, the buffer owned by the new pid). -> 5.4, 6.1, 6.2.
 17. Missing owner questions: the source for a GPL hand-out, the default keyboard; each keymap costs every user. ->
     questions 1, 2 and 8; two questions that were technical (2.06 MB, a bigger `/tmp`) decided instead (10; not taken).
+
+## Owner decision (2026-10-28)
+
+Postponed: "skip demo floppy for now". The design stays as revision 2; nothing is built and its questions stay open
+until the owner takes it up again.
