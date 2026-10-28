@@ -1,0 +1,121 @@
+ZPKG(8)			Zenix manual
+
+NAME
+    zpkg - install, update and remove packages
+
+SYNOPSIS
+    zpkg -Sy | -Syu | -Syuu
+    zpkg -S NAME...   zpkg -Sw NAME...   zpkg -Sc
+    zpkg -Ss WORD...  zpkg -Si NAME...
+    zpkg -Q [NAME...] | -Qi NAME... | -Ql NAME... | -Qo PATH... | -Qu
+    zpkg -R[s][n] NAME...
+    zpkg -U FILE...
+    zpkg --back NAME [--yes]
+    options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL
+             --ram  -q
+
+DESCRIPTION
+    zpkg keeps Zenix's programs up to date from a package repository on
+    a web server: plain files, signed with the owner's key (DESIGN D22).
+    It fetches and checks; /sbin/zup installs, one package at a time,
+    each as a transaction a power cut cannot leave half done (zup(8)).
+
+    -Sy      fetch the channel's package list when there is a newer one.
+             Its signature is checked before a line of it is read; a
+             list older than the one here (a replay), of another
+             channel, signed with the wrong kind of key, or past its
+             expiry date is refused. A server whose list is older than
+             the one here is "behind": the next server is tried.
+    -Syu     -Sy, then every installed package with a newer version in
+             the list. A newer system (the kernel, zup, zpkg, base) is
+             downloaded and checked, and zpkg says how it reaches the
+             boot partition: it is installed at the next restart, with
+             "Zenix (previous)" in the boot menu as the way back. Until
+             the update slot comes (D22 step 7) the owner copies it and
+             its .sig to BOOT:Zenix/ from AmigaOS. Packages that need
+             the new system are downloaded and wait: after the restart,
+             zpkg -Syu again.
+    -Syuu    as -Syu, and also down to the list's version where the
+             installed one is newer (after a channel change)
+    -S NAME  install packages and the dependencies they are missing,
+             dependencies first; -Sw only downloads and checks them
+    -Ss      search the stored list's names and descriptions
+    -Si      a package of the stored list, in words
+    -Sc      empty the download cache down to the installed version and
+             the one before of each package
+    -Q       the installed packages (-Qi in words, -Ql their files,
+             -Qo which package owns a path, -Qu those with a newer
+             version in the stored list). A package that needs a newer
+             base than the one running is marked.
+    -R NAME  remove packages; refused while an installed package needs
+             one of them. -s also removes the packages that were
+             installed only as dependencies and nothing else needs; -n
+             also deletes config files the owner changed (else they are
+             kept as PATH.save).
+    -U FILE  install a package file (a .zup and its .sig beside it, e.g.
+             received with rz): copied into the cache first, its
+             signature checked, then installed. Give the whole path.
+    --back NAME
+             put the newest cached version older than the installed one
+             back (asks first; --yes does not ask)
+
+    Everything is downloaded and checked before the first change: each
+    file against the list's size and SHA-256 while it streams to
+    /var/cache/zpkg/pkg/ (a cut download is resumed next time), its
+    header against the list's version and channel, its manifest's
+    dependencies against the list's, and the paths against what is
+    installed. Only then does zup install, dependencies first.
+
+    A running program keeps running the version it started with; zpkg
+    names the ones that do.
+
+OPTIONS
+    --snapshot NAME   read the dated snapshot NAME instead of the
+                      channel (a known state; its age and expiry are not
+                      checked, its name is: a list that is not that
+                      snapshot's is refused)
+    --ignore-expiry   once, a list past its expiry (when the clock is
+                      wrong)
+    --reset-serial CHANNEL
+                      forget the stored list of CHANNEL (or
+                      snapshot-NAME): the next -Sy takes any list signed
+                      for it, also an older one
+    --ram             go on although the root is a RAM disk (what is
+                      installed is gone at the next start)
+    -q                fewer words
+
+FILES
+    /etc/zpkg.conf            channel NAME, server URL (in order), hold
+                              NAME, cache KB (a config file: an owner's
+                              change survives updates)
+    /var/lib/zpkg/            the installed packages (zup's manifests),
+                              deps (installed only as a dependency),
+                              sync/ (the stored lists), lock
+    /var/cache/zpkg/pkg/      downloaded package files and their .sig
+
+EXIT STATUS
+    0 when everything worked or there was nothing to do, 1 when
+    something was refused or failed (zpkg or zup says why), 2 for a
+    wrong argument.
+
+NOTES
+    Plain http:// servers only for now (the owner's NAS, D22 owner
+    decision 4); https:// comes with the stable channel on GitHub Pages
+    (D22 step 9). The shipped /etc/zpkg.conf names no server: add one,
+    for example
+        server http://NAS:8088/zenix
+    The keys zpkg trusts are built in: a test build trusts only the
+    test key (the channel test), a release build only the release keys
+    (testing, stable). Only root changes packages; -Ss, -Si and -Q are
+    for everyone. zpkg changes nothing on a ZenixFS root (a test root),
+    while a new system is on trial (not confirmed yet), or without a
+    package database. During a system update's restart nothing is new:
+    zenixboot and zup do what they always do (zenixboot(8), zup(8)).
+    If the PC stops re-signing the list, every machine refuses it 60
+    days after its last signature (a frozen repository cannot be
+    passed off as current); --ignore-expiry goes on once. --back looks
+    only in the cache for now (an image's first install has none).
+    Verified in FS-UAE (tools/zpkg-emu-test.sh) over the A2065 and SLIP.
+
+SEE ALSO
+    zup(8), zenixboot(8), docs/d22-zpkg.md

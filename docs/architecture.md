@@ -337,12 +337,20 @@ for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the num
   one item a line: `zpkg 1`, `name NAME`, `version NUMBER STRING`, `group base` (the packages that move as one),
   `depends NAME NUMBER` (at least that version), then the entries: `f MODE UID GID SHA256 SIZE /PATH` (a file),
   `c ...` (the same for a config file the owner may edit), `l TARGET /PATH` (a symbolic link), `d MODE UID GID /PATH`
-  (a directory). Words a later format adds are ignored by older readers. A path is at most 55 bytes (with
+  (a directory); since D22 also `desc TEXT` (one line) and `takes OTHER` (8.4.4). Words a later format adds are
+  ignored by older readers. A path is at most 55 bytes (with
   `.zup-new` it fits a system call's 63). The `.tgz` is a gzip'd ustar archive of the `f` and `c` files in manifest
   order. The standard packages: **zup** (`/sbin/zup`), **base** (`init`, `login`, `sh`, `mount`, the config files
   `/etc/svctab`, `passwd`, `group`, `fstab`, `motd`; `/etc/autologin` belongs to the test images and is never
-  shipped), **utils** (every other command, the links such as `more`), **man** (the manual pages). The full root
-  images (`zenix.hdf`, the SD card's root) carry the manifests of what they hold in `/var/lib/zpkg/`.
+  shipped; the servers on the disk, the network drivers, the licences, the console font, the root certificates) -
+  these two are the group base, which moves only with the system (zpkg in D22 step 5 joins it) - and, since D22
+  step 4 (8.4.4), the families (`tools/mkzup.py` FAMILIES: coreutils, textutils, grep, sed, awk, pager, shadow,
+  nettools, ssh, zenix-tests and others, about 26), each with its programs, links and manual pages, and **base-man**
+  (the pages of the base programs and of what is not a command); every family `takes utils` and `man`, the one-piece
+  packages of the D15 bundles, and base-man `takes man`, so a machine installed before the split moves over one
+  family at a time, live. The full root images (`zenix.hdf`, the SD card's root) carry the manifests of what they
+  hold in `/var/lib/zpkg/`. **The system bundle** (`make bundle`) carries the kernel and the base group only (D22
+  3.1, `mkzup.py bundle --base-only`); the families are installed live (`zup -f`, zpkg).
 - **The bundle** (`make bundle`: `build/zenix-update.zup`), big-endian: a 96-byte header (`ZUP1`, format 1, header
   size 96, version number, version string[16], date `YYYYMMDD`, the lowest installed base version it applies to
   (0: any), channel[8], table-of-contents offset 96 and entry count (1-64), total size (at most 16 MB), flags 0, and
@@ -357,7 +365,10 @@ for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the num
   deleted, `state.new` renamed, flushed; a start that finds only `state.new` reads it. The files beside it:
   `zenix`, `zenix.new`, `zenix.old`, `zenix.rejected`, `zenix-update.zup` (`.part` while copied, `.bad`, `.done`,
   `.rejected`). The bootinfo fields: `+0x78` the bundle's address (16-aligned), `+0x7C` its size (0: none), `+0x80`
-  flags (bit 0: going back, "Zenix (previous)").
+  flags (bit 0 `UPD_F_ROLLBACK`: going back, "Zenix (previous)"; bit 1 `UPD_F_TRIAL`: handed over during an
+  unconfirmed trial, DESIGN D22 4.3, claimed and kept by the kernel after `UPD_RELEASE`, set by zenixboot from D22 step 7).
+- **One parser of each format** (DESIGN D22 4.2): `user/zpkgfmt.c` reads manifests and bundles for zup, zpkg and the
+  host tests (fuzzed: `tools/host/zpkg-test.sh fuzz`, target `fmt`).
 - **zup** (`user/zup.c`, `/sbin/zup`, man/zup.txt) installs the packages of a bundle onto the root, as one
   transaction: `/var/lib/zpkg/journal` (text: `zupj 1`, `target VERSION T`, one line an operation - `OP LINK MODE UID
   GID SHA TARGET OLD PATH`, `-` where nothing applies; OP is `R` replace, `A` add, `D` delete, `l` new link, `L`
@@ -376,6 +387,22 @@ for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the num
   config file never). The database is the installed manifests, `/var/lib/zpkg/NAME.manifest`; the one-line result
   goes to `/var/lib/zpkg/result`. Built for the PC with `tools/host/zup-host.c` (the same system calls on a directory,
   a power cut before any chosen change) for `tools/zup-host-test.sh`.
+- **Live transactions** (DESIGN D22 4.2, `zup -f FILE`, `zup -r NAME`): one package each, from a package bundle (one
+  package, no kernel; read from the file twice, its SHA-256 then unpacked, never held in memory) or removed. The
+  journal says `live 1 NAME` in its second line, before any operation (made with `O_EXCL`); the previous files go to
+  `/var/cache/zpkg/live/f/`, emptied at the commit (and at the next start of a transaction), no undo log, no result
+  line, no update note; its commit or recovery never touches a prev set. Live-only operations (growth of the journal;
+  only a zup that writes a live journal reads one): `S` a changed config file of a removed package renamed
+  `PATH.save` (a prev link first), `M` a new directory, `X` a removed package's directory removed if empty (both undone
+  by a rollback). `takes OTHER` in a manifest (D22 8.4.4) hands OTHER's listed paths over: the three-way compare uses
+  OTHER's entry, and OTHER's manifest is rewritten without them in the same transaction (removed with its last
+  entry). `/var/lib/zpkg/lock` holds the pid of the zup or zpkg that changes packages (`O_EXCL`; a zup goes on under
+  its parent's; a holder that is not a living zup or zpkg, while no other zup lives, is stale), made and removed under
+  the "needs a check" mark; the boot run takes it only for a journal or a way back without a bundle. zup refuses live
+  changes to the base group (by group and by name), to a package the newest prev set's undo logs hold, during a trial
+  (`UPD_F_TRIAL`), and paths owned by another package, unowned existing ones, under `/var/lib/zpkg` or
+  `/var/cache/zpkg`, or below a symbolic link (man/zup.txt). The installed-manifest table and the change table grow
+  as needed (at most 1,024 changes a transaction).
 
 ## 4. Executables: ZEXE and relocation
 
@@ -713,7 +740,8 @@ bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the b
 
 **Updates** (D15, section 3 "Updates"): `SYS_update(op, a, b)` (82). `UPD_INFO` fills `struct uupdate` (32 bytes, frozen,
 at most the size given in `b`: the bundle's address and size - 0 when there is none -, its flags, the running kernel's
-version number and string from the `ZVER` record; anyone); `UPD_RELEASE` gives the bundle's memory back to the pool
+version number and string from the `ZVER` record; anyone; the flags `UPD_F_ROLLBACK` 1 and `UPD_F_TRIAL` 2, the trial
+bit kept after `UPD_RELEASE`); `UPD_RELEASE` gives the bundle's memory back to the pool
 (root; `boot` calls it after zup, whatever zup did); `UPD_NOTE` (root) writes the update note (kind 1 done, 2 failed,
 3 confirmed, 4 confirmed but the root half failed - what a 3 over a 2 or 4 of the same version becomes -, and a
 version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version
@@ -1102,11 +1130,13 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   (`tools/ext2-host-test.sh`, then `e2fsck -fn`). **The same rule for every request (audit 2026-10-26 F5): a power
   cut leaves only leaks**, never a block or inode in use marked free, a count below its names or a `..` naming a free
   inode: freeing a file's blocks (delete, truncate) writes the inode without them first and frees them in the bitmaps
-  after, its number last; `mkdir` raises the parent's count before adding the entry; `rmdir` refuses (-ENOTEMPTY) a
+  after, its number last; `mkdir` raises the parent's count before the new directory (and its `..`) exists (D22 step 4: before, a cut between the
+  two left a `..` the parent did not count, which an rmdir of the parent then left naming a free inode); `rmdir` refuses (-ENOTEMPTY) a
   directory whose count says a subdirectory still points at it (one a cut left unnamed). What a cut can leave is a
   count one too high, an unnamed inode or directory, blocks or inodes marked in use that nothing holds, free counts a
-  little off: space lost until `fsck.ext2` or `e2fsck` gives it back. Tested on the host by cutting the disk after
-  each of an update's 2200 block writes (`tools/zup-host-test.sh` section 3, `tools/e2safe.py` sorts e2fsck's findings
+  little off: space lost until `fsck.ext2` or `e2fsck` gives it back. A deleted inode's dtime is never below the
+  inode count (e2fsck reads such a value as an orphan-list link; a clock never set writes times near 1970). Tested on the host by cutting the disk after
+  each of an update's 2200 block writes and of a live `zup -f` and `zup -r` (`tools/zup-host-test.sh` section 3, `tools/e2safe.py` sorts e2fsck's findings
   into leaks and the rest). Such a cut leaves the volume marked "not cleanly unmounted" (the clean mark, section 9,
   DESIGN D17): boot checks a marked root with `fsck.ext2 -y` at the next start, `mount -a` a marked volume of
   `/etc/fstab`, and `fsck.ext2` repairs every leak a cut leaves in one run (`tools/zup-host-test.sh`,

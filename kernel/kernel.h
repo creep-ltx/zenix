@@ -123,6 +123,8 @@ void upd_release(void);
 #define UPD_RELEASE   2                 /* root: the bundle's memory back to the pool */
 #define UPD_NOTE      3                 /* root: kind (UPDNOTE_*), version -> the update note */
 #define UPD_F_ROLLBACK 1u               /* bootinfo flags: "Zenix (previous)" (zenixboot PREVIOUS) */
+#define UPD_F_TRIAL    2u               /* bootinfo flags: handed over during an unconfirmed trial (DESIGN D22 4.3;
+                                         * zenixboot sets it from D22 step 7); kept after UPD_RELEASE */
 #define UPDNOTE_FAILED    2u
 #define UPDNOTE_CONFIRMED 3u
 #define UPDNOTE_ROOTFAILED 4u           /* CONFIRMED over a FAILED (or ROOTFAILED) of the same version (audit3 B1) */

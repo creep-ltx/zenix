@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* zup: installs the root half of an update (DESIGN D15, docs/d15-self-updates.md section 5; docs/man/zup.txt).
+/* zup: installs the root half of an update (DESIGN D15, docs/d15-self-updates.md section 5) and, since DESIGN D22
+ * (docs/d22-zpkg.md 4.2), single packages for zpkg; docs/man/zup.txt.
  * boot runs it at every start, after the root is mounted and before anything else (user/boot.c):
  *   1. a journal left by a power cut: finish the install (every new file complete and checked) or roll it back;
  *   2. "Zenix (previous)" (the rollback flag) or a kernel older than the installed base: put the previous version
@@ -7,6 +8,9 @@
  *   3. a bundle zenixboot left in memory (SYS_update INFO): check all of it before any change (SHA-256 of every part,
  *      versions, dependencies, space), install a newer zup first and run it for the rest, then the other packages
  *      in one transaction.
+ * zup -f FILE (one package bundle, streamed from the file) and zup -r NAME (one package removed) are live
+ * transactions (D22 4.2): the same engine, under /var/lib/zpkg/lock, their previous files in /var/cache/zpkg/live/
+ * until the commit; they never touch a prev set (the system's way back) and never a base-group package.
  * A transaction: the journal (written and synced first), the volume marked "needs a check", every replaced or removed
  * file hard-linked into prev-V/f/ (no copies), each new file written as PATH.zup-new, checked against its SHA-256,
  * owner then mode set, renamed over PATH (crash-safe in ext2 since D15 step 0, and a running program keeps its code,
@@ -25,17 +29,16 @@ typedef unsigned short u16;
 #include "../kernel/fsproto.h"
 #endif
 #include "miniz.h"
+#include "zpkgfmt.h"
 
 #define DB       "/var/lib/zpkg"
 #define JOURNAL  DB "/journal"
+#define LOCK     DB "/lock"
 #define RESULT   DB "/result"
 #define CACHE    "/var/cache/zpkg"
-#define MAXPKG   16
-#define MAXDEP   8
+#define MAXPKG   ZF_MAXPKG
 #define MAXOPS   1024
-#define PMAX     64             /* every path given to a system call is at most 63 bytes */
-#define HDR      96
-#define TOCE     80
+#define PMAX     ZF_PMAX        /* every path given to a system call is at most 63 bytes */
 
 static int failed;              /* an error was reported: the exit status */
 static char result[200];        /* the one-line result for init and login (RESULT) */
@@ -44,35 +47,15 @@ static char lastmsg[160];       /* the last thing said: the reason a refusal giv
 /* Every message goes out the moment it is said: libz's printf writes each call with one write() (only oputs and
  * oprintf collect output), so a zup that is stopped or loses its power has shown all it said (audit 2026-10-26 F3:
  * checked, it was never buffered; tools/update-test.sh slowzup checks the messages of the zups boot stopped). */
-static void say(const char *fmt, ...)
+static void vsay(const char *fmt, va_list ap)
 {
-    va_list ap;
-    va_start(ap, fmt);
     vsnprintf(lastmsg, sizeof lastmsg, fmt, ap);
-    va_end(ap);
     printf("zup: %s\n", lastmsg);
 }
-
-static int has_nul(const void *p, u32 n) { const u8 *q = p; while (n--) if (!*q++) return 1; return 0; }
-static u32 be32(const u8 *p) { return (u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | p[3]; }
+static void say(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vsay(fmt, ap); va_end(ap); }
+void zf_say(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vsay(fmt, ap); va_end(ap); }   /* user/zpkgfmt.c's */
 
 /* ---- small helpers ---- */
-static int hexval(int c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; }
-static int parse_sha(const char *s, u8 out[32])
-{
-    for (int i = 0; i < 32; i++) {
-        int a = hexval(s[2 * i]), b = a < 0 ? -1 : hexval(s[2 * i + 1]);
-        if (b < 0) return -1;
-        out[i] = (u8)(a << 4 | b);
-    }
-    return s[64] ? -1 : 0;
-}
-static void put_sha(char *out, const u8 h[32])
-{
-    static const char hx[] = "0123456789abcdef";
-    for (int i = 0; i < 32; i++) { out[2 * i] = hx[h[i] >> 4]; out[2 * i + 1] = hx[h[i] & 15]; }
-    out[64] = 0;
-}
 static int pjoin(char *out, const char *a, const char *b)   /* a + b, at most 63 bytes */
 {
     u32 la = strlen(a), lb = strlen(b);
@@ -170,241 +153,242 @@ static int fs_mark(int unclean)
     return port < 0 ? port : sys_call(port, &m);
 }
 
-/* ---- manifests ---- */
-struct ent { char kind; u16 mode, uid, gid; u8 sha[32]; u32 size; char *path, *target; };
-struct pkg {
-    char *name, *vstr, *group, *text;
-    u32 vnum, textlen;
-    int ndep; char *dep[MAXDEP]; u32 depv[MAXDEP];
-    int nent; struct ent *ent;
-    const u8 *tgz; u32 tgzlen;              /* in the bundle */
-    const u8 *man; u32 manlen;
-};
-
-static int path_ok(const char *p)
+/* ---- the lock (DESIGN D22 4.2): one zup or zpkg changes packages at a time ----
+ * /var/lib/zpkg/lock holds the pid of the zpkg or zup that changes things. It is made whole or not at all: the pid is
+ * written to lock.PID, which is then linked to lock (an O_EXCL step: a reader never sees it empty). A zup finds it
+ * held by its parent (zpkg, or the zup that runs it as stage 2) and goes on under it, unless a sibling zup runs too;
+ * held by another living zup or zpkg it refuses; a holder that is not a living zup or zpkg is stale only while no
+ * other zup or zpkg lives (one may still run after the zpkg that held the lock for it died), and is then taken over.
+ * Only the holder removes it. The lock file's own writes need no "needs a check" mark of zup's: each is one request,
+ * which the filesystem's own clean mark covers (D17); only the holder ever touches the mark (review 2026-10-28).
+ * Processes carry no owner in SYS_procinfo: a user's program named zup or zpkg can make zup wait, never go ahead. */
+static int lock_mine;
+static int proc_get(int pid, struct uproc *out)              /* the living process with this pid: 1, else 0 */
 {
-    u32 n = strlen(p);
-    if (p[0] != '/' || n < 2 || n > PMAX - 9 || p[n - 1] == '/' || strstr(p, "//") || strstr(p, "/./") || strstr(p, "/../"))
-        return 0;
-    if (!strcmp(p + n - 2, "/.") || (n >= 3 && !strcmp(p + n - 3, "/..")))    /* a final . or .. (audit3 B6) */
-        return 0;
-    for (const char *q = p; *q; q++)
-        if (!isalnum(*q) && !strchr("._+/-", *q)) return 0;
-    return 1;
+    for (u32 i = 1; sys_procinfo(i, out) >= 0; i++)
+        if (out->state && out->state != 5 && (int)out->pid == pid) return 1;   /* 5: a zombie */
+    return 0;
 }
-/* a package name (used in paths: the database's NAME.manifest): [a-z0-9][a-z0-9+.-]*, at most 24 (audit3 B6) */
-static int name_ok(const char *p)
+static int is_pkgprog(const struct uproc *p) { return !strcmp(p->name, "zup") || !strcmp(p->name, "zpkg"); }
+static int other_pkgprog(int me, int ppid)                  /* another living zup or zpkg than us and our parent */
 {
-    u32 n = strlen(p);
-    if (n < 1 || n > 24 || !((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9'))) return 0;
-    for (; *p; p++)
-        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '+' || *p == '.' || *p == '-')) return 0;
-    return 1;
+    struct uproc p;
+    for (u32 i = 1; sys_procinfo(i, &p) >= 0; i++)
+        if (p.state && p.state != 5 && is_pkgprog(&p) && (int)p.pid != me && (int)p.pid != ppid) return (int)p.pid;
+    return 0;
 }
-static u32 num(const char *s, int base, int *bad)
+static int lock_holder(void)
 {
-    char *e;
-    if (!*s) { *bad = 1; return 0; }
-    u32 v = (u32)strtoul(s, &e, base);
-    if (*e) *bad = 1;
-    return v;
+    u32 len;
+    char *t = slurp(LOCK, &len);
+    int h = t ? (int)strtoul(t, 0, 10) : 0;
+    free(t);
+    return h;
 }
-/* text: a manifest (malloc'd, NUL-terminated; kept by the pkg). 0, or -EINVAL with the reason said */
-static int parse_manifest(struct pkg *p, char *text, u32 len, const char *where)
+static int lock_take(void)                                  /* 0, or -EBUSY (said), or another error */
 {
-    memset(p, 0, sizeof *p);
-    p->text = text; p->textlen = len;
-    if (strncmp(text, "zpkg 1\n", 7)) { say("%s: not a zpkg 1 manifest", where); return -EINVAL; }
-    int cap = 0;
-    for (char *l = text, *e; *l; l = e) {
-        for (e = l; *e && *e != '\n'; e++) ;
-        if (*e) *e++ = 0;
-        char *w[10]; int nw = 0;
-        for (char *q = l; *q && nw < 10; ) {
-            while (*q == ' ') *q++ = 0;
-            if (!*q) break;
-            w[nw++] = q;
-            while (*q && *q != ' ') q++;
-        }
-        if (!nw) continue;
-        int bad = 0;
-        if (!strcmp(w[0], "name") && nw == 2) { p->name = w[1]; if (!name_ok(w[1])) bad = 1; }
-        else if (!strcmp(w[0], "version") && nw == 3) { p->vnum = num(w[1], 10, &bad); p->vstr = w[2]; }
-        else if (!strcmp(w[0], "group") && nw == 2) p->group = w[1];
-        else if (!strcmp(w[0], "depends") && nw == 3) {
-            if (p->ndep == MAXDEP) { say("%s: more than %d dependencies", where, MAXDEP); return -EINVAL; }
-            p->dep[p->ndep] = w[1]; p->depv[p->ndep++] = num(w[2], 10, &bad);
-            if (!name_ok(w[1])) bad = 1;
-        } else if ((!strcmp(w[0], "f") || !strcmp(w[0], "c") || !strcmp(w[0], "d") || !strcmp(w[0], "l")) && nw >= 3) {
-            struct ent x;
-            memset(&x, 0, sizeof x);
-            x.kind = w[0][0];
-            if (x.kind == 'f' || x.kind == 'c') {
-                if (nw != 7) bad = 1;
-                else {
-                    x.mode = (u16)num(w[1], 8, &bad); x.uid = (u16)num(w[2], 10, &bad); x.gid = (u16)num(w[3], 10, &bad);
-                    if (parse_sha(w[4], x.sha)) bad = 1;
-                    x.size = num(w[5], 10, &bad); x.path = w[6];
-                }
-            } else if (x.kind == 'd') {
-                if (nw != 5) bad = 1;
-                else { x.mode = (u16)num(w[1], 8, &bad); x.uid = (u16)num(w[2], 10, &bad); x.gid = (u16)num(w[3], 10, &bad); x.path = w[4]; }
-            } else {
-                if (nw != 3) bad = 1;
-                else { x.target = w[1]; x.path = w[2]; if (strlen(x.target) >= PMAX - 9) bad = 1; }
+    int me = sys_getpid(), ppid = 0, z, r = 0;
+    struct uproc p;
+    char mine[PMAX], b[16];
+    if (proc_get(me, &p)) ppid = (int)p.ppid;
+    snprintf(mine, sizeof mine, LOCK ".%d", me);
+    for (int tries = 0; tries < 3; tries++) {
+        int fd = sys_open(mine, O_WRONLY | O_CREAT | O_TRUNC);
+        if (fd < 0 && tries == 0) { mkdirs(DB); continue; }
+        if (fd < 0) { say("cannot make %s (%d)", mine, fd); return fd; }
+        int n = snprintf(b, sizeof b, "%d\n", me);
+        r = write_all(fd, b, (u32)n);
+        sys_close(fd);
+        if (r == 0) r = sys_link(mine, LOCK);
+        sys_unlink(mine);
+        if (r == 0) {                                   /* lock.PID files a cut left behind go */
+            char **names;
+            int n = dir_list(DB, &names);
+            for (int i = 0; i < n; i++) {
+                char lp[PMAX];
+                int pid = !strncmp(names[i], "lock.", 5) ? (int)strtoul(names[i] + 5, 0, 10) : 0;
+                if (pid > 0 && pid != me && !proc_get(pid, &p) && !pjoin(lp, DB "/", names[i])) sys_unlink(lp);
             }
-            if (bad || !path_ok(x.path) || (x.mode & ~07777u)) { say("%s: a bad entry (%s)", where, w[0]); return -EINVAL; }
-            if (p->nent == cap) {
-                cap = cap ? cap * 2 : 64;
-                struct ent *ne = realloc(p->ent, (u32)cap * sizeof *ne);
-                if (!ne) { say("out of memory"); return -ENOMEM; }
-                p->ent = ne;
-            }
-            p->ent[p->nent++] = x;
+            dir_free(names, n);
+            lock_mine = 1;
+            return 0;
         }
-        /* any other line: something a later format added (append-only): ignored */
-        if (bad) { say("%s: a bad line (%s)", where, w[0]); return -EINVAL; }
+        if (r != -EEXIST) { say("cannot make %s (%d)", LOCK, r); return r; }
+        int holder = lock_holder();
+        if (holder > 0 && holder != me && proc_get(holder, &p) && is_pkgprog(&p)) {
+            if (holder == ppid) {                           /* our zpkg (or stage 1) holds it for us */
+                if ((z = other_pkgprog(me, ppid))) { say("another %s (pid %d) runs beside this one: nothing done", "zup or zpkg", z); return -EBUSY; }
+                return 0;
+            }
+            say("another %s (pid %d) is changing packages: nothing done", p.name, holder);
+            return -EBUSY;
+        }
+        if ((z = other_pkgprog(me, ppid))) { say("another zup or zpkg (pid %d) is still changing packages: nothing done", z); return -EBUSY; }
+        sys_unlink(LOCK);                                   /* stale: taken over */
     }
-    if (!p->name || !p->vstr || !p->vnum) { say("%s: no name or version", where); return -EINVAL; }
-    return 0;
+    say("cannot take %s", LOCK);
+    return -EBUSY;
 }
-static struct ent *find_ent(struct pkg *p, const char *path)
+static void lock_drop(void)
 {
-    for (int i = 0; p && i < p->nent; i++)
-        if (!strcmp(p->ent[i].path, path)) return &p->ent[i];
-    return 0;
+    if (!lock_mine) return;
+    if (lock_holder() == sys_getpid()) { sys_unlink(LOCK); sys_sync(); }   /* (sync: the volume is clean again, D17) */
+    lock_mine = 0;
 }
 
-/* the installed manifest of a package (/var/lib/zpkg/NAME.manifest), or 0 */
-static struct pkg *installed(const char *name)
+/* ---- manifests (user/zpkgfmt.c) ---- */
+/* the installed manifests (/var/lib/zpkg/NAME.manifest): a table that grows as needed. A damaged manifest or no
+ * memory sets dberr: live transactions refuse then (a package wrongly taken as "not installed" could lose files) */
+static struct zf_pkg **db;
+static int ndb, dbcap, dberr, dball;
+static struct zf_pkg *installed(const char *name)
 {
-    static struct pkg db[MAXPKG * 2];
-    static int ndb;
     for (int i = 0; i < ndb; i++)
-        if (!strcmp(db[i].name, name)) return &db[i];
+        if (!strcmp(db[i]->name, name)) return db[i];
     char path[PMAX];
     u32 len;
-    if (pjoin(path, DB "/", name) || pjoin(path, path, ".manifest")) return 0;
+    struct ustat st;
+    if (pjoin(path, DB "/", name) || pjoin(path, path, ".manifest") || sys_lstat(path, &st) < 0) return 0;
+    if (ndb == dbcap) {
+        int nc = dbcap ? dbcap * 2 : 16;
+        struct zf_pkg **n = realloc(db, (u32)nc * sizeof *n);
+        if (!n) { say("out of memory for the package database"); dberr = 1; return 0; }
+        db = n; dbcap = nc;
+    }
     char *t = slurp(path, &len);
-    if (!t || ndb == MAXPKG * 2) { free(t); return 0; }
-    if (parse_manifest(&db[ndb], t, len, path)) { free(t); return 0; }
-    return &db[ndb++];
-}
-static u32 base_version(void) { struct pkg *b = installed("base"); return b ? b->vnum : 0; }
-
-/* ---- the bundle (in memory, from zenixboot: read in place, never passed to a system call) ---- */
-struct bundle { const u8 *p; u32 len, vnum, minv; char vstr[17]; int npkg; struct pkg pk[MAXPKG]; };
-
-static int sha_ok(const u8 *data, u32 len, const u8 *want)
-{
-    u8 h[32];
-    sha256(data, len, h);
-    return !memcmp(h, want, 32);
-}
-static int bundle_parse(struct bundle *b, const u8 *p, u32 len)
-{
-    memset(b, 0, sizeof *b);
-    b->p = p; b->len = len;
-    if (len < HDR || memcmp(p, "ZUP1", 4) || be32(p + 4) != 1 || be32(p + 8) != HDR) { say("the bundle is not a ZUP1 bundle"); return -EINVAL; }
-    u32 ntoc = be32(p + 52), total = be32(p + 56);
-    if (total != len) { say("the bundle is %u bytes, its header says %u", len, total); return -EINVAL; }
-    if (be32(p + 48) != HDR || ntoc < 1 || ntoc > 64 || ntoc * TOCE > len - HDR) { say("the bundle's table of contents is bad"); return -EINVAL; }
-    struct sha256 c; u8 h[32];
-    sha256_init(&c); sha256_update(&c, p, 64); sha256_update(&c, p + HDR, ntoc * TOCE); sha256_final(&c, h);
-    if (memcmp(h, p + 64, 32)) { say("the bundle's table of contents does not match its SHA-256"); return -EINVAL; }
-    b->vnum = be32(p + 12); b->minv = be32(p + 36);
-    memcpy(b->vstr, p + 16, 16); b->vstr[16] = 0;
-    for (u32 i = 0; i < ntoc; i++) {
-        const u8 *e = p + HDR + i * TOCE;
-        u32 off = be32(e + 40), size = be32(e + 44);
-        char name[41];
-        memcpy(name, e, 40); name[40] = 0;
-        if (!has_nul(e, 40)) { say("part %u: its name is not terminated", i); return -EINVAL; }
-        if (off < HDR + ntoc * TOCE || off > len || size > len - off) { say("%s: outside the bundle", name); return -EINVAL; }
-        if (!sha_ok(p + off, size, e + 48)) { say("%s: SHA-256 does not match (the bundle is damaged)", name); return -EINVAL; }
-        if (strncmp(name, "pkg/", 4)) continue;             /* boot/: zenixboot's */
-        char *dot = strrchr(name, '.');
-        if (!dot || dot - name - 4 < 1 || dot - name - 4 > 24) { say("%s: not a package part", name); return -EINVAL; }
-        *dot = 0;
-        if (!name_ok(name + 4)) { say("%s: a bad package name (only a-z 0-9 + . -)", name); return -EINVAL; }
-        struct pkg *k = 0;
-        for (int j = 0; j < b->npkg; j++) if (!strcmp(b->pk[j].name, name + 4)) k = &b->pk[j];
-        if (!k) {
-            if (b->npkg == MAXPKG) { say("more than %d packages in the bundle", MAXPKG); return -EINVAL; }
-            k = &b->pk[b->npkg++];
-            k->name = strdup(name + 4);
-            if (!k->name) return -ENOMEM;
-        }
-        if (!strcmp(dot + 1, "manifest")) { k->man = p + off; k->manlen = size; }
-        else if (!strcmp(dot + 1, "tgz")) { k->tgz = p + off; k->tgzlen = size; }
-        else { say("%s.%s: not a package part", name, dot + 1); return -EINVAL; }
+    struct zf_pkg *k = malloc(sizeof *k);
+    if (!t || !k) { free(t); free(k); say("%s: cannot read it", path); dberr = 1; return 0; }
+    if (zf_manifest_parse(k, t, len, path) || strcmp(k->name, name)) {
+        say("%s: the package database is damaged", path);
+        zf_pkg_free(k); free(k); dberr = 1;
+        return 0;
     }
-    for (int j = 0; j < b->npkg; j++) {
-        struct pkg *k = &b->pk[j];
-        char *pname = k->name;
-        const u8 *man = k->man, *tgz = k->tgz; u32 ml = k->manlen, tl = k->tgzlen;
-        if (!man || !tgz) { say("package %s: its manifest or its files are missing", pname); return -EINVAL; }
-        char *t = malloc(ml + 1);
-        if (!t) return -ENOMEM;
-        memcpy(t, man, ml); t[ml] = 0;
-        if (has_nul(t, ml)) { say("package %s: a NUL in its manifest", pname); return -EINVAL; }
-        if (parse_manifest(k, t, ml, pname)) return -EINVAL;
-        if (strcmp(k->name, pname)) { say("package %s: its manifest names %s", pname, k->name); return -EINVAL; }
-        k->man = man; k->manlen = ml; k->tgz = tgz; k->tgzlen = tl;
-        free(pname);
+    return db[ndb++] = k;
+}
+static void installed_all(void)                             /* every installed manifest into the table */
+{
+    char **names;
+    if (dball) return;
+    dball = 1;
+    int n = dir_list(DB, &names);
+    for (int i = 0; i < n; i++) {
+        u32 l = strlen(names[i]);
+        if (l < 10 || strcmp(names[i] + l - 9, ".manifest")) continue;
+        names[i][l - 9] = 0;
+        if (zf_name_ok(names[i])) installed(names[i]);
     }
-    return 0;
+    dir_free(names, n);
+}
+static u32 base_version(void) { struct zf_pkg *b = installed("base"); return b ? b->vnum : 0; }
+static void db_reset(void)                                  /* the table emptied: the manifests are read again */
+{
+    for (int i = 0; i < ndb; i++) { zf_pkg_free(db[i]); free(db[i]); }
+    ndb = dball = dberr = 0;
+}
+static u32 peek_base(void)                                  /* the base manifest's version, not kept in the table */
+{
+    u32 v = base_version();
+    db_reset();
+    return v;
 }
 
 /* ---- the plan: one transaction's operations ----
  * R replace (the old file kept as a prev link), A add, D delete (prev link), l a new link, L a changed link (the old
- * target kept), u a removed link (its target kept). The journal holds one line an operation:
+ * target kept), u a removed link (its target kept); live only (D22 4.2): S a changed config file of a removed package
+ * renamed PATH.save (a prev link first), M a new directory (so a rollback leaves none behind), X a directory of a
+ * removed package removed if empty (put back by a rollback). The journal holds one line an operation:
  *   OP LINK MODE UID GID SHA TARGET OLD PATH         ("-" for what does not apply; LINK is T.N in prev-V/f/) */
 struct op {
     char op, link[12];
     u16 mode, uid, gid;
     u8 sha[32]; int hassha;
     char *target, *old, *path;
-    struct pkg *pk; const char *mpath;      /* where the new content comes from: pk's tar member mpath, or its manifest */
+    struct zf_pkg *pk; const char *mpath;   /* where the new content comes from: pk's tar member mpath, */
+    const u8 *data; u32 datalen;            /* or these bytes (a manifest: the package's own, or a taken one rewritten) */
+    u32 size;                               /* R/A from a tar member: the manifest's size of it */
     int done;
 };
-static struct op ops[MAXOPS];
-static int nops;
+static struct op *ops;                      /* allocated for the plan's size (D22 4.2), at most MAXOPS */
+static int nops, opcap;
 static u32 target_v, tnum;                  /* the version being installed and the transaction number within it */
 static char prevdir[PMAX];
 static int nkept;
 static char kept[2][PMAX];
+static int live;                            /* a live transaction (zup -f / -r): prevdir live/, no undo log */
+static char livename[25];                   /* its package */
 
-static struct op *add_op(char op, const char *path)
+static struct op *op_new(void)
 {
-    if (nops == MAXOPS) { say("more than %d changes in one update", MAXOPS); return 0; }
+    if (nops == MAXOPS) return 0;
+    if (nops == opcap) {
+        int nc = opcap ? opcap * 2 : 32;
+        if (nc > MAXOPS) nc = MAXOPS;
+        struct op *n = realloc(ops, (u32)nc * sizeof *n);
+        if (!n) return 0;
+        ops = n; opcap = nc;
+    }
     struct op *o = &ops[nops++];
     memset(o, 0, sizeof *o);
+    return o;
+}
+static struct op *add_op(char op, const char *path)
+{
+    struct op *o = op_new();
+    if (!o) { say(nops == MAXOPS ? "more than %d changes in one update" : "out of memory for the plan", MAXOPS); return 0; }
     o->op = op;
     o->path = strdup(path);
-    if (op == 'R' || op == 'D') snprintf(o->link, sizeof o->link, "%u.%d", tnum, nops);
+    if (op == 'R' || op == 'D' || op == 'S') snprintf(o->link, sizeof o->link, "%u.%d", tnum, nops);
     else strcpy(o->link, "-");
     return o->path ? o : 0;
 }
-static int same_meta(const struct ustat *st, const struct ent *e)
+/* a link's target as it is now, for the journal (one word of mkzup's characters): 1, else 0 with the reason said */
+static int link_old(const char *path, char out[PMAX])
+{
+    int n = sys_readlink(path, out, PMAX - 1);
+    if (n < 0 || n >= PMAX - 9) { say("%s: its link cannot be read, or is too long: not replaced", path); return 0; }
+    out[n] = 0;
+    if (!zf_target_ok(out)) { say("%s: its link points to a name zup does not write down: not replaced", path); return 0; }
+    return 1;
+}
+static int same_meta(const struct ustat *st, const struct zf_ent *e)
 {
     return (st->mode & 07777) == e->mode && st->uid == e->uid && st->gid == e->gid;
 }
-static int plan_pkg(struct pkg *k)
+static int takes(const struct zf_pkg *k, const char *other)
 {
-    struct pkg *old = installed(k->name);
+    for (int i = 0; i < k->ntakes; i++) if (!strcmp(k->takes[i], other)) return 1;
+    return 0;
+}
+/* the entry a path had before this package's plan: its own older version's, or (takes, D22 8.4.4) a taken package's */
+static struct zf_ent *was_ent(struct zf_pkg *k, struct zf_pkg *old, const char *path)
+{
+    struct zf_ent *e = zf_find_ent(old, path);
+    for (int t = 0; !e && t < k->ntakes; t++) e = zf_find_ent(installed(k->takes[t]), path);
+    return e;
+}
+static int plan_pkg(struct zf_pkg *k)
+{
+    struct zf_pkg *old = installed(k->name);
     char tmp[PMAX];
+    for (int i = 0; live && i < k->nent; i++) {         /* live: the new directories first (M), so a rollback */
+        struct zf_ent *e = &k->ent[i];                  /* removes them last, after what went into them */
+        struct ustat st;
+        if (e->kind != 'd' || sys_lstat(e->path, &st) == 0) continue;
+        struct op *o = add_op('M', e->path);
+        if (!o) return -ENOMEM;
+        o->mode = e->mode; o->uid = e->uid; o->gid = e->gid;
+    }
     for (int i = 0; i < k->nent; i++) {
-        struct ent *e = &k->ent[i];
+        struct zf_ent *e = &k->ent[i];
         struct ustat st;
         int have = sys_lstat(e->path, &st) == 0;
         struct op *o;
-        if (e->kind == 'd') continue;                   /* made before the files (do_dirs) */
+        if (e->kind == 'd') continue;                   /* made before the files: do_dirs, or (live) the M above */
         if (e->kind == 'l') {
             if (have && (st.mode & S_IFMT) != S_IFLNK) { say("%s exists and is not a link: not replaced", e->path); return -EEXIST; }
             if (have && link_is(e->path, e->target)) continue;
             char oldt[PMAX] = "";
-            if (have) { int n = sys_readlink(e->path, oldt, sizeof oldt - 1); oldt[n > 0 ? n : 0] = 0; }
+            if (have && !link_old(e->path, oldt)) return -EINVAL;
             if (!(o = add_op(have ? 'L' : 'l', e->path))) return -ENOMEM;
             o->target = e->target; o->old = have ? strdup(oldt) : 0;
             continue;
@@ -415,9 +399,9 @@ static int plan_pkg(struct pkg *k)
             u8 cur[32];
             if (sha_file(e->path, cur)) { say("%s: cannot read it", e->path); return -EIO; }
             if (!memcmp(cur, e->sha, 32)) continue;     /* already the new one */
-            struct ent *was = find_ent(old, e->path);
+            struct zf_ent *was = was_ent(k, old, e->path);
             if (!was || memcmp(cur, was->sha, 32)) {    /* the owner changed it (or we cannot know): theirs stays */
-                if (pjoin(tmp, e->path, ".new") || !path_ok(tmp)) { say("%s.new: the name is too long", e->path); return -ENAMETOOLONG; }
+                if (pjoin(tmp, e->path, ".new") || !zf_path_ok(tmp)) { say("%s.new: the name is too long", e->path); return -ENAMETOOLONG; }
                 dest = tmp;
                 if (nkept < 2) strcpy(kept[nkept], e->path);
                 nkept++;
@@ -426,7 +410,7 @@ static int plan_pkg(struct pkg *k)
                 if (have && (st2.mode & S_IFMT) == S_IFREG && file_has(dest, e->sha)) continue;
                 if (have && (st2.mode & S_IFMT) != S_IFREG) { say("%s exists and is not a file", dest); return -EEXIST; }
             }
-        } else if (e->kind == 'c' && !have && find_ent(old, e->path)) {
+        } else if (e->kind == 'c' && !have && was_ent(k, old, e->path)) {
             continue;                                   /* the owner deleted a config file the last version had */
         } else if (have && same_meta(&st, e) && st.size == e->size && file_has(e->path, e->sha)) {
             continue;                                   /* unchanged */
@@ -434,17 +418,19 @@ static int plan_pkg(struct pkg *k)
         if (!(o = add_op(have ? 'R' : 'A', dest))) return -ENOMEM;
         o->mode = e->mode; o->uid = e->uid; o->gid = e->gid;
         memcpy(o->sha, e->sha, 32); o->hassha = 1;
-        o->pk = k; o->mpath = e->path;
+        o->pk = k; o->mpath = e->path; o->size = e->size;
     }
     for (int i = 0; old && i < old->nent; i++) {        /* what the new version no longer has */
-        struct ent *e = &old->ent[i];
+        struct zf_ent *e = &old->ent[i];
         struct ustat st;
-        if (find_ent(k, e->path) || sys_lstat(e->path, &st) < 0) continue;
+        if (zf_find_ent(k, e->path) || sys_lstat(e->path, &st) < 0) continue;
         if (e->kind == 'f' && (st.mode & S_IFMT) == S_IFREG) { if (!add_op('D', e->path)) return -ENOMEM; }
         else if (e->kind == 'l' && (st.mode & S_IFMT) == S_IFLNK) {
+            char cur[PMAX];
+            if (!link_old(e->path, cur)) return -EINVAL;
             struct op *o = add_op('u', e->path);
             if (!o) return -ENOMEM;
-            o->old = e->target;
+            o->old = strdup(cur);                       /* what is there now, which a rollback puts back */
         }
         /* c (the owner's settings) and d stay */
     }
@@ -455,13 +441,114 @@ static int plan_pkg(struct pkg *k)
     if (!o) return -ENOMEM;
     o->mode = 0644;
     sha256(k->man, k->manlen, o->sha); o->hassha = 1;
-    o->pk = k; o->mpath = 0;
+    o->data = k->man; o->datalen = k->manlen;
     return 0;
 }
-static void do_dirs(struct pkg *k)
+/* takes OTHER (D22 8.4.4): OTHER's manifest rewritten without the entries k lists, in the same transaction (an R of
+ * its database entry with text zup makes; a D when no entry is left). Only from live transactions (zup -f) */
+static int plan_takes(struct zf_pkg *k)
+{
+    for (int t = 0; t < k->ntakes; t++) {
+        struct zf_pkg *ot = installed(k->takes[t]);
+        if (!ot) continue;                              /* nothing installed to take from */
+        char mpath[PMAX];
+        u32 len, n = 0;
+        if (pjoin(mpath, DB "/", ot->name) || pjoin(mpath, mpath, ".manifest")) return -ENAMETOOLONG;
+        char *raw = slurp(mpath, &len), *out = raw ? malloc(len + 1) : 0;
+        if (!out) { free(raw); say("%s: cannot read it", mpath); return -EIO; }
+        int left = 0, gone = 0;
+        for (char *l = raw, *e; *l; l = e) {            /* line by line: an entry k lists is dropped */
+            for (e = l; *e && *e != '\n'; e++) ;
+            u32 ll = (u32)(e - l) + (*e ? 1 : 0);
+            int ent = (l[0] == 'f' || l[0] == 'c' || l[0] == 'l') && l[1] == ' ';   /* d: shared, stays */
+            if (ent) {
+                char *p = e;                            /* the path is the last word */
+                while (p > l && p[-1] != ' ') p--;
+                char path[PMAX];
+                u32 pl = (u32)(e - p);
+                if (pl < PMAX) { memcpy(path, p, pl); path[pl] = 0; } else path[0] = 0;
+                if (zf_find_ent(k, path)) { gone++; e += *e ? 1 : 0; continue; }
+                left++;
+            }
+            memcpy(out + n, l, ll); n += ll;
+            e += *e ? 1 : 0;
+        }
+        free(raw);
+        if (!gone) { free(out); continue; }
+        for (int i = 0; !left && i < ndb; i++)          /* emptied: nothing installed may need it (review 2026-10-28) */
+            for (int d = 0; db[i] != ot && db[i] != installed(k->name) && d < db[i]->ndep; d++)
+                if (!strcmp(db[i]->dep[d], ot->name) && strcmp(db[i]->name, k->name)) {
+                    say("%s takes all of %s, which %s needs: refused", k->name, ot->name, db[i]->name);
+                    free(out);
+                    return -EPERM;
+                }
+        struct op *o = add_op(left ? 'R' : 'D', mpath);
+        if (!o) { free(out); return -ENOMEM; }
+        if (left) {
+            o->mode = 0644;
+            sha256(out, n, o->sha); o->hassha = 1;
+            o->data = (const u8 *)out; o->datalen = n;
+        } else free(out);
+    }
+    return 0;
+}
+/* zup -r: every file, link and config file of the package (a changed config file kept as PATH.save, or with -n
+ * deleted), then its database entry. A path another installed package also lists stays */
+static int owned_by_other(struct zf_pkg *k, const char *path)
+{
+    for (int i = 0; i < ndb; i++)
+        if (db[i] != k && zf_find_ent(db[i], path)) return 1;
+    return 0;
+}
+static int plan_remove(struct zf_pkg *k, int nosave)
 {
     for (int i = 0; i < k->nent; i++) {
-        struct ent *e = &k->ent[i];
+        struct zf_ent *e = &k->ent[i];
+        struct ustat st;
+        if (e->kind == 'd' || sys_lstat(e->path, &st) < 0 || owned_by_other(k, e->path)) continue;
+        if (e->kind == 'l') {
+            char cur[PMAX];
+            if ((st.mode & S_IFMT) != S_IFLNK) continue;
+            if (!link_old(e->path, cur)) return -EINVAL;
+            struct op *o = add_op('u', e->path);
+            if (!o) return -ENOMEM;
+            o->old = strdup(cur);
+            continue;
+        }
+        if ((st.mode & S_IFMT) != S_IFREG) continue;
+        char op = 'D';
+        if (e->kind == 'c' && !nosave && !file_has(e->path, e->sha)) {       /* the owner changed it: kept */
+            char sv[PMAX];
+            struct ustat s2;
+            if (pjoin(sv, e->path, ".save")) { say("%s.save: the name is too long", e->path); return -ENAMETOOLONG; }
+            if (sys_lstat(sv, &s2) == 0) { say("%s exists: move it away first (it would be replaced)", sv); return -EEXIST; }
+            op = 'S';
+            if (nkept < 2) strcpy(kept[nkept], e->path);
+            nkept++;
+        }
+        if (!add_op(op, e->path)) return -ENOMEM;
+    }
+    /* its directories no other package lists, deepest first (removed only if empty when their turn comes: X) */
+    for (int d = ZF_PMAX; d > 1; d--)
+        for (int i = 0; i < k->nent; i++) {
+            struct zf_ent *e = &k->ent[i];
+            struct ustat st;
+            int depth = 0;
+            for (const char *q = e->path; *q; q++) depth += *q == '/';
+            if (e->kind != 'd' || depth != d - 1 || sys_lstat(e->path, &st) < 0 || (st.mode & S_IFMT) != S_IFDIR ||
+                owned_by_other(k, e->path)) continue;
+            struct op *o = add_op('X', e->path);
+            if (!o) return -ENOMEM;
+            o->mode = (u16)(st.mode & 07777); o->uid = (u16)st.uid; o->gid = (u16)st.gid;   /* as it is on the disk */
+        }
+    char mpath[PMAX];
+    if (pjoin(mpath, DB "/", k->name) || pjoin(mpath, mpath, ".manifest")) return -ENAMETOOLONG;
+    return add_op('D', mpath) ? 0 : -ENOMEM;
+}
+static void do_dirs(struct zf_pkg *k)
+{
+    for (int i = 0; i < k->nent; i++) {
+        struct zf_ent *e = &k->ent[i];
         struct ustat st;
         if (e->kind != 'd' || sys_lstat(e->path, &st) == 0) continue;
         mkdirs(e->path);
@@ -474,7 +561,7 @@ static void do_dirs(struct pkg *k)
 static int put_op(char *line, u32 max, const struct op *o)
 {
     char sh[65] = "-";
-    if (o->hassha) put_sha(sh, o->sha);
+    if (o->hassha) zf_put_sha(sh, o->sha);
     return snprintf(line, max, "%c %s %o %u %u %s %s %s %s\n", o->op, o->link, o->mode, o->uid, o->gid, sh,
                     o->target ? o->target : "-", o->old ? o->old : "-", o->path);
 }
@@ -487,14 +574,14 @@ static int ops_text(char **out, u32 *len)
     *out = b; *len = n;
     return 0;
 }
-/* the operations of journal or log text (in place); 0 or -EINVAL */
+/* the operations of journal or log text (in place); 0 or -EINVAL. S only in a live journal (D22 4.2) */
 static int parse_ops(char *t)
 {
     nops = 0;
     for (char *l = t, *e; *l; l = e) {
         for (e = l; *e && *e != '\n'; e++) ;
         if (*e) *e++ = 0;
-        if (!l[0] || l[1] != ' ' || !strchr("RADlLu", l[0])) continue;
+        if (!l[0] || l[1] != ' ' || !strchr(live ? "RADlLuSMX" : "RADlLu", l[0])) continue;
         char *w[9]; int nw = 0;
         for (char *q = l; *q && nw < 9; ) {
             while (*q == ' ') *q++ = 0;
@@ -502,13 +589,13 @@ static int parse_ops(char *t)
             w[nw++] = q;
             while (*q && *q != ' ') q++;
         }
-        if (nw != 9 || nops == MAXOPS || strlen(w[1]) >= 12 || !path_ok(w[8])) return -EINVAL;
-        struct op *o = &ops[nops++];
-        memset(o, 0, sizeof *o);
+        if (nw != 9 || nops == MAXOPS || strlen(w[1]) >= 12 || !zf_path_ok(w[8])) return -EINVAL;
+        struct op *o = op_new();
+        if (!o) return -ENOMEM;
         int bad = 0;
         o->op = w[0][0]; strcpy(o->link, w[1]);
-        o->mode = (u16)num(w[2], 8, &bad); o->uid = (u16)num(w[3], 10, &bad); o->gid = (u16)num(w[4], 10, &bad);
-        if (strcmp(w[5], "-")) { if (parse_sha(w[5], o->sha)) return -EINVAL; o->hassha = 1; }
+        o->mode = (u16)zf_num(w[2], 8, &bad); o->uid = (u16)zf_num(w[3], 10, &bad); o->gid = (u16)zf_num(w[4], 10, &bad);
+        if (strcmp(w[5], "-")) { if (zf_parse_sha(w[5], o->sha)) return -EINVAL; o->hassha = 1; }
         o->target = strcmp(w[6], "-") ? w[6] : 0;
         o->old = strcmp(w[7], "-") ? w[7] : 0;
         o->path = w[8];
@@ -542,6 +629,7 @@ static int finish_op(struct op *o)
     case 'R': case 'A': {
         struct ustat st;
         if (sys_lstat(nw, &st) < 0) return file_has(o->path, o->sha) ? 0 : -ENOENT;   /* renamed already */
+        if ((st.mode & S_IFMT) != S_IFREG) return -EEXIST;                            /* only what zup wrote */
         int r;
         if ((r = sys_chown(nw, o->uid, o->gid)) < 0 || (r = sys_chmod(nw, o->mode)) < 0) return r;
         return sys_rename(nw, o->path);
@@ -549,6 +637,26 @@ static int finish_op(struct op *o)
     case 'D': case 'u': {
         int r = sys_unlink(o->path);
         return r == -ENOENT ? 0 : r;
+    }
+    case 'M': {                                         /* a directory the package lists that was not there */
+        struct ustat st;
+        if (sys_lstat(o->path, &st) == 0) return (st.mode & S_IFMT) == S_IFDIR ? 0 : -EEXIST;
+        int r = sys_mkdir(o->path);
+        if (r < 0) return r;
+        sys_chown(o->path, o->uid, o->gid);
+        return sys_chmod(o->path, o->mode);
+    }
+    case 'X': {                                         /* a removed package's directory, if nothing is left in it */
+        struct ustat st;
+        sys_rmdir(o->path);
+        return sys_lstat(o->path, &st) == 0 && (st.mode & S_IFMT) != S_IFDIR ? -EEXIST : 0;
+    }
+    case 'S': {                                         /* PATH -> PATH.save (its prev link holds the inode) */
+        char sv[PMAX];
+        struct ustat st;
+        if (pjoin(sv, o->path, ".save")) return -ENAMETOOLONG;
+        if (sys_lstat(o->path, &st) < 0) return sys_lstat(sv, &st) == 0 ? 0 : -ENOENT;   /* renamed already */
+        return sys_rename(o->path, sv);
     }
     case 'l': case 'L':
         if (link_is(o->path, o->target)) return 0;
@@ -571,9 +679,26 @@ static void undo_op(struct op *o)
         sys_unlink(nw);
         if (sys_link(pv, nw) == 0) sys_rename(nw, o->path);
         return;
+    case 'S': {
+        char sv[PMAX];
+        if (prev_of(pv, o) || pjoin(sv, o->path, ".save") || sys_lstat(pv, &sp) < 0) { sys_unlink(nw); return; }
+        if (sys_lstat(o->path, &sf) < 0 || sf.ino != sp.ino) {
+            sys_unlink(nw);
+            if (sys_link(pv, nw) == 0) sys_rename(nw, o->path);
+        }
+        if (sys_lstat(o->path, &sf) == 0 && sf.ino == sp.ino && sys_lstat(sv, &sf) == 0 && sf.ino == sp.ino) sys_unlink(sv);
+        return;
+    }
     case 'A':
         sys_unlink(nw);
         sys_unlink(o->path);
+        return;
+    case 'M':
+        sys_rmdir(o->path);                             /* only if empty: what the package put there went first */
+        return;
+    case 'X':                                           /* (owner and mode again: a cut may fall between) */
+        if (sys_lstat(o->path, &sf) < 0) sys_mkdir(o->path);
+        if (sys_lstat(o->path, &sf) == 0 && (sf.mode & S_IFMT) == S_IFDIR) { sys_chown(o->path, o->uid, o->gid); sys_chmod(o->path, o->mode); }
         return;
     case 'l':
         sys_unlink(nw);
@@ -588,9 +713,13 @@ static void undo_op(struct op *o)
 }
 static void undo_all(void) { for (int i = nops; i-- > 0; ) undo_op(&ops[i]); }
 
-/* the new content of each R/A operation of package k into PATH.zup-new: its files from the tar.gz, streamed */
-struct tarst { int fd; u32 left, pad, hdr; struct op *o; struct sha256 c; u8 h[512]; int err; struct pkg *k; };
-static struct op *op_for(struct pkg *k, const char *mpath)
+/* the new content of each R/A operation of package k into PATH.zup-new: its files from the tar.gz, streamed (from the
+ * bundle in memory, or from the file zup -f reads: tgzfd at tgzoff, read a piece at a time) */
+static int tgzfd = -1;
+static u32 tgzoff;
+static u8 inbuf[4096];
+struct tarst { int fd; u32 left, pad, hdr; struct op *o; struct sha256 c; u8 h[512]; int err; struct zf_pkg *k; };
+static struct op *op_for(struct zf_pkg *k, const char *mpath)
 {
     for (int i = 0; i < nops; i++)
         if (ops[i].pk == k && ops[i].mpath && !strcmp(ops[i].mpath, mpath) && (ops[i].op == 'R' || ops[i].op == 'A')) return &ops[i];
@@ -616,7 +745,10 @@ static int new_close(struct tarst *t)                   /* a member is complete:
     sha256_final(&t->c, h);
     if (zupnew(nw, t->o->path)) return -ENAMETOOLONG;
     if (memcmp(h, t->o->sha, 32)) { say("%s: SHA-256 of the package's file does not match its manifest", t->o->mpath); return -EINVAL; }
-    if (sha_file(nw, h) || memcmp(h, t->o->sha, 32)) { say("%s: what was written does not read back right", nw); return -EIO; }
+    struct ustat st;
+    if (sys_lstat(nw, &st) < 0 || (st.mode & S_IFMT) != S_IFREG || sha_file(nw, h) || memcmp(h, t->o->sha, 32)) {
+        say("%s: what was written does not read back right", nw); return -EIO;
+    }
     int r;
     if ((r = sys_chown(nw, t->o->uid, t->o->gid)) < 0 || (r = sys_chmod(nw, t->o->mode)) < 0) { say("%s: owner or mode not set", nw); return r; }
     t->o->done = 1;
@@ -659,8 +791,10 @@ static int tar_feed(struct tarst *t, const u8 *p, u32 n)
         t->fd = -1;
         if (t->o) {
             char nw[PMAX];
+            if (size != t->o->size) { say("%s: its archive's size is not its manifest's", t->o->mpath); return t->err = -EINVAL; }
             if (zupnew(nw, t->o->path)) return t->err = -ENAMETOOLONG;
-            t->fd = sys_open(nw, O_WRONLY | O_CREAT | O_TRUNC);
+            sys_unlink(nw);                             /* made anew: never written through what was there */
+            t->fd = sys_open(nw, O_WRONLY | O_CREAT | O_EXCL);
             if (t->fd < 0) { say("%s: cannot create it (%d)", nw, t->fd); return t->err = t->fd; }
             sha256_init(&t->c);
             if (!size && (t->err = new_close(t))) return t->err;
@@ -668,31 +802,56 @@ static int tar_feed(struct tarst *t, const u8 *p, u32 n)
     }
     return t->err;
 }
-static int unpack(struct pkg *k)
+/* bytes of k's tgz from pos: in place (the bundle in memory: all the rest) or a piece read from the file */
+static int tgz_at(struct zf_pkg *k, u32 pos, const u8 **p, u32 *n)
+{
+    if (k->tgz) { *p = k->tgz + pos; *n = k->tgzlen - pos; return 0; }
+    u32 want = k->tgzlen - pos < sizeof inbuf ? k->tgzlen - pos : sizeof inbuf;
+    int r = sys_lseek(tgzfd, (int)(tgzoff + pos), 0);
+    if (r >= 0) r = sys_read(tgzfd, inbuf, want);
+    if (r != (int)want) { say("package %s: cannot read its files (%d)", k->name, r < 0 ? r : -EIO); return -EIO; }
+    *p = inbuf; *n = want;
+    return 0;
+}
+static int unpack(struct zf_pkg *k)
 {
     static u8 *dict;
     static tinfl_decompressor *dec;
     if (!dict) dict = malloc(TINFL_LZ_DICT_SIZE);
     if (!dec) dec = malloc(sizeof *dec);
     if (!dict || !dec) { say("out of memory"); return -ENOMEM; }
-    const u8 *in = k->tgz;
-    u32 len = k->tgzlen, pos = 10;
-    if (len < 18 || in[0] != 0x1f || in[1] != 0x8b || in[2] != 8) { say("package %s: not gzip data", k->name); return -EINVAL; }
-    u32 flg = in[3];
-    if (flg & 4) { if (pos + 2 > len) return -EINVAL; pos += 2 + (in[pos] | (u32)in[pos + 1] << 8); }
-    if (flg & 8) while (pos < len && in[pos++]) ;
-    if (flg & 16) while (pos < len && in[pos++]) ;
+    const u8 *in;
+    u32 len = k->tgzlen, pos = 10, inn = 0;
+    if (len < 18) { say("package %s: not gzip data", k->name); return -EINVAL; }
+    if (tgz_at(k, 0, &in, &inn)) return -EIO;
+    if (in[0] != 0x1f || in[1] != 0x8b || in[2] != 8) { say("package %s: not gzip data", k->name); return -EINVAL; }
+    u32 flg = in[3];                                    /* the header's fields lie in the first piece */
+    if (flg & 4) { if (pos + 2 > inn) return -EINVAL; pos += 2 + (in[pos] | (u32)in[pos + 1] << 8); }
+    if (flg & 8) while (pos < inn && in[pos++]) ;
+    if (flg & 16) while (pos < inn && in[pos++]) ;
     if (flg & 2) pos += 2;
-    if (pos >= len) { say("package %s: a damaged gzip header", k->name); return -EINVAL; }
+    if (pos >= inn) { say("package %s: a damaged gzip header", k->name); return -EINVAL; }
+    in += pos; inn -= pos;
     static struct tarst t;
     memset(&t, 0, sizeof t);
     t.fd = -1; t.k = k;
+    u32 cap = 20480, outn = 0;                          /* the most the archive may inflate to: its files, headers, */
+    for (int i = 0; i < k->nent; i++)                   /* padding and the end blocks (review 2026-10-28: no bomb) */
+        if (k->ent[i].kind == 'f' || k->ent[i].kind == 'c') {
+            u32 add = ((k->ent[i].size + 511) & ~511u) + 512;
+            if (add < k->ent[i].size || cap + add < cap) { say("package %s: its sizes are too big", k->name); return -EINVAL; }
+            cap += add;
+        }
     tinfl_init(dec);
     size_t dofs = 0;
     for (;;) {
-        size_t in_n = len - pos, out_n = TINFL_LZ_DICT_SIZE - dofs;
-        tinfl_status st = tinfl_decompress(dec, in + pos, &in_n, dict, dict + dofs, &out_n, 0);
-        pos += (u32)in_n;
+        if (!inn && pos < len && tgz_at(k, pos, &in, &inn)) { t.err = -EIO; break; }
+        size_t in_n = inn, out_n = TINFL_LZ_DICT_SIZE - dofs;
+        int more = pos + inn < len;
+        tinfl_status st = tinfl_decompress(dec, in, &in_n, dict, dict + dofs, &out_n, more ? TINFL_FLAG_HAS_MORE_INPUT : 0);
+        pos += (u32)in_n; in += in_n; inn -= (u32)in_n;
+        outn += (u32)out_n;
+        if (outn > cap || outn < (u32)out_n) { say("package %s: its archive is bigger than its manifest says", k->name); t.err = -EINVAL; break; }
         if (out_n && tar_feed(&t, dict + dofs, (u32)out_n)) break;
         dofs = (dofs + out_n) & (TINFL_LZ_DICT_SIZE - 1);
         if (st == TINFL_STATUS_DONE) break;
@@ -705,26 +864,30 @@ static int unpack(struct pkg *k)
         if (ops[i].pk == k && ops[i].mpath && !ops[i].done) { say("package %s: %s is not in its archive", k->name, ops[i].mpath); return -EINVAL; }
     return 0;
 }
-static int write_manifests(void)
+static int write_data(void)                             /* the manifests: the packages' own, and rewritten taken ones */
 {
     for (int i = 0; i < nops; i++) {
         struct op *o = &ops[i];
-        if (!o->pk || o->mpath || o->done) continue;
+        if (!o->data || o->done) continue;
         char nw[PMAX];
         u8 h[32];
         int r;
         if (zupnew(nw, o->path)) return -ENAMETOOLONG;
         /* through our own buffer: the bundle is no process's memory, a system call refuses it (-EFAULT) */
-        int fd = sys_open(nw, O_WRONLY | O_CREAT | O_TRUNC);
+        sys_unlink(nw);
+        int fd = sys_open(nw, O_WRONLY | O_CREAT | O_EXCL);
         r = fd < 0 ? fd : 0;
-        for (u32 at = 0; !r && at < o->pk->manlen; at += sizeof iobuf) {
-            u32 k = o->pk->manlen - at < sizeof iobuf ? o->pk->manlen - at : sizeof iobuf;
-            memcpy(iobuf, o->pk->man + at, k);
+        for (u32 at = 0; !r && at < o->datalen; at += sizeof iobuf) {
+            u32 k = o->datalen - at < sizeof iobuf ? o->datalen - at : sizeof iobuf;
+            memcpy(iobuf, o->data + at, k);
             r = write_all(fd, iobuf, k);
         }
         if (fd >= 0) sys_close(fd);
         if (r < 0) { say("%s: cannot write it (%d)", nw, r); return r; }
-        if (sha_file(nw, h) || memcmp(h, o->sha, 32)) { say("%s: what was written does not read back right", nw); return -EIO; }
+        struct ustat st;
+        if (sys_lstat(nw, &st) < 0 || (st.mode & S_IFMT) != S_IFREG || sha_file(nw, h) || memcmp(h, o->sha, 32)) {
+            say("%s: what was written does not read back right", nw); return -EIO;
+        }
         sys_chown(nw, 0, 0);
         sys_chmod(nw, 0644);
         o->done = 1;
@@ -732,19 +895,23 @@ static int write_manifests(void)
     return 0;
 }
 
-/* after the commit record: the older prev sets go, the journal goes, the volume is clean again (repeatable) */
+/* after the commit record: the older prev sets go, the journal goes, the volume is clean again (repeatable). A live
+ * transaction's commit never touches a prev set (D22 4.2): only its own live/ is emptied */
 static void post_commit(int wasclean)
 {
-    char **names;
-    int n = dir_list(CACHE, &names);
-    char me[24];
-    snprintf(me, sizeof me, "prev-%u", target_v);
-    for (int i = 0; i < n; i++)
-        if (!strncmp(names[i], "prev-", 5) && strcmp(names[i], me)) {
-            char p[PMAX];
-            if (!pjoin(p, CACHE "/", names[i])) rm_tree(p);
-        }
-    dir_free(names, n);
+    if (live) rm_tree(prevdir);
+    else {
+        char **names;
+        int n = dir_list(CACHE, &names);
+        char me[24];
+        snprintf(me, sizeof me, "prev-%u", target_v);
+        for (int i = 0; i < n; i++)
+            if (!strncmp(names[i], "prev-", 5) && strcmp(names[i], me)) {
+                char p[PMAX];
+                if (!pjoin(p, CACHE "/", names[i])) rm_tree(p);
+            }
+        dir_free(names, n);
+    }
     sys_unlink(JOURNAL);
     sys_sync();
     if (wasclean) fs_mark(0);
@@ -754,8 +921,8 @@ static void undo_cleanup(int wasclean)                  /* a transaction rolled 
     char p[PMAX], t[12];
     for (int i = 0; i < nops; i++)
         if (ops[i].link[0] != '-' && !prev_of(p, &ops[i])) sys_unlink(p);
-    snprintf(t, sizeof t, "/log.%u", tnum);
-    if (!pjoin(p, prevdir, t)) sys_unlink(p);
+    if (live) rm_tree(prevdir);
+    else { snprintf(t, sizeof t, "/log.%u", tnum); if (!pjoin(p, prevdir, t)) sys_unlink(p); }
     sys_unlink(JOURNAL);
     sys_sync();
     if (wasclean) fs_mark(0);
@@ -764,37 +931,49 @@ static int write_log(void)                              /* prev-V/log.T: the und
 {
     char p[PMAX], t[12], *txt;
     u32 len;
+    if (live) return 0;                                 /* a live transaction keeps no undo record (D22 4.2) */
     snprintf(t, sizeof t, "/log.%u", tnum);
     if (pjoin(p, prevdir, t) || ops_text(&txt, &len)) return -ENOMEM;
     int r = write_file(p, txt, len);
     free(txt);
     return r;
 }
-static void set_prevdir(u32 v) { snprintf(prevdir, sizeof prevdir, CACHE "/prev-%u", v); }
+static void set_prevdir(u32 v)
+{
+    if (live) strcpy(prevdir, CACHE "/live");
+    else snprintf(prevdir, sizeof prevdir, CACHE "/prev-%u", v);
+}
 
 /* one transaction, planned in ops[] (target_v, tnum, prevdir set). 0, or -errno (then it was rolled back) */
-static int run_transaction(struct pkg **list, int n)
+static int run_transaction(struct zf_pkg **list, int n)
 {
-    char *txt, head[80], p[PMAX];
+    char *txt, head[96], p[PMAX];
     u32 len;
     int r, wasclean = fs_mark(1) == 1;
     if ((r = ops_text(&txt, &len))) return r;
     mkdirs(DB);
     mkdirs(CACHE);
-    snprintf(head, sizeof head, "zupj 1\ntarget %u %u %d\n", target_v, tnum, wasclean);
-    int fd = sys_open(JOURNAL, O_WRONLY | O_CREAT | O_TRUNC);
+    if (live) {
+        rm_tree(prevdir);                               /* what a cut live transaction may have left */
+        snprintf(head, sizeof head, "zupj 1\nlive 1 %s\ntarget %u %u %d\n", livename, target_v, tnum, wasclean);
+    } else
+        snprintf(head, sizeof head, "zupj 1\ntarget %u %u %d\n", target_v, tnum, wasclean);
+    /* a live journal is made with O_EXCL: it can never be another transaction's (recover() ran under the lock) */
+    int fd = sys_open(JOURNAL, O_WRONLY | O_CREAT | (live ? O_EXCL : O_TRUNC));
     if (fd < 0 || (r = write_all(fd, head, strlen(head))) || (r = write_all(fd, txt, len)) || (r = write_all(fd, "end\n", 4))) {
         if (fd >= 0) sys_close(fd);
         free(txt);
         say("cannot write the journal (%d): nothing changed", fd < 0 ? fd : r);
-        sys_unlink(JOURNAL);
+        if (fd != -EEXIST) sys_unlink(JOURNAL);
         if (wasclean) fs_mark(0);
         return fd < 0 ? fd : r;
     }
     sys_close(fd);
     free(txt);
     sys_sync();
-    for (int i = 0; i < n; i++) do_dirs(list[i]);
+    if (!live) for (int i = 0; i < n; i++) do_dirs(list[i]);
+    for (int i = 0; live && i < nops; i++)              /* live: the new directories first, journaled (M) */
+        if (ops[i].op == 'M' && (r = finish_op(&ops[i])) < 0) { say("%s: cannot make the directory (%d)", ops[i].path, r); goto back; }
     mkdirs(prevdir);
     if (pjoin(p, prevdir, "/f")) return -ENAMETOOLONG;
     sys_mkdir(p);
@@ -806,7 +985,7 @@ static int run_transaction(struct pkg **list, int n)
     }
     for (int i = 0; i < n; i++)
         if ((r = unpack(list[i]))) goto back;
-    if ((r = write_manifests())) goto back;
+    if ((r = write_data())) goto back;
     for (int i = 0; i < nops; i++)
         if ((r = finish_op(&ops[i])) < 0) { say("%s: cannot put it in place (%d)", ops[i].path, r); goto back; }
     if ((r = write_log()) < 0) { say("cannot write the undo log (%d)", r); goto back; }
@@ -837,13 +1016,32 @@ static int recover(void)
         free(t);
         return 0;
     }
+    /* a live transaction (D22 4.2) says so in its second line, before any operation: its directory is live/, never
+     * a prev set, and its end never touches one */
+    int badlive = 0;
+    live = !strncmp(t, "zupj 1\nlive 1 ", 14);
+    if (live) {
+        char *e = strchr(t + 14, '\n');
+        u32 nl = e ? (u32)(e - (t + 14)) : 0;
+        if (!e || nl >= sizeof livename) badlive = 1;
+        else { memcpy(livename, t + 14, nl); livename[nl] = 0; badlive = !zf_name_ok(livename); }
+    }
     char *l = strstr(t, "\ntarget ");
-    char *u = strstr(t, "\nundo ");
+    char *u = live ? 0 : strstr(t, "\nundo ");
     /* the volume stays marked "needs a check" after a power cut in the middle of an install: a block write may have
      * been cut too (at worst a leaked inode, D15 step 0), which fsck.ext2 finds */
     if (l) { char *sp; v = (u32)strtoul(l + 8, &sp, 10); tn = (u32)strtoul(sp, &sp, 10); }
     else if (u) { v = (u32)strtoul(u + 6, 0, 10); undo = 1; }
-    if (!v || parse_ops(t) < 0) { say("the journal is damaged: removed (check the root with fsck.ext2)"); sys_unlink(JOURNAL); free(t); return -EINVAL; }
+    if (badlive || (live && tn != 1)) v = 0;
+    if (!v || parse_ops(t) < 0) {
+        int wl = !strncmp(t, "zupj 1\nlive 1 ", 14);
+        if (wl) {                                       /* its previous files stay where the next live run won't empty them */
+            rm_tree(CACHE "/live.damaged");
+            sys_rename(CACHE "/live", CACHE "/live.damaged");
+        }
+        say("the journal is damaged: removed (check the root with fsck.ext2)%s", wl ? "; the files it replaced are in " CACHE "/live.damaged" : "");
+        sys_unlink(JOURNAL); free(t); live = 0; return -EINVAL;
+    }
     target_v = v; tnum = tn;
     set_prevdir(v);
     if (undo) {                                         /* a rollback to the previous version, cut: go on with it */
@@ -857,8 +1055,10 @@ static int recover(void)
     }
     if (committed) {
         post_commit(0);
-        snprintf(result, sizeof result, "zup: the update to %u was installed (finished after a power cut)", v);
+        if (live) say("the change of package %s was done (finished after a power cut)", livename);
+        else snprintf(result, sizeof result, "zup: the update to %u was installed (finished after a power cut)", v);
         free(t);
+        live = 0;
         return 1;
     }
     int can = !rolling;
@@ -873,19 +1073,27 @@ static int recover(void)
         for (int i = 0; i < nops && !r; i++) r = finish_op(&ops[i]) < 0;
         if (!r && write_log() >= 0 && journal_append("commit\n") == 0) {
             post_commit(0);
-            say("finished the install of %u", v);
-            snprintf(result, sizeof result, "zup: the update to %u was installed (finished after a power cut)", v);
+            if (live) say("finished the change of package %s after a power cut", livename);
+            else {
+                say("finished the install of %u", v);
+                snprintf(result, sizeof result, "zup: the update to %u was installed (finished after a power cut)", v);
+            }
             free(t);
+            live = 0;
             return 1;
         }
     }
     if (!rolling) journal_append("rollback\n");
     undo_all();
     undo_cleanup(0);
-    say("rolled the unfinished install of %u back", v);
-    snprintf(result, sizeof result, "zup: the update to %u was cut off and rolled back; it is tried again at the next start", v);
+    if (live) say("rolled the unfinished change of package %s back (zpkg can do it again)", livename);
+    else {
+        say("rolled the unfinished install of %u back", v);
+        snprintf(result, sizeof result, "zup: the update to %u was cut off and rolled back; it is tried again at the next start", v);
+    }
     failed = 1;
     free(t);
+    live = 0;
     return 1;
 }
 
@@ -937,26 +1145,43 @@ static int rollback(u32 v)
 }
 
 /* ---- the update ---- */
-static int dep_ok(struct bundle *b, const char *name, u32 v)
+static int dep_ok(struct zf_bundle *b, const char *name, u32 v)
 {
-    for (int i = 0; i < b->npkg; i++) if (!strcmp(b->pk[i].name, name) && b->pk[i].vnum >= v) return 1;
-    struct pkg *k = installed(name);
+    for (int i = 0; b && i < b->npkg; i++) if (!strcmp(b->pk[i].name, name) && b->pk[i].vnum >= v) return 1;
+    struct zf_pkg *k = installed(name);
     return k && k->vnum >= v;
 }
-static int install(struct bundle *b, u32 kvnum, int stage2)
+/* room on the root for what the plan writes (new files and manifests; the old ones stay as prev links) */
+static int space_ok(void)
 {
-    struct pkg *todo[MAXPKG];
+    u32 need = 0;
+    for (int i = 0; i < nops; i++)
+        if (ops[i].op == 'R' || ops[i].op == 'A') {
+            struct zf_ent *e = ops[i].mpath ? zf_find_ent(ops[i].pk, ops[i].mpath) : 0;
+            need += (e ? e->size : ops[i].datalen) + 1024;
+        }
+    struct ustatfs fs;
+    if (sys_statfs(&fs) == 0 && fs.bsize >= 1024 && (fs.bfree * (fs.bsize / 1024) < need / 1024 + 64 || fs.ffree < (u32)nops + 16)) {
+        say("not enough space on the root: %u KB and %d files needed", need / 1024 + 64, nops + 16);
+        return -ENOSPC;
+    }
+    return 0;
+}
+static int install(struct zf_bundle *b, u32 kvnum, int stage2)
+{
+    struct zf_pkg *todo[MAXPKG];
     int ntodo = 0, need_zup = 0;
     u32 base = base_version();
     if (b->vnum < base) { say("the bundle (%u) is older than the installed base (%u): refused", b->vnum, base); return -EINVAL; }
     if (b->minv > base) { say("the bundle needs base %u or newer, %u is installed: refused", b->minv, base); return -EINVAL; }
     for (int i = 0; i < b->npkg; i++) {
-        struct pkg *k = &b->pk[i], *old = installed(k->name);
+        struct zf_pkg *k = &b->pk[i], *old = installed(k->name);
         if (old && old->vnum > k->vnum) { say("%s %u is older than the installed %u: refused", k->name, k->vnum, old->vnum); return -EINVAL; }
         if (k->group && !strcmp(k->group, "base") && k->vnum > kvnum) {
             say("%s %u is newer than the running kernel (%u): the kernel goes first (zenixboot): refused", k->name, k->vnum, kvnum);
             return -EINVAL;
         }
+        if (k->ntakes && k->group && !strcmp(k->group, "base")) { say("%s: a base-group package never takes another's files: refused", k->name); return -EINVAL; }
         if (old && old->vnum == k->vnum) continue;
         for (int d = 0; d < k->ndep; d++)
             if (!dep_ok(b, k->dep[d], k->depv[d])) { say("%s needs %s %u or newer: refused", k->name, k->dep[d], k->depv[d]); return -EINVAL; }
@@ -964,6 +1189,19 @@ static int install(struct bundle *b, u32 kvnum, int stage2)
         if (!strcmp(k->name, "zup")) need_zup = 1;
     }
     if (!ntodo) { say("version %u is installed already: nothing to do", b->vnum); return 1; }
+    installed_all();                                    /* a path another installed package owns is not taken (review) */
+    for (int i = 0; i < ntodo; i++)
+        for (int e = 0; e < todo[i]->nent; e++) {
+            struct zf_ent *x, *me = &todo[i]->ent[e];
+            if (me->kind == 'd') continue;
+            for (int j = 0; j < ndb; j++) {
+                int inb = 0;
+                for (int q = 0; q < b->npkg; q++) inb |= !strcmp(b->pk[q].name, db[j]->name);
+                if (inb || takes(todo[i], db[j]->name) || !(x = zf_find_ent(db[j], me->path)) || x->kind == 'd') continue;
+                say("%s belongs to package %s, which this bundle does not carry: refused", me->path, db[j]->name);
+                return -EEXIST;
+            }
+        }
     target_v = b->vnum;
     set_prevdir(target_v);
     tnum = 1;
@@ -973,25 +1211,15 @@ static int install(struct bundle *b, u32 kvnum, int stage2)
         snprintf(t, sizeof t, "/log.%u", tnum);
         if (pjoin(p, prevdir, t) || sys_stat(p, &st) < 0) break;
     }
-    /* space: what the plan writes (new files and manifests; the old ones stay as prev links until the next update) */
     nops = 0; nkept = 0;
-    for (int i = 0; i < ntodo; i++) { int r = plan_pkg(todo[i]); if (r) return r; }
-    u32 need = 0;
-    for (int i = 0; i < nops; i++)
-        if (ops[i].op == 'R' || ops[i].op == 'A') {
-            struct ent *e = ops[i].mpath ? find_ent(ops[i].pk, ops[i].mpath) : 0;
-            need += (e ? e->size : ops[i].pk->manlen) + 1024;
-        }
-    struct ustatfs fs;
-    if (sys_statfs(&fs) == 0 && fs.bsize >= 1024 && (fs.bfree * (fs.bsize / 1024) < need / 1024 + 64 || fs.ffree < (u32)nops + 16)) {
-        say("not enough space on the root: %u KB and %d files needed", need / 1024 + 64, nops + 16);
-        return -ENOSPC;
-    }
+    for (int i = 0; i < ntodo; i++) { int r = plan_pkg(todo[i]); if (!r) r = plan_takes(todo[i]); if (r) return r; }
+    int r = space_ok();
+    if (r) return r;
     if (need_zup && !stage2 && ntodo > 1) {             /* zup first, then the new zup does the rest */
-        struct pkg *z[1];
+        struct zf_pkg *z[1];
         for (int i = 0; i < ntodo; i++) if (!strcmp(todo[i]->name, "zup")) z[0] = todo[i];
         nops = 0; nkept = 0;
-        int r = plan_pkg(z[0]);
+        r = plan_pkg(z[0]);
         if (r) return r;
         say("installing zup %u first", z[0]->vnum);
         if ((r = run_transaction(z, 1))) { say("zup %u was not installed (%d): rolled back", z[0]->vnum, r); return r; }
@@ -1002,7 +1230,7 @@ static int install(struct bundle *b, u32 kvnum, int stage2)
         return st == 0 ? 2 : st == 1 ? 3 : -EIO;        /* 2/3: the new zup did the rest (and wrote the result) */
     }
     say("installing %u (%s): %d packages, %d changes", b->vnum, b->vstr, ntodo, nops);
-    int r = run_transaction(todo, ntodo);
+    r = run_transaction(todo, ntodo);
     if (r) { say("the install of %u failed (%d) and was rolled back", b->vnum, r); return r; }
     char names[80];
     u32 nl = 0;
@@ -1013,6 +1241,248 @@ static int install(struct bundle *b, u32 kvnum, int stage2)
     if (nkept) snprintf(result + n, sizeof result - (u32)n, "; kept your %s%s (the new one: %s.new)", kept[0],
                         nkept > 1 ? " and others" : "", kept[0]);
     say("%s", result + 5);
+    return 0;
+}
+
+/* ---- live transactions: zup -f FILE and zup -r NAME (DESIGN D22 4.2) ----
+ * zup trusts no caller: every rule is its own. Never a base-group package (by its group and by name), never a
+ * package the newest prev set's undo logs touch (the system's way back would put half of it back), never a path
+ * another package owns (unless taken), under the package database or the cache, or below a symbolic link. */
+static int base_name(const char *n) { return !strcmp(n, "zup") || !strcmp(n, "zpkg") || !strcmp(n, "base"); }
+static int in_prev(const char *name)                    /* its manifest in the newest prev set's undo logs */
+{
+    u32 pv = newest_prev();
+    if (!pv) return 0;
+    char dir[PMAX], p[PMAX], t[12], want[PMAX + 2];
+    snprintf(dir, sizeof dir, CACHE "/prev-%u", pv);
+    snprintf(want, sizeof want, " " DB "/%s.manifest\n", name);
+    int hit = 0;
+    for (u32 tn = 1; tn <= 16 && !hit; tn++) {
+        u32 ll;
+        snprintf(t, sizeof t, "/log.%u", tn);
+        if (pjoin(p, dir, t)) break;
+        char *lg = slurp(p, &ll);
+        if (lg && strstr(lg, want)) hit = 1;
+        free(lg);
+    }
+    return hit;
+}
+static int live_refused(struct zf_pkg *k, const char *what)    /* 0, or -EPERM (said) */
+{
+    struct zf_pkg *was = installed(k->name);
+    if ((k->group && !strcmp(k->group, "base")) || base_name(k->name) || (was && was->group && !strcmp(was->group, "base"))) {
+        say("%s is in the group base: it changes only with the system (a system update, then a restart): refused", k->name);
+        return -EPERM;
+    }
+    if (in_prev(k->name)) {
+        say("%s is part of the previous system the boot menu can go back to: it %s with the next system update", k->name, what);
+        return -EPERM;
+    }
+    return 0;
+}
+static int under(const char *path, const char *dir)
+{
+    u32 n = strlen(dir);
+    return !strncmp(path, dir, n) && (path[n] == '/' || !path[n]);
+}
+/* a path zup may change: no symbolic link in a directory on the way, not on another mount (only the root has
+ * zup's journal and mark) */
+static int path_safe(const char *path)
+{
+    char b[PMAX];
+    u32 n = strlen(path);
+    struct umountinfo mi;
+    if (n >= PMAX) return -ENAMETOOLONG;
+    memcpy(b, path, n + 1);
+    for (u32 j = 1; j < n; j++) {
+        struct ustat st;
+        if (b[j] != '/') continue;
+        b[j] = 0;
+        if (sys_lstat(b, &st) == 0 && (st.mode & S_IFMT) == S_IFLNK) { say("%s: %s is a symbolic link: refused", path, b); return -EPERM; }
+        b[j] = '/';
+    }
+    for (u32 i = 1; sys_mountinfo(i, &mi) == 0; i++)
+        if (mi.path[0] == '/' && mi.path[1] && under(path, mi.path)) { say("%s is on another mount (%s): refused", path, mi.path); return -EPERM; }
+    return 0;
+}
+static int paths_ok(struct zf_pkg *k)
+{
+    struct zf_pkg *old = installed(k->name);
+    int r;
+    for (int i = 0; old && i < old->nent; i++)          /* what the new version removes: the same rules */
+        if (!zf_find_ent(k, old->ent[i].path) && (r = path_safe(old->ent[i].path))) return r;
+    for (int i = 0; i < k->nent; i++) {
+        struct zf_ent *e = &k->ent[i];
+        if (under(e->path, DB) || under(e->path, CACHE) || ((under(DB, e->path) || under(CACHE, e->path)) && e->kind != 'd')) {
+            say("%s: a package may not write there: refused", e->path); return -EPERM;
+        }
+        if ((r = path_safe(e->path))) return r;
+        int mine = zf_find_ent(old, e->path) != 0;
+        for (int j = 0; j < ndb; j++) {                 /* another package's path: d may be shared (pacman's rule) */
+            struct zf_ent *x;
+            if (db[j] == old || !(x = zf_find_ent(db[j], e->path))) continue;
+            if ((x->kind == 'd') != (e->kind == 'd')) { say("%s: a directory in one package and not in %s: refused", e->path, db[j]->name); return -EEXIST; }
+            if (x->kind == 'd') continue;
+            if (!takes(k, db[j]->name)) { say("%s belongs to package %s: refused", e->path, db[j]->name); return -EEXIST; }
+            mine = 1;
+        }
+        struct ustat st;
+        if (!mine && e->kind != 'd' && sys_lstat(e->path, &st) == 0) {
+            say("%s exists and belongs to no package: refused (move it away first)", e->path);
+            return -EEXIST;
+        }
+    }
+    return 0;
+}
+/* the file's package bundle (D22 3.1: no kernel, one package), read without holding it in memory: the header and
+ * table, the manifest (copied: kept as is for the database, and parsed), the tgz's SHA-256 a piece at a time */
+static int read_pkgfile(const char *file, struct zf_bundle *b, struct zf_pkg *k)
+{
+    struct ustat st;
+    u8 hdr[ZF_HDR + 2 * ZF_TOCE];
+    int fd = sys_open(file, O_RDONLY), r = -EINVAL;
+    if (fd < 0) { say("%s: cannot open it (%d)", file, fd); return fd; }
+    if (sys_fstat(fd, &st) < 0 || (st.mode & S_IFMT) != S_IFREG || st.size > (16u << 20)) {
+        say("%s: not a package file (a regular file up to 16 MB)", file); goto out;
+    }
+    unsigned need = ZF_HDR, have = 0;
+    for (;;) {
+        if (need > sizeof hdr) { say("%s: not a package file (one package, two parts): a system bundle is installed by zenixboot at a restart", file); goto out; }
+        int n = sys_read(fd, hdr + have, need - have);
+        if (n < 0 || (u32)n != need - have) { say("%s: the bundle is shorter than its header", file); goto out; }
+        have = need;
+        r = zf_bundle_head(b, hdr, have, st.size, &need);
+        if (r != -EAGAIN) break;
+        r = -EINVAL;
+    }
+    if (r) goto out;
+    r = -EINVAL;
+    const u8 *msha = 0, *tsha = 0;
+    u32 moff = 0, mlen = 0, toff = 0, tlen = 0;
+    char pn[25] = "";
+    for (unsigned i = 0; i < b->ntoc; i++) {
+        char name[41], pname[25];
+        unsigned off, size;
+        const unsigned char *sha;
+        if (zf_bundle_entry(b, i, name, &off, &size, &sha)) goto out;
+        int kind = zf_part_kind(name, pname);
+        if (kind < 0) goto out;
+        if (!kind) { say("%s: a system bundle (%s): it is installed by zenixboot at a restart, not here", file, name); goto out; }
+        if (pn[0] && strcmp(pn, pname)) { say("%s: a package file holds one package", file); goto out; }
+        strcpy(pn, pname);
+        if (kind == 1) { if (msha) goto dup; msha = sha; moff = off; mlen = size; }
+        else { if (tsha) goto dup; tsha = sha; toff = off; tlen = size; }
+    }
+    if (!msha || !tsha) { say("package %s: its manifest or its files are missing", pn); goto out; }
+    if (mlen > (1u << 20)) { say("package %s: its manifest is too big", pn); goto out; }
+    u8 *man = malloc(mlen + 1);
+    char *text = malloc(mlen + 1);
+    if (!man || !text) { free(man); free(text); say("out of memory"); r = -ENOMEM; goto out; }
+    u8 h[32];
+    if (sys_lseek(fd, (int)moff, 0) < 0 || sys_read(fd, man, mlen) != (int)mlen) { free(man); free(text); say("%s: cannot read it", file); r = -EIO; goto out; }
+    sha256(man, mlen, h);
+    if (memcmp(h, msha, 32)) { free(man); free(text); say("pkg/%s.manifest: SHA-256 does not match (the bundle is damaged)", pn); goto out; }
+    memcpy(text, man, mlen); text[mlen] = 0;
+    if (strlen(text) != mlen) { free(man); free(text); say("package %s: a NUL in its manifest", pn); goto out; }
+    if (zf_manifest_parse(k, text, mlen, pn)) { free(man); zf_pkg_free(k); goto out; }
+    k->man = man; k->manlen = mlen;
+    if (strcmp(k->name, pn)) { say("package %s: its manifest names %s", pn, k->name); goto out; }
+    struct sha256 c;                                    /* the tgz: its SHA-256 now, inflated later (a second pass) */
+    sha256_init(&c);
+    if (sys_lseek(fd, (int)toff, 0) < 0) { say("%s: cannot read it", file); r = -EIO; goto out; }
+    for (u32 at = 0; at < tlen; ) {
+        u32 want = tlen - at < sizeof inbuf ? tlen - at : sizeof inbuf;
+        int n = sys_read(fd, inbuf, want);
+        if (n != (int)want) { say("%s: cannot read it", file); r = -EIO; goto out; }
+        sha256_update(&c, inbuf, want);
+        at += want;
+    }
+    sha256_final(&c, h);
+    if (memcmp(h, tsha, 32)) { say("pkg/%s.tgz: SHA-256 does not match (the bundle is damaged)", pn); goto out; }
+    k->tgz = 0; k->tgzlen = tlen;
+    tgzfd = fd; tgzoff = toff;
+    return 0;
+dup:
+    say("%s: a part twice", file);
+out:
+    sys_close(fd);
+    return r;
+}
+static int live_begin(const char *name, u32 v)
+{
+    live = 1;
+    strcpy(livename, name);
+    target_v = v; tnum = 1;
+    set_prevdir(v);
+    nops = 0; nkept = 0;
+    return 0;
+}
+static int install_file(const char *file, int down, u32 effbase)
+{
+    static struct zf_bundle b;
+    static struct zf_pkg k;
+    int r = read_pkgfile(file, &b, &k);
+    b.p = 0;                                            /* (read_pkgfile's header buffer is gone) */
+    if (r) return r;
+    struct zf_pkg *old = installed(k.name);
+    installed_all();
+    if (dberr) { say("the package database cannot be read: nothing changed"); return -EIO; }
+    if (b.vnum != k.vnum) { say("package %s: the bundle says version %u, its manifest %u: refused", k.name, b.vnum, k.vnum); return -EINVAL; }
+    if ((r = live_refused(&k, "changes"))) return r;
+    for (int t = 0; t < k.ntakes; t++) {
+        struct zf_pkg *ot = installed(k.takes[t]);
+        if (base_name(k.takes[t]) || (ot && ot->group && !strcmp(ot->group, "base"))) {
+            say("%s takes %s, a base-group package: refused", k.name, k.takes[t]);
+            return -EPERM;
+        }
+        if (ot && (r = live_refused(ot, "is taken"))) return r;
+    }
+    if (old && old->vnum == k.vnum) { say("%s %u is installed already: nothing to do", k.name, k.vnum); return 1; }
+    if (old && old->vnum > k.vnum && !down) {
+        say("%s %u is older than the installed %u: refused (zpkg --back asks for an older one)", k.name, k.vnum, old->vnum);
+        return -EINVAL;
+    }
+    u32 minv = b.minv;                                  /* the header's minimum or its depends base, the larger */
+    for (int d = 0; d < k.ndep; d++) if (!strcmp(k.dep[d], "base") && k.depv[d] > minv) minv = k.depv[d];
+    if (minv > effbase) { say("%s needs base %u or newer, the system is %u: refused", k.name, minv, effbase); return -EINVAL; }
+    for (int i = 0; old && old->vnum > k.vnum && i < ndb; i++)     /* a downgrade: what needs the newer one */
+        for (int d = 0; db[i] != old && d < db[i]->ndep; d++)
+            if (!strcmp(db[i]->dep[d], k.name) && db[i]->depv[d] > k.vnum) {
+                say("%s needs %s %u or newer: the downgrade to %u is refused", db[i]->name, k.name, db[i]->depv[d], k.vnum);
+                return -EPERM;
+            }
+    for (int d = 0; d < k.ndep; d++)
+        if (!dep_ok(0, k.dep[d], k.depv[d])) { say("%s needs %s %u or newer: refused", k.name, k.dep[d], k.depv[d]); return -EINVAL; }
+    if ((r = paths_ok(&k))) return r;
+    live_begin(k.name, k.vnum);
+    if ((r = plan_pkg(&k)) || (r = plan_takes(&k)) || (r = space_ok())) return r;
+    struct zf_pkg *list[1] = { &k };
+    say("installing %s %u (%s): %d changes", k.name, k.vnum, k.vstr, nops);
+    if ((r = run_transaction(list, 1))) { say("the install of %s failed (%d) and was rolled back", k.name, r); return r; }
+    say("installed %s %s (%u)%s%s%s", k.name, k.vstr, k.vnum, nkept ? "; kept your " : "", nkept ? kept[0] : "",
+        nkept ? (nkept > 1 ? " and others (the new ones: .new)" : " (the new one: .new)") : "");
+    return 0;
+}
+static int remove_pkg(const char *name, int nosave)
+{
+    if (!zf_name_ok(name)) { say("%s: not a package name", name); return -EINVAL; }
+    installed_all();
+    if (dberr) { say("the package database cannot be read: nothing changed"); return -EIO; }
+    struct zf_pkg *k = installed(name);
+    if (!k) { say("%s is not installed", name); return -ENOENT; }
+    int r = live_refused(k, "is removed");
+    if (r) return r;
+    for (int i = 0; i < ndb; i++)                       /* nothing installed may need it (zpkg removes dependents first) */
+        for (int d = 0; db[i] != k && d < db[i]->ndep; d++)
+            if (!strcmp(db[i]->dep[d], name)) { say("%s needs %s: refused", db[i]->name, name); return -EPERM; }
+    for (int i = 0; i < k->nent; i++)
+        if ((r = path_safe(k->ent[i].path))) return r;
+    live_begin(name, k->vnum);
+    if ((r = plan_remove(k, nosave))) return r;
+    say("removing %s %u: %d changes", name, k->vnum, nops);
+    if ((r = run_transaction(0, 0))) { say("the removal of %s failed (%d) and was rolled back", name, r); return r; }
+    say("removed %s%s%s%s", name, nkept ? "; kept your changed " : "", nkept ? kept[0] : "",
+        nkept ? (nkept > 1 ? " and others as .save" : " as .save") : "");
     return 0;
 }
 
@@ -1040,7 +1510,7 @@ static int list(void)
         u32 l = strlen(names[i]);
         if (l < 10 || strcmp(names[i] + l - 9, ".manifest")) continue;
         names[i][l - 9] = 0;
-        struct pkg *k = installed(names[i]);
+        struct zf_pkg *k = installed(names[i]);
         if (k) printf("%-12s %u (%s)%s\n", k->name, k->vnum, k->vstr, k->group ? "  base group" : "");
     }
     dir_free(names, n);
@@ -1049,12 +1519,61 @@ static int list(void)
     return 0;
 }
 
+static int usage(void)
+{
+    printf("usage: zup [-l]          (boot runs zup at every start; see man zup)\n"
+           "       zup -f FILE [-d]  install one package file (zpkg runs this)\n"
+           "       zup -r NAME [-n]  remove one package\n");
+    return 2;
+}
+static int live_main(int argc, char **argv)            /* zup -f FILE [-d], zup -r NAME [-n] */
+{
+    int f = !strcmp(argv[1], "-f"), opt = 0;
+    if (argc < 3 || argc > 4) return usage();
+    if (argc == 4) {
+        if (strcmp(argv[3], f ? "-d" : "-n")) return usage();
+        opt = 1;
+    }
+    if (sys_getuid() != 0) { printf("zup: only root installs or removes packages\n"); return 1; }
+    signal(SIGINT, SIG_IGN); signal(SIGHUP, SIG_IGN); signal(SIGTERM, SIG_IGN);    /* never ended or stopped */
+    signal(SIGQUIT, SIG_IGN); signal(SIGTSTP, SIG_IGN);                            /* half-way */
+    struct uupdate u;
+    memset(&u, 0, sizeof u);
+    if (sys_update(UPD_INFO, (u32)&u, sizeof u) < 0) { say("this kernel has no updates (SYS_update): nothing done"); return 1; }
+    if (u.flags & UPD_F_TRIAL) {
+        say("a new system is on trial (not confirmed yet): no package changes now, \"Zenix (previous)\" would break them");
+        return 1;
+    }
+    struct ustat st;
+    if (sys_stat(DB, &st) < 0) { say("no package database here (%s): nothing done", DB); return 1; }
+    if (lock_take()) return 1;
+    u32 jl;
+    char *j = slurp(JOURNAL, &jl);
+    if (j && strncmp(j, "zupj 1\nlive 1 ", 14)) {         /* a system update's: boot's to finish, with its result */
+        free(j);
+        say("a system update is unfinished: restart first (zup finishes it at the start), then try again");
+        lock_drop();
+        return 1;
+    }
+    free(j);
+    int r = recover() < 0 ? -EIO : 0;
+    db_reset();
+    if (r) say("nothing done: check the root (fsck.ext2) first");
+    else {
+        u32 base = base_version(), eff = base < u.kvnum ? base : u.kvnum;
+        r = f ? install_file(argv[2], opt, eff) : remove_pkg(argv[2], opt);
+    }
+    lock_drop();
+    return r < 0;
+}
+
 int main(int argc, char **argv)
 {
     signal(SIGPIPE, SIG_IGN);           /* DESIGN D16 rule 11: `zup | less` and quitting less never end an update half-way */
     int stage2 = argc > 1 && !strcmp(argv[1], "-2");
     if (argc > 1 && !strcmp(argv[1], "-l")) return list();
-    if (argc > 1 && !stage2) { printf("usage: zup [-l]   (boot runs zup at every start; see man zup)\n"); return 2; }
+    if (argc > 1 && (!strcmp(argv[1], "-f") || !strcmp(argv[1], "-r"))) return live_main(argc, argv);
+    if (argc > 1 && !stage2) return usage();
     if (sys_getuid() != 0) { printf("zup: only root installs updates\n"); return 1; }
 #ifdef DIAG_SLOWZUP     /* test builds (tools/update-test.sh slowzup): a stage 2 that hangs, for boot's time limit */
     if (stage2) { say("diag: DIAG_SLOWZUP: stage 2 hangs"); for (;;) sys_sleep(100); }   /* say, as every message: the
@@ -1063,8 +1582,22 @@ int main(int argc, char **argv)
     struct uupdate u;
     memset(&u, 0, sizeof u);
     if (sys_update(UPD_INFO, (u32)&u, sizeof u) < 0) return 0;      /* a kernel without updates: nothing to do */
+    /* D22 4.2: the lock, when there is a journal to finish or a way back to take and no bundle (with a bundle zup runs
+     * only at boot, where nothing else does; without one a zup started by hand must never take a running live
+     * transaction's journal for a cut one). A lock left from before the restart is stale */
+    struct ustat st;
+    struct uproc me, par;
+    if (proc_get(sys_getpid(), &me) && proc_get((int)me.ppid, &par) && !strcmp(par.name, "boot"))
+        sys_unlink(LOCK);                               /* boot's run: nothing else runs, a lock is from before */
+    u32 base = peek_base(), pv = newest_prev();
+    if (!(u.addr && u.size) && (sys_lstat(JOURNAL, &st) == 0 || (pv > u.kvnum && ((u.flags & UPD_F_ROLLBACK) || base > u.kvnum)))) {
+        int lr = lock_take();
+        if (lr == -EBUSY) return 1;
+        if (lr) say("going on without the lock (nothing else runs at boot)");
+    }
     recover();
-    u32 base = base_version(), pv = newest_prev();
+    db_reset();                                         /* what recover() put back is read again (review 2026-10-28) */
+    base = base_version(); pv = newest_prev();
     if (pv > u.kvnum && ((u.flags & UPD_F_ROLLBACK) || base > u.kvnum)) {
         say("%s: putting the version before %u back", (u.flags & UPD_F_ROLLBACK) ? "Zenix (previous) was chosen" :
             "the installed base is newer than the kernel", pv);
@@ -1073,20 +1606,22 @@ int main(int argc, char **argv)
         else { snprintf(result, sizeof result, "zup: the rollback to the version before %u failed (%d)", pv, r); failed = 1; }
         say("%s", result + 5);
         save_result();
+        lock_drop();
         return failed;
     } else if (u.flags & UPD_F_ROLLBACK) {
         say("Zenix (previous) was chosen: the root has nothing newer than the kernel (%u) to roll back", u.kvnum);
     }
-    if (!u.addr || !u.size) { save_result(); return failed; }
-    static struct bundle b;
-    int r = bundle_parse(&b, (const u8 *)u.addr, u.size);
+    if (!u.addr || !u.size) { save_result(); lock_drop(); return failed; }
+    static struct zf_bundle b;
+    int r = zf_bundle_parse(&b, (const u8 *)u.addr, u.size);
     if (r == 0) r = install(&b, u.kvnum, stage2);
-    if (r == 2 || r == 3) return r - 2;                 /* the new zup did it, result and note included */
+    if (r == 2 || r == 3) { lock_drop(); return r - 2; }   /* the new zup did it, result and note included */
     if (r < 0) {
         snprintf(result, sizeof result, "zup: the update to %u was not installed: %s", b.vnum, lastmsg);
         failed = 1;
     }
     sys_update(UPD_NOTE, r < 0 ? UPDNOTE_FAILED : UPDNOTE_DONE, b.vnum);
     save_result();
+    lock_drop();
     return failed;
 }

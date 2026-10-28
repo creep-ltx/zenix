@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp
+          rz cryptotest ssh ssh-keygen wget sntp zpkg
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -267,13 +267,16 @@ $(BUILD)/gzip.uelf: $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
-# zup (DESIGN D15, /sbin/zup): inflate (miniz) and SHA-256 (sha.c)
+# zup (DESIGN D15, /sbin/zup): inflate (miniz), SHA-256 (sha.c) and the package formats' parsers (zpkgfmt.c, D22 4.2:
+# one copy for zup, zpkg and the tests)
 $(BUILD)/sha256.uo $(BUILD)/sha256.po: user/sha256.h
-$(BUILD)/zup.uo: user/zup.c user/libz.h user/usys.h user/sha256.h kernel/fsproto.h | $(BUILD)
-	$(CC) $(UCFLAGS) $(MINIZ_CFLAGS) -c $< -o $@
-$(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+$(BUILD)/zpkgfmt.uo: user/zpkgfmt.c user/zpkgfmt.h user/sha256.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/zup.uo: user/zup.c user/zpkgfmt.h user/libz.h user/usys.h user/sha256.h kernel/fsproto.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os $(MINIZ_CFLAGS) -c $< -o $@
+$(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
-	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 # programs that look up users and groups (/etc/passwd, /etc/group), and those that also check passwords
 PWAPPS := ls id whoami chown renice useradd userdel gpasswd netstat
@@ -468,6 +471,18 @@ $(BUILD)/wget.uo $(BUILD)/sntp.uo: $(BUILD)/%.uo: user/%.c $(BUILD)/builddate.h 
 	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
 $(BUILD)/wget.uo: user/wget/wget.h net/http/http.h crypto/zc/zc_tls.h crypto/zc/zc_x509.h
 $(BUILD)/sntp.uo: net/sntp/sntp.h
+# zpkg (DESIGN D22, docs/man/zpkg.txt) over its cores (user/zpkg/: the list and the trust rules, the resolver),
+# net/http/, the package formats (zpkgfmt.c), Ed25519 from the library, the clock file's code; its trusted keys built
+# in (tools/zsign.py cheader: the TEST key, or with RELEASE=1 tools/keys/zenix-release-*.pub, D21 6.3)
+ZPKGOBJS := $(BUILD)/cr/user/zpkg/index.o $(BUILD)/cr/user/zpkg/resolve.o $(BUILD)/cr/net/http/http.o $(BUILD)/zpkgfmt.uo \
+            $(BUILD)/sha256.uo $(BUILD)/cr/crypto/zc/zc_clock.o
+$(BUILD)/zpkgkeys.h: tools/zsign.py FORCE | $(BUILD)
+	@python3 tools/zsign.py cheader $@ $(if $(RELEASE),--release)
+$(BUILD)/cr/user/zpkg/index.o $(BUILD)/cr/user/zpkg/resolve.o: user/zpkg/zpkg.h
+$(BUILD)/zpkg.uo: user/zpkg.c $(BUILD)/zpkgkeys.h $(BUILD)/builddate.h user/zpkg/zpkg.h user/zpkgfmt.h net/http/http.h crypto/zc/zc.h crypto/zc/zc_clock.h user/socket.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
+$(BUILD)/zpkg.uelf: $(BUILD)/zpkg.uo $(ZPKGOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/zpkg.uo $(ZPKGOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/wget.uelf: $(BUILD)/wget.uo $(WGETOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/wget.uo $(WGETOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/sntp.uelf: $(BUILD)/sntp.uo $(SNTPOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
@@ -533,7 +548,8 @@ $(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
 	cp $< $@
 
 # ---- updates (DESIGN D15, docs/d15-self-updates.md): the packages of a build and the bundle zenixboot installs ----
-# build/pkg/NAME.manifest + NAME.tgz for the standard packages (tools/mkzup.py says which files each holds); the full
+# build/pkg/NAME.manifest + NAME.tgz for the standard packages (tools/mkzup.py says which files each holds: the base
+# group, the families and base-man, DESIGN D22 8.4.4); the full
 # root images get their manifests in /var/lib/zpkg (tools/mkroot.sh), so the first update knows what is installed.
 packages: $(BUILD)/pkg/list
 # the PC font (DESIGN D20 4.2: telnet's PC boards load it with CON_FONT): from Linux's font_8x8.c, on the full root
@@ -545,10 +561,12 @@ $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 	python3 tools/mkpsf.py tools/font_8x8.c $@
 $(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
-# the bundle: the kernel and every package (copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
+# the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
+# zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
+BASEPKGS := zup base zpkg
 bundle: $(BUILD)/zenix-update.zup
 $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py
-	python3 tools/mkzup.py bundle $@ --kernel $(BUILD)/kernel.bin $(BUILD)/pkg $$(cat $(BUILD)/pkg/list)
+	python3 tools/mkzup.py bundle $@ --base-only --kernel $(BUILD)/kernel.bin $(BUILD)/pkg $(BASEPKGS)
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 1,024 inodes (512 ran out with the
 # network's files in D19 step 8: cmds2-test makes 150 files)

@@ -72,6 +72,27 @@ int sys_readlink(const char *p, char *b, u32 max) { return zfs_req(FS_READLINK, 
 int sys_sync(void) { return zfs_req(FS_SYNC, 0, 0, 0, 0); }
 int sys_statfs(struct ustatfs *f) { return zfs_req(FS_STATFS, (u32)f, 0, 0, 0); }
 int sys_getuid(void) { return 0; }
+int sys_getpid(void) { return (int)getpid(); }
+int sys_mountinfo(u32 i, struct umountinfo *m)
+{
+    if (i) return -1;
+    memset(m, 0, sizeof *m); strcpy(m->path, "/"); strcpy(m->type, "ext2");
+    return 0;
+}
+int sys_lseek(int fd, int off, int whence)
+{
+    if (bad_fd(fd) || whence != 0 || off < 0) return -EINVAL;
+    return (int)(fds[fd].off = (u32)off);
+}
+int sys_fstat(int fd, struct ustat *s) { return bad_fd(fd) ? -EBADF : zfs_req(FS_FSTAT, fds[fd].ino, (u32)s, 0, 0); }
+int sys_procinfo(u32 i, struct uproc *p)                /* one process: this zup (its lock is its own) */
+{
+    if (i != 1) return -EINVAL;
+    memset(p, 0, sizeof *p);
+    p->pid = (u32)getpid(); p->ppid = (u32)getppid(); p->state = 1;
+    strcpy(p->name, "zup");
+    return 0;
+}
 int sys_spawn(const char *path, char *const *argv, const int *stdio)
 {
     (void)path; (void)stdio;

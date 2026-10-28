@@ -3,7 +3,8 @@
 # Zenix updating itself, in the emulator (DESIGN D15, docs/d15-self-updates.md section 11). A1200, Kickstart 3.1,
 # 2 MB chip + 8 MB fast, an IDE disk with the FFS boot partition (zenixboot, Zenix/zenix = this build's kernel,
 # version V1) and the ext2 root of this build, on which "the owner" added a line to /etc/passwd. The bundle (version
-# V2) has a kernel built with ZVNUM=V2 and this build's packages, with a new /etc/passwd and /etc/motd and a /bin/hello
+# V2) has a kernel built with ZVNUM=V2 and this build's packages zup, base and zenix-tests (the D15 path itself takes
+# any; the build's own bundle carries the base group only, DESIGN D22 3.1), with a new /etc/passwd and /etc/motd and a /bin/hello
 # that says HELLO. Each setup is one disk and one or more FS-UAE runs; the boot partition is read back on the PC
 # (tools/ffsread.py) and the root checked with e2fsck -fn after each.
 #   install      the kernel replaced (zenix.old kept), the FFS steps in their order with flushes, the bundle in memory
@@ -51,18 +52,18 @@ echo ' Zenix updated (update-test)' >$OUT/motd2
 python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); assert d.count(b"hello from pid") == 1
 open(sys.argv[2], "wb").write(d.replace(b"hello from pid", b"HELLO from pid"))' $OUT/b2/hello.zx $OUT/hello2
 python3 tools/mkzup.py repack $P base /etc/passwd=$OUT/passwd2 /etc/motd=$OUT/motd2 >/dev/null &&
-python3 tools/mkzup.py repack $P utils /bin/hello=$OUT/hello2 >/dev/null || { echo "FAIL repack"; exit 1; }
+python3 tools/mkzup.py repack $P zenix-tests /bin/hello=$OUT/hello2 >/dev/null || { echo "FAIL repack"; exit 1; }
 for k in b2 b2t1 b2t2 b2t3; do
-    python3 tools/mkzup.py bundle $OUT/$k.zup --kernel $OUT/$k/kernel.bin $P zup base utils man >/dev/null || { echo "FAIL bundle $k"; exit 1; }
+    python3 tools/mkzup.py bundle $OUT/$k.zup --kernel $OUT/$k/kernel.bin $P zup base zenix-tests >/dev/null || { echo "FAIL bundle $k"; exit 1; }
 done
 make -s BUILD=$OUT/b2s ZVNUM=$V2 UDIAG=-DDIAG_SLOWZUP $OUT/b2s/kernel.bin $OUT/b2s/pkg/list >>$OUT/make.log 2>&1 ||
     { echo "FAIL build slowzup"; exit 1; }
 rm -rf $OUT/pkgs; mkdir -p $OUT/pkgs; cp $P/* $OUT/pkgs/; cp $OUT/b2s/pkg/zup.* $OUT/pkgs/
-python3 tools/mkzup.py bundle $OUT/b2s.zup --kernel $OUT/b2s/kernel.bin $OUT/pkgs zup base utils man >/dev/null ||
+python3 tools/mkzup.py bundle $OUT/b2s.zup --kernel $OUT/b2s/kernel.bin $OUT/pkgs zup base zenix-tests >/dev/null ||
     { echo "FAIL bundle b2s"; exit 1; }
-python3 tools/mkzup.py bundle $OUT/b2z.zup --kernel $OUT/b2/kernel-zfs.bin $P zup base utils man >/dev/null ||
+python3 tools/mkzup.py bundle $OUT/b2z.zup --kernel $OUT/b2/kernel-zfs.bin $P zup base zenix-tests >/dev/null ||
     { echo "FAIL bundle b2z"; exit 1; }
-python3 tools/mkzup.py bundle $OUT/b2min.zup --kernel $OUT/b2/kernel.bin --min 4000000000 $P zup base utils man >/dev/null ||
+python3 tools/mkzup.py bundle $OUT/b2min.zup --kernel $OUT/b2/kernel.bin --min 4000000000 $P zup base zenix-tests >/dev/null ||
     { echo "FAIL bundle b2min"; exit 1; }
 # the owner's root: this build's, with a line added to /etc/passwd
 cp $B/zenix.hdf $OUT/root.img

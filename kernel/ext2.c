@@ -843,7 +843,9 @@ int ext2_iput(const struct inode *in)
     wr32(raw + 8, in->mtime);           /* atime */
     wr32(raw + 12, in->mtime);          /* ctime */
     wr32(raw + 16, in->mtime);
-    wr32(raw + 20, in->links ? 0 : in->mtime);     /* dtime of a deleted inode */
+    /* dtime of a deleted inode: e2fsck takes a dtime below the inode count for an orphan-list link, so a clock that
+     * was never set (near 1970, a machine without a battery clock) must not write one (found by zpkg's FS-UAE test) */
+    wr32(raw + 20, in->links ? 0 : in->mtime > ninodes ? in->mtime : ninodes + 1);
     wr16(raw + 24, in->gid);
     wr16(raw + 26, in->links);
     wr32(raw + 28, in->nblocks);
@@ -1332,16 +1334,25 @@ int ext2_mkdir(struct inode *dir, const char *name)
         return -EEXIST;
     if (dir->links >= 65000)
         return -EMLINK;
-    int r = new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1);
+    /* the parent's count first (the new ".." counts there), before the new directory's ".." exists, then the entry: a
+     * cut anywhere leaves the parent's count one too high and perhaps an unnamed directory (leaks fsck finds), never
+     * a ".." the parent does not count, which a later rmdir of the parent would leave naming a free inode (F5; found
+     * by D22's live transactions, whose rollback removes the directories they made) */
+    dir->links++;
+    dir->mtime = fs_now();
+    int r = ext2_iput(dir);
     if (r)
         return r;
+    if ((r = new_inode(&d, S_IFDIR | fsp_new_dir_mode(ext2_umask), 1)))
+        goto undo;
     inherit_group(&d, dir);
     u32 blk = bmap_alloc(&d, 0);
     if (!blk) {
         d.links = 0;
         ext2_iput(&d);
         free_inode(d.ino, 1);
-        return -ENOSPC;
+        r = -ENOSPC;
+        goto undo;
     }
     d.size = bsize;
     memset(dbuf, 0, bsize);
@@ -1356,23 +1367,22 @@ int ext2_mkdir(struct inode *dir, const char *name)
     dbuf[19] = file_type(S_IFDIR);
     dbuf[20] = '.';
     dbuf[21] = '.';
-    if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d))
-        return -EIO;
-    /* the parent's count first (the new ".." counts there), then the entry: a cut in between leaves the parent's
-     * count one too high and an unnamed directory (leaks fsck finds), never a count below the names (F5) */
-    dir->links++;
-    dir->mtime = fs_now();
-    if ((r = ext2_iput(dir)))
-        return r;
+    if (bwrite_copy(blk, 0, dbuf, bsize) || ext2_iput(&d)) {
+        release(&d);
+        r = -EIO;
+        goto undo;
+    }
     if ((r = dir_add(dir, name, len, d.ino, d.mode))) {
-        if (ext2_iget(dir->ino, dir) == 0) {    /* dir_add may have rewritten it (index flag, a new block) */
-            dir->links--;
-            ext2_iput(dir);
-        }
-        release(&d);                            /* the new directory has no name: its block and number go back */
-        return r;
+        release(&d);                            /* the new directory has no name: its block and number go back, */
+        goto undo;                              /* then the parent's count (never a ".." it does not count) */
     }
     return 0;
+undo:
+    if (ext2_iget(dir->ino, dir) == 0) {        /* no new directory: the parent's count back */
+        dir->links--;
+        ext2_iput(dir);
+    }
+    return r;
 }
 
 int ext2_unlink(struct inode *dir, const char *name)

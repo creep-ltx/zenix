@@ -855,3 +855,133 @@ word, and that "no floor" is the right call. Its findings, all taken in above:
 - an old zpkg ignores the word (now said);
 - two client paths had no test (now tested).
 
+
+## As built: step 1 (main line, branch zpkg1, 2026-10-28)
+
+- `user/zpkgfmt.c` + `.h`: zup.c's manifest and bundle parsers moved out unchanged (the same checks, the same
+  messages through the program's `zf_say`), with the bundle reader split so a file can be streamed (step 4):
+  `zf_bundle_head` (header and table, asks for more bytes while it has too few), `zf_bundle_entry` (one table entry,
+  range-checked), `zf_part_kind` (a `pkg/` part's name), `zf_bundle_parse` (all of it in memory, as before);
+  `zf_pkg_free`/`zf_bundle_free` (a bundle's package names now live in the bundle itself, so nothing leaks after a
+  refusal). Built at -Os: `zup` text 42,806 -> 40,520 bytes, `/sbin/zup` 48,104 -> 45,228 (*measured*).
+  `tools/zup-host-test.sh` unchanged in what it checks (48 passed). Fuzz target `fmt` in `tools/host/zpkg-fuzz.c`
+  (manifests, and bundles read in pieces as `zup -f` will): 10 million inputs in 120 s, nothing found.
+- `UPD_F_TRIAL` 2 claimed (CLAUDE.md; `kernel/kernel.h`, `user/usys.h`): the kernel keeps that one bit after
+  `UPD_RELEASE`, so zpkg, which runs after boot gave the bundle back, still sees it. zenixboot sets it from step 7.
+
+## As built: step 4, zup's live transactions (main line, branch zpkg1, 2026-10-28)
+
+- `zup -f FILE [-d]` and `zup -r NAME [-n]` (man/zup.txt) in zup's one engine, every rule of 4.2: the lock (taken by
+  zup itself with `O_EXCL`, or held by its parent; a dead holder's lock is stale only while no other zup lives, so a
+  zup left running after its zpkg died is never taken for a cut one; made and removed under the "needs a check" mark;
+  the boot run takes it only for a journal or a way back without a bundle in memory, since with a bundle nothing else
+  runs); `live 1 NAME` before the operations, `live/`, no undo log, no result, no note, a commit and a recovery that
+  never touch `prev-*`; versions (`-d`; the header's minimum against the smaller of the installed base and the
+  running kernel); never the base group (group and name), never a package in the newest prev set's logs, never during
+  a trial (`UPD_F_TRIAL`); paths owned by another package (directories shared, `takes` excepted), under the
+  database or the cache, below a symbolic link; `takes` with the taken entry in the three-way compare and the taken
+  manifest rewritten (or removed) in the same transaction; `.save` (`S`). The file is streamed: header and table,
+  the manifest copied and parsed, the tgz's SHA-256 a piece at a time, then inflated from the file in 4 KB pieces.
+  The change table and the installed-manifest table grow as needed: zup's bss 97,142 -> 19,690 bytes.
+- **Choices where the note was silent (conservative):** (1) an existing file or link no package owns is a conflict
+  (pacman's rule; 4.2 named only owned paths); (2) a removal is refused while any installed package depends on the
+  package (zpkg removes dependents first), not only a base-group one; (3) an older `PATH.save` is never replaced: the
+  removal is refused until it is moved; (4) two more live-only operations, `M` (a new directory, removed by a
+  rollback) and `X` (a removed package's directory, removed if empty, put back by a rollback), so a rollback leaves
+  no directory behind and a cut after the commit leaves none either; (5) the lock's parent rule uses the parent's pid
+  from `SYS_procinfo` (not an argument); (6) a damaged installed manifest stops every live change ("the package
+  database cannot be read"); the boot run keeps D15's behaviour; (7) a base-group package with `takes` is refused in
+  a system bundle too; (8) zup -f and -r refuse to run on a kernel without `SYS_update` and on a root without
+  `/var/lib/zpkg` ("no package database here").
+- **Found and fixed on the way (kernel/ext2.c):** `mkdir` wrote the new directory (with its `..`) before raising the
+  parent's count; a cut in between, then an rmdir of the parent before `fsck` (a live rollback removing the directory
+  it made), left that `..` naming a free inode, the kind of damage F5 rules out. The count is raised first now.
+- Sizes (*measured*): `zup` text 40,520 -> 47,288 bytes at -Os (zup.c is cold code: -Os now, it was -O2), bss
+  97,142 -> 19,690; `/sbin/zup` 45,228 -> 52,988 bytes; the kernel +40 bytes.
+- Tests (`tools/zup-host-test.sh`, all passing, *verified*): D15's 48 unchanged, plus 44: the base-only system
+  update, a first install, "installed already", an upgrade with a kept config, older refused and `-d`, 13 refusals of
+  `-f` and 4 of `-r` each checked to change nothing (root, `prev-V` and the lock), a removal refused for a dependent,
+  the lock held by a living zup, a stale lock with another zup alive, the parent's lock, a stale lock taken over,
+  `takes` (part of a package, the rest of it, a config file), `-r` with `.save`, `-n`, an older `.save`; a power cut
+  before each change of four live operations (`-f` new, `-f` upgrade with a kept config, a `takes` hand-over, `-r`
+  with `.save`), the commit line included, then the next start: old or new exactly, `prev-V` byte for byte; "Zenix
+  (previous)" after live transactions; on the real ext2 server a cut after each block write of `-f` (506 cuts) and
+  `-r` (378): at worst leaks, marked, `prev-V` untouched.
+- **The base-only system update and the split (8.4.4, the rest of step 4):** `make bundle` now passes `--base-only`
+  with the base group (`zup base`; zpkg joins in step 5): the system bundle is 400,784 bytes (was 932,864). `make
+  packages` makes the families of `tools/mkzup.py` FAMILIES (26: coreutils, findutils, archive, grep, sed, awk,
+  textutils, diffutils, hashutils, shellutils, sysinfo, procps, sysutils, pager, edit, shadow, disktools, cu, zmodem,
+  nettools, telnet, ssh, wget, sntp, zenix-tests; each with a `desc`, its programs, links and pages, `depends base`,
+  `takes utils` and `takes man`) and base-man (`takes man`); a program in no family stops the build; packages an
+  older build left in `build/pkg` are removed. `tools/update-test.sh` builds its own test bundles with zup, base and
+  zenix-tests (the D15 path itself still takes any package; 16 packages a bundle is zup's limit). Tested on the host
+  (section 2c of `tools/zup-host-test.sh`): this build packed as the D15 bundles shipped it (zup, base, utils, man)
+  installed on an empty root, a family refused while the prev set holds utils, the base-only update, then the 26
+  families and base-man by `zup -f`: utils and man gone, every file as before, the prev set untouched.
+  **Choices (conservative):** `boot` and `diskd` go to zenix-tests (the kernel carries its own copies; the files on
+  the disk are not what runs); the man program goes with less (pager); a page that is no program's goes to base-man.
+
+### Reviews of step 4 (two independent read-only reviews, 2026-10-28) and what changed
+
+*Correctness and power cuts:* (blocker) the boot run read base's manifest into zup's table before `recover()`, so a
+recovery that put base back left a stale version for the install (it said "installed already"): the table is now
+emptied after `recover()`, and a new host test cuts before each change and then starts straight away with the
+bundle. (should fix) the lock's marks could clear the "needs a check" mark under another zup's transaction: the
+lock file's writes no longer touch zup's mark (one request each, which fsd's own clean mark covers; only the holder
+marks); the pid was written after the `O_EXCL` create, so a reader could see an empty lock: now `lock.PID` is written
+and linked to `lock`; a stale lock is taken over only while no other zup or zpkg lives; a boot run that cannot take
+the lock for another reason than a living holder goes on (nothing else runs at boot); `zup -f`/`-r` refuse to
+finish a system update's journal ("restart first": its result is boot's). (minor) mkdir's failure path now frees
+the new directory before lowering the parent's count; `X`'s undo sets owner and mode again (a cut between) and
+records the directory's own mode; old link targets are read from the disk for `u` (as for `L`) and must be
+journal-safe words; `takes` keeps the taken package's directory lines; `M` operations come first in the plan; a
+damaged live journal keeps its previous files in `live.damaged`.
+*Security and refusals:* (blocker) a package could name `PATH.zup-new` (a link of its own) and aim zup's writes,
+`chmod` and `chown` through it at a base file: the names `.zup-new`, `.new` and `.save` are refused in every manifest
+(user/zpkgfmt.c, and mkzup), every `.zup-new` is made anew with `O_EXCL` after an unlink, and only a regular file of
+zup's own is chowned, chmodded or renamed. (should fix) a path listed twice, a link target `-` or with other
+characters than mkzup's, more than 2,048 entries: refused by the parser; a tar member must have its manifest's size
+and the archive may not inflate past its manifest's sizes; a package whose installed manifest says `group base` is
+refused too; a sibling zup under the same parent is refused; a downgrade (`-d`) is refused while an installed
+package needs the newer version, and a `takes` that empties a package something needs; the larger of the header's
+minimum and `depends base` is checked against the effective base. (minor) a path that is an ancestor of the database
+or the cache, or on another mount, is refused, and removals get the symbolic-link check too; SIGQUIT and SIGTSTP are
+ignored as well; a system bundle that would take a path an installed package outside it owns is refused (the boot
+run). Not changed: `SYS_procinfo` carries no owner, so a user's program named zup or zpkg can make zup wait (never
+go ahead); owners and set-user-id bits are the repository's policy (mkrepo), not zup's.
+All tests pass after the fixes (`tools/zup-host-test.sh` 107, `tools/ext2-host-test.sh` 82).
+
+## As built: step 5, zpkg (main line, branch zpkg1, 2026-10-28)
+
+- `user/zpkg.c` (`/bin/zpkg`, man/zpkg.txt) over the cores of steps 2-3, `user/zpkgfmt.c` and Ed25519: `-Sy`,
+  `-Syu`, `-Syuu`, `-S`, `-Sw`, `-Ss`, `-Si`, `-Sc`, `-Q`, `-Qi`, `-Ql`, `-Qo`, `-Qu`, `-R`/`-Rs`/`-Rn`, `-U`,
+  `--back`, `--snapshot`, `--ignore-expiry`, `--reset-serial`, `--ram`; plain HTTP with time limits (connect 15 s,
+  silence 60 s, a total per file of 2 min plus 1 s a KB), keep-alive, redirects (never to https), resume from
+  `.part`; the order of 4.3 (resolve; download and check everything; the manifests' dependencies and `takes` against
+  the list, file conflicts across the set; then one `zup -f` or `zup -r` per package); the deps file; the lock as
+  zup's (linked whole, a stale holder only while no other zup or zpkg lives); the running programs of an updated
+  package named; a newer system downloaded and checked, and the owner told to copy it to BOOT: until the slot comes
+  (step 7). The package `zpkg` joins the base group (`/bin/zpkg`, `/etc/zpkg.conf` as a config file naming no server,
+  D22 7.6); `make bundle` carries zup, base and zpkg. The trusted keys are built in (`tools/zsign.py cheader`: the
+  TEST key in a test build, `RELEASE=1` the release keys of `tools/keys/`).
+- **Choices (conservative):** `-U` copies the file and its `.sig` into the root-only cache before it checks them
+  (nobody can change the file between the check and zup) and takes only a whole path; `--back` looks in the cache
+  only (the list names no older versions; the pool fallback of 7.5 needs a list word, left open); zpkg asks for 160
+  KB free before a change; the kernel's own processes (boot, diskd) are not named as running old versions.
+- **Found and fixed on the way:** the resolver never set its depth counter (`user/zpkg/resolve.c`, the S21 guard):
+  on the 68020 the first `-S` said "more than 64 deep"; kernel/ext2.c wrote a deleted inode's dtime from a clock
+  never set (near 1970), below the inode count, which e2fsck takes for an orphan-list link: now never below it.
+- Sizes (*measured*): `/bin/zpkg` 89,936 bytes (text 82,678, bss 33,520: Ed25519 and SHA-512 about 20 KB, the HTTP
+  core, the list parser and resolver, libz's printf); `/sbin/zup` 56,920 (text 50,734); the system bundle 453,504
+  bytes (the kernel, zup, base, zpkg). The RAM floppy's kernel: 159,924 of 179,200 bytes (19,276 left; 2,892 on the
+  mount tests' floppy).
+- **Memory (FS-UAE, *measured*, not hardware):** the stock A1200 (2 MB chip): 1,014 KB free after the run, about 540
+  KB free while zpkg and zup install one package; over SLIP 598 KB. **The 1 MB chip-only machine cannot run zpkg with
+  the network up:** with SLIP up and one login about 104 KB are free (netd's pools take the rest), so zpkg refuses
+  with its memory message and changes nothing (`zpkg-emu-test.sh m` checks exactly that). An owner's question
+  (below in the hand-back), not decided here.
+- Tests (`tools/zpkg-emu-test.sh`, *verified* in FS-UAE): `e` the A2065, 22 checks (every operation above, a replay
+  skipped, a damaged mirror refused and the next used, a cut download resumed, an expired list and
+  `--ignore-expiry`, `-U` with a bad `.sig`, the refusals, e2fsck after); `s` SLIP (-Sy, -S with a dependency, -Rns,
+  e2fsck); `m` the 1 MB machine (above). In `tools/check.sh` as `zpkg-emu-test` (parts e|s|m). Not yet: the emulator
+  killed during a live install (the host tests cut before every change and after every block write instead).

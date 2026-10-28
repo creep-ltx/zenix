@@ -7,13 +7,29 @@
  *   -DFUZZ_FFS      the slot walk over an image made of the input (up to 256 blocks), then a write that may touch
  *                   only the slot's data blocks
  *   -DFUZZ_RESOLVE  the resolver: a list from the input, installed packages made from its first blocks
- * (zpkgfmt.c's manifest and bundle parsers are the main session's step 1; their harness comes with them.)
+ *   -DFUZZ_FMT      user/zpkgfmt.c (D15's frozen formats, zup's and zpkg's one parser; build with it, sha256.c and
+ *                   -DZHOST): an input starting with Z is a bundle (head and table read in pieces as zup -f streams it,
+ *                   then the whole bundle in memory), any other a manifest; every entry checked against the rules
  */
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../../user/zpkg/zpkg.h"
 #include "../../net/http/http.h"
+#ifdef FUZZ_FMT
+#include <errno.h>
+#include "../../user/zpkgfmt.h"
+void zf_say(const char *fmt, ...) { (void)fmt; }
+static void fmt_pkg_check(struct zf_pkg *p)
+{
+    if (!zf_name_ok(p->name) || !p->vnum || p->ndep > ZF_MAXDEP)
+        __builtin_trap();
+    for (int i = 0; i < p->nent; i++)
+        if (!zf_path_ok(p->ent[i].path) || !strchr("fcdl", p->ent[i].kind) || (p->ent[i].mode & ~07777u) ||
+            (p->ent[i].kind == 'l' && strlen(p->ent[i].target) >= ZF_PMAX - 9))
+            __builtin_trap();
+}
+#endif
 
 #ifdef FUZZ_FFS
 struct mem {
@@ -161,6 +177,48 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         free(s);
     }
     free(r);
+#elif defined(FUZZ_FMT)
+    if (size && data[0] == 'Z') {
+        static struct zf_bundle b;
+        unsigned need = 0, avail = 0;
+        int r;
+        while ((r = zf_bundle_head(&b, data, avail, (unsigned)size, &need)) == -EAGAIN) {
+            if (need <= avail || need > size)
+                __builtin_trap();       /* it must ask for more, and never past the end */
+            avail = need;
+        }
+        if (r == 0 && (b.ntoc < 1 || b.ntoc > ZF_MAXTOC || ZF_HDR + b.ntoc * ZF_TOCE > size))
+            __builtin_trap();
+        for (unsigned i = 0; r == 0 && i < b.ntoc; i++) {
+            char name[41], pname[25];
+            unsigned off, sz;
+            const unsigned char *sha;
+            if (zf_bundle_entry(&b, i, name, &off, &sz, &sha) == 0) {
+                if (off > size || sz > size - off)
+                    __builtin_trap();
+                zf_part_kind(name, pname);
+            }
+        }
+        unsigned char *copy = malloc(size);
+        memcpy(copy, data, size);
+        if (zf_bundle_parse(&b, copy, (unsigned)size) == 0)
+            for (int j = 0; j < b.npkg; j++) {
+                fmt_pkg_check(&b.pk[j]);
+                if (b.pk[j].man < copy || b.pk[j].man + b.pk[j].manlen > copy + size || b.pk[j].tgz < copy ||
+                    b.pk[j].tgz + b.pk[j].tgzlen > copy + size)
+                    __builtin_trap();
+            }
+        zf_bundle_free(&b);
+        free(copy);
+    } else {
+        struct zf_pkg p;
+        char *t = malloc(size + 1);
+        memcpy(t, data, size);
+        t[size] = 0;
+        if (zf_manifest_parse(&p, t, (unsigned)size, "fuzz") == 0)
+            fmt_pkg_check(&p);
+        zf_pkg_free(&p);
+    }
 #elif defined(FUZZ_FFS)
     struct mem m;
     struct zp_ffs f;

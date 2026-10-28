@@ -100,6 +100,48 @@ int sys_statfs(struct ustatfs *f)
     return 0;
 }
 int sys_getuid(void) { return 0; }
+int sys_getpid(void) { return (int)getpid(); }
+int sys_mountinfo(u32 i, struct umountinfo *m)
+{
+    if (i) return -1;
+    memset(m, 0, sizeof *m); strcpy(m->path, "/"); strcpy(m->type, "ext2");
+    return 0;
+}
+int sys_lseek(int fd, int off, int whence) { off_t r = lseek(fd, off, whence); return r < 0 ? err() : (int)r; }
+int sys_fstat(int fd, struct ustat *s) { struct stat st; if (fstat(fd, &st) < 0) return err(); fill(s, &st); return 0; }
+static int *pids, npids;
+int sys_procinfo(u32 i, struct uproc *p)
+{
+    if (i == 1 || !pids) {                              /* a fresh list of the PC's processes at each walk's start */
+        DIR *d = opendir("/proc");
+        struct dirent *e;
+        int cap = 0;
+        npids = 0;
+        while (d && (e = readdir(d))) {
+            if (e->d_name[0] < '1' || e->d_name[0] > '9') continue;
+            if (npids == cap) pids = realloc(pids, sizeof *pids * (size_t)(cap = cap ? cap * 2 : 256));
+            pids[npids++] = atoi(e->d_name);
+        }
+        if (d) closedir(d);
+    }
+    if (i < 1 || (int)i > npids) return -EINVAL;
+    memset(p, 0, sizeof *p);
+    char path[64], buf[512];
+    snprintf(path, sizeof path, "/proc/%d/stat", pids[i - 1]);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;                                   /* gone meanwhile: a free slot */
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    char *a = strchr(buf, '('), *b = strrchr(buf, ')');
+    if (!a || !b || b - a - 1 > 15) return 0;
+    memcpy(p->name, a + 1, (size_t)(b - a - 1));
+    char st = b[2];
+    p->pid = (u32)pids[i - 1];
+    p->ppid = (u32)atoi(b + 4);
+    p->state = st == 'Z' || st == 'X' ? 5 : 1;
+    return 0;
+}
 int sys_spawn(const char *path, char *const *argv, const int *stdio)
 {
     (void)stdio;
