@@ -17,7 +17,8 @@
 #define ENETDOWN 100
 #endif
 
-#define WSB_OUTCAP (WSB_SMALL + 5)      /* one connection's send queue: a whole frame of up to 4 KB */
+#define WSB_OUTCAP WSB_SMALL            /* one connection's send queue: a whole frame of up to 4 KB (header included:
+                                         * exactly libz's 4 KB block, not the next size's 8 KB; measured, step 1) */
 #define WSB_BG     8                    /* detached commands and let-go ones the daemon still reaps (decision 6) */
 #define WSB_BADKEY 8                    /* addresses that sent a wrong key, remembered for the pause */
 #define WSB_SPEEDMAX (256u << 20)       /* SPEED: 1 byte to 256 MB, as Wasabi */

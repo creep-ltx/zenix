@@ -323,6 +323,38 @@ static int open_listener(void)
     return 0;
 }
 
+/* the discovery sockets (3.1): with the listener, never for a trial instance; a port that is taken is said once */
+static void open_disc(void)
+{
+    unsigned ports[2] = { WSB_DISC_A, g.port };
+    if (g.trial)
+        return;
+    for (int i = 0; i < 2; i++) {
+        if ((i && ports[1] == ports[0]) || g.ufd[i] >= 0)
+            continue;
+        if (fd_take(1))
+            break;
+        g.ufd[i] = wsb_os_udp(ports[i]);
+        if (g.ufd[i] < 0) {
+            fd_give(1);
+            g.ufd[i] = -1;
+            say("no discovery on a UDP port (in use?)", 0);
+        }
+    }
+}
+
+/* the network server went away (netd killed or crashed: every socket of its epoch is dead, D19 rule 9): the listener
+ * and the discovery sockets are closed and opened again at once, which starts netd again (D11), then every 10 s
+ * (5.7). Without this a dead listener would wake every poll. The connections find out by themselves (their recv). */
+static void net_lost(void)
+{
+    if (g.lfd >= 0) { wsb_os_close(g.lfd); fd_give(1); g.lfd = -1; }
+    for (int i = 0; i < 2; i++)
+        if (g.ufd[i] >= 0) { wsb_os_close(g.ufd[i]); fd_give(1); g.ufd[i] = -1; }
+    g.netretry = g.now | 1;
+    say("the network server went away: listening again when it is back", 0);
+}
+
 int wsb_init(int argc, char **argv)
 {
     int r;
@@ -402,21 +434,8 @@ int wsb_init(int argc, char **argv)
         say("cannot listen on TCP port", m);
         return WSB_ST_FAIL;
     }
-    if (!g.trial) {
-        unsigned ports[2] = { WSB_DISC_A, g.port };
-        for (int i = 0; i < 2; i++) {
-            if (i && ports[1] == ports[0])
-                break;
-            if (fd_take(1))
-                break;
-            g.ufd[i] = wsb_os_udp(ports[i]);
-            if (g.ufd[i] < 0) {
-                fd_give(1);
-                g.ufd[i] = -1;
-                say("no discovery on a UDP port (in use?)", 0);
-            }
-        }
-    }
+    if (!r)
+        open_disc();
     {
         char m[120];
         struct wsb_buf b = { m, 0, sizeof m };
@@ -646,6 +665,8 @@ static void accept_one(void)
     fd = wsb_os_accept(g.lfd, &peer);
     if (fd < 0) {
         fd_give(1);
+        if (fd == -ENETDOWN)
+            net_lost();
         return;
     }
     if (!wsb_allowed(&g.conf, peer)) {          /* before HELLO, and no word to it */
@@ -656,7 +677,7 @@ static void accept_one(void)
     }
     for (i = 0; i < WSB_CONNS && g.c[i].fd >= 0; i++)
         ;
-    if (i == WSB_CONNS || g.quit >= 0) {
+    if (i == WSB_CONNS || g.quit >= 0 || g.rebootpend || g.rebootpid) {      /* (a reboot under way: nobody new, step 1) */
         static const uint8_t busy[] = { WT_ERR, 0, 0, 0, 10, 0, 0, 0, 0, 0, 4, 'b', 'u', 's', 'y' };
         wsb_os_send(fd, busy, sizeof busy);
         wsb_os_close(fd);
@@ -751,8 +772,10 @@ int wsb_step(void)
             say("cannot listen any more: stopped", 0);
             g.quit = WSB_ST_FAIL;
             return finish();
-        } else
+        } else {
+            open_disc();
             say("the network is up: listening", 0);
+        }
     }
     if (g.refused != g.refused_saved && (uint32_t)(g.now - g.refused_at) >= WSB_REFUSED_MS)
         refused_save();
@@ -839,9 +862,19 @@ int wsb_step(void)
         if (!rev)
             continue;
         if (w == -1) {
+            if (rev & (WSB_POLLERR | WSB_POLLHUP | WSB_POLLNVAL)) {
+                net_lost();
+                continue;
+            }
             for (int j = 0; j < 4 && g.lfd >= 0; j++)
                 accept_one();
         } else if (w == -2 || w == -3) {
+            if (g.ufd[-2 - w] != f[k].fd)
+                continue;
+            if (rev & (WSB_POLLERR | WSB_POLLHUP | WSB_POLLNVAL)) {
+                net_lost();
+                continue;
+            }
             probe(f[k].fd);
         } else if (w >= 0 && w < WSB_CONNS) {
             struct conn *c = &g.c[w];

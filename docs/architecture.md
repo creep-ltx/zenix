@@ -219,7 +219,10 @@ serial cable (scroll back with Amiga+Up). **The servers' output** (D11 step 8): 
 gets, as its standard input, output and error, a file of type `FT_KLOG`: what it writes goes through `kputc` like
 `kprintf` (the serial port, the ring, the screen while mirrored); reading it gives end of file. So after the boot no
 server message appears on a console; `mount` says "see dmesg" when a server did not start. `boot` itself (and so
-`init`) keeps console 1. `SYS_klog` (73: offset, buffer, length) reads the ring (an offset below the oldest character
+`init`) keeps console 1. **`/dev/kmsg`** (DESIGN D24 6.5) gives root the same kind of file: opened write only
+(`O_RDONLY` or `O_RDWR`: -EINVAL; anyone but root: -EACCES), its writes go into the log as a service's do; init passes it to the
+daemons of `/etc/daemons` as their output and errors (man/init.txt "DAEMONS"); as with a service's output, its bytes go
+unfiltered to the serial port at its speed, so a big write holds the writer (and the machine) that long. `SYS_klog` (73: offset, buffer, length) reads the ring (an offset below the oldest character
 held reads from it; with `KLOG_OLDEST` 0x40000000 in the offset it answers that oldest offset, audit 2026-10-26 F10);
 `dmesg` prints it from there (`user/klogread.h`). A panic or an exception in the kernel switches the mirror on again, so its text reaches the
 screen, and records the reason in the log before the machine stops.
@@ -1181,6 +1184,7 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   and ends on a kill or after 2 s in which the port took nothing (logged: what was written, or -EIO), audit A5; with
   `O_NONBLOCK` (netd's SLIP, DESIGN D19 5.3) a write takes what fits now (-EAGAIN for nothing) and a read with nothing
   received answers -EAGAIN),
+  `/dev/kmsg` (root, write only: the kernel log, section 3 "Kernel log"),
   `/dev/null`, `/dev/zero`, `/dev/urandom` and `/dev/random` (section 3, "Random numbers"; `O_NONBLOCK` makes
   `/dev/random` answer -EAGAIN while it would wait). `fstat` of a console gives its number in `st_ino` (the
   `ustat` has no device field; `login` uses it to apply `/etc/autologin` to console 1 only).
@@ -1286,7 +1290,10 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   logout is the shell's end. A session holds no login process (30 KB, and login's 13 KB of shared code once no
   console waits at a prompt); nothing is written to the disk (no utmp). `init`'s `waitcon` takes one ended child per
   call and answers its status: the one console whose process is no longer there (wait says -1) gets that status, the
-  others' are asked for one by one.
+  others' are asked for one by one; the daemons of `/etc/daemons` (DESIGN D24 7, man/init.txt "DAEMONS") are matched
+  the same way. A daemon's delayed start is a `SIGALRM` whose handler (no `SA_RESTART`) makes `waitcon` return -EINTR
+  and arms the alarm again one tick later, so an alarm that came just before the wait still ends it; init cancels it
+  after every wait.
 - **tty** (`tty.c`): one per console, line discipline in the kernel: echo, backspace, `^U`, `^C` (SIGINT to the
   foreground: a process group or, in the old form of `SYS_setfg`, one process; nobody, or a group with no living
   member: `intr` is set for a shell that polls `ttyintr`), `^Z` (SIGTSTP the same way), `^D`; Tab is kept in the line (Backspace

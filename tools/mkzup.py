@@ -178,7 +178,7 @@ def parse_manifest(text):
 # The standard packages (section 4 of the design note). Ownership and modes as tools/mkroot.sh gives them on the
 # images (root owns everything; su, sudo and passwd set-user-id root; /etc/passwd and /etc/group 644).
 BASE_PROGS = ["init", "login", "sh", "mount"]
-BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console", "hosts"]   # /etc/autologin is the test images' own: never shipped
+BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console", "hosts", "daemons"]   # /etc/autologin is the test images' own: never shipped
 SETUID = {"su", "sudo", "passwd"}
 LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), ("chown", "/bin/chgrp"),
          ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos"), ("ifconfig", "/bin/ifup"), ("ifconfig", "/bin/ifdown"),
@@ -305,6 +305,16 @@ def std_packages(build, uapps):
                 ents += mandirs + [("f", 0o644, 0, 0, pages[f], "/usr/man/" + f) for f in mypages]
             make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)], desc=desc, takes=("utils", "man"))
             names.append(fam)
+        # the remote control daemon (DESIGN D24, /sbin/wasabid): a package of its own, off until root writes
+        # /etc/wasabid.conf and its line in /etc/daemons; not a command (SBINAPPS), so in no family
+        if os.path.exists(zx("wasabid")):
+            ents = [("d", 0o755, 0, 0, None, "/sbin"), ("f", 0o755, 0, 0, zx("wasabid"), "/sbin/wasabid")]
+            if "wasabid.txt" in pages:
+                ents += mandirs + [("f", 0o644, 0, 0, pages["wasabid.txt"], "/usr/man/wasabid.txt")]
+                taken.add("wasabid.txt")
+            make_package(out, "wasabid", vnum, vstr, ents, deps=[("base", vnum)],
+                         desc="the remote control daemon (the Wasabi protocol), off by default")
+            names.append("wasabid")
         rest = sorted(f for f in pages if f not in taken)
         make_package(out, "base-man", vnum, vstr, mandirs + [("f", 0o644, 0, 0, pages[f], "/usr/man/" + f) for f in rest],
                      deps=[("base", vnum)], desc="the manual pages of the base system and of what is not a command",

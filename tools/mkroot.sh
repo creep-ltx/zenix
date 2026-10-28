@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name> (zup, zfsd and netd as
-# /sbin/<name>), and the licence notices of the code from other projects in /usr/share/licenses.
+# Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name> (zup, zfsd, netd and wasabid
+# as /sbin/<name>), and the licence notices of the code from other projects in /usr/share/licenses.
 # usage: mkroot.sh out.hdf builddir "prog prog ..."
 set -e
 OUT="$1"; B="$2"; PROGS="$3"; SIZE="${4:-8M}"; INODES="${5:-512}"
@@ -33,7 +33,7 @@ fi
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2
-    dir=bin; case $p in zup|zfsd|netd) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15), the servers (D19)
+    dir=bin; case $p in zup|zfsd|netd|wasabid) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15), the servers (D19)
     case $p in drv-*) dir=sbin/net; name=${p#drv-}; mkdir -p "$T/sbin/net";; esac   # the network's drivers (D19 step 7)
     cp "$B/$p.zx" "$T/$dir/$name"
     chmod 755 "$T/$dir/$name"
@@ -90,7 +90,7 @@ fakeroot sh -c '
     chown 1001:100 "$1/home/guest"
     chmod 1777 "$1/tmp"
     chmod 4755 "$1/bin/su" "$1/bin/sudo" "$1/bin/passwd"
-    chmod 644 "$1/etc/passwd" "$1/etc/group"
+    chmod 644 "$1/etc/passwd" "$1/etc/group" "$1/etc/svctab" "$1/etc/daemons"
     mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$2" -d "$1" -F "$3" "$4"
 ' sh "$T" "$INODES" "$TMPOUT" "$SIZE"
 e2fsck -fn "$TMPOUT" >/dev/null
