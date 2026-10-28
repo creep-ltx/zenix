@@ -291,15 +291,16 @@ links from the root into `/usr` need **the kernel to follow symbolic links acros
 mount answers ENOENT: a limit fixed for every Zenix). A setup script asks the keyboard (`CON_KEYMAP`, root only) and
 finds the network card. *Prototype*: everything fits with about 50 KB free. The owner's approval of the note approves
 its features (note section 12). The full design: [d25-demo-floppy.md](d25-demo-floppy.md).
-## D26. Symbolic links across mounts (audit 2026-10-26 F12; design note revision 1, nothing built)
+## D26. Symbolic links across mounts (audit 2026-10-26 F12; design note revision 2 after four reviews, nothing built)
 **Why.** A symbolic link is followed only inside its own filesystem, so a link into another mount answers ENOENT (and
 an absolute target on any mount but the root is resolved from that volume's root); Linux follows it, and D25's links
-from the RAM root into `/usr` need it. **How.** While more than the root is mounted, the kernel marks its path requests
-(`UMSG_LINKS`) and a filesystem server stops at the first symbolic link it meets and answers `FS_LINKED` with the text
+from the RAM root into `/usr` need it. **How.** When a path request's path is a kernel copy (always while more than the root is mounted, and for
+`chdir` and `mount`), the kernel marks it (`UMSG_LINKS`) and a filesystem server stops at the first symbolic link it meets and answers `FS_LINKED` with the text
 the path continues at, written into the request's own path buffer; the kernel normalises it, picks the mount again
 and sends the request again, at most 40 links per path (Linux's), then -ELOOP. `..` at a mount point is Linux's; the
 working directory's text and mount points are kept resolved. A server not asked, and an old server, follow links
-inside their volume as today. The full design: [d26-links-across-mounts.md](d26-links-across-mounts.md).
+inside their volume as today. The bit is set only on a kernel buffer with an absolute path; each path is resolved
+once per system call (D13's checks on the resolved mount); `umount` matches the text before asking any server. The full design: [d26-links-across-mounts.md](d26-links-across-mounts.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers; fsd and diskd are built into the kernel image, zfsd is the file `/sbin/zfsd` since D19 step 1. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).
