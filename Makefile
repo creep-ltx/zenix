@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen
+          rz cryptotest ssh ssh-keygen wget sntp
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -393,7 +393,9 @@ CRYPTO_SRCS := $(sort $(wildcard crypto/zc/*.c)) crypto/monocypher/monocypher.c 
 CRYPTO_O2 := crypto/monocypher/monocypher.c crypto/monocypher/monocypher-ed25519.c crypto/bearssl/src/ec/ec_c25519_m15.c \
              crypto/bearssl/src/int/i15_montmul.c crypto/bearssl/src/ec/ec_p256_m15.c crypto/bearssl/src/symcipher/chacha20_ct.c \
              crypto/bearssl/src/symcipher/poly1305_ctmul32.c crypto/bearssl/src/hash/sha2small.c crypto/bearssl/src/hash/sha2big.c
-CRYPTO_DEF := -DBR_LE_UNALIGNED=0 -DBR_BE_UNALIGNED=0 -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0 \
+# BR_USE_UNIX_TIME=0: x509_minimal never calls time() and loses its 64-bit division (D21 3.5, 8.3: the date comes
+# from zc_clock's callback; newlib's headers would switch it on)
+CRYPTO_DEF := -DBR_LE_UNALIGNED=0 -DBR_BE_UNALIGNED=0 -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0 -DBR_USE_UNIX_TIME=0 \
               -Icrypto/bearssl/inc -Icrypto/bearssl/src -Icrypto/openssh
 CRYPTO_OBJS := $(patsubst %.c,$(BUILD)/cr/%.o,$(CRYPTO_SRCS))
 $(BUILD)/cr/%.o: %.c
@@ -438,6 +440,31 @@ $(BUILD)/ssh.po: user/ssh.c net/ssh/ssh.h user/pw.h user/libz.h user/usys.h tool
 $(BUILD)/ssh.puelf: $(BUILD)/ssh.po $(BUILD)/pw.po $(SSHPOBJS) $(BUILD)/libcrypto-pure.a $(BUILD)/crt0-pure.o $(BUILD)/libz.po link/pure.ld
 	$(CC) $(UCFLAGS) $(PULDFLAGS) $(BUILD)/crt0-pure.o $(BUILD)/ssh.po $(BUILD)/pw.po $(SSHPOBJS) $(BUILD)/libcrypto-pure.a $(BUILD)/libz.po $(LIBGCC) -o $@
 STACK_ssh-keygen := 16384
+# the define above is not tracked: the one file it changes is rebuilt when the Makefile changes
+$(BUILD)/cr/crypto/bearssl/src/x509/x509_minimal.o $(BUILD)/crp/crypto/bearssl/src/x509/x509_minimal.o: Makefile
+# the build date (DESIGN D21 8.3: the floor certificate dates are never judged below): the last commit's time, so
+# one commit always builds the same programs; SOURCE_DATE_EPOCH when given (a build outside git), else 0. The header
+# changes only when the date does
+BUILD_DATE := $(or $(SOURCE_DATE_EPOCH),$(shell git log -1 --format=%ct 2>/dev/null),0)
+$(BUILD)/builddate.h: FORCE | $(BUILD)
+	@printf '#define ZENIX_BUILD_DATE %su\n' '$(BUILD_DATE)' > $@.new; cmp -s $@.new $@ || mv $@.new $@; rm -f $@.new
+FORCE:
+# wget (DESIGN D21 8, docs/man/wget.txt) over its core (user/wget/), net/http/ (shared with zpkg) and the library's
+# TLS glue (crypto/zc/zc_tls.c), a plain program (not pure: D21 3.5); sntp (D21 8.3, docs/man/sntp.txt) over
+# net/sntp/ and the clock file's code (crypto/zc/zc_clock.c). The cores are system-call free (tools/host/tls-test.sh)
+WGETOBJS := $(BUILD)/cr/user/wget/plan.o $(BUILD)/cr/net/http/http.o
+SNTPOBJS := $(BUILD)/cr/net/sntp/sntp.o
+$(BUILD)/cr/user/wget/plan.o: user/wget/wget.h net/http/http.h
+$(BUILD)/cr/net/http/http.o: net/http/http.h
+$(BUILD)/cr/net/sntp/sntp.o: net/sntp/sntp.h
+$(BUILD)/wget.uo $(BUILD)/sntp.uo: $(BUILD)/%.uo: user/%.c $(BUILD)/builddate.h crypto/zc/zc_clock.h user/socket.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -I$(BUILD) -Inet/port/shim $(CRYPTO_DEF) -c $< -o $@
+$(BUILD)/wget.uo: user/wget/wget.h net/http/http.h crypto/zc/zc_tls.h crypto/zc/zc_x509.h
+$(BUILD)/sntp.uo: net/sntp/sntp.h
+$(BUILD)/wget.uelf: $(BUILD)/wget.uo $(WGETOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/wget.uo $(WGETOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/sntp.uelf: $(BUILD)/sntp.uo $(SNTPOBJS) $(BUILD)/libcrypto.a $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/sntp.uo $(SNTPOBJS) $(BUILD)/libcrypto.a $(BUILD)/libz.uo $(LIBGCC) -o $@
 # rz and sz (DESIGN D20 5, docs/man/rz.txt; sz is a link to rz): the Zmodem engine (user/xfer/, CTerm's, MIT) at -O2
 # (every byte of a transfer goes through it), the download rules (rzrules.c, shared with the PC tests) and rz.c cold
 XFEROBJS := $(BUILD)/xf-zmodem.no $(BUILD)/xf-detect.no $(BUILD)/xf-rzrules.no
@@ -562,4 +589,4 @@ clean:
 
 .SECONDARY:
 .DELETE_ON_ERROR:           # a recipe that fails leaves no half-written target behind for the next make to trust
-.PHONY: all run test check clean packages bundle
+.PHONY: all run test check clean packages bundle FORCE
