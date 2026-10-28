@@ -206,9 +206,14 @@ struct mount {
     char pname[16];                     /* port name of the server */
     char dev[16], type[8];
     u32 gen;                            /* D13: new on every mount and every (re)start of its server (vfs_server_started) */
+    u32 ok_epoch;                       /* F13: the ids below passed mount_search at this perm_epoch (0: none) */
+    u16 ok_uid, ok_gid;
 };
-static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1 } };
+static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1, 0, 0, 0 } };
 static u32 gen_last = 1;
+/* F13: rises with every request that can change who may search a directory (a mode, an owner, a name moved or
+ * removed), every mount, umount and server start: a cached mount_search answer older than it is asked again */
+static u32 perm_epoch = 1;
 static int nmnt = 1;                    /* mounts in use, the root included */
 
 __attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
@@ -221,6 +226,8 @@ __attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 
         return -EIO;                    /* the filesystem server is gone */
     m.type = type;
     m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
+    if (type == FS_CHMOD || type == FS_CHOWN || type == FS_RENAME || type == FS_RMDIR || type == FS_UNLINK)
+        perm_epoch++;                   /* before the call: a check that overlaps it is not cached (mount_search) */
     /* FS_CLOSE never starts a stopped server (D11): a new server has no opens to release, and proc_exit's closes
      * must never load a program; FS_SYNC and FS_QUIT skip a server that is not running (it has nothing to write: an
      * ext2 one wrote through, a dead ZenixFS one's uncommitted changes are gone, a starting one wrote nothing yet) */
@@ -287,8 +294,50 @@ static __attribute__((noinline)) int path_abs(char *out, const char *cwd, const 
     return 0;
 }
 
+/* F13 (audit 2026-10-26): a path that crosses into mount mi passes the directories above its mount point, which live
+ * on the parent volume: the caller needs search (x) permission on each, as on Linux. A mount's server sees only the
+ * path below the mount point, so the kernel asks the parent's server for the mount point itself (FS_LSTAT with the
+ * caller's ids: its walk checks x on every directory above it), and so on up through nested mounts to the root.
+ * Root (uid 0, and a service's program read as root, D11) passes, as on Linux. Every error refuses (a parent server
+ * that is gone, a mount point renamed away under its mount: Linux would not find it either). buf: PATHMAX bytes of
+ * scratch. 0 or -errno. */
+static __attribute__((noinline)) int mount_search(int mi, char *buf)
+{
+    if (current->svc_depth || current->uid == 0)
+        return 0;
+    /* the answer is cached per mount for one set of ids (measured: an uncached check cost 1.7 ms a call in FS-UAE,
+     * +38% on a stat through the mount); a success only, kept until perm_epoch rises */
+    struct mount *top = &mnt[mi];
+    u32 ep = perm_epoch;
+    if (top->ok_epoch == ep && top->ok_uid == current->uid && top->ok_gid == current->gid)
+        return 0;
+    while (mi > 0) {
+        const char *mp = mnt[mi].path;
+        int ml = (int)strlen_(mp), pm = 0, bl = 1;
+        for (int i = 1; i < NMOUNT; i++) {      /* the mount mi's mount point lies on: the longest one above it */
+            if (i == mi || !mnt[i].used) continue;
+            int l = (int)strlen_(mnt[i].path);
+            if (l > bl && l < ml && !memcmp_(mp, mnt[i].path, (u32)l) && mp[l] == '/') { pm = i; bl = l; }
+        }
+        const char *r = pm ? mp + bl : mp;
+        int n = 0;
+        while (r[n]) { buf[n] = r[n]; n++; }
+        buf[n] = 0;
+        struct ustat st;
+        long e = fs_call_on(pm, FS_LSTAT, (u32)buf, mount_root(pm), (u32)&st, 0);
+        if (e < 0)
+            return (int)e;
+        mi = pm;
+    }
+    if (perm_epoch == ep) {             /* nothing changed while the servers were asked */
+        top->ok_epoch = ep; top->ok_uid = current->uid; top->ok_gid = current->gid;
+    }
+    return 0;
+}
+
 /* which mount takes PATH; *rel = the path to give its server (in buf, PATHMAX bytes, or PATH itself), *cwd = the
- * working directory inode to give it. -ENAMETOOLONG when the path is too long. */
+ * working directory inode to give it. -ENAMETOOLONG when the path is too long, -EACCES when a directory above the
+ * mount point may not be searched (F13). */
 static __attribute__((noinline)) int route(const char *path, const char *cwdtext, u32 cwdino, char *buf, const char **rel, u32 *cwd)
 {
     if (nmnt <= 1) { *rel = path; *cwd = cwdino; return 0; }
@@ -302,6 +351,8 @@ static __attribute__((noinline)) int route(const char *path, const char *cwdtext
         while (mnt[i].path[l]) l++;
         if (l > bl && !memcmp_(tmp, mnt[i].path, (u32)l) && (tmp[l] == 0 || tmp[l] == '/')) { best = i; bl = l; }
     }
+    if (best && (e = mount_search(best, buf)))
+        return e;
     const char *r = best ? tmp + bl : tmp;
     if (!*r) r = "/";
     int n = 0;
@@ -333,6 +384,7 @@ void vfs_server_started(const char *pname)
     for (int i = 0; i < NMOUNT; i++)
         if (mnt[i].used && !strcmp_(mnt[i].pname, pname))
             mnt[i].gen = ++gen_last;
+    perm_epoch++;                       /* F13: a restarted ZenixFS server may bring back older modes */
 }
 
 /* is something loaded from mount m (a segment, or a load in progress)? */
@@ -880,6 +932,7 @@ long vfs_mount(const struct umountreq *r)
     }
     mt->root = (u32)root;
     nmnt++;
+    perm_epoch++;                       /* F13: a new mount can sit between a mount and its parent */
     return 0;
 }
 
@@ -917,6 +970,7 @@ long vfs_umount(const char *path)
     fs_call_on(mi, FS_QUIT, 0, 0, 0, 0);               /* the server syncs, lets go of its device and exits */
     mnt[mi].used = 0;
     nmnt--;
+    perm_epoch++;                                       /* F13: the mount point's parent is another volume now */
     return 0;
 }
 

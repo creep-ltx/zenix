@@ -13,5 +13,9 @@ send svctest reg k 0 /bin/msgpingd -port k; svctest call k 7; svctest call k 7; 
 wait svctest call k 1: 0 60
 send svctest reg c1 0 /bin/msgpingd -port c1 -call c2; svctest reg c2 0 /bin/msgpingd -port c2 -call c1; svctest call c1 1\r
 wait svctest call c1 1: 50
+send mkdir -p /tmp/pf /lp; msgpingd -port fs.pf -fs & sleep 1; svctest mount fs.pf /tmp/pf\r
+sleep 4
+send svctest reg lp 0 /lp/msgpingd -port lp; svctest mount lp /lp; svctest rm lp; umount /tmp/pf; echo f14-$(echo back)\r
+wait f14-back 40
 send dmesg | grep 'svc: [a-z0-9]*:'; echo svc-l-done\r
 sleep 4

@@ -70,6 +70,7 @@ static int namei(uint32_t cwd, const char *path, int follow_last, int depth, uin
         if ((r = zenixfs_getattr(fs, ino, &in))) return r;
         if (is_lnk(&in) && (!last || follow_last)) {
             char target[256];
+            if (in.size > 255) return -ENAMETOOLONG;    /* audit F15: never follow a prefix of a longer target */
             int n = zenixfs_readlink(fs, ino, target, 255);
             if (n < 0) return n;
             target[n] = 0;

@@ -111,3 +111,26 @@ send dmesg | grep 'svc: fs\.'\r
 sleep 3
 send umount /mnt; mount; echo mount-svc-done\r
 sleep 3
+# ---- F13: search (x) permission on the directories above a mount point ----
+send su user\r
+sleep 3
+send mkdir -p /tmp/al/mnt; chmod 755 /tmp/al; exit\r
+sleep 3
+send mount ide0p1 /tmp/al/mnt; mount ide0p2 /tmp/al/mnt/sub; echo f13-one > /tmp/al/mnt/s.txt; echo f13-two > /tmp/al/mnt/sub/o.txt; echo f13-$(echo ready)\r
+wait f13-ready 30
+send su guest\r
+sleep 3
+send cat /tmp/al/mnt/s.txt /tmp/al/mnt/sub/o.txt; echo open-g=$?; exit\r
+sleep 3
+send su user\r
+sleep 3
+send chmod 700 /tmp/al; cat /tmp/al/mnt/s.txt /tmp/al/mnt/sub/o.txt; echo owner=$?; exit\r
+sleep 3
+send su guest\r
+sleep 3
+send cat /tmp/al/mnt/s.txt; echo g1=$?; cat /tmp/al/mnt/sub/o.txt; echo g2=$?; ls /tmp/al/mnt; echo g3=$?; cd /tmp/al/mnt/sub; echo g4=$?; echo x > /tmp/al/mnt/w.txt; echo g5=$?; exit\r
+sleep 4
+send cat /tmp/al/mnt/s.txt /tmp/al/mnt/sub/o.txt; echo root=$?\r
+sleep 3
+send umount /tmp/al/mnt/sub; umount /tmp/al/mnt; mount; echo f13-$(echo done)\r
+wait f13-done 30

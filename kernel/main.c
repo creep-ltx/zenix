@@ -269,6 +269,8 @@ void irq2_c(u32 *rb)
             }
         }
     }
+    if (icr & 1)
+        sock_tick();                    /* the network watchdog (audit O9): counts, and at worst kills the server */
     sched_tick((u16)sr, icr & 1);       /* the tick counts the slice in any mode; a switch only when user code was cut */
     if (sr & 0x2000)
         return;

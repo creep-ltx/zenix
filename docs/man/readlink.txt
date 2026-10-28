@@ -7,8 +7,10 @@ SYNOPSIS
     readlink link...
 
 DESCRIPTION
-    Prints the target path stored in each symbolic link. Says nothing and
-    returns 1 for names that are not symbolic links. There are no options.
+    Prints the target path stored in each symbolic link, however long (a
+    link made elsewhere may hold more than the 255 bytes Zenix follows; a
+    target over 4095 bytes is reported). Says nothing and returns 1 for
+    names that are not symbolic links. There are no options.
 
 EXAMPLE
     readlink /bin/more         prints less

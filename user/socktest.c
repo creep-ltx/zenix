@@ -239,6 +239,20 @@ static int sendpipe_main(void)          /* fd 0 is a socket whose peer closed: a
     return 3;                           /* not reached: SIGPIPE ends it (141) */
 }
 
+static int netcall_main(void)           /* a socket call to a server that takes no requests: waits until a kill */
+{
+    printf("netcall: calling\n");
+    oflush();
+    int s = sk(0);
+    printf("netcall: socket returned %d\n", s);
+    return s < 0 ? -s : 0;
+}
+
+static int hangserve_main(void)         /* fd 0 a socket: socktestd hangs inside this request (command 6) */
+{
+    return -zz(0, 6);
+}
+
 static int hang_main(void)              /* blocks in recv until ^C (sock-test.sh types it) */
 {
     int a, b;
@@ -568,6 +582,64 @@ static void c_down(void)
         sys_close(s);
 }
 
+/* audit O9, part 1: after command 5 socktestd answers the close and then runs on without taking requests (S22's
+ * loop); a socket call then waits queued: kill -9 ends it at once (the kernel takes the queued call back) */
+static void c_stuck(void)
+{
+    int s = sk(0);
+    int e = s < 0 ? s : zz(s, 5);
+    int c = s < 0 ? s : sys_close(s);   /* answered, then socktestd runs on */
+    if (e || c) {
+        result("stuckkill", 0, "socket %d, command 5: %d, close %d", s, e, c);
+        return;
+    }
+    char *argv[3] = { self, "_netcall", 0 };
+    int pid = sys_spawn(self, argv, 0);
+    sys_sleep(100);
+    int alive = sys_waitnb(pid) == -2;
+    u32 t0 = sys_ticks();
+    sys_killsig(pid, SIGKILL);
+    int st = sys_wait(pid);
+    u32 t = sys_ticks() - t0;
+    result("stuckkill", alive && st == 128 + SIGKILL && t < 50, "waiting after 1 s: %d; kill -9: status %d after %u ticks",
+           alive, st, t);
+}
+
+/* part 2 (after sock-test.sh's ^C on another waiting call): the watchdog. The next call waits until the kernel ends
+ * the server (10 s of its own time without an answer); queued, it goes to the next server (D19 rule 9), which the
+ * kernel starts for it. Then command 6 hangs
+ * the server inside a request: a kill cannot take that call back (the server has it), so the killed caller ends when
+ * the watchdog ends the server */
+static void c_watchdog(void)
+{
+    u32 t0 = sys_ticks();
+    int s = sk(0);
+    u32 t = sys_ticks() - t0;
+    result("watchdog", s >= 0 && t >= 900 && t < 6000, "a call queued on the stuck server: %d after %u ticks (the "
+           "next server answered it, D19 rule 9)", s, t);
+    if (s >= 0)
+        sys_close(s);
+    s = sk(0);
+    result("watchrestart", s >= 0, "a new socket starts it again: %d", s);
+    if (s < 0)
+        return;
+    int fds[3] = { s, 1, 2 };
+    char *argv[3] = { self, "_hangserve", 0 };
+    int pid = sys_spawn(self, argv, fds);
+    sys_sleep(100);
+    t0 = sys_ticks();
+    sys_killsig(pid, SIGKILL);
+    int st = sys_wait(pid);
+    t = sys_ticks() - t0;
+    result("stuckserve", st == 128 + SIGKILL && t >= 700 && t < 6000,
+           "killed inside the hung request: status %d after %u ticks (the watchdog)", st, t);
+    int s2 = sk(0);
+    result("watchagain", s2 >= 0, "and again a new socket: %d", s2);
+    if (s2 >= 0)
+        sys_close(s2);
+    sys_close(s);
+}
+
 int main(int argc, char **argv)
 {
     if (!path_find(argv[0], self, sizeof self))
@@ -579,10 +651,15 @@ int main(int argc, char **argv)
             return sendpipe_main();
         if (!strcmp(argv[1], "_hang"))
             return hang_main();
+        if (!strcmp(argv[1], "_netcall"))
+            return netcall_main();
+        if (!strcmp(argv[1], "_hangserve"))
+            return hangserve_main();
         return argc > 2 ? peer_main(argv[1], argv[2]) : 99;
     }
     if (argc < 2) {
-        fprintf(2, "usage: socktest CHECK... (basic ptr block poll restart partial connect sigpipe down hang)\n");
+        fprintf(2, "usage: socktest CHECK... (basic ptr block poll restart partial connect sigpipe down hang stuck "
+                   "watchdog)\n");
         return 2;
     }
     for (int i = 1; i < argc; i++) {
@@ -597,6 +674,8 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "sigpipe")) c_sigpipe();
         else if (!strcmp(c, "down")) c_down();
         else if (!strcmp(c, "hang")) return hang_main();
+        else if (!strcmp(c, "stuck")) c_stuck();
+        else if (!strcmp(c, "watchdog")) c_watchdog();
         else result(c, 0, "no such check");
     }
     return fails;

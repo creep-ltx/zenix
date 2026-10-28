@@ -13,8 +13,9 @@ typedef int s32;
  * each socket holds up to CAP bytes the peer sent (so a big send waits for the reader: partial sends). Connects to a
  * port of 8000 or more complete one second later (-EINPROGRESS first: the connect rule). Commands, as setsockopt
  * at level ZZ: 1 crash at once (an illegal instruction: its death, without a reply), 2 the next recv answers a count
- * far too big (the kernel's clamp), 3 end cleanly, 4 (getsockopt) the requests served so far. A name it does not
- * know is -ENETDOWN (rule 9). */
+ * far too big (the kernel's clamp), 3 end cleanly, 4 (getsockopt) the requests served so far, 5 hang once the next close
+ * is answered (a busy loop that takes no more requests, as S22's loop inside lwIP), 6 hang inside the request (never answers it):
+ * the kernel's watchdog must end it (audit O9). A name it does not know is -ENETDOWN (rule 9). */
 #define NS  24
 #define CAP 512
 #define ZZ  0x7A7A
@@ -26,7 +27,7 @@ static struct sk {
     u32 done_at, count;                 /* connecting: completes at this tick */
     u8 buf[CAP];
 } sk[NS];
-static u32 epoch, served, lie;
+static u32 epoch, served, lie, hang_after_close;
 static struct unetready push[NS];
 static int npush;
 
@@ -255,6 +256,11 @@ static s32 serve(struct umsg *m, u32 *b, u32 *b2)
             lie = 1;
         if (q->r.option == 3)
             return 0x7FFF0003;                  /* the caller ends the loop (main) */
+        if (q->r.option == 5)
+            hang_after_close = 1;               /* answer, and hang after the next close is answered (main) */
+        if (q->r.option == 6)
+            for (;;)                            /* hang inside the request: never answers (audit O9's test) */
+                __asm__ volatile("");
         break;
     case SOCK_IOCTL:
         if (q->r.option != FIONREAD)
@@ -314,11 +320,14 @@ int main(void)
             int ni = by_name(((struct netreq *)m->a[1])->newsock);
             b2 = ni >= 0 ? bits(ni) : 0;
         }
-        int quit = r == 0x7FFF0003;
+        int quit = r == 0x7FFF0003, hang = hang_after_close && m->type == NET_CLOSE;
         m->a[2] = b | b2 << 16;
         m->a[3] = epoch;
         sys_netsrv(NETSRV_REPLY, (u32)m, quit ? 0 : (u32)r);
         if (quit)
             return 0;
+        if (hang)
+            for (;;)                            /* runs on, takes no request: S22's loop inside lwIP (audit O9) */
+                __asm__ volatile("");
     }
 }

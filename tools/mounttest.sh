@@ -20,7 +20,7 @@ debugfs -w -R "write $OUT/f.txt f.txt" $OUT/df1.adf >/dev/null 2>&1
 dd if=/dev/zero of=$OUT/df1.adf bs=1 seek=1128 count=16 conv=notrunc status=none
 rm -rf $OUT/states; mkdir -p $OUT/states
 sed "s#^floppy_drive_0 = .*#&\nfloppy_drive_1 = $OUT/df1.adf\nfloppy_drive_count = 2\nwritable_floppy_images = 1\nsave_states_dir = $OUT/states#" fsuae/mounts.fs-uae > $OUT/mounts.fs-uae
-ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh $OUT/mounts.fs-uae 230 tools/tests/mount-test.txt > $OUT/mount.log 2>&1
+ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh $OUT/mounts.fs-uae 300 tools/tests/mount-test.txt > $OUT/mount.log 2>&1
 grep -q 'ide0p1 .*/mnt .*ext2' $OUT/mount.log && check "mount lists the first filesystem" ok || check "mount lists the first filesystem" bad
 grep -q 'ide0p2 .*/mnt/sub .*ext2' $OUT/mount.log && check "nested mount works" ok || check "nested mount works" bad
 grep -aq '^fdisk: ide0 is in use (a partition on it is mounted)' $OUT/mount.log && check "fdisk does not write a disk with a mounted partition" ok || check "fdisk does not write a disk with a mounted partition" bad
@@ -50,6 +50,18 @@ has "the servers' messages are in the kernel log: diskd's (a dead server's claim
 has "... zfsd's (not a ZenixFS volume)" '^(.*# )?inlog-zfsd=[1-9]$'
 has "... fsd's (the floppy refused at its restart)" '^(.*# )?inlog-fsd=[1-9]$'
 has "the script ran to the end" '^(.*# )?mount-svc-done$'
+# F13 (audit 2026-10-26): a path through a mount checks search permission on the directories above the mount point
+has "F13: another user reads through mounts below an open directory (normal paths unchanged)" '^(.*# )?open-g=0$'
+has "F13: the owner of the 700 directory reads through both mounts" '^(.*# )?owner=0$'
+has "F13: root reads through both mounts" '^(.*# )?root=0$'
+for g in g1 g2 g3 g4 g5; do
+  has "F13: another user cannot pass the 700 directory above the mounts ($g)" "^(.*# )?$g=[1-9][0-9]*\$"
+done
+has "F13: ... and is told 'permission denied'" '^cat: /tmp/al/mnt/s\.txt: permission denied'
+[ "$(tr -d '\r' < $L | grep -acx 'f13-one')" = 3 ] && [ "$(tr -d '\r' < $L | grep -acx 'f13-two')" = 3 ] && \
+  check "F13: the files were read exactly three times (guest before the chmod, the owner, root)" ok || \
+  check "F13: the files were read exactly three times (guest before the chmod, the owner, root)" bad
+has "F13: the section ran to the end" '^(.*# )?f13-done$'
 # umount while a program is being loaded from the mount (audit A3): refused, the load completes; a floppy's reads are
 # slow enough to umount in the middle
 head -c 901120 /dev/zero > $OUT/df1l.adf
@@ -58,11 +70,13 @@ debugfs -w -R "write $BD/awk.zx awk" $OUT/df1l.adf >/dev/null 2>&1
 debugfs -w -R "sif awk mode 0100755" $OUT/df1l.adf >/dev/null 2>&1
 cp $BD/zenix.hdf $OUT/lroot.hdf
 sed "s#^floppy_drive_0 = .*#&\nfloppy_drive_1 = $OUT/df1l.adf\nfloppy_drive_count = 2#; s#^floppy_drive_speed = .*#floppy_drive_speed = 100#; s#^hard_drive_0 = .*#hard_drive_0 = $OUT/lroot.hdf#" fsuae/a1200-020-fast.fs-uae > $OUT/load.fs-uae
-ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh $OUT/load.fs-uae 150 tools/tests/mount-load-test.txt > $OUT/load.log 2>&1
+ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh $OUT/load.fs-uae 220 tools/tests/mount-load-test.txt > $OUT/load.log 2>&1
 L=$OUT/load.log
 has "umount during a program load from the mount is refused" '^(.*# )?um=1$'
 has "... the program loaded and ran" '^(.*# )?loaded-ok$'
 has "... and the umount after it works" '^(.*# )?um2=0$'
+# F13's cost, for the record (FS-UAE, not hardware): 200 stats each; the user's through the mount pay one more call
+tr -d '\r' < $L | awk '/^m-(user|root)-(mnt|root)$/ { m = $0 } /^real/ && m { print "INFO F13 200 stats: " m " " $2; m = "" }'
 rm -f $OUT/df1l.adf $OUT/lroot.hdf
 # the unmounted partitions are clean ext2 as seen by the host (partitions start at cylinder 1 and 14 of 1008 sectors)
 for spec in "1 13104" "14 18144"; do set -- $spec

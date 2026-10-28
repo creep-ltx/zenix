@@ -814,6 +814,8 @@ void proc_kill(struct proc *p)
     if (p->state == P_STOP || p->state == P_EV || p->state == P_SLEEP ||
         (p->state == P_MSG && !p->wait_msg))        /* a server in recv, not a client in call */
         ready_force(p);
+    else if (p->state == P_MSG && p->msg_cancel)
+        ipc_cancel(p);                  /* a socket call not yet taken by the server (audit O9) */
 }
 
 int kill_status(const struct proc *p)

@@ -253,6 +253,11 @@ noted in 5.4.
 - A filesystem server (the root or a mount) calls only diskd.
 - A server's start-up may call other services, never its own port (`call()` already refuses that) and never in a
   cycle (the deadline breaks one and logs it).
+- **A loader never waits for the service it loads** (audit 2026-10-26 F14): a program that can only be read through
+  the service itself (a file service whose program lies on a mount that service serves) would make its loader's own
+  file call queue on the held port, before any deadline exists (the 30 s start deadline begins at `SV_STARTING`).
+  `svc_call` refuses a call to an entry in `SV_LOADING` whose loader is the caller: "svc: NAME: its program is read
+  through the service itself", -ECONNRESET at once; the load fails as any failed spawn does (logged, not counted).
 - **Loads nest at most two deep**, and every case fits: a file service read from the root while the root server is
   stopped (1: the file service, 2: `@fsd`/`@zfsd` from the image); a mount whose server is stopped (1: the image, no
   disk read at all, because mounts are registered as images, 6.4). A third level fails with -ECONNRESET and is logged.

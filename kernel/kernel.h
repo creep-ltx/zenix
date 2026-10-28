@@ -478,6 +478,7 @@ struct proc {                   /* start.S relies on the first three: */
     u8 alarm_on;
     u8 sig_intr;                /* the system call gave up for a signal (a restart is possible, rule 4) */
     u8 kill_sig;                /* ended by this signal's default action: wait status 128 + it */
+    u8 msg_cancel;              /* audit O9: a kill may take its call back while the message is still queued (sock.c) */
 };
 extern struct proc procs[NPROC];
 extern struct proc *current;
@@ -571,6 +572,7 @@ long ipc_kcall(int port, struct umsg *m, int ns);   /* the kernel's own requests
 long ipc_wait(struct umsg *m);                 /* the caller's m is queued: wait for the reply (and take a D11 role) */
 void ipc_enqueue(struct port *p, struct umsg *m, int front);
 void ipc_unqueue(struct port *p, struct umsg *m);
+void ipc_cancel(struct proc *p);       /* audit O9: a kill takes back p's queued call (msg_cancel), -EINTR */
 void ipc_finish(struct umsg *m, s32 result);
 int ipc_serving(int pid);                      /* is pid serving a request now? */
 #define UMSG_KERNEL 1
@@ -616,6 +618,8 @@ long sock_rw(struct file *f, void *buf, u32 n, int write);
 u16 sock_poll(struct file *f);
 void sock_release(u32 i);               /* the socket file's last close */
 void sock_server_gone(void);            /* the "net" server ended (svc.c): a new epoch, every socket dead */
+void sock_server_started(void);         /* current took the "net" port over (svc.c): the watchdog's server */
+void sock_tick(void);                   /* the tick (main.c): the network watchdog (audit O9) */
 extern u32 net_epoch;
 /* drv.c: the network's drivers (DESIGN D19 2.3, 2.4; DRV_* in netproto.h) */
 long drv_sys(u32 op, u32 a, u32 b);

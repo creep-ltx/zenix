@@ -59,6 +59,7 @@ void schedule(void)
     }
 }
 int proc_kill_now(void) { return current->killed != 0; }
+void proc_kill(struct proc *p) { p->killed = 3; }           /* the watchdog (audit O9): never reached here */
 void kprintf(const char *fmt, ...) { (void)fmt; }
 int user_ok_wr(const struct proc *p, u32 ptr, u32 len) { (void)p; return ptr >= 0x1000 || !len; }
 int user_ok_rd(const struct proc *p, u32 ptr, u32 len) { return user_ok_wr(p, ptr, len); }

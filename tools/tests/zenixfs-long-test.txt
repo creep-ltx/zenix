@@ -1,0 +1,15 @@
+wait zenix:/# 90
+sleep 1
+send mkdir -p /mnt /ext; mount ide0p1 /ext; mount ide0p2 /mnt\r
+sleep 8
+send cat /ext/long; e=$?; cat /mnt/long; echo e15=$e z15=$?\r
+sleep 4
+send cat /ext/aaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb /mnt/aaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\r
+sleep 3
+send readlink /ext/long /mnt/long\r
+sleep 3
+send ls -l /ext/long; tree /ext; realpath /ext/long; tar cf /tmp/t.tar /ext/long; echo t15=$?\r
+sleep 5
+send umount /mnt; umount /ext; sync; echo f15-$(echo done)\r
+wait f15-done 30
+sleep 2

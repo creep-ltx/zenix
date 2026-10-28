@@ -39,6 +39,14 @@ DESCRIPTION
              once; the old sockets are dead; closing them starts nothing;
              a new socket starts the server again
     hang     blocks in recv until ^C (tools/sock-test.sh types it)
+    stuck    socktestd made to run on without taking requests
+             (command 5): a socket call then waits, queued; kill -9 ends
+             it at once (audit O9). sock-test.sh then ^Cs another one
+    watchdog run after stuck: a call waits until the kernel's watchdog
+             ends the stuck server (10 s of its time) and the next server
+             answers it; then the server stuck inside a request (command
+             6): its caller, killed, ends when the watchdog ends the
+             server; a new socket works each time
 
 EXIT STATUS
     The number of checks that failed.

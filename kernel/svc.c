@@ -295,6 +295,11 @@ long svc_call(int i, struct umsg *m, int ns)
         kprintf("svc: %s: its own server called it before it opened its port\n", ports[i].name);
         return -ECONNRESET;                     /* it would wait for itself */
     }
+    if (s->state == SV_LOADING && s->pid == current->pid) {     /* audit F14: reading the program needs the service */
+        current->wait_msg = 0;
+        kprintf("svc: %s: its program is read through the service itself\n", ports[i].name);
+        return -ECONNRESET;                     /* its loader would wait for itself, with no deadline */
+    }
     if (s->state == SV_STOPPED && !ns && !disk_frozen) {     /* once disk writes are stopped nothing is started */
         long r = load(i, m);
         if (r)
@@ -332,6 +337,8 @@ int svc_handover(int i)
     s->state = SV_RUNNING;
     s->served = 1;
     vfs_server_started(p->name);                /* D13: its mounts' code segments are not reused */
+    if (eq(p->name, "net"))
+        sock_server_started();                  /* the network watchdog watches this one (audit O9) */
     if (eq(p->name, "fs"))
         klog_mirror_off();                      /* the root is up: from here the screen belongs to the programs */
     wake(s->watcher);

@@ -19,7 +19,10 @@ DESCRIPTION
     above completes a second later (-EINPROGRESS first). Commands
     (setsockopt at level 0x7A7A): 1 crash at once in the middle of the
     request, 2 the next receive answers a far too big count, 3 end
-    cleanly, 4 (getsockopt) the number of requests answered. A socket it
+    cleanly, 4 (getsockopt) the number of requests answered, 5 run on
+    without taking requests once the next close is answered (a busy
+    loop, as audit S22's), 6 run on inside this request, never
+    answering it (both for the kernel's watchdog, audit O9). A socket it
     does not know is -ENETDOWN; a message that is not the kernel's is
     -EACCES. Its output goes to the kernel log ("socktestd: serving net,
     epoch N").
