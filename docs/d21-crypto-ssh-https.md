@@ -872,3 +872,16 @@ and takes the first accepted answer (how `sntp` combines several servers is the 
 a 200 starts the file again (D22's rule; GNU wget refuses to truncate there); (6) GNU wget's exit statuses; (7) the
 build date for the floor comes from the program (`zc_clock_floor`'s first argument): its source (a build define,
 from the commit's date for reproducible builds) is the main session's.
+
+### Main-session decisions on step 7's open points (2026-10-28)
+
+(1) RSA first through the cipher-suite order only (no patch of BearSSL's T0 code): accepted, the dual-certificate test
+shows it decides. (2) **"Trusted clock this boot"** means: the battery clock was read at boot, or `sntp` accepted an
+answer this boot (a root-only `settime` from sntp with its guard). The main line adds a kernel flag readable by programs
+(a new word or bit, claimed in CLAUDE.md first) when it builds the wget/sntp programs; until then the glue's `trusted`
+flag is passed by the caller. (3) sntp takes the first accepted answer and gives each server its share of the 10 s; an
+answer before the floor is refused: accepted. (4) **wget `-c` when the server ignores Range (200):** follow GNU wget for
+wget (refuse to truncate, say so, exit non-zero) — D22's restart rule stays zpkg's, where the cache file is zpkg's own.
+(5) **Relative and `//host` Locations:** wget follows them (as GNU wget), resolved against the request URL; net/http
+gains the resolution when the program is built (zpkg may keep refusing them). (6) The glue lives in `crypto/zc/`:
+accepted. (7) The TLS 1.3 wording: accepted. (8) `-DBR_RDRAND=0` only in host tests: accepted.
