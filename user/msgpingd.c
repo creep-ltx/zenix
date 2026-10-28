@@ -6,7 +6,9 @@
  * instruction: the service manager's tests, DESIGN D11); type 9 = quit. Exits after serving COUNT requests if given.
  * -call NAME: call port NAME once before creating its own (a start-up that needs another service: D11's tests).
  * -fs: a filesystem server that hangs on sync: FS_ROOT answers 2, FS_SYNC never returns, FS_QUIT ends it, anything
- * else fails (a reboot must not wait for it for ever: audit A7, tools/svc-test.sh). -fsbad: the same, but FS_ROOT
+ * else fails (a reboot must not wait for it for ever: audit A7, tools/svc-test.sh). -fsstall: the same, but every
+ * request other than FS_ROOT, FS_CLOSE and FS_QUIT never returns (a program that opens a file there is held in the
+ * kernel until the server ends: wasabid's "freed", tools/remote-test.sh). -fsbad: the same, but FS_ROOT
  * fails too (a mount that fails must end its server: audit A9). -fslinked: a filesystem server that answers DESIGN D26's
  * FS_LINKED wrongly: FS_OPEN of anything but its root and /f -1025 (FSL_A1 for a one-path request: outside the table),
  * FS_READ and FS_READDIR -1024 (requests that never ask for it), anything else -1024 with the path left as it is (a
@@ -26,6 +28,7 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "-port") && i + 1 < argc) pname = argv[++i];
         else if (!strcmp(argv[i], "-fs")) fs = 1;
         else if (!strcmp(argv[i], "-fsbad")) fs = 2;
+        else if (!strcmp(argv[i], "-fsstall")) fs = 4;
         else if (!strcmp(argv[i], "-fslinked")) fs = 3;
         else if (!strcmp(argv[i], "-call") && i + 1 < argc) {
             struct umsg c;
@@ -43,6 +46,7 @@ int main(int argc, char **argv)
         int r = 0;
         if (fs) {
             if (m->type == FS_SYNC && fs != 3) for (;;) sys_sleep(100);
+            if (fs == 4 && m->type != FS_ROOT && m->type != FS_CLOSE && m->type != FS_QUIT) for (;;) sys_sleep(100);
             if (m->type == FS_QUIT) { sys_reply(m, 0); return 0; }
             int root = fs == 3 && m->type == FS_OPEN && !strcmp((const char *)m->a[0], "/");
             if (root || (fs == 3 && m->type == FS_OPEN && !strcmp((const char *)m->a[0], "/f"))) {
@@ -53,7 +57,7 @@ int main(int argc, char **argv)
             } else if (fs == 3)
                 r = m->type == FS_ROOT ? 2 : m->type == FS_SYNC || m->type == FS_CLOSE ? 0 : m->type == FS_OPEN ? -1025 : -1024;
             else
-                r = m->type == FS_ROOT && fs == 1 ? 2 : -38;
+                r = m->type == FS_ROOT && (fs == 1 || fs == 4) ? 2 : -38;
             m = sys_replyrecv(m, r, port);
             continue;
         }

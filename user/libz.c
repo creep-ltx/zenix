@@ -566,6 +566,81 @@ const char *zwhy(const char *dflt)
  * The two helpers every directory walker uses, so that no walker keeps a name array or a path buffer on its 16 KB
  * stack (a recursive walk takes one level per directory, and there is no guard below the stack). */
 
+/* svctab's and /etc/daemons' line (libz.h) */
+int svc_line(char *l, char **name, int *nice, char **prog)
+{
+    for (char *t = l; *t; t++)
+        if (*t == '\t' || *t == '\r') *t = ' ';       /* (a CR: a file edited on another system) */
+    for (char *t = l + strlen(l); t > l && t[-1] == ' '; )
+        *--t = 0;                                       /* trailing spaces are not part of the program's text */
+    char *p = l, *nv;
+    while (*p == ' ') p++;
+    *name = p;
+    if (!*p || *p == '#') return 0;
+    while (*p && *p != ' ') p++;
+    if (*p) *p++ = 0;
+    while (*p == ' ') p++;
+    nv = p;
+    if (*p == '-') p++;
+    int digits = 0;
+    while (*p >= '0' && *p <= '9') { p++; digits++; }
+    int sep = *p == ' ' && digits <= 3;                /* a longer number would wrap in atoi */
+    if (*p) *p++ = 0;
+    while (*p == ' ') p++;
+    if (!digits || !sep || !*p) return -EINVAL;
+    *nice = atoi(nv);
+    *prog = p;
+    return 1;
+}
+
+/* realpath's resolver (realpath(1), wasabid): one pass at a time, no recursion; no printf (wasabid has none) */
+int zrealpath(const char *in, char *out, u32 cap)
+{
+    char path[320], acc[160], tgt[160], next[320];
+    int links = 0;
+    acc[0] = 0;
+    if (in[0] != '/' && sys_getcwd(acc, sizeof acc) < 0) strcpy(acc, "/");
+    if (!strcmp(acc, "/")) acc[0] = 0;
+    u32 il = strlen(in);
+    if (il >= sizeof path) return -1;
+    memcpy(path, in, il + 1);
+    char *p = path;
+    while (*p) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        char *e = p; while (*e && *e != '/') e++;
+        char save = *e; *e = 0;
+        if (!strcmp(p, ".")) { }
+        else if (!strcmp(p, "..")) { char *sl = strrchr(acc, '/'); if (sl) *sl = 0; }
+        else {
+            u32 l = strlen(acc); if (l + strlen(p) + 2 >= sizeof acc) return -1;
+            acc[l] = '/'; strcpy(acc + l + 1, p);
+            struct ustat st;
+            if (sys_lstat(acc[0] ? acc : "/", &st) == 0 && (st.mode & S_IFMT) == S_IFLNK) {
+                if (++links > 40) return -1;
+                int n = sys_readlink(acc, tgt, sizeof tgt - 1); if (n < 0) return -1;
+                if (n == (int)sizeof tgt - 1) return -1;    /* a longer target (F15): "cannot resolve", never a prefix */
+                tgt[n] = 0;
+                *strrchr(acc, '/') = 0;                     /* the directory part, then the link text relative to it */
+                *e = save;
+                u32 el = strlen(e);
+                if ((u32)n + el >= sizeof next) return -1;
+                memcpy(next, tgt, (u32)n);
+                memcpy(next + n, e, el + 1);
+                strcpy(path, next);
+                if (tgt[0] == '/') acc[0] = 0;              /* an absolute target starts again from / */
+                p = path;
+                continue;
+            }
+        }
+        *e = save; p = e;
+    }
+    const char *r = acc[0] ? acc : "/";
+    if (strlen(r) >= cap) return -1;
+    strcpy(out, r);
+    return 0;
+}
+
 /* "dir/name" in a new malloc'd string (no double slash). NULL when it would be longer than a system call takes
  * (zerrno 36, "path too long") or there is no memory (zerrno 12): the caller reports it, nothing is cut. */
 char *path_join(const char *dir, const char *name)

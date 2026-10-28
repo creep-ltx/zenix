@@ -1,0 +1,6 @@
+# /etc/daemons - servers nobody calls, kept running by init (DESIGN D24 7; init(8)).
+# NAME     NICE  PROGRAM [ARGUMENTS]
+# init starts each line after `ifup -a` and again when it ends (status 0: a stop until the next boot; five ends in
+# 60 s: given up). Output goes to the kernel log (dmesg). At most 4 lines; 6 words in 79 characters.
+# The remote control (wasabid(8)): write /etc/wasabid.conf first, then remove the # below.
+#wasabid   0     /sbin/wasabid --init

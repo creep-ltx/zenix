@@ -91,6 +91,8 @@
 #define WK_FORCE   1                    /* KILL: SIGKILL (clear: SIGINT) */
 #define WS_FROMAMIGA 1                  /* SPEED: the daemon sends */
 #define WX_CELLS   1                    /* TEXT: with each cell's style and colour */
+#define WG_NOTES   1                    /* GRAB's flags word after the name (caps zenix): STDERR notes welcome; without
+                                         * it the note is only logged (an older client fails on any frame but DATA) */
 
 /* ---- the daemon's limits and times (D24 5) ---- */
 #define WSB_NFD       16                /* descriptors a process has (NFD) */

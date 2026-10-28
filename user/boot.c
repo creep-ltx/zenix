@@ -27,27 +27,13 @@ static void svctab(void)
     if (fd >= 0) sys_close(fd);
     if (n <= 0) return;
     buf[n] = 0;
-    for (char *t = buf; *t; t++)
-        if (*t == '\t') *t = ' ';                  /* the kernel splits a program's words at spaces */
     for (char *l = buf, *e; *l; l = e) {
         for (e = l; *e && *e != '\n'; e++)
             ;
         if (*e) *e++ = 0;
-        char *p = l, *name, *nv;
-        while (*p == ' ') p++;
-        if (!*p || *p == '#') continue;
-        name = p;
-        while (*p && *p != ' ') p++;
-        if (*p) *p++ = 0;
-        while (*p == ' ') p++;
-        nv = p;
-        if (*p == '-') p++;
-        int digits = 0;
-        while (*p >= '0' && *p <= '9') { p++; digits++; }
-        int sep = *p == ' ';
-        if (*p) *p++ = 0;
-        while (*p == ' ') p++;
-        if (!digits || !sep || sys_svc_register(name, p, atoi(nv)) < 0) {
+        char *name, *prog;
+        int nice, k = svc_line(l, &name, &nice, &prog);
+        if (k < 0 || (k > 0 && sys_svc_register(name, prog, nice) < 0)) {
             say("boot: /etc/svctab: line skipped: ");
             say(name);
             say("\n");

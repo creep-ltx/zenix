@@ -67,13 +67,16 @@ STACK_boot := 4096
 # in FS-UAE: the deepest byte written after a boot, logins on two consoles, ls -l, df, mount); init's frames are its
 # 512-byte /etc/console buffer and printf, diskd has no recursion: 4 KB and 8 KB (16 before)
 STACK_init := 4096
+# init is cold code (it waits for its children all its life): -Os, which also pays for /etc/daemons (DESIGN D24 7)
+$(BUILD)/init.uo: UCFLAGS += -Os
 STACK_diskd := 8192
 # every program links only the parts of libz it calls (libz is built one section per function)
 ULDFLAGS := -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # servers that live on the disk as files (DESIGN D19 step 1), installed as /sbin/NAME on every full root image and in
-# the base package: the ZenixFS server, which mount registers as a file service (D11 6.4). Not commands: no page.
-SBINAPPS := zfsd netd
+# the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
+# Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt.
+SBINAPPS := zfsd netd wasabid
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -387,6 +390,19 @@ $(BUILD)/telnet.uo: user/telnet.c net/telnet/telnet.h user/xfer/xfer.h user/sock
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/telnet.uelf: $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/xf-detect.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/telnet.uo $(TNOBJS) $(BUILD)/xf-detect.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# wasabid (DESIGN D24, docs/man/wasabid.txt): the remote control daemon, /sbin/wasabid, its OS layer (user/wasabid.c)
+# over its core in net/wasabi/ (no system calls, shared with the PC tests, tools/host/wasabi-test.sh) and regex.c
+# (TEXT's patterns). All of it cold code: -Os (the main session, D24 step 0)
+WSBOBJS := $(patsubst %,$(BUILD)/ws-%.no,core files info pure run screen regex)
+$(BUILD)/ws-%.no: net/wasabi/%.c net/wasabi/wasabi.h net/wasabi/wasabi_int.h user/regex.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/ws-regex.no: user/regex.c user/regex.h user/libz.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/wasabid.uo: user/wasabid.c net/wasabi/wasabi.h user/socket.h kernel/netproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/wasabid.uelf: $(BUILD)/wasabid.uo $(WSBOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/wasabid.uo $(WSBOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+STACK_wasabid := 8192
 # the crypto library (DESIGN D21 3.5, docs/d21-crypto-ssh-https.md): BearSSL and Monocypher (only the files used,
 # crypto/*/README) and Zenix's crypto/zc/, as one archive linked with --gc-sections into the programs that use it
 # (cryptotest, ssh, ssh-keygen). Cold code at -Os; the files a handshake waits on at -O2 (D21 3.6 step 1: the curve25519

@@ -1,6 +1,6 @@
 # D24: the remote control, `wasabid` for Zenix (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 16); nothing built.** Roadmap block 2: "a
+Status: **design, revision 2 after two independent reviews (section 16); steps 0-2 built (the end of this note).** Roadmap block 2: "a
 Wasabi-like remote control (early: it lets the A1200 be tested remotely)"; CLAUDE.md: "a Wasabi-like remote-access
 daemon for Zenix (needs the network driver)". A daemon on Zenix that **speaks the protocol of the owner's Wasabi**, so
 the `wasabi` command on the PC, its Python API, its MCP server (Claude's tools), the desktop and phone apps work with
@@ -594,3 +594,63 @@ session's answers to the questions step 0 raised, built so in `net/wasabi/` and 
   count saved at most once a minute, the two extra bad-configuration cases, SCREEN's bit 0 doing nothing, the banner
   "Zenix VER") are accepted as built. FREE's "freed" path and a down network are tested in FS-UAE at step 1.
 
+
+## Steps 1 and 2 as built (branch wasabi1, 2026-10-28)
+
+Built as section 14 steps 1 and 2 say, with the main session's decisions above; the choices the note did not make,
+taken conservatively:
+
+- **The OS layer** is `user/wasabid.c` (the core's `wasabi.h` interface over libz and the system calls, as
+  `tools/host/wasabi-host.c` is over Linux's). At its start it closes standard input and output (the core counts the
+  log, standard error, as its one inherited descriptor), sets the commands' environment once (`SYS_envset`) and
+  ignores SIGPIPE. `wsb_os_con_ops()` is 0: caps leave the console commands out until step 3. A file command never
+  opens `/dev/ttyS0` under any name (-EBUSY: opening it takes the serial port, SLIP's line). Interfaces are asked
+  through the listener's socket (no descriptor of its own). libz gained `zrealpath` (realpath(1)'s resolver, moved,
+  no printf) and `svc_line` (boot's `/etc/svctab` parser, moved and shared with init, the "one parser" of section 7).
+- **Its own heap** (as netd's, D19): libz's malloc rounds blocks up to a power of two and grows its chunks four times
+  over, which held 112 KB in `ps` with one connection (*measured in FS-UAE*); first fit in 16 KB regions taken when
+  needed and given back when empty brings it to 88 KB. The core's send queue is 4 KB exactly (`WSB_OUTCAP`, so a
+  frame's payload is at most 4,091 bytes: still Wasabi's "at most 4 KB"), one libz-sized block, not the next size up.
+- **Found in the core and fixed** (both checked in FS-UAE, part c): the discovery sockets were never opened when the
+  daemon started on a down network (now opened with the listener, when the network comes up); and when netd ends
+  under the daemon its dead listener woke every `poll` at once (a busy loop): the listener and the discovery
+  sockets are now closed and opened again at once (which starts netd again, D11), then every 10 s.
+- **While a reboot is under way** (from the `OK` until `/bin/reboot` comes back) a new connection gets `ERR` "busy",
+  as during `QUIT`: a client waiting for the machine to come back no longer reaches the old daemon.
+- **GRAB's note** (the main session's decision) is sent as a `STDERR` frame only when the client's flags word after
+  the name has bit 0 (`WG_NOTES`, Wasabi 0.11b3); otherwise only logged. Host-checked with a display that changes
+  while it is read (`tools/host/wasabi-check.py`, `.moving`).
+- **Size** (*measured*, -Os): `/sbin/wasabid` 55,496 bytes of image (62,592 on the disk with its relocations; section
+  10 estimated 30-35 KB: the core alone is 41.7 KB with `regex.c`, libz's part 10 KB), 66 KB loaded with its 8 KB
+  stack. **Memory** (*FS-UAE*, `ps`): 72 KB idle, 88 KB with one connection running a command; the stock A1200 with
+  SLIP up and a session leaves 943 KB free. On the 1 MB machine (one login and the test's shell) 201 KB are free
+  before it and 108 KB with it: enough for file copies, not for a command (`could not start /bin/sh: out of memory`).
+  A package of its own, `wasabid` (not in the base group).
+- **FS-UAE's slirp takes no port forwards**: `slirp_redir` (FS-UAE 3.2.35) is accepted and never opened, so every
+  FS-UAE part runs over SLIP through `zenix-slirp`'s forwards (12.2's "else the SLIP path"), in a user and network
+  namespace (`tools/remote-test.sh`: parts c, d and r in one run of two boots, l on 1 MB, b init's daemons).
+- **Not checked in FS-UAE**, said here: the replay of a previous boot that ended in a **panic** (a `DIAG_PANIC`
+  kernel panics at every boot, so its next boot cannot start the daemon; the replay of a boot that ended with
+  `reboot` is checked, the panic case on the PC); "none of its lines on console 1" (true by construction, standard
+  output and error are `/dev/kmsg`; reading a console needs step 3's `CON_READ`).
+- **An idle connection is dropped after 10 s** (3.2's progress rule counts a connection without a command as waiting
+  on its peer): Wasabi makes a connection per command, so this never meets its client; a script holding one open
+  must keep sending.
+- **FREE's "freed"** needs the slot's own `sh` held by a server: a child stuck in a call is reaped later, and sh
+  itself ends at SIGINT ("stopped"). The test holds sh with the test server `msgpingd -fsstall` (a new test mode:
+  every request but the root's never answered).
+- **`/dev/kmsg`** is opened write only (`O_RDONLY` and `O_RDWR` -EINVAL), root by the effective id. **init** is built
+  at -Os (cold code: its text grew by 2.1 KB, 2.6 KB of memory for ever), reads `/etc/daemons` in 128-byte pieces
+  (lines over 127 characters skipped, said, unless a comment), keeps `/dev/kmsg` open (one descriptor), and its alarm
+  re-arms itself only while init is in its wait. `/etc/daemons` ships commented out, in the base package's config
+  files, mode 644 on every image.
+- **Floppies:** the kernel grew by 408 bytes (18,868 bytes left on the RAM floppy, 2,484 on the mount tests'); the RAM
+  disks lost 5 blocks (176 and 32 free).
+
+One independent read-only review of init's supervision and `/dev/kmsg` (2026-10-28): no blocker; two should-fix
+findings (an alarm that could keep waking init every tick after a race at its cancel; a child's own exit status -4
+taken for the alarm) and the minor ones (the refusal not in the kernel log, a long comment, CR and trailing spaces,
+a nice that could wrap, `O_RDWR`, the files' modes on the image, a comment on the wrong function, a bare -1) are fixed.
+Left as they are: a daemon whose exit status is -1 or -2 (negative statuses look like `waitnb`'s own answers, an old
+trap of init's sessions too: a kernel mask to 0-255 would end it); `/dev/kmsg`'s bytes reach the serial port
+unfiltered and at its speed, as a service's output does.

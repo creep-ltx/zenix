@@ -222,8 +222,11 @@ void cmd_grab(struct conn *c, const uint8_t *p, uint32_t len)
     struct wsb_con_head h;
     struct wsb_con_disp d;
     int con, e;
+    uint32_t fl = 0;
     if (!len || wsb_getstr(p, len, &off, name, sizeof name))
         name[0] = 0;
+    else if (off < len && wsb_get32(p, len, &off, &fl))
+        fl = 0;                                 /* the flags word (Wasabi 0.11b3, caps zenix): bit 0 notes welcome */
     if ((con = shown(&h)) < 0) { qerr(c, 0, 0, "no console is shown"); return; }
     if (name[0] && name_con(name) != con) {
         qerr(c, 0, 0, name_con(name) < 0 ? "no screen with that name (tty1-tty10)" :
@@ -248,6 +251,7 @@ void cmd_grab(struct conn *c, const uint8_t *p, uint32_t len)
     c->gen = d.generation;
     c->changes = h.changes;
     c->blen = d.width;
+    c->xflags = fl;
     c->job = J_GRAB;
 }
 
@@ -279,12 +283,17 @@ void produce_screen(struct conn *c)
         }
         qcommit(c, WT_DATA, n);
     }
-    if (qroom(c) < 1)
+    static const char note[] = "the console changed while it was read (each line is right; the picture may mix "
+                               "moments)";
+    if (qroom(c) < sizeof note)
         return;
     struct wsb_con_head h;
     if (wsb_os_con_read(c->con, &h, 0, 0) || h.changes != c->changes ||
-        (!wsb_os_con_line(c->con, 0, (uint8_t *)c->buf, w, &d) && d.generation != c->gen))
-        say("GRAB: the console changed while it was read (each line is right; the picture may mix moments)", 0);
+        (!wsb_os_con_line(c->con, 0, (uint8_t *)c->buf, w, &d) && d.generation != c->gen)) {
+        say("GRAB:", note);
+        if (c->xflags & WG_NOTES)               /* only to a client that asked (the main session, step 1) */
+            q(c, WT_STDERR, note, sizeof note - 1);
+    }
     qend(c);
     conn_jobdone(c);
 }

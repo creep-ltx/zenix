@@ -5,11 +5,15 @@ through tools/host/wasabi-host.c, every command Zenix offers, as the real wasabi
 the flags it sets), and the rules of D24 3.2, 5 and 9: wrong keys and the pause, short and oversized frames, unknown
 tags, a transfer that stops moving, one connection over the cap, the address filter, discovery.
     wasabi-check.py HOST_BINARY WORKDIR PORT_OFFSET [WASABI_CHECKOUT]
-Prints PASS/FAIL lines; exit status 0 only when every check passed. Standard library only."""
+Prints PASS/FAIL lines; exit status 0 only when every check passed. Standard library only. Its frames and checks are
+also tools/host/wasabi-remote.py's (the same against Zenix in FS-UAE, tools/remote-test.sh)."""
 import os, socket, stat, struct, subprocess, sys, time
 
-HOSTBIN, WORK, OFF = sys.argv[1], os.path.abspath(sys.argv[2]), int(sys.argv[3])
-REAL = sys.argv[4] if len(sys.argv) > 4 else ""
+if __name__ == "__main__":
+    HOSTBIN, WORK, OFF = sys.argv[1], os.path.abspath(sys.argv[2]), int(sys.argv[3])
+    REAL = sys.argv[4] if len(sys.argv) > 4 else ""
+else:                                           # imported by wasabi-remote.py, which sets OFF (the forward's port)
+    HOSTBIN, WORK, OFF, REAL = "", "", 0, ""
 KEY = "k3y-for-the-host-test-0123"
 CAPS = ("ping,info,ls,put,get,run,del,mkdir,debug,reboot,rebootto,restart,ps,kill,speed,speedfile,quit,grab,"
         "screen,windows,hb,key,health,detach,slots,sum,inputs,zenix,text")
@@ -603,6 +607,29 @@ def t_screen(d):
         for x in range(640):
             want += bytes(pal[pen(x, ln)])
     check(e is None and (w, h, bpp) == (640, 256, 3) and got[12:] == bytes(want), "GRAB: every pixel")
+    # GRAB's note (flags bit 0, Wasabi 0.11b3): a STDERR frame among the DATA only when asked, the picture still whole
+    def grab_frames(payload):
+        c.send(GRAB, payload)
+        tags, size = [], 0
+        while True:
+            t, p = c.recv()
+            tags.append(t)
+            if t == DATA:
+                size += len(p)
+            if t in (END, ERR, None):
+                return tags, size, p
+    open(rootfile(".moving"), "w").close()
+    tags, size, _ = grab_frames(S("") + struct.pack(">I", 1))
+    check(tags.count(STDERR) == 1 and tags[-1] == END and size == 12 + 640 * 256 * 3,
+          "GRAB with flags bit 0 while the display changes: one STDERR note, the whole picture")
+    tags, size, _ = grab_frames(S("") + struct.pack(">I", 0))
+    check(STDERR not in tags and tags[-1] == END and size == 12 + 640 * 256 * 3,
+          "GRAB without bit 0 while the display changes: no note frame (it is only logged)")
+    tags, size, _ = grab_frames(S(""))
+    check(STDERR not in tags and tags[-1] == END, "GRAB without a flags word (an older client): no note frame")
+    os.unlink(rootfile(".moving"))
+    tags, size, _ = grab_frames(S("") + struct.pack(">I", 1))
+    check(STDERR not in tags and tags[-1] == END, "GRAB with bit 0 of a quiet display: no note")
     _, e = c.data(GRAB, S("tty2"))
     check(e is not None and "display" in e[1], "GRAB of a console not shown refused")
     got, e = c.data(SUM, struct.pack(">hhhh", 0, 0, 0, 0))

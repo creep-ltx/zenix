@@ -621,8 +621,8 @@ long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
 
 /* the few device files: /dev/tty (this process's controlling tty), /dev/console (console 1), /dev/tty1 .. /dev/tty10
  * (the virtual consoles: root, or a process whose controlling tty it is - nobody reads another user's keys),
- * /dev/ttyS0 (the serial port, DESIGN D12), /dev/null, /dev/zero, /dev/urandom and /dev/random (DESIGN D19 9.3,
- * random.c: off 1 waits until the pool is seeded) */
+ * /dev/ttyS0 (the serial port, DESIGN D12), /dev/kmsg (root, write only: the kernel log, D24 6.5), /dev/null,
+ * /dev/zero, /dev/urandom and /dev/random (DESIGN D19 9.3, random.c: off 1 waits until the pool is seeded) */
 static long open_device(const char *path, int flags)
 {
     int type = 0, con = 0;
@@ -634,6 +634,14 @@ static long open_device(const char *path, int flags)
         if (e < 0)
             return e;
         type = FT_SERIAL;
+    }
+    else if (!strcmp_(path, "/dev/kmsg")) {         /* DESIGN D24 6.5: root writes lines into the kernel log, as a
+                                                     * service's output goes there (D11 step 8): init's daemons */
+        if (current->uid != 0)
+            return -EACCES;
+        if ((flags & (O_WRONLY | O_RDWR)) != O_WRONLY)
+            return -EINVAL;                 /* write only: reading the log is SYS_klog's (dmesg) */
+        type = FT_KLOG;
     }
     else if (!strcmp_(path, "/dev/null")) type = FT_NULL;
     else if (!strcmp_(path, "/dev/zero")) type = FT_ZERO;

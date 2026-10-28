@@ -249,6 +249,14 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `channel`, `server`, `hold`, `cache`; others ignored), `/var/lib/zpkg/deps` (a name a line) and `sync/CHANNEL.index`
   with its `.sig`; zpkg's built-in keys by build kind (D21 6.3); `zup -f`/`-r`'s command line is between programs of one base version
   and not frozen (docs/d22-zpkg.md section 10).
+- **D24 steps 1-2 (the remote control, branch wasabi1, 2026-10-28):** `/dev/kmsg` (root by the effective id, opened
+  write only; `O_RDONLY`/`O_RDWR` -EINVAL, anyone else -EACCES; its writes go into the kernel log as a service's output does);
+  `/etc/daemons` (`NAME NICE PROGRAM [ARGUMENTS]`, svctab's layout and limits, at most 4 lines, root's and writable by
+  nobody else) and init's policy for its lines (D11's numbers, status 0 a stop, 75 "start me again at once" but
+  counted, output and errors to `/dev/kmsg`); `/etc/wasabid.conf`'s words (`key`, `port`, `allow`, `name`) and its
+  refusals (root's regular file, mode 600, at most 2 KB, decision 4 of d24-remote.md); wasabid's TCP port 1236, its
+  discovery answer, its exit statuses (0 a stop, 1 could not start, 75 start again) and arguments (`--init`,
+  `--trial`, `--port`). The Wasabi protocol itself is the Wasabi project's (its PROTOCOL.md), followed, not ours.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

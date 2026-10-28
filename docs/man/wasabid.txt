@@ -1,0 +1,142 @@
+WASABID(8)		Zenix manual
+
+NAME
+    wasabid - the remote control daemon (the Wasabi protocol)
+
+SYNOPSIS
+    /sbin/wasabid [--init] [--trial] [--port N]
+
+DESCRIPTION
+    wasabid lets a PC drive Zenix over the network with the owner's
+    Wasabi: the `wasabi` command, its Python API and its MCP server
+    (DESIGN D24, docs/d24-remote.md). It speaks Wasabi's protocol,
+    version 1, on TCP port 1236 (not AmigaOS's 1234: the client keeps
+    that one encrypted), and answers discovery on UDP 1234 and 1236
+    with "WASABI!1 NAME 1236 Zenix VERSION". From the PC:
+
+        wasabi --host AMIGA --port 1236 --key KEY run 'ls /bin'
+        wasabi ... put FILE /tmp/FILE      wasabi ... get /etc/motd -
+        wasabi ... ls /tmp   ps   info   health   slots   free 1
+        wasabi ... debug                   (the kernel log, live)
+        wasabi ... reboot --to amigaos --yes
+
+    It is off until root sets it up: write /etc/wasabid.conf (below),
+    then start it by hand (/sbin/wasabid &, its lines on standard
+    error) or let init keep it running: the line
+    "wasabid 0 /sbin/wasabid --init" in /etc/daemons (init(8)).
+
+    What it offers (its caps): ping, info, ls, put, get, run, del,
+    mkdir, debug, reboot (and reboot to a system), restart, ps, kill,
+    speed, speedfile, quit, hb, health, detach, slots, zenix. The
+    console commands (grab, screen, windows, key, sum, inputs, text)
+    need kernel operations that come with D24's step 3; until then they
+    are left out of caps and answer "not in this Zenix yet".
+
+    run    "sh -c COMMAND" as root, standard input /dev/null, its
+           output sent as it comes (standard error apart unless the
+           client merges them), the environment HOME=/root, PATH, USER
+           =root, TERM=dumb. EXIT comes when sh has ended: a background
+           job of the command ("x &") keeps no slot, its later output is
+           lost. Two commands at once (two run slots); a third gets
+           "all run slots are busy". A detached run writes its output to
+           /tmp/wasabi-bg-N and is never stopped. A command whose client
+           went away gets SIGINT, then SIGKILL after 3 s.
+    free   SIGINT to the slot's process group; without the client's
+           --max-time also SIGKILL after 3 s, answer "stopped", or
+           "freed" when even that did not end it (a process waiting on a
+           server that hangs cannot end until the server answers): the
+           slot is let go of and the command reaped when it ends.
+    put    regular files only, to a temporary .wsb-N beside the target,
+           renamed over it at the end (a transfer cut short leaves the
+           old file). A replaced file keeps its mode; a new one is 0755
+           for a Zenix program, else 0644 (a client with caps zenix may
+           send a mode). /sbin/wasabid itself is refused.
+    get    regular files only (never a device: /dev/zero would never
+           end, opening /dev/ttyS0 would take the serial port).
+    ls     Wasabi's lines: the mode as AmigaDOS protection bits, the
+           time as a DateStamp; a symbolic link shows its target.
+    kill   SIGINT, with the flag SIGKILL; never boot, init or wasabid;
+           netd, diskd and the filesystem servers only with the flag.
+           ps shows each pid as 0x%08x, which kill takes.
+    debug  the kernel log, a line a frame, read every 100 ms; a log that
+           wrapped past the client says "[wasabi: N bytes of the kernel
+           log were lost]"; heartbeats every 5 s. A new subscriber first
+           gets how the previous boot ended (and after a panic its last
+           20 lines). One subscriber at a time.
+    reboot runs /bin/reboot [amigaos|zenix] (the random seed and the
+           clock floor are written, the disks synced) after the OK and a
+           farewell on the log stream. Refused while zup, fsck.*,
+           mkfs.*, fdisk or dd runs (a client's --force skips this
+           guard; "run reboot" is never stopped).
+    restart  ends with status 75, which init (--init) answers by
+           starting it again at once; refused when started by hand.
+    quit   ends with status 0 (init does not start it again).
+    health key-value lines: mem.chip.free, mem.fast.free, emu68,
+           zenix.version, uptime, procs, load.ready, net.IFACE.rx/tx/
+           bad, disk.root.free.kb.
+
+OPTIONS
+    --init     started by init (/etc/daemons): restart is allowed
+    --trial    a trial instance beside the running one (with --port):
+               no discovery, the refused count not written, no restart
+    --port N   the TCP port (default: the file's, else 1236)
+
+CONFIGURATION
+    /etc/wasabid.conf, root's regular file with mode 600, at most 2 KB;
+    # starts a comment:
+
+    key TEXT     the shared secret, 16 to 127 characters (required).
+                 Make a strong one of its own, never the AmigaOS
+                 Wasabi's: head -c 18 /dev/random | base64
+    port N       the TCP port (1236)
+    allow CIDR   more addresses that may connect (at most 8 lines);
+                 "allow any" lets every address in (warned at each start)
+    name NAME    the name discovery answers (1-31 of A-Z a-z 0-9 . _ -;
+                 default zenix)
+
+    Only the home network's addresses (10/8, 172.16/12, 192.168/16,
+    127/8, 169.254/16) and the allow lines may connect; others are
+    closed before a word and counted (WELCOME's refused, kept in
+    /var/lib/wasabid.refused). A wrong key closes the connection and
+    makes that address's next HELLO wait a second. A missing or bad file
+    (a line it does not understand, a second key or port, a short key,
+    a file others may read) ends wasabid with status 0 and a line naming
+    the line and why: a stop, not started again by init.
+
+    The key crosses the network in the clear at every command: anyone
+    who can watch the home network can read it, and whoever has it can
+    do anything on the machine as root (no MMU: every program can also
+    read it from memory). Keep it off other networks; encryption is a
+    later step (D24 9).
+
+THE NETWORK
+    A network that is down (no network server: "network is down") is
+    waited out: wasabid tries again every 10 s and never ends for it.
+    When netd ends under it (killed, a crash), its sockets die; it
+    listens again at once, which starts netd again (D11), then every
+    10 s. At most 4 connections at once (a fifth gets "busy"), one file
+    transfer at a time; a connection that makes no progress for 10 s in
+    either direction is dropped.
+
+FILES
+    /sbin/wasabid             the daemon (the package wasabid)
+    /etc/wasabid.conf         its configuration (never shipped)
+    /var/lib/wasabid.refused  the count of refused callers
+    /etc/daemons              init's line that keeps it running
+
+NOTES
+    Not encrypted (the client warns once per address and port). No
+    install command: Zenix updates itself with zpkg, so "wasabi update"
+    does not work; try a new daemon as a trial instance (--trial --port
+    1237) first. Files on an NFS mount are refused until the cancel
+    mark of D23 lets a hung NAS be left. A local filesystem server that
+    hangs holds the daemon's file calls as it holds every program's.
+    A command that opens /dev/tty (sudo, passwd) waits for console 1's
+    keyboard. Behind NAT (zenix-slirp, FS-UAE) every caller looks like
+    10.0.2.2: keep such port forwards on the PC's 127.0.0.1. Memory
+    (FS-UAE, ps): 72 KB idle, 88 KB with a connection running a command;
+    on 1 MB of chip RAM with a login there is no room left for a
+    command's shell. Verified in FS-UAE over SLIP: tools/remote-test.sh.
+
+SEE ALSO
+    init(8), netd(8), reboot(8), dmesg(1), zpkg(8)

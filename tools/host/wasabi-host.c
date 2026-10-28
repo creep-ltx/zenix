@@ -8,6 +8,7 @@
  *   .procs                          extra processes, "PID PPID NAME" lines (the guard's and KILL's tests)
  *   .kills                          kill()s of pretend processes are written here, "PID SIG"
  *   .conwrite                       its text is written to console 1 at the next look (then removed)
+ *   .moving                         while it exists, the display's generation rises at every line read (GRAB's note)
  * The pretend processes are boot (1), init (2), netd (3) and fsd (4); then wasabid itself and its children. Ten
  * consoles, 1 and 2 in use, 1 shown, 80 x 32; a typed line "echo WORDS" is answered with WORDS on the next line. */
 #define _GNU_SOURCE
@@ -514,7 +515,11 @@ int wsb_os_con_line(int n, int line, uint8_t *pens, uint32_t cap, struct wsb_con
     d->width = COLS * 8;
     d->height = ROWS * 8;
     d->depth = 3;
-    d->generation = 7;
+    static uint32_t gen = 7;
+    struct stat s;
+    if (!stat(hp("/.moving"), &s))
+        gen++;                                  /* the display "changed its mode" while it was read */
+    d->generation = gen;
     for (int i = 0; i < 16; i++) {
         d->rgb[i][0] = (uint8_t)(i * 32);
         d->rgb[i][1] = (uint8_t)(255 - i * 32);

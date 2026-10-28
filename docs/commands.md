@@ -78,6 +78,7 @@ spot-checked against the code that day.
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
 | [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 | [genet](man/genet.txt) | not a command: the Ethernet driver of a Raspberry Pi CM4 or Pi 4 under Emu68 (`/sbin/net/genet`), started by netd |
+| [wasabid](man/wasabid.txt) | not a command: the remote control daemon (`/sbin/wasabid`, DESIGN D24), the owner's Wasabi protocol on TCP 1236; off until root writes `/etc/wasabid.conf`, kept running by init through `/etc/daemons` |
 
 ## Internals and test programs
 [init](man/init.txt), [boot](man/boot.txt), [diskd](man/diskd.txt) (the built-in start-up programs);
