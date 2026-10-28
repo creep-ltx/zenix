@@ -15,6 +15,7 @@ Work files in OUT. Every check prints PASS or FAIL; the exit status is the numbe
 import hashlib
 import os
 import random
+import re
 import shutil
 import struct
 import subprocess
@@ -198,7 +199,7 @@ def part_repo(out, core):
             import mkrepo
             pix = mkrepo.parse_index(open(os.path.join(repo, "test", f), "rb").read())
             rc, o = run(core, "index", os.path.join(repo, "test", f))
-            good &= o.strip() == "ok test %d %d" % (pix["serial"], len(pix["pkgs"]))
+            good &= o.strip() == "ok test %d %d -" % (pix["serial"], len(pix["pkgs"]))
     ok("every list mkrepo wrote parses in C with the same serial and package count", good)
     rc, o = run(core, "latest", os.path.join(repo, "test", "latest"))
     ok("latest parses in C", o.strip() == "ok %d" % latest(repo, "test"), o)
@@ -264,14 +265,43 @@ def part_repo(out, core):
     ok("promote across key classes (testing -> test) is refused", rc != 0, msg)
     rc, msg = check(rel, "--today", "20261101")
     ok("check: a stable list naming files whose header says testing is sound (the class rule)", rc == 0, msg)
-    rc, msg = py("mkrepo.py", "snapshot", rel, "stable", "2026.11", env=env)
+    rc, msg = mr("snapshot", rel, "stable", "2026.11")
+    ok("snapshot with the test key is refused (a release channel)", rc != 0 and "test key" in msg, msg)
+    rc, msg = mr("snapshot", rel, "test", "2026.11", key=rkey)
+    ok("a snapshot of the test channel is refused", rc != 0 and "release channel" in msg, msg)
+    rc, msg = mr("snapshot", rel, "stable", "2026.11", key=rkey)
     sd = os.path.join(rel, "snapshots", "2026.11")
-    ok("snapshot: a copy of stable's list, its .sig and latest",
+    snapdata = open(os.path.join(sd, "index-%d" % six["serial"]), "rb").read() if rc == 0 else b""
+    stabledata = open(os.path.join(rel, "stable", "index-%d" % six["serial"]), "rb").read()
+    ok("snapshot (amendment 1): stable's list with \"snapshot 2026.11\" after its channel line, signed, and latest",
        rc == 0 and sorted(os.listdir(sd)) == sorted(["latest", "index-%d" % six["serial"], "index-%d.sig" % six["serial"]])
-       and open(os.path.join(sd, "index-%d" % six["serial"]), "rb").read() ==
-       open(os.path.join(rel, "stable", "index-%d" % six["serial"]), "rb").read(), msg)
-    rc, msg = py("mkrepo.py", "snapshot", rel, "stable", "2026.11", env=env)
+       and snapdata == stabledata.replace(b"\nchannel stable\n", b"\nchannel stable\nsnapshot 2026.11\n", 1) and
+       open(os.path.join(sd, "latest"), "rb").read() == open(os.path.join(rel, "stable", "latest"), "rb").read(), msg)
+    rc2, out2 = run(core, "index", os.path.join(sd, "index-%d" % six["serial"]))
+    ok("the C parser reads the snapshot's name", rc2 == 0 and out2.strip() == "ok stable %d %d 2026.11" %
+       (six["serial"], len(six["pkgs"])), out2)
+    rc, msg = mr("snapshot", rel, "stable", "2026.11", key=rkey)
     ok("a snapshot name is never reused", rc != 0, msg)
+    sw = os.path.join(out, "snapswap")
+    for what, fn, want in (
+            ("a snapshot holding the channel's list (the old copy)", lambda: (
+                shutil.copy(os.path.join(rel, "stable", "index-%d" % six["serial"]), os.path.join(sw, "snapshots",
+                            "2026.11", "index-%d" % six["serial"])),
+                shutil.copy(os.path.join(rel, "stable", "index-%d.sig" % six["serial"]), os.path.join(sw, "snapshots",
+                            "2026.11", "index-%d.sig" % six["serial"]))), "says snapshot (none)"),
+            ("a snapshot under another name", lambda: os.rename(os.path.join(sw, "snapshots", "2026.11"),
+                                                                os.path.join(sw, "snapshots", "2026.10")),
+             "says snapshot 2026.11"),
+            ("a cut snapshot run's folder", lambda: os.makedirs(os.path.join(sw, "snapshots", "2026.12.part")),
+             "a cut snapshot run"),
+            ("a channel holding a snapshot's list", lambda: [shutil.copy(os.path.join(sd, f), os.path.join(sw, "stable", f))
+                                                             for f in os.listdir(sd)], "a channel's list says snapshot")):
+        shutil.rmtree(sw, ignore_errors=True)
+        shutil.copytree(rel, sw)
+        fn()
+        rc, msg = check(sw, "--today", "20261101")
+        ok("check finds %s" % what, rc != 0 and want in msg, msg)
+    shutil.rmtree(sw, ignore_errors=True)
     rc, msg = check(rel, "--today", "20270601")
     ok("check: expired channel lists are named; a snapshot's expiry is not checked",
        rc != 0 and "testing: expired" in msg and "stable: expired" in msg and "snapshots/2026.11: expired" not in msg, msg)
@@ -394,13 +424,18 @@ def part_differential(out, core, n):
     repo = os.path.join(out, "repo")
     seeds = [open(os.path.join(repo, "test", f), "rb").read() for f in sorted(os.listdir(os.path.join(repo, "test")))
              if f.startswith("index-") and not f.endswith(".sig")]
+    snaps = os.path.join(out, "release-repo", "snapshots")      # a snapshot's list (amendment 1), when there is one
+    for sn in sorted(os.listdir(snaps)) if os.path.isdir(snaps) else []:
+        seeds += [open(os.path.join(snaps, sn, f), "rb").read() for f in sorted(os.listdir(os.path.join(snaps, sn)))
+                  if f.startswith("index-") and not f.endswith(".sig")]
     if not seeds:
         ok("differential: lists from the repo part", False, "run the repo part first")
         return
     rnd = random.Random(22)
     words = [b"pkg", b"version", b"file", b"size", b"depends", b"takes", b"desc", b"group", b"base", b"system",
              b"channel", b"serial", b"date", b"expires", b"min", b" ", b"  ", b"\n", b"\r", b"\0", b"0", b"9999999999",
-             b"4294967296", b"zenix-1.zup", b"-", b"zpkgindex 1", b"20260229", b"a" * 73, b"\xff"]
+             b"4294967296", b"zenix-1.zup", b"-", b"zpkgindex 1", b"20260229", b"a" * 73, b"\xff",
+             b"snapshot", b"snapshot 2026.11\n", b"\nsnapshot ", b".", b"_", b"A" * 33]
     path = os.path.join(out, "diff.index")
     bad = []
     accepted = 0
@@ -424,7 +459,7 @@ def part_differential(out, core, n):
         open(path, "wb").write(data)
         try:
             p = mkrepo.parse_index(data)
-            want = "ok %s %d %d" % (p["channel"], p["serial"], len(p["pkgs"]))
+            want = "ok %s %d %d %s" % (p["channel"], p["serial"], len(p["pkgs"]), p.get("snapshot", "-"))
         except mkrepo.Bad:
             want = "refused"
         rc, o = run(core, "index", path)
@@ -828,6 +863,48 @@ def part_net(out, client):
                       U + "/rel")
         ok("--snapshot: the class is checked, serial and expiry are not (said), stored apart",
            rc == 0 and "a snapshot" in msg and os.path.exists(os.path.join(st3, "sync", "snapshot-2026.11.index")), msg)
+        rc, msg = run(client, "sync", "--clock", "20990101", "--snapshot", "2026.11", st3, "stable", "release", rpub,
+                      U + "/rel")
+        ok("--snapshot again: the stored snapshot's serial, taken", rc == 0 and "a snapshot" in msg, msg)
+        rc, msg = run(client, "sync", "--snapshot", "../stable", st3, "stable", "release", rpub, U + "/rel")
+        ok("--snapshot with a name that is a path is refused before any URL or path", rc == 2, msg)
+        sp = os.path.join(st3, "sync", "snapshot-2026.11.index")
+        keep = open(sp, "rb").read()
+        shutil.copy(os.path.join(rel, "stable", "index-%d" % latest(rel, "stable")), sp)
+        rc, msg = run(client, "sync", "--clock", "20990101", "--snapshot", "2026.11", st3, "stable", "release", rpub,
+                      U + "/rel")
+        ok("a stored snapshot file that is not the snapshot's is ignored, not a lock-out",
+           rc == 0 and "ignored" in msg and open(sp, "rb").read() == keep, msg)
+        # audit 2026-10-28 O1 (amendment 1): someone between the machine and the mirror answers --snapshot with an
+        # older signed list, or another snapshot's; and a snapshot's list as the channel's
+        sdir = os.path.join(root, "rel", "snapshots", "2026.11")
+        oldest = min(int(f[6:]) for f in os.listdir(os.path.join(rel, "testing")) if re.match(r"^index-[0-9]+$", f))
+        for f in os.listdir(sdir):
+            os.unlink(os.path.join(sdir, f))
+        shutil.copy(os.path.join(rel, "testing", "index-%d" % oldest), os.path.join(sdir, "index-%d" % oldest))
+        shutil.copy(os.path.join(rel, "testing", "index-%d.sig" % oldest), os.path.join(sdir, "index-%d.sig" % oldest))
+        open(os.path.join(sdir, "latest"), "w").write("zpkglatest 1 %d\n" % oldest)
+        st4 = os.path.join(out, "state4")
+        shutil.rmtree(st4, ignore_errors=True)
+        rc, msg = run(client, "sync", "--clock", "20990101", "--snapshot", "2026.11", st4, "stable", "release", rpub,
+                      U + "/rel")
+        ok("--snapshot: an older signed channel list swapped in is refused (O1)",
+           rc != 0 and "not the snapshot asked for" in msg and
+           not os.path.exists(os.path.join(st4, "sync", "snapshot-2026.11.index")), msg)
+        shutil.rmtree(sdir)
+        shutil.copytree(os.path.join(rel, "snapshots", "2026.11"), os.path.join(root, "rel", "snapshots", "2026.10"))
+        shutil.rmtree(st4, ignore_errors=True)
+        rc, msg = run(client, "sync", "--clock", "20990101", "--snapshot", "2026.10", st4, "stable", "release", rpub,
+                      U + "/rel")
+        ok("--snapshot: another snapshot's signed list is refused", rc != 0 and "not the snapshot asked for" in msg, msg)
+        sd = os.path.join(root, "rel", "stable")
+        for f in os.listdir(os.path.join(rel, "snapshots", "2026.11")):
+            shutil.copy(os.path.join(rel, "snapshots", "2026.11", f), os.path.join(sd, f))
+        shutil.rmtree(st4, ignore_errors=True)
+        rc, msg = run(client, "sync", "--clock", "20261101", st4, "stable", "release", rpub, U + "/rel")
+        ok("a snapshot's signed list served as the channel's is refused",
+           rc != 0 and "a snapshot's, not the channel's" in msg, msg)
+        shutil.rmtree(st4, ignore_errors=True)
     finally:
         srv.kill()
         srv.wait()

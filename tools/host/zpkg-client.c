@@ -432,7 +432,7 @@ static int cmd_sync(int argc, char **argv)
         if (!strcmp(argv[i], "--clock")) t.clock = (zp_u32)atol(argv[++i]);
         else if (!strcmp(argv[i], "--clockfloor")) t.clockfloor = (zp_u32)atol(argv[++i]);
         else if (!strcmp(argv[i], "--floor")) t.floor = (zp_u32)atol(argv[++i]);
-        else if (!strcmp(argv[i], "--snapshot")) { snapshot = argv[++i]; t.flags |= ZP_T_SNAPSHOT; }
+        else if (!strcmp(argv[i], "--snapshot")) { snapshot = argv[++i]; t.snapshot = snapshot; }
         else if (!strcmp(argv[i], "--idle-ms")) idle_ms = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--file-ms")) file_ms = atoi(argv[++i]);
         else return 2;
@@ -441,6 +441,8 @@ static int cmd_sync(int argc, char **argv)
         return 2;
     state = argv[i];
     chan = argv[i + 1];
+    if (snapshot && !zp_snapshot_name_ok(snapshot))
+        return 2;
     t.channel = snapshot ? 0 : chan;
     t.keyclass = !strcmp(argv[i + 2], "test") ? ZP_KEY_TEST : ZP_KEY_RELEASE;
     for (char *p = argv[i + 3]; *p && npub < 4; p += 64 + (p[64] == ',')) {
@@ -468,8 +470,16 @@ static int cmd_sync(int argc, char **argv)
             printf("the stored list is damaged: %s\n", why);
             return 1;
         }
-        t.stored = ix.serial;
-        have = 1;
+        if (snapshot && zp_index_usable(&ix, &t, 0, &why) == ZP_ESNAPSHOT) {
+            /* a stored file that is not this snapshot's (damaged, or older than amendment 1): not a floor */
+            printf("the stored snapshot list is not %s's: ignored\n", snapshot);
+            zp_index_free(&ix);
+            free(stored);
+            stored = 0;
+        } else {
+            t.stored = ix.serial;
+            have = 1;
+        }
     }
     for (m = 0; m < mirrors; m++) {
         const char *base = argv[mirror0 + m];
@@ -589,7 +599,7 @@ static int cmd_sync(int argc, char **argv)
             ix = nx;
             have = 1;
             printf("new %u%s%s%s\n", ix.serial, warn & ZP_W_CLOCK_BEHIND ? " (the clock is behind)" : "",
-                   warn & ZP_W_UNCHECKED ? " (a snapshot: serial and expiry not checked)" : "",
+                   warn & ZP_W_UNCHECKED ? " (a snapshot: its age and expiry not checked)" : "",
                    warn & ZP_W_EXPIRY_IGNORED ? " (expiry ignored)" : "");
             free(list);
             list = 0;

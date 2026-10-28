@@ -797,3 +797,91 @@ comes back; 1 MB from the PC byte for byte (compared on the PC and by `sha256sum
 (`RekeyLimit 1M`, two key exchanges); a host whose key differs from known_hosts refused (exit 255, no login on that
 sshd); an interactive shell (a command, Ctrl-C to a remote `sleep`, `free` and `ps` on console 2), `~.` (exit 255).
 SLIP was not tried (the A2065 path covers the protocol; over SLIP the 11.5 KB/s line is the limit): left for the A1200.
+
+## As built: step 7, the PC-side parts (side helper, branch w7, 2026-10-28; not yet reviewed)
+
+Built, without system calls (the programs `wget`, `sntp` and their Makefile lines are the main session's):
+- **`crypto/zc/zc_tls.c`** (`zc_tls.h`): BearSSL's client engine driven over a byte transport the caller gives (two
+  callbacks, `send` and `recv`; the socket layer and its timeouts stay in the program), with 3.3's set-up: TLS 1.2
+  only, ECDHE only, the six suites with the RSA form before the ECDSA one, SHA-256/384/512, no renegotiation, SNI
+  always, ALPN when asked; the chain through `zc_x509` with the time rules below; BearSSL's one-way 16,709-byte buffer
+  (HTTP sends and receives in turn). Session resumption kept in a cache the caller owns (four sessions, keyed by host
+  and port, the master secrets wiped at the end). A transport that ends without `close_notify` is `ZC_TLS_ETRUNC`.
+  `zc_tls_strerror` gives one line per error, among them 3.2's TLS 1.3 message. `zc_pem_cert` reads the owner's PEM
+  roots for `/etc/ssl/local/`.
+- **`crypto/zc/zc_clock.c`** (`zc_clock.h`): `/var/lib/clock` (`zenix-clock 1 SECONDS`, one spelling per number, any
+  other line ignored), the floor (`zc_clock_floor`: the newer of the build date and the file), and the time callback
+  of 8.3: with a trusted clock both dates against it, never below the floor; without one "not after" against the
+  floor, "not before" skipped; `used_floor` tells the program to say so once.
+- **`user/wget/`** (`wget.h`, `plan.c`): the command line (`-q`, `-c`, `-O FILE`), the local name as GNU wget's basic
+  cases (the URL's last segment with its query, safe `%XX` decoded, `index.html`, `NAME.1`...), each answer's action
+  (write, append, follow, done, fail) with D22's rules through `net/http/`: at most 3 redirects, never https to http,
+  relative Locations not followed (D22 choice 13), resume by `http_resume` (206 appended, 200 from the start), 416
+  after `-c` "already complete"; GNU wget's exit statuses (2 command line, 4 network, 5 certificate, 7 protocol,
+  8 a server's error).
+- **`net/sntp/`** (`sntp.h`, `sntp.c`): the request (version 4, every field zero but a random transmit stamp), the
+  reply's checks (mode 4, version 3 or 4, our nonce as its origin before anything else is believed, a kiss of death,
+  stratum 1-15, leap indicator not 3, a transmit time after 1970; RFC 4330's era rule, good to 2104), the time
+  (transmit time plus half the round trip, the server's own time taken out, 32-bit arithmetic only), the guard
+  (`sntp_judge`: set the clock; raise the floor only within 10 minutes of the battery clock or, without one, at most
+  400 days past the floor), and `/etc/sntp`'s parser (at most four `server HOST` lines, warnings for the rest).
+- **`net/http/`, two fixes:** a URL's `#fragment` is no longer sent; a 416's `Content-Range: bytes */N` is taken.
+
+**Found:** BearSSL's `x509_minimal` calls `time()` and does the 64-bit division only when `BR_USE_UNIX_TIME` is on,
+which newlib's headers switch on for m68k-elf. **`-DBR_USE_UNIX_TIME=0` removes both, so 3.5's "patch" is one build
+define, no change to BearSSL's file** (the size test checks no row links `__divdi3`, `__moddi3` or `time`). On the PC,
+`-DBR_RDRAND=0` makes the 32 injected bytes BearSSL's only seed, as on a 68k (no RDRAND), so a recorded handshake
+replays for the fuzzer.
+
+**Not done as 3.3 says:** BearSSL always lists ECDSA before RSA in `signature_algorithms` (its T0 code, no setting),
+so "RSA listed first" there needs a patch of `ssl_hs_client.c`'s compiled byte code; not made. What decides a server's
+certificate in TLS 1.2 is the suite, and the suites list RSA first: a test server holding both an RSA and an ECDSA
+certificate answers with RSA.
+
+**Sizes (*measured*, m68k `-Os`, `--gc-sections`, libz stand-ins not counted):** the TLS client with the glue, the
+X.509 wrapper, anchors, time rules and PEM 86,300 bytes (D21 7.1's TLS row with the wrapper was 82,554); wget's core
+with `net/http/` 6,311; both 92,642; sntp's core with the clock file 1,795. The glue's own memory: `struct zc_tls`
+about 7 KB, plus the 16,709-byte record buffer, the 16 KB chain buffer and the anchor store. None uses a 64-bit
+multiply or divide (`check-68020-60`).
+
+**Tests** (`tools/host/tls-test.sh`, parts `units https sntp size`, default all; `fuzz SECONDS` apart):
+`tools/host/tls-core-test.c` (139 checks: the clock file, the time callback, SNTP's packets and hostile replies, the
+guard, `/etc/sntp`, wget's command line, names, plans and answers, the PEM reader); **https**, 66 checks in `unshare
+--map-root-user --map-auto -nm` (`tools/host/tls-test.py`, a test CA made at each run, its keys only in the work
+folder): `tools/host/wget-client.c` (the cores over POSIX sockets) against Python servers on 127.0.0.1 choosing a
+certificate by SNI: RSA, ECDSA, RSA-4096 and P-384 chains, a wildcard, expired, not yet valid, wrong name, unknown
+root, missing intermediate, no serverAuth, ten certificates, the owner's root through PEM, a TLS 1.3-only server's
+message, the floor without a trusted clock (and a 1970 clock), keep-alive (four requests, one handshake), resumption
+counted on both sides, 1 MB byte for byte, chunked, names, 404, redirects (3, a fourth refused, https to http refused,
+http to https, another host and its certificate), resume (206, 416, 200, a wrong Content-Range, after a cut),
+truncation without `close_notify`, one byte per TLS record, a slow and a stalled server; **sntp**, 19 checks
+(`tools/host/sntp-client.c` against a Python SNTP server on 127.0.0.2-16): true answers, liars 500 days and one hour
+off (the clock set, the floor file untouched), an answer before the floor refused, a kiss of death, another nonce, a
+forged answer before the true one, stratum 16, leap 3, a client's packet, version 2, no transmit time, short, slow
+and silent servers, `/etc/sntp`'s warnings. **Fuzzing** (`tls-fuzz.c`, `tls-test.sh fuzz SECONDS`, one harness at a time):
+the glue and BearSSL's engine fed a server flight recorded with a fixed seed (the seed replays through the handshake
+to the HTTP answer, checked first), then a second connection trying resumption; URLs, redirects, names and the
+command line; responses in pieces through the plan; SNTP replies, `/etc/sntp`, the clock file and PEM. A 10-minute
+run (150 s each, 2026-10-28): 234,000 TLS inputs, 39 million URL, 12 million plan, 2.5 million SNTP: nothing found.
+
+Choices where the note was silent (binding unless changed here): (1) the glue lives in `crypto/zc/` beside the
+wrapper (zpkg links it too, D22 step 9); (2) the transport is two blocking callbacks, as BearSSL's own `br_sslio`;
+(3) a reply before the floor is refused by `sntp_judge` (the time can never be before the build date); (4)
+`sntp-client` gives each server its share of the 10 s, so one that answers garbage cannot use up the others' time,
+and takes the first accepted answer (how `sntp` combines several servers is the main session's call); (5) with `-c`
+a 200 starts the file again (D22's rule; GNU wget refuses to truncate there); (6) GNU wget's exit statuses; (7) the
+build date for the floor comes from the program (`zc_clock_floor`'s first argument): its source (a build define,
+from the commit's date for reproducible builds) is the main session's.
+
+### Main-session decisions on step 7's open points (2026-10-28)
+
+(1) RSA first through the cipher-suite order only (no patch of BearSSL's T0 code): accepted, the dual-certificate test
+shows it decides. (2) **"Trusted clock this boot"** means: the battery clock was read at boot, or `sntp` accepted an
+answer this boot (a root-only `settime` from sntp with its guard). The main line adds a kernel flag readable by programs
+(a new word or bit, claimed in CLAUDE.md first) when it builds the wget/sntp programs; until then the glue's `trusted`
+flag is passed by the caller. (3) sntp takes the first accepted answer and gives each server its share of the 10 s; an
+answer before the floor is refused: accepted. (4) **wget `-c` when the server ignores Range (200):** follow GNU wget for
+wget (refuse to truncate, say so, exit non-zero) — D22's restart rule stays zpkg's, where the cache file is zpkg's own.
+(5) **Relative and `//host` Locations:** wget follows them (as GNU wget), resolved against the request URL; net/http
+gains the resolution when the program is built (zpkg may keep refusing them). (6) The glue lives in `crypto/zc/`:
+accepted. (7) The TLS 1.3 wording: accepted. (8) `-DBR_RDRAND=0` only in host tests: accepted.
