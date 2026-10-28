@@ -373,6 +373,12 @@ at its end (the two images' offsets, packed and unpacked sizes, the method), ass
 
 ### 7.3 Links across mounts (a limit fixed for every Zenix)
 
+**Superseded by DESIGN D26** ([d26-links-across-mounts.md](d26-links-across-mounts.md), built 2026-10-28): the kernel
+follows every link, not only those leaving a volume, through the servers' `FS_LINKED` answer; the sketch below is kept
+as the first idea. D25's `net` service starts from the demo's own `/etc/svctab` line (boot's `sys_stat("/sbin/netd")`
+runs before init mounts `/usr`); every `/bin/NAME -> /usr/bin/NAME` costs one more round trip a start, so the demo's
+`PATH` puts `/usr/bin` first.
+
 Every absolute path the programs use (section 2) must keep working, and the RAM root cannot hold the programs. So
 **the kernel follows a symbolic link whose target leaves the volume**: when a filesystem server meets, during a walk,
 a link with an absolute target (or a `..` above its volume's root), it answers with a new reply that carries the link's

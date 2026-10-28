@@ -4,3 +4,7 @@ send cat /persist.txt /pdir/f.txt\r
 sleep 3
 send cat /data/d.txt; cat /plink; wc /big.txt\r
 sleep 8
+# DESIGN D26 test 16: a ZenixFS root with an ext2 mount (/data): links from the root into the mount and back, relative
+# ones climbing out of the mount or passing its mount point
+send ln -s /data/d.txt /zl1; echo q1=$(cat /zl1); ln -s /persist.txt /data/zl2; echo q2=$(cat /data/zl2); ln -s ../persist.txt /data/zl3; echo q3=$(cat /data/zl3); ln -s ../data/d.txt /pdir/zl3b; echo q3b=$(cat /pdir/zl3b); rm /zl1 /data/zl2 /data/zl3 /pdir/zl3b; echo q-$(echo done)\r
+wait q-done 40

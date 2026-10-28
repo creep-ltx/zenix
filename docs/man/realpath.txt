@@ -8,12 +8,14 @@ SYNOPSIS
 
 DESCRIPTION
     Prints each path made absolute, with . and .. removed and symbolic links
-    followed. With -e the path must exist.
+    followed, at most 40 of them in one path, as the kernel follows them.
+    With -e the path must exist.
 
 NOTES
     A symbolic link whose target is 159 bytes or longer cannot be resolved
     (the longest path Zenix takes is 159 bytes): "cannot resolve", never a
-    prefix of the target.
+    prefix of the target. More than 40 links in one path (a loop) cannot be
+    resolved either.
 
 EXIT STATUS
     0, 1 if a path cannot be resolved (or with -e does not exist).

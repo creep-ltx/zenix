@@ -474,7 +474,11 @@ old address (`tcp_netif_ip_addr_changed`); programs see `ECONNABORTED`.
 
 netd calls only the root's filesystem server `fs` (its config files, spawning drivers) and the kernel; never a `fs.*`
 mount; drivers reach only `net` (through the kernel). So **no server that netd's files depend on may call `net`**: no
-root filesystem over the network. A later NFS client is a filesystem server that calls `net`, which changes D11's
+root filesystem over the network. **Amended by D26 (symbolic links across mounts, built 2026-10-28):** D25 ships
+`/sbin/netd -> /usr/sbin/netd` and `/etc/ssl/anchors -> /usr/share/...`, so netd's files may lead through links into a
+**disk** mount (its server calls only diskd), **never into a network mount** (nfscd calls `net`: netd would wait for
+nfscd, which waits for netd). D23 refuses NFS mounts on `/`, `/bin`, `/sbin` and `/etc`, but a link can still lead
+there: keeping it out is root's (said in `mount`'s page). A later NFS client is a filesystem server that calls `net`, which changes D11's
 "filesystem servers call only diskd": allowed for mounts only, decided with NFS.
 
 ## 7. Size and memory budgets

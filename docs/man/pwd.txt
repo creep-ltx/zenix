@@ -10,8 +10,12 @@ DESCRIPTION
     Prints the absolute path of the current directory, as kept by the system
     for this process. There are no options. The shell has a built-in pwd too.
 
+    The path has no symbolic links in it: after cd through a link, pwd shows
+    where the link led (cd /bin with /bin -> /usr/bin shows /usr/bin), as
+    Linux's /bin/pwd and cd -P do. So cd .. goes to that directory's parent.
+
 EXIT STATUS
-    0, or 1 if the directory cannot be found.
+    0, or 1 if the directory cannot be found (said on the error output).
 
 SEE ALSO
     sh(1)

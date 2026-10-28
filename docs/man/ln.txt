@@ -24,6 +24,11 @@ EXAMPLES
 
 NOTES
     A link name longer than 63 bytes is reported, never cut short.
+    A symbolic link may lead into another mounted filesystem and out of
+    one: the kernel follows it (an absolute target from /, a relative one
+    from the link's directory, also past a mount point), at most 40 links
+    in one path ("too many levels of symbolic links"). A hard link through
+    a symbolic link into another filesystem is a "cross-device link".
     A link that cannot be made says why ("file exists", "permission
     denied", "cross-device link" for a hard link to another filesystem
     ...).

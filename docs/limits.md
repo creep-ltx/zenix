@@ -87,7 +87,10 @@ pointers.
 - 32 processes, 28 message ports (12 held for services, 16 ordinary), 64 open files, 16 fds per process, 8 extra memory regions per process, 8 mounts
   (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
   at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
-  -ENAMETOOLONG beyond, never cut), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
+  -ENAMETOOLONG beyond, never cut; also where a link's target plus the rest of a path would be longer, DESIGN D26),
+  40 symbolic links followed in one path once anything but the root is mounted (and always by `chdir`, `mount` and
+  `realpath`; -ELOOP beyond; with only the root mounted the server's own rule: 8 nested), link targets of at most 255
+  bytes (-ENAMETOOLONG), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
   NTSC), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
   console first scrolls), a cooked tty line of 511 characters (a key past that rings the bell, and at its end the whole line is refused with
   "tty: the line was too long": nothing of it is handed on, also when the shell's editor took over halfway).

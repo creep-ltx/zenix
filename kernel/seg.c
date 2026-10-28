@@ -112,10 +112,10 @@ int seg_busy(int m, const struct ustat *st)
     return 0;
 }
 
-int seg_on(int m)
+int seg_any(void)
 {
     for (int i = 0; i < NSEG; i++)
-        if (segs[i].code && segs[i].m == (u8)m)
+        if (segs[i].code)
             return 1;
     return 0;
 }

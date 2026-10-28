@@ -196,7 +196,11 @@ There is deliberately **no** start-at-boot field, no restart field and no depend
 
 The format is documented in `docs/man/boot.txt` (boot reads it). A bad line is reported in the kernel log and
 skipped; it never stops the boot. A path in `/etc/svctab` is read from the root filesystem, never from a mount, so
-starting a file service needs at most the root server (5.1, nesting).
+starting a file service needs at most the root server (5.1, nesting). **Amended by D26 (2026-10-28):** the kernel now
+follows symbolic links across mounts, so a service's program may be a link into a mount (D25's `/sbin/netd ->
+/usr/sbin/netd`); its load then also needs that mount's server, one more call inside the same nesting (the mount's
+server is an image or a file read from the root, 6.4), and a program read through the service itself is refused at
+once (F14, 5.1). Verified: `tools/mounttest.sh`, a service whose program is a link into an ext2 mount starts and serves.
 
 ## 5. How it works
 
@@ -265,7 +269,8 @@ noted in 5.4.
   root's `@fsd` if that is stopped too); a file service that lives *on* a ZenixFS mount, started while both that
   mount's and the root's servers are stopped, would need three levels and fails once (logged; the next call works).
   The kernel stack (4 KB) must hold two levels of `call()` + a spawn + filesystem calls: measured with
-  `-fstack-usage` in build step 1.
+  `-fstack-usage` in build step 1. Since D26 a load may also follow links across mounts (its program a link into a
+  mount): the same two levels, each path walk's restarts one after the other on the same frames (d26 note 14).
 
 ### 5.2 Ports: held, handed over, given back
 - `NPORT` grows from 16 to 28: **12 slots for held ports** (one per entry, the range used by nothing else) and 16

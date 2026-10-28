@@ -193,9 +193,11 @@ long vfs_pipe(int fds[2], u32 flags)
  * SYS_mount. With only the root mounted a path goes to its server untouched (the server resolves it, symbolic
  * links included). Once something else is mounted, every path is first made absolute and normalised as text
  * (cwd text + path, "." and ".." removed) and handed to the server of the longest mount point that prefixes it,
- * as a path inside that filesystem. Limits of this: ".." is resolved on the text, so a working directory reached
- * through a symbolic link behaves as its text says; a symbolic link on the root filesystem cannot point into a
- * mount by relative ".." going out of it; link and rename across mounts fail. */
+ * as a path inside that filesystem. Its symbolic links are the kernel's then (DESIGN D26): the request carries
+ * UMSG_LINKS, the server stops at the first link and answers where the path continues (FS_LINKED), and the kernel
+ * normalises that, picks the mount again and sends the request again (struct pwalk, wstep). chdir and mount do so
+ * with only the root mounted too, so the working directory and the mount points are recorded resolved. link and
+ * rename across mounts fail. */
 
 #define NMOUNT 8
 struct mount {
@@ -208,15 +210,17 @@ struct mount {
     u32 gen;                            /* D13: new on every mount and every (re)start of its server (vfs_server_started) */
     u32 ok_epoch;                       /* F13: the ids below passed mount_search at this perm_epoch (0: none) */
     u16 ok_uid, ok_gid;
+    u32 inst;                           /* D26: new on every mount only (gen also moves when its server restarts) */
 };
-static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1, 0, 0, 0 } };
-static u32 gen_last = 1;
+static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1, 0, 0, 0, 1 } };
+static u32 gen_last = 1, inst_last = 1;
 /* F13: rises with every request that can change who may search a directory (a mode, an owner, a name moved or
  * removed), every mount, umount and server start: a cached mount_search answer older than it is asked again */
 static u32 perm_epoch = 1;
 static int nmnt = 1;                    /* mounts in use, the root included */
 
-__attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
+/* one request to mount mi's server; kfl: UMSG_LINKS when the sender takes the FS_LINKED answer (wstep), else 0 */
+static __attribute__((noinline)) long fs_call_k(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3, u16 kfl)
 {
     struct umsg m;                      /* on this process's kernel stack: the server reads it in place */
     struct mount *mt = &mnt[mi];
@@ -232,7 +236,7 @@ __attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 
      * must never load a program; FS_SYNC and FS_QUIT skip a server that is not running (it has nothing to write: an
      * ext2 one wrote through, a dead ZenixFS one's uncommitted changes are gone, a starting one wrote nothing yet) */
     int ns = type == FS_CLOSE ? SVC_NS_CLOSE : type == FS_SYNC || type == FS_QUIT ? SVC_NS_SKIP : 0;
-    long r = ipc_kcall(mt->port, &m, ns, 0);
+    long r = ipc_kcall(mt->port, &m, ns, kfl);
     if (r == -ECONNRESET) {             /* the server is gone (D11), or its port closed or its slot reused (G1, A11) */
         mt->port = -1;                  /* look it up again next time */
         r = ns == SVC_NS_SKIP ? 0 : -EIO;   /* programs see an I/O error, as before; a sync or quit skipped a server
@@ -240,7 +244,14 @@ __attribute__((noinline)) long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 
     } else if (r == -EIO) {
         mt->port = -1;
     }
+    if (!kfl && fsl_is(r))
+        r = -EIO;                       /* D26: an FS_LINKED nobody asked for never reaches a program */
     return r;
+}
+
+long fs_call_on(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
+{
+    return fs_call_k(mi, type, a0, a1, a2, a3, 0);
 }
 
 /* the root inode of mount mi (learned from the server the first time it is needed) */
@@ -335,34 +346,126 @@ static __attribute__((noinline)) int mount_search(int mi, char *buf)
     return 0;
 }
 
-/* which mount takes PATH; *rel = the path to give its server (in buf, PATHMAX bytes, or PATH itself), *cwd = the
- * working directory inode to give it. -ENAMETOOLONG when the path is too long, -EACCES when a directory above the
- * mount point may not be searched (F13). */
-static __attribute__((noinline)) int route(const char *path, const char *cwdtext, u32 cwdino, char *buf, const char **rel, u32 *cwd)
+/* ---- D26: a path argument's walk across mounts (docs/d26-links-across-mounts.md 5) ----
+ * One per path argument of a system call, on the caller's kernel stack: the mount, its instance, the inode to give as
+ * the working directory, the server's path (buf, PATHMAX bytes, or the caller's own text with only the root mounted),
+ * the links followed for it (at most 40, Linux's MAXSYMLINKS), and whether an FS_OPEN lost its O_CREAT */
+#define MAXLINKS 40
+struct pwalk {
+    int m;
+    u32 inst, cwd;
+    const char *rel;
+    char *buf;
+    u8 links, kcopy, nocreat;           /* kcopy: rel is buf, absolute and normalised: the request may carry UMSG_LINKS */
+};
+
+/* the mount that takes the absolute, normalised text TMP: W's mount and its server's path in W's buf. 0, or -EACCES
+ * when a directory above the mount point may not be searched (F13) */
+static __attribute__((noinline)) int pick(struct pwalk *w, const char *tmp)
 {
-    if (nmnt <= 1) { *rel = path; *cwd = cwdino; return 0; }
-    char tmp[PATHMAX];
-    int e = path_abs(tmp, cwdtext, path);
-    if (e) return e;
-    int best = 0, bl = 1;
+    int best = 0, bl = 1, e;
     for (int i = 1; i < NMOUNT; i++) {
         if (!mnt[i].used) continue;
         int l = 0;
         while (mnt[i].path[l]) l++;
         if (l > bl && !memcmp_(tmp, mnt[i].path, (u32)l) && (tmp[l] == 0 || tmp[l] == '/')) { best = i; bl = l; }
     }
-    if (best && (e = mount_search(best, buf)))
+    if (best && (e = mount_search(best, w->buf)))
         return e;
     const char *r = best ? tmp + bl : tmp;
     if (!*r) r = "/";
     int n = 0;
-    while (r[n]) { buf[n] = r[n]; n++; }
-    buf[n] = 0;
-    *rel = buf;
-    *cwd = mount_root(best);
-    return best;
+    while (r[n]) { w->buf[n] = r[n]; n++; }
+    w->buf[n] = 0;
+    w->rel = w->buf;
+    w->kcopy = 1;
+    w->cwd = mount_root(best);
+    w->m = best;
+    w->inst = mnt[best].inst;
+    return 0;
 }
-#define ROUTE(path_, rb_, rel_, cwdino_) route(path_, current->cwd, current->cwd_ino, rb_, &rel_, &cwdino_)
+
+/* start W for PATH from the working directory CWDTEXT / CWDINO (fs_exec_open passes the parent's). With only the
+ * root mounted the path goes to its server untouched, unless COPY (chdir, mount: always normalised, D26 5.6).
+ * 0, or -ENAMETOOLONG, -EACCES */
+static __attribute__((noinline)) int walk_start(struct pwalk *w, const char *path, const char *cwdtext, u32 cwdino,
+                                                char *buf, int copy)
+{
+    w->buf = buf;
+    w->links = w->nocreat = 0;
+    if (nmnt <= 1 && !copy) {
+        w->m = 0; w->inst = mnt[0].inst; w->rel = path; w->cwd = cwdino; w->kcopy = 0;
+        return 0;
+    }
+    char tmp[PATHMAX];
+    int e = path_abs(tmp, cwdtext, path);
+    return e ? e : pick(w, tmp);
+}
+#define WSTART(w_, path_, buf_) walk_start(&(w_), path_, current->cwd, current->cwd_ino, buf_, 0)
+
+/* W's server answered "this path continues at TEXT" (in W's buf, untrusted): W moves on there. 0 or -errno */
+static __attribute__((noinline)) int walk_follow(struct pwalk *w)
+{
+    if (current->killed)
+        return -EINTR;
+    if (++w->links > MAXLINKS)
+        return -ELOOP;
+    w->buf[PATHMAX - 1] = 0;
+    if (!mnt[w->m].used || mnt[w->m].inst != w->inst)
+        return -EIO;                    /* unmounted while the client waited: TEXT means nothing now */
+    char tmp[PATHMAX];
+    int e = path_abs(tmp, w->buf[0] == '/' ? "/" : mnt[w->m].path, w->buf);
+    return e ? e : pick(w, tmp);
+}
+
+/* the absolute text W's server path stands for (its mount point and the path below it) into OUT (PATHMAX) */
+static __attribute__((noinline)) int walk_text(const struct pwalk *w, char *out)
+{
+    int n = 0;
+    const char *p = w->m ? mnt[w->m].path : "";
+    while (*p) out[n++] = *p++;
+    p = w->rel;
+    if (w->m && p[0] == '/' && !p[1]) p++;
+    while (*p) {
+        if (n >= PATHMAX - 1) return -ENAMETOOLONG;
+        out[n++] = *p++;
+    }
+    if (!n) out[n++] = '/';
+    out[n] = 0;
+    return 0;
+}
+
+#define WC_AGAIN (-FS_LINKED)           /* wstep: a state moved on, send again (never a server's answer: fs_call_k) */
+/* one request on W's path (W2: the second path of FS_RENAME and FS_LINK); X2, X3 the other arguments (FS_SYMLINK: X2
+ * the target text). On an FS_LINKED answer the state it names follows the link: WC_AGAIN, or -errno (-EXDEV when the
+ * two paths now lie on two mounts) */
+static __attribute__((noinline)) long wstep(struct pwalk *w, struct pwalk *w2, u32 type, u32 x2, u32 x3)
+{
+    u32 a0 = (u32)w->rel, a1 = w->cwd, a2 = x2, a3 = x3;
+    int bit = w->kcopy && (!w2 || w2->kcopy);
+    if (type == FS_SYMLINK) { a0 = x2; a1 = (u32)w->rel; a2 = w->cwd; a3 = 0; }
+    else if (w2) { a1 = (u32)w2->rel; a2 = w->cwd; a3 = 0; }
+    else if (type == FS_OPEN && w->nocreat) a2 &= ~(u32)O_CREAT;
+    long r = fs_call_k(w->m, type, a0, a1, a2, a3, bit ? UMSG_LINKS : 0);
+    if (!bit || !fsl_is(r))
+        return r;
+    u32 bits = (u32)(-r - FS_LINKED);
+    if (!fsl_ok(type, bits))
+        return -EIO;                    /* the table of D26 4: a server may not rewrite that argument */
+    if (type == FS_OPEN && (bits & FSL_LAST))
+        w->nocreat = 1;                 /* a link as the last name: open what it leads to, never create it (5.5) */
+    int e = walk_follow((bits & FSL_A1) && w2 ? w2 : w);
+    if (e)
+        return e;
+    return w2 && w->m != w2->m ? -EXDEV : WC_AGAIN;
+}
+static long wcall(struct pwalk *w, struct pwalk *w2, u32 type, u32 x2, u32 x3)
+{
+    long r;
+    while ((r = wstep(w, w2, type, x2, x3)) == WC_AGAIN)
+        ;
+    return r;
+}
 
 long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
 {
@@ -387,17 +490,6 @@ void vfs_server_started(const char *pname)
     perm_epoch++;                       /* F13: a restarted ZenixFS server may bring back older modes */
 }
 
-/* is something loaded from mount m (a segment, or a load in progress)? */
-static int exec_on(int m)
-{
-    if (seg_on(m))
-        return 1;
-    for (struct exec_src *x = loading; x; x = x->next)
-        if (x->m == m)
-            return 1;
-    return 0;
-}
-
 /* would writing the file with status st change a program in memory or being read (-ETXTBSY)? */
 static __attribute__((noinline)) int exec_busy(int m, const struct ustat *st)
 {
@@ -418,13 +510,16 @@ static __attribute__((noinline)) void changed(int m, long ino)
             x->stale = 1;
 }
 
-/* D13, audit3 B2: the inode a name leads to now (0: none, or nothing of mount m is loaded), asked before an unlink,
- * a rename over it, or a link or symlink made there; after the call, changed(m, that inode) unlists only its
- * segments (its number may be given to a new file), so an rm or mv elsewhere on the mount keeps the sharing */
-static __attribute__((noinline)) long name_ino(int m, const char *rel, u32 cwd)
+/* D13, audit3 B2: the inode a name leads to now (0: none, or nothing is loaded from any mount), asked before an
+ * unlink, a rename over it, or a link or symlink made there; after the call, changed(w->m, that inode) unlists only
+ * its segments (its number may be given to a new file), so an rm or mv elsewhere on the mount keeps the sharing.
+ * The FS_LSTAT resolves W (D26 5.2, 5.3): the request that follows starts there, on the mount that holds the name */
+static __attribute__((noinline)) long name_ino(struct pwalk *w)
 {
     struct ustat st;
-    if (!exec_on(m) || fs_call_on(m, FS_LSTAT, (u32)rel, cwd, (u32)&st, 0) < 0)
+    if (!seg_any() && !loading)
+        return 0;
+    if (wcall(w, 0, FS_LSTAT, (u32)&st, 0) < 0)
         return 0;
     return (long)st.ino;
 }
@@ -438,13 +533,15 @@ static void unlist_ino(int m, long ino)
  * process's memory and then reads the image straight into it (fs_exec_read). */
 long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *x)
 {
-    char rb[PATHMAX]; const char *rel; u32 cwd;
-    int m = route(path, parent ? parent->cwd : "/", parent ? parent->cwd_ino : 2, rb, &rel, &cwd);
-    if (m < 0)
-        return m;
-    long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, O_RDONLY | O_EXEC, (u32)&x->st);
+    char rb[PATHMAX];
+    struct pwalk w;
+    int e = walk_start(&w, path, parent ? parent->cwd : "/", parent ? parent->cwd_ino : 2, rb, 0);
+    if (e)
+        return e;
+    long ino = wcall(&w, 0, FS_OPEN, O_RDONLY | O_EXEC, (u32)&x->st);
     if (ino < 0)
         return ino;
+    int m = w.m;                        /* D26: the mount the program is on, after its links (D13's key) */
     x->m = m;
     x->ino = ino;
     x->gen = mnt[m].gen;
@@ -569,26 +666,56 @@ static long open_device(const char *path, int flags)
     return fd;
 }
 
+static int is_dev(const char *p)
+{
+    return p[0] == '/' && p[1] == 'd' && p[2] == 'e' && p[3] == 'v' && p[4] == '/';
+}
+
 long vfs_open(const char *path, int flags)
 {
     struct ustat st;
-    char rb[PATHMAX]; const char *rel; u32 cwd;
-    if (path[0] == '/' && path[1] == 'd' && path[2] == 'e' && path[3] == 'v' && path[4] == '/') {
+    char rb[2][PATHMAX];                    /* the walk's buffer and a scratch one (they swap) */
+    struct pwalk w;
+    if (is_dev(path)) {
         long d = open_device(path, flags);
         if (d != -ENODEV)
             return d;
     }
-    int m = ROUTE(path, rb, rel, cwd);
-    if (m < 0)
-        return m;
+    int e = WSTART(w, path, rb[0]);
+    if (e)
+        return e;
     /* D13: an open for writing of a program whose shared code is in memory or being read is refused, "text file
      * busy" (the safe update is a new file renamed over the old name). The server truncates in its FS_OPEN, so with
-     * O_TRUNC the kernel asks first (only while something of that mount is loaded); without, it checks the answer. */
+     * O_TRUNC the kernel asks first (only while something is loaded); without, it checks the answer. D26 5.2: the
+     * FS_STAT resolves the path on a copy of the walk, which the FS_OPEN then starts from; a path that does not stat
+     * (nothing there to be busy) opens from where it was, so a link to nothing keeps its -ENOENT (5.5) */
     int wr = flags & (O_WRONLY | O_RDWR);
-    if (wr && (flags & O_TRUNC) && exec_on(m) && fs_call_on(m, FS_STAT, (u32)rel, cwd, (u32)&st, 0) >= 0 &&
-        exec_busy(m, &st))
-        return -ETXTBSY;
-    long ino = fs_call_on(m, FS_OPEN, (u32)rel, cwd, (u32)flags, (u32)&st);
+    long ino;
+    for (;;) {
+        char *spare = w.buf == rb[0] ? rb[1] : rb[0];
+        if (wr && (flags & O_TRUNC) && (seg_any() || loading)) {
+            struct pwalk c = w;
+            if (w.kcopy) {
+                strcpy_(spare, w.buf);
+                c.buf = spare; c.rel = spare;
+            }
+            if (wcall(&c, 0, FS_STAT, (u32)&st, 0) >= 0) {
+                if (exec_busy(c.m, &st))
+                    return -ETXTBSY;
+                w = c;
+                spare = w.buf == rb[0] ? rb[1] : rb[0];
+            }
+        }
+        ino = wstep(&w, 0, FS_OPEN, (u32)flags, (u32)&st);
+        if (ino != WC_AGAIN)
+            break;
+        if (!walk_text(&w, spare) && is_dev(spare)) {   /* a link to /dev/...: the kernel's devices first */
+            long d = open_device(spare, flags);
+            if (d != -ENODEV)
+                return d;
+        }
+    }
+    int m = w.m;
     if (ino < 0)
         return ino;                         /* the server's errno: -ENOENT, -EACCES, -EEXIST (O_CREAT|O_EXCL) ... */
     if (wr) {
@@ -618,9 +745,10 @@ long vfs_open(const char *path, int flags)
 
 long vfs_stat(const char *path, struct ustat *st)
 {
-    char rb[PATHMAX]; const char *rel; u32 cwd;
-    int m = ROUTE(path, rb, rel, cwd);
-    return m < 0 ? m : fs_call_on(m, FS_STAT, (u32)rel, cwd, (u32)st, 0);
+    char rb[PATHMAX];
+    struct pwalk w;
+    int e = WSTART(w, path, rb);
+    return e ? e : wcall(&w, 0, FS_STAT, (u32)st, 0);
 }
 
 long vfs_fstat(struct file *f, struct ustat *st)
@@ -645,18 +773,20 @@ long vfs_fstat(struct file *f, struct ustat *st)
     return fs_call_on(f->fs, FS_FSTAT, f->ino, (u32)st, 0, 0);
 }
 
+/* D26 5.6: always normalised and resolved, with only the root mounted too: the working directory's text is the
+ * link-free one (Linux's getcwd), so a later ".." is the physical one and umount's busy check sees it */
 long vfs_chdir(const char *path)
 {
-    char rb[PATHMAX], text[PATHMAX]; const char *rel; u32 cwd;
-    int e = path_abs(text, current->cwd, path);         /* the new working directory's text must fit: else refused */
+    char rb[PATHMAX], text[PATHMAX];
+    struct pwalk w;
+    int e = walk_start(&w, path, current->cwd, current->cwd_ino, rb, 1);
     if (e)
         return e;
-    int m = ROUTE(path, rb, rel, cwd);
-    if (m < 0)
-        return m;
-    long ino = fs_call_on(m, FS_CHDIR, (u32)rel, cwd, 0, 0);
+    long ino = wcall(&w, 0, FS_CHDIR, 0, 0);
     if (ino < 0)
         return ino;
+    if ((e = walk_text(&w, text)))
+        return e;                       /* the new working directory's text must fit: else refused */
     current->cwd_ino = (u32)ino;
     strcpy_(current->cwd, text);
     return 0;
@@ -696,34 +826,37 @@ long vfs_statfs(void *out, u32 mount)
 
 long vfs_path1(u32 op, const char *p, u32 a2, u32 a3)
 {
-    char rb[PATHMAX]; const char *rel; u32 cwd;
-    int m = ROUTE(p, rb, rel, cwd);
-    if (m < 0)
-        return m;
-    return fs_call_on(m, op, (u32)rel, cwd, a2, a3);
+    char rb[PATHMAX];
+    struct pwalk w;
+    int e = WSTART(w, p, rb);
+    return e ? e : wcall(&w, 0, op, a2, a3);
+}
+
+/* rename, link and symlink: name_ino's FS_LSTAT on the new name, then the request, both redone from where the
+ * request's FS_LINKED left the walks (D26 5.2); two paths on two mounts, textually or after their links: -EXDEV */
+static __attribute__((noinline)) long two_paths(u32 op, struct pwalk *a, struct pwalk *b, const char *text)
+{
+    long ino, r;
+    if (a && a->m != b->m)
+        return -EXDEV;                      /* not across filesystems: mv copies */
+    do {
+        ino = name_ino(b);                  /* D13: the name replaced or made (its inode may be reused) */
+        if (a && a->m != b->m)
+            return -EXDEV;
+        r = op == FS_SYMLINK ? wstep(b, 0, op, (u32)text, 0) : wstep(a, b, op, 0, 0);
+    } while (r == WC_AGAIN);
+    unlist_ino(b->m, ino);
+    return r;
 }
 
 long vfs_link(u32 op, const char *a, const char *b)
 {
-    char ra[PATHMAX], rb[PATHMAX]; const char *rela, *relb; u32 ca, cb;
-    if (op == FS_SYMLINK) {                 /* a is the link text, only b is a path */
-        int m = ROUTE(b, rb, relb, cb);
-        if (m < 0)
-            return m;
-        long ino = name_ino(m, relb, cb);
-        long r = fs_call_on(m, op, (u32)a, (u32)relb, cb, 0);
-        unlist_ino(m, ino);
-        return r;
-    }
-    int m1 = ROUTE(a, ra, rela, ca), m2 = ROUTE(b, rb, relb, cb);
-    if (m1 < 0 || m2 < 0)
-        return m1 < 0 ? m1 : m2;
-    if (m1 != m2)
-        return -EXDEV;                      /* a hard link cannot cross filesystems */
-    long ino = name_ino(m1, relb, cb);      /* the new name (a link never replaces one; asked to be sure) */
-    long r = fs_call_on(m1, op, (u32)rela, (u32)relb, ca, 0);
-    unlist_ino(m1, ino);
-    return r;
+    char ra[PATHMAX], rb[PATHMAX];
+    struct pwalk wa, wb;
+    int e = op == FS_SYMLINK ? 0 : WSTART(wa, a, ra);   /* FS_SYMLINK: a is the link text, only b is a path */
+    if (e || (e = WSTART(wb, b, rb)))
+        return e;
+    return op == FS_SYMLINK ? two_paths(op, 0, &wb, a) : two_paths(op, &wa, &wb, 0);
 }
 
 /* every mount's server writes out what it holds. With REBOOT (SYS_reboot) each has at most 5 s: the tick resets the
@@ -747,43 +880,34 @@ long vfs_sync(int reboot)
 
 long vfs_mkdir(const char *path)
 {
-    char rb[PATHMAX]; const char *rel; u32 cwd;
-    int m = ROUTE(path, rb, rel, cwd);
-    return m < 0 ? m : fs_call_on(m, FS_MKDIR, (u32)rel, cwd, 0, 0);
+    return vfs_path1(FS_MKDIR, path, 0, 0);
 }
 
 long vfs_unlink(const char *path)
 {
-    char rb[PATHMAX]; const char *rel; u32 cwd;
-    int m = ROUTE(path, rb, rel, cwd);
-    if (m < 0)
-        return m;
-    long ino = name_ino(m, rel, cwd);       /* D13: its inode number may be given to a new file */
-    long r = fs_call_on(m, FS_UNLINK, (u32)rel, cwd, 0, 0);
-    unlist_ino(m, ino);
+    char rb[PATHMAX];
+    struct pwalk w;
+    long ino, r;
+    int e = WSTART(w, path, rb);
+    if (e)
+        return e;
+    do {
+        ino = name_ino(&w);                 /* D13: its inode number may be given to a new file */
+        r = wstep(&w, 0, FS_UNLINK, 0, 0);
+    } while (r == WC_AGAIN);
+    unlist_ino(w.m, ino);
     return r;
 }
 
 long vfs_rmdir(const char *path)
 {
-    char rb[PATHMAX]; const char *rel; u32 cwd;
-    int m = ROUTE(path, rb, rel, cwd);
-    return m < 0 ? m : fs_call_on(m, FS_RMDIR, (u32)rel, cwd, 0, 0);
+    return vfs_path1(FS_RMDIR, path, 0, 0);
 }
 
+/* the file renamed over may be reused (D13); the moved one keeps its inode and contents, so its segments stay right */
 long vfs_rename(const char *from, const char *to)
 {
-    char ra[PATHMAX], rb[PATHMAX]; const char *rela, *relb; u32 ca, cb;
-    int m1 = ROUTE(from, ra, rela, ca), m2 = ROUTE(to, rb, relb, cb);
-    if (m1 < 0 || m2 < 0)
-        return m1 < 0 ? m1 : m2;
-    if (m1 != m2)
-        return -EXDEV;                      /* not across filesystems: mv copies */
-    long ino = name_ino(m1, relb, cb);      /* D13: the file renamed over (its inode may be reused); the moved one
-                                             * keeps its inode and contents, so its segments stay right */
-    long r = fs_call_on(m1, FS_RENAME, (u32)rela, (u32)relb, ca, 0);
-    unlist_ino(m1, ino);
-    return r;
+    return vfs_link(FS_RENAME, from, to);
 }
 
 long vfs_read(struct file *f, void *buf, u32 n)
@@ -886,10 +1010,19 @@ static int user_str_eq(const char *a, const char *b) { return !strcmp_(a, b); }
 
 long vfs_mount(const struct umountreq *r)
 {
-    char abs[PATHMAX], rb[PATHMAX]; const char *rel; u32 cwd;
+    char abs[PATHMAX], rb[PATHMAX];
     struct ustat st;
-    int e = path_abs(abs, current->cwd, r->path);
+    struct pwalk w;
+    /* D26 5.6: the mount point resolved (its links followed, also its last name: it must be a directory), and every
+     * check on the resolved text: a link to / is -EBUSY as / is */
+    int e = walk_start(&w, r->path, current->cwd, current->cwd_ino, rb, 1);
     if (e)
+        return e;
+    if ((e = (int)wcall(&w, 0, FS_STAT, (u32)&st, 0)) < 0)
+        return e;
+    if (!S_ISDIR(st.mode))
+        return -ENOTDIR;                        /* the mount point must be a directory */
+    if ((e = walk_text(&w, abs)))
         return e;
     if (abs[1] == 0)
         return -EBUSY;                          /* not on the root */
@@ -904,13 +1037,6 @@ long vfs_mount(const struct umountreq *r)
     }
     if (free < 0)
         return -EBUSY;                          /* all NMOUNT entries in use */
-    int pm = ROUTE(abs, rb, rel, cwd);
-    if (pm < 0)
-        return pm;
-    if ((e = (int)fs_call_on(pm, FS_STAT, (u32)rel, cwd, (u32)&st, 0)) < 0)
-        return e;
-    if (!S_ISDIR(st.mode))
-        return -ENOTDIR;                        /* the mount point must be a directory */
     int port = port_find(r->port);
     if (port < 0)
         return -ENODEV;                         /* no server on that port */
@@ -922,6 +1048,7 @@ long vfs_mount(const struct umountreq *r)
     strncpy_(mt->type, r->type, sizeof mt->type - 1);
     mt->port = port;
     mt->gen = ++gen_last;                   /* D13: nothing loaded from the slot's last mount is reused */
+    mt->inst = ++inst_last;                 /* D26: an FS_LINKED answered for the slot's last mount is refused */
     mt->used = 1;
     struct fsinfo fi;
     long root = fs_call_on(free, FS_ROOT, (u32)&fi, 0, 0, 0);
@@ -942,16 +1069,48 @@ static int prefix_of(const char *dir, const char *path)         /* is PATH DIR o
     return !memcmp_(path, dir, (u32)l) && (path[l] == 0 || path[l] == '/');
 }
 
-long vfs_umount(const char *path)
+static int mount_at(const char *abs)
 {
-    char abs[PATHMAX];
+    for (int i = 1; i < NMOUNT; i++)
+        if (mnt[i].used && user_str_eq(mnt[i].path, abs))
+            return i;
+    return -1;
+}
+
+/* D26 5.7: the normalised text against the mount table first, asking no server (a hung NFS mount, a stopped mount
+ * service); only when nothing matches, the directory part resolved (FS_STAT, links followed) and the last name
+ * joined as it is (lstat's rule), so umount works by both names and never walks into the mount it removes */
+static __attribute__((noinline)) int umount_find(const char *path)
+{
+    char abs[PATHMAX], rb[PATHMAX], res[PATHMAX];
+    struct pwalk w;
+    struct ustat st;
     int e = path_abs(abs, current->cwd, path);
     if (e)
         return e;
-    int mi = -1;
-    for (int i = 1; i < NMOUNT; i++)
-        if (mnt[i].used && user_str_eq(mnt[i].path, abs))
-            mi = i;
+    int mi = mount_at(abs);
+    if (mi >= 0 || !abs[1])
+        return mi;
+    int slash = (int)strlen_(abs);
+    while (abs[slash] != '/') slash--;
+    abs[slash] = 0;
+    if ((e = walk_start(&w, slash ? abs : "/", "/", 2, rb, 1)) || wcall(&w, 0, FS_STAT, (u32)&st, 0) < 0 ||
+        !S_ISDIR(st.mode) || walk_text(&w, res))
+        return -1;
+    int n = (int)strlen_(res), l = (int)strlen_(abs + slash + 1);
+    if (n == 1) n = 0;
+    if (n + 1 + l >= PATHMAX)
+        return -1;
+    res[n] = '/';
+    strcpy_(res + n + 1, abs + slash + 1);
+    return mount_at(res);
+}
+
+long vfs_umount(const char *path)
+{
+    int mi = umount_find(path);
+    if (mi == -ENAMETOOLONG)
+        return mi;
     if (mi < 0)
         return -EINVAL;                         /* nothing is mounted there */
     for (int i = 1; i < NMOUNT; i++)                    /* busy: another filesystem is mounted below it */

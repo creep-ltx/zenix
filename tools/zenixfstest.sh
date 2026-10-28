@@ -4,7 +4,8 @@
 # unmount, remount, zfsd (the file /sbin/zfsd, DESIGN D19) killed and started again, the old name @zfsd, fsck.zenixfs; then the HOST checks the same partition with zenixfs-tool (independent implementation
 # of the check: the same library source, but a different program, block device and compiler).
 # Then (audit F15) the PC writes a 300-byte link target into both volumes and a second boot checks that neither
-# server follows a prefix of it ("file name too long") and that readlink prints it whole.
+# server follows a prefix of it ("file name too long") and that readlink prints it whole. A third boot checks DESIGN
+# D26's symbolic links across mounts (ZenixFS next to ext2, tools/tests/zenixfs-links-test.txt).
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
 make -s BUILD=$BD all $BD/zenix-mount.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
@@ -94,4 +95,44 @@ if [ -s $OUT/offset.txt ]; then
   dd if=$BD/scratch.hdf of=$OUT/p1.img bs=512 skip=1008 count=$p1n status=none
   e2fsck -fn $OUT/p1.img > $OUT/e2fsck15.log 2>&1 && check "F15: host e2fsck: the ext2 partition is clean" ok || check "F15: host e2fsck: the ext2 partition is clean" bad
 fi
+# DESIGN D26 (audit F12): symbolic links across mounts with ZenixFS on /mnt next to ext2 on /ext (a third boot on the
+# same scratch disk, tools/tests/zenixfs-links-test.txt)
+ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenixfs-serial} tools/run-test.sh fsuae/mounts.fs-uae 300 tools/tests/zenixfs-links-test.txt 2>&1 | tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g' > $OUT/links.log
+L=$OUT/links.log
+v() { grep -a "^\(.*# \)\?$1=" $L | tail -1 | sed "s/^.*$1=//"; }
+is() { [ "$(v $2)" = "$3" ] && check "$1" ok || check "$1 (got '$(v $2)', want '$3')" bad; }
+is "D26 1 ZenixFS: a link on the root to a file on the ZenixFS mount" z1a z-file
+is "D26 1 ZenixFS: ... readlink shows it" z1b /mnt/w/f
+is "D26 1 ZenixFS: a link on ZenixFS to a file on the ext2 mount" z1c e-file
+is "D26 2 ZenixFS: an absolute target on the root" z2a root-file
+is "D26 2 ZenixFS: ... and on the same mount" z2b z-file
+is "D26 3 ZenixFS: a relative link at the mount's root climbing out" z3a root-file
+is "D26 3 ZenixFS: ... one on the root passing the mount point" z3b z-file
+is "D26 3 ZenixFS: ... one climbing from ZenixFS into the ext2 mount" z3c e-file
+is "D26 4 ZenixFS: cat through a directory link" z4a z-file
+is "D26 4 ZenixFS: pwd after cd through it: the resolved text" z4b /mnt/w
+is "D26 4 ZenixFS: cd ..: the mount's parent" z4c /mnt
+is "D26 4 ZenixFS: umount busy while a shell is there" z4d 1
+is "D26 5 ZenixFS: echo > through a directory link" z5a x5
+is "D26 5 ZenixFS: O_CREAT on a link to nothing on the ext2 mount fails" z5b 1
+is "D26 5 ZenixFS: ... and creates nothing" z5c 1
+is "D26 5 ZenixFS: a 25-link chain between ZenixFS and ext2 with O_TRUNC" z5d trunc25
+is "D26 6 ZenixFS: rm removes the link" z6a 1
+is "D26 6 ZenixFS: ... not its file" z6b z-file
+is "D26 6 ZenixFS: ln onto another mount through a link: -EXDEV" z6c 1
+is "D26 6 ZenixFS: ln from ZenixFS (through a link) to ext2: -EXDEV" z6d 1
+is "D26 7 ZenixFS: a loop between ZenixFS and ext2: -ELOOP" z7a 1
+is "D26 7 ZenixFS: a chain of 40 works" z7b old
+is "D26 7 ZenixFS: ... 41 is -ELOOP" z7c 1
+is "D26 7 ZenixFS: an O_TRUNC open of a 40-chain" z7d t40
+is "D26 7 ZenixFS: an unlink through a 40-chain of directory links" z7e 0
+is "D26 7 ZenixFS: ... the file is gone" z7f 1
+is "D26 8 ZenixFS: a user cannot read a link in a ZenixFS directory without x" z8a 1
+is "D26 10 ZenixFS: a link on ZenixFS to /dev/null" z10 0
+grep -aqE '^ide0p1 +/mnt/mp +ext2' $L && check "D26 12 ZenixFS: ext2 mounted through a link onto a ZenixFS directory: the resolved mount point" ok || check "D26 12 ZenixFS: mount through a link onto ZenixFS" bad
+is "D26 12 ZenixFS: ... the files there" z12a e-file
+is "D26 12 ZenixFS: ... umount by the resolved name" z12b 0
+is "D26 15 ZenixFS: '..' after a link on the text" z15 root-file
+is "D26 ZenixFS: unmounted at the end" um-end 0
+grep -aqE '^(.*# )?zlinks-done$' $L && check "D26 ZenixFS: the links script ran to the end" ok || check "D26 ZenixFS: the links script ran to the end" bad
 exit $((1 - pass))

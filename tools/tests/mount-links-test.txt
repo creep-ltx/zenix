@@ -1,0 +1,91 @@
+wait zenix:/# 90
+sleep 1
+# DESIGN D26 (audit 2026-10-26 F12): symbolic links across ext2 mounts. ide0p1 (from mount-test) on /mnt, the
+# read-only floppy df1 (state "has errors", links made on the PC) on /ro, ide0p2 for the mount-point cases.
+# 4: a chdir through a link made before the first mount: the text is the resolved one, so umount sees it
+send mkdir /mnt /ro; ln -s /mnt /tmp/early; cd /tmp/early; echo c4e=$(pwd); mount ide0p1 /mnt; umount /mnt; echo c4f=$?; cd /; echo s0-$(echo done)\r
+wait s0-done 30
+send mount -t ext2 df1 /ro; mkdir -p /mnt/w; echo mnt-file > /mnt/w/f; echo root-file > /tmp/r.txt; echo s1-$(echo done)\r
+wait s1-done 30
+# 1-3: links from the root into the mount, from the mount out, relative ones climbing out or passing the mount point
+send ln -s /mnt/w/f /tmp/l1; echo c1a=$(cat /tmp/l1); echo c1b=$(readlink /tmp/l1); ls -l /tmp/l1\r
+sleep 3
+send ln -s /tmp/r.txt /mnt/w/l2; echo c2a=$(cat /mnt/w/l2); ln -s /mnt/w/f /mnt/l2b; echo c2b=$(cat /mnt/l2b)\r
+sleep 3
+send ln -s ../tmp/r.txt /mnt/l3; echo c3a=$(cat /mnt/l3); ln -s ../mnt/w/f /tmp/l3b; echo c3b=$(cat /tmp/l3b); echo c3c=$(cat /ro/up/f); echo c3d=$(cat /ro/abs/f)\r
+sleep 3
+# 4: a directory link into the mount
+send ln -s /mnt/w /tmp/dl; echo c4a=$(cat /tmp/dl/f); cd /tmp/dl; echo c4b=$(pwd); cd ..; echo c4c=$(pwd); cd /tmp/dl; umount /mnt; echo c4d=$?; cd /; echo s4-$(echo done)\r
+wait s4-done 30
+# 5: creating through links
+send echo x5 > /tmp/dl/new; echo c5a=$(cat /mnt/w/new); ln -s /mnt/w/nothing /tmp/l5; echo y > /tmp/l5; echo c5b=$?; test -e /mnt/w/nothing; echo c5c=$?\r
+sleep 3
+# mk NAME N END: a chain of N links NAME1 -> NAME2 -> ... -> END, the odd ones on ide0p2 (/s, kept off the small RAM
+# disk), the even ones on /mnt
+send mkdir /s; mount ide0p2 /s; mkdir -p /s/w; mk() { i=1; while [ $i -le $2 ]; do n=$((i+1)); if [ $((i%2)) = 1 ]; then l=/s/w/$1$i; else l=/mnt/w/$1$i; fi; if [ $((n%2)) = 1 ]; then t=/s/w/$1$n; else t=/mnt/w/$1$n; fi; [ $n -gt $2 ] && t=$3; ln -s $t $l; i=$n; done; echo made-$1; }\r
+sleep 5
+send echo old > /mnt/w/f25; mk c 25 /mnt/w/f25; echo trunc25 > /s/w/c1; echo c5d=$(cat /mnt/w/f25)\r
+wait made-c 60
+sleep 2
+# 6: rm of a link; ln and mv onto another mount; the textual-mount deviation both ways
+send rm /tmp/l1; test -L /tmp/l1; echo c6a=$?; echo c6b=$(cat /mnt/w/f); ln /mnt/w/f /tmp/dl/h6; echo c6c=$?; ln /mnt/w/f /mnt/w/h6b; echo c6d=$?; ln /tmp/dl/f /tmp/h6x; echo c6g=$?\r
+sleep 4
+send echo a6 > /mnt/w/a6; mv /mnt/w/a6 /tmp/dl/b6; echo c6e=$(cat /mnt/w/b6); mv /tmp/dl/b6 /mnt/w/c6; echo c6f=$(cat /mnt/w/c6); test -e /mnt/w/b6; echo c6h=$?\r
+sleep 5
+# 7: loops (the root's /tmp and the mount); 40 links work, 41 do not; an O_TRUNC open and an unlink (two calls on one path) of 40
+send ln -s /mnt/w/la /tmp/la; ln -s /tmp/la /mnt/w/la; cat /tmp/la; echo c7a=$?\r
+sleep 3
+send echo old > /mnt/w/f40; mk k 40 /mnt/w/f40; echo c7b=$(cat /s/w/k1); ln -s /s/w/k1 /mnt/w/k0; cat /mnt/w/k0; echo c7c=$?; echo t40 > /s/w/k1; echo c7d=$(cat /mnt/w/f40)\r
+wait made-k 90
+sleep 3
+send mk d 40 /mnt/w; echo v > /mnt/w/victim; rm /s/w/d1/victim; echo c7e=$?; test -e /mnt/w/victim; echo c7f=$?; umount /s\r
+wait made-d 90
+sleep 3
+# 8: permissions: a link in a directory without x; a link into a mount below a directory without x (F13)
+send mkdir /tmp/nx; ln -s /mnt/w/f /tmp/nx/l; chmod 700 /tmp/nx; mkdir -p /tmp/p8/m; mount ide0p2 /tmp/p8/m; echo p8 > /tmp/p8/m/f; chmod 700 /tmp/p8; ln -s /tmp/p8/m/f /tmp/l8; echo s8-$(echo done)\r
+wait s8-done 30
+send su guest\r
+sleep 3
+send cat /tmp/nx/l; echo c8a=$?; cat /tmp/l8; echo c8b=$?; exit\r
+sleep 3
+send echo c8c=$(cat /tmp/l8); umount /tmp/p8/m; echo c8d=$?\r
+sleep 4
+# 9: a shared program (D13) run through a link into the mount; text file busy through a link; rm through a link
+send cp /ro/hp /mnt/w/hp; chmod 755 /mnt/w/hp; ln -s /mnt/w/hp /tmp/lhp; /tmp/lhp 70 > /dev/null & /tmp/lhp 70 > /dev/null & sleep 1; echo ==s2; /ro/free\r
+sleep 4
+send echo x >> /tmp/lhp; echo c9a=$?; cp /ro/hp /tmp/lhp; echo c9b=$?; rm /tmp/dl/hp; echo c9c=$?; cp /ro/hp /mnt/w/hp; chmod 755 /mnt/w/hp; /tmp/lhp 20 > /dev/null & sleep 1; echo ==s3; /ro/free; echo s9-$(echo done)\r
+wait s9-done 30
+# 10: a link on the mount to the kernel's /dev/null
+send ln -s /dev/null /mnt/w/nul; echo hi > /mnt/w/nul; echo c10a=$?; echo c10b=[$(cat /mnt/w/nul)]\r
+sleep 3
+# 11: a continuation over 159 bytes, a 256-byte target, an empty target (made on the PC)
+send cat /ro/long150/abcdefghij; echo c11a=$?; cat /ro/l256; echo c11b=$?; cat /ro/empty/x; echo c11c=$?\r
+sleep 3
+# 12: mount through links: resolved and recorded so; umount by both names; / and an existing mount point; 47 bytes
+send mkdir /tmp/mp /tmp/real /tmp/real/mp2 /tmp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; ln -s /tmp/mp /tmp/lmp; ln -s /tmp/real /tmp/ldir; mount ide0p2 /tmp/lmp; mount; umount /tmp/mp; echo c12a=$?\r
+sleep 6
+send mount ide0p2 /tmp/ldir/mp2; mount; umount /tmp/ldir/mp2; echo c12b=$?\r
+sleep 6
+send ln -s / /tmp/lroot; mount ide0p2 /tmp/lroot; echo c12c=$?; ln -s /mnt /tmp/lm2; mount ide0p2 /tmp/lm2; echo c12d=$?; ln -s /tmp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa /tmp/ls; mount ide0p2 /tmp/ls; echo c12e=$?; echo s12-$(echo done)\r
+wait s12-done 40
+# 13: umount of a stopped mount service, by its exact text: no server is called (nothing started again)
+send mount ide0p2 /tmp/mp; ls /tmp/mp > /dev/null; kill $(pgrep -x fsd | tail -1); sleep 2; a=$(dmesg | grep -c 'fs.ide0p2: started'); umount /tmp/mp; echo c13a=$?; echo c13b=$(( $(dmesg | grep -c 'fs.ide0p2: started') - a ))\r
+sleep 8
+# 14: chmod, mkdir and rm through a link from the read-only volume into the writable one
+send chmod 600 /ro/abs/f; echo c14a=$?; mkdir /ro/abs/x14d; echo c14b=$?; echo z > /mnt/w/x14; rm /ro/abs/x14; echo c14c=$?; test -d /mnt/w/x14d; echo c14d=$?; test -e /mnt/w/x14; echo c14e=$?; chmod 600 /ro/f.txt; echo c14f=$?\r
+sleep 5
+# 15: ".." after a link is taken on the text (the deviation from Linux, pinned)
+send ln -s /mnt/w /tmp/dv; echo c15=$(cat /tmp/dv/../r.txt)\r
+sleep 3
+# 17: a service's program found through a link into a mount (D25's shape, after F14)
+send ln -s /ro/mpd /tmp/lmpd; svctest reg lp 0 /tmp/lmpd -port lp; svctest call lp 3; svctest rm lp\r
+sleep 6
+# a server's wrong FS_LINKED answers are refused: msgpingd -fslinked on /tmp/ml (an open with bits outside the table,
+# a read that never asks); a valid one with its path unchanged goes on at that text from /
+send mkdir /tmp/ml; svctest reg ml 0 /ro/mpd -port ml -fslinked; svctest mount ml /tmp/ml; cat /tmp/ml/x; /ro/sha256sum /tmp/ml/f; stat /tmp/ml/z; umount /tmp/ml; echo cml=$?; svctest rm ml; echo sml-$(echo done)\r
+wait sml-done 30
+# the cost of a link (FS-UAE, not hardware): 200 test -e through a directory link and directly, as root
+send echo lk-link; /ro/time sh -c 'for i in $(seq 200); do test -e /tmp/dl/f; done'; echo lk-direct; /ro/time sh -c 'for i in $(seq 200); do test -e /mnt/w/f; done'; echo lk-$(echo done)\r
+wait lk-done 120
+send wait; umount /ro; umount /mnt; echo um-end=$?; mount; echo links-$(echo done)\r
+wait links-done 40

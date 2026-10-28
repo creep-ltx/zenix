@@ -2,8 +2,9 @@
 
 Revision 2, 2026-10-28, after four independent reviews (section 13). A fix, not a feature: a symbolic link into
 another mount answers ENOENT today; Linux follows it. D25 asked for it (the demo floppy's links from the RAM root into
-`/usr`, d25-demo-floppy.md 7.3), but every Zenix that mounts anything needs it. Nothing here is built. Statements are
-*read* from the source at main 77d43f2 unless they say *measured*.
+`/usr`, d25-demo-floppy.md 7.3), but every Zenix that mounts anything needs it. **Built on branch d26, 2026-10-28:
+section 14 says how, and what differs.** Statements are *read* from the source at main 77d43f2 unless they say
+*measured*.
 
 ## 1. The problem
 
@@ -481,3 +482,64 @@ security, B and C at architecture fit, frozen interfaces and size. What they fou
 6. nfscd answers asynchronously. -> TEXT is written only at reply time, never after a cancel (4).
 7. The new reach of a hostile volume. -> Said in 6; `nosymfollow` proposed as a later item.
 8. boot's `sys_stat("/sbin/netd")` runs before `/usr` is mounted. -> Said in 8 (D25's svctab line).
+
+## 14. As built (branch d26, 2026-10-28)
+
+Built in the order of section 11, one commit a step: step 0 (the claims, `fsproto.h`'s `UMSG_LINKS`, `FS_LINKED`,
+`FSL_*`, `fsl_ok`, the servers' `fsl_text`, errno.h's reserved range, `ipc_kcall`'s kflags), step 1 (fsd), step 2
+(zfsd, nfscd), step 3 (the kernel, sh, realpath, the FS-UAE tests). What differs from the text above, and why:
+
+- **fsd walks twice for a changing request with the bit.** `prewalk` makes the request's walks (stopping at the first
+  link) before the read-only refusal and the mark; when it meets no link, `handle1` walks again as before. One more
+  walk through cached blocks for a `chmod`, `mkdir`, `rm`, `mv`, `ln` or a creating open while something is mounted;
+  nothing else changed in `handle1`.
+- **nfscd's read-only mount** (`o`) refused every changing request at its start; with the bit that refusal waits for
+  the walk (`OPF_RO`), so its answer comes before EROFS as fsd's does (5.6 of the table's rule "the decision comes
+  before anything else").
+- **`O_TRUNC`'s `FS_STAT` runs on a copy of the walk** (5.2): adopted when it succeeds (then the `FS_OPEN` starts from
+  it, and both reach one file), dropped when it fails (nothing is there to be busy). Without the copy a failed
+  `FS_STAT` through a last-name link would have moved the walk past the link, and the `FS_OPEN` that follows would have
+  created the link's target (5.5).
+- **D13's gate** is `seg_any()` (any segment of any mount) or a load in progress, as 5.3 says; `seg_on(m)` and
+  `exec_on(m)` had no other user and are gone.
+- **`mount`** resolves its mount point with `FS_STAT` first, then runs the `/`, 47-byte and "already mounted" checks on
+  the resolved text: a mount on a missing directory now answers -ENOENT before "all entries in use".
+- **`realpath`** follows 40 links without recursion (static buffers): 40 recursive levels of its old 1.4 KB frames
+  would have overflowed a program's 16 KB stack. **`pwd`** had a 128-byte buffer (a longer working directory answered
+  1 with no word) and **sh's prompt** (`\w`) a 130-byte one that a 159-byte working directory overran: both are
+  `FS_PATHMAX` now, and pwd says why it failed (found while fixing, CLAUDE.md).
+- **Test 9's "umount while it runs is -EBUSY"** does not hold, before or after D26: D13 lets a mount go while a shared
+  program from it runs (it holds no file open, `tools/pure-test.sh` m, "umount=0"). The test checks the rest through a
+  link: the program shared (D13), `>>` and `cp` over it "text file busy", `rm` through a directory link, and a new start
+  after the file is replaced loading a new copy.
+- **Test 13** covers a stopped mount service (its server killed, `umount` by the exact text starts no server). A
+  server that does not answer at all still holds `umount`'s final `FS_QUIT`, as before D26; only the new resolution
+  step must not call it, and it does not when the text matches.
+- **Test 5's `O_CREAT|O_EXCL` on a link** is checked on the host (`tools/ext2-host-test.sh`, `zenixfs/tests/zfsd-test.sh`,
+  nfs-sim-test `links`): no command on the mount tests' floppy opens with `O_EXCL` by itself.
+- **A wrong server** is tested with `msgpingd -fslinked` (`tools/mounttest.sh`): an `FS_LINKED` with bits outside the
+  table and one to a request that never asks (`FS_READDIR`) are -EIO; a valid one goes on at its text.
+- **The old zfsd** (built from main before D26) under the new kernel, by hand in FS-UAE (2026-10-28): a link inside its
+  volume is followed by zfsd itself, a link on the root into it works (fsd answers, the kernel goes on), a link out of
+  it answers -ENOENT, `cd` through a link inside it keeps the textual working directory: today's answers, as section 7
+  says.
+
+**Sizes (measured, `make -s all`):** `kernel.bin` 157,716 bytes on main (22a6d5f) -> 159,596: +16 step 0, +584 step 1
+(fsd is inside it), +1,280 step 3 (vfs.c's walks and `seg_any`); **3,220 bytes left on the mount tests' floppy**
+(5,100 before; no RAM disk shrink needed), 19,604 on the RAM floppy. More than section 9's estimate (under 1.2 KB):
+the walk state, the copy for `O_TRUNC`, `umount`'s second way and the table each cost more than guessed. `zfsd.zx`
+36,788 -> 37,308 (+520, a file on the mount tests' RAM disk). nfscd's core +658 bytes of code (`tools/host/nfs-test.sh`
+size).
+
+**Kernel stack (`-fstack-usage` sums, 2026-10-28):** the deepest chain is a rename whose `FS_LSTAT` makes a service
+load whose program is reached through a link into a mount whose own server must be loaded too: `syscall_c` 272,
+`vfs_link` 392, `two_paths` 48, `wstep` 40, `fs_call_k` 80, `call` 44, the load (`load` 156, `proc_load` 144),
+`fs_exec_open` 224, `wstep`, `walk_follow` 180, `pick` 40, `mount_search` 116, `fs_call_k`, `call`, the second load,
+`schedule`: about 2.8 KB of the 4 KB, about 0.2 KB more than the same chain before D26 (`route`'s 200 and its callers'
+frames). The stack guard did not fire in any test.
+
+**Speed (FS-UAE's 68020: an emulator's figure, not hardware, 2026-10-28):** 200 `test -e` through a directory link on
+the root into an ext2 mount 1.516 s, the same path directly 1.008 s: about 2.5 ms more for each link followed (one more
+round trip to the root's server, a new normalisation and a walk of the text before the link), `tools/mounttest.sh`'s
+INFO line. With only the root mounted nothing changes but `chdir`, which now normalises. The real machines' figures
+(the stock A1200, the 060) are measured by the owner: [weekend-2026-10-30.md](weekend-2026-10-30.md) (e) 7.

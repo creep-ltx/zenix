@@ -667,7 +667,7 @@ struct seg *seg_enter(const struct exec_src *x, u32 code, u32 size, u32 sum, con
 void seg_put(struct seg *s);                    /* drop a reference; the last one frees the code */
 void seg_unlist(int m, long ino);               /* file ino (-1: every file) of mount m may have changed */
 int seg_busy(int m, const struct ustat *st);    /* a segment of that file exists (ETXTBSY) */
-int seg_on(int m);                              /* a segment loaded from mount m exists */
+int seg_any(void);                              /* a segment loaded from any mount exists (D26: name_ino) */
 void seg_stats(u32 *bytes, u32 *saved);         /* shared code in memory, and what sharing it saves */
 void seg_crash(struct proc *p, u32 pc);         /* a process running shared code faulted: is the code intact? */   /* SVC_OPENS: the inodes held open on that mount */
 long vfs_open(const char *path, int flags);
