@@ -276,6 +276,31 @@ network first, encryption a later step. Five small root-only kernel interfaces (
 `KLOG_TOTAL`; `/dev/kmsg`). **A D11 decision:** servers nobody calls (network listeners) are kept alive by init, the
 lines of `/etc/daemons` with D11's numbers (amends D11 1 and 4.4, D19 2.3; closes D20 7.2's open point). The full
 design: [d24-remote.md](d24-remote.md).
+## D25. The demo floppy, network edition (roadmap block 2's end; design note revision 2 after two reviews, nothing built)
+**Why.** One 880 KB floppy that boots any 68020+ Amiga with 2 MB (the stock A1200 included) into Zenix with the
+network, `telnet`, `ssh` and `wget`, to hand to anyone (owner 2026-10-25; KolibriOS's packed programs the model).
+**How.** Every program is packed with LZ4 in a new wrapper, `ZPAK` (the inner header plain, code and data as two
+streams), and unpacked by the kernel's loader in place in the program's own memory (no RAM disk holds programs); LZ4
+because on a 14 MHz 68020 reading a floppy only it starts programs faster than unpacked ones (*modelled* and
+*estimated*; deflate breaks even, Shrinkler doubles the time). The light commands are linked into one pure multi-call
+program (a "box": one libz on the disk instead of 36; *measured* 54 KB of shared code against 294 KB of separate
+files), kept in memory after use by D13's planned rule (unused segments dropped only when memory runs short). The
+floppy is one ext2 filesystem marked read-only and mounted on `/usr`, the Amiga bootblock in its boot area and the
+packed kernel and a 160 KB RAM-disk root (`/etc`, `/home`, `/tmp`) after its end, both unpacked by the bootblock;
+links from the root into `/usr` need **the kernel to follow symbolic links across mounts** (today a link into another
+mount answers ENOENT: a limit fixed for every Zenix). A setup script asks the keyboard (`CON_KEYMAP`, root only) and
+finds the network card. *Prototype*: everything fits with about 50 KB free. The owner's approval of the note approves
+its features (note section 12). The full design: [d25-demo-floppy.md](d25-demo-floppy.md).
+## D26. Symbolic links across mounts (audit 2026-10-26 F12; design note revision 2 after four reviews, nothing built)
+**Why.** A symbolic link is followed only inside its own filesystem, so a link into another mount answers ENOENT (and
+an absolute target on any mount but the root is resolved from that volume's root); Linux follows it, and D25's links
+from the RAM root into `/usr` need it. **How.** When a path request's path is a kernel copy (always while more than the root is mounted, and for
+`chdir` and `mount`), the kernel marks it (`UMSG_LINKS`) and a filesystem server stops at the first symbolic link it meets and answers `FS_LINKED` with the text
+the path continues at, written into the request's own path buffer; the kernel normalises it, picks the mount again
+and sends the request again, at most 40 links per path (Linux's), then -ELOOP. `..` at a mount point is Linux's; the
+working directory's text and mount points are kept resolved. A server not asked, and an old server, follow links
+inside their volume as today. The bit is set only on a kernel buffer with an absolute path; each path is resolved
+once per system call (D13's checks on the resolved mount); `umount` matches the text before asking any server. The full design: [d26-links-across-mounts.md](d26-links-across-mounts.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers; fsd and diskd are built into the kernel image, zfsd is the file `/sbin/zfsd` since D19 step 1. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).

@@ -614,3 +614,31 @@ breaking G4); both reviewers judged that shape sound. It adds a second small ker
 removes `-id`, the hash, the user map and `umount -f`.
 
 Last checked against the code: 2026-10-27 (main at 22fd4ba).
+
+## As built: step 0, the NFS client core (side helper, merged 2026-10-28; reviewed by the main session)
+
+Built: `net/nfs/` without system calls (`nfs.h` the interface, `rpc.c` XDR/RPC/AUTH_SYS/record marking, one connection,
+reconnects with old xids, hard and soft timeouts, JUKEBOX; `proto.c` GETPORT, MNT/UMNT, NFSv3's 19 calls and NULL with
+every length checked; `table.c` handles, inode numbers, caches, readdir positions; `ops.c` every FS_* request as a small
+state machine; `write.c` UNSTABLE, COMMIT, the verifier and resend; `core.c` setup, options, the mount sequence, the
+saved-root check). m68k -Os: about 37.2 KB of code, no 64-bit multiply or divide. Tests: `tools/host/nfs-test.sh` (in
+`check.sh host`): `nfs-sim.py` (portmapper, MOUNT, NFSv3 with every fault of 11.1; 16 scenarios, 185 checks), libnfs as a
+check on the simulator, a real unfs3 0.10.0 run rootless (fetched with a pinned sha256, never committed), and a fuzzer
+(300 s, 850,173 inputs, nothing found; each request answered exactly once, no leaks).
+
+The step-0 helper's interface additions and smaller choices (its report, 2026-10-28: `nfs_connect`/`nfs_connected`/
+`nfs_disconnect`, `nfs_save`, `nfs_poll`, `nfs_kill`/`nfs_end`/`nfs_init`/`nfs_codes_parse`, the "NFS1" saved-table
+format of at most 77 bytes, "broke twice" counting only closes/resets while a call is out, STATFS and the root's stat
+bounded at 2 s from the cache, a handle without attributes refused, a changed handle for the same fileid kept on one
+inode number, reads pipelined only within a request, JUKEBOX retries 1, 2 then every 4 s, 8/32 requests per mount, a short
+WRITE count as -EIO, a failed COMMIT dropped with a log line, ACCESS cached per credential, ext2 file-type codes) are
+binding unless changed here.
+
+**Decided by the main session (2026-10-28), for step 1:** (a) **memory:** the idle tables were about 87 KB against the
+note's ~70 KB with code; the node table (256 entries of 158 bytes, each with a 64-byte handle) shrinks: handles move
+to a separate pool sized to their real length (Linux and Synology handles are 28-36 bytes), and the small profile keeps
+64 nodes (the large one 256); target under 40 KB idle on the stock A1200, measured; (b) **an unlinked open file** gets
+Linux's "silly rename" (`.nfsXXXX`, removed at the last close), because Unix programs rely on reading an unlinked
+temporary file; (c) **CHOWN** is checked locally as fsperm rule 5 (root only), and the NAS decides too; (d) `ESTALE`
+(116) is claimed in step 1 and replaces -EIO for stale handles; (e) messages stay queued in nfscd while `NFS_P_TAKE` is
+clear, as the host client does; (f) `mount.c` turns a checked mount's error numbers into messages.
