@@ -73,7 +73,8 @@ DESCRIPTION
            the directory DIR as a filesystem (root): a reboot must not
            wait for a server that never answers its sync.
     serve  is a filesystem server on port PORT (root) that holds every request
-           until its client is killed (DESIGN D23 step 1). FS_ROOT names the
+           until its client is killed (DESIGN D23 step 1). It prints "svctest
+           serve: PORT ready" once its port is open. FS_ROOT names the
            type TYPE (nfs: a network mount, synced last); FS_CLOSE (printed,
            with "came marked" if it was), FS_SYNC (its a0 printed), FS_QUIT
            (ends it) and an open of /o (a file: its reads are held) are

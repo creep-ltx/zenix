@@ -672,6 +672,7 @@ static struct node *new_node(int type)
 }
 
 static struct node *parse_list(const char *const *stops);
+static struct node *parse_command(void);
 static struct node *parse_andor(const char *const *stops);
 
 static int at_eof(void) { return ti >= ntoks; }
@@ -700,6 +701,44 @@ static int is_assign(const char *w)
     return w[i] == '=';
 }
 
+static int is_redir_op(struct tok *t)
+{
+    if (!t || t->type != T_OP) return 0;
+    const char *o = t->op;
+    return !strcmp(o, "<") || !strcmp(o, ">") || !strcmp(o, ">>") || !strcmp(o, ">&") || !strcmp(o, "&>") || !strcmp(o, "<<");
+}
+
+/* one redirection at ti (is_redir_op is true there); *end is moved past it. 0 = a syntax error */
+static struct redir *parse_redir(u32 *end)
+{
+    struct tok *t = peek();
+    const char *o = t->op;
+    struct redir *r = aalloc(sizeof *r); memset(r, 0, sizeof *r);
+    r->kind = !strcmp(o, "<") ? 0 : !strcmp(o, ">") ? 1 : !strcmp(o, ">>") ? 2 : !strcmp(o, ">&") ? 3 : !strcmp(o, "&>") ? 4 : 5;
+    r->fd = t->fd != 255 ? t->fd : (r->kind == 0 || r->kind == 5) ? 0 : 1;
+    if (r->kind == 5) { r->body = t->heredoc; r->hdquoted = t->hdquoted; *end = t->end; ti++; return r; }
+    ti++;
+    struct tok *w = peek();
+    if (!w || w->type != T_WORD) { if (!w) lex_incomplete = 1; syn("missing redirection target"); return 0; }
+    r->word = w->text; *end = w->end; ti++;
+    return r;
+}
+
+/* the redirections after a compound command ("done < file", "( list ) > file", "{ list; } 2>&1"): kept on its node,
+ * which runs with them in place (exec_node); its source text grows to take them in, so a child shell given the text
+ * (a pipeline stage, a background job) sees them too */
+static int compound_redirs(struct node *n)
+{
+    struct redir **rtail = &n->redirs;
+    u32 end = n->end;
+    while (is_redir_op(peek())) {
+        struct redir *r = parse_redir(&end); if (!r) return 0;
+        *rtail = r; rtail = &r->next;
+    }
+    if (end != n->end) { n->end = end; n->src = adupn(lex_src + n->start, end - n->start); }
+    return 1;
+}
+
 static struct node *parse_simple(void)
 {
     struct node *n = new_node(N_SIMPLE);
@@ -711,18 +750,8 @@ static struct node *parse_simple(void)
         if (!t) break;
         if (t->type == T_NL) break;
         if (t->type == T_OP) {
-            const char *o = t->op;
-            if (!strcmp(o, "<") || !strcmp(o, ">") || !strcmp(o, ">>") || !strcmp(o, ">&") || !strcmp(o, "&>") || !strcmp(o, "<<")) {
-                struct redir *r = aalloc(sizeof *r); memset(r, 0, sizeof *r);
-                r->kind = !strcmp(o, "<") ? 0 : !strcmp(o, ">") ? 1 : !strcmp(o, ">>") ? 2 : !strcmp(o, ">&") ? 3 : !strcmp(o, "&>") ? 4 : 5;
-                r->fd = t->fd != 255 ? t->fd : (r->kind == 0 || r->kind == 5) ? 0 : 1;
-                if (r->kind == 5) { r->body = t->heredoc; r->hdquoted = t->hdquoted; end = t->end; ti++; }
-                else {
-                    ti++;
-                    struct tok *w = peek();
-                    if (!w || w->type != T_WORD) { if (!w) lex_incomplete = 1; syn("missing redirection target"); return 0; }
-                    r->word = w->text; end = w->end; ti++;
-                }
+            if (is_redir_op(t)) {
+                struct redir *r = parse_redir(&end); if (!r) return 0;
                 *rtail = r; rtail = &r->next;
                 continue;
             }
@@ -740,7 +769,7 @@ static struct node *parse_simple(void)
     return n;
 }
 
-static struct node *parse_command(void)
+static struct node *parse_compound(void)
 {
     if (stack_low()) { syn("nested too deeply"); return 0; }
     struct tok *t = peek();
@@ -884,11 +913,20 @@ static struct node *parse_command(void)
         struct node *n = new_node(N_SUBSH);
         n->a = parse_list(s_p); if (!n->a) return 0;
         if (!is_op(peek(), ")")) { if (at_eof()) lex_incomplete = 1; syn("expected )"); return 0; }
+        n->name = adupn(lex_src + start + 1, toks[ti].start - start - 1);   /* the list inside, for the child shell */
         n->end = toks[ti].end; ti++;
         n->start = start; n->src = adupn(lex_src + start, n->end - start);
         return n;
     }
     return parse_simple();
+}
+
+/* a command: a compound one takes the redirections after it (a simple one reads its own) */
+static struct node *parse_command(void)
+{
+    struct node *n = parse_compound();
+    if (!n || n->type == N_SIMPLE || n->type == N_FUNC) return n;
+    return compound_redirs(n) ? n : 0;
 }
 
 static struct node *parse_pipeline(void)
@@ -1921,6 +1959,15 @@ static int exec_node(struct node *n)
     int st = 0;
     if (exit_requested) return last_status;
     if (check_intr()) return 130;
+    if (n->redirs && n->type != N_SIMPLE) {                 /* a compound command's redirections, around all of it */
+        struct rsave rs; rs_init(&rs);
+        if (apply_redirs(n->redirs, &rs) || ex_error) { ex_error = 0; rs_restore(&rs); last_status = 1; return 1; }
+        struct redir *r = n->redirs; n->redirs = 0;
+        st = exec_node(n);
+        n->redirs = r;
+        rs_restore(&rs);
+        return st;
+    }
     switch (n->type) {
     case N_SIMPLE: st = run_simple(n, 0, 0); break;
     case N_PIPE: st = run_pipeline(n, 0, 0); break;
@@ -2030,8 +2077,7 @@ static int exec_node(struct node *n)
     }
     case N_SUBSH: {
         char *mark = abrk;
-        char *inner = adupn(n->src + 1, strlen(n->src) - 2);
-        char *argv[5] = { "sh", "-c", subshell_text(inner), 0, 0 };
+        char *argv[5] = { "sh", "-c", subshell_text(n->name), 0, 0 };
         if (env_dirty) { env_sync(); env_dirty = 0; }
         int pid = sys_spawn("/bin/sh", argv, 0);
         job_join(pid, pid);
@@ -2050,8 +2096,6 @@ static int exec_node(struct node *n)
     last_status = st;
     return st;
 }
-
-/* the redirections after a compound command ("done < file") are not supported yet; they work on simple commands */
 
 /* ---- command substitution and scripts ---- */
 static int run_capture(const char *cmd, char **out)

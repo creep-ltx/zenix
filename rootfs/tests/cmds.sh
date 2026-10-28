@@ -108,6 +108,13 @@ printf 'cat <<-E\n\tindented\n\tE\ncat <<"Q"\nfi done esac } ) \x27 " $x\nQ\n' >
 printf 'y=from-long2\n' > $T/long2.sh; echo ". $T/long2.sh; echo \$y" >> $L; echo set -- $(seq 1000 1399) >> $L
 printf 'echo "n=$# last=${400}"\nf() { echo "f sees $x"; }\nf\necho "sum=$x"\n' >> $L
 t sh-long;    sh $L; echo "rc=$? lines=$(wc -l < $L) longest=$(awk '{ if (length($0) > m) m = length($0) } END { print m }' $L)"
+# redirections after a compound command (audit 2026-10-28 O10): a subshell, a group, a loop, if and case, in the
+# foreground, in the background and in a pipeline
+t sh-compound-redir; ( echo sub1; echo sub2 ) > $T/c1.txt & wait; cat $T/c1.txt; ( echo out; echo err >&2 ) 2>&1 | tr a-z A-Z & wait; { echo g1; echo g2; } > $T/c2.txt & wait; cat $T/c2.txt
+t sh-compound-redir2; ( echo fg ) > $T/c3.txt; { echo app; } >> $T/c3.txt; cat $T/c3.txt; while read a b; do echo "<$a>"; done < fruit.txt; for i in 1 2; do echo i$i; done > $T/c4.txt; cat $T/c4.txt; if true; then echo iff; fi > $T/c5.txt 2>&1; cat $T/c5.txt; case x in x) echo cs >&2 ;; esac 2>&1 | tr a-z A-Z
+t sh-compound-redir3; { echo e1 >&2; echo o1; } 2>/dev/null | wc -l; ( cd /; pwd ) > $T/c6.txt; cat $T/c6.txt; pwd | sed "s|$D|D|"; f() { echo inf; } > $T/c7.txt; f; cat $T/c7.txt; ( echo hd; cat ) <<E
+here
+E
 # commands from a pipe or a file (audit 2026-10-26 F4): not interactive (no prompts, no line editor), read a command
 # at a time, so a command run gets the rest of the input (from a pipe the shell reads one byte at a time)
 t sh-stdin;   printf 'read x\nhello\necho "got $x"\n' | sh; printf 'echo a\ncat\nrest 1\nrest 2\n' | sh; printf 'echo one\necho two\nexit 3\necho never\n' | sh; echo "rc=$?"

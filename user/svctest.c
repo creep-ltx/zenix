@@ -27,7 +27,7 @@
  *                                  commit), wait, read it through the open file (ZenixFS: the file is gone with the
  *                                  uncommitted seconds: an error, never another file)
  *   svctest serve PORT TYPE        a filesystem server on PORT that holds every request until it is cancelled (DESIGN
- *                                  D23 step 1): FS_ROOT 2 (fsinfo type TYPE: "nfs" makes it a network mount), FS_CLOSE
+ *                                  D23 step 1), saying "PORT ready" once its port is open: FS_ROOT 2 (fsinfo type TYPE: "nfs" makes it a network mount), FS_CLOSE
  *                                  0 (said), FS_SYNC 0 (its a0 said), FS_QUIT ends it, FS_OPEN of /o 5. Polls its port with POLLPRI; on it, the
  *                                  held requests marked UMSG_CANCEL are answered: a stat 0 (a server that ignores the
  *                                  mark), anything else -EINTR. A request that comes marked is answered -EINTR at once
@@ -46,6 +46,7 @@ static int serve(const char *name, const char *type)
     struct umsg *held[8];
     int nh = 0, port = sys_port_create(name);
     if (port < 0) { printf("svctest serve: port %d\n", port); return 1; }
+    printf("svctest serve: %s ready\n", name);    /* the test waits for this, not a fixed time */
     for (;;) {
         struct pollfd pf = { port, POLLPORT | POLLIN | POLLPRI, 0 };
         int n = sys_evwait(&pf, 1, -1);
