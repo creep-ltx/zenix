@@ -885,3 +885,34 @@ wget (refuse to truncate, say so, exit non-zero) — D22's restart rule stays zp
 (5) **Relative and `//host` Locations:** wget follows them (as GNU wget), resolved against the request URL; net/http
 gains the resolution when the program is built (zpkg may keep refusing them). (6) The glue lives in `crypto/zc/`:
 accepted. (7) The TLS 1.3 wording: accepted. (8) `-DBR_RDRAND=0` only in host tests: accepted.
+
+## As built: step 7, the programs `wget` and `sntp` (side helper, branch wgetprog, 2026-10-28; not yet reviewed)
+
+`user/wget.c` (`docs/man/wget.txt`) over `user/wget/`, `net/http/` and `zc_tls`; `user/sntp.c` (`docs/man/sntp.txt`)
+over `net/sntp/` and `zc_clock`, with the main session's decisions above:
+- **`-c` and a 200:** refused, the file left as it was, exit 1 (`wget_plan_answer`; `http_resume` and its restart rule
+  stay zpkg's). *Found:* today's GNU wget (1.25, run on the PC 2026-10-28, and its manual) restarts from scratch and
+  overwrites there; the refusal ("Refusing to truncate existing file") is what older GNU wgets did. The choice is one
+  branch in `plan.c` if the main session wants 1.25's behaviour.
+- **Relative and `//host` Locations:** `http_redirect_rel` in `net/http/` (RFC 3986 5.2, its 5.4.1 examples in
+  `tls-core-test.c`; the scheme kept for `//host`, so never https to http; another scheme refused); wget's plan uses it,
+  `http_redirect` (zpkg's) still refuses them.
+- **The trusted clock:** no kernel interface yet, so wget passes `trusted` 0 (one stub, `clock_trusted()`) and sntp
+  passes `have_rtc` 0 (`have_rtc()`); the kernel proposal is the main line's (below, in the hand-off).
+- **wget:** sockets non-blocking with `poll`: 60 s to connect (`SO_ERROR` after `EINPROGRESS`), 60 s of silence at
+  most; one connection kept while the next URL goes to the same server; the TLS memory (the 16,709-byte record buffer,
+  the 16 KB chain buffer, a 16 KB anchor store, the context and the session cache, about 57 KB) allocated at the first
+  https URL only; `/etc/ssl/anchors` read through `zc_anchors_find`; `/etc/ssl/local/`'s PEM files (at most 16 roots,
+  64 KB a file) read at the first https URL, each root's subject hash computed once so `find` adds only the matching
+  ones; 32 seed bytes from `/dev/random` for each handshake ("waiting for the random pool" when it would wait);
+  "the clock is not set" once a run; progress and errors on standard error, nothing with `-q` (GNU wget's `-q`).
+- **sntp:** `sntp [-r]`, root only; `/etc/sntp` (4 KB read at most); the servers in order, each its share of the
+  10 s; a send that fails because the network is not up yet is tried again each second within the share; the nonce
+  from `/dev/urandom` (it is not a key, and sntp runs early at boot); the first accepted answer judged by `sntp_judge`,
+  the clock set with `SYS_settime`, the floor written beside and renamed (`/var/lib/clock.new`, mode 644); `-r` writes
+  the build date.
+- **The build date** is `ZENIX_BUILD_DATE` in `build/builddate.h`, from the last commit's time (`git log -1
+  --format=%ct`, `SOURCE_DATE_EPOCH` outside git), rewritten only when it changes.
+
+**Sizes (*measured*, m68k):** `wget` 114,884 bytes (code 114,864, BSS 13,044; plus about 57 KB allocated for an https
+URL); `sntp` 15,420. Neither links `time`, `__divdi3` or `__moddi3`.

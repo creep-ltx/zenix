@@ -1,0 +1,57 @@
+SNTP(8)			Zenix manual
+
+NAME
+    sntp - set the clock from the network
+
+SYNOPSIS
+    sntp [-r]
+
+DESCRIPTION
+    Asks the time servers named in /etc/sntp, in order, over SNTP
+    (UDP port 123), and sets the clock (root only) from the first
+    accepted answer:
+
+        sntp: the clock set from pool.ntp.org: 2026-10-28 06:30:12 UTC
+        (it was 3 s off)
+
+    Every server gets its share of 10 seconds in all. An answer is
+    believed only when it carries back the random stamp sntp sent;
+    a server that is not synchronised (stratum 16, leap indicator 3)
+    or sends a "kiss of death" is passed over.
+
+    The floor: /var/lib/clock holds the newest time this machine has
+    trusted. Certificates are never judged by a time below it, nor
+    below the build date. An answer before the floor is refused. An
+    accepted answer raises the floor only when it agrees within 10
+    minutes with the battery clock, or, without one, is at most 400
+    days past the floor: one lying server can set a wrong clock for
+    this boot, but cannot move the floor far.
+
+    Started by hand for now; the network's start (ifup) is to run it
+    when /etc/sntp exists.
+
+OPTIONS
+    -r          reset the floor to the build date (after a wrong time
+                raised it)
+
+FILES
+    /etc/sntp       "server HOST" lines, at most four; # comments;
+                    other lines are reported and ignored
+    /var/lib/clock  "zenix-clock 1 SECONDS", the floor (mode 644)
+
+EXAMPLES
+    echo server pool.ntp.org > /etc/sntp; sntp
+
+EXIT STATUS
+    0 the clock was set (or -r done); 1 no accepted answer, no
+    /etc/sntp, or not root; 2 wrong arguments.
+
+NOTES
+    Plain SNTP: the answer is not signed, so a machine on the path can
+    lie about the time (the floor's rules limit what that does to
+    certificate checks). One answer, not an average; no slewing, no
+    daemon. Until the kernel can tell sntp whether a battery clock was
+    read at boot, sntp takes the 400-day rule.
+
+SEE ALSO
+    date(1), wget(1), ifconfig(8)

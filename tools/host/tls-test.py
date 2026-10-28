@@ -226,6 +226,13 @@ def handle(c, tls):
         if mode == "tohttps":
             reply("301 Moved", b"", [("Location", "https://%s/%s" % (host.split(":")[0], rest))])
             continue
+        if mode == "rel":                   # /rel/PATH: a relative Location, "x/../../PATH" (RFC 3986 5.2)
+            reply("302 Found", b"", [("Location", "x/../" + "../" * (rest.count("/") + 1) + rest)])
+            continue
+        if mode == "schemerel":             # /schemerel/HOST/PATH: "//HOST/PATH", the same scheme
+            h2, _, p = rest.partition("/")
+            reply("302 Found", b"", [("Location", "//%s/%s" % (h2, p))])
+            continue
         if mode == "tohost":                # /tohost/HOST/PATH: an absolute https Location on another name
             h2, _, p = rest.partition("/")
             reply("302 Found", b"", [("Location", "https://%s/%s" % (h2, p))])
@@ -484,6 +491,12 @@ def https(out, client):
     rc, so, se = wget("https://rsa.test/tohost/ecdsa.test/dir/f.bin")
     ok("redirects: another host, the name from the URL given (f.bin)", rc == 0 and
        os.path.exists(os.path.join(work, "f.bin")) and "ecdsa.test" in LOG["sni"], (rc, se, os.listdir(work)))
+    rc, so, se = wget("-O", "-", "https://rsa.test/rel/dir/f.bin")
+    ok("redirects: a relative Location followed (x/../../dir/f.bin from /rel/)", rc == 0 and so == small and "hops=1" in se,
+       (rc, se))
+    rc, so, se = wget("-O", "-", "https://rsa.test/schemerel/ecdsa.test/small.txt")
+    ok("redirects: //host followed with the same scheme (TLS to ecdsa.test)", rc == 0 and so == small and
+       "ecdsa.test" in LOG["sni"], (rc, se))
     rc, so, se = wget("-O", "-", "https://rsa.test/tohost/wrong.test/small.txt")
     ok("redirects: the next host's certificate is checked too", rc == 5 and "another name" in se, (rc, se))
     # -- resume (-c, D22 7.5's rule) --
@@ -496,7 +509,8 @@ def https(out, client):
     ok("resume: a complete file (416): nothing to do", rc == 0 and "already complete" in se and open(part, "rb").read() == big, (rc, se))
     open(part, "wb").write(b"X" * 1000)
     rc, so, se = wget("-c", "https://rsa.test/norange/big.bin")
-    ok("resume: a server without ranges (200): the file again from its start", rc == 0 and open(part, "rb").read() == big, (rc, se))
+    ok("resume: a server without ranges (200): refused, the file untouched, exit 1", rc == 1 and
+       open(part, "rb").read() == b"X" * 1000 and "refusing to truncate" in se, (rc, se))
     open(part, "wb").write(big[:1000])
     rc, so, se = wget("-c", "https://rsa.test/badrange/big.bin")
     ok("resume: a wrong Content-Range refused, the file untouched", rc == 7 and open(part, "rb").read() == big[:1000], (rc, se))
@@ -713,4 +727,5 @@ def main():
     sys.exit(min(fails, 100))
 
 
-main()
+if __name__ == "__main__":       # tools/wget-ns.py imports the CA and the servers
+    main()

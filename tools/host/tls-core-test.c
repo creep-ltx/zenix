@@ -302,6 +302,53 @@ static void t_wget(void)
 
         CHECK(http_redirect(&u, "/n#x", &hops) == 0 && !strcmp(u.path, "/n"), "redirect: fragment dropped");
     }
+    /* relative Locations (RFC 3986 5.2, its 5.4.1 examples with the base http://a/b/c/d;p?q) */
+    {
+        static const char *const ex[][2] = {
+            { "g", "/b/c/g" }, { "./g", "/b/c/g" }, { "g/", "/b/c/g/" }, { "/g", "/g" }, { "?y", "/b/c/d;p?y" },
+            { "g?y", "/b/c/g?y" }, { "#s", "/b/c/d;p?q" }, { "g#s", "/b/c/g" }, { "g?y#s", "/b/c/g?y" },
+            { ";x", "/b/c/;x" }, { "g;x", "/b/c/g;x" }, { ".", "/b/c/" }, { "./", "/b/c/" }, { "..", "/b/" },
+            { "../", "/b/" }, { "../g", "/b/g" }, { "../..", "/" }, { "../../", "/" }, { "../../g", "/g" },
+            { "../../../g", "/g" }, { "../../../../g", "/g" }, { "/./g", "/g" }, { "/../g", "/g" }, { "g.", "/b/c/g." },
+            { ".g", "/b/c/.g" }, { "g..", "/b/c/g.." }, { "..g", "/b/c/..g" }, { "./../g", "/b/g" }, { "./g/.", "/b/c/g/" },
+            { "g/./h", "/b/c/g/h" }, { "g/../h", "/b/c/h" }, { "g;x=1/./y", "/b/c/g;x=1/y" }, { "g;x=1/../y", "/b/c/y" },
+            { "g?y/./x", "/b/c/g?y/./x" }, { "g?y/../x", "/b/c/g?y/../x" }, { "", "/b/c/d;p?q" },
+        };
+        unsigned i;
+
+        for (i = 0; i < sizeof ex / sizeof ex[0]; i++) {
+            int hops = 0;
+
+            http_url_parse(&u, "http://a/b/c/d;p?q");
+            CHECK(http_redirect_rel(&u, ex[i][0], &hops) == 0 && !strcmp(u.path, ex[i][1]) && !strcmp(u.host, "a") &&
+                  hops == 1, "relative: \"%s\" -> %s (%s)", ex[i][0], ex[i][1], u.path);
+        }
+        {
+            int hops = 0;
+
+            http_url_parse(&u, "https://a/b");
+            CHECK(http_redirect_rel(&u, "//g:81/x/../y", &hops) == 0 && u.tls && !strcmp(u.host, "g") && u.port == 81 &&
+                  !strcmp(u.path, "/y"), "relative: //host keeps https (%s %s)", u.host, u.path);
+            CHECK(http_redirect_rel(&u, "//g", &hops) == 0 && u.port == 443 && !strcmp(u.path, "/"),
+                  "relative: //host without a port: the scheme's");
+            CHECK(http_redirect_rel(&u, "x", &hops) == 0 && http_redirect_rel(&u, "y", &hops) == HTTP_ELOOP,
+                  "relative: the fourth hop refused");
+            hops = 0;
+            CHECK(http_redirect_rel(&u, "http://a/x", &hops) == HTTP_EPERM, "relative: an absolute https to http refused");
+            CHECK((hops = 0, http_redirect_rel(&u, "mailto:x@y", &hops)) == HTTP_EINVAL, "relative: another scheme refused");
+            CHECK((hops = 0, http_redirect_rel(&u, "//bad_host/x", &hops)) == HTTP_EINVAL, "relative: a bad //host refused");
+            CHECK((hops = 0, http_redirect_rel(&u, "a b", &hops)) == HTTP_EINVAL, "relative: a space refused");
+            http_url_parse(&u, "http://a/b");
+            memset(big, 'z', 1100);
+            big[1100] = 0;
+            hops = 0;
+            CHECK(http_redirect_rel(&u, big, &hops) == HTTP_EINVAL && !strcmp(u.path, "/b"),
+                  "relative: too long refused, the URL unchanged");
+            hops = 0;
+            CHECK(http_redirect(&u, "x", &hops) == HTTP_EPERM && http_redirect(&u, "//k/x", &hops) == HTTP_EPERM,
+                  "http_redirect (zpkg's) still refuses relative and //host");
+        }
+    }
     /* plans */
     args(&o, "http://h/d/f.bin");
     CHECK(wget_plan_start(&p, &o, 0, &why) == 0 && !strcmp(p.name, "f.bin") && p.need_free_name && !p.need_size &&
@@ -328,8 +375,15 @@ static void t_wget(void)
     CHECK(answer(&p, "HTTP/1.1 307 T\r\nLocation: http://k/d\r\n\r\n", &ex) == WGET_FAIL && ex == WGET_EXIT_PROTO,
           "redirect: https to http refused");
     wget_plan_start(&p, &o, 0, &why);
-    CHECK(answer(&p, "HTTP/1.1 302 F\r\nLocation: x/y\r\n\r\n", &ex) == WGET_FAIL, "redirect: relative not followed");
-    CHECK(answer(&p, "HTTP/1.1 302 F\r\nLocation: //k/y\r\n\r\n", &ex) == WGET_FAIL, "redirect: //host not followed");
+    args(&o, "https://h/d/e/a?q=1");
+    wget_plan_start(&p, &o, 0, &why);
+    CHECK(answer(&p, "HTTP/1.1 302 F\r\nLocation: x/y\r\n\r\n", &ex) == WGET_FOLLOW && !strcmp(p.url.path, "/d/e/x/y")
+          && !strcmp(p.name, "a?q=1"), "redirect: a relative Location followed (%s), the name kept", p.url.path);
+    CHECK(answer(&p, "HTTP/1.1 302 F\r\nLocation: //k:8443/y\r\n\r\n", &ex) == WGET_FOLLOW && p.url.tls &&
+          !strcmp(p.url.host, "k") && p.url.port == 8443 && !strcmp(p.url.path, "/y"), "redirect: //host followed");
+    wget_plan_start(&p, &o, 0, &why);
+    CHECK(answer(&p, "HTTP/1.1 302 F\r\nLocation: ftp://k/y\r\n\r\n", &ex) == WGET_FAIL && ex == WGET_EXIT_PROTO,
+          "redirect: another scheme refused");
     CHECK(answer(&p, "HTTP/1.1 302 F\r\n\r\n", &ex) == WGET_FAIL, "redirect: no Location");
     args(&o, "http://h/a");
     wget_plan_start(&p, &o, 0, &why);
@@ -356,8 +410,8 @@ static void t_wget(void)
     CHECK(answer(&p, "HTTP/1.1 206 P\r\nContent-Range: bytes 100-199/200\r\nContent-Length: 99\r\n\r\n", &ex) ==
           WGET_FAIL, "resume: a length that does not fit refused");
     CHECK(answer(&p, "HTTP/1.1 206 P\r\nContent-Length: 100\r\n\r\n", &ex) == WGET_FAIL, "resume: 206 without a range");
-    CHECK(answer(&p, "HTTP/1.1 200 OK\r\nContent-Length: 300\r\n\r\n", &ex) == WGET_WRITE && !p.append && !p.from,
-          "resume: 200 starts again");
+    CHECK(answer(&p, "HTTP/1.1 200 OK\r\nContent-Length: 300\r\n\r\n", &ex) == WGET_FAIL && ex == WGET_EXIT_GENERIC,
+          "resume: a 200 is refused (never truncate with -c), exit 1");
     wget_plan_start(&p, &o, 0, &why);
     wget_plan_have(&p, 1, 200);
     CHECK(answer(&p, "HTTP/1.1 416 R\r\nContent-Range: bytes */200\r\nContent-Length: 0\r\n\r\n", &ex) == WGET_DONE,

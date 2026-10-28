@@ -2,7 +2,8 @@
 #pragma once
 /*
  * wget's core (DESIGN D21 8, step 7; D22 7.4-7.5), without system calls: the command line (-q, -c, -O FILE), each
- * URL's plan (http: or https:, at most 3 redirects and never from https to http, net/http's rules), the local file's
+ * URL's plan (http: or https:, at most 3 redirects and never from https to http, relative and //HOST Locations
+ * resolved against the request's URL: net/http's http_redirect_rel), the local file's
  * name in GNU wget's basic way, and what to do with each answer, the resume rule included. The program (user/wget.c)
  * owns the sockets, D21's TLS glue (crypto/zc/zc_tls.h), the files and the messages; the HTTP protocol itself is
  * net/http/'s (shared with zpkg).
@@ -12,8 +13,9 @@
  * control character (kept as %XX), "index.html" for an empty segment, "." or "..". Without -O and -c an existing
  * file is not overwritten: the next free "NAME.1", "NAME.2"... is used (the program asks wget_nextname).
  * -c (resume, D22 7.5's rule through http_resume): with a file of N > 0 bytes the request asks "bytes=N-"; a 206
- * whose Content-Range is N-(T-1)/T is appended; a 200 starts the file again from its first byte; a 416 means the
- * file is already complete (GNU wget's reading). -O FILE: every URL into FILE ("-": standard output), truncated once
+ * whose Content-Range is N-(T-1)/T is appended; a 200 (the server ignored the range) is refused, the file left as it
+ * was, exit 1 (the main session's choice, 2026-10-28: the refusal older GNU wgets made; D22's restart rule stays
+ * zpkg's); a 416 means the file is already complete (GNU wget's reading). -O FILE: every URL into FILE ("-": standard output), truncated once
  * at the start (with -c: the first URL resumes FILE; "-" never resumes).
  * Exit statuses (GNU wget's): 0 done, 1 generic, 2 command line, 3 file I/O, 4 network, 5 TLS verification,
  * 7 protocol, 8 a server's error answer; with several failures the lowest of 2-8 wins, 1 only when no other.

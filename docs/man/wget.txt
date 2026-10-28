@@ -1,0 +1,88 @@
+WGET(1)			Zenix manual
+
+NAME
+    wget - fetch files over HTTP and HTTPS
+
+SYNOPSIS
+    wget [-q] [-c] [-O FILE] URL...
+
+DESCRIPTION
+    Fetches each URL (http:// or https://, at most 16) into a file in
+    the current directory, named as GNU wget names it: the last part of
+    the URL's path with its query ("b?x=1"), %XX decoded where that is
+    safe, index.html for a directory. An existing file is not
+    overwritten: the next free NAME.1, NAME.2 ... is used.
+
+    For https:// the server's certificate chain is checked against the
+    root certificates in /etc/ssl/anchors and the owner's own roots in
+    /etc/ssl/local/, and the name in the URL against the certificate's
+    names. TLS 1.2 only, with forward secrecy (ECDHE) and AES-GCM or
+    ChaCha20-Poly1305; nothing weaker is accepted.
+
+    Up to 3 redirects are followed (absolute, relative and //HOST
+    Locations), never one from https to http. The file keeps the name
+    from the URL given. Requests to the same server go over one
+    connection, and a TLS session is reused for the next connection
+    to it in the same run. A connection that is not made in 60 s, or a
+    server silent for 60 s, fails.
+
+    Progress goes to standard error: the connection, the handshake,
+    the answer, the bytes saved.
+
+OPTIONS
+    -q          quiet: nothing on standard error (the exit status says)
+    -c          continue: with a file of N bytes already there, ask for
+                the rest from byte N and append it. A server that
+                answers with the whole file (it ignores the request) is
+                refused and the file left as it was; a complete file is
+                left alone ("already complete")
+    -O FILE     every URL into FILE, one after the other (truncated at
+                the start; with -c the first one continues it); "-" is
+                standard output
+    --quiet, --continue, --output-document=FILE: the same
+
+EXAMPLES
+    wget https://aminet.net/util/arc/lha.lha
+    wget -c http://nas.local/zenix/big.bin      continue a cut download
+    wget -q -O - http://10.0.2.2/list.txt | grep zenix
+
+FILES
+    /etc/ssl/anchors    the trusted root certificates (Mozilla's list)
+    /etc/ssl/local/     the owner's own roots (PEM files, root's), e.g.
+                        a NAS's self-signed certificate: at most 16
+                        roots, 64 KB a file
+    /var/lib/clock      the newest time this machine has trusted, the
+                        floor certificate dates are judged against
+    /dev/random         32 random bytes for each TLS handshake
+
+EXIT STATUS
+    0 every URL fetched; 1 a generic error (also -c refused); 2 the
+    command line; 3 a file could not be written; 4 the network (no
+    such host, no connection, cut, too slow); 5 the certificate was
+    refused; 7 a protocol error (a bad answer, too many redirects, https
+    to http); 8 the server answered with an error (404, 500 ...). With
+    several failures the lowest of 2-8 is given (GNU wget's rule).
+
+NOTES
+    Certificates need the date. Until the kernel can tell wget that its
+    clock was set from the battery clock or by sntp(8) this boot, wget
+    never trusts the clock: it says once "the clock is not set:
+    certificate dates checked only against DATE" and judges the expiry
+    against the floor (the build date or /var/lib/clock, the newer),
+    and does not check "not valid before". A certificate that expired
+    before the floor is refused.
+
+    On a 14 MHz 68020 the TLS handshake is public-key arithmetic: half
+    a minute for a site with RSA certificates, more than a minute with
+    ECDSA ones, so some servers give up first. A second or two on a
+    68060.
+
+    Not checked: revocation (no OCSP, no CRL). Not supported: TLS 1.3
+    (a server that needs it says so), certificates signed with RSA-PSS,
+    IP addresses in certificates (use the name), the extended master
+    secret (servers in FIPS mode refuse). No FTP, no proxies, no
+    cookies, no passwords, no recursion, no time stamps. A file name
+    longer than 63 bytes cannot be opened (the system call limit).
+
+SEE ALSO
+    sntp(8), ssh(1), host(1)

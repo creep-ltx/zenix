@@ -199,13 +199,12 @@ int wget_plan_answer(struct wget_plan *p, const struct http_resp *r, int *exitco
             *exitcode = WGET_EXIT_PROTO;
             return WGET_FAIL;
         }
-        rc = http_redirect(&p->url, r->location, &p->hops);
+        rc = http_redirect_rel(&p->url, r->location, &p->hops);
         if (rc == 0)
             return WGET_FOLLOW;
         *exitcode = WGET_EXIT_PROTO;
         *why = rc == HTTP_ELOOP ? "more than 3 redirects"
-             : rc == HTTP_EPERM ? (r->location[0] == 'h' ? "a redirect from https to http is never followed"
-                                                         : "a relative redirect (not followed)")
+             : rc == HTTP_EPERM ? "a redirect from https to http is never followed"
                                 : "a redirect to a URL wget cannot fetch";
         return WGET_FAIL;
     }
@@ -221,10 +220,11 @@ int wget_plan_answer(struct wget_plan *p, const struct http_resp *r, int *exitco
                 p->append = 1;
                 return WGET_WRITE;
             }
-            if (rc == HTTP_RESTART) {
-                p->from = 0;
-                p->append = 0;
-                return WGET_WRITE;
+            if (rc == HTTP_RESTART) {   /* the server ignored the range: the file is never truncated (-c) */
+                *why = "the server does not support continued downloads, which conflicts with -c; refusing to "
+                       "truncate the existing file";
+                *exitcode = WGET_EXIT_GENERIC;
+                return WGET_FAIL;
             }
             *why = "the server's answer to the resume does not fit (Content-Range)";
             *exitcode = WGET_EXIT_PROTO;
