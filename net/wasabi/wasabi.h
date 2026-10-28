@@ -14,7 +14,7 @@
  * The core owns the loop: wsb_step builds the poll set, calls wsb_os_poll once with the timeout of its next timer
  * (at most 100 ms while a child lives or a subscriber listens, 5.1, 5.4), then serves what is ready, a piece at a
  * time: every socket and pipe is read and written only after poll said so, and never waited on (5.1). The OS layer's
- * main is:   if (wsb_init(argc, argv) == 0) for (;;) { int st = wsb_step(); if (st >= 0) return st; }
+ * main is:   int st = wsb_init(argc, argv); while (st == WSB_GOON) st = wsb_step(); return st;
  *
  * The OS layer's duties before wsb_init: SIGPIPE ignored; SIGCHLD's handler (if any) only sets a flag (the core
  * reaps every child it started with wsb_os_wait, 5.1); the environment of the commands is WSB_ENV (Zenix: set once
@@ -124,6 +124,9 @@ uint32_t wsb_os_now(void);                         /* milliseconds, any start, m
 uint32_t wsb_os_uptime(void);                      /* whole seconds since boot (SYS_ticks 1) */
 void wsb_os_log(const char *line);                 /* one line for the kernel log (no newline): standard error, which
                                                     * is /dev/kmsg under init (6.5) */
+void *wsb_os_alloc(uint32_t n);                    /* the heap: 0 when full (every result checked) */
+void wsb_os_free(void *p);
+const char *wsb_os_strerror(int e);                /* the words of an error number (libz's zstrerror), 0 if unknown */
 
 /* -- poll: Linux's struct pollfd and bits (frozen in D16) -- */
 struct wsb_pollfd { int fd; short events, revents; };
@@ -204,6 +207,8 @@ int wsb_os_klog(uint32_t off, void *buf, uint32_t n);
 /* -- the consoles (D24 6.1-6.3; the main session's kernel ops, root only, -ENXIO for a console never used; the OS
  * layer opens /dev/ttyN for the call and closes it: one descriptor for a moment). con: 1..WSB_NCONS -- */
 #define WSB_NCONS 10
+int wsb_os_con_ops(void);                          /* 1: the kernel has CON_READ, CON_LINE and CON_INPUT (D24 14 step 3);
+                                                    * 0: caps leave out the console commands, which answer ERR */
 struct wsb_con_head {                              /* CON_READ's header (6.1), in the core's terms */
     uint16_t rows, cols, crow, ccol;               /* the grid and the cursor */
     uint32_t changes;                              /* raised on every draw */
@@ -229,7 +234,7 @@ int wsb_os_con_input(int con, int kind, const uint8_t *b, int n);   /* n <= 256:
 /* Arguments as wasabid's (D24 5.3, 7, 4 INSTALL): --init (started by init: RESTART allowed), --trial (a trial
  * instance), --port N (the TCP port, over the configuration's). Reads /etc/wasabid.conf (root's, mode 600, else
  * refused), /var/lib/wasabid.refused and the previous boot's kernel log; opens the listener and the discovery
- * sockets. 0, or the exit status (WSB_ST_STOP for no or a bad configuration, logged). */
+ * sockets. WSB_GOON (carry on with wsb_step), or the exit status (WSB_ST_STOP for no or a bad configuration, logged). */
 int wsb_init(int argc, char **argv);
 /* One turn of the loop: WSB_GOON, or the exit status (everything closed, children signalled). */
 int wsb_step(void);
@@ -288,6 +293,10 @@ uint32_t wsb_mode_to_prot(uint32_t mode);
 uint32_t wsb_prot_to_mode(uint32_t prot, uint32_t old, int zexe);
 /* Unix seconds -> a DateStamp: days since 1978-01-01, minutes, ticks (1/50 s) */
 void wsb_datestamp(uint32_t t, uint32_t *days, uint32_t *mins, uint32_t *ticks);
+/* an error number -> ERR's u32 code: the nearest AmigaDOS code, so the client's names read right (main session's
+ * decision 2: ENOENT 205, EEXIST 203, EACCES/EPERM 223 for a write and 224 for a read, ENOSPC 221, ENOTEMPTY 216,
+ * ENOTDIR/EISDIR 212, EBUSY/ETXTBSY 202, EROFS 214; else 0). e: negative or positive; write: 1 a write, 0 a read */
+uint32_t wsb_errcode(int e, int write);
 /* is this a process name REBOOT's guard stops at (zup, fsck.*, mkfs.*, fdisk, dd; 5.5)? */
 int wsb_guarded(const char *name);
 

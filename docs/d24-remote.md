@@ -265,6 +265,11 @@ About 0.2 KB.
 
 ### 6.4 `KLOG_TOTAL`: where the log is
 
+**Replaced by the main session's decision 1 (2026-10-28, below):** no `KLOG_TOTAL`. `SYS_klog`'s `KLOG_OLDEST` (audit
+F10, built after this note was written) answers the offset of the oldest character the ring holds, so a reader whose
+position fell below it knows exactly how much was lost; F10 also fixed the `dmesg` wrap bug (`user/klogread.h`). The
+text below is kept as it was reviewed.
+
 A flag bit in `SYS_klog`'s offset (as `KLOG_PREV`): the call answers the total number of characters written so far, so
 a reader whose position fell behind the ring knows how much was lost and where to go on. About 50 bytes. **Found here, a
 bug to fix next (CLAUDE.md "fix when found"):** `dmesg` adds what it got to a position the kernel had clamped, so once the
@@ -447,7 +452,8 @@ cable.
 ## 13. For the main session (interfaces to claim; not owner questions)
 
 - `SYS_console` ops `CON_READ`, `CON_LINE`, `CON_INPUT` (proposed 4, 5, 6; descriptor-named as D20 4.5, root only, their
-  structs' first sizes, -ENXIO for an unused console), the `KLOG_TOTAL` flag of `SYS_klog`, `/dev/kmsg` (root, write
+  structs' first sizes, -ENXIO for an unused console), the `KLOG_TOTAL` flag of `SYS_klog` (*replaced by decision 1:
+  `KLOG_OLDEST`, nothing new*), `/dev/kmsg` (root, write
   only, `FT_KLOG`): frozen once built, in CLAUDE.md's list. D16's list of input producers gains `CON_INPUT`; the "kwork
   only" comments in `tty.c` and `term.c` are corrected.
 - `/etc/daemons` (7) and `/etc/wasabid.conf` (5.7): new `/etc` formats base programs read, frozen once shipped; init's
@@ -455,7 +461,7 @@ cable.
 - **D11 1 and 4.4, D19 2.3, D20 7.2** amended by name with section 7's decision; its own DESIGN line (D24 carries it).
 - `/sbin/wasabid` in `SBINAPPS` and `tools/mkroot.sh`'s `/sbin` list, its page `docs/man/wasabid.txt`, `commands.md`,
   `features.md`; `init`'s page gets section 7, `reboot`'s nothing.
-- **The `dmesg` wrap bug** of 6.4: fix next.
+- **The `dmesg` wrap bug** of 6.4: fix next. (*Done before this was built: audit 2026-10-26 F10, decision 1.*)
 - **The feature halt:** the roadmap's approved order names the remote control (block 2); the owner's yes to this note is
   the yes to `wasabid`, the five kernel interfaces and `/etc/daemons`.
 - **Review depth:** two reviews done (a root daemon on the network, kernel interfaces, a D11 decision); a second look at
@@ -466,7 +472,7 @@ cable.
 0. *side:* **the daemon's core on the PC** (`net/wasabi/`), the conformance client, the fuzzer, its host test (the core's
    OS layer named in its header, approved by the main session before code: coherence first).
 1. **The daemon without the screen:** section 4 but `GRAB`, `SUM`, `SCREEN`, `WINDOWS`, `KEY`, `INPUTS`, `TEXT`;
-   `KLOG_TOTAL`; `/etc/wasabid.conf`; started by hand. FS-UAE parts c, d, r, l. **The first thing a session can use:** run
+   `KLOG_TOTAL` (*replaced by decision 1*); `/etc/wasabid.conf`; started by hand. FS-UAE parts c, d, r, l. **The first thing a session can use:** run
    and copy on Zenix from the PC. (Network-mount files wait for D23 step 1's cancel mark: until then they are refused on
    an `nfs` mount.)
 2. **`/dev/kmsg`, `/etc/daemons` and init's supervision** (7). Part b.
@@ -535,3 +541,42 @@ Last checked against the code: 2026-10-27 (main at 22fd4ba).
 ## Owner decisions (2026-10-28)
 
 The owner answered "Yes" to every recommendation of this note's questions.
+
+## Main session decisions, 2026-10-28 (step 0)
+
+The core's header (`net/wasabi/wasabi.h`, its OS layer and entry points) was approved before code; these are the main
+session's answers to the questions step 0 raised, built so in `net/wasabi/` and checked by `tools/host/wasabi-test.sh`.
+
+1. **No `KLOG_TOTAL`** (6.4): the daemon uses `KLOG_OLDEST`; a subscriber whose position fell below the oldest
+   character gets "[wasabi: N bytes of the kernel log were lost]" and goes on from there. The `dmesg` bug of 6.4 was
+   fixed by audit F10. 6.4, 13 and 14 are amended by name above.
+2. **ERR's code:** the nearest AmigaDOS code from a fixed table in the core (`wsb_errcode`, one place, host-tested), so
+   the client's names read right and scripts that test codes keep working: `ENOENT` 205, `EEXIST` 203,
+   `EACCES`/`EPERM` 223 for a write and 224 for a read (223 where the core cannot tell), `ENOSPC` 221, `ENOTEMPTY` 216,
+   `ENOTDIR`/`EISDIR` 212, `EBUSY`/`ETXTBSY` 202, `EROFS` 214, anything else 0 (and 0 for the daemon's own refusals).
+   The message is the daemon's words, then the error number's words (libz's `zstrerror`).
+3. **REBOOT's order** (5.5): `OK` to the requester, the farewell on the log stream, the other connections drained
+   and closed (at most 1 s), then `/bin/reboot [amigaos|zenix]` as a child with its output in a pipe, the requester's
+   connection kept open meanwhile. If `reboot` comes back, its words follow the `OK` as an `ERR`. Today's client
+   closes after the `OK` and loses that `ERR`: reading it is one more Wasabi addition for section 11.
+4. **A bad `/etc/wasabid.conf`** is one with a line the daemon does not understand, a key under 16 or over 127
+   characters, more than 8 `allow` lines, a second `key` or `port`, or a name that is not 1-31 of
+   `A-Z a-z 0-9 . _ -`; so is a file that is not root's regular file with mode 600, or over 2 KB. Each is a stop:
+   status 0 and a log line naming the line and the reason.
+5. **`--trial`:** no discovery sockets (the main daemon holds those ports), the refused count never written, and
+   `RESTART` refused as for a daemon started by hand.
+6. **Detached `RUN`s** are reaped from a table of 8 (the commands let go of by `FREE` share it); a ninth gets `ERR`
+   "too many background commands".
+7. **The console descriptor:** the moment a `CON_*` call opens `/dev/ttyN` uses one of the 2 spare descriptors of
+   5.1's budget, never during a spawn.
+8. **The console structs:** the core sees `struct wsb_con_head` and `struct wsb_con_disp` (`wasabi.h`), which the OS
+   layer fills from the kernel's; the kernel's own layouts are designed at step 3.
+9. **Pipes:** plain pipes; the daemon reads only after `POLLIN`, and a child blocking on a full pipe is the
+   back-pressure.
+10. **The console commands before step 3:** the core implements all of section 4 and is checked against pretend
+   consoles on the PC. Caps stay truthful: the OS layer's `wsb_os_con_ops()` answers whether the kernel has the
+   console operations (0 until step 3 on Zenix); without them `grab`, `screen`, `windows`, `key`, `sum`, `inputs` and
+   `text` are left out of caps, and those commands answer `ERR` "not in this Zenix yet".
+11. **`SPEED` through a file** needs its size plus 64 KB free on that filesystem (Wasabi's 8 MB would refuse every
+   small Zenix disk).
+
