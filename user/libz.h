@@ -28,6 +28,14 @@ const char *zstrerror(int e);         /* strerror: the text of an error number (
 char *path_join(const char *dir, const char *name);   /* malloc'd "dir/name"; NULL: too long (zerrno 36) or no memory (12) */
 int dir_list(const char *path, char ***names);  /* malloc'd, NULL-terminated names without . and ..; count or -1 */
 void dir_free(char **names, int n);
+/* the absolute name of a path with ., .. and symbolic links resolved as the kernel follows them (DESIGN D26: at most
+ * 40 links; the path need not exist): 0 and out (cap bytes, at most 160 used), -1 when it cannot be resolved (a loop,
+ * a link that cannot be read, a name too long). Its buffers are on the stack (under 1 KB, no recursion) */
+int zrealpath(const char *in, char *out, u32 cap);
+/* one line of /etc/svctab or /etc/daemons (DESIGN D11 4.4, D24 7): "NAME NICE PROGRAM [ARGUMENTS]", cut in place (tabs
+ * made spaces: the kernel splits a program's words at spaces). 1: *name, *nice and *prog set; 0: blank or a # comment;
+ * -EINVAL: a bad line (*name its first word, for the message). One parser for boot and init */
+int svc_line(char *l, char **name, int *nice, char **prog);
 
 /* more of the C library */
 char *strdup(const char *s);
