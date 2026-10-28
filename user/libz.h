@@ -14,6 +14,9 @@ void *memset(void *d, int c, unsigned long n);
 void *memmove(void *d, const void *s, unsigned long n);
 void *malloc(u32 n);
 void free(void *p);
+void *rheap_alloc(u32 n);                 /* the region heap: small first-fit blocks, for servers (libz.c) */
+void rheap_free(void *p);
+u32 rheap_size(const void *p);             /* the bytes a block holds (with its header) */
 void *xmalloc(u32 n);                     /* malloc, or "NAME: out of memory" and exit status 1 */
 void *calloc(unsigned long n, unsigned long size);   /* zeroed; NULL on overflow or no memory */
 void *realloc(void *p, unsigned long n);  /* in place if it fits; copies only the old block; NULL leaves p as it was */

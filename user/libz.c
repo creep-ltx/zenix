@@ -502,6 +502,68 @@ void _zexit(int status) { oflush(); sys_exit(status); for (;;); }
 
 /* malloc that does not come back empty: out of memory ends the program with a message and status 1 */
 char **_zargv;
+/* The region heap (moved from wasabid, D24; used by wasabid and nfscd, D23), for servers that must stay small: first
+ * fit in regions of 16 KB taken from the kernel when needed and given back when empty, neighbours joined on free; a
+ * block over a region's size is a region of its own. At most 6 regions (a process has 8, D11's NREG). malloc rounds a
+ * block up to a power of two and grows its chunks four times over, which held 112 KB in wasabid's `ps` for one
+ * connection where this holds 88 KB (measured in FS-UAE, D24 step 1). */
+#define RH_RSZ 16400u                       /* 16 KB and room for two 8 KB blocks with their headers */
+#define RH_NRG 6
+#define RH_BUSE 1u                          /* a block's size word: bit 0 in use, bit 1 a region of its own */
+#define RH_BOWN 2u
+static char *rh_rg[RH_NRG];                /* each starts with its first block's header */
+static u32 rh_bsz(const u32 *h) { return h[0] & ~3u; }
+void *rheap_alloc(u32 n)
+{
+    u32 need = ((n ? n : 1) + 4 + 7) & ~7u;
+    if (need > RH_RSZ) {
+        u32 *h = sys_memalloc(need);
+        if (!h) return 0;
+        h[0] = need | RH_BUSE | RH_BOWN;
+        return h + 1;
+    }
+    for (int pass = 0; pass < 2; pass++)
+        for (int r = 0; r < RH_NRG; r++) {
+            if (!rh_rg[r]) {
+                if (!pass || !(rh_rg[r] = sys_memalloc(RH_RSZ))) continue;
+                *(u32 *)rh_rg[r] = RH_RSZ;    /* one free block, the whole region */
+            }
+            for (u32 o = 0; o < RH_RSZ; o += rh_bsz((u32 *)(rh_rg[r] + o))) {
+                u32 *h = (u32 *)(rh_rg[r] + o), sz = rh_bsz(h);
+                if ((h[0] & RH_BUSE) || sz < need) continue;
+                if (sz - need >= 16) {  /* split: the rest stays free */
+                    *(u32 *)((char *)h + need) = sz - need;
+                    sz = need;
+                }
+                h[0] = sz | RH_BUSE;
+                return h + 1;
+            }
+        }
+    return 0;
+}
+u32 rheap_size(const void *p) { return p ? rh_bsz((const u32 *)p - 1) : 0; }
+void rheap_free(void *p)
+{
+    u32 *h = (u32 *)p - 1;
+    if (!p) return;
+    if (h[0] & RH_BOWN) { sys_memfree(h); return; }
+    h[0] &= ~RH_BUSE;
+    for (int r = 0; r < RH_NRG; r++) {
+        if (!rh_rg[r] || (char *)h < rh_rg[r] || (char *)h >= rh_rg[r] + RH_RSZ) continue;
+        for (u32 o = 0; o < RH_RSZ; ) {     /* join every run of free neighbours */
+            u32 *a = (u32 *)(rh_rg[r] + o), *b;
+            while (!(a[0] & RH_BUSE) && o + rh_bsz(a) < RH_RSZ && !((b = (u32 *)((char *)a + rh_bsz(a)))[0] & RH_BUSE))
+                a[0] = rh_bsz(a) + rh_bsz(b);
+            o += rh_bsz(a);
+        }
+        if (*(u32 *)rh_rg[r] == RH_RSZ) {     /* all of it free again: back to the kernel */
+            sys_memfree(rh_rg[r]);
+            rh_rg[r] = 0;
+        }
+        return;
+    }
+}
+
 void *xmalloc(u32 n)
 {
     void *p = malloc(n);
@@ -545,6 +607,7 @@ static const struct { unsigned char e; const char *text; } errtext[] = {
     { EISCONN, "already connected" }, { ENOTCONN, "not connected" }, { ETIMEDOUT, "connection timed out" },
     { ECONNREFUSED, "connection refused" }, { EHOSTUNREACH, "no route to host" },
     { EALREADY, "operation already in progress" }, { EINPROGRESS, "operation in progress" },
+    { ESTALE, "stale file handle" },
 };
 /* strerror: the text of an error number (positive or negative), 0 if it has none */
 const char *zstrerror(int e)

@@ -254,7 +254,10 @@ noted in 5.4.
 **The deadlock rules** (the ramlib lesson, written down so nobody breaks them later):
 - Nobody loads on behalf of someone else: the loader is always a client that needed the service.
 - diskd calls nobody: no filesystem, no other server, not the mount table.
-- A filesystem server (the root or a mount) calls only diskd.
+- A filesystem server (the root or a mount) calls only diskd. **An NFS mount's server (nfscd, DESIGN D23 4.2)** calls
+  `net` (its socket, through the kernel) and, at its start only, the root's server (its program, `/etc/passwd` and
+  `/etc/group`); never another mount, never itself. `mount` refuses an NFS mount on `/`, `/bin`, `/sbin`, `/etc` and
+  below the last three, where netd's and nfscd's own files are (no cycle netd -> nfscd -> netd).
 - A server's start-up may call other services, never its own port (`call()` already refuses that) and never in a
   cycle (the deadline breaks one and logs it).
 - **A loader never waits for the service it loads** (audit 2026-10-26 F14): a program that can only be read through

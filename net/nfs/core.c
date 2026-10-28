@@ -104,7 +104,7 @@ int nfs_codes_parse(const char *s, struct nfs_opts *o)
 }
 
 /* ---- set up ---- */
-#define ALLOC(p, n) do { (p) = zalloc((u32)(n) * (u32)sizeof *(p)); if (!(p)) goto nomem; } while (0)
+#define PART(p, n) do { off = (off + 7) & ~7u; if (b) (p) = (void *)(b + off); off += (u32)(n) * (u32)sizeof *(p); } while (0)
 
 static u32 pow2_down(u32 v) { u32 p = 1024; while (p * 2 <= v && p < (1u << 20)) p *= 2; return p; }
 
@@ -123,13 +123,13 @@ int nfs_init(const struct nfs_conf *c)
     struct prof *p = &N.pf;
     N.o_large = c->large;
     if (!c->large) {
-        p->rsize = p->wsize = 8192; p->nnodes = 256; p->nnames = 256; p->nrdt = 8; p->ndc = 4; p->cap = 32768;
+        p->rsize = p->wsize = 8192; p->nnodes = 64; p->nnames = 64; p->nrdt = 8; p->ndc = 4; p->cap = 32768;
         p->nops = 8; p->npieces = 32; p->ncreds = 8;
     } else {
         u32 cb = c->cache_bytes ? c->cache_bytes : 256 * 1024;
         if (cb > 1024 * 1024) cb = 1024 * 1024;
         if (cb < 128 * 1024) cb = 128 * 1024;
-        p->rsize = p->wsize = 32768; p->nnodes = 2048; p->nnames = 2048; p->nrdt = 64;
+        p->rsize = p->wsize = 32768; p->nnodes = 256; p->nnames = 256; p->nrdt = 64;
         p->cap = cb / 2; p->ndc = (cb / 2) / p->rsize;
         p->nops = 32; p->npieces = 128; p->ncreds = 16;
     }
@@ -138,19 +138,24 @@ int nfs_init(const struct nfs_conf *c)
     N.rshift = 0; while ((1u << N.rshift) < N.rsize) N.rshift++;
     N.hmask = 1; while (N.hmask < p->nnodes * 2) N.hmask <<= 1; N.hmask--;
     N.rxcap = p->rsize + 1024; N.txcap = p->wsize + 1024;
-    ALLOC(N.nodes, p->nnodes);
-    ALLOC(N.inoh, N.hmask + 1);
-    ALLOC(N.fidh, N.hmask + 1);
-    ALLOC(N.names, p->nnames);
-    ALLOC(N.rdts, p->nrdt);
-    ALLOC(N.chunk, 1);
-    ALLOC(N.dc, p->ndc);
-    ALLOC(N.ops, p->nops);
-    ALLOC(N.calls, p->ncalls);
-    ALLOC(N.pieces, p->npieces);
-    ALLOC(N.creds, p->ncreds);
-    ALLOC(N.rx, N.rxcap);
-    ALLOC(N.tx, N.txcap);
+    for (int pass = 0; pass < 2; pass++) {      /* pass 0 counts, pass 1 places: one block for everything */
+        u32 off = 0;
+        u8 *b = N.blk;
+        PART(N.nodes, p->nnodes);
+        PART(N.inoh, N.hmask + 1);
+        PART(N.fidh, N.hmask + 1);
+        PART(N.names, p->nnames);
+        PART(N.rdts, p->nrdt);
+        PART(N.chunk, 1);
+        PART(N.dc, p->ndc);
+        PART(N.ops, p->nops);
+        PART(N.calls, p->ncalls);
+        PART(N.pieces, p->npieces);
+        PART(N.creds, p->ncreds);
+        PART(N.rx, N.rxcap);
+        PART(N.tx, N.txcap);
+        if (!pass && !(N.blk = zalloc(N.blksz = off))) goto nomem;
+    }
     tab_init();
     N.chunk->rdt = -1;
     N.root = N_NONE;
@@ -184,8 +189,10 @@ void nfs_end(void)
 {
     if (N.pieces) for (u32 i = 0; i < N.pf.npieces; i++) if (N.pieces[i].data) zfree(N.pieces[i].data, N.pieces[i].len);
     if (N.dc) for (u32 i = 0; i < N.pf.ndc; i++) if (N.dc[i].data) zfree(N.dc[i].data, N.rsize);
-    void *bl[] = { N.nodes, N.inoh, N.fidh, N.names, N.rdts, N.chunk, N.dc, N.ops, N.calls, N.pieces, N.creds, N.rx, N.tx };
-    for (u32 i = 0; i < sizeof bl / sizeof bl[0]; i++) if (bl[i]) nfs_free(bl[i]);
+    if (N.blk) {
+        for (u32 i = 0; i < N.pf.nnodes; i++) node_fh_free(&N.nodes[i]);
+        zfree(N.blk, N.blksz);
+    }
     memset(&N, 0, sizeof N);
 }
 
@@ -316,7 +323,8 @@ void nfs_request(const struct nfs_req *r)
         goto out;
     }
     if (N.done || N.killed) { nfs_answer(r->id, -EIO); return; }
-    if (r->kflags & NFS_REQ_CANCEL) { nfs_answer(r->id, -EINTR); return; }   /* a cancelled one still queued (5.2) */
+    int cancelled = (r->kflags & NFS_REQ_CANCEL) && !(r->type == FS_SYNC && r->a[0] == 1);   /* bounded: never cut */
+    if (cancelled && r->type != FS_QUIT) { nfs_answer(r->id, -EINTR); return; }   /* a cancelled one still queued (5.2) */
     int o = -1;
     for (u32 i = 0; i < N.pf.nops; i++) if (!N.ops[i].used) { o = (int)i; break; }
     if (o < 0) { lg("too many requests at once (-EAGAIN)", 0, -1, 0); nfs_answer(r->id, -EAGAIN); return; }
@@ -332,6 +340,7 @@ void nfs_request(const struct nfs_req *r)
     if (r->kflags & NFS_REQ_LINKS) op->flags |= OPF_LINKS;
     op->node = op->node2 = N_NONE;
     op_start(o);
+    if (cancelled && N.ops[o].used && N.ops[o].id == r->id) nfs_cancel(r->id);   /* FS_QUIT: quit, dropping the rest */
 out:
     rpc_kick();
 }
@@ -359,6 +368,7 @@ void nfs_cancel(u32 id)
     for (u32 i = 0; i < N.pf.nops; i++) {
         struct op *op = &N.ops[i];
         if (!op->used || op->id != id) continue;
+        if (op->type == FS_SYNC && op->a[0] == 1) break;    /* a bounded sync is never cut short (fsproto.h) */
         if (op->type == FS_WRITE) wr_cancel((int)i);
         else if (op->type == FS_QUIT) {          /* a cancelled umount drops the rest (7.4) */
             if (N.unsaved_bytes) lg("umount cancelled: ", 0, (long)(N.unsaved_bytes + 1023) / 1024, " KB not saved on the NAS");

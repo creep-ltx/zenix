@@ -41,10 +41,15 @@
 #      failure, or in its back-off, it ends at once; a nice 19 loader boosted by a nice -20 client queued in its
 #      back-off is back at its own level (PRI 31) after the start failed
 #   dmg  a test-only kernel damages diskd's saved table: diskd stops with its message, the kernel panics
+#   c  the cancel mark (DESIGN D23 step 1) with `svctest serve`, a server that holds every request until it is
+#      cancelled: Ctrl-C's SIGINT (not caught) and kill -9 mark the waiting open, the server's poll sees POLLPRI once,
+#      its -EINTR ends the program (130, 137: no restart); a caught SIGINT marks nothing until kill -9; the second call
+#      of unlink and of an O_TRUNC open comes marked; sync and reboot sync the local mount before the network one
+#      (type nfs) and give that one FS_SYNC a0 1 at the reboot
 # tools/svc-test.sh [PART...] runs only those parts (default: all).
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
-PARTS=" ${*:-a z zs b n r d o zo u l f s h t dmg} "
+PARTS=" ${*:-a z zs b n r d o zo u l f s h t dmg c} "
 want_part() { case "$PARTS" in *" $1 "*) return 0;; esac; return 1; }
 make -s BUILD=$BD all $BD/zenix-zroot.hdf $BD/zenix-ram.adf $BD/zenix-zfs.adf >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 OUT=${ZENIX_OUT:-/tmp/zenix-svc}; mkdir -p "$OUT"
@@ -284,6 +289,48 @@ line h "the reboot gives it 5 s, then resets, naming it" "reboot: fs.hang did no
 rx   h "... the machine booted again" "klog: boot 2, .*"
 if e2fsck -fn "$OUT/root.hdf" > "$OUT/e2fsck-h.log" 2>&1; then echo "PASS the host's e2fsck finds the root clean (it was synced first)"; else echo "FAIL the host's e2fsck finds the root clean (it was synced first)"; pass=0; fi
 rm -f "$OUT/root.hdf"
+fi
+
+# ---- c: the cancel mark (D23 step 1) ----
+before() {   # before LOG WHAT RE1 RE2 [FROM]: after the first line matching FROM (or from the start), the first line
+             # matching RE1 comes before the first matching RE2
+    local a b f=0
+    [ -n "$5" ] && f=$(grep -anxE -- "$5" "$OUT/$1.log" | head -1 | cut -d: -f1)
+    a=$(tail -n +$((f + 1)) "$OUT/$1.log" | grep -anxE -- "$3" | head -1 | cut -d: -f1)
+    b=$(tail -n +$((f + 1)) "$OUT/$1.log" | grep -anxE -- "$4" | head -1 | cut -d: -f1)
+    if [ -n "$f" ] && [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; then echo "PASS $2"; else echo "FAIL $2 ($f $a $b)"; pass=0; fi
+}
+if want_part c; then
+cp $BD/zenix.hdf "$OUT/root-c.hdf"
+conf c "$OUT/root-c.hdf"
+run c "$OUT/c.fs-uae" 150 tools/tests/svc-cancel-test.txt
+rx   c "the network-type and the local test servers are mounted" ".*c0-up"
+rx   c "cat's open is held by the server" ".*svctest serve: type 1 held"
+rx   c "SIGINT (not caught) marks it: the server answers -EINTR after the cancel" ".*svctest serve: type 1 answered -4 after the cancel"
+rx   c "... seen through POLLPRI on its port" ".*svctest serve: POLLPRI, 1 held cancelled"
+rx   c "... and cat ends at once, killed by SIGINT (no restart)" ".*c1-status=130"
+before c "kill -9 marks it too: answered -4 after the cancel" ".*svctest serve: type 1 answered -4 after the cancel" ".*c2-status=137" ".*c1-status=130"
+rx   c "... and the program ends at once" ".*c2-status=137"
+before c "a caught SIGINT marks nothing: no POLLPRI until kill -9" ".*c3-mark" ".*svctest serve: (type 1 answered -4 after the cancel|POLLPRI, 1 held cancelled)" ".*c2-status=137"
+none c "... and the caught open never returned early" ".*svctest catch: open .*"
+rx   c "... kill -9 ends it" ".*c3-status=137"
+rx   c "unlink's FS_LSTAT, held and cancelled, is answered by a server that ignores the mark" ".*svctest serve: type 19 answered 0 after the cancel"
+rx   c "... and its FS_UNLINK, made after the kill, comes marked" ".*svctest serve: type 9 came cancelled"
+rx   c "... the program ends at once" ".*c4-status=130"
+rx   c "an O_TRUNC open's FS_STAT is cancelled, its FS_OPEN comes marked" ".*svctest serve: type 1 came cancelled"
+rx   c "... the program ends at once" ".*c5-status=130"
+rx   c "a read of an open file, cancelled: -EINTR" ".*svctest serve: type 2 answered -4 after the cancel"
+rx   c "... the program ends at once" ".*c8-status=130"
+rx   c "... and its close at the exit reaches the server unmarked" ".*svctest serve: close 5"
+none c "no close is ever marked (proc_exit's calls, FS_CLOSE)" ".*svctest serve: close .* came marked"
+# (safe because serve receives every message at once: a cancel of a queued one would also count)
+none c "POLLPRI is taken as seen: never reported twice for one cancel" ".*svctest serve: POLLPRI, 0 held cancelled"
+none c "no program's call returned without the server's answer" ".*svctest (unlink|trunc): .*"
+before c "sync: the local mount first ..." ".*svctest serve: fs.l sync a0=0" ".*svctest serve: fs.c sync a0=0"
+rx   c "... then the network mount, a0 0" ".*svctest serve: fs.c sync a0=0"
+before c "reboot: the local mount first, then the network mount, bounded (a0 1)" ".*svctest serve: fs.l sync a0=0" ".*svctest serve: fs.c sync a0=1" ".*c7-synced"
+rx   c "... the machine booted again" ".*klog: boot 2, .*"
+rm -f "$OUT/root-c.hdf"
 fi
 
 # ---- t: /etc/svctab ----

@@ -75,8 +75,9 @@ ULDFLAGS := -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-se
 USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # servers that live on the disk as files (DESIGN D19 step 1), installed as /sbin/NAME on every full root image and in
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
-# Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt.
-SBINAPPS := zfsd netd wasabid
+# Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
+# the server of an NFS mount, is described in docs/man/mount.txt.
+SBINAPPS := zfsd netd wasabid nfscd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -403,6 +404,16 @@ $(BUILD)/wasabid.uo: user/wasabid.c net/wasabi/wasabi.h user/socket.h kernel/net
 $(BUILD)/wasabid.uelf: $(BUILD)/wasabid.uo $(WSBOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/wasabid.uo $(WSBOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_wasabid := 8192
+# nfscd (DESIGN D23, docs/d23-nfs.md): the server of an NFS mount, /sbin/nfscd, its OS layer (user/nfscd.c) over the
+# NFS client core in net/nfs/ (no system calls, shared with the PC tests, tools/host/nfs-test.sh). Cold code: -Os
+NFSOBJS := $(patsubst %,$(BUILD)/nfs-%.no,core ops proto rpc table write)
+$(BUILD)/nfs-%.no: net/nfs/%.c net/nfs/nfs.h net/nfs/nfs_int.h kernel/fsproto.h kernel/errno.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/nfscd.uo: user/nfscd.c net/nfs/nfs.h user/socket.h kernel/netproto.h kernel/fsproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/nfscd.uelf: $(BUILD)/nfscd.uo $(NFSOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/nfscd.uo $(NFSOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+STACK_nfscd := 8192
 # the crypto library (DESIGN D21 3.5, docs/d21-crypto-ssh-https.md): BearSSL and Monocypher (only the files used,
 # crypto/*/README) and Zenix's crypto/zc/, as one archive linked with --gc-sections into the programs that use it
 # (cryptotest, ssh, ssh-keygen). Cold code at -Os; the files a handshake waits on at -O2 (D21 3.6 step 1: the curve25519

@@ -137,7 +137,7 @@ numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*
 `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
 zup's "needs a check" mark), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
-`struct umsg`'s `kflags` bits: 1 `UMSG_KERNEL`, 2 `UMSG_NETREPLY` (internal), 4 `UMSG_CANCEL` (D23, planned), 8
+`struct umsg`'s `kflags` bits: 1 `UMSG_KERNEL`, 2 `UMSG_NETREPLY` (internal), 4 `UMSG_CANCEL` (D23 step 1, branch nfs12, 2026-10-28: only the kernel sets it, for a killed client), 8
 `UMSG_LINKS` (D26, branch d26, 2026-10-28: only the kernel sets it, through `ipc_kcall`'s kflags argument; `call()`
 ORs D23's `UMSG_CANCEL` in itself). Answers in `kernel/fsproto.h`: a value or -errno; -1024 .. -1279 reserved (no
 errno goes there, `kernel/errno.h`), of which `FS_LINKED` + `FSL_*` (`FSL_A1` 1, `FSL_LAST` 2: -1024 .. -1027) for a
@@ -147,7 +147,8 @@ network numbers (Linux's, main, 2026-10-27): `ENOTSOCK` 88, `EDESTADDRREQ` 89, `
 `ENOPROTOOPT` 92, `EPROTONOSUPPORT` 93, `EAFNOSUPPORT` 97, `EADDRINUSE` 98, `EADDRNOTAVAIL` 99, `ENETDOWN` 100,
 `ENETUNREACH` 101, `ECONNABORTED` 103, `ENOBUFS` 105, `EISCONN` 106, `ENOTCONN` 107, `ETIMEDOUT` 110, `ECONNREFUSED`
 111, `EHOSTUNREACH` 113, `EALREADY` 114, `EINPROGRESS` 115; `ETXTBSY` 26 (D13, "text file busy": a running
-shared program opened for writing; claimed 2026-10-25, Linux's number). Update note kinds (D15, frozen, append-only):
+shared program opened for writing; claimed 2026-10-25, Linux's number); `ESTALE` 116 (D23, "stale file handle", Linux's;
+branch nfs12, 2026-10-28). Update note kinds (D15, frozen, append-only):
 1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). `struct uupdate`'s (and
 the bootinfo's) flags bits: 1 `UPD_F_ROLLBACK` (D15), 2 `UPD_F_TRIAL` (D22 4.3, claimed 2026-10-28: an unconfirmed trial;
 the kernel keeps it after `UPD_RELEASE`; zenixboot sets it from D22 step 7). Port names
@@ -257,6 +258,17 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   refusals (root's regular file, mode 600, at most 2 KB, decision 4 of d24-remote.md); wasabid's TCP port 1236, its
   discovery answer, its exit statuses (0 a stop, 1 could not start, 75 start again) and arguments (`--init`,
   `--trial`, `--port`). The Wasabi protocol itself is the Wasabi project's (its PROTOCOL.md), followed, not ours.
+- **D23 step 1 (the cancel mark, branch nfs12, 2026-10-28):** `UMSG_CANCEL` 4 (set by the kernel only, for a client
+  killed while it waits and on every call a killed process makes after; never for a caught signal, never on
+  `proc_exit`'s calls or `FS_CLOSE`; never cleared; a server may answer -EINTR, the call is never restarted; `FS_QUIT`
+  is carried out marked or not, a bounded `FS_SYNC` ignores it, diskd ignores it); `POLLPRI` 2 on a port
+  ("a message sent to it was cancelled since you last saw POLLPRI"; reported only when asked for, and the report takes
+  it as seen); `FS_SYNC`'s a0 (1 "bounded": answer within 2 s; any other value as 0) and `vfs_sync`'s order (network mounts,
+  by `fsinfo.type` `nfs`, last); `ESTALE` 116.
+- **D23 step 2 (nfscd, branch nfs12, 2026-10-28):** `/etc/fstab`'s type `nfs` with `HOST:/EXPORT` and mount's NFS
+  options (`hard`, `soft`, `timeo=`, `retrans=`, `ro`, `sync`, `actimeo=`); the service names `fs.nfs0` .. `fs.nfs7`
+  and the program text `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` with its codes (`h s tN rN o y aN l`, append-only);
+  nfscd's saved record (`NFS1`, the root's handle and fileid, at most 77 bytes).
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

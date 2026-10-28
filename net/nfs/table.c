@@ -54,12 +54,20 @@ int tab_init(void)
     return 0;
 }
 
+void node_fh_free(struct node *p)
+{
+    if (p->fh && p->fh != p->fhi) zfree(p->fh, p->fhlen);
+}
+
 static void node_drop(u16 i)
 {
     struct node *p = &N.nodes[i];
     h_del(N.inoh, key_ino, i);
     if (!(p->flags & NF_STALE)) h_del(N.fidh, key_fid, i);
     dc_drop(i);
+    node_fh_free(p);
+    p->fh = 0;
+    p->fhlen = 0;
     p->flags = 0;
     p->gen++;
 }
@@ -127,13 +135,15 @@ int node_get(const u8 *fh, u32 fhlen, const struct fattr *a)
     if (i < 0) {
         i = node_slot();
         if (i < 0) return -1;
+        u8 *h = fhlen > NODE_FH ? zalloc(fhlen) : 0;
+        if (fhlen > NODE_FH && !h) return -1;
         struct node *p = &N.nodes[i];
         u16 g = p->gen;
         memset(p, 0, sizeof *p);
         p->gen = g;
         p->flags = NF_USED;
         p->fileid = a->fileid;
-        p->fhlen = (u8)fhlen; memcpy(p->fh, fh, fhlen);
+        p->fh = h ? h : p->fhi; p->fhlen = (u8)fhlen; memcpy(p->fh, fh, fhlen);
         p->ino = ino_free(a->fileid);
         h_add(N.inoh, p->ino, (u16)i);
         h_add(N.fidh, fid32(p->fileid), (u16)i);
@@ -148,13 +158,15 @@ int node_root(const u8 *fh, u32 n)
 {
     int i = node_slot();
     if (i < 0) return -1;
+    u8 *h = n > NODE_FH ? zalloc(n) : 0;
+    if (n > NODE_FH && !h) return -1;
     struct node *p = &N.nodes[i];
     u16 g = p->gen;
     memset(p, 0, sizeof *p);
     p->gen = g;
     p->flags = NF_USED | NF_ROOT;
     p->ino = 2;
-    p->fhlen = (u8)n; memcpy(p->fh, fh, n);
+    p->fh = h ? h : p->fhi; p->fhlen = (u8)n; memcpy(p->fh, fh, n);
     h_add(N.inoh, 2, (u16)i);
     h_add(N.fidh, fid32(0), (u16)i);
     N.root = (u16)i;

@@ -334,6 +334,8 @@ static inline u32 usize_n(u32 given, u32 first, u32 now)
 #define EV_CON   8u                     /* init: a console wants a login, or the reset warning came */
 struct upollfd { s32 fd; u16 events, revents; };    /* SYS_evwait's items: Linux's struct pollfd (frozen) */
 #define POLLIN   0x0001                 /* poll's bits: Linux values (frozen) */
+#define POLLPRI  0x0002                 /* on a port (D23 5.2): a message sent to it was cancelled since its owner last
+                                         * saw a POLLPRI (an evwait that asked for it and reported it takes it as seen) */
 #define POLLOUT  0x0004
 #define POLLERR  0x0008
 #define POLLHUP  0x0010
@@ -347,7 +349,7 @@ void ev_arm(u32 *mask);                 /* the caller registers on an object and
 long ev_block(u32 bits, int timed, u32 until, int restart);  /* 0 woken, -EINTR killed or a handler due */
 long ev_wait_items(u32 uitems, u32 n, s32 timeout);
 u16 vfs_poll(struct file *f);           /* registers the caller on the object (vfs.c) */
-u16 port_poll(int port);                /* ipc.c */
+u16 port_poll(int port, u16 ev);        /* ipc.c: POLLIN, POLLPRI (taken as seen when ev asks for it) */
 u16 serdev_poll(void);                  /* serial.c */
 extern u32 serdev_wait;
 /* DESIGN D16: signals (signal.c). Numbers and default actions as Linux (frozen) */
@@ -562,6 +564,7 @@ struct port {
     struct umsg *head, *tail;
     struct proc *waiter;        /* server blocked in recv */
     u32 evw;                    /* D16: the slots polling it (SYS_evwait with POLLPORT) */
+    u32 ncancel, nseen;         /* D23 5.2: cancels of messages sent to it; how many its owner saw (POLLPRI) */
 };
 extern struct port ports[NPORT];
 #define PORT_ID(i) ((int)((ports[i].gen << 8) | (u32)(i)))     /* a port number: (generation << 8) | slot */
@@ -577,11 +580,12 @@ long ipc_wait(struct umsg *m);                 /* the caller's m is queued: wait
 void ipc_enqueue(struct port *p, struct umsg *m, int front);
 void ipc_unqueue(struct port *p, struct umsg *m);
 void ipc_cancel(struct proc *p);       /* audit O9: a kill takes back p's queued call (msg_cancel), -EINTR */
+void ipc_cancel_mark(struct proc *p);  /* D23 5.1: a kill marks p's call in flight UMSG_CANCEL (the call still waits) */
 void ipc_finish(struct umsg *m, s32 result);
 int ipc_serving(int pid);                      /* is pid serving a request now? */
 #define UMSG_KERNEL 1
 #define UMSG_NETREPLY 2                 /* D19: answered by the network server's NETSRV_REPLY (sock.c), internal */
-/* 4 UMSG_CANCEL (D23, planned); 8 UMSG_LINKS (D26) in fsproto.h, where the servers see it */
+/* 4 UMSG_CANCEL (D23) and 8 UMSG_LINKS (D26) are in fsproto.h, where the servers see them */
 struct proc *ipc_client(struct umsg *m);       /* the client of m if it is in flight and served by current, else 0 */
 struct umsg *ipc_recv(int port, int wait);
 struct umsg *ipc_replyrecv(struct umsg *m, s32 result, int port);
@@ -685,7 +689,9 @@ long vfs_path1(u32 op, const char *p, u32 a2, u32 a3);   /* chmod/utimes/lstat/r
 long vfs_link(u32 op, const char *a, const char *b);
 #include "clock.h"
 extern struct wclock wclock;        /* SYS_time, SYS_settime (main.c, clock.h) */
-long vfs_sync(int reboot);             /* 1: SYS_reboot, each server at most 5 s (then the tick resets) */
+long vfs_sync(int how);                /* VS_* bits; the network mounts last (D23 5.4) */
+#define VS_REBOOT  1                    /* SYS_reboot: each server at most 5 s (then the tick resets) */
+#define VS_BOUNDED 2                    /* FS_SYNC a0 1 to the network mounts: answer within 2 s (reboot, reset warning) */
 long vfs_mkdir(const char *path);
 long vfs_unlink(const char *path);
 long vfs_rmdir(const char *path);

@@ -77,7 +77,7 @@ long ev_block(u32 bits, int timed, u32 until, int restart)
 }
 
 /* SYS_evwait (poll and select in libz): n items { fd, events, revents }, timeout in ticks (-1: none, 0: only check).
- * An item with POLLPORT is a port the caller owns: POLLIN when a message is queued. The count of items with revents
+ * An item with POLLPORT is a port the caller owns: POLLIN when a message is queued, POLLPRI after a cancel (D23). The count of items with revents
  * set, 0 at the timeout, -EINTR when a handler is due (never restarted). */
 long ev_wait_items(u32 uitems, u32 n, s32 timeout)
 {
@@ -95,7 +95,7 @@ long ev_wait_items(u32 uitems, u32 n, s32 timeout)
             if (it[i].fd < 0)
                 ;                       /* POSIX: ignored */
             else if (ev & POLLPORT)
-                r = port_poll(it[i].fd);
+                r = port_poll(it[i].fd, ev);
             else if ((u32)it[i].fd >= NFD || !current->fd[it[i].fd])
                 r = POLLNVAL;
             else

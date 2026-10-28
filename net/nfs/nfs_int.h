@@ -15,12 +15,8 @@ typedef int16_t s16;
 typedef int32_t s32;
 typedef uint64_t u64;
 
-/* D23 12: ESTALE (Linux's 116) is still to be claimed by the main session; until then -EIO */
-#ifdef ESTALE
+/* D23 12: ESTALE (Linux's 116), claimed in step 1 (kernel/errno.h) */
 #define NFS_ESTALE ESTALE
-#else
-#define NFS_ESTALE EIO
-#endif
 
 /* the open flags FS_OPEN carries (user/usys.h, frozen; O_EXCL and O_EXEC are in fsproto.h) */
 #ifndef O_WRONLY
@@ -146,6 +142,7 @@ struct res {
 #define NF_REF 8                         /* referenced since the clock hand passed */
 #define NF_USED 16                       /* the slot holds a file */
 #define NF_COMMIT 32                     /* a commit is wanted (the last close, 7.3) */
+#define NODE_FH 36                       /* a handle up to this long lives in the node itself */
 struct node {
     u32 ino;
     u64 fileid;
@@ -160,7 +157,10 @@ struct node {
     u32 attr_at, acto;                   /* when the attributes were fetched; how long they stay fresh (ms) */
     u32 commit_at;                       /* the commit timer (7.2), 0 none */
     struct fattr a;
-    u8 fh[FHMAX];
+    u8 *fh;                              /* fhlen bytes: fhi, or the heap for a longer one (the main session's
+                                          * decision (a), 2026-10-28: handles are 28-36 bytes on Linux and Synology,
+                                          * not FHMAX) */
+    u8 fhi[NODE_FH];
 };
 
 /* ---- the requests nfscd holds (4.3) ---- */
@@ -304,7 +304,8 @@ struct nfs {
     u32 fraglen; u8 hdr[4]; u8 hdrn; u8 last; u8 skipping; u32 skipxid; u32 skipped;
     /* sending */
     u8 *tx; u32 txcap, txhead, txtail;
-    /* tables */
+    /* tables: all of them and the two buffers in one block (blk, blksz bytes): one heap block, no slack between */
+    u8 *blk; u32 blksz;
     struct node *nodes; u16 *inoh, *fidh; u32 hmask; u32 hand;
     struct nament *names;
     struct rdt *rdts; struct chunk *chunk;
@@ -392,6 +393,7 @@ void wr_reset(void);
 int wr_resend_all(void);                 /* a changed verifier: everything written again */
 /* core.c */
 void *zalloc(u32 n);
+void node_fh_free(struct node *p);   /* a handle on the heap (table.c) */
 void zfree(void *p, u32 n);
 int cred_get(const struct nfs_req *r);   /* an interned credential, -1 when the table is full */
 void cred_put(int c);

@@ -25,8 +25,82 @@
  *                                  filesystem (pingd -fs) for the reboot's time limit (audit A7)
  *   svctest lost FILE SECS [PID]   create FILE and write AAAA, kill PID (the filesystem server: it ends before its next
  *                                  commit), wait, read it through the open file (ZenixFS: the file is gone with the
- *                                  uncommitted seconds: an error, never another file) */
+ *                                  uncommitted seconds: an error, never another file)
+ *   svctest serve PORT TYPE        a filesystem server on PORT that holds every request until it is cancelled (DESIGN
+ *                                  D23 step 1): FS_ROOT 2 (fsinfo type TYPE: "nfs" makes it a network mount), FS_CLOSE
+ *                                  0 (said), FS_SYNC 0 (its a0 said), FS_QUIT ends it, FS_OPEN of /o 5. Polls its port with POLLPRI; on it, the
+ *                                  held requests marked UMSG_CANCEL are answered: a stat 0 (a server that ignores the
+ *                                  mark), anything else -EINTR. A request that comes marked is answered -EINTR at once
+ *   svctest catch FILE             catch SIGINT, then open FILE: a caught signal must not cancel the open (D16 4)
+ *   svctest trunc FILE             open FILE with O_WRONLY|O_CREAT|O_TRUNC (the kernel's FS_STAT, then FS_OPEN)
+ *   svctest unlink FILE            unlink FILE (the kernel's FS_LSTAT, then FS_UNLINK) */
+#include "../kernel/fsproto.h"
 #define E_MS 709u
+
+static int ncaught;
+static void caught(int sig) { (void)sig; ncaught++; }
+
+/* svctest serve (D23 step 1): every request but FS_ROOT, FS_CLOSE, FS_SYNC and FS_QUIT is held until it is cancelled */
+static int serve(const char *name, const char *type)
+{
+    struct umsg *held[8];
+    int nh = 0, port = sys_port_create(name);
+    if (port < 0) { printf("svctest serve: port %d\n", port); return 1; }
+    for (;;) {
+        struct pollfd pf = { port, POLLPORT | POLLIN | POLLPRI, 0 };
+        int n = sys_evwait(&pf, 1, -1);
+        if (n < 0) return 1;
+        if (pf.revents & POLLPRI) {
+            int k = 0;
+            for (int i = 0; i < nh; ) {
+                struct umsg *m = held[i];
+                if (!(m->kflags & UMSG_CANCEL)) { i++; continue; }
+                int st = m->type == FS_STAT || m->type == FS_LSTAT || m->type == FS_FSTAT, r = -EINTR;
+                if (st) {
+                    u32 *u = (u32 *)(m->type == FS_FSTAT ? m->a[1] : m->a[2]);   /* ino mode size mtime uid gid links */
+                    memset(u, 0, 28);
+                    u[0] = 3; u[1] = 0100644; u[6] = 1;
+                    r = 0;
+                }
+                printf("svctest serve: type %u answered %d after the cancel\n", m->type, r);
+                sys_reply(m, r);
+                held[i] = held[--nh];
+                k++;
+            }
+            printf("svctest serve: POLLPRI, %d held cancelled\n", k);
+        }
+        if (!(pf.revents & POLLIN)) continue;
+        struct umsg *m = sys_recv(port, 0);
+        if (!m || (int)m == -1) continue;
+        int r;
+        if (m->type == FS_ROOT) {
+            struct fsinfo *fi = (struct fsinfo *)m->a[0];
+            memset(fi, 0, sizeof *fi);
+            strcpy(fi->dev, "svct");
+            strncpy(fi->type, type, sizeof fi->type - 1);
+            r = 2;
+        } else if (m->type == FS_CLOSE) {
+            printf("svctest serve: close %u%s\n", m->a[0], m->kflags & UMSG_CANCEL ? " came marked" : "");
+            r = 0;
+        } else if (m->type == FS_OPEN && !(m->kflags & UMSG_CANCEL) && !strcmp((const char *)m->a[0], "/o")) {
+            u32 *u = (u32 *)m->a[3];            /* /o opens (a file of 10 bytes): its reads are held */
+            memset(u, 0, 28);
+            u[0] = 5; u[1] = 0100644; u[2] = 10; u[6] = 1;
+            r = 5;
+        }
+        else if (m->type == FS_SYNC) { printf("svctest serve: %s sync a0=%u\n", name, m->a[0]); r = 0; }
+        else if (m->type == FS_QUIT) { sys_reply(m, 0); return 0; }
+        else if (m->kflags & UMSG_CANCEL) {
+            printf("svctest serve: type %u came cancelled\n", m->type);
+            r = -EINTR;
+        } else if (nh < 8) {
+            printf("svctest serve: type %u held\n", m->type);
+            held[nh++] = m;
+            continue;
+        } else r = -EBUSY;
+        sys_reply(m, r);
+    }
+}
 
 int main(int argc, char **argv)
 {
@@ -137,6 +211,22 @@ int main(int argc, char **argv)
         printf("svctest mount %s: %d\n", argv[3], sys_mount(&rq));
         return 0;
     }
-    printf("usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost|mount ...\n");
+    if (argc >= 4 && !strcmp(argv[1], "serve"))
+        return serve(argv[2], argv[3]);
+    if (argc >= 3 && !strcmp(argv[1], "catch")) {
+        signal(SIGINT, caught);
+        int fd = sys_open(argv[2], O_RDONLY);
+        printf("svctest catch: open %d, SIGINT caught %d\n", fd, ncaught);
+        return 0;
+    }
+    if (argc >= 3 && !strcmp(argv[1], "trunc")) {
+        printf("svctest trunc: %d\n", sys_open(argv[2], O_WRONLY | O_CREAT | O_TRUNC));
+        return 0;
+    }
+    if (argc >= 3 && !strcmp(argv[1], "unlink")) {
+        printf("svctest unlink: %d\n", sys_unlink(argv[2]));
+        return 0;
+    }
+    printf("usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost|mount|serve|catch|trunc|unlink ...\n");
     return 2;
 }

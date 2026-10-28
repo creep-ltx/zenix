@@ -1,6 +1,6 @@
 # D23: the NFS client (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 15); nothing built.** Roadmap block 2, "Zenix
+Status: **design, revision 2 after two independent reviews (section 15); steps 0-2 built (the core, the cancel mark, nfscd reading: the as-built sections at the end).** Roadmap block 2, "Zenix
 reaches the world": "an NFS client". It mounts a directory the owner's NAS (or any Linux PC) exports, so `ls /nas`,
 `cp`, `less` and running a program from there work as on a local disk. It is a filesystem server like `zfsd` (D11 6.4's
 "file service" rule), the first one that talks to the network instead of `diskd`, so it answers D19 6.5's open point
@@ -642,6 +642,77 @@ Linux's "silly rename" (`.nfsXXXX`, removed at the last close), because Unix pro
 temporary file; (c) **CHOWN** is checked locally as fsperm rule 5 (root only), and the NAS decides too; (d) `ESTALE`
 (116) is claimed in step 1 and replaces -EIO for stale handles; (e) messages stay queued in nfscd while `NFS_P_TAKE` is
 clear, as the host client does; (f) `mount.c` turns a checked mount's error numbers into messages.
+
+## As built: step 1, the two kernel changes (branch nfs12, 2026-10-28)
+
+Built as 5.1, 5.2 and 5.4 say (`kernel/ipc.c` `ipc_cancel_mark`, `call()`, `port_poll`; `proc_kill`; `vfs_sync`),
+tested in FS-UAE by `tools/svc-test.sh c` with `svctest serve`, a server that holds every request until it is cancelled.
+What the text did not settle, decided conservatively:
+
+- **A plain `recv` does not take a cancel as seen;** only an `evwait` that asked for `POLLPRI` and reported it does
+  (5.2 said "or its next `ipc_recv`"). Otherwise a kill between nfscd's poll and its receive would be swallowed for a
+  request nfscd already holds. A server that never polls (fsd) only lets the port's count grow.
+- **`proc_exit`'s calls are never marked** (the closes of a killed program): they must reach the server as they are,
+  and nfscd answers `FS_CLOSE` at once anyway (7.3).
+- **A service port's count is taken as seen when a new server takes the port over** (its queued cancelled messages
+  come to it marked; nothing it holds yet).
+- **The network flag** is the type the server gives in `FS_ROOT`'s `fsinfo` (`nfs`), at the mount and at a later
+  first `FS_ROOT`; not the type `mount` passes.
+- **`ESTALE` 116** is claimed (errno.h, libz's text "stale file handle"); the core's `NFS_ESTALE` now uses it.
+- **`FS_CLOSE` is never marked** (any close, not only `proc_exit`'s: the kernel has already dropped its file, so a
+  close answered -EINTR would leak the open in the server); **`FS_QUIT` is carried out marked or not**, dropping what
+  it could not save; **a bounded `FS_SYNC` ignores the mark** (a killed `reboot` must not lose the 2 s of commits);
+  diskd ignores it (a killed server's own calls may carry it). All four are in the frozen text (`fsproto.h`).
+- **A loader killed while it reads the program** (its reads are now cancelled) passes the load to the next client,
+  as one killed in its back-off does, instead of "cannot start" failing the whole queue.
+- **Size:** the kernel grew by 556 bytes (`kernel.bin` 160,332 -> 160,888 on the disk; section 9.1 estimated ~300):
+  1,928 bytes left on the mount tests' floppy, 18,312 on the RAM floppy.
+
+One independent read-only review (2026-10-28): no blocker. Its should-fix findings are fixed: `FS_CLOSE` marked by
+`call()` (now never), a killed `reboot` cutting the bounded sync short (the sync ignores the mark), a killed loader
+failing the queue (it passes the load on), and test gaps (kill -9's mark, a cancelled read whose exit close must come
+unmarked: `svc-test.sh c`). Minor ones fixed: comments (POLLPRI also for queued messages; loads and watches),
+`FS_SYNC` a0 "any other value as 0", `mt->net` set only after a root, architecture.md's wording. Not tested in FS-UAE,
+said: the handover's reset of the seen count and "a plain receive does not take it as seen" (read in the code).
+
+## As built: step 2, nfscd reading (branch nfs12, 2026-10-28)
+
+Built: `/sbin/nfscd` (`user/nfscd.c`, the OS layer over `net/nfs/`), `mount -t nfs` and fstab's `nfs` lines
+(`user/mount.c`), the base package and every full root image carry it. Tested in FS-UAE by `tools/nfs-emu-test.sh`
+(not `tools/nfs-test.sh` as 11.2 says: `make check` already has a test called nfs-test, the host one), parts e
+(reading), h (reading), s, b and k of 11.2 in two boots, with `tools/nfs-host.py` (nfs-sim's server with the test tree,
+steered by the Amiga's lookups of `.ctl-*` names) as the PC's server. Decided where the note was silent:
+
+- **Step 2 serves reading only:** nfscd adds the code `o` itself, so every change is -EROFS until step 3 brings the
+  writes' tests (the core has writes; they are not let loose on a NAS before FS-UAE has checked them).
+- **Memory (decision (a)):** a handle of up to 36 bytes lives in its node (Linux's and the Synology's fit), a longer
+  one on the heap; 64 nodes and 64 cached names on the small profile, 256 on the large; all tables and the two buffers
+  are one heap block. The heap is libz's region heap (moved there from wasabid: one copy, `rheap_alloc`), its region
+  16,400 bytes so two 8 KB cache pieces share one. **Measured (FS-UAE, stock A1200, `ps`): 112 KB mounted and idle,
+  144 KB after reading (the data cache full)**, against the note's ~70 / ~150 KB: the code is 51.6 KB (9.1 estimated
+  30-36 KB), the tables 25 KB, the receive and send buffers 9 KB each. With SLIP's netd and one login the stock A1200
+  keeps about 790-990 KB free in these runs (the emulator's figure).
+- **The source port:** netd has no abortive close (no `SO_LINGER`), so the port of the connection to the portmapper
+  or mountd is still closing when the next connection is made: nfscd then takes the next port (bind or connect said
+  "address in use"). For the duplicate request cache this matters only for changing requests (step 3); *open for the
+  main session:* netd's `SO_LINGER` {1, 0} (an abort) would keep one port, as 3.4 wants.
+- **A host name** is looked up by `SOCK_RESOLVE` on a socket of its own, inside the loop (the loop never waits for
+  DNS); a number needs no lookup.
+- **Messages held by nfscd** (decision (e)): up to 8 more than the core's slots; `FS_CLOSE` and a cancelled message go
+  to the core at once; on `POLLPRI` each held message newly marked is cancelled once.
+- **The groups** come from `/etc/passwd` and `/etc/group` at the start: 32 users with groups, 16 groups each.
+- **mount's messages** (decision (f)): -ETIMEDOUT "the NAS did not answer", -EACCES "refused the mount (its export
+  rules)", -ENOENT "no such export", -ECONNREFUSED, -EHOSTUNREACH, -ENETDOWN, each "(see dmesg)". A missing or
+  non-directory mount point is the kernel's own refusal.
+- **wasabid still refuses files on an NFS mount:** D24 5.3 serves them through a helper (`wasabid --file`, killed after
+  10 s without progress) that needs the cancel mark; the mark exists now, the helper is D24 work not yet built, so the
+  refusal stays (its words now name the helper). *Open for the main session.*
+- **Not checked in FS-UAE in this step:** reading over SLIP (part l, step 5), the large profile (the emulated A1200
+  with fast RAM and the A2065: the matrix, step 5); the real Synology (step 6).
+
+Sizes: `/sbin/nfscd` 51,616 bytes of image (58,460 on the disk with its relocations), 60.9 KB loaded with its 8 KB
+stack; `mount` 15.5 KB; the kernel unchanged by step 2 (160,888 bytes on the disk: 18,312 left on the RAM floppy,
+1,928 on the mount tests' floppy); nfscd is on neither floppy.
 
 ## Owner decisions (2026-10-28)
 

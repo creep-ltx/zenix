@@ -73,7 +73,7 @@ struct proc *proc_by_pid(int pid) { for (int i = 0; i < NPROC; i++) if (procs[i]
 static int data_ready;                  /* the object of the interleaving test: a tty with a line or not */
 static u32 obj_mask;
 u16 vfs_poll(struct file *f) { (void)f; ev_arm(&obj_mask); return data_ready ? POLLIN : 0; }
-u16 port_poll(int port) { (void)port; return POLLNVAL; }
+u16 port_poll(int port, u16 ev) { (void)port; (void)ev; return POLLNVAL; }
 
 static int bad;
 #define EXPECT_TRUE(c, msg) do { if (!(c)) { printf("FAIL: %s\n", msg); bad++; } else printf("ok:   %s\n", msg); } while (0)

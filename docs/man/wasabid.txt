@@ -128,8 +128,10 @@ NOTES
     Not encrypted (the client warns once per address and port). No
     install command: Zenix updates itself with zpkg, so "wasabi update"
     does not work; try a new daemon as a trial instance (--trial --port
-    1237) first. Files on an NFS mount are refused until the cancel
-    mark of D23 lets a hung NAS be left. A local filesystem server that
+    1237) first. Files on an NFS mount are refused until the helper of
+    DESIGN D24 5.3 is built (a child the daemon kills after 10 s without
+    progress; D23's cancel mark, which it needs, exists since D23 step
+    1). A local filesystem server that
     hangs holds the daemon's file calls as it holds every program's.
     A command that opens /dev/tty (sudo, passwd) waits for console 1's
     keyboard. Behind NAT (zenix-slirp, FS-UAE) every caller looks like

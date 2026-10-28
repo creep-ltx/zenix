@@ -816,6 +816,8 @@ void proc_kill(struct proc *p)
         ready_force(p);
     else if (p->state == P_MSG && p->msg_cancel)
         ipc_cancel(p);                  /* a socket call not yet taken by the server (audit O9) */
+    if (p->wait_msg)
+        ipc_cancel_mark(p);             /* D23 5.1: its server may answer -EINTR (a call taken back above is done) */
 }
 
 int kill_status(const struct proc *p)

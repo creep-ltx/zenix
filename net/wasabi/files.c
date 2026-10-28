@@ -9,7 +9,7 @@
 #define S_IFDIR 0040000u
 #define S_IFREG 0100000u
 
-static const char nfs_words[] = "files on a network mount are not served yet (D24 step 1, after D23's cancel mark)";
+static const char nfs_words[] = "files on a network mount are not served yet (they need D24 5.3's helper)";
 static const char self_words[] = "that is the running daemon - a new wasabid is tried as a trial instance and shipped "
                                  "as a package";
 

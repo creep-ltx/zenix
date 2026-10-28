@@ -652,7 +652,7 @@ void syscall_c(u32 *rb)
             ;
         else {
             svc_hurry();                /* loaders in a back-off start at once (D11 6.3) */
-            long e = vfs_sync(1);       /* each server has 5 s (A7) */
+            long e = vfs_sync(VS_REBOOT | VS_BOUNDED);   /* each server has 5 s (A7); a network one 2 s (D23) */
             disk_frozen = 1;
             klog_set_reason(KLOG_END_REBOOT);
             kprintf("reboot: filesystems synced%s, disk writes stopped; resetting%s\n", e < 0 ? " (with an error)" : "",

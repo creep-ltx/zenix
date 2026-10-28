@@ -211,8 +211,15 @@ struct mount {
     u32 ok_epoch;                       /* F13: the ids below passed mount_search at this perm_epoch (0: none) */
     u16 ok_uid, ok_gid;
     u32 inst;                           /* D26: new on every mount only (gen also moves when its server restarts) */
+    u8 net;                             /* D23 5.4: its server said type "nfs" at FS_ROOT: synced last, bounded */
 };
-static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1, 0, 0, 0, 1 } };
+static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1, 0, 0, 0, 1, 0 } };
+
+/* D23 5.4: a network filesystem, by the type its server gave in FS_ROOT's fsinfo (later network types join here) */
+static int net_type(const struct fsinfo *fi)
+{
+    return fi->type[0] == 'n' && fi->type[1] == 'f' && fi->type[2] == 's' && !fi->type[3];
+}
 static u32 gen_last = 1, inst_last = 1;
 /* F13: rises with every request that can change who may search a directory (a mode, an owner, a name moved or
  * removed), every mount, umount and server start: a cached mount_search answer older than it is asked again */
@@ -267,6 +274,7 @@ static __attribute__((noinline)) u32 mount_root(int mi)
                 memcpy(mnt[mi].dev, fi.dev, sizeof mnt[mi].dev);
                 memcpy(mnt[mi].type, fi.type, sizeof mnt[mi].type);
             }
+            mnt[mi].net = (u8)net_type(&fi);
         }
     }
     return mnt[mi].root ? mnt[mi].root : 2;
@@ -867,21 +875,24 @@ long vfs_link(u32 op, const char *a, const char *b)
     return op == FS_SYMLINK ? two_paths(op, 0, &wb, a) : two_paths(op, &wa, &wb, 0);
 }
 
-/* every mount's server writes out what it holds. With REBOOT (SYS_reboot) each has at most 5 s: the tick resets the
- * machine after that, naming it (kbd_tick, audit A7) */
-long vfs_sync(int reboot)
+/* every mount's server writes out what it holds: the local ones first, the network mounts last (D23 5.4: a dead NAS
+ * must not leave a local mount after it unsynced). With VS_REBOOT (SYS_reboot) each has at most 5 s: the tick resets
+ * the machine after that, naming it (kbd_tick, audit A7). With VS_BOUNDED the network mounts get FS_SYNC a0 1: their
+ * servers answer within 2 s */
+long vfs_sync(int how)
 {
     long r = 0;
-    for (int i = 0; i < NMOUNT; i++) {
-        if (!mnt[i].used)
-            continue;
-        if (reboot) {
-            reboot_who = mnt[i].pname;
-            reboot_deadline = (ticks + 500) | 1;
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < NMOUNT; i++) {
+            if (!mnt[i].used || mnt[i].net != pass)
+                continue;
+            if (how & VS_REBOOT) {
+                reboot_who = mnt[i].pname;
+                reboot_deadline = (ticks + 500) | 1;
+            }
+            if (fs_call_on(i, FS_SYNC, pass && (how & VS_BOUNDED) ? 1 : 0, 0, 0, 0) < 0 && i == 0)
+                r = -EIO;
         }
-        if (fs_call_on(i, FS_SYNC, 0, 0, 0, 0) < 0 && i == 0)
-            r = -EIO;
-    }
     reboot_deadline = 0;
     return r;
 }
@@ -1059,12 +1070,14 @@ long vfs_mount(const struct umountreq *r)
     mt->inst = ++inst_last;                 /* D26: an FS_LINKED answered for the slot's last mount is refused */
     mt->used = 1;
     struct fsinfo fi;
+    memset(&fi, 0, sizeof fi);
     long root = fs_call_on(free, FS_ROOT, (u32)&fi, 0, 0, 0);
     if (root <= 0) {
         fs_call_on(free, FS_QUIT, 0, 0, 0, 0);     /* a server that runs but gave no root lets its device go (A9) */
         mt->used = 0;
         return root < 0 ? root : -EIO;
     }
+    mt->net = (u8)net_type(&fi);
     mt->root = (u32)root;
     nmnt++;
     perm_epoch++;                       /* F13: a new mount can sit between a mount and its parent */
