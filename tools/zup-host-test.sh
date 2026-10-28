@@ -88,7 +88,7 @@ grep -qx base.manifest $T/db && grep -qx utils.manifest $T/db && grep -qx man.ma
 # ---- 2. zup on the PC ----
 U=$T/u; mkdir -p $U
 gcc -m32 -DZHOST -std=gnu11 -O1 -g -Wall -Wextra -Wno-format-truncation -fsanitize=address,undefined -fno-omit-frame-pointer \
-    -Iuser/miniz -o $U/zup user/zup.c user/sha256.c user/miniz/miniz_tinfl.c tools/host/zup-host.c 2>$U/cc.log &&
+    -Iuser/miniz -o $U/zup user/zup.c user/zpkgfmt.c user/sha256.c user/miniz/miniz_tinfl.c tools/host/zup-host.c 2>$U/cc.log &&
     ! grep -q 'warning' $U/cc.log && check "zup builds for the PC without a warning" ok || { check "zup builds for the PC without a warning" bad; cat $U/cc.log; }
 export ZUP_SELF=$U/zup ASAN_OPTIONS=detect_leaks=0
 V0=2026102500; V1=2026102600; V2=2026102701
@@ -280,7 +280,7 @@ R2="-Dsys_call=hd_sys_call -Dsys_port_find=hd_port_find"
 XF="-m32 -DZHOST -std=gnu11 -O1 -g -Wall -Wextra -Wno-format-truncation -Wno-unused-parameter -Wno-sign-compare -Wno-missing-field-initializers"
 gcc $XF -DFSD $R2 -c -o $X/fsd.o tools/host/zup-fsd.c 2>$X/cc.log && gcc $XF -DFSD $R2 -c -o $X/hd.o tools/host/hostdisk.c 2>>$X/cc.log &&
     gcc $XF -DFSD -c -o $X/ext2.o kernel/ext2.c 2>>$X/cc.log &&
-    gcc $XF -Iuser/miniz -o $X/zup user/zup.c user/sha256.c user/miniz/miniz_tinfl.c tools/host/zup-ext2.c $X/fsd.o $X/hd.o $X/ext2.o 2>>$X/cc.log &&
+    gcc $XF -Iuser/miniz -o $X/zup user/zup.c user/zpkgfmt.c user/sha256.c user/miniz/miniz_tinfl.c tools/host/zup-ext2.c $X/fsd.o $X/hd.o $X/ext2.o 2>>$X/cc.log &&
     check "zup builds for the PC on the ext2 server" ok || { check "zup builds for the PC on the ext2 server" bad; cat $X/cc.log; }
 gcc -m32 -DZHOST -DFSD -std=gnu11 -O1 -o $X/fsck user/fsck_ext2.c tools/host/hostdisk.c kernel/ext2.c 2>>$X/cc.log ||
     check "fsck.ext2 builds for the PC" bad

@@ -102,7 +102,7 @@ part_net() {
 }
 
 # libFuzzer, one harness at a time with a memory limit (this PC's rule, knowledge base claude-code/)
-FUZZ_TARGETS="index latest http ffs resolve"
+FUZZ_TARGETS=${ZPKG_FUZZ_TARGETS:-"index latest http ffs resolve fmt"}    # ZPKG_FUZZ_TARGETS: only these
 part_fuzz() {
     local secs=$1 n=0 t each FCC=${FUZZCC:-clang} found=0
     local fl="-fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined"
@@ -118,6 +118,13 @@ part_fuzz() {
         case $t in
         index|resolve) cp "$OUT"/repo/test/index-* "$OUT"/release-repo/*/index-* "$d/seeds/" 2>/dev/null; rm -f "$d"/seeds/*.sig ;;
         latest) cp "$OUT/repo/test/latest" "$d/seeds/" 2>/dev/null ;;
+        fmt) cp "$OUT"/repo/pool/*.zup "$d/seeds/" 2>/dev/null
+             python3 -I -c 'import sys, struct
+for z in sys.argv[2:]:
+    d = open(z, "rb").read(); n = struct.unpack(">I", d[52:56])[0]
+    for i in range(n):
+        name, off, size = struct.unpack(">40sII", d[96 + 80 * i:96 + 80 * i + 48])
+        if name.rstrip(b"\0").endswith(b".manifest"): open(sys.argv[1] + "/" + z.split("/")[-1] + ".manifest", "wb").write(d[off:off + size])' "$d/seeds" "$OUT"/repo/pool/*.zup ;;
         http) printf '\x01\x00HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello' >"$d/seeds/len"
               printf '\x01\x00HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5;x\r\nhello\r\n0\r\nT: 1\r\n\r\n' >"$d/seeds/chunked"
               printf '\x7f\xffHTTP/1.1 206 P\r\nContent-Range: bytes 100-199/200\r\nContent-Length: 100\r\n\r\n' >"$d/seeds/range"
@@ -130,8 +137,10 @@ part_fuzz() {
                  "$d/s40k=Zenix/zenix-update.slot" "tools/zsign.py=Zenix/f3" >/dev/null ;;
         esac
         # shellcheck disable=SC2086
-        $FCC -std=gnu99 -g -O1 $fl -DFUZZ_$T -o "$d/fuzz" tools/host/zpkg-fuzz.c $CORE_SRCS 2>"$d/build.log" ||
-            { tail -5 "$d/build.log"; bad "fuzz $t does not build"; continue; }
+        local extra=""
+        [ "$t" = fmt ] && extra="-DZHOST user/zpkgfmt.c user/sha256.c"
+        $FCC -std=gnu99 -g -O1 $fl -DFUZZ_$T -o "$d/fuzz" tools/host/zpkg-fuzz.c $CORE_SRCS $extra 2>"$d/build.log" ||
+            { tail -5 "$d/build.log"; bad "fuzz $t does not build"; found=1; continue; }
         say "fuzz $t: $each s, one process, 2 GB memory limit (log $d/fuzz.log)"
         if nice "$d/fuzz" -max_total_time="$each" -rss_limit_mb=2048 -malloc_limit_mb=512 -max_len=262144 -timeout=20 \
                 -artifact_prefix="$d/artifacts/" -print_final_stats=1 "$d/corpus" "$d/seeds" >"$d/fuzz.log" 2>&1; then

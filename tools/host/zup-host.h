@@ -44,6 +44,7 @@ struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };
 #define UPD_RELEASE   2
 #define UPD_NOTE      3
 #define UPD_F_ROLLBACK 1u
+#define UPD_F_TRIAL    2u
 #define UPDNOTE_DONE      1u
 #define UPDNOTE_FAILED    2u
 #define UPDNOTE_CONFIRMED 3u

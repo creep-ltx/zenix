@@ -357,7 +357,10 @@ for people; the kernel image carries both in a 24-byte record (`"ZVER"`, the num
   deleted, `state.new` renamed, flushed; a start that finds only `state.new` reads it. The files beside it:
   `zenix`, `zenix.new`, `zenix.old`, `zenix.rejected`, `zenix-update.zup` (`.part` while copied, `.bad`, `.done`,
   `.rejected`). The bootinfo fields: `+0x78` the bundle's address (16-aligned), `+0x7C` its size (0: none), `+0x80`
-  flags (bit 0: going back, "Zenix (previous)").
+  flags (bit 0 `UPD_F_ROLLBACK`: going back, "Zenix (previous)"; bit 1 `UPD_F_TRIAL`: handed over during an
+  unconfirmed trial, DESIGN D22 4.3, claimed and kept by the kernel after `UPD_RELEASE`, set by zenixboot from D22 step 7).
+- **One parser of each format** (DESIGN D22 4.2): `user/zpkgfmt.c` reads manifests and bundles for zup, zpkg and the
+  host tests (fuzzed: `tools/host/zpkg-test.sh fuzz`, target `fmt`).
 - **zup** (`user/zup.c`, `/sbin/zup`, man/zup.txt) installs the packages of a bundle onto the root, as one
   transaction: `/var/lib/zpkg/journal` (text: `zupj 1`, `target VERSION T`, one line an operation - `OP LINK MODE UID
   GID SHA TARGET OLD PATH`, `-` where nothing applies; OP is `R` replace, `A` add, `D` delete, `l` new link, `L`
@@ -713,7 +716,8 @@ bytes of the log area's first header (`BOOTNOTE_*`, `kernel/kernel.h`) for the b
 
 **Updates** (D15, section 3 "Updates"): `SYS_update(op, a, b)` (82). `UPD_INFO` fills `struct uupdate` (32 bytes, frozen,
 at most the size given in `b`: the bundle's address and size - 0 when there is none -, its flags, the running kernel's
-version number and string from the `ZVER` record; anyone); `UPD_RELEASE` gives the bundle's memory back to the pool
+version number and string from the `ZVER` record; anyone; the flags `UPD_F_ROLLBACK` 1 and `UPD_F_TRIAL` 2, the trial
+bit kept after `UPD_RELEASE`); `UPD_RELEASE` gives the bundle's memory back to the pool
 (root; `boot` calls it after zup, whatever zup did); `UPD_NOTE` (root) writes the update note (kind 1 done, 2 failed,
 3 confirmed, 4 confirmed but the root half failed - what a 3 over a 2 or 4 of the same version becomes -, and a
 version) at klog area +0xE0 for zenixboot (section 3, "Kernel log"). `uname` prints the version

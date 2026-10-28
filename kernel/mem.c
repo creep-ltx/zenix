@@ -147,7 +147,8 @@ __attribute__((cold, optimize("Os"))) void upd_release(void)
         kprintf("update: the bundle's %u bytes are free again\n", upd_size);
     }
     upd_blk = 0;
-    upd_pa = upd_size = upd_flags = 0;
+    upd_pa = upd_size = 0;
+    upd_flags &= UPD_F_TRIAL;           /* D22 4.3: zpkg asks after boot gave the bundle back */
 }
 
 void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)

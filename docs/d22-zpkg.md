@@ -855,3 +855,16 @@ word, and that "no floor" is the right call. Its findings, all taken in above:
 - an old zpkg ignores the word (now said);
 - two client paths had no test (now tested).
 
+
+## As built: step 1 (main line, branch zpkg1, 2026-10-28)
+
+- `user/zpkgfmt.c` + `.h`: zup.c's manifest and bundle parsers moved out unchanged (the same checks, the same
+  messages through the program's `zf_say`), with the bundle reader split so a file can be streamed (step 4):
+  `zf_bundle_head` (header and table, asks for more bytes while it has too few), `zf_bundle_entry` (one table entry,
+  range-checked), `zf_part_kind` (a `pkg/` part's name), `zf_bundle_parse` (all of it in memory, as before);
+  `zf_pkg_free`/`zf_bundle_free` (a bundle's package names now live in the bundle itself, so nothing leaks after a
+  refusal). Built at -Os: `zup` text 42,806 -> 40,520 bytes, `/sbin/zup` 48,104 -> 45,228 (*measured*).
+  `tools/zup-host-test.sh` unchanged in what it checks (48 passed). Fuzz target `fmt` in `tools/host/zpkg-fuzz.c`
+  (manifests, and bundles read in pieces as `zup -f` will): 10 million inputs in 120 s, nothing found.
+- `UPD_F_TRIAL` 2 claimed (CLAUDE.md; `kernel/kernel.h`, `user/usys.h`): the kernel keeps that one bit after
+  `UPD_RELEASE`, so zpkg, which runs after boot gave the bundle back, still sees it. zenixboot sets it from step 7.

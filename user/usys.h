@@ -174,6 +174,8 @@ struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };
 #define UPD_RELEASE   2
 #define UPD_NOTE      3
 #define UPD_F_ROLLBACK 1u       /* flags: the owner chose "Zenix (previous)" (zenixboot PREVIOUS) */
+#define UPD_F_TRIAL    2u       /* flags: an unconfirmed trial runs (D22 4.3): zpkg installs nothing live. Kept after
+                                 * UPD_RELEASE; an older zenixboot leaves it 0 (zenixboot sets it from D22 step 7) */
 #define UPDNOTE_DONE      1u    /* NOTE kinds: zup installed the root half (or it was installed already) */
 #define UPDNOTE_FAILED    2u    /* zup refused the bundle or rolled the root back */
 #define UPDNOTE_CONFIRMED 3u    /* login's prompt is up on console 1: this kernel works (login.c) */

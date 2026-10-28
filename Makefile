@@ -267,13 +267,16 @@ $(BUILD)/gzip.uelf: $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/gzip.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
-# zup (DESIGN D15, /sbin/zup): inflate (miniz) and SHA-256 (sha.c)
+# zup (DESIGN D15, /sbin/zup): inflate (miniz), SHA-256 (sha.c) and the package formats' parsers (zpkgfmt.c, D22 4.2:
+# one copy for zup, zpkg and the tests)
 $(BUILD)/sha256.uo $(BUILD)/sha256.po: user/sha256.h
-$(BUILD)/zup.uo: user/zup.c user/libz.h user/usys.h user/sha256.h kernel/fsproto.h | $(BUILD)
+$(BUILD)/zpkgfmt.uo: user/zpkgfmt.c user/zpkgfmt.h user/sha256.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/zup.uo: user/zup.c user/zpkgfmt.h user/libz.h user/usys.h user/sha256.h kernel/fsproto.h | $(BUILD)
 	$(CC) $(UCFLAGS) $(MINIZ_CFLAGS) -c $< -o $@
-$(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+$(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
-	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 # programs that look up users and groups (/etc/passwd, /etc/group), and those that also check passwords
 PWAPPS := ls id whoami chown renice useradd userdel gpasswd netstat
