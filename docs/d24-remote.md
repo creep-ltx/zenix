@@ -580,3 +580,17 @@ session's answers to the questions step 0 raised, built so in `net/wasabi/` and 
 11. **`SPEED` through a file** needs its size plus 64 KB free on that filesystem (Wasabi's 8 MB would refuse every
    small Zenix disk).
 
+## Main session, 2026-10-28: step 0 reviewed
+
+- Merged with its host test in `make check` (`wasabi-test`: core, check, size; the fuzz part is run by hand, one
+  fuzzer at a time). The real Wasabi client's part runs when `ZENIX_WASABI` names a checkout.
+- **wasabid is built at -Os** (step 1's Makefile lines): all of it is cold code; 37,100 bytes of text there, above
+  section 10's estimate, measured again linked at step 1.
+- **GRAB's "moved" note** is logged, not sent: today's client fails on any frame but DATA inside GRAB. Sending it is a
+  section 11 addition (the client accepts it), then the daemon sends it.
+- **HEALTH** has no largest-free-block key (Zenix has no call for it); the client's `health` tolerating a missing
+  `mem.chip.largest` is a section 11 addition, no new kernel call. The disk key is `disk.root.free.kb`, in KB.
+- The step's small choices (TEXT's 16-byte header and cells, LS read whole up to 32 KB, PUT's `.wsb-N`, the refused
+  count saved at most once a minute, the two extra bad-configuration cases, SCREEN's bit 0 doing nothing, the banner
+  "Zenix VER") are accepted as built. FREE's "freed" path and a down network are tested in FS-UAE at step 1.
+
