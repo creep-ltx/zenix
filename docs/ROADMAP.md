@@ -90,7 +90,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    properly"): modern, small and constant-time, e.g. BearSSL (MIT) for TLS and Dropbear's client (MIT) for SSH, with
    Ed25519/X25519/ChaCha20 (fast without an FPU or AES hardware) and a real random source; it also signs `zpkg`'s
    packages; then `ssh` (a proper client, keys, known hosts) and HTTPS for `wget`; `zpkg` with its repository on the
-   owner's NAS. A security audit. Then **the Zenix demo floppy**
+   owner's NAS. A security audit. Then (postponed by the owner on 2026-10-28, design D25 ready) **the Zenix demo floppy**
    (owner 2026-10-25, in the spirit of the 1999 QNX demo disk): one 880 KB Amiga floppy that boots into Zenix with the
    network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5. The model (owner 2026-10-26): KolibriOS, a
    desktop, network and programs on one 1.44 MB floppy; as there, the programs are packed on the disk and unpacked

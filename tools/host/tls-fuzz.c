@@ -167,7 +167,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n)
         wget_nextname(name, sizeof name, name, 7);
         http_request(req, sizeof req, &u, n, n & 1);
         for (i = 1; i < nl; i++)
-            if (http_redirect(&u, lines[i], &hops) == 0) {
+            if ((i & 1 ? http_redirect_rel : http_redirect)(&u, lines[i], &hops) == 0) {
+                if (u.path[0] != '/' || strlen(u.path) > HTTP_PATHMAX || strchr(u.path, '#'))
+                    abort();            /* a resolved Location is always a path this client may send */
                 wget_name(name, sizeof name, &u);
                 http_request(req, sizeof req, &u, 0, 0);
             }

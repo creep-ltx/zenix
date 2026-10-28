@@ -531,3 +531,7 @@ allocating, the display's layout kept inside the kernel) and shrinks the daemon 
 setting, `/dev/vcs*` dropped).
 
 Last checked against the code: 2026-10-27 (main at 22fd4ba).
+
+## Owner decisions (2026-10-28)
+
+The owner answered "Yes" to every recommendation of this note's questions.
