@@ -878,3 +878,7 @@ From the coordinator, the same day: step 0 and `sh`'s bug are taken by the main 
 was technical, so it is decided by the main session (section 17).
 
 Last checked against the code: 2026-10-28 (branch d28 at bf93534).
+
+## Owner decisions (2026-10-28)
+
+The owner answered **yes to every question above** (2026-10-28, "I think yes for all questions"): Zenix speaks UTF-8 everywhere, like Linux (screen, keyboard, file names), while old Amiga Latin-1 text still reads right; Greek, Cyrillic and other alphabets show as a box for now, an add-on font later if wanted. This is the yes to the note: built in block 3's order (after block 2's audit); step 0 is done on main.
