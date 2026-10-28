@@ -178,7 +178,7 @@ static void t_trust(void)
     struct zp_index ix;
     const char *why;
     unsigned warn;
-    struct zp_trust t = { "testing", ZP_KEY_RELEASE, 0, 2026102700u, 20261104, 20261027, 0 };
+    struct zp_trust t = { "testing", ZP_KEY_RELEASE, 0, 2026102700u, 20261104, 20261027, 0, 0 };
     if (parse(HEAD "pkg awk\nversion 2026103001 0.3b6\nfile awk-2026103001.zup 31744 " SHA "\nsize 1\n", &ix, &why))
         { CHECK(0, "trust: the list"); return; }
     CHECK(zp_days(19700101) == 0 && zp_days(20000301) == 11017 && zp_days(20240229) > 0 && zp_days(20230229) < 0 &&
@@ -221,17 +221,62 @@ static void t_trust(void)
     t.clockfloor = 20261027;
     t.clock = 20261020;
     CHECK(zp_today(&t) == 20261027, "a clock behind the floor: the floor");
+    /* D22 amendment 1 (audit 2026-10-28 O1): a list without a snapshot line is never a snapshot */
     t.clock = 20990101;
-    t.flags = ZP_T_SNAPSHOT;
     t.channel = 0;
+    t.snapshot = "2026.11";
+    t.stored = 0;
+    CHECK(zp_index_check(&ix, &t, &warn, &why) == ZP_ESNAPSHOT && zp_index_usable(&ix, &t, &warn, &why) == ZP_ESNAPSHOT,
+          "a channel's list (an old one swapped in) is refused for --snapshot");
+    zp_index_free(&ix);
+    if (parse("zpkgindex 1\nchannel stable\nsnapshot 2026.11\nserial 2026110301\ndate 20261103\nexpires 20270102\n"
+              "system 2026110301 0.3b7 zenix-2026110301.zup 412160 " SHA " min 0\n", &ix, &why))
+        { CHECK(0, "trust: the snapshot list"); return; }
     t.stored = 2026120000u;
+    CHECK(zp_index_check(&ix, &t, &warn, &why) == ZP_EREPLAY, "a snapshot whose serial is not the stored one's");
+    t.stored = 2026110301u;
     CHECK(zp_index_check(&ix, &t, &warn, &why) == 0 && (warn & ZP_W_UNCHECKED),
-          "a snapshot: an old serial and an expired date are taken, said");
+          "the stored snapshot again: taken, its age and expiry not checked, said");
+    t.stored = 0;
+    t.floor = 2026120000u;
+    CHECK(zp_index_check(&ix, &t, &warn, &why) == 0 && (warn & ZP_W_UNCHECKED),
+          "a fresh machine: a snapshot older than zpkg's floor is taken (old on purpose)");
+    t.floor = 2026102700u;
+    t.snapshot = "2026.10";
+    CHECK(zp_index_check(&ix, &t, &warn, &why) == ZP_ESNAPSHOT && zp_index_usable(&ix, &t, &warn, &why) == ZP_ESNAPSHOT,
+          "another snapshot's list is refused (the name is signed)");
+    t.snapshot = 0;
+    t.channel = "stable";
+    t.clock = 20261104;
+    CHECK(zp_index_check(&ix, &t, &warn, &why) == ZP_ESNAPSHOT && zp_index_usable(&ix, &t, &warn, &why) == ZP_ESNAPSHOT,
+          "a snapshot's list is refused as the channel's list");
+    t.channel = 0;
+    t.snapshot = "2026.11";
     t.keyclass = ZP_KEY_TEST;
     CHECK(zp_index_check(&ix, &t, &warn, &why) == ZP_ECLASS, "a snapshot: the class is still checked");
     zp_index_free(&ix);
+    {
+        static const char *badsnap[] = { "snapshot\n", "snapshot .x\n", "snapshot a b\n", "snapshot a/b\n",
+            "snapshot aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", "snapshot a\nsnapshot a\n" };
+        char buf[512];
+        for (size_t k = 0; k < sizeof badsnap / sizeof *badsnap; k++) {
+            snprintf(buf, sizeof buf, "zpkgindex 1\nchannel stable\n%sserial 2026110301\ndate 20261103\n"
+                     "expires 20270102\nsystem 2026110301 0.3b7 zenix-2026110301.zup 412160 " SHA " min 0\n", badsnap[k]);
+            CHECK(parse(buf, &ix, &why) != 0, "a bad snapshot line is refused");
+        }
+        snprintf(buf, sizeof buf, "zpkgindex 1\nchannel stable\nsnapshot A0._-zzzzzzzzzzzzzzzzzzzzzzzzzzz\n"
+                 "serial 2026110301\ndate 20261103\nexpires 20270102\n"
+                 "system 2026110301 0.3b7 zenix-2026110301.zup 412160 " SHA " min 0\n");
+        CHECK(!zp_snapshot_name_ok("") && !zp_snapshot_name_ok("../a") && !zp_snapshot_name_ok("a/b") &&
+              !zp_snapshot_name_ok("-a") && !zp_snapshot_name_ok("2026.part") && zp_snapshot_name_ok("2026.11") &&
+              zp_snapshot_name_ok("Q") && zp_snapshot_name_ok("a.partx") && zp_snapshot_name_ok("part"),
+              "snapshot names: no path, no leading mark, no .part");
+        CHECK(parse(buf, &ix, &why) == 0 && !strcmp(ix.snapshot, "A0._-zzzzzzzzzzzzzzzzzzzzzzzzzzz"),
+              "a 32-character snapshot name");
+        zp_index_free(&ix);
+    }
     /* a serial above its date, a serial below a version it names */
-    t = (struct zp_trust){ "testing", ZP_KEY_RELEASE, 0, 0, 20261104, 0, 0 };
+    t = (struct zp_trust){ "testing", ZP_KEY_RELEASE, 0, 0, 20261104, 0, 0, 0 };
     if (!parse("zpkgindex 1\nchannel testing\nserial 2026110401\ndate 20261103\nexpires 20270102\n"
                "system 2026110301 0.3b7 zenix-2026110301.zup 412160 " SHA " min 0\n", &ix, &why)) {
         CHECK(zp_index_check(&ix, &t, &warn, &why) == ZP_ESERIAL, "a serial above its date");
@@ -815,7 +860,7 @@ int main(int argc, char **argv)
             free(t);
             return 1;
         }
-        printf("ok %s %u %d\n", ix.channel, ix.serial, ix.npkg);
+        printf("ok %s %u %d %s\n", ix.channel, ix.serial, ix.npkg, ix.snapshot ? ix.snapshot : "-");
         zp_index_free(&ix);
         free(t);
         return 0;

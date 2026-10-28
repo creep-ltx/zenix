@@ -29,6 +29,7 @@ typedef uint32_t zp_u32;
 #define ZP_EREPLAY   (-1003)        /* the serial is not above the stored one (or below the floor) */
 #define ZP_ESERIAL   (-1004)        /* the serial is above its own date's, or below a version the list names */
 #define ZP_EEXPIRED  (-1005)        /* past its expiry: "the package list expired on E, and the clock says T" */
+#define ZP_ESNAPSHOT (-1006)        /* a snapshot's list where a channel's was asked for, or another snapshot's (D22 A1) */
 
 #define ZP_INDEX_MAX   (256u * 1024)    /* a bigger list is refused (3.3) */
 #define ZP_LATEST_MAX  64
@@ -36,6 +37,7 @@ typedef uint32_t zp_u32;
 #define ZP_NAMEMAX     24
 #define ZP_VSTRMAX     15               /* the bundle header's version string, 16 bytes with its NUL */
 #define ZP_DESCMAX     72
+#define ZP_SNAPMAX     32               /* a snapshot's name: [A-Za-z0-9][A-Za-z0-9._-]{0,31}, not ending ".part" (SNAP_RE) */
 #define ZP_MAXDEP      8                /* as zup's manifests (user/zup.c MAXDEP) */
 #define ZP_MAXTAKES    8
 #define ZP_BUNDLE_MAX  (16u << 20)      /* zenixboot's and mkzup's ceiling */
@@ -67,6 +69,7 @@ struct zp_system {
 
 struct zp_index {
     const char *channel;
+    const char *snapshot;           /* "snapshot NAME" (D22 amendment 1): the snapshot this list is; 0 a channel's list */
     zp_u32 serial, date, expires;
     struct zp_system sys;
     int npkg;
@@ -95,23 +98,28 @@ int zp_latest_parse(const char *buf, size_t n, zp_u32 *serial);
 #define ZP_LATEST_BEHIND 2          /* "this mirror is behind": the next mirror */
 int zp_latest_decide(zp_u32 latest, zp_u32 stored);
 
+/* a snapshot's name (D22 amendment 1, mkrepo's SNAP_RE): 1 good; zpkg checks --snapshot NAME with it before the name
+ * goes into a URL or a path */
+int zp_snapshot_name_ok(const char *s);
 /* the class of a channel name: ZP_KEY_TEST, ZP_KEY_RELEASE, 0 unknown */
 int zp_channel_class(const char *channel);
 
 /* ---- the trust rules for a parsed list (5.1-5.3) ---- */
-#define ZP_T_SNAPSHOT      1u       /* --snapshot: class checked, serial and expiry not */
+/* bit 1u was ZP_T_SNAPSHOT: a snapshot is now asked for by name (zp_trust.snapshot, D22 amendment 1) */
 #define ZP_T_IGNORE_EXPIRY 2u       /* --ignore-expiry (root, once) */
 #define ZP_W_CLOCK_BEHIND  1u       /* the clock is more than a day behind the list's signed date */
 #define ZP_W_EXPIRY_IGNORED 2u
-#define ZP_W_UNCHECKED     4u       /* a snapshot: serial and expiry not checked (said on the screen) */
+#define ZP_W_UNCHECKED     4u       /* a snapshot: its age and expiry not checked (said on the screen) */
 struct zp_trust {
     const char *channel;            /* the channel asked for (a snapshot: 0, any channel of the key's class) */
     int keyclass;                   /* the class of the key the list's .sig verified with */
-    zp_u32 stored;                  /* the stored list's serial for this channel, 0 none */
+    zp_u32 stored;                  /* the stored list's serial for this channel (or this snapshot), 0 none */
     zp_u32 floor;                   /* a fresh machine's floor: zpkg's build date as YYYYMMDD00 */
     zp_u32 clock;                   /* the clock's date YYYYMMDD, 0 when there is no clock */
     zp_u32 clockfloor;              /* D21's time floor (/var/lib/clock, the build date) as YYYYMMDD */
     unsigned flags;
+    const char *snapshot;           /* --snapshot NAME: the list must say "snapshot NAME"; 0: a channel's list, which
+                                     * must not carry a snapshot line (D22 amendment 1) */
 };
 /* "today" (5.3): the newer of the clock and the floor */
 zp_u32 zp_today(const struct zp_trust *t);

@@ -107,7 +107,7 @@ ROOT/                        (e.g. http://nas:PORT/zenix  or  https://OWNER.gith
   testing/index-SERIAL.sig   its D21 signature, label "Zenix package index v1"
   stable/...                 the same three
   test/...                   the test channel: test builds, the test key (D21 choice 7)
-  snapshots/2026.11/         a dated snapshot: a copy of one stable index and its .sig (the files stay in pool/)
+  snapshots/2026.11/         a dated snapshot: one stable index with "snapshot 2026.11" added, signed (amendment 1)
 ```
 
 - **Channels are directories; the files live once in `pool/`.** Promoting testing to stable is a new stable list
@@ -123,9 +123,9 @@ ROOT/                        (e.g. http://nas:PORT/zenix  or  https://OWNER.gith
 - **The pool keeps what any list or snapshot names, plus the previous version of every package**; mkrepo prunes the
   rest (6.2).
 - **Snapshots are for installing a known state** (the installer of block 4, release notes), not for `-Syu`: their
-  serial is older and their expiry passes. `zpkg --snapshot 2026.11 -S ...` reads one knowingly: the signature and the
-  class are checked, the serial and expiry are not (said on the screen), and it is stored apart from the channel's
-  list (`sync/snapshot-NAME.index`), never replacing it.
+  serial is older and their expiry passes. `zpkg --snapshot 2026.11 -S ...` reads one knowingly: the signature, the
+  class and the signed `snapshot` line naming 2026.11 are checked, its age and expiry are not (said on the screen),
+  and it is stored apart from the channel's list (`sync/snapshot-NAME.index`), never replacing it (amendment 1).
 
 ### 3.3 The package list (`index-SERIAL`)
 
@@ -382,7 +382,8 @@ question 1. If no, (d): zpkg leaves the bundle in the cache and says how to copy
 
 - **The list:** `zc_sig_verify` with D21's label and keys over the bytes fetched, **before** they are parsed or stored;
   then `channel`, `serial`, `date`, `expires` (5.2-5.3). The stored list is used without a second signature check
-  (root-owned, as the installed files), but its expiry is checked at every use.
+  (root-owned, as the installed files), but its expiry is checked at every use. (A snapshot's list: its name instead of
+  its expiry, amendment 1.)
 - **A package or system bundle from the list:** the download stops at the list's size (a server sending more is cut
   off; a total time per file and chunk sizes are limited), its SHA-256 is computed while it streams to `.part`, it is
   renamed only when it matches; then the name and version inside must equal the list's, and the header's channel must
@@ -403,7 +404,8 @@ question 1. If no, (d): zpkg leaves the bundle in the cache and says how to copy
 - **The serial:** a list is accepted only if its serial is larger than the stored one for that channel (equal: the
   stored list is used). A replayed older signed list is refused. A fresh machine's floor is zpkg's build date as
   `YYYYMMDD00`. A serial is bounded by its own signed `date` (3.3), so one mistaken huge serial cannot lock a machine
-  out for ever; root can still reset the stored serial (`--reset-serial CHANNEL`, said loudly).
+  out for ever; root can still reset the stored serial (`--reset-serial CHANNEL`, said loudly). A snapshot has no
+  floor; its serial must equal the stored one (amendment 1).
 - **Mix and match** is impossible: the list binds every file to its SHA-256.
 - **Versions never go back by themselves:** `-Syu` only moves up; down only by `-Syuu` or `-U -d`. zpkg refuses an
   older system bundle itself (zenixboot alone would accept one after REJECTED); the system's way back is "previous".
@@ -414,7 +416,8 @@ question 1. If no, (d): zpkg leaves the bundle in the cache and says how to copy
 
 - **Expiry** (D21 6.5): a list past `expires` is refused, at every use, also when `latest` says nothing is new (a
   stale `latest` cannot hide a frozen repository). The release tool re-signs each channel weekly (same files, new
-  serial), `expires` 60 days after signing (owner question 3). Said plainly: if the owner's PC stops re-signing, every
+  serial), `expires` 60 days after signing (owner question 3); a snapshot's list is bound by its name instead
+  (amendment 1). Said plainly: if the owner's PC stops re-signing, every
   machine, the public ones too, refuses its list after 60 days until it is re-signed or `--ignore-expiry` is used.
 - **The time:** "today" is the newer of the clock and D21's floor (`/var/lib/clock`, the build date). A clock that is
   behind never makes a list look valid for longer than the floor allows.
@@ -441,7 +444,7 @@ packages until zpkg and zenixboot carry a new key (zpkg by a system bundle signe
 - **`tools/mkrepo.py`** (new): `add REPO CHANNEL BUILD` (3.4's version rules, the pool files, a new list with serial
   and expiry, every new file and the list signed through `zsign.py`, `latest` written last; refuses a test key for a
   release channel and a `date` far from the previous list's), `promote REPO testing stable`, `resign REPO CHANNEL`
-  (the weekly re-sign), `snapshot REPO stable 2026.11`, `prune REPO` (3.2), `check REPO` (every list, signature, size
+  (the weekly re-sign), `snapshot REPO stable 2026.11` (signs, amendment 1), `prune REPO` (3.2), `check REPO` (every list, signature, size
   and SHA-256, as zpkg would), `installdb` input for images (3.4).
 - **`tools/zsign.py`** (built, D21): the kinds `bundle` and `index` exist; the index class check is added (5.1).
 
@@ -757,3 +760,98 @@ passed in until `user/rdb.h` carries them (the main line's change), "exactly one
 control block's field layout is defined by the main line in step 7 before it ships**; (13) HTTP: relative and `//host`
 Locations are not followed, Content-Length with chunked or any other transfer coding is refused, the per-file time
 limit belongs to the socket layer (step 5); (14) `user/zpkgfmt.c` and its fuzz harness are the main line's step 1.
+
+## Amendment 1 (2026-10-28): a snapshot's list names itself (network audit O1)
+
+**The hole** (docs/audit-2026-10-28-network.md O1, *verified* by that audit's reviewer): `mkrepo snapshot` copied a
+channel's list and its `.sig` unchanged, and `--snapshot NAME` skipped the serial and expiry checks. Nothing signed
+said which snapshot a list was, so anyone between the machine and a plain-HTTP mirror could answer
+`snapshots/NAME/` with any older list signed by a key of the right class (an expired `testing` list from months ago),
+and zpkg took it (rc 0).
+
+**The fix: the name is in the signed bytes.**
+
+- **A new header word, `snapshot NAME`** (growth of `zpkgindex 1`, 3.3; once, before the first `pkg`; NAME is
+  `[A-Za-z0-9][A-Za-z0-9._-]{0,31}` and not ending in `.part`, mkrepo's rule for snapshot names, so it can never
+  hold a `/` or start with a dot, and is never a cut run's `NAME.part` folder, which `check` and `prune` skip). A list with the line is that snapshot's list; a channel's list never has one. Inside a package block the word
+  is an unknown word, ignored, as any growth.
+- **`mkrepo snapshot REPO CHANNEL NAME --key KEY`** writes `snapshots/NAME/index-SERIAL`: the channel's current list
+  with `snapshot NAME` after its `channel` line and every other line as it was (serial, date, expiry, every block),
+  read back with the parser to be the same list, then **signed anew** (the index label, a release key: a snapshot is
+  of `testing` or `stable`, never `test`, and never signed with the test key), then `latest`. A name is never used
+  twice (as before). The pool files are the channel list's, so prune keeps them (3.2) as before.
+- **zpkg's rules (5.1, after the signature and the class):**
+  - `--snapshot NAME` takes only a list whose `snapshot` line is NAME, byte for byte. An older channel list, a list
+    of another snapshot or a list without the line is refused ("the package list is not the snapshot asked for").
+  - Without `--snapshot`, a list that has a `snapshot` line is refused ("the package list is a snapshot's, not the
+    channel's"), so a snapshot can never be passed off as a channel's newer list either. This holds at every use of a
+    stored list too (`zp_index_usable`).
+  - NAME is checked with the same rule before it goes into a URL or a path.
+- **Replay and the serial (5.2, kept consistent):** a snapshot is old on purpose, so it has **no serial floor** and
+  **no expiry** (a floor at zpkg's build date would make every newer zpkg refuse every older snapshot, the opposite of
+  "install a known state"). The binding replaces both: since the name is signed and a name is published once, the
+  only list a mirror can answer `--snapshot NAME` with is that snapshot's own. What stays is the list's own shape
+  (3.3): its serial at most its date's x 100 + 99 and not below any version it names, checked for snapshots as well.
+  **Once stored, a snapshot does not change:** a later fetch of the same name must have the stored serial (equal:
+  taken again), otherwise it is refused, like an older channel list. A stored file that does not itself say NAME
+  (damaged, or from before this amendment) is ignored, not used as the serial, so it cannot lock the snapshot out.
+  To take a remade snapshot root uses 5.2's reset: `--reset-serial snapshot-NAME` (a repository never remakes one;
+  this is only for a repository that broke that rule). **"Published once" holds only per repository:** one
+  repository per release key, and a snapshot folder is never deleted (prune never does); a machine that already
+  stored a snapshot is protected by the stored serial either way, a fresh one only by that rule.
+  Expiry stays as decided (owner decision 3): 60 days for channel lists; for a snapshot it would only bound a
+  list the owner asked for by name.
+- **Said plainly:** a snapshot names a fixed set of files, so a snapshot of something with a later found hole stays
+  installable by name; that is what a snapshot is for, and `-Syu` from the channel moves past it. A stolen release
+  key can sign a false snapshot as it can sign anything (5.4).
+- **A key change** (D21's next key): snapshots signed with a key zpkg no longer trusts stop verifying; the release
+  process makes new snapshots under new names, it never re-signs an old name.
+- **`mkrepo check`** refuses a snapshot directory whose list does not say its own name, a channel directory whose
+  list says any snapshot, and names a `snapshots/NAME.part` left by a cut run (harmless, zpkg refuses its list, but
+  rsync would carry it to the mirrors).
+
+**What this changes elsewhere:** `zpkgindex 1`'s word list (frozen once built, growth only: one header word); the
+trust struct grows a `snapshot` field and the `ZP_T_SNAPSHOT` flag is gone (the name is the mode, so the two cannot
+disagree); a new refusal `ZP_ESNAPSHOT` (-1006). No other file format, no system call, no Amiga code outside
+`user/zpkg/` (zpkg itself is not built on the Amiga yet). Snapshots made before this amendment (none were published)
+would now be refused by zpkg and by `check`. A zpkg built before this amendment would ignore the word and could take
+a snapshot's list as a channel's; none was built, and it would be no worse than its own channel's older list.
+
+### As built (side helper, branch o1, 2026-10-28)
+
+- `user/zpkg/index.c`, `zpkg.h`: the `snapshot` header word; `zp_snapshot_name_ok`; `struct zp_trust` gains
+  `snapshot` (the last field) and loses `ZP_T_SNAPSHOT`; `ZP_ESNAPSHOT`; both checks (`zp_index_check`,
+  `zp_index_usable`); for a snapshot the serial's shape is checked, its floor not, and a stored snapshot's serial must
+  match; the test client ignores a stored snapshot file that does not say its name. m68k -Os -m68000: 5,624 -> 6,129 bytes of text (*measured*, +505).
+- `tools/mkrepo.py`: `parse_index` and `index_text` know the word; `snapshot` signs (`--key`), refuses `test` and the
+  test key; `check` as above.
+- Tests (`tools/host/zpkg-test.sh`, all passing, *verified*): core 189 (snapshot binding both ways, another
+  snapshot's list, the stored serial, a fresh machine's floor not applied, bad and good names); repo 63 (the
+  snapshot's bytes are stable's plus one line, the C parser reads the name, test key and test channel refused, four
+  `check` findings: a snapshot dir holding the plain channel list, a snapshot under another name, a cut run's
+  `.part` folder, a channel dir holding a snapshot's list); differential on 3,000 damaged lists, now with snapshot seeds and words, the parsers
+  also agreeing on the snapshot name; net 46, among them **the O1 swap: `--snapshot 2026.11` answered by an older
+  signed `testing` list over HTTP is refused and nothing is stored**, another snapshot's list refused, a snapshot's
+  list served as `stable`'s refused, a path as the name refused, a wrong stored snapshot file ignored; fuzz 30 s,
+  nothing found.
+- **For the main line, when zpkg is built (step 5):** pass `--snapshot NAME` as `zp_trust.snapshot` after
+  `zp_snapshot_name_ok`, set `zp_trust.stored` from `sync/snapshot-NAME.index` when present and it says NAME (`zp_index_usable`
+  not `ZP_ESNAPSHOT`), accept `--reset-serial snapshot-NAME`, and show
+  `ZP_ESNAPSHOT`'s text; `docs/man` for zpkg says what `--snapshot` checks.
+
+### Review (one independent read-only review, 2026-10-28)
+
+The reviewer judged that the amendment closes O1, with no blockers. It checked the fetch path, the stored-list path,
+a snapshot with no channel asked, latest skipped for snapshots and the line stripped, and it found that the swap test
+really runs the attack. It also found that 21 of the lists both parsers accepted in the differential run carry the new
+word, and that "no floor" is the right call. Its findings, all taken in above:
+- a name ending in `.part` was valid but hidden from `check` and `prune` (now refused in both parsers and in the rule);
+- a cut run's `.part` folder went unreported (`check` names it);
+- a wrong stored snapshot file could lock the snapshot out (now ignored);
+- sections 5.1-5.3 did not mention the exceptions (now one line each);
+- the recovery was a new mechanism (now 5.2's `--reset-serial snapshot-NAME`);
+- Python's `$` let a trailing newline through (now `\Z`);
+- "published once" holds only per repository (now said);
+- an old zpkg ignores the word (now said);
+- two client paths had no test (now tested).
+

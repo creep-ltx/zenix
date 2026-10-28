@@ -49,7 +49,10 @@ Found while fixing:
   bbs-test run, which passes; a build with stale objects is not set up as a test).
 
 Left open, each with a proposal:
-- **O1 a snapshot list is not bound to its name** (low; D22, `index.c` `ZP_T_SNAPSHOT`, mkrepo.py). `--snapshot NAME`
+- **O1 a snapshot list is not bound to its name** (low; D22, `index.c` `ZP_T_SNAPSHOT`, mkrepo.py). **Designed (D22
+  amendment 1) and fixed in the PC tools and the list core** (branch o1: a signed `snapshot NAME` line, mkrepo
+  re-signs, zpkg refuses another name or a snapshot's list for a channel; test: zpkg-test net "--snapshot: an older
+  signed channel list swapped in is refused (O1)"; zpkg itself on the Amiga still to be built against it). `--snapshot NAME`
   skips the serial and expiry checks, and nothing signed names the snapshot: someone in the middle of the plain-HTTP
   testing mirror can answer with any older list signed by the same key class. Shown by the reviewer (an expired list
   taken as a snapshot, rc 0). This is a change to the signed list format, so it goes in D22's note first, not into
