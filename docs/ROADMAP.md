@@ -96,7 +96,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    desktop, network and programs on one 1.44 MB floppy; as there, the programs are packed on the disk and unpacked
    when they start, which is what makes a desktop edition fit 880 KB.
 3. **A terminal you can live in:** a fuller C library (picolibc, newlib's descendant: D27; steps 0-4 built 2026-10-29); D13 stage 2 (shared libraries) decided; the text-UI
-   library (ported 2026-10-29: ports/tui), then Sumi, Maki, Markdown and `zc`; UTF-8 in the console; PC (CP437) and other bitmap fonts for the console
+   library (ported 2026-10-29: ports/tui), then Sumi (ported 2026-10-29: ports/sumi), Maki, Markdown and `zc`; UTF-8 in the console; PC (CP437) and other bitmap fonts for the console
    (the PC set comes earlier, with telnet); a text-only e-mail client (IMAP/SMTP over TLS; owner 2026-10-26); and
    (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported, a tracker music player (MOD and friends, on
    Paula), an IRC client. Audit; then a first public pre-release (0.1),

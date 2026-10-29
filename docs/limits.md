@@ -192,12 +192,15 @@ pointers.
   `GLOB_ALTDIRFUNC`, `GLOB_LIMIT` (`GLOB_ABEND`). `regcomp`: `user/regex.c`'s syntax, 9 groups reported, `REG_NEWLINE`
   only for `^` and `$`, `REG_NOTEOL` `REG_INVARG`. `getgrnam`'s members at most 127 bytes. `fcntl`, `ioctl` and the
   sockets as libz's (below and above: `O_NONBLOCK` on sockets and `pipe2` only).
-- The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used so far by
-  `/tests/tuitest`): Latin-1 output and upstream's own widths until the console's UTF-8 (DESIGN D28; the switch
+- The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used by
+  `/tests/tuitest` and `sumi`): Latin-1 output and upstream's own widths until the console's UTF-8 (DESIGN D28; the switch
   `TUI_UTF8`); no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` 0 (no
   AmigaOS signals: poll descriptor 0); a grid of at most 400 x 200 cells; 64 events queued (upstream drops the one
   past that); about 96 KB of memory while a terminal is open on 80 x 32 (two grids of 16-byte cells, 80 KB, which the
   allocator keeps for reuse after closing until the program ends).
+- Sumi (`ports/sumi/README`, man/sumi.txt): no mouse and no clipboard shared with other programs; settings only with
+  `HOME` set; a path of at most 63 bytes; saving through a link replaces the link; about 194 KB of its own and 81 KB of
+  shared code with one file open on 80 x 32.
 - SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
   MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the
   wire). The kernel's receive ring is 1 KB (89 ms of SLIP): when netd cannot read for longer (a busy program at its

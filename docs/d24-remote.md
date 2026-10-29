@@ -85,15 +85,16 @@ On its own port Zenix is "another Amiga at this address". Port 1235 is the trial
 ### 3.2 The connection rules
 
 The address filter (RFC 1918, loopback, link-local; `allow CIDR` adds ranges, `allow any` turns it off and is warned
-about at every start) is checked before `HELLO`; refused addresses are counted (`WELCOME`'s `refused`, the count kept
-in `/var/lib/wasabid.refused`) and get no discovery answer either. **A transfer must keep moving:** no progress for 10 s
-in either direction drops the connection (a whole 64 KB frame takes about 6 s over SLIP, so Wasabi's "finish a frame in
-10 s" would drop real frames). Before `WELCOME` there is a deadline as well: 10 s from the accept, however slowly the
-`HELLO` trickles in (audit 2026-10-29 B2-1: a byte every 8 s counted as progress and four such connections held every
-slot for hours without the key). An unknown tag gets `ERR` "not on Zenix". A connection whose first byte is `0x16` (a TLS
-ClientHello) is closed at once (the client's sign to go plain). Behind NAT (zenix-slirp, FS-UAE's slirp) every peer
-looks like 10.0.2.2: the filter and the per-address pause cannot tell callers apart there, so port forwards to the
-daemon stay bound to the PC's 127.0.0.1 (zenix-slirp's default), said in the page.
+about at every start) is checked before `HELLO`; refused addresses are counted (`WELCOME`'s `refused`, the count kept in
+`/var/lib/wasabid.refused`) and get no discovery answer either. **A transfer must keep moving:** no progress for 10 s in
+either direction drops the connection (a whole 64 KB frame takes about 6 s over SLIP, so Wasabi's "finish a frame in 10
+s" would drop real frames). Before `WELCOME` there is a deadline as well: 30 s from the accept (`WSB_HELLO_MS`), however
+slowly the `HELLO` trickles in (audit 2026-10-29 B2-1: a byte every 8 s counted as progress and four such connections
+held every slot for hours without the key); until then the 10 s progress rule counts from the last byte received, so a
+loaded client whose `HELLO` comes in pieces is not dropped (B2-15). An unknown tag gets `ERR` "not on Zenix". A
+connection whose first byte is `0x16` (a TLS ClientHello) is closed at once (the client's sign to go plain). Behind NAT
+(zenix-slirp, FS-UAE's slirp) every peer looks like 10.0.2.2: the filter and the per-address pause cannot tell callers
+apart there, so port forwards to the daemon stay bound to the PC's 127.0.0.1 (zenix-slirp's default), said in the page.
 
 ## 4. The commands on Zenix
 

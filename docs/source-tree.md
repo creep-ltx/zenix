@@ -12,7 +12,7 @@ zenix/
 ├── net/         the network (DESIGN D19): lwIP, its Zenix port, netd's core, telnet's and ssh's cores
 ├── crypto/      the crypto library (DESIGN D21): BearSSL, Monocypher, OpenSSH's bcrypt, Zenix's zc/
 ├── libc/        the standard C library (DESIGN D27): picolibc's files and Zenix's port
-├── ports/       programs and libraries from elsewhere, each a pinned copy with Zenix's layer (the text-UI library)
+├── ports/       programs and libraries from elsewhere, each a pinned copy with Zenix's layer (the text-UI library, Sumi)
 ├── rootfs/      files copied onto the Zenix root disk (/etc, test scripts)
 ├── link/        linker scripts (kernel, programs, stage0)
 ├── tools/       image builders, the emulator rig and every test
@@ -107,6 +107,7 @@ the source, the commit, what the layer does and how to update.
 | Folder | What it is |
 |---|---|
 | `tui/` | the text-UI library (roadmap block 3): the owner's tui.library (MIT, AmigaLibs), `upstream/` from `tools/tui-vendor.sh`; `zenix/core.c` compiles upstream's `core.c` unchanged with its terminal half given over termios, `poll` and `TIOCGWINSZ`, `zenix/glue.c` the old `tui_*` names, `zenix/include/` the AmigaOS names over the C library. Built into `build/libtui.a`; its test program is `user/tuitest.c` (`/tests/tuitest`, `tools/tui-test.sh`). `README` has the rest |
+| `sumi/` | Sumi, the owner's text editor (roadmap block 3, MIT, TextTools), `/bin/sumi`: `upstream/` from `tools/sumi-vendor.sh`, compiled unchanged over `zenix/` (`include/amigados.h` and `dos.c`: AmigaOS's file, lock, date and protection calls over the C library); linked with `libtui-pure.a` and `libc-pure.a` as a program with shared code; `ports/sumi/README` has the source, the commit, the choices and how to update |
 
 ## tools/: building and testing
 

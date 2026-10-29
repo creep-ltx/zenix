@@ -45,6 +45,8 @@ lic() { mkdir -p "$T/usr/share/licenses"; cp "$(dirname "$0")/../$1" "$T/usr/sha
 case " $PROGS " in *" netd "*) lic net/lwip/COPYING lwIP;; esac
 case " $PROGS " in *" gzip "*|*" zup "*) lic user/miniz/LICENSE miniz;; esac
 case " $PROGS " in *" rz "*) lic user/xfer/LICENSE zmodem;; esac
+# Sumi (ports/sumi): the notices of the owner's MIT code in it, its own and the text-UI library's
+case " $PROGS " in *" sumi "*) lic ports/sumi/upstream/LICENSE sumi; lic ports/tui/upstream/LICENSE tui;; esac
 # the C library's notice (picolibc, BSD-style licences file by file, DESIGN D27 3.2) on the full images, as the base
 # package; and its test program in /tests
 [ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc

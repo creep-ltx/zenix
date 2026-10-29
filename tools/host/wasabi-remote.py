@@ -48,6 +48,28 @@ def wait_up(limit, why):
     raise RuntimeError("the daemon did not answer within %d s (%s)" % (limit, why))
 
 
+def conn_free(limit=30):
+    """a connection once the daemon has seen the earlier ones close (their ends cross a loaded line: "busy" until then)"""
+    t0 = time.time()
+    while True:
+        try:
+            return conn()
+        except RuntimeError as e:
+            if "busy" not in str(e) or time.time() - t0 > limit:
+                raise
+            time.sleep(0.5)
+
+
+def until(limit, f):
+    """f() polled every 0.5 s until it is true or limit seconds pass: its last value"""
+    t0 = time.time()
+    while True:
+        v = f()
+        if v or time.time() - t0 > limit:
+            return v
+        time.sleep(0.5)
+
+
 def welcome(c):
     n, = struct.unpack_from(">H", c.welcome, 2)
     m, = struct.unpack_from(">H", c.welcome, 4 + n)
@@ -220,16 +242,16 @@ def part_c(c):
     ok(e is None and b"stuck" in got, "SLOTS shows the stuck command (%r)" % got)
     o, e, rc = sh(c, "pkill -KILL -x msgpingd; sleep 2; umount /tmp/hang; echo um=$?")
     ok("um=0" in o, "the hung server killed and unmounted (%r %r)" % (o, e))
-    time.sleep(1)
-    got, e = c.data(wc.SLOTS)
+    got, e = until(15, lambda: (lambda r: r if r[1] is None and b"stuck" not in r[0] else None)(c.data(wc.SLOTS))) or \
+        c.data(wc.SLOTS)
     ok(e is None and b"stuck" not in got, "the stuck command ended when its server did, and was reaped (%r)" % got)
     # detached
     o, e, rc = sh(c, "sleep 1; echo bg-done", 2)
     ok(rc == 0 and e.startswith("[started in the background; its output goes to /tmp/wasabi-bg-"),
        "RUN detached: the note, EXIT 0 (%r)" % e)
     name = e.split("goes to ")[1].rstrip("]\n") if "goes to " in e else "/nope"
-    time.sleep(4)
-    got, _ = c.data(wc.GET, S(name))
+    got = until(20, lambda: (lambda g: g if g == b"bg-done\n" else None)(c.data(wc.GET, S(name))[0])) or \
+        c.data(wc.GET, S(name))[0]
     ok(got == b"bg-done\n", "the detached command's output file (%r)" % got)
     # PS and KILL
     got, e = c.data(wc.PS)
@@ -257,8 +279,7 @@ def part_c(c):
     ok(t == wc.ERR and errtext(p)[1] == "busy" and c5.closed(), "a fifth connection: ERR 'busy', closed")
     for x in cs:
         x.close()
-    time.sleep(1)
-    h = conn()
+    h = conn_free()
     h.s.sendall(struct.pack(">BI", wc.INFO, 20)[:3])
     t0 = time.time()
     ok(h.closed(20) and 9 < time.time() - t0 < 16, "half a frame: dropped after 10 s (%.1f s)" % (time.time() - t0))
@@ -334,7 +355,14 @@ def part_d1():
 
 
 def part_reboot(s):
-    c = conn()                                  # (an idle connection is dropped after 10 s: D24 3.2)
+    # the log stream has just been flooded: wait until the daemon has caught up (a heartbeat comes only then) rather
+    # than connecting across a full line (audit B2-15)
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        t, p = s.recv()
+        if t is None or (t == wc.LOG and p[10:] == b""):
+            break
+    c = conn_free()                             # (an idle connection is dropped after 10 s: D24 3.2)
     sh(c, "cp /bin/sleep /tmp/zup; chmod 755 /tmp/zup; /tmp/zup 120", 2)
     time.sleep(3)
     o, _, _ = sh(c, "pgrep -x zup")

@@ -47,7 +47,7 @@ struct conn {
     int closing;                        /* 1: close when the queue is sent; 2: our side shut, the peer's end awaited */
     uint32_t closeby;                   /* closing's deadline */
     uint32_t last;                      /* the last progress, ms */
-    uint32_t born;                      /* accepted, ms: HELLO must be answered within WSB_HELLO_MS of it (audit B2-1) */
+    uint32_t born;                      /* accepted, ms: HELLO must be answered within WSB_HELLO_MS of it (audit B2-1, B2-15) */
     uint32_t holdto;                    /* a HELLO held for the wrong-key pause is served then (held != 0) */
     int held;
     struct wsb_rx rx;

@@ -773,3 +773,28 @@ a Zenix implementation), as built; the files and the way to update them are in `
   as events, among them ^C as a key and a lone Esc; a timed wait, `TuiPoll`; suspend, `TuiKeyAfter`, resume; the
   terminal given back cooked, with the cursor, cleared) on FS-UAE's stock A1200. The MIT notice travels with it
   (`/usr/share/licenses/tui` on the images that carry `/tests/tuitest`); no shipped program uses the library yet.
+
+## Sumi on Zenix (roadmap block 3, the first of the owner's programs; built 2026-10-29)
+
+Section 9's rule 1 for the first time on a whole program; the files, the choices and the way to update are in
+`ports/sumi/README`, the user's page is `docs/man/sumi.txt`.
+
+- **The copy:** `ports/sumi/upstream/` holds Sumi 0.2b6 (the owner's TextTools, MIT, commit 5334392) as it is
+  (`tools/sumi-vendor.sh`). Upstream has no OS layer of its own (it calls AmigaOS directly), so Zenix's layer is
+  AmigaOS's names over the C library (`ports/sumi/zenix/`: `include/amigados.h` and `dos.c`, about 580 lines): files,
+  locks, `Examine`/`ExNext`, dates, protection bits as Unix modes, `IoErr`/`Fault`, `SystemTags` as `system()`.
+  Upstream compiles unchanged, warning-free under `-Wwrite-strings` (no write into a literal, which a ZEX2 needs).
+- **Built as shared code (rule 4):** `/bin/sumi` is ZEX2, over `libc-pure.a` and the text-UI library's pure build
+  (`libtui-pure.a`, new here, as the library's "as built" planned). 93,752 bytes: 83,392 shared, 5,488 data,
+  31,564 bytes of data and BSS per process (the 16 KB stack apart); the library's part of the code 11.4 KB.
+  Stack: `STACK_DEFAULT`, measured (`ports/sumi/README`).
+- **Settings:** upstream's `ENVARC:Sumi` is `$HOME/.config/Sumi` (the keys, the settings, where each file was left);
+  `ENV:` has no copy on Zenix. Decided here with the others the README lists (no shared clipboard, `run` through
+  `sh`, the mode and root's owner kept on save), for the main session to confirm.
+- **Memory (FS-UAE, the stock A1200, 80 x 32, one file open):** Sumi owns 194 KB and shares 81 KB of code (`ps`):
+  about a quarter of the 1,132 KB free with one login for the first Sumi, 194 KB for each one more. Most of it is
+  upstream's design: the text-UI library's two 80 KB grids and a 26 KB places table (the README's findings, for the
+  owner's repository).
+- **Test:** `tools/sumi-test.sh` (in `make check`): the screen read back with `termtest screen` (`CON_READ`, then the
+  keys typed with `CON_INPUT`, so every wait is for an event), the saved file byte for byte, its mode, the settings
+  folder, the cursor put back at a second start.

@@ -209,6 +209,7 @@ FAMILIES = [
     ("sysutils", "the console, the kernel log, the disks' sync, restart", "dmesg input beep sync reboot"),
     ("pager", "less and man, the pager and the manual reader", "less man"),
     ("edit", "the text editor", "edit"),
+    ("sumi", "Sumi, a text editor: tabs, colours for code, undo, find and replace", "sumi"),
     ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
     ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
                   "fsck_zenixfs umount"),
@@ -228,6 +229,8 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
             ("user/xfer/LICENSE", "zmodem"), ("crypto/bearssl/LICENSE", "BearSSL"), ("crypto/monocypher/LICENCE", "Monocypher"),
             ("tools/certdata.COPYING", "certdata"), ("crypto/openssh/LICENCE", "OpenSSH-bcrypt"),
             ("libc/picolibc/COPYING.picolibc", "picolibc")]
+# the notices of code from other projects that only one family's programs carry (as tools/mkroot.sh puts them)
+FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")]}
 ANCHORS = "anchors"                       # DESIGN D21 8.1: build/anchors (tools/mkanchors.py) as /etc/ssl/anchors
 FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
 
@@ -304,6 +307,11 @@ def std_packages(build, uapps):
             taken.update(mypages)
             if mypages:
                 ents += mandirs + [("f", 0o644, 0, 0, pages[f], "/usr/man/" + f) for f in mypages]
+            if FAMILY_LICENSES.get(fam):
+                have = {e[5] for e in ents}
+                ents += [("d", 0o755, 0, 0, None, d) for d in ("/usr", "/usr/share", "/usr/share/licenses") if d not in have]
+                ents += [("f", 0o644, 0, 0, os.path.join(ROOT, f), "/usr/share/licenses/" + n)
+                         for f, n in FAMILY_LICENSES[fam]]
             make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)], desc=desc, takes=("utils", "man"))
             names.append(fam)
         # the remote control daemon (DESIGN D24, /sbin/wasabid): a package of its own, off until root writes

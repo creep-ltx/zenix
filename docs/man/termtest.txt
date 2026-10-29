@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     termtest [columns|colours|scroll|pcfont [FILE]|rules TTY]
     termtest [conops|rawkeys|text|readline|readraw N|grab FILE|depth N]
+    termtest screen TTY TEXT SECS [TYPE]
 
 DESCRIPTION
     Draws a test page: bold, underline and inverse text, a 36-column box
@@ -51,7 +52,15 @@ DESCRIPTION
     termtest grab FILE writes the shown display through CON_LINE: ZGRB,
     the width, height and depth (16 bits each), 16 palette words
     (0x0RGB), then a pen a pixel. termtest depth N switches the display
-    to N colours (2, 4, 8, 16; CON_COLOURS).
+    to N colours (2, 4, 8, 16; CON_COLOURS). termtest screen TTY TEXT
+    SECS waits (at most SECS seconds) until TEXT is on the grid of the
+    console TTY, such as /dev/tty1, and has not changed for 200 ms, then
+    prints it through CON_READ:
+    "row NN|...|" per row, "attr NN|...|" for a row with colours or
+    attributes ('.' a plain cell, else the hex digit of its foreground
+    colour), and the cursor; exit status 1 if TEXT never came; then it
+    types TYPE into that console (\xHH and \r for control keys), so a
+    test goes on only once the grid was read (tools/sumi-test.sh).
 
 SEE ALSO
     clear(1), edit(1)

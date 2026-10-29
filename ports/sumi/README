@@ -1,0 +1,65 @@
+Sumi, the owner's text editor, the first of the owner's programs on Zenix (roadmap block 3: the text-UI library,
+then Sumi, Maki, Markdown; DESIGN D27 section 9; docs/d27-c-library.md, "Sumi on Zenix"; the user's page is
+docs/man/sumi.txt)
+
+What it is: a text editor in the way of micro and nano that draws in the terminal (tabs, colours for code, find and
+replace, undo, macros), written for AmigaOS over tui.library. On Zenix it is /bin/sumi, a program with shared code
+(ZEX2: a second Sumi costs only its data), linked with the text-UI library's pure build (build/libtui-pure.a, ports/tui)
+and the C library's (build/libc-pure.a).
+
+upstream/  the owner's source, one source for AmigaOS and Zenix (D27 9, rule 1; owner 2026-10-28), pinned here and
+           never changed: the owner's TextTools repository (public, MIT), commit
+           533439214cf4225feed4f0e748c3b3f20099e60b (2026-10-22), Sumi 0.2b6: src/*.c and src/sumi.h, README.md as README
+           (the user's documentation, which docs/man/sumi.txt follows) and LICENSE (MIT, the notice that travels with the
+           program: tools/mkroot.sh and the package sumi put it in /usr/share/licenses/sumi, with tui's).
+zenix/     Zenix's layer (GPL-2.0-only), kept apart so the copy can be refreshed. Upstream calls AmigaOS directly (it
+           has no OS layer of its own), so the layer is AmigaOS's names over the C library:
+           include/   amigados.h: the types, the structures upstream reads (FileInfoBlock, DateStamp, the clipboard's
+                      request) and the calls, each one's meaning on Zenix in its head; the exec/, dos/, devices/,
+                      intuition/ and proto/ headers upstream includes are amigados.h (and so are those the text-UI
+                      library's headers include, in this build)
+           dos.c      the calls: Open/Read/Write/Seek/Close/FGets (a handle is the descriptor + 1, so 0 stays
+                      "failed"), Lock/UnLock/Examine/ExNext/SameLock/CreateDir (a lock is the path, its device and
+                      inode), DeleteFile, Rename, SetProtection (the Unix mode, and root's owner), IoErr and Fault
+                      (errno and strerror), CompareDates, SystemTags (system()), FindTask, the clipboard device
+                      (never opens)
+
+Decided here (conservatively; for the main session to confirm):
+- The names: only three of upstream's own literals are mapped, nothing else is ever rewritten (a file the user names
+  is a Unix path as typed): "ENVARC:Sumi" is $HOME/.config/Sumi (made at the first start, mode 700: Sumi.places lists
+  the files edited), "ENV:Sumi" is no file (AmigaOS keeps a RAM copy of the settings there; on Zenix one place is
+  enough, so that copy is never written and never read), "T:Sumi-" is /tmp/Sumi- (a file never named, kept when the
+  terminal goes away). No HOME: no settings are kept.
+- Protection bits: FileInfoBlock's protection carries the Unix mode (bits 8-19, bit 31 marking it) and FIBF_WRITE
+  when this user may not write the file (upstream then shows [read-only] and refuses to save over it, as for an
+  AmigaOS file protected against writing). FIBF_DELETE is never set: a directory that cannot be written fails the
+  save with its own message. SetProtection puts the mode back after the save (a new copy renamed over the old file)
+  and, when root saves, the owner and group Examine saw, so root editing a user's file leaves it the user's.
+- Comments: Zenix files have none; Examine gives an empty one, so upstream never sets one.
+- The clipboard: none shared between programs on Zenix yet; clipboard.device never opens and upstream keeps the
+  copied text itself (shared by its tabs, gone when it ends).
+- "run COMMAND": through sh (system()), in the terminal, as upstream runs an AmigaDOS command.
+- The stack: upstream swaps to a 32 KB stack of its own when the Shell gave less; on Zenix the program's stack is the
+  loader's (D27 9 rule 5) and FindTask answers a task with enough, so upstream never swaps. STACK_DEFAULT (16 KB):
+  -fstack-usage gives under 1.2 KB per frame (file_save the largest), the deepest chain a few KB; the one recursion,
+  the regular expressions' re_here (60 bytes a level), is at most one level per repeat in a 128-byte pattern.
+
+Found in upstream (for the owner's repository, not changed here):
+- Saving goes through a new copy renamed over the file (file.c): through a soft link (AmigaOS's too) the link is
+  replaced by a file and its target keeps the old text; resolving the link first would keep it.
+- Memory: about 194 KB of data while one file is open on 80 x 32 (ps), of which the text-UI library's two grids are
+  80 KB (16-byte cells) and the places table 26 KB, allocated whole at the first file (100 entries of 264 bytes:
+  PATHMAX 256); a smaller cell, a growing table or a shorter PATHMAX would each matter on the stock A1200.
+- Messages and help keep AmigaOS words: "Protect it +wd first", "an AmigaDOS command", "ENVARC:Sumi/Sumi.keys" in
+  "does nothing"; on Zenix they mean chmod, a shell command and $HOME/.config/Sumi. A word from the OS layer
+  (upstream's own small header) would make them right on both.
+- Shift+Tab (unindent) needs the terminal to send ESC [ Z; Zenix's console sends a plain Tab for it today (a
+  console matter, not upstream's).
+
+Tests: tools/sumi-test.sh (FS-UAE, the stock A1200; in make check): sumi opens a file, the grid is read back with
+termtest screen (CON_READ), keys are put in (CON_INPUT), the saved file is compared byte for byte, the settings and
+the cursor's place checked at a second start, the memory printed.
+
+To update: tools/sumi-vendor.sh /path/to/TextTools [COMMIT] (the files above from that commit, unchanged), put the
+commit here, build, run tools/sumi-test.sh, and bring docs/man/sumi.txt in step with the README's changes; if
+upstream starts to use an AmigaOS call amigados.h does not have, the build says so (an undeclared function).

@@ -101,7 +101,8 @@
 #define WSB_XFERS     1                 /* file transfers (PUT/GET/SPEED through a file); another: ERR "busy" */
 #define WSB_PATHMAX   63                /* the system calls' limit (5.3) */
 #define WSB_STALL_MS  10000             /* no progress in either direction: the connection is dropped (3.2) */
-#define WSB_HELLO_MS  10000             /* no WELCOME this long after accept: dropped, however slowly bytes come (B2-1) */
+#define WSB_HELLO_MS  30000             /* no WELCOME this long after accept: dropped, however bytes come (B2-1, B2-15);
+                                         * before it, WSB_STALL_MS counts from the last byte received, as after it */
 #define WSB_KILL_MS   3000              /* SIGINT, then SIGKILL after this (FREE, a slot whose client went, --force) */
 #define WSB_HB_MS     5000              /* heartbeats on the log stream */
 #define WSB_LOG_MS    100               /* the kernel log is read this often while a subscriber listens */
