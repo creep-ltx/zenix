@@ -63,7 +63,13 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   must read the same from the cylinder-low register (ATA: a busy drive answers its status from every register); DRDY
   must keep 0x55 and 0xAA written to cylinder-low; status 0 is a drive still starting (some show 0 for about 9 s,
   hand-off note) and gets up to 10 s, BSY up to 30 s, with a line on the log saying what it waits for. Every wait is
-  timed on the E-clock (`hr_time`); ERR is believed only once BSY is clear (ATA). IDENTIFY word 49 bit 9 must say
+  timed on the E-clock (`hr_time`); ERR is believed only once BSY is clear (ATA). Before IDENTIFY one READ SECTORS of
+  sector 0 (its data dropped) starts the drive's transfer from a command of Zenix's own: FS-UAE 3.2's IDE does not
+  reset its buffer offset for IDENTIFY, so after AmigaOS's last command - a READ of several sectors when zenixboot's
+  last read was a kernel file of whole 512-byte blocks - IDENTIFY gave a stale sector (`tools/update-test.sh zfsroot`
+  boots such a kernel). An error of that READ is not counted (IDENTIFY decides). As a backstop IDENTIFY's data must look like an ATA
+  drive's (word 0 bit 15 clear or CompactFlash's 0x848A; the checksum right when word 255 has its signature 0xA5),
+  and word 49 bit 9 must say
   LBA: a CHS-only drive is refused with a message (it would take LBA numbers as cylinder/head/sector). Data goes
   through Gayle's fast window (`0xDA2000`, "16 bit" timing; the registers stay in the "8 bit" `0xDA0000` window,
   Gayle spec p.7-8); on the Gayle port up to 256 sectors per READ/WRITE SECTORS command, one DRQ per sector (the
