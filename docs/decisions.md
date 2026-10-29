@@ -69,3 +69,4 @@ Mark each fixed item in the audit file in the same commit as the fix. When a bat
 After the first real boot, the next goals are: a terminal the owner can live in on the real machine, then ZenixFS as
 root, then the desktop (ROADMAP phases).
 **Amiga demos on Zenix approved and moved up (owner 2026-10-29, "I would like to be able to watch an Amiga demo in Zenix. That would be amazing. So yes, please move it up"):** ROADMAP block 3½, right after block 3's audit; a design note first, reviewed twice; bare-hardware demos first, demos needing AmigaOS's libraries later.
+**The demo command is called `amiga` (owner 2026-10-29, asked "which one is the best option", the main session recommended it):** `amiga FILE.adf` boots a disk image, `amiga PROGRAM` runs an AmigaOS program file; Zenix also hands an AmigaOS program typed by name to `amiga` (its file magic), as Linux does with Wine; Ahiru later calls the same command.
