@@ -89,7 +89,8 @@ static u32 ms_ticks(u32 ms)
     return ms * (eclock_hz / 1000);
 }
 
-/* Wait until (status & mask) == want with BSY clear, at most ms milliseconds. ERR counts only once BSY is clear (I4).
+/* Wait until (status & mask) == want with BSY clear, at most ms milliseconds. ERR counts only once BSY is clear (I4),
+ * and not at all with ST_ERR in mask (an error of the command before, which the next command clears).
  * 0, or -1 with what it waited for on the log. */
 static int ide_wait(u8 mask, u8 want, u32 ms, const char *what)
 {
@@ -98,9 +99,9 @@ static int ide_wait(u8 mask, u8 want, u32 ms, const char *what)
     for (;;) {
         s = IDE_REG(7);
         if (!(s & ST_BSY)) {
-            if (s & ST_ERR)
+            if ((s & ST_ERR) && !(mask & ST_ERR))
                 break;
-            if ((s & mask) == want)
+            if ((s & mask & ~ST_ERR) == want)
                 return 0;
         }
         if ((u32)(hr_time() - t0) > lim) {
@@ -158,13 +159,24 @@ static int ide_present(void)
     return 0;
 }
 
+static u16 id[256];                     /* IDENTIFY's data (and sector 0 before it, dropped) */
+static int ide_cmd(u32 lba, u32 n, u16 *p, int write);
+
 static int ide_identify(void)
 {
     if (ide_present())
         return -1;
+    /* One READ SECTORS of sector 0 first, its data dropped, so that the drive's data transfer starts from a fresh
+     * command of ours. FS-UAE 3.2's IDE does not reset its buffer offset for IDENTIFY (its ide_data_ready; fixed in
+     * later FS-UAE): after a READ of several sectors - AmigaOS's last command when zenixboot's last read was a kernel
+     * file of whole 512-byte blocks - IDENTIFY's data was a stale sector of that read, and the drive was refused
+     * (tools/update-test.sh zfsroot). A one-sector READ starts its buffer at 0 again; on a real drive it is one sector
+     * more at boot. Its result does not matter: IDENTIFY decides (its ERR, from a CHS-only drive, say, is not counted
+     * in the wait below; writing IDENTIFY clears it). */
+    (void)ide_cmd(0, 1, id, 0);
     IDE_REG(6) = 0xE0;              /* master, LBA mode */
     ide_settle();
-    if (ide_wait(ST_BSY | ST_DRDY, ST_DRDY, T_BUSY_MS, "the drive before IDENTIFY"))
+    if (ide_wait(ST_BSY | ST_DRDY | ST_ERR, ST_DRDY, T_BUSY_MS, "the drive before IDENTIFY"))
         return -1;
     IDE_REG(7) = 0xEC;              /* IDENTIFY DEVICE */
     ide_settle();
@@ -259,9 +271,12 @@ int ide_init(void)
         return -1;
     }
     IDE_CTL = 0x02;                                 /* nIEN on the port that has the drive (polling only) */
-    static u16 id[256];
-    for (int i = 0; i < 256; i++)
-        id[i] = swab(IDE_DATA);
+    u8 sum = 0;                     /* of the 512 bytes: ATA's checksum in word 255 makes it 0 */
+    for (int i = 0; i < 256; i++) {
+        u16 w = IDE_DATA;
+        sum = (u8)(sum + w + (w >> 8));
+        id[i] = swab(w);
+    }
     ide_settle();
     ide_ack();
 
@@ -273,6 +288,12 @@ int ide_init(void)
     model[40] = 0;
     for (int i = 39; i >= 0 && (model[i] == ' ' || model[i] == 0); i--)
         model[i] = 0;
+    /* a backstop, not a proof: the data must be an ATA drive's - word 0 bit 15 clear (or 0x848A, CompactFlash's
+     * signature), and the checksum right when word 255 has its signature A5 (ATA-5 on; FS-UAE gives none) */
+    if (((id[0] & 0x8000) && id[0] != 0x848A) || ((id[255] & 0xFF) == 0xA5 && sum)) {
+        kprintf("ide: %s port: IDENTIFY data is not a drive's (%x %x): not used\n", port_name, id[0], id[255]);
+        return -1;
+    }
     if (!(id[49] & 0x0200)) {       /* I9: a CHS-only drive would take LBA numbers as cylinder/head/sector */
         kprintf("ide: %s port: %s cannot address by LBA (CHS only): not used\n", port_name, model);
         return -1;

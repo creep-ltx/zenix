@@ -27,7 +27,8 @@
 #   nozup        a root without /sbin/zup: boot says so and leaves the note FAILED; the bundle is kept the same way
 #   zfsroot      a machine that runs the test-only kernel for a ZenixFS root (kernel-zfs, DESIGN D19 step 1): a bundle
 #                whose kernel has no ZenixFS server is refused (renamed .bad, the installed kernel starts); one whose
-#                kernel has it (a kernel-zfs of the new version) is installed
+#                kernel has it (a kernel-zfs of the new version) is installed. The installed kernel is padded to a whole
+#                number of 512-byte blocks: the first boot's IDE probe then follows a multi-sector READ (kernel/ide.c)
 #   slowzup      a test build (UDIAG=-DDIAG_SLOWZUP: boot's limit 4 min, the bundle's zup hangs as stage 2): boot stops
 #                both zups and gives the bundle's memory back only after that (audit3 B4); no zup runs at the prompt
 #   sig          the signatures (DESIGN D21 6.4): a release build of zenixboot (RELEASE=1 with a release key made for
@@ -346,17 +347,23 @@ setup_slowzup() {
     check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
 }
 setup_zfsroot() {
-    local n=zfsroot b=$OUT/zfsroot/boot/Zenix
-    KERNEL1=$B/kernel-zfs.bin disk $n $OUT/b2.zup || { check $n "the disk" bad; return; }
+    local n=zfsroot b=$OUT/zfsroot/boot/Zenix k=$OUT/kzfs512.bin
+    # the installed kernel padded with zeros to a whole number of 512-byte blocks (zenixboot and the kernel ignore bytes
+    # after the relocation table): AmigaOS's last IDE command before the hand-over is then a READ of several sectors
+    # (the file's last blocks, read whole), after which FS-UAE 3.2 handed out a stale sector as IDENTIFY's data unless
+    # the kernel starts the drive's transfer afresh first (kernel/ide.c ide_identify: a READ of one sector)
+    cp $B/kernel-zfs.bin $k; python3 -c 'import os, sys; f = open(sys.argv[1], "ab"); f.write(bytes(-os.path.getsize(sys.argv[1]) % 512))' $k
+    check $n "the installed kernel-zfs is a whole number of 512-byte blocks ($(stat -c %s $k) bytes)" "$([ $(( $(stat -c %s $k) % 512 )) = 0 ] && echo ok || echo bad)"
+    KERNEL1=$k disk $n $OUT/b2.zup || { check $n "the disk" bad; return; }
     printf '%s\nsleep 2\nsend uname; echo zb\\x6fk\\r\nsleep 3\nstop\n' "$S_PROMPT" >$OUT/$n/s1.txt
     run $n 1 900 $OUT/$n/s1.txt
     check $n "a bundle whose kernel has no ZenixFS server, on a machine with the ZenixFS kernel: refused, renamed .bad" \
         "$(has $n 1 'zenix-update.zup is not used: its kernel has no ZenixFS server, and this machine runs a kernel for a ZenixFS root \(kernel-zfs\); renamed zenix-update.bad')"
-    check $n "... the installed kernel starts, nothing replaced" "$(grep -aq "^Zenix 0\\.2 ($V1) m68k" $OUT/$n/1.txt && [ "$(same $b/zenix $B/kernel-zfs.bin)" = ok ] && [ ! -f $b/zenix.old ] && [ -f $b/zenix-update.bad ] && grep -aq '^zbok$' $OUT/$n/1.txt && echo ok || echo bad)"
+    check $n "... the installed kernel starts, nothing replaced" "$(grep -aq "^Zenix 0\\.2 ($V1) m68k" $OUT/$n/1.txt && [ "$(same $b/zenix $k)" = ok ] && [ ! -f $b/zenix.old ] && [ -f $b/zenix-update.bad ] && grep -aq '^zbok$' $OUT/$n/1.txt && echo ok || echo bad)"
     rm -f $b/zenix-update.bad $b/zenix-update.bad.sig; cp $OUT/b2z.zup $b/zenix-update.zup; cp $OUT/b2z.zup.sig $b/zenix-update.zup.sig; ffs_put $n
     run $n 2 900 $OUT/$n/s1.txt
     check $n "a bundle with a ZenixFS kernel (kernel-zfs of the new version) is installed" \
-        "$(grep -aq 'update: installing version '$V2 $OUT/$n/2.txt && grep -aq "^Zenix 0\\.2 ($V2) m68k" $OUT/$n/2.txt && [ "$(same $b/zenix $OUT/b2/kernel-zfs.bin)" = ok ] && [ "$(same $b/zenix.old $B/kernel-zfs.bin)" = ok ] && echo ok || echo bad)"
+        "$(grep -aq 'update: installing version '$V2 $OUT/$n/2.txt && grep -aq "^Zenix 0\\.2 ($V2) m68k" $OUT/$n/2.txt && [ "$(same $b/zenix $OUT/b2/kernel-zfs.bin)" = ok ] && [ "$(same $b/zenix.old $k)" = ok ] && echo ok || echo bad)"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 2)"
 }
 # sig: one boot partition with a zenixboot (and its Zenix/) per case; the refused cases have a file that is not a
