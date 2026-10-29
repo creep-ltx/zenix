@@ -673,3 +673,12 @@ The owner answered **yes to every question above** (2026-10-28, "I think yes for
 - **The documentation split** is right: DESIGN.md D27 and architecture.md sections 4 and 12 change with the switch.
 - The helper's other decisions (the init/fini lines in step 1, the port's own `fdopen` list, the environment by weak
   reference, `O_CLOEXEC` 0, `memalign` in the C library only, what stays in libz until step 3) are accepted as built.
+
+## Main session, 2026-10-29: steps 2-3 merged
+
+- **waitpid's status** stays as built (SYS_wait's 128 + n read as an exit status, `WIFSIGNALED` never true): the wait
+  convention is frozen; a wait form that names the signal is the additive fix, weighed together with the audit's
+  exit-status trap (D24 notes, block 2's audit), not a remapping of 129-159.
+- **`system()`** ignores SIGINT and SIGQUIT while it waits, as POSIX asks: done in step 4 (the bridge), with its test.
+- The other calls (wait's table compare, termios's remembered settings and raw-mode bytes, `REG_NOTEOL`,
+  `REG_NEWLINE`, the unsupported spawn and glob flags) are accepted as built and stay listed in the step-3 "As built".
