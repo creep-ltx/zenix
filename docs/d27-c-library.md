@@ -805,5 +805,5 @@ Section 9's rule 1 for the first time on a whole program; the files, the choices
   Unix mode kept on save, no clipboard between programs, `run` through sh).
 - **Shift+Tab** sends `ESC [ Z` in raw mode, as xterm and Linux's console do: a small keyboard change, next job.
 - **Memory:** 194 KB per Sumi on the stock A1200 is too much; the causes are upstream's (the text-UI library's 16-byte
-  cells, 80 KB for two grids; Sumi's 26 KB places table allocated whole). Fixed upstream, in the owner's repositories,
-  with the owner's leave (2026-10-29: "you should fix the bug"), then the copies refreshed.
+  cells, 80 KB for two grids; Sumi's 26 KB places table allocated whole). A change to the owner's own libraries and
+  programs (they run on AmigaOS too): proposed to the owner, not made; the copies are refreshed once upstream changes.
