@@ -811,7 +811,9 @@ int wsb_step(void)
         }
         if (!c->hello && !c->held && !c->closing) {
             /* a HELLO trickled in a byte at a time would count as progress for ever: four such connections kept every
-             * slot, the owner's too, for hours without the key (audit 2026-10-29 B2-1) */
+             * slot, the owner's too, for hours without the key (audit 2026-10-29 B2-1). So a cap from the accept; but
+             * not 10 s: a loaded client on a busy line (a lost segment sent again) is honest and still waits on its
+             * HELLO then (B2-15). Silence is the 10 s progress rule below, counted from the last byte received */
             if ((uint32_t)(g.now - c->born) >= WSB_HELLO_MS) {
                 conn_drop(i);
                 continue;

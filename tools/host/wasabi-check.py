@@ -51,13 +51,14 @@ def errtext(p):
 
 class Conn:
     def __init__(self, port=1236, key=KEY, hello=True, timeout=8):
+        t0 = time.time()
         self.s = socket.create_connection(("127.0.0.1", port + OFF), timeout=timeout)
         self.buf = b""
         if hello:
             self.send(HELLO, struct.pack(">H", 1) + S(key))
             t, p = self.recv()
             if t != WELCOME:
-                raise RuntimeError("no WELCOME: %r %r" % (t, p))
+                raise RuntimeError("no WELCOME: %r %r (%.1f s after the connect)" % (t, p, time.time() - t0))
             self.welcome = p
 
     def send(self, tag, payload=b""):
@@ -715,20 +716,33 @@ def t_limits(d):
     c = Conn(hello=False)
     t0 = time.time()
     check(c.closed(14) and 9.5 < time.time() - t0 < 13, "no HELLO: dropped after 10 s")
-    # a HELLO trickled a byte at a time (each byte is progress): still dropped 10 s after the accept (audit B2-1);
-    # meanwhile the four slots are not all taken for ever
+    # a slow but honest client (B2-15): its HELLO in three pieces 6 s apart, the last 12 s after the accept: each piece
+    # is progress, so it gets its WELCOME (the 10 s from the accept of B2-1 dropped it)
+    c = Conn(hello=False, timeout=20)
+    t0 = time.time()
+    h = struct.pack(">BI", HELLO, 2 + 2 + len(KEY)) + struct.pack(">H", 1) + S(KEY)
+    for k, piece in enumerate((h[:3], h[3:12], h[12:])):
+        if k:
+            time.sleep(6)
+        c.s.sendall(piece)
+    t, p = c.recv()
+    check(t == WELCOME and 11.5 < time.time() - t0, "a HELLO in pieces 6 s apart: WELCOME %.1f s after the accept "
+          "(B2-15)" % (time.time() - t0))
+    c.close()
+    # a HELLO trickled a byte at a time (each byte is progress): still dropped 30 s after the accept (audit B2-1,
+    # WSB_HELLO_MS); meanwhile the four slots are not all taken for ever
     c = Conn(hello=False)
     t0 = time.time()
     c.s.sendall(bytes([HELLO, 0, 0, 0x0f, 0xff]))
     gone = False
-    while time.time() - t0 < 16 and not gone:
+    while time.time() - t0 < 36 and not gone:
         time.sleep(2)
         try:
             c.s.sendall(b"x")
         except OSError:
             gone = True
         gone = gone or c.closed(0.1)
-    check(gone and 9.5 < time.time() - t0 < 14, "a HELLO trickled a byte every 2 s: dropped 10 s after the accept "
+    check(gone and 29.5 < time.time() - t0 < 34, "a HELLO trickled a byte every 2 s: dropped 30 s after the accept "
           "(%.1f s)" % (time.time() - t0))
     # discovery on both ports
     u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

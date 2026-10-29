@@ -137,8 +137,9 @@ THE NETWORK
     listens again at once, which starts netd again (D11), then every
     10 s. At most 4 connections at once (a fifth gets "busy"), one file
     transfer at a time; a connection that makes no progress for 10 s in
-    either direction is dropped, and so is one not past HELLO 10 s
-    after it connected.
+    either direction is dropped (before HELLO is done: 10 s after the
+    last byte received), and so is one not past HELLO 30 s after it
+    connected, however slowly its bytes come.
 
 FILES
     /sbin/wasabid             the daemon (the package wasabid)
