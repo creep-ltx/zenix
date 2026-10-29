@@ -27,10 +27,11 @@ DESCRIPTION
 
     What it offers (its caps): ping, info, ls, put, get, run, del,
     mkdir, debug, reboot (and reboot to a system), restart, ps, kill,
-    speed, speedfile, quit, hb, health, detach, slots, zenix. The
-    console commands (grab, screen, windows, key, sum, inputs, text)
-    need kernel operations that come with D24's step 3; until then they
-    are left out of caps and answer "not in this Zenix yet".
+    speed, speedfile, quit, grab, screen, windows, hb, key, health,
+    detach, slots, sum, inputs, zenix, text. The console commands go
+    through the kernel's console operations (SYS_console CON_READ,
+    CON_LINE, CON_INPUT); on a kernel without them they are left out
+    of caps and answer "not in this Zenix yet".
 
     run    "sh -c COMMAND" as root, standard input /dev/null, its
            output sent as it comes (standard error apart unless the
@@ -74,6 +75,24 @@ DESCRIPTION
     health key-value lines: mem.chip.free, mem.fast.free, emu68,
            zenix.version, uptime, procs, load.ready, net.IFACE.rx/tx/
            bad, disk.root.free.kb.
+    text   the console's text (TEXT, new with Zenix): a header and a
+           glyph a cell (with the client's flag 3 bytes a cell: glyph,
+           style, colour), at once or, with a pattern (an extended
+           regular expression), when a row matches: read every 100 ms
+           while the console changes, at most 3600 s, else the screen
+           and ERR "timeout". A console never used: ERR.
+    grab   the shown console as RGB pixels, a display line at a time
+           (slow over SLIP: 480 KB a picture). Only the shown console.
+    sum    a checksum of the shown console's pens (a region or all).
+    screen the ten consoles as screens ttyN, front first; a title
+           brings that console to the front (Amiga+F<N>).
+    windows  one S line for the shown console (no windows).
+    key    mode 0 raw Amiga key codes (the qualifiers ignored: the codes
+           carry the modifiers), as typed at the keyboard; mode 1 text
+           into the shown console's input. What a call leaves held is
+           released at its end.
+    inputs kinds 0 (raw keys) and 1 (characters), timed by the daemon;
+           no mouse (kind 2 is refused).
 
 OPTIONS
     --init     started by init (/etc/daemons): restart is allowed

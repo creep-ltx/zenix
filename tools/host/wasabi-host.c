@@ -548,6 +548,7 @@ int wsb_os_con_input(int n, int kind, const uint8_t *b, int cnt)
             }
         }
         if (f) fclose(f);
+        amiga_down = 0;                 /* as the kernel: what a call left held is released at its end (D24 6.3) */
         return cnt;
     }
     if (!con[n].used)

@@ -6,8 +6,8 @@
  *
  * The descriptors: the core counts its own against 16 (D24 5.1) with the log as one, so standard input and output
  * are closed at the start and standard error is the log (the console when started by hand, /dev/kmsg under init).
- * The console operations of D24 6.1-6.3 come with step 3: until then wsb_os_con_ops() is 0 and caps leave the screen
- * commands out. */
+ * The console commands (D24 6.1-6.3, step 3) go through SYS_console's CON_READ, CON_LINE and CON_INPUT; on a kernel
+ * without them wsb_os_con_ops() is 0 and caps leave the screen commands out. */
 #include "socket.h"
 #include "../net/wasabi/wasabi.h"
 
@@ -290,14 +290,84 @@ int wsb_os_ifaces(struct wsb_iface *t, int max)
 }
 int wsb_os_klog(uint32_t off, void *buf, uint32_t n) { int r = sys_klog(off, buf, n); return r < 0 ? 0 : r; }
 
-/* ---- the consoles: D24 step 3 ---- */
-int wsb_os_con_ops(void) { return 0; }
+/* ---- the consoles (D24 6.1-6.3): SYS_console's CON_READ, CON_LINE and CON_INPUT through /dev/ttyN, opened for the
+ * call and closed (one of the two spare descriptors of 5.1, never during a spawn: the loop does one thing at a time) ---- */
+static int con_fd(int con)
+{
+    char p[12] = "/dev/tty";
+    int k = 8;
+    if (con >= 10)
+        p[k++] = '1';
+    p[k++] = (char)('0' + con % 10);
+    p[k] = 0;
+    return con >= 1 && con <= WSB_NCONS ? sys_open(p, O_RDWR) : -ENXIO;
+}
+
+/* 1 when the kernel has the ops: an older one answers CON_READ with -EINVAL (its op test), asked once */
+int wsb_os_con_ops(void)
+{
+    static int have = -1;
+    if (have < 0) {
+        struct uconread r = { sizeof r, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        int fd = con_fd(1);
+        have = fd >= 0 && sys_conread(fd, &r) != -EINVAL;
+        if (fd >= 0)
+            sys_close(fd);
+    }
+    return have;
+}
+
 int wsb_os_con_read(int con, struct wsb_con_head *h, uint8_t *cells, uint32_t cap)
-{ (void)con; (void)h; (void)cells; (void)cap; return -ENOSYS; }
+{
+    struct uconread r = { sizeof r, (u32)cells, cells ? cap : 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    int fd = con_fd(con), e;
+    if (fd < 0)
+        return fd;
+    e = sys_conread(fd, &r);
+    sys_close(fd);
+    if (e < 0)
+        return e;
+    h->rows = r.rows;
+    h->cols = r.cols;
+    h->crow = r.crow;
+    h->ccol = r.ccol;
+    h->changes = r.changes;
+    h->shown = (r.flags & CONRD_SHOWN) != 0;
+    h->pcfont = (r.flags & CONRD_FONT) != 0;
+    return 0;
+}
+
 int wsb_os_con_line(int con, int line, uint8_t *pens, uint32_t cap, struct wsb_con_disp *d)
-{ (void)con; (void)line; (void)pens; (void)cap; (void)d; return -ENOSYS; }
+{
+    struct uconline l = { sizeof l, (u32)pens, cap, 0, 0, 0, 0, 0, { 0 } };
+    int fd = con_fd(con), e;
+    if (fd < 0)
+        return fd;
+    e = sys_conline(fd, line, &l);
+    sys_close(fd);
+    if (e < 0)
+        return e;
+    d->width = l.width;
+    d->height = l.height;
+    d->depth = l.depth;
+    d->generation = l.generation;
+    for (int i = 0; i < 16; i++) {      /* 12 bits a colour, as AGA shows them with LOCT 0: each nibble doubled */
+        d->rgb[i][0] = (uint8_t)((l.palette[i] >> 8 & 15) * 17);
+        d->rgb[i][1] = (uint8_t)((l.palette[i] >> 4 & 15) * 17);
+        d->rgb[i][2] = (uint8_t)((l.palette[i] & 15) * 17);
+    }
+    return 0;
+}
+
 int wsb_os_con_input(int con, int kind, const uint8_t *b, int n)
-{ (void)con; (void)kind; (void)b; (void)n; return -ENOSYS; }
+{
+    int fd = con_fd(con), r;
+    if (fd < 0)
+        return fd;
+    r = sys_coninput(fd, kind == WSB_IN_TEXT ? CONI_TEXT : CONI_RAW, b, (u32)n);
+    sys_close(fd);
+    return r;
+}
 
 int main(int argc, char **argv)
 {

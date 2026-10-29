@@ -3,7 +3,10 @@
 """The PC's side of tools/remote-test.sh (DESIGN D24 12.2): wasabid on Zenix in FS-UAE, reached over SLIP through
 zenix-slirp's forwards (TCP PORT and UDP PORT+1 to the Amiga's 1236), with wasabi-check.py's frames and checks.
     wasabi-remote.py PORT RUN WORKDIR [WASABI_CHECKOUT]
-RUN  c   the stock A1200 (parts c, d, r): the daemon started by hand while the network is down, then everything of
+RUN  s   the screen (part s, D24 step 3): TEXT, its wait and timeout, KEY text and raw keys (Amiga+F2: console 2's
+         login), SCREEN, WINDOWS, SUM before and after a change, GRAB against termtest's own CON_LINE picture at 3 and 4
+         planes, a console never used
+     c   the stock A1200 (parts c, d, r): the daemon started by hand while the network is down, then everything of
          section 4 but the screen, netd killed under it, the kernel log stream, REBOOT and its guard; after the reboot
          the previous boot's ending replayed, then the owner's own client (when WASABI_CHECKOUT names a checkout of
          Wasabi; skipped otherwise)
@@ -21,7 +24,6 @@ PORT, RUN, WORK = int(sys.argv[1]), sys.argv[2], os.path.abspath(sys.argv[3])
 REAL = sys.argv[4] if len(sys.argv) > 4 else ""
 wc.OFF = PORT - 1236
 S, errtext, put = wc.S, wc.errtext, wc.put
-NOSCREEN = ",".join(x for x in wc.CAPS.split(",") if x not in wc.SCREEN)
 T = 60                                          # SLIP moves about 11 KB/s: generous socket timeouts
 
 
@@ -71,8 +73,11 @@ def getfile(c, path, limit=30):
 def done(c=None):
     """/tmp/pc-done on Zenix: its script goes on and ends the run"""
     try:
-        c = c or conn(timeout=20)
-        put(c, "/tmp/pc-done", b"done\n")
+        if not c or put(c, "/tmp/pc-done", b"done\n") != "OK":     # a connection that broke: a new one
+            c = conn(timeout=20)
+            r = put(c, "/tmp/pc-done", b"done\n")
+            if r != "OK":
+                print("wasabi-remote: could not write /tmp/pc-done: %r" % (r,), flush=True)
         c.close()
     except Exception as e:
         print("wasabi-remote: could not write /tmp/pc-done: %r" % e, flush=True)
@@ -90,8 +95,8 @@ def mem(c, what):
 # ---- run c: the stock A1200 ----
 def part_c(c):
     banner, caps, refused = welcome(c)
-    ok(banner.startswith("Zenix ") and caps == NOSCREEN and refused == 0,
-       "WELCOME: banner %r, caps without the screen commands (no console operations before step 3)" % banner)
+    ok(banner.startswith("Zenix ") and caps == wc.CAPS and refused == 0,
+       "WELCOME: banner %r, caps with the screen commands (the kernel has the console operations)" % banner)
     ok(c.simple(wc.PING)[0] == wc.PONG, "PING -> PONG")
     got, e = c.data(wc.GET, S("/tmp/wd1.log"))
     log = got.decode("latin-1")
@@ -393,13 +398,111 @@ def part_r(port):
     for args, want in ((["ping"], "Zenix"), (["run", "echo from-the-real-client"], "from-the-real-client"),
                        (["put", local, "/tmp/real.bin"], ""), (["get", "/tmp/real.bin", back], ""),
                        (["ls", "/tmp"], "real.bin"), (["ps"], "wasabid"), (["info"], "Zenix"),
-                       (["health"], "")):
+                       (["health"], ""), (["windows"], "tty1"), (["sum"], ""),
+                       (["grab", "--raw", os.path.join(WORK, "real-grab.png")], "")):
         r = subprocess.run(base + args, capture_output=True, text=True, env=env, timeout=180)
         extra = True
         if args[0] == "get":
             extra = os.path.exists(back) and open(back, "rb").read() == blob
+        if args[0] == "grab":
+            g = os.path.join(WORK, "real-grab.png")
+            extra = os.path.exists(g) and open(g, "rb").read(8) == b"\x89PNG\r\n\x1a\n"
         ok(r.returncode == 0 and want in r.stdout and extra, "the real client: %s (%d %r %r)" %
            (args[0], r.returncode, r.stdout[-200:], r.stderr[-300:]))
+
+
+# ---- run s: the screen ----
+def text(c, flags=0, con=0, tmo=0, pat=""):
+    return c.data(wc.TEXT, struct.pack(">III", flags, con, tmo) + S(pat))
+
+
+def rows_of(got):
+    r, k = struct.unpack(">HH", got[:4])
+    g = got[16:]
+    return [g[i * k:(i + 1) * k].decode("latin-1").rstrip() for i in range(r)]
+
+
+def zgrab(c, path):
+    """termtest's own picture of the display (CON_LINE): ZGRB, w, h, depth, 16 palette words, a pen a pixel"""
+    o, e, rc = sh(c, "termtest grab %s" % path)
+    got, e2 = getfile(c, path, 120)
+    if rc or e2 or got[:4] != b"ZGRB":
+        return None
+    w, h, d = struct.unpack(">HHH", got[4:10])
+    pal = [struct.unpack(">H", got[10 + 2 * i:12 + 2 * i])[0] for i in range(16)]
+    rgb = [bytes(((p >> s) & 15) * 17 for s in (8, 4, 0)) for p in pal]
+    return w, h, d, b"".join(rgb[x & 15] for x in got[42:42 + w * h])
+
+
+def part_s(c):
+    banner, caps, refused = welcome(c)
+    ok(caps == wc.CAPS, "WELCOME: caps with the screen commands")
+    got, e = text(c)
+    rows, cols, crow, ccol, ch = struct.unpack(">HHHHI", got[:12])
+    ok(e is None and (rows, cols) == (32, 80) and got[12] == 1 and got[14] == 1 and len(got) == 16 + 32 * 80,
+       "TEXT: console 1 shown, its header and a glyph a cell")
+    got2, e = text(c, 1)                                  # WX_CELLS
+    ok(e is None and len(got2) == 16 + 32 * 80 * 3 and got2[16::3][:80] == got[16:96],
+       "TEXT with the cells: 3 bytes each, the same glyphs")
+    ok(c.simple(wc.KEYT, struct.pack(">H", 1) + b"echo hello-s\n")[0] == wc.OK, "KEY text")
+    got, e = text(c, 0, 0, 10, "echo hello-s")
+    ok(e is None and any(r.endswith("echo hello-s") for r in rows_of(got)), "TEXT waiting: the typed line is on the screen")
+    d = conn()
+    o, er, rc, _ = wc.run(d, "sleep 3; echo s-marker-$((6*7)) > /dev/tty1", 2)
+    d.close()
+    t0 = time.time()
+    got, e = text(c, 0, 1, 30, "^s-marker-42$")
+    ok(e is None and "s-marker-42" in rows_of(got) and time.time() - t0 > 1.5,
+       "TEXT waiting for a pattern that appears later (%.1f s)" % (time.time() - t0))
+    t0 = time.time()
+    got, e = text(c, 0, 1, 2, "never-there")
+    ok(e is not None and "timeout" in e[1] and len(got) == 16 + 2560 and 1.5 < time.time() - t0 < 10,
+       "TEXT's timeout: the screen, then ERR timeout (%r)" % (e,))
+    for k in range(2):
+        _, e = text(c, 0, 9)
+        ok(e is not None and "never used" in e[1], "TEXT of a console never used: ERR (%d, nothing allocated)" % k)
+    got, e = c.data(wc.WINDOWS)
+    ok(e is None and got == b"S\ttty1\t0\t0\t640\t256\t3\ttty1\n", "WINDOWS: one S line (%r)" % got)
+    s1, e1 = c.data(wc.SUM, struct.pack(">hhhh", 0, 0, 0, 0))
+    s2, e2 = c.data(wc.SUM, struct.pack(">hhhh", 0, 0, 0, 0))
+    ok(e1 is None and s1 == s2 and struct.unpack(">II", s1)[1] == 640 * 256, "SUM of a quiet screen twice: the same")
+    for depth in (3, 4):
+        if depth == 4:
+            o, _, rc = sh(c, "termtest depth 16")
+            ok("colours 16" in o, "the display to 16 colours (%r)" % o)
+        z = zgrab(c, "/tmp/s.zg")
+        got, e = c.data(wc.GRAB, S(""))
+        z2 = zgrab(c, "/tmp/s.zg")
+        same = z is not None and z == z2 and e is None and z[2] == depth and got[:12] == struct.pack(">III", 640, 256, 3)
+        ok(same and got[12:] == z[3], "GRAB at %d planes: every pixel as termtest's CON_LINE picture of the same quiet "
+           "moment (%s)" % (depth, e))
+        if depth == 4:
+            got, e = c.data(wc.WINDOWS)
+            ok(e is None and got.endswith(b"\t4\ttty1\n"), "WINDOWS: the depth 4 now (%r)" % got)
+    sh(c, "termtest depth 8")
+    ok(c.simple(wc.KEYT, struct.pack(">H", 1) + b"# x\n")[0] == wc.OK, "KEY text again")
+    s3, e3 = c.data(wc.SUM, struct.pack(">hhhh", 0, 0, 0, 0))
+    ok(e3 is None and s3 != s1, "SUM after a change: different")
+    # raw keys: Amiga+F2 shows console 2, whose login prompt TEXT waits for
+    t, p = c.simple(wc.KEYT, struct.pack(">HHHHHHHHH", 0, 0x66, 0, 0x51, 0, 0xD1, 0, 0xE6, 0))
+    ok(t == wc.OK, "KEY raw codes: Amiga+F2")
+    got, e = text(c, 0, 2, 30, "login:")
+    ok(e is None and got[12] == 1 and any("login:" in r for r in rows_of(got)), "TEXT of console 2: shown, its login prompt")
+    got, e = c.data(wc.SCREENT, struct.pack(">I", 0) + S(""))
+    ok(e is None and got.startswith(b"tty2 640 256 3 tty2\n") and b"tty1 640 256 3 tty1\n" in got,
+       "SCREEN: the consoles, front first (%r)" % got)
+    got, e = c.data(wc.SCREENT, struct.pack(">I", 0) + S("tty1"))
+    got, e = text(c)
+    ok(e is None and got[14] == 1, "SCREEN tty1: console 1 in front again")
+    rec = lambda k, wait, a: struct.pack(">BBHHHhh", k, 0, wait, a, 0, 0, 0)
+    t, p = c.simple(wc.INPUTS, rec(1, 2, ord("#")) + rec(0, 2, 0x60) + rec(0, 2, 0x20) + rec(0, 2, 0xA0) + rec(0, 0, 0xE0)
+                    + rec(1, 0, ord("\n")))
+    got, e = text(c, 0, 1, 10, "^#A$")
+    ok(t == wc.OK and e is None, "INPUTS: a character, Shift held across raw events (A), Return (%r %r)" % (t, e))
+    t0 = time.time()
+    got, e = text(c, 0, 1, 14, "never-there")
+    ok(e is not None and "timeout" in e[1] and 13 < time.time() - t0 < 30,
+       "TEXT waiting 14 s (longer than the 10 s progress rule): ERR timeout (%r, %.1f s)" % (e, time.time() - t0))
 
 
 # ---- run l: the 1 MB machine ----
@@ -455,6 +558,9 @@ def main():
             part_reboot(s)
             c = part_c2()
             part_r(PORT)
+        elif RUN == "s":
+            c = wait_up(500, "the boot")
+            part_s(c)
         elif RUN == "l":
             c = wait_up(500, "the 1 MB machine's boot")
             part_l(c)

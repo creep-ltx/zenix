@@ -8,6 +8,8 @@
 #    one plane has (at 4 planes this is the test of FMODE 3's fetch window)
 #  - `termtest colours`: the 16 colour blocks against the palette (3 planes: colour & 7; 2: the four colours; 1 plane:
 #    no colours)
+#  - D24 6.2: `termtest colours`'s g writes the display through CON_LINE (pens and palette): every pixel against the
+#    colours screenshot (those inside one colour: the scaled screenshot blurs the edges)
 #  - `termtest scroll` (coloured lines scrolling the screen three times, so the blitter copies the rows back,
 #    background-colour erases, a scroll region with inserted and deleted lines): the screen afterwards must be the
 #    very picture a redraw from the grid gives (the scrollback one line up and back down redraws) - no garbage
@@ -52,7 +54,11 @@ sleep 2
 send termtest colours\r
 sleep 5
 shot colours
+send g
+sleep 8
 send q
+sleep 2
+send sync\r
 sleep 2
 send termtest scroll\r
 wait zenix:/# 120
@@ -106,6 +112,9 @@ for d in $DEPTHS; do
     check "$d planes: termtest columns: all 80 columns in order${ref:+, the edges exactly where one plane has them} ($(head -1 "$OUT/geom$d"))" $r
     [ $d = 1 ] && head -1 "$OUT/geom$d" > "$OUT/edges1"
     ct palette "$OUT/d$d-colours.png" "$OUT/geom$d" $d; check "$d planes: termtest colours: the 16 blocks as $d planes show them" $?
+    debugfs -R "cat /tmp/grab.zg" "$B/zenix.hdf" > "$OUT/d$d-grab.zg" 2>/dev/null
+    ct grab "$OUT/d$d-colours.png" "$OUT/geom$d" "$OUT/d$d-grab.zg"
+    check "$d planes: CON_LINE's picture (termtest's g) is the screenshot of the same moment, pixel by pixel (D24 6.2)" $?
     ct same "$OUT/d$d-scrolled.png" "$OUT/d$d-redrawn.png"; check "$d planes: after termtest scroll the screen is what a redraw from the grid gives" $?
     if [ $d = 2 ]; then
         ct rows "$OUT/d$d-back.png" "$OUT/geom$d" $d; check "$d planes: scrolled back a page, every row keeps its colour" $?

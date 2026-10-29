@@ -71,6 +71,7 @@ struct conn {
     int con;                            /* J_TEXT, J_GRAB: the console */
     uint32_t changes, gen;              /* J_TEXT: the change counter last read; J_GRAB: at the start */
     int line, lines;                    /* J_GRAB: the next display line, how many */
+    uint8_t mods;                       /* KEY, J_INPUTS: bit m, raw modifier 0x60 + m held (raw_keys) */
 };
 
 /* a run slot (5.1) and the children the daemon only reaps */

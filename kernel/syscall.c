@@ -43,6 +43,8 @@ _Static_assert(__builtin_offsetof(struct udirent, name) + 64 == UDIRENT_FIRST, "
 _Static_assert(__builtin_offsetof(struct umountinfo, type) + 8 == UMOUNTINFO_FIRST, "umountinfo's first size is frozen");
 _Static_assert(__builtin_offsetof(struct uupdate, kver) + 16 == UUPDATE_FIRST, "uupdate's first size is frozen");
 _Static_assert(__builtin_offsetof(struct uproc, name) + 16 == UPROC_FIRST, "uproc's first size is frozen");
+_Static_assert(__builtin_offsetof(struct uconread, pad) + 2 == UCONREAD_FIRST, "uconread's first size is frozen");
+_Static_assert(__builtin_offsetof(struct uconline, palette) + 32 == UCONLINE_FIRST, "uconline's first size is frozen");
 static __attribute__((noinline)) s32 usize(u32 p, u32 given, u32 sizes)
 {
     u32 n = usize_n(given, sizes >> 16, sizes & 0xFFFF);

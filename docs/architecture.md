@@ -1456,6 +1456,28 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   2 KB plus 8 KB above one plane, only while loaded; the kernel image +1,900 bytes. Tests: `tools/term-test.sh` (each
   rule's stored cells, the ops' checks and errors, owners, the palette at a switch, the panic reset, a fuzz with every
   rule), `tools/colour-test.sh` (`termtest pcfont`'s screenshots at 1-4 planes; section 13).
+- **The remote control's console ops** (DESIGN D24 6.1-6.3, `SYS_console`'s ops 5-7, step 3 built on branch wasabi3
+  2026-10-29; `kernel/kernel.h` has the structs). Root only by the effective id (-EPERM), named by any console's
+  descriptor (-EBADF, -ENOTTY), and none allocates: a console whose terminal was never used is -ENXIO (`term.c`'s
+  `get()` would allocate and panic on a full memory). **`CON_READ`** (a2 a `struct uconread` stating its size, with a
+  pointer to the caller's cell buffer and its size; a3 0) copies the live grid (never the scrollback view) as 3 bytes a
+  cell (the stored byte, the attribute bits, the colour byte) in whole cells, and the header: rows, columns, the
+  cursor, a per-console change counter (raised by every `term_write`, font and rules changes, redraws, a switch away and scrollback moves), and flags (shown,
+  an 8-bit font loaded, scrolled back, the cursor shown). **`CON_LINE`** (a2 a display line, a3 a `struct uconline`)
+  answers for the shown console only (else -ENXIO; no display -ENODEV): `gfx_conline` turns one line of the drawing
+  window (`off`, where the CPU draws; the Copper shows it from the next vertical blank) into a pen a pixel from the
+  interleaved planes, with the width, height, depth, a generation (raised by a depth change and a palette switch) and
+  the palette as the Copper's 12-bit words; the planes' layout stays the kernel's. **`CON_INPUT`** (a2 at most 256
+  bytes, a3 the count | kind << 16): kind 0 hands each raw code to `kbd.c`'s `key_code` from the system call
+  (`kbd_inject`: the same process context as `kbd_work`, which cannot run meanwhile; the interrupt's ring is not
+  touched and no randomness is credited), so the keymap, the modifiers and Amiga+F1..F10 act as at the keyboard, for
+  the shown console; 0x78 and 0xF8-0xFF refuse the whole call; at its end the modifiers the call pressed and did not
+  release are released and a key it left down stops repeating; a call stops early, as a terminal write does, after two
+  ticks while input waits (raw keys act as the real keyboard, Amiga+F*n*'s allocation of a new console included). Kind 1 types the bytes into that console's tty
+  (`tty_type`: the line discipline, echo and Ctrl-C of the serial line, without its 0x1d hook), stopping before a byte
+  the queue could not keep (^C, ^Z, ^U and backspace always get through); -ENXIO for a tty never used. Both answer how many bytes were taken. The daemon is their one
+  user (`user/wasabid.c`, through `/dev/ttyN` opened for the call); `termtest conops`, `rawkeys` and `text` check them
+  (`tools/con-test.sh`). The kernel image +1,472 bytes.
 - **Input path: interrupts queue, `kwork` works** (`kernel/main.c`, audit B4/B5). The interrupt handlers do
   only what cannot wait: the keyboard handler (`kbd_isr`) reads the byte, answers the keyboard's handshake and puts
   the raw code into a 128-slot ring; the serial handler (`serial_rx_isr`, level 5) moves each byte from Paula into a
@@ -1479,7 +1501,8 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   calls it, and a `busy` flag keeps it from being re-entered, so the tty queue and line, the terminal grids, the
   blitter and the heap (the first use of a console allocates its tty and terminal) are only ever changed by one
   piece of code at a time. Lost wakeups (B5) cannot happen: `tty_read` and init's `proc_wait` (`WAIT_CONSOLE`) test
-  "is there something?" and then block in kernel code with none of those points in between, so `kwork` - the only producer -
+  "is there something?" and then block in kernel code with none of those points in between, so `kwork` - the only producer
+  besides `SYS_console`'s `CON_INPUT` (D24 6.3), which runs in its caller's system call and so cannot run there either -
   cannot run between the two; input that
   arrives meanwhile waits in its ring, and the wake-up that delivers it (`ev_wake`, section 6) comes after the reader
   is blocked - and one that came between the check and the block is caught by the event bit. The

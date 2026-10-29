@@ -227,7 +227,9 @@ measured size passes 4 KB, the next step frees room first (more cold files at `-
     not stay stopped for ever.
 13. **Producers (the full list for the build), each setting the bit and readying under the mask:** `tty_input`,
     `tty_setmode`, `tty_inject`, `serial_work`, the pipes and `file_close`, the stop path in `schedule` and `proc_exit`
-    (for the parent), `con_switch`, `ipc_enqueue`, `sig_send`, the alarm (inside `wake_sleepers`, masked). Not all run at
+    (for the parent), `con_switch`, `ipc_enqueue`, `sig_send`, the alarm (inside `wake_sleepers`, masked);
+    *since D24 step 3 (2026-10-29):* `SYS_console`'s `CON_INPUT`, whose raw keys reach `tty_input` and `con_switch`
+    and whose text reaches the tty's line discipline in the caller's own system call. Not all run at
     the `kwork` points (pipes, kill, a child's exit or stop, messages and `sig_send` run in the producer's own system
     call); all are safe by the same rule. `proc_exit`'s own `wake_io` goes.
 14. **Size:** the reviewers' prototype of the core is 2.3 KB at -Os; with the blocking sites, the tty/pipe/serial changes,

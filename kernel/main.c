@@ -206,7 +206,8 @@ static void irq_other_report(void)
  * being re-entered, so tty, terminal, heap and blitter state are only ever changed by one piece of code at a time.
  * This also closes the lost wakeup (B5): a reader that finds no line and then blocks (tty_read; init's proc_wait for a
  * console that wants a login) is kernel code with none of the four points between its check and its block, so kwork -
- * the only producer of input and of console requests - cannot run there; input that arrives meanwhile waits in the ring and
+ * the producer of input and of console requests, with SYS_console's CON_INPUT (D24 6.3), which runs in another
+ * process's system call and so cannot run there either - cannot run there; input that arrives meanwhile waits in the ring and
  * its wake-up (ev_wake, D16) comes after the reader blocked. A new call of kwork() must keep it that way. */
 volatile int kwork_pending;
 

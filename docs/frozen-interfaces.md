@@ -61,7 +61,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `HWINFO_DRYRUN` ("ZHWD") in the hwinfo magic from a caller that may return to AmigaOS (zenixboot CHECK): stage0
   writes no hardware then.
 - **D20 (telnet's console, step 1, 2026-10-27):** `SYS_console`'s op word `op | (fd + 1) << 8` (0 above the op: no
-  descriptor, only `CON_COLOURS`); `CON_FONT` 2 (a2 PSF1 data, a3 its size; a2 0 drops it; PSF1 mode 0, height 8,
+  descriptor, only `CON_COLOURS`; ops are 1-255, 4 reserved for D28's `CON_UFONT`; D24's ops 5-7 take a descriptor
+  too); `CON_FONT` 2 (a2 PSF1 data, a3 its size; a2 0 drops it; PSF1 mode 0, height 8,
   2,052 bytes; meaning "8-bit mode: each byte one glyph of this font, no UTF-8 while loaded"), `CON_RULES` 3 (a2 bits,
   a3 mask, 0 asks, answers the bits before); the `CONR_*` bits 1-64 and their meanings; the target rules (a console,
   the caller's own in its foreground, or root's) and the errors -EBADF, -ENOTTY, -EPERM, -ENODEV, -EFAULT, -EINVAL,
@@ -113,6 +114,25 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   refusals (root's regular file, mode 600, at most 2 KB, decision 4 of d24-remote.md); wasabid's TCP port 1236, its
   discovery answer, its exit statuses (0 a stop, 1 could not start, 75 start again) and arguments (`--init`,
   `--trial`, `--port`). The Wasabi protocol itself is the Wasabi project's (its PROTOCOL.md), followed, not ours.
+- **D24 step 3 (the console ops, branch wasabi3, 2026-10-29):** `SYS_console` ops 5 `CON_READ`, 6 `CON_LINE`, 7
+  `CON_INPUT` in D20's op word, root only by the effective id (-EPERM before the descriptor's checks), on any console's
+  descriptor (-EBADF, -ENOTTY); for `CON_READ`, `CON_LINE` and the text kind a console never used is -ENXIO with
+  nothing allocated (raw keys act as the real keyboard). The structs' `size` is written back as the bytes the kernel
+  filled. `CON_READ`: a2 a `struct uconread`
+  (first size `UCONREAD_FIRST` 28: the caller's size, cells pointer and size; rows, cols, cursor row and column, the
+  change counter, `CONRD_*` flags 1 shown, 2 an 8-bit font, 4 scrolled back, 8 the cursor shown, the cell size 3), a3 0
+  (any other value -EINVAL: room for later forms); the cells row by row, 3 bytes (the stored byte, `CONA_*` 1 inverse,
+  2 underline, 4 bold, the colour byte with the rules' bright colours in), whole cells only, answering the bytes
+  written. `CON_LINE`: a2 the display line (below the height, else -EINVAL), a3 a `struct uconline` (first size
+  `UCONLINE_FIRST` 56: size, pens pointer and size; width, height, depth, the generation, 16 palette words 0x0RGB as
+  the Copper shows them, unused entries 0); a pen a pixel in whole groups of 8, the answer the pens written; -ENODEV
+  without a display, -ENXIO for a console not shown. Only "a line of pens" is frozen, never the planes' layout.
+  `CON_INPUT`: a2 the bytes, a3 the count (at most 256) | kind << 16; kind 0 raw key codes into the keyboard path
+  (the shown console, whatever console the descriptor names; 0x78 and 0xF8-0xFF refuse the whole call with -EINVAL;
+  at its end the modifiers it pressed and did not release are released and a key it left down does not repeat), kind
+  1 text into that console's tty as the serial line's bytes (no 0x1d hook), stopping before a byte the queue could not
+  keep (^C, ^Z, ^U and backspace always taken); a raw call may also stop early on a busy machine; the answer the bytes
+  taken. The structs grow only at their end, each stating its own size.
 - **D23 step 1 (the cancel mark, branch nfs12, 2026-10-28):** `UMSG_CANCEL` 4 (set by the kernel only, for a client
   killed while it waits and on every call a killed process makes after; never for a caught signal, never on
   `proc_exit`'s calls or `FS_CLOSE`; never cleared; a server may answer -EINTR, the call is never restarted; `FS_QUIT`
