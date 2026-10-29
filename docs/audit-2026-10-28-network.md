@@ -108,6 +108,14 @@ Left open, each with a proposal:
   file of a transfer started late): the PUT and 8 KB go first, the reset only once LS shows its temporary file, then
   the GET waits out "busy". Test: 6 runs of each part side by side with the fix (3 + 3 at once, twice), all passed.
 - **O12 a 4 KB buffer nfscd never uses** (libz's stdout buffer, per mount): drop it with D27's port (block 3).
+- **O13 the floppy driver out of the kernel** (owner 2026-10-29): `kernel/floppy.c` (4.4 KB) becomes a server started
+  at the first use of df0-df3 and gone when idle, as netd is started at the first socket call; the floppy boot does not
+  need it (the bootblock loads the RAM disk). Saves 4.4 KB of kernel memory on every machine and of the kernel file on
+  the boot floppies; costs a little more while a floppy is in use. A short design note first (the first disk driver
+  outside the kernel: how diskd reaches it), at block 2's audit. The A3000's SCSI driver (2.3 KB) stays inside (needed
+  to boot an A3000; owner 2026-10-29).
+- **O14 a kernel size budget** (owner 2026-10-29, "why is it so big"): the audit lists each kernel part's size, finds
+  dead code and oversized buffers, and sets a budget the build checks.
 - **O8 Zmodem has no cap on files per session** (judged acceptable): a board can offer thousands of honest small
   files; the disk filling up ends it, as with any download the user lets run. A cap would be a new option (the
   feature halt).
