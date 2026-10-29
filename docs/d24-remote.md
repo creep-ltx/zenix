@@ -724,7 +724,7 @@ a modifier the call pressed is up at its end even if held at the keyboard (one f
 has); Caps Lock stays as a call leaves it; raw function keys can overflow a raw tty's queue as the real keyboard can;
 codes 0x68-0x77 are taken and do nothing.
 
-**Open (for the main session): `update-test zfsroot` fails with this branch's kernel, and the cause is not in it.**
+**Resolved (main, 2026-10-29, commit 0c43903): `update-test zfsroot` failed with this branch's kernel, and the cause was not in it** (FS-UAE 3.2.35's IDE handed IDENTIFY the last sector of a multi-sector READ when the kernel file was whole 512-byte blocks; the kernel now reads a sector before IDENTIFY). The original note:
 The first boot of that case (zenixboot refuses a bundle without a ZenixFS server, then starts the installed
 `kernel-zfs`) reads an empty or garbage IDENTIFY ("ide: A1200/A600 port: cannot address by LBA") and panics "no disk
 and no ramdisk"; the second boot of the very same kernel file, with an accepted bundle, starts. Main passes; **main

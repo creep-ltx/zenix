@@ -1639,7 +1639,7 @@ outputs (`tools/cmds-test.sh`).
 
 - Toolchain: `m68k-elf-gcc` and binutils, prefix `TOOLPREFIX` (README.md); `make` produces `build/zenix.adf` (bootblock + kernel only),
   `build/zenix.hdf` (ext2 root disk) and, as a separate dev/test build, `build/zenix-ram.adf` (the same plus a RAM
-  root image). That floppy holds the bootblock, the kernel and the 704 KB RAM disk (`RAMDISK_K` in the Makefile), so
+  root image). That floppy holds the bootblock, the kernel and the RAM disk (640 KB since 2026-10-29: `RAMDISK_K` in the Makefile; the mount tests' floppy `RAMDISK_MOUNT_K`, 704 KB), so
   the kernel may be at most 179200 bytes (`KERNEL_MAX`): every build of `kernel.bin` prints how much is left, and
   `tools/mkadf.py` refuses an image that is over and says by how much. The mount tests' floppy `zenix-mount.adf` has a
   RAM disk of its own size (`RAMDISK_MOUNT_K`, 728 KB: it carries `/sbin/zfsd`), so its limit is lower
