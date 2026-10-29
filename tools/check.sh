@@ -121,7 +121,7 @@ row() {
 }
 
 for t in $LIST; do
-    case "$t" in docs-check|zenixfs-test|stage0-68k-test|net-test|telnet-test|crypto-test|zpkg-test|nfs-test|tls-test|wasabi-test) ;; *) [ -x "tools/$t.sh" ] || { echo "check: no test called $t"; exit 2; } ;; esac
+    case "$t" in docs-check|zenixfs-test|stage0-68k-test|confont-test|net-test|telnet-test|crypto-test|zpkg-test|nfs-test|tls-test|wasabi-test) ;; *) [ -x "tools/$t.sh" ] || { echo "check: no test called $t"; exit 2; } ;; esac
 done
 T0=$(date +%s)
 hostl=""; emul=""
