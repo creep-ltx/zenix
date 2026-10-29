@@ -97,6 +97,14 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `channel`, `server`, `hold`, `cache`; others ignored), `/var/lib/zpkg/deps` (a name a line) and `sync/CHANNEL.index`
   with its `.sig`; zpkg's built-in keys by build kind (D21 6.3); `zup -f`/`-r`'s command line is between programs of one base version
   and not frozen (docs/d22-zpkg.md section 10).
+- **D21 step 5 (signatures, branch sig5, 2026-10-28):** the detached `.sig` (80 bytes: `ZSG1`, format 1, algorithm
+  1 Ed25519, two zero bytes, the key id, the signature) and its labels with their digests (`Zenix bundle signature v1`
+  over SHA-256 of a bundle's header bytes 0-63 and its table; `Zenix package index v1` over the whole list); its life
+  beside the bundle on BOOT:Zenix/ (`zenix-update.zup.sig`, copied as `.sig.part` and renamed before the bundle;
+  renamed with it to `zenix-update.bad.sig`, `.done.sig`, `.rejected.sig`); zenixboot's state-file key
+  `sigdigest HEX` (the 64-hex digest that verified; older zenixboots ignore it); which key a build trusts (`make
+  RELEASE=1`: only `tools/keys/zenix-release-*.pub`, the channels `stable` and `testing`; a test build: only the TEST
+  key, the channel `test`); zenixboot's argument `UNSIGNED_OK` (test builds only; a release build ignores it).
 - **D24 steps 1-2 (the remote control, branch wasabi1, 2026-10-28):** `/dev/kmsg` (root by the effective id, opened
   write only; `O_RDONLY`/`O_RDWR` -EINVAL, anyone else -EACCES; its writes go into the kernel log as a service's output does);
   `/etc/daemons` (`NAME NICE PROGRAM [ARGUMENTS]`, svctab's layout and limits, at most 4 lines, root's and writable by

@@ -978,6 +978,8 @@ static int cache_copy(const char *file, char out[48])
     if (file[0] != '/' && strcmp(file, out)) {          /* a name relative to where zpkg was started */
         say("%s: give the file with its whole path (/...)", file); return -EINVAL;
     }
+    struct ustat sst;                                   /* the cable's path (D21 6.5): no .sig, nothing copied */
+    if (sys_stat(sigf, &sst) < 0) { say("%s: no signature (%s, 80 bytes): refused", file, sigf); return -EPERM; }
     if (sys_chdir(CACHE) < 0) { sys_mkdir("/var/cache/zpkg"); sys_mkdir(CACHE); if (sys_chdir(CACHE) < 0) return -EIO; }
     if (copy_in(file, out) || copy_in(sigf, so)) { sys_unlink(out); sys_unlink(so); say("%s: cannot copy it (and its .sig) into the cache", file); return -EIO; }
     return 0;

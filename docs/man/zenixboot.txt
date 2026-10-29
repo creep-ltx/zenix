@@ -4,7 +4,7 @@ NAME
     zenixboot - start Zenix from AmigaOS, from files on a disk partition
 
 SYNOPSIS
-    zenixboot [KERNEL] [RAM=FILE] [CHECK] [PREVIOUS]
+    zenixboot [KERNEL] [RAM=FILE] [CHECK] [PREVIOUS] [UNSIGNED_OK]
 
 DESCRIPTION
     zenixboot is an AmigaOS program, not a Zenix one. It boots Zenix on an
@@ -57,10 +57,48 @@ UPDATES
     Zenix/zenix-update.zup (always as zenix-update.zup.part first, then
     renamed: a .part is a copy that was cut off and is renamed .bad).
 
-    A new bundle is read whole into memory (fast RAM first) and checked:
-    every count, size and offset, the SHA-256 of its table and of every
-    part. A bad one is renamed zenix-update.bad with the reason, and the
-    installed system starts; one older than the installed version too.
+    A new bundle is read whole into memory (fast RAM first) and checked in
+    this order: every count, size and offset and the SHA-256 of its table
+    (computed over the header's first 64 bytes and the table, and compared
+    with the header); whether its kernel can serve this root and the
+    volume has room (else it waits, unchecked, for a later start); then
+    its signature; then the SHA-256 of every part. A bad one is renamed
+    zenix-update.bad with the reason, and the installed system starts; one
+    older than the installed version too.
+
+SIGNATURES
+    Every bundle must come with its signature, Zenix/zenix-update.zup.sig
+    (80 bytes, made by tools/zsign.py on the PC; DESIGN D21 6.1-6.4):
+    Ed25519 over the label "Zenix bundle signature v1" and the digest
+    zenixboot computed itself, never one read from a file. Copy the .sig
+    first (as zenix-update.zup.sig.part, renamed), then the bundle. A
+    bundle without one, with one that does not verify, signed by a key
+    zenixboot does not know, or of the other kind of channel is renamed
+    zenix-update.bad (its .sig zenix-update.bad.sig) with the reason;
+    the installed system starts. On success it says which key signed
+    and how long the check took ("signed by release key 1a2b3c4d5e6f7081
+    (checked in 7.84 s)"). The .sig follows the bundle: renamed .done.sig,
+    .rejected.sig or .bad.sig with it; a cut-off zenix-update.zup.sig.part
+    is deleted, and a zenix-update.zup.sig with no bundle (left by a cut
+    between two renames) is renamed zenix-update.bad.sig.
+
+    Which keys: a release build (make RELEASE=1) knows only the release
+    keys (tools/keys/zenix-release-*.pub, built in) and takes only
+    bundles of the channels stable and testing; a test build knows only
+    its tree's TEST key (made in build/sign-test, never in the
+    repository) and takes only the channel test. zenixboot is never
+    updated by a bundle, so its keys change only when a new zenixboot is
+    copied by hand.
+
+    The check runs once per bundle: the verified digest is written into
+    the state file (sigdigest), and the later starts of the same trial
+    compare the computed digest with it instead of checking again. The
+    check (an estimate of 6-9 s on a 14 MHz 68020) runs on a stack of its
+    own (6 KB, StackSwap): its deepest chain is 2,412 bytes, measured with
+    gcc's -fcallgraph-info, more than the boot shell's default stack can
+    be trusted to leave free. That stack is filled with a pattern first;
+    zenixboot says how much of it the check used, and refuses the bundle
+    if the check reached its lowest 512 bytes.
     So is one whose kernel cannot serve the machine's root: when the
     installed kernel says it serves ZenixFS roots (the test-only
     kernel-zfs; the shipped kernel has no ZenixFS server, DESIGN D19) and
@@ -111,8 +149,9 @@ UPDATES
     The start rule: Zenix/zenix; if it is missing or not a kernel, a
     zenix.new with the state's SHA-256, then zenix.old; the one used is
     named on the screen and the serial port. The state file Zenix/state
-    (text: version, the kernel's SHA-256, the phase - installing, trial,
-    confirmed, rejected -, handovers, the last boot number) is written as
+    (text: version, the kernel's SHA-256, the verified signature's digest,
+    the phase - installing, trial, confirmed, rejected -, handovers, the
+    last boot number; unknown keys are ignored) is written as
     state.new and renamed; a start that finds only state.new uses it.
     zenixboot and bootmenu are never updated by a bundle. CHECK writes
     nothing; RAM= ignores a waiting bundle (its root half needs the disk's
@@ -132,6 +171,9 @@ ARGUMENTS
                 start stops it first: NOTES)
     PREVIOUS    go back to the previous version (UPDATES above): the
                 boot menu's "Zenix (previous)" line
+    UNSIGNED_OK a test build takes a bundle without a .sig (it says so;
+                a .sig that is there must still verify). A release build
+                says it ignores it and refuses unsigned bundles
 
 EXAMPLES
     SYS:zenixboot
@@ -175,7 +217,7 @@ NOTES
     (make build/zenix-card.img for an Emu68 SD card, build/zenix-boot.hdf
     for an IDE or CF disk); tools/write-card.sh writes the SD card.
 
-    Verified in FS-UAE (tools/zenixboot-test.sh; updates:
+    Verified in FS-UAE (tools/zenixboot-test.sh; updates and signatures:
     tools/update-test.sh); not yet run on a real Amiga. Not verified:
     whether an RTG card gives the monitor back to the chipset when no
     screen is shown.

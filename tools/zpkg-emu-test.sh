@@ -63,6 +63,9 @@ python3 tools/mkrepo.py add $W/r1 test $BD --key $KEY --date $today >$OUT/repo.l
     python3 tools/mkrepo.py check $W/r --test-pub build/sign-test/zenix-test.pub >>$OUT/repo.log 2>&1 || { cat $OUT/repo.log; echo "FAIL the repository"; exit 1; }
 ZT=$(ls $W/r/pool | grep '^zenix-tests-.*\.zup$' | sort | head -1); ZTV=${ZT#zenix-tests-}; ZTV=${ZTV%.zup}
 EXTRA=$(ls $W/r/pool | grep '^extra-.*\.zup$');
+# a key this build does not know (made for the test, never kept): its signature over the extra package
+openssl genpkey -algorithm ed25519 -out $OUT/foreign.key 2>/dev/null && cp $W/r/pool/$EXTRA $OUT/foreign.zup &&
+    python3 tools/zsign.py sign --key $OUT/foreign.key $OUT/foreign.zup >/dev/null || { echo "FAIL a foreign signature"; exit 1; }
 echo "zpkg-test: the repository: $(grep -c '^pkg ' $W/r/test/index-* | tail -1) packages; zenix-tests $ZTV (installed) and $(ls $W/r/pool | grep '^zenix-tests-.*\.zup$' | sort | tail -1) (new)"
 
 get() { debugfs -R "cat $1" $IMG 2>/dev/null | tr -d '\r'; }
@@ -84,6 +87,10 @@ image() {   # IMG: this build's root, the network (A2065 or SLIP), the script, t
     put $W/r/pool/$EXTRA /tests/$EXTRA 644
     put $W/r/pool/$EXTRA.sig /tests/$EXTRA.sig 644
     head -c 80 /dev/zero >$OUT/badsig; put $W/r/pool/$EXTRA /tests/bad.zup 644; put $OUT/badsig /tests/bad.zup.sig 644
+    # the cable's path (DESIGN D21 6.5, D22 7.6: rz receives the files, zpkg -U checks them): one without a .sig, and
+    # one signed by a key this build does not know
+    put $W/r/pool/$EXTRA /tests/nosig.zup 644
+    put $W/r/pool/$EXTRA /tests/foreign.zup 644; put $OUT/foreign.zup.sig /tests/foreign.zup.sig 644
     put $OUT/zp.sh /tests/zp.sh 755
 }
 conf() {    # the conf files the script switches between: SERVER... (the port is the test server's)
@@ -119,7 +126,7 @@ for n in 1 2 3 4; do zpkg -S extra; r=$?; echo cut$n=$r; [ $r = 0 ] && break; do
 zpkg -Q extra; zpkg -Rns extra
 echo ==exp; cp /tests/conf.good /etc/zpkg.conf; cp /var/lib/clock /tmp/clock.save 2>/dev/null; echo 'zenix-clock 1 1830297600' > /var/lib/clock
 zpkg -Syu; echo exp=$?; zpkg -Syu --ignore-expiry; echo expi=$?; rm /var/lib/clock; cp /tmp/clock.save /var/lib/clock 2>/dev/null
-echo ==u; zpkg -S extralib; zpkg -U /tests/bad.zup; echo ubad=$?; zpkg -U tests/EXTRAFILE; echo urel=$?; zpkg -U /tests/EXTRAFILE; echo u=$?; zpkg -Q extra
+echo ==u; zpkg -S extralib; zpkg -U /tests/bad.zup; echo ubad=$?; zpkg -U /tests/nosig.zup; echo unosig=$?; zpkg -U /tests/foreign.zup; echo uforeign=$?; zpkg -U tests/EXTRAFILE; echo urel=$?; zpkg -U /tests/EXTRAFILE; echo u=$?; zpkg -Q extra
 echo ==ref; zpkg -R base; echo rbase=$?; zpkg -S zup; echo szup=$?; zpkg -R extralib; echo rlib=$?; echo 'zpkg -Sy; echo ur=$?' | su user 2>&1; zpkg -X; echo bad=$?
 echo ==mem; free; cat /tmp/free-during.txt
 echo ==end
@@ -189,6 +196,8 @@ if full:
     w = sec("u")
     check(st("ubad") == 1 and "the signature does not verify" in w and st("urel") == 1 and st("u") == 0 and re.search(r"^extra ", w, re.M),
           "-U: a bad .sig refused, a relative name refused, a signed file installed", w)
+    check(st("unosig") == 1 and "no signature (" in w and st("uforeign") == 1 and w.count("the signature does not verify") >= 2,
+          "-U (the cable's path): a file without a .sig and one signed by a key this build does not know refused", w)
     w = sec("ref")
     check(st("rbase") == 1 and st("szup") == 1 and "part of the system" in w and st("rlib") == 1 and "is needed by an installed package (extra)" in w and
           "only root changes packages" in w and re.search(r"^ur=1$", w, re.M) and st("bad") == 2, "refused: -R base, -S zup (the system), -R a dependency, a user, a wrong option", w)

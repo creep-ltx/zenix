@@ -257,6 +257,7 @@ file instead of hashing `zenix` every time); the signature is checked once per t
    kernel; `PREVIOUS` cut after the bundle rename).
 6. Docs; the owner's first D15 card package (`BOOT:Zenix/`, the "previous" menu line, the fixed bootmenu), with the owner.
 7. Signatures (Ed25519, a small public-domain implementation checked against its test vectors; measured on a 68020).
+   Built as D21 step 5 (docs/d21-crypto-ssh-https.md, "As built: step 5"; man/zenixboot.txt "SIGNATURES").
 
 ## 13. The first review's answers to the open questions
 

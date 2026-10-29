@@ -23,9 +23,12 @@ typedef unsigned long u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 #include "../user/sha256.h"
+#include "../crypto/zc/zc.h"            /* zc_sig_verify, the .sig format (DESIGN D21 6.1-6.2) */
+#include "zpkgkeys.h"                   /* the build's trusted public keys (tools/zsign.py cheader, D21 6.3): the TEST
+                                           key in a test build, tools/keys/zenix-release-*.pub with RELEASE=1 */
 
-#define ZB_VERSION "0.2b4"
-#define ZB_DATE "27.10.2026"
+#define ZB_VERSION "0.3b1"
+#define ZB_DATE "28.10.2026"
 static const char version[] __attribute__((used, section(".text.start"))) = "$VER: zenixboot " ZB_VERSION " (" ZB_DATE ")";
 
 /* the same numbers as boot/handoff.S */
@@ -55,6 +58,7 @@ long zb_dopkt(void *dosbase, void *port, long action);
 u32 zb_tables(void *table, void *buffer, u32 ksize);
 void zb_serial(const char *fmt, long *args);
 void zb_go(void *table, void *buffer, u32 ksize, u32 home) __attribute__((noreturn));
+long zb_onstack(long (*fn)(void *), void *arg, void *lower, u32 size);
 extern void *SysBase;
 static void *DOSBase, *GfxBase;
 
@@ -83,6 +87,7 @@ static void *DOSBase, *GfxBase;
 #define Lock(n, m)          zb_os(DOSBase, -84, 0, (long)(n), (long)(m), 0, 0, 0)
 #define UnLock(l)           zb_os(DOSBase, -90, 0, (long)(l), 0, 0, 0, 0)
 #define Info(l, d)          zb_os(DOSBase, -114, 0, (long)(l), (long)(d), 0, 0, 0)
+#define DateStamp(d)        zb_os(DOSBase, -192, 0, (long)(d), 0, 0, 0, 0)
 #define IoErr()             zb_os(DOSBase, -132, 0, 0, 0, 0, 0, 0)
 #define CurrentDir(l)       zb_os(DOSBase, -126, 0, (long)(l), 0, 0, 0, 0)
 #define WaitForChar(f, us)  zb_os(DOSBase, -204, 0, (long)(f), (long)(us), 0, 0, 0)
@@ -118,6 +123,12 @@ static void *DOSBase, *GfxBase;
 /* the compiler may call these (struct copies), and sha256.c does */
 void *memcpy(void *d, const void *s, unsigned long n) { u8 *a = d; const u8 *b = s; while (n--) *a++ = *b++; return d; }
 void *memset(void *d, int c, unsigned long n) { u8 *a = d; while (n--) *a++ = (u8)c; return d; }
+int memcmp(const void *a, const void *b, unsigned long n)
+{
+    const u8 *p = a, *q = b;
+    for (; n; n--, p++, q++) if (*p != *q) return *p < *q ? -1 : 1;
+    return 0;
+}
 static int memeq(const void *a, const void *b, u32 n) { const u8 *p = a, *q = b; while (n--) if (*p++ != *q++) return 0; return 1; }
 static int streq(const char *a, const char *b) { while (*a && *a == *b) a++, b++; return *a == *b; }
 
@@ -239,6 +250,9 @@ static int fail_dos(const char *what)
 /* ---- the update files in Zenix/ (every name below is relative to it: CurrentDir(zdir) while they are used) ---- */
 static const char B_ZUP[] = "zenix-update.zup", B_PART[] = "zenix-update.zup.part", B_BAD[] = "zenix-update.bad",
                   B_DONE[] = "zenix-update.done", B_REJ[] = "zenix-update.rejected";
+/* the bundle's detached signature (DESIGN D21 6.2): its life follows the bundle's (renamed with it, after it) */
+static const char S_ZUP[] = "zenix-update.zup.sig", S_PART[] = "zenix-update.zup.sig.part", S_BAD[] = "zenix-update.bad.sig",
+                  S_DONE[] = "zenix-update.done.sig", S_REJ[] = "zenix-update.rejected.sig";
 static int wrote;                       /* something was written on BOOT: (flushed again before AmigaOS goes) */
 
 /* ACTION_FLUSH to the volume's handler, and wait for its reply: FFS keeps metadata (headers, the bitmap) in its
@@ -302,7 +316,7 @@ static int file_has(const char *name, const u8 *sha)
 /* ---- the state file (Zenix/state, frozen format: text, "zenixboot-state 1" ... "end") ---- */
 enum { PH_NONE, PH_INSTALLING, PH_TRIAL, PH_CONFIRMED, PH_REJECTED, PH_SKIPPED };
 static const char *const phases[] = { "none", "installing", "trial", "confirmed", "rejected", "skipped" };
-static struct { u32 version, handovers, lastboot; u8 ksha[32]; int haveksha, phase; } st;
+static struct { u32 version, handovers, lastboot; u8 ksha[32], sigd[32]; int haveksha, havesigd, phase; } st;
 
 static char *put_s(char *p, const char *s) { while (*s) *p++ = *s++; return p; }
 static char *put_u(char *p, u32 v)
@@ -320,13 +334,24 @@ static u32 get_u(const char *s, const char **end)
     return v;
 }
 static int hexv(int c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1; }
+static int hex32(const char *v, u8 out[32])     /* 64 hex digits first: 1, else 0 */
+{
+    for (int i = 0; i < 32; i++) {
+        int a = hexv(v[2 * i]), b = a < 0 ? -1 : hexv(v[2 * i + 1]);
+        if (b < 0) return 0;
+        out[i] = (u8)(a << 4 | b);
+    }
+    return 1;
+}
+static const char hx[] = "0123456789abcdef";
+static char *put_hex(char *p, const u8 *b, u32 n) { while (n--) { *p++ = hx[*b >> 4]; *p++ = hx[*b++ & 15]; } return p; }
 
 static int state_parse(char *t, long n)
 {
     if (n < 18 || !memeq(t, "zenixboot-state 1\n", 18)) return -1;
     t[n] = 0;
     int end = 0;
-    st.version = st.handovers = st.lastboot = 0; st.haveksha = 0; st.phase = PH_NONE;
+    st.version = st.handovers = st.lastboot = 0; st.haveksha = st.havesigd = 0; st.phase = PH_NONE;
     for (char *l = t; *l; ) {
         char *e = l;
         while (*e && *e != '\n') e++;
@@ -338,14 +363,9 @@ static int state_parse(char *t, long n)
         else if (streq(l, "handovers")) st.handovers = get_u(v, 0);
         else if (streq(l, "lastboot")) st.lastboot = get_u(v, 0);
         else if (streq(l, "phase")) { for (int i = 0; i < 6; i++) if (streq(v, phases[i])) st.phase = i; }
-        else if (streq(l, "kernelsha")) {
-            st.haveksha = 1;
-            for (int i = 0; i < 32; i++) {
-                int a = hexv(v[2 * i]), b = a < 0 ? -1 : hexv(v[2 * i + 1]);
-                if (b < 0) { st.haveksha = 0; break; }
-                st.ksha[i] = (u8)(a << 4 | b);
-            }
-        } else if (streq(l, "end")) end = 1;
+        else if (streq(l, "kernelsha")) st.haveksha = hex32(v, st.ksha);
+        else if (streq(l, "sigdigest")) st.havesigd = hex32(v, st.sigd) && !v[64];   /* D21 6.4: the digest verified */
+        else if (streq(l, "end")) end = 1;
         l = e;
     }
     return end ? 0 : -1;
@@ -368,13 +388,10 @@ static void state_read(void)
 static int state_write(void)
 {
     static char buf[512];
-    static const char hx[] = "0123456789abcdef";
     char *p = put_s(buf, "zenixboot-state 1\nversion ");
     p = put_u(p, st.version);
-    if (st.haveksha) {
-        p = put_s(p, "\nkernelsha ");
-        for (int i = 0; i < 32; i++) { *p++ = hx[st.ksha[i] >> 4]; *p++ = hx[st.ksha[i] & 15]; }
-    }
+    if (st.haveksha) { p = put_s(p, "\nkernelsha "); p = put_hex(p, st.ksha, 32); }
+    if (st.havesigd) { p = put_s(p, "\nsigdigest "); p = put_hex(p, st.sigd, 32); }
     p = put_s(p, "\nphase "); p = put_s(p, phases[st.phase]);
     p = put_s(p, "\nhandovers "); p = put_u(p, st.handovers);
     p = put_s(p, "\nlastboot "); p = put_u(p, st.lastboot);
@@ -413,9 +430,11 @@ static u32 bunsize, bunalloc, bunv;
 static const u8 *bkern;                 /* its boot/zenix part */
 static u32 bkernsize;
 static u8 bksha[32];
+static u8 bdig[32];                     /* the digest computed over header bytes 0-63 and the table (D21 6.1) */
 
-/* every count, size and offset checked (untrusted: anyone who can write BOOT: wrote it); with full, the SHA-256 of
- * every part too. 0, or a reason */
+/* every count, size and offset checked (untrusted: anyone who can write BOOT: wrote it), the table's digest computed
+ * into bdig and compared with header bytes 64-95; with full, the SHA-256 of every part too (D21 6.4's step 4: only
+ * after the signature, bundle_parts). 0, or a reason */
 static const char *bundle_check(const u8 *p, u32 len, int full)
 {
     if (len < ZUP_HDR || !memeq(p, "ZUP1", 4) || be32(p + 4) != 1 || be32(p + 8) != ZUP_HDR) return "not a ZUP1 bundle";
@@ -424,8 +443,8 @@ static const char *bundle_check(const u8 *p, u32 len, int full)
     if (be32(p + 48) != ZUP_HDR || ntoc < 1 || ntoc > 64 || ntoc * ZUP_TOCE > len - ZUP_HDR) return "a bad table of contents";
     u8 h[32];
     struct sha256 c;
-    sha256_init(&c); sha256_update(&c, p, 64); sha256_update(&c, p + ZUP_HDR, ntoc * ZUP_TOCE); sha256_final(&c, h);
-    if (!memeq(h, p + 64, 32)) return "the table of contents does not match its SHA-256";
+    sha256_init(&c); sha256_update(&c, p, 64); sha256_update(&c, p + ZUP_HDR, ntoc * ZUP_TOCE); sha256_final(&c, bdig);
+    if (!memeq(bdig, p + 64, 32)) return "the table of contents does not match its SHA-256";
     bkern = 0;
     for (u32 i = 0; i < ntoc; i++) {
         const u8 *e = p + ZUP_HDR + i * ZUP_TOCE;
@@ -442,6 +461,83 @@ static const char *bundle_check(const u8 *p, u32 len, int full)
     if (!bkern) return "it has no kernel (boot/zenix)";
     bunv = be32(p + 12);
     return 0;
+}
+
+/* ---- the signature (DESIGN D21 6.4): Zenix/zenix-update.zup.sig over the computed digest bdig ---- */
+#define KEY_RELEASE (ZPKG_KEYCLASS == 2)  /* a RELEASE=1 build: the release keys; else the TEST key (D21 6.3) */
+#define SIG_STACK 6144                  /* its own stack (zb_onstack): the measured chain, docs/man/zenixboot.txt */
+#define SIG_GUARD 512                   /* its lowest bytes: touched means too close (refused, never trusted) */
+static int unsigned_ok;                 /* UNSIGNED_OK given to a test build: a missing .sig is accepted */
+static int sig_reused;                  /* sig_check found the trial's verified digest (sigdigest): nothing checked */
+static const char NOMEM[] = "not enough memory for it";
+struct sigrun { const u8 *sig; int which; };
+static long sig_run(void *a)
+{
+    struct sigrun *r = a;
+    return zc_sig_verify(r->sig, ZC_SIG_SIZE, ZC_SIG_LABEL_BUNDLE, bdig, zpkg_keys, ZPKG_NKEYS, &r->which);
+}
+/* after bundle_check. 0 (verified, or verified at the trial's first start: sigdigest), NOMEM, or a reason */
+static const char *sig_check(int trial)
+{
+    static char why[96];
+    static u8 sig[ZC_SIG_SIZE + 1];
+    const u8 *ch = bun + 40;            /* the header's channel (8 bytes, NUL-padded): the key class's (D21 6.3) */
+    int rel = memeq(ch, "stable", 7) || memeq(ch, "testing", 8), tst = memeq(ch, "test", 5);
+    sig_reused = 0;
+    if (KEY_RELEASE ? !rel : !tst)
+        return KEY_RELEASE ? "its channel is not a release channel (stable, testing): a test build's bundle"
+                           : "its channel is not \"test\": a release bundle (this zenixboot is a test build)";
+    if (trial && st.havesigd && memeq(st.sigd, bdig, 32)) {
+        sig_reused = 1;
+        say("zenixboot: update: its signature was verified at the trial's first start (sigdigest)\n", 0, 0, 0);
+        return 0;
+    }
+    long fh = Open(S_ZUP, MODE_OLDFILE), n;
+    if (!fh) {
+        if (unsigned_ok) {
+            st.havesigd = 0;
+            say("zenixboot: update: no signature, accepted: UNSIGNED_OK (a test build)\n", 0, 0, 0);
+            return 0;
+        }
+        return "it has no signature (Zenix/zenix-update.zup.sig)";
+    }
+    n = Read(fh, sig, sizeof sig);
+    Close(fh);
+    if (n != ZC_SIG_SIZE) return "its signature (Zenix/zenix-update.zup.sig) is not 80 bytes";
+    u8 *stk = AllocMem(SIG_STACK, 0);
+    if (!stk) return NOMEM;
+    memset(stk, 0xA5, SIG_STACK);       /* the guard: its lowest SIG_GUARD bytes must stay untouched */
+    long t0[3], t1[3];
+    say("zenixboot: update: checking its signature\n", 0, 0, 0);
+    DateStamp(t0);
+    struct sigrun r = { sig, -1 };
+    long rc = zb_onstack(sig_run, &r, stk, SIG_STACK);
+    DateStamp(t1);
+    u32 low = 16;                       /* (StackSwap puts a mark of its own at the stack's lowest bytes) */
+    while (low < SIG_STACK && stk[low] == 0xA5) low++;
+    FreeMem(stk, SIG_STACK);
+    say("zenixboot: update: the check used %ld of its %ld bytes of stack\n", (long)(SIG_STACK - low), SIG_STACK, 0);
+    if (low < SIG_GUARD) return "its check overran its stack (zenixboot's SIG_STACK is too small): not trusted";
+    char *p = put_s(why, KEY_RELEASE ? "release key " : "test key ");
+    p = put_hex(p, sig + 8, 8);
+    *p = 0;
+    if (rc == ZC_SIG_OK) {
+        long ticks = (t1[0] - t0[0]) * 4320000 + (t1[1] - t0[1]) * 3000 + (t1[2] - t0[2]);   /* 50 a second */
+        if (ticks < 0) ticks = 0;
+        say("zenixboot: update: signed by %s (checked in %ld.%02ld s)\n", (long)why, ticks / 50, ticks % 50 * 2);
+        memcpy(st.sigd, bdig, 32);
+        st.havesigd = 1;
+        return 0;
+    }
+    if (rc == ZC_SIG_EKEY) {
+        p = put_s(why, "it is signed by key ");
+        p = put_hex(p, sig + 8, 8);
+        p = put_s(p, KEY_RELEASE ? ", not a release key" : ", not this build's test key");
+        *p = 0;
+        return why;
+    }
+    return rc == ZC_SIG_EBAD ? "its signature does not verify (damaged, or made for another bundle)"
+                             : "its signature file is not a Zenix signature (ZSG1, Ed25519)";
 }
 /* The roots a kernel can serve (DESIGN D19 step 1): its version record "ZVER" (kernel/syscall.c), grown by "ZSRV" and
  * a mask (1 ext2, 2 ZenixFS). The shipped kernel has no ZenixFS server built in; only the test-only kernel-zfs has.
@@ -487,7 +583,6 @@ static const char *roots_check(void)
     return 0;
 }
 /* the whole file into memory, fast RAM first */
-static const char NOMEM[] = "not enough memory for it";
 static const char *bundle_load(long size)
 {
     if (size < ZUP_HDR || (u32)size > ZUP_MAX) return "its size is out of range";
@@ -508,13 +603,20 @@ static void bundle_free(void)
     bunraw = bun = 0;
     bunsize = bunalloc = 0;
 }
+/* the bundle renamed, then its .sig (D21 6.2: zenix-update.bad.sig and so on; a cut between the two leaves a .sig
+ * without a bundle, which nothing uses), flushed */
+static void ren_bundle(const char *to, const char *tosig)
+{
+    if (exists(B_ZUP)) ren(B_ZUP, to);
+    if (exists(S_ZUP)) ren(S_ZUP, tosig);
+    flushfs();
+}
 /* a damaged or unusable bundle: renamed .bad (never re-hashed at every start), the reason said */
 static void bundle_bad(const char *why)
 {
     say("zenixboot: update: Zenix/%s is not used: %s; renamed %s\n", (long)B_ZUP, (long)why, (long)B_BAD);
     bundle_free();
-    ren(B_ZUP, B_BAD);
-    flushfs();
+    ren_bundle(B_BAD, S_BAD);
 }
 
 /* before any write: the volume writable and validated, and room for zenix.new besides everything there */
@@ -559,7 +661,7 @@ static u32 upd_flags;
 static void previous(void)
 {
     upd_flags |= UPD_F_ROLLBACK;
-    if (exists(B_ZUP)) { ren(B_ZUP, B_REJ); flushfs(); }
+    if (exists(B_ZUP) || exists(S_ZUP)) ren_bundle(B_REJ, S_REJ);
     if (!exists("zenix.old")) {
         say("zenixboot: no previous version is kept (Zenix/zenix.old): starting the installed one\n", 0, 0, 0);
         return;
@@ -574,7 +676,7 @@ static void previous(void)
 static void retire(const char *why)
 {
     say("zenixboot: update: version %ld %s: the update is done\n", (long)st.version, (long)why, 0);
-    if (exists(B_ZUP)) { ren(B_ZUP, B_DONE); flushfs(); }
+    if (exists(B_ZUP) || exists(S_ZUP)) ren_bundle(B_DONE, S_DONE);
     st.phase = PH_CONFIRMED;
     state_write();
 }
@@ -606,9 +708,15 @@ static void update_half(int prev_asked)
 {
     long size;
     state_read();
+    if (exists(S_PART)) {               /* a copy of a .sig that was cut off (D21 6.2: renamed before the bundle) */
+        say("zenixboot: update: Zenix/%s was not copied to the end: deleted\n", (long)S_PART, 0, 0);
+        del(S_PART);
+        flushfs();
+    }
     if (exists(B_PART)) {               /* a copy that was cut off: never used */
         say("zenixboot: update: Zenix/%s was not copied to the end: renamed %s\n", (long)B_PART, (long)B_BAD, 0);
         ren(B_PART, B_BAD);
+        if (!exists(B_ZUP) && exists(S_ZUP)) ren(S_ZUP, S_BAD);     /* its .sig, copied before it */
         flushfs();
     }
     if (prev_asked) { previous(); return; }
@@ -638,7 +746,14 @@ static void update_half(int prev_asked)
         }
     }
     long fh = Open(B_ZUP, MODE_OLDFILE);
-    if (!fh) return;
+    if (!fh) {
+        if (exists(S_ZUP) && !exists(B_ZUP)) {  /* left by a cut between two renames: never one for a later bundle */
+            say("zenixboot: update: Zenix/%s has no bundle: renamed %s\n", (long)S_ZUP, (long)S_BAD, 0);
+            ren(S_ZUP, S_BAD);
+            flushfs();
+        }
+        return;
+    }
     size = file_size(fh);
     static u8 hdr[ZUP_HDR];
     long n = size >= ZUP_HDR ? Read(fh, hdr, ZUP_HDR) : -1;
@@ -648,26 +763,38 @@ static void update_half(int prev_asked)
     if (st.version == v && st.phase == PH_CONFIRMED) {      /* offered again after it was done: kept as it is */
         say("zenixboot: update: version %ld is installed and confirmed already: Zenix/%s renamed %s\n", (long)v,
             (long)B_ZUP, (long)B_DONE);
-        ren(B_ZUP, B_DONE);
-        flushfs();
+        ren_bundle(B_DONE, S_DONE);
         return;
     }
     if (v < st.version && st.phase != PH_REJECTED && st.phase != PH_NONE) {     /* never an older kernel than installed */
         bundle_bad("it is older than the installed version");
         return;
     }
+    /* D21 6.4's order: the sizes and the table, the digest computed and compared (bundle_check); the signature over
+     * that digest (sig_check); then the parts' SHA-256 (bundle_check full). In the trial (the kernel installed) the
+     * same digest as the one verified at its first start skips both: nothing is re-verified at every start */
+    int trial = st.version == v && st.phase == PH_TRIAL;
     const char *why = bundle_load(size);
-    if (why == NOMEM) { say("zenixboot: update: %s: not installed this time\n", (long)why, 0, 0); return; }
-    if (!why) why = bundle_check(bun, bunsize, !(st.version == v && st.phase == PH_TRIAL));
-    if (why) { bundle_bad(why); return; }
-    if (st.version == v && st.phase == PH_TRIAL) {          /* the kernel is in place: the root half again (harmless) */
-        say("zenixboot: update: version %ld in trial: the bundle goes to Zenix again\n", (long)v, 0, 0);
-        return;
-    }
-    if ((why = roots_check())) { bundle_bad(why); return; }
-    if ((why = volume_check(bkernsize))) {
+    if (!why) why = bundle_check(bun, bunsize, 0);
+    if (!why && bunv != v) why = "it changed while it was read";   /* the version decided on is the one checked */
+    /* before the signature (it only refuses or waits): a volume that cannot take the kernel now costs no 6-9 s check
+     * at every start, and a kernel that cannot serve this root is refused at once */
+    if (!why && !trial) why = roots_check();
+    if (!why && !trial && (why = volume_check(bkernsize))) {
         say("zenixboot: update: version %ld not installed this time: %s\n", (long)v, (long)why, 0);
         bundle_free();
+        return;
+    }
+    if (!why) why = sig_check(trial);
+    if (why == NOMEM) {
+        say("zenixboot: update: %s: not %s this time\n", (long)why, (long)(trial ? "handed over" : "installed"), 0);
+        bundle_free();
+        return;
+    }
+    if (!why && !sig_reused) why = bundle_check(bun, bunsize, 1);
+    if (why) { bundle_bad(why); return; }
+    if (trial) {                        /* the kernel is in place: the root half again (harmless) */
+        say("zenixboot: update: version %ld in trial: the bundle goes to Zenix again\n", (long)v, 0, 0);
         return;
     }
     say("zenixboot: update: installing version %ld\n", (long)v, 0, 0);
@@ -693,8 +820,8 @@ static int kernel_ok(long fh, long ksize, u8 *hdr)
 
 int zb_main(void)
 {
-    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S";
-    long args[4] = { 0, 0, 0, 0 };
+    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S";
+    long args[5] = { 0, 0, 0, 0, 0 };
     long rda, kfh = 0, rfh = 0, ksize = 0, rsize = 0;
     u8 *table = 0, *buf = 0, hdr[32];
     u32 k512, r512, total = 0, home;
@@ -709,6 +836,10 @@ int zb_main(void)
     const char *kname = args[0] ? (const char *)args[0] : "zenix";
     const char *rname = (const char *)args[1];
     int check = args[2] != 0, prev = args[3] != 0;
+    if (args[4]) {                      /* DESIGN D21 6.4: unsigned bundles only in test builds, and only when asked */
+        if (KEY_RELEASE) say("zenixboot: UNSIGNED_OK is for test builds: ignored (unsigned bundles are refused)\n", 0, 0, 0);
+        else unsigned_ok = 1;
+    }
 
     /* the klog area first, before anything else can be allocated there (as the bootblock); if AmigaOS already uses
      * part of it, the zones below keep our buffers out of it */

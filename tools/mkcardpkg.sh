@@ -9,7 +9,10 @@
 #       bootmenu         this tree's boot menu (the whole-area AllocAbs fix of D15 step 0), also for bootzenix
 #       BootMenu.conf    the dual card's menu with the "Zenix (previous)" line after the Zenix line (for comparing)
 #       try/zenix-update.zup   (unless --no-try) a trial bundle: this tree with the version number + 50 and the
-#                        string + "-try", to try D15 on the real card (install, confirm, "Zenix (previous)")
+#                        string + "-try", the base group only as make bundle (DESIGN D22 3.1; a bundle holds
+#                        at most 16 packages), to try D15 on the real card (install, confirm, "Zenix (previous)"), and
+#                        its signature try/zenix-update.zup.sig (DESIGN D21 6.4: zenixboot refuses it without)
+#       licenses/        the notices of the code from other projects in zenixboot (BearSSL, Monocypher)
 #   pc/root.img          the new Zenix root for the card's partition 3 (ext2, 1 GB, 16384 inodes, as
 #                        tools/mkdualcard.sh made it), every program and the package database (so the next update's
 #                        zup knows what is installed), /etc/network/interfaces for the CM4's Ethernet (eth0, DHCP,
@@ -18,6 +21,10 @@
 #   dom/zenix-dom.img    the DoM image (tools/mkdom.sh: Zenix only, for the stock A1200 and the 060)
 #   SHA256SUMS           of every file
 # usage: tools/mkcardpkg.sh [--no-try] [--no-dom] [OUTDIR]      BUILD=DIR: the build directory (default build)
+#        RELEASE=1: the owner's package (DESIGN D21 6.3): zenixboot trusts only tools/keys/zenix-release-*.pub and the
+#        trial bundle carries the release channel "testing" and the release key's signature (SIGNKEY=, default
+#        tools/zsign.py's, outside every repository). Without it the package is a TEST package: its zenixboot trusts
+#        the TEST key of build/sign-test (made on this PC, gone with make clean) and its README says so first.
 # Why a root image and not a bundle for the root: the card's root (from 2026-10-24) has no /sbin/zup, so the first D15
 # update cannot install its root half (docs/d15-self-updates.md section 8, "the first D15 update"). Every update after
 # this one is a bundle copied to BOOT:Zenix/.
@@ -41,8 +48,18 @@ touch "$OUT/.zenix-cardpkg"
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mvar() { make -s -C "$ROOT" -pn 2>/dev/null | sed -n "s/^$1 := //p" | head -1; }
+REL=()
+case "${RELEASE:-}" in ""|1) ;; *) die "RELEASE=1 makes the owner's package; RELEASE=${RELEASE} means neither";; esac
+if [ -n "${RELEASE:-}" ]; then
+    REL=(RELEASE=1)
+    [ -n "${SIGNKEY:-}" ] && REL+=(SIGNKEY="$SIGNKEY")
+    SIGNWITH=(--key "${SIGNKEY:-$HOME/.config/zenix-signing/zenix-release.key}")
+else
+    TK=$(python3 "$HERE/zsign.py" testkey | cut -d' ' -f1); [ -n "$TK" ] || die "the test key"
+    SIGNWITH=(--key "$TK")
+fi
 
-make -s -C "$ROOT" BUILD="$B" "$B/root-card.img" "$B/bootmenu" "$B/zenixboot" "$B/kernel.bin" "$B/pkg/list" \
+make -s -C "$ROOT" BUILD="$B" "${REL[@]}" "$B/root-card.img" "$B/bootmenu" "$B/zenixboot" "$B/kernel.bin" "$B/pkg/list" \
     "$B/zenix-update.zup" >"$T/make.log" 2>&1 || { tail -20 "$T/make.log"; die "the build failed"; }
 UAPPS=$(mvar UAPPS); SBINAPPS=$(mvar SBINAPPS); NETDRVS=$(mvar NETDRVS)
 [ -n "$UAPPS" ] || die "cannot read UAPPS from the Makefile"
@@ -63,6 +80,8 @@ A=$OUT/amiga/zenixpkg
 cp "$B/kernel.bin" "$A/Zenix/zenix"
 cp "$B/zenixboot" "$A/zenixboot"
 cp "$B/bootmenu" "$A/bootmenu"
+mkdir -p "$A/licenses"
+cp "$ROOT/crypto/bearssl/LICENSE" "$A/licenses/BearSSL"; cp "$ROOT/crypto/monocypher/LICENCE" "$A/licenses/Monocypher"
 cat >"$A/BootMenu.conf" <<'EOF'
 # S:BootMenu.conf - the boot menu (docs/man/bootmenu.txt). One entry per line: LABEL = partition NAME | run COMMAND
 # | shell. "default N" picks entry N when the countdown runs out; "timeout S" is the countdown in seconds.
@@ -84,11 +103,13 @@ if [ -n "$TRY" ]; then
     [ ${#TS} -le 15 ] || TS="${VSTR:0:11}-try"
     TB=$B/cardpkg-try
     rm -rf "$TB"
-    make -s -C "$ROOT" BUILD="$TB" ZVNUM=$TV ZVSTR="$TS" "$TB/kernel.bin" "$TB/pkg/list" >"$T/make-try.log" 2>&1 ||
+    make -s -C "$ROOT" BUILD="$TB" "${REL[@]}" ZVNUM=$TV ZVSTR="$TS" "$TB/kernel.bin" "$TB/pkg/list" >"$T/make-try.log" 2>&1 ||
         { tail -20 "$T/make-try.log"; die "the trial build failed"; }
     mkdir -p "$A/try"
-    python3 "$HERE/mkzup.py" bundle "$A/try/zenix-update.zup" --kernel "$TB/kernel.bin" "$TB/pkg" $(cat "$TB/pkg/list") >/dev/null
+    python3 "$HERE/mkzup.py" bundle "$A/try/zenix-update.zup" --kernel "$TB/kernel.bin" ${RELEASE:+--channel testing} \
+        --base-only "$TB/pkg" $(mvar BASEPKGS) >/dev/null
     python3 "$HERE/mkzup.py" check "$A/try/zenix-update.zup" >/dev/null || die "the trial bundle does not check"
+    python3 "$HERE/zsign.py" sign "${SIGNWITH[@]}" "$A/try/zenix-update.zup" >/dev/null || die "the trial bundle cannot be signed"
     TRYSIZE=$(stat -c %s "$A/try/zenix-update.zup")
 fi
 KSIZE=$(stat -c %s "$B/kernel.bin")
@@ -132,6 +153,7 @@ e2fsck -fn "$OUT/pc/root.img" >/dev/null 2>&1 || die "the new root is not clean 
 {
     echo "# Zenix card package: Zenix $VSTR ($VNUM)"
     echo
+    [ -z "${RELEASE:-}" ] && echo "**A TEST PACKAGE: its zenixboot trusts this PC's test key, not the release key. Not for the owner's card.**" && echo
     echo "Built $(date +%Y-%m-%d) from commit $COMMIT. The boot partition (BOOT:) needs **$NEEDKB KB free** (\`Info BOOT:\`)."
     [ -n "$TRY" ] && echo "The trial bundle in \`amiga/zenixpkg/try/\` is Zenix $TS ($TV)."
     [ -n "$DOM" ] && echo "The DoM image is $(( $(stat -c %s "$OUT/dom/zenix-dom.img") / 1048576 )) MB: the DoM must be at least that big."
@@ -140,6 +162,7 @@ e2fsck -fn "$OUT/pc/root.img" >/dev/null 2>&1 || die "the new root is not clean 
 } >"$OUT/README.md"
 (cd "$OUT" && find . -type f ! -name SHA256SUMS ! -name .zenix-cardpkg | sort | sed 's#^\./##' | xargs sha256sum >SHA256SUMS)
 echo "$OUT: Zenix $VSTR ($VNUM) from $COMMIT"
+[ -z "${RELEASE:-}" ] && echo "  a TEST package (the test key; RELEASE=1 makes the owner's): not for the owner's card"
 echo "  amiga/zenixpkg: Zenix/zenix ($KSIZE bytes), zenixboot, bootmenu, BootMenu.conf${TRY:+, try/zenix-update.zup ($TS, $TV)}"
 echo "  pc/root.img: the card's new root (1 GB ext2), for tools/write-root.sh"
 [ -n "$DOM" ] && echo "  dom/zenix-dom.img: $(( $(stat -c %s "$OUT/dom/zenix-dom.img") / 1048576 )) MB"

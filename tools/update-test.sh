@@ -30,12 +30,19 @@
 #                kernel has it (a kernel-zfs of the new version) is installed
 #   slowzup      a test build (UDIAG=-DDIAG_SLOWZUP: boot's limit 4 min, the bundle's zup hangs as stage 2): boot stops
 #                both zups and gives the bundle's memory back only after that (audit3 B4); no zup runs at the prompt
+#   sig          the signatures (DESIGN D21 6.4): a release build of zenixboot (RELEASE=1 with a release key made for
+#                the test) refuses a bundle without a .sig, with a damaged one, with a test-key signature on a release
+#                bundle (which zsign.py itself refuses to make), a test bundle, and UNSIGNED_OK; a test build refuses
+#                an unsigned bundle and takes one with UNSIGNED_OK; each renamed .bad with its .sig; then the release
+#                build installs a bundle signed by the release key. Every bundle of the other setups is signed with
+#                the TEST key (as make bundle does); cold, refused and nozup check that a trial's later starts do not
+#                verify again (sigdigest)
 # usage: tools/update-test.sh [setup...]     (ZENIX_SERIAL, ZENIX_OUT, ZENIX_BUILD as the other tests)
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-update.XXXXXX)}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-update-serial}
-SETUPS="${*:-install cold panic hang previous powercut bad refused nozup slowzup zfsroot}"
+SETUPS="${*:-install cold panic hang previous powercut bad refused nozup slowzup zfsroot sig}"
 BG=; [ $# = 0 ] && BG=1                 # all of them: side by side (each takes an emulator slot); named ones: in turn
 V1=$(sed -n 's/^#define ZENIX_VNUM \([0-9]*\)u$/\1/p' kernel/version.h); V2=$((V1 + 101))
 make -s BUILD=$BD $BD/zenixboot $BD/kernel.bin $BD/kernel-zfs.bin $BD/zenix.hdf $BD/pkg/list >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL build"; exit 1; }
@@ -53,18 +60,22 @@ python3 -c 'import sys; d = open(sys.argv[1], "rb").read(); assert d.count(b"hel
 open(sys.argv[2], "wb").write(d.replace(b"hello from pid", b"HELLO from pid"))' $OUT/b2/hello.zx $OUT/hello2
 python3 tools/mkzup.py repack $P base /etc/passwd=$OUT/passwd2 /etc/motd=$OUT/motd2 >/dev/null &&
 python3 tools/mkzup.py repack $P zenix-tests /bin/hello=$OUT/hello2 >/dev/null || { echo "FAIL repack"; exit 1; }
+# every bundle signed with the TEST key, as make bundle signs (DESIGN D21 6.3; the key made when missing, never committed)
+TKEY=$(python3 tools/zsign.py testkey | cut -d' ' -f1) || { echo "FAIL the test key"; exit 1; }
+sign() { python3 tools/zsign.py sign --key ${2:-$TKEY} $1 >/dev/null; }
 for k in b2 b2t1 b2t2 b2t3; do
-    python3 tools/mkzup.py bundle $OUT/$k.zup --kernel $OUT/$k/kernel.bin $P zup base zenix-tests >/dev/null || { echo "FAIL bundle $k"; exit 1; }
+    python3 tools/mkzup.py bundle $OUT/$k.zup --kernel $OUT/$k/kernel.bin $P zup base zenix-tests >/dev/null && sign $OUT/$k.zup ||
+        { echo "FAIL bundle $k"; exit 1; }
 done
 make -s BUILD=$OUT/b2s ZVNUM=$V2 UDIAG=-DDIAG_SLOWZUP $OUT/b2s/kernel.bin $OUT/b2s/pkg/list >>$OUT/make.log 2>&1 ||
     { echo "FAIL build slowzup"; exit 1; }
 rm -rf $OUT/pkgs; mkdir -p $OUT/pkgs; cp $P/* $OUT/pkgs/; cp $OUT/b2s/pkg/zup.* $OUT/pkgs/
-python3 tools/mkzup.py bundle $OUT/b2s.zup --kernel $OUT/b2s/kernel.bin $OUT/pkgs zup base zenix-tests >/dev/null ||
-    { echo "FAIL bundle b2s"; exit 1; }
-python3 tools/mkzup.py bundle $OUT/b2z.zup --kernel $OUT/b2/kernel-zfs.bin $P zup base zenix-tests >/dev/null ||
-    { echo "FAIL bundle b2z"; exit 1; }
-python3 tools/mkzup.py bundle $OUT/b2min.zup --kernel $OUT/b2/kernel.bin --min 4000000000 $P zup base zenix-tests >/dev/null ||
-    { echo "FAIL bundle b2min"; exit 1; }
+python3 tools/mkzup.py bundle $OUT/b2s.zup --kernel $OUT/b2s/kernel.bin $OUT/pkgs zup base zenix-tests >/dev/null &&
+    sign $OUT/b2s.zup || { echo "FAIL bundle b2s"; exit 1; }
+python3 tools/mkzup.py bundle $OUT/b2z.zup --kernel $OUT/b2/kernel-zfs.bin $P zup base zenix-tests >/dev/null &&
+    sign $OUT/b2z.zup || { echo "FAIL bundle b2z"; exit 1; }
+python3 tools/mkzup.py bundle $OUT/b2min.zup --kernel $OUT/b2/kernel.bin --min 4000000000 $P zup base zenix-tests >/dev/null &&
+    sign $OUT/b2min.zup || { echo "FAIL bundle b2min"; exit 1; }
 # the owner's root: this build's, with a line added to /etc/passwd
 cp $B/zenix.hdf $OUT/root.img
 cp rootfs/etc/passwd $OUT/passwd1; echo 'owner::1002:100::/home/owner:/bin/sh' >>$OUT/passwd1
@@ -78,7 +89,7 @@ disk() {
     local d=$OUT/$1; rm -rf $d; mkdir -p $d/boot/S $d/boot/Zenix
     printf '%s\n' "${3:-SYS:zenixboot}" >$d/boot/S/Startup-Sequence
     cp $B/zenixboot $d/boot/zenixboot; cp ${KERNEL1:-$B/kernel.bin} $d/boot/Zenix/zenix
-    [ -n "$2" ] && cp $2 $d/boot/Zenix/zenix-update.zup
+    if [ -n "$2" ]; then cp $2 $d/boot/Zenix/zenix-update.zup; [ -f $2.sig ] && cp $2.sig $d/boot/Zenix/zenix-update.zup.sig; fi
     ffs_put $1 || return 1
 }
 # ffs_put NAME: the boot partition made again from $OUT/NAME/boot (the files; what the owner would copy in AmigaOS)
@@ -179,11 +190,13 @@ EOF
     check $n "the next start reads the confirmation and renames the bundle .done" "$(inorder $n 1 'reboot: filesystems synced' 'version '$V2' came up' 'renamed zenix-update.zup to zenix-update.done' 'state confirmed')"
     check $n "boot partition: zenix is the new kernel, zenix.old the old one, the bundle .done, state confirmed" \
         "$([ "$(same $b/zenix $OUT/b2/kernel.bin)" = ok ] && [ "$(same $b/zenix.old $B/kernel.bin)" = ok ] && [ -f $b/zenix-update.done ] && [ ! -f $b/zenix-update.zup ] && grep -q '^phase confirmed$' $b/state && echo ok || echo bad)"
+    check $n "the signature: checked once (signed by the test key) before the kernel steps, renamed with the bundle (.done.sig)" \
+        "$([ "$(inorder $n 1 'update: checking its signature' 'update: signed by test key [0-9a-f]{16} \(checked in [0-9]+\.[0-9]+ s\)' 'update: installing version '$V2)" = ok ] && [ "$(grep -ac 'checking its signature' $OUT/$n/1.txt)" = 1 ] && [ "$(same $b/zenix-update.done.sig $OUT/b2.zup.sig)" = ok ] && [ ! -f $b/zenix-update.zup.sig ] && grep -q '^sigdigest [0-9a-f]\{64\}$' $b/state && echo ok || echo bad)"
     check $n "the boot partition's bitmap is valid after the flushes (root block flag -1)" "$([ "$(python3 tools/ffsread.py $OUT/$n/disk.hdf --part ZB0 rootflag)" = -1 ] && echo ok || echo bad)"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
     check $n "a shell prompt after the second boot" "$(has $n 1 '^zbok$')"
     # the same bundle offered again: retired at once, nothing installed, the real previous kernel kept
-    cp $OUT/b2.zup $b/zenix-update.zup; ffs_put $n
+    cp $OUT/b2.zup $b/zenix-update.zup; cp $OUT/b2.zup.sig $b/zenix-update.zup.sig; ffs_put $n
     cat >$OUT/$n/s2.txt <<EOF
 $S_PROMPT
 sleep 2
@@ -202,12 +215,16 @@ setup_cold() {
     printf '%s\nsleep 3\nstop\n' "$S_PROMPT" >$OUT/$n/s1.txt
     run $n 1 900 $OUT/$n/s1.txt
     check $n "the trial kernel came up (it never confirms: a test build)" "$(has $n 1 'diag: DIAG_TRIAL=3: not confirming')"
+    head -c 40 $OUT/b2.zup.sig >$OUT/$n/boot/Zenix/zenix-update.zup.sig.part; ffs_put $n     # a .sig copy cut off
     printf '%s\nsleep 2\nsend uname; echo zb\\x6fk\\r\nsleep 3\nstop\n' "$S_PROMPT" >$OUT/$n/s2.txt
     run $n 2 900 $OUT/$n/s2.txt
+    check $n "a cut-off .sig.part is deleted" "$(grep -aq 'zenix-update.zup.sig.part was not copied to the end: deleted' $OUT/$n/2.txt && [ ! -f $OUT/$n/boot/Zenix/zenix-update.zup.sig.part ] && [ -f $OUT/$n/boot/Zenix/zenix-update.zup.sig ] && echo ok || echo bad)"
     check $n "a cold start in the trial: no evidence, no question, a message" \
         "$(grep -aq 'was installed and not yet confirmed; if it misbehaves, choose Zenix (previous)' $OUT/$n/2.txt && ! grep -aq 'start the previous version' $OUT/$n/2.txt && echo ok || echo bad)"
     check $n "... the new kernel starts again, nothing rolled back" "$(grep -aq "^Zenix 0\.2 ($V2) m68k" $OUT/$n/2.txt && [ "$(same $OUT/$n/boot/Zenix/zenix $OUT/b2t3/kernel.bin)" = ok ] && grep -q '^phase trial$' $OUT/$n/boot/Zenix/state && grep -q '^handovers 2$' $OUT/$n/boot/Zenix/state && echo ok || echo bad)"
     check $n "... the root half still in place (passwd.new)" "$([ "$(rhas $n 2 /etc/passwd.new)" = yes ] && echo ok || echo bad)"
+    check $n "the trial's second start does not check the signature again (sigdigest), the first did" \
+        "$(grep -aq 'update: signed by test key' $OUT/$n/1.txt && grep -aq "its signature was verified at the trial's first start (sigdigest)" $OUT/$n/2.txt && ! grep -aq 'checking its signature' $OUT/$n/2.txt && echo ok || echo bad)"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 2)"
 }
 setup_fail() {   # panic or hang
@@ -224,7 +241,7 @@ $S_PROMPT" >$OUT/$n/s1.txt
         "$(grep -aqx 1 $OUT/$n/1.txt && grep -aq 'passwd.new: not found' $OUT/$n/1.txt && grep -aq '^hello from pid' $OUT/$n/1.txt && echo ok || echo bad)"
     local b=$OUT/$n/boot/Zenix
     check $n "boot partition: zenix the old kernel, zenix.rejected the new one, the bundle .rejected" \
-        "$([ "$(same $b/zenix $B/kernel.bin)" = ok ] && [ "$(same $b/zenix.rejected $OUT/b2t$t/kernel.bin)" = ok ] && [ -f $b/zenix-update.rejected ] && [ ! -f $b/zenix.old ] && grep -q '^phase rejected$' $b/state && echo ok || echo bad)"
+        "$([ "$(same $b/zenix $B/kernel.bin)" = ok ] && [ "$(same $b/zenix.rejected $OUT/b2t$t/kernel.bin)" = ok ] && [ -f $b/zenix-update.rejected ] && [ -f $b/zenix-update.rejected.sig ] && [ ! -f $b/zenix-update.zup.sig ] && [ ! -f $b/zenix.old ] && grep -q '^phase rejected$' $b/state && echo ok || echo bad)"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
     check $n "a shell prompt" "$(has $n 1 '^zbok$')"
 }
@@ -275,12 +292,14 @@ setup_powercut() {
 setup_bad() {
     local n=bad
     python3 -c 'import sys; d = bytearray(open(sys.argv[1], "rb").read()); d[len(d) // 2] ^= 0x10; open(sys.argv[2], "wb").write(d)' $OUT/b2.zup $OUT/bad.zup
+    cp $OUT/b2.zup.sig $OUT/bad.zup.sig         # the header and the table are b2's: the signature verifies, a part does not
     disk $n $OUT/bad.zup || { check $n "the disk" bad; return; }
     head -c 1000 $OUT/b2.zup >$OUT/$n/boot/Zenix/zenix-update.zup.part; ffs_put $n
     printf '%s\nsleep 2\nsend uname; echo zb\\x6fk\\r\nsleep 3\nstop\n' "$S_PROMPT" >$OUT/$n/s1.txt
     run $n 1 900 $OUT/$n/s1.txt
     check $n "a .part (a copy cut off) is renamed .bad" "$(has $n 1 'zenix-update.zup.part was not copied to the end: renamed zenix-update.bad')"
-    check $n "a damaged bundle is renamed .bad with the reason" "$(has $n 1 'zenix-update.zup is not used: a part does not match its SHA-256')"
+    check $n "a damaged bundle is renamed .bad with the reason (after its signature verified), its .sig .bad.sig" \
+        "$([ "$(inorder $n 1 'update: signed by test key' 'zenix-update.zup is not used: a part does not match its SHA-256')" = ok ] && [ -f $OUT/$n/boot/Zenix/zenix-update.bad.sig ] && [ ! -f $OUT/$n/boot/Zenix/zenix-update.zup.sig ] && echo ok || echo bad)"
     check $n "the installed system starts" "$(grep -aq "^Zenix 0\\.2 ($V1) m68k" $OUT/$n/1.txt && [ "$(same $OUT/$n/boot/Zenix/zenix $B/kernel.bin)" = ok ] && [ ! -f $OUT/$n/boot/Zenix/zenix.old ] && echo ok || echo bad)"
 }
 # refused / nozup: the root half fails (zup refuses the bundle, or there is no zup), the kernel confirms (login on
@@ -305,6 +324,8 @@ EOF
     check $n "the next start: it came up, but the bundle is kept and handed over again" \
         "$(inorder $n 1 'reboot: filesystems synced' 'Zenix '$V2' came up, but its root half was not installed' 'version '$V2' in trial: the bundle goes to Zenix again' "$why")"
     check $n "... not retired: no 'the update is done', no .done" "$(! grep -aq 'the update is done' $OUT/$n/1.txt && [ -f $b/zenix-update.zup ] && [ ! -f $b/zenix-update.done ] && grep -q '^phase trial$' $b/state && echo ok || echo bad)"
+    check $n "... the signature checked at the first start only (sigdigest at the second)" \
+        "$([ "$(grep -ac 'checking its signature' $OUT/$n/1.txt)" = 1 ] && [ "$(inorder $n 1 'update: signed by test key' 'reboot: filesystems synced' "verified at the trial's first start \(sigdigest\)")" = ok ] && echo ok || echo bad)"
     check $n "... the new kernel runs, a shell prompt" "$(grep -aq "^Zenix 0\.2 ($V2) m68k" $OUT/$n/1.txt && grep -aq '^zbok$' $OUT/$n/1.txt && echo ok || echo bad)"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
 }
@@ -332,11 +353,68 @@ setup_zfsroot() {
     check $n "a bundle whose kernel has no ZenixFS server, on a machine with the ZenixFS kernel: refused, renamed .bad" \
         "$(has $n 1 'zenix-update.zup is not used: its kernel has no ZenixFS server, and this machine runs a kernel for a ZenixFS root \(kernel-zfs\); renamed zenix-update.bad')"
     check $n "... the installed kernel starts, nothing replaced" "$(grep -aq "^Zenix 0\\.2 ($V1) m68k" $OUT/$n/1.txt && [ "$(same $b/zenix $B/kernel-zfs.bin)" = ok ] && [ ! -f $b/zenix.old ] && [ -f $b/zenix-update.bad ] && grep -aq '^zbok$' $OUT/$n/1.txt && echo ok || echo bad)"
-    rm -f $b/zenix-update.bad; cp $OUT/b2z.zup $b/zenix-update.zup; ffs_put $n
+    rm -f $b/zenix-update.bad $b/zenix-update.bad.sig; cp $OUT/b2z.zup $b/zenix-update.zup; cp $OUT/b2z.zup.sig $b/zenix-update.zup.sig; ffs_put $n
     run $n 2 900 $OUT/$n/s1.txt
     check $n "a bundle with a ZenixFS kernel (kernel-zfs of the new version) is installed" \
         "$(grep -aq 'update: installing version '$V2 $OUT/$n/2.txt && grep -aq "^Zenix 0\\.2 ($V2) m68k" $OUT/$n/2.txt && [ "$(same $b/zenix $OUT/b2/kernel-zfs.bin)" = ok ] && [ "$(same $b/zenix.old $B/kernel-zfs.bin)" = ok ] && echo ok || echo bad)"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 2)"
+}
+# sig: one boot partition with a zenixboot (and its Zenix/) per case; the refused cases have a file that is not a
+# kernel as Zenix/zenix, so zenixboot goes back to AmigaOS after refusing and the Startup-Sequence runs the next one
+setup_sig() {
+    local n=sig d=$OUT/sig k=$OUT/sigkeys c
+    rm -rf $d $k; mkdir -p $d/boot/S $k/pub
+    # a release key made for this test only (never a real one), and a release build of zenixboot that trusts it
+    openssl genpkey -algorithm ed25519 -out $k/rel.key 2>/dev/null && openssl pkey -in $k/rel.key -pubout -out $k/pub/zenix-release-test.pub 2>/dev/null ||
+        { check $n "a release key for the test (openssl)" bad; return; }
+    make -s -j8 BUILD=$OUT/rel RELEASE=1 RELEASE_KEYS=$k/pub $OUT/rel/zenixboot >$d/make.log 2>&1 || { check $n "the release build of zenixboot" bad; return; }
+    local relid; relid=$(python3 tools/zsign.py keyid $k/pub/zenix-release-test.pub)
+    python3 tools/mkzup.py bundle $d/rel.zup --channel testing --kernel $OUT/b2/kernel.bin $P zup base zenix-tests >/dev/null &&
+        sign $d/rel.zup $k/rel.key || { check $n "a release bundle signed by the release key" bad; return; }
+    check $n "zsign.py refuses to sign a release bundle with the test key" "$(cp $d/rel.zup $d/relt.zup; sign $d/relt.zup 2>/dev/null && echo bad || echo ok)"
+    # the forged one: the test key's signature over the release bundle (zsign.py told not to know the test key)
+    cp $d/rel.zup $d/relt.zup; ZSIGN_TEST_DIR=$d/none python3 tools/zsign.py sign --key $TKEY $d/relt.zup >/dev/null ||
+        { check $n "a test-key signature on a release bundle" bad; return; }
+    python3 -c 'import sys; d = bytearray(open(sys.argv[1], "rb").read()); d[40] ^= 1; open(sys.argv[2], "wb").write(d)' $d/rel.zup.sig $d/bad.sig
+    python3 -c 'import sys; d = bytearray(open(sys.argv[1], "rb").read()); d[len(d) // 2] ^= 0x10; open(sys.argv[2], "wb").write(d)' $OUT/b2.zup $d/dmg.zup
+    case1() {   # DIR ZENIXBOOT BUNDLE [SIG] [KERNEL]
+        mkdir -p $d/boot/$1/Zenix; cp $2 $d/boot/$1/zenixboot; cp $3 $d/boot/$1/Zenix/zenix-update.zup
+        [ -n "$4" ] && cp $4 $d/boot/$1/Zenix/zenix-update.zup.sig
+        if [ -n "$5" ]; then cp $5 $d/boot/$1/Zenix/zenix; else echo 'not a kernel' >$d/boot/$1/Zenix/zenix; fi
+    }
+    case1 c1 $OUT/rel/zenixboot $d/rel.zup                           # release build: no .sig
+    case1 c2 $OUT/rel/zenixboot $d/rel.zup $d/bad.sig                # a damaged .sig
+    case1 c3 $OUT/rel/zenixboot $d/rel.zup $d/relt.zup.sig           # the test key over a release bundle
+    case1 c4 $OUT/rel/zenixboot $OUT/b2.zup $OUT/b2.zup.sig          # a test bundle, rightly signed by the test key
+    case1 c5 $OUT/rel/zenixboot $d/rel.zup                           # UNSIGNED_OK on a release build
+    case1 t1 $B/zenixboot $OUT/b2.zup                                # test build: no .sig
+    case1 t2 $B/zenixboot $d/dmg.zup                                 # test build, UNSIGNED_OK: taken, then its damaged part
+    case1 c6 $OUT/rel/zenixboot $d/rel.zup $d/rel.zup.sig $B/kernel.bin   # release build, release key: installed
+    printf 'FailAt 21\nSYS:c1/zenixboot\nSYS:c2/zenixboot\nSYS:c3/zenixboot\nSYS:c4/zenixboot\nSYS:c5/zenixboot UNSIGNED_OK\nSYS:t1/zenixboot\nSYS:t2/zenixboot UNSIGNED_OK\nSYS:c6/zenixboot\n' >$d/boot/S/Startup-Sequence
+    ffs_put $n || { check $n "the disk" bad; return; }
+    printf '%s\nsleep 2\nsend uname; echo zb\\x6fk\\r\nsleep 3\nstop\n' "$S_PROMPT" >$d/s1.txt
+    run $n 1 900 $d/s1.txt
+    local b=$d/boot ok
+    badsig() { [ -f $b/$1/Zenix/zenix-update.bad ] && [ ! -f $b/$1/Zenix/zenix-update.zup ] && { [ -z "$2" ] || [ -f $b/$1/Zenix/zenix-update.bad.sig ]; } && [ ! -f $b/$1/Zenix/zenix-update.zup.sig ] && echo ok || echo bad; }
+    check $n "release build, no .sig: refused, renamed .bad" "$([ "$(has $n 1 'zenix-update.zup is not used: it has no signature \(Zenix/zenix-update.zup.sig\); renamed zenix-update.bad')" = ok ] && [ "$(badsig c1)" = ok ] && echo ok || echo bad)"
+    check $n "... a damaged .sig: refused (does not verify), both renamed (.bad, .bad.sig)" \
+        "$([ "$(has $n 1 'zenix-update.zup is not used: its signature does not verify')" = ok ] && [ "$(badsig c2 1)" = ok ] && echo ok || echo bad)"
+    check $n "... the test key's signature on a release bundle: refused (its key named, not a release key)" \
+        "$([ "$(has $n 1 "is not used: it is signed by key $(python3 tools/zsign.py keyid ${TKEY%.key}.pub), not a release key")" = ok ] && [ "$(badsig c3 1)" = ok ] && echo ok || echo bad)"
+    check $n "... a test bundle signed by the test key: refused (not a release channel)" \
+        "$([ "$(has $n 1 'is not used: its channel is not a release channel')" = ok ] && [ "$(badsig c4 1)" = ok ] && echo ok || echo bad)"
+    check $n "... UNSIGNED_OK: ignored by a release build, the unsigned bundle refused" \
+        "$([ "$(inorder $n 1 'UNSIGNED_OK is for test builds: ignored' 'it has no signature')" = ok ] && [ "$(badsig c5)" = ok ] && echo ok || echo bad)"
+    check $n "test build, no .sig: refused" "$([ "$(grep -ac 'it has no signature (Zenix/zenix-update.zup.sig); renamed' $d/1.txt)" = 3 ] && [ "$(badsig t1)" = ok ] && echo ok || echo bad)"
+    check $n "test build, UNSIGNED_OK: an unsigned bundle taken (said), then checked as always (its damaged part refused)" \
+        "$([ "$(inorder $n 1 'no signature, accepted: UNSIGNED_OK \(a test build\)' 'is not used: a part does not match its SHA-256')" = ok ] && [ "$(badsig t2)" = ok ] && echo ok || echo bad)"
+    check $n "every refusal went back to AmigaOS without writing a kernel (the next case ran)" \
+        "$([ "$(grep -ac 'no usable kernel in Zenix/' $d/1.txt)" = 7 ] && ! ls $b/c[1-5]/Zenix/zenix.new $b/t[12]/Zenix/zenix.new >/dev/null 2>&1 && echo ok || echo bad)"
+    check $n "release build, the release key: verified (the key named), installed, the new version runs" \
+        "$([ "$(inorder $n 1 "update: signed by release key $relid" 'update: installing version '$V2 '^zup: installed Zenix .*\('$V2'\)' "^Zenix 0\.2 \($V2\) m68k")" = ok ] && [ "$(same $b/c6/Zenix/zenix $OUT/b2/kernel.bin)" = ok ] && grep -q '^sigdigest [0-9a-f]\{64\}$' $b/c6/Zenix/state && echo ok || echo bad)"
+    check $n "the check's stack: its high-water mark said, below the guard" "$(has $n 1 'the check used [0-9]+ of its 6144 bytes of stack')"
+    check $n "a shell prompt" "$(has $n 1 '^zbok$')"
+    check $n "the root: e2fsck -fn clean" "$(rootok $n 1)"
 }
 
 one() {
@@ -352,6 +430,7 @@ one() {
     slowzup) setup_slowzup ;;
     zfsroot) setup_zfsroot ;;
     nozup) ROOTIMG=$OUT/root-nozup.img setup_rootfail nozup $OUT/b2.zup 'boot: no /sbin/zup: the update is not installed' ;;
+    sig) setup_sig ;;
     *) echo "FAIL unknown setup $1" >$OUT/$1.res ;;
     esac
 }
