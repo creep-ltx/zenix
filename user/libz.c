@@ -196,14 +196,14 @@ void *realloc(void *p, unsigned long n)
  * buffer of limited size. It counts every character it is given, so snprintf returns the full length as C says.
  * Supported: %d %i %u %x %X %o %c %s %p %%, flags - 0 + space #, width and precision as numbers or *, and the
  * length letters h l z t (all the same size here: everything is 32 bits). */
-struct sink { int kind, fd; char *buf; u32 max, n, tn; char tmp[512]; };
+struct sink { int kind, fd; char *buf; u32 max, n, tn; void (*out)(const char *, u32); char tmp[512]; };
 enum { SK_FD, SK_MEM, SK_OUT };
 
 static void sink_flush(struct sink *k)
 {
     if (!k->tn) return;
     if (k->kind == SK_FD) sys_write(k->fd, k->tmp, k->tn);
-    else oputn(k->tmp, k->tn);
+    else k->out(k->tmp, k->tn);         /* oprintf's oputn, through a pointer: only oprintf names the buffer */
     k->tn = 0;
 }
 static void put(struct sink *k, char c)
@@ -316,7 +316,7 @@ int sprintf(char *buf, const char *fmt, ...)
 }
 int oprintf(const char *fmt, ...)
 {
-    struct sink k; k.kind = SK_OUT; k.n = k.tn = 0;
+    struct sink k; k.kind = SK_OUT; k.n = k.tn = 0; k.out = oputn;
     va_list ap; va_start(ap, fmt);
     vfmt(&k, fmt, ap);
     va_end(ap);
@@ -488,17 +488,22 @@ int rd_getline(struct rd *r, char **line, u32 *cap)
 }
 
 /* ---------------------------------------------------------------- buffered output */
+/* The 4 KB buffer is linked only into programs that use it (audit O12): _zexit flushes it through oflush_at_exit, a
+ * pointer the first oputn sets, so a program that never buffers (diskd, wasabid, nfscd, any printf-only one) names
+ * neither the buffer nor oflush. */
 static char obuf[4096]; static u32 olen;
+static void (*oflush_at_exit)(void);
 void oflush(void) { if (olen) { int r = sys_write(1, obuf, olen); olen = 0; if (r < 0) sys_exit(141); } }   /* the reader is gone: end, as SIGPIPE would */
 void oputn(const char *s, u32 n)
 {
+    oflush_at_exit = oflush;
     if (n >= sizeof obuf) { oflush(); if (sys_write(1, s, n) < 0) sys_exit(141); return; }
     if (olen + n > sizeof obuf) oflush();
     memcpy(obuf + olen, s, n); olen += n;
 }
 void oputs(const char *s) { oputn(s, strlen(s)); }
 void oputc(int c) { char b = (char)c; oputn(&b, 1); }
-void _zexit(int status) { oflush(); sys_exit(status); for (;;); }
+void _zexit(int status) { if (oflush_at_exit) oflush_at_exit(); sys_exit(status); for (;;); }
 
 /* malloc that does not come back empty: out of memory ends the program with a message and status 1 */
 char **_zargv;

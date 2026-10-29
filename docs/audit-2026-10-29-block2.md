@@ -195,6 +195,12 @@ each fix's test as named in the table, all passing in this branch (`make check` 
   boot-only code and the bss items stay open. Tests: matrix, cmds-test, diag-test.
 - **O12** (unused 4 KB output buffers in diskd, wasabid, nfscd): done next with the above, in libz, if the programs'
   output stays byte for byte the same; else with D27.
+  **Done 2026-10-29:** `_zexit` flushes through `oflush_at_exit`, set by the first `oputn`; `oprintf`'s sink reaches
+  `oputn` through a pointer, so the formatter alone names neither. Measured (`m68k-elf-size`): diskd's bss 11,762 ->
+  7,666, wasabid's 10,552 -> 6,456, nfscd's 9,456 -> 5,360 bytes (each mount), and 96 more programs that never
+  buffer (`hello` 4,108 -> 12) lose the 4 KB too: 405,504 bytes of bss over 99 programs; code + data 33,008 bytes less
+  in all. Programs that buffer keep it (and 4 bytes for the pointer, 16 fewer of code). Output unchanged: the whole
+  suite (`make check`).
 - **B2-10:** with D15's next step (a minimum accepted version kept outside BOOT:).
 - **nfscd and wasabid as shared code; `struct port` padded to 64 bytes:** measured first (the second on the stock
   A1200, the owner's weekend list), then decided.

@@ -55,7 +55,9 @@ for n in $CONFS; do
                                              # malloc start small and grow on demand; no login stays, DESIGN D18)
     if [ "$n" = a1200-chip1m ]; then              # ... and where memory runs out (console 5 or 6), init or login says so
         grep -q '^con6ok$' $OUT/$n.log ||
-            grep -qE 'init: cannot start /bin/login.*out of memory|login: cannot start /bin/sh: out of memory' $OUT/$n.log || ok=0
+            grep -qE 'init: cannot start /bin/login.*out of memory|login: cannot start /bin/sh: out of memory|^sh: no memory' $OUT/$n.log || ok=0
+        # (sh: no memory: since programs that never buffer lost libz's 4 KB output buffer, audit O12, sh may load where
+        # it did not and then find no room for its arena; it says so and ends, init starts another login)
     fi
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"

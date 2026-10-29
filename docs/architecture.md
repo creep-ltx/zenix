@@ -446,7 +446,10 @@ about a quarter of the plain table (2932 bytes instead of 11576 on 2026-10-26). 
 both tables give the same image and the same offsets. Programs declare their stack size in the header: 16 KB unless the
 Makefile's `STACK_<program>` says otherwise (`sh` 24 KB, `gzip` and `edit` 32 KB; the numbers and how they were measured
 are in limits.md). A guard pattern lies at the bottom of every stack (section 6). There is no shared-library format yet; programs are linked
-statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls).
+statically against `user/libz.c` (with `--gc-sections`, so each takes only the libz functions it calls). libz's 4 KB
+output buffer (`oputs`, `oprintf`) is in a program only if it uses it: the exit flushes it through a pointer the first
+write sets (audit O12, 2026-10-29: diskd, wasabid, every nfscd and every program that never buffers its output take
+4 KB less memory).
 
 **ZEX2: programs with shared code** (DESIGN D13, docs/d13-shared-code.md). A program built for it has one copy of its
 code and constants in memory for every process running it, as an AmigaOS pure program. Every object is compiled with
