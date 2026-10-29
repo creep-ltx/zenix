@@ -4,9 +4,9 @@
 # with FS-UAE's A2065 (slirp; the serial port stays the console's, so the tap types the keys and reads the console's
 # copy), tools/bbs-sim.py on the namespace's 127.0.0.1:2323 (the Amiga's 10.0.2.2), as tools/eth-test.sh runs its
 # servers. Checked: the negotiation the board recorded (TTYPE XTERM-16COLOR, NAWS 80 x 32, BINARY both ways, no
-# negotiation before the board's first IAC on a port that is not 23, no loop); the Unix screen's UTF-8 shown as
-# Latin-1 on the console's copy; the console's ESC[6n answer reaching the board; keys (Ctrl-C, a Swedish letter as
-# UTF-8); CONR_LFONLY set on console 1 while telnet runs (termtest rules from console 2, with free and ps: the memory
+# negotiation before the board's first IAC on a port that is not 23, no loop); the Unix screen's UTF-8 passed through
+# to the console (DESIGN D28 12); the console's ESC[6n answer reaching the board; keys (Ctrl-C, a Swedish letter in
+# UTF-8 passed through); CONR_LFONLY set on console 1 while telnet runs (termtest rules from console 2, with free and ps: the memory
 # while a call is up); the escape prompt (here -e ^E: 0x1D is the serial port's own hook), z then fg, q; the board
 # hanging up ("Connection closed by"); telnet with a pipe for keys and a file for the screen (the console's rules
 # refused: said once, the call works); a refused port (exit 1); a board that floods requests and reads nothing
@@ -60,7 +60,7 @@ send termtest rules /dev/tty1; free; ps\r
 sleep 5
 send \x1d1
 sleep 2
-send abc\x03\xe4\r
+send abc\x03\xc3\xa4\r
 sleep 3
 send \x05
 wait telnet> 10
@@ -143,8 +143,8 @@ check(ag.get("him", {}).get("0") and ag.get("us", {}).get("0"), "BINARY agreed b
 check(not ev(first, "client_iac_first") and not any(ev(c, "loop") for c in calls), "no negotiation before the board's IAC on port 2323, no loop")
 check(any(re.fullmatch(r"\x1b\[\d+;\d+R", r["answer"]) for r in ev(first, "dsr")), "ESC[6n: the console's answer reached the board", ev(first, "dsr"))
 keys = "".join(r["hex"] for r in ev(first, "keys"))
-check("61626303c3a40d" in keys, "keys: abc, Ctrl-C, a-umlaut as UTF-8 (c3 a4), Return", keys[:120])
-check(re.search(rb"\xe5\?x(\x1b\[1m)?B", log) is not None, "the Unix screen's UTF-8 shown as Latin-1 (\\xe5 for a-ring, ? for a box line)")
+check("61626303c3a40d" in keys, "keys: abc, Ctrl-C, a-umlaut typed as UTF-8 passed through (c3 a4, D28), Return", keys[:120])
+check(re.search(rb"\xc3\xa5\xe2\x94\x80x(\x1b\[1m)?B", log) is not None, "the Unix screen's UTF-8 passed through to the console (DESIGN D28 12)")
 check(b"rules 64" in log, "CONR_LFONLY set on console 1 while telnet runs (termtest rules /dev/tty1)")
 check(len(re.findall(rb"telnet> ", log)) >= 2 and b"<<END lf>>" in log, "the escape prompt twice; z suspended, fg went on (the lf screen came)")
 check(b"Connection closed." in log and b"st1=0" in log, "q at the prompt: Connection closed., exit 0")
@@ -264,9 +264,9 @@ PY
 # (its copy on the serial port) against bbs-sim's EXPECT for each screen and mode (music, iCE, FF, SUB, the Amiga
 # codes, the font switch); the board's record (TERMINAL-TYPE ANSI, NAWS 80x32, the keys per mode: Backspace BS,
 # a-ring 0x86 in CP437 or 0xE5 in Latin-1; the Amiga window bounds answer); the console's rules while each
-# mode runs (termtest rules from console 2: PC 111, Amiga 46; none after); the "colours 16" note once a call at fewer
-# than 16 colours, never at 16; the escape prompt's mode switch; the fallback (CP437 as Latin-1 in the file, said
-# once). The screenshots: the PC grid in the CP437 font's glyphs (every cell), the colours in the CGA palette (both
+# mode runs (termtest rules from console 2: PC 111, Amiga 174 = 46 and CONR_8BIT, DESIGN D28 12; none after); the
+# "colours 16" note once a call at fewer than 16 colours, never at 16; the escape prompt's mode switch; the fallback
+# (CP437 as UTF-8 in the file, D28; said once). The screenshots: the PC grid in the CP437 font's glyphs (every cell), the colours in the CGA palette (both
 # BBS modes, bright by CONR_BRIGHT), and the Amiga mode's Latin-1 screen in the same Topaz glyphs as the plain console.
 part_b() {
     local tag=$1 conf=$2 depth=$3 col=$4
@@ -376,7 +376,7 @@ w1, w2 = ev(c1, "wbr"), ev(c2, "wbr")
 check(any(r["answer"] == "\x9b1;1;32;80 r" for r in w1) and any(r["answer"] == "\x9b1;1;32;80 r" for r in w2),
       "the Amiga window bounds (CSI 0 SP q) answered 1;1;32;80 (after the prompt's switch to the Amiga mode too)", (w1, w2))
 rules = [int(x) for x in re.findall(rb"rules (\d+)", log)]
-check(rules[:3] == [111, 46, 0], "the console's rules: PC mode 111, Amiga mode 46, none after the calls", rules)
+check(rules[:3] == [111, 174, 0], "the console's rules: PC mode 111, Amiga mode 174 (with CONR_8BIT, D28), none after the calls", rules)
 note = rb"telnet: %d colours: ANSI art loses its shading; `colours 16` in /etc/console shows it fully" % col
 n = log.count(note) if col < 16 else log.count(b"`colours 16`")
 check(n == (2 if col < 16 else 0), f"the colours note: once a call on the console at {col} colours" if col < 16 else
@@ -384,11 +384,12 @@ check(n == (2 if col < 16 else 0), f"the colours note: once a call on the consol
 check(b"telnet> " in log and b"stp=0" in log and b"sta=0" in log, "the escape prompt; both calls ended with status 0")
 o = open(f"{out}/b-{tag}-out.txt", "rb").read()
 e = open(f"{out}/b-{tag}-err.txt", "rb").read()
-m = re.search(rb"8: (.{16})", o)
-check(bool(m) and m.group(1) == bytes([0xC7, 0xFC, 0xE9, 0xE2, 0xE4, 0xE0, 0xE5, 0xE7, 0xEA, 0xEB, 0xE8, 0xEF, 0xEE, 0xEC, 0xC4, 0xC5]),
-      "the PC mode into a file: CP437 shown as Latin-1 (row 8 of the grid)", m.group(1) if m else o[-200:])
-m = re.search(rb"B: (.{16})", o)
-check(bool(m) and m.group(1)[:5] == b"###|+", "... box characters and shades as + | #", m.group(1) if m else "")
+want8 = "ÇüéâäàåçêëèïîìÄÅ".encode("utf-8")
+m = re.search(rb"8: (.{%d})" % len(want8), o, re.S)
+check(bool(m) and m.group(1) == want8, "the PC mode into a file: CP437 as UTF-8 (row 8 of the grid, D28)",
+      m.group(1) if m else o[-200:])
+m = re.search(rb"B: (.{15})", o, re.S)
+check(bool(m) and m.group(1) == "░▒▓│┤".encode("utf-8"), "... shades and box characters as themselves", m.group(1) if m else "")
 check(e.count(b"the PC font is not available here") == 1 and e.count(b"rules are not available here") == 1 and b"stf=0" in log,
       "... the font and the rules refused there: each said once, the call works", e)
 k = open(f"{out}/b-{tag}-k.txt", errors="replace").read()

@@ -15,7 +15,18 @@
  * For BBS terminals (DESIGN D20 4.2-4.5) a console may get a loaded 8-bit font (CON_FONT: each byte one glyph of it)
  * and seven rules (CON_RULES, CONR_*), each set by a program through a descriptor of that console and dropped when its
  * last setter ends. The colour rules act when a cell is stored: the colour byte in the grid (and the scrollback)
- * already holds the bright foreground or background, so redraws and console switches stay right. */
+ * already holds the bright foreground or background, so redraws and console switches stay right.
+ *
+ * UTF-8 (DESIGN D28, docs/d28-console-text.md): the bytes written are UTF-8, decoded here, in put1: a pending
+ * character is one more parser state (E_UTF), so ASCII pays one test of a byte it already holds. Nothing is decoded
+ * inside an escape sequence (a window title's UTF-8 is swallowed with it). A byte that cannot be part of a character
+ * is one cell: its Latin-1 glyph (0xA0-0xFF; old Amiga text stays readable), else the box (0x80-0x9F, stored as the
+ * byte); never a control; C1 controls written as UTF-8 are ignored. A cell is a 16-bit value: today's byte is its low
+ * byte, and a cell above U+00FF has A_HI in `at` and its high byte in `hi`, a plane allocated the first time the
+ * console stores such a character (2,560 bytes; the scrollback keeps an 80-byte high row only for the lines that
+ * need one, from a pool). 0xFFFE is a character beyond U+FFFF (its width kept, drawn as the box), 0xFFFF the right
+ * half (tail) of a wide character. Widths are the kernel's (confont.c, the C library's own tables). In 8-bit mode (a
+ * CON_FONT, or the rule CONR_8BIT) nothing is decoded and a cell above U+00FF draws as '?'. */
 
 #define HLINES 200                      /* scrollback lines per console */
 
@@ -25,12 +36,16 @@
 #define E_CSI 2
 #define E_STR 3
 #define E_ESCI 4
+#define E_UTF 5                         /* D28: inside a UTF-8 character (the decoder's state below) */
 #define NPAR 16                         /* CSI parameters kept; more are read and ignored */
 #define PMAX 9999                       /* a parameter's largest value: more digits keep it there */
 
 #define A_INV 1
 #define A_UND 2
 #define A_BOLD 4
+#define A_HI 8                          /* D28: the cell's high byte is in hi (a value above 0xFF) */
+#define V_BIG 0xFFFE                    /* D28: a character beyond U+FFFF */
+#define V_TAIL 0xFFFF                   /* D28: the right half of a wide character */
 #define CO_DEF 0x07                     /* colour byte: foreground in the low nibble, background in the high one */
 
 struct term {
@@ -58,11 +73,36 @@ struct term {
     struct gfont *font;                 /* a loaded 8-bit font (CON_FONT), 0: Topaz */
     int fowner, rowner;                 /* who set the font, the rules: dropped when that process ends */
     u32 changes;                        /* raised on every write and font or rules change (CON_READ, D24 6.1) */
+    u8 *hi;                             /* D28: [TROWS_MAX][COLS] high bytes of A_HI cells, allocated on first use */
+    struct hpool *hp;                   /* D28: the scrollback's high rows */
+    struct udec {                       /* D28: the decoder (8 bytes): the bytes held (a lead and its */
+        u8 ub[4];                       /* continuations), how many, how many still wanted, the next byte's */
+        u8 un, uneed, ulo, uhi;         /* allowed range */
+    } u;
+};
+
+/* D28: the scrollback's high rows. For each of its lines a slot: 0 none, else an 80-byte row of a pool that grows
+ * in chunks of HCHUNK rows (a line pushed with any A_HI cell takes one; its other cells get 0), given back when the
+ * line leaves the scrollback. */
+#define HCHUNK 16
+#define HNCH ((HLINES + HCHUNK - 1) / HCHUNK)
+struct hpool {
+    u8 slot[HLINES];
+    u8 used[(HLINES + 7) / 8];          /* bit r - 1: row r is taken */
+    u8 nch;
+    u8 *ch[HNCH];
 };
 
 static struct term *wsp[NCONS + 1];
 int con_cur = 1;
 u16 con_want;                           /* bit n: console n was shown with nobody on it: init starts a login there */
+static u8 panicked;                     /* D28: a panic prints: nothing is allocated any more */
+static u8 nomem_say;                    /* D28: a high plane or row could not be had ('?' shown): said once, after */
+static u8 nomem_said;
+
+/* D28: 8-bit mode (a CON_FONT, or CONR_8BIT): no decoding, the keys Latin-1, cells above 0xFF drawn as '?' */
+static inline int eight(const struct term *t) { return t->font || (t->rules & CONR_8BIT); }
+int term_eight(int con) { return con >= 1 && con <= NCONS && wsp[con] && eight(wsp[con]); }
 
 static void reset_term(struct term *t)
 {
@@ -104,21 +144,52 @@ static const u16 rowx[TROWS_MAX] = { R4(0), R4(4), R4(8), R4(12), R4(16), R4(20)
 #undef R4
 _Static_assert(TROWS_MAX == 32, "rowx has 32 rows");
 
-static void draw(struct term *t, int y, int x)
+/* D28: a cell above 0xFF, drawn from the stored cells (never from today's widths, so a font change cannot orphan a
+ * half): a tail is its lead's right half (if the lead is a cell above 0xFF), else blank; a lead whose next cell is a
+ * tail is the left half; in 8-bit mode '?' (a tail blank) */
+static void udraw(int row, int x, u32 v, u32 prev, u32 next, u8 a, u8 co, int eb)
+{
+    a &= (u8)~A_HI;
+    if (eb)
+        gfx_cell(row, x, v == V_TAIL ? ' ' : '?', a, co);
+    else if (v == V_TAIL) {
+        if (prev > 0xFF && prev != V_TAIL)
+            gfx_ucell(row, x, (u16)prev, a, co, 2);
+        else
+            gfx_cell(row, x, ' ', a, co);
+    } else
+        gfx_ucell(row, x, (u16)v, a, co, next == V_TAIL);
+}
+
+static inline u32 cellv(const struct term *t, u32 o)       /* a cell's value */
+{
+    u32 c = ((const u8 *)t->ch)[o];
+    return (((const u8 *)t->at)[o] & A_HI) ? (u32)t->hi[o] << 8 | c : c;
+}
+
+static __attribute__((noinline)) void draw_hi(struct term *t, int y, int x, u32 o, u8 a)
+{
+    udraw(y, x, cellv(t, o), x ? cellv(t, o - 1) : 0, x < COLS - 1 ? cellv(t, o + 1) : 0, a, ((u8 *)t->co)[o],
+          eight(t));
+}
+
+static void drawx(struct term *t, int y, int x, u8 axor)
 {
     u32 o = rowx[y] + (u32)x;
-    gfx_cell(y, x, ((u8 *)t->ch)[o], ((u8 *)t->at)[o], ((u8 *)t->co)[o]);
+    u8 a = ((u8 *)t->at)[o];
+    if (a & A_HI)
+        draw_hi(t, y, x, o, a ^ axor);
+    else
+        gfx_cell(y, x, ((u8 *)t->ch)[o], a ^ axor, ((u8 *)t->co)[o]);
 }
+
+static void draw(struct term *t, int y, int x) { drawx(t, y, x, 0); }
 
 static void cursor(struct term *t, int on)
 {
     if (!t->curvis || t->back)
         return;
-    if (on) {
-        u32 o = rowx[t->cy] + (u32)t->cx;   /* no multiply by COLS per key echoed (audit 2026-10-29 B2-12) */
-        gfx_cell(t->cy, t->cx, ((u8 *)t->ch)[o], ((u8 *)t->at)[o] ^ A_INV, ((u8 *)t->co)[o]);
-    } else
-        draw(t, t->cy, t->cx);
+    drawx(t, t->cy, t->cx, on ? A_INV : 0);    /* no multiply by COLS per key echoed (audit 2026-10-29 B2-12) */
 }
 
 static void redraw_all(struct term *t)
@@ -132,22 +203,83 @@ static void redraw_all(struct term *t)
 
 /* ---- scrollback ---- */
 
+/* D28: the high row of scrollback line h (0: none) */
+static u8 *hrow(const struct hpool *hp, int h)
+{
+    u32 r = hp ? hp->slot[h] : 0;
+    return r ? hp->ch[(r - 1) / HCHUNK] + (r - 1) % HCHUNK * COLS : 0;
+}
+
+/* a free row of the pool (its number), growing it by a chunk when it is full; 0: no memory */
+static u32 hrow_take(struct term *t)
+{
+    struct hpool *hp = t->hp;
+    if (!hp) {
+        if (panicked || !(hp = kmalloc(sizeof *hp)))
+            return 0;
+        memset(hp, 0, sizeof *hp);
+        t->hp = hp;
+    }
+    for (u32 r = 0; r < (u32)hp->nch * HCHUNK && r < HLINES; r++)
+        if (!(hp->used[r >> 3] >> (r & 7) & 1)) {
+            hp->used[r >> 3] |= (u8)(1u << (r & 7));
+            return r + 1;
+        }
+    if (hp->nch >= HNCH || panicked || !(hp->ch[hp->nch] = kmalloc(HCHUNK * COLS)))
+        return 0;
+    u32 r = (u32)hp->nch++ * HCHUNK;
+    hp->used[r >> 3] |= (u8)(1u << (r & 7));
+    return r + 1;
+}
+
+/* D28: line hhead of the scrollback, row y's copy (l), gives back its old high row and takes one if it has A_HI cells */
+static __attribute__((noinline)) void hist_high(struct term *t, int y, u8 *l, int high)
+{
+    struct hpool *hp = t->hp;
+    if (hp && hp->slot[t->hhead]) {                     /* the line leaving the scrollback gives its row back */
+        u32 r = hp->slot[t->hhead] - 1u;
+        hp->used[r >> 3] &= (u8)~(1u << (r & 7));
+        hp->slot[t->hhead] = 0;
+    }
+    if (!high)
+        return;
+    u32 r = hrow_take(t);
+    if (r) {
+        t->hp->slot[t->hhead] = (u8)r;
+        u8 *h = hrow(t->hp, t->hhead);
+        for (int x = 0; x < COLS; x++)
+            h[x] = (t->at[y][x] & A_HI) ? t->hi[rowx[y] + (u32)x] : 0;
+    } else {                                            /* no row: the line's high cells are kept as '?' */
+        for (int x = 0; x < COLS; x++)
+            if (t->at[y][x] & A_HI)
+                l[x] = t->ch[y][x] == 0xFF && t->hi[rowx[y] + (u32)x] == 0xFF ? ' ' : '?';
+        nomem_say = 1;
+    }
+}
+
 static void hist_push(struct term *t, int y)
 {
     if (!t->hist) {
+        if (panicked)
+            return;                                     /* nothing allocated while a panic prints */
         t->hist = kmalloc(2 * HLINES * COLS);
         if (!t->hist)
             return;
         t->hn = t->hhead = 0;
     }
     u8 *c = t->hist[HLINES + t->hhead];
-    memcpy(t->hist[t->hhead], t->ch[y], COLS);
+    u8 *l = t->hist[t->hhead];
+    memcpy(l, t->ch[y], COLS);
+    int high = 0;
     for (int x = 0; x < COLS; x++) {                    /* one colour byte: inverse is kept as swapped colours */
         u8 v = t->co[y][x];
         if (t->at[y][x] & A_INV)
             v = (v & 15) == v >> 4 ? 0x70 : (u8)(v << 4 | v >> 4);
         c[x] = v;
+        high |= t->at[y][x] & A_HI;
     }
+    if (t->hp || high)
+        hist_high(t, y, l, high);
     t->hhead = (t->hhead + 1) % HLINES;
     if (t->hn < HLINES)
         t->hn++;
@@ -160,16 +292,27 @@ static void show_back(struct term *t)
         int k = t->hn - t->back + r;                    /* in the composite (scrollback then grid), 0 the oldest */
         if (k >= t->hn) {
             int y = k - t->hn;
-            for (int x = 0; x < COLS; x++)
-                if (t->ch[y][x] != ' ' || t->at[y][x] || t->co[y][x] != CO_DEF)
+            for (int x = 0; x < COLS; x++) {
+                u32 o = rowx[y] + (u32)x;
+                if (t->at[y][x] & A_HI)                 /* D28: a cell above 0xFF, drawn at display row r */
+                    udraw(r, x, cellv(t, o), x ? cellv(t, o - 1) : 0, x < COLS - 1 ? cellv(t, o + 1) : 0, t->at[y][x],
+                          t->co[y][x], eight(t));
+                else if (t->ch[y][x] != ' ' || t->at[y][x] || t->co[y][x] != CO_DEF)
                     gfx_cell(r, x, t->ch[y][x], t->at[y][x], t->co[y][x]);
+            }
             continue;
         }
         int h = (t->hhead - t->hn + k + HLINES * 2) % HLINES;
-        const u8 *l = t->hist[h], *c = t->hist[HLINES + h];
-        for (int x = 0; x < COLS; x++)
-            if (l[x] != ' ' || c[x] != CO_DEF)
+        const u8 *l = t->hist[h], *c = t->hist[HLINES + h], *hr = hrow(t->hp, h);
+        for (int x = 0; x < COLS; x++) {
+            if (hr && hr[x]) {                          /* D28: a high cell (its row byte is never 0) */
+                u32 v = (u32)hr[x] << 8 | l[x];
+                u32 pv = x && hr[x - 1] ? (u32)hr[x - 1] << 8 | l[x - 1] : 0;
+                u32 nv = x < COLS - 1 && hr[x + 1] ? (u32)hr[x + 1] << 8 | l[x + 1] : 0;
+                udraw(r, x, v, pv, nv, 0, c[x], eight(t));
+            } else if (l[x] != ' ' || c[x] != CO_DEF)
                 gfx_cell(r, x, l[x], 0, c[x]);
+        }
     }
 }
 
@@ -207,7 +350,7 @@ void term_redraw(void)
 {
     struct term *t = get(con_cur);
     t->changes++;                                       /* what the display shows of it changed (CON_READ) */
-    gfx_show(t->font, t->rules & CONR_CGAPAL);          /* its font and palette (D20): a switch, a new depth */
+    gfx_show(t->font, t->rules & CONR_CGAPAL, eight(t));    /* its font, palette (D20), 8-bit mode (D28) */
     if (t->back)
         show_back(t);
     else {
@@ -234,6 +377,33 @@ static void move_rows(struct term *t, int dst, int src, int n)
     memmove(t->ch[dst], t->ch[src], (u32)n * COLS);
     memmove(t->at[dst], t->at[src], (u32)n * COLS);
     memmove(t->co[dst], t->co[src], (u32)n * COLS);
+    if (t->hi)
+        memmove(t->hi + rowx[dst], t->hi + rowx[src], (u32)n * COLS);
+}
+
+/* D28: is cell x of row y the right half of a wide character? */
+static int is_tail(const struct term *t, int y, int x)
+{
+    u32 o = rowx[y] + (u32)x;
+    return (((const u8 *)t->at)[o] & A_HI) && ((const u8 *)t->ch)[o] == 0xFF && t->hi[o] == 0xFF;
+}
+
+static void blank1(struct term *t, int vis, int y, int x)  /* a half blanked: a space, its colour kept */
+{
+    t->ch[y][x] = ' ';
+    t->at[y][x] = 0;
+    if (vis)
+        draw(t, y, x);
+}
+
+/* D28: a cut between columns x - 1 and x of row y (a write, an erase or a move begins or ends there): a wide
+ * character spanning it loses both halves, as xterm and VTE do */
+static __attribute__((noinline)) void cut(struct term *t, int vis, int y, int x)
+{
+    if (x > 0 && x < COLS && is_tail(t, y, x)) {
+        blank1(t, vis, y, x - 1);
+        blank1(t, vis, y, x);
+    }
 }
 
 /* rows top..bot move up (dir 1) or down (dir 0) by n; the rows that come in are blank with the background colour.
@@ -284,6 +454,10 @@ static void linefeed(struct term *t, int vis)
 
 static void clear_cells(struct term *t, int vis, int y, int x0, int x1)       /* [x0,x1) */
 {
+    if (t->hi) {                                        /* D28: the orphaned halves at the edges */
+        cut(t, vis, y, x0);
+        cut(t, vis, y, x1);
+    }
     if (x0 == 0 && x1 == COLS) {
         blank_rows(t, y, 1);
         if (vis)
@@ -448,6 +622,11 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
         break;
     case 'P': {                                         /* delete characters */
         if (n > COLS - t->cx) n = COLS - t->cx;
+        if (t->hi) {                                    /* D28: the halves cut at both edges, then the high bytes */
+            cut(t, vis, t->cy, t->cx);
+            cut(t, vis, t->cy, t->cx + n);
+            memmove(t->hi + rowx[t->cy] + t->cx, t->hi + rowx[t->cy] + t->cx + n, (u32)(COLS - t->cx - n));
+        }
         memmove(&t->ch[t->cy][t->cx], &t->ch[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
         memmove(&t->at[t->cy][t->cx], &t->at[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
         memmove(&t->co[t->cy][t->cx], &t->co[t->cy][t->cx + n], (u32)(COLS - t->cx - n));
@@ -457,6 +636,11 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
     }
     case '@': {                                         /* insert characters */
         if (n > COLS - t->cx) n = COLS - t->cx;
+        if (t->hi) {                                    /* D28: a character split at the cursor, one pushed off */
+            cut(t, vis, t->cy, t->cx);
+            cut(t, vis, t->cy, COLS - n);
+            memmove(t->hi + rowx[t->cy] + t->cx + n, t->hi + rowx[t->cy] + t->cx, (u32)(COLS - t->cx - n));
+        }
         memmove(&t->ch[t->cy][t->cx + n], &t->ch[t->cy][t->cx], (u32)(COLS - t->cx - n));
         memmove(&t->at[t->cy][t->cx + n], &t->at[t->cy][t->cx], (u32)(COLS - t->cx - n));
         memmove(&t->co[t->cy][t->cx + n], &t->co[t->cy][t->cx], (u32)(COLS - t->cx - n));
@@ -508,11 +692,168 @@ static __attribute__((noinline)) void csi(struct term *t, int vis, char c)
     }
 }
 
+static void put1(struct term *t, int vis, u8 ch);
+static void utf_start(struct term *t, int vis, u8 ch);
+static void utf_more(struct term *t, int vis, u8 ch);
+
+/* D28: the cell at the cursor is taken by a character of w columns (the deferred wrap done): a wide character it
+ * cuts loses both halves */
+static __attribute__((noinline)) void unhalf(struct term *t, int vis, int w)
+{
+    cut(t, vis, t->cy, t->cx);
+    cut(t, vis, t->cy, t->cx + w);
+}
+
+/* the cursor after a character of w columns: the last column defers the wrap (or wraps at once: CONR_WRAPNOW) */
+static void advance(struct term *t, int vis, int w)
+{
+    if (t->cx + w <= COLS - 1)
+        t->cx += w;
+    else if (!(t->rules & CONR_WRAPNOW)) {
+        t->cx = COLS - 1;
+        t->wrap = 1;
+    } else {                                            /* CONR_WRAPNOW (D20): ANSI.SYS and the Amiga console */
+        t->cx = 0;
+        linefeed(t, vis);
+    }
+}
+
+/* a byte as a cell of its own (D28: a byte that is not part of a character: its Latin-1 glyph, or the box) */
+static __attribute__((noinline)) void cell8(struct term *t, int vis, u8 ch)
+{
+    if (t->wrap) {
+        t->cx = 0;
+        linefeed(t, vis);
+        t->wrap = 0;
+    }
+    u32 o = rowx[t->cy] + (u32)t->cx;
+    if (((u8 *)t->at)[o] & A_HI)
+        unhalf(t, vis, 1);
+    ((u8 *)t->ch)[o] = ch;
+    ((u8 *)t->at)[o] = t->attr;
+    ((u8 *)t->co)[o] = t->colour | t->cor;
+    if (vis)
+        gfx_cell(t->cy, t->cx, ch, t->attr, ((u8 *)t->co)[o]);
+    advance(t, vis, 1);
+}
+
+/* D28: the cell at grid offset o is the right half of a wide character (the plane exists) */
+static inline int tail_at(const struct term *t, u32 o)
+{
+    return (((const u8 *)t->at)[o] & A_HI) && ((const u8 *)t->ch)[o] == 0xFF && t->hi[o] == 0xFF;
+}
+
+/* D28: the high plane, on first use (never while a panic prints); 0: no memory (said once, after the write) */
+static int hi_get(struct term *t)
+{
+    if (t->hi)
+        return 1;
+    if (!panicked && (t->hi = kmalloc(TROWS_MAX * COLS)))
+        return 1;
+    nomem_say = 1;
+    return 0;
+}
+
+/* D28: a decoded character (section 5's putcp): C1 ignored; Latin-1 a byte cell; else its width (0: not stored),
+ * the deferred wrap (a wide one at the last column wraps first), the halves it cuts, the store, the draw */
+static __attribute__((noinline)) void putcp(struct term *t, int vis, u32 cp)
+{
+    if (cp < 0xA0)
+        return;                                         /* C1 controls written as UTF-8: ignored */
+    if (cp <= 0xFF) {
+        cell8(t, vis, (u8)cp);
+        return;
+    }
+    int w = con_cwidth(cp);
+    if (w <= 0)
+        return;                                         /* zero-width: not stored (the program counted 0 too) */
+    u32 v = cp > 0xFFFF ? V_BIG : cp >= 0xFFFE ? 0xFFFD : cp;      /* U+FFFE/FFFF are noncharacters: the box */
+    if (!hi_get(t)) {                                   /* no memory: '?' (a wide one '?' and a space) */
+        cell8(t, vis, '?');
+        if (w == 2)
+            cell8(t, vis, ' ');
+        return;
+    }
+    if (t->wrap) {
+        t->cx = 0;
+        linefeed(t, vis);
+        t->wrap = 0;
+    }
+    if (w == 2 && t->cx == COLS - 1) {                  /* a wide character at the last column wraps first */
+        t->cx = 0;
+        linefeed(t, vis);
+    }
+    u32 o = rowx[t->cy] + (u32)t->cx, ow = o + (t->cx + w < COLS ? (u32)w : 0);
+    if (tail_at(t, o) || tail_at(t, ow))
+        unhalf(t, vis, w);                              /* a wide character it cuts loses both halves */
+    u8 a = t->attr | A_HI, c = t->colour | t->cor;
+    ((u8 *)t->ch)[o] = (u8)v;
+    t->hi[o] = (u8)(v >> 8);
+    ((u8 *)t->at)[o] = a;
+    ((u8 *)t->co)[o] = c;
+    if (w == 2) {
+        ((u8 *)t->ch)[o + 1] = 0xFF;
+        t->hi[o + 1] = 0xFF;
+        ((u8 *)t->at)[o + 1] = a;
+        ((u8 *)t->co)[o + 1] = c;
+    }
+    if (vis) {                                          /* (the cells after it hold no tail of it: drawn directly) */
+        gfx_ucell(t->cy, t->cx, (u16)v, t->attr, c, w == 2);     /* (never in 8-bit mode: nothing is decoded) */
+        if (w == 2)
+            draw(t, t->cy, t->cx + 1);
+    }
+    advance(t, vis, w);
+}
+
+/* D28 4: a byte of 0x80 or more outside a sequence, not in 8-bit mode: a lead starts a character (its next byte's
+ * range by Unicode's Table 3-7: no overlong forms, no surrogates, nothing above U+10FFFF); any other is a cell */
+static __attribute__((noinline)) void utf_start(struct term *t, int vis, u8 ch)
+{
+    if (ch < 0xC2 || ch > 0xF4) {
+        cell8(t, vis, ch);                              /* a lone continuation, C0, C1, F5-FF */
+        return;
+    }
+    t->u.ub[0] = ch;
+    t->u.un = 1;
+    t->u.uneed = ch < 0xE0 ? 1 : ch < 0xF0 ? 2 : 3;
+    t->u.ulo = ch == 0xE0 ? 0xA0 : ch == 0xF0 ? 0x90 : 0x80;
+    t->u.uhi = ch == 0xED ? 0x9F : ch == 0xF4 ? 0x8F : 0xBF;
+    t->esc = E_UTF;
+}
+
+/* D28 4: the next byte of a pending character: in range, held (the last one finishes it); else each byte held is a
+ * cell of its own and the breaking byte is taken afresh (a control or ESC acts after those cells) */
+static __attribute__((noinline, optimize("O2"))) void utf_more(struct term *t, int vis, u8 ch)
+{
+    if (ch >= t->u.ulo && ch <= t->u.uhi) {
+        t->u.ub[t->u.un++] = ch;
+        t->u.ulo = 0x80;
+        t->u.uhi = 0xBF;
+        if (--t->u.uneed)
+            return;
+        t->esc = 0;
+        const u8 *b = t->u.ub;
+        u32 cp = t->u.un == 2 ? (u32)(b[0] & 0x1F) << 6 | (b[1] & 0x3F) :
+                 t->u.un == 3 ? (u32)(b[0] & 0x0F) << 12 | (u32)(b[1] & 0x3F) << 6 | (b[2] & 0x3F) :
+                 (u32)(b[0] & 0x07) << 18 | (u32)(b[1] & 0x3F) << 12 | (u32)(b[2] & 0x3F) << 6 | (b[3] & 0x3F);
+        putcp(t, vis, cp);
+        return;
+    }
+    t->esc = 0;
+    for (u32 i = 0; i < t->u.un; i++)
+        cell8(t, vis, t->u.ub[i]);
+    put1(t, vis, ch);
+}
+
 /* one character; the caller hides and redraws the cursor around a batch. term.c is built -Os (DESIGN D14: room on the
- * RAM floppy); this, every character's path, -O2, with the escape sequences (csi) kept out of it. */
+ * RAM floppy); this, every character's path, -O2, with the escape sequences (csi) and UTF-8 (D28) kept out of it. */
 static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
 {
     if (t->esc) {
+        if (t->esc == E_UTF) {                          /* D28: inside a character (before CAN/SUB: they break it) */
+            utf_more(t, vis, ch);
+            return;
+        }
         if (ch == 0x18 || ch == 0x1A) {                 /* CAN, SUB: the sequence is cancelled */
             t->esc = 0;
             return;
@@ -597,12 +938,18 @@ control:
     }
     if (ch < 32 && (t->esc || !ch || !(t->rules & CONR_PCCTRL)))
         return;                                         /* CONR_PCCTRL (D20): the other controls are glyphs */
+    if (ch >= 0x80 && !eight(t)) {                      /* D28: UTF-8 (in 8-bit mode the byte is the cell) */
+        utf_start(t, vis, ch);
+        return;
+    }
     if (t->wrap) {                                      /* deferred wrap, as terminals do */
         t->cx = 0;
         linefeed(t, vis);
         t->wrap = 0;
     }
     u32 o = rowx[t->cy] + (u32)t->cx;
+    if (((u8 *)t->at)[o] & A_HI)                        /* D28: writing over half of a wide character */
+        unhalf(t, vis, 1);
     ((u8 *)t->ch)[o] = ch;
     ((u8 *)t->at)[o] = t->attr;
     ((u8 *)t->co)[o] = t->colour | t->cor;
@@ -619,8 +966,10 @@ control:
 }
 
 /* Draw s; bounded: stop early once two ticks (10-20 ms) have passed while input waits or a better process is ready,
- * and say how many bytes were taken (tty_write then lets kwork and that process run: D20 section 6) */
-static u32 write_(int w, const char *s, u32 n, int bounded)
+ * and say how many bytes were taken (tty_write then lets kwork and that process run: D20 section 6). D28 4: a piece
+ * never ends inside a UTF-8 character: the early stop waits for its end, and a piece of n bytes that ends inside one
+ * takes up to max bytes (at most 3 more), so kwork's echo between two pieces cannot break it. */
+static u32 write_(int w, const char *s, u32 n, u32 max, int bounded)
 {
     struct term *t = get(w);
     int vis = (w == con_cur) && gfx_up();
@@ -632,22 +981,43 @@ static u32 write_(int w, const char *s, u32 n, int bounded)
         cursor(t, 0);
     while (i < n) {
         put1(t, vis, (u8)s[i++]);
-        if (bounded && (u32)(ticks - t0) >= 2 && (kwork_pending || need_resched))
+        if (bounded && (u32)(ticks - t0) >= 2 && (kwork_pending || need_resched) && t->esc != E_UTF)
             break;
     }
+    while (i < max && t->esc == E_UTF)
+        put1(t, vis, (u8)s[i++]);
     if (vis)
         cursor(t, 1);
+    if (nomem_say) {                                    /* D28: said once, after the write (kprintf draws too) */
+        nomem_say = 0;
+        if (!nomem_said++)
+            kprintf("term: no memory for the cells above U+00FF: shown as '?' (said once)\n");
+    }
     return i;
 }
 
-void term_write(int w, const char *s, u32 n) { write_(w, s, n, 0); }
+void term_write(int w, const char *s, u32 n) { write_(w, s, n, n, 0); }
 
-/* a tty write's piece (tty.c): at least one byte, perhaps fewer than n (above) */
-u32 term_write_some(int w, const char *s, u32 n) { return write_(w, s, n, 1); }
+/* a tty write's piece (tty.c): at least one byte, perhaps fewer than n, perhaps up to max (above) */
+u32 term_write_some(int w, const char *s, u32 n, u32 max) { return write_(w, s, n, max < n ? n : max, 1); }
 
-/* kernel log text onto the visible console (kprintf mirror during boot) */
+/* kernel log text onto the visible console (kprintf mirror during boot). D28: a program's pending UTF-8 character
+ * is put aside and back, so a log line in its middle does not break it. */
 void term_log(const char *s, u32 n)
 {
+    struct term *t = wsp[con_cur];
+    if (!t && panicked)
+        return;                                         /* a console never used: nothing allocated in a panic */
+    if (t && t->esc == E_UTF) {
+        struct udec u = t->u;
+        t->esc = 0;
+        term_write(con_cur, s, n);
+        if (t->esc == 0) {                              /* the log ended outside any sequence: the character goes on */
+            t->u = u;
+            t->esc = E_UTF;
+        }
+        return;
+    }
     term_write(con_cur, s, n);
 }
 
@@ -701,6 +1071,8 @@ static void font_drop(struct term *t)
     if (!t->font)
         return;
     struct gfont *f = t->font;
+    if (t->esc == E_UTF)
+        t->esc = 0;                                     /* D28: a pending character is dropped with the mode */
     t->changes++;
     t->font = 0;
     t->fowner = 0;
@@ -716,25 +1088,36 @@ static void rules_set(struct term *t, u8 r)
     t->rules = r;
     if (!(r & CONR_BRIGHT)) { t->cor &= (u8)~0x08; t->scor &= (u8)~0x08; }
     if (!(r & CONR_ICE)) { t->cor &= (u8)~0x80; t->scor &= (u8)~0x80; }
-    if (((old ^ r) & CONR_CGAPAL) && t->con == con_cur)
-        gfx_show(t->font, r & CONR_CGAPAL);
+    if (((old ^ r) & CONR_8BIT) && t->esc == E_UTF)
+        t->esc = 0;                                     /* D28: the 8-bit mode set or cleared: nothing pending */
+    if (t->con == con_cur && gfx_up()) {
+        if (((old ^ r) & CONR_8BIT) && !t->font)
+            term_redraw();                              /* D28: cells above 0xFF and 0x80-0x9F look different now */
+        else if ((old ^ r) & CONR_CGAPAL)
+            gfx_show(t->font, r & CONR_CGAPAL, eight(t));
+    }
 }
 
 /* ---- DESIGN D24 6.1-6.3: the remote control's ops (root only; nothing allocated: a console never used is -ENXIO) ---- */
 
-/* CON_READ: the grid (not the scrollback view) and its header into the caller's struct uconread and cell buffer */
-static long con_read(struct term *t, struct uconread *r)
+/* CON_READ: the grid (not the scrollback view) and its header into the caller's struct uconread and cell buffer;
+ * cells of 3 bytes (the stored byte, the attributes, the colour), or (D28, CONRF_CELL4) of 4: the 16-bit value
+ * big-endian first */
+static long con_read(struct term *t, struct uconread *r, u32 cs)
 {
-    u32 k = r->ncells / 3, all = (u32)trows * COLS;
+    u32 k = r->ncells / cs, all = (u32)trows * COLS;
     if (k > all)
         k = all;
-    if (k && !user_ok_wr(current, r->cells, k * 3))
+    if (k && !user_ok_wr(current, r->cells, k * cs))
         return -EFAULT;
     u8 *o = (u8 *)r->cells;
-    for (u32 i = 0; i < k; i++, o += 3) {
-        o[0] = ((u8 *)t->ch)[i];
-        o[1] = ((u8 *)t->at)[i];
-        o[2] = ((u8 *)t->co)[i];
+    for (u32 i = 0; i < k; i++, o += cs) {
+        u8 a = ((u8 *)t->at)[i], *c = o;
+        if (cs == 4)
+            *c++ = (a & A_HI) ? t->hi[i] : 0;
+        c[0] = ((u8 *)t->ch)[i];
+        c[1] = a & (A_INV | A_UND | A_BOLD);
+        c[2] = ((u8 *)t->co)[i];
     }
     r->rows = (u16)trows;
     r->cols = COLS;
@@ -743,10 +1126,10 @@ static long con_read(struct term *t, struct uconread *r)
     r->changes = t->changes;
     r->flags = (u8)((t->con == con_cur ? CONRD_SHOWN : 0) | (t->font ? CONRD_FONT : 0) | (t->back ? CONRD_BACK : 0) |
                     (t->curvis ? CONRD_CURSOR : 0));
-    r->csize = 3;
+    r->csize = (u8)cs;
     r->pad = 0;
     r->size = UCONREAD_FIRST;                           /* the bytes of the struct the kernel filled */
-    return (long)(k * 3);
+    return (long)(k * cs);
 }
 
 /* the caller's struct for CON_READ / CON_LINE: its first word its size (0: the first size, which is all there is so
@@ -798,7 +1181,7 @@ long term_conop(u32 op, u32 a2, u32 a3)
         if (e)
             return e;
         if (op == CON_READ)
-            return a3 ? -EINVAL : con_read(wsp[con], (struct uconread *)a2);
+            return a3 > CONRF_CELL4 ? -EINVAL : con_read(wsp[con], (struct uconread *)a2, a3 == CONRF_CELL4 ? 4 : 3);
         return gfx_conline(a2, (struct uconline *)a3);
     }
     if (!own && current->uid != 0)
@@ -833,6 +1216,8 @@ long term_conop(u32 op, u32 a2, u32 a3)
     if (!nf)
         return -ENOMEM;
     struct gfont *of = t->font;
+    if (t->esc == E_UTF)
+        t->esc = 0;                                     /* D28: 8-bit mode from now on: nothing pending */
     t->font = nf;
     t->fowner = current->pid;                           /* one owner: the last setter */
     t->changes++;
@@ -857,14 +1242,54 @@ void term_release(int pid)
     }
 }
 
-/* a panic draws into the shown console: Topaz and no rules, whatever a board set (D20 4.2) */
+/* a panic draws into the shown console: Topaz and no rules, whatever a board set (D20 4.2); no pending UTF-8
+ * character, and nothing allocated from now on (D28) */
 void term_panic(void)
 {
     struct term *t = wsp[con_cur];
+    panicked = 1;
     if (t) {
         t->rules = 0;
         t->cor = 0;
         t->wrap = 0;
+        if (t->esc == E_UTF)
+            t->esc = 0;
     }
-    gfx_show(0, 0);
+    gfx_show(0, 0, 0);
+}
+
+/* DESIGN D28 7: SYS_console CON_UFONT, the console's Unicode font for every console (no descriptor; root). The size is
+ * bounded before anything is allocated; the checks run on the kernel's own copy (confont.c); one pointer store
+ * switches to it; then the old copy is freed, every console's pending character cleared and the shown console drawn
+ * again. a2 0 drops the font (every character above U+00FF the box; widths do not change). Kept when its setter
+ * ends: it is the system's (term_release leaves it). */
+long term_ufont(u32 a2, u32 a3)
+{
+    if (current->uid != 0)
+        return -EPERM;
+    if (!gfx_up())
+        return -ENODEV;
+    u8 *c = 0;
+    if (a2) {
+        if (a3 > CONF_MAXSIZE || a3 < CONF_HDR + CONF_INDEX)
+            return -EINVAL;
+        if (!user_ok_rd(current, a2, a3))
+            return -EFAULT;
+        if (!(c = kmalloc(a3)))
+            return -ENOMEM;
+        memcpy(c, (const void *)a2, a3);
+        if (confont_check(c, a3)) {
+            kfree(c);
+            return -EINVAL;
+        }
+    }
+    kfree(confont_set(c));
+    for (int i = 1; i <= NCONS; i++)
+        if (wsp[i]) {
+            if (wsp[i]->esc == E_UTF)
+                wsp[i]->esc = 0;
+            wsp[i]->changes++;
+        }
+    term_redraw();
+    return 0;
 }

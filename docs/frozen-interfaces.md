@@ -35,6 +35,35 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   75 counted, so five RESTARTs of wasabid in a minute lost it until the next boot. Accepted once, not repeated: init and
   every daemon ship together with the kernel, and no released daemon depends on the old count (a restart loop is still
   given up). Any later change is a new status or a new word in the file.
+- **One accepted change of meaning (DESIGN D28, branch utf8, 2026-10-29):** the bytes a console shows and the keys it
+  sends are UTF-8 instead of Latin-1, also for every program built before D28. Accepted once, not repeated: the
+  programs that depend on it (`telnet`, `sh`'s line editor, `edit`, `less`, `ls`) change in the same release (D28
+  steps 2-5 ship together, and the `telnet` package requires that base), the 8-bit mode (a `CON_FONT`, or the new
+  rule `CONR_8BIT`) keeps the old meaning for whoever asks for it, and the Latin-1 fallback keeps old Latin-1 text
+  readable. Any later change is a new rule bit.
+- **D28 (the console's UTF-8 and fonts, branch utf8, 2026-10-29):** `SYS_console` op 4 `CON_UFONT`: exactly 4 in the
+  op word (a descriptor there: -EINVAL), root only (-EPERM), a2 the ZCF1 data and a3 its size (a2 0 drops the font:
+  every character above U+00FF the box, the widths unchanged), -ENODEV without a display, -EINVAL for a3 above
+  98,848 (refused before anything is allocated) or any check, -EFAULT, -ENOMEM (nothing changes); the checks (magic
+  `ZCF1`, header size 32, flags 0, width and height 8, the reserved fields 0, 3-4,096 glyphs, 0-255 half-pages, the
+  total size equal to a3 and to 32 + 512 + 256 P + 8 G, index bytes 0 and 1 zero, none above P and no two naming
+  one half-page, every entry 0, 32-126, 160-255 or below 256 + G); kept when its setter ends (the system's, not a session's). The ZCF1 format
+  (`tools/mkconfont.py`, all big-endian): the 32-byte header (offsets 0 magic, 4 header size, 6 flags, 8 width, 9
+  height, 10 glyph count, 12 half-page count, 14 reserved, 16 total size, 20-31 reserved), then the 512-byte index (a
+  byte per 128-code-point half-page of the BMP: 0 none, else 1 + its number), the half-pages (128 16-bit entries: 0
+  no glyph, 32-126 or 160-255 Topaz's glyph of that Latin-1 byte, 256 + n glyph n), the glyphs (8 bytes, a byte a row, bit 7 the
+  left pixel); glyphs 0, 1, 2 the box and the wide box's halves; entries for U+FFFE/U+FFFF ignored; any later meaning
+  needs a flags bit. `CONR_8BIT` 128 (`CONR_ALL` 255): 8-bit mode with the console's Topaz, owned and dropped as the
+  other rules, kept by `ESC c`; a `CON_FONT` implies the same mode; in it nothing is decoded, the keyboard sends the
+  keymap's Latin-1 bytes, and a cell above 0xFF draws as '?' (unchanged). `CON_READ`'s a3 1 (`CONRF_CELL4`): cells
+  of 4 bytes (the 16-bit value big-endian: up to 0xFF the stored byte, else the code point, 0xFFFE a character beyond
+  U+FFFF, 0xFFFF a wide character's right half; then `CONA_*`, then the colour), `csize` 4; a3 0 as before (the low
+  byte; `A_HI` never shown in the attribute byte), other values -EINVAL. The path
+  `/usr/share/consolefonts/zenix-8x8.zcf` (full images and the base package) and `/etc/console`'s
+  `font auto|none|NAME` (NAME a plain name: `/usr/share/consolefonts/NAME.zcf`; no line or no file: auto). The
+  console's UTF-8 rules as documented behaviour (D28 section 4: nothing decoded inside an escape sequence, a byte that
+  is not part of a character one cell of its Latin-1 glyph or the box, C1 controls written as UTF-8 ignored, U+FFFE
+  and U+FFFF stored as U+FFFD) and its widths (picolibc's `wcwidth` in a non-CJK locale, section 9).
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).
@@ -69,8 +98,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `HWINFO_DRYRUN` ("ZHWD") in the hwinfo magic from a caller that may return to AmigaOS (zenixboot CHECK): stage0
   writes no hardware then.
 - **D20 (telnet's console, step 1, 2026-10-27):** `SYS_console`'s op word `op | (fd + 1) << 8` (0 above the op: no
-  descriptor, only `CON_COLOURS`; ops are 1-255, 4 reserved for D28's `CON_UFONT`; D24's ops 5-7 take a descriptor
-  too); `CON_FONT` 2 (a2 PSF1 data, a3 its size; a2 0 drops it; PSF1 mode 0, height 8,
+  descriptor, only `CON_COLOURS` and D28's `CON_UFONT`; ops are 1-255; D24's ops 5-7 take a descriptor too); `CON_FONT` 2 (a2 PSF1 data, a3 its size; a2 0 drops it; PSF1 mode 0, height 8,
   2,052 bytes; meaning "8-bit mode: each byte one glyph of this font, no UTF-8 while loaded"), `CON_RULES` 3 (a2 bits,
   a3 mask, 0 asks, answers the bits before); the `CONR_*` bits 1-64 and their meanings; the target rules (a console,
   the caller's own in its foreground, or root's) and the errors -EBADF, -ENOTTY, -EPERM, -ENODEV, -EFAULT, -EINVAL,

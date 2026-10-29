@@ -194,6 +194,14 @@ static int conread(int fd, struct uconread *r, void *cells, u32 n)
     r->ncells = n;
     return sys_conread(fd, r);
 }
+static int conread4(int fd, struct uconread *r, void *cells, u32 n)
+{
+    memset(r, 0, sizeof *r);
+    r->size = sizeof *r;
+    r->cells = (u32)cells;
+    r->ncells = n;
+    return sys_conread4(fd, r);
+}
 static int conline(int fd, int line, struct uconline *d, void *pens, u32 n)
 {
     memset(d, 0, sizeof *d);
@@ -244,7 +252,7 @@ static int conops(void)
     h.size = 0;
     h.ncells = 0;
     ck(sys_conread(1, &h) == 0, "CON_READ: size 0 is the first size", 0);
-    ck(sys3(89, CON_READ | 2u << 8, (u32)&h, 1) == -EINVAL, "CON_READ: a3 not 0", 0);
+    ck(sys3(89, CON_READ | 2u << 8, (u32)&h, 2) == -EINVAL, "CON_READ: a3 not 0 or 1 (D28: 1 the 4-byte cells)", 0);
     ck(sys_conread(14, &h) == -EBADF, "CON_READ: no such descriptor", 0);
     int nul = sys_open("/dev/null", O_RDWR), t9 = ttyfd(9);
     ck(sys_conread(nul, &h) == -ENOTTY, "CON_READ: not a console", 0);
@@ -323,7 +331,11 @@ static int rawkeys(void)
     take((u8 *)res, 64);                                        /* anything typed before */
     /* tools/kbd-test.sh's k1 and k2, by the same key positions: the Swedish layers, then Caps Lock */
     keys_give("\x1a\x9a\x29\xa9\x2a\xaa\x60\x03\x83\xe0\x65\x1a\x9a\xe5\x65\x60\x1a\x9a\xe0\xe5\x65\x02\x82\xe5\x65\x30\xb0\xe5",
-              28, "\xe5\xf6\xe4\xa3\x5b\x7b\xb2\x5c", 8, "raw keys: Swedish layers plain, Shift, Alt, Shift+Alt");
+              28, "\xc3\xa5\xc3\xb6\xc3\xa4\xc2\xa3\x5b\x7b\xc2\xb2\x5c", 13,
+              "raw keys: Swedish layers plain, Shift, Alt, Shift+Alt (the letters as UTF-8, DESIGN D28)");
+    sys_conrules(1, CONR_8BIT, CONR_8BIT);                      /* D28: 8-bit mode: the keymap's Latin-1 bytes */
+    keys_give("\x1a\x9a\x29\xa9", 4, "\xe5\xf6", 2, "raw keys: in 8-bit mode (CONR_8BIT) Latin-1, as before D28");
+    sys_conrules(1, 0, CONR_8BIT);
     keys_give("\x62\x20\xa0\x35\xb5\x01\x81\x60\x33\xb3\xe0\xe2\x22\xa2", 14, "AB1cd", 5,
               "raw keys: Caps Lock on letters only, Shift inverts it");
     keys_give("\x63\x33\xb3\xe3\x4c\xcc", 6, "\x03\x1b[A", 4, "raw keys: Ctrl-C (raw, no signals) and an arrow");
@@ -350,6 +362,210 @@ static int rawkeys(void)
     sys_close(t2);
     sys_ttymode(0);
     return report("rawkeys");
+}
+
+static void hex(const char *tag, const u8 *b, int n);
+
+/* ---- DESIGN D28: the Unicode font as the display draws it (termtest utf8, root, on the console shown) ----
+ * Every code point the loaded font maps (/usr/share/consolefonts/zenix-8x8.zcf, read here) is written as UTF-8 to
+ * its own cell and the cell's pixels read back from the display (CON_LINE: a pen a pixel; set where not the
+ * background) against what it must be: the font's glyph, or for a stand-in Topaz's glyph of its Latin-1 byte (that
+ * byte drawn in a reference cell); a character the font lacks is the box, a wide one the wide box's two halves; then a
+ * screen in the style of Claude Code's (a rounded box, the message and result marks, the spinner, the logo's blocks,
+ * braille, a wide emoji) the same way. Run at each depth (tools/con-test.sh). */
+static u8 *uf; static long ufn;
+static int ufp;                                         /* the font's half-page count */
+static u32 ufentry(u32 c)                               /* 0 none, 32-255 a Topaz byte, 256 + n glyph n */
+{
+    if (c > 0xFFFF || c < 0x100) return 0;
+    u32 h = uf[32 + (c >> 7)];
+    if (!h) return 0;
+    const u8 *e = uf + 32 + 512 + 256 * (h - 1) + 2 * (c & 127);
+    return (u32)e[0] << 8 | e[1];
+}
+static const u8 *ufglyph(u32 n) { return uf + 32 + 512 + 256 * ufp + 8 * n; }
+static int u8enc(u32 c, char *o)
+{
+    if (c < 0x80) { o[0] = (char)c; return 1; }
+    if (c < 0x800) { o[0] = (char)(0xC0 | c >> 6); o[1] = (char)(0x80 | (c & 0x3F)); return 2; }
+    if (c < 0x10000) { o[0] = (char)(0xE0 | c >> 12); o[1] = (char)(0x80 | (c >> 6 & 0x3F)); o[2] = (char)(0x80 | (c & 0x3F)); return 3; }
+    o[0] = (char)(0xF0 | c >> 18); o[1] = (char)(0x80 | (c >> 12 & 0x3F)); o[2] = (char)(0x80 | (c >> 6 & 0x3F));
+    o[3] = (char)(0x80 | (c & 0x3F));
+    return 4;
+}
+static void putat(int row, int col, u32 c)
+{
+    char b[24];
+    int n = snprintf(b, sizeof b, "\033[%d;%dH", row + 1, col + 1);
+    n += u8enc(c, b + n);
+    sys_write(1, b, (u32)n);
+}
+static u8 *upens;
+static int cellbits(int row, int col, u8 *g)            /* a cell's 8 x 8 pixels from the display -> 0, -1 on error */
+{
+    struct uconline d;
+    for (int y = 0; y < 8; y++) {
+        if (conline(1, row * 8 + y, &d, upens, 640) != 640) return -1;
+        u8 b = 0;
+        for (int x = 0; x < 8; x++) b = (u8)(b << 1 | (upens[col * 8 + x] != 0));
+        g[y] = b;
+    }
+    return 0;
+}
+static u8 topaz[224][8]; static u8 have_topaz[224];
+static const u8 *topaz_of(u32 b)                        /* Topaz's glyph of a Latin-1 byte, as the display draws it */
+{
+    if (!have_topaz[b - 32]) {
+        putat(0, 79, b);
+        cellbits(0, 79, topaz[b - 32]);
+        have_topaz[b - 32] = 1;
+    }
+    return topaz[b - 32];
+}
+static int utf8bad, utf8n;
+/* the cell (row, col) must show want; else said once per kind of failure (the first few) */
+static void cell_is(int row, int col, const u8 *want, u32 c, const char *what)
+{
+    u8 g[8];
+    utf8n++;
+    if (cellbits(row, col, g) || memcmp(g, want, 8)) {
+        if (utf8bad++ < 6) {
+            char m[96];
+            snprintf(m, sizeof m, "utf8: U+%04X (%s) at %d,%d: %02x%02x%02x%02x%02x%02x%02x%02x", c, what, row, col,
+                     g[0], g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
+            ck(0, m, 0);
+        }
+    }
+}
+static void expect_cell(int row, int col, u32 c)        /* c written at (row, col): checked against the font */
+{
+    u32 e = ufentry(c);
+    if (e >= 256) cell_is(row, col, ufglyph(e - 256), c, "its glyph");
+    else if (e) cell_is(row, col, topaz_of(e), c, "Topaz's stand-in");
+    else cell_is(row, col, ufglyph(0), c, "the box");
+}
+static int utf8page(void)
+{
+    int fd = sys_open("/usr/share/consolefonts/zenix-8x8.zcf", O_RDONLY);
+    uf = malloc(98848);
+    upens = malloc(640);
+    if (fd < 0 || !uf || !upens) { ck(0, "utf8: the font file and memory", fd); return report("utf8"); }
+    ufn = sys_read(fd, uf, 98848);
+    sys_close(fd);
+    ck(ufn > 544 && !memcmp(uf, "ZCF1", 4), "utf8: the default font read", (int)ufn);
+    ufp = uf[12] << 8 | uf[13];
+    sys_ttymode(TTY_RAW | TTY_NOSIG);
+    out("\033[0m\033[?25l\033[2J");
+    /* every mapped code point, 40 to a row (two columns each), page by page */
+    static u32 list[1400]; int nl = 0;
+    for (u32 h = 2; h < 512 && nl < 1400; h++)
+        if (uf[32 + h])
+            for (u32 k = 0; k < 128 && nl < 1400; k++) {
+                u32 c = h << 7 | k;
+                if (ufentry(c) && c < 0xFFFE) list[nl++] = c;
+            }
+    char m[64];
+    snprintf(m, sizeof m, "utf8: the font maps %d code points", nl);
+    ck(nl > 1000, m, nl);
+    for (int at = 0; at < nl; at += 40 * 28) {
+        out("\033[2J");
+        for (int i = at; i < nl && i < at + 40 * 28; i++) putat(1 + (i - at) / 40, (i - at) % 40 * 2, list[i]);
+        for (int i = at; i < nl && i < at + 40 * 28; i++) {
+            u32 c = list[i];
+            int row = 1 + (i - at) / 40, col = (i - at) % 40 * 2;
+            expect_cell(row, col, c);
+            if ((zu8width(c) == 2)) {                          /* a wide character with a glyph: a blank right half */
+                static const u8 blank[8];
+                cell_is(row, col + 1, blank, c, "the right half of a wide character with a glyph");
+            }
+        }
+    }
+    snprintf(m, sizeof m, "utf8: every mapped code point drawn as the font says (%d cells)", utf8n);
+    ck(!utf8bad, m, utf8bad);
+    /* what the font lacks: the box, a wide character the wide box's two halves */
+    int b0 = utf8bad;
+    out("\033[2J");
+    putat(2, 0, 0x0416); putat(2, 4, 0x4E00); putat(2, 8, 0x1F600);
+    cell_is(2, 0, ufglyph(0), 0x0416, "the box: Cyrillic is not in the font");
+    cell_is(2, 4, ufglyph(1), 0x4E00, "the wide box's left half");
+    cell_is(2, 5, ufglyph(2), 0x4E00, "the wide box's right half");
+    cell_is(2, 8, ufglyph(1), 0x1F600, "an emoji beyond the BMP: the wide box");
+    cell_is(2, 9, ufglyph(2), 0x1F600, "... its right half");
+    ck(utf8bad == b0, "utf8: a character the font lacks is the box (a wide one the wide box)", utf8bad - b0);
+    /* a screen in the style of Claude Code's */
+    static const char *const cc[] = {
+        "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae",          /* ╭────╮ */
+        "\xe2\x94\x82 \xe2\x9c\xbb \xe2\x94\x82",                                                     /* │ ✻ │ */
+        "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf",          /* ╰────╯ */
+        "\xe2\x8f\xba Read(file) \xe2\x8e\xbf  done \xe2\x9c\x93 \xe2\x80\xa6",                      /* ⏺ ⎿ ✓ … */
+        "\xc2\xb7\xe2\x9c\xa2\xe2\x9c\xb3\xe2\x9c\xb6\xe2\x9c\xbb\xe2\x9c\xbd \xe2\x9d\xaf \xe2\x8f\xb5",  /* ·✢✳✶✻✽ ❯ ⏵ */
+        "\xe2\x96\x90\xe2\x96\x9b\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x9c\xe2\x96\x8c \xe2\xa0\x8b\xe2\xa0\x99\xe2\xa0\xb9",
+        "\xe2\x9a\xa1 \xe2\x80\x9cquote\xe2\x80\x9d \xe2\x80\x94 \xe2\x86\x92 \xc5\x82\xc3\xb3" "d\xc5\xba" };   /* ⚡ “” — → łódź */
+    b0 = utf8bad;
+    out("\033[2J");
+    for (int r = 0; r < (int)(sizeof cc / sizeof cc[0]); r++) {
+        char b[16]; snprintf(b, sizeof b, "\033[%d;3H", 4 + r); out(b); out(cc[r]);
+        int col = 2;
+        for (const unsigned char *q = (const unsigned char *)cc[r]; *q; ) {
+            u32 c = *q; int n = 1;
+            if (c >= 0xF0) { c = (c & 7) << 18 | (u32)(q[1] & 0x3F) << 12 | (u32)(q[2] & 0x3F) << 6 | (q[3] & 0x3F); n = 4; }
+            else if (c >= 0xE0) { c = (c & 15) << 12 | (u32)(q[1] & 0x3F) << 6 | (q[2] & 0x3F); n = 3; }
+            else if (c >= 0xC0) { c = (c & 31) << 6 | (q[1] & 0x3F); n = 2; }
+            q += n;
+            if (c < 0x100) { cell_is(3 + r, col, topaz_of(c), c, "Latin-1 in Topaz"); col++; continue; }
+            if ((zu8width(c) == 2) && !ufentry(c)) {
+                cell_is(3 + r, col, ufglyph(1), c, "a wide emoji: the wide box");
+                cell_is(3 + r, col + 1, ufglyph(2), c, "... its right half");
+                col += 2;
+                continue;
+            }
+            expect_cell(3 + r, col, c);
+            col++;
+        }
+    }
+    ck(utf8bad == b0, "utf8: a screen in Claude Code's style (box, marks, spinner, logo blocks, braille, an emoji)", utf8bad - b0);
+    out("\033[0m\033[2J\033[H\033[?25h");
+    sys_ttymode(0);
+    return report("utf8");
+}
+/* DESIGN D28 10: cooked Backspace by character, through CON_INPUT's text (the line discipline, its echo) on this
+ * console, the columns read back (CON_READ's 4-byte cells): a Swedish letter (2 bytes, 1 column), a wide character
+ * (3 bytes, 2 columns), the Latin-1 fallback's one-byte cells (one column each), a zero-width mark (no column) */
+static int erase(void)
+{
+    struct uconread h;
+    u8 *g = malloc(64 * 80 * 4), b[64];
+    if (!g) return 1;
+    sys_ttymode(0);
+    take(b, sizeof b);
+    out("\r\n");
+    conread4(1, &h, g, 0);
+    int row = h.crow;
+    static const struct { const char *in; int col; const char *what; } st[] = {
+        { "x\xe4\xb8\x80", 3, "a wide character typed: 2 columns" },
+        { "\x7f", 1, "Backspace over it: 2 columns back, both cells blank" },
+        { "\xc3\xa5", 2, "a Swedish letter: 1 column" },
+        { "\x7f", 1, "Backspace over it: 1 column (its 2 bytes)" },
+        { "\x80\xa4", 3, "two stray bytes (the Latin-1 fallback): 2 cells" },
+        { "\x7f", 2, "Backspace: one of them" },
+        { "e\xcc\x81", 3, "a letter and a combining accent: 1 column" },
+        { "\x7f", 3, "Backspace over the accent: nothing on the screen moves" },
+        { "\x7f\x7f", 1, "... then over the letter and the stray byte" } };
+    for (unsigned i = 0; i < sizeof st / sizeof st[0]; i++) {
+        sys_coninput(1, CONI_TEXT, st[i].in, (u32)strlen(st[i].in));
+        conread4(1, &h, g, 64 * 80 * 4);
+        int blank = 1;
+        for (int x = st[i].col; x < 6; x++) {
+            const u8 *c = g + 4 * (row * 80 + x);
+            if (c[0] || c[1] != ' ') blank = 0;
+        }
+        ck(h.crow == row && h.ccol == st[i].col && blank, st[i].what, h.ccol);
+    }
+    sys_coninput(1, CONI_TEXT, "\r", 1);
+    int n = (int)sys_read(0, b, sizeof b);
+    ck(n == 2 && b[0] == 'x' && b[1] == '\n', "the line handed on: x and the newline", n);
+    hex("erased", b, n > 0 ? n : 0);
+    return report("erase");
 }
 
 static void hex(const char *tag, const u8 *b, int n)
@@ -452,39 +668,60 @@ static int grab(const char *path)
  * foreground), and the cursor. Status 1 on a timeout, the grid printed all the same. TYPE (\xHH and \r understood)
  * is then typed into the console (CON_INPUT text), so a script goes on only once the grid was read; \kHH in it is a
  * raw key code (CON_INPUT raw, a run of them one call: a modifier held in it is let go at the run's end). */
+/* row y of a 4-byte grid (DESIGN D28's CON_READ cells) as UTF-8 into t (room for 3 * 80 + 1), trailing blanks kept
+ * or cut: a cell up to 0xFF is that Latin-1 character, a wide character's right half adds nothing, one beyond the
+ * BMP is '?' */
+static void row_utf8(const u8 *g, int y, char *t, int cut)
+{
+    int k = 0;
+    for (int x = 0; x < 80; x++) {
+        const u8 *c = g + 4 * (y * 80 + x);
+        u32 v = (u32)c[0] << 8 | c[1];
+        if (v == 0xFFFF) continue;
+        if (v == 0xFFFE) v = '?';
+        if (!v) v = ' ';
+        if (v < 0x80) t[k++] = (char)v;
+        else if (v < 0x800) { t[k++] = (char)(0xC0 | v >> 6); t[k++] = (char)(0x80 | (v & 0x3F)); }
+        else { t[k++] = (char)(0xE0 | v >> 12); t[k++] = (char)(0x80 | (v >> 6 & 0x3F)); t[k++] = (char)(0x80 | (v & 0x3F)); }
+    }
+    while (cut && k > 0 && t[k - 1] == ' ') k--;
+    t[k] = 0;
+}
+
+/* termtest screen TTY TEXT SECS [TYPE]: wait until the console's grid shows TEXT (DESIGN D24's CON_READ, the 4-byte
+ * cells of D28), then until it stops changing; print it ("row NN|...|" in UTF-8, "attr NN|...|" a cell a column),
+ * then type TYPE into it (CON_INPUT) */
 static int screen(const char *tty, const char *want, int secs, const char *type)
 {
     int fd = sys_open(tty, O_RDWR), rows = 0, found = 0, r = -1;
     struct uconread h;
-    u8 *g = malloc(64 * 80 * 3), *t = malloc(81);
+    u8 *g = malloc(64 * 80 * 4);
+    char *t = malloc(3 * 80 + 1);
     if (fd < 0 || !g || !t) { dprintf(2, "termtest: %s: %s\n", tty, fd < 0 ? zstrerror(fd) : "out of memory"); return 2; }
     u32 end = sys_ticks() + (u32)secs * 100;
     for (;;) {
-        r = conread(fd, &h, g, 64 * 80 * 3);
+        r = conread4(fd, &h, g, 64 * 80 * 4);
         rows = h.rows;
         if (r >= 0)
             for (int y = 0; y < rows && !found; y++) {
-                for (int x = 0; x < 80; x++) t[x] = g[3 * (y * 80 + x)] ? g[3 * (y * 80 + x)] : ' ';
-                t[80] = 0;
-                found = strstr((char *)t, want) != 0;
+                row_utf8(g, y, t, 0);
+                found = strstr(t, want) != 0;
             }
         if (found || (int)(sys_ticks() - end) >= 0) break;
         sys_sleep(10);
     }
     for (u32 c = h.changes; found && (int)(sys_ticks() - end) < 0; c = h.changes) {   /* then until it stops changing */
         sys_sleep(20);
-        r = conread(fd, &h, g, 64 * 80 * 3);
+        r = conread4(fd, &h, g, 64 * 80 * 4);
         if (r < 0 || h.changes == c) break;
     }
     if (r < 0) { dprintf(2, "termtest: CON_READ: %s\n", zstrerror(r)); return 2; }
     for (int y = 0; y < rows; y++) {
-        int n = 80, col = 0;
-        for (int x = 0; x < 80; x++) t[x] = g[3 * (y * 80 + x)] ? g[3 * (y * 80 + x)] : ' ';
-        while (n > 0 && t[n - 1] == ' ') n--;
-        t[n] = 0;
+        int col = 0;
+        row_utf8(g, y, t, 1);
         dprintf(1, "row %02d|%s|\n", y, t);
         for (int x = 0; x < 80; x++) {
-            u8 a = g[3 * (y * 80 + x) + 1], c = g[3 * (y * 80 + x) + 2];
+            u8 a = g[4 * (y * 80 + x) + 2], c = g[4 * (y * 80 + x) + 3];
             t[x] = a || c != 0x07 ? "0123456789abcdef"[c & 15] : '.';
             col |= t[x] != '.';
         }
@@ -518,6 +755,8 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "conops")) return conops();
     if (argc > 1 && !strcmp(argv[1], "rawkeys")) return rawkeys();
     if (argc > 1 && !strcmp(argv[1], "text")) return text();
+    if (argc > 1 && !strcmp(argv[1], "erase")) return erase();
+    if (argc > 1 && !strcmp(argv[1], "utf8")) return utf8page();
     if (argc > 1 && !strcmp(argv[1], "readline")) return readline();
     if (argc > 2 && !strcmp(argv[1], "readraw")) return readraw(atoi(argv[2]));
     if (argc > 2 && !strcmp(argv[1], "grab")) return grab(argv[2]);

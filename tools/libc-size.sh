@@ -31,7 +31,7 @@ budget "hello with printf" ${Z[hello]} 6600
 budget "a stdio + malloc + qsort tool" ${Z[sort]} 10400
 budget "the time functions, over hello" $((Z[time] - Z[hello])) 14300
 budget "floating point, over hello" $((Z[float] - Z[hello])) 16300
-budget "the UTF-8 functions, over hello" $((Z[utf8] - Z[hello])) 5800
+budget "the UTF-8 functions, over hello" $((Z[utf8] - Z[hello])) 6700   # D28: setlocale reads the environment
 budget "the library's data + BSS per process (hello with printf)" ${D[hello]} 1024
 warned=""
 for p in $progs; do

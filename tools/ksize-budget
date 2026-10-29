@@ -4,6 +4,11 @@
 # of 2026-10-29 with about 3% room (the parts the kernel's shrink made smaller the same day: their new sizes); a part
 # that needs more raises its line here, in the commit that grows it, so the growth is seen. The last lines bound the whole: kernel.bin's bytes, and the room it must leave on the mount tests'
 # floppy (the binding limit, KERNEL_MAX_MOUNT).
+# DESIGN D28 steps 2-3 (2026-10-29, the console's UTF-8): term 8,652 -> 12,558 (the decoder, the 16-bit cells and the
+# scrollback's high rows, wide characters, CON_UFONT, CON_READ's 4-byte cells), gfx 6,086 -> 7,770 and bss + 260 (the
+# Unicode font's lookup, byte-wise drawing, the built-in boxes, Topaz's own 0x80-0x9F kept aside), tty 2,508 -> 2,876
+# (Backspace by character), confont new 3,018 (the width table 1,816, the font's checks); the mount tests' RAM disk
+# went from 716 to 712 KB for it (Makefile).
 start     3900   8192
 main      5950   1100
 serial    5950   6500
@@ -19,9 +24,10 @@ rtc       1550      0
 proc      9100  15600
 syscall   9950      0
 vfs      11150   1600
-tty       2600     64
-gfx       6300   2000
-term      8950     64
+tty       2960     64
+gfx       8000   2320
+term     12800     64
+confont   3100     32
 kbd       3750    180
 ipc       3400   1600
 svc       5600   1420
@@ -32,5 +38,5 @@ random    3800    280
 sock      4700   1060
 drv       1850    640
 embed    47500      0
-TOTAL   162000
+TOTAL   172000
 ROOM      1024

@@ -627,6 +627,8 @@ void syscall_c(u32 *rb)
     case SYS_console:                   /* the 2 MB diet: /etc/console's colours, set by init (root); D20: a */
         if (a1 == CON_COLOURS)          /* console's font and rules, named by a descriptor in the op word */
             r = a2 && current->uid != 0 ? -EPERM : gfx_set_colours((int)a2);
+        else if (a1 == CON_UFONT)       /* D28: the Unicode font, every console's: no descriptor (with one: */
+            r = (s32)term_ufont(a2, a3);        /* term_conop's -EINVAL, as for any op it does not know) */
         else
             r = (s32)term_conop(a1, a2, a3);
         break;

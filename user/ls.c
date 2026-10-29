@@ -96,13 +96,14 @@ static void show(struct ent *v, int n)
         return;
     }
     if (!tty || o_1) { for (int i = 0; i < n; i++) { putname(&v[i]); char sf = suffix(&v[i]); if (sf) oputc(sf); oputc('\n'); } return; }
-    int w = 0; for (int i = 0; i < n; i++) { int l = (int)strlen(v[i].name) + (suffix(&v[i]) ? 1 : 0); if (l > w) w = l; }
+    /* the columns by the names' widths on the console (DESIGN D28: a UTF-8 letter one column, a wide one two) */
+    int w = 0; for (int i = 0; i < n; i++) { int l = zu8cols(v[i].name, strlen(v[i].name)) + (suffix(&v[i]) ? 1 : 0); if (l > w) w = l; }
     w += 2; int cols = 80 / w; if (cols < 1) cols = 1;
     int rows = (n + cols - 1) / cols;
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
             int i = c * rows + r; if (i >= n) break;
-            putname(&v[i]); char sf = suffix(&v[i]); int l = (int)strlen(v[i].name) + (sf ? 1 : 0); if (sf) oputc(sf);
+            putname(&v[i]); char sf = suffix(&v[i]); int l = zu8cols(v[i].name, strlen(v[i].name)) + (sf ? 1 : 0); if (sf) oputc(sf);
             if (c * rows + r + rows < n) for (int k = l; k < w; k++) oputc(' ');
         }
         oputc('\n');

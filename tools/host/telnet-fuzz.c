@@ -74,7 +74,7 @@ int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long n)
     k = tn_encode(&t, d, (long)n, out);
     if (k < (long)n || k > 2 * (long)n)
         abort();
-    k = tk_keys(mode, d, (long)n, out, &bell);
+    k = tk_keys(mode, n & 1, d, (long)n, out, &bell);
     if (k < 0 || k > 2 * (long)n || bell > (long)n)
         abort();
     tn_size(&t, n > 1 ? d[0] | d[1] << 8 : 80, 255);

@@ -163,12 +163,33 @@ void term_redraw(void);                 /* the console shown, drawn again from i
 struct gfont;
 struct gfont *gfx_font_new(const u8 *glyphs);   /* 2,048 bytes copied (and the table for planes) -> 0 no memory */
 void gfx_font_free(struct gfont *f);
-void gfx_show(const struct gfont *f, int cga);  /* the shown console's font (0: Topaz) and palette (1: CGA's) */
+void gfx_show(const struct gfont *f, int cga, int eight);   /* the shown console's font (0: Topaz), palette (1: CGA's)
+                                                 * and 8-bit mode (D28: 1, Topaz's own 0x80-0x9F; else those bytes
+                                                 * are the box) */
 long term_conop(u32 op, u32 a2, u32 a3);        /* SYS_console CON_FONT / CON_RULES (op word with the descriptor) */
 void term_release(int pid);             /* a process ends: the fonts and rules it set are dropped */
 void term_panic(void);                  /* a panic: the shown console back to Topaz and no rules, before it draws */
 /* colour: foreground in the low nibble, background in the high one (0x07: grey on black) */
 void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour);
+/* DESIGN D28: a cell above U+00FF (v: the code point, 0xFFFE a character beyond the BMP) in the Unicode font's glyph,
+ * its Topaz stand-in or the box; part 0 one cell, 1 a wide character's left half, 2 its right half (v the lead's) */
+void gfx_ucell(int row, int col, u16 v, u8 attr, u8 colour, int part);
+/* DESIGN D28 sections 6, 7, 9 (confont.c): the console's widths, its Unicode font (ZCF1, CON_UFONT) */
+#define CONF_HDR        32
+#define CONF_INDEX      512
+#define CONF_MAXG       4096
+#define CONF_MAXP       255
+#define CONF_MAXSIZE    (CONF_HDR + CONF_INDEX + CONF_MAXP * 256 + CONF_MAXG * 8)     /* 98,848 */
+int con_width(u32 c);                   /* picolibc's wcwidth (non-CJK): -1, 0, 1 or 2 */
+int con_cwidth(u32 c);                  /* the same, from the loaded font's entry when it maps c */
+long confont_check(const u8 *d, u32 n); /* CON_UFONT's checks on the kernel's copy -> 0 or -EINVAL */
+u8 *confont_set(u8 *d);                 /* a checked copy becomes the font (0: none) -> the old copy */
+extern const u8 *cf_index;              /* the loaded font: 512 index bytes (0: no font) */
+extern const u16 *cf_pages;             /* its half-pages, entries in the CPU's order with the width class on top */
+extern const u8 *cf_glyphs;             /* its glyphs, 8 bytes each */
+extern u32 cf_nglyphs;
+long term_ufont(u32 a2, u32 a3);        /* SYS_console CON_UFONT (root; no descriptor) */
+int term_eight(int con);                /* console con is in 8-bit mode (CON_FONT or CONR_8BIT): no UTF-8 */
 void gfx_scroll(u8 colour);             /* the whole screen up a row; the new row takes colour's background */
 void gfx_clear_text(u8 colour);
 void gfx_fill_rows(int row, int n, u8 colour);  /* n rows take colour's background (the blitter) */
@@ -176,7 +197,8 @@ void gfx_move_rows(int dst, int src, int n);    /* n rows from src to dst, overl
 void gfx_vblank(void);
 void term_putc(int con, char c);
 void term_write(int con, const char *s, u32 n);
-u32 term_write_some(int con, const char *s, u32 n);   /* tty_write: may stop early to let input and others run (D20 6) */
+u32 term_write_some(int con, const char *s, u32 n, u32 max);  /* tty_write: may stop early to let input and others
+                                                 * run (D20 6); never inside a UTF-8 character: then up to max (D28 4) */
 void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
 int term_ckm(void);                     /* the console on the screen wants ESC O A arrows (DECCKM) */
 int term_size(void);                    /* rows << 16 | columns */
@@ -825,11 +847,15 @@ int tty_of(const struct proc *p);
 #define CONR_ICE        16   /* SGR 5 and 6 the bright background (colour + 8), 25 ends it */
 #define CONR_CGAPAL     32   /* the CGA/VGA palette while this console is shown */
 #define CONR_LFONLY     64   /* LF moves down one row, same column (no CR) */
-#define CONR_ALL        127
+#define CONR_8BIT       128  /* DESIGN D28: 8-bit mode with Topaz (no UTF-8; the keys Latin-1), as a CON_FONT implies */
+#define CONR_ALL        255
+#define CON_UFONT       4    /* DESIGN D28 7: no descriptor; root; a2 ZCF1 data, a3 its size; a2 0 drops it -> 0 */
 /* DESIGN D24 6.1-6.3 (the remote control; frozen): root only (-EPERM), named by any console's descriptor. CON_READ,
  * CON_LINE and CON_INPUT's text: a console never used is -ENXIO (nothing is allocated); raw keys act as the real
  * keyboard does (Amiga+Fn to an unused console allocates it and asks init for a login). Op 4 is D28's CON_UFONT. */
-#define CON_READ        5    /* a2 struct uconread *, a3 0 -> the cell bytes written */
+#define CON_READ        5    /* a2 struct uconread *, a3 the cells' form (CONRF_*) -> the cell bytes written */
+#define CONRF_CELL3     0    /* 3 bytes a cell: the stored byte (a cell above U+00FF: its low byte), CONA_*, colour */
+#define CONRF_CELL4     1    /* DESIGN D28: 4 bytes a cell: the 16-bit value (big-endian), CONA_*, colour */
 #define CON_LINE        6    /* a2 a display line, a3 struct uconline * -> the pens written; -ENXIO: not shown */
 #define CON_INPUT       7    /* a2 the bytes, a3 count | kind << 16 (CONI_*; count at most 256) -> how many taken */
 #define CONI_RAW        0    /* raw Amiga key codes into the keyboard path (the shown console) */
@@ -842,7 +868,7 @@ struct uconread {            /* CON_READ: the caller fills size, cells, ncells; 
     u16 rows, cols, crow, ccol;     /* the grid and the cursor */
     u32 changes;             /* raised on every write, font or rules change, switch or scrollback move */
     u8 flags;                /* CONRD_* */
-    u8 csize;                /* bytes a cell: 3 */
+    u8 csize;                /* bytes a cell: 3, or 4 (CONRF_CELL4) */
     u16 pad;
 };
 #define UCONREAD_FIRST  28

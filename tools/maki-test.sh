@@ -21,7 +21,7 @@ from screenlog import Log, rows, attrs, cursor
 L = Log(sys.argv[1])
 check, part = L.check, L.part
 s0, s1, s2, s3 = (part("scr%d" % i, "scr%d" % (i + 1)) for i in range(4))
-s4, f = part("scr4", "file"), part("file", "mdone")
+s4, s5, f = part("scr4", "scr5"), part("scr5", "file"), part("file", "mdone")
 r0, r1, r2, r3, r4 = rows(s0), rows(s1), rows(s2), rows(s3), rows(s4)
 check([L.status(n) for n in ("st", "st2", "st3")] == [0, 0, 0],
       "maki ran and ended with status 0 three times (q): a file, a pipe, a directory",
@@ -49,6 +49,9 @@ check(re.search(r"^300$", f, re.M) is not None and re.search(r"^same=yes$", L.te
 check(re.search(r"^drwx------ .*Maki$", f, re.M) is not None and re.search(r"^-rw-r--r-- .* Maki\.keys$", f, re.M)
       is not None and re.search(r"^-rw-r--r-- .*\.config/FileColours$", f, re.M) is not None,
       "the settings: $HOME/.config/Maki (this user's only) with the keys, $HOME/.config/FileColours", f[:600])
+r5 = rows(s5)                           # DESIGN D28: a UTF-8 file (a Swedish letter, a box line, a wide character)
+check(r5.get(0) == "b\u00e5r \u2500 \u4e00x" and "UTF-8" in r5.get(31, "") and L.status("st4") == 0,
+      "a UTF-8 file shown as it is (the wide character two cells), the status line says UTF-8", (r5.get(0), r5.get(31)))
 L.memory(f, "maki", "Maki")
 L.waits()
 L.done()

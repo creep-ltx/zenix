@@ -118,3 +118,11 @@ struct timeval { long tv_sec, tv_usec; };
 int select(int nfds, fd_set *rd, fd_set *wr, fd_set *ex, struct timeval *tv);
 int zsig_num(const char *name);                 /* "TERM", "SIGTERM" or "15" -> 15; -1 if unknown */
 const char *zsig_name(int sig);                 /* 15 -> "TERM"; 0 if none */
+/* DESIGN D28: UTF-8 as the console decodes it, and its widths (kernel/cwidth.h: the same function and table), so a
+ * program lays out its columns as the console draws them. A byte that is not part of a character is one cell of one
+ * column (the console's Latin-1 fallback); a C1 control written as UTF-8 and a zero-width character take none. */
+int zu8next(const char *s, u32 n, int *cols);   /* bytes of the character at s (1-4; n >= 1), *cols its columns */
+u32 zu8prev(const char *s, u32 pos);            /* where the character before pos starts (pos > 0) */
+int zu8width(u32 c);                            /* a code point's columns: -1, 0, 1 or 2 */
+int zu8cols(const char *s, u32 n);              /* the columns of n bytes */
+u32 zu8fit(const char *s, u32 n, int cols);     /* the bytes of whole characters that fit in cols columns */

@@ -55,32 +55,49 @@ static void checki(const char *name, long got, long want)
     check(name, got == want, b);
 }
 
-/* the console's grid (CON_READ on descriptor 0) */
+/* the console's grid (CON_READ on descriptor 0, DESIGN D28's 4-byte cells: the 16-bit value, CONA_*, the colour) */
 static unsigned char *cells;
 static struct uconread grid;
 static int readgrid(void)
 {
-    unsigned cap = 132 * 64 * 3;
+    unsigned cap = 132 * 64 * 4;
     if (!cells && !(cells = malloc(cap))) return -1;
     memset(&grid, 0, sizeof grid);
     grid.size = sizeof grid;
     grid.cells = (u32)cells;
     grid.ncells = cap;
-    if (sys_conread(0, &grid) < 0 || !grid.cols || grid.cols > 132 || grid.rows > 64) return -1;
+    if (sys_conread4(0, &grid) < 0 || grid.csize != 4 || !grid.cols || grid.cols > 132 || grid.rows > 64) return -1;
     return 0;
 }
-static unsigned char *cell(int col, int row) { return cells + ((unsigned)row * grid.cols + (unsigned)col) * 3; }
-/* the glyphs of one row from col, n of them, as text */
+static unsigned char *cell(int col, int row) { return cells + ((unsigned)row * grid.cols + (unsigned)col) * 4 + 1; }
+static unsigned cellv(int col, int row) { unsigned char *c = cell(col, row); return (unsigned)c[-1] << 8 | c[0]; }
+/* the characters of one row from col on, as UTF-8, for n cells (a wide character's right half adds nothing) */
 static const char *text(int col, int row, int n)
 {
-    static char b[133];
-    for (int i = 0; i < n && i < 132; i++) b[i] = (char)cell(col + i, row)[0];
-    b[n] = 0;
+    static char b[4 * 133];
+    int k = 0;
+    for (int i = 0; i < n && i < 132; i++) {
+        unsigned v = cellv(col + i, row);
+        if (v == 0xFFFF) continue;
+        if (v == 0xFFFE) v = '?';
+        if (v < 0x80) b[k++] = (char)v;
+        else if (v < 0x800) { b[k++] = (char)(0xC0 | v >> 6); b[k++] = (char)(0x80 | (v & 0x3F)); }
+        else { b[k++] = (char)(0xE0 | v >> 12); b[k++] = (char)(0x80 | (v >> 6 & 0x3F)); b[k++] = (char)(0x80 | (v & 0x3F)); }
+    }
+    b[k] = 0;
     return b;
+}
+/* the cells a UTF-8 text takes (wide characters two; none here are zero-width) */
+static int cells_of(const char *s)
+{
+    int n = 0;
+    for (; *s; s++) if (((unsigned char)*s & 0xC0) != 0x80) n += (unsigned char)*s == 0xE4 ? 2 : 1;   /* (U+4E00) */
+    return n;
 }
 static void checkt(const char *name, int col, int row, const char *want)
 {
-    check(name, !strcmp(text(col, row, (int)strlen(want)), want), text(col, row, (int)strlen(want)));
+    const char *got = text(col, row, cells_of(want));
+    check(name, !strcmp(got, want), got);
 }
 /* a cell's attribute bits and colour byte, as "a<bits> c<colour>" */
 static void checkc(const char *name, int col, int row, int at, int co)
@@ -154,7 +171,7 @@ int main(void)
     char b[64];
     snprintf(b, sizeof b, "%dx%d", tui_cols, tui_rows);
     check("the size: the console's (TIOCGWINSZ)", tui_cols == cols && tui_rows == rows, b);
-    check("an ANSI terminal (CTerm's path), Latin-1 (UTF8 0)", tui_cterm == 1 && tui_utf8 == 0, "");
+    check("an ANSI terminal (CTerm's path), UTF-8 (UTF8 1: the console's, DESIGN D28)", tui_cterm == 1 && tui_utf8 == 1, "");
     check("raw mode: no line editing, no echo, no signals", !cooked(), "");
 
     /* the widgets: a title bar, a box, Latin-1 and UTF-8 text, colours and attributes, a wide character, the full
@@ -177,8 +194,8 @@ int main(void)
     TuiPut(t, bx + 2, by + 1, "Sm\xf6rg\xe5sbord", 11, 2, TC_DEFAULT, 0);              /* Latin-1 bytes */
     long w = TuiPutUTF8(t, bx + 2, by + 2, "\xc5\x81\xc3\xb3" "d\xc5\xba \xe2\x80\x93 \xe2\x80\x9cx\xe2\x80\x9d \xe2\x86\x92 ok",
                         -1, 3, TC_DEFAULT, TA_UNDER);                                  /* Łódź – “x” → ok */
-    TuiPutC(t, bx + 2, by + 3, 0x4E00, 7, TC_DEFAULT, 0);                             /* wide: '?' and a space */
-    TuiPutC(t, bx + 4, by + 3, 0x2588, 5, TC_DEFAULT, 0);                             /* full block: reversed space */
+    TuiPutC(t, bx + 2, by + 3, 0x4E00, 7, TC_DEFAULT, 0);                             /* wide: two cells */
+    TuiPutC(t, bx + 4, by + 3, 0x2588, 5, TC_DEFAULT, 0);                             /* the full block */
     TuiPut(t, 30, 3, "red", 3, 1, 4, 0);
     TuiPut(t, 30, 4, "x196", 4, TC_X(196), TC_DEFAULT, 0);
     TuiPut(t, 30, 5, "rgb", 3, TC_RGB(255, 0, 0), TC_DEFAULT, 0);   /* (green 2, 3, 6, 7 ...: see ports/tui/README) */
@@ -191,16 +208,19 @@ int main(void)
     else {
         checkt("the title", 1, 0, "tuitest: the text-UI library");
         checkc("the title: bold, white on blue", 1, 0, CONA_BOLD, 0x4F);
-        checkt("the box's top", bx, by, "+----------------------+");
-        checkt("the box's side", bx, by + 1, "|");
-        checkt("the box's bottom", bx, by + bh - 1, "+----------------------+");
-        checkt("Latin-1 text as it is", bx + 2, by + 1, "Sm\xf6rg\xe5sbord");
+        checkt("the box's top: rounded corners and lines (UTF-8)", bx, by, "\u256d\u2500\u2500\u2500\u2500\u2500\u2500"
+               "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e");
+        checkt("the box's side", bx, by + 1, "\u2502");
+        checkt("the box's bottom", bx, by + bh - 1, "\u2570\u2500\u2500\u2500\u2500\u2500\u2500"
+               "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f");
+        checkt("Latin-1 text: its letters", bx + 2, by + 1, "Sm\u00f6rg\u00e5sbord");
         checkc("Latin-1 text: green", bx + 2, by + 1, 0, 0x02);
-        checkt("UTF-8 text: the nearest Latin-1", bx + 2, by + 2, "L\xf3" "dz - \"x\" > ok");
+        checkt("UTF-8 text as it is", bx + 2, by + 2, "\u0141\u00f3d\u017a \u2013 \u201cx\u201d \u2192 ok");
         checkc("UTF-8 text: underlined", bx + 2, by + 2, CONA_UND, 0x03);
-        checkt("a wide character: '?' and a space", bx + 2, by + 3, "? ");
-        checkc("the full block: a reversed space", bx + 4, by + 3, CONA_INV, 0x05);
-        checkt("the full block's glyph", bx + 4, by + 3, " ");
+        snprintf(b, sizeof b, "%04x %04x", cellv(bx + 2, by + 3), cellv(bx + 3, by + 3));
+        check("a wide character: its two cells", cellv(bx + 2, by + 3) == 0x4E00 && cellv(bx + 3, by + 3) == 0xFFFF, b);
+        checkc("the full block: magenta", bx + 4, by + 3, 0, 0x05);
+        checkt("the full block's glyph", bx + 4, by + 3, "\u2588");
         checkc("colours: red on blue", 30, 3, 0, 0x41);
         unsigned char x = cell(30, 4)[2], g = cell(30, 5)[2];
         snprintf(b, sizeof b, "%02x %02x", x, g);
@@ -274,7 +294,7 @@ int main(void)
     TuiFlush(t);
     if (readgrid() == 0) {
         checkt("resumed: everything drawn again", 1, 0, "tuitest: the text-UI library");
-        checkt("... the box too", bx, by, "+----------------------+");
+        checkt("... the box too", bx, by, "\u256d\u2500\u2500");
     }
 
     tui_close();

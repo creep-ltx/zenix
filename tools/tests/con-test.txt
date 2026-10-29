@@ -2,24 +2,38 @@ wait zenix:/# 120
 sleep 1
 send termtest conops\r
 wait (?m)^conops: [0-9]+ failed 60
+send termtest utf8\r
+wait (?m)^utf8: [0-9]+ failed 240
 send termtest depth 16\r
 wait colours 30
 send termtest conops\r
 wait (?m)^conops: [0-9]+ failed 60
+send termtest utf8\r
+wait (?m)^utf8: [0-9]+ failed 240
 send termtest depth 4\r
 wait colours 30
 send termtest conops\r
 wait (?m)^conops: [0-9]+ failed 60
+send termtest utf8\r
+wait (?m)^utf8: [0-9]+ failed 240
 send termtest depth 2\r
 wait colours 30
 send termtest conops\r
 wait (?m)^conops: [0-9]+ failed 60
+send termtest utf8\r
+wait (?m)^utf8: [0-9]+ failed 240
 send termtest depth 8\r
 wait colours 30
 send termtest rawkeys\r
 wait (?m)^rawkeys: [0-9]+ failed 60
 send termtest text\r
 wait (?m)^text: [0-9]+ failed 60
+send termtest erase\r
+wait (?m)^erase: [0-9]+ failed 60
+send echo q\xe2\x94\x80\xc3\x80\x08\x08z | hexdump\r
+wait (?m)^00000000 .*\n 20
+send echo ab\xc3\xa5\x1b[D\x1b[Dc\x05 | hexdump\r
+wait (?m)^00000000 .*\n 20
 send termtest readline\r
 wait readline: 20
 sleep 1

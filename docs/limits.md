@@ -92,8 +92,20 @@ pointers.
   `realpath`; -ELOOP beyond; with only the root mounted the server's own rule: 8 nested), link targets of at most 255
   bytes (-ENAMETOOLONG), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
   NTSC), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
-  console first scrolls), a cooked tty line of 511 characters (a key past that rings the bell, and at its end the whole line is refused with
+  console first scrolls), a cooked tty line of 511 characters (bytes: a Swedish letter is two, DESIGN D28; a key past that rings the bell, and at its end the whole line is refused with
   "tty: the line was too long": nothing of it is handed on, also when the shell's editor took over halfway).
+- UTF-8 in the console (DESIGN D28, architecture.md section 11): the font draws box lines, blocks, braille, CP437's
+  symbols, Claude Code's marks and Western letters (Latin Extended letters as their base letter: `ł` as `l`, the
+  accents lost); Greek and Cyrillic text, other scripts and colour emoji are the box (a wide one the wide box; an
+  add-on font later if wanted). Characters beyond U+FFFF keep their width and are the box. Zero-width characters
+  (combining accents, joiners, variation selectors) are not stored: a letter written with a separate accent (NFD
+  text, macOS file names) shows without it. Backspace over a Tab moves back one column; over a zero-width character
+  it removes it with nothing visible changing; right after a character in the last column (the wrap pending)
+  Backspace's echo lands one column left, as on Linux's console (a wide character there: one column too many). Widths are Unicode 15.0's (the C library's tables): a few symbols
+  newer than that, and emoji written with a variation selector (`❤️`), may take another width in a Linux terminal.
+  The font: at most 4,096 glyphs in 255 half-pages, 98,848 bytes, 8 x 8 only, Latin-1 always Topaz's; one for every
+  console. A console that shows a character above U+00FF takes 2,560 bytes more, and 80 bytes for each of its
+  scrollback lines with such characters (at most 16,200); with no memory for them such characters show as `?`.
 - The screen (DESIGN D14, architecture.md section 11): twice the screen's height in chip RAM, 40 KB at 1 bitplane,
   80 KB at 2, 120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; by default 4 planes
   only on AGA with fast RAM, 3 on OCS/ECS with fast RAM and on every machine with 2 MB of chip RAM and no fast RAM,
@@ -193,8 +205,8 @@ pointers.
   only for `^` and `$`, `REG_NOTEOL` `REG_INVARG`. `getgrnam`'s members at most 127 bytes. `fcntl`, `ioctl` and the
   sockets as libz's (below and above: `O_NONBLOCK` on sockets and `pipe2` only).
 - The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used by
-  `/tests/tuitest`, `sumi`, `maki` and `markdown`): Latin-1 output and upstream's own widths until the console's UTF-8 (DESIGN D28; the switch
-  `TUI_UTF8`); no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` 0 (no
+  `/tests/tuitest`, `sumi`, `maki` and `markdown`): UTF-8 output and the C library's widths since the console's UTF-8
+  (DESIGN D28; `make TUI_UTF8=0` the Latin-1 build), no composing of a separate accent onto its letter; no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` 0 (no
   AmigaOS signals: poll descriptor 0), `TuiWait`'s extra signals at most 8 descriptors; a grid of at most 400 x 200 cells; 64 events queued (upstream drops the one
   past that); about 96 KB of memory while a terminal is open on 80 x 32 (two grids of 16-byte cells, 80 KB, which the
   allocator keeps for reuse after closing until the program ends).

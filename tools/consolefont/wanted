@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# The characters the console font must draw (DESIGN D28 section 6): "U+XXXX where it was seen: name". tools/mkconfont.py
+# fails when one has neither a glyph nor a stand-in. Claude Code's set was counted in its Linux program file
+# (2.1.296, 2026-10-28); its wide emoji (width 2: the wide box) are not listed.
+U+23FA Claude Code 2.1.296's screen: BLACK CIRCLE FOR RECORD
+U+23BF Claude Code 2.1.296's screen: DENTISTRY SYMBOL LIGHT VERTICAL AND BOTTOM RIGHT
+U+00B7 Claude Code 2.1.296's screen: MIDDLE DOT
+U+2722 Claude Code 2.1.296's screen: FOUR TEARDROP-SPOKED ASTERISK
+U+2733 Claude Code 2.1.296's screen: EIGHT SPOKED ASTERISK
+U+2736 Claude Code 2.1.296's screen: SIX POINTED BLACK STAR
+U+273B Claude Code 2.1.296's screen: TEARDROP-SPOKED ASTERISK
+U+273D Claude Code 2.1.296's screen: HEAVY TEARDROP-SPOKED ASTERISK
+U+276F Claude Code 2.1.296's screen: HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT
+U+23F5 Claude Code 2.1.296's screen: BLACK MEDIUM RIGHT-POINTING TRIANGLE
+U+2713 Claude Code 2.1.296's screen: CHECK MARK
+U+2714 Claude Code 2.1.296's screen: HEAVY CHECK MARK
+U+2717 Claude Code 2.1.296's screen: BALLOT X
+U+2718 Claude Code 2.1.296's screen: HEAVY BALLOT X
+U+2610 Claude Code 2.1.296's screen: BALLOT BOX
+U+2612 Claude Code 2.1.296's screen: BALLOT BOX WITH X
+U+25EF Claude Code 2.1.296's screen: LARGE CIRCLE
+U+25C9 Claude Code 2.1.296's screen: FISHEYE
+U+25FC Claude Code 2.1.296's screen: BLACK MEDIUM SQUARE
+U+25FB Claude Code 2.1.296's screen: WHITE MEDIUM SQUARE
+U+25CF Claude Code 2.1.296's screen: BLACK CIRCLE
+U+25CB Claude Code 2.1.296's screen: WHITE CIRCLE
+U+25C6 Claude Code 2.1.296's screen: BLACK DIAMOND
+U+25C7 Claude Code 2.1.296's screen: WHITE DIAMOND
+U+25AA Claude Code 2.1.296's screen: BLACK SMALL SQUARE
+U+25A0 Claude Code 2.1.296's screen: BLACK SQUARE
+U+25A1 Claude Code 2.1.296's screen: WHITE SQUARE
+U+25B6 Claude Code 2.1.296's screen: BLACK RIGHT-POINTING TRIANGLE
+U+25C0 Claude Code 2.1.296's screen: BLACK LEFT-POINTING TRIANGLE
+U+25B2 Claude Code 2.1.296's screen: BLACK UP-POINTING TRIANGLE
+U+25BC Claude Code 2.1.296's screen: BLACK DOWN-POINTING TRIANGLE
+U+25B8 Claude Code 2.1.296's screen: BLACK RIGHT-POINTING SMALL TRIANGLE
+U+25BE Claude Code 2.1.296's screen: BLACK DOWN-POINTING SMALL TRIANGLE
+U+2023 Claude Code 2.1.296's screen: TRIANGULAR BULLET
+U+21E7 Claude Code 2.1.296's screen: UPWARDS WHITE ARROW
+U+2318 Claude Code 2.1.296's screen: PLACE OF INTEREST SIGN
+U+23CE Claude Code 2.1.296's screen: RETURN SYMBOL
+U+203B Claude Code 2.1.296's screen: REFERENCE MARK
+U+2605 Claude Code 2.1.296's screen: BLACK STAR
+U+29C9 Claude Code 2.1.296's screen: TWO JOINED SQUARES
+U+23F8 Claude Code 2.1.296's screen: DOUBLE VERTICAL BAR
+U+29D7 Claude Code 2.1.296's screen: BLACK HOURGLASS
+U+2234 Claude Code 2.1.296's screen: THEREFORE
+U+22EE Claude Code 2.1.296's screen: VERTICAL ELLIPSIS
+U+2248 Claude Code 2.1.296's screen: ALMOST EQUAL TO
+U+2500 Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT HORIZONTAL
+U+2502 Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT VERTICAL
+U+256D Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT ARC DOWN AND RIGHT
+U+256E Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT ARC DOWN AND LEFT
+U+256F Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT ARC UP AND LEFT
+U+2570 Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT ARC UP AND RIGHT
+U+251C Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT VERTICAL AND RIGHT
+U+2514 Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT UP AND RIGHT
+U+250C Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT DOWN AND RIGHT
+U+2510 Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT DOWN AND LEFT
+U+2518 Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT UP AND LEFT
+U+2501 Claude Code 2.1.296's screen: BOX DRAWINGS HEAVY HORIZONTAL
+U+2503 Claude Code 2.1.296's screen: BOX DRAWINGS HEAVY VERTICAL
+U+2504 Claude Code 2.1.296's screen: BOX DRAWINGS LIGHT TRIPLE DASH HORIZONTAL
+U+2550 Claude Code 2.1.296's screen: BOX DRAWINGS DOUBLE HORIZONTAL
+U+2551 Claude Code 2.1.296's screen: BOX DRAWINGS DOUBLE VERTICAL
+U+258E Claude Code 2.1.296's screen: LEFT ONE QUARTER BLOCK
+U+258F Claude Code 2.1.296's screen: LEFT ONE EIGHTH BLOCK
+U+2588 Claude Code 2.1.296's screen: FULL BLOCK
+U+2590 Claude Code 2.1.296's screen: RIGHT HALF BLOCK
+U+258C Claude Code 2.1.296's screen: LEFT HALF BLOCK
+U+259B Claude Code 2.1.296's screen: QUADRANT UPPER LEFT AND UPPER RIGHT AND LOWER LEFT
+U+259C Claude Code 2.1.296's screen: QUADRANT UPPER LEFT AND UPPER RIGHT AND LOWER RIGHT
+U+259D Claude Code 2.1.296's screen: QUADRANT UPPER RIGHT
+U+2598 Claude Code 2.1.296's screen: QUADRANT UPPER LEFT
+U+2596 Claude Code 2.1.296's screen: QUADRANT LOWER LEFT
+U+2597 Claude Code 2.1.296's screen: QUADRANT LOWER RIGHT
+U+259F Claude Code 2.1.296's screen: QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT
+U+2580 Claude Code 2.1.296's screen: UPPER HALF BLOCK
+U+2584 Claude Code 2.1.296's screen: LOWER HALF BLOCK
+U+2591 Claude Code 2.1.296's screen: LIGHT SHADE
+U+2592 Claude Code 2.1.296's screen: MEDIUM SHADE
+U+2593 Claude Code 2.1.296's screen: DARK SHADE
+U+2026 Claude Code 2.1.296's screen: HORIZONTAL ELLIPSIS
+U+2022 Claude Code 2.1.296's screen: BULLET
+U+2014 Claude Code 2.1.296's screen: EM DASH
+U+2013 Claude Code 2.1.296's screen: EN DASH
+U+2019 Claude Code 2.1.296's screen: RIGHT SINGLE QUOTATION MARK
+U+201C Claude Code 2.1.296's screen: LEFT DOUBLE QUOTATION MARK
+U+201D Claude Code 2.1.296's screen: RIGHT DOUBLE QUOTATION MARK
+U+2192 Claude Code 2.1.296's screen: RIGHTWARDS ARROW
+U+2190 Claude Code 2.1.296's screen: LEFTWARDS ARROW
+U+2191 Claude Code 2.1.296's screen: UPWARDS ARROW
+U+2193 Claude Code 2.1.296's screen: DOWNWARDS ARROW
+U+280B braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-124
+U+2819 braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-145
+U+2839 braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-1456
+U+2838 braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-456
+U+283C braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-3456
+U+2834 braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-356
+U+2826 braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-236
+U+2827 braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-1236
+U+2807 braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-123
+U+280F braille spinners (Claude Code, cli-spinners): BRAILLE PATTERN DOTS-1234
+U+20AC ordinary text: EURO SIGN
+U+2018 ordinary text: LEFT SINGLE QUOTATION MARK
+U+201E ordinary text: DOUBLE LOW-9 QUOTATION MARK
+U+2122 ordinary text: TRADE MARK SIGN

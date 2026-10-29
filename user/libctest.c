@@ -329,6 +329,41 @@ static void t_utf8(void)
     n = wcrtomb(b, 0xf6, &st);
     check("wcrtomb of ö", n == 2 && (unsigned char)b[0] == 0xc3 && (unsigned char)b[1] == 0xb6, "");
     check("toupper stays ASCII", toupper('a') == 'A' && isalpha('Z') && !isdigit('x'), "");
+    /* DESIGN D28 11: setlocale(LC_ALL, "") reads LC_ALL, LC_CTYPE, then LANG (picolibc alone would not) */
+    static const struct { const char *all, *ctype, *lang; int utf8; } env[] = {
+        { 0, 0, "C.UTF-8", 1 }, { 0, 0, "sv_SE", 1 }, { 0, 0, "sv_SE.UTF-8", 1 }, { 0, 0, "C", 0 }, { 0, 0, 0, 0 },
+        { "C", 0, "C.UTF-8", 0 }, { 0, "C.UTF-8", "C", 1 }, { "", 0, "C.UTF-8", 1 } };
+    for (unsigned i = 0; i < sizeof env / sizeof env[0]; i++) {
+        if (env[i].all) setenv("LC_ALL", env[i].all, 1); else unsetenv("LC_ALL");
+        if (env[i].ctype) setenv("LC_CTYPE", env[i].ctype, 1); else unsetenv("LC_CTYPE");
+        if (env[i].lang) setenv("LANG", env[i].lang, 1); else unsetenv("LANG");
+        char what[96];
+        snprintf(what, sizeof what, "setlocale(LC_ALL, \"\") with LC_ALL=%s LC_CTYPE=%s LANG=%s: %s", env[i].all ? env[i].all : "-",
+                 env[i].ctype ? env[i].ctype : "-", env[i].lang ? env[i].lang : "-", env[i].utf8 ? "UTF-8" : "C");
+        const char *r = setlocale(LC_ALL, "");
+        check(what, r && (MB_CUR_MAX > 1) == env[i].utf8, r ? r : "NULL");
+    }
+    setenv("LANG", "sv_SE.KOI8-R", 1); unsetenv("LC_ALL"); unsetenv("LC_CTYPE");
+    setlocale(LC_ALL, "C.UTF-8");
+    check("an unknown charset: NULL, the locale as it was", !setlocale(LC_ALL, "") && MB_CUR_MAX > 1, "");
+    /* the console's decoder's cases (term-test): mbrtowc agrees on what is a character */
+    static const struct { const char *s; int n; unsigned w; } dec[] = {
+        { "\xc2\xa0", 2, 0xA0 }, { "\xdf\xbf", 2, 0x7FF }, { "\xe0\xa0\x80", 3, 0x800 }, { "\xef\xbf\xbd", 3, 0xFFFD },
+        { "\xf0\x90\x80\x80", 4, 0x10000 }, { "\xf4\x8f\xbf\xbf", 4, 0x10FFFF }, { "\xe2\x94\x80", 3, 0x2500 },
+        { "\xc0\x80", -1, 0 }, { "\xe0\x80\x80", -1, 0 }, { "\xed\xa0\x80", -1, 0 }, { "\xf0\x80\x80\x80", -1, 0 },
+        { "\xf4\x90\x80\x80", -1, 0 }, { "\xf5\x80\x80\x80", -1, 0 }, { "\x80", -1, 0 } };
+    int agree = 1;
+    for (unsigned i = 0; i < sizeof dec / sizeof dec[0]; i++) {
+        memset(&st, 0, sizeof st);
+        w = 0;
+        n = mbrtowc(&w, dec[i].s, strlen(dec[i].s), &st);
+        if (dec[i].n < 0 ? n != (size_t)-1 : n != (size_t)dec[i].n || (unsigned)w != dec[i].w) {
+            agree = 0;
+            printf("libctest: mbrtowc case %u: %d, U+%04X\n", i, (int)n, (unsigned)w);
+        }
+    }
+    check("mbrtowc agrees with the console's decoder (valid lengths, overlong, surrogates, above U+10FFFF)", agree, "");
+    unsetenv("LANG");
     setlocale(LC_ALL, "C");
 }
 

@@ -75,7 +75,8 @@ part_core() {
     if "$OUT/telnet-core-test" "$OUT/cp437-tables.bin" && python3 - "$OUT/cp437-tables.bin" <<'PY'
 import sys
 d = open(sys.argv[1], "rb").read()
-fb, keys = d[:256], d[256:]
+ucs = [d[2 * i] << 8 | d[2 * i + 1] for i in range(256)]
+keys = d[512:]
 bad = []
 for b in range(256):                     # Latin-1 -> CP437 for keys: exactly Python's codec (0: none)
     want = 0
@@ -86,17 +87,18 @@ for b in range(256):                     # Latin-1 -> CP437 for keys: exactly Py
             pass
     if keys[b] != want:
         bad.append(f"keys {b:02x}: {keys[b]:02x}, cp437 says {want:02x}")
-for b in range(256):                     # CP437 -> Latin-1: what Latin-1 has is kept, ASCII as it is, the rest plain
-    u = ord(bytes([b]).decode("cp437"))
-    if 0x20 <= b < 0x7F and fb[b] != b:
-        bad.append(f"fallback {b:02x}: ASCII changed")
-    elif b >= 0x80 and 0xA0 <= u <= 0xFF and fb[b] != u:
-        bad.append(f"fallback {b:02x}: {fb[b]:02x}, Latin-1 has {u:02x}")
-    elif b >= 0x80 and not 0xA0 <= u <= 0xFF and not (0x20 <= fb[b] < 0x7F or fb[b] == 0xB7):
-        bad.append(f"fallback {b:02x}: {fb[b]:02x} is not plain")
-for b in (0x07, 0x08, 0x09, 0x0A, 0x0D, 0x1B):
-    if fb[b] != b:
-        bad.append(f"fallback {b:02x}: a working control changed")
+pc = "\u0000☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼"    # the IBM PC's glyphs at the control positions
+for b in range(256):                     # CP437 -> Unicode (D28): the codec, the PC's glyphs, the working controls
+    if b in (0x00, 0x07, 0x08, 0x09, 0x0A, 0x0C, 0x0D, 0x1A, 0x1B):
+        want = b
+    elif b < 0x20:
+        want = ord(pc[b])
+    elif b == 0x7F:
+        want = 0x2302
+    else:
+        want = ord(bytes([b]).decode("cp437"))
+    if ucs[b] != want:
+        bad.append(f"cp437 {b:02x}: U+{ucs[b]:04X}, wanted U+{want:04X}")
 if bad:
     print("\n".join(bad))
     sys.exit(1)

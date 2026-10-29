@@ -33,8 +33,10 @@ NOTES
     Root only, as the port reaches a whole other computer. 115200 baud,
     8 bits, no parity, no handshake (the cable's three wires). No file
     transfer, no speed option, no ~ commands but ~. and ~~. The other
-    side's screen should be 80x32 (PAL) or 80x25 (NTSC) and plain: the
-    console shows Latin-1, two colours.
+    side's screen should be 80x32 (PAL) or 80x25 (NTSC): the console
+    shows UTF-8 and xterm's 16 colours. Bytes go both ways untouched, so
+    the keys go as UTF-8; tell the other side's getty LANG=C.UTF-8 and
+    TERM=xterm-16color.
     If cu itself is killed (not ended with ~.), its receiving half (a
     second cu, "cu -r") ends at the next byte that arrives, and the port is
     free again.

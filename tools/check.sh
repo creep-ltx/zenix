@@ -20,7 +20,7 @@
 # machine's emulator slots (tools/run-test.sh), shared with other sessions on this PC.
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
-HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test genet-test serial-test term-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size"
+HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test genet-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size"
 EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
@@ -75,6 +75,7 @@ run_job() {
     wasabi-test) cmd=(tools/host/wasabi-test.sh core check size) ;;
     zenixfs-test) cmd=(make -s -C zenixfs test) ;;
     stage0-68k-test) cmd=(python3 tools/stage0-68k-test.py) ;;
+    confont-test) cmd=(python3 tools/mkconfont.py test) ;;
     *) cmd=("tools/$t.sh" "$@") ;;
     esac
     mkdir -p "$RUN/$j"
@@ -120,7 +121,7 @@ row() {
 }
 
 for t in $LIST; do
-    case "$t" in docs-check|zenixfs-test|stage0-68k-test|net-test|telnet-test|crypto-test|zpkg-test|nfs-test|tls-test|wasabi-test) ;; *) [ -x "tools/$t.sh" ] || { echo "check: no test called $t"; exit 2; } ;; esac
+    case "$t" in docs-check|zenixfs-test|stage0-68k-test|confont-test|net-test|telnet-test|crypto-test|zpkg-test|nfs-test|tls-test|wasabi-test) ;; *) [ -x "tools/$t.sh" ] || { echo "check: no test called $t"; exit 2; } ;; esac
 done
 T0=$(date +%s)
 hostl=""; emul=""

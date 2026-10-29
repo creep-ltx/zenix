@@ -301,6 +301,20 @@ and sends the request again, at most 40 links per path (Linux's), then -ELOOP. `
 working directory's text and mount points are kept resolved. A server not asked, and an old server, follow links
 inside their volume as today. The bit is set only on a kernel buffer with an absolute path; each path is resolved
 once per system call (D13's checks on the resolved mount); `umount` matches the text before asking any server. The full design: [d26-links-across-mounts.md](d26-links-across-mounts.md).
+## D28. UTF-8 in the console, and the console's fonts (roadmap block 3; design note revision 2 after two reviews; approved by the owner 2026-10-28; steps 1-6 built on branch utf8, 2026-10-29)
+**Why.** The console showed Latin-1 only, so UTF-8 from Linux, the web, `ssh`, Claude Code over `cu` and the
+owner's own programs showed as junk. **How.** The kernel's terminal decodes UTF-8 in `put1` (one more parser state:
+ASCII pays one test and one read, about 5 instructions of 266); nothing is decoded inside an escape sequence; a byte
+that is not part of a character is one cell, its Latin-1 glyph (old Amiga text stays readable) or a box, never a
+control. A cell is 16 bits: an `A_HI` mark in its attributes and a high plane allocated on first use (2,560 bytes;
+the scrollback keeps high rows only for the lines that need them). Wide characters take two cells with xterm's rules;
+zero-width ones are dropped. The widths are the kernel's, from the C library's own tables (`kernel/cwidth.h`, shared
+with libz, 1,816 bytes). Glyphs: Topaz stays the look of Latin-1; a supplement font (ZCF1, `zenix-8x8.zcf`, 531
+glyphs and 584 stand-ins, 10,424 bytes; box drawing, blocks and braille generated, CP437's symbols, Zenix's own
+glyphs) is loaded by init at boot (`/etc/console`'s `font` line; `font none` turns it off) through `SYS_console` op 4
+`CON_UFONT`. 8-bit mode (a `CON_FONT`, or the new rule `CONR_8BIT`): no decoding, Latin-1 keys (telnet's Amiga and PC
+modes). Keys are UTF-8; cooked Backspace and `sh`, `edit`, `less`, `ls` work by characters and columns; `LANG=C.UTF-8`;
+the C library's `setlocale("")` reads the environment. The full design: [d28-console-text.md](d28-console-text.md).
 ## Where the decisions stand (2026-10-24)
 D1 messages: ports + synchronous zero-copy calls done; the filesystems (ext2 `fsd`, ZenixFS `zfsd`) and the disk (`diskd`, the only one with raw-disk system calls) are user-mode servers; fsd and diskd are built into the kernel image, zfsd is the file `/sbin/zfsd` since D19 step 1. Drivers, tty, pipes and the display are still in the kernel. A hung server blocks its clients (a client in a call is only freed by the reply or by the server dying); a killed client of a hung server is cancelled (D23: `UMSG_CANCEL`, `POLLPRI` on the port; a server that answers it, nfscd, frees it).
 D2 user mode + TRAP: done; the TRAP cost is **not measured** (emulator timing is not CPU timing).

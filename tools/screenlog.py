@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Reading a serial log of the terminal programs' tests (tools/sumi-test.sh, maki-test.sh, markdown-test.sh): the
-grids `termtest screen` printed (CON_READ: "row NN|...|", "attr NN|...|", the cursor) between the script's ==NAME
-markers, the PASS/FAIL lines, and the memory line from free and ps while the program was open."""
+grids `termtest screen` printed (CON_READ: "row NN|...|" in UTF-8 since DESIGN D28, "attr NN|...|", the cursor)
+between the script's ==NAME markers, the PASS/FAIL lines, and the memory line from free and ps while the program was
+open. The log is read as UTF-8 (a byte that is not is kept as U+DC80-DCFF, Python's surrogateescape)."""
 import re
 import sys
 
 
 class Log:
     def __init__(self, path):
-        self.text = open(path, encoding="latin-1").read()
+        self.text = open(path, encoding="utf-8", errors="surrogateescape").read()
         self.bad = 0
 
     def check(self, ok, what, detail=""):

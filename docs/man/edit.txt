@@ -40,6 +40,11 @@ NOTES
     signal), unsaved changes are lost.
     Running out of memory ends the editor with "edit: out of memory"; changes
     not yet saved are lost.
+    The text is UTF-8 (kept byte for byte): the cursor moves and deletes by
+    characters, a wide character takes two columns, a combining accent
+    none (it is not shown), a byte that is not UTF-8 is one character of
+    one column; "col" in the status line is the screen column. A search
+    pattern is matched as bytes.
     It uses all the rows of the terminal: 30 text rows on a PAL screen, 23
     on NTSC (the other two are the title and the status line).
     The status line is white on blue where colours are wanted (the rule of

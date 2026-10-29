@@ -27,20 +27,20 @@ check(L.status("st") == 0, "markdown ran and ended with status 0 (Ctrl+W)", L.st
 check(len(r0) == 32 and r0.get(0, "").startswith("Markdown  t.md"), "the view on the console's 32 rows, the tab's name",
       r0.get(0))
 check(r0.get(1) == "   Big Title" and a0.get(1, "")[2:13] == "c" * 11 and r0.get(5) == "  Second" and
-      a0.get(5, "")[2:8] == "c" * 6 and re.fullmatch(r"  -{76}", r0.get(6, "")),
+      a0.get(5, "")[2:8] == "c" * 6 and re.fullmatch(r"  \u2500{76}", r0.get(6, "")),
       "the headings: the # marks gone, coloured, the second one underlined", (r0.get(1), a0.get(1), r0.get(6)))
 check(r0.get(3) == "  Some bold and italic text with code." and a0.get(3, "")[7:11] == "7777" and
       a0.get(3, "")[33:37] == "bbbb" and a0.get(3, "")[:7] == "." * 7,
       "emphasis: the marks gone, the bold word bold, the code coloured, plain text plain", (r0.get(3), a0.get(3)))
-check([r0.get(i) for i in (8, 9, 10, 12, 13)] == ["  * one", "  * two", "    - nested", "  1. first", "  2. second"]
+check([r0.get(i) for i in (8, 9, 10, 12, 13)] == ["  \u2022 one", "  \u2022 two", "    - nested", "  1. first", "  2. second"]
       and a0.get(8, "")[2] == "6" and a0.get(12, "")[2:4] == "66",
       "lists: bullets (another for the nested item) and numbers, coloured", [r0.get(i) for i in range(8, 14)])
-check(re.fullmatch(r"  \+- c -{70}\+", r0.get(15, "")) is not None and
-      re.fullmatch(r"  \| int x = 1; {63}\|", r0.get(16, "")) is not None and
-      re.fullmatch(r"  \+-{74}\+", r0.get(17, "")) is not None and a0.get(16, "")[4:7] == "666",
+check(re.fullmatch(r"  \u256d\u2500 c \u2500{70}\u256e", r0.get(15, "")) is not None and
+      re.fullmatch(r"  \u2502 int x = 1; {63}\u2502", r0.get(16, "")) is not None and
+      re.fullmatch(r"  \u2570\u2500{74}\u256f", r0.get(17, "")) is not None and a0.get(16, "")[4:7] == "666",
       "the code block in a box named by its language, its C coloured", [r0.get(i) for i in (15, 16, 17)])
-check(r0.get(19) == "  | a quote", "the quote behind its bar", r0.get(19))
-check(r0.get(21, "").replace(" ", "") == "|" * 20 + "deep", "20 quotes inside each other (the renderer's recursion, "
+check(r0.get(19) == "  \u2502 a quote", "the quote behind its bar", r0.get(19))
+check(r0.get(21, "").replace(" ", "") == "\u2502" * 20 + "deep", "20 quotes inside each other (the renderer's recursion, "
       "upstream's 32 KB stack)", r0.get(21))
 check(r0.get(30, "").startswith(" /tmp/t.md  > Big Title") and r0.get(30, "").endswith("all  view") and
       set(a0.get(30, "")) == {"7"} and r0.get(31, "").startswith("Space Page  Tab Link"),

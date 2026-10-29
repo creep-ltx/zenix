@@ -27,18 +27,17 @@ zenix/     Zenix's layer (GPL-2.0-only), kept apart so the copy can be refreshed
                       exec/, dos/ and proto/ headers the upstream file includes are amiga.h
 
 On Zenix the toolkit's public fields say: CTerm 1 (the console takes the ANSI colours as they are, 256 and 24-bit
-ones as the nearest of its 16, and ESC [ ? 25 h/l for the cursor: upstream's CTerm path), UTF8 0, CellW and CellH 0.
-No mouse, no pastes, no resize events (the console never changes size), no second screen (closing clears it).
-TuiSignal answers 0: a program with a poll loop of its own polls descriptor 0 and calls TuiPoll. TuiWait's extra
-signals are descriptors (tui_zenix_sigfd names the one behind each bit): the wait ends with TE_NONE and the bit in
-*got when it has data, as upstream's extra signals end it.
+ones as the nearest of its 16, and ESC [ ? 25 h/l for the cursor: upstream's CTerm path), UTF8 1 (since the console's
+UTF-8, DESIGN D28), CellW and CellH 0. No mouse, no pastes, no resize events (the console never changes size), no
+second screen (closing clears it). TuiSignal answers 0: a program with a poll loop of its own polls descriptor 0 and
+calls TuiPoll. TuiWait's extra signals are descriptors (tui_zenix_sigfd names the one behind each bit): the wait ends
+with TE_NONE and the bit in *got when it has data, as upstream's extra signals end it.
 
-Widths and UTF-8: the console is Latin-1 today (one byte one cell), so the toolkit writes Latin-1 and the stand-ins
-upstream gives a plain console (box lines as - | +, Lodz for the Polish name, quotes and dashes as ' " -); widths
-are upstream's own table (CTerm's, without utf8.library). The switch TUI_UTF8=1 (make TUI_UTF8=1, the define
-ZENIX_TUI_UTF8) turns on UTF-8 output and the C library's wcwidth (through upstream's own TUI_LIB way to
-utf8.library's widths, include/proto/utf8.h; composing accents onto letters is not there): off until the console's
-UTF-8 (DESIGN D28) is built. Every build compiles it ($(BUILD)/tui/core-utf8.o, not linked) so it keeps building.
+Widths and UTF-8: the build TUI_UTF8=1 (the Makefile's default since DESIGN D28, the define ZENIX_TUI_UTF8) writes
+UTF-8 and takes the widths from the C library's wcwidth (through upstream's own TUI_LIB way to utf8.library's widths,
+include/proto/utf8.h: the same tables as the console's); composing accents onto letters is not there. make TUI_UTF8=0
+builds the Latin-1 toolkit of before (upstream's stand-ins for a plain console: box lines as - | +, Lodz for the
+Polish name); every build compiles the other setting too ($(BUILD)/tui/core-other.o, not linked) so it keeps building.
 
 Found in upstream (for the owner's repository, not changed here): a 24-bit colour whose green value has bit 1 set
 (TC_RGB(r, g, b) with g = 2, 3, 6, 7, ... 255) is taken for a pen colour (TC_PEN, bit 0x200) by sgrcol and to16any,
