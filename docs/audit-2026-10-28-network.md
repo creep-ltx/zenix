@@ -122,7 +122,9 @@ Left open, each with a proposal:
   update test) as a cross-check. A whole move of `make check` is decided after, with measurements.
 - **O16 con-test "cooked lines" lost a character once** (full run 2026-10-29 07:58; passed alone): the text path's
   line read "61580a" against the serial path's "61580at". Find the race (a check before the last byte arrived, or a
-  real lost byte in CON_INPUT's cooked path) and make it deterministic.
+  real lost byte in CON_INPUT's cooked path) and make it deterministic. **Fixed (audit 2026-10-29 B2-14):** the test's race, no
+  byte lost: the script typed its next command as soon as `line:` arrived, and the echo's `t` landed before the
+  line's end; it now waits for the whole line.
 - **O8 Zmodem has no cap on files per session** (judged acceptable): a board can offer thousands of honest small
   files; the disk filling up ends it, as with any download the user lets run. A cap would be a new option (the
   feature halt).

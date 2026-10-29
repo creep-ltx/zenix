@@ -13,9 +13,9 @@ claims); (c) size and speed on the stock A1200 (the kernel's parts, each daemon'
 Every finding was checked again from the source before it was fixed; "reproduced" says how, "read" means from the
 source only.
 
-**Result:** no high findings. 3 medium, 6 low, 2 info, and 1 speed finding. All of them fixed except one low (B2-5:
+**Result:** no high findings. 3 medium, 7 low, 2 info, and 1 speed finding. All of them fixed except one low (B2-5:
 the fix would change a frozen policy, so it goes to the owner) and one info (B2-10, a design question). Closed in the
-network audit: O1, O5 and O6 (O5 by B2-9), and O14 (the kernel's size budget, B2-13). O13's design note is section 3
+network audit: O1, O5 and O6 (O5 by B2-9), O14 (the kernel's size budget, B2-13) and O16 (a test's race, B2-14). O13's design note is section 3
 below.
 
 ## 1. Findings
@@ -33,7 +33,8 @@ below.
 | B2-9 | low | `net/http/http.c` (chunk-size lines and the CRLFs after chunks were not counted), network audit O5 | A hostile mirror could send 4 KB of chunk extension per body byte up to the body limit (wget's is 4 GB). zpkg already has a per-file deadline (120 s + 1 s per KB, `user/zpkg.c:399`), so for zpkg this was only waste. Read | A chunk-size line is at most 256 bytes (`HTTP_CLINEMAX`); the framing as a whole is at most 8 bytes per body byte plus 4 KB (one-byte chunks take 5), `http.c:488` | fixed (test: zpkg-test core, "a chunk-size line of 300 bytes refused", "200 bytes of extension per data byte: refused after 4 KB", "90 one-byte chunks are fine") |
 | B2-10 | info | zenixboot, `boot/zenixboot.c` (the state file's phase) | An older signed bundle is accepted when the state file's phase is `none` or `rejected`, and the state file is unsigned text on BOOT:, so deleting it reopens a downgrade to any older signed bundle. Whoever can write BOOT: can also replace zenixboot itself, which D21 6.4 accepts. Read | A minimum version kept somewhere other than BOOT: (proposal, section 4) | open (design) |
 | B2-12 | speed | the console, `kernel/term.c:118` (`cursor`) | The cursor drawn on indexed `[cy][cx]`, a 32-bit multiply by 80 per call (cursor off and on at every write: each echoed key), about 6 µs at 14 MHz (read; cycles from the 68020 manual). The row table `rowx` was already there | `cursor()` uses `rowx` as `draw()` does | fixed (objdump: 28 multiplies in term.o before, 27 after; term-test and the console tests unchanged) |
-| B2-13 | low | the kernel's size (network audit O14) | Nothing held the kernel's parts to a size: it grew 22.9 KB since 2026-10-27 unseen, and the mount tests' floppy, the binding limit, has 16.6 KB left. docs/architecture.md still gave the sizes of 2026-10-27 | `tools/ksize-check.sh` and `tools/ksize-budget`, run by the `kernel.bin` rule: every part to its line (code + data, bss), kernel.bin to 165,000 bytes and at least 12 KB left under `KERNEL_MAX_MOUNT`; a part over fails the build and is named. architecture.md points here | fixed (checked: with term's line set to 100 the script names term and exits 1; the build passes at 162,592 of 165,000) |
+| B2-13 | low | the kernel's size (network audit O14) | Nothing held the kernel's parts to a size: it grew 22.9 KB since 2026-10-27 unseen, and the mount tests' floppy, the binding limit, has 16.6 KB left. docs/architecture.md still gave the sizes of 2026-10-27 | `tools/ksize-check.sh` and `tools/ksize-budget`, run by the `kernel.bin` rule: every part to its line (code + data, bss), kernel.bin to 165,000 bytes and at least 1 KB left under `KERNEL_MAX_MOUNT` (12 KB was planned; main's 716 KB mount RAM disk of 2026-10-29 leaves 4.3 KB); a part over fails the build and is named. architecture.md points here | fixed (checked: with term's line set to 100 the script names term and exits 1; the build passes at 162,592 of 165,000) |
+| B2-14 | low | con-test, `tools/tests/con-test.txt` (network audit O16) | "cooked lines" failed once under a full run: the serial path's line came out `61580at`, the text path's `61580a` as wanted. No byte was lost: the script's `wait (?m)^line:` matched as soon as `line:` arrived and typed the next command at once; the kernel echoes typed keys while termtest still prints, so the `t` of `termtest readraw` landed before the line's end (a loaded PC widens the gap). The raw part waited a fixed 3 s the same way. Read (the expected and the seen line differ by exactly that) | The script waits for the whole line, its newline included (`(?m)^line:[0-9a-f]*\n`, the same for `raw:`), before it types again | fixed (test: con-test in the full run) |
 
 (B2-11 is the dead code of section 2, a proposal.)
 
@@ -41,7 +42,8 @@ below.
 
 Measured 2026-10-29 with `m68k-elf-size` on the build (`kernel.bin` 162,588 bytes: 158,852 of code and data plus
 3,736 of header and relocations; bss 41,988 bytes). Room: 82,148 bytes under `KERNEL_MAX` (the RAM floppy), 16,612
-under `KERNEL_MAX_MOUNT` (the mount tests' floppy, the limit that binds).
+under `KERNEL_MAX_MOUNT` (the mount tests' floppy, the limit that binds) at 704 KB of RAM disk, 4,320 since main made
+it 716 KB the same day: the kernel's next 4 KB need either the shrink list below or a smaller mount RAM disk.
 
 | Part | Code + data | bss | Budget (code + data / bss) |
 |---|---|---|---|
