@@ -29,6 +29,6 @@ send termtest readraw 5\r
 wait readraw: 20
 sleep 1
 send ab\x03c\r
-wait (?m)^raw:[0-9a-f]*\n 20
+waitecho (?m)^raw:[0-9a-f]*\n 20
 send echo con-test-""done\r
 wait con-test-done 20

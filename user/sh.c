@@ -619,6 +619,7 @@ static int lex(const char *s)
                 if (npend == 8) { lex_err = "more than 8 here-documents on one line"; return 2; }
                 pend[npend++] = ntoks - 2;                     /* the << token carries the body (and fd 1 = strip tabs) */
                 toks[ntoks - 2].text = toks[ntoks - 1].text;
+                toks[ntoks - 2].end = (u32)e;                  /* the token's text ends after its delimiter word (B2-6) */
                 toks[ntoks - 2].hdquoted = (strchr(toks[ntoks - 1].text, '\'') || strchr(toks[ntoks - 1].text, '"') || strchr(toks[ntoks - 1].text, '\\')) ? 1 : 0;
                 ntoks--;                                       /* the delimiter word is folded into the << token */
                 i = e; continue;
