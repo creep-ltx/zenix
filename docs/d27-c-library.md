@@ -611,3 +611,13 @@ Last checked against the code: 2026-10-28 (main at 722d6f6).
 ## Owner decisions (2026-10-28)
 
 The owner answered **yes to every question above** (2026-10-28, "I think yes for all questions"): Ahiru and the CFile core it uses may be published in Zenix's tree under MIT; the owner's programs keep one source for AmigaOS and Zenix, each in its own repository, and Zenix carries a copy. This is the yes to the note: built in block 3's order (after block 2's audit).
+
+## Main session, 2026-10-29: steps 0-1 merged
+
+- **The raised size budgets** of `tools/libc-size.sh` (hello with printf 6,600, the sort tool 10,400, time +14,300,
+  floating point +16,300, UTF-8 +5,800) are accepted: only ported programs pay them; the base system keeps libz's
+  direct path (section 7), and its own rows are within the design's budgets. Cutting libz's allocator for the C
+  library build is looked at in step 5's size table, not before.
+- **The documentation split** is right: DESIGN.md D27 and architecture.md sections 4 and 12 change with the switch.
+- The helper's other decisions (the init/fini lines in step 1, the port's own `fdopen` list, the environment by weak
+  reference, `O_CLOEXEC` 0, `memalign` in the C library only, what stays in libz until step 3) are accepted as built.
