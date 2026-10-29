@@ -1,0 +1,22 @@
+picolibc 1.8.10, the C library's code from elsewhere (DESIGN D27, docs/d27-c-library.md section 4)
+
+Source: the official release picolibc-1.8.10.tar.xz from github.com/picolibc/picolibc/releases (SHA-256
+0ce5ee3bde81256633644d7b3bd25f5a6ccfd8b0590fd4ee543df2c3ede6e27e, as the release's .sha256sum file says), taken
+2026-10-29. Only the files Zenix builds are here, under their own paths: the sources sources.mk names, every file they
+include, and the public headers (newlib/libc/include). None of them is changed. No build script of picolibc's is used:
+the Makefile compiles sources.mk's list (LIBC_SRCS), and picolibc.h is the configuration header picolibc's meson
+build would write, written by hand for Zenix.
+
+Licences: BSD-style (2- and 3-clause BSD and older permissive ones), listed file by file in COPYING.picolibc, the
+machine-readable list; COPYING.NEWLIB is newlib's. No GPL or LGPL file is among them. COPYING.picolibc ships as
+/usr/share/licenses/picolibc on every full image and in the base package.
+
+Zenix's own part (GPL-2.0-only) is libc/zenix: the system layer, the headers whose numbers are Zenix's (errno,
+fcntl, signal, limits, dirent, generated from the kernel's headers), the streams, the start and exit, strerror,
+dprintf; and user/zshare.h's files shared with libz (the allocator, the environment, the buffered output, the error
+texts).
+
+To update: unpack the new official release into a new empty directory (after checking its checksum), run
+tools/libc-vendor.sh on it, compare sources.mk with the release's CMakeLists.txt lists for files added or gone,
+update this file and picolibc.h's version, then build and run tools/libc-host-test.sh, tools/libc-size.sh and
+tools/libc-test.sh.
