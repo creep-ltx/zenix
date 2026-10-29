@@ -187,12 +187,12 @@ check("recv 2 escctl 1" in xfer and "send 3 escctl 1" in xfer, "pc: BINARY refus
 
 # ---- a Unix host ----
 steps = ["wait <<END hello>>", "line unix", "wait <<END unix>>", "line colours", "wait <<END colours>>",
-         "key \\xe5\\x7f\\e[3~", "line", "line ff", "wait <<END ff>>", "line bye", "eof"]
+         "key \\xc3\\xa5\\x7f\\e[3~", "line", "line ff", "wait <<END ff>>", "line bye", "eof"]   # (D28: the console's UTF-8 keys)
 record, screen, events, xfer, out = call("unix", "unix", steps)
 negotiation("unix", record, "XTERM-16COLOR", True)
 screens_check("unix", "unix", screen, events, ["unix", "colours"])
 check(screens_of(screen).get("ff", [None])[0] == b"a\x0cb", "unix: FF as it is (no BBS rewrite)")
-check(b"\xc3\xa5\x7f\x1b[3~\r" in keys_sent(record), "unix: keys: a-ring as UTF-8, Backspace DEL, Del as given")
+check(b"\xc3\xa5\x7f\x1b[3~\r" in keys_sent(record), "unix: keys: a-ring in UTF-8 passed through (D28), Backspace DEL, Del as given")
 
 shutil.rmtree(work, ignore_errors=True)
 print("sim: %s" % ("all passed" if not fails else "%d FAILED" % fails))

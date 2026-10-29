@@ -44,7 +44,7 @@ grep -q '^c 644 0 0 [0-9a-f]* [0-9]* /etc/passwd$' $B/pkg/base.manifest && ! gre
     check "base: /etc/passwd is a config file, /etc/autologin is never shipped; su is set-user-id; more is a link" bad
 # packages are reproducible: the same build gives the same bytes (mtime 0, no names in the gzip header)
 mkdir -p $T/r2 $T/r3
-cp $B/init.zx $B/login.zx $B/sh.zx $B/mount.zx $B/zfsd.zx $B/netd.zx $B/nfscd.zx $B/cp437-8x8.psf $B/anchors $T/r2/ && cp $B/init.zx $B/login.zx $B/sh.zx $B/mount.zx $B/zfsd.zx $B/netd.zx $B/nfscd.zx $B/cp437-8x8.psf $B/anchors $T/r3/   # base (and /sbin/zfsd, /sbin/netd: D19; /sbin/nfscd: D23; the PC font: D20; the root certificates: D21)
+cp $B/init.zx $B/login.zx $B/sh.zx $B/mount.zx $B/zfsd.zx $B/netd.zx $B/nfscd.zx $B/cp437-8x8.psf $B/zenix-8x8.zcf $B/anchors $T/r2/ && cp $B/init.zx $B/login.zx $B/sh.zx $B/mount.zx $B/zfsd.zx $B/netd.zx $B/nfscd.zx $B/cp437-8x8.psf $B/zenix-8x8.zcf $B/anchors $T/r3/   # base (and /sbin/zfsd, /sbin/netd: D19; /sbin/nfscd: D23; the PC font: D20; the root certificates: D21; the Unicode font: D28)
 python3 tools/mkzup.py packages $T/r2 "init login sh mount" >/dev/null && sleep 1 && python3 tools/mkzup.py packages $T/r3 "init login sh mount" >/dev/null &&
     cmp -s $T/r2/pkg/base.tgz $T/r3/pkg/base.tgz && cmp -s $T/r2/pkg/base.manifest $T/r3/pkg/base.manifest &&
     check "packages are reproducible (the same files give the same bytes)" ok || check "packages are reproducible" bad
