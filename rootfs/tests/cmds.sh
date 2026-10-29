@@ -115,6 +115,15 @@ t sh-compound-redir2; ( echo fg ) > $T/c3.txt; { echo app; } >> $T/c3.txt; cat $
 t sh-compound-redir3; { echo e1 >&2; echo o1; } 2>/dev/null | wc -l; ( cd /; pwd ) > $T/c6.txt; cat $T/c6.txt; pwd | sed "s|$D|D|"; f() { echo inf; } > $T/c7.txt; f; cat $T/c7.txt; ( echo hd; cat ) <<E
 here
 E
+# a here-document after a compound command in a pipeline stage and in the background (audit 2026-10-29 B2-6): the
+# child shell gets the body too
+t sh-compound-redir4; while read l; do echo "<$l>"; done <<E | tr a-z A-Z
+one
+two
+E
+{ cat; echo g; } <<'E' > $T/c8.txt & wait; cat $T/c8.txt
+bg $x
+E
 # commands from a pipe or a file (audit 2026-10-26 F4): not interactive (no prompts, no line editor), read a command
 # at a time, so a command run gets the rest of the input (from a pipe the shell reads one byte at a time)
 t sh-stdin;   printf 'read x\nhello\necho "got $x"\n' | sh; printf 'echo a\ncat\nrest 1\nrest 2\n' | sh; printf 'echo one\necho two\nexit 3\necho never\n' | sh; echo "rc=$?"

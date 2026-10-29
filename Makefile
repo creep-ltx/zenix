@@ -191,9 +191,10 @@ RAMDISK_K := 640
 RAMDISK_MOUNT_K := 716
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
-$(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh
+$(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py --delta $< $@
+	@KSIZE_SKIP=$(if $(DIAG)$(GFXDEPTH),1) TOOLPREFIX=$(TOOLPREFIX) tools/ksize-check.sh $(BUILD) $@ $(KERNEL_MAX_MOUNT) || { rm -f $@; exit 1; }
 	@s=$$(wc -c < $@); echo "$@: $$s of $(KERNEL_MAX) bytes, $$(($(KERNEL_MAX) - s)) left for the kernel on the RAM floppy" \
 	    "($$(($(KERNEL_MAX_MOUNT) - s)) on the mount tests' floppy)"; \
 	    [ $$s -le $(KERNEL_MAX) ] || echo "$@: WARNING: $$((s - $(KERNEL_MAX))) bytes too big for the RAM floppy (zenix-ram.adf)"; \
@@ -491,6 +492,9 @@ CLOCKOBJS := $(BUILD)/clockfile.uo $(BUILD)/cr/crypto/zc/zc_clock.o
 $(BUILD)/clockfile.uo: user/clockfile.c user/clockfile.h crypto/zc/zc_clock.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 $(BUILD)/reboot.uo $(BUILD)/sntp.uo: user/clockfile.h
+# reboot's floor is never below the build date (audit 2026-10-29 B2-2)
+$(BUILD)/reboot.uo: user/reboot.c $(BUILD)/builddate.h crypto/zc/zc_clock.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -I$(BUILD) -c $< -o $@
 $(BUILD)/reboot.uelf: $(BUILD)/reboot.uo $(CLOCKOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/reboot.uo $(CLOCKOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 $(BUILD)/cr/user/wget/plan.o: user/wget/wget.h net/http/http.h

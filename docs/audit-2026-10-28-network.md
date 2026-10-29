@@ -57,7 +57,7 @@ Left open, each with a proposal:
   testing mirror can answer with any older list signed by the same key class. Shown by the reviewer (an expired list
   taken as a snapshot, rc 0). This is a change to the signed list format, so it goes in D22's note first, not into
   code: a signed `snapshot NAME` header line written by mkrepo and required to equal the name asked for, and a floor
-  on its serial. zpkg on the Amiga is not built yet.
+  on its serial. zpkg on the Amiga is not built yet. **Closed (block 2's audit, 2026-10-29):** zpkg on the Amiga uses the list core's `snap_fits` (`user/zpkg/index.c`), so a snapshot's list is bound to its name there too.
 - **O2 ssh cuts keyboard-interactive text without saying so** (info; `auth.c` `info_request`, `auth_methods`): a
   prompt past the 2 KB text space shows empty; the methods list is cut at 159 bytes. CLAUDE.md's rule "a limit that is
   hit says so" applies. Fix with a note line ("the server's text was longer than ssh shows: cut") when an
@@ -71,10 +71,10 @@ Left open, each with a proposal:
   discard the first words.
 - **O5 HTTP chunk lines** (D22 step 5): chunk-size and extension lines are not counted against a total. A hostile
   mirror can send 4 KB of extension per data byte, up to the body limit. The per-file timeout planned for step 5 must
-  be there before HTTP fetches packages.
+  be there before HTTP fetches packages. **Fixed (audit 2026-10-29 B2-9):** zpkg's per-file deadline exists (120 s + 1 s per KB), and the parser now counts the framing: a chunk-size line at most 256 bytes, all of it at most 8 bytes per body byte plus 4 KB (test: zpkg-test core).
 - **O6 bundles are not yet verified on the Amiga** (D21 6.4, status): zenixboot has no `zc_sig_verify` yet, and zup
   checks each part only against the bundle's own table. Nothing fetches bundles over the network today; this must
-  close before zpkg's slot write ships.
+  close before zpkg's slot write ships. **Closed (D21 step 5, checked by audit 2026-10-29):** zenixboot checks every bundle's signature over the recomputed digest, with the key class tied to the channel; zpkg checks the list's and `-U`'s bundle's. One residue is B2-10 (a deleted state file reopens downgrades to older signed bundles).
 - **O7 the multiplier's timing on a real 68020** (D21 9.2, owner's hardware): the measurement on the stock A1200 that
   D21 plans is still to be made. FS-UAE and Emu68 cannot tell (Emu68 turns `mulu.l` into an ARM multiply).
 - **O9 a process waiting on a hung netd cannot be killed** (design; S22 showed it): `net_call` waits for netd's
@@ -107,22 +107,24 @@ Left open, each with a proposal:
   and before the echo. remote-test c's cut PUT could reach the daemon after the GET and LS that check it (a .wsb-
   file of a transfer started late): the PUT and 8 KB go first, the reset only once LS shows its temporary file, then
   the GET waits out "busy". Test: 6 runs of each part side by side with the fix (3 + 3 at once, twice), all passed.
-- **O12 a 4 KB buffer nfscd never uses** (libz's stdout buffer, per mount): drop it with D27's port (block 3).
+- **O12 a 4 KB buffer nfscd never uses** (libz's stdout buffer, per mount): drop it with D27's port (block 3). Audit 2026-10-29: wider than nfscd (every program that never prints carries it: diskd, wasabid, nfscd); the fix is in that audit's section 4.
 - **O13 the floppy driver out of the kernel** (owner 2026-10-29): `kernel/floppy.c` (4.4 KB) becomes a server started
   at the first use of df0-df3 and gone when idle, as netd is started at the first socket call; the floppy boot does not
   need it (the bootblock loads the RAM disk). Saves 4.4 KB of kernel memory on every machine and of the kernel file on
   the boot floppies; costs a little more while a floppy is in use. A short design note first (the first disk driver
   outside the kernel: how diskd reaches it), at block 2's audit. The A3000's SCSI driver (2.3 KB) stays inside (needed
-  to boot an A3000; owner 2026-10-29).
+  to boot an A3000; owner 2026-10-29). **Designed (audit 2026-10-29, section 3):** the server `fdd` behind diskd, started by mount; it also ends the floppy's freezes (the driver busy-waits in the system call today). Building it waits for its place in the order of work.
 - **O14 a kernel size budget** (owner 2026-10-29, "why is it so big"): the audit lists each kernel part's size, finds
-  dead code and oversized buffers, and sets a budget the build checks.
+  dead code and oversized buffers, and sets a budget the build checks. **Fixed (audit 2026-10-29 B2-13):** `tools/ksize-check.sh` and `tools/ksize-budget`, run by the `kernel.bin` rule; each part's size and the shrink list are in that audit's section 2.
 - **O15 Amiberry as a second emulator** (owner 2026-10-29): FS-UAE 3.2.35's IDE bug (IDENTIFY after a multi-sector
   READ, fixed in later FS-UAE) cost a day; Amiberry (8.3.0 here, the current WinUAE core, already used headless by
   other projects) is tried on a few key tests (the floppy and disk boots, the A2065 with its built-in network, the
   update test) as a cross-check. A whole move of `make check` is decided after, with measurements.
 - **O16 con-test "cooked lines" lost a character once** (full run 2026-10-29 07:58; passed alone): the text path's
   line read "61580a" against the serial path's "61580at". Find the race (a check before the last byte arrived, or a
-  real lost byte in CON_INPUT's cooked path) and make it deterministic.
+  real lost byte in CON_INPUT's cooked path) and make it deterministic. **Fixed (audit 2026-10-29 B2-14):** the test's race, no
+  byte lost: the script typed its next command as soon as `line:` arrived, and the echo's `t` landed before the
+  line's end; it now waits for the whole line.
 - **O8 Zmodem has no cap on files per session** (judged acceptable): a board can offer thousands of honest small
   files; the disk filling up ends it, as with any download the user lets run. A cap would be a new option (the
   feature halt).

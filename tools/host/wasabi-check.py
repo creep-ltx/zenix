@@ -288,6 +288,17 @@ def t_files(d):
     r = put(c, "/sbin/wasabid", b"evil")
     check(isinstance(r, tuple) and "running daemon" in r[1] and
           open(rootfile("/sbin/wasabid"), "rb").read() == b"ZEXE....", "PUT of /sbin/wasabid refused (%r)" % (r,))
+    # a link to the daemon is refused too; a path that cannot be resolved is refused, never let through (B2-3)
+    os.symlink("../sbin/wasabid", rootfile("/data/self"))
+    r = put(c, "/data/self", b"evil")
+    check(isinstance(r, tuple) and "running daemon" in r[1] and
+          open(rootfile("/sbin/wasabid"), "rb").read() == b"ZEXE....", "PUT through a link to wasabid refused (%r)" % (r,))
+    os.symlink("loop", rootfile("/data/loop"))
+    r = put(c, "/data/loop", b"evil")
+    check(isinstance(r, tuple) and "cannot be resolved" in r[1] and os.path.islink(rootfile("/data/loop")),
+          "PUT to a path that cannot be resolved (a link loop) refused (%r)" % (r,))
+    os.unlink(rootfile("/data/self"))
+    os.unlink(rootfile("/data/loop"))
     r = put(c, "/nas/x", b"x")
     check(isinstance(r, tuple) and "network mount" in r[1], "PUT on an nfs mount refused (%r)" % (r,))
     r = put(c, "/data/sub", b"x")
@@ -704,6 +715,21 @@ def t_limits(d):
     c = Conn(hello=False)
     t0 = time.time()
     check(c.closed(14) and 9.5 < time.time() - t0 < 13, "no HELLO: dropped after 10 s")
+    # a HELLO trickled a byte at a time (each byte is progress): still dropped 10 s after the accept (audit B2-1);
+    # meanwhile the four slots are not all taken for ever
+    c = Conn(hello=False)
+    t0 = time.time()
+    c.s.sendall(bytes([HELLO, 0, 0, 0x0f, 0xff]))
+    gone = False
+    while time.time() - t0 < 16 and not gone:
+        time.sleep(2)
+        try:
+            c.s.sendall(b"x")
+        except OSError:
+            gone = True
+        gone = gone or c.closed(0.1)
+    check(gone and 9.5 < time.time() - t0 < 14, "a HELLO trickled a byte every 2 s: dropped 10 s after the accept "
+          "(%.1f s)" % (time.time() - t0))
     # discovery on both ports
     u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     u.settimeout(2)

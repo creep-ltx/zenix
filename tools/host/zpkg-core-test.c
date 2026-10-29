@@ -662,6 +662,29 @@ static void t_http(void)
                                 "01234567890123456789012345678901234567890123456789\r\n33\r\n";
     feed_all(chsum, sizeof chsum - 1, 100, 0, g);
     CHECK(g->err == HTTP_E2BIG, "chunks that add up past the limit");
+    /* the framing counted (audit 2026-10-29 B2-9, network audit O5): a 4 KB extension per data byte is refused */
+    {
+        static char ext[16384];
+        size_t o = (size_t)snprintf(ext, sizeof ext, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1;");
+        memset(ext + o, 'x', 300); o += 300;
+        memcpy(ext + o, "\r\nX\r\n0\r\n\r\n", 10); o += 10;
+        feed_all(ext, o, 100, 0, g);
+        CHECK(g->err == HTTP_E2BIG, "a chunk-size line of 300 bytes refused (err %d)", g->err);
+        o = (size_t)snprintf(ext, sizeof ext, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+        for (int k = 0; k < 40; k++) {
+            memcpy(ext + o, "1;", 2); o += 2;
+            memset(ext + o, 'x', 200); o += 200;
+            memcpy(ext + o, "\r\nX\r\n", 5); o += 5;
+        }
+        memcpy(ext + o, "0\r\n\r\n", 5); o += 5;
+        feed_all(ext, o, 100, 0, g);
+        CHECK(g->err == HTTP_E2BIG, "200 bytes of extension per data byte: refused after 4 KB (err %d)", g->err);
+        o = (size_t)snprintf(ext, sizeof ext, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+        for (int k = 0; k < 90; k++) { memcpy(ext + o, "1\r\nY\r\n", 6); o += 6; }
+        memcpy(ext + o, "0\r\n\r\n", 5); o += 5;
+        feed_all(ext, o, 100, 1, g);
+        CHECK(!g->err && g->ends == 1 && g->blen == 90, "90 one-byte chunks are fine (err %d, %zu bytes)", g->err, g->blen);
+    }
     static const char short_[] = "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc";
     feed_all(short_, sizeof short_ - 1, 100, 0, g);
     CHECK(g->err == HTTP_EIO, "a body shorter than announced (the connection closed)");

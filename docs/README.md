@@ -41,6 +41,7 @@
 | [ROADMAP.md](ROADMAP.md) | Vision, principles and the phased plan. |
 | [audit-2026-10-22.md](audit-2026-10-22.md) | The audit of 2026-10-22: the work list of the hardening round (batches A-E), each item marked with its fix. |
 | [audit-2026-10-28-network.md](audit-2026-10-28-network.md) | The focused security audit of the network (roadmap block 2, D19 step 11): the work list S1-S21, each marked with its fix, the items left open (O1-O8) and what a machine without an MMU cannot promise. |
+| [audit-2026-10-29-block2.md](audit-2026-10-29-block2.md) | Block 2's closing audit (security, robustness without an MMU, size and speed): B2-1 to B2-13 with their fixes, the kernel's size by part and its budget (O14), the floppy driver as a server (O13's design note), and what goes to the owner. |
 | [audit-2026-10-26.md](audit-2026-10-26.md) | The focused audit closing roadmap block 1 (D13 to D15): the work list B1-B9 and T1, each marked with its fix. |
 | [audit-2026-10-25.md](audit-2026-10-25.md) | The focused audit of 2026-10-25 (everything since the first audit closed, D11 included): the work list A1-A16 and P1, each marked with its fix. |
 | [audit-closing-2026-10-24.md](audit-closing-2026-10-24.md) | The closing report of the audit round: what was fixed, what is verified on the real A1200, what is left. |

@@ -17,13 +17,15 @@ Claim a number here **before** using it (system calls, message types, port names
 | 89 `console`'s op word `op \| (fd + 1) << 8` (0 above the op: no descriptor, only `CON_COLOURS`), op 2 `CON_FONT` (a PSF1 font for that console, null drops), op 3 `CON_RULES` (bits, mask; `CONR_*` 1-64) (DESIGN D20 4.5) | main, branch t12, 2026-10-27 |
 | 89 `console`'s ops 5 `CON_READ` (a console's grid: `struct uconread`), 6 `CON_LINE` (a display line's pens: `struct uconline`), 7 `CON_INPUT` (raw keys or text: kinds `CONI_RAW` 0, `CONI_TEXT` 1); the `CONRD_*` flags 1-8 and the cells' `CONA_*` bits 1-4 (DESIGN D24 6.1-6.3, root only; op 4 stays D28's `CON_UFONT`, planned) | main's builder, branch wasabi3, 2026-10-29 |
 | 90 `sock` (DESIGN D19: every BSD socket call: op `SOCK_*` plus the request size << 16, fd, `struct usockreq`), 91 `netsrv` (the network server: `NETSRV_HELLO`, `READY`, `REPLY`), 92 `drv` (the network's drivers: `DRV_*` ops 1-7, `HWINFO` .. `XFER`; built on branch n678 2026-10-27) | main, branch n023, 2026-10-27 |
+| `ticks`'s (20) argument 2 (DESIGN D21 8.3: who set the clock this boot, `CLOCK_RTC` 1, `CLOCK_NET` 2) and `settime`'s (59) second argument (0 a hand-set time, clears the bits; 1 from a checked source, sets `CLOCK_NET`; other values -EINVAL) | branch clock, merged 2026-10-28 (recorded here by audit 2026-10-29 B2-7) |
 | **next free: 93** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
 numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*` from 64 (the drivers' blocks, step 7:
 `NETDRV_ATTACH` 64, `NETDRV_XFER` 65, branch n678 2026-10-27);
 `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
-zup's "needs a check" mark), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
+zup's "needs a check" mark), `FS_SYNC`'s a0 1 "bounded" (D23 step 1, branch nfs12, 2026-10-28; recorded by audit
+2026-10-29 B2-7), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
 `struct umsg`'s `kflags` bits: 1 `UMSG_KERNEL`, 2 `UMSG_NETREPLY` (internal), 4 `UMSG_CANCEL` (D23 step 1, branch nfs12, 2026-10-28: only the kernel sets it, for a killed client), 8
 `UMSG_LINKS` (D26, branch d26, 2026-10-28: only the kernel sets it, through `ipc_kcall`'s kflags argument; `call()`
@@ -39,7 +41,9 @@ shared program opened for writing; claimed 2026-10-25, Linux's number); `ESTALE`
 branch nfs12, 2026-10-28). Update note kinds (D15, frozen, append-only):
 1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). `struct uupdate`'s (and
 the bootinfo's) flags bits: 1 `UPD_F_ROLLBACK` (D15), 2 `UPD_F_TRIAL` (D22 4.3, claimed 2026-10-28: an unconfirmed trial;
-the kernel keeps it after `UPD_RELEASE`; zenixboot sets it from D22 step 7). Port names
+the kernel keeps it after `UPD_RELEASE`; zenixboot sets it from D22 step 7). Poll bits on a port (D23 step 1, branch nfs12, 2026-10-28; recorded by audit 2026-10-29 B2-7): `POLLPRI` 2 (Linux's
+value) on a port: a message sent to it was cancelled (`UMSG_CANCEL`) since its owner last saw one. Socket options: `SO_LINGER` 13 (Linux's, D23 steps 3-4, branch nfs34,
+2026-10-28; recorded by the same audit). Port names
 registered as services (D11):
 `disk`, `fs`, `fs.*`; `ping` (the test service, served by `msgpingd` since D19 step 0); `net` (D19, the network server:
 reserved for root like `fs` and `disk`; `socktestd` serves it in the tests until netd).

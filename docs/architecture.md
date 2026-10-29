@@ -1642,9 +1642,12 @@ outputs (`tools/cmds-test.sh`).
   root image). That floppy holds the bootblock, the kernel and the RAM disk (640 KB since 2026-10-29: `RAMDISK_K` in the Makefile; the mount tests' floppy `RAMDISK_MOUNT_K`, 716 KB: its tests write about 20 KB there), so
   the kernel may be at most `KERNEL_MAX` bytes (the floppy less the bootblock and the RAM disk): every build of `kernel.bin` prints how much is left, and
   `tools/mkadf.py` refuses an image that is over and says by how much. The mount tests' floppy `zenix-mount.adf` has a
-  RAM disk of its own size (`RAMDISK_MOUNT_K`, 728 KB: it carries `/sbin/zfsd`), so its limit is lower
-  (`KERNEL_MAX_MOUNT`, 154624 bytes); the size line says that one too. Since DESIGN D19 step 1 (zfsd out of the image)
-  the kernel is 139644 bytes (176144 before), measured 2026-10-27.
+  RAM disk of its own size (`RAMDISK_MOUNT_K`: it carries `/sbin/zfsd`), so its limit is lower
+  (`KERNEL_MAX_MOUNT`); the size line says that one too. **The kernel's size budget** (audit 2026-10-29 B2-13, network
+  audit O14): `tools/ksize-check.sh`, run by the `kernel.bin` rule, holds every part (object file) to its line in
+  `tools/ksize-budget` (code + data, bss), the whole `kernel.bin` to `TOTAL` and its room under `KERNEL_MAX_MOUNT` to
+  `ROOM`; a part over its budget fails the build. A part that needs more raises its line in the commit that grows it.
+  The parts' sizes and where the kernel could shrink: `docs/audit-2026-10-29-block2.md`, section "The kernel's size".
 - **The test-only kernel** `kernel-zfs.bin` (`make build/kernel-zfs.bin`, `build/zenix-zfs.adf`, a kernel-only floppy):
   the same sources with `-DKERNEL_ZFSD` for `embed.S`, `svc.c` and `syscall.c` (objects `zfs-*.o`), so zfsd is built
   in again (176420 bytes, too big for a RAM floppy). Only for the emulator tests that boot a ZenixFS root.
