@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# The kernel's size budget (audit 2026-10-29 B2-13, network audit O14), checked by tools/ksize-check.sh at every build of
+# kernel.bin. One line per part: the object, its most code + data bytes, its most bss bytes. The budgets are the sizes
+# of 2026-10-29 with about 3% room; a part that needs more raises its line here, in the commit that grows it, so the
+# growth is seen. The last lines bound the whole: kernel.bin's bytes, and the room it must leave on the mount tests'
+# floppy (the binding limit, KERNEL_MAX_MOUNT).
+start     3900   8192
+main      6500   1100
+serial    7100   6500
+mem       2900    240
+ide       3700    560
+emmc      4900    640
+floppy    4500    160
+input      400     32
+audio      800     32
+a3000     2400    100
+blk        460     16
+rtc       1550      0
+proc     10700  15600
+syscall  10000      0
+vfs      11200   1600
+tty       2600     64
+gfx       6300   2000
+term      9000     64
+kbd       3750    180
+ipc       3700   1600
+svc       5600   1420
+seg       1250    256
+event      700      0
+signal    2100      0
+random    3800    280
+sock      4700   1060
+drv       1850    640
+embed    47500      0
+TOTAL   165000
+ROOM     12288
