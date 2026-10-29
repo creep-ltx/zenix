@@ -346,7 +346,9 @@ rx   t "... the log names the start" "svc: ping: started /bin/msgpingd \(pid [0-
 rx   t "ping's quit is a stop" ".*svc: ping: msgpingd \(pid [0-9]+\) stopped"
 rx   t "... none left after it" "(.*# )?after-quit=0"
 if [ "$(grep -ac 'svc: ping: started /bin/msgpingd' "$OUT/t.log")" -ge 3 ]; then echo "PASS ... the next ping starts it again"; else echo "FAIL ... the next ping starts it again"; pass=0; fi
-if [ "$(grep -acE '.*svctest call gone 1: -104 in [0-9] ms' "$OUT/t.log")" -ge 3 ]; then echo "PASS a missing program fails at once, every time"; else echo "FAIL a missing program fails at once, every time"; pass=0; fi
+# "at once": under 100 ms, far from the back-off's seconds (the first look through /bin reads all its blocks: 10 ms
+# since /bin's directory took a third block with maki and markdown, 8 ms before)
+if [ "$(grep -acE '.*svctest call gone 1: -104 in [0-9]{1,2} ms' "$OUT/t.log")" -ge 3 ]; then echo "PASS a missing program fails at once, every time"; else echo "FAIL a missing program fails at once, every time"; pass=0; fi
 rx   t "... the log says why" "svc: gone: cannot start /bin/nosuchprog \(error -2\)"
 none t "... and it is never counted (no give-up)" "svc: gone: given up.*"
 rx   t "a crash during a request: that client gets -104" ".*svctest call q 7: -104 in [0-9]+ ms"
