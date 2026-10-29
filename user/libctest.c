@@ -7,7 +7,12 @@
  *                       first: line-buffered; into a pipe it comes last: fully buffered)
  *   libctest epipe      writes to stdout until the reader is gone (the shell sees status 141)
  *   libctest stdin      prints a prompt without a newline, reads a line: the prompt is out before the read waits;
- *                       then the stream buffers' memory (inside the allocator's first chunk) */
+ *                       then the stream buffers' memory (inside the allocator's first chunk)
+ *   libctest tty        the terminal (DESIGN D27 5.4) with the keys the test types after each prompt: the console's
+ *                       size, raw mode and back, ICANON without ECHO (the console's grid shows nothing typed), the
+ *                       C library's line editing, getpass
+ *   libctest hold N     every check, then N seconds more (the ZEX2 build on two consoles at once: free shows one
+ *                       copy of its code) */
 #define _GNU_SOURCE
 #include <ctype.h>
 #include <dirent.h>
@@ -27,6 +32,19 @@
 #include <time.h>
 #include <unistd.h>
 #include <wchar.h>
+#include <glob.h>
+#include <grp.h>
+#include <poll.h>
+#include <pwd.h>
+#include <regex.h>
+#include <spawn.h>
+#include <termios.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/ioctl.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
 #include <zenix.h>
 #define ZENIX_LIBC
 #include "usys.h"                       /* SYS_procinfo, for the memory checks */
@@ -107,9 +125,13 @@ static void t_qsort(void)
     check("bsearch", f && *f == 5, "");
 }
 
+/* a name in /tmp of this process's own (two may run at once: the ZEX2 build on two consoles) */
+static void tmpname(char *out, const char *what) { snprintf(out, 48, "/tmp/lc%d%s", getpid(), what); }
+
 static void t_files(void)
 {
-    const char *p = "/tmp/libct.txt";
+    char p[48];
+    tmpname(p, ".txt");
     struct stat st;
     unlink(p);
     FILE *f = fopen(p, "w");
@@ -158,7 +180,8 @@ static void t_files(void)
 
 static void t_dirs(void)
 {
-    const char *d = "/tmp/libct.d";
+    char d[48];
+    tmpname(d, ".d");
     char p[64];
     mkdir(d, 0755);
     for (int i = 0; i < 200; i++) { snprintf(p, sizeof p, "%s/f%03d", d, i); close(open(p, O_WRONLY | O_CREAT, 0644)); }
@@ -326,6 +349,385 @@ static void t_errors(void)
     check("getpid", getpid() > 1, "");
 }
 
+/* ---- step 3 (DESIGN D27 section 13): signals, poll and select, sockets, libzenix's helpers, users, glob, regcomp,
+ * processes */
+static volatile int got_sig;
+static void on_usr1(int s) { got_sig = s; }
+static void t_signals(void)
+{
+    struct sigaction a, o;
+    memset(&a, 0, sizeof a);
+    a.sa_handler = on_usr1;
+    check("sigaction", sigaction(SIGUSR1, &a, &o) == 0 && o.sa_handler == SIG_DFL, "");
+    raise(SIGUSR1);
+    checki("raise: the handler ran", got_sig, SIGUSR1);
+    sigset_t s, old;
+    sigemptyset(&s);
+    sigaddset(&s, SIGUSR1);
+    got_sig = 0;
+    sigprocmask(SIG_BLOCK, &s, &old);
+    raise(SIGUSR1);
+    check("blocked: not yet", got_sig == 0, "");
+    sigprocmask(SIG_SETMASK, &old, 0);
+    checki("unblocked: it ran", got_sig, SIGUSR1);
+    check("signal() gives the handler back", signal(SIGUSR1, SIG_IGN) == on_usr1, "");
+    raise(SIGUSR1);
+    check("an ignored signal", 1, "");
+    signal(SIGUSR1, SIG_DFL);
+    checks("zsig_name", zsig_name(SIGTERM) ? zsig_name(SIGTERM) : "", "TERM");
+    checki("zsig_num", zsig_num("SIGHUP"), SIGHUP);
+    check("kill(pid, 0): it exists", kill(getpid(), 0) == 0, "");
+    check("getpgrp is ours", getpgrp() > 0 && getpgid(0) == getpgrp(), "");
+}
+
+static void t_poll(void)
+{
+    int fd[2];
+    check("pipe", pipe(fd) == 0, "");
+    struct pollfd p = { fd[0], POLLIN, 0 };
+    struct timespec a, b;
+    clock_gettime(CLOCK_MONOTONIC, &a);
+    int r = poll(&p, 1, 50);
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    long ms = (long)(b.tv_sec - a.tv_sec) * 1000 + (b.tv_nsec - a.tv_nsec) / 1000000;
+    check("poll of an empty pipe: 0 after the timeout", r == 0 && ms >= 50, "");
+    write(fd[1], "x", 1);
+    r = poll(&p, 1, -1);
+    check("poll: POLLIN once there is a byte", r == 1 && (p.revents & POLLIN), "");
+    fd_set rs;
+    FD_ZERO(&rs);
+    FD_SET(fd[0], &rs);
+    struct timeval tv = { 1, 0 };
+    r = select(fd[0] + 1, &rs, 0, 0, &tv);
+    check("select: readable", r == 1 && FD_ISSET(fd[0], &rs), "");
+    close(fd[1]);
+    char c;
+    read(fd[0], &c, 1);
+    p.revents = 0;
+    r = poll(&p, 1, 0);
+    check("poll: the writer gone (POLLHUP or POLLIN at the end)", r == 1 && (p.revents & (POLLHUP | POLLIN)), "");
+    close(fd[0]);
+    int pf[2];
+    check("pipe2 O_NONBLOCK", pipe2(pf, O_NONBLOCK) == 0 && read(pf[0], &c, 1) < 0 && errno == EAGAIN, strerror(errno));
+    close(pf[0]); close(pf[1]);
+}
+
+static void t_sockets(void)
+{
+    struct in_addr in;
+    char b[INET_ADDRSTRLEN];
+    check("inet_pton and inet_ntop", inet_pton(AF_INET, "10.0.2.15", &in) == 1 &&
+          !strcmp(inet_ntop(AF_INET, &in, b, sizeof b), "10.0.2.15"), b);
+    check("inet_addr (BSD's short form)", inet_addr("127.1") == htonl(0x7f000001), "");
+    check("inet_pton refuses a bad address", inet_pton(AF_INET, "1.2.3", &in) == 0, "");
+    struct addrinfo h, *res = 0;
+    memset(&h, 0, sizeof h);
+    h.ai_family = AF_INET;
+    h.ai_socktype = SOCK_STREAM;
+    int r = getaddrinfo("127.0.0.1", "http", &h, &res);
+    struct sockaddr_in *sa = res ? (struct sockaddr_in *)res->ai_addr : 0;
+    check("getaddrinfo of a number and a service", !r && sa && ntohs(sa->sin_port) == 80 &&
+          sa->sin_addr.s_addr == htonl(INADDR_LOOPBACK) && res->ai_protocol == IPPROTO_TCP, gai_strerror(r));
+    freeaddrinfo(res);
+    checks("gai_strerror", gai_strerror(EAI_NONAME), "name or service not known");
+    /* a UDP datagram to itself on the loopback: netd answers (started at the first socket) */
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    struct sockaddr_in me;
+    memset(&me, 0, sizeof me);
+    me.sin_family = AF_INET;
+    me.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t ml = sizeof me;
+    check("socket, bind, getsockname", s >= 0 && bind(s, (struct sockaddr *)&me, sizeof me) == 0 &&
+          getsockname(s, (struct sockaddr *)&me, &ml) == 0 && me.sin_port != 0, strerror(errno));
+    ssize_t n = sendto(s, "dgram", 5, 0, (struct sockaddr *)&me, sizeof me);
+    struct pollfd p = { s, POLLIN, 0 };
+    char rb[16] = "";
+    int ready = poll(&p, 1, 3000);
+    ssize_t m = ready == 1 ? recvfrom(s, rb, sizeof rb - 1, 0, 0, 0) : -1;
+    check("sendto itself, poll, recvfrom", n == 5 && m == 5 && !memcmp(rb, "dgram", 5), strerror(errno));
+    int nb = 1;
+    check("ioctl FIONBIO and fcntl F_GETFL see O_NONBLOCK", ioctl(s, FIONBIO, &nb) == 0 &&
+          (fcntl(s, F_GETFL) & O_NONBLOCK), "");
+    check("a recv with nothing there: EAGAIN", recv(s, rb, sizeof rb, 0) < 0 && errno == EAGAIN, strerror(errno));
+    close(s);
+}
+
+static void t_helpers(void)
+{
+    char *j = path_join("/tmp", "x");
+    checks("path_join", j ? j : "", "/tmp/x");
+    free(j);
+    check("path_join too long: ENAMETOOLONG", !path_join("/tmp", "a-name-that-makes-the-path-longer-than-sixty-three-bytes-long") &&
+          errno == ENAMETOOLONG, "");
+    char **names;
+    int n = dir_list("/tests", &names), found = 0;
+    for (int i = 0; i < n; i++) if (!strcmp(names[i], "libctest")) found = 1;
+    check("dir_list", n > 1 && found, "");
+    dir_free(names, n);
+    char p[64];
+    check("path_find through $PATH", path_find("sh", p, sizeof p) && !strcmp(p, "/bin/sh"), p);
+    check("zrealpath", zrealpath("/tmp/../etc/./", p, sizeof p) == 0 && !strcmp(p, "/etc"), p);
+    check("color_arg", color_arg("--color=never", 2) == 0 && color_arg("--colour", 2) == 2 && color_arg("-x", 2) == -1, "");
+    check("color_auto on a file: no", (n = open("/etc/passwd", O_RDONLY)) >= 0 && !color_auto(n), "");
+    close(n);
+}
+
+static void t_users(void)
+{
+    struct passwd *pw = getpwnam("root");
+    check("getpwnam root", pw && pw->pw_uid == 0 && pw->pw_gid == 0 && !strcmp(pw->pw_dir, "/") &&
+          !strcmp(pw->pw_shell, "/bin/sh"), "");
+    pw = getpwuid(1000);
+    checks("getpwuid 1000", pw ? pw->pw_name : "", "user");
+    check("getpwnam of nobody: 0", getpwnam("no-such-user") == 0, "");
+    struct group *g = getgrnam("users");
+    check("getgrnam users, its members", g && g->gr_gid == 100 && g->gr_mem[0] && !strcmp(g->gr_mem[0], "user") &&
+          g->gr_mem[1] && !strcmp(g->gr_mem[1], "guest") && !g->gr_mem[2], "");
+    g = getgrgid(10);
+    checks("getgrgid 10", g ? g->gr_name : "", "wheel");
+}
+
+static void t_glob(void)
+{
+    char d[48], p[64];
+    tmpname(d, ".g");
+    mkdir(d, 0755);
+    const char *files[] = { "b.c", "a.c", "c.h", ".hid.c", 0 };
+    for (int i = 0; files[i]; i++) { snprintf(p, sizeof p, "%s/%s", d, files[i]); close(open(p, O_WRONLY | O_CREAT, 0644)); }
+    snprintf(p, sizeof p, "%s/sub", d); mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/sub/d.c", d); close(open(p, O_WRONLY | O_CREAT, 0644));
+    glob_t g;
+    char want[160];
+    snprintf(p, sizeof p, "%s/*.c", d);
+    int r = glob(p, 0, 0, &g);
+    snprintf(want, sizeof want, "%s/a.c %s/b.c", d, d);
+    char got[200] = "";
+    for (int i = 0; !r && i < g.gl_pathc; i++) { if (i) strcat(got, " "); strncat(got, g.gl_pathv[i], 60); }
+    checks("glob *.c: sorted, no dot file", got, want);
+    globfree(&g);
+    snprintf(p, sizeof p, "%s/*/*.c", d);
+    r = glob(p, 0, 0, &g);
+    snprintf(want, sizeof want, "%s/sub/d.c", d);
+    checks("glob */*.c", !r && g.gl_pathc == 1 ? g.gl_pathv[0] : "", want);
+    globfree(&g);
+    snprintf(p, sizeof p, "%s/s*", d);
+    r = glob(p, GLOB_MARK, 0, &g);
+    snprintf(want, sizeof want, "%s/sub/", d);
+    checks("glob GLOB_MARK", !r && g.gl_pathc == 1 ? g.gl_pathv[0] : "", want);
+    snprintf(p, sizeof p, "%s/.h*", d);
+    r = glob(p, GLOB_APPEND, 0, &g);
+    check("glob GLOB_APPEND, a dot file by a dot pattern", !r && g.gl_pathc == 2 && strstr(g.gl_pathv[1], ".hid.c"), "");
+    globfree(&g);
+    snprintf(p, sizeof p, "%s/*.x", d);
+    checki("glob with no match: GLOB_NOMATCH", glob(p, 0, 0, &g), GLOB_NOMATCH);
+    r = glob(p, GLOB_NOCHECK, 0, &g);
+    check("GLOB_NOCHECK gives the pattern", !r && g.gl_pathc == 1 && !strcmp(g.gl_pathv[0], p), "");
+    globfree(&g);
+    check("an unsupported flag: GLOB_ABEND", glob(p, GLOB_BRACE, 0, &g) == GLOB_ABEND && errno == EINVAL, "");
+    for (int i = 0; files[i]; i++) { snprintf(p, sizeof p, "%s/%s", d, files[i]); unlink(p); }
+    snprintf(p, sizeof p, "%s/sub/d.c", d); unlink(p);
+    snprintf(p, sizeof p, "%s/sub", d); rmdir(p);
+    rmdir(d);
+}
+
+static void t_regex(void)
+{
+    regex_t re;
+    regmatch_t m[3];
+    char b[64];
+    int r = regcomp(&re, "(ab|cd)+e", REG_EXTENDED);
+    checki("regcomp ERE", r, 0);
+    checki("re_nsub", (long long)re.re_nsub, 1);
+    r = regexec(&re, "xxabcde!", 3, m, 0);
+    snprintf(b, sizeof b, "%d %d-%d %d-%d %d", r, (int)m[0].rm_so, (int)m[0].rm_eo, (int)m[1].rm_so, (int)m[1].rm_eo, (int)m[2].rm_so);
+    checks("regexec: the match and its group", b, "0 2-7 4-6 -1");
+    checki("REG_NOMATCH", regexec(&re, "abab", 0, 0, 0), REG_NOMATCH);
+    regfree(&re);
+    r = regcomp(&re, "a\\(b*\\)c", 0);
+    r = r ? r : regexec(&re, "zabbbc", 2, m, 0);
+    snprintf(b, sizeof b, "%d %d-%d %d-%d", r, (int)m[0].rm_so, (int)m[0].rm_eo, (int)m[1].rm_so, (int)m[1].rm_eo);
+    checks("a basic expression (no REG_EXTENDED)", b, "0 1-6 2-5");
+    regfree(&re);
+    regcomp(&re, "^HeLLo", REG_EXTENDED | REG_ICASE | REG_NOSUB);
+    check("REG_ICASE and REG_NOSUB", regexec(&re, "hello world", 0, 0, 0) == 0, "");
+    check("REG_NOTBOL: ^ does not match at the start", regexec(&re, "hello", 0, 0, REG_NOTBOL) == REG_NOMATCH, "");
+    regfree(&re);
+    regcomp(&re, "^b", REG_EXTENDED | REG_NEWLINE);
+    check("REG_NEWLINE: ^ after a newline", regexec(&re, "a\nb", 0, 0, 0) == 0, "");
+    regfree(&re);
+    regcomp(&re, "o+", REG_EXTENDED);
+    m[0].rm_so = 5; m[0].rm_eo = 12;
+    r = regexec(&re, "foo, goo, zoo", 1, m, REG_STARTEND);
+    snprintf(b, sizeof b, "%d %d-%d", r, (int)m[0].rm_so, (int)m[0].rm_eo);
+    checks("REG_STARTEND", b, "0 6-8");
+    regfree(&re);
+    r = regcomp(&re, "a(", REG_EXTENDED);
+    check("a bad pattern is refused", r != 0, "");
+    regerror(REG_NOMATCH, 0, b, sizeof b);
+    checks("regerror", b, "no match");
+}
+
+/* the bytes a descriptor gives until its end */
+static void slurp(int fd, char *b, int max)
+{
+    int n = 0, r;
+    while (n < max - 1 && (r = (int)read(fd, b + n, (size_t)(max - 1 - n))) > 0) n += r;
+    b[n] = 0;
+}
+static void t_spawn(void)
+{
+    int fd[2], st = -1;
+    pid_t pid = 0;
+    char b[96];
+    pipe(fd);
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, fd[1], 1);
+    char *echo[] = { "echo", "spawned", "here", 0 };
+    int r = posix_spawn(&pid, "/bin/echo", &fa, 0, echo, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    close(fd[1]);
+    slurp(fd[0], b, sizeof b);
+    close(fd[0]);
+    check("posix_spawn with stdout to a pipe", !r && pid > 0 && !strcmp(b, "spawned here\n"), b);
+    check("waitpid: exit status 0", waitpid(pid, &st, 0) == pid && WIFEXITED(st) && WEXITSTATUS(st) == 0, "");
+    char tf[48];
+    tmpname(tf, ".sp");
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, 1, tf, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    char *penv[] = { "printenv", "ZX_SPAWN", 0 }, *envp[] = { "ZX_SPAWN=forty-two", "PATH=/bin", 0 };
+    r = posix_spawnp(&pid, "printenv", &fa, 0, penv, envp);
+    posix_spawn_file_actions_destroy(&fa);
+    waitpid(pid, &st, 0);
+    int f = open(tf, O_RDONLY);
+    slurp(f, b, sizeof b);
+    close(f);
+    unlink(tf);
+    check("posix_spawnp, envp and an opened stdout", !r && !strcmp(b, "forty-two\n"), b);
+    check("... our environment is as it was", getenv("ZX_SPAWN") == 0 && getenv("PATH") != 0, "");
+    posix_spawn_file_actions_init(&fa);
+    checki("a file action on descriptor 5: EINVAL", posix_spawn_file_actions_addclose(&fa, 5), EINVAL);
+    posix_spawn_file_actions_destroy(&fa);
+    posix_spawnattr_t at;
+    posix_spawnattr_init(&at);
+    posix_spawnattr_setflags(&at, POSIX_SPAWN_SETPGROUP);
+    posix_spawnattr_setpgroup(&at, 0);
+    char *sl[] = { "sleep", "1", 0 };
+    r = posix_spawn(&pid, "/bin/sleep", 0, &at, sl, 0);
+    int pg = getpgid(pid);
+    check("POSIX_SPAWN_SETPGROUP: a group of its own", !r && pg == pid && pg != getpgrp(), "");
+    checki("another attribute: EINVAL", posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGMASK), EINVAL);
+    posix_spawnattr_destroy(&at);
+    waitpid(pid, &st, 0);
+    char *t1[] = { "true", 0 }, *t2[] = { "false", 0 };
+    pid_t a, c;
+    posix_spawn(&a, "/bin/true", 0, 0, t1, 0);
+    posix_spawn(&c, "/bin/false", 0, 0, t2, 0);
+    int s1 = -1, s2 = -1;
+    pid_t w1 = wait(&s1), w2 = wait(&s2);
+    check("wait: which child and its status", ((w1 == a && w2 == c && WEXITSTATUS(s1) == 0 && WEXITSTATUS(s2) == 1) ||
+          (w1 == c && w2 == a && WEXITSTATUS(s1) == 1 && WEXITSTATUS(s2) == 0)), "");
+    check("wait with no child: ECHILD", wait(&st) < 0 && errno == ECHILD, "");
+    checki("system: the exit status", WEXITSTATUS(system("exit 3")), 3);
+    check("system(NULL): there is a shell", system(0) != 0, "");
+    FILE *pf = popen("echo through a pipe", "r");
+    b[0] = 0;
+    if (pf) fgets(b, sizeof b, pf);
+    checks("popen r", b, "through a pipe\n");
+    checki("pclose: the status", pf ? pclose(pf) : -1, 0);
+    tmpname(tf, ".po");
+    char cmd[80];
+    snprintf(cmd, sizeof cmd, "cat > %s", tf);
+    pf = popen(cmd, "w");
+    if (pf) { fputs("into the command\n", pf); pclose(pf); }
+    f = open(tf, O_RDONLY);
+    slurp(f, b, sizeof b);
+    close(f);
+    unlink(tf);
+    checks("popen w", b, "into the command\n");
+    check("getppid", getppid() > 0 && getppid() != getpid(), "");
+}
+
+/* the console's grid (CON_READ, root) holds text on one of its rows: 1, 0, or -1 when it cannot be read */
+static int grid_has(const char *text)
+{
+    static unsigned char *cells;
+    unsigned cap = 132 * 64 * 3;
+    if (!cells && !(cells = malloc(cap))) return -1;
+    struct uconread r = { sizeof r, (u32)cells, cap, 0, 0, 0, 0, 0, 0, 0, 0 };
+    if (sys_conread(0, &r) < 0 || !r.cols || r.cols > 132) return -1;
+    char row[133];
+    for (unsigned y = 0; y < r.rows && (y + 1) * r.cols * 3 <= cap; y++) {
+        for (unsigned x = 0; x < r.cols; x++) row[x] = (char)cells[(y * r.cols + x) * 3];
+        row[r.cols] = 0;
+        if (strstr(row, text)) return 1;
+    }
+    return 0;
+}
+static void prompt(const char *p) { fputs(p, stdout); fflush(stdout); }
+/* libctest tty: the terminal with keys the test types (tools/libc-test.sh) */
+static int t_tty(void)
+{
+    struct winsize ws;
+    int ti = sys_ttyinfo(), fd[2];
+    check("TIOCGWINSZ: the console's size", ioctl(0, TIOCGWINSZ, &ws) == 0 && ws.ws_row == (ti >> 16) &&
+          ws.ws_col == (ti & 0xFFFF), "");
+    printf("winsize %ux%u\n", ws.ws_col, ws.ws_row);
+    pipe(fd);
+    check("TIOCGWINSZ on a pipe: ENOTTY", ioctl(fd[0], TIOCGWINSZ, &ws) < 0 && errno == ENOTTY, "");
+    struct termios orig, t;
+    check("tcgetattr on a pipe: ENOTTY", tcgetattr(fd[0], &t) < 0 && errno == ENOTTY, "");
+    close(fd[0]); close(fd[1]);
+    check("tcgetattr: cooked at the start", tcgetattr(0, &orig) == 0 && (orig.c_lflag & (ICANON | ECHO | ISIG)) ==
+          (ICANON | ECHO | ISIG) && orig.c_cc[VMIN] == 1 && orig.c_cc[VTIME] == 0, "");
+    t = orig;
+    t.c_cc[VMIN] = 0; t.c_cc[VTIME] = 5;
+    check("VMIN 0 / VTIME 5: EINVAL", tcsetattr(0, TCSANOW, &t) < 0 && errno == EINVAL, "");
+    t = orig;
+    cfmakeraw(&t);
+    check("tcsetattr raw", tcsetattr(0, TCSANOW, &t) == 0, "");
+    prompt("raw> ");
+    char c1 = 0, c2 = 0;
+    read(0, &c1, 1);
+    read(0, &c2, 1);
+    tcsetattr(0, TCSANOW, &orig);
+    printf("\n");
+    check("raw: a key without Return; ISIG off: ^C is a byte", c1 == 'x' && c2 == 3, "");
+    t = orig;
+    t.c_lflag &= ~(tcflag_t)ECHO;
+    tcsetattr(0, TCSANOW, &t);
+    prompt("secret> ");
+    char b[64];
+    ssize_t n = read(0, b, sizeof b - 1);
+    tcsetattr(0, TCSANOW, &orig);
+    b[n > 0 ? n : 0] = 0;
+    printf("\n");
+    check("ICANON on, ECHO off: a line read", !strcmp(b, "hidden words\n"), "");
+    check("... nothing of it echoed (the console's grid)", grid_has("hidden") == 0 && grid_has("secret>") == 1, "");
+    t = orig;
+    t.c_lflag &= ~(tcflag_t)ISIG;
+    tcsetattr(0, TCSANOW, &t);
+    prompt("edit> ");
+    n = read(0, b, sizeof b - 1);
+    b[n > 0 ? n : 0] = 0;
+    check("the C library's line editing: erase", !strcmp(b, "abc\n"), b);
+    check("... echoed", grid_has("edit> abc") == 1, "");
+    prompt("pieces> ");
+    char p1[4] = "", p2[4] = "", p3[4] = "";
+    read(0, p1, 2); read(0, p2, 2); n = read(0, p3, 3);
+    tcsetattr(0, TCSANOW, &orig);
+    check("a line handed out in pieces", !memcmp(p1, "12", 2) && !memcmp(p2, "34", 2) && n == 2 && !memcmp(p3, "5\n", 2), "");
+    char *pw = getpass("Password: ");
+    check("getpass", pw && !strcmp(pw, "pw123"), pw);
+    check("... not echoed", grid_has("pw123") == 0, "");
+    prompt("cooked> ");
+    b[0] = 0;
+    fgets(b, sizeof b, stdin);
+    checks("cooked again: a line", b, "plain\n");
+    printf("libctest tty: %d checks, %d failed\n", nchk, nfail);
+    return nfail ? 1 : 0;
+}
+
 static int atexit_ran;
 static void at_end(void) { if (!atexit_ran++) dprintf(1, "atexit ran\n"); }
 
@@ -352,6 +754,7 @@ int main(int argc, char **argv)
         printf("stream buffers in the first chunk: %s (%u -> %u)\n", m1 == m0 ? "yes" : "no", m0, m1);
         return 0;
     }
+    if (argc > 1 && !strcmp(argv[1], "tty")) return t_tty();
     atexit(at_end);
     t_formats();
     t_scan();
@@ -363,6 +766,15 @@ int main(int argc, char **argv)
     t_time();
     t_utf8();
     t_errors();
+    t_signals();
+    t_poll();
+    t_sockets();
+    t_helpers();
+    t_users();
+    t_glob();
+    t_regex();
+    t_spawn();
     printf("libctest: %d checks, %d failed\n", nchk, nfail);
+    if (argc > 2 && !strcmp(argv[1], "hold")) sleep((unsigned)atoi(argv[2]));   /* still running: free shows it */
     return nfail ? 1 : 0;
 }

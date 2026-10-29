@@ -52,11 +52,11 @@ struct sigaction { _sig_func_ptr sa_handler; sigset_t sa_mask; int sa_flags; };
 #define SIG_BLOCK   ZX_SIG_BLOCK
 #define SIG_UNBLOCK ZX_SIG_UNBLOCK
 #define SIG_SETMASK ZX_SIG_SETMASK
-#define sigemptyset(s)    (*(s) = 0, 0)
-#define sigfillset(s)     (*(s) = ~1ul, 0)
-#define sigaddset(s, n)   (*(s) |= 1ul << (n), 0)
-#define sigdelset(s, n)   (*(s) &= ~(1ul << (n)), 0)
-#define sigismember(s, n) ((int)((*(s) >> (n)) & 1))
+static __inline int sigemptyset(sigset_t *s) { *s = 0; return 0; }
+static __inline int sigfillset(sigset_t *s) { *s = ~1ul; return 0; }
+static __inline int sigaddset(sigset_t *s, int n) { *s |= 1ul << n; return 0; }
+static __inline int sigdelset(sigset_t *s, int n) { *s &= ~(1ul << n); return 0; }
+static __inline int sigismember(const sigset_t *s, int n) { return (int)((*s >> n) & 1); }
 _sig_func_ptr signal(int, _sig_func_ptr);
 int raise(int);
 int kill(pid_t, int);

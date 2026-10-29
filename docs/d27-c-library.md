@@ -1,7 +1,7 @@
 # D27: the C library, and D13 stage 2 decided (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 15); build steps 0 and 1 built 2026-10-29 (section
-13, "As built").** Roadmap block 3 ("A terminal
+Status: **design, revision 2 after two independent reviews (section 15); build steps 0-3 built 2026-10-29 (section 13,
+"As built").** Roadmap block 3 ("A terminal
 you can live in"): "a fuller C library (newlib); D13 stage 2 (shared libraries) decided". This note chooses the C
 library, says what Zenix's system calls must back, how it replaces libz's C half without making Zenix's own programs
 bigger, how it works with D13's shared code, decides D13 stage 2 (for the C library and for the text-UI library), and
@@ -543,9 +543,61 @@ measures it and the budgets are confirmed then):
      affected (they keep libz, then `dprintf`/`oputs`).
 2. **Pure:** `libc-pure.a`, the port's 64-bit division, the link scripts' init/fini lines (every existing output
    byte-identical, as 5.3 measured), `libctest` as ZEX2 on two consoles.
+   **As built (step 2, 2026-10-29):**
+   - `libctest.pzx` (`/tests/libctestpure`): `user/libctest.c` through `tools/purecc.sh`, the pure crt0, `link/pure.ld`
+     and `libc-pure.a` (Makefile: `.cpo`, `.cpuelf`, `.pzx` rules for `LIBCAPPS`). ZEX2, 78,368 bytes: 71,920 shared,
+     3,360 data, 14,024 bytes of memory per process (with its 16 KB stack counted apart); the ZEXE build 81,836.
+   - The 64-bit division: `libc/zenix/divdi3.c` (`__udivdi3`, `__umoddi3`, `__divdi3`, `__moddi3`; 570 bytes at
+     `-Os`): one `divu.l` for 32-bit operands, four for a 16-bit divisor (16-bit digits), else shift and subtract
+     (at most 64 steps); in both archives, so ahead of libgcc. It is 2 KB smaller than libgcc's: the time row of the
+     size table went from +13,632 to +11,604 bytes. `tools/libc-host-test.sh` checks it against the PC's division
+     (968 edge cases and 200,000 random ones, every divisor size, signed and unsigned).
+   - libgcc's `__muldi3` (the time code's 64-bit multiply) is linked into `libctestpure` and `mkzexe` accepts it: no
+     absolute reference into the shared part (section 7's check, done).
+   - The init/fini lines: checked again at 98f88cc, the tree built with and without them (the same build date and
+     test key): 151 outputs compared, only `libctest.zx` (which needs them) and `zenix.hdf` (which holds it) differ.
+   - `tools/libc-test.sh`'s second run (FS-UAE with fast RAM): `libctestpure hold 40` on consoles 2 and 3 at once,
+     every check passing in both; `free` shows one copy of its code and the second one saved, `ps` both running it,
+     and the copy freed when both end. The test's temporary files are named by the process (two run at once).
 3. **Terminal and processes:** termios (5.4), `TIOCGWINSZ`, `getpass`, `posix_spawn`, `system`, `popen`, `getpw*`,
    `glob`, `regcomp`; their `libctest` parts. *The C library is ready for the text-UI library and the first port (the
    next roadmap items).*
+   **As built (step 3, 2026-10-29):**
+   - New port files: `termios.c` (+ `include/sys/termios.h`, Linux's names and numbers), `spawn.c` (`posix_spawn`,
+     `posix_spawnp`, the file actions and attributes, `waitpid`, `wait`, `system`, `popen`/`pclose`, `getppid`),
+     `pwd.c` (`getpwnam`, `getpwuid`, `getgrnam`, `getgrgid`), `glob.c`, `regcomp.c` (over `user/regex.c`, which now
+     also compiles in the C library); `sys.c` gained `pipe2` and the read hook of the line editing. Headers:
+     `sys/socket.h`, `netinet/in.h`, `netinet/tcp.h`, `arpa/inet.h`, `netdb.h` (all `user/socket.h`, now one header for
+     both libraries), `sys/ioctl.h` (`struct winsize`, `TIOCGWINSZ` 0x5413), `poll.h`, `sys/poll.h`, `regex.h`
+     (picolibc's uses `size_t` without its header), `stdio.h` (+ `popen`, `pclose`); `signal.h`'s set operations
+     became inline functions (as macros they warned when used as statements).
+   - Moved out of `libz.c` into shared files (`user/zshare.h`), now in both libraries: `zsig.c` (the signals, the
+     process groups, the signals' names), `zpoll.c` (`poll`, `select`), `zsock.c` (the sockets, `fcntl`, `ioctl`, the
+     address texts, `getaddrinfo`), `zhelp.c` (`path_join`, `dir_list`, `path_find`, `zrealpath`, the colour rule and
+     the BRE translation, `zs_bre_to_ere`, which libz's `bre_to_ere` wraps) and, out of `pw.c`, `zpw.c` (the passwd
+     and group parser, `pw_slurp`, `read_secret`); `zenix.h` (libzenix) declares the helpers. The socket and poll
+     numbers come from the kernel's headers through `zenix-consts.h` (37 more names; the host test checks 137).
+     Every libz program's output is unchanged (the whole suite); the sum of the program files is 7.7 KB smaller than
+     step 1's (2 KB of it `libctest`), the largest growth 328 bytes (`nettest`: inlining across files lost);
+     `kernel.bin` is byte-identical.
+   - `libctest` grew to 143 checks (signals, `poll`/`select`, a UDP datagram to itself on the loopback, the helpers,
+     the users, `glob`, `regcomp`, `posix_spawn` with file actions, `envp` and a process group, `wait`, `system`,
+     `popen` both ways) and a `tty` part (15 checks, keys typed by the test: the console's size and `ENOTTY` on a
+     pipe, raw and back, ^C a byte without `ISIG`, `ICANON` without `ECHO` with nothing on the console's grid
+     (`CON_READ`), the line editing's erase and a line read in pieces, `getpass`, cooked again).
+   - Sizes: a raw program 568 bytes (536 at step 1: `read`'s hook), hello with `printf` 6,348, the sort tool 9,996;
+     `termios.c` is 1,288 bytes of code and 714 of BSS (its line), only in programs that set the terminal.
+   - *Decided here where the note is silent (for the main session to confirm):* `waitpid` gives SYS_wait's status
+     (the shell's `$?`: 128 + the signal for a program a signal ended) as an exit status, so `WIFSIGNALED` is never
+     true; a stopped child (`WUNTRACED`) is stopped by `SIGTSTP`; `waitpid(-1)` and `wait` find which child ended from
+     the process table before and after (SYS_wait does not say); `pid` 0 or below -1 answers `EINVAL`. `tcgetattr`
+     answers the settings this process set last (the kernel cannot be asked), cooked at the start. In the port's line
+     editing ^Z and ^\ are bytes (the kernel's raw mode signals only ^C); a line is at most 511 characters, refused
+     with the kernel's words. `VMIN`/`VTIME` are checked whatever `ICANON` is. `getpass` puts back the mode set last.
+     `posix_spawnattr_setsigmask` and `setsigdefault` answer `EINVAL` (the scheduling ones are absent); at most 8
+     opens per spawn. `system` does not ignore `SIGINT`/`SIGQUIT` while it waits (POSIX asks it). `glob`'s
+     unsupported flags answer `GLOB_ABEND`; `regexec`'s `REG_NOTEOL` answers `REG_INVARG`; `REG_NEWLINE` covers `^`
+     and `$` only; 9 groups at most are reported.
 4. **The bridge:** `dprintf`/`vdprintf`, `printf` to `dprintf(1, ...)` and the other renames across the tree; every
    test's output unchanged.
 5. **The switch, measured:** the size table for every program three ways; static counts for the hot programs; with the

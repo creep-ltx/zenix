@@ -87,8 +87,9 @@ TESTDRVS := fake
 NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 # programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
-# the C library's test program (DESIGN D27 section 11, tools/libc-test.sh), in the test images' /tests
-TESTLIBC := $(BUILD)/libctest.zx
+# the C library's test program (DESIGN D27 section 11, tools/libc-test.sh), in the test images' /tests: its ZEXE
+# build and its ZEX2 one (libctestpure)
+TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf $(TESTDRVS:%=$(BUILD)/drv-%.zx) $(BUILD)/libc-pure.a
 
@@ -556,9 +557,14 @@ STACK_netd := 8192
 # (tools/libc-consts.sh); the port's headers go ahead of picolibc's. A C library program links $(BUILD)/libc.a before
 # $(LIBGCC), with the long long printf (LIBC_LDFLAGS). ----
 include libc/picolibc/sources.mk
-LIBZ_SHARED := zmalloc zenv zout zerrtab     # libz's files the C library builds too (user/zshare.h; libz.uo below)
+# libz's files the C library builds too (user/zshare.h; libz.uo below): the allocator, the environment, the buffered
+# output, the error texts, the signals, poll and select, the sockets, the helpers (paths, colours) and the passwd parser
+LIBZ_SHARED := zmalloc zenv zout zerrtab zsig zpoll zsock zhelp zpw
+# the port: the system layer, the start and the end, the streams, strerror, dprintf, directories, the 64-bit division
+# (section 7: libgcc's is not pure), the terminal, processes, users, glob, regcomp (over user/regex.c, the one engine)
 LIBC_PORT = libc/zenix/sys.c libc/zenix/start.c libc/zenix/stdio.c libc/zenix/strerror.c libc/zenix/dprintf.c libc/zenix/dirent.c \
-             $(LIBZ_SHARED:%=user/%.c)
+             libc/zenix/divdi3.c libc/zenix/termios.c libc/zenix/spawn.c libc/zenix/pwd.c libc/zenix/glob.c libc/zenix/regcomp.c \
+             user/regex.c $(LIBZ_SHARED:%=user/%.c)
 LIBC_O2 := $(filter newlib/libc/machine/m68k/%,$(LIBC_SRCS)) \
            $(addprefix newlib/libc/string/,memchr.c memcmp.c memmove.c strcat.c strchr.c strcmp.c strcpy.c strcspn.c \
              strlen.c strncat.c strncmp.c strncpy.c strnlen.c strrchr.c strspn.c strstr.c) \
@@ -571,7 +577,8 @@ LIBC_INC := -Ilibc/zenix/include -I$(BUILD)/libc-inc -Ilibc/picolibc/newlib/libc
 LIBC_CFLAGS := -m68020-60 -msoft-float -ffreestanding -nostdlib -g -ffunction-sections -fdata-sections -fno-common \
                -frounding-math -fsignaling-nans -fno-builtin-copysignl -fno-stack-protector -D_LIBC -U_FORTIFY_SOURCE \
                $(LIBC_INC)
-LIBC_HDRS := $(BUILD)/libc-inc/zenix-consts.h libc/picolibc/picolibc.h $(wildcard libc/zenix/include/*.h libc/zenix/include/sys/*.h)
+LIBC_HDRS := $(BUILD)/libc-inc/zenix-consts.h libc/picolibc/picolibc.h $(wildcard libc/zenix/include/*.h libc/zenix/include/*/*.h) \
+             user/socket.h user/zpw.h user/regex.h
 LIBC_OBJS = $(patsubst %,$(BUILD)/lc/%.o,$(basename $(LIBC_SRCS))) $(patsubst %.c,$(BUILD)/lcz/%.o,$(LIBC_PORT))
 LIBC_POBJS = $(patsubst %,$(BUILD)/lcp/%.o,$(basename $(LIBC_SRCS))) $(patsubst %.c,$(BUILD)/lczp/%.o,$(LIBC_PORT))
 LIBC_OPT = $(if $(filter $(1),$(LIBC_O2)),-O2,-Os)
@@ -579,7 +586,7 @@ LIBC_NOBUILTIN = $(if $(filter newlib/libc/machine/m68k/%,$(1)),-fno-builtin)
 # mkostemps' mask names O_SYNC, which Zenix does not define (a caller cannot pass it): 0 there
 LIBC_DEF_newlib/libc/tinystdio/mktemp.c := -DO_SYNC=0
 LIBC_LDFLAGS := -Wl,--defsym=vfprintf=__l_vfprintf -Wl,--defsym=vfscanf=__l_vfscanf
-$(BUILD)/libc-inc/zenix-consts.h: tools/libc-consts.sh kernel/kernel.h kernel/fsproto.h kernel/ext2.h user/usys.h
+$(BUILD)/libc-inc/zenix-consts.h: tools/libc-consts.sh kernel/kernel.h kernel/fsproto.h kernel/ext2.h kernel/netproto.h user/usys.h
 	@mkdir -p $(dir $@)
 	tools/libc-consts.sh $@
 $(BUILD)/lc/%.o: libc/picolibc/%.c $(LIBC_HDRS)
@@ -630,6 +637,16 @@ $(BUILD)/libc-pure.a: $(LIBC_POBJS) tools/check-68020-60.sh
 	rm -f $@
 	$(TOOLPREFIX)ar rcs $@ $(LIBC_POBJS)
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
+# C library programs with shared code (ZEX2, DESIGN D27 section 7): compiled through tools/purecc.sh, linked with the
+# pure crt0, link/pure.ld and libc-pure.a (its own 64-bit division ahead of libgcc's, which a pure program cannot use);
+# libctest.pzx is /tests/libctestpure on the test images (tools/libc-test.sh runs it on two consoles at once)
+$(LIBCAPPS:%=$(BUILD)/%.cpo): $(BUILD)/%.cpo: user/%.c $(LIBC_HDRS) tools/purecc.sh | $(BUILD)
+	tools/purecc.sh $(CC) $(LIBC_PFLAGS) -c $< -o $@
+$(BUILD)/%.cpuelf: $(BUILD)/%.cpo $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link/pure.ld
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $< $(BUILD)/libc-pure.a $(LIBGCC) -o $@
+$(LIBCAPPS:%=$(BUILD)/%.pzx): $(BUILD)/%.pzx: $(BUILD)/%.cpuelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)
@@ -638,7 +655,8 @@ $(BUILD)/crt0.o: user/crt0.S | $(BUILD)
 # joined into one object (ld -r keeps every function's section, so --gc-sections still takes only what is called)
 $(BUILD)/libz-main.uo: user/libz.c user/libz.h user/zshare.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@
-$(LIBZ_SHARED:%=$(BUILD)/%.uo) $(LIBZ_SHARED:%=$(BUILD)/%.po): user/zshare.h
+$(LIBZ_SHARED:%=$(BUILD)/%.uo) $(LIBZ_SHARED:%=$(BUILD)/%.po): user/zshare.h user/zpw.h
+$(BUILD)/zsock.uo $(BUILD)/zsock.po: user/socket.h kernel/netproto.h
 $(BUILD)/libz.uo: $(BUILD)/libz-main.uo $(LIBZ_SHARED:%=$(BUILD)/%.uo)
 	$(CC) -m68020-60 -nostdlib -r $^ -o $@
 $(BUILD)/libz-main.po: user/libz.c user/libz.h user/zshare.h user/usys.h tools/purecc.sh | $(BUILD)

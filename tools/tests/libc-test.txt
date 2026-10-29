@@ -11,4 +11,18 @@ send typed line\r
 wait first chunk 30
 send echo ==d""done\r
 wait ==ddone 30
+send /tests/libctest tty; echo ==e""done\r
+wait raw> 30
+send x\x03
+wait secret> 20
+send hidden words\r
+wait edit> 20
+send abX\x7fc\r
+wait pieces> 20
+send 12345\r
+wait Password: 20
+send pw123\r
+wait cooked> 20
+send plain\r
+wait ==edone 30
 stop

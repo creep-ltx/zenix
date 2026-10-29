@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #pragma once
 #include "libz.h"
-/* /etc/passwd:  name:hash:uid:gid:comment:home:shell      /etc/group:  name::gid:member,member
- * hash: empty = no password, "*" = account locked, else "ROUNDS$salt$hex", or the older "salt$hex" = 100 rounds (sha.c).
- * The uid and gid fields must be decimal numbers (0-65535): a line where they are not is ignored, never read as 0. */
-struct pw { char name[32], hash[100], comment[48], home[64], shell[32]; u32 uid, gid; };
-struct gr { char name[32]; u32 gid; char members[128]; };
-int pw_byname(const char *name, struct pw *out);       /* 0 found, -1 not */
-int pw_byuid(u32 uid, struct pw *out);
-int gr_byname(const char *name, struct gr *out);
-int gr_bygid(u32 gid, struct gr *out);
+#include "zpw.h"                        /* struct pw, struct gr and the parser (zpw.c) */
 const char *pw_name(u32 uid, char *buf);                /* name, or the number as text when unknown */
 const char *gr_name(u32 gid, char *buf);
-int read_secret(const char *prompt, char *buf, int max);
-char *pw_slurp(const char *path, int *len);              /* the whole file, malloc'd (free it), NUL-terminated; 0 if unreadable */
 int pw_replace(const char *who, const char *path, const char *data, u32 len, u32 mode);   /* PATH.new, then rename over: 0 or -1 (said) */
 int gr_has(const char *list, const char *name);         /* NAME in a comma-separated member list */
 void gr_drop(char *list, const char *name);             /* take NAME out of such a list, in place */

@@ -56,10 +56,14 @@ zenix/
 - **The C library:** `libz.c`, `libz.h`, `usys.h` (system call wrappers), `socket.h` (the BSD socket calls, DESIGN D19), `crt0.S` (program start-up). Zenix's
   own small library, which every program built so far uses; the files it shares with the standard C library (DESIGN
   D27): `zshare.h`, `zmalloc.c` (the allocator), `zenv.c` (the environment), `zout.c` (the buffered output),
-  `zerrtab.c` (the error texts). `libctest.c`: the standard C library's test program (`/tests/libctest`).
+  `zerrtab.c` (the error texts), `zsig.c` (signals), `zpoll.c` (`poll`, `select`), `zsock.c` (sockets), `zhelp.c`
+  (paths, directories, colours), `zpw.c` and `zpw.h` (the passwd and group parser; `pw.c` keeps the editing);
+  `socket.h` is the sockets' one header for both. `libctest.c`: the standard C library's test program
+  (`/tests/libctest`, and its ZEX2 build `/tests/libctestpure`).
 - **`libc/`, the standard C library (DESIGN D27, docs/d27-c-library.md):** `picolibc/` picolibc 1.8.10, only the files
   built (`sources.mk`, `picolibc.h`, its licences, README); `zenix/` Zenix's port (the system layer, the streams,
-  the start and exit, `strerror`, `dprintf`, directories) and `zenix/include/` the headers with Zenix's numbers.
+  the start and exit, `strerror`, `dprintf`, directories, the 64-bit division, termios, `posix_spawn` and the
+  waits, users, `glob`, `regcomp`) and `zenix/include/` the headers with Zenix's numbers.
   Built into `build/libc.a` and `build/libc-pure.a`.
 - **The shell:** `sh.c`.
 - **Commands:** one file per program, `NAME.c`, each with a manual page in `docs/man/NAME.txt`. The list:
