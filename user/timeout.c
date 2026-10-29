@@ -6,15 +6,15 @@ int main(int argc, char **argv)
 {
     int i = 1, sig = SIGTERM;
     if (i + 1 < argc && !strcmp(argv[i], "-s")) {
-        if ((sig = zsig_num(argv[i + 1])) <= 0) { fprintf(2, "timeout: %s: invalid signal\n", argv[i + 1]); return 2; }
+        if ((sig = zsig_num(argv[i + 1])) <= 0) { dprintf(2, "timeout: %s: invalid signal\n", argv[i + 1]); return 2; }
         i += 2;
     }
-    if (argc - i < 2) { fprintf(2, "usage: timeout [-s SIGNAL] seconds command [argument...]\n"); return 2; }
+    if (argc - i < 2) { dprintf(2, "usage: timeout [-s SIGNAL] seconds command [argument...]\n"); return 2; }
     u32 limit = (u32)atoi(argv[i]) * 100;                 /* 100 ticks a second */
     char path[160];
-    if (!path_find(argv[i + 1], path, sizeof path)) { fprintf(2, "timeout: %s: command not found\n", argv[i + 1]); return 127; }
+    if (!path_find(argv[i + 1], path, sizeof path)) { dprintf(2, "timeout: %s: command not found\n", argv[i + 1]); return 127; }
     int pid = sys_spawn(path, argv + i + 1, 0);           /* in our job's group, the terminal's foreground (DESIGN D16) */
-    if (pid < 0) { fprintf(2, "timeout: %s: %s\n", argv[i + 1], zwhy("cannot run")); return 127; }
+    if (pid < 0) { dprintf(2, "timeout: %s: %s\n", argv[i + 1], zwhy("cannot run")); return 127; }
     u32 start = sys_ticks();
     for (;;) {
         int st = sys_waitnb(pid);

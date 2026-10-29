@@ -69,7 +69,7 @@ static int try_mount(const char *name, int mode, int share)
     fs_dev = disk_open(name, 0);
     if (fs_dev < 0 || !ext2_probe()) return -1;
     if (ext2_mount_as(mode)) {
-        printf("fsd: %s: %s\n", name, ext2_why);
+        dprintf(1, "fsd: %s: %s\n", name, ext2_why);
         return -1;
     }
     strncpy(devname, name, sizeof devname - 1);
@@ -452,7 +452,7 @@ int main(int argc, char **argv)
     ext2_busy = open_busy;
     disk_port = sys_port_find("disk");                /* a registered service: calling it starts diskd if need be */
     int share = argc > 3 && !strcmp(argv[3], "-fsck"), root = share || (argc > 3 && !strcmp(argv[3], "-root"));
-    if (argc < 3) { printf("usage: fsd DEVICE PORT [-root|-fsck] [-id ID]\n"); return 2; }
+    if (argc < 3) { dprintf(1, "usage: fsd DEVICE PORT [-root|-fsck] [-id ID]\n"); return 2; }
     const char *pname = argv[2], *dev = argv[1], *who = root ? "fsd" : pname;
     char name[16];
     int self = sys_svc_self(), restart = (self & 0xFFFF) > 1;
@@ -462,19 +462,19 @@ int main(int argc, char **argv)
         dev = name;
     }
     if (try_mount(dev, root ? EXT2_RW : EXT2_ANY, share)) {
-        if (root) printf("fsd: no writable ext2 filesystem on %s for the root\n", dev);
-        else printf("%s: %s is not an ext2 filesystem Zenix can mount, or is in use\n", who, dev);
+        if (root) dprintf(1, "fsd: no writable ext2 filesystem on %s for the root\n", dev);
+        else dprintf(1, "%s: %s is not an ext2 filesystem Zenix can mount, or is in use\n", who, dev);
         return 1;
     }
     if ((self & SVC_MIDREQ) && !ext2_readonly) {        /* ext2 has no journal: the change may be half done (D11 5.4) */
         int e = ext2_mark_unclean();
         need = marked = 1;
-        printf("%s: %s was being changed when its server ended: check it with fsck.ext2\n", who, dev);
+        dprintf(1, "%s: %s was being changed when its server ended: check it with fsck.ext2\n", who, dev);
         if (e < 0)
-            printf("%s: %s: could not mark it \"needs a check\" on the disk (error %d): run fsck.ext2 by hand\n", who, dev, e);
+            dprintf(1, "%s: %s: could not mark it \"needs a check\" on the disk (error %d): run fsck.ext2 by hand\n", who, dev, e);
     }
     int port = sys_port_create(pname);
-    if (port < 0) { printf("%s: cannot create the port %s\n", who, pname); return 1; }
+    if (port < 0) { dprintf(1, "%s: cannot create the port %s\n", who, pname); return 1; }
     if (restart) {                                      /* the inodes the kernel holds open on us (D11 5.4) */
         static u32 ino[160];
         int n = sys_svc_opens(ino, sizeof ino);
@@ -483,7 +483,7 @@ int main(int argc, char **argv)
             open_ref(ino[i]);
             if (!ext2_iget(ino[i], &t) && !t.links) open_busy(ino[i]);  /* an orphan of the server before */
         }
-        if (n < 0) printf("%s: %s: restart: the open files are unknown (%d): space of deleted open files stays used until fsck.ext2\n", who, dev, n);
+        if (n < 0) dprintf(1, "%s: %s: restart: the open files are unknown (%d): space of deleted open files stays used until fsck.ext2\n", who, dev, n);
     }
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {

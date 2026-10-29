@@ -23,12 +23,12 @@ static int open_ep(struct ep *e, const char *name, int write, u32 seek)
             m.type = DISK_INFOSZ; m.a[0] = (u32)h; m.a[1] = (u32)&di; m.a[2] = sizeof di;
             if (sys_call(port, &m) < 0) return -1;
             e->dev = 1; e->h = h; e->sectors = di.sectors;
-            if (bs % 512) { fprintf(2, "dd: the block size for a disk must be a multiple of 512\n"); return -1; }
+            if (bs % 512) { dprintf(2, "dd: the block size for a disk must be a multiple of 512\n"); return -1; }
             return 0;
         }
     }
     e->fd = write ? sys_open(name, O_WRONLY | O_CREAT | (seek ? 0 : O_TRUNC)) : sys_open(name, O_RDONLY);
-    if (e->fd < 0) { fprintf(2, "dd: cannot open %s\n", name); return -1; }
+    if (e->fd < 0) { dprintf(2, "dd: cannot open %s\n", name); return -1; }
     return 0;
 }
 
@@ -58,9 +58,9 @@ int main(int argc, char **argv)
         else if (!strncmp(argv[i], "count=", 6)) count = (u32)atoi(argv[i] + 6);
         else if (!strncmp(argv[i], "skip=", 5)) skip = (u32)atoi(argv[i] + 5);
         else if (!strncmp(argv[i], "seek=", 5)) seek = (u32)atoi(argv[i] + 5);
-        else { fprintf(2, "usage: dd if=SRC of=DST [bs=N] [count=N] [skip=N] [seek=N]\n"); return 2; }
+        else { dprintf(2, "usage: dd if=SRC of=DST [bs=N] [count=N] [skip=N] [seek=N]\n"); return 2; }
     }
-    if (!in || !out || bs == 0 || bs > 65536) { fprintf(2, "usage: dd if=SRC of=DST [bs=N] [count=N] [skip=N] [seek=N]\n"); return 2; }
+    if (!in || !out || bs == 0 || bs > 65536) { dprintf(2, "usage: dd if=SRC of=DST [bs=N] [count=N] [skip=N] [seek=N]\n"); return 2; }
     port = sys_port_find("disk");
     struct ep a, b;
     if (open_ep(&a, in, 0, 0) || open_ep(&b, out, 1, seek)) return 1;
@@ -70,12 +70,12 @@ int main(int argc, char **argv)
     u32 recs = 0, partial = 0;
     while (recs + partial < count) {
         int n = xfer(&a, 0, skip + recs + partial, buf, bs);
-        if (n < 0) { fprintf(2, "dd: read error\n"); return 1; }
+        if (n < 0) { dprintf(2, "dd: read error\n"); return 1; }
         if (n == 0) break;
         int w = xfer(&b, 1, seek + recs + partial, buf, (u32)n);
-        if (w != n) { fprintf(2, "dd: write error\n"); return 1; }
+        if (w != n) { dprintf(2, "dd: write error\n"); return 1; }
         if ((u32)n == bs) recs++; else partial++;
     }
-    fprintf(2, "%u+%u records in\n%u+%u records out\n", recs, partial, recs, partial);   /* on stderr, as GNU dd */
+    dprintf(2, "%u+%u records in\n%u+%u records out\n", recs, partial, recs, partial);   /* on stderr, as GNU dd */
     return 0;
 }

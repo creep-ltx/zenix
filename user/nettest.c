@@ -15,7 +15,7 @@ static void result(const char *name, int ok, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    printf("nettest %s: %s (%s)\n", name, ok ? "PASS" : "FAIL", buf);
+    dprintf(1, "nettest %s: %s (%s)\n", name, ok ? "PASS" : "FAIL", buf);
     if (!ok) fails++;
 }
 
@@ -107,7 +107,7 @@ static int serve(const char *proto, int port, const char *mode)
     setsockopt(l, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     struct sockaddr_in a = sin(INADDR_ANY, port);
     if (l < 0 || bind(l, SA(a), sizeof a) || (!udp && listen(l, 16))) {
-        printf("nettest serve: %s port %d: %s\n", proto, port, zwhy("?"));
+        dprintf(1, "nettest serve: %s port %d: %s\n", proto, port, zwhy("?"));
         return 1;
     }
     static char buf[2048];
@@ -411,10 +411,10 @@ static void c_hang(void)
     struct sockaddr_in a = sin(INADDR_ANY, 7009);
     bind(l, SA(a), sizeof a);
     listen(l, 1);
-    printf("hang: waiting\n");
+    dprintf(1, "hang: waiting\n");
     oflush();
     accept(l, 0, 0);
-    printf("hang: accept returned: %s\n", zwhy("?"));
+    dprintf(1, "hang: accept returned: %s\n", zwhy("?"));
 }
 
 /* a listener for netstat to show (the script runs `netstat -l` meanwhile) */
@@ -426,7 +426,7 @@ static void c_listen(void)
     listen(l, 1);
     bind(u, SA(b), sizeof b);
     int c = dial(7010), s = accept(l, 0, 0);
-    printf("listen: ready\n");
+    dprintf(1, "listen: ready\n");
     oflush();
     sys_sleep(3000);
     sys_close(c); sys_close(s);
@@ -879,10 +879,10 @@ int main(int argc, char **argv)
             strncpy(pcname, argv[first + 1], sizeof pcname - 1);
             PC = ntohl(PC);
         } else if (!strcmp(argv[first], "-n") && atoi(argv[first + 1]) > 0) getsize = (u32)atoi(argv[first + 1]);
-        else { fprintf(2, "nettest: %s %s: not an address or a size\n", argv[first], argv[first + 1]); return 2; }
+        else { dprintf(2, "nettest: %s %s: not an address or a size\n", argv[first], argv[first + 1]); return 2; }
         first += 2;
     }
-    if (argc < first + 1) { fprintf(2, "usage: nettest [-p ADDR] [-n BYTES] CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup drvperm asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n"); return 2; }
+    if (argc < first + 1) { dprintf(2, "usage: nettest [-p ADDR] [-n BYTES] CHECK... (tcp udp poll nonblock names many perm restart partial sigpipe down giveup drvperm asm hang listen slip sliptcp slipget slipudp slipdns slipflood)\n"); return 2; }
     for (int i = first; i < argc; i++) {
         const char *c = argv[i];
         if (!strcmp(c, "tcp")) c_tcp();
@@ -907,7 +907,7 @@ int main(int argc, char **argv)
         else if (!strcmp(c, "slipudp")) c_slipudp();
         else if (!strcmp(c, "slipdns")) c_slipdns();
         else if (!strcmp(c, "slipflood")) c_slipflood();
-        else { printf("nettest: no check %s\n", c); fails++; }
+        else { dprintf(1, "nettest: no check %s\n", c); fails++; }
         oflush();
     }
     return fails;

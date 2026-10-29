@@ -112,7 +112,7 @@ int main(int argc, char **argv)
     int dma = 0, bad = 0, claim = 0;
     u32 region = 0, rlen = 0;
     char line[160];
-    if (argc < 2) { printf("usage: fake IFACE [dma] [bad]\n"); return 2; }
+    if (argc < 2) { dprintf(1, "usage: fake IFACE [dma] [bad]\n"); return 2; }
     ifn = argv[1];
     for (int i = 2; i < argc; i++) {
         if (!strcmp(argv[i], "dma")) dma = 1;

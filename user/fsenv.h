@@ -24,4 +24,4 @@ static inline u32 fs_ticks(void) { return sys_ticks(); }
 static inline u32 fs_time(void) { return (u32)sys_time(); }
 int fs_blk_read(u32 lba, u32 count, void *buf);
 int fs_blk_write(u32 lba, u32 count, const void *buf);
-#define fs_log printf
+#define fs_log(...) dprintf(1, __VA_ARGS__)

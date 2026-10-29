@@ -6,10 +6,10 @@ static int show(const char *name)
 {
     char path[100]; snprintf(path, sizeof path, DIR "%s.txt", name);
     struct ustat st;
-    if (sys_stat(path, &st) < 0) { fprintf(2, "man: no manual entry for %s\n", name); return 1; }
+    if (sys_stat(path, &st) < 0) { dprintf(2, "man: no manual entry for %s\n", name); return 1; }
     char *av[3] = { "less", path, 0 };
     int pid = sys_spawn("/bin/less", av, 0);
-    if (pid < 0) { fprintf(2, "man: cannot run the pager\n"); return 1; }
+    if (pid < 0) { dprintf(2, "man: cannot run the pager\n"); return 1; }
     int rc = sys_wait(pid);             /* the pager is in our job's group, the terminal's foreground (DESIGN D16) */
     return rc;
 }
@@ -34,14 +34,14 @@ static int keyword(const char *w)
             char *sum = strstr(text, "SYNOPSIS AND DESCRIPTION"); sum = sum ? strchr(sum, '\n') : 0;
             char line[100]; k = 0; if (sum) { sum++; while (*sum == ' ') sum++; while (*sum && *sum != '\n' && k < 90) line[k++] = *sum++; } line[k] = 0;
             char nm[40]; strncpy(nm, names[i], 39); nm[39] = 0; char *dot = strstr(nm, ".txt"); if (dot) *dot = 0;
-            printf("%-14s %s\n", nm, line); found = 1;
+            dprintf(1, "%-14s %s\n", nm, line); found = 1;
         }
     }
     return found ? 0 : 1;
 }
 int main(int argc, char **argv)
 {
-    if (argc < 2) { fprintf(2, "usage: man name...   |   man -k word\n"); return 1; }
+    if (argc < 2) { dprintf(2, "usage: man name...   |   man -k word\n"); return 1; }
     if (!strcmp(argv[1], "-k")) { if (argc < 3) return 1; return keyword(argv[2]); }
     int rc = 0;
     for (int i = 1; i < argc; i++) rc |= show(argv[i]);

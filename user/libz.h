@@ -2,26 +2,25 @@
 #pragma once
 #include "usys.h"
 #include <stdarg.h>
-typedef unsigned long size_t;
-u32 strlen(const char *s);
+typedef __SIZE_TYPE__ size_t;            /* the compiler's, as the C library's (DESIGN D27 6 step 2) */
+size_t strlen(const char *s);
 int strcmp(const char *a, const char *b);
-int strncmp(const char *a, const char *b, u32 n);
+int strncmp(const char *a, const char *b, size_t n);
 char *strcpy(char *d, const char *s);
 char *strchr(const char *s, int c);
 char *strstr(const char *h, const char *n);
-void *memcpy(void *d, const void *s, unsigned long n);
-void *memset(void *d, int c, unsigned long n);
-void *memmove(void *d, const void *s, unsigned long n);
-void *malloc(u32 n);
+void *memcpy(void *d, const void *s, size_t n);
+void *memset(void *d, int c, size_t n);
+void *memmove(void *d, const void *s, size_t n);
+void *malloc(size_t n);
 void free(void *p);
 void *rheap_alloc(u32 n);                 /* the region heap: small first-fit blocks, for servers (libz.c) */
 void rheap_free(void *p);
 u32 rheap_size(const void *p);             /* the bytes a block holds (with its header) */
 void *xmalloc(u32 n);                     /* malloc, or "NAME: out of memory" and exit status 1 */
-void *calloc(unsigned long n, unsigned long size);   /* zeroed; NULL on overflow or no memory */
-void *realloc(void *p, unsigned long n);  /* in place if it fits; copies only the old block; NULL leaves p as it was */
-int fprintf(int fd, const char *fmt, ...);
-int printf(const char *fmt, ...);
+void *calloc(size_t n, size_t size);   /* zeroed; NULL on overflow or no memory */
+void *realloc(void *p, size_t n);  /* in place if it fits; copies only the old block; NULL leaves p as it was */
+int dprintf(int fd, const char *fmt, ...);   /* POSIX's: unbuffered, straight to fd (DESIGN D27 6 step 2) */
 int atoi(const char *s);
 const char *zwhy(const char *dflt);   /* the text of the last failure's error number (zerrno: "permission denied" ...), else dflt */
 const char *zstrerror(int e);         /* strerror: the text of an error number (either sign), 0 if unknown */
@@ -34,7 +33,7 @@ void dir_free(char **names, int n);
 /* the absolute name of a path with ., .. and symbolic links resolved as the kernel follows them (DESIGN D26: at most
  * 40 links; the path need not exist): 0 and out (cap bytes, at most 160 used), -1 when it cannot be resolved (a loop,
  * a link that cannot be read, a name too long). Its buffers are on the stack (under 1 KB, no recursion) */
-int zrealpath(const char *in, char *out, u32 cap);
+int zrealpath(const char *in, char *out, size_t cap);
 /* one line of /etc/svctab or /etc/daemons (DESIGN D11 4.4, D24 7): "NAME NICE PROGRAM [ARGUMENTS]", cut in place (tabs
  * made spaces: the kernel splits a program's words at spaces). 1: *name, *nice and *prog set; 0: blank or a # comment;
  * -EINVAL: a bad line (*name its first word, for the message). One parser for boot and init */
@@ -43,20 +42,20 @@ int svc_line(char *l, char **name, int *nice, char **prog);
 /* more of the C library */
 char *strdup(const char *s);
 char *strcat(char *d, const char *s);
-char *strncpy(char *d, const char *s, u32 n);
+char *strncpy(char *d, const char *s, size_t n);
 char *strrchr(const char *s, int c);
-int memcmp(const void *a, const void *b, unsigned long n);
+int memcmp(const void *a, const void *b, size_t n);
 long strtol(const char *s, char **end, int base);
 unsigned long strtoul(const char *s, char **end, int base);
-void qsort(void *base, u32 n, u32 size, int (*cmp)(const void *, const void *));
-int snprintf(char *buf, u32 max, const char *fmt, ...);
+void qsort(void *base, size_t n, size_t size, int (*cmp)(const void *, const void *));
+int snprintf(char *buf, size_t max, const char *fmt, ...);
 int sprintf(char *buf, const char *fmt, ...);
-int vsnprintf(char *buf, u32 max, const char *fmt, va_list ap);
-int vfprintf(int fd, const char *fmt, va_list ap);
+int vsnprintf(char *buf, size_t max, const char *fmt, va_list ap);
+int vdprintf(int fd, const char *fmt, va_list ap);
 int isdigit(int c); int isalpha(int c); int isalnum(int c); int isspace(int c);
 int isupper(int c); int islower(int c); int toupper(int c); int tolower(int c);
 char *getenv(const char *name);
-int path_find(const char *name, char *out, u32 max);   /* a program by name through $PATH, as sh does: 1 = found (out) */
+int path_find(const char *name, char *out, size_t max);   /* a program by name through $PATH, as sh does: 1 = found (out) */
 char *bre_to_ere(const char *bre);   /* a basic regular expression in the extended syntax of regex.c (malloc'd) */
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);

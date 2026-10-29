@@ -10,13 +10,13 @@ int main(int argc, char **argv)
     if (i < argc && !strcmp(argv[i], "-")) { login_env = 1; i++; }
     if (i < argc) target = argv[i];
     struct pw p;
-    if (pw_byname(target, &p)) { fprintf(2, "su: %s: no such user\n", target); return 1; }
+    if (pw_byname(target, &p)) { dprintf(2, "su: %s: no such user\n", target); return 1; }
     if (sys_getuid() != 0 && p.hash[0]) {
         char pass[100];
-        if (read_secret("Password: ", pass, sizeof pass) || !pw_check(pass, p.hash)) { sys_sleep(100); fprintf(2, "su: wrong password\n"); return 1; }
+        if (read_secret("Password: ", pass, sizeof pass) || !pw_check(pass, p.hash)) { sys_sleep(100); dprintf(2, "su: wrong password\n"); return 1; }
     }
     sys_setgid(p.gid);
-    if (sys_setuid(p.uid) < 0) { fprintf(2, "su: not permitted\n"); return 1; }
+    if (sys_setuid(p.uid) < 0) { dprintf(2, "su: not permitted\n"); return 1; }
     /* the target's environment, not the caller's: a PATH, HOME or IFS the caller set must not steer a shell that runs
      * as someone else (as root: the caller's ~/.shrc or their own programs first in PATH) */
     setenv("USER", p.name, 1); setenv("LOGNAME", p.name, 1); setenv("HOME", p.home, 1); setenv("SHELL", p.shell, 1);
@@ -25,6 +25,6 @@ int main(int argc, char **argv)
     if (login_env) sys_chdir(p.home);
     char *av[] = { p.shell, 0 };
     int pid = sys_spawn(p.shell, av, 0);
-    if (pid < 0) { fprintf(2, "su: cannot start %s\n", p.shell); return 1; }
+    if (pid < 0) { dprintf(2, "su: cannot start %s\n", p.shell); return 1; }
     return sys_wait(pid);               /* the shell makes its own group the terminal's foreground (DESIGN D16) */
 }

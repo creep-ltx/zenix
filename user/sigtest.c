@@ -15,7 +15,7 @@ static void result(const char *name, int ok, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    printf("sigtest %s: %s (%s)\n", name, ok ? "PASS" : "FAIL", buf);
+    dprintf(1, "sigtest %s: %s (%s)\n", name, ok ? "PASS" : "FAIL", buf);
     if (!ok)
         fails++;
 }
@@ -143,7 +143,7 @@ static int blockterm_main(void)
     sigset_t s = 1u << SIGTERM;
     sigprocmask(SIG_BLOCK, &s, 0);
     raise(SIGTERM);
-    printf("sigtest: still alive with SIGTERM blocked\n");
+    dprintf(1, "sigtest: still alive with SIGTERM blocked\n");
     sigprocmask(SIG_UNBLOCK, &s, 0);
     return 5;                           /* not reached */
 }
@@ -280,7 +280,7 @@ static void t_ttyread(void)
 {
     catch(SIGALRM, count, 0, SA_RESTART);
     reset_hits();
-    printf("sigtest: type a line\n");
+    dprintf(1, "sigtest: type a line\n");
     sys_alarm(20);
     char b[32];
     int n = sys_read(0, b, sizeof b - 1);
@@ -428,7 +428,7 @@ static void t_select(void)
     p[0].fd = 0; p[0].events = POLLIN;
     p[1].fd = fds[0]; p[1].events = POLLIN;
     p[2].fd = port; p[2].events = POLLIN | POLLPORT;
-    printf("sigtest: type for select\n");
+    dprintf(1, "sigtest: type for select\n");
     u32 t0 = sys_ticks();
     int r = poll(p, 3, 20000);
     u32 dt = sys_ticks() - t0;
@@ -474,7 +474,7 @@ static int contchild_main(void)
     catch(SIGUSR1, count, 0, SA_RESTART);
     while (!hits[SIGUSR1] || !hits[SIGCONT])
         sys_sleep(2);
-    printf("sigtest: child order %d %d\n", order[0], order[1]);
+    dprintf(1, "sigtest: child order %d %d\n", order[0], order[1]);
     return 10 * order[0] + order[1] == 10 * SIGCONT + SIGUSR1 || 10 * order[0] + order[1] == 10 * SIGUSR1 + SIGCONT
            ? 0 : 1;
 }
@@ -596,30 +596,30 @@ static void t_forged(void)
 static void on_tstp(int sig)
 {
     (void)sig;
-    printf("sigtest: TSTP handler ran\n");
+    dprintf(1, "sigtest: TSTP handler ran\n");
     signal(SIGTSTP, SIG_DFL);
     sigset_t m = 1u << SIGTSTP;
     sigprocmask(SIG_UNBLOCK, &m, 0);
     raise(SIGTSTP);                     /* stop for real, as a program that restored its terminal first */
     signal(SIGTSTP, on_tstp);
 }
-static void on_cont(int sig) { (void)sig; printf("sigtest: CONT handler ran\n"); }
+static void on_cont(int sig) { (void)sig; dprintf(1, "sigtest: CONT handler ran\n"); }
 static int jobber_main(void)
 {
     signal(SIGTSTP, on_tstp);
     signal(SIGCONT, on_cont);
-    printf("sigtest: jobber ready\n");
+    dprintf(1, "sigtest: jobber ready\n");
     for (;;)
         sys_sleep(100);
     return 0;
 }
 
 /* ---- intr: SIGINT with a handler (the shell's ^C test): prints and ends with 3 ---- */
-static void on_int(int sig) { (void)sig; printf("sigtest: INT handler ran\n"); sys_exit(3); }
+static void on_int(int sig) { (void)sig; dprintf(1, "sigtest: INT handler ran\n"); sys_exit(3); }
 static int intr_main(void)
 {
     signal(SIGINT, on_int);
-    printf("sigtest: waiting for ^C\n");
+    dprintf(1, "sigtest: waiting for ^C\n");
     for (;;)
         sys_sleep(100);
     return 0;
@@ -663,7 +663,7 @@ int main(int argc, char **argv)
         if (k < sizeof checks / sizeof checks[0])
             checks[k].fn();
         else {
-            printf("sigtest: unknown check %s\n", argv[i]);
+            dprintf(1, "sigtest: unknown check %s\n", argv[i]);
             fails++;
         }
     }

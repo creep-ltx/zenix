@@ -19,7 +19,7 @@ int main(int argc, char **argv)
     if (!strcmp(me, "bootamigaos"))
         note = BOOTNOTE_AMIGAOS;
     if (argc > 2 || (argc == 2 && note)) {
-        fprintf(2, "usage: reboot [amigaos|zenix]   (bootamigaos = reboot amigaos)\n");
+        dprintf(2, "usage: reboot [amigaos|zenix]   (bootamigaos = reboot amigaos)\n");
         return 2;
     }
     if (argc == 2) {
@@ -28,7 +28,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[1], "zenix"))
             note = BOOTNOTE_ZENIX;
         else {
-            fprintf(2, "reboot: %s: not a system (amigaos or zenix)\n", argv[1]);
+            dprintf(2, "reboot: %s: not a system (amigaos or zenix)\n", argv[1]);
             return 2;
         }
     }
@@ -42,6 +42,6 @@ int main(int argc, char **argv)
     }
     int r = sys_reboot(note);
     const char *t = zstrerror(r);
-    fprintf(2, "reboot: %s\n", r == -EPERM ? "only root may reboot" : t ? t : "failed");
+    dprintf(2, "reboot: %s\n", r == -EPERM ? "only root may reboot" : t ? t : "failed");
     return 1;
 }

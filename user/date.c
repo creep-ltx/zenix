@@ -23,8 +23,8 @@ int main(int argc, char **argv)
 {
     if (argc > 2 && !strcmp(argv[1], "-s")) {
         u32 t = parse_time(argv[2]);
-        if (!t) { fprintf(2, "date: invalid date '%s' (use YYYY-MM-DD HH:MM:SS)\n", argv[2]); return 1; }
-        if (sys_settime(t) < 0) { fprintf(2, "date: cannot set the clock: %s\n", zwhy("refused")); return 1; }   /* root only */
+        if (!t) { dprintf(2, "date: invalid date '%s' (use YYYY-MM-DD HH:MM:SS)\n", argv[2]); return 1; }
+        if (sys_settime(t) < 0) { dprintf(2, "date: cannot set the clock: %s\n", zwhy("refused")); return 1; }   /* root only */
     }
     u32 t = (u32)sys_time();
     u32 days = t / 86400, rem = t % 86400;

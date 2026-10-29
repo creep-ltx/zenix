@@ -170,7 +170,7 @@ pointers.
   `/etc/resolv.conf`), 2 name servers; a lookup answers at most 4 addresses; `netstat` shows at most 64 rows.
   `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL); a pipe is non-blocking only when
   made so (`sys_pipe2(fds, O_NONBLOCK)`, both ends).
-- The C library (DESIGN D27, block 3 steps 1-3; programs built on it so far: `/tests/libctest`, `libctestpure`): paths at most 63 bytes
+- The C library (DESIGN D27, block 3 steps 1-4; programs built on it so far: `/tests/libctest`, `libctestpure`): paths at most 63 bytes
   (`PATH_MAX` 64), names 63, 16 descriptors (`OPEN_MAX`); `open`'s and `mkdir`'s mode is set by a `chmod` after the
   call (the system calls take none: not atomic); `stat` gives one time (the modification's) for all three; the wall
   clock has whole seconds (`gettimeofday`'s microseconds 0), `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
@@ -185,8 +185,9 @@ pointers.
   is the console's size. Processes: `posix_spawn`'s file actions only for the child's descriptors 0-2 (others
   `EINVAL`), at most 8 opens; `envp` set around the spawn; only `POSIX_SPAWN_SETPGROUP` (done right after the spawn);
   `waitpid` for one pid or any (-1; 0 and other groups `EINVAL`), a status as the shell's `$?` (`WIFSIGNALED` never
-  true: a program a signal ended shows 128 + the signal as its exit status); `system` does not ignore `SIGINT` and
-  `SIGQUIT` while it waits. `glob`: `*`, `?`, `[...]`, a backslash, the flags but `GLOB_BRACE`, `GLOB_TILDE`,
+  true: a program a signal ended shows 128 + the signal as its exit status); `system` ignores `SIGINT` and `SIGQUIT`
+  while it waits from the moment the caller runs again after the spawn (the child inherits ignored signals and
+  `SYS_spawn` cannot give it the defaults): a signal sent before that still reaches the caller. `glob`: `*`, `?`, `[...]`, a backslash, the flags but `GLOB_BRACE`, `GLOB_TILDE`,
   `GLOB_ALTDIRFUNC`, `GLOB_LIMIT` (`GLOB_ABEND`). `regcomp`: `user/regex.c`'s syntax, 9 groups reported, `REG_NEWLINE`
   only for `^` and `$`, `REG_NOTEOL` `REG_INVARG`. `getgrnam`'s members at most 127 bytes. `fcntl`, `ioctl` and the
   sockets as libz's (below and above: `O_NONBLOCK` on sockets and `pipe2` only).

@@ -1,6 +1,6 @@
 # D27: the C library, and D13 stage 2 decided (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 15); build steps 0-3 built 2026-10-29 (section 13,
+Status: **design, revision 2 after two independent reviews (section 15); build steps 0-4 built 2026-10-29 (section 13,
 "As built").** Roadmap block 3 ("A terminal
 you can live in"): "a fuller C library (newlib); D13 stage 2 (shared libraries) decided". This note chooses the C
 library, says what Zenix's system calls must back, how it replaces libz's C half without making Zenix's own programs
@@ -600,6 +600,31 @@ measures it and the budgets are confirmed then):
      and `$` only; 9 groups at most are reported.
 4. **The bridge:** `dprintf`/`vdprintf`, `printf` to `dprintf(1, ...)` and the other renames across the tree; every
    test's output unchanged.
+   **As built (step 4, 2026-10-29):**
+   - libz's `fprintf(int fd, ...)` and `vfprintf(int fd, ...)` are `dprintf` and `vdprintf` (the same code); libz's
+     `printf` is gone and its calls are `dprintf(1, ...)`: 137 files under `user/` and `net/` (a script's
+     mechanical rename; `fsenv.h`'s `fs_log` with them; lwIP's own files untouched, the C library's programs keep
+     C's `printf`); `pw.h`'s inline `fputs(s, fd)` is `pw_fputs`; libz's sizes are `size_t` (`__SIZE_TYPE__`,
+     `unsigned long` on m68k-elf as before: `strlen`, the `mem*` and `strn*` functions, `malloc`, `calloc`,
+     `realloc`, `qsort`, `snprintf`, `vsnprintf`, `path_find`, `zrealpath`). The PC builds of Zenix files
+     (`tools/host/zhost.h`, `zup-host.h`) map `dprintf` onto the host's streams, so a test's lines keep their order.
+   - Sizes (the whole tree against 5d892bd): the program files 1,380 bytes more in all (each `dprintf(1, ...)` pushes
+     one argument more); the largest growth `fsck.ext2` 444, `termtest` 340, `mount` 196; `kernel.bin` 64 more (fsd
+     inside it): the mount tests' floppy keeps 9,308 bytes (9,372 before). Every test's output unchanged (`make
+     check`).
+   - `system` ignores `SIGINT` and `SIGQUIT` while it waits and puts the caller's handlers back (the main session's
+     decision of 2026-10-29). Set **after** the spawn: a child inherits ignored and blocked signals (as across
+     `exec`) and `SYS_spawn` cannot reset them as POSIX's `fork` does in between, so ignoring first would make the
+     command deaf to ^C. A signal sent before the caller runs again after the spawn still reaches it (limits.md).
+     `libctest` checks it (3 checks: a command that signals its caller, the handlers back, the command's own
+     defaults through `libctest sigdfl`).
+   - *Found and fixed:* a C library program that does not use the environment crashed at its start: `_zstart` called
+     `zenv_load` through a weak reference, which is address 0 when `zenv.o` is not linked, and `mkzexe` relocated it
+     like any address, to the program's own start, which then called itself until the stack guard stopped it
+     (`libctest` uses the environment, so no test had met it; `tuitest` did). The environment is now loaded by a
+     pointer `zenv.c` puts in `.init_array` (C library build only; gcc's `constructor` attribute uses `.ctors` here,
+     which the link scripts drop), and `mkzexe` refuses an undefined weak symbol in a ZEXE as it does in a ZEX2
+     (`tools/mkzexe-test.sh` checks both).
 5. **The switch, measured:** the size table for every program three ways; static counts for the hot programs; with the
    owner home, the stock A1200's timed runs; then the base system on the C library + libzenix, libz's own C code
    deleted, the docs of section 12. Two reviews.
@@ -682,3 +707,11 @@ The owner answered **yes to every question above** (2026-10-28, "I think yes for
 - **`system()`** ignores SIGINT and SIGQUIT while it waits, as POSIX asks: done in step 4 (the bridge), with its test.
 - The other calls (wait's table compare, termios's remembered settings and raw-mode bytes, `REG_NOTEOL`,
   `REG_NEWLINE`, the unsupported spawn and glob flags) are accepted as built and stay listed in the step-3 "As built".
+
+## For the main session: step 4 (the builder helper, 2026-10-29)
+
+(The helper's notes for the main session's review; nothing here is decided by an owner question.)
+
+- The bridge and `system`'s signals as step 4's "As built" says; the window before the caller runs again is the
+  conservative choice (the command keeps ^C); a spawn that gives a child the default dispositions would close it
+  (a `SYS_spawn` flag, a kernel change: not proposed).

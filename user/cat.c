@@ -22,12 +22,12 @@ static int dump(int fd)
 int main(int argc, char **argv)
 {
     int i = 1, rc = 0;
-    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'n') o_n = 1; else if (*p == 'b') o_b = 1; else if (*p == 's') o_s = 1; else if (*p == 'E') o_E = 1; else { fprintf(2, "cat: unknown option -%c\n", *p); return 2; } }
+    for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'n') o_n = 1; else if (*p == 'b') o_b = 1; else if (*p == 's') o_s = 1; else if (*p == 'E') o_E = 1; else { dprintf(2, "cat: unknown option -%c\n", *p); return 2; } }
     if (o_b) o_n = 0;
     if (i >= argc) return dump(0);
     for (; i < argc; i++) {
         int fd = !strcmp(argv[i], "-") ? 0 : sys_open(argv[i], O_RDONLY);
-        if (fd < 0) { fprintf(2, "cat: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
+        if (fd < 0) { dprintf(2, "cat: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
         rc |= dump(fd); if (fd) sys_close(fd);
     }
     return rc;

@@ -18,7 +18,7 @@ struct drvq {
 
 static inline void drv_out(const char *name, const char *msg)
 {
-    printf("%s: %s\n", name, msg);      /* netd's standard output: the kernel log */
+    dprintf(1, "%s: %s\n", name, msg);      /* netd's standard output: the kernel log */
 }
 
 /* the hardware table (DRV_HWINFO); 0 if there is none */

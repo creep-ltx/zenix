@@ -11,7 +11,7 @@
 static int bad;
 static void check(const char *what, int ok)
 {
-    printf("badptr: %s %s\n", what, ok ? "ok" : "FAILED");
+    dprintf(1, "badptr: %s %s\n", what, ok ? "ok" : "FAILED");
     if (!ok) bad = 1;
 }
 
@@ -27,7 +27,7 @@ static int call(int port, u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
 static int ipc_checks(void)
 {
     static char buf[512];
-    if (sys_geteuid() == 0) { printf("badptr: ipc: run this as a normal user\n"); return 2; }
+    if (sys_geteuid() == 0) { dprintf(1, "badptr: ipc: run this as a normal user\n"); return 2; }
     check("ipc: port \"fs\" cannot be created", sys_port_create("fs") == -EBUSY);     /* registered services (D11) */
     check("ipc: port \"fs.ide0p9\" cannot be created", sys_port_create("fs.ide0p9") == -13);
     check("ipc: port \"disk\" cannot be created", sys_port_create("disk") == -EBUSY);
@@ -49,7 +49,7 @@ static int ipc_checks(void)
         servers++;
         if (sys_kill((int)p.pid) == -13 && sys_jobctl((int)p.pid, 0) == -13 && sys_setfg((int)p.pid) == -13) refused++;
     }
-    printf("badptr: ipc: %d system processes, %d refused kill, stop and foreground\n", servers, refused);
+    dprintf(1, "badptr: ipc: %d system processes, %d refused kill, stop and foreground\n", servers, refused);
     check("ipc: system processes cannot be killed, stopped or made foreground", servers >= 4 && refused == servers);
     /* O_EXCL (here-documents, mktemp): one request checks and creates; an existing name - also a dangling symbolic link
      * another user put there - is never opened or followed */
@@ -59,13 +59,13 @@ static int ipc_checks(void)
     int f3 = sys_open("/tmp/.badptr-l", O_WRONLY | O_CREAT | O_EXCL);
     struct ustat st;
     int followed = sys_stat("/tmp/.badptr-t", &st) == 0;
-    printf("badptr: ipc: O_EXCL gives %d, %d, %d\n", f1 >= 0 ? 0 : f1, f2, f3);
+    dprintf(1, "badptr: ipc: O_EXCL gives %d, %d, %d\n", f1 >= 0 ? 0 : f1, f2, f3);
     check("ipc: O_EXCL creates once, then -17, also for a dangling symbolic link", f1 >= 0 && f2 == -17 && f3 == -17 && !followed);
     if (f1 >= 0) sys_close(f1);
     sys_unlink("/tmp/.badptr-x"); sys_unlink("/tmp/.badptr-l"); sys_unlink("/tmp/.badptr-t");
     check("ipc: the clock cannot be set", sys_settime(1) == -13);
     check("ipc: the serial copy cannot be switched", sys_ttymirror(1) == -13);
-    printf("badptr: ipc %s\n", bad ? "FAILED" : "all ok");
+    dprintf(1, "badptr: ipc %s\n", bad ? "FAILED" : "all ok");
     return bad;
 }
 
@@ -83,7 +83,7 @@ static void size_checks(void)
 {
     fill();
     int r = sys3(21, 0, (u32)gb, 0);
-    printf("badptr: procinfo, size 0: %d, bytes 32-43 %s\n", r, written(32) ? "untouched" : "WRITTEN");
+    dprintf(1, "badptr: procinfo, size 0: %d, bytes 32-43 %s\n", r, written(32) ? "untouched" : "WRITTEN");
     check("procinfo from an old program (size 0, a 40-byte buffer and a guard): 32 bytes, nothing after", r == 0 && written(32));
     int ok = fill() || (sys3(21, 0, (u32)gb, 40) == 0 && written(40));
     ok = ok && !fill() && sys3(21, 0, (u32)gb, sizeof(struct uproc) + 64) == 0 && written(sizeof(struct uproc));
@@ -115,7 +115,7 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "ipc")) return ipc_checks();
     int a = sys_write(1, (const void *)0x1000, 16);
     int b = sys_write(1, (const void *)0xFFFFFFF0, 64);
-    printf("badptr: write(0x1000)=%d write(0xfffffff0)=%d\n", a, b);
+    dprintf(1, "badptr: write(0x1000)=%d write(0xfffffff0)=%d\n", a, b);
     check("bad pointers refused", a == -EFAULT && b == -EFAULT);
     size_checks();
 
@@ -162,7 +162,7 @@ int main(int argc, char **argv)
      * must give them back so that the next one works */
     void *big[16]; int nb = 0;
     while (nb < 16 && (big[nb] = malloc(65536))) nb++;
-    printf("badptr: %d big blocks before NULL\n", nb);
+    dprintf(1, "badptr: %d big blocks before NULL\n", nb);
     check("malloc says NULL when the regions run out", nb > 0 && nb < 16);
     for (int i = 0; i < nb; i++) free(big[i]);
     void *again = malloc(65536);
@@ -174,6 +174,6 @@ int main(int argc, char **argv)
     free(&fake[2]);
     check("a bad free is survived", 1);
 
-    printf("badptr: %s\n", bad ? "FAILED" : "all ok");
+    dprintf(1, "badptr: %s\n", bad ? "FAILED" : "all ok");
     return bad;
 }

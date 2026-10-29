@@ -9,9 +9,9 @@ int main(int argc, char **argv)
     int kill_them = !strcmp(me, "pkill"), list = 0, exact = 0, i = 1, found = 0, sig = SIGTERM;
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         if (kill_them && zsig_num(argv[i] + 1) >= 0 && strcmp(argv[i], "-x")) { sig = zsig_num(argv[i] + 1); continue; }
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'l') list = 1; else if (*p == 'x') exact = 1; else { fprintf(2, "%s: unknown option -%c\n", me, *p); return 2; } }
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'l') list = 1; else if (*p == 'x') exact = 1; else { dprintf(2, "%s: unknown option -%c\n", me, *p); return 2; } }
     }
-    if (i >= argc) { fprintf(2, "usage: %s [-lx] name\n", me); return 2; }
+    if (i >= argc) { dprintf(2, "usage: %s [-lx] name\n", me); return 2; }
     int self = sys_getpid(); struct uproc p; int parent = -1;
     if (sys_procinfo(0, &p) == 0) { }
     for (u32 k = 0; k < 256; k++) {      /* until procinfo says the table ends */
@@ -23,7 +23,7 @@ int main(int argc, char **argv)
         if (exact ? strcmp(p.name, argv[i]) : !strstr(p.name, argv[i])) continue;
         found++;
         if (kill_them) kill((int)p.pid, sig);
-        else if (list) printf("%u %s\n", p.pid, p.name); else printf("%u\n", p.pid);
+        else if (list) dprintf(1, "%u %s\n", p.pid, p.name); else dprintf(1, "%u\n", p.pid);
     }
     return found ? 0 : 1;
 }

@@ -11,7 +11,7 @@ static int sum(int fd, const char *name)
     while ((r = sys_read(fd, buf, sizeof buf)) > 0)
         sha256_update(&c, buf, (u32)r);
     if (r < 0) {
-        fprintf(2, "sha256sum: %s: %s\n", name, zstrerror(r) ? zstrerror(r) : "cannot read");
+        dprintf(2, "sha256sum: %s: %s\n", name, zstrerror(r) ? zstrerror(r) : "cannot read");
         return -1;
     }
     unsigned char h[32];
@@ -20,7 +20,7 @@ static int sum(int fd, const char *name)
     char s[65];
     for (int i = 0; i < 32; i++) { s[2*i] = hex[h[i] >> 4]; s[2*i+1] = hex[h[i] & 15]; }
     s[64] = 0;
-    printf("%s  %s\n", s, name);
+    dprintf(1, "%s  %s\n", s, name);
     return 0;
 }
 int main(int argc, char **argv)
@@ -29,7 +29,7 @@ int main(int argc, char **argv)
     int rc = 0;
     for (int i = 1; i < argc; i++) {
         int fd = sys_open(argv[i], O_RDONLY);
-        if (fd < 0) { fprintf(2, "sha256sum: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
+        if (fd < 0) { dprintf(2, "sha256sum: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
         if (sum(fd, argv[i])) rc = 1;
         sys_close(fd);
     }

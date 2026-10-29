@@ -58,27 +58,27 @@ int main(int argc, char **argv)
         else dev = argv[i];
     }
     if (!dev || (bsize != 1024 && bsize != 2048 && bsize != 4096) || bpi < 1024) {
-        printf("usage: mkfs.ext2 [-b 1024|2048|4096] [-i bytes-per-inode] device\n");
+        dprintf(1, "usage: mkfs.ext2 [-b 1024|2048|4096] [-i bytes-per-inode] device\n");
         return 2;
     }
     port = sys_port_find("disk");
-    if (port < 0) { printf("mkfs.ext2: no disk server\n"); return 1; }
+    if (port < 0) { dprintf(1, "mkfs.ext2: no disk server\n"); return 1; }
     struct umsg m;
     m.type = DISK_OPEN; m.a[0] = (u32)dev; m.a[1] = DISK_RAW;
     h = sys_call(port, &m);
     struct diskinfo di;
     m.type = DISK_INFOSZ; m.a[0] = (u32)h; m.a[1] = (u32)&di; m.a[2] = sizeof di;
-    if (h < 0 || sys_call(port, &m) < 0) { printf("mkfs.ext2: cannot open %s (mounted, or no such device)\n", dev); return 1; }
+    if (h < 0 || sys_call(port, &m) < 0) { dprintf(1, "mkfs.ext2: cannot open %s (mounted, or no such device)\n", dev); return 1; }
     if (di.maxsect) maxsect = di.maxsect;
     if (!strcmp(dev, "ide0") && di.start == 0 && di.dostype == 0)
-        printf("mkfs.ext2: warning: formatting the whole disk, not a partition\n");
+        dprintf(1, "mkfs.ext2: warning: formatting the whole disk, not a partition\n");
 
     u32 first = bsize == 1024 ? 1 : 0;
     u32 nblocks = (di.sectors / (bsize / 512));
     u32 bpg = 8 * bsize;
     u32 ngroups, gdt, ipg, itb, overhead;
     for (;;) {
-        if (nblocks < 64) { printf("mkfs.ext2: device too small\n"); return 1; }
+        if (nblocks < 64) { dprintf(1, "mkfs.ext2: device too small\n"); return 1; }
         ngroups = cdiv(nblocks - first, bpg);
         gdt = cdiv(ngroups * 32, bsize);
         u32 ninodes = (u32)(((unsigned long long)nblocks * bsize) / bpi);
@@ -137,7 +137,7 @@ int main(int argc, char **argv)
         }
     }
 
-    printf("mkfs.ext2: %s: %u blocks of %u bytes, %u groups, %u inodes\n", dev, nblocks, bsize, ngroups, ninodes);
+    dprintf(1, "mkfs.ext2: %s: %u blocks of %u bytes, %u groups, %u inodes\n", dev, nblocks, bsize, ngroups, ninodes);
 
     for (u32 g = 0; g < ngroups; g++) {
         u32 gs = first + g * bpg, gb = (nblocks - gs < bpg) ? nblocks - gs : bpg;
@@ -197,9 +197,9 @@ int main(int argc, char **argv)
         if (wblk(lf_first + i, blk)) goto fail;
     }
     (void)used0;
-    printf("mkfs.ext2: done\n");
+    dprintf(1, "mkfs.ext2: done\n");
     return 0;
 fail:
-    printf("mkfs.ext2: write error\n");
+    dprintf(1, "mkfs.ext2: write error\n");
     return 1;
 }

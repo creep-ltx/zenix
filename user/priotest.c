@@ -56,7 +56,7 @@ static u32 pri_of(int pid)
 static void server(void)
 {
     int port = sys_port_create("priot");
-    if (port < 0) { fprintf(2, "priotest: cannot create the port\n"); sys_exit(1); }
+    if (port < 0) { dprintf(2, "priotest: cannot create the port\n"); sys_exit(1); }
     sh->ready = 1;
     struct umsg *m = sys_recv(port, 1);
     int first = 1;
@@ -74,7 +74,7 @@ static void server(void)
 static int child(char **argv)
 {
     sh = (struct shared *)strtoul(argv[3], 0, 16);
-    if (setpriority(PRIO_PROCESS, 0, atoi(argv[4])) < 0) { fprintf(2, "priotest: setpriority: %s\n", zwhy("refused")); return 1; }
+    if (setpriority(PRIO_PROCESS, 0, atoi(argv[4])) < 0) { dprintf(2, "priotest: setpriority: %s\n", zwhy("refused")); return 1; }
     if (argv[2][0] == 's') server();
     spin(&sh->r[argv[2][0] - '0'], (u32)atoi(argv[5]));
     return 0;
@@ -88,7 +88,7 @@ static int start(const char *role, int nice, u32 ms)
     snprintf(t, sizeof t, "%u", ms);
     char *argv[] = { "priotest", "-c", (char *)role, a, n, t, 0 };
     int pid = sys_spawn("/bin/priotest", argv, 0);
-    if (pid < 0) { fprintf(2, "priotest: cannot start a child: %s\n", zwhy("failed")); sys_exit(1); }
+    if (pid < 0) { dprintf(2, "priotest: cannot start a child: %s\n", zwhy("failed")); sys_exit(1); }
     return pid;
 }
 
@@ -99,7 +99,7 @@ static int result(const char *mode, int ok, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    printf("priotest %s: %s %s\n", mode, ok ? "PASS" : "FAIL", buf);
+    dprintf(1, "priotest %s: %s %s\n", mode, ok ? "PASS" : "FAIL", buf);
     return ok ? 0 : 1;
 }
 
@@ -140,7 +140,7 @@ static int t_fair(void)
         u32 t0 = r0->start[0];
         for (int k = 0; k < 2; k++)
             for (u32 i = 0; i < sh->r[k].n; i++)
-                printf("  spinner %d: %u..%u ms\n", k, ms_of(sh->r[k].start[i] - t0), ms_of(sh->r[k].end[i] - t0));
+                dprintf(1, "  spinner %d: %u..%u ms\n", k, ms_of(sh->r[k].start[i] - t0), ms_of(sh->r[k].end[i] - t0));
     }
     return result("fair", ok, "(%u whole stretches while both ran: %u..%u ms, want 35..70; %s)", mid, mid ? lo : 0, hi,
                   turns ? "they take turns" : "NOT taking turns");
@@ -239,15 +239,15 @@ static int t_stale(void)
 int main(int argc, char **argv)
 {
     if (argc == 6 && !strcmp(argv[1], "-c")) return child(argv);
-    if (argc != 2) { fprintf(2, "usage: priotest fair|prio|wake|inherit|stale\n"); return 2; }
+    if (argc != 2) { dprintf(2, "usage: priotest fair|prio|wake|inherit|stale\n"); return 2; }
     sh = sys_memalloc(sizeof *sh);
-    if (!sh) { fprintf(2, "priotest: out of memory\n"); return 1; }
+    if (!sh) { dprintf(2, "priotest: out of memory\n"); return 1; }
     memset(sh, 0, sizeof *sh);
     if (!strcmp(argv[1], "fair")) return t_fair();
     if (!strcmp(argv[1], "prio")) return t_prio();
     if (!strcmp(argv[1], "wake")) return t_wake();
     if (!strcmp(argv[1], "inherit")) return t_inherit();
     if (!strcmp(argv[1], "stale")) return t_stale();
-    fprintf(2, "usage: priotest fair|prio|wake|inherit|stale\n");
+    dprintf(2, "usage: priotest fair|prio|wake|inherit|stale\n");
     return 2;
 }

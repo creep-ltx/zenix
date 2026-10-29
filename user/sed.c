@@ -24,11 +24,11 @@ static void *compile(const char *re, int icase)
 {
     char *e = o_E ? strdup(re) : bre_to_ere(re);
     void *p = re_comp(e, (icase ? RE_ICASE : 0) | RE_LONGEST);
-    if (!p) { fprintf(2, "sed: bad regular expression: %s\n", re); _zexit(2); }
+    if (!p) { dprintf(2, "sed: bad regular expression: %s\n", re); _zexit(2); }
     return p;
 }
 
-static void die(const char *m, const char *a) { fprintf(2, "sed: %s%s%s\n", m, a ? ": " : "", a ? a : ""); _zexit(2); }
+static void die(const char *m, const char *a) { dprintf(2, "sed: %s%s%s\n", m, a ? ": " : "", a ? a : ""); _zexit(2); }
 
 /* read a delimited part of s (after the opening delimiter); returns the part, advances *p past the closing one */
 static char *part(const char **p, char delim, int is_regex)
@@ -225,16 +225,16 @@ int main(int argc, char **argv)
         }
         for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'n') o_n = 1; else if (*p == 'E' || *p == 'r') o_E = 1; else if (*p == 'i') o_i = 1; else if (*p == 's') ; else die("unknown option", argv[i]); }
     }
-    if (!have_script) { if (i >= argc) { fprintf(2, "usage: sed [-nEi] [-e script] [-f file] [script] [file...]\n"); return 2; } script = argv[i++]; }
+    if (!have_script) { if (i >= argc) { dprintf(2, "usage: sed [-nEi] [-e script] [-f file] [script] [file...]\n"); return 2; } script = argv[i++]; }
     parse_script(script);
     if (i >= argc) { run_stream(0, 1); oflush(); return 0; }
     int rc = 0;
     for (; i < argc; i++) {
         int fd = sys_open(argv[i], O_RDONLY);
-        if (fd < 0) { fprintf(2, "sed: %s: %s\n", argv[i], zwhy("cannot open")); rc = 2; continue; }
+        if (fd < 0) { dprintf(2, "sed: %s: %s\n", argv[i], zwhy("cannot open")); rc = 2; continue; }
         if (o_i) {
             char *tmp = xmalloc(strlen(argv[i]) + 8); strcpy(tmp, argv[i]); strcat(tmp, ".sedtmp");
-            int out = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC); if (out < 0) { fprintf(2, "sed: cannot write %s\n", tmp); rc = 2; sys_close(fd); free(tmp); continue; }
+            int out = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC); if (out < 0) { dprintf(2, "sed: cannot write %s\n", tmp); rc = 2; sys_close(fd); free(tmp); continue; }
             run_stream(fd, out); sys_close(fd); sys_close(out);
             sys_unlink(argv[i]); sys_rename(tmp, argv[i]);
             free(tmp);

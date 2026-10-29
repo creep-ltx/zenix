@@ -101,7 +101,7 @@ void zs_badptr(const char *who, const void *p)
     *o++ = '\n';
     sys_write(2, b, (u32)(o - b));
 #else
-    fprintf(2, ZS_LIB ": %s() of a pointer malloc did not give out (or freed twice): %p\n", who, p);
+    dprintf(2, ZS_LIB ": %s() of a pointer malloc did not give out (or freed twice): %p\n", who, p);
 #endif
 }
 /* the header of a block malloc gave out, or 0 (reported) */

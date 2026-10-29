@@ -20,7 +20,7 @@ int main(int argc, char **argv)
     int y = ty, m = tm, hl = sys_isatty(1);
     if (argc == 2) y = atoi(argv[1]), m = 0;
     else if (argc >= 3) { m = atoi(argv[1]); y = atoi(argv[2]); }
-    if (y < 1 || y > 9999 || m < 0 || m > 12) { fprintf(2, "cal: bad month or year\n"); return 2; }
+    if (y < 1 || y > 9999 || m < 0 || m > 12) { dprintf(2, "cal: bad month or year\n"); return 2; }
     static const char *names[] = { "January","February","March","April","May","June","July","August","September","October","November","December" };
     for (int mo = m ? m : 1; mo <= (m ? m : 12); mo++) {
         char head[40]; snprintf(head, sizeof head, "%s %d", names[mo - 1], y);

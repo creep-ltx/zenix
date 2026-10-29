@@ -32,11 +32,11 @@ static void list(void)
 {
     struct umountinfo mi;
     struct ustatfs sf;
-    printf("%-8s %-14s %-8s %9s %9s\n", "DEVICE", "MOUNTED ON", "TYPE", "SIZE-KB", "FREE-KB");
+    dprintf(1, "%-8s %-14s %-8s %9s %9s\n", "DEVICE", "MOUNTED ON", "TYPE", "SIZE-KB", "FREE-KB");
     for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++) {
         unsigned size = 0, fr = 0;
         if (sys_statfs_mount(&sf, i) == 0) { size = sf.blocks * (sf.bsize / 1024); fr = sf.bfree * (sf.bsize / 1024); }
-        printf("%-8s %-14s %-8s %9u %9u\n", mi.dev[0] ? mi.dev : "?", mi.path, mi.type[0] ? mi.type : "?", size, fr);
+        dprintf(1, "%-8s %-14s %-8s %9u %9u\n", mi.dev[0] ? mi.dev : "?", mi.path, mi.type[0] ? mi.type : "?", size, fr);
     }
 }
 
@@ -50,25 +50,25 @@ static int mount_one(const char *dev, const char *dir, const char *type, int fsc
     struct umountinfo mi;
     char pname[16], id[64], prog[SVC_TEXT_MAX];
     int vt = vol_id(sys_port_find("disk"), dev, id);       /* its DISK_OPEN also probes a floppy drive past df0 */
-    if (disk_info(dev, &di) < 0) { printf("mount: no such device: %s\n", dev); return 1; }
-    if (di.mounted) { printf("mount: %s is already in use\n", dev); return 1; }
+    if (disk_info(dev, &di) < 0) { dprintf(1, "mount: no such device: %s\n", dev); return 1; }
+    if (di.mounted) { dprintf(1, "mount: %s is already in use\n", dev); return 1; }
     if (!type) {
         type = di.dostype == DT_EXT2 ? "ext2" : di.dostype == DT_ZENIXFS ? "zenixfs" : 0;
-        if (!type) { printf("mount: cannot tell the type of %s; use -t ext2 or -t zenixfs\n", dev); return 1; }
+        if (!type) { dprintf(1, "mount: cannot tell the type of %s; use -t ext2 or -t zenixfs\n", dev); return 1; }
     }
     int z = !strcmp(type, "zenixfs");
-    if (!z && strcmp(type, "ext2")) { printf("mount: unknown type %s (ext2, zenixfs or nfs)\n", type); return 1; }
+    if (!z && strcmp(type, "ext2")) { dprintf(1, "mount: unknown type %s (ext2, zenixfs or nfs)\n", type); return 1; }
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
     for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++)
-        if (!strcmp(mi.port, pname)) { printf("mount: %s is already mounted on %s\n", dev, mi.path); return 1; }
+        if (!strcmp(mi.port, pname)) { dprintf(1, "mount: %s is already mounted on %s\n", dev, mi.path); return 1; }
     if (!z && vt == 1 && !(vol_state & 1)) {               /* not marked clean: a cut while it was written */
-        if (!fsck) printf("mount: %s was not unmounted cleanly: check it (umount it, then fsck.ext2 -y %s)\n", dev, dev);
+        if (!fsck) dprintf(1, "mount: %s was not unmounted cleanly: check it (umount it, then fsck.ext2 -y %s)\n", dev, dev);
         else {
-            printf("mount: %s was not unmounted cleanly: fsck.ext2 -y %s\n", dev, dev);
+            dprintf(1, "mount: %s was not unmounted cleanly: fsck.ext2 -y %s\n", dev, dev);
             char *fa[] = { "/bin/fsck.ext2", "-y", (char *)dev, 0 };
             int pid = sys_spawn(fa[0], fa, 0), st = pid < 0 ? pid : sys_wait(pid);
             if (pid < 0 || st > 1)
-                printf("mount: %s could not be repaired (fsck.ext2: %d): mounted as it is, still marked \"needs a check\"\n", dev, st);
+                dprintf(1, "mount: %s could not be repaired (fsck.ext2: %d): mounted as it is, still marked \"needs a check\"\n", dev, st);
         }
     }
     /* ext2: the built-in fsd. ZenixFS: the file /sbin/zfsd (DESIGN D19 step 1; D11 6.4's file service), without the
@@ -79,13 +79,13 @@ static int mount_one(const char *dev, const char *dir, const char *type, int fsc
     strcat(prog, " -id "); strcat(prog, id);
     int r = sys_svc_register(pname, prog, -10);
     if (r < 0) {
-        printf(r == -EBUSY ? "mount: too many filesystems mounted\n" : "mount: cannot register the server of %s (%d)\n", dev, r);
+        dprintf(1, r == -EBUSY ? "mount: too many filesystems mounted\n" : "mount: cannot register the server of %s (%d)\n", dev, r);
         return 1;
     }
     struct umountreq rq = { dir, pname, dev, type };
     if ((r = sys_mount(&rq)) < 0) {
-        if (r == -EIO) printf("mount: cannot mount %s: its filesystem server did not start (see dmesg)\n", dev);
-        else printf("mount: cannot mount %s on %s: %s\n", dev, dir, zwhy("refused (is it an existing directory, not already a mount point? are you root?)"));
+        if (r == -EIO) dprintf(1, "mount: cannot mount %s: its filesystem server did not start (see dmesg)\n", dev);
+        else dprintf(1, "mount: cannot mount %s on %s: %s\n", dev, dir, zwhy("refused (is it an existing directory, not already a mount point? are you root?)"));
         sys_svc_remove(pname);                             /* a failed mount leaves no service behind */
         return 1;
     }
@@ -118,8 +118,8 @@ static int nfs_codes(const char *opts, int lazy, char *codes)
         else if (!strncmp(p, "timeo=", 6) && okv && num >= 1 && num <= 600) { if (num != 30) sprintf(c, "t%u", num); }
         else if (!strncmp(p, "retrans=", 8) && okv && num >= 1 && num <= 100) { if (num != 3) sprintf(c, "r%u", num); }
         else if (!strncmp(p, "actimeo=", 8) && okv && num <= 3600) sprintf(c, "a%u", num);
-        else { printf("mount: unknown NFS option %s (hard, soft, timeo=S, retrans=N, ro, rw, sync, actimeo=S)\n", p); return 1; }
-        if (n + strlen(c) >= 32) { printf("mount: too many NFS options\n"); return 1; }
+        else { dprintf(1, "mount: unknown NFS option %s (hard, soft, timeo=S, retrans=N, ro, rw, sync, actimeo=S)\n", p); return 1; }
+        if (n + strlen(c) >= 32) { dprintf(1, "mount: too many NFS options\n"); return 1; }
         strcpy(codes + n, c); n += strlen(c);
         *e = save;
         p = *e ? e + 1 : e;
@@ -149,8 +149,8 @@ static void nfs_why(const char *src, int r)
                     r == -EHOSTUNREACH || r == -ENETUNREACH ? "the NAS cannot be reached" :
                     r == -ENETDOWN ? "the network is down" :
                     r == -EIO ? "its server did not start" : 0;
-    if (w) printf("mount: %s: %s (see dmesg)\n", src, w);
-    else printf("mount: %s: %s (see dmesg)\n", src, zstrerror(r) ? zstrerror(r) : "refused");
+    if (w) dprintf(1, "mount: %s: %s (see dmesg)\n", src, w);
+    else dprintf(1, "mount: %s: %s (see dmesg)\n", src, zstrerror(r) ? zstrerror(r) : "refused");
 }
 
 /* mount -t nfs HOST:/EXPORT DIR: fs.nfsN -> "/sbin/nfscd nfsN HOST:/EXPORT [CODES]" at nice -10 (D11 6.4). A hand mount
@@ -160,11 +160,11 @@ static int mount_nfs(const char *src, const char *dir, const char *opts, int laz
 {
     char codes[40], prog[SVC_TEXT_MAX], pname[16], dev[8], real[160];
     const char *c = strchr(src, ':');
-    if (!c || c == src || c[1] != '/') { printf("mount: %s: not HOST:/EXPORT\n", src); return 1; }
+    if (!c || c == src || c[1] != '/') { dprintf(1, "mount: %s: not HOST:/EXPORT\n", src); return 1; }
     if (nfs_codes(opts, lazy, codes)) return 1;
     if (zrealpath(dir, real, sizeof real) < 0) strncpy(real, dir, sizeof real - 1), real[sizeof real - 1] = 0;
     if (nfs_refused(real)) {
-        printf("mount: %s: an NFS mount may not be on /, /bin, /sbin, /etc or below them\n", dir);
+        dprintf(1, "mount: %s: an NFS mount may not be on /, /bin, /sbin, /etc or below them\n", dir);
         return 1;
     }
     int k = 0;
@@ -173,17 +173,17 @@ static int mount_nfs(const char *src, const char *dir, const char *opts, int laz
         strcpy(pname, "fs."); strcat(pname, dev);
         if (sys_port_find(pname) < 0) break;
     }
-    if (k == 8) { printf("mount: too many NFS mounts (nfs0 .. nfs7 are in use)\n"); return 1; }
+    if (k == 8) { dprintf(1, "mount: too many NFS mounts (nfs0 .. nfs7 are in use)\n"); return 1; }
     u32 room = SVC_TEXT_MAX - 1 - strlen("/sbin/nfscd nfs0 ") - (codes[0] ? strlen(codes) + 1 : 0);
     if (strlen(src) > room) {
-        printf("mount: %s: too long for the service table: at most %u characters\n", src, room);
+        dprintf(1, "mount: %s: too long for the service table: at most %u characters\n", src, room);
         return 1;
     }
     strcpy(prog, "/sbin/nfscd "); strcat(prog, dev); strcat(prog, " "); strcat(prog, src);
     if (codes[0]) { strcat(prog, " "); strcat(prog, codes); }
     int r = sys_svc_register(pname, prog, -10);
     if (r < 0) {
-        printf(r == -EBUSY ? "mount: too many filesystems mounted\n" : "mount: cannot register the server of %s (%d)\n", src, r);
+        dprintf(1, r == -EBUSY ? "mount: too many filesystems mounted\n" : "mount: cannot register the server of %s (%d)\n", src, r);
         return 1;
     }
     struct umountreq rq = { dir, pname, dev, "nfs" };
@@ -192,7 +192,7 @@ static int mount_nfs(const char *src, const char *dir, const char *opts, int laz
             /* the kernel's own refusals come before the server is asked; the server's come from its FS_ROOT */
             struct ustat st;
             if (sys_stat(dir, &st) < 0 || (st.mode & 0170000) != 0040000 || r == -EBUSY)
-                printf("mount: cannot mount %s on %s: %s\n", src, dir, zwhy("refused"));
+                dprintf(1, "mount: cannot mount %s on %s: %s\n", src, dir, zwhy("refused"));
             else nfs_why(src, r);
         } else nfs_why(src, r);
         sys_svc_remove(pname);
@@ -229,7 +229,7 @@ static int mount_all(void)
             if (nf >= 2 && !(f[3] && strstr(f[3], "noauto"))) {
                 const char *type = (nf >= 3 && strcmp(f[2], "auto")) ? f[2] : 0;
                 if (type && !strcmp(type, "nfs") ? mount_nfs(f[0], f[1], f[3], 1) : mount_one(f[0], f[1], type, 1)) bad = 1;
-            } else if (nf < 2) { printf("mount: bad line in /etc/fstab: %s\n", line); bad = 1; }
+            } else if (nf < 2) { dprintf(1, "mount: bad line in /etc/fstab: %s\n", line); bad = 1; }
         }
         *eol = save;
         line = *eol ? eol + 1 : eol;
@@ -252,11 +252,11 @@ int main(int argc, char **argv)
     if (all) return mount_all();
     if (argc == 1) { list(); return 0; }
     if (!dev || !dir) {
-        printf("usage: mount [-t ext2|zenixfs] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
+        dprintf(1, "usage: mount [-t ext2|zenixfs] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
                "       mount -a     mount (list)\n");
         return 2;
     }
     if ((type && !strcmp(type, "nfs")) || (!type && strstr(dev, ":/"))) return mount_nfs(dev, dir, opts, 0);
-    if (opts) { printf("mount: -o is for NFS mounts only\n"); return 2; }
+    if (opts) { dprintf(1, "mount: -o is for NFS mounts only\n"); return 2; }
     return mount_one(dev, dir, type, 0);
 }

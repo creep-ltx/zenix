@@ -27,14 +27,14 @@ static void line_reserve(struct line *l, int n)
 {
     if (n + 1 <= l->cap) return;
     int nc = l->cap ? l->cap * 2 : 32; while (nc < n + 1) nc *= 2;
-    char *ns = realloc(l->s, (u32)nc); if (!ns) { fprintf(2, "edit: out of memory\n"); _zexit(1); }
+    char *ns = realloc(l->s, (u32)nc); if (!ns) { dprintf(2, "edit: out of memory\n"); _zexit(1); }
     l->s = ns; l->cap = nc;
 }
 static void lines_reserve(int n)
 {
     if (n <= capL) return;
     int nc = capL ? capL * 2 : 256; while (nc < n) nc *= 2;
-    struct line *nl = realloc(L, (u32)nc * sizeof *nl); if (!nl) { fprintf(2, "edit: out of memory\n"); _zexit(1); }
+    struct line *nl = realloc(L, (u32)nc * sizeof *nl); if (!nl) { dprintf(2, "edit: out of memory\n"); _zexit(1); }
     L = nl; capL = nc;
 }
 static void insert_line_at(int y)                       /* a new empty line before index y */
@@ -110,7 +110,7 @@ static int group_id, last_typed_end_y = -1, last_typed_end_x;
 
 static void note(int kind, int y, int x, const char *t, int n)
 {
-    if (nU == capU) { int nc = capU ? capU * 2 : 128; struct undo *nu = realloc(U, (u32)nc * sizeof *nu); if (!nu) { fprintf(2, "edit: out of memory\n"); _zexit(1); } U = nu; capU = nc; }
+    if (nU == capU) { int nc = capU ? capU * 2 : 128; struct undo *nu = realloc(U, (u32)nc * sizeof *nu); if (!nu) { dprintf(2, "edit: out of memory\n"); _zexit(1); } U = nu; capU = nc; }
     redo_to = 0;
     struct undo *u = &U[nU++];
     u->kind = kind; u->y = y; u->x = x; u->n = n; u->group = group_id; u->cy0 = cy; u->cx0 = cx;
@@ -584,11 +584,11 @@ int main(int argc, char **argv)
     lines_reserve(1); memset(&L[0], 0, sizeof L[0]); nL = 1;
     if (filename[0]) {
         struct ustat st;
-        if (sys_stat(filename, &st) == 0) { if ((st.mode & S_IFMT) == S_IFDIR) { fprintf(2, "edit: %s is a directory\n", filename); return 1; } if (load_file(filename) < 0) { fprintf(2, "edit: cannot read %s\n", filename); return 1; } }
+        if (sys_stat(filename, &st) == 0) { if ((st.mode & S_IFMT) == S_IFDIR) { dprintf(2, "edit: %s is a directory\n", filename); return 1; } if (load_file(filename) < 0) { dprintf(2, "edit: cannot read %s\n", filename); return 1; } }
         else snprintf(message, sizeof message, "new file %s", filename);
     }
     if (goto_line > 0) { cy = goto_line - 1; clamp_cursor(); }
-    if (!sys_isatty(0)) { fprintf(2, "edit: standard input is not a terminal\n"); return 1; }
+    if (!sys_isatty(0)) { dprintf(2, "edit: standard input is not a terminal\n"); return 1; }
     sys_ttymode(TTY_RAW | TTY_NOSIG);
     signal(SIGINT, on_end); signal(SIGTERM, on_end); signal(SIGHUP, on_end);
     signal(SIGTSTP, on_tstp); signal(SIGCONT, on_cont);

@@ -3,13 +3,13 @@
 /* The allocator, the environment, the buffered output and the error texts are in files of their own that the C
  * library builds too (user/zshare.h: zmalloc.c, zenv.c, zout.c, zerrtab.c); libz.uo is this file and those. */
 
-u32 strlen(const char *s) { u32 n = 0; while (s[n]) n++; return n; }
+size_t strlen(const char *s) { size_t n = 0; while (s[n]) n++; return n; }
 int strcmp(const char *a, const char *b)
 {
     while (*a && *a == *b) { a++; b++; }
     return (unsigned char)*a - (unsigned char)*b;
 }
-int strncmp(const char *a, const char *b, u32 n)
+int strncmp(const char *a, const char *b, size_t n)
 {
     while (n && *a && *a == *b) { a++; b++; n--; }
     return n ? (unsigned char)*a - (unsigned char)*b : 0;
@@ -27,7 +27,7 @@ char *strstr(const char *h, const char *n)
     for (; *h; h++) if (!strncmp(h, n, l)) return (char *)h;
     return 0;
 }
-void *memcpy(void *d, const void *s, unsigned long n)
+void *memcpy(void *d, const void *s, size_t n)
 {
     char *p = d; const char *q = s;
     if (n >= 8 && !(((unsigned long)p | (unsigned long)q) & 3)) {      /* aligned: longwords */
@@ -38,14 +38,14 @@ void *memcpy(void *d, const void *s, unsigned long n)
     while (n--) *p++ = *q++;
     return d;
 }
-void *memmove(void *d, const void *s, unsigned long n)
+void *memmove(void *d, const void *s, size_t n)
 {
     char *p = d; const char *q = s;
     if (p < q) while (n--) *p++ = *q++;
     else { p += n; q += n; while (n--) *--p = *--q; }
     return d;
 }
-void *memset(void *d, int c, unsigned long n)
+void *memset(void *d, int c, size_t n)
 {
     char *p = d;
     if (n >= 8 && !((unsigned long)p & 3)) {
@@ -147,34 +147,27 @@ static void vfmt(struct sink *k, const char *f, va_list ap)
     }
 }
 
-int vfprintf(int fd, const char *fmt, va_list ap)
+int vdprintf(int fd, const char *fmt, va_list ap)
 {
     struct sink k; k.kind = SK_FD; k.fd = fd; k.n = k.tn = 0;
     vfmt(&k, fmt, ap); sink_flush(&k);
     return (int)k.n;
 }
-int vsnprintf(char *buf, u32 max, const char *fmt, va_list ap)
+int vsnprintf(char *buf, size_t max, const char *fmt, va_list ap)
 {
     struct sink k; k.kind = SK_MEM; k.buf = buf; k.max = max; k.n = 0; k.tn = 0;
     vfmt(&k, fmt, ap);
     if (max) buf[k.n < max ? k.n : max - 1] = 0;
     return (int)k.n;
 }
-int fprintf(int fd, const char *fmt, ...)
+int dprintf(int fd, const char *fmt, ...)
 {
     va_list ap; va_start(ap, fmt);
-    int n = vfprintf(fd, fmt, ap);
+    int n = vdprintf(fd, fmt, ap);
     va_end(ap);
     return n;
 }
-int printf(const char *fmt, ...)
-{
-    va_list ap; va_start(ap, fmt);
-    int n = vfprintf(1, fmt, ap);
-    va_end(ap);
-    return n;
-}
-int snprintf(char *buf, u32 max, const char *fmt, ...)
+int snprintf(char *buf, size_t max, const char *fmt, ...)
 {
     va_list ap; va_start(ap, fmt);
     int n = vsnprintf(buf, max, fmt, ap);
@@ -201,9 +194,9 @@ int oprintf(const char *fmt, ...)
 /* ---------------------------------------------------------------- more of the C library */
 char *strdup(const char *s) { u32 n = strlen(s) + 1; char *p = malloc(n); if (p) memcpy(p, s, n); return p; }
 char *strcat(char *d, const char *s) { strcpy(d + strlen(d), s); return d; }
-char *strncpy(char *d, const char *s, u32 n) { u32 i = 0; for (; i < n && s[i]; i++) d[i] = s[i]; for (; i < n; i++) d[i] = 0; return d; }
+char *strncpy(char *d, const char *s, size_t n) { size_t i = 0; for (; i < n && s[i]; i++) d[i] = s[i]; for (; i < n; i++) d[i] = 0; return d; }
 char *strrchr(const char *s, int c) { const char *r = 0; for (;; s++) { if (*s == (char)c) r = s; if (!*s) break; } return (char *)r; }
-int memcmp(const void *a, const void *b, unsigned long n)
+int memcmp(const void *a, const void *b, size_t n)
 {
     const unsigned char *p = a, *q = b;
     while (n--) { if (*p != *q) return *p - *q; p++; q++; }
@@ -243,7 +236,7 @@ long strtol(const char *s, char **end, int base)
 }
 
 /* a shell sort: small, no recursion, fine for the sizes commands see */
-void qsort(void *base, u32 n, u32 size, int (*cmp)(const void *, const void *))
+void qsort(void *base, size_t n, size_t size, int (*cmp)(const void *, const void *))
 {
     char *b = base, tmp[256];
     if (size > sizeof tmp || n < 2) return;
@@ -354,7 +347,7 @@ void rheap_free(void *p)
 void *xmalloc(u32 n)
 {
     void *p = malloc(n);
-    if (!p) { fprintf(2, "%s: out of memory\n", _zargv && _zargv[0] ? _zargv[0] : "libz"); _zexit(1); }
+    if (!p) { dprintf(2, "%s: out of memory\n", _zargv && _zargv[0] ? _zargv[0] : "libz"); _zexit(1); }
     return p;
 }
 
@@ -401,7 +394,7 @@ int svc_line(char *l, char **name, int *nice, char **prog)
 char *bre_to_ere(const char *s)
 {
     char *r = zs_bre_to_ere(s);
-    if (!r) { fprintf(2, "%s: out of memory\n", _zargv && _zargv[0] ? _zargv[0] : "libz"); _zexit(1); }
+    if (!r) { dprintf(2, "%s: out of memory\n", _zargv && _zargv[0] ? _zargv[0] : "libz"); _zexit(1); }
     return r;
 }
 

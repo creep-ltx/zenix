@@ -15,11 +15,11 @@ static void count(int fd, const char *name, int fl, int fw, int fc, int show)
             inw = !sp;
         }
     int one = fl + fw + fc == 1;
-    if (fl) printf(one ? "%u" : "%7u", lines);
-    if (fw) printf(one ? "%u" : "%7u", words);
-    if (fc) printf(one ? "%u" : "%7u", bytes);
-    if (show) printf(" %s", name);
-    printf("\n");
+    if (fl) dprintf(1, one ? "%u" : "%7u", lines);
+    if (fw) dprintf(1, one ? "%u" : "%7u", words);
+    if (fc) dprintf(1, one ? "%u" : "%7u", bytes);
+    if (show) dprintf(1, " %s", name);
+    dprintf(1, "\n");
     tl += lines; tw += words; tc += bytes;
 }
 int main(int argc, char **argv)
@@ -32,9 +32,9 @@ int main(int argc, char **argv)
     if (i >= argc) { count(0, "", fl, fw, fc, 0); return 0; }
     for (; i < argc; i++) {
         int fd = sys_open(argv[i], O_RDONLY);
-        if (fd < 0) { fprintf(2, "wc: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
+        if (fd < 0) { dprintf(2, "wc: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
         count(fd, argv[i], fl, fw, fc, 1); sys_close(fd); files++;
     }
-    if (files > 1) { if (fl) printf("%7u", tl); if (fw) printf("%7u", tw); if (fc) printf("%7u", tc); printf(" total\n"); }
+    if (files > 1) { if (fl) dprintf(1, "%7u", tl); if (fw) dprintf(1, "%7u", tw); if (fc) dprintf(1, "%7u", tc); dprintf(1, " total\n"); }
     return rc;
 }

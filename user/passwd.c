@@ -7,14 +7,14 @@ int main(int argc, char **argv)
     u32 me = (u32)sys_getuid();
     struct pw p;
     const char *who = argc > 1 ? argv[1] : 0;
-    if (who ? pw_byname(who, &p) : pw_byuid(me, &p)) { fprintf(2, "passwd: no such user\n"); return 1; }
-    if (me != 0 && p.uid != me) { fprintf(2, "passwd: only root can change other users' passwords\n"); return 1; }
+    if (who ? pw_byname(who, &p) : pw_byuid(me, &p)) { dprintf(2, "passwd: no such user\n"); return 1; }
+    if (me != 0 && p.uid != me) { dprintf(2, "passwd: only root can change other users' passwords\n"); return 1; }
     char old[100], n1[100], n2[100];
     if (me != 0 && p.hash[0]) {
-        if (read_secret("Current password: ", old, sizeof old) || !pw_check(old, p.hash)) { sys_sleep(100); fprintf(2, "passwd: wrong password\n"); return 1; }
+        if (read_secret("Current password: ", old, sizeof old) || !pw_check(old, p.hash)) { sys_sleep(100); dprintf(2, "passwd: wrong password\n"); return 1; }
     }
     if (read_secret("New password: ", n1, sizeof n1) || read_secret("Again: ", n2, sizeof n2)) return 1;
-    if (strcmp(n1, n2)) { fprintf(2, "passwd: the two did not match\n"); return 1; }
+    if (strcmp(n1, n2)) { dprintf(2, "passwd: the two did not match\n"); return 1; }
     char hash[100] = "";
     if (n1[0]) {
         char salt[12]; u32 t = sys_hrtime() ^ ((u32)sys_time() << 7);
@@ -25,12 +25,12 @@ int main(int argc, char **argv)
     /* rewrite /etc/passwd through a new file, then rename it into place */
     int n = 0, fd;
     char *old_file = pw_slurp("/etc/passwd", &n);       /* the whole file: no user past some size may be lost */
-    if (!old_file) { fprintf(2, "passwd: cannot read /etc/passwd\n"); return 1; }
+    if (!old_file) { dprintf(2, "passwd: cannot read /etc/passwd\n"); return 1; }
     u32 lines = 1;
     for (int k = 0; k < n; k++) if (old_file[k] == '\n') lines++;
     u32 cap = (u32)n + lines * (strlen(hash) + 2);      /* each line may get the new hash and a newline */
     char *new_file = malloc(cap);
-    if (!new_file) { fprintf(2, "passwd: out of memory\n"); return 1; }
+    if (!new_file) { dprintf(2, "passwd: out of memory\n"); return 1; }
     u32 o = 0;
     for (char *l = old_file; *l; ) {
         char *e = strchr(l, '\n'); u32 len = e ? (u32)(e - l) : strlen(l);
@@ -48,10 +48,10 @@ int main(int argc, char **argv)
         l = e + 1;
     }
     fd = sys_open("/etc/passwd.new", O_WRONLY | O_CREAT | O_TRUNC);
-    if (fd < 0 || sys_write(fd, new_file, o) != (int)o) { fprintf(2, "passwd: %s\n", zwhy("cannot write the new file")); return 1; }
+    if (fd < 0 || sys_write(fd, new_file, o) != (int)o) { dprintf(2, "passwd: %s\n", zwhy("cannot write the new file")); return 1; }
     sys_close(fd);
     sys_chmod("/etc/passwd.new", 0644);
-    if (sys_rename("/etc/passwd.new", "/etc/passwd") < 0) { fprintf(2, "passwd: cannot replace /etc/passwd\n"); return 1; }
-    printf("passwd: password for %s %s\n", p.name, hash[0] ? "changed" : "removed");
+    if (sys_rename("/etc/passwd.new", "/etc/passwd") < 0) { dprintf(2, "passwd: cannot replace /etc/passwd\n"); return 1; }
+    dprintf(1, "passwd: password for %s %s\n", p.name, hash[0] ? "changed" : "removed");
     return 0;
 }

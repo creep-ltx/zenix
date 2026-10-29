@@ -452,12 +452,12 @@ static void restart_opens(const char *who)
     }
     int kept = zenixfs_orphans_keep(fs, held);
     if (n < 0 || kept < 0 || zenixfs_ino_floor(fs, top + 1))
-        printf("%s: %s: restart: open files %d, orphans %d: some space may stay used until fsck.zenixfs\n", who, devname, n, kept);
+        dprintf(1, "%s: %s: restart: open files %d, orphans %d: some space may stay used until fsck.zenixfs\n", who, devname, n, kept);
 }
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) { printf("usage: zfsd DEVICE [PORT] [-root] [-id ID]\n"); return 2; }
+    if (argc < 2) { dprintf(1, "usage: zfsd DEVICE [PORT] [-root] [-id ID]\n"); return 2; }
     /* PORT left out (mount since DESIGN D19 step 1: "/sbin/zfsd DEVICE -id ID" fits the 80 bytes a service's program
      * may have, SVC_TEXT, where the port word would not): fs.DEVICE, the name mount gives the mount's service */
     char pbuf[16];
@@ -475,15 +475,15 @@ int main(int argc, char **argv)
         if (vol_find(sys_port_find("disk"), dev, argv[argc - 1], name, who, restart)) return 1;
         dev = name;
     }
-    if (try_mount(dev, restart)) { printf("%s: %s is not a ZenixFS volume, or is in use\n", who, dev); return 1; }
+    if (try_mount(dev, restart)) { dprintf(1, "%s: %s is not a ZenixFS volume, or is in use\n", who, dev); return 1; }
     struct zenixfs_stats st;
     zenixfs_get_stats(fs, &st);
     if (st.mount_damage)
-        printf("%s: %s: %u commit record(s) were unreadable; mounted from the last good commit\n", who, devname, st.mount_damage);
+        dprintf(1, "%s: %s: %u commit record(s) were unreadable; mounted from the last good commit\n", who, devname, st.mount_damage);
     if (!zdisk_can_flush())
-        printf("%s: %s: the disk cannot flush its write cache: a power cut may lose the last commits, or damage the volume if the disk reorders writes\n", who, devname);
+        dprintf(1, "%s: %s: the disk cannot flush its write cache: a power cut may lose the last commits, or damage the volume if the disk reorders writes\n", who, devname);
     int port = sys_port_create(pname);
-    if (port < 0) { printf("%s: cannot create the port %s\n", who, pname); return 1; }
+    if (port < 0) { dprintf(1, "%s: cannot create the port %s\n", who, pname); return 1; }
     if (restart)
         restart_opens(who);
     struct umsg *m = sys_recv(port, 1);

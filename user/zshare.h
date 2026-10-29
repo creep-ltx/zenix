@@ -25,8 +25,8 @@ void zenv_load(void);
 #else
 #include "libz.h"
 #define ZS_LIB "libz"
-typedef u32 zs_size;
-typedef unsigned long zs_ulong;
+typedef size_t zs_size;
+typedef size_t zs_ulong;
 typedef u32 zs_nfds;
 void zenv_load(void);
 #endif

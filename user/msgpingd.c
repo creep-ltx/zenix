@@ -35,11 +35,11 @@ int main(int argc, char **argv)
             memset(&c, 0, sizeof c);
             c.type = 1;
             int r = sys_call(sys_port_find(argv[++i]), &c);
-            if (r < 0) { printf("msgpingd: %s: the call to %s failed (%d)\n", pname, argv[i], r); return 1; }
+            if (r < 0) { dprintf(1, "msgpingd: %s: the call to %s failed (%d)\n", pname, argv[i], r); return 1; }
         } else left = atoi(argv[i]);
     }
     int port = sys_port_create(pname);
-    if (port < 0) { printf("msgpingd: port busy\n"); return 1; }
+    if (port < 0) { dprintf(1, "msgpingd: port busy\n"); return 1; }
     struct umsg *m = sys_recv(port, 1);
     for (;;) {
         if ((int)m == -1) return 1;

@@ -23,7 +23,7 @@ static void col(u32 a) { struct in_addr in = { a }; oprintf("%-16s", inet_ntoa(i
 int main(int argc, char **argv)
 {
     int s = socket(AF_INET, SOCK_DGRAM, 0);
-    if (s < 0) { fprintf(2, "route: the network server: %s\n", zwhy("not reachable")); return 1; }
+    if (s < 0) { dprintf(2, "route: the network server: %s\n", zwhy("not reachable")); return 1; }
     if (argc == 1 || (argc == 2 && !strcmp(argv[1], "-n"))) {
         struct uroute d;
         static struct unetif rows[8];
@@ -33,7 +33,7 @@ int main(int argc, char **argv)
         r.len = sizeof rows;
         r.flags = sizeof rows[0];
         int n = sys_sock(SOCK_IFLIST | (u32)sizeof r << 16, s, &r), e = route(s, ROUTE_GET, 0, &d);
-        if (n < 0 || e < 0) { fprintf(2, "route: %s\n", zstrerror(n < 0 ? n : e)); return 1; }
+        if (n < 0 || e < 0) { dprintf(2, "route: %s\n", zstrerror(n < 0 ? n : e)); return 1; }
         oprintf("Kernel IP routing table\nDestination     Gateway         Genmask         Flags Iface\n");
         if (d.gw) { col(0); col(d.gw); col(0); oprintf("UG    %s\n", d.name); }
         for (int i = 0; i < n; i++) {
@@ -53,12 +53,12 @@ int main(int argc, char **argv)
     } else if (i != argc) goto usage;
     int e = route(s, add ? ROUTE_ADD : ROUTE_DEL, gw, 0);
     if (e < 0) {
-        fprintf(2, "route: %s\n", e == -EPERM ? "only root may change the routes" :
+        dprintf(2, "route: %s\n", e == -EPERM ? "only root may change the routes" :
                    e == -ENETUNREACH ? "no interface is up that reaches that gateway" : zstrerror(e));
         return 1;
     }
     return 0;
 usage:
-    fprintf(2, "usage: route [-n]\n       route add default [gw] GATEWAY\n       route del default\n");
+    dprintf(2, "usage: route [-n]\n       route add default [gw] GATEWAY\n       route del default\n");
     return 2;
 }

@@ -8,12 +8,12 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "-s")) brk = 1;
         else if (!strncmp(argv[i], "-w", 2)) width = argv[i][2] ? atoi(argv[i] + 2) : (i + 1 < argc ? atoi(argv[++i]) : 80);
         else if (isdigit((unsigned char)argv[i][1])) width = atoi(argv[i] + 1);
-        else { fprintf(2, "fold: unknown option %s\n", argv[i]); return 2; }
+        else { dprintf(2, "fold: unknown option %s\n", argv[i]); return 2; }
     }
     if (width < 1) width = 1;
     for (int a = i; a < argc || a == i; a++) {
         int fd = 0;
-        if (a < argc) { fd = sys_open(argv[a], O_RDONLY); if (fd < 0) { fprintf(2, "fold: %s: %s\n", argv[a], zwhy("cannot open")); rc = 1; continue; } }
+        if (a < argc) { fd = sys_open(argv[a], O_RDONLY); if (fd < 0) { dprintf(2, "fold: %s: %s\n", argv[a], zwhy("cannot open")); rc = 1; continue; } }
         struct rd r; rd_init(&r, fd);
         char *line = 0; u32 cap = 0; int n;
         while ((n = rd_getline(&r, &line, &cap)) >= 0) {

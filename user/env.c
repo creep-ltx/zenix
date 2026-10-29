@@ -9,10 +9,10 @@ int main(int argc, char **argv)
         char path[128];
         if (strchr(argv[i], '/')) strcpy(path, argv[i]); else { strcpy(path, "/bin/"); strcat(path, argv[i]); }
         int pid = sys_spawn(path, argv + i, 0);
-        if (pid < 0) { fprintf(2, "env: %s: cannot run\n", argv[i]); return 127; }
+        if (pid < 0) { dprintf(2, "env: %s: cannot run\n", argv[i]); return 127; }
         return sys_wait(pid);
     }
     getenv("");
-    for (char **e = environ; e && *e; e++) printf("%s\n", *e);
+    for (char **e = environ; e && *e; e++) dprintf(1, "%s\n", *e);
     return 0;
 }

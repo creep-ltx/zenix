@@ -20,7 +20,7 @@ static int seed(void *u, unsigned char *b, size_t n)
         return fd;
     int r = sys_read(fd, b, (u32)n);
     if (r == -EAGAIN) {
-        fprintf(2, "ssh-keygen: waiting for the random pool (type on the keyboard)\n");
+        dprintf(2, "ssh-keygen: waiting for the random pool (type on the keyboard)\n");
         sys_close(fd);
         fd = sys_open("/dev/random", O_RDONLY);
         if (fd < 0)
@@ -66,7 +66,7 @@ static int writefile(const char *path, const char *data, long n, u32 mode)
 
 static int die(const char *what, const char *path)
 {
-    fprintf(2, "ssh-keygen: %s%s%s\n", path ? path : "", path ? ": " : "", what);
+    dprintf(2, "ssh-keygen: %s%s%s\n", path ? path : "", path ? ": " : "", what);
     return 1;
 }
 
@@ -147,10 +147,10 @@ static int remove_host(const char *file, const char *hostname)
         l += len;
     }
     if (marked)
-        printf("# Host %s: %d marked line%s (@revoked, @cert-authority) kept\n", hostname, marked, marked == 1 ? "" : "s");
+        dprintf(1, "# Host %s: %d marked line%s (@revoked, @cert-authority) kept\n", hostname, marked, marked == 1 ? "" : "s");
     if (!removed) {
         if (!marked)
-            printf("Host %s not found in %s\n", hostname, file);
+            dprintf(1, "Host %s not found in %s\n", hostname, file);
         return 1;
     }
     char old[ZPATH_MAX];
@@ -158,14 +158,14 @@ static int remove_host(const char *file, const char *hostname)
     sys_unlink(old);
     if (writefile(old, t, n, 0644) < 0 || writefile(file, out, o, 0644) < 0)
         return die(zwhy("cannot write"), file);
-    printf("# Host %s found: %d line%s removed\n%s updated.\nOriginal contents retained as %s\n", hostname, removed,
+    dprintf(1, "# Host %s found: %d line%s removed\n%s updated.\nOriginal contents retained as %s\n", hostname, removed,
            removed == 1 ? "" : "s", file, old);
     return 0;
 }
 
 static int usage(void)
 {
-    fprintf(2, "usage: ssh-keygen [-t ed25519] [-f FILE] [-C COMMENT] [-N PASS] [-a ROUNDS] [-q]\n"
+    dprintf(2, "usage: ssh-keygen [-t ed25519] [-f FILE] [-C COMMENT] [-N PASS] [-a ROUNDS] [-q]\n"
                "       ssh-keygen -l [-f FILE]    ssh-keygen -y [-f FILE] [-P PASS]    ssh-keygen -R HOST [-f FILE]\n");
     return 2;
 }
@@ -177,7 +177,7 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         const char *o = argv[i];
         int more = i + 1 < argc;
-        if (!strcmp(o, "-t") && more) { if (strcmp(argv[++i], "ed25519")) { fprintf(2, "ssh-keygen: only ed25519 keys\n"); return 2; } }
+        if (!strcmp(o, "-t") && more) { if (strcmp(argv[++i], "ed25519")) { dprintf(2, "ssh-keygen: only ed25519 keys\n"); return 2; } }
         else if (!strcmp(o, "-f") && more) file = argv[++i];
         else if (!strcmp(o, "-C") && more) comment = argv[++i];
         else if ((!strcmp(o, "-N") || !strcmp(o, "-P")) && more) pass = argv[++i];
@@ -207,16 +207,16 @@ int main(int argc, char **argv)
             return 1;
         if (list) {
             ssh_fingerprint(fp, blob, SSH_ED25519_BLOB);
-            printf("256 %s %s (ED25519)\n", fp, c[0] ? c : "no comment");
+            dprintf(1, "256 %s %s (ED25519)\n", fp, c[0] ? c : "no comment");
         } else if (ssh_pubkey_line(line, sizeof line, blob, SSH_ED25519_BLOB, c) > 0)
-            printf("%s\n", line);
+            dprintf(1, "%s\n", line);
         return 0;
     }
 
     /* a new key pair */
     struct ustat st;
     if (sys_stat(file, &st) == 0) {
-        fprintf(2, "ssh-keygen: %s already exists: not overwritten (remove it first)\n", file);
+        dprintf(2, "ssh-keygen: %s already exists: not overwritten (remove it first)\n", file);
         return 1;
     }
     if (file == def && sys_stat(home_ssh, &st) < 0) {
@@ -240,10 +240,10 @@ int main(int argc, char **argv)
     zc_rng_bytes(&rng, chk, 4);
     zc_rng_wipe(&rng);
     if (!quiet)
-        printf("Generating public/private ed25519 key pair.\n");
+        dprintf(1, "Generating public/private ed25519 key pair.\n");
     crypto_ed25519_key_pair(sk, pk, sd);   /* (it wipes the seed itself) */
     if (*pass && !quiet)
-        printf("Protecting it with the passphrase (bcrypt, %d rounds: this takes a while)...\n", rounds);
+        dprintf(1, "Protecting it with the passphrase (bcrypt, %d rounds: this takes a while)...\n", rounds);
     static char text[2048], line[512], pubname[ZPATH_MAX];
     static unsigned char work[SSH_KEY_WORK];
     long n = ssh_key_write(text, sizeof text, sk, comment, pass, salt, (unsigned)rounds, chk, work, sizeof work);
@@ -267,7 +267,7 @@ int main(int argc, char **argv)
     if (!quiet) {
         char fp[SSH_FP_LEN];
         ssh_fingerprint(fp, blob, SSH_ED25519_BLOB);
-        printf("Your identification has been saved in %s\nYour public key has been saved in %s\n"
+        dprintf(1, "Your identification has been saved in %s\nYour public key has been saved in %s\n"
                "The key fingerprint is:\n%s %s\n", file, pubname, fp, comment);
     }
     return 0;

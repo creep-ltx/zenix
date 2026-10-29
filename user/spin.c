@@ -7,7 +7,7 @@ int main(int argc, char **argv)
     volatile unsigned n = 0;
     for (int r = 1; r <= rounds; r++) {
         for (unsigned i = 0; i < 400000; i++) n = n + 1;
-        printf("spin: round %d\n", r);
+        dprintf(1, "spin: round %d\n", r);
     }
     return 3;
 }

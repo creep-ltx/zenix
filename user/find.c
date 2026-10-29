@@ -33,9 +33,9 @@ static void __attribute__((noinline)) run_exec(const char *path)
     av[n] = 0;
     char prog[160];
     oflush();
-    if (!path_find(av[0], prog, sizeof prog)) { fprintf(2, "find: %s: command not found\n", av[0]); rc = 1; free(av); return; }
+    if (!path_find(av[0], prog, sizeof prog)) { dprintf(2, "find: %s: command not found\n", av[0]); rc = 1; free(av); return; }
     int pid = sys_spawn(prog, av, 0);
-    if (pid < 0) { fprintf(2, "find: %s: %s\n", av[0], zwhy("cannot run")); rc = 1; }
+    if (pid < 0) { dprintf(2, "find: %s: %s\n", av[0], zwhy("cannot run")); rc = 1; }
     else sys_wait(pid);                                     /* as GNU find: the command's own status does not change find's */
     free(av);
 }
@@ -56,10 +56,10 @@ static void visit(const char *path, const char *name, int depth, const struct us
     }
     if (isdir && depth < maxdepth) {
         char **names; int nn = dir_list(path, &names);        /* heap, not stack: one level per directory */
-        if (nn < 0) { fprintf(2, "find: %s: %s\n", path, zwhy("cannot read")); rc = 1; return; }
+        if (nn < 0) { dprintf(2, "find: %s: %s\n", path, zwhy("cannot read")); rc = 1; return; }
         for (int i = 0; i < nn; i++) {
             char *child = path_join(path, names[i]);
-            if (!child) { fprintf(2, "find: %s/%s: %s\n", path, names[i], zwhy("cannot read")); rc = 1; continue; }
+            if (!child) { dprintf(2, "find: %s/%s: %s\n", path, names[i], zwhy("cannot read")); rc = 1; continue; }
             struct ustat cs; if (sys_lstat(child, &cs) == 0) visit(child, names[i], depth + 1, &cs);   /* a link is not followed */
             free(child);
         }
@@ -82,11 +82,11 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-print")) do_print = 1;
         else if (!strcmp(argv[i], "-delete")) { do_delete = 1; do_print = 0; }
         else if (!strcmp(argv[i], "-exec")) { exec_argv = argv + i + 1; do_print = 0; while (i + 1 < argc && strcmp(argv[i + 1], ";")) { i++; exec_n++; } i++; }
-        else { fprintf(2, "find: unknown expression %s\n", argv[i]); return 2; }
+        else { dprintf(2, "find: unknown expression %s\n", argv[i]); return 2; }
     }
     for (int k = 0; k < np; k++) {
         struct ustat st;
-        if ((do_delete ? sys_lstat(paths[k], &st) : sys_stat(paths[k], &st)) < 0) { fprintf(2, "find: %s: %s\n", paths[k], zwhy("not found")); rc = 1; continue; }
+        if ((do_delete ? sys_lstat(paths[k], &st) : sys_stat(paths[k], &st)) < 0) { dprintf(2, "find: %s: %s\n", paths[k], zwhy("not found")); rc = 1; continue; }
         const char *nm = strrchr(paths[k], '/'); nm = nm && nm[1] ? nm + 1 : paths[k];
         visit(paths[k], nm, 0, &st);
     }

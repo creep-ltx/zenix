@@ -7,6 +7,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../../kernel/errno.h"        /* the Zenix error numbers (the same values as Linux) */
+/* Zenix's dprintf(fd, ...) (DESIGN D27 6 step 2) through the host's streams, so a test's lines keep their order with
+ * the harness's own printf: descriptor 2 is stderr, any other stdout */
+#include <stdarg.h>
+static inline int zhost_dprintf(int fd, const char *fmt, ...)
+{
+    va_list ap; va_start(ap, fmt);
+    int n = vfprintf(fd == 2 ? stderr : stdout, fmt, ap);
+    va_end(ap);
+    return n;
+}
+#define dprintf zhost_dprintf
 
 typedef unsigned int u32;
 typedef unsigned char u8;

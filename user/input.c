@@ -11,7 +11,7 @@ int main(int argc, char **argv)
         int s[4];
         sys_input(s);
         if (!secs || s[0] || s[1] || s[2] != last[2] || s[3] != last[3]) {
-            printf("mouse dx %d dy %d buttons %c%c%c joystick %c%c%c%c%c\n", s[0], s[1],
+            dprintf(1, "mouse dx %d dy %d buttons %c%c%c joystick %c%c%c%c%c\n", s[0], s[1],
                    (s[2] & 1) ? 'L' : '-', (s[2] & 2) ? 'R' : '-', (s[2] & 4) ? 'M' : '-',
                    (s[3] & 1) ? 'U' : '-', (s[3] & 2) ? 'D' : '-', (s[3] & 4) ? 'L' : '-',
                    (s[3] & 8) ? 'R' : '-', (s[3] & 16) ? 'F' : '-');

@@ -70,7 +70,7 @@ static void cb_(u8 *m, u32 i) { m[i / 8] &= (u8)~(1u << (i % 8)); }
 static int rblk(u32 n, void *buf) { return n >= nblocks ? -1 : fs_blk_read(n * (bsize / 512), bsize / 512, buf); }
 static int wblk(u32 n, const void *buf) { return n >= nblocks ? -1 : fs_blk_write(n * (bsize / 512), bsize / 512, buf); }
 
-#define problem(...) do { printf(__VA_ARGS__); printf("\n"); errors++; } while (0)
+#define problem(...) do { dprintf(1, __VA_ARGS__); dprintf(1, "\n"); errors++; } while (0)
 
 #define COMPAT_HAS_JOURNAL 0x0004
 #define COMPAT_EXT_ATTR    0x0008
@@ -205,7 +205,7 @@ static int add_dir(u32 ino)
     if (ndirs == dircap) {
         u32 nc = dircap ? dircap * 2 : 256;
         u32 *n = realloc(dirlist, nc * 4);
-        if (!n) { printf("fsck.ext2: out of memory (directory list of %u)\n", ndirs); return -1; }
+        if (!n) { dprintf(1, "fsck.ext2: out of memory (directory list of %u)\n", ndirs); return -1; }
         dirlist = n; dircap = nc;
     }
     dirlist[ndirs++] = ino;
@@ -223,7 +223,7 @@ static u8 dirent_type(u32 t)             /* directory entry file type of mode ty
 static int take_inode(u32 ino)
 {
     u8 *in = inode_ptr(ino, 0);
-    if (!in) { printf("fsck.ext2: read error in the inode table\n"); return -1; }
+    if (!in) { dprintf(1, "fsck.ext2: read error in the inode table\n"); return -1; }
     u32 mode = L16(in), t = mode & 0170000;
     sb_(usedi, ino);
     nfiles++;
@@ -331,8 +331,8 @@ static int run(void)
     memset(usedi, 0, (ninodes + 8) / 8); memset(maybe, 0, (ninodes + 8) / 8); memset(isdir, 0, (ninodes + 8) / 8);
     memset(reach, 0, (ninodes + 8) / 8); memset(scanned, 0, (ninodes + 8) / 8); memset(itype, 0, ninodes + 1);
     memset(links, 0, (ninodes + 1) * 2); memset(dotdot, 0, (ninodes + 1) * 4); memset(parent, 0, (ninodes + 1) * 4);
-    for (u32 i = 0; i < gdt_blocks; i++) if (rblk(gdt_start + i, gdt + i * bsize)) { printf("fsck.ext2: cannot read the group table\n"); return 8; }
-    if (fs_blk_read(2, 2, sb)) { printf("fsck.ext2: cannot read the superblock\n"); return 8; }
+    for (u32 i = 0; i < gdt_blocks; i++) if (rblk(gdt_start + i, gdt + i * bsize)) { dprintf(1, "fsck.ext2: cannot read the group table\n"); return 8; }
+    if (fs_blk_read(2, 2, sb)) { dprintf(1, "fsck.ext2: cannot read the superblock\n"); return 8; }
 
     /* ---- metadata blocks ---- */
     sb_(blockmap, 0);
@@ -343,7 +343,7 @@ static int run(void)
         if (has_backup(g))
             for (u32 k = 0; k < 1 + gdt_blocks + rsv_gdt; k++) if (gs + k < nblocks) sb_(blockmap, gs + k);
         if (bb < gs || bb >= gs + gb || ib < gs || ib >= gs + gb || it < gs || it >= gs + gb || itb > gs + gb - it) {
-            printf("fsck.ext2: group %u has its tables outside the group: cannot repair\n", g);
+            dprintf(1, "fsck.ext2: group %u has its tables outside the group: cannot repair\n", g);
             return 8;
         }
         sb_(blockmap, bb); sb_(blockmap, ib);
@@ -351,14 +351,14 @@ static int run(void)
     }
 
     /* ---- pass 1: inodes and their blocks ---- */
-    printf("Pass 1: Checking inodes, blocks, and sizes\n");
+    dprintf(1, "Pass 1: Checking inodes, blocks, and sizes\n");
     static u8 ibm[4096];
     for (u32 g = 0; g < ngroups; g++) {
-        if (rblk(L32(gdt + g * 32 + 4), ibm)) { printf("fsck.ext2: cannot read an inode bitmap\n"); return 8; }
+        if (rblk(L32(gdt + g * 32 + 4), ibm)) { dprintf(1, "fsck.ext2: cannot read an inode bitmap\n"); return 8; }
         for (u32 i = 0; i < ipg; i++) {
             u32 ino = g * ipg + i + 1;
             u8 *in = inode_ptr(ino, 0);
-            if (!in) { printf("fsck.ext2: read error in the inode table\n"); return 8; }
+            if (!in) { dprintf(1, "fsck.ext2: read error in the inode table\n"); return 8; }
             u32 mode = L16(in), lc = L16(in + 26);
             int reserved = ino < first_ino && ino != 2;
             int live = (mode != 0 && lc > 0) || ino == 2;     /* as e2fsck decides it: a link count; dtime is checked below */
@@ -381,7 +381,7 @@ static int run(void)
     }
 
     /* ---- pass 2: directories ---- */
-    printf("Pass 2: Checking directory structure\n");
+    dprintf(1, "Pass 2: Checking directory structure\n");
     static u8 db[4096];
     for (u32 d = 0; d < ndirs; d++) {
         u32 dino = dirlist[d];
@@ -395,7 +395,7 @@ static int run(void)
             u32 bi = off / bsize, blk = dir_bmap(copy, bi);
             if (!blk) { problem("  directory %u has a hole at block %u", dino, bi); unfixable++; continue; }
             if (blk == 0xFFFFFFFF || blk >= nblocks) { problem("  directory %u: block %u unreadable", dino, bi); unfixable++; continue; }
-            if (rblk(blk, db)) { printf("fsck.ext2: read error in directory %u\n", dino); return 8; }
+            if (rblk(blk, db)) { dprintf(1, "fsck.ext2: read error in directory %u\n", dino); return 8; }
             int dirty = 0;
             u32 o = 0;
             while (o + 8 <= bsize) {
@@ -443,7 +443,7 @@ static int run(void)
     }
 
     /* ---- pass 3: connectivity ---- */
-    printf("Pass 3: Checking directory connectivity\n");
+    dprintf(1, "Pass 3: Checking directory connectivity\n");
     sb_(reach, 2);
     parent[2] = 2;
     for (int again = 1; again;) {
@@ -523,7 +523,7 @@ static int run(void)
     }
 
     /* ---- pass 4: link counts ---- */
-    printf("Pass 4: Checking reference counts\n");
+    dprintf(1, "Pass 4: Checking reference counts\n");
     for (u32 ino = 2; ino <= ninodes; ino++) {
         if (!tb(usedi, ino) || (ino < first_ino && ino != 2)) continue;
         u8 *in = inode_ptr(ino, 0);
@@ -536,14 +536,14 @@ static int run(void)
     }
 
     /* ---- pass 5: bitmaps and counts ---- */
-    printf("Pass 5: Checking group summary information\n");
+    dprintf(1, "Pass 5: Checking group summary information\n");
     u32 total_free_b = 0, total_free_i = 0;
     static u8 bb[4096];
     for (u32 g = 0; g < ngroups; g++) {
         u32 gs = first + g * bpg, gb = nblocks - gs < bpg ? nblocks - gs : bpg;
         u32 bbn = L32(gdt + g * 32 + 0), ibn = L32(gdt + g * 32 + 4);
         u32 freeb = 0, freei = 0, dirs = 0, badb = 0, badi = 0, pad = 0;
-        if (rblk(bbn, bb) || rblk(ibn, ibm)) { printf("fsck.ext2: cannot read the bitmaps of group %u\n", g); return 8; }
+        if (rblk(bbn, bb) || rblk(ibn, ibm)) { dprintf(1, "fsck.ext2: cannot read the bitmaps of group %u\n", g); return 8; }
         for (u32 i = 0; i < gb; i++) {
             int used = tb(blockmap, gs + i);
             if (!used) freeb++;
@@ -590,11 +590,11 @@ static int run(void)
     int relink = 0;
     if (fix && norphans && !unfixable) {
         /* attach orphans to /lost+found using the filesystem library, after pass 5: it allocates from repaired bitmaps */
-        if (ext2_mount()) { printf("fsck.ext2: cannot attach orphans (mount failed)\n"); unfixable++; }
+        if (ext2_mount()) { dprintf(1, "fsck.ext2: cannot attach orphans (mount failed)\n"); unfixable++; }
         else {
             struct inode lf, root;
             if (ext2_iget(2, &root) || ext2_lookup(&root, "lost+found", 10, &(u32){0}) ) {
-                if (ext2_mkdir(&root, "lost+found")) printf("fsck.ext2: cannot create /lost+found\n");
+                if (ext2_mkdir(&root, "lost+found")) dprintf(1, "fsck.ext2: cannot create /lost+found\n");
             }
             if (!ext2_namei("/lost+found", 2, &lf, 0)) {
                 for (u32 k = 0; k < norphans; k++) {
@@ -604,7 +604,7 @@ static int run(void)
                     name[0] = '#';
                     for (int j = 0; j < n; j++) name[1 + j] = t[n - 1 - j];
                     name[1 + n] = 0;
-                    if (!ext2_link(&lf, name, orphan[k])) { printf("  attached inode %u as /lost+found/%s\n", orphan[k], name); fixed++; relink = 1; }
+                    if (!ext2_link(&lf, name, orphan[k])) { dprintf(1, "  attached inode %u as /lost+found/%s\n", orphan[k], name); fixed++; relink = 1; }
                     if (ext2_iget(lf.ino, &lf)) break;
                 }
             }
@@ -640,39 +640,39 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-n")) want_fix = 0;
         else dev = argv[i];
     }
-    if (!dev) { printf("usage: fsck.ext2 [-y] device\n"); return 2; }
+    if (!dev) { dprintf(1, "usage: fsck.ext2 [-y] device\n"); return 2; }
     port = sys_port_find("disk");
-    if (port < 0) { printf("fsck.ext2: no disk server\n"); return 8; }
+    if (port < 0) { dprintf(1, "fsck.ext2: no disk server\n"); return 8; }
     struct umsg m;
     m.type = DISK_OPEN; m.a[0] = (u32)dev; m.a[1] = DISK_RAW;
     h = sys_call(port, &m);
-    if (h < 0) { printf("fsck.ext2: cannot open %s (mounted, or no such device)\n", dev); return 8; }
+    if (h < 0) { dprintf(1, "fsck.ext2: cannot open %s (mounted, or no such device)\n", dev); return 8; }
 
-    if (fs_blk_read(2, 2, sb) || L16(sb + 56) != 0xEF53) { printf("fsck.ext2: %s has no ext2 filesystem\n", dev); return 8; }
+    if (fs_blk_read(2, 2, sb) || L16(sb + 56) != 0xEF53) { dprintf(1, "fsck.ext2: %s has no ext2 filesystem\n", dev); return 8; }
     u32 logbs = L32(sb + 24);
-    if (logbs > 2) { printf("fsck.ext2: block size above 4096 not supported\n"); return 8; }
+    if (logbs > 2) { dprintf(1, "fsck.ext2: block size above 4096 not supported\n"); return 8; }
     bsize = 1024u << logbs;
     ninodes = L32(sb + 0); nblocks = L32(sb + 4); first = L32(sb + 20);
     bpg = L32(sb + 32); ipg = L32(sb + 40);
     u32 rev = L32(sb + 76);
-    if (rev > 1) { printf("fsck.ext2: unknown ext2 revision %u\n", rev); return 8; }
+    if (rev > 1) { dprintf(1, "fsck.ext2: unknown ext2 revision %u\n", rev); return 8; }
     isize = rev ? L16(sb + 88) : 128;
     first_ino = rev ? L32(sb + 84) : 11;
     compat = rev ? L32(sb + 92) : 0; incompat = rev ? L32(sb + 96) : 0; rocompat = rev ? L32(sb + 100) : 0;
     sparse = rocompat & RO_SPARSE;
     rsv_gdt = (compat & COMPAT_RESIZE) ? L16(sb + 206) : 0;
-    if (incompat & ~(u32)INCOMPAT_FILETYPE) { printf("fsck.ext2: unsupported incompatible features %x (ext3/ext4?): use e2fsck\n", incompat); return 8; }
-    if (compat & COMPAT_HAS_JOURNAL) { printf("fsck.ext2: %s has an ext3 journal, which fsck.ext2 cannot check: use e2fsck\n", dev); return 8; }
-    if (rocompat & ~(u32)(RO_SPARSE | RO_LARGE_FILE)) { printf("fsck.ext2: unsupported read-only features %x: use e2fsck\n", rocompat); return 8; }
+    if (incompat & ~(u32)INCOMPAT_FILETYPE) { dprintf(1, "fsck.ext2: unsupported incompatible features %x (ext3/ext4?): use e2fsck\n", incompat); return 8; }
+    if (compat & COMPAT_HAS_JOURNAL) { dprintf(1, "fsck.ext2: %s has an ext3 journal, which fsck.ext2 cannot check: use e2fsck\n", dev); return 8; }
+    if (rocompat & ~(u32)(RO_SPARSE | RO_LARGE_FILE)) { dprintf(1, "fsck.ext2: unsupported read-only features %x: use e2fsck\n", rocompat); return 8; }
     if (!bpg || !ipg || bpg > 8 * bsize || ipg > 8 * bsize || first != (bsize == 1024 ? 1u : 0u) || nblocks <= first + 2 ||
         isize < 128 || isize > bsize || (isize & (isize - 1)) || first_ino < 11 || first_ino > ninodes) {
-        printf("fsck.ext2: bad superblock\n"); return 8;
+        dprintf(1, "fsck.ext2: bad superblock\n"); return 8;
     }
     ngroups = (nblocks - first + bpg - 1) / bpg;
-    if (ninodes / ipg != ngroups || ninodes % ipg) { printf("fsck.ext2: superblock inconsistent (groups x inodes-per-group != inodes)\n"); return 8; }
+    if (ninodes / ipg != ngroups || ninodes % ipg) { dprintf(1, "fsck.ext2: superblock inconsistent (groups x inodes-per-group != inodes)\n"); return 8; }
     gdt_blocks = (ngroups * 32 + bsize - 1) / bsize;
     gdt_start = first + 1;
-    if (gdt_start + gdt_blocks + rsv_gdt > nblocks) { printf("fsck.ext2: bad superblock (group table)\n"); return 8; }
+    if (gdt_start + gdt_blocks + rsv_gdt > nblocks) { dprintf(1, "fsck.ext2: bad superblock (group table)\n"); return 8; }
 
     gdt = malloc(gdt_blocks * bsize);
     blockmap = malloc((nblocks + 7) / 8);
@@ -689,41 +689,41 @@ int main(int argc, char **argv)
     orphan = malloc(MAXORPHANS * 4);
     if (!gdt || !blockmap || !aclmap || !usedi || !maybe || !isdir || !reach || !scanned || !itype || !links || !dotdot ||
         !parent || !orphan) {
-        printf("fsck.ext2: out of memory (%u inodes, %u blocks)\n", ninodes, nblocks);
+        dprintf(1, "fsck.ext2: out of memory (%u inodes, %u blocks)\n", ninodes, nblocks);
         return 8;
     }
 
-    printf("fsck.ext2: %s: %u blocks of %u bytes, %u groups, %u inodes%s\n", dev, nblocks, bsize, ngroups, ninodes, want_fix ? " (repair mode)" : "");
+    dprintf(1, "fsck.ext2: %s: %u blocks of %u bytes, %u groups, %u inodes%s\n", dev, nblocks, bsize, ngroups, ninodes, want_fix ? " (repair mode)" : "");
     now = (u32)sys_time();
     fix = 0;                                         /* first a check that writes nothing */
     int r = run(), total = 0;
     if (r) return r;
     if (want_fix && errors && unfixable) {
-        printf("fsck.ext2: %u problem(s) cannot be repaired safely: nothing was changed (use e2fsck)\n", unfixable);
+        dprintf(1, "fsck.ext2: %u problem(s) cannot be repaired safely: nothing was changed (use e2fsck)\n", unfixable);
         return 4;
     }
     if (want_fix && errors) {
-        printf("fsck.ext2: repairing\n");
+        dprintf(1, "fsck.ext2: repairing\n");
         fix = 1;
         for (int k = 0; ; k++) {                     /* orphans attached: again, for their counts and the bitmaps */
             r = run();
             total += fixed;
             if (r != 1) break;
-            if (k == 2) { printf("fsck.ext2: orphans attached, but their counts did not settle in 3 runs\n"); return 4; }
-            printf("fsck.ext2: orphans attached to /lost+found: checking again\n");
+            if (k == 2) { dprintf(1, "fsck.ext2: orphans attached, but their counts did not settle in 3 runs\n"); return 4; }
+            dprintf(1, "fsck.ext2: orphans attached to /lost+found: checking again\n");
         }
         if (r) return r;
-        if (wfail) { printf("fsck.ext2: %u repair write(s) failed: the volume stays marked\n", wfail); return 8; }
+        if (wfail) { dprintf(1, "fsck.ext2: %u repair write(s) failed: the volume stays marked\n", wfail); return 8; }
         fix = 0;                                     /* proof: a run that writes nothing finds nothing */
-        printf("fsck.ext2: checking the repair\n");
+        dprintf(1, "fsck.ext2: checking the repair\n");
         if ((r = run())) return r;
-        if (errors) { printf("fsck.ext2: %u problem(s) left after the repair (use e2fsck)\n", errors); return 4; }
+        if (errors) { dprintf(1, "fsck.ext2: %u problem(s) left after the repair (use e2fsck)\n", errors); return 4; }
     }
-    printf("fsck.ext2: %s: %u files, %u/%u blocks used\n", dev, nfiles, nblocks - (L32(sb + 12)), nblocks);
-    if (unfixable) { printf("fsck.ext2: %u problem(s) could not be repaired\n", unfixable); return 4; }
-    if (errors && !want_fix) { printf("fsck.ext2: %u problem(s) found: run with -y to repair\n", errors); return 4; }
-    if (want_fix && mark_clean()) { printf("fsck.ext2: %s: could not mark it clean (a write or flush failed)\n", dev); return 8; }
-    if (total) { printf("fsck.ext2: %u repair(s) made\n", total); return 1; }
-    printf("fsck.ext2: clean\n");
+    dprintf(1, "fsck.ext2: %s: %u files, %u/%u blocks used\n", dev, nfiles, nblocks - (L32(sb + 12)), nblocks);
+    if (unfixable) { dprintf(1, "fsck.ext2: %u problem(s) could not be repaired\n", unfixable); return 4; }
+    if (errors && !want_fix) { dprintf(1, "fsck.ext2: %u problem(s) found: run with -y to repair\n", errors); return 4; }
+    if (want_fix && mark_clean()) { dprintf(1, "fsck.ext2: %s: could not mark it clean (a write or flush failed)\n", dev); return 8; }
+    if (total) { dprintf(1, "fsck.ext2: %u repair(s) made\n", total); return 1; }
+    dprintf(1, "fsck.ext2: clean\n");
     return 0;
 }

@@ -11,7 +11,7 @@ static const char *prog = "ifconfig";
 static int sock(int quiet)
 {
     int s = socket(AF_INET, SOCK_DGRAM, 0);
-    if (s < 0 && !quiet) fprintf(2, "%s: the network server: %s\n", prog, zwhy("not reachable"));
+    if (s < 0 && !quiet) dprintf(2, "%s: the network server: %s\n", prog, zwhy("not reachable"));
     return s;
 }
 
@@ -20,13 +20,13 @@ static int sock_again(void)
 {
     int s = sock(1);
     if (s >= 0 || zerrno != ENETDOWN || sys_geteuid() != 0) {
-        if (s < 0) fprintf(2, "%s: the network server: %s\n", prog, zwhy("not reachable"));
+        if (s < 0) dprintf(2, "%s: the network server: %s\n", prog, zwhy("not reachable"));
         return s;
     }
     struct ustat st;
-    if (sys_stat("/sbin/netd", &st) < 0) { fprintf(2, "%s: there is no network server (/sbin/netd)\n", prog); return -1; }
+    if (sys_stat("/sbin/netd", &st) < 0) { dprintf(2, "%s: there is no network server (/sbin/netd)\n", prog); return -1; }
     if (sys_svc_register("net", "/sbin/netd", 0) >= 0)
-        fprintf(2, "%s: the network server was not running: registered /sbin/netd again\n", prog);
+        dprintf(2, "%s: the network server was not running: registered /sbin/netd again\n", prog);
     return sock(0);
 }
 
@@ -79,13 +79,13 @@ static int list(int s, const char *only)
     r.len = sizeof rows;
     r.flags = sizeof rows[0];
     int n = sys_sock(SOCK_IFLIST | (u32)sizeof r << 16, s, &r), found = 0;
-    if (n < 0) { fprintf(2, "%s: %s\n", prog, zstrerror(n)); return 1; }
+    if (n < 0) { dprintf(2, "%s: %s\n", prog, zstrerror(n)); return 1; }
     for (int i = 0; i < n; i++) {
         if (only && strcmp(rows[i].name, only)) continue;
         if (found++) oputc('\n');
         show(&rows[i]);
     }
-    if (only && !found) { fprintf(2, "%s: %s: no such interface (up)\n", prog, only); return 1; }
+    if (only && !found) { dprintf(2, "%s: %s: no such interface (up)\n", prog, only); return 1; }
     if (!only && n && rows[0].dns[0]) {
         char d[16];
         oprintf("\nnameservers");
@@ -109,7 +109,7 @@ static int wait_attached(int s, const char *name)
         for (int i = 0; i < n; i++) if (!strcmp(rows[i].name, name)) return 0;
         sys_sleep(10);
     }
-    fprintf(2, "%s: %s: its driver did not attach within 10 s (dmesg says why)\n", prog, name);
+    dprintf(2, "%s: %s: its driver did not attach within 10 s (dmesg says why)\n", prog, name);
     return 1;
 }
 
@@ -143,21 +143,21 @@ static int updown(int argc, char **argv, int up)
     int all = 0, n = 0, bad = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-a")) all = 1;
-        else if (argv[i][0] == '-') { fprintf(2, "usage: %s -a | IFACE...\n", prog); return 2; }
+        else if (argv[i][0] == '-') { dprintf(2, "usage: %s -a | IFACE...\n", prog); return 2; }
         else n++;
     }
-    if (!all && !n) { fprintf(2, "usage: %s -a | IFACE...\n", prog); return 2; }
+    if (!all && !n) { dprintf(2, "usage: %s -a | IFACE...\n", prog); return 2; }
     int s = up ? sock_again() : sock(0);
     if (s < 0) return 1;
     if (all) {
         int r = ifset(s, "", up ? NETIFREQ_UP : NETIFREQ_DOWN, 0, 0);
-        if (r < 0) { fprintf(2, "%s -a: %s\n", prog, why(r)); bad = 1; }
+        if (r < 0) { dprintf(2, "%s -a: %s\n", prog, why(r)); bad = 1; }
         else if (up) start_sntp();
     }
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-') continue;
         int r = ifset(s, argv[i], up ? NETIFREQ_UP : NETIFREQ_DOWN, 0, 0);
-        if (r < 0) { fprintf(2, "%s: %s: %s\n", prog, argv[i], why(r)); bad = 1; }
+        if (r < 0) { dprintf(2, "%s: %s: %s\n", prog, argv[i], why(r)); bad = 1; }
         else if (up && wait_attached(s, argv[i])) bad = 1;
     }
     sys_close(s);
@@ -218,22 +218,22 @@ int main(int argc, char **argv)
     int s = up == 1 ? sock_again() : sock(0), r = 0;
     if (s < 0) return 1;
     if (up == 1 && (r = ifset(s, name, NETIFREQ_UP, 0, 0)) < 0 && r != -EEXIST) {
-        fprintf(2, "ifconfig: %s: %s\n", name, why(r));
+        dprintf(2, "ifconfig: %s: %s\n", name, why(r));
         return 1;
     }
     if (up == 1 && !r && wait_attached(s, name)) return 1;
     if (have && (r = ifset(s, name, NETIFREQ_ADDR, a, m)) < 0) {
-        fprintf(2, "ifconfig: %s: %s\n", name, why(r));
+        dprintf(2, "ifconfig: %s: %s\n", name, why(r));
         return 1;
     }
     if (up == 0 && (r = ifset(s, name, NETIFREQ_DOWN, 0, 0)) < 0) {
-        fprintf(2, "ifconfig: %s: %s\n", name, why(r));
+        dprintf(2, "ifconfig: %s: %s\n", name, why(r));
         return 1;
     }
     sys_close(s);
     return 0;
 usage:
-    fprintf(2, "usage: ifconfig [-a] [IFACE [ADDRESS[/PREFIX]] [netmask MASK] [up|down]]\n"
+    dprintf(2, "usage: ifconfig [-a] [IFACE [ADDRESS[/PREFIX]] [netmask MASK] [up|down]]\n"
                "       ifup -a | IFACE...    ifdown -a | IFACE...\n");
     return 2;
 }

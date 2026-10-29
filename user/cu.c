@@ -42,23 +42,23 @@ int main(int argc, char **argv)
     if (argc == 3 && !strcmp(argv[1], "-l"))
         dev = argv[2];
     else if (argc != 1) {
-        fprintf(2, "usage: cu [-l device]\n");
+        dprintf(2, "usage: cu [-l device]\n");
         return 2;
     }
     int port = sys_open(dev, O_RDWR);
     if (port < 0) {
-        fprintf(2, "cu: %s: %s\n", dev, zstrerror(port) ? zstrerror(port) : "cannot open");
+        dprintf(2, "cu: %s: %s\n", dev, zstrerror(port) ? zstrerror(port) : "cannot open");
         return 1;
     }
     char *cargv[] = { "cu", "-r", 0 };
     int io[3] = { port, 1, 2 };
     int child = sys_spawn("/bin/cu", cargv, io);
     if (child < 0) {
-        fprintf(2, "cu: cannot start the receiving half: %s\n", zwhy("failed"));
+        dprintf(2, "cu: cannot start the receiving half: %s\n", zwhy("failed"));
         sys_close(port);
         return 1;
     }
-    printf("Connected to %s. Type ~. at the start of a line to end.\r\n", dev);
+    dprintf(1, "Connected to %s. Type ~. at the start of a line to end.\r\n", dev);
     sys_ttymode(TTY_RAW | TTY_NOSIG);           /* every key as it is, Ctrl-C included, goes to the other side */
     int bol = 1, tilde = 0;
     for (;;) {
@@ -86,6 +86,6 @@ int main(int argc, char **argv)
     sys_kill(child);
     sys_wait(child);
     sys_close(port);
-    printf("\r\n[cu: disconnected from %s]\n", dev);
+    dprintf(1, "\r\n[cu: disconnected from %s]\n", dev);
     return 0;
 }

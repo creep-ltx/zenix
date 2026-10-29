@@ -41,7 +41,7 @@ static void say(const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(b, sizeof b, fmt, ap);
     va_end(ap);
-    printf("zpkg: %s\n", b);
+    dprintf(1, "zpkg: %s\n", b);
 }
 void zf_say(const char *fmt, ...)       /* user/zpkgfmt.c's reasons */
 {
@@ -1119,7 +1119,7 @@ static int cmd_search(char **words, int n)
         for (int j = 0; j < n && ok; j++) ok = ci_has(p->name, words[j]) || (p->desc && ci_has(p->desc, words[j]));
         if (!ok) continue;
         struct zf_pkg *k = inst_find(p->name);
-        printf("%s %s%s%s\n    %s\n", p->name, p->vstr, k ? " [installed" : "", k ? (k->vnum == p->vnum ? "]" : ", another version]") : "",
+        dprintf(1, "%s %s%s%s\n    %s\n", p->name, p->vstr, k ? " [installed" : "", k ? (k->vnum == p->vnum ? "]" : ", another version]") : "",
                p->desc ? p->desc : "");
     }
     return 0;
@@ -1131,14 +1131,14 @@ static int cmd_info_list(char **names, int n)
     for (int i = 0; i < n; i++) {
         const struct zp_pkg *p = zp_index_find(&ix, names[i]);
         if (!p) { say("%s is not in the package list", names[i]); rc = 1; continue; }
-        printf("Name        : %s\nVersion     : %s (%u)\nDescription : %s\n", p->name, p->vstr, p->vnum, p->desc ? p->desc : "");
-        printf("Group       : %s\nDepends on  :", p->base ? "base (comes with the system update)" : "none");
-        for (int d = 0; d < p->ndep; d++) printf(" %s>=%u", zp_pkg_dep(&ix, p, d)->name, zp_pkg_dep(&ix, p, d)->vnum);
-        printf("%s\n", p->ndep ? "" : " nothing");
-        if (p->ntakes) { printf("Takes       :"); for (int t = 0; t < p->ntakes; t++) printf(" %s", ix.takes[p->takes0 + t]); printf("\n"); }
-        if (p->file) printf("File        : %s, %u bytes (%u installed)\n", p->file, p->fsize, p->size);
+        dprintf(1, "Name        : %s\nVersion     : %s (%u)\nDescription : %s\n", p->name, p->vstr, p->vnum, p->desc ? p->desc : "");
+        dprintf(1, "Group       : %s\nDepends on  :", p->base ? "base (comes with the system update)" : "none");
+        for (int d = 0; d < p->ndep; d++) dprintf(1, " %s>=%u", zp_pkg_dep(&ix, p, d)->name, zp_pkg_dep(&ix, p, d)->vnum);
+        dprintf(1, "%s\n", p->ndep ? "" : " nothing");
+        if (p->ntakes) { dprintf(1, "Takes       :"); for (int t = 0; t < p->ntakes; t++) dprintf(1, " %s", ix.takes[p->takes0 + t]); dprintf(1, "\n"); }
+        if (p->file) dprintf(1, "File        : %s, %u bytes (%u installed)\n", p->file, p->fsize, p->size);
         struct zf_pkg *k = inst_find(p->name);
-        printf("Installed   : %s\n\n", k ? k->vstr : "no");
+        dprintf(1, "Installed   : %s\n\n", k ? k->vstr : "no");
     }
     return rc;
 }
@@ -1150,7 +1150,7 @@ static int cmd_query(char **names, int n, char what)
             int found = 0;
             for (int j = 0; j < ninst; j++)
                 if (zf_find_ent(inst[j], names[i]) && zf_find_ent(inst[j], names[i])->kind != 'd') {
-                    printf("%s is owned by %s %s\n", names[i], inst[j]->name, inst[j]->vstr);
+                    dprintf(1, "%s is owned by %s %s\n", names[i], inst[j]->name, inst[j]->vstr);
                     found = 1;
                 }
             if (!found) { say("no package owns %s", names[i]); rc = 1; }
@@ -1161,10 +1161,10 @@ static int cmd_query(char **names, int n, char what)
         if (use_stored()) return 1;
         for (int j = 0; j < ninst; j++) {
             const struct zp_pkg *p = zp_index_find(&ix, inst[j]->name);
-            if (p && p->vnum > inst[j]->vnum) printf("%s %s -> %s\n", inst[j]->name, inst[j]->vstr, p->vstr);
+            if (p && p->vnum > inst[j]->vnum) dprintf(1, "%s %s -> %s\n", inst[j]->name, inst[j]->vstr, p->vstr);
         }
         if (ix.sys.vnum > effbase && inst_find("base") && ix.sys.vnum > inst_find("base")->vnum)
-            printf("Zenix (the system) %u -> %s (%u)\n", inst_find("base")->vnum, ix.sys.vstr, ix.sys.vnum);
+            dprintf(1, "Zenix (the system) %u -> %s (%u)\n", inst_find("base")->vnum, ix.sys.vstr, ix.sys.vnum);
         return 0;
     }
     for (int j = 0; j < ninst; j++) {
@@ -1176,16 +1176,16 @@ static int cmd_query(char **names, int n, char what)
         for (int d = 0; d < k->ndep; d++) if (!strcmp(k->dep[d], "base")) needbase = k->depv[d];
         const char *mark = needbase > effbase ? "  (needs base newer than the one running)" : "";
         if (what == 'l') {
-            for (int e = 0; e < k->nent; e++) printf("%s %s\n", k->name, k->ent[e].path);
+            for (int e = 0; e < k->nent; e++) dprintf(1, "%s %s\n", k->name, k->ent[e].path);
         } else if (what == 'i') {
             int nf = 0;
             for (int e = 0; e < k->nent; e++) nf += k->ent[e].kind != 'd';
-            printf("Name        : %s\nVersion     : %s (%u)%s\nGroup       : %s\nDepends on  :", k->name, k->vstr, k->vnum, mark,
+            dprintf(1, "Name        : %s\nVersion     : %s (%u)%s\nGroup       : %s\nDepends on  :", k->name, k->vstr, k->vnum, mark,
                    k->group ? k->group : "none");
-            for (int d = 0; d < k->ndep; d++) printf(" %s>=%u", k->dep[d], k->depv[d]);
-            printf("%s\nFiles       : %d\nInstalled as: %s\n\n", k->ndep ? "" : " nothing", nf,
+            for (int d = 0; d < k->ndep; d++) dprintf(1, " %s>=%u", k->dep[d], k->depv[d]);
+            dprintf(1, "%s\nFiles       : %d\nInstalled as: %s\n\n", k->ndep ? "" : " nothing", nf,
                    winst[j].asdep ? "a dependency" : "asked for");
-        } else printf("%s %s%s\n", k->name, k->vstr, mark);
+        } else dprintf(1, "%s %s%s\n", k->name, k->vstr, mark);
     }
     for (int i = 0; i < n; i++) if (!inst_find(names[i])) { say("%s is not installed", names[i]); rc = 1; }
     return rc;
@@ -1193,7 +1193,7 @@ static int cmd_query(char **names, int n, char what)
 
 static int usage(void)
 {
-    printf("usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sc\n"
+    dprintf(1, "usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sc\n"
            "       zpkg -Q [NAME...] | -Qi NAME... | -Ql NAME... | -Qo PATH... | -Qu\n"
            "       zpkg -R[s][n] NAME... | -U FILE... | --back NAME\n"
            "  options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL  --ram  --yes   (man zpkg)\n");

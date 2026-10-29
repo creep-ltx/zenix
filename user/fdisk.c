@@ -71,14 +71,14 @@ static const char *tname(unsigned t)
 static void list(const char *only)
 {
     struct diskinfo d;
-    printf("%-8s %-10s %10s %9s  %s\n", "DEVICE", "LABEL", "SECTORS", "SIZE", "TYPE");
+    dprintf(1, "%-8s %-10s %10s %9s  %s\n", "DEVICE", "LABEL", "SECTORS", "SIZE", "TYPE");
     for (u32 i = 0; dlist(i, &d) == 0; i++) {
         if (only && strncmp(d.name, only, strlen(only))) continue;
         /* KB below 1 MB (a floppy, the RAM disk), MB from there on: never "0" for a disk that has sectors */
         char size[16];
         if (d.sectors < 2048) snprintf(size, sizeof size, "%u KB", d.sectors / 2);
         else snprintf(size, sizeof size, "%u MB", d.sectors / 2048);
-        printf("%-8s %-10s %10u %9s  %s%s%s\n", d.name, d.label, d.sectors, size,
+        dprintf(1, "%-8s %-10s %10u %9s  %s%s%s\n", d.name, d.label, d.sectors, size,
                d.dostype ? tname(d.dostype) : "", d.flags & 1 ? " boot" : "", d.mounted ? " mounted" : "");
     }
 }
@@ -98,8 +98,8 @@ static int has_mbr(void)
 static int may_write(const char *name)
 {
     int r = open_disk(name, DISK_RAW);
-    if (r == -EBUSY) { printf("fdisk: %s is in use (a partition on it is mounted): fdisk can only list it\n", name); return 0; }
-    if (r < 0) { printf("fdisk: cannot open %s for writing\n", name); return 0; }
+    if (r == -EBUSY) { dprintf(1, "fdisk: %s is in use (a partition on it is mounted): fdisk can only list it\n", name); return 0; }
+    if (r < 0) { dprintf(1, "fdisk: cannot open %s for writing\n", name); return 0; }
     h = r;
     return 1;
 }
@@ -174,70 +174,70 @@ static unsigned free_mb(unsigned disk_sectors)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) { printf("usage: fdisk list|init|add|del|boot ...\n"); return 2; }
+    if (argc < 2) { dprintf(1, "usage: fdisk list|init|add|del|boot ...\n"); return 2; }
     port = sys_port_find("disk");
-    if (port < 0) { printf("fdisk: no disk server\n"); return 1; }
+    if (port < 0) { dprintf(1, "fdisk: no disk server\n"); return 1; }
     if (!strcmp(argv[1], "list")) { list(argc > 2 ? argv[2] : 0); return 0; }
-    if (argc < 3) { printf("fdisk: which disk?\n"); return 2; }
+    if (argc < 3) { dprintf(1, "fdisk: which disk?\n"); return 2; }
     h = open_disk(argv[2], 0);                       /* reading first; writing needs DISK_RAW (see may_write) */
     struct diskinfo di;
     if (h < 0 || dinfo(h, &di) < 0 || di.start != 0 || di.dostype != 0 || strncmp(di.name, "ide", 3)) {
-        printf("fdisk: %s is not a whole disk\n", argv[2]);
+        dprintf(1, "fdisk: %s is not a whole disk\n", argv[2]);
         return 1;
     }
     int have = rdb_read(rd, &r);
-    if (have < 0) { printf("fdisk: cannot read %s\n", argv[2]); return 1; }
+    if (have < 0) { dprintf(1, "fdisk: cannot read %s\n", argv[2]); return 1; }
     unsigned cylinders = di.sectors / RDB_CYL;
 
     if (!strcmp(argv[1], "init")) {
-        if (argc < 4 || strcmp(argv[3], "-y")) { printf("fdisk: init destroys the partition table: add -y\n"); return 1; }
+        if (argc < 4 || strcmp(argv[3], "-y")) { dprintf(1, "fdisk: init destroys the partition table: add -y\n"); return 1; }
         if (have != 1 && has_mbr() && (argc < 5 || strcmp(argv[4], "-y"))) {
-            printf("fdisk: %s has a PC partition table (MBR) and boot files; init would destroy them.\n"
+            dprintf(1, "fdisk: %s has a PC partition table (MBR) and boot files; init would destroy them.\n"
                    "       If you really mean it: fdisk init %s -y -y\n", argv[2], argv[2]);
             return 1;
         }
-        if (cylinders < 3) { printf("fdisk: disk too small\n"); return 1; }
+        if (cylinders < 3) { dprintf(1, "fdisk: disk too small\n"); return 1; }
         if (!may_write(argv[2])) return 1;
-        if (write_empty(cylinders)) { printf("fdisk: cannot write the partition table\n"); return 1; }
+        if (write_empty(cylinders)) { dprintf(1, "fdisk: cannot write the partition table\n"); return 1; }
         rescan();
         list(argv[2]);
         return 0;
     }
     if (have != 1 && has_mbr()) {
-        printf("fdisk: %s has a PC partition table (MBR); fdisk edits Amiga tables (RDB) only.\n", argv[2]);
+        dprintf(1, "fdisk: %s has a PC partition table (MBR); fdisk edits Amiga tables (RDB) only.\n", argv[2]);
         return 1;
     }
     if (have != 1) {
-        printf("fdisk: no partition table on %s (use: fdisk init %s -y)\n", argv[2], argv[2]);
+        dprintf(1, "fdisk: no partition table on %s (use: fdisk init %s -y)\n", argv[2], argv[2]);
         return 1;
     }
     if (r.noedit) {
-        printf("fdisk: %s: %s.\n       fdisk will not change a table it cannot keep exactly (use HDToolBox).\n", argv[2], r.noedit);
+        dprintf(1, "fdisk: %s: %s.\n       fdisk will not change a table it cannot keep exactly (use HDToolBox).\n", argv[2], r.noedit);
         return 1;
     }
 
-    if (strcmp(argv[1], "add") && strcmp(argv[1], "del") && strcmp(argv[1], "boot")) { printf("fdisk: unknown command %s\n", argv[1]); return 2; }
+    if (strcmp(argv[1], "add") && strcmp(argv[1], "del") && strcmp(argv[1], "boot")) { dprintf(1, "fdisk: unknown command %s\n", argv[1]); return 2; }
     if (!may_write(argv[2])) return 1;
     int rc = 0;
     if (!strcmp(argv[1], "add")) {
-        if (argc < 5) { printf("usage: fdisk add DISK LABEL SIZE [ext2|zenixfs]\n"); return 2; }
-        if (r.nparts >= RDB_MAXPART) { printf("fdisk: too many partitions (%d)\n", RDB_MAXPART); return 1; }
-        if (strlen(argv[3]) > 31 || !argv[3][0]) { printf("fdisk: a label has 1 to 31 characters\n"); return 1; }
+        if (argc < 5) { dprintf(1, "usage: fdisk add DISK LABEL SIZE [ext2|zenixfs]\n"); return 2; }
+        if (r.nparts >= RDB_MAXPART) { dprintf(1, "fdisk: too many partitions (%d)\n", RDB_MAXPART); return 1; }
+        if (strlen(argv[3]) > 31 || !argv[3][0]) { dprintf(1, "fdisk: a label has 1 to 31 characters\n"); return 1; }
         unsigned mb = strcmp(argv[4], "rest") ? (unsigned)atoi(argv[4]) : 0, lo, hi;
-        if (strcmp(argv[4], "rest") && mb == 0) { printf("fdisk: size in MB, or \"rest\"\n"); return 2; }
+        if (strcmp(argv[4], "rest") && mb == 0) { dprintf(1, "fdisk: size in MB, or \"rest\"\n"); return 2; }
         if (place(mb, di.sectors, &lo, &hi)) {
-            printf("fdisk: not enough free space (the largest free part is %u MB)\n", free_mb(di.sectors));
+            dprintf(1, "fdisk: not enough free space (the largest free part is %u MB)\n", free_mb(di.sectors));
             return 1;
         }
         unsigned st = lo * r.cylblocks, n = (hi - lo + 1) * r.cylblocks;
         for (int i = 0; i < r.nparts; i++)               /* never over another partition */
             if (r.part[i].sectors && st < r.part[i].start + r.part[i].sectors && r.part[i].start < st + n) {
-                printf("fdisk: internal error: the new partition would overlap %s\n", r.part[i].label);
+                dprintf(1, "fdisk: internal error: the new partition would overlap %s\n", r.part[i].label);
                 return 1;
             }
         unsigned nb;                                     /* a block of the RDB area that no chain uses */
         for (nb = r.blk + 1; nb <= r.rdbhi && owned(nb); nb++) ;
-        if (nb > r.rdbhi) { printf("fdisk: no free block left in the RDB area for another partition\n"); return 1; }
+        if (nb > r.rdbhi) { dprintf(1, "fdisk: no free block left in the RDB area for another partition\n"); return 1; }
         for (unsigned i = 0; i < 128; i++) b[i] = 0;
         b[0] = RDB_ID_PART; b[1] = 64; b[3] = 7;
         b[4] = 0xFFFFFFFFu;
@@ -255,9 +255,9 @@ int main(int argc, char **argv)
         else rc = poke(r.blk, 7, nb, RDB_ID_RDSK);
         if (!rc && rd(r.blk, b) == 0 && b[38] < nb) rc = poke(r.blk, 38, nb, RDB_ID_RDSK);   /* HighRDSKBlock */
     } else if (!strcmp(argv[1], "del") || !strcmp(argv[1], "boot")) {
-        if (argc < 4) { printf("usage: fdisk %s DISK N\n", argv[1]); return 2; }
+        if (argc < 4) { dprintf(1, "usage: fdisk %s DISK N\n", argv[1]); return 2; }
         int n = atoi(argv[3]) - 1;
-        if (n < 0 || n >= r.nparts) { printf("fdisk: no partition %s\n", argv[3]); return 1; }
+        if (n < 0 || n >= r.nparts) { dprintf(1, "fdisk: no partition %s\n", argv[3]); return 1; }
         if (!strcmp(argv[1], "del")) {
             if (rd(r.part[n].blk, b) || b[0] != RDB_ID_PART) rc = -1;
             else {
@@ -268,9 +268,9 @@ int main(int argc, char **argv)
             if (rd(r.part[n].blk, b) || b[0] != RDB_ID_PART) rc = -1;
             else rc = poke(r.part[n].blk, 5, (argc > 4 && !strcmp(argv[4], "off")) ? (b[5] & ~1u) : (b[5] | 1u), RDB_ID_PART);
         }
-    } else { printf("fdisk: unknown command %s\n", argv[1]); return 2; }
+    } else { dprintf(1, "fdisk: unknown command %s\n", argv[1]); return 2; }
 
-    if (rc) { printf("fdisk: cannot write the partition table\n"); return 1; }
+    if (rc) { dprintf(1, "fdisk: cannot write the partition table\n"); return 1; }
     rescan();
     list(argv[2]);
     return 0;

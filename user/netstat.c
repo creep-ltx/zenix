@@ -35,7 +35,7 @@ int main(int argc, char **argv)
     if (!t && !u && !w) t = u = w = 1;
     int s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0) {
-        fprintf(2, "netstat: %s\n", zwhy("no network"));
+        dprintf(2, "netstat: %s\n", zwhy("no network"));
         return 1;
     }
     enum { MAXROWS = 64 };
@@ -48,7 +48,7 @@ int main(int argc, char **argv)
     int n = sys_sock(SOCK_NETSTAT | (u32)sizeof r << 16, s, &r);
     sys_close(s);
     if (n < 0) {
-        fprintf(2, "netstat: %s\n", zstrerror(n));
+        dprintf(2, "netstat: %s\n", zstrerror(n));
         return 1;
     }
     oprintf("Active Internet connections%s\n", a ? " (servers and established)" : l ? " (only servers)" : " (w/o servers)");
@@ -69,6 +69,6 @@ int main(int argc, char **argv)
     if (n == MAXROWS) oprintf("netstat: only the first %d shown\n", MAXROWS);
     return 0;
 usage:
-    fprintf(2, "usage: netstat [-tuwlan]\n");
+    dprintf(2, "usage: netstat [-tuwlan]\n");
     return 2;
 }

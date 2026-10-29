@@ -32,17 +32,17 @@ const char *gr_name(u32 gid, char *buf)
 int pw_replace(const char *who, const char *path, const char *data, u32 len, u32 mode)
 {
     char tmp[64];
-    if (strlen(path) + 5 > sizeof tmp) { fprintf(2, "%s: %s: path too long\n", who, path); return -1; }
+    if (strlen(path) + 5 > sizeof tmp) { dprintf(2, "%s: %s: path too long\n", who, path); return -1; }
     strcpy(tmp, path); strcat(tmp, ".new");
     int fd = sys_open(tmp, O_WRONLY | O_CREAT | O_TRUNC);
     if (fd < 0 || sys_write(fd, data, len) != (int)len) {
-        fprintf(2, "%s: %s: %s\n", who, tmp, zwhy("cannot write"));
+        dprintf(2, "%s: %s: %s\n", who, tmp, zwhy("cannot write"));
         if (fd >= 0) { sys_close(fd); sys_unlink(tmp); }
         return -1;
     }
     sys_close(fd);
     sys_chmod(tmp, mode);
-    if (sys_rename(tmp, path) < 0) { fprintf(2, "%s: cannot replace %s: %s\n", who, path, zwhy("failed")); sys_unlink(tmp); return -1; }
+    if (sys_rename(tmp, path) < 0) { dprintf(2, "%s: cannot replace %s: %s\n", who, path, zwhy("failed")); sys_unlink(tmp); return -1; }
     return 0;
 }
 
@@ -81,10 +81,10 @@ int gr_edit(const char *who, const char *group, const char *name, int add)
 {
     int n = 0;
     char *old = pw_slurp("/etc/group", &n);
-    if (!old) { fprintf(2, "%s: cannot read /etc/group\n", who); return -1; }
+    if (!old) { dprintf(2, "%s: cannot read /etc/group\n", who); return -1; }
     u32 nl = strlen(name), gl = strlen(group), o = 0;
     char *nf = malloc((u32)n + nl + 4);
-    if (!nf) { fprintf(2, "%s: out of memory\n", who); free(old); return -1; }
+    if (!nf) { dprintf(2, "%s: out of memory\n", who); free(old); return -1; }
     int done = 0;
     for (char *l = old; *l; ) {
         char *e = strchr(l, '\n'); u32 len = e ? (u32)(e - l) : strlen(l);
@@ -105,7 +105,7 @@ int gr_edit(const char *who, const char *group, const char *name, int add)
         l = e + 1;
     }
     free(old);
-    if (!done) { fprintf(2, "%s: %s: no such group in /etc/group\n", who, group); free(nf); return -1; }
+    if (!done) { dprintf(2, "%s: %s: no such group in /etc/group\n", who, group); free(nf); return -1; }
     int rc = pw_replace(who, "/etc/group", nf, o, 0644);
     free(nf);
     return rc;

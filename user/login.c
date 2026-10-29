@@ -28,7 +28,7 @@ static int session(const struct pw *p)
     sys_chdir(p->home);
     char *argv[] = { (char *)p->shell, 0 };          /* spawn only reads argv */
     int pid = sys_spawn(p->shell, argv, 0);
-    if (pid < 0) { fprintf(2, "login: cannot start %s: %s\n", p->shell, zwhy("failed")); return 1; }
+    if (pid < 0) { dprintf(2, "login: cannot start %s: %s\n", p->shell, zwhy("failed")); return 1; }
     if (handover)                       /* init's login: the shell becomes init's child, login ends (DESIGN D18) */
         sys_exit_handing(ST_HANDED | pid, pid);
     sys_wait(pid);                      /* the shell makes its own group the terminal's foreground (DESIGN D16) */
@@ -56,7 +56,7 @@ int main(int argc, char **argv)
     }
     for (int tries = 0; tries < 5; ) {
         if (!name[0]) {
-            fputs("zenix login: ", 1);
+            pw_fputs("zenix login: ", 1);
             /* the tty is in cooked mode here: it echoes the name, edits the line (Backspace, ^U) and echoes the
              * Return, so login only takes the characters (echoing them too printed the name twice) */
             int n = 0; char c;
@@ -68,14 +68,14 @@ int main(int argc, char **argv)
             if (autologin) {                                    /* the shipped images: say plainly what that means */
                 struct pw r;
                 if (pw_byname("root", &r) == 0 && !r.hash[0])
-                    fputs("login: warning: root has no password and /etc/autologin logs in without asking; set passwords with passwd and remove /etc/autologin before trusting this system\n", 1);
+                    pw_fputs("login: warning: root has no password and /etc/autologin logs in without asking; set passwords with passwd and remove /etc/autologin before trusting this system\n", 1);
             }
             if (force || !p.hash[0]) return session(&p);
             if (read_secret("Password: ", pass, sizeof pass) == 0 && pw_check(pass, p.hash)) return session(&p);
         } else {
             read_secret("Password: ", pass, sizeof pass);       /* same delay and questions for an unknown name */
         }
-        fputs("Login incorrect\n", 1);
+        pw_fputs("Login incorrect\n", 1);
         sys_sleep(100);
         tries++; name[0] = 0; force = autologin = 0;
     }

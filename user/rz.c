@@ -29,11 +29,11 @@ static void tell(char kind, const char *fmt, ...)
     vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
     if (tform)
-        fprintf(2, "%c %s\n", kind, line);
+        dprintf(2, "%c %s\n", kind, line);
     else if (kind == 'P')
-        fprintf(2, "\r%s\033[K", line);
+        dprintf(2, "\r%s\033[K", line);
     else
-        fprintf(2, "\r%s\033[K\r\n", line);
+        dprintf(2, "\r%s\033[K\r\n", line);
 }
 
 /* ---- the host: standard input and output ---- */
@@ -118,7 +118,7 @@ static void x_rest(void *u, const unsigned char *b, long n)
     if (n <= 0)
         return;
     if (tform)
-        fprintf(2, "R %ld\n", n);
+        dprintf(2, "R %ld\n", n);
     while (n > 0) {
         int w = sys_write(2, b, (u32)n);
         if (w <= 0)
@@ -260,7 +260,7 @@ static void x_rclose(void *u, void *f) { (void)u; sys_close((int)(long)f - 1); }
 
 static int usage(int send)
 {
-    fprintf(2, send ? "usage: sz [-e] [-q] [-T] FILE...\n" : "usage: rz [-e] [-q] [-T] [-d DIR]\n");
+    dprintf(2, send ? "usage: sz [-e] [-q] [-T] FILE...\n" : "usage: rz [-e] [-q] [-T] [-d DIR]\n");
     return 2;
 }
 
@@ -280,7 +280,7 @@ int main(int argc, char **argv)
     if (send ? i >= argc : i != argc)
         return usage(send);
     if (dir && sys_chdir(dir) < 0) {
-        fprintf(2, "%s: %s: %s\n", me, dir, zwhy("cannot go there"));
+        dprintf(2, "%s: %s: %s\n", me, dir, zwhy("cannot go there"));
         return 1;
     }
     struct sigaction sa;

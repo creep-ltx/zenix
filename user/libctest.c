@@ -11,6 +11,7 @@
  *   libctest tty        the terminal (DESIGN D27 5.4) with the keys the test types after each prompt: the console's
  *                       size, raw mode and back, ICANON without ECHO (the console's grid shows nothing typed), the
  *                       C library's line editing, getpass
+ *   libctest sigdfl     (run by system's check) status 0 when SIGINT and SIGQUIT have their default actions
  *   libctest hold N     every check, then N seconds more (the ZEX2 build on two consoles at once: free shows one
  *                       copy of its code) */
 #define _GNU_SOURCE
@@ -50,6 +51,7 @@
 #include "usys.h"                       /* SYS_procinfo, for the memory checks */
 
 static int nchk, nfail;
+static const char *myname = "/tests/libctest";      /* argv[0]: the ZEX2 build runs as /tests/libctestpure */
 static void check(const char *name, int ok, const char *got)
 {
     nchk++;
@@ -646,6 +648,17 @@ static void t_spawn(void)
     unlink(tf);
     checks("popen w", b, "into the command\n");
     check("getppid", getppid() > 0 && getppid() != getpid(), "");
+    /* system ignores SIGINT and SIGQUIT while it waits (POSIX: ^C is the command's), puts the caller's handlers
+     * back after, and the command itself gets the defaults */
+    signal(SIGINT, on_usr1);
+    signal(SIGQUIT, on_usr1);
+    got_sig = 0;
+    snprintf(cmd, sizeof cmd, "sleep 1; kill -INT %d; kill -QUIT %d; exit 5", getpid(), getpid());
+    checki("system: SIGINT and SIGQUIT ignored while it waits", WEXITSTATUS(system(cmd)) * 100 + got_sig, 500);
+    check("system: the caller's handlers back after", signal(SIGINT, SIG_DFL) == on_usr1 &&
+          signal(SIGQUIT, SIG_DFL) == on_usr1, "");
+    snprintf(cmd, sizeof cmd, "%s sigdfl", myname);
+    checki("system: the command's SIGINT and SIGQUIT are the defaults", WEXITSTATUS(system(cmd)), 0);
 }
 
 /* the console's grid (CON_READ, root) holds text on one of its rows: 1, 0, or -1 when it cannot be read */
@@ -755,6 +768,12 @@ int main(int argc, char **argv)
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "tty")) return t_tty();
+    if (argc > 1 && !strcmp(argv[1], "sigdfl")) {     /* run by system(): SIGINT and SIGQUIT not ignored here */
+        struct sigaction i, q;
+        return sigaction(SIGINT, 0, &i) == 0 && sigaction(SIGQUIT, 0, &q) == 0 && i.sa_handler == SIG_DFL &&
+               q.sa_handler == SIG_DFL ? 0 : 7;
+    }
+    myname = argv[0];
     atexit(at_end);
     t_formats();
     t_scan();

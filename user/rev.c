@@ -13,7 +13,7 @@ int main(int argc, char **argv)
     if (argc < 2) { one(0); return 0; }
     for (int i = 1; i < argc; i++) {
         int fd = strcmp(argv[i], "-") ? sys_open(argv[i], O_RDONLY) : 0;
-        if (fd < 0) { fprintf(2, "rev: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
+        if (fd < 0) { dprintf(2, "rev: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
         one(fd); if (fd) sys_close(fd);
     }
     return rc;

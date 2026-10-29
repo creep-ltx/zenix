@@ -45,8 +45,8 @@ static int serve(const char *name, const char *type)
 {
     struct umsg *held[8];
     int nh = 0, port = sys_port_create(name);
-    if (port < 0) { printf("svctest serve: port %d\n", port); return 1; }
-    printf("svctest serve: %s ready\n", name);    /* the test waits for this, not a fixed time */
+    if (port < 0) { dprintf(1, "svctest serve: port %d\n", port); return 1; }
+    dprintf(1, "svctest serve: %s ready\n", name);    /* the test waits for this, not a fixed time */
     for (;;) {
         struct pollfd pf = { port, POLLPORT | POLLIN | POLLPRI, 0 };
         int n = sys_evwait(&pf, 1, -1);
@@ -63,12 +63,12 @@ static int serve(const char *name, const char *type)
                     u[0] = 3; u[1] = 0100644; u[6] = 1;
                     r = 0;
                 }
-                printf("svctest serve: type %u answered %d after the cancel\n", m->type, r);
+                dprintf(1, "svctest serve: type %u answered %d after the cancel\n", m->type, r);
                 sys_reply(m, r);
                 held[i] = held[--nh];
                 k++;
             }
-            printf("svctest serve: POLLPRI, %d held cancelled\n", k);
+            dprintf(1, "svctest serve: POLLPRI, %d held cancelled\n", k);
         }
         if (!(pf.revents & POLLIN)) continue;
         struct umsg *m = sys_recv(port, 0);
@@ -81,7 +81,7 @@ static int serve(const char *name, const char *type)
             strncpy(fi->type, type, sizeof fi->type - 1);
             r = 2;
         } else if (m->type == FS_CLOSE) {
-            printf("svctest serve: close %u%s\n", m->a[0], m->kflags & UMSG_CANCEL ? " came marked" : "");
+            dprintf(1, "svctest serve: close %u%s\n", m->a[0], m->kflags & UMSG_CANCEL ? " came marked" : "");
             r = 0;
         } else if (m->type == FS_OPEN && !(m->kflags & UMSG_CANCEL) && !strcmp((const char *)m->a[0], "/o")) {
             u32 *u = (u32 *)m->a[3];            /* /o opens (a file of 10 bytes): its reads are held */
@@ -89,13 +89,13 @@ static int serve(const char *name, const char *type)
             u[0] = 5; u[1] = 0100644; u[2] = 10; u[6] = 1;
             r = 5;
         }
-        else if (m->type == FS_SYNC) { printf("svctest serve: %s sync a0=%u\n", name, m->a[0]); r = 0; }
+        else if (m->type == FS_SYNC) { dprintf(1, "svctest serve: %s sync a0=%u\n", name, m->a[0]); r = 0; }
         else if (m->type == FS_QUIT) { sys_reply(m, 0); return 0; }
         else if (m->kflags & UMSG_CANCEL) {
-            printf("svctest serve: type %u came cancelled\n", m->type);
+            dprintf(1, "svctest serve: type %u came cancelled\n", m->type);
             r = -EINTR;
         } else if (nh < 8) {
-            printf("svctest serve: type %u held\n", m->type);
+            dprintf(1, "svctest serve: type %u held\n", m->type);
             held[nh++] = m;
             continue;
         } else r = -EBUSY;
@@ -106,7 +106,7 @@ static int serve(const char *name, const char *type)
 int main(int argc, char **argv)
 {
     if (argc >= 3 && !strcmp(argv[1], "port")) {
-        printf("svctest port %s: %d\n", argv[2], sys_port_create(argv[2]));
+        dprintf(1, "svctest port %s: %d\n", argv[2], sys_port_create(argv[2]));
         return 0;
     }
     if (argc >= 3 && !strcmp(argv[1], "ports")) {
@@ -117,7 +117,7 @@ int main(int argc, char **argv)
             if ((r = sys_port_create(n)) < 0) break;
             k++;
         }
-        printf("svctest ports: %d made, then %d\n", k, r);
+        dprintf(1, "svctest ports: %d made, then %d\n", k, r);
         sys_sleep((u32)atoi(argv[2]) * 100);
         return 0;
     }
@@ -125,15 +125,15 @@ int main(int argc, char **argv)
         char text[SVC_TEXT_MAX];
         text[0] = 0;
         for (int i = 4; i < argc; i++) {
-            if (strlen(text) + strlen(argv[i]) + 2 > sizeof text) { printf("svctest reg: too long\n"); return 1; }
+            if (strlen(text) + strlen(argv[i]) + 2 > sizeof text) { dprintf(1, "svctest reg: too long\n"); return 1; }
             if (i > 4) strcat(text, " ");
             strcat(text, argv[i]);
         }
-        printf("svctest reg %s: %d\n", argv[2], sys_svc_register(argv[2], text, atoi(argv[3])));
+        dprintf(1, "svctest reg %s: %d\n", argv[2], sys_svc_register(argv[2], text, atoi(argv[3])));
         return 0;
     }
     if (argc >= 3 && !strcmp(argv[1], "rm")) {
-        printf("svctest rm %s: %d\n", argv[2], sys_svc_remove(argv[2]));
+        dprintf(1, "svctest rm %s: %d\n", argv[2], sys_svc_remove(argv[2]));
         return 0;
     }
     if (argc >= 5 && !strcmp(argv[1], "kcall")) {
@@ -151,7 +151,7 @@ int main(int argc, char **argv)
         m.a[0] = argc > 4 ? (u32)atoi(argv[4]) : 0;
         u32 t0 = sys_hrtime();
         int r = port < 0 ? port : sys_call(port, &m);
-        printf("svctest call %s %s: %d in %u ms\n", argv[2], argv[3], r, (sys_hrtime() - t0) / E_MS);
+        dprintf(1, "svctest call %s %s: %d in %u ms\n", argv[2], argv[3], r, (sys_hrtime() - t0) / E_MS);
         if (argc > 5)
             sys_sleep((u32)atoi(argv[5]) * 100);
         return 0;
@@ -162,13 +162,13 @@ int main(int argc, char **argv)
         struct umsg m;
         m.type = DISK_OPEN; m.a[0] = (u32)argv[2]; m.a[1] = raw ? DISK_RAW : 0;
         int h = sys_call(dp, &m);
-        if (raw) { printf("svctest raw %s: %d\n", argv[2], h); return 0; }
+        if (raw) { dprintf(1, "svctest raw %s: %d\n", argv[2], h); return 0; }
         m.type = DISK_READ; m.a[0] = (u32)h; m.a[1] = 0; m.a[2] = 1; m.a[3] = (u32)sec;
         int r1 = sys_call(dp, &m);
         sys_sleep(argc > 3 ? (u32)atoi(argv[3]) * 100 : 500);
         m.type = DISK_READ; m.a[0] = (u32)h; m.a[1] = 0; m.a[2] = 1; m.a[3] = (u32)sec;
         int r2 = sys_call(dp, &m);
-        printf("svctest hold %s: handle %d, read %d, after the wait %d\n", argv[2], h, r1, r2);
+        dprintf(1, "svctest hold %s: handle %d, read %d, after the wait %d\n", argv[2], h, r1, r2);
         return 0;
     }
     if (argc >= 4 && !strcmp(argv[1], "keep")) {
@@ -178,7 +178,7 @@ int main(int argc, char **argv)
         sys_sleep((u32)atoi(argv[3]) * 100);
         sys_lseek(fd, 0, 0);
         int n2 = sys_read(fd, b, sizeof b);
-        printf("svctest keep %s: read %d, deleted %d, again %d: %s\n", argv[2], n1, u, n2,
+        dprintf(1, "svctest keep %s: read %d, deleted %d, again %d: %s\n", argv[2], n1, u, n2,
                n1 > 0 && n1 == n2 && !memcmp(a, b, (u32)n1) ? "the same bytes" : "DIFFERENT");
         sys_close(fd);
         return 0;
@@ -186,13 +186,13 @@ int main(int argc, char **argv)
     if (argc >= 4 && !strcmp(argv[1], "kill")) {
         sys_sleep((u32)atoi(argv[3]) * 100);
         int a = sys_kill(atoi(argv[2])), b = sys_kill(atoi(argv[2]));
-        printf("svctest kill %s: %d %d\n", argv[2], a, b);
+        dprintf(1, "svctest kill %s: %d %d\n", argv[2], a, b);
         return 0;
     }
     if (argc >= 3 && !strcmp(argv[1], "reboot")) {
         sys_kill(atoi(argv[2]));
         sys_sleep(50);
-        printf("svctest reboot: %d\n", sys_reboot(0));
+        dprintf(1, "svctest reboot: %d\n", sys_reboot(0));
         return 1;
     }
     if (argc >= 4 && !strcmp(argv[1], "lost")) {
@@ -203,13 +203,13 @@ int main(int argc, char **argv)
         sys_lseek(fd, 0, 0);
         memset(buf, 0, sizeof buf);
         int r = sys_read(fd, buf, 4);
-        printf("svctest lost %s: wrote %d, read %d \"%s\"\n", argv[2], w, r, r > 0 ? buf : "");
+        dprintf(1, "svctest lost %s: wrote %d, read %d \"%s\"\n", argv[2], w, r, r > 0 ? buf : "");
         sys_close(fd);
         return 0;
     }
     if (argc >= 4 && !strcmp(argv[1], "mount")) {
         struct umountreq rq = { argv[3], argv[2], "test", "test" };
-        printf("svctest mount %s: %d\n", argv[3], sys_mount(&rq));
+        dprintf(1, "svctest mount %s: %d\n", argv[3], sys_mount(&rq));
         return 0;
     }
     if (argc >= 4 && !strcmp(argv[1], "serve"))
@@ -217,17 +217,17 @@ int main(int argc, char **argv)
     if (argc >= 3 && !strcmp(argv[1], "catch")) {
         signal(SIGINT, caught);
         int fd = sys_open(argv[2], O_RDONLY);
-        printf("svctest catch: open %d, SIGINT caught %d\n", fd, ncaught);
+        dprintf(1, "svctest catch: open %d, SIGINT caught %d\n", fd, ncaught);
         return 0;
     }
     if (argc >= 3 && !strcmp(argv[1], "trunc")) {
-        printf("svctest trunc: %d\n", sys_open(argv[2], O_WRONLY | O_CREAT | O_TRUNC));
+        dprintf(1, "svctest trunc: %d\n", sys_open(argv[2], O_WRONLY | O_CREAT | O_TRUNC));
         return 0;
     }
     if (argc >= 3 && !strcmp(argv[1], "unlink")) {
-        printf("svctest unlink: %d\n", sys_unlink(argv[2]));
+        dprintf(1, "svctest unlink: %d\n", sys_unlink(argv[2]));
         return 0;
     }
-    printf("usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost|mount|serve|catch|trunc|unlink ...\n");
+    dprintf(1, "usage: svctest port|ports|reg|rm|call|kcall|raw|hold|keep|lost|mount|serve|catch|trunc|unlink ...\n");
     return 2;
 }

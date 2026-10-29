@@ -35,7 +35,7 @@ static char *talloc(u32 n)
     n = (n + 3) & ~3u;
     if (!ntmp || tmp_used + n > tmp_cap) {
         u32 want = n + 8 > TMP_CHUNK ? n + 8 : TMP_CHUNK;
-        if (ntmp >= 64) { fprintf(2, "awk: expression too large\n"); _zexit(2); }
+        if (ntmp >= 64) { dprintf(2, "awk: expression too large\n"); _zexit(2); }
         tmp_chunks[ntmp++] = xmalloc(want); tmp_cap = want; tmp_used = 0;
     }
     char *p = tmp_chunks[ntmp - 1] + tmp_used; tmp_used += n; return p;
@@ -46,7 +46,7 @@ static char *xstrdup(const char *s) { u32 n = strlen(s); char *p = xmalloc(n + 1
 static void fatal(const char *fmt, ...)
 {
     char b[256]; va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof b, fmt, ap); va_end(ap);
-    oflush(); fprintf(2, "awk: %s\n", b); _zexit(2);
+    oflush(); dprintf(2, "awk: %s\n", b); _zexit(2);
 }
 
 /* ================================================================ numbers: parsing and printing without a math library */
@@ -1141,7 +1141,7 @@ static int open_next_main(void)
         main_in = xmalloc(sizeof *main_in); memset(main_in, 0, sizeof *main_in);
         main_in->name = xstrdup(arg);
         main_in->fd = !strcmp(arg, "-") ? 0 : sys_open(arg, O_RDONLY);
-        if (main_in->fd < 0) { fprintf(2, "awk: cannot open %s\n", arg); free(main_in->name); free(main_in); main_in = 0; exit_code = 2; continue; }
+        if (main_in->fd < 0) { dprintf(2, "awk: cannot open %s\n", arg); free(main_in->name); free(main_in); main_in = 0; exit_code = 2; continue; }
         rd_init(&main_in->r, main_in->fd);
         set_strvar(sFILENAME, arg); fnr = 0; any_file = 1;
         return 1;
@@ -1698,10 +1698,10 @@ int main(int argc, char **argv)
             char *t = read_file_text(f);
             if (progtext) { char *c = xmalloc(strlen(progtext) + strlen(t) + 2); strcpy(c, progtext); strcat(c, "\n"); strcat(c, t); progtext = c; } else progtext = t;
         }
-        else if (!strcmp(o, "--version") || !strcmp(o, "-version")) { printf("awk (Zenix) 1\n"); return 0; }
+        else if (!strcmp(o, "--version") || !strcmp(o, "-version")) { dprintf(1, "awk (Zenix) 1\n"); return 0; }
         else fatal("unknown option %s", o);
     }
-    if (!progtext) { if (i >= argc) { fprintf(2, "usage: awk [-F fs] [-v var=value] [-f progfile | 'program'] [file ...]\n"); return 2; } progtext = argv[i++]; }
+    if (!progtext) { if (i >= argc) { dprintf(2, "usage: awk [-F fs] [-v var=value] [-f progfile | 'program'] [file ...]\n"); return 2; } progtext = argv[i++]; }
     if (fsopt) { char *u = unescape(fsopt); if (!strcmp(u, "t")) { free(u); u = xstrdup("\t"); } set_strvar(sFS, u); free(u); }
     for (int k = 0; k < nv; k++) assign_cmdline(vspecs[k]);
 
