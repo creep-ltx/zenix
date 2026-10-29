@@ -1576,7 +1576,7 @@ libz's messages), calls `main` and ends with `_zexit` (buffered output flushed, 
 address that needs relocating and no hand-written code reaches a global, which a program with shared code requires
 (DESIGN D13; crt0 built with `-DZEX2` has the ZEX2 header).
 
-`user/libz.c` is a tiny freestanding C library (`printf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
+`user/libz.c` is a tiny freestanding C library (`dprintf`, string/ctype, `malloc` over `memalloc`, `qsort`, `strtol`,
 environment, buffered line reader, a regex engine from the CUtils project), and the POSIX signal and wait calls on
 top of DESIGN D16's system calls (section 6): `sigaction`, `signal` (BSD style, as glibc: with `SA_RESTART`),
 `sigprocmask` and the `sigset_t` macros, `kill`, `raise`, `alarm` (seconds), `pause`, `setpgid`, `getpgid`,
@@ -1628,8 +1628,8 @@ a new heap string, or refuses (NULL, `zerrno` ENAMETOOLONG, "file name too long"
 63 bytes a system call takes. Programs that start another program by name (`find -exec`, `xargs`, `timeout`) find it
 with `path_find`, the shell's `$PATH` search; `sed` and `expr :` share `bre_to_ere`. libz and the programs are built
 with `-ffunction-sections -fdata-sections`, so the linker's `--gc-sections` leaves out the libz parts a program does
-not use. A level of recursion costs 72-170 bytes of stack instead of 1.4-2.7 KB. `printf`, `snprintf`, `sprintf`, `fprintf`
-and `oprintf` share one formatter with no length limit: `%d %i %u %x %X %o %c %s %p %%`, flags `- 0 + space #`, width and
+not use. A level of recursion costs 72-170 bytes of stack instead of 1.4-2.7 KB. `dprintf`, `vdprintf` (POSIX's: straight to a
+descriptor, unbuffered; DESIGN D27 6 step 2), `snprintf`, `sprintf` and `oprintf` share one formatter with no length limit: `%d %i %u %x %X %o %c %s %p %%`, flags `- 0 + space #`, width and
 precision as numbers or `*`; no floating point, no 64-bit numbers. The programs (the count and the list: commands.md): a full shell (`sh`:
 line editor, history, completion, variables, quoting, wildcards, pipes, redirects incl. here-documents,
 `if/while/for`, functions, aliases, arithmetic, command substitution, job control), file tools, text tools

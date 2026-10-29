@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
-# Host test of tools/mkzexe.py's ZEX2 path (DESIGN D13, docs/d13-shared-code.md section 11): small programs built the
+# Host test of tools/mkzexe.py, mostly its ZEX2 path (DESIGN D13, docs/d13-shared-code.md section 11): small programs built the
 # way a program with shared code is (tools/purecc.sh, link/pure.ld, crt0 -DZEX2, libz.po), then
 #   - the good one: a .data pointer into constants is in the to-code list, a .data pointer into BSS and the table slot
 #     of a BSS array in the to-data list, the slot of a constant in the to-code list, the header adds up;
 #   - refused, each with its reason and the symbol named: an absolute reference from code to data (shared-to-data), a
-#     PC-relative one, a value equal to text_size, an undefined weak symbol, an absolute symbol;
+#     PC-relative one, a value equal to text_size, an undefined weak symbol (in a ZEXE too), an absolute symbol;
 #   - the kernel's relocation table by distance (--delta): the same image and the same offsets as the plain table.
 #   tools/mkzexe-test.sh            (BUILD=dir to build in another directory; default a temporary one)
 cd "$(dirname "$0")/.." || exit 1
 OUT=$(mktemp -d /tmp/zenix-mkzexe.XXXXXX)
 B=${BUILD:-$OUT/build}
 trap 'rm -rf "$OUT"' EXIT
-make -s BUILD="$B" "$B/crt0-pure.o" "$B/libz.po" >"$OUT/make.log" 2>&1 || { cat "$OUT/make.log"; echo "FAIL build"; exit 1; }
+make -s BUILD="$B" "$B/crt0-pure.o" "$B/libz.po" "$B/crt0.o" "$B/libz.uo" >"$OUT/make.log" 2>&1 || { cat "$OUT/make.log"; echo "FAIL build"; exit 1; }
 # the Makefile's default compiler (TOOLPREFIX, or m68k-elf-gcc on PATH, else the default install place)
 PFX=${TOOLPREFIX:-$(command -v m68k-elf-gcc >/dev/null 2>&1 && echo m68k-elf- || echo "$HOME/opt/m68k-elf/bin/m68k-elf-")}
 CC=${PFX}gcc
@@ -134,6 +134,12 @@ extern int maybe __attribute__((weak));
 int main(void) { return &maybe ? maybe : 0; }
 EOF
 prog weak "$OUT/weak.c" && refused weak "an undefined weak symbol" "undefined \(weak\) symbol maybe"
+# the same in a ZEXE (link/user.ld): relocated, address 0 would become the program's own start (found 2026-10-29: a
+# C library program without the environment called its own start through such a symbol until its stack overflowed)
+"$CC" "${F[@]}" -c "$OUT/weak.c" -o "$OUT/weakx.o" &&
+"$CC" "${F[@]}" -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections "$B/crt0.o" "$OUT/weakx.o" \
+    "$B/libz.uo" "$LIBGCC" -o "$OUT/weakx.elf" 2>"$OUT/weakx.ld.log" &&
+refused weakx "an undefined weak symbol in a ZEXE" "undefined \(weak\) symbol maybe"
 
 cat > "$OUT/abs.c" <<'EOF'
 extern char hwreg[];

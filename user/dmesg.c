@@ -16,12 +16,12 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "-p"))
         flag = KLOG_PREV;
     else if (argc > 1) {
-        fprintf(2, "usage: dmesg [-p]\n");
+        dprintf(2, "usage: dmesg [-p]\n");
         return 2;
     }
     unsigned got = klog_dump(rd, flag, out, buf, sizeof buf);
     if (flag && !got) {
-        fprintf(2, "dmesg: no log from a previous boot\n");
+        dprintf(2, "dmesg: no log from a previous boot\n");
         return 1;
     }
     return 0;

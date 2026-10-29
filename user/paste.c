@@ -7,14 +7,14 @@ int main(int argc, char **argv)
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         if (!strcmp(argv[i], "-s")) serial = 1;
         else if (!strncmp(argv[i], "-d", 2)) delims = argv[i][2] ? argv[i] + 2 : (i + 1 < argc ? argv[++i] : "\t");
-        else { fprintf(2, "paste: unknown option %s\n", argv[i]); return 2; }
+        else { dprintf(2, "paste: unknown option %s\n", argv[i]); return 2; }
     }
     static struct rd rds[8];                     /* 8 x 2 KB buffers: not on the 16 KB stack */
     int nf = argc - i; int fds[8], done[8];
-    if (nf < 1 || nf > 8) { if (nf < 1) { nf = 1; fds[0] = 0; rd_init(&rds[0], 0); done[0] = 0; } else { fprintf(2, "paste: at most 8 files\n"); return 2; } }
+    if (nf < 1 || nf > 8) { if (nf < 1) { nf = 1; fds[0] = 0; rd_init(&rds[0], 0); done[0] = 0; } else { dprintf(2, "paste: at most 8 files\n"); return 2; } }
     else for (int k = 0; k < nf; k++) {
         fds[k] = strcmp(argv[i + k], "-") ? sys_open(argv[i + k], O_RDONLY) : 0;
-        if (fds[k] < 0) { fprintf(2, "paste: %s: %s\n", argv[i + k], zwhy("cannot open")); return 1; }
+        if (fds[k] < 0) { dprintf(2, "paste: %s: %s\n", argv[i + k], zwhy("cannot open")); return 1; }
         rd_init(&rds[k], fds[k]); done[k] = 0;
     }
     int nd = (int)strlen(delims); if (!nd) { delims = "\t"; nd = 1; }
@@ -27,7 +27,7 @@ int main(int argc, char **argv)
         int alive = 0; static char *cells[8];
         for (int k = 0; k < nf; k++) {
             cells[k] = 0;
-            if (!done[k]) { if (rd_getline(&rds[k], &line, &cap) >= 0) { if (!(cells[k] = strdup(line))) { fprintf(2, "paste: out of memory\n"); return 1; } alive = 1; } else done[k] = 1; }
+            if (!done[k]) { if (rd_getline(&rds[k], &line, &cap) >= 0) { if (!(cells[k] = strdup(line))) { dprintf(2, "paste: out of memory\n"); return 1; } alive = 1; } else done[k] = 1; }
         }
         if (!alive) break;
         for (int k = 0; k < nf; k++) { if (k) oputc(delims[(k - 1) % nd]); if (cells[k]) { oputs(cells[k]); free(cells[k]); } }

@@ -9,10 +9,10 @@ int main(int argc, char **argv)
         const char *val = o[2] ? o + 2 : (i + 1 < argc ? argv[++i] : "");
         if (o[1] == 'b') body = val[0]; else if (o[1] == 'n') fmt = val; else if (o[1] == 'w') width = atoi(val);
         else if (o[1] == 's') sep = val; else if (o[1] == 'v') n = atoi(val); else if (o[1] == 'i') step = atoi(val);
-        else { fprintf(2, "nl: unknown option %s\n", o); return 2; }
+        else { dprintf(2, "nl: unknown option %s\n", o); return 2; }
     }
     int fd = 0;
-    if (i < argc) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { fprintf(2, "nl: %s: %s\n", argv[i], zwhy("cannot open")); return 1; } }
+    if (i < argc) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { dprintf(2, "nl: %s: %s\n", argv[i], zwhy("cannot open")); return 1; } }
     struct rd r; rd_init(&r, fd);
     char *line = 0; u32 cap = 0; int len;
     while ((len = rd_getline(&r, &line, &cap)) >= 0) {

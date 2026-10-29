@@ -105,7 +105,7 @@ void netd_heap_free(void *p)
     for (r = 0; r < nreg; r++)
         if ((char *)b >= reg[r].base && (char *)b < reg[r].base + reg[r].size) break;
     if (r == nreg || b->next != HB_USED) {
-        printf("netd: a free of memory netd's heap did not give (%x): ignored\n", (u32)p);
+        dprintf(1, "netd: a free of memory netd's heap did not give (%x): ignored\n", (u32)p);
         return;
     }
     struct hblk **pp = &reg[r].free, *prev = 0;
@@ -205,7 +205,7 @@ static int drv_spawn(struct drv *d)
     d->rung = 0;
     d->h = -1;
     d->start_at = 0;
-    printf("net: %s: started %s (pid %d)\n", d->cfg.name, path, pid);
+    dprintf(1, "net: %s: started %s (pid %d)\n", d->cfg.name, path, pid);
     return 0;
 }
 /* ifup of a stanza with a driver: its process starts; the interface appears when it attaches */
@@ -246,7 +246,7 @@ static void drv_reap(void)
         if (!d->used || !d->pid) continue;
         int st = sys_waitnb(d->pid);
         if (st == -2) continue;
-        printf("net: %s: /sbin/net/%s (pid %d) ended, status %d\n", d->cfg.name, d->cfg.driver, d->pid, st);
+        dprintf(1, "net: %s: /sbin/net/%s (pid %d) ended, status %d\n", d->cfg.name, d->cfg.driver, d->pid, st);
         d->pid = 0;
         if (d->h >= 0) netd_drv_gone(d->h);
         d->h = -1;
@@ -256,14 +256,14 @@ static void drv_reap(void)
         u32 now = sys_ticks();
         if (!d->ends || now - d->win >= DRV_WINDOW) { d->win = now; d->ends = 0; }
         if (++d->ends >= 5) {
-            printf("net: %s: /sbin/net/%s given up after 5 ends in 60 s (ifup %s starts it again)\n", d->cfg.name,
+            dprintf(1, "net: %s: /sbin/net/%s given up after 5 ends in 60 s (ifup %s starts it again)\n", d->cfg.name,
                    d->cfg.driver, d->cfg.name);
             d->givenup = 1;
             continue;
         }
         u32 back = d->ends >= 2 ? 100u << (d->ends - 2) : 0;
         d->start_at = (now + back) | 1;
-        if (back) printf("net: %s: start %d in %u s\n", d->cfg.name, d->ends + 1, back / 100);
+        if (back) dprintf(1, "net: %s: start %d in %u s\n", d->cfg.name, d->ends + 1, back / 100);
     }
 }
 /* drivers due to start again; the ticks until the next one (0x7fffffff: none) */
@@ -277,7 +277,7 @@ static u32 drv_starts(void)
         if ((int)left <= 0) {
             d->start_at = 0;
             if (drv_spawn(d) < 0) {
-                printf("net: %s: cannot start /sbin/net/%s\n", d->cfg.name, d->cfg.driver);
+                dprintf(1, "net: %s: cannot start /sbin/net/%s\n", d->cfg.name, d->cfg.driver);
                 d->used = 0;
             }
         } else if (left < next) next = left;
@@ -364,7 +364,7 @@ static char *slurp(const char *path, unsigned long *len)
         *len = n > 0 ? (unsigned long)n : 0;
         b[*len] = 0;
     } else if (st.size > CONF_MAX)
-        printf("netd: %s: over %u bytes, not read\n", path, CONF_MAX);
+        dprintf(1, "netd: %s: over %u bytes, not read\n", path, CONF_MAX);
     sys_close(fd);
     return b;
 }
@@ -385,7 +385,7 @@ static void load_config(void)
     ifs_state = -ENOENT;
     if (sys_stat("/etc/network/interfaces", &st) < 0) return;
     if (!netd_config_trusted(st.mode, st.uid)) {
-        printf("netd: /etc/network/interfaces must belong to root and be writable by root alone: not used\n");
+        dprintf(1, "netd: /etc/network/interfaces must belong to root and be writable by root alone: not used\n");
         ifs_state = -EACCES;
         return;
     }
@@ -406,7 +406,7 @@ static long if_up(const char *name)
         if (name[0] ? strcmp(c->name, name) : !c->is_auto) continue;
         e = strcmp(c->driver, "slip") ? drv_up(c) : netd_if_up(c);
         if (e < 0 && !(e == -EEXIST && !name[0])) {
-            printf("netd: %s would not come up: %s\n", c->name, zstrerror((int)e));
+            dprintf(1, "netd: %s would not come up: %s\n", c->name, zstrerror((int)e));
             if (!r) r = e;
         }
         if (name[0]) return e;
@@ -660,7 +660,7 @@ int main(void)
     signal(SIGCHLD, on_child);                  /* a driver ended: the handler only sets a flag */
     port = sys_port_create("net");              /* the port first: the kernel's start deadline (D19 6.3) */
     if (port < 0) {
-        printf("netd: port net: %s\n", zstrerror(port));
+        dprintf(1, "netd: port net: %s\n", zstrerror(port));
         return 1;
     }
     epoch = (u32)sys_netsrv(NETSRV_HELLO, 0, 0);
@@ -669,11 +669,11 @@ int main(void)
     reg_chunk = (u32)(lim.heap / 4 + 4095) & ~4095u;    /* the heap's regions: a quarter of the limit each */
     if (reg_chunk < 8192) reg_chunk = 8192;
     if (seed(s, "/dev/urandom")) {
-        printf("netd: cannot read /dev/urandom\n");
+        dprintf(1, "netd: cannot read /dev/urandom\n");
         return 1;
     }
     if (netd_init(&lim, s)) {
-        printf("netd: the limits are wrong\n");
+        dprintf(1, "netd: the limits are wrong\n");
         return 1;
     }
     memset(s, 0, sizeof s);
@@ -681,7 +681,7 @@ int main(void)
     rnd_fd = sys_open("/dev/random", O_RDONLY | O_NONBLOCK);
     load_config();
     if_up("");                                  /* the "auto" interfaces (D19 6.3: after the port is open) */
-    printf("netd: serving net, epoch %u, %s profile (%u KB of buffers)\n", epoch,
+    dprintf(1, "netd: serving net, epoch %u, %s profile (%u KB of buffers)\n", epoch,
            prof == NETD_PROFILE_LARGE ? "large" : "small", (u32)(lim.heap / 1024));
     for (;;) {
         unsigned long ms = netd_turn();

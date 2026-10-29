@@ -50,6 +50,10 @@ case " $PROGS " in *" rz "*) lic user/xfer/LICENSE zmodem;; esac
 [ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc
 if [ -z "$NOTESTS" ] && [ -f "$B/libctest.zx" ]; then cp "$B/libctest.zx" "$T/tests/libctest" && chmod 755 "$T/tests/libctest"; fi
 if [ -z "$NOTESTS" ] && [ -f "$B/libctest.pzx" ]; then cp "$B/libctest.pzx" "$T/tests/libctestpure" && chmod 755 "$T/tests/libctestpure"; fi
+# the text-UI library's test program (ports/tui) and the notice of the owner's MIT code in it, which travels with it
+if [ -z "$NOTESTS" ] && [ -f "$B/tuitest.zx" ]; then
+    cp "$B/tuitest.zx" "$T/tests/tuitest" && chmod 755 "$T/tests/tuitest" && lic ports/tui/upstream/LICENSE tui
+fi
 # the PC font (DESIGN D20 4.2) on the full images (those with manual pages), with its notice, as the base package
 if [ -z "$NOMAN" ] && [ -f "$B/cp437-8x8.psf" ]; then
     mkdir -p "$T/usr/share/consolefonts"

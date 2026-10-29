@@ -41,7 +41,7 @@ static void sum(int fd, const char *name)
     u32 v[4] = { m.a, m.b, m.c, m.d };
     static const char hex[] = "0123456789abcdef"; char s[33];
     for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) { unsigned char byte = (unsigned char)(v[i] >> (8 * j)); s[8*i + 2*j] = hex[byte >> 4]; s[8*i + 2*j + 1] = hex[byte & 15]; }
-    s[32] = 0; printf("%s  %s\n", s, name);
+    s[32] = 0; dprintf(1, "%s  %s\n", s, name);
 }
 int main(int argc, char **argv)
 {
@@ -49,7 +49,7 @@ int main(int argc, char **argv)
     int rc = 0;
     for (int i = 1; i < argc; i++) {
         int fd = strcmp(argv[i], "-") ? sys_open(argv[i], O_RDONLY) : 0;
-        if (fd < 0) { fprintf(2, "md5sum: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
+        if (fd < 0) { dprintf(2, "md5sum: %s: %s\n", argv[i], zwhy("cannot open")); rc = 1; continue; }
         sum(fd, argv[i]); if (fd) sys_close(fd);
     }
     return rc;

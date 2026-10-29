@@ -17,15 +17,15 @@ static void start(int n, int again)
     if (n == 10) { dev[8] = '1'; dev[9] = '0'; dev[10] = 0; }
     else { dev[8] = (char)('0' + n); dev[9] = 0; }
     int fd = sys_open(dev, O_RDWR);
-    if (fd < 0) { printf("init: cannot open %s\n", dev); oflush(); return; }
-    if (again) fprintf(fd, "init: session ended, starting another\n");
+    if (fd < 0) { dprintf(1, "init: cannot open %s\n", dev); oflush(); return; }
+    if (again) dprintf(fd, "init: session ended, starting another\n");
     char *argv[] = { "/bin/login", "--init", 0 };
     int io[3] = { fd, fd, fd };
     pid[n] = sys_spawn("/bin/login", argv, io);
     if (pid[n] < 0) {                   /* said on that console and on init's own output (flushed: init never ends) */
         const char *why = zstrerror(pid[n]); if (!why) why = "failed";
-        fprintf(fd, "init: cannot start /bin/login: %s\n", why);
-        printf("init: cannot start /bin/login on %s: %s\n", dev, why);
+        dprintf(fd, "init: cannot start /bin/login: %s\n", why);
+        dprintf(1, "init: cannot start /bin/login on %s: %s\n", dev, why);
         oflush();
         pid[n] = 0;
     }
@@ -53,12 +53,12 @@ static void console_setup(void)
             ;
         if (*v) *v++ = 0;
         while (*v == ' ' || *v == '\t') v++;
-        if (strcmp(w, "colours") && strcmp(w, "colors")) { printf("init: /etc/console: unknown setting %s\n", w); continue; }
+        if (strcmp(w, "colours") && strcmp(w, "colors")) { dprintf(1, "init: /etc/console: unknown setting %s\n", w); continue; }
         if (!strncmp(v, "auto", 4)) continue;
         int c = atoi(v), r = c ? sys_console(CON_COLOURS, c) : -EINVAL;
-        if (r == -EINVAL) printf("init: /etc/console: colours %s: 2, 4, 8 or 16 (or auto)\n", v);
-        else if (r < 0) printf("init: /etc/console: colours %d: %s, staying at %d\n", c, zstrerror(r), sys_console(CON_COLOURS, 0));
-        else if (r != c) printf("init: /etc/console: colours %d: this machine shows %d\n", c, r);
+        if (r == -EINVAL) dprintf(1, "init: /etc/console: colours %s: 2, 4, 8 or 16 (or auto)\n", v);
+        else if (r < 0) dprintf(1, "init: /etc/console: colours %d: %s, staying at %d\n", c, zstrerror(r), sys_console(CON_COLOURS, 0));
+        else if (r != c) dprintf(1, "init: /etc/console: colours %d: this machine shows %d\n", c, r);
     }
     oflush();
 }
@@ -113,17 +113,17 @@ static void daemons_load(void)
     if (fd < 0) return;
     if (sys_fstat(fd, &st) < 0 || st.uid != 0 || (st.mode & 022)) {
         sys_close(fd);
-        printf("init: /etc/daemons is not root's or others may write it: ignored\n");
+        dprintf(1, "init: /etc/daemons is not root's or others may write it: ignored\n");
         oflush();
         if ((fd = sys_open("/dev/kmsg", O_WRONLY)) >= 0) {
-            fprintf(fd, "init: /etc/daemons is not root's or others may write it: ignored\n");
+            dprintf(fd, "init: /etc/daemons is not root's or others may write it: ignored\n");
             sys_close(fd);
         }
         return;
     }
     if ((kmsg = sys_open("/dev/kmsg", O_WRONLY)) < 0) {
         sys_close(fd);
-        printf("init: /etc/daemons: no /dev/kmsg for their output (%s): none started\n", zstrerror(kmsg));
+        dprintf(1, "init: /etc/daemons: no /dev/kmsg for their output (%s): none started\n", zstrerror(kmsg));
         oflush();
         kmsg = -1;
         return;
@@ -149,10 +149,10 @@ static void daemons_load(void)
             if (r > 0)
                 for (char *p = prog; *p; ) { while (*p == ' ') p++; if (*p) words++; while (*p && *p != ' ') p++; }
             if (r < 0 || strlen(name) > 15 || strlen(prog) > 79 || words > 6 || prog[0] != '/' || nice < -20 || nice > 19) {
-                fprintf(kmsg, "init: /etc/daemons: line skipped: %s\n", name);
+                dprintf(kmsg, "init: /etc/daemons: line skipped: %s\n", name);
                 continue;
             }
-            if (nd == NDAEMON) { fprintf(kmsg, "init: /etc/daemons: more than %d daemons: %s ignored\n", NDAEMON, name); continue; }
+            if (nd == NDAEMON) { dprintf(kmsg, "init: /etc/daemons: more than %d daemons: %s ignored\n", NDAEMON, name); continue; }
             struct daemon *d = &dm[nd++];
             strcpy(d->name, name);
             strcpy(d->text, prog);
@@ -184,11 +184,11 @@ static void daemon_start(struct daemon *d)
     if (d->pid > 0) {
         d->began = sys_ticks();
         sys_setpriority(PRIO_PROCESS, d->pid, d->nice);
-        fprintf(kmsg, "init: %s: started %s (pid %d)\n", d->name, d->text, d->pid);
+        dprintf(kmsg, "init: %s: started %s (pid %d)\n", d->name, d->text, d->pid);
         return;
     }
     const char *why = zstrerror(d->pid);
-    fprintf(kmsg, "init: %s: cannot start %s: %s\n", d->name, argv[0], why ? why : "failed");
+    dprintf(kmsg, "init: %s: cannot start %s: %s\n", d->name, argv[0], why ? why : "failed");
     d->pid = 0;
 }
 
@@ -204,12 +204,12 @@ static void daemon_ended(struct daemon *d, int st)
     d->pid = 0;
     if (pid > 0 && st == 0) {
         d->state = 2;
-        fprintf(kmsg, "init: %s: %s (pid %d) stopped (status 0): not started again until the next boot\n", d->name, prog, pid);
+        dprintf(kmsg, "init: %s: %s (pid %d) stopped (status 0): not started again until the next boot\n", d->name, prog, pid);
         return;
     }
     u32 now = sys_ticks();
     if (pid > 0)
-        fprintf(kmsg, "init: %s: %s (pid %d) ended, status %d%s\n", d->name, prog, pid, st,
+        dprintf(kmsg, "init: %s: %s (pid %d) ended, status %d%s\n", d->name, prog, pid, st,
                 st == 75 ? " (start me again)" : "");
     if (pid > 0 && st == 75 && now - d->began >= 500) {        /* ran 5 s or more: not counted */
         d->due = now;
@@ -219,7 +219,7 @@ static void daemon_ended(struct daemon *d, int st)
     d->nends++;
     if (d->nends >= 5) {
         d->state = 3;
-        fprintf(kmsg, "init: %s: given up after 5 ends in 60 s (the next boot starts it again)\n", d->name);
+        dprintf(kmsg, "init: %s: given up after 5 ends in 60 s (the next boot starts it again)\n", d->name);
         return;
     }
     static const unsigned short wait[4] = { 0, 100, 200, 400 };

@@ -26,8 +26,8 @@ static void say(const char *fmt, ...)
     if (quiet)
         return;
     va_start(ap, fmt);
-    fprintf(2, "wget: ");
-    vfprintf(2, fmt, ap);
+    dprintf(2, "wget: ");
+    vdprintf(2, fmt, ap);
     va_end(ap);
 }
 
@@ -593,7 +593,7 @@ int main(int argc, char **argv)
     const char *why = "";
     int i, rc, ex = 0;
     if ((rc = wget_args(&o, argc, argv, &why))) {
-        fprintf(2, "wget: %s\nusage: wget [-q] [-c] [-O FILE] URL...\n", why);
+        dprintf(2, "wget: %s\nusage: wget [-q] [-c] [-O FILE] URL...\n", why);
         return rc;
     }
     quiet = o.quiet;

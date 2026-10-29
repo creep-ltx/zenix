@@ -20,7 +20,7 @@ static void result(const char *name, int ok, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    printf("socktest %s: %s (%s)\n", name, ok ? "PASS" : "FAIL", buf);
+    dprintf(1, "socktest %s: %s (%s)\n", name, ok ? "PASS" : "FAIL", buf);
     if (!ok)
         fails++;
 }
@@ -241,10 +241,10 @@ static int sendpipe_main(void)          /* fd 0 is a socket whose peer closed: a
 
 static int netcall_main(void)           /* a socket call to a server that takes no requests: waits until a kill */
 {
-    printf("netcall: calling\n");
+    dprintf(1, "netcall: calling\n");
     oflush();
     int s = sk(0);
-    printf("netcall: socket returned %d\n", s);
+    dprintf(1, "netcall: socket returned %d\n", s);
     return s < 0 ? -s : 0;
 }
 
@@ -258,11 +258,11 @@ static int hang_main(void)              /* blocks in recv until ^C (sock-test.sh
     int a, b;
     if (pair(7100, &a, &b))
         return 90;
-    printf("hang: waiting\n");
+    dprintf(1, "hang: waiting\n");
     oflush();
     char c;
     int r = rcv(b, &c, 1, 0);
-    printf("hang: recv returned %d\n", r);
+    dprintf(1, "hang: recv returned %d\n", r);
     return 0;
 }
 
@@ -658,7 +658,7 @@ int main(int argc, char **argv)
         return argc > 2 ? peer_main(argv[1], argv[2]) : 99;
     }
     if (argc < 2) {
-        fprintf(2, "usage: socktest CHECK... (basic ptr block poll restart partial connect sigpipe down hang stuck "
+        dprintf(2, "usage: socktest CHECK... (basic ptr block poll restart partial connect sigpipe down hang stuck "
                    "watchdog)\n");
         return 2;
     }

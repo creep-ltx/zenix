@@ -23,13 +23,13 @@ int main(int argc, char **argv)
         else if (o == 'c' || o == 'b') { mode = 2; parse_list(val); }
         else if (o == 'd') delim = (unsigned char)val[0];
         else if (o == 's') only = 1;
-        else { fprintf(2, "cut: unknown option -%c\n", o); return 2; }
+        else { dprintf(2, "cut: unknown option -%c\n", o); return 2; }
     }
-    if (!mode) { fprintf(2, "usage: cut -f LIST [-d C] [-s] | -c LIST [file...]\n"); return 2; }
+    if (!mode) { dprintf(2, "usage: cut -f LIST [-d C] [-s] | -c LIST [file...]\n"); return 2; }
     int rc = 0, nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {
         int fd = 0;
-        if (nfiles) { fd = sys_open(argv[i + f], O_RDONLY); if (fd < 0) { fprintf(2, "cut: %s: %s\n", argv[i + f], zwhy("cannot open")); rc = 1; continue; } }
+        if (nfiles) { fd = sys_open(argv[i + f], O_RDONLY); if (fd < 0) { dprintf(2, "cut: %s: %s\n", argv[i + f], zwhy("cannot open")); rc = 1; continue; } }
         struct rd r; rd_init(&r, fd);
         char *line = 0; u32 cap = 0;
         while (rd_getline(&r, &line, &cap) >= 0) {

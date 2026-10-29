@@ -90,10 +90,13 @@ def main():
         sys.exit("no ZEXE header at offset 4 (start.S header missing)")
 
     syms = {}
+    undef = set()
     for line in run(PFX + "nm", elf).splitlines():
         p = line.split()
         if len(p) == 3:
             syms[p[2]] = int(p[0], 16)
+        elif len(p) == 2:
+            undef.add(p[1])                 # undefined, weak (w, v): address 0
     bss_end = syms["__bss_end"]
 
     relocs = []
@@ -103,12 +106,15 @@ def main():
         if m:
             cur = m.group(1)
             continue
-        m = re.match(r"([0-9a-f]{8})\s+[0-9a-f]+\s+(R_68K_\w+)", line)
+        m = re.match(r"([0-9a-f]{8})\s+[0-9a-f]+\s+(R_68K_\w+)(?:\s+[0-9a-f]+\s+(\S+))?", line)
         if not m:
             continue
         off, typ = int(m.group(1), 16), m.group(2)
         if cur and cur.startswith((".rela.debug", ".rela.eh_frame", ".rela.comment")):
             continue                        # not loaded: its offsets are not addresses
+        if typ == "R_68K_32" and m.group(3) in undef:
+            # an undefined weak symbol is address 0; relocated, it would be the program's own start (as ZEX2: refused)
+            sys.exit(f"{elf}: undefined (weak) symbol {m.group(3)} at {off:#x}: its address would be 0")
         if typ == "R_68K_32":
             if off + 4 > len(img):
                 continue                    # inside bss: nothing to patch

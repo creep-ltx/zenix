@@ -9,9 +9,9 @@ static int rewrite(const char *file, const char *name, int group, int *found)
 {
     int n = 0;
     char *old = pw_slurp(file, &n);
-    if (!old) { fprintf(2, "userdel: cannot read %s\n", file); return -1; }
+    if (!old) { dprintf(2, "userdel: cannot read %s\n", file); return -1; }
     char *nf = malloc((u32)n + 2);
-    if (!nf) { fprintf(2, "userdel: out of memory\n"); return -1; }
+    if (!nf) { dprintf(2, "userdel: out of memory\n"); return -1; }
     u32 o = 0, nl = strlen(name);
     for (char *l = old; *l; ) {
         char *e = strchr(l, '\n'); u32 len = e ? (u32)(e - l) : strlen(l);
@@ -40,25 +40,25 @@ int main(int argc, char **argv)
     int rmhome = 0; const char *name = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-r")) rmhome = 1;
-        else if (argv[i][0] == '-' || name) { fprintf(2, "usage: userdel [-r] name\n"); return 2; }
+        else if (argv[i][0] == '-' || name) { dprintf(2, "usage: userdel [-r] name\n"); return 2; }
         else name = argv[i];
     }
-    if (!name) { fprintf(2, "usage: userdel [-r] name\n"); return 2; }
-    if (sys_getuid() != 0) { fprintf(2, "userdel: only root may remove users\n"); return 1; }
+    if (!name) { dprintf(2, "usage: userdel [-r] name\n"); return 2; }
+    if (sys_getuid() != 0) { dprintf(2, "userdel: only root may remove users\n"); return 1; }
     struct pw p;
-    if (pw_byname(name, &p)) { fprintf(2, "userdel: %s: no such user\n", name); return 1; }
-    if (p.uid == 0) { fprintf(2, "userdel: %s is a root account: not removed\n", name); return 1; }
+    if (pw_byname(name, &p)) { dprintf(2, "userdel: %s: no such user\n", name); return 1; }
+    if (p.uid == 0) { dprintf(2, "userdel: %s is a root account: not removed\n", name); return 1; }
     int found = 0;
     if (rewrite("/etc/passwd", name, 0, &found) || !found) return 1;
-    if (rewrite("/etc/group", name, 1, &found)) fprintf(2, "userdel: %s was removed, but /etc/group was not updated\n", name);
+    if (rewrite("/etc/group", name, 1, &found)) dprintf(2, "userdel: %s was removed, but /etc/group was not updated\n", name);
     if (rmhome) {
-        if (!strcmp(p.home, "/") || p.home[0] != '/') fprintf(2, "userdel: home %s not removed (not a user's own directory)\n", p.home);
+        if (!strcmp(p.home, "/") || p.home[0] != '/') dprintf(2, "userdel: home %s not removed (not a user's own directory)\n", p.home);
         else {
             char *av[] = { "rm", "-r", p.home, 0 };
             int pid = sys_spawn("/bin/rm", av, 0);
-            if (pid < 0 || sys_wait(pid) != 0) fprintf(2, "userdel: %s: could not be removed completely\n", p.home);
+            if (pid < 0 || sys_wait(pid) != 0) dprintf(2, "userdel: %s: could not be removed completely\n", p.home);
         }
     }
-    printf("userdel: %s removed%s\n", name, rmhome ? ", with the home directory" : "");
+    dprintf(1, "userdel: %s removed%s\n", name, rmhome ? ", with the home directory" : "");
     return 0;
 }

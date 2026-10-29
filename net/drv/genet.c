@@ -49,7 +49,7 @@ static void gn_log(struct genet *g, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(t, sizeof t, fmt, ap);
     va_end(ap);
-    printf("genet: %s: %s\n", g->ifn, t);   /* netd's standard output: the kernel log */
+    dprintf(1, "genet: %s: %s\n", g->ifn, t);   /* netd's standard output: the kernel log */
 }
 /* Emu68's range opcodes (base A0, length D1, whole 64-byte lines): clean, or clean and invalidate; never a bare
  * invalidate (CLAUDE.md: nothing dropped unwritten). The same words the kernel's DRV_CACHE uses */
@@ -145,7 +145,7 @@ static void choose_cache(const struct hwinfo *h, int force)
 int main(int argc, char **argv)
 {
     if (argc >= 2 && !strcmp(argv[1], PROBE_ARG)) return probe();
-    if (argc < 2) { printf("usage: genet IFACE [cache=kernel|cache=user] [noselftest]\n"); return 2; }
+    if (argc < 2) { dprintf(1, "usage: genet IFACE [cache=kernel|cache=user] [noselftest]\n"); return 2; }
     int force = 0, selftest = 1, r;
     g.ifn = argv[1];
     for (int i = 2; i < argc; i++) {

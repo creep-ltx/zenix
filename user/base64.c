@@ -8,10 +8,10 @@ int main(int argc, char **argv)
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--decode")) dec = 1;
         else if (!strncmp(argv[i], "-w", 2)) wrap = argv[i][2] ? atoi(argv[i] + 2) : (i + 1 < argc ? atoi(argv[++i]) : 76);
-        else { fprintf(2, "base64: unknown option %s\n", argv[i]); return 2; }
+        else { dprintf(2, "base64: unknown option %s\n", argv[i]); return 2; }
     }
     int fd = 0;
-    if (i < argc && strcmp(argv[i], "-")) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { fprintf(2, "base64: %s: %s\n", argv[i], zwhy("cannot open")); return 1; } }
+    if (i < argc && strcmp(argv[i], "-")) { fd = sys_open(argv[i], O_RDONLY); if (fd < 0) { dprintf(2, "base64: %s: %s\n", argv[i], zwhy("cannot open")); return 1; } }
     struct rd r; rd_init(&r, fd);
     if (!dec) {
         int col = 0, c, n = 0; unsigned char b[3];

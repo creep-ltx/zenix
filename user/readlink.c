@@ -6,12 +6,12 @@
 int main(int argc, char **argv)
 {
     char *b = malloc(TMAX + 1); int rc = 0;
-    if (!b) { fprintf(2, "readlink: out of memory\n"); return 1; }
+    if (!b) { dprintf(2, "readlink: out of memory\n"); return 1; }
     for (int i = 1; i < argc; i++) {
         int n = sys_readlink(argv[i], b, TMAX);
         if (n < 0) { rc = 1; continue; }
-        if (n == TMAX) { fprintf(2, "readlink: %s: target longer than %d bytes\n", argv[i], TMAX - 1); rc = 1; continue; }
-        b[n] = 0; printf("%s\n", b);
+        if (n == TMAX) { dprintf(2, "readlink: %s: target longer than %d bytes\n", argv[i], TMAX - 1); rc = 1; continue; }
+        b[n] = 0; dprintf(1, "%s\n", b);
     }
     return rc;
 }

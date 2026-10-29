@@ -22,7 +22,7 @@ static void check(int ok, const char *what)
 {
     checks++;
     if (!ok) {
-        printf("FAIL cryptotest: %s\n", what);
+        dprintf(1, "FAIL cryptotest: %s\n", what);
         fails++;
     }
 }
@@ -242,10 +242,10 @@ static void say_time(const char *what, u32 best, u32 bytes)
 {
     u32 us = us_of(best);
     if (bytes)
-        printf("time %-34s %7u.%03u ms  %u KB/s\n", what, us / 1000, us % 1000,
+        dprintf(1, "time %-34s %7u.%03u ms  %u KB/s\n", what, us / 1000, us % 1000,
                us ? (u32)((unsigned long long)bytes * 1000000u / us / 1024) : 0);
     else
-        printf("time %-34s %7u.%03u ms\n", what, us / 1000, us % 1000);
+        dprintf(1, "time %-34s %7u.%03u ms\n", what, us / 1000, us % 1000);
 }
 
 #define TIMED(what, bytes, body) do { u32 best_ = ~0u; for (int r_ = 0; r_ < runs; r_++) { u32 e_ = sys_hrtime(); \
@@ -256,7 +256,7 @@ static void times(int runs)
     static unsigned char buf[16384 + 64];
     unsigned char k[32], u[32], o[32], sk[64], pk[32], sig[64], seed[32], tag[16], key[64];
     calibrate();
-    printf("cryptotest: E-clock %u Hz; best of %d run%s (an emulator's times are not the machine's)\n", eclock_hz,
+    dprintf(1, "cryptotest: E-clock %u Hz; best of %d run%s (an emulator's times are not the machine's)\n", eclock_hz,
            runs, runs == 1 ? "" : "s");
     memset(k, 0x42, 32);
     memset(u, 0, 32);
@@ -305,7 +305,7 @@ static void mul_check(void)
     static const u32 ops[4][2] = { { 0, 0 }, { 1, 1 }, { 0xFFFFFFFFu, 0xFFFFFFFFu }, { 0x9E3779B9u, 0x7F4A7C15u } };
     static const char *const names[4] = { "0 x 0", "1 x 1", "all ones", "random" };
     calibrate();
-    printf("cryptotest: 100,000 multiplies each (E-clock %u Hz; an emulator's times are not the machine's)\n",
+    dprintf(1, "cryptotest: 100,000 multiplies each (E-clock %u Hz; an emulator's times are not the machine's)\n",
            eclock_hz);
     for (int wide = 1; wide >= 0; wide--) {
         u32 lo = ~0u, hi = 0;
@@ -316,11 +316,11 @@ static void mul_check(void)
                 if (t < best) best = t;
             }
             u32 us = us_of(best);
-            printf("mul %s %-9s %6u us\n", wide ? "muls.l" : "mulu.w", names[i], us);
+            dprintf(1, "mul %s %-9s %6u us\n", wide ? "muls.l" : "mulu.w", names[i], us);
             if (best < lo) lo = best;
             if (best > hi) hi = best;
         }
-        printf("mul %s: %s (spread %u%%)\n", wide ? "muls.l" : "mulu.w",
+        dprintf(1, "mul %s: %s (spread %u%%)\n", wide ? "muls.l" : "mulu.w",
                hi - lo <= lo / 50 ? "the same time for every operand" : "THE TIME DEPENDS ON THE OPERANDS",
                lo ? (hi - lo) * 100 / lo : 0);
     }
@@ -338,7 +338,7 @@ int main(int argc, char **argv)
         return 0;
     }
     if (argc != 1) {
-        fprintf(2, "usage: cryptotest [time [N] | mul]\n");
+        dprintf(2, "usage: cryptotest [time [N] | mul]\n");
         return 2;
     }
     test_x25519();
@@ -346,6 +346,6 @@ int main(int argc, char **argv)
     test_chacha_poly();
     test_sha_hmac();
     test_ssh();
-    printf("cryptotest: %d checks, %d failed: %s\n", checks, fails, fails ? "FAIL" : "ok");
+    dprintf(1, "cryptotest: %d checks, %d failed: %s\n", checks, fails, fails ? "FAIL" : "ok");
     return fails != 0;
 }

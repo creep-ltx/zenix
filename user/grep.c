@@ -101,7 +101,7 @@ static int grep_fd(int fd, const char *name)
             }
         } else if (!o_c) {
             if (after > 0) { emit(name, ln, '-', line, len); after--; }
-            else if (ctx_b) { int idx = bhead; if (before[idx]) free(before[idx]); if (!(before[idx] = strdup(line))) { fprintf(2, "grep: out of memory\n"); _zexit(2); } bln[idx] = ln; bhead = (bhead + 1) % bsz; if (nb < ctx_b) nb++; }
+            else if (ctx_b) { int idx = bhead; if (before[idx]) free(before[idx]); if (!(before[idx] = strdup(line))) { dprintf(2, "grep: out of memory\n"); _zexit(2); } bln[idx] = ln; bhead = (bhead + 1) % bsz; if (nb < ctx_b) nb++; }
         }
     }
     if (o_c) { if (multi && !o_h) { put_name(name); put_sep(':'); } oprintf("%d\n", count); }
@@ -117,21 +117,21 @@ static void grep_path(const char *path, int top)
 {
     struct ustat st;
     if (path[0] == '-' && !path[1] && top) { grep_fd(0, "(standard input)"); return; }     /* "-": standard input */
-    if (sys_stat(path, &st) < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("no such file or directory")); rc_err = 1; return; }
+    if (sys_stat(path, &st) < 0) { if (!o_s) dprintf(2, "grep: %s: %s\n", path, zwhy("no such file or directory")); rc_err = 1; return; }
     if ((st.mode & S_IFMT) == S_IFDIR) {
-        if (!o_r) { if (!o_s) fprintf(2, "grep: %s: is a directory\n", path); rc_err = 1; return; }
+        if (!o_r) { if (!o_s) dprintf(2, "grep: %s: is a directory\n", path); rc_err = 1; return; }
         char **names; int n = dir_list(path, &names);         /* heap, not stack: one level per directory */
-        if (n < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); rc_err = 1; return; }
+        if (n < 0) { if (!o_s) dprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); rc_err = 1; return; }
         for (int i = 0; i < n; i++) {
             char *c = path_join(path, names[i]);
-            if (c) grep_path(c, 0); else { if (!o_s) fprintf(2, "grep: %s/%s: %s\n", path, names[i], zwhy("cannot open")); rc_err = 1; }
+            if (c) grep_path(c, 0); else { if (!o_s) dprintf(2, "grep: %s/%s: %s\n", path, names[i], zwhy("cannot open")); rc_err = 1; }
             free(c);
         }
         dir_free(names, n);
         return;
     }
     int fd = sys_open(path, O_RDONLY);
-    if (fd < 0) { if (!o_s) fprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); rc_err = 1; return; }
+    if (fd < 0) { if (!o_s) dprintf(2, "grep: %s: %s\n", path, zwhy("cannot open")); rc_err = 1; return; }
     grep_fd(fd, path); sys_close(fd);
     (void)top;
 }
@@ -143,8 +143,8 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "--")) { i++; break; }
         if (argv[i][1] == '-') {
             int m = color_arg(argv[i], 2);
-            if (m == -2) { fprintf(2, "grep: invalid argument for --color: %s (always, never or auto)\n", argv[i]); return 2; }
-            if (m < 0) { fprintf(2, "grep: unknown option %s\n", argv[i]); return 2; }
+            if (m == -2) { dprintf(2, "grep: invalid argument for --color: %s (always, never or auto)\n", argv[i]); return 2; }
+            if (m < 0) { dprintf(2, "grep: unknown option %s\n", argv[i]); return 2; }
             cmode = m;
             continue;
         }
@@ -164,14 +164,14 @@ int main(int argc, char **argv)
             case 'l': o_l = 1; break; case 'L': o_L = 1; break; case 'o': o_o = 1; break; case 'q': o_q = 1; break;
             case 'h': o_h = 1; break; case 'H': o_H = 1; break; case 'r': case 'R': o_r = 1; break; case 'E': break;
             case 'F': o_F = 1; break; case 'w': o_w = 1; break; case 'x': o_x = 1; break; case 's': o_s = 1; break;
-            default: fprintf(2, "grep: unknown option -%c\n", *p); return 2;
+            default: dprintf(2, "grep: unknown option -%c\n", *p); return 2;
             }
         }
     }
-    if (!pat) { if (i >= argc) { fprintf(2, "usage: grep [options] PATTERN [file...]\n"); return 2; } pat = argv[i++]; }
+    if (!pat) { if (i >= argc) { dprintf(2, "usage: grep [options] PATTERN [file...]\n"); return 2; } pat = argv[i++]; }
     color = cmode == 2 ? color_auto(1) : cmode;
     if (o_F) fixed = pat;
-    else { re = re_comp(pat, (o_i ? RE_ICASE : 0) | RE_LONGEST); if (!re) { fprintf(2, "grep: bad pattern %s\n", pat); return 2; } }
+    else { re = re_comp(pat, (o_i ? RE_ICASE : 0) | RE_LONGEST); if (!re) { dprintf(2, "grep: bad pattern %s\n", pat); return 2; } }
     int nfiles = argc - i;
     multi = nfiles > 1 || o_r || o_H;
     if (!nfiles) { if (o_r) grep_path(".", 1); else grep_fd(0, "(standard input)"); }

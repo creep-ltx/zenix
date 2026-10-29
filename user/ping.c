@@ -26,7 +26,7 @@ int main(int argc, char **argv)
             u32 t = (u32)strtoul(v, &e, 10) * 100;
             if (*e == '.' && isdigit((unsigned char)e[1])) { t += (u32)(e[1] - '0') * 10; e += 2; while (isdigit((unsigned char)*e)) e++; }
             if (*e || !t || !isdigit((unsigned char)*v)) goto usage;
-            if (t < 20 && sys_geteuid() != 0) { fprintf(2, "ping: an interval below 0.2 s is root's\n"); return 2; }
+            if (t < 20 && sys_geteuid() != 0) { dprintf(2, "ping: an interval below 0.2 s is root's\n"); return 2; }
             interval = t;
             continue;
         }
@@ -43,18 +43,18 @@ int main(int argc, char **argv)
     h.ai_family = AF_INET;
     h.ai_socktype = SOCK_DGRAM;
     int g = getaddrinfo(host, 0, &h, &res);
-    if (g) { fprintf(2, "ping: %s: %s\n", host, gai_strerror(g)); return 2; }
+    if (g) { dprintf(2, "ping: %s: %s\n", host, gai_strerror(g)); return 2; }
     struct sockaddr_in to = *(struct sockaddr_in *)res->ai_addr;
     freeaddrinfo(res);
     int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_ICMP);
-    if (s < 0) { fprintf(2, "ping: %s\n", zwhy("cannot make an ICMP socket")); return 2; }
+    if (s < 0) { dprintf(2, "ping: %s\n", zwhy("cannot make an ICMP socket")); return 2; }
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
     sa.sa_handler = on_int;                             /* no SA_RESTART: ^C ends the wait, then the summary */
     sigaction(SIGINT, &sa, 0);
     char ip[16];
     strcpy(ip, inet_ntoa(to.sin_addr));
-    printf("PING %s (%s): %u data bytes\n", host, ip, size);
+    dprintf(1, "PING %s (%s): %u data bytes\n", host, ip, size);
     oflush();
     static unsigned char out[8 + 1400], in[8 + 1400 + 64];
     u32 sent = 0, got = 0, tmin = 0xFFFFFFFF, tmax = 0, tsum = 0;
@@ -68,7 +68,7 @@ int main(int argc, char **argv)
         u32 t0 = sys_hrtime();
         if (size >= 4) memcpy(out + 8, &t0, 4);
         if (sendto(s, out, 8 + size, 0, (struct sockaddr *)&to, sizeof to) < 0) {
-            fprintf(2, "ping: %s\n", zwhy("send failed"));
+            dprintf(2, "ping: %s\n", zwhy("send failed"));
         }
         next += interval;
         u32 until = (count && sent == count) ? sys_ticks() + wait_s * 100 : next;
@@ -90,18 +90,18 @@ int main(int argc, char **argv)
             if (rt < tmin) tmin = rt;
             if (rt > tmax) tmax = rt;
             if (!quiet) {
-                printf("%d bytes from %s: icmp_seq=%u time=%u.%u ms\n", n, inet_ntoa(from.sin_addr), seq, rt / 10, rt % 10);
+                dprintf(1, "%d bytes from %s: icmp_seq=%u time=%u.%u ms\n", n, inet_ntoa(from.sin_addr), seq, rt / 10, rt % 10);
                 oflush();
             }
             if (count && sent == count && got >= sent) break;
         }
     }
-    printf("\n--- %s ping statistics ---\n%u packets transmitted, %u received, %u%% packet loss\n", host, sent, got,
+    dprintf(1, "\n--- %s ping statistics ---\n%u packets transmitted, %u received, %u%% packet loss\n", host, sent, got,
            sent ? (sent - (got > sent ? sent : got)) * 100 / sent : 0);
-    if (got) printf("rtt min/avg/max = %u.%u/%u.%u/%u.%u ms\n", tmin / 10, tmin % 10, tsum / got / 10, tsum / got % 10,
+    if (got) dprintf(1, "rtt min/avg/max = %u.%u/%u.%u/%u.%u ms\n", tmin / 10, tmin % 10, tsum / got / 10, tsum / got % 10,
                     tmax / 10, tmax % 10);
     return got ? 0 : 1;
 usage:
-    fprintf(2, "usage: ping [-q] [-c COUNT] [-i SECONDS] [-s SIZE] [-W SECONDS] HOST\n");
+    dprintf(2, "usage: ping [-q] [-c COUNT] [-i SECONDS] [-s SIZE] [-W SECONDS] HOST\n");
     return 2;
 }

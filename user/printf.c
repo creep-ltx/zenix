@@ -34,13 +34,13 @@ static long number(const char *s)
     if (s[0] == '\'' || s[0] == '"') return (unsigned char)s[1];
     char *end; long v = (long)strtoul(s[0] == '-' ? s + 1 : s, &end, 0);
     if (s[0] == '-') v = -v;
-    if (*end || end == s) { fprintf(2, "printf: %s: not a completely converted number\n", s); rc = 1; }
+    if (*end || end == s) { dprintf(2, "printf: %s: not a completely converted number\n", s); rc = 1; }
     return v;
 }
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) { fprintf(2, "usage: printf FORMAT [ARGUMENT...]\n"); return 2; }
+    if (argc < 2) { dprintf(2, "usage: printf FORMAT [ARGUMENT...]\n"); return 2; }
     const char *fmt = argv[1];
     args = argv + 2; nargs = argc - 2;
     do {
@@ -74,7 +74,7 @@ int main(int argc, char **argv)
                 const char *a = next_arg(); char out[512]; int o = 0;
                 for (; a && *a && o < 511; a++) { if (*a == '\\') { a++; char c; if (esc(&a, &c)) { out[o++] = c; a--; } else out[o++] = '\\'; } else out[o++] = *a; }
                 out[o] = 0; spec[sl++] = 's'; spec[sl] = 0; oprintf(spec, out);
-            } else { fprintf(2, "printf: %%%c: invalid conversion\n", conv); return 1; }
+            } else { dprintf(2, "printf: %%%c: invalid conversion\n", conv); return 1; }
         }
         if (argi == used_before) break;                    /* the format used no argument: once is enough */
     } while (argi < nargs);

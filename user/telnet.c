@@ -44,7 +44,7 @@ static void sendall(void *u, const unsigned char *b, long n)
         p[1].fd = 0; p[1].events = POLLIN; p[1].revents = 0;
         int r = poll(p, eof_keys ? 1 : 2, 1000);
         if (r == 0 && ++stalled >= STALL_SECS) {
-            fprintf(2, "\r\ntelnet: %s has read nothing for %d s: the call is ended\r\n", host, STALL_SECS);
+            dprintf(2, "\r\ntelnet: %s has read nothing for %d s: the call is ended\r\n", host, STALL_SECS);
             quit = 1;
             return;
         }
@@ -55,7 +55,7 @@ static void sendall(void *u, const unsigned char *b, long n)
                 eof_keys = 1;
             for (int i = 0; i < m; i++)
                 if (k[i] == esc_key) {
-                    fprintf(2, "\r\ntelnet: %s is not reading what is sent: the call is ended\r\n", host);
+                    dprintf(2, "\r\ntelnet: %s is not reading what is sent: the call is ended\r\n", host);
                     quit = 2;
                     return;
                 }
@@ -125,7 +125,7 @@ static void font_set(int want)
     font_on = r >= 0;
     tf.fallback = !font_on;
     if (!font_on && !font_note++)
-        fprintf(2, "telnet: the PC font is not available here (%s): CP437 is shown as its nearest Latin-1 characters\r\n",
+        dprintf(2, "telnet: the PC font is not available here (%s): CP437 is shown as its nearest Latin-1 characters\r\n",
                 zstrerror(r));
 }
 
@@ -137,7 +137,7 @@ static void mode_apply(void)
         rules_old = r;
     rules_ok = r >= 0;
     if (!rules_ok && !echo_note++)
-        fprintf(2, "telnet: the console's rules are not available here (%s): the screen is drawn without them\r\n",
+        dprintf(2, "telnet: the console's rules are not available here (%s): the screen is drawn without them\r\n",
                 zstrerror(r));
     font_set(tn.mode == TN_PC);
 }
@@ -323,7 +323,7 @@ static void err_bytes(const unsigned char *b, long n)
         } else if (ep.line[0] == 'R')
             ep.rest = atoi(t);
         else
-            printf("\r\033[K%s: %s\r\n", ep.line[0] == 'M' ? "Zmodem" : "rz", t);
+            dprintf(1, "\r\033[K%s: %s\r\n", ep.line[0] == 'M' ? "Zmodem" : "rz", t);
     }
 }
 
@@ -345,7 +345,7 @@ static void drain(void)
     static unsigned char raw[1024], data[1024], text[1024];
     long tn_ = 0;
     u32 t0 = sys_ticks();
-    printf("\r\033[KZmodem: dropping the rest of the cancelled transfer...\r\n");
+    dprintf(1, "\r\033[KZmodem: dropping the rest of the cancelled transfer...\r\n");
     while (sys_ticks() - t0 < 6000 && !quit) {
         struct pollfd p = { sock, POLLIN, 0 };
         if (poll(&p, 1, 1000) <= 0)
@@ -378,7 +378,7 @@ static void transfer(int kind, const unsigned char *pre, long npre, char **files
     memcpy(pend, pre, (u32)npre);
     np = npre;
     if (sys_pipe2(in, O_NONBLOCK) < 0 || sys_pipe(out) < 0 || sys_pipe(err) < 0) {
-        printf("\r\ntelnet: no pipes for the transfer: %s\r\n", zwhy("failed"));
+        dprintf(1, "\r\ntelnet: no pipes for the transfer: %s\r\n", zwhy("failed"));
         board_cancel();
         goto close;
     }
@@ -403,7 +403,7 @@ static void transfer(int kind, const unsigned char *pre, long npre, char **files
     sys_close(in[0]); sys_close(out[1]); sys_close(err[1]);
     in[0] = out[1] = err[1] = -1;
     if (pid < 0) {
-        printf("\r\ntelnet: cannot start %s: %s\r\n", argv[0], zwhy("failed"));
+        dprintf(1, "\r\ntelnet: cannot start %s: %s\r\n", argv[0], zwhy("failed"));
         board_cancel();
         goto close;
     }
@@ -505,7 +505,7 @@ static void upload(const unsigned char *pre, long npre)
         }
     if (!nf) {
         board_cancel();
-        printf("\r\033[KZmodem: no files: the upload is cancelled\r\n");
+        dprintf(1, "\r\033[KZmodem: no files: the upload is cancelled\r\n");
         return;
     }
     transfer(2, pre, npre, f, nf);
@@ -545,16 +545,16 @@ static void from_net(const unsigned char *raw, long n)
 /* Ctrl-]: the local prompt on the bottom row (never its last column), one key */
 static void menu(void)
 {
-    printf("\0337\033[%d;1H\033[m\033[2Ktelnet> q quit, z suspend, a/p/x mode, d/u down/upload, ^] itself, Return: ",
+    dprintf(1, "\0337\033[%d;1H\033[m\033[2Ktelnet> q quit, z suspend, a/p/x mode, d/u down/upload, ^] itself, Return: ",
            bottom_row());
     char c = 0;
     if (sys_read(0, &c, 1) != 1) c = 'q';
-    printf("\033[2K\0338");
+    dprintf(1, "\033[2K\0338");
     if (c == 'q') {
         quit = 2;
     } else if (c == 'z') {
         term_off();
-        printf("\r\n");
+        dprintf(1, "\r\n");
         sys_killsig(sys_getpid(), SIGTSTP);     /* the shell's job control; it goes on here after fg */
         term_on();
     } else if (c == 'a' || c == 'p' || c == 'x') {
@@ -622,7 +622,7 @@ static int book_find(const char *name, struct book *b)
         if (!nw)
             continue;
         if (nw < 2 || strlen(w[0]) >= sizeof b->name || strlen(w[1]) >= sizeof b->host) {
-            fprintf(2, "telnet: %s line %d: not \"NAME HOST [PORT] [amiga|pc|unix] [ice]\" (ignored)\n", path, ln);
+            dprintf(2, "telnet: %s line %d: not \"NAME HOST [PORT] [amiga|pc|unix] [ice]\" (ignored)\n", path, ln);
             continue;
         }
         if (name) {
@@ -643,14 +643,14 @@ static int book_find(const char *name, struct book *b)
             else if (!strcmp(w[j], "pc")) b->mode = TN_PC;
             else if (!strcmp(w[j], "unix")) b->mode = TN_UNIX;
             else if (!strcmp(w[j], "ice")) b->ice = 1;
-            else fprintf(2, "telnet: %s line %d: unknown word %s (ignored)\n", path, ln, w[j]);
+            else dprintf(2, "telnet: %s line %d: unknown word %s (ignored)\n", path, ln, w[j]);
         }
         if (name)
             found = 1;
         else {
             if (!listed++)
-                printf("the phone book (%s):\n", path);
-            printf("  %-16s %s %d%s%s\n", b->name, b->host, b->port, b->mode == TN_PC ? " pc" : b->mode == TN_UNIX ?
+                dprintf(1, "the phone book (%s):\n", path);
+            dprintf(1, "  %-16s %s %d%s%s\n", b->name, b->host, b->port, b->mode == TN_PC ? " pc" : b->mode == TN_UNIX ?
                    " unix" : b->mode == TN_AMIGA ? " amiga" : "", b->ice ? " ice" : "");
         }
     }
@@ -661,7 +661,7 @@ static int book_find(const char *name, struct book *b)
 
 static int usage(void)
 {
-    fprintf(2, "usage: telnet [-a|-p|-x] [-i] [-r] [-d DIR] [-e CHAR|none] HOST|NAME [PORT]\n");
+    dprintf(2, "usage: telnet [-a|-p|-x] [-i] [-r] [-d DIR] [-e CHAR|none] HOST|NAME [PORT]\n");
     return 2;
 }
 
@@ -708,32 +708,32 @@ int main(int argc, char **argv)
     if (dldir) {
         struct ustat st;
         if (sys_stat(dldir, &st) < 0 || (st.mode & S_IFMT) != S_IFDIR) {
-            fprintf(2, "telnet: %s: not a directory\n", dldir);
+            dprintf(2, "telnet: %s: not a directory\n", dldir);
             return 2;
         }
     }
     signal(SIGPIPE, SIG_IGN);                   /* a transfer program that ended: its pipe says so, no signal */
     int port = atoi(pstr);
-    if (port <= 0 || port > 65535) { fprintf(2, "telnet: %s: not a port number\n", pstr); return 2; }
+    if (port <= 0 || port > 65535) { dprintf(2, "telnet: %s: not a port number\n", pstr); return 2; }
 
     struct addrinfo h, *r = 0;
     memset(&h, 0, sizeof h);
     h.ai_family = AF_INET;
     h.ai_socktype = SOCK_STREAM;
-    printf("Trying %s...\n", host);
+    dprintf(1, "Trying %s...\n", host);
     int e = getaddrinfo(host, pstr, &h, &r);
     if (e) {
-        fprintf(2, "telnet: %s: %s\n", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
+        dprintf(2, "telnet: %s: %s\n", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
         return 1;
     }
     sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0 || connect(sock, r->ai_addr, r->ai_addrlen) < 0) {
-        fprintf(2, "telnet: %s port %d: %s\n", host, port, zstrerror(zerrno) ? zstrerror(zerrno) : "cannot connect");
+        dprintf(2, "telnet: %s port %d: %s\n", host, port, zstrerror(zerrno) ? zstrerror(zerrno) : "cannot connect");
         freeaddrinfo(r);
         return 1;
     }
     freeaddrinfo(r);
-    printf("Connected to %s. Escape key is %s.\n", host, esc_key < 0 ? "off" : "Ctrl-]");
+    dprintf(1, "Connected to %s. Escape key is %s.\n", host, esc_key < 0 ? "off" : "Ctrl-]");
     int pr = getpriority(PRIO_PROCESS, 0);      /* one level lower than started at (the SLIP plan) */
     if (pr < 19)
         setpriority(PRIO_PROCESS, 0, pr + 1);
@@ -753,7 +753,7 @@ int main(int argc, char **argv)
     if (mode != TN_UNIX && sys_isatty(1)) {     /* the owner's rule: said once, at the start of a call */
         int col = sys_console(CON_COLOURS, 0);
         if (col > 0 && col < 16)                /* the screen takes 40 KB a plane: 16 colours are 4 planes */
-            printf("telnet: %d colours: ANSI art loses its shading; `colours 16` in /etc/console shows it fully "
+            dprintf(1, "telnet: %d colours: ANSI art loses its shading; `colours 16` in /etc/console shows it fully "
                    "(%d KB more chip RAM)\n", col, 40 * (col == 8 ? 1 : col == 4 ? 2 : 3));
     }
     term_on();
@@ -784,6 +784,6 @@ int main(int argc, char **argv)
     }
     term_off();
     sys_close(sock);
-    printf(quit == 2 ? "\r\nConnection closed.\n" : "\r\nConnection closed by %s.\n", host);
+    dprintf(1, quit == 2 ? "\r\nConnection closed.\n" : "\r\nConnection closed by %s.\n", host);
     return 0;
 }

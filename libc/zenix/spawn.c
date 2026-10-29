@@ -4,12 +4,14 @@
  *  - file actions are done in the parent around the spawn and can only set the child's descriptors 0-2 (others EINVAL);
  *  - an envp other than environ is set with SYS_envset around the spawn and put back;
  *  - POSIX_SPAWN_SETPGROUP is done by the parent right after the spawn (setpgid); the other attributes answer EINVAL.
- * system and popen run /bin/sh -c through it. waitpid and wait over SYS_wait, which answers a child's status as the
- * shell's $? (0-255, 128 + the signal for one that a signal ended): it is given as an exit status (WEXITSTATUS), a
- * stopped child (WUNTRACED) as stopped by SIGTSTP. SYS_wait for any child does not say which one: wait looks at the
- * process table before and after (SYS_procinfo). getppid from the table too. */
+ * system and popen run /bin/sh -c through it; system ignores SIGINT and SIGQUIT while it waits (POSIX). waitpid and
+ * wait over SYS_wait, which answers a child's status as the shell's $? (0-255, 128 + the signal for one that a signal
+ * ended): it is given as an exit status (WEXITSTATUS), a stopped child (WUNTRACED) as stopped by SIGTSTP. SYS_wait for
+ * any child does not say which one: wait looks at the process table before and after (SYS_procinfo). getppid from the
+ * table too. */
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
@@ -202,8 +204,20 @@ int system(const char *cmd)
     pid_t pid;
     int st, r = posix_spawn(&pid, "/bin/sh", 0, 0, argv, 0);
     if (r) { errno = r; return -1; }
-    while (waitpid(pid, &st, 0) < 0)
-        if (errno != EINTR) return -1;
+    /* POSIX: the caller ignores SIGINT and SIGQUIT while it waits (^C stops the command, not the program that ran
+     * it). Set after the spawn: a child inherits ignored (and blocked) signals, as across exec, and SYS_spawn cannot
+     * give it the defaults (POSIX's fork does that in between), so the command must not see them ignored. A signal
+     * that comes before the caller runs again after the spawn still reaches the caller: a limit, said in D27. */
+    struct sigaction ign = { .sa_handler = SIG_IGN }, oint, oquit;
+    sigemptyset(&ign.sa_mask);
+    sigaction(SIGINT, &ign, &oint);
+    sigaction(SIGQUIT, &ign, &oquit);
+    while ((r = waitpid(pid, &st, 0)) < 0 && errno == EINTR)
+        ;
+    int e = errno;
+    sigaction(SIGINT, &oint, 0);
+    sigaction(SIGQUIT, &oquit, 0);
+    if (r < 0) { errno = e; return -1; }
     return st;
 }
 

@@ -42,7 +42,7 @@ static void die(const char *fmt, ...)
     vsnprintf(m, sizeof m, fmt, ap);
     va_end(ap);
     term_off();
-    fprintf(2, "\r\nssh: %s\n", m);
+    dprintf(2, "\r\nssh: %s\n", m);
     ssh_wipe(&s);
     zc_wipe(sk, sizeof sk);
     sys_exit(255);
@@ -91,9 +91,9 @@ static void out_text(void *u, int kind, const char *t, long n)
     if ((k == SSH_TEXT_PROGRESS || k == SSH_TEXT_DEBUG) && !verbose && !(kind & SSH_TEXT_ALWAYS))
         return;
     if (k == SSH_TEXT_PROGRESS)
-        fprintf(2, "ssh: [%u.%02u s] %.*s\r\n", sys_ticks() / 100, sys_ticks() % 100, (int)n, t);
+        dprintf(2, "ssh: [%u.%02u s] %.*s\r\n", sys_ticks() / 100, sys_ticks() % 100, (int)n, t);
     else
-        fprintf(2, "%.*s%s", (int)n, t, n && t[n - 1] == '\n' ? "" : "\r\n");
+        dprintf(2, "%.*s%s", (int)n, t, n && t[n - 1] == '\n' ? "" : "\r\n");
 }
 
 static unsigned char *grow(void *u, unsigned char *old, long need)
@@ -114,7 +114,7 @@ static int seed(void *u, unsigned char *b, size_t n)
         return fd;
     int r = sys_read(fd, b, (u32)n);
     if (r == -EAGAIN) {
-        fprintf(2, "%s: waiting for the random pool (type on the keyboard)\n", (const char *)u);
+        dprintf(2, "%s: waiting for the random pool (type on the keyboard)\n", (const char *)u);
         sys_close(fd);
         fd = sys_open("/dev/random", O_RDONLY);
         if (fd < 0)
@@ -205,7 +205,7 @@ static void hostkey(void)
         return;
     }
     if (r == SSH_KH_CHANGED) {
-        fprintf(2, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
+        dprintf(2, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
                    "ssh: THE HOST KEY OF %s HAS CHANGED: refused\n"
                    "Someone could be listening, or the host was set up again.\n"
                    "The key it sent: ED25519 %s\n"
@@ -215,7 +215,7 @@ static void hostkey(void)
         die("host key verification failed");
     }
     if (r == SSH_KH_REVOKED) {          /* never "remove that line": that would undo the revocation (S15) */
-        fprintf(2, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
+        dprintf(2, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
                    "ssh: THE HOST KEY OF %s IS REVOKED: refused\n"
                    "The key it sent: ED25519 %s is marked @revoked in %s line %ld.\n"
                    "A revoked key is never accepted.\n", host, fp, kh, line);
@@ -223,7 +223,7 @@ static void hostkey(void)
         die("host key verification failed");
     }
     char a[96];
-    fprintf(2, "The authenticity of host '%s' can't be established.\n%sED25519 key fingerprint is %s.\n", host,
+    dprintf(2, "The authenticity of host '%s' can't be established.\n%sED25519 key fingerprint is %s.\n", host,
             r == SSH_KH_OTHERTYPE ? "(It is known with a key of another type.)\n" : "", fp);
     for (;;) {
         if (ask("Are you sure you want to continue connecting (yes/no/[fingerprint])? ", a, sizeof a, 1) < 0 ||
@@ -234,10 +234,10 @@ static void hostkey(void)
         if (!strcmp(a, "yes") || !strcmp(a, fp))
             break;
         if (!strncmp(a, "SHA256:", 7)) {
-            fprintf(2, "That is not the host's fingerprint.\n");
+            dprintf(2, "That is not the host's fingerprint.\n");
             continue;
         }
-        fprintf(2, "Please type 'yes', 'no' or the fingerprint: ");
+        dprintf(2, "Please type 'yes', 'no' or the fingerprint: ");
     }
     char l[400];
     long ln = ssh_kh_line(l, sizeof l, host, port, s.hostkey, s.hostkeylen);
@@ -246,9 +246,9 @@ static void hostkey(void)
     if (fd >= 0 && needs_nl && strcmp(kh, "/etc/ssh/ssh_known_hosts"))
         sys_write(fd, "\n", 1);         /* else the new line glued onto the last one spoilt both (S16) */
     if (fd < 0 || sys_write(fd, l, (u32)ln) != (int)ln)
-        fprintf(2, "ssh: could not add the key to %s\n", kh);
+        dprintf(2, "ssh: could not add the key to %s\n", kh);
     else
-        fprintf(2, "Warning: added '%s' (ED25519) to the list of known hosts.\n", host);
+        dprintf(2, "Warning: added '%s' (ED25519) to the list of known hosts.\n", host);
     if (fd >= 0) sys_close(fd);
     ssh_hostkey(&s, 1);
 }
@@ -263,7 +263,7 @@ static int load_key(const char *path, int must)
         return 0;
     }
     if (st.mode & 077) {
-        fprintf(2, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
+        dprintf(2, "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n"
                    "ssh: UNPROTECTED PRIVATE KEY FILE: %s (mode %o) is open to\n"
                    "others; it is ignored. chmod 600 %s\n", path, st.mode & 0777, path);
         return 0;
@@ -277,7 +277,7 @@ static int load_key(const char *path, int must)
     if (r == SSH_KEY_ENEEDPASS) {
         char pass[128];
         if (ask("Enter the passphrase for the key: ", pass, sizeof pass, 0) == 0) {
-            fprintf(2, "ssh: unlocking the key (bcrypt: this takes a while)...\n");
+            dprintf(2, "ssh: unlocking the key (bcrypt: this takes a while)...\n");
             r = ssh_key_read(t, n, pass, sk, 0, 0, work, sizeof work);
         }
         zc_wipe(pass, sizeof pass);
@@ -285,7 +285,7 @@ static int load_key(const char *path, int must)
     zc_wipe(t, (u32)n);
     free(t);
     if (r != SSH_KEY_OK) {
-        fprintf(2, "ssh: %s: %s (not used)\n", path, r == SSH_KEY_ETYPE ? "not an Ed25519 key" :
+        dprintf(2, "ssh: %s: %s (not used)\n", path, r == SSH_KEY_ETYPE ? "not an Ed25519 key" :
                 r == SSH_KEY_EBADPASS ? "wrong passphrase" : r == SSH_KEY_ENOTKEY ? "not an OpenSSH private key" :
                 "a damaged key file");
         return 0;
@@ -311,7 +311,7 @@ static void key_out(const unsigned char *b, long n)
 static void suspend(void)
 {
     term_off();
-    fprintf(2, "\r\n");
+    dprintf(2, "\r\n");
     sys_killsig(sys_getpid(), SIGTSTP);
     if (sys_isatty(0)) { sys_ttymode(TTY_RAW | TTY_NOSIG); raw_on = 1; }
     if (filter_on) {
@@ -326,10 +326,10 @@ static void keys_in(const unsigned char *k, long n)
         unsigned char c = k[i];
         if (esc_wait) {
             esc_wait = 0;
-            if (c == '.') { quit = 1; fprintf(2, "\r\nConnection to %s closed.\r\n", host); return; }
+            if (c == '.') { quit = 1; dprintf(2, "\r\nConnection to %s closed.\r\n", host); return; }
             if (c == 0x1A) { suspend(); at_start = 0; continue; }
             if (c == '?') {
-                fprintf(2, "\r\nSupported escape sequences:\r\n %c.  close the connection\r\n %c^Z suspend ssh\r\n"
+                dprintf(2, "\r\nSupported escape sequences:\r\n %c.  close the connection\r\n %c^Z suspend ssh\r\n"
                         " %c?  this help\r\n %c%c  send the escape character\r\n", esc_char, esc_char, esc_char,
                         esc_char, esc_char);
                 continue;
@@ -349,7 +349,7 @@ static void keys_in(const unsigned char *k, long n)
 
 static int usage(void)
 {
-    fprintf(2, "usage: ssh [-p PORT] [-l USER] [-i KEY] [-e CHAR|none] [-t|-T] [-v] [user@]host [command...]\n");
+    dprintf(2, "usage: ssh [-p PORT] [-l USER] [-i KEY] [-e CHAR|none] [-t|-T] [-v] [user@]host [command...]\n");
     return 255;
 }
 
@@ -461,7 +461,7 @@ int main(int argc, char **argv)
     tf.rows = s.rows;
     tf_init(&tf, TN_UNIX);
     if (interactive)
-        fprintf(2, "ssh: key exchange with %s (on a 68020 this takes a while)...\n", host);
+        dprintf(2, "ssh: key exchange with %s (on a 68020 this takes a while)...\n", host);
     ssh_start(&s);
     ssh_tick(&s, sys_uptime());
 
@@ -482,8 +482,8 @@ int main(int argc, char **argv)
             static char ans[SSH_KBD_PROMPTS][128];
             const char *a[SSH_KBD_PROMPTS];
             int ok = 1;
-            if (s.kbd_name[0]) fprintf(2, "%s\n", s.kbd_name);
-            if (s.kbd_instruction[0]) fprintf(2, "%s\n", s.kbd_instruction);
+            if (s.kbd_name[0]) dprintf(2, "%s\n", s.kbd_name);
+            if (s.kbd_instruction[0]) dprintf(2, "%s\n", s.kbd_instruction);
             for (int k = 0; k < s.kbd_n && ok; k++) {
                 ok = ask(s.kbd_prompt[k], ans[k], sizeof ans[k], s.kbd_echo[k]) == 0;
                 a[k] = ans[k];
@@ -568,13 +568,13 @@ int main(int argc, char **argv)
     if (quit)
         ssh_close(&s);
     if (s.state == SSH_ST_FAILED) {
-        fprintf(2, "ssh: %s\n", s.err);
+        dprintf(2, "ssh: %s\n", s.err);
         ssh_wipe(&s);
         zc_wipe(sk, sizeof sk);
         return 255;
     }
     if (verbose)
-        fprintf(2, "ssh: %lu key exchange%s\n", s.kex_count, s.kex_count == 1 ? "" : "s");
+        dprintf(2, "ssh: %lu key exchange%s\n", s.kex_count, s.kex_count == 1 ? "" : "s");
     int st = s.exit_status;
     ssh_wipe(&s);
     zc_wipe(sk, sizeof sk);

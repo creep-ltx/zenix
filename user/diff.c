@@ -86,10 +86,10 @@ static int diff_files(const char *p1, const char *p2, const char *l1, const char
     struct lines a = { 0, 0 }, b = { 0, 0 };
     char *ops = 0; struct hunk { int a0, ac, b0, bc, k0, k1; } *h = 0;
     int rc, total;
-    if (read_lines(p1, &a) < 0) { fprintf(2, "diff: %s: %s\n", p1, a.n < 0 ? "out of memory" : zwhy("cannot open")); rc = 2; goto out; }
-    if (read_lines(p2, &b) < 0) { fprintf(2, "diff: %s: %s\n", p2, b.n < 0 ? "out of memory" : zwhy("cannot open")); rc = 2; goto out; }
+    if (read_lines(p1, &a) < 0) { dprintf(2, "diff: %s: %s\n", p1, a.n < 0 ? "out of memory" : zwhy("cannot open")); rc = 2; goto out; }
+    if (read_lines(p2, &b) < 0) { dprintf(2, "diff: %s: %s\n", p2, b.n < 0 ? "out of memory" : zwhy("cannot open")); rc = 2; goto out; }
     total = script(&a, &b, &ops);
-    if (total < 0) { fprintf(2, "diff: out of memory\n"); rc = 2; goto out; }
+    if (total < 0) { dprintf(2, "diff: out of memory\n"); rc = 2; goto out; }
     int differ = 0;
     for (int k = 0; k < total; k++) if (ops[k] != ' ') { differ = 1; break; }
     if (!differ) { rc = 0; goto out; }
@@ -99,7 +99,7 @@ static int diff_files(const char *p1, const char *p2, const char *l1, const char
     /* hunks: runs of non-common ops, with their positions in a and b */
     int ai = 0, bi = 0;
     h = malloc(sizeof *h * (u32)(total + 1)); int nh = 0;
-    if (!h) { fprintf(2, "diff: out of memory\n"); rc = 2; goto out; }
+    if (!h) { dprintf(2, "diff: out of memory\n"); rc = 2; goto out; }
     for (int k = 0; k < total;) {
         if (ops[k] == ' ') { ai++; bi++; k++; continue; }
         struct hunk *x = &h[nh++]; x->a0 = ai; x->b0 = bi; x->k0 = k; x->ac = x->bc = 0;
@@ -154,16 +154,16 @@ static int diff_dirs(const char *d1, const char *d2)
     int rc = 0;
     /* the names of both sides, each once, sorted; lists and paths on the heap (one level per directory) */
     char **l1, **l2; int n1 = dir_list(d1, &l1), n2 = dir_list(d2, &l2);
-    if (n1 < 0 || n2 < 0) { fprintf(2, "diff: %s: %s\n", n1 < 0 ? d1 : d2, zwhy("cannot read")); dir_free(l1, n1); dir_free(l2, n2); return 2; }
+    if (n1 < 0 || n2 < 0) { dprintf(2, "diff: %s: %s\n", n1 < 0 ? d1 : d2, zwhy("cannot read")); dir_free(l1, n1); dir_free(l2, n2); return 2; }
     char **names = malloc((u32)(n1 + n2 + 1) * sizeof *names); int nn = 0;
-    if (!names) { fprintf(2, "diff: out of memory\n"); dir_free(l1, n1); dir_free(l2, n2); return 2; }
+    if (!names) { dprintf(2, "diff: out of memory\n"); dir_free(l1, n1); dir_free(l2, n2); return 2; }
     for (int i = 0; i < n1; i++) names[nn++] = l1[i];
     for (int i = 0; i < n2; i++) { int dup = 0; for (int k = 0; k < n1; k++) if (!strcmp(l1[k], l2[i])) dup = 1; if (!dup) names[nn++] = l2[i]; }
     for (int i = 1; i < nn; i++) { char *t = names[i]; int j = i; while (j > 0 && strcmp(names[j - 1], t) > 0) { names[j] = names[j - 1]; j--; } names[j] = t; }
     for (int i = 0; i < nn; i++) {
         struct ustat s1, s2;
         char *p1 = path_join(d1, names[i]), *p2 = p1 ? path_join(d2, names[i]) : 0;
-        if (!p2) { fprintf(2, "diff: %s/%s: %s\n", p1 ? d2 : d1, names[i], zwhy("cannot compare")); free(p1); rc = 2; continue; }
+        if (!p2) { dprintf(2, "diff: %s/%s: %s\n", p1 ? d2 : d1, names[i], zwhy("cannot compare")); free(p1); rc = 2; continue; }
         int e1 = sys_stat(p1, &s1) == 0, e2 = sys_stat(p2, &s2) == 0;
         if (!e1) { oprintf("Only in %s: %s\n", d2, names[i]); if (rc < 1) rc = 1; }
         else if (!e2) { oprintf("Only in %s: %s\n", d1, names[i]); if (rc < 1) rc = 1; }
@@ -192,9 +192,9 @@ int main(int argc, char **argv)
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
         if (!strcmp(argv[i], "--")) { i++; break; }
         if (argv[i][1] == 'U') { o_u = 1; o_ctx = atoi(argv[i][2] ? argv[i] + 2 : (i + 1 < argc ? argv[++i] : "3")); continue; }
-        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'u') o_u = 1; else if (*p == 'q') o_q = 1; else if (*p == 'i') o_i = 1; else if (*p == 'w') o_w = 1; else if (*p == 'r') o_r = 1; else { fprintf(2, "diff: unknown option -%c\n", *p); return 2; } }
+        for (const char *p = argv[i] + 1; *p; p++) { if (*p == 'u') o_u = 1; else if (*p == 'q') o_q = 1; else if (*p == 'i') o_i = 1; else if (*p == 'w') o_w = 1; else if (*p == 'r') o_r = 1; else { dprintf(2, "diff: unknown option -%c\n", *p); return 2; } }
     }
-    if (argc - i != 2) { fprintf(2, "usage: diff [-uqiwr] [-U N] file1 file2\n"); return 2; }
+    if (argc - i != 2) { dprintf(2, "usage: diff [-uqiwr] [-U N] file1 file2\n"); return 2; }
     struct ustat s1, s2;
     int e1 = sys_stat(argv[i], &s1), e2 = sys_stat(argv[i + 1], &s2);
     if (e1 == 0 && e2 == 0 && (s1.mode & S_IFMT) == S_IFDIR && (s2.mode & S_IFMT) == S_IFDIR) { int rc = diff_dirs(argv[i], argv[i + 1]); oflush(); return rc; }

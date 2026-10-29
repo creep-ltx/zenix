@@ -119,7 +119,7 @@ static void fill(struct ent *e, const char *path)
 static int list(const char *path, int top)
 {
     struct ustat st;
-    if (sys_lstat(path, &st) < 0) { fprintf(2, "ls: %s: not found\n", path); return 1; }
+    if (sys_lstat(path, &st) < 0) { dprintf(2, "ls: %s: not found\n", path); return 1; }
     int isdir = (st.mode & S_IFMT) == S_IFDIR;
     if (!isdir && (st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(path, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) { isdir = 1; st = t; } }
     if (!isdir || o_d) {
@@ -130,16 +130,16 @@ static int list(const char *path, int top)
     (void)top;
     /* the names come from the heap and grow as needed (libz dir_list): no limit but memory, and running out says so */
     char **names; int nn = dir_list(path, &names);
-    if (nn < 0) { fprintf(2, "ls: %s: %s\n", path, zwhy("cannot open")); return 1; }
+    if (nn < 0) { dprintf(2, "ls: %s: %s\n", path, zwhy("cannot open")); return 1; }
     struct ent *v = malloc(((u32)nn + 2) * sizeof(struct ent));
-    if (!v) { fprintf(2, "ls: %s: out of memory (%d names)\n", path, nn); dir_free(names, nn); return 1; }
+    if (!v) { dprintf(2, "ls: %s: out of memory (%d names)\n", path, nn); dir_free(names, nn); return 1; }
     int n = 0;
     for (int k = o_a ? -2 : 0; k < nn; k++) {          /* -a: . and .. too (dir_list leaves them out) */
         const char *nm = k == -2 ? "." : k == -1 ? ".." : names[k];
         if (k >= 0 && nm[0] == '.' && !o_a && !o_A) continue;
         struct ent *e = &v[n++]; strncpy(e->name, nm, 63); e->name[63] = 0;
         char *full = path_join(path, nm);
-        if (full) fill(e, full); else { memset(&e->st, 0, sizeof e->st); e->islink = 0; e->link[0] = 0; fprintf(2, "ls: %s/%s: %s\n", path, nm, zwhy("cannot read")); }
+        if (full) fill(e, full); else { memset(&e->st, 0, sizeof e->st); e->islink = 0; e->link[0] = 0; dprintf(2, "ls: %s/%s: %s\n", path, nm, zwhy("cannot read")); }
         free(full);
     }
     dir_free(names, nn);
@@ -149,7 +149,7 @@ static int list(const char *path, int top)
         for (int i = 0; i < n; i++)
             if ((v[i].st.mode & S_IFMT) == S_IFDIR && strcmp(v[i].name, ".") && strcmp(v[i].name, "..")) {
                 char *full = path_join(path, v[i].name);
-                if (full) rc |= list(full, 0); else { fprintf(2, "ls: %s/%s: %s\n", path, v[i].name, zwhy("cannot read")); rc = 1; }
+                if (full) rc |= list(full, 0); else { dprintf(2, "ls: %s/%s: %s\n", path, v[i].name, zwhy("cannot read")); rc = 1; }
                 free(full);
             }
     free(v);
@@ -162,15 +162,15 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "--")) { i++; break; }
         if (argv[i][1] == '-') {
             int m = color_arg(argv[i], 1);
-            if (m == -2) { fprintf(2, "ls: invalid argument for --color: %s (always, never or auto)\n", argv[i]); return 2; }
-            if (m < 0) { fprintf(2, "ls: unknown option %s\n", argv[i]); return 2; }
+            if (m == -2) { dprintf(2, "ls: invalid argument for --color: %s (always, never or auto)\n", argv[i]); return 2; }
+            if (m < 0) { dprintf(2, "ls: unknown option %s\n", argv[i]); return 2; }
             cmode = m;
             continue;
         }
         for (const char *p = argv[i] + 1; *p; p++) {
             switch (*p) { case 'a': o_a = 1; break; case 'A': o_A = 1; break; case 'l': o_l = 1; break; case 'd': o_d = 1; break; case 'R': o_R = 1; break;
                 case 'F': o_F = 1; break; case 'h': o_h = 1; break; case 't': o_t = 1; break; case 'r': o_r = 1; break; case 'S': o_S = 1; break; case '1': o_1 = 1; break; case 's': break;
-                default: fprintf(2, "ls: unknown option -%c\n", *p); return 2; }
+                default: dprintf(2, "ls: unknown option -%c\n", *p); return 2; }
         }
     }
     tty = sys_isatty(1);
@@ -183,7 +183,7 @@ int main(int argc, char **argv)
     for (int k = 0; k < n; k++) {
         const char *a = argv[i + k];
         struct ustat st;
-        if (sys_lstat(a, &st) < 0) { fprintf(2, "ls: %s: not found\n", a); rc = 1; continue; }
+        if (sys_lstat(a, &st) < 0) { dprintf(2, "ls: %s: not found\n", a); rc = 1; continue; }
         int isdir = (st.mode & S_IFMT) == S_IFDIR;
         if ((st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(a, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) isdir = 1; }
         struct ent *e = (isdir && !o_d) ? &dirs[nd++] : &files[nf++];

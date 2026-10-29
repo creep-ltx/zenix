@@ -50,7 +50,7 @@ static char lastmsg[160];       /* the last thing said: the reason a refusal giv
 static void vsay(const char *fmt, va_list ap)
 {
     vsnprintf(lastmsg, sizeof lastmsg, fmt, ap);
-    printf("zup: %s\n", lastmsg);
+    dprintf(1, "zup: %s\n", lastmsg);
 }
 static void say(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vsay(fmt, ap); va_end(ap); }
 void zf_say(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vsay(fmt, ap); va_end(ap); }   /* user/zpkgfmt.c's */
@@ -1509,23 +1509,23 @@ static int list(void)
 {
     char **names;
     int n = dir_list(DB, &names);
-    if (n < 0) { printf("zup: no package database (%s)\n", DB); return 1; }
+    if (n < 0) { dprintf(1, "zup: no package database (%s)\n", DB); return 1; }
     for (int i = 0; i < n; i++) {
         u32 l = strlen(names[i]);
         if (l < 10 || strcmp(names[i] + l - 9, ".manifest")) continue;
         names[i][l - 9] = 0;
         struct zf_pkg *k = installed(names[i]);
-        if (k) printf("%-12s %u (%s)%s\n", k->name, k->vnum, k->vstr, k->group ? "  base group" : "");
+        if (k) dprintf(1, "%-12s %u (%s)%s\n", k->name, k->vnum, k->vstr, k->group ? "  base group" : "");
     }
     dir_free(names, n);
     u32 pv = newest_prev();
-    if (pv) printf("previous version kept: the one before %u (Zenix (previous) in the boot menu)\n", pv);
+    if (pv) dprintf(1, "previous version kept: the one before %u (Zenix (previous) in the boot menu)\n", pv);
     return 0;
 }
 
 static int usage(void)
 {
-    printf("usage: zup [-l]          (boot runs zup at every start; see man zup)\n"
+    dprintf(1, "usage: zup [-l]          (boot runs zup at every start; see man zup)\n"
            "       zup -f FILE [-d]  install one package file (zpkg runs this)\n"
            "       zup -r NAME [-n]  remove one package\n");
     return 2;
@@ -1538,7 +1538,7 @@ static int live_main(int argc, char **argv)            /* zup -f FILE [-d], zup 
         if (strcmp(argv[3], f ? "-d" : "-n")) return usage();
         opt = 1;
     }
-    if (sys_getuid() != 0) { printf("zup: only root installs or removes packages\n"); return 1; }
+    if (sys_getuid() != 0) { dprintf(1, "zup: only root installs or removes packages\n"); return 1; }
     signal(SIGINT, SIG_IGN); signal(SIGHUP, SIG_IGN); signal(SIGTERM, SIG_IGN);    /* never ended or stopped */
     signal(SIGQUIT, SIG_IGN); signal(SIGTSTP, SIG_IGN);                            /* half-way */
     struct uupdate u;
@@ -1578,7 +1578,7 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "-l")) return list();
     if (argc > 1 && (!strcmp(argv[1], "-f") || !strcmp(argv[1], "-r"))) return live_main(argc, argv);
     if (argc > 1 && !stage2) return usage();
-    if (sys_getuid() != 0) { printf("zup: only root installs updates\n"); return 1; }
+    if (sys_getuid() != 0) { dprintf(1, "zup: only root installs updates\n"); return 1; }
 #ifdef DIAG_SLOWZUP     /* test builds (tools/update-test.sh slowzup): a stage 2 that hangs, for boot's time limit */
     if (stage2) { say("diag: DIAG_SLOWZUP: stage 2 hangs"); for (;;) sys_sleep(100); }   /* say, as every message: the
                                                                  * slowzup test sees it after boot stopped this zup */

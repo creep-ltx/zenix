@@ -328,7 +328,7 @@ static u32 seed(void)
 
 int main(int argc, char **argv)
 {
-    if (argc < 3 || argc > 4) { printf("usage: /sbin/nfscd nfsN HOST:/EXPORT [CODES] (started by mount -t nfs)\n"); return 2; }
+    if (argc < 3 || argc > 4) { dprintf(1, "usage: /sbin/nfscd nfsN HOST:/EXPORT [CODES] (started by mount -t nfs)\n"); return 2; }
     dev = argv[1];
     const char *src = argv[2], *colon = strchr(src, ':'), *codes = argc > 3 ? argv[3] : 0;
     if (!colon || colon[1] != '/' || colon == src || (u32)(colon - src) >= sizeof host) {

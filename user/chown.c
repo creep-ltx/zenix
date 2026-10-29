@@ -6,14 +6,14 @@ static u32 new_uid = 0xFFFFFFFFu, new_gid = 0xFFFFFFFFu;
 
 static void apply(const char *path)
 {
-    if (sys_chown(path, new_uid, new_gid) < 0) { fprintf(2, "%s: %s: %s\n", only_group ? "chgrp" : "chown", path, zwhy("cannot change owner")); rc = 1; return; }
+    if (sys_chown(path, new_uid, new_gid) < 0) { dprintf(2, "%s: %s: %s\n", only_group ? "chgrp" : "chown", path, zwhy("cannot change owner")); rc = 1; return; }
     struct ustat st;
     if (!recursive || sys_lstat(path, &st) < 0 || (st.mode & S_IFMT) != S_IFDIR) return;
     char **names; int nn = dir_list(path, &names);            /* heap, not stack: one level per directory */
-    if (nn < 0) { fprintf(2, "%s: %s: %s\n", only_group ? "chgrp" : "chown", path, zwhy("cannot read")); rc = 1; return; }
+    if (nn < 0) { dprintf(2, "%s: %s: %s\n", only_group ? "chgrp" : "chown", path, zwhy("cannot read")); rc = 1; return; }
     for (int i = 0; i < nn; i++) {
         char *c = path_join(path, names[i]);
-        if (c) apply(c); else { fprintf(2, "%s: %s/%s: %s\n", only_group ? "chgrp" : "chown", path, names[i], zwhy("cannot change owner")); rc = 1; }
+        if (c) apply(c); else { dprintf(2, "%s: %s/%s: %s\n", only_group ? "chgrp" : "chown", path, names[i], zwhy("cannot change owner")); rc = 1; }
         free(c);
     }
     dir_free(names, nn);
@@ -33,14 +33,14 @@ int main(int argc, char **argv)
     only_group = !strcmp(me, "chgrp");
     int i = 1;
     if (i < argc && !strcmp(argv[i], "-R")) { recursive = 1; i++; }
-    if (i + 1 >= argc) { fprintf(2, "usage: %s [-R] %s file...\n", me, only_group ? "group" : "owner[:group]"); return 2; }
+    if (i + 1 >= argc) { dprintf(2, "usage: %s [-R] %s file...\n", me, only_group ? "group" : "owner[:group]"); return 2; }
     char spec[64]; strncpy(spec, argv[i++], 63); spec[63] = 0;
     char *colon = strchr(spec, ':');
-    if (only_group) { if (id_of(spec, 1, &new_gid)) { fprintf(2, "chgrp: %s: no such group\n", spec); return 1; } }
+    if (only_group) { if (id_of(spec, 1, &new_gid)) { dprintf(2, "chgrp: %s: no such group\n", spec); return 1; } }
     else {
         if (colon) *colon = 0;
-        if (spec[0] && id_of(spec, 0, &new_uid)) { fprintf(2, "chown: %s: no such user\n", spec); return 1; }
-        if (colon && colon[1] && id_of(colon + 1, 1, &new_gid)) { fprintf(2, "chown: %s: no such group\n", colon + 1); return 1; }
+        if (spec[0] && id_of(spec, 0, &new_uid)) { dprintf(2, "chown: %s: no such user\n", spec); return 1; }
+        if (colon && colon[1] && id_of(colon + 1, 1, &new_gid)) { dprintf(2, "chown: %s: no such group\n", colon + 1); return 1; }
     }
     for (; i < argc; i++) apply(argv[i]);
     return rc;

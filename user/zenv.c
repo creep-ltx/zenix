@@ -18,6 +18,15 @@ void zenv_load(void)
     env_ptrs[k] = 0;
     environ = env_ptrs;
 }
+#ifdef ZENIX_LIBC
+/* the C library loads the environment before main in a program that links it (getenv, setenv, environ), from the
+ * init array (libc/zenix/start.c): a weak reference from the start would be address 0 in a program without it, and
+ * a ZEXE's relocation makes that the program's own start (found 2026-10-29: such a program called itself until its
+ * stack overflowed) */
+static void zenv_init(void) { zenv_load(); }
+static void (*const zenv_init_p)(void) __attribute__((section(".init_array"), used)) = zenv_init;   /* gcc's
+                                         * constructor attribute would use .ctors here, which the link scripts drop */
+#endif
 static void env_save(void)
 {
     static char blk[1024];

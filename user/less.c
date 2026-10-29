@@ -15,12 +15,12 @@ static void *re; static const char *name = "(standard input)";
 
 static void append(const char *b, u32 n)
 {
-    if (tlen + n + 1 > tcap) { u32 nc = tcap ? tcap * 2 : 8192; while (nc < tlen + n + 1) nc *= 2; char *nt = realloc(text, nc); if (!nt) { fprintf(2, "less: out of memory\n"); _zexit(1); } text = nt; tcap = nc; }
+    if (tlen + n + 1 > tcap) { u32 nc = tcap ? tcap * 2 : 8192; while (nc < tlen + n + 1) nc *= 2; char *nt = realloc(text, nc); if (!nt) { dprintf(2, "less: out of memory\n"); _zexit(1); } text = nt; tcap = nc; }
     memcpy(text + tlen, b, n); tlen += n;
 }
 static void add_row(u32 off, u32 len)
 {
-    if (nrows == rcap) { u32 nc = rcap ? rcap * 2 : 512; struct row *nr = realloc(rows, nc * sizeof *nr); if (!nr) { fprintf(2, "less: out of memory\n"); _zexit(1); } rows = nr; rcap = nc; }
+    if (nrows == rcap) { u32 nc = rcap ? rcap * 2 : 512; struct row *nr = realloc(rows, nc * sizeof *nr); if (!nr) { dprintf(2, "less: out of memory\n"); _zexit(1); } rows = nr; rcap = nc; }
     rows[nrows].off = off; rows[nrows].len = (unsigned short)len; nrows++;
 }
 /* the length of a colour code (ESC [ digits ; : m) at text[i], else 0 */
@@ -189,12 +189,12 @@ int main(int argc, char **argv)
     while (i < argc && argv[i][0] == '-' && argv[i][1]) i++;         /* options are accepted and ignored */
     int tty_out = sys_isatty(1);
     if (i >= argc) {
-        if (sys_isatty(0)) { fprintf(2, "usage: less file...   (or: command | less)\n"); return 1; }
+        if (sys_isatty(0)) { dprintf(2, "usage: less file...   (or: command | less)\n"); return 1; }
         char b[1024]; int n; while ((n = sys_read(0, b, sizeof b)) > 0) append(b, (u32)n);
     } else {
         for (; i < argc; i++) {
             int fd = sys_open(argv[i], O_RDONLY);
-            if (fd < 0) { fprintf(2, "less: %s: %s\n", argv[i], zwhy("cannot open")); continue; }
+            if (fd < 0) { dprintf(2, "less: %s: %s\n", argv[i], zwhy("cannot open")); continue; }
             name = argv[i];
             char b[1024]; int n; while ((n = sys_read(fd, b, sizeof b)) > 0) append(b, (u32)n);
             sys_close(fd);
@@ -209,7 +209,7 @@ int main(int argc, char **argv)
         return 0;
     }
     tty_fd = sys_open("/dev/tty", O_RDONLY);
-    if (tty_fd < 0) { fprintf(2, "less: no terminal\n"); return 1; }
+    if (tty_fd < 0) { dprintf(2, "less: no terminal\n"); return 1; }
     sys_ttymode(TTY_RAW | TTY_NOSIG);
     signal(SIGINT, on_end); signal(SIGTERM, on_end); signal(SIGHUP, on_end);
     signal(SIGTSTP, on_tstp); signal(SIGCONT, on_cont);

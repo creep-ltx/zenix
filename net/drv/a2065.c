@@ -71,7 +71,7 @@ static void say(const char *fmt, u32 a, u32 b)
     char t[160], l[200];
     snprintf(t, sizeof t, fmt, a, b);
     snprintf(l, sizeof l, "a2065: %s: %s", ifn, t);
-    printf("%s\n", l);
+    dprintf(1, "%s\n", l);
 }
 
 /* the rings and the block in the board's RAM; then INIT and STRT (the LANCE stopped first). 0, or -1 */
@@ -192,7 +192,7 @@ static int tx_poll(void)
 int main(int argc, char **argv)
 {
     unsigned char mac[6];
-    if (argc < 2) { printf("usage: a2065 IFACE\n"); return 2; }
+    if (argc < 2) { dprintf(1, "usage: a2065 IFACE\n"); return 2; }
     ifn = argv[1];
     const struct hwboard *bd = drv_board(drv_hwinfo(), 0x202, 112);    /* Commodore A2065 */
     if (!bd) { say("no A2065 board in the hardware table", 0, 0); return 1; }

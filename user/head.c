@@ -9,12 +9,12 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-c") && i + 1 < argc) nc = atoi(argv[++i]);
         else if (isdigit((unsigned char)argv[i][1])) nl = atoi(argv[i] + 1);
         else if (!strcmp(argv[i], "--")) { i++; break; }
-        else { fprintf(2, "head: unknown option %s\n", argv[i]); return 2; }
+        else { dprintf(2, "head: unknown option %s\n", argv[i]); return 2; }
     }
     int nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {
         int fd = 0; const char *name = "standard input";
-        if (nfiles) { name = argv[i + f]; fd = sys_open(name, O_RDONLY); if (fd < 0) { fprintf(2, "head: %s: %s\n", name, zwhy("cannot open")); rc = 1; continue; } }
+        if (nfiles) { name = argv[i + f]; fd = sys_open(name, O_RDONLY); if (fd < 0) { dprintf(2, "head: %s: %s\n", name, zwhy("cannot open")); rc = 1; continue; } }
         if (nfiles > 1) oprintf("%s==> %s <==\n", f ? "\n" : "", name);
         struct rd r; rd_init(&r, fd);
         if (nc >= 0) { int c; for (long k = 0; k < nc && (c = rd_getc(&r)) >= 0; k++) oputc(c); }

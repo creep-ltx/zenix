@@ -12,7 +12,7 @@ typedef unsigned char u8;
  * line, printed alike for the script to compare; `termtest grab FILE` the shown display through CON_LINE (pens and
  * palette, "ZGRB"); `termtest depth N` CON_COLOURS. In `termtest colours` the key g grabs to /tmp/grab.zg. */
 #define ESC "\033"
-static void at(int r, int c, const char *s) { printf(ESC "[%d;%dH%s", r, c, s); }
+static void at(int r, int c, const char *s) { dprintf(1, ESC "[%d;%dH%s", r, c, s); }
 
 static int grab(const char *path);
 
@@ -26,9 +26,9 @@ static void keys(int show)
         if (n <= 0 || b[0] == 'q') break;
         if (b[0] == 'g') { grab("/tmp/grab.zg"); continue; }
         if (show) {
-            printf("key:");
-            for (int i = 0; i < n; i++) printf(" %02x", (unsigned char)b[i]);
-            printf("\n");
+            dprintf(1, "key:");
+            for (int i = 0; i < n; i++) dprintf(1, " %02x", (unsigned char)b[i]);
+            dprintf(1, "\n");
         }
     }
     sys_ttymode(0);
@@ -37,53 +37,53 @@ static void keys(int show)
 /* rows 1-7: column c lit (white, every plane) where bit (row - 1) of c is set; row 8 lit across all 80 columns */
 static void columns(void)
 {
-    printf(ESC "[?25l" ESC "[2J");
+    dprintf(1, ESC "[?25l" ESC "[2J");
     for (int k = 0; k < 8; k++) {
-        printf(ESC "[%d;1H", k + 1);
+        dprintf(1, ESC "[%d;1H", k + 1);
         for (int c = 0; c < 80; c++)
-            printf("%s", k == 7 || (c >> k & 1) ? ESC "[7;97m " ESC "[m" : " ");
+            dprintf(1, "%s", k == 7 || (c >> k & 1) ? ESC "[7;97m " ESC "[m" : " ");
     }
-    printf(ESC "[10;1Hcolumns 0-79 in binary, row 1 the lowest bit; q quits");
+    dprintf(1, ESC "[10;1Hcolumns 0-79 in binary, row 1 the lowest bit; q quits");
     keys(0);
-    printf(ESC "[?25h" ESC "[2J" ESC "[H");
+    dprintf(1, ESC "[?25h" ESC "[2J" ESC "[H");
 }
 
 /* rows 3-4: the 16 colours as background blocks, 5 columns each (colour i from column 5i); rows 6-9: the 16 as text
  * on black and on white, then bold, underline and inverse */
 static void colours(void)
 {
-    printf(ESC "[?25l" ESC "[2J" ESC "[1;1Hthe 16 colours (ESC[40-47m, ESC[100-107m), as text on black and on white");
+    dprintf(1, ESC "[?25l" ESC "[2J" ESC "[1;1Hthe 16 colours (ESC[40-47m, ESC[100-107m), as text on black and on white");
     for (int r = 3; r <= 4; r++) {
-        printf(ESC "[%d;1H", r);
-        for (int i = 0; i < 16; i++) printf(ESC "[%dm     ", i < 8 ? 40 + i : 100 + i - 8);
-        printf(ESC "[m");
+        dprintf(1, ESC "[%d;1H", r);
+        for (int i = 0; i < 16; i++) dprintf(1, ESC "[%dm     ", i < 8 ? 40 + i : 100 + i - 8);
+        dprintf(1, ESC "[m");
     }
     for (int b = 0; b < 2; b++) {
-        printf(ESC "[%d;1H" ESC "[%dm", 6 + b, b ? 107 : 40);
-        for (int i = 0; i < 16; i++) printf(ESC "[%dmAa%-2d ", i < 8 ? 30 + i : 90 + i - 8, i);
-        printf(ESC "[m");
+        dprintf(1, ESC "[%d;1H" ESC "[%dm", 6 + b, b ? 107 : 40);
+        for (int i = 0; i < 16; i++) dprintf(1, ESC "[%dmAa%-2d ", i < 8 ? 30 + i : 90 + i - 8, i);
+        dprintf(1, ESC "[m");
     }
-    printf(ESC "[8;1H" ESC "[1;31mbold red" ESC "[m " ESC "[4;32munderlined green" ESC "[m " ESC "[7;34minverse blue"
+    dprintf(1, ESC "[8;1H" ESC "[1;31mbold red" ESC "[m " ESC "[4;32munderlined green" ESC "[m " ESC "[7;34minverse blue"
            ESC "[m " ESC "[1;4;7;33mall three yellow" ESC "[m " ESC "[38;5;208m256: 208" ESC "[m "
            ESC "[38;2;0;200;200mtrue colour" ESC "[m");
-    printf(ESC "[10;1Hq quits");
+    dprintf(1, ESC "[10;1Hq quits");
     keys(0);
-    printf(ESC "[?25h" ESC "[m" ESC "[2J" ESC "[H");
+    dprintf(1, ESC "[?25h" ESC "[m" ESC "[2J" ESC "[H");
 }
 
 /* line n in colour (n % 7) + 1, the line's rest erased in a background colour every 5th line */
 static void scroll(void)
 {
-    printf(ESC "[m" ESC "[2J" ESC "[H");
+    dprintf(1, ESC "[m" ESC "[2J" ESC "[H");
     for (int n = 1; n <= 100; n++) {
-        printf(ESC "[%dmline %d " ESC "[7minverse" ESC "[27m", 30 + n % 7 + 1, n);
-        if (n % 5 == 0) printf(ESC "[4%dm" ESC "[K", n / 5 % 8);
-        printf(ESC "[m\n");
+        dprintf(1, ESC "[%dmline %d " ESC "[7minverse" ESC "[27m", 30 + n % 7 + 1, n);
+        if (n % 5 == 0) dprintf(1, ESC "[4%dm" ESC "[K", n / 5 % 8);
+        dprintf(1, ESC "[m\n");
     }
-    printf(ESC "[5;20r" ESC "[20;1H");                          /* a region: scroll inside it */
-    for (int n = 1; n <= 30; n++) printf("\n" ESC "[3%dm" ESC "[44mregion %d" ESC "[K" ESC "[m", n % 7 + 1, n);
-    printf(ESC "[8;1H" ESC "[45m" ESC "[3L" ESC "[12;1H" ESC "[2M" ESC "[5;1H" ESC "[43m" ESC "M" ESC "[2S" ESC "[m");
-    printf(ESC "[r" ESC "[31;1H" ESC "[42m" ESC "[J" ESC "[m");
+    dprintf(1, ESC "[5;20r" ESC "[20;1H");                          /* a region: scroll inside it */
+    for (int n = 1; n <= 30; n++) dprintf(1, "\n" ESC "[3%dm" ESC "[44mregion %d" ESC "[K" ESC "[m", n % 7 + 1, n);
+    dprintf(1, ESC "[8;1H" ESC "[45m" ESC "[3L" ESC "[12;1H" ESC "[2M" ESC "[5;1H" ESC "[43m" ESC "M" ESC "[2S" ESC "[m");
+    dprintf(1, ESC "[r" ESC "[31;1H" ESC "[42m" ESC "[J" ESC "[m");
 }
 
 /* DESIGN D20 step 1: a console's loaded font and the BBS rules (tools/colour-test.sh). FILE is a PSF1 font; without
@@ -114,10 +114,10 @@ static unsigned char *psf_file(const char *path)
         return b;
     }
     int fd = sys_open(path, O_RDONLY);
-    if (fd < 0) { fprintf(2, "termtest: %s: %s\n", path, zstrerror(fd)); return 0; }
+    if (fd < 0) { dprintf(2, "termtest: %s: %s\n", path, zstrerror(fd)); return 0; }
     int n = sys_read(fd, b, sizeof b);
     sys_close(fd);
-    if (n != (int)sizeof b) { fprintf(2, "termtest: %s: not a 2,052-byte PSF1 font\n", path); return 0; }
+    if (n != (int)sizeof b) { dprintf(2, "termtest: %s: not a 2,052-byte PSF1 font\n", path); return 0; }
     return b;
 }
 
@@ -126,14 +126,14 @@ static int pcfont(const char *path)
     unsigned char *f = psf_file(path);
     if (!f) return 1;
     int r = sys_confont(1, f, 2052);
-    if (r < 0) { fprintf(2, "termtest: CON_FONT: %s\n", zstrerror(r)); return 1; }
+    if (r < 0) { dprintf(2, "termtest: CON_FONT: %s\n", zstrerror(r)); return 1; }
     u32 all = CONR_PCCTRL | CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_ICE | CONR_CGAPAL;
     r = sys_conrules(1, all, all | CONR_LFONLY);
-    if (r < 0) { fprintf(2, "termtest: CON_RULES: %s\n", zstrerror(r)); sys_confont(1, 0, 0); return 1; }
-    printf(ESC "[?25l" ESC "[m" ESC "[5;5HZ" ESC "[2JH");
+    if (r < 0) { dprintf(2, "termtest: CON_RULES: %s\n", zstrerror(r)); sys_confont(1, 0, 0); return 1; }
+    dprintf(1, ESC "[?25l" ESC "[m" ESC "[5;5HZ" ESC "[2JH");
     for (int row = 0; row < 16; row++) {
         unsigned char l[16];
-        printf(ESC "[%d;1H", row + 3);
+        dprintf(1, ESC "[%d;1H", row + 3);
         for (int c = 16 * row; c < 16 * row + 16; c++) {
             int acts = c == 0 || c == 7 || c == 8 || c == 9 || c == 10 || c == 13 || c == 27;
             l[c - 16 * row] = acts ? ' ' : (unsigned char)c;
@@ -141,16 +141,16 @@ static int pcfont(const char *path)
         sys_write(1, l, sizeof l);
     }
     for (int r2 = 20; r2 <= 21; r2++) {
-        printf(ESC "[%d;1H", r2);
-        for (int i = 0; i < 16; i++) printf(ESC "[%dm     ", i < 8 ? 40 + i : 100 + i - 8);
-        printf(ESC "[m");
+        dprintf(1, ESC "[%d;1H", r2);
+        for (int i = 0; i < 16; i++) dprintf(1, ESC "[%dm     ", i < 8 ? 40 + i : 100 + i - 8);
+        dprintf(1, ESC "[m");
     }
-    printf(ESC "[23;1H" ESC "[1;31mR" ESC "[0;31mr" ESC "[5;44m  " ESC "[0;44m  " ESC "[m");
-    printf(ESC "[24;1H%s\r\nX", "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW");
+    dprintf(1, ESC "[23;1H" ESC "[1;31mR" ESC "[0;31mr" ESC "[5;44m  " ESC "[0;44m  " ESC "[m");
+    dprintf(1, ESC "[24;1H%s\r\nX", "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW");
     sys_conrules(1, CONR_LFONLY, CONR_LFONLY);
-    printf(ESC "[27;1HA\nB");
+    dprintf(1, ESC "[27;1HA\nB");
     sys_conrules(1, 0, CONR_LFONLY);
-    printf(ESC "[30;1H");
+    dprintf(1, ESC "[30;1H");
     sys_ttymode(TTY_RAW);
     for (;;) {
         char b[8];
@@ -159,10 +159,10 @@ static int pcfont(const char *path)
         if (b[0] == 'x') return 0;              /* the kernel drops the font and the rules (D20 4.2) */
         int c = b[0] == '2' ? 2 : b[0] == '4' ? 4 : b[0] == '8' ? 8 : b[0] == '6' ? 16 : 0;
         if (c && (r = sys_console(CON_COLOURS, c)) < 0)
-            fprintf(2, "termtest: colours %d: %s\n", c, zstrerror(r));
+            dprintf(2, "termtest: colours %d: %s\n", c, zstrerror(r));
     }
     sys_ttymode(0);
-    printf(ESC "[m" ESC "[2J" ESC "[H" ESC "[?25h");       /* cleared before the font goes (D20 4.2) */
+    dprintf(1, ESC "[m" ESC "[2J" ESC "[H" ESC "[?25h");       /* cleared before the font goes (D20 4.2) */
     sys_conrules(1, 0, CONR_PCCTRL | CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_ICE | CONR_CGAPAL | CONR_LFONLY);
     sys_confont(1, 0, 0);
     return 0;
@@ -182,7 +182,7 @@ static void ck(int ok, const char *what, int got)
 static int report(const char *name)
 {
     sys_write(1, res, resn);
-    printf("%s: %d failed\n", name, fails);
+    dprintf(1, "%s: %d failed\n", name, fails);
     return fails != 0;
 }
 static void out(const char *s) { sys_write(1, s, strlen(s)); }
@@ -216,7 +216,7 @@ static int conops(void)
     u8 *g = malloc((u32)rows * 80 * 3 + 8), *pens = malloc(656);
     struct uconread h;
     struct uconline d;
-    if (!g || !pens) { fprintf(2, "termtest: out of memory\n"); return 1; }
+    if (!g || !pens) { dprintf(2, "termtest: out of memory\n"); return 1; }
     out(ESC "[?25h" ESC "[m" ESC "[2J" ESC "[HABC" ESC "[2;1H" ESC "[1;4;7;31;42mxyz" ESC "[m" ESC "[3;71H\xe5"
         ESC "[5;1H" ESC "[44m " ESC "[m" ESC "[6;11H");
     r = conread(1, &h, g, (u32)rows * 80 * 3);
@@ -353,9 +353,9 @@ static int rawkeys(void)
 
 static void hex(const char *tag, const u8 *b, int n)
 {
-    printf("%s:", tag);
-    for (int i = 0; i < n; i++) printf("%02x", b[i]);
-    printf("\n");
+    dprintf(1, "%s:", tag);
+    for (int i = 0; i < n; i++) dprintf(1, "%02x", b[i]);
+    dprintf(1, "\n");
 }
 
 static volatile int got_int;
@@ -395,7 +395,7 @@ static int text(void)
 static int readline(void)
 {
     u8 b[64];
-    printf("readline:\n");
+    dprintf(1, "readline:\n");
     int n = sys_read(0, b, sizeof b);
     hex("line", b, n < 0 ? 0 : n);
     return 0;
@@ -406,7 +406,7 @@ static int readraw(int want)
     u8 b[64];
     int n = 0;
     sys_ttymode(TTY_RAW | TTY_NOSIG);
-    printf("readraw:\n");
+    dprintf(1, "readraw:\n");
     while (n < want && n < (int)sizeof b) {
         int k = sys_read(0, b + n, (u32)(want - n));
         if (k <= 0) break;
@@ -429,14 +429,14 @@ static int grab(const char *path)
         if (fd >= 0 && (conread(fd, &h, 0, 0) || !(h.flags & CONRD_SHOWN))) { sys_close(fd); fd = -1; }
     }
     u8 *pens = malloc(640);
-    if (fd < 0 || !pens || conline(fd, 0, &d, 0, 0)) { fprintf(2, "termtest: grab: no display\n"); return 1; }
+    if (fd < 0 || !pens || conline(fd, 0, &d, 0, 0)) { dprintf(2, "termtest: grab: no display\n"); return 1; }
     int o = sys_open(path, O_WRONLY | O_CREAT | O_TRUNC);
-    if (o < 0) { fprintf(2, "termtest: %s: %s\n", path, zstrerror(o)); return 1; }
+    if (o < 0) { dprintf(2, "termtest: %s: %s\n", path, zstrerror(o)); return 1; }
     u8 hd[42] = { 'Z', 'G', 'R', 'B', (u8)(d.width >> 8), (u8)d.width, (u8)(d.height >> 8), (u8)d.height, 0, (u8)d.depth };
     for (int i = 0; i < 16; i++) { hd[10 + 2 * i] = (u8)(d.palette[i] >> 8); hd[11 + 2 * i] = (u8)d.palette[i]; }
     sys_write(o, hd, sizeof hd);
     for (int l = 0; l < d.height; l++) {
-        if (conline(fd, l, &d, pens, 640) != 640) { fprintf(2, "termtest: grab: line %d\n", l); return 1; }
+        if (conline(fd, l, &d, pens, 640) != 640) { dprintf(2, "termtest: grab: line %d\n", l); return 1; }
         sys_write(o, pens, 640);
     }
     sys_close(o);
@@ -452,23 +452,23 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "readline")) return readline();
     if (argc > 2 && !strcmp(argv[1], "readraw")) return readraw(atoi(argv[2]));
     if (argc > 2 && !strcmp(argv[1], "grab")) return grab(argv[2]);
-    if (argc > 2 && !strcmp(argv[1], "depth")) { int r = sys_console(CON_COLOURS, atoi(argv[2])); printf("colours %d\n", r); return r < 0; }
+    if (argc > 2 && !strcmp(argv[1], "depth")) { int r = sys_console(CON_COLOURS, atoi(argv[2])); dprintf(1, "colours %d\n", r); return r < 0; }
     if (argc > 1 && !strcmp(argv[1], "pcfont")) return pcfont(argc > 2 ? argv[2] : 0);
     if (argc == 3 && !strcmp(argv[1], "rules")) {          /* the rules of another console (root): D20's tests */
         int fd = sys_open(argv[2], O_RDWR);
         int r = fd < 0 ? fd : sys_conrules(fd, 0, 0);
-        if (r < 0) { fprintf(2, "termtest: %s: %s\n", argv[2], zstrerror(r)); return 1; }
-        printf("rules %d\n", r);
+        if (r < 0) { dprintf(2, "termtest: %s: %s\n", argv[2], zstrerror(r)); return 1; }
+        dprintf(1, "rules %d\n", r);
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "columns")) { columns(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "colours")) { colours(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "scroll")) { scroll(); return 0; }
-    if (argc > 1) { fprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY|conops|rawkeys|text|readline|readraw N|grab FILE|depth N]\n"); return 2; }
+    if (argc > 1) { dprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY|conops|rawkeys|text|readline|readraw N|grab FILE|depth N]\n"); return 2; }
     int sz = sys_ttyinfo();
-    printf(ESC "[2J" ESC "[H");
-    printf(ESC "[7m Zenix terminal test " ESC "[0m  size %dx%d\n", sz & 0xFFFF, sz >> 16);
-    printf("normal " ESC "[1mbold" ESC "[0m " ESC "[4munderline" ESC "[0m " ESC "[7minverse" ESC "[0m "
+    dprintf(1, ESC "[2J" ESC "[H");
+    dprintf(1, ESC "[7m Zenix terminal test " ESC "[0m  size %dx%d\n", sz & 0xFFFF, sz >> 16);
+    dprintf(1, "normal " ESC "[1mbold" ESC "[0m " ESC "[4munderline" ESC "[0m " ESC "[7minverse" ESC "[0m "
            ESC "[1;4;7mall three" ESC "[0m\n");
     /* the box is 36 columns wide: its longest line (27 characters from column 5) keeps a margin */
     at(4, 1, "+----------------------------------+");
@@ -478,18 +478,18 @@ int main(int argc, char **argv)
     at(7, 5, "ESC[row;colH, erase, scroll");
     /* scroll region rows 11..14: print 8 numbers, only that area scrolls */
     at(10, 1, "scroll region (rows 11-14):");
-    printf(ESC "[11;14r");
-    for (int i = 1; i <= 8; i++) printf(ESC "[14;1H\nline %d", i);
-    printf(ESC "[r");
+    dprintf(1, ESC "[11;14r");
+    for (int i = 1; i <= 8; i++) dprintf(1, ESC "[14;1H\nline %d", i);
+    dprintf(1, ESC "[r");
     at(16, 1, "erase line demo: ");
-    printf("XXXXXXXXXXXX" ESC "[6D" ESC "[K|end\n");
+    dprintf(1, "XXXXXXXXXXXX" ESC "[6D" ESC "[K|end\n");
     at(17, 1, "insert/delete line: A");
     at(18, 1, "B");
     at(19, 1, "C");
-    printf(ESC "[18;1H" ESC "[1L" "inserted");
+    dprintf(1, ESC "[18;1H" ESC "[1L" "inserted");
     at(20, 1, "keys: press arrows/F-keys/Del, q quits");
     at(22, 1, "");
     keys(1);
-    printf("done\n");
+    dprintf(1, "done\n");
     return 0;
 }

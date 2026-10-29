@@ -25,12 +25,12 @@ int main(int argc, char **argv)
 {
     if (argc > 2 && !strcmp(argv[1], "sleep")) {
         sys_sleep((u32)atoi(argv[2]) * 100);
-        printf("crash: slept %s s\n", argv[2]);
+        dprintf(1, "crash: slept %s s\n", argv[2]);
         return 0;
     }
     if (argc > 1 && (!strcmp(argv[1], "poke") || !strcmp(argv[1], "damage"))) {
         *(volatile char *)(unsigned long)victim ^= 0x20;    /* no MMU: nothing stops it */
-        printf("crash: changed a byte of my constants\n");
+        dprintf(1, "crash: changed a byte of my constants\n");
         oflush();
         if (argv[1][0] == 'p')
             return 0;
@@ -43,25 +43,25 @@ int main(int argc, char **argv)
         int r = fd >= 0 ? sys_read(fd, (char *)(unsigned long)lit, 4) : fd;
         sys_write(1, "crash: a literal written\n", 25);
         int c = sys_spawn("/bin/true", 0, 0);
-        printf("crash: open of a literal path %d, read %d, read into a literal %d, it says: %s, spawn %s\n",
+        dprintf(1, "crash: open of a literal path %d, read %d, read into a literal %d, it says: %s, spawn %s\n",
                fd >= 0, n, r, lit, c > 0 && sys_wait(c) == 0 ? "ok" : "failed");
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "stack")) {
-        printf("crash: recursing until the stack overflows\n");
+        dprintf(1, "crash: recursing until the stack overflows\n");
         oflush();
         return deep(0);
     }
     if (argc > 1 && (!strcmp(argv[1], "kstack") || !strcmp(argv[1], "idle"))) {
-        printf("crash: damaging the guard of %s kernel stack\n", argv[1][0] == 'k' ? "our" : "pid 0's");
+        dprintf(1, "crash: damaging the guard of %s kernel stack\n", argv[1][0] == 'k' ? "our" : "pid 0's");
         oflush();
         sys3(3, argv[1][0] == 'k' ? 0x4B53544B : 0x49444C45, 0, 0);    /* SYS_yield with the test word */
         sys_yield();
-        printf("crash: still here (not a STACK_TEST kernel)\n");
+        dprintf(1, "crash: still here (not a STACK_TEST kernel)\n");
         return 1;
     }
-    printf("crash: about to fault\n");
+    dprintf(1, "crash: about to fault\n");
     __asm__ volatile("illegal");
-    printf("crash: not reached\n");
+    dprintf(1, "crash: not reached\n");
     return 0;
 }

@@ -46,29 +46,29 @@ int main(int argc, char **argv)
         }
         for (const char *p = argv[i] + 1; *p; p++) {
             if (*p == 'r') o_r = 1; else if (*p == 'n') o_n = 1; else if (*p == 'u') o_u = 1; else if (*p == 'f') o_f = 1; else if (*p == 'b') o_b = 1;
-            else { fprintf(2, "sort: unknown option -%c\n", *p); return 2; }
+            else { dprintf(2, "sort: unknown option -%c\n", *p); return 2; }
         }
     }
     char **v = 0; u32 n = 0, cap = 0;
     int nfiles = argc - i;
     for (int f = 0; f < (nfiles ? nfiles : 1); f++) {
         int fd = 0;
-        if (nfiles && strcmp(argv[i + f], "-")) { fd = sys_open(argv[i + f], O_RDONLY); if (fd < 0) { fprintf(2, "sort: %s: %s\n", argv[i + f], zwhy("cannot open")); rc = 2; continue; } }
+        if (nfiles && strcmp(argv[i + f], "-")) { fd = sys_open(argv[i + f], O_RDONLY); if (fd < 0) { dprintf(2, "sort: %s: %s\n", argv[i + f], zwhy("cannot open")); rc = 2; continue; } }
         struct rd r; rd_init(&r, fd);
         char *line = 0; u32 lc = 0;
         while (rd_getline(&r, &line, &lc) >= 0) {
-            if (n == cap) { u32 nc = cap ? cap * 2 : 256; char **nv = realloc(v, nc * sizeof(char *)); if (!nv) { fprintf(2, "sort: out of memory\n"); return 2; } v = nv; cap = nc; }
-            if (!(v[n] = strdup(line))) { fprintf(2, "sort: out of memory\n"); return 2; }
+            if (n == cap) { u32 nc = cap ? cap * 2 : 256; char **nv = realloc(v, nc * sizeof(char *)); if (!nv) { dprintf(2, "sort: out of memory\n"); return 2; } v = nv; cap = nc; }
+            if (!(v[n] = strdup(line))) { dprintf(2, "sort: out of memory\n"); return 2; }
             n++;
         }
         free(line);
         if (fd) sys_close(fd);
     }
     char **tmp = malloc((n ? n : 1) * sizeof(char *));
-    if (!tmp) { fprintf(2, "sort: out of memory\n"); return 2; }
+    if (!tmp) { dprintf(2, "sort: out of memory\n"); return 2; }
     msort(v, tmp, n);
     int ofd = 1;
-    if (outfile) { ofd = sys_open(outfile, O_WRONLY | O_CREAT | O_TRUNC); if (ofd < 0) { fprintf(2, "sort: %s: %s\n", outfile, zwhy("cannot write")); return 2; } }
+    if (outfile) { ofd = sys_open(outfile, O_WRONLY | O_CREAT | O_TRUNC); if (ofd < 0) { dprintf(2, "sort: %s: %s\n", outfile, zwhy("cannot write")); return 2; } }
     for (u32 k = 0; k < n; k++) {
         if (o_u && k && cmp(v[k - 1], v[k]) == 0) continue;
         if (outfile) { sys_write(ofd, v[k], strlen(v[k])); sys_write(ofd, "\n", 1); } else { oputs(v[k]); oputc('\n'); }

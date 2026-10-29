@@ -11,7 +11,7 @@ static u32 us(u32 e) { return (u32)(((unsigned long long)e * 1000000ull) / E_HZ)
 static void report(const char *what, u32 e, u32 n)
 {
     u32 total = us(e);
-    printf("%-34s %8u us total, %6u us each (n=%u)\n", what, total, n ? total / n : 0, n);
+    dprintf(1, "%-34s %8u us total, %6u us each (n=%u)\n", what, total, n ? total / n : 0, n);
 }
 
 /* how fast does this machine run a tight loop? (subq + bne in the I-cache is
@@ -24,7 +24,7 @@ static void bench_cpu(void)
     __asm__ volatile("0: subq.l #1,%0\n\tbne 0b" : "+d"(c) :: "cc");
     u32 e = sys_hrtime() - t0;
     u32 t = us(e);
-    printf("cpu loop: %u passes in %u us = %u passes/ms (about %u MHz if 6 clocks/pass)\n",
+    dprintf(1, "cpu loop: %u passes in %u us = %u passes/ms (about %u MHz if 6 clocks/pass)\n",
            n, t, t ? n * 1000 / t : 0, t ? (n * 6) / t : 0);
 }
 
@@ -48,7 +48,7 @@ static void failed(const char *what, const char *name, int r)
 
 static void report_checked(const char *what, u32 e, u32 n)
 {
-    if (nfail) printf("%-34s FAILED: %d of %u calls (first: %s); no timing\n", what, nfail, n, first_fail);
+    if (nfail) dprintf(1, "%-34s FAILED: %d of %u calls (first: %s); no timing\n", what, nfail, n, first_fail);
     else report(what, e, n);
     nfail = 0;
 }
@@ -66,7 +66,7 @@ static void bench_fsstat(void)
 static void bench_ipc(void)
 {
     int pid = sys_spawn("/bin/pingd", 0, 0);
-    if (pid < 0) { printf("(no pingd, skipping ipc)\n"); return; }
+    if (pid < 0) { dprintf(1, "(no pingd, skipping ipc)\n"); return; }
     int port, tries = 0;
     while ((port = sys_port_find("ping")) < 0 && ++tries < 200) sys_sleep(1);
     if (port < 0) return;
@@ -98,7 +98,7 @@ static void bench_read(void)
     int bad = nfail;
     report_checked("read /bin/sh, 4K chunks, cached", e, 100);
     u32 t = us(e);
-    if (t && !bad) printf("   = %u KB/s\n", (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024));
+    if (t && !bad) dprintf(1, "   = %u KB/s\n", (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024));
 }
 
 static void bench_cold(void)
@@ -117,7 +117,7 @@ static void bench_cold(void)
     int bad = nfail;
     report_checked("read 6 files, first time (disk)", e, 6);
     u32 t = us(e);
-    if (t && !bad) printf("   = %u KB/s from the disk (%u bytes)\n", (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024), bytes);
+    if (t && !bad) dprintf(1, "   = %u KB/s from the disk (%u bytes)\n", (u32)(((unsigned long long)bytes * 1000000ull) / t / 1024), bytes);
 }
 
 static void bench_create(void)
@@ -126,7 +126,7 @@ static void bench_create(void)
     int r = sys_mkdir("/tmp/bench");
     if (r < 0 && r != -EEXIST) {
         const char *t = zstrerror(r);
-        printf("create/delete: cannot make /tmp/bench (%s): skipped\n", t ? t : "failed");
+        dprintf(1, "create/delete: cannot make /tmp/bench (%s): skipped\n", t ? t : "failed");
         return;
     }
     u32 t0 = sys_hrtime();
@@ -148,7 +148,7 @@ static void bench_create(void)
     report_checked("delete 50 files", sys_hrtime() - t0, 50);
     if ((r = sys_rmdir("/tmp/bench")) < 0) {
         const char *t = zstrerror(r);
-        printf("create/delete: cannot remove /tmp/bench (%s)\n", t ? t : "failed");
+        dprintf(1, "create/delete: cannot remove /tmp/bench (%s)\n", t ? t : "failed");
     }
 }
 
@@ -188,15 +188,15 @@ static void bench_screen(void)
     sys_ttymirror(1);
     u32 e_on = print_lines(fd, line);
     if (fd != 1) sys_close(fd);
-    printf("\n");
+    dprintf(1, "\n");
     if (off) report("print 300 lines of 79 chars (no copy)", e_off, 300);
-    else printf("print 300 lines, serial copy off: not measured (only root may turn the copy off)\n");
+    else dprintf(1, "print 300 lines, serial copy off: not measured (only root may turn the copy off)\n");
     report("... with the serial copy on", e_on, 300);
 }
 
 int main(void)
 {
-    printf("Zenix benchmark (E-clock %u Hz)\n", E_HZ);
+    dprintf(1, "Zenix benchmark (E-clock %u Hz)\n", E_HZ);
     bench_cpu();
     bench_syscall();
     bench_fsstat();
@@ -206,6 +206,6 @@ int main(void)
     bench_cold();
     bench_create();
     bench_screen();
-    printf("done\n");
+    dprintf(1, "done\n");
     return 0;
 }

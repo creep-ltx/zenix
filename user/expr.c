@@ -25,7 +25,7 @@ static char *match(void)
         char *ere = bre_to_ere(r), *anch = xmalloc(strlen(ere) + 2);
         anch[0] = '^'; strcpy(anch + 1, r[0] == '^' ? ere + 1 : ere);       /* "^" in the expression is the anchor anyway */
         void *re = re_comp(anch, RE_LONGEST);
-        if (!re) { fprintf(2, "expr: bad regular expression: %s\n", r); _zexit(2); }
+        if (!re) { dprintf(2, "expr: bad regular expression: %s\n", r); _zexit(2); }
         int caps[2 * RE_GROUPS]; for (int k = 0; k < 2 * RE_GROUPS; k++) caps[k] = -1;
         int len = (int)strlen(l), hit = re_exec(re, l, len, 0, caps);
         int groups = 0; for (const char *q = r; *q; q++) if (q[0] == '\\' && q[1] == '(') { groups = 1; break; }
@@ -44,8 +44,8 @@ static char *mul(void)
     char *l = match();
     while (ai < ac && (!strcmp(av[ai], "*") || !strcmp(av[ai], "/") || !strcmp(av[ai], "%"))) {
         char op = av[ai++][0]; char *r = match(); int ok1, ok2; long a = num(l, &ok1), b = num(r, &ok2);
-        if (!ok1 || !ok2) { fprintf(2, "expr: non-numeric argument\n"); _zexit(2); }
-        if (op != '*' && !b) { fprintf(2, "expr: division by zero\n"); _zexit(2); }
+        if (!ok1 || !ok2) { dprintf(2, "expr: non-numeric argument\n"); _zexit(2); }
+        if (op != '*' && !b) { dprintf(2, "expr: division by zero\n"); _zexit(2); }
         l = fmt(op == '*' ? a * b : op == '/' ? a / b : a % b);
     }
     return l;
@@ -55,7 +55,7 @@ static char *add(void)
     char *l = mul();
     while (ai < ac && (!strcmp(av[ai], "+") || !strcmp(av[ai], "-"))) {
         char op = av[ai++][0]; char *r = mul(); int ok1, ok2; long a = num(l, &ok1), b = num(r, &ok2);
-        if (!ok1 || !ok2) { fprintf(2, "expr: non-numeric argument\n"); _zexit(2); }
+        if (!ok1 || !ok2) { dprintf(2, "expr: non-numeric argument\n"); _zexit(2); }
         l = fmt(op == '+' ? a + b : a - b);
     }
     return l;
@@ -76,8 +76,8 @@ static char *val(void) { char *l = andop(); while (ai < ac && !strcmp(av[ai], "|
 int main(int argc, char **argv)
 {
     av = argv + 1; ac = argc - 1; ai = 0;
-    if (!ac) { fprintf(2, "usage: expr expression\n"); return 2; }
+    if (!ac) { dprintf(2, "usage: expr expression\n"); return 2; }
     char *v = val();
-    printf("%s\n", v);
+    dprintf(1, "%s\n", v);
     return (!*v || !strcmp(v, "0")) ? 1 : 0;
 }

@@ -278,11 +278,11 @@ int main(void)
 {
     int port = sys_port_create("net");
     if (port < 0) {
-        printf("socktestd: port net: %d\n", port);
+        dprintf(1, "socktestd: port net: %d\n", port);
         return 1;
     }
     epoch = (u32)sys_netsrv(NETSRV_HELLO, 0, 0);
-    printf("socktestd: serving net, epoch %u\n", epoch);
+    dprintf(1, "socktestd: serving net, epoch %u\n", epoch);
     for (;;) {
         u32 now = sys_ticks();
         int wait = 1;

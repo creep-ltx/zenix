@@ -98,7 +98,7 @@ static __attribute__((unused)) int vol_find(int port, const char *dev, const cha
         if (want[i]) zero = 0;
     }
     if (restart && zero && dev[0] == 'd') {
-        printf("%s: a floppy without a volume id is not served again after a restart: mount it again\n", who);
+        dprintf(1, "%s: a floppy without a volume id is not served again after a restart: mount it again\n", who);
         return 1;
     }
     int at_place = 0, carriers = 0;
@@ -121,6 +121,6 @@ static __attribute__((unused)) int vol_find(int port, const char *dev, const cha
         }
     if (carriers == 1)
         return 0;
-    printf(carriers ? "%s: two devices carry the volume's id\n" : "%s: the volume is on no device\n", who);
+    dprintf(1, carriers ? "%s: two devices carry the volume's id\n" : "%s: the volume is on no device\n", who);
     return 1;
 }

@@ -29,10 +29,10 @@ static void run(char **items, int from, int count)
     av[n] = 0;
     char prog[160];
     oflush();
-    if (!path_find(av[0], prog, sizeof prog)) { fprintf(2, "xargs: %s: command not found\n", av[0]); rc = 127; }
+    if (!path_find(av[0], prog, sizeof prog)) { dprintf(2, "xargs: %s: command not found\n", av[0]); rc = 127; }
     else {
         int pid = sys_spawn(prog, av, 0);
-        if (pid < 0) { fprintf(2, "xargs: %s: %s\n", av[0], zwhy("cannot run")); rc = 127; }
+        if (pid < 0) { dprintf(2, "xargs: %s: %s\n", av[0], zwhy("cannot run")); rc = 127; }
         else if (sys_wait(pid)) rc = 123;
     }
     if (repl) for (int q = 0; q < nc; q++) free(av[q]);
@@ -43,16 +43,16 @@ int main(int argc, char **argv)
 {
     int i = 1, maxn = 0;
     for (; i < argc && argv[i][0] == '-' && argv[i][1]; i++) {
-        if (!strcmp(argv[i], "-n") && i + 1 < argc) { maxn = atoi(argv[++i]); if (maxn < 1) { fprintf(2, "xargs: -n needs a number of at least 1\n"); return 2; } }
-        else if (!strcmp(argv[i], "-I") && i + 1 < argc) { repl = argv[++i]; if (!repl[0]) { fprintf(2, "xargs: -I needs a non-empty string\n"); return 2; } }
+        if (!strcmp(argv[i], "-n") && i + 1 < argc) { maxn = atoi(argv[++i]); if (maxn < 1) { dprintf(2, "xargs: -n needs a number of at least 1\n"); return 2; } }
+        else if (!strcmp(argv[i], "-I") && i + 1 < argc) { repl = argv[++i]; if (!repl[0]) { dprintf(2, "xargs: -I needs a non-empty string\n"); return 2; } }
         else if (!strcmp(argv[i], "--")) { i++; break; }
-        else { fprintf(2, "xargs: unknown option %s\n", argv[i]); return 2; }
+        else { dprintf(2, "xargs: unknown option %s\n", argv[i]); return 2; }
     }
     static char *echo_cmd[] = { "echo", 0 };
     if (i >= argc) { cmd = echo_cmd; nc = 1; } else { cmd = argv + i; nc = argc - i; }
     u32 fixed = 0;
     for (int q = 0; q < nc; q++) fixed += strlen(cmd[q]) + 1;
-    if (nc >= ARGC_MAX || fixed >= ARGB_MAX) { fprintf(2, "xargs: the command alone is too long to run\n"); return 2; }
+    if (nc >= ARGC_MAX || fixed >= ARGB_MAX) { dprintf(2, "xargs: the command alone is too long to run\n"); return 2; }
 
     int cap = 64, ni = 0; u32 bytes = fixed;
     char **items = xmalloc((u32)cap * sizeof(char *));
@@ -63,20 +63,20 @@ int main(int argc, char **argv)
         while ((c = rd_getc(&r)) >= 0 && (repl ? c == '\n' : isspace(c))) ;
         if (c < 0) break;
         u32 n = 0;
-        #define PUT(ch) do { if (n + 2 > tcap) { tcap *= 2; char *nt = realloc(tok, tcap); if (!nt) { fprintf(2, "xargs: out of memory\n"); return 1; } tok = nt; } tok[n++] = (char)(ch); } while (0)
+        #define PUT(ch) do { if (n + 2 > tcap) { tcap *= 2; char *nt = realloc(tok, tcap); if (!nt) { dprintf(2, "xargs: out of memory\n"); return 1; } tok = nt; } tok[n++] = (char)(ch); } while (0)
         if (repl) { do PUT(c); while ((c = rd_getc(&r)) >= 0 && c != '\n'); }
         else if (c == '"' || c == '\'') { int q = c; while ((c = rd_getc(&r)) >= 0 && c != q) PUT(c); }
         else { do PUT(c); while ((c = rd_getc(&r)) >= 0 && !isspace(c)); }
         tok[n] = 0;
-        if (n + 1 + fixed > ARGB_MAX) { fprintf(2, "xargs: an argument is too long to run (%u bytes)\n", n); return 1; }
+        if (n + 1 + fixed > ARGB_MAX) { dprintf(2, "xargs: an argument is too long to run (%u bytes)\n", n); return 1; }
         if (repl) { char *one[1] = { tok }; run(one, 0, 1); continue; }
         if (ni && (nc + ni + 1 > ARGC_MAX || bytes + n + 1 > ARGB_MAX)) {     /* this word does not fit: run what is there first */
             run(items, 0, ni);
             for (int q = 0; q < ni; q++) free(items[q]);
             ni = 0; bytes = fixed;
         }
-        if (ni == cap) { cap *= 2; char **nv = realloc(items, (u32)cap * sizeof(char *)); if (!nv) { fprintf(2, "xargs: out of memory\n"); return 1; } items = nv; }
-        if (!(items[ni++] = strdup(tok))) { fprintf(2, "xargs: out of memory\n"); return 1; }
+        if (ni == cap) { cap *= 2; char **nv = realloc(items, (u32)cap * sizeof(char *)); if (!nv) { dprintf(2, "xargs: out of memory\n"); return 1; } items = nv; }
+        if (!(items[ni++] = strdup(tok))) { dprintf(2, "xargs: out of memory\n"); return 1; }
         bytes += n + 1;
         if (maxn && ni == maxn) { run(items, 0, ni); for (int q = 0; q < ni; q++) free(items[q]); ni = 0; bytes = fixed; }
     }

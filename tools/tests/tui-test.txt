@@ -1,0 +1,16 @@
+wait zenix:/# 120
+send /tests/tuitest; echo st=$?; echo ==t""done\r
+wait ev0> 60
+send a
+wait ev4> 20
+send \xe5
+wait ev5> 20
+send \x03
+wait ev6> 20
+send \x1b
+wait ev8> 20
+send q
+wait a key goes back 30
+send k
+wait ==tdone 60
+stop

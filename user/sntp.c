@@ -45,7 +45,7 @@ static void civil(u32 t, char *out, u32 cap)
 static void warn(void *u, int line, const char *what)
 {
     (void)u;
-    fprintf(2, "sntp: /etc/sntp line %d: %s (ignored)\n", line, what);
+    dprintf(2, "sntp: /etc/sntp line %d: %s (ignored)\n", line, what);
 }
 
 static u32 now_ms(void)
@@ -65,12 +65,12 @@ static int ask(const char *host, u32 until, uint32_t *t)
     h.ai_family = AF_INET;
     h.ai_socktype = SOCK_DGRAM;
     if ((e = getaddrinfo(host, "123", &h, &r)) != 0) {
-        fprintf(2, "sntp: %s: %s\n", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
+        dprintf(2, "sntp: %s: %s\n", host, e == EAI_NONAME ? "no such host" : gai_strerror(e));
         return -1;
     }
     s = socket(AF_INET, SOCK_DGRAM, 0);
     if (s < 0 || connect(s, r->ai_addr, r->ai_addrlen) < 0) {
-        fprintf(2, "sntp: %s: %s\n", host, zwhy("no socket"));
+        dprintf(2, "sntp: %s: %s\n", host, zwhy("no socket"));
         freeaddrinfo(r);
         if (s >= 0)
             sys_close(s);
@@ -80,7 +80,7 @@ static int ask(const char *host, u32 until, uint32_t *t)
     /* the nonce need not be a key: /dev/urandom never waits (sntp runs early at boot, before the pool may be ready) */
     fd = sys_open("/dev/urandom", O_RDONLY);
     if (fd < 0 || sys_read(fd, nonce, 8) != 8) {
-        fprintf(2, "sntp: no random numbers\n");
+        dprintf(2, "sntp: no random numbers\n");
         if (fd >= 0)
             sys_close(fd);
         sys_close(s);
@@ -94,7 +94,7 @@ static int ask(const char *host, u32 until, uint32_t *t)
             break;
         e = zerrno;
         if ((e != ENETUNREACH && e != ENETDOWN && e != EHOSTUNREACH) || (int)(until - sent) < 1000) {
-            fprintf(2, "sntp: %s: %s\n", host, zstrerror(e) ? zstrerror(e) : "cannot send");
+            dprintf(2, "sntp: %s: %s\n", host, zstrerror(e) ? zstrerror(e) : "cannot send");
             sys_close(s);
             return -1;
         }
@@ -107,23 +107,23 @@ static int ask(const char *host, u32 until, uint32_t *t)
         pf.events = POLLIN;
         pf.revents = 0;
         if (left <= 0 || poll(&pf, 1, left) != 1) {
-            fprintf(2, "sntp: %s: no answer\n", host);
+            dprintf(2, "sntp: %s: no answer\n", host);
             break;
         }
         k = recv(s, p, sizeof p, 0);
         if (k < 0) {
-            fprintf(2, "sntp: %s: %s\n", host, zwhy("no answer"));
+            dprintf(2, "sntp: %s: %s\n", host, zwhy("no answer"));
             break;
         }
         e = sntp_parse(&a, p, (size_t)k, nonce);
         if (e == SNTP_EORIGIN || e == SNTP_ESHORT)
             continue;                   /* not the answer to our request: wait on for it */
         if (e == SNTP_EKOD)
-            fprintf(2, "sntp: %s: refused us (kiss of death %s)\n", host, a.kod);
+            dprintf(2, "sntp: %s: refused us (kiss of death %s)\n", host, a.kod);
         else if (e == SNTP_ESTRATUM || e == SNTP_ELEAP)
-            fprintf(2, "sntp: %s: its clock is not synchronised\n", host);
+            dprintf(2, "sntp: %s: its clock is not synchronised\n", host);
         else if (e)
-            fprintf(2, "sntp: %s: not a valid answer (%d)\n", host, e);
+            dprintf(2, "sntp: %s: not a valid answer (%d)\n", host, e);
         else {
             *t = sntp_time(&a, now_ms() - sent);
             sys_close(s);
@@ -146,34 +146,34 @@ int main(int argc, char **argv)
     if (argc == 2 && !strcmp(argv[1], "-r"))
         reset = 1;
     else if (argc != 1) {
-        fprintf(2, "usage: sntp [-r]\n");
+        dprintf(2, "usage: sntp [-r]\n");
         return 2;
     }
     if (sys_geteuid() != 0) {
-        fprintf(2, "sntp: only root may set the clock\n");
+        dprintf(2, "sntp: only root may set the clock\n");
         return 1;
     }
     if (reset) {
         int e = clockfile_write(ZENIX_BUILD_DATE);
         civil(ZENIX_BUILD_DATE, d1, sizeof d1);
         if (e < 0) {
-            fprintf(2, "sntp: cannot write %s: %s\n", ZC_CLOCK_PATH, zstrerror(e) ? zstrerror(e) : "failed");
+            dprintf(2, "sntp: cannot write %s: %s\n", ZC_CLOCK_PATH, zstrerror(e) ? zstrerror(e) : "failed");
             return 1;
         }
-        printf("sntp: the floor reset to the build date, %s\n", d1);
+        dprintf(1, "sntp: the floor reset to the build date, %s\n", d1);
         return 0;
     }
     if ((fd = sys_open("/etc/sntp", O_RDONLY)) < 0) {
-        fprintf(2, "sntp: no /etc/sntp (a line \"server pool.ntp.org\" names a server)\n");
+        dprintf(2, "sntp: no /etc/sntp (a line \"server pool.ntp.org\" names a server)\n");
         return 1;
     }
     while (n < (int)sizeof text && (i = sys_read(fd, text + n, sizeof text - (u32)n)) > 0)
         n += i;
     if (n == (int)sizeof text && sys_read(fd, d1, 1) > 0)
-        fprintf(2, "sntp: /etc/sntp: only its first %u bytes read\n", (unsigned)sizeof text);
+        dprintf(2, "sntp: /etc/sntp: only its first %u bytes read\n", (unsigned)sizeof text);
     sys_close(fd);
     if (sntp_conf_parse(&c, text, (size_t)n, warn, 0) == 0) {
-        fprintf(2, "sntp: /etc/sntp names no server\n");
+        dprintf(2, "sntp: /etc/sntp names no server\n");
         return 1;
     }
     floor = zc_clock_floor(ZENIX_BUILD_DATE, clockfile_read(&file) == 0, file);
@@ -191,27 +191,27 @@ int main(int argc, char **argv)
         civil(t, d1, sizeof d1);
         if (!j) {
             civil(floor, d2, sizeof d2);
-            fprintf(2, "sntp: %s: its time %s is before the floor %s: refused\n", c.host[i], d1, d2);
+            dprintf(2, "sntp: %s: its time %s is before the floor %s: refused\n", c.host[i], d1, d2);
             continue;
         }
         /* only an answer that passed the guard marks the clock trusted (CLOCK_NET): the rest clears the marks, so
          * neither wget's "not before" nor reboot's floor ever leans on an answer the guard did not accept */
         if ((j & SNTP_RAISE ? sys_settime_checked(t) : sys_settime(t)) < 0) {
-            fprintf(2, "sntp: cannot set the clock: %s\n", zwhy("refused"));
+            dprintf(2, "sntp: cannot set the clock: %s\n", zwhy("refused"));
             return 1;
         }
-        printf("sntp: the clock set from %s: %s (it was %ld s off)\n", c.host[i], d1, (long)t - (long)was);
+        dprintf(1, "sntp: the clock set from %s: %s (it was %ld s off)\n", c.host[i], d1, (long)t - (long)was);
         if (j & SNTP_RAISE) {
             int e = clockfile_write(t);     /* t is past the floor (sntp_judge): the file only rises */
             if (e < 0)
-                fprintf(2, "sntp: cannot write %s: %s\n", ZC_CLOCK_PATH, zstrerror(e) ? zstrerror(e) : "failed");
+                dprintf(2, "sntp: cannot write %s: %s\n", ZC_CLOCK_PATH, zstrerror(e) ? zstrerror(e) : "failed");
         } else {
             civil(floor, d2, sizeof d2);
-            printf("sntp: the floor stays at %s (the answer is %s)\n", d2,
+            dprintf(1, "sntp: the floor stays at %s (the answer is %s)\n", d2,
                    rtc ? "more than 10 minutes from the battery clock" : "more than 400 days past it");
         }
         return 0;
     }
-    fprintf(2, "sntp: no server gave an accepted answer\n");
+    dprintf(2, "sntp: no server gave an accepted answer\n");
     return 1;
 }

@@ -27,14 +27,14 @@ static int apply(const char *spec, unsigned cur, unsigned *out, int isdir)
 }
 int main(int argc, char **argv)
 {
-    if (argc < 3) { fprintf(2, "usage: chmod MODE file...\n"); return 2; }
+    if (argc < 3) { dprintf(2, "usage: chmod MODE file...\n"); return 2; }
     int rc = 0;
     for (int i = 2; i < argc; i++) {
         struct ustat st;
-        if (sys_stat(argv[i], &st) < 0) { fprintf(2, "chmod: %s: not found\n", argv[i]); rc = 1; continue; }
+        if (sys_stat(argv[i], &st) < 0) { dprintf(2, "chmod: %s: not found\n", argv[i]); rc = 1; continue; }
         unsigned mode;
-        if (!apply(argv[1], st.mode, &mode, (st.mode & S_IFMT) == S_IFDIR)) { fprintf(2, "chmod: invalid mode '%s'\n", argv[1]); return 2; }
-        if (sys_chmod(argv[i], mode) < 0) { fprintf(2, "chmod: %s: cannot change\n", argv[i]); rc = 1; }
+        if (!apply(argv[1], st.mode, &mode, (st.mode & S_IFMT) == S_IFDIR)) { dprintf(2, "chmod: invalid mode '%s'\n", argv[1]); return 2; }
+        if (sys_chmod(argv[i], mode) < 0) { dprintf(2, "chmod: %s: cannot change\n", argv[i]); rc = 1; }
     }
     return rc;
 }
