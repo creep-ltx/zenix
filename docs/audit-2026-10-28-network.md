@@ -116,6 +116,10 @@ Left open, each with a proposal:
   to boot an A3000; owner 2026-10-29).
 - **O14 a kernel size budget** (owner 2026-10-29, "why is it so big"): the audit lists each kernel part's size, finds
   dead code and oversized buffers, and sets a budget the build checks.
+- **O15 Amiberry as a second emulator** (owner 2026-10-29): FS-UAE 3.2.35's IDE bug (IDENTIFY after a multi-sector
+  READ, fixed in later FS-UAE) cost a day; Amiberry (8.3.0 here, the current WinUAE core, already used headless by
+  other projects) is tried on a few key tests (the floppy and disk boots, the A2065 with its built-in network, the
+  update test) as a cross-check. A whole move of `make check` is decided after, with measurements.
 - **O8 Zmodem has no cap on files per session** (judged acceptable): a board can offer thousands of honest small
   files; the disk filling up ends it, as with any download the user lets run. A cap would be a new option (the
   feature halt).
