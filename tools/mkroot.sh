@@ -66,10 +66,12 @@ if [ -z "$NOMAN" ]; then          # NOMAN=1: leave the manual pages out (small i
     for f in "$T"/usr/man.gen/*.txt; do b=$(basename "$f"); [ -e "$T/usr/man/$b" ] || cp "$f" "$T/usr/man/$b"; done
     rm -rf "$T/usr/man.gen"
 fi
-ln -s less "$T/bin/more"
-ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"; ln -s pgrep "$T/bin/pkill"; ln -s reboot "$T/bin/bootamigaos"   # more is less
-ln -s ifconfig "$T/bin/ifup"; ln -s ifconfig "$T/bin/ifdown"     # ifup and ifdown are ifconfig (DESIGN D19 6.4)
-ln -s rz "$T/bin/sz"                                              # sz is rz (DESIGN D20 5)
+# a second name for a program, only where the program is on this image (a small image leaves some out: no dead links)
+alias_of() { [ -e "$T/bin/$1" ] && ln -s "$1" "$T/bin/$2"; true; }
+alias_of less more                                                 # more is less
+alias_of gzip gunzip; alias_of gzip zcat; alias_of chown chgrp; alias_of pgrep pkill; alias_of reboot bootamigaos
+alias_of ifconfig ifup; alias_of ifconfig ifdown                   # ifup and ifdown are ifconfig (DESIGN D19 6.4)
+alias_of rz sz                                                     # sz is rz (DESIGN D20 5)
 # the package database (DESIGN D15): the manifest of every package of this build (make packages) whose files this
 # image holds exactly as the manifest says, so the first update knows what is installed (tools/mkzup.py installdb).
 # PKGDB=1: the full images only (the Makefile sets it for zenix.hdf and root-card.img)
