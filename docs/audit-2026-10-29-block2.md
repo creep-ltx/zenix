@@ -204,3 +204,11 @@ each fix's test as named in the table, all passing in this branch (`make check` 
 - **B2-10:** with D15's next step (a minimum accepted version kept outside BOOT:).
 - **nfscd and wasabid as shared code; `struct port` padded to 64 bytes:** measured first (the second on the stock
   A1200, the owner's weekend list), then decided.
+
+## Found after the audit (2026-10-29)
+
+- **B2-15 remote-test failed once with "no WELCOME"** under a full run with 6 emulators (passed alone, 115 checks):
+  probably B2-1's new rule (a connection without WELCOME is dropped 10 s after it connects) meeting a slow emulated
+  handshake under load. Check whether the 10 s can be hit by a loaded but honest client; if so, count from the last
+  byte received rather than from the connect, and make the test wait for the event. Fix next.
+
