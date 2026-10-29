@@ -9,6 +9,7 @@ typedef unsigned int u32;
 #include <fcntl.h>                       /* give the constants below, from the same kernel headers */
 #include <signal.h>
 #include <sys/stat.h>
+#include <poll.h>                        /* struct pollfd and the POLL* bits (the same layout and numbers) */
 #define zerrno errno
 #endif
 extern int zerrno;                       /* libz: the error number of the last failed system call (EACCES ...) */
@@ -194,6 +195,7 @@ struct uupdate { u32 addr, size, flags, kvnum; char kver[16]; };
 #define UPDNOTE_ROOTFAILED 4u   /* the kernel makes a CONFIRMED over a FAILED of the same version this (audit3 B1) */
 static inline int sys_update(u32 op, u32 a, u32 b) { return sys3(82, op, a, b); }
 /* events and signals (DESIGN D16, docs/d16-events-and-signals.md; libz.h has the POSIX calls on top of these) */
+#ifndef ZENIX_LIBC                       /* the C library: its <poll.h> (libc/zenix/include, from these numbers) */
 struct pollfd { int fd; short events, revents; };
 #define POLLIN   0x0001         /* Linux's values */
 #define POLLPRI  0x0002         /* on a port (D23): a message sent to it was cancelled (UMSG_CANCEL) since the last POLLPRI */
@@ -202,6 +204,7 @@ struct pollfd { int fd; short events, revents; };
 #define POLLHUP  0x0010
 #define POLLNVAL 0x0020
 #define POLLPORT 0x4000         /* Zenix: fd is a port this process owns; POLLIN when a message is queued */
+#endif
 static inline int sys_evwait(struct pollfd *f, u32 n, int ticks) { return sys3(83, (u32)f, n, (u32)ticks); }   /* ticks -1: no limit */
 struct usigaction { u32 size, handler, mask, flags, entry; };   /* handler 0 default, 1 ignore, else caught */
 static inline int sys_sigaction(int sig, const struct usigaction *a) { return sys3(84, (u32)sig, (u32)a, 0); }   /* old: 0 default, 1 ignored, 2 caught */

@@ -24,11 +24,18 @@
  * among those the first by the pattern's order (Perl's, not POSIX's
  * longest - the same for what scripts write); with RE_LONGEST (sed) the
  * longest of the leftmost matches, as POSIX says. Compiled once, run per line. */
+#ifdef ZENIX_LIBC                        /* the C library's regcomp (libc/zenix/regcomp.c, DESIGN D27 section 5) */
+#include <stdlib.h>
+#include <string.h>
+#else
 #include "libz.h"
+#endif
 #include "regex.h"
 #define cu_alloc malloc
 #define cu_free free
+#ifndef NULL
 #define NULL ((void *)0)
+#endif
 
 enum { R_CHAR, R_ANY, R_CLASS, R_BOL, R_EOL, R_SPLIT, R_JMP, R_SAVE, R_MATCH, R_WORDB, R_NWORDB, R_WBEG, R_WEND, R_BOT, R_EOT };
 

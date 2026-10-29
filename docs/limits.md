@@ -170,15 +170,26 @@ pointers.
   `/etc/resolv.conf`), 2 name servers; a lookup answers at most 4 addresses; `netstat` shows at most 64 rows.
   `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL); a pipe is non-blocking only when
   made so (`sys_pipe2(fds, O_NONBLOCK)`, both ends).
-- The C library (DESIGN D27, block 3 step 1; programs built on it so far: `/tests/libctest`): paths at most 63 bytes
+- The C library (DESIGN D27, block 3 steps 1-3; programs built on it so far: `/tests/libctest`, `libctestpure`): paths at most 63 bytes
   (`PATH_MAX` 64), names 63, 16 descriptors (`OPEN_MAX`); `open`'s and `mkdir`'s mode is set by a `chmod` after the
   call (the system calls take none: not atomic); `stat` gives one time (the modification's) for all three; the wall
   clock has whole seconds (`gettimeofday`'s microseconds 0), `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
   is wall time since the start; `lseek` past 4 GB `EOVERFLOW`; `readdir`'s `d_type` always `DT_UNKNOWN`; the
   environment at most 63 variables and 1 KB; `printf` without a float build prints `%f` as `*float*`; no `fork`,
   `exec`, `mmap`, `sbrk`, threads; `O_CLOEXEC` is 0 (a spawned program gets only descriptors 0-2 anyway), `O_SYNC`
-  and `O_NOCTTY` are not defined. Signals (`sigaction`), `poll`, sockets, termios and `posix_spawn` come with later
-  steps (docs/d27-c-library.md section 13).
+  and `O_NOCTTY` are not defined. The terminal (D27 5.4): `ICANON`, `ECHO` and `ISIG` all on is the kernel's cooked
+  mode, any of them off its raw mode (with `ICANON` the C library edits the line: erase, kill, ^D, at most 511
+  characters; ^Z and ^\ are bytes there, only ^C signals in raw mode); `VMIN` 1 and `VTIME` 0 only (else `EINVAL`);
+  the other bits (`ICRNL`, `IXON`, `OPOST`, the speeds ...) are kept and answered back but change nothing: in raw mode
+  Return is `\r`; `tcgetattr` answers what the process set last (cooked at its start); no `SIGWINCH`; `TIOCGWINSZ`
+  is the console's size. Processes: `posix_spawn`'s file actions only for the child's descriptors 0-2 (others
+  `EINVAL`), at most 8 opens; `envp` set around the spawn; only `POSIX_SPAWN_SETPGROUP` (done right after the spawn);
+  `waitpid` for one pid or any (-1; 0 and other groups `EINVAL`), a status as the shell's `$?` (`WIFSIGNALED` never
+  true: a program a signal ended shows 128 + the signal as its exit status); `system` does not ignore `SIGINT` and
+  `SIGQUIT` while it waits. `glob`: `*`, `?`, `[...]`, a backslash, the flags but `GLOB_BRACE`, `GLOB_TILDE`,
+  `GLOB_ALTDIRFUNC`, `GLOB_LIMIT` (`GLOB_ABEND`). `regcomp`: `user/regex.c`'s syntax, 9 groups reported, `REG_NEWLINE`
+  only for `^` and `$`, `REG_NOTEOL` `REG_INVARG`. `getgrnam`'s members at most 127 bytes. `fcntl`, `ioctl` and the
+  sockets as libz's (below and above: `O_NONBLOCK` on sockets and `pipe2` only).
 - SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
   MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the
   wire). The kernel's receive ring is 1 KB (89 ms of SLIP): when netd cannot read for longer (a busy program at its

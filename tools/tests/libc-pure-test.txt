@@ -1,0 +1,31 @@
+wait zenix:/# 120
+sleep 2
+send \x1d2
+wait zenix login: 30
+send root\r
+sleep 5
+send \x1d3
+wait zenix login: 30
+send root\r
+sleep 5
+send \x1d1
+sleep 2
+send echo ==pbase; free\r
+wait (?m)^==pbase 20
+sleep 2
+send \x1d2
+sleep 2
+send /tests/libctestpure hold 40 > /tmp/p2.out 2>&1; echo st=$? >> /tmp/p2.out\r
+sleep 1
+send \x1d3
+sleep 2
+send /tests/libctestpure hold 40 > /tmp/p3.out 2>&1; echo st=$? >> /tmp/p3.out\r
+sleep 1
+send \x1d1
+sleep 20
+send echo ==ptwo; free; ps\r
+wait (?m)^==ptwo 20
+sleep 2
+send until grep -q st= /tmp/p2.out && grep -q st= /tmp/p3.out; do sleep 2; done; echo ==pafter; free; for f in /tmp/p2.out /tmp/p3.out; do grep -c '^ok ' $f; grep -E '^(FAIL|libctest:|st=)' $f; done; echo ==p""done\r
+wait ==pdone 240
+stop

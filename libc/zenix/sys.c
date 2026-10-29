@@ -34,7 +34,14 @@ int open(const char *path, int flags, ...)
 }
 int creat(const char *path, mode_t mode) { return open(path, O_WRONLY | O_CREAT | O_TRUNC, mode); }
 int close(int fd) { return ret(sys_close(fd)); }
-ssize_t read(int fd, void *buf, size_t n) { return ret(sys_read(fd, buf, (u32)n)); }
+/* the terminal's line editing in raw mode (termios.c, DESIGN D27 5.4) when a program asked for ICANON without ECHO or
+ * ISIG: a pointer, so a program that never sets the terminal links none of it */
+ssize_t (*__zx_tty_read)(int fd, void *buf, size_t n);
+ssize_t read(int fd, void *buf, size_t n)
+{
+    if (__zx_tty_read) return __zx_tty_read(fd, buf, n);
+    return ret(sys_read(fd, buf, (u32)n));
+}
 ssize_t write(int fd, const void *buf, size_t n) { return ret(sys_write(fd, buf, (u32)n)); }
 off_t lseek(int fd, off_t off, int whence)
 {
@@ -44,6 +51,7 @@ off_t lseek(int fd, off_t off, int whence)
 int dup(int fd) { return ret(sys_dup(fd)); }
 int dup2(int from, int to) { return ret(sys_dup2(from, to)); }
 int pipe(int fds[2]) { return ret(sys_pipe(fds)); }
+int pipe2(int fds[2], int flags) { return ret(sys_pipe2(fds, flags)); }      /* O_NONBLOCK (both ends) */
 int isatty(int fd)
 {
     int r = sys_isatty(fd);
@@ -132,8 +140,6 @@ gid_t getgid(void) { return (gid_t)sys_getgid(); }
 gid_t getegid(void) { return (gid_t)sys_getgid(); }         /* there is no effective group id */
 int setuid(uid_t u) { return ret(sys_setuid(u)); }
 int setgid(gid_t g) { return ret(sys_setgid(g)); }
-int kill(pid_t pid, int sig) { return ret(sys_killsig(pid, sig)); }
-int raise(int sig) { return kill(getpid(), sig); }
 void _exit(int status) { sys_exit(status); __builtin_unreachable(); }
 
 /* ---- time: the wall clock in seconds (SYS_time), the 100 Hz tick since boot (SYS_ticks: never goes back, wraps
