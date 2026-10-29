@@ -1,0 +1,12 @@
+wait zenix:/# 120
+send seq 1 300 | sed 's/^/line /' > /tmp/m.txt; free > /tmp/f0.txt; echo ==m""set\r
+wait ==mset 30
+send (termtest screen /dev/tty1 'line 1-''31/300' 60 ' ' > /tmp/scr0.txt; free > /tmp/f1.txt; ps > /tmp/ps1.txt; termtest screen /dev/tty1 'line 32-''62/300' 60 '/line 25\\r' > /tmp/scr1.txt; termtest screen /dev/tty1 'line 250-''280/300' 60 'q' > /tmp/scr2.txt) & maki /tmp/m.txt; echo st=$?\r
+waitecho st=0 90
+send termtest screen /dev/tty1 'sec''ond' 60 'q' > /tmp/scr3.txt & (echo first; sleep 2; echo sec""ond) | maki; echo st2=$?\r
+waitecho st2=0 60
+send termtest screen /dev/tty1 'm.t''xt' 60 'q' > /tmp/scr4.txt & maki /tmp; echo st3=$?\r
+waitecho st3=0 60
+send maki /tmp/m.txt | wc -l > /tmp/wc.txt; maki /tmp/m.txt | cmp - /tmp/m.txt && echo same=yes; echo ==scr0; cat /tmp/scr0.txt; echo ==scr1; cat /tmp/scr1.txt; echo ==scr2; cat /tmp/scr2.txt; echo ==scr3; cat /tmp/scr3.txt; echo ==scr4; cat /tmp/scr4.txt; echo ==file; cat /tmp/wc.txt; ls -ld $HOME/.config/Maki; ls -l $HOME/.config/Maki $HOME/.config/FileColours; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==m""done\r
+wait ==mdone 60
+stop

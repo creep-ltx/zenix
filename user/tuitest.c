@@ -140,7 +140,7 @@ int main(void)
     checki("TuiCharWidth: CJK takes two cells", TuiCharWidth(0x4E00), 2);
     checki("TuiCharWidth: a combining mark none", TuiCharWidth(0x301), 0);
     pipe(fd);
-    check("TuiOpenIO on a pipe: no terminal", TuiOpenIO(fd[0], 1) == NULL && !TuiPossible(fd[0]), "");
+    check("TuiOpenIO on a pipe: no terminal", TuiOpenIO(fd[0] + 1, 2) == NULL && !TuiPossible(fd[0] + 1), "");
     close(fd[0]);
     close(fd[1]);
     check("tui_possible on the console", tui_possible(), "");

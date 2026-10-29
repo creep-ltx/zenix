@@ -1,0 +1,58 @@
+The AmigaOS layer of the owner's terminal programs on Zenix (roadmap block 3; DESIGN D27 section 9; Sumi, Maki and
+Markdown, ports/sumi, ports/maki, ports/markdown; docs/d27-c-library.md, "Sumi on Zenix" and "Maki and Markdown on
+Zenix")
+
+What it is: the owner's programs call AmigaOS directly (they have no OS layer of their own), so their upstream files
+compile unchanged over AmigaOS's names given here over the C library (GPL-2.0-only). One layer for the three, never a
+copy each: dos.c is compiled once per program (build/PROG/zenix-dos.o) with the settings names that program maps
+(ZENIX_TT_NAMES, the Makefile's TT_NAMES_PROG), and linked with the program's files, the text-UI library's pure build
+(build/libtui-pure.a, ports/tui) and the C library's (build/libc-pure.a).
+
+include/   amigados.h: the types, the structures upstream reads (FileInfoBlock, DateStamp, DateTime, FileHandle,
+           DosPacket, the clipboard's request) and the calls, each one's meaning on Zenix in its head; the exec/, dos/,
+           devices/, intuition/ and proto/ headers upstream includes are amigados.h (and so are those the text-UI
+           library's headers include, in this build); proto/utf8.h (Maki's composing, never reached) and
+           inline/macros.h (Markdown's call into openurl.library, never reached): no library opens on Zenix
+dos.c      the calls: Open/Read/Write/Seek/Close/FGets (a handle is the descriptor + 1, so 0 stays "failed"; "*" the
+           terminal, /dev/tty), Input/Output/IsInteractive, Lock/UnLock/Examine/ExNext/SameLock/CreateDir (a lock is
+           the path, its device and inode), DeleteFile, Rename, SetProtection (the Unix mode, and root's owner),
+           IoErr and Fault (errno and strerror), CompareDates, DateToStr, GetVar (getenv), Delay, SystemTags
+           (system(), with SYS_Input and SYS_Output as the command's descriptors 0 and 1), FindTask, DOS packets
+           (SendPkt/GetMsg: a pipe read when it has data), the reply ports' signal bits for the text-UI library's
+           wait (tui_zenix_sigfd), the clipboard device (never opens), OpenLibrary (never opens)
+
+Decided here (conservatively; for the main session to confirm):
+- The names: only the program's own literals are mapped, nothing else is ever rewritten (a file the user names is a
+  Unix path as typed): "ENVARC:NAME" is $HOME/.config/NAME for the program's names (Sumi; Maki and FileColours;
+  Markdown: TT_NAMES_PROG), its folder made at the first start, mode 700 (the places file lists the files read or
+  edited); "ENV:NAME" is no file (AmigaOS keeps a RAM copy of the settings there; on Zenix one place is enough, so that
+  copy is never written and never read); "T:PROG-" is /tmp/PROG- (a file never named, kept when the terminal goes
+  away). No HOME: no settings are kept.
+- Protection bits: FileInfoBlock's protection carries the Unix mode (bits 8-19, bit 31 marking it) and AmigaOS's r, w
+  and e bits, set when this user may not read or write the file, or it has no x bit (upstream then shows [read-only]
+  and refuses to save over it; Maki's listing shows rwed as AmigaOS's List does, and its colours take a file with x
+  and no name ending for a program). FIBF_DELETE is never set: a directory that cannot be written fails the save with
+  its own message. SetProtection puts the mode back after a save (a new copy renamed over the old file) and, when root
+  saves, the owner and group Examine saw. Comments: Zenix files have none; Examine gives an empty one. A soft link is
+  listed as what it points to (stat, not lstat: upstream would take ST_SOFTLINK's 3, above 0, for a directory).
+- Dates: DateStamp counts days from 1970 (AmigaOS: 1978); only this layer reads and writes it (CompareDates,
+  DateToStr in local time), so upstream never sees the difference.
+- "*" (AmigaOS's console of the program) is /dev/tty: Maki reading a pipe takes its keys from the terminal.
+- Packets: upstream's ACTION_READ (Maki reading a pipe while it shows it) is a read done when the descriptor has data:
+  SendPkt notes it on the reply port, GetMsg polls the descriptor (never waiting) and reads; the reply port's signal
+  bit (16-31, as AmigaOS gives a program's own) names that descriptor to TuiWait (tui_zenix_sigfd, ports/tui), so the
+  wait ends when the pipe has more. Other packets fail (DoPkt: ACTION_DISK_INFO asks the console whether it is CTerm;
+  Zenix's is not). A read still out when Maki closes the pipe stays (upstream's PA_IGNORE): nothing writes into it.
+- Ctrl-C: SetSignal never has it (in raw mode ^C is a key, which upstream takes as Esc in a prompt); a long search
+  in Maki cannot be stopped by it.
+- SystemTags: through sh (system()), in the terminal; upstream's default editor "Sumi" (Maki's v without $EDITOR) is
+  run as Zenix's sumi.
+- The stack: upstream swaps to a 32 KB stack of its own when the Shell gave less; on Zenix the program's stack is the
+  loader's (D27 9 rule 5) and FindTask answers a task with enough, so upstream never swaps (each program's README has
+  its measurement).
+
+Tests: each program's (tools/sumi-test.sh, tools/maki-test.sh, tools/markdown-test.sh, in make check); their logs are
+read by tools/screenlog.py.
+
+If upstream starts to use an AmigaOS call amigados.h does not have, the build says so (an undeclared function); the
+call is added here, once, for every program.

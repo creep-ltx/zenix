@@ -17,22 +17,10 @@ make -s BUILD=$BD $BD/zenix.hdf >>$OUT/build.log 2>&1 || { echo "FAIL the image"
 ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 400 tools/tests/sumi-test.txt 2>&1 | tr -d '\r' > $OUT/run.log
 python3 - "$OUT/run.log" <<'PY'
 import re, sys
-log = open(sys.argv[1], encoding="latin-1").read()
-bad = 0
-def check(ok, what, detail=""):
-    global bad
-    print(("PASS " if ok else "FAIL ") + what + ("" if ok else ": " + repr(detail)[:600]))
-    bad += not ok
-def part(name, nxt):
-    m = re.search(r"^==%s\n(.*?)^==%s\n" % (name, nxt), log, re.M | re.S)
-    return m.group(1) if m else ""
-def rows(t):
-    return {int(m.group(1)): m.group(2) for m in re.finditer(r"^row (\d\d)\|(.*)\|$", t, re.M)}
-def attrs(t):
-    return {int(m.group(1)): m.group(2) for m in re.finditer(r"^attr (\d\d)\|(.*)\|$", t, re.M)}
-def cursor(t):
-    m = re.search(r"^cursor (\d+) (\d+)( shown)?$", t, re.M)
-    return m and (int(m.group(1)), int(m.group(2)), bool(m.group(3)))
+sys.path.insert(0, "tools")
+from screenlog import Log, rows, attrs, cursor
+L = Log(sys.argv[1])
+log, check, part = L.text, L.check, L.part
 s0, s1, s2, f = part("scr0", "scr1"), part("scr1", "scr2"), part("scr2", "file"), part("file", "sdone")
 r0, r1, r2 = rows(s0), rows(s1), rows(s2)
 check(re.search(r"st=0$", log, re.M) is not None and re.search(r"st2=0$", log, re.M) is not None,
@@ -63,13 +51,7 @@ check(re.search(r"^-rw-r--r-- .* Sumi\.keys$", f, re.M) is not None and
 check(re.search(r"^drwx------ .*Sumi$", f, re.M) is not None, "the settings folder is this user's only (700)", f[:600])
 check(r2.get(1) == "  1 Hello Zenix \xe5" and r2.get(30, "").endswith("line 2/3  col 1   Latin-1   text") and
       cursor(s2) == (2, 4, True), "a second start: the cursor back where it was left", (r2.get(30), cursor(s2)))
-ps = re.search(r"^ +\d+ +\d+ +\d+ +-?\d+ +\w+ +(\d+) +(\d+) sumi$", f, re.M)
-fr = re.findall(r"^chip RAM free: (\d+) KB$", f, re.M)
-check(ps is not None and len(fr) == 2, "free and ps while Sumi is open", f[-800:])
-if ps and len(fr) == 2:
-    print("     (memory, stock A1200, 80 x 32, emulator figures: sumi owns %s KB, its shared code %s KB; chip RAM "
-          "free %s KB before, %s KB with Sumi, the test's own shell and ps)" % (ps.group(1), ps.group(2), fr[0], fr[1]))
-check("serial-tap: wait timed out" not in log and "the run ended during a wait" not in log,
-      "every wait was met", re.findall(r"FAIL: serial-tap.*", log))
-sys.exit(1 if bad else 0)
+L.memory(f, "sumi", "Sumi")
+L.waits()
+L.done()
 PY

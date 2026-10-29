@@ -210,6 +210,8 @@ FAMILIES = [
     ("pager", "less and man, the pager and the manual reader", "less man"),
     ("edit", "the text editor", "edit"),
     ("sumi", "Sumi, a text editor: tabs, colours for code, undo, find and replace", "sumi"),
+    ("maki", "Maki, a pager: colours, search, pipes, directories, line numbers", "maki"),
+    ("markdown", "Markdown, a viewer and editor for Markdown files", "markdown"),
     ("shadow", "users and passwords: su, sudo, passwd, useradd", "su sudo passwd useradd userdel gpasswd"),
     ("disktools", "disks and filesystems: fdisk, mkfs, fsck, dd, umount", "dd fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs "
                   "fsck_zenixfs umount"),
@@ -230,7 +232,12 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
             ("tools/certdata.COPYING", "certdata"), ("crypto/openssh/LICENCE", "OpenSSH-bcrypt"),
             ("libc/picolibc/COPYING.picolibc", "picolibc")]
 # the notices of code from other projects that only one family's programs carry (as tools/mkroot.sh puts them)
-FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")]}
+# (the text-UI library's notice once a package: sumi's is "tui" since it shipped first, the others' "PROG-tui"; two
+# packages may not own one file, zpkg 4.3)
+FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
+                   "maki": [("ports/maki/upstream/LICENSE", "maki"), ("ports/tui/upstream/LICENSE", "maki-tui")],
+                   "markdown": [("ports/markdown/upstream/LICENSE", "markdown"),
+                                ("ports/tui/upstream/LICENSE", "markdown-tui")]}
 ANCHORS = "anchors"                       # DESIGN D21 8.1: build/anchors (tools/mkanchors.py) as /etc/ssl/anchors
 FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
 

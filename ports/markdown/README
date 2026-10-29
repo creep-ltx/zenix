@@ -1,0 +1,50 @@
+Markdown, the owner's Markdown viewer and editor, the third of the owner's programs on Zenix (roadmap block 3: the
+text-UI library, then Sumi, Maki, Markdown; DESIGN D27 section 9; docs/d27-c-library.md, "Maki and Markdown on
+Zenix"; the user's page is docs/man/markdown.txt)
+
+What it is: a viewer that shows Markdown files the way they read (headings, emphasis, lists, quotes, code blocks with
+colours, tables, links, an outline) and edits them with Sumi's editor, in the terminal, written for AmigaOS over
+tui.library. On Zenix it is /bin/markdown, a program with shared code (ZEX2: a second one costs only its data),
+linked with the text-UI library's pure build (build/libtui-pure.a, ports/tui) and the C library's (build/libc-pure.a).
+
+upstream/  the owner's source, one source for AmigaOS and Zenix (D27 9, rule 1; owner 2026-10-28), pinned here and
+           never changed: the owner's TextTools repository (public, MIT), commit
+           533439214cf4225feed4f0e748c3b3f20099e60b (2026-10-22), Markdown 0.1b5: src/*.c and src/*.h, README.md as
+           README (the user's documentation, which docs/man/markdown.txt follows) and LICENSE (MIT, the notice that
+           travels with the program: tools/mkroot.sh and the package markdown put it in /usr/share/licenses/markdown,
+           with the text-UI library's as markdown-tui).
+
+Zenix's layer is ports/common (GPL-2.0-only, shared with Sumi and Maki): AmigaOS's names over the C library; the
+name Markdown maps is "Markdown" (ENVARC:Markdown, ENV:Markdown, T:Markdown-). What each call does and the choices
+(names, protection bits, "run" through sh, the clipboard) are in ports/common/README; Markdown's call into
+openurl.library (an address followed: to the browser) is there as inline/macros.h's LP2, never reached (no library
+opens), so an address is copied inside the program instead, upstream's own way without OpenURL.
+
+Markdown's own (for the main session to confirm with the layer's choices):
+- The stack: 32 KB (STACK_markdown), upstream's own (its STACKSZ, the stack it swaps to on AmigaOS): the renderer
+  (md.c) recurses once per container inside a container, about 1 KB a level (blocks 984 bytes, -fstack-usage), up to
+  MAXDEPTH 24; tools/markdown-test.sh renders 20. Upstream's md.c can be built with MAXDEPTH 10 (as its
+  markdown.datatype is, on a 16 KB stack): 16 KB less for each Markdown running, nesting cut at 10; not done (the
+  same program on both systems first).
+- Pictures: none (the console has no cells of its own size, tui_cellw 0): upstream then names them in a line.
+
+Found in upstream (for the owner's repository, not changed here):
+- Memory: about 241 KB of data while one file is open on 80 x 32 (ps), of which the stack is 32 KB and the text-UI
+  library's two grids 80 KB (16-byte cells), and 131 KB of shared code (the largest of the three programs; the editor
+  is Sumi's code a second time, compiled into this program).
+- The editor half is a copy of Sumi's files (buf.c, file.c, syntax.c, clip.c, keys.c; the same names, changed apart
+  since): two copies in one repository to keep in step; a shared source for the two programs would make it one.
+- A link's target is made an AmigaDOS path (md_resolve, md.c): "../x" becomes "/x" after the file's folder, which on
+  AmigaOS is the parent; on Zenix "dir//x" is "dir/x" and, beside a file named without a folder, "/x" the root: a
+  link that goes up a folder opens the wrong file (read from the source, not tested). The OS layer joining the parts
+  (AmigaOS's AddPart, a Unix join here) would make it right on both.
+- Messages and help keep AmigaOS words ("Keys: ENVARC:Markdown/Markdown.keys", "an AmigaDOS command"), as Sumi's do.
+
+Tests: tools/markdown-test.sh (FS-UAE, the stock A1200; in make check): markdown opens a .md file, the view is read
+back with termtest screen (CON_READ): headings, emphasis, lists, a code block, quotes, 20 quotes inside each other,
+the status line; e (CON_INPUT) turns it into the source to edit, read back too; the settings; the memory printed.
+
+To update: tools/texttools-vendor.sh markdown /path/to/TextTools [COMMIT] (the files above from that commit,
+unchanged), put the commit here, build, run tools/markdown-test.sh, and bring docs/man/markdown.txt in step with the
+README's changes; if upstream starts to use an AmigaOS call amigados.h does not have, the build says so (an
+undeclared function): ports/common gets it.

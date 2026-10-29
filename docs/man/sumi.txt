@@ -97,7 +97,7 @@ NOTES
     words of the original ("Protect it +wd first" means chmod u+w).
     SIGINT does not reach it (^C is a key); SIGTERM, SIGHUP and SIGKILL
     end it at once, without saving; the console's mode is put back.
-    Memory on the stock A1200 (80 x 32): about 194 KB of its own and 81 KB
+    Memory on the stock A1200 (80 x 32): about 195 KB of its own and 82 KB
     of code shared by every Sumi running (measured in FS-UAE,
     tools/sumi-test.sh); a second Sumi costs only its own part.
 

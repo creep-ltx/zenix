@@ -130,7 +130,7 @@ pointers.
   2; a recalled history line cut to 478 the same; longer commands go on over several lines with a final backslash,
   at most 2047 bytes).
 - awk: a `printf`/`sprintf` field width or precision of at most 4096 ("field width too large", status 2).
-- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip` and `edit`, 4 KB for
+- Kernel stack 4 KB per process; user stack 16 KB by default, 24 KB for `sh`, 32 KB for `gzip`, `edit` and `markdown`, 4 KB for
   `boot` and `init`, 8 KB for `diskd` (the last three live for ever and use under 700 bytes: DESIGN D18; the
   Makefile's `STACK_*`, written into each program's header). The lowest 16 bytes of each stack are the guard
   pattern (architecture.md section 6). Measured with `-fstack-usage`
@@ -193,13 +193,20 @@ pointers.
   only for `^` and `$`, `REG_NOTEOL` `REG_INVARG`. `getgrnam`'s members at most 127 bytes. `fcntl`, `ioctl` and the
   sockets as libz's (below and above: `O_NONBLOCK` on sockets and `pipe2` only).
 - The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used by
-  `/tests/tuitest` and `sumi`): Latin-1 output and upstream's own widths until the console's UTF-8 (DESIGN D28; the switch
+  `/tests/tuitest`, `sumi`, `maki` and `markdown`): Latin-1 output and upstream's own widths until the console's UTF-8 (DESIGN D28; the switch
   `TUI_UTF8`); no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` 0 (no
-  AmigaOS signals: poll descriptor 0); a grid of at most 400 x 200 cells; 64 events queued (upstream drops the one
+  AmigaOS signals: poll descriptor 0), `TuiWait`'s extra signals at most 8 descriptors; a grid of at most 400 x 200 cells; 64 events queued (upstream drops the one
   past that); about 96 KB of memory while a terminal is open on 80 x 32 (two grids of 16-byte cells, 80 KB, which the
   allocator keeps for reuse after closing until the program ends).
 - Sumi (`ports/sumi/README`, man/sumi.txt): no mouse and no clipboard shared with other programs; settings only with
-  `HOME` set; a path of at most 63 bytes; saving through a link replaces the link; about 194 KB of its own and 81 KB of
+  `HOME` set; a path of at most 63 bytes; saving through a link replaces the link; about 195 KB of its own and 82 KB of
+  shared code with one file open on 80 x 32.
+- Maki (`ports/maki/README`, man/maki.txt): no mouse; a long search not stopped by Ctrl+C (a key); settings only with
+  `HOME` set; a path of at most 63 bytes; about 650 KB of its own and 58 KB of shared code with one file open on
+  80 x 32 (the original's buffers: more than half of the stock A1200's free memory).
+- Markdown (`ports/markdown/README`, man/markdown.txt): no mouse, no pictures, no browser, no clipboard shared with
+  other programs; containers inside containers to 24 levels (a 32 KB stack); a link going up a folder (`../x`) opens
+  the wrong file; settings only with `HOME` set; a path of at most 63 bytes; about 241 KB of its own and 131 KB of
   shared code with one file open on 80 x 32.
 - SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
   MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the

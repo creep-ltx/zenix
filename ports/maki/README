@@ -1,0 +1,53 @@
+Maki, the owner's pager, the second of the owner's programs on Zenix (roadmap block 3: the text-UI library, then
+Sumi, Maki, Markdown; DESIGN D27 section 9; docs/d27-c-library.md, "Maki and Markdown on Zenix"; the user's page is
+docs/man/maki.txt)
+
+What it is: a pager in the way of less that draws in the terminal (colours, search, pipes, directories, follow, big
+files never read whole), written for AmigaOS over tui.library. On Zenix it is /bin/maki, a program with shared code
+(ZEX2: a second Maki costs only its data), linked with the text-UI library's pure build (build/libtui-pure.a,
+ports/tui) and the C library's (build/libc-pure.a). Zenix's less and more stay: Maki is one more pager, not their
+replacement.
+
+upstream/  the owner's source, one source for AmigaOS and Zenix (D27 9, rule 1; owner 2026-10-28), pinned here and
+           never changed: the owner's TextTools repository (public, MIT), commit
+           533439214cf4225feed4f0e748c3b3f20099e60b (2026-10-22), Maki 0.1b6: src/*.c and src/*.h, README.md as README
+           (the user's documentation, which docs/man/maki.txt follows) and LICENSE (MIT, the notice that travels with
+           the program: tools/mkroot.sh and the package maki put it in /usr/share/licenses/maki, with the text-UI
+           library's as maki-tui).
+
+Zenix's layer is ports/common (GPL-2.0-only, shared with Sumi and Markdown): AmigaOS's names over the C library; the
+names Maki maps are "Maki" (ENVARC:Maki, ENV:Maki) and "FileColours" (ENVARC:FileColours, ENV:FileColours: the
+colours of a directory's names, shared on AmigaOS with ls and Ahiru). What each call does and the choices are in
+ports/common/README; the ones Maki is the first to need: "*" as /dev/tty (the keys while a pipe is read), its read
+packets on a pipe (SendPkt/GetMsg) and their reply port's signal bit for the text-UI library's wait, the AmigaOS
+protection bits from the Unix mode (a directory's listing), DateToStr, GetVar for MAKI and EDITOR, SystemTags with
+SYS_Input/SYS_Output (v: the editor in the terminal).
+
+Maki's own (for the main session to confirm with the layer's choices):
+- The stack: STACK_DEFAULT (16 KB): -fstack-usage gives smain 1.3 KB the largest frame, the rest under 0.5 KB; the one
+  recursion is the regular expressions' (Sumi's, 60 bytes a level, at most one per repeat in a 128-byte pattern).
+- utf8.library (composing an accent written apart onto its letter) never opens: such accents are left out, as upstream
+  does without the library.
+
+Found in upstream (for the owner's repository, not changed here):
+- Memory: about 650 KB of data while one file is open on 80 x 32 (ps), more than half of the stock A1200's 1,132 KB
+  free: the cells of one line (MAXC 40000 cells of 8 bytes, 320 KB, allocated at the start), the line's bytes (MAXLB
+  32 KB + MAXC, 72 KB), the file cache (8 slots of 16 KB, 128 KB) and the text-UI library's two grids (80 KB, 16-byte
+  cells). Cells as long as the longest line read so far, or a smaller cache, would each matter on the stock A1200.
+- Stopping a search (stopped()) reads only the Ctrl-C signal (SetSignal); where ^C is a key (Zenix's raw mode, the
+  text-UI library's keys) nothing stops a long search; a look for a key (TuiKeyWaiting) would do it on both.
+- The pipe's reader looks into AmigaOS's FileHandle (fh_Type, fh_Buf, fh_Pos, fh_End, fh_Arg1) and sends packets
+  itself: the layer has to imitate those structures (amigados.h); a pipe read of the OS layer's (one call) would be
+  simpler to give on another system.
+- The default editor is "Sumi" (capital S): AmigaOS finds the command whatever its case; on a system whose names keep
+  their case it is "sumi" (the layer maps it).
+- Messages and help keep AmigaOS words ("ENVARC:Maki/Maki.keys", ENV:EDITOR), as Sumi's do.
+
+Tests: tools/maki-test.sh (FS-UAE, the stock A1200; in make check): maki opens a file, the grid is read back with
+termtest screen (CON_READ), keys are put in (CON_INPUT): a page on, a search, quit; a pipe with a late line, a
+directory, the output into a pipe; the settings; the memory printed.
+
+To update: tools/texttools-vendor.sh maki /path/to/TextTools [COMMIT] (the files above from that commit, unchanged),
+put the commit here, build, run tools/maki-test.sh, and bring docs/man/maki.txt in step with the README's changes; if
+upstream starts to use an AmigaOS call amigados.h does not have, the build says so (an undeclared function):
+ports/common gets it.

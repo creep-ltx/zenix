@@ -780,8 +780,9 @@ Section 9's rule 1 for the first time on a whole program; the files, the choices
 `ports/sumi/README`, the user's page is `docs/man/sumi.txt`.
 
 - **The copy:** `ports/sumi/upstream/` holds Sumi 0.2b6 (the owner's TextTools, MIT, commit 5334392) as it is
-  (`tools/sumi-vendor.sh`). Upstream has no OS layer of its own (it calls AmigaOS directly), so Zenix's layer is
-  AmigaOS's names over the C library (`ports/sumi/zenix/`: `include/amigados.h` and `dos.c`, about 580 lines): files,
+  (`tools/sumi-vendor.sh`, since Maki `tools/texttools-vendor.sh`). Upstream has no OS layer of its own (it calls
+  AmigaOS directly), so Zenix's layer is AmigaOS's names over the C library (`ports/sumi/zenix/`, since Maki
+  `ports/common/`: `include/amigados.h` and `dos.c`, about 580 lines): files,
   locks, `Examine`/`ExNext`, dates, protection bits as Unix modes, `IoErr`/`Fault`, `SystemTags` as `system()`.
   Upstream compiles unchanged, warning-free under `-Wwrite-strings` (no write into a literal, which a ZEX2 needs).
 - **Built as shared code (rule 4):** `/bin/sumi` is ZEX2, over `libc-pure.a` and the text-UI library's pure build
@@ -807,3 +808,49 @@ Section 9's rule 1 for the first time on a whole program; the files, the choices
 - **Memory:** 194 KB per Sumi on the stock A1200 is too much; the causes are upstream's (the text-UI library's 16-byte
   cells, 80 KB for two grids; Sumi's 26 KB places table allocated whole). A change to the owner's own libraries and
   programs (they run on AmigaOS too): proposed to the owner, not made; the copies are refreshed once upstream changes.
+
+## Maki and Markdown on Zenix (roadmap block 3, the owner's pager and Markdown viewer; built 2026-10-29)
+
+Sumi's way again (section 9's rule 1), with one layer for the three; the files, the choices and the way to update are
+in `ports/common/README`, `ports/maki/README` and `ports/markdown/README`; the user's pages `docs/man/maki.txt` and
+`docs/man/markdown.txt`. Both are in UAPPS under the owner's yes of 2026-10-28 (the block-3 programs); `less` and
+`more` stay.
+
+- **The copies:** `ports/maki/upstream/` (Maki 0.1b6) and `ports/markdown/upstream/` (Markdown 0.1b5), the owner's
+  TextTools at commit 5334392, Sumi's commit too, unchanged (`tools/texttools-vendor.sh PROG`, which replaces
+  `tools/sumi-vendor.sh`).
+- **One layer, no copies:** `ports/sumi/zenix/` moved to `ports/common/` and grew what Maki and Markdown call
+  (DateToStr, GetVar, Input/Output/IsInteractive, Delay, the FileHandle and DOS packets of Maki's pipe reader, the
+  AmigaOS r w e bits from the Unix mode, SystemTags' SYS_Input/SYS_Output, OpenLibrary as none, and two headers whose
+  calls are never reached: `proto/utf8.h`, `inline/macros.h`). `dos.c` is compiled once per program with the names it
+  maps (`TT_NAMES_PROG` in the Makefile: "Sumi"; "Maki" and "FileColours"; "Markdown"), and the Makefile's rules for
+  the three are one template (`TEXTTOOL_RULES`). Sumi grew 288 bytes of shared code by it.
+- **Decided here (for the main session to confirm):**
+  - **The text-UI library takes handles:** `TuiOpen`, `TuiOpenIO` and `TuiPossible` take the descriptor + 1, as the
+    layer's handles are (0 still the default: descriptor 0 for the input, 1 for the output); before, a descriptor.
+    Maki hands the library the terminal it opened (`tui_console`), which needs the two to agree. Only `tuitest`
+    called them with a descriptor (changed with it).
+  - **`TuiWait`'s extra signals are descriptors:** `tui_zenix_sigfd(bit)` names the one behind a signal bit
+    (`ports/tui/zenix/sigfd.c`: none, a library member of its own; `ports/common/dos.c` gives the program's own: the
+    reply port of Maki's pipe read). The wait polls it with the terminal and ends with `TE_NONE` and the bit when it
+    has data, as upstream's extra signals do: a pipe's late lines show without a key (`tools/maki-test.sh` checks
+    it). This is the addition the library's "as built" left for a program with a loop of its own.
+  - **"*" is `/dev/tty`** (was `dup` of 0 or 1): the keys of a Maki reading a pipe come from the terminal.
+  - **The licences:** packages `maki` and `markdown` (a family each, as `sumi`), each with its own notice and the
+    text-UI library's under its own name (`maki-tui`, `markdown-tui`: two packages may not own one file, zpkg 4.3;
+    `sumi` keeps `tui`).
+  - **Markdown's stack is 32 KB** (`STACK_markdown`), upstream's own: its renderer recurses about 1 KB per container
+    in a container, to 24. Upstream's `MAXDEPTH 10` build (its datatype's) would take 16 KB less per Markdown.
+- **Memory (FS-UAE, the stock A1200, 80 x 32, one file open, `ps`):** Maki owns **650 KB** and shares 58 KB of code;
+  Markdown owns **241 KB** and shares 131 KB; Sumi 195 KB and 82 KB. Maki's 650 KB is upstream's design (the cells of
+  one 40,000-character line, 320 KB; its bytes, 72 KB; a 128 KB file cache; the library's two grids, 80 KB): more
+  than half of the stock A1200's 1,132 KB free with one login. A change for the owner's repository (it runs on AmigaOS
+  too): proposed, not made here, as Sumi's memory was.
+- **Found in upstream** (the READMEs list them): Maki's memory above; a long search in Maki stops only on the Ctrl-C
+  signal (a key on Zenix); Maki's pipe reader imitates AmigaOS's FileHandle; Markdown makes a link's target an
+  AmigaDOS path ("../x" as "/x": on Zenix the wrong file); Markdown carries its own copy of Sumi's editor files.
+- **Shift+Tab** (the main session's next job above): the keyboard sends `ESC [ Z` in raw mode (`kernel/kbd.c`);
+  Sumi's unindent is checked through the keyboard's codes in `tools/sumi-test.sh` (`termtest screen`'s `\kHH`), the
+  bytes in `tools/con-test.sh`; Zenix's own `edit` had Shift+Tab in its help but never read it: it does now.
+- **Tests:** `tools/maki-test.sh` and `tools/markdown-test.sh` (in `make check`), Sumi's pattern (`termtest screen`,
+  `CON_READ`, then `CON_INPUT`), their logs read by `tools/screenlog.py` (shared with `tools/sumi-test.sh`).
