@@ -475,11 +475,6 @@ static long wcall(struct pwalk *w, struct pwalk *w2, u32 type, u32 x2, u32 x3)
     return r;
 }
 
-long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
-{
-    return fs_call_on(0, type, a0, a1, a2, a3);
-}
-
 static struct exec_src *loading;        /* the program loads in progress, linked through the spawners' kernel stacks */
 
 /* ---- D13: what tells the shared code segments (seg.c) that a file may have changed ---- */

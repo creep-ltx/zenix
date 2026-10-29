@@ -99,6 +99,8 @@ static const struct keymap keymaps[] = {
 
 static const struct keymap *kmap = &keymaps[1];   /* sv; /etc/keymap later */
 
+/* for /etc/keymap (not read yet): nothing calls these today, so the linker drops them (--gc-sections) */
+
 int kbd_set_keymap(const char *name)
 {
     for (u32 i = 0; i < sizeof keymaps / sizeof keymaps[0]; i++)

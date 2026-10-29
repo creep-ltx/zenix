@@ -10,6 +10,11 @@ typedef uint32_t u32;
 typedef int32_t s32;
 typedef int8_t s8;
 
+/* a cold function (the boot, a rare system call) in a file built -O2: -Os for it alone. The hot paths (the console,
+ * messages, the task switch, the system call entry, the disk's reads) keep -O2: the list is docs/architecture.md
+ * section 13, "Optimisation" (audit block 2, the kernel's shrink) */
+#define KCOLD __attribute__((optimize("Os")))
+
 /* bootinfo v3, written by the bootblock at 0x1000 */
 #define MEMF_CHIP 2u
 #define MEMF_FAST 4u
@@ -35,7 +40,6 @@ void serial_tx_drain(void);
 void serial_rx_isr(void);               /* level 5: queues the byte only */
 void serial_work(void);                 /* process context: the queued bytes to the tty, the 0x1d test hook */
 void irq5_c(void);
-void serial_puts(const char *s);
 /* /dev/ttyS0 (DESIGN D12): one process at a time owns the port; then the console copy, the kernel log's copy and the
  * 0x1d hook are off the wire and received bytes wait for serdev_read */
 long serdev_open(void);                 /* -EBUSY when it is open already */
@@ -174,7 +178,6 @@ void term_putc(int con, char c);
 void term_write(int con, const char *s, u32 n);
 u32 term_write_some(int con, const char *s, u32 n);   /* tty_write: may stop early to let input and others run (D20 6) */
 void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
-int term_back(void);
 int term_ckm(void);                     /* the console on the screen wants ESC O A arrows (DECCKM) */
 int term_size(void);                    /* rows << 16 | columns */
 void con_switch(int con);               /* show console con (1..NCONS); an unused one asks init for a login */
@@ -641,7 +644,6 @@ void file_close(struct file *f);
 int fd_install(struct proc *p, struct file *f);
 long vfs_read(struct file *f, void *buf, u32 n);
 long vfs_write(struct file *f, const void *buf, u32 n);
-long fs_call(u32 type, u32 a0, u32 a1, u32 a2, u32 a3);
 struct ustat;
 struct exec_src {                       /* a program file being loaded (fs_exec_open .. fs_exec_close) */
     int m; long ino; struct ustat st;

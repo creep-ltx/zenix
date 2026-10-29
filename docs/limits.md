@@ -170,6 +170,15 @@ pointers.
   `/etc/resolv.conf`), 2 name servers; a lookup answers at most 4 addresses; `netstat` shows at most 64 rows.
   `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL); a pipe is non-blocking only when
   made so (`sys_pipe2(fds, O_NONBLOCK)`, both ends).
+- The C library (DESIGN D27, block 3 step 1; programs built on it so far: `/tests/libctest`): paths at most 63 bytes
+  (`PATH_MAX` 64), names 63, 16 descriptors (`OPEN_MAX`); `open`'s and `mkdir`'s mode is set by a `chmod` after the
+  call (the system calls take none: not atomic); `stat` gives one time (the modification's) for all three; the wall
+  clock has whole seconds (`gettimeofday`'s microseconds 0), `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
+  is wall time since the start; `lseek` past 4 GB `EOVERFLOW`; `readdir`'s `d_type` always `DT_UNKNOWN`; the
+  environment at most 63 variables and 1 KB; `printf` without a float build prints `%f` as `*float*`; no `fork`,
+  `exec`, `mmap`, `sbrk`, threads; `O_CLOEXEC` is 0 (a spawned program gets only descriptors 0-2 anyway), `O_SYNC`
+  and `O_NOCTTY` are not defined. Signals (`sigaction`), `poll`, sockets, termios and `posix_spawn` come with later
+  steps (docs/d27-c-library.md section 13).
 - SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
   MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the
   wire). The kernel's receive ring is 1 KB (89 ms of SLIP): when netd cannot read for longer (a busy program at its

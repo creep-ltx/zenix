@@ -216,7 +216,6 @@ void term_redraw(void)
     }
 }
 
-int term_back(void) { return wsp[con_cur] ? wsp[con_cur]->back : 0; }
 
 /* the console on the screen asked for cursor-key mode (kbd.c sends ESC O A for the arrows then) */
 int term_ckm(void) { return wsp[con_cur] ? wsp[con_cur]->ckm : 0; }

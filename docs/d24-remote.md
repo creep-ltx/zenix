@@ -304,7 +304,9 @@ with D11's policy.** So:
   waits in `sys_waitcon`, which has no timeout, so the back-off is an `alarm` with a handler and no `SA_RESTART`: the wait
   returns -EINTR and init's loop starts what is due. An end with status 0 is a stop (not started again until the next
   boot; root may start the program by hand). **Status 75 is init's own "start me again at once"** (not sysexits'
-  meaning): no back-off, but it counts toward the five ends, so a daemon restarting in a loop is given up.
+  meaning): no back-off, and it counts toward the five ends only when the daemon ran less than 5 s, so a daemon
+  restarting in a loop is given up and one restarted by hand (`RESTART`) a few times a minute is not (audit block 2,
+  B2-5, 2026-10-29: an accepted change of meaning, docs/frozen-interfaces.md).
 - **`RESTART`** ends the daemon with 75 after it closed its sockets; only a daemon started with `--init` accepts it
   (one started by hand answers `ERR` "not supervised: nobody would start me again").
 - The telnet server and a later `sshd` (D20 7, D21 4.6) are further lines of the same file: one way for every listener.

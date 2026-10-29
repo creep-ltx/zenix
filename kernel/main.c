@@ -42,6 +42,15 @@ void *memcpy(void *d, const void *s, unsigned long n)
     return d;
 }
 
+/* gcc at -Os turns a counting loop over a string into a call to strlen (the program loader's), as it does memcpy */
+unsigned long strlen(const char *s)
+{
+    const char *e = s;
+    while (*e)
+        e++;
+    return (unsigned long)(e - s);
+}
+
 /* ---- boot stage colours (audit A11, kernel/diag.h) ---- */
 u16 diag_colour = DIAG_ORANGE;          /* start.S set stage 5 before kmain */
 
@@ -74,6 +83,8 @@ void diag_stage(int n, u16 colour)
  * the panic text is being printed (the terminal itself failing) leaves the screen alone from then on. */
 static int panic_printing, panic_noscreen;
 
+#pragma GCC push_options
+#pragma GCC optimize("Os")              /* the stop (a panic) and, below, the boot: cold, size first (audit block 2) */
 static void panic_begin(void)
 {
     ints_off();
@@ -106,6 +117,7 @@ void panic(const char *why)
     for (;;)
         ;
 }
+#pragma GCC pop_options
 
 /* any exception without its own handler; register block protocol as in
  * start.S. M0: report and stop. */
@@ -308,6 +320,24 @@ u32 hr_time(void)
     return ~(((bhi << 8 | blo) << 16) | (ahi << 8 | alo));
 }
 
+/* the loop every idle moment returns to (the scheduler's): -O2, apart from kmain's -Os boot code */
+static __attribute__((noreturn, noinline)) void idle_loop(void)
+{
+    for (;;) {
+        proc_reap_orphans();
+        kwork();                /* queued input first: it may wake a reader */
+        schedule();             /* run anything ready; returns when idle */
+        serial_tx_drain();
+        u16 s = irq_save();     /* checked with interrupts masked: STOP enables them and waits in one instruction,
+                                 * so input queued after the check still ends the wait at once */
+        if (!kwork_pending && !serial_tx_pending())
+            cpu_idle();
+        irq_restore(s);
+    }
+}
+
+#pragma GCC push_options
+#pragma GCC optimize("Os")              /* the boot (vectors_init to kmain): run once, size first (audit block 2) */
 static void vectors_init(void)
 {
     for (int i = 0; i < 256; i++)
@@ -470,18 +500,9 @@ void kmain(struct bootinfo *bi)
     diag_stage(DIAG_BOOTED, 0);
     timer_init();
     ints_on();
-    for (;;) {
-        proc_reap_orphans();
-        kwork();                /* queued input first: it may wake a reader */
-        schedule();             /* run anything ready; returns when idle */
-        serial_tx_drain();
-        u16 s = irq_save();     /* checked with interrupts masked: STOP enables them and waits in one instruction,
-                                 * so input queued after the check still ends the wait at once */
-        if (!kwork_pending && !serial_tx_pending())
-            cpu_idle();
-        irq_restore(s);
-    }
+    idle_loop();
 }
+#pragma GCC pop_options
 
 /* Overlapping copies (the console's grid on every scroll: three moves of 31 rows of 80 bytes). Both ends 4-aligned
  * (the distance then a multiple of 4): long words, a quarter of the bus accesses of a byte loop, which on a machine

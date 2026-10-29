@@ -45,6 +45,10 @@ lic() { mkdir -p "$T/usr/share/licenses"; cp "$(dirname "$0")/../$1" "$T/usr/sha
 case " $PROGS " in *" netd "*) lic net/lwip/COPYING lwIP;; esac
 case " $PROGS " in *" gzip "*|*" zup "*) lic user/miniz/LICENSE miniz;; esac
 case " $PROGS " in *" rz "*) lic user/xfer/LICENSE zmodem;; esac
+# the C library's notice (picolibc, BSD-style licences file by file, DESIGN D27 3.2) on the full images, as the base
+# package; and its test program in /tests
+[ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc
+if [ -z "$NOTESTS" ] && [ -f "$B/libctest.zx" ]; then cp "$B/libctest.zx" "$T/tests/libctest" && chmod 755 "$T/tests/libctest"; fi
 # the PC font (DESIGN D20 4.2) on the full images (those with manual pages), with its notice, as the base package
 if [ -z "$NOMAN" ] && [ -f "$B/cp437-8x8.psf" ]; then
     mkdir -p "$T/usr/share/consolefonts"

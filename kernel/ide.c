@@ -113,6 +113,10 @@ static int ide_wait(u8 mask, u8 want, u32 ms, const char *what)
     return -1;
 }
 
+static int ide_cmd(u32 lba, u32 n, u16 *p, int write);
+/* From here to ide_init: finding the drive at boot, -Os (audit block 2); the commands and their waits stay -O2 */
+#pragma GCC push_options
+#pragma GCC optimize("Os")
 /* I2/I3: is a drive answering on this port? With an empty bus nothing may wait long, nothing is written but the
  * cylinder-low register. 0 = a drive, ready for a command. */
 static int ide_present(void)
@@ -160,7 +164,6 @@ static int ide_present(void)
 }
 
 static u16 id[256];                     /* IDENTIFY's data (and sector 0 before it, dropped) */
-static int ide_cmd(u32 lba, u32 n, u16 *p, int write);
 
 static int ide_identify(void)
 {
@@ -302,6 +305,8 @@ int ide_init(void)
     kprintf("ide: %s port %p: %s - %u sectors (%uMB)\n", port_name, ide_base, model, nsectors, nsectors / 2048);
     return 0;
 }
+
+#pragma GCC pop_options
 
 /* One READ SECTORS / WRITE SECTORS command for n sectors (1..256), one DRQ per sector. The waits run with interrupts
  * on: the drive cannot interrupt (nIEN, and Gayle's IDE enable is off), and a wait of seconds with level 2 masked

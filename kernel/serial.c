@@ -60,7 +60,7 @@ void serial_tx_drain(void)
     irq_restore(s);
 }
 
-/* The kernel's own output (kprintf, serial_puts): always complete - when the ring is full it waits for the port. */
+/* The kernel's own output (kprintf): always complete - when the ring is full it waits for the port. */
 static void serial_putc_wait(char c)
 {
     if (c == '\n')
@@ -243,12 +243,6 @@ void serial_work(void)
     }
 }
 
-void serial_puts(const char *s)
-{
-    while (*s && !serdev)
-        serial_putc_wait(*s++);
-}
-
 /* /dev/ttyS0 (DESIGN D12) */
 long serdev_open(void)
 {
@@ -374,7 +368,10 @@ __attribute__((optimize("Os"))) long serdev_write(const u8 *buf, u32 n, int nonb
  * boot ended, a sum over the header - tells a real log from a half-cleared area. Both sums are updated per
  * character (O(1), interrupts masked), so a slot is consistent between any two characters. If the area overlaps the
  * kernel or the RAM disk (a machine with little chip RAM), a 1 KB ring in the BSS is used and the log does not
- * outlive a reset. */
+ * outlive a reset.
+ * From here to the end (the log, the boot notes, kprintf) the file is -Os: the kernel's own messages, not the serial
+ * device's paths above, which stay -O2 (audit block 2, the kernel's shrink). */
+#pragma GCC optimize("Os")
 #define KLOG_SIZE       8192
 #define KLOG_HDR        256
 #define KLOG_SMALL      1024

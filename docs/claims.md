@@ -38,7 +38,8 @@ network numbers (Linux's, main, 2026-10-27): `ENOTSOCK` 88, `EDESTADDRREQ` 89, `
 `ENETUNREACH` 101, `ECONNABORTED` 103, `ENOBUFS` 105, `EISCONN` 106, `ENOTCONN` 107, `ETIMEDOUT` 110, `ECONNREFUSED`
 111, `EHOSTUNREACH` 113, `EALREADY` 114, `EINPROGRESS` 115; `ETXTBSY` 26 (D13, "text file busy": a running
 shared program opened for writing; claimed 2026-10-25, Linux's number); `ESTALE` 116 (D23, "stale file handle", Linux's;
-branch nfs12, 2026-10-28). Update note kinds (D15, frozen, append-only):
+branch nfs12, 2026-10-28); the C library's (D27 section 5, Linux's numbers, block 3, 2026-10-29): `EDOM` 33, `EOVERFLOW`
+75, `EILSEQ` 84, and `ENOTSUP` the same number as `EOPNOTSUPP` (95, a second name, no new number). Update note kinds (D15, frozen, append-only):
 1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). `struct uupdate`'s (and
 the bootinfo's) flags bits: 1 `UPD_F_ROLLBACK` (D15), 2 `UPD_F_TRIAL` (D22 4.3, claimed 2026-10-28: an unconfirmed trial;
 the kernel keeps it after `UPD_RELEASE`; zenixboot sets it from D22 step 7). Poll bits on a port (D23 step 1, branch nfs12, 2026-10-28; recorded by audit 2026-10-29 B2-7): `POLLPRI` 2 (Linux's

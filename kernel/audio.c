@@ -38,7 +38,7 @@ static void stop(void)
     AUD1VOL = 0;
 }
 
-void beep(u32 hz, u32 ms)
+KCOLD void beep(u32 hz, u32 ms)
 {
     if (!wave) {
         wave = mem_alloc(WAVE_BYTES, MEM_CHIP, 0);

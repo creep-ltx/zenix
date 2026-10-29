@@ -78,7 +78,7 @@ int may_signal(const struct proc *p)
  * id who (0: the caller's real id); PRIO_PGRP: there are no process groups (-EINVAL). Changing another process needs
  * the kill rule (may_signal); raising a base priority (a lower nice) needs root: -EACCES. getpriority answers 20 - nice
  * (1 .. 40, the best of the matching processes), so a result never looks like an error number; libz turns it back. */
-static long do_priority(int set, u32 which, u32 who, s32 nice)
+KCOLD static long do_priority(int set, u32 which, u32 who, s32 nice)
 {
     if (which == PRIO_PROCESS) {
         struct proc *p = who ? proc_by_pid((int)who) : current;

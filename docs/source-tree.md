@@ -53,8 +53,14 @@ zenix/
 
 - **Servers:** `diskd.c` (disks and partitions), `fsd.c` (ext2), `zenixfsd.c` (ZenixFS), `boot.c` (starts init),
   `init.c` (logins on the consoles), `msgpingd.c` (the message benchmark's partner).
-- **The C library:** `libz.c`, `libz.h`, `usys.h` (system call wrappers), `socket.h` (the BSD socket calls, DESIGN D19), `crt0.S` (program start-up). Zenix has its
-  own small library, not newlib.
+- **The C library:** `libz.c`, `libz.h`, `usys.h` (system call wrappers), `socket.h` (the BSD socket calls, DESIGN D19), `crt0.S` (program start-up). Zenix's
+  own small library, which every program built so far uses; the files it shares with the standard C library (DESIGN
+  D27): `zshare.h`, `zmalloc.c` (the allocator), `zenv.c` (the environment), `zout.c` (the buffered output),
+  `zerrtab.c` (the error texts). `libctest.c`: the standard C library's test program (`/tests/libctest`).
+- **`libc/`, the standard C library (DESIGN D27, docs/d27-c-library.md):** `picolibc/` picolibc 1.8.10, only the files
+  built (`sources.mk`, `picolibc.h`, its licences, README); `zenix/` Zenix's port (the system layer, the streams,
+  the start and exit, `strerror`, `dprintf`, directories) and `zenix/include/` the headers with Zenix's numbers.
+  Built into `build/libc.a` and `build/libc-pure.a`.
 - **The shell:** `sh.c`.
 - **Commands:** one file per program, `NAME.c`, each with a manual page in `docs/man/NAME.txt`. The list:
   [commands.md](commands.md).
