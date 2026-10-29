@@ -101,6 +101,12 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported, a tracker music player (MOD and friends, on
    Paula), an IRC client. Audit; then a first public pre-release (0.1),
    with the owner's yes.
+3½. **Amiga demos on Zenix** (approved by the owner 2026-10-29: "I would like to be able to watch an Amiga demo in
+   Zenix. That would be amazing. So yes, please move it up"): a design note first (reviewed twice: it hands the whole
+   machine over and takes it back), then built: choose a demo (an ADF or a program file) in Zenix, Zenix saves its
+   state and steps aside, the demo has the hardware and chip RAM, and Zenix comes back when it ends, as demos return
+   to Workbench. Demos on the bare hardware first; demos that need AmigaOS's libraries later. Starts when block 3's
+   audit is done. The idea's notes: docs/future-ideas.md "Amiga demos on Zenix".
 4. **The Amiga world:** FAT, FFS/OFS, then PFS3; LhA/LZX unpacking; ZenixFS as the root on real hardware; the
    installer. Audit, with the filesystems fuzzed against damaged disks.
 5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,

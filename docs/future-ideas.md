@@ -306,7 +306,7 @@ D11): the self-update is designed as the first part of it (the kernel, the boot 
 the old version kept to boot back to from the menu), so there is never a second way to update. Needs: the network,
 checksums on every package (sha256sum exists), and a design note before any code.
 
-## Amiga demos on Zenix (the owner's wish, 2026-10-26; an idea, not approved as a feature)
+## Amiga demos on Zenix (the owner's wish, 2026-10-26; **approved 2026-10-29**, now ROADMAP block 3½)
 
 Choosing a demo from one's own collection in Zenix and watching it run on the real hardware. A demo does not want an
 operating system, it wants the machine: Zenix's part is to hand it over cleanly and to get it back. After block 4 (Zenix
