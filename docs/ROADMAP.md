@@ -97,9 +97,8 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    when they start, which is what makes a desktop edition fit 880 KB.
 3. **A terminal you can live in:** a fuller C library (picolibc, newlib's descendant: D27; steps 0-4 built 2026-10-29); D13 stage 2 (shared libraries) decided; the text-UI
    library (ported 2026-10-29: ports/tui), then Sumi (ported 2026-10-29: ports/sumi), Maki, Markdown and `zc`; UTF-8 in the console; PC (CP437) and other bitmap fonts for the console
-   (the PC set comes earlier, with telnet); a text-only e-mail client (IMAP/SMTP over TLS; owner 2026-10-26); and
-   (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported, a tracker music player (MOD and friends, on
-   Paula), an IRC client. Audit; then a first public pre-release (0.1),
+   (the PC set comes earlier, with telnet); (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported. (Postponed by the owner 2026-10-29, "can wait":
+   the tracker music player, the IRC client and the e-mail client; their place in the order to be set.) Audit; then a first public pre-release (0.1),
    with the owner's yes.
 3½. **Amiga demos on Zenix** (approved by the owner 2026-10-29: "I would like to be able to watch an Amiga demo in
    Zenix. That would be amazing. So yes, please move it up"): a design note first (reviewed twice: it hands the whole
