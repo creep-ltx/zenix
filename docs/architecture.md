@@ -1351,7 +1351,12 @@ its own volume as before (an old kernel, a root program's raw request). Verified
 - **tty** (`tty.c`): one per console, line discipline in the kernel: echo, backspace, `^U`, `^C` (SIGINT to the
   foreground: a process group or, in the old form of `SYS_setfg`, one process; nobody, or a group with no living
   member: `intr` is set for a shell that polls `ttyintr`), `^Z` (SIGTSTP the same way), `^D`; Tab is kept in the line (Backspace
-  over it moves back one column on the screen; the line itself is right). A cooked line holds 511 characters
+  over it moves back one column on the screen; the line itself is right). **Backspace and `^U` work by character**
+  (DESIGN D28 10, Linux's `IUTF8` always on): the line's last character as the console decoded it (up to 3 bytes back
+  to a lead whose length agrees and whose bytes form a character, else one byte: the Latin-1 fallback's one-byte
+  cells), removed, and `\b \b` once per column it took (a Swedish letter 1, a wide character 2, a zero-width mark
+  none, so nothing visible changes); in 8-bit mode one byte, as before. The 511-character limit counts bytes (a
+  Swedish letter is two). A cooked line holds 511 characters
   (more than the shell's line editor, 478, so a line typed ahead for the shell is never cut here): a key past that
   rings the bell and marks the line too long, and at its end the whole line is refused with "tty: the line was too
   long ... not taken", never handed on cut; the mark outlives a switch to raw mode, so the rest of such a line typed
@@ -1365,7 +1370,7 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position, as input on the console of the
   program that asked (it went to the console on screen, so a background program could type into another console's
   input: audit3 B9). Arrows and function keys
-  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it and `TERM=xterm-16color`
+  arrive as escape codes. `SYS_ttyinfo` gives the size; the shell sets `LINES` from it, `LANG=C.UTF-8` (D28 11) and `TERM=xterm-16color`
   (xterm's keys and 16 colours; it was `vt100`; over a serial line the other side's getty picks `TERM`). Programs
   colour their output by one libz rule (`color_auto`: the output is a terminal, `TERM` set and not `dumb`,
   `NO_COLOR` not set): `ls` and `grep` (`--color=auto|always|never`, GNU's bytes), the shell's default prompt,
@@ -1459,12 +1464,59 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   2 KB plus 8 KB above one plane, only while loaded; the kernel image +1,900 bytes. Tests: `tools/term-test.sh` (each
   rule's stored cells, the ops' checks and errors, owners, the palette at a switch, the panic reset, a fuzz with every
   rule), `tools/colour-test.sh` (`termtest pcfont`'s screenshots at 1-4 planes; section 13).
+- **UTF-8 and the Unicode font** (DESIGN D28, built on branch utf8 2026-10-29; [d28-console-text.md](d28-console-text.md)).
+  **Decoding** is in `term.c`'s `put1`: a byte of 0x80 or more on the printable path (one test of the byte already in
+  a register) starts a character, a pending one is the parser state `E_UTF` (its 8 bytes in `struct term`), so a
+  character split between two writes or by SLIP's frames is finished by the next. Unicode's well-formed sequences
+  only (no overlong forms, no surrogates, nothing above U+10FFFF); a byte that cannot be part of a character is one
+  cell: its Latin-1 glyph (0xA0-0xFF: old Amiga text and file names read right) or the box (0x80-0x9F, stored as
+  the byte: outside 8-bit mode those bytes' glyphs are the box, swapped into Topaz's table when the shown console's
+  mode changes, so the Latin-1 path pays nothing); a broken sequence's bytes are such cells and the breaking byte is
+  taken afresh (a control or ESC acts after them); C1 controls written as UTF-8 are ignored; U+FFFE/FFFF are stored as
+  U+FFFD. **Nothing is decoded inside an escape sequence** (a window title's UTF-8 is swallowed with it; a byte of
+  0x80 or more still ends a CSI). The kernel log puts a pending character aside and back; a tty write's piece never
+  ends inside a character (the early stop waits, the 256-byte cut takes up to 3 more bytes). **Cells** are 16-bit
+  values: the byte in `ch` stays the low byte, `A_HI` (8) in `at` marks a cell whose high byte is in `hi`, a 2,560-byte
+  plane allocated the first time the console stores a character above U+00FF (never while a panic prints; no memory:
+  `?`, said once on the log); every store and clear already writes `at`, so a stale high byte is never read; row and
+  cell moves move `hi` too. 0xFFFE is a character beyond the BMP (its width kept, drawn as the box), 0xFFFF the right
+  half of a wide character. **The scrollback** keeps a slot byte a line and an 80-byte high row from a pool (chunks of
+  16 rows, at most 200) only for the lines with such cells, given back when the line leaves; no row: `?`. **Wide
+  characters** (width 2) are a lead and a tail with xterm's rules: at column 78 they fill 78-79 with the wrap pending,
+  at column 79 they wrap first; writing, erasing (`K`, `X`, `J`) or inserting/deleting (`@`, `P`) across half of one
+  blanks the other half; drawing is decided from the stored cells (a lead before a tail is the font's glyph, or the
+  wide box's left half; that tail the box's right half, any other tail blank). Zero-width characters are not stored.
+  **Widths** are the kernel's (`kernel/cwidth.h`, shared with libz's `zu8width`: picolibc's `wcwidth` in a non-CJK
+  locale, from the C library's own `combining.t` and `wide.t`, generated at build time by `tools/mkconfont.py widths`
+  into 1,816 bytes; a host test compares all 1,114,112 code points with picolibc's own function). **The Unicode
+  font** (`kernel/confont.c`; `SYS_console` op 4 `CON_UFONT`, no descriptor, root): ZCF1 (`tools/mkconfont.py`: a
+  header, a 512-byte index of 128-code-point half-pages, entries 0 / 32-255 a Topaz stand-in / 256 + n a glyph, 8 x 8
+  glyphs), checked on the kernel's copy in one pass (size bounded at 98,848 before any allocation), then each entry
+  of its half-pages gets its code point's width class in its top three bits (so a mapped character's width comes with
+  its glyph), one pointer store switches to it, the old copy is freed, every console's pending character cleared and
+  the shown console drawn again. Kept when its setter ends. `gfx_ucell` draws a cell above U+00FF: Topaz's glyph for a
+  stand-in (through `gfx_cell`), else the font's 8 bytes drawn byte-wise (each plane's byte `(b & m) ^ n`, one loop per
+  depth, the masks kept opaque to gcc so no `muls.w` appears), or the box built into `gfx.c` (24 bytes) without a font.
+  The default font `zenix-8x8.zcf` (10,424 bytes: 531 glyphs, 584 stand-ins) is loaded by init at boot
+  (`/etc/console`'s `font` line, man/init.txt). **8-bit mode:** a `CON_FONT`, or the rule **`CONR_8BIT`** (128; telnet's
+  Amiga mode): nothing is decoded, the keys are Latin-1, a cell above 0xFF draws as `?` (unchanged; it shows again
+  when the mode ends); setting or clearing it redraws the shown console. **`CON_READ`'s a3 1** gives 4-byte cells
+  (the 16-bit value big-endian, the attributes, the colour); a3 0 the 3-byte cells as before (the low byte).
+  **Cost** (instruction counts of `put1` and `gfx_cell` per character at 3 planes, from the compiled kernel run in an
+  instruction-set emulator on the PC; not a timing): ASCII 266 (261 before D28), a box line or a symbol in the font
+  about 528 (1.98 times). Memory: the font 10.4 KB once; a console with Unicode 2.5 KB for its plane, its scrollback
+  80 bytes a line with such cells (200 bytes of slots); the kernel 157,640 -> 166,852 bytes. Tests: `tools/term-test.sh`
+  (the decoder's cases, the cells, wide and zero-width characters, the scrollback pool, 8-bit mode both ways, each of
+  `CON_UFONT`'s checks against the built font, `CON_READ`'s cells, a fuzz; and the widths against picolibc),
+  `mkconfont.py test` (the generator against `font_8x8.c`), `tools/con-test.sh`'s `termtest utf8` (every glyph and a
+  Claude Code-style screen read back from the display through `CON_LINE` at 2, 4, 8 and 16 colours) and `termtest
+  erase`.
 - **The remote control's console ops** (DESIGN D24 6.1-6.3, `SYS_console`'s ops 5-7, step 3 built on branch wasabi3
   2026-10-29; `kernel/kernel.h` has the structs). Root only by the effective id (-EPERM), named by any console's
   descriptor (-EBADF, -ENOTTY), and none allocates: a console whose terminal was never used is -ENXIO (`term.c`'s
   `get()` would allocate and panic on a full memory). **`CON_READ`** (a2 a `struct uconread` stating its size, with a
   pointer to the caller's cell buffer and its size; a3 0) copies the live grid (never the scrollback view) as 3 bytes a
-  cell (the stored byte, the attribute bits, the colour byte) in whole cells, and the header: rows, columns, the
+  cell (the stored byte, the attribute bits, the colour byte; D28's a3 1: 4 bytes, the 16-bit value first) in whole cells, and the header: rows, columns, the
   cursor, a per-console change counter (raised by every `term_write`, font and rules changes, redraws, a switch away and scrollback moves), and flags (shown,
   an 8-bit font loaded, scrolled back, the cursor shown). **`CON_LINE`** (a2 a display line, a3 a `struct uconline`)
   answers for the shown console only (else -ENXIO; no display -ENODEV): `gfx_conline` turns one line of the drawing
@@ -1534,7 +1586,9 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   live on a Swedish Amiga); `sv` is the AmigaOS keymap "s" (generated from xkeyboard-config by the Fuzix Amiga
   port, checked against Workbench 3.1's `DEVS:Keymaps/s`), `us` the US one. Caps Lock (raw 0x62, a toggle the
   keyboard reports as down/up) shifts the letters only. Accents that AmigaOS treats as dead keys are typed as
-  the spacing character (no composition). Software key repeat: 500 ms, then 33 per second (timed by the tick, done by `kbd_work`), until
+  the spacing character (no composition). **The keymaps' Latin-1 letters are sent as UTF-8** (DESIGN D28 10: å is
+  `C3 A5`; a keymap byte 0x80-0x9F would be a C1 control and is dropped), except while the shown console is in 8-bit
+  mode (`CON_FONT`, `CONR_8BIT`), where the byte goes as it is. Software key repeat: 500 ms, then 33 per second (timed by the tick, done by `kbd_work`), until
   the key is released or another goes down; modifiers and Amiga combinations do not repeat. Codes 0x40-0x67 are
   layout-neutral; arrows, F-keys, Shift+Tab (`ESC [ Z`, as xterm and Linux), Help and Del become escape sequences in
   raw mode (in cooked mode Shift+Tab is a Tab). Verified in FS-UAE

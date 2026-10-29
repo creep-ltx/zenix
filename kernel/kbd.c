@@ -199,7 +199,13 @@ static void key_down(u8 code)
         return;
     if (ctrl_down && (c & 0x40) && c < 0x80)
         c &= 0x1F;                      /* Ctrl-letter, incl. Ctrl-C */
-    tty_input(c);
+    if (c >= 0x80 && !term_eight(con_cur)) {    /* DESIGN D28 10: the keymaps' Latin-1 letters typed as UTF-8 */
+        if (c < 0xA0)
+            return;                     /* 0x80-0x9F would be a C1 control: no keymap has one, dropped */
+        tty_input((u8)(0xC0 | c >> 6));
+        c = (u8)(0x80 | (c & 0x3F));
+    }
+    tty_input(c);                       /* in 8-bit mode (CON_FONT, CONR_8BIT) the byte as it is, as before D28 */
 }
 
 /* Software key repeat (an Amiga keyboard sends one code per press; AmigaOS repeats in software too): the last key

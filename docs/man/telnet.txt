@@ -15,8 +15,9 @@ DESCRIPTION
     told to the other side.
 
     Three modes:
-    -a  an Amiga board (the default): Latin-1 in the console's own Topaz,
-        terminal type ANSI. The Amiga console's codes are understood:
+    -a  an Amiga board (the default): Latin-1 in the console's own Topaz
+        (the console's 8-bit mode: no UTF-8 while it runs), terminal type
+        ANSI. The Amiga console's codes are understood:
         the byte 0x9B as ESC [, the cursor off and on (CSI 0 SP p), the
         window bounds request (CSI 0 SP q, answered with the window
         size); CSI n u (the Amiga's line length) is dropped.
@@ -24,9 +25,9 @@ DESCRIPTION
         smiley set) through the PC font, loaded for this console from
         /usr/share/consolefonts/cp437-8x8.psf, terminal type ANSI. A line
         feed moves down only, the bytes 1-31 are drawn as glyphs.
-    -x  a Unix host: xterm-like, terminal type XTERM-16COLOR; UTF-8 from
-        the other side is shown in Latin-1 (other characters as ?), and a
-        line feed moves down only, as xterm does.
+    -x  a Unix host: xterm-like, terminal type XTERM-16COLOR; UTF-8 goes
+        both ways as it is (the console shows it), and a line feed moves
+        down only, as xterm does.
 
     In both board modes the console wraps at the last column at once,
     ESC[2J also homes the cursor, bold (SGR 1) is the bright colour, the
@@ -41,7 +42,8 @@ DESCRIPTION
     Keys: Backspace sends BS in the board modes (DEL in the Unix mode),
     Del sends DEL; Swedish letters go as CP437 to a PC board (a letter
     CP437 lacks rings the bell and is not sent), as Latin-1 to an Amiga
-    board, as UTF-8 to a Unix host.
+    board (a character Latin-1 lacks rings the bell), as UTF-8 to a Unix
+    host. Telnet and the kernel's UTF-8 console come in one release.
 
     Ctrl-] opens a prompt on the bottom row: q closes the connection, z
     suspends telnet (fg brings it back), a, p and x switch to the Amiga,
@@ -107,8 +109,9 @@ NOTES
     over SLIP while a big screen is drawn.
     When the standard output is not the console (telnet host > file), the
     console's rules and the PC font are not set (each said once) and the
-    call goes on; in the PC mode CP437 is then written as the nearest
-    Latin-1 characters (box lines as - | +, blocks as #). When the keys
+    call goes on; in the PC mode CP437 is then written as UTF-8 (box
+    lines stay box lines), and keys that come as UTF-8 are turned into
+    CP437. When the keys
     come from a pipe or a file, telnet keeps the call until the other
     side closes it. A computer that disappears without closing the
     connection leaves telnet waiting: Ctrl-] q.

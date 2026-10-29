@@ -305,7 +305,7 @@ static void key_out(const unsigned char *b, long n)
         if (koff) { memmove(kbuf, kbuf + koff, (u32)(kn - koff)); kn -= koff; koff = 0; }
         if (kn + 2 * n > (long)sizeof kbuf) return;     /* typed faster than the session takes it: dropped */
     }
-    kn += tk_keys(TN_UNIX, b, n, kbuf + kn, &bell);
+    kn += tk_keys(TN_UNIX, 1, b, n, kbuf + kn, &bell);
 }
 
 static void suspend(void)

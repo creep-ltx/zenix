@@ -215,6 +215,8 @@ twice.
 - **UTF-8 later (roadmap block 3):** a loaded `CON_FONT` font means, and is frozen to mean, **"8-bit mode: each byte is
   one glyph of this 256-glyph font; the console decodes no UTF-8 while it is loaded"** (the role of Linux's `ESC % @`).
   Block 3's Unicode fonts (PSF2 with a Unicode table) are told apart by their magic and get their own meaning then.
+  (Replaced: DESIGN D28 section 7 gives the Unicode font an op of its own, `CON_UFONT`, in its own format, ZCF1;
+  `CON_FONT` stays PSF1 only.)
   When the console decodes UTF-8, telnet's Amiga mode converts Latin-1 to UTF-8 itself (a 128-entry table) or loads
   the 8-bit mode with a Latin-1 font; decided in block 3, nothing here blocks either.
 - **Topaz for Amiga boards is already there** (the machine's own ROM Topaz 8, Latin-1, read at boot, never shipped).

@@ -34,7 +34,10 @@ static void start(int n, int again)
 
 /* /etc/console (D14 section 11): "colours N" (2, 4, 8 or 16; "colors" too) sets the text console's colours, read
  * once here, before anything else takes chip RAM; no file, no such line or "auto": the machine's default. Read at
- * every start of init, so a change counts from the next boot. */
+ * every start of init, so a change counts from the next boot. DESIGN D28 7: "font auto|none|NAME", the console's
+ * Unicode font, kept here and loaded after mount -a (font_setup); no file or no such line is "font auto". */
+static char ufont[24] = "auto";
+
 static void console_setup(void)
 {
     char b[512];
@@ -53,6 +56,16 @@ static void console_setup(void)
             ;
         if (*v) *v++ = 0;
         while (*v == ' ' || *v == '\t') v++;
+        if (!strcmp(w, "font")) {                       /* D28: one word, a plain name (no path) */
+            char *x = v;
+            while (*x && *x != ' ' && *x != '\t' && *x != '\r') x++;
+            *x = 0;
+            if (!*v || strchr(v, '/') || x - v > (int)sizeof ufont - 1)
+                dprintf(1, "init: /etc/console: font %s: auto, none or a font's name (at most 23 letters)\n", v);
+            else
+                strcpy(ufont, v);
+            continue;
+        }
         if (strcmp(w, "colours") && strcmp(w, "colors")) { dprintf(1, "init: /etc/console: unknown setting %s\n", w); continue; }
         if (!strncmp(v, "auto", 4)) continue;
         int c = atoi(v), r = c ? sys_console(CON_COLOURS, c) : -EINVAL;
@@ -60,6 +73,47 @@ static void console_setup(void)
         else if (r < 0) dprintf(1, "init: /etc/console: colours %d: %s, staying at %d\n", c, zstrerror(r), sys_console(CON_COLOURS, 0));
         else if (r != c) dprintf(1, "init: /etc/console: colours %d: this machine shows %d\n", c, r);
     }
+    oflush();
+}
+
+/* DESIGN D28 7: the console's Unicode font (/etc/console's font line), after mount -a (a separately mounted /usr
+ * holds it): auto loads /usr/share/consolefonts/zenix-8x8.zcf if it is there (the RAM floppy has none: silent), NAME
+ * that font's NAME.zcf, none nothing (11 KB of memory saved; the widths stay right). The file is read into a memory
+ * region of its own (sys_memalloc: not malloc, whose code init does not otherwise need), given back after the call
+ * (init never ends). What fails is said on the console; the console then shows the box for what it cannot draw. */
+static void font_setup(void)
+{
+    if (!strcmp(ufont, "none"))
+        return;
+    int a = !strcmp(ufont, "auto");
+    char path[64] = "/usr/share/consolefonts/";
+    strcat(path, a ? "zenix-8x8" : ufont);
+    strcat(path, ".zcf");
+    struct ustat st;
+    int fd = sys_open(path, O_RDONLY);
+    if (fd < 0) {
+        if (!a) dprintf(1, "init: /etc/console: font %s: no file %s\n", ufont, path);
+        oflush();
+        return;
+    }
+    int r = sys_conufont(0, 0);                         /* a kernel before D28 refuses the op itself */
+    char *b = 0;
+    if (r == -EINVAL)
+        dprintf(1, "init: this kernel has no Unicode font: %s not loaded\n", path);
+    else if (r == -ENODEV)
+        ;                                               /* no display */
+    else if (sys_fstat(fd, &st) < 0 || st.size > 98848 || st.size < 544)
+        dprintf(1, "init: %s: not a console font (ZCF1)\n", path);
+    else if (!(b = sys_memalloc(st.size)))
+        dprintf(1, "init: %s: no memory for it\n", path);
+    else if (sys_read(fd, b, st.size) != (int)st.size)
+        dprintf(1, "init: %s: could not be read\n", path);
+    else if ((r = sys_conufont(b, st.size)) == -EINVAL)
+        dprintf(1, "init: %s: not a console font (ZCF1)\n", path);
+    else if (r < 0)
+        dprintf(1, "init: %s: %s\n", path, zstrerror(r) ? zstrerror(r) : "failed");
+    if (b) sys_memfree(b);
+    sys_close(fd);
     oflush();
 }
 
@@ -264,6 +318,7 @@ int main(void)
         int mp = sys_spawn("/bin/mount", ma, 0);
         if (mp >= 0) sys_wait(mp);
     }
+    font_setup();                                       /* D28: after mount -a, before the first login */
     if (auto_iface()) {                                 /* the network (DESIGN D19 6.3): started, never waited for */
         char *ia[] = { "/bin/ifup", "-a", 0 };
         sys_spawn("/bin/ifup", ia, 0);

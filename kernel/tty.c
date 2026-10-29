@@ -163,7 +163,8 @@ long tty_write(int i, const void *buf, u32 n)
     u32 done = 0;
     while (done < n) {
         u32 k = n - done > TTY_WPIECE ? TTY_WPIECE : n - done;
-        k = term_write_some(i, s + done, k);    /* the screen: cursor handled once per piece */
+        k = term_write_some(i, s + done, k, n - done);  /* the screen: cursor handled once per piece; never inside a
+                                                         * UTF-8 character (D28 4) */
         if (i == con_cur && tty_mirror)
             for (u32 j = 0; j < k; j++)
                 serial_putc(s[done + j]);
@@ -196,6 +197,36 @@ static void commit(struct tty *t, u8 c)
 static void erase1(int i)
 {
     out(i, '\b'); out(i, ' '); out(i, '\b');
+}
+
+/* DESIGN D28 10: the line's last character, as the console decoded it (Linux's IUTF8, always on outside 8-bit mode):
+ * up to 3 bytes back to a lead whose length agrees and whose bytes form a character, else one byte (the Latin-1
+ * fallback's one-byte cells). Removed, and `\b \b` once per column it took (a zero-width one took none). */
+static void erase_char(int i, struct tty *t)
+{
+    u32 n = 1, w = 1;
+    if (!term_eight(i) && t->line[t->llen - 1] >= 0x80) {
+        u32 k = 1;
+        while (k < 4 && k < t->llen && (t->line[t->llen - k] & 0xC0) == 0x80)
+            k++;
+        const u8 *b = t->line + t->llen - k;
+        u32 len = b[0] >= 0xC2 && b[0] <= 0xDF ? 2 : b[0] >= 0xE0 && b[0] <= 0xEF ? 3 : b[0] >= 0xF0 && b[0] <= 0xF4 ? 4 : 0;
+        if (len == k && k >= 2) {
+            u8 lo = b[0] == 0xE0 ? 0xA0 : b[0] == 0xF0 ? 0x90 : 0x80;
+            u8 hi = b[0] == 0xED ? 0x9F : b[0] == 0xF4 ? 0x8F : 0xBF;
+            if (b[1] >= lo && b[1] <= hi) {             /* the later bytes are continuations: the scan says so */
+                u32 cp = k == 2 ? (u32)(b[0] & 0x1F) << 6 | (b[1] & 0x3F) :
+                         k == 3 ? (u32)(b[0] & 0x0F) << 12 | (u32)(b[1] & 0x3F) << 6 | (b[2] & 0x3F) :
+                         (u32)(b[0] & 0x07) << 18 | (u32)(b[1] & 0x3F) << 12 | (u32)(b[2] & 0x3F) << 6 | (b[3] & 0x3F);
+                int cw = con_cwidth(cp);
+                n = k;
+                w = cp < 0xA0 ? 0 : cw < 0 ? 0 : (u32)cw;      /* C1 and zero-width ones were never drawn */
+            }
+        }
+    }
+    t->llen = (u16)(t->llen - n);
+    while (w--)
+        erase1(i);
 }
 
 /* the end of a line that was too long: nothing of it is handed on, and the console says so */
@@ -265,18 +296,14 @@ static void input(int i, u8 c)
         ev_wake(&t->wait);
         return;
     }
-    if (c == 8 || c == 127) {               /* backspace */
-        if (t->llen) {
-            t->llen--;
-            erase1(i);
-        }
+    if (c == 8 || c == 127) {               /* backspace: one character (D28 10) */
+        if (t->llen)
+            erase_char(i, t);
         return;
     }
     if (c == 21) {                          /* ^U */
-        while (t->llen) {
-            t->llen--;
-            erase1(i);
-        }
+        while (t->llen)
+            erase_char(i, t);
         t->over = 0;
         return;
     }

@@ -92,7 +92,7 @@ struct tf {
     void (*answer)(void *u, const unsigned char *b, long n);   /* to the board (the caller encodes it) */
     void (*event)(void *u, int ev, int arg);                   /* may be NULL */
     int mode;                           /* TN_PC, TN_AMIGA, TN_UNIX */
-    int fallback;                       /* the PC mode without the console's PC font: CP437 -> Latin-1 (3.5) */
+    int fallback;                       /* the PC mode without the console's PC font: CP437 -> UTF-8 (3.5, D28) */
     int cols, rows;                     /* for the Amiga window bounds report */
     /* the filter's */
     int st;
@@ -100,8 +100,6 @@ struct tf {
     int musicn;
     unsigned char seq[TF_SEQMAX];
     int seqn;
-    unsigned long ucs;                  /* the Unix mode's UTF-8 decoding */
-    int need;
     unsigned char ob[256];
     int obn;
 };
@@ -114,11 +112,15 @@ void tf_setmode(struct tf *f, int mode);
 /* ---- keys (3.3) ---- */
 
 /* The console's keys -> what the board gets (before tn_encode), in out (room for 2n). *bell counts the keys with no
- * form in the mode (a Latin-1 letter CP437 lacks): not sent. The escape key is the caller's (looked for first). */
-long tk_keys(int mode, const unsigned char *in, long n, unsigned char *out, int *bell);
+ * form in the mode (a Latin-1 letter CP437 lacks): not sent. The escape key is the caller's (looked for first).
+ * DESIGN D28 12: utf8 says the keys come as UTF-8 (the console is not in 8-bit mode: the PC mode without its font,
+ * a mode whose rules the console refused); a BBS mode then decodes them first (a character split between two calls
+ * is finished by the next). The Unix mode passes the keys through as they are. */
+long tk_keys(int mode, int utf8, const unsigned char *in, long n, unsigned char *out, int *bell);
 
 /* the tables (cp437.c) */
-extern const unsigned char tn_cp437_latin1[256];
+extern const unsigned short tn_cp437_ucs[256];
 extern const unsigned char tn_latin1_cp437[256];
+int tn_utf8(unsigned long c, unsigned char *o);         /* a code point as UTF-8 (room for 4) -> its bytes */
 
 #endif

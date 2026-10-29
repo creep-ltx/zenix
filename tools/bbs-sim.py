@@ -105,7 +105,7 @@ EXPECT.update({
     ("font", "pc"): (b"12345", [("mode", "amiga"), ("mode", "pc")]),
     ("amiga", "amiga"): ("Åäö é ß".encode("latin-1") + E + b"1;33mY" + E + b"0m" + E + b"?25l" + E + b"?25hZ", []),
     ("amigaart", "amiga"): (SCREENS["amigaart"].replace(b"\x9b", E), []),
-    ("unix", "unix"): (b"\xe5?x" + E + b"1mB" + E + b"0m", []),
+    ("unix", "unix"): (SCREENS["unix"], []),     # DESIGN D28 12: the host's UTF-8 passed through (the console decodes it)
 })
 
 

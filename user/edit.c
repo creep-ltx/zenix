@@ -149,16 +149,30 @@ static void redo_once(void)
 }
 
 /* ------------------------------------------------------------ geometry: columns on the screen */
-static int vcol(int y, int x)                           /* visual column of byte x on line y (tabs to the next multiple of 8) */
+/* DESIGN D28: the text is UTF-8 and the cursor always at a character's start; a character takes the console's
+ * columns (libz's zu8*: a letter one, a wide one two, a zero-width one none; a byte that is not UTF-8 one, as the
+ * console shows it), a tab to the next multiple of 8, a control one ('?') */
+static int chw(int y, int i, int col, int *n)           /* the columns of the character at byte i (at column col), *n its bytes */
 {
-    int c = 0;
-    for (int i = 0; i < x && i < L[y].len; i++) c = L[y].s[i] == '\t' ? (c / 8 + 1) * 8 : c + 1;
+    unsigned char c = (unsigned char)L[y].s[i];
+    *n = 1;
+    if (c == '\t') return (col / 8 + 1) * 8 - col;
+    if (c < 0x80) return 1;
+    int w; *n = zu8next(L[y].s + i, (u32)(L[y].len - i), &w);
+    return w;
+}
+static int u8n(int y, int x) { int w; return zu8next(L[y].s + x, (u32)(L[y].len - x), &w); }    /* bytes of the character at x */
+static int u8p(int y, int x) { return (int)zu8prev(L[y].s, (u32)x); }                          /* the character before x */
+static int vcol(int y, int x)                           /* visual column of byte x on line y */
+{
+    int c = 0, n;
+    for (int i = 0; i < x && i < L[y].len; i += n) c += chw(y, i, c, &n);
     return c;
 }
-static int byte_at_vcol(int y, int col)                 /* the byte whose cell holds visual column col (or the line end) */
+static int byte_at_vcol(int y, int col)                 /* the character whose cells hold visual column col (or the line end) */
 {
-    int c = 0;
-    for (int i = 0; i < L[y].len; i++) { int w = L[y].s[i] == '\t' ? (c / 8 + 1) * 8 - c : 1; if (col < c + w) return i; c += w; }
+    int c = 0, n;
+    for (int i = 0; i < L[y].len; i += n) { int w = chw(y, i, c, &n); if (col < c + w) return i; c += w; }
     return L[y].len;
 }
 static int gutter(void) { if (!show_nums) return 0; int w = 1, n = nL; while (n >= 10) { w++; n /= 10; } return w + 1; }
@@ -215,14 +229,14 @@ static void backspace(void)
 {
     group_id++; last_typed_end_y = -1;
     if (has_sel()) { delete_selection(); return; }
-    if (cx > 0) { do_delete(cy, cx - 1, cy, cx); cx--; }
+    if (cx > 0) { int p = u8p(cy, cx); do_delete(cy, p, cy, cx); cx = p; }      /* one character (D28) */
     else if (cy > 0) { int px = L[cy - 1].len; do_delete(cy - 1, px, cy, 0); cy--; cx = px; }
 }
 static void delete_forward(void)
 {
     group_id++; last_typed_end_y = -1;
     if (has_sel()) { delete_selection(); return; }
-    if (cx < L[cy].len) do_delete(cy, cx, cy, cx + 1);
+    if (cx < L[cy].len) do_delete(cy, cx, cy, cx + u8n(cy, cx));
     else if (cy + 1 < nL) do_delete(cy, cx, cy + 1, 0);
 }
 static void cut_line(void)
@@ -311,7 +325,9 @@ static int save_file(const char *path)
 }
 
 /* ------------------------------------------------------------ the screen: only changed rows are sent */
-struct cell_row { char c[SCR_COLS + 1]; unsigned char inv[SCR_COLS]; };
+/* a cell: its character's bytes packed into a long, the first in the top byte (D28: a UTF-8 character is up to 4); 0
+ * the right half of a wide character (nothing is sent for it) */
+struct cell_row { u32 c[SCR_COLS]; unsigned char inv[SCR_COLS]; };
 static struct cell_row shadow[TEXT_ROWS_MAX + 2], cur_row;
 static int use_color;                   /* the status line in colour (inv 2) */
 static int shadow_valid;
@@ -322,17 +338,32 @@ static void flush_row(int r, const struct cell_row *want)
     char pos[16]; snprintf(pos, sizeof pos, "\033[%d;1H", r + 1); oputs(pos);
     int cur = 0;
     for (int i = 0; i < SCR_COLS; i++) {
+        if (!want->c[i]) continue;
         if (want->inv[i] != cur) { oputs(want->inv[i] == 2 ? "\033[0;7;34;107m" : want->inv[i] ? "\033[0;7m" : "\033[0m"); cur = want->inv[i]; }
-        oputc((unsigned char)want->c[i]);
+        for (u32 v = want->c[i]; v; v <<= 8) oputc((unsigned char)(v >> 24));
     }
     if (cur) oputs("\033[0m");
     shadow[r] = *want;
 }
+static u32 pack(const char *s, int n)                  /* a character's n bytes as a cell */
+{
+    u32 v = 0;
+    for (int i = 0; i < 4; i++) v = v << 8 | (i < n ? (unsigned char)s[i] : 0);
+    return v;
+}
+/* the text into cells from col on, by characters (a wide one two cells; one that does not fit is a space) */
 static void put_str(struct cell_row *row, int col, const char *s, int n, int inv)
 {
-    for (int i = 0; i < n && col + i < SCR_COLS; i++) { row->c[col + i] = s[i]; row->inv[col + i] = (unsigned char)inv; }
+    for (int i = 0, k, w; i < n && col < SCR_COLS; i += k) {
+        k = zu8next(s + i, (u32)(n - i), &w);
+        if (!w) continue;
+        row->inv[col] = (unsigned char)inv;
+        if (w == 2 && col + 1 >= SCR_COLS) { row->c[col++] = ' ' << 24; break; }
+        row->c[col++] = (unsigned char)s[i] < 32 ? '?' << 24 : pack(s + i, k);
+        if (w == 2) { row->inv[col] = (unsigned char)inv; row->c[col++] = 0; }
+    }
 }
-static void blank_row(struct cell_row *row, int inv) { memset(row->c, ' ', SCR_COLS); memset(row->inv, inv, SCR_COLS); row->c[SCR_COLS] = 0; }
+static void blank_row(struct cell_row *row, int inv) { for (int i = 0; i < SCR_COLS; i++) row->c[i] = ' ' << 24; memset(row->inv, inv, SCR_COLS); }
 
 static int in_selection(int y, int x)
 {
@@ -357,16 +388,20 @@ static void render(void)
         int y = top + r;
         if (y < nL) {
             if (g) { char nb[12]; snprintf(nb, sizeof nb, "%*d ", g - 1, y + 1); put_str(&cur_row, 0, nb, g, 0); }
-            int col = 0;
-            for (int i = 0; i <= L[y].len; i++) {
-                int w = i == L[y].len ? 1 : L[y].s[i] == '\t' ? (col / 8 + 1) * 8 - col : 1;
-                int sel = in_selection(y, i) || (i == L[y].len && has_sel() && in_selection(y, i) );
+            int col = 0, n;
+            for (int i = 0; i <= L[y].len; i += n) {
+                int w = i == L[y].len ? (n = 1) : chw(y, i, col, &n);
+                int sel = in_selection(y, i) && i < L[y].len;
+                unsigned char c0 = i < L[y].len ? (unsigned char)L[y].s[i] : ' ';
+                u32 cell = i == L[y].len || c0 == '\t' ? ' ' << 24 : c0 < 32 ? '?' << 24 : pack(L[y].s + i, n);
                 for (int k = 0; k < w; k++) {
                     int sc = col + k - leftcol;
                     if (sc < 0 || sc >= width) continue;
-                    char ch = i == L[y].len ? ' ' : (L[y].s[i] == '\t' ? ' ' : L[y].s[i]);
-                    if ((unsigned char)ch < 32) ch = '?';
-                    cur_row.c[g + sc] = ch; cur_row.inv[g + sc] = (unsigned char)(sel && i < L[y].len);
+                    u32 v = cell;
+                    if (w == 2 && cell != (' ' << 24))      /* a wide character: its left cell, then the half (0) */
+                        v = k ? 0 : sc + 1 >= width ? ' ' << 24 : cell;     /* cut by the edge: a space */
+                    if (w == 2 && k == 1 && sc == 0) v = ' ' << 24;           /* its left half scrolled off */
+                    cur_row.c[g + sc] = v; cur_row.inv[g + sc] = (unsigned char)sel;
                 }
                 col += w;
             }
@@ -395,15 +430,41 @@ static void render(void)
 static void invalidate(void) { shadow_valid = 0; oputs("\033[2J"); }
 
 /* ------------------------------------------------------------ keys */
-enum { K_NONE = 0, K_UP = 256, K_DOWN, K_RIGHT, K_LEFT, K_HOME, K_END, K_DEL, K_INS, K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10, K_BTAB };
+enum { K_NONE = 0, K_UP = 256, K_DOWN, K_RIGHT, K_LEFT, K_HOME, K_END, K_DEL, K_INS, K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10, K_BTAB, K_TEXT };
+static char kbuf[4]; static int kn;     /* K_TEXT (D28): a UTF-8 character's bytes, as the keyboard sends them */
+static unsigned char pq[4]; static int pqn;     /* bytes read ahead that were not part of a character */
 #define M_SHIFT 0x1000
 #define M_ALT   0x2000
 #define M_CTRL  0x4000
-static int getb(void) { unsigned char c; return sys_read(0, &c, 1) == 1 ? c : -1; }
+static int getb(void)
+{
+    unsigned char c;
+    if (pqn) { c = pq[0]; memmove(pq, pq + 1, (u32)--pqn); return c; }
+    return sys_read(0, &c, 1) == 1 ? c : -1;
+}
 static int read_key(void)
 {
     int c = getb();
     if (c < 0) return -1;
+    if (c >= 0xC2 && c <= 0xF4) {                       /* D28: a lead: its continuations come with it */
+        int need = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4, w;
+        int other = -1;
+        kbuf[0] = (char)c; kn = 1;
+        while (kn < need) {
+            int b = getb();
+            if (b < 0) break;
+            if ((b & 0xC0) != 0x80) { other = b; break; }
+            kbuf[kn++] = (char)b;
+        }
+        if (zu8next(kbuf, (u32)kn, &w) == kn) {
+            if (other >= 0) pq[pqn++] = (unsigned char)other;
+            return K_TEXT;
+        }
+        for (int i = 1; i < kn; i++) pq[pqn++] = (unsigned char)kbuf[i];      /* not a character: byte by byte */
+        if (other >= 0) pq[pqn++] = (unsigned char)other;
+        kn = 1;
+        return c;
+    }
     if (c != 27) return c;
     int s1 = getb();
     if (s1 == 'O') { int f = getb(); return f >= 'P' && f <= 'S' ? K_F1 + (f - 'P') : K_NONE; }
@@ -430,13 +491,14 @@ static int prompt(const char *label, char *out, int max, const char *initial)
     int n = 0;
     if (initial) { n = (int)strlen(initial); if (n >= max) n = max - 1; memcpy(out, initial, (u32)n); }
     for (;;) {
-        char line[SCR_COLS + 1]; snprintf(line, sizeof line, "%s%.*s", label, n, out);
+        char line[4 * SCR_COLS + 1]; snprintf(line, sizeof line, "%s%.*s", label, n, out);
         char pos[24]; snprintf(pos, sizeof pos, "\033[%d;1H", text_rows + 2); oputs(pos); oputs("\033[K"); oputs(line); oflush();
         shadow_valid = 0;
         int c = read_key();
         if (c == '\r' || c == '\n') { out[n] = 0; return 1; }
         if (c == 27 || c == 3 || c < 0 || c == K_NONE) { if (c == K_NONE) continue; return 0; }
-        if ((c == 127 || c == 8) && n) n--;
+        if ((c == 127 || c == 8) && n) n = (int)zu8prev(out, (u32)n);         /* one character (D28) */
+        else if (c == K_TEXT && n + kn < max) { memcpy(out + n, kbuf, (u32)kn); n += kn; }
         else if (c >= 32 && c < 256 && n < max - 1) out[n++] = (char)c;
     }
 }
@@ -505,7 +567,7 @@ static void replace_cmd(void)
             int y1, x1, y2, x2; sel_range(&y1, &x1, &y2, &x2);
             do_delete(y1, x1, y2, x2); int ey, ex; do_insert(y1, x1, with, (int)strlen(with), &ey, &ex);
             cy = ey; cx = ex; sel_on = 0; count++;
-            if (!*with && x2 == x1) cx++;                     /* an empty match: step on */
+            if (!*with && x2 == x1) cx += cx < L[cy].len ? u8n(cy, cx) : 1;    /* an empty match: step on */
         } else { sel_on = 0; }
     }
     sel_on = 0;
@@ -620,13 +682,13 @@ int main(int argc, char **argv)
                 if (mods & M_CTRL) move_to(cy, 0, extend);
                 else if (mods & M_ALT) { int x = cx; while (x > 0 && !is_word((unsigned char)L[cy].s[x - 1])) x--; while (x > 0 && is_word((unsigned char)L[cy].s[x - 1])) x--; move_to(cy, x, extend); }
                 else if (!extend && has_sel()) { int y1, x1, y2, x2; sel_range(&y1, &x1, &y2, &x2); move_to(y1, x1, 0); }
-                else if (cx > 0) move_to(cy, cx - 1, extend); else if (cy > 0) move_to(cy - 1, L[cy - 1].len, extend);
+                else if (cx > 0) move_to(cy, u8p(cy, cx), extend); else if (cy > 0) move_to(cy - 1, L[cy - 1].len, extend);
                 break;
             case K_RIGHT:
                 if (mods & M_CTRL) move_to(cy, L[cy].len, extend);
                 else if (mods & M_ALT) { int x = cx; while (x < L[cy].len && !is_word((unsigned char)L[cy].s[x])) x++; while (x < L[cy].len && is_word((unsigned char)L[cy].s[x])) x++; move_to(cy, x, extend); }
                 else if (!extend && has_sel()) { int y1, x1, y2, x2; sel_range(&y1, &x1, &y2, &x2); move_to(y2, x2, 0); }
-                else if (cx < L[cy].len) move_to(cy, cx + 1, extend); else if (cy + 1 < nL) move_to(cy + 1, 0, extend);
+                else if (cx < L[cy].len) move_to(cy, cx + u8n(cy, cx), extend); else if (cy + 1 < nL) move_to(cy + 1, 0, extend);
                 break;
             case K_HOME: move_to(cy, 0, extend); break;
             case K_END: move_to(cy, L[cy].len, extend); break;
@@ -659,11 +721,12 @@ int main(int argc, char **argv)
         case 6: find_cmd(0, 1); break;                                                       /* Ctrl+F */
         case 7: find_cmd(1, 1); break;                                                       /* Ctrl+G */
         case 18: replace_cmd(); break;                                                       /* Ctrl+R */
-        case 12: { char in[32]; if (prompt("go to line: ", in, sizeof in, 0) && in[0]) { int ln = atoi(in), col = 0; char *c = strchr(in, ':'); if (c) col = atoi(c + 1); move_to(ln > 0 ? ln - 1 : 0, col > 0 ? col - 1 : 0, 0); } break; }
+        case 12: { char in[32]; if (prompt("go to line: ", in, sizeof in, 0) && in[0]) { int ln = atoi(in), col = 0; char *c = strchr(in, ':'); if (c) col = atoi(c + 1); int y = ln > 0 ? ln - 1 : 0; if (y >= nL) y = nL - 1; move_to(y, byte_at_vcol(y, col > 0 ? col - 1 : 0), 0); } break; }
         case 13: case 10: new_line_indent(); break;
         case 127: case 8: backspace(); break;
         case 9: if (has_sel()) indent(1); else { char t = '\t'; type_text(&t, 1); } break;
         case 27: sel_on = 0; break;
+        case K_TEXT: type_text(kbuf, kn); break;                                             /* D28: a UTF-8 letter */
         default:
             if (k >= 32 && k < 256) { char ch = (char)k; type_text(&ch, 1); }
         }

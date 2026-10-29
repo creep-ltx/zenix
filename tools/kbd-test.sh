@@ -15,8 +15,8 @@ python3 tools/kbd-test.py $OUT/kbd.fs-uae "$SERIAL" > $OUT/run.log 2>&1
 pass=1
 get() { debugfs -R "cat $1" $BD/zenix.hdf 2>/dev/null; }
 want() { if [ "$(get $1 | od -An -tx1 | tr -d ' \n')" = "$2" ]; then echo "PASS $3"; else echo "FAIL $3: got $(get $1 | od -An -tx1 | tr -d '\n')"; pass=0; fi; }
-# å ö ä £ [ { ² \ newline, Latin-1
-want /tmp/k1.txt "e5f6e4a35b7bb25c0a" "Swedish layers: plain, Shift, Alt, Shift+Alt"
+# å ö ä £ [ { ² \ newline: the keymap's Latin-1 letters typed as UTF-8 (DESIGN D28 10)
+want /tmp/k1.txt "c3a5c3b6c3a4c2a35b7bc2b25c0a" "Swedish layers: plain, Shift, Alt, Shift+Alt (UTF-8)"
 want /tmp/k2.txt "41423163640a" "Caps Lock on letters only, Shift inverts it"
 n=$(get /tmp/k3.txt | tr -cd z | wc -c)
 if [ "$n" -ge 10 ] && [ "$n" -le 40 ]; then echo "PASS key repeat ($n z's from a 1.2 s hold)"; else echo "FAIL key repeat: $n z's"; pass=0; fi

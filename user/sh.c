@@ -204,20 +204,35 @@ static int builtin_names(const char **out, int max);
 
 static void put_n(const char *s, int n) { sys_write(1, s, (u32)n); }
 
-/* redraw the line: prompt, the visible part of the text, cursor in place */
+/* redraw the line: prompt, the visible part of the text, cursor in place. DESIGN D28: by characters and columns (the
+ * console's widths, libz's zu8*): scroll is the first shown byte, always at a character's start */
 static void redraw(const char *prompt, int plen, const char *buf, int len, int pos, int *scroll)
 {
-    int avail = 77 - plen;
+    int avail = 77 - plen, w;
     if (avail < 10) avail = 10;
     if (pos < *scroll) *scroll = pos;
-    if (pos > *scroll + avail - 1) *scroll = pos - avail + 1;
-    if (len <= avail) *scroll = 0;
-    int shown = len - *scroll; if (shown > avail) shown = avail;
+    while (zu8cols(buf + *scroll, (u32)(pos - *scroll)) > avail - 1)
+        *scroll += zu8next(buf + *scroll, (u32)(len - *scroll), &w);
+    if (zu8cols(buf, (u32)len) <= avail) *scroll = 0;
+    int shown = (int)zu8fit(buf + *scroll, (u32)(len - *scroll), avail);
     outs("\r"); outs(prompt);
     put_n(buf + *scroll, shown);
     outs("\033[K");
-    int back = shown - (pos - *scroll);
+    int back = zu8cols(buf + *scroll, (u32)shown) - zu8cols(buf + *scroll, (u32)(pos - *scroll));
     if (back > 0) { char e[16]; e[0] = 27; e[1] = '['; utoa((u32)back, e + 2); u32 l = strlen(e); e[l] = 'D'; e[l + 1] = 0; outs(e); }
+}
+
+/* DESIGN D28: the bytes before pos end inside a character (a lead whose continuations are still coming, as a typed
+ * letter's second byte): the line is drawn again only when it is whole */
+static int u8_incomplete(const char *buf, int pos)
+{
+    for (int k = 1; k <= 3 && k <= pos; k++) {
+        unsigned char b = (unsigned char)buf[pos - k];
+        if ((b & 0xC0) == 0x80) continue;
+        int need = b >= 0xC2 && b <= 0xDF ? 2 : b >= 0xE0 && b <= 0xEF ? 3 : b >= 0xF0 && b <= 0xF4 ? 4 : 0;
+        return need > k;
+    }
+    return 0;
 }
 
 /* ---- completion ---- */
@@ -304,13 +319,13 @@ static int find_completions(const char *buf, int pos, char **m, int max, int *ws
 
 static void list_matches(char **m, int n)
 {
-    int w = 0; for (int i = 0; i < n; i++) { int l = (int)strlen(m[i]); if (l > w) w = l; }
+    int w = 0; for (int i = 0; i < n; i++) { int l = zu8cols(m[i], strlen(m[i])); if (l > w) w = l; }   /* D28: columns */
     w += 2; int cols = 78 / w; if (cols < 1) cols = 1;
     outs("\r\n");
     for (int i = 0; i < n; i++) {
         outs(m[i]);
         if ((i + 1) % cols == 0 || i == n - 1) outs("\r\n");
-        else for (int k = (int)strlen(m[i]); k < w; k++) outs(" ");
+        else for (int k = zu8cols(m[i], strlen(m[i])); k < w; k++) outs(" ");
     }
 }
 
@@ -333,14 +348,16 @@ static int isearch(char *buf, int max, int *lenp, int *posp)
     pat[0] = 0;
     for (;;) {
         char shown[64]; const char *m = found < nhist ? hist[found] : "";
-        strncpy(shown, m, 50); shown[50] = 0;
+        u32 sl = zu8fit(m, strlen(m), 50);              /* D28: whole characters, 50 columns */
+        if (sl > 60) sl = zu8fit(m, 60, 50);
+        memcpy(shown, m, sl); shown[sl] = 0;
         outs("\r(reverse-i-search)`"); outs(pat); outs("': "); outs(shown); outs("\033[K");
         unsigned char c;
         if (sys_read(0, &c, 1) != 1) return 0;
         if (c == 18) { if (found > 0) { int f = hist_find(pat, found - 1); if (f < nhist) found = f; } continue; }   /* next older */
-        if (c == 127 || c == 8) { if (pl) { pat[--pl] = 0; found = nhist > 0 ? hist_find(pat, nhist - 1) : nhist; } continue; }
+        if (c == 127 || c == 8) { if (pl) { pl = (int)zu8prev(pat, (u32)pl); pat[pl] = 0; found = nhist > 0 ? hist_find(pat, nhist - 1) : nhist; } continue; }
         if (c == 7 || c == 3) return 0;                        /* Ctrl-G or Ctrl-C: cancel, keep the line as it was */
-        if (c >= 32 && c < 127) {
+        if (c >= 32 && c != 127) {                              /* D28: UTF-8 letters too, byte by byte */
             if (pl < 46) { pat[pl++] = (char)c; pat[pl] = 0; int f = hist_find(pat, found < nhist ? found : nhist - 1); if (f < nhist) found = f; else found = nhist; }
             continue;
         }
@@ -420,22 +437,33 @@ static int readline(const char *prompt, int plen, char *buf, int max)
         case 4:                                                 /* Ctrl-D: end of input, or delete */
             if (len == 0) { outs("\r\n"); sys_ttymode(0); return -1; }
             /* fall through */
-        case K_DEL:                                             /* Del */
-            if (pos < len) { memmove(buf + pos, buf + pos + 1, (u32)(len - pos)); len--; }
+        case K_DEL:                                             /* Del: the character under the cursor (D28) */
+            if (pos < len) { int w, k = zu8next(buf + pos, (u32)(len - pos), &w); memmove(buf + pos, buf + pos + k, (u32)(len - pos - k + 1)); len -= k; }
             break;
-        case 127: case 8:
-            if (pos > 0) { memmove(buf + pos - 1, buf + pos, (u32)(len - pos + 1)); pos--; len--; }
+        case 127: case 8:                                       /* the character before it */
+            if (pos > 0) { int p = (int)zu8prev(buf, (u32)pos); memmove(buf + p, buf + pos, (u32)(len - pos + 1)); len -= pos - p; pos = p; }
             break;
         case 1: pos = 0; break;
         case 5: pos = len; break;
-        case 2: if (pos > 0) pos--; break;
-        case 6: if (pos < len) pos++; break;
+        case 2: if (pos > 0) pos = (int)zu8prev(buf, (u32)pos); break;
+        case 6: if (pos < len) { int w; pos += zu8next(buf + pos, (u32)(len - pos), &w); } break;
         case 11: len = pos; buf[len] = 0; break;                /* Ctrl-K */
         case 21: memmove(buf, buf + pos, (u32)(len - pos + 1)); len -= pos; pos = 0; break;   /* Ctrl-U */
         case 23: { int s = pos; while (s > 0 && is_space(buf[s - 1])) s--; while (s > 0 && !is_space(buf[s - 1])) s--;
                    memmove(buf + s, buf + pos, (u32)(len - pos + 1)); len -= pos - s; pos = s; break; }   /* Ctrl-W */
         case 12: outs("\033[2J\033[H"); break;                  /* Ctrl-L */
-        case 20: if (pos > 0 && len > 1) { if (pos == len) pos--; char t = buf[pos - 1]; buf[pos - 1] = buf[pos]; buf[pos] = t; pos++; } break;   /* Ctrl-T */
+        case 20:                                                /* Ctrl-T: the two characters around the cursor */
+            if (pos > 0 && len > 1) {
+                int w;
+                if (pos == len) pos = (int)zu8prev(buf, (u32)pos);
+                int a = pos > 0 ? (int)zu8prev(buf, (u32)pos) : -1, b = zu8next(buf + pos, (u32)(len - pos), &w);
+                if (a >= 0) {
+                    char t[4]; int la = pos - a;
+                    memcpy(t, buf + a, (u32)la); memmove(buf + a, buf + pos, (u32)b); memcpy(buf + a + b, t, (u32)la);
+                    pos = a + b + la;
+                }
+            }
+            break;
         case 18:                                                /* Ctrl-R: search the history */
             if (isearch(buf, max, &len, &pos)) { outs("\r\n"); sys_ttymode(0); buf[len] = 0; return len; }
             break;
@@ -487,7 +515,8 @@ static int readline(const char *prompt, int plen, char *buf, int max)
         }
         if (!len) over = 0;
         if (again_tab) tabs = 1;
-        redraw(prompt, plen, buf, len, pos, &scroll);
+        if (!u8_incomplete(buf, pos))                           /* D28: a letter's first byte waits for its rest */
+            redraw(prompt, plen, buf, len, pos, &scroll);
     }
 }
 
@@ -2646,10 +2675,10 @@ static int run_builtin(char **argv, int argc)
 /* ================================================================ prompt and main */
 static char *expand_prompt(const char *ps, int *vislen)
 {
-    char out[256]; int o = 0, vis = 0, hidden = 0;
+    char out[256]; int o = 0, vis = 0, hidden = 0;            /* D28: vis in columns (a UTF-8 letter one) */
     const char *home = var_get("HOME");
     for (const char *p = ps; *p && o < 240; p++) {
-        if (*p != '\\') { out[o++] = *p; if (!hidden) vis++; continue; }
+        if (*p != '\\') { out[o++] = *p; if (!hidden) vis += (*p & 0xC0) != 0x80; continue; }
         p++;
         if (!*p) break;
         const char *add = 0; char tmp[162];   /* "~" + a working directory of up to 159 bytes (D26) */
@@ -2671,7 +2700,7 @@ static char *expand_prompt(const char *ps, int *vislen)
         case '\\': out[o++] = '\\'; if (!hidden) vis++; continue;
         default: out[o++] = '\\'; out[o++] = *p; if (!hidden) vis += 2; continue;
         }
-        if (add) for (; *add && o < 240; add++) { out[o++] = *add; if (!hidden) vis++; }
+        if (add) { int a0 = o; for (; *add && o < 240; add++) out[o++] = *add; if (!hidden) vis += zu8cols(out + a0, (u32)(o - a0)); }
     }
     out[o] = 0; *vislen = vis;
     return adup(out);
@@ -2694,7 +2723,8 @@ static void init_vars(void)
 {
     static const char *const defs[][2] = {
         { "PATH", "/bin" }, { "HOME", "/home" }, { "USER", "root" }, { "HOSTNAME", "zenix" }, { "SHELL", "/bin/sh" },
-        { "TERM", "xterm-16color" }, { "COLUMNS", "80" }, { 0, 0 } };     /* the console: xterm's keys, 16 colours (D14) */
+        { "TERM", "xterm-16color" }, { "COLUMNS", "80" },         /* the console: xterm's keys, 16 colours (D14) */
+        { "LANG", "C.UTF-8" }, { 0, 0 } };                        /* ... and UTF-8 (D28 11: one character set) */
     for (int i = 0; defs[i][0]; i++) if (!var_get(defs[i][0])) var_set(defs[i][0], defs[i][1], 1);
     if (!var_get("LINES")) { char b[12]; int ti = sys_ttyinfo(); utoa(ti > 0 ? (u32)ti >> 16 : 25, b); var_set("LINES", b, 1); }   /* 32 PAL, 25 NTSC */
     if (!var_get("PS1")) {              /* the host green and the directory blue where colour is wanted (D14) */

@@ -10,7 +10,8 @@ DESCRIPTION
     /bin/init is started by boot(8) on console 1. It first sets the
     console's colours from /etc/console (below), then prints /etc/motd, runs
     "mount -a" if there is an /etc/fstab (so the filesystems listed there
-    are mounted before anyone can log in), starts "ifup -a" without
+    are mounted before anyone can log in), loads the console's Unicode
+    font (the font line, below), starts "ifup -a" without
     waiting for it if /etc/network/interfaces has an "auto" line (the
     network, ifconfig(8): no login waits for a cable), and then looks
     after the ten
@@ -68,9 +69,9 @@ DAEMONS
     /etc/daemons ships with every line commented out: nothing runs until
     root removes a #.
 
-THE CONSOLE'S COLOURS
+THE CONSOLE'S COLOURS AND FONT
     /etc/console holds the text console's settings, one per line (# starts
-    a comment). Today there is one:
+    a comment):
 
     colours N   2, 4, 8 or 16 colours ("colors" is the same; "auto", or no
                 line, lets the machine decide: 16 with fast RAM on an AGA
@@ -89,6 +90,22 @@ THE CONSOLE'S COLOURS
     16 on an OCS or ECS Amiga gives 8; without the chip RAM for the new
     screen the console stays as it was and init says so. The kernel says
     the new depth in its log (dmesg): "display: AGA chips, 2 bitplanes ...".
+
+    font auto   the console's Unicode font (the default; also with no line
+                or no /etc/console): /usr/share/consolefonts/zenix-8x8.zcf,
+                if it is there, for box lines, blocks, braille, symbols and
+                Western letters above Latin-1. 11 KB of memory, once.
+    font none   no font: every character above U+00FF shows as a small box
+                (the columns stay right).
+    font NAME   /usr/share/consolefonts/NAME.zcf (a plain name, at most 23
+                letters).
+
+    The font is loaded after "mount -a" (a separately mounted /usr holds
+    it), before the first login. What fails is said on console 1: "init:
+    /etc/console: font NAME: no file ...", "...: not a console font
+    (ZCF1)", "...: no memory for it", "init: this kernel has no Unicode
+    font" (an older kernel); auto with no file (the RAM floppy) says
+    nothing. Latin-1 is always the ROM's Topaz.
 
 NOTES
     init waits for both kinds of event in one call (wait with the

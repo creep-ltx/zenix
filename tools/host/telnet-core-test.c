@@ -312,11 +312,11 @@ static void filter(void)
     memcpy(big, "\x1b[", 2);
     big[100] = 'm';
     fcase(TN_PC, 0, big, 101, big, 101, "a sequence over 64 bytes: passed on whole");
-    fcase(TN_PC, 1, "\xc4\xb3\xdb\x84\x01\x86\x9b", 7, "-|#\xe4o\xe5\xa2", 7,
-          "PC without the font: box -> - |, block -> #, a-umlaut, smiley -> o");
-    FC(TN_UNIX, "\xc3\xa5\xe2\x94\x80\xc3" "A\x9b\x1b[31m", "\xe5?" "?A?\x1b[31m",
-       "Unix: UTF-8 to Latin-1, the rest ? (a box line, a cut sequence, a lone 0x9B)");
-    FC(TN_UNIX, "\xc0\x80\xc2\x85\xf8", "???" "?", "Unix: overlong, C1 and F8 are ?");
+    fcase(TN_PC, 1, "\xc4\xb3\xdb\x84\x01\x86\x9b\x07\x0d", 9,
+          "\xe2\x94\x80\xe2\x94\x82\xe2\x96\x88\xc3\xa4\xe2\x98\xba\xc3\xa5\xc2\xa2\x07\x0d", 20,
+          "PC without the font (D28): CP437 as UTF-8 (box lines, a block, a-umlaut, the smiley), BEL and CR kept");
+    FC(TN_UNIX, "\xc3\xa5\xe2\x94\x80\xc3" "A\x9b\x1b[31m", "\xc3\xa5\xe2\x94\x80\xc3" "A\x9b\x1b[31m",
+       "Unix (D28): the host's bytes as they are (the console decodes UTF-8)");
 
     ffresh(&f, TN_PC);
     tf_write(&f, (const unsigned char *)"\x1b[?33hA\x1b[?33;25lB", 18);
@@ -342,16 +342,30 @@ static void keys(void)
     unsigned char out[64];
     int bell = 0;
     long k;
-    k = tk_keys(TN_PC, (const unsigned char *)"\x7f\x1b[3~\x1b[A\x03\xe5\xe4\xf6\xc5\xc4\xd6\xa4", 16, out, &bell);
+    k = tk_keys(TN_PC, 0, (const unsigned char *)"\x7f\x1b[3~\x1b[A\x03\xe5\xe4\xf6\xc5\xc4\xd6\xa4", 16, out, &bell);
     CHECK(k == 12 && !memcmp(out, "\x08\x7f\x1b[A\x03\x86\x84\x94\x8f\x8e\x99", 12) && bell == 1,
           "PC keys: Backspace BS, Del DEL, arrows and ^C as given, Swedish letters CP437, a currency sign: the bell");
     bell = 0;
-    k = tk_keys(TN_AMIGA, (const unsigned char *)"\x7f\x1b[3~\xe5\x1b[2~", 10, out, &bell);
+    k = tk_keys(TN_AMIGA, 0, (const unsigned char *)"\x7f\x1b[3~\xe5\x1b[2~", 10, out, &bell);
     CHECK(k == 7 && !memcmp(out, "\x08\x7f\xe5\x1b[2~", 7) && bell == 0, "Amiga keys: BS, DEL, Latin-1 as given, Help as given");
-    k = tk_keys(TN_UNIX, (const unsigned char *)"\x7f\x1b[3~\xe5", 6, out, &bell);
-    CHECK(k == 7 && !memcmp(out, "\x7f\x1b[3~\xc3\xa5", 7), "Unix keys: as given, Latin-1 as UTF-8");
-    k = tk_keys(TN_PC, (const unsigned char *)"\x1b[3", 3, out, &bell);
+    k = tk_keys(TN_UNIX, 1, (const unsigned char *)"\x7f\x1b[3~\xc3\xa5\xe5", 9, out, &bell);
+    CHECK(k == 9 && !memcmp(out, "\x7f\x1b[3~\xc3\xa5\xe5", 9), "Unix keys (D28): as given, UTF-8 not encoded twice");
+    k = tk_keys(TN_PC, 0, (const unsigned char *)"\x1b[3", 3, out, &bell);
     CHECK(k == 3 && !memcmp(out, "\x1b[3", 3), "a cut ESC[3 stays as it is (no waiting for more)");
+    bell = 0;
+    k = tk_keys(TN_PC, 1, (const unsigned char *)"a\xc3\xa5\xc3\xa4\xe2\x94\x80\xe2\x82\xac", 11, out, &bell);
+    CHECK(k == 4 && !memcmp(out, "a\x86\x84\xc4", 4) && bell == 1,
+          "PC keys from a UTF-8 console (no font): a-ring, a-umlaut CP437; a pasted box line its CP437 byte; the euro the bell");
+    k = tk_keys(TN_PC, 1, (const unsigned char *)"\xc3", 1, out, &bell);
+    long k2 = tk_keys(TN_PC, 1, (const unsigned char *)"\xa5x", 2, out + k, &bell);
+    CHECK(k == 0 && k2 == 2 && !memcmp(out, "\x86x", 2), "... a letter split between two reads is finished by the next");
+    k = tk_keys(TN_PC, 1, (const unsigned char *)"\xe2", 1, out, &bell);
+    k2 = tk_keys(TN_PC, 1, (const unsigned char *)"y", 1, out + k, &bell);
+    CHECK(k == 0 && k2 == 2 && out[0] == 0x83 && out[1] == 'y', "... a lead followed by ASCII: the byte as Latin-1, then the letter");
+    bell = 0;
+    k = tk_keys(TN_AMIGA, 1, (const unsigned char *)"\xc3\xa5\xe5\xe2\x94\x80", 6, out, &bell);
+    CHECK(k == 2 && out[0] == 0xE5 && out[1] == 0xE5 && bell == 1,
+          "Amiga keys from a UTF-8 console: Latin-1 (a stray byte as itself); a character Latin-1 lacks: the bell");
 }
 
 int main(int argc, char **argv)
@@ -363,7 +377,9 @@ int main(int argc, char **argv)
     keys();
     if (argc > 1) {
         FILE *f = fopen(argv[1], "wb");
-        if (!f || fwrite(tn_cp437_latin1, 1, 256, f) != 256 || fwrite(tn_latin1_cp437, 1, 256, f) != 256) {
+        unsigned char ub[512];
+        for (int i = 0; i < 256; i++) { ub[2 * i] = (unsigned char)(tn_cp437_ucs[i] >> 8); ub[2 * i + 1] = (unsigned char)tn_cp437_ucs[i]; }
+        if (!f || fwrite(ub, 1, 512, f) != 512 || fwrite(tn_latin1_cp437, 1, 256, f) != 256) {
             printf("FAIL core: cannot write %s\n", argv[1]);
             fails++;
         }

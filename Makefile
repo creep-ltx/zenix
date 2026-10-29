@@ -39,7 +39,7 @@ UDIAG   ?=
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/confont.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch msgpingd msgping socktestd socktest bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
@@ -168,6 +168,12 @@ KOPT_rtc := -Os
 KOPT_kbd := -Os
 KOPT_gfx := -Os
 KOPT_term := -Os
+# DESIGN D28: the console's widths and the Unicode font's checks (cold, -Os; the width lookup keeps -O2 by an
+# attribute), with the width table generated from the C library's own tables (picolibc's combining.t and wide.t)
+KOPT_confont := -Os -I$(BUILD)
+$(BUILD)/confont.o: $(BUILD)/conwidth.h
+$(BUILD)/conwidth.h: tools/mkconfont.py libc/picolibc/newlib/libc/string/combining.t libc/picolibc/newlib/libc/string/wide.t | $(BUILD)
+	python3 tools/mkconfont.py widths $@
 # DESIGN D16 rule 14 (room for events and signals, measured 2026-10-26): tty.c (line discipline at typing speed) and
 # vfs.c (dispatch and path routing; the time goes to the servers) at -Os save 4048 bytes of the RAM floppy's kernel; the
 # pipes' copy loops (pipe_read, pipe_write) keep -O2 through an attribute (136 bytes). The scheduler, ipc.c and the
@@ -194,7 +200,8 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 # DESIGN D19 step 1), so its kernel limit is lower; the build says that one too. Its RAM disk carries no test
 # scripts (NOTESTS=1: the mount tests run none of /tests); that made room for D20 step 1's 8 KB (3 blocks were free).
 RAMDISK_K := 640
-RAMDISK_MOUNT_K := 716
+# 712 since DESIGN D28 step 2 (2026-10-29): the console's UTF-8 took about 9 KB of kernel; 33 blocks stay free there
+RAMDISK_MOUNT_K := 712
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
@@ -567,6 +574,7 @@ LIBZ_SHARED := zmalloc zenv zout zerrtab zsig zpoll zsock zhelp zpw
 # (section 7: libgcc's is not pure), the terminal, processes, users, glob, regcomp (over user/regex.c, the one engine)
 LIBC_PORT = libc/zenix/sys.c libc/zenix/start.c libc/zenix/stdio.c libc/zenix/strerror.c libc/zenix/dprintf.c libc/zenix/dirent.c \
              libc/zenix/divdi3.c libc/zenix/termios.c libc/zenix/spawn.c libc/zenix/pwd.c libc/zenix/glob.c libc/zenix/regcomp.c \
+             libc/zenix/locale.c \
              user/regex.c $(LIBZ_SHARED:%=user/%.c)
 LIBC_O2 := $(filter newlib/libc/machine/m68k/%,$(LIBC_SRCS)) \
            $(addprefix newlib/libc/string/,memchr.c memcmp.c memmove.c strcat.c strchr.c strcmp.c strcpy.c strcspn.c \
@@ -588,6 +596,10 @@ LIBC_OPT = $(if $(filter $(1),$(LIBC_O2)),-O2,-Os)
 LIBC_NOBUILTIN = $(if $(filter newlib/libc/machine/m68k/%,$(1)),-fno-builtin)
 # mkostemps' mask names O_SYNC, which Zenix does not define (a caller cannot pass it): 0 there
 LIBC_DEF_newlib/libc/tinystdio/mktemp.c := -DO_SYNC=0
+# DESIGN D28 11: picolibc's setlocale ignores the environment for ""; the port's (libc/zenix/locale.c) reads LC_ALL,
+# LC_CTYPE and LANG and calls picolibc's under this name
+LIBC_DEF_newlib/libc/locale/setlocale.c := -Dsetlocale=__pico_setlocale
+$(BUILD)/lc/newlib/libc/locale/setlocale.o $(BUILD)/lcp/newlib/libc/locale/setlocale.o: Makefile
 LIBC_LDFLAGS := -Wl,--defsym=vfprintf=__l_vfprintf -Wl,--defsym=vfscanf=__l_vfscanf
 $(BUILD)/libc-inc/zenix-consts.h: tools/libc-consts.sh kernel/kernel.h kernel/fsproto.h kernel/ext2.h kernel/netproto.h user/usys.h
 	@mkdir -p $(dir $@)
@@ -653,26 +665,28 @@ $(LIBCAPPS:%=$(BUILD)/%.pzx): $(BUILD)/%.pzx: $(BUILD)/%.cpuelf tools/mkzexe.py 
 
 # ---- the text-UI library (roadmap block 3; DESIGN D27 sections 8-9: linked into each program, no shared library):
 # the owner's tui.library, its upstream source pinned in ports/tui/upstream (tools/tui-vendor.sh, unchanged) and
-# compiled through Zenix's layer in ports/tui/zenix (ports/tui/README). TUI_UTF8=1 switches it to UTF-8 output and the
-# C library's wcwidth (off until the console's UTF-8, DESIGN D28). tuitest is its test program (/tests/tuitest,
-# tools/tui-test.sh), a C library program linked with libtui.a.
-TUI_UTF8 ?= 0
+# compiled through Zenix's layer in ports/tui/zenix (ports/tui/README). TUI_UTF8=1 (the default since the console's
+# UTF-8, DESIGN D28) is UTF-8 output and the C library's wcwidth; TUI_UTF8=0 the Latin-1 build of before. tuitest is
+# its test program (/tests/tuitest, tools/tui-test.sh), a C library program linked with libtui.a.
+TUI_UTF8 ?= 1
 TUI_CFLAGS := $(LIBC_PFLAGS) -Iports/tui/zenix/include -Iports/tui/upstream/include -DTUI_STATIC \
               $(if $(filter 1,$(TUI_UTF8)),-DZENIX_TUI_UTF8)
 TUI_HDRS := $(LIBC_HDRS) $(wildcard ports/tui/zenix/include/*.h ports/tui/zenix/include/*/*.h) \
-            $(wildcard ports/tui/upstream/include/*.h ports/tui/upstream/include/*/*.h)
+            $(wildcard ports/tui/upstream/include/*.h ports/tui/upstream/include/*/*.h) Makefile
+# (Makefile: TUI_UTF8's default lives here, and the objects must follow it)
 $(BUILD)/tui/%.o: ports/tui/zenix/%.c ports/tui/upstream/src/%.c $(TUI_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(TUI_CFLAGS) -c $< -o $@
-# (core-utf8.o: the TUI_UTF8 build of the same file, compiled with every build so the switch keeps building; not used)
-$(BUILD)/tui/core-utf8.o: ports/tui/zenix/core.c ports/tui/upstream/src/core.c $(TUI_HDRS)
+# (core-other.o: the other setting's build of the same file, compiled with every build so the switch keeps building;
+# not used)
+$(BUILD)/tui/core-other.o: ports/tui/zenix/core.c ports/tui/upstream/src/core.c $(TUI_HDRS)
 	@mkdir -p $(dir $@)
-	$(CC) $(TUI_CFLAGS) -DZENIX_TUI_UTF8 -c $< -o $@
+	$(CC) $(filter-out -DZENIX_TUI_UTF8,$(TUI_CFLAGS)) $(if $(filter 1,$(TUI_UTF8)),,-DZENIX_TUI_UTF8) -c $< -o $@
 # (sigfd.o: TuiWait's extra signals none, a member of its own: linked only when the program gives none, ports/common)
 $(BUILD)/tui/sigfd.o: ports/tui/zenix/sigfd.c $(TUI_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(TUI_CFLAGS) -c $< -o $@
-$(BUILD)/libtui.a: $(BUILD)/tui/core.o $(BUILD)/tui/glue.o $(BUILD)/tui/sigfd.o $(BUILD)/tui/core-utf8.o tools/check-68020-60.sh
+$(BUILD)/libtui.a: $(BUILD)/tui/core.o $(BUILD)/tui/glue.o $(BUILD)/tui/sigfd.o $(BUILD)/tui/core-other.o tools/check-68020-60.sh
 	rm -f $@
 	$(TOOLPREFIX)ar rcs $@ $(BUILD)/tui/core.o $(BUILD)/tui/glue.o $(BUILD)/tui/sigfd.o
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
@@ -736,14 +750,14 @@ $(BUILD)/crt0.o: user/crt0.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 # libz.uo is user/libz.c and the files it shares with the C library (DESIGN D27 section 6 step 1, user/zshare.h),
 # joined into one object (ld -r keeps every function's section, so --gc-sections still takes only what is called)
-$(BUILD)/libz-main.uo: user/libz.c user/libz.h user/zshare.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/libz-main.uo: user/libz.c user/libz.h user/zshare.h user/usys.h kernel/cwidth.h $(BUILD)/conwidth.h | $(BUILD)
+	$(CC) $(UCFLAGS) -I$(BUILD) -c $< -o $@
 $(LIBZ_SHARED:%=$(BUILD)/%.uo) $(LIBZ_SHARED:%=$(BUILD)/%.po): user/zshare.h user/zpw.h
 $(BUILD)/zsock.uo $(BUILD)/zsock.po: user/socket.h kernel/netproto.h
 $(BUILD)/libz.uo: $(BUILD)/libz-main.uo $(LIBZ_SHARED:%=$(BUILD)/%.uo)
 	$(CC) -m68020-60 -nostdlib -r $^ -o $@
-$(BUILD)/libz-main.po: user/libz.c user/libz.h user/zshare.h user/usys.h tools/purecc.sh | $(BUILD)
-	tools/purecc.sh $(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/libz-main.po: user/libz.c user/libz.h user/zshare.h user/usys.h kernel/cwidth.h $(BUILD)/conwidth.h tools/purecc.sh | $(BUILD)
+	tools/purecc.sh $(CC) $(UCFLAGS) -I$(BUILD) -c $< -o $@
 $(BUILD)/libz.po: $(BUILD)/libz-main.po $(LIBZ_SHARED:%=$(BUILD)/%.po)
 	$(CC) -m68020-60 -nostdlib -r $^ -o $@
 $(BUILD)/%.uo: user/%.c user/libz.h user/usys.h | $(BUILD)
@@ -792,7 +806,13 @@ $(BUILD)/anchors: tools/certdata tools/mkanchors.py | $(BUILD)
 	python3 tools/mkanchors.py $@ >/dev/null
 $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 	python3 tools/mkpsf.py tools/font_8x8.c $@
-$(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+# the console's Unicode font (DESIGN D28 6, ZCF1), /usr/share/consolefonts/zenix-8x8.zcf on the full root images and in
+# the base package: box drawing, blocks and braille generated, CP437's symbols from font_8x8.c, Zenix's own glyphs
+# and stand-ins (tools/consolefont/); init loads it at boot (/etc/console's font line)
+UFONT_SRC := tools/font_8x8.c tools/mkconfont.py $(wildcard tools/consolefont/*)
+$(BUILD)/zenix-8x8.zcf: $(UFONT_SRC) | $(BUILD)
+	python3 tools/mkconfont.py font $@
+$(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
 # zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
@@ -812,7 +832,7 @@ $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py 
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 1,024 inodes (512 ran out with the
 # network's files in D19 step 8: cmds2-test makes 150 files)
-$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
 	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 8M 1024
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
@@ -837,7 +857,7 @@ $(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkca
 	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
 # the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
 # ext2 root with every program (written to a card by tools/write-card.sh)
-$(BUILD)/root-card.img: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+$(BUILD)/root-card.img: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
 	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 512M 8192
 $(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
 	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img

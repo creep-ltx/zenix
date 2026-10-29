@@ -96,7 +96,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    desktop, network and programs on one 1.44 MB floppy; as there, the programs are packed on the disk and unpacked
    when they start, which is what makes a desktop edition fit 880 KB.
 3. **A terminal you can live in:** a fuller C library (picolibc, newlib's descendant: D27; steps 0-4 built 2026-10-29); D13 stage 2 (shared libraries) decided; the text-UI
-   library (ported 2026-10-29: ports/tui), then Sumi, Maki and Markdown (ported 2026-10-29: ports/sumi, ports/maki, ports/markdown) and `zc`; UTF-8 in the console; PC (CP437) and other bitmap fonts for the console
+   library (ported 2026-10-29: ports/tui), then Sumi, Maki and Markdown (ported 2026-10-29: ports/sumi, ports/maki, ports/markdown) and `zc`; UTF-8 in the console (D28 steps 1-6 built 2026-10-29, branch utf8); PC (CP437) and other bitmap fonts for the console
    (the PC set comes earlier, with telnet); (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported. (Postponed by the owner 2026-10-29, "can wait":
    the tracker music player, the IRC client and the e-mail client; later, unscheduled.) Audit; then a first public pre-release (0.1),
    with the owner's yes.
@@ -144,7 +144,7 @@ any desktop:
   `while`, functions), globbing, aliases, job control, `2>` and here-documents, a profile file. Lessons from
   the csh project (best of bash, zsh and fish).
 - *Terminal:* arrow, Home/End and function keys as standard escape codes, scrollback, text styles (bold,
-  inverse, underline), colours (DESIGN D14: 16 on AGA, 8 on OCS/ECS with fast RAM), UTF-8 later.
+  inverse, underline), colours (DESIGN D14: 16 on AGA, 8 on OCS/ECS with fast RAM), UTF-8 (DESIGN D28).
 - *Users:* multi-user with the honest no-MMU limit (DESIGN.md D8): uids, permission checks in the filesystem server,
   `login`, `su`, `chown`, `/etc/passwd`.
 - *C library and kernel:* full printf, stdio, `qsort`, `strtol`, time functions, `getenv`, signals, `kill`,

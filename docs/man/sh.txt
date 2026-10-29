@@ -38,6 +38,10 @@ LINE EDITING
              and does not run)
     Tab      complete a command, a file name or a $variable; twice lists
              the choices
+    The line is UTF-8 (the console's): the keys move, delete and swap
+    whole characters, and wide characters take two columns; a byte that is
+    not UTF-8 is one character of one column, as the console shows it.
+    The 478 characters the line holds are bytes (a Swedish letter is two).
     Ctrl+R   search the history backwards as you type; Ctrl+R again goes to
              an older match, Enter runs it, an arrow key keeps it for editing,
              Ctrl+G cancels
@@ -114,6 +118,8 @@ VARIABLES THE SHELL USES
     they show where it led, as Linux's cd -P; DESIGN D26)
     TERM (default xterm-16color: the console speaks xterm's keys and 16
         colours; over a serial line the other computer's getty sets it)
+    LANG (default C.UTF-8: the console's one character set; programs on
+        the C library read it with LC_ALL and LC_CTYPE; LANG=C gives bytes)
     NO_COLOR (set to something: no colours from ls, grep, edit or the
         prompt; no-color.org)
     LINES (from the terminal: 32 on PAL, 25 on NTSC)  COLUMNS

@@ -14,9 +14,9 @@
  *    owner's programs gives them (ports/common: 0 stays "none"); 0 for the input is descriptor 0 and 0 for the
  *    output descriptor 1 (upstream: Input() and Output()); inside, the toolkit keeps the descriptors;
  *  - CTerm is 1: the Zenix console takes the ANSI colours as they are (256 and 24-bit ones as the nearest of its 16)
- *    and ESC [ ? 25 h / l for the cursor: upstream's CTerm path. UTF8 is 0: the console is Latin-1 (one byte one
- *    cell) until its UTF-8 (DESIGN D28) lands; ZENIX_TUI_UTF8 (ports/tui/README) switches the output to UTF-8 and the
- *    widths to the C library's wcwidth then. CellW and CellH are 0; no mouse, no pastes;
+ *    and ESC [ ? 25 h / l for the cursor: upstream's CTerm path. UTF8 is 1 with ZENIX_TUI_UTF8 (the default build
+ *    since the console's UTF-8, DESIGN D28; ports/tui/README): UTF-8 output and the C library's wcwidth; without it 0,
+ *    the Latin-1 toolkit of before. CellW and CellH are 0; no mouse, no pastes;
  *  - the console has no second screen: closing (and suspending) clears it, as upstream does in a plain console;
  *  - TuiSignal answers 0 (no AmigaOS signals); a program with a poll loop of its own polls descriptor 0 and calls
  *    TuiPoll. TuiWait's extra signals are descriptors: tui_zenix_sigfd(bit) names the one behind a signal bit (the
@@ -27,6 +27,7 @@
  * file unused and are never emitted (the C rule: a later declaration without static keeps the internal linkage). */
 #ifdef ZENIX_TUI_UTF8
 #define TUI_LIB                 /* upstream's way to utf8.library's widths: wcwidth here (include/proto/utf8.h) */
+#define Utf8Base tui_zenix_Utf8Base     /* the library's own: Maki defines a Utf8Base of its own (one program) */
 #endif
 #include <errno.h>
 #include <poll.h>

@@ -59,11 +59,16 @@ if [ -z "$NOTESTS" ] && [ -f "$B/libctest.pzx" ]; then cp "$B/libctest.pzx" "$T/
 if [ -z "$NOTESTS" ] && [ -f "$B/tuitest.zx" ]; then
     cp "$B/tuitest.zx" "$T/tests/tuitest" && chmod 755 "$T/tests/tuitest" && lic ports/tui/upstream/LICENSE tui
 fi
-# the PC font (DESIGN D20 4.2) on the full images (those with manual pages), with its notice, as the base package
+# the PC font (DESIGN D20 4.2) on the full images (those with manual pages), with its notice, as the base package;
+# the Unicode font (DESIGN D28 6, made from the same font_8x8.c and Zenix's own glyphs) beside it
 if [ -z "$NOMAN" ] && [ -f "$B/cp437-8x8.psf" ]; then
     mkdir -p "$T/usr/share/consolefonts"
     cp "$B/cp437-8x8.psf" "$T/usr/share/consolefonts/"
     lic tools/font_8x8.COPYING font_8x8
+fi
+if [ -z "$NOMAN" ] && [ -f "$B/zenix-8x8.zcf" ]; then
+    mkdir -p "$T/usr/share/consolefonts"
+    cp "$B/zenix-8x8.zcf" "$T/usr/share/consolefonts/"
 fi
 # the root certificates (DESIGN D21 8.1) and the owner's own folder for more, on the full images, as the base package
 if [ -z "$NOMAN" ] && [ -f "$B/anchors" ]; then

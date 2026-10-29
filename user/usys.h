@@ -226,6 +226,10 @@ static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 
 #define CONR_ICE 16             /* SGR 5 and 6 the bright background */
 #define CONR_CGAPAL 32          /* the CGA palette while shown */
 #define CONR_LFONLY 64          /* LF without CR */
+#define CONR_8BIT 128           /* DESIGN D28: 8-bit mode with Topaz (no UTF-8; the keys Latin-1) */
+/* DESIGN D28 7: the console's Unicode font (ZCF1) for every console: root, no descriptor; a null pointer drops it */
+#define CON_UFONT 4
+static inline int sys_conufont(const void *zcf, u32 n) { return sys3(89, CON_UFONT, (u32)zcf, n); }
 static inline int sys_confont(int fd, const void *psf, u32 n) { return sys3(89, CON_FONT | (u32)(fd + 1) << 8, (u32)psf, n); }
 static inline int sys_conrules(int fd, u32 bits, u32 mask) { return sys3(89, CON_RULES | (u32)(fd + 1) << 8, bits, mask); }
 /* DESIGN D24 6.1-6.3, the remote control's console ops: root only (-EPERM), any console's descriptor; a console never
@@ -261,6 +265,10 @@ struct uconline {
 };
 _Static_assert(__builtin_offsetof(struct uconline, palette) + 32 == UCONLINE_FIRST, "uconline's first size");
 static inline int sys_conread(int fd, struct uconread *r) { return sys3(89, CON_READ | (u32)(fd + 1) << 8, (u32)r, 0); }
+/* DESIGN D28: CON_READ's a3 1, cells of 4 bytes (the 16-bit value big-endian, CONA_*, colour): a value above 0xFF is
+ * a code point, 0xFFFE a character beyond U+FFFF, 0xFFFF the right half of a wide character */
+#define CONRF_CELL4 1
+static inline int sys_conread4(int fd, struct uconread *r) { return sys3(89, CON_READ | (u32)(fd + 1) << 8, (u32)r, CONRF_CELL4); }
 static inline int sys_conline(int fd, int line, struct uconline *d) { return sys3(89, CON_LINE | (u32)(fd + 1) << 8, (u32)line, (u32)d); }
 static inline int sys_coninput(int fd, int kind, const void *b, u32 n) { return sys3(89, CON_INPUT | (u32)(fd + 1) << 8, (u32)b, n | (u32)kind << 16); }
 #ifndef ZENIX_LIBC                       /* the C library: its own headers have them (libc/zenix/include) */

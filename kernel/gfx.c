@@ -23,7 +23,13 @@
  * Region scrolls (CSI S/T/L/M, a scroll region) are one blitter copy too, and erased rows a blitter fill with the
  * background colour. A glyph is drawn by the CPU, one byte per plane per glyph line: (glyph & m1) ^ m2 per plane, m1
  * set where the foreground and background bits differ, m2 where the background bit is set. Glyphs come from the
- * Kickstart ROM's Topaz 8, found through GfxBase before the OS memory is reused. */
+ * Kickstart ROM's Topaz 8, found through GfxBase before the OS memory is reused.
+ * DESIGN D28: a cell above U+00FF (gfx_ucell) takes its glyph from the Unicode font (confont.c: the half-page index,
+ * an entry, then Topaz's glyph of a Latin-1 byte for a stand-in, else the font's 8 bytes drawn byte-wise: each
+ * plane's byte (b & m) ^ n, with no replicated table and no multiply), or the box built in here when the font has
+ * none or there is no font. Outside 8-bit mode the bytes 0x80-0x9F (stray bytes: no text is stored there) are the
+ * box: their glyph lines are swapped with Topaz's own when the shown console's mode changes (gfx_show), so the
+ * Latin-1 path pays nothing for it. */
 
 /* first display line; 0x2C is the standard start. Emulator windows
  * crop the top, so screenshot tests build with DIW_V=0x38 (make DIWV=0x38). */
@@ -67,6 +73,14 @@ static int cop_col, cop_ptr;            /* where the colours and the plane point
 static int off;                         /* drawing window top (lines) */
 static volatile int hw_off = -1;        /* what the Copper list shows */
 static u8 glyphs[224][8] __attribute__((aligned(4)));  /* Latin-1 32..255 */
+static u8 c1alt[32][8];                 /* D28: the glyphs of 0x80-0x9F not in glyphs[] now (Topaz's, or the boxes) */
+static int c1topaz;                     /* glyphs[] holds Topaz's own 0x80-0x9F (8-bit mode shown) */
+/* D28: the box, and the wide box's left and right halves, when the Unicode font has none (or there is none) */
+static const u8 boxes[3][8] = {
+    { 0x00, 0x7E, 0x42, 0x42, 0x42, 0x42, 0x7E, 0x00 },
+    { 0x00, 0x7F, 0x40, 0x40, 0x40, 0x40, 0x7F, 0x00 },
+    { 0x00, 0xFE, 0x02, 0x02, 0x02, 0x02, 0xFE, 0x00 },
+};
 static int up;
 
 /* The 16 ANSI colours, 12 bits (on AGA with LOCT 0 each value fills the low nibbles too). Grey on black stays the
@@ -142,6 +156,11 @@ static int font_extract(u32 tf)
             glyphs[ch - 32][y] = (u8)(pair >> (8 - (bitoff & 7)));
         }
     }
+    for (int i = 0; i < 32; i++) {      /* D28: outside 8-bit mode 0x80-0x9F draw the box; Topaz's are kept aside */
+        memcpy(c1alt[i], glyphs[0x80 - 32 + i], 8);
+        memcpy(glyphs[0x80 - 32 + i], boxes[0], 8);
+    }
+    c1topaz = 0;
     return 0;
 }
 
@@ -322,14 +341,10 @@ static HOT void draw2(u8 *p, const u32 *g, u32 m1, u32 m2)
     }
 }
 
-static HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
+/* the colours a cell is drawn in at this depth (more than one plane): *fg, *bg; bold added for a bright colour at 2
+ * or 3 planes, and inverse applied -> the attributes then */
+static inline __attribute__((always_inline)) HOT u32 pens(u32 attr, u32 colour, u32 *fgp, u32 *bgp)
 {
-    const struct gfont *f = sfont;
-    int gi = f ? ch : (ch < 32 ? '?' : ch) - 32;
-    if (gfx_depth == 1) {
-        draw1(p, f ? f->g[gi] : glyphs[gi], attr, (attr & 1) ? 0xFF : 0);
-        return;
-    }
     u32 fg = colour & 15, bg = colour >> 4;
     if (gfx_depth < 4) {
         if (fg >= 8) {
@@ -347,6 +362,21 @@ static HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
         fg = bg;
         bg = t;
     }
+    *fgp = fg;
+    *bgp = bg;
+    return attr;
+}
+
+static inline __attribute__((always_inline)) HOT void put_glyph(u8 *p, u8 ch, u32 attr, u32 colour)
+{
+    const struct gfont *f = sfont;
+    int gi = f ? ch : (ch < 32 ? '?' : ch) - 32;
+    if (gfx_depth == 1) {
+        draw1(p, f ? f->g[gi] : glyphs[gi], attr, (attr & 1) ? 0xFF : 0);
+        return;
+    }
+    u32 fg, bg;
+    attr = pens(attr, colour, &fg, &bg);
     const u32 *g = (f ? f->r : rglyph) + gi * 8;
     u32 tmp[8];
     if (attr & 6) {
@@ -385,10 +415,96 @@ static void set_rows(void)              /* lstride changed: each text row is 8 l
         rowoff[r] = a;
 }
 
-HOT void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour)
+HOT __attribute__((noipa)) void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour)
 {
     if (up)
         put_glyph(top + rowoff[row] + col, ch, attr, colour);
+}
+
+/* D28: 8 glyph bytes drawn byte-wise at any depth: each plane's byte is (b & m) ^ n, m set where the foreground and
+ * background bits differ, n where the background bit is set (no replicated table: gcc turns every C replication into
+ * a 44-cycle muls.l, DESIGN D28 8). Bold and underline, rarer, go through a copy first; one loop per depth keeps the
+ * masks in registers. */
+static HOT void put_bytes(u8 *p, const u8 *g, u32 attr, u32 colour)
+{
+    u8 tmp[8];
+    if (attr & 6) {
+        for (int y = 0; y < 8; y++) {
+            u32 b = g[y];
+            if (attr & 4)
+                b |= b >> 1;                    /* bold: smear one pixel */
+            tmp[y] = (u8)b;
+        }
+        if (attr & 2)
+            tmp[7] = 0xFF;                      /* underline */
+        g = tmp;
+    }
+    if (gfx_depth == 1) {
+        u8 x = (attr & 1) ? 0xFF : 0;
+        for (int y = 0; y < 8; y++, p += STRIDE)
+            *p = (u8)(g[y] ^ x);
+        return;
+    }
+    u32 fg, bg;
+    pens(attr, colour, &fg, &bg);
+    u8 m0 = (fg ^ bg) & 1 ? 0xFF : 0, n0 = bg & 1 ? 0xFF : 0;
+    u8 m1 = (fg ^ bg) & 2 ? 0xFF : 0, n1 = bg & 2 ? 0xFF : 0;
+    u8 m2 = (fg ^ bg) & 4 ? 0xFF : 0, n2 = bg & 4 ? 0xFF : 0;
+    u8 m3 = (fg ^ bg) & 8 ? 0xFF : 0, n3 = bg & 8 ? 0xFF : 0;
+    /* opaque to gcc: knowing a mask is 0 or 0xFF it would turn b & m into a muls.w (D28 8's trap) */
+    __asm__("" : "+d"(m0), "+d"(n0), "+d"(m1), "+d"(n1));
+    __asm__("" : "+d"(m2), "+d"(n2), "+d"(m3), "+d"(n3));
+    const u8 *e = g + 8;
+    if (gfx_depth == 3)
+        for (; g < e; g++, p += 3 * STRIDE) {
+            u8 b = *g;
+            p[0] = (b & m0) ^ n0;
+            p[STRIDE] = (b & m1) ^ n1;
+            p[2 * STRIDE] = (b & m2) ^ n2;
+        }
+    else if (gfx_depth == 4)
+        for (; g < e; g++, p += 4 * STRIDE) {
+            u8 b = *g;
+            p[0] = (b & m0) ^ n0;
+            p[STRIDE] = (b & m1) ^ n1;
+            p[2 * STRIDE] = (b & m2) ^ n2;
+            p[3 * STRIDE] = (b & m3) ^ n3;
+        }
+    else
+        for (; g < e; g++, p += 2 * STRIDE) {
+            u8 b = *g;
+            p[0] = (b & m0) ^ n0;
+            p[STRIDE] = (b & m1) ^ n1;
+        }
+}
+
+/* D28: a cell above U+00FF: part 0 one cell, 1 the left half of a wide character, 2 its right half (v the lead's).
+ * The font's entry: 0 none (the box; a wide character's halves of the wide box), 32-255 Topaz's glyph of that byte
+ * (a stand-in, drawn exactly as Topaz), 256 + n its glyph n. A lead with a glyph has a blank right half. */
+HOT void gfx_ucell(int row, int col, u16 v, u8 attr, u8 colour, int part)
+{
+    if (!up)
+        return;
+    u8 *p = top + rowoff[row] + col;
+    u32 e = 0;                          /* (Topaz's glyphs through gfx_cell: put_glyph stays inlined in that hot path) */
+    if (v < 0xFFFE && cf_index) {
+        u32 h = cf_index[v >> 7];
+        if (h)
+            e = cf_pages[(h - 1) * 128 + (v & 127)] & 0x1FFF;
+    }
+    if (part == 2) {
+        if (e)
+            gfx_cell(row, col, ' ', attr, colour);
+        else
+            put_bytes(p, cf_index ? cf_glyphs + 16 : boxes[2], attr, colour);
+        return;
+    }
+    if (!e)
+        put_bytes(p, cf_index ? cf_glyphs + 8 * (u32)part : boxes[part], attr, colour);
+    else if (e < 256)
+        gfx_cell(row, col, (u8)e, attr, colour);
+    else
+        put_bytes(p, cf_glyphs + 8 * (e - 256), attr, colour);
 }
 
 /* rows [row, row + n) of the screen take the background colour of `colour` */
@@ -599,9 +715,28 @@ void gfx_font_free(struct gfont *f)
     kfree(f);
 }
 
-/* the console shown changed, or its font or rules did: its glyphs from now on, its palette at the next vertical blank */
-void gfx_show(const struct gfont *f, int cga)
+/* D28: Topaz's own glyphs of 0x80-0x9F (8-bit mode) or the boxes, swapped into glyphs[] and Topaz's table */
+static void c1_swap(void)
 {
+    for (int i = 0; i < 32; i++) {
+        u8 *a = glyphs[0x80 - 32 + i], *b = c1alt[i];
+        for (int y = 0; y < 8; y++) {
+            u8 t = a[y];
+            a[y] = b[y];
+            b[y] = t;
+            if (rglyph)
+                rglyph[(0x80 - 32 + i) * 8 + y] = a[y] * 0x01010101u;
+        }
+    }
+    c1topaz = !c1topaz;
+}
+
+/* the console shown changed, or its font or rules did: its glyphs from now on, its palette at the next vertical
+ * blank; eight: its 8-bit mode (D28), where Topaz draws 0x80-0x9F as its own glyphs */
+void gfx_show(const struct gfont *f, int cga, int eight)
+{
+    if ((eight != 0) != c1topaz)
+        c1_swap();
     sfont = f;
     cga = cga != 0;
     if (cga != scga) {
@@ -783,7 +918,7 @@ void gfx_panic(void)
 {
     if (!up)
         return;
-    sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable) */
+    sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable); no table work here */
     top = line_at(off);                 /* a fault inside set_off may have left top behind off */
     cop_point(off);
     cop[cop_col + 1] = 0x800;

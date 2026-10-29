@@ -31,7 +31,8 @@ static u32 sgr_len(u32 i, u32 end)
     while (k < end && ((text[k] >= '0' && text[k] <= '9') || text[k] == ';' || text[k] == ':')) k++;
     return k < end && text[k] == 'm' ? k + 1 - i : 0;
 }
-/* split the text into screen rows: lines of up to 80 columns, tabs to the next multiple of 8 */
+/* split the text into screen rows: lines of up to 80 columns, tabs to the next multiple of 8; DESIGN D28: by
+ * characters and the console's widths (a UTF-8 letter one column, a wide one two), never inside a character */
 static void layout(void)
 {
     nrows = 0;
@@ -41,9 +42,10 @@ static void layout(void)
         while (i < tlen && text[i] != '\n') {
             u32 sl = sgr_len(i, tlen);
             if (sl) { i += sl; continue; }                  /* a colour code: no width */
-            u32 w = text[i] == '\t' ? 8 - (col % 8) : ((unsigned char)text[i] < 32 ? 2u : 1u);
+            u32 w = text[i] == '\t' ? 8 - (col % 8) : ((unsigned char)text[i] < 32 ? 2u : 1u), k = 1;
+            if ((unsigned char)text[i] >= 0x80) { int cw; k = (u32)zu8next(text + i, tlen - i, &cw); w = (u32)cw; }
             if (col + w > 80 && col > 0) { add_row(start, i - start); start = i; col = 0; }
-            col += w; i++;
+            col += w; i += k;
         }
         add_row(start, i - start);
         if (i < tlen) i++;                                  /* the newline */
@@ -63,6 +65,7 @@ static void put_row(const struct row *r)
         if (sl) { oputn(text + k, sl); k += sl - 1; coloured = 1; continue; }
         if (c == '\t') { do { oputc(' '); col++; } while (col % 8); }
         else if (c < 32) { oputc('^'); oputc(c + 64); col += 2; }
+        else if (c >= 0x80) { int w, n = zu8next(text + k, end - k, &w); oputn(text + k, (u32)n); k += (u32)n - 1; col += (u32)w; }
         else { oputc(c); col++; }
     }
     if (coloured) oputs("\033[m");
@@ -120,7 +123,11 @@ static void prompt_line(const char *label, char *out, int max)
         if (sys_read(tty_fd, &c, 1) != 1) break;
         if (c == '\r' || c == '\n') break;
         if (c == 27 || c == 3) { n = 0; break; }
-        if ((c == 127 || c == 8) && n) { n--; oputs("\b \b"); }
+        if ((c == 127 || c == 8) && n) {               /* D28: one character, its columns */
+            int p = (int)zu8prev(out, (u32)n), w = zu8cols(out + p, (u32)(n - p));
+            n = p;
+            while (w-- > 0) oputs("\b \b");
+        }
         else if (c >= 32 && n < max - 1) { out[n++] = (char)c; oputc(c); }
         oflush();
     }

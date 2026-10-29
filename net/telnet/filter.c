@@ -55,8 +55,7 @@ void tf_init(struct tf *f, int mode)
     f->mode = mode;
     f->st = F_GROUND;
     f->musicmode = 1;                   /* BANSI, SyncTERM's default */
-    f->musicn = f->seqn = f->need = f->obn = 0;
-    f->ucs = 0;
+    f->musicn = f->seqn = f->obn = 0;
 }
 
 void tf_setmode(struct tf *f, int mode)
@@ -64,7 +63,7 @@ void tf_setmode(struct tf *f, int mode)
     if (f->st == F_CSI)
         outn(f, f->seq, f->seqn);       /* a sequence cut by the switch goes as it was */
     f->st = F_GROUND;
-    f->seqn = f->need = 0;
+    f->seqn = 0;
     f->mode = mode;
 }
 
@@ -89,44 +88,12 @@ static void ground(struct tf *f, unsigned char c)
     }
     if (c == 0x1A)                      /* SUB: DOS's end of file */
         return;
-    out1(f, f->mode == TN_PC && f->fallback ? tn_cp437_latin1[c] : c);
-}
-
-static void unix_byte(struct tf *f, unsigned char c)
-{
-    if (c < 0x80) {
-        if (f->need) {
-            out1(f, '?');               /* a sequence cut short */
-            f->need = 0;
-        }
-        out1(f, c);
+    if (f->mode == TN_PC && f->fallback && tn_cp437_ucs[c] >= 0x80) {     /* D28: CP437 as UTF-8 */
+        unsigned char u[4];
+        outn(f, u, tn_utf8(tn_cp437_ucs[c], u));
         return;
     }
-    if (c < 0xC0) {
-        if (!f->need) {
-            out1(f, '?');               /* a continuation byte alone */
-            return;
-        }
-        f->ucs = (f->ucs << 6) | (c & 0x3F);
-        if (--f->need == 0)
-            out1(f, f->ucs >= 0xA0 && f->ucs <= 0xFF ? (unsigned char)f->ucs : '?');
-        return;
-    }
-    if (f->need)
-        out1(f, '?');
-    if (c >= 0xC2 && c <= 0xDF) {
-        f->ucs = c & 0x1F;
-        f->need = 1;
-    } else if (c >= 0xE0 && c <= 0xEF) {
-        f->ucs = c & 0x0F;              /* three bytes: never Latin-1 (overlong or above 0xFF): '?' at the end */
-        f->need = 2;
-    } else if (c >= 0xF0 && c <= 0xF4) {
-        f->ucs = c & 0x07;
-        f->need = 3;
-    } else {
-        f->need = 0;                    /* C0, C1 (overlong) and F5-FF are never UTF-8 */
-        out1(f, '?');
-    }
+    out1(f, c);
 }
 
 /* the parameters of the sequence in seq: the private marker, the numbers (-1: empty), the one intermediate */
@@ -267,7 +234,7 @@ void tf_write(struct tf *f, const unsigned char *b, long n)
     for (i = 0; i < n; i++) {
         unsigned char c = b[i];
         if (f->mode == TN_UNIX) {
-            unix_byte(f, c);
+            out1(f, c);                 /* D28 12: the host's UTF-8 as it is (the console decodes it) */
             continue;
         }
 again:

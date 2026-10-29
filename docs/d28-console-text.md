@@ -1,6 +1,7 @@
 # D28: UTF-8 in the console, and the console's fonts (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 18); nothing built.** Roadmap block 3 ("A terminal
+Status: **revision 2 after two independent reviews (section 18); steps 1-6 built on branch utf8, 2026-10-29 (section
+19, "As built"); steps 7-9 not.** Roadmap block 3 ("A terminal
 you can live in"): "UTF-8 in the console; PC (CP437) and other bitmap fonts for the console (the PC set comes earlier,
 with telnet)". The PC set came with telnet (D20 step 1, `CON_FONT`). This note decides the rest:
 - how the console decodes UTF-8 and what a cell holds;
@@ -387,7 +388,8 @@ own.
   - the magic; header size 32; flags 0; width and height 8; the reserved fields 0;
   - glyph count 3-4,096; half-page count 0-255; the total size equal to a3 and to the formula;
   - index bytes 0 and 1 are 0, and every index byte is at most the half-page count;
-  - every entry is 0, 32-255, or below 256 + the glyph count.
+  - every entry is 0, 32-255, or below 256 + the glyph count (as built: 32-126 or 160-255, and no two index bytes
+    alike: section 19).
 - **The switch:**
   - the kernel writes each mapped code point's width class (section 9) into the top three bits of its copy's entries
     (the entries need 13 bits);
@@ -882,3 +884,77 @@ Last checked against the code: 2026-10-28 (branch d28 at bf93534).
 ## Owner decisions (2026-10-28)
 
 The owner answered **yes to every question above** (2026-10-28, "I think yes for all questions"): Zenix speaks UTF-8 everywhere, like Linux (screen, keyboard, file names), while old Amiga Latin-1 text still reads right; Greek, Cyrillic and other alphabets show as a box for now, an add-on font later if wanted. This is the yes to the note: built in block 3's order (after block 2's audit); step 0 is done on main.
+
+## 19. As built (branch utf8, 2026-10-29)
+
+Steps 1-6 of section 15, built in one branch (steps 2-5 ship together, section 12). What differs from the sections
+above, and the choices the note left open, taken conservatively (the builder's, for the main session to confirm):
+
+- **Step 1 on main's files, not a side copy:** D27 had vendored picolibc, so the width table is generated straight
+  from `libc/picolibc/newlib/libc/string/combining.t` and `wide.t` (`tools/mkconfont.py widths`, into
+  `$(BUILD)/conwidth.h`); `tools/consolefont/` holds the hand-drawn glyphs (`symbols.glyphs`), the stand-ins
+  (`standins`, generated once with Python's `unicodedata` and checked in: 584, Latin Extended letters by their
+  decomposition kept up to the longest Latin-1 letter, so `ǖ` is `ü`; `ł đ ħ ı` added by hand, they have none) and the
+  wanted list (`wanted`, 103 characters).
+- **The width table is 1,816 bytes, not 2,492:** the ranges above U+FFFF are stored as 16-bit pairs grouped by plane
+  with an 18-byte index of each plane's first range (no range crosses a plane); the same 1,114,112 answers (the host
+  test). One function, `kernel/cwidth.h`, is compiled into the kernel (`confont.c`) and libz (`zu8width`), so the
+  console and Zenix's own programs share it; each program that lays out text pays the table once (sh, ls, less, edit:
+  about +3.5-5 KB each with the code).
+- **The default font:** 531 glyphs (128 box drawing: the 29 doubles are CP437's own, all of Unicode's are in CP437,
+  the light and heavy ones generated and checked against CP437's 11 light ones; 32 blocks; 256 braille; 57 CP437
+  symbols; 3 boxes and 55 hand-drawn), 22 half-pages, **10,424 bytes**.
+- **Speed (instruction counts, not timings):** the compiled kernel's `put1` with `gfx_cell` run in an instruction-set
+  emulator on the PC (Unicorn), 3 planes: an ASCII character 261 instructions before D28, **266 after** (+5, the
+  budget); `─` or `⏺` from the font about **528** (1.98 times; the budget is twice), `å` as two UTF-8 bytes 362. Two
+  traps fixed on the way: gcc split `gfx_cell` (an extra call on every character) once a second caller existed in
+  `gfx.c` (`noipa` and an always-inline `put_glyph` keep it whole), and turned `b & m` with `m` known to be 0 or 0xFF
+  into `muls.w` (the masks are made opaque with an empty `asm`). No timing on the A1200 yet.
+- **Sizes:** the kernel 157,640 -> **166,852 bytes** (+9.2 KB: term 8,652 -> 12,558, gfx 6,086 -> 7,770, confont
+  3,018 new, tty +368; budgets in `tools/ksize-budget`); the mount tests' RAM disk 716 -> **712 KB** for it (4,156
+  bytes left for the kernel there, 25 free blocks on the disk); the RAM floppy 77,884 bytes left for the kernel;
+  `sh` +4.2 KB, `ls` +3.1 KB, `less` +3.4 KB, `edit` +4.5 KB, `init` +1.3 KB (the width table and the code).
+- **Memory** (FS-UAE's stock A1200, 2 MB chip RAM only, one login): free 1,360 KB before D28, **1,335 KB** after (the
+  font 10.2 KB, the kernel, the bigger shell); 300 lines of Claude Code-like output (a box line with its marks in every
+  third line) then take 41 KB, of which 32 KB is the scrollback every console takes when it first scrolls and about
+  9 KB the high plane and the 100 scrollback rows: about 34 KB of D28 in all, 2.5% (emulator figures; `free` on the
+  A1200 still to come).
+- **Decisions the note did not take:**
+  - `CON_READ` gets a second form, a3 1 (`CONRF_CELL4`, claimed): 4-byte cells with the 16-bit value first, which the
+    tests (and later Wasabi's screen text) need; the 3-byte form gives the low byte and never shows `A_HI`.
+  - In 8-bit mode a wide character's right half draws as a space (its left half `?`).
+  - Writing over half of a wide character blanks both halves' cells, keeping each cell's colour.
+  - The `/etc/console` font line takes a plain name only (no `/`, at most 23 letters); `font auto` with no file
+    (the RAM floppy) is silent; init tells an old kernel from a bad file by asking op 4 to drop first.
+  - Outside 8-bit mode Topaz's glyphs for 0x80-0x9F are swapped for the box when the shown console's mode changes
+    (256 bytes kept aside), so the Latin-1 path pays nothing for the box.
+  - telnet's keys in a BBS mode are decoded from UTF-8 whenever the console is not in 8-bit mode (the PC font refused,
+    or the rules refused); a box line pasted into the PC mode goes as its CP437 byte; a character an Amiga board
+    cannot take rings the bell. ssh's keys and screen pass UTF-8 through as the Unix mode does.
+  - Step 6: `libc/zenix/locale.c` wraps picolibc's `setlocale` (compiled as `__pico_setlocale`): `""` reads `LC_ALL`,
+    `LC_CTYPE`, `LANG`; a name with no charset is UTF-8. picolibc's own `wcwidth` stays (the packed one was optional);
+    `ZENIX_VNUM` is not raised here (the release step's).
+  - The text-UI library is built `TUI_UTF8=1` by default (Sumi, Maki, Markdown, tuitest: UTF-8 out, the C library's
+    widths).
+- **Tests:** `tools/term-test.sh` (the decoder's table, the cells, wide and zero-width characters, the scrollback pool,
+  8-bit mode both ways, every `CON_UFONT` check against the built font, `CON_READ`'s 4-byte cells, a 300,000-piece
+  fuzz; `build/conwidth-test`: every code point against picolibc's own `wcwidth.c`), `mkconfont.py test`
+  (`confont-test` in `make check`), `tools/host/telnet-test.sh` (the CP437 table, the keys per mode), and in FS-UAE
+  `tools/con-test.sh` (`termtest utf8`: every glyph of the font and a Claude Code-style screen read back from the
+  display through `CON_LINE` at 2, 4, 8 and 16 colours; `termtest erase`: cooked Backspace by character; sh's editor;
+  raw keys as UTF-8 and in 8-bit mode as Latin-1), `tools/kbd-test.sh`, `tools/libc-test.sh` (`setlocale`, `mbrtowc`
+  against the decoder's cases), `tools/tui-test.sh` and the three ports' tests, `tools/bbs-test.sh`.
+- **The review (one independent read-only review of the decoder, the cells and the pool, `CON_UFONT`'s checks):**
+  fixed: the scrollback view drew its live rows' cells above 0xFF from their low byte; two index bytes naming one
+  half-page passed the check (the widths of the wrong block, and on the host an entry read past the glyphs): now
+  -EINVAL, in `mkconfont.py check` too, with a mutation test each; stand-in entries 0x7F-0x9F (whose Topaz glyphs are
+  the box outside 8-bit mode) refused, so the check takes 32-126 and 160-255 (a tightening of sections 6 and 7,
+  before the format is frozen); the scrollback's first allocation and `term_log` on a console never used no longer
+  allocate while a panic prints. Left as stated limits: Backspace right after a character in the last column (the
+  deferred wrap: `\b` goes to column 78, as on Linux's console; a wide character there takes one column too many,
+  and before D28 a narrow one was off the same way), and a character whose bytes arrive split across two input runs
+  (serial input, `CON_INPUT`) can be broken by output written between them, or a program's write ending inside a
+  character by the next echo (only `tty_write`'s own pieces are kept whole).
+- **Not done (later steps or the A1200):** step 7 (one drawing path; needs the A1200's timing of byte-wise drawing
+  against `rglyph`), step 8 (composing accents), step 9 (`confont`); `bench` and `free` on the stock A1200.
+

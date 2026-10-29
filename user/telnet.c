@@ -86,13 +86,16 @@ static void answer(void *u, const unsigned char *b, long n)   /* the filter's an
 }
 
 /* the console's rules for each mode (D20 3.5), and the bits telnet changes (the rest are left as they were) */
-#define RULES_MINE (CONR_PCCTRL | CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_ICE | CONR_CGAPAL | CONR_LFONLY)
+#define RULES_MINE (CONR_PCCTRL | CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_ICE | CONR_CGAPAL | CONR_LFONLY | \
+                    CONR_8BIT)
 static u32 mode_rules(int m)
 {
     if (m == TN_UNIX)
         return CONR_LFONLY;
     u32 r = CONR_WRAPNOW | CONR_CLRHOME | CONR_BRIGHT | CONR_CGAPAL | (ice_on ? CONR_ICE : 0);
-    return m == TN_PC ? r | CONR_PCCTRL | CONR_LFONLY : r;
+    /* DESIGN D28 12: the Amiga mode is the console's 8-bit mode with Topaz (the board's Latin-1 bytes as before, the
+     * keys Latin-1); the PC mode's font is 8-bit mode by itself */
+    return m == TN_PC ? r | CONR_PCCTRL | CONR_LFONLY : r | CONR_8BIT;
 }
 
 #define PCFONT "/usr/share/consolefonts/cp437-8x8.psf"
@@ -125,7 +128,7 @@ static void font_set(int want)
     font_on = r >= 0;
     tf.fallback = !font_on;
     if (!font_on && !font_note++)
-        dprintf(2, "telnet: the PC font is not available here (%s): CP437 is shown as its nearest Latin-1 characters\r\n",
+        dprintf(2, "telnet: the PC font is not available here (%s): CP437 is shown as Unicode (UTF-8)\r\n",
                 zstrerror(r));
 }
 
@@ -202,7 +205,9 @@ static void keys_out(const unsigned char *k, long n)
     int bell = 0;
     while (n > 0) {
         long c = n > 64 ? 64 : n;
-        long m = tk_keys(tn.mode, k, c, t, &bell);
+        /* D28: the keys are UTF-8 unless the console is in 8-bit mode (the PC font, the Amiga mode's rules) */
+        int utf8 = tn.mode == TN_PC ? !font_on : !rules_ok;
+        long m = tk_keys(tn.mode, utf8, k, c, t, &bell);
         if (tn_local_echo(&tn))
             screen(0, t, m);
         sendall(0, e, tn_encode(&tn, t, m, e));

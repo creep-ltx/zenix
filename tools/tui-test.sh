@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
 # The text-UI library in FS-UAE (roadmap block 3; ports/tui): /tests/tuitest on the stock A1200 opens the console
-# through the old tui_* names, draws its widgets (a title bar, a box, Latin-1 and UTF-8 text with its Latin-1
-# stand-ins, colours, attributes, a wide character, the full block, the last cell, the cursor) and reads the
+# through the old tui_* names, draws its widgets (a title bar, a box with rounded corners, Latin-1 and UTF-8 text in
+# UTF-8 since DESIGN D28, colours, attributes, a wide character, the full block, the last cell, the cursor) and reads the
 # console's grid back (CON_READ) to check them; only changed cells are sent and TuiRedraw sends all; then the keys:
 # the single ones this script types after each prompt (a letter, a Latin-1 key, ^C as a key, a lone Esc) and the
 # escape sequences tuitest puts into the console's input at once (an arrow, F1, Ctrl+Right, Shift+Tab), a timed wait, TuiPoll, suspending for a command and TuiKeyAfter's key, resuming (drawn again), and the

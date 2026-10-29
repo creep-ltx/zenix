@@ -4,3 +4,6 @@
 # without fast RAM. auto (or no line): the machine decides - 16 with fast
 # RAM (8 on an OCS or ECS Amiga), 8 with 2 MB of chip RAM only, 2 with less.
 colours auto
+# font auto (or no line): the console's Unicode font for box lines, symbols
+# and Western letters (11 KB); none: every character above U+00FF a box.
+font auto

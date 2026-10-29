@@ -409,3 +409,77 @@ int setpriority(int which, int who, int nice)
 {
     return sys_setpriority(which, who, nice) < 0 ? -1 : 0;
 }
+
+/* ---- DESIGN D28: UTF-8 as the console decodes it (kernel/term.c's rules), its widths (kernel/cwidth.h) ---- */
+#include "../kernel/cwidth.h"
+
+int zu8width(u32 c) { return cw_width(c); }
+
+/* the character at s: a lead and its continuations in Unicode's ranges (no overlong forms, no surrogates, nothing
+ * above U+10FFFF) -> its bytes and columns; anything else is one byte of one column */
+int zu8next(const char *s, u32 n, int *cols)
+{
+    const unsigned char *b = (const unsigned char *)s;
+    u32 c = b[0], k, cp;
+    *cols = 1;
+    if (c < 0x80) {
+        *cols = c >= 0x20 && c != 0x7F ? 1 : 0;
+        return 1;
+    }
+    if (c < 0xC2 || c > 0xF4)
+        return 1;
+    k = c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4;
+    if (n < k)
+        return 1;
+    u32 lo = c == 0xE0 ? 0xA0 : c == 0xF0 ? 0x90 : 0x80, hi = c == 0xED ? 0x9F : c == 0xF4 ? 0x8F : 0xBF;
+    if (b[1] < lo || b[1] > hi)
+        return 1;
+    for (u32 i = 2; i < k; i++)
+        if ((b[i] & 0xC0) != 0x80)
+            return 1;
+    cp = k == 2 ? (c & 0x1F) << 6 | (b[1] & 0x3F) :
+         k == 3 ? (c & 0x0F) << 12 | (u32)(b[1] & 0x3F) << 6 | (b[2] & 0x3F) :
+         (c & 0x07) << 18 | (u32)(b[1] & 0x3F) << 12 | (u32)(b[2] & 0x3F) << 6 | (b[3] & 0x3F);
+    int w = cw_width(cp);
+    *cols = w < 0 ? 0 : w;
+    return (int)k;
+}
+
+/* up to 3 bytes back to a lead whose character ends exactly at pos, else one byte */
+u32 zu8prev(const char *s, u32 pos)
+{
+    int cols;
+    for (u32 k = 2; k <= 4 && k <= pos; k++) {
+        unsigned char b = (unsigned char)s[pos - k];
+        if ((b & 0xC0) != 0x80) {
+            if (b >= 0xC2 && zu8next(s + pos - k, k, &cols) == (int)k)
+                return pos - k;
+            break;
+        }
+    }
+    return pos - 1;
+}
+
+int zu8cols(const char *s, u32 n)
+{
+    int c = 0, w;
+    for (u32 i = 0; i < n;) {
+        i += (u32)zu8next(s + i, n - i, &w);
+        c += w;
+    }
+    return c;
+}
+
+u32 zu8fit(const char *s, u32 n, int cols)
+{
+    u32 i = 0;
+    int w;
+    while (i < n) {
+        int k = zu8next(s + i, n - i, &w);
+        if (w > cols)
+            break;
+        cols -= w;
+        i += (u32)k;
+    }
+    return i;
+}

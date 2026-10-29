@@ -304,7 +304,7 @@ static void type_keys(const unsigned char *b, long n)
     long k;
     if (!t)
         die("no memory");
-    k = tk_keys(c.tn.mode, b, n, t, &bell);
+    k = tk_keys(c.tn.mode, 0, b, n, t, &bell);     /* the keys as an 8-bit console gives them */
     if (bell)
         fprintf(c.events, "bell %d\n", bell);
     to_board(t, k);

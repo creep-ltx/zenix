@@ -240,6 +240,7 @@ FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui
                                 ("ports/tui/upstream/LICENSE", "markdown-tui")]}
 ANCHORS = "anchors"                       # DESIGN D21 8.1: build/anchors (tools/mkanchors.py) as /etc/ssl/anchors
 FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
+UFONT = "zenix-8x8.zcf"                   # DESIGN D28 6: the Unicode font init loads at boot (/etc/console's font line)
 
 
 def binname(p):
@@ -275,7 +276,8 @@ def std_packages(build, uapps):
     base += [("d", 0o755, 0, 0, None, d) for d in ("/usr", "/usr/share", "/usr/share/licenses")]
     base += [("f", 0o644, 0, 0, os.path.join(ROOT, f), "/usr/share/licenses/" + n) for f, n in LICENSES]
     base += [("d", 0o755, 0, 0, None, "/usr/share/consolefonts"),
-             ("f", 0o644, 0, 0, os.path.join(build, FONT), "/usr/share/consolefonts/" + FONT)]
+             ("f", 0o644, 0, 0, os.path.join(build, FONT), "/usr/share/consolefonts/" + FONT),
+             ("f", 0o644, 0, 0, os.path.join(build, UFONT), "/usr/share/consolefonts/" + UFONT)]
     base += [("d", 0o755, 0, 0, None, "/etc/ssl"), ("d", 0o755, 0, 0, None, "/etc/ssl/local"),
              ("f", 0o644, 0, 0, os.path.join(build, ANCHORS), "/etc/ssl/" + ANCHORS)]
     base += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", c), "/etc/" + c) for c in BASE_CONFIG]
