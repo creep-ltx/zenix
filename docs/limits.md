@@ -170,7 +170,8 @@ pointers.
   `/etc/resolv.conf`), 2 name servers; a lookup answers at most 4 addresses; `netstat` shows at most 64 rows.
   `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL); a pipe is non-blocking only when
   made so (`sys_pipe2(fds, O_NONBLOCK)`, both ends).
-- The C library (DESIGN D27, block 3 steps 1-4; programs built on it so far: `/tests/libctest`, `libctestpure`): paths at most 63 bytes
+- The C library (DESIGN D27, block 3 steps 1-4; programs built on it so far: `/tests/libctest`, `libctestpure`,
+  `/tests/tuitest`): paths at most 63 bytes
   (`PATH_MAX` 64), names 63, 16 descriptors (`OPEN_MAX`); `open`'s and `mkdir`'s mode is set by a `chmod` after the
   call (the system calls take none: not atomic); `stat` gives one time (the modification's) for all three; the wall
   clock has whole seconds (`gettimeofday`'s microseconds 0), `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
@@ -191,6 +192,12 @@ pointers.
   `GLOB_ALTDIRFUNC`, `GLOB_LIMIT` (`GLOB_ABEND`). `regcomp`: `user/regex.c`'s syntax, 9 groups reported, `REG_NEWLINE`
   only for `^` and `$`, `REG_NOTEOL` `REG_INVARG`. `getgrnam`'s members at most 127 bytes. `fcntl`, `ioctl` and the
   sockets as libz's (below and above: `O_NONBLOCK` on sockets and `pipe2` only).
+- The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used so far by
+  `/tests/tuitest`): Latin-1 output and upstream's own widths until the console's UTF-8 (DESIGN D28; the switch
+  `TUI_UTF8`); no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` 0 (no
+  AmigaOS signals: poll descriptor 0); a grid of at most 400 x 200 cells; 64 events queued (upstream drops the one
+  past that); about 96 KB of memory while a terminal is open on 80 x 32 (two grids of 16-byte cells, 80 KB, which the
+  allocator keeps for reuse after closing until the program ends).
 - SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
   MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the
   wire). The kernel's receive ring is 1 KB (89 ms of SLIP): when netd cannot read for longer (a busy program at its

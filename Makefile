@@ -89,7 +89,7 @@ NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
 # the C library's test program (DESIGN D27 section 11, tools/libc-test.sh), in the test images' /tests: its ZEXE
 # build and its ZEX2 one (libctestpure)
-TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx
+TESTLIBC := $(BUILD)/libctest.zx $(BUILD)/libctest.pzx $(BUILD)/tuitest.zx
 
 all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf $(TESTDRVS:%=$(BUILD)/drv-%.zx) $(BUILD)/libc-pure.a
 
@@ -647,6 +647,35 @@ $(BUILD)/%.cpuelf: $(BUILD)/%.cpo $(BUILD)/crt0-pure.o $(BUILD)/libc-pure.a link
 $(LIBCAPPS:%=$(BUILD)/%.pzx): $(BUILD)/%.pzx: $(BUILD)/%.cpuelf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
+
+# ---- the text-UI library (roadmap block 3; DESIGN D27 sections 8-9: linked into each program, no shared library):
+# the owner's tui.library, its upstream source pinned in ports/tui/upstream (tools/tui-vendor.sh, unchanged) and
+# compiled through Zenix's layer in ports/tui/zenix (ports/tui/README). TUI_UTF8=1 switches it to UTF-8 output and the
+# C library's wcwidth (off until the console's UTF-8, DESIGN D28). tuitest is its test program (/tests/tuitest,
+# tools/tui-test.sh), a C library program linked with libtui.a.
+TUI_UTF8 ?= 0
+TUI_CFLAGS := $(LIBC_PFLAGS) -Iports/tui/zenix/include -Iports/tui/upstream/include -DTUI_STATIC \
+              $(if $(filter 1,$(TUI_UTF8)),-DZENIX_TUI_UTF8)
+TUI_HDRS := $(LIBC_HDRS) $(wildcard ports/tui/zenix/include/*.h ports/tui/zenix/include/*/*.h) \
+            $(wildcard ports/tui/upstream/include/*.h ports/tui/upstream/include/*/*.h)
+$(BUILD)/tui/%.o: ports/tui/zenix/%.c ports/tui/upstream/src/%.c $(TUI_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(TUI_CFLAGS) -c $< -o $@
+# (core-utf8.o: the TUI_UTF8 build of the same file, compiled with every build so the switch keeps building; not used)
+$(BUILD)/tui/core-utf8.o: ports/tui/zenix/core.c ports/tui/upstream/src/core.c $(TUI_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(TUI_CFLAGS) -DZENIX_TUI_UTF8 -c $< -o $@
+$(BUILD)/libtui.a: $(BUILD)/tui/core.o $(BUILD)/tui/glue.o $(BUILD)/tui/core-utf8.o tools/check-68020-60.sh
+	rm -f $@
+	$(TOOLPREFIX)ar rcs $@ $(BUILD)/tui/core.o $(BUILD)/tui/glue.o
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
+$(BUILD)/tuitest.co: user/tuitest.c $(TUI_HDRS) user/usys.h | $(BUILD)
+	$(CC) $(TUI_CFLAGS) -Iuser -c $< -o $@
+$(BUILD)/tuitest.celf: $(BUILD)/tuitest.co $(BUILD)/crt0.o $(BUILD)/libtui.a $(BUILD)/libc.a link/user.ld
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0.o $< $(BUILD)/libtui.a $(BUILD)/libc.a $(LIBGCC) -o $@
+$(BUILD)/tuitest.zx: $(BUILD)/tuitest.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(STACK_DEFAULT)
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)

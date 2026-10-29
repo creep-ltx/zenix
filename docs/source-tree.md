@@ -1,7 +1,7 @@
 # The source tree
 
 What each folder holds and where to start reading. How the parts work together is in [architecture.md](architecture.md),
-why they work that way in [why.md](why.md). Last checked against the code: 2026-10-24.
+why they work that way in [why.md](why.md). Last checked against the code: 2026-10-29.
 
 ```
 zenix/
@@ -11,6 +11,8 @@ zenix/
 ├── zenixfs/     the ZenixFS library, its host tools and tests
 ├── net/         the network (DESIGN D19): lwIP, its Zenix port, netd's core, telnet's and ssh's cores
 ├── crypto/      the crypto library (DESIGN D21): BearSSL, Monocypher, OpenSSH's bcrypt, Zenix's zc/
+├── libc/        the standard C library (DESIGN D27): picolibc's files and Zenix's port
+├── ports/       programs and libraries from elsewhere, each a pinned copy with Zenix's layer (the text-UI library)
 ├── rootfs/      files copied onto the Zenix root disk (/etc, test scripts)
 ├── link/        linker scripts (kernel, programs, stage0)
 ├── tools/       image builders, the emulator rig and every test
@@ -59,7 +61,8 @@ zenix/
   `zerrtab.c` (the error texts), `zsig.c` (signals), `zpoll.c` (`poll`, `select`), `zsock.c` (sockets), `zhelp.c`
   (paths, directories, colours), `zpw.c` and `zpw.h` (the passwd and group parser; `pw.c` keeps the editing);
   `socket.h` is the sockets' one header for both. `libctest.c`: the standard C library's test program
-  (`/tests/libctest`, and its ZEX2 build `/tests/libctestpure`).
+  (`/tests/libctest`, and its ZEX2 build `/tests/libctestpure`); `tuitest.c`: the text-UI library's (`ports/tui`,
+  `/tests/tuitest`).
 - **`libc/`, the standard C library (DESIGN D27, docs/d27-c-library.md):** `picolibc/` picolibc 1.8.10, only the files
   built (`sources.mk`, `picolibc.h`, its licences, README); `zenix/` Zenix's port (the system layer, the streams,
   the start and exit, `strerror`, `dprintf`, directories, the 64-bit division, termios, `posix_spawn` and the
@@ -94,6 +97,16 @@ zenix/
 
 The Makefile builds them into `build/libcrypto.a` (and a pure copy for `ssh`), linked with `--gc-sections` into
 `cryptotest`, `ssh` and `ssh-keygen`.
+
+## ports/: from elsewhere, with Zenix's layer (DESIGN D27 section 9)
+
+One folder each: `upstream/` the other project's files, pinned to one commit and never changed (refreshed by a
+script in `tools/`), its licence with them; `zenix/` Zenix's own layer beside them (GPL-2.0-only); a `README` naming
+the source, the commit, what the layer does and how to update.
+
+| Folder | What it is |
+|---|---|
+| `tui/` | the text-UI library (roadmap block 3): the owner's tui.library (MIT, AmigaLibs), `upstream/` from `tools/tui-vendor.sh`; `zenix/core.c` compiles upstream's `core.c` unchanged with its terminal half given over termios, `poll` and `TIOCGWINSZ`, `zenix/glue.c` the old `tui_*` names, `zenix/include/` the AmigaOS names over the C library. Built into `build/libtui.a`; its test program is `user/tuitest.c` (`/tests/tuitest`, `tools/tui-test.sh`). `README` has the rest |
 
 ## tools/: building and testing
 

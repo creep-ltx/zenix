@@ -1,7 +1,7 @@
 # D27: the C library, and D13 stage 2 decided (design note, revision 2)
 
 Status: **design, revision 2 after two independent reviews (section 15); build steps 0-4 built 2026-10-29 (section 13,
-"As built").** Roadmap block 3 ("A terminal
+"As built"); the text-UI library ported (the last section).** Roadmap block 3 ("A terminal
 you can live in"): "a fuller C library (newlib); D13 stage 2 (shared libraries) decided". This note chooses the C
 library, says what Zenix's system calls must back, how it replaces libz's C half without making Zenix's own programs
 bigger, how it works with D13's shared code, decides D13 stage 2 (for the C library and for the text-UI library), and
@@ -715,3 +715,61 @@ The owner answered **yes to every question above** (2026-10-28, "I think yes for
 - The bridge and `system`'s signals as step 4's "As built" says; the window before the caller runs again is the
   conservative choice (the command keeps ^C); a spawn that gives a child the default dispositions would close it
   (a `SYS_spawn` flag, a kernel change: not proposed).
+
+## The text-UI library on Zenix (roadmap block 3, the first port; built 2026-10-29)
+
+What section 8 decided (static, no shared library) and section 9 asked (one source, a pinned copy, its OS layer given
+a Zenix implementation), as built; the files and the way to update them are in `ports/tui/README`.
+
+- **The copy:** `ports/tui/upstream/` holds the owner's tui.library (AmigaLibs, MIT, commit 3b74efd, 0.5b1) as it
+  is: the toolkit, the glue of the old `tui_*` names, the headers, the licence (`tools/tui-vendor.sh` copies them from
+  a commit). Upstream has no platform layer of its own (its terminal code is AmigaOS calls in the same file), so
+  Zenix's layer is separate files in `ports/tui/zenix/` that compile the upstream files unchanged: `core.c` renames
+  upstream's terminal functions by `#define` and declares them `static` first, so they are compiled and never
+  emitted, and gives its own; `include/amiga.h` maps the few AmigaOS calls the drawing half keeps (`Write`,
+  `AllocVec`, `FreeVec`, `CopyMem`, `CurrentTime`) onto the C library and only declares the rest (a link error if a
+  kept part ever needs one). A platform split in upstream itself (its terminal half in a file of its own) would make
+  the renaming unnecessary: for the owner's repository, not done here.
+- **Section 9's table, as built:** `SetMode` raw is `cfmakeraw` (no echo, no signals: ^C and ^Z arrive as keys,
+  as upstream's Ctrl-C..F signals become keys); `ACTION_WAIT_CHAR` and `Wait()` are `poll` on the input descriptor,
+  with upstream's timeouts (40 ms for the rest of an escape sequence); `CSI 0 q` is `TIOCGWINSZ` (80 x 24 if it
+  fails, as upstream); a `BPTR` is a descriptor, 0 meaning descriptor 0 for the input and 1 for the output. No
+  `SIGWINCH` and no resize events (the console never changes size).
+- **Decided here (conservatively, for the main session to confirm):**
+  - `CTerm` is 1 on Zenix: upstream's CTerm path is the ANSI one (the colours as they are, `ESC [ ? 25 h/l` for the
+    cursor, the last cell drawn: the console's wrap is deferred, it does not scroll). Upstream's plain-console path
+    would map the colours onto Workbench's four pens and hide the cursor with `CSI 0 SP p`, which the console does
+    not know. `UTF8` 0, `CellW`/`CellH` 0; no mouse, no pastes. A program reading `CTerm` as "CTerm's mouse" gets
+    no mouse events, nothing worse.
+  - The console has no second screen: closing and suspending clear it (upstream does so in a plain console);
+    `ESC [ ? 1049 h/l` and `ESC [ ? 7 l` are still sent, for a terminal that has them.
+  - `TuiSignal` answers 0 and `TuiWait`'s extra signals are none: a program with a loop of its own polls
+    descriptor 0 and calls `TuiPoll` (Ahiru's port decides whether it needs more, e.g. a call giving the descriptor:
+    an upstream interface addition, not made here). A signal that interrupts a wait (its handler ran) ends it with
+    `TE_NONE`, as upstream's extra signals do.
+  - Widths: the console is Latin-1, so the toolkit writes Latin-1 and upstream's stand-ins for the rest, with
+    upstream's own width table. `make TUI_UTF8=1` switches on UTF-8 output and the C library's `wcwidth` through
+    upstream's own way to utf8.library (`TUI_LIB`); composing accents onto letters is not there (picolibc has no
+    normalisation; the accent is left out, as upstream does without utf8.library). Off until D28 lands; compiled in
+    every build so it keeps building.
+  - Only a ZEXE build of the library for now; the pure build (`libtui-pure.a`, D27 9 rule 4) comes with Sumi, the
+    first program that runs several times at once.
+  - The test program injects the escape sequences itself (`CON_INPUT`, all at once, as the keyboard gives them):
+    the serial tap types a byte every 20 ms, and more than 40 ms between ESC and the rest is a lone Esc by
+    upstream's rule.
+- **Sizes (measured, FS-UAE's stock A1200):** the library inside a program that uses all of it (`tuitest`) is 10,570
+  bytes of code (section 8 estimated 5-12 KB); `tuitest` is 29 KB with the C library's streams. Memory while a
+  terminal is open on 80 x 32: **98,336 bytes**, of which 81,920 are upstream's two grids (2,560 cells of 16 bytes
+  each, what should be shown and what is shown) and about 7.6 KB its state (the 4 KB output buffer, 64 queued
+  events); after closing the grids' 80 KB stays in the allocator's chunks for reuse until the program ends. That is
+  about 9% of the stock A1200's 1,132 KB free per program with a terminal open (Sumi and Maki at once: about 190 KB).
+  Smaller cells are upstream's design to change (the owner's repository), not the port's.
+- **Found in upstream (for the owner's repository; the copy is not changed):** a 24-bit colour whose green value
+  has bit 1 set (`TC_RGB(r, g, b)` with g = 2, 3, 6, 7, ... 255) is taken for a pen (`TC_PEN`, bit 0x200): `sgrcol`
+  and `to16any` test 0x200 before 0x1000000, so it is drawn as pen `g & 7`. Testing 0x1000000 first fixes it.
+- **Tests:** `tools/tui-test.sh` (in `make check`): `/tests/tuitest`, 46 checks against the console's grid read back
+  with `CON_READ` (the title, a box, Latin-1 text, UTF-8 text as its stand-ins, colours and attributes, a wide
+  character, the full block, the last cell, the cursor; only changed cells sent, `TuiRedraw` sending all; nine keys
+  as events, among them ^C as a key and a lone Esc; a timed wait, `TuiPoll`; suspend, `TuiKeyAfter`, resume; the
+  terminal given back cooked, with the cursor, cleared) on FS-UAE's stock A1200. The MIT notice travels with it
+  (`/usr/share/licenses/tui` on the images that carry `/tests/tuitest`); no shipped program uses the library yet.
