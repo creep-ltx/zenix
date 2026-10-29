@@ -541,6 +541,16 @@ def part_b(c):
     o, _, _ = sh(c, "dmesg | grep 'init: wasabid'")
     ok("ended, status 75 (start me again)" in o and o.count("init: wasabid: started") == 2,
        "init logged the status 75 and the new start (%r)" % o)
+    for i in range(5):              # B2-5: a 75 after 5 s of running is not counted toward "given up"
+        time.sleep(max(0, t0 + 6.5 - time.time()))
+        t, p = c.simple(wc.RESTART)
+        ok(t == wc.OK, "RESTART %d of five more, each after 5 s of running: OK" % (i + 1))
+        t0 = time.time()
+        time.sleep(2)
+        c = wait_up(60, "after RESTART %d" % (i + 1))
+    o, _, _ = sh(c, "dmesg | grep 'init: wasabid'")
+    ok(o.count("init: wasabid: started") == 7 and "given up" not in o,
+       "six RESTARTs within a minute after 5 s each: started again every time, never given up (%r)" % o)
     return c
 
 

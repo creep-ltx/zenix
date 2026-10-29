@@ -22,7 +22,8 @@
 #      against termtest's own CON_LINE picture of the same moment at 3 and 4 planes, a console never used
 #   l  the 1 MB machine (part l): 100 KB both ways, the memory with the daemon idle and with a session
 #   b  init's daemons (part b, D24 7): /etc/daemons starts wasabid at boot (its lines in the kernel log, /dev/kmsg
-#      root's and write only), RESTART starts it again at once (status 75), a missing configuration is a stop, a
+#      root's and write only), RESTART starts it again at once (status 75), five more RESTARTs each after 5 s of
+#      running are not given up but five quick ends with status 75 are (B2-5), a missing configuration is a stop, a
 #      daemon killed five times in a minute is given up
 # Needs zenix-slirp's libslirp and GLib (pkg-config slirp) and unprivileged user namespaces, as slip-test.
 cd "$(dirname "$0")/.." || exit 1
@@ -166,9 +167,11 @@ ifdown sl0
 sync
 EOS
     image
-    printf '# the test daemons\nwasabid 0 /sbin/wasabid --init\n  dsleep\t5  /tests/dsleep 600\n' > $OUT/daemons
+    printf '# the test daemons\nwasabid 0 /sbin/wasabid --init\n  dsleep\t5  /tests/dsleep 600\nq75 0 /bin/sh /tests/q75.sh\n' > $OUT/daemons
     put $OUT/daemons /etc/daemons 644
     put $BD/sleep.zx /tests/dsleep 755
+    printf 'exit 75\n' > $OUT/q75.sh
+    put $OUT/q75.sh /tests/q75.sh 755
     run fsuae/a1200-020.fs-uae 900 b
     local f k=$OUT/b-k.txt ok
     for f in after ds k; do get /tmp/b-$f.txt > $OUT/b-$f.txt; done
@@ -180,6 +183,11 @@ EOS
         grep -aq 'init: dsleep: given up after 5 ends in 60 s' $k && grep -aqx 'st=1' $OUT/b-ds.txt &&
         [ "$(grep -ac 'init: dsleep: started /tests/dsleep 600' $k)" = 5 ] && ok=1
     check "a daemon killed five times in a minute: started again after each (0, 1, 2, 4 s), then given up" $ok "$(grep -a 'dsleep' $k | tail -12; cat $OUT/b-ds.txt)"
+    ok=0; [ "$(grep -acE 'init: q75: /bin/sh \(pid [0-9]+\) ended, status 75 \(start me again\)$' $k)" = 5 ] &&
+        grep -aq 'init: q75: given up after 5 ends in 60 s' $k && ok=1
+    check "a daemon ending with status 75 at once, five times: still given up (B2-5)" $ok "$(grep -a 'q75' $k | tail -8)"
+    ok=0; grep -aq 'init: wasabid: given up' $k || ok=1
+    check "wasabid RESTARTed six times in a minute after 5 s each: never given up (B2-5)" $ok "$(grep -a 'init: wasabid' $k | tail -8)"
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-b.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (b)" || { echo "FAIL e2fsck (b)"; pass=0; }
 }
 

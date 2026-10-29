@@ -52,8 +52,10 @@ DAEMONS
     hand); any other end is counted, and the next start waits 0, 1, 2 or
     4 seconds after the first, second, third or fourth end within a
     minute; the fifth gives it up until the next boot. Status 75 is init's
-    own "start me again at once": no wait, but counted. A program that
-    cannot be started counts as an end. The kernel log says each step:
+    own "start me again at once": no wait, and counted only when the
+    program ran less than 5 seconds (a quick restart loop is still given
+    up). A program that cannot be started counts as an end. The kernel
+    log says each step:
 
         init: wasabid: started /sbin/wasabid --init (pid 12)
         init: wasabid: /sbin/wasabid (pid 12) ended, status 75 (start

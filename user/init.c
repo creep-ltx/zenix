@@ -86,7 +86,8 @@ static int auto_iface(void)
  * runs as root, standard input /dev/null, output and errors /dev/kmsg (the kernel log: never a console), and is
  * started again when it ends, as D11 does for services: status 0 is a stop (not again until the next boot), any other
  * end is counted and waits 0, 1, 2, 4 s before the next start, five ends within 60 s give it up; status 75 is init's
- * own "start me again at once" (no wait, but counted). The waits are an alarm whose handler only makes sys_waitcon
+ * own "start me again at once": no wait, and counted only when the daemon ran under 5 s (a quick restart loop is still
+ * given up; five RESTARTs of a daemon that ran a while are not: audit block 2, B2-5). The waits are an alarm whose handler only makes sys_waitcon
  * return (-EINTR, no SA_RESTART): it arms itself again one tick later, so an alarm that came just before the wait
  * still ends it; the loop cancels it after every wait. */
 #define NDAEMON 4
@@ -96,6 +97,7 @@ static struct daemon {
     unsigned char nends;                        /* ends counted in this window */
     signed char nice;
     u32 due, win;                       /* the tick of its next start; of the first end of the window */
+    u32 began;                          /* the tick it was last started */
     char name[16], text[80];
 } dm[NDAEMON];
 static int kmsg = -1;
@@ -180,6 +182,7 @@ static void daemon_start(struct daemon *d)
     d->pid = null < 0 ? null : sys_spawn(argv[0], argv, io);
     if (null >= 0) sys_close(null);
     if (d->pid > 0) {
+        d->began = sys_ticks();
         sys_setpriority(PRIO_PROCESS, d->pid, d->nice);
         fprintf(kmsg, "init: %s: started %s (pid %d)\n", d->name, d->text, d->pid);
         return;
@@ -205,11 +208,15 @@ static void daemon_ended(struct daemon *d, int st)
         return;
     }
     u32 now = sys_ticks();
-    if (!d->nends || now - d->win >= 6000) { d->win = now; d->nends = 0; }
-    d->nends++;
     if (pid > 0)
         fprintf(kmsg, "init: %s: %s (pid %d) ended, status %d%s\n", d->name, prog, pid, st,
                 st == 75 ? " (start me again)" : "");
+    if (pid > 0 && st == 75 && now - d->began >= 500) {        /* ran 5 s or more: not counted */
+        d->due = now;
+        return;
+    }
+    if (!d->nends || now - d->win >= 6000) { d->win = now; d->nends = 0; }
+    d->nends++;
     if (d->nends >= 5) {
         d->state = 3;
         fprintf(kmsg, "init: %s: given up after 5 ends in 60 s (the next boot starts it again)\n", d->name);
