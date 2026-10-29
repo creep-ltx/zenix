@@ -83,7 +83,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 
 1. **Foundations finished (the week of 2026-10-26):** D13 shared code; the shell's memory fix; the colour console;
    the self-updates. Audit.
-2. **Zenix reaches the world:** signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
+2. **Zenix reaches the world** (done in FS-UAE 2026-10-29, closing audit docs/audit-2026-10-29-block2.md; the real A1200 checks are the owner's weekend): signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
    server, DHCP, DNS); `ping`, `telnet` (made for BBSes, the owner's daily use: ANSI colours, the PC character set and Amiga
    fonts, the BBS window size, downloads), `wget`, an NFS client; a Wasabi-like remote control (early: it lets the A1200
    be tested remotely); **one small crypto library** (owner 2026-10-26: "I need to be able to SSH into my Linux machine,

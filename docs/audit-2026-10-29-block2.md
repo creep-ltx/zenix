@@ -176,3 +176,17 @@ floppy freezes the machine for about 2 s. That is the strongest reason for O13, 
 
 Established 2026-10-29: the findings read from source by three reviewers and checked again; B2-1 reproduced on the PC;
 each fix's test as named in the table, all passing in this branch (`make check` at the end of the work).
+
+## Main session's decisions on section 4 (2026-10-29)
+
+- **B2-5:** yes: a daemon's status 75 counts toward "given up" only when it ran under 5 s. A change of meaning of a
+  frozen rule, accepted once and recorded in docs/frozen-interfaces.md with the fix (every program ships with the
+  kernel and init; no released daemon depends on the old count). Fixed next.
+- **The kernel shrink list:** `--gc-sections` and dead code, and -Os on the cold kernel files (measured, each hot path
+  kept at -O2), done next with B2-5; freeing the boot-only code after boot needs its own design note (later, measured
+  first).
+- **O12** (unused 4 KB output buffers in diskd, wasabid, nfscd): done next with the above, in libz, if the programs'
+  output stays byte for byte the same; else with D27.
+- **B2-10:** with D15's next step (a minimum accepted version kept outside BOOT:).
+- **nfscd and wasabid as shared code; `struct port` padded to 64 bytes:** measured first (the second on the stock
+  A1200, the owner's weekend list), then decided.
