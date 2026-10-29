@@ -120,6 +120,9 @@ Left open, each with a proposal:
   READ, fixed in later FS-UAE) cost a day; Amiberry (8.3.0 here, the current WinUAE core, already used headless by
   other projects) is tried on a few key tests (the floppy and disk boots, the A2065 with its built-in network, the
   update test) as a cross-check. A whole move of `make check` is decided after, with measurements.
+- **O16 con-test "cooked lines" lost a character once** (full run 2026-10-29 07:58; passed alone): the text path's
+  line read "61580a" against the serial path's "61580at". Find the race (a check before the last byte arrived, or a
+  real lost byte in CON_INPUT's cooked path) and make it deterministic.
 - **O8 Zmodem has no cap on files per session** (judged acceptable): a board can offer thousands of honest small
   files; the disk filling up ends it, as with any download the user lets run. A cap would be a new option (the
   feature halt).
