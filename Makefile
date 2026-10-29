@@ -188,7 +188,7 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 # DESIGN D19 step 1), so its kernel limit is lower; the build says that one too. Its RAM disk carries no test
 # scripts (NOTESTS=1: the mount tests run none of /tests); that made room for D20 step 1's 8 KB (3 blocks were free).
 RAMDISK_K := 640
-RAMDISK_MOUNT_K := 704
+RAMDISK_MOUNT_K := 716
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
