@@ -1,0 +1,10 @@
+wait zenix:/# 120
+send printf 'first line\\nsecond\\n' > /tmp/s.txt; chmod 640 /tmp/s.txt; free > /tmp/f0.txt; echo ==s""set\r
+wait ==sset 30
+send (termtest screen /dev/tty1 'line 1/''2' 60 'Hello Zenix \\xe5\\r\\x13' > /tmp/scr0.txt; free > /tmp/f1.txt; ps > /tmp/ps1.txt; termtest screen /dev/tty1 'saved s.txt' 60 '\\x17' > /tmp/scr1.txt) & sumi /tmp/s.txt; echo st=$?\r
+waitecho st=0 90
+send termtest screen /dev/tty1 'line 2/''3' 60 '\\x17' > /tmp/scr2.txt & sumi /tmp/s.txt; echo st2=$?\r
+waitecho st2=0 60
+send echo ==scr0; cat /tmp/scr0.txt; echo ==scr1; cat /tmp/scr1.txt; echo ==scr2; cat /tmp/scr2.txt; echo ==file; hexdump /tmp/s.txt; ls -l /tmp/s.txt; echo home=$HOME; ls -ld $HOME/.config/Sumi; ls -l $HOME/.config/Sumi; cat $HOME/.config/Sumi/Sumi.places; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==s""done\r
+wait ==sdone 60
+stop

@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -676,6 +676,38 @@ $(BUILD)/tuitest.celf: $(BUILD)/tuitest.co $(BUILD)/crt0.o $(BUILD)/libtui.a $(B
 $(BUILD)/tuitest.zx: $(BUILD)/tuitest.celf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(STACK_DEFAULT)
+# the pure build of the library (D27 9 rule 4), for the programs with shared code that use it (Sumi)
+$(BUILD)/tuip/%.o: ports/tui/zenix/%.c ports/tui/upstream/src/%.c $(TUI_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(TUI_CFLAGS) -c $< -o $@
+$(BUILD)/libtui-pure.a: $(BUILD)/tuip/core.o $(BUILD)/tuip/glue.o tools/check-68020-60.sh
+	rm -f $@
+	$(TOOLPREFIX)ar rcs $@ $(BUILD)/tuip/core.o $(BUILD)/tuip/glue.o
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
+
+# ---- Sumi (roadmap block 3, the owner's text editor; ports/sumi/README): upstream's files pinned in
+# ports/sumi/upstream (tools/sumi-vendor.sh, unchanged), compiled over Zenix's AmigaOS layer (ports/sumi/zenix: the
+# headers and dos.c) and linked with the text-UI library and the C library, as a program with shared code (ZEX2: a
+# second editor costs only its data). /bin/sumi (UAPPS; it has no user/sumi.c: these rules build it). ----
+SUMI_SRCS := main buf file syntax clip keys
+SUMI_CFLAGS := $(LIBC_PFLAGS) -Iports/sumi/zenix/include -Iports/tui/upstream/include -DTUI_STATIC
+SUMI_HDRS := $(LIBC_HDRS) ports/sumi/upstream/src/sumi.h $(wildcard ports/sumi/zenix/include/*.h \
+             ports/sumi/zenix/include/*/*.h ports/tui/upstream/include/*.h ports/tui/upstream/include/*/*.h)
+$(BUILD)/sumi/%.o: ports/sumi/upstream/src/%.c $(SUMI_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(SUMI_CFLAGS) -Wno-sign-compare -Wno-unused-parameter -Wno-unused-but-set-variable -c $< -o $@
+$(BUILD)/sumi/dos.o: ports/sumi/zenix/dos.c $(SUMI_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(SUMI_CFLAGS) -c $< -o $@
+SUMI_OBJS := $(SUMI_SRCS:%=$(BUILD)/sumi/%.o) $(BUILD)/sumi/dos.o
+$(BUILD)/sumi.cpuelf: $(SUMI_OBJS) $(BUILD)/crt0-pure.o $(BUILD)/libtui-pure.a $(BUILD)/libc-pure.a link/pure.ld
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(SUMI_OBJS) $(BUILD)/libtui-pure.a \
+	    $(BUILD)/libc-pure.a $(LIBGCC) -o $@
+$(BUILD)/sumi.pzx: $(BUILD)/sumi.cpuelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_sumi),$(STACK_DEFAULT))
+$(BUILD)/sumi.zx: $(BUILD)/sumi.pzx
+	cp $< $@
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)

@@ -1,0 +1,106 @@
+SUMI(1)			Zenix manual
+
+NAME
+    sumi - a text editor for the terminal, with tabs and colours for code
+
+SYNOPSIS
+    sumi [+LINE] [FILE ...]
+
+DESCRIPTION
+    Sumi is the owner's text editor for the Amiga, in the way of micro and
+    nano; Zenix carries a copy of its source (ports/sumi, version 0.2b6).
+    It draws in the terminal it is started from. Each FILE opens in a tab
+    of its own; with none, an empty one. +LINE jumps to that line of the
+    next file. A file that does not exist is created when it is saved.
+
+    Files are kept as they are: Latin-1 or UTF-8 (found by looking at the
+    text), LF or CR LF line ends, the last new line or not. Saving writes a
+    new copy beside the file (sumi-new-...) and replaces the old one only
+    when the copy is whole; the file keeps its permissions (and, when root
+    saves it, its owner).
+
+    Colours for C, 68k assembly, ARexx, Amiga E, Blitz Basic, Installer
+    scripts, AmigaGuide, AmigaDOS scripts, Python, Markdown, shell scripts,
+    Makefiles, JSON, HTML/XML and Lua, by the file's name or first line.
+    Finding: plain or regular expressions (. * + ? [a-z] [^...] ^ $ \d \w
+    \s \b, one line at a time), smart case (a capital makes it exact),
+    every match marked, replace with a question for each or all, a history
+    (Up/Down). Soft wrap, Justify (a paragraph reflowed to column 72), the
+    matching bracket, comments on and off, lines moved, auto-indent,
+    macros, undo for everything. A file that changed on disk since it was
+    read is not written over without asking; one this user may not write
+    is shown [read-only] and not saved over.
+
+KEYS (the defaults; every one can be changed, FILES)
+    Ctrl+S, F2         save, save as
+    Ctrl+O, Ctrl+T     open a file in a new tab, a new empty tab
+    Ctrl+Q             close the tab
+    F9, F10            the previous, the next tab
+    Ctrl+W             quit (asks about what is not saved)
+    Ctrl+Z, Ctrl+Y     undo, redo
+    Ctrl+C, Ctrl+X, Ctrl+V  copy, cut, paste (nothing selected: the line)
+    Ctrl+K, Ctrl+D, Ctrl+A  cut the line, duplicate it, select all
+    Tab, Shift+Tab     indent, unindent (the selected lines too)
+    Ctrl+F, F3/Ctrl+G, Shift+F3  find, the next, the previous
+    Ctrl+R, Ctrl+L     replace, go to a line (LINE or LINE:COLUMN)
+    F5, F6             the matching bracket, comment the line(s)
+    Ctrl+Alt+Up/Down   move the line(s) up / down
+    F7, F8             Justify, soft wrap on / off
+    Shift+F4, F4       tabs and trailing spaces shown, line numbers
+    Shift+F2           insert a file at the cursor
+    Shift+F5, Shift+F6 record keys (again: stop), play them
+    Ctrl+Left/Right    the line's start (twice: the very start) / end
+    Alt+Left/Right     a word back / on
+    Alt+Up/Down, Ctrl+P/N  a page up / down
+    Ctrl+Up/Down       the file's start / end
+    Shift + a moving key   select
+    F1                 the help: every key as bound now
+    Ctrl+U             a command (below)
+    Ctrl+C, Ctrl+Z and the others are keys here, never signals.
+
+COMMANDS (Ctrl+U)
+    save [NAME], open [NAME], insert [NAME], goto N[:C], count, quit,
+    run COMMAND (a command through sh, in the terminal; its output stays
+    until a key), lang NAME (text c asm rexx e bb install guide script
+    py md sh make json html lua), and set: tabsize N (1-16, 8), tabs
+    spaces / tabs, numbers on/off, autoindent on/off, wrap on/off,
+    wrapcol N (10-400, 72), autoclose on/off, whitespace on/off, regex
+    on/off, case smart/exact/any, backup on/off (the old version kept as
+    NAME.bak), encoding utf8/latin1, lineends lf/crlf.
+
+FILES
+    $HOME/.config/Sumi/Sumi.keys    the keys: one "KEY ACTION" a line,
+                                    written with the defaults at the
+                                    first start; a line of its own wins
+    $HOME/.config/Sumi/Sumi.prefs   the settings that set changes
+    $HOME/.config/Sumi/Sumi.places  where each file was left (the last
+                                    100): the cursor goes back there
+    The folder is made at the first start, readable by this user only
+    (AmigaOS's ENVARC:Sumi; there is no second copy as ENV: has). Without
+    HOME nothing is kept. When the terminal goes away with changes not
+    saved (the input ends), each changed file is kept as NAME.save, an
+    unnamed one as /tmp/Sumi-N.save.
+
+EXIT STATUS
+    0 when it quits; 10 when it is not started in a terminal; 20 when
+    there is not enough memory or the terminal cannot be used.
+
+NOTES
+    The console has no mouse and no clipboard shared between programs:
+    Ctrl+C and Ctrl+V copy and paste inside Sumi, between its tabs. The
+    console sends Shift+Tab as Tab, so unindenting needs another key bound
+    in Sumi.keys; the Help key is Insert here (F1 is the help). The
+    console is Latin-1: a UTF-8 file is shown and kept as UTF-8, its
+    characters beyond Latin-1 shown as stand-ins.
+    Saving through a symbolic or hard link replaces the link with the new
+    file and leaves its target as it was; edit the target itself. A
+    path is at most 63 bytes (PATH_MAX). Some messages keep the AmigaOS
+    words of the original ("Protect it +wd first" means chmod u+w).
+    SIGINT does not reach it (^C is a key); SIGTERM, SIGHUP and SIGKILL
+    end it at once, without saving; the console's mode is put back.
+    Memory on the stock A1200 (80 x 32): about 194 KB of its own and 81 KB
+    of code shared by every Sumi running (measured in FS-UAE,
+    tools/sumi-test.sh); a second Sumi costs only its own part.
+
+SEE ALSO
+    edit(1), less(1), sh(1)

@@ -444,8 +444,69 @@ static int grab(const char *path)
     return 0;
 }
 
+/* `termtest screen TTY TEXT SECS [TYPE]` (root; the editor's test, tools/sumi-test.sh): wait until TEXT is on the
+ * console's grid (CON_READ, read every 100 ms; at most SECS seconds) and the grid has then not changed for 200 ms,
+ * then print it: "row NN|text|" for each row with its trailing blanks cut, "attr NN|...|" for the rows with cells in
+ * colour or with attributes (a letter per cell: '.' plain, else the colour byte's low nibble in hex for the
+ * foreground), and the cursor. Status 1 on a timeout, the grid printed all the same. TYPE (\xHH and \r understood)
+ * is then typed into the console (CON_INPUT text), so a script goes on only once the grid was read. */
+static int screen(const char *tty, const char *want, int secs, const char *type)
+{
+    int fd = sys_open(tty, O_RDWR), rows = 0, found = 0, r = -1;
+    struct uconread h;
+    u8 *g = malloc(64 * 80 * 3), *t = malloc(81);
+    if (fd < 0 || !g || !t) { dprintf(2, "termtest: %s: %s\n", tty, fd < 0 ? zstrerror(fd) : "out of memory"); return 2; }
+    u32 end = sys_ticks() + (u32)secs * 100;
+    for (;;) {
+        r = conread(fd, &h, g, 64 * 80 * 3);
+        rows = h.rows;
+        if (r >= 0)
+            for (int y = 0; y < rows && !found; y++) {
+                for (int x = 0; x < 80; x++) t[x] = g[3 * (y * 80 + x)] ? g[3 * (y * 80 + x)] : ' ';
+                t[80] = 0;
+                found = strstr((char *)t, want) != 0;
+            }
+        if (found || (int)(sys_ticks() - end) >= 0) break;
+        sys_sleep(10);
+    }
+    for (u32 c = h.changes; found && (int)(sys_ticks() - end) < 0; c = h.changes) {   /* then until it stops changing */
+        sys_sleep(20);
+        r = conread(fd, &h, g, 64 * 80 * 3);
+        if (r < 0 || h.changes == c) break;
+    }
+    if (r < 0) { dprintf(2, "termtest: CON_READ: %s\n", zstrerror(r)); return 2; }
+    for (int y = 0; y < rows; y++) {
+        int n = 80, col = 0;
+        for (int x = 0; x < 80; x++) t[x] = g[3 * (y * 80 + x)] ? g[3 * (y * 80 + x)] : ' ';
+        while (n > 0 && t[n - 1] == ' ') n--;
+        t[n] = 0;
+        dprintf(1, "row %02d|%s|\n", y, t);
+        for (int x = 0; x < 80; x++) {
+            u8 a = g[3 * (y * 80 + x) + 1], c = g[3 * (y * 80 + x) + 2];
+            t[x] = a || c != 0x07 ? "0123456789abcdef"[c & 15] : '.';
+            col |= t[x] != '.';
+        }
+        t[80] = 0;
+        if (col) dprintf(1, "attr %02d|%s|\n", y, t);
+    }
+    dprintf(1, "cursor %d %d%s\n", h.crow, h.ccol, h.flags & CONRD_CURSOR ? " shown" : "");
+    if (type) {
+        int n = 0;
+        for (const char *q = type; *q && n < 80; q++) {
+            if (q[0] == '\\' && q[1] == 'r') { t[n++] = '\r'; q++; }
+            else if (q[0] == '\\' && q[1] == 'x' && q[2] && q[3]) { t[n++] = (u8)strtoul((char[]){ q[2], q[3], 0 }, 0, 16); q += 3; }
+            else t[n++] = (u8)*q;
+        }
+        r = sys_coninput(fd, CONI_TEXT, t, (u32)n);
+        if (r != n) dprintf(2, "termtest: CON_INPUT: %s\n", r < 0 ? zstrerror(r) : "not all taken");
+    }
+    sys_close(fd);
+    return !found;
+}
+
 int main(int argc, char **argv)
 {
+    if ((argc == 5 || argc == 6) && !strcmp(argv[1], "screen")) return screen(argv[2], argv[3], atoi(argv[4]), argv[5]);
     if (argc > 1 && !strcmp(argv[1], "conops")) return conops();
     if (argc > 1 && !strcmp(argv[1], "rawkeys")) return rawkeys();
     if (argc > 1 && !strcmp(argv[1], "text")) return text();
@@ -464,7 +525,7 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "columns")) { columns(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "colours")) { colours(); return 0; }
     if (argc > 1 && !strcmp(argv[1], "scroll")) { scroll(); return 0; }
-    if (argc > 1) { dprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY|conops|rawkeys|text|readline|readraw N|grab FILE|depth N]\n"); return 2; }
+    if (argc > 1) { dprintf(2, "usage: termtest [columns|colours|scroll|pcfont [FILE]|rules TTY|conops|rawkeys|text|readline|readraw N|grab FILE|depth N|screen TTY TEXT SECS [TYPE]]\n"); return 2; }
     int sz = sys_ttyinfo();
     dprintf(1, ESC "[2J" ESC "[H");
     dprintf(1, ESC "[7m Zenix terminal test " ESC "[0m  size %dx%d\n", sz & 0xFFFF, sz >> 16);
