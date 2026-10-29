@@ -958,3 +958,14 @@ above, and the choices the note left open, taken conservatively (the builder's, 
 - **Not done (later steps or the A1200):** step 7 (one drawing path; needs the A1200's timing of byte-wise drawing
   against `rglyph`), step 8 (composing accents), step 9 (`confont`); `bench` and `free` on the stock A1200.
 
+
+## Main session, 2026-10-30: steps 1-6 merged
+
+- **The version number** is bumped with the merge (`ZENIX_VNUM` 2026103000), so the telnet package's "needs this base"
+  tells this base from an older one; the readable version stays 0.2 until a release step names one.
+- **wasabid's TEXT** switches to the 4-byte `CON_READ` form (`CONRF_CELL4`) together with the Wasabi client learning
+  UTF-8 text (a D24 section 11 addition), as one change; until then TEXT gives only the low byte of a character
+  above U+00FF (the 3-byte cell form), so such characters read wrong over the remote control (read in term.c).
+- **con-test** runs `termtest utf8` at 8 colours (the stock A1200's default) and 16 (AGA) only; `conops` still runs at
+  all four depths. The suite's time goes back down (the four-depth glyph page took about 12 minutes).
+- The helper's other decisions (section 19) are accepted as built.

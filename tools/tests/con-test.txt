@@ -14,14 +14,10 @@ send termtest depth 4\r
 wait colours 30
 send termtest conops\r
 wait (?m)^conops: [0-9]+ failed 60
-send termtest utf8\r
-wait (?m)^utf8: [0-9]+ failed 240
 send termtest depth 2\r
 wait colours 30
 send termtest conops\r
 wait (?m)^conops: [0-9]+ failed 60
-send termtest utf8\r
-wait (?m)^utf8: [0-9]+ failed 240
 send termtest depth 8\r
 wait colours 30
 send termtest rawkeys\r

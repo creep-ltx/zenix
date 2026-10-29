@@ -13,13 +13,13 @@ BD=${ZENIX_BUILD:-build}
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-con}; mkdir -p $OUT
-ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 1200 tools/tests/con-test.txt > $OUT/serial.log 2>&1
+ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 900 tools/tests/con-test.txt > $OUT/serial.log 2>&1
 L=$OUT/serial.log
 pass=1
 tr -d '\r' < $L | grep -a '^FAIL' && pass=0
 for t in conops utf8 rawkeys text erase; do
     n=$(tr -d '\r' < $L | grep -ac "^$t: 0 failed")
-    want=1; [ $t = conops ] || [ $t = utf8 ] && want=4
+    want=1; [ $t = conops ] && want=4; [ $t = utf8 ] && want=2   # utf8 at 8 and 16 colours (the stock default and AGA), conops at all four
     if [ "$n" = $want ]; then echo "PASS termtest $t ($want run(s), every check passed)"; else echo "FAIL termtest $t: $n of $want runs passed"; pass=0; fi
 done
 lines=$(tr -d '\r' < $L | grep -a '^line:' | sort | uniq -c | awk '{ print $1 " " $2 }')
