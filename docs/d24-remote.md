@@ -1,6 +1,6 @@
 # D24: the remote control, `wasabid` for Zenix (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 16); steps 0-2 built (the end of this note).** Roadmap block 2: "a
+Status: **design, revision 2 after two independent reviews (section 16); steps 0-3 built (the end of this note).** Roadmap block 2: "a
 Wasabi-like remote control (early: it lets the A1200 be tested remotely)"; CLAUDE.md: "a Wasabi-like remote-access
 daemon for Zenix (needs the network driver)". A daemon on Zenix that **speaks the protocol of the owner's Wasabi**, so
 the `wasabi` command on the PC, its Python API, its MCP server (Claude's tools), the desktop and phone apps work with
@@ -451,7 +451,8 @@ cable.
 
 ## 13. For the main session (interfaces to claim; not owner questions)
 
-- `SYS_console` ops `CON_READ`, `CON_LINE`, `CON_INPUT` (proposed 4, 5, 6; descriptor-named as D20 4.5, root only, their
+- `SYS_console` ops `CON_READ`, `CON_LINE`, `CON_INPUT` (proposed 4, 5, 6; *claimed as 5, 6, 7 at step 3: op 4 is D28's
+  `CON_UFONT`*; descriptor-named as D20 4.5, root only, their
   structs' first sizes, -ENXIO for an unused console), the `KLOG_TOTAL` flag of `SYS_klog` (*replaced by decision 1:
   `KLOG_OLDEST`, nothing new*), `/dev/kmsg` (root, write
   only, `FT_KLOG`): frozen once built, in CLAUDE.md's list. D16's list of input producers gains `CON_INPUT`; the "kwork
@@ -663,3 +664,62 @@ unfiltered and at its speed, as a service's output does.
 - **The 1 MB machine** (not one of the owner's) is not a target for a command through wasabid with a login.
 - **Exit statuses -1/-2 taken for waitnb's own answers** (init's old trap): a frozen convention, so no kernel mask now;
   it goes on block 2's security audit as an item to weigh (a new wait form would be the additive fix).
+
+## Step 3 as built (branch wasabi3, 2026-10-29)
+
+Built as 6.1-6.3 and section 14 step 3 say, with the main session's decisions; the kernel's own layouts (decision 8)
+and the choices the note left open, taken conservatively:
+
+- **The numbers:** ops 5, 6, 7 (13 amended by name): D28 section 16 plans `CON_UFONT` as op 4, so 4 stays free for it.
+- **The structs say their own size** (as D19's `udrvattach`): `CON_READ` takes a `struct uconread` (28 bytes: the
+  caller's size, a pointer to the cells and their buffer's size; the kernel fills the header), and its a3 must be 0,
+  room for a later form (D28's wider cells will need one: today's cells are 3 bytes, frozen). `CON_LINE` takes the
+  line in a2 and a `struct uconline` (56 bytes: size, pens pointer and size; width, height, depth, generation, the
+  palette as 12-bit Copper words). A header and its buffer in one call need no copy in the daemon and no permanent
+  buffer. A buffer size (`ncells`, `npens`) of 0 asks for the header (or the display's facts) alone, which `shown()`
+  and `SCREEN` use. The kernel writes back into `size` the bytes of the struct it filled (28 and 56 today), so a newer
+  program meeting an older kernel knows which fields are there.
+- **`CON_INPUT`'s arguments:** SYS_console has three, so the kind rides in a3's top half (count | kind << 16).
+- **The change counter** moves on every write to the console (each `term_write`, echo included), on a font or rules
+  change (a drop at a process's end too), on a redraw (a switch to it, a depth change), when it stops being shown and
+  when the display's scrollback view moves; the generation on a depth change and on a palette switch (CGA's), which
+  also changes what a line shows. CON_LINE reads the drawing window, so a line is what the next frame shows.
+- **Raw keys a call leaves down:** the note releases the modifiers at the call's end; a key left down (no up code)
+  also stops repeating then, so a client that went away cannot leave a key repeating for ever. Only what the call
+  itself pressed is released, but the modifier states are the keyboard's own (one flag for both Shifts, and so on): a
+  modifier the call pressed is up at its end even if it is held at the real keyboard too. Caps Lock is a toggle and
+  stays as the call left it. A key held over several calls does not repeat. Raw function and cursor keys in a raw tty
+  can fill its queue as the real keyboard can (its oldest bytes dropped, logged).
+- **A raw-key call is bounded** as a terminal write is (D20 6): after two ticks while input waits or a better process
+  is ready it stops (256 Amiga+F codes would redraw the screen 128 times) and answers how many it took; the core sends
+  the rest. Raw keys act as the real keyboard does, so Amiga+F*n* to an unused console allocates it (and init starts
+  a login there); "nothing allocated" holds for `CON_READ`, `CON_LINE` and the text kind. The daemon's `INPUTS` and long `KEY`s span several calls, so its core sends the modifiers the
+  command still holds again at the start of each call (`raw_keys`, host-checked).
+- **Text into a full queue:** a byte that would go into the queue is taken only while there is room: in a cooked tty
+  for the whole line and its newline, in a raw one one byte (the tty's ring would otherwise drop its oldest bytes).
+  ^C, ^Z, ^U and backspace commit nothing and always get through, so a program that stopped reading can still be
+  interrupted remotely.
+- **A console never used** is one whose terminal (for text, also its tty) was never allocated: opening `/dev/ttyN`
+  allocates nothing, so `TEXT` of it answers ENXIO every time.
+- **Found in the core by part s and fixed:** a `TEXT` wait longer than 10 s ended with the connection dropped instead
+  of its answer: the job's end left the progress time as it was at the command's start, so the 10 s rule (3.2) took
+  the connection as stalled. A job's end is now progress (`conn_jobdone`); host-checked with a 12 s wait.
+- **wasabid** grew by 1,056 bytes of image (55,796 to 56,852; 64,076 on the disk): the OS layer's three calls and
+  `raw_keys`. Caps now include the screen commands (`wsb_os_con_ops()` asks the kernel once: an older kernel answers
+  `CON_READ` with -EINVAL).
+- **Size** (*measured*): the kernel grew by 1,472 bytes (6.1-6.3 estimated 0.7 KB): 16,840 bytes are left for the kernel
+  on the RAM floppy and **456 on the mount tests' floppy**, so D23's and the pty step's kernel parts need room made
+  there first (the main session's call).
+
+
+One independent read-only review of the three ops and a second look at `CON_INPUT`'s code (2026-10-29): no blocker.
+Fixed: text could not get ^C through a full queue (now only bytes that go into the queue need room); the change
+counter missed a font or rules dropped at a process's end, a switch away and scrollback moves; the first sizes had no
+`_Static_assert` (now in `syscall.c` and `usys.h`, with `UCONREAD_FIRST`/`UCONLINE_FIRST` for programs); a newer
+program could not tell how much an older kernel filled (the kernel writes back `size`); a raw-key call was unbounded
+(256 Amiga+F codes: 128 redraws with input shut out; now bounded as a terminal write); "nothing allocated" was not
+true of raw keys (now said: they act as the real keyboard); stale comments in `tty.c`, `kbd.c` and `main.c`; the
+docs' wording on held modifiers, Caps Lock, the palette's frame and buffer sizes of 0. Left as they are, said above:
+a modifier the call pressed is up at its end even if held at the keyboard (one flag per modifier, as the keyboard
+has); Caps Lock stays as a call leaves it; raw function keys can overflow a raw tty's queue as the real keyboard can;
+codes 0x68-0x77 are taken and do nothing.

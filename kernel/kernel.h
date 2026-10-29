@@ -824,6 +824,45 @@ int tty_of(const struct proc *p);
 #define CONR_CGAPAL     32   /* the CGA/VGA palette while this console is shown */
 #define CONR_LFONLY     64   /* LF moves down one row, same column (no CR) */
 #define CONR_ALL        127
+/* DESIGN D24 6.1-6.3 (the remote control; frozen): root only (-EPERM), named by any console's descriptor. CON_READ,
+ * CON_LINE and CON_INPUT's text: a console never used is -ENXIO (nothing is allocated); raw keys act as the real
+ * keyboard does (Amiga+Fn to an unused console allocates it and asks init for a login). Op 4 is D28's CON_UFONT. */
+#define CON_READ        5    /* a2 struct uconread *, a3 0 -> the cell bytes written */
+#define CON_LINE        6    /* a2 a display line, a3 struct uconline * -> the pens written; -ENXIO: not shown */
+#define CON_INPUT       7    /* a2 the bytes, a3 count | kind << 16 (CONI_*; count at most 256) -> how many taken */
+#define CONI_RAW        0    /* raw Amiga key codes into the keyboard path (the shown console) */
+#define CONI_TEXT       1    /* text into that console's tty, as the serial line's bytes */
+#define CONI_MAX        256
+struct uconread {            /* CON_READ: the caller fills size, cells, ncells; the kernel the rest */
+    u32 size;                /* the caller's size of this struct (0: the first size); back: the bytes filled */
+    u32 cells;               /* where the cells go: rows x cols of 3 bytes (glyph, CONA_* bits, colour) */
+    u32 ncells;              /* its size in bytes: at most that many are written */
+    u16 rows, cols, crow, ccol;     /* the grid and the cursor */
+    u32 changes;             /* raised on every write, font or rules change, switch or scrollback move */
+    u8 flags;                /* CONRD_* */
+    u8 csize;                /* bytes a cell: 3 */
+    u16 pad;
+};
+#define UCONREAD_FIRST  28
+#define CONRD_SHOWN     1    /* the console on the display */
+#define CONRD_FONT      2    /* an 8-bit font is loaded (CON_FONT): each glyph is that font's, CP437 for the PC's */
+#define CONRD_BACK      4    /* the display shows its scrollback (the grid is the live screen) */
+#define CONRD_CURSOR    8    /* the cursor is shown */
+#define CONA_INV        1    /* a cell's attribute bits: inverse, underline, bold */
+#define CONA_UND        2
+#define CONA_BOLD       4
+struct uconline {            /* CON_LINE: the caller fills size, pens, npens; the kernel the rest */
+    u32 size;                /* the caller's size of this struct (0: the first size); back: the bytes filled */
+    u32 pens;                /* where the line goes: one pen a pixel */
+    u32 npens;               /* its size: at most that many are written (0: only the display's facts) */
+    u16 width, height, depth, pad;  /* pixels, display lines, planes */
+    u32 generation;          /* raised when the depth, the planes or the palette change */
+    u16 palette[16];         /* pens 0 .. 2^depth - 1 as the next frame shows them, 12 bits 0x0RGB; the rest 0 */
+};
+#define UCONLINE_FIRST  56
+long gfx_conline(u32 line, struct uconline *d);  /* CON_LINE's display part, console and struct checked (term_conop) */
+int kbd_inject(const u8 *codes, int n);  /* CON_INPUT's raw keys -> n, or -EINVAL (a refused code: nothing taken) */
+int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes taken, -ENXIO: no tty yet */
 /* DESIGN D19, the network (docs/d19-network.md section 4.2; ops and structs in netproto.h) */
 #define SYS_sock        90   /* op (SOCK_*) | request size << 16, fd, struct usockreq * -> per op */
 #define SYS_netsrv      91   /* op (NETSRV_*), a, b: only the network server */

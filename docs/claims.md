@@ -15,6 +15,7 @@ Claim a number here **before** using it (system calls, message types, port names
 | `exit`'s second argument (DESIGN D18: a child's pid, made the caller's parent's child first; login steps aside for init) | built on branch diet, 2026-10-26 |
 | 89 `console` (the 2 MB diet, DESIGN D18: op 1 `CON_COLOURS`, the display's colours 2/4/8/16, 0 asks; D14 note section 11) | built on branch diet, 2026-10-26 |
 | 89 `console`'s op word `op \| (fd + 1) << 8` (0 above the op: no descriptor, only `CON_COLOURS`), op 2 `CON_FONT` (a PSF1 font for that console, null drops), op 3 `CON_RULES` (bits, mask; `CONR_*` 1-64) (DESIGN D20 4.5) | main, branch t12, 2026-10-27 |
+| 89 `console`'s ops 5 `CON_READ` (a console's grid: `struct uconread`), 6 `CON_LINE` (a display line's pens: `struct uconline`), 7 `CON_INPUT` (raw keys or text: kinds `CONI_RAW` 0, `CONI_TEXT` 1); the `CONRD_*` flags 1-8 and the cells' `CONA_*` bits 1-4 (DESIGN D24 6.1-6.3, root only; op 4 stays D28's `CON_UFONT`, planned) | main's builder, branch wasabi3, 2026-10-29 |
 | 90 `sock` (DESIGN D19: every BSD socket call: op `SOCK_*` plus the request size << 16, fd, `struct usockreq`), 91 `netsrv` (the network server: `NETSRV_HELLO`, `READY`, `REPLY`), 92 `drv` (the network's drivers: `DRV_*` ops 1-7, `HWINFO` .. `XFER`; built on branch n678 2026-10-27) | main, branch n023, 2026-10-27 |
 | **next free: 93** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.

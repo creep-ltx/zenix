@@ -126,6 +126,29 @@ void cmd_text(struct conn *c, const uint8_t *p, uint32_t len)
     c->until = g.now + WSB_LOG_MS;
 }
 
+/* Raw key codes, the modifiers this command holds pressed again first: the kernel releases at the end of each call
+ * what the call left held (6.3: a client that went away leaves no key down), so a modifier held across calls (INPUTS'
+ * events, KEY's pieces) is sent again with each. n <= WSB_RAWPIECE -> the codes of k taken, or the kernel's error */
+#define WSB_RAWPIECE 248
+static int raw_keys(struct conn *c, int con, const uint8_t *k, int n)
+{
+    uint8_t b[WSB_RAWPIECE + 8];
+    int m = 0, r;
+    for (int i = 0; i < 8; i++)
+        if (c->mods >> i & 1)
+            b[m++] = (uint8_t)(0x60 + i);
+    memcpy(b + m, k, (size_t)n);
+    if ((r = wsb_os_con_input(con, WSB_IN_RAW, b, m + n)) < 0)
+        return r;
+    r = r < m ? 0 : r - m;                      /* the kernel may stop early (a busy machine): the codes of k taken */
+    for (int i = 0; i < r; i++) {
+        unsigned q = k[i] & 0x7Fu;
+        if (q >= 0x60 && q <= 0x67 && q != 0x62)
+            c->mods = (uint8_t)(k[i] & 0x80 ? c->mods & ~(1u << (q - 0x60)) : c->mods | 1u << (q - 0x60));
+    }
+    return r;
+}
+
 /* ---- INPUTS ---- */
 void cmd_inputs(struct conn *c, const uint8_t *p, uint32_t len)
 {
@@ -149,6 +172,7 @@ void cmd_inputs(struct conn *c, const uint8_t *p, uint32_t len)
     memcpy(c->buf, p, len);
     c->blen = n;
     c->bpos = 0;
+    c->mods = 0;
     c->until = g.now;
     c->job = J_INPUTS;
 }
@@ -185,7 +209,7 @@ void screen_tick(struct conn *c, uint32_t *tmo)
             }
             const uint8_t *r = (const uint8_t *)c->buf + 12 * c->bpos;
             uint8_t b = r[5];
-            if (wsb_os_con_input(c->con, r[0] ? WSB_IN_TEXT : WSB_IN_RAW, &b, 1) != 1) {
+            if ((r[0] ? wsb_os_con_input(c->con, WSB_IN_TEXT, &b, 1) : raw_keys(c, c->con, &b, 1)) != 1) {
                 char m[48];
                 struct wsb_buf w = { m, 0, sizeof m };
                 bs(&w, "input event write failed at event ");
@@ -414,13 +438,16 @@ void cmd_key(struct conn *c, const uint8_t *p, uint32_t len)
         for (uint32_t i = 0; i < total; i++)
             if (p[4 * i]) { qerr(c, 0, 0, "not a raw key code (0-255)"); return; }
     if ((con = shown(&h)) < 0) { qerr(c, 0, 0, "no console is shown"); return; }
+    c->mods = 0;
     while (done < total) {
-        uint32_t n = total - done < sizeof k ? total - done : sizeof k;
+        uint32_t n = total - done < WSB_RAWPIECE ? total - done : WSB_RAWPIECE;
         for (uint32_t i = 0; i < n; i++)
             k[i] = mode ? p[done + i] : p[4 * (done + i) + 1];
-        int r = wsb_os_con_input(con, mode ? WSB_IN_TEXT : WSB_IN_RAW, k, (int)n);
+        int r = mode ? wsb_os_con_input(con, WSB_IN_TEXT, k, (int)n) : raw_keys(c, con, k, (int)n);
         if (r < 0) { qerr(c, r, 0, "the console refused the input"); return; }
         done += (uint32_t)r;
+        if (!mode && r > 0)
+            continue;                           /* raw keys: the kernel stopped early on a busy machine; the rest next */
         if ((uint32_t)r < n) {
             char m[80];
             struct wsb_buf b = { m, 0, sizeof m };

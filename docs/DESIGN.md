@@ -263,7 +263,7 @@ an unchanged verifier, `FS_CLOSE` answered at once, `mount -a` never waiting for
 by default, made killable by two small kernel changes: **the cancel mark** (`UMSG_CANCEL` on the requests of a killed
 client, `POLLPRI` on the server's port) and **the reboot sync** (network mounts synced last, `FS_SYNC` bounded). The
 full design: [d23-nfs.md](d23-nfs.md).
-## D24. The remote control, `wasabid` (roadmap block 2; design note revision 2 after two reviews; steps 0-2 built on branch wasabi1, 2026-10-28)
+## D24. The remote control, `wasabid` (roadmap block 2; design note revision 2 after two reviews; steps 0-2 built on branch wasabi1, 2026-10-28; step 3, the console ops 5-7 and the screen commands, on branch wasabi3, 2026-10-29)
 **Why.** Test Zenix on the real A1200 with nobody at it, and let the owner's tools (the `wasabi` command, its Python
 API, its MCP server for Claude, the apps) drive Zenix as they drive AmigaOS. **How.** `/sbin/wasabid` speaks the owner's
 Wasabi protocol version 1 (frames, `caps`, discovery) and offers what fits Zenix: files (regular files only; network

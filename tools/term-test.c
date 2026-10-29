@@ -125,6 +125,12 @@ static int fg_ok = 1, uok = 1;
 int tty_of(const struct proc *p) { return p->ctty; }
 int tty_in_fg(int tty, const struct proc *p) { (void)tty; (void)p; return fg_ok; }
 int user_ok_rd(const struct proc *p, u32 ptr, u32 len) { (void)p; (void)ptr; (void)len; return uok; }
+int user_ok_wr(const struct proc *p, u32 ptr, u32 len) { (void)p; (void)ptr; (void)len; return uok; }
+/* D24 6.2-6.3's other halves (gfx.c, kbd.c, tty.c), as models: what term_conop hands them */
+static int raw_n, text_con, text_n, line_n;
+int kbd_inject(const u8 *c, int n) { (void)c; raw_n = n; return n; }
+int tty_type(int con, const u8 *b, int n) { (void)b; text_con = con; text_n = n; return n; }
+long gfx_conline(u32 line, struct uconline *d) { (void)d; line_n = (int)line; return 640; }
 
 static int bad;
 #define EXPECT_TRUE(c, msg) do { if (!(c)) { printf("FAIL: %s\n", msg); bad++; } else printf("ok:   %s\n", msg); } while (0)
@@ -498,6 +504,63 @@ int main(void)
         EXPECT_TRUE(t->esc == 0 && t->attr == 0 && t->colour == CO_DEF && t->curvis && !t->ckm && t->top == 0 &&
                     t->bot == trows - 1 && !strcmp(row(y0) + x0, "ok"),
                     "telnet's reset after a hostile board: string ended, colours, scroll region, cursor, keys; in place");
+    }
+
+    /* ---- DESIGN D24 6.1-6.3: CON_READ against the model screen, the ops' checks ---- */
+    me.uid = 0; me.fd[4] = &ttyf[9];
+    reset();
+    out("\033[1;4;7;31;42mxy\033[m\033[3;71H\345\033[44m\033[K\033[m\033[6;11H");
+    for (int i = 0; i < 300; i++) { char c = (char)(" abc\033[;1234567890mHJKLM@P\n\r\t"[(i * 7 + i / 13) % 29]); outn(&c, 1); }
+    {
+        struct uconread *r = (struct uconread *)psf;            /* a u32 address, as on the Amiga */
+        u8 *cells = mmap(0, 16384, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+        if (cells == MAP_FAILED) { printf("FAIL: mmap\n"); return 1; }
+        memset(r, 0, sizeof *r);
+        r->size = sizeof *r; r->cells = (u32)(unsigned long)cells; r->ncells = 16384;
+        long n = term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0);
+        int same = n == trows * COLS * 3;
+        for (int y = 0; y < trows && same; y++)
+            for (int x = 0; x < COLS && same; x++) {
+                const u8 *c = cells + 3 * (y * COLS + x);
+                same = c[0] == T()->ch[y][x] && c[1] == T()->at[y][x] && c[2] == T()->co[y][x] &&
+                       (c[0] == scr_ch[y][x] || !screen_is_grid());
+            }
+        EXPECT_TRUE(same && screen_is_grid(), "CON_READ: every cell as the grid holds it (and the screen shows it)");
+        EXPECT_TRUE(r->rows == trows && r->cols == COLS && r->crow == T()->cy && r->ccol == T()->cx && r->csize == 3 &&
+                    r->changes == T()->changes && (r->flags & CONRD_SHOWN), "CON_READ: the header");
+        u32 ch0 = r->changes; out("x");
+        term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0);
+        EXPECT_TRUE(r->changes == ch0 + 1, "CON_READ: a write raises the change counter");
+        r->ncells = 8; cells[6] = 0x5A;
+        EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == 6 && cells[6] == 0x5A, "CON_READ: whole cells only");
+        r->size = 27;
+        EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == -EINVAL, "CON_READ: a size below the first: -EINVAL");
+        r->size = 0; r->ncells = 0;
+        EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == 0 && r->rows == trows, "CON_READ: size 0 is the first size");
+        EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 1) == -EINVAL, "CON_READ: a3 not 0: -EINVAL");
+        uok = 0; EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == -EFAULT, "CON_READ: a struct outside the caller: -EFAULT"); uok = 1;
+        EXPECT_TRUE(!wsp[9] && term_conop(OP(CON_READ, 4), (u32)(unsigned long)r, 0) == -ENXIO &&
+                    term_conop(OP(CON_LINE, 4), 0, (u32)(unsigned long)r) == -ENXIO &&
+                    term_conop(OP(CON_INPUT, 4), (u32)(unsigned long)psf, 1 | CONI_TEXT << 16) == -ENXIO && !wsp[9],
+                    "a console never used: -ENXIO for all three, nothing allocated");
+        EXPECT_TRUE(term_conop(OP(CON_READ, 2), (u32)(unsigned long)r, 0) == -ENOTTY &&
+                    term_conop(OP(CON_READ, 9), (u32)(unsigned long)r, 0) == -EBADF, "CON_READ: a file -ENOTTY, none -EBADF");
+        r->size = 0; EXPECT_TRUE(term_conop(OP(CON_LINE, 1), 17, (u32)(unsigned long)r) == 640 && line_n == 17, "CON_LINE: the shown console's line to gfx");
+        EXPECT_TRUE(term_conop(OP(CON_LINE, 3), 0, (u32)(unsigned long)r) == -ENXIO, "CON_LINE: a console not shown: -ENXIO");
+        up = 0; EXPECT_TRUE(term_conop(OP(CON_LINE, 1), 0, (u32)(unsigned long)r) == -ENODEV &&
+                            term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == 0, "no display: CON_LINE -ENODEV, CON_READ works"); up = 1;
+        EXPECT_TRUE(term_conop(OP(CON_INPUT, 3), (u32)(unsigned long)psf, 5 | CONI_TEXT << 16) == 5 && text_con == 2 && text_n == 5,
+                    "CON_INPUT text: into the descriptor's console");
+        EXPECT_TRUE(term_conop(OP(CON_INPUT, 4), (u32)(unsigned long)psf, 256) == 256 && raw_n == 256,
+                    "CON_INPUT raw: to the keyboard whichever console names it, 256 bytes");
+        EXPECT_TRUE(term_conop(OP(CON_INPUT, 1), (u32)(unsigned long)psf, 257) == -EINVAL &&
+                    term_conop(OP(CON_INPUT, 1), (u32)(unsigned long)psf, 1 | 2 << 16) == -EINVAL &&
+                    term_conop(OP(CON_INPUT, 1), (u32)(unsigned long)psf, 1 | 1u << 24) == -EINVAL, "CON_INPUT: 257 bytes, kind 2, high bits: -EINVAL");
+        uok = 0; EXPECT_TRUE(term_conop(OP(CON_INPUT, 1), (u32)(unsigned long)psf, 1) == -EFAULT, "CON_INPUT: bytes outside the caller: -EFAULT"); uok = 1;
+        me.uid = 1000;
+        EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == -EPERM && term_conop(OP(CON_INPUT, 9), 0, 0) == -EPERM &&
+                    term_conop(OP(CON_LINE, 1), 0, 0) == -EPERM, "not root: -EPERM, before the descriptor's checks");
+        EXPECT_TRUE(term_conop(OP(8, 1), 0, 0) == -EINVAL, "op 8: -EINVAL");
     }
 
     if (bad) { printf("term-test: %d FAILED\n", bad); return 1; }

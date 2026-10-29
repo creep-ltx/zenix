@@ -272,6 +272,7 @@ static struct gfont *fonts;
 static const struct gfont *sfont;
 static int scga;                        /* the shown console asked for the CGA palette (CONR_CGAPAL) */
 static volatile int pal_dirty;          /* the Copper list's colours are to be written at the next vertical blank */
+static u32 dgen;                        /* CON_LINE's generation: raised when the depth, planes or palette change */
 
 static HOT void draw1(u8 *p, const u8 *g, u32 attr, u32 x)
 {
@@ -606,6 +607,7 @@ void gfx_show(const struct gfont *f, int cga)
     if (cga != scga) {
         scga = cga;
         pal_dirty = 1;
+        dgen++;
     }
 }
 
@@ -720,6 +722,7 @@ int gfx_set_colours(int colours)
     COP1LCH = (u16)((u32)nc >> 16);
     COP1LCL = (u16)(u32)nc;
     irq_restore(s);
+    dgen++;
     u32 t0 = hr_time(), n = 0;          /* a vertical blank: the beam's line number goes down once */
     int last = (int)((VPOSL >> 8) & 0x1FF);
     while ((u32)(hr_time() - t0) < ECLOCK_PAL / 10 && ++n < 2000000u) {
@@ -741,6 +744,36 @@ int gfx_set_colours(int colours)
 }
 
 int gfx_up(void) { return up; }
+
+/* SYS_console CON_LINE (DESIGN D24 6.2), for the shown console (term_conop checked it): display line `line` of the
+ * drawing window as one pen a pixel, and the display's facts, into the caller's struct uconline. Only "a line of
+ * pens" is promised: the planes' layout stays the kernel's. -> the pens written */
+long gfx_conline(u32 line, struct uconline *d)
+{
+    if (line >= (u32)dlines)
+        return -EINVAL;
+    u32 k = d->npens < 8 * STRIDE ? d->npens & ~7u : 8 * STRIDE;
+    if (k && !user_ok_wr(current, d->pens, k))
+        return -EFAULT;
+    const u8 *p = line_at(off + (int)line);
+    u8 *o = (u8 *)d->pens;
+    for (u32 x = 0; x < k / 8; x++, p++)
+        for (int b = 7; b >= 0; b--) {
+            u32 pen = 0;
+            for (int pl = gfx_depth - 1; pl >= 0; pl--)
+                pen = pen << 1 | (p[pl * STRIDE] >> b & 1);
+            *o++ = (u8)pen;
+        }
+    d->width = 8 * STRIDE;
+    d->height = (u16)dlines;
+    d->depth = (u16)gfx_depth;
+    d->pad = 0;
+    d->generation = dgen;
+    d->size = UCONLINE_FIRST;                           /* the bytes of the struct the kernel filled */
+    for (int i = 0; i < 16; i++)
+        d->palette[i] = i < (1 << gfx_depth) ? colour_of(i, gfx_depth) : 0;
+    return (long)k;
+}
 
 /* a kernel panic with the display up (interrupts are off): show the scroll position the text was drawn at (the
  * vertical-blank interrupt that normally applies it no longer runs; the Copper reads the pointers at the next frame)

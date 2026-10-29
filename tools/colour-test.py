@@ -30,6 +30,9 @@
                                         planes show them
   colour-test.py bbssame A GEOMA ROWA B GEOMB ROWB N   N text rows of A from ROWA have the same glyph shapes as B's
                                         from ROWB (Topaz: telnet's Amiga mode against the plain console)
+  colour-test.py grab SHOT GEOM ZG       DESIGN D24 6.2: termtest's CON_LINE picture of the display (ZG, "ZGRB": a pen a
+                                        pixel and the palette) against the screenshot of the same moment: every pixel
+                                        whose 3 x 3 neighbourhood is one colour (edges blur in the scaled screenshot)
 Each prints what it found and exits 1 on a failure."""
 import os
 import re
@@ -233,8 +236,37 @@ def near(a, b, tol=24):
     return all(abs(p - q) <= tol for p, q in zip(a, b))
 
 
+def grab(shot, geom, zg):
+    """the CON_LINE picture against the screenshot, at each Amiga pixel's middle"""
+    _, px, _ = load(shot)
+    x0, x1, yc, h = geom
+    d = open(zg, "rb").read()
+    if d[:4] != b"ZGRB":
+        print("grab: not a ZGRB file"); return 1
+    w, hh, depth = (int.from_bytes(d[4 + 2 * i:6 + 2 * i], "big") for i in range(3))
+    pal = [int.from_bytes(d[10 + 2 * i:12 + 2 * i], "big") for i in range(16)]
+    rgb = [tuple(((p >> s) & 15) * 17 for s in (8, 4, 0)) for p in pal]
+    pens = d[42:42 + w * hh]
+    if len(pens) != w * hh or w != 640:
+        print(f"grab: {w} x {hh}, {len(pens)} pens"); return 1
+    pw, top = (x1 - x0 + 1) / w, yc - 7.5 * h
+    n = bad = 0
+    for y in range(1, hh - 1):
+        for x in range(1, w - 1):
+            p = pens[y * w + x]
+            if any(pens[(y + j) * w + x + k] != p for j in (-1, 0, 1) for k in (-1, 0, 1)):
+                continue
+            n += 1
+            if not near(px[int(x0 + (x + 0.5) * pw), int(top + (y + 0.5) * h / 8)], rgb[p]):
+                bad += 1
+    print(f"grab: {depth} planes, {n} inner pixels compared, {bad} differ")
+    return 0 if n > 100000 and bad <= n // 1000 else 1
+
+
 def main():
     what = sys.argv[1]
+    if what == "grab":
+        return grab(sys.argv[2], [float(v) for v in open(sys.argv[3]).readline().split()], sys.argv[4])
     if what == "columns":
         r = columns(sys.argv[2])
         if not r:

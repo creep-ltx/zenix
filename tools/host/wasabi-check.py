@@ -587,6 +587,12 @@ def t_screen(d):
     got, e = text(0, 0, 1, "never there")
     check(e is not None and e[1] == "timeout" and len(got) == 16 + 2560 and 0.9 < time.time() - t0 < 3,
           "TEXT's timeout: the grid, then ERR 'timeout'")
+    t0 = time.time()
+    c.s.settimeout(20)
+    got, e = text(0, 0, 12, "never there")
+    c.s.settimeout(8)
+    check(e is not None and e[1] == "timeout" and 11.5 < time.time() - t0 < 15,
+          "TEXT waiting 12 s, longer than the 10 s progress rule: kept, then ERR 'timeout' (%r, %.1f s)" % (e, time.time() - t0))
     _, e = text(0, 5)
     check(e is not None and e[0] == 0 and "never used" in e[1], "TEXT of a console never used: ERR (-ENXIO)")
     _, e = text(0, 0, 0, "(")
@@ -672,6 +678,11 @@ def t_screen(d):
     check(t == ERR and "mouse" in errtext(p)[1], "INPUTS of a mouse event: ERR before anything")
     t, p = c.simple(INPUTS, rec(1, 200, 65) + rec(1, 60, 66))
     check(t == ERR and "250" in errtext(p)[1], "INPUTS waits over 5 s: ERR")
+    # a modifier held across events: the kernel releases at the end of each call (D24 6.3), so the daemon sends it again
+    t, p = c.simple(INPUTS, rec(0, 2, 0x66) + rec(0, 2, 0x52) + rec(0, 2, 0xD2) + rec(0, 0, 0xE6))
+    keys = open(rootfile(".keys")).read().split()
+    check(t == OK and text()[0][14] == 3 and keys[-7:] == ["66", "66", "52", "66", "d2", "66", "e6"],
+          "INPUTS: Amiga held across events (sent again with each), Amiga+F3 shows console 3 (%s)" % keys[-7:])
     c.close()
 
 

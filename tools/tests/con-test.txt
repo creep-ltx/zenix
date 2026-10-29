@@ -1,0 +1,34 @@
+wait zenix:/# 120
+sleep 1
+send termtest conops\r
+wait (?m)^conops: [0-9]+ failed 60
+send termtest depth 16\r
+wait colours 30
+send termtest conops\r
+wait (?m)^conops: [0-9]+ failed 60
+send termtest depth 4\r
+wait colours 30
+send termtest conops\r
+wait (?m)^conops: [0-9]+ failed 60
+send termtest depth 2\r
+wait colours 30
+send termtest conops\r
+wait (?m)^conops: [0-9]+ failed 60
+send termtest depth 8\r
+wait colours 30
+send termtest rawkeys\r
+wait (?m)^rawkeys: [0-9]+ failed 60
+send termtest text\r
+wait (?m)^text: [0-9]+ failed 60
+send termtest readline\r
+wait readline: 20
+sleep 1
+send abc\x08\x08X\r
+wait (?m)^line: 20
+send termtest readraw 5\r
+wait readraw: 20
+sleep 1
+send ab\x03c\r
+sleep 3
+send echo con-test-""done\r
+wait con-test-done 20

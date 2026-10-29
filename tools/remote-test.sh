@@ -18,6 +18,8 @@
 #      previous boot's ending replayed and `dmesg -p` showing the boot note; then the owner's own client (when
 #      ZENIX_WASABI names a checkout of Wasabi, 0.11b3 or later: ping, run, put, get, ls, ps, info, health; skipped
 #      otherwise)
+#   s  the screen (part s, D24 step 3): TEXT and its wait, KEY text and raw keys, INPUTS, SCREEN, WINDOWS, SUM, GRAB
+#      against termtest's own CON_LINE picture of the same moment at 3 and 4 planes, a console never used
 #   l  the 1 MB machine (part l): 100 KB both ways, the memory with the daemon idle and with a session
 #   b  init's daemons (part b, D24 7): /etc/daemons starts wasabid at boot (its lines in the kernel log, /dev/kmsg
 #      root's and write only), RESTART starts it again at once (status 75), a missing configuration is a stop, a
@@ -120,6 +122,18 @@ EOS
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-c.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (c)" || { echo "FAIL e2fsck (c)"; pass=0; }
 }
 
+part_s() {
+    cat > $OUT/remote.sh <<'EOS'
+/sbin/wasabid 2> /tmp/wd.log &
+i=0; while [ ! -e /tmp/pc-done ] && [ $i -lt 900 ]; do sleep 1; i=$((i+1)); done
+ifdown sl0
+sync
+EOS
+    image
+    run fsuae/a1200-020.fs-uae 900 s
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-s.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (s)" || { echo "FAIL e2fsck (s)"; pass=0; }
+}
+
 part_l() {
     cat > $OUT/remote.sh <<'EOS'
 free > /tmp/l-free0.txt
@@ -169,8 +183,8 @@ EOS
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-b.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (b)" || { echo "FAIL e2fsck (b)"; pass=0; }
 }
 
-[ $# = 0 ] && set -- c l b
+[ $# = 0 ] && set -- c s l b
 for p in "$@"; do
-    case $p in c|l|b) "part_$p" ;; *) echo "remote-test: unknown part $p"; exit 2 ;; esac
+    case $p in c|s|l|b) "part_$p" ;; *) echo "remote-test: unknown part $p"; exit 2 ;; esac
 done
 exit $((1 - pass))

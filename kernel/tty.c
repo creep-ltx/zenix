@@ -4,14 +4,17 @@
 /* One tty per virtual console (1..NCONS, /dev/tty1..). Line discipline:
  * echo, backspace, ^U, ^C (SIGINT to the tty's foreground: a process group or
  * one process, DESIGN D16), ^Z (SIGTSTP), ^D (end of file); Tab is kept. Reads return one line at a time. Input (serial or
- * Amiga keyboard) always goes to the tty of the console on the screen;
+ * Amiga keyboard) always goes to the tty of the console on the screen (CON_INPUT's text to the console it names);
  * output goes to that tty's terminal and, for the console on the screen,
  * is mirrored to the serial port. A process's tty is its controlling tty
  * (struct proc ctty, given at spawn), not whatever its fd 0 is, so
  * `ls | less` on console 2 reads console 2's keys.
  * Everything here runs in process context: tty_input is called by kwork
- * (main.c), never by an interrupt (audit B4), so the queue, the line and
- * the screen are never changed by two pieces of code at once. */
+ * (main.c) and by SYS_console's CON_INPUT (DESIGN D24 6.3: raw keys through
+ * kbd.c, text through tty_type) in its caller's system call, never by an
+ * interrupt (audit B4). Of kwork's four points only tty_write's piece
+ * boundary is inside a system call, and these calls never reach it, so the queue, the
+ * line and the screen are never changed by two pieces of code at once. */
 
 #define NTTY (NCONS + 1)
 #define QSZ 1024
@@ -207,10 +210,10 @@ static void refuse_line(int i, struct tty *t)
     t->over = 0;
 }
 
-/* one typed byte, from kwork (serial_work or kbd_work): process context, never an interrupt */
-void tty_input(u8 c)
+/* one typed byte for console i's tty, from kwork (serial_work or kbd_work: the console on the screen) or CON_INPUT
+ * (tty_type): process context, never an interrupt */
+static void input(int i, u8 c)
 {
-    int i = con_cur;
     struct tty *t = get(i);
     if (t->mode & TTY_RAW) {                /* the program does its own editing */
         if (t->over && c != 3) {            /* the rest of a line too long, typed ahead: refused up to its end */
@@ -301,6 +304,35 @@ void tty_input(u8 c)
     }
 }
 
+void tty_input(u8 c) { input(con_cur, c); }
+
+/* CON_INPUT's text (D24 6.3): bytes into console con's tty as the serial line's are typed (the line discipline, echo,
+ * Ctrl-C), without its 0x1d hook. Stops before a byte the queue could not keep (a cooked line needs room for the
+ * whole line and its newline; ^C, ^Z, ^U and backspace commit nothing, so they always get through) -> the bytes taken; -ENXIO when the console's tty was never used (nothing allocated) */
+int tty_type(int con, const u8 *b, int n)
+{
+    struct tty *t = con >= 1 && con < NTTY ? tt[con] : 0;
+    int i;
+    if (!t)
+        return -ENXIO;
+    for (i = 0; i < n; i++) {
+        u8 c = b[i];
+        u32 room = QSZ - 1 - (u32)((t->qhead - t->qtail + QSZ) % QSZ), need;
+        if (t->mode & TTY_RAW)                  /* what commits: all but a signalling ^C and a refused long line */
+            need = (c == 3 && !(t->mode & TTY_NOSIG)) || (t->over && c != 3) ? 0 : 1;
+        else if (c == '\r' || c == '\n')
+            need = t->over ? 0 : t->llen + 1u;
+        else if (c == 4)
+            need = t->over ? 0 : t->llen;
+        else
+            need = (c >= 32 || c == '\t') && !t->over ? t->llen + 2u : 0;     /* ^C ^Z ^U backspace: always */
+        if (room < need)
+            break;
+        input(con, c);
+    }
+    return i;
+}
+
 static int have_line(struct tty *t)
 {
     if (t->mode & TTY_RAW)
@@ -343,7 +375,8 @@ long tty_read(int i, void *buf, u32 n)
             return 0;
         }
         /* No lost wakeup between the checks above and the block (audit B5, D16 section 3): input reaches the queue only
-         * through kwork, which runs only at the points listed in main.c, none of them between here and ev_block; and a
+         * through kwork, which runs only at the points listed in main.c, none of them between here and ev_block, and
+         * through CON_INPUT, another process's system call, which cannot run here either (no preemption); and a
          * wake-up after ev_arm sets the bit, which ev_block tests with interrupts masked. A handler interrupts the read
          * (-EINTR, restarted with SA_RESTART) */
         long e = ev_block(EV_IO, 0, 0, 1);

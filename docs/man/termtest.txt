@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     termtest [columns|colours|scroll|pcfont [FILE]|rules TTY]
+    termtest [conops|rawkeys|text|readline|readraw N|grab FILE|depth N]
 
 DESCRIPTION
     Draws a test page: bold, underline and inverse text, a 36-column box
@@ -32,7 +33,25 @@ DESCRIPTION
     drops them), 2 4 8 6 switch the display to 2, 4, 8 or 16 colours
     (root). termtest rules TTY: prints the console rules (CON_RULES
     bits) of the console TTY, such as /dev/tty1 (root, for another
-    console), for telnet's tests.
+    console), for telnet's tests. In termtest colours, g writes the
+    display to /tmp/grab.zg (as grab below).
+
+    The console operations of the remote control (root; tools/con-test.sh,
+    DESIGN D24 6.1-6.3): termtest conops draws a page and checks it
+    through CON_READ (the grid, the cursor, the change counter, short
+    buffers, the errors) and CON_LINE (pens and palette), and that a
+    console never used answers ENXIO; termtest rawkeys types raw key codes
+    through CON_INPUT and checks the bytes (the Swedish layers, Caps
+    Lock, Ctrl, an arrow, what a call leaves held released, Amiga+F2 and
+    back); termtest text types through CON_INPUT in raw and cooked mode
+    and prints the bytes read as "raw:HEX" and "line:HEX", as termtest
+    readline (one cooked line) and readraw N (N raw bytes) print what was
+    typed on the console, so the two paths compare. Each prints PASS and
+    FAIL lines and "NAME: N failed", exit status 1 on a failure.
+    termtest grab FILE writes the shown display through CON_LINE: ZGRB,
+    the width, height and depth (16 bits each), 16 palette words
+    (0x0RGB), then a pen a pixel. termtest depth N switches the display
+    to N colours (2, 4, 8, 16; CON_COLOURS).
 
 SEE ALSO
     clear(1), edit(1)

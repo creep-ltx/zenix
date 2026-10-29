@@ -57,6 +57,7 @@ struct term {
                                          * bright background (SGR 5); scor saved by ESC 7 */
     struct gfont *font;                 /* a loaded 8-bit font (CON_FONT), 0: Topaz */
     int fowner, rowner;                 /* who set the font, the rules: dropped when that process ends */
+    u32 changes;                        /* raised on every write and font or rules change (CON_READ, D24 6.1) */
 };
 
 static struct term *wsp[NCONS + 1];
@@ -191,6 +192,7 @@ void term_scroll_view(int delta)
     if (nb == t->back)
         return;
     cursor(t, 0);
+    t->changes++;
     t->back = nb;
     if (nb)
         show_back(t);
@@ -203,6 +205,7 @@ void term_scroll_view(int delta)
 void term_redraw(void)
 {
     struct term *t = get(con_cur);
+    t->changes++;                                       /* what the display shows of it changed (CON_READ) */
     gfx_show(t->font, t->rules & CONR_CGAPAL);          /* its font and palette (D20): a switch, a new depth */
     if (t->back)
         show_back(t);
@@ -622,6 +625,7 @@ static u32 write_(int w, const char *s, u32 n, int bounded)
     struct term *t = get(w);
     int vis = (w == con_cur) && gfx_up();
     u32 i = 0, t0 = ticks;
+    t->changes++;
     if (t->back)
         leave_back(t, vis);                             /* output brings the live screen back */
     if (vis)
@@ -666,7 +670,10 @@ int con_in_use(int w)
 }
 
 /* Amiga+Fn or the serial hook: show console w. A console nobody is on asks init for a login there (init waits for
- * that in SYS_wait with WAIT_CONSOLE; called from kwork only, so the wakeup cannot be lost) - like Linux's autovt. */
+ * that in SYS_wait with WAIT_CONSOLE) - like Linux's autovt. Called in process context only: from kwork, or from
+ * SYS_console's CON_INPUT raw keys in their caller's system call (D24 6.3). Neither can run between init's check and
+ * its block (the kernel is not preempted, and kwork runs at none of those points), and ev_post's bit catches the rest,
+ * so the wakeup cannot be lost. */
 void con_switch(int w)
 {
     if (w < 1 || w > NCONS)
@@ -679,6 +686,8 @@ void con_switch(int w)
     }
     if (w == con_cur)
         return;
+    if (wsp[con_cur])
+        wsp[con_cur]->changes++;                        /* no longer shown (CON_READ's flag) */
     con_cur = w;
     if (gfx_up())
         term_redraw();
@@ -692,6 +701,7 @@ static void font_drop(struct term *t)
     if (!t->font)
         return;
     struct gfont *f = t->font;
+    t->changes++;
     t->font = 0;
     t->fowner = 0;
     if (t->con == con_cur && gfx_up())
@@ -702,6 +712,7 @@ static void font_drop(struct term *t)
 static void rules_set(struct term *t, u8 r)
 {
     u8 old = t->rules;
+    t->changes++;
     t->rules = r;
     if (!(r & CONR_BRIGHT)) { t->cor &= (u8)~0x08; t->scor &= (u8)~0x08; }
     if (!(r & CONR_ICE)) { t->cor &= (u8)~0x80; t->scor &= (u8)~0x80; }
@@ -709,20 +720,87 @@ static void rules_set(struct term *t, u8 r)
         gfx_show(t->font, r & CONR_CGAPAL);
 }
 
-/* op word: op | (fd + 1) << 8. The descriptor must be a console that is the caller's controlling tty, with the caller
- * in its foreground (asking the rules excepted), or root's on any console; a display must be there. */
+/* ---- DESIGN D24 6.1-6.3: the remote control's ops (root only; nothing allocated: a console never used is -ENXIO) ---- */
+
+/* CON_READ: the grid (not the scrollback view) and its header into the caller's struct uconread and cell buffer */
+static long con_read(struct term *t, struct uconread *r)
+{
+    u32 k = r->ncells / 3, all = (u32)trows * COLS;
+    if (k > all)
+        k = all;
+    if (k && !user_ok_wr(current, r->cells, k * 3))
+        return -EFAULT;
+    u8 *o = (u8 *)r->cells;
+    for (u32 i = 0; i < k; i++, o += 3) {
+        o[0] = ((u8 *)t->ch)[i];
+        o[1] = ((u8 *)t->at)[i];
+        o[2] = ((u8 *)t->co)[i];
+    }
+    r->rows = (u16)trows;
+    r->cols = COLS;
+    r->crow = (u16)t->cy;
+    r->ccol = (u16)t->cx;
+    r->changes = t->changes;
+    r->flags = (u8)((t->con == con_cur ? CONRD_SHOWN : 0) | (t->font ? CONRD_FONT : 0) | (t->back ? CONRD_BACK : 0) |
+                    (t->curvis ? CONRD_CURSOR : 0));
+    r->csize = 3;
+    r->pad = 0;
+    r->size = UCONREAD_FIRST;                           /* the bytes of the struct the kernel filled */
+    return (long)(k * 3);
+}
+
+/* the caller's struct for CON_READ / CON_LINE: its first word its size (0: the first size, which is all there is so
+ * far; smaller -EINVAL), the struct writable -> 0 */
+static long ustruct(u32 a, u32 first)
+{
+    if (!user_ok_wr(current, a, 4))
+        return -EFAULT;
+    u32 n = *(u32 *)a;
+    if (n && n < first)
+        return -EINVAL;
+    return user_ok_wr(current, a, first) ? 0 : -EFAULT;
+}
+
+/* op word: op | (fd + 1) << 8. CON_FONT and CON_RULES: the descriptor must be a console that is the caller's
+ * controlling tty, with the caller in its foreground (asking the rules excepted), or root's on any console; a display
+ * must be there. CON_READ, CON_LINE, CON_INPUT (D24): root's only, on any console's descriptor. */
 long term_conop(u32 op, u32 a2, u32 a3)
 {
     u32 fd = (op >> CON_FD_SHIFT) - 1;
     op &= (1u << CON_FD_SHIFT) - 1;
-    if (op != CON_FONT && op != CON_RULES)
+    if (op != CON_FONT && op != CON_RULES && (op < CON_READ || op > CON_INPUT))
         return -EINVAL;
+    int d24 = op >= CON_READ;
+    if (d24 && current->uid != 0)
+        return -EPERM;
     struct file *f = fd < NFD ? current->fd[fd] : 0;
     if (!f)
         return -EBADF;
     if (f->type != FT_TTY || f->off < 1 || f->off > NCONS)
         return -ENOTTY;
     int con = (int)f->off, own = con == tty_of(current);
+    if (d24) {
+        if (op == CON_INPUT) {
+            u32 n = a3 & 0xFFFF, kind = a3 >> 16;
+            if (kind > CONI_TEXT || n > CONI_MAX)
+                return -EINVAL;
+            if (n && !user_ok_rd(current, a2, n))
+                return -EFAULT;
+            if (kind == CONI_RAW)                       /* the keyboard: the shown console's (any console names it) */
+                return kbd_inject((const u8 *)a2, (int)n);
+            return wsp[con] ? tty_type(con, (const u8 *)a2, (int)n) : -ENXIO;
+        }
+        if (op == CON_LINE && !gfx_up())
+            return -ENODEV;
+        if (!wsp[con] || (op == CON_LINE && con != con_cur))
+            return -ENXIO;
+        long e = ustruct(op == CON_READ ? a2 : a3, op == CON_READ ? UCONREAD_FIRST : UCONLINE_FIRST);
+        if (e)
+            return e;
+        if (op == CON_READ)
+            return a3 ? -EINVAL : con_read(wsp[con], (struct uconread *)a2);
+        return gfx_conline(a2, (struct uconline *)a3);
+    }
     if (!own && current->uid != 0)
         return -EPERM;
     if (own && !(op == CON_RULES && !a3) && !tty_in_fg(con, current))
@@ -757,6 +835,7 @@ long term_conop(u32 op, u32 a2, u32 a3)
     struct gfont *of = t->font;
     t->font = nf;
     t->fowner = current->pid;                           /* one owner: the last setter */
+    t->changes++;
     if (con == con_cur)
         term_redraw();                                  /* the grid holds bytes: everything in the new font */
     gfx_font_free(of);

@@ -92,6 +92,7 @@ void conn_jobdone(struct conn *c)
     c->bend = 0;
     c->xflags = 0;
     c->job = J_NONE;
+    c->last = g.now;                    /* a job that ends is progress: a long TEXT wait or INPUTS is not a stall (3.2) */
 }
 
 static void conn_close(struct conn *c)

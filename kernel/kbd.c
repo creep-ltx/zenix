@@ -205,7 +205,7 @@ static void key_down(u8 code)
  * repeat itself happens in kbd_work, in process context. */
 #define KBD_REPEAT_DELAY 50             /* 500 ms */
 #define KBD_REPEAT_RATE  3              /* about 33 per second */
-static volatile u8 rep_code;            /* 0: nothing held; written by kbd_work only, read by the tick */
+static volatile u8 rep_code;            /* 0: nothing held; written by key_code's callers (kbd_work, CON_INPUT), read by the tick */
 static u32 rep_at;                      /* tick of the next repeat */
 
 /* Raw key codes from the interrupt to kbd_work: a ring with one producer (kbd_isr, level 2) and one consumer
@@ -411,6 +411,40 @@ static void key_code(u8 code)
     rep_code = code;
     rep_at = ticks + KBD_REPEAT_DELAY;
     key_down(code);
+}
+
+/* SYS_console CON_INPUT's raw keys (DESIGN D24 6.3), in the caller's system call: process context like kbd_work, which
+ * cannot run meanwhile (the kernel is not preempted), so each code goes to key_code as if typed; the interrupt's ring
+ * is not touched (no second producer) and no randomness is credited (the timing came from the network). The reset
+ * warning and the keyboard's status codes are refused (the whole call, nothing taken). At the end the modifiers the
+ * call pressed and did not release are released, and a key it left down stops repeating: a client that went away
+ * leaves no key held. The modifier states are the keyboard's own: one the call pressed is up at its end even if it is
+ * held at the real keyboard too; Caps Lock, a toggle, is left as the call left it. A call stops early, as a terminal
+ * write does, once two ticks have passed while input waits or a better process is ready -> the codes taken. */
+int kbd_inject(const u8 *c, int n)
+{
+    for (int i = 0; i < n; i++)
+        if ((c[i] & 0x7F) == 0x78 || c[i] >= 0xF8)
+            return -EINVAL;
+    u8 held = 0, mine = 0;                      /* bit m: modifier 0x60 + m pressed by this call; its repeating key */
+    u32 t0 = ticks;
+    int i;
+    for (i = 0; i < n; i++) {
+        if (i && (u32)(ticks - t0) >= 2 && (kwork_pending || need_resched))
+            break;                              /* bounded as a terminal write: console switches redraw (D20 6) */
+        u8 k = c[i], m = (u8)(k & 0x7F);
+        if (m >= 0x60 && m <= 0x67 && m != 0x62)
+            held = (u8)(k & 0x80 ? held & ~(1u << (m - 0x60)) : held | 1u << (m - 0x60));
+        key_code(k);
+        if (!(k & 0x80) && rep_code == m)
+            mine = m;
+    }
+    for (int m = 0; m < 8; m++)
+        if (held >> m & 1)
+            key_code((u8)(0xE0 + m));
+    if (mine && rep_code == mine)
+        rep_code = 0;
+    return i;
 }
 
 /* Process context (kwork): everything the keyboard interrupt queued, then a key repeat if one is due. */

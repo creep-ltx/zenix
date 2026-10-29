@@ -214,6 +214,41 @@ static inline int sys_console(int op, int v) { return sys3(89, (u32)op, (u32)v, 
 #define CONR_LFONLY 64          /* LF without CR */
 static inline int sys_confont(int fd, const void *psf, u32 n) { return sys3(89, CON_FONT | (u32)(fd + 1) << 8, (u32)psf, n); }
 static inline int sys_conrules(int fd, u32 bits, u32 mask) { return sys3(89, CON_RULES | (u32)(fd + 1) << 8, bits, mask); }
+/* DESIGN D24 6.1-6.3, the remote control's console ops: root only (-EPERM), any console's descriptor; a console never
+ * used -ENXIO. The structs (kernel/kernel.h, frozen): the caller fills size (sizeof), the buffer and its size. */
+#define CON_READ 5              /* the grid: struct uconread, cells of 3 bytes (glyph, CONA_*, colour) -> cell bytes */
+#define CON_LINE 6              /* a display line of the shown console: struct uconline, a pen a pixel -> pens */
+#define CON_INPUT 7             /* kind CONI_RAW raw key codes (the keyboard), CONI_TEXT text (that console's tty) */
+#define CONI_RAW 0
+#define CONI_TEXT 1
+#define CONI_MAX 256            /* bytes a call -> how many were taken */
+struct uconread {            /* cells: rows x cols of 3 bytes, row by row */
+    u32 size, cells, ncells;
+    unsigned short rows, cols, crow, ccol;
+    u32 changes;
+    unsigned char flags, csize;
+    unsigned short pad;
+};
+#define UCONREAD_FIRST 28       /* the first sizes (frozen); the kernel writes back into size the bytes it filled */
+#define UCONLINE_FIRST 56
+_Static_assert(__builtin_offsetof(struct uconread, pad) + 2 == UCONREAD_FIRST, "uconread's first size");
+#define CONRD_SHOWN 1           /* the console on the display */
+#define CONRD_FONT 2            /* an 8-bit font is loaded (CON_FONT): its glyphs, CP437 for the PC's */
+#define CONRD_BACK 4            /* the display shows its scrollback */
+#define CONRD_CURSOR 8          /* the cursor is shown */
+#define CONA_INV 1
+#define CONA_UND 2
+#define CONA_BOLD 4
+struct uconline {
+    u32 size, pens, npens;
+    unsigned short width, height, depth, pad;
+    u32 generation;
+    unsigned short palette[16]; /* 12 bits 0x0RGB, pens 0 .. 2^depth - 1 */
+};
+_Static_assert(__builtin_offsetof(struct uconline, palette) + 32 == UCONLINE_FIRST, "uconline's first size");
+static inline int sys_conread(int fd, struct uconread *r) { return sys3(89, CON_READ | (u32)(fd + 1) << 8, (u32)r, 0); }
+static inline int sys_conline(int fd, int line, struct uconline *d) { return sys3(89, CON_LINE | (u32)(fd + 1) << 8, (u32)line, (u32)d); }
+static inline int sys_coninput(int fd, int kind, const void *b, u32 n) { return sys3(89, CON_INPUT | (u32)(fd + 1) << 8, (u32)b, n | (u32)kind << 16); }
 #define SIGHUP   1
 #define SIGINT   2
 #define SIGQUIT  3
