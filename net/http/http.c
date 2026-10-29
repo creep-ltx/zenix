@@ -482,6 +482,11 @@ int http_resp_feed(struct http_resp *r, const unsigned char *in, size_t n, size_
             unsigned char c = in[i++];
             if (r->st != S_CSIZE && r->st != S_CCRLF && ++r->hbytes > HTTP_HDRMAX)
                 return *used = i, fail(r, HTTP_E2BIG);
+            /* the chunked framing is counted too (network audit O5): a line of 256 bytes at most, and all of it at most
+             * 8 bytes a body byte plus 4 KB (one-byte chunks take 5), so a mirror cannot send kilobytes per byte */
+            if ((r->st == S_CSIZE || r->st == S_CCRLF) &&
+                (r->llen >= HTTP_CLINEMAX || (++r->cbytes > HTTP_HDRMAX && (r->cbytes - HTTP_HDRMAX) / 8 > r->got)))
+                return *used = i, fail(r, HTTP_E2BIG);
             if (c != '\n') {
                 if (r->llen >= sizeof r->line - 1)
                     return *used = i, fail(r, HTTP_E2BIG);

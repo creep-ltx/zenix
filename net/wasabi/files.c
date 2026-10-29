@@ -84,7 +84,11 @@ static int is_self(const char *path)
     char r[WSB_PATHMAX + 1];
     if (!strcmp(path, "/sbin/wasabid"))
         return 1;
-    return !wsb_os_realpath(path, r, sizeof r) && !strcmp(r, "/sbin/wasabid");
+    /* a path that cannot be resolved (a link loop, a link text longer than the resolver takes): -1, refused by the
+     * caller, never replaced unchecked (audit 2026-10-29 B2-3) */
+    if (wsb_os_realpath(path, r, sizeof r))
+        return -1;
+    return !strcmp(r, "/sbin/wasabid");
 }
 
 void cmd_put(struct conn *c, const uint8_t *p, uint32_t len)
@@ -106,7 +110,9 @@ void cmd_put(struct conn *c, const uint8_t *p, uint32_t len)
     c->xpath[0] = c->xtmp[0] = 0;
     if (e) { sink(c, J_PUT, 0, e == -ENAMETOOLONG ? "the path is longer than 63 bytes" : "bad path"); return; }
     if (path_ok(path)) { sink(c, J_PUT, 0, "a Zenix path starts with /"); return; }
-    if (is_self(path)) { sink(c, J_PUT, 0, self_words); return; }
+    e = is_self(path);
+    if (e < 0) { sink(c, J_PUT, -ELOOP, "the path cannot be resolved (a link loop or a link too long)"); return; }
+    if (e) { sink(c, J_PUT, 0, self_words); return; }
     if (on_nfs(path)) { sink(c, J_PUT, 0, nfs_words); return; }
     if (!wsb_os_stat(path, &st) && (st.mode & S_IFMT) != S_IFREG) {
         sink(c, J_PUT, (st.mode & S_IFMT) == S_IFDIR ? -EISDIR : -EINVAL, "not a regular file");
@@ -119,6 +125,8 @@ void cmd_put(struct conn *c, const uint8_t *p, uint32_t len)
     if (g.xbusy) { sink(c, J_PUT, 0, "busy: another file transfer is running"); return; }
     if (fd_take(1)) { sink(c, J_PUT, 0, "busy: all descriptors in use"); return; }
     e = -EEXIST;
+    if (!g.tmpseq)                      /* not 1, 2, 3 at every start: leftovers of a killed PUT block no name (B2-4) */
+        g.tmpseq = (g.now * 2654435761u) >> 12;
     for (int t = 0; t < 8 && e == -EEXIST; t++) {
         struct wsb_buf b = { c->xtmp, 0, sizeof c->xtmp };
         bsn(&b, path, dl);

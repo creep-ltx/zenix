@@ -493,7 +493,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
 
 /* ================================================================ lexer */
 enum { T_WORD, T_OP, T_NL };
-struct tok { u8 type, fd, hdquoted; char op[4]; char *text; u32 start, end; char *heredoc; };
+struct tok { u8 type, fd, hdquoted; char op[4]; char *text; u32 start, end; char *heredoc; u32 hb0, hb1; };   /* hb0-hb1: a here-document's body and end line in the source */
 static struct tok *toks;
 static int ntoks, ti, tokcap;
 static const char *lex_src;
@@ -593,7 +593,7 @@ static int lex(const char *s)
                         i = s[e] ? e + 1 : e;
                     }
                     if (!found) { lex_why = 2; lex_hdtab = h->fd == 1; memcpy(lex_hd, dl, dn + 1); return 1; }
-                    if (body) { body[bo] = 0; h->heredoc = body; } else blen = bo;
+                    if (body) { body[bo] = 0; h->heredoc = body; h->hb0 = (u32)b0; h->hb1 = (u32)i; } else blen = bo;
                 }
             }
             npend = 0;
@@ -724,6 +724,26 @@ static struct redir *parse_redir(u32 *end)
     return r;
 }
 
+/* a node's source text [start, end) for a child shell (a pipeline stage, a background job, a function body), with
+ * the bodies of its here-documents that follow the line after it: "{ cat; } <<EOF | cat" gave the child "<<EOF" and
+ * no body (audit 2026-10-29 B2-6) */
+static char *node_src(u32 start, u32 end)
+{
+    u32 len = end - start;
+    for (int k = 0; k < ntoks; k++)
+        if (toks[k].type == T_OP && toks[k].heredoc && toks[k].start >= start && toks[k].start < end && toks[k].hb0 >= end)
+            len += 1 + toks[k].hb1 - toks[k].hb0;
+    char *p = aalloc(len + 1), *o = p;
+    memcpy(o, lex_src + start, end - start); o += end - start;
+    for (int k = 0; k < ntoks; k++)
+        if (toks[k].type == T_OP && toks[k].heredoc && toks[k].start >= start && toks[k].start < end && toks[k].hb0 >= end) {
+            *o++ = '\n';
+            memcpy(o, lex_src + toks[k].hb0, toks[k].hb1 - toks[k].hb0); o += toks[k].hb1 - toks[k].hb0;
+        }
+    *o = 0;
+    return p;
+}
+
 /* the redirections after a compound command ("done < file", "( list ) > file", "{ list; } 2>&1"): kept on its node,
  * which runs with them in place (exec_node); its source text grows to take them in, so a child shell given the text
  * (a pipeline stage, a background job) sees them too */
@@ -735,7 +755,7 @@ static int compound_redirs(struct node *n)
         struct redir *r = parse_redir(&end); if (!r) return 0;
         *rtail = r; rtail = &r->next;
     }
-    if (end != n->end) { n->end = end; n->src = adupn(lex_src + n->start, end - n->start); }
+    if (end != n->end) { n->end = end; n->src = node_src(n->start, end); }
     return 1;
 }
 
@@ -765,7 +785,7 @@ static struct node *parse_simple(void)
     n->nwords = words.n; n->words = words.v;
     n->nassign = assigns.n; n->assign = assigns.v;
     n->redirs = rhead; n->start = start; n->end = end;
-    n->src = adupn(lex_src + start, end - start);
+    n->src = node_src(start, end);
     return n;
 }
 
@@ -802,7 +822,7 @@ static struct node *parse_compound(void)
             }
             if (!is_kw(peek(), "fi")) { if (at_eof()) lex_incomplete = 1; syn("expected fi"); return 0; }
             n->end = toks[ti].end; ti++;
-            n->start = start; n->src = adupn(lex_src + start, n->end - start);
+            n->start = start; n->src = node_src(start, n->end);
             return n;
         }
         if (is_kw(t, "while") || is_kw(t, "until")) {
@@ -816,7 +836,7 @@ static struct node *parse_compound(void)
             n->b = parse_list(s_done); if (!n->b) return 0;
             if (!is_kw(peek(), "done")) { if (at_eof()) lex_incomplete = 1; syn("expected done"); return 0; }
             n->end = toks[ti].end; ti++;
-            n->start = start; n->src = adupn(lex_src + start, n->end - start);
+            n->start = start; n->src = node_src(start, n->end);
             return n;
         }
         if (is_kw(t, "for")) {
@@ -838,7 +858,7 @@ static struct node *parse_compound(void)
             n->b = parse_list(s_done); if (!n->b) return 0;
             if (!is_kw(peek(), "done")) { if (at_eof()) lex_incomplete = 1; syn("expected done"); return 0; }
             n->end = toks[ti].end; ti++;
-            n->start = start; n->src = adupn(lex_src + start, n->end - start);
+            n->start = start; n->src = node_src(start, n->end);
             return n;
         }
         if (is_kw(t, "case")) {
@@ -877,7 +897,7 @@ static struct node *parse_compound(void)
                 *tail = it; tail = &it->next;
             }
             n->end = toks[ti].end; ti++;
-            n->start = start; n->src = adupn(lex_src + start, n->end - start);
+            n->start = start; n->src = node_src(start, n->end);
             return n;
         }
         if (is_kw(t, "{")) {
@@ -887,7 +907,7 @@ static struct node *parse_compound(void)
             n->a = parse_list(s_br); if (!n->a) return 0;
             if (!is_kw(peek(), "}")) { if (at_eof()) lex_incomplete = 1; syn("expected }"); return 0; }
             n->end = toks[ti].end; ti++;
-            n->start = start; n->src = adupn(lex_src + start, n->end - start);
+            n->start = start; n->src = node_src(start, n->end);
             return n;
         }
         if (is_kw(t, "function") || (ti + 2 < ntoks && is_name_c((unsigned char)t->text[0], 1) && is_op(&toks[ti + 1], "(") && is_op(&toks[ti + 2], ")"))) {
@@ -902,7 +922,7 @@ static struct node *parse_compound(void)
             u32 bstart = toks[ti].start;
             struct node *body = parse_command(); if (!body) return 0;
             struct node *n = new_node(N_FUNC); n->name = name; n->a = body;
-            n->src = adupn(lex_src + bstart, body->end - bstart);
+            n->src = node_src(bstart, body->end);
             n->start = start; n->end = body->end;
             return n;
         }
@@ -913,9 +933,9 @@ static struct node *parse_compound(void)
         struct node *n = new_node(N_SUBSH);
         n->a = parse_list(s_p); if (!n->a) return 0;
         if (!is_op(peek(), ")")) { if (at_eof()) lex_incomplete = 1; syn("expected )"); return 0; }
-        n->name = adupn(lex_src + start + 1, toks[ti].start - start - 1);   /* the list inside, for the child shell */
+        n->name = node_src(start + 1, toks[ti].start);   /* the list inside, for the child shell */
         n->end = toks[ti].end; ti++;
-        n->start = start; n->src = adupn(lex_src + start, n->end - start);
+        n->start = start; n->src = node_src(start, n->end);
         return n;
     }
     return parse_simple();

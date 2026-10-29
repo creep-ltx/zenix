@@ -114,9 +114,10 @@ static void cursor(struct term *t, int on)
 {
     if (!t->curvis || t->back)
         return;
-    if (on)
-        gfx_cell(t->cy, t->cx, t->ch[t->cy][t->cx], t->at[t->cy][t->cx] ^ A_INV, t->co[t->cy][t->cx]);
-    else
+    if (on) {
+        u32 o = rowx[t->cy] + (u32)t->cx;   /* no multiply by COLS per key echoed (audit 2026-10-29 B2-12) */
+        gfx_cell(t->cy, t->cx, ((u8 *)t->ch)[o], ((u8 *)t->at)[o] ^ A_INV, ((u8 *)t->co)[o]);
+    } else
         draw(t, t->cy, t->cx);
 }
 

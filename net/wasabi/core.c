@@ -703,7 +703,7 @@ static void accept_one(void)
     c->peer = peer;
     c->xfd = -1;
     c->slot = -1;
-    c->last = g.now;
+    c->last = c->born = g.now;
     wsb_rx_init(&c->rx, c->in);
 }
 
@@ -808,6 +808,15 @@ int wsb_step(void)
         if (c->closing == 2 && c->closeby && DUE(c->closeby)) {
             conn_drop(i);
             continue;
+        }
+        if (!c->hello && !c->held && !c->closing) {
+            /* a HELLO trickled in a byte at a time would count as progress for ever: four such connections kept every
+             * slot, the owner's too, for hours without the key (audit 2026-10-29 B2-1) */
+            if ((uint32_t)(g.now - c->born) >= WSB_HELLO_MS) {
+                conn_drop(i);
+                continue;
+            }
+            TMO(&tmo, WSB_HELLO_MS - (g.now - c->born));
         }
         if (waits_on_peer(c)) {
             if ((uint32_t)(g.now - c->last) >= WSB_STALL_MS) {

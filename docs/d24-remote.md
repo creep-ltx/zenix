@@ -88,7 +88,9 @@ The address filter (RFC 1918, loopback, link-local; `allow CIDR` adds ranges, `a
 about at every start) is checked before `HELLO`; refused addresses are counted (`WELCOME`'s `refused`, the count kept
 in `/var/lib/wasabid.refused`) and get no discovery answer either. **A transfer must keep moving:** no progress for 10 s
 in either direction drops the connection (a whole 64 KB frame takes about 6 s over SLIP, so Wasabi's "finish a frame in
-10 s" would drop real frames). An unknown tag gets `ERR` "not on Zenix". A connection whose first byte is `0x16` (a TLS
+10 s" would drop real frames). Before `WELCOME` there is a deadline as well: 10 s from the accept, however slowly the
+`HELLO` trickles in (audit 2026-10-29 B2-1: a byte every 8 s counted as progress and four such connections held every
+slot for hours without the key). An unknown tag gets `ERR` "not on Zenix". A connection whose first byte is `0x16` (a TLS
 ClientHello) is closed at once (the client's sign to go plain). Behind NAT (zenix-slirp, FS-UAE's slirp) every peer
 looks like 10.0.2.2: the filter and the per-address pause cannot tell callers apart there, so port forwards to the
 daemon stay bound to the PC's 127.0.0.1 (zenix-slirp's default), said in the page.

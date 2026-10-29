@@ -108,7 +108,9 @@ int wsb_os_open(const char *path, int flags, uint32_t mode)
 {
     char r[160];
     /* the serial port is taken by opening it (D12: one owner; SLIP's line): never for a file command, under any name */
-    if (!zrealpath(path, r, sizeof r) && !strcmp(r, "/dev/ttyS0"))
+    if (zrealpath(path, r, sizeof r))   /* not resolved (a link text or a path past zrealpath's 159 bytes): refused, */
+        return -ENAMETOOLONG;           /* never let through unchecked (audit 2026-10-29 B2-3) */
+    if (!strcmp(r, "/dev/ttyS0"))
         return -EBUSY;
     int fl = flags == WSB_O_READ ? O_RDONLY : flags == WSB_O_WRITE ? O_WRONLY | O_CREAT | O_EXCL : O_WRONLY | O_CREAT | O_APPEND;
     int fd = sys_open(path, fl | O_NONBLOCK);

@@ -2,6 +2,8 @@
 #include "libz.h"
 #include "randseed.h"
 #include "clockfile.h"
+#include "builddate.h"
+#include "../crypto/zc/zc_clock.h"
 /* reboot [amigaos|zenix]: save the disks and reset the Amiga (root only). With a system named - or started as
  * "bootamigaos" - the boot menu (boot/bootmenu.c) starts that system at once instead of showing the menu. First a
  * new random seed goes into /var/lib/random-seed (DESIGN D19 9.3, randseed.h): what this session gathered is in the
@@ -34,7 +36,8 @@ int main(int argc, char **argv)
         seed_store(seed_pool_ready() ? SEED_F_SEEDED : 0, 0);     /* a read-only root: nothing written, no harm */
         int b = sys_clockbits();
         uint32_t now = sys_time(), file;
-        if (b > 0 && (b & (CLOCK_RTC | CLOCK_NET)) && (clockfile_read(&file) < 0 || now > file))
+        uint32_t floor = zc_clock_floor(ZENIX_BUILD_DATE, clockfile_read(&file) == 0, file);   /* as sntp and wget */
+        if (b > 0 && clockfile_rises(b & CLOCK_RTC, b & CLOCK_NET, 1, floor, now))
             clockfile_write(now);                                   /* the floor only rises; a failure is no harm */
     }
     int r = sys_reboot(note);

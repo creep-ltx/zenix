@@ -9,6 +9,8 @@ typedef uint8_t u8;
 typedef uint32_t u32;
 typedef int32_t s32;
 #include "../kernel/clock.h"
+#include "../user/clockfile.h"
+#include "../net/sntp/sntp.h"
 
 static int fails;
 static void check(int ok, const char *what)
@@ -71,6 +73,18 @@ int main(void)
     c.secs = 0xFFFFFFFFu; c.sub = 99; c.base = 5;
     wclock_tick(&c);
     check(c.secs == 0 && wclock_now(&c) == 5, "the seconds count wraps after 2^32 s (136 years), modulo arithmetic");
+
+    /* 5. reboot's floor (user/clockfile.h, audit 2026-10-29 B2-2): a battery clock far ahead never raises it */
+    const u32 fl = 1830000000u, day = 86400u;
+    check(CLOCKFILE_RTC_AHEAD == SNTP_AHEAD, "reboot's bound is sntp's 400 days");
+    check(clockfile_rises(1, 0, 1, fl, fl + 30 * day), "the battery clock 30 days past the floor raises it");
+    check(!clockfile_rises(1, 0, 1, fl, 2954000000u), "a battery clock set to 2063 does not (the old reboot did)");
+    check(clockfile_rises(1, 0, 1, fl, fl + 400 * day) && !clockfile_rises(1, 0, 1, fl, fl + 400 * day + 1),
+          "400 days past the floor still raises it, a second more does not");
+    check(clockfile_rises(0, 1, 1, fl, 2954000000u), "sntp's checked answer raises it however far");
+    check(!clockfile_rises(1, 1, 1, fl, fl - 1) && !clockfile_rises(0, 1, 1, fl, fl), "the floor never falls");
+    check(!clockfile_rises(0, 0, 1, fl, fl + day) && !clockfile_rises(0, 0, 0, 0, fl), "a hand-set time never raises it");
+    check(clockfile_rises(1, 0, 0, 0, fl), "no file yet: the battery clock writes the first one");
 
     printf("%s\n", fails ? "clock-host-test: FAILED" : "clock-host-test: ok");
     return fails != 0;

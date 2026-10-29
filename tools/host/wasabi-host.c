@@ -216,8 +216,23 @@ int wsb_os_realpath(const char *p, char *out, int cap)
 {
     char r[PATH_MAX];
     size_t l = strlen(root);
-    if (!realpath(hp(p), r))
-        return -errno;
+    if (!realpath(hp(p), r)) {
+        /* as zrealpath on Zenix: a name not there yet resolves through its directory (a PUT's new file) */
+        char d[PATH_MAX], *sl;
+        int e = errno;
+        snprintf(d, sizeof d, "%s", hp(p));
+        sl = strrchr(d, '/');
+        if (e != ENOENT || !sl || sl == d)
+            return -e;
+        *sl = 0;
+        struct stat ls;
+        if (!lstat(hp(p), &ls) || !realpath(d, r))     /* a dangling link: not resolved, as a loop */
+            return e == ENOENT ? -ELOOP : -e;
+        if (strlen(r) + strlen(sl + 1) + 2 > sizeof r)
+            return -ENAMETOOLONG;
+        strcat(r, "/");
+        strcat(r, sl + 1);
+    }
     if (strncmp(r, root, l) || (r[l] && r[l] != '/'))
         return -EACCES;                         /* outside the pretend root */
     snprintf(out, (size_t)cap, "%s", r[l] ? r + l : "/");

@@ -570,7 +570,11 @@ static int ops_text(char **out, u32 *len)
     u32 cap = (u32)nops * 200 + 128, n = 0;
     char *b = malloc(cap);
     if (!b) return -ENOMEM;
-    for (int i = 0; i < nops; i++) n += (u32)put_op(b + n, cap - n, &ops[i]);
+    for (int i = 0; i < nops; i++) {
+        int w = put_op(b + n, cap - n, &ops[i]);
+        if (w < 0 || (u32)w >= cap - n) { free(b); return -ENAMETOOLONG; }   /* never past the block (audit B2-8) */
+        n += (u32)w;
+    }
     *out = b; *len = n;
     return 0;
 }

@@ -12,6 +12,7 @@
 #include <stddef.h>
 
 #define HTTP_HDRMAX   4096          /* the status line and headers together (and a chunked body's trailer) */
+#define HTTP_CLINEMAX 256           /* a chunk-size line, extensions included (audit 2026-10-29 B2-9, network audit O5) */
 #define HTTP_HOSTMAX  255
 #define HTTP_PATHMAX  1023
 #define HTTP_MAXREDIR 3
@@ -63,6 +64,7 @@ struct http_resp {
     int st, head, minor;
     unsigned long limit, got, left;
     unsigned hbytes, llen;
+    unsigned long cbytes;           /* chunk-size lines and the CRLFs after chunks: at most 8 a body byte + 4 KB (B2-9) */
     char line[HTTP_HDRMAX];
 };
 /* limit: the most body bytes taken (the list's size of the file); head: the request was HEAD (no body) */
