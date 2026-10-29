@@ -53,8 +53,8 @@ Found in upstream (for the owner's repository, not changed here):
 - Messages and help keep AmigaOS words: "Protect it +wd first", "an AmigaDOS command", "ENVARC:Sumi/Sumi.keys" in
   "does nothing"; on Zenix they mean chmod, a shell command and $HOME/.config/Sumi. A word from the OS layer
   (upstream's own small header) would make them right on both.
-- Shift+Tab (unindent) needs the terminal to send ESC [ Z; Zenix's console sends a plain Tab for it today (a
-  console matter, not upstream's).
+- Shift+Tab (unindent) needs the terminal to send ESC [ Z; Zenix's console sent a plain Tab for it (a console matter,
+  not upstream's): fixed in the keyboard (kernel/kbd.c, 2026-10-29), checked by tools/sumi-test.sh.
 
 Tests: tools/sumi-test.sh (FS-UAE, the stock A1200; in make check): sumi opens a file, the grid is read back with
 termtest screen (CON_READ), keys are put in (CON_INPUT), the saved file is compared byte for byte, the settings and

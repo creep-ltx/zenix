@@ -4,7 +4,7 @@
 # depth` switches to 4, 2 and 1 for the same checks): termtest conops (CON_READ's grid and header against what it
 # drew, the change counter, short buffers, the errors, a console never used is ENXIO twice, CON_LINE's pens and
 # palette, root only), termtest rawkeys (raw key codes through CON_INPUT give tools/kbd-test.sh's bytes for the same
-# key positions; modifiers and a repeating key released at the end of a call; refused codes; Amiga+F2 and back),
+# key positions; Tab and Shift+Tab (ESC [ Z); modifiers and a repeating key released at the end of a call; refused codes; Amiga+F2 and back),
 # termtest text (text through CON_INPUT, raw and cooked, a full queue), and the same text typed on the serial line
 # (termtest readline, readraw) giving the very same bytes.
 cd "$(dirname "$0")/.." || exit 1

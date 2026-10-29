@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
-# The editor: type, move, save, quit, reopen, replace, undo/redo, all by serial key presses; the saved file is read back
+# The editor: type, move, unindent (Shift+Tab, ESC [ Z), save, quit, reopen, replace, undo/redo, all by serial key presses; the saved file is read back
 # from the disk image and compared with what it must be.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)

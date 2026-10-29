@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Sumi in FS-UAE (roadmap block 3; ports/sumi): the owner's text editor on the stock A1200. /bin/sumi opens a file
 # of two lines; termtest screen reads the console's grid back (CON_READ) once Sumi has drawn it, then types into the
-# console (CON_INPUT) a line of text with a Latin-1 letter, Enter and Ctrl+S; a second read once "saved s.txt" is
+# console (CON_INPUT) a Tab, a line of text with a Latin-1 letter, Shift+Tab as raw key codes (the keyboard's ESC [ Z:
+# Sumi unindents the line, the tab is gone again), Enter and Ctrl+S; a second read once "saved s.txt" is
 # on the grid, then Ctrl+W quits. The file is compared byte for byte, its mode kept, the settings folder
 # ($HOME/.config/Sumi) holds the keys file and where the file was left, and a second start puts the cursor back
 # there. The memory with Sumi open is printed (free and ps). Every wait is for an event (the grid, the shell's
@@ -49,7 +50,7 @@ check(a0.get(2, "")[:4] == "8888" and a0.get(1, "")[:4] == "88.8" and a0.get(2, 
       "status line inverse", (a0.get(1), a0.get(2), a0.get(30)))
 check(r1.get(1) == "  1 Hello Zenix \xe5" and r1.get(2) == "  2 first line" and r1.get(3) == "  3 second" and
       r1.get(31) == "saved s.txt" and r1.get(30, "").endswith("line 2/3  col 1   Latin-1   text") and
-      "[changed]" not in r1.get(30, ""), "typed text, a Latin-1 letter, Enter and Ctrl+S: shown and saved", r1)
+      "[changed]" not in r1.get(30, ""), "Tab, typed text, a Latin-1 letter, Shift+Tab (unindent), Enter and Ctrl+S: shown and saved", r1)
 check(cursor(s1) == (2, 4, True), "the cursor after Enter: line 2, column 1", cursor(s1))
 hx = re.findall(r"^[0-9a-f]{8}  ((?:[0-9a-f]{2} {1,2})+)", f, re.M)
 data = bytes(int(b, 16) for line in hx for b in line.split())

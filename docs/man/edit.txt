@@ -25,7 +25,8 @@ KEYS
     Alt+Left, Alt+Right     a word back / on
     Alt+Up, Alt+Down        a page up / down
     Tab inserts a tab; with lines selected Tab and Shift+Tab indent and
-    unindent them. Enter keeps the indentation of the line above.
+    unindent them. Shift+Tab alone unindents the line (a tab or up to four
+    spaces). Enter keeps the indentation of the line above.
 
 FILES
     Saving writes a new copy and replaces the old file only when it is

@@ -88,8 +88,7 @@ EXIT STATUS
 NOTES
     The console has no mouse and no clipboard shared between programs:
     Ctrl+C and Ctrl+V copy and paste inside Sumi, between its tabs. The
-    console sends Shift+Tab as Tab, so unindenting needs another key bound
-    in Sumi.keys; the Help key is Insert here (F1 is the help). The
+    Help key is Insert here (F1 is the help). The
     console is Latin-1: a UTF-8 file is shown and kept as UTF-8, its
     characters beyond Latin-1 shown as stand-ins.
     Saving through a symbolic or hard link replaces the link with the new
