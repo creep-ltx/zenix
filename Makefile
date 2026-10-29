@@ -87,8 +87,10 @@ TESTDRVS := fake
 NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 # programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
 TESTPZX := $(BUILD)/hello.pzx $(BUILD)/crash.pzx $(BUILD)/sigtest.pzx
+# the C library's test program (DESIGN D27 section 11, tools/libc-test.sh), in the test images' /tests
+TESTLIBC := $(BUILD)/libctest.zx
 
-all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf $(TESTDRVS:%=$(BUILD)/drv-%.zx)
+all: $(BUILD)/zenix.adf $(BUILD)/zenix.hdf $(TESTDRVS:%=$(BUILD)/drv-%.zx) $(BUILD)/libc-pure.a
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -546,11 +548,103 @@ $(BUILD)/drv-genet.uo: net/drv/genet-core.c net/drv/genet.h
 # netd's stack: lwIP's deepest chain (a segment in, its answer out) and the log's formatting (D19 7.3: 8 KB)
 STACK_netd := 8192
 
+# ---- the C library (DESIGN D27, docs/d27-c-library.md): picolibc 1.8.10 vendored in libc/picolibc (only the files
+# built, LIBC_SRCS in its sources.mk; no meson), Zenix's port in libc/zenix, and the files it shares with libz
+# (user/zshare.h). Two archives, as libz's two builds: libc.a for ZEXE programs, libc-pure.a (every C object through
+# tools/purecc.sh) for ZEX2. -Os, the formatter included; -O2 for the string functions, m68k's memcpy/memset, the
+# stdio buffer path and the allocator (section 4's golden path). Zenix's constants come from the kernel's headers
+# (tools/libc-consts.sh); the port's headers go ahead of picolibc's. A C library program links $(BUILD)/libc.a before
+# $(LIBGCC), with the long long printf (LIBC_LDFLAGS). ----
+include libc/picolibc/sources.mk
+LIBZ_SHARED := zmalloc zenv zout zerrtab     # libz's files the C library builds too (user/zshare.h; libz.uo below)
+LIBC_PORT = libc/zenix/sys.c libc/zenix/start.c libc/zenix/stdio.c libc/zenix/strerror.c libc/zenix/dprintf.c libc/zenix/dirent.c \
+             $(LIBZ_SHARED:%=user/%.c)
+LIBC_O2 := $(filter newlib/libc/machine/m68k/%,$(LIBC_SRCS)) \
+           $(addprefix newlib/libc/string/,memchr.c memcmp.c memmove.c strcat.c strchr.c strcmp.c strcpy.c strcspn.c \
+             strlen.c strncat.c strncmp.c strncpy.c strnlen.c strrchr.c strspn.c strstr.c) \
+           $(addprefix newlib/libc/tinystdio/,bufio.c fgetc.c fputc.c fgets.c fputs.c fwrite.c fread.c getchar.c \
+             putchar.c) \
+           user/zmalloc.c
+LIBC_INC := -Ilibc/zenix/include -I$(BUILD)/libc-inc -Ilibc/picolibc/newlib/libc/machine/m68k \
+            -Ilibc/picolibc/newlib/libc/tinystdio -Ilibc/picolibc/newlib/libc/locale -Ilibc/picolibc \
+            -Ilibc/picolibc/newlib/libc/include -Ilibc/picolibc/newlib/libm/common
+LIBC_CFLAGS := -m68020-60 -msoft-float -ffreestanding -nostdlib -g -ffunction-sections -fdata-sections -fno-common \
+               -frounding-math -fsignaling-nans -fno-builtin-copysignl -fno-stack-protector -D_LIBC -U_FORTIFY_SOURCE \
+               $(LIBC_INC)
+LIBC_HDRS := $(BUILD)/libc-inc/zenix-consts.h libc/picolibc/picolibc.h $(wildcard libc/zenix/include/*.h libc/zenix/include/sys/*.h)
+LIBC_OBJS = $(patsubst %,$(BUILD)/lc/%.o,$(basename $(LIBC_SRCS))) $(patsubst %.c,$(BUILD)/lcz/%.o,$(LIBC_PORT))
+LIBC_POBJS = $(patsubst %,$(BUILD)/lcp/%.o,$(basename $(LIBC_SRCS))) $(patsubst %.c,$(BUILD)/lczp/%.o,$(LIBC_PORT))
+LIBC_OPT = $(if $(filter $(1),$(LIBC_O2)),-O2,-Os)
+LIBC_NOBUILTIN = $(if $(filter newlib/libc/machine/m68k/%,$(1)),-fno-builtin)
+# mkostemps' mask names O_SYNC, which Zenix does not define (a caller cannot pass it): 0 there
+LIBC_DEF_newlib/libc/tinystdio/mktemp.c := -DO_SYNC=0
+LIBC_LDFLAGS := -Wl,--defsym=vfprintf=__l_vfprintf -Wl,--defsym=vfscanf=__l_vfscanf
+$(BUILD)/libc-inc/zenix-consts.h: tools/libc-consts.sh kernel/kernel.h kernel/fsproto.h kernel/ext2.h user/usys.h
+	@mkdir -p $(dir $@)
+	tools/libc-consts.sh $@
+$(BUILD)/lc/%.o: libc/picolibc/%.c $(LIBC_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC_CFLAGS) $(LIBC_DEF_$*.c) $(call LIBC_NOBUILTIN,$*.c) $(call LIBC_OPT,$*.c) -c $< -o $@
+$(BUILD)/lc/%.o: libc/picolibc/%.S
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC_CFLAGS) -fno-builtin -O2 -c $< -o $@
+$(BUILD)/lcz/%.o: %.c $(LIBC_HDRS) user/zshare.h user/usys.h
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC_CFLAGS) -Wall -Wextra -DZENIX_LIBC -Iuser -Ilibc/picolibc/newlib/libc/tinystdio $(call LIBC_OPT,$*.c) -c $< -o $@
+$(BUILD)/lcp/%.o: libc/picolibc/%.c $(LIBC_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(LIBC_CFLAGS) $(LIBC_DEF_$*.c) $(call LIBC_NOBUILTIN,$*.c) $(call LIBC_OPT,$*.c) -c $< -o $@
+$(BUILD)/lcp/%.o: libc/picolibc/%.S
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC_CFLAGS) -fno-builtin -O2 -c $< -o $@
+$(BUILD)/lczp/%.o: %.c $(LIBC_HDRS) user/zshare.h user/usys.h tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(LIBC_CFLAGS) -Wall -Wextra -DZENIX_LIBC -Iuser $(call LIBC_OPT,$*.c) -c $< -o $@
+$(BUILD)/libc.a: $(LIBC_OBJS) tools/check-68020-60.sh
+	rm -f $@
+	$(TOOLPREFIX)ar rcs $@ $(LIBC_OBJS)
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
+# C library programs (LIBCAPPS; the size table's test programs, tools/libc-size.sh, in $(BUILD)/lcs): compiled against
+# the port's and picolibc's headers, linked with libz's crt0 and libc.a, the long long printf unless the program
+# names the floating point one (LIBC_FLOAT_name = 1: printf's %f, %g, scanf's too)
+LIBCAPPS := libctest
+LIBC_PFLAGS := -m68020-60 -msoft-float -ffreestanding -nostdlib -g -Os -Wall -Wextra -fno-common -ffunction-sections \
+               -fdata-sections $(LIBC_INC)
+LIBC_FLOATLD := -Wl,--defsym=vfprintf=__d_vfprintf -Wl,--defsym=vfscanf=__d_vfscanf
+LIBC_FLOAT_float := 1
+$(LIBCAPPS:%=$(BUILD)/%.co): $(BUILD)/%.co: user/%.c $(LIBC_HDRS) | $(BUILD)
+	$(CC) $(LIBC_PFLAGS) -c $< -o $@
+$(BUILD)/lcs/%.co: tools/tests/libc-size/%.c $(LIBC_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC_PFLAGS) -c $< -o $@
+$(BUILD)/%.celf: $(BUILD)/%.co $(BUILD)/crt0.o $(BUILD)/libc.a link/user.ld
+	$(CC) $(LIBC_PFLAGS) $(ULDFLAGS) $(if $(LIBC_FLOAT_$(notdir $*)),$(LIBC_FLOATLD),$(LIBC_LDFLAGS)) \
+	    $(BUILD)/crt0.o $< $(BUILD)/libc.a $(LIBGCC) -o $@
+$(LIBCAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
+$(BUILD)/lcs/%.zx: $(BUILD)/lcs/%.celf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(STACK_DEFAULT)
+$(BUILD)/libc-pure.a: $(LIBC_POBJS) tools/check-68020-60.sh
+	rm -f $@
+	$(TOOLPREFIX)ar rcs $@ $(LIBC_POBJS)
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
+
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
-$(BUILD)/libz.uo: user/libz.c user/libz.h user/usys.h | $(BUILD)
-	$(CC) $(UCFLAGS) -ffunction-sections -fdata-sections -c $< -o $@
+# libz.uo is user/libz.c and the files it shares with the C library (DESIGN D27 section 6 step 1, user/zshare.h),
+# joined into one object (ld -r keeps every function's section, so --gc-sections still takes only what is called)
+$(BUILD)/libz-main.uo: user/libz.c user/libz.h user/zshare.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -c $< -o $@
+$(LIBZ_SHARED:%=$(BUILD)/%.uo) $(LIBZ_SHARED:%=$(BUILD)/%.po): user/zshare.h
+$(BUILD)/libz.uo: $(BUILD)/libz-main.uo $(LIBZ_SHARED:%=$(BUILD)/%.uo)
+	$(CC) -m68020-60 -nostdlib -r $^ -o $@
+$(BUILD)/libz-main.po: user/libz.c user/libz.h user/zshare.h user/usys.h tools/purecc.sh | $(BUILD)
+	tools/purecc.sh $(CC) $(UCFLAGS) -c $< -o $@
+$(BUILD)/libz.po: $(BUILD)/libz-main.po $(LIBZ_SHARED:%=$(BUILD)/%.po)
+	$(CC) -m68020-60 -nostdlib -r $^ -o $@
 $(BUILD)/%.uo: user/%.c user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -c $< -o $@
 $(BUILD)/%.uelf: $(BUILD)/%.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
@@ -617,7 +711,7 @@ $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py 
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 1,024 inodes (512 ran out with the
 # network's files in D19 step 8: cmds2-test makes 150 files)
-$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
 	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 8M 1024
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
@@ -642,7 +736,7 @@ $(BUILD)/zenix-boot.hdf: $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf tools/mkca
 	python3 tools/mkcard.py ide $@ $(BUILD)/zenix-bootfs.img $(BUILD)/zenix.hdf
 # the SD card of an Emu68 Amiga: MBR, p1 FAT for Emu68 (empty here), p2 0x76 RDB with the boot volume, p3 a 512 MB
 # ext2 root with every program (written to a card by tools/write-card.sh)
-$(BUILD)/root-card.img: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
+$(BUILD)/root-card.img: $(BUILD)/cp437-8x8.psf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
 	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 512M 8192
 $(BUILD)/zenix-card.img: $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img tools/mkcard.py tools/mkrdb-multi.py
 	python3 tools/mkcard.py sd $@ $(BUILD)/zenix-bootfs.img $(BUILD)/root-card.img

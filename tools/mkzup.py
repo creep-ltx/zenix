@@ -226,7 +226,8 @@ BASE_SBIN = ["zfsd", "netd", "nfscd"]              # not in UAPPS (not commands)
 # the licence notices of the code from other projects (owner decision, DESIGN D19 2026-10-27), as tools/mkroot.sh
 LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("tools/font_8x8.COPYING", "font_8x8"),
             ("user/xfer/LICENSE", "zmodem"), ("crypto/bearssl/LICENSE", "BearSSL"), ("crypto/monocypher/LICENCE", "Monocypher"),
-            ("tools/certdata.COPYING", "certdata"), ("crypto/openssh/LICENCE", "OpenSSH-bcrypt")]
+            ("tools/certdata.COPYING", "certdata"), ("crypto/openssh/LICENCE", "OpenSSH-bcrypt"),
+            ("libc/picolibc/COPYING.picolibc", "picolibc")]
 ANCHORS = "anchors"                       # DESIGN D21 8.1: build/anchors (tools/mkanchors.py) as /etc/ssl/anchors
 FONT = "cp437-8x8.psf"                    # DESIGN D20 4.2: build/cp437-8x8.psf as /usr/share/consolefonts/cp437-8x8.psf
 

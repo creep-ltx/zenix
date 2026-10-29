@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#include "libz.h"
+#include "zshare.h"
+/* The allocator, the environment, the buffered output and the error texts are in files of their own that the C
+ * library builds too (user/zshare.h: zmalloc.c, zenv.c, zout.c, zerrtab.c); libz.uo is this file and those. */
 
 u32 strlen(const char *s) { u32 n = 0; while (s[n]) n++; return n; }
 int strcmp(const char *a, const char *b)
@@ -62,134 +64,6 @@ int atoi(const char *s)
     return neg ? -v : v;
 }
 
-/* ---------------------------------------------------------------- memory
- * malloc over the kernel's SYS_memalloc, which gives a process at most NREG (8) extra regions, so small blocks must
- * not use one each. Every block has an 8-byte header: its capacity (the bytes after the header) and a tag saying
- * whether it is a small block in use, a big block in use or a free block.
- *  - Small blocks hold 16, 32, 64 ... 32768 bytes (size classes; the header comes on top, so a request of exactly a
- *    power of two, as buffers and doubling arrays usually are, fills its class). They are cut from chunks the kernel
- *    gives: the first is 4 KB (a program that needs little, such as login waiting for its shell, holds little), each
- *    next one four times the last, up to 512 KB (smaller if memory is short), so a program that needs a lot still
- *    uses few regions (4 + 16 + 64 + 256 + 512 KB in five). A freed small block goes on its class's free list and is used again;
- *    it is never given back to the kernel (that happens when the program ends). O(1), no coalescing; a class that is
- *    empty carves a block of a larger class before taking new chunk space.
- *  - Bigger blocks get a region of their own, and free() gives exactly those back with SYS_memfree.
- * free() and realloc() check the tag: a pointer malloc did not give out (or one freed twice) is reported on
- * standard error and ignored instead of corrupting the lists. */
-#define M_SMALL   0x5a4d5300u           /* "ZMS" + class: a small block in use */
-#define M_BIG     0x5a4d4247u           /* "ZMBG": a block in its own region */
-#define M_FREE    0x5a4d4652u           /* "ZMFR": on a free list */
-#define NCLASS    12                    /* capacities 16 << 0 .. 16 << 11 = 32 KB */
-#define CAP(k)    (16u << (k))
-#define BLK(k)    (CAP(k) + 8u)         /* a class's block: capacity + header */
-#define CHUNK_MIN 4096u
-#define CHUNK_MAX (512u * 1024)
-#define MALLOC_MAX 0x3FFFFFF0u          /* a request above this is refused (no size arithmetic below can wrap) */
-struct mhdr { u32 cap, tag; };
-static struct mhdr *freel[NCLASS];      /* free blocks; the next pointer is the first word after the header */
-static char *chunk; static u32 left;    /* the unused end of the newest chunk */
-static u32 next_chunk = CHUNK_MIN;
-
-static void mfree_put(struct mhdr *h, int k)
-{
-    h->cap = CAP(k);
-    h->tag = M_FREE;
-    *(struct mhdr **)(h + 1) = freel[k];
-    freel[k] = h;
-}
-/* memory that is not needed now (the end of a chunk, the rest of a carved block): cut it into free blocks of the
- * largest classes that fit, so none of it is lost */
-static void carve(char *p, u32 n)
-{
-    while (n >= BLK(0)) {
-        int k = NCLASS - 1;
-        while (BLK(k) > n) k--;
-        mfree_put((struct mhdr *)p, k);
-        p += BLK(k); n -= BLK(k);
-    }
-}
-static struct mhdr *small_get(int k)
-{
-    u32 sz = BLK(k);
-    struct mhdr *h = freel[k];
-    if (h) { freel[k] = *(struct mhdr **)(h + 1); return h; }
-    if (left < sz) {
-        for (int j = k + 1; j < NCLASS; j++)            /* a free block of a larger class: take ours from its start */
-            if (freel[j]) {
-                h = freel[j]; freel[j] = *(struct mhdr **)(h + 1);
-                carve((char *)h + sz, BLK(j) - sz);
-                return h;
-            }
-        u32 want = next_chunk;
-        while (want < sz) want *= 2;
-        char *c;
-        while (!(c = sys_memalloc(want)) && want / 2 >= sz) want /= 2;  /* smaller if memory is short */
-        if (!c && !(c = sys_memalloc(want = sz))) return 0;             /* last try: just this block */
-        carve(chunk, left);                             /* the old chunk's end, before it is forgotten */
-        chunk = c; left = want;
-        if (want >= next_chunk) next_chunk = want < CHUNK_MAX / 4 ? want * 4 : CHUNK_MAX;   /* not after a short one */
-    }
-    h = (struct mhdr *)chunk; chunk += sz; left -= sz;
-    return h;
-}
-void *malloc(u32 n)
-{
-    if (n > MALLOC_MAX) return 0;
-    struct mhdr *h;
-    if (n <= CAP(NCLASS - 1)) {
-        int k = 0;
-        while (CAP(k) < n) k++;
-        if (!(h = small_get(k))) return 0;
-        h->cap = CAP(k);
-        h->tag = M_SMALL | (u32)k;
-    } else {
-        u32 need = (n + sizeof *h + 15) & ~15u;
-        if (!(h = sys_memalloc(need))) return 0;
-        h->cap = need - sizeof *h;
-        h->tag = M_BIG;
-    }
-    return h + 1;
-}
-/* the header of a block malloc gave out, or 0 (reported) */
-static struct mhdr *mhdr_of(void *p, const char *who)
-{
-    struct mhdr *h = (struct mhdr *)p - 1;
-    if (((u32)p & 7) || !(h->tag == M_BIG || (h->tag & ~0xFFu) == M_SMALL)) {
-        fprintf(2, "libz: %s() of a pointer malloc did not give out (or freed twice): %p\n", who, p);
-        return 0;
-    }
-    return h;
-}
-void free(void *p)
-{
-    if (!p) return;
-    struct mhdr *h = mhdr_of(p, "free");
-    if (!h) return;
-    if (h->tag == M_BIG) { h->tag = M_FREE; sys_memfree(h); }
-    else mfree_put(h, (int)(h->tag & 0xFF));
-}
-/* realloc: in place when the block is already big enough, else a new block with the old contents (only as many
- * bytes as the old block holds) and the old one freed. On failure the old block is left as it was. */
-/* zeroed n * size bytes; NULL when the product overflows or there is no memory (OpenSSH's bcrypt_pbkdf, D21) */
-void *calloc(unsigned long n, unsigned long size)
-{
-    if (size && n > 0xFFFFFFFFu / size) return 0;
-    void *p = malloc((u32)(n * size));
-    if (p) memset(p, 0, n * size);
-    return p;
-}
-void *realloc(void *p, unsigned long n)
-{
-    if (!p) return malloc((u32)n);
-    struct mhdr *h = mhdr_of(p, "realloc");
-    if (!h) return 0;
-    if (n <= h->cap) return p;
-    void *q = malloc((u32)n);
-    if (!q) return 0;
-    memcpy(q, p, h->cap);
-    free(p);
-    return q;
-}
 
 /* ---------------------------------------------------------------- formatted output
  * One formatter feeds a "sink": a file descriptor (written in chunks), the buffered standard output, or a memory
@@ -382,39 +256,6 @@ void qsort(void *base, u32 n, u32 size, int (*cmp)(const void *, const void *))
         }
 }
 
-/* ---------------------------------------------------------------- the environment
- * The kernel keeps NAME=value NUL ... NUL NUL per process, inherited by children;
- * the first use copies it into a table the program owns. */
-char **environ;
-static char env_store[1024];
-static char *env_ptrs[64];
-static int env_ready;
-
-static void env_load(void)
-{
-    if (env_ready) return;
-    env_ready = 1;
-    int n = sys_envget(env_store, sizeof env_store), k = 0;
-    if (n > (int)sizeof env_store) n = (int)sizeof env_store;
-    for (int i = 0; i < n && env_store[i] && k < 63;) { env_ptrs[k++] = env_store + i; i += (int)strlen(env_store + i) + 1; }
-    env_ptrs[k] = 0;
-    environ = env_ptrs;
-}
-static void env_save(void)
-{
-    static char blk[1024];
-    u32 n = 0;
-    for (int i = 0; env_ptrs[i]; i++) { u32 l = strlen(env_ptrs[i]); if (n + l + 2 > sizeof blk) break; memcpy(blk + n, env_ptrs[i], l); n += l; blk[n++] = 0; }
-    blk[n++] = 0;
-    sys_envset(blk, n);
-}
-char *getenv(const char *name)
-{
-    env_load();
-    u32 l = strlen(name);
-    for (int i = 0; env_ptrs[i]; i++) if (!strncmp(env_ptrs[i], name, l) && env_ptrs[i][l] == '=') return env_ptrs[i] + l + 1;
-    return 0;
-}
 /* Colours (DESIGN D14): `auto` means colour when fd is a terminal, TERM is set and not "dumb", and NO_COLOR is not set
  * to something (no-color.org) - one rule for every program */
 int color_rule(int fd, const char *term, const char *no_color)
@@ -435,29 +276,6 @@ int color_arg(const char *arg, int bare)
     if (!strcmp(w, "auto") || !strcmp(w, "tty") || !strcmp(w, "if-tty")) return 2;
     return -2;
 }
-int unsetenv(const char *name)
-{
-    env_load();
-    u32 l = strlen(name);
-    for (int i = 0; env_ptrs[i]; i++)
-        if (!strncmp(env_ptrs[i], name, l) && env_ptrs[i][l] == '=') { for (int k = i; env_ptrs[k]; k++) env_ptrs[k] = env_ptrs[k + 1]; env_save(); return 0; }
-    return 0;
-}
-int setenv(const char *name, const char *value, int overwrite)
-{
-    env_load();
-    if (!overwrite && getenv(name)) return 0;
-    unsetenv(name);
-    int k = 0; while (env_ptrs[k]) k++;
-    if (k >= 63) return -1;
-    char *e = malloc(strlen(name) + strlen(value) + 2);
-    if (!e) return -1;
-    strcpy(e, name); strcat(e, "="); strcat(e, value);
-    env_ptrs[k] = e; env_ptrs[k + 1] = 0;
-    env_save();
-    return 0;
-}
-
 /* ---------------------------------------------------------------- buffered line reader */
 void rd_init(struct rd *r, int fd) { r->fd = fd; r->pos = r->len = r->eof = 0; }
 static int rd_fill(struct rd *r)
@@ -487,23 +305,7 @@ int rd_getline(struct rd *r, char **line, u32 *cap)
     return (int)n;
 }
 
-/* ---------------------------------------------------------------- buffered output */
-/* The 4 KB buffer is linked only into programs that use it (audit O12): _zexit flushes it through oflush_at_exit, a
- * pointer the first oputn sets, so a program that never buffers (diskd, wasabid, nfscd, any printf-only one) names
- * neither the buffer nor oflush. */
-static char obuf[4096]; static u32 olen;
-static void (*oflush_at_exit)(void);
-void oflush(void) { if (olen) { int r = sys_write(1, obuf, olen); olen = 0; if (r < 0) sys_exit(141); } }   /* the reader is gone: end, as SIGPIPE would */
-void oputn(const char *s, u32 n)
-{
-    oflush_at_exit = oflush;
-    if (n >= sizeof obuf) { oflush(); if (sys_write(1, s, n) < 0) sys_exit(141); return; }
-    if (olen + n > sizeof obuf) oflush();
-    memcpy(obuf + olen, s, n); olen += n;
-}
-void oputs(const char *s) { oputn(s, strlen(s)); }
-void oputc(int c) { char b = (char)c; oputn(&b, 1); }
-void _zexit(int status) { if (oflush_at_exit) oflush_at_exit(); sys_exit(status); for (;;); }
+void _zexit(int status) { if (zout_at_exit) zout_at_exit(); sys_exit(status); for (;;); }
 
 /* malloc that does not come back empty: out of memory ends the program with a message and status 1 */
 char **_zargv;
@@ -586,49 +388,6 @@ void _zstart(int argc, char **argv)
     _zexit(main(argc, argv));
 }
 
-/* the error number of the last failed system call (or libz helper), and the reason to print for it */
-int zerrno;
-static const struct { unsigned char e; const char *text; } errtext[] = {
-    { EPERM, "operation not permitted" }, { ENOENT, "no such file or directory" }, { ESRCH, "no such process" },
-    { EINTR, "interrupted" }, { EIO, "input/output error" }, { ENXIO, "no such device" },
-    { E2BIG, "argument list too long" }, { ENOEXEC, "not a Zenix program" }, { EBADF, "bad file descriptor" },
-    { ECHILD, "no child process" }, { EAGAIN, "resource temporarily unavailable" }, { ENOMEM, "out of memory" },
-    { EACCES, "permission denied" }, { EFAULT, "bad address" }, { EBUSY, "device or resource busy" },
-    { EEXIST, "file exists" }, { EXDEV, "cross-device link" }, { ENODEV, "no such device" },
-    { ENOTDIR, "not a directory" }, { EISDIR, "is a directory" }, { EINVAL, "invalid argument" },
-    { ENFILE, "too many open files in the system" }, { EMFILE, "too many open files" }, { ENOTTY, "not a terminal" }, { ETXTBSY, "text file busy" },
-    { EFBIG, "file too large" }, { ENOSPC, "no space left on device" }, { ESPIPE, "illegal seek" },
-    { EROFS, "read-only file system" }, { EMLINK, "too many links" }, { EPIPE, "broken pipe" },
-    { ERANGE, "result out of range" }, { ENAMETOOLONG, "file name too long" }, { ENOSYS, "not implemented" },
-    { ENOTEMPTY, "directory not empty" }, { ELOOP, "too many levels of symbolic links" },
-    { EOPNOTSUPP, "operation not supported" },
-    /* the network's (DESIGN D19) */
-    { ENOTSOCK, "not a socket" }, { EDESTADDRREQ, "destination address required" }, { EMSGSIZE, "message too long" },
-    { EPROTOTYPE, "protocol wrong type for socket" }, { ENOPROTOOPT, "protocol not available" },
-    { EPROTONOSUPPORT, "protocol not supported" }, { EAFNOSUPPORT, "address family not supported" },
-    { EADDRINUSE, "address already in use" }, { EADDRNOTAVAIL, "cannot assign requested address" },
-    { ENETDOWN, "network is down" }, { ENETUNREACH, "network is unreachable" },
-    { ECONNABORTED, "connection aborted" }, { ECONNRESET, "connection reset" }, { ENOBUFS, "no buffer space available" },
-    { EISCONN, "already connected" }, { ENOTCONN, "not connected" }, { ETIMEDOUT, "connection timed out" },
-    { ECONNREFUSED, "connection refused" }, { EHOSTUNREACH, "no route to host" },
-    { EALREADY, "operation already in progress" }, { EINPROGRESS, "operation in progress" },
-    { ESTALE, "stale file handle" },
-};
-/* strerror: the text of an error number (positive or negative), 0 if it has none */
-const char *zstrerror(int e)
-{
-    if (e < 0) e = -e;
-    for (unsigned i = 0; i < sizeof errtext / sizeof errtext[0]; i++)
-        if (errtext[i].e == e) return errtext[i].text;
-    return 0;
-}
-/* The text for zerrno, else dflt. EPERM (1) gives dflt too: a bare -1, which some calls still return for "failed"
- * without a reason, looks the same (docs/limits.md lists them). */
-const char *zwhy(const char *dflt)
-{
-    const char *t = zerrno > 1 ? zstrerror(zerrno) : 0;
-    return t ? t : dflt;
-}
 
 /* ---------------------------------------------------------------- directories and paths
  * The two helpers every directory walker uses, so that no walker keeps a name array or a path buffer on its 16 KB

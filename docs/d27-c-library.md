@@ -1,6 +1,7 @@
 # D27: the C library, and D13 stage 2 decided (design note, revision 2)
 
-Status: **design, revision 2 after two independent reviews (section 15); nothing built.** Roadmap block 3 ("A terminal
+Status: **design, revision 2 after two independent reviews (section 15); build steps 0 and 1 built 2026-10-29 (section
+13, "As built").** Roadmap block 3 ("A terminal
 you can live in"): "a fuller C library (newlib); D13 stage 2 (shared libraries) decided". This note chooses the C
 library, says what Zenix's system calls must back, how it replaces libz's C half without making Zenix's own programs
 bigger, how it works with D13's shared code, decides D13 stage 2 (for the C library and for the text-UI library), and
@@ -501,6 +502,45 @@ measures it and the budgets are confirmed then):
    kernel's constants (host test), the allocator and the other shared files moved out of `libz.c` (every libz
    program's output unchanged), the streams, `_zstart`/`exit`, `strerror`; `libctest` (ZEXE) in `/tests`;
    `tools/libc-test.sh`; the size table with the real port, the budgets of section 10 confirmed.
+   **As built (steps 0 and 1, 2026-10-29):**
+   - *Step 0.* picolibc 1.8.10 from its official release (checksum in `libc/picolibc/README`), 875 files: the 694
+     sources of `libc/picolibc/sources.mk` (from the release's CMakeLists.txt lists for ctype, errno, locale, misc,
+     posix, search, stdlib, string, time, tinystdio, uchar, machine/m68k and libm's common, math, fenv; left out: the
+     allocator, regex, the environment, `system`, `strerror`, `clock`, `exit`, `fdopen`, arc4random, the Berkeley
+     hash/ndbm, pathconf, fdevopen, the POSIX console), every file they include (the cross compiler's `-MM`,
+     `tools/libc-vendor.sh`) and the public headers; none changed. `build/libc.a` (703 objects, 239,206 bytes of code)
+     and `build/libc-pure.a` from the Makefile, both through `check-68020-60`; `COPYING.picolibc` as
+     `/usr/share/licenses/picolibc` on the full images and in the base package.
+   - *Step 1.* `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84, `ENOTSUP` in `kernel/errno.h` (claimed), their texts in the one
+     table. The port, `libc/zenix/`: the system layer (`sys.c`: files, names, ids, time), directories (`dirent.c`),
+     the streams (`stdio.c`), `_zstart`/`exit` (`start.c`), `strerror` (`strerror.c`) and `dprintf`/`vdprintf`
+     (`dprintf.c`: tinystdio has none). Headers ahead of picolibc's: `sys/errno.h` (includes `kernel/errno.h`),
+     `sys/_default_fcntl.h`, `signal.h`, `sys/syslimits.h` (over picolibc's by `#include_next`), `sys/dirent.h`,
+     `stdio.h` (adds `dprintf`), `zenix.h` (libzenix's `oputs` family); the numbers from `zenix-consts.h`, which
+     `tools/libc-consts.sh` generates from the kernel's headers. The shared files out of `libz.c` (`user/zshare.h`):
+     `zmalloc.c` (+ `memalign`, `aligned_alloc`, `posix_memalign`, `malloc_usable_size`, in the C library only),
+     `zenv.c`, `zout.c`, `zerrtab.c`; `libz.uo` is `libz.c` and those joined by `ld -r`. Every libz program builds
+     from them with its output unchanged (the whole suite); the sum of the program files 7.4 KB smaller (cross-file
+     inlining lost and gained, largest growth 124 bytes, `host`). Tests: `tools/libc-host-test.sh` (106 constants
+     against the kernel's, no FPU instruction, check-68020-60), `tools/libc-test.sh` (`/tests/libctest`, 73 checks
+     and the shell-side ones), `tools/libc-size.sh`; all in `make check`.
+   - *Found while building, and decided here:* the link scripts' init/fini lines (planned for step 2) came now,
+     because `exit` needs them for `atexit` (picolibc keeps those in `.fini_array_onexit`, which the lines' last
+     `KEEP` takes; `__bothinit_array_*` too, which picolibc's `__libc_init_array` reads): every existing output
+     byte-identical (149 files compared). `fopen`'s files are kept in a list by the port's own `fdopen` so `exit`
+     flushes them (picolibc's leaves that to `fclose`, against C). The environment is loaded at the start only when
+     the program links it (a weak reference), or every program would carry its 1.3 KB of BSS. `O_CLOEXEC` is 0
+     (every spawned program gets only descriptors 0-2). The signal calls, `poll`, `select`, sockets and the path
+     helpers stay in `libz.c` until the C library first offers them (step 3), so step 1 moves only what it uses.
+   - *The size table with the real port (`tools/libc-size.sh`, ZEXE bytes):* raw 536 (budget 600), hello with
+     `dprintf` 2,732 (2,800), with `oputs` 888, with `printf` 6,312 (was 5,200), the sort tool 9,960 (was 7,600),
+     time +13,632 over hello (was 13 KB), floating point +15,560 (was 15 KB), UTF-8 +5,500 (was 5 KB); the library's
+     data + BSS with `printf` 226 bytes (1 KB). The programs without streams keep their budgets; those with a stream
+     or `malloc` cost about 1.1-2.4 KB more than the stand-in measured: libz's allocator (`malloc`, `free`,
+     `realloc`: about 1.4 KB at `-O2`, against the stand-in's `sbrk` one) and the lazily taken stream buffers
+     (section 5.2's design). Section 10's budgets for those rows are raised to the measured sizes with about 5% room
+     (6,600; 10,400; +14,300; +16,300; +5,800), for the main session to confirm. Zenix's own programs are not
+     affected (they keep libz, then `dprintf`/`oputs`).
 2. **Pure:** `libc-pure.a`, the port's 64-bit division, the link scripts' init/fini lines (every existing output
    byte-identical, as 5.3 measured), `libctest` as ZEX2 on two consoles.
 3. **Terminal and processes:** termios (5.4), `TIOCGWINSZ`, `getpass`, `posix_spawn`, `system`, `popen`, `getpw*`,

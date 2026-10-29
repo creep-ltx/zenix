@@ -4,6 +4,13 @@
 typedef unsigned int u32;
 #include "../kernel/errno.h"
 
+#ifdef ZENIX_LIBC
+#include <errno.h>                       /* the C library (DESIGN D27): its errno is the one variable, its headers */
+#include <fcntl.h>                       /* give the constants below, from the same kernel headers */
+#include <signal.h>
+#include <sys/stat.h>
+#define zerrno errno
+#endif
 extern int zerrno;                       /* libz: the error number of the last failed system call (EACCES ...) */
 static inline int sys3(int n, u32 a, u32 b, u32 c)
 {
@@ -24,10 +31,12 @@ struct udirent { u32 ino, type; char name[64]; };
 struct ustat { u32 ino, mode, size, mtime, uid, gid, links; };
 struct uproc { u32 pid, ppid, state, mem; char name[16]; int nice; u32 pri; u32 shared; u32 pgid; };   /* nice -20..19; pri: the level now, 0 highest, 32 idle; mem: its own memory; shared: the shared code it runs (D13); pgid: its process group (D16) */
 
+#ifndef ZENIX_LIBC                       /* the C library: its own headers have them (libc/zenix/include) */
 #define S_IFMT  0170000
 #define S_IFDIR 0040000
 #define S_IFREG 0100000
 #define S_IFLNK 0120000
+#endif
 
 static inline void sys_exit(int c) { sys3(1, (u32)c, 0, 0); for (;;); }
 /* end, the child `pid` handed to our parent first (DESIGN D18: login stepping aside for init); login's status then is
@@ -67,6 +76,7 @@ static inline int sys_meminfo(u32 out[4]) { return sys3(22, (u32)out, 16, 0); }
 static inline int sys_setfg(int pid) { return sys3(23, (u32)pid, 0, 0); }
 static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }   /* the old form: end it (status 130) */
 
+#ifndef ZENIX_LIBC                       /* the C library: its own headers have them (libc/zenix/include) */
 #define O_RDONLY 0
 #define O_WRONLY 1
 #define O_RDWR   2
@@ -74,6 +84,7 @@ static inline int sys_kill(int pid) { return sys3(24, (u32)pid, 0, 0); }   /* th
 #define O_TRUNC  0x200
 #define O_APPEND 0x400
 #define O_EXCL   0x80     /* with O_CREAT: fail with -17 if the name exists (also as a symbolic link) */
+#endif
 static inline int sys_mkdir(const char *p) { return sys3(25, (u32)p, 0, 0); }
 static inline int sys_unlink(const char *p) { return sys3(26, (u32)p, 0, 0); }
 static inline int sys_rmdir(const char *p) { return sys3(27, (u32)p, 0, 0); }
@@ -249,6 +260,7 @@ _Static_assert(__builtin_offsetof(struct uconline, palette) + 32 == UCONLINE_FIR
 static inline int sys_conread(int fd, struct uconread *r) { return sys3(89, CON_READ | (u32)(fd + 1) << 8, (u32)r, 0); }
 static inline int sys_conline(int fd, int line, struct uconline *d) { return sys3(89, CON_LINE | (u32)(fd + 1) << 8, (u32)line, (u32)d); }
 static inline int sys_coninput(int fd, int kind, const void *b, u32 n) { return sys3(89, CON_INPUT | (u32)(fd + 1) << 8, (u32)b, n | (u32)kind << 16); }
+#ifndef ZENIX_LIBC                       /* the C library: its own headers have them (libc/zenix/include) */
 #define SIGHUP   1
 #define SIGINT   2
 #define SIGQUIT  3
@@ -276,10 +288,13 @@ static inline int sys_coninput(int fd, int kind, const void *b, u32 n) { return 
 #define SIG_UNBLOCK 1
 #define SIG_SETMASK 2
 #define SA_RESTART  0x10000000
+#endif
 /* DESIGN D19, the network: the raw calls (the BSD functions over them are libz's, step 4); ops and structs in
  * kernel/netproto.h */
+#ifndef ZENIX_LIBC                       /* the C library: its own headers have them (libc/zenix/include) */
 #define O_NONBLOCK 0x800        /* never wait (sockets, /dev/random) */
 #define S_IFSOCK 0140000        /* fstat's type of a socket */
+#endif
 static inline int sys_sock(u32 op, int fd, void *req) { return sys3(90, op, (u32)fd, (u32)req); }
 static inline int sys_netsrv(u32 op, u32 a, u32 b) { return sys3(91, op, a, b); }
 static inline int sys_drv(u32 op, u32 a, u32 b) { return sys3(92, op, a, b); }   /* DESIGN D19 step 7: the network's drivers (DRV_*, netproto.h) */

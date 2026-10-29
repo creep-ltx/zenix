@@ -1,0 +1,14 @@
+wait zenix:/# 120
+send /tests/libctest; echo st=$?; echo ==a""done\r
+wait ==adone 300
+send /tests/libctest order; /tests/libctest order | cat; echo ==b""done\r
+wait ==bdone 60
+send { /tests/libctest epipe; echo ep=$? > /tmp/ep; } | head -n 1; cat /tmp/ep; echo ==c""done\r
+wait ==cdone 60
+send /tests/libctest stdin\r
+wait prompt> 30
+send typed line\r
+wait first chunk 30
+send echo ==d""done\r
+wait ==ddone 30
+stop

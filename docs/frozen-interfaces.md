@@ -35,6 +35,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   75 counted, so five RESTARTs of wasabid in a minute lost it until the next boot. Accepted once, not repeated: init and
   every daemon ship together with the kernel, and no released daemon depends on the old count (a restart loop is still
   given up). Any later change is a new status or a new word in the file.
+- **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
+  `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
+  `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).
 - **D16 (events and signals, 2026-10-26):** the signal numbers and their default actions (Linux's); the 128 + n wait
   statuses; the signal frame (`struct sigframe`, first size `SIGFRAME_FIRST` 84: size, d0-d7, a0-a7, PC, condition
   codes, signal, blocked mask) and `sigreturn`'s contract (the frame's address in a0 to the entry, back in d1; only

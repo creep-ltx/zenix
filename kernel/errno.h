@@ -34,11 +34,14 @@
 #define EROFS        30     /* read-only filesystem */
 #define EMLINK       31     /* too many links */
 #define EPIPE        32     /* broken pipe */
+#define EDOM         33     /* a math function's argument outside its domain (DESIGN D27: the C library) */
 #define ERANGE       34     /* result out of range */
 #define ENAMETOOLONG 36     /* file name or path too long */
 #define ENOSYS       38     /* no such system call / not implemented */
 #define ENOTEMPTY    39     /* directory not empty */
 #define ELOOP        40     /* too many symbolic links */
+#define EOVERFLOW    75     /* a value too large for its type (DESIGN D27: the C library) */
+#define EILSEQ       84     /* an invalid or incomplete multibyte character (DESIGN D27: the C library's UTF-8) */
 #define ENOTSOCK     88     /* not a socket (DESIGN D19: the network's numbers, Linux's values) */
 #define EDESTADDRREQ 89     /* destination address required */
 #define EMSGSIZE     90     /* message too long */
@@ -46,6 +49,7 @@
 #define ENOPROTOOPT  92     /* protocol not available (an unknown socket option) */
 #define EPROTONOSUPPORT 93  /* protocol not supported */
 #define EOPNOTSUPP   95     /* operation not supported (here) */
+#define ENOTSUP      EOPNOTSUPP     /* the same number, as Linux (DESIGN D27) */
 #define EAFNOSUPPORT 97     /* address family not supported */
 #define EADDRINUSE   98     /* address already in use */
 #define EADDRNOTAVAIL 99    /* cannot assign the requested address */
