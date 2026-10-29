@@ -327,6 +327,7 @@ static int rawkeys(void)
     keys_give("\x62\x20\xa0\x35\xb5\x01\x81\x60\x33\xb3\xe0\xe2\x22\xa2", 14, "AB1cd", 5,
               "raw keys: Caps Lock on letters only, Shift inverts it");
     keys_give("\x63\x33\xb3\xe3\x4c\xcc", 6, "\x03\x1b[A", 4, "raw keys: Ctrl-C (raw, no signals) and an arrow");
+    keys_give("\x42\xc2\x60\x42\xc2\xe0", 6, "\t\x1b[Z", 4, "raw keys: Tab, then Shift+Tab as ESC [ Z (back tab)");
     keys_give("\x60", 1, "", 0, "raw keys: Shift down alone");
     keys_give("\x20\xa0", 2, "a", 1, "raw keys: ... was released at the end of its call");
     keys_give("\x31", 1, "z", 1, "raw keys: z down, no up");
@@ -449,7 +450,8 @@ static int grab(const char *path)
  * then print it: "row NN|text|" for each row with its trailing blanks cut, "attr NN|...|" for the rows with cells in
  * colour or with attributes (a letter per cell: '.' plain, else the colour byte's low nibble in hex for the
  * foreground), and the cursor. Status 1 on a timeout, the grid printed all the same. TYPE (\xHH and \r understood)
- * is then typed into the console (CON_INPUT text), so a script goes on only once the grid was read. */
+ * is then typed into the console (CON_INPUT text), so a script goes on only once the grid was read; \kHH in it is a
+ * raw key code (CON_INPUT raw, a run of them one call: a modifier held in it is let go at the run's end). */
 static int screen(const char *tty, const char *want, int secs, const char *type)
 {
     int fd = sys_open(tty, O_RDWR), rows = 0, found = 0, r = -1;
@@ -491,14 +493,20 @@ static int screen(const char *tty, const char *want, int secs, const char *type)
     }
     dprintf(1, "cursor %d %d%s\n", h.crow, h.ccol, h.flags & CONRD_CURSOR ? " shown" : "");
     if (type) {
-        int n = 0;
-        for (const char *q = type; *q && n < 80; q++) {
+        int n = 0, kind = CONI_TEXT;
+        for (const char *q = type; ; q++) {
+            int k = q[0] == '\\' && q[1] == 'k' && q[2] && q[3] ? CONI_RAW : CONI_TEXT;
+            if (n && (k != kind || !*q || n == 80)) {          /* a run of one kind is one CON_INPUT call */
+                r = sys_coninput(fd, kind, t, (u32)n);
+                if (r != n) dprintf(2, "termtest: CON_INPUT: %s\n", r < 0 ? zstrerror(r) : "not all taken");
+                n = 0;
+            }
+            if (!*q) break;
+            kind = k;
             if (q[0] == '\\' && q[1] == 'r') { t[n++] = '\r'; q++; }
-            else if (q[0] == '\\' && q[1] == 'x' && q[2] && q[3]) { t[n++] = (u8)strtoul((char[]){ q[2], q[3], 0 }, 0, 16); q += 3; }
+            else if (q[0] == '\\' && (q[1] == 'x' || q[1] == 'k') && q[2] && q[3]) { t[n++] = (u8)strtoul((char[]){ q[2], q[3], 0 }, 0, 16); q += 3; }
             else t[n++] = (u8)*q;
         }
-        r = sys_coninput(fd, CONI_TEXT, t, (u32)n);
-        if (r != n) dprintf(2, "termtest: CON_INPUT: %s\n", r < 0 ? zstrerror(r) : "not all taken");
     }
     sys_close(fd);
     return !found;

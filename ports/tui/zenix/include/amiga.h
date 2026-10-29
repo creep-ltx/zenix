@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* The AmigaOS names the text-UI library's upstream source (ports/tui/upstream, the owner's tui.library) uses, for its
  * Zenix build: the types, and the few calls its drawing half makes, over the C library (DESIGN D27 section 9's table:
- * Write is write, AllocVec malloc, CopyMem memmove, CurrentTime gettimeofday). A BPTR is a file descriptor here.
+ * Write is write, AllocVec malloc, CopyMem memmove, CurrentTime gettimeofday). A BPTR is a file descriptor inside the
+ * toolkit; TuiOpen, TuiOpenIO and TuiPossible take handles, the descriptor + 1 (ports/tui/zenix/core.c).
  * The terminal half of the upstream file (packets to the console, signals, SetMode, the size by CSI 0 q) is replaced
  * as a whole by ports/tui/zenix/core.c; the calls only it makes are declared, so the upstream file compiles
  * unchanged, and defined nowhere: if a part the Zenix build keeps ever starts to use one, the link fails and says so.
@@ -67,6 +68,9 @@ LONG Read(BPTR fh, APTR b, LONG n);
 LONG WaitForChar(BPTR fh, LONG us);
 LONG SetMode(BPTR fh, LONG mode);
 LONG IsInteractive(BPTR fh);
+/* the descriptor behind signal bit `bit` for TuiWait's extra signals, -1 none: the program's AmigaOS layer gives it
+ * (ports/common/dos.c); ports/tui/zenix/sigfd.c is the library's own (none), linked only when nothing else has it */
+int tui_zenix_sigfd(int bit);
 BPTR Input(void);
 BPTR Output(void);
 void SendPkt(struct DosPacket *dp, struct MsgPort *port, struct MsgPort *reply);

@@ -1536,7 +1536,8 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   keyboard reports as down/up) shifts the letters only. Accents that AmigaOS treats as dead keys are typed as
   the spacing character (no composition). Software key repeat: 500 ms, then 33 per second (timed by the tick, done by `kbd_work`), until
   the key is released or another goes down; modifiers and Amiga combinations do not repeat. Codes 0x40-0x67 are
-  layout-neutral; arrows, F-keys, Help and Del become escape sequences in raw mode. Verified in FS-UAE
+  layout-neutral; arrows, F-keys, Shift+Tab (`ESC [ Z`, as xterm and Linux), Help and Del become escape sequences in
+  raw mode (in cooked mode Shift+Tab is a Tab). Verified in FS-UAE
   (`tools/kbd-test.sh`); the handshake length and the reset warning are read from the manual and the hand-off note,
   not measured on hardware.
 - **Serial** (`serial.c`): interrupt-driven receive (queued for `serial_work`, above), 115200 baud, mirrors the

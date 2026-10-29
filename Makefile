@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -60,6 +60,9 @@ STACK_sh := 24576
 STACK_gzip := 32768
 STACK_edit := 32768
 STACK_awk := 65536
+# Markdown (ports/markdown): upstream's renderer recurses once per container inside a container, about 1 KB a level, to
+# MAXDEPTH 24 (md.c), and upstream itself runs on a 32 KB stack (its STACKSZ): the same here
+STACK_markdown := 32768
 # boot (pid 1, built into the kernel image) lives for ever: its frames are under 500 bytes (-fstack-usage, 2026-10-26),
 # so 4 KB, the loader's least; it gave back the memory D15 cost in 1 MB of chip RAM (three sessions again)
 STACK_boot := 4096
@@ -665,9 +668,13 @@ $(BUILD)/tui/%.o: ports/tui/zenix/%.c ports/tui/upstream/src/%.c $(TUI_HDRS)
 $(BUILD)/tui/core-utf8.o: ports/tui/zenix/core.c ports/tui/upstream/src/core.c $(TUI_HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(TUI_CFLAGS) -DZENIX_TUI_UTF8 -c $< -o $@
-$(BUILD)/libtui.a: $(BUILD)/tui/core.o $(BUILD)/tui/glue.o $(BUILD)/tui/core-utf8.o tools/check-68020-60.sh
+# (sigfd.o: TuiWait's extra signals none, a member of its own: linked only when the program gives none, ports/common)
+$(BUILD)/tui/sigfd.o: ports/tui/zenix/sigfd.c $(TUI_HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(TUI_CFLAGS) -c $< -o $@
+$(BUILD)/libtui.a: $(BUILD)/tui/core.o $(BUILD)/tui/glue.o $(BUILD)/tui/sigfd.o $(BUILD)/tui/core-utf8.o tools/check-68020-60.sh
 	rm -f $@
-	$(TOOLPREFIX)ar rcs $@ $(BUILD)/tui/core.o $(BUILD)/tui/glue.o
+	$(TOOLPREFIX)ar rcs $@ $(BUILD)/tui/core.o $(BUILD)/tui/glue.o $(BUILD)/tui/sigfd.o
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
 $(BUILD)/tuitest.co: user/tuitest.c $(TUI_HDRS) user/usys.h | $(BUILD)
 	$(CC) $(TUI_CFLAGS) -Iuser -c $< -o $@
@@ -676,38 +683,53 @@ $(BUILD)/tuitest.celf: $(BUILD)/tuitest.co $(BUILD)/crt0.o $(BUILD)/libtui.a $(B
 $(BUILD)/tuitest.zx: $(BUILD)/tuitest.celf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(STACK_DEFAULT)
-# the pure build of the library (D27 9 rule 4), for the programs with shared code that use it (Sumi)
+# the pure build of the library (D27 9 rule 4), for the programs with shared code that use it (Sumi, Maki, Markdown)
 $(BUILD)/tuip/%.o: ports/tui/zenix/%.c ports/tui/upstream/src/%.c $(TUI_HDRS) tools/purecc.sh
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(TUI_CFLAGS) -c $< -o $@
-$(BUILD)/libtui-pure.a: $(BUILD)/tuip/core.o $(BUILD)/tuip/glue.o tools/check-68020-60.sh
+$(BUILD)/tuip/sigfd.o: ports/tui/zenix/sigfd.c $(TUI_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(TUI_CFLAGS) -c $< -o $@
+$(BUILD)/libtui-pure.a: $(BUILD)/tuip/core.o $(BUILD)/tuip/glue.o $(BUILD)/tuip/sigfd.o tools/check-68020-60.sh
 	rm -f $@
-	$(TOOLPREFIX)ar rcs $@ $(BUILD)/tuip/core.o $(BUILD)/tuip/glue.o
+	$(TOOLPREFIX)ar rcs $@ $(BUILD)/tuip/core.o $(BUILD)/tuip/glue.o $(BUILD)/tuip/sigfd.o
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
 
-# ---- Sumi (roadmap block 3, the owner's text editor; ports/sumi/README): upstream's files pinned in
-# ports/sumi/upstream (tools/sumi-vendor.sh, unchanged), compiled over Zenix's AmigaOS layer (ports/sumi/zenix: the
-# headers and dos.c) and linked with the text-UI library and the C library, as a program with shared code (ZEX2: a
-# second editor costs only its data). /bin/sumi (UAPPS; it has no user/sumi.c: these rules build it). ----
-SUMI_SRCS := main buf file syntax clip keys
-SUMI_CFLAGS := $(LIBC_PFLAGS) -Iports/sumi/zenix/include -Iports/tui/upstream/include -DTUI_STATIC
-SUMI_HDRS := $(LIBC_HDRS) ports/sumi/upstream/src/sumi.h $(wildcard ports/sumi/zenix/include/*.h \
-             ports/sumi/zenix/include/*/*.h ports/tui/upstream/include/*.h ports/tui/upstream/include/*/*.h)
-$(BUILD)/sumi/%.o: ports/sumi/upstream/src/%.c $(SUMI_HDRS) tools/purecc.sh
-	@mkdir -p $(dir $@)
-	tools/purecc.sh $(CC) $(SUMI_CFLAGS) -Wno-sign-compare -Wno-unused-parameter -Wno-unused-but-set-variable -c $< -o $@
-$(BUILD)/sumi/dos.o: ports/sumi/zenix/dos.c $(SUMI_HDRS) tools/purecc.sh
-	@mkdir -p $(dir $@)
-	tools/purecc.sh $(CC) $(SUMI_CFLAGS) -c $< -o $@
-SUMI_OBJS := $(SUMI_SRCS:%=$(BUILD)/sumi/%.o) $(BUILD)/sumi/dos.o
-$(BUILD)/sumi.cpuelf: $(SUMI_OBJS) $(BUILD)/crt0-pure.o $(BUILD)/libtui-pure.a $(BUILD)/libc-pure.a link/pure.ld
-	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(SUMI_OBJS) $(BUILD)/libtui-pure.a \
-	    $(BUILD)/libc-pure.a $(LIBGCC) -o $@
-$(BUILD)/sumi.pzx: $(BUILD)/sumi.cpuelf tools/mkzexe.py tools/check-68020-60.sh
-	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
-	tools/mkzexe.py $< $@ $(or $(STACK_sumi),$(STACK_DEFAULT))
-$(BUILD)/sumi.zx: $(BUILD)/sumi.pzx
-	cp $< $@
+# ---- The owner's terminal programs (roadmap block 3; the owner's TextTools: Sumi the editor, Maki the pager,
+# Markdown the viewer; ports/PROG/README): upstream's files pinned in ports/PROG/upstream (tools/texttools-vendor.sh,
+# unchanged), compiled over Zenix's AmigaOS layer shared by the three (ports/common: the headers and dos.c, compiled
+# for each program with the settings names it maps) and linked with the text-UI library and the C library, as
+# programs with shared code (ZEX2: a second one costs only its data). /bin/sumi, /bin/maki, /bin/markdown (UAPPS; no
+# user/PROG.c: these rules build them). TT_NAMES_PROG: the names after ENVARC: (and ENV:) the program's own literals
+# use, mapped to $HOME/.config/NAME; the first is the program's, also for T:NAME- (/tmp/NAME-). ----
+TEXTTOOLS := sumi maki markdown
+TT_SRCS_sumi := main buf file syntax clip keys
+TT_SRCS_maki := main src keys drawer filecol
+TT_SRCS_markdown := main buf file syntax clip keys md mdedit view
+TT_NAMES_sumi := "Sumi"
+TT_NAMES_maki := "Maki","FileColours"
+TT_NAMES_markdown := "Markdown"
+TT_CFLAGS := $(LIBC_PFLAGS) -Iports/common/include -Iports/tui/upstream/include -DTUI_STATIC
+TT_HDRS := $(LIBC_HDRS) $(wildcard ports/common/include/*.h ports/common/include/*/*.h ports/tui/upstream/include/*.h \
+           ports/tui/upstream/include/*/*.h)
+define TEXTTOOL_RULES
+$$(BUILD)/$(1)/%.o: ports/$(1)/upstream/src/%.c $$(TT_HDRS) $$(wildcard ports/$(1)/upstream/src/*.h) tools/purecc.sh
+	@mkdir -p $$(dir $$@)
+	tools/purecc.sh $$(CC) $$(TT_CFLAGS) -Wno-sign-compare -Wno-unused-parameter -Wno-unused-but-set-variable -c $$< -o $$@
+$$(BUILD)/$(1)/zenix-dos.o: ports/common/dos.c $$(TT_HDRS) tools/purecc.sh Makefile
+	@mkdir -p $$(dir $$@)
+	tools/purecc.sh $$(CC) $$(TT_CFLAGS) '-DZENIX_TT_NAMES=$$(TT_NAMES_$(1))' -c $$< -o $$@
+$$(BUILD)/$(1).cpuelf: $$(TT_SRCS_$(1):%=$$(BUILD)/$(1)/%.o) $$(BUILD)/$(1)/zenix-dos.o $$(BUILD)/crt0-pure.o \
+                       $$(BUILD)/libtui-pure.a $$(BUILD)/libc-pure.a link/pure.ld
+	$$(CC) $$(LIBC_PFLAGS) $$(PULDFLAGS) $$(LIBC_LDFLAGS) $$(BUILD)/crt0-pure.o $$(TT_SRCS_$(1):%=$$(BUILD)/$(1)/%.o) \
+	    $$(BUILD)/$(1)/zenix-dos.o $$(BUILD)/libtui-pure.a $$(BUILD)/libc-pure.a $$(LIBGCC) -o $$@
+$$(BUILD)/$(1).pzx: $$(BUILD)/$(1).cpuelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$$(TOOLPREFIX) tools/check-68020-60.sh $$<
+	tools/mkzexe.py $$< $$@ $$(or $$(STACK_$(1)),$$(STACK_DEFAULT))
+$$(BUILD)/$(1).zx: $$(BUILD)/$(1).pzx
+	cp $$< $$@
+endef
+$(foreach p,$(TEXTTOOLS),$(eval $(call TEXTTOOL_RULES,$(p))))
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)

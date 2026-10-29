@@ -59,8 +59,9 @@ DESCRIPTION
     "row NN|...|" per row, "attr NN|...|" for a row with colours or
     attributes ('.' a plain cell, else the hex digit of its foreground
     colour), and the cursor; exit status 1 if TEXT never came; then it
-    types TYPE into that console (\xHH and \r for control keys), so a
-    test goes on only once the grid was read (tools/sumi-test.sh).
+    types TYPE into that console (\xHH and \r for control keys, \kHH
+    for a raw key code: 60 42 c2 e0 is Shift+Tab), so a test goes on
+    only once the grid was read (tools/sumi-test.sh).
 
 SEE ALSO
     clear(1), edit(1)

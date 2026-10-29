@@ -2,7 +2,7 @@ wait zenix:/# 90
 sleep 1
 send edit /tmp/e1.txt\r
 sleep 4
-send hello world\rsecond line\rthird\x1b[A\x1b[A\x1b[D
+send hello world\rsecond line\r\tthird\x1b[Z\x1b[A\x1b[A\x1b[D
 sleep 2
 send X
 sleep 1

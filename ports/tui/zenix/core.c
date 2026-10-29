@@ -10,16 +10,19 @@
  *    the rest of an escape sequence);
  *  - the size: TIOCGWINSZ (the console's 80 x 32 PAL, 80 x 25 NTSC), else 80 x 24 as upstream; the console never
  *    changes size, so there are no resize events (no SIGWINCH);
- *  - a BPTR is a file descriptor; 0 for the input is descriptor 0 and 0 for the output descriptor 1 (upstream: Input()
- *    and Output());
+ *  - a BPTR given to TuiOpen, TuiOpenIO and TuiPossible is a handle: the descriptor + 1, as the AmigaOS layer of the
+ *    owner's programs gives them (ports/common: 0 stays "none"); 0 for the input is descriptor 0 and 0 for the
+ *    output descriptor 1 (upstream: Input() and Output()); inside, the toolkit keeps the descriptors;
  *  - CTerm is 1: the Zenix console takes the ANSI colours as they are (256 and 24-bit ones as the nearest of its 16)
  *    and ESC [ ? 25 h / l for the cursor: upstream's CTerm path. UTF8 is 0: the console is Latin-1 (one byte one
  *    cell) until its UTF-8 (DESIGN D28) lands; ZENIX_TUI_UTF8 (ports/tui/README) switches the output to UTF-8 and the
  *    widths to the C library's wcwidth then. CellW and CellH are 0; no mouse, no pastes;
  *  - the console has no second screen: closing (and suspending) clears it, as upstream does in a plain console;
  *  - TuiSignal answers 0 (no AmigaOS signals); a program with a poll loop of its own polls descriptor 0 and calls
- *    TuiPoll. TuiWait's extra signals are none: a signal that interrupts the wait (its handler ran) ends it with
- *    TE_NONE, as upstream's extra signals do.
+ *    TuiPoll. TuiWait's extra signals are descriptors: tui_zenix_sigfd(bit) names the one behind a signal bit (the
+ *    AmigaOS layer's reply ports, a pipe Maki reads; sigfd.c: none, when the program has no such layer); the wait
+ *    ends with TE_NONE and the bit in *got when it has data. A signal that interrupts the wait (its handler ran)
+ *    ends it with TE_NONE too, as upstream's extra signals do.
  * The upstream terminal functions are renamed by the defines below and declared static first, so they stay in the
  * file unused and are never emitted (the C rule: a later declaration without static keeps the internal linkage). */
 #ifdef ZENIX_TUI_UTF8
@@ -119,21 +122,40 @@ static void zasksize(Priv *p)
     p->pub.Cols = cols;
 }
 
-/* input on the console within ms (-1: no limit): 1 yes, 0 no, -1 a signal came (its handler ran) */
-static int zwaitin(Priv *p, int ms)
+/* input on the console within ms (-1: no limit): 1 yes, 0 no, -1 a signal came (its handler ran). The descriptors
+ * behind the signal bits in extra are waited on too (tui_zenix_sigfd): those with data (or their end) into *got. */
+static int zwaitx(Priv *p, int ms, ULONG extra, ULONG *got)
 {
-    struct pollfd f;
-    int r;
-    f.fd = (int)p->tin;
-    f.events = POLLIN;
-    f.revents = 0;
-    r = poll(&f, 1, ms);
+    struct pollfd f[9];
+    ULONG bit[9];
+    int r, n = 1, i;
+    f[0].fd = (int)p->tin;
+    f[0].events = POLLIN;
+    f[0].revents = 0;
+    for (i = 0; i < 32 && extra && n < 9; i++)
+        if (extra >> i & 1) {
+            int fd = tui_zenix_sigfd(i);
+            if (fd < 0) continue;
+            f[n].fd = fd;
+            f[n].events = POLLIN;
+            f[n].revents = 0;
+            bit[n++] = 1UL << i;
+        }
+    r = poll(f, (nfds_t)n, ms);
     if (r < 0) {
         if (errno == EINTR) return -1;
         p->ended = 1;                   /* the descriptor is gone: the end, as upstream's 0-byte Read */
         return 0;
     }
-    return r > 0;
+    for (i = 1; i < n; i++)
+        if (f[i].revents) *got |= bit[i];
+    return f[0].revents != 0;
+}
+
+static int zwaitin(Priv *p, int ms)
+{
+    ULONG none = 0;
+    return zwaitx(p, ms, 0, &none);
 }
 
 /* what the console has into ibuf; 0 bytes after "input is there": the input ended */
@@ -184,14 +206,15 @@ static int zgive(Priv *p, TuiEv *e)
 
 LONG TuiPossible(BPTR in)
 {
-    return isatty((int)in) && isatty(1);
+    return isatty(in ? (int)in - 1 : 0) && isatty(1);
 }
 
 struct Tui *TuiOpenIO(BPTR in, BPTR out)
 {
     ZPriv *z;
     Priv *p;
-    if (!out) out = 1;
+    in = in ? in - 1 : 0;               /* handles (the descriptor + 1) to descriptors */
+    out = out ? out - 1 : 1;
     if (!isatty((int)in) || !isatty((int)out)) return NULL;
     if (!(z = calloc(1, sizeof(*z)))) return NULL;
     p = &z->p;
@@ -276,7 +299,7 @@ void TuiResume(struct Tui *t)
 LONG TuiWait(struct Tui *t, TuiEv *e, LONG us, ULONG extra, ULONG *got)
 {
     Priv *p = P(t);
-    (void)extra;
+    ULONG g;
     if (got) *got = 0;
     if (!p) {
         memset(e, 0, sizeof(*e));
@@ -290,7 +313,14 @@ LONG TuiWait(struct Tui *t, TuiEv *e, LONG us, ULONG extra, ULONG *got)
         if (p->evh != p->evt || p->ended) continue;
         if (us == 0) break;
         TuiFlush(t);
-        r = zwaitin(p, us < 0 ? -1 : (int)((us + 999) / 1000));
+        g = 0;
+        r = zwaitx(p, us < 0 ? -1 : (int)((us + 999) / 1000), extra, &g);
+        if (g) {                        /* an extra descriptor has data: TE_NONE, unless keys came with it */
+            if (got) *got |= g;
+            zreadnow(p);
+            if (p->evh != p->evt || p->ended) continue;
+            break;
+        }
         if (r < 0 || (r == 0 && !p->ended && us > 0)) break;   /* a signal, or the time is up */
     }
     e->type = TE_NONE;

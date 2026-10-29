@@ -265,13 +265,14 @@ static void indent(int dir)
 {
     int y1 = cy, y2 = cy;
     if (has_sel()) { int x1, x2; sel_range(&y1, &x1, &y2, &x2); if (x2 == 0 && y2 > y1) y2--; }
+    int gone = 0;                                       /* characters taken from the cursor's line (no selection) */
     group_id++; last_typed_end_y = -1;
     for (int y = y1; y <= y2; y++) {
         if (dir > 0) { int ey, ex; do_insert(y, 0, "\t", 1, &ey, &ex); }
-        else if (L[y].len && L[y].s[0] == '\t') do_delete(y, 0, y, 1);
-        else { int k = 0; while (k < 4 && k < L[y].len && L[y].s[k] == ' ') k++; if (k) do_delete(y, 0, y, k); }
+        else if (L[y].len && L[y].s[0] == '\t') { do_delete(y, 0, y, 1); gone = 1; }
+        else { int k = 0; while (k < 4 && k < L[y].len && L[y].s[k] == ' ') k++; if (k) do_delete(y, 0, y, k); gone = k; }
     }
-    if (!has_sel()) { cx += dir > 0 ? 1 : 0; clamp_cursor(); }
+    if (!has_sel()) { cx += dir > 0 ? 1 : -(cx < gone ? cx : gone); clamp_cursor(); }
 }
 
 /* ------------------------------------------------------------ files */
@@ -394,7 +395,7 @@ static void render(void)
 static void invalidate(void) { shadow_valid = 0; oputs("\033[2J"); }
 
 /* ------------------------------------------------------------ keys */
-enum { K_NONE = 0, K_UP = 256, K_DOWN, K_RIGHT, K_LEFT, K_HOME, K_END, K_DEL, K_INS, K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10 };
+enum { K_NONE = 0, K_UP = 256, K_DOWN, K_RIGHT, K_LEFT, K_HOME, K_END, K_DEL, K_INS, K_F1, K_F2, K_F3, K_F4, K_F5, K_F6, K_F7, K_F8, K_F9, K_F10, K_BTAB };
 #define M_SHIFT 0x1000
 #define M_ALT   0x2000
 #define M_CTRL  0x4000
@@ -414,6 +415,7 @@ static int read_key(void)
     int key = K_NONE;
     if (ch == 'A') key = K_UP; else if (ch == 'B') key = K_DOWN; else if (ch == 'C') key = K_RIGHT; else if (ch == 'D') key = K_LEFT;
     else if (ch == 'H') key = K_HOME; else if (ch == 'F') key = K_END;
+    else if (ch == 'Z') key = K_BTAB;                                     /* Shift+Tab: ESC [ Z */
     else if (ch == 'P' || ch == 'Q' || ch == 'R' || ch == 'S') key = K_F1 + (ch - 'P');
     else if (ch == '~') {
         if (num == 3) key = K_DEL; else if (num == 2) key = K_INS; else if (num == 1) key = K_HOME; else if (num == 4) key = K_END;
@@ -629,6 +631,7 @@ int main(int argc, char **argv)
             case K_HOME: move_to(cy, 0, extend); break;
             case K_END: move_to(cy, L[cy].len, extend); break;
             case K_DEL: delete_forward(); break;
+            case K_BTAB: indent(-1); break;
             case K_F1: help_screen(); break;
             case K_F2: { char in[128]; if (prompt("save as: ", in, sizeof in, filename[0] ? filename : 0) && in[0]) { strcpy(filename, in); if (save_file(filename) < 0) snprintf(message, sizeof message, "cannot save %s", filename); else snprintf(message, sizeof message, "saved %s", filename); } break; }
             case K_F3: find_cmd(1, (mods & M_SHIFT) ? -1 : 1); break;

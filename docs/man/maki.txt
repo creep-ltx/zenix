@@ -1,0 +1,92 @@
+MAKI(1)			Zenix manual
+
+NAME
+    maki - a pager for the terminal: colours, search, pipes, directories
+
+SYNOPSIS
+    maki [-N] [-S] [+LINE | +/TEXT] [FILE | DIRECTORY | - ...]
+    command | maki
+
+DESCRIPTION
+    Maki is the owner's pager for the Amiga, in the way of less; Zenix
+    carries a copy of its source (ports/maki, version 0.1b6). It draws in
+    the terminal it is started from. Each FILE is one of a list ([ and ]
+    go between them); a DIRECTORY shows what is in it, as ls -l does
+    (AmigaOS's protection bits hspa rwed, the size, the date, the name);
+    - (or no FILE with a pipe for input) reads the input, which fills the
+    screen as it comes, the keys then coming from the terminal.
+
+    Files are never read whole: the lines are indexed as far as they are
+    needed, and further while you read, so a big file opens at once. ANSI
+    colours show as colours (16, 256 and 24-bit ones as the nearest of
+    the console's), man-style overstrike (b BS b, _ BS x) as bold and
+    underline. The characters are guessed by looking (Latin-1, UTF-8 or
+    the PC's CP437 for .ans .nfo .diz); F7 changes them. When the output
+    is not a terminal (maki FILE > OUT), the files are written out as
+    cat would.
+
+OPTIONS
+    -N         line numbers
+    -S         long lines cut, not folded (Left and Right look aside)
+    +LINE      start at that line
+    +/TEXT     start at the first match of TEXT
+    The environment variable MAKI holds options to start with (as less's
+    LESS).
+
+KEYS (the defaults; every one can be changed, FILES)
+    Space, f, PgDn, Alt+Down     a page down
+    b, Backspace, PgUp, Alt+Up   a page up
+    Return, j, Down / k, Up      a line down / up
+    d / u                        half a page down / up
+    g, <, Ctrl+Up / G, >, Ctrl+Down  the start / the end (with a
+                                 number first: that line)
+    N %                          N percent of the way
+    :, Ctrl+L                    go to a line
+    / ? n N                      search forward, back, the next, the one
+                                 before (a regular expression; a capital
+                                 makes it exact; every match is marked)
+    F                            follow the end of a growing file or
+                                 pipe, as tail -f (any key stops)
+    ] [                          the next / the previous file
+    v                            edit the file at this line ($EDITOR,
+                                 else sumi)
+    m LETTER, ' LETTER           mark a place, back to it
+    F4, F7, F8                   line numbers, the characters, folded or
+                                 cut lines
+    =, Ctrl+G                    about the file
+    h, F1                        the keys as bound now
+    q                            quit
+    Esc                          stop (following, a number)
+    A number typed first counts: 5 Space goes five pages on.
+
+FILES
+    $HOME/.config/Maki/Maki.keys    the keys: one "KEY ACTION" a line,
+                                    written with the defaults at the
+                                    first start
+    $HOME/.config/FileColours       the colours of a directory's names by
+                                    kind (written with the defaults when
+                                    missing)
+    The folder is made at the first start, readable by this user only
+    (AmigaOS's ENVARC:Maki and ENVARC:FileColours; there is no second
+    copy as ENV: has). Without HOME nothing is kept.
+
+EXIT STATUS
+    0 when it quits; 10 when a FILE cannot be opened; 20 when there is
+    not enough memory, no terminal for the keys or the terminal cannot be
+    used.
+
+NOTES
+    Maki does not replace less and more: all three are there. The console
+    has no mouse (the wheel) and no resize. Ctrl+C is a key here, never
+    a signal: a long search cannot be stopped by it.
+    A soft link in a directory's list shows as what it points to. Some
+    messages keep the AmigaOS words of the original. A path is at most
+    63 bytes (PATH_MAX).
+    Memory on the stock A1200 (80 x 32): about 650 KB of its own and 58 KB
+    of code shared by every Maki running (measured in FS-UAE,
+    tools/maki-test.sh): most of it the original's buffers for one very
+    long line (320 KB) and its file cache (128 KB); a second Maki costs
+    only its own part.
+
+SEE ALSO
+    less(1), more(1), sumi(1), markdown(1), ls(1)

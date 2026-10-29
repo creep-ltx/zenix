@@ -124,7 +124,7 @@ static const char keyspecial[0x28] = {
     0, 0, 0, 0, 0, 0, 0, 0,
 };
 
-/* cursor keys, function keys, Help and Del as the usual escape sequences. Only programs in raw mode get them.
+/* cursor keys, function keys, Shift+Tab, Help and Del as the usual escape sequences. Only programs in raw mode get them.
  * Scrollback is a console key, Amiga + Up/Down (see kbd_key), like the console switch Amiga+F1..F10. */
 static void emit_seq(const char *q)
 {
@@ -173,6 +173,7 @@ static int special_key(u8 code)
         emit_seq(fkeys[code - 0x50]);
         return 1;
     }
+    if (code == 0x42 && raw && shift_down) { emit_seq("\033[Z"); return 1; }  /* Shift+Tab: back tab, as xterm and Linux */
     if (code == 0x5F) { emit_seq("\033[2~"); return 1; }       /* Help = Insert */
     if (code == 0x46) { emit_seq("\033[3~"); return 1; }       /* Del */
     return 0;

@@ -1,0 +1,89 @@
+MARKDOWN(1)		Zenix manual
+
+NAME
+    markdown - a Markdown viewer and editor for the terminal
+
+SYNOPSIS
+    markdown [-e] [+LINE] [FILE ...]
+
+DESCRIPTION
+    Markdown is the owner's Markdown viewer and editor for the Amiga, a
+    sibling of Sumi and Maki; Zenix carries a copy of its source
+    (ports/markdown, version 0.1b5). It draws in the terminal it is
+    started from. A .md file opens in the view, the way it reads:
+    headings, bold, italic, code, strikethrough, lists (nested, numbered,
+    task boxes), quotes and GitHub's [!NOTE] alerts, code blocks in a box
+    with colours for their language, tables with box lines, rules, links,
+    entities and the HTML that READMEs use. Other files, and a .md file
+    with -e, open to edit. Each FILE opens in a tab of its own.
+
+    Links: Tab chooses one, Return follows it: another Markdown file opens
+    in a tab, #heading jumps there. The outline (o) lists every heading.
+    Editing (e) is Sumi's editor, whole (tabs, undo, find and replace,
+    macros); Ctrl+P shows the text and the view together, the view
+    following the cursor. Return goes on with a list or a quote, Ctrl+B
+    makes bold, Ctrl+N is the format menu; the commands table (the table
+    at the cursor made neat) and toc (a list of the headings as links).
+
+OPTIONS
+    -e         open .md files to edit
+    +LINE      start at that line of the next file
+
+KEYS IN THE VIEW (the defaults; every one can be changed, FILES)
+    Space, f, PgDn / b, PgUp     a page down / up
+    Down, j / Up, k              a line
+    d / u                        half a page
+    g, < / G, >                  the start / the end
+    ] / [                        the next heading / the one before
+    o, t                         the outline
+    Tab / Shift+Tab              the next link or task box / the one
+                                 before
+    Return, Right                follow the link (or tick the box)
+    Backspace, Left              back
+    x                            tick or untick a task box (Ctrl+S saves)
+    / ? n N                      find, back, the next, the one before
+    e, Ctrl+E                    edit (in the editor: back to the view)
+    p, Ctrl+P                    edit with the view beside
+    q / Ctrl+W                   close the tab / quit
+    h                            the keys as bound now
+    While editing: Sumi's keys (sumi(1)), and Ctrl+E the view, Ctrl+P
+    split, Ctrl+B bold, Ctrl+N format, Shift+F1 the outline.
+
+SETTINGS
+    The command key (Ctrl+U) takes set width N (the view's text at most
+    so wide, 0 the whole width; 100 at first), set split auto|side|under,
+    set pictures on|off and all of Sumi's settings.
+
+FILES
+    $HOME/.config/Markdown/Markdown.keys    the keys, an [edit] and a
+                                            [view] part, written with
+                                            the defaults at the first
+                                            start
+    $HOME/.config/Markdown/Markdown.prefs   the settings set changes
+    $HOME/.config/Markdown/Markdown.places  where each file was left
+    The folder is made at the first start, readable by this user only
+    (AmigaOS's ENVARC:Markdown; there is no second copy as ENV: has).
+    Without HOME nothing is kept. When the terminal goes away with changes
+    not saved, each changed file is kept as NAME.save, an unnamed one as
+    /tmp/Markdown-N.save.
+
+EXIT STATUS
+    0 when it quits; 10 when it is not started in a terminal; 20 when
+    there is not enough memory or the terminal cannot be used.
+
+NOTES
+    The console has no mouse, no pictures and no clipboard shared between
+    programs; following an address (http:...) copies it inside the
+    program (no browser). The console is Latin-1: characters beyond it
+    show as stand-ins. Ctrl+C is a key here, never a signal. Footnotes
+    show as written. A link that goes up a folder (../x) is taken the
+    AmigaOS way and opens the wrong file. A path is at most 63 bytes
+    (PATH_MAX).
+    Memory on the stock A1200 (80 x 32): about 241 KB of its own (its
+    stack is 32 KB, as the original's: the renderer goes one level deeper
+    for each quote or list inside another, up to 24) and 131 KB of code
+    shared by every Markdown running (measured in FS-UAE,
+    tools/markdown-test.sh).
+
+SEE ALSO
+    sumi(1), maki(1), less(1)
