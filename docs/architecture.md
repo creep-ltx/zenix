@@ -1655,11 +1655,26 @@ outputs (`tools/cmds-test.sh`).
   number, the 16-byte string, then `ZSRV` and a word of the roots the kernel has a server built in for (1 ext2, 2
   ZenixFS: the shipped kernel 1, kernel-zfs 3). zenixboot refuses a bundle whose kernel says it has no ZenixFS server
   when the installed kernel says it has one (`roots_check`, docs/man/zenixboot.txt); a record without `ZSRV` (every
-  kernel before D19) is no evidence and refuses nothing. The kernel is built with `-O2`, except the five
-  truly cold drivers - `floppy`, `emmc`, `a3000`, `rtc` and `kbd` (every wait in them is timed by the E-clock or a timer)
-  - which are built with `-Os` (`KOPT_*` in the Makefile, DESIGN D13 step 0: about 6.8 KB smaller); the floppy's MFM
-  track coding (`mfm.h`) keeps `-O2` through a pragma in `floppy.c`. `gfx` is built with `-Os` too (DESIGN D14: its
-  set-up code), its glyph drawing with `-O2` (a function attribute).
+  kernel before D19) is no evidence and refuses nothing.
+- **Optimisation: hot paths `-O2`, cold code `-Os`** (the golden path). Whole files at `-Os` (`KOPT_*` in the
+  Makefile): the cold drivers `floppy`, `emmc`, `a3000`, `rtc`, `kbd` (every wait in them timed by the E-clock or a
+  timer; DESIGN D13 step 0), `gfx` and `term` (set-up code; the glyph drawing and the per-character path `-O2` by a
+  function attribute), `tty`, `vfs` (the pipes' copy loops `-O2`), `event`, `signal`, `random`, `sock`, `drv`, `svc`
+  (a pragma); the floppy's MFM coding (`mfm.h`) `-O2` by a pragma. **Cold parts of the `-O2` files at `-Os`** (the
+  kernel's shrink, audit 2026-10-29 block 2: a `#pragma GCC optimize("Os")` region or `KCOLD` in `kernel/kernel.h`):
+  `main.c`'s boot (`vectors_init` to `kmain`) and panic; `serial.c`'s kernel log, boot notes and `kprintf`;
+  `proc.c`'s program loader (`fill_mem` to `proc_spawn_image`), `proc_init`, and a kill, a process's end and the wait
+  for it (`proc_kill` to `proc_wait`); `ide.c`'s drive probe (`ide_present` to `ide_init`); `ipc.c`'s `port_create`,
+  `ipc_cancel`, `ipc_proc_exit`; `mem.c`'s `mem_init` and its range set-up; `audio.c`'s `beep`; `syscall.c`'s
+  `do_priority`. **Kept `-O2`, unchanged:** the console (`term`'s character path, `kbd`'s interrupt and work), the
+  messages (all of `ipc.c` but the three above), the task switch (`schedule`, `ready`, the sleepers, the tick, the
+  idle loop, `start.S`), the system call entry (`syscall_c` and its helpers, `start.S`), the user-pointer checks, the
+  serial device and its interrupt (SLIP), `memcpy`/`memset`/`memmove`, the allocator, the block layer and the IDE
+  commands (`ide_cmd`, `ide_wait`, the reads and writes); the ext2 read path is fsd's (a program, `-O2`). Checked
+  when made: every function of these files compared instruction by instruction with the `-O2` build before (only the
+  listed cold ones differ; the idle loop, moved out of `kmain`, is the same instructions). The kernel is linked with
+  `--gc-sections` (functions nothing calls are dropped). `kernel.bin` 162,592 bytes before, 158,076 after (4,516
+  less; the parts' sizes in `tools/ksize-budget`).
 - Pi driver tests (no hardware needed): `tools/stage0-test.sh` (stage0's logic on the host against the real CM4
   device tree with Emu68's range rewriting), `tools/stage0-68k-test.py` (the real 68020 stage0 code in a CPU
   emulator, `pip install unicorn`), `tools/emmc-test.sh` (the SD driver against a strict SDHCI model,

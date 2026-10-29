@@ -51,7 +51,7 @@ int port_slot(const char *name)
 
 /* A registered name (D11) is taken over only by the process the kernel started for it, anyone else - root too - gets
  * -EBUSY; "fs", "fs.*" and "disk" not registered yet need root. */
-int port_create(const char *name, int owner)
+KCOLD int port_create(const char *name, int owner)
 {
     int i = port_slot(name);
     if (i >= 0)
@@ -182,7 +182,7 @@ void ipc_unqueue(struct port *p, struct umsg *m)
  * running server: the server never saw it, so nothing of the caller's is in use; the call returns -EINTR and the kill
  * ends the process at the end of its system call. A message being served is never taken back (the server reads and
  * writes the caller's memory in place): the network watchdog bounds that wait (sock.c). From proc_kill, any context. */
-void ipc_cancel(struct proc *p)
+KCOLD void ipc_cancel(struct proc *p)
 {
     u16 s = irq_save();
     struct umsg *m = p->wait_msg, *q;
@@ -352,7 +352,7 @@ long ipc_reply(struct umsg *m, s32 result)
 
 /* a process died: its service ports go back to held (svc.c: their queued messages wait for the next server), its
  * other ports close (waking their clients with -ECONNRESET), and every request it was serving fails */
-void ipc_proc_exit(int pid)
+KCOLD void ipc_proc_exit(int pid)
 {
     svc_exit(current);
     for (int i = 0; i < NPORT; i++) {

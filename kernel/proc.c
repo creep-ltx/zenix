@@ -258,7 +258,7 @@ void stack_fail(struct proc *p, int which)
     p->killed = 2;                      /* 2: exit code 139, as for a fault */
 }
 
-void proc_init(void)
+KCOLD void proc_init(void)         /* the boot: once, size first */
 {
     memset(procs, 0, sizeof procs);
     procs[0].state = P_READY;           /* pid 0: idle, runs on the boot stack */
@@ -333,6 +333,10 @@ static void relocate(u8 *base, const u32 *rel, u32 n)
     for (u32 i = 0; i < n; i++)
         *(u32 *)(base + rel[i]) += (u32)base;
 }
+/* From here to proc_spawn_image, the program loader is -Os (audit block 2, the kernel's shrink): its time goes to
+ * reading the file; the two loops over the relocations above stay -O2 */
+#pragma GCC push_options
+#pragma GCC optimize("Os")
 static int fill_mem(const void *ctx, u8 *base, const struct zexe *h)
 {
     const u8 *file = ctx;
@@ -680,6 +684,8 @@ int proc_spawn_image(const void *img, u32 len, char *const *argv, int argc, int 
     return proc_load((const union zhdr *)img, len, fill_mem, img, argv[0], argv, argc, 0, 0, tty, priv, -1);
 }
 
+#pragma GCC pop_options
+
 /* may killed process p end now? Never inside a message call (the server may still use the client's buffers, and the
  * kernel code around the call - a program load, the list of loads in progress through the kernel stacks - must reach
  * its end): it ends at the end of its system call. A service process killed while serving a request ends only between
@@ -803,6 +809,14 @@ void proc_cont(struct proc *p)
         ready_force(p);
 }
 
+int kill_status(const struct proc *p)
+{
+    return p->killed == 2 ? 139 : p->kill_sig ? 128 + p->kill_sig : 130;
+}
+
+/* From proc_kill to proc_wait: a kill, a process's end and the wait for it, once per program: -Os (audit block 2) */
+#pragma GCC push_options
+#pragma GCC optimize("Os")
 void proc_kill(struct proc *p)
 {
     if (p->killed == 1)
@@ -818,11 +832,6 @@ void proc_kill(struct proc *p)
         ipc_cancel(p);                  /* a socket call not yet taken by the server (audit O9) */
     if (p->wait_msg)
         ipc_cancel_mark(p);             /* D23 5.1: its server may answer -EINTR (a call taken back above is done) */
-}
-
-int kill_status(const struct proc *p)
-{
-    return p->killed == 2 ? 139 : p->kill_sig ? 128 + p->kill_sig : 130;
 }
 
 void proc_exit(int code)
@@ -937,6 +946,8 @@ int proc_wait(int pid, int flags)
             return (int)e;              /* -EINTR: a handler runs (and the call is restarted with SA_RESTART) */
     }
 }
+
+#pragma GCC pop_options
 
 /* Free zombies nobody will wait for: the parent is gone or is itself a zombie (it can never wait). Called by the idle
  * loop, by every process exit (for its own children) and before a spawn looks for a free slot, so a busy machine that

@@ -38,7 +38,7 @@ static struct mblk *next_of(struct range *r, struct mblk *b)
     return n < r->hi ? (struct mblk *)n : 0;
 }
 
-static void add_range(u32 lo, u32 hi, int chip)
+KCOLD static void add_range(u32 lo, u32 hi, int chip)
 {
     lo = (lo + 15) & ~15u;
     hi &= ~15u;
@@ -54,7 +54,7 @@ static void add_range(u32 lo, u32 hi, int chip)
 }
 
 /* Add [lo,hi) minus the excluded spans */
-static void add_minus(u32 lo, u32 hi, int chip, const u32 ex[][2], int nex)
+KCOLD static void add_minus(u32 lo, u32 hi, int chip, const u32 ex[][2], int nex)
 {
     for (int i = 0; i < nex; i++) {
         u32 a = ex[i][0], b = ex[i][1];
@@ -151,7 +151,7 @@ __attribute__((cold, optimize("Os"))) void upd_release(void)
     upd_flags &= UPD_F_TRIAL;           /* D22 4.3: zpkg asks after boot gave the bundle back */
 }
 
-void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
+KCOLD void mem_init(const struct bootinfo *bi, u32 kernel_pa, u32 kernel_mem)
 {
     /* low chip RAM (vectors, bootinfo, bootblock scratch) and the kernel */
     /* ... and the kernel log's area at the top of chip RAM (audit A12; 0 when the log could not be kept there) */

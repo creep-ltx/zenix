@@ -185,6 +185,14 @@ each fix's test as named in the table, all passing in this branch (`make check` 
 - **The kernel shrink list:** `--gc-sections` and dead code, and -Os on the cold kernel files (measured, each hot path
   kept at -O2), done next with B2-5; freeing the boot-only code after boot needs its own design note (later, measured
   first).
+  **Done 2026-10-29 (B2-11 and the -Os item):** `--gc-sections` on both kernel links; `serial_puts`, `fs_call`,
+  `term_back` deleted (`kbd_set_keymap`/`kbd_keymap_name` kept for `/etc/keymap`, dropped by the linker until then);
+  the cold parts of the -O2 files at -Os (the list is docs/architecture.md section 13, "Optimisation"), every function
+  of the touched files compared instruction by instruction with the build before: the hot ones are unchanged.
+  `kernel.bin` 162,592 -> 158,076 bytes (main 6,278 -> 5,752, serial 6,909 -> 5,757, proc 10,373 -> 8,787, ipc 3,561
+  -> 3,283, ide 3,542 -> 3,284, audio 756 -> 526, syscall 9,750 -> 9,650, mem 2,802 -> 2,744; code + data); 8,836
+  bytes left on the mount tests' floppy. `syscall.c` stays -O2 until the stock A1200's system-call benchmark; the
+  boot-only code and the bss items stay open. Tests: matrix, cmds-test, diag-test.
 - **O12** (unused 4 KB output buffers in diskd, wasabid, nfscd): done next with the above, in libz, if the programs'
   output stays byte for byte the same; else with D27.
 - **B2-10:** with D15's next step (a minimum accepted version kept outside BOOT:).
