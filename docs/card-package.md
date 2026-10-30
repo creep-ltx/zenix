@@ -59,6 +59,7 @@ Keep the old files (the way back), then copy the new ones:
 Copy BOOT:zenixboot BOOT:zenixboot.pre-d15
 Copy BOOT:bootmenu BOOT:bootmenu.pre-d15
 Copy BOOT:S/BootMenu.conf BOOT:S/BootMenu.conf.pre-d15
+Rename BOOT:zenix BOOT:zenix.pre-d15
 MakeDir BOOT:Zenix
 Copy RAM:zenixpkg/Zenix/zenix BOOT:Zenix/zenix
 Copy RAM:zenixpkg/zenixboot BOOT:zenixboot
@@ -72,7 +73,8 @@ The last command shows the menu file: the new line must be the **last line, on a
 changed yours, the same). If you copied `bootzenix` into your AmigaOS as well (`Which bootzenix` says where), copy the
 new one there too: `Copy RAM:zenixpkg/bootmenu C:bootzenix` (with the place `Which` named).
 
-`BOOT:zenix` and `BOOT:zenix.old` (the old kernels) stay where they are: the new zenixboot takes the kernel from
+AmigaOS names ignore upper and lower case, so the old kernel file `BOOT:zenix` must be renamed before the folder
+`BOOT:Zenix` can be made (found on the owner's card, 2026-10-30). `BOOT:zenix.pre-d15` and `BOOT:zenix.old` (the old kernels) stay: the new zenixboot takes the kernel from
 `BOOT:Zenix/` now, and the old files are the way back. Do not start Zenix yet: the root comes first (step 2).
 
 Switch the Amiga off (wait until the drive light is out).
@@ -146,6 +148,7 @@ the session: nothing is lost, the previous version is kept at each step.
    Copy BOOT:bootmenu.pre-d15 BOOT:bootzenix
    Copy BOOT:S/BootMenu.conf.pre-d15 BOOT:S/BootMenu.conf
    Rename BOOT:Zenix BOOT:Zenix-off
+   Rename BOOT:zenix.pre-d15 BOOT:zenix
    ```
 2. On the PC, with the card in the reader (the saved copy's name was printed in step 2):
    ```
