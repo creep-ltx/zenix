@@ -1,5 +1,8 @@
 # D29: ZINE, AmigaOS programs on Zenix (design note, revision 2)
 
+> **Superseded design (owner 2026-10-30):** revisions 1-2 below (a warm restart into the ROM's AmigaOS and back) are not what the owner wants: the program runs **under Zenix**, with a small AmigaOS of Zenix's own and the hardware handed to it, no restarts (docs/decisions.md). Revision 3 replaces this text.
+
+
 Status: **revision 2, 2026-10-30, after two independent reviews (four reports, section 16).** Approved by the owner on
 2026-10-29 and 2026-10-30 ([decisions.md](decisions.md), the entries "Amiga demos on Zenix" to "The Amiga layer is
 ZINE"); ROADMAP block 3½. Nothing of it is built; step 0 (section 14) measures the open facts on the real machines
