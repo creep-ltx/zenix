@@ -854,3 +854,27 @@ in `ports/common/README`, `ports/maki/README` and `ports/markdown/README`; the u
   bytes in `tools/con-test.sh`; Zenix's own `edit` had Shift+Tab in its help but never read it: it does now.
 - **Tests:** `tools/maki-test.sh` and `tools/markdown-test.sh` (in `make check`), Sumi's pattern (`termtest screen`,
   `CON_READ`, then `CON_INPUT`), their logs read by `tools/screenlog.py` (shared with `tools/sumi-test.sh`).
+
+## The owner's leaner versions (builder helper, 2026-10-30)
+
+The copies refreshed to the owner's new versions (`tools/tui-vendor.sh`, `tools/texttools-vendor.sh`, unchanged):
+tui.library **0.5b3** (AmigaLibs cd59201: a cell of 6 bytes, not 16; 0.5b2 fixed the green-bit colour found here),
+Sumi **0.2b7**, Maki **0.1b7**, Markdown **0.1b6** (TextTools ff34b48: buffers that grow when needed). Nothing in
+Zenix's layers changed. Memory on FS-UAE's stock A1200, 80 x 32, one file open (`ps`, emulator figures):
+
+| | before | after | its file |
+|---|---|---|---|
+| tuitest, a terminal open | 98,336 bytes | 81,920 bytes | 34,200 -> 35,332 bytes |
+| Sumi | 195 KB (86 KB shared code) | **116 KB** (87 KB) | 98,756 -> 100,100 bytes |
+| Maki | 650 KB (62 KB) | **202 KB** (63 KB) | 67,864 -> 69,488 bytes |
+| Markdown | 241 KB (134 KB) | 242 KB (136 KB) | 152,412 -> 154,060 bytes |
+
+Chip RAM free with the program, the test's shell and `ps` (1,335 KB before it starts): Sumi 918 -> 996 KB, Maki 487
+-> 933 KB, Markdown 821 -> 818 KB.
+
+- **For the main session (the allocator, not upstream):** the 15,360-byte grids are now small blocks (the 16 KB size
+  class) instead of a region each, so they stay with the program after closing (tuitest's old check, "less after
+  closing than while open", could no longer hold; it now checks that a second open and close takes nothing more), and
+  Markdown's figure did not move: its heap probably grew into the allocator's next chunk, four times the last
+  (read from `user/zmalloc.c`, not measured block by block). A 15 KB block taking a 16 KB class and chunks growing
+  4, 16, 64, 256 KB are the allocator's rounding; a closer fit for blocks of 8-32 KB would let such savings show.

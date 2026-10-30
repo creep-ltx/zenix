@@ -9,7 +9,7 @@ linked with the text-UI library's pure build (build/libtui-pure.a, ports/tui) an
 
 upstream/  the owner's source, one source for AmigaOS and Zenix (D27 9, rule 1; owner 2026-10-28), pinned here and
            never changed: the owner's TextTools repository (public, MIT), commit
-           533439214cf4225feed4f0e748c3b3f20099e60b (2026-10-22), Markdown 0.1b5: src/*.c and src/*.h, README.md as
+           ff34b48dea52ab22f23384d5a5829e33e2caef5a (2026-10-30), Markdown 0.1b6: src/*.c and src/*.h, README.md as
            README (the user's documentation, which docs/man/markdown.txt follows) and LICENSE (MIT, the notice that
            travels with the program: tools/mkroot.sh and the package markdown put it in /usr/share/licenses/markdown,
            with the text-UI library's as markdown-tui).
@@ -29,8 +29,11 @@ Markdown's own (for the main session to confirm with the layer's choices):
 - Pictures: none (the console has no cells of its own size, tui_cellw 0): upstream then names them in a line.
 
 Found in upstream (for the owner's repository, not changed here):
-- Memory: about 241 KB of data while one file is open on 80 x 32 (ps), of which the stack is 32 KB and the text-UI
-  library's two grids 80 KB (16-byte cells), and 131 KB of shared code (the largest of the three programs; the editor
+- Memory: about 242 KB of data while one file is open on 80 x 32 (ps), of which the stack is 32 KB, and 136 KB of
+  shared code. With 0.1b5 and tui.library 0.5b1 it was 241 KB: the smaller grids (31 KB, were 80 KB in regions of
+  their own) and 0.1b6's places table and history at their length did not lower the figure here; the grids now come
+  from the allocator's chunks, which grow four times over (user/zmalloc.c: 4, 16, 64, 256 KB), so the saving is
+  probably held in a larger last chunk (read, not measured block by block) (the largest of the three programs; the editor
   is Sumi's code a second time, compiled into this program).
 - The editor half is a copy of Sumi's files (buf.c, file.c, syntax.c, clip.c, keys.c; the same names, changed apart
   since): two copies in one repository to keep in step; a shared source for the two programs would make it one.

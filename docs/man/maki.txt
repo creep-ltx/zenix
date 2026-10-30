@@ -9,7 +9,7 @@ SYNOPSIS
 
 DESCRIPTION
     Maki is the owner's pager for the Amiga, in the way of less; Zenix
-    carries a copy of its source (ports/maki, version 0.1b6). It draws in
+    carries a copy of its source (ports/maki, version 0.1b7). It draws in
     the terminal it is started from. Each FILE is one of a list ([ and ]
     go between them); a DIRECTORY shows what is in it, as ls -l does
     (AmigaOS's protection bits hspa rwed, the size, the date, the name);
@@ -82,11 +82,11 @@ NOTES
     A soft link in a directory's list shows as what it points to. Some
     messages keep the AmigaOS words of the original. A path is at most
     63 bytes (PATH_MAX).
-    Memory on the stock A1200 (80 x 32): about 650 KB of its own and 58 KB
+    Memory on the stock A1200 (80 x 32): about 202 KB of its own and 63 KB
     of code shared by every Maki running (measured in FS-UAE,
-    tools/maki-test.sh): most of it the original's buffers for one very
-    long line (320 KB) and its file cache (128 KB); a second Maki costs
-    only its own part.
+    tools/maki-test.sh); its buffers grow with the longest line shown
+    and the file cache with the file read; a second Maki costs only its
+    own part.
 
 SEE ALSO
     less(1), more(1), sumi(1), markdown(1), ls(1)

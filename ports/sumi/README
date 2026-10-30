@@ -9,7 +9,7 @@ and the C library's (build/libc-pure.a).
 
 upstream/  the owner's source, one source for AmigaOS and Zenix (D27 9, rule 1; owner 2026-10-28), pinned here and
            never changed: the owner's TextTools repository (public, MIT), commit
-           533439214cf4225feed4f0e748c3b3f20099e60b (2026-10-22), Sumi 0.2b6: src/*.c and src/sumi.h, README.md as README
+           ff34b48dea52ab22f23384d5a5829e33e2caef5a (2026-10-30), Sumi 0.2b7: src/*.c and src/sumi.h, README.md as README
            (the user's documentation, which docs/man/sumi.txt follows) and LICENSE (MIT, the notice that travels with the
            program: tools/mkroot.sh and the package sumi put it in /usr/share/licenses/sumi, with tui's).
 
@@ -28,9 +28,9 @@ Sumi's own (for the main session to confirm with the layer's choices):
 Found in upstream (for the owner's repository, not changed here):
 - Saving goes through a new copy renamed over the file (file.c): through a soft link (AmigaOS's too) the link is
   replaced by a file and its target keeps the old text; resolving the link first would keep it.
-- Memory: about 195 KB of data while one file is open on 80 x 32 (ps), of which the text-UI library's two grids are
-  80 KB (16-byte cells) and the places table 26 KB, allocated whole at the first file (100 entries of 264 bytes:
-  PATHMAX 256); a smaller cell, a growing table or a shorter PATHMAX would each matter on the stock A1200.
+- Memory: about 116 KB of data while one file is open on 80 x 32 (ps; 195 KB with Sumi 0.2b6 and tui.library
+  0.5b1): since 0.2b7 the places table and the prompts' history hold each entry at its length, and since tui.library
+  0.5b3 a cell is 6 bytes (two grids 31 KB, were 80 KB).
 - Messages and help keep AmigaOS words: "Protect it +wd first", "an AmigaDOS command", "ENVARC:Sumi/Sumi.keys" in
   "does nothing"; on Zenix they mean chmod, a shell command and $HOME/.config/Sumi. A word from the OS layer
   (upstream's own small header) would make them right on both.

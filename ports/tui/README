@@ -7,7 +7,7 @@ is linked into each program that uses it ($(BUILD)/libtui.a, D27 8: no shared li
 
 upstream/  the owner's source, one source for AmigaOS and Zenix (D27 9, rule 1; owner 2026-10-28), pinned here and
            never changed: the owner's AmigaLibs repository (public, MIT), commit
-           3b74efdd97886112c2b8808d8e8e4d4323a85134 (2026-10-22), tui.library 0.5b1: src/core.c (the toolkit),
+           cd592016f85fb0859e39f310da039f426eb14734 (2026-10-30), tui.library 0.5b3: src/core.c (the toolkit),
            src/glue.c (the old tui_* names), src/version.h, include/ (libraries/tui.h, clib/tui_protos.h, tui.h)
            and LICENSE (MIT, the notice that travels with any program built from it: tools/mkroot.sh puts it in
            /usr/share/licenses/tui next to /tests/tuitest).
@@ -39,9 +39,12 @@ include/proto/utf8.h: the same tables as the console's); composing accents onto 
 builds the Latin-1 toolkit of before (upstream's stand-ins for a plain console: box lines as - | +, Lodz for the
 Polish name); every build compiles the other setting too ($(BUILD)/tui/core-other.o, not linked) so it keeps building.
 
-Found in upstream (for the owner's repository, not changed here): a 24-bit colour whose green value has bit 1 set
-(TC_RGB(r, g, b) with g = 2, 3, 6, 7, ... 255) is taken for a pen colour (TC_PEN, bit 0x200) by sgrcol and to16any,
-which test 0x200 before 0x1000000: it is drawn as pen g & 7 instead. tuitest uses a red that avoids it.
+Found in upstream: a 24-bit colour whose green value had bit 1 set was taken for a pen colour (found here with
+0.5b1; fixed upstream in 0.5b2, the 24-bit flag tested first). Since 0.5b3 a cell is 6 bytes, not 16 (its colours and
+attributes a number in a table of the styles in use): with a terminal open on 80 x 32 tuitest's process holds
+81,920 bytes, not 98,336 (FS-UAE, the stock A1200). The two grids (15,360 bytes each) now come from the allocator's
+size classes (16 KB blocks, user/zmalloc.c) instead of a region each, so closing keeps them for the program to use
+again rather than giving them back: tools/tui-test.sh checks that a second open and close takes nothing more.
 
 Tests: tools/tui-test.sh (FS-UAE, the stock A1200; in make check): /tests/tuitest (user/tuitest.c) draws its widgets
 and reads the console's grid back.
