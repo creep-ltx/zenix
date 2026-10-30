@@ -82,6 +82,7 @@ if [ "$1" = "--staged" ] || [ "$1" = "--commit" ]; then
         user/xfer/*) ;;          # the transfer engine and its file rules (DESIGN D20 5): a library, no page of its own
         user/zpkg/*) ;;          # zpkg's core (DESIGN D22): a library of the coming zpkg, no page of its own yet
         user/wget/*) ;;          # wget's core (DESIGN D21 step 7): a library of the coming wget, no page of its own yet
+        user/zine/*) ;;          # ZINE's cores (DESIGN D29 step 1): libraries of the coming zine and its blob, no page of their own
         user/*.c)
             b=$(basename "$c" .c); n=$(echo "$b" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
             case "$b" in libz|regex|miniz|fsd|pw|clockfile|sha|sha256|zenixfsd|zenixfs_disk|zpkgfmt|zmalloc|zenv|zout|zerrtab|zsig|zpoll|zsock|zhelp|zpw|libctest|tuitest) continue;; esac     # libraries, servers, the libraries' test programs: no page of their own

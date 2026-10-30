@@ -382,11 +382,10 @@ one C source, compiled into both, so a file the loader would refuse is refused w
   longword ends it: it has no length word of its own), `HUNK_END`. Every count and offset range-checked with arithmetic
   that cannot wrap; a
   relocation names a hunk that exists and an offset with offset + 4 within its size.
-- Refused, each with its own message: `HUNK_OVERLAY`/`BREAK` ("NAME uses overlays: not supported yet"), `0x3F7`
-  (`HUNK_DREL32` in the
-  AmigaDOS Manual, a short form in the Guru Book: step 1 decides from the AmigaDOS Manual and the Guru Book and tests
-  both
-  forms; until then refused), `HUNK_RELRELOC32` (`0x3FD`), external references, anything else ("not an AmigaOS program
+- `0x3F7` (`HUNK_DREL32` in the AmigaDOS Manual, the short form in the Guru Book): decided at step 1, it is
+  `HUNK_RELOC32SHORT` (16.1).
+- Refused, each with its own message: `HUNK_OVERLAY`/`BREAK` ("NAME uses overlays: not supported yet"),
+  `HUNK_RELRELOC32` (`0x3FD`), external references, anything else ("not an AmigaOS program
   (unknown hunk 0x3F9 at byte 1234)").
 - **Loading** (from the volume): each hunk from the program's memory list with its memory type and `MEMF_CLEAR` (BSS and
   the part of a hunk beyond its stored data are zero, as LoadSeg leaves them), the size longword and the next-segment
@@ -399,7 +398,7 @@ one C source, compiled into both, so a file the loader would refuse is refused w
   false, `cli_FailLevel` 10), `pr_CIS`/`pr_COS` (BPTRs to file handles), `pr_CurrentDir`/`pr_HomeDir` (BPTRs to locks
   on the program's directory), `pr_WindowPtr` -1, `pr_Arguments`, `pr_ReturnAddr` ("points to just above the return
   address on the currently active stack", AmigaDOS Manual: most likely the initial stack pointer + 4, the stack-size
-  slot; some start-up code `exit`s through it: step 1 decides it with a start-up that does, and tests it).
+  slot; some start-up code `exit`s through it: read so at step 1, tested at step 3 with a start-up that does, 16.1).
 - **The start:** a stack of 64 KB by default (`zine` passes another size if the owner gives one later; the boot shell's
   4 KB breaks demos), from the program's own memory; `d0` the length and `a0` the arguments ending in "\n"; `(sp)` the
   return address into ZINE and `4(sp)` the stack size; `a6` ExecBase (not promised by AmigaOS, harmless); user mode,
@@ -906,7 +905,7 @@ in its own slot; screenshots through the cage rig (`ZENIX_CAGE_RIG`), compared a
 | `z060` | a 64-bit `mulu.l` (on the 68060 configurations only) | without the library the crash line names the 68060; with a test library standing in for the owner's, the right product |
 
 Also: by name; the refusals (no `x` bit, a non-hunk file, damaged hunk files from a `tools/mkbadhunk.py`, overlays,
-`0x3F7` until step 1 decides, from a telnet login, a non-member, a chip-only machine); a server that does not answer the
+from a telnet login, a non-member, a chip-only machine); a server that does not answer the
 sync (a test server that sleeps): refused and Zenix goes on, nothing lost, and its late reply harms nothing (7.2 step
 5); a reset warning (FS-UAE's keyboard sends one) during the way in: the hand-over is given up, the disks synced, the
 machine resets as without ZINE (7.2 step 4); a fast-RAM setup booted with a RAM disk in chip RAM: the RAM disk is not
@@ -962,6 +961,54 @@ the `.fd` files. The real machines' runs are the owner's hardware time, each pre
 9. **The owner's PiStorm A1200:** the tests and a demo of the owner's own; times and sizes into this note.
 10. **The Apollo 1260**, the same list (Zenix itself must run there first).
 11. A focused audit of ZINE (CLAUDE.md: a deep core change).
+
+### 16.1 Step 1 as built (2026-10-30)
+
+The host-side parts, plain C with no C library (`user/zine/zcore.h`), so the same files build into `/bin/zine`, the
+blob and the PC's tests. Nothing in step 1 touches the reset, a capture vector or anything resident (path B is not
+built). Test: `tools/host/zine-test.sh` (in `make check`'s host list as `zine-test`; *verified* 2026-10-30, 222 checks).
+
+- **The hunk check and loader** (`user/zine/hunk.c`, `hunk.h`): one walk for both, as section 6 says; `zh_check` gives
+  the hunks' memory by type and the refusal's message (`NAME uses overlays: not supported yet`, `NAME is not an AmigaOS
+  program (unknown hunk 0x3F9 at byte 1234)`, and one for each damage), `zh_load` allocates through the caller, copies,
+  clears, relocates and builds the segment list (it writes through a pointer and relocates with the address the
+  program sees, so the PC's test checks the exact bytes). Decided here:
+  - **`0x3F7` is `HUNK_RELOC32SHORT`** in a program (the Guru Book, ch. 22.2.6: the ROM's loader implements the short
+    form under 1015/`$3F7`, and `HUNK_DRELOC32`, the AmigaDOS Manual's meaning of the number, "can occur only in object
+    modules"); `0x3FC` is taken too. Both forms are tested.
+  - **The short form's padding** (the Guru Book: a word to the next longword, "must"): taken when the stream ends off a
+    longword and the padded reading is the one that gives a block type (or the file ends); files without it load the
+    same. Tested both ways, also at the end of the file.
+  - A missing `HUNK_END` before the next hunk or the end of the file ends the hunk; after the last hunk an overlay table
+    or another hunk is refused, other bytes are ignored. At most 1,024 hunks and 256 MB.
+  - **`pr_ReturnAddr`** (6): the AmigaDOS Manual's "just above the return address on the currently active stack" is
+    read as the initial stack pointer + 4 (the stack-size slot); it needs a running program, so `ztake`'s second run
+    tests it at step 3 (*read*, not yet verified).
+- **The volume** (`user/zine/zvol.c`, `zvol.h`): builder (`zv_init`, `zv_add`: UTF-8 to Latin-1, the names left out
+  with their reason, the protection bits and the DateStamp from the Unix mode and time) and reader (`zv_check`,
+  `zv_find` with `NAME:`, `SYS:`, `PROGDIR:`, `:`, `C:` ... `FONTS:`, `/` and `//`, Latin-1 case folding; `zv_next`);
+  `zv_fits` holds 5.6's limits. The block is internal to one build (native byte order), never frozen.
+- **The memory planner** (`user/zine/zplan.c`, `zplan.h`): from a walk of the pools (blocks with their headers, the
+  ranges, bootinfo's regions) the saved pieces, the program's chunks, the numbers and the ZINE block's size; a walk that
+  is not one consistent picture is refused. The test checks on a model of memory that, after the program wrote all it
+  was given, putting the pieces back restores every byte Zenix owns, and that nothing is given twice or given from the
+  kernel, the RAM disk, the klog area or `0`-`0xFFF`. The block's fixed parts (stack, ring, margin, CRC table) are
+  *proposed* constants until step 3 measures.
+- **The tables** (`user/zine/lvo.c`, `lvo.h`, `amigaofs.h`; `tools/zine-tables.py`): 539 function names and offsets of
+  exec, dos, graphics, intuition, the CIA and potgo resources (V37), made by the tool from the RKRM Includes and
+  Autodocs' Function Offset Reference, and 359 structure offsets checked against its Structure Reference. The text is
+  OCR'd: each offset is read in its three printed forms, which must agree and follow on from the one before; names are
+  spelt as all the manuals spell them most often, with a list of letter/digit slips the vote leaves; six graphics lines
+  the text layer lost and a few structure fields it garbled were read from the page images (each listed in the tool).
+  `ZENIX_MANUALS` (the manuals' text folder, in the owner's private notes) runs this check; without it the part says
+  SKIPPED. **Needs the NDK (owner question 4):** every V39/V40 function (exec above -780, `LoadRGB32`, `AllocBitMap`,
+  ... : `zine` names them by offset only), the V39 names of exec's pool calls (the V37 list has `CreatePrivatePool` and
+  `DeletePrivatePool` at -696/-702), ExecBase's and GfxBase's V39 fields, the AA bits and `MemType`, the 68060 bit.
+- **Sizes** for the 68020-60 (code + data, `-Os` / `-O2`): hunk 3,623 / 5,844, volume 2,134 / 2,422, planner 1,122 /
+  1,298, offset names 6,421 / 6,459 bytes; together 13.3 / 16.0 KB. No 64-bit multiply or divide, no outside call.
+- **Fuzzing** (`tools/host/zine-test.sh fuzz [SECONDS]`, not in `make check`): the hunk check against the loader
+  (whatever the check takes must load), a volume built from the input then damaged, plans from random walks; 300 s
+  found nothing (2026-10-30).
 
 ## 17. Questions for the owner (what ZINE should be)
 
