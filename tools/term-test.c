@@ -409,6 +409,34 @@ static void d28(void)
     rows = 0; for (int i = 0; i < 25; i++) rows += __builtin_popcount(t->hp->used[i]);
     EXPECT_TRUE(rows == 200 && t->hp->nch == HNCH, "... at most 200 rows (the worst case)");
     (void)hp0;
+    /* audit B3-17: with the scrollback full of such lines each new one takes over the leaving line's row: still 200
+     * rows, no two lines sharing one, and every line's own characters (U+2500 + i % 64, oldest to newest in order) */
+    for (int i = 0; i < 500; i++) { char b[8] = { (char)0xe2, (char)0x94, (char)(0x80 + i % 64), '\n', 0 }; out(b); }
+    {
+        int ok = t->hn == HLINES, prev = -1;
+        u8 seen[HLINES + 1] = { 0 };
+        rows = 0; for (int i = 0; i < 25; i++) rows += __builtin_popcount(t->hp->used[i]);
+        for (int k = 0; k < HLINES && ok; k++) {
+            int h = (t->hhead - t->hn + k + 2 * HLINES) % HLINES, r = t->hp->slot[h];
+            const u8 *hr = hrow(t->hp, h);
+            ok = r && !seen[r]++ && hr && hr[0] == 0x25 && t->hist[h][0] < 64 &&
+                 (prev < 0 || t->hist[h][0] == (prev + 1) % 64);
+            prev = t->hist[h][0];
+        }
+        EXPECT_TRUE(ok && rows == 200, "... a full scrollback hands each leaving row to the new line, each line its own");
+    }
+    /* one line in three (3 does not divide 200: the leaving lines' rows are given back and taken again by a search) */
+    for (int i = 0; i < 1000; i++) out(i % 3 ? "plain\n" : "\xe2\x94\x82\n");
+    {
+        int used = 0, ok = 1;
+        u8 seen[HLINES + 1] = { 0 };
+        for (int h = 0; h < HLINES; h++) {
+            int r = t->hp->slot[h];
+            if (r) { used++; ok &= !seen[r]++ && (t->hp->used[(r - 1) >> 3] >> ((r - 1) & 7) & 1); }
+        }
+        rows = 0; for (int i = 0; i < 25; i++) rows += __builtin_popcount(t->hp->used[i]);
+        EXPECT_TRUE(ok && used == rows && rows >= 60 && rows <= 74, "... rows given back are found again (a byte at a time), none shared");
+    }
     for (int i = 0; i < 40; i++) out("\n");
     for (int i = 0; i < 200; i++) out("\n");
     { int n = t->hp->nch; for (int i = 0; i < n; i++) { free(t->hp->ch[i]); t->hp->ch[i] = 0; } t->hp->nch = 0; memset(t->hp->used, 0, sizeof t->hp->used);
@@ -515,6 +543,16 @@ static void d28(void)
                     "CON_READ a3 0: 3-byte cells as before (the low byte; A_HI never shown)");
     }
     me.uid = 1000;
+    /* audit B3-18: put1's printable path and the cells it sends one step away */
+    reset(); out("\033[1;80Hq\x7f");
+    EXPECT_TRUE(gv(0, 79) == 'q' && gv(1, 0) == 0x7F && T()->cy == 1 && T()->cx == 1 && screen_is_grid(),
+                "ASCII at the last column defers the wrap; DEL is a cell");
+    reset(); term_conop(OP(CON_RULES, 1), CONR_8BIT, CONR_ALL); out("\033[1;80H\xe5\xe4x");
+    EXPECT_TRUE(gv(0, 79) == 0xE5 && gv(1, 0) == 0xE4 && gv(1, 1) == 'x' && screen_is_grid(),
+                "8-bit mode: a byte above 0x7F at the last column defers the wrap like ASCII");
+    term_conop(OP(CON_RULES, 1), 0, CONR_ALL);
+    reset(); out("\xe4\xb8\x80\033[1;2Hz");
+    EXPECT_TRUE(gv(0, 0) == ' ' && gv(0, 1) == 'z' && no_orphan() && screen_is_grid(), "ASCII over a right half: both halves go");
     /* a fuzz: random bytes split anywhere, font loads and drops, rules on and off */
     reset();
     srand(28);

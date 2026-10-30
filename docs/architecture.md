@@ -687,8 +687,8 @@ pattern (section 6).
   a busy machine that never idles does not fill its table with them.
 - A process's environment (at most 1 KB, `ENVMAX`) is a block of its own memory, copied from its parent's at spawn
   and replaced by `SYS_envset` (since 2026-10-26; it was a 1 KB array in each of the 32 slots, 32 KB of kernel BSS on
-  every machine). The handlers' `sa_mask` table (D16, 128 bytes) is taken from the kernel heap only by a program that
-  sets a mask.
+  every machine), which refuses a block whose last byte is not 0 (-EINVAL, audit B3-12). The handlers' `sa_mask`
+  table (D16, 128 bytes) is taken from the kernel heap only by a program that sets a mask.
 - Each process has 16 file descriptors; the system has 64 open-file slots (a slot's reference count is 16 bits)
   and 16 message ports.
 
@@ -1503,8 +1503,10 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   when the mode ends); setting or clearing it redraws the shown console. **`CON_READ`'s a3 1** gives 4-byte cells
   (the 16-bit value big-endian, the attributes, the colour); a3 0 the 3-byte cells as before (the low byte).
   **Cost** (instruction counts of `put1` and `gfx_cell` per character at 3 planes, from the compiled kernel run in an
-  instruction-set emulator on the PC; not a timing): ASCII 266 (261 before D28), a box line or a symbol in the font
-  about 528 (1.98 times). Memory: the font 10.4 KB once; a console with Unicode 2.5 KB for its plane, its scrollback
+  instruction-set emulator on the PC; not a timing): ASCII 249 (261 before D28, 266 after it, 249 since audit B3-18:
+  the printable path on its own, the rest one call away), `å` 348, a box line or a symbol in the font about 510 (528
+  before B3-18; the same path without a font 782 -> 764). A scroll that pushes a line with such cells into a full
+  scrollback hands it the leaving line's high row (B3-17: 2,200 -> 677 instructions for that part, no search). Memory: the font 10.4 KB once; a console with Unicode 2.5 KB for its plane, its scrollback
   80 bytes a line with such cells (200 bytes of slots); the kernel 157,640 -> 166,852 bytes. Tests: `tools/term-test.sh`
   (the decoder's cases, the cells, wide and zero-width characters, the scrollback pool, 8-bit mode both ways, each of
   `CON_UFONT`'s checks against the built font, `CON_READ`'s cells, a fuzz; and the widths against picolibc),

@@ -394,19 +394,25 @@ static void t_errors(void)
         check("setenv too big for the block refused (ENOMEM), the old value kept", setenv("LIBCTEST", big, 1) == -1 &&
               errno == ENOMEM && getenv("LIBCTEST") && !strcmp(getenv("LIBCTEST"), "yes"), "");
     }
-    /* audit B3-12: a block the kernel took without its last 0 still ends inside the child's copy */
+    /* audit B3-12: the kernel refuses a block without its last 0 (EINVAL) and keeps the old one; the C library's
+     * extra byte (user/zenv.c) stays for safety */
     {
         static char saved[1024], junk[1024];
-        int sl = sys_envget(saved, sizeof saved);
-        pid_t pid;
-        int st = -1;
-        char *av[] = { (char *)myname, "envlen", 0 };
+        int sl = sys_envget(saved, sizeof saved), r = 0, r1 = 0, sl2 = -1, sl3 = -1, same2 = 0, same4 = 0;
         memset(junk, 'A', sizeof junk);
-        if (sl > 0 && sys_envset(junk, sizeof junk) >= 0) {
-            if (posix_spawn(&pid, myname, 0, 0, av, 0) == 0) waitpid(pid, &st, 0);
+        if (sl > 0) {
+            r = sys_envset(junk, sizeof junk);
+            sl2 = sys_envget(junk, sizeof junk);
+            same2 = sl2 == sl && !memcmp(junk, saved, (size_t)sl);
+            r1 = sys_envset("Z=1", 4);  /* one 0 at its end is enough */
+            sl3 = sys_envget(junk, sizeof junk);
             sys_envset(saved, (u32)sl);
+            same4 = sys_envget(junk, sizeof junk) == sl && !memcmp(junk, saved, (size_t)sl);
         }
-        checki("an environment block without its last 0: the child's strings end inside it", WEXITSTATUS(st), 0);
+        checki("an environment block without its last 0 is refused (EINVAL)", r, -EINVAL);
+        checki("the refused block leaves the old one, byte for byte", same2, 1);
+        checki("a block ending in one 0 is taken", r1 == 0 && sl3 == 4, 1);
+        checki("the kernel's environment is back after the test", same4, 1);
     }
     unsetenv("LIBCTEST");
     check("unsetenv", getenv("LIBCTEST") == 0, "");
@@ -820,7 +826,9 @@ static int t_tty(void)
 }
 
 static int atexit_ran;
-static void at_end(void) { if (!atexit_ran++) dprintf(1, "atexit ran\n"); }
+/* stdout is flushed first: into a file it is fully buffered, and its last part would come after this line, splitting
+ * whichever line the buffer ended in */
+static void at_end(void) { if (!atexit_ran++) { fflush(stdout); dprintf(1, "atexit ran\n"); } }
 
 int main(int argc, char **argv)
 {
@@ -846,7 +854,6 @@ int main(int argc, char **argv)
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "tty")) return t_tty();
-    if (argc > 1 && !strcmp(argv[1], "envlen")) return environ && environ[0] && strlen(environ[0]) <= 1024 ? 0 : 7;
     if (argc > 1 && !strcmp(argv[1], "sigdfl")) {     /* run by system(): SIGINT and SIGQUIT not ignored here */
         struct sigaction i, q;
         return sigaction(SIGINT, 0, &i) == 0 && sigaction(SIGQUIT, 0, &q) == 0 && i.sa_handler == SIG_DFL &&
