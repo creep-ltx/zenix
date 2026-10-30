@@ -236,3 +236,15 @@ each fix's test as named in the table, all passing in this branch (`make check` 
   a note saying so. To settle with the owner: the licences of LHa for UNIX and unlzx, and whether these files are
   derived works of them; until then Zenix (GPL-2.0-only, its repository private) does not publish them: a public
   release leaves them out (Ahiru without archives) or carries them under their own terms.
+
+**Looked up (2026-10-30, *read* from licence databases and packagers, not from the original texts):**
+- **LHa for UNIX 1.14i:** its own "free restricted" licence: copying, changes and redistribution allowed on conditions
+  (notices kept, changes documented, the original contents shipped with it) plus extra requirements for commercial use;
+  Debian, Nixpkgs and ScanCode do not count it as free software. **Not GPL-compatible.** Code derived from its decoders
+  cannot ship in Zenix's GPL tree.
+- **unlzx.c 1.1** (Erik Meusel, from David Tritscher's unlzx 1.0): no licence stated; packagers list it as "unknown",
+  "freely available" at most. **Not safe** to ship derived code.
+- **xDMS 1.3:** public domain, as the file says. Fine.
+- **Recommendation:** before a public release, the LHA and LZX readers are written again from the formats' public
+  descriptions (a clean rewrite, as the AmigaOS clean-room rule), not from those programs; until then a public build
+  leaves them out. The DMS reader may stay.
