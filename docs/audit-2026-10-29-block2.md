@@ -236,3 +236,6 @@ each fix's test as named in the table, all passing in this branch (`make check` 
   a note saying so. To settle with the owner: the licences of LHa for UNIX and unlzx, and whether these files are
   derived works of them; until then Zenix (GPL-2.0-only, its repository private) does not publish them: a public
   release leaves them out (Ahiru without archives) or carries them under their own terms.
+- **B2-16 wasabi-test fails when the suite runs as a background job in a script** (`bash -c '... & wait'`; found
+  2026-10-30): "the freed command's client gets EXIT 130" (SIGINT ignored by such jobs). wasabi-host now resets SIGINT
+  and SIGQUIT for its commands, which was not enough; the foreground and the harness's own background runs pass. Open.
