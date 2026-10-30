@@ -692,3 +692,8 @@ boot path and frozen interfaces. Every finding is worked in; the main ones:
   add-and-rotate; the redirect for services and a missing `/bin/zine`; the impossible Kickstart 1.3 case dropped; the
   questions marked pending; the decisions.md and future-ideas.md updates listed for the main session. A Zenix-side
   `SumKickData` (dropping pass 1) is kept as an option for step 0 to confirm, not the design.
+
+## Owner decisions (2026-10-30)
+
+The owner agreed to all five questions of section 15 with their recommendations ("I agree on the five questions"). Recorded in docs/decisions.md.
+
