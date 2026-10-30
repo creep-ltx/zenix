@@ -283,6 +283,8 @@ int wsb_os_spawn(const char *const *argv, int in, int out, int err)
         if (chdir(root))
             _exit(127);
         signal(SIGPIPE, SIG_DFL);
+        signal(SIGINT, SIG_DFL);           /* a suite started in the background (nohup ... &) ignores SIGINT: */
+        signal(SIGQUIT, SIG_DFL);          /* the commands must not inherit that (FREE's EXIT 130 check) */
         execve(prog, (char *const *)argv, (char *const *)env);
         _exit(127);
     }
