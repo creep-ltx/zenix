@@ -624,7 +624,7 @@ $(BUILD)/lcp/%.o: libc/picolibc/%.S
 $(BUILD)/lczp/%.o: %.c $(LIBC_HDRS) user/zshare.h user/usys.h tools/purecc.sh
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(LIBC_CFLAGS) -Wall -Wextra -DZENIX_LIBC -Iuser $(call LIBC_OPT,$*.c) $(UDIAG) -c $< -o $@
-$(BUILD)/libc.a: $(LIBC_OBJS) tools/check-68020-60.sh
+$(BUILD)/libc.a: $(LIBC_OBJS) libc/picolibc/sources.mk tools/check-68020-60.sh
 	rm -f $@
 	$(TOOLPREFIX)ar rcs $@ $(LIBC_OBJS)
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
@@ -650,7 +650,7 @@ $(LIBCAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.celf tools/mkzexe.py tool
 $(BUILD)/lcs/%.zx: $(BUILD)/lcs/%.celf tools/mkzexe.py tools/check-68020-60.sh
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(STACK_DEFAULT)
-$(BUILD)/libc-pure.a: $(LIBC_POBJS) tools/check-68020-60.sh
+$(BUILD)/libc-pure.a: $(LIBC_POBJS) libc/picolibc/sources.mk tools/check-68020-60.sh
 	rm -f $@
 	$(TOOLPREFIX)ar rcs $@ $(LIBC_POBJS)
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $@
