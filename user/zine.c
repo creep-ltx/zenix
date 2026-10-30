@@ -12,7 +12,7 @@ typedef int s32;
 #include "zine/lvo.h"
 
 #define BLOB "/lib/zine/zine.blob"
-static const char *name;
+static const char *name, *blobpath = BLOB;
 
 static int zine_sys(u32 op, void *a, u32 b) { return sys3(93, op, (u32)a, b); }
 
@@ -63,9 +63,9 @@ static u32 load_blob(u32 *size)
 {
     struct ustat st;
     u32 len;
-    u8 *f = slurp(BLOB, &len, &st);
+    u8 *f = slurp(blobpath, &len, &st);
     if (!f)
-        die("zine: " BLOB ": %s (ZINE is not installed)", zwhy("cannot be read"));
+        die("zine: the blob %s (ZINE is not installed)", zwhy("cannot be read"));
     if (len < 48 || memcmp(f + 4, "ZEXE", 4) || be32(f + ZINB_OFF) != ZINB_MAGIC)
         die("zine: " BLOB " is damaged (%s)", "not ZINE's blob");
     u32 want = be32(f + ZINB_OFF + 8);
@@ -105,8 +105,13 @@ static const char *vecname(u32 v)
 
 int main(int argc, char **argv)
 {
+    if (argc > 3 && !strcmp(argv[1], "--blob")) {     /* the tests' other blobs (/tests/zine/null.blob) */
+        blobpath = argv[2];
+        argv += 2;
+        argc -= 2;
+    }
     if (argc < 2) {
-        dprintf(2, "usage: zine PROGRAM [ARGS...]\n");
+        dprintf(2, "usage: zine [--blob FILE] PROGRAM [ARGS...]\n");
         return 2;
     }
     const char *path = argv[1];

@@ -224,6 +224,7 @@ FAMILIES = [
     ("ssh", "the secure shell and its keys", "ssh ssh-keygen"),
     ("wget", "fetch files over HTTP and HTTPS", "wget"),
     ("sntp", "set the clock from the network", "sntp"),
+    ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
                     "socktestd socktest bench termtest priotest svctest sigtest nettest cryptotest boot diskd"),
 ]
@@ -236,6 +237,8 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 # the notices of code from other projects that only one family's programs carry (as tools/mkroot.sh puts them)
 # (the text-UI library's notice once a package: sumi's is "tui" since it shipped first, the others' "PROG-tui"; two
 # packages may not own one file, zpkg 4.3)
+# files beside a family's programs, from the build directory (DESIGN D29: ZINE's blob, the small AmigaOS zine loads)
+FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")]}
 FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
                    "maki": [("ports/maki/upstream/LICENSE", "maki"), ("ports/tui/upstream/LICENSE", "maki-tui")],
                    "markdown": [("ports/markdown/upstream/LICENSE", "markdown"),
@@ -325,6 +328,12 @@ def std_packages(build, uapps):
                 ents += [("d", 0o755, 0, 0, None, d) for d in ("/usr", "/usr/share", "/usr/share/licenses") if d not in have]
                 ents += [("f", 0o644, 0, 0, os.path.join(ROOT, f), "/usr/share/licenses/" + n)
                          for f, n in FAMILY_LICENSES[fam]]
+            for f, dst in FAMILY_FILES.get(fam, []):
+                have = {e[5] for e in ents}
+                parts = dst.split("/")[1:-1]
+                ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
+                         if d not in have]
+                ents += [("f", 0o644, 0, 0, os.path.join(build, f), dst)]
             make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)], desc=desc, takes=("utils", "man"))
             names.append(fam)
         # the remote control daemon (DESIGN D24, /sbin/wasabid): a package of its own, off until root writes

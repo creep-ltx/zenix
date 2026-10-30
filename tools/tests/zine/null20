@@ -1,0 +1,5 @@
+# ZINE step 2 (tools/zine-emu-test.sh): twenty pauses and resumes with the null blob, run at console 1
+rm -f /tmp/zn.count /tmp/zn.done
+n=0
+while [ $n -lt 20 ]; do zine --blob /tests/zine/null.blob /tests/zine/zexit; echo $? >> /tmp/zn.count; n=$((n+1)); done
+touch /tmp/zn.done

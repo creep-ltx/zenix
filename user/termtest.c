@@ -752,6 +752,15 @@ static int screen(const char *tty, const char *want, int secs, const char *type)
 int main(int argc, char **argv)
 {
     if ((argc == 5 || argc == 6) && !strcmp(argv[1], "screen")) return screen(argv[2], argv[3], atoi(argv[4]), argv[5]);
+    if (argc == 4 && !strcmp(argv[1], "type")) {          /* a line typed into console N's tty (CON_INPUT, root) */
+        char t[CONI_MAX];
+        u32 n = strlen(argv[3]);
+        if (n > sizeof t - 1)
+            return 1;
+        memcpy(t, argv[3], n);
+        t[n++] = '\r';
+        return sys_coninput(atoi(argv[2]), CONI_TEXT, t, n) != (int)n;
+    }
     if (argc > 1 && !strcmp(argv[1], "conops")) return conops();
     if (argc > 1 && !strcmp(argv[1], "rawkeys")) return rawkeys();
     if (argc > 1 && !strcmp(argv[1], "text")) return text();
