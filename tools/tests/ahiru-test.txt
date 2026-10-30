@@ -1,0 +1,20 @@
+wait zenix:/# 120
+send mkdir -p /tmp/a/sub; echo hello ahiru > /tmp/a/one.txt; echo second file > /tmp/a/two.txt; echo kept > /tmp/a/sub/keep.txt; chmod 640 /tmp/a/one.txt; ln -s one.txt /tmp/a/sub/link; free > /tmp/f0.txt; echo ==a""set\r
+wait ==aset 30
+send printf '%s\\n' "termtest screen /dev/tty1 'two.''txt' 60 'jyykl' > /tmp/scr0.txt; free > /tmp/f1.txt; ps > /tmp/ps1.txt" "termtest screen /dev/tty1 'sub/keep.''txt' 60 'pp' > /tmp/scr1.txt" > /tmp/k.sh; echo ==k""1\r
+wait ==k1 30
+send printf '%s\\n' "termtest screen /dev/tty1 'one.txt   one.''txt' 60 'hjjddkkl' > /tmp/scr2.txt" "termtest screen /dev/tty1 'cut 1 ''item' 60 'pp' > /tmp/scr3.txt" >> /tmp/k.sh; echo ==k""2\r
+wait ==k2 30
+send printf '%s\\n' "termtest screen /dev/tty1 'two.txt        ''          12' 60 'hjdD' > /tmp/scr4.txt" "termtest screen /dev/tty1 'dele''te' 60 'y' > /tmp/scr5.txt" >> /tmp/k.sh; echo ==k""3\r
+wait ==k3 30
+send printf '%s\\n' "termtest screen /dev/tty1 'free  ''1/1' 60 'ljjE' > /tmp/scr6.txt" "termtest screen /dev/tty1 'Sumi  one.''txt' 60 '\\x17' > /tmp/scr7.txt" "termtest screen /dev/tty1 'sub/one.''txt' 60 'q' > /tmp/scr8.txt" >> /tmp/k.sh; echo ==k""4\r
+wait ==k4 30
+send sh /tmp/k.sh & ahiru /tmp/a; echo st=$?\r
+waitecho st=0 180
+send mkdir /tmp/z; printf '\\064\\000\\055\\154\\150\\065\\055\\050\\000\\000\\000\\104\\000\\000\\000\\371\\360\\343\\152\\040\\002\\100\\301\\125\\005\\000\\000\\056\\311\\011\\000\\001\\151\\156\\056\\164\\170\\164\\005\\000\\120\\244\\201\\007\\000\\121\\350\\003\\350\\003\\000\\000\\000\\043\\102\\222\\220\\310\\061\\332\\001\\354\\206\\210\\075\\356\\256\\370\\222\\022\\232\\221\\003\\106\\067\\025\\043\\210\\206\\323\\250\\351\\230\\313\\075\\215\\105\\074\\056\\232\\137\\010\\000' > /tmp/z/a.lha; echo ==l""ha\r
+wait ==lha 30
+send (termtest screen /dev/tty1 'LhA ''archive' 60 'l' > /tmp/scr9.txt; termtest screen /dev/tty1 'a.lha/in.''txt' 60 'yyhpp' > /tmp/scr10.txt; termtest screen /dev/tty1 'free  ''1/2' 60 'q' > /tmp/scr11.txt) & ahiru /tmp/z; echo st2=$?\r
+waitecho st2=0 120
+send for i in 0 1 2 3 4 5 6 7 8 9 10 11; do echo ==scr$i; cat /tmp/scr$i.txt; done; echo ==file; ls -l /tmp/a /tmp/a/sub; cat /tmp/a/sub/one.txt /tmp/a/sub/two.txt /tmp/a/sub/keep.txt /tmp/z/in.txt; ls -l /tmp/z; readlink /tmp/a/sub/link; ls -ld $HOME/.config/Ahiru; ls -l $HOME/.config/Ahiru $HOME/.config/FileColours; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; cat /tmp/k.sh; echo ==a""done\r
+wait ==adone 60
+stop

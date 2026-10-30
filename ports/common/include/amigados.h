@@ -31,6 +31,7 @@
 #define ZENIX_TT_AMIGADOS_H
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 typedef unsigned long ULONG;
 typedef long LONG;
@@ -68,13 +69,18 @@ void CloseLibrary(struct Library *lib);
 ULONG SetSignal(ULONG on, ULONG mask);
 struct StackSwapStruct { APTR stk_Lower; ULONG stk_Upper; APTR stk_Pointer; };
 struct Task *FindTask(CONST_STRPTR name);
+struct ExecBase { struct Task *ThisTask; };
+extern struct ExecBase *SysBase;       /* ThisTask is FindTask(NULL)'s (dos.c) */
 void StackSwap(struct StackSwapStruct *s);
 struct Message { int unused; };
+struct Node { struct Node *ln_Succ, *ln_Pred; char *ln_Name; };
+struct List { struct Node *lh_Head, *lh_Tail, *lh_TailPred; };
 struct DosPacket;
 struct MsgPort {                        /* a reply port: one packet out at a time (dos.c) */
     UBYTE mp_Flags, mp_SigBit;
     struct DosPacket *pending;
     int fd;
+    struct List mp_MsgList;             /* (Ahiru's window code reads it: never reached, amigagui.h) */
 };
 #define PA_IGNORE 2
 struct Message *GetMsg(struct MsgPort *p);
@@ -100,6 +106,7 @@ LONG DoIO(struct IORequest *r);
 
 /* dos */
 struct DateStamp { LONG ds_Days, ds_Minute, ds_Tick; };
+#define AMIGA_EPOCH_DAYS 2922           /* a DateStamp's day 0, 1978-01-01, is day 2922 from 1970 */
 struct DateTime {
     struct DateStamp dat_Stamp;
     UBYTE dat_Format, dat_Flags;
@@ -196,6 +203,74 @@ LONG IoErr(void);
 LONG Fault(LONG code, CONST_STRPTR header, STRPTR buf, LONG len);
 LONG CompareDates(const struct DateStamp *a, const struct DateStamp *b);
 LONG SystemTags(CONST_STRPTR command, ...);
+
+/* ---- Ahiru, the owner's file manager, and the CFile core under it (ports/ahiru): what they call beyond the three
+ * terminal programs. The same rules as above; besides:
+ *  - more names (amigados.h's head and ports/common/README): "PROGDIR:NAME..." of the program's own names is
+ *    $HOME/.config/NAME/NAME... (its folder made, mode 700, when a file there is written); "SYS:" is "/"; "T:" and
+ *    "RAM:" are /tmp; "NIL:" is /dev/null;
+ *  - a lock holds an absolute path (made from the current directory when the name is relative); NameFromLock gives it
+ *    with every soft link on the way resolved; ParentDir the folder above ("/" has none); CurrentDir changes the
+ *    process's directory (chdir) and gives back the lock it had before (0: where the program started); Info gives the
+ *    filesystem's blocks (SYS_statfs of the mount the path is on);
+ *  - a DateStamp counts days from 1978 as AmigaOS's does (the core turns them into dates itself): Examine fills it
+ *    so, DateStamp gives now, SetFileDate sets a file's time (SYS_utimes, whole seconds);
+ *  - IoErr gives AmigaOS's numbers for what the core tests (not found, in use, disk full, protected, exists, not
+ *    empty, across devices), else the errno; Fault gives the text of either;
+ *  - AllocMem is malloc (MEMF_CLEAR calloc; FreeMem's size unused); AvailMem the free memory (SYS_meminfo: chip,
+ *    fast or both; MEMF_LARGEST half of it, the kernel tells no largest block); Forbid/Permit nothing (one process);
+ *  - Wait(signals) waits on the descriptors behind them: the text-UI library's terminal (TuiSignal's bit) and the
+ *    reply ports' (tui_zenix_sigfd); Ctrl-C never comes (in raw mode ^C is a key); Signal does nothing;
+ *  - SystemTags with SYS_Asynch runs the command in the background through the shell (its input and output the
+ *    handles given, else /dev/null) and does not wait; Execute runs a command through the shell, "" the user's shell
+ *    reading from the input given ($SHELL, else /bin/sh). */
+struct MinNode { struct MinNode *mln_Succ, *mln_Pred; };
+#define MEMF_CHIP    2
+#define MEMF_FAST    4
+#define MEMF_LARGEST 0x20000
+APTR AllocMem(ULONG n, ULONG flags);
+void FreeMem(APTR p, ULONG n);
+ULONG AvailMem(ULONG flags);
+static inline void Forbid(void) { }
+static inline void Permit(void) { }
+static inline void Signal(struct Task *t, ULONG sigs) { (void)t; (void)sigs; }
+ULONG Wait(ULONG signals);
+#define MODE_READWRITE 1004
+#define EXCLUSIVE_LOCK (-1)
+#define ACCESS_WRITE   EXCLUSIVE_LOCK
+#define ERROR_OBJECT_IN_USE        202
+#define ERROR_OBJECT_EXISTS        203
+#define ERROR_DIR_NOT_FOUND        204
+#define ERROR_OBJECT_WRONG_TYPE    212
+#define ERROR_RENAME_ACROSS_DEVICES 215
+#define ERROR_DIRECTORY_NOT_EMPTY  216
+#define ERROR_DISK_FULL            221
+#define ERROR_DELETE_PROTECTED     222
+#define ERROR_WRITE_PROTECTED      223
+#define ERROR_READ_PROTECTED       224
+#define FIBF_ARCHIVE (1 << 4)
+#define FIBF_PURE    (1 << 5)
+#define ST_ROOT      1
+#define SYS_Asynch   0x80000022
+#define NP_Name      0x800003F4
+void DateStamp(struct DateStamp *ds);
+LONG SetFileDate(CONST_STRPTR name, const struct DateStamp *ds);
+static inline void CurrentTime(ULONG *secs, ULONG *mics)
+{
+    struct timeval tv;
+    gettimeofday(&tv, 0);
+    *secs = (ULONG)tv.tv_sec;
+    *mics = (ULONG)tv.tv_usec;
+}
+LONG FPuts(BPTR fh, CONST_STRPTR s);
+LONG FPutC(BPTR fh, LONG c);
+static inline LONG Flush(BPTR fh) { (void)fh; return DOSTRUE; }   /* handles are not buffered */
+BPTR CurrentDir(BPTR lock);
+BPTR ParentDir(BPTR lock);
+BPTR DupLock(BPTR lock);
+LONG NameFromLock(BPTR lock, STRPTR buf, LONG len);
+LONG Info(BPTR lock, struct InfoData *id);
+LONG Execute(CONST_STRPTR cmd, BPTR in, BPTR out);
 
 /* intuition */
 BOOL DoubleClick(ULONG s1, ULONG m1, ULONG s2, ULONG m2);

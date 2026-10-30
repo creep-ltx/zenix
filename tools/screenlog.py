@@ -17,7 +17,8 @@ class Log:
         self.bad += not ok
 
     def part(self, name, nxt):
-        m = re.search(r"^==%s\n(.*?)^==%s\n" % (name, nxt), self.text, re.M | re.S)
+        m = re.search(r"^==%s\n(.*?)^==%s$" % (name, nxt), self.text, re.M | re.S)   # (the last marker may end
+        # the log with no new line: the run stops as soon as the tap has seen it)
         return m.group(1) if m else ""
 
     def status(self, name):

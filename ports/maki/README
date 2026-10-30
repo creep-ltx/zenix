@@ -10,7 +10,7 @@ replacement.
 
 upstream/  the owner's source, one source for AmigaOS and Zenix (D27 9, rule 1; owner 2026-10-28), pinned here and
            never changed: the owner's TextTools repository (public, MIT), commit
-           533439214cf4225feed4f0e748c3b3f20099e60b (2026-10-22), Maki 0.1b6: src/*.c and src/*.h, README.md as README
+           ff34b48dea52ab22f23384d5a5829e33e2caef5a (2026-10-30), Maki 0.1b7: src/*.c and src/*.h, README.md as README
            (the user's documentation, which docs/man/maki.txt follows) and LICENSE (MIT, the notice that travels with
            the program: tools/mkroot.sh and the package maki put it in /usr/share/licenses/maki, with the text-UI
            library's as maki-tui).
@@ -30,10 +30,10 @@ Maki's own (for the main session to confirm with the layer's choices):
   does without the library.
 
 Found in upstream (for the owner's repository, not changed here):
-- Memory: about 650 KB of data while one file is open on 80 x 32 (ps), more than half of the stock A1200's 1,132 KB
-  free: the cells of one line (MAXC 40000 cells of 8 bytes, 320 KB, allocated at the start), the line's bytes (MAXLB
-  32 KB + MAXC, 72 KB), the file cache (8 slots of 16 KB, 128 KB) and the text-UI library's two grids (80 KB, 16-byte
-  cells). Cells as long as the longest line read so far, or a smaller cache, would each matter on the stock A1200.
+- Memory: about 202 KB of data while one file is open on 80 x 32 (ps); 650 KB with Maki 0.1b6 and tui.library
+  0.5b1 (the cells of a 40,000-character line, its bytes and an eight-slot file cache made at the start, and 16-byte
+  cells). Since 0.1b7 the line's cells and bytes and the cache's slots grow when needed, and since tui.library 0.5b3
+  a cell is 6 bytes.
 - Stopping a search (stopped()) reads only the Ctrl-C signal (SetSignal); where ^C is a key (Zenix's raw mode, the
   text-UI library's keys) nothing stops a long search; a look for a key (TuiKeyWaiting) would do it on both.
 - The pipe's reader looks into AmigaOS's FileHandle (fh_Type, fh_Buf, fh_Pos, fh_End, fh_Arg1) and sends packets

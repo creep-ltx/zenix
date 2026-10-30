@@ -32,10 +32,11 @@ ev = re.search(r"^events: (.*)$", r, re.M)
 check(ev is not None and ev.group(1).split() == "a UP F1 C-RIGHT U+00E5 C-c ESC S-TAB q".split(),
       "the keys as events", ev and ev.group(1))
 check("tuitest: a command's output" in log, "a command's output while suspended")
-mem = re.search(r"^memory: (\d+) bytes while open, (\d+) after$", r, re.M)
-check(mem is not None and int(mem.group(2)) < int(mem.group(1)), "its memory: less after closing than while open",
-      mem and mem.group(0))
-if mem: print("     (memory: %s bytes while open, %s after)" % (mem.group(1), mem.group(2)))
+mem = re.search(r"^memory: (\d+) bytes while open, (\d+) after, (\d+) after a second open and close$", r, re.M)
+check(mem is not None and int(mem.group(3)) <= int(mem.group(2)),
+      "its memory: a second open and close takes nothing more (the first close freed it all)", mem and mem.group(0))
+if mem: print("     (memory: %s bytes while open, %s after closing and the test's own buffer, %s after a second "
+              "open and close)" % mem.groups())
 check("serial-tap: wait timed out" not in log and "the run ended during a wait" not in log,
       "every prompt came", re.findall(r"FAIL: serial-tap.*", log))
 sys.exit(1 if bad else 0)

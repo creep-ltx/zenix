@@ -227,3 +227,12 @@ each fix's test as named in the table, all passing in this branch (`make check` 
   instead of slept for; a "no WELCOME" now says how long after the connect it came. wasabi-test check: "a HELLO in
   pieces 6 s apart: WELCOME 12 s after the accept" (dropped by B2-1's rule, by reading) and the trickled HELLO now
   dropped at 30 s; remote-test c passes (67 checks).
+
+## Licences to settle (before any public release of Zenix; found 2026-10-30)
+
+- **Ahiru's archive readers** in ports/ahiru/upstream/core/: `lha.c`/`.h` (decoders that follow LHa for UNIX's
+  slide.c, huf.c, dhuf.c, larc.c), `lzx.c`/`.h` (a port of unlzx.c 1.1), `dms.c`/`.h` (a port of xDMS 1.3, public
+  domain), all through the owner's BBX Go readers. They carry no MIT notice in Zenix's copy (tools/ahiru-vendor.sh) and
+  a note saying so. To settle with the owner: the licences of LHa for UNIX and unlzx, and whether these files are
+  derived works of them; until then Zenix (GPL-2.0-only, its repository private) does not publish them: a public
+  release leaves them out (Ahiru without archives) or carries them under their own terms.

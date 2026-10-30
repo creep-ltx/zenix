@@ -279,7 +279,7 @@ int main(void)
     check("TuiWait with a time: TE_NONE when it is up", r == 0 && e.type == TE_NONE && dt >= 250 && dt < 2000, b);
     r = TuiPoll(t, &e);
     check("TuiPoll: nothing there", r == 0 && e.type == TE_NONE && !TuiKeyWaiting(t), "");
-    checki("TuiSignal: no AmigaOS signals", (long)TuiSignal(t), 0);
+    checki("TuiSignal: the terminal's bit (8), for the AmigaOS layer's Wait (ports/common)", (long)TuiSignal(t), 256);
 
     /* the terminal lent to a command and taken back */
     tui_suspend();
@@ -305,8 +305,14 @@ int main(void)
     }
     check("tui_wait after tui_close: TE_END", tui_wait(&e, -1, 0, NULL) == 1 && e.type == TE_END, "");
     unsigned m2 = mymem();
+    /* a second open and close takes nothing more: what the first close freed is used again (the grids are small
+     * enough since tui.library 0.5b3 to come from the allocator's chunks, which stay the program's) */
+    int again = tui_open() != 0;
+    if (again) tui_close();
+    unsigned m3 = mymem();
     printf("\ntuitest: the results\n%.*s", (int)rlen, res ? res : "");   /* a line of their own after the clear */
-    printf("memory: %u bytes while open, %u after\n", m1 - m0, m2 - m0);
+    printf("memory: %u bytes while open, %u after, %s%u after a second open and close\n", m1 - m0, m2 - m0,
+           again ? "" : "no second open, ", m3 - m0);
     printf("tuitest: %d checks, %d failed\n", nchk, nfail);
     return nfail ? 1 : 0;
 }
