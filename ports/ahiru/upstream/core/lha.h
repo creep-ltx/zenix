@@ -1,5 +1,6 @@
-/* Copyright (c) 2026 Tobias Karlsson. MIT License: ports/ahiru/upstream/LICENSE (this notice is Zenix's copy's) */
-/* SPDX-License-Identifier: MIT */
+/* Zenix's copy: derived from other authors' code (lha: LHa for UNIX; lzx: unlzx 1.1; dms: xDMS 1.3, public
+ * domain), through the owner's BBX Go readers. Its licence is NOT settled: not for a public release of Zenix
+ * until it is (docs/audit-2026-10-29-block2.md, "Licences to settle"). */
 /* lha - LhA / LZH archives: list the members and unpack one.
  *
  * Header levels 0 to 3; methods -lh0- (stored), -lh1- (LHarc's

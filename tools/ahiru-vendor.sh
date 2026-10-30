@@ -42,6 +42,11 @@ for f in $FILES; do
     [ "$f" = ahiru/README.md ] && o=$D/ahiru/README     # (no .md outside docs/: tools/docs-check.sh)
     mkdir -p "$(dirname "$o")"
     case "$f" in
+    core/lha.[ch]|core/lzx.[ch]|core/dms.[ch])   # derived from others' code: never the owner's MIT notice (below)
+        { echo "/* Zenix's copy: derived from other authors' code (lha: LHa for UNIX; lzx: unlzx 1.1; dms: xDMS 1.3, public"
+          echo " * domain), through the owner's BBX Go readers. Its licence is NOT settled: not for a public release of Zenix"
+          echo " * until it is (docs/audit-2026-10-29-block2.md, \"Licences to settle\"). */"
+          git -C "$S" show "$H:$f"; } > "$o" ;;
     *.c|*.h)
         if git -C "$S" show "$H:$f" | head -5 | grep -q -i -E 'SPDX|licen[cs]e|copyright'; then
             git -C "$S" show "$H:$f" > "$o"
