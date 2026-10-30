@@ -69,12 +69,16 @@ void CloseLibrary(struct Library *lib);
 ULONG SetSignal(ULONG on, ULONG mask);
 struct StackSwapStruct { APTR stk_Lower; ULONG stk_Upper; APTR stk_Pointer; };
 struct Task *FindTask(CONST_STRPTR name);
-struct ExecBase { struct Task *ThisTask; };
-extern struct ExecBase *SysBase;       /* ThisTask is FindTask(NULL)'s (dos.c) */
-void StackSwap(struct StackSwapStruct *s);
-struct Message { int unused; };
 struct Node { struct Node *ln_Succ, *ln_Pred; char *ln_Name; };
 struct List { struct Node *lh_Head, *lh_Tail, *lh_TailPred; };
+struct ExecBase {                       /* ThisTask is FindTask(NULL)'s (dos.c); the rest for ctop (below) */
+    struct Task *ThisTask;
+    UWORD AttnFlags;                    /* the CPU, as the kernel's log says it ("cpu: ... (attnflags N)") */
+    struct List TaskReady, TaskWait;    /* empty, but where ctop's layer lists the processes (ports/ctop) */
+};
+extern struct ExecBase *SysBase;
+void StackSwap(struct StackSwapStruct *s);
+struct Message { int unused; };
 struct DosPacket;
 struct MsgPort {                        /* a reply port: one packet out at a time (dos.c) */
     UBYTE mp_Flags, mp_SigBit;
@@ -84,7 +88,8 @@ struct MsgPort {                        /* a reply port: one packet out at a tim
 };
 #define PA_IGNORE 2
 struct Message *GetMsg(struct MsgPort *p);
-struct IORequest { UWORD io_Command; UBYTE io_Error; };
+struct Device { struct Library dd_Library; };
+struct IORequest { UWORD io_Command; UBYTE io_Error; struct Device *io_Device; };
 struct IOClipReq {
     UWORD io_Command;
     UBYTE io_Error;
@@ -271,6 +276,52 @@ BPTR DupLock(BPTR lock);
 LONG NameFromLock(BPTR lock, STRPTR buf, LONG len);
 LONG Info(BPTR lock, struct InfoData *id);
 LONG Execute(CONST_STRPTR cmd, BPTR in, BPTR out);
+
+/* ---- ctop (ports/ctop, the owner's btop-like monitor from CUtils), in dos.c unless said:
+ *  - AvailMem(MEMF_TOTAL) is the memory the kernel manages, as its log said at boot ("mem: N KB chip, M KB fast
+ *    free"; 0 when the log no longer holds that line); SysBase->AttnFlags the log's CPU line;
+ *  - timer.device opens; ReadEClock counts the 100 Hz tick since boot (its rate 100: the E-clock's own 32-bit
+ *    count wraps every 101 minutes);
+ *  - a Unix path with a colon after it ("/mnt/nas:", a volume's name as ctop forms it) is that path;
+ *  - LockDosList/NextDosEntry give the mount table as volumes named by their paths, SetTaskPri the nice value, and
+ *    OpenLibrary("bsdsocket.library") the network's counters: ctop's own layer (ports/ctop/zenix), through
+ *    zenix_openlib, which dos.c's OpenLibrary asks when the program's layer has set it. */
+#define MEMF_TOTAL   0x80000
+#define AFF_68010 (1 << 0)
+#define AFF_68020 (1 << 1)
+#define AFF_68030 (1 << 2)
+#define AFF_68040 (1 << 3)
+#define AFF_68881 (1 << 4)
+#define AFF_68882 (1 << 5)
+#define AFF_FPU40 (1 << 6)
+#define SIGBREAKF_CTRL_D (1UL << 13)
+#define SIGBREAKF_CTRL_E (1UL << 14)
+#define SIGBREAKF_CTRL_F (1UL << 15)
+#define TICKS_PER_SECOND 50
+#define TAG_USER  0x80000000UL
+struct TagItem { Tag ti_Tag; ULONG ti_Data; };
+struct timerequest { struct IORequest tr_node; struct { ULONG tv_secs, tv_micro; } tr_time; };
+struct EClockVal { ULONG ev_hi, ev_lo; };
+#define TIMERNAME   "timer.device"
+#define UNIT_ECLOCK 2
+ULONG ReadEClock(struct EClockVal *ev);
+extern struct Library *(*zenix_openlib)(CONST_STRPTR name, ULONG version);   /* 0, or a program's own */
+void SetTaskPri(struct Task *t, LONG pri);                  /* ports/ctop/zenix */
+static inline int stricmp(const char *a, const char *b) { return strcasecmp(a, b); }
+static inline int strnicmp(const char *a, const char *b, size_t n) { return strncasecmp(a, b, n); }
+static inline STRPTR FilePart(CONST_STRPTR p)
+{
+    const char *s = strrchr(p, '/'), *c = strrchr(p, ':');
+    if (c > s)
+        s = c;
+    return (STRPTR)(s ? s + 1 : p);
+}
+struct DosList { struct DosList *dol_Next; LONG dol_Type; struct MsgPort *dol_Task; BPTR dol_Name; };
+#define LDF_READ    1
+#define LDF_VOLUMES 4
+struct DosList *LockDosList(ULONG flags);                  /* ports/ctop/zenix */
+struct DosList *NextDosEntry(struct DosList *dl, ULONG flags);
+void UnLockDosList(ULONG flags);
 
 /* intuition */
 BOOL DoubleClick(ULONG s1, ULONG m1, ULONG s2, ULONG m2);

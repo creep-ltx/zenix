@@ -1032,3 +1032,32 @@ tests' floppy (`zenix-mount.adf`) was full: passwd, whoami, uname and touch, whi
 ran out at 8); it now asks until memory or regions run out (at most 4,096). bench gained two lines (small blocks and
 300-3,800-byte blocks).
 
+## ctop on Zenix (roadmap block 3, the owner's monitor; built 2026-10-30)
+
+Built as the other ports (D27 section 9; `ports/ctop/README` has the details and the choices): upstream's `ctop.c`
+(CUtils, 0.1b3) pinned unchanged in `ports/ctop/upstream` (`tools/ctop-vendor.sh`), compiled over `ports/common` and
+ctop's own Zenix files (`ports/ctop/zenix`: the part of CUtils' library ctop calls, `cu.h` and `cu.c`, and
+bsdsocket.library's base, `sockbase.S`), a program with shared code (ZEX2) in UAPPS as `/bin/ctop`, the package
+`ctop`.
+- **What it shows on Zenix:** the processor (the kernel's log's CPU line), memory in use (the size: the kernel's boot
+  log, the memory it had to give; free from `SYS_meminfo`), every mount's space (`SYS_mountinfo`, `statfs`), the
+  network's bytes in and out a second and their totals while netd runs (`SOCK_IFLIST`'s counters, the loopback left
+  out; ctop never starts netd), every process (`SYS_procinfo`: its name, its nice value as the priority, its state),
+  sorting, the filter, signals (C, D, E, F as SIGINT, SIGTERM, SIGUSR1, SIGUSR2) and the priority (`setpriority`).
+- **What it cannot show** (its page, NOTES): how busy the processor is and each process's CPU% and time (the kernel
+  keeps no CPU time a process: docs/future-ideas.md item 4, not approved), a process's stack and its free part, CLI
+  numbers, the Pi; the largest free block is the layer's guess.
+- **Changed in the shared layer** (`ports/common`, for the main session to confirm): AvailMem's `MEMF_TOTAL`,
+  `AttnFlags`, timer.device's `ReadEClock`, "/path:" as a path, BADDR of an address, `ENVARC:` writes making
+  `$HOME/.config`, and `zenix_openlib` (a program's own libraries) - `ports/common/README`; `tools/purecc.sh` hands
+  `-Wa,` options to the assembler.
+- **Found and fixed while porting:** upstream sets a6 to the library base in inline assembler; this GCC frames with
+  a6, so an inlined call wrote ctop's locals into its own shared code (the kernel: "shared code is DAMAGED"). ctop is
+  built with `-fno-inline` (the calls stay in small functions that save a6).
+- **Sizes and memory (FS-UAE, the stock A1200, 80 x 32):** `/bin/ctop` 62,412 bytes; with ctop open it owns 102
+  KB and shares 57 KB (`ps`).
+- **Found in upstream** (for the owner's repository; `ports/ctop/README`): the help says 0.1b1 while the version is
+  0.1b3; the a6 inline calls depend on AmigaOS's GCC framing with a5; "CPU% is sampled" is the only wording for an
+  unmeasured CPU; 256-task arrays fixed in BSS; AmigaOS words in its messages.
+- **Tests:** `tools/ctop-test.sh` (in `make check`): the boxes read back (`CON_READ`), keys put in (`CON_INPUT`), the
+  net box with netd running, the errors and the usage, the keys file, the memory.

@@ -1,0 +1,77 @@
+CTOP(1)			Zenix manual
+
+NAME
+    ctop - a monitor in the way of btop: memory, disks, network, processes
+
+SYNOPSIS
+    ctop [-d SECONDS]
+
+DESCRIPTION
+    ctop is the owner's monitor for the Amiga, in the way of btop; Zenix
+    carries a copy of its source (ports/ctop, from CUtils). It draws in
+    the terminal it is started from, in four boxes, each shown or hidden
+    with its key (1 to 4):
+    cpu    the clock, the refresh interval, the processor (68020 ...,
+           +FPU), how much chip and fast memory is in use, the number of
+           processes and how many are running or ready, the uptime
+    mem    chip and fast memory: the size, a meter and a graph of what
+           is in use, the largest free block; below it the disks: every
+           mount (/ and the others, by path) with a meter of its space
+    net    the network's bytes in and out a second, as a graph, and the
+           totals (the interfaces netd has, not the loopback); only
+           while netd runs (ctop never starts it)
+    proc   every process: its name, its priority (the nice value the
+           other way round: 10 is nice -10), its state (run for ctop
+           itself, rdy ready, wai waiting), sorted by the column shown at
+           the right of the box's top (Left and Right change it)
+    -d SECONDS  the interval between refreshes (default 1, as 0.5 or
+           2.5; + and - change it while it runs).
+
+KEYS
+    Every key is in $HOME/.config/ctop.keys (written at the first start
+    with the built-in ones; h lists what is bound). The usual ones:
+    q Esc Ctrl-C     quit
+    h ?              the keys
+    Up Down k j      select a process (PgUp PgDn, Home End too)
+    Return           the selected process's details
+    t K              send it SIGINT (ctop's "break", Ctrl-C)
+    s                send it C (SIGINT), D (SIGTERM), E (SIGUSR1) or
+                     F (SIGUSR2)
+    N n              change its priority (-128 to 127: nice is minus
+                     it, -20 to 19)
+    Left Right r     the sort column, the other way round
+    f /              show only names holding a text
+    e                every process, or only the Shells (none on Zenix)
+    c                the program's name or the task's (the same here)
+    1 2 3 4          show or hide a box
+    + -              refresh faster or slower
+    Space            pause; Ctrl-L draws everything again
+
+EXIT STATUS
+    0 when it quits; 10 for a bad argument (a delay that is not a number
+    of seconds, a word after the options); 20 when there is no terminal
+    to draw in.
+
+NOTES
+    What Zenix does not tell yet stays empty: how busy the processor is
+    (the cpu box's graph and meter, a CPU% for each process and TIME+:
+    Zenix keeps no CPU time a process; the help line then says "CPU% is
+    sampled", which on Zenix means not known), a process's stack and its
+    free part, CLI numbers (the Shells' list is empty), the Pi's
+    temperature and clock (not under Emu68 here).
+    The memory's size is what the kernel had to give at boot (its log's
+    "mem:" line, shown by dmesg); if the log no longer holds that line
+    the memory rows are not shown. The largest free block is not known
+    either: the box shows half of the free memory, the layer's guess.
+    The address in a process's details is ctop's own slot for it, not
+    an address in memory. Priorities: only root may raise one (a lower
+    nice value).
+    Some words stay AmigaOS's: "no bsdsocket.library: no network" when
+    netd is not running, "Shells", "the Pi", ENVARC:ctop.keys in the
+    help (on Zenix that file is $HOME/.config/ctop.keys).
+    Memory on the stock A1200 (80 x 32): about 102 KB of its own and
+    57 KB of code shared by every ctop running (measured in FS-UAE,
+    tools/ctop-test.sh).
+
+SEE ALSO
+    ps(1), free(1), df(1), netstat(1), nice(1), kill(1), dmesg(1)

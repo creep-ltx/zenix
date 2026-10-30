@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -791,6 +791,38 @@ $(BUILD)/ahiru.pzx: $(BUILD)/ahiru.cpuelf tools/mkzexe.py tools/check-68020-60.s
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_ahiru),$(STACK_DEFAULT))
 $(BUILD)/ahiru.zx: $(BUILD)/ahiru.pzx
+	cp $< $@
+
+# ---- ctop, the owner's btop-like monitor (roadmap block 3; ports/ctop/README): upstream's ctop.c pinned in
+# ports/ctop/upstream (tools/ctop-vendor.sh, unchanged), compiled over the AmigaOS layer of the owner's programs
+# (ports/common: dos.c with ctop's settings name) and ctop's own Zenix files (ports/ctop/zenix: the part of CUtils'
+# library it calls, cu.h and cu.c, and bsdsocket.library's base, sockbase.S), linked with the text-UI library and the
+# C library as a program with shared code (ZEX2). /bin/ctop (UAPPS). ----
+CTOP_OBJS := $(BUILD)/ctop/ctop.o $(BUILD)/ctop/cu.o $(BUILD)/ctop/sockbase.o $(BUILD)/ctop/zenix-dos.o
+CTOP_HDRS := $(TT_HDRS) ports/ctop/zenix/cu.h
+# upstream calls bsdsocket.library itself (inline asm: the base in a6, registers named without %): the assembler is
+# told so, and nothing is inlined, so that no function holding those calls keeps its frame in a6 (this GCC's frame
+# pointer; AmigaOS's GCC frames with a5): an inlined call wrote ctop's locals into its code (found 2026-10-30)
+CTOP_FIX := -Wa,--register-prefix-optional -fno-inline
+$(BUILD)/ctop/ctop.o: ports/ctop/upstream/src/ctop.c $(CTOP_HDRS) tools/purecc.sh Makefile
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(TT_CFLAGS) -Iports/ctop/zenix -Wno-sign-compare -Wno-unused-parameter $(CTOP_FIX) -c $< -o $@
+$(BUILD)/ctop/cu.o: ports/ctop/zenix/cu.c $(CTOP_HDRS) user/usys.h kernel/netproto.h tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(TT_CFLAGS) -Iports/ctop/zenix -c $< -o $@
+$(BUILD)/ctop/sockbase.o: ports/ctop/zenix/sockbase.S | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(CC) $(ASFLAGS) $< -o $@
+$(BUILD)/ctop/zenix-dos.o: ports/common/dos.c $(TT_HDRS) tools/purecc.sh Makefile
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(TT_CFLAGS) '-DZENIX_TT_NAMES="ctop"' -c $< -o $@
+$(BUILD)/ctop.cpuelf: $(CTOP_OBJS) $(BUILD)/crt0-pure.o $(BUILD)/libtui-pure.a $(BUILD)/libc-pure.a link/pure.ld
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(CTOP_OBJS) $(BUILD)/libtui-pure.a \
+	    $(BUILD)/libc-pure.a $(LIBGCC) -o $@
+$(BUILD)/ctop.pzx: $(BUILD)/ctop.cpuelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_ctop),$(STACK_DEFAULT))
+$(BUILD)/ctop.zx: $(BUILD)/ctop.pzx
 	cp $< $@
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
