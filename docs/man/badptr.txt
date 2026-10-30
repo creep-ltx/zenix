@@ -22,10 +22,10 @@ DESCRIPTION
     calls: memalloc of 0 or of sizes near 4 GB gives 0 (NULL), malloc of
     such sizes gives NULL, a freed small block is used again, 600 small blocks
     across several of malloc's growing chunks keep their contents and are
-    used again after free, the largest
-    small block (32 KB) can be had, realloc keeps the contents, malloc
-    says NULL when the process's memory regions run out and free gives
-    them back, and a free() of a pointer malloc did not give out is
+    used again after free, a 32 KB block can be had, realloc keeps the
+    contents, malloc of 64 KB blocks says NULL when the memory or the
+    process's regions run out and free gives them back, and a free() of a
+    pointer malloc did not give out is
     reported and survived. Prints one line per check, ending in "ok" or
     "FAILED", then "badptr: all ok".
 

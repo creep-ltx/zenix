@@ -248,3 +248,9 @@ each fix's test as named in the table, all passing in this branch (`make check` 
 - **Recommendation:** before a public release, the LHA and LZX readers are written again from the formats' public
   descriptions (a clean rewrite, as the AmigaOS clean-room rule), not from those programs; until then a public build
   leaves them out. The DMS reader may stay.
+
+## Found after the audit (2026-10-30)
+
+- **B2-16 wasabi-test fails when the suite runs as a background job in a script** (`bash -c '... & wait'`; found
+  2026-10-30): "the freed command's client gets EXIT 130" (SIGINT ignored by such jobs). wasabi-host now resets SIGINT
+  and SIGQUIT for its commands, which was not enough; the foreground and the harness's own background runs pass. Open.

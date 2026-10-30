@@ -519,7 +519,7 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
 - Every block records its owner. `mem_free_owner(pid)` hands back everything a process held, which is how a
   crashed or killed process is cleaned up without any cooperation from it.
 - Free-byte counters are O(1), so `free` and `SYS_meminfo` read them cheaply.
-- `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 8 at a time,
+- `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 16 at a time,
   each at most `MEMALLOC_MAX` = 64 MB). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
   refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
 - Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
@@ -1294,8 +1294,8 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   without waiting when the file has an `auto` line. SLIP (step 5) is lwIP's `slipif` on `/dev/ttyS0` opened with
   `O_NONBLOCK`: netd reads what came and writes what fits, keeping the rest of a frame in its own 4 KB queue. Its
   buffers come from regions of its own (first fit, joined on free; each a quarter of the profile's limit, at least 8
-  KB, taken when needed), not libz's malloc, whose power-of-two classes and 4/16/64 KB chunks held 84 KB for the 24 KB
-  heap. It ignores SIGPIPE. `SO_LINGER` (Linux's 13, `struct linger`, D23 step 3): `{1, 0}` makes the close an abort
+  KB, taken when needed), not libz's malloc: the old power-of-two malloc held 84 KB for the 24 KB heap, and the new one
+  (2026-10-30) still 4 KB more in `ps` than these regions (docs/d27-c-library.md "The allocator"). It ignores SIGPIPE. `SO_LINGER` (Linux's 13, `struct linger`, D23 step 3): `{1, 0}` makes the close an abort
   (a reset: no FIN_WAIT or TIME_WAIT, the port free at once); a longer linger is kept for `getsockopt` but not waited
   for (a close never blocks in netd). 72,392 bytes of code, 13 KB of data, an 8 KB stack (99 KB in `ps` on the stock A1200
   after the loopback tests, 115 KB with SLIP up); `tools/netd-test.sh` runs it over the loopback in FS-UAE,
@@ -1639,18 +1639,20 @@ top of DESIGN D16's system calls (section 6): `sigaction`, `signal` (BSD style, 
 `pkill`, `timeout` and the shell take). The handler table and the entry the kernel sends handlers to (`_zsigentry`:
 pc-relative only, a5-relative data, so it works in a program with shared code) are libz's; the entry keeps `zerrno`.
 
-**`malloc`** (audit B2) has to live with `NREG` = 8 regions per process, so small blocks never take a region each.
-Every block has an 8-byte header: its capacity and a tag (small in use, big in use, free). Blocks of up to 32 KB
-come in size classes of 16, 32, 64 ... 32768 bytes (the header on top, so the usual power-of-two buffer fills its
-class), cut from chunks the kernel gives: the first
-chunk is 4 KB (so a program that needs little holds little: `login` waiting for its shell, the servers), each next
-one four times the last up to 512 KB (4, 16, 64, 256, 512 KB; smaller when memory is short), so even a program that
-needs megabytes uses few regions. A freed small block goes on its class's free list and is used again (O(1), no
-coalescing); an empty class carves a free block of a larger class before taking new chunk space; small blocks are never given
-back to the kernel (that happens when the program ends). A bigger block gets a region of its own, and `free` gives
-exactly those back with `SYS_memfree`. `free` and `realloc` check the tag: a pointer `malloc` did not give out, or
-one freed twice, is reported on standard error and ignored. `realloc` grows in place when the block's capacity is
-enough, else copies only the old block's bytes. `xmalloc` ends the program with "NAME: out of memory".
+**`malloc`** (`user/zmalloc.c`, one allocator for libz and the C library; its policy and measurements:
+docs/d27-c-library.md "The allocator") lives with `NREG` = 16 regions per process, so most blocks share regions
+("chunks"). Every block has an 8-byte header (its capacity and a tag) and is 8-aligned; a request is rounded up to 8
+bytes, never to a power of two. The blocks of a chunk lie end to end: a free one sits in a bin of its size (powers of
+two), its capacity repeated in its last word and a flag in the next block's header, so `free` joins it with both
+neighbours at once, and a chunk wholly free again goes back to the kernel (the first one stays). Small blocks (at most
+256 bytes, 8-byte steps) and medium ones (up to 8 KB, by bin) go on quick lists when freed and are taken back from
+there in O(1); the quick lists go back into their chunks, joined, before the heap grows, when they hold more than 32 KB
+or when the heap has a free block of 64 KB. A new chunk is the request with its headers, else 4 KB times 1.41 for each
+region the allocator holds (from 10 regions on at least the heap so far, at most 4 MB; smaller when memory is short).
+A request of 8 KB or more gets a region of its own while the allocator holds fewer than 10, and `free` gives it back.
+`free` and `realloc` check the tag: a pointer `malloc` did not give out, or one freed twice, is reported on standard
+error and ignored; a damaged header found while joining stops the program (status 134, its address said). `realloc`
+grows in place when the block or the free block after it is big enough, else copies only the old block's bytes. `xmalloc` ends the program with "NAME: out of memory".
 
 **The shell's arena** (`user/sh.c`, fixed 2026-10-25: it was a fixed region of an eighth of free memory, 64-256 KB per
 shell, and a script was read and parsed whole). Tokens, the parsed tree and expansions come from a stack of chunks

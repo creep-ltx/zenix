@@ -1,6 +1,6 @@
 # Command reference
 
-Zenix has 137 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
+Zenix has 138 programs (the `UAPPS` list in the Makefile; servers and test programs included), each with a manual
 page in `docs/man/NAME.txt`; a few more pages are for names that start the same program (`gunzip`, `zcat`, `chgrp`,
 `more`, `pkill`, `ifup`, `ifdown`). The pages use the exact format that Zenix's own `man` reads (plain text of at most 78 columns, a
 `NAME(section)` header, `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `EXAMPLES`, `EXIT STATUS`, `SEE ALSO`); the
@@ -41,6 +41,7 @@ spot-checked against the code that day.
 | [echo](man/echo.txt), [printf](man/printf.txt), [seq](man/seq.txt), [yes](man/yes.txt), [expr](man/expr.txt) | generate and calculate |
 | [less](man/less.txt) / [more](man/more.txt), [edit](man/edit.txt), [sumi](man/sumi.txt), [maki](man/maki.txt), [markdown](man/markdown.txt) | pagers and editors (the owner's: sumi the editor with tabs and colours for code, maki the pager with colours, pipes and directories, markdown the Markdown viewer and editor; `ports/`) |
 | [ahiru](man/ahiru.txt) | the owner's file manager in three columns: previews, marks, copy, move, delete, archives and disk images as folders, tabs, find (`ports/ahiru`) |
+| [ctop](man/ctop.txt) | the owner's monitor in the way of btop: memory, disks, the network's rates and every process in four boxes (`ports/ctop`) |
 | [cu](man/cu.txt) | a terminal on another computer through the serial port (DESIGN D12) |
 | [man](man/man.txt) | these manuals |
 
@@ -92,7 +93,7 @@ spot-checked against the code that day.
 
 ## Run on AmigaOS, not on Zenix
 [zenixboot](man/zenixboot.txt) starts Zenix from files on a hard disk, CF or SD card partition, so that no floppy is
-needed (not one of the 137 programs: it is an AmigaOS program on the AmigaDOS boot partition).
+needed (not one of the 138 programs: it is an AmigaOS program on the AmigaDOS boot partition).
 [bootmenu](man/bootmenu.txt) is the boot menu of a disk with AmigaOS and Zenix on it (the SD card of
 `tools/mkdualcard.sh`): it boots a chosen AmigaOS partition or runs zenixboot.
 

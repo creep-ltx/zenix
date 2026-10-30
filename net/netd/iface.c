@@ -434,7 +434,7 @@ static void drv_free_mem(struct drvif *d)
 {
     int i;
     for (i = 0; i < NETD_IFMAX * 2; i++) if (drvifs[i] == d) drvifs[i] = NULL;
-    netd_os_free(d);                    /* the struct and the buffers: one region (a process has 8, netd's heap 5) */
+    netd_os_free(d);                    /* the struct and the buffers: one region (a process has 16, netd's heap at most 5) */
 }
 static void dbuf_free(struct pbuf *p)
 {

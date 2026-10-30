@@ -43,7 +43,8 @@ speed is judged from the code (*read*) until the stock A1200 times it. The owner
 ## 2. Today (read)
 
 - **libz** (`user/libz.c`, `user/libz.h`, about 1,080 lines, built `-O2`): string and ctype functions; `malloc` over
-  `SYS_memalloc` (size classes, made for `NREG` = 8 regions per process, tags checked by `free`; architecture.md
+  `SYS_memalloc` (size classes, made for `NREG` = 8 regions per process, tags checked by `free`; replaced 2026-10-30:
+  "The allocator"; architecture.md
   section 12); `printf` (straight to descriptor 1), `snprintf` and `fprintf(int fd, ...)` with one integer-only
   formatter; buffered output to descriptor 1 (`oputs`, `oprintf`, `oflush`; 4 KB of BSS) and a line reader
   (`rd_getline`); `qsort`, `strtol`; the environment (at most 63 variables, 1 KB); the Zenix helpers (`path_join`,
@@ -215,11 +216,10 @@ code does not change).
 
 ### 5.1 Memory: libz's allocator, shared
 
-`malloc` is libz's: size classes cut from chunks that grow 4 KB, 16, 64, 256, 512 KB, so a program uses few of its
-eight regions; big blocks get a region and go back on `free`; a pointer `malloc` did not give out is reported, never
-followed ("safety stays"). picolibc's own `malloc` needs `sbrk`, one growing heap, which a no-MMU Zenix cannot give.
-The source moves to one file both libraries build (section 6). It gains what the standard asks and libz lacks:
-`posix_memalign`/`aligned_alloc`, `malloc_usable_size`, `reallocarray`.
+`malloc` is libz's, one source for both (`user/zmalloc.c`; its policy since 2026-10-30, measured, is "The allocator"
+at the end of this note): a pointer `malloc` did not give out is reported, never followed ("safety stays").
+picolibc's own `malloc` needs `sbrk`, one growing heap, which a no-MMU Zenix cannot give. It gains what the standard
+asks and libz lacks: `posix_memalign`/`aligned_alloc`, `malloc_usable_size`, `reallocarray`.
 
 ### 5.2 The streams
 
@@ -441,6 +441,8 @@ measures it and the budgets are confirmed then):
 - **Per program, file size:** a raw program (`read`/`write` only) at most 600 bytes; hello without streams (`dprintf`,
   `oputs`) at most 2.8 KB; hello with `printf` at most 5.2 KB; a stdio + `malloc` + `qsort` tool at most 7.6 KB; the
   time functions at most 13 KB more; floating point at most 15 KB more; UTF-8 functions at most 5 KB more.
+- **As checked** (`tools/libc-size.sh`, the measured port with room): hello with `printf` at most 7.6 KB and the stdio +
+  `malloc` + `qsort` tool 11.4 KB since the allocator of 2026-10-30 ("The allocator": about 0.7 KB more of its code).
 - **Per process (memory):** the library's data + BSS at most 1 KB; stdio's buffers inside the first 4 KB `malloc`
   chunk (no region of their own, 5.2); `libctest` reports its regions and bytes (`SYS_procinfo`'s `mem`) and checks them.
 - **The switch** (section 6 step 3): the per-program, total and `kernel.bin` rules there.
@@ -919,7 +921,8 @@ programs), its package `ahiru` (its notice and the text-UI library's as `ahiru-t
   above: a block is rounded up to a power of two (Ahiru's 16,400-byte preview buffer takes a 32 KB block), and the
   chunks grow four times over (4, 16, 64, 256 KB), so a heap a little over 84 KB holds 340 KB (read from the code and
   the sizes, not measured block by block). Chunks after 64 KB growing by 64 or 128 KB (at most 8 regions a process,
-  D11) would let the ports' memory shrink without touching them; measured before it is changed.
+  D11) would let the ports' memory shrink without touching them; measured before it is changed. (Done 2026-10-30,
+  measured: "The allocator"; Ahiru now owns 178 KB.)
 - **Found in upstream** (the README lists them, for the owner's repository): AmigaDOS path shapes (`g/`, `dt`, the
   title's "//" at the root), names compared without case, a picture in an archive unpacked for a preview that cannot
   be shown, `O` and `launch` starting terminal programs without the terminal, keys typed during an operation dropped
@@ -930,3 +933,131 @@ programs), its package `ahiru` (its notice and the text-UI library's as `ahiru-t
   put in (`CON_INPUT`): a copy, a move, a delete at its question, E opening Sumi and back, an lha archive entered and
   its member (packed -lh5-) copied out; the files on the disk (the copy with its mode, the move, the delete, the link,
   the member with the archive's date); the settings and `FileColours`; the memory.
+
+## The allocator (built 2026-10-30: one policy for every program, measured)
+
+**What it was.** `user/zmalloc.c` rounded every block up to a power of two (16 bytes to 32 KB, the 8-byte header on
+top), cut them from chunks of 4, 16, 64, 256 and 512 KB, never gave a small block back to the kernel, and gave each
+block over 32 KB a region of its own; the kernel allows `NREG` = 8 regions a process. Ahiru's 16,400-byte buffer took
+32 KB, and a program a little over a chunk held the next one, four times bigger and mostly empty.
+
+**How it was measured.** A diagnostic build (`make UDIAG=-DZMALLOC_TRACE`: never shipped) makes the programs named in
+`user/zmalloc.c` append every call to `/var/mt/NAME.PID`; their FS-UAE tests ran with it (ahiru twice, sumi, maki,
+markdown, sh, netd over the loopback and with the A2065 and an NFS mount, nfscd, wasabid), and the files are
+`tools/testdata/mtrace`. `tools/zmalloc-host.c` replays them against the allocator built for a 32-bit PC with the
+kernel's regions imitated (16-byte headers and rounding, a region limit), counting what `ps` counts: the bytes held at
+the peak. Policies tried on the nine traces (the sum of their peaks; the old allocator 1,457 KB): chunks doubling,
+growing by 1.41, by half or all of the heap so far, by the regions held; own regions from 4, 8, 15, 16 or 32 KB, for
+6 to 14 regions. **With 8 regions none was both small and roomy:** the smallest without a failed call held about
+710 KB, but then only 250-430 KB of 100-byte blocks fit into the regions (the old one: 1,755 KB), because small
+chunks use the regions up; growing late chunks fast enough for megabytes gave back most of the gain. **With 16
+regions** the policy below holds 693 KB for the same traces and over 11 MB of 100-byte blocks (5 MB of 20 KB ones).
+So `NREG` is 16 (kernel/kernel.h): 2 KB more of the kernel's BSS (eight more region slots in each of 32 process
+slots); the kernel's region loops (a pointer check in a region, `SYS_memalloc`, `ps`) run over 16 slots.
+
+**The design.** One allocator for libz and the C library (its head comment in `user/zmalloc.c` is the reference):
+- An 8-byte header (capacity, tag) on every block, 8-aligned; a request is rounded up to 8 bytes (up to 256: to 16).
+- Chunks hold blocks end to end with an end mark. A free block is in a bin of its size (powers of two, a bit map),
+  its capacity repeated in its last word and a flag in the next header, so `free` joins both neighbours at once;
+  `malloc` takes the best of the first eight that fit in its bin, else the first of the next bin that holds one.
+- Quick lists, the hot path: a freed small block (at most 256 bytes) goes on the list of its size (16-byte steps;
+  `malloc` takes from it or from the list 16 bytes up), a medium one (up to 8 KB) on its bin's list (`malloc` takes
+  the head if it is big enough, else the next bin's). They go back into their chunks, joined, before the heap grows,
+  when the medium lists hold more than 32 KB, or when the heap has a free block of 64 KB or more (memory a program
+  gave back: quick blocks would pin its chunks).
+- A new chunk: the request with its headers, else 4 KB times 1.41 for each region the allocator holds (4, 6, 8, 12,
+  16 ... KB, plus 64 bytes so two 4 KB blocks fit 8 KB's), from 10 regions on at least the heap so far, at most 4 MB;
+  halved while memory is short. A chunk wholly free again (after its quick blocks went back) goes back to the kernel,
+  except the first one.
+- A request of 8 KB or more gets a region of its own while the allocator holds fewer than 10 regions (6 stay for the
+  heap and the program's own `SYS_memalloc`); `free` gives it back at once. Past that, big blocks go into the chunks,
+  so a program runs out of memory before it runs out of regions.
+- `realloc` grows in place when the block, or the free block after it, is big enough.
+- Safety stays: a pointer `malloc` did not give out, or one freed twice, is reported on standard error and ignored
+  (as before); a damaged header found on the way (a free block's tag, a neighbour's when joining: a program wrote
+  past its block) stops the program with status 134 and the header's address, since the lists cannot be trusted.
+- The state is one structure reached through one address register (shorter code, fewer relocations in every
+  program); the chunks' code is `-Os`, the quick lists' `-O2`.
+
+**Memory, before and after** (FS-UAE, the stock A1200 configuration, 80 x 32; `ps`'s own memory with the program
+open, from each test's printed figures; emulator figures, the same build otherwise):
+
+| program (KB) | before | after |
+|---|---|---|
+| ahiru (a folder open) | 392 | 178 |
+| markdown (a file open) | 242 | 135 |
+| maki (a 300-line file) | 202 | 115 |
+| sumi (a file open) | 116 | 73 |
+| ctop (new) | | 102 |
+| sh (the login shell: its own arena, malloc's first chunk) | 61 | 61 |
+| netd (its own heap, kept: below), the loopback | 116 | 116 |
+| netd, the A2065 and one NFS mount | 122 | 122 |
+| nfscd (the region heap, kept), one mount | 120 | 120 |
+| wasabid (the region heap, kept), one connection | 88 (D24) | 87 |
+
+Chip RAM free at the prompt with one login: 1,304 KB before, 1,300 after (the kernel's 2 KB for 16 regions, the
+programs' code).
+
+The traces' peaks on the PC (KB held at the peak, the old allocator / the new one): ahiru 393 / 179 and 329 / 196
+(an lha archive), markdown 169 / 61, maki 169 / 97, sumi 85 / 50, netd over the loopback 85 / 19 and with NFS
+21 / 11, nfscd 121 / 61, wasabid 41 / 19, sh 5 / 5.
+
+**Speed.** On the PC (`tools/zmalloc-test.sh`, the same code for 32-bit x86, -O2; it compares builds, nothing
+more): a small free and malloc of mixed sizes 5.6 ns (old 9.6), a 300-3,800-byte malloc and free 4.5 ns (old 4.4),
+the ahiru trace's calls 10.0 ns each (old 8.5), netd's 5.3 (old 5.4). In FS-UAE, `bench`'s two new lines run back to
+back on both builds (emulator figures, not hardware): small blocks 49 us a pair (old 54), 300-3,800 bytes 67 (old
+57). The emulated 68020 rewards few memory accesses and a hot path that fits its 256-byte instruction cache: a byte
+count and a list bit map on the small path cost 15-25%, a free that also handled medium blocks in line slowed the
+small path, so the small free is a push and one look at the bins' bit map, and the medium path sits in a function of
+its own. The stock A1200's own figures are still to be taken (`bench`, the two malloc lines).
+
+**Size.** The allocator's code is about 1.25 KB more in every program that frees and reallocates (`ls` 23,488 to
+24,756 bytes, `sh` 90,596 to 91,840; the per-process BSS 212 bytes, was 56); all the programs' files together 99 KB
+more (ctop's 62 KB aside). The C library's budgets grew with it (hello with `printf` 7.6 KB, section 10). The mount
+tests' floppy (`zenix-mount.adf`) was full: passwd, whoami, uname and touch, which no mount test runs, left it
+(28 KB free, 25 before). The RAM floppy (`zenix-ram.adf`) keeps 101 KB.
+
+**The daemons' own heaps stay** (measured; the trace replays give KB at the peak / at rest):
+- **netd's** (`net/netd/main.c`: first fit in regions a quarter of the profile's limit): folded into malloc it held
+  120 KB in `ps` over the loopback and 126 with NFS on the stock A1200 (116 and 122 with its own; FS-UAE, netd-test and
+  nfs-emu-test), though 120 against 152 with 4 MB of fast RAM (the large profile, whose 50 KB regions are mostly
+  empty). The replays: its heap 17 / 17 over the loopback, 9 / 9 with NFS, 25 / 25 in wasabid's test, malloc 19 / 11,
+  11 / 11, 31 / 19. The stock A1200 is the floor, so it stays; regions of a fixed 8 KB instead of a quarter of the
+  limit would give the large profile most of the 32 KB (for the main session).
+- **The region heap of wasabid and nfscd** (`rheap_*` in libz): wasabid 17 / 0 against malloc's 19 / 19 (its 4 KB
+  pieces sit on the medium quick lists while idle), nfscd 54 against 61 per mount: their buffers are fixed 4 KB pieces
+  its 16 KB regions hold exactly, and it gives everything back when idle.
+
+**Also found and changed:** `badptr` asked for sixteen 64 KB blocks and expected NULL before the sixteenth (regions
+ran out at 8); it now asks until memory or regions run out (at most 4,096). bench gained two lines (small blocks and
+300-3,800-byte blocks).
+
+## ctop on Zenix (roadmap block 3, the owner's monitor; built 2026-10-30)
+
+Built as the other ports (D27 section 9; `ports/ctop/README` has the details and the choices): upstream's `ctop.c`
+(CUtils, 0.1b3) pinned unchanged in `ports/ctop/upstream` (`tools/ctop-vendor.sh`), compiled over `ports/common` and
+ctop's own Zenix files (`ports/ctop/zenix`: the part of CUtils' library ctop calls, `cu.h` and `cu.c`, and
+bsdsocket.library's base, `sockbase.S`), a program with shared code (ZEX2) in UAPPS as `/bin/ctop`, the package
+`ctop`.
+- **What it shows on Zenix:** the processor (the kernel's log's CPU line), memory in use (the size: the kernel's boot
+  log, the memory it had to give; free from `SYS_meminfo`), every mount's space (`SYS_mountinfo`, `statfs`), the
+  network's bytes in and out a second and their totals while netd runs (`SOCK_IFLIST`'s counters, the loopback left
+  out; ctop never starts netd), every process (`SYS_procinfo`: its name, its nice value as the priority, its state),
+  sorting, the filter, signals (C, D, E, F as SIGINT, SIGTERM, SIGUSR1, SIGUSR2) and the priority (`setpriority`).
+- **What it cannot show** (its page, NOTES): how busy the processor is and each process's CPU% and time (the kernel
+  keeps no CPU time a process: docs/future-ideas.md item 4, not approved), a process's stack and its free part, CLI
+  numbers, the Pi; the largest free block is the layer's guess.
+- **Changed in the shared layer** (`ports/common`, for the main session to confirm): AvailMem's `MEMF_TOTAL`,
+  `AttnFlags`, timer.device's `ReadEClock`, "/path:" as a path, BADDR of an address, `ENVARC:` writes making
+  `$HOME/.config`, and `zenix_openlib` (a program's own libraries) - `ports/common/README`; `tools/purecc.sh` hands
+  `-Wa,` options to the assembler.
+- **Found and fixed while porting:** upstream sets a6 to the library base in inline assembler; this GCC frames with
+  a6, so an inlined call wrote ctop's locals into its own shared code (the kernel: "shared code is DAMAGED"). ctop is
+  built with `-fno-inline` (the calls stay in small functions that save a6).
+- **Sizes and memory (FS-UAE, the stock A1200, 80 x 32):** `/bin/ctop` 62,412 bytes; with ctop open it owns 102
+  KB and shares 57 KB (`ps`).
+- **Found in upstream** (for the owner's repository; `ports/ctop/README`): the help says 0.1b1 while the version is
+  0.1b3; the a6 inline calls depend on AmigaOS's GCC framing with a5; "CPU% is sampled" is the only wording for an
+  unmeasured CPU; 256-task arrays fixed in BSS; AmigaOS words in its messages.
+- **Tests:** `tools/ctop-test.sh` (in `make check`): the boxes read back (`CON_READ`), keys put in (`CON_INPUT`), the
+  net box with netd running, the errors and the usage, the keys file, the memory.

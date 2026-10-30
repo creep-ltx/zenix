@@ -71,9 +71,17 @@ Decided here (conservatively; for the main session to confirm):
 - The stack: upstream swaps to a 32 KB stack of its own when the Shell gave less; on Zenix the program's stack is the
   loader's (D27 9 rule 5) and FindTask answers a task with enough, so upstream never swaps (each program's README has
   its measurement).
+- For ctop (ports/ctop; amigados.h's last part): AvailMem(MEMF_TOTAL) is what the kernel's boot log says it had to
+  give ("mem: N KB chip, M KB fast free"; 0 when the log no longer holds the line), SysBase->AttnFlags the log's CPU
+  line; timer.device opens and ReadEClock counts the 100 Hz tick (rate 100: the E-clock's own count wraps every 101
+  minutes); a Unix path with a colon after it ("/mnt/nas:", a mount named as a volume) is that path; BADDR of a value
+  above the handles is that address (a BSTR's, a MKBADDR's); "ENVARC:NAME" written makes $HOME/.config first, as
+  AmigaOS's ENVARC: is always there; OpenLibrary asks zenix_openlib, a program's own layer's hook, for a library it
+  does not know (ctop's bsdsocket.library); SysBase has the TaskReady and TaskWait lists (empty, for ctop's layer);
+  the volumes (LockDosList) and SetTaskPri are ctop's layer's.
 
-Tests: each program's (tools/sumi-test.sh, tools/maki-test.sh, tools/markdown-test.sh, in make check); their logs are
-read by tools/screenlog.py.
+Tests: each program's (tools/sumi-test.sh, tools/maki-test.sh, tools/markdown-test.sh, tools/ahiru-test.sh,
+tools/ctop-test.sh, in make check); their logs are read by tools/screenlog.py.
 
 If upstream starts to use an AmigaOS call amigados.h does not have, the build says so (an undeclared function); the
 call is added here, once, for every program.

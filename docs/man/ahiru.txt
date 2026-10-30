@@ -96,8 +96,8 @@ NOTES
     /tmp; the others are not there); g/ and dt (the trashcan) need an
     AmigaOS path and do nothing; names compare without case. A path is
     at most 63 bytes (PATH_MAX).
-    Memory on the stock A1200 (80 x 32): about 392 KB of its own and
-    223 KB of code shared by every Ahiru running (measured in FS-UAE,
+    Memory on the stock A1200 (80 x 32): about 178 KB of its own and
+    225 KB of code shared by every Ahiru running (measured in FS-UAE,
     tools/ahiru-test.sh); a second Ahiru costs only its own part.
 
 SEE ALSO

@@ -77,15 +77,15 @@ Ahiru's own (for the main session to confirm with the layer's choices):
 
 Sizes (FS-UAE, the stock A1200, 2026-10-30): /bin/ahiru 242,876 bytes: 228,632 of code shared by every Ahiru (the
 CFile core's half of it: core/ about 58 KB, fs/ about 72 KB before linking, the archive and disk-image code
-included), 8,026 of data and 41,518 of BSS per process. Memory with /tmp/a open on 80 x 32 (ps): Ahiru owns 392 KB
-and shares 223 KB of code (chip RAM free 1,335 KB before, 618 KB with Ahiru, the test's shell and ps).
+included), 8,026 of data and 41,518 of BSS per process. Memory with /tmp/a open on 80 x 32 (ps): Ahiru owns 178 KB
+and shares 225 KB of code (chip RAM free 1,331 KB before, 826 KB with Ahiru, the test's shell and ps); 392 KB before
+the allocator of 2026-10-30 (docs/d27-c-library.md "The allocator").
 
 Found in upstream (for the owner's repository, not changed here):
-- Memory: 392 KB of data for one Ahiru, about a third of the stock A1200's 1,132 KB free; besides the code: its BSS
-  (41 KB: the preview card 7.5 KB, the key bindings 3 KB, ...), the 16 KB preview buffer (PBUFSZ + 16 bytes: a 32 KB
-  block in Zenix's allocator), the text-UI library's grids (31 KB). The rest is Zenix's allocator (user/zmalloc.c):
-  its chunks grow four times over (4, 16, 64, 256 KB), so a heap a little over 84 KB holds 340 KB (read, not measured
-  block by block; docs/d27-c-library.md, "Ahiru on Zenix", for the main session).
+- Memory: 178 KB of data for one Ahiru; besides the code: its BSS (41 KB: the preview card 7.5 KB, the key bindings
+  3 KB, ...), the 16 KB preview buffer (PBUFSZ + 16 bytes), two 64 KB buffers while it copies, the text-UI library's
+  grids (31 KB). (It was 392 KB with the power-of-two allocator: measured block by block since, docs/d27-c-library.md
+  "The allocator".)
 - Paths are AmigaDOS shapes in the core and Ahiru: "g/" (this volume's root) finds no ':' and stays; "dt" (the
   trashcan, <volume>:Trashcan) finds no ':' and does nothing, without a word; the title row puts a '/' between the
   folder and the name unless the folder ends in ':', so at the root it reads "//bin"; the default keys go to SYS:

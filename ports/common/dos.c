@@ -103,6 +103,16 @@ static int zpath(const char *name, char *out)
     if (!pre) {
         pre = "";
         rest = name[0] ? name : ".";    /* AmigaOS's "" is the current directory */
+        n = strlen(name);
+        if (name[0] == '/' && n > 1 && name[n - 1] == ':' && strchr(name, ':') == name + n - 1) {
+            if (n > ZPATH) {            /* "/mnt/nas:", a mount named as a volume (ctop): the path */
+                errno = ENAMETOOLONG;
+                return 0;
+            }
+            memcpy(out, name, n - 1);
+            out[n - 1] = 0;
+            return 1;
+        }
     }
     n = strlen(pre) + strlen(rest);
     if (n >= ZPATH) {
@@ -114,10 +124,16 @@ static int zpath(const char *name, char *out)
     return 1;
 }
 
-/* a file written into the program's settings folder ("PROGDIR:"): $HOME/.config and the folder made first */
+/* a file written into the program's settings ("ENVARC:NAME": $HOME/.config made first; "PROGDIR:": $HOME/.config and the
+ * program's folder) */
 static void mkconf(const char *name)
 {
     char p[ZPATH], *slash;
+    if (mapped(name, "ENVARC:", 0, 0) && confpath("", 0, p)) {
+        p[strlen(p) - 1] = 0;
+        mkdir(p, 0755);                 /* $HOME/.config, as AmigaOS's ENVARC: is always there (ctop.keys) */
+        return;
+    }
     if (!mapped(name, "PROGDIR:", 0, 0) || !confpath(envnames[0], 0, p))
         return;
     slash = strrchr(p, '/');
@@ -639,6 +655,8 @@ static struct MsgPort dosport;          /* what a real handle's fh_Type points t
 
 void *zenix_baddr(BPTR b)
 {
+    if (b > 0x1000)
+        return (void *)b;               /* an address (MKBADDR's, ctop's volume names): above any handle */
     if (b <= 0 || b > NFH)
         return &fhs[0];
     fhs[b].fh_Type = &dosport;
@@ -723,12 +741,15 @@ ULONG SetSignal(ULONG on, ULONG mask)
     return 0;                           /* no Ctrl-C signal: in raw mode ^C is a key (the text-UI library's) */
 }
 
+struct Library *(*zenix_openlib)(CONST_STRPTR name, ULONG version);
 struct Library *OpenLibrary(CONST_STRPTR name, ULONG version)
 {
     static struct Library tui = { TUI_VERSION, TUI_REVISION };
     (void)version;
     if (name && !strcmp(name, "tui.library"))
         return &tui;                    /* the text-UI library: linked into the program (ports/tui) */
+    if (zenix_openlib)
+        return zenix_openlib(name, version);    /* a program's own layer (ctop's bsdsocket.library) */
     return NULL;                        /* no AmigaOS libraries on Zenix */
 }
 
@@ -746,11 +767,53 @@ BOOL DoubleClick(ULONG s1, ULONG m1, ULONG s2, ULONG m2)
 /* exec: the task (its stack large enough that upstream's main() never swaps: the stack is the program's own), a
  * process for the fields upstream sets (pr_WindowPtr: no requesters on Zenix anyway) */
 static struct Process me = { { 0, (APTR)0x100000 }, 0, 0 };
-static struct ExecBase execbase = { &me.pr_Task };
+static struct ExecBase execbase = { &me.pr_Task, 0,
+    { (struct Node *)&execbase.TaskReady.lh_Tail, 0, (struct Node *)&execbase.TaskReady.lh_Head },
+    { (struct Node *)&execbase.TaskWait.lh_Tail, 0, (struct Node *)&execbase.TaskWait.lh_Head } };
 struct ExecBase *SysBase = &execbase;
+
+/* the first line of this boot's kernel log that starts with pre, into out (n bytes); 0 when the log no longer
+ * holds it (the CPU and the memory at boot: what the kernel tells nowhere else) */
+static int klogline(const char *pre, char *out, u32 n)
+{
+    char chunk[256], line[120];
+    u32 ln = 0, k = (u32)strlen(pre), off = (u32)sys_klog(0x40000000u, chunk, 1);   /* where the log held starts */
+    int got;
+    while ((got = sys_klog(off, chunk, sizeof chunk)) > 0) {
+        off += (u32)got;
+        for (int i = 0; i < got; i++) {
+            if (chunk[i] != '\n') {
+                if (ln + 1 < sizeof line) line[ln++] = chunk[i];
+                continue;
+            }
+            line[ln] = 0;
+            if (ln >= k && !strncmp(line, pre, k)) {
+                strncpy(out, line + k, n - 1);
+                out[n - 1] = 0;
+                return 1;
+            }
+            ln = 0;
+        }
+    }
+    return 0;
+}
+static u32 hexafter(const char *s, const char *key)
+{
+    const char *p = strstr(s, key);
+    return p ? (u32)strtoul(p + strlen(key), 0, 16) : 0;
+}
+/* the CPU's AttnFlags, once */
+static void attnflags(void)
+{
+    static int done;
+    char l[100];
+    if (!done++ && klogline("cpu: ", l, sizeof l))
+        execbase.AttnFlags = (UWORD)hexafter(l, "(attnflags ");
+}
 
 struct Task *FindTask(CONST_STRPTR name)
 {
+    attnflags();
     return name ? NULL : &me.pr_Task;   /* a task by name (Ahiru's archiver's): none on Zenix */
 }
 
@@ -762,10 +825,22 @@ void StackSwap(struct StackSwapStruct *s)
 /* the clipboard device: none on Zenix (upstream keeps the copied text itself, amigados.h) */
 struct IORequest *CreateIORequest(struct MsgPort *p, ULONG size) { (void)p; (void)size; return NULL; }
 void DeleteIORequest(struct IORequest *r) { (void)r; }
+static struct Device timerdev;
 LONG OpenDevice(CONST_STRPTR name, ULONG unit, struct IORequest *r, ULONG flags)
 {
-    (void)name; (void)unit; (void)r; (void)flags;
+    (void)unit; (void)flags;
+    if (name && r && !strcmp(name, TIMERNAME)) {        /* only ReadEClock (ctop's clock) */
+        r->io_Device = &timerdev;
+        attnflags();
+        return 0;
+    }
     return -1;
+}
+ULONG ReadEClock(struct EClockVal *ev)
+{
+    ev->ev_hi = 0;
+    ev->ev_lo = (ULONG)sys_ticks();     /* the 100 Hz tick since boot (wraps after 497 days) */
+    return 100;
 }
 void CloseDevice(struct IORequest *r) { (void)r; }
 LONG DoIO(struct IORequest *r) { (void)r; return -1; }
@@ -782,6 +857,19 @@ ULONG AvailMem(ULONG flags)
 {
     u32 m[4] = { 0, 0, 0, 0 };
     ULONG n;
+    if (flags & MEMF_TOTAL) {           /* what the kernel had to give at boot: its log's "mem:" line */
+        static long chip = -1, fast;
+        char l[80];
+        if (chip < 0) {
+            chip = fast = 0;
+            if (klogline("mem: ", l, sizeof l)) {
+                char *f = strstr(l, "KB chip, ");
+                chip = strtol(l, 0, 10) * 1024;
+                fast = f ? strtol(f + 9, 0, 10) * 1024 : 0;
+            }
+        }
+        return (ULONG)(flags & MEMF_CHIP ? chip : flags & MEMF_FAST ? fast : chip + fast);
+    }
     sys_meminfo(m);
     n = flags & MEMF_CHIP ? m[0] : flags & MEMF_FAST ? m[1] : m[0] + m[1];
     return flags & MEMF_LARGEST ? n / 2 : n;

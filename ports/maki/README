@@ -30,7 +30,8 @@ Maki's own (for the main session to confirm with the layer's choices):
   does without the library.
 
 Found in upstream (for the owner's repository, not changed here):
-- Memory: about 202 KB of data while one file is open on 80 x 32 (ps); 650 KB with Maki 0.1b6 and tui.library
+- Memory: about 115 KB of data while one file is open on 80 x 32 (ps; 202 KB before the allocator of 2026-10-30,
+  docs/d27-c-library.md "The allocator"); 650 KB with Maki 0.1b6 and tui.library
   0.5b1 (the cells of a 40,000-character line, its bytes and an eight-slot file cache made at the start, and 16-byte
   cells). Since 0.1b7 the line's cells and bytes and the cache's slots grow when needed, and since tui.library 0.5b3
   a cell is 6 bytes.

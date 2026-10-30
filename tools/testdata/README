@@ -6,3 +6,9 @@ bbs-sim/welcome.ans, bbs-sim/amiga.asc: a CP437 ANSI screen and a Latin-1 Amiga 
 (DESIGN D20 8.1), made for this repository (GPL-2.0-only as the rest); tools/bbs-sim.py sends them. Real art packs
 are copyrighted and never committed.
 
+
+mtrace/NAME.gz: the allocations of Zenix's programs as they ran in FS-UAE on the stock A1200 (2026-10-30), recorded by
+a ZMALLOC_TRACE build (user/zmalloc.c; each line "m size block", "f block", "r old size new", the region heap's "h"
+and "g", netd's heap's "n" and "o", recorded with a call added there for the run, in hex) during the tests of ahiru
+(two runs: a folder, an lha archive), maki, markdown, sumi, sh, netd (over the loopback and with the A2065 and an NFS
+mount), nfscd and wasabid; tools/zmalloc-test.sh replays them (made for this repository, GPL-2.0-only as the rest).

@@ -293,6 +293,12 @@ char **_zargv;
 #define RH_BOWN 2u
 static char *rh_rg[RH_NRG];                /* each starts with its first block's header */
 static u32 rh_bsz(const u32 *h) { return h[0] & ~3u; }
+#ifdef ZMALLOC_TRACE
+void zs_mtrace(char op, u32 a, u32 b, u32 c, int n);
+static void *rheap_alloc1(u32 n);
+void *rheap_alloc(u32 n) { void *p = rheap_alloc1(n); zs_mtrace('h', n, (u32)p, 0, 2); return p; }
+#define rheap_alloc rheap_alloc1
+#endif
 void *rheap_alloc(u32 n)
 {
     u32 need = ((n ? n : 1) + 4 + 7) & ~7u;
@@ -322,6 +328,12 @@ void *rheap_alloc(u32 n)
     return 0;
 }
 u32 rheap_size(const void *p) { return p ? rh_bsz((const u32 *)p - 1) : 0; }
+#ifdef ZMALLOC_TRACE
+#undef rheap_alloc
+static void rheap_free1(void *p);
+void rheap_free(void *p) { if (p) zs_mtrace('g', (u32)p, 0, 0, 1); rheap_free1(p); }
+#define rheap_free rheap_free1
+#endif
 void rheap_free(void *p)
 {
     u32 *h = (u32 *)p - 1;
@@ -344,6 +356,9 @@ void rheap_free(void *p)
     }
 }
 
+#ifdef ZMALLOC_TRACE
+#undef rheap_free
+#endif
 void *xmalloc(u32 n)
 {
     void *p = malloc(n);

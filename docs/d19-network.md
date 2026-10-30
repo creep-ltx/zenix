@@ -1010,7 +1010,9 @@ FS-UAE test through `zenix-slirp`. The owner's how-to: `docs/network-serial.md`.
    Every older program keeps its meaning (they never set `O_NONBLOCK`; only `POLLOUT` became truthful, as 5.3 says).
    `tools/serial-test.sh` checks both on the host model of Paula. SLIP runs at 115,200 only: another speed in the
    `driver slip` line is -EINVAL (Zenix's port has one speed, D12).
-6. **netd's heap on Zenix** (found measuring step 5): with SLIP up netd held 176 KB on the stock A1200, because
+6. **netd's heap on Zenix** (found measuring step 5; kept when the allocator was redone for every program on
+   2026-10-30, measured: docs/d27-c-library.md "The allocator"): with SLIP up netd held 176 KB on the stock A1200,
+   because
    libz's `malloc` rounds each block up to a power of two and grows in chunks of 4, 16 and 64 KB (84 KB for a 24 KB
    heap). netd now takes its buffers from regions of its own (first fit, neighbours joined on free; each a quarter of
    the profile's limit, at least 8 KB, taken when needed, at most 5), and reads its configuration files into regions
@@ -1189,7 +1191,7 @@ the PC's 127.0.0.1. No tap, no uaenet, no `slirp_*` option needed. Local choices
    is not set for a DHCP reply that arrives before the interface has an address (the hook's `netif` was NULL); netd
    now finds the interface by its DHCP client (`netif_dhcp_data`). netd logs the lease ("netd: eth0: DHCP gave
    10.0.2.15") and its loss. And step 7's driver interfaces moved out of netd's BSS (12 KB every machine paid, also
-   on SLIP) into one region a driver, taken at its attach (a process has 8 regions; netd's heap takes up to 5).
+   on SLIP) into one region a driver, taken at its attach (a process had 8 regions and netd's heap takes up to 5; 16 since 2026-10-30: D27 "The allocator").
 
 Sizes (*measured* 2026-10-27): `a2065` 8,752 bytes (7,776 of code); netd 83,628 bytes of code, 14.8 KB of BSS (step 5:
 72,392 and 13 KB; DHCP, ARP and Ethernet are now reached, and the driver interfaces); the kernel unchanged by this step.

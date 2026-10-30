@@ -9,7 +9,9 @@ SYNOPSIS
 DESCRIPTION
     Times a set of operations with the CIA E-clock (709,379 Hz on PAL, far
     finer than the 100 Hz tick) and prints microseconds per operation:
-    a null system call, stat through the filesystem server, a message round
+    a null system call, a malloc and free of small blocks (12 to 200
+    bytes, in turn) and of blocks of 300 to 3,800 bytes, stat through the
+    filesystem server, a message round
     trip, cached and uncached file reads, creating and deleting 50 small
     files, listing /bin, and printing 300 lines to the terminal (/dev/tty)
     twice: with the serial copy of the console off (only root may switch it

@@ -1,0 +1,12 @@
+wait zenix:/# 120
+send free > /tmp/f0.txt; echo ==c""set\r
+wait ==cset 30
+send (termtest screen /dev/tty1 'Tas''ks ' 60 'h' > /tmp/c0.txt; free > /tmp/f1.txt; ps > /tmp/ps1.txt; termtest screen /dev/tty1 'Any key goes ''back' 60 ' ' > /tmp/c1.txt; termtest screen /dev/tty1 'Tas''ks ' 60 'e' > /tmp/c2.txt; termtest screen /dev/tty1 '0/''0' 60 'q' > /tmp/c3.txt) & ctop; echo st=$?\r
+waitecho st=0 120
+send netstat > /dev/null; (termtest screen /dev/tty1 'To''tal ' 60 'q' > /tmp/c4.txt) & ctop -d 0.5; echo st2=$?\r
+waitecho st2=0 120
+send ctop -d x; echo st3=$?; ctop extra; echo st4=$?; ctop '?'; echo st5=$?\r
+waitecho st5=0 30
+send for i in 0 1 2 3 4; do echo ==c$i; cat /tmp/c$i.txt; done; echo ==file; ls -l $HOME/.config/ctop.keys; head -2 $HOME/.config/ctop.keys; cat /tmp/f0.txt /tmp/f1.txt /tmp/ps1.txt; echo ==c""done\r
+wait ==cdone 60
+stop

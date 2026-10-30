@@ -1,0 +1,75 @@
+ctop, the owner's btop-like monitor on Zenix (roadmap block 3: "the owner's Ahiru file manager and ctop ported";
+DESIGN D27 section 9; docs/d27-c-library.md, "ctop on Zenix"; the user's page is docs/man/ctop.txt)
+
+What it is: a monitor in the way of btop that draws in the terminal: the processor, memory and disks, the network
+and every task, in four boxes with graphs, written for AmigaOS over tui.library and CUtils' own library. On Zenix it
+is /bin/ctop, a program with shared code (ZEX2: a second ctop costs only its data), linked with the text-UI library's
+pure build (build/libtui-pure.a, ports/tui) and the C library's (build/libc-pure.a).
+
+upstream/  the owner's source, one source for AmigaOS and Zenix (D27 9, rule 1; owner 2026-10-28), pinned here and
+           never changed: the owner's CUtils repository (public, MIT), commit
+           cc0bc6802b86393d88143a8989312fd3bca41fee (2026-10-24), ctop 0.1b3: src/ctop.c, docs/ctop.md as README (the
+           user's documentation, which docs/man/ctop.txt follows) and LICENSE (MIT, the notice that travels with the
+           program: tools/mkroot.sh and the package ctop put it in /usr/share/licenses/ctop, with the text-UI
+           library's as ctop-tui). tools/ctop-vendor.sh copies them.
+zenix/     Zenix's own files (GPL-2.0-only):
+           cu.h       the part of CUtils' library (lib/cu.h) ctop calls, with the same names and types: the command
+                      line, the messages, the task list (CuTask; CU_MAXTASKS 32, the kernel's NPROC, where upstream
+                      has 256: ctop's task arrays are 52 KB smaller), the CPU (CuShare), the Pi (CuPi)
+           cu.c       those calls over Zenix's: the command line from the C library's argv (Unix flags as cu_opt
+                      gives them), messages on standard error; cu_tasks from SYS_procinfo (each process a node of
+                      its own, its priority the nice value the other way round, ctop itself running, a process ready
+                      as ready, every other waiting, the idle loop as [idle]), listed in SysBase->TaskWait so that
+                      ctop's own look before SetTaskPri finds it; SetTaskPri is setpriority (nice = -priority,
+                      -20 .. 19); cu_signal sends C SIGINT, D SIGTERM, E SIGUSR1, F SIGUSR2; the CPU's calls say
+                      "not known" (cu_cpumeasure -1: no graph, no figures, TIME+ "-"); no Pi, no Emu68; the volumes
+                      (LockDosList, NextDosEntry) are the mount table, each named by its path; bsdsocket.library's
+                      four calls ctop makes (below)
+           sockbase.S bsdsocket.library's base: ctop calls the library itself, its base in a6 and the call's
+                      offset below it (SocketBaseTagList -294, ReleaseInterfaceList -456, ObtainInterfaceList -462,
+                      QueryInterfaceTagList -468, arguments in a0 and a1). The table is in the code (never written
+                      at run time), each entry branching to a stub that hands the registers to cu.c's C function;
+                      every other offset answers -1. OpenLibrary("bsdsocket.library") gives it only while netd runs
+                      (a socket would start netd: ctop must not), through ports/common's zenix_openlib hook, set at
+                      cu_args. The counters are the interfaces' rx_bytes and tx_bytes (SOCK_IFLIST), the loopback's
+                      left out; an interface's address its addr.
+
+The AmigaOS layer (ports/common) gained what ctop is the first to need (amigados.h's last part, ports/common/README):
+AvailMem(MEMF_TOTAL) from the kernel's boot log ("mem: N KB chip, M KB fast free"), SysBase->AttnFlags from its CPU
+line, timer.device and ReadEClock (the 100 Hz tick, rate 100), a Unix path with a colon after it as that path ("/:" is
+/: ctop names a volume so), BADDR of an address (not a handle) as that address, ENVARC:NAME making $HOME/.config
+first, the exec and utility names (struct TagItem, struct DosList, AFF_*, SIGBREAKF_CTRL_D-F, stricmp, FilePart ...).
+
+Decided here (conservatively; for the main session to confirm):
+- What Zenix cannot tell stays "not known" in ctop's own way, nothing invented: how busy the processor is and each
+  process's CPU% and time (no CPU time per process in the kernel: docs/future-ideas.md item 4), a process's stack and
+  its free part ("?"), CLI numbers (none: the Shells' list is empty), the Pi.
+- The memory's size is the kernel's boot log figure (the memory it had to give out at boot); no kernel interface was
+  added for it. If the log has wrapped past that line, ctop shows no memory rows (its own way for a size of 0).
+- The largest free block is the layer's guess (half of what is free), as Ahiru has it; the kernel tells no largest
+  block.
+- The build: -Wa,--register-prefix-optional (upstream's inline assembler names registers without %) and -fno-inline:
+  this GCC keeps a function's frame in a6 when it needs a frame pointer, and an inlined library call (a6 set to the
+  base) then wrote ctop's locals into its own code (found 2026-10-30: "shared code is DAMAGED"); not inlined, the
+  calls sit in small functions that save and restore a6.
+- The stack: STACK_DEFAULT (16 KB; upstream swaps to its own 16 KB stack when the task's is smaller, which on Zenix it
+  never is).
+
+Found in upstream (for the owner's repository, not changed here):
+- The help screen says "ctop 0.1b1" and docs/ctop.md's state 0.1b1, while the version string is 0.1b3.
+- The inline calls into bsdsocket.library (register variables in a6 inside functions the compiler may inline) work
+  with AmigaOS's GCC (frame pointer a5) but break with a compiler that frames with a6 (see above): a call through a
+  small non-inlined function, or a library stub, would hold on any compiler.
+- With no CPU measurement the help line says "CPU% is sampled (another top has the hooks)": a third case ("not
+  measured") would read better on systems without exec's task hooks.
+- The arrays sized for 256 tasks (the tasks, the rows, the shares: 60 KB of BSS with lib/cu.h's CU_MAXTASKS, and two
+  512-slot CPU histories of 7 KB each) are fixed; growing them as tasks appear would suit a small machine.
+- AmigaOS words in messages and help ("no bsdsocket.library", "Shells", ENVARC:ctop.keys), as the other programs.
+
+Tests: tools/ctop-test.sh (FS-UAE, the stock A1200; in make check): the four boxes read back with termtest screen
+(CON_READ), keys put in (CON_INPUT): h, Space, e, q; with netd running the net box's rates and totals; a bad delay, an
+extra word, ?; the keys file; the memory printed.
+
+To update: tools/ctop-vendor.sh /path/to/CUtils [COMMIT] (the files above from that commit, unchanged), put the commit
+here, build, run tools/ctop-test.sh, and bring docs/man/ctop.txt in step with the README's changes; if upstream starts
+to call a cu_ function or an AmigaOS call Zenix's layer does not have, the build says so (an undeclared function).
