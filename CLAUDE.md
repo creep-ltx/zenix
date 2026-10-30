@@ -161,5 +161,5 @@ GPL-2-compatible and keeps its own licence header (miniz MIT, regex.c MIT from C
 **Clean room (AmigaOS sources).** Never open or cite the leaked AmigaOS source. Allowed sources of AmigaOS knowledge:
 the public manuals and autodocs (knowledge base `manuals/`), the clean hand-offs in the owner's research folder
 (hardware quirks, ROM boot sequence, 2026-10-23) and the knowledge base's `amiga/aos31-study/` notes (owner,
-2026-10-24): ideas, facts and numbers in someone else's words, never code or routine-shaped pseudo-code. Cite them as
+2026-10-24): ideas, facts and numbers in someone else's words, never code or routine-shaped pseudo-code. Also the free NDK 3.2's interface files (includes, `.fd` files) for names and numbers only, never code (owner 2026-10-30, for ZINE). Cite them as
 "AmigaOS 3.1 study, aos31-study/<note>".
