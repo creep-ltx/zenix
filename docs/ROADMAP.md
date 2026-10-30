@@ -95,7 +95,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5. The model (owner 2026-10-26): KolibriOS, a
    desktop, network and programs on one 1.44 MB floppy; as there, the programs are packed on the disk and unpacked
    when they start, which is what makes a desktop edition fit 880 KB.
-3. **A terminal you can live in:** a fuller C library (picolibc, newlib's descendant: D27; steps 0-4 built 2026-10-29); D13 stage 2 (shared libraries) decided; the text-UI
+3. **A terminal you can live in** (done in FS-UAE 2026-10-30, closing audit docs/audit-2026-10-30-block3.md; the public pre-release waits for the owner and the LHA/LZX rewrite): a fuller C library (picolibc, newlib's descendant: D27; steps 0-4 built 2026-10-29); D13 stage 2 (shared libraries) decided; the text-UI
    library (ported 2026-10-29: ports/tui), then Sumi, Maki and Markdown (ported 2026-10-29: ports/sumi, ports/maki, ports/markdown) and `zc`; UTF-8 in the console (D28 steps 1-6 built 2026-10-29, branch utf8); PC (CP437) and other bitmap fonts for the console
    (the PC set comes earlier, with telnet); (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported (ported 2026-10-30: ports/ahiru, ports/ctop). (Postponed by the owner 2026-10-29, "can wait":
    the tracker music player, the IRC client and the e-mail client; later, unscheduled.) Audit; then a first public pre-release (0.1),

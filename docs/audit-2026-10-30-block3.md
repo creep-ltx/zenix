@@ -101,3 +101,12 @@ text-UI library (static, D27 section 8).
 Established 2026-10-30: the reviewers' reading and their host-side tests (named above); the fixes' tests
 `tools/dos-host-test.sh` (new), `tools/zmalloc-test.sh`, `tools/libc-host-test.sh`, `/tests/libctest`, and the full
 suite (`make check`).
+
+## Main session's decisions on section 3 (2026-10-30)
+
+- **2 (the console's speed) and 6 (the kernel refusing a broken environment):** technical, yes: built next, the
+  console change timed on the stock A1200 with the owner's hardware time.
+- **1, 3 and 4 (changes in the owner's Ahiru, tui.library and programs):** asked of the owner.
+- **5 (moving folders on ext2):** later, a feature for the owner to approve when wanted.
+- **7:** as recorded (the clean rewrite before any public release).
+
