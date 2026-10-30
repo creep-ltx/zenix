@@ -359,8 +359,13 @@ void syscall_c(u32 *rb)
         if (a2 <= ENVMAX && UOKR(a1, a2)) {
             char *e = a2 ? mem_alloc(a2, 0, (u32)current->pid) : 0;
             r = -ENOMEM;
-            if (e || !a2) {
+            if (e)
                 memcpy(e, (const void *)a1, a2);
+            if (e && e[a2 - 1]) {       /* a block without its last 0 is refused, checked on the kernel's own copy:
+                                         * every child's strlen would run past it (audit B3-12) */
+                mem_free(e);
+                r = -EINVAL;
+            } else if (e || !a2) {
                 mem_free(current->env);
                 current->env = e;
                 current->envlen = (u16)a2;

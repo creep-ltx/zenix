@@ -210,7 +210,9 @@ static u8 *hrow(const struct hpool *hp, int h)
     return r ? hp->ch[(r - 1) / HCHUNK] + (r - 1) % HCHUNK * COLS : 0;
 }
 
-/* a free row of the pool (its number), growing it by a chunk when it is full; 0: no memory */
+/* a free row of the pool (its number), growing it by a chunk when it is full; 0: no memory. The bits are scanned a
+ * byte at a time (audit B3-17: a full byte is one test, not eight) */
+_Static_assert(HCHUNK % 8 == 0 && HLINES % 8 == 0, "the pool's bits come in whole bytes");
 static u32 hrow_take(struct term *t)
 {
     struct hpool *hp = t->hp;
@@ -220,10 +222,16 @@ static u32 hrow_take(struct term *t)
         memset(hp, 0, sizeof *hp);
         t->hp = hp;
     }
-    for (u32 r = 0; r < (u32)hp->nch * HCHUNK && r < HLINES; r++)
-        if (!(hp->used[r >> 3] >> (r & 7) & 1)) {
-            hp->used[r >> 3] |= (u8)(1u << (r & 7));
-            return r + 1;
+    u32 nb = (u32)hp->nch * (HCHUNK / 8);
+    if (nb > sizeof hp->used)
+        nb = sizeof hp->used;
+    for (u32 i = 0; i < nb; i++)
+        if (hp->used[i] != 0xFF) {
+            u32 b = 0;
+            while (hp->used[i] >> b & 1)
+                b++;
+            hp->used[i] |= (u8)(1u << b);
+            return i * 8 + b + 1;
         }
     if (hp->nch >= HNCH || panicked || !(hp->ch[hp->nch] = kmalloc(HCHUNK * COLS)))
         return 0;
@@ -232,18 +240,26 @@ static u32 hrow_take(struct term *t)
     return r + 1;
 }
 
-/* D28: line hhead of the scrollback, row y's copy (l), gives back its old high row and takes one if it has A_HI cells */
+/* D28: line hhead of the scrollback, row y's copy (l), gives back its old high row and takes one if it has A_HI cells;
+ * a line with high cells takes over the leaving line's row as it is (audit B3-17: no search once the scrollback is
+ * full of such lines, as box-drawing output fills it) */
 static __attribute__((noinline)) void hist_high(struct term *t, int y, u8 *l, int high)
 {
     struct hpool *hp = t->hp;
-    if (hp && hp->slot[t->hhead]) {                     /* the line leaving the scrollback gives its row back */
-        u32 r = hp->slot[t->hhead] - 1u;
-        hp->used[r >> 3] &= (u8)~(1u << (r & 7));
+    u32 r = 0;
+    if (hp && hp->slot[t->hhead]) {                     /* the line leaving the scrollback had a row */
+        r = hp->slot[t->hhead];
         hp->slot[t->hhead] = 0;
+        if (!high) {                                    /* given back */
+            r--;
+            hp->used[r >> 3] &= (u8)~(1u << (r & 7));
+            return;
+        }
     }
     if (!high)
         return;
-    u32 r = hrow_take(t);
+    if (!r)
+        r = hrow_take(t);
     if (r) {
         t->hp->slot[t->hhead] = (u8)r;
         u8 *h = hrow(t->hp, t->hhead);
@@ -845,9 +861,9 @@ static __attribute__((noinline, optimize("O2"))) void utf_more(struct term *t, i
     put1(t, vis, ch);
 }
 
-/* one character; the caller hides and redraws the cursor around a batch. term.c is built -Os (DESIGN D14: room on the
- * RAM floppy); this, every character's path, -O2, with the escape sequences (csi) and UTF-8 (D28) kept out of it. */
-static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
+/* the rest of put1: the bytes of an escape sequence and the controls (put1 sends UTF-8 and the other cells straight to
+ * their own paths; the same tests stay here, so any byte is right here too) */
+static __attribute__((noinline, optimize("O2"))) void put1_more(struct term *t, int vis, u8 ch)
 {
     if (t->esc) {
         if (t->esc == E_UTF) {                          /* D28: inside a character (before CAN/SUB: they break it) */
@@ -942,27 +958,45 @@ control:
         utf_start(t, vis, ch);
         return;
     }
-    if (t->wrap) {                                      /* deferred wrap, as terminals do */
-        t->cx = 0;
-        linefeed(t, vis);
-        t->wrap = 0;
+    cell8(t, vis, ch);
+}
+
+/* one character; the caller hides and redraws the cursor around a batch. term.c is built -Os (DESIGN D14: room on the
+ * RAM floppy); this, every character's path, -O2: a printable ASCII byte outside a sequence (0x20-0x7F) is stored and
+ * drawn here, everything else (a deferred wrap, half of a wide character, UTF-8, a sequence) one step away, so the
+ * common path keeps its few registers (audit B3-18: about 4% fewer instructions per character) */
+_Static_assert(__builtin_offsetof(struct term, ch) == 0 &&
+               __builtin_offsetof(struct term, at) == sizeof ((struct term *)0)->ch &&
+               __builtin_offsetof(struct term, co) == 2 * sizeof ((struct term *)0)->ch, "put1: ch first, at and co after it");
+static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
+{
+    if (__builtin_expect(t->esc || (s8)ch < 32 || t->wrap, 0)) {   /* (a deferred wrap, as terminals do: cell8) */
+        if (t->esc == E_UTF)                            /* D28: inside a character (before CAN/SUB: they break it) */
+            utf_more(t, vis, ch);
+        else if (t->esc || ch < 32)
+            put1_more(t, vis, ch);
+        else if (ch >= 0x80 && !eight(t))               /* D28: UTF-8 (in 8-bit mode the byte is the cell) */
+            utf_start(t, vis, ch);
+        else
+            cell8(t, vis, ch);
+        return;
     }
-    u32 o = rowx[t->cy] + (u32)t->cx;
-    if (((u8 *)t->at)[o] & A_HI)                        /* D28: writing over half of a wide character */
-        unhalf(t, vis, 1);
-    ((u8 *)t->ch)[o] = ch;
-    ((u8 *)t->at)[o] = t->attr;
-    ((u8 *)t->co)[o] = t->colour | t->cor;
+    u8 *c = (u8 *)t + rowx[t->cy] + (u32)t->cx;        /* the cell's byte (ch is first); its attributes and colour
+                                                         * follow, a grid apart */
+    if (c[sizeof t->ch] & A_HI) {                       /* D28: over half of a wide character: cell8 (unhalf) */
+        cell8(t, vis, ch);
+        return;
+    }
+    c[0] = ch;
+    c[sizeof t->ch] = t->attr;
+    u8 co = t->colour | t->cor;
+    c[2 * sizeof t->ch] = co;
     if (vis)
-        gfx_cell(t->cy, t->cx, ch, t->attr, ((u8 *)t->co)[o]);
+        gfx_cell(t->cy, t->cx, ch, t->attr, co);
     if (t->cx != COLS - 1)
         t->cx++;
-    else if (!(t->rules & CONR_WRAPNOW))
-        t->wrap = 1;
-    else {                                              /* CONR_WRAPNOW (D20): ANSI.SYS and the Amiga console */
-        t->cx = 0;
-        linefeed(t, vis);
-    }
+    else
+        advance(t, vis, 1);                             /* the last column: the wrap deferred, or CONR_WRAPNOW's */
 }
 
 /* Draw s; bounded: stop early once two ticks (10-20 ms) have passed while input waits or a better process is ready,

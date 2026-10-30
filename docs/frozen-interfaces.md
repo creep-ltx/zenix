@@ -183,6 +183,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
 - **D23 step 3 (writes, branch nfs34, 2026-10-28):** `SO_LINGER` 13 at `SOL_SOCKET` with `struct linger` (Linux's
   `{l_onoff, l_linger}`, 8 bytes; shorter -EINVAL): `{1, 0}` closes by an abort (a reset, the port free at once); a
   longer linger is answered by `getsockopt` but never waited for. Not frozen: the `.nfs` stand-in names.
+- **Audit block 3 B3-12 (`SYS_envset`, 2026-10-30):** a block whose last byte is not 0 is refused with -EINVAL
+  (checked on the kernel's own copy; the old environment kept); a block of 0 bytes still empties it. An addition only:
+  every caller in the tree ends its block with a 0, and before, such a block was taken and every child's `strlen` ran
+  past it.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 
