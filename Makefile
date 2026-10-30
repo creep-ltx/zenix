@@ -240,9 +240,11 @@ $(BUILD)/zenix.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin tools/mkadf.py
 # adding here, and cannot overflow the image).
 RAMAPPS := init login sh ls cat echo pwd ps free wc hello crash uname df fdisk mkfs_ext2 fsck_ext2 sync mkdir rmdir rm cp mv \
            touch head tail sleep true false chmod id whoami su passwd chown ln stat cmp date env printenv dmesg
-# the mount tests (tools/mounttest.sh) boot their own small floppy: the standard RAM image is full
+# the mount tests (tools/mounttest.sh) boot their own small floppy: the standard RAM image is full (passwd, whoami,
+# uname and touch left out 2026-10-30, no mount test runs them: the allocator's code, about 1 KB more in each program,
+# had taken the room the tests write into; 25 KB stay free, as before)
 MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount \
-             mkfs_zenixfs fsck_zenixfs su id whoami chmod touch wc head tail ps stat uname sleep true false env passwd \
+             mkfs_zenixfs fsck_zenixfs su id chmod wc head tail ps stat sleep true false env \
              kill pgrep grep dmesg svctest zfsd readlink realpath tar tree
 
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
@@ -612,7 +614,7 @@ $(BUILD)/lc/%.o: libc/picolibc/%.S
 	$(CC) $(LIBC_CFLAGS) -fno-builtin -O2 -c $< -o $@
 $(BUILD)/lcz/%.o: %.c $(LIBC_HDRS) user/zshare.h user/usys.h
 	@mkdir -p $(dir $@)
-	$(CC) $(LIBC_CFLAGS) -Wall -Wextra -DZENIX_LIBC -Iuser -Ilibc/picolibc/newlib/libc/tinystdio $(call LIBC_OPT,$*.c) -c $< -o $@
+	$(CC) $(LIBC_CFLAGS) -Wall -Wextra -DZENIX_LIBC -Iuser -Ilibc/picolibc/newlib/libc/tinystdio $(call LIBC_OPT,$*.c) $(UDIAG) -c $< -o $@
 $(BUILD)/lcp/%.o: libc/picolibc/%.c $(LIBC_HDRS) tools/purecc.sh
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(LIBC_CFLAGS) $(LIBC_DEF_$*.c) $(call LIBC_NOBUILTIN,$*.c) $(call LIBC_OPT,$*.c) -c $< -o $@
@@ -621,7 +623,7 @@ $(BUILD)/lcp/%.o: libc/picolibc/%.S
 	$(CC) $(LIBC_CFLAGS) -fno-builtin -O2 -c $< -o $@
 $(BUILD)/lczp/%.o: %.c $(LIBC_HDRS) user/zshare.h user/usys.h tools/purecc.sh
 	@mkdir -p $(dir $@)
-	tools/purecc.sh $(CC) $(LIBC_CFLAGS) -Wall -Wextra -DZENIX_LIBC -Iuser $(call LIBC_OPT,$*.c) -c $< -o $@
+	tools/purecc.sh $(CC) $(LIBC_CFLAGS) -Wall -Wextra -DZENIX_LIBC -Iuser $(call LIBC_OPT,$*.c) $(UDIAG) -c $< -o $@
 $(BUILD)/libc.a: $(LIBC_OBJS) tools/check-68020-60.sh
 	rm -f $@
 	$(TOOLPREFIX)ar rcs $@ $(LIBC_OBJS)

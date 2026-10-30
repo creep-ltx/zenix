@@ -79,7 +79,7 @@ NOTES
     show as written. A link that goes up a folder (../x) is taken the
     AmigaOS way and opens the wrong file. A path is at most 63 bytes
     (PATH_MAX).
-    Memory on the stock A1200 (80 x 32): about 242 KB of its own (its
+    Memory on the stock A1200 (80 x 32): about 135 KB of its own (its
     stack is 32 KB, as the original's: the renderer goes one level deeper
     for each quote or list inside another, up to 24) and 136 KB of code
     shared by every Markdown running (measured in FS-UAE,

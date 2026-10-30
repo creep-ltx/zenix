@@ -194,11 +194,42 @@ static void bench_screen(void)
     report("... with the serial copy on", e_on, 300);
 }
 
+/* malloc and free (docs/d27-c-library.md "The allocator"): small blocks of a few sizes in turn, as list nodes and
+ * words are (the quick lists), and blocks of 300 to 3,800 bytes given and freed in reverse (the chunks' bins) */
+static void bench_malloc(void)
+{
+    static void *q[64];
+    static const u32 sz[8] = { 12, 16, 24, 32, 40, 64, 100, 200 };
+    u32 r = 5, n = 5000, bad = 0;
+    for (int i = 0; i < 64; i++) if (!(q[i] = malloc(sz[i & 7]))) bad++;
+    u32 t0 = sys_hrtime();
+    for (u32 i = 0; i < n; i++) {
+        r ^= r << 13; r ^= r >> 17; r ^= r << 5;
+        int s = (int)(r & 63);
+        free(q[s]);
+        if (!(q[s] = malloc(sz[(r >> 8) & 7]))) bad++;
+    }
+    u32 e = sys_hrtime() - t0;
+    for (int i = 0; i < 64; i++) free(q[i]);
+    if (bad) { dprintf(1, "%-34s FAILED: %u blocks not given\n", "malloc + free, small", bad); return; }
+    report("malloc + free, small blocks", e, n);
+    void *b[8];
+    t0 = sys_hrtime();
+    for (u32 i = 0; i < n / 8; i++) {
+        for (int j = 0; j < 8; j++) if (!(b[j] = malloc(300 + (u32)j * 500))) bad++;
+        for (int j = 7; j >= 0; j--) free(b[j]);
+    }
+    e = sys_hrtime() - t0;
+    if (bad) { dprintf(1, "%-34s FAILED: %u blocks not given\n", "malloc + free, 300-3,800 bytes", bad); return; }
+    report("malloc + free, 300-3,800 bytes", e, n / 8 * 8);
+}
+
 int main(void)
 {
     dprintf(1, "Zenix benchmark (E-clock %u Hz)\n", E_HZ);
     bench_cpu();
     bench_syscall();
+    bench_malloc();
     bench_fsstat();
     bench_ipc();
     bench_dir();

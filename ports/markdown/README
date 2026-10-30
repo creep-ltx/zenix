@@ -29,7 +29,8 @@ Markdown's own (for the main session to confirm with the layer's choices):
 - Pictures: none (the console has no cells of its own size, tui_cellw 0): upstream then names them in a line.
 
 Found in upstream (for the owner's repository, not changed here):
-- Memory: about 242 KB of data while one file is open on 80 x 32 (ps), of which the stack is 32 KB, and 136 KB of
+- Memory: about 135 KB of data while one file is open on 80 x 32 (ps; 242 KB before the allocator of 2026-10-30,
+  docs/d27-c-library.md "The allocator"), of which the stack is 32 KB, and 136 KB of
   shared code (the largest of the three programs; the editor is Sumi's code a second time, compiled into this
   program). With 0.1b5 and tui.library 0.5b1 it was 241 KB: the smaller grids (31 KB, were 80 KB in regions of their
   own) and 0.1b6's places table and history at their length did not lower the figure here; the grids now come from

@@ -613,7 +613,9 @@ taken conservatively:
   opens `/dev/ttyS0` under any name (-EBUSY: opening it takes the serial port, SLIP's line). Interfaces are asked
   through the listener's socket (no descriptor of its own). libz gained `zrealpath` (realpath(1)'s resolver, moved,
   no printf) and `svc_line` (boot's `/etc/svctab` parser, moved and shared with init, the "one parser" of section 7).
-- **Its own heap** (as netd's, D19): libz's malloc rounds blocks up to a power of two and grows its chunks four times
+- **Its own heap** (as netd's, D19; kept when the allocator was redone on 2026-10-30, measured: wasabid's fixed 4 KB
+  buffers fit the region heap exactly and it gives everything back at rest, docs/d27-c-library.md "The allocator"):
+  libz's malloc rounded blocks up to a power of two and grew its chunks four times
   over, which held 112 KB in `ps` with one connection (*measured in FS-UAE*); first fit in 16 KB regions taken when
   needed and given back when empty brings it to 88 KB. The core's send queue is 4 KB exactly (`WSB_OUTCAP`, so a
   frame's payload is at most 4,091 bytes: still Wasabi's "at most 4 KB"), one libz-sized block, not the next size up.
@@ -665,7 +667,8 @@ unfiltered and at its speed, as a service's output does.
 
 - **libz's allocator** (power-of-two classes, 4x chunk growth) costs the daemons dearly on small machines: wasabid and
   netd keep their own heaps for now. The allocator's policy is decided once, for every program, in D27 step 1 (the
-  allocator moves into the C library's port there), measured, not here.
+  allocator moves into the C library's port there), measured, not here. (Decided 2026-10-30, measured: D27 "The allocator"; netd's heap and the
+  region heap of wasabid and nfscd stay.)
 - **The 1 MB machine** (not one of the owner's) is not a target for a command through wasabid with a login.
 - **Exit statuses -1/-2 taken for waitnb's own answers** (init's old trap): a frozen convention, so no kernel mask now;
   it goes on block 2's security audit as an item to weigh (a new wait form would be the additive fix).

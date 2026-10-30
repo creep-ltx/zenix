@@ -28,7 +28,8 @@ Sumi's own (for the main session to confirm with the layer's choices):
 Found in upstream (for the owner's repository, not changed here):
 - Saving goes through a new copy renamed over the file (file.c): through a soft link (AmigaOS's too) the link is
   replaced by a file and its target keeps the old text; resolving the link first would keep it.
-- Memory: about 116 KB of data while one file is open on 80 x 32 (ps; 195 KB with Sumi 0.2b6 and tui.library
+- Memory: about 73 KB of data while one file is open on 80 x 32 (ps; 116 KB before the allocator of 2026-10-30,
+  docs/d27-c-library.md "The allocator"; 195 KB with Sumi 0.2b6 and tui.library
   0.5b1): since 0.2b7 the places table and the prompts' history hold each entry at its length, and since tui.library
   0.5b3 a cell is 6 bytes (two grids 31 KB, were 80 KB).
 - Messages and help keep AmigaOS words: "Protect it +wd first", "an AmigaDOS command", "ENVARC:Sumi/Sumi.keys" in

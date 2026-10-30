@@ -20,7 +20,7 @@
 # machine's emulator slots (tools/run-test.sh), shared with other sessions on this PC.
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
-HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test genet-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size"
+HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test genet-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test"
 EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;

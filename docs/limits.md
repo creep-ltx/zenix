@@ -84,7 +84,7 @@ pointers.
 
 ## Hard numbers worth knowing
 
-- 32 processes, 28 message ports (12 held for services, 16 ordinary), 64 open files, 16 fds per process, 8 extra memory regions per process, 8 mounts
+- 32 processes, 28 message ports (12 held for services, 16 ordinary), 64 open files, 16 fds per process, 16 extra memory regions per process, 8 mounts
   (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
   at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
   -ENAMETOOLONG beyond, never cut; also where a link's target plus the rest of a path would be longer, DESIGN D26),
@@ -134,7 +134,7 @@ pointers.
 - The shell: no fixed count of arguments, glob matches, words, pipeline stages, `for` items or positional
   parameters, and no limit on a script's length (it is read and run a command at a time). They grow in its arena,
   which starts at 8 KB and takes more from the kernel while a command needs it (chunks of at least 16 KB, each
-  four times the last, so the 8 memory regions a process may have reach several MB), given back when the
+  four times the last, so the 16 memory regions a process may have reach several MB), given back when the
   command is done; when the kernel has no more: "sh: out of memory" and that shell ends (status 2); a word of at most 4095 characters (longer is an error, status 1; an expanded here-document has no limit: it is built in the arena);
   at most 8 here-documents on one line, 16 nested alias expansions, 64 `local` variables in the running functions,
   128 variables, 48 aliases and 48 functions, 200 history lines; a typed line of 478 characters (the line editor: a
@@ -160,10 +160,11 @@ pointers.
 - Shared code (DESIGN D13, architecture.md section 4): at most 8 segments (`NSEG`) at a time; a ninth program with
   shared code runs as a private copy. A ZEX2 program's address table is at most 32 KB (16-bit offsets: a larger one
   is a link error).
-- Memory per process: at most 8 extra regions at a time (`SYS_memalloc`), each at most 64 MB. `malloc` keeps blocks of
-  up to 32 KB in a few growing chunks (4 KB, 16 KB, 64 KB, 256 KB, then 512 KB each) and gives every bigger block a
-  region of its own, so a program holds at most 8 minus its chunks blocks bigger than 32 KB at once (`badptr`, with
-  four chunks in use, gets 4); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
+- Memory per process: at most 16 extra regions at a time (`SYS_memalloc`, `NREG`), each at most 64 MB. `malloc`
+  (docs/d27-c-library.md "The allocator") keeps blocks in chunks that grow with the request (4 KB, then 1.41 times
+  more for each region it holds, at most 4 MB a chunk) and gives a block of 8 KB or more a region of its own while it
+  holds fewer than 10; past that big blocks go into the chunks too, so a program runs out of memory, not of regions,
+  first (in the PC's test 16 regions hold over 11 MB of 100-byte blocks); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
 - Paths: the directory tools report a joined path longer than a system call takes (63 bytes) instead of cutting it.
 - Sockets (DESIGN D19, architecture.md section 11): 32 kernel sockets for the whole machine, the last 4 only for root

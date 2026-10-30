@@ -447,7 +447,9 @@ int may_signal(const struct proc *p);   /* syscall.c: 0, -ESRCH or -EACCES */
 #define PRIO_PROCESS 0                  /* SYS_getpriority / SYS_setpriority: who is a pid (0: the caller) */
 #define PRIO_PGRP    1                  /* not supported: -EINVAL (frozen, D16 rule 8) */
 #define PRIO_USER    2                  /* who is a user id (0: the caller's real user id) */
-#define NREG  8                 /* extra memory regions per process */
+#define NREG  16                /* extra memory regions per process (16: the allocator holds big blocks exactly in
+                                 * regions of their own and grows its chunks by the request, docs/d27-c-library.md
+                                 * "The allocator"; 8 more cost 2 KB of the kernel's bss) */
 #define ENVMAX 1024
 /* P_WAIT and P_IO are no longer entered (D16: wait and I/O block in P_EV); SYS_procinfo still reports a process in
  * P_EV as one of them (waiting for a child: P_WAIT, else P_IO), so the numbers programs know keep their meaning */

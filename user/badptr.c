@@ -132,7 +132,7 @@ int main(int argc, char **argv)
     char *q = malloc(100);
     check("a freed small block is reused", p && p == q);
 
-    /* many small blocks: they fill the 4 KB first chunk and the growing ones after it (16, 64 KB), stay apart and
+    /* many small blocks: they fill the 4 KB first chunk and the growing ones after it (6, 8, 12 KB ...), stay apart and
      * keep their contents; freed, they are used again */
     static char *sm[600]; int nsm = 0, apart = 1;
     while (nsm < 600 && (sm[nsm] = malloc(100))) { memset(sm[nsm], nsm & 0xFF, 100); nsm++; }
@@ -144,7 +144,7 @@ int main(int argc, char **argv)
     check("... and are used again after free", reused);
     free(again1);
 
-    /* the largest small block (32 KB: it needs a chunk bigger than the first one) */
+    /* a 32 KB block (a region of its own) */
     char *l = malloc(32768);
     if (l) { memset(l, 1, 32768); free(l); }
     check("malloc(32768) works", l != 0);
@@ -158,12 +158,12 @@ int main(int argc, char **argv)
     check("realloc keeps the contents", same);
     free(s);
 
-    /* big blocks each take a region (at most 8 per process): malloc must say NULL when they run out, and free
-     * must give them back so that the next one works */
-    void *big[16]; int nb = 0;
-    while (nb < 16 && (big[nb] = malloc(65536))) nb++;
+    /* big blocks (a region each while there are some to spare, then in the chunks): malloc must say NULL when the
+     * memory or the regions run out, and free must give them back so that the next one works */
+    static void *big[4096]; int nb = 0;
+    while (nb < 4096 && (big[nb] = malloc(65536))) nb++;
     dprintf(1, "badptr: %d big blocks before NULL\n", nb);
-    check("malloc says NULL when the regions run out", nb > 0 && nb < 16);
+    check("malloc says NULL when the memory or the regions run out", nb > 0 && nb < 4096);
     for (int i = 0; i < nb; i++) free(big[i]);
     void *again = malloc(65536);
     check("free gives big blocks back", again != 0);
