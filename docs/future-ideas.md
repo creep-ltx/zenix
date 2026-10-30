@@ -384,3 +384,12 @@ server and toolkit; only the window manager's policy differs, so every program r
   only if that layer one day works well.
 - **First program:** a terminal (day one is an i3 full of terminals), then a file manager, settings, an editor, telnet
   for BBSes in a window and the demo browser.
+
+### The owner's further thoughts (2026-10-30)
+
+- Most people who watch demos have at least a 68030 and 8 MB of fast RAM: the demo feature may require fast RAM.
+- AmigaOS is usually installed somewhere: for a program such as Directory Opus, Zenix could mount the AmigaOS
+  partition and make the assigns (SYS:, LIBS:, C: ...) before running it (needs block 4's FFS/PFS3).
+- "Wouldn't it be nice if we could have our own AmigaOS kernel that can run inside of Zenix, so that the two can
+  operate simultaneously": the Wine route of this file, much later.
+
