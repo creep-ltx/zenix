@@ -102,7 +102,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    with the owner's yes.
 3½. **Amiga demos on Zenix** (approved by the owner 2026-10-29: "I would like to be able to watch an Amiga demo in
    Zenix. That would be amazing. So yes, please move it up"): a design note first (reviewed twice: it hands the whole
-   machine over and takes it back), then built: run an AmigaOS executable (`amiga FILE`, or its name; no disk images for now: owner 2026-10-30) from Zenix, Zenix saves its
+   machine over and takes it back), then built: run an AmigaOS executable by its name from Zenix (no command, no disk images for now: owner 2026-10-30), Zenix saves its
    state and steps aside, the demo has the hardware and chip RAM, and Zenix comes back when it ends, as demos return
    to Workbench. Demos on the bare hardware first; demos that need AmigaOS's libraries later. Starts when block 3's
    audit is done. The idea's notes: docs/future-ideas.md "Amiga demos on Zenix".
