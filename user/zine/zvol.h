@@ -1,0 +1,74 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#pragma once
+/* ZINE's in-memory volume (docs/d29-zine.md section 5.6): the program's directory as one block that `zine` fills
+ * before the hand-over and ZINE's dos reads during the session (names found by ZINE itself, no handler). Plain C
+ * (zcore.h). The block is internal to one build (zine and the blob come from the same tree): native byte order.
+ *
+ * Layout: struct zv_hdr, then cap entries (struct zv_ent; entry 0 is the root, the volume itself), then the files'
+ * data, each 4-aligned. Names follow AmigaDOS's rules: Latin-1, compared without case (Latin-1 letters too), no ':'
+ * or '/', at most ZV_NAMEMAX bytes. */
+#include "zcore.h"
+
+#define ZV_MAGIC    0x5a564f4cu         /* "ZVOL" */
+#define ZV_VERSION  1u
+#define ZV_NAMEMAX  107                 /* bytes of a name (fib_FileName holds 108 with its end) */
+#define ZV_VOLMAX   30                  /* bytes of the volume's name */
+#define ZV_MAXFILES 500u                /* section 5.6's limits: more, and only the program goes in */
+#define ZV_MAXBYTES (16u << 20)
+
+/* AmigaDOS protection bits (dos/dos.h): the low four are set to forbid */
+#define ZV_FIBF_DELETE  1u
+#define ZV_FIBF_EXECUTE 2u
+#define ZV_FIBF_WRITE   4u
+#define ZV_FIBF_READ    8u
+
+struct zv_hdr {
+    zu32 magic, version;
+    zu32 nent, cap;                     /* entries used, entries room */
+    zu32 size;                          /* the whole block's bytes */
+    zu32 data, used;                    /* where the data starts (from the block's start), bytes of it used */
+    char volname[ZV_VOLMAX + 2];        /* Latin-1, 0-ended */
+};
+struct zv_ent {
+    zu32 parent;                        /* its directory's entry (the root: 0) */
+    zu32 size;                          /* bytes (a directory: 0) */
+    zu32 prot;                          /* fib_Protection */
+    zu32 days, mins, ticks;             /* the date (a DateStamp: days since 1978-01-01, minutes, 1/50 s) */
+    zu32 off;                           /* the data, from the block's start */
+    zu16 dir;                           /* 1: a directory */
+    zu16 namelen;
+    char name[ZV_NAMEMAX + 1];          /* Latin-1, 0-ended */
+};
+
+/* the bytes a block needs for n entries (the root included) and the files' bytes */
+zu32 zv_need(zu32 n, zu32 bytes, zu32 nfiles);
+/* 1 when a directory of nfiles files and bytes bytes may go in whole with free_fast bytes of fast RAM free (5.6:
+ * at most 500 files, 16 MB and half the free fast RAM), else 0: only the program goes in */
+int zv_fits(zu32 nfiles, zu32 bytes, zu32 free_fast);
+
+/* Builder (in `zine`). zv_init: an empty volume in blk (size bytes, room for cap entries, the root included); the
+ * volume's name from name (UTF-8; "ZINE" if it is no AmigaDOS name). 0 or a negative errno. */
+int zv_init(void *blk, zu32 size, zu32 cap, const char *name);
+/* Adds name (UTF-8, as the directory gave it) under the directory entry parent: dir 1 for a directory, mode the Unix
+ * mode, mtime Unix seconds, size the bytes. The entry's index, with *data where its size bytes go (the caller reads
+ * the file into it); or a ZV_E_ code (negative) and nothing added: say zv_reason() and go on. */
+int zv_add(void *blk, zu32 parent, const char *name, int dir, zu32 mode, zu32 mtime, zu32 size, zu8 **data);
+#define ZV_E_NAME   -1                  /* not a Latin-1 name, or holds ':' or '/', or is empty, "." or ".." */
+#define ZV_E_LONG   -2                  /* longer than 107 bytes */
+#define ZV_E_CLASH  -3                  /* another name in the directory is the same but for case */
+#define ZV_E_FULL   -4                  /* no entry left */
+#define ZV_E_SPACE  -5                  /* no room for the data */
+#define ZV_E_PARENT -6                  /* parent is no directory of the volume */
+const char *zv_reason(int e);
+
+/* Reader (the blob's dos). zv_check: the block is whole and consistent (0, or -ZE_INVAL). */
+int zv_check(const void *blk, zu32 len);
+const struct zv_ent *zv_ent(const void *blk, zu32 i);
+/* Finds path (Latin-1, AmigaDOS form) from the directory entry cur: "NAME:", "SYS:", "PROGDIR:" and ":" are the
+ * root, "C:", "S:", "L:", "LIBS:", "DEVS:", "FONTS:" the root's directories of those names; '/' at the start or
+ * twice goes up one. 0 and *out, or -ZE_NOENT, -ZE_NOTDIR, -ZE_NODEV (a device the volume is not: "NIL:", "CON:"). */
+int zv_find(const void *blk, zu32 cur, const char *path, zu32 *out);
+/* the first entry after `after` in directory dir (ExNext's order), or 0 at the end; zv_next(blk, dir, 0) is the first */
+zu32 zv_next(const void *blk, zu32 dir, zu32 after);
+/* AmigaDOS's comparison: 1 when a and b (Latin-1, n bytes of a, b 0-ended) are the same name but for case */
+int zv_same(const char *a, zu32 n, const char *b);

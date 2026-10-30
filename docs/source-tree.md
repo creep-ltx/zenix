@@ -68,6 +68,10 @@ zenix/
   the start and exit, `strerror`, `dprintf`, directories, the 64-bit division, termios, `posix_spawn` and the
   waits, users, `glob`, `regcomp`) and `zenix/include/` the headers with Zenix's numbers.
   Built into `build/libc.a` and `build/libc-pure.a`.
+- **ZINE's cores (DESIGN D29, docs/d29-zine.md 16.1):** `zine/`: `hunk.c` (the hunk check and loader), `zvol.c` (the
+  in-memory volume), `zplan.c` (the memory planner), `lvo.c`/`lvo.h` (the library offset names, made by
+  `tools/zine-tables.py`), `amigaofs.h` (the structure offsets), `zcore.h` (what they share); plain C for `/bin/zine`,
+  the blob and the PC.
 - **The shell:** `sh.c`.
 - **Commands:** one file per program, `NAME.c`, each with a manual page in `docs/man/NAME.txt`. The list:
   [commands.md](commands.md).
@@ -120,6 +124,6 @@ the source, the commit, what the layer does and how to update.
 | Images | `mkzexe.py` (ELF to ZEXE), `mkadf.py`, `mkroot.sh`, `mkdisk.py`, `mkrdb.py`, `mkmbr.py`, `mkcard.py`, `mkdualcard.sh` (the dual-boot SD card), `write-card.sh` (writes a card safely), `mkcardpkg.sh` (the owner's card package), `mkdom.sh` (the DoM image), `write-root.sh` and `cardroot.py` (a new root onto the dual card's partition 3, the owner's settings carried) |
 | The emulator rig | `fsuae_conf.py` (writes a configuration), `run-test.sh`, `serial-tap.py` (types a script into the serial port and waits for answers), `shot.py` (screenshots) |
 | Emulator tests | `*-test.sh` and the scripts they type, in `tools/tests/` |
-| Host tests | `host/` (the disk and ext2 servers built for the PC; the network's tests, `host/net-test.sh`: lwIP's unit tests, netd on the PC against `zenix-slirp`, the fuzzer), `*-test.c` (drivers against software models of the hardware) |
+| Host tests | `host/` (the disk and ext2 servers built for the PC; the network's tests, `host/net-test.sh`: lwIP's unit tests, netd on the PC against `zenix-slirp`, the fuzzer; `host/zine-test.sh`: ZINE's cores, their tables against the RKRM text (`zine-tables.py`) and their fuzzers), `*-test.c` (drivers against software models of the hardware) |
 | The PC's end of the SLIP line | `host/zenix-slirp/` (`zenix-slirp`: SLIP to libslirp, no root; needs libslirp and GLib); `slip-test.sh` and `slip-host.py` (Zenix in FS-UAE on the line, the PC's test servers; `eth-test.sh` uses the same servers behind FS-UAE's A2065) |
 | Rules | `docs-check.sh` (the documentation stays in step with the code), `check-68020-60.sh` (no instruction a 68060 lacks) |
