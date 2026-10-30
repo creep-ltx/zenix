@@ -391,5 +391,8 @@ server and toolkit; only the window manager's policy differs, so every program r
 - AmigaOS is usually installed somewhere: for a program such as Directory Opus, Zenix could mount the AmigaOS
   partition and make the assigns (SYS:, LIBS:, C: ...) before running it (needs block 4's FFS/PFS3).
 - "Wouldn't it be nice if we could have our own AmigaOS kernel that can run inside of Zenix, so that the two can
-  operate simultaneously": the Wine route of this file, much later.
+  operate simultaneously": the Wine route of this file, much later.- Demos ask for fast RAM too, some for 16 MB or more (owner 2026-10-30): Zenix keeps only a small corner of fast RAM
+  (about 1-2 MB at its top, marked as in use in the memory list the demo's AmigaOS sees) and hands over the rest with
+  all of chip RAM. A demo that writes outside what it was given may hit Zenix's corner: Zenix checks a checksum of it on
+  the way back and, if damaged, says so and reboots cleanly (the disks were saved before the demo started).
 
