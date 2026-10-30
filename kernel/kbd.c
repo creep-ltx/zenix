@@ -335,6 +335,17 @@ void kbd_init(void)
     handshake();
 }
 
+/* DESIGN D29 9.2: back from an Amiga program: held keys, modifiers and the repeating key forgotten (their releases
+ * went to the program), the queue emptied, one handshake (the keyboard may wait for one) */
+void kbd_zine(void)
+{
+    rep_code = 0;
+    shift_down = ctrl_down = alt_down = amiga_down = 0;
+    rw_count = 0;
+    kq_tail = kq_head;
+    kbd_init();
+}
+
 /* In init's process context (proc_wait, WAIT_CONSOLE), once kbd_work has seen the held reset warning and woken it. */
 /* A software reset, as exec's ColdReboot does it (ROM Kernel Manual, exec.library/ColdReboot): the ROM's start
  * address from its header, then RESET and JMP in one long word, so the JMP is already fetched when RESET takes the

@@ -63,6 +63,8 @@ void klog_write(const char *s, u32 n);        /* a service's output (FT_KLOG): i
 #define KLOG_END_RUNNING 0u                   /* why a boot ended, kept in the log header for the next boot */
 #define KLOG_END_PANIC   1u
 #define KLOG_END_REBOOT  2u                   /* the reboot system call */
+#define KLOG_END_ZINE    3u                   /* DESIGN D29: during a ZINE session (an Amiga program had the machine) */
+#define KLOG_END_ZINE_DAMAGED 4u              /* D29 9.4: ZINE's sums found Zenix's memory damaged (claimed, step 5) */
 /* the boot note (SYS_reboot): a one-shot choice for the boot menu (boot/bootmenu.c) in the spare bytes of the log
  * area's first header, BOOTNOTE_OFF from the area's start (the top of chip RAM - KLOG_AREA_SIZE). Four longs: magic,
  * kind, ~(magic + kind), 0. The same numbers are in boot/bootmenu.c. */
@@ -897,6 +899,15 @@ int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes tak
 #define SYS_sock        90   /* op (SOCK_*) | request size << 16, fd, struct usockreq * -> per op */
 #define SYS_netsrv      91   /* op (NETSRV_*), a, b: only the network server */
 #define SYS_drv         92   /* op (DRV_*), a, b: only the network server's children, its drivers (drv.c) */
+#define SYS_zine        93   /* op (ZINE_INFO, ZINE_GO: kernel/zine.h), a, b: DESIGN D29, an Amiga program (zine.c) */
+long zine_sys(u32 op, u32 a, u32 b);
+struct zine_range;
+u32 mem_ranges(const struct zine_range **r);    /* D29: mem.c's pool ranges, for ZINE's blob */
+void mem_totals(u32 *chip, u32 *fast);          /* the bytes in the chip and fast pools */
+void drv_zine(void);                            /* D29: every claimed device quiesced, its driver killed */
+void fd_zine(void);                             /* D29: floppy motors off, heads unknown, track cache dropped */
+void kbd_zine(void);                            /* D29: held keys forgotten, one handshake */
+u32 gfx_zine(u16 *diw);                         /* D29: the Copper list; DIWSTRT, DIWSTOP into diw[0..1] */
 void syscall_c(u32 *rb);
 void trap0_entry(void);
 void irq5_entry(void);

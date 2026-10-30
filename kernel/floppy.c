@@ -241,6 +241,20 @@ static int probe(int d)
     return drv[d].present;
 }
 
+/* DESIGN D29 (ZINE) 7.2 step 8 and 9.2: before and after an Amiga program had the machine: every motor off, the
+ * head positions unknown (recalibrated at the next use) and the track cache dropped (it may have moved the heads or
+ * changed the disk) */
+void fd_zine(void)
+{
+    for (int d = 0; d < 4; d++)
+        if (drv[d].present) {
+            set_motor(d, 0);
+            drv[d].cyl = -1;
+        }
+    cdrive = -1;
+    deselect();
+}
+
 /* returns: bit 0 drive present, bit 1 disk inserted, bit 2 write protected; the sector count << 8 */
 int fd_info(u32 d)
 {

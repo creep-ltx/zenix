@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "kernel.h"
+#include "zine.h"
 
 /* Memory manager. No MMU, so every byte is physical and nothing can be
  * moved once handed out: fragmentation is the enemy. Rules:
@@ -331,6 +332,21 @@ void mem_stats(u32 *chip_free, u32 *fast_free)
 {
     *chip_free = freeb[1];
     *fast_free = freeb[0];
+}
+
+/* DESIGN D29 (ZINE): the pools as they are (the blob walks their blocks with interrupts masked), and their sizes */
+_Static_assert(sizeof(struct range) == sizeof(struct zine_range), "ZINE reads the range table");
+u32 mem_ranges(const struct zine_range **r)
+{
+    *r = (const struct zine_range *)ranges;
+    return (u32)nranges;
+}
+
+void mem_totals(u32 *chip, u32 *fast)
+{
+    *chip = *fast = 0;
+    for (int i = 0; i < nranges; i++)
+        *(ranges[i].chip ? chip : fast) += ranges[i].hi - ranges[i].lo;
 }
 
 void *kmalloc(u32 n) { return mem_alloc(n, 0, 0); }

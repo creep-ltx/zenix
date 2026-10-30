@@ -98,6 +98,20 @@ void drv_exit(struct proc *p)
             release(&claims[i], claims[i].pid == p->pid ? "the driver ended" : "the network server ended");
 }
 
+/* DESIGN D29 7.2 step 6: before ZINE hands the machine over, every claimed device is stopped by its quiesce program
+ * and its driver killed: it is not scheduled before the resume, dies then (its claim released as above), and the
+ * network server starts it again (D19's restart) */
+void drv_zine(void)
+{
+    for (int i = 0; i < NCLAIM; i++)
+        if (claims[i].pid) {
+            quiesce(&claims[i]);
+            struct proc *p = proc_by_pid(claims[i].pid);
+            if (p)
+                proc_kill(p);
+        }
+}
+
 static struct claim *mine(u32 id)
 {
     if (id < 1 || id > NCLAIM || claims[id - 1].pid != current->pid)
