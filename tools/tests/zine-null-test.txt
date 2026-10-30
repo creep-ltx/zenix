@@ -23,6 +23,12 @@ send zine /tests/zine/zhello; echo zhello-rc=$?\r
 wait zhello-rc= 60
 send zine /tests/zine/ztake; echo ztake-rc=$?\r
 wait ztake-rc= 60
+send zine /tests/zine/zcrash; echo zcrash-rc=$?\r
+wait zcrash-rc= 60
+send zine /tests/zine/zbadcall; echo zbadcall-rc=$?\r
+wait zbadcall-rc= 60
+send zine /tests/zine/zalloc; echo zalloc-rc=$?\r
+wait zalloc-rc= 60
 send free\r
 wait (?m)^fast RAM free.*\n 20
 send date; echo zine-null-done\r

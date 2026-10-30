@@ -876,7 +876,7 @@ $(BUILD)/zine.blob: $(BUILD)/zine-blob.elf tools/mkzexe.py tools/mkzblob.py tool
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
-ZINETESTS := zexit zhello ztake
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc
 # the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
 $(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@

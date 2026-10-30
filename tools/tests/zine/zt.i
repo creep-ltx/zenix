@@ -18,3 +18,6 @@
 #define gb_ActiView     34
 #define gb_copinit      38
 #define MEMF_CHIP       2
+#define LVO_PutMsg      -366
+#define LVO_AvailMem    -216
+#define MEMF_FAST       4

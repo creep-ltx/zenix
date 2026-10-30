@@ -1025,7 +1025,8 @@ built). Test: `tools/host/zine-test.sh` (in `make check`'s host list as `zine-te
   `tools/mkhunktest.py`: position-independent code, one code hunk).
 - The serial line's input is the shown console's (kernel/tty.c), so zine typed on the serial line counts as the
   Amiga's own console; ssh, telnet and logins on other ttys are refused.
-- Not yet: `zcrash`, `zbadcall`, `zalloc`, the kernel review, the owner's PiStorm.
+- `zcrash` (an ILLEGAL instruction: "crashed: illegal instruction at ..."), `zbadcall` (exec's PutMsg, which ZINE lacks: named, stopped) and `zalloc` (1 MB fast and 256 KB chip written, read back, freed; AvailMem as before) too, 2026-10-31.
+- Not yet: the kernel review, a real demo, the owner's PiStorm.
 
 ## 17. Questions for the owner (what ZINE should be)
 

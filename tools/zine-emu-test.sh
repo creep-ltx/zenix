@@ -16,7 +16,7 @@ ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; pass=0; }
 log=$(tr -d '\r' < $L)
 n=$(echo "$log" | grep -ac '^zine: back after 0 s (0)')
-[ "$n" = 23 ] && ok "twenty-one pauses and resumes with the null blob, then zexit and zhello (the kernel's 0 s line 23 times)" || no "the kernel's 'back' line $n times, not 23 (21 null sessions, zexit, zhello)"
+[ "$n" = 26 ] && ok "twenty-one pauses and resumes with the null blob, then five programs (the kernel's 0 s line 26 times)" || no "the kernel's 'back' line $n times, not 26 (21 null sessions, zexit, zhello, zcrash, zbadcall, zalloc)"
 echo "$log" | grep -aq '^count=20 ok=20' && ok "the console's shell ran zine twenty times and went on" || no "the console's loop: $(echo "$log" | grep -a '^count=')"
 f1=$(echo "$log" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); f2=$(echo "$log" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 c1=$(echo "$log" | grep -a -m1 '^chip RAM free' | tr -dc 0-9); c2=$(echo "$log" | grep -a '^chip RAM free' | sed -n 2p | tr -dc 0-9)
@@ -28,6 +28,9 @@ echo "$log" | grep -aq '^disk-ok' && ok "a file written and read back afterwards
 echo "$log" | grep -aq '^zexit-rc=7' && echo "$log" | grep -aq 'zexit ended (return code 7)' && ok "zexit: an AmigaOS program ran and returned 7" || no "zexit: $(echo "$log" | grep -a 'zexit' | tail -2)"
 echo "$log" | grep -aq '^hello from an AmigaOS program' && echo "$log" | grep -aq '^zhello-rc=0' && ok "zhello: dos.library's Output() and Write(), the text shown after" || no "zhello: $(echo "$log" | grep -a 'zhello' | tail -2)"
 echo "$log" | grep -aq 'ztake ended (return code 0) after [2-4] s' && echo "$log" | grep -aq '^ztake-rc=0' && ok "ztake: its own Copper list for 150 frames, the display given back" || no "ztake: $(echo "$log" | grep -a 'ztake' | tail -2)"
+echo "$log" | grep -aq 'zcrash crashed: illegal instruction at' && echo "$log" | grep -aq '^zcrash-rc=1' && ok "zcrash: an illegal instruction is reported, Zenix is back" || no "zcrash: $(echo "$log" | grep -a 'zcrash' | tail -2)"
+echo "$log" | grep -aq 'zbadcall called exec.library PutMsg (offset -366), which ZINE does not support yet' && ok "zbadcall: a call ZINE lacks is named, the program stopped" || no "zbadcall: $(echo "$log" | grep -a 'zbadcall' | tail -2)"
+echo "$log" | grep -aq '^zalloc-rc=0' && ok "zalloc: 1 MB fast and 256 KB chip from AllocMem, written and read back, freed, AvailMem as before" || no "zalloc: $(echo "$log" | grep -a 'zalloc' | tail -2)"
 f3=$(echo "$log" | grep -a '^fast RAM free' | tail -1 | tr -dc 0-9); c3=$(echo "$log" | grep -a '^chip RAM free' | tail -1 | tr -dc 0-9)
 [ "$f3" = "$f1" ] && [ "$c3" = "$c1" ] && ok "free memory after the real programs as before them" || no "free memory after the real programs: chip $c3 KB, fast $f3 KB (before: $c1, $f1)"
 echo "$log" | grep -aq '^zine-null-done' || no "the script did not reach its end"
