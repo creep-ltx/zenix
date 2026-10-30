@@ -1095,3 +1095,13 @@ lessons (the cache order, the MMU off with `ptest`, PCR only on a real 060, the 
 display set). Dropped: the ExecBase copy and zenixboot's change, KickTags, CoolCapture passes, the chip anchor, the
 corner and its copying, the FFS writer, `zine.device`, the residents and `zinerun`, every reset on the normal way. The
 full text is in git (`3c536e6`, docs/d29-zine.md).
+
+## Owner decisions on revision 3 (2026-10-30)
+
+All four questions answered as recommended. **Path B is dropped:** Ctrl-Amiga-Amiga during a program is the clean
+restart into Zenix through the boot note on every machine (section 9's fallback becomes the only way); no ColdCapture,
+CoolCapture, KickTag or other reset-surviving code is written (a safety check stops it, as such code is what boot
+viruses use). Path A (the program returns, exits, crashes into ZINE's vectors, alerts, or calls what ZINE lacks) is
+the way back. The NDK 3.2's interface files may be used for names and numbers (clean-room list amended for them).
+Step 0's measurements shrink to what path A and the restart need.
+
