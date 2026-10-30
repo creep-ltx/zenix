@@ -100,7 +100,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    (the PC set comes earlier, with telnet); (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported (ported 2026-10-30: ports/ahiru, ports/ctop). (Postponed by the owner 2026-10-29, "can wait":
    the tracker music player, the IRC client and the e-mail client; later, unscheduled.) Audit; then a first public pre-release (0.1),
    with the owner's yes.
-3½. **Amiga demos on Zenix: ZINE** (`zine PROGRAM`, or the program's name) (approved by the owner 2026-10-29: "I would like to be able to watch an Amiga demo in
+3½. **PARKED 2026-10-30 (safety checks stopped the build twice; branch zine02 kept, docs/decisions.md). Amiga demos on Zenix: ZINE** (`zine PROGRAM`, or the program's name) (approved by the owner 2026-10-29: "I would like to be able to watch an Amiga demo in
    Zenix. That would be amazing. So yes, please move it up"): a design note first (reviewed twice: it hands the whole
    machine over and takes it back), then built: run an AmigaOS executable with `zine PROGRAM` or by its name (no disk images for now: owner 2026-10-30), Zenix saves its
    state and steps aside, the demo has the hardware and chip RAM, and Zenix comes back when it ends, as demos return
