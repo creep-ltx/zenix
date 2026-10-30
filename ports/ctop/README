@@ -68,7 +68,8 @@ Found in upstream (for the owner's repository, not changed here):
 
 Tests: tools/ctop-test.sh (FS-UAE, the stock A1200; in make check): the four boxes read back with termtest screen
 (CON_READ), keys put in (CON_INPUT): h, Space, e, q; with netd running the net box's rates and totals; a bad delay, an
-extra word, ?; the keys file; the memory printed.
+extra word, ?; the keys file; the memory printed. Part n: the net box with traffic over FS-UAE's A2065 (eth0's address,
+a download's rate, both lines back at 0B/s with only blanks after them).
 
 To update: tools/ctop-vendor.sh /path/to/CUtils [COMMIT] (the files above from that commit, unchanged), put the commit
 here, build, run tools/ctop-test.sh, and bring docs/man/ctop.txt in step with the README's changes; if upstream starts

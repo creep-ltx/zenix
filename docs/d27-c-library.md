@@ -1061,7 +1061,8 @@ bsdsocket.library's base, `sockbase.S`), a program with shared code (ZEX2) in UA
   0.1b3; the a6 inline calls depend on AmigaOS's GCC framing with a5; "CPU% is sampled" is the only wording for an
   unmeasured CPU; 256-task arrays fixed in BSS; AmigaOS words in its messages.
 - **Tests:** `tools/ctop-test.sh` (in `make check`): the boxes read back (`CON_READ`), keys put in (`CON_INPUT`), the
-  net box with netd running, the errors and the usage, the keys file, the memory.
+  net box with netd running, the errors and the usage, the keys file, the memory; part n the net box with traffic over
+  the A2065 (a download's rate, then 0B/s with nothing left of the longer rate after it).
 
 ## Step 5: the measurement (builder helper, 2026-10-30; no switch, as decided 2026-10-29)
 
