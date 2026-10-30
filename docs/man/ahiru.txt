@@ -1,0 +1,104 @@
+AHIRU(1)			Zenix manual
+
+NAME
+    ahiru - a file manager for the terminal, in three columns
+
+SYNOPSIS
+    ahiru [PATH] [LOG] [KEYS=...]
+
+DESCRIPTION
+    Ahiru is the owner's file manager for the Amiga, in the way of ranger
+    and yazi; Zenix carries a copy of its source and of the CFile core it
+    is built on (ports/ahiru, version 0.3b6). It draws in the terminal it
+    is started from, in three columns: the parent folder, the folder
+    (PATH, else where it was left, else /), and a preview of what the
+    cursor is on: a folder's contents, a text's first screen (ANSI art in
+    colour), a program's version, a module's or an archive's facts, else
+    hex. The title row shows the path and the name under the cursor, the
+    status row the protection, size and date, the free space and the
+    place in the list.
+
+    Enter on an lha, lzx or zip archive or an ADF or ISO image opens it
+    as a folder: look inside, view and copy out, unpack with x. Copying
+    writes beside an old file and replaces it only when the new one is
+    whole; a move deletes only what arrived; a soft link is copied and
+    deleted as a link, never followed into.
+
+KEYS
+    Every key is in $HOME/.config/Ahiru/Ahiru.keys (written at the first
+    start; ? lists them as they are). The usual ones:
+    j k, Up Down     move (J K half a page, gg G top and bottom)
+    h l, Left Right  up a folder, into a folder or an archive
+    Return           in, or open the file (view it, or run a program)
+    i                view the file (x flips to hex)
+    E                edit it (EDITOR in Ahiru.config, else $EDITOR,
+                     else sumi), Ahiru waits
+    Space v uv       mark, invert the marks, unmark all
+    yy dd            yank (copy) or cut the marked, or the one under
+                     the cursor
+    pp po            paste here; paste, replacing what is there
+    dD Del           delete (asks)
+    cw a A I         rename (empty, before the ending, at the end, at
+                     the start)
+    M                make a folder
+    / n N  f         search, next, previous; filter the list
+    s Ctrl+S         find names, find files holding a text, below here
+    t ] [ 1-9        tabs: new, next, previous, by number
+    V cb cr          visual marking, rename in the editor, by pattern
+    ! S :            a command here, a shell here, Ahiru's command line
+    gv cd            the volume list (the mounts), a typed path
+    m ' Z            bookmark, jump to one, jump by habit
+    on os ot oe or   sort by name, size, time, ending; reverse
+    L zp             what follows the names; the preview on or off
+    q                quit
+    Patterns (find, filter, rename by pattern) are Unix wildcards
+    (* ? [...]).
+
+OPTIONS
+    PATH       the folder to start in
+    LOG        each start-up step, with the free memory, appended to
+               /tmp/Ahiru.log
+    KEYS=...   keys played at the start (| Return, ~ Esc, { } Left and
+               Right, _ Space); with LOG the screen is then written as
+               text to /tmp/Ahiru.grid
+
+FILES
+    $HOME/.config/Ahiru/Ahiru.keys     the keys
+    $HOME/.config/Ahiru/Ahiru.config   the settings (sort, line mode,
+                                       EDITOR, START, OPENWITH ...),
+                                       written on quit
+    $HOME/.config/Ahiru/Ahiru.theme    the colours of each thing drawn
+    $HOME/.config/Ahiru/Ahiru.places   the folders used (Z)
+    $HOME/.config/Ahiru/Ahiru.marks    the bookmarks
+    $HOME/.config/FileColours          the colours of names by kind, as
+                                       maki's
+    The folder is made at the first start, readable by this user only
+    (AmigaOS's PROGDIR: and ENVARC:). Without HOME nothing is kept.
+
+EXIT STATUS
+    0 when it quits; 20 when there is not enough memory or no terminal
+    to draw in.
+
+NOTES
+    Only inside the terminal: the original's own screen and Workbench
+    window (MODE screen or window, SCREEN or WINDOW) end with "cannot
+    open a screen or window". No mouse, no picture previews, no sound
+    (P says so), no ARexx, no clipboard shared with other programs, no
+    background copies (a paste runs while you wait, Esc stops it), no
+    drives for disk images (=d). lha, lzx and zip archives are read only
+    (changing them needs the Amiga's lha, lzx and zip); ADF images are
+    written by Ahiru itself.
+    The status row and line mode show AmigaOS's protection letters
+    (hsparwed: what you may do, h for a dot file), not the Unix mode; a
+    copy keeps the mode and the date. A copy by root is root's.
+    Some keys and messages keep AmigaOS words: gs gc gl gd ge gt gr go to
+    SYS: C: LIBS: DEVS: ENV: T: RAM: (on Zenix SYS: is /, T: and RAM:
+    /tmp; the others are not there); g/ and dt (the trashcan) need an
+    AmigaOS path and do nothing; names compare without case. A path is
+    at most 63 bytes (PATH_MAX).
+    Memory on the stock A1200 (80 x 32): about 392 KB of its own and
+    223 KB of code shared by every Ahiru running (measured in FS-UAE,
+    tools/ahiru-test.sh); a second Ahiru costs only its own part.
+
+SEE ALSO
+    ls(1), cp(1), mv(1), rm(1), sumi(1), maki(1), mount(8)

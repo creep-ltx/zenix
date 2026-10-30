@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -744,6 +744,52 @@ $$(BUILD)/$(1).zx: $$(BUILD)/$(1).pzx
 	cp $$< $$@
 endef
 $(foreach p,$(TEXTTOOLS),$(eval $(call TEXTTOOL_RULES,$(p))))
+
+# ---- Ahiru, the owner's file manager (roadmap block 3; ports/ahiru/README): its upstream files and the CFile core's
+# under it (the owner's CFile repository: ahiru/src, core/, fs/), pinned in ports/ahiru/upstream (tools/ahiru-vendor.sh,
+# unchanged but for the MIT notice Zenix's copy adds), compiled over the AmigaOS layer of the owner's programs
+# (ports/common: dos.c with Ahiru's settings names, gui.c: the screen calls, which never open) and Ahiru's own Zenix
+# files (ports/ahiru/zenix: the core's OS layer os.c, the parts with no place on Zenix none.c, and term.c and list.c,
+# upstream's compiled with one function each of Zenix's), linked with the text-UI library and the C library as a
+# program with shared code (ZEX2). /bin/ahiru (UAPPS). Each directory's objects in a folder of their own (fs/ops.c and
+# ahiru/src/ops.c, core/sums.c and fs/sums.c share names). ----
+AHIRU_UP := main ui preview ops fe keys more more2 filecol
+AHIRU_CORE := core util arc lha lzx zip adf adfw iso dms version rename sums
+AHIRU_FS := find place ops icon kind arcfs arcw keymap sync renames usercmd sums
+AHIRU_ZX := os none term list
+AHIRU_OBJS := $(AHIRU_UP:%=$(BUILD)/ahiru/ahiru/%.o) $(AHIRU_CORE:%=$(BUILD)/ahiru/core/%.o) \
+              $(AHIRU_FS:%=$(BUILD)/ahiru/fs/%.o) $(AHIRU_ZX:%=$(BUILD)/ahiru/zenix/%.o) \
+              $(BUILD)/ahiru/zenix-dos.o $(BUILD)/ahiru/zenix-gui.o
+AHIRU_CFLAGS := $(TT_CFLAGS) -Iports/ahiru/upstream -Iports/ahiru/upstream/src -Iports/ahiru/upstream/ahiru/src \
+                -Wno-sign-compare -Wno-unused-parameter -Wno-unused-but-set-variable -Wno-pointer-sign \
+                -Wno-missing-field-initializers
+AHIRU_HDRS := $(TT_HDRS) $(wildcard ports/ahiru/upstream/*/*.h ports/ahiru/upstream/ahiru/src/*.h)
+$(BUILD)/ahiru/ahiru/%.o: ports/ahiru/upstream/ahiru/src/%.c $(AHIRU_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(AHIRU_CFLAGS) -c $< -o $@
+$(BUILD)/ahiru/core/%.o: ports/ahiru/upstream/core/%.c $(AHIRU_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(AHIRU_CFLAGS) -c $< -o $@
+$(BUILD)/ahiru/fs/%.o: ports/ahiru/upstream/fs/%.c $(AHIRU_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(AHIRU_CFLAGS) -c $< -o $@
+$(BUILD)/ahiru/zenix/%.o: ports/ahiru/zenix/%.c $(AHIRU_HDRS) $(wildcard ports/ahiru/upstream/ahiru/src/*.c) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(AHIRU_CFLAGS) -c $< -o $@
+$(BUILD)/ahiru/zenix-dos.o: ports/common/dos.c $(TT_HDRS) tools/purecc.sh Makefile
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(TT_CFLAGS) '-DZENIX_TT_NAMES="Ahiru","FileColours"' -c $< -o $@
+$(BUILD)/ahiru/zenix-gui.o: ports/common/gui.c $(TT_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(TT_CFLAGS) -c $< -o $@
+$(BUILD)/ahiru.cpuelf: $(AHIRU_OBJS) $(BUILD)/crt0-pure.o $(BUILD)/libtui-pure.a $(BUILD)/libc-pure.a link/pure.ld
+	$(CC) $(LIBC_PFLAGS) $(PULDFLAGS) $(LIBC_LDFLAGS) $(BUILD)/crt0-pure.o $(AHIRU_OBJS) $(BUILD)/libtui-pure.a \
+	    $(BUILD)/libc-pure.a $(LIBGCC) -o $@
+$(BUILD)/ahiru.pzx: $(BUILD)/ahiru.cpuelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(or $(STACK_ahiru),$(STACK_DEFAULT))
+$(BUILD)/ahiru.zx: $(BUILD)/ahiru.pzx
+	cp $< $@
 
 # ---- user programs: ZEXE, relocated by the kernel at load ----
 $(BUILD)/crt0.o: user/crt0.S | $(BUILD)

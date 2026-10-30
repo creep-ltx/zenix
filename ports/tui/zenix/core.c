@@ -18,8 +18,9 @@
  *    since the console's UTF-8, DESIGN D28; ports/tui/README): UTF-8 output and the C library's wcwidth; without it 0,
  *    the Latin-1 toolkit of before. CellW and CellH are 0; no mouse, no pastes;
  *  - the console has no second screen: closing (and suspending) clears it, as upstream does in a plain console;
- *  - TuiSignal answers 0 (no AmigaOS signals); a program with a poll loop of its own polls descriptor 0 and calls
- *    TuiPoll. TuiWait's extra signals are descriptors: tui_zenix_sigfd(bit) names the one behind a signal bit (the
+ *  - TuiSignal answers bit 8 and notes the terminal's input descriptor (tui_zenix_tfd): the AmigaOS layer's Wait()
+ *    (ports/common/dos.c, Ahiru's main loop) polls it for that bit; a program with a poll loop of its own polls
+ *    descriptor 0 and calls TuiPoll. TuiWait's extra signals are descriptors: tui_zenix_sigfd(bit) names the one behind a signal bit (the
  *    AmigaOS layer's reply ports, a pipe Maki reads; sigfd.c: none, when the program has no such layer); the wait
  *    ends with TE_NONE and the bit in *got when it has data. A signal that interrupts the wait (its handler ran)
  *    ends it with TE_NONE too, as upstream's extra signals do.
@@ -83,6 +84,12 @@ typedef struct {
     Priv p;
     struct termios saved;
 } ZPriv;
+
+/* the terminal's signal for a program with a Wait() of its own (Ahiru): bit 8, AmigaOS's SIGF_DOS, the bit upstream's
+ * console packets come back on; the AmigaOS layer's Wait (ports/common/dos.c) polls tui_zenix_tfd for it (TuiSignal
+ * sets it, TuiClose clears it) */
+ULONG tui_zenix_tsig = 1UL << 8;
+int tui_zenix_tfd = -1;
 
 static int zraw(Priv *p)
 {
@@ -249,6 +256,7 @@ void TuiClose(struct Tui *t)
 {
     Priv *p = P(t);
     if (!p) return;
+    if (tui_zenix_tfd == (int)p->tin) tui_zenix_tfd = -1;
     if (!p->tsusp) {
         zmodes_off(p);
         zcooked(p);
@@ -330,8 +338,10 @@ LONG TuiWait(struct Tui *t, TuiEv *e, LONG us, ULONG extra, ULONG *got)
 
 ULONG TuiSignal(struct Tui *t)
 {
-    (void)t;
-    return 0;
+    Priv *p = P(t);
+    if (!p || p->tsusp) return 0;
+    tui_zenix_tfd = (int)p->tin;
+    return tui_zenix_tsig;
 }
 
 LONG TuiPoll(struct Tui *t, TuiEv *e)

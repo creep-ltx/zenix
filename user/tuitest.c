@@ -279,7 +279,7 @@ int main(void)
     check("TuiWait with a time: TE_NONE when it is up", r == 0 && e.type == TE_NONE && dt >= 250 && dt < 2000, b);
     r = TuiPoll(t, &e);
     check("TuiPoll: nothing there", r == 0 && e.type == TE_NONE && !TuiKeyWaiting(t), "");
-    checki("TuiSignal: no AmigaOS signals", (long)TuiSignal(t), 0);
+    checki("TuiSignal: the terminal's bit (8), for the AmigaOS layer's Wait (ports/common)", (long)TuiSignal(t), 256);
 
     /* the terminal lent to a command and taken back */
     tui_suspend();

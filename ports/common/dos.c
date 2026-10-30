@@ -15,6 +15,9 @@
 #include <poll.h>
 #include <time.h>
 #include <amigados.h>
+#define ZENIX_LIBC                      /* usys.h: the C library's errno and constants */
+#include "../../user/usys.h"   /* SYS_meminfo, SYS_statfs, SYS_mountinfo, SYS_utimes: no C library calls */
+#include "../tui/upstream/src/version.h" /* the linked text-UI library's version, for OpenLibrary("tui.library") */
 
 static LONG lasterr;                    /* IoErr: the last failure's errno (0 none) */
 
@@ -49,36 +52,54 @@ static size_t mapped(const char *name, const char *prefix, int only_first, int s
     return 0;
 }
 
+/* the AmigaOS places the owner's programs name in their own literals (amigados.h, ports/common/README) */
+static const struct { const char *amiga, *zenix; } places[] = {
+    { "T:", "/tmp/" }, { "RAM:", "/tmp/" }, { "SYS:", "/" }, { "NIL:", "/dev/null" }, { 0, 0 }
+};
+
+/* $HOME/.config/ + rest into out (the program's settings), 0 (errno set) without a HOME or room */
+static int confpath(const char *rest, const char *sub, char *out)
+{
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) {
+        errno = ENOENT;
+        return 0;
+    }
+    if (strlen(home) + 9 + (sub ? strlen(sub) + 1 : 0) + strlen(rest) >= ZPATH) {
+        errno = ENAMETOOLONG;
+        return 0;
+    }
+    strcpy(out, home);
+    strcat(out, "/.config/");
+    if (sub) {
+        strcat(out, sub);
+        strcat(out, "/");
+    }
+    strcat(out, rest);
+    return 1;
+}
+
 /* name as a Zenix path into out; 0 (errno set) when it has none */
 static int zpath(const char *name, char *out)
 {
-    const char *rest = 0, *pre = 0, *home;
+    const char *rest = 0, *pre = 0;
     size_t n;
-    if (mapped(name, "ENVARC:", 0, 0)) {
-        home = getenv("HOME");
-        if (!home || !home[0]) {
-            errno = ENOENT;
-            return 0;
-        }
-        pre = home;
-        rest = name + 7;                /* "Sumi..." after "/.config/" */
-        if (strlen(pre) + 9 + strlen(rest) >= ZPATH) {
-            errno = ENAMETOOLONG;
-            return 0;
-        }
-        strcpy(out, pre);
-        strcat(out, "/.config/");
-        strcat(out, rest);
-        return 1;
-    }
+    int i;
+    if (mapped(name, "ENVARC:", 0, 0))
+        return confpath(name + 7, 0, out);      /* "Sumi..." after "/.config/" */
     if (mapped(name, "ENV:", 0, 0)) {
         errno = ENOENT;
         return 0;
     }
-    if (mapped(name, "T:", 1, '-')) {
-        pre = "/tmp/";
-        rest = name + 2;
-    }
+    if (mapped(name, "PROGDIR:", 0, 0))
+        return confpath(name + 8, envnames[0], out);    /* "Ahiru.keys" after "/.config/Ahiru/" */
+    for (i = 0; places[i].amiga && !pre; i++)
+        if (!strncmp(name, places[i].amiga, strlen(places[i].amiga))) {
+            pre = places[i].zenix;
+            rest = name + strlen(places[i].amiga);
+            if (pre[1] && pre[strlen(pre) - 1] == '/' && *rest == '/')
+                rest++;                 /* "T:/x" as "T:x" */
+        }
     if (!pre) {
         pre = "";
         rest = name[0] ? name : ".";    /* AmigaOS's "" is the current directory */
@@ -91,6 +112,19 @@ static int zpath(const char *name, char *out)
     strcpy(out, pre);
     strcat(out, rest);
     return 1;
+}
+
+/* a file written into the program's settings folder ("PROGDIR:"): $HOME/.config and the folder made first */
+static void mkconf(const char *name)
+{
+    char p[ZPATH], *slash;
+    if (!mapped(name, "PROGDIR:", 0, 0) || !confpath(envnames[0], 0, p))
+        return;
+    slash = strrchr(p, '/');
+    *slash = 0;
+    mkdir(p, 0755);                     /* $HOME/.config */
+    *slash = '/';
+    mkdir(p, 0700);                     /* its own folder: this user's only */
 }
 
 /* ---- files: a handle is the descriptor + 1 ---- */
@@ -109,9 +143,13 @@ BPTR Open(CONST_STRPTR name, LONG mode)
     }
     else if (!zpath(name, p))
         return fail();
-    else if (mode == MODE_NEWFILE)
+    else if (mode == MODE_NEWFILE) {
+        mkconf(name);
         fd = open(p, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    else
+    } else if (mode == MODE_READWRITE) {     /* (AmigaOS's: the file kept, made when missing) */
+        mkconf(name);
+        fd = open(p, O_RDWR | O_CREAT, 0666);
+    } else
         fd = open(p, O_RDONLY);
     if (fd < 0)
         return fail();
@@ -212,6 +250,46 @@ struct zlock {
     DIR *dir;
 };
 
+/* p made absolute (from the current directory) and plain: no "." or ".." parts, no doubled '/' (the parts as
+ * written: a ".." after a soft link goes up from the link's folder, as the shell's cd does); 0 when it will not fit */
+static int zabsolute(char *p)
+{
+    char in[ZPATH], *s, *o = p;
+    if (p[0] != '/') {
+        if (!getcwd(in, sizeof in) || strlen(in) + 1 + strlen(p) >= ZPATH) {
+            errno = ENAMETOOLONG;
+            return 0;
+        }
+        strcat(in, "/");
+        strcat(in, p);
+    } else
+        strcpy(in, p);
+    *o = 0;
+    for (s = in; *s; ) {
+        char *e;
+        size_t n;
+        while (*s == '/') s++;
+        for (e = s; *e && *e != '/'; e++)
+            ;
+        n = (size_t)(e - s);
+        if (n == 1 && s[0] == '.')
+            ;
+        else if (n == 2 && s[0] == '.' && s[1] == '.') {
+            char *up = strrchr(p, '/');
+            if (up) *up = 0;
+        } else if (n) {
+            size_t l = strlen(p);
+            p[l] = '/';
+            memcpy(p + l + 1, s, n);
+            p[l + 1 + n] = 0;
+        }
+        s = e;
+    }
+    if (!p[0])
+        strcpy(p, "/");
+    return 1;
+}
+
 BPTR Lock(CONST_STRPTR name, LONG mode)
 {
     struct zlock *l;
@@ -219,7 +297,7 @@ BPTR Lock(CONST_STRPTR name, LONG mode)
     char p[ZPATH];
     (void)mode;
     errno = 0;
-    if (!zpath(name, p) || stat(p, &st) < 0)
+    if (!zpath(name, p) || !zabsolute(p) || stat(p, &st) < 0)
         return fail();
     if (!(l = calloc(1, sizeof *l))) {
         errno = ENOMEM;
@@ -260,7 +338,7 @@ static void fill(struct FileInfoBlock *fib, const char *path, const char *name, 
     if (!dir && !(st->st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)))
         fib->fib_Protection |= FIBF_EXECUTE;    /* AmigaOS's e bit: a program (Maki's colours) */
     fib->fib_Size = (LONG)st->st_size;
-    fib->fib_Date.ds_Days = (LONG)(st->st_mtime / 86400);
+    fib->fib_Date.ds_Days = (LONG)(st->st_mtime / 86400) - AMIGA_EPOCH_DAYS;
     fib->fib_Date.ds_Minute = (LONG)(st->st_mtime % 86400 / 60);
     fib->fib_Date.ds_Tick = (LONG)(st->st_mtime % 60 * 50);
     fib->fib_OwnerUID = (UWORD)st->st_uid;
@@ -406,18 +484,32 @@ void FreeDosObject(ULONG type, APTR p)
     free(p);
 }
 
+/* the errno numbers that have an AmigaOS number upstream tests for (IoErr), and back (Fault) */
+static const struct { short amiga, err; } amigaerr[] = {
+    { ERROR_OBJECT_NOT_FOUND, ENOENT }, { ERROR_OBJECT_IN_USE, EBUSY }, { ERROR_OBJECT_EXISTS, EEXIST },
+    { ERROR_OBJECT_WRONG_TYPE, ENOTDIR }, { ERROR_RENAME_ACROSS_DEVICES, EXDEV },
+    { ERROR_DIRECTORY_NOT_EMPTY, ENOTEMPTY }, { ERROR_DISK_FULL, ENOSPC }, { ERROR_WRITE_PROTECTED, EACCES },
+    { 0, 0 }
+};
+
 LONG IoErr(void)
 {
-    return lasterr == ENOENT ? ERROR_OBJECT_NOT_FOUND : lasterr;
+    int i;
+    for (i = 0; amigaerr[i].amiga; i++)
+        if (amigaerr[i].err == lasterr)
+            return amigaerr[i].amiga;
+    return lasterr;
 }
 
 LONG Fault(LONG code, CONST_STRPTR header, STRPTR buf, LONG len)
 {
     const char *t;
+    int i;
     if (len <= 0)
         return 0;
-    if (code == ERROR_OBJECT_NOT_FOUND)
-        code = ENOENT;
+    for (i = 0; amigaerr[i].amiga; i++)
+        if (amigaerr[i].amiga == code)
+            code = amigaerr[i].err;
     t = code == ERROR_NO_MORE_ENTRIES ? "no more entries" : strerror((int)code);
     snprintf(buf, (size_t)len, "%s%s%s", header ? header : "", header ? ": " : "", t);
     return (LONG)strlen(buf);
@@ -434,26 +526,47 @@ LONG CompareDates(const struct DateStamp *a, const struct DateStamp *b)
     return 0;
 }
 
-/* upstream's "run" and Maki's editor: the command through the shell in the terminal, SYS_Input and SYS_Output (handles)
- * as its descriptors 0 and 1 (put back after); its exit status, -1 if it could not run. Upstream's default editor
- * "Sumi" is Zenix's sumi. */
+/* upstream's "run", Maki's editor and Ahiru's commands: the command through the shell in the terminal, SYS_Input and
+ * SYS_Output (handles) as its descriptors 0 and 1 (put back after); its exit status, -1 if it could not run. With
+ * SYS_Asynch it runs in the background (sh's '&': not waited for; its input and output /dev/null unless given) and the
+ * answer is 0 when it started. Upstream's editors by their AmigaOS names are Zenix's sumi: "Sumi" (Maki's, without
+ * $EDITOR) and "C:Ed" (Ahiru's, without $EDITOR: the owner's editor, as on his A1200). */
+static const char *const editors[] = { "Sumi ", "C:Ed ", 0 };
 LONG SystemTags(CONST_STRPTR command, ...)
 {
     va_list ap;
     ULONG tag;
     BPTR h[2] = { 0, 0 };
-    int keep[2] = { -1, -1 }, st, i;
+    int keep[2] = { -1, -1 }, st, i, async = 0;
     char *cmd = NULL;
     va_start(ap, command);
     while ((tag = va_arg(ap, ULONG)) != TAG_DONE) {
         LONG v = va_arg(ap, LONG);
         if (tag == SYS_Input) h[0] = v;
         else if (tag == SYS_Output) h[1] = v;
+        else if (tag == SYS_Asynch) async = v != 0;
     }
     va_end(ap);
-    if (!strncmp(command, "Sumi ", 5) && (cmd = strdup(command)) != NULL) {
-        cmd[0] = 's';
-        command = cmd;
+    for (i = 0; editors[i]; i++)
+        if (!strncmp(command, editors[i], strlen(editors[i]))) {
+            const char *rest = command + strlen(editors[i]);
+            if ((cmd = malloc(strlen(rest) + 6)) != NULL) {
+                strcpy(cmd, "sumi ");
+                strcat(cmd, rest);
+                command = cmd;
+            }
+            break;
+        }
+    if (async) {                        /* "cmd &": the shell starts it and ends, the command is nobody's child */
+        char *bg = malloc(strlen(command) + 40);
+        if (!bg) {
+            free(cmd);
+            return -1;
+        }
+        strcpy(bg, command);
+        strcat(bg, h[0] > 0 || h[1] > 0 ? " &" : " </dev/null >/dev/null 2>&1 &");
+        free(cmd);
+        command = cmd = bg;
     }
     for (i = 0; i < 2; i++)
         if (h[i] > 0 && h[i] - 1 != i && (keep[i] = dup(i)) >= 0)
@@ -465,7 +578,9 @@ LONG SystemTags(CONST_STRPTR command, ...)
             close(keep[i]);
         }
     free(cmd);
-    return st < 0 ? -1 : WEXITSTATUS(st);
+    if (st < 0) return -1;
+    if (async) return WEXITSTATUS(st) ? -1 : 0;
+    return WEXITSTATUS(st);
 }
 
 /* ---- the standard handles, variables, dates, time ---- */
@@ -502,7 +617,8 @@ void Delay(LONG ticks)
 LONG DateToStr(struct DateTime *dt)
 {
     static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
-    time_t t = (time_t)dt->dat_Stamp.ds_Days * 86400 + dt->dat_Stamp.ds_Minute * 60 + dt->dat_Stamp.ds_Tick / 50;
+    time_t t = ((time_t)dt->dat_Stamp.ds_Days + AMIGA_EPOCH_DAYS) * 86400 + dt->dat_Stamp.ds_Minute * 60 +
+               dt->dat_Stamp.ds_Tick / 50;
     struct tm tm;
     if (!localtime_r(&t, &tm))
         return DOSFALSE;
@@ -609,8 +725,10 @@ ULONG SetSignal(ULONG on, ULONG mask)
 
 struct Library *OpenLibrary(CONST_STRPTR name, ULONG version)
 {
-    (void)name;
+    static struct Library tui = { TUI_VERSION, TUI_REVISION };
     (void)version;
+    if (name && !strcmp(name, "tui.library"))
+        return &tui;                    /* the text-UI library: linked into the program (ports/tui) */
     return NULL;                        /* no AmigaOS libraries on Zenix */
 }
 
@@ -627,11 +745,13 @@ BOOL DoubleClick(ULONG s1, ULONG m1, ULONG s2, ULONG m2)
 
 /* exec: the task (its stack large enough that upstream's main() never swaps: the stack is the program's own), a
  * process for the fields upstream sets (pr_WindowPtr: no requesters on Zenix anyway) */
+static struct Process me = { { 0, (APTR)0x100000 }, 0, 0 };
+static struct ExecBase execbase = { &me.pr_Task };
+struct ExecBase *SysBase = &execbase;
+
 struct Task *FindTask(CONST_STRPTR name)
 {
-    static struct Process me = { { 0, (APTR)0x100000 }, 0, 0 };
-    (void)name;
-    return &me.pr_Task;
+    return name ? NULL : &me.pr_Task;   /* a task by name (Ahiru's archiver's): none on Zenix */
 }
 
 void StackSwap(struct StackSwapStruct *s)
@@ -649,3 +769,212 @@ LONG OpenDevice(CONST_STRPTR name, ULONG unit, struct IORequest *r, ULONG flags)
 }
 void CloseDevice(struct IORequest *r) { (void)r; }
 LONG DoIO(struct IORequest *r) { (void)r; return -1; }
+
+/* ---- Ahiru and the CFile core (amigados.h, "Ahiru, the owner's file manager"): memory, more of the files and
+ * locks, dates, the shell, waiting ---- */
+
+APTR AllocMem(ULONG n, ULONG flags) { return flags & MEMF_CLEAR ? calloc(1, n) : malloc(n); }
+void FreeMem(APTR p, ULONG n) { (void)n; free(p); }
+
+/* the free memory of the kind asked (chip, fast, either); "the largest block" is half of it: the kernel says only
+ * how much is free, and upstream sizes its buffers from this (never all of it) */
+ULONG AvailMem(ULONG flags)
+{
+    u32 m[4] = { 0, 0, 0, 0 };
+    ULONG n;
+    sys_meminfo(m);
+    n = flags & MEMF_CHIP ? m[0] : flags & MEMF_FAST ? m[1] : m[0] + m[1];
+    return flags & MEMF_LARGEST ? n / 2 : n;
+}
+
+LONG FPuts(BPTR fh, CONST_STRPTR s)
+{
+    LONG n = (LONG)strlen(s);
+    return Write(fh, s, n) == n ? 0 : -1;       /* AmigaOS's: 0, or -1 on failure */
+}
+
+LONG FPutC(BPTR fh, LONG c)
+{
+    char b = (char)c;
+    return Write(fh, &b, 1) == 1 ? c : -1;
+}
+
+/* now, in AmigaOS's days from 1978 */
+void DateStamp(struct DateStamp *ds)
+{
+    time_t t = time(0);
+    ds->ds_Days = (LONG)(t / 86400) - AMIGA_EPOCH_DAYS;
+    ds->ds_Minute = (LONG)(t % 86400 / 60);
+    ds->ds_Tick = (LONG)(t % 60 * 50);
+}
+
+LONG SetFileDate(CONST_STRPTR name, const struct DateStamp *ds)
+{
+    char p[ZPATH];
+    long t = ((long)ds->ds_Days + AMIGA_EPOCH_DAYS) * 86400 + ds->ds_Minute * 60 + ds->ds_Tick / 50;
+    errno = 0;
+    if (!zpath(name, p))
+        return fail();
+    if (t < 0)
+        t = 0;
+    if (sys_utimes(p, (u32)t) < 0) {
+        lasterr = EPERM;
+        return DOSFALSE;
+    }
+    return DOSTRUE;
+}
+
+/* the lock's path with every soft link on the way resolved (at most 8), into buf; FALSE when it will not fit */
+LONG NameFromLock(BPTR lock, STRPTR buf, LONG len)
+{
+    struct zlock *l = (struct zlock *)lock;
+    char cur[ZPATH], link[ZPATH], rest[ZPATH];
+    int hops = 0;
+    size_t at = 1;
+    if (!l)
+        return DOSFALSE;
+    strcpy(cur, l->path);
+    while (at < strlen(cur) + 1 && hops <= 8) {
+        struct stat st;
+        char *e = strchr(cur + at, '/'), save = 0;
+        ssize_t n;
+        if (e) save = *e, *e = 0;
+        if (lstat(cur, &st) == 0 && S_ISLNK(st.st_mode) && (n = readlink(cur, link, sizeof link - 1)) > 0) {
+            link[n] = 0;
+            strcpy(rest, e ? e + 1 : "");
+            if (link[0] != '/') {       /* relative to the link's folder */
+                char *s = strrchr(cur, '/');
+                s[1] = 0;
+                if (strlen(cur) + strlen(link) >= sizeof cur) return DOSFALSE;
+                strcat(cur, link);
+            } else
+                strcpy(cur, link);
+            if (rest[0]) {
+                if (strlen(cur) + 1 + strlen(rest) >= sizeof cur) return DOSFALSE;
+                strcat(cur, "/");
+                strcat(cur, rest);
+            }
+            if (!zabsolute(cur)) return DOSFALSE;
+            hops++;
+            at = 1;                     /* from the top: the target may hold links of its own */
+            continue;
+        }
+        if (!e) break;
+        *e = save;
+        at = (size_t)(e - cur) + 1;
+    }
+    if (hops > 8 || (LONG)strlen(cur) >= len) {
+        lasterr = hops > 8 ? ELOOP : ENAMETOOLONG;
+        return DOSFALSE;
+    }
+    strcpy(buf, cur);
+    return DOSTRUE;
+}
+
+BPTR DupLock(BPTR lock)
+{
+    struct zlock *l = (struct zlock *)lock, *d;
+    if (!l || !(d = malloc(sizeof *d)))
+        return 0;
+    *d = *l;
+    d->dir = NULL;
+    return (BPTR)d;
+}
+
+/* the folder above the lock's (resolved) path; 0 at "/" */
+BPTR ParentDir(BPTR lock)
+{
+    char p[ZPATH], *s;
+    if (!NameFromLock(lock, p, sizeof p) || !strcmp(p, "/"))
+        return 0;
+    s = strrchr(p, '/');
+    if (s == p) s[1] = 0;
+    else *s = 0;
+    return Lock(p, SHARED_LOCK);
+}
+
+/* the process's directory: chdir to the lock's path (0: where the program started); the lock it had before back */
+static BPTR curdir;
+static char startdir[ZPATH];
+BPTR CurrentDir(BPTR lock)
+{
+    BPTR old = curdir;
+    if (!startdir[0] && !getcwd(startdir, sizeof startdir))
+        strcpy(startdir, "/");
+    if (chdir(lock ? ((struct zlock *)lock)->path : startdir) == 0)
+        curdir = lock;
+    return old;
+}
+
+/* the filesystem the lock is on (the mount whose path is the longest at the start of the lock's): its blocks */
+LONG Info(BPTR lock, struct InfoData *id)
+{
+    struct zlock *l = (struct zlock *)lock;
+    struct umountinfo mi;
+    struct ustatfs f;
+    u32 i, best = 0;
+    size_t bl = 0;
+    char p[ZPATH];
+    if (!l || !NameFromLock(lock, p, sizeof p))
+        return DOSFALSE;
+    for (i = 0; sys_mountinfo(i, &mi) == 0; i++) {
+        size_t n = strnlen(mi.path, sizeof mi.path);
+        if (n > bl && !strncmp(p, mi.path, n) && (n == 1 || p[n] == '/' || !p[n])) {
+            best = i;
+            bl = n;
+        }
+    }
+    if (!bl || sys_statfs_mount(&f, best) < 0) {
+        lasterr = EIO;
+        return DOSFALSE;
+    }
+    memset(id, 0, sizeof *id);
+    id->id_NumBlocks = (LONG)f.blocks;
+    id->id_NumBlocksUsed = (LONG)(f.blocks - f.bfree);
+    id->id_BytesPerBlock = (LONG)f.bsize;
+    id->id_DiskState = 82;              /* ID_VALIDATED */
+    return DOSTRUE;
+}
+
+/* a command through the shell with in and out (handles) as its descriptors 0 and 1, waited for; "" is the user's
+ * shell, reading its commands from in. TRUE when it ran */
+LONG Execute(CONST_STRPTR cmd, BPTR in, BPTR out)
+{
+    const char *sh = getenv("SHELL");
+    return SystemTags(cmd && cmd[0] ? cmd : sh && sh[0] ? sh : "/bin/sh", SYS_Input, in, SYS_Output, out,
+                      TAG_DONE) != -1;
+}
+
+/* the descriptor behind the text-UI library's signal (TuiSignal's bit: its terminal), set by ports/tui/zenix */
+extern ULONG tui_zenix_tsig;
+extern int tui_zenix_tfd;
+
+/* the signals that came of those asked for: the terminal's (TuiSignal's) when it has input, a reply port's when its
+ * read has data (tui_zenix_sigfd); waits until one does. Ctrl-C never comes (^C is a key in raw mode). A signal
+ * handler that ran ends the wait with nothing. */
+ULONG Wait(ULONG signals)
+{
+    struct pollfd f[9];
+    ULONG bit[9], got = 0;
+    int n = 0, i;
+    if ((signals & tui_zenix_tsig) && tui_zenix_tfd >= 0) {
+        f[n].fd = tui_zenix_tfd;
+        f[n].events = POLLIN;
+        f[n].revents = 0;
+        bit[n++] = tui_zenix_tsig;
+    }
+    for (i = 0; i < 32 && n < 9; i++)
+        if ((signals >> i & 1) && (1UL << i) != tui_zenix_tsig && tui_zenix_sigfd(i) >= 0) {
+            f[n].fd = tui_zenix_sigfd(i);
+            f[n].events = POLLIN;
+            f[n].revents = 0;
+            bit[n++] = 1UL << i;
+        }
+    if (!n)
+        return 0;                       /* nothing that could ever come */
+    if (poll(f, (nfds_t)n, -1) <= 0)
+        return 0;
+    for (i = 0; i < n; i++)
+        if (f[i].revents) got |= bit[i];
+    return got;
+}

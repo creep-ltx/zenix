@@ -26,12 +26,14 @@ zenix/     Zenix's layer (GPL-2.0-only), kept apart so the copy can be refreshed
                       declared and defined nowhere (a link error if a kept part ever starts to use one); the
                       exec/, dos/ and proto/ headers the upstream file includes are amiga.h
 
-On Zenix the toolkit's public fields say: CTerm 1 (the console takes the ANSI colours as they are, 256 and 24-bit
-ones as the nearest of its 16, and ESC [ ? 25 h/l for the cursor: upstream's CTerm path), UTF8 1 (since the console's
+On Zenix the toolkit's public fields say: CTerm 1 (the console takes the ANSI colours as they are, 256 and 24-bit ones
+as the nearest of its 16, and ESC [ ? 25 h/l for the cursor: upstream's CTerm path), UTF8 1 (since the console's
 UTF-8, DESIGN D28), CellW and CellH 0. No mouse, no pastes, no resize events (the console never changes size), no
-second screen (closing clears it). TuiSignal answers 0: a program with a poll loop of its own polls descriptor 0 and
-calls TuiPoll. TuiWait's extra signals are descriptors (tui_zenix_sigfd names the one behind each bit): the wait ends
-with TE_NONE and the bit in *got when it has data, as upstream's extra signals end it.
+second screen (closing clears it). TuiSignal answers bit 8 (AmigaOS's SIGF_DOS, where upstream's console packets come
+back) and notes the terminal's input descriptor (tui_zenix_tsig, tui_zenix_tfd): the AmigaOS layer's Wait
+(ports/common/dos.c, Ahiru's main loop) polls that descriptor for the bit; a program with a poll loop of its own polls
+descriptor 0 and calls TuiPoll. TuiWait's extra signals are descriptors (tui_zenix_sigfd names the one behind each
+bit): the wait ends with TE_NONE and the bit in *got when it has data, as upstream's extra signals end it.
 
 Widths and UTF-8: the build TUI_UTF8=1 (the Makefile's default since DESIGN D28, the define ZENIX_TUI_UTF8) writes
 UTF-8 and takes the widths from the C library's wcwidth (through upstream's own TUI_LIB way to utf8.library's widths,

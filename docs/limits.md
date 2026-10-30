@@ -205,21 +205,26 @@ pointers.
   only for `^` and `$`, `REG_NOTEOL` `REG_INVARG`. `getgrnam`'s members at most 127 bytes. `fcntl`, `ioctl` and the
   sockets as libz's (below and above: `O_NONBLOCK` on sockets and `pipe2` only).
 - The text-UI library (roadmap block 3, `ports/tui/README`; the owner's tui.library linked in, used by
-  `/tests/tuitest`, `sumi`, `maki` and `markdown`): UTF-8 output and the C library's widths since the console's UTF-8
-  (DESIGN D28; `make TUI_UTF8=0` the Latin-1 build), no composing of a separate accent onto its letter; no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` 0 (no
-  AmigaOS signals: poll descriptor 0), `TuiWait`'s extra signals at most 8 descriptors; a grid of at most 400 x 200 cells; 64 events queued (upstream drops the one
-  past that); about 96 KB of memory while a terminal is open on 80 x 32 (two grids of 16-byte cells, 80 KB, which the
+  `/tests/tuitest`, `sumi`, `maki`, `markdown` and `ahiru`): UTF-8 output and the C library's widths since the console's UTF-8
+  (DESIGN D28; `make TUI_UTF8=0` the Latin-1 build), no composing of a separate accent onto its letter; no mouse, no pastes, no resize events, no second screen (closing clears it); `TuiSignal` bit 8 (the
+  terminal's input, which the AmigaOS layer's `Wait` polls), `TuiWait`'s extra signals at most 8 descriptors; a grid of at most 400 x 200 cells; 64 events queued (upstream drops the one
+  past that); about 80 KB of memory while a terminal is open on 80 x 32 (two grids of 6-byte cells, 31 KB, which the
   allocator keeps for reuse after closing until the program ends).
 - Sumi (`ports/sumi/README`, man/sumi.txt): no mouse and no clipboard shared with other programs; settings only with
-  `HOME` set; a path of at most 63 bytes; saving through a link replaces the link; about 195 KB of its own and 82 KB of
+  `HOME` set; a path of at most 63 bytes; saving through a link replaces the link; about 116 KB of its own and 87 KB of
   shared code with one file open on 80 x 32.
 - Maki (`ports/maki/README`, man/maki.txt): no mouse; a long search not stopped by Ctrl+C (a key); settings only with
-  `HOME` set; a path of at most 63 bytes; about 650 KB of its own and 58 KB of shared code with one file open on
-  80 x 32 (the original's buffers: more than half of the stock A1200's free memory).
+  `HOME` set; a path of at most 63 bytes; about 202 KB of its own and 63 KB of shared code with one file open on
+  80 x 32.
 - Markdown (`ports/markdown/README`, man/markdown.txt): no mouse, no pictures, no browser, no clipboard shared with
   other programs; containers inside containers to 24 levels (a 32 KB stack); a link going up a folder (`../x`) opens
-  the wrong file; settings only with `HOME` set; a path of at most 63 bytes; about 241 KB of its own and 131 KB of
+  the wrong file; settings only with `HOME` set; a path of at most 63 bytes; about 242 KB of its own and 136 KB of
   shared code with one file open on 80 x 32.
+- Ahiru (`ports/ahiru/README`, man/ahiru.txt): inside the terminal only (no screen or window of its own); no mouse,
+  picture previews, sound, ARexx, shared clipboard, background copies or drives for disk images; lha, lzx and zip
+  archives read only; AmigaOS's protection letters on the status row; g/ and dt (an AmigaOS path's root and trashcan)
+  do nothing; names compared without case; settings only with `HOME` set; a path of at most 63 bytes; folder walks to
+  20 levels (the core's MAXDEPTH); about 392 KB of its own and 223 KB of shared code with a folder open on 80 x 32.
 - SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
   MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the
   wire). The kernel's receive ring is 1 KB (89 ms of SLIP): when netd cannot read for longer (a busy program at its

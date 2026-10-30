@@ -30,11 +30,11 @@ Markdown's own (for the main session to confirm with the layer's choices):
 
 Found in upstream (for the owner's repository, not changed here):
 - Memory: about 242 KB of data while one file is open on 80 x 32 (ps), of which the stack is 32 KB, and 136 KB of
-  shared code. With 0.1b5 and tui.library 0.5b1 it was 241 KB: the smaller grids (31 KB, were 80 KB in regions of
-  their own) and 0.1b6's places table and history at their length did not lower the figure here; the grids now come
-  from the allocator's chunks, which grow four times over (user/zmalloc.c: 4, 16, 64, 256 KB), so the saving is
-  probably held in a larger last chunk (read, not measured block by block) (the largest of the three programs; the editor
-  is Sumi's code a second time, compiled into this program).
+  shared code (the largest of the three programs; the editor is Sumi's code a second time, compiled into this
+  program). With 0.1b5 and tui.library 0.5b1 it was 241 KB: the smaller grids (31 KB, were 80 KB in regions of their
+  own) and 0.1b6's places table and history at their length did not lower the figure here; the grids now come from
+  the allocator's chunks, which grow four times over (user/zmalloc.c: 4, 16, 64, 256 KB), so the saving is probably
+  held in a larger last chunk (read, not measured block by block).
 - The editor half is a copy of Sumi's files (buf.c, file.c, syntax.c, clip.c, keys.c; the same names, changed apart
   since): two copies in one repository to keep in step; a shared source for the two programs would make it one.
 - A link's target is made an AmigaDOS path (md_resolve, md.c): "../x" becomes "/x" after the file's folder, which on

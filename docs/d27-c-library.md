@@ -878,3 +878,55 @@ Chip RAM free with the program, the test's shell and `ps` (1,335 KB before it st
   Markdown's figure did not move: its heap probably grew into the allocator's next chunk, four times the last
   (read from `user/zmalloc.c`, not measured block by block). A 15 KB block taking a 16 KB class and chunks growing
   4, 16, 64, 256 KB are the allocator's rounding; a closer fit for blocks of 8-32 KB would let such savings show.
+
+## Ahiru on Zenix (roadmap block 3, the owner's file manager; built 2026-10-30)
+
+Section 9's rule 1 a fourth time, on the biggest of the owner's programs: Ahiru and the CFile core under it (the
+owner's yes of 2026-10-28: published in Zenix's tree under MIT). The files, the choices and the way to update are in
+`ports/ahiru/README`, the user's page is `docs/man/ahiru.txt`; `/bin/ahiru` is in UAPPS (approved with the block-3
+programs), its package `ahiru` (its notice and the text-UI library's as `ahiru-tui`).
+
+- **The copy:** `ports/ahiru/upstream/` holds Ahiru 0.3b6 and the core's files it builds (the owner's CFile
+  repository, commit 78e80fd; `tools/ahiru-vendor.sh`). The CFile repository's files have no licence notice, so the
+  script adds a two-line MIT notice naming the owner to each copied source file and the owner's MIT licence as
+  `LICENSE` (the wording of his TextTools); otherwise unchanged.
+- **One layer, no copies:** `ports/common` grew what Ahiru and the core call (the README's list: more places, locks
+  with absolute paths, `NameFromLock` resolving links, `ParentDir`, `CurrentDir`, `Info`, `DateStamp` and
+  `SetFileDate`, `AvailMem`, `Wait`, `Execute`, `SystemTags` in the background), and `gui.c`, the screen calls, which
+  never open. Ahiru's own Zenix files are `ports/ahiru/zenix/`: `os.c`, the core's OS layer (`fs/os.h`, the seam the
+  core already has for its Kickstarts) instead of upstream's AmigaOS one; `none.c`, the parts with no place on the
+  console yet (sound, pictures, ARexx, the commodity, trackfile drives, module loading, the background paste); and
+  `term.c` and `list.c`, upstream's compiled with one function each of Zenix's (every terminal taken for CTerm's, so
+  MODE auto opens inside it; the parent of a Unix path).
+- **Changed in the shared layer (for the main session to confirm):**
+  - A `DateStamp` counts days from 1978, as AmigaOS's (it counted from 1970: only the layer read it before; the CFile
+    core reads it itself and writes it into archives and disk images). Sumi, Maki and Markdown pass their tests
+    unchanged.
+  - `T:` is `/tmp` for any name (it was `T:PROG-` only), with `RAM:` (`/tmp`), `SYS:` (`/`), `NIL:` (`/dev/null`)
+    and `PROGDIR:NAME` (`$HOME/.config/NAME/`): Ahiru's literals and default keys name them.
+  - The text-UI library's `TuiSignal` answers bit 8 (it answered 0) and names the terminal's descriptor, which the
+    layer's `Wait` polls: Ahiru's main loop waits in `Wait(ui_sig() | ...)`, as on AmigaOS. `tuitest` checks the
+    bit.
+  - `OpenLibrary("tui.library")` opens (the library linked in, its version 0.5): Ahiru's terminal half asks for it.
+- **Decided here (conservatively; the README's list):** inside the terminal only; the background paste becomes a
+  paste in the front (no threads, rule 3: slicing it is upstream's design to change); lha, lzx and zip read only
+  (no outside packers); the volume list is the mount table; Unix wildcards for patterns; `C:Ed` (the default editor)
+  is sumi; the stack `STACK_DEFAULT` (measured, about 11 KB at the deepest).
+- **Sizes and memory (FS-UAE, the stock A1200, 80 x 32):** `/bin/ahiru` 242,876 bytes: 228,632 of shared code,
+  8,026 of data, 41,518 of BSS. With a folder open Ahiru owns **392 KB** and shares 223 KB (`ps`): a third of the
+  stock A1200's 1,132 KB free with one login.
+- **For the main session (the allocator):** much of the 392 KB is `user/zmalloc.c`'s rounding, as Markdown's 242 KB
+  above: a block is rounded up to a power of two (Ahiru's 16,400-byte preview buffer takes a 32 KB block), and the
+  chunks grow four times over (4, 16, 64, 256 KB), so a heap a little over 84 KB holds 340 KB (read from the code and
+  the sizes, not measured block by block). Chunks after 64 KB growing by 64 or 128 KB (at most 8 regions a process,
+  D11) would let the ports' memory shrink without touching them; measured before it is changed.
+- **Found in upstream** (the README lists them, for the owner's repository): AmigaDOS path shapes (`g/`, `dt`, the
+  title's "//" at the root), names compared without case, a picture in an archive unpacked for a preview that cannot
+  be shown, `O` and `launch` starting terminal programs without the terminal, keys typed during an operation dropped
+  (`ui_abort` takes every waiting key; only Esc counts), AmigaOS words in messages, and the licence notes of
+  `core/lha.c` ("follows LHa for UNIX"), `core/lzx.c` (unlzx) and `core/dms.c` (xDMS, public domain) for the owner to
+  confirm under the notice added here.
+- **Tests:** `tools/ahiru-test.sh` (in `make check`): the three columns read back (`termtest screen`, `CON_READ`), keys
+  put in (`CON_INPUT`): a copy, a move, a delete at its question, E opening Sumi and back, an lha archive entered and
+  its member (packed -lh5-) copied out; the files on the disk (the copy with its mode, the move, the delete, the link,
+  the member with the archive's date); the settings and `FileColours`; the memory.

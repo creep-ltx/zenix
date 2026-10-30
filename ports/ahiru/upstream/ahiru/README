@@ -1,0 +1,265 @@
+# Ahiru - file manager
+
+*Ahiru* is Japanese for a (white) duck - a nod to Yazi, the Chinese duck
+it takes after. It was called UP-File until version 0.2b2.
+
+A Ranger/Yazi-style file manager for the classic Amiga (AmigaOS 2.04 and
+up), in text mode: on a 4, 8 or 16 colour screen of its own, in a window
+on Workbench, or **inside the terminal** it was started from (a CTerm tab
+or pane, or any Amiga console window) - see "Three ways to show" below.
+
+Three columns, Ranger's 1:3:4: the **parent** directory on the left, the
+**current** one in the middle, and a **preview** on the right of whatever
+the cursor is on:
+
+- a directory shows its contents;
+- text shows its first screen, **ANSI art shows in colour**;
+- an executable shows its hunk count and `$VER:` string;
+- an IFF picture shows its size, colours and mode (HAM, EHB), an 8SVX
+  sound its rate and length;
+- a ProTracker module shows its title, patterns and sample names;
+- an LhA archive lists its members (header levels 0, 1 and 2), an LZX or
+  Zip archive its member count and unpacked size;
+- an ADF disk image shows its filesystem and volume name;
+- anything else shows as hex.
+
+The preview is worked out only when the keyboard is idle, so holding a
+key down over a slow disk never reads a file per row.
+
+## Keys
+
+Every key is configurable: `PROGDIR:Ahiru.keys` lists them, one a line
+(`gg top`, `<Up> up`, `gs go SYS:`, `q none` to take a key away). Ahiru
+writes the file with all its built-in keys the first time it starts;
+edit it and start Ahiru again. The help (`?`) and the panels after a
+prefix key are made from it, so they always show the keys as they are.
+A line Ahiru does not understand is said in red at start; the others
+still work. The built-in keys:
+
+vi keys, as in Ranger. A prefix key (`g`, `y`, `d`, `p`, `c`, `u`, `z`,
+`o`, `=`) opens a small panel at the bottom listing what can follow;
+`m` and `'` show the bookmarks and take a key of their own.
+
+| Key | Action |
+|---|---|
+| `j` `k` / Up Down | move (`J` `K` half a page, Shift+Up/Down a page) |
+| `h` / Left | parent directory (at a root: the volume list) |
+| `l` / Right / Enter | enter a directory, an archive (lha, lzx, zip) or a disk image (ADF, ISO; a DMS file is unpacked to an ADF first, asks), or open a file by type: run a program (asks), read text/ANSI, show pictures, sounds and guides in MultiView |
+| `gg` `G` | top, bottom |
+| `i` | view the file full screen (text, ANSI art, hex; `x` flips to hex) |
+| `E` | edit (EDITOR in the config, else `ENV:EDITOR`, else `C:Ed`); Sumi, the editor that lives in the terminal, gets a console window as big as Ahiru's screen, or the terminal pane when Ahiru runs inside one |
+| Space | mark and move on; `v` inverts the marks, `uv` clears them |
+| `yy` / `dd` | yank (copy) / cut the marked set, or the entry under the cursor |
+| `pp` / `po` | paste here / paste, overwriting everything |
+| `dD` / Del | delete (asks; delete-protected files ask again) |
+| `cw` `a` `A` `I` | rename: empty, cursor at the extension, at the end, at the start |
+| `M` | make a directory |
+| `x` | unpack the marked archives (or the one under the cursor) here, with no outside unpacker (asks) |
+| `/` `n` `N` | search, next, previous |
+| `f` | filter the listing (empty or Esc clears) |
+| `on` `os` `ot` `oe` `or` | sort by name, size, time, extension; reverse (capitals sort reversed) |
+| `zh` `zp` `zc` | show/hide `.info` icons, preview column on/off, cycle 4/8/16 colours |
+| `gs` `gc` `gl` `gd` `ge` `gt` `gr` | go to SYS: C: LIBS: DEVS: ENV: T: RAM: |
+| `gv` `g/` `gh` | the volume list, this volume's root, home (START) |
+| `m` + key, `'` + key | bookmark this directory, jump to a bookmark |
+| `cd` | go to a typed path (a file's path opens its drawer on it) |
+| `:` | command line: `mkdir NAME`, `touch NAME`, `cd PATH`, `shell COMMAND`, `rename NEW` (the entry under the cursor; without NEW it asks), `q` or `quit` |
+| `!` / `S` | run a command here (output in a console) / open a shell here |
+| `R` / F5 | reload |
+| `pk` | pack the marked (or the entry under the cursor) into a new archive here |
+| `cr` | rename by pattern (`*.JPG` to `*.jpg`): the marked, else all, with a preview of old -> new first |
+| `=c` / `=s` | compare with the next tab's folder (marks what differs) / make the next tab's folder like this one |
+| `=m` | MD5 and CRC-32 of the marked files (Return saves a `.md5`); on a `.md5` or `.sfv` file: check the files it lists |
+| `=d` | an `.adf` into a drive (`DA0:`) and in; again, or inside the drive: out |
+| `?` / Help | the key list |
+| `q` | quit |
+
+Icons travel with their files: copying, moving, renaming or deleting
+`Foo` takes `Foo.info` along whether icons are shown or not.
+
+The cursor position is remembered per directory, so going back into a
+drawer puts you where you were.
+
+## Settings
+
+`PROGDIR:Ahiru.config`, written on quit; unknown lines are ignored:
+
+```
+COLORS 8              ; 4, 8 or 16
+FONT topaz.font/8     ; any fixed-width font
+HIDEINFO yes          ; hide .info icons
+PREVIEW yes           ; the third column
+SORT name             ; name, size, date or ext
+REVERSE no
+START SYS:            ; where gh goes
+SAVEDIR yes           ; start where you quit (LASTDIR)
+EDITOR                ; empty: ENV:EDITOR, then C:Ed (C:Sumi suggested)
+EDITORCONSOLE no      ; yes: the editor needs a console (Sumi is known as one)
+HOTKEY ctrl alt a     ; (2.0+) brings Ahiru up in the drawer Workbench has active
+CXPOPUP yes           ; no: start hidden and wait for the hotkey; q then only hides
+VERIFY no             ; yes: every copy is read back and compared before it is kept
+LINEMODE size         ; after the names: size, date, bits or none
+OPENWITH mod Play     ; offered by O for files ending .mod (* = any)
+MODE auto             ; auto, screen, window or terminal (see below)
+WINDOW 40 30 680 400  ; the window's place and size (window mode), kept
+```
+
+From Workbench, the icon's tool types `HOTKEY` and `CXPOPUP` win over
+the file.
+
+Bookmarks live in `PROGDIR:Ahiru.marks`, one per line (`a DH0:Work`).
+
+The palettes: **16** is the classic ANSI sixteen; **8** is the ANSI eight
+with the blue lifted so directories read on black; **4** is black, grey,
+sky blue and amber. Colours by kind: directories blue, programs green,
+archives red, pictures yellow, sounds magenta, source cyan, icons dim.
+These come from **`ENVARC:FileColours`**, the file csh's `ls` reads too
+(written with these defaults when missing), so a file looks the same in
+Ahiru as in `ls`: change a kind's colour there, or put an ending into a
+kind (`.foo picture`), and both follow. Links, scripts (s bit) and hidden
+files (h bit) have colours of their own.
+
+## Usage
+
+```
+Ahiru [PATH] [SCREEN | WINDOW | TERMINAL]
+```
+
+## Three ways to show
+
+- **Screen** - a screen of its own. It copies the Workbench's display
+  mode and size; if that mode will not take the depth, a plain hires
+  screen is used; if no screen can be opened, a window on Workbench.
+- **Window** - an ordinary window on Workbench: moved, sized and closed
+  as any, in Workbench's colours. Its place and size are kept
+  (`WINDOW` in the config).
+- **Terminal** - inside the terminal Ahiru was started from, the way
+  ranger and yazi run inside a terminal on Linux: no window or screen of
+  its own, it draws in the CTerm tab or pane (or the console window) it
+  was typed in. When it quits, the terminal is as it was - in CTerm its
+  screens do not end up in the history.
+  - In **CTerm**: CTerm's theme colours, the mouse (click, double-click,
+    the wheel), picture previews as real pictures (sixel), and it follows
+    the pane's size (Left Amiga+Return beside it gives a Shell next to
+    Ahiru).
+  - In **any other console** (CON:, KingCON, ...): Workbench's colours,
+    no mouse, no pictures; the screen is cleared when it quits.
+  - Needs **`LIBS:tui.library` 0.3 or newer**, the terminal programs'
+    shared toolkit (the one Sumi, Maki and Markdown use; built in
+    the AmigaLibs repo's `tui/`, one file per processor). Without it Ahiru
+    says so and opens on its screen instead.
+  - `!` (a Shell command), `S` (a Shell) and the editor run *in the
+    terminal* while Ahiru waits, then Ahiru comes back - as in ranger.
+  - No hotkey there: a second Ahiru in a terminal does not pop up the
+    first one.
+
+**MODE auto** (the start): inside the terminal when Ahiru is started
+from a Shell in CTerm, otherwise its own screen. `MODE screen`, `window`
+or `terminal` in the config fixes one; the words `SCREEN`, `WINDOW` and
+`TERMINAL` after `Ahiru` choose for that start only. `TERMINAL` from a
+Workbench icon (there is no console) is the screen.
+
+## Building
+
+C, cross-compiled with Bebbo's `m68k-amigaos-gcc` (libnix):
+
+```
+make          # builds Ahiru (the core is the folder above: CFILE=..)
+```
+
+Terminal mode is drawn by tui.library (`src/term.c` turns its events into
+Ahiru's); its headers come from `TUI=../../AmigaLibs/tui`.
+
+The work is done by the core in the CFile repo, which CFile uses too:
+`core/` reads the formats (lha, lzx, zip, ADF, ISO, DMS, IFF, ANSI,
+natural sort, file kinds) and `fs/` does folders, the volume list,
+archives and disk images as folders, copy, move, delete, rename and new
+folder with the safety rules (a file is written beside the old one and
+swapped in only when whole, a move deletes only what arrived, links stay
+links, icons travel with their files, a newer version is never replaced
+without asking). Ahiru is the screen and the keys; `src/fe.c` answers
+the core's questions and draws its progress bar. The core has its own
+tests in the CFile repo (`make test`, `tests/fs.sh`); see
+`CFile/docs/core.md`.
+
+## Tabs, visual mode, finding, the trashcan, sound
+
+- **Tabs**: `t` opens a new tab where you are, `]` and `[` go to the next
+  and the one before, `1`-`9` go straight to one, Ctrl-W closes it. The
+  title row shows them: ` 1 [2] 3`.
+- **Visual mode**: `V`, then move: everything between where you started
+  and the cursor is marked. `V` or Esc ends it, the marks stay.
+- **Bulk rename**: `cb` puts the marked names (or all of them) in your
+  editor, one a line; change them, save, and they are renamed - icons
+  along, and two names can swap.
+- **Find**: `s` finds names in this folder and every one below (a part of
+  the name, or an AmigaDOS pattern such as `#?.mod`); Ctrl-S finds files
+  holding a text. The hits show as a list of their own: preview, copy,
+  delete, Enter as anywhere. `h` or `R` goes back to the folder.
+- **The trashcan**: `dt` moves to the volume's Trashcan drawer, as
+  Workbench has it; a disk without one gets one, with the system's
+  trashcan icon. `dD` still deletes for good.
+- **Sound**: `P` plays the module or 8SVX sound under the cursor in the
+  background while you go on; `P` again stops it.
+
+## Background copies, the clipboard, open with, and more
+
+- **Background copies**: a paste between folders on disks runs in a
+  process of its own; the status row counts it up and you go on. `w`
+  shows it (`x` there stops it). A question it has (a name already
+  there) comes up as usual. While it runs, the other file operations
+  wait for it. Pastes into or out of archives stay in the front.
+- **The clipboard**: `cc` copies the path, `cf` the name, `cF` the folder.
+- **Open with**: `O` offers the program the file's icon names, the
+  `OPENWITH ext program` lines of `Ahiru.config`, MultiView, the editor,
+  or running it; a digit or Return picks.
+- **Jump by habit**: `Z` and a part of a name goes to the folder used
+  most (and lately) that holds it; several: a digit picks. Remembered in
+  `PROGDIR:Ahiru.places`.
+- **Live filter**: `f` narrows the list as you type; Esc gives it back.
+- **Line mode**: `L` shows sizes, dates, protection bits or nothing after
+  the names (`LINEMODE` in the config).
+- **Mouse**: a click selects, a second quick one opens; a click in the
+  parent column goes up onto it (from find's hits: back to the folder
+  searched, as `h`), in a folder's preview goes into it; the
+  wheel scrolls.
+- **Colours**: `PROGDIR:Ahiru.theme` holds the palette and which colour
+  draws what, for 4, 8 and 16 colours; written when missing. The file
+  kinds' colours in `ENVARC:FileColours` (csh's, `KIND CTERM,PLAIN`) win
+  where it gives one: its first number on Ahiru's own screen and in CTerm
+  (ANSI colours, 90-97 bright; grey is the theme's dim), its second in a
+  Workbench window or a plain console (30-33 = Workbench's pens 0-3).
+- **ARexx**: the port `AHIRU` - `GO path`, `GET PATH|NAME|FILE|MARKED`,
+  `ACTION name [argument]` (any action of Ahiru.keys), `REFRESH`, `QUIT`.
+  While Ahiru is hidden or waits in a question, `GET` is answered,
+  `QUIT` quits when hidden, and the rest return 5 (busy).
+- **Your own commands**: a line in `Ahiru.keys` binds a key to `run`
+  (the output in a console, waits) or `launch` (starts it and goes on):
+  `<F2> run Echo {file}`, `<F3> launch SYS:Utilities/MultiView {file}`.
+  `{file}` `{name}` `{dir}` `{marked}` `{other}` (the next tab's folder)
+  are filled in, quoted.
+
+## Archives and disk images
+
+Enter on an lha, lzx or zip archive, an ADF or ISO image opens it like a
+folder: walk around in it, view (`i`) and edit (`E`) its files (an edit
+goes back in when saved), yank out of it and paste into it, rename and
+delete inside it. Changes to lha, lzx and zip archives use C:lha, C:lzx
+and C:zip on a copy, which Ahiru reads back and checks before it
+replaces the archive; ADF images are written by Ahiru itself. A typed
+path (`cd`) or a bookmark can point inside an archive.
+
+For testing on an emulator without a keyboard (over wasabi):
+
+- `KEYS=...` plays keys at start: `|` is Return, `~` Esc, `{` `}` Left
+  and Right, `_` Space.
+- `LOG` writes each startup stage, with the free memory, to `RAM:Ahiru.log` and, once the
+  played keys are used up, the whole screen as text to
+  `RAM:Ahiru.grid` (rows of characters, then the foreground and
+  background pen of every cell). A screen grab of a planar screen
+  drops pixel columns from letters; the grid is exact.
+- Ctrl-C quits from anywhere, the viewer and prompts included.
+
+Ahiru uses no C stdio at all (its own `fmt()` replaces `sprintf`):
+libnix's stdio setup returns 20 before `main` when the program is
+started without a console, as wasabi does.

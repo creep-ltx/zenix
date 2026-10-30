@@ -1,12 +1,12 @@
-The AmigaOS layer of the owner's terminal programs on Zenix (roadmap block 3; DESIGN D27 section 9; Sumi, Maki and
-Markdown, ports/sumi, ports/maki, ports/markdown; docs/d27-c-library.md, "Sumi on Zenix" and "Maki and Markdown on
-Zenix")
+The AmigaOS layer of the owner's terminal programs on Zenix (roadmap block 3; DESIGN D27 section 9; Sumi, Maki,
+Markdown and Ahiru, ports/sumi, ports/maki, ports/markdown, ports/ahiru; docs/d27-c-library.md, "Sumi on Zenix",
+"Maki and Markdown on Zenix" and "Ahiru on Zenix")
 
 What it is: the owner's programs call AmigaOS directly (they have no OS layer of their own), so their upstream files
-compile unchanged over AmigaOS's names given here over the C library (GPL-2.0-only). One layer for the three, never a
-copy each: dos.c is compiled once per program (build/PROG/zenix-dos.o) with the settings names that program maps
-(ZENIX_TT_NAMES, the Makefile's TT_NAMES_PROG), and linked with the program's files, the text-UI library's pure build
-(build/libtui-pure.a, ports/tui) and the C library's (build/libc-pure.a).
+compile unchanged over AmigaOS's names given here over the C library (GPL-2.0-only). One layer for all four, never
+a copy each: dos.c is compiled once per program (build/PROG/zenix-dos.o) with the settings names that program maps
+(ZENIX_TT_NAMES, the Makefile's TT_NAMES_PROG; Ahiru's in its own rules), and linked with the program's files, the
+text-UI library's pure build (build/libtui-pure.a, ports/tui) and the C library's (build/libc-pure.a).
 
 include/   amigados.h: the types, the structures upstream reads (FileInfoBlock, DateStamp, DateTime, FileHandle,
            DosPacket, the clipboard's request) and the calls, each one's meaning on Zenix in its head; the exec/, dos/,
@@ -19,15 +19,25 @@ dos.c      the calls: Open/Read/Write/Seek/Close/FGets (a handle is the descript
            IoErr and Fault (errno and strerror), CompareDates, DateToStr, GetVar (getenv), Delay, SystemTags
            (system(), with SYS_Input and SYS_Output as the command's descriptors 0 and 1), FindTask, DOS packets
            (SendPkt/GetMsg: a pipe read when it has data), the reply ports' signal bits for the text-UI library's
-           wait (tui_zenix_sigfd), the clipboard device (never opens), OpenLibrary (never opens)
+           wait (tui_zenix_sigfd), the clipboard device (never opens), OpenLibrary (only "tui.library", the one
+           linked in, opens); for Ahiru and the CFile core also (amigados.h's last part): AllocMem/FreeMem,
+           AvailMem (SYS_meminfo), MODE_READWRITE, FPuts/FPutC, NameFromLock (soft links resolved), DupLock,
+           ParentDir, CurrentDir (chdir), Info (SYS_statfs of the mount), DateStamp and SetFileDate (SYS_utimes),
+           Execute (the shell; "" the user's), SystemTags' SYS_Asynch (the shell's &), Wait (the terminal's signal
+           from the text-UI library and the reply ports' descriptors, by poll), SysBase->ThisTask
+gui.c      Ahiru's screen calls (include/amigagui.h: Intuition, graphics, diskfont, icon): none ever opens; OpenFont
+           gives a font all the same (upstream reads its size before it tries a screen)
 
 Decided here (conservatively; for the main session to confirm):
-- The names: only the program's own literals are mapped, nothing else is ever rewritten (a file the user names is a
-  Unix path as typed): "ENVARC:NAME" is $HOME/.config/NAME for the program's names (Sumi; Maki and FileColours;
-  Markdown: TT_NAMES_PROG), its folder made at the first start, mode 700 (the places file lists the files read or
-  edited); "ENV:NAME" is no file (AmigaOS keeps a RAM copy of the settings there; on Zenix one place is enough, so that
-  copy is never written and never read); "T:PROG-" is /tmp/PROG- (a file never named, kept when the terminal goes
-  away). No HOME: no settings are kept.
+- The names: only the program's own literals and a few AmigaOS places are mapped, nothing else is ever rewritten (a
+  file the user names is a Unix path as typed): "ENVARC:NAME" is $HOME/.config/NAME for the program's names (Sumi;
+  Maki and FileColours; Markdown: TT_NAMES_PROG), its folder made at the first start, mode 700 (the places file lists
+  the files read or edited); "ENV:NAME" is no file (AmigaOS keeps a RAM copy of the settings there; on Zenix one place
+  is enough, so that copy is never written and never read); "T:" (and so "T:PROG-") is /tmp, "RAM:" /tmp too, "SYS:"
+  /, "NIL:" /dev/null (the places Ahiru's literals and its default keys name; a Unix name starting so is rare: such a
+  name in the current folder is taken for the place); "PROGDIR:NAME..." of the program's own names is
+  $HOME/.config/NAME/NAME... (Ahiru keeps its files beside itself on AmigaOS; the folder is made, mode 700, when one
+  is written). No HOME: no settings are kept.
 - Protection bits: FileInfoBlock's protection carries the Unix mode (bits 8-19, bit 31 marking it) and AmigaOS's r, w
   and e bits, set when this user may not read or write the file, or it has no x bit (upstream then shows [read-only]
   and refuses to save over it; Maki's listing shows rwed as AmigaOS's List does, and its colours take a file with x
@@ -35,8 +45,19 @@ Decided here (conservatively; for the main session to confirm):
   its own message. SetProtection puts the mode back after a save (a new copy renamed over the old file) and, when root
   saves, the owner and group Examine saw. Comments: Zenix files have none; Examine gives an empty one. A soft link is
   listed as what it points to (stat, not lstat: upstream would take ST_SOFTLINK's 3, above 0, for a directory).
-- Dates: DateStamp counts days from 1970 (AmigaOS: 1978); only this layer reads and writes it (CompareDates,
-  DateToStr in local time), so upstream never sees the difference.
+- Dates: DateStamp counts days from 1978, as AmigaOS's does (AMIGA_EPOCH_DAYS): the CFile core turns them into
+  dates itself and writes them into archives and disk images; Sumi, Maki and Markdown leave them to this layer
+  (CompareDates, DateToStr in local time).
+- Locks hold an absolute path, made from the current directory and freed of "." and ".." parts as written (as the
+  shell's cd); NameFromLock resolves the soft links on the way (at most 8). IoErr gives AmigaOS's numbers for what
+  upstream tests (not found, in use, exists, wrong type, across devices, not empty, disk full, write protected),
+  Fault the text of either.
+- Wait: the signals that can come are the text-UI library's (TuiSignal's bit: the terminal has input) and the
+  reply ports' (their pipe has data); one asked with none of them behind it never comes, so a Wait for nothing
+  else returns 0 at once.
+- SystemTags with SYS_Asynch: the command through the shell's & (with /dev/null as its input and output unless
+  handles are given), so it is nobody's child; "C:Ed " (Ahiru's default editor without $EDITOR) is Zenix's sumi,
+  as "Sumi " is.
 - "*" (AmigaOS's console of the program) is /dev/tty: Maki reading a pipe takes its keys from the terminal.
 - Packets: upstream's ACTION_READ (Maki reading a pipe while it shows it) is a read done when the descriptor has data:
   SendPkt notes it on the reply port, GetMsg polls the descriptor (never waiting) and reads; the reply port's signal
