@@ -8,3 +8,13 @@
 #define LVO_Output      -60
 #define LVO_Write       -48
 #define LVO_Exit        -144
+#define LVO_Forbid      -132
+#define LVO_Permit      -138
+#define LVO_LoadView    -222
+#define LVO_WaitTOF     -270
+#define LVO_WaitBlit    -228
+#define LVO_OwnBlitter  -456
+#define LVO_DisownBlitter -462
+#define gb_ActiView     34
+#define gb_copinit      38
+#define MEMF_CHIP       2

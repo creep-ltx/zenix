@@ -17,5 +17,13 @@ send cat /tmp/zn.after\r
 wait typed-after 20
 send echo disk-ok > /home/zn.disk; sync; cat /home/zn.disk 2>/dev/null || (echo disk-ok > /tmp/zn.disk; cat /tmp/zn.disk)\r
 wait (?m)^disk-ok 20
+send zine /tests/zine/zexit; echo zexit-rc=$?\r
+wait zexit-rc= 60
+send zine /tests/zine/zhello; echo zhello-rc=$?\r
+wait zhello-rc= 60
+send zine /tests/zine/ztake; echo ztake-rc=$?\r
+wait ztake-rc= 60
+send free\r
+wait (?m)^fast RAM free.*\n 20
 send date; echo zine-null-done\r
 wait zine-null-done 20
