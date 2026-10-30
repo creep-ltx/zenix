@@ -91,7 +91,6 @@ LIBC_SRCS := \
     newlib/libc/locale/localedata.c \
     newlib/libc/locale/locale_ctype_ptr.c \
     newlib/libc/locale/locale_ctype_ptr_l.c \
-    newlib/libc/locale/localedata.c \
     newlib/libc/locale/locale_mb_cur_max.c \
     newlib/libc/locale/locale_names.c \
     newlib/libc/locale/newlocale.c \
@@ -201,12 +200,10 @@ LIBC_SRCS := \
     newlib/libc/string/memccpy.c \
     newlib/libc/string/memchr.c \
     newlib/libc/string/memcmp.c \
-    newlib/libc/string/memcpy.c \
     newlib/libc/string/memmem.c \
     newlib/libc/string/memmove.c \
     newlib/libc/string/mempcpy.c \
     newlib/libc/string/memrchr.c \
-    newlib/libc/string/memset.c \
     newlib/libc/string/memset_explicit.c \
     newlib/libc/string/rawmemchr.c \
     newlib/libc/string/rindex.c \
@@ -221,13 +218,11 @@ LIBC_SRCS := \
     newlib/libc/string/strcoll.c \
     newlib/libc/string/strcoll_l.c \
     newlib/libc/string/strcmp.c \
-    newlib/libc/string/strcpy.c \
     newlib/libc/string/strcspn.c \
     newlib/libc/string/strdup.c \
     newlib/libc/string/strerror_r.c \
     newlib/libc/string/strlcat.c \
     newlib/libc/string/strlcpy.c \
-    newlib/libc/string/strlen.c \
     newlib/libc/string/strlwr.c \
     newlib/libc/string/strncasecmp.c \
     newlib/libc/string/strncasecmp_l.c \
@@ -601,7 +596,6 @@ LIBC_SRCS := \
     newlib/libm/common/frexpl.c \
     newlib/libm/common/exp10l.c \
     newlib/libm/common/fabsl.c \
-    newlib/libm/common/frexpl.c \
     newlib/libm/common/math_inexactl.c \
     newlib/libm/common/nanl.c \
     newlib/libm/common/nexttoward.c \

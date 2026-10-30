@@ -64,6 +64,10 @@ for a in $BD/libc.a $BD/libc-pure.a; do
         echo "PASS $(basename $a): no 64-bit multiply or divide (check-68020-60)" || { echo "FAIL $(basename $a): check-68020-60"; pass=0; }
     fpu=$($OD -d --no-show-raw-insn $a | grep -E '^ *[0-9a-f]+:[[:space:]]+f(mov|add|sub|mul|div|cmp|tst|sqrt|abs|neg|int|b|db|s[a-z]|save|restore|trap|nop|get|scale|rem|mod|sin|cos|tan|a|e|l|t)[a-z.]*[[:space:]]')
     [ -z "$fpu" ] && echo "PASS $(basename $a): no FPU instruction (-msoft-float)" || { echo "FAIL $(basename $a): FPU instructions"; echo "$fpu" | head -3; pass=0; }
+    # one member of each name: which of two the linker took depended on their order (audit B3-21: the generic memcpy,
+    # memset, strcpy and strlen beside machine/m68k's)
+    dup=$(${TOOLPREFIX:-$HOME/opt/m68k-elf/bin/m68k-elf-}ar t $a | sort | uniq -d | tr '\n' ' ')
+    [ -z "$dup" ] && echo "PASS $(basename $a): one member of each name" || { echo "FAIL $(basename $a): members twice: $dup"; pass=0; }
 done
 # the 64-bit division against the PC's
 cat > $T/div.c <<'C'

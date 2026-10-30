@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # The allocator on the PC (docs/d27-c-library.md "The allocator"): user/zmalloc.c built for a 32-bit PC with the
 # kernel's regions imitated (tools/zmalloc-host.c). Checked: its region count is the kernel's NREG; a stray free, a
-# double free and a huge request are refused and a damaged header stops the program (134); three seeds of a million
+# double free and a huge request are refused and a damaged header stops the program (134); a grown heap keeps its
+# quick lists (audit B3-11); three seeds of a million
 # random calls keep every block's bytes (no overlap, realloc keeps the contents, calloc is zero) and give every chunk
 # but the kept ones back; the regions hold megabytes; and each recorded program's allocations (tools/testdata/mtrace,
 # from a ZMALLOC_TRACE build in FS-UAE) are replayed and held within the budget below (the bytes held at the peak,
@@ -47,6 +48,8 @@ fi
 Z="$T/zmh"
 o=$($Z bad 2>&1)
 case "$o" in "bad: "*) echo "PASS stray and double frees reported and ignored, a damaged header stops (134)" ;; *) fail "the bad pointers" ;; esac
+o=$($Z quick -r 16 2>&1)
+case "$o" in "quick: "*) echo "PASS $o" ;; *) fail "$o" ;; esac
 for s in 1 7 1234; do
     o=$($Z stress -r 16 $s); echo "     $o"
     case "$o" in *"every block kept"*"0 calls out of regions"*) ;; *) fail "stress, seed $s: $o" ;; esac

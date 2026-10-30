@@ -79,7 +79,8 @@ FILES
     (AmigaOS's ENVARC:Sumi; there is no second copy as ENV: has). Without
     HOME nothing is kept. When the terminal goes away with changes not
     saved (the input ends), each changed file is kept as NAME.save, an
-    unnamed one as /tmp/Sumi-N.save.
+    unnamed one as /tmp/T-UID/Sumi-N.save (UID: the user's number; a
+    folder of the user's own, mode 700).
 
 EXIT STATUS
     0 when it quits; 10 when it is not started in a terminal; 20 when

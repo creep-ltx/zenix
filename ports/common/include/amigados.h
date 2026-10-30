@@ -4,11 +4,13 @@
  * calls are ports/common/dos.c; the few that are one line are here. What each one does on Zenix, in short:
  *  - a file handle (BPTR from Open, Input, Output) is the descriptor + 1, so 0 stays "failed" as AmigaOS has it
  *    (the text-UI library's layer takes the same handles); "*" is the terminal (/dev/tty); a lock (Lock, CreateDir)
- *    is a small block holding the path and the file's device and inode (SameLock compares those);
+ *    is a small block holding the path and the file's inode (SameLock compares those and the mount, from the mount
+ *    table: Zenix's stat gives no device); Rename never replaces an existing other object (AmigaOS's refusal);
  *  - the program's own settings names are mapped (nothing else; the Makefile's TT_NAMES_PROG): "ENVARC:NAME" is
  *    $HOME/.config/NAME (the settings, the keys and where each file was left), "ENV:NAME" is no file at all
  *    (AmigaOS's RAM copy of ENVARC:; one place on Zenix, so the second copy is never written and never read),
- *    "T:PROG-" is /tmp/PROG- (an unnamed file kept when the terminal goes away);
+ *    "T:PROG-" is /tmp/T-UID/PROG- (an unnamed file kept when the terminal goes away; T-UID is this user's own
+ *    folder, mode 700);
  *  - a file's protection (fib_Protection) carries its Unix mode in bits 8-19 with bit 31 set, and AmigaOS's r, w
  *    and e bits (set when NOT allowed) from what this user may do (upstream then says "read-only" and refuses to
  *    save over a file it may not write); SetProtection gives the mode back (chmod) and, for root, the owner Examine
@@ -213,7 +215,7 @@ LONG SystemTags(CONST_STRPTR command, ...);
  * terminal programs. The same rules as above; besides:
  *  - more names (amigados.h's head and ports/common/README): "PROGDIR:NAME..." of the program's own names is
  *    $HOME/.config/NAME/NAME... (its folder made, mode 700, when a file there is written); "SYS:" is "/"; "T:" and
- *    "RAM:" are /tmp; "NIL:" is /dev/null;
+ *    "RAM:" are /tmp/T-UID, this user's own folder (mode 700); "NIL:" is /dev/null;
  *  - a lock holds an absolute path (made from the current directory when the name is relative); NameFromLock gives it
  *    with every soft link on the way resolved; ParentDir the folder above ("/" has none); CurrentDir changes the
  *    process's directory (chdir) and gives back the lock it had before (0: where the program started); Info gives the

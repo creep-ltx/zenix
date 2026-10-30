@@ -230,6 +230,11 @@ static void t_malloc(void)
     free(r);
     void *a = 0;
     check("posix_memalign 64", !posix_memalign(&a, 64, 100) && !((uintptr_t)a & 63), "");
+    /* audit B3-10: an alignment over the allocator's limit is refused, not wrapped into a 16-byte block */
+    {
+        volatile size_t big = 0xBFFFFFF8u, al = 0x40000000u;       /* (volatile: no compile-time size warning) */
+        check("memalign with a huge alignment refused", !memalign(al, big) && !aligned_alloc(al * 2, 16), "");
+    }
     check("malloc_usable_size of it", a && malloc_usable_size(a) >= 100, "");
     a = realloc(a, 5000);
     check("realloc of an aligned block", a != 0, "");
@@ -379,6 +384,30 @@ static void t_errors(void)
     check("getenv of PATH", getenv("PATH") != 0, "");
     setenv("LIBCTEST", "yes", 1);
     checks("setenv then getenv", getenv("LIBCTEST") ? getenv("LIBCTEST") : "", "yes");
+    /* audit B3-13: a bad name and a variable too big for the kernel's block are refused, the old value kept */
+    errno = 0;
+    check("setenv of a name with = refused (EINVAL)", setenv("A=B", "x", 1) == -1 && errno == EINVAL, "");
+    {
+        static char big[1100];
+        memset(big, 'v', sizeof big - 1);
+        errno = 0;
+        check("setenv too big for the block refused (ENOMEM), the old value kept", setenv("LIBCTEST", big, 1) == -1 &&
+              errno == ENOMEM && getenv("LIBCTEST") && !strcmp(getenv("LIBCTEST"), "yes"), "");
+    }
+    /* audit B3-12: a block the kernel took without its last 0 still ends inside the child's copy */
+    {
+        static char saved[1024], junk[1024];
+        int sl = sys_envget(saved, sizeof saved);
+        pid_t pid;
+        int st = -1;
+        char *av[] = { (char *)myname, "envlen", 0 };
+        memset(junk, 'A', sizeof junk);
+        if (sl > 0 && sys_envset(junk, sizeof junk) >= 0) {
+            if (posix_spawn(&pid, myname, 0, 0, av, 0) == 0) waitpid(pid, &st, 0);
+            sys_envset(saved, (u32)sl);
+        }
+        checki("an environment block without its last 0: the child's strings end inside it", WEXITSTATUS(st), 0);
+    }
     unsetenv("LIBCTEST");
     check("unsetenv", getenv("LIBCTEST") == 0, "");
     char cwd[64];
@@ -437,6 +466,20 @@ static void t_poll(void)
     struct timeval tv = { 1, 0 };
     r = select(fd[0] + 1, &rs, 0, 0, &tv);
     check("select: readable", r == 1 && FD_ISSET(fd[0], &rs), "");
+    /* audit B3-16: a descriptor past the process's limit is EBADF, a negative timeout EINVAL; a huge timeout is no
+     * wrap into "for ever" (the byte is there: at once) */
+    FD_ZERO(&rs);
+    FD_SET(40, &rs);
+    errno = 0;
+    check("select: a descriptor past the limit is EBADF", select(41, &rs, 0, 0, &tv) == -1 && errno == EBADF, "");
+    struct timeval neg = { -1, 0 }, huge = { 0x7FFFFFFF, 0 };
+    FD_ZERO(&rs);
+    FD_SET(fd[0], &rs);
+    errno = 0;
+    check("select: a negative timeout is EINVAL", select(fd[0] + 1, &rs, 0, 0, &neg) == -1 && errno == EINVAL, "");
+    FD_ZERO(&rs);
+    FD_SET(fd[0], &rs);
+    check("select: a huge timeout, the byte there: readable at once", select(fd[0] + 1, &rs, 0, 0, &huge) == 1, "");
     close(fd[1]);
     char c;
     read(fd[0], &c, 1);
@@ -803,6 +846,7 @@ int main(int argc, char **argv)
         return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "tty")) return t_tty();
+    if (argc > 1 && !strcmp(argv[1], "envlen")) return environ && environ[0] && strlen(environ[0]) <= 1024 ? 0 : 7;
     if (argc > 1 && !strcmp(argv[1], "sigdfl")) {     /* run by system(): SIGINT and SIGQUIT not ignored here */
         struct sigaction i, q;
         return sigaction(SIGINT, 0, &i) == 0 && sigaction(SIGQUIT, 0, &q) == 0 && i.sa_handler == SIG_DFL &&

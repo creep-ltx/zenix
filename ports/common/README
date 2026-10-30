@@ -33,11 +33,22 @@ Decided here (conservatively; for the main session to confirm):
   file the user names is a Unix path as typed): "ENVARC:NAME" is $HOME/.config/NAME for the program's names (Sumi;
   Maki and FileColours; Markdown: TT_NAMES_PROG), its folder made at the first start, mode 700 (the places file lists
   the files read or edited); "ENV:NAME" is no file (AmigaOS keeps a RAM copy of the settings there; on Zenix one place
-  is enough, so that copy is never written and never read); "T:" (and so "T:PROG-") is /tmp, "RAM:" /tmp too, "SYS:"
+  is enough, so that copy is never written and never read); "T:" (and so "T:PROG-") and "RAM:" are /tmp/T-UID, this user's own folder
+  there (made with mode 700; one of that name that is not the user's own, or is a link, is refused: audit B3-7), "SYS:"
   /, "NIL:" /dev/null (the places Ahiru's literals and its default keys name; a Unix name starting so is rare: such a
   name in the current folder is taken for the place); "PROGDIR:NAME..." of the program's own names is
   $HOME/.config/NAME/NAME... (Ahiru keeps its files beside itself on AmigaOS; the folder is made, mode 700, when one
   is written). No HOME: no settings are kept.
+- AmigaOS's meanings kept where Zenix's differ (audit 2026-10-30, block 3): Rename never replaces an existing other
+  object (ERROR_OBJECT_EXISTS; Zenix's rename(2) would, and upstream relies on the refusal); MODE_OLDFILE opens for
+  reading and writing (read only when writing is not allowed: Ahiru writes disk images in place); SameLock tells
+  mounts apart by the mount table (Zenix's stat has no device); DeleteFile takes a folder on EISDIR or EPERM; ExNext
+  lists a name whose path is over 63 bytes as an empty file nobody may read, so a copy fails on it instead of leaving
+  it out; SystemTags and Execute turn upstream's AmigaDOS quotes ("NAME", where nothing is expanded) into sh's single
+  quotes, so a name holding $, ` or \ is not run as a command (a name holding a " still ends its quotes early: upstream
+  would need to pass the name apart from the command text).
+- FGets keeps one read-ahead buffer for every handle: switching it between two handles drops what was read ahead
+  from the first (no caller does; audit B3-24).
 - Protection bits: FileInfoBlock's protection carries the Unix mode (bits 8-19, bit 31 marking it) and AmigaOS's r, w
   and e bits, set when this user may not read or write the file, or it has no x bit (upstream then shows [read-only]
   and refuses to save over it; Maki's listing shows rwed as AmigaOS's List does, and its colours take a file with x

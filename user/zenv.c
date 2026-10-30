@@ -4,7 +4,8 @@
 #include "zshare.h"
 
 char **environ;
-static char env_store[1024];
+#define ENV_BYTES 1024                  /* the kernel's ENVMAX */
+static char env_store[ENV_BYTES + 1];    /* (+1: a block the kernel took without its last 0 still ends, B3-12) */
 static char *env_ptrs[64];
 static int env_ready;
 
@@ -12,8 +13,10 @@ void zenv_load(void)
 {
     if (env_ready) return;
     env_ready = 1;
-    int n = sys_envget(env_store, sizeof env_store), k = 0;
-    if (n > (int)sizeof env_store) n = (int)sizeof env_store;
+    int n = sys_envget(env_store, ENV_BYTES), k = 0;
+    if (n < 0) n = 0;
+    if (n > ENV_BYTES) n = ENV_BYTES;
+    env_store[n] = 0;
     for (int i = 0; i < n && env_store[i] && k < 63;) { env_ptrs[k++] = env_store + i; i += (int)strlen(env_store + i) + 1; }
     env_ptrs[k] = 0;
     environ = env_ptrs;
@@ -29,7 +32,7 @@ static void (*const zenv_init_p)(void) __attribute__((section(".init_array"), us
 #endif
 static void env_save(void)
 {
-    static char blk[1024];
+    static char blk[ENV_BYTES];
     u32 n = 0;
     for (int i = 0; env_ptrs[i]; i++) { u32 l = strlen(env_ptrs[i]); if (n + l + 2 > sizeof blk) break; memcpy(blk + n, env_ptrs[i], l); n += l; blk[n++] = 0; }
     blk[n++] = 0;
@@ -53,15 +56,22 @@ int unsetenv(const char *name)
 int setenv(const char *name, const char *value, int overwrite)
 {
     zenv_load();
+    if (!name || !*name || strchr(name, '=')) { zerrno = EINVAL; return -1; }
     if (!overwrite && getenv(name)) return 0;
-    unsetenv(name);
-    int k = 0; while (env_ptrs[k]) k++;
-    if (k >= 63) return -1;
-    char *e = malloc(strlen(name) + strlen(value) + 2);
-    if (!e) return -1;
+    /* the block the kernel keeps holds ENV_BYTES and 63 variables: a variable that would not fit is refused (ENOMEM)
+     * with the old value kept, never dropped unsaid (audit B3-13) */
+    u32 l = strlen(name), tot = 1;
+    int k = 0, at = -1;
+    for (; env_ptrs[k]; k++) {
+        if (!strncmp(env_ptrs[k], name, l) && env_ptrs[k][l] == '=') at = k;
+        else tot += strlen(env_ptrs[k]) + 1;
+    }
+    if ((at < 0 && k >= 63) || tot + l + strlen(value) + 2 > ENV_BYTES) { zerrno = ENOMEM; return -1; }
+    char *e = malloc(l + strlen(value) + 2);
+    if (!e) { zerrno = ENOMEM; return -1; }
     strcpy(e, name); strcat(e, "="); strcat(e, value);
-    env_ptrs[k] = e; env_ptrs[k + 1] = 0;
+    if (at >= 0) env_ptrs[at] = e;
+    else { env_ptrs[k] = e; env_ptrs[k + 1] = 0; }
     env_save();
     return 0;
 }
-
