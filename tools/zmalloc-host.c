@@ -320,6 +320,26 @@ static int badtest(void)
     return fail;
 }
 
+/* audit B3-11: a heap that has grown (a new chunk's untouched rest is a free block of 64 KB or more) keeps its quick
+ * lists: a small block freed stays on its quick list (its header says "ZMQ"), it is not joined back at every free */
+static int quicktest(void)
+{
+    static char *keep[400];
+    uint32_t tag;
+    for (int i = 0; i < 400; i++)
+        if (!(keep[i] = zm_malloc(1000))) { printf("the quick lists: out of memory\n"); return 1; }
+    char *s = zm_malloc(40);
+    zm_free(s);
+    tag = ((uint32_t *)s)[-1] & ~0xFFu;
+    for (int i = 0; i < 400; i++) zm_free(keep[i]);
+    if (tag != 0x5a4d5100u) {
+        printf("the quick lists: a small block freed in a grown heap was taken off its quick list (tag %08x)\n", tag);
+        return 1;
+    }
+    printf("quick: a grown heap keeps its quick lists (a new chunk's free rest is not memory given back)\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) { fprintf(stderr, "usage: zmalloc-host MODE [-r N] ...: replay TRACE... | stress [SEED] | speed | room [SIZE] | bad\n"); return 2; }
@@ -342,5 +362,6 @@ int main(int argc, char **argv)
         return 0;
     }
     if (!strcmp(argv[1], "bad")) return badtest();
+    if (!strcmp(argv[1], "quick")) return quicktest();
     return 2;
 }

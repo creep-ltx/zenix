@@ -254,3 +254,8 @@ each fix's test as named in the table, all passing in this branch (`make check` 
 - **B2-16 wasabi-test fails when the suite runs as a background job in a script** (`bash -c '... & wait'`; found
   2026-10-30): "the freed command's client gets EXIT 130" (SIGINT ignored by such jobs). wasabi-host now resets SIGINT
   and SIGQUIT for its commands, which was not enough; the foreground and the harness's own background runs pass. Open.
+  **Fixed (2026-10-30, block 3's audit):** that reset (433c8cb) is the whole fix: reproduced with the wasabi-host of
+  before it (`bash -c 'trap "" INT QUIT; tools/host/wasabi-test.sh check & wait'`: "EXIT 130" fails) and passing with
+  today's, in the background and in a script (the "not enough" was a run that did not have it). Every wasabi-test
+  check run now starts its client and daemon with SIGINT and SIGQUIT ignored, so the case is tested each time (with
+  the old wasabi-host it fails in the foreground too).

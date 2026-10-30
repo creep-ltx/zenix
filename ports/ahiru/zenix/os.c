@@ -30,10 +30,13 @@
 #include "fs/os.h"
 #include "fs/place.h"
 #include "core/util.h"
+#include "fs/shared.h"
 
 UWORD v_exec = 40, v_dos = 40, v_int = 40, v_gfx = 40;   /* upstream takes the roads of AmigaOS 3.x (V36 and up) */
 
-int os_init(void) { return 1; }
+/* AmigaOS's NAME.info is NAME's icon and travels with it; on Zenix a NAME.info is a file of its own (Texinfo's ...):
+ * deleting, moving or renaming NAME must not take an unrelated file with it, unasked (audit B3-5) */
+int os_init(void) { fs_sh()->s_icons = 0; return 1; }
 void os_exit(void) { }
 
 void *xalloc(ULONG size) { return calloc(1, size ? size : 1); }

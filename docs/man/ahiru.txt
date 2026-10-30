@@ -57,10 +57,10 @@ KEYS
 OPTIONS
     PATH       the folder to start in
     LOG        each start-up step, with the free memory, appended to
-               /tmp/Ahiru.log
+               /tmp/T-UID/Ahiru.log (UID: your user number)
     KEYS=...   keys played at the start (| Return, ~ Esc, { } Left and
                Right, _ Space); with LOG the screen is then written as
-               text to /tmp/Ahiru.grid
+               text to /tmp/T-UID/Ahiru.grid
 
 FILES
     $HOME/.config/Ahiru/Ahiru.keys     the keys
@@ -93,9 +93,14 @@ NOTES
     copy keeps the mode and the date. A copy by root is root's.
     Some keys and messages keep AmigaOS words: gs gc gl gd ge gt gr go to
     SYS: C: LIBS: DEVS: ENV: T: RAM: (on Zenix SYS: is /, T: and RAM:
-    /tmp; the others are not there); g/ and dt (the trashcan) need an
+    /tmp/T-UID, your own folder there; the others are not there); g/ and
+    dt (the trashcan) need an
     AmigaOS path and do nothing; names compare without case. A path is
-    at most 63 bytes (PATH_MAX).
+    at most 63 bytes (PATH_MAX): a name with a longer path is listed as
+    an empty file nobody may read, and copying or moving it fails. A
+    rename onto a name that exists is refused (as on AmigaOS). A file's
+    NAME.info is not taken along with it (on AmigaOS it is its icon; on
+    Zenix a file of its own).
     Memory on the stock A1200 (80 x 32): about 178 KB of its own and
     225 KB of code shared by every Ahiru running (measured in FS-UAE,
     tools/ahiru-test.sh); a second Ahiru costs only its own part.

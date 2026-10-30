@@ -964,7 +964,8 @@ slots); the kernel's region loops (a pointer check in a region, `SYS_memalloc`, 
   `malloc` takes from it or from the list 16 bytes up), a medium one (up to 8 KB) on its bin's list (`malloc` takes
   the head if it is big enough, else the next bin's). They go back into their chunks, joined, before the heap grows,
   when the medium lists hold more than 32 KB, or when the heap has a free block of 64 KB or more (memory a program
-  gave back: quick blocks would pin its chunks).
+  gave back: quick blocks would pin its chunks; not the newest chunk's untouched rest, which a heap that has just
+  grown always has: flushing for it at every free kept the lists empty, audit B3-11).
 - A new chunk: the request with its headers, else 4 KB times 1.41 for each region the allocator holds (4, 6, 8, 12,
   16 ... KB, plus 64 bytes so two 4 KB blocks fit 8 KB's), from 10 regions on at least the heap so far, at most 4 MB;
   halved while memory is short. A chunk wholly free again (after its quick blocks went back) goes back to the kernel,
@@ -1061,3 +1062,204 @@ bsdsocket.library's base, `sockbase.S`), a program with shared code (ZEX2) in UA
   unmeasured CPU; 256-task arrays fixed in BSS; AmigaOS words in its messages.
 - **Tests:** `tools/ctop-test.sh` (in `make check`): the boxes read back (`CON_READ`), keys put in (`CON_INPUT`), the
   net box with netd running, the errors and the usage, the keys file, the memory.
+
+## Step 5: the measurement (builder helper, 2026-10-30; no switch, as decided 2026-10-29)
+
+**How it was built** (in `/tmp`, nothing of it in the tree): three builds of the whole tree at main 63d65e4. (1) Today:
+libz at `-O2`. (2) libz at `-Os` (its own file and the shared files `user/z*.c` only; the programs' own code unchanged),
+section 6's fair comparison. (3) The C library + a slim libzenix: every libz program's own code compiled exactly as
+today (`-O2`, the same flags) with `-DZENIX_LIBC` and the C library's headers, a stand-in `libz.h` that includes the
+standard headers and `zenix.h` and declares the Zenix-only helpers, and linked with `libzenix.a` + `libc.a` instead of
+`libz.uo`. libzenix is libz.c without its own string, memory, ctype, `strtol`/`qsort`/`atoi` and formatter code (the
+note's "libz's own C code deleted"): the line reader, `_zexit` (now `exit`), the region heap, `xmalloc`, `svc_line`,
+`bre_to_ere`, the priorities, the `zu8*` functions and `oprintf` (C's formatter into the 4 KB output buffer through 128
+bytes on the stack), one archive member each (one object pulled the environment's start-up hook into every program:
+about 1 KB more each, measured). The tree needed three mechanical changes: `pw.h`'s private `memchr` and `sh.c`'s
+`utoa` collide with the C library's names, and lwIP needs `SSIZE_MAX` from the C library's headers (netd built without
+its string shim). Every image built; nothing run (a measurement of sizes only).
+
+**The table** (ZEXE file bytes; the five ports and `libctest` are C library programs already and the same in all
+three, so not listed; `over` = more than the larger of 256 bytes or 2% above today's file, section 6's rule):
+
+```
+program        libz -O2 libz -Os C library  change       %
+diskd              9280     9444      9684    +404   +4.4
+init              13620    11312     12636    -984   -7.2
+sh                91840    88984     91472    -368   -0.4
+ls                24756    21272     24220    -536   -2.2
+cat               11304     8800     10152   -1152  -10.2
+echo                340      560       528    +188  +55.3
+pwd                6148     4288      4760   -1388  -22.6
+ps                 4272     2384      3044   -1228  -28.7
+free               4120     2232      2896   -1224  -29.7
+wc                 7300     5440      5912   -1388  -19.0
+grep              28568    25604     29824   +1256   +4.4
+uname              4012     2124      2784   -1228  -30.6
+hello              4140     2220      3140   -1000  -24.2
+spin               4052     2132      3052   -1000  -24.7
+crash              6000     4044      5056    -944  -15.7
+badptr            14616    12464     13632    -984   -6.7
+boot               7688     7640      8320    +632   +8.2
+mkdir              6696     4836      5308   -1388  -20.7
+rmdir              6244     4388      4856   -1388  -22.2
+rm                11168     8848     10172    -996   -8.9
+cp                12452    10124     11816    -636   -5.1
+mv                12328    10000     11700    -628   -5.1
+touch              6432     4568      5088   -1344  -20.9
+msgpingd           5748     3804      4664   -1084  -18.9
+msgping            6500     4580      4428   -2072  -31.9
+socktestd          8204     6260      7208    -996  -12.1
+socktest          26504    24244     25732    -772   -2.9
+bench             17564    15428     15164   -2400  -13.7
+fdisk             16468    14524     14576   -1892  -11.5
+mkfs_ext2         12932    10692     10920   -2012  -15.6
+fsck_ext2         41576    39408     40588    -988   -2.4
+df                 6032     4144      3736   -2296  -38.1
+sync                192      412       380    +188  +97.9
+termtest          38740    36436     39672    +932   +2.4
+head              11436     8900     10876    -560   -4.9
+tail              12120     9520     11612    -508   -4.2
+sort              12960    10468     11676   -1284   -9.9
+uniq              11364     8836     10272   -1092   -9.6
+cut               11804     9392     11144    -660   -5.6
+tr                 6112     4264      7104    +992  +16.2
+tee                6528     4664      5188   -1340  -20.5
+seq                4884     2788      3884   -1000  -20.5
+basename           6400     4216      5612    -788  -12.3
+dirname            6264     4088      5436    -828  -13.2
+yes                 284      504       472    +188  +66.2
+sleep              4412     2568      3832    -580  -13.1
+true                140      360       328    +188 +134.3
+false               140      360       328    +188 +134.3
+env                7608     5176      6688    -920  -12.1
+printenv           4444     2472      3264   -1180  -26.6
+which              4896     2900      3912    -984  -20.1
+clear              3848     1960      2624   -1224  -31.8
+whoami             8500     6248      7876    -624   -7.3
+hostname           4372     2400      3196   -1176  -26.9
+id                 9680     7348      8976    -704   -7.3
+uptime             3984     2096      2760   -1224  -30.7
+cmp                4764     2852      3584   -1180  -24.8
+hexdump            7716     5520      6240   -1476  -19.1
+stat               4384     2496      3160   -1224  -27.9
+expr              20720    18340     21732   +1012   +4.9
+find              14600    11800     13652    -948   -6.5
+xargs             13236    10772     12924    -312   -2.4
+du                11556     9092     10576    -980   -8.5
+sed               29108    26456     30364   +1256   +4.3
+diff              18300    15536     17484    -816   -4.5
+chmod              4992     3152      4280    -712  -14.3
+ln                10164     7892      9376    -788   -7.8
+readlink           5976     3868      4896   -1080  -18.1
+date               9984     7816      8448   -1536  -15.4
+less              28668    25920     29568    +900   +3.1
+edit              45960    42916     47664   +1704   +3.7
+man                7996     5852      8912    +916  +11.5
+gzip              34196    32064     37784   +3588  +10.5
+tar               16780    14468     16384    -396   -2.4
+input              4584     2660      3628    -956  -20.9
+beep                192      412       380    +188  +97.9
+dmesg              4268     2372      3084   -1184  -27.7
+dd                 5860     3936      5172    -688  -11.7
+login             15584    13120     14736    -848   -5.4
+su                12880    10156     11820   -1060   -8.2
+passwd            15336    12892     14476    -860   -5.6
+chown             13228    10684     12648    -580   -4.4
+sha256sum          8636     6644      7028   -1608  -18.6
+printf             8124     5956      7120   -1004  -12.4
+tac               10692     8248      9560   -1132  -10.6
+rev               10072     7872      9112    -960   -9.5
+nl                11432     8900     10504    -928   -8.1
+fold              11136     8688     10656    -480   -4.3
+paste             11304     8860     10240   -1064   -9.4
+comm              11140     8724      9964   -1176  -10.6
+expand             7324     5404      6332    -992  -13.5
+mktemp             8044     6164      6844   -1200  -14.9
+realpath           5328     3292      4572    -756  -14.2
+base64             8272     6344      7528    -744   -9.0
+md5sum             7680     5796      6212   -1468  -19.1
+cal                6464     4220      5356   -1108  -17.1
+time               8400     6524      6168   -2232  -26.6
+timeout            8996     6832      7808   -1188  -13.2
+kill               8232     6232      6924   -1308  -15.9
+pgrep              7240     5328      6712    -528   -7.3
+watch              6768     4620      6132    -636   -9.4
+tree              11992     9640     11812    -180   -1.5
+mount             16584    14416     17428    +844   +5.1
+umount             6372     4516      4984   -1388  -21.8
+mkfs_zenixfs      22960    20760     22568    -392   -1.7
+fsck_zenixfs      24140    21988     23420    -720   -3.0
+nice               9032     6880      7796   -1236  -13.7
+renice            11856     9624     10980    -876   -7.4
+priotest          12764    10864     11796    -968   -7.6
+reboot             8648     6676      7112   -1536  -17.8
+cu                 7804     5860      6380   -1424  -18.2
+awk              102840   100464    103136    +296   +0.3
+svctest           11020     9156     10264    -756   -6.9
+useradd           16508    14272     15956    -552   -3.3
+userdel           13240    11056     12620    -620   -4.7
+gpasswd           13976    11708     13276    -700   -5.0
+sudo              16832    14044     15556   -1276   -7.6
+zup               57616    55404     61428   +3812   +6.6
+sigtest           30820    28144     29724   -1096   -3.6
+netstat           13716    11252     12828    -888   -6.5
+nettest           48048    43980     46012   -2036   -4.2
+ifconfig          14056    11784     12900   -1156   -8.2
+route              9416     7236      7900   -1516  -16.1
+ping              15204    12576     14068   -1136   -7.5
+host              13004    10612     11784   -1220   -9.4
+telnet            33344    30508     32800    -544   -1.6
+rz                25544    23312     24564    -980   -3.8
+cryptotest        80908    78908     78832   -2076   -2.6
+ssh              108468   105756    108404     -64   -0.1
+ssh-keygen        57532    55280     56828    -704   -1.2
+wget             121652   118856    122568    +916   +0.8
+sntp              17812    15164     16256   -1556   -8.7
+zpkg              90624    87832     92176   +1552   +1.7
+zfsd              38184    36024     37688    -496   -1.3
+netd              93896    91992     93536    -360   -0.4
+wasabid           64748    61856     63580   -1168   -1.8
+nfscd             60816    58444     60204    -612   -1.0
+drv-a2065          8384     6416      7480    -904  -10.8
+drv-genet         17504    15524     16736    -768   -4.4
+total (139)     2474196  2181644   2375304  -98892   -4.0
+kernel.bin       166876   165024    166864     -12   -0.0
+```
+
+**The rule applied (section 6 step 3):**
+- *No program more than 256 bytes or 2% bigger:* **fails for 13 files**, among them two hot ones: `grep` +1,256
+  (+4.4%) and `less` +900 (+3.1%); the largest `zup` +3,812, `gzip` +3,588, `edit` +1,704, `diskd` +404 (in the
+  kernel). 117 files shrink, 22 grow.
+- *The sum not bigger:* passes, **98,892 bytes smaller (-4.0%)** than today.
+- *`kernel.bin` not bigger:* passes, 12 bytes smaller (diskd +404 and boot +632 inside it, fsd smaller); the mount
+  tests' floppy keeps 4,144 bytes (4,132 today).
+- *The hot programs not slower* (static instruction counts, objdump; the A1200's timing is the owner's): the C
+  library's string functions take as many or fewer instructions per byte: `strlen` 2 per byte (libz 3), `memcpy` 5
+  per 16 bytes (libz 3 per 4, with a compare against the stack, and a byte loop when the pointers are not aligned),
+  `memset` 2 per 4 bytes (libz 3), `strcmp` about 11 per 4 aligned bytes (libz 7 per byte), `strchr` about 14 per 4
+  aligned bytes (libz 5 per byte); their start costs about 10 instructions more, which short strings pay. The
+  formatter's per-character path is shorter (the stream's `put` about 12 instructions plus an indirect call, libz's
+  `put` about 22 plus a call). `cat` copies with `read`/`write` either way. **No loss by these counts**; the stock
+  A1200's `bench` and text-tool runs (section 10) are not done.
+- *Memory per process:* the same within 8 bytes for `ls`, `cat`, `grep`, `less`; `sh` +1,296 bytes of BSS (the
+  environment's store, which libz keeps elsewhere).
+
+**Where the bytes go** (summed over the 139 files, by symbol): C's formatter is smaller (the `-Os` `vfprintf` and
+`__ultoa_invert`, 1.66 KB, against libz's `-O2` `vfmt` + `fmt_num` + `put`, 3.3 KB: -235 KB in all); the losses are the
+C library's faster string code (`strstr`'s two-way search 1.5 KB in 15 of them, `strchr` 242 bytes, `strtol` 282),
+`memset`, the ctype table (384 bytes), the start and end (`__libc_init_array`, `exit`), and `sys3` no longer inlined in
+some places. `grep`, `sed`, `expr`, `less` and `edit` grow by the two-way `strstr` and `strchr` mostly.
+
+**The finding the table also shows:** libz at `-Os` alone is **292,552 bytes (11.8%) smaller** than today, 132 of the
+139 files smaller (`diskd` +164; `echo`, `sync`, `yes`, `true`, `false`, `beep` +220 each), and `kernel.bin` 1,852
+bytes smaller (the mount tests' floppy 5,984 left). Against that build the C library is 193,660 bytes bigger.
+libz's hot string functions at `-Os` need their own count before that is taken (its byte loops are the same code at
+either setting; the formatter's speed is the open question).
+
+**Conclusion: not a clear win.** The total and the kernel pass, the speed counts pass, but 13 of the files break the
+per-program rule, two of them hot, and the cheaper size win is libz at `-Os`, which the C library does not beat. As
+decided (2026-10-29), **nothing is switched and both libraries stay**. For the main session: (1) libz's cold parts at
+`-Os` (the formatter, `qsort`, `strtol`, the helpers), its hot string functions kept at `-O2` or taken from picolibc's
+assembly, is a measured -290 KB with no switch; (2) if the switch is wanted later, libzenix could carry libz's small
+`strstr`/`strchr` in place of picolibc's (most of the 13 overs), then the table again and the A1200's timings.
+Measured 2026-10-30 (builds in /tmp at 63d65e4, ZEXE bytes, objdump counts; no emulator or hardware runs).

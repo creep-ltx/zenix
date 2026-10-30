@@ -15,6 +15,7 @@
 #include <poll.h>
 #include <time.h>
 #include <amigados.h>
+#include <zenix.h>                      /* zrealpath */
 #define ZENIX_LIBC                      /* usys.h: the C library's errno and constants */
 #include "../../user/usys.h"   /* SYS_meminfo, SYS_statfs, SYS_mountinfo, SYS_utimes: no C library calls */
 #include "../tui/upstream/src/version.h" /* the linked text-UI library's version, for OpenLibrary("tui.library") */
@@ -54,8 +55,29 @@ static size_t mapped(const char *name, const char *prefix, int only_first, int s
 
 /* the AmigaOS places the owner's programs name in their own literals (amigados.h, ports/common/README) */
 static const struct { const char *amiga, *zenix; } places[] = {
-    { "T:", "/tmp/" }, { "RAM:", "/tmp/" }, { "SYS:", "/" }, { "NIL:", "/dev/null" }, { 0, 0 }
+    { "T:", 0 }, { "RAM:", 0 }, { "SYS:", "/" }, { "NIL:", "/dev/null" }, { 0, 0 }
 };
+
+/* T: and RAM: (0 above): a folder of this user's own in /tmp, /tmp/T-UID/, made with mode 700 (audit B3-7: the
+ * programs' fixed names there, Sumi-N.save, CFileV..., Ahiru.log, in the shared /tmp could be another user's file or
+ * a soft link planted by one). A folder of that name that is not this user's own, or is a link, is refused (EACCES) */
+#ifndef ZENIX_TMPDIR
+#define ZENIX_TMPDIR "/tmp"
+#endif
+static const char *usertmp(void)
+{
+    static char d[32];
+    struct stat st;
+    snprintf(d, sizeof d, ZENIX_TMPDIR "/T-%u/", (unsigned)getuid());
+    d[strlen(d) - 1] = 0;
+    mkdir(d, 0700);
+    if (lstat(d, &st) < 0 || !S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & 077)) {
+        errno = EACCES;
+        return 0;
+    }
+    strcat(d, "/");
+    return d;
+}
 
 /* $HOME/.config/ + rest into out (the program's settings), 0 (errno set) without a HOME or room */
 static int confpath(const char *rest, const char *sub, char *out)
@@ -96,6 +118,8 @@ static int zpath(const char *name, char *out)
     for (i = 0; places[i].amiga && !pre; i++)
         if (!strncmp(name, places[i].amiga, strlen(places[i].amiga))) {
             pre = places[i].zenix;
+            if (!pre && !(pre = usertmp()))
+                return 0;
             rest = name + strlen(places[i].amiga);
             if (pre[1] && pre[strlen(pre) - 1] == '/' && *rest == '/')
                 rest++;                 /* "T:/x" as "T:x" */
@@ -165,8 +189,12 @@ BPTR Open(CONST_STRPTR name, LONG mode)
     } else if (mode == MODE_READWRITE) {     /* (AmigaOS's: the file kept, made when missing) */
         mkconf(name);
         fd = open(p, O_RDWR | O_CREAT, 0666);
-    } else
-        fd = open(p, O_RDONLY);
+    } else {                            /* MODE_OLDFILE: AmigaOS's is read and write (Ahiru writes disk images in place,
+                                         * audit B3-3); read only when writing is not allowed */
+        fd = open(p, O_RDWR);
+        if (fd < 0 && errno != ENOENT && errno != ENOTDIR && errno != ENAMETOOLONG)
+            fd = open(p, O_RDONLY);
+    }
     if (fd < 0)
         return fail();
     return fd + 1;
@@ -398,8 +426,13 @@ LONG ExNext(BPTR lock, struct FileInfoBlock *fib)
         struct stat st;
         if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
             continue;
-        if (strlen(l->path) + 1 + strlen(d->d_name) >= ZPATH)
-            continue;                   /* a name no call could open: not offered */
+        if (strlen(l->path) + 1 + strlen(d->d_name) >= ZPATH) {
+            memset(&st, 0, sizeof st);  /* a path no call can open: listed (an empty file nobody may read), so a copy
+                                         * of its folder fails on it with "too long" instead of leaving it out unsaid
+                                         * (audit B3-8) */
+            fill(fib, "", d->d_name, &st);
+            return DOSTRUE;
+        }
         strcpy(p, l->path);
         if (strcmp(p, "/"))
             strcat(p, "/");
@@ -413,10 +446,30 @@ LONG ExNext(BPTR lock, struct FileInfoBlock *fib)
     return DOSFALSE;
 }
 
+/* the mount a path is on (1 + its index: the mount whose path is the longest at the start of the path, links
+ * resolved), 0 when it cannot be told. Zenix's stat gives no device (audit B3-4): this is SameLock's and Rename's */
+static u32 zmount(const char *path)
+{
+    struct umountinfo mi;
+    char r[160];
+    u32 i, best = 0;
+    size_t bl = 0;
+    if (zrealpath(path, r, sizeof r) < 0)
+        return 0;
+    for (i = 0; sys_mountinfo(i, &mi) == 0; i++) {
+        size_t n = strnlen(mi.path, sizeof mi.path);
+        if (n > bl && !strncmp(r, mi.path, n) && (n == 1 || r[n] == '/' || !r[n])) {
+            best = i + 1;
+            bl = n;
+        }
+    }
+    return best;
+}
+
 LONG SameLock(BPTR a, BPTR b)
 {
     struct zlock *x = (struct zlock *)a, *y = (struct zlock *)b;
-    if (x->dev != y->dev)
+    if (x->dev != y->dev || zmount(x->path) != zmount(y->path))
         return LOCK_DIFFERENT;
     return x->ino == y->ino ? LOCK_SAME : LOCK_SAME_VOLUME;
 }
@@ -445,16 +498,28 @@ LONG DeleteFile(CONST_STRPTR name)
     errno = 0;
     if (!zpath(name, p))
         return fail();
-    if (unlink(p) < 0 && (errno != EISDIR || rmdir(p) < 0))
+    if (unlink(p) < 0 && ((errno != EISDIR && errno != EPERM) || rmdir(p) < 0))   /* (EPERM: POSIX's other answer
+                                         * for a folder, an NFS server's: B3-9) */
         return fail();
     return DOSTRUE;
 }
 
+/* AmigaOS's Rename never replaces: an existing other object at the new name is refused (ERROR_OBJECT_EXISTS), as
+ * upstream expects (its saves move the old file aside first; Ahiru's r and :rename ask nothing). Zenix's rename(2)
+ * replaces a file silently, which lost the old one (audit B3-1). The same object under another name (a name that
+ * differs only in case, a hard link) may be renamed. */
 LONG Rename(CONST_STRPTR from, CONST_STRPTR to)
 {
     char a[ZPATH], b[ZPATH];
+    struct stat sa, sb;
     errno = 0;
-    if (!zpath(from, a) || !zpath(to, b) || rename(a, b) < 0)
+    if (!zpath(from, a) || !zpath(to, b) || lstat(a, &sa) < 0)
+        return fail();
+    if (lstat(b, &sb) == 0 && (sa.st_ino != sb.st_ino || zmount(a) != zmount(b))) {
+        errno = EEXIST;
+        return fail();
+    }
+    if (rename(a, b) < 0)
         return fail();
     return DOSTRUE;
 }
@@ -548,6 +613,34 @@ LONG CompareDates(const struct DateStamp *a, const struct DateStamp *b)
  * answer is 0 when it started. Upstream's editors by their AmigaOS names are Zenix's sumi: "Sumi" (Maki's, without
  * $EDITOR) and "C:Ed" (Ahiru's, without $EDITOR: the owner's editor, as on his A1200). */
 static const char *const editors[] = { "Sumi ", "C:Ed ", 0 };
+
+/* upstream quotes names AmigaDOS's way ("NAME", the name as it is: upstream escapes no star or quote in it), and
+ * AmigaDOS expands nothing inside the quotes; Zenix's sh expands $, ` and \ inside "..." (audit B3-2: a file named x$(cmd) ran cmd when it was
+ * edited or opened). Each quoted part becomes a single-quoted one for sh (' as '\''); the rest is left as written (the
+ * user's own command text). malloc'd; 0 when out of memory */
+static char *amiquote(const char *c)
+{
+    char *o = malloc(strlen(c) * 4 + 3), *w = o;
+    int in = 0;
+    if (!o)
+        return 0;
+    for (; *c; c++) {
+        if (!in) {
+            if (*c == '"') { in = 1; *w++ = '\''; }
+            else *w++ = *c;
+            continue;
+        }
+        char ch = *c;
+        if (ch == '"') { in = 0; *w++ = '\''; continue; }
+        if (ch == '\'') { memcpy(w, "'\\''", 4); w += 4; }
+        else *w++ = ch;
+    }
+    if (in)
+        *w++ = '\'';
+    *w = 0;
+    return o;
+}
+
 LONG SystemTags(CONST_STRPTR command, ...)
 {
     va_list ap;
@@ -573,6 +666,15 @@ LONG SystemTags(CONST_STRPTR command, ...)
             }
             break;
         }
+    {
+        char *q = amiquote(command);
+        if (!q) {
+            free(cmd);
+            return -1;
+        }
+        free(cmd);
+        command = cmd = q;
+    }
     if (async) {                        /* "cmd &": the shell starts it and ends, the command is nobody's child */
         char *bg = malloc(strlen(command) + 40);
         if (!bg) {

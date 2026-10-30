@@ -169,6 +169,8 @@ static int zwaitin(Priv *p, int ms)
 /* what the console has into ibuf; 0 bytes after "input is there": the input ended */
 static int zreadsome(Priv *p)
 {
+    if (p->ilen >= (int)sizeof(p->ibuf))
+        return 0;                       /* (a full buffer: a read of 0 bytes would look like the end: B3-15) */
     ssize_t n = read((int)p->tin, p->ibuf + p->ilen, sizeof(p->ibuf) - (size_t)p->ilen);
     if (n <= 0) {
         if (n < 0 && errno == EINTR) return 0;

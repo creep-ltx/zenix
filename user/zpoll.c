@@ -9,16 +9,26 @@ int poll(struct pollfd *f, zs_nfds n, int ms)
     int r = sys_evwait(f, n, ms < 0 ? -1 : (ms + 9) / 10);
     return r < 0 ? -1 : r;
 }
+/* a process has at most NFD descriptors: the C library's FD_SETSIZE (64) would put 512 bytes on the stack (audit B3-16) */
+#ifdef ZX_NFD
+#define ZS_NFD ZX_NFD
+#else
+#define ZS_NFD FD_SETSIZE
+#endif
 int select(int nfds, fd_set *rd, fd_set *wr, fd_set *ex, struct timeval *tv)
 {
-    struct pollfd p[FD_SETSIZE];
+    struct pollfd p[ZS_NFD];
     u32 n = 0;
     (void)ex;
     for (int fd = 0; fd < nfds && fd < FD_SETSIZE; fd++) {
         short ev = (short)((rd && FD_ISSET(fd, rd) ? POLLIN : 0) | (wr && FD_ISSET(fd, wr) ? POLLOUT : 0));
-        if (ev) { p[n].fd = fd; p[n].events = ev; p[n].revents = 0; n++; }
+        if (!ev) continue;
+        if (fd >= ZS_NFD) { zerrno = EBADF; return -1; }    /* (no such descriptor can be open) */
+        p[n].fd = fd; p[n].events = ev; p[n].revents = 0; n++;
     }
-    int ms = tv ? (int)tv->tv_sec * 1000 + (int)tv->tv_usec / 1000 : -1;     /* (the C library's time_t: 64 bits) */
+    if (tv && (tv->tv_sec < 0 || tv->tv_usec < 0)) { zerrno = EINVAL; return -1; }
+    /* the timeout in ms, at most about 24 days (a larger one is that, not a wrap into "for ever": B3-16) */
+    int ms = !tv ? -1 : tv->tv_sec >= 2000000 ? 2000000000 : (int)tv->tv_sec * 1000 + (int)(tv->tv_usec / 1000);
     int r = poll(p, n, ms);
     if (r < 0) return -1;
     if (rd) FD_ZERO(rd);

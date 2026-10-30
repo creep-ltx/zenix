@@ -44,7 +44,7 @@ The AmigaOS layer is ports/common (shared with Sumi, Maki and Markdown, no copy)
 maps ("Ahiru": PROGDIR:Ahiru.keys, .theme, .config, .places, .marks as $HOME/.config/Ahiru/Ahiru.*, the folder made
 mode 700; "FileColours": ENVARC:FileColours as $HOME/.config/FileColours, Maki's), and gui.c, the screen calls,
 which never open. What each call does is in ports/common/README; the ones Ahiru is the first to need: more places
-(SYS: as /, T: and RAM: as /tmp, NIL: as /dev/null), locks with absolute paths and NameFromLock resolving soft
+(SYS: as /, T: and RAM: as /tmp/T-UID, NIL: as /dev/null), locks with absolute paths and NameFromLock resolving soft
 links, ParentDir, CurrentDir, Info, DateStamp from 1978 (AmigaOS's, which the core counts in) and SetFileDate,
 IoErr's AmigaOS numbers, AvailMem, Wait on the terminal (TuiSignal's bit, ports/tui) and the reply ports, Execute
 and SystemTags in the background, FPuts, AllocMem.

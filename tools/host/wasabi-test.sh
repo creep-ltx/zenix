@@ -52,8 +52,10 @@ part_check() {
         { bad "wasabi-host does not build"; return; }
     local off=$((20000 + $$ % 30000)) r
     rm -rf "$OUT/check"
-    r=$(ASAN_OPTIONS=detect_leaks=1 timeout 600 python3 -I tools/host/wasabi-check.py "$OUT/wasabi-host" "$OUT/check" \
-        "$off" "${ZENIX_WASABI:-}" 2>&1)
+    # (SIGINT and SIGQUIT ignored around the client and the daemon, as in a suite started in the background from a
+    # script: the commands the daemon runs must get them back, B2-16; every run checks it this way)
+    r=$(trap '' INT QUIT; ASAN_OPTIONS=detect_leaks=1 timeout 600 python3 -I tools/host/wasabi-check.py "$OUT/wasabi-host" \
+        "$OUT/check" "$off" "${ZENIX_WASABI:-}" 2>&1)
     echo "$r" | /usr/bin/grep -v '^wasabi-check: [a-z]* PASS$'
     if /usr/bin/grep -l 'runtime error\|AddressSanitizer\|LeakSanitizer' "$OUT"/check/daemon-*.log 2>/dev/null; then
         bad "check: a sanitizer report in the daemon's log (the files above)"

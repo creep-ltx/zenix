@@ -117,6 +117,8 @@ static struct zmstate {
     u32 binmap;                         /* bit i: bin i is not empty */
     struct chunk *chunks, *first;       /* the chunks held (newest first); the first one, never given back */
     u32 nchunks, nown, heapsz;          /* chunks held, own regions held, the chunks' bytes */
+    struct fblk *fresh;                 /* the newest chunk's untouched rest (free, never used): not memory given
+                                         * back (audit B3-11) */
 } zms;
 static inline struct zmstate *zmp(void)
 {
@@ -138,6 +140,7 @@ static inline struct zmstate *zmp(void)
 #define nchunks (zm->nchunks)
 #define nown    (zm->nown)
 #define heapsz  (zm->heapsz)
+#define fresh   (zm->fresh)
 
 #define NEXTB(h)  ((struct mhdr *)((char *)(h) + 8 + (h)->cap))
 /* the quick lists are the hot path (-O2, as the rest of libz); the chunks' code is small instead (-Os) */
@@ -180,6 +183,7 @@ static inline u32 binof(u32 cap)
 COLD static void fl_del(struct fblk *b)
 {
     ZM;
+    if (b == fresh) fresh = 0;          /* (joined with a freed block, or used) */
     if (b->prev) b->prev->next = b->next;
     else {
         u32 i = binof(b->cap);
@@ -233,6 +237,18 @@ COLD static void heap_put(struct mhdr *h)
     h->tag = M_USE;                     /* (no free block before it now) */
     mkfree(h, cap);
 }
+/* memory given back: a free block of 64 KB or more other than the newest chunk's untouched rest (a heap that has just
+ * grown has that one; flushing the quick lists at every free for it kept them empty and every malloc on the slow path
+ * until the chunk was used up, 7 times slower: audit B3-11) */
+static inline int given_back(void)
+{
+    ZM;
+    u32 m = binmap >> BIN_LARGE, i;
+    struct fblk *f = fresh;
+    if (!m) return 0;
+    if (!f || (i = binof(f->cap)) < BIN_LARGE) return 1;
+    return m != 1u << (i - BIN_LARGE) || bin[i] != f || f->next;
+}
 /* every quick block back into its chunk, joined (before the heap grows) */
 static int qany(void)                   /* a block on a quick list */
 {
@@ -269,12 +285,15 @@ COLD static struct fblk *fit(u32 cap)
 /* take cap bytes from the free block b; the rest (if it can hold a free block) stays free */
 COLD static struct mhdr *take(struct fblk *b, u32 cap)
 {
+    ZM;
     struct mhdr *h = (struct mhdr *)b;
+    int wasfresh = b == fresh;
     fl_del(b);
     if (b->cap - cap >= 24) {
         u32 rest = b->cap - cap - 8;
         h->cap = cap;
         mkfree(NEXTB(h), rest);
+        if (wasfresh) fresh = (struct fblk *)NEXTB(h);     /* the untouched rest is still untouched */
     } else
         NEXTB(h)->tag &= ~M_PF;
     h->tag = M_USE;
@@ -315,6 +334,7 @@ COLD static struct mhdr *heap_get(u32 cap)
     end->tag = M_END;
     h->tag = M_USE;
     mkfree(h, want - 24);
+    fresh = (struct fblk *)h;
     return take((struct fblk *)h, cap);
 }
 /* not a small block on its quick lists: a medium one from its bin's list (the head if it is big enough, else the
@@ -400,18 +420,17 @@ COLD static void free_blk(struct mhdr *h)
         quick[i] = h;
         /* back to the chunks when the lists grow big, or when the heap has a large free block (memory a program
          * gave back: its quick blocks would keep chunks from going back to the kernel) */
-        if ((qbytes += h->cap) > QUICK_MAX || binmap >> BIN_LARGE) quick_flush();
+        if ((qbytes += h->cap) > QUICK_MAX || given_back()) quick_flush();
         return;
     }
     heap_put(h);                        /* (a small one here is a memalign place's block: straight back) */
 }
 COLD static void free_slow(void *p)
 {
-    ZM;
     struct mhdr *h = mhdr_of(real_hdr(p) + 1, "free");
     if (!h) return;
     free_blk(h);
-    if (binmap >> BIN_LARGE) quick_flush();             /* a free block of 64 KB or more: the quick blocks back too */
+    if (given_back()) quick_flush();             /* a free block of 64 KB or more: the quick blocks back too */
 }
 /* a medium block onto its bin's quick list (free's, kept out of free itself: the hot path stays short, as the
  * 68020's 256-byte instruction cache likes it) */
@@ -422,7 +441,7 @@ __attribute__((noinline)) static void free_med(struct mhdr *h)
     h->tag = M_QFREE | (h->tag & M_PF);
     *(struct mhdr **)(h + 1) = quick[i];
     quick[i] = h;
-    if ((qbytes += h->cap) > QUICK_MAX || binmap >> BIN_LARGE) quick_flush();
+    if ((qbytes += h->cap) > QUICK_MAX || given_back()) quick_flush();
 }
 void free(void *p)
 {
@@ -437,7 +456,7 @@ void free(void *p)
             h->tag = M_QFREE | (h->tag & M_PF);
             *(struct mhdr **)(h + 1) = quick[i];
             quick[i] = h;
-            if (binmap >> BIN_LARGE) quick_flush();     /* (memory given back: see quick_flush's callers) */
+            if (given_back()) quick_flush();     /* (memory given back: see quick_flush's callers) */
             return;
         }
         if (cap <= MED_MAX) { free_med(h); return; }
@@ -517,7 +536,7 @@ void *memalign(zs_ulong align, zs_ulong n)
 ZM_API void *memalign1(zs_ulong align, zs_ulong n)
 {
     if (align <= 8) return malloc((zs_size)n);
-    if (align & (align - 1) || n > MALLOC_MAX - align - 8) return 0;
+    if (align > MALLOC_MAX / 2 || align & (align - 1) || n > MALLOC_MAX - align - 8) return 0;   /* (no wrap: B3-10) */
     char *b = malloc((zs_size)(n + align + 8));
     if (!b) return 0;
     char *p = (char *)(((u32)b + 8 + align - 1) & ~(u32)(align - 1));
