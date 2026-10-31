@@ -1,0 +1,76 @@
+wait zenix:/# 90
+sleep 1
+# docs/architecture.md section 7, "Paths": D 30 bytes, Q seven of them (216), X 50, B 208, N46 and N47 to end on 255 and 256
+send D=Mapp-aaaaaaaaaaaaaaaaaaaaaaaaa; Q=$D/$D/$D/$D/$D/$D/$D; T=ok/$Q; X=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; B=/tmp/$X/$X/$X/$X; N46=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; N47=b$N46; echo s0-$(echo done)\r
+wait s0-done 20
+# ---- ext2, nothing else mounted: the path goes to the server as it is ----
+send mkdir -p /tmp/$T; echo a1=$?; echo deep-file > /tmp/$T/fil.txt; echo a2=$(cat /tmp/$T/fil.txt)\r
+sleep 4
+send cp -r /tmp/ok /tmp/ok2; echo a3=$?; echo a4=$(find /tmp/ok2 | wc -l); echo a5=$(ls -R /tmp/ok2 | grep -c fil.txt); echo a6=$(ls /tmp/ok2/$Q)\r
+sleep 15
+send tar cf /tmp/a.tar /tmp/ok2; echo a7=$?; echo a8=$(tar tf /tmp/a.tar | wc -l); mkdir /tmp/x; tar xf /tmp/a.tar -C /tmp/x; echo a9=$?; diff -r /tmp/ok /tmp/x/tmp/ok2; echo a10=$?\r
+sleep 15
+send echo a11=$(du -s /tmp/ok2 | wc -l); echo a12=$(grep -r deep-file /tmp/ok2 | wc -l); chown -R 1 /tmp/ok2; echo a13=$?; echo a14=$(tree /tmp/ok2 | grep -c fil.txt)\r
+sleep 15
+send cd /tmp/$T; echo a15=$(pwd | wc -c); echo a16=$(cat fil.txt); cd /\r
+sleep 3
+send rm -r /tmp/ok2 /tmp/x; echo a17=$?; ls /tmp/ok2; echo a18=$?; echo s1-$(echo done)\r
+wait s1-done 60
+# ---- the limit, to the byte: 255 goes, 256 says so ----
+send mkdir -p $B; echo limit > $B/$N46; echo b1=$?; echo b2=$(cat $B/$N46); echo b3=$(ls $B/$N46 | wc -c)\r
+sleep 5
+send cat $B/$N47; echo b4=$?; echo x > $B/$N47; echo b5=$?; mkdir $B/$N47; echo b6=$?; ls $B/$N47; echo b7=$?\r
+sleep 3
+send rm -f /tmp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; echo b8=$?\r
+sleep 3
+send find $B/$N47; echo b9=$?; cd $B/$N47; echo b10=$?; stat $B/$N47; echo b11=$?; touch $B/$N47; echo b12=$?\r
+sleep 4
+send ln -s $B/$N46 /tmp/l255; echo c1=$?; echo c2=$(readlink /tmp/l255 | wc -c); echo c3=$(cat /tmp/l255); ln -s $B/$N47 /tmp/l256; echo c4=$?\r
+sleep 4
+send mv $B/$N46 $B/c$N46; echo c5=$?; mv $B/$N46 $B/cc$N46; echo c7=$?; echo c8=$(cat $B/$N46)\r
+sleep 4
+# a tree whose path is over 255: only a relative path gets there (nothing is mounted, so the server is asked)
+send cd $B; mkdir $X; echo inside > $X/f; echo d1=$?; cd $X; echo d2=$?; cd $B; ls $X/f; echo d3=$?; cd /\r
+sleep 4
+send find /tmp/$X; echo d4=$?; cp -r /tmp/$X /tmp/co; echo d5=$?; tar cf /tmp/d.tar /tmp/$X; echo d6=$?\r
+sleep 8
+send rm -r /tmp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; echo d7=$?; du -s /tmp/$X; echo d8=$?; echo s2-$(echo done)\r
+wait s2-done 60
+# ---- what the first run found out of reach is still there, and rm from inside takes it ----
+send cd $B; ls $X/f; echo d9=$?\r
+sleep 2
+send rm -r aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; echo d10=$?; cd /\r
+sleep 4
+send mkdir -p $B; rm -r /tmp/co; echo d11=$?\r
+sleep 4
+# ---- with mounts: the kernel makes every path absolute ----
+send mkdir /mnt /p /z; mount -o rw ide0p3 /mnt; echo e1=$?; mount ide0p4 /p; echo e2=$?; mount; echo s3-$(echo done)\r
+wait s3-done 30
+send echo limit > $B/$N46; echo e3=$(cat $B/$N46); cat $B/$N47; echo e4=$?; cd $B; cat $N47; echo e5=$?; cat $X/nothing; echo e6=$?; cd /\r
+sleep 4
+# FFS: reads, copies out and in, and removes
+send cat /mnt/$T/fil.txt; cp -r /mnt/ok /tmp/fok; echo f1=$?; echo f2=$(find /tmp/fok | wc -l); echo f3=$(ls -R /mnt/ok | grep -c fil.txt); echo f4=$(ls /mnt/$T)\r
+sleep 25
+send tar cf /tmp/f.tar /mnt/ok; echo f5=$?; echo f6=$(tar tf /tmp/f.tar | wc -l); cp -r /mnt/ok /mnt/kopia; echo f7=$?; diff -r /mnt/ok /mnt/kopia; echo f8=$?; rm -r /mnt/kopia; echo f9=$?; ls /mnt/kopia; echo f10=$?; echo s4-$(echo done)\r
+wait s4-done 120
+send find /mnt/over; echo f11=$?; cp -r /mnt/over /tmp/fover; echo f12=$?; rm -r /tmp/fover; cd /mnt/$T; echo f13=$(pwd | wc -c); cat fil.txt; cd /; echo s5-$(echo done)\r
+wait s5-done 60
+# a link across the mount in a long path, and a rename through it: the deepest walk the kernel has
+send ln -s /mnt /tmp/lm; echo g1=$(cat /tmp/lm/$T/fil.txt); mv /tmp/lm/$T/fil.txt /tmp/lm/$T/ny.txt; echo g2=$?; mv /tmp/lm/$T/ny.txt /tmp/lm/$T/fil.txt; echo g3=$?; echo g4=$(cat /mnt/$T/fil.txt)\r
+sleep 6
+# a link loop where the walk's raw text names a real file on the volume: the loop's error, and that file stays
+send ln -s /mnt/lb /mnt/la; ln -s /mnt/la /mnt/lb; mkdir -p /mnt/mnt/la /mnt/mnt/lb; echo keep > /mnt/mnt/la/x; echo keep > /mnt/mnt/lb/x; rm /mnt/la/x; echo g5=$?; echo g6=$(cat /mnt/mnt/la/x)$(cat /mnt/mnt/lb/x)\r
+sleep 6
+# a directory that cannot be read: never taken for an empty one (dir_list's error)
+send rm -r /mnt/skadad; echo h1=$?; cat /mnt/skadad/hel.txt; echo h2=$?; rm -rf /mnt/skadad; echo h3=$?; cp -r /mnt/skadad /tmp/sk; echo h4=$?; find /mnt/skadad > /dev/null; echo h5=$?; tar cf /tmp/sk.tar /mnt/skadad; echo h6=$?; du -s /mnt/skadad; echo h7=$?; mv /mnt/skadad /tmp/skm; echo h8=$?; cat /mnt/skadad/hel.txt; echo h9=$?; echo s6-$(echo done)\r
+wait s6-done 60
+# PFS3: read-only
+send cat /p/$T/fil.txt; cp -r /p/ok /tmp/pok; echo i1=$?; diff -r /tmp/fok /tmp/pok; echo i2=$?; echo i3=$(find /p/ok | wc -l); echo i4=$(ls -R /p/ok | grep -c fil.txt); tar cf /tmp/p.tar /p/ok; echo i5=$?; echo i6=$(tar tf /tmp/p.tar | wc -l); echo s7-$(echo done)\r
+wait s7-done 120
+send find /p/over; echo i7=$?; rm -r /p/ok; echo i8=$?; cat /p/$T/fil.txt; cd /p/$T; echo i9=$(pwd | wc -c); cd /; echo s8-$(echo done)\r
+wait s8-done 40
+# ZenixFS
+send mkfs.zenixfs ide0p5; echo j1=$?; mount ide0p5 /z; echo j2=$?; mkdir -p /z/$T; echo j3=$?; echo deep-file > /z/$T/fil.txt; cp -r /z/ok /tmp/zok; echo j4=$?; echo j5=$(find /z/ok | wc -l); rm -r /z/ok; echo j6=$?; ls /z/ok; echo j7=$?; echo s9-$(echo done)\r
+wait s9-done 90
+send sync; umount /z; umount /p; umount /mnt; echo k1=$?; sync; echo paths-test-$(echo done)\r
+wait paths-test-done 60
