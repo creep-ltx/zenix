@@ -92,13 +92,14 @@ static int write_atomic(const char *path, const void *p, u32 n)   /* PATH.new wr
     if (r) sys_unlink(tmp);
     return r;
 }
+static u8 iobuf[4096];                  /* sha_fd_range's and boot_sha's (never at once) */
 static int sha_fd_range(int fd, u32 n, u8 out[32])
 {
-    static u8 buf[4096];
+    u8 *buf = iobuf;
     struct sha256 c;
     sha256_init(&c);
     while (n) {
-        int k = sys_read(fd, buf, n < sizeof buf ? n : sizeof buf);
+        int k = sys_read(fd, buf, n < sizeof iobuf ? n : sizeof iobuf);
         if (k <= 0) return -EIO;
         sha256_update(&c, buf, (u32)k);
         n -= (u32)k;
@@ -787,14 +788,24 @@ static int rdb_rd(unsigned lba, void *buf) { return dmsg(DISK_READ, (u32)rdb_h, 
 #define DT_RDB_IN_MBR 0x52444200u       /* diskd: MBR type 0x76, an Amiga RDB inside (Emu68's convention) */
 struct bootpart { char name[16]; struct zp_ffs f; struct dpart d; };
 /* the boot partition: 0 (bp filled, opened for reading), or < 0 with the reason said */
+static int boot_find2(struct bootpart *bp, struct diskinfo *di, struct rdb *rr, char *why2);
 static int boot_find(struct bootpart *bp)
 {
-    static struct diskinfo di[20];
-    static struct rdb r;
     static char why2[240];
+    struct diskinfo *di = malloc(sizeof *di * 20);          /* (on the heap: zpkg must still load on 1 MB machines) */
+    struct rdb *rp_ = malloc(sizeof *rp_);
+    int rc = boot_find2(bp, di, rp_, why2);
+    free(di);
+    free(rp_);
+    return rc;
+}
+static int boot_find2(struct bootpart *bp, struct diskinfo *di, struct rdb *rr, char *why2)
+{
+#define r (*rr)
     struct bootpart c;
     int n = 0, found = 0, hd = -1;
     const char *why = 0;
+    if (!di || !rr) { say("out of memory"); return -ENOMEM; }
     why2[0] = 0;
     dport = sys_port_find("disk");
     if (dport < 0) { say("no disk server: the system update cannot be put on a boot partition"); return -ENODEV; }
@@ -831,7 +842,7 @@ static int boot_find(struct bootpart *bp)
                     *bp = c;
                 } else {                            /* (every partition it could not check: said if none is found) */
                     u32 l = (u32)strlen(why2);
-                    snprintf(why2 + l, sizeof why2 - l, "%s%s (%s): %s", l ? "; " : "", di[j].name, di[j].label, w ? w : "refused");
+                    snprintf(why2 + l, 240 - l, "%s%s (%s): %s", l ? "; " : "", di[j].name, di[j].label, w ? w : "refused");
                     why = why2;
                 }
             }
@@ -848,6 +859,7 @@ static int boot_find(struct bootpart *bp)
         "base) is not updated here: this Zenix was not started by zenixboot from a disk (a floppy start?). Programs "
         "update as before; the system needs a start from a boot partition (man zenixboot)");
     return -ENOENT;
+#undef r
 }
 struct fsrc { int fd; };
 static int file_src(void *u, zp_u32 off, unsigned char *buf, zp_u32 n)
@@ -858,11 +870,11 @@ static int file_src(void *u, zp_u32 off, unsigned char *buf, zp_u32 n)
 }
 static int boot_sha(const struct zp_bootvol *v, const struct zp_bootfile *bf, u8 out[32])
 {
-    static u8 b[4096];
+    u8 *b = iobuf;
     struct sha256 c;
     sha256_init(&c);
     for (u32 off = 0; off < bf->size; ) {
-        u32 k = bf->size - off < sizeof b ? bf->size - off : sizeof b;
+        u32 k = bf->size - off < sizeof iobuf ? bf->size - off : sizeof iobuf;
         if (zp_boot_read(v, bf, off, b, k)) return -EIO;
         sha256_update(&c, b, k);
         off += k;
