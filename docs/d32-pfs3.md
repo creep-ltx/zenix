@@ -105,16 +105,14 @@ This is a report point, as the licence asks (PFS3's code is 4-clause BSD; docs/f
 - **Examining the bytes:** the root blocks and every other structure of volumes made by the real handler in FS-UAE (`pfs3-aos-test`),
   and read-only of the image of the owner's own card (four PFS3 partitions). That the reading is right is *verified* against those.
 - **Not used:** any other PFS3 reader's code, the AmigaOS sources (clean room).
-- The handler (Aminet `disk/misc/pfs3aio.lha`, 3.1) ran only inside FS-UAE and is not in the repository, nor are volumes made with it.
+- The handler (Aminet `disk/misc/pfs3aio.lha`, 3.1; for `PFS\2`, built from the public source with `-DLARGE_FILE_SIZE=1`, which the Aminet build cannot format) ran only inside FS-UAE and is not in the repository, nor are volumes made with it.
 
 ## Limits
 Read-only. Files under 4 GB (decision 10). 64 open files a mount. A cache of 16 reserved blocks of 1 KB (at least 8 of any size) and one
-data block. The system's path limits (`docs/limits.md`) matter on real volumes: over 63 bytes in one system call, 159 absolute. On the owner's card most names lie deeper than 63 bytes from `/mnt`: `cd` gets there, `cp -r` and `find` stop there with an error. Not changed here: it is the kernel's limit, for every filesystem. The largest formats (`PFS\2`, reserved blocks over
-1 KB, blocks over 512 bytes, large files) are *read from the format and tested on `tools/mkpfs3.py`'s volumes only* unless the
-hand-back of the branch says otherwise: the Aminet handler makes `PFS\1`. Comments and `.deldir` are not shown. Never run on a real Amiga yet.
+data block. The system's path limits (`docs/limits.md`) matter on real volumes: over 63 bytes in one system call, 159 absolute. On the owner's card most names lie deeper than 63 bytes from `/mnt`: `cd` gets there, `cp -r` and `find` stop there with an error. Not changed here: it is the kernel's limit, for every filesystem. *Verified against what the real handler made:* `PFS\1` (plain, super blocks, 4 KB in the table), `PFS\2` with blocks of 1 KB and 4 KB and with 2 KB reserved blocks (112 GB). *Only read from the format and tested on `tools/mkpfs3.py`'s volumes:* the large-file mode (files over 4 GB), rollover files, reserved blocks over 1 KB with 512-byte blocks other than that one, old volumes without split anodes, `muPF`/`AFS\1`/`muAF`. Comments and `.deldir` are not shown. Never run on a real Amiga yet.
 
 ## Tests
 `pfs3-host-test` (the server on the PC against `tools/mkpfs3.py`: ten layouts, names, links, refusals, a fuzz run with ASAN and UBSAN
 aimed at root, extension, index and anode blocks, chains, directory entries, extra fields, links), `pfs3-test` (FS-UAE: an RDB inside
 an MBR type 0x76, `PFS\3`, `PDS\3`, 4 KB in the table, damage; afterwards not one byte changed). `pfs3-aos-test` (not in `make check`,
-SKIP without the machines and the handler: AmigaOS 3.2 and pfs3aio make the volumes; every file compared).
+SKIP without the machines and the handler: AmigaOS 3.2 and pfs3aio make the volumes; every file compared). Read-only on the PC, the image of the owner's card: 51,699 files in four partitions read to their full sizes with no error (only the 5 names past the system's path limit not reached).
