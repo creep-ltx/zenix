@@ -49,7 +49,7 @@ pointers.
   section 3) but **never run on a real Pi**: the SD controller is modelled from the SD Host Controller and SD
   Physical Layer specifications, so clocks, the mailbox calls and card-detect are unverified.
   Partition tables: an RDB or a PC MBR (primary entries; verified in FS-UAE with disk images). The Emu68 boot card
-  holds Emu68 and the Kickstart ROM in its FAT partition: never write to it without a plan. Not done: extended
+  holds Emu68 and the Kickstart ROM in its FAT partition: `mount -t fat` can write there, so never do without a plan. Not done: extended
   partitions, GPT, the 50 MHz high-speed mode, eMMC. Until then: RAM-disk root from the floppy.
 - Signals (DESIGN D16) have no SIGSEGV/SIGBUS handlers (a fault ends the program, 139), no sessions, no controlling
   terminals other than the consoles and no SIGHUP on a hang-up (with telnet's pseudo-terminals, later); SIGQUIT,
@@ -119,6 +119,9 @@ pointers.
   waits up to 2 s for a slot or a name being given back; a started server has 30 s to open its port; the start after the 2nd, 3rd and 4th end within 60 s waits 1, 2
   and 4 s, and the 5th end within 60 s gives a service up; loads nest at most two deep; a server's saved table is at most 512 bytes (diskd's is 426); a restarted filesystem server takes at most 160 open
   inode numbers from the kernel (more than the 64 open files and 32 program loads there can be).
+- FAT (DESIGN D30, `docs/d30-fat.md`): 512-byte sectors only; 64 open files a mount, 16 chains waiting for a commit (more
+  forces one), a 24-sector cache; a long name over 63 bytes of UTF-8 is listed by its 8.3 name; a FAT mount's options at
+  most about 30 characters (the service text); no `fsck.fat` on Zenix.
 - NFS (DESIGN D23, architecture.md section 9 "nfscd"): 8 NFS mounts at most (nfs0 .. nfs7, within the 7 mounts);
   `HOST:/EXPORT` at most 62 characters with no options (the service text); files below 4 GB, offsets below 2 GB;
   names up to 63 bytes listed; the kernel's 8 supplementary groups a request (for a root program's own request: 16 a

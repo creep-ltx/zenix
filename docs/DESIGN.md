@@ -24,7 +24,7 @@ D5. **Filesystem: ext2** behind a VFS layer. Standard little-endian format (swap
     128-byte inodes, no extents or 64-bit, old revision flags, readable by Linux. Host `e2fsck` for now.
     ext3 clean volumes may be read; a journal can come later. Timestamps unsigned (good to 2106).
     The kernel is loaded from the boot floppy. Written from the public ext2 specification (since D9 Linux's
-    GPL-2 code could be reused too; it was not needed). FAT is only an optional module (not built). Buffer cache
+    GPL-2 code could be reused too; it was not needed). FAT is a server of its own (D30), not in the kernel. Buffer cache
     always. Later added: ZenixFS, the native filesystem (zenixfs.md), behind the same server protocol.
 D6. **Scheduler:** preemptive, priority-based, round-robin within a priority, event-driven wake-ups;
     interactive tasks (terminal, display server) high priority; lazy FPU save only if an FPU exists.
@@ -351,3 +351,9 @@ Open questions: whether to
 optionally use an MMU, and how much of the old user programs port unchanged.
 
 Written 2026-10-22; decisions updated and checked against the code 2026-10-23.
+
+## D30. FAT (roadmap block 4; decided in the note, the owner delegated the details 2026-10-31; built on branch fat)
+`/sbin/fatd`, a file service per mount: FAT12, FAT16, FAT32 with long names, read and write, through `kernel/fsproto.h`
+like zfsd. No owners or modes on disk: mount options. Writes in the order data, FAT, directories, a freed chain zeroed
+only after its directory is on the disk; the boot sector never written; the dirty mark in `FAT[1]`; a volume not clean is
+read-only unless `-o force`. Details: `docs/d30-fat.md`.

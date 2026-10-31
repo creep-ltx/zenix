@@ -1,0 +1,22 @@
+FATD(8)			Zenix manual
+
+NAME
+    fatd - the server of a FAT mount
+
+SYNOPSIS
+    /sbin/fatd device [-id start,size] [-o options]
+
+DESCRIPTION
+    Not a command: mount -t fat registers it as the service fs.DEVICE
+    and the kernel starts it at the mount's first use (DESIGN D30,
+    docs/d30-fat.md). It serves FAT12, FAT16 and FAT32 with long file
+    names, reading and writing. Everything a user sets is mount's: see
+    mount(8) for the options and the limits. It comes with the
+    disktools package.
+
+    Its lines in dmesg start with fatd: a volume it refuses and why, a
+    volume not marked clean ("mounted read-only"), a bad option, a write
+    that failed.
+
+SEE ALSO
+    mount(8), umount(8)

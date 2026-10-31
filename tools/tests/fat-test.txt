@@ -1,0 +1,109 @@
+wait zenix:/# 90
+sleep 1
+send mkdir /mnt /flop\r
+sleep 2
+send fdisk list\r
+sleep 3
+send mount ide0p1 /mnt\r
+sleep 5
+send mount\r
+sleep 3
+send ls -l /mnt\r
+sleep 3
+send cat /mnt/config.txt\r
+sleep 2
+send cat /mnt/CONFIG.TXT\r
+sleep 2
+send cat /mnt/from-linux-long-name.txt\r
+sleep 2
+send echo hello-from-zenix > /mnt/NEW.TXT\r
+sleep 2
+send cat /mnt/NEW.TXT\r
+sleep 2
+send mkdir /mnt/Mappen\r
+sleep 2
+send echo svenska > '/mnt/Mappen/r\xc3\xa4ksm\xc3\xb6rg\xc3\xa5s l\xc3\xa5ngt namn.txt'\r
+sleep 3
+send ls /mnt/Mappen\r
+sleep 3
+send cat '/mnt/MAPPEN/R\xc3\x84KSM\xc3\x96RG\xc3\x85S L\xc3\x85NGT NAMN.TXT'\r
+sleep 3
+send cp /bin/ls /mnt/ls.bin\r
+sleep 5
+send cmp /bin/ls /mnt/ls.bin && echo same-copy\r
+sleep 5
+send mv /mnt/NEW.TXT /mnt/Mappen/moved.txt\r
+sleep 3
+send rm /mnt/kick.rom\r
+sleep 3
+send ls /mnt\r
+sleep 3
+send ln -s x /mnt/l\r
+sleep 2
+send chmod 777 /mnt/ls.bin\r
+sleep 2
+send chown 5 /mnt/ls.bin\r
+sleep 2
+send echo x > '/mnt/a:b'\r
+sleep 2
+send /mnt/ls.bin /mnt\r
+sleep 3
+send df /mnt\r
+sleep 3
+send sync\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount\r
+sleep 3
+send mount -t fat -o fmode=755,uid=7 ide0p1 /mnt\r
+sleep 5
+send ls -l /mnt/ls.bin\r
+sleep 3
+send /mnt/ls.bin /mnt\r
+sleep 3
+send echo run-from-fat=$?\r
+sleep 2
+send umount /mnt\r
+sleep 3
+send mount -t fat -o nonsense ide0p1 /mnt\r
+sleep 5
+send dmesg | grep fatd\r
+sleep 4
+send mount ide0p1 /mnt\r
+sleep 5
+send echo after-kill > /mnt/uncommitted.txt\r
+sleep 1
+send kill -9 $(pgrep fatd)\r
+sleep 3
+send ls /mnt\r
+sleep 5
+send echo x > /mnt/refused.txt\r
+sleep 3
+send dmesg | grep 'mounted read-only'\r
+sleep 4
+send umount /mnt\r
+sleep 3
+send mount -o force ide0p1 /mnt\r
+sleep 5
+send echo fixed > /mnt/forced.txt\r
+sleep 3
+send sync\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount -t fat df1 /flop\r
+sleep 8
+send cat /flop/ON-FLOP.TXT\r
+sleep 5
+send echo written-on-floppy > /flop/skriven.txt\r
+sleep 5
+send ls /flop\r
+sleep 5
+send umount /flop\r
+sleep 8
+send sync\r
+sleep 3
+send echo fat-test-done\r
+sleep 2
+stop

@@ -247,6 +247,7 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 # (the text-UI library's notice once a package: sumi's is "tui" since it shipped first, the others' "PROG-tui"; two
 # packages may not own one file, zpkg 4.3)
 # files beside a family's programs, from the build directory (DESIGN D29: ZINE's blob, the small AmigaOS zine loads)
+FAMILY_SBIN = {"disktools": ["fatd"]}     # DESIGN D30: /sbin/fatd, mount's server for a FAT volume
 FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")]}
 FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
                    "maki": [("ports/maki/upstream/LICENSE", "maki"), ("ports/tui/upstream/LICENSE", "maki-tui")],
@@ -325,6 +326,9 @@ def std_packages(build, uapps):
             if not mine:
                 continue
             ents = [("f", 0o4755 if p in SETUID else 0o755, 0, 0, zx(p), "/bin/" + binname(p)) for p in mine]
+            for p in FAMILY_SBIN.get(fam, []):           # a server beside the family's programs (not a command)
+                if os.path.exists(zx(p)):
+                    ents += [("d", 0o755, 0, 0, None, "/sbin"), ("f", 0o755, 0, 0, zx(p), "/sbin/" + p)]
             links = [(t, p) for t, p in LINKS if t in mine]
             ents += [("l", 0o777, 0, 0, t, p) for t, p in links]
             mypages = sorted({binname(p) + ".txt" for p in mine} | {os.path.basename(p) + ".txt" for t, p in links})

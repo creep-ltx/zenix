@@ -79,8 +79,8 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # servers that live on the disk as files (DESIGN D19 step 1), installed as /sbin/NAME on every full root image and in
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
 # Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
-# the server of an NFS mount, is described in docs/man/mount.txt.
-SBINAPPS := zfsd netd wasabid nfscd
+# the server of an NFS mount, is described in docs/man/mount.txt, as is fatd (D30), the server of a FAT mount.
+SBINAPPS := zfsd netd wasabid nfscd fatd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -435,6 +435,10 @@ $(BUILD)/nfscd.uo: user/nfscd.c net/nfs/nfs.h user/socket.h kernel/netproto.h ke
 $(BUILD)/nfscd.uelf: $(BUILD)/nfscd.uo $(NFSOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/nfscd.uo $(NFSOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 STACK_nfscd := 8192
+# fatd (DESIGN D30, docs/d30-fat.md): the server of a FAT mount, /sbin/fatd, one file. Cold code: -Os
+$(BUILD)/fatd.uo: user/fatd.c user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+STACK_fatd := 8192
 # the crypto library (DESIGN D21 3.5, docs/d21-crypto-ssh-https.md): BearSSL and Monocypher (only the files used,
 # crypto/*/README) and Zenix's crypto/zc/, as one archive linked with --gc-sections into the programs that use it
 # (cryptotest, ssh, ssh-keygen). Cold code at -Os; the files a handshake waits on at -O2 (D21 3.6 step 1: the curve25519
