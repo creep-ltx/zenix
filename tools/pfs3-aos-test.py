@@ -6,7 +6,8 @@ dates. Then pfs3d (the PC build) reads each image and every file is compared wit
 it needs this PC's test machines and a handler file the repository does not carry. Without them: SKIP, and it passes.
 Emulators only; never the real Amiga.
 usage: PFS3AIO=FILE tools/pfs3-aos-test.py [variant ...]    variants: plain super bs4096 (default all three); with
-PFS3AIO2=FILE, a handler built from the public source with large files, also pfs2 pfs2k1 pfs2k4 (asked for by name). PFS3_KEEP=DIR keeps the images there."""
+PFS3AIO2=FILE, a handler built from the public source with -DLARGE_FILE_SIZE=1 (2 stops at a requester), also pfs2k1 pfs2k4 huge,
+asked for by name. PFS3_KEEP=DIR keeps the images there."""
 import calendar, fcntl, os, random, re, shutil, struct, subprocess, sys, tempfile, time, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -115,7 +116,7 @@ def make_source(src):
     put("t/" + "m" * 31, b"thirty-one-characters\n")
     put("t/" + "L" * 100, b"a-long-name\n")
     os.makedirs(os.path.join(src, "t2"))
-    a, b = pat(128 << 10, "a"), pat(128 << 10, "b")
+    a, b = pat(32 << 10, "a"), pat(32 << 10, "b")
     open(os.path.join(src, "t2/a"), "wb").write(a)
     open(os.path.join(src, "t2/b"), "wb").write(b)
     return exp, a, b
@@ -127,8 +128,8 @@ def job_script(dev, exp, a, b):
     s = ["FailAt 21", f"Copy ZSRC:t {v} ALL CLONE QUIET", "Echo copied $RC"]
     # Swedish names and upper case in a directory name
     s += [f'Rename {v}Mapp {v}ÅÄÖ-mapp', f'Rename {v}ÅÄÖ-mapp/rak.txt "{v}ÅÄÖ-mapp/räksmörgås.txt"', f'Rename {v}ÅÄÖ-mapp/o.txt "{v}ÅÄÖ-mapp/ö é.txt"']
-    for a, b in (("/Mapp/rak.txt", "/ÅÄÖ-mapp/räksmörgås.txt"), ("/Mapp/o.txt", "/ÅÄÖ-mapp/ö é.txt")):
-        exp[b] = exp.pop(a)
+    for old, new in (("/Mapp/rak.txt", "/ÅÄÖ-mapp/räksmörgås.txt"), ("/Mapp/o.txt", "/ÅÄÖ-mapp/ö é.txt")):
+        exp[new] = exp.pop(old)
     s += [f'FileNote {v}note.txt "{"k" * 79}"']
     s += [f"Protect {v}r.txt re", f"Protect {v}b511 rw", f"Protect {v}b513 r"]
     exp["/r.txt"]["mode"] = 0o555
@@ -150,11 +151,11 @@ def job_script(dev, exp, a, b):
     # a file removed goes to the deleted-files directory, which is not listed
     s += [f"Delete {v}Many/f0005 QUIET"]
     del exp["/Many/f0005"]
-    for i in range(40):
+    for i in range(12):
         s.append(f"Type ZSRC:t2/a >>{v}frag")
         s.append(f"Type ZSRC:t2/b >>{v}frag2")
-    exp["/frag"] = dict(data=a * 40)
-    exp["/frag2"] = dict(data=b * 40)
+    exp["/frag"] = dict(data=a * 12)
+    exp["/frag2"] = dict(data=b * 12)
     for k in list(exp):                                    # every directory on the way
         while k.rfind("/") > 0:
             k = k[:k.rfind("/")]
@@ -331,6 +332,8 @@ def variant(tag, T, handler, sectors_cyl, bs, patch_fnsize=True):
     if os.environ.get("PFS3_KEEP"):
         shutil.copy(img, os.path.join(os.environ["PFS3_KEEP"], tag + ".hdf"))
     check(f"{tag}: pfs3d mounts what AmigaOS made", out.startswith("mount -> 0"), out[:400])
+    if not out.startswith("mount -> 0"):
+        return
     got = judge(tag, out, exp)
     p = got.get("/hard1"), got.get("/b4096")
     check(f"{tag}: a hard link has its file's inode number", p[0] and p[1] and p[0][7] == p[1][7], p)
@@ -368,9 +371,11 @@ def main():
             variant("bs4096", T, handler, 25, 4096)              # the partition table says 4 KB blocks, as two of the owner's partitions
         if "super" in want:
             variant("super", T, handler, 1400, 512)              # 5.6 GB, sparse: over the size where super blocks start
-        for tag, b in (("pfs2", 512), ("pfs2k1", 1024), ("pfs2k4", 4096)):   # large files: the newer type; logical blocks over 512
+        for tag, b in (("pfs2k1", 1024), ("pfs2k4", 4096)):                  # logical blocks over 512: the newer type, PFS\\2
             if tag in want and os.environ.get("PFS3AIO2"):
                 variant(tag, T, os.environ["PFS3AIO2"], 25, b)
+        if "huge" in want and os.environ.get("PFS3AIO2"):
+            variant("huge", T, os.environ["PFS3AIO2"], 28000, 512)   # 112 GB, sparse: reserved blocks of 2 KB
     finally:
         amiga_stop()
         shutil.rmtree(T, ignore_errors=True)

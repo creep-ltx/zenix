@@ -60,7 +60,7 @@ block) inside the reserved area, on a grid of `RB`-sized steps from `firstreserv
 **Root** (block 2; the facts below are all in its first 512 bytes), by byte: 0 type, 4 options, 8 datestamp, 12 creation day,
 minute, tick (16 bits each), 18 protection, 20 name (length byte, then up to 31), 52 last reserved block, 56 first reserved block,
 60 reserved free, 64 `RB` (16 bits), 66 sectors in the root's cluster (16 bits), 68 blocks free, 72 always free, 76 roving, 80 old
-deleted-files pointer, 84 size of the disk in blocks, 88 the extension's block, 92 unused, 96 five bitmap index blocks, 116 the 99
+deleted-files pointer, 84 size of the disk in 512-byte sectors, 88 the extension's block, 92 unused, 96 five bitmap index blocks, 116 the 99
 index blocks of a volume without super blocks. Block 0 holds the type too.
 
 **Option bits:** 1 hard disk, 2 split anodes, 4 directory extra fields, 8 deleted-files directory, 16 size field, 32 extension,

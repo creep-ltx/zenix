@@ -285,7 +285,7 @@ class Volume:
             opts |= OPT["large"]
         r = bytearray(max(self.rb, 512))
         r[:96] = struct.pack(">IIIHHHH", self.typ, opts, 1, *DAY, 0xF0) + bytes([len(self.name)]) + self.name.ljust(31, b"\0") + \
-            struct.pack(">IIIHHIIIIIII", self.res_last, self.res_first, 0, self.rb, self.rc, self.nblocks - self.next_data, 0, 0, 0, self.nblocks, ext, 0)
+            struct.pack(">IIIHHIIIIIII", self.res_last, self.res_first, 0, self.rb, self.rc, self.nblocks - self.next_data, 0, 0, 0, self.nblocks * self.spb, ext, 0)
         if not self.sup:
             for ix, b in index.items():
                 r[116 + 4 * ix:120 + 4 * ix] = struct.pack(">I", b)

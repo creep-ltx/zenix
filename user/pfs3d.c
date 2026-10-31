@@ -949,7 +949,8 @@ static int try_mount(const char *name, int restart)
     RC = RB / BS;
     apb = (RB - 16) / 12; ipb = (RB - 12) / 4;
     if (res_first < 2 || res_last < res_first || res_last >= nblocks || res_last - res_first < RC) { why("the reserved area is not inside the partition: damaged"); goto no; }
-    disk_size = (m_opts & M_SIZEFIELD) && g32(root + R_DISKSIZE) ? g32(root + R_DISKSIZE) : nblocks;
+    /* the root's disk size counts 512-byte sectors, whatever the block size (verified on a PFS\\2 volume with 1 KB blocks) */
+    disk_size = (m_opts & M_SIZEFIELD) && g32(root + R_DISKSIZE) ? g32(root + R_DISKSIZE) / SPB : nblocks;
     if (disk_size > nblocks) { why("the volume is larger than its partition: refused"); goto no; }
     blocks_free = g32(root + R_FREE);
     if (blocks_free > disk_size) blocks_free = 0;

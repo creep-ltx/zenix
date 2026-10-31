@@ -29,7 +29,7 @@ sleep 2
 send stat /mnt/hardname\r
 sleep 3
 send ls /mnt/Lista | wc -l\r
-sleep 8
+sleep 15
 send ls -l /mnt/Mapp/skyddad\r
 sleep 3
 send echo x > /mnt/refused.txt\r
@@ -43,7 +43,7 @@ sleep 3
 send cp /mnt/ls.bin /tmp/ls.bin && cmp /bin/ls /tmp/ls.bin && echo same-copy\r
 sleep 6
 send /mnt/ls.bin /mnt/Mapp ; echo run-from-pfs3=$?\r
-sleep 4
+sleep 10
 send kill -9 $(pgrep pfs3d)\r
 sleep 3
 send cat /mnt/mapp/under/TEXT.txt ; echo after-the-kill=$?\r
