@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """The card of tools/paths-test.sh: an MBR, the ext2 root, a type 0x76 partition with an RDB holding an FFS volume (written
 to), a PFS3 volume (read-only) and an empty partition for ZenixFS. Each volume has ok/ (a tree that fits in 255 bytes from
-its mount point) and over/ (one that does not); the FFS volume also skadad/, a folder with a damaged entry.
+its mount point) and over/ (one that does not). A second FFS volume has skadad/, a folder with a damaged entry
+(ffsd mounts that volume read-only).
 usage: paths-test-images.py ROOT CARD OUTDIR
        paths-test-images.py --judge OUTDIR       p3, cut from the card by the test"""
 import os
@@ -30,12 +31,15 @@ def fill(add):
 def make(root, card, out):
     a = Ffs(2 * CYL // 512, "Djup", True, 3)
     fill(a.add_file)
-    a.add_file("skadad/hel.txt", b"whole\n")
-    bad = a.add_file("skadad/trasig.txt", b"damaged\n")
-    img = bytearray(a.image())
-    img[bad * 512 + 20] ^= 0xFF                 # the entry's checksum: listing the folder fails there
     pa = os.path.join(out, "a.img")
-    open(pa, "wb").write(img)
+    open(pa, "wb").write(a.image())
+    v = Ffs(CYL // 512, "Skadad", True, 3)
+    v.add_file("skadad/hel.txt", b"whole\n")
+    bad = v.add_file("skadad/trasig.txt", b"damaged\n")
+    img = bytearray(v.image())
+    img[bad * 512 + 20] ^= 0xFF                 # the entry's checksum: listing the folder fails there
+    pd = os.path.join(out, "d.img")
+    open(pd, "wb").write(img)
     b = Pfs(2 * CYL // 512, "Djupa")
     fill(b.add_file)
     pb = os.path.join(out, "b.img")
@@ -44,7 +48,7 @@ def make(root, card, out):
     open(pc, "wb").write(bytes(4 * CYL))
     rdb = os.path.join(out, "rdb.img")
     subprocess.run([sys.executable, os.path.join(HERE, "mkrdb-multi.py"), rdb, f"{pa}:ffs3:DH0", f"{pb}:pfs3:DH1",
-                    f"{pc}:zenixfs:DH2"], check=True, stdout=subprocess.DEVNULL)
+                    f"{pc}:zenixfs:DH2", f"{pd}:ffs3:DH3"], check=True, stdout=subprocess.DEVNULL)
     r0, p2 = open(root, "rb").read(), open(rdb, "rb").read()
     s1 = 2048
     s2 = (s1 + len(r0) // 512 + 2047) // 2048 * 2048
@@ -64,8 +68,7 @@ def make(root, card, out):
 def judge(out):
     d = Disk(os.path.join(out, "p3.img"))
     d.walk()
-    # the damaged entry is the test's own: the judge may name that folder and nothing else
-    bad = [w for w in d.bad if "skadad" not in w and "trasig" not in w]
+    bad = list(d.bad)
     if d.read(("/ok/" + "/".join([D] * 7) + "/fil.txt").encode()) != b"deep-file\n":
         bad.append("the deep file")
     if any(n.startswith(b"/kopia") for n in d.files):

@@ -44,7 +44,7 @@ sleep 4
 send mkdir -p $B; rm -r /tmp/co; echo d11=$?\r
 sleep 4
 # ---- with mounts: the kernel makes every path absolute ----
-send mkdir /mnt /p /z; mount -o rw ide0p3 /mnt; echo e1=$?; mount ide0p4 /p; echo e2=$?; mount; echo s3-$(echo done)\r
+send mkdir /mnt /p /z /d; mount -o rw ide0p3 /mnt; echo e1=$?; mount ide0p4 /p; echo e2=$?; mount ide0p6 /d; echo e7=$?; mount; echo s3-$(echo done)\r
 wait s3-done 30
 send echo limit > $B/$N46; echo e3=$(cat $B/$N46); cat $B/$N47; echo e4=$?; cd $B; cat $N47; echo e5=$?; cat $X/nothing; echo e6=$?; cd /\r
 sleep 4
@@ -58,11 +58,8 @@ wait s5-done 60
 # a link across the mount in a long path, and a rename through it: the deepest walk the kernel has
 send ln -s /mnt /tmp/lm; echo g1=$(cat /tmp/lm/$T/fil.txt); mv /tmp/lm/$T/fil.txt /tmp/lm/$T/ny.txt; echo g2=$?; mv /tmp/lm/$T/ny.txt /tmp/lm/$T/fil.txt; echo g3=$?; echo g4=$(cat /mnt/$T/fil.txt)\r
 sleep 6
-# a link loop where the walk's raw text names a real file on the volume: the loop's error, and that file stays
-send ln -s /mnt/lb /mnt/la; ln -s /mnt/la /mnt/lb; mkdir -p /mnt/mnt/la /mnt/mnt/lb; echo keep > /mnt/mnt/la/x; echo keep > /mnt/mnt/lb/x; rm /mnt/la/x; echo g5=$?; echo g6=$(cat /mnt/mnt/la/x)$(cat /mnt/mnt/lb/x)\r
-sleep 6
 # a directory that cannot be read: never taken for an empty one (dir_list's error)
-send rm -r /mnt/skadad; echo h1=$?; cat /mnt/skadad/hel.txt; echo h2=$?; rm -rf /mnt/skadad; echo h3=$?; cp -r /mnt/skadad /tmp/sk; echo h4=$?; find /mnt/skadad > /dev/null; echo h5=$?; tar cf /tmp/sk.tar /mnt/skadad; echo h6=$?; du -s /mnt/skadad; echo h7=$?; mv /mnt/skadad /tmp/skm; echo h8=$?; cat /mnt/skadad/hel.txt; echo h9=$?; echo s6-$(echo done)\r
+send rm -r /d/skadad; echo h1=$?; cat /d/skadad/hel.txt; echo h2=$?; rm -rf /d/skadad; echo h3=$?; cp -r /d/skadad /tmp/sk; echo h4=$?; find /d/skadad > /dev/null; echo h5=$?; tar cf /tmp/sk.tar /d/skadad; echo h6=$?; du -s /d/skadad; echo h7=$?; mv /d/skadad /tmp/skm; echo h8=$?; cat /d/skadad/hel.txt; echo h9=$?; echo s6-$(echo done)\r
 wait s6-done 60
 # PFS3: read-only
 send cat /p/$T/fil.txt; cp -r /p/ok /tmp/pok; echo i1=$?; diff -r /tmp/fok /tmp/pok; echo i2=$?; echo i3=$(find /p/ok | wc -l); echo i4=$(ls -R /p/ok | grep -c fil.txt); tar cf /tmp/p.tar /p/ok; echo i5=$?; echo i6=$(tar tf /tmp/p.tar | wc -l); echo s7-$(echo done)\r
@@ -72,5 +69,10 @@ wait s8-done 40
 # ZenixFS
 send mkfs.zenixfs ide0p5; echo j1=$?; mount ide0p5 /z; echo j2=$?; mkdir -p /z/$T; echo j3=$?; echo deep-file > /z/$T/fil.txt; cp -r /z/ok /tmp/zok; echo j4=$?; echo j5=$(find /z/ok | wc -l); rm -r /z/ok; echo j6=$?; ls /z/ok; echo j7=$?; echo s9-$(echo done)\r
 wait s9-done 90
-send sync; umount /z; umount /p; umount /mnt; echo k1=$?; sync; echo paths-test-$(echo done)\r
+# a link loop where the walk's raw text names a real file on the volume: the loop's error, and that file stays
+send ln -s /z/lb /z/la; ln -s /z/la /z/lb; mkdir -p /z/z/la /z/z/lb; echo keep > /z/z/la/x; echo keep > /z/z/lb/x; rm /z/la/x; echo g5=$?; echo g6=$(cat /z/z/la/x)$(cat /z/z/lb/x); mv /z/z/la/x /z/la/y; echo g7=$?; echo g8=$(cat /z/z/la/x); echo s10-$(echo done)\r
+wait s10-done 30
+send sync; umount /d; umount /z; umount /p; umount /mnt; echo k1=$?; sync; echo paths-test-$(echo done)\r
 wait paths-test-done 60
+sleep 2
+stop

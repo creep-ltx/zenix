@@ -59,7 +59,12 @@ for bits in "$@"; do
     has "... and refuses writes" 'refused\.txt.*read-only'
     has "the floppy (FAT12, no partition table) reads" '^on-the-floppy$'
     has "... lists what was written" 'skriven\.txt'
-    hasnot "fatd did not crash" 'fatd.*(exception|crash|bus error|address error)'
+    has "paths: a tree 225 bytes deep on FAT: mkdir -p" '^(.*# )?fd1=0$'
+has "... cp -r" '^(.*# )?fd2=0$'
+has "... find" '^(.*# )?fd3=9$'
+has "... rm -r" '^(.*# )?fd4=0$'
+has "... the copy whole" '^(.*# )?fd5=9$'
+hasnot "fatd did not crash" 'fatd.*(exception|crash|bus error|address error)'
     echo "--- FAT$bits: back on the PC"
     dd if=$CARD of=$P bs=512 skip=2048 count=32768 status=none
     fsck.fat -n $P > $OUT/fsck.log 2>&1 && check "fsck.fat finds nothing" ok || { check "fsck.fat finds nothing" bad; head -20 $OUT/fsck.log; }

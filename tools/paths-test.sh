@@ -39,7 +39,7 @@ is "du" a11 1
 is "grep -r" a12 1
 is "chown -R" a13 0
 is "tree" a14 1
-is "cd, pwd" a15 233
+is "cd, pwd" a15 225
 is "... a relative name there" a16 deep-file
 is "rm -r" a17 0
 is "... gone" a18 1
@@ -59,6 +59,7 @@ has "... rm says so" "^rm: /tmp/a+/a+/a+/a+/b{47}: $TL\$"
 isnot0 "... find" b9
 isnot0 "... cd" b10
 isnot0 "... stat" b11
+has "... stat says so" "^stat: /tmp/a+/a+/a+/a+/b{47}: $TL\$"
 isnot0 "... touch" b12
 is "a link target of 255 bytes" c1 0
 is "... read back" c2 256
@@ -72,19 +73,20 @@ is "below the limit by a relative name" d1 0
 isnot0 "... cd past the limit refused" d2
 is "... ls by the relative name" d3 0
 isnot0 "find past the limit: not 0" d4
-has "... names the path and says why" "^find: /tmp/a+/a+/a+/a+/a+/f: $TL\$"
+has "... names the path and says why" "^find: /tmp(/a+){5}: $TL\$"
 isnot0 "cp -r: not 0" d5
-has "... says why" "^cp: .*/a+/f: $TL\$"
+has "... says why" "^cp: /tmp(/a+){5}: $TL\$"
 isnot0 "tar c: not 0" d6
-has "... says why" "^tar: .*/a+/f: $TL\$"
+has "... says why" "^tar: /tmp(/a+){5}: $TL\$"
 isnot0 "rm -r: not 0" d7
-has "... says why" "^rm: .*/a+/f: $TL\$"
+has "... says why" "^rm: /tmp(/a+){5}: $TL\$"
 is "... and it is still there" d9 0
 is "from inside it goes" d10 0
 is "... and the rest" d11 0
 echo "--- with mounts"
 is "FFS read-write" e1 0
 is "PFS3" e2 0
+is "the damaged FFS volume" e7 0
 has "FFS listed" 'ide0p3 +/mnt +ffs '
 has "PFS3 listed" 'ide0p4 +/p +pfs3 '
 is "255 bytes still go" e3 limit
@@ -105,18 +107,15 @@ is "... gone" f10 1
 isnot0 "find over the limit: not 0" f11
 has "... says why" "^find: /mnt/over/.*: $TL\$"
 isnot0 "cp -r: not 0" f12
-is "cd, pwd" f13 233
+is "cd, pwd" f13 225
 is "a path through a link across the mount" g1 deep-file
 is "rename through it" g2 0
 is "... back" g3 0
 is "... the file as it was" g4 deep-file
-isnot0 "rm through a link loop: not 0" g5
-has "... the loop's own error" '^rm: /mnt/la/x: too many (levels of )?symbolic links$'
-is "... and the files the loop's raw text names stay" g6 keepkeep
 echo "--- a folder that cannot be read"
 isnot0 "rm -r: not 0" h1
-has "... the real reason" '^rm: /mnt/skadad: input/output error$'
-hasnot "... not \"not empty\"" '^rm: /mnt/skadad: .*not empty'
+has "... the real reason" '^rm: /d/skadad: input/output error$'
+hasnot "... not \"not empty\"" '^rm: /d/skadad: .*not empty'
 is "... the file in it still there" h2 0
 isnot0 "rm -rf too" h3
 isnot0 "cp -r: not 0" h4
@@ -135,7 +134,7 @@ is "tar t" i6 10
 isnot0 "find over the limit: not 0" i7
 has "... says why" "^find: /p/over/.*: $TL\$"
 isnot0 "rm -r refused: read-only" i8
-is "cd, pwd" i9 233
+is "cd, pwd" i9 223
 echo "--- ZenixFS"
 is "made" j1 0
 is "mounted" j2 0
@@ -144,6 +143,11 @@ is "cp -r out" j4 0
 is "find" j5 9
 is "rm -r" j6 0
 isnot0 "... gone" j7
+isnot0 "rm through a link loop: not 0" g5
+has "... the loop's own error" '^rm: /z/la/x: too many levels of symbolic links$'
+is "... and the files the loop's raw text names stay" g6 keepkeep
+isnot0 "rename into a link loop: not 0" g7
+is "... the file stays" g8 keep
 is "umount" k1 0
 hasnot "nothing crashed or ran out of stack" '(overflowed|exception|bus error|address error|PANIC|panic|Guru)'
 echo "--- back on the PC"
