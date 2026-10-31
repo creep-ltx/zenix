@@ -31,6 +31,8 @@ grep '^wheel:' /etc/group
 printf 'pw1\npw1\n' | passwd fay > /dev/null; echo pw-fay=$?
 echo 'echo pw1 | sudo id; echo sudo-pw=$?' | su fay
 echo 'printf "a\nb\nc\n" | sudo id; echo sudo-wrong=$?' | su fay
+# the 5 minutes after a right password (owner 2026-10-31): the same shell's next sudo asks nothing, -k forgets
+echo 'echo pw1 | sudo true; printf "x\n" | sudo true; echo sudo-stamp=$?; sudo -k; printf "x\n" | sudo true; echo sudo-forgot=$?' | su fay
 echo 'echo pw1 | sudo -u guest id' | su fay
 echo 'echo pw1 | sudo nosuchcmd; echo sudo-nocmd=$?' | su fay
 echo 'echo pw1 | sudo false; echo sudo-false=$?' | su fay

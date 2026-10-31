@@ -49,7 +49,9 @@ want "-G adds to wheel" "wheel::10:user,fay"
 want "passwd for fay" "pw-fay=0"
 want "sudo with the right password" "sudo-pw=0"
 want "three wrong passwords" "sudo-wrong=1"
-grep -ac '^sudo: wrong password$' $OUT/ua.out | grep -qx 3 && echo "PASS three tries" || { echo "FAIL three tries"; pass=0; }
+want "no password again within 5 minutes in the same shell" "sudo-stamp=0"
+want "sudo -k forgets it" "sudo-forgot=1"
+grep -ac '^sudo: wrong password$' $OUT/ua.out | grep -qx 4 && echo "PASS three tries" || { echo "FAIL three tries"; pass=0; }
 want "sudo -u" "uid=1001(guest) gid=100(users)"
 want "unknown command" "sudo-nocmd=127"
 want "the command's status" "sudo-false=1"

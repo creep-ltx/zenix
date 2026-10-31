@@ -7,8 +7,13 @@ SYNOPSIS
     sudo [-u user] command [arg...]
     sudo [-u user] -s
     sudo [-u user] -i
+    sudo -k
 
 DESCRIPTION
+    After a right password sudo asks no more for 5 minutes in the
+    same shell (a timestamp in /var/run/sudo, root's alone; a restart
+    or a moved clock ends it). sudo -k forgets it at once.
+
     Runs COMMAND as root, or as USER with -u, and waits for it. -s starts
     the target's shell instead; -i does the same in the target's home
     directory.
