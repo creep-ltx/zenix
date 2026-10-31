@@ -1047,7 +1047,7 @@ copy at start) is not built. zenixboot does not change at all.
 
 **The bootstrap from 2026103000** (the owner's system: its zup refuses every base-group package live, by group and by
 name, and its zpkg has no writer, so no new `/bin/zpkg` can arrive before a system update):
-- `tools/mkzup.py` makes a live package **`zpkg-new`** (this build's zpkg as `/bin/zpkg-new`, its own page) with
+- `tools/mkzup.py` makes a live package **`zpkg-new`** (this build's zpkg as `/bin/zpkg-new`; its page goes with base-man, which images have) with
   `depends base 2026103000` (`BOOTSTRAP`); `tools/mkrepo.py` keeps that base (and the header's minimum) while the
   system moves on, and adds `depends zpkg-new` to `sysutils` in the repository only (`BOOTSTRAP_DEP`; never in the
   build, so an image's database never names a package the image lacks). The old zpkg's `-Syu` upgrades `sysutils`,
@@ -1084,7 +1084,8 @@ Not fixed here (zenixboot is only changed by hand); zpkg's message says "at most
 **Said plainly, and open:** this writes the owner's boot partition's metadata (two new files per update, one
 hash-chain link each, the bitmap). The checks above make a damaged or unexpected volume a refusal, and the write
 order keeps a cut harmless, but CLAUDE.md asks for a plan the owner agreed to before any write to a disk with AmigaOS
-partitions, and the approved D22 decision said "nothing else there ever written". **The owner's explicit yes to this
-plan is needed before the first use on the real card**, and a second design review (update changes get two). Before
+partitions, and the approved D22 decision said "nothing else there ever written": **the owner approved this plan on
+2026-10-31 ("Yes", docs/decisions.md)**. One read-only review was done (findings worked in); a second is the main
+session's call (update changes get two). Before
 the first real write: a read-only check of the real BOOT: image on the PC (`tools/ffsread.py check`, and zpkg's own
 walk), which shows whether the owner's FFS writes its volumes as the walk expects. Not verified on the real A1200.

@@ -30,7 +30,7 @@ OUT=${ZENIX_OUT:-/tmp/zenix-sysup}; mkdir -p "$OUT"
 OLD=${ZENIX_SYSUP_OLD:-381e9b1}
 SER=${ZENIX_SERIAL:-/tmp/zenix-sysup-serial}
 export ZSIGN_TEST_DIR=$PWD/build/sign-test          # one TEST key for the old build, the new ones and the repository
-make -s BUILD=$BD all >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL the build"; exit 1; }
+make -s BUILD=$BD all $BD/zenixboot >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL the build"; exit 1; }
 OUT=$(cd "$OUT" && pwd); BD=$(cd "$BD" && pwd)
 for t in openssl debugfs e2fsck resize2fs git; do command -v $t >/dev/null || { echo "FAIL $t is not installed"; exit 1; }; done
 unshare --map-root-user --map-auto -nm true 2>/dev/null || { echo "FAIL unshare --map-root-user --map-auto fails (newuidmap, /etc/subuid)"; exit 1; }
@@ -42,7 +42,7 @@ R() { echo "$1" >>"$OUT/results"; case $1 in FAIL*) pass=0 ;; esac; echo "$1"; }
 check() { if [ "$2" = ok ]; then R "PASS $1"; else R "FAIL $1"; fi; }
 : >"$OUT/results"
 
-# ---- the builds: the owner's (old), this one as V1, and V2 (V1's files, a new motd in base) ----
+# ---- the builds: the owner's (old), this one as V1, and as V2 (with a new motd in base) ----
 V0=2026103000
 V1=2026103101; V2=2026103102
 O=$OUT/old
@@ -58,22 +58,7 @@ fi
 OV=$(python3 -I -c 'import sys; sys.path.insert(0, "tools"); import mkzup; print(mkzup.kernel_version(open(sys.argv[1], "rb").read())[0])' "$O/build/kernel.bin")
 [ "$OV" = $V0 ] || { echo "FAIL the old build says version $OV, not $V0"; exit 1; }
 make -s BUILD=$OUT/b1 ZVNUM=$V1 $OUT/b1/kernel.bin $OUT/b1/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V1"; exit 1; }
-rm -rf $OUT/b2; mkdir -p $OUT/b2; cp -a $OUT/b1/pkg $OUT/b2/
-python3 -I - $OUT/b1/kernel.bin $OUT/b2/kernel.bin $V1 $V2 $OUT/b2/pkg <<'PYEOF' || { echo "FAIL the build V2"; exit 1; }
-import sys, struct, os, re
-src, dst, v1, v2, pk = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
-d = bytearray(open(src, "rb").read())
-i = d.find(b"ZVER" + struct.pack(">I", v1))
-assert i >= 0
-d[i + 4:i + 8] = struct.pack(">I", v2)
-open(dst, "wb").write(d)
-for f in os.listdir(pk):
-    if f.endswith(".manifest"):
-        t = open(os.path.join(pk, f)).read()
-        t = re.sub(r"^version %d " % v1, "version %d " % v2, t, flags=re.M)
-        t = re.sub(r"^depends (\S+) %d$" % v1, r"depends \1 %d" % v2, t, flags=re.M)
-        open(os.path.join(pk, f), "w").write(t)
-PYEOF
+make -s BUILD=$OUT/b2 ZVNUM=$V2 $OUT/b2/kernel.bin $OUT/b2/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V2"; exit 1; }
 echo ' Zenix updated twice (sysupdate-test)' >$OUT/motd2
 python3 tools/mkzup.py repack $OUT/b2/pkg base /etc/motd=$OUT/motd2 >/dev/null || { echo "FAIL repack"; exit 1; }
 
@@ -126,12 +111,17 @@ step() {        # step N CMD...: one command, its output and status into /tests/
   echo 'dmesg > /tests/dmesg; sync; echo s4-d""one'; } >$OUT/s4.sh
 { cat $OUT/net.sh; echo 'cp /tests/conf.r /etc/zpkg.conf'; step 21 'zpkg -Syu'; echo 'echo m-d""one'; } >$OUT/sm.sh
 
-boot_check() {  # NAME DISK PARTIMG WHAT: the FFS boot partition on the PC: the whole volume, and amitools agrees
+boot_check() {  # NAME DISK PARTIMG WHAT FRESH: the FFS boot partition on the PC: the whole volume, and amitools agrees
+                # (nothing it says of the fresh volume FRESH it did not say before)
     local n=$1 img=$3
     python3 tools/ffsread.py $2 --part ZB0 dump $img 2>/dev/null || python3 tools/ffsread.py $2 dump $img
     local o; o=$(python3 tools/ffsread.py $img check 2>&1)
     local x=ok
-    if command -v xdfscan >/dev/null; then cp $img $img.hdf; xdfscan $img.hdf 2>&1 | grep -q ' ok ' || x=bad; rm -f $img.hdf; fi
+    if command -v xdfscan >/dev/null; then    # (its complaints about the fresh image, mkffs's: bits past the end, ignored)
+        cp $img $img.hdf; xdfscan -v $img.hdf 2>&1 | grep -a 'ERROR\|WARN' | sort >$img.x; rm -f $img.hdf
+        cp $5 $img.hdf; xdfscan -v $img.hdf 2>&1 | grep -a 'ERROR\|WARN' | sort >$img.x0; rm -f $img.hdf
+        [ -z "$(comm -23 $img.x $img.x0)" ] || x=bad
+    fi
     check "$n: $4: the boot partition is a valid volume on the PC ($o; amitools' xdfscan: $x)" \
         "$([ "$o" = "ok, 0 leaked blocks" ] && [ $x = ok ] && echo ok || echo bad)"
 }
@@ -242,7 +232,7 @@ import sys; sys.path.insert(0, "tools"); import mkzup
 k, o = open(sys.argv[1], "rb").read(), open(sys.argv[2], "rb").read()
 sys.exit(0 if mkzup.kernel_version(k)[0] == int(sys.argv[3]) and mkzup.kernel_version(o)[0] == int(sys.argv[4]) else 1)' $z/zenix $z/zenix.old $V2 $V1 &&
            grep -q '^phase trial$' $z/state && echo ok || echo bad)"
-    boot_check b $d/disk.hdf $d/zb0.img "after both updates"
+    boot_check b $d/disk.hdf $d/zb0.img "after both updates" $d/ffs.img
     e2fsck -fn $d/root-after.img >$d/e2fsck.log 2>&1 && R "PASS b: the root: e2fsck -fn clean" || R "FAIL b: the root: e2fsck (log $d/e2fsck.log)"
     check "b: no process faulted" "$(grep -aq '\[kernel\]' $d/dmesg && echo bad || echo ok)"
 }
@@ -271,7 +261,7 @@ part_m() {
     rm -rf $d/bootx; mkdir -p $d/bootx; python3 tools/ffsread.py $d/p2.img --part ZB0 extract $d/bootx
     check "m: ... the bundle and its .sig on the PC as the repository's" \
         "$(cmp -s $d/bootx/Zenix/zenix-update.zup $SYS1 && cmp -s $d/bootx/Zenix/zenix-update.zup.sig $SYS1.sig && echo ok || echo bad)"
-    boot_check m $d/p2.img $d/zb0.img "the card layout"
+    boot_check m $d/p2.img $d/zb0.img "the card layout" $d/ffs.img
     e2fsck -fn $d/root-after.img >$d/e2fsck.log 2>&1 && R "PASS m: the root: e2fsck -fn clean" || R "FAIL m: the root: e2fsck (log $d/e2fsck.log)"
     # a disk without a boot partition (the root alone, started from the floppy): said, nothing written
     root_img $d/root2.img $BD/zenix.hdf || { R "FAIL m: the second root image"; return; }

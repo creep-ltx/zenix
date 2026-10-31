@@ -346,10 +346,8 @@ def std_packages(build, uapps):
             make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)], desc=desc, takes=("utils", "man"))
             names.append(fam)
         if "zpkg" in progs:                 # the bootstrap package (BOOTSTRAP above): this build's zpkg, under its own name
+            # (its page goes with base-man: an image has the page but not this package, so it may not own it)
             ents = [("f", 0o755, 0, 0, zx("zpkg"), "/bin/zpkg-new")]
-            if "zpkg-new.txt" in pages:
-                ents += mandirs + [("f", 0o644, 0, 0, pages["zpkg-new.txt"], "/usr/man/zpkg-new.txt")]
-                taken.add("zpkg-new.txt")
             make_package(out, "zpkg-new", vnum, vstr, ents, deps=[("base", BOOTSTRAP["zpkg-new"])],
                          desc="zpkg that writes the system update itself, for a system older than that")
             names.append("zpkg-new")
