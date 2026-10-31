@@ -312,8 +312,8 @@ def t_files(d):
           "PUT short of its size: ERR 'size mismatch', no file")
     r = put(c, "rel/path", b"x")
     check(isinstance(r, tuple) and "starts with /" in r[1], "PUT of a relative path refused")
-    r = put(c, "/" + "a" * 70, b"x")
-    check(isinstance(r, tuple) and "63" in r[1], "PUT of a path over 63 bytes refused")
+    r = put(c, "/" + "a" * 260, b"x")
+    check(isinstance(r, tuple) and "255" in r[1], "PUT of a path over 255 bytes refused")
     c.close()
     # cut half-way: the old file stays, no temporary left
     with open(rootfile("/data/keep"), "wb") as f:

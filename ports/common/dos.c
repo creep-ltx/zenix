@@ -30,7 +30,7 @@ static int fail(void)
 
 /* ---- names: the program's own settings names and its T: prefix, nothing else (amigados.h) ---- */
 
-#define ZPATH 64                        /* PATH_MAX: the kernel's 63 bytes and the NUL */
+#define ZPATH 256                       /* PATH_MAX: the kernel's 255 bytes and the NUL */
 
 #ifndef ZENIX_TT_NAMES
 #error "ZENIX_TT_NAMES: the program's settings names (the Makefile's TT_NAMES_PROG)"
@@ -451,7 +451,7 @@ LONG ExNext(BPTR lock, struct FileInfoBlock *fib)
 static u32 zmount(const char *path)
 {
     struct umountinfo mi;
-    char r[160];
+    char r[ZPATH];
     u32 i, best = 0;
     size_t bl = 0;
     if (zrealpath(path, r, sizeof r) < 0)

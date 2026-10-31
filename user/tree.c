@@ -20,7 +20,8 @@ static void walk(const char *path, const char *prefix)
         if (!o_a && names[i][0] == '.') continue;
         char *child = path_join(path, names[i]);
         if (!child) { dprintf(2, "tree: %s/%s: %s\n", path, names[i], zwhy("cannot read")); rc = 1; continue; }
-        struct ustat st; int isdir = sys_lstat(child, &st) == 0 && (st.mode & S_IFMT) == S_IFDIR;
+        struct ustat st; int le = sys_lstat(child, &st), isdir = le == 0 && (st.mode & S_IFMT) == S_IFDIR;
+        if (le < 0 && le != -ENOENT) { dprintf(2, "tree: %s: %s\n", child, zwhy("cannot read")); rc = 1; free(child); continue; }
         if (o_d && !isdir) { free(child); continue; }
         int last = i == last_i;
         dprintf(1, "%s%s%s", prefix, last ? "`-- " : "|-- ", names[i]);

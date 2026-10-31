@@ -43,7 +43,7 @@ Decided here (conservatively; for the main session to confirm):
   object (ERROR_OBJECT_EXISTS; Zenix's rename(2) would, and upstream relies on the refusal); MODE_OLDFILE opens for
   reading and writing (read only when writing is not allowed: Ahiru writes disk images in place); SameLock tells
   mounts apart by the mount table (Zenix's stat has no device); DeleteFile takes a folder on EISDIR or EPERM; ExNext
-  lists a name whose path is over 63 bytes as an empty file nobody may read, so a copy fails on it instead of leaving
+  lists a name whose path is over 255 bytes as an empty file nobody may read, so a copy fails on it instead of leaving
   it out; SystemTags and Execute turn upstream's AmigaDOS quotes ("NAME", where nothing is expanded) into sh's single
   quotes, so a name holding $, ` or \ is not run as a command (a name holding a " still ends its quotes early: upstream
   would need to pass the name apart from the command text).

@@ -78,7 +78,7 @@ NOTES
     program (no browser). The console is Latin-1: characters beyond it
     show as stand-ins. Ctrl+C is a key here, never a signal. Footnotes
     show as written. A link that goes up a folder (../x) is taken the
-    AmigaOS way and opens the wrong file. A path is at most 63 bytes
+    AmigaOS way and opens the wrong file. A path is at most 255 bytes
     (PATH_MAX).
     Memory on the stock A1200 (80 x 32): about 135 KB of its own (its
     stack is 32 KB, as the original's: the renderer goes one level deeper

@@ -10,7 +10,7 @@
 #define ZF_MAXPKG   16                  /* packages in one bundle */
 #define ZF_MAXDEP   8                   /* dependencies of one package */
 #define ZF_MAXTAKES 8                   /* takes lines of one package (DESIGN D22 8.4.4) */
-#define ZF_PMAX     64                  /* every path given to a system call is at most 63 bytes */
+#define ZF_PMAX     64                  /* a package's path with its .zup-new: frozen with the manifest (D15), not a system call's limit */
 #define ZF_HDR      96                  /* the bundle header */
 #define ZF_TOCE     80                  /* one table-of-contents entry: name[40], offset, size, SHA-256 */
 #define ZF_MAXTOC   64

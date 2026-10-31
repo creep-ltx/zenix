@@ -276,6 +276,7 @@ def t_links():
     sim.symlink("d/s2", "sub")
     sim.symlink("d/long", "/" + "r" * 255)
     sim.symlink("d/l150", "/" + "p" * 149)
+    sim.symlink("d/l250", "/" + "p" * 249)
     sim.symlink("d/empty", "")
     sim.symlink("d/nul", "a\0b")
     c = Client()
@@ -291,7 +292,7 @@ def t_links():
             ("link /d/sub/f /d/s2/h", "-1025 a1 d/sub/h"), ("symlink some/target /d/s2/l", "-1025 a1 d/sub/l"),
             ("chmod /d/abs 600", "-1024 a0 /etc/motd"), ("chown /d/abs 5 5", "-1024 a0 /etc/motd"),
             ("utimes /d/abs 1000", "-1024 a0 /etc/motd"), ("stat /d/l150/x", "-1024 a0 /" + "p" * 149 + "/x"),
-            ("stat /d/l150/xyzxyzxyzx", "-36"), ("stat /d/long/x", "-36"), ("stat /d/empty/x", "-2"),
+            ("stat /d/l150/xyzxyzxyzx", "-1024 a0 /" + "p" * 149 + "/xyzxyzxyzx"), ("stat /d/l250/xyzxyzxyzx", "-36"), ("stat /d/long/x", "-36"), ("stat /d/empty/x", "-2"),
             ("stat /d/nul/x", "-5"), ("stat d/abs/x", "-2"), ("readlink /d/abs", "9 /etc/motd")]
     for cmd, w in want:
         r = c.cmd(cmd)

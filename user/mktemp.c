@@ -11,9 +11,10 @@ int main(int argc, char **argv)
         else { dprintf(2, "mktemp: unknown option %s\n", argv[i]); return 2; }
     }
     if (i < argc) tmpl = argv[i];
-    char name[160];
+    char name[ZPATH_MAX];
     if (tmpl[0] == '/' || !base) { if (tmpl[0] != '/' && !base) base = "/tmp"; }
-    if (tmpl[0] == '/') snprintf(name, sizeof name, "%s", tmpl); else snprintf(name, sizeof name, "%s/%s", base, tmpl);
+    int made = tmpl[0] == '/' ? snprintf(name, sizeof name, "%s", tmpl) : snprintf(name, sizeof name, "%s/%s", base, tmpl);
+    if (made >= (int)sizeof name) { dprintf(2, "mktemp: %s: file name too long\n", tmpl); return 1; }
     int n = (int)strlen(name), x = n; while (x > 0 && name[x - 1] == 'X') x--;
     if (x == n) { dprintf(2, "mktemp: the template needs trailing X characters\n"); return 2; }
     static const char set[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";

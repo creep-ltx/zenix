@@ -589,7 +589,7 @@ done
     check "fsck.ext2 cut after each of its repair writes ($fk_cut_runs cuts): never marked clean early, the next run finishes" ok || check "fsck.ext2 cut inside its repair: $fk_cut_bad bad of $fk_cut_runs" bad
 # ---- D26: the FS_LINKED answer (symbolic links across mounts, docs/d26-links-across-mounts.md 4) ----
 mke2fs -q -F -t ext2 -b 1024 $T/ln.img 8M
-L150=$(printf 'p%.0s' $(seq 1 150)); L158=$(printf 'q%.0s' $(seq 1 158))
+L150=$(printf 'p%.0s' $(seq 1 150)); L254=$(printf 'q%.0s' $(seq 1 254))
 cat > $T/ln0.txt <<EOF
 mount
 mkdir /d
@@ -600,7 +600,7 @@ symlink /etc/motd /d/abs
 symlink ../x/y /d/rel
 symlink sub /d/s2
 symlink /$L150 /d/l150
-symlink /$L158 /d/l158
+symlink /$L254 /d/l254
 symlink /tmp /d/fast
 mkdir /nox
 symlink /d /nox/in
@@ -639,7 +639,7 @@ chown /d/abs 5 5
 utimes /d/abs 1000
 stat /d/l150
 stat /d/l150/x
-stat /d/l158/x
+stat /d/l254/x
 stat /d/l256/x
 stat /d/fast/x
 stat /d/nul/x
@@ -687,7 +687,7 @@ stat -> -2
 EOF
 )
 got=$(grep -v '^ext2:\|^mount\|^writes\|^state\|^ls ->\|^links -> 0' $T/out | sed 's/^\(lstat -> 0 ino\).*/\1/' | head -29)
-[ "$got" = "$want" ] && check "D26: FS_LINKED for every request of the table: TEXT, the bits, S and E of a parent walk, absolute and relative targets, 150/158/256-byte and empty and NUL targets, a relative path answered as today" ok ||
+[ "$got" = "$want" ] && check "D26: FS_LINKED for every request of the table: TEXT, the bits, S and E of a parent walk, absolute and relative targets, 150/254/256-byte and empty and NUL targets, a relative path answered as today" ok ||
     { check "D26: the FS_LINKED answers" bad; diff <(echo "$want") <(echo "$got"); }
 grep -q '^writes -> 0$' $T/out && grep -q '^state -> 1 marked 0' $T/out && grep -q '^ls -> . .. f (3, 0)$' $T/out && grep -q '^open -> -17$' $T/out &&
     check "D26: the bounced requests (mkdir, unlink, rename, link, symlink, chmod, chown, utimes, O_CREAT) wrote nothing, not even the mark; O_CREAT|O_EXCL on a link is -EEXIST" ok ||

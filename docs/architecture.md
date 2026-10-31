@@ -800,9 +800,11 @@ messages and servers already took whatever fitted in `FS_PATHMAX`. Real AmigaOS 
 **Design.**
 - `FS_PATHMAX` 256. The copy-in takes `FS_PATHMAX` bytes. Each path's buffer lives in a small function of its own
   (`sys_path1`, `sys_path2`, `sys_mount_copy`, `do_spawn`), not in `syscall_c`, whose frame every system call carries.
-- The kernel stack (4 KB): -fstack-usage, the frames along the deepest walks (a rename through a link across mounts),
-  are in `docs/limits.md`. No path buffer on a user stack in a recursive function (the directory tools already keep
-  theirs on the heap).
+- The kernel stack (4 KB): the walks write in the very buffer the path was copied into (`walk_start`'s BUF, `vfs_*`
+  take `char *`), the scratch text of `walk_norm` is off the stack before a server is asked, and `mount_search` needs
+  only a mount point's 48 bytes. So a path costs one buffer a call and the deepest chains stay about where they were
+  (-fstack-usage, the numbers in `docs/limits.md`). No path buffer on a user stack in a recursive function (the
+  directory tools already keep theirs on the heap).
 - `struct proc.cwd` is `FS_PATHMAX` bytes: 96 more in each of the 32 slots. That is the cost in RAM of the raise to 255
   (the rest is stack, used only during a call).
 - **Frozen interfaces only grow** (docs/frozen-interfaces.md): no message or struct changes. `FS_PATHMAX` is not in a
@@ -810,7 +812,10 @@ messages and servers already took whatever fitted in `FS_PATHMAX`. Real AmigaOS 
   `getcwd` with a small buffer is -ERANGE, never an overrun, when someone has gone deeper. An older server has 160-byte
   buffers: it refuses (-ENAMETOOLONG) a longer path where it copies one, and its continuation text (D26) is at most 160
   bytes, inside the kernel's 256. A newer server's text could be 256 bytes, which is why it needs a kernel at least as
-  new: the D15 rule (the kernel is never older than the root) and its package's `depends base` give that.
+  new: the D15 rule (the kernel is never older than the root) and its package's `depends base` give that, with one
+  narrow exception: booting "Zenix (previous)" with zup then failing leaves a newer root under an older kernel, and a
+  mount server started there could overrun that kernel's 160-byte buffer on a link whose text passes 159 bytes.
+  Accepted (a failed rollback and a long link together); it cannot be fixed from the new side.
 - User side: `ZPATH_MAX` (libz) and `PATH_MAX` (the C library) 256; `path_join` says -ENAMETOOLONG past 255, and a
   tool whose relative path is short enough but too long once absolute hears it from the kernel: every tool reports that
   and goes on. Fixed buffers that cut a name silently are gone (`nice`, `time`, `env`, `edit`, `mktemp`, `gzip`).

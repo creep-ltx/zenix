@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* wasabid's files (DESIGN D24 4, 5.3): PUT, GET, LS, DEL, MKDIR and SPEED. Regular files only, opened O_NONBLOCK;
- * paths at most 63 bytes; a network mount refused until D23's cancel mark (step 1). */
+ * paths at most 255 bytes; a network mount refused until D23's cancel mark (step 1). */
 #include "wasabi_int.h"
 
 #define ZEXE_MAGIC 0x5a455845u                  /* 'ZEXE', 'ZEX2' (kernel/kernel.h) */
@@ -17,7 +17,7 @@ static int get_path(struct conn *c, const uint8_t *p, uint32_t len, uint32_t *of
 {
     int e = wsb_getstr(p, len, off, path, WSB_PATHMAX + 1);
     if (e == -ENAMETOOLONG) {
-        qerr(c, 0, 0, "the path is longer than 63 bytes");
+        qerr(c, 0, 0, "the path is longer than 255 bytes");
         return -1;
     }
     if (e) {
@@ -108,7 +108,7 @@ void cmd_put(struct conn *c, const uint8_t *p, uint32_t len)
     c->xflags = 0;
     c->xprot = prot;
     c->xpath[0] = c->xtmp[0] = 0;
-    if (e) { sink(c, J_PUT, 0, e == -ENAMETOOLONG ? "the path is longer than 63 bytes" : "bad path"); return; }
+    if (e) { sink(c, J_PUT, 0, e == -ENAMETOOLONG ? "the path is longer than 255 bytes" : "bad path"); return; }
     if (path_ok(path)) { sink(c, J_PUT, 0, "a Zenix path starts with /"); return; }
     e = is_self(path);
     if (e < 0) { sink(c, J_PUT, -ELOOP, "the path cannot be resolved (a link loop or a link too long)"); return; }

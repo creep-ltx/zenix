@@ -40,8 +40,8 @@ NOTES
     Running out of memory is reported ("out of memory") and ends the command
     with a non-zero status; nothing is cut short silently.
     Directories with any number of entries are walked, as deep as paths go. A
-    path longer than 63 bytes (what a system call takes) is reported ("path
-    too long") and skipped, never cut short.
+    path longer than 255 bytes (what a system call takes) is reported
+    ("file name too long") and skipped, never cut short.
     With -r, the "diff A B" line is printed only for files that differ, as
     GNU diff does (without the -r that GNU repeats in it).
 

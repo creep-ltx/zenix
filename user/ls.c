@@ -109,9 +109,14 @@ static void show(struct ent *v, int n)
         oputc('\n');
     }
 }
+static int fill_bad;
 static void fill(struct ent *e, const char *path)
 {
-    if (sys_lstat(path, &e->st) < 0) memset(&e->st, 0, sizeof e->st);
+    int le = sys_lstat(path, &e->st);
+    if (le < 0) {
+        memset(&e->st, 0, sizeof e->st);
+        if (le != -ENOENT) { dprintf(2, "ls: %s: %s\n", path, zstrerror(le)); fill_bad = 1; }   /* there but out of reach (a path too long) */
+    }
     e->islink = (e->st.mode & S_IFMT) == S_IFLNK;
     e->link[0] = 0;
     if (e->islink) { int n = sys_readlink(path, e->link, 63); if (n < 0) n = 0; e->link[n] = 0;
@@ -120,7 +125,7 @@ static void fill(struct ent *e, const char *path)
 static int list(const char *path, int top)
 {
     struct ustat st;
-    if (sys_lstat(path, &st) < 0) { dprintf(2, "ls: %s: not found\n", path); return 1; }
+    { int le = sys_lstat(path, &st); if (le < 0) { dprintf(2, "ls: %s: %s\n", path, le == -ENOENT ? "not found" : zstrerror(le)); return 1; } }
     int isdir = (st.mode & S_IFMT) == S_IFDIR;
     if (!isdir && (st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(path, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) { isdir = 1; st = t; } }
     if (!isdir || o_d) {
@@ -182,14 +187,14 @@ int main(int argc, char **argv)
     tty = sys_isatty(1);
     color = cmode == 2 ? color_auto(1) : cmode;
     int n = argc - i; multi = n > 1;
-    if (!n) { rc = list(".", 1); oflush(); return rc; }
+    if (!n) { rc = list(".", 1); oflush(); return rc | fill_bad; }
     /* operands: everything that is not a directory is listed together first, sorted; then each directory */
     struct ent *files = xmalloc((u32)n * sizeof(struct ent)); int nf = 0;
     struct ent *dirs = xmalloc((u32)n * sizeof(struct ent)); int nd = 0;
     for (int k = 0; k < n; k++) {
         const char *a = argv[i + k];
         struct ustat st;
-        if (sys_lstat(a, &st) < 0) { dprintf(2, "ls: %s: not found\n", a); rc = 1; continue; }
+        { int le = sys_lstat(a, &st); if (le < 0) { dprintf(2, "ls: %s: %s\n", a, le == -ENOENT ? "not found" : zstrerror(le)); rc = 1; continue; } }
         int isdir = (st.mode & S_IFMT) == S_IFDIR;
         if ((st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(a, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) isdir = 1; }
         struct ent *e = (isdir && !o_d) ? &dirs[nd++] : &files[nf++];
@@ -199,5 +204,5 @@ int main(int argc, char **argv)
     qsort(dirs, (u32)nd, sizeof(struct ent), cmp);
     for (int k = 0; k < nd; k++) rc |= list(dirs[k].name, k == 0 && !nf);
     oflush();
-    return rc;
+    return rc | fill_bad;
 }

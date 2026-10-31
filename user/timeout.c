@@ -11,7 +11,7 @@ int main(int argc, char **argv)
     }
     if (argc - i < 2) { dprintf(2, "usage: timeout [-s SIGNAL] seconds command [argument...]\n"); return 2; }
     u32 limit = (u32)atoi(argv[i]) * 100;                 /* 100 ticks a second */
-    char path[160];
+    char path[ZPATH_MAX];
     if (!path_find(argv[i + 1], path, sizeof path)) { dprintf(2, "timeout: %s: command not found\n", argv[i + 1]); return 127; }
     int pid = sys_spawn(path, argv + i + 1, 0);           /* in our job's group, the terminal's foreground (DESIGN D16) */
     if (pid < 0) { dprintf(2, "timeout: %s: %s\n", argv[i + 1], zwhy("cannot run")); return 127; }

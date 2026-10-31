@@ -164,7 +164,12 @@ static int diff_dirs(const char *d1, const char *d2)
         struct ustat s1, s2;
         char *p1 = path_join(d1, names[i]), *p2 = p1 ? path_join(d2, names[i]) : 0;
         if (!p2) { dprintf(2, "diff: %s/%s: %s\n", p1 ? d2 : d1, names[i], zwhy("cannot compare")); free(p1); rc = 2; continue; }
-        int e1 = sys_stat(p1, &s1) == 0, e2 = sys_stat(p2, &s2) == 0;
+        int r1 = sys_stat(p1, &s1), r2 = sys_stat(p2, &s2), e1 = r1 == 0, e2 = r2 == 0;
+        if ((r1 < 0 && r1 != -ENOENT) || (r2 < 0 && r2 != -ENOENT)) {   /* there but not reachable: not "only in" */
+            int first = r1 < 0 && r1 != -ENOENT;
+            dprintf(2, "diff: %s: %s\n", first ? p1 : p2, zstrerror(first ? r1 : r2));
+            free(p1); free(p2); rc = 2; continue;
+        }
         if (!e1) { oprintf("Only in %s: %s\n", d2, names[i]); if (rc < 1) rc = 1; }
         else if (!e2) { oprintf("Only in %s: %s\n", d1, names[i]); if (rc < 1) rc = 1; }
         else {

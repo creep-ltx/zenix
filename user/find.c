@@ -31,7 +31,7 @@ static void __attribute__((noinline)) run_exec(const char *path)
     char **av = xmalloc((u32)(exec_n + 1) * sizeof(char *)); int n = 0;
     for (int i = 0; i < exec_n; i++) av[n++] = !strcmp(exec_argv[i], "{}") ? (char *)path : exec_argv[i];
     av[n] = 0;
-    char prog[160];
+    char prog[ZPATH_MAX];
     oflush();
     if (!path_find(av[0], prog, sizeof prog)) { dprintf(2, "find: %s: command not found\n", av[0]); rc = 1; free(av); return; }
     int pid = sys_spawn(prog, av, 0);
@@ -60,7 +60,9 @@ static void visit(const char *path, const char *name, int depth, const struct us
         for (int i = 0; i < nn; i++) {
             char *child = path_join(path, names[i]);
             if (!child) { dprintf(2, "find: %s/%s: %s\n", path, names[i], zwhy("cannot read")); rc = 1; continue; }
-            struct ustat cs; if (sys_lstat(child, &cs) == 0) visit(child, names[i], depth + 1, &cs);   /* a link is not followed */
+            struct ustat cs; int le = sys_lstat(child, &cs);
+            if (le == 0) visit(child, names[i], depth + 1, &cs);        /* a link is not followed */
+            else if (le != -ENOENT) { dprintf(2, "find: %s: %s\n", child, zwhy("cannot read")); rc = 1; }
             free(child);
         }
         dir_free(names, nn);

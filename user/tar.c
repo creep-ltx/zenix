@@ -62,7 +62,7 @@ static void __attribute__((noinline)) add_file(const char *path, const struct us
 static void add(const char *path)
 {
     struct ustat st;
-    if (sys_lstat(path, &st) < 0) { dprintf(2, "tar: %s: cannot stat\n", path); add_rc = 1; return; }
+    if (sys_lstat(path, &st) < 0) { dprintf(2, "tar: %s: %s\n", path, zwhy("cannot stat")); add_rc = 1; return; }
     u32 t = st.mode & S_IFMT;
     if (verbose) dprintf(2, "%s\n", path);
     if (t == S_IFDIR) {

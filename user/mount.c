@@ -191,7 +191,7 @@ static void nfs_why(const char *src, int r)
  * waits for a NAS, a cable or a lease */
 static int mount_nfs(const char *src, const char *dir, const char *opts, int lazy)
 {
-    char codes[40], prog[SVC_TEXT_MAX], pname[16], dev[8], real[160];
+    char codes[40], prog[SVC_TEXT_MAX], pname[16], dev[8], real[ZPATH_MAX];
     const char *c = strchr(src, ':');
     if (!c || c == src || c[1] != '/') { dprintf(1, "mount: %s: not HOST:/EXPORT\n", src); return 1; }
     if (nfs_codes(opts, lazy, codes)) return 1;

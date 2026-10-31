@@ -42,8 +42,8 @@ NOTES
     do not match it), and -delete removes the link, never what it points to.
     With -delete a starting path that is a link is not followed either.
     Directories with any number of entries are walked, as deep as paths go. A
-    path longer than 63 bytes (what a system call takes) is reported ("path
-    too long") and skipped, never cut short.
+    path longer than 255 bytes (what a system call takes) is reported
+    ("file name too long") and skipped, never cut short.
 
 EXIT STATUS
     0, 1 if a starting path does not exist (or may not be read: the

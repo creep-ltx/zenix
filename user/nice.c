@@ -33,10 +33,9 @@ int main(int argc, char **argv)
         dprintf(2, "nice: cannot set niceness %d: %s\n", want, zwhy("refused"));
         return 125;
     }
-    char path[160];
-    if (strchr(argv[i], '/')) snprintf(path, sizeof path, "%s", argv[i]);
-    else if (!path_find(argv[i], path, sizeof path)) { dprintf(2, "nice: %s: not found\n", argv[i]); return 127; }
-    int pid = sys_spawn(path, argv + i, 0);
+    char path[ZPATH_MAX];
+    if (!strchr(argv[i], '/') && !path_find(argv[i], path, sizeof path)) { dprintf(2, "nice: %s: not found\n", argv[i]); return 127; }
+    int pid = sys_spawn(strchr(argv[i], '/') ? argv[i] : path, argv + i, 0);        /* a name with a slash as it is: the kernel judges its length */
     if (pid < 0) { dprintf(2, "nice: %s: %s\n", argv[i], zwhy("cannot run")); return 126; }
     int st = sys_wait(pid);             /* the command is in our job's group, the terminal's foreground (DESIGN D16) */
     return st;

@@ -12,5 +12,5 @@
 #undef NAME_MAX
 #define NAME_MAX  63
 #undef PATH_MAX
-#define PATH_MAX  64
+#define PATH_MAX  256
 #endif

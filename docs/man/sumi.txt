@@ -94,7 +94,7 @@ NOTES
     characters beyond Latin-1 shown as stand-ins.
     Saving through a symbolic or hard link replaces the link with the new
     file and leaves its target as it was; edit the target itself. A
-    path is at most 63 bytes (PATH_MAX). Some messages keep the AmigaOS
+    path is at most 255 bytes (PATH_MAX). Some messages keep the AmigaOS
     words of the original ("Protect it +wd first" means chmod u+w).
     SIGINT does not reach it (^C is a key); SIGTERM, SIGHUP and SIGKILL
     end it at once, without saving; the console's mode is put back.

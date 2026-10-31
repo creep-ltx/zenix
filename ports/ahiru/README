@@ -72,8 +72,8 @@ Ahiru's own (for the main session to confirm with the layer's choices):
   AmigaOS does (below).
 - The stack: STACK_DEFAULT (16 KB). -fstack-usage: the largest frames 2.5 KB (pack), 2.1 KB (op_openfile), under
   1.7 KB the rest; the recursive walks (deltree 336 bytes, copytree 176, treestat 164, find's walk 212) stop at the
-  core's MAXDEPTH 20, and a Zenix path has at most 63 bytes: the deepest chain (smain, run, fs_delete, 20 deltrees)
-  is about 11 KB. Upstream swaps to a 64 KB stack of its own on AmigaOS; FindTask answers a task that needs none.
+  core's MAXDEPTH 20, and a Zenix path has at most 255 bytes: the deepest chain (smain, run, fs_delete, 20 deltrees)
+  is about 12 KB. Upstream swaps to a 64 KB stack of its own on AmigaOS; FindTask answers a task that needs none.
 
 Sizes (FS-UAE, the stock A1200, 2026-10-30): /bin/ahiru 242,876 bytes: 228,632 of code shared by every Ahiru (the
 CFile core's half of it: core/ about 58 KB, fs/ about 72 KB before linking, the archive and disk-image code

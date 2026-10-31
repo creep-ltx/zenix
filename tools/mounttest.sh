@@ -87,7 +87,7 @@ for c in "write $OUT/ro.txt f.txt" "write $BD/hello.pzx hp" "sif hp mode 0100755
          "write $BD/msgpingd.zx mpd" "sif mpd mode 0100755" "write $BD/time.zx time" "sif time mode 0100755" \
          "write $BD/sha256sum.zx sha256sum" "sif sha256sum mode 0100755" \
          "symlink abs /mnt/w" "symlink up ../mnt/w" \
-         "symlink long150 /tmp/$(printf 'a%.0s' $(seq 145))" "symlink l256 /$(printf 'r%.0s' $(seq 255))" "symlink empty x" \
+         "symlink long250 /tmp/$(printf 'a%.0s' $(seq 245))" "symlink l256 /$(printf 'r%.0s' $(seq 255))" "symlink empty x" \
          "sif empty size 0" "ssv state 3"; do
     debugfs -w -R "$c" $OUT/dfro.adf >/dev/null 2>&1
 done
@@ -147,8 +147,8 @@ is "D26 9: rm through a directory link while it runs" c9c 0
 [ "$s3s" -gt "$s2s" ] && check "D26 9: the file replaced on the mount: a new start loads a new copy" ok || check "D26 9: a new start after the replacement loads a new copy ($s2s -> $s3s)" bad
 is "D26 10: a link on the mount to /dev/null: writing works" c10a 0
 is "D26 10: ... and reads nothing" c10b '[]'
-is "D26 11: a continuation over 159 bytes: -ENAMETOOLONG" c11a 1
-has "D26 11: ... file name too long" '^cat: /ro/long150/abcdefghij: file name too long$'
+is "D26 11: a continuation over 255 bytes: -ENAMETOOLONG" c11a 1
+has "D26 11: ... file name too long" '^cat: /ro/long250/abcdefghij: file name too long$'
 is "D26 11: a 256-byte target: -ENAMETOOLONG" c11b 1
 has "D26 11: ... file name too long" '^cat: /ro/l256: file name too long$'
 is "D26 11: an empty target: -ENOENT" c11c 1

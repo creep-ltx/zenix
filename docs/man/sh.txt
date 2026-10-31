@@ -114,7 +114,7 @@ BUILTINS
 VARIABLES THE SHELL USES
     PATH (default /bin)  HOME  USER  HOSTNAME  IFS  PWD  OLDPWD
     (PWD, pwd and the prompt's \w are the system's working directory,
-    up to 159 bytes, with no symbolic link in it: after cd through a link
+    up to 255 bytes, with no symbolic link in it: after cd through a link
     they show where it led, as Linux's cd -P; DESIGN D26)
     TERM (default xterm-16color: the console speaks xterm's keys and 16
         colours; over a serial line the other computer's getty sets it)

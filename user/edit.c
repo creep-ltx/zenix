@@ -17,7 +17,7 @@ static int text_rows = 23;              /* this terminal: its rows - 2 (main set
 /* ------------------------------------------------------------ the buffer: an array of lines */
 struct line { char *s; int len, cap; };
 static struct line *L; static int nL, capL;
-static char filename[128]; static int modified, final_newline = 1;
+static char filename[ZPATH_MAX]; static int modified, final_newline = 1;
 static int cy, cx, top, leftcol, show_nums;
 static int sel_on, ay, ax;
 static char *clip; static int clip_n;
@@ -605,7 +605,7 @@ static int quit_ok(void)
     if (!modified) return 1;
     int a = ask("unsaved changes: save before quitting? (y)es (n)o (c)ancel ", "ync");
     if (a == 'y') {
-        if (!filename[0]) { char in[128]; if (!prompt("save as: ", in, sizeof in, 0) || !in[0]) return 0; strcpy(filename, in); }
+        if (!filename[0]) { char in[ZPATH_MAX]; if (!prompt("save as: ", in, sizeof in, 0) || !in[0]) return 0; strcpy(filename, in); }
         if (save_file(filename) < 0) { snprintf(message, sizeof message, "cannot save %s", filename); return 0; }
         return 1;
     }
@@ -642,7 +642,7 @@ int main(int argc, char **argv)
       text_rows = rows - 2; if (text_rows > TEXT_ROWS_MAX) text_rows = TEXT_ROWS_MAX; if (text_rows < 3) text_rows = 3; }
     for (; i < argc; i++) {
         if (argv[i][0] == '+' && isdigit((unsigned char)argv[i][1])) goto_line = atoi(argv[i] + 1);
-        else if (!filename[0]) { strncpy(filename, argv[i], 127); filename[127] = 0; }
+        else if (!filename[0]) { if (strlen(argv[i]) >= sizeof filename) { dprintf(2, "edit: %s: file name too long\n", argv[i]); return 1; } strcpy(filename, argv[i]); }
     }
     use_color = color_auto(1);
     lines_reserve(1); memset(&L[0], 0, sizeof L[0]); nL = 1;
@@ -695,7 +695,7 @@ int main(int argc, char **argv)
             case K_DEL: delete_forward(); break;
             case K_BTAB: indent(-1); break;
             case K_F1: help_screen(); break;
-            case K_F2: { char in[128]; if (prompt("save as: ", in, sizeof in, filename[0] ? filename : 0) && in[0]) { strcpy(filename, in); if (save_file(filename) < 0) snprintf(message, sizeof message, "cannot save %s", filename); else snprintf(message, sizeof message, "saved %s", filename); } break; }
+            case K_F2: { char in[ZPATH_MAX]; if (prompt("save as: ", in, sizeof in, filename[0] ? filename : 0) && in[0]) { strcpy(filename, in); if (save_file(filename) < 0) snprintf(message, sizeof message, "cannot save %s", filename); else snprintf(message, sizeof message, "saved %s", filename); } break; }
             case K_F3: find_cmd(1, (mods & M_SHIFT) ? -1 : 1); break;
             case K_F4: show_nums = !show_nums; invalidate(); break;
             default: break;
@@ -707,7 +707,7 @@ int main(int argc, char **argv)
         switch (k) {
         case 17: if (quit_ok()) goto done; break;                                            /* Ctrl+Q */
         case 19:                                                                             /* Ctrl+S */
-            if (!filename[0]) { char in[128]; if (!prompt("save as: ", in, sizeof in, 0) || !in[0]) break; strcpy(filename, in); }
+            if (!filename[0]) { char in[ZPATH_MAX]; if (!prompt("save as: ", in, sizeof in, 0) || !in[0]) break; strcpy(filename, in); }
             if (save_file(filename) < 0) snprintf(message, sizeof message, "cannot save %s", filename); else snprintf(message, sizeof message, "saved %s (%d lines)", filename, nL);
             break;
         case 26: undo_once(); break;                                                         /* Ctrl+Z */

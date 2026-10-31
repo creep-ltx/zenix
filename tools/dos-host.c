@@ -93,11 +93,17 @@ int main(int argc, char **argv)
     if (l3) UnLock(l3);
 
     /* B3-8: ExNext lists a name whose path is too long */
-    mkdir("d", 0755);
-    getcwd(q, sizeof q);
-    snprintf(p, sizeof p, "d/%.*s", 60, "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn");
+    {   /* a folder within the 255 bytes, a name in it past them: two levels of 100 bytes and a name of 60, from here */
+        static const char l[] = "llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll";
+        snprintf(q, sizeof q, "d/%s", l);
+        mkdir("d", 0755);
+        mkdir(q, 0755);
+        snprintf(q, sizeof q, "d/%s/%s", l, l);
+        mkdir(q, 0755);
+    }
+    snprintf(p, sizeof p, "%s/%.*s", q, 60, "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn");
     put(p, "x");
-    BPTR dl = Lock((STRPTR)"d", SHARED_LOCK);
+    BPTR dl = Lock((STRPTR)q, SHARED_LOCK);
     struct FileInfoBlock fib;
     int seen = 0;
     if (dl && Examine(dl, &fib))
