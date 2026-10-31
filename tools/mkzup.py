@@ -282,7 +282,7 @@ def std_packages(build, uapps):
         make_package(out, "zpkg", vnum, vstr, [("f", 0o755, 0, 0, zx("zpkg"), "/bin/zpkg"),
                                                ("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", "zpkg.conf"), "/etc/zpkg.conf")],
                      group="base", deps=[("zup", vnum)] if "zup" in progs else [])
-    base = dirs + [("f", 0o755, 0, 0, zx(p), "/bin/" + p) for p in BASE_PROGS]
+    base = dirs + [("d", 0o700, 0, 0, None, "/root")] + [("f", 0o755, 0, 0, zx(p), "/bin/" + p) for p in BASE_PROGS]
     # the servers that live on the disk (DESIGN D19: /sbin/zfsd, which mount starts for a ZenixFS volume; /sbin/netd,
     # which the kernel starts at the first socket call)
     base += [("d", 0o755, 0, 0, None, "/sbin")] + [("f", 0o755, 0, 0, zx(p), "/sbin/" + p) for p in BASE_SBIN]
@@ -298,6 +298,11 @@ def std_packages(build, uapps):
     base += [("d", 0o755, 0, 0, None, "/etc/ssl"), ("d", 0o755, 0, 0, None, "/etc/ssl/local"),
              ("f", 0o644, 0, 0, os.path.join(build, ANCHORS), "/etc/ssl/" + ANCHORS)]
     base += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", "etc", c), "/etc/" + c) for c in BASE_CONFIG]
+    if os.environ.get("ZENIX_RELEASE"):
+        rel = os.path.join(build, "passwd.release")
+        with open(rel, "w") as f:
+            f.write(release_passwd())
+        base = [e[:4] + (rel, e[5]) if e[5] == "/etc/passwd" else e for e in base]
     make_package(out, "base", vnum, vstr, base, group="base", deps=[("zup", vnum)] if "zup" in names else [])
     if "zpkg" in progs:
         names.append("zpkg")
@@ -540,8 +545,16 @@ def repack(pkgdir, name, repl):
         make_package(pkgdir, name, m["vnum"], m["vstr"], ents, m["group"], m["deps"], m["desc"], m["takes"])
 
 
+def release_passwd():
+    """/etc/passwd as released: root's home is /root (owner 2026-10-31). rootfs/ keeps / for the test builds, whose
+    scripts wait for the prompt zenix:/# (ZENIX_RELEASE, set by the Makefile's RELEASE=1; users-test checks this line)."""
+    with open(os.path.join(ROOT, "rootfs", "etc", "passwd")) as f:
+        return f.read().replace("root::0:0:root:/:", "root::0:0:root:/root:", 1)
+
 def main(a):
-    if len(a) >= 3 and a[0] == "packages":
+    if a == ["release-passwd"]:
+        sys.stdout.write(release_passwd())
+    elif len(a) >= 3 and a[0] == "packages":
         std_packages(a[1], a[2])
     elif len(a) >= 5 and a[0] == "pkg":
         out, name, vnum, vstr = a[1], a[2], int(a[3]), a[4]

@@ -12,6 +12,9 @@ T=$(mktemp -d)
 TMPOUT="$OUT.tmp.$$"
 trap 'rm -rf "$T" "$TMPOUT"' EXIT
 cp -r "$(dirname "$0")/../rootfs/." "$T/"
+# root's home (owner 2026-10-31): /root in a release build, / in a test build (tools/mkzup.py release_passwd)
+[ -z "$ZENIX_RELEASE" ] || python3 "$(dirname "$0")/mkzup.py" release-passwd > "$T/etc/passwd"
+[ -n "$NOTESTS" ] || mkdir -p "$T/root"
 [ -n "$NOTESTS" ] && rm -rf "$T/tests"      # NOTESTS=1: leave the test scripts out (the small RAM-disk image)
 # the eleven corrupt programs mem.sh feeds to the loader (tools/mkbadzexe.py), with the scripts, so mem.sh also runs on
 # a real machine's card (2026-10-24: on the A1200 they were missing and the check passed for the wrong reason)
@@ -122,6 +125,7 @@ fakeroot sh -c '
     chown 1000:100 "$1/home/user"
     chown 1001:100 "$1/home/guest"
     chmod 1777 "$1/tmp"
+    [ ! -d "$1/root" ] || chmod 700 "$1/root"
     chmod 4755 "$1/bin/su" "$1/bin/sudo" "$1/bin/passwd"
     [ ! -f "$1/bin/zine" ] || chmod 4755 "$1/bin/zine"     # root and the group zine (zine checks it)
     chmod 644 "$1/etc/passwd" "$1/etc/group" "$1/etc/svctab" "$1/etc/daemons"

@@ -544,6 +544,9 @@ RELEASE_KEYS ?= tools/keys
 ifneq ($(filter-out 1,$(RELEASE)),)
 $(error RELEASE=1 makes a release build; leave it out for a test build (RELEASE=$(RELEASE) means neither))
 endif
+ifdef RELEASE
+export ZENIX_RELEASE := 1
+endif
 $(BUILD)/zpkgkeys.h: tools/zsign.py FORCE | $(BUILD)
 	@python3 tools/zsign.py cheader $@ $(if $(RELEASE),--release $(RELEASE_KEYS))
 $(BUILD)/cr/user/zpkg/index.o $(BUILD)/cr/user/zpkg/resolve.o $(BUILD)/cr/user/zpkg/bootfs.o: user/zpkg/zpkg.h

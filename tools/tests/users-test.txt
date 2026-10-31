@@ -130,3 +130,11 @@ send echo "tab-$((2+1))-ok"\r
 sleep 2
 send sudo unam\t; echo sudocomp-$?\r
 sleep 3
+send cp /etc/passwd /tmp/pw.save; sed 's|^root::0:0:root:/:|root::0:0:root:/root:|' /tmp/pw.save > /etc/passwd\r
+sleep 2
+send ls -ld /root | cut -c1-10; su -\r
+sleep 3
+send echo roothome=$HOME cwd=$(pwd); exit\r
+sleep 3
+send mv /tmp/pw.save /etc/passwd\r
+sleep 2

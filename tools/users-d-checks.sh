@@ -52,6 +52,9 @@ users_d_checks() {
     line "a history entry longer than the line is cut, not copied over it" "hist-2-ok"
     line "completing a 150-character variable name does not overflow" "tab-3-ok"
     line "Tab after sudo completes a command name (sudo unam -> sudo uname)" "sudocomp-0"
+    line "root's home: /root, private, and su - goes there" "roothome=/root cwd=/root"
+    line "... the folder is root's alone" "drwx------"
+    python3 tools/mkzup.py release-passwd | grep -q '^root::0:0:root:/root:' && echo "PASS the released /etc/passwd says /root" || { echo "FAIL the released /etc/passwd"; bad=1; }
     line "find says permission denied, not 'not found'" "find: /tmp/priv/x: permission denied"
     line "du says permission denied" "du: /tmp/priv/x: permission denied"
     line "cp says permission denied" "cp: /tmp/priv/x: permission denied"
