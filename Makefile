@@ -876,7 +876,16 @@ $(BUILD)/zine.blob: $(BUILD)/zine-blob.elf tools/mkzexe.py tools/mkzblob.py tool
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
-ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc
+# the trace build (tests only, /tests/zine/trace.blob): every library call named on the serial port
+ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+$(BUILD)/zt-blobs.o: user/zine/blobs.S | $(BUILD)
+	$(CC) $(ASFLAGS) -DZINE_TRACE $< -o $@
+$(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(ZTBLOBOBJS) $(LIBGCC) -o $@
+$(BUILD)/zine-trace.blob: $(BUILD)/zine-trace.elf tools/mkzexe.py tools/mkzblob.py
+	tools/mkzexe.py $< $@.zx
+	python3 tools/mkzblob.py $@.zx $@
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen
 # the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
 $(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
@@ -890,7 +899,7 @@ $(BUILD)/zinetests/%: tools/tests/zine/%.S tools/tests/zine/zt.i tools/mkhunktes
 	$(CC) $(ASFLAGS) -Itools/tests/zine $< -o $(BUILD)/zinetests/$*.o
 	python3 tools/mkhunktest.py $(BUILD)/zinetests/$*.o $@
 zine-tests: $(ZINETESTS:%=$(BUILD)/zinetests/%)
-$(BUILD)/zenix.hdf $(BUILD)/root-card.img: $(BUILD)/zine.blob $(BUILD)/zine-null.blob $(ZINETESTS:%=$(BUILD)/zinetests/%)
+$(BUILD)/zenix.hdf $(BUILD)/root-card.img: $(BUILD)/zine.blob $(BUILD)/zine-null.blob $(BUILD)/zine-trace.blob $(ZINETESTS:%=$(BUILD)/zinetests/%)
 
 # ---- programs with shared code (DESIGN D13, ZEX2: docs/d13-shared-code.md): one copy of the code for every process
 # running it. Every object is compiled with -msep-data through tools/purecc.sh (the 16-bit table offsets) - libz and

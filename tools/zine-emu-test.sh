@@ -29,7 +29,7 @@ echo "$log" | grep -aq '^zexit-rc=7' && echo "$log" | grep -aq 'zexit ended (ret
 echo "$log" | grep -aq '^hello from an AmigaOS program' && echo "$log" | grep -aq '^zhello-rc=0' && ok "zhello: dos.library's Output() and Write(), the text shown after" || no "zhello: $(echo "$log" | grep -a 'zhello' | tail -2)"
 echo "$log" | grep -aq 'ztake ended (return code 0) after [2-4] s' && echo "$log" | grep -aq '^ztake-rc=0' && ok "ztake: its own Copper list for 150 frames, the display given back" || no "ztake: $(echo "$log" | grep -a 'ztake' | tail -2)"
 echo "$log" | grep -aq 'zcrash crashed: illegal instruction at' && echo "$log" | grep -aq '^zcrash-rc=1' && ok "zcrash: an illegal instruction is reported, Zenix is back" || no "zcrash: $(echo "$log" | grep -a 'zcrash' | tail -2)"
-echo "$log" | grep -aq 'zbadcall called exec.library PutMsg (offset -366), which ZINE does not support yet' && ok "zbadcall: a call ZINE lacks is named, the program stopped" || no "zbadcall: $(echo "$log" | grep -a 'zbadcall' | tail -2)"
+echo "$log" | grep -aq 'zbadcall called exec.library ObtainSemaphore (offset -564, from' && ok "zbadcall: a call ZINE lacks is named, the program stopped" || no "zbadcall: $(echo "$log" | grep -a 'zbadcall' | tail -2)"
 echo "$log" | grep -aq '^zalloc-rc=0' && ok "zalloc: 1 MB fast and 256 KB chip from AllocMem, written and read back, freed, AvailMem as before" || no "zalloc: $(echo "$log" | grep -a 'zalloc' | tail -2)"
 f3=$(echo "$log" | grep -a '^fast RAM free' | tail -1 | tr -dc 0-9); c3=$(echo "$log" | grep -a '^chip RAM free' | tail -1 | tr -dc 0-9)
 [ "$f3" = "$f1" ] && [ "$c3" = "$c1" ] && ok "free memory after the real programs as before them" || no "free memory after the real programs: chip $c3 KB, fast $f3 KB (before: $c1, $f1)"

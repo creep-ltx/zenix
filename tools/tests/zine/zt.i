@@ -19,5 +19,12 @@
 #define gb_copinit      38
 #define MEMF_CHIP       2
 #define LVO_PutMsg      -366
+#define LVO_ObtainSemaphore -564
 #define LVO_AvailMem    -216
 #define MEMF_FAST       4
+#define LVO_OpenScreenTagList -612
+#define LVO_CloseScreen -66
+#define LVO_LoadRGB32   -882
+#define sc_BitMap       184
+#define sc_ViewPort     44
+#define bm_Planes       8

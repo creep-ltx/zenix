@@ -115,6 +115,7 @@ struct zstate {
     u32 tod0;                           /* CIA-A's TOD at the hand-over */
     u16 attn;
     u8 aga, ecs, pal;
+    u32 shown;                          /* the screen ZINE shows (OpenScreen), 0: none */
     u32 lib[4];                         /* exec, graphics, dos, intuition bases (ZINE_LIB_*) */
     u32 proc, seglist;
     u32 out_fh, in_fh;                  /* the file handles (BPTRs) */
@@ -127,7 +128,7 @@ extern u32 zr_how, zr_code, zr_ret6, zr_callpc;   /* set by the stubs in blobs.S
 /* blobs.S */
 void zb_setvbr(u32 v);
 void zb_flush(void);
-void zb_go(u32 pc, u32 usp, u32 d0, u32 a0, u32 a6) __attribute__((noreturn));
+void zb_go(u32 pc, u32 usp, u32 d0, u32 a0, u32 a6, u32 a3) __attribute__((noreturn));
 void zb_leave(u32 resume, u32 d0, u32 d1) __attribute__((noreturn));
 void zb_goback(void) __attribute__((noreturn));
 u32 zb_call(u32 code, u32 data, u32 d1);   /* a handler or server: a0 custom, a1 data, a5 code, a6 ExecBase */
@@ -141,6 +142,9 @@ void zb_back(void) __attribute__((noreturn));
 void zb_stop(u32 how, u32 why) __attribute__((noreturn));
 void zb_libs_init(void);
 u32 zb_out(const char *s, u32 n);
+u32 zb_cia_irq(int c, u32 icr);
+void zb_screen_frame(void);
+void zb_screen_report(void);
 void zb_wait_lines(u32 n);
 void zb_waitblit(void);
 void zb_blank_view(void);

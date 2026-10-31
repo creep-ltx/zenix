@@ -133,13 +133,63 @@ int main(int argc, char **argv)
         die("ZINE needs fast RAM (this machine has only chip RAM)%s", "");
     if (info.layout != ZINE_LAYOUT)
         die("zine: ZINE's files and the kernel are from different versions: %s", "finish the update first");
-    /* the volume (5.6): the program alone in this version (its directory comes with build step 4) */
-    u32 vsize = zv_need(2, len, 1);
+    /* the volume (5.6): the program's directory, its plain files (not its subdirectories yet), when they fit (at
+     * most 500 files, 16 MB and half the free fast RAM); else the program alone */
+    char dir[256];
+    u32 dl = (u32)(name - path);
+    if (dl >= sizeof dir)
+        dl = 0;
+    memcpy(dir, path, dl);
+    dir[dl] = 0;
+    if (!dl)
+        strcpy(dir, ".");
+    u32 nfiles = 0, bytes = 0;
+    int dfd = sys_open(dir, 0);
+    struct udirent de;
+    struct ustat fst;
+    char fp[320];
+    if (dfd >= 0) {
+        while (sys_readdir(dfd, &de) > 0) {
+            if (de.name[0] == '.' || !strcmp(de.name, name))
+                continue;
+            snprintf(fp, sizeof fp, "%s/%s", dir, de.name);
+            if (sys_stat(fp, &fst) == 0 && (fst.mode & S_IFMT) == S_IFREG)
+                nfiles++, bytes += fst.size;
+        }
+        sys_close(dfd);
+    }
+    if (!zv_fits(nfiles + 1, bytes + len, info.fast_free))
+        nfiles = 0, bytes = 0;
+    u32 vsize = zv_need(nfiles + 2, bytes + len, nfiles + 1);
     u8 *vol = sys_memalloc(vsize), *data;
-    if (!vol || zv_init(vol, vsize, 2, "ZINE") || zv_add(vol, 0, name, 0, st.mode, st.mtime, len, &data) < 0)
+    if (!vol || zv_init(vol, vsize, nfiles + 2, "ZINE") || zv_add(vol, 0, name, 0, st.mode, st.mtime, len, &data) < 0)
         die("zine: not enough memory for %s", name);
     memcpy(data, file, len);
     free(file);
+    if (nfiles && (dfd = sys_open(dir, 0)) >= 0) {
+        u32 added = 0;
+        while (added < nfiles && sys_readdir(dfd, &de) > 0) {
+            if (de.name[0] == '.' || !strcmp(de.name, name))
+                continue;
+            snprintf(fp, sizeof fp, "%s/%s", dir, de.name);
+            if (sys_stat(fp, &fst) || (fst.mode & S_IFMT) != S_IFREG)
+                continue;
+            int e = zv_add(vol, 0, de.name, 0, fst.mode, fst.mtime, fst.size, &data);
+            if (e < 0) {
+                dprintf(2, "zine: %s left out: %s\n", de.name, zv_reason(e));
+                continue;
+            }
+            int ffd = sys_open(fp, 0);
+            u32 got = 0;
+            int n;
+            while (ffd >= 0 && got < fst.size && (n = sys_read(ffd, data + got, fst.size - got)) > 0)
+                got += (u32)n;
+            if (ffd >= 0)
+                sys_close(ffd);
+            added++;
+        }
+        sys_close(dfd);
+    }
     u32 bsize, blob = load_blob(&bsize);
     /* the ZINE block: the saved chip RAM (Zenix's used chip blocks, low memory), the plan, the stack, the libraries */
     u32 ksize = info.chip_total - info.chip_free + (256u << 10);
@@ -217,8 +267,8 @@ int main(int argc, char **argv)
     case ZH_UNSUP: {
         const char *lib = b->lib < 4 ? libs[b->lib] : "a library";
         const char *fn = b->lib < 4 ? zl_name(lib, b->lvo) : 0;
-        dprintf(1, "ZINE: %s called %s %s%s(offset -%u), which ZINE does not support yet: stopped\n", name, lib,
-                fn ? fn : "", fn ? " " : "", b->lvo);
+        dprintf(1, "ZINE: %s called %s %s%s(offset -%u, from %08x), which ZINE does not support yet: stopped\n",
+                name, lib, fn ? fn : "", fn ? " " : "", b->lvo, b->pc);
         break;
     }
     case ZH_CRASH:

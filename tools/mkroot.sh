@@ -61,7 +61,7 @@ if [ -z "$NOTESTS" ] && [ -f "$B/libctest.pzx" ]; then cp "$B/libctest.pzx" "$T/
 # the null blob and the test programs (AmigaOS hunk executables written for the purpose) in /tests/zine
 if [ -f "$B/zine.blob" ] && [ -f "$T/bin/zine" ]; then mkdir -p "$T/lib/zine" && cp "$B/zine.blob" "$T/lib/zine/"; fi
 if [ -z "$NOTESTS" ] && [ -f "$B/zine-null.blob" ] && [ -d "$B/zinetests" ]; then
-    mkdir -p "$T/tests/zine" && cp "$B/zine-null.blob" "$T/tests/zine/null.blob" && cp "$B"/zinetests/z[a-z]* "$T/tests/zine/"
+    mkdir -p "$T/tests/zine" && cp "$B/zine-null.blob" "$T/tests/zine/null.blob" && { [ ! -f "$B/zine-trace.blob" ] || cp "$B/zine-trace.blob" "$T/tests/zine/trace.blob"; } && cp "$B"/zinetests/z[a-z]* "$T/tests/zine/"
     rm -f "$T"/tests/zine/*.o
     cp "$(dirname "$0")/tests/zine/null20" "$T/tests/zine/"
 fi

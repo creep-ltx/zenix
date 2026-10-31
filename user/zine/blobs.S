@@ -206,7 +206,9 @@ zb_flush:
     rts
 1:  .word   0xF4F8                  /* cpusha bc */
     rts
-/* zb_go(pc, usp, d0, a0, a6): into the program in user mode, interrupts on (6) */
+/* zb_go(pc, usp, d0, a0, a6, a3): into the program in user mode, interrupts on (6); a3 the address of its first
+ * segment's link longword (seglist << 2), as programs started from a Shell find it: some decrunchers' first
+ * instructions walk the segment list from there */
 zb_go:
     move.l  4(%sp),%a1
     move.l  8(%sp),%a2
@@ -214,6 +216,7 @@ zb_go:
     move.l  12(%sp),%d0
     move.l  16(%sp),%a0
     move.l  20(%sp),%a6
+    move.l  24(%sp),%a3
     move.l  zb_stack_top,%sp
     clr.w   -(%sp)                  /* format 0 */
     move.l  %a1,-(%sp)
@@ -227,7 +230,6 @@ zb_go:
     moveq   #0,%d7
     sub.l   %a1,%a1
     sub.l   %a2,%a2
-    sub.l   %a3,%a3
     sub.l   %a4,%a4
     sub.l   %a5,%a5
     rte
@@ -312,8 +314,9 @@ zb_putch:
     CF  zs_Signal, c_Signal, 2, %a1, %d0
     CF  zs_AllocSignal, c_AllocSignal, 1, %d0
     CF  zs_FreeSignal, c_FreeSignal, 1, %d0
-    CF  zs_OldOpenLibrary, c_OpenLibrary, 1, %a1
+    CF  zs_OldOpenLibrary, c_OldOpenLibrary, 1, %a1
     CF  zs_OpenLibrary, c_OpenLibrary, 2, %a1, %d0
+    CF  zs_TaggedOpenLibrary, c_TaggedOpenLibrary, 1, %d0
     CF  zs_CloseLibrary, c_CloseLibrary, 1, %a1
     CF  zs_OpenResource, c_OpenResource, 1, %a1
     CF  zs_OpenDevice, c_OpenDevice, 4, %a0, %d0, %a1, %d1
@@ -338,6 +341,68 @@ zb_putch:
     CF  zs_VBeamPos, c_VBeamPos, 0
     CF  zs_SetRGB4, c_SetRGB4, 4, %d0, %d1, %d2, %d3
     CF  zs_LoadRGB4, c_LoadRGB4, 2, %a1, %d0
+    CF  zs_InitBitMap, c_InitBitMap, 4, %a0, %d0, %d1, %d2
+    CF  zs_AllocRaster, c_AllocRaster, 2, %d0, %d1
+    CF  zs_FreeRaster, c_FreeRaster, 3, %a0, %d0, %d1
+    CF  zs_FreeBitMap, c_FreeBitMap, 1, %a0
+    CF  zs_InitRastPort, c_InitRastPort, 1, %a1
+    CF  zs_LoadRGB32, c_LoadRGB32, 2, %a0, %a1
+    CF  zs_OpenScreenTagList, c_OpenScreenTagList, 2, %a0, %a1
+    CF  zs_OpenScreen, c_OpenScreen, 1, %a0
+    CF  zs_CloseScreen, c_CloseScreen, 1, %a0
+    CF  zs_ScreenToFront, c_ScreenToFront, 1, %a0
+    CF  zs_GetMsg, c_GetMsg, 1, %a0
+    CF  zs_Open, c_Open, 2, %d1, %d2
+    CF  zs_Close, c_Close, 1, %d1
+    CF  zs_Seek, c_Seek, 3, %d1, %d2, %d3
+    CF  zs_Cause, c_Cause, 1, %a1
+    CF  zs_AddICRVector, c_AddICRVector, 3, %a6, %d0, %a1
+    CF  zs_RemICRVector, c_RemICRVector, 3, %a6, %d0, %a1
+    CF  zs_AbleICR, c_AbleICR, 2, %a6, %d0
+    CF  zs_SetICR, c_SetICR, 2, %a6, %d0
+    CF  zs_DoIO, c_DoIO, 1, %a1
+    CF  zs_SendIO, c_SendIO, 1, %a1
+    CF  zs_CheckIO, c_CheckIO, 1, %a1
+    CF  zs_WaitIO, c_WaitIO, 1, %a1
+    CF  zs_AbortIO, c_AbortIO, 1, %a1
+    CF  zs_TimerBeginIO, c_TimerBeginIO, 1, %a1
+    CF  zs_TimerAbortIO, c_TimerAbortIO, 1, %a1
+    CF  zs_AddTime, c_AddTime, 2, %a0, %a1
+    CF  zs_SubTime, c_SubTime, 2, %a0, %a1
+    CF  zs_CmpTime, c_CmpTime, 2, %a0, %a1
+    CF  zs_ReadEClock, c_ReadEClock, 1, %a0
+    CF  zs_GetSysTime, c_GetSysTime, 1, %a0
+    CF  zs_PutMsg, c_PutMsg, 2, %a0, %a1
+    CF  zs_ReplyMsg, c_ReplyMsg, 1, %a1
+    CF  zs_WaitPort, c_WaitPort, 1, %a0
+    CF  zs_CreateMsgPort, c_CreateMsgPort, 0
+    CF  zs_DeleteMsgPort, c_DeleteMsgPort, 1, %a0
+    CF  zs_OpenWindowTagList, c_OpenWindowTagList, 2, %a0, %a1
+    CF  zs_OpenWindow, c_OpenWindow, 1, %a0
+    CF  zs_CloseWindow, c_CloseWindow, 1, %a0
+    CF  zs_ModifyIDCMP, c_ModifyIDCMP, 2, %a0, %d0
+    CF  zs_SetPointer, c_SetPointer, 1, %a0
+    CF  zs_ViewPortAddress, c_ViewPortAddress, 1, %a0
+    .globl  zs_SetRGB32             /* a0 the ViewPort, d0 the pen, d1-d3 red, green, blue */
+zs_SetRGB32:
+    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    move.l  %a0,-(%sp)
+    jsr     c_SetRGB32
+    lea     20(%sp),%sp
+    rts
+    .globl  zs_AllocBitMap          /* five arguments: d0 width, d1 height, d2 depth, d3 flags, a0 friend */
+zs_AllocBitMap:
+    move.l  %a0,-(%sp)
+    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    jsr     c_AllocBitMap
+    lea     20(%sp),%sp
+    rts
     /* dos */
     CF  zs_Output, c_Output, 0
     CF  zs_Input, c_Input, 0
@@ -355,6 +420,26 @@ zb_putch:
     /* intuition */
     CF  zs_CloseWorkBench, c_CloseWorkBench, 0
     CF  zs_OpenWorkBench, c_OpenWorkBench, 0
+
+/* exec's StackSwap (V37, -732): a0 the StackSwapStruct {stk_Lower, stk_Upper, stk_Pointer}: the task's stack bounds
+ * and the stack pointer exchanged with the struct's; the caller returns on the new stack (amigaofs.h: ThisTask 276,
+ * tc_SPLower 58, tc_SPUpper 62). Every register but a1 and d1 kept (d0 too) */
+    .globl  zs_StackSwap
+zs_StackSwap:
+    move.l  (%sp)+,%a1              /* the return address, from the old stack */
+    move.l  %a2,-(%sp)
+    move.l  ZEXEC+276,%a2           /* ThisTask */
+    move.l  58(%a2),%d1
+    move.l  (%a0),58(%a2)
+    move.l  %d1,(%a0)
+    move.l  62(%a2),%d1
+    move.l  4(%a0),62(%a2)
+    move.l  %d1,4(%a0)
+    move.l  (%sp)+,%a2
+    move.l  %sp,%d1
+    move.l  8(%a0),%sp
+    move.l  %d1,8(%a0)
+    jmp     (%a1)
 
 /* zb_jumptable(base, slots, lvo[], fn[], n): every slot "jsr zx_unsup", then each of the n functions "jmp fn" at
  * base - lvo */
@@ -376,8 +461,89 @@ zb_jumptable:
     move.w  (%a2)+,%d1
     move.l  %a0,%a1
     sub.l   %d1,%a1
+#ifdef ZINE_TRACE
+    move.l  ztr_n,%d1               /* the trace build: the slot calls zx_trace, which names it and goes on */
+    lsl.l   #3,%d1
+    lea     ztr_tab,%a3
+    add.l   %d1,%a3
+    move.l  %a1,(%a3)+              /* the slot */
+    move.l  32(%sp),%d1
+    move.l  36(%sp),%d2
+    sub.l   %d0,%d2                 /* this function's index */
+    subq.l  #1,%d2
+    lsl.l   #2,%d2
+    move.l  %d1,%a3
+    move.l  0(%a3,%d2.l),%d1
+    lea     ztr_tab,%a3
+    move.l  ztr_n,%d2
+    lsl.l   #3,%d2
+    move.l  %d1,4(%a3,%d2.l)        /* its function */
+    addq.l  #1,ztr_n
+    move.w  #0x4EB9,(%a1)+          /* jsr abs.l */
+    move.l  #zx_trace,(%a1)
+#else
     move.w  #0x4EF9,(%a1)+          /* jmp abs.l */
     move.l  (%a3)+,(%a1)
+#endif
 4:  dbra    %d0,3b
     movem.l (%sp)+,%d2-%d3/%a2-%a3
     rts
+
+    .data
+    .globl  zb_tracing              /* 1 in the trace build: zb_back also writes the code before a bad call */
+zb_tracing:
+#ifdef ZINE_TRACE
+    .long   1
+#else
+    .long   0
+#endif
+    .text
+#ifdef ZINE_TRACE
+/* the trace build (tests only, /tests/zine/trace.blob): every supported library call is written to the serial port
+ * as "Z" and the slot's address in hex, then the function runs with every register as the caller left it */
+    .bss
+    .even
+ztr_n:   .space 4
+ztr_tab: .space 8 * 256
+    .text
+zx_trace:
+    movem.l %d0-%d3/%a0-%a1,-(%sp)
+    move.l  24(%sp),%d1             /* our return address: the slot + 6 */
+    subq.l  #6,%d1
+    move.l  %d1,%a1                 /* the slot */
+    moveq   #'Z',%d0
+    bsr.s   ztr_put
+    moveq   #7,%d2
+1:  rol.l   #4,%d1
+    move.l  %d1,%d0
+    and.w   #15,%d0
+    move.b  ztr_hex(%pc,%d0.w),%d0
+    bsr.s   ztr_put
+    dbra    %d2,1b
+    moveq   #10,%d0
+    bsr.s   ztr_put
+    lea     ztr_tab,%a0             /* find the slot's function */
+    move.l  ztr_n,%d2
+2:  subq.l  #1,%d2
+    bmi.s   3f
+    cmp.l   (%a0),%a1
+    beq.s   4f
+    addq.l  #8,%a0
+    bra.s   2b
+3:  move.l  #zx_unsup,%a0
+    bra.s   5f
+4:  move.l  4(%a0),%a0
+5:  move.l  %a0,24(%sp)             /* our return address becomes the function: rts below jumps there */
+    movem.l (%sp)+,%d0-%d3/%a0-%a1
+    rts
+ztr_put:                            /* d0: a byte to the serial port, waiting for the transmit buffer (d3 used) */
+    move.w  0xdff018,%d3
+    btst    #13,%d3
+    beq.s   ztr_put
+    and.w   #0xff,%d0
+    or.w    #0x100,%d0
+    move.w  %d0,0xdff030
+    rts
+ztr_hex: .ascii "0123456789abcdef"
+    .even
+#endif

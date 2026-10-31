@@ -335,7 +335,7 @@ void zb_run(void)
     *(u32 *)(cli + ZO_CommandLineInterface_cli_Module) = seg;
     *(u32 *)(cli + ZO_CommandLineInterface_cli_DefaultStack) = stack / 4;
     zb_flush();                         /* the loaded code (CLAUDE.md) */
-    zb_go((seg << 2) + 4, usp, arglen, args, ZEXEC);
+    zb_go((seg << 2) + 4, usp, arglen, args, ZEXEC, seg << 2);
 }
 
 /* ---- the program's ends ---- */
@@ -372,12 +372,31 @@ void zb_crash(u32 *rb)
 void zb_back(void)
 {
     struct zine_blk *b = Z.blk;
+    extern u32 zb_tracing;
+    if (zb_tracing)
+        zb_screen_report();
     b->how = zr_how;
     if (zr_how == ZH_RETURN || zr_how == ZH_EXIT)
         b->code = (s32)zr_code;
     if (zr_how == ZH_UNSUP) {
         u32 slot = zr_ret6 - 6;
         b->pc = zr_callpc;
+        extern u32 zb_tracing;
+        if (zb_tracing && (zr_callpc & 1) == 0 && zr_callpc >= 0x1000) {   /* the trace build: the 32 bytes before */
+            static const char hx[] = "0123456789abcdef";
+            for (u32 a = zr_callpc - 32; a < zr_callpc; a += 2) {
+                u16 w = *(const u16 *)a;
+                char t[5] = { hx[w >> 12], hx[w >> 8 & 15], hx[w >> 4 & 15], hx[w & 15], ' ' };
+                for (int k = 0; k < 5; k++) {
+                    while (!(CUSTOM(0x018) & 0x2000))
+                        ;
+                    CUSTOM(0x030) = (u16)(0x100 | (u8)t[k]);
+                }
+            }
+            while (!(CUSTOM(0x018) & 0x2000))
+                ;
+            CUSTOM(0x030) = 0x10A;
+        }
         for (u32 i = 0; i < 4; i++) {
             const struct zlib *l = (const struct zlib *)Z.lib[i];
             if (slot < (u32)l && (u32)l - slot <= l->negsize) {
@@ -484,10 +503,16 @@ void zb_irq(u32 vec)
     u32 pend = INTREQR & INTENAR & lvlmask[lv];
     if (!pend)
         return;                         /* spurious */
-    if (lv == 2 && (CIAA(CIA_ICR) & 8))
-        kbd();
-    if (lv == 6)
-        (void)CIAB(CIA_ICR);
+    if (lv == 2 && (pend & 0x0008)) {
+        u32 icr = CIAA(CIA_ICR);        /* read once: the read clears it */
+        u32 done = zb_cia_irq(0, icr);
+        if ((icr & 8) && !(done & 8))
+            kbd();                      /* the keyboard while no program's handler takes it */
+    }
+    if (lv == 3 && (pend & 0x0020))
+        zb_screen_frame();
+    if (lv == 6 && (pend & 0x2000))
+        zb_cia_irq(1, CIAB(CIA_ICR));
     for (u32 bit = 0; bit < 15; bit++) {
         u16 m = (u16)(1u << bit);
         if (!(pend & m))
