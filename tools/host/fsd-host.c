@@ -113,6 +113,7 @@ int main(void)
             if (a && options(a)) { printf("mount -> bad option\n"); continue; }
             r = try_mount("hd0", 0);
             printf("mount -> %d%s\n", r, readonly ? " readonly" : "");
+            if (r) return 0;                              /* as fatd: a refused volume has no server */
             continue;
 #else
             r = try_mount("hd0", 0);

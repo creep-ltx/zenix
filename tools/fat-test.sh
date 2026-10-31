@@ -54,6 +54,7 @@ for bits in "$@"; do
     has "... and the program runs from FAT" '^(.*# )?run-from-fat=0$'
     has "a bad option: mount says so" 'cannot mount ide0p1: its filesystem server did not start'
     has "... and the log why" 'fatd: bad option at: nonsense'
+    has "saved and clean by the timers alone: a kill later, the restart stays writable" '^(.*# )?wrote-after-clean$'
     has "killed with a change not committed: the restart says it" 'was not unmounted cleanly: mounted read-only'
     has "... and refuses writes" 'refused\.txt.*read-only'
     has "the floppy (FAT12, no partition table) reads" '^on-the-floppy$'
@@ -65,6 +66,8 @@ for bits in "$@"; do
     g() { mtype -i $P "::$1" 2>/dev/null; }
     [ "$(g 'Mappen/räksmörgås långt namn.txt')" = svenska ] && check "Linux reads the Swedish long name" ok || check "Linux reads the Swedish long name" bad
     [ "$(g Mappen/moved.txt)" = hello-from-zenix ] && check "... the renamed file" ok || check "... the renamed file" bad
+    [ "$(g timer.txt)" = by-the-timer ] && check "Linux reads what the commit timer saved" ok || check "Linux reads what the commit timer saved" bad
+    [ "$(g after-clean.txt)" = still-writable ] && check "... and what was written after that restart" ok || check "... and what was written after that restart" bad
     [ "$(g forced.txt)" = fixed ] && check "... what was written after -o force" ok || check "... what was written after -o force" bad
     mcopy -n -i $P ::ls.bin $OUT/ls.bin && cmp -s $OUT/ls.bin $BD/ls.zx && check "... the copied program, byte for byte" ok || check "... the copied program, byte for byte" bad
     mdir -i $P ::kick.rom >/dev/null 2>&1 && check "a deleted file is gone" bad || check "a deleted file is gone" ok

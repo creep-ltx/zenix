@@ -7,9 +7,9 @@ are *read* from Microsoft's FAT specification (published) and general knowledge;
 `mount -t fat DEVICE DIR` serves a FAT12, FAT16 or FAT32 volume with VFAT long names, read and write. The server is
 `/sbin/fatd`, a file service like `/sbin/zfsd` (D11 6.4, D19 step 1): one process per mount, the same protocol
 (`kernel/fsproto.h`). Nothing is added to the kernel, `diskd` or the small floppies' root: only `mount` learns the type
-(about 200 bytes), and it finds the type by itself for an MBR partition of a FAT type (01 04 06 0B 0C 0E, the hidden
+(556 bytes more in `mount.zx`, measured: 16,584 to 17,140), and it finds the type by itself for an MBR partition of a FAT type (01 04 06 0B 0C 0E, the hidden
 11 14 16 1B 1C 1E, and EF). A volume without a partition table is `mount -t fat ide0 DIR` or `df1` (`diskd` lists the
-whole device; it already tells a bare FAT volume from an MBR, D-mbr-test).
+whole device; it already tells a bare FAT volume from an MBR: `tools/mbr-test.sh`).
 
 ## Decisions (made here, the owner delegated the details, 2026-10-31)
 - **Names:** UTF-8 to programs, UCS-2 on disk (surrogate pairs kept, so UTF-16 from Windows reads right). Old 8.3 names:
@@ -20,7 +20,7 @@ whole device; it already tells a bare FAT volume from an MBR, D-mbr-test).
 - **Inode numbers:** FAT has none. Root 1; a directory `0x40000000 | first cluster` (stateless: `..` gives the
   parent's, a rename keeps it); a file its entry's place (`sector * 16 + index`, 30 bits). An open file has a slot (64,
   the kernel's NFILE) that keeps its number, first cluster and size across a rename; a new file that would collide with
-  a slot takes a number from `0x60000000 |` a counter. After a server restart the kernel's open files answer `ESTALE`
+  a slot takes a number from `0x60000000 |` a counter; on a volume over 32 GB places wrap, which only a slot's check notices. After a server restart the kernel's open files answer `ESTALE`
   until closed, as `nfscd`.
 - **Unix meaning:** owner, group and modes come from `-o uid=,gid=,fmode=,dmode=` (defaults root, root, 644, 755). The
   read-only attribute is the one mode bit on disk: `chmod a-w` sets it, `chmod u+w` clears it; any other change, `chown`
@@ -31,18 +31,18 @@ whole device; it already tells a bare FAT volume from an MBR, D-mbr-test).
   after the directory that named it is on the disk. So freed chains wait in a list and are zeroed in the FAT at the end
   of a commit. Rename writes the new entry first, then removes the old one (overwriting a file changes its short entry
   in place: one 32-byte write). The worst a power cut leaves is lost clusters, or a chain longer than the file's size,
-  and two names for one file for a rename: never another file's data. All FAT copies are written in turn, with a disk
+  and two names for one file for a rename, for the moment between its two directory writes (`fsck.fat` on a PC settles it; a rename over the other name then only removes one): never another file's data. One exception, FAT12 only: an entry across two FAT sectors cannot be written at once, so a cut between them can leave a half-new link; no fix exists in the format, and the Pi's partition is not FAT12. All FAT copies are written in turn, with a disk
   flush between them. Commit: 3 s after the first change, at `sync` and at `umount` (as zfsd).
 - **The boot sector is never written.** A torn write there would lose the volume (FAT12/16 have no backup). So the
   dirty mark is the specification's clean-shutdown bit in `FAT[1]` (FAT16, FAT32; both FAT copies), set before the
-  first change and cleared 5 s after the last commit or at `sync` and `umount`. FAT12 has no such bit. At mount a volume
+  first change and cleared 5 s after the last commit, counted from the commit, or at `sync` and `umount`. FAT12 has no such bit. At mount a volume
   whose `FAT[1]` bit or boot sector byte says dirty (other systems set the latter) is **mounted read-only with a line
-  in dmesg**; `-o force` mounts it writable and takes over the `FAT[1]` bit. Zenix has no `fsck.fat`.
+  in dmesg**; `-o force` mounts it writable and takes over the `FAT[1]` bit, cleared at the next clean moment even with no write (asking for it is the owner's decision), and marks FSInfo's count to be rewritten. Zenix has no `fsck.fat`.
 - **FSInfo (FAT32):** free count and next-free hint read at mount if they make sense, written when the volume goes
   clean. Without it the first `df` counts the FAT once.
 - **Damage:** the BPB is checked whole at mount (sizes, FAT long enough for its clusters, inside the device; only
   512-byte sectors). Chains are checked per step: out of range, free or bad in a chain is `EIO`; walks are bounded by the
-  file's size, directories by the format's 2 MB, so a loop ends in `EIO`. LFN parts are checked (order, checksum);
+  file's size, directories by the format's 2 MB, so a loop ends in `EIO`; a file's chain is also checked for a loop at its first open (up to 16,384 clusters: past that a loop inside the size reads repeated data, bounded); `O_TRUNC` skips the check, so a damaged file can be overwritten. Data past a directory's end marker counts as free. LFN parts are checked (order, checksum);
   bad ones are ignored and the 8.3 name shows, which is what the format asks.
 - **The service text:** `/sbin/fatd DEV -id START,SIZE [-o OPTIONS]`: a volume id without the uuid (`volid.h`'s place
   rule; FAT has only a 4-byte serial and `vol_look` must not grow, it is in the kernel's fsd), so a floppy is refused at a restart.

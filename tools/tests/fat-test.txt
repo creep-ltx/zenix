@@ -72,6 +72,14 @@ send dmesg | grep fatd\r
 sleep 4
 send mount ide0p1 /mnt\r
 sleep 5
+send echo by-the-timer > /mnt/timer.txt\r
+sleep 11
+send kill -9 $(pgrep fatd)\r
+sleep 3
+send echo still-writable > /mnt/after-clean.txt && echo wrote-after-clean\r
+sleep 4
+send sync\r
+sleep 3
 send echo after-kill > /mnt/uncommitted.txt\r
 sleep 1
 send kill -9 $(pgrep fatd)\r

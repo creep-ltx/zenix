@@ -3,8 +3,8 @@
 """The FAT server (user/fatd.c) built for the PC, against images from mkfs.fat, checked with fsck.fat and mtools:
 what it reads of other systems' volumes, what it writes as other systems read it, the limits, the dirty mark, a power
 cut after every sector written, damaged volumes (ASAN + UBSAN: no crash, no hang).
-usage: tools/fat-host-test.py [fuzz-rounds]   (default 100; one small image at a time, memory capped)"""
-import os, random, re, resource, shutil, signal, struct, subprocess, sys, tempfile
+usage: tools/fat-host-test.py [fuzz-rounds]   (default 330; one small image at a time, memory capped)"""
+import os, random, re, resource, shutil, signal, struct, subprocess, sys, tempfile, time
 
 CF = "-m32 -DZHOST -DZFSD -DFATD -Wall -Wextra -Wno-builtin-declaration-mismatch -Wno-unused-function -O1 -g -Iuser".split()
 SAN = "-fsanitize=address,undefined -fno-sanitize-recover=undefined".split()
@@ -38,7 +38,7 @@ def mkimg(bits, mb=None, extra=(), kb=None, name="i.img"):
     return p
 
 
-def run(img, script, exe="fatd", env=None, timeout=120):
+def run(img, script, exe=os.environ.get("FAT_EXE", "fatd"), env=None, timeout=120):
     e = dict(os.environ, HOSTDISK=img)
     e.update(env or {})
     r = subprocess.run([os.path.join(T, exe)], input=script.encode(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -209,6 +209,19 @@ def test_limits():
     fr = re.findall(r"bfree (\d+)", o)
     check("statfs: free space falls to nothing and comes back", len(fr) == 3 and fr[1] == "0" and fr[2] == fr[0], str(fr) + o)
     check("after it all fsck.fat finds nothing", fsck(img)[0], fsck(img)[1])
+    # a loop in a file's chain answers EIO, and ends
+    for bits, kw in ((12, dict(kb=720)), (16, dict(mb=8)), (32, dict(mb=40, extra=("-s", "1")))):
+        img = mkimg(bits, **kw)
+        mput(img, "LOOP.BIN", pat(40000))
+        d = bytearray(open(img, "rb").read())
+        v = Vol(d, bits)
+        e = v.entries(v.rootclus)[0][-1]
+        ch = v.chain(v.first(e))
+        v.set(ch[len(ch) // 2], ch[3])
+        open(img, "wb").write(d)
+        _, o = run(img, "mount\nopen /LOOP.BIN r\nopen /LOOP.BIN w\nopen /LOOP.BIN wt\nwrite %1 0 fresh\nclose %1\nstat /LOOP.BIN\nsync\numount\n", timeout=60)
+        check(f"FAT{bits}: a loop in a chain answers EIO at open, for reading and writing", o.count("open -> -5") == 2, o)
+        check(f"FAT{bits}: ... overwriting the file still works, and frees the loop", "size 5" in o and "write -> 5" in o, o)
     # FAT32's FSInfo is kept
     img = mkimg(32, mb=40, extra=("-s", "1"))
     _, o = run(img, "mount\nopen /a wc\nwrite %1 0 @100000\nclose %1\nsync\numount\n")
@@ -342,74 +355,235 @@ def test_cuts():
         check(f"{label}: a file being renamed has its data under a name", bad_rename == 0, first)
 
 
+class Vol:
+    """an image's layout, read the way a damaging test needs it (the first FAT only: the server reads that one)"""
+    def __init__(self, d, bits):
+        self.d, self.bits = d, bits
+        self.res = struct.unpack_from("<H", d, 14)[0]
+        self.fatsz = struct.unpack_from("<H", d, 22)[0] or struct.unpack_from("<I", d, 36)[0]
+        self.spc = d[13]
+        rootents = struct.unpack_from("<H", d, 17)[0]
+        self.rootoff = (self.res + d[16] * self.fatsz) * 512
+        self.data = self.rootoff + (rootents * 32 + 511) // 512 * 512
+        self.rootclus = struct.unpack_from("<I", d, 44)[0] if bits == 32 else 0
+
+    def fat_at(self, c):
+        return self.res * 512 + (c + c // 2 if self.bits == 12 else c * self.bits // 8)
+
+    def get(self, c):
+        p = self.fat_at(c)
+        if self.bits == 12:
+            v = self.d[p] | self.d[p + 1] << 8
+            return v >> 4 if c & 1 else v & 0xFFF
+        return struct.unpack_from("<H" if self.bits == 16 else "<I", self.d, p)[0]
+
+    def set(self, c, v):
+        p = self.fat_at(c)
+        if self.bits == 12:
+            if c & 1:
+                self.d[p] = (self.d[p] & 0x0F) | (v << 4 & 0xF0)
+                self.d[p + 1] = v >> 4 & 0xFF
+            else:
+                self.d[p] = v & 0xFF
+                self.d[p + 1] = (self.d[p + 1] & 0xF0) | (v >> 8 & 0x0F)
+        else:
+            struct.pack_into("<H" if self.bits == 16 else "<I", self.d, p, v & (0xFFFF if self.bits == 16 else 0x0FFFFFFF))
+
+    def clus_off(self, c):
+        return self.data + (c - 2) * self.spc * 512
+
+    def first(self, e):
+        c = struct.unpack_from("<H", self.d, e + 26)[0]
+        return c | struct.unpack_from("<H", self.d, e + 20)[0] << 16 if self.bits == 32 else c
+
+    def set_first(self, e, c):
+        struct.pack_into("<H", self.d, e + 26, c & 0xFFFF)
+        if self.bits == 32:
+            struct.pack_into("<H", self.d, e + 20, c >> 16 & 0xFFFF)
+
+    def dir_span(self, cl):
+        return (self.rootoff, self.data - self.rootoff) if not cl else (self.clus_off(cl), self.spc * 512)
+
+    def entries(self, cl):
+        """(offset of short entries, offset of long-name parts) in the first cluster or root of a directory"""
+        at, n = self.dir_span(cl)
+        sh, lf = [], []
+        for o in range(at, at + n, 32):
+            if self.d[o] == 0:
+                break
+            if self.d[o] != 0xE5:
+                (lf if self.d[o + 11] & 0x3F == 0x0F else sh).append(o)
+        return sh, lf
+
+    def chain(self, c):
+        out = []
+        end = {12: 0xFF8, 16: 0xFFF8, 32: 0x0FFFFFF8}[self.bits]
+        while 2 <= c < end and c not in out and len(out) < 200:
+            out.append(c)
+            c = self.get(c) & 0x0FFFFFFF
+        return out
+
+
+def damage(d, bits, kind, rnd):
+    """one kind of damage to a volume that otherwise mounts, so it reaches the server's walks; kinds 0-1 hit the boot sector"""
+    v = Vol(d, bits)
+    root = v.rootclus
+    rsh, rlf = v.entries(root)
+    files = [e for e in rsh if not d[e + 11] & 0x18 and v.first(e) >= 2]
+    dirs = [e for e in rsh if d[e + 11] & 0x10]
+    subsh, sublf = v.entries(v.first(dirs[0])) if dirs else ([], [])
+    subfiles = [e for e in subsh if d[e] != 0x2E and not d[e + 11] & 0x18 and v.first(e) >= 2]
+    allfiles = files + subfiles
+    chains = [v.chain(v.first(e)) for e in allfiles]
+    longest = max(chains, key=len)
+    high = {12: 0xFF0, 16: 0xFFF0, 32: 0x0FFFFFF0}[bits]
+    nclus_guess = (len(d) - v.data) // (v.spc * 512) + 2
+    if kind == 0:                                          # one boot sector field, a value on an edge
+        at, size = rnd.choice(((11, 2), (13, 1), (14, 2), (16, 1), (17, 2), (19, 2), (21, 1), (22, 2), (32, 4), (36, 4), (40, 2), (44, 4), (48, 2)))
+        val = rnd.choice((0, 1, 2, 3, 0x80, 0xFF, 0xFFFF, 0xFFFFFFFF, rnd.randrange(1 << (8 * size))))
+        d[at:at + size] = (val & ((1 << (8 * size)) - 1)).to_bytes(size, "little")
+    elif kind == 1:                                        # a smaller claim that still mounts: FAT or root cut short
+        if bits == 32:
+            struct.pack_into("<I", d, 44, rnd.choice((2, 3, longest[0], nclus_guess - 1, nclus_guess)))
+        else:
+            struct.pack_into("<H", d, 17, rnd.choice((16, 32, 512, 1024)))
+    elif kind == 2:                                        # a loop: a chain back to itself or an earlier cluster
+        c = rnd.choice(longest)
+        v.set(c, rnd.choice(longest[:longest.index(c) + 1]))
+    elif kind == 3:                                        # a chain that leaves the volume, or ends in a free or bad cluster
+        v.set(rnd.choice(longest), rnd.choice((0, 1, nclus_guess, nclus_guess + 5, high, {12: 0xFF7, 16: 0xFFF7, 32: 0x0FFFFFF7}[bits])))
+    elif kind == 4:                                        # an entry's first cluster and size lie
+        e = rnd.choice(allfiles)
+        if rnd.random() < 0.6:
+            v.set_first(e, rnd.choice((0, 1, nclus_guess, nclus_guess + 9, high, 0x0FFFFFFF if bits == 32 else high, longest[0])))
+        else:
+            struct.pack_into("<I", d, e + 28, rnd.choice((0, 1, 511, 1 << 20, 1 << 31, 0xFFFFFFFF, 0xFFFFFFE0)))
+    elif kind == 5:                                        # a directory: first cluster, attributes, chain
+        e = rnd.choice(rsh)
+        w = rnd.randrange(5)
+        if w == 0 and dirs:
+            v.set_first(dirs[0], rnd.choice((0, 1, nclus_guess, longest[0], v.first(dirs[0]), root)))
+        elif w == 1:
+            d[e + 11] ^= rnd.choice((0x10, 0x08, 0x0F, 0x3F, 0xFF))
+        elif w == 2 and dirs:                              # the subdirectory's chain loops or leaves
+            c = v.first(dirs[0])
+            v.set(c, rnd.choice((c, 0, nclus_guess, longest[0])))
+        elif w == 3 and root:                              # FAT32's root chain itself
+            v.set(root, rnd.choice((root, 0, nclus_guess)))
+        elif w == 4 and dirs:                              # a directory whose "." or ".." lies
+            c = v.first(dirs[0])
+            o = v.clus_off(c) + rnd.choice((0, 32))
+            v.set_first(o, rnd.choice((0, 1, c, nclus_guess, longest[0])))
+    elif kind == 6:                                        # long-name parts: order, checksum, attribute, characters
+        parts = rlf + sublf
+        for _ in range(rnd.choice((1, 2, 4))):
+            o = rnd.choice(parts)
+            w = rnd.randrange(5)
+            if w == 0:
+                d[o] = rnd.choice((0, 0x40, 0x41, 0x54, 0x55, 0x7F, 0x20, 1, 20, 21))
+            elif w == 1:
+                d[o + 13] ^= 0xFF
+            elif w == 2:
+                struct.pack_into("<H", d, o + rnd.choice((1, 3, 14, 28, 30)), rnd.choice((0, 0x2F, 1, 0xD800, 0xDC00, 0xFFFF, 0xFFFE)))
+            elif w == 3:
+                d[o:o + 32] = bytes(32)
+            else:
+                d[o + 11] = 0x0E
+    elif kind == 7:                                        # a directory of garbage: a file's data as entries, a sector of noise
+        o = rnd.choice(rsh + subsh)
+        at, n = v.dir_span(v.first(dirs[0]) if dirs else root)
+        for i in range(rnd.choice((1, 8, 32))):
+            at2 = at + 32 * rnd.randrange(n // 32)
+            d[at2:at2 + 32] = bytes(rnd.randrange(256) for _ in range(32))
+        d[o] = rnd.choice((0, 5, 0xE5, 0x20, 0x2F, 0x2E, 0xFF))
+    elif kind == 8:                                        # the FAT's own place: noise over part of it
+        at = v.res * 512 + rnd.randrange(min(v.fatsz * 512 - 64, 512))
+        for i in range(rnd.choice((4, 16, 64))):
+            d[at + i] = rnd.choice((0, 0xFF, 2, rnd.randrange(256)))
+    elif kind == 9:                                        # free count and next-free hints that lie (FAT32), the dirty byte
+        if bits == 32:
+            fs = struct.unpack_from("<H", d, 48)[0] * 512
+            struct.pack_into("<I", d, fs + rnd.choice((488, 492)), rnd.choice((0, 1, 0xFFFFFFFF, 0xFFFFFFFE, nclus_guess)))
+        else:
+            d[37] ^= 1
+        v.set(1, rnd.choice((0, 0xFFF)))
+    elif kind == 10:                                       # the volume cut short
+        del d[rnd.randrange(512, len(d)):]
+    return d
+
+
 def test_fuzz(rounds):
-    """damaged volumes: an error, never a crash or a hang"""
+    """damaged volumes: an error, never a crash or a hang. Each round: one kind of damage aimed at a walk."""
     rnd = random.Random(20261031)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    bases = [("f12", mkimg(12, kb=720, name="fz12.img")), ("f16", mkimg(16, mb=4, extra=("-s", "1"), name="fz16.img")),
-             ("f32", mkimg(32, mb=8, extra=("-s", "2"), name="fz32.img"))]
+    bases = [(12, mkimg(12, kb=720, name="fz12.img")), (16, mkimg(16, mb=4, extra=("-s", "1"), name="fz16.img")),
+             (32, mkimg(32, mb=8, extra=("-s", "2"), name="fz32.img"))]
     for _, b in bases:
         sh("mmd", "-i", b, "::dir one")
         mput(b, "dir one/long file name inside.txt", pat(5000))
         mput(b, "SHORT.TXT", pat(2000, 2))
         mput(b, "räksmörgås.txt", pat(600, 4))
-    script = ("mount force\nstatfs\nls /\nls /dir+one\nopen /SHORT.TXT r\nread %1 0 2000\nread %1 1500 400\nfstat %1\nopen /dir+one/long+file+name+inside.txt rw\n"
-              "read %2 0 5000\nwrite %2 100 xx\nwrite %2 6000 tail\nclose %2\nopen /new.bin wc\nwrite %3 0 @9000\nclose %3\nmkdir /nd\nopen /nd/f+with+long+name wc\nclose %4\n"
-              "rename /SHORT.TXT /nd/renamed.txt\nrename /nd /nd2\nrename /dir+one /nd2/x\nunlink /räksmörgås.txt\nrmdir /nd2/x\nunlink /new.bin\nchdir /nd2\nstat /nd2/..\nutimes /nd2 5\nsync\nls /\numount\n")
-    crashes = hangs = errors = 0
+        mput(b, "BIG.BIN", pat(30000, 6))
+    script = ("mount force\nstatfs\nls /\nls /dir+one\nopen /SHORT.TXT r\nread %1 0 2000\nread %1 1500 400\nfstat %1\nopen /BIG.BIN r\nread %2 0 30000\nread %2 20000 100\n"
+              "open /dir+one/long+file+name+inside.txt rw\nread %3 0 5000\nwrite %3 100 xx\nwrite %3 6000 tail\nclose %3\nopen /new.bin wc\nwrite %4 0 @9000\nclose %4\nmkdir /nd\nopen /nd/f+with+long+name wc\nclose %5\n"
+              "rename /SHORT.TXT /nd/renamed.txt\nrename /nd /nd2\nrename /dir+one /nd2/x\nunlink /räksmörgås.txt\nrmdir /nd2/x\nopen /BIG.BIN wt\nwrite %6 0 again\nclose %6\nunlink /new.bin\nchdir /nd2\nstat /nd2/..\nutimes /nd2 5\nsync\nls /\nstatfs\numount\n")
+    KINDS = 11
+    crashes = hangs = errors = refused = ran = 0
+    slowest = (0, 0, 0, 0)
+    per = [[0, 0, 0] for _ in range(KINDS)]                # each kind: refused at mount, answered EIO, neither
     first = ""
+    done = 0
     for rd in range(rounds):
-        name, base = bases[rd % 3]
-        d = bytearray(open(base, "rb").read())
-        size = len(d)
-        res = struct.unpack_from("<H", d, 14)[0]
-        fatsz = struct.unpack_from("<H", d, 22)[0] or struct.unpack_from("<I", d, 36)[0]
-        root = (res + d[16] * fatsz) * 512
-        kind = rd % 7
-        rng = {0: (0, 90), 1: (res * 512, min(4096, fatsz * 512)), 2: (root, 4096), 3: (0, 512), 4: (root, 2048), 5: (res * 512, 512), 6: (0, min(size, 1 << 20))}[kind]
-        n = rnd.choice((1, 2, 4, 8, 32, 200))
-        for _ in range(n):
-            at = rng[0] + rnd.randrange(rng[1])
-            d[at] = rnd.choice((0, 1, 2, 0xFF, 0xF8, 0xE5, 0x0F, 0x80, rnd.randrange(256)))
-        if kind == 5:                                      # a loop in a chain: a cluster that points to itself or back
-            bits = {"f12": 0, "f16": 16, "f32": 32}[name]
-            if bits:
-                for c in range(3, 40, 3):
-                    v = rnd.randrange(2, c + 1)
-                    if bits == 16:
-                        struct.pack_into("<H", d, res * 512 + c * 2, v)
-                    else:
-                        struct.pack_into("<I", d, res * 512 + c * 4, v)
-        if kind == 6 and rd % 2:                           # a truncated volume
-            d = d[:rnd.randrange(512, size)]
+        bits, base = bases[rd % 3]
+        kind = rd // 3 % KINDS
+        d = damage(bytearray(open(base, "rb").read()), bits, kind, rnd)
+        if rd % 4 == 3 and kind != 10:                     # now and then a second damage on top of the first
+            try:
+                d = damage(d, bits, rnd.randrange(2, 10), rnd)
+            except (ValueError, IndexError, ZeroDivisionError, OverflowError, struct.error):
+                pass                                       # the first left nothing for the second to aim at
         p = os.path.join(T, "fz.img")
         open(p, "wb").write(d)
+        done += 1
+        t0 = time.time()
         try:
             rc, o = run(p, script, exe="fatd-asan", timeout=60, env={"ASAN_OPTIONS": "detect_leaks=0:abort_on_error=0:allocator_may_return_null=1", "UBSAN_OPTIONS": "halt_on_error=1"})
         except subprocess.TimeoutExpired:
             hangs += 1
-            first = first or f"round {rd}: hang"
+            first = first or f"round {rd} kind {kind}: hang"
             shutil.copy(p, "/tmp/zenix-fat-hang.img")
             continue
+        el = time.time() - t0
+        if el > slowest[0]:
+            slowest = (el, rd, kind, bits)
         if rc != 0 or "Sanitizer" in o or "runtime error" in o:
             crashes += 1
             if not first:
-                first = f"round {rd} kind {kind}: rc {rc}\n" + o[-1500:]
+                first = f"round {rd} kind {kind} FAT{bits}: rc {rc}\n" + o[-1500:]
                 shutil.copy(p, "/tmp/zenix-fat-crash.img")
+            continue
+        if "mount -> -1" in o:
+            refused += 1
+            per[kind][0] += 1
         elif re.search(r"-> -5\b", o):
             errors += 1
+            per[kind][1] += 1
+        else:
+            ran += 1
+            per[kind][2] += 1
         if rd and not rd % 100:
-            print(f"fuzz: {rd} rounds, {crashes} crashes, {hangs} hangs, {errors} answered EIO", flush=True)
+            print(f"fuzz: {rd} rounds, {crashes} crashes, {hangs} hangs, {refused} refused, {errors} answered EIO", flush=True)
         if not rd % 50 and os.getloadavg()[0] > 16:
             print("load above 16: stopping the fuzz run early", flush=True)
             break
-    check(f"fuzz: {rounds} damaged volumes, no crash", crashes == 0, first)
+    print(f"fuzz: {done} rounds: {refused} refused at mount, {errors} answered EIO, {ran} neither; per kind (refused, EIO, neither): {per}; slowest {slowest[0]:.1f} s (round {slowest[1]}, kind {slowest[2]}, FAT{slowest[3]})", flush=True)
+    check(f"fuzz: {done} damaged volumes, no crash", crashes == 0, first)
     check("fuzz: no hang", hangs == 0, first)
-    check(f"fuzz: damage was seen ({errors} volumes answered EIO)", errors > 0)
+    check(f"fuzz: the damage reached the walks ({errors} volumes answered EIO after mounting)", errors >= done // 6)
 
 
 def main():
-    rounds = int(sys.argv[1]) if len(sys.argv) > 1 else 100
+    rounds = int(sys.argv[1]) if len(sys.argv) > 1 else 330
     for t in ("mkfs.fat", "fsck.fat", "mcopy"):
         if not shutil.which(t):
             print(f"FAIL {t} is missing")

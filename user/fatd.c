@@ -69,9 +69,11 @@ static int dcall(u32 type, u32 lba, u32 n, void *buf)
     m.type = type; m.a[0] = (u32)dh; m.a[1] = lba; m.a[2] = n; m.a[3] = (u32)buf;
     return disk_call(dport, &m) < 0 ? -EIO : 0;
 }
+static int need_flush;                 /* something was written since the last disk flush */
 static int dflush(void)
 {
     struct umsg m;
+    need_flush = 0;
     m.type = DISK_FLUSH; m.a[0] = (u32)dh;
     int r = disk_call(dport, &m);
     return r < 0 && r != -95 ? -EIO : 0;              /* -95: the disk cannot flush */
@@ -81,6 +83,10 @@ static int dio(u32 type, u32 lba, u32 n, void *buf)
 {
     u8 *p = buf;
     if (lba >= total_secs || n > total_secs - lba) return -EIO;
+    if (type == DISK_WRITE) {
+        if (!lba) return -EIO;                    /* the boot sector is never written (d30) */
+        need_flush = 1;
+    }
     while (n) {
         u32 k = n < maxsect ? n : maxsect;
         int r = dcall(type, lba, k, p);
@@ -122,9 +128,8 @@ static int flush_kind(int kind)
         if (cache[i].valid && cache[i].dirty && cache[i].kind == kind) {
             if ((r = dio(DISK_WRITE, cache[i].lba, 1, cache[i].d))) return r;
             cache[i].dirty = 0;
-            any = 1;
         }
-    return any ? dflush() : 0;
+    return need_flush ? dflush() : 0;              /* direct writes count: what follows must not overtake them */
 }
 /* everything but the waiting frees, in the order the crash rules ask */
 static int flush_all(void)
@@ -201,6 +206,7 @@ static int fat_rawset(u32 cl, u32 v)
 {
     u32 off = fat_bits == 12 ? cl + cl / 2 : fat_bits == 16 ? cl * 2 : cl * 4;
     u32 s = fat_base() + (off >> 9), i = off & 511;
+    if (fat_bits == 12 && i == 511 && !cget(s + 1, K_FAT, 0)) return -EIO;   /* no half-changed entry if it cannot be read */
     struct cbuf *c = cget(s, K_FAT, 0);
     if (!c) return -EIO;
     if (fat_bits == 12) {
@@ -231,6 +237,9 @@ static int chain_next(u32 cl, u32 *nx)
     if (r) return r;
     if (v == EOC) { *nx = 0; return 0; }
     if (v < 2 || v >= nclus) return -EIO;
+    u32 t;                                         /* a link to a free cluster: damage, or a flush a power cut tore */
+    if ((r = fat_get(v, &t))) return r;
+    if (!t) return -EIO;
     *nx = v;
     return 0;
 }
@@ -280,7 +289,7 @@ static int alloc_clus(u32 *out)
 /* a chain whose name is gone (or going, in the same commit) waits for the end of the commit */
 static int chain_release(u32 first)
 {
-    if (first < 2 || first >= nclus) return 0;
+    if (first < 2 || first >= nclus || first == root_clus) return 0;   /* an entry that names the root: damage */
     if (npend == NPEND) { int r = inner_commit(); if (r) return r; }
     pend[npend++] = first;
     return 0;
@@ -290,7 +299,7 @@ static int apply_frees(void)
     dm_forget();
     for (u32 i = 0; i < npend; i++) {
         u32 c = pend[i];
-        while (c >= 2 && c < nclus) {               /* each step zeroes one: a loop in the chain ends at its own start */
+        while (c >= 2 && c < nclus && c != root_clus) {   /* each step zeroes one: a loop in the chain ends at its own start */
             u32 v;
             int r = fat_get(c, &v);
             if (r) return r;
@@ -640,8 +649,8 @@ static u32 file_ino(const node_t *n)
     struct ofile *o = slot_at(n->lba, n->byte);
     if (o) return o->ino;
     u32 v = ((n->lba << 4) | (n->byte >> 5)) & 0x3FFFFFFFu;
-    if (v < 16) v += 16;                          /* wrapped on a volume over 64 GB: never the root's number */
-    if (slot_ino(v)) v = 0x60000000u | (++synth & 0x0FFFFFFF);
+    if (v < 16) v += 16;                          /* wrapped on a volume over 32 GB: never the root's number */
+    while (slot_ino(v)) v = 0x60000000u | (++synth & 0x0FFFFFFF);
     return v;
 }
 static int is_dir(const node_t *n) { return n->isroot || (n->e[11] & A_DIR); }
@@ -656,7 +665,8 @@ static int dir_of(const node_t *n, u32 *dir)
     return 0;
 }
 static u32 dir_ino(u32 dir) { return !dir || dir == root_clus ? ROOT : DINO(dir); }
-/* INO as a directory: stateless. A freed directory's cluster no longer starts with its own "." */
+/* INO as a directory: stateless. A cluster that does not start with its own "." is stale. A handle to a removed
+ * directory may still list it, or the directory that took its cluster: reading only, paths on a mount are text */
 static int ino_dir(u32 ino, u32 *dir)
 {
     if (ino == ROOT) { *dir = root_dir(); return 0; }
@@ -744,7 +754,7 @@ static int name_bad(void)
     if (!q_len) return -EINVAL;
     for (u32 i = 0; i < q_len; i++) {
         u32 c = q[i];
-        if (c < 0x20 || c == 0x7F || (c < 0x80 && strchr("\"*/:<>?\\|", (int)c))) return -EINVAL;
+        if (c < 0x20 || c == 0x7F || c == 0xFFFF || (c < 0x80 && strchr("\"*/:<>?\\|", (int)c))) return -EINVAL;
     }
     if (q[q_len - 1] == '.' || q[q_len - 1] == ' ') return -EINVAL;
     return 0;
@@ -819,6 +829,7 @@ static int dir_grow(u32 tail)
 static int dir_room(u32 dir, u32 count, u32 *where)
 {
     u32 off = 0, run = 0, lba, tail = dir;
+    int end = 0;                                  /* past the end marker everything is free, whatever is there */
     for (;; off += 32) {
         int r = dir_lba(dir, off, &lba);
         if (r < 0) return r == -EIO && off >= DIR_MAX ? -ENOSPC : r;
@@ -839,7 +850,8 @@ static int dir_room(u32 dir, u32 count, u32 *where)
         struct cbuf *c = cget(lba, K_DIR, 0);
         if (!c) return -EIO;
         u8 b = c->d[off & 511];
-        if (b == 0xE5 || !b) {
+        if (!b) end = 1;
+        if (b == 0xE5 || end) {
             if (!run) *where = off;
             if (++run == count) return 0;
         } else run = 0;
@@ -873,23 +885,26 @@ static int entry_add(u32 dir, const u8 *body, node_t *n)
         }
     }
     if ((r = dir_lba(dir, o, &lba)) <= 0) return r ? r : -EIO;
-    u8 *e = entry_w(lba, o & 511);
-    if (!e) return -EIO;
-    if (!e[0]) was_end = 1;
-    memcpy(e, body, 32);
-    memcpy(e, sh, 11);
-    memcpy(n->e, e, 32);
-    n->dir = dir; n->off = o; n->lba = lba; n->byte = (u16)(o & 511); n->isroot = 0; n->haslfn = !plain;
-    if (was_end) {                                /* what follows was "free to the end": keep that true */
+    struct cbuf *cb = cget(lba, K_DIR, 0);
+    if (!cb) return -EIO;
+    if (was_end || !cb->d[o & 511]) {             /* what follows was "free to the end": keep that true */
         u32 l2;
         r = dir_lba(dir, o + 32, &l2);
         if (r < 0 && o + 32 < DIR_MAX) return r;
         if (r > 0) {
             u8 *z = entry_w(l2, (o + 32) & 511);
             if (!z) return -EIO;
-            if (z[0]) z[0] = 0;
+            z[0] = 0;
         }
     }
+    /* the last step, which cannot fail after it: a caller that fails frees what the entry would name */
+    u8 *e = entry_w(lba, o & 511);
+    if (!e) return -EIO;
+    memcpy(e, body, 32);
+    memcpy(e, sh, 11);
+    e[12] = 0;                                    /* the lower-case bits belonged to the old short name */
+    memcpy(n->e, e, 32);
+    n->dir = dir; n->off = o; n->lba = lba; n->byte = (u16)(o & 511); n->isroot = 0; n->haslfn = !plain;
     return 0;
 }
 /* the entries of N go: the long-name parts and the short entry */
@@ -1020,6 +1035,7 @@ static int file_write(struct ofile *o, u32 off, const u8 *buf, u32 n)
     if (n > 0xFFFFFFFFu - off) return -EFBIG;
     if ((r = touch())) return r;
     if (off > o->size) {                          /* no holes in FAT: the gap is written as zeros */
+        if (off - o->size >= 0x40000000u) return -EFBIG;
         r = file_put(o, o->size, 0, off - o->size);
         if (r > 0) { o->size += (u32)r; }
         if (r < 0 || o->size != off) { o->mtime = (u32)sys_time(); entry_update(o); return r < 0 ? r : -ENOSPC; }
@@ -1044,6 +1060,26 @@ static int file_trunc(struct ofile *o)
 }
 
 /* ---- requests ---- */
+/* a file's chain at its first open: in range, and no loop (a mark moved to every 2nd, 4th, 8th ... step; a walk bounded
+ * by the file's size would not notice one). A chain over CHECK_MAX clusters is walked no further here: its reads and
+ * writes stay bounded by the size. Keeps a normal open cheap: a 16 MB file at 4 KB clusters is 8 sectors of FAT32 */
+#define CHECK_MAX 16384
+static int chain_check(u32 c)
+{
+    u32 mark = 0, left = 1, span = 1;
+    if (!c) return 0;
+    if (c < 2 || c >= nclus) return -EIO;
+    for (u32 i = 0; i < CHECK_MAX; i++) {
+        u32 nx;
+        int r = chain_next(c, &nx);
+        if (r) return r;
+        if (!nx) return 0;
+        if (nx == mark) return -EIO;
+        if (!--left) { span *= 2; left = span; mark = nx; }
+        c = nx;
+    }
+    return 0;
+}
 static int slot_new(const node_t *n, struct ofile **out)
 {
     struct ofile *o = slot_at(n->lba, n->byte);
@@ -1095,6 +1131,7 @@ static int do_open(struct umsg *m)
     } else {
         if (!fsp_access(cuid, cgid, cng, cgs, file_mode(n.e[11]), m_uid, m_gid, fsp_open_want(flags))) return -EACCES;
         if (writing && readonly) return -EROFS;
+        if (!slot_at(n.lba, n.byte) && !(writing && (flags & O_TRUNC)) && (r = chain_check(first_of(n.e)))) return r;
     }
     if ((r = slot_new(&n, &o))) return r;
     if (writing && (flags & O_TRUNC) && (o->size || o->first)) {
@@ -1178,7 +1215,7 @@ static int do_rename(struct umsg *m)
     u32 da, db, sc = 0;
     int r;
     if ((r = namei(m->a[2], (const char *)m->a[0], &a))) return r;
-    if (a.isroot) return -EBUSY;
+    if (a.isroot || !a.lba) return -EBUSY;        /* the root, or the working directory given as "." */
     if (a.e[0] == '.' && (a.e[1] == ' ' || a.e[1] == '.')) return -EINVAL;
     if ((r = parent(m->a[2], (const char *)m->a[1], &db))) return r == -EINVAL ? -EBUSY : r;
     if (!dir_may()) return -EACCES;
@@ -1212,10 +1249,14 @@ static int do_rename(struct umsg *m)
         struct ofile *to = src_dir ? 0 : slot_at(b.lba, b.byte);
         u8 *e = entry_w(b.lba, b.byte);
         if (!e) return -EIO;
-        memcpy(e + 11, a.e + 11, 21);
+        u32 srcfirst = src_dir ? sc : so ? so->first : first_of(a.e);
+        e[11] = a.e[11];                          /* e[12]: the lower-case bits stay with this short name */
+        memcpy(e + 13, a.e + 13, 19);
         if (so) { set_first(e, so->first); put32(e + 28, so->size); }
         if (to) to->orphan = 1;                   /* the old file stays readable through its handle */
-        else if ((r = chain_release(old))) return r;
+        /* two names on one chain, as a power cut in an earlier rename leaves: the chain is not going anywhere */
+        else if (old != srcfirst && (r = chain_release(old))) return r;
+        if (to && old == srcfirst) to->first = 0;
         nw = b;
     } else {
         u8 body[32];
@@ -1227,7 +1268,7 @@ static int do_rename(struct umsg *m)
     if ((r = flush_all())) return r;              /* the new name is on the disk */
     if ((r = entry_del(&a))) return r;
     if (so) { so->lba = nw.lba; so->byte = nw.byte; }
-    return 0;
+    return flush_kind(K_DIR);                     /* and the old one gone: the time with two names is short */
 }
 
 static int do_mkdir(struct umsg *m)
@@ -1386,7 +1427,7 @@ static int handle1(struct umsg *m)
         int given = m->a[2] != FS_UTIME_NOW;
         unsigned md = is_dir(&n) ? m_dmode : file_mode(n.e[11]);
         if (!fsp_utimes_ok(cuid, m_uid, given, fsp_access(cuid, cgid, cng, cgs, md, m_uid, m_gid, FSP_W))) return -EACCES;
-        if (n.isroot) return 0;
+        if (n.isroot || !n.lba) return 0;         /* the root, or the working directory given as ".": no entry here */
         if ((r = touch())) return r;
         u8 *e = entry_w(n.lba, n.byte);
         if (!e) return -EIO;
@@ -1498,6 +1539,8 @@ static int try_mount(const char *name, int restart)
     m.type = DISK_INFOSZ; m.a[0] = (u32)dh; m.a[1] = (u32)&di; m.a[2] = sizeof di;
     if (disk_call(dport, &m) < 0) return why("cannot read the device");
     maxsect = di.maxsect ? di.maxsect : 1;
+    if (!(di.caps & (DISKCAP_FLUSH | DISKCAP_RAM)))
+        why("the disk cannot flush its write cache: a power cut may damage the volume if the disk reorders writes");
     total_secs = di.sectors;
     if (dio(DISK_READ, 0, 1, b)) return why("cannot read the boot sector");
     if (check_bpb(b, di.sectors)) goto no;
@@ -1513,6 +1556,7 @@ static int try_mount(const char *name, int restart)
     if (unclean && !readonly) {
         why("was not unmounted cleanly: mounted writable (-o force)");
         if (clean_bit() && !(v & clean_bit())) marked = 1;      /* ours to clear at the end */
+        info_dirty = 1;                                         /* FSInfo is not trusted below: the next write says unknown or the count */
         /* the boot sector's byte stays as it is: that sector is never written here */
     }
     if (fat_bits == 32 && fsinfo_sec && !dio(DISK_READ, fsinfo_sec, 1, b) && !unclean &&
@@ -1591,8 +1635,33 @@ int main(int argc, char **argv)
         for (int i = 0, j = 0; i < n && i < NOPEN; i++)
             if ((ino[i] & 0xF0000000u) != 0x40000000u && ino[i] != ROOT) { opens[j].ino = ino[i]; opens[j].count = 1; opens[j].stale = 1; j++; }
     }
-    struct umsg *m = sys_recv(port, 1);
-    while ((int)m != -1) {
+    struct umsg *m = 0;
+    u32 saved_at = sys_ticks();                   /* the last commit: the volume goes clean QUIET_TICKS after it */
+    int warned = 0;
+    for (;;) {
+        if (!m) {
+            u32 age, now = sys_ticks();
+            if (dirty) {                          /* changes wait: the next request, or the commit time */
+                age = now - dirty_since;
+                if (age < COMMIT_TICKS) m = (struct umsg *)sys3(32, (u32)port, 1 + COMMIT_TICKS - age, 0);
+                if (!m) {                         /* on time, also under a steady stream of requests */
+                    if (sync_all()) {
+                        if (!warned++) dprintf(1, "fatd: %s: a write failed: changes are not saved yet\n", devname);
+                        dirty_since = sys_ticks();
+                    } else saved_at = sys_ticks();
+                    continue;
+                }
+            } else if (marked) {                  /* all saved: counted from the commit, not from the last request */
+                age = now - saved_at;
+                if (age < QUIET_TICKS) m = (struct umsg *)sys3(32, (u32)port, 1 + QUIET_TICKS - age, 0);
+                if (!m) {
+                    if (go_clean() && !warned++) dprintf(1, "fatd: %s: a write failed: the volume stays marked\n", devname);
+                    saved_at = sys_ticks();
+                    continue;
+                }
+            } else m = sys_recv(port, 1);
+            if ((int)m == -1) break;
+        }
         int r = handle(m);
         if (quitting) {
             int e = readonly ? 0 : go_clean();
@@ -1603,18 +1672,13 @@ int main(int argc, char **argv)
             disk_call(dport, &u);
             return 0;
         }
-        if (!dirty && !marked) { m = sys_replyrecv(m, r, port); continue; }
+        if (!dirty && !marked) {
+            m = sys_replyrecv(m, r, port);
+            if ((int)m == -1) break;
+            continue;
+        }
         sys_reply(m, r);
         m = 0;
-        if (dirty) {                              /* changes wait: the next request, or the commit time */
-            u32 age = sys_ticks() - dirty_since;
-            if (age < COMMIT_TICKS) m = (struct umsg *)sys3(32, (u32)port, 1 + COMMIT_TICKS - age, 0);
-            if (!m && sync_all()) dprintf(1, "fatd: %s: a write failed: changes may be lost\n", devname);
-        }
-        if (!m && !dirty && marked)               /* all saved: quiet for a while, the volume goes clean */
-            m = (struct umsg *)sys3(32, (u32)port, QUIET_TICKS, 0);
-        if (!m && !dirty && marked && go_clean()) dprintf(1, "fatd: %s: a write failed\n", devname);
-        if (!m) m = sys_recv(port, 1);
     }
     return 1;
 }
