@@ -106,7 +106,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    state and steps aside, the demo has the hardware and chip RAM, and Zenix comes back when it ends, as demos return
    to Workbench. Demos on the bare hardware first; demos that need AmigaOS's libraries later. Starts when block 3's
    audit is done. The idea's notes: docs/future-ideas.md "Amiga demos on Zenix".
-4. **The Amiga world:** FAT, FFS/OFS, then PFS3; LhA/LZX unpacking; ZenixFS as the root on real hardware; the
+4. **The Amiga world:** FAT (built 2026-10-31 in FS-UAE: docs/d30-fat.md, `/sbin/fatd`), FFS/OFS, then PFS3; LhA/LZX unpacking; ZenixFS as the root on real hardware; the
    installer. Audit, with the filesystems fuzzed against damaged disks.
 5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
    viewers, preferences; TrueType fonts (owner 2026-10-26; rendered once per size into bitmap fonts and cached, so a

@@ -6,11 +6,11 @@
 #include "volid.h"
 
 /* mount                      list the mounted filesystems
- * mount [-t TYPE] DEVICE DIR  serve DEVICE with the filesystem server for TYPE (a service, fs.DEVICE) and put it on DIR
+ * mount [-t TYPE] [-o OPTIONS] DEVICE DIR  serve DEVICE with the filesystem server for TYPE (a service, fs.DEVICE) and put it on DIR
  * mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR   an NFS export (DESIGN D23): the service fs.nfsN, served by /sbin/nfscd
  * mount -a                   mount everything listed in /etc/fstab (init does this at boot)
- * TYPE is ext2, zenixfs or nfs; without -t it is read from the partition's type in the RDB (a HOST:/EXPORT is nfs).
- * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs or auto (from the partition type), OPTIONS =
+ * TYPE is ext2, zenixfs, fat or nfs; without -t it is read from the partition's type in the RDB or MBR (a HOST:/EXPORT is nfs).
+ * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs, fat or auto (from the partition type), OPTIONS =
  * "defaults" or a comma list; "noauto" leaves the line out of mount -a. Lines starting with # and blank lines are ignored.
  * An ext2 volume not marked clean (a power cut while it was written, DESIGN D17) is checked first by mount -a
  * (fsck.ext2 -y, as Linux's fsck pass at boot); a plain mount only warns. */
@@ -44,7 +44,12 @@ static void list(void)
  * server for the type (ext2: the kernel's built-in fsd; ZenixFS: the file /sbin/zfsd, DESIGN D19) and the volume id, at
  * nice -10; the kernel's first call to it (the root inode, in SYS_mount) starts it, and a call after it died starts it
  * again. Returns 0, or 1 after printing why not. */
-static int mount_one(const char *dev, const char *dir, const char *type, int fsck)
+/* an MBR partition of a FAT type (diskd's 'MBR' + type byte): 01 04 06 0B 0C 0E, 11 14 16 1B 1C 1E (hidden), EF (D30) */
+static int fat_part(u32 dt)
+{
+    return (dt & 0xFFFFFF00u) == 0x4D425200u && ((dt & 0xFF) == 0xEF || ((dt & 0xE0) == 0 && (0x58525852u >> (dt & 0x1F) & 1)));
+}
+static int mount_one(const char *dev, const char *dir, const char *type, const char *opts, int fsck)
 {
     struct diskinfo di;
     struct umountinfo mi;
@@ -53,15 +58,16 @@ static int mount_one(const char *dev, const char *dir, const char *type, int fsc
     if (disk_info(dev, &di) < 0) { dprintf(1, "mount: no such device: %s\n", dev); return 1; }
     if (di.mounted) { dprintf(1, "mount: %s is already in use\n", dev); return 1; }
     if (!type) {
-        type = di.dostype == DT_EXT2 ? "ext2" : di.dostype == DT_ZENIXFS ? "zenixfs" : 0;
-        if (!type) { dprintf(1, "mount: cannot tell the type of %s; use -t ext2 or -t zenixfs\n", dev); return 1; }
+        type = di.dostype == DT_EXT2 ? "ext2" : di.dostype == DT_ZENIXFS ? "zenixfs" : fat_part(di.dostype) ? "fat" : 0;
+        if (!type) { dprintf(1, "mount: cannot tell the type of %s; use -t ext2, -t zenixfs or -t fat\n", dev); return 1; }
     }
-    int z = !strcmp(type, "zenixfs");
-    if (!z && strcmp(type, "ext2")) { dprintf(1, "mount: unknown type %s (ext2, zenixfs or nfs)\n", type); return 1; }
+    int z = !strcmp(type, "zenixfs"), f = !strcmp(type, "fat");
+    if (opts && !f && !fsck) { dprintf(1, "mount: -o is for FAT and NFS mounts only\n"); return 1; }
+    if (!z && !f && strcmp(type, "ext2")) { dprintf(1, "mount: unknown type %s (ext2, zenixfs, fat or nfs)\n", type); return 1; }
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
     for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++)
         if (!strcmp(mi.port, pname)) { dprintf(1, "mount: %s is already mounted on %s\n", dev, mi.path); return 1; }
-    if (!z && vt == 1 && !(vol_state & 1)) {               /* not marked clean: a cut while it was written */
+    if (!z && !f && vt == 1 && !(vol_state & 1)) {               /* not marked clean: a cut while it was written */
         if (!fsck) dprintf(1, "mount: %s was not unmounted cleanly: check it (umount it, then fsck.ext2 -y %s)\n", dev, dev);
         else {
             dprintf(1, "mount: %s was not unmounted cleanly: fsck.ext2 -y %s\n", dev, dev);
@@ -73,10 +79,17 @@ static int mount_one(const char *dev, const char *dir, const char *type, int fsc
     }
     /* ext2: the built-in fsd. ZenixFS: the file /sbin/zfsd (DESIGN D19 step 1; D11 6.4's file service), without the
      * port word (zfsd names it fs.DEVICE itself): the path and the volume id leave no room for it in SVC_TEXT */
-    strcpy(prog, z ? "/sbin/zfsd " : "@fsd ");
+    /* FAT (D30): the file /sbin/fatd, the id's place only (a volume serial is not read here), the options as they are:
+     * fatd checks them */
+    strcpy(prog, z ? "/sbin/zfsd " : f ? "/sbin/fatd " : "@fsd ");
     strcat(prog, dev);
-    if (!z) { strcat(prog, " "); strcat(prog, pname); }
+    if (!z && !f) { strcat(prog, " "); strcat(prog, pname); }
+    if (f) id[17] = 0;
     strcat(prog, " -id "); strcat(prog, id);
+    if (f && opts) {
+        if (strlen(prog) + strlen(opts) + 5 > SVC_TEXT_MAX) { dprintf(1, "mount: too many options\n"); return 1; }
+        strcat(prog, " -o "); strcat(prog, opts);
+    }
     int r = sys_svc_register(pname, prog, -10);
     if (r < 0) {
         dprintf(1, r == -EBUSY ? "mount: too many filesystems mounted\n" : "mount: cannot register the server of %s (%d)\n", dev, r);
@@ -228,7 +241,7 @@ static int mount_all(void)
             }
             if (nf >= 2 && !(f[3] && strstr(f[3], "noauto"))) {
                 const char *type = (nf >= 3 && strcmp(f[2], "auto")) ? f[2] : 0;
-                if (type && !strcmp(type, "nfs") ? mount_nfs(f[0], f[1], f[3], 1) : mount_one(f[0], f[1], type, 1)) bad = 1;
+                if (type && !strcmp(type, "nfs") ? mount_nfs(f[0], f[1], f[3], 1) : mount_one(f[0], f[1], type, f[3], 1)) bad = 1;
             } else if (nf < 2) { dprintf(1, "mount: bad line in /etc/fstab: %s\n", line); bad = 1; }
         }
         *eol = save;
@@ -252,11 +265,10 @@ int main(int argc, char **argv)
     if (all) return mount_all();
     if (argc == 1) { list(); return 0; }
     if (!dev || !dir) {
-        dprintf(1, "usage: mount [-t ext2|zenixfs] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
+        dprintf(1, "usage: mount [-t ext2|zenixfs|fat] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
                "       mount -a     mount (list)\n");
         return 2;
     }
     if ((type && !strcmp(type, "nfs")) || (!type && strstr(dev, ":/"))) return mount_nfs(dev, dir, opts, 0);
-    if (opts) { dprintf(1, "mount: -o is for NFS mounts only\n"); return 2; }
-    return mount_one(dev, dir, type, 0);
+    return mount_one(dev, dir, type, opts, 0);
 }

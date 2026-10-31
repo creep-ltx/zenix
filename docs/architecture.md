@@ -952,6 +952,13 @@ created in the seconds before the crash (not committed) is gone, its open file r
 never handed to another file. The library
 allocates only at mount (block cache, bitmaps, three scratch blocks), so a running server needs no more memory.
 
+### fatd - a FAT mount's server (`user/fatd.c`, port `fs.DEVICE`, DESIGN D30)
+`mount -t fat DEV DIR` (or a PC partition of a FAT type) registers `fs.DEV` -> `/sbin/fatd DEV -id START,SIZE [-o OPTIONS]`
+at nice -10 (a file service, D11 6.4). One file, one process per mount, the protocol of `kernel/fsproto.h`; no links on
+FAT, so `UMSG_LINKS` never bounces. It has one 24-sector cache for FAT, directory and partial data sectors (whole sectors
+go straight between the disk and the caller), a table of open files, and a list of chains waiting to be freed. The
+commit order, inode numbers and damage rules are in `docs/d30-fat.md`.
+
 ### nfscd - an NFS mount's server (`user/nfscd.c` + `net/nfs/`, port `fs.nfs0` .. `fs.nfs7`, DESIGN D23)
 `mount -t nfs HOST:/EXPORT DIR` registers `fs.nfsN` -> `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` at nice -10 (a file
 service, D11 6.4; the options as one word of codes: `s` soft, `tN` timeo, `rN` retrans, `o` read-only, `y` sync, `aN`

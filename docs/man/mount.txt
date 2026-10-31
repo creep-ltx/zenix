@@ -5,7 +5,7 @@ NAME
 
 SYNOPSIS
     mount
-    mount [-t type] device dir
+    mount [-t type] [-o options] device dir
     mount [-t nfs] [-o options] host:/export dir
     mount -a
 
@@ -19,8 +19,10 @@ DESCRIPTION
     ..., df0, df1 (see fdisk). Filesystems can be mounted inside each other
     (/mnt, then /mnt/sub).
 
-    The type is ext2 or zenixfs. Without -t it is read from the partition's
-    type in the partition table (fdisk add ... ext2|zenixfs).
+    The type is ext2, zenixfs or fat. Without -t it is read from the
+    partition's type in the partition table (fdisk add ... ext2|zenixfs;
+    a PC partition of a FAT type counts as fat). A volume without a
+    partition table needs -t fat.
 
     The filesystem's server is a service (DESIGN D11): mount reads the
     device's volume id (where it is and its superblock's uuid) and
@@ -48,6 +50,37 @@ DESCRIPTION
     ZenixFS: changes are kept in memory and committed atomically three
     seconds after the first change, at sync(1) and at umount, so a power
     cut leaves the volume as it was at the last commit (docs/zenixfs.md).
+
+    FAT (DESIGN D30): FAT12, FAT16 and FAT32 with long file names, read
+    and write, on a PC partition (mount ide0p1 /mnt) or a volume without
+    a partition table (mount -t fat ide0 /mnt, mount -t fat df1 /mnt).
+    Names are UTF-8 for programs and UCS-2 on the disk; 8.3 names are
+    read as CP437. Case does not matter in a name, as on any FAT
+    volume. FAT has no owners or modes, so they come from the mount.
+    Options (-o, comma-separated):
+      uid=N, gid=N   who owns everything (default 0, root).
+      fmode=OCT      the mode of files (default 644: no program runs from
+                     the volume unless the mount says so).
+      dmode=OCT      the mode of directories (default 755).
+      ro             read-only; not one sector is written.
+      force          mount writable a volume not marked clean.
+      rw, defaults, noauto: accepted.
+    A wrong option stops the server: "did not start (see dmesg)".
+    Refused, because FAT cannot hold them: ln and ln -s, chown to anyone
+    else, chmod other than taking away or giving back the write bits
+    (that is the file's read-only attribute), the characters " * / : < >
+    ? \ | and control characters in a name, a name that ends in a dot or
+    a space.
+    Changes are saved 3 seconds after the first change, at sync(1) and
+    at umount. They are written in an order that protects the other
+    files on the volume: a power cut can at worst lose the last changes
+    and leave space marked used. fsck.fat on another computer takes that
+    space back. The boot sector is never written. The volume is marked
+    "not clean" while changes are being saved (FAT16 and FAT32; 5 seconds
+    after the last one it is clean again), and such a volume, from a
+    power cut or from another system, is mounted read-only with a line
+    in dmesg; -o force mounts it writable and clears the mark at the
+    next clean moment.
 
     NFS (DESIGN D23): mount -t nfs nas:/volume1/zenix /nas puts a
     directory that a NAS or a Linux PC exports on dir (NFSv3 over TCP;
@@ -85,8 +118,8 @@ DESCRIPTION
 
     mount -a mounts everything listed in /etc/fstab; init runs it at boot.
     Each line is "device dir type options" (fields separated by spaces or
-    tabs): type is ext2, zenixfs, nfs (device host:/export) or auto (read
-    from the partition type);
+    tabs): type is ext2, zenixfs, fat, nfs (device host:/export) or auto
+    (read from the partition type);
     options is defaults, or a comma list in which "noauto" leaves the line
     out of mount -a. Lines starting with # and empty lines are ignored.
     A line that fails is reported and the others are still mounted.
@@ -97,6 +130,7 @@ EXAMPLES
     mount -t ext2 ide0p2 /mnt/sub
     mount
     echo 'ide0p2 /data auto defaults' >> /etc/fstab
+    mount -t fat -o uid=100,gid=100 ide0p1 /boot
     mount -t nfs nas:/volume1/zenix /nas
     mount -t nfs -o soft,timeo=10 192.0.2.20:/export /mnt
 
@@ -131,8 +165,18 @@ NOTES
     service is removed again.
     ZenixFS names longer than 63 bytes (possible on a volume written
     elsewhere) are not listed by ls; they can still be opened by name.
-    Only types with a server can be mounted (ext2, zenixfs, nfs). A ZenixFS
-    mount needs /sbin/zfsd on the root: without it the server does not
+    FAT: 512-byte sectors only (others are refused by name); files below
+    4 GB, the format's own limit; a write past the end writes zeros; times
+    are stored as UTC with 2-second steps; access dates are never written;
+    no fsck.fat on Zenix. A long name over 63 bytes of UTF-8 is listed by
+    its 8.3 name. Case is folded for Latin, Greek and Cyrillic only.
+    The first df of a volume with no free count counts
+    the FAT once. A file open while fatd was restarted answers "stale
+    file handle" until it is closed. A real PC floppy cannot be read: the
+    drive reads the Amiga's 880 KB tracks only (an image formatted FAT12
+    can). A FAT mount needs /sbin/fatd on the root (the disktools package).
+    Only types with a server can be mounted (ext2, zenixfs, fat, nfs). A
+    ZenixFS mount needs /sbin/zfsd on the root: without it the server does not
     start ("cannot start /sbin/zfsd" in dmesg).
     NFS writes: a write returns once the NAS holds the bytes; they are
     saved on its disk within 5 s, at the file's last close, at sync and
@@ -167,5 +211,5 @@ NOTES
     writes past it (the frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
-    umount(8), nfscd(8), fdisk(1), df(1), dmesg(1), mkfs.ext2(1),
+    umount(8), nfscd(8), fatd(8), fdisk(1), df(1), dmesg(1), mkfs.ext2(1),
     mkfs.zenixfs(1), boot(8)

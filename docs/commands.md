@@ -63,6 +63,7 @@ spot-checked against the code that day.
 | [zpkg-new](man/zpkg-new.txt) | zpkg in a live package of its own, for a system whose zpkg cannot write system updates (2026103000): `zpkg-new -Syu` once (D22 4.5) |
 | [random](man/random.txt) | not a command: `/dev/random` and `/dev/urandom`, the kernel's random numbers, and the seed file (DESIGN D19) |
 | [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
+| [fatd](man/fatd.txt) | not a command: a FAT mount's server (`/sbin/fatd`, DESIGN D30), started by the kernel for `mount -t fat`; its manual is mount's |
 | [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd, zfsd, or nfscd for a NAS's folder over NFS, DESIGN D23)|
 
 ## The network
