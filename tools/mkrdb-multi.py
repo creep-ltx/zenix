@@ -3,7 +3,7 @@
 """Make an Amiga disk image with an RDB and several partitions, as a real hard disk or CF card has.
 usage: mkrdb-multi.py out.hdf image:type[:label[:flags]] [image:type[:label[:flags]] ...]
 type is ext2, zenixfs or ffs (AmigaDOS FFS, DOS\\1: Kickstart mounts it with the FFS in its ROM; zenixboot's boot
-partition), or for ffsd's tests ofs (DOS\\0), ffs3 (DOS\\3), ffs3k (DOS\\3 with 1 KB blocks). The first partition is marked bootable unless flags are given: flags is a comma list of "boot" (bootable,
+partition), or for ffsd's tests ofs (DOS\\0), ffs3 (DOS\\3), ffs3k (DOS\\3 with 1 KB blocks), ffs5, ffs7 (DOS\\5, DOS\\7). The first partition is marked bootable unless flags are given: flags is a comma list of "boot" (bootable,
 boot priority 0) and "nomount" (AmigaOS leaves the partition alone; Zenix ignores the flag), or "-" for none. An image
 of "-" or a size such as "4M" makes an empty partition (for a filesystem to be made inside Zenix); a real file is
 copied in. An ffs image must fill its cylinders exactly (16 heads x 63 sectors = 504 KB each): the volume's size is
@@ -12,7 +12,7 @@ import os
 import struct
 import sys
 
-TYPES = {"ext2": 0x4C4E5800, "zenixfs": 0x5A4E4601, "ffs": 0x444F5301, "ofs": 0x444F5300, "ffs3": 0x444F5303, "ffs3k": 0x444F5303}
+TYPES = {"ext2": 0x4C4E5800, "zenixfs": 0x5A4E4601, "ffs": 0x444F5301, "ofs": 0x444F5300, "ffs3": 0x444F5303, "ffs3k": 0x444F5303, "ffs5": 0x444F5305, "ffs7": 0x444F5307}
 HEADS, SECS = 16, 63
 CYL = HEADS * SECS * 512
 
