@@ -801,6 +801,15 @@ int gfx_init(void)
     return 0;
 }
 
+/* DESIGN D29 9.2: what ZINE's way back writes into the display's write-only registers: the Copper list (returned)
+ * and DIWSTRT, DIWSTOP as gfx_init wrote them */
+u32 gfx_zine(u16 *diw)
+{
+    diw[0] = (u16)((DIW_V << 8) | 0x81);
+    diw[1] = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
+    return (u32)cop;
+}
+
 /* /etc/console's setting (init, SYS_console; D14 section 11): show `colours` (2, 4, 8, 16) from now on. The new
  * buffer and Copper list come first (no memory: -ENOMEM, the display stays as it is); the switch is one register
  * write with interrupts masked, which the Copper takes at the next vertical blank; one frame later (a timeout of

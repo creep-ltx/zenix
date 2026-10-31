@@ -1,0 +1,2 @@
+# ZINE step 3 (tools/zine-emu-test.sh): the real blob, the smallest program
+zine /tests/zine/zexit; echo zexit-rc=$?

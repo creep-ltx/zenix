@@ -646,6 +646,9 @@ void syscall_c(u32 *rb)
     case SYS_drv:                       /* D19 step 7: the network's drivers (drv.c) */
         r = (s32)drv_sys(a1, a2, a3);
         break;
+    case SYS_zine:                      /* D29: an Amiga program under ZINE (zine.c) */
+        r = (s32)zine_sys(a1, a2, a3);
+        break;
     case SYS_getpriority:
         r = (s32)do_priority(0, a1, a2, 0);
         break;

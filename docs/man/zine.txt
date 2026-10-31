@@ -1,0 +1,38 @@
+ZINE(1)				Zenix manual
+
+NAME
+    zine - run an AmigaOS program under Zenix
+
+SYNOPSIS
+    zine [--blob FILE] PROGRAM [ARGS...]
+
+DESCRIPTION
+    Runs PROGRAM, an AmigaOS executable, under ZINE: Zenix pauses, gives
+    the program the machine and a small AmigaOS of its own
+    (/lib/zine/zine.blob, loaded only when zine runs), and carries on at
+    the prompt when the program ends. The disks are written out first;
+    every Zenix program is paused where it stood while the Amiga program
+    runs.
+
+    Only root may run zine, and only at the Amiga's own console (not
+    over ssh, telnet or the serial port's own login). It needs fast RAM.
+
+    ZINE is being built (DESIGN D29): the pause and the way back are
+    tested; running real programs comes next.
+
+    Ctrl-Amiga-Amiga while the program runs restarts the machine into
+    Zenix.
+
+OPTIONS
+    --blob FILE   use FILE instead of /lib/zine/zine.blob (the tests'
+                  /tests/zine/null.blob pauses and resumes only)
+
+EXAMPLES
+    zine /home/demos/mydemo
+
+EXIT STATUS
+    The program's return code; 1 when it could not run, crashed or was
+    stopped; 2 for bad arguments.
+
+SEE ALSO
+    free(1)

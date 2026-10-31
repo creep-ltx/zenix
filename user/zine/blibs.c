@@ -1,0 +1,1665 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* ZINE's blob: the small AmigaOS's libraries (DESIGN D29 section 5; the first set of build step 3): ExecBase and the
+ * other bases with their jump tables, the memory lists, the process and its CLI, and the functions beyond memory
+ * (blob.c). Every vector not listed here is "jsr zx_unsup": the program stops cleanly and `zine` names the call. */
+#include "blob.h"
+#include "zvol.h"
+
+/* ---- lists (exec/lists.h) ---- */
+static u32 cia_base[2];                 /* ZINE's ciaa.resource and ciab.resource (below) */
+static u32 timer_base;                  /* ZINE's timer.device (below) */
+static int timer_step(void);
+static void newlist(struct zlist *l, u8 type)
+{
+    l->head = (struct znode *)&l->tail;
+    l->tail = 0;
+    l->tailpred = (struct znode *)&l->head;
+    l->type = type;
+}
+
+void c_AddHead(struct zlist *l, struct znode *n)
+{
+    n->succ = l->head;
+    n->pred = (struct znode *)&l->head;
+    l->head->pred = n;
+    l->head = n;
+}
+
+void c_AddTail(struct zlist *l, struct znode *n)
+{
+    n->succ = (struct znode *)&l->tail;
+    n->pred = l->tailpred;
+    l->tailpred->succ = n;
+    l->tailpred = n;
+}
+
+void c_Insert(struct zlist *l, struct znode *n, struct znode *after)
+{
+    if (!after) {
+        c_AddHead(l, n);
+        return;
+    }
+    n->succ = after->succ;
+    n->pred = after;
+    after->succ->pred = n;
+    after->succ = n;
+}
+
+void c_Remove(struct znode *n)
+{
+    n->pred->succ = n->succ;
+    n->succ->pred = n->pred;
+}
+
+u32 c_RemHead(struct zlist *l)
+{
+    struct znode *n = l->head;
+    if (!n->succ)
+        return 0;
+    c_Remove(n);
+    return (u32)n;
+}
+
+u32 c_RemTail(struct zlist *l)
+{
+    struct znode *n = l->tailpred;
+    if (!n->pred)
+        return 0;
+    c_Remove(n);
+    return (u32)n;
+}
+
+void c_Enqueue(struct zlist *l, struct znode *n)
+{
+    struct znode *s = l->head;
+    while (s->succ && s->pri >= n->pri)
+        s = s->succ;
+    n->succ = s;
+    n->pred = s->pred;
+    s->pred->succ = n;
+    s->pred = n;
+}
+
+static int streq(const char *a, const char *b)
+{
+    while (*a && *a == *b)
+        a++, b++;
+    return *a == *b;
+}
+
+u32 c_FindName(struct zlist *l, const char *name)
+{
+    struct znode *n = (struct znode *)l;     /* from a list, or from a node: the search starts after it */
+    for (n = n->succ; n && n->succ; n = n->succ)
+        if (n->name && streq(n->name, name))
+            return (u32)n;
+    return 0;
+}
+
+/* ---- the task (one process) and its signals ---- */
+#define TASK(o, t) (*(volatile t *)(Z.proc + ZO_Task_##o))
+
+u32 c_FindTask(const char *name)
+{
+    return !name || streq(name, (const char *)TASK(tc_Node + ZO_Node_ln_Name, u32)) ? Z.proc : 0;
+}
+
+u32 c_SetTaskPri(u32 task, u32 pri)
+{
+    (void)task;
+    (void)pri;
+    return 0;
+}
+
+u32 c_SetSignal(u32 sigs, u32 mask)
+{
+    u32 old = TASK(tc_SigRecvd, u32);
+    TASK(tc_SigRecvd, u32) = (old & ~mask) | (sigs & mask);
+    return old;
+}
+
+void c_Signal(u32 task, u32 sigs)
+{
+    if (task == Z.proc)
+        TASK(tc_SigRecvd, u32) |= sigs;
+}
+
+/* Wait: one process, so only an interrupt server can send the signal; with interrupts disabled nothing can (5.2) */
+u32 c_Wait(u32 sigs)
+{
+    for (;;) {
+        u32 got = TASK(tc_SigRecvd, u32) & sigs;
+        if (got) {
+            TASK(tc_SigRecvd, u32) &= ~got;
+            return got;
+        }
+        if (timer_step())               /* a timer request comes due (waited for here): its signal, then again */
+            continue;
+        if (!sigs || EB(ZO_ExecBase_IDNestCnt, s8) >= 0)
+            zb_stop(ZH_STOP, ZS_WAIT);
+    }
+}
+
+u32 c_AllocSignal(u32 n)
+{
+    s32 want = (s8)n;
+    u32 alloc = TASK(tc_SigAlloc, u32);
+    for (s32 i = want < 0 ? 31 : want; i >= (want < 0 ? 16 : want); i--)
+        if (!(alloc & (1u << i))) {
+            TASK(tc_SigAlloc, u32) = alloc | 1u << i;
+            TASK(tc_SigRecvd, u32) &= ~(1u << i);
+            return (u32)i;
+        }
+    return (u32)-1;
+}
+
+void c_FreeSignal(u32 n)
+{
+    if ((s32)n >= 0 && n < 32)
+        TASK(tc_SigAlloc, u32) &= ~(1u << n);
+}
+
+/* ---- interrupts (8.3) ---- */
+extern void zx_chain(void);
+#define IV(n) ((struct ziv *)(ZEXEC + ZO_ExecBase_IntVects + 12 * (n)))
+
+u32 c_SetIntVector(u32 n, struct zint *is)
+{
+    if (n > 15)
+        return 0;
+    struct ziv *iv = IV(n);
+    u32 old = (u32)iv->node;
+    iv->node = (struct znode *)is;
+    iv->code = is ? is->code : 0;
+    iv->data = is ? is->data : 0;
+    return old;
+}
+
+static struct zlist chains[16];
+void c_AddIntServer(u32 n, struct zint *is)
+{
+    if (n < 16 && chains[n].tailpred) {
+        u16 s = INTENAR & 0x4000;
+        INTENA = 0x4000;
+        c_Enqueue(&chains[n], &is->node);
+        if (s)
+            INTENA = 0xC000;
+    }
+}
+
+void c_RemIntServer(u32 n, struct zint *is)
+{
+    if (n < 16 && chains[n].tailpred) {
+        u16 s = INTENAR & 0x4000;
+        INTENA = 0x4000;
+        c_Remove(&is->node);
+        if (s)
+            INTENA = 0xC000;
+    }
+}
+
+/* ---- the rest of exec ---- */
+void c_Alert(u32 code)
+{
+    if (code & AT_DeadEnd) {
+        Z.blk->addr = code;
+        zb_stop(ZH_ALERT, 0);
+    }
+    static const char hx[] = "0123456789ABCDEF";
+    char t[] = "ZINE: a recoverable alert 00000000\n";
+    for (int i = 0; i < 8; i++)
+        t[26 + i] = hx[(code >> (28 - 4 * i)) & 15];
+    zb_out(t, sizeof t - 1);
+}
+
+static const char *const libname[4] = { "exec.library", "graphics.library", "dos.library", "intuition.library" };
+
+static u32 slen(const char *s);
+u32 c_OpenLibrary(const char *name, u32 version)
+{
+    for (int i = 0; i < 4; i++)
+        if (name && streq(name, libname[i])) {
+            struct zlib *l = (struct zlib *)Z.lib[i];
+            if (version > l->version)
+                return 0;
+            l->opencnt++;
+            return (u32)l;
+        }
+    if (name) {                         /* named in the program's output (zine shows it) */
+        static const char msg[] = "ZINE: no library ";
+        zb_out(msg, sizeof msg - 1);
+        zb_out(name, slen(name));
+        zb_out("\n", 1);
+    }
+    return 0;                           /* a library ZINE has not: 0, as AmigaOS answers when it has none */
+}
+
+/* exec's TaggedOpenLibrary (3.0, -810): a library by its OLTAG number: 1 graphics, 3 intuition, 4 dos (the NDK 3.2's
+ * exec/execbase.h); the others ZINE has not (0) */
+u32 c_TaggedOpenLibrary(u32 tag)
+{
+    static const u8 lib[] = { 0, 1, 0, 3, 2 };
+    if (tag == 0 || tag >= sizeof lib || !lib[tag])
+        return 0;
+    struct zlib *l = (struct zlib *)Z.lib[lib[tag]];
+    l->opencnt++;
+    return (u32)l;
+}
+
+u32 c_OldOpenLibrary(const char *name) { return c_OpenLibrary(name, 0); }    /* any version */
+
+void c_CloseLibrary(struct zlib *l)
+{
+    if (l && l->opencnt)
+        l->opencnt--;
+}
+
+static u32 slen(const char *s);
+u32 c_OpenResource(const char *name)
+{
+    static const char msg[] = "ZINE: no resource ";  /* named in the program's output (zine shows it) */
+    if (name && streq(name, "ciaa.resource"))
+        return cia_base[0];
+    if (name && streq(name, "ciab.resource"))
+        return cia_base[1];
+    if (name) {
+        zb_out(msg, sizeof msg - 1);
+        zb_out(name, slen(name));
+        zb_out("\n", 1);
+    }
+    return 0;                           /* the resources come with build step 4 */
+}
+
+/* no devices in the first version (5.5): the request's io_Error and the answer are IOERR_OPENFAIL */
+static u32 slen(const char *s)
+{
+    u32 n = 0;
+    while (s && s[n])
+        n++;
+    return n;
+}
+
+u32 c_OpenDevice(const char *name, u32 unit, u8 *io, u32 flags)
+{
+    (void)unit, (void)flags;
+    static const char msg[] = "ZINE: no device ";     /* said once per name in the program's output (zine shows it) */
+    if (name && timer_base && streq(name, "timer.device")) {
+        if (io) {
+            *(u32 *)(io + ZO_IORequest_io_Device) = timer_base;
+            *(u32 *)(io + 24) = 0;      /* io_Unit */
+            io[31] = 0;                 /* io_Error */
+        }
+        return 0;
+    }
+    if (name) {
+        zb_out(msg, sizeof msg - 1);
+        zb_out(name, slen(name));
+        zb_out("\n", 1);
+    }
+    if (io) {
+        *(u32 *)(io + ZO_IORequest_io_Device) = 0;
+        io[ZO_IORequest_io_Error] = 0xFF;
+    }
+    return (u32)-1;
+}
+
+void c_CloseDevice(u8 *io)
+{
+    (void)io;
+}
+
+u32 c_SetFunction(u8 *lib, s32 off, u32 fn)
+{
+    u8 *slot = lib + (s16)off;
+    u32 old = *(u32 *)(slot + 2);
+    *(u16 *)slot = 0x4EF9;
+    *(u32 *)(slot + 2) = fn;
+    extern void zx_CacheClearU(void);
+    zx_CacheClearU();
+    return old;
+}
+
+/* the instruction cache stays as Zenix had it, the data cache off (10.1): the answer says so; changes are not made */
+u32 c_CacheControl(u32 bits, u32 mask)
+{
+    (void)bits, (void)mask;
+    extern void zx_CacheClearU(void);
+    zx_CacheClearU();
+    return 1;                           /* CACRF_EnableI */
+}
+
+/* RawDoFmt (exec): %[-][0][width][.limit][l](d u x X s b c), %% ; without l a number is a 16-bit word */
+typedef void (*zput)(void *u, u32 c);
+static const u8 *fmt(const char *f, const u8 *d, zput put, void *u)
+{
+    for (; *f; f++) {
+        if (*f != '%') {
+            put(u, (u8)*f);
+            continue;
+        }
+        f++;
+        int left = 0, zero = 0, lng = 0;
+        u32 width = 0, limit = 0xFFFFFFFFu;
+        if (*f == '-')
+            left = 1, f++;
+        if (*f == '0')
+            zero = 1, f++;
+        while (*f >= '0' && *f <= '9')
+            width = width * 10 + (u32)(*f++ - '0');
+        if (*f == '.') {
+            limit = 0;
+            for (f++; *f >= '0' && *f <= '9'; f++)
+                limit = limit * 10 + (u32)(*f - '0');
+        }
+        if (*f == 'l')
+            lng = 1, f++;
+        char buf[12], *s = buf + sizeof buf, *str = 0;
+        u32 len = 0, v = 0;
+        switch (*f) {
+        case 'd': case 'D': case 'u': case 'U': case 'x': case 'X': case 'c':
+            if (lng) {
+                v = (u32)d[0] << 24 | (u32)d[1] << 16 | (u32)d[2] << 8 | d[3];
+                d += 4;
+            } else {
+                v = (u32)d[0] << 8 | d[1];
+                if (*f == 'd' || *f == 'D')
+                    v = (u32)(s32)(int16_t)v;
+                d += 2;
+            }
+            break;
+        case 's': case 'b':
+            v = (u32)d[0] << 24 | (u32)d[1] << 16 | (u32)d[2] << 8 | d[3];
+            d += 4;
+            break;
+        case 0:
+            return d;
+        default:
+            put(u, (u8)*f);
+            continue;
+        }
+        int neg = 0;
+        switch (*f) {
+        case 'd': case 'D':
+            if ((s32)v < 0)
+                neg = 1, v = -v;
+            /* fall through */
+        case 'u': case 'U':
+            do
+                *--s = (char)('0' + v % 10);
+            while (v /= 10);
+            if (neg)
+                *--s = '-';
+            str = s, len = (u32)(buf + sizeof buf - s);
+            break;
+        case 'x': case 'X':
+            do
+                *--s = "0123456789ABCDEF"[v & 15] | (*f == 'x' ? 0x20 : 0);
+            while (v >>= 4);
+            str = s, len = (u32)(buf + sizeof buf - s);
+            break;
+        case 'c':
+            buf[0] = (char)v, str = buf, len = 1;
+            break;
+        case 's':
+            str = (char *)v;
+            for (len = 0; str && str[len] && len < limit; len++)
+                ;
+            break;
+        case 'b':
+            str = v ? (char *)(v << 2) + 1 : 0;
+            len = v ? *(u8 *)(v << 2) : 0;
+            if (len > limit)
+                len = limit;
+            break;
+        }
+        for (u32 i = len; !left && i < width; i++)
+            put(u, zero ? '0' : ' ');
+        for (u32 i = 0; i < len; i++)
+            put(u, (u8)str[i]);
+        for (u32 i = len; left && i < width; i++)
+            put(u, ' ');
+    }
+    return d;
+}
+
+struct rawput { u32 proc, a3; };
+static void raw_put(void *u, u32 c)
+{
+    struct rawput *r = u;
+    if (!r->proc)
+        return;
+    if (*(const u32 *)r->proc == 0x16C04E75u) {     /* the usual "move.b d0,(a3)+; rts": done here */
+        *(u8 *)r->a3 = (u8)c;
+        r->a3++;
+    } else
+        zb_putch(r->proc, &r->a3, c);
+}
+
+u32 c_RawDoFmt(const char *f, const u8 *data, u32 proc, u32 a3)
+{
+    struct rawput r = { proc, a3 };
+    const u8 *e = fmt(f, data, raw_put, &r);
+    raw_put(&r, 0);
+    return (u32)e;
+}
+
+/* ---- dos (5.4, the first set): the output into the ring `zine` shows after the session ---- */
+u32 zb_out(const char *s, u32 n)
+{
+    struct zine_blk *b = Z.blk;
+    u32 k = n < ZB_OUTMAX - b->outlen ? n : ZB_OUTMAX - b->outlen;
+    zmemcpy(b->out + b->outlen, s, k);
+    b->outlen += k;
+    b->outlost += n - k;
+    return n;
+}
+
+static void out_put(void *u, u32 c)
+{
+    char ch = (char)c;
+    (void)u;
+    zb_out(&ch, 1);
+}
+
+u32 c_Output(void) { return Z.out_fh; }
+u32 c_Input(void) { return Z.in_fh; }
+u32 c_IoErr(void) { return Z.ioerr; }
+
+u32 c_SetIoErr(u32 e)
+{
+    u32 o = Z.ioerr;
+    Z.ioerr = e;
+    return o;
+}
+
+/* ---- dos's files (5.6): the program's directory as the volume zine made (user/zine/zvol.h), read-only; a file
+ * opened to be written takes the bytes and keeps none (owner answer 3: what a program writes is gone afterwards),
+ * as does NIL:. A FileHandle (44 bytes) is given, its fh_Args the slot here. ---- */
+#define NFILES 16
+static struct { u8 used, sink; u32 ent, pos, fh; } files[NFILES];
+#define MODE_OLDFILE 1005
+#define MODE_NEWFILE 1006
+#define MODE_READWRITE 1004
+
+static int slot_of(u32 fh)
+{
+    if (!fh || fh == Z.in_fh || fh == Z.out_fh)
+        return -1;
+    u32 a = fh << 2;
+    for (int i = 0; i < NFILES; i++)
+        if (files[i].used && files[i].fh == a)
+            return i;
+    return -1;
+}
+
+u32 c_Open(const char *name, s32 mode)
+{
+    const void *vol = (const void *)Z.a.vol;
+    if (!name) {
+        Z.ioerr = 205;                  /* ERROR_OBJECT_NOT_FOUND */
+        return 0;
+    }
+    if ((name[0] == '*' && !name[1]) || zv_same(name, 4, "CON:") || zv_same(name, 4, "RAW:"))
+        return mode == MODE_OLDFILE ? Z.in_fh : Z.out_fh;
+    u32 ent = 0;
+    int sink = 0;
+    int e = zv_find(vol, 0, name, &ent);
+    if (e == -ZE_NODEV)
+        sink = 1;                       /* NIL: and the like */
+    else if (mode == MODE_NEWFILE)
+        sink = 1;
+    else if (e || zv_ent(vol, ent)->dir) {
+        static const char msg[] = "ZINE: no file ";
+        zb_out(msg, sizeof msg - 1);
+        zb_out(name, slen(name));
+        zb_out("\n", 1);
+        Z.ioerr = e ? 205 : 212;        /* ERROR_OBJECT_NOT_FOUND, ERROR_OBJECT_WRONG_TYPE */
+        return 0;
+    }
+    for (int i = 0; i < NFILES; i++)
+        if (!files[i].used) {
+            u32 fh = zx_AllocMem(44, 1 << 16);
+            if (!fh)
+                break;
+            files[i].used = 1, files[i].sink = (u8)sink, files[i].ent = ent, files[i].pos = 0, files[i].fh = fh;
+            *(u32 *)(fh + 36) = (u32)i; /* fh_Args */
+            *(u32 *)(fh + 24) = (u32)-1;
+            return fh >> 2;
+        }
+    Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
+    return 0;
+}
+
+u32 c_Close(u32 fh)
+{
+    int i = slot_of(fh);
+    if (i < 0)
+        return 1;
+    zx_FreeMem(files[i].fh, 44);
+    files[i].used = 0;
+    return 1;
+}
+
+u32 c_Read(u32 fh, char *buf, s32 n)
+{
+    if (fh == Z.in_fh)
+        return 0;                       /* the input is empty: end of file */
+    int i = slot_of(fh);
+    if (i < 0 || n < 0) {
+        Z.ioerr = 114;
+        return (u32)-1;
+    }
+    if (files[i].sink)
+        return 0;
+    const void *vol = (const void *)Z.a.vol;
+    const struct zv_ent *en = zv_ent(vol, files[i].ent);
+    u32 left = en->size > files[i].pos ? en->size - files[i].pos : 0, k = (u32)n < left ? (u32)n : left;
+    zmemcpy(buf, (const u8 *)vol + en->off + files[i].pos, k);
+    files[i].pos += k;
+    return k;
+}
+
+s32 c_Seek(u32 fh, s32 pos, s32 mode)
+{
+    int i = slot_of(fh);
+    if (i < 0) {
+        Z.ioerr = 114;
+        return -1;
+    }
+    u32 size = files[i].sink ? 0 : zv_ent((const void *)Z.a.vol, files[i].ent)->size;
+    s32 old = (s32)files[i].pos, base = mode < 0 ? 0 : mode > 0 ? (s32)size : old;   /* BEGINNING -1, END 1 */
+    s32 np = base + pos;
+    if (np < 0 || (u32)np > size) {
+        Z.ioerr = 219;                  /* ERROR_SEEK_ERROR */
+        return -1;
+    }
+    files[i].pos = (u32)np;
+    return old;
+}
+
+u32 c_Write(u32 fh, const char *buf, s32 n)
+{
+    int fs = slot_of(fh);
+    if (fs >= 0 && n >= 0)
+        return files[fs].sink ? (u32)n : (u32)-1;     /* a written file keeps nothing; the program's files are read-only */
+    if (fh != Z.out_fh || n < 0) {
+        Z.ioerr = 114;                  /* ERROR_OBJECT_WRONG_TYPE: not a handle ZINE gave */
+        return (u32)-1;
+    }
+    return zb_out(buf, (u32)n);
+}
+
+
+
+u32 c_PutStr(const char *s)
+{
+    zb_out(s, slen(s));
+    return 0;
+}
+
+u32 c_FPuts(u32 fh, const char *s)
+{
+    return c_Write(fh, s, (s32)slen(s)) == (u32)-1 ? (u32)-1 : 0;
+}
+
+u32 c_FPutC(u32 fh, u32 c)
+{
+    char ch = (char)c;
+    return c_Write(fh, &ch, 1) == (u32)-1 ? (u32)-1 : (c & 0xFF);
+}
+
+u32 c_VPrintf(const char *f, const u8 *argv)
+{
+    u32 before = Z.blk->outlen + Z.blk->outlost;
+    fmt(f, argv, out_put, 0);
+    return Z.blk->outlen + Z.blk->outlost - before;
+}
+
+u32 c_VFPrintf(u32 fh, const char *f, const u8 *argv)
+{
+    if (fh != Z.out_fh) {
+        Z.ioerr = 114;
+        return (u32)-1;
+    }
+    return c_VPrintf(f, argv);
+}
+
+u32 c_Flush(u32 fh) { (void)fh; return 1; }
+
+/* Delay: 50 ticks a second, counted in beam lines (313 a tick: 15,625 lines a second on PAL, 15,734 on NTSC) */
+void c_Delay(u32 ticks)
+{
+    zb_wait_lines(ticks * 313);
+}
+
+/* ---- graphics (5.3, the first set) ---- */
+#define IB_VIEWLORD(ib) ((ib) + ZO_IntuitionBase_ViewLord)
+void c_WaitBlit(void) { zb_waitblit(); }
+
+void c_OwnBlitter(void)
+{
+    zb_waitblit();
+    Z.blitter = 1;
+}
+
+void c_DisownBlitter(void) { Z.blitter = 0; }
+
+u32 c_VBeamPos(void)
+{
+    return ((u32)(VPOSR & 1) << 8) | (VHPOSR >> 8);
+}
+
+/* the next vertical blank, by the beam (works with interrupts off): the line number goes down; 100 ms at most */
+void c_WaitTOF(void)
+{
+    u32 last = c_VBeamPos(), seen = 0;
+    for (u32 it = 0; it < 4000000u && seen < 1600; it++) {
+        u32 l = c_VBeamPos();
+        if (l < last)
+            return;
+        if (l != last)
+            seen++;
+        last = l;
+    }
+}
+
+void c_LoadView(u32 view)
+{
+    if (view && view != IB_VIEWLORD(Z.lib[3]))
+        zb_stop(ZH_STOP, ZS_VIEW);      /* a View of graphics' own: not in the first version */
+    *(u32 *)(Z.lib[1] + ZO_GfxBase_ActiView) = view;
+    zb_blank_view();
+}
+
+void c_SetRGB4(u32 n, u32 r, u32 g, u32 bl)
+{
+    if (n < 32)
+        COLOR(n) = (u16)((r & 15) << 8 | (g & 15) << 4 | (bl & 15));
+}
+
+void c_LoadRGB4(const u16 *c, u32 n)
+{
+    for (u32 i = 0; i < n && i < 32; i++)
+        COLOR(i) = c[i];
+}
+
+/* graphics' bitmaps (the RKRM autodocs; offsets amigaofs.h): plain data, and planes in chip RAM */
+void c_InitBitMap(u8 *bm, u32 depth, u32 width, u32 height)
+{
+    *(u16 *)(bm + ZO_BitMap_BytesPerRow) = (u16)(((width + 15) >> 4) * 2);
+    *(u16 *)(bm + ZO_BitMap_Rows) = (u16)height;
+    bm[ZO_BitMap_Flags] = 0;
+    bm[ZO_BitMap_Depth] = (u8)depth;
+    *(u16 *)(bm + ZO_BitMap_pad) = 0;
+}
+
+#define RASSIZE(w, h) ((u32)(h) * (((u32)(w) + 15) >> 3 & ~1u))
+/* MEMF_CHIP, and cleared: AmigaOS's AllocRaster does not promise it, but after a boot its chip RAM is mostly zeros and
+ * programs show rows they never draw; ZINE's chip RAM still holds Zenix's old data */
+u32 c_AllocRaster(u32 w, u32 h) { return zx_AllocMem(RASSIZE(w, h), 2 | 1 << 16); }
+void c_FreeRaster(u32 p, u32 w, u32 h) { if (p) zx_FreeMem(p, RASSIZE(w, h)); }
+
+/* InitRastPort: the RKRM's defaults (all pens and pointers 0 but Mask 0xFF, FgPen and AOlPen 1, JAM2, a solid line
+ * pattern; RastPort 100 bytes: Mask 24, FgPen 25, AOlPen 27, DrawMode 28, linpatcnt 30, Flags 32, LinePtrn 34) */
+void c_InitRastPort(u8 *rp)
+{
+    zmemset(rp, 0, 100);
+    rp[24] = 0xFF;
+    rp[25] = 1;
+    rp[27] = 1;
+    rp[28] = 1;
+    rp[30] = 15;
+    *(u16 *)(rp + 32) = 1;              /* FRST_DOT */
+    *(u16 *)(rp + 34) = 0xFFFF;
+}
+
+/* AllocBitMap (V39): the struct and its planes (one chip block each, cleared with BMF_CLEAR or not: always cleared
+ * here); the friend bitmap and the other flags are not used */
+u32 c_AllocBitMap(u32 w, u32 h, u32 depth, u32 flags, u32 friend)
+{
+    (void)flags; (void)friend;
+    if (depth > 8)
+        return 0;
+    u8 *bm = (u8 *)zx_AllocMem(ZO_BitMap_SIZEOF, 1 << 16);     /* MEMF_CLEAR */
+    if (!bm)
+        return 0;
+    c_InitBitMap(bm, depth, w, h);
+    for (u32 i = 0; i < depth; i++) {
+        u32 p = zx_AllocMem(RASSIZE(w, h), 2 | 1 << 16);
+        if (!p) {
+            while (i--)
+                zx_FreeMem(*(u32 *)(bm + ZO_BitMap_Planes + 4 * i), RASSIZE(w, h));
+            zx_FreeMem((u32)bm, ZO_BitMap_SIZEOF);
+            return 0;
+        }
+        *(u32 *)(bm + ZO_BitMap_Planes + 4 * i) = p;
+    }
+    return (u32)bm;
+}
+
+void c_FreeBitMap(u8 *bm)
+{
+    if (!bm)
+        return;
+    u32 w = *(u16 *)(bm + ZO_BitMap_BytesPerRow) * 8u, h = *(u16 *)(bm + ZO_BitMap_Rows);
+    for (u32 i = 0; i < bm[ZO_BitMap_Depth]; i++)
+        if (*(u32 *)(bm + ZO_BitMap_Planes + 4 * i))
+            zx_FreeMem(*(u32 *)(bm + ZO_BitMap_Planes + 4 * i), RASSIZE(w, h));
+    zx_FreeMem((u32)bm, ZO_BitMap_SIZEOF);
+}
+
+/* graphics' 32-bit colours (V39): LoadRGB32's table is {count << 16 | first, r, g, b ... , 0}; the top 8 bits of each
+ * 32-bit component go to AGA's registers through BPLCON3's LOCT (the low nibbles), on other chips the top 4 bits.
+ * The ViewPort is not looked at: ZINE's display is the hardware's (5.3) */
+static void rgb32(u32 n, u32 r, u32 g, u32 b)
+{
+    if (n > 255)
+        return;
+    u16 hi = (u16)((r >> 28) << 8 | (g >> 28) << 4 | b >> 28);
+    if (Z.aga) {
+        u16 lo = (u16)((r >> 24 & 15) << 8 | (g >> 24 & 15) << 4 | (b >> 24 & 15));
+        u16 bank = (u16)((n >> 5) << 13);
+        BPLCON3 = bank;
+        COLOR(n & 31) = hi;
+        BPLCON3 = bank | 0x0200;
+        COLOR(n & 31) = lo;
+        BPLCON3 = 0;
+    } else if (n < 32)
+        COLOR(n) = hi;
+}
+
+void c_LoadRGB32(u32 vp, const u32 *t)
+{
+    (void)vp;
+    while (t && *t) {
+        u32 cnt = *t >> 16, first = *t & 0xFFFF;
+        t++;
+        for (u32 i = 0; i < cnt; i++, t += 3)
+            rgb32(first + i, t[0], t[1], t[2]);
+    }
+}
+
+void c_SetRGB32(u32 vp, u32 n, u32 r, u32 g, u32 b) { (void)vp; rgb32(n, r, g, b); }
+
+/* ---- intuition's screens (5.5): a screen ZINE never shows. OpenScreenTagList gives the program a Screen with its
+ * BitMap (planes in chip RAM, cleared, or the program's own with CUSTOMBITMAP / SA_BitMap), a RastPort on it and a
+ * ViewPort with a RasInfo and a ColorMap; demos then put up their own Copper list. The offsets are the NDK 3.2's
+ * intuition/screens.h, graphics/view.h and rastport.h (sizes 346, 40, 100) ---- */
+#define SC_Width 12
+#define SC_Height 14
+#define SC_ViewPort 44
+#define SC_RastPort 84
+#define SC_BitMap 184
+#define SC_SIZEOF 346
+#define VP_ColorMap 4
+#define VP_DWidth 24
+#define VP_DHeight 26
+#define VP_RasInfo 36
+#define RP_BitMap 4
+#define RP_Mask 24
+#define RP_FgPen 25
+#define RP_DrawMode 28
+#define CM_Count 2
+#define CM_ColorTable 4
+#define ZSCR_EXTRA 80                   /* after the Screen: a flag, the RasInfo (12), the ColorMap (52), the Copper
+                                         * list (+68), its plane pointers (+72), the program's own BitMap (+76) */
+
+/* the screen shown (5.5, the screens' first form): its BitMap's planes from the top, the standard display window
+ * (320 or 640 wide, 256 or 200 lines), lowres, hires, HAM or EHB from its mode; colours stay what the program set */
+#define VP_Modes 32
+static void show_screen(u8 *sc)
+{
+    u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
+    u16 modes = *(u16 *)(sc + SC_ViewPort + VP_Modes);
+    u32 depth = bm[ZO_BitMap_Depth], bpr = *(u16 *)(bm + ZO_BitMap_BytesPerRow);
+    int hires = (modes & 0x8000) != 0;
+    u32 shown = hires ? 80 : 40;
+    u16 *c = *(u16 **)(sc + SC_SIZEOF + 68);
+    if (!c) {
+        c = (u16 *)zx_AllocMem(400, 2);
+        if (!c)
+            return;
+        *(u16 **)(sc + SC_SIZEOF + 68) = c;
+    }
+    u16 *l = c;
+    for (int i = 0; i < 16; i++)
+        *l++ = (u16)(0x120 + 2 * i), *l++ = (u16)(i & 1 ? ZNULLSPR : 0);
+    u32 rows = *(u16 *)(bm + ZO_BitMap_Rows), most = Z.pal ? 256 : 200;
+    if (*(u16 *)(sc + SC_Height) && *(u16 *)(sc + SC_Height) < rows)
+        rows = *(u16 *)(sc + SC_Height);
+    if (modes & 0x0004)
+        rows /= 2;                      /* an interlaced screen: two fields of half the rows each */
+    if (!rows || rows > most)
+        rows = most;
+    *l++ = 0x8E, *l++ = 0x2C81;
+    *l++ = 0x90, *l++ = (u16)(((0x2C + rows) << 8 & 0xFF00) | 0xC1);    /* the window's end: the screen's rows only */
+    /* AGA, lowres, 320 shown, rows and planes on 8-byte boundaries: 64-bit fetches (FMODE 3, DDFSTOP $B0: the
+     * knowledge base's aga4k note, proven on a real A1200), which 7 and 8 planes need; else 16-bit as OCS */
+    int f3 = 0;
+    if (Z.aga && !hires && !(bpr & 7)) {
+        f3 = 1;
+        for (u32 i = 0; i < depth && i < 8; i++)
+            if (*(u32 *)(bm + ZO_BitMap_Planes + 4 * i) & 7)
+                f3 = 0;
+    }
+    *l++ = 0x92, *l++ = hires ? 0x3C : 0x38;
+    *l++ = 0x94, *l++ = hires ? 0xD4 : f3 ? 0xB0 : 0xD0;
+    u16 con0 = (u16)(0x0200 | (depth & 7) << 12 | (depth == 8 ? 0x0010 : 0) | (hires ? 0x8000 : 0) |
+                     (modes & 0x0800) | (modes & 0x0004));             /* HAM, LACE as the mode asks */
+    *l++ = 0x100, *l++ = con0;
+    *l++ = 0x102, *l++ = 0;
+    *l++ = 0x104, *l++ = 0x0024;
+    u16 mod = (u16)(bpr > shown ? bpr - shown : 0);
+    *l++ = 0x108, *l++ = mod;
+    *l++ = 0x10A, *l++ = mod;
+    if (Z.aga) {
+        *l++ = 0x1FC, *l++ = (u16)(f3 ? 3 : 0);
+        *l++ = 0x106, *l++ = (u16)(0x0C00 | (modes & 0x0080 ? 0 : 0));
+        *l++ = 0x10C, *l++ = 0x0011;
+    }
+    *(u16 **)(sc + SC_SIZEOF + 72) = l;  /* where the plane pointers are: zb_screen_frame renews them */
+    for (u32 i = 0; i < depth && i < 8; i++) {
+        u32 p = *(u32 *)(bm + ZO_BitMap_Planes + 4 * i);
+        *l++ = (u16)(0xE0 + 4 * i), *l++ = (u16)(p >> 16);
+        *l++ = (u16)(0xE2 + 4 * i), *l++ = (u16)p;
+    }
+    *l++ = 0xFFFF, *l++ = 0xFFFE;
+    COP1LC = (u32)c;
+    COPJMP1 = 0;
+    Z.shown = (u32)sc;
+}
+
+u32 c_OpenScreenTagList(const u8 *ns, const u32 *tags)
+{
+    u32 w = 320, h = Z.pal ? 256 : 200, depth = 1, custom = 0, modes = 0, behind = 0;
+    if (ns) {
+        if (*(const s16 *)(ns + 4) > 0) w = (u32)*(const s16 *)(ns + 4);
+        if (*(const s16 *)(ns + 6) > 0) h = (u32)*(const s16 *)(ns + 6);
+        depth = *(const u16 *)(ns + 8);
+        modes = *(const u16 *)(ns + 12);
+        if (*(const u16 *)(ns + 14) & 0x0040)       /* CUSTOMBITMAP */
+            custom = *(const u32 *)(ns + 28);
+    }
+    for (const u32 *t = tags; t; t += 2) {
+        u32 tag = t[0], d = t[1];
+        if (tag == 0)
+            break;
+        if (tag == 2) {                 /* TAG_MORE */
+            t = (const u32 *)d - 2;
+            if (!d)
+                break;
+            continue;
+        }
+        if (tag == 3) {                 /* TAG_SKIP */
+            t += 2 * d;
+            continue;
+        }
+        if (tag == 0x80000023 && (s32)d > 0) w = d;
+        if (tag == 0x80000024 && (s32)d > 0) h = d;
+        if (tag == 0x80000025) depth = d;
+        if (tag == 0x8000002E) custom = d;
+        if (tag == 0x80000032) modes = d;           /* SA_DisplayID: the mode bits ViewPort.Modes has too */
+        if (tag == 0x80000037) behind = d;          /* SA_Behind */
+    }
+    extern u32 zb_tracing;
+    if (zb_tracing) {                   /* the trace build: what was asked, in the program's output */
+        char t[64];
+        static const char hx[] = "0123456789abcdef";
+        u32 v[5] = { w, h, depth, modes, custom }, n = 0;
+        static const char lead[] = "ZINE: screen";
+        zmemcpy(t, lead, sizeof lead - 1);
+        n = sizeof lead - 1;
+        for (int i = 0; i < 5; i++) {
+            t[n++] = ' ';
+            for (int k = 0; k < 8; k++)
+                t[n++] = hx[v[i] >> (28 - 4 * k) & 15];
+        }
+        t[n++] = '\n';
+        zb_out(t, n);
+    }
+    if (depth < 1 || depth > 8)
+        depth = depth > 8 ? 8 : 1;
+    u8 *sc = (u8 *)zx_AllocMem(SC_SIZEOF + ZSCR_EXTRA, 1 << 16);
+    if (!sc)
+        return 0;
+    u8 *bm = sc + SC_BitMap;
+    if (custom) {
+        zmemcpy(bm, (const void *)custom, ZO_BitMap_SIZEOF);
+        *(u32 *)(sc + SC_SIZEOF + 76) = custom;    /* shown from the program's own struct: its planes may come later */
+    }
+    else {
+        c_InitBitMap(bm, depth, w, h);
+        for (u32 i = 0; i < depth; i++) {
+            u32 p = zx_AllocMem(RASSIZE(w, h), 2 | 1 << 16);
+            if (!p) {
+                while (i--)
+                    zx_FreeMem(*(u32 *)(bm + ZO_BitMap_Planes + 4 * i), RASSIZE(w, h));
+                zx_FreeMem((u32)sc, SC_SIZEOF + ZSCR_EXTRA);
+                return 0;
+            }
+            *(u32 *)(bm + ZO_BitMap_Planes + 4 * i) = p;
+        }
+    }
+    *(u16 *)(sc + SC_Width) = (u16)w;
+    *(u16 *)(sc + SC_Height) = (u16)h;
+    *(u16 *)(sc + SC_ViewPort + VP_DWidth) = (u16)w;
+    *(u16 *)(sc + SC_ViewPort + VP_DHeight) = (u16)h;
+    u8 *ri = sc + SC_SIZEOF + 2, *cm = ri + 12;
+    if (custom)
+        bm = (u8 *)custom;
+    *(u32 *)(ri + 4) = (u32)bm;
+    *(u32 *)(sc + SC_ViewPort + VP_RasInfo) = (u32)ri;
+    *(u16 *)(cm + CM_Count) = (u16)(1u << (depth < 5 ? depth : 5));
+    *(u32 *)(sc + SC_ViewPort + VP_ColorMap) = (u32)cm;
+    *(u32 *)(sc + SC_RastPort + RP_BitMap) = (u32)bm;
+    sc[SC_RastPort + RP_Mask] = 0xFF;
+    sc[SC_RastPort + RP_FgPen] = 1;
+    sc[SC_RastPort + RP_DrawMode] = 1;  /* JAM2 */
+    sc[SC_SIZEOF] = custom ? 1 : 0;     /* CloseScreen frees only planes it allocated */
+    *(u16 *)(sc + SC_ViewPort + VP_Modes) = (u16)modes;
+    if (!behind)
+        show_screen(sc);
+    return (u32)sc;
+}
+
+u32 c_OpenScreen(const u8 *ns) { return c_OpenScreenTagList(ns, 0); }
+
+void zb_screen_report(void);
+u32 c_CloseScreen(u8 *sc)
+{
+    if (!sc)
+        return 0;
+    u8 *bm = sc + SC_BitMap;
+    if (!sc[SC_SIZEOF]) {
+        u32 w = *(u16 *)(bm + ZO_BitMap_BytesPerRow) * 8u, h = *(u16 *)(bm + ZO_BitMap_Rows);
+        for (u32 i = 0; i < bm[ZO_BitMap_Depth]; i++)
+            if (*(u32 *)(bm + ZO_BitMap_Planes + 4 * i))
+                zx_FreeMem(*(u32 *)(bm + ZO_BitMap_Planes + 4 * i), RASSIZE(w, h));
+    }
+    extern u32 zb_tracing;
+    if (zb_tracing && Z.shown == (u32)sc)
+        zb_screen_report();
+    if (Z.shown == (u32)sc) {
+        zb_blank_view();
+        Z.shown = 0;
+    }
+    if (*(u32 *)(sc + SC_SIZEOF + 68))
+        zx_FreeMem(*(u32 *)(sc + SC_SIZEOF + 68), 400);
+    zx_FreeMem((u32)sc, SC_SIZEOF + ZSCR_EXTRA);
+    return 1;
+}
+
+void c_ScreenToFront(u8 *sc) { if (sc) show_screen(sc); }
+
+/* the trace build: the shown screen's BitMap at the end (bytes per row, rows, depth, the planes, a sum of plane 0) */
+void zb_screen_report(void)
+{
+    u8 *sc = (u8 *)Z.shown;
+    if (!sc)
+        return;
+    u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
+    u32 sum = 0, p0 = *(u32 *)(bm + ZO_BitMap_Planes);
+    for (u32 i = 0; p0 && i < 4000; i++)
+        sum += ((const u8 *)p0)[i];
+    u32 v[12] = { *(u16 *)(bm + 0), *(u16 *)(bm + 2), bm[5], sum, (u32)bm };
+    for (int i = 0; i < 7; i++)
+        v[5 + i] = *(u32 *)(bm + ZO_BitMap_Planes + 4 * i);
+    static const char hx[] = "0123456789abcdef";
+    char t[12 * 9 + 20];
+    u32 n = 0;
+    static const char lead[] = "ZINE: bitmap";
+    zmemcpy(t, lead, sizeof lead - 1);
+    n = sizeof lead - 1;
+    for (int i = 0; i < 12; i++) {
+        t[n++] = ' ';
+        for (int k = 0; k < 8; k++)
+            t[n++] = hx[v[i] >> (28 - 4 * k) & 15];
+    }
+    t[n++] = '\n';
+    zb_out(t, n);
+}
+
+/* every frame (the vertical blank, before the program's servers): the shown screen's plane pointers from its
+ * BitMap as it is now (a program's own BitMap may get its planes after OpenScreen, or swap them) */
+void zb_screen_frame(void)
+{
+    u8 *sc = (u8 *)Z.shown;
+    if (!sc)
+        return;
+    u16 *l = *(u16 **)(sc + SC_SIZEOF + 72);
+    u8 *bm = *(u8 **)(sc + SC_SIZEOF + 76) ? *(u8 **)(sc + SC_SIZEOF + 76) : sc + SC_BitMap;
+    for (u32 i = 0; i < bm[ZO_BitMap_Depth] && i < 8; i++, l += 4) {
+        u32 p = *(u32 *)(bm + ZO_BitMap_Planes + 4 * i);
+        l[1] = (u16)(p >> 16);
+        l[3] = (u16)p;
+    }
+}
+
+/* ---- exec's message ports (the RKRM autodocs; offsets: MsgPort 34 bytes, mp_SigBit 15, mp_SigTask 16, mp_MsgList
+ * 20): nothing in ZINE sends a program a message, so GetMsg finds none, and WaitPort on an empty port waits for a
+ * signal nothing can send (stopped, as Wait) ---- */
+#define MP_SigBit 15
+#define MP_SigTask 16
+#define MP_MsgList 20
+#define MP_SIZEOF 34
+static void initport(u8 *mp)
+{
+    newlist((struct zlist *)(mp + MP_MsgList), 5);     /* NT_MESSAGE */
+    mp[8] = 4;                          /* ln_Type NT_MSGPORT */
+    mp[MP_SigBit] = 16;
+    *(u32 *)(mp + MP_SigTask) = *(u32 *)(ZEXEC + ZO_ExecBase_ThisTask);
+}
+
+u32 c_GetMsg(u8 *mp) { return mp ? c_RemHead((struct zlist *)(mp + MP_MsgList)) : 0; }
+void c_PutMsg(u8 *mp, struct znode *m) { if (mp && m) c_AddTail((struct zlist *)(mp + MP_MsgList), m); }
+void c_ReplyMsg(u32 m) { (void)m; }
+u32 c_WaitPort(u8 *mp)
+{
+    struct zlist *l = (struct zlist *)(mp + MP_MsgList);
+    if (!mp || !l->head->succ)
+        zb_stop(ZH_STOP, ZS_WAIT);
+    return (u32)l->head;
+}
+
+u32 c_CreateMsgPort(void)
+{
+    u8 *mp = (u8 *)zx_AllocMem(MP_SIZEOF, 1 << 16);
+    if (mp)
+        initport(mp);
+    return (u32)mp;
+}
+
+void c_DeleteMsgPort(u8 *mp) { if (mp) zx_FreeMem((u32)mp, MP_SIZEOF); }
+
+/* ---- intuition's windows: a Window on the screen it names (or the first), its RastPort the screen's, an IDCMP
+ * port that never gets a message (Window 136 bytes: Width 8, Height 10, Flags 24, IDCMPFlags 82, UserPort 86, WScreen
+ * 46, RPort 50; NewWindow: Width 4, Height 6, IDCMPFlags 10, Screen 30; WA_ tags 0x80000063 + n) ---- */
+#define WIN_SIZEOF 136
+u32 c_OpenWindowTagList(const u8 *nw, const u32 *tags)
+{
+    u32 w = 0, h = 0, scr = 0, idcmp = 0;
+    if (nw) {
+        w = *(const u16 *)(nw + 4);
+        h = *(const u16 *)(nw + 6);
+        idcmp = *(const u32 *)(nw + 10);
+        scr = *(const u32 *)(nw + 30);
+    }
+    for (const u32 *t = tags; t; t += 2) {
+        u32 tag = t[0], d = t[1];
+        if (tag == 0)
+            break;
+        if (tag == 2) {
+            if (!d)
+                break;
+            t = (const u32 *)d - 2;
+            continue;
+        }
+        if (tag == 3) {
+            t += 2 * d;
+            continue;
+        }
+        if (tag == 0x80000066) w = d;
+        if (tag == 0x80000067) h = d;
+        if (tag == 0x8000006A) idcmp = d;
+        if (tag == 0x80000070) scr = d;
+    }
+    u8 *win = (u8 *)zx_AllocMem(WIN_SIZEOF + MP_SIZEOF, 1 << 16);
+    if (!win)
+        return 0;
+    if (scr) {
+        if (!w) w = *(const u16 *)((const u8 *)scr + SC_Width);
+        if (!h) h = *(const u16 *)((const u8 *)scr + SC_Height);
+        *(u32 *)(win + 50) = scr + SC_RastPort;
+    }
+    *(u16 *)(win + 8) = (u16)(w ? w : 320);
+    *(u16 *)(win + 10) = (u16)(h ? h : 200);
+    *(u32 *)(win + 46) = scr;
+    *(u32 *)(win + 82) = idcmp;
+    u8 *mp = win + WIN_SIZEOF;
+    initport(mp);
+    *(u32 *)(win + 86) = (u32)mp;
+    return (u32)win;
+}
+
+u32 c_OpenWindow(const u8 *nw) { return c_OpenWindowTagList(nw, 0); }
+void c_CloseWindow(u8 *win) { if (win) zx_FreeMem((u32)win, WIN_SIZEOF + MP_SIZEOF); }
+u32 c_ModifyIDCMP(u8 *win, u32 f) { if (win) *(u32 *)(win + 82) = f; return 1; }
+void c_SetPointer(u32 win) { (void)win; }
+u32 c_ViewPortAddress(const u8 *win)
+{
+    u32 scr = win ? *(const u32 *)(win + 46) : 0;
+    return scr ? scr + SC_ViewPort : 0;
+}
+
+/* ---- intuition: what take-over start-up code calls ---- */
+u32 c_CloseWorkBench(void) { return 1; }    /* yes on purpose (5.5): demos take no for "cannot close it" */
+u32 c_OpenWorkBench(void) { return 0; }
+
+/* ---- the tables ---- */
+#define F(x) extern void zs_##x(void)
+#define X(x) extern void zx_##x(void)
+F(Alert); F(SetIntVector); F(AddIntServer); F(RemIntServer); F(AllocMem); F(AllocAbs); F(FreeMem); F(AvailMem);
+F(Insert); F(AddHead); F(AddTail); F(Remove); F(RemHead); F(RemTail); F(Enqueue); F(FindName); F(FindTask);
+F(SetTaskPri); F(SetSignal); F(Wait); F(Signal); F(AllocSignal); F(FreeSignal); F(OldOpenLibrary); F(OpenLibrary);
+F(CloseLibrary); F(TaggedOpenLibrary); F(StackSwap); F(OpenResource); F(OpenDevice); F(CloseDevice); F(SetFunction); F(RawDoFmt); F(TypeOfMem); F(CopyMem);
+F(CacheControl); F(AllocVec); F(FreeVec); F(CreatePool); F(DeletePool); F(AllocPooled); F(FreePooled);
+F(InitRastPort); F(InitBitMap); F(AllocRaster); F(FreeRaster); F(AllocBitMap); F(FreeBitMap);
+F(Cause); F(AddICRVector); F(RemICRVector); F(AbleICR); F(SetICR);
+F(Open); F(Close); F(Seek);
+F(DoIO); F(SendIO); F(CheckIO); F(WaitIO); F(AbortIO);
+F(TimerBeginIO); F(TimerAbortIO); F(AddTime); F(SubTime); F(CmpTime); F(ReadEClock); F(GetSysTime);
+F(GetMsg); F(PutMsg); F(ReplyMsg); F(WaitPort); F(CreateMsgPort); F(DeleteMsgPort);
+F(OpenWindowTagList); F(OpenWindow); F(CloseWindow); F(ModifyIDCMP); F(SetPointer); F(ViewPortAddress);
+F(LoadRGB32); F(SetRGB32); F(OpenScreenTagList); F(OpenScreen); F(CloseScreen); F(ScreenToFront);
+F(LoadView); F(WaitTOF); F(WaitBlit); F(OwnBlitter); F(DisownBlitter); F(VBeamPos); F(SetRGB4); F(LoadRGB4);
+F(Output); F(Input); F(Write); F(Read); F(PutStr); F(VPrintf); F(VFPrintf); F(FPuts); F(FPutC); F(Flush); F(IoErr);
+F(SetIoErr); F(Delay); F(CloseWorkBench); F(OpenWorkBench); F(rts);
+X(Supervisor); X(Disable); X(Enable); X(Forbid); X(Permit); X(SetSR); X(GetCC); X(CacheClearU); X(ColdReboot); X(Exit);
+
+/* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
+static const u16 exec_lvo[] = { 30, 108, 114, 120, 126, 132, 138, 144, 162, 168, 174, 198, 204, 210, 216, 234, 240,
+    246, 252, 258, 264, 270, 276, 294, 300, 306, 318, 324, 330, 336, 408, 414, 420, 444, 450, 498, 522, 528, 534, 552,
+    624, 630, 636, 642, 648, 684, 690, 696, 702, 708, 714, 726, 732, 810, 366, 372, 378, 384, 666, 672, 456, 462, 468,
+    474, 480, 180 };
+static void (*const exec_fn[])(void) = { zx_Supervisor, zs_Alert, zs_rts, zx_Disable, zx_Enable, zx_Forbid,
+    zx_Permit, zx_SetSR, zs_SetIntVector, zs_AddIntServer, zs_RemIntServer, zs_AllocMem, zs_AllocAbs, zs_FreeMem,
+    zs_AvailMem, zs_Insert, zs_AddHead, zs_AddTail, zs_Remove, zs_RemHead, zs_RemTail, zs_Enqueue, zs_FindName,
+    zs_FindTask, zs_SetTaskPri, zs_SetSignal, zs_Wait, zs_Signal, zs_AllocSignal, zs_FreeSignal, zs_OldOpenLibrary,
+    zs_CloseLibrary, zs_SetFunction, zs_OpenDevice, zs_CloseDevice, zs_OpenResource, zs_RawDoFmt, zx_GetCC,
+    zs_TypeOfMem, zs_OpenLibrary, zs_CopyMem, zs_CopyMem, zx_CacheClearU, zx_CacheClearU, zs_CacheControl,
+    zs_AllocVec, zs_FreeVec, zs_CreatePool, zs_DeletePool, zs_AllocPooled, zs_FreePooled, zx_ColdReboot,
+    zs_StackSwap, zs_TaggedOpenLibrary, zs_PutMsg, zs_GetMsg, zs_ReplyMsg, zs_WaitPort, zs_CreateMsgPort,
+    zs_DeleteMsgPort, zs_DoIO, zs_SendIO, zs_CheckIO, zs_WaitIO, zs_AbortIO,
+    zs_Cause };
+static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492, 498, 918, 924, 882, 852, 198 };
+static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, zs_WaitTOF, zs_SetRGB4, zs_VBeamPos,
+    zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
+    zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort };
+static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66 };
+static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
+    zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek };
+static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300 };
+static void (*const int_fn[])(void) = { zs_CloseWorkBench, zs_OpenWorkBench, zs_OpenScreenTagList, zs_OpenScreen,
+    zs_CloseScreen, zs_ScreenToFront, zs_SetPointer, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,
+    zs_ModifyIDCMP, zs_SetPointer, zs_SetPointer, zs_ViewPortAddress };
+_Static_assert(sizeof exec_lvo / 2 == sizeof exec_fn / sizeof exec_fn[0], "exec table");
+_Static_assert(sizeof gfx_lvo / 2 == sizeof gfx_fn / sizeof gfx_fn[0], "graphics table");
+_Static_assert(sizeof dos_lvo / 2 == sizeof dos_fn / sizeof dos_fn[0], "dos table");
+_Static_assert(sizeof int_lvo / 2 == sizeof int_fn / sizeof int_fn[0], "intuition table");
+
+static const u16 slots[4] = { ZEXEC_SLOTS, 176, 193, 202 };   /* the NDK 3.2's .fd files: graphics, dos, intuition */
+static const u16 possize[4] = { 632, 1024, 256, 256 };
+
+static u32 area;                        /* the next free byte of the area (the ZINE block) */
+static u32 take(u32 n)
+{
+    u32 a = (area + 3) & ~3u;
+    area = a + n;
+    zmemset((void *)a, 0, n);
+    return a;
+}
+
+static const char idstr[] = "ZINE 40.1 (Zenix's small AmigaOS)\r\n";
+
+static void lib_init(int i, u32 base)
+{
+    struct zlib *l = (struct zlib *)base;
+    l->node.type = NT_LIBRARY;
+    l->node.name = (char *)libname[i];
+    l->negsize = (u16)(slots[i] * 6);
+    l->possize = possize[i];
+    l->version = 40;
+    l->revision = 1;
+    l->idstring = (char *)idstr;
+    l->opencnt = 1;
+    Z.lib[i] = base;
+}
+
+/* ---- timer.device (the RKRM's Devices manual; IORequest: mn_ReplyPort 14, io_Device 20, io_Command 28, io_Flags 30,
+ * io_Error 31; timerequest's timeval at 32): the time is CIA-A's time-of-day counter, which counts the display's
+ * frames (20 ms on PAL), so it is as fine as a frame. TR_ADDREQUEST is kept until it is due; WaitIO, DoIO and Wait
+ * wait for it (one process: nothing else could run meanwhile), CheckIO says whether it is. ---- */
+#define TR_ADDREQUEST 9
+#define TR_GETSYSTIME 10
+#define TR_SETSYSTIME 11
+#define IOF_QUICK 1
+#define NTREQ 16
+static u8 *treq[NTREQ];
+static u32 tdue[NTREQ];
+static u32 tlast, thigh;                /* the counter's last value and the times it wrapped (24 bits) */
+
+static u32 ticks(void)                  /* frames since the program started, monotonic */
+{
+    u32 hi = CIAA(CIA_TODHI), mid = CIAA(CIA_TODMID), lo = CIAA(CIA_TODLO);
+    u32 t = hi << 16 | mid << 8 | lo;
+    if (t < tlast)
+        thigh++;
+    tlast = t;
+    return ((thigh << 24) | t) - Z.tod0;
+}
+
+static u32 hz(void) { return Z.pal ? 50 : 60; }
+
+static void tv_now(u32 *tv)
+{
+    u32 t = ticks();
+    tv[0] = t / hz();
+    tv[1] = (t % hz()) * (1000000u / hz());
+}
+
+static void io_done(u8 *io)
+{
+    io[31] = 0;
+    io[8] = 7;                          /* ln_Type NT_REPLYMSG */
+    if (io[30] & IOF_QUICK)
+        return;
+    u8 *rp = *(u8 **)(io + 14);
+    if (rp) {
+        c_AddTail((struct zlist *)(rp + 20), (struct znode *)io);
+        if (*(u32 *)(rp + 16) == Z.proc && !(rp[14] & 3))      /* PA_SIGNAL to this process */
+            TASK(tc_SigRecvd, u32) |= 1u << rp[15];
+    }
+}
+
+static int pending(u8 *io)
+{
+    for (int i = 0; i < NTREQ; i++)
+        if (treq[i] == io)
+            return i;
+    return -1;
+}
+
+/* the earliest due request, waited for and completed: 1, or 0 when none is waiting */
+static int timer_step(void)
+{
+    int best = -1;
+    for (int i = 0; i < NTREQ; i++)
+        if (treq[i] && (best < 0 || (s32)(tdue[i] - tdue[best]) < 0))
+            best = i;
+    if (best < 0)
+        return 0;
+    while ((s32)(ticks() - tdue[best]) < 0)
+        ;
+    u8 *io = treq[best];
+    treq[best] = 0;
+    io_done(io);
+    return 1;
+}
+
+void c_TimerBeginIO(u8 *io)
+{
+    u16 cmd = *(u16 *)(io + 28);
+    u32 *tv = (u32 *)(io + 32);
+    io[8] = 5;                          /* NT_MESSAGE: in progress */
+    if (cmd == TR_ADDREQUEST) {
+        u32 n = tv[0] * hz() + (tv[1] * hz() + 999999u) / 1000000u;
+        for (int i = 0; i < NTREQ; i++)
+            if (!treq[i]) {
+                treq[i] = io;
+                tdue[i] = ticks() + n;
+                io[30] &= (u8)~IOF_QUICK;
+                return;
+            }
+        io[31] = (u8)-1;                /* no room: IOERR_OPENFAIL as the nearest refusal */
+        io_done(io);
+        return;
+    }
+    if (cmd == TR_GETSYSTIME)
+        tv_now(tv);
+    else if (cmd != TR_SETSYSTIME) {
+        io[31] = (u8)-3;                /* IOERR_NOCMD */
+        if (!(io[30] & IOF_QUICK))
+            io_done(io);
+        return;
+    }
+    io_done(io);
+}
+
+void c_TimerAbortIO(u8 *io)
+{
+    int i = pending(io);
+    if (i >= 0) {
+        treq[i] = 0;
+        io_done(io);
+        io[31] = (u8)-2;                /* IOERR_ABORTED */
+    }
+}
+
+/* exec's I/O calls for every device ZINE has (timer.device only) */
+u32 c_CheckIO(u8 *io) { return io && pending(io) < 0 ? (u32)io : 0; }
+s32 c_WaitIO(u8 *io)
+{
+    if (!io)
+        return 0;
+    while (pending(io) >= 0)
+        timer_step();
+    u8 *rp = *(u8 **)(io + 14);
+    if (rp && !(io[30] & IOF_QUICK))
+        c_Remove((struct znode *)io);   /* off the reply port */
+    return (s8)io[31];
+}
+void c_SendIO(u8 *io)
+{
+    io[30] = 0;
+    if (*(u32 *)(io + 20) == timer_base)
+        c_TimerBeginIO(io);
+    else {
+        io[31] = (u8)-1;
+        io_done(io);
+    }
+}
+s32 c_DoIO(u8 *io)
+{
+    io[30] = IOF_QUICK;
+    if (*(u32 *)(io + 20) == timer_base)
+        c_TimerBeginIO(io);
+    else
+        io[31] = (u8)-1;
+    return c_WaitIO(io);
+}
+void c_AbortIO(u8 *io) { if (io && *(u32 *)(io + 20) == timer_base) c_TimerAbortIO(io); }
+
+void c_AddTime(u32 *d, const u32 *s2)
+{
+    d[0] += s2[0];
+    d[1] += s2[1];
+    if (d[1] >= 1000000u)
+        d[1] -= 1000000u, d[0]++;
+}
+void c_SubTime(u32 *d, const u32 *s2)
+{
+    if (d[1] < s2[1])
+        d[1] += 1000000u, d[0]--;
+    d[1] -= s2[1];
+    d[0] -= s2[0];
+}
+s32 c_CmpTime(const u32 *a, const u32 *b)
+{
+    if (a[0] != b[0])
+        return a[0] > b[0] ? -1 : 1;
+    if (a[1] != b[1])
+        return a[1] > b[1] ? -1 : 1;
+    return 0;
+}
+u32 c_ReadEClock(u32 *ev)
+{
+    u32 t = ticks(), e = Z.a.eclock_hz / hz();
+    /* t * e as 64 bits: t below 2^24 frames for days, e about 14200 */
+    u32 lo = (t & 0xFFFF) * e, hi = (t >> 16) * e;
+    ev[1] = lo + (hi << 16);
+    ev[0] = (hi >> 16) + (ev[1] < lo);
+    return Z.a.eclock_hz;
+}
+void c_GetSysTime(u32 *tv) { tv_now(tv); }
+
+/* ---- ciaa.resource and ciab.resource (the RKRM's Resources chapter; cia_lib.fd: AddICRVector -6, RemICRVector -12,
+ * AbleICR -18, SetICR -24): a handler for each of a CIA's five interrupt bits, called from the level 2 (CIA-A) and
+ * level 6 (CIA-B) interrupts with a1 its is_Data, as exec's own does. ICR reads clear the chip's bits, so what was
+ * read is kept in `pend` for SetICR. ---- */
+static struct zint *icr_vec[2][5];
+static u8 icr_en[2], icr_pend[2];
+static volatile u8 *cia_icr(int c) { return c ? &CIAB(CIA_ICR) : &CIAA(CIA_ICR); }
+static int which(u32 base) { return base == cia_base[1]; }
+
+u32 c_AddICRVector(u32 base, u32 bit, struct zint *iv)
+{
+    int c = which(base);
+    if (bit > 4)
+        return (u32)iv;
+    if (icr_vec[c][bit])
+        return (u32)icr_vec[c][bit];
+    icr_vec[c][bit] = iv;
+    icr_en[c] |= (u8)(1u << bit);
+    *cia_icr(c) = (u8)(0x80 | 1u << bit);
+    return 0;
+}
+
+void c_RemICRVector(u32 base, u32 bit, struct zint *iv)
+{
+    int c = which(base);
+    (void)iv;
+    if (bit > 4)
+        return;
+    icr_vec[c][bit] = 0;
+    icr_en[c] &= (u8)~(1u << bit);
+    *cia_icr(c) = (u8)(1u << bit);
+}
+
+u32 c_AbleICR(u32 base, u32 mask)
+{
+    int c = which(base);
+    u32 old = icr_en[c];
+    if (mask & 0x80)
+        icr_en[c] |= (u8)(mask & 0x1F);
+    else
+        icr_en[c] &= (u8)~(mask & 0x1F);
+    if (mask & 0x1F)
+        *cia_icr(c) = (u8)mask;
+    return old;
+}
+
+u32 c_SetICR(u32 base, u32 mask)
+{
+    int c = which(base);
+    icr_pend[c] |= *cia_icr(c) & 0x1F;
+    u32 old = icr_pend[c];
+    if (mask & 0x80)
+        icr_pend[c] |= (u8)(mask & 0x1F);
+    else
+        icr_pend[c] &= (u8)~(mask & 0x1F);
+    return old;
+}
+
+/* exec's Cause (-180): a software interrupt. One process and no lower priority to wait for: the handler runs at
+ * once, with a1 its is_Data (a program calls Cause from its own interrupt code, which then finishes after it) */
+void c_Cause(struct zint *iv)
+{
+    if (iv && iv->code)
+        zb_call(iv->code, iv->data, 0);
+}
+
+/* from zb_irq: the CIA's ICR (read once there), the handlers of its bits called; the bits handled are returned */
+u32 zb_cia_irq(int c, u32 icr)
+{
+    icr_pend[c] |= (u8)(icr & 0x1F);
+    u32 done = 0;
+    for (int b = 0; b < 5; b++)
+        if ((icr_pend[c] & icr_en[c] & (1u << b)) && icr_vec[c][b]) {
+            icr_pend[c] &= (u8)~(1u << b);
+            zb_call(icr_vec[c][b]->code, icr_vec[c][b]->data, 0);
+            done |= 1u << b;
+        }
+    return done;
+}
+
+static struct zint chainint[16];
+static const char chainname[] = "ZINE chain";
+
+/* a BSTR, longword aligned (dos) */
+static u32 bstr(const char *s)
+{
+    u32 n = slen(s);
+    if (n > 255)
+        n = 255;
+    u8 *b = (u8 *)take(n + 2);
+    b[0] = (u8)n;
+    zmemcpy(b + 1, s, n);
+    return (u32)b >> 2;
+}
+
+void zb_libs_init(void)
+{
+    struct zine_blk *b = Z.blk;
+    area = Z.lib[0];                    /* zb_prepare left the area's start there */
+    /* the libraries other than exec: in the ZINE block (fast RAM) */
+    static void (*const *const fns[4])(void) = { exec_fn, gfx_fn, dos_fn, int_fn };
+    static const u16 *const lvos[4] = { exec_lvo, gfx_lvo, dos_lvo, int_lvo };
+    static const u16 nfn[4] = { sizeof exec_lvo / 2, sizeof gfx_lvo / 2, sizeof dos_lvo / 2, sizeof int_lvo / 2 };
+    for (int i = 0; i < 4; i++) {
+        u32 base = i ? take(slots[i] * 6u + possize[i]) + slots[i] * 6u : ZEXEC;
+        if (!i)
+            zmemset((void *)(ZEXEC - ZEXEC_SLOTS * 6), 0, ZEXEC_SLOTS * 6 + possize[0]);
+        zb_jumptable(base, slots[i], lvos[i], fns[i], nfn[i]);
+        lib_init(i, base);
+    }
+    /* timer.device: its own base (the Library 34 bytes after 11 vectors: Open, Close, Expunge, the reserved one,
+     * BeginIO, AbortIO and the five of timer_lib.fd) */
+    {
+        static const u16 tlvo[] = { 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66 };
+        static void (*const tfn[])(void) = { zs_rts, zs_rts, zs_rts, zs_rts, zs_TimerBeginIO, zs_TimerAbortIO,
+                                             zs_AddTime, zs_SubTime, zs_CmpTime, zs_ReadEClock, zs_GetSysTime };
+        static const char tname[] = "timer.device";
+        u32 base = take(11 * 6 + 34) + 11 * 6;
+        zb_jumptable(base, 11, tlvo, tfn, 11);
+        struct zlib *l = (struct zlib *)base;
+        l->node.type = 3;               /* NT_DEVICE */
+        l->node.name = (char *)tname;
+        l->negsize = 66;
+        l->possize = 34;
+        l->version = 40;
+        l->idstring = (char *)idstr;
+        timer_base = base;
+    }
+    extern u32 zb_tracing;
+    if (zb_tracing) {                   /* the trace build: the bases, so the trace's slots can be named */
+        static const char hx[] = "0123456789abcdef";
+        u32 v[5] = { Z.lib[0], Z.lib[1], Z.lib[2], Z.lib[3], timer_base };
+        for (int i = 0; i < 5; i++) {
+            char t[11] = { 'B', (char)('0' + i) };
+            for (int k = 0; k < 8; k++)
+                t[2 + k] = hx[v[i] >> (28 - 4 * k) & 15];
+            t[10] = '\n';
+            for (int k = 0; k < 11; k++) {
+                while (!(CUSTOM(0x018) & 0x2000))
+                    ;
+                CUSTOM(0x030) = (u16)(0x100 | (u8)t[k]);
+            }
+        }
+    }
+    for (int c = 0; c < 2; c++) {       /* the CIAs' resources: 4 vectors and a Library each */
+        static const u16 clvo[] = { 6, 12, 18, 24 };
+        static void (*const cfn[])(void) = { zs_AddICRVector, zs_RemICRVector, zs_AbleICR, zs_SetICR };
+        static const char *const cname[2] = { "ciaa.resource", "ciab.resource" };
+        u32 base = take(4 * 6 + 34) + 4 * 6;
+        zb_jumptable(base, 4, clvo, cfn, 4);
+        struct zlib *l = (struct zlib *)base;
+        l->node.type = 8;               /* NT_RESOURCE */
+        l->node.name = (char *)cname[c];
+        l->negsize = 24;
+        l->possize = 34;
+        l->version = 40;
+        cia_base[c] = base;
+    }
+    /* ExecBase (5.1) */
+    EB(ZO_ExecBase_SoftVer, u16) = 1;
+    EB(ZO_ExecBase_ChkBase, u32) = 0;   /* not ~ExecBase: a reset never trusts it (no path B, owner 2026-10-30) */
+    EB(ZO_ExecBase_SysStkUpper, u32) = Z.stack_top;
+    EB(ZO_ExecBase_SysStkLower, u32) = Z.stack_top - (16u << 10);
+    EB(ZO_ExecBase_IDNestCnt, s8) = -1;
+    EB(ZO_ExecBase_TDNestCnt, s8) = -1;
+    EB(ZO_ExecBase_AttnFlags, u16) = Z.attn;
+    EB(ZO_ExecBase_ResModules, u32) = ZNULLSPR + 16;    /* an empty, zero-ended array */
+    static const u16 lists[] = { ZO_ExecBase_MemList, ZO_ExecBase_ResourceList, ZO_ExecBase_DeviceList,
+                                 ZO_ExecBase_IntrList, ZO_ExecBase_LibList, ZO_ExecBase_PortList,
+                                 ZO_ExecBase_TaskReady, ZO_ExecBase_TaskWait, ZO_ExecBase_SemaphoreList };
+    static const u8 ltype[] = { NT_MEMORY, NT_RESOURCE, 3, NT_INTERRUPT, NT_LIBRARY, NT_MSGPORT, NT_TASK, NT_TASK, 15 };
+    for (u32 i = 0; i < sizeof lists / 2; i++)
+        newlist((struct zlist *)(ZEXEC + lists[i]), ltype[i]);
+    for (int i = 0; i < 4; i++)
+        EB(ZO_ExecBase_LastAlert + 4 * i, u32) = 0xFFFFFFFFu;
+    EB(ZO_ExecBase_VBlankFrequency, u8) = Z.pal ? 50 : 60;
+    EB(ZO_ExecBase_PowerSupplyFrequency, u8) = Z.pal ? 50 : 60;
+    EB(ZO_ExecBase_ex_EClockFrequency, u32) = Z.a.eclock_hz;
+    for (int i = 0; i < 4; i++)
+        c_AddTail((struct zlist *)(ZEXEC + ZO_ExecBase_LibList), (struct znode *)Z.lib[i]);
+    /* the server chains: PORTS, COPER, VERTB, EXTER, NMI */
+    static const u8 ch[] = { 3, 4, 5, 13, 15 };
+    for (u32 i = 0; i < sizeof ch; i++) {
+        u32 n = ch[i];
+        newlist(&chains[n], NT_INTERRUPT);
+        chainint[n].node.type = NT_INTERRUPT;
+        chainint[n].node.name = (char *)chainname;
+        chainint[n].data = (u32)&chains[n];
+        chainint[n].code = (u32)zx_chain;
+        IV(n)->data = (u32)&chains[n];
+        IV(n)->code = (u32)zx_chain;
+        IV(n)->node = &chainint[n].node;
+    }
+    /* the blitter's vector holds GfxBase as its data, as graphics' own handler has it there: take-over code reads
+     * GfxBase from ExecBase->IntVects[INTB_BLIT].iv_Data instead of opening the library (no handler: its interrupt
+     * stays off until a program sets one) */
+    IV(6)->data = Z.lib[1];
+    /* the memory lists (4.1, 4.2): one MemHeader a region, its chunks exactly what the plan gives */
+    for (u32 r = 0; r < 8; r++) {
+        struct zmh *h = 0;
+        struct zchunk **tail = 0;
+        for (u32 i = 0; i < Z.nchunk; i++) {
+            const struct zp_chunk *c = &Z.chunk[i];
+            if (c->reg != r || c->len < 8)
+                continue;
+            if (!h) {
+                h = (struct zmh *)take(sizeof *h);
+                h->node.type = NT_MEMORY;
+                h->attrs = (u16)Z.reg[r].attrs;
+                h->node.pri = (s8)(Z.reg[r].attrs & MEMF_CHIP ? -10 : 0);
+                h->node.name = Z.reg[r].attrs & MEMF_CHIP ? "chip memory" : "expansion memory";
+                h->lower = Z.reg[r].lower < 0x1000 ? 0x1000 : Z.reg[r].lower;
+                h->upper = Z.reg[r].upper;
+                tail = &h->first;
+                if (Z.reg[r].attrs & MEMF_CHIP)
+                    EB(ZO_ExecBase_MaxLocMem, u32) = h->upper;
+            }
+            struct zchunk *m = (struct zchunk *)c->addr;
+            m->next = 0;
+            m->bytes = c->len & ~7u;
+            *tail = m;
+            tail = &m->next;
+            h->free += m->bytes;
+        }
+        if (h)
+            c_Enqueue((struct zlist *)(ZEXEC + ZO_ExecBase_MemList), &h->node);
+    }
+    /* the process and its CLI (6) */
+    u8 *pr = (u8 *)take(ZO_Process_SIZEOF + 16);
+    Z.proc = (u32)pr;
+    struct znode *pn = (struct znode *)pr;
+    pn->type = NT_PROCESS;
+    pn->name = b->name;
+    *(u32 *)(pr + ZO_Task_tc_SigAlloc) = 0xFFFF;
+    newlist((struct zlist *)(pr + ZO_Process_pr_MsgPort + ZO_MsgPort_mp_MsgList), NT_MESSAGE);
+    pr[ZO_Process_pr_MsgPort + ZO_Node_ln_Type] = NT_MSGPORT;
+    *(u32 *)(pr + ZO_Process_pr_MsgPort + ZO_MsgPort_mp_SigTask) = (u32)pr;
+    pr[ZO_Process_pr_MsgPort + ZO_MsgPort_mp_SigBit] = 8;   /* SIGB_DOS */
+    *(u32 *)(pr + ZO_Process_pr_WindowPtr) = 0xFFFFFFFFu;
+    u32 out = take(ZO_FileHandle_SIZEOF), in = take(ZO_FileHandle_SIZEOF);
+    Z.out_fh = out >> 2, Z.in_fh = in >> 2;
+    *(u32 *)(pr + ZO_Process_pr_COS) = Z.out_fh;
+    *(u32 *)(pr + ZO_Process_pr_CIS) = Z.in_fh;
+    u32 cli = take(64);
+    *(u32 *)(pr + ZO_Process_pr_CLI) = cli >> 2;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_CommandName) = bstr(b->name);
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_FailLevel) = 10;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_StandardInput) = Z.in_fh;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_CurrentInput) = Z.in_fh;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_StandardOutput) = Z.out_fh;
+    *(u32 *)(cli + ZO_CommandLineInterface_cli_CurrentOutput) = Z.out_fh;
+    EB(ZO_ExecBase_ThisTask, u32) = Z.proc;
+    /* graphics' and intuition's fields (5.3, 5.5) */
+    u32 gb = Z.lib[1], ib = Z.lib[3];
+    u32 cpr = take(ZO_cprlist_SIZEOF);
+    *(u32 *)(cpr + ZO_cprlist_start) = ZBLANK;
+    *(u32 *)(IB_VIEWLORD(ib) + ZO_View_LOFCprList) = cpr;
+    *(u32 *)(gb + ZO_GfxBase_ActiView) = IB_VIEWLORD(ib);
+    *(u32 *)(gb + ZO_GfxBase_copinit) = ZBLANK;
+    *(u32 *)(gb + ZO_GfxBase_LOFlist) = ZBLANK;
+    *(u32 *)(gb + ZO_GfxBase_SHFlist) = ZBLANK;
+    *(u16 *)(gb + ZO_GfxBase_DisplayFlags) = Z.pal ? 4 : 1;     /* PAL, NTSC (graphics/gfxbase.h) */
+    *(u8 *)(gb + ZO_GfxBase_VBlank) = Z.pal ? 50 : 60;
+    u8 crb = Z.ecs ? 1 : 0;             /* GFXF_HR_AGNUS; GFXF_HR_DENISE: an ECS Denise answers $FC, Lisa $F8 */
+    if ((DENISEID & 0xFF) == 0xFC || Z.aga)
+        crb |= 2;
+    if (Z.aga)
+        crb |= 4 | 8;                   /* GFXF_AA_ALICE, GFXF_AA_LISA (the NDK's graphics/gfxbase.h) */
+    *(u8 *)(gb + ZO_GfxBase_ChipRevBits0) = crb;
+    *(volatile u32 *)4 = ZEXEC;         /* only now does address 4 point at an ExecBase (7.3 step 3) */
+}

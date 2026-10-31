@@ -39,7 +39,7 @@ UDIAG   ?=
 # 68060 multilib's do not and run on every 68020+, so that one is linked (the check below covers it too)
 LIBGCC  := $(shell $(CC) -mcpu=68060 -msoft-float -print-libgcc-file-name 2>/dev/null)
 
-KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/confont.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/embed.o
+KOBJS := $(BUILD)/start.o $(BUILD)/main.o $(BUILD)/serial.o $(BUILD)/mem.o $(BUILD)/ide.o $(BUILD)/emmc.o $(BUILD)/floppy.o $(BUILD)/input.o $(BUILD)/audio.o $(BUILD)/a3000.o $(BUILD)/blk.o $(BUILD)/rtc.o $(BUILD)/proc.o $(BUILD)/syscall.o $(BUILD)/vfs.o $(BUILD)/tty.o $(BUILD)/gfx.o $(BUILD)/term.o $(BUILD)/confont.o $(BUILD)/kbd.o $(BUILD)/ipc.o $(BUILD)/svc.o $(BUILD)/seg.o $(BUILD)/event.o $(BUILD)/signal.o $(BUILD)/random.o $(BUILD)/sock.o $(BUILD)/drv.o $(BUILD)/zine.o $(BUILD)/embed.o
 
 UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash badptr boot \
           mkdir rmdir rm cp mv touch msgpingd msgping socktestd socktest bench fdisk mkfs_ext2 fsck_ext2 df sync termtest \
@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -189,6 +189,8 @@ KOPT_random := -Os
 KOPT_sock := -Os
 # DESIGN D19 step 7: the drivers' system call (claims, DMA memory, quiesce, the blocks to netd): cold, -Os
 KOPT_drv := -Os
+# DESIGN D29 step 2: ZINE's kernel part (SYS_zine: the checks, the sync, the hand-over and the resume): cold, -Os
+KOPT_zine := -Os
 $(BUILD)/%.o: kernel/%.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
@@ -849,6 +851,56 @@ $(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py tools/check-68020-60.sh Makefile
 	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
 	tools/mkzexe.py $< $@ $(or $(STACK_$*),$(STACK_DEFAULT))
 
+# ---- ZINE (DESIGN D29, docs/d29-zine.md): /bin/zine, its blob /lib/zine/zine.blob (the small AmigaOS, run by the
+# kernel in supervisor mode; a ZEXE image zine relocates, with a "ZINB" header and a CRC: tools/mkzblob.py) and the
+# test programs, AmigaOS hunk executables written for the purpose (tools/tests/zine/*.S, tools/mkhunktest.py), in
+# the test images' /tests/zine. The cores of user/zine/ are shared by zine and the blob (and the host tests). ----
+ZINEH := kernel/zine.h $(wildcard user/zine/*.h)
+$(BUILD)/zc-%.uo: user/zine/%.c $(ZINEH) | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/zine.uo: user/zine.c $(ZINEH) user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+ZINECMD := $(BUILD)/zine.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-lvo.uo
+$(BUILD)/zine.uelf: $(ZINECMD) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZINECMD) $(BUILD)/libz.uo $(LIBGCC) -o $@
+ZBLOBOBJS := $(BUILD)/zb-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+$(BUILD)/zb-blobs.o: user/zine/blobs.S | $(BUILD)
+	$(CC) $(ASFLAGS) $< -o $@
+# the blob writes low memory (the vectors at 0, ExecBase at 0x800): addresses near 0 are not null pointers to it
+ZBFLAGS := -Os -fno-delete-null-pointer-checks --param=min-pagesize=0
+$(BUILD)/zb-%.o: user/zine/%.c $(ZINEH) | $(BUILD)
+	$(CC) $(UCFLAGS) $(ZBFLAGS) -c $< -o $@
+$(BUILD)/zine-blob.elf: $(ZBLOBOBJS) link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(ZBLOBOBJS) $(LIBGCC) -o $@
+$(BUILD)/zine.blob: $(BUILD)/zine-blob.elf tools/mkzexe.py tools/mkzblob.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@.zx
+	python3 tools/mkzblob.py $@.zx $@
+# the trace build (tests only, /tests/zine/trace.blob): every library call named on the serial port
+ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+$(BUILD)/zt-blobs.o: user/zine/blobs.S | $(BUILD)
+	$(CC) $(ASFLAGS) -DZINE_TRACE $< -o $@
+$(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(ZTBLOBOBJS) $(LIBGCC) -o $@
+$(BUILD)/zine-trace.blob: $(BUILD)/zine-trace.elf tools/mkzexe.py tools/mkzblob.py
+	tools/mkzexe.py $< $@.zx
+	python3 tools/mkzblob.py $@.zx $@
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen
+# the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
+$(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
+	$(CC) $(ASFLAGS) $< -o $@
+$(BUILD)/zine-null.elf: $(BUILD)/zb-nullblob.o link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/zb-nullblob.o -o $@
+$(BUILD)/zine-null.blob: $(BUILD)/zine-null.elf tools/mkzexe.py tools/mkzblob.py
+	tools/mkzexe.py $< $@.zx
+	python3 tools/mkzblob.py $@.zx $@
+$(BUILD)/zinetests/%: tools/tests/zine/%.S tools/tests/zine/zt.i tools/mkhunktest.py | $(BUILD)
+	@mkdir -p $(BUILD)/zinetests
+	$(CC) $(ASFLAGS) -Itools/tests/zine $< -o $(BUILD)/zinetests/$*.o
+	python3 tools/mkhunktest.py $(BUILD)/zinetests/$*.o $@
+zine-tests: $(ZINETESTS:%=$(BUILD)/zinetests/%)
+$(BUILD)/zenix.hdf $(BUILD)/root-card.img: $(BUILD)/zine.blob $(BUILD)/zine-null.blob $(BUILD)/zine-trace.blob $(ZINETESTS:%=$(BUILD)/zinetests/%)
+
 # ---- programs with shared code (DESIGN D13, ZEX2: docs/d13-shared-code.md): one copy of the code for every process
 # running it. Every object is compiled with -msep-data through tools/purecc.sh (the 16-bit table offsets) - libz and
 # crt0 too, so a pure program has its own builds of them (.po) - and linked with link/pure.ld. NAME.pzx is the
@@ -892,7 +944,7 @@ $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 UFONT_SRC := tools/font_8x8.c tools/mkconfont.py $(wildcard tools/consolefont/*)
 $(BUILD)/zenix-8x8.zcf: $(UFONT_SRC) | $(BUILD)
 	python3 tools/mkconfont.py font $@
-$(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+$(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
 # zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)

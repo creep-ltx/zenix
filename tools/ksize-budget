@@ -14,7 +14,7 @@
 start     3900   8192
 main      5950   1100
 serial    5950   6500
-mem       2850    240
+mem       2900    240
 ide       3400    560
 emmc      4900    640
 floppy    4500    160
@@ -30,7 +30,7 @@ tty       2960     64
 gfx       8000   2320
 term     12800     64
 confont   3100     32
-kbd       3750    180
+kbd       3800    180
 ipc       3400   1600
 svc       5600   1420
 seg       1250    256
@@ -38,7 +38,8 @@ event      700      0
 signal    2100      0
 random    3800    280
 sock      4700   1060
-drv       1850    640
+drv       1900    640
+zine      1200     16
 embed    47500      0
 TOTAL   172000
 ROOM      1024

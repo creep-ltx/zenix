@@ -19,7 +19,8 @@ Claim a number here **before** using it (system calls, message types, port names
 | 90 `sock` (DESIGN D19: every BSD socket call: op `SOCK_*` plus the request size << 16, fd, `struct usockreq`), 91 `netsrv` (the network server: `NETSRV_HELLO`, `READY`, `REPLY`), 92 `drv` (the network's drivers: `DRV_*` ops 1-7, `HWINFO` .. `XFER`; built on branch n678 2026-10-27) | main, branch n023, 2026-10-27 |
 | `ticks`'s (20) argument 2 (DESIGN D21 8.3: who set the clock this boot, `CLOCK_RTC` 1, `CLOCK_NET` 2) and `settime`'s (59) second argument (0 a hand-set time, clears the bits; 1 from a checked source, sets `CLOCK_NET`; other values -EINVAL) | branch clock, merged 2026-10-28 (recorded here by audit 2026-10-29 B2-7) |
 | 89 `console`'s op 4 `CON_UFONT` (the console's Unicode font for every console: no descriptor in the op word, root; a2 ZCF1 data, a3 its size; a2 0 drops it), the rule `CONR_8BIT` 128 (`CONR_ALL` 255), and `CON_READ`'s a3 1 `CONRF_CELL4` (cells of 4 bytes: the 16-bit value big-endian, `CONA_*`, the colour) (DESIGN D28 7) | main's builder, branch utf8, 2026-10-29 |
-| **next free: 93** | |
+| 93 `zine` (DESIGN D29: op 0 `ZINE_INFO` `struct uzine_info`, op 1 `ZINE_GO` `struct uzine_go`; root at the Amiga's own console only); the kernel log's end reasons `KLOG_END_ZINE` 3 and `KLOG_END_ZINE_DAMAGED` 4 (the second for step 5) | branch zine02, 2026-10-30 (step 2 tested in FS-UAE) |
+| **next free: 94** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
 numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*` from 64 (the drivers' blocks, step 7:

@@ -57,6 +57,14 @@ case " $PROGS " in *" ctop "*) lic ports/ctop/upstream/LICENSE ctop; lic ports/t
 [ -z "$NOMAN" ] && lic libc/picolibc/COPYING.picolibc picolibc
 if [ -z "$NOTESTS" ] && [ -f "$B/libctest.zx" ]; then cp "$B/libctest.zx" "$T/tests/libctest" && chmod 755 "$T/tests/libctest"; fi
 if [ -z "$NOTESTS" ] && [ -f "$B/libctest.pzx" ]; then cp "$B/libctest.pzx" "$T/tests/libctestpure" && chmod 755 "$T/tests/libctestpure"; fi
+# ZINE (DESIGN D29): its blob, the small AmigaOS /bin/zine loads (only on images with /bin/zine), and on test images
+# the null blob and the test programs (AmigaOS hunk executables written for the purpose) in /tests/zine
+if [ -f "$B/zine.blob" ] && [ -f "$T/bin/zine" ]; then mkdir -p "$T/lib/zine" && cp "$B/zine.blob" "$T/lib/zine/"; fi
+if [ -z "$NOTESTS" ] && [ -f "$B/zine-null.blob" ] && [ -d "$B/zinetests" ]; then
+    mkdir -p "$T/tests/zine" && cp "$B/zine-null.blob" "$T/tests/zine/null.blob" && { [ ! -f "$B/zine-trace.blob" ] || cp "$B/zine-trace.blob" "$T/tests/zine/trace.blob"; } && cp "$B"/zinetests/z[a-z]* "$T/tests/zine/"
+    rm -f "$T"/tests/zine/*.o
+    cp "$(dirname "$0")/tests/zine/null20" "$T/tests/zine/"
+fi
 # the text-UI library's test program (ports/tui) and the notice of the owner's MIT code in it, which travels with it
 if [ -z "$NOTESTS" ] && [ -f "$B/tuitest.zx" ]; then
     cp "$B/tuitest.zx" "$T/tests/tuitest" && chmod 755 "$T/tests/tuitest" && lic ports/tui/upstream/LICENSE tui

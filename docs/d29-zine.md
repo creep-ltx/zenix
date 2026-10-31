@@ -1010,6 +1010,54 @@ built). Test: `tools/host/zine-test.sh` (in `make check`'s host list as `zine-te
   (whatever the check takes must load), a volume built from the input then damaged, plans from random walks; 300 s
   found nothing (2026-10-30).
 
+### 16.2 Steps 2 and 3 as built, first part (2026-10-30)
+
+*Verified* in FS-UAE (A1200, 68020, 4 MB fast RAM; `tools/zine-emu-test.sh`, in `make check`):
+- **Step 2:** `SYS_zine` 93 (`kernel/zine.c`, +1,688 bytes of kernel) with the null blob (`/tests/zine/null.blob`,
+  `user/zine/nullblob.S`: back at once through the kernel's resume routine): once and then twenty times in a row in a
+  script; free memory after the twenty as after the first, the console's input, a file written and read back.
+- **Step 3, first programs** with the real blob (`/lib/zine/zine.blob`, 19 KB): `zexit` (returns 7: zine reports it
+  and exits with 7), `zhello` (dos.library's `Output()` and `Write()`: the line is shown after the program),
+  `ztake` (graphics.library's `LoadView(0)`, its own Copper list in chip RAM for 150 frames, the system's list and
+  view back: the screen is red, blue and white for 3 s, then Zenix's console as before; `tools/zine-shot.py` takes
+  the pictures in the cage rig). Each program had 2015 KB chip and 3055 KB fast RAM; free memory afterwards as
+  before. The test programs are AmigaOS hunk executables written for the purpose (`tools/tests/zine/*.S`,
+  `tools/mkhunktest.py`: position-independent code, one code hunk).
+- The serial line's input is the shown console's (kernel/tty.c), so zine typed on the serial line counts as the
+  Amiga's own console; ssh, telnet and logins on other ttys are refused.
+- `zcrash` (an ILLEGAL instruction: "crashed: illegal instruction at ..."), `zbadcall` (exec's PutMsg, which ZINE lacks: named, stopped) and `zalloc` (1 MB fast and 256 KB chip written, read back, freed; AvailMem as before) too, 2026-10-31.
+- Not yet: the kernel review, a real demo, the owner's PiStorm.
+
+### 16.3 Real demos (2026-10-31, the night after the owner said "When I wake up I want Amiga demos working")
+
+*Verified* in FS-UAE (A1200 AGA, 68030 + 68882, 8 MB fast and 64 MB Zorro III fast; pictures taken in the cage rig
+during each run): four demos run under ZINE from start to end and give Zenix back with its memory as before:
+- **LTX4k** (the owner's own 4k intro, Ikadalawampu engine): about 10 minutes before the first picture in the emulator (Shrinkler unpacking the 4 KB, then the precalculation), then
+  its effects; returns 0.
+- **Ikadalawampu** (Loonies, Breakpoint 2010, 4 KB): the same, returns 0.
+- **Moral Fiber** (Nah-Kolor, 2026): an intuition screen of 320 x 210 at 8 planes, timer.device, ciaa/ciab.resource,
+  Cause, an AHX replayer; the whole demo with all its parts; returns 0.
+- **Bacon of Hope** (Desire, the HD version, a 68000 OCS trackmo): takes the machine over by hand and plays. It needs
+  its memory below 16 MB: with the program in Zorro III RAM (0x40000000) it froze on its first picture, with 8 MB of
+  Zorro II fast RAM it plays (the owner's PiStorm's fast RAM is high too: to check there). It did not end within
+  15 minutes (a trackmo that loops or waits).
+
+What the demos needed and ZINE now has (the as-built list): exec TaggedOpenLibrary, StackSwap, Cause, the message
+ports, DoIO/SendIO/CheckIO/WaitIO/AbortIO; OldOpenLibrary of any version; timer.device; ciaa/ciab.resource; graphics
+InitBitMap, InitRastPort, AllocRaster (cleared), FreeRaster, AllocBitMap, FreeBitMap, LoadRGB32, SetRGB32; intuition
+screens shown with their own Copper list (FMODE 3 on AGA lowres when rows and planes allow), windows, SetPointer,
+ModifyIDCMP, ViewPortAddress; dos Open/Close/Read/Seek on the program's folder (zine puts the folder's plain files into
+the volume; written files keep nothing); a3 = the segment list at the start (decrunchers walk it); GfxBase in
+IntVects[INTB_BLIT].iv_Data; missing devices, resources, libraries and files named in the program's output; the trace
+build `/tests/zine/trace.blob` (every call, crash registers and code on the serial port: `tools` side in the main
+session's /tmp scripts for now).
+
+Open: the review of 2026-10-31 (one bug fixed: zb_flush read the CPU flags from the page already Zenix's again; the
+others recorded as findings: a second local disk's failed sync not refused, a floppy changed during the session, the
+MMU/PCR registers on 040/060, the order in zine_resume, the session's seconds from CIA-A's TOD (one test run read 1 s
+for 3 s: use the battery clock), Gayle's IDE interrupt, Ctrl-C during the sync, the CIA-B restart window, the mouse
+counters); sound not yet checked (the pictures only); the owner's PiStorm; demos needing memory below 16 MB.
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts
