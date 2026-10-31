@@ -436,7 +436,7 @@ def t_run(d):
     got, e = c.data(FREE, struct.pack(">II", na, 0))
     check(e is None and got == b"stopped", "FREE: SIGINT, 'stopped' (%r %r)" % (got, e))
     t, p = a.recv()
-    check(t == EXIT and struct.unpack(">I", p[:4])[0] == 130, "the freed command's client gets EXIT 130")
+    check(t == EXIT and struct.unpack(">I", p[:4])[0] == 130, "the freed command's client gets EXIT 130 (%r %r)" % (t, p[:4]))
     nb = struct.unpack(">I", sb[1])[0]
     got, e = c.data(FREE, struct.pack(">II", nb, 1))
     check(e is None and got == b"asked", "FREE bit 0: 'asked'")

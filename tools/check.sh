@@ -13,7 +13,7 @@
 # Not run, on purpose: stage0-68k-test when the Python module unicorn is missing (named as skipped), audio/klog/joystick (weak or
 # covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test, diag-test, colour-test and
 # random-test and bbs-test, ZENIX_CAGE_RIG; net-test and slip-test need libslirp (GLib) and unprivileged user namespaces (eth-test
-# the namespaces too; ssh-test also OpenSSH's sshd and ssh-keygen, openssl, and unshare --map-auto; wget-test openssl and the namespaces;
+# the namespaces too, and ctop-test's part n; ssh-test also OpenSSH's sshd and ssh-keygen, openssl, and unshare --map-auto; wget-test openssl and the namespaces;
 # zine-test's tables part ZENIX_MANUALS (the manuals as text; SKIPPED without it); zpkg-emu-test and remote-test the namespaces and libslirp; remote-test also runs the owner's Wasabi client when
 # ZENIX_WASABI names a checkout of it). A new
 # emulator test starts only while the machine's 1-minute load is 16 or less; every FS-UAE run also takes one of the
@@ -42,6 +42,7 @@ SPLIT[netd-test]="s|l"                              # the stock A1200 (small pro
 SPLIT[bbs-test]="e s|b|b16|z"                       # the Unix mode and SLIP; the BBS modes at 3 and 4 planes
 SPLIT[crypto68k-test]="fsuae/a1200-020.fs-uae|fsuae/matrix/a1200-030.fs-uae fsuae/matrix/a1200-040.fs-uae fsuae/matrix/a1200-060.fs-uae"   # the 020 with the times
 SPLIT[slip-test]="s|m|n"                            # 2 MB and 1 MB of chip RAM; noise and a flood
+SPLIT[ctop-test]="c|n"                              # the boxes and keys; the net box with traffic (the A2065)
 SPLIT[eth-test]="e|g"                               # the A2065; genet where there is no GENET
 SPLIT[zpkg-emu-test]="e|s|m"                       # D22 8.2: the A2065, SLIP, 1 MB of chip RAM
 SPLIT[nfs-emu-test]="m|b|w|r|u"                     # D23: reading, hard, soft, killed; the lazy fstab boot; writing; reboot; users

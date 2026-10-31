@@ -259,3 +259,10 @@ each fix's test as named in the table, all passing in this branch (`make check` 
   today's, in the background and in a script (the "not enough" was a run that did not have it). Every wasabi-test
   check run now starts its client and daemon with SIGINT and SIGQUIT ignored, so the case is tested each time (with
   the old wasabi-host it fails in the foreground too).
+  **The flake left (2026-10-31):** the check still failed now and then (EXIT 137: FREE's SIGKILL 3 s later). The
+  reset ran in the child after the fork, its setpgid, dup2s, the close of 1,021 descriptors and chdir, and a FREE that
+  came before it (wasabi-check sends one a few milliseconds after RUN) found SIGINT still ignored and was dropped: a
+  race in the test daemon, not in wasabid (Zenix's spawn has no such gap, and Zenix's shell does not ignore SIGINT for
+  `&` jobs). wasabi-host now blocks SIGINT and SIGQUIT across the fork and the child unblocks them after the reset, so
+  one sent meanwhile is held and acted on. Measured: the old wasabi-host failed 7 of 12 checks run side by side, the new
+  one passed 12 of 12 (and 8 of 8 of a client that sends FREE at once, where the old failed 5 of 6).
