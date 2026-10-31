@@ -1032,7 +1032,7 @@ built). Test: `tools/host/zine-test.sh` (in `make check`'s host list as `zine-te
 
 *Verified* in FS-UAE (A1200 AGA, 68030 + 68882, 8 MB fast and 64 MB Zorro III fast; pictures taken in the cage rig
 during each run): four demos run under ZINE from start to end and give Zenix back with its memory as before:
-- **LTX4k** (the owner's own 4k intro, Ikadalawampu engine): about 10 minutes of precalculation in the emulator, then
+- **LTX4k** (the owner's own 4k intro, Ikadalawampu engine): about 10 minutes before the first picture in the emulator (Shrinkler unpacking the 4 KB, then the precalculation), then
   its effects; returns 0.
 - **Ikadalawampu** (Loonies, Breakpoint 2010, 4 KB): the same, returns 0.
 - **Moral Fiber** (Nah-Kolor, 2026): an intuition screen of 320 x 210 at 8 planes, timer.device, ciaa/ciab.resource,
