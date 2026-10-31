@@ -153,10 +153,13 @@ def check(ok, what, detail=""):
     bad += not ok
 full = part == "e"
 w = sec("sy")
-if part == "m" and "KB of memory are free" in w:
+if part == "m" and ("KB of memory are free" in w or "zpkg: out of memory" in w):
     # the 1 MB machine with SLIP up has about 100 KB left (netd and the login); zpkg must say so and change nothing
-    check(st("sy") == 1 and re.search(r"only \d+ KB of memory are free", w) and "extra: a test package" not in sec("s1"),
-          "1 MB of chip RAM: too little memory left with the network up: zpkg says so and changes nothing", w)
+    # (since D22 amendment 2's boot partition writer, 2026-10-31, zpkg itself (128 KB to load) may not fit: then the
+    # shell says "zpkg: out of memory", also nothing changed)
+    check(st("sy") in (1, 126, 127) and (re.search(r"only \d+ KB of memory are free", w) or "zpkg: out of memory" in w) and
+          "extra: a test package" not in sec("s1"),
+          "1 MB of chip RAM: too little memory left with the network up: zpkg (or the shell) says so and nothing changes", w)
     m = re.search(r"only (\d+) KB", w)
     print("zpkg-test m: free memory with SLIP up and one login on 1 MB of chip RAM: %s KB (zpkg asks for 160)" % (m.group(1) if m else "?"))
     print("zpkg-test m: " + " ".join(l.strip() for l in sec("mem").splitlines()[:1]))

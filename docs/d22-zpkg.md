@@ -1061,8 +1061,11 @@ name, and its zpkg has no writer, so no new `/bin/zpkg` can arrive before a syst
   version, and a changed package's dependencies are written as the versions the new list gives them (before, any but
   `depends base` had to name a version the list already had).
 
-**Sizes (*measured*, this build):** `user/zpkg/bootfs.c` 7,327 bytes of code at -Os; `/bin/zpkg` 91,032 -> 106,568
-bytes; `zpkg-new` is the same file. The kernel and zenixboot do not change.
+**Sizes (*measured*, this build):** `user/zpkg/bootfs.c` about 7.4 KB of code at -Os; `/bin/zpkg` 91,032 -> 107,264
+bytes, 113,324 -> 128,740 bytes of memory to load (the partition tables and buffers on the heap, only while a system
+is written); `zpkg-new` is the same file. The kernel grows 40 bytes (diskd's copy of `rdb.h`), zenixboot not at all.
+On the 1 MB chip-only machine with SLIP up (not the owner's) about 85 KB stay free with zpkg loaded; it refuses as
+before (`tools/zpkg-emu-test.sh m`).
 
 **Tests:** `tools/host/zpkg-test.sh boot` (85 checks; DOS\1 and DOS\3; replaces the slot part): the files made and
 judged by a reader of its own (`tools/ffsread.py check`) and amitools' `xdfscan`, the new header in block order
