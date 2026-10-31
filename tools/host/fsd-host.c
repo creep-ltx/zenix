@@ -27,19 +27,25 @@
  * Built with -DZFSD it drives the ZenixFS server (user/zenixfsd.c, zenixfs/zenixfs.c) on a ZenixFS image instead: the
  * same commands but cut, unclean, mark, idle and state (ext2's clean mark), "mount" ignores root (tools/zfsd-host-test.sh).
  * With -DFATD as well the FAT server (user/fatd.c, tools/fat-host-test.py): "mount [OPTIONS]", and commit (the timer's
- * commit), umount (FS_QUIT and what fatd does at it), statfs; a + in a path is a space. */
+ * commit), umount (FS_QUIT and what fatd does at it), statfs; a + in a path is a space.
+ * With -DFFSD instead the OFS/FFS server (user/ffsd.c, tools/ffs-host-test.py): the same commands as FAT's. */
 #ifdef ZFSD                                               /* -DZFSD: the ZenixFS server (user/zenixfsd.c) instead */
 #include "zhost.h"
 struct udirent { u32 ino; u32 type; char name[64]; };    /* usys.h's (zhost.h has none; ext2.h is not included) */
 struct ustat { u32 ino, mode, size, mtime; u32 uid, gid, links; };
 static inline long sys3(u32 nr, u32 a, u32 b, u32 c) { (void)nr; (void)a; (void)b; (void)c; return 0; }   /* main only */
 #define main fsd_main
-#ifdef FATD                                               /* -DZFSD -DFATD: the FAT server (user/fatd.c) */
+#if defined(FATD) || defined(FFSD)
 #undef main
 #define S_IFDIR 0040000
 #define S_IFREG 0100000
+#ifdef FATD                                               /* -DZFSD -DFATD: the FAT server (user/fatd.c) */
 #include "../../user/fatd.c"
 #define ROOT_INO ROOT
+#else                                                     /* -DZFSD -DFFSD: the OFS/FFS server (user/ffsd.c) */
+#include "../../user/ffsd.c"
+#define ROOT_INO root_blk
+#endif
 #else
 #include "../../user/zenixfsd.c"
 #define ROOT_INO ROOT
@@ -109,7 +115,7 @@ int main(void)
         struct ustat st;
         if (!strcmp(cmd, "mount")) {
 #ifdef ZFSD
-#ifdef FATD
+#if defined(FATD) || defined(FFSD)
             if (a && options(a)) { printf("mount -> bad option\n"); continue; }
             r = try_mount("hd0", 0);
             printf("mount -> %d%s\n", r, readonly ? " readonly" : "");
@@ -130,7 +136,7 @@ int main(void)
         if (!strcmp(cmd, "links")) { links = a && !strcmp(a, "on"); printf("links -> %u\n", links); continue; }
         static char pa[FS_PATHMAX], pb[FS_PATHMAX];      /* the kernel's buffers: a server may write TEXT there */
         char *a0 = a, *b0 = b;
-#ifdef FATD
+#if defined(FATD) || defined(FFSD)
         for (char *t = a; t && *t; t++) if (*t == '+') *t = ' ';  /* a name with spaces in a command line */
         if (b && strcmp(cmd, "write")) for (char *t = b; *t; t++) if (*t == '+') *t = ' ';
 #endif
@@ -192,9 +198,23 @@ int main(void)
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);
 #ifdef ZFSD
         else if (!strcmp(cmd, "dirty")) { printf("dirty -> %d\n", dirty); continue; }   /* changes not yet committed */
-#ifdef FATD
+#if defined(FATD) || defined(FFSD)
         else if (!strcmp(cmd, "commit")) r = sync_all();        /* the timer's commit */
         else if (!strcmp(cmd, "umount")) { r = req(FS_QUIT, 0, 0, 0, 0); if (!r) r = go_clean(); }
+        else if (!strcmp(cmd, "dump")) {                  /* dump INO HOSTFILE: the file through FS_READ, in odd pieces */
+            FILE *out = fopen(b0, "wb");
+            u32 off = 0;
+            static const u32 piece[] = { 4096, 100, 777, 65536, 1, 512 };
+            for (u32 i = 0; out; i++) {
+                r = req(FS_READ, num(a), off, (u32)big, piece[i % 6]);
+                if (r <= 0) break;
+                fwrite(big, 1, (size_t)r, out);
+                off += (u32)r;
+            }
+            if (out) fclose(out);
+            printf("dump -> %d %u\n", r, off);
+            continue;
+        }
         else if (!strcmp(cmd, "statfs")) {
             struct ustatfs f;
             r = req(FS_STATFS, (u32)&f, 0, 0, 0);
