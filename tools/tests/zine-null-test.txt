@@ -19,6 +19,8 @@ send echo disk-ok > /home/zn.disk; sync; cat /home/zn.disk 2>/dev/null || (echo 
 wait (?m)^disk-ok 20
 send zine /tests/zine/zexit; echo zexit-rc=$?\r
 wait zexit-rc= 60
+send zine /tests/zine/zexit-with-a-name-longer-than-31-bytes; echo zlong-rc=$?\r
+wait zlong-rc= 60
 send zine /tests/zine/zhello; echo zhello-rc=$?\r
 wait zhello-rc= 60
 send zine /tests/zine/ztake; echo ztake-rc=$?\r

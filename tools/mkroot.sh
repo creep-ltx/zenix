@@ -64,6 +64,7 @@ if [ -z "$NOTESTS" ] && [ -f "$B/zine-null.blob" ] && [ -d "$B/zinetests" ]; the
     mkdir -p "$T/tests/zine" && cp "$B/zine-null.blob" "$T/tests/zine/null.blob" && { [ ! -f "$B/zine-trace.blob" ] || cp "$B/zine-trace.blob" "$T/tests/zine/trace.blob"; } && cp "$B"/zinetests/z[a-z]* "$T/tests/zine/"
     rm -f "$T"/tests/zine/*.o
     cp "$(dirname "$0")/tests/zine/null20" "$T/tests/zine/"
+    cp "$B/zinetests/zexit" "$T/tests/zine/zexit-with-a-name-longer-than-31-bytes"   # the name in full (2026-10-31)
 fi
 # the text-UI library's test program (ports/tui) and the notice of the owner's MIT code in it, which travels with it
 if [ -z "$NOTESTS" ] && [ -f "$B/tuitest.zx" ]; then

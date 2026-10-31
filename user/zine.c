@@ -272,7 +272,10 @@ int main(int argc, char **argv)
         break;
     }
     case ZH_CRASH:
-        if (vecname(b->vec))
+        if (b->vec == 10 || b->vec == 11)
+            dprintf(1, "ZINE: %s crashed: %s at %08x (instruction %04x %04x)\n", name, vecname(b->vec), b->pc,
+                    b->addr >> 16, b->addr & 0xFFFF);
+        else if (vecname(b->vec))
             dprintf(1, "ZINE: %s crashed: %s at %08x (access %08x)\n", name, vecname(b->vec), b->pc, b->addr);
         else
             dprintf(1, "ZINE: %s crashed: exception %u at %08x\n", name, b->vec, b->pc);

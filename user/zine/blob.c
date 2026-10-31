@@ -365,6 +365,8 @@ void zb_crash(u32 *rb)
     b->pc = *(u32 *)(fr + 2);
     b->addr = fmt == 0xA || fmt == 0xB ? *(u32 *)(fr + 16) : fmt == 7 ? *(u32 *)(fr + 20) :
               fmt == 4 || fmt == 2 ? *(u32 *)(fr + 8) : 0;
+    if ((b->vec == 10 || b->vec == 11) && !(b->pc & 1) && b->pc >= 0x1000)
+        b->addr = *(const u32 *)b->pc;  /* line A/F: no access address; the instruction's first four bytes instead */
     zr_how = ZH_CRASH;
     extern u32 zb_tracing;
     if (zb_tracing) {                   /* the trace build: d0-d7/a0-a6, the SR, the user stack and 8 longs on it */

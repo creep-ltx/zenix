@@ -69,7 +69,7 @@ enum {                                  /* why it stopped (ZH_STOP) or could not
 };
 struct zine_blk {
     u32 magic, size;
-    char name[32];                      /* the program's name (the volume's entry) */
+    char name[108];                     /* the program's name (the volume's entry: at most 107 bytes, zvol.h) */
     char args[ZB_ARGMAX];               /* its arguments, ending in "\n" (AmigaDOS's form) */
     u32 arglen, stack;                  /* the arguments' length; the stack's bytes */
     /* the answer */
