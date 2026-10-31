@@ -1028,6 +1028,36 @@ built). Test: `tools/host/zine-test.sh` (in `make check`'s host list as `zine-te
 - `zcrash` (an ILLEGAL instruction: "crashed: illegal instruction at ..."), `zbadcall` (exec's PutMsg, which ZINE lacks: named, stopped) and `zalloc` (1 MB fast and 256 KB chip written, read back, freed; AvailMem as before) too, 2026-10-31.
 - Not yet: the kernel review, a real demo, the owner's PiStorm.
 
+### 16.3 Real demos (2026-10-31, the night after the owner said "When I wake up I want Amiga demos working")
+
+*Verified* in FS-UAE (A1200 AGA, 68030 + 68882, 8 MB fast and 64 MB Zorro III fast; pictures taken in the cage rig
+during each run): four demos run under ZINE from start to end and give Zenix back with its memory as before:
+- **LTX4k** (the owner's own 4k intro, Ikadalawampu engine): about 10 minutes of precalculation in the emulator, then
+  its effects; returns 0.
+- **Ikadalawampu** (Loonies, Breakpoint 2010, 4 KB): the same, returns 0.
+- **Moral Fiber** (Nah-Kolor, 2026): an intuition screen of 320 x 210 at 8 planes, timer.device, ciaa/ciab.resource,
+  Cause, an AHX replayer; the whole demo with all its parts; returns 0.
+- **Bacon of Hope** (Desire, the HD version, a 68000 OCS trackmo): takes the machine over by hand and plays. It needs
+  its memory below 16 MB: with the program in Zorro III RAM (0x40000000) it froze on its first picture, with 8 MB of
+  Zorro II fast RAM it plays (the owner's PiStorm's fast RAM is high too: to check there). It did not end within
+  15 minutes (a trackmo that loops or waits).
+
+What the demos needed and ZINE now has (the as-built list): exec TaggedOpenLibrary, StackSwap, Cause, the message
+ports, DoIO/SendIO/CheckIO/WaitIO/AbortIO; OldOpenLibrary of any version; timer.device; ciaa/ciab.resource; graphics
+InitBitMap, InitRastPort, AllocRaster (cleared), FreeRaster, AllocBitMap, FreeBitMap, LoadRGB32, SetRGB32; intuition
+screens shown with their own Copper list (FMODE 3 on AGA lowres when rows and planes allow), windows, SetPointer,
+ModifyIDCMP, ViewPortAddress; dos Open/Close/Read/Seek on the program's folder (zine puts the folder's plain files into
+the volume; written files keep nothing); a3 = the segment list at the start (decrunchers walk it); GfxBase in
+IntVects[INTB_BLIT].iv_Data; missing devices, resources, libraries and files named in the program's output; the trace
+build `/tests/zine/trace.blob` (every call, crash registers and code on the serial port: `tools` side in the main
+session's /tmp scripts for now).
+
+Open: the review of 2026-10-31 (one bug fixed: zb_flush read the CPU flags from the page already Zenix's again; the
+others recorded as findings: a second local disk's failed sync not refused, a floppy changed during the session, the
+MMU/PCR registers on 040/060, the order in zine_resume, the session's seconds from CIA-A's TOD (one test run read 1 s
+for 3 s: use the battery clock), Gayle's IDE interrupt, Ctrl-C during the sync, the CIA-B restart window, the mouse
+counters); sound not yet checked (the pictures only); the owner's PiStorm; demos needing memory below 16 MB.
+
 ## 17. Questions for the owner (what ZINE should be)
 
 1. Owner answer 1 allowed "the Amiga's own console or through Wasabi". Typing into the console through Wasabi counts

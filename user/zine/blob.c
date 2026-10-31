@@ -106,6 +106,8 @@ long zb_prepare(const struct zine_args *a)
         return -ZE_INVAL;
     const struct bootinfo *bi = (const struct bootinfo *)0x1000;
     Z.attn = bi->attn;
+    extern u32 zb_attn;
+    zb_attn = bi->attn & 0xFFFF;     /* for zb_flush, which runs when the low page is no longer ZINE's */
     nreg = 0;
     for (u32 i = 0; i < bi->nregions && i < 8; i++)
         if (bi->r[i].attrs & (MEMF_CHIP | MEMF_FAST))

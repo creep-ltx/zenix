@@ -197,7 +197,7 @@ zb_setvbr:
 /* the caches flushed after writing code (CLAUDE.md): CACR's clear bit on 020/030, cpusha bc on 040/060 and Emu68
  * (never cinva); the CPU from ExecBase's AttnFlags as AmigaOS reported them (bootinfo). Supervisor mode only. */
 zb_flush:
-    move.w  ZEXEC+296,%d0
+    move.w  zb_attn+2,%d0          /* the CPU flags zb_prepare kept: the low page may be Zenix's again (review 2026-10-31) */
     and.w   #0x0088,%d0
     bne.s   1f
     movec   %cacr,%d0
@@ -490,6 +490,9 @@ zb_jumptable:
     rts
 
     .data
+    .globl  zb_attn                 /* AttnFlags (a long, the low word used), set by zb_prepare */
+zb_attn:
+    .long   0
     .globl  zb_tracing              /* 1 in the trace build: zb_back also writes the code before a bad call */
 zb_tracing:
 #ifdef ZINE_TRACE
