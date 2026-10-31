@@ -62,6 +62,8 @@ send readlink /mnt/Nya/lnk\r
 sleep 2
 send ln /mnt/ls.bin /mnt/hl\r
 sleep 2
+send cmp /mnt/ls.bin /mnt/hl && echo hl-same\r
+sleep 5
 send chmod 777 /mnt/ls.bin\r
 sleep 2
 send chmod 444 /mnt/ls.bin\r
@@ -132,10 +134,8 @@ send cat /mnt/onek.txt\r
 sleep 2
 send sha256sum /mnt/big.bin\r
 sleep 8
-send cp /bin/ls /mnt/ls.bin\r
-sleep 5
-send cmp /bin/ls /mnt/ls.bin && echo same-1k\r
-sleep 5
+send echo x > /mnt/nope1k.txt\r
+sleep 2
 send df /mnt\r
 sleep 3
 send umount /mnt\r

@@ -201,6 +201,21 @@ int main(void)
 #if defined(FATD) || defined(FFSD)
         else if (!strcmp(cmd, "commit")) r = sync_all();        /* the timer's commit */
         else if (!strcmp(cmd, "umount")) { r = req(FS_QUIT, 0, 0, 0, 0); if (!r) r = go_clean(); }
+#ifdef FFSD
+        else if (!strcmp(cmd, "rmall")) {                 /* rmall DIR: every name removed while it is listed, as some programs do */
+            struct ustat ds;
+            struct udirent e;
+            int ino = req(FS_OPEN, (u32)a, CWD, O_RDONLY, (u32)&ds), n = 0;
+            u32 cookie = 0;
+            while (ino > 0 && req(FS_READDIR, (u32)ino, cookie, (u32)&e, (u32)&cookie) > 0) {
+                static char full[FS_PATHMAX];
+                snprintf(full, sizeof full, "%s/%s", a0, e.name);
+                if (!req(FS_UNLINK, (u32)full, CWD, 0, 0)) n++;
+            }
+            printf("rmall -> %d\n", n);
+            continue;
+        }
+#endif
         else if (!strcmp(cmd, "dump")) {                  /* dump INO HOSTFILE: the file through FS_READ, in odd pieces */
             FILE *out = fopen(b0, "wb");
             u32 off = 0;

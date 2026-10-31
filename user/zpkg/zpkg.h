@@ -207,6 +207,7 @@ struct zp_bootvol {                 /* a checked volume (zp_boot_open), never ke
     zp_u32 nleak;                   /* blocks marked in use that nothing names (a cut write's leftovers) */
     zp_u32 nheaders;
     int intl;
+    int links;                  /* the volume has hard links: leaks are not given back */
 };
 struct zp_bootfile {
     zp_u32 header, size, nblk;

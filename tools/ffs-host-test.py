@@ -227,7 +227,7 @@ def test_read():
 
 def test_refusals():
     p = mkvol("rf.img", 3)
-    _, o = run(p, "mount rw\nlink /plain.txt /g\nchmod /plain.txt 777\nchmod /plain.txt 600\nchmod /plain.txt 444\nstat /plain.txt\nunlink /plain.txt\nchmod /plain.txt 755\nunlink /plain.txt\n"
+    _, o = run(p, "mount rw\nlink /Mapp /g\nchmod /plain.txt 777\nchmod /plain.txt 600\nchmod /plain.txt 444\nstat /plain.txt\nunlink /plain.txt\nchmod /plain.txt 755\nunlink /plain.txt\n"
                   "chown /big.bin 5 5\nchown /big.bin 0 0\nreadlink /big.bin\nmkdir /x:y\nopen /a:b wc\nopen /kanji-日本 wc\nopen /" + "n" * 31 + " wc\nrmdir /nope\nrmdir /big.bin\nunlink /nope\nmkdir /d\nopen /d w\nunlink /d\n"
                   "open /d/f wc\nclose %1\nrmdir /d\nrename /d /d/e\nmkdir /big.bin\nopen /big.bin wcx\nsymlink /etc/x /abs\nsymlink ../a/b /rel\nreadlink /rel\nsymlink a /rel\nas 5 5\nopen /big.bin w\nopen /new wc\nchmod /big.bin 700\nunlink /big.bin\numount\n")
     want = ["link -> -1", "chmod -> -1", "chown -> -1", "readlink -> -22", "mkdir -> -22", "open -> -22", "open -> -84", "open -> -36",
@@ -252,7 +252,7 @@ def test_refusals():
 
 def test_write():
     """a workload of changes on every type written; judged by the walker, xdfscan, xdftool"""
-    for dos, bs in ((3, 512), (1, 512), (0, 512), (2, 512), (3, 1024), (1, 4096), (0, 1024)):
+    for dos, bs in ((3, 512), (1, 512), (0, 512), (2, 512)):
         label = f"DOS{dos} {bs} bytes"
         p = mkvol(f"w{dos}{bs}.img", dos, bs, kb=2048)
         s = ("mount rw\nmkdir /Nya\nopen /Nya/räksmörgås+på+svenska.txt wc\nwrite %1 0 hej\nclose %1\n"
@@ -293,6 +293,21 @@ def test_write():
 
 
 def test_limits():
+    # blocks over 512 bytes are read-only
+    p = mkvol("bk.img", 3, 1024)
+    _, o = run(p, "mount rw\nopen /x wc\nopen /plain.txt r\nread %1 0 5\n")
+    check("1 KB blocks: read-only even asked for rw", "never written" in o and "open -> -30" in o and "read -> 5" in o, o)
+    # ln, and a rename on a full disk
+    p = mkvol("ln.img", 3)
+    _, o = run(p, "mount rw\nlink /plain.txt /Mapp/andra\nstat /Mapp/andra\nlink /plain.txt /Mapp/andra\nunlink /plain.txt\nstat /Mapp/andra\nsync\numount\n")
+    d = Disk(p).walk()
+    check("ln: two names, the first goes, the file stays", "links 2" in o and "links 1" in o and "link -> -17" in o and d.read(b"/Mapp/andra") == pat(1000) and not d.bad and d.leak == 0, o + str(d.bad))
+    # a program that removes what it lists misses nothing
+    p = mkvol("rmall.img", 3, tree=lambda v: [v.add_file(f"d/f{i}", b"x") for i in range(178)])
+    _, o = run(p, "mount rw\nrmall /d\nrmdir /d\nsync\numount\n")
+    check("a listing while its names are removed misses none", "rmall -> 178" in o and "rmdir -> 0" in o, o)
+    d = Disk(p).walk()
+    check("... and the volume is whole", d.walked and not d.bad and d.leak == 0, str(d.bad) + str(d.leak))
     # many names: chains grow, stay in order
     p = mkvol("many.img", 3, kb=4096)
     names = [f"file number {i:04}.txt" for i in range(600)]
@@ -325,6 +340,11 @@ def test_limits():
     _, o = run(p, "mount rw\nstatfs\nopen /b wc\nwrite %1 0 @400000\nclose %1\nsync\nstatfs\numount\n")
     d = Disk(p).walk()
     check("... written, the free count right", d.walked and not d.bad and d.leak == 0 and d.read(b"/b") == patn(400000) and not errors(o), o + str(d.bad))
+    # a volume full: a rename across chains needs one block
+    p = mkvol("rfull.img", 1, kb=128, tree=lambda v: (v.add_file("a", b"x"), v.add_file("fill", bytes(1))))
+    _, o = run(p, "mount rw\nopen /fill w\nwrite %1 0 @200000\nclose %1\nrename /a /zzzzz\nstat /a\nsync\numount\n")
+    d = Disk(p).walk()
+    check("a full disk: a rename answers ENOSPC, nothing lost", "rename -> -28" in o and d.read(b"/a") == b"x" and not d.bad, o + str(d.bad))
     # the walks: hard links removed and promoted
     def links(v):
         h = v.add_file("orig", b"the data\n")
@@ -440,7 +460,7 @@ def d0_exts(disk, h):
 
 def test_cuts():
     """a power cut after every sector written: the volume stays valid, others whole, the next -o rw mount works"""
-    for label, dos, bs in (("FFS", 3, 512), ("OFS", 2, 512), ("FFS 1 KB blocks", 1, 1024)):
+    for label, dos, bs in (("FFS", 3, 512), ("OFS", 2, 512)):
         def tree(v):
             for i in range(6):
                 v.add_file(f"OTHER{i}.BIN", pat(3000 + 900 * i, i))
@@ -449,19 +469,23 @@ def test_cuts():
             v.add_file("zap.bin", pat(3000, 7))
             h = v.add_file("hl.bin", pat(2000, 8))
             v.hard_link("keep/hl2", h)
+            h2 = v.add_file("hl3.bin", pat(1200, 11))
+            v.hard_link("keep/hl4", h2)
+            for i in range(5):
+                v.add_file(f"tree/sub/f{i}", pat(700 + i, i))
         base = mkvol("base.img", dos, bs, kb=1024, tree=tree)
         d0 = Disk(base, bs).walk()
         others = {k: d0.read(k) for k in d0.files if b"OTHER" in k and b"OTHER5" not in k or b"kept" in k}
         s = ("mount rw\nopen /new.bin wc\nwrite %1 0 @6000\nclose %1\nmkdir /nydir\nopen /nydir/en+fil+med+långt+namn.txt wc\nwrite %2 0 @700\nclose %2\n"
              "commit\nunlink /old.bin\nrename /new.bin /nydir/moved.bin\nopen /app.bin wc\nwrite %3 0 @3000\nwrite %3 3000 @60000\nclose %3\n"
-             "commit\nopen /nydir/en+fil+med+långt+namn.txt wt\nwrite %4 0 @100\nclose %4\nrename /app.bin /OTHER5.BIN\nunlink /hl.bin\nunlink /keep/hl2\nopen /zap.bin w\nwrite %5 0 ZZZZ\nclose %5\nsymlink ../zap.bin /nydir/sl\nrmdir /nope\nsync\numount\n")
+             "commit\nopen /nydir/en+fil+med+långt+namn.txt wt\nwrite %4 0 @100\nclose %4\nrename /app.bin /OTHER5.BIN\nunlink /hl.bin\nunlink /keep/hl2\nopen /zap.bin w\nwrite %5 0 ZZZZ\nclose %5\nsymlink ../zap.bin /nydir/sl\nrename /tree /nydir/moved+tree\nrename /hl3.bin /nydir/hl5\nlink /keep/kept+with+long+name.txt /nyl\nrename /nydir/sl /sl2\nrmdir /nope\nsync\numount\n")
         cut = os.path.join(T, "cut.img")
         shutil.copy(base, cut)
         rc, o = run(cut, s, env={"HOSTDISK_COUNT": "1"})
         total = int(re.search(r"hostdisk-writes (\d+)", o).group(1))
         dw = Disk(cut, bs).walk()
         check(f"{label}: the workload runs whole ({total} sectors)", rc == 0 and dw.walked and not dw.bad and dw.leak == 0 and len(errors(o)) == 1, o[-600:] + str(dw.bad) + str(dw.leak))
-        bad_struct = bad_other = bad_old = bad_remount = bad_scan = leaked = 0
+        bad_struct = bad_other = bad_old = bad_remount = bad_scan = bad_lost = leaked = 0
         first = ""
         step = 1 if total < 300 else 2
         spb = bs // 512
@@ -496,22 +520,30 @@ def test_cuts():
                 if not ok:
                     bad_scan += 1
                     first = first or f"cut {k}: xdfscan {so}"
-            # the next mount: writable, unless a hard link's window was hit (then read-only, with its reason)
+            # the next mount: always writable; what a cut left half done is finished
             _, o2 = run(cut, "mount rw\nopen /after.txt wc\nwrite %1 0 ok\nclose %1\nls /\nsync\numount\n", env={})
             if "readonly" in o2:
-                if "hard link" not in o2:
-                    bad_remount += 1
-                    first = first or f"cut {k}: remount: {o2[:300]}"
+                bad_remount += 1
+                first = first or f"cut {k}: remount: {o2[:300]}"
             else:
                 d2 = Disk(cut, bs).walk()
                 if d2.bad or d2.leak or d2.read(b"/after.txt") != b"ok":
                     bad_remount += 1
                     first = first or f"cut {k}: remount {d2.bad} leak {d2.leak}"
+                # nothing that was being moved is lost: the tree and the linked file, under one name or the other
+                sub = [d2.read(pre + b"/sub/f3") for pre in (b"/tree", b"/nydir/moved tree")]
+                if pat(703, 3) not in sub:
+                    bad_lost += 1
+                    first = first or f"cut {k}: the tree is gone: {sorted(d2.files)}"
+                if pat(1200, 11) not in (d2.read(b"/hl3.bin"), d2.read(b"/nydir/hl5")):
+                    bad_lost += 1
+                    first = first or f"cut {k}: the linked file is gone"
         check(f"{label}: valid after a cut at any of {total} sectors", bad_struct == 0, first)
         check(f"{label}: other files whole", bad_other == 0, first)
         check(f"{label}: files being changed have good data or none", bad_old == 0, first)
         check(f"{label}: xdfscan agrees (every 6th cut)", bad_scan == 0, first)
         check(f"{label}: the next -o rw mount works, gives lost blocks back, the walker agrees", bad_remount == 0, first)
+        check(f"{label}: a directory and a file being renamed are never lost", bad_lost == 0, first)
         print(f"  ({leaked} of the cuts left lost blocks)")
 
 

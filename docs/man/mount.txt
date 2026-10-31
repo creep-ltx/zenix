@@ -19,10 +19,11 @@ DESCRIPTION
     ..., df0, df1 (see fdisk). Filesystems can be mounted inside each other
     (/mnt, then /mnt/sub).
 
-    The type is ext2, zenixfs or fat. Without -t it is read from the
+    The type is ext2, zenixfs, fat or ffs. Without -t it is read from the
     partition's type in the partition table (fdisk add ... ext2|zenixfs;
-    a PC partition of a FAT type counts as fat). A volume without a
-    partition table needs -t fat.
+    a PC partition of a FAT type counts as fat, an RDB partition of type
+    DOS\0 .. DOS\7 as ffs). A volume without a partition table needs -t
+    fat or -t ffs.
 
     The filesystem's server is a service (DESIGN D11): mount reads the
     device's volume id (where it is and its superblock's uuid) and
@@ -82,6 +83,45 @@ DESCRIPTION
     in dmesg; -o force mounts it writable and clears the mark at the
     next clean moment.
 
+    OFS and FFS (DESIGN D31): AmigaDOS volumes, an RDB partition (also
+    inside an MBR partition of type 0x76, as on an Emu68 card) or a
+    volume without a table (mount -t ffs df0 /mnt, -t ffs ide0 /mnt).
+    Read-only unless -o rw is given, on every device. DOS\0 .. DOS\7 are
+    read, with blocks of 512 to 32768 bytes. Written are only DOS\0 ..
+    DOS\3 with 512-byte blocks; the others run read-only with a line in
+    dmesg. Names are UTF-8 for programs and Latin-1 on the disk, and
+    case does not matter (A-Z, on international volumes the Latin-1
+    letters too). Owner, group and modes come from the mount; a file's
+    r, w and e bits select from fmode.
+    Options (-o, comma-separated):
+      rw             write. The whole volume is checked first: one read
+                     for each file and directory, a bit of memory per
+                     block for the moment. Anything wrong, a bitmap AmigaOS
+                     marked invalid, not enough memory: read-only, and the
+                     reason in dmesg.
+      ro             read-only, the default.
+      uid=N, gid=N   who owns everything (default 0, root).
+      fmode=OCT      the bits files may show (default 755).
+      dmode=OCT      the mode of directories (default 755).
+      blocksize=N, reserved=N   a volume whose table does not say.
+      defaults, noauto: accepted.
+    chmod sets the r, w and e bits: a mode the three bits cannot show (600)
+    is refused. Taking w away also protects from delete, as AmigaOS's
+    read-only; giving it back undoes both. An entry protected from
+    delete answers "operation not permitted" to rm, also for root.
+    Refused: chown to anyone else, a name with : / or control characters,
+    over 30 characters, or with a character outside Latin-1, ln to a
+    directory, ln -s to an absolute path (it would mean something else on
+    the Amiga). ln -s writes the Amiga's form of a relative path, and a link
+    read shows the Unix form: Vol:x from this volume climbs to its root;
+    a link to another volume leads nowhere.
+    Changes are saved 3 seconds after the first change, at sync(1) and
+    at umount, in an order that keeps the volume valid: a power cut can at
+    worst lose the last changes and leave space marked used, which the
+    next -o rw mount gives back. A rename always keeps the file under
+    its old name, its new name or both, and the next -o rw mount finishes
+    it. The volume never needs AmigaOS's validator because of Zenix.
+
     NFS (DESIGN D23): mount -t nfs nas:/volume1/zenix /nas puts a
     directory that a NAS or a Linux PC exports on dir (NFSv3 over TCP;
     -t nfs may be left out when the source has the form host:/export).
@@ -118,7 +158,7 @@ DESCRIPTION
 
     mount -a mounts everything listed in /etc/fstab; init runs it at boot.
     Each line is "device dir type options" (fields separated by spaces or
-    tabs): type is ext2, zenixfs, fat, nfs (device host:/export) or auto
+    tabs): type is ext2, zenixfs, fat, ffs, nfs (device host:/export) or auto
     (read from the partition type);
     options is defaults, or a comma list in which "noauto" leaves the line
     out of mount -a. Lines starting with # and empty lines are ignored.
@@ -131,6 +171,8 @@ EXAMPLES
     mount
     echo 'ide0p2 /data auto defaults' >> /etc/fstab
     mount -t fat -o uid=100,gid=100 ide0p1 /boot
+    mount ide0p3 /amiga
+    mount -t ffs -o rw df0 /floppy
     mount -t nfs nas:/volume1/zenix /nas
     mount -t nfs -o soft,timeo=10 192.0.2.20:/export /mnt
 
@@ -175,7 +217,17 @@ NOTES
     file handle" until it is closed. A real PC floppy cannot be read: the
     drive reads the Amiga's 880 KB tracks only (an image formatted FAT12
     can). A FAT mount needs /sbin/fatd on the root (the disktools package).
-    Only types with a server can be mounted (ext2, zenixfs, fat, nfs). A
+    OFS and FFS: files under 2 GB, the format's own limit; comments are
+    kept and never shown; times are stored as UTC; a -o rw mount checks
+    the whole volume first, so it takes longer the more files there are;
+    a rename across hash chains needs one free block (a full disk answers
+    "no space"); a write past the end writes zeros; a file open while ffsd
+    was restarted answers "stale file handle" until it is closed. A long
+    name over 63 bytes of UTF-8 is listed as its start, ~ and its block
+    number, which opens it. After a cut, a rename over an existing name can
+    leave both entries. An FFS mount needs /sbin/ffsd on the root (the
+    disktools package).
+    Only types with a server can be mounted (ext2, zenixfs, fat, ffs, nfs). A
     ZenixFS mount needs /sbin/zfsd on the root: without it the server does not
     start ("cannot start /sbin/zfsd" in dmesg).
     NFS writes: a write returns once the NAS holds the bytes; they are
@@ -211,5 +263,5 @@ NOTES
     writes past it (the frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
-    umount(8), nfscd(8), fatd(8), fdisk(1), df(1), dmesg(1), mkfs.ext2(1),
+    umount(8), nfscd(8), fatd(8), ffsd(8), fdisk(1), df(1), dmesg(1), mkfs.ext2(1),
     mkfs.zenixfs(1), boot(8)

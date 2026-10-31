@@ -122,6 +122,9 @@ pointers.
 - FAT (DESIGN D30, `docs/d30-fat.md`): 512-byte sectors only; 64 open files a mount, 16 chains waiting for a commit (more
   forces one), a 24-sector cache; a long name over 63 bytes of UTF-8 is listed by its 8.3 name; a FAT mount's options at
   most about 30 characters (the service text); no `fsck.fat` on Zenix.
+- OFS and FFS (DESIGN D31, `docs/d31-ffs.md`): only DOS\0-DOS\3 with 512-byte blocks are written; files under 2 GB; 64 open files a mount, 16 removed entries waiting for a commit (more
+  forces one), a cache of 24 blocks at 512 bytes (8 at 2 KB and over); a long name over 63 bytes of UTF-8 is listed by its start and block number; comments are not shown; options at
+  most about 30 characters (the service text).
 - NFS (DESIGN D23, architecture.md section 9 "nfscd"): 8 NFS mounts at most (nfs0 .. nfs7, within the 7 mounts);
   `HOST:/EXPORT` at most 62 characters with no options (the service text); files below 4 GB, offsets below 2 GB;
   names up to 63 bytes listed; the kernel's 8 supplementary groups a request (for a root program's own request: 16 a

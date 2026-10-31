@@ -959,6 +959,14 @@ FAT, so `UMSG_LINKS` never bounces. It has one 24-sector cache for FAT, director
 go straight between the disk and the caller), a table of open files, and a list of chains waiting to be freed. The
 commit order, inode numbers and damage rules are in `docs/d30-fat.md`.
 
+### ffsd - an OFS or FFS mount's server (`user/ffsd.c`, port `fs.DEVICE`, DESIGN D31)
+`mount -t ffs DEV DIR` (or an RDB partition of a type `DOS\0` .. `DOS\7`) registers `fs.DEV` -> `/sbin/ffsd DEV -id START,SIZE [-o OPTIONS]`
+at nice -10 (a file service, D11 6.4). One file, one process per mount, the protocol of `kernel/fsproto.h`; it answers
+`FS_LINKED` for soft links as zfsd does. It reads the block size and reserved blocks from the RDB with `user/rdb.h` through the whole
+disk's device. It has a cache of whole blocks with a kind each (new, bitmap, changed list, changed header), written in that
+order, a table of open files by header block, and a list of removed entries waiting for a commit. The rules are in
+`docs/d31-ffs.md`.
+
 ### nfscd - an NFS mount's server (`user/nfscd.c` + `net/nfs/`, port `fs.nfs0` .. `fs.nfs7`, DESIGN D23)
 `mount -t nfs HOST:/EXPORT DIR` registers `fs.nfsN` -> `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` at nice -10 (a file
 service, D11 6.4; the options as one word of codes: `s` soft, `tN` timeo, `rN` retrans, `o` read-only, `y` sync, `aN`

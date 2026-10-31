@@ -210,6 +210,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `euid=`), Linux's form.
 - **D30 (FAT, branch fat, 2026-10-31):** `/etc/fstab`'s type `fat` and mount's FAT options (`uid=`, `gid=`, `fmode=`,
   `dmode=`, `ro`, `rw`, `force`); `fsinfo.type` `fat`; the program text `/sbin/fatd DEV -id START,SIZE [-o OPTIONS]`.
+- **D31 (OFS, FFS, branch ffs, 2026-10-31):** `/etc/fstab`'s type `ffs` and mount's FFS options (`uid=`, `gid=`, `fmode=`,
+  `dmode=`, `ro`, `rw`, `blocksize=`, `reserved=`); `fsinfo.type` `ffs`; the program text `/sbin/ffsd DEV -id START,SIZE [-o OPTIONS]`.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

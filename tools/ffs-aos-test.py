@@ -161,7 +161,7 @@ def main():
         p = os.path.join(T, n)
         open(p, "wb").write(v.image())
         script = ("mount rw\nmkdir /Nya\nopen /Nya/Svensk+räksmörgås.txt wc\nwrite %1 0 hej\nclose %1\nopen /big.bin wc\nwrite %2 0 @200000\nclose %2\n"
-                  "rename /old.txt /Nya/moved.txt\nunlink /Dir/gone.bin\nsymlink ../from+linux.txt /Nya/lnk\nopen /ro.txt wc\nwrite %3 0 protected\nclose %3\nchmod /ro.txt 555\nsync\numount\n")
+                  "rename /old.txt /Nya/moved.txt\nunlink /Dir/gone.bin\nsymlink ../from+linux.txt /Nya/lnk\nopen /ro.txt wc\nwrite %3 0 protected\nclose %3\nchmod /ro.txt 555\nlink /big.bin /Nya/hardl\nsync\numount\n")
         o = ffsd(p, script)
         check(f"DOS{dos}: ffsd's workload", not re.search(r"-> -\d", o), o)
         imgs.append(p)
@@ -177,6 +177,7 @@ def main():
         check(f"AmigaOS lists {nm}, written by ffsd", rc == 0 and "big.bin" in o and "Nya" in o and "ro.txt" in o and "gone" not in o, o)
         check(f"AmigaOS reads ffsd's big file ({nm})", aget(dev + "big.bin") == patn(200000))
         check(f"... a moved file ({nm})", aget(dev + "Nya/moved.txt") == pat(3000))
+        check(f"... ffsd's hard link ({nm})", aget(dev + "Nya/hardl") == patn(200000))
         check(f"... a name written from UTF-8 ({nm})", "Svensk r" in wasabi("ls", dev + "Nya")[1])
         rc, o = wasabi("run", f"List {dev}ro.txt")
         check(f"... chmod 555 shows as AmigaOS's protection ({nm})", "r-e-" in o, o)

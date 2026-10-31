@@ -99,7 +99,7 @@ def judge(out, lszx):
     if b"/big.bin" in b.files:
         bad.append("OFS: big.bin is still there")
     c = Disk(os.path.join(out, "p5.img"), 1024).walk()
-    want(c, "/ls.bin", ls)
+    want(c, "/onek.txt", b"one-kb-blocks\n")
     f = Disk(os.path.join(out, "df1.adf")).walk()
     want(f, "/skriven.txt", b"written-on-floppy\n")
     want(f, "/flop.txt", b"on-the-floppy\n")

@@ -1,0 +1,29 @@
+FFSD(8)			Zenix manual
+
+NAME
+    ffsd - the server of an OFS or FFS mount
+
+SYNOPSIS
+    /sbin/ffsd device [-id start,size] [-o options]
+
+DESCRIPTION
+    Not a command: mount -t ffs registers it as the service fs.DEVICE
+    and the kernel starts it at the mount's first use (DESIGN D31,
+    docs/d31-ffs.md). It serves AmigaDOS volumes: OFS and FFS, with or
+    without international names, directory cache and long names
+    (DOS\0 .. DOS\7). Everything a user sets is mount's: see mount(8)
+    for the options and the limits. It comes with the disktools package.
+
+    Its lines in dmesg start with ffsd: a volume it refuses and why, a
+    volume mounted read-only and why, lost blocks given back, a change
+    a power cut left half done and now finished, a bad option, a write
+    that failed.
+
+    A damaged volume answers errors, never a crash: a file whose list
+    of blocks loops or leaves the volume answers an I/O error when it
+    is opened; a listing goes on past a damaged chain and answers an
+    I/O error at its end. With -o rw the whole volume is checked first;
+    anything wrong and it is mounted read-only with the reason.
+
+SEE ALSO
+    mount(8), umount(8)

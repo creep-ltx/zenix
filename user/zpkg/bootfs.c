@@ -286,7 +286,10 @@ static int walk_dir(struct zp_bootvol *v, zp_u32 d, int depth, const char *want,
                     break;
                 rc = header(v, b, T_HEADER, d, buf, why);
                 break;
-            case ST_LINKFILE: case ST_LINKDIR: case ST_SOFTLINK:
+            case ST_LINKFILE: case ST_LINKDIR:
+                v->links = 1;                                   /* see the give-back below */
+                break;
+            case ST_SOFTLINK:
                 break;                                          /* a header only (the target is walked as itself) */
             default:
                 rc = refuse(why, "an entry of an unknown kind (secondary type)", ZP_EINVAL);
@@ -654,8 +657,10 @@ int zp_boot_create(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src s
         bm_take(v, nb[i], dirty);
         v->own[nb[i] >> 3] |= (unsigned char)(1u << (nb[i] & 7));
     }
-    if (v->nleak)                                           /* blocks a cut write left in use that nothing names (the
-                                                             * walk proved it): free again in the same writes */
+    if (v->nleak && !v->links)                              /* blocks a cut write left in use that nothing names (the
+                                                             * walk proved it): free again in the same writes. Not with
+                                                             * hard links: a cut in ffsd's rename (d31 8) leaves a file
+                                                             * whose header is reached only through its link */
         for (b = v->f->reserved; b < v->f->nblocks; b++)
             if (!owned(v, b) && !bm_free(v, b))
                 bm_give(v, b, dirty);
@@ -679,8 +684,12 @@ int zp_boot_create(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src s
     sum_set(buf, L_CHECKSUM);
     if ((rc = wr(v, prev ? prev : v->dir, buf, why)) != 0 || (rc = flush(v, why)) != 0)
         goto out;
-    v->nfree = v->nfree - total + v->nleak;
-    v->nleak = 0;
+    if (v->links)
+        v->nfree -= total;
+    else {
+        v->nfree = v->nfree - total + v->nleak;
+        v->nleak = 0;
+    }
     rc = 0;
 out:
     free(nb);

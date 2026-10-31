@@ -671,6 +671,7 @@ static int alloc_block(u32 *out)
             u32 v = GL(c->d, 1 + wi) >> bit;
             if (!v) {                                 /* nothing free in the rest of this word */
                 u32 skip = 32 - bit;
+                if (skip > nblocks - b) skip = nblocks - b;   /* the bits past the end count for nothing */
                 b += skip; scanned += skip;
                 if (b >= nblocks) b = reserved;
                 continue;
@@ -735,7 +736,6 @@ static void free_entry(u32 key)
 }
 
 /* ---- commits ---- */
-static u32 rd_dir;                     /* the listing's memory: see do_readdir */
 static int sync_all(void)
 {
     int r;
@@ -825,7 +825,6 @@ static int chain_remove(u32 dir, u32 key)
     if (!c) return -EIO;
     SL(c->d, at, after);
     mark(c, K_REF, SUM_HDR);
-    rd_dir = 0;
     return 0;
 }
 /* the entry KEY, whose name is already in it, joins DIR's chain at its place in block order. FLUSH: it reaches the disk
@@ -845,7 +844,6 @@ static int chain_insert(u32 dir, u32 key, int flush)
     if (!c) return -EIO;
     SL(c->d, at, key);
     mark(c, K_REF, SUM_HDR);
-    rd_dir = 0;
     return 0;
 }
 static int dir_touch(u32 dir)
@@ -1037,6 +1035,7 @@ static int file_put(struct ofile *o, u32 off, const u8 *buf, u32 n)
         u32 idx = off / pay, in = off % pay, left = n - done, d;
         int fresh, r = data_block_grow(o, idx, &d, &fresh);
         if (r) return done ? (int)done : r;
+        if (idx * pay >= o->size && off >= o->size) fresh = 1;   /* named past the size (a cut, d31 7): it holds nothing */
         if (is_ofs) {
             struct cbuf *c;
             if (fresh) {
@@ -1245,60 +1244,50 @@ static int do_open(struct umsg *m)
     return (int)o->ino;
 }
 
-/* a listing's memory: where the walk of the chain stands, so reading a directory in order costs one block per entry. Any
- * change to a chain forgets it; a request out of order walks its chain from the start. The cookie: bit 31 damage was
- * met, 16 and up the hash slot, below that the place in its chain */
-static u32 rd_cookie, rd_next;
+/* a listing's place is the last entry it gave: its header says the rest (its hash, its next), also when it was removed
+ * meanwhile, so a program that removes what it reads misses nothing. The cookie: bit 31 damage was met, below that the
+ * last entry; RD_END after the last slot. A listing goes on past a damaged chain and answers -EIO at the end */
+#define RD_END 0x7FFFFFFFu
+static u32 rd_dir;
 static struct cwalk rd_w;
 static int do_readdir(struct umsg *m)
 {
     struct udirent *ud = (struct udirent *)m->a[2];
-    u32 dir = m->a[0], cookie = m->a[1], bad = cookie >> 31, s = (cookie >> 16) & 0x7FFF, idx = cookie & 0xFFFF, e = 0;
-    int have = 0, r = ino_dir(dir);
+    u32 dir = m->a[0], cookie = m->a[1], bad = cookie >> 31, last = cookie & RD_END, s = 0, e = 0;
+    u32 *newc = (u32 *)m->a[3];
+    const u8 *nm;
+    u32 len;
+    struct cbuf *c;
+    int r = ino_dir(dir);
     if (r) return r;
-    if (rd_dir == dir && rd_cookie == cookie && rd_next) { e = rd_next; have = 1; }
-    else if (idx && s < HT) {                         /* out of order: walk this chain to its place */
-        struct cbuf *c = hdr(dir);
-        if (!c) return -EIO;
-        e = GL(c->d, O_TABLE + s);
-        cw_init(&rd_w);
-        for (u32 i = 0; i < idx && e; i++) {
-            u32 nx = 0;
-            if (!(c = hdr(e)) || cw_step(&rd_w, nx = GL(c->d, O_CHAIN))) { bad = 1; nx = 0; }
-            e = nx;
-        }
-        if (e) have = 1;
-        else { s++; idx = 0; }                        /* the chain got shorter meanwhile, or is damaged */
-    } else idx = 0;
+    if (last == RD_END) { *newc = cookie; return bad ? -EIO : 0; }
+    if (rd_dir != dir || !last) { rd_dir = dir; cw_init(&rd_w); }
+    if (last) {
+        if (!(c = hdr(last)) || GL(c->d, O_PARENT) != dir || name_of(c->d, last, &nm, &len)) return -EIO;   /* its block was used again */
+        s = name_hash(nm, len) + 1;
+        e = GL(c->d, O_CHAIN);
+        if (cw_step(&rd_w, e)) { bad = 1; e = 0; }
+    }
     for (;;) {
-        if (!have) {
+        if (!e) {
             if (s >= HT) {
-                *(u32 *)m->a[3] = (bad << 31) | (HT << 16);
+                *newc = bad << 31 | RD_END;
                 return bad ? -EIO : 0;
             }
-            struct cbuf *c = hdr(dir);
-            if (!c) return -EIO;
+            if (!(c = hdr(dir))) return -EIO;
             e = GL(c->d, O_TABLE + s);
-            idx = 0;
+            s++;
             cw_init(&rd_w);
-            have = 1;
+            continue;
         }
-        if (!e) { s++; idx = 0; have = 0; continue; }
-        struct cbuf *c = hdr(e);
-        const u8 *nm;
-        u32 len;
-        if (!c || GL(c->d, O_PARENT) != dir || name_of(c->d, e, &nm, &len)) { bad = 1; s++; idx = 0; have = 0; continue; }
-        u32 sec = GL(c->d, O_SEC), nx = GL(c->d, O_CHAIN);
-        if (sec != ST_FILE && sec != ST_DIR && sec != ST_SOFT && sec != ST_LFILE && sec != ST_LDIR) { bad = 1; s++; idx = 0; have = 0; continue; }
+        c = hdr(e);
+        if (!c || GL(c->d, O_PARENT) != dir || name_of(c->d, e, &nm, &len) || name_hash(nm, len) != s - 1) { bad = 1; e = 0; continue; }
+        u32 sec = GL(c->d, O_SEC);
+        if (sec != ST_FILE && sec != ST_DIR && sec != ST_SOFT && sec != ST_LFILE && sec != ST_LDIR) { bad = 1; e = 0; continue; }
         name_list(nm, len, e, ud->name, sizeof ud->name);
         ud->type = sec == ST_DIR || sec == ST_LDIR ? 2 : sec == ST_SOFT ? 7 : 1;
         ud->ino = sec == ST_LFILE || sec == ST_LDIR ? GL(c->d, O_REAL) : e;
-        if (cw_step(&rd_w, nx)) { bad = 1; nx = 0; }
-        if (idx >= 0xFFFE) { bad = 1; nx = 0; }       /* more than 65,534 names in one chain: damage */
-        if (nx) idx++; else { s++; idx = 0; }
-        rd_dir = dir; rd_next = nx;
-        rd_cookie = (bad << 31) | (s << 16) | idx;
-        *(u32 *)m->a[3] = rd_cookie;
+        *newc = bad << 31 | e;
         return 1;
     }
 }
@@ -1321,27 +1310,6 @@ static int dir_empty(u32 d)
     if (!c) return -EIO;
     for (u32 i = 0; i < HT; i++) if (GL(c->d, O_TABLE + i)) return -ENOTEMPTY;
     return 0;
-}
-/* the entry KEY changes its name (N, LEN) and directory. Over three writes when chains differ: out of the old chain, the
- * header, into the new chain, each on the disk before the next: linking first would put it in two chains */
-static int rename_core(u32 key, u32 olddir, u32 newdir, const u8 *nm, u32 len)
-{
-    u32 oh, nh = name_hash(nm, len);
-    int r = entry_hash(key, &oh);
-    if (r) return r;
-    struct cbuf *c;
-    if (olddir == newdir && oh == nh) {               /* the same chain: one write */
-        if (!(c = hdr(key))) return -EIO;
-        set_name(c->d, nm, len);
-        mark(c, K_REF, SUM_HDR);
-        rd_dir = 0;
-        return 0;
-    }
-    if ((r = chain_remove(olddir, key)) || (r = flush_all())) return r;
-    if (!(c = hdr(key))) return -EIO;
-    set_name(c->d, nm, len);
-    mark(c, K_REF, SUM_HDR);
-    return chain_insert(newdir, key, 1);
 }
 /* the hard link L leaves its file's list, as the list's last step */
 static int list_splice(u32 real, u32 l)
@@ -1369,6 +1337,68 @@ static int unlink_link(u32 l, u32 dir, u32 real)
     if ((r = chain_remove(dir, l)) || (r = flush_all()) || (r = list_splice(real, l))) return r;
     return entry_release(l);
 }
+/* a new hard link to REAL, named NM in DIR: its block, then the file's list, then the directory's chain, each on the disk
+ * before the next. After this the file has both names (d31 8) */
+static int link_new(u32 real, u32 dir, const u8 *nm, u32 len, u32 sec, u32 *out)
+{
+    u32 b, nl;
+    int r = alloc_block(&b);
+    if (r) return r;
+    struct cbuf *c = hdr(real);
+    if (!c) return -EIO;
+    nl = GL(c->d, O_NEXTLINK);
+    if (!(c = new_block(b))) return -EIO;
+    SL(c->d, 0, T_HEADER); SL(c->d, 1, b); SL(c->d, O_SEC, sec); SL(c->d, O_PARENT, dir);
+    SL(c->d, O_REAL, real); SL(c->d, O_NEXTLINK, nl);
+    set_name(c->d, nm, len);
+    put_date(c->d, O_DAYS, (u32)sys_time());
+    mark(c, K_NEW, SUM_HDR);
+    if (!(c = hdr(real))) return -EIO;
+    SL(c->d, O_NEXTLINK, b);
+    mark(c, K_REF, SUM_HDR);
+    if ((r = flush_all()) || (r = chain_insert(dir, b, 0)) || (r = flush_all())) return r;
+    *out = b;
+    return 0;
+}
+/* the header H, in no chain now, takes the name and place of its hard link L, and L goes */
+static int take_place(u32 h, u32 l, u32 ldir)
+{
+    u8 nm[31];
+    const u8 *p;
+    u32 len;
+    int r;
+    struct cbuf *c = hdr(l);
+    if (!c || name_of(c->d, l, &p, &len) || len > 30) return -EIO;
+    memcpy(nm, p, len);
+    if (!(c = hdr(h))) return -EIO;
+    set_name(c->d, nm, len);
+    mark(c, K_REF, SUM_HDR);
+    if ((r = chain_insert(ldir, h, 1)) || (r = flush_all())) return r;
+    return unlink_link(l, ldir, h);
+}
+/* the header H (in chain of directory HDIR) takes the name of its hard link L. Through all of this the file has a name:
+ * L's, which leads to H. The same chain: one write */
+static int promote(u32 h, u32 hdir, u32 l, u32 ldir)
+{
+    u32 h1, h2;
+    int r;
+    if ((r = entry_hash(h, &h1)) || (r = entry_hash(l, &h2))) return r;
+    if (hdir == ldir && h1 == h2) {
+        const u8 *p;
+        u8 nm[31];
+        u32 len;
+        struct cbuf *c = hdr(l);
+        if (!c || name_of(c->d, l, &p, &len) || len > 30) return -EIO;
+        memcpy(nm, p, len);
+        if (!(c = hdr(h))) return -EIO;
+        set_name(c->d, nm, len);
+        mark(c, K_REF, SUM_HDR);
+        if ((r = flush_all())) return r;
+        return unlink_link(l, ldir, h);
+    }
+    if ((r = chain_remove(hdir, h)) || (r = flush_all())) return r;
+    return take_place(h, l, ldir);
+}
 /* the name N goes, and what it names if that was the last name. The original of a file with hard links takes over the
  * first link's name and the link goes: nothing that points at the header has to change */
 static int unlink_entry(const node_t *n)
@@ -1382,15 +1412,9 @@ static int unlink_entry(const node_t *n)
     if (!c) return -EIO;
     u32 l = n->sec == ST_SOFT ? 0 : GL(c->d, O_NEXTLINK);
     if (l) {
-        u8 nm[31];
-        const u8 *p;
-        u32 len;
-        c = hdr(l);
-        if (!c || name_of(c->d, l, &p, &len) || len > 30) return -EIO;
-        memcpy(nm, p, len);
+        if (!(c = hdr(l))) return -EIO;
         u32 ld = GL(c->d, O_PARENT);
-        if ((r = rename_core(n->key, n->parent, ld, nm, len)) || (r = flush_all())) return r;
-        if ((r = unlink_link(l, ld, n->key))) return r;
+        if ((r = promote(n->key, n->parent, l, ld))) return r;
         return dir_touch(n->parent);
     }
     if ((r = chain_remove(n->parent, n->key)) || (r = dir_touch(n->parent))) return r;
@@ -1413,6 +1437,7 @@ static int do_rename(struct umsg *m)
     if (!dir_may()) return -EACCES;
     if ((r = name_bad())) return r;
     u32 len = q_len;
+    if (len > 30) return readonly ? -EROFS : -ENAMETOOLONG;    /* (only a long-name volume, never written, gets here) */
     memcpy(nm, q, len);
     if (is_dir(&a) && !a.islink) {
         if ((r = inside(db, a.key)) < 0) return r;
@@ -1437,14 +1462,35 @@ static int do_rename(struct umsg *m)
         if (t.prot & P_DELETE) return -EPERM;
     }
     if ((r = touch())) return r;
-    if ((r = rename_core(a.key, a.parent, db, nm, len))) return r;
-    if ((r = dir_touch(a.parent)) || (db != a.parent && (r = dir_touch(db)))) return r;
-    /* the new entry is in, on the disk, before the old one with that name goes: the name never goes missing */
-    if ((r = flush_all())) return r;
-    if (exists) {
-        if ((r = node_load(t.key, &t)) || (r = unlink_entry(&t))) return r;
+    u32 h1, l = 0;
+    if ((r = entry_hash(a.key, &h1))) return r;
+    if (a.parent == db && h1 == name_hash(nm, len)) {  /* the same chain: one write */
+        struct cbuf *c = hdr(a.key);
+        if (!c) return -EIO;
+        set_name(c->d, nm, len);
+        mark(c, K_REF, SUM_HDR);
+        if ((r = flush_all())) return r;
+        if (exists && ((r = node_load(t.key, &t)) || (r = unlink_entry(&t)))) return r;
+    } else if (a.sec == ST_SOFT) {                    /* nothing points at a soft link: a new one, the old one goes */
+        struct cbuf *c = hdr(a.key);
+        if (!c) return -EIO;
+        memcpy(sb, c->d, BS);
+        if ((r = alloc_block(&l)) || !(c = new_block(l))) return r ? r : -EIO;
+        memcpy(c->d, sb, BS);
+        SL(c->d, 1, l);
+        set_name(c->d, nm, len);
+        mark(c, K_NEW, SUM_HDR);
+        if ((r = chain_insert(db, l, 0)) || (r = flush_all())) return r;
+        if (exists && ((r = node_load(t.key, &t)) || (r = unlink_entry(&t)) || (r = flush_all()))) return r;
+        if ((r = chain_remove(a.parent, a.key)) || (r = entry_release(a.key))) return r;
+    } else {                                          /* d31 8: the new name first, as a hard link */
+        if ((r = link_new(a.real, db, nm, len, is_dir(&a) ? ST_LDIR : ST_LFILE, &l))) return r;
+        if (exists && ((r = node_load(t.key, &t)) || (r = unlink_entry(&t)) || (r = flush_all()))) return r;
+        r = a.islink ? unlink_link(a.key, a.parent, a.real) : promote(a.key, a.parent, l, db);
+        if (r) return r;
     }
-    return flush_kind(K_REF);
+    if ((r = dir_touch(a.parent)) || (db != a.parent && (r = dir_touch(db)))) return r;
+    return flush_all();
 }
 
 static int do_mkdir(struct umsg *m)
@@ -1603,10 +1649,21 @@ static int handle1(struct umsg *m)
         if ((o = slot_ino(n.real))) o->mtime = t;
         return 0;
     }
-    case FS_LINK: {                                   /* d31: read and removed, not made */
+    case FS_LINK: {
         const char *p = (const char *)m->a[0];
+        u32 l;
         if ((r = walk(m->a[2], p, strlen(p), 1, 0, &n))) return r;
-        return -EPERM;
+        if (is_dir(&n)) return -EPERM;                /* no hard links to directories */
+        u32 real = n.real;
+        if ((r = parent_of(m->a[2], (const char *)m->a[1], &dir))) return r;
+        if (!dir_may()) return -EACCES;
+        if ((r = name_bad())) return r;
+        r = lookup(dir, &n);
+        if (!r) return -EEXIST;
+        if (r != -ENOENT) return r;
+        if ((r = touch())) return r;
+        if ((r = link_new(real, dir, q, q_len, ST_LFILE, &l))) return r;
+        return dir_touch(dir);
     }
     case FS_SYMLINK: return do_symlink(m);
     case FS_READLINK: {
@@ -1680,15 +1737,31 @@ static int own(u32 b)
     owned[k >> 5] |= 1u << (k & 31);
     return 1;
 }
-/* is the entry KEY in the chain of its directory? */
+/* is the entry KEY in the chain of its directory? 1, 0, -1 on damage or a read error */
 static int in_chain(u32 key)
 {
-    u32 h, prev, at, next;
     struct cbuf *c = hdr(key);
-    if (!c) return 0;
-    u32 dir = GL(c->d, O_PARENT);
-    return !entry_hash(key, &h) && !chain_place(dir, key, h, 1, &prev, &at, &next);
+    const u8 *n;
+    u32 len;
+    struct cwalk w;
+    if (!c || name_of(c->d, key, &n, &len)) return -1;
+    u32 h = name_hash(n, len), dir = GL(c->d, O_PARENT);
+    if (!(c = hdr(dir))) return -1;
+    if (GL(c->d, O_SEC) != ST_DIR && GL(c->d, O_SEC) != ST_ROOT) return -1;
+    u32 e = GL(c->d, O_TABLE + h);
+    cw_init(&w);
+    while (e) {
+        if (e == key) return 1;
+        if (!(c = hdr(e))) return -1;
+        e = GL(c->d, O_CHAIN);
+        if (cw_step(&w, e)) return -1;
+    }
+    return 0;
 }
+/* what a power cut left half done, to finish when the whole volume has proved good (d31 8): at most one */
+enum { FIX_NONE, FIX_SPLICE, FIX_TAKE, FIX_DROP };
+static int fix_kind;
+static u32 fix_h, fix_l, fix_dir;
 static const char *check_file(u32 key)
 {
     struct cbuf *c = hdr(key);
@@ -1716,8 +1789,7 @@ static const char *check_file(u32 key)
     }
     return 0;
 }
-/* the file's list of hard links: each member a link to it. One not in its directory's chain (a cut while it was removed)
- * leaves the list here */
+/* the file's list of hard links: each member a link to it. One not in its directory's chain: a cut around its removal */
 static const char *check_list(u32 key)
 {
     struct cbuf *c = hdr(key);
@@ -1727,29 +1799,59 @@ static const char *check_list(u32 key)
         if (i > 4096 || !(c = hdr(l))) return "a damaged list of hard links";
         u32 nx = GL(c->d, O_NEXTLINK);
         if ((GL(c->d, O_SEC) != ST_LFILE && GL(c->d, O_SEC) != ST_LDIR) || GL(c->d, O_REAL) != key) return "a damaged list of hard links";
-        if (!in_chain(l) && (list_splice(key, l) || flush_kind(K_REF))) return "a damaged list of hard links";
+        int in = in_chain(l);
+        if (in < 0) return "a damaged list of hard links";
+        if (!in) {
+            if (fix_kind || !own(l)) return "more than one change left half done";
+            fix_kind = FIX_SPLICE; fix_h = key; fix_l = l;
+        }
         l = nx;
     }
     return 0;
 }
+static const char *check_tree(u32 start);
+static u32 fix_walk;                   /* a directory found only through its hard link: walked after the tree */
 static const char *check_link(u32 key)
 {
     struct cbuf *c = hdr(key);
     if (!c) return "a damaged link";
-    u32 t = GL(c->d, O_REAL), s = GL(c->d, O_SEC), l;
+    u32 t = GL(c->d, O_REAL), s = GL(c->d, O_SEC), dir = GL(c->d, O_PARENT), l;
     if (t == key || !(c = hdr(t)) || GL(c->d, O_SEC) != (s == ST_LFILE ? ST_FILE : ST_DIR)) return "a hard link to nothing";
     l = GL(c->d, O_NEXTLINK);
     for (u32 i = 0; l != key; i++) {
         if (!l || i > 4096 || !(c = hdr(l))) return "a hard link its file does not know";
         l = GL(c->d, O_NEXTLINK);
     }
-    if (!in_chain(t)) return "a hard link to a file in no directory";
+    int in = in_chain(t);
+    if (in < 0) return "a hard link to a damaged file";
+    if (!in) {                                        /* a cut in a rename: the header has left its chain */
+        const char *w;
+        if (fix_kind || !own(t)) return "more than one change left half done";
+        fix_kind = FIX_TAKE; fix_h = t; fix_l = key; fix_dir = dir;
+        if ((w = check_list(t))) return w;
+        if (s == ST_LFILE) return check_file(t);
+        fix_walk = t;
+        return 0;
+    }
+    if (!(c = hdr(t))) return "a damaged file header";
+    if (GL(c->d, O_PARENT) == dir) {                  /* a cut at the end of a rename: both entries have one name */
+        const u8 *a, *b;
+        u32 la, lb;
+        u8 copy[31];
+        if (name_of(c->d, t, &a, &la) || la > 30) return "a damaged file header";
+        memcpy(copy, a, la);
+        if (!(c = hdr(key)) || name_of(c->d, key, &b, &lb)) return "a damaged link";
+        if (la == lb && !memcmp(copy, b, la)) {
+            if (fix_kind) return "more than one change left half done";
+            fix_kind = FIX_DROP; fix_h = t; fix_l = key; fix_dir = dir;
+        }
+    }
     return 0;
 }
 /* the walk: no stack, no recursion, whatever the depth: after a directory its header says where to go on */
-static const char *check_tree(void)
+static const char *check_tree(u32 start)
 {
-    u32 d = root_blk, h = 0, e = 0;
+    u32 d = start, h = 0, e = 0;
     const char *w;
     for (;;) {
         struct cbuf *c;
@@ -1757,7 +1859,7 @@ static const char *check_tree(void)
             if (!(c = hdr(d))) return "a damaged directory";
             while (h < HT && !(e = GL(c->d, O_TABLE + h))) h++;
             if (h == HT) {
-                if (d == root_blk) return 0;
+                if (d == start) return 0;
                 if (entry_hash(d, &h) || !(c = hdr(d))) return "a damaged directory";
                 e = GL(c->d, O_CHAIN);
                 d = GL(c->d, O_PARENT);
@@ -1784,10 +1886,10 @@ static const char *check_tree(void)
         e = nx;
     }
 }
-/* the bitmap against the walk: a named block marked free is damage; a block marked used that nothing names goes free */
+/* the bitmap against the walk: a named block marked free is damage. Nothing changes until all of it has been looked at */
 static const char *check_bitmap(u32 *leaks)
 {
-    u32 total = nblocks - reserved, k = 0;
+    u32 total = nblocks - reserved;
     *leaks = 0;
     free_cnt = 0;
     for (u32 p = 0; p < nbm; p++) {                   /* first all of them: one page says what another page's block is */
@@ -1795,21 +1897,25 @@ static const char *check_bitmap(u32 *leaks)
         if (bm_where(p, &b)) return "a bitmap pointer outside the volume";
         if (!own(b)) return "a bitmap block named twice";
     }
-    for (u32 p = 0; p < nbm; p++) {
-        struct cbuf *c;
-        if (!(c = bm_page(p))) return "a bitmap block with a bad checksum";
-        for (u32 w = 1; w < LW && k < total; w++, k += 32) {
-            u32 bits = total - k < 32 ? total - k : 32, in = bits < 32 ? (1u << bits) - 1 : 0xFFFFFFFFu;
-            u32 fr = GL(c->d, w) & in, used = owned[k >> 5];
-            if (fr & used) return "a block in use is marked free";
-            u32 leak = ~(fr | used) & in;
-            for (u32 v = fr | leak; v; v &= v - 1) free_cnt++;
-            if (leak) {
-                for (u32 v = leak; v; v &= v - 1) (*leaks)++;
-                SL(c->d, w, GL(c->d, w) | leak);
-                mark(c, K_BM, SUM_BM);
+    for (int give = 0; give < 2; give++) {
+        u32 k = 0;
+        for (u32 p = 0; p < nbm; p++) {
+            struct cbuf *c = bm_page(p);
+            if (!c) return "a bitmap block with a bad checksum";
+            for (u32 w = 1; w < LW && k < total; w++, k += 32) {
+                u32 bits = total - k < 32 ? total - k : 32, in = bits < 32 ? (1u << bits) - 1 : 0xFFFFFFFFu;
+                u32 fr = GL(c->d, w) & in, used = owned[k >> 5], leak = ~(fr | used) & in;
+                if (!give) {
+                    if (fr & used) return "a block in use is marked free";
+                    for (u32 v = fr | leak; v; v &= v - 1) free_cnt++;
+                    for (u32 v = leak; v; v &= v - 1) (*leaks)++;
+                } else if (leak) {                    /* a block nothing names goes free: the walk proved it */
+                    SL(c->d, w, GL(c->d, w) | leak);
+                    mark(c, K_BM, SUM_BM);
+                }
             }
         }
+        if (!*leaks) break;
     }
     return 0;
 }
@@ -1828,7 +1934,8 @@ static int check_volume(void)
         if (!own(e) || !(c = cget(e, K_REF, 0))) w = "a damaged bitmap extension block";
         else e = GL(c->d, LW - 1);
     }
-    if (!w) w = check_tree();
+    if (!w) w = check_tree(root_blk);
+    if (!w && fix_walk) w = check_tree(fix_walk);
     if (!w) w = check_bitmap(&leaks);
     free(owned);
     owned = 0;
@@ -1836,14 +1943,21 @@ static int check_volume(void)
         dprintf(1, "ffsd: %s: damaged: %s: mounted read-only\n", devname, w);
         readonly = 1;
         free_cnt = 0xFFFFFFFFu;
-        for (u32 i = 0; i < ncache; i++) cache[i].valid = cache[i].dirty = 0;     /* a repair begun is dropped */
+        for (u32 i = 0; i < ncache; i++) cache[i].dirty = 0;     /* (nothing was changed; the bits stay as they were) */
         return 0;
     }
     if (leaks) {
         dprintf(1, "ffsd: %s: %u lost blocks given back\n", devname, leaks);
         dirty = 1; dirty_since = sys_ticks();
     }
-    for (u32 i = 0; i < ncache; i++) if (cache[i].valid && cache[i].dirty) { dirty = 1; dirty_since = sys_ticks(); }
+    if (fix_kind) {                                   /* the volume is good but for this: finish it */
+        int r = fix_kind == FIX_SPLICE ? list_splice(fix_h, fix_l) : fix_kind == FIX_DROP ? unlink_link(fix_l, fix_dir, fix_h) : take_place(fix_h, fix_l, fix_dir);
+        if (!r) r = flush_all();
+        if (r) { why("could not finish a change a power cut left half done: mounted read-only"); readonly = 1; return 0; }
+        if (fix_kind == FIX_SPLICE) free_block(fix_l);
+        dprintf(1, "ffsd: %s: finished a change a power cut left half done\n", devname);
+        dirty = 1; dirty_since = sys_ticks();
+    }
     return 0;
 }
 
@@ -1945,6 +2059,7 @@ static int try_mount(const char *name, int restart)
         if (!(di.caps & (DISKCAP_FLUSH | DISKCAP_RAM)))
             why("the disk cannot flush its write cache: a power cut may damage the volume if the disk reorders writes");
         if (v > 3) { why(v < 6 ? "a directory cache volume is never written: mounted read-only" : "a long-name volume is never written: mounted read-only"); readonly = 1; }
+        else if (BS != 512) { why("blocks over 512 bytes are never written (one block is not one write to the disk): mounted read-only"); readonly = 1; }
         else if (!bm_valid) { why("its bitmap is marked invalid (AmigaOS validates it at its next mount): mounted read-only"); readonly = 1; }
         else if (t0 != dostype || ((dt & 0xFFFFFF00u) == 0x444F5300u && dt != dostype)) { why("the boot block and the partition table name different types: mounted read-only"); readonly = 1; }
         else if (!nocheck && check_volume()) goto no;

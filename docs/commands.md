@@ -64,6 +64,7 @@ spot-checked against the code that day.
 | [random](man/random.txt) | not a command: `/dev/random` and `/dev/urandom`, the kernel's random numbers, and the seed file (DESIGN D19) |
 | [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
 | [fatd](man/fatd.txt) | not a command: a FAT mount's server (`/sbin/fatd`, DESIGN D30), started by the kernel for `mount -t fat`; its manual is mount's |
+| [ffsd](man/ffsd.txt) | not a command: an OFS or FFS mount's server (`/sbin/ffsd`, DESIGN D31), started by the kernel for `mount -t ffs`; its manual is mount's |
 | [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd, zfsd, or nfscd for a NAS's folder over NFS, DESIGN D23)|
 
 ## The network
