@@ -18,5 +18,9 @@ DESCRIPTION
     volume not marked clean ("mounted read-only"), a bad option, a write
     that failed.
 
+    A damaged volume answers errors, never a crash: a file whose chain
+    loops or leaves the volume answers an I/O error when it is opened;
+    opening it with truncation still works, and so does removing it.
+
 SEE ALSO
     mount(8), umount(8)
