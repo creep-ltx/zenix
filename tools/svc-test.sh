@@ -63,7 +63,7 @@ line() { if grep -aqxF -- "$3" "$OUT/$1.log"; then echo "PASS $2"; else echo "FA
 rx()   { if grep -aqxE -- "$3" "$OUT/$1.log"; then echo "PASS $2"; else echo "FAIL $2"; pass=0; fi; }
 none() { if grep -aqxE -- "$3" "$OUT/$1.log"; then echo "FAIL $2"; pass=0; else echo "PASS $2"; fi; }
 same() {   # same LOG WHAT KEY1 KEY2: two "KEY=N" lines hold the same number
-    local a b; a=$(grep -aoxE "$3=[0-9]+" "$OUT/$1.log" | head -1); b=$(grep -aoxE "$4=[0-9]+" "$OUT/$1.log" | head -1)
+    local a b; a=$(grep -aoE "$3=[0-9]+" "$OUT/$1.log" | head -1); b=$(grep -aoE "$4=[0-9]+" "$OUT/$1.log" | head -1)   # not -x: a kernel line may start before it
     if [ -n "$a" ] && [ "${a#*=}" = "${b#*=}" ]; then echo "PASS $2 (${a#*=})"; else echo "FAIL $2 ($a $b)"; pass=0; fi
 }
 conf() {   # conf NAME HDF [FLOPPY]: the fast A1200 with another hard disk (and another boot floppy)
@@ -166,7 +166,7 @@ rm -f "$OUT/root.hdf" "$OUT/df1.adf"
 fi
 
 free_grew() {   # free_grew LOG WHAT A B MIN: the number in B=... exceeds the one in A=... by at least MIN
-    local a b; a=$(grep -aoxE "$3=[0-9]+" "$OUT/$1.log" | head -1); b=$(grep -aoxE "$4=[0-9]+" "$OUT/$1.log" | head -1)
+    local a b; a=$(grep -aoE "$3=[0-9]+" "$OUT/$1.log" | head -1); b=$(grep -aoE "$4=[0-9]+" "$OUT/$1.log" | head -1)   # not -x: a kernel line may start before it
     a=${a#*=}; b=${b#*=}
     if [ -n "$a" ] && [ -n "$b" ] && [ $((b - a)) -ge "$5" ]; then echo "PASS $2 ($a -> $b KB)"; else echo "FAIL $2 ($a -> $b KB)"; pass=0; fi
 }
