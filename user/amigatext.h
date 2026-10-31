@@ -90,3 +90,10 @@ static __attribute__((unused)) int am_link_rest(const u8 *t, u32 start, u32 n, c
     out[k] = 0;
     return (int)k;
 }
+/* the names before byte S of an absolute path: how far a soft link there is below the volume's root */
+static __attribute__((unused)) u32 am_path_depth(const char *p, u32 s)
+{
+    u32 d = 0;
+    for (u32 i = 1; i < s; i++) if (p[i] != '/' && (p[i - 1] == '/')) d++;
+    return d;
+}

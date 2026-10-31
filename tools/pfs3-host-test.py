@@ -214,8 +214,27 @@ def test_names():
     ls = lines(o)
     check("every change is refused: read-only filesystem", all(l.endswith("-30") for l in ls[1:13]), o)
     check("nothing written", "writes -> 0" in o)
+    rc, o = run(p, "mount\nunlink /missing\nmkdir /b1\nmkdir /no/such\nopen /no/such r\nopen /no/such c\nrename /missing /x\nrename /b1 /no/x\nlink /missing /x\nsymlink b1 /sl1\nchmod /missing 600\nrmdir /missing\nunlink /\n")
+    ls = lines(o)
+    want = ["-2", "-17", "-2", "-2", "-2", "-2", "-2", "-2", "-17", "-2", "-2", "-21"]
+    check("a change that could not have happened anyway answers why", [l.split()[-1] for l in ls[1:13]] == want, o)
+    rc, o = run(p, "mount\nlinks on\nmkdir /sl6/new\nunlink /sl6/y.txt\nchmod /sl1 600\nrename /sl6/y /Under/z\nrename /Under/x.txt /sl6/z\nopen /sl6/n wc\nlinks off\n")
+    ls = lines(o)
+    check("a change through a link bounces first: where it leads may be writable", all("-102" in l for l in ls[2:6]) and "-102" in ls[7] and " a1 " in ls[6] and " a0 Under/deep/new" in ls[2], o)
+    rc, o = run(p, "mount\nlinks on\nreadlink /dhl/deep/sl4\nopen /Under/deep/sl4 r\nopen /dhl/deep/sl4 r\nlinks off\nstat /dhl/deep/sl4\n")
+    ls = lines(o)
+    check("a link from the root, reached through a hard linked directory: counted from the path used", ls[2].endswith(" ../../Under/x.txt") and ls[4].endswith(" dhl/deep/../../Under/x.txt") and " -> 0 " in ls[6], o)
+    rc, o = run(p, "mount dmode=600\nstat /Under/x.txt\nas 5 5\nstat /Under/x.txt\n")
+    ls = lines(o)
+    check("root searches a directory whatever the mount's dmode, others do not", " -> 0 " in ls[1] and ls[3].endswith("-13"), o)
     rc, o = run(p, "raw on\nas 5 5\nmount\nraw on\nas 5 5\nopen /b1 r\n")
     check("a user's raw request is refused", lines(o)[-1].endswith("-13"), o)
+
+
+def g_name(d, b):
+    """the first name in directory block b"""
+    n = d[b * 512 + 20 + 17]
+    return bytes(d[b * 512 + 20 + 18:b * 512 + 20 + 18 + n])
 
 
 def patched(base, *edits):
@@ -264,6 +283,40 @@ def test_refuse():
     rc, o = run(good, "mount\nstat /b1\ntree /\nwrites\n")
     got, errs = tree(o)
     check("a delete left half done: mounted, said so, read as it is, not touched", "mount -> 0" in o and "cut off" in o and not errs and "writes -> 0" in o, o[:400])
+    # a name not found past a damaged block is not "no such file"; names after it are found; an anode number out of range
+    v = Volume(16384)
+    for i in range(120):
+        v.add_file(f"Lots/en-fil-med-ett-ganska-langt-namn-{i:03}", b"z")
+    d = bytearray(v.image())
+    db = [b for b in sorted(v.blocks) if d[b * 512:b * 512 + 2] == b"DB" and d[b * 512 + 20 + 18:b * 512 + 20 + 27] == b"en-fil-me"]
+    d[db[1] * 512] = 0x58                                 # (the first block is what makes it a directory: damage there is an error at open)
+    open(good, "wb").write(d)
+    rc, o = run(good, "mount\nstat /Lots/en-fil-med-ett-ganska-langt-namn-119\nstat /Lots/nope\nls /Lots\n")
+    ls = lines(o)
+    check("a damaged directory block: names past it found, a missing name is an I/O error, the listing shows the rest and says so", " -> 0 " in ls[1] and ls[2].endswith("-5") and ", -5)" in ls[3] and "119" in ls[3], o)
+    for raw, what in ((0xFFFFFC00, "as a link answer"), (0x80000006, "negative"), (0x0000FFFF, "past an anode block")):
+        v = Volume(16384, split=raw == 0x0000FFFF)
+        v.split = False if raw != 0x0000FFFF else True
+        v.add_file("a", b"a\n")
+        v.add_file("Mapp/b", b"b\n")
+        d = bytearray(v.image())
+        rb = next(b for b in sorted(v.blocks) if d[b * 512:b * 512 + 2] == b"DB" and g_name(d, b) == b"a")
+        d[rb * 512 + 20 + 2:rb * 512 + 20 + 6] = struct.pack(">I", raw)
+        open(good, "wb").write(d)
+        rc, o = run(good, "mount\nopen /a r\nstat /a\nls /\n")
+        ls = lines(o)
+        check(f"an entry's anode number {what}: an I/O error, nothing that looks like an answer", ls[1].endswith("-5") and ls[2].endswith("-5") and rc == 0, o)
+    # reformatted with smaller blocks: an older volume's root further on must not win over the new one
+    big = Volume(16384, bs=4096, rb=4096, super_=True, name="Gammal")
+    big.add_file("gammal.txt", b"old\n")
+    old = big.image()
+    v = Volume(16384, name="Ny")
+    v.add_file("ny.txt", b"new\n")
+    d = bytearray(v.image())
+    d[2 * 4096:2 * 4096 + 512] = old[2 * 4096:2 * 4096 + 512]
+    open(good, "wb").write(d)
+    rc, o = run(good, "mount\nls /\n")
+    check("an old root left by a reformat is not taken for the volume", "ny.txt" in o and "gammal" not in o, o)
     # the source has no way to write
     src = open(os.path.join(HERE, "..", "user", "pfs3d.c")).read()
     check("the server's source sends nothing but reads", not re.search(r"DISK_WRITE|DISK_FLUSH|DISK_RAW", src))
@@ -290,7 +343,7 @@ def fuzz():
         v2.add_file("L" * 100, b"long\n")
         d = v2.image()
         images.append((d, v2))
-    script = "mount\nstatfs\ntree / 400 8\nstat /Mapp/big\nopen /hl r\nread %1 0 4096\nread %1 60000 10\nfstat %1\nclose %1\nls /\nls /Mapp\nstat /Mapp/Under/up\nstat /Mapp/Under/rot\nstat /Mapp/Under/vol\nstat /Mapp/Under/.\nstat /Mapp/./Under/../Under/\nstat /dhl/.\nreadlink /sl\nlinks on\nopen /sl r\nstat /Mapp/Under/up/x\nlinks off\nopen /dhl/up/.. r\nchdir /Mapp/Under/../..\nstat /" + "L" * 100 + "\nread 77 0 10\nfstat 5\nquit\n"
+    script = "mount\nstatfs\ntree / 400 8\nstat /Mapp/big\nopen /hl r\nread %1 0 4096\nread %1 60000 10\nfstat %1\nclose %1\nls /\nls /Mapp\nstat /Mapp/Under/up\nstat /Mapp/Under/rot\nstat /Mapp/Under/vol\nstat /Mapp/Under/.\nstat /Mapp/./Under/../Under/\nstat /dhl/.\nunlink /Mapp/big\nmkdir /Mapp/Under/up/n\nrename /sl /x\nopen /Mapp/nothing c\nreadlink /sl\nlinks on\nopen /sl r\nstat /Mapp/Under/up/x\nlinks off\nopen /dhl/up/.. r\nchdir /Mapp/Under/../..\nstat /" + "L" * 100 + "\nread 77 0 10\nfstat 5\nquit\n"
     rng = random.Random(0x50F5)
     p = os.path.join(T, "fuzz.img")
     bad = hangs = mounted = 0

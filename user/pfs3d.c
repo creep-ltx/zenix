@@ -154,7 +154,7 @@ static u8 *seq_block(u32 blk, u32 id, u32 seq)
  * it is always one small positive number, so it cannot look like an error in a reply ---- */
 static u32 an_of(u32 raw)
 {
-    if (!(m_opts & M_SPLIT)) return raw;
+    if (!(m_opts & M_SPLIT)) return raw / apb > 0xFFFF ? NO_ANODE : raw;
     if ((raw & 0xFFFF) >= apb) return NO_ANODE;
     return (raw >> 16) * apb + (raw & 0xFFFF);
 }
@@ -282,18 +282,18 @@ static int ent_read(const u8 *d, u32 off, ent_t *e)
 static int ent_find(u32 dir, u32 an, ent_t *e)
 {
     struct dwalk w;
-    int r;
+    int r, bad = 0;
     if ((r = dw_start(&w, dir))) return r;
     for (;;) {
         const u8 *d = dw_block(&w);
-        if (!d) return -EIO;
-        for (int off = DIR_FIRST; ; ) {
+        if (!d) bad = 1;
+        else for (int off = DIR_FIRST; ; ) {
             off = ent_read(d, (u32)off, e);
-            if (off < 0) return -EIO;
-            if (!off) break;
+            if (off < 0) bad = 1;
+            if (off <= 0) break;
             if (e->an == an) return 0;
         }
-        if ((r = dw_next(&w))) return r > 0 ? -ENOENT : r;
+        if ((r = dw_next(&w))) return r < 0 || bad ? -EIO : -ENOENT;
     }
 }
 
@@ -301,7 +301,7 @@ static int ent_find(u32 dir, u32 an, ent_t *e)
 typedef struct {
     u32 own;                           /* the entry's own anode: what a long name's listed form says */
     u32 real;                          /* the object it is: its anode, the inode number */
-    u32 dir;                           /* the directory that holds the object's own entry */
+    u32 at;                            /* the directory the name was found in */
     u32 kind;                          /* K_FILE, K_DIR, K_SOFT or K_ROLL */
     u32 size;                          /* what a program sees */
     u32 fsize, roll;                   /* a rollover file: the circle's size, where it starts */
@@ -315,7 +315,7 @@ static int node_of(ent_t *e, u32 dir, node_t *n)
 {
     u32 kind = e->kind;
     int r;
-    n->own = e->an;
+    n->own = e->an; n->at = dir;
     for (int i = 0; kind == K_LFILE || kind == K_LDIR; i++) {
         struct anode a;                               /* a link's anode: the object's directory; then the object's anode */
         u32 want = e->link;
@@ -325,8 +325,8 @@ static int node_of(ent_t *e, u32 dir, node_t *n)
         if (kind == K_LDIR ? e->kind != K_DIR && e->kind != K_LDIR : e->kind == K_DIR || e->kind == K_LDIR) return -EIO;
         kind = e->kind;
     }
-    if (kind == K_BAD) return -EIO;
-    n->real = e->an; n->dir = dir; n->kind = kind;
+    if (kind == K_BAD || !e->an || e->an == NO_ANODE) return -EIO;
+    n->real = e->an; n->kind = kind;
     n->prot = e->prot; n->mtime = e->mtime;
     n->size = n->fsize = e->size; n->roll = 0; n->big = e->sizehi != 0;
     if (kind == K_ROLL) {
@@ -350,7 +350,7 @@ static int node_of(ent_t *e, u32 dir, node_t *n)
 static void node_root(node_t *n)
 {
     memset(n, 0, sizeof *n);
-    n->own = n->real = n->dir = ROOT_ANODE; n->kind = K_DIR; n->mtime = root_date; n->links = 2;
+    n->own = n->real = n->at = ROOT_ANODE; n->kind = K_DIR; n->mtime = root_date; n->links = 2;
 }
 /* AN as a directory: stateless. 0, -ESTALE (no anode there any more), -ENOTDIR */
 static int ino_dir(u32 an)
@@ -401,28 +401,29 @@ static u32 alias_of(void)
     }
     return t >= 2 && sh ? key : 0;
 }
-/* the entry of DIR named q (or a long name's listed form). 0, -ENOENT, -ENOTDIR, -EIO. Damage in a block ends the search
- * with -EIO: what follows it in the block cannot be read */
+/* the entry of DIR named q (or a long name's listed form). 0, -ENOENT, -EIO. Damage in a block: the rest of that block
+ * cannot be read, the search goes on in the next, and a name not found is -EIO then: it may be in what could not be read */
 static int lookup(u32 dir, node_t *n)
 {
     struct dwalk w;
     ent_t e;
-    int r;
+    int r, bad = 0;
     if ((r = dw_start(&w, dir))) return -EIO;
     for (;;) {
         const u8 *d = dw_block(&w);
-        if (!d) return -EIO;
-        for (int off = DIR_FIRST; ; ) {
+        if (!d) bad = 1;
+        else for (int off = DIR_FIRST; ; ) {
             off = ent_read(d, (u32)off, &e);
-            if (off < 0) return -EIO;
-            if (!off) break;
+            if (off < 0) bad = 1;
+            if (off <= 0) break;
             if (e.nlen != q_len) continue;
             u32 i = 0;
             while (i < q_len && up(e.name[i]) == up(q[i])) i++;
             if (i == q_len) return node_of(&e, dir, n);
         }
-        if ((r = dw_next(&w))) { if (r < 0) return r; break; }
+        if ((r = dw_next(&w))) { if (r < 0) bad = 1; break; }
     }
+    if (bad) return -EIO;
     u32 key = alias_of();
     if (!key || ent_find(dir, key, &e)) return -ENOENT;
     char alias[64], want[64];
@@ -525,8 +526,9 @@ static int file_read(struct ofile *o, u32 off, u8 *buf, u32 n)
 }
 
 /* ---- soft links ---- */
-/* the text of soft link AN, held in entry DIR's directory, as a Zenix path */
-static int link_text(u32 an, u32 dir, u32 size, char *out, u32 cap)
+/* the text of soft link AN as a Zenix path. A text from the volume's root goes up UPS names, what the path that reached
+ * the link is deep; UPS < 0: as deep as directory DIR, which is the name's own */
+static int link_text(u32 an, u32 size, u32 dir, int ups, char *out, u32 cap)
 {
     struct anode a;
     static u8 copy[256];
@@ -541,12 +543,12 @@ static int link_text(u32 an, u32 dir, u32 size, char *out, u32 cap)
     memcpy(copy, d, n);
     int st = am_link_root(copy, n, volname, volname_len, up);
     if (st >= 0) {
-        for (u32 i = 0; dir != ROOT_ANODE; i++) {
+        for (u32 i = 0; ups < 0 ? dir != ROOT_ANODE : i < (u32)ups; i++) {
             u32 p;
-            if (i > 512 || dir_parent(dir, &p)) return -EIO;
+            if (ups < 0 && (i > 512 || dir_parent(dir, &p))) return -EIO;
             if (k + 3 >= cap) return -ENAMETOOLONG;
             out[k++] = '.'; out[k++] = '.'; out[k++] = '/';
-            dir = p;
+            if (ups < 0) dir = p;
         }
     }
     return am_link_rest(copy, st < 0 ? 0 : (u32)st, n, out, k, cap);
@@ -557,7 +559,8 @@ static const char *lk_path;            /* where a walk stopped at a link (D26): 
 static u32 lk_s, lk_e;
 static node_t lk_node;
 
-static int dmode_ok(int want) { return fsp_access(cuid, cgid, cng, cgs, m_dmode, m_uid, m_gid, want); }
+static int links_left;                 /* in one request, as the kernel's limit: a few links that name each other many times end */
+static int dmode_ok(int want) { return fsp_access(cuid, cgid, cng, cgs, S_IFDIR | m_dmode, m_uid, m_gid, want); }
 
 /* walk PATH's first LEN bytes from directory CWD; the end in N. Links are followed inside the volume (not the last name
  * unless FOLLOW), or with stoplinks the walk ends at the first one with -FS_LINKED */
@@ -594,7 +597,8 @@ static int walk(u32 cwd, const char *path, u32 len, int follow, int depth, node_
                 return -FS_LINKED;
             }
             char t[256];
-            int m = link_text(n->real, n->dir, n->size, t, sizeof t);
+            if (--links_left < 0) return -ELOOP;
+            int m = link_text(n->real, n->size, cur, -1, t, sizeof t);
             if (m < 0) return m;
             /* the link's text is relative to the directory that holds its name */
             if ((r = walk(cur, t, (u32)m, 1, depth + 1, n))) return r;
@@ -603,6 +607,39 @@ static int walk(u32 cwd, const char *path, u32 len, int follow, int depth, node_
         if (!is_dir(n)) return -ENOTDIR;
         cur = n->real;
     }
+}
+
+/* the directory that holds PATH's last name, and that name in q */
+static int parent_of(u32 cwd, const char *path, u32 *dir)
+{
+    static node_t pn;
+    u32 n = strlen(path);
+    while (n > 1 && path[n - 1] == '/') n--;
+    u32 s = n;
+    while (s > 0 && path[s - 1] != '/') s--;
+    if (n == s || (n - s == 1 && path[s] == '.') || (n - s == 2 && path[s] == '.' && path[s + 1] == '.')) return -EINVAL;
+    int r = walk(cwd, path, s, 1, 0, &pn);
+    if (r) return r;
+    if (!is_dir(&pn)) return -ENOTDIR;
+    *dir = pn.real;
+    return am_name_in(path + s, n - s, q, 107, &q_len);
+}
+/* What a change answers: the same as on a writable filesystem up to the point of changing anything (a link leading out of
+ * the volume bounces, FS_LINKED, and the change happens where it leads), then read-only. WANT 1: the name must be there,
+ * 0: it must not, -1: only its directory matters */
+static int refuse_at(u32 cwd, const char *path, int want)
+{
+    static node_t t;
+    u32 dir;
+    int r = parent_of(cwd, path, &dir);
+    if (r) return r;
+    if (!dmode_ok(FSP_X)) return -EACCES;
+    if (want < 0) return -EROFS;
+    r = lookup(dir, &t);
+    if (r && r != -ENOENT) return r;
+    if (want && r) return r;
+    if (!want && !r) return -EEXIST;
+    return -EROFS;
 }
 
 /* ---- requests ---- */
@@ -649,7 +686,10 @@ static int do_open(struct umsg *m)
     u32 flags = m->a[2];
     int r = walk(m->a[1], path, strlen(path), !((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)), 0, &n);
     struct ustat *st = (struct ustat *)m->a[3];
-    if (r == -ENOENT && (flags & O_CREAT)) return -EROFS;
+    if (r == -ENOENT && (flags & O_CREAT)) {          /* in a directory that exists it would be made: read-only */
+        u32 dir;
+        return (r = parent_of(m->a[1], path, &dir)) ? r : -EROFS;
+    }
     if (r) return r;
     if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) return -EEXIST;
     if (is_dir(&n)) {
@@ -761,11 +801,32 @@ static int handle1(struct umsg *m)
         if ((r = walk(m->a[1], p, strlen(p), 1, 0, &n))) return r;
         if (!is_dir(&n)) return -ENOTDIR;
         if (!dmode_ok(FSP_X)) return -EACCES;
+        if (ino_dir(n.real)) return -EIO;
         return (int)n.real;
     }
-    case FS_WRITE: case FS_MKDIR: case FS_UNLINK: case FS_RMDIR: case FS_RENAME: case FS_CHMOD: case FS_CHOWN:
-    case FS_UTIMES: case FS_LINK: case FS_SYMLINK:
-        return -EROFS;                                /* no such code here, on purpose: docs/d32-pfs3.md */
+    /* changes: there is no code for them, on purpose (docs/d32-pfs3.md); the kernel still needs to know where a path leads */
+    case FS_WRITE:
+        return -EROFS;
+    case FS_MKDIR:
+        return refuse_at(m->a[1], (const char *)m->a[0], 0);
+    case FS_UNLINK: case FS_RMDIR:
+        r = refuse_at(m->a[1], (const char *)m->a[0], 1);
+        return r == -EINVAL && m->type == FS_UNLINK ? -EISDIR : r;
+    case FS_RENAME: {
+        if ((r = refuse_at(m->a[2], (const char *)m->a[0], 1)) != -EROFS) return r;
+        return refuse_at(m->a[2], (const char *)m->a[1], -1);
+    }
+    case FS_LINK: {
+        const char *p = (const char *)m->a[0];
+        if ((r = walk(m->a[2], p, strlen(p), 1, 0, &n))) return r;
+        return refuse_at(m->a[2], (const char *)m->a[1], 0);
+    }
+    case FS_SYMLINK:
+        return refuse_at(m->a[2], (const char *)m->a[1], 0);
+    case FS_CHMOD: case FS_CHOWN: case FS_UTIMES: {
+        const char *p = (const char *)m->a[0];
+        return (r = walk(m->a[1], p, strlen(p), 1, 0, &n)) ? r : -EROFS;
+    }
     case FS_STATFS: {
         struct ustatfs *f = (struct ustatfs *)m->a[0];
         u32 sh = BS == 512 ? 1 : 0;                   /* bsize at least 1 KB: programs divide by 1024 */
@@ -780,7 +841,10 @@ static int handle1(struct umsg *m)
         char t[256];
         if ((r = walk(m->a[1], p, strlen(p), 0, 0, &n))) return r;
         if (n.kind != K_SOFT) return -EINVAL;
-        int l = link_text(n.real, n.dir, n.size, t, sizeof t);
+        u32 pl = strlen(p);
+        while (pl && p[pl - 1] == '/') pl--;
+        while (pl && p[pl - 1] != '/') pl--;
+        int l = link_text(n.real, n.size, n.at, p[0] == '/' ? (int)am_path_depth(p, pl) : -1, t, sizeof t);
         if (l < 0) return l;
         if ((u32)l > m->a[3]) l = (int)m->a[3];
         memcpy((char *)m->a[2], t, (u32)l);
@@ -804,7 +868,7 @@ static int linked(struct umsg *m)
     int a1 = (m->type == FS_RENAME || m->type == FS_LINK || m->type == FS_SYMLINK) && lk_path == (const char *)m->a[1];
     char *p = (char *)m->a[a1];
     char t[256], out[FS_PATHMAX];
-    int n = link_text(lk_node.real, lk_node.dir, lk_node.size, t, sizeof t), r;
+    int n = link_text(lk_node.real, lk_node.size, lk_node.at, (int)am_path_depth(p, lk_s), t, sizeof t), r;
     if (n < 0) return n;
     if ((r = fsl_text(out, p, lk_s, lk_e, t, (unsigned)n))) return r;
     u32 e = lk_e;
@@ -824,6 +888,7 @@ static int handle(struct umsg *m)
         for (unsigned i = 0; i < cng; i++) cgs[i] = g->g[i];
     }
     stoplinks = (m->kflags & UMSG_LINKS) != 0;
+    links_left = 40;
     int r = handle1(m);
     return r == -FS_LINKED ? linked(m) : r;
 }
@@ -866,11 +931,11 @@ static int try_mount(const char *name, int restart)
     if (disk_call(dport, &m) < 0) { why("cannot read the device"); goto no; }
     maxsect = di.maxsect ? di.maxsect : 1;
     if (o_bs && (o_bs < 512 || o_bs > MAX_RB || (o_bs & (o_bs - 1)))) { why("only blocks of 512 to 4096 bytes, a power of 2"); goto no; }
-    /* where the root is, largest block first: a smaller size's root place lies inside the root cluster of a larger one,
-     * so what is found there is never an old root by mistake; an original PFS\1 volume keeps 512-byte blocks even when
-     * the partition table says more */
+    /* where the root is, smallest block first: a format writes blocks 0 and 1 whole, so at a larger block size every smaller
+     * size's root place is gone; at a smaller one an older, larger volume's root may still lie further on and must not be
+     * found. An original PFS\1 volume keeps 512-byte blocks even when the partition table says more */
     int found = 0;
-    for (u32 s = o_bs ? o_bs : MAX_RB; s >= (o_bs ? o_bs : 512) && !found; s /= 2)
+    for (u32 s = o_bs ? o_bs : 512; s <= (o_bs ? o_bs : MAX_RB) && !found; s *= 2)
         if (!root_try(s, di.sectors)) found = 1;
     if (!found) { why("not a PFS volume (no PFS root block in its place)"); goto no; }
     m_opts = g32(root + R_OPTIONS);

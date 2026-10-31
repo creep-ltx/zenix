@@ -13,7 +13,8 @@ The purpose: Zenix can read the owner's real AmigaOS, which lives on PFS3. The n
 ## Decisions (made here, the owner delegated the details, 2026-10-31)
 1. **Read-only, always, with no write path.** The source has no `DISK_WRITE` and no `DISK_FLUSH` (a test greps for them); there
    is no write code to get wrong. `-o rw` is refused: by `mount` with a line for the user and by the server if started some
-   other way. Every request that would change something answers `EROFS`.
+   other way. Every request that would change something answers what a writable volume would up to that point (a link leading out of
+   the volume still bounces, `ENOENT`, `EEXIST`, `EACCES`), then `EROFS`.
 2. **What the root block names is the volume.** PFS3 has no journal to replay: changed metadata goes to new blocks, then one new
    root block commits them (the old locations are given back only after that). So whatever is on the disk, also after AmigaOS was
    cut off, is one whole committed state: the last root's. **A volume with pending changes:** the only thing pending in the format
@@ -21,7 +22,9 @@ The purpose: Zenix can read the owner's real AmigaOS, which lives on PFS3. The n
    mount. It concerns which blocks are free, which this server never reads: the file is already gone from its directory (or already
    shorter). pfs3d mounts, reads the state on the disk, says so in one dmesg line, and does nothing about it. Data written into a
    file in place after the last root can be there (new bytes under the old size); that is what AmigaOS itself would read.
-3. **Finding the root, and the block size.** The root is block 2 of the volume. Tried largest block first (4096 down to 512),
+3. **Finding the root, and the block size.** The root is block 2 of the volume. Tried smallest block first (512 up to 4096: a format
+   writes blocks 0 and 1 whole, so at a larger block size no smaller size's root survives; a larger size's old root can survive a
+   reformat with smaller blocks, and must not win),
    needing `PFS\1` or `PFS\2` (also the older `muPF`, `AFS\1`, `muAF`: same layout by the format's own header, not tested) in the
    root and in block 0. No RDB parsing: the owner's DH2 and DH3 say 4 KB blocks in the table but are `PFS\1` volumes with 512-byte
    blocks inside (the handler falls back the same way), so the table would be the wrong thing to trust. `-o blocksize=` forces one.
@@ -29,8 +32,8 @@ The purpose: Zenix can read the owner's real AmigaOS, which lives on PFS3. The n
    format), an original type with the newer format's features, impossible reserved block sizes, a reserved area outside the
    partition, a volume larger than its partition, a damaged extension, no root directory.
 5. **Inode numbers are small positive numbers:** on the disk an anode number is two 16-bit parts (block, place in it) on current
-   volumes; Zenix folds it to `block * anodes-per-block + place`, so it cannot look like an error in a reply (a sign bit set) and is
-   stable across a restart. Files open at a restart answer `ESTALE` until closed, as ffsd's. A hard link answers its object's number.
+   volumes; Zenix folds it to `block * anodes-per-block + place`, so it cannot look like an error in a reply and is stable across a restart (a number
+   past the largest possible is damage, on old volumes with one number too). Files open at a restart answer `ESTALE` until closed, as ffsd's. A hard link answers its object's number.
 6. **Names:** Latin-1 on the disk, UTF-8 to programs, compared as PFS3 does (always international: a-z, 0xE0-0xFE but 0xF7). A name
    over 63 bytes of UTF-8 does not fit `udirent`: listed as its start + `~` + its own anode in hex, which opens it, as ffsd's. Comments
    and the owner fields are not shown.
@@ -42,11 +45,13 @@ The purpose: Zenix can read the owner's real AmigaOS, which lives on PFS3. The n
 10. **Files of 4 GB or more** (the large-file mode's high size bits) are listed with the size 4294967295 and answer `EFBIG` at open;
     the protocol's offsets are 32 bits. Up to 4 GB they read; the kernel's `lseek` stops at 2 GB as for every filesystem here.
 11. **Soft links:** the text is in the link's first data block, its length in the entry; read as D31 11 (`amigatext.h`, shared with
-    ffsd): `Vol:a/b` on this volume or `:a/b` is the way up to this volume's root, a leading `/` is `../`. Another volume's name stays.
+    ffsd): `Vol:a/b` on this volume or `:a/b` is the way up to this volume's root, counted from the path that reached the link (a hard
+    linked directory is a second way there), a leading `/` is `../`. Another volume's name stays.
 12. **Damage:** every reserved block must lie on the reserved area's grid and have its id, sequence number or owner anode. A
     directory's blocks are anodes of exactly one block (all three places the format makes them). Chains are walked with Brent's mark,
     the mark kept with the open file: a loop answers `EIO` however many reads it takes. A listing goes on past a damaged block and
-    answers `EIO` at its end. Damage may fail a request, never crash or hang (`pfs3-host-test`, ASAN + UBSAN).
+    answers `EIO` at its end; a name not found, with a damaged block on the way, is `EIO`, not `ENOENT`. A directory whose *first* block is damaged is `EIO` at open and `cd`: that block is what says it is a directory. At most 40 soft links are
+    followed in one request. Damage may fail a request, never crash or hang (`pfs3-host-test`, ASAN + UBSAN).
 
 ## The format, as this server reads it
 All numbers big-endian. A **block** is the volume's logical block; a **reserved block** is `RB` bytes (1, 2 or 4 KB, at least a

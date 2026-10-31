@@ -405,8 +405,9 @@ static int ino_dir(u32 ino)
 }
 
 /* ---- soft links ---- */
-/* the text of the soft link KEY as a Zenix path (amigatext.h) */
-static int link_text(u32 key, char *out, u32 cap)
+/* the text of the soft link KEY as a Zenix path (amigatext.h). A text from the volume's root goes up UPS names, what the
+ * path that reached the link is deep; UPS < 0: as deep as the link's own directory */
+static int link_text(u32 key, int ups, char *out, u32 cap)
 {
     struct cbuf *c = hdr(key);
     if (!c || GL(c->d, O_SEC) != ST_SOFT) return -EIO;
@@ -421,12 +422,12 @@ static int link_text(u32 key, char *out, u32 cap)
         static u8 copy[256];
         memcpy(copy, t, n);
         t = copy;
-        for (u32 up_n = 0; parent != root_blk; up_n++) {
-            struct cbuf *p = hdr(parent);
-            if (!p || up_n > 512) return -EIO;
+        for (u32 up_n = 0; ups < 0 ? parent != root_blk : up_n < (u32)ups; up_n++) {
+            struct cbuf *p = ups < 0 ? hdr(parent) : 0;
+            if ((ups < 0 && !p) || up_n > 512) return -EIO;
             if (k + 3 >= cap) return -ENAMETOOLONG;
             out[k++] = '.'; out[k++] = '.'; out[k++] = '/';
-            parent = GL(p->d, O_PARENT);
+            if (p) parent = GL(p->d, O_PARENT);
         }
     }
     return am_link_rest(t, st < 0 ? 0 : (u32)st, n, out, k, cap);
@@ -468,10 +469,11 @@ static int link_store(const char *t, u8 *out, u32 cap)
 }
 
 /* ---- paths ---- */
+static int links_left;                 /* in one request, as the kernel's limit: a few links that name each other many times end */
 static const char *lk_path;            /* where a walk stopped at a link (D26): the path, the name, the link */
 static u32 lk_s, lk_e, lk_key;
 
-static int dmode_ok(int want) { return fsp_access(cuid, cgid, cng, cgs, m_dmode, m_uid, m_gid, want); }
+static int dmode_ok(int want) { return fsp_access(cuid, cgid, cng, cgs, S_IFDIR | m_dmode, m_uid, m_gid, want); }
 static int dir_may(void) { return fsp_dir_modify(cuid, cgid, cng, cgs, m_dmode, m_uid, m_gid); }
 
 /* walk PATH's first LEN bytes from directory CWD; the end in N. Links are followed inside the volume (not the last name
@@ -509,7 +511,8 @@ static int walk(u32 cwd, const char *path, u32 len, int follow, int depth, node_
                 return -FS_LINKED;
             }
             char t[256];
-            int m = link_text(n->key, t, sizeof t);
+            if (--links_left < 0) return -ELOOP;
+            int m = link_text(n->key, -1, t, sizeof t);
             if (m < 0) return m;
             if ((r = walk(cur, t, (u32)m, 1, depth + 1, n))) return r;
         }
@@ -1599,7 +1602,7 @@ static int handle1(struct umsg *m)
         char t[256];
         if ((r = walk(m->a[1], p, strlen(p), 0, 0, &n))) return r;
         if (n.sec != ST_SOFT) return -EINVAL;
-        int l = link_text(n.key, t, sizeof t);
+        int l = link_text(n.key, -1, t, sizeof t);
         if (l < 0) return l;
         if ((u32)l > m->a[3]) l = (int)m->a[3];
         memcpy((char *)m->a[2], t, (u32)l);
@@ -1625,7 +1628,7 @@ static int linked(struct umsg *m)
     int a1 = (m->type == FS_RENAME || m->type == FS_LINK || m->type == FS_SYMLINK) && lk_path == (const char *)m->a[1];
     char *p = (char *)m->a[a1];
     char t[256], out[FS_PATHMAX];
-    int n = link_text(lk_key, t, sizeof t), r;
+    int n = link_text(lk_key, (int)am_path_depth(p, lk_s), t, sizeof t), r;
     if (n < 0) return n;
     if ((r = fsl_text(out, p, lk_s, lk_e, t, (unsigned)n))) return r;
     u32 e = lk_e;
@@ -1646,6 +1649,7 @@ static int handle(struct umsg *m)
         for (unsigned i = 0; i < cng; i++) cgs[i] = g->g[i];
     }
     stoplinks = (m->kflags & UMSG_LINKS) != 0;
+    links_left = 40;
     int r = handle1(m);
     return r == -FS_LINKED ? linked(m) : r;
 }
