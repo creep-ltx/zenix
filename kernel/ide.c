@@ -200,6 +200,13 @@ static void gayle_quiet(void)
     *(volatile u8 *)GAYLE_A1200_LATCH = 0x7C;
 }
 
+/* D29 (ZINE) 9.2: after an Amiga program had the machine, Gayle's IDE enable and latch as ide_init left them */
+void ide_zine(void)
+{
+    if (ide_irq_latch == GAYLE_A1200_LATCH)
+        gayle_quiet();
+}
+
 /* Does the area at "a" (512-byte aligned) mirror the custom chips? Seen without writing there: the real INTENA is changed (an
  * audio channel's enable bit, with the CPU's interrupts masked - kmain runs at level 7 until the boot is done - and
  * put back), and a mirror shows the same INTENAR at offset $1C, both times. */

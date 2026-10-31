@@ -22,8 +22,19 @@ DESCRIPTION
     member of zine can do anything to the machine while a program
     runs, as root can. It needs fast RAM.
 
-    ZINE is being built (DESIGN D29): the pause and the way back are
-    tested; running real programs comes next.
+    An AmigaOS program with the x bit runs by its name too, as any
+    command: the kernel sees the file starts with 00 00 03 F3 (an
+    AmigaOS executable) and runs zine PATH ARGS... instead. Without the
+    x bit it runs only as zine FILE.
+
+    While zine writes the disks out and the program runs, other
+    programs' file requests wait (they go on when Zenix is back). If any
+    local disk cannot be written out, zine refuses; Ctrl-C during that
+    gives up before anything is handed over. Afterwards every floppy
+    drive's disk counts as changed (the program may have swapped it):
+    open it again before using it.
+
+    ZINE is being built (DESIGN D29): real demos run in FS-UAE.
 
     Ctrl-Amiga-Amiga while the program runs restarts the machine into
     Zenix.
@@ -34,6 +45,7 @@ OPTIONS
 
 EXAMPLES
     zine /home/demos/mydemo
+    chmod +x mydemo; ./mydemo      (the same, by name)
 
 EXIT STATUS
     The program's return code; 1 when it could not run, crashed or was

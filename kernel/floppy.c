@@ -250,6 +250,8 @@ void fd_zine(void)
         if (drv[d].present) {
             set_motor(d, 0);
             drv[d].cyl = -1;
+            drv[d].changed = 1;         /* the program may have stepped the heads (which resets the change line) and
+                                         * the disk swapped: the old disk's state is never used on a new one */
         }
     cdrive = -1;
     deselect();

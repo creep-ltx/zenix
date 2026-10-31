@@ -108,6 +108,8 @@ long zb_prepare(const struct zine_args *a)
     Z.attn = bi->attn;
     extern u32 zb_attn;
     zb_attn = bi->attn & 0xFFFF;     /* for zb_flush, which runs when the low page is no longer ZINE's */
+    if (Z.attn & 0x0088)
+        zb_mmu_save(Z.mmu);             /* 10.1: the 040/060's MMU and PCR come back as Zenix had them */
     nreg = 0;
     for (u32 i = 0; i < bi->nregions && i < 8; i++)
         if (bi->r[i].attrs & (MEMF_CHIP | MEMF_FAST))
@@ -411,12 +413,14 @@ void zb_serial_hex(char tag, const u32 *v, int n)
     }
 }
 
-/* the way back, path A (9.1 steps 1, 4-6; the sums of step 3 come with build step 5; the MMU and the 040/060 data
- * cache of step 2 with build step 8): everything off, Zenix's memory back with low memory last, the chips' register
+/* the way back, path A (9.1 steps 1, 4-6; the sums of step 3 come with build step 5; the 040/060 MMU and PCR first,
+ * zb_mmu_back): everything off, Zenix's memory back with low memory last, the chips' register
  * set and the CIAs from Zenix's records (9.2), then the kernel's resume */
 void zb_back(void)
 {
     struct zine_blk *b = Z.blk;
+    if (Z.attn & 0x0088)
+        zb_mmu_back(Z.mmu);             /* first: a program's translation must not stand while Zenix's memory returns */
     extern u32 zb_tracing;
     if (zb_tracing)
         zb_screen_report();

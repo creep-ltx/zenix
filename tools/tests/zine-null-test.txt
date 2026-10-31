@@ -33,6 +33,16 @@ send zine /tests/zine/zalloc; echo zalloc-rc=$?\r
 wait zalloc-rc= 60
 send zine /tests/zine/zscreen; echo zscreen-rc=$?\r
 wait zscreen-rc= 60
+send rm -f /home/zbg; sh -c 'i=0; while [ $i -lt 400 ]; do echo $i >> /home/zbg; i=$((i+1)); done' & zine /tests/zine/ztake; wait; echo zbg=$(grep -c . /home/zbg) last=$(tail -1 /home/zbg)\r
+wait (?m)^zbg=.*\n 90
+send mkdir /tmp/zx; cp /tests/zine/zexit /tmp/zx/zexit; chmod 755 /tmp/zx/zexit; /tmp/zx/zexit a b; echo byname1=$?\r
+wait byname1= 60
+send cd /tmp/zx; ./zexit; echo byname2=$?; cd /\r
+wait byname2= 60
+send OP=$PATH; PATH=/tmp/zx:$PATH; zexit; echo byname3=$?; PATH=$OP\r
+wait byname3= 60
+send chmod 644 /tmp/zx/zexit; /tmp/zx/zexit; echo byname4=$?; rm -r /tmp/zx\r
+wait byname4= 30
 send free\r
 wait (?m)^fast RAM free.*\n 20
 send su user\r

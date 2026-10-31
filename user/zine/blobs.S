@@ -194,6 +194,76 @@ zb_setvbr:
     move.l  4(%sp),%d0
     movec   %d0,%vbr
     rts
+/* zb_mmu_save(m): 040/060 only (AttnFlags bit 3 or 7). TC, ITT0, ITT1, DTT0, DTT1, URP, SRP into m[1..7] and bit 0
+ * of m[0]; the 060's PCR into m[8] and bit 1. Probed as zenixboot does, with the illegal-instruction and line-F
+ * vectors caught (an EC/LC part may lack the MMU's registers; only a 68060 has PCR, Emu68 reports a 68040).
+ * Supervisor mode, interrupts masked. */
+    .globl  zb_mmu_save, zb_mmu_back
+zb_mmu_save:
+    move.l  4(%sp),%a0
+    movem.l %a2-%a4,-(%sp)
+    movec   %vbr,%a1
+    move.l  0x10(%a1),-(%sp)
+    move.l  0x2C(%a1),-(%sp)
+    lea     9f(%pc),%a2
+    move.l  %a2,0x10(%a1)
+    move.l  %a2,0x2C(%a1)
+    move.l  %sp,%a3
+    clr.l   (%a0)
+    lea     1f(%pc),%a4             /* a trap goes on at 1: (the PCR) */
+    .long   0x4E7A0003              /* movec tc,d0 */
+    move.l  %d0,4(%a0)
+    .long   0x4E7A0004              /* movec itt0,d0 */
+    move.l  %d0,8(%a0)
+    .long   0x4E7A0005              /* itt1 */
+    move.l  %d0,12(%a0)
+    .long   0x4E7A0006              /* dtt0 */
+    move.l  %d0,16(%a0)
+    .long   0x4E7A0007              /* dtt1 */
+    move.l  %d0,20(%a0)
+    .long   0x4E7A0806              /* urp */
+    move.l  %d0,24(%a0)
+    .long   0x4E7A0807              /* srp */
+    move.l  %d0,28(%a0)
+    or.b    #1,3(%a0)
+1:  lea     2f(%pc),%a4
+    .long   0x4E7A0808              /* movec pcr,d0 (68060 only) */
+    move.l  %d0,32(%a0)
+    or.b    #2,3(%a0)
+2:  move.l  (%sp)+,0x2C(%a1)
+    move.l  (%sp)+,0x10(%a1)
+    movem.l (%sp)+,%a2-%a4
+    rts
+9:  move.l  %a3,%sp                 /* the instruction does not exist here: its frame dropped */
+    jmp     (%a4)
+/* zb_mmu_back(m): what zb_mmu_save read, written back (the data cache pushed before the mapping changes, the
+ * translation cache flushed after) */
+zb_mmu_back:
+    move.l  4(%sp),%a0
+    btst    #0,3(%a0)
+    beq.s   1f
+    .word   0xF4F8                  /* cpusha bc */
+    move.l  4(%a0),%d0
+    .long   0x4E7B0003              /* movec d0,tc */
+    .word   0xF518                  /* pflusha */
+    move.l  8(%a0),%d0
+    .long   0x4E7B0004
+    move.l  12(%a0),%d0
+    .long   0x4E7B0005
+    move.l  16(%a0),%d0
+    .long   0x4E7B0006
+    move.l  20(%a0),%d0
+    .long   0x4E7B0007
+    move.l  24(%a0),%d0
+    .long   0x4E7B0806
+    move.l  28(%a0),%d0
+    .long   0x4E7B0807
+1:  btst    #1,3(%a0)
+    beq.s   2f
+    move.l  32(%a0),%d0
+    .long   0x4E7B0808              /* movec d0,pcr */
+2:  rts
+
 /* the caches flushed after writing code (CLAUDE.md): CACR's clear bit on 020/030, cpusha bc on 040/060 and Emu68
  * (never cinva); the CPU from ExecBase's AttnFlags as AmigaOS reported them (bootinfo). Supervisor mode only. */
 zb_flush:

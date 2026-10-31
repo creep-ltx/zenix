@@ -27,8 +27,11 @@ static int busy;
 /* zine_enter(entry, args): d2-d7/a2-a6, USP, VBR and CACR onto the kernel stack, its pointer in zine_ksp, then the
  * blob's entry with args. The blob comes back through zine_resume (d0 the answer, d1 the seconds; supervisor mode,
  * interrupts masked, any stack), or by its own rts when it refused before taking anything (then d1 is 0). The
- * resume puts CACR back and flushes both caches (Zenix's code is where a program's may have been cached, and Emu68
- * would run stale translations), then VBR and USP, and returns from zine_enter with interrupts still masked. */
+ * resume puts VBR back first, then CACR with both caches cleared (Zenix's code and data are where a program's may
+ * have been cached, the 030's data cache may hold lines from before the session that the program's writes with the
+ * cache off did not update, and Emu68 would run stale translations: CI and CD on 020/030, cpusha bc on 040/060),
+ * then USP, and returns from zine_enter with interrupts still masked. The 040/060 MMU registers and the 060's PCR
+ * are the blob's (zb_mmu_save, zb_mmu_back). */
 __asm__(
     "    .text\n"
     "    .globl zine_enter\n"
@@ -52,11 +55,17 @@ __asm__(
     "    move.l  %d1,zine_secs\n"
     "    move.l  %d0,%a2\n"
     "    move.l  (%sp)+,%d1\n"
+    "    move.l  (%sp)+,%a0\n"
+    "    movec   %a0,%vbr\n"             /* Zenix's vectors before anything else (review 2026-10-31) */
+    "    move.w  0x1000,%d0\n"           /* bootinfo's AttnFlags: 68040/68060? */
+    "    and.w   #0x0088,%d0\n"
+    "    bne.s   1f\n"
+    "    or.w    #0x0808,%d1\n"          /* 020/030: both caches cleared (CI, CD) as CACR is put back */
     "    movec   %d1,%cacr\n"
-    "    jsr     cache_flush_code\n"
-    "    move.l  (%sp)+,%a0\n"
-    "    movec   %a0,%vbr\n"
-    "    move.l  (%sp)+,%a0\n"
+    "    bra.s   2f\n"
+    "1:  movec   %d1,%cacr\n"
+    "    .word   0xF4F8\n"               /* cpusha bc (never cinva: CLAUDE.md) */
+    "2:  move.l  (%sp)+,%a0\n"
     "    move.l  %a0,%usp\n"
     "    move.l  %a2,%d0\n"
     "    movem.l (%sp)+,%d2-%d7/%a2-%a6\n"
@@ -77,6 +86,19 @@ static int allowed(void)
     return 1;
 }
 
+/* the battery clock's minutes and seconds as seconds (0-3599), read until two readings agree (no rollover between);
+ * the same nibbles on the MSM6242 and the RP5C01 (rtc.c) */
+static u32 rtc_ms(void)
+{
+    u32 a = ~0u, b = 0;
+    for (int k = 0; k < 4 && a != b; k++) {
+        b = a;
+        volatile const u8 *r = (volatile const u8 *)0xDC0003;
+        a = ((r[12] & 7) * 10 + (r[8] & 15)) * 60 + (r[4] & 7) * 10 + (r[0] & 15);
+    }
+    return a % 3600;
+}
+
 static long go(const struct uzine_go *g)
 {
     if (!allowed())
@@ -94,12 +116,18 @@ static long go(const struct uzine_go *g)
     if (!f)
         return -ENODEV;                 /* a chip-only machine: the saved chip RAM has nowhere to go */
     busy = 1;
-    /* 7.2 step 5: every mount's server writes out what it holds (local first, network last within 2 s). Then nothing
-     * runs again before the hand-over: this call does not sleep from here on */
-    if (vfs_sync(VS_BOUNDED) < 0) {
+    /* 7.2 step 5: every mount's server writes out what it holds (local first, network last within 2 s), with every
+     * other process's filesystem requests held from here to the resume (vfs_hold), so each server is idle with its
+     * writes out at the hand-over; any local mount that fails refuses it. Nothing sleeps after the sync */
+    vfs_hold = current;
+    long e = vfs_sync(VS_BOUNDED | VS_LOCALS);
+    e = current->killed ? -EINTR : e < 0 ? -EIO : 0;     /* Ctrl-C during the sync: given up, nothing taken */
+    if (e) {
+        vfs_hold = 0;
         busy = 0;
-        return -EIO;
+        return e;
     }
+    u32 rt0 = rtc_ms();
     drv_zine();                         /* 7.2 step 6: the network's devices stopped, their drivers die after */
     kprintf("zine: filesystems synced; handing the machine to an Amiga program\n");
     klog_set_reason(KLOG_END_ZINE);     /* 7.2 step 7: a cold start during the session says why (9.4) */
@@ -131,7 +159,13 @@ static long go(const struct uzine_go *g)
      * devices now, then DMA and the interrupts Zenix had, last */
     INTREQ = 0x7FFF;
     kbd_zine();                         /* held keys forgotten, one handshake */
-    fd_zine();                          /* the head position unknown, the track cache dropped */
+    fd_zine();                          /* the head position unknown, the track cache dropped, the disks changed */
+    ide_zine();                         /* Gayle's IDE interrupt enable and latch */
+    input_init();                       /* the mouse counters read afresh: the program's moves are no jump */
+    if (rtc_ok) {                       /* 9.7: the battery clock's minutes and seconds correct the CIA-A count */
+        s32 d = (s32)((rtc_ms() + 3600 - rt0) % 3600) - (s32)(zine_secs % 3600);
+        zine_secs += (u32)(d > 1800 ? d - 3600 : d < -1800 ? d + 3600 : d);
+    }
     INTENA = 0x7FFF;
     INTENA = (u16)(INTF_SETCLR | (ena & 0x7FFF));
     DMACON = 0x07FF;
@@ -141,6 +175,7 @@ static long go(const struct uzine_go *g)
     bootnote_set(0);                    /* no note: a later reset boots as usual */
     irq_restore(s);
     kprintf("zine: back after %u s (%d)\n", zine_secs, r);
+    vfs_hold = 0;
     busy = 0;
     return r;
 }

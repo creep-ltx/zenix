@@ -226,9 +226,22 @@ static u32 gen_last = 1, inst_last = 1;
  * removed), every mount, umount and server start: a cached mount_search answer older than it is asked again */
 static u32 perm_epoch = 1;
 static int nmnt = 1;                    /* mounts in use, the root included */
+struct proc *vfs_hold;                  /* D29: while set, only it (and the servers) send filesystem requests */
 /* SYS_groups' SET: a new list's number (struct proc grp_id). It is the next perm_epoch, so it is never one given before
  * (and never 0), and every cached mount_search answer, made for some older list, is asked again */
 u32 vfs_new_grp_id(void) { return ++perm_epoch; }
+
+/* D29 7.2 step 5: while zine syncs and hands the machine over, nobody else starts a filesystem request (so every
+ * server is idle with its writes out at the hand-over); the servers' own calls (a server on an image file) go on */
+static int held(void)
+{
+    if (!vfs_hold || vfs_hold == current || current->priv)
+        return 0;
+    for (int i = 0; i < NMOUNT; i++)
+        if (mnt[i].used && mnt[i].port >= 0 && port_owner(mnt[i].port) == current)
+            return 0;
+    return 1;
+}
 
 /* one request to mount mi's server; kfl: UMSG_LINKS when the sender takes the FS_LINKED answer (wstep), else 0 */
 static __attribute__((noinline)) long fs_call_k(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3, u16 kfl)
@@ -239,6 +252,12 @@ static __attribute__((noinline)) long fs_call_k(int mi, u32 type, u32 a0, u32 a1
     struct mount *mt = &mnt[mi];
     if (current->pid == 0 || !mt->used)
         return -EINVAL;
+    while (held()) {
+        if (current->killed)
+            return -EINTR;
+        sleep_until(ticks + 2);
+        schedule();
+    }
     if (mt->port < 0 && (mt->port = port_find(mt->pname)) < 0)
         return -EIO;                    /* the filesystem server is gone */
     m.type = type;
@@ -563,9 +582,9 @@ long fs_exec_open(const char *path, const struct proc *parent, struct exec_src *
             x->wopen = 1;
     x->next = loading;                  /* until fs_exec_close: a restarted server must count this open (D11) */
     loading = x;
-    if (!S_ISREG(x->st.mode) || x->st.size > 256u * 1024) {
+    if (!S_ISREG(x->st.mode)) {         /* the size is proc_spawn's to check (an AmigaOS program may be larger) */
         fs_exec_close(x);
-        return S_ISDIR(x->st.mode) ? -EISDIR : S_ISREG(x->st.mode) ? -EFBIG : -EACCES;
+        return S_ISDIR(x->st.mode) ? -EISDIR : -EACCES;
     }
     return 0;
 }
@@ -893,7 +912,8 @@ long vfs_sync(int how)
                 reboot_who = mnt[i].pname;
                 reboot_deadline = (ticks + 500) | 1;
             }
-            if (fs_call_on(i, FS_SYNC, pass && (how & VS_BOUNDED) ? 1 : 0, 0, 0, 0) < 0 && i == 0)
+            if (fs_call_on(i, FS_SYNC, pass && (how & VS_BOUNDED) ? 1 : 0, 0, 0, 0) < 0 &&
+                (i == 0 || (!pass && (how & VS_LOCALS))))
                 r = -EIO;
         }
     reboot_deadline = 0;

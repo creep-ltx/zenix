@@ -821,7 +821,7 @@ disks that were consistent at the hand-over.
 
 ## 12. What the user sees
 
-### 12.1 The command and running by name (decided)
+### 12.1 The command and running by name (decided; by name built 2026-10-31, 16.4)
 
 - **`zine PROGRAM [ARGS...]`** (`docs/man/zine.txt`, `commands.md`, `features.md` when built). No options in this
   version (later ones go here: a stack size, a system-friendly mode, a directory to give). NOTES: 9.5's warning;
@@ -1053,10 +1053,45 @@ build `/tests/zine/trace.blob` (every call, crash registers and code on the seri
 session's /tmp scripts for now).
 
 Open: the review of 2026-10-31 (one bug fixed: zb_flush read the CPU flags from the page already Zenix's again; the
-others recorded as findings: a second local disk's failed sync not refused, a floppy changed during the session, the
+others recorded as findings, all but the CIA-B restart window fixed in 16.4: a second local disk's failed sync not refused, a floppy changed during the session, the
 MMU/PCR registers on 040/060, the order in zine_resume, the session's seconds from CIA-A's TOD (one test run read 1 s
 for 3 s: use the battery clock), Gayle's IDE interrupt, Ctrl-C during the sync, the CIA-B restart window, the mouse
 counters); sound not yet checked (the pictures only); the owner's PiStorm; demos needing memory below 16 MB.
+
+### 16.4 Running by name and the review's findings (2026-10-31, branch zine04)
+
+*Verified* in FS-UAE (A1200, 68020, 4 MB fast RAM; `tools/zine-emu-test.sh`):
+- **By name (12.1, step 7):** `proc_spawn` reads a file's first longword; `0x000003F3` (`HUNK_HEADER`) runs
+  `/bin/zine PATH ARGS...` in its place (argv[0] "zine"; one level only: a hunk file at `/bin/zine` is -ENOEXEC, and
+  without `/bin/zine` the kernel log says "PATH is an AmigaOS program: ZINE is not installed" and the spawn is
+  -ENOEXEC). The 256 KB limit moved from `fs_exec_open` to after that check: a demo may be larger (Bacon of Hope's HD
+  version is 927 KB). The x bit is the filesystem server's check as for any program. Tested: by path with arguments,
+  as `./zexit`, found on `PATH`, and refused without the x bit (sh's 126). Kernel +292 bytes (proc).
+- **The sync (review a, g):** `vfs_sync` mode `VS_LOCALS` refuses (-EIO) when any local mount's server fails its
+  `FS_SYNC`, not only mount 0's. From the start of the sync to the resume `vfs_hold` is the zine process: every other
+  process's filesystem request waits in `fs_call_k` (a 20 ms poll; a kill ends the wait with -EINTR) unless it is the
+  server of a mount or a `priv` process (a server on an image file goes on), so each server is idle with its writes
+  out at the hand-over; the requests go on after the resume. Ctrl-C during the sync (`current->killed`): -EINTR,
+  `busy` and the hold cleared, nothing handed over. Tested: a background job appending 400 lines to a file on `/home`
+  while `ztake` runs: all 400 there afterwards. The refusal of a second mount is *read* (no test server that fails
+  its sync yet).
+- **Floppies (b):** `fd_zine` marks every present drive's disk as changed (`drv[].changed`): requests fail until the
+  disk server opens the drive again (`fd_info`), so the old disk's state is never written to a swapped one (a program
+  that steps the heads resets the change line, so a swap cannot be seen afterwards). *Read*.
+- **040/060 (c):** the blob saves TC, ITT0/1, DTT0/1, URP and SRP (and the 68060's PCR) in `zb_prepare` and writes
+  them back first thing in `zb_back` (`cpusha bc`, TC, `pflusha`, the rest), each probed with the illegal-instruction
+  and line-F vectors caught as zenixboot does (Emu68 reports a 68040: no PCR). Verified in 16.5's 68040 run.
+- **The resume's order (d):** `zine_resume` puts VBR back first, then CACR with both caches cleared: CI and CD on the
+  020/030 (the 030's data cache may hold lines the program's writes with the cache off did not update), `cpusha bc`
+  on 040/060.
+- **The seconds (e):** with a battery clock (`rtc_ok`, set by `rtc_read` at boot) the kernel reads its minutes and
+  seconds before the hand-over and after (until two readings agree) and corrects the blob's CIA-A count to the
+  clock's difference (the CIA-A count chooses the hour; the clock's minutes and seconds are exact). Tested: `ztake`'s
+  150 frames now say 2-4 s.
+- **Gayle (f):** `ide_zine` runs `gayle_quiet` again (nIEN, Gayle's enable 0, the latch cleared), as `ide_init` left
+  them. **The mouse (h):** `input_init` again, so the counters the program moved are no jump.
+- Kernel 169,340 -> 170,120 bytes; the mount tests' RAM disk 712 -> 708 KB for the room (12 blocks free).
+- Still open: the CIA-B restart window (the review's), a test server that fails its sync.
 
 ## 17. Questions for the owner (what ZINE should be)
 
