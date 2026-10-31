@@ -19,11 +19,11 @@ DESCRIPTION
     ..., df0, df1 (see fdisk). Filesystems can be mounted inside each other
     (/mnt, then /mnt/sub).
 
-    The type is ext2, zenixfs, fat or ffs. Without -t it is read from the
-    partition's type in the partition table (fdisk add ... ext2|zenixfs;
+    The type is ext2, zenixfs, fat, ffs or pfs3. Without -t it is read from
+    the partition's type in the partition table (fdisk add ... ext2|zenixfs;
     a PC partition of a FAT type counts as fat, an RDB partition of type
-    DOS\0 .. DOS\7 as ffs). A volume without a partition table needs -t
-    fat or -t ffs.
+    DOS\0 .. DOS\7 as ffs, PFS\1 .. PFS\3 or PDS\1 .. PDS\3 as pfs3). A
+    volume without a partition table needs -t fat, -t ffs or -t pfs3.
 
     The filesystem's server is a service (DESIGN D11): mount reads the
     device's volume id (where it is and its superblock's uuid) and
@@ -122,6 +122,14 @@ DESCRIPTION
     its old name, its new name or both, and the next -o rw mount finishes
     it. The volume never needs AmigaOS's validator because of Zenix.
 
+    PFS3 (DESIGN D32): an RDB partition, also inside an MBR partition of
+    type 0x76, or a volume without a table (mount -t pfs3 ide0 /mnt).
+    Only ever read: -o rw is refused, and every change answers "read-only
+    file system". Names are UTF-8 for programs and Latin-1 on the disk,
+    found in any case. Soft and hard links work. Protection bits and the
+    options uid=, gid=, fmode=, dmode= (and blocksize= to force a block
+    size) work as for FFS.
+
     NFS (DESIGN D23): mount -t nfs nas:/volume1/zenix /nas puts a
     directory that a NAS or a Linux PC exports on dir (NFSv3 over TCP;
     -t nfs may be left out when the source has the form host:/export).
@@ -158,7 +166,8 @@ DESCRIPTION
 
     mount -a mounts everything listed in /etc/fstab; init runs it at boot.
     Each line is "device dir type options" (fields separated by spaces or
-    tabs): type is ext2, zenixfs, fat, ffs, nfs (device host:/export) or auto
+    tabs): type is ext2, zenixfs, fat, ffs, pfs3, nfs (device host:/export)
+    or auto
     (read from the partition type);
     options is defaults, or a comma list in which "noauto" leaves the line
     out of mount -a. Lines starting with # and empty lines are ignored.
@@ -227,7 +236,14 @@ NOTES
     number, which opens it. After a cut, a rename over an existing name can
     leave both entries. An FFS mount needs /sbin/ffsd on the root (the
     disktools package).
-    Only types with a server can be mounted (ext2, zenixfs, fat, ffs, nfs). A
+    PFS3: read-only; files under 4 GB (a larger one is listed, and opening
+    it answers "file too large"); comments and .deldir are not shown; times
+    are stored as UTC; a file open while pfs3d was restarted answers "stale
+    file handle" until it is closed. A name over 63 bytes of UTF-8 is listed
+    as its start, ~ and a number, which opens it. A PFS3 mount needs
+    /sbin/pfs3d on the root (the disktools package).
+    Only types with a server can be mounted (ext2, zenixfs, fat, ffs, pfs3,
+    nfs). A
     ZenixFS mount needs /sbin/zfsd on the root: without it the server does not
     start ("cannot start /sbin/zfsd" in dmesg).
     NFS writes: a write returns once the NAS holds the bytes; they are
@@ -263,5 +279,5 @@ NOTES
     writes past it (the frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
-    umount(8), nfscd(8), fatd(8), ffsd(8), fdisk(1), df(1), dmesg(1),
+    umount(8), nfscd(8), fatd(8), ffsd(8), pfs3d(8), fdisk(1), df(1), dmesg(1),
     mkfs.ext2(1), mkfs.zenixfs(1), boot(8)

@@ -1,0 +1,33 @@
+PFS3D(8)		Zenix manual
+
+NAME
+    pfs3d - the read-only server of a PFS3 mount
+
+SYNOPSIS
+    /sbin/pfs3d device [-id start,size] [-o options]
+
+DESCRIPTION
+    Not a command: mount -t pfs3 registers it as the service fs.DEVICE
+    and the kernel starts it at the mount's first use (DESIGN D32,
+    docs/d32-pfs3.md). It reads PFS3 volumes, as AmigaOS's PFS3 handlers
+    make them. It only reads: it has no code that writes to a disk, and
+    -o rw is refused. Everything a user sets is mount's: see mount(8)
+    for the options and the limits. It comes with the disktools package.
+
+    Its lines in dmesg start with pfs3d: a volume it refuses and why, a
+    bad option, and a delete AmigaOS was cut off in the middle of. That
+    one is only a line: AmigaOS finishes it at its next mount, and what
+    is read is the state on the disk.
+
+    A damaged volume answers errors, never a crash: a file whose chain
+    of anodes loops or leaves the volume answers an I/O error when a
+    read gets there; a listing goes on past a damaged directory block
+    and answers an I/O error at its end.
+
+NOTES
+    The deleted-files directory (.deldir) and comments are not shown. A
+    file of 4 GB or more is listed but cannot be opened. Rollover files
+    read as their virtual contents.
+
+SEE ALSO
+    mount(8), umount(8), ffsd(8)

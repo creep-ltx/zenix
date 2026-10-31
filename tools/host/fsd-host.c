@@ -28,20 +28,24 @@
  * same commands but cut, unclean, mark, idle and state (ext2's clean mark), "mount" ignores root (tools/zfsd-host-test.sh).
  * With -DFATD as well the FAT server (user/fatd.c, tools/fat-host-test.py): "mount [OPTIONS]", and commit (the timer's
  * commit), umount (FS_QUIT and what fatd does at it), statfs; a + in a path is a space.
- * With -DFFSD instead the OFS/FFS server (user/ffsd.c, tools/ffs-host-test.py): the same commands as FAT's. */
+ * With -DFFSD instead the OFS/FFS server (user/ffsd.c, tools/ffs-host-test.py): the same commands as FAT's.
+ * With -DPFS3D the PFS3 server (user/pfs3d.c, tools/pfs3-host-test.py): the same, and it can only read. */
 #ifdef ZFSD                                               /* -DZFSD: the ZenixFS server (user/zenixfsd.c) instead */
 #include "zhost.h"
 struct udirent { u32 ino; u32 type; char name[64]; };    /* usys.h's (zhost.h has none; ext2.h is not included) */
 struct ustat { u32 ino, mode, size, mtime; u32 uid, gid, links; };
 static inline long sys3(u32 nr, u32 a, u32 b, u32 c) { (void)nr; (void)a; (void)b; (void)c; return 0; }   /* main only */
 #define main fsd_main
-#if defined(FATD) || defined(FFSD)
+#if defined(FATD) || defined(FFSD) || defined(PFS3D)
 #undef main
 #define S_IFDIR 0040000
 #define S_IFREG 0100000
 #ifdef FATD                                               /* -DZFSD -DFATD: the FAT server (user/fatd.c) */
 #include "../../user/fatd.c"
 #define ROOT_INO ROOT
+#elif defined(PFS3D)                                      /* -DZFSD -DPFS3D: the PFS3 server (user/pfs3d.c) */
+#include "../../user/pfs3d.c"
+#define ROOT_INO ROOT_ANODE
 #else                                                     /* -DZFSD -DFFSD: the OFS/FFS server (user/ffsd.c) */
 #include "../../user/ffsd.c"
 #define ROOT_INO root_blk
@@ -98,6 +102,75 @@ static u32 flags_of(const char *s)
     return f | (r && w ? O_RDWR : w ? O_WRONLY : O_RDONLY);
 }
 
+#ifdef PFS3D
+/* tree DIR: every name under DIR, one line each: kind, mode, size, links, mtime, crc32 of all its data read in pieces,
+ * the path, the listed inode and -> a soft link's text. A line "! CODE PATH" for any error. The judge of a real volume */
+static u32 crc_of(u32 c, const u8 *p, u32 n)
+{
+    static u32 t[256];
+    if (!t[1]) for (u32 i = 0; i < 256; i++) { u32 x = i; for (int k = 0; k < 8; k++) x = x & 1 ? 0xEDB88320u ^ x >> 1 : x >> 1; t[i] = x; }
+    c = ~c;
+    while (n--) c = t[(c ^ *p++) & 255] ^ c >> 8;
+    return ~c;
+}
+static u32 tree_left = 0xFFFFFFFFu, tree_bytes = 0xFFFFFFFFu;     /* "tree DIR N MB": where a damaged volume's walk stops */
+static void tree(const char *dir)
+{
+    static u8 data[1 << 17];
+    struct ustat ds;
+    int ino = req(FS_OPEN, (u32)dir, CWD, O_RDONLY, (u32)&ds);
+    if (ino < 0) { printf("! %d %s\n", ino, dir); return; }
+    u32 cookie = 0;
+    struct udirent e;
+    int r;
+    while ((r = req(FS_READDIR, (u32)ino, cookie, (u32)&e, (u32)&cookie)) > 0) {
+        if (!tree_left || !--tree_left) break;
+        char *full = malloc(FS_PATHMAX);
+        struct ustat st;
+        if ((u32)snprintf(full, FS_PATHMAX, "%s/%s", strcmp(dir, "/") ? dir : "", e.name) >= FS_PATHMAX) {
+            printf("toolong %s/%s\n", dir, e.name);     /* over the system's path limit: reached only with chdir */
+            free(full);
+            continue;
+        }
+        char *ask = malloc(FS_PATHMAX);
+        strcpy(ask, full);
+        int rs = req(FS_LSTAT, (u32)ask, CWD, (u32)&st, 0);
+        if (rs < 0) printf("! %d %s\n", rs, full);
+        else if ((st.mode & 0170000) == S_IFDIR) {
+            printf("d %o %u %u %u 0 %s #%u\n", st.mode & 07777, 0u, st.links, st.mtime, full, st.ino);
+            tree(full);
+        } else if ((st.mode & 0170000) == 0120000) {
+            static char t[FS_PATHMAX];
+            strcpy(ask, full);
+            rs = req(FS_READLINK, (u32)ask, CWD, (u32)t, 255);
+            if (rs < 0) printf("! %d %s\n", rs, full);
+            else { t[rs] = 0; printf("l %o %u %u %u 0 %s #%u -> %s\n", st.mode & 07777, st.size, st.links, st.mtime, full, st.ino, t); }
+        } else {
+            struct ustat os;
+            strcpy(ask, full);
+            int fi = req(FS_OPEN, (u32)ask, CWD, O_RDONLY, (u32)&os);
+            if (fi < 0) { printf("! %d %s\n", fi, full); free(ask); free(full); continue; }
+            u32 off = 0, crc = 0;
+            static const u32 piece[] = { 65536, 100, 777, 4096, 1, 131072 };
+            for (u32 i = 0; ; i++) {
+                rs = req(FS_READ, (u32)fi, off, (u32)data, piece[i % 6]);
+                if (rs <= 0 || (u32)rs > tree_bytes) break;
+                tree_bytes -= (u32)rs;
+                crc = crc_of(crc, data, (u32)rs);
+                off += (u32)rs;
+            }
+            req(FS_CLOSE, (u32)fi, 0, 0, 0);
+            if (rs < 0) printf("! %d %s\n", rs, full);
+            if (tree_bytes && off != st.size) printf("! short %u %s\n", off, full);
+            printf("f %o %u %u %u %08x %s #%u\n", st.mode & 07777, st.size, st.links, st.mtime, crc, full, st.ino);
+        }
+        free(ask); free(full);
+    }
+    req(FS_CLOSE, (u32)ino, 0, 0, 0);
+    if (r < 0) printf("! %d %s (listing)\n", r, dir);
+}
+#endif
+
 int main(void)
 {
     char line[1024];
@@ -115,7 +188,7 @@ int main(void)
         struct ustat st;
         if (!strcmp(cmd, "mount")) {
 #ifdef ZFSD
-#if defined(FATD) || defined(FFSD)
+#if defined(FATD) || defined(FFSD) || defined(PFS3D)
             if (a && options(a)) { printf("mount -> bad option\n"); continue; }
             r = try_mount("hd0", 0);
             printf("mount -> %d%s\n", r, readonly ? " readonly" : "");
@@ -136,7 +209,7 @@ int main(void)
         if (!strcmp(cmd, "links")) { links = a && !strcmp(a, "on"); printf("links -> %u\n", links); continue; }
         static char pa[FS_PATHMAX], pb[FS_PATHMAX];      /* the kernel's buffers: a server may write TEXT there */
         char *a0 = a, *b0 = b;
-#if defined(FATD) || defined(FFSD)
+#if defined(FATD) || defined(FFSD) || defined(PFS3D)
         for (char *t = a; t && *t; t++) if (*t == '+') *t = ' ';  /* a name with spaces in a command line */
         if (b && strcmp(cmd, "write")) for (char *t = b; *t; t++) if (*t == '+') *t = ' ';
 #endif
@@ -198,9 +271,17 @@ int main(void)
         else if (!strcmp(cmd, "quit")) r = req(FS_QUIT, 0, 0, 0, 0);
 #ifdef ZFSD
         else if (!strcmp(cmd, "dirty")) { printf("dirty -> %d\n", dirty); continue; }   /* changes not yet committed */
-#if defined(FATD) || defined(FFSD)
+#if defined(FATD) || defined(FFSD) || defined(PFS3D)
         else if (!strcmp(cmd, "commit")) r = sync_all();        /* the timer's commit */
         else if (!strcmp(cmd, "umount")) { r = req(FS_QUIT, 0, 0, 0, 0); if (!r) r = go_clean(); }
+#ifdef PFS3D
+        else if (!strcmp(cmd, "tree")) {
+            if (b0) { tree_left = (u32)atoi(b0); tree_bytes = c ? (u32)atoi(c) << 20 : 0xFFFFFFFFu; }
+            tree(a0 && *a0 ? a0 : "/");
+            printf("tree -> done\n");
+            continue;
+        }
+#endif
 #ifdef FFSD
         else if (!strcmp(cmd, "rmall")) {                 /* rmall DIR: every name removed while it is listed, as some programs do */
             struct ustat ds;

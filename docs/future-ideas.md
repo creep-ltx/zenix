@@ -107,8 +107,8 @@ is not preemptive.
   First candidates: libz, the regex engine, the line editor, a text-user-interface library for porting Sumi and Maki.
   The ZEXE format left room for it (DESIGN D3).
 - **newlib** as a fuller C library, to make porting small Unix and Minix programs easy.
-- **PFS3 support** written from the on-disk format (facts, not code), or as a separate filesystem server under its own
-  licence. PFS3's code is 4-clause BSD, which cannot be mixed into GPL code; its authors could be asked to drop the
+- **PFS3 support:** reading is built (D32, `/sbin/pfs3d`, written from the on-disk format: facts, not code). Writing is not
+  planned: PFS3's code is 4-clause BSD, which cannot be mixed into GPL code; its authors could be asked to drop the
   advertising clause.
 - **SD card log area:** once the SD driver is proven on the owner's card, save the kernel log to a small area of that
   card, so it can be read on a PC.

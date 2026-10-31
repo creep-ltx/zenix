@@ -362,3 +362,8 @@ read-only unless `-o force`. Details: `docs/d30-fat.md`.
 `/sbin/ffsd`, a file service per mount: AmigaDOS volumes `DOS\0`-`DOS\7`, read; `DOS\0`-`DOS\3` also written with `-o rw`, after a
 check of the whole volume. The root's bitmap flag is never cleared: the order new blocks, bitmap, changed extension blocks,
 changed headers leaves at worst lost blocks after a cut. Details: `docs/d31-ffs.md`.
+
+## D32. PFS3 (roadmap block 4; decided in the note, the owner delegated the details 2026-10-31; built on branch pfs3)
+`/sbin/pfs3d`, a file service per mount: PFS3 volumes, read-only, with no write code at all and `-o rw` refused. Written from the
+on-disk format's facts, no PFS3 code (its licence does not mix with GPL). What the root block names is the state read; nothing is
+replayed or finished. A damaged volume answers errors. Details: `docs/d32-pfs3.md`.

@@ -212,6 +212,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `dmode=`, `ro`, `rw`, `force`); `fsinfo.type` `fat`; the program text `/sbin/fatd DEV -id START,SIZE [-o OPTIONS]`.
 - **D31 (OFS, FFS, branch ffs, 2026-10-31):** `/etc/fstab`'s type `ffs` and mount's FFS options (`uid=`, `gid=`, `fmode=`,
   `dmode=`, `ro`, `rw`, `blocksize=`, `reserved=`); `fsinfo.type` `ffs`; the program text `/sbin/ffsd DEV -id START,SIZE [-o OPTIONS]`.
+- **D32 (PFS3, branch pfs3, 2026-10-31):** `/etc/fstab`'s type `pfs3` and mount's PFS3 options (`uid=`, `gid=`, `fmode=`, `dmode=`, `ro`, `blocksize=`; `rw` is refused); `fsinfo.type` `pfs3`; the program text `/sbin/pfs3d DEV -id START,SIZE [-o OPTIONS]`.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

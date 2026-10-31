@@ -12,6 +12,7 @@ typedef unsigned short u16;
 #include "diskcall.h"
 #include "volid.h"
 #include "rdb.h"
+#include "amigatext.h"
 
 /* ffsd DEVICE -id START,SIZE [-o OPTIONS]: the AmigaDOS filesystem server (OFS and FFS, DOS\0 .. DOS\7), a file service
  * started by mount(8) as fs.DEVICE. The decisions and why: docs/d31-ffs.md. In short:
@@ -40,7 +41,6 @@ typedef unsigned short u16;
 #define P_WRITE     4u
 #define P_READ      8u
 #define P_ARCHIVE   16u
-#define AMIGA_EPOCH 252460800u         /* 1978-01-01 in Unix time */
 /* the longs of a header counted from the end of the block */
 #define O_HIGHSEQ   2u
 #define O_HSIZE     3u
@@ -281,23 +281,8 @@ static int name_of(const u8 *d, u32 key, const u8 **n, u32 *len)
     *n = p + 1; *len = l;
     return 0;
 }
-/* NAME (LEN bytes of UTF-8) into q as Latin-1. 0, -EILSEQ (not Latin-1, or not UTF-8), -ENAMETOOLONG */
-static int name_in(const char *name, u32 len)
-{
-    u32 n = 0, cap = is_ln ? 107 : 30;
-    const u8 *p = (const u8 *)name, *e = p + len;
-    while (p < e) {
-        u32 c = *p++;
-        if (c >= 0x80) {
-            if ((c != 0xC2 && c != 0xC3) || p >= e || (*p & 0xC0) != 0x80) return -EILSEQ;
-            c = (c & 3) << 6 | (*p++ & 0x3F);
-        }
-        if (n == cap) return -ENAMETOOLONG;
-        q[n++] = (u8)c;
-    }
-    q_len = n;
-    return 0;
-}
+/* NAME (LEN bytes of UTF-8) into q as Latin-1 */
+static int name_in(const char *name, u32 len) { return am_name_in(name, len, q, is_ln ? 107 : 30, &q_len); }
 static int name_bad(void)
 {
     if (!q_len) return -EINVAL;
@@ -307,46 +292,11 @@ static int name_bad(void)
     }
     return 0;
 }
-/* Latin-1 as UTF-8 in OUT, what can be typed: damage (a control character, a /) shows as _. Length, or -1 past CAP */
-static int utf8_of(const u8 *n, u32 len, char *out, u32 cap, int raw)
-{
-    u32 k = 0;
-    for (u32 i = 0; i < len; i++) {
-        u32 c = n[i];
-        if (!raw && (c < 0x20 || c == '/')) c = '_';
-        if (k + 2 >= cap) return -1;
-        if (c < 0x80) out[k++] = (char)c;
-        else { out[k++] = (char)(0xC0 | c >> 6); out[k++] = (char)(0x80 | (c & 0x3F)); }
-    }
-    out[k] = 0;
-    return (int)k;
-}
-/* a name for a listing: on a long-name volume one over 63 bytes of UTF-8 is its start, ~ and the block number */
-static void name_list(const u8 *n, u32 len, u32 key, char *out, u32 cap)
-{
-    if (utf8_of(n, len, out, cap, 0) >= 0) return;
-    u32 k = len;
-    while (k && utf8_of(n, k, out, cap - 10, 0) < 0) k--;
-    char *p = out + strlen(out);
-    *p++ = '~';
-    int s = 28;
-    while (s > 0 && !(key >> s)) s -= 4;
-    for (; s >= 0; s -= 4) *p++ = "0123456789abcdef"[(key >> s) & 15];
-    *p = 0;
-}
-
 /* ---- dates ---- */
-static u32 amiga_to_unix(u32 days, u32 mins, u32 ticks)
-{
-    if (days > 46000) return 0xFFFFFFFFu;             /* past the Unix time here; damage */
-    if (mins > 1439) mins = 1439;
-    if (ticks > 2999) ticks = 2999;
-    return AMIGA_EPOCH + days * 86400 + mins * 60 + ticks / 50;
-}
 static void put_date(u8 *d, u32 at, u32 t)
 {
-    if (t < AMIGA_EPOCH) t = AMIGA_EPOCH;
-    t -= AMIGA_EPOCH;
+    if (t < AM_EPOCH) t = AM_EPOCH;
+    t -= AM_EPOCH;
     SL(d, at, t / 86400);
     SL(d, at + 1, (t % 86400) / 60);
     SL(d, at + 2, (t % 60) * 50);
@@ -379,7 +329,7 @@ static int node_load(u32 key, node_t *n)
         n->real = t; n->sec = GL(c->d, O_SEC); n->islink = 1;
     } else if (sec != ST_FILE && sec != ST_DIR && sec != ST_SOFT && sec != ST_ROOT) return -EIO;
     u32 at = is_ln && n->real != root_blk ? O_DAYS_LN : O_DAYS;
-    n->mtime = amiga_to_unix(GL(c->d, at), GL(c->d, at + 1), GL(c->d, at + 2));
+    n->mtime = am_to_unix(GL(c->d, at), GL(c->d, at + 1), GL(c->d, at + 2));
     n->prot = GL(c->d, O_PROT);
     n->size = GL(c->d, O_SIZE);
     if (n->sec != ST_ROOT && n->sec != ST_DIR && n->sec != ST_SOFT && n->size > MAX_SIZE) return -EIO;
@@ -436,10 +386,10 @@ static int lookup(u32 dir, node_t *n)
         const u8 *nm;
         u32 len;
         char alias[64];
-        if (name_of(c->d, key, &nm, &len) || utf8_of(nm, len, alias, 64, 0) >= 0) return -ENOENT;
-        name_list(nm, len, key, alias, 64);
+        if (name_of(c->d, key, &nm, &len) || am_utf8_of(nm, len, alias, 64, 0) >= 0) return -ENOENT;
+        am_name_list(nm, len, key, alias, 64);
         char want[64];
-        if (utf8_of(q, q_len, want, 64, 0) < 0 || strcmp(want, alias)) return -ENOENT;
+        if (am_utf8_of(q, q_len, want, 64, 0) < 0 || strcmp(want, alias)) return -ENOENT;
         return node_load(key, n);
     }
     return -ENOENT;
@@ -455,8 +405,7 @@ static int ino_dir(u32 ino)
 }
 
 /* ---- soft links ---- */
-/* the text of the soft link KEY as a Zenix path: a leading / is ../, a//b is a/../b, this volume's name is the way up to
- * its root (the server does not know the mount point), another volume's stays as it is and leads nowhere */
+/* the text of the soft link KEY as a Zenix path (amigatext.h) */
 static int link_text(u32 key, char *out, u32 cap)
 {
     struct cbuf *c = hdr(key);
@@ -466,42 +415,21 @@ static int link_text(u32 key, char *out, u32 cap)
     while (n < max && t[n]) n++;
     if (n == max) return -EIO;
     if (!n) return -ENOENT;
-    u32 start = 0, colon = n;
-    for (u32 i = 0; i < n; i++) if (t[i] == ':') { colon = i; break; }
-    if (colon < n) {
-        u32 i = 0;
-        if (colon == volname_len) while (i < colon && up(t[i]) == up(volname[i])) i++;
-        if (!colon || i == colon) {                   /* ":x" or "ThisVolume:x": from the root */
-            if (n > 255) return -ENAMETOOLONG;
-            static u8 copy[256];
-            memcpy(copy, t, n);
-            t = copy;
-            for (u32 up_n = 0; parent != root_blk; up_n++) {
-                struct cbuf *p = hdr(parent);
-                if (!p || up_n > 512) return -EIO;
-                if (k + 3 >= cap) return -ENAMETOOLONG;
-                out[k++] = '.'; out[k++] = '.'; out[k++] = '/';
-                parent = GL(p->d, O_PARENT);
-            }
-            start = colon + 1;
-        }
-    }
-    int seg = 1;
-    for (u32 i = start; i < n; i++) {
-        u32 ch = t[i];
-        if (ch == '/' && seg) {
+    int st = am_link_root(t, n, volname, volname_len, up);
+    if (st >= 0) {                                    /* from the root: the way up reads other blocks */
+        if (n > 255) return -ENAMETOOLONG;
+        static u8 copy[256];
+        memcpy(copy, t, n);
+        t = copy;
+        for (u32 up_n = 0; parent != root_blk; up_n++) {
+            struct cbuf *p = hdr(parent);
+            if (!p || up_n > 512) return -EIO;
             if (k + 3 >= cap) return -ENAMETOOLONG;
             out[k++] = '.'; out[k++] = '.'; out[k++] = '/';
-            continue;
+            parent = GL(p->d, O_PARENT);
         }
-        seg = ch == '/';
-        if (k + 2 >= cap) return -ENAMETOOLONG;
-        if (ch < 0x80) out[k++] = (char)ch;
-        else { out[k++] = (char)(0xC0 | ch >> 6); out[k++] = (char)(0x80 | (ch & 0x3F)); }
     }
-    if (!k) { out[k++] = '.'; }                       /* "ThisVolume:" at the root */
-    out[k] = 0;
-    return (int)k;
+    return am_link_rest(t, st < 0 ? 0 : (u32)st, n, out, k, cap);
 }
 /* a Zenix relative path as a soft link's text on the disk. Length, or -errno */
 static int link_store(const char *t, u8 *out, u32 cap)
@@ -1284,7 +1212,7 @@ static int do_readdir(struct umsg *m)
         if (!c || GL(c->d, O_PARENT) != dir || name_of(c->d, e, &nm, &len) || name_hash(nm, len) != s - 1) { bad = 1; e = 0; continue; }
         u32 sec = GL(c->d, O_SEC);
         if (sec != ST_FILE && sec != ST_DIR && sec != ST_SOFT && sec != ST_LFILE && sec != ST_LDIR) { bad = 1; e = 0; continue; }
-        name_list(nm, len, e, ud->name, sizeof ud->name);
+        am_name_list(nm, len, e, ud->name, sizeof ud->name);
         ud->type = sec == ST_DIR || sec == ST_LDIR ? 2 : sec == ST_SOFT ? 7 : 1;
         ud->ino = sec == ST_LFILE || sec == ST_LDIR ? GL(c->d, O_REAL) : e;
         *newc = bad << 31 | e;

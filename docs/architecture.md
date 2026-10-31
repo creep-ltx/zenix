@@ -967,6 +967,13 @@ disk's device. It has a cache of whole blocks with a kind each (new, bitmap, cha
 order, a table of open files by header block, and a list of removed entries waiting for a commit. The rules are in
 `docs/d31-ffs.md`.
 
+### pfs3d - a PFS3 mount's server (`user/pfs3d.c`, port `fs.DEVICE`, DESIGN D32)
+`mount -t pfs3 DEV DIR` (or an RDB partition of a type `PFS\1`..`PFS\3`, `PDS\1`..`PDS\3`) registers `fs.DEV` -> `/sbin/pfs3d DEV -id START,SIZE [-o OPTIONS]`
+at nice -10 (a file service, D11 6.4). One file, one process per mount, the protocol of `kernel/fsproto.h`; it answers `FS_LINKED`
+for soft links as zfsd does. Only reads: it sends the disk server nothing but `DISK_READ`. A small cache of reserved blocks, one
+data block, a table of open files by anode with where the last read was in the chain; `user/amigatext.h` (names, dates, soft link
+text) is shared with ffsd. The rules and the format are in `docs/d32-pfs3.md`.
+
 ### nfscd - an NFS mount's server (`user/nfscd.c` + `net/nfs/`, port `fs.nfs0` .. `fs.nfs7`, DESIGN D23)
 `mount -t nfs HOST:/EXPORT DIR` registers `fs.nfsN` -> `/sbin/nfscd nfsN HOST:/EXPORT [CODES]` at nice -10 (a file
 service, D11 6.4; the options as one word of codes: `s` soft, `tN` timeo, `rN` retrans, `o` read-only, `y` sync, `aN`

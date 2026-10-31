@@ -247,7 +247,7 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 # (the text-UI library's notice once a package: sumi's is "tui" since it shipped first, the others' "PROG-tui"; two
 # packages may not own one file, zpkg 4.3)
 # files beside a family's programs, from the build directory (DESIGN D29: ZINE's blob, the small AmigaOS zine loads)
-FAMILY_SBIN = {"disktools": ["fatd", "ffsd"]}     # DESIGN D30, D31: mount's servers for a FAT volume and an OFS or FFS volume
+FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d"]}     # DESIGN D30, D31, D32: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume
 FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")]}
 FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
                    "maki": [("ports/maki/upstream/LICENSE", "maki"), ("ports/tui/upstream/LICENSE", "maki-tui")],

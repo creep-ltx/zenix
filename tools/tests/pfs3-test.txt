@@ -1,0 +1,94 @@
+wait zenix:/# 90
+sleep 1
+send mkdir /mnt\r
+sleep 2
+send mount ide0p3 /mnt\r
+sleep 5
+send mount\r
+sleep 3
+send ls -l /mnt\r
+sleep 4
+send cat '/mnt/r\xc3\xa4ksm\xc3\xb6rg\xc3\xa5s.txt'\r
+sleep 2
+send cat '/mnt/R\xc3\x84KSM\xc3\x96RG\xc3\x85S.TXT'\r
+sleep 2
+send cat /mnt/mapp/UNDER/text.txt\r
+sleep 2
+send sha256sum /mnt/Mapp/big.bin\r
+sleep 15
+send readlink /mnt/Mapp/up\r
+sleep 2
+send cat /mnt/Mapp/up\r
+sleep 2
+send cat /mnt/fromroot\r
+sleep 2
+send cat /mnt/volroot\r
+sleep 2
+send cat /mnt/hardmapp/text.txt\r
+sleep 2
+send stat /mnt/hardname\r
+sleep 3
+send ls /mnt/Lista | wc -l\r
+sleep 8
+send ls -l /mnt/Mapp/skyddad\r
+sleep 3
+send echo x > /mnt/refused.txt\r
+sleep 2
+send mkdir /mnt/refused\r
+sleep 2
+send rm /mnt/hardname\r
+sleep 2
+send df /mnt\r
+sleep 3
+send cp /mnt/ls.bin /tmp/ls.bin && cmp /bin/ls /tmp/ls.bin && echo same-copy\r
+sleep 6
+send /mnt/ls.bin /mnt/Mapp ; echo run-from-pfs3=$?\r
+sleep 4
+send kill -9 $(pgrep pfs3d)\r
+sleep 3
+send cat /mnt/mapp/under/TEXT.txt ; echo after-the-kill=$?\r
+sleep 4
+send umount /mnt\r
+sleep 3
+send mount -o rw ide0p3 /mnt\r
+sleep 3
+send mount -t pfs3 -o uid=5,nonsense ide0p3 /mnt\r
+sleep 5
+send mount -t pfs3 -o uid=5,gid=6,fmode=640,dmode=750 ide0p3 /mnt\r
+sleep 5
+send ls -ld /mnt\r
+sleep 2
+send ls -ln /mnt/ls.bin\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount ide0p4 /mnt\r
+sleep 5
+send mount\r
+sleep 3
+send cat /mnt/super.txt\r
+sleep 2
+send sha256sum /mnt/big.bin\r
+sleep 15
+send umount /mnt\r
+sleep 3
+send mount ide0p5 /mnt\r
+sleep 5
+send cat /mnt/ok.txt\r
+sleep 2
+send cat /mnt/loop.bin > /dev/null ; echo loop-chain=$?\r
+sleep 4
+send ls /mnt/Mapp ; echo bad-dir=$?\r
+sleep 4
+send ls /mnt ; echo root-still=$?\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount -t pfs3 ide0p6 /mnt\r
+sleep 5
+send mount -t pfs3 ide0p2 /mnt\r
+sleep 5
+send dmesg | grep pfs3d\r
+sleep 3
+send echo pfs3-test-done\r
+sleep 2

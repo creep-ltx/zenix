@@ -15,7 +15,7 @@ cp -r "$HERE/../rootfs/." "$T/"
 mkdir -p "$T/bin" "$T/tmp" "$T/home/user" "$T/home/guest"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')
-    dir=bin; case $p in zup|zfsd|netd|nfscd|fatd|ffsd) dir=sbin; mkdir -p "$T/sbin";; esac   # the updater, the servers (DESIGN D19)
+    dir=bin; case $p in zup|zfsd|netd|nfscd|fatd|ffsd|pfs3d) dir=sbin; mkdir -p "$T/sbin";; esac   # the updater, the servers (DESIGN D19)
     case $p in drv-*) dir=sbin/net; name=${p#drv-}; mkdir -p "$T/sbin/net";; esac   # the network's drivers (D19)
     cp "$B/$p.zx" "$T/$dir/$name"
     chmod 755 "$T/$dir/$name"

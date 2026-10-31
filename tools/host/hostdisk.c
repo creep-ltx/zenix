@@ -3,7 +3,7 @@
  * filesystem code. One device: the whole image (or the part given by HOSTDISK_START/HOSTDISK_SECTORS, in sectors).
  * The image comes from the environment variable HOSTDISK or from hostdisk_use(). Counts every write so a test can
  * check that a read-only mount wrote nothing. HOSTDISK_CUT=N: a power cut after N sectors written (exit 99);
- * HOSTDISK_COUNT: the sectors written (and, on a second line, read) are said at the end. HOSTDISK_NOFAST: sys_meminfo
+ * HOSTDISK_RDONLY: the image is opened read-only, for an image that must not change. HOSTDISK_COUNT: the sectors written (and, on a second line, read) are said at the end. HOSTDISK_NOFAST: sys_meminfo
  * says there is no fast RAM (fsd's small block cache, DESIGN D18). */
 #include "zhost.h"
 #include "../../kernel/diskproto.h"
@@ -23,7 +23,7 @@ int hostdisk_die;                               /* ... or, set, end the program 
 int hostdisk_use(const char *path, u32 start, u32 sectors)
 {
     if (fd >= 0) close(fd);
-    fd = open(path, O_RDWR);
+    fd = open(path, getenv("HOSTDISK_RDONLY") ? O_RDONLY : O_RDWR);
     if (fd < 0) return -1;
     struct stat st;
     fstat(fd, &st);
@@ -71,7 +71,7 @@ int sys_call(int port, struct umsg *m)
     case DISK_READ: case DISK_WRITE: {
         u32 lba = m->a[1], n = m->a[2];
         if (n == 0 || lba + n < lba || lba + n > nsec) return -1;
-        off_t off = (off_t)((start_sec + lba) * 512);
+        off_t off = (off_t)(start_sec + lba) * 512;
         u32 *w = (u32 *)m->a[3];
         if (m->type == DISK_READ) {
             hostdisk_reads += n;
