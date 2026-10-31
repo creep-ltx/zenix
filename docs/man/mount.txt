@@ -263,5 +263,5 @@ NOTES
     writes past it (the frozen-interface rule, CLAUDE.md).
 
 SEE ALSO
-    umount(8), nfscd(8), fatd(8), ffsd(8), fdisk(1), df(1), dmesg(1), mkfs.ext2(1),
-    mkfs.zenixfs(1), boot(8)
+    umount(8), nfscd(8), fatd(8), ffsd(8), fdisk(1), df(1), dmesg(1),
+    mkfs.ext2(1), mkfs.zenixfs(1), boot(8)

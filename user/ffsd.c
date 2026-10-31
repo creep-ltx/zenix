@@ -1826,8 +1826,12 @@ static const char *check_link(u32 key)
     if (in < 0) return "a hard link to a damaged file";
     if (!in) {                                        /* a cut in a rename: the header has left its chain */
         const char *w;
+        if (fix_kind == FIX_TAKE && fix_h == t) return 0;         /* its other links lead here too */
         if (fix_kind || !own(t)) return "more than one change left half done";
-        fix_kind = FIX_TAKE; fix_h = t; fix_l = key; fix_dir = dir;
+        /* the newest link, the head of its list, is the one it was taking the place of */
+        if (!(c = hdr(t)) || !(fix_l = GL(c->d, O_NEXTLINK)) || !(c = hdr(fix_l))) return "a damaged list of hard links";
+        fix_dir = GL(c->d, O_PARENT);
+        fix_kind = FIX_TAKE; fix_h = t;
         if ((w = check_list(t))) return w;
         if (s == ST_LFILE) return check_file(t);
         fix_walk = t;
