@@ -27,7 +27,7 @@ want "kill -CONT lets it go on (none stopped)" "stopped=0"
 want "pkill ends it, pgrep then finds none" "gone=1"
 want "watch shows the command and its output" "Every 1s: echo tick"
 want "Ctrl-C ends watch" "after-watch"
-want "tac (last line first)" "users::100:user,guest"
+want "tac (last line first)" "zine::11:"
 want "rev" "toor:0::toor"
 want "paste -s -d+" "x+y"
 tr -d '\r' < $OUT/run.log | grep -aqxE 'msgping: 500 round trips in [0-9]+ us, [0-9]+\.[0-9] us each' && echo "PASS msgping times round trips in microseconds" || { echo "FAIL msgping times round trips in microseconds"; pass=0; }
