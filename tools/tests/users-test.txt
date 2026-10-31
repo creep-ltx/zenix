@@ -128,3 +128,5 @@ send echo $vvvv\t\x03
 sleep 2
 send echo "tab-$((2+1))-ok"\r
 sleep 2
+send sudo unam\t; echo sudocomp-$?\r
+sleep 3

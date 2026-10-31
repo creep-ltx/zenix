@@ -284,6 +284,16 @@ static int find_completions(const char *buf, int pos, char **m, int max, int *ws
     for (int i = 0; i < ws; i++) if (!is_space(buf[i]) && !strchr("|;&(", buf[i])) { cmdpos = 0; break; }
     /* after a | ; & ( the next word is a command again */
     { int i = ws - 1; while (i >= 0 && is_space(buf[i])) i--; if (i >= 0 && strchr("|;&(", buf[i])) cmdpos = 1; }
+    /* after a word that runs the next one (sudo, time, nice ...) the next word is a command too (bash's) */
+    {
+        int e = ws - 1; while (e >= 0 && is_space(buf[e])) e--;
+        int b = e; while (b >= 0 && !is_space(buf[b]) && !strchr("|;&(", buf[b])) b--;
+        static const char *const runners[] = { "sudo", "time", "nice", "nohup", "exec", "command", "watch", "env", 0 };
+        if (e >= 0 && e - b < 10) {
+            char w[12]; memcpy(w, buf + b + 1, (u32)(e - b)); w[e - b] = 0;
+            for (int k = 0; runners[k]; k++) if (!strcmp(w, runners[k])) cmdpos = 1;
+        }
+    }
     char pre[200]; int pl = pos - ws; if (pl > 190) pl = 190;
     memcpy(pre, buf + ws, (u32)pl); pre[pl] = 0;
     int n = 0;
