@@ -134,6 +134,11 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `channel`, `server`, `hold`, `cache`; others ignored), `/var/lib/zpkg/deps` (a name a line) and `sync/CHANNEL.index`
   with its `.sig`; zpkg's built-in keys by build kind (D21 6.3); `zup -f`/`-r`'s command line is between programs of one base version
   and not frozen (docs/d22-zpkg.md section 10).
+- **D22 amendment 2 (the system update from Zenix, 2026-10-31):** zpkg writes exactly the names every zenixboot reads,
+  `Zenix/zenix-update.zup` and `zenix-update.zup.sig` (frozen by D15 and D21 6.2), as new files of the one FFS
+  partition with a `Zenix` folder holding a kernel; the package `zpkg-new` (`/bin/zpkg-new`, `depends base
+  2026103000`) and `zpkg-new` as a package program's name in zup's and zpkg's lock rule; `sysutils`'s dependency on
+  it in the repository's lists (tools/mkzup.py `BOOTSTRAP`, `BOOTSTRAP_DEP`; both go together when the owner says).
 - **D21 step 5 (signatures, branch sig5, 2026-10-28):** the detached `.sig` (80 bytes: `ZSG1`, format 1, algorithm
   1 Ed25519, two zero bytes, the key id, the signature) and its labels with their digests (`Zenix bundle signature v1`
   over SHA-256 of a bundle's header bytes 0-63 and its table; `Zenix package index v1` over the whole list); its life

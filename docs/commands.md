@@ -59,7 +59,8 @@ spot-checked against the code that day.
 | [sudo](man/sudo.txt) | run one command as root: members of the group wheel, with their own password |
 | [dd](man/dd.txt), [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [mkfs.zenixfs](man/mkfs.zenixfs.txt), [fsck.zenixfs](man/fsck.zenixfs.txt), [sync](man/sync.txt), [reboot](man/reboot.txt) | disks |
 | [zup](man/zup.txt) | install the root half of an update (`/sbin/zup`, DESIGN D15); one package at a time for zpkg (`-f`, `-r`, D22) |
-| [zpkg](man/zpkg.txt) | the package manager: `-Syu`, `-S`, `-R`, `-Q`, `-U`, signed lists and packages over HTTP (DESIGN D22) |
+| [zpkg](man/zpkg.txt) | the package manager: `-Syu`, `-S`, `-R`, `-Q`, `-U`, signed lists and packages over HTTP; writes a system update onto the boot partition itself (DESIGN D22) |
+| [zpkg-new](man/zpkg-new.txt) | zpkg in a live package of its own, for a system whose zpkg cannot write system updates (2026103000): `zpkg-new -Syu` once (D22 4.5) |
 | [random](man/random.txt) | not a command: `/dev/random` and `/dev/urandom`, the kernel's random numbers, and the seed file (DESIGN D19) |
 | [rescue](man/rescue.txt) | not a command: what to do when the disk check at boot cannot repair the root (the four choices boot offers, step by step) |
 | [mount](man/mount.txt), [umount](man/umount.txt) | mounting more than the root filesystem (its server is a service: the kernel's fsd, zfsd, or nfscd for a NAS's folder over NFS, DESIGN D23)|

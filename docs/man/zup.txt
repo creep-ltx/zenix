@@ -11,11 +11,12 @@ SYNOPSIS
 
 DESCRIPTION
     zup installs the programs and files of an update onto the root
-    filesystem. An update arrives as a bundle on the boot partition;
-    zenixboot(8) installs its kernel, and the new kernel hands the bundle
-    to zup in memory. zup needs a kernel that knows updates (SYS_update,
-    Zenix 0.2 of 2026-10-26 and later); on an older one it does nothing.
-    Only root runs it. It does, in this order:
+    filesystem. An update arrives as a bundle on the boot partition
+    (zpkg -Syu writes it there, zpkg(8)); zenixboot(8) installs its
+    kernel, and the new kernel hands the bundle to zup in memory. zup
+    needs a kernel that knows updates (SYS_update, Zenix 0.2 of
+    2026-10-26 and later); on an older one it does nothing. Only root
+    runs it. It does, in this order:
 
     1. A journal left by a power cut (/var/lib/zpkg/journal): the install
        it describes is finished, if every new file is there, complete and
@@ -76,11 +77,11 @@ DESCRIPTION
     symbolic link on its way; the version is older than the installed
     one (unless -d) or needs a newer base or another package first; the
     file is a system bundle (those go through zenixboot); a new system
-    is on trial (not confirmed yet); another zup or zpkg is changing
-    packages (/var/lib/zpkg/lock); a manifest lists a path twice, a
-    name ending in .zup-new, .new or .save (zup's own), a link target of
-    other characters than A-Z a-z 0-9 . _ + / -, or more than 2,048
-    entries; a path is on another mount; a downgrade would leave an
+    is on trial (not confirmed yet); another zup, zpkg or zpkg-new is
+    changing packages (/var/lib/zpkg/lock); a manifest lists a path
+    twice, a name ending in .zup-new, .new or .save (zup's own), a
+    link target of other characters than A-Z a-z 0-9 . _ + / -, or more
+    than 2,048 entries; a path is on another mount; a downgrade would leave an
     installed package without the version it needs. A system update's
     unfinished journal is left to the next start ("restart first").
     Removing refuses a package another installed package needs. A config

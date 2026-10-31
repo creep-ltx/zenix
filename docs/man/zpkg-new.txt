@@ -1,0 +1,40 @@
+ZPKG-NEW(8)			Zenix manual
+
+NAME
+    zpkg-new - zpkg for a system whose own zpkg cannot write updates
+
+SYNOPSIS
+    zpkg-new -Syu
+    (and every other form of zpkg(8))
+
+DESCRIPTION
+    zpkg-new is zpkg(8), the same program, in a package of its own (the
+    package zpkg-new, /bin/zpkg-new). It exists for one step: a system
+    whose own /bin/zpkg came before the system update could be written
+    from Zenix (Zenix 2026103000) cannot install a new /bin/zpkg live
+    (zpkg belongs to the system, which changes only at a restart), so
+    it cannot write the system update itself. The package zpkg-new can
+    be installed live, and its zpkg can.
+
+    On such a system, as root:
+        zpkg -Syu        the old zpkg installs zpkg-new (with the
+                         package sysutils, which needs it) and only
+                         downloads the new system; it still says to
+                         copy the system from AmigaOS: not needed
+        zpkg-new -Syu    writes the system update onto the boot
+                         partition (zpkg(8), SYSTEM UPDATES)
+        reboot           zenixboot installs it
+        zpkg -Syu        after the restart: the packages that waited
+                         for the new system; from now on /bin/zpkg
+                         writes system updates itself
+
+NOTES
+    It needs a base of 2026103000 or newer. Once the system is updated
+    it is not needed any more; it stays installed while sysutils needs
+    it (the repository drops that need when no machine runs an older
+    system). The new zup and zpkg count it as a package program for
+    their lock; the old zpkg does not, so never run the old zpkg and
+    zpkg-new at the same time.
+
+SEE ALSO
+    zpkg(8), zup(8), zenixboot(8), docs/d22-zpkg.md

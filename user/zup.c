@@ -169,7 +169,10 @@ static int proc_get(int pid, struct uproc *out)              /* the living proce
         if (out->state && out->state != 5 && (int)out->pid == pid) return 1;   /* 5: a zombie */
     return 0;
 }
-static int is_pkgprog(const struct uproc *p) { return !strcmp(p->name, "zup") || !strcmp(p->name, "zpkg"); }
+static int is_pkgprog(const struct uproc *p)
+{
+    return !strcmp(p->name, "zup") || !strcmp(p->name, "zpkg") || !strcmp(p->name, "zpkg-new");   /* (D22 4.5's bootstrap) */
+}
 static int other_pkgprog(int me, int ppid)                  /* another living zup or zpkg than us and our parent */
 {
     struct uproc p;

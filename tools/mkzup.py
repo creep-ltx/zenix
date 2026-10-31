@@ -185,6 +185,15 @@ LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), 
          ("rz", "/bin/sz")]
 SBIN = {"zup"}
 OWN_PKG = {"zpkg"}                        # a base-group package of its own (DESIGN D22 step 5): /bin/zpkg, /etc/zpkg.conf
+# The bootstrap (DESIGN D22 4.5, as built 2026-10-31): a base whose zpkg cannot write the boot partition (2026103000,
+# the first one the owner runs) installs nothing of the base group live, so this build's zpkg also comes as a live
+# package, zpkg-new (/bin/zpkg-new), pinned to that older base (tools/mkrepo.py keeps its "depends base"). In the
+# repository (not in the build, so an image's database never names a package the image lacks) sysutils depends on it
+# (BOOTSTRAP_DEP, added by tools/mkrepo.py add), so the old zpkg's -Syu brings it. Then "zpkg-new -Syu" writes the
+# system update; after the restart the base's own /bin/zpkg can. NAME: the oldest base it must install on. Both go
+# when no machine runs a base without the writer any more (the owner's word).
+BOOTSTRAP = {"zpkg-new": 2026103000}
+BOOTSTRAP_DEP = {"sysutils": "zpkg-new"}
 # The packages by family (DESIGN D22 8.4.4, owner decision 2): every command outside the base group belongs to exactly
 # one family (a program in UAPPS that none names is refused: add it here), with its links and its manual pages. Each
 # family "takes" the old one-piece packages utils and man, so a machine installed before the split moves over one
@@ -336,6 +345,14 @@ def std_packages(build, uapps):
                 ents += [("f", 0o644, 0, 0, os.path.join(build, f), dst)]
             make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)], desc=desc, takes=("utils", "man"))
             names.append(fam)
+        if "zpkg" in progs:                 # the bootstrap package (BOOTSTRAP above): this build's zpkg, under its own name
+            ents = [("f", 0o755, 0, 0, zx("zpkg"), "/bin/zpkg-new")]
+            if "zpkg-new.txt" in pages:
+                ents += mandirs + [("f", 0o644, 0, 0, pages["zpkg-new.txt"], "/usr/man/zpkg-new.txt")]
+                taken.add("zpkg-new.txt")
+            make_package(out, "zpkg-new", vnum, vstr, ents, deps=[("base", BOOTSTRAP["zpkg-new"])],
+                         desc="zpkg that writes the system update itself, for a system older than that")
+            names.append("zpkg-new")
         # the remote control daemon (DESIGN D24, /sbin/wasabid): a package of its own, off until root writes
         # /etc/wasabid.conf and its line in /etc/daemons; not a command (SBINAPPS), so in no family
         if os.path.exists(zx("wasabid")):

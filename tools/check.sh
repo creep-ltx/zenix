@@ -21,7 +21,7 @@
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
 HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test zenixfs-test mfm-test emmc-test genet-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest zroot-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
 host) LIST="$HOST" ;;
@@ -33,7 +33,7 @@ JOBS=${ZENIX_EMU_SLOTS:-6}
 # The emulator tests start longest first (from a run on 2026-10-26), so the long ones do not end up last. The two
 # longest run as several jobs at once, each with some of the test's parts (the script's arguments; | between jobs);
 # the table still shows one line per test (its time: the jobs' times added up).
-LONGEST="ssh-test wget-test zpkg-emu-test remote-test nfs-emu-test update-test rootcheck-test svc-test matrix crypto68k-test diag-test colour-test bbs-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
+LONGEST="sysupdate-test ssh-test wget-test zpkg-emu-test remote-test nfs-emu-test update-test rootcheck-test svc-test matrix crypto68k-test diag-test colour-test bbs-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
 declare -A SPLIT
 SPLIT[svc-test]="a z zs b n r d|o zo u l|f s h t dmg c"
 SPLIT[colour-test]="1 4 2|3 s4 s16 s7"    # the 1-plane run first (its edges are the reference); s*: the setting (D18)
@@ -45,6 +45,7 @@ SPLIT[slip-test]="s|m|n"                            # 2 MB and 1 MB of chip RAM;
 SPLIT[ctop-test]="c|n"                              # the boxes and keys; the net box with traffic (the A2065)
 SPLIT[eth-test]="e|g"                               # the A2065; genet where there is no GENET
 SPLIT[zpkg-emu-test]="e|s|m"                       # D22 8.2: the A2065, SLIP, 1 MB of chip RAM
+SPLIT[sysupdate-test]="b|m"                         # D22 amendment 2: the owner's way from 2026103000; the card layout
 SPLIT[nfs-emu-test]="m|b|w|r|u"                     # D23: reading, hard, soft, killed; the lazy fstab boot; writing; reboot; users
 SPLIT[remote-test]="c|s|l|b"                        # D24: the stock A1200 (c, d, r), the screen, 1 MB of chip RAM, init's daemons
 SPLIT[update-test]="install bad|cold previous|panic hang|powercut slowzup|refused nozup|zfsroot"

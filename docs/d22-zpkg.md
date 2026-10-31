@@ -330,6 +330,9 @@ base V, base V-1 runs"); they work again when the system update is installed aga
 
 ### 4.5 The update slot: how a bundle from Zenix reaches BOOT:
 
+**Replaced (2026-10-31, amendment 2 at the end):** zpkg writes the bundle and its `.sig` as zenixboot's own two files
+(option (a), narrowed); the slot below was not built. The rest of this section is the design as reviewed.
+
 | | How | Against it |
 |---|---|---|
 | (a) An FFS writer in Zenix | create a file on BOOT: | bitmap, headers, hash chains written by Zenix on the owner's AmigaOS partition: the riskiest write in the system, for one file |
@@ -646,8 +649,8 @@ main session's.
 ## 10. Frozen once built (CLAUDE.md's list gets them in their steps)
 
 The list's format (`zpkgindex 1`, its words and meanings, growth only), `latest`'s line, the pool's names and the
-channel directories (3.2-3.3); the slot file's place, the `MKSLOT` size rule and the control block (4.5: zenixboot
-changes only by hand, so every later zpkg must write what the first slot-reading zenixboot reads); `UPD_F_TRIAL` (a
+channel directories (3.2-3.3); what zpkg writes on BOOT: (amendment 2: `Zenix/zenix-update.zup` and its `.sig`,
+zenixboot's names, frozen already by D15 and D21; no slot); `UPD_F_TRIAL` (a
 bit of D15's frozen bootinfo flags, growth); `/etc/zpkg.conf`'s format (a base config file a base program reads); the
 manifest lines `desc` and `takes`, the journal line `live` and the live-only operation `S` (growth of D15's frozen
 formats, which old readers ignore and never meet); `/var/lib/zpkg/deps`, `lock` and `sync/` (read by later zpkgs and
@@ -993,3 +996,95 @@ All tests pass after the fixes (`tools/zup-host-test.sh` 107, `tools/ext2-host-t
   machine updates through a D15 bundle copied onto it. netd's memory is not reopened for it.
 - Open, not blocking: `--back` from the repository's pool (a list word naming older versions) and the FS-UAE power cut
   during a live install (8.2); the host tests cut before every change and after every block write meanwhile.
+
+## Amendment 2 (2026-10-31): the system update written as zenixboot's own files; step 7 as built
+
+**The owner's requirement (2026-10-31):** "We need to fix so zpkg -Syu also update the system. Because we can not
+rely on boot: because it might not exist. So maybe fix zpkg command, then I'll update using -Syu, get the new zpkg and
+run -Syu again to update the base and kernel." A system update happens from Zenix alone (`zpkg -Syu`, then a restart),
+with no step in AmigaOS by the owner, ever.
+
+**Why the slot of 4.5 cannot do that.** zenixboot is only ever installed by hand (D15 section 6: it has no copy in
+place between two renames), and the one on every card in the field (0.3b1, the owner's since 2026-10-31) reads only
+`Zenix/zenix-update.zup` and its `.sig`. A slot read by a newer zenixboot needs that newer zenixboot on BOOT: first,
+copied from AmigaOS; "zenixboot makes the slot itself when it is missing" (proposed by the main session) needs the
+same copy. Every way that works with the zenixboot already there writes FFS metadata on BOOT: once per update (4.5's
+option (a)). So option (a) is taken, as narrow as it can be, and the slot (`MKSLOT`, the control block, zenixboot's
+copy at start) is not built. zenixboot does not change at all.
+
+**What zpkg writes** (`user/zpkg/bootfs.c`, system-call free, host-tested; `user/zpkg.c` `system_put`):
+- **Where:** the one FFS partition of the disk's RDB (at sector 0, or inside the MBR partition of type 0x76 of an
+  Emu68 card; `user/rdb.h` now carries each partition's block size and reserved blocks) whose root has a `Zenix`
+  folder with `zenix`, `zenix.new` or `zenix.old` in it (zenixboot's own rule for its update layout). None: zpkg
+  says this Zenix was not started from a boot partition (a floppy start), installs the programs, never the system,
+  and exits 1. Two: refused.
+- **Checked first, every time, the whole volume** (4.5's walk widened from one file to everything): 512-byte blocks,
+  2 reserved blocks, DOS\1 or DOS\3, a device that flushes; the root (type, checksum, hash table size, "bitmap
+  valid", no bitmap extension block), the bitmap blocks' checksums; every directory, file and link from the root by
+  its hash chains (type, own number, parent, checksum, name length, a known secondary type), every file's extension
+  blocks and data pointers (inside the partition, the count matching the byte size); no block named twice (this also
+  ends every loop); every entry in its own name's hash chain; every block in use marked in use in the bitmap. Blocks
+  marked in use that nothing names (a cut write's leftovers) are not refused: AmigaOS never validates a volume whose
+  bitmap is valid, so the next file's bitmap write gives them back (the walk proved nothing names them). At most
+  4,096 headers and 8 directory levels.
+- **Then the two files, the `.sig` first:** each in blocks free in the bitmap and named by nothing (from the root
+  upwards, as FFS allocates), in the order of CFile's FFS writer (knowledge base `amiga/disk-images.md`): the data,
+  extension and header blocks, flushed; the bitmap blocks, flushed; then the one write that links the header into
+  the `Zenix` folder's hash chain at its place in block order (the chain's previous header or the folder's slot),
+  flushed. The root's "bitmap valid" flag is never cleared, no date and no other header is touched. A cut leaves
+  the file whole or not there, at worst leaked blocks (given back by the next write). Then the volume is walked again and both files read back and
+  compared (the bundle's SHA-256, the `.sig`'s bytes).
+- **The rules around it:** the bundle's `.sig` is verified with the built-in keys before anything is written (as
+  zenixboot will); a `zenix-update.zup` already there with the same bytes and `.sig` is "ready already", else zpkg
+  names the version it holds and says to restart first (it is the last update until zenixboot retires it: at the
+  start after its confirmed one, or after its third start; or one zenixboot has not taken yet); a lone `zenix-update.zup.sig` (a cut between the two files) gets its
+  one data block written in place; room for both files plus the kernel's size and 16 blocks for zenixboot's own steps
+  (`zenix.new`, the state file), else nothing is written. `-U` of a system bundle goes the same way.
+- **What stays as designed:** the bundle, its signature and zenixboot's checks (D21 6.4), the trial, the
+  confirmation, "Zenix (previous)", zup's root half: D15 as built. `UPD_F_TRIAL` stays unset (only a new zenixboot
+  would set it; none is needed), so zpkg relies on the rule above: no new system is written while the last one is
+  still on the partition.
+
+**The bootstrap from 2026103000** (the owner's system: its zup refuses every base-group package live, by group and by
+name, and its zpkg has no writer, so no new `/bin/zpkg` can arrive before a system update):
+- `tools/mkzup.py` makes a live package **`zpkg-new`** (this build's zpkg as `/bin/zpkg-new`, its own page) with
+  `depends base 2026103000` (`BOOTSTRAP`); `tools/mkrepo.py` keeps that base (and the header's minimum) while the
+  system moves on, and adds `depends zpkg-new` to `sysutils` in the repository only (`BOOTSTRAP_DEP`; never in the
+  build, so an image's database never names a package the image lacks). The old zpkg's `-Syu` upgrades `sysutils`,
+  whose dependency `zpkg-new` it installs live at once; `sysutils` itself waits for the new base.
+- **The owner types:** `zpkg -Syu` (zpkg-new arrives; the system is only downloaded, and the old zpkg's message about
+  copying it from AmigaOS is to be ignored), `zpkg-new -Syu` (the system is written), `reboot`, then `zpkg -Syu`
+  (what waited). From then on: `zpkg -Syu`, `reboot`, `zpkg -Syu`.
+- `zpkg-new` goes (both lines of `tools/mkzup.py`) when no machine runs a base without the writer (the owner's word).
+  zup and zpkg count `zpkg-new` as a package program for the lock.
+- **mkrepo's other dependencies (choice 2 of steps 2-3, now built):** the change rule ignores every dependency's
+  version, and a changed package's dependencies are written as the versions the new list gives them (before, any but
+  `depends base` had to name a version the list already had).
+
+**Sizes (*measured*, this build):** `user/zpkg/bootfs.c` 7,327 bytes of code at -Os; `/bin/zpkg` 91,032 -> 106,568
+bytes; `zpkg-new` is the same file. The kernel and zenixboot do not change.
+
+**Tests:** `tools/host/zpkg-test.sh boot` (85 checks; DOS\1 and DOS\3; replaces the slot part): the files made and
+judged by a reader of its own (`tools/ffsread.py check`) and amitools' `xdfscan`, the new header in block order
+between the two names of its chain, only the new blocks, the bitmap and one link block changed, the write order per
+file, a power cut before every one of a create's 83 block writes (whole or absent, at worst leaks, the next run
+finishes and gives the leaks back), an in-place write, 23 kinds of damage refused untouched, a leak counted and given back, no `Zenix`, a full volume; the
+fuzz target `ffs` (open, create, the result walked again, an in-place write). `tools/sysupdate-test.sh` (FS-UAE, in
+`make check`): **b** from an image built from 381e9b1 (Zenix 2026103000, its zenixboot; 8 MB of fast RAM): the owner's four steps, then
+a second update with the new `/bin/zpkg` alone (refused while the first is on the partition, written after the
+restart, installed); the boot partition checked on the PC by `ffsread.py check` and `xdfscan`, the root by e2fsck;
+**m** the SD card's layout (MBR, the RDB inside type 0x76, the root a PC partition, started from the floppy) and a
+disk without a boot partition.
+
+**Found on the way (FS-UAE, 2026-10-31):** on an A1200 with 2 MB of chip RAM alone, AmigaOS's own start reuses the top
+of chip RAM, so zenixboot never reads the new system's confirmation (the update note) and retires an update only
+after its third start (D15's rule); on machines with fast RAM it is retired at the start after the confirmed one.
+Not fixed here (zenixboot is only changed by hand); zpkg's message says "at most three starts later".
+
+**Said plainly, and open:** this writes the owner's boot partition's metadata (two new files per update, one
+hash-chain link each, the bitmap). The checks above make a damaged or unexpected volume a refusal, and the write
+order keeps a cut harmless, but CLAUDE.md asks for a plan the owner agreed to before any write to a disk with AmigaOS
+partitions, and the approved D22 decision said "nothing else there ever written". **The owner's explicit yes to this
+plan is needed before the first use on the real card**, and a second design review (update changes get two). Before
+the first real write: a read-only check of the real BOOT: image on the PC (`tools/ffsread.py check`, and zpkg's own
+walk), which shows whether the owner's FFS writes its volumes as the walk expects. Not verified on the real A1200.

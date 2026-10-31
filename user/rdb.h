@@ -19,6 +19,8 @@ struct rdb_part {
     unsigned bootable;
     unsigned heads, secs;           /* the partition's own geometry (DosEnvec Surfaces, BlocksPerTrack) */
     unsigned blk;                   /* block number of its PART block */
+    unsigned blksize, reserved;     /* DosEnvec SizeBlock x SectorPerBlock in bytes, and Reserved: the filesystem's
+                                     * geometry (zpkg's boot partition writer, DESIGN D22 4.5) */
     unsigned start, sectors;        /* in 512-byte sectors from the start of the RDB's disk; sectors 0 = unusable */
 };
 struct rdb {
@@ -130,6 +132,7 @@ static __attribute__((unused)) int rdb_read(rdb_io rd, struct rdb *r)
             p->heads = env[3]; p->secs = env[5];
             p->bootable = sec[5] & 1;
             p->blk = next;
+            p->blksize = env[1] * 4 * (env[4] ? env[4] : 1); p->reserved = env[6];   /* (SectorPerBlock) */
             /* sectors per cylinder of this partition: Surfaces x BlocksPerTrack sectors of SizeBlock longs */
             unsigned sb = env[1], per = sb && (sb * 4) % 512 == 0 ? sb * 4 / 512 : 0;
             unsigned long long cyl = (unsigned long long)p->heads * p->secs * per;

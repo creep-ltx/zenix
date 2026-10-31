@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-only
 # zpkg's PC-side tests (DESIGN D22 8.1, steps 2 and 3 of section 9), on the PC only, no emulator, no root:
-#   tools/host/zpkg-test.sh [PART...]   parts: core repo differential slot net (default: all of them)
+#   tools/host/zpkg-test.sh [PART...]   parts: core repo differential boot net (default: all of them)
 #                                       fuzz [SECONDS]: every parser under libFuzzer, the time shared out (not in
 #                                       the default run; 300 s when no number follows)
 # core          user/zpkg/ (the list, latest, the trust rules, the resolver) and net/http/ (URLs, requests, the
@@ -10,8 +10,10 @@
 #               version rules of 3.4, serials, latest, promote, snapshot, prune, check finding damage, installdb,
 #               the test key refused for release channels, two runs byte for byte; every list read by the C parser
 # differential  the C list parser against mkrepo's Python one on 3,000 damaged lists
-# slot          the update slot's read-only FFS walk and in-place write on tools/mkffs.py images, DOS\1 and DOS\3,
-#               every refusal of 4.5 on a damaged copy
+# boot          the boot partition writer (user/zpkg/bootfs.c, D22 4.5 as built) on tools/mkffs.py images, DOS\1
+#               and DOS\3: the update's two files made, judged by a reader of the test's own and amitools' xdfscan,
+#               their place in the hash chain, the write order, a power cut before every block write, an in-place
+#               write, every refusal on a damaged copy
 # net           in unshare -rnm (a user, mount and network namespace with only lo): tools/host/zpkg-client.c over
 #               the cores against tools/host/http-test-server.py: keep-alive, chunked and huge chunks, Range
 #               honoured, ignored and wrong, bodies longer, shorter and endless, a slow drip, a stalled server, a
@@ -29,7 +31,7 @@ SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-fram
 HCFLAGS="-std=gnu99 -g -O1 -Wall -Wextra -Werror"
 BRDEF="-DBR_LE_UNALIGNED=0 -DBR_BE_UNALIGNED=0 -DBR_USE_URANDOM=0 -DBR_USE_GETENTROPY=0"
 CINC="-Icrypto/bearssl/inc -Icrypto/bearssl/src"
-CORE_SRCS="user/zpkg/index.c user/zpkg/resolve.c user/zpkg/ffsslot.c net/http/http.c"
+CORE_SRCS="user/zpkg/index.c user/zpkg/resolve.c user/zpkg/bootfs.c net/http/http.c"
 SIG_SRCS="user/sha256.c $(ls crypto/zc/*.c) crypto/monocypher/monocypher.c crypto/monocypher/monocypher-ed25519.c $(find crypto/bearssl/src -name '*.c' | sort)"
 fails=0
 skips=""
@@ -79,9 +81,9 @@ part_differential() {
     py_part differential "$OUT" "$OUT/zpkg-core-test" "${ZPKG_DIFF_COUNT:-3000}"
 }
 
-part_slot() {
+part_boot() {
     build_core || return
-    py_part slot "$OUT" "$OUT/zpkg-core-test"
+    py_part boot "$OUT" "$OUT/zpkg-core-test"
 }
 
 part_net() {
@@ -110,7 +112,7 @@ part_fuzz() {
     for t in $FUZZ_TARGETS; do n=$((n + 1)); done
     each=$(( (secs + n - 1) / n ))
     [ -f "$OUT/repo/test/latest" ] || part_repo >/dev/null
-    [ -f "$OUT/slot/boot-DOS1.img" ] || part_slot >/dev/null
+    [ -f "$OUT/boot/boot-DOS1.img" ] || part_boot >/dev/null
     for t in $FUZZ_TARGETS; do
         local d="$OUT/fuzz/$t" T
         T=$(echo "$t" | tr a-z A-Z)
@@ -132,9 +134,9 @@ for z in sys.argv[2:]:
               printf 'http://127.0.0.1:8088/zenix/testing/latest' >"$d/seeds/url" ;;
         ffs) head -c 20480 /dev/zero >"$d/s20k"
              head -c 40960 /dev/zero >"$d/s40k"
-             python3 -I tools/mkffs.py "$d/seeds/one.img" 64K BOOT "$d/s20k=Zenix/zenix-update.slot" >/dev/null
+             python3 -I tools/mkffs.py "$d/seeds/one.img" 64K BOOT "$d/s20k=Zenix/zenix" >/dev/null
              python3 -I tools/mkffs.py "$d/seeds/two.img" 128K BOOT --intl "tools/mkffs.py=S/x" \
-                 "$d/s40k=Zenix/zenix-update.slot" "tools/zsign.py=Zenix/f3" >/dev/null ;;
+                 "$d/s20k=Zenix/zenix" "tools/zsign.py=Zenix/f3" >/dev/null ;;
         esac
         # shellcheck disable=SC2086
         local extra=""
@@ -155,14 +157,14 @@ for z in sys.argv[2:]:
 }
 
 parts=("$@")
-[ ${#parts[@]} = 0 ] && parts=(core repo differential slot net)
+[ ${#parts[@]} = 0 ] && parts=(core repo differential boot net)
 for ((i = 0; i < ${#parts[@]}; i++)); do
     p=${parts[i]}
     case "$p" in
     core) part_core ;;
     repo) part_repo ;;
     differential) part_differential ;;
-    slot) part_slot ;;
+    boot) part_boot ;;
     net) part_net ;;
     fuzz) if [[ "${parts[i + 1]:-}" =~ ^[0-9]+$ ]]; then part_fuzz "${parts[i + 1]}"; i=$((i + 1)); else part_fuzz 300; fi ;;
     *) echo "zpkg-test: no part called $p"; exit 2 ;;

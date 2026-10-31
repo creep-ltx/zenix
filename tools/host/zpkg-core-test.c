@@ -766,10 +766,13 @@ static void t_http(void)
     free(g);
 }
 
-/* ---- the slot ---- */
+/* ---- the boot partition (bootfs.c) ---- */
 struct img {
     FILE *f;
     zp_u32 n;
+    long cut;                       /* a power cut: the program ends before block write number cut (1 = the first) */
+    long writes;
+    FILE *log;                      /* $ZP_WLOG: "W BLOCK" and "F" lines, in order */
 };
 static int img_read(void *u, zp_u32 blk, unsigned char *buf)
 {
@@ -781,38 +784,74 @@ static int img_read(void *u, zp_u32 blk, unsigned char *buf)
 static int img_write(void *u, zp_u32 blk, unsigned char *buf)
 {
     struct img *m = u;
+    if (m->cut && ++m->writes >= m->cut) {
+        fflush(m->f);
+        printf("cut before write %ld\n", m->writes);
+        exit(3);
+    }
     if (blk >= m->n || fseek(m->f, (long)blk * 512, SEEK_SET) || fwrite(buf, 1, 512, m->f) != 512)
         return -5;
+    fflush(m->f);
+    if (m->log)
+        fprintf(m->log, "W %u\n", blk);
+    return 0;
+}
+static int img_flush(void *u)
+{
+    struct img *m = u;
+    if (m->log)
+        fprintf(m->log, "F\n");
+    return fflush(m->f) ? -5 : 0;
+}
+struct fsrc {
+    const unsigned char *d;
+    zp_u32 n;
+};
+static int fsrc_read(void *u, zp_u32 off, unsigned char *buf, zp_u32 n)
+{
+    struct fsrc *s = u;
+    if (off > s->n || n > s->n - off)
+        return -22;
+    memcpy(buf, s->d + off, n);
     return 0;
 }
 
-static int slot_cmd(int argc, char **argv, int write)
+/* boot IMG DOSTYPE [noflush] [BS RES]              the walk: "ok FREE LEAK HEADERS DIR"
+ * bootfind IMG DOSTYPE NAME                        Zenix/NAME: "ok SIZE NBLK HEADER BLOCK..."
+ * bootcreate IMG DOSTYPE NAME FILE [CUT]           a new file Zenix/NAME with FILE's bytes ("created")
+ * bootwrite IMG DOSTYPE NAME OFF FILE              FILE's bytes at OFF into Zenix/NAME's data blocks ("written") */
+static int boot_cmd(int argc, char **argv)
 {
     struct img m;
     struct zp_ffs f;
-    struct zp_slot s;
-    const char *why = "";
-    int rc;
+    struct zp_bootvol v;
+    struct zp_bootfile bf;
+    const char *why = "", *cmd = argv[1];
+    int rc, wr = strcmp(cmd, "boot") && strcmp(cmd, "bootfind");
     long sz;
-    m.f = fopen(argv[2], write ? "r+b" : "rb");
+    memset(&m, 0, sizeof m);
+    m.f = fopen(argv[2], wr ? "r+b" : "rb");
     if (!m.f) {
         printf("cannot open %s\n", argv[2]);
         return 2;
     }
+    if (getenv("ZP_WLOG"))
+        m.log = fopen(getenv("ZP_WLOG"), "a");
     fseek(m.f, 0, SEEK_END);
     sz = ftell(m.f);
     m.n = (zp_u32)(sz / 512);
     memset(&f, 0, sizeof f);
     f.blocksize = 512;
     f.reserved = 2;
-    f.dostype = strcmp(argv[5], "DOS3") ? (strcmp(argv[5], "DOS1") ? 0x444F5300u : ZP_DOS1) : ZP_DOS3;
+    f.dostype = strcmp(argv[3], "DOS3") ? (strcmp(argv[3], "DOS1") ? 0x444F5300u : ZP_DOS1) : ZP_DOS3;
     f.nblocks = m.n;
     f.canflush = 1;
     f.read = img_read;
-    f.write = img_write;
+    f.write = wr ? img_write : 0;
+    f.flush = img_flush;
     f.u = &m;
-    if (!write) {
-        for (int i = 6; i < argc; i++) {
+    if (!strcmp(cmd, "boot"))
+        for (int i = 4; i < argc; i++) {
             if (!strcmp(argv[i], "noflush"))
                 f.canflush = 0;
             else if (i + 1 < argc) {
@@ -821,30 +860,54 @@ static int slot_cmd(int argc, char **argv, int write)
                 i++;
             }
         }
-    }
-    rc = zp_slot_find(&f, argv[3], argv[4], &s, &why);
+    rc = zp_boot_open(&f, "Zenix", &v, &why);
     if (rc) {
         printf("refused: %s\n", why);
         fclose(m.f);
         return 1;
     }
-    if (write) {
+    if (!strcmp(cmd, "boot")) {
+        printf("ok %u %u %u %u\n", v.nfree, v.nleak, v.nheaders, v.dir);
+    } else if (!strcmp(cmd, "bootfind")) {
+        rc = zp_boot_find(&v, argv[4], &bf, &why);
+        if (rc)
+            printf("%s: %s\n", rc == ZP_ENOENT ? "absent" : "refused", why);
+        else {
+            printf("ok %u %u %u", bf.size, bf.nblk, bf.header);
+            for (zp_u32 i = 0; i < bf.nblk; i++)
+                printf(" %u", bf.blk[i]);
+            printf("\n");
+            zp_boot_file_free(&bf);
+        }
+    } else {
         size_t n;
-        char *data = readfile(argv[7], &n);
+        char *data = readfile(argv[!strcmp(cmd, "bootcreate") ? 5 : 6], &n);
         if (!data) {
-            printf("cannot read %s\n", argv[7]);
+            printf("cannot read the data\n");
             return 2;
         }
-        rc = zp_slot_pwrite(&f, &s, (zp_u32)atol(argv[6]), (unsigned char *)data, (zp_u32)n);
+        if (!strcmp(cmd, "bootcreate")) {
+            static const zp_u32 date[3] = { 17800, 600, 0 };
+            struct fsrc src = { (const unsigned char *)data, (zp_u32)n };
+            m.cut = argc > 6 ? atol(argv[6]) : 0;
+            rc = zp_boot_create(&v, argv[4], (zp_u32)n, fsrc_read, &src, date, &why);
+            if (rc)
+                printf("refused %d: %s\n", rc, why);
+            else
+                printf("created\n");
+        } else {
+            rc = zp_boot_find(&v, argv[4], &bf, &why);
+            if (!rc) {
+                rc = zp_boot_pwrite(&v, &bf, (zp_u32)atol(argv[5]), (unsigned char *)data, (zp_u32)n);
+                zp_boot_file_free(&bf);
+            }
+            printf(rc ? "write refused %d\n" : "written\n", rc);
+        }
         free(data);
-        printf(rc ? "write refused %d\n" : "written\n", rc);
-    } else {
-        printf("ok %u %u %u", s.size, s.nblk, s.header);
-        for (zp_u32 i = 0; i < s.nblk; i++)
-            printf(" %u", s.blk[i]);
-        printf("\n");
     }
-    zp_slot_free(&s);
+    zp_boot_close(&v);
+    if (m.log)
+        fclose(m.log);
     fclose(m.f);
     return rc ? 1 : 0;
 }
@@ -888,11 +951,10 @@ int main(int argc, char **argv)
         free(t);
         return 0;
     }
-    if (argc >= 6 && !strcmp(argv[1], "slot"))
-        return slot_cmd(argc, argv, 0);
-    if (argc == 8 && !strcmp(argv[1], "slotwrite"))
-        return slot_cmd(argc, argv, 1);
-    fprintf(stderr, "usage: zpkg-core-test units | index FILE | latest FILE | slot IMG DIR NAME DOSTYPE [noflush] [BS RES]"
-                    " | slotwrite IMG DIR NAME DOSTYPE OFF FILE\n");
+    if ((argc >= 4 && !strcmp(argv[1], "boot")) || (argc == 5 && !strcmp(argv[1], "bootfind")) ||
+        ((argc == 6 || argc == 7) && !strcmp(argv[1], "bootcreate")) || (argc == 7 && !strcmp(argv[1], "bootwrite")))
+        return boot_cmd(argc, argv);
+    fprintf(stderr, "usage: zpkg-core-test units | index FILE | latest FILE | boot IMG DOSTYPE [noflush] [BS RES]"
+                    " | bootfind IMG DOSTYPE NAME | bootcreate IMG DOSTYPE NAME FILE [CUT] | bootwrite IMG DOSTYPE NAME OFF FILE\n");
     return 2;
 }

@@ -17,6 +17,8 @@
 #include "../crypto/zc/zc_clock.h"
 #include "builddate.h"
 #include "zpkgkeys.h"
+#include "rdb.h"
+#include "../kernel/diskproto.h"
 
 typedef unsigned char u8;
 
@@ -247,7 +249,10 @@ static int proc_alive(int pid, struct uproc *p)
         if (p->state && p->state != 5 && (int)p->pid == pid) return 1;
     return 0;
 }
-static int is_pkgprog(const struct uproc *p) { return !strcmp(p->name, "zup") || !strcmp(p->name, "zpkg"); }
+static int is_pkgprog(const struct uproc *p)
+{
+    return !strcmp(p->name, "zup") || !strcmp(p->name, "zpkg") || !strcmp(p->name, "zpkg-new");   /* (D22 4.5's bootstrap) */
+}
 static int lock_take(void)
 {
     int me = sys_getpid();
@@ -757,6 +762,209 @@ static void say_running(const char *name)
     free(k);
 }
 
+/* ---- the system update onto the boot partition (D22 4.5, as built 2026-10-31; user/zpkg/bootfs.c) ----
+ * zenixboot (under Kickstart's own dos, at every start from the AmigaDOS boot partition) installs
+ * Zenix/zenix-update.zup and its .sig (D15, D21 6.4). zpkg writes those two files there itself: the partition is
+ * found (exactly one FFS partition of the RDB with a Zenix folder holding a kernel), the whole volume checked, the
+ * .sig and then the bundle written as new files in the safe order, then read back from the disk and checked. */
+static const char B_ZUP[] = "zenix-update.zup", B_SIG[] = "zenix-update.zup.sig";
+static int dport = -1;
+struct dpart { int h; };
+static int dmsg(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
+{
+    struct umsg m;
+    m.type = type; m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
+    int r = sys_call(dport, &m);
+    return r == -ECONNRESET ? sys_call(dport, &m) : r;     /* a restarted diskd kept every handle (diskcall.h) */
+}
+static int dk_read(void *u, zp_u32 b, unsigned char *buf) { return dmsg(DISK_READ, (u32)((struct dpart *)u)->h, b, 1, (u32)buf) < 0 ? -EIO : 0; }
+static int dk_write(void *u, zp_u32 b, unsigned char *buf) { return dmsg(DISK_WRITE, (u32)((struct dpart *)u)->h, b, 1, (u32)buf) < 0 ? -EIO : 0; }
+static int dk_flush(void *u) { return dmsg(DISK_FLUSH, (u32)((struct dpart *)u)->h, 0, 0, 0) < 0 ? -EIO : 0; }
+static int rdb_h;
+static u32 rdb_base;
+static int rdb_rd(unsigned lba, void *buf) { return dmsg(DISK_READ, (u32)rdb_h, rdb_base + lba, 1, (u32)buf) < 0 ? -1 : 0; }
+
+#define DT_RDB_IN_MBR 0x52444200u       /* diskd: MBR type 0x76, an Amiga RDB inside (Emu68's convention) */
+struct bootpart { char name[16]; struct zp_ffs f; struct dpart d; };
+/* the boot partition: 0 (bp filled, opened for reading), or < 0 with the reason said */
+static int boot_find(struct bootpart *bp)
+{
+    static struct diskinfo di[20];
+    static struct rdb r;
+    static char why2[240];
+    struct bootpart c;
+    int n = 0, found = 0, hd = -1;
+    const char *why = 0;
+    why2[0] = 0;
+    dport = sys_port_find("disk");
+    if (dport < 0) { say("no disk server: the system update cannot be put on a boot partition"); return -ENODEV; }
+    while (n < 20 && dmsg(DISK_LISTSZ, (u32)n, (u32)&di[n], sizeof di[n], 0) >= 0) n++;
+    for (int i = 0; i < n; i++) if (!strcmp(di[i].name, "ide0")) hd = dmsg(DISK_OPEN, (u32)di[i].name, 0, 0, 0);
+    for (int i = 0; hd >= 0 && i < n; i++) {
+        if (strcmp(di[i].name, "ide0") && di[i].dostype != DT_RDB_IN_MBR) continue;
+        rdb_h = hd; rdb_base = strcmp(di[i].name, "ide0") ? di[i].start : 0;
+        if (rdb_read(rdb_rd, &r) != 1) continue;
+        for (int k = 0; k < r.nparts; k++) {
+            const struct rdb_part *rp = &r.part[k];
+            if ((rp->dostype != ZP_DOS1 && rp->dostype != ZP_DOS3) || !rp->sectors) continue;
+            for (int j = 0; j < n; j++) {
+                if (di[j].start != rdb_base + rp->start || di[j].sectors != rp->sectors || di[j].dostype != rp->dostype) continue;
+                struct zp_bootvol v;
+                memset(&c, 0, sizeof c);
+                strcpy(c.name, di[j].name);
+                c.d.h = dmsg(DISK_OPEN, (u32)di[j].name, 0, 0, 0);
+                if (c.d.h < 0) continue;
+                c.f.blocksize = rp->blksize; c.f.reserved = rp->reserved; c.f.dostype = rp->dostype;
+                c.f.nblocks = di[j].sectors; c.f.canflush = (di[j].caps & DISKCAP_FLUSH) != 0;
+                c.f.read = dk_read; c.f.flush = dk_flush; c.f.u = 0;
+                struct zp_ffs f = c.f;
+                f.u = &c.d;
+                const char *w = 0;
+                if (zp_boot_open(&f, "Zenix", &v, &w) == 0) {
+                    struct zp_bootfile bf;
+                    int kern = 0;
+                    static const char *const kn[3] = { "zenix", "zenix.new", "zenix.old" };   /* zenixboot's own rule */
+                    for (int q = 0; q < 3 && !kern; q++) { kern = zp_boot_find(&v, kn[q], &bf, 0) == 0; zp_boot_file_free(&bf); }
+                    zp_boot_close(&v);
+                    if (!kern) continue;
+                    if (found++) { say("two AmigaDOS partitions with a Zenix folder (%s, %s): zpkg does not choose one", bp->name, c.name); return -EEXIST; }
+                    *bp = c;
+                } else {                            /* (every partition it could not check: said if none is found) */
+                    u32 l = (u32)strlen(why2);
+                    snprintf(why2 + l, sizeof why2 - l, "%s%s (%s): %s", l ? "; " : "", di[j].name, di[j].label, w ? w : "refused");
+                    why = why2;
+                }
+            }
+        }
+    }
+    if (found) { bp->f.u = &bp->d; return 0; }
+    if (why) {
+        say("no usable AmigaDOS boot partition with a Zenix folder was found; these could not be checked: %s. If one "
+            "of them is the boot partition, that is why nothing is written; start AmigaOS on it once (it checks and "
+            "repairs its volumes) and try again", why);
+        return -EINVAL;
+    }
+    say("no AmigaDOS boot partition with a Zenix folder (zenixboot's) was found, so the system (the kernel and the "
+        "base) is not updated here: this Zenix was not started by zenixboot from a disk (a floppy start?). Programs "
+        "update as before; the system needs a start from a boot partition (man zenixboot)");
+    return -ENOENT;
+}
+struct fsrc { int fd; };
+static int file_src(void *u, zp_u32 off, unsigned char *buf, zp_u32 n)
+{
+    struct fsrc *s = u;
+    if (sys_lseek(s->fd, (int)off, 0) < 0) return -EIO;
+    return sys_read(s->fd, buf, n) == (int)n ? 0 : -EIO;
+}
+static int boot_sha(const struct zp_bootvol *v, const struct zp_bootfile *bf, u8 out[32])
+{
+    static u8 b[4096];
+    struct sha256 c;
+    sha256_init(&c);
+    for (u32 off = 0; off < bf->size; ) {
+        u32 k = bf->size - off < sizeof b ? bf->size - off : sizeof b;
+        if (zp_boot_read(v, bf, off, b, k)) return -EIO;
+        sha256_update(&c, b, k);
+        off += k;
+    }
+    sha256_final(&c, out);
+    return 0;
+}
+/* the system bundle FILE (in the cache, with FILE.sig) onto the boot partition: 0, or 1 (said). verified: its .sig
+ * was checked just now (-U) */
+static int verify_file(const char *file, struct zf_bundle *b, char pname[25], int *sys);
+static int system_put(const char *file, int verified)
+{
+    struct zf_bundle b;
+    char pn[25], sigf[56];
+    int sys = 0, rc = 1;
+    u32 size, ksize = 0;
+    u8 sha[32], sig[ZC_SIG_SIZE], got[32];
+    struct bootpart bp;
+    struct zp_bootvol v;
+    struct zp_bootfile bf;
+    const char *why = "";
+    if (verified ? read_head(file, &b, pn, &sys) : verify_file(file, &b, pn, &sys)) return 1;  /* the .sig: as zenixboot will */
+    if (sys != 1) { say("%s: not a system bundle", file); return 1; }
+    for (unsigned i = 0; i < b.ntoc; i++) {
+        char name[41]; unsigned off, sz; const unsigned char *h;
+        if (zf_bundle_entry(&b, i, name, &off, &sz, &h) == 0 && !strcmp(name, "boot/zenix")) ksize = sz;
+    }
+    snprintf(sigf, sizeof sigf, "%s.sig", file);
+    int fd = sys_open(sigf, O_RDONLY);
+    int sn = fd >= 0 ? sys_read(fd, sig, sizeof sig) : -1;
+    if (fd >= 0) sys_close(fd);
+    if (sn != ZC_SIG_SIZE || file_sha(file, &size, sha)) { say("%s: cannot read it and its .sig", file); return 1; }
+    if (boot_find(&bp)) return 1;
+    int h = dmsg(DISK_OPEN, (u32)bp.name, DISK_RAW, 0, 0);
+    if (h < 0) { say("%s: cannot open it for writing (%s)", bp.name, h == -EBUSY ? "something has it mounted" : zstrerror(h)); return 1; }
+    bp.d.h = h;
+    bp.f.write = dk_write;
+    if (zp_boot_open(&bp.f, "Zenix", &v, &why)) { say("%s, the boot partition: %s: nothing written", bp.name, why); return 1; }
+    if (zp_boot_find(&v, B_ZUP, &bf, &why) == 0) {         /* one there already: the same, or restart first */
+        u8 hv[4] = { 0, 0, 0, 0 }, s2[ZC_SIG_SIZE];
+        int same = bf.size == size && boot_sha(&v, &bf, got) == 0 && !memcmp(got, sha, 32);
+        zp_boot_read(&v, &bf, 12, hv, 4);                   /* (its header's version, for the message) */
+        zp_boot_file_free(&bf);
+        same = same && zp_boot_find(&v, B_SIG, &bf, &why) == 0 && bf.size == ZC_SIG_SIZE &&
+               zp_boot_read(&v, &bf, 0, s2, ZC_SIG_SIZE) == 0 && !memcmp(s2, sig, ZC_SIG_SIZE);
+        zp_boot_file_free(&bf);
+        zp_boot_close(&v);
+        if (same) { say("Zenix %s (%u) is on the boot partition already: it is installed at the next restart (reboot)", b.vstr, b.vnum); return 0; }
+        say("%s: Zenix/%s holds Zenix %u, which zenixboot has not finished with (it retires it once it knows that "
+            "system came up, at most three starts later): restart, then zpkg -Syu again", bp.name, B_ZUP,
+            (u32)hv[0] << 24 | (u32)hv[1] << 16 | (u32)hv[2] << 8 | hv[3]);
+        return 1;
+    }
+    int havesig = zp_boot_find(&v, B_SIG, &bf, &why) == 0;
+    /* room for both files, and for zenixboot's own steps after them (zenix.new, the state file) */
+    u32 need = zp_boot_blocks(size) + (havesig ? 0 : zp_boot_blocks(ZC_SIG_SIZE)) + zp_boot_blocks(ksize) + 16;
+    if (v.nfree < need) {
+        say("%s: the boot partition has %u KB free, the update needs %u KB there: nothing written", bp.name, v.nfree / 2, need / 2);
+        goto out;
+    }
+    if (v.nleak) say("%s: %u blocks of the boot partition were in use with no file (a cut write): given back now", bp.name, v.nleak);
+    u32 t = sys_clockbits() > 0 && (sys_clockbits() & (CLOCK_RTC | CLOCK_NET)) ? sys_time() : ZENIX_BUILD_DATE;
+    u32 secs = t > 252460800u ? t - 252460800u : 0;
+    zp_u32 date[3] = { secs / 86400, secs % 86400 / 60, secs % 60 * 50 };
+    say("writing Zenix %s (%u) to the boot partition (%s, Zenix/%s, %u KB)", b.vstr, b.vnum, bp.name, B_ZUP, (size + 1023) / 1024);
+    if (havesig) {                                          /* left by a cut between the two files: its one block again */
+        int r = bf.size == ZC_SIG_SIZE ? zp_boot_pwrite(&v, &bf, 0, sig, ZC_SIG_SIZE) : -EINVAL;
+        zp_boot_file_free(&bf);
+        if (r) { say("%s: Zenix/%s is there and cannot be written (%s): nothing more written", bp.name, B_SIG, r == -EINVAL ? "not 80 bytes" : "a write error"); goto out; }
+    } else {
+        struct fsrc ss;
+        int sfd = sys_open(sigf, O_RDONLY);
+        ss.fd = sfd;
+        int r = sfd < 0 ? -EIO : zp_boot_create(&v, B_SIG, ZC_SIG_SIZE, file_src, &ss, date, &why);
+        if (sfd >= 0) sys_close(sfd);
+        if (r) { say("%s: Zenix/%s: %s: nothing more written", bp.name, B_SIG, why); goto out; }
+    }
+    {
+        struct fsrc bs;
+        bs.fd = sys_open(file, O_RDONLY);
+        int r = bs.fd < 0 ? -EIO : zp_boot_create(&v, B_ZUP, size, file_src, &bs, date, &why);
+        if (bs.fd >= 0) sys_close(bs.fd);
+        if (r) { say("%s: Zenix/%s: %s", bp.name, B_ZUP, why); goto out; }
+    }
+    zp_boot_close(&v);
+    /* read back from the disk, through a new walk of the whole volume */
+    bp.f.write = 0;
+    if (zp_boot_open(&bp.f, "Zenix", &v, &why)) { say("%s: the boot partition after the write: %s", bp.name, why); return 1; }
+    int ok = zp_boot_find(&v, B_ZUP, &bf, &why) == 0 && bf.size == size && boot_sha(&v, &bf, got) == 0 && !memcmp(got, sha, 32);
+    zp_boot_file_free(&bf);
+    u8 sig2[ZC_SIG_SIZE];
+    ok = ok && zp_boot_find(&v, B_SIG, &bf, &why) == 0 && bf.size == ZC_SIG_SIZE && zp_boot_read(&v, &bf, 0, sig2, ZC_SIG_SIZE) == 0 &&
+         !memcmp(sig2, sig, ZC_SIG_SIZE);
+    zp_boot_file_free(&bf);
+    if (!ok) { say("%s: the update does not read back right from the boot partition: zenixboot will refuse it", bp.name); goto out; }
+    say("Zenix %s (%u) is ready on the boot partition: it is installed at the next restart (reboot)", b.vstr, b.vnum);
+    rc = 0;
+out:
+    zp_boot_close(&v);
+    return rc;
+}
+
 /* ---- -S, -Syu, -Syuu, -Sw ---- */
 static int names_ok(char **names, int n)
 {
@@ -897,14 +1105,11 @@ static int cmd_sync(char **names, int n, int y, int u, int down_only, int ram)
             waits > 1 ? "s" : "", waits > 1 ? "" : "s");
         for (int i = 0; i < pl.n; i++) if (pl.step[i].kind == ZP_STEP_WAIT) say("  %s %s", pl.step[i].pkg->name, pl.step[i].pkg->vstr);
     }
-    if (pl.system && !failed)
-        say("Zenix %s (%u) is downloaded: %s/%s and its .sig. Until the update slot comes (D22 step 7), copy both to "
-            "BOOT:Zenix/ as zenix-update.zup and zenix-update.zup.sig from AmigaOS; it is installed at the next restart",
-            ix.sys.vstr, ix.sys.vnum, CACHE, ix.sys.file);
     if (failed) say("stopped: %d of %d installed (zup said why); zpkg -Syu again goes on", done, todo);
     else if (todo) say("%d package%s installed", done, done == 1 ? "" : "s");
+    int sysfail = pl.system && !failed && system_put(ix.sys.file, 0);     /* the system last: the boot partition */
     zp_plan_free(&pl);
-    return failed;
+    return failed || sysfail;
 }
 
 /* ---- -R, -Rs, -Rn, -Rns ---- */
@@ -1005,9 +1210,7 @@ static int cmd_upgrade(char **files, int n, int down, int ram)
             snprintf(ns, sizeof ns, "%s.sig", nm);
             snprintf(cs3, sizeof cs3, "%s.sig", files[i]);
             if (!down && sys_rename(files[i], nm) == 0) sys_rename(cs3, ns);
-            say("a system update (Zenix %s, %u), checked: %s/%s and its .sig. Until the update slot comes (D22 step 7) "
-                "copy both to BOOT:Zenix/ as zenix-update.zup and zenix-update.zup.sig from AmigaOS; it is installed at the "
-                "next restart", b.vstr, b.vnum, CACHE, nm);
+            if (system_put(down ? files[i] : nm, 1)) { failed = 1; break; }
             continue;
         }
         if (sys) { say("%s: more than one package: refused", files[i]); failed = 1; break; }

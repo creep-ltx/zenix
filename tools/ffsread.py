@@ -8,6 +8,8 @@ usage: ffsread.py IMAGE [--part NAME] ls              every file: "PATH SIZE" (d
        ffsread.py IMAGE [--part NAME] get PATH OUT     one file
        ffsread.py IMAGE [--part NAME] extract DIR      every file into DIR
        ffsread.py IMAGE [--part NAME] rootflag         the root block's bitmap flag (-1: valid, 0: needs validating)
+       ffsread.py IMAGE [--part NAME] check            the whole volume (headers, chains, checksums, every block used
+                                                       once, the bitmap): "ok, N leaked blocks", or each problem
        ffsread.py IMAGE --part NAME dump OUT           the partition's bytes
        ffsread.py IMAGE --part NAME load IN            write IN (the partition's size) back into the partition
 IMAGE is an FFS volume, or a disk with an RDB (then --part names the partition, e.g. ZB0)."""
@@ -105,6 +107,107 @@ class Vol:
         return bytes(out[:size])
 
 
+def upper_c(c, intl):
+    return c - 32 if (97 <= c <= 122 or (intl and 224 <= c <= 254 and c != 247)) else c
+
+
+def ffs_hash(name, intl):
+    h = len(name)
+    for c in name.encode("latin-1"):
+        h = (h * 13 + upper_c(c, intl)) & 0x7FF
+    return h % 72
+
+
+class _Chk:
+    def __init__(self, data):
+        self.d, self.intl = data, data[3] == 3
+        self.n = len(data) // BS
+
+    def L(self, b, i):
+        return struct.unpack(">I", self.d[b * BS + 4 * i:b * BS + 4 * i + 4])[0]
+
+    def sum_ok(self, b):
+        return sum(struct.unpack(">128I", self.d[b * BS:(b + 1) * BS])) & 0xFFFFFFFF == 0
+
+    def check(self):
+        prob, used, files = [], {}, {}
+
+        def use(b, what):
+            if not 2 <= b < self.n:
+                prob.append("%s: block %d outside" % (what, b))
+            elif b in used:
+                prob.append("%s: block %d also %s" % (what, b, used[b]))
+            else:
+                used[b] = what
+
+        root = (2 + self.n - 1) // 2
+        if self.L(root, 0) != 2 or self.L(root, 127) != 1 or not self.sum_ok(root) or self.L(root, 78) != 0xFFFFFFFF:
+            prob.append("the root block")
+        use(root, "root")
+        nbm = (self.n - 2 + 32 * 127 - 1) // (32 * 127)
+        bms = [self.L(root, 79 + i) for i in range(nbm)]
+        for b in bms:
+            use(b, "bitmap")
+            if not self.sum_ok(b):
+                prob.append("bitmap block %d checksum" % b)
+
+        def walk(d, path, depth):
+            if depth > 10:
+                prob.append("too deep")
+                return
+            for h in range(72):
+                b, steps, last = self.L(d, 6 + h), 0, 0
+                while b and steps < 10000:
+                    steps += 1
+                    nm = bytes(self.d[b * BS + 433:b * BS + 433 + self.d[b * BS + 432]]).decode("latin-1")
+                    use(b, path + nm)
+                    if self.L(b, 0) != 2 or self.L(b, 1) != b or not self.sum_ok(b) or self.L(b, 125) != d:
+                        prob.append("%s%s: a bad header" % (path, nm))
+                        break
+                    if ffs_hash(nm, self.intl) != h:
+                        prob.append("%s%s: in the wrong hash chain" % (path, nm))
+                    st = self.L(b, 127)
+                    if st == 2:
+                        walk(b, path + nm + "/", depth + 1)
+                    elif st == 0xFFFFFFFD:
+                        size = self.L(b, 81)
+                        want = (size + BS - 1) // BS
+                        ptrs, x, first = [], b, True
+                        while x:
+                            if not first:
+                                use(x, path + nm + " ext")
+                                if self.L(x, 0) != 16 or self.L(x, 1) != x or not self.sum_ok(x) or self.L(x, 125) != b:
+                                    prob.append("%s%s: a bad extension block" % (path, nm))
+                                    break
+                            hs = self.L(x, 2)
+                            ptrs += [self.L(x, 77 - i) for i in range(min(hs, 72))]
+                            x, first = self.L(x, 126), False
+                        if len(ptrs) != want or (want and self.L(b, 4) != ptrs[0]):
+                            prob.append("%s%s: %d pointers for %d bytes" % (path, nm, len(ptrs), size))
+                        for q in ptrs:
+                            use(q, path + nm + " data")
+                        files[path + nm] = (b, b"".join(self.d[q * BS:(q + 1) * BS] for q in ptrs)[:size])
+                    last = b
+                    b = self.L(b, 124)
+        walk(root, "", 0)
+        leaks = 0
+        for blk in range(2, self.n):
+            k = blk - 2
+            bm = bms[k // (32 * 127)]
+            free = self.L(bm, 1 + (k % (32 * 127)) // 32) >> (k % 32) & 1
+            if blk in used and free:
+                prob.append("block %d (%s) in use but free in the bitmap" % (blk, used[blk]))
+            if blk not in used and not free:
+                leaks += 1
+        return prob, leaks, files
+
+
+def check_volume(data):
+    """the whole volume: every header, hash chain, extension block and checksum, every block used once, the blocks in
+    use against the bitmap. -> (problems, leaks: blocks marked in use that nothing names, {path: (header, bytes)})"""
+    return _Chk(data).check()
+
+
 def main(a):
     if len(a) < 2:
         die(__doc__)
@@ -130,6 +233,12 @@ def main(a):
     if cmd == "ls":
         for n, s, _ in v.walk():
             print(n if n.endswith("/") else "%s %d" % (n, s))
+    elif cmd == "check":
+        prob, leaks, _ = check_volume(bytes(img[off:off + size]))
+        for x in prob:
+            print("problem: " + x)
+        print("ok, %d leaked blocks" % leaks if not prob else "damaged")
+        sys.exit(1 if prob else 0)
     elif cmd == "rootflag":
         L, _ = v.blk(v.root)
         print(struct.unpack(">i", struct.pack(">I", L[78]))[0])
