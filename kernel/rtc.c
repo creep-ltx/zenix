@@ -56,6 +56,8 @@ static int custom_mirror(void)
     return same;
 }
 
+u8 rtc_ok;                              /* rtc_read found a ticking clock (D29: the session's seconds) */
+
 /* Seconds since 1970, or 0 when there is no usable clock. */
 u32 rtc_read(void)
 {
@@ -101,6 +103,7 @@ u32 rtc_read(void)
     else RTC(13) = mode ? mode : 0x08 | (nib(13) & 0x04);  /* the timer runs again; Kickstart's bank 1 if it was so */
     if (sec > 59 || min > 59 || hh > 23 || day < 1 || day > 31 || mon < 1 || mon > 12) goto none;
     u32 year = yr >= 78 ? 1900 + yr : 2000 + yr;
+    rtc_ok = msm_type || !mode;         /* an RP5C01 left in Kickstart's bank 1 shows no time at registers 0-3 */
     kprintf("clock: %s %u-%s%u-%s%u %s%u:%s%u:%s%u\n", msm_type ? "MSM6242" : "RP5C01", year, mon < 10 ? "0" : "", mon,
             day < 10 ? "0" : "", day, hh < 10 ? "0" : "", hh, min < 10 ? "0" : "", min, sec < 10 ? "0" : "", sec);
     return days_from_civil(year, mon, day) * 86400 + hh * 3600 + min * 60 + sec;

@@ -125,6 +125,28 @@ static const char *vecname(u32 v)
     return v < 12 ? n[v] : 0;
 }
 
+/* a line-F crash: the FPU instructions a 68040 or 68060 does not have in hardware (AmigaOS's 68040.library and
+ * 68060.library emulate them; ZINE does not), by the general form's opmode (coprocessor 1, ext 0x0000/0x4000 forms) */
+static const char *fpu_missing(u32 w)
+{
+    static const struct { u8 op; char n[8]; } t[] = {
+        { 0x01, "FINT" }, { 0x02, "FSINH" }, { 0x03, "FINTRZ" }, { 0x06, "FLOGNP1" }, { 0x08, "FETOXM1" },
+        { 0x09, "FTANH" }, { 0x0A, "FATAN" }, { 0x0C, "FASIN" }, { 0x0D, "FATANH" }, { 0x0E, "FSIN" },
+        { 0x0F, "FTAN" }, { 0x10, "FETOX" }, { 0x11, "FTWOTOX" }, { 0x12, "FTENTOX" }, { 0x14, "FLOGN" },
+        { 0x15, "FLOG10" }, { 0x16, "FLOG2" }, { 0x19, "FCOSH" }, { 0x1C, "FACOS" }, { 0x1D, "FCOS" },
+        { 0x1E, "FGETEXP" }, { 0x1F, "FGETMAN" }, { 0x21, "FMOD" }, { 0x25, "FREM" }, { 0x26, "FSCALE" },
+    };
+    if ((w >> 16 & 0xFFC0) != 0xF200 || (w & 0xA000))
+        return 0;
+    u32 op = w & 0x7F;
+    if (op >= 0x30 && op <= 0x37)
+        return "FSINCOS";
+    for (u32 i = 0; i < sizeof t / sizeof t[0]; i++)
+        if (t[i].op == op)
+            return t[i].n;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 3 && !strcmp(argv[1], "--blob")) {     /* the tests' other blobs (/tests/zine/null.blob): root only */
@@ -300,7 +322,11 @@ int main(int argc, char **argv)
         break;
     }
     case ZH_CRASH:
-        if (b->vec == 10 || b->vec == 11)
+        if (b->vec == 11 && fpu_missing(b->addr))
+            dprintf(1, "ZINE: %s crashed: line F instruction at %08x (instruction %04x %04x: %s, which this CPU "
+                    "does not have in hardware; AmigaOS's 68040/68060.library emulates it, ZINE does not)\n", name, b->pc,
+                    b->addr >> 16, b->addr & 0xFFFF, fpu_missing(b->addr));
+        else if (b->vec == 4 || b->vec == 10 || b->vec == 11)
             dprintf(1, "ZINE: %s crashed: %s at %08x (instruction %04x %04x)\n", name, vecname(b->vec), b->pc,
                     b->addr >> 16, b->addr & 0xFFFF);
         else if (vecname(b->vec))

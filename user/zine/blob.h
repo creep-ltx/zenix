@@ -121,12 +121,16 @@ struct zstate {
     u32 out_fh, in_fh;                  /* the file handles (BPTRs) */
     u32 ioerr;
     u8 blitter;
+    u32 mmu[9];                         /* 040/060 (zb_mmu_save): which were read (bit 0 TC, ITT0/1, DTT0/1, URP, SRP;
+                                         * bit 1 the 060's PCR), then their values in that order */
 };
 extern struct zstate Z;
 extern u32 zr_how, zr_code, zr_ret6, zr_callpc;   /* set by the stubs in blobs.S on the way out */
 
 /* blobs.S */
 void zb_setvbr(u32 v);
+void zb_mmu_save(u32 *m);               /* 040/060: the MMU's registers and the 060's PCR as Zenix has them */
+void zb_mmu_back(const u32 *m);         /* and back, after the program (it may have switched the MMU or PCR) */
 void zb_flush(void);
 void zb_go(u32 pc, u32 usp, u32 d0, u32 a0, u32 a6, u32 a3) __attribute__((noreturn));
 void zb_leave(u32 resume, u32 d0, u32 d1) __attribute__((noreturn));

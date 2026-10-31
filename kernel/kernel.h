@@ -96,6 +96,7 @@ extern volatile u32 ticks;
 u32 hr_time(void);          /* E-clock ticks (eclock_hz), CIA-B timers A+B; wraps after ~1.7 h; never early */
 extern u32 eclock_hz;       /* 709379 (PAL) or 715909 (NTSC), read at boot */
 u32 rtc_read(void);
+extern u8 rtc_ok;                       /* rtc_read found a ticking battery clock */
 extern int tty_mirror;      /* 100 Hz, CIA-A timer A */
 
 /* start.S */
@@ -725,8 +726,10 @@ long vfs_path1(u32 op, const char *p, u32 a2, u32 a3);   /* chmod/utimes/lstat/r
 long vfs_link(u32 op, const char *a, const char *b);
 #include "clock.h"
 extern struct wclock wclock;        /* SYS_time, SYS_settime (main.c, clock.h) */
+extern struct proc *vfs_hold;           /* D29: zine's sync and session: other processes' filesystem requests wait */
 long vfs_sync(int how);                /* VS_* bits; the network mounts last (D23 5.4) */
 #define VS_REBOOT  1                    /* SYS_reboot: each server at most 5 s (then the tick resets) */
+#define VS_LOCALS  4                    /* D29 ZINE: refused (-EIO) when any local mount's sync fails, not only / */
 #define VS_BOUNDED 2                    /* FS_SYNC a0 1 to the network mounts: answer within 2 s (reboot, reset warning) */
 long vfs_mkdir(const char *path);
 long vfs_unlink(const char *path);
@@ -919,7 +922,9 @@ struct zine_range;
 u32 mem_ranges(const struct zine_range **r);    /* D29: mem.c's pool ranges, for ZINE's blob */
 void mem_totals(u32 *chip, u32 *fast);          /* the bytes in the chip and fast pools */
 void drv_zine(void);                            /* D29: every claimed device quiesced, its driver killed */
-void fd_zine(void);                             /* D29: floppy motors off, heads unknown, track cache dropped */
+void fd_zine(void);                             /* D29: floppy motors off, heads unknown, track cache dropped, every
+                                                 * disk counted as changed (it may have been swapped meanwhile) */
+void ide_zine(void);                            /* D29: Gayle's IDE interrupt enable and latch as ide_init left them */
 void kbd_zine(void);                            /* D29: held keys forgotten, one handshake */
 u32 gfx_zine(u16 *diw);                         /* D29: the Copper list; DIWSTRT, DIWSTOP into diw[0..1] */
 void syscall_c(u32 *rb);

@@ -821,7 +821,7 @@ disks that were consistent at the hand-over.
 
 ## 12. What the user sees
 
-### 12.1 The command and running by name (decided)
+### 12.1 The command and running by name (decided; by name built 2026-10-31, 16.4)
 
 - **`zine PROGRAM [ARGS...]`** (`docs/man/zine.txt`, `commands.md`, `features.md` when built). No options in this
   version (later ones go here: a stack size, a system-friendly mode, a directory to give). NOTES: 9.5's warning;
@@ -1053,10 +1053,84 @@ build `/tests/zine/trace.blob` (every call, crash registers and code on the seri
 session's /tmp scripts for now).
 
 Open: the review of 2026-10-31 (one bug fixed: zb_flush read the CPU flags from the page already Zenix's again; the
-others recorded as findings: a second local disk's failed sync not refused, a floppy changed during the session, the
+others recorded as findings, all but the CIA-B restart window fixed in 16.4: a second local disk's failed sync not refused, a floppy changed during the session, the
 MMU/PCR registers on 040/060, the order in zine_resume, the session's seconds from CIA-A's TOD (one test run read 1 s
 for 3 s: use the battery clock), Gayle's IDE interrupt, Ctrl-C during the sync, the CIA-B restart window, the mouse
 counters); sound not yet checked (the pictures only); the owner's PiStorm; demos needing memory below 16 MB.
+
+### 16.4 Running by name and the review's findings (2026-10-31, branch zine04)
+
+*Verified* in FS-UAE (A1200, 68020, 4 MB fast RAM; `tools/zine-emu-test.sh`):
+- **By name (12.1, step 7):** `proc_spawn` reads a file's first longword; `0x000003F3` (`HUNK_HEADER`) runs
+  `/bin/zine PATH ARGS...` in its place (argv[0] "zine"; one level only: a hunk file at `/bin/zine` is -ENOEXEC, and
+  without `/bin/zine` the kernel log says "PATH is an AmigaOS program: ZINE is not installed" and the spawn is
+  -ENOEXEC). The 256 KB limit moved from `fs_exec_open` to after that check: a demo may be larger (Bacon of Hope's HD
+  version is 927 KB). The x bit is the filesystem server's check as for any program. Tested: by path with arguments,
+  as `./zexit`, found on `PATH`, and refused without the x bit (sh's 126). Kernel +292 bytes (proc).
+- **The sync (review a, g):** `vfs_sync` mode `VS_LOCALS` refuses (-EIO) when any local mount's server fails its
+  `FS_SYNC`, not only mount 0's. From the start of the sync to the resume `vfs_hold` is the zine process: every other
+  process's filesystem request waits in `fs_call_k` (a 20 ms poll; a kill ends the wait with -EINTR) unless it is the
+  server of a mount or a `priv` process (a server on an image file goes on), so each server is idle with its writes
+  out at the hand-over; the requests go on after the resume. Ctrl-C during the sync (`current->killed`): -EINTR,
+  `busy` and the hold cleared, nothing handed over. Tested: a background job appending 400 lines to a file on `/home`
+  while `ztake` runs: all 400 there afterwards. The refusal of a second mount is *read* (no test server that fails
+  its sync yet).
+- **Floppies (b):** `fd_zine` marks every present drive's disk as changed (`drv[].changed`): requests fail until the
+  disk server opens the drive again (`fd_info`), so the old disk's state is never written to a swapped one (a program
+  that steps the heads resets the change line, so a swap cannot be seen afterwards). *Read*.
+- **040/060 (c):** the blob saves TC, ITT0/1, DTT0/1, URP and SRP (and the 68060's PCR) in `zb_prepare` and writes
+  them back first thing in `zb_back` (`cpusha bc`, TC, `pflusha`, the rest), each probed with the illegal-instruction
+  and line-F vectors caught as zenixboot does (Emu68 reports a 68040: no PCR). Verified in 16.5's 68040 run.
+- **The resume's order (d):** `zine_resume` puts VBR back first, then CACR with both caches cleared: CI and CD on the
+  020/030 (the 030's data cache may hold lines the program's writes with the cache off did not update), `cpusha bc`
+  on 040/060.
+- **The seconds (e):** with a battery clock (`rtc_ok`, set by `rtc_read` at boot) the kernel reads its minutes and
+  seconds before the hand-over and after (until two readings agree) and corrects the blob's CIA-A count to the
+  clock's difference (the CIA-A count chooses the hour; the clock's minutes and seconds are exact). Tested: `ztake`'s
+  150 frames now say 2-4 s.
+- **Gayle (f):** `ide_zine` runs `gayle_quiet` again (nIEN, Gayle's enable 0, the latch cleared), as `ide_init` left
+  them. **The mouse (h):** `input_init` again, so the counters the program moved are no jump.
+- Kernel 169,340 -> 170,120 bytes; the mount tests' RAM disk 712 -> 708 KB for the room (12 blocks free).
+- A read-only review of this (2026-10-31) found, fixed in the same branch: an exiting process's `FS_CLOSE` was dropped
+  by the hold's -EINTR (it now waits for the resume); the clock correction could wrap below 0 (now skipped when it
+  would: a program that set the clock) and an RP5C01 left in Kickstart's bank 1 shows no time at registers 0-3
+  (`rtc_ok` only for a clock read in bank 0); `zb_mmu_back` wrote Zenix's TC before the other registers (now TC 0,
+  the rest, then TC); `(sp)` in supervisor mode was refused by the line-F stand-in (16.5).
+- Still open: the CIA-B restart window (the review's), a test server that fails its sync; a server starting on demand
+  during the hold waits for the resume (its 30 s start deadline may count it as failed), and init's reset-warning sync
+  waits too (the disks are already synced; the keyboard's own timeout resets).
+
+### 16.5 The 68040/060 stand-ins: MMU instructions, missing FPU instructions, CacheControl (2026-10-31, zine04)
+
+The owner's Bacon of Hope stopped on the PiStorm with "line F instruction at 0811d658". Emu68 runs `fsin`, `ftwotox`
+and the other FPU instructions a real 040/060 lacks itself (knowledge base `amiga/emu68-and-pistorm.md`), and Bacon of
+Hope is 68000 code, so the line F is *proposed* to be an MMU instruction: Emu68 has no MMU, so old demos' "switch the
+030's MMU off" (`pmove` to TC, `pflusha`), or the 040's own `pflusha`, end there. Decided and built:
+- **The line-F vector** (`zv_linef`, `zb_linef` in blob.c) takes as no-ops, with the MMU off as Zenix runs it: the
+  68030's `PMOVE` to and from TC, TT0, TT1, CRP, SRP and MMUSR (a write skipped, a read gives 0), `PFLUSH`/`PFLUSHA`,
+  `PLOAD` and `PTEST` (coprocessor 0's general form, every addressing mode but the full extension format; `(An)+`
+  and `-(An)` move An as the CPU would); and the 040/060's own `PFLUSH`, `PFLUSHA`, `PTEST`, `PLPA` ($F5xx, one
+  word). The program's output says once "ZINE: an MMU instruction (PMOVE, PFLUSH, PTEST) taken as a no-op: the MMU
+  is off". Anything else at the line-F vector is a crash as before.
+- **FPU instructions the CPU lacks** are not emulated (the 060 library's package is far larger than the blob): the
+  crash line names them, "line F instruction at ... (instruction f200 000e: FSIN, which this CPU does not have in
+  hardware; AmigaOS's 68040/68060.library emulates it, ZINE does not)", for the 040/060's missing set (FSIN, FCOS,
+  FETOX, FLOGN, FSINCOS, FTWOTOX, FMOD, FREM, FINT ...). FS-UAE's 68040 stacks such a line F as format 2 with the
+  next instruction's PC (the nearest FPU instruction word before it is named); a format-4 frame gives the faulted
+  instruction's own address. An illegal-instruction crash shows its words too.
+- **CacheControl** (exec -648) is real now: the old bits, and the instruction cache switched as asked (CACR's IE on
+  040/060, EnableI/FreezeI/IBE on 020/030), both caches cleared after; the data cache stays off (10.1). Before, it
+  answered "instruction cache on" and changed nothing, so a program that switches the cache off to change its own
+  code ran stale code on a 68040: Bacon of Hope in FS-UAE's 68040 (8 MB fast RAM, FPU) crashed with an illegal
+  instruction after 387 s that way; with this change it plays through to its end scroller (pictures taken at 20 s to
+  750 s in the cage rig). Whether Emu68 drops its translations when
+  the instruction cache is switched off is not known (*proposed*: it flushes on the CACR write, as on a CACR clear).
+- *Verified* in FS-UAE (`tools/zine-emu-test.sh`): `zmmu` (PMOVE to and from TC, TT0, CRP, SRP by memory, `(An)+`,
+  `-(sp)`, `d16(An)` and immediate, PFLUSHA; in supervisor mode the 040's PFLUSHA and PMOVE TC) returns 0 on the
+  68020 and on the matrix's 68040, the no-op line in its output; `zfpu` (FSIN) named on the 68020 without an FPU and
+  on the 68040; on the 68040 `ztake` and `zcrash` with Zenix back each time and free memory as before
+  (16.4's MMU registers saved and put back). Not yet on the PiStorm: Bacon of Hope there is the owner's test.
+- Blob 25,988 -> 27,032 bytes; the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

@@ -108,6 +108,8 @@ long zb_prepare(const struct zine_args *a)
     Z.attn = bi->attn;
     extern u32 zb_attn;
     zb_attn = bi->attn & 0xFFFF;     /* for zb_flush, which runs when the low page is no longer ZINE's */
+    if (Z.attn & 0x0088)
+        zb_mmu_save(Z.mmu);             /* 10.1: the 040/060's MMU and PCR come back as Zenix had them */
     nreg = 0;
     for (u32 i = 0; i < bi->nregions && i < 8; i++)
         if (bi->r[i].attrs & (MEMF_CHIP | MEMF_FAST))
@@ -178,7 +180,7 @@ small:
 }
 
 /* ---- the way in (7.3) and the start (6), on the ZINE block's stack ---- */
-extern void zv_crash(void), zv_spurious(void), zv_irq(void), zv_priv(void);
+extern void zv_crash(void), zv_spurious(void), zv_irq(void), zv_priv(void), zv_linef(void);
 
 static void cia_save_stop(void)
 {
@@ -288,6 +290,7 @@ void zb_run(void)
     for (int i = 2; i < 256; i++)
         v[i] = (u32)zv_crash;
     v[8] = (u32)zv_priv;
+    v[11] = (u32)zv_linef;
     v[24] = (u32)zv_spurious;
     for (int i = 25; i < 32; i++)
         v[i] = (u32)zv_irq;
@@ -365,8 +368,17 @@ void zb_crash(u32 *rb)
     b->pc = *(u32 *)(fr + 2);
     b->addr = fmt == 0xA || fmt == 0xB ? *(u32 *)(fr + 16) : fmt == 7 ? *(u32 *)(fr + 20) :
               fmt == 4 || fmt == 2 ? *(u32 *)(fr + 8) : 0;
-    if ((b->vec == 10 || b->vec == 11) && !(b->pc & 1) && b->pc >= 0x1000)
-        b->addr = *(const u32 *)b->pc;  /* line A/F: no access address; the instruction's first four bytes instead */
+    if (b->vec == 11 && fmt == 4)       /* a 68040's unimplemented FPU instruction: the faulted one's own address */
+        b->pc = *(u32 *)(fr + 12);
+    if (b->vec == 11 && fmt == 2 && !(b->pc & 1) && b->pc >= 0x1010)    /* the frame's PC is the next instruction's
+                                         * (seen in FS-UAE's 68040): the nearest FPU instruction word before it */
+        for (u32 k = 4; k <= 16; k += 2)
+            if ((*(const u16 *)(b->pc - k) & 0xFFC0) == 0xF200) {
+                b->pc -= k;
+                break;
+            }
+    if ((b->vec == 4 || b->vec == 10 || b->vec == 11) && !(b->pc & 1) && b->pc >= 0x1000)
+        b->addr = *(const u32 *)b->pc;  /* illegal, line A/F: no access address; the instruction's first four bytes */
     zr_how = ZH_CRASH;
     extern u32 zb_tracing;
     if (zb_tracing) {                   /* the trace build: d0-d7/a0-a6, the SR, the user stack and 8 longs on it */
@@ -385,6 +397,100 @@ void zb_crash(u32 *rb)
                 zb_serial_hex('C', (const u32 *)(v[i] - 32), 12);
     }
     zb_goback();
+}
+
+/* The line-F vector (zv_linef, blobs.S; rb: d0-d7/a0-a6, then the CPU's frame). Old programs written for a 68030
+ * switch its MMU off or flush it (PMOVE to TC, TT0, TT1, CRP, SRP; PFLUSHA), or read those registers to put them
+ * back later; a 68040 or 68060 (and Emu68, which reports a 68040) has no such instructions and takes the line-F
+ * vector, where AmigaOS's 68040/68060.library steps over them. With the MMU off (Zenix runs so, zb_mmu_back puts the
+ * registers back) they are no-ops: a write to an MMU register is skipped, a read gives 0 (MMU off, no transparent
+ * translation), PFLUSH, PLOAD and PTEST do nothing; so do the 68040/060's own PFLUSH, PTEST and PLPA ($F5xx, one
+ * word), which a CPU without that MMU (Emu68) also sends here. The instruction's length comes from its addressing mode;
+ * (An)+ and -(An) move An as the CPU would. 0: done, the frame's PC past the instruction; 1: not one of these (a
+ * crash, named by zine: an FPU instruction this CPU lacks, for one). Format 0 frames only (the 020-060 line-F). */
+u32 zb_getusp(void);
+void zb_setusp(u32 a);
+u32 zb_linef(u32 *rb);
+u32 zb_linef(u32 *rb)
+{
+    u8 *fr = (u8 *)rb + 60;
+    u32 pc = *(u32 *)(fr + 2);
+    if ((*(u16 *)(fr + 6) >> 12) || (pc & 1) || pc < 0x1000)
+        return 1;
+    const u16 *ip = (const u16 *)pc;
+    u32 op = ip[0], ext = ip[1], mode = op >> 3 & 7, rn = op & 7, len = 4, size;
+    if ((op & 0xFF00) == 0xF500) {      /* the 68040/060's PFLUSH, PFLUSHA, PTEST, PLPA (one word): Emu68 has no MMU */
+        len = 2;
+        goto done;
+    }
+    if ((op & 0xFFC0) != 0xF000)
+        return 1;                       /* not coprocessor 0's general form: not a 68030 MMU instruction */
+    u32 kind = ext >> 13, preg = ext >> 10 & 7, rd = ext & 0x200;
+    if (kind == 2 && !(ext & 0xFF) && (preg == 0 || preg == 2 || preg == 3))
+        size = preg ? 8 : 4;            /* PMOVE TC (long), SRP or CRP (double long) */
+    else if (kind == 0 && !(ext & 0xFF) && (preg == 2 || preg == 3))
+        size = 4;                       /* PMOVE TT0, TT1 */
+    else if (kind == 3 && !(ext & 0x1DFF))
+        size = 2;                       /* PMOVE MMUSR */
+    else if (kind == 1 || kind == 4)
+        size = 0, rd = 0;               /* PFLUSH, PFLUSHA, PLOAD; PTEST: nothing to do, only the length */
+    else
+        return 1;
+    int user = !(*(u16 *)fr & 0x2000);
+    u32 *an = rn < 7 ? &rb[8 + rn] : 0, a7 = user ? zb_getusp() : (u32)fr + 8, areg = an ? *an : a7, a = 0;
+    if (size == 0 && mode <= 1)
+        ;                               /* PFLUSH/PLOAD with a register for the function code (ext's fc field) */
+    else if (mode == 0 || mode == 1) {
+        if (mode == 1 && rn == 7)
+            return 1;
+        if (rd)
+            rb[mode * 8 + rn] = 0;      /* a register as the target */
+    } else if (mode == 2 || mode == 3 || mode == 4) {
+        u32 step = size ? size : 0;
+        if (mode == 4)
+            areg -= step;
+        a = areg;
+        if (mode == 3)
+            areg += step;
+        if (an)
+            *an = areg;
+        else if (user)
+            zb_setusp(areg);
+        else if (mode != 2)
+            return 1;                   /* the supervisor stack moved under the frame: not taken */
+    } else if (mode == 5) {
+        a = areg + (u32)(s32)(s16)ip[2], len = 6;
+    } else if (mode == 6 || (mode == 7 && rn == 3)) {
+        u32 bx = ip[2];
+        if (bx & 0x100)
+            return 1;                   /* the full extension format: not taken */
+        u32 x = rb[bx >> 12 & 15];      /* d0-d7 then a0-a6 (a7 as above) */
+        if ((bx >> 12 & 15) == 15)
+            x = a7;
+        if (!(bx & 0x800))
+            x = (u32)(s32)(s16)x;
+        a = (mode == 6 ? areg : pc + 4) + (x << (bx >> 9 & 3)) + (u32)(s32)(s8)bx, len = 6;
+    } else if (mode == 7 && rn == 0) {
+        a = (u32)(s32)(s16)ip[2], len = 6;
+    } else if (mode == 7 && rn == 1) {
+        a = (u32)ip[2] << 16 | ip[3], len = 8;
+    } else if (mode == 7 && rn == 2) {
+        a = pc + 4 + (u32)(s32)(s16)ip[2], len = 6;
+    } else if (mode == 7 && rn == 4 && !rd) {
+        len = 4 + (size < 4 ? 2 : size);    /* an immediate written to the register */
+    } else
+        return 1;
+    if (rd && a)
+        zmemset((void *)a, 0, size);    /* the register read: 0, as with the MMU off */
+done:
+    *(u32 *)(fr + 2) = pc + len;
+    static u8 said;
+    if (!said) {
+        said = 1;
+        static const char m[] = "ZINE: an MMU instruction (PMOVE, PFLUSH, PTEST) taken as a no-op: the MMU is off\n";
+        zb_out(m, sizeof m - 1);
+    }
+    return 0;
 }
 
 /* the trace build: tag and n longs in hex on the serial port */
@@ -411,12 +517,14 @@ void zb_serial_hex(char tag, const u32 *v, int n)
     }
 }
 
-/* the way back, path A (9.1 steps 1, 4-6; the sums of step 3 come with build step 5; the MMU and the 040/060 data
- * cache of step 2 with build step 8): everything off, Zenix's memory back with low memory last, the chips' register
+/* the way back, path A (9.1 steps 1, 4-6; the sums of step 3 come with build step 5; the 040/060 MMU and PCR first,
+ * zb_mmu_back): everything off, Zenix's memory back with low memory last, the chips' register
  * set and the CIAs from Zenix's records (9.2), then the kernel's resume */
 void zb_back(void)
 {
     struct zine_blk *b = Z.blk;
+    if (Z.attn & 0x0088)
+        zb_mmu_back(Z.mmu);             /* first: a program's translation must not stand while Zenix's memory returns */
     extern u32 zb_tracing;
     if (zb_tracing)
         zb_screen_report();

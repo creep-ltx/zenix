@@ -41,7 +41,7 @@ spot-checked against the code that day.
 | [echo](man/echo.txt), [printf](man/printf.txt), [seq](man/seq.txt), [yes](man/yes.txt), [expr](man/expr.txt) | generate and calculate |
 | [less](man/less.txt) / [more](man/more.txt), [edit](man/edit.txt), [sumi](man/sumi.txt), [maki](man/maki.txt), [markdown](man/markdown.txt) | pagers and editors (the owner's: sumi the editor with tabs and colours for code, maki the pager with colours, pipes and directories, markdown the Markdown viewer and editor; `ports/`) |
 | [ahiru](man/ahiru.txt) | the owner's file manager in three columns: previews, marks, copy, move, delete, archives and disk images as folders, tabs, find (`ports/ahiru`) |
-| [zine](man/zine.txt) | runs an AmigaOS program under ZINE, Zenix's own small AmigaOS (DESIGN D29; being built: the pause and resume are tested, the programs not yet) |
+| [zine](man/zine.txt) | runs an AmigaOS program under ZINE, Zenix's own small AmigaOS (DESIGN D29; being built: real demos run in FS-UAE); an executable AmigaOS program also runs by its name |
 | [ctop](man/ctop.txt) | the owner's monitor in the way of btop: memory, disks, the network's rates and every process in four boxes (`ports/ctop`) |
 | [cu](man/cu.txt) | a terminal on another computer through the serial port (DESIGN D12) |
 | [man](man/man.txt) | these manuals |

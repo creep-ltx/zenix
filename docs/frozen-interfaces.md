@@ -193,6 +193,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   first: size, blob, blob_size, vol, vol_size, blk, blk_size, flags 0); both only grow at the end, the caller passes
   its size (kernel/zine.h). Not frozen: the kernel-blob interface after them (one build; a blob of another layout is
   -ENOEXEC).
+- **D29 12.1, running by name (branch zine04, 2026-10-31):** a file a program spawns that has the x bit and starts with
+  the longword `0x000003F3` (AmigaOS's `HUNK_HEADER`) is run as `/bin/zine PATH ARGS...` (argv[0] "zine"); without
+  `/bin/zine` the spawn is -ENOEXEC (the kernel log names the file). Such a file may be larger than 256 KB (Zenix
+  programs still are refused above that, -EFBIG).
 - **Audit block 3 B3-12 (`SYS_envset`, 2026-10-30):** a block whose last byte is not 0 is refused with -EINVAL
   (checked on the kernel's own copy; the old environment kept); a block of 0 bytes still empties it. An addition only:
   every caller in the tree ends its block with a 0, and before, such a block was taken and every child's `strlen` ran

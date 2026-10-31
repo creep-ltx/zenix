@@ -28,3 +28,4 @@
 #define sc_BitMap       184
 #define sc_ViewPort     44
 #define bm_Planes       8
+#define LVO_Supervisor  -30

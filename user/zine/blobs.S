@@ -43,6 +43,29 @@ zv_crash:
     move.l  %sp,-(%sp)
     jsr     zb_crash                /* never returns */
 
+/* the line-F vector (11): a 68030 MMU instruction (PMOVE, PFLUSH, PLOAD, PTEST) on a CPU without that MMU is taken
+ * as the no-op it is with the MMU off (zb_linef, blob.c); anything else is a crash as above */
+    .globl  zv_linef
+zv_linef:
+    movem.l %d0-%d7/%a0-%a6,-(%sp)
+    move.l  %sp,-(%sp)
+    jsr     zb_linef
+    tst.l   %d0
+    bne.s   1f
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d0-%d7/%a0-%a6
+    rte
+1:  jsr     zb_crash                /* never returns; its argument is still on the stack */
+    .globl  zb_getusp, zb_setusp
+zb_getusp:
+    move.l  %usp,%a0
+    move.l  %a0,%d0
+    rts
+zb_setusp:
+    move.l  4(%sp),%a0
+    move.l  %a0,%usp
+    rts
+
 /* the spurious interrupt (vector 24) */
     .globl  zv_spurious
 zv_spurious:
@@ -74,7 +97,9 @@ zv_priv:
     beq.s   3f
     cmp.l   #zs_flush,2(%sp)
     beq.s   4f
-    bra.s   zv_crash
+    cmp.l   #zs_cc,2(%sp)
+    beq.s   5f
+    bra.w   zv_crash
 1:  move.l  %a0,-(%sp)              /* Supervisor: the frame's PC becomes the caller's return address (popped from */
     move.l  %usp,%a0                /* the user stack), and the function runs in supervisor mode; its rte returns */
     move.l  (%a0)+,6(%sp)           /* to the caller with the caller's SR. Every user register stays as it was. */
@@ -97,6 +122,12 @@ zv_priv:
 4:  move.l  %d0,-(%sp)              /* the cache flush */
     jsr     zb_flush
     move.l  (%sp)+,%d0
+    move.l  #zs_rts,2(%sp)
+    rte
+5:  move.l  %d1,-(%sp)              /* CacheControl(d0 bits, d1 mask) -> d0 the old bits */
+    move.l  %d0,-(%sp)
+    jsr     zb_cachectl
+    addq.l  #8,%sp
     move.l  #zs_rts,2(%sp)
     rte
 
@@ -159,6 +190,17 @@ zs_flush:
     move.l  (%sp)+,%d0
     rts
 
+/* CacheControl(d0 bits, d1 mask) (exec, -648): from user mode by the privilege violation, in supervisor mode here */
+    .globl  zs_CacheControl
+zs_CacheControl:
+zs_cc:
+    ori.w   #0,%sr
+    move.l  %d1,-(%sp)
+    move.l  %d0,-(%sp)
+    jsr     zb_cachectl
+    addq.l  #8,%sp
+    rts
+
 /* ---- the ways out (9.1) ----
  * The program's return address (its rts), dos Exit, exec ColdReboot and every vector ZINE does not have reach
  * zs_catch with zr_how set: from user mode its privileged instruction traps (zv_priv sends it to zb_goback), in
@@ -194,6 +236,79 @@ zb_setvbr:
     move.l  4(%sp),%d0
     movec   %d0,%vbr
     rts
+/* zb_mmu_save(m): 040/060 only (AttnFlags bit 3 or 7). TC, ITT0, ITT1, DTT0, DTT1, URP, SRP into m[1..7] and bit 0
+ * of m[0]; the 060's PCR into m[8] and bit 1. Probed as zenixboot does, with the illegal-instruction and line-F
+ * vectors caught (an EC/LC part may lack the MMU's registers; only a 68060 has PCR, Emu68 reports a 68040).
+ * Supervisor mode, interrupts masked. */
+    .globl  zb_mmu_save, zb_mmu_back
+zb_mmu_save:
+    move.l  4(%sp),%a0
+    movem.l %a2-%a4,-(%sp)
+    movec   %vbr,%a1
+    move.l  0x10(%a1),-(%sp)
+    move.l  0x2C(%a1),-(%sp)
+    lea     9f(%pc),%a2
+    move.l  %a2,0x10(%a1)
+    move.l  %a2,0x2C(%a1)
+    move.l  %sp,%a3
+    clr.l   (%a0)
+    lea     1f(%pc),%a4             /* a trap goes on at 1: (the PCR) */
+    .long   0x4E7A0003              /* movec tc,d0 */
+    move.l  %d0,4(%a0)
+    .long   0x4E7A0004              /* movec itt0,d0 */
+    move.l  %d0,8(%a0)
+    .long   0x4E7A0005              /* itt1 */
+    move.l  %d0,12(%a0)
+    .long   0x4E7A0006              /* dtt0 */
+    move.l  %d0,16(%a0)
+    .long   0x4E7A0007              /* dtt1 */
+    move.l  %d0,20(%a0)
+    .long   0x4E7A0806              /* urp */
+    move.l  %d0,24(%a0)
+    .long   0x4E7A0807              /* srp */
+    move.l  %d0,28(%a0)
+    or.b    #1,3(%a0)
+1:  lea     2f(%pc),%a4
+    .long   0x4E7A0808              /* movec pcr,d0 (68060 only) */
+    move.l  %d0,32(%a0)
+    or.b    #2,3(%a0)
+2:  move.l  (%sp)+,0x2C(%a1)
+    move.l  (%sp)+,0x10(%a1)
+    movem.l (%sp)+,%a2-%a4
+    rts
+9:  move.l  %a3,%sp                 /* the instruction does not exist here: its frame dropped */
+    jmp     (%a4)
+/* zb_mmu_back(m): what zb_mmu_save read, written back (the data cache pushed before the mapping changes, the
+ * translation cache flushed after) */
+zb_mmu_back:
+    move.l  4(%sp),%a0
+    btst    #0,3(%a0)
+    beq.s   1f
+    .word   0xF4F8                  /* cpusha bc */
+    moveq   #0,%d0
+    .long   0x4E7B0003              /* movec d0,tc: translation off while the rest is written */
+    .word   0xF518                  /* pflusha */
+    move.l  8(%a0),%d0
+    .long   0x4E7B0004
+    move.l  12(%a0),%d0
+    .long   0x4E7B0005
+    move.l  16(%a0),%d0
+    .long   0x4E7B0006
+    move.l  20(%a0),%d0
+    .long   0x4E7B0007
+    move.l  24(%a0),%d0
+    .long   0x4E7B0806
+    move.l  28(%a0),%d0
+    .long   0x4E7B0807
+    move.l  4(%a0),%d0
+    .long   0x4E7B0003              /* then Zenix's TC */
+    .word   0xF518
+1:  btst    #1,3(%a0)
+    beq.s   2f
+    move.l  32(%a0),%d0
+    .long   0x4E7B0808              /* movec d0,pcr */
+2:  rts
+
 /* the caches flushed after writing code (CLAUDE.md): CACR's clear bit on 020/030, cpusha bc on 040/060 and Emu68
  * (never cinva); the CPU from ExecBase's AttnFlags as AmigaOS reported them (bootinfo). Supervisor mode only. */
 zb_flush:
@@ -325,7 +440,6 @@ zb_putch:
     CF  zs_RawDoFmt, c_RawDoFmt, 4, %a0, %a1, %a2, %a3
     CF  zs_TypeOfMem, c_TypeOfMem, 1, %a1
     CF  zs_CopyMem, c_CopyMem, 3, %a0, %a1, %d0
-    CF  zs_CacheControl, c_CacheControl, 2, %d0, %d1
     CF  zs_AllocVec, c_AllocVec, 2, %d0, %d1
     CF  zs_FreeVec, c_FreeVec, 1, %a1
     CF  zs_CreatePool, c_CreatePool, 3, %d0, %d1, %d2

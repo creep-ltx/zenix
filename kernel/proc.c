@@ -661,8 +661,8 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     return pid;
 }
 
-int proc_spawn(const char *path, char *const *argv, int argc,
-               struct proc *parent, const int *stdio, int tty)
+#define SPAWN_HUNK (-4096)                  /* not an errno: spawn1 found an AmigaOS program */
+static int spawn1(const char *path, char *const *argv, int argc, struct proc *parent, const int *stdio, int tty)
 {
     struct exec_src x;
     union zhdr h;                       /* a ZEXE header, or the longer ZEX2 one */
@@ -671,13 +671,44 @@ int proc_spawn(const char *path, char *const *argv, int argc,
         return (int)r;
     memset(&h, 0, sizeof h);
     u32 hn = x.st.size < sizeof h ? x.st.size : sizeof h;
-    if (x.st.size >= sizeof h.v1 && fs_exec_read(&x, 0, &h, hn)) {      /* shorter: proc_load says why it is refused */
+    if (x.st.size >= 4 && fs_exec_read(&x, 0, &h, hn)) {      /* shorter: proc_load says why it is refused */
         fs_exec_close(&x);
         return -EIO;
+    }
+    if (*(const u32 *)&h == 0x3F3) {   /* HUNK_HEADER: an AmigaOS program (proc_spawn below runs zine) */
+        fs_exec_close(&x);
+        return SPAWN_HUNK;
+    }
+    if (x.st.size > 256u * 1024) {      /* the largest Zenix program (an AmigaOS one may be bigger: zine reads it) */
+        fs_exec_close(&x);
+        return -EFBIG;
     }
     int pid = proc_load(&h, x.st.size, fill_fs, &x, path, argv, argc, parent, stdio, tty, 0,
                         (x.st.mode & 04000) ? (int)x.st.uid : -1);    /* set-user-id: runs as its owner (su, passwd) */
     fs_exec_close(&x);                  /* the image is in memory: the server may forget this open */
+    return pid;
+}
+
+/* D29 12.1, running by name: an executable AmigaOS program (an x bit, the file starts with HUNK_HEADER 0x3F3) runs as
+ * `/bin/zine PATH ARGS...` (frozen behaviour); without /bin/zine it is -ENOEXEC, said in the kernel log */
+int proc_spawn(const char *path, char *const *argv, int argc, struct proc *parent, const int *stdio, int tty)
+{
+    int pid = spawn1(path, argv, argc, parent, stdio, tty);
+    if (pid != SPAWN_HUNK)
+        return pid;
+    char **v = kmalloc((u32)(argc + 2) * 4);
+    if (!v)
+        return -ENOMEM;
+    v[0] = "zine", v[1] = (char *)path;
+    for (int i = 1; i < argc; i++)
+        v[i + 1] = argv[i];
+    v[argc + 1] = 0;
+    pid = spawn1("/bin/zine", v, argc + 1, parent, stdio, tty);
+    kfree(v);
+    if (pid == -ENOENT || pid == SPAWN_HUNK) {
+        kprintf("exec: %s is an AmigaOS program: ZINE is not installed\n", path);
+        pid = -ENOEXEC;
+    }
     return pid;
 }
 
