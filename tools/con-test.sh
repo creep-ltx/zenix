@@ -30,6 +30,8 @@ if [ "$raws" = "2 raw:616203630d" ]; then echo "PASS the text path and the seria
 # by two Backspaces; the cursor left over a Swedish letter and a b, then c typed between
 hx=$(tr -d '\r' < $L | grep -a '^00000000 ' | awk '{ $1 = ""; sub(/  *\|.*/, ""); print }' | tr -s ' ' | sed 's/^ //')
 if echo "$hx" | grep -qx '71 7a 0a'; then echo "PASS sh: Backspace takes whole characters (a pasted box line, A-grave's 0x80)"; else echo "FAIL sh Backspace: $hx"; pass=0; fi
+n=$(tr -d '\r' < $L | grep -ac '^ghost-abc-def$')
+if [ "$n" = 2 ]; then echo "PASS sh: the grey suggestion from history, taken with Right"; else echo "FAIL sh suggestion: ghost-abc-def $n times"; pass=0; fi
 if echo "$hx" | grep -qx '61 62 20 78 63 64 0a'; then echo "PASS sh: Ctrl, Alt and Shift with the arrows (a word left, nothing typed from the codes)"; else echo "FAIL sh modifier arrows: $hx"; pass=0; fi
 if echo "$hx" | grep -qx '61 63 62 c3 a5 0a'; then echo "PASS sh: the cursor moves by characters (left over a Swedish letter)"; else echo "FAIL sh cursor: $hx"; pass=0; fi
 grep -aq 'con-test-done' $L || { echo "FAIL the script did not reach its end"; pass=0; }

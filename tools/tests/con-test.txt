@@ -32,6 +32,12 @@ send echo ab\xc3\xa5\x1b[D\x1b[Dc\x05 | hexdump\r
 wait (?m)^00000000 .*\n 20
 send echo ab cd\x1b[1;5Dx\x1b[1;2C\x1b[1;3D\x1b[1;5C\x05 | hexdump\r
 wait (?m)^00000000 .*\n 20
+send echo ghost-abc-def\r
+wait (?m)^ghost-abc-def 20
+send echo gho\x1b[C; echo gh-done\r
+wait gh-done 20
+send echo ghost-x\x1b[1;5C\x1b[1;5C; echo gw-done\r
+wait gw-done 20
 send termtest readline\r
 wait readline: 20
 sleep 1

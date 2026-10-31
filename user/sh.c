@@ -168,6 +168,7 @@ static struct func *func_find(const char *n) { for (int i = 0; i < 48; i++) if (
 
 #define HMAX 200
 static char *hist[HMAX]; static int nhist;
+static const char *suggest;            /* the grey rest redraw showed (a history line's tail), or 0 */
 static void hist_add(const char *l)
 {
     if (!*l || (nhist && !strcmp(hist[nhist - 1], l))) return;
@@ -219,7 +220,46 @@ static void redraw(const char *prompt, int plen, const char *buf, int len, int p
     put_n(buf + *scroll, shown);
     outs("\033[K");
     int back = zu8cols(buf + *scroll, (u32)shown) - zu8cols(buf + *scroll, (u32)(pos - *scroll));
+    /* fish's autosuggestion (owner 2026-10-31): with the cursor at the end, the rest of the newest history line that
+     * starts with what is typed, in grey after the cursor; Right or End takes it, Ctrl/Alt+Right one word */
+    suggest = 0;
+    if (pos == len && len > 0 && *scroll == 0)
+        for (int i = nhist - 1; i >= 0; i--)
+            if (!strncmp(hist[i], buf, (u32)len) && hist[i][len]) {
+                const char *rest = hist[i] + len;
+                int room = avail - zu8cols(buf, (u32)len) - 1;
+                int fit = room > 0 ? (int)zu8fit(rest, (u32)strlen(rest), room) : 0;
+                if (fit > 0) {
+                    suggest = rest;
+                    outs("\033[90m"); put_n(rest, fit); outs("\033[0m");
+                    back += zu8cols(rest, (u32)fit);
+                }
+                break;
+            }
     if (back > 0) { char e[16]; e[0] = 27; e[1] = '['; utoa((u32)back, e + 2); u32 l = strlen(e); e[l] = 'D'; e[l + 1] = 0; outs(e); }
+}
+
+/* take the suggestion into the line: all of it, or (word) up to the end of its next word */
+static int take_suggestion(char *buf, int len, int max, int word)
+{
+    if (!suggest)
+        return len;
+    int n = (int)strlen(suggest);
+    if (word) {
+        int k = 0;
+        while (k < n && is_space(suggest[k])) k++;
+        while (k < n && !is_space(suggest[k])) k++;
+        n = k;
+    }
+    if (len + n > max - 2)
+        n = max - 2 - len;
+    if (n <= 0)
+        return len;
+    memcpy(buf + len, suggest, (u32)n);
+    len += n;
+    buf[len] = 0;
+    suggest = 0;
+    return len;
 }
 
 /* DESIGN D28: the bytes before pos end inside a character (a lead whose continuations are still coming, as a typed
@@ -422,6 +462,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
                 if (mod) { int t = num; num = mod; mod = t; }   /* the first number is the key's, the second the modifiers */
                 if ((mod == 3 || mod == 5) && (s2 == 'C' || s2 == 'D')) {  /* Ctrl or Alt with right/left: a word (bash's) */
                     if (s2 == 'D') { while (pos > 0 && is_space(buf[pos - 1])) pos--; while (pos > 0 && !is_space(buf[pos - 1])) pos--; }
+                    else if (pos == len && suggest) { len = take_suggestion(buf, len, max, 1); pos = len; }
                     else { while (pos < len && is_space(buf[pos])) pos++; while (pos < len && !is_space(buf[pos])) pos++; }
                     redraw(prompt, plen, buf, len, pos, &scroll);
                     continue;
@@ -443,7 +484,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
         if (c != 9) tabs = 0;
         switch (c) {
         case 13: case 10:
-            outs("\r\n"); sys_ttymode(0); buf[len] = 0;
+            outs("\033[K\r\n"); sys_ttymode(0); buf[len] = 0;  /* the grey suggestion off the finished line */
             if (over) {
                 char n[12]; utoa((u32)max - 2, n);
                 outs("sh: the line was too long (more than "); outs(n); outs(" characters): not run\r\n");
@@ -451,7 +492,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             }
             return len;
         case 3:                                                 /* Ctrl-C: cancel the line */
-            outs("^C\r\n"); sys_ttymode(0); buf[0] = 0; return -2;
+            outs("\033[K^C\r\n"); sys_ttymode(0); buf[0] = 0; return -2;
         case 4:                                                 /* Ctrl-D: end of input, or delete */
             if (len == 0) { outs("\r\n"); sys_ttymode(0); return -1; }
             /* fall through */
@@ -462,9 +503,9 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             if (pos > 0) { int p = (int)zu8prev(buf, (u32)pos); memmove(buf + p, buf + pos, (u32)(len - pos + 1)); len -= pos - p; pos = p; }
             break;
         case 1: pos = 0; break;
-        case 5: pos = len; break;
+        case 5: if (pos == len) len = take_suggestion(buf, len, max, 0); pos = len; break;
         case 2: if (pos > 0) pos = (int)zu8prev(buf, (u32)pos); break;
-        case 6: if (pos < len) { int w; pos += zu8next(buf + pos, (u32)(len - pos), &w); } break;
+        case 6: if (pos < len) { int w; pos += zu8next(buf + pos, (u32)(len - pos), &w); } else { len = take_suggestion(buf, len, max, 0); pos = len; } break;
         case 11: len = pos; buf[len] = 0; break;                /* Ctrl-K */
         case 21: memmove(buf, buf + pos, (u32)(len - pos + 1)); len -= pos; pos = 0; break;   /* Ctrl-U */
         case 23: { int s = pos; while (s > 0 && is_space(buf[s - 1])) s--; while (s > 0 && !is_space(buf[s - 1])) s--;
