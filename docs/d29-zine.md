@@ -1091,7 +1091,46 @@ counters); sound not yet checked (the pictures only); the owner's PiStorm; demos
 - **Gayle (f):** `ide_zine` runs `gayle_quiet` again (nIEN, Gayle's enable 0, the latch cleared), as `ide_init` left
   them. **The mouse (h):** `input_init` again, so the counters the program moved are no jump.
 - Kernel 169,340 -> 170,120 bytes; the mount tests' RAM disk 712 -> 708 KB for the room (12 blocks free).
-- Still open: the CIA-B restart window (the review's), a test server that fails its sync.
+- A read-only review of this (2026-10-31) found, fixed in the same branch: an exiting process's `FS_CLOSE` was dropped
+  by the hold's -EINTR (it now waits for the resume); the clock correction could wrap below 0 (now skipped when it
+  would: a program that set the clock) and an RP5C01 left in Kickstart's bank 1 shows no time at registers 0-3
+  (`rtc_ok` only for a clock read in bank 0); `zb_mmu_back` wrote Zenix's TC before the other registers (now TC 0,
+  the rest, then TC); `(sp)` in supervisor mode was refused by the line-F stand-in (16.5).
+- Still open: the CIA-B restart window (the review's), a test server that fails its sync; a server starting on demand
+  during the hold waits for the resume (its 30 s start deadline may count it as failed), and init's reset-warning sync
+  waits too (the disks are already synced; the keyboard's own timeout resets).
+
+### 16.5 The 68040/060 stand-ins: MMU instructions, missing FPU instructions, CacheControl (2026-10-31, zine04)
+
+The owner's Bacon of Hope stopped on the PiStorm with "line F instruction at 0811d658". Emu68 runs `fsin`, `ftwotox`
+and the other FPU instructions a real 040/060 lacks itself (knowledge base `amiga/emu68-and-pistorm.md`), and Bacon of
+Hope is 68000 code, so the line F is *proposed* to be an MMU instruction: Emu68 has no MMU, so old demos' "switch the
+030's MMU off" (`pmove` to TC, `pflusha`), or the 040's own `pflusha`, end there. Decided and built:
+- **The line-F vector** (`zv_linef`, `zb_linef` in blob.c) takes as no-ops, with the MMU off as Zenix runs it: the
+  68030's `PMOVE` to and from TC, TT0, TT1, CRP, SRP and MMUSR (a write skipped, a read gives 0), `PFLUSH`/`PFLUSHA`,
+  `PLOAD` and `PTEST` (coprocessor 0's general form, every addressing mode but the full extension format; `(An)+`
+  and `-(An)` move An as the CPU would); and the 040/060's own `PFLUSH`, `PFLUSHA`, `PTEST`, `PLPA` ($F5xx, one
+  word). The program's output says once "ZINE: an MMU instruction (PMOVE, PFLUSH, PTEST) taken as a no-op: the MMU
+  is off". Anything else at the line-F vector is a crash as before.
+- **FPU instructions the CPU lacks** are not emulated (the 060 library's package is far larger than the blob): the
+  crash line names them, "line F instruction at ... (instruction f200 000e: FSIN, which this CPU does not have in
+  hardware; AmigaOS's 68040/68060.library emulates it, ZINE does not)", for the 040/060's missing set (FSIN, FCOS,
+  FETOX, FLOGN, FSINCOS, FTWOTOX, FMOD, FREM, FINT ...). FS-UAE's 68040 stacks such a line F as format 2 with the
+  next instruction's PC (the nearest FPU instruction word before it is named); a format-4 frame gives the faulted
+  instruction's own address. An illegal-instruction crash shows its words too.
+- **CacheControl** (exec -648) is real now: the old bits, and the instruction cache switched as asked (CACR's IE on
+  040/060, EnableI/FreezeI/IBE on 020/030), both caches cleared after; the data cache stays off (10.1). Before, it
+  answered "instruction cache on" and changed nothing, so a program that switches the cache off to change its own
+  code ran stale code on a 68040: Bacon of Hope in FS-UAE's 68040 (8 MB fast RAM, FPU) crashed with an illegal
+  instruction after 387 s that way; with this change it plays through to its end scroller (pictures taken at 20 s to
+  750 s in the cage rig). Whether Emu68 drops its translations when
+  the instruction cache is switched off is not known (*proposed*: it flushes on the CACR write, as on a CACR clear).
+- *Verified* in FS-UAE (`tools/zine-emu-test.sh`): `zmmu` (PMOVE to and from TC, TT0, CRP, SRP by memory, `(An)+`,
+  `-(sp)`, `d16(An)` and immediate, PFLUSHA; in supervisor mode the 040's PFLUSHA and PMOVE TC) returns 0 on the
+  68020 and on the matrix's 68040, the no-op line in its output; `zfpu` (FSIN) named on the 68020 without an FPU and
+  on the 68040; on the 68040 `ztake` and `zcrash` with Zenix back each time and free memory as before
+  (16.4's MMU registers saved and put back). Not yet on the PiStorm: Bacon of Hope there is the owner's test.
+- Blob 25,988 -> 27,032 bytes; the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

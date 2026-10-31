@@ -253,8 +253,8 @@ static __attribute__((noinline)) long fs_call_k(int mi, u32 type, u32 a0, u32 a1
     if (current->pid == 0 || !mt->used)
         return -EINVAL;
     while (held()) {
-        if (current->killed)
-            return -EINTR;
+        if (current->killed && !current->exiting && type != FS_CLOSE)
+            return -EINTR;              /* an exit's closes wait for the resume (ipc sends them even when killed) */
         sleep_until(ticks + 2);
         schedule();
     }

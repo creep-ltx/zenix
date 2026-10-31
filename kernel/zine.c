@@ -164,7 +164,9 @@ static long go(const struct uzine_go *g)
     input_init();                       /* the mouse counters read afresh: the program's moves are no jump */
     if (rtc_ok) {                       /* 9.7: the battery clock's minutes and seconds correct the CIA-A count */
         s32 d = (s32)((rtc_ms() + 3600 - rt0) % 3600) - (s32)(zine_secs % 3600);
-        zine_secs += (u32)(d > 1800 ? d - 3600 : d < -1800 ? d + 3600 : d);
+        d = d > 1800 ? d - 3600 : d < -1800 ? d + 3600 : d;
+        if ((s32)zine_secs + d >= 0)    /* a program that set or stopped the clock: the CIA-A count stands */
+            zine_secs += (u32)d;
     }
     INTENA = 0x7FFF;
     INTENA = (u16)(INTF_SETCLR | (ena & 0x7FFF));

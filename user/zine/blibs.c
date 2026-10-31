@@ -320,12 +320,28 @@ u32 c_SetFunction(u8 *lib, s32 off, u32 fn)
 }
 
 /* the instruction cache stays as Zenix had it, the data cache off (10.1): the answer says so; changes are not made */
-u32 c_CacheControl(u32 bits, u32 mask)
+/* CacheControl (exec): the old bits; the instruction cache switched as asked (old programs that change their own code
+ * switch it off; the 68040's 4 KB one and Emu68's translations would run the old code). The 020/030's CACR has
+ * exec's layout (EnableI 0, FreezeI 1, IBE 4); the 040/060's IE is bit 15. The data cache stays off as Zenix runs
+ * it: without an MMU chip RAM is not marked uncached, so DMA would not be seen. Both caches are cleared after
+ * (CACRF_ClearI/ClearD always). Supervisor mode (zs_CacheControl, blobs.S). */
+u32 zb_cachectl(u32 bits, u32 mask);
+u32 zb_cachectl(u32 bits, u32 mask)
 {
-    (void)bits, (void)mask;
-    extern void zx_CacheClearU(void);
-    zx_CacheClearU();
-    return 1;                           /* CACRF_EnableI */
+    extern u32 zb_attn;
+    int big = (zb_attn & 0x0088) != 0;
+    u32 c;
+    __asm__ volatile("movec %%cacr,%0" : "=d"(c));
+    u32 old = big ? (c >> 15 & 1) | (c >> 31 & 1) << 8 : c & 0x3313;
+    u32 nw = (old & ~mask) | (bits & mask);
+    if (big) {
+        c = (c & ~0x80008000u) | (nw & 1 ? 0x8000u : 0) | (old & 0x100 ? 0x80000000u : 0);
+        __asm__ volatile(".word 0xF4F8\n\tmovec %0,%%cacr\n\t.word 0xF4F8" : : "d"(c) : "memory");
+    } else {
+        c = (c & ~0x13u) | (nw & 0x13) | 0x0808;
+        __asm__ volatile("movec %0,%%cacr" : : "d"(c) : "memory");
+    }
+    return old;
 }
 
 /* RawDoFmt (exec): %[-][0][width][.limit][l](d u x X s b c), %% ; without l a number is a 16-bit word */

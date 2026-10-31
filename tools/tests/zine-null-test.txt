@@ -35,6 +35,8 @@ send zine /tests/zine/zscreen; echo zscreen-rc=$?\r
 wait zscreen-rc= 60
 send rm -f /home/zbg; sh -c 'i=0; while [ $i -lt 400 ]; do echo $i >> /home/zbg; i=$((i+1)); done' & zine /tests/zine/ztake; wait; echo zbg=$(grep -c . /home/zbg) last=$(tail -1 /home/zbg)\r
 wait (?m)^zbg=.*\n 90
+send zine /tests/zine/zmmu; echo zmmu-rc=$?; zine /tests/zine/zfpu; echo zfpu-rc=$?\r
+wait zfpu-rc= 60
 send mkdir /tmp/zx; cp /tests/zine/zexit /tmp/zx/zexit; chmod 755 /tmp/zx/zexit; /tmp/zx/zexit a b; echo byname1=$?\r
 wait byname1= 60
 send cd /tmp/zx; ./zexit; echo byname2=$?; cd /\r
