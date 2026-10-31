@@ -140,7 +140,7 @@ static void tree(const char *dir)
             printf("d %o %u %u %u 0 %s #%u\n", st.mode & 07777, 0u, st.links, st.mtime, full, st.ino);
             tree(full);
         } else if ((st.mode & 0170000) == 0120000) {
-            static char t[FS_PATHMAX];
+            static char t[256];
             strcpy(ask, full);
             rs = req(FS_READLINK, (u32)ask, CWD, (u32)t, 255);
             if (rs < 0) printf("! %d %s\n", rs, full);

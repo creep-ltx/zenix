@@ -176,7 +176,7 @@ class Volume:
         ents = [self._entry(c) for c in d.children]
         blocks, cur = [], b""
         for e in ents:
-            if 20 + len(cur) + len(e) + 1 > self.rb:
+            if 20 + len(cur) + len(e) > self.rb:
                 blocks.append(cur)
                 cur = b""
             cur += e

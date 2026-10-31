@@ -3,7 +3,7 @@
 """The PFS3 server (user/pfs3d.c) built for the PC, against images from tools/mkpfs3.py: every block size and index layout,
 names, links, a big directory, damage refused at the mount, nothing ever written, and a fuzz run with ASAN and UBSAN aimed at
 the format's own structures (no crash, no hang). What AmigaOS's own handler makes is judged by tools/pfs3-aos-test.py.
-usage: tools/pfs3-host-test.py [fuzz-rounds]   (default 1500). PFS3_ONLY="fuzz" runs parts: kinds, names, refuse, fuzz."""
+usage: tools/pfs3-host-test.py [fuzz-rounds]   (default 1500). PFS3_ONLY="fuzz" runs parts: kinds, names, refuse, fuzz; PFS3_CF adds compiler flags (--coverage)."""
 import calendar, hashlib, os, random, re, resource, shutil, struct, subprocess, sys, tempfile, time, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -97,6 +97,17 @@ def test_kinds():
         bad = [q for q, d in exp.items() if q not in got or int(got[q][2]) != len(d) or int(got[q][5], 16) != zlib.crc32(d)]
         check(f"{tag}: every file as it was written ({len(exp)})", not bad, bad[:5])
         check(f"{tag}: nothing written", "writes -> 0" in o and hashlib.sha256(open(p, "rb").read()).hexdigest() == h)
+    # a directory block filled to its last byte: one entry of 24 bytes and 35 of 28 make the 1004 that fit
+    v = Volume(16384)
+    names = ["abc"] + [f"nam{i:04}" for i in range(35)] + ["after-the-full-block"]
+    for n in names:
+        v.add_file("Full/" + n, n.encode())
+    p = save(v, "full.img")
+    d = open(p, "rb").read()
+    fb = v.anodes[v.find("Full").an][1]
+    rc, o = run(p, "mount\nls /Full\nstat /Full/after-the-full-block\nstat /Full/nam0034\ntree /\n")
+    got, errs = tree(o)
+    check("a directory block filled to its last byte", sum(d[fb * 1024 // 1024 * 512 + 20:fb * 512 + 1024]) > 0 and d[fb * 512 + 1022:fb * 512 + 1024] != b"\xff\xff" and "(37, 0)" in o and not errs and "stat -> 0" in lines(o)[2] and "stat -> 0" in lines(o)[3], o[:500])
     # a directory over many blocks and a file over many anode blocks: the chains and the listing's place in them
     v = Volume(65536, rb=1024, reserved=1024)
     exp = {}
@@ -273,11 +284,13 @@ def fuzz():
         v2.hard_link("dhl", "Mapp/Under")
         v2.soft_link("sl", "Mapp/big")
         v2.soft_link("Mapp/Under/up", "/hl")
+        v2.soft_link("Mapp/Under/rot", ":Mapp/big")
+        v2.soft_link("Mapp/Under/vol", "Pfstest:Mapp/big")
         v2.rollover("ro", b"0123456789", 3, 8)
         v2.add_file("L" * 100, b"long\n")
         d = v2.image()
         images.append((d, v2))
-    script = "mount\nstatfs\ntree / 400 8\nstat /Mapp/big\nopen /hl r\nread %1 0 4096\nread %1 60000 10\nfstat %1\nclose %1\nls /\nls /Mapp\nstat /Mapp/Under/up\nreadlink /sl\nlinks on\nopen /sl r\nstat /Mapp/Under/up/x\nlinks off\nopen /dhl/up/.. r\nchdir /Mapp/Under/../..\nstat /" + "L" * 100 + "\nread 77 0 10\nfstat 5\nquit\n"
+    script = "mount\nstatfs\ntree / 400 8\nstat /Mapp/big\nopen /hl r\nread %1 0 4096\nread %1 60000 10\nfstat %1\nclose %1\nls /\nls /Mapp\nstat /Mapp/Under/up\nstat /Mapp/Under/rot\nstat /Mapp/Under/vol\nstat /Mapp/Under/.\nstat /Mapp/./Under/../Under/\nstat /dhl/.\nreadlink /sl\nlinks on\nopen /sl r\nstat /Mapp/Under/up/x\nlinks off\nopen /dhl/up/.. r\nchdir /Mapp/Under/../..\nstat /" + "L" * 100 + "\nread 77 0 10\nfstat 5\nquit\n"
     rng = random.Random(0x50F5)
     p = os.path.join(T, "fuzz.img")
     bad = hangs = mounted = 0
@@ -388,7 +401,7 @@ def fuzz():
 
 def main():
     os.chdir(os.path.join(HERE, ".."))
-    r = subprocess.run(["gcc", *CF, *SAN, *SRC, "-o", EXE], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    r = subprocess.run(["gcc", *CF, *SAN, *os.environ.get("PFS3_CF", "").split(), *SRC, "-o", EXE], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     warn = r.stdout.decode()
     if r.returncode:
         print(warn)
