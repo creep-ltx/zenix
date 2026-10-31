@@ -142,6 +142,8 @@ int sys_update(u32 op, u32 a, u32 b2)
     }
     return 0;
 }
+int zerrno;
+const char *zwhy(const char *dflt) { return dflt; }
 int dir_list(const char *path, char ***names)
 {
     struct ustat st;

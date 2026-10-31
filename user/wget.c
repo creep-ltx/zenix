@@ -140,6 +140,8 @@ static void load_local(void)
 {
     char **names, *pem = 0;
     int n = dir_list("/etc/ssl/local", &names), i;
+    if (n < 0 && zerrno != ENOENT)
+        say("/etc/ssl/local: %s: its roots are not used\n", zwhy("cannot read"));
     for (i = 0; i < n; i++) {
         char *p = path_join("/etc/ssl/local", names[i]);
         int fd = p ? sys_open(p, O_RDONLY) : -1, len = 0, r;
