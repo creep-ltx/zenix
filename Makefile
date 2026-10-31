@@ -203,8 +203,8 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 # scripts (NOTESTS=1: the mount tests run none of /tests); that made room for D20 step 1's 8 KB (3 blocks were free).
 RAMDISK_K := 640
 # 712 since DESIGN D28 step 2 (2026-10-29): the console's UTF-8 took about 9 KB of kernel; 33 blocks stay free there.
-# 708 since 2026-10-31 (D29 ZINE: running by name and the review's fixes, about 0.6 KB of kernel); 12 blocks free
-RAMDISK_MOUNT_K := 708
+# Not less: at 708 (12 blocks free) mounttest's links part runs out of space in /tmp (2026-10-31)
+RAMDISK_MOUNT_K := 712
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget

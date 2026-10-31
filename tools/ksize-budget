@@ -15,7 +15,7 @@
 # ids, their count and the list's number), syscall 9,950 -> 10,150 (the call itself).
 # 2026-10-31 (D29 12.1, an AmigaOS program run by its name through /bin/zine): proc 9,100 -> 9,300; (the review of
 # ZINE's kernel part: the hold on filesystem requests, the battery clock, Gayle, the mouse, the cache order) zine
-# 1,200 -> 1,500, rtc bss 0 -> 4 (rtc_ok); the mount tests' RAM disk 712 -> 708 KB for the room (Makefile).
+# 1,200 -> 1,500, rtc bss 0 -> 4 (rtc_ok); ROOM 1,024 -> 800 (the mount tests' RAM disk cannot shrink: its /tmp fills).
 start     3900   8192
 main      5950   1100
 serial    5950   6500
@@ -47,4 +47,4 @@ drv       1900    640
 zine      1500     16
 embed    47500      0
 TOTAL   172000
-ROOM      1024
+ROOM       800

@@ -17,6 +17,8 @@ send cat /tmp/zn.after\r
 wait typed-after 20
 send echo disk-ok > /home/zn.disk; sync; cat /home/zn.disk 2>/dev/null || (echo disk-ok > /tmp/zn.disk; cat /tmp/zn.disk)\r
 wait (?m)^disk-ok 20
+send free\r
+wait (?m)^fast RAM free.*\n 20
 send zine /tests/zine/zexit; echo zexit-rc=$?\r
 wait zexit-rc= 60
 send zine /tests/zine/zexit-with-a-name-longer-than-31-bytes; echo zlong-rc=$?\r
@@ -39,9 +41,9 @@ send zine /tests/zine/zmmu; echo zmmu-rc=$?; zine /tests/zine/zfpu; echo zfpu-rc
 wait zfpu-rc= 60
 send mkdir /tmp/zx; cp /tests/zine/zexit /tmp/zx/zexit; chmod 755 /tmp/zx/zexit; /tmp/zx/zexit a b; echo byname1=$?\r
 wait byname1= 60
-send cd /tmp/zx; ./zexit; echo byname2=$?; cd /\r
+send (cd /tmp/zx; ./zexit; echo byname2=$?)\r
 wait byname2= 60
-send OP=$PATH; PATH=/tmp/zx:$PATH; zexit; echo byname3=$?; PATH=$OP\r
+send (PATH=/tmp/zx:$PATH; zexit; echo byname3=$?)\r
 wait byname3= 60
 send chmod 644 /tmp/zx/zexit; /tmp/zx/zexit; echo byname4=$?; rm -r /tmp/zx\r
 wait byname4= 30

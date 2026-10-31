@@ -44,6 +44,8 @@ echo "$log" | grep -aq '^byname2=7' && ok "an AmigaOS program run as ./zexit" ||
 echo "$log" | grep -aq '^byname3=7' && ok "an AmigaOS program found on PATH" || no "on PATH: $(echo "$log" | grep -a 'byname3' | tail -1)"
 echo "$log" | grep -aq '^byname4=126' && ok "an AmigaOS program without the x bit is not run by name" || no "without x: $(echo "$log" | grep -a 'byname4' | tail -1)"
 f3=$(echo "$log" | grep -a '^fast RAM free' | tail -1 | tr -dc 0-9); c3=$(echo "$log" | grep -a '^chip RAM free' | tail -1 | tr -dc 0-9)
+# the mark: taken after the files above are written, just before the real programs (they stay in the RAM disk)
+f1=$(echo "$log" | grep -a '^fast RAM free' | sed -n 3p | tr -dc 0-9); c1=$(echo "$log" | grep -a '^chip RAM free' | sed -n 3p | tr -dc 0-9)
 [ "$f3" = "$f1" ] && [ "$c3" = "$c1" ] && ok "free memory after the real programs as before them" || no "free memory after the real programs: chip $c3 KB, fast $f3 KB (before: $c1, $f1)"
 echo "$log" | grep -aq '^zgroup1=1' && echo "$log" | grep -aq 'zine: not allowed: root and the members of the group zine' && ok "a user outside the group zine is refused" || no "zine group, outside: $(echo "$log" | grep -a 'zgroup1\|group zine' | tail -2)"
 echo "$log" | grep -aq '^zgroup2=7' && ok "after gpasswd -a user zine the user runs zine (set-user-id root, the group checked by zine)" || no "zine group, member: $(echo "$log" | grep -a 'zgroup2' | tail -2)"
