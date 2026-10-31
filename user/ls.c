@@ -130,7 +130,7 @@ static int list(const char *path, int top)
     printed_any = 1;
     (void)top;
     /* the names come from the heap and grow as needed (libz dir_list): no limit but memory, and running out says so */
-    char **names; int nn = dir_list(path, &names);
+    char **names; int rerr, nn = dir_list_some(path, &names, &rerr);
     if (nn < 0) { dprintf(2, "ls: %s: %s\n", path, zwhy("cannot open")); return 1; }
     struct ent *v = malloc(((u32)nn + 2) * sizeof(struct ent));
     if (!v) { dprintf(2, "ls: %s: out of memory (%d names)\n", path, nn); dir_free(names, nn); return 1; }
@@ -146,6 +146,11 @@ static int list(const char *path, int top)
     dir_free(names, nn);
     show(v, n);
     int rc = 0;
+    if (rerr) {                                        /* what could be read is shown; the rest is said to be missing */
+        zerrno = rerr;
+        dprintf(2, "ls: %s: %s\n", path, zwhy("cannot read all of it"));
+        rc = 1;
+    }
     if (o_R)
         for (int i = 0; i < n; i++)
             if ((v[i].st.mode & S_IFMT) == S_IFDIR && strcmp(v[i].name, ".") && strcmp(v[i].name, "..")) {

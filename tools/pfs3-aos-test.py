@@ -6,7 +6,7 @@ dates. Then pfs3d (the PC build) reads each image and every file is compared wit
 it needs this PC's test machines and a handler file the repository does not carry. Without them: SKIP, and it passes.
 Emulators only; never the real Amiga.
 usage: PFS3AIO=FILE tools/pfs3-aos-test.py [variant ...]    variants: plain super bs4096 (default all three); with
-PFS3AIO2=FILE, a handler built from the public source with large files, also pfs2. PFS3_KEEP=DIR keeps the images there."""
+PFS3AIO2=FILE, a handler built from the public source with large files, also pfs2 pfs2k1 pfs2k4 (asked for by name). PFS3_KEEP=DIR keeps the images there."""
 import calendar, fcntl, os, random, re, shutil, struct, subprocess, sys, tempfile, time, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -218,13 +218,13 @@ def judge(tag, out, exp):
     return got
 
 
-def anode_pieces(img, start, path_anode_hint=None):
+def anode_pieces(img, start, bs=512):
     """an independent look at the bytes: how many pieces the largest file's chain has, from the image, for the test's own
     honesty (a contiguous file would prove nothing). A small walker in the format's terms, reserved blocks of 1 KB"""
     f = open(img, "rb")
 
     def block(b, n=1024):
-        f.seek((start + b) * 512)
+        f.seek(start * 512 + b * bs)
         return f.read(n)
 
     root = block(2, 512)
@@ -302,14 +302,14 @@ def variant(tag, T, handler, sectors_cyl, bs, patch_fnsize=True):
     time.sleep(12)
     amiga_stop()
     # long names: the file name size lives in the rootblock extension, one number (what the handler's own tool changes)
-    d = bytearray(open(img, "r+b").read(start * 512 + 2048))
-    root = start * 512 + 2 * bs if struct.unpack(">I", d[start * 512 + 2 * bs:start * 512 + 2 * bs + 4])[0] in (0x50465301, 0x50465302) else start * 512 + 1024
+    d = bytearray(open(img, "r+b").read(start * 512 + 16384))
+    unit = bs if d[start * 512 + 2 * bs:start * 512 + 2 * bs + 4] in (b"PFS\x01", b"PFS\x02") else 512     # a PFS\1 volume keeps 512-byte blocks
+    root = start * 512 + 2 * unit
     rtype = d[root:root + 4]
     print(f"     root: {bytes(rtype)!r} options {struct.unpack('>I', d[root + 4:root + 8])[0]:#x} reserved block {struct.unpack('>H', d[root + 64:root + 66])[0]} disk size {struct.unpack('>I', d[root + 84:root + 88])[0]}", flush=True)
     ext = struct.unpack(">I", d[root + 88:root + 92])[0]
     if patch_fnsize:
         with open(img, "r+b") as f:
-            unit = 512
             f.seek(start * 512 + ext * unit + 56)
             f.write(struct.pack(">H", 108))
     ok, o = amiga_start(img, src)
@@ -334,7 +334,7 @@ def variant(tag, T, handler, sectors_cyl, bs, patch_fnsize=True):
     got = judge(tag, out, exp)
     p = got.get("/hard1"), got.get("/b4096")
     check(f"{tag}: a hard link has its file's inode number", p[0] and p[1] and p[0][7] == p[1][7], p)
-    n = anode_pieces(img, start)
+    n = anode_pieces(img, start, unit)
     check(f"{tag}: the fragmented file really is in pieces ({n})", n > 3, n)
     e = dict(os.environ, HOSTDISK=img, HOSTDISK_RDONLY="1", HOSTDISK_START=str(start), HOSTDISK_SECTORS=str(sectors))
     script = "mount\nstat /RÄKSMÖRGÅS.TXT\nstat /åäö-MAPP/RÄKSMÖRGÅS.TXT\nstat /dirlink/d01\nstat /softdir/d01\nopen /soft1 r\nfstat %1\nstat /" + "M" * 31 + "\nstat /.deldir\nopen /new wc\nunlink /b512\nmkdir /x\n"
@@ -368,8 +368,9 @@ def main():
             variant("bs4096", T, handler, 25, 4096)              # the partition table says 4 KB blocks, as two of the owner's partitions
         if "super" in want:
             variant("super", T, handler, 1400, 512)              # 5.6 GB, sparse: over the size where super blocks start
-        if "pfs2" in want and os.environ.get("PFS3AIO2"):
-            variant("pfs2", T, os.environ["PFS3AIO2"], 25, 4096, patch_fnsize=False)
+        for tag, b in (("pfs2", 512), ("pfs2k1", 1024), ("pfs2k4", 4096)):   # large files: the newer type; logical blocks over 512
+            if tag in want and os.environ.get("PFS3AIO2"):
+                variant(tag, T, os.environ["PFS3AIO2"], 25, b)
     finally:
         amiga_stop()
         shutil.rmtree(T, ignore_errors=True)

@@ -66,6 +66,8 @@ NOTES
     The columns are laid out by the names' widths on the console (UTF-8:
     a letter one column, a wide character two; a byte that is not UTF-8
     one); names are bytes and are printed as they are.
+    A directory that cannot be read to its end (a damaged disk) shows what
+    could be read, says why on stderr and exits 1.
     A directory of any size is listed: the names are kept in memory, and
     if memory runs out ls says "out of memory" and exits with 1.
     An access the user is not allowed is reported as "permission denied".

@@ -70,15 +70,17 @@ char *path_join(const char *dir, const char *name)
 
 /* The names in a directory, without "." and "..", in the order the filesystem gives them: *names is a malloc'd
  * array (as long as needed, NULL-terminated) of malloc'd strings, given back with dir_free. Returns the count, or
- * -1 when the directory cannot be read (zerrno from the system call) or memory runs out (zerrno 12); *names is
- * then NULL and nothing is left allocated. */
-int dir_list(const char *path, char ***names)
+ * -1 when the directory cannot be opened (zerrno from the system call) or memory runs out (zerrno 12); *names is
+ * then NULL and nothing is left allocated. If reading fails part way (a damaged disk), *err is that error and the
+ * names read so far are returned: what can be seen is seen. Without a failure *err is 0. */
+int dir_list_some(const char *path, char ***names, int *err)
 {
     *names = 0;
+    *err = 0;
     int fd = sys_open(path, O_RDONLY);
     if (fd < 0) return -1;
-    char **v = 0; int n = 0, cap = 0; struct udirent d;
-    while (sys_readdir(fd, &d) > 0) {
+    char **v = 0; int n = 0, cap = 0, r; struct udirent d;
+    while ((r = sys_readdir(fd, &d)) > 0) {
         if (!strcmp(d.name, ".") || !strcmp(d.name, "..")) continue;
         if (n + 1 >= cap) {
             int nc = cap ? cap * 2 : 32;
@@ -89,6 +91,7 @@ int dir_list(const char *path, char ***names)
         if (!(v[n] = strdup(d.name))) goto oom;
         n++;
     }
+    if (r < 0 && r != -ENOTDIR) *err = -r;            /* (not a directory: no names, as it always was) */
     sys_close(fd);
     if (!v && !(v = malloc(sizeof *v))) { zerrno = ENOMEM; return -1; }
     v[n] = 0;
@@ -99,6 +102,18 @@ oom:
     dir_free(v, n);
     zerrno = ENOMEM;
     return -1;
+}
+/* dir_list_some for those who go on to act on the names (copy, remove, archive): all of them, or -1 */
+int dir_list(const char *path, char ***names)
+{
+    int e, n = dir_list_some(path, names, &e);
+    if (n >= 0 && e) {
+        dir_free(*names, n);
+        *names = 0;
+        zerrno = e;
+        return -1;
+    }
+    return n;
 }
 void dir_free(char **names, int n)
 {

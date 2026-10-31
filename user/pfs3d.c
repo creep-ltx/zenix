@@ -655,6 +655,7 @@ static int do_open(struct umsg *m)
     if (is_dir(&n)) {
         if (flags & (O_WRONLY | O_RDWR)) return -EISDIR;
         if (!fsp_access(cuid, cgid, cng, cgs, S_IFDIR | m_dmode, m_uid, m_gid, fsp_open_want(flags))) return -EACCES;
+        if (ino_dir(n.real)) return -EIO;             /* an entry says directory; its first block says otherwise */
         fill_node(&n, st);
         return (int)n.real;
     }
@@ -680,7 +681,7 @@ static int do_readdir(struct umsg *m)
     u32 *newc = (u32 *)m->a[3];
     ent_t e;
     int r = ino_dir(dir);
-    if (r) return r;
+    if (r) return slot_ino(dir) ? -ENOTDIR : -EIO;
     if (!rd_live || rd.dir != dir || rd.ord > ord) {
         if ((r = dw_start(&rd, dir))) { rd_live = 0; return bad ? -EIO : r; }
         rd_live = 1;

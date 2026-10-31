@@ -58,7 +58,7 @@ send mount -t pfs3 -o uid=5,gid=6,fmode=640,dmode=750 ide0p3 /mnt\r
 sleep 5
 send ls -ld /mnt\r
 sleep 2
-send ls -ln /mnt/ls.bin\r
+send ls -l /mnt/ls.bin\r
 sleep 3
 send umount /mnt\r
 sleep 3

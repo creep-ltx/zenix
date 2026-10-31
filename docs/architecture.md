@@ -1707,7 +1707,8 @@ at each call), so they outlive the command that defined them. When the kernel gi
 
 **Directory walkers** (audit B6: `rm -r`, `cp -r`, `mv`, `du`, `find`, `grep -r`, `chown -R`, `tar c`, `diff -r`,
 `tree`, `ls -R`) use two libz helpers instead of arrays on the stack: `dir_list` reads a directory into a
-heap array that grows as needed (no limit on entries; `dir_free` gives it back), and `path_join` makes "dir/name" in
+heap array that grows as needed (no limit on entries; `dir_free` gives it back; a read that fails part way is -1 and the error,
+so a tool that acts on the names never acts on half of them, and `dir_list_some`, which `ls` uses, gives what was read and the error), and `path_join` makes "dir/name" in
 a new heap string, or refuses (NULL, `zerrno` ENAMETOOLONG, "file name too long") when it would be longer than the
 63 bytes a system call takes. Programs that start another program by name (`find -exec`, `xargs`, `timeout`) find it
 with `path_find`, the shell's `$PATH` search; `sed` and `expr :` share `bre_to_ere`. libz and the programs are built

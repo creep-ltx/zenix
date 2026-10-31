@@ -104,7 +104,7 @@ This is a report point, as the licence asks (PFS3's code is 4-clause BSD; docs/f
 
 ## Limits
 Read-only. Files under 4 GB (decision 10). 64 open files a mount. A cache of 16 reserved blocks of 1 KB (at least 8 of any size) and one
-data block. Paths over 159 bytes are reached only by `cd` (the system's limit). The largest formats (`PFS\2`, reserved blocks over
+data block. The system's path limits (`docs/limits.md`) matter on real volumes: over 63 bytes in one system call, 159 absolute. On the owner's card most names lie deeper than 63 bytes from `/mnt`: `cd` gets there, `cp -r` and `find` stop there with an error. Not changed here: it is the kernel's limit, for every filesystem. The largest formats (`PFS\2`, reserved blocks over
 1 KB, blocks over 512 bytes, large files) are *read from the format and tested on `tools/mkpfs3.py`'s volumes only* unless the
 hand-back of the branch says otherwise: the Aminet handler makes `PFS\1`. Comments and `.deldir` are not shown. Never run on a real Amiga yet.
 
