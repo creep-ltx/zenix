@@ -16,7 +16,7 @@ ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; pass=0; }
 log=$(tr -d '\r' < $L)
 n=$(echo "$log" | grep -ac '^zine: back after 0 s (0)')
-[ "$n" = 27 ] || [ "$n" = 28 ] && ok "twenty-one pauses and resumes with the null blob, then five programs (the kernel's 0 s line 26 times)" || no "the kernel's 'back' line $n times, not 27 (21 null sessions, zexit, the long name, zhello, zcrash, zbadcall, zalloc)"
+[ "$n" = 28 ] || [ "$n" = 29 ] && ok "twenty-one pauses and resumes with the null blob, then five programs (the kernel's 0 s line 26 times)" || no "the kernel's 'back' line $n times, not 28 (21 null sessions, zexit, the long name, zhello, zcrash, zbadcall, zalloc, the group member)"
 echo "$log" | grep -aq '^count=20 ok=20' && ok "the console's shell ran zine twenty times and went on" || no "the console's loop: $(echo "$log" | grep -a '^count=')"
 f1=$(echo "$log" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); f2=$(echo "$log" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 c1=$(echo "$log" | grep -a -m1 '^chip RAM free' | tr -dc 0-9); c2=$(echo "$log" | grep -a '^chip RAM free' | sed -n 2p | tr -dc 0-9)
@@ -35,6 +35,8 @@ echo "$log" | grep -aq '^zalloc-rc=0' && ok "zalloc: 1 MB fast and 256 KB chip f
 echo "$log" | grep -aq '^zscreen-rc=0' && ok "zscreen: an 8-plane screen from intuition, LoadRGB32's colours, CloseScreen" || no "zscreen: $(echo "$log" | grep -a 'zscreen' | tail -2)"
 f3=$(echo "$log" | grep -a '^fast RAM free' | tail -1 | tr -dc 0-9); c3=$(echo "$log" | grep -a '^chip RAM free' | tail -1 | tr -dc 0-9)
 [ "$f3" = "$f1" ] && [ "$c3" = "$c1" ] && ok "free memory after the real programs as before them" || no "free memory after the real programs: chip $c3 KB, fast $f3 KB (before: $c1, $f1)"
+echo "$log" | grep -aq '^zgroup1=1' && echo "$log" | grep -aq 'zine: not allowed: root and the members of the group zine' && ok "a user outside the group zine is refused" || no "zine group, outside: $(echo "$log" | grep -a 'zgroup1\|group zine' | tail -2)"
+echo "$log" | grep -aq '^zgroup2=7' && ok "after gpasswd -a user zine the user runs zine (set-user-id root, the group checked by zine)" || no "zine group, member: $(echo "$log" | grep -a 'zgroup2' | tail -2)"
 echo "$log" | grep -aq '^zine-null-done' || no "the script did not reach its end"
 echo "$log" | grep -aiE 'panic|exception|guru' && no "the kernel log has a panic or exception"
 exit $((1 - pass))

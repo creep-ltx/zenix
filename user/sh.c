@@ -402,11 +402,19 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             unsigned char s1, s2 = 0;
             if (sys_read(0, &s1, 1) != 1) continue;
             if (s1 == '[' || s1 == 'O') {
-                int num = 0;
+                int num = 0, mod = 0;               /* ESC [ 1 ; MOD X: Shift 2, Alt 3, Ctrl 5 (xterm's, as the console sends) */
                 for (;;) {
                     if (sys_read(0, &s2, 1) != 1) break;
                     if (s2 >= '0' && s2 <= '9') { num = num * 10 + (s2 - '0'); continue; }
+                    if (s2 == ';') { mod = num; num = 0; continue; }
                     break;
+                }
+                if (mod) { int t = num; num = mod; mod = t; }   /* the first number is the key's, the second the modifiers */
+                if ((mod == 3 || mod == 5) && (s2 == 'C' || s2 == 'D')) {  /* Ctrl or Alt with right/left: a word (bash's) */
+                    if (s2 == 'D') { while (pos > 0 && is_space(buf[pos - 1])) pos--; while (pos > 0 && !is_space(buf[pos - 1])) pos--; }
+                    else { while (pos < len && is_space(buf[pos])) pos++; while (pos < len && !is_space(buf[pos])) pos++; }
+                    redraw(prompt, plen, buf, len, pos, &scroll);
+                    continue;
                 }
                 if (s2 == 'A') c = 16;                         /* up = Ctrl-P */
                 else if (s2 == 'B') c = 14;                    /* down = Ctrl-N */

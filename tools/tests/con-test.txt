@@ -30,6 +30,8 @@ send echo q\xe2\x94\x80\xc3\x80\x08\x08z | hexdump\r
 wait (?m)^00000000 .*\n 20
 send echo ab\xc3\xa5\x1b[D\x1b[Dc\x05 | hexdump\r
 wait (?m)^00000000 .*\n 20
+send echo ab cd\x1b[1;5Dx\x1b[1;2C\x1b[1;3D\x1b[1;5C\x05 | hexdump\r
+wait (?m)^00000000 .*\n 20
 send termtest readline\r
 wait readline: 20
 sleep 1

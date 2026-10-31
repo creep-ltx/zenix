@@ -35,5 +35,17 @@ send zine /tests/zine/zscreen; echo zscreen-rc=$?\r
 wait zscreen-rc= 60
 send free\r
 wait (?m)^fast RAM free.*\n 20
+send su user\r
+wait $ 20
+send zine /tests/zine/zexit; echo zgroup1=$?\r
+wait zgroup1= 30
+send exit\r
+wait zenix:/# 20
+send gpasswd -a user zine\r
+wait zenix:/# 20
+send su user\r
+wait $ 20
+send zine /tests/zine/zexit; echo zgroup2=$?; exit\r
+wait zenix:/# 60
 send date; echo zine-null-done\r
 wait zine-null-done 20

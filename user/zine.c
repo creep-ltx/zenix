@@ -2,7 +2,7 @@
 /* zine PROGRAM [ARGS...]: run an AmigaOS program under ZINE, Zenix's own small AmigaOS (DESIGN D29,
  * docs/d29-zine.md section 7.1; docs/man/zine.txt). Checks the file, puts it into the in-memory volume, loads and
  * relocates /lib/zine/zine.blob, hands the machine over through SYS_zine and says how the program ended. */
-#include "libz.h"
+#include "pw.h"
 typedef unsigned short u16;
 typedef unsigned char u8;
 typedef int s32;
@@ -15,6 +15,30 @@ typedef int s32;
 static const char *name, *blobpath = BLOB;
 
 static int zine_sys(u32 op, void *a, u32 b) { return sys3(93, op, (u32)a, b); }
+
+/* zine is set-user-id root (owner answer 1, 2026-10-30: root and the group zine; the kernel has one group a process,
+ * so the membership is checked here, as sudo checks wheel). What it reads for the program, it reads only where the
+ * user who ran it may (root may all), so it shows nobody a file through a program's output */
+static u32 ruid, rgid;
+static int may_read(const struct ustat *st)
+{
+    if (ruid == 0)
+        return 1;
+    if (st->uid == ruid)
+        return (st->mode & 0400) != 0;
+    if (st->gid == rgid)
+        return (st->mode & 0040) != 0;
+    return (st->mode & 0004) != 0;
+}
+
+static int in_zine_group(void)
+{
+    struct pw me;
+    struct gr g;
+    if (pw_byuid(ruid, &me) || gr_byname("zine", &g))
+        return 0;
+    return me.gid == g.gid || gr_has(g.members, me.name);
+}
 
 static void die(const char *fmt, const char *arg)
 {
@@ -30,6 +54,10 @@ static u8 *slurp(const char *path, u32 *len, struct ustat *st)
     if (fd < 0)
         return 0;
     u8 *b = 0;
+    if (sys_fstat(fd, st) == 0 && !may_read(st)) {
+        sys_close(fd);
+        return 0;
+    }
     if (sys_fstat(fd, st) == 0 && (b = malloc(st->size ? st->size : 1))) {
         u32 got = 0;
         int n;
@@ -105,7 +133,9 @@ static const char *vecname(u32 v)
 
 int main(int argc, char **argv)
 {
-    if (argc > 3 && !strcmp(argv[1], "--blob")) {     /* the tests' other blobs (/tests/zine/null.blob) */
+    if (argc > 3 && !strcmp(argv[1], "--blob")) {     /* the tests' other blobs (/tests/zine/null.blob): root only */
+        if (sys_getuid() != 0)
+            die("zine: --blob is for root%s", "");
         blobpath = argv[2];
         argv += 2;
         argc -= 2;
@@ -114,6 +144,14 @@ int main(int argc, char **argv)
         dprintf(2, "usage: zine [--blob FILE] PROGRAM [ARGS...]\n");
         return 2;
     }
+    ruid = (u32)sys_getuid();
+    {
+        struct pw me;
+        rgid = pw_byuid(ruid, &me) ? 0xFFFFu : me.gid;
+    }
+    if (ruid != 0 && !in_zine_group())
+        die("zine: not allowed: root and the members of the group zine may (root can add: gpasswd -a %s zine)",
+            getenv("USER") ? getenv("USER") : "NAME");
     const char *path = argv[1];
     name = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
     struct ustat st;
@@ -144,16 +182,16 @@ int main(int argc, char **argv)
     if (!dl)
         strcpy(dir, ".");
     u32 nfiles = 0, bytes = 0;
-    int dfd = sys_open(dir, 0);
     struct udirent de;
     struct ustat fst;
+    int dfd = sys_stat(dir, &fst) == 0 && may_read(&fst) ? sys_open(dir, 0) : -1;
     char fp[320];
     if (dfd >= 0) {
         while (sys_readdir(dfd, &de) > 0) {
             if (de.name[0] == '.' || !strcmp(de.name, name))
                 continue;
             snprintf(fp, sizeof fp, "%s/%s", dir, de.name);
-            if (sys_stat(fp, &fst) == 0 && (fst.mode & S_IFMT) == S_IFREG)
+            if (sys_stat(fp, &fst) == 0 && (fst.mode & S_IFMT) == S_IFREG && may_read(&fst))
                 nfiles++, bytes += fst.size;
         }
         sys_close(dfd);
@@ -172,7 +210,7 @@ int main(int argc, char **argv)
             if (de.name[0] == '.' || !strcmp(de.name, name))
                 continue;
             snprintf(fp, sizeof fp, "%s/%s", dir, de.name);
-            if (sys_stat(fp, &fst) || (fst.mode & S_IFMT) != S_IFREG)
+            if (sys_stat(fp, &fst) || (fst.mode & S_IFMT) != S_IFREG || !may_read(&fst))
                 continue;
             int e = zv_add(vol, 0, de.name, 0, fst.mode, fst.mtime, fst.size, &data);
             if (e < 0) {
@@ -227,7 +265,7 @@ int main(int argc, char **argv)
     case 0:
         break;
     case -EPERM:
-        die("zine: not allowed (root, at the Amiga's own console)%s", "");
+        die("zine: not allowed here (only at the Amiga's own console)%s", "");
         break;
     case -EBUSY:
         die("zine: not now (another ZINE session, or an update %s)", "not yet confirmed");

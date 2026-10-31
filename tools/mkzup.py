@@ -176,10 +176,10 @@ def parse_manifest(text):
 
 
 # The standard packages (section 4 of the design note). Ownership and modes as tools/mkroot.sh gives them on the
-# images (root owns everything; su, sudo and passwd set-user-id root; /etc/passwd and /etc/group 644).
+# images (root owns everything; su, sudo, passwd and zine set-user-id root; /etc/passwd and /etc/group 644).
 BASE_PROGS = ["init", "login", "sh", "mount"]
 BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console", "hosts", "daemons"]   # /etc/autologin is the test images' own: never shipped
-SETUID = {"su", "sudo", "passwd"}
+SETUID = {"su", "sudo", "passwd", "zine"}
 LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), ("chown", "/bin/chgrp"),
          ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos"), ("ifconfig", "/bin/ifup"), ("ifconfig", "/bin/ifdown"),
          ("rz", "/bin/sz")]

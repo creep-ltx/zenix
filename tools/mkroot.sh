@@ -123,6 +123,7 @@ fakeroot sh -c '
     chown 1001:100 "$1/home/guest"
     chmod 1777 "$1/tmp"
     chmod 4755 "$1/bin/su" "$1/bin/sudo" "$1/bin/passwd"
+    [ ! -f "$1/bin/zine" ] || chmod 4755 "$1/bin/zine"     # root and the group zine (zine checks it)
     chmod 644 "$1/etc/passwd" "$1/etc/group" "$1/etc/svctab" "$1/etc/daemons"
     mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$2" -d "$1" -F "$3" "$4"
 ' sh "$T" "$INODES" "$TMPOUT" "$SIZE"

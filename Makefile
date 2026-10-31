@@ -858,9 +858,9 @@ $(BUILD)/%.zx: $(BUILD)/%.uelf tools/mkzexe.py tools/check-68020-60.sh Makefile
 ZINEH := kernel/zine.h $(wildcard user/zine/*.h)
 $(BUILD)/zc-%.uo: user/zine/%.c $(ZINEH) | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
-$(BUILD)/zine.uo: user/zine.c $(ZINEH) user/libz.h user/usys.h | $(BUILD)
+$(BUILD)/zine.uo: user/zine.c $(ZINEH) user/pw.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
-ZINECMD := $(BUILD)/zine.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-lvo.uo
+ZINECMD := $(BUILD)/zine.uo $(BUILD)/pw.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-lvo.uo
 $(BUILD)/zine.uelf: $(ZINECMD) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZINECMD) $(BUILD)/libz.uo $(LIBGCC) -o $@
 ZBLOBOBJS := $(BUILD)/zb-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo

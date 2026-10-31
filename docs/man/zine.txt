@@ -14,8 +14,12 @@ DESCRIPTION
     every Zenix program is paused where it stood while the Amiga program
     runs.
 
-    Only root may run zine, and only at the Amiga's own console (not
-    over ssh, telnet or the serial port's own login). It needs fast RAM.
+    Root and the members of the group zine may run it (root adds one
+    with gpasswd -a NAME zine), and only at the Amiga's own console
+    (not over ssh or telnet). zine is set-user-id root; it reads the
+    program and its folder only where the user who ran it may. A
+    member of zine can do anything to the machine while a program
+    runs, as root can. It needs fast RAM.
 
     ZINE is being built (DESIGN D29): the pause and the way back are
     tested; running real programs comes next.
