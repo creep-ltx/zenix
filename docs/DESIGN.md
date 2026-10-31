@@ -357,3 +357,8 @@ Written 2026-10-22; decisions updated and checked against the code 2026-10-23.
 like zfsd. No owners or modes on disk: mount options. Writes in the order data, FAT, directories, a freed chain zeroed
 only after its directory is on the disk; the boot sector never written; the dirty mark in `FAT[1]`; a volume not clean is
 read-only unless `-o force`. Details: `docs/d30-fat.md`.
+
+## D31. OFS and FFS (roadmap block 4; decided in the note, the owner delegated the details 2026-10-31; built on branch ffs)
+`/sbin/ffsd`, a file service per mount: AmigaDOS volumes `DOS\0`-`DOS\7`, read; `DOS\0`-`DOS\3` also written with `-o rw`, after a
+check of the whole volume. The root's bitmap flag is never cleared: the order new blocks, bitmap, changed extension blocks,
+changed headers leaves at worst lost blocks after a cut. Details: `docs/d31-ffs.md`.
