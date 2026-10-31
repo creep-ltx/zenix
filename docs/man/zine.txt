@@ -15,9 +15,10 @@ DESCRIPTION
     runs.
 
     Root and the members of the group zine may run it (root adds one
-    with gpasswd -a NAME zine), and only at the Amiga's own console
-    (not over ssh or telnet). zine is set-user-id root; it reads the
-    program and its folder only where the user who ran it may. A
+    with gpasswd -a NAME zine; it counts from their next login or su),
+    and only at the Amiga's own console (not over ssh or telnet). zine is
+    set-user-id root; it reads the program and its folder only where the
+    user who ran it may, with that user's groups. A
     member of zine can do anything to the machine while a program
     runs, as root can. It needs fast RAM.
 

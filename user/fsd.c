@@ -169,11 +169,11 @@ static int parent(const char *path, u32 cwd, struct inode *dir, char *name)
     return ext2_namei_parent(path, cwd, dir, name);
 }
 
-/* permission helpers: the caller is in ext2_uid/ext2_gid (set per request in handle) */
+/* permission helpers: the caller is in ext2_uid/ext2_gid/ext2_groups (set per request in handle) */
 static int deny(void) { ext2_denied = 1; return 0; }
 static int dir_may(const struct inode *dir)                /* add or remove entries: w and x */
 {
-    return !ext2_enforce || fsp_dir_modify(ext2_uid, ext2_gid, dir->mode, dir->uid, dir->gid) || deny();
+    return !ext2_enforce || fsp_dir_modify(ext2_uid, ext2_gid, ext2_ngroups, ext2_groups, dir->mode, dir->uid, dir->gid) || deny();
 }
 static int owner_only(const struct inode *in)
 {
@@ -273,7 +273,7 @@ static int handle1(struct umsg *m)
     case FS_CHMOD:
         if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
         if (!owner_only(&in)) return -EACCES;
-        return ext2_chmod(in.ino, fsp_chmod_mode(ext2_uid, ext2_gid, in.gid, m->a[2]));
+        return ext2_chmod(in.ino, fsp_chmod_mode(ext2_uid, ext2_gid, ext2_ngroups, ext2_groups, in.gid, m->a[2]));
     case FS_CHOWN:
         if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
         if (ext2_enforce && !fsp_is_root(ext2_uid)) { ext2_denied = 1; return -EACCES; }
@@ -281,7 +281,7 @@ static int handle1(struct umsg *m)
     case FS_UTIMES: {
         if ((r = ext2_namei((const char *)m->a[0], m->a[1], &in, 0))) return r;
         int given = m->a[2] != FS_UTIME_NOW;
-        if (ext2_enforce && !fsp_utimes_ok(ext2_uid, in.uid, given, fsp_access(ext2_uid, ext2_gid, in.mode, in.uid, in.gid, FSP_W)))
+        if (ext2_enforce && !fsp_utimes_ok(ext2_uid, in.uid, given, fsp_access(ext2_uid, ext2_gid, ext2_ngroups, ext2_groups, in.mode, in.uid, in.gid, FSP_W)))
             { deny(); return -EACCES; }
         return ext2_utimes(in.ino, given ? m->a[2] : fs_time());
     }
@@ -416,6 +416,12 @@ static int handle(struct umsg *m)
 {
     if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -EACCES; /* raw IPC from a user: inode numbers would bypass every check */
     ext2_uid = m->uid; ext2_gid = m->gid; ext2_umask = m->umask;
+    ext2_ngroups = 0;
+    if (m->kflags & UMSG_GROUPS) {                  /* the caller's supplementary groups follow the message */
+        const struct umsg_groups *g = UMSG_GROUPS_AT(m);
+        ext2_ngroups = g->n < NGROUPS ? g->n : NGROUPS;
+        for (u32 i = 0; i < ext2_ngroups; i++) ext2_groups[i] = g->g[i];
+    }
     ext2_enforce = 1; ext2_denied = 0;
     ext2_stoplinks = (m->kflags & UMSG_LINKS) != 0;
     int r;

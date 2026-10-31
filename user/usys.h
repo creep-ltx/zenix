@@ -146,6 +146,13 @@ static inline int sys_setgid(u32 id) { return sys3(64, id, 0, 0); }
 static inline int sys_umask(u32 mask) { return sys3(65, mask, 0, 0); }
 static inline int sys_chown(const char *p, u32 uid, u32 gid) { return sys3(66, (u32)p, uid, gid); }
 static inline int sys_geteuid(void) { return sys3(67, 0, 0, 0); }
+/* supplementary groups (SYS_groups 94, kernel/kernel.h): at most NGROUPS ids besides the gid, inherited, kept across
+ * set-user-id. get: max 0 counts them, a smaller room than the list is -EINVAL; set: root only (login, su, sudo) */
+#ifndef NGROUPS
+#define NGROUPS 8         /* kernel/fsproto.h */
+#endif
+static inline int sys_getgroups(unsigned short *g, u32 max) { return sys3(94, 0, (u32)g, max); }
+static inline int sys_setgroups(const unsigned short *g, u32 n) { return sys3(94, 1, (u32)g, n); }
 struct umountreq { const char *path, *port, *dev, *type; };
 struct umountinfo { char path[48], port[16], dev[16], type[8]; };
 static inline int sys_mount(const struct umountreq *r) { return sys3(69, (u32)r, 0, 0); }

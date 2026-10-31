@@ -52,8 +52,9 @@ Zenix is multi-user from the start of the terminal phase, as a Unix expects, wit
 security boundary** - any program can read or write any memory and touch the hardware. Users, groups and permissions
 therefore give accounting, separation of home directories and protection against honest mistakes, not protection
 against a program written to cheat (the same trust level as AmigaOS). The docs must say so.
-- A user id and group id (and supplementary groups later) on every process, inherited by children; calls getuid,
-  geteuid, getgid, setuid (root, or back to the real id), setgid, umask.
+- A user id and group id (and up to 8 supplementary groups since 2026-10-31, set by login, su and sudo from
+  /etc/group) on every process, inherited by children; calls getuid, geteuid, getgid, setuid (root, or back to the
+  real id), setgid, groups, umask.
 - The kernel passes the caller's ids to the filesystem server in every request; the server checks owner/group/other
   r/w/x on lookup, open, create, unlink, rename, chdir and exec; root bypasses. New files get the caller's ids and
   mode & ~umask. ext2 already stores uid, gid and mode.

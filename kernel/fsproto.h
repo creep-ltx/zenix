@@ -75,6 +75,16 @@ struct fsinfo { char dev[16]; char type[8]; };
  * a bounded FS_SYNC (a0 1) ignores the bit. A server's own calls (fsd's to diskd) may carry it: diskd ignores it.
  * Its server's evwait sees POLLPRI on the port (kernel.h) when a message sent to it (queued or held) is marked. */
 #define UMSG_CANCEL  4
+/* Supplementary groups (owner 2026-10-31; frozen, append-only): UMSG_GROUPS, a kflags bit set by the kernel only (its
+ * requests for a system call, vfs.c): a struct umsg_groups follows the message in memory (UMSG_GROUPS_AT(m), right
+ * after struct umsg): n (0 .. NGROUPS) and the caller's supplementary group ids (SYS_groups). Each of them counts as the
+ * caller's group as gid does, in every permission check (fsperm.h rule 1, and chmod's set-group-id rule 5). A
+ * service's load (D11, read as root) carries n 0. Without the bit (a root program's own SYS_call, a kernel before it)
+ * only gid counts. The ids are the kernel's, but a server still clamps n to NGROUPS. */
+#define UMSG_GROUPS  16
+#define NGROUPS      8          /* supplementary groups a process may have (SYS_groups), besides its gid */
+struct umsg_groups { unsigned short n, g[NGROUPS]; };
+#define UMSG_GROUPS_AT(m) ((const struct umsg_groups *)((m) + 1))
 #define FS_LINKED    1024       /* the answer -(FS_LINKED + bits); -1024 .. -1027 used, -1024 .. -1279 reserved */
 #define FS_LINKED_END 1279      /* the reserved range's end: no errno goes there (kernel/errno.h) */
 #define FSL_A1       1          /* the path in a[1] was rewritten (FS_RENAME, FS_LINK; always FS_SYMLINK), else a[0] */

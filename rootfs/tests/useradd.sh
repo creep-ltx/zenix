@@ -43,6 +43,19 @@ gpasswd -d guest wheel; echo gp-del-again=$?
 echo 'gpasswd -a guest wheel; echo gp-user=$?' | su user
 userdel -r fay; echo del-fay=$?
 grep '^wheel:' /etc/group
+# supplementary groups (2026-10-31): gail's own group is users, wheel and zine are her second and third; su (as login
+# and sudo) gives a process every group /etc/group lists the user in, and each one counts for the files
+useradd -G wheel,zine gail; echo add-gail=$?
+mkdir /tmp/gt; echo w > /tmp/gt/w; chgrp wheel /tmp/gt/w; chmod 640 /tmp/gt/w
+echo z > /tmp/gt/z; chgrp zine /tmp/gt/z; chmod 660 /tmp/gt/z; echo r > /tmp/gt/r; chmod 640 /tmp/gt/r
+echo 'id | cut -d" " -f3; cat /tmp/gt/w; echo z2 >> /tmp/gt/z; echo zw=$?; cat /tmp/gt/r; echo r=$?' | su gail
+cat /tmp/gt/z
+echo 'sudo id | cut -d" " -f1,2; echo sudo-gail=$?' | su gail
+id gail | cut -d" " -f3
+echo 'id | cut -d" " -f3' | su guest
+gpasswd -d gail wheel > /dev/null; echo 'cat /tmp/gt/w; echo w-after=$?' | su gail
+userdel gail; echo del-gail=$?
+rm -r /tmp/gt
 # sh with a pipe as its input (audit 2026-10-26 F4): no prompt, so a piped su's output is whole lines; -i gives the
 # prompt (and the line editor) all the same
 echo 'echo via-pipe' | sh > /tmp/ua.sh1 2>&1; echo "pipe-out=$(cat /tmp/ua.sh1)"

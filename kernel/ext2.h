@@ -69,6 +69,8 @@ int ext2_chmod(u32 ino, u32 mode);
 int ext2_chown(u32 ino, u32 uid, u32 gid);
 int ext2_access(const struct inode *in, int want);
 extern u32 ext2_uid, ext2_gid, ext2_umask;
+extern u32 ext2_ngroups;                /* the caller's supplementary groups (fsproto.h UMSG_GROUPS) */
+extern u16 ext2_groups[];
 extern int ext2_enforce, ext2_denied;
 int ext2_utimes(u32 ino, u32 t);
 int ext2_hardlink(struct inode *dir, const char *name, u32 ino);

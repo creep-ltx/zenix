@@ -88,12 +88,9 @@ static void stamp_forget(u32 uid)
     sys_unlink(path);
 }
 
-static int in_wheel(const struct pw *me)
-{
-    struct gr g;
-    if (gr_byname("wheel", &g)) return 0;
-    return me->gid == g.gid || gr_has(g.members, me->name);
-}
+/* the caller's own groups, as the kernel holds them (inherited: sudo is set-user-id root, which keeps them): a
+ * gpasswd -a counts from the next login (or su), as on Unix */
+static int in_wheel(void) { return in_group_named("wheel"); }
 
 int main(int argc, char **argv)
 {
@@ -113,7 +110,7 @@ int main(int argc, char **argv)
     if (pw_byname(target, &p)) { dprintf(2, "sudo: %s: no such user\n", target); return 1; }
     if (ruid != 0) {
         if (pw_byuid(ruid, &me)) { dprintf(2, "sudo: user %u is not in /etc/passwd\n", ruid); return 1; }
-        if (!in_wheel(&me)) { dprintf(2, "sudo: %s is not in the group wheel (root can add: gpasswd -a %s wheel)\n", me.name, me.name); return 1; }
+        if (!in_wheel()) { dprintf(2, "sudo: %s is not in the group wheel (root can add: gpasswd -a %s wheel)\n", me.name, me.name); return 1; }
         if (me.hash[0] && !stamp_fresh(ruid)) {
             int ok = 0;
             for (int t = 0; t < 3 && !ok; t++) {
@@ -137,6 +134,7 @@ int main(int argc, char **argv)
     struct ustat st;
     if (sys_stat(cmd, &st) < 0) { dprintf(2, "sudo: %s: command not found\n", shell ? cmd : argv[i]); return 127; }
     sys_setgid(p.gid);
+    pw_initgroups("sudo", &p);          /* the target's groups, not the caller's */
     if (sys_setuid(p.uid) < 0) { dprintf(2, "sudo: not permitted (is sudo set-user-id root?)\n"); return 1; }
     /* the target's environment, not the caller's (see su.c) */
     setenv("USER", p.name, 1); setenv("LOGNAME", p.name, 1); setenv("HOME", p.home, 1); setenv("SHELL", p.shell, 1);

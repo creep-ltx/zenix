@@ -91,8 +91,9 @@ non-privileged ports" box (or nothing, as AmiNFSv3 found on the owner's NAS: che
 ### 3.3 Credentials: AUTH_SYS
 
 Every request carries AUTH_SYS (RFC 5531): the machine name `zenix` (servers only log it), the uid and gid **of the
-program the request is for** (the kernel's stamp in the message) and its supplementary groups (from `/etc/group`, read
-at nfscd's start: a `gpasswd` change counts from the next mount; at most 16). Credentials are per request, not per
+program the request is for** (the kernel's stamp in the message) and its supplementary groups (since 2026-10-31 the
+kernel's list in the request, `UMSG_GROUPS`, at most 8; for a root program's own request without it, from
+`/etc/group`, read at nfscd's start: a `gpasswd` change counts from the next mount; at most 16). Credentials are per request, not per
 open: a program that drops its rights after opening a file reads it with the new ones (as Linux). Root's own requests
 go as uid 0; the NAS decides what root may do ("squash"). No Kerberos (`RPCSEC_GSS`): it needs a key server, and on a
 machine without an MMU a ticket in memory is readable by any program anyway (section 10).

@@ -585,6 +585,10 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
     p->uid = parent ? parent->uid : 0;
     p->ruid = parent ? parent->ruid : 0;
     p->gid = parent ? parent->gid : 0;
+    if (parent) {                                   /* the supplementary groups too (kept by set-user-id) */
+        p->ngroups = parent->ngroups; p->grp_id = parent->grp_id;
+        for (int i = 0; i < NGROUPS; i++) p->groups[i] = parent->groups[i];
+    }
     p->umask = parent ? parent->umask : 022;
     p->nice = parent ? parent->nice : 0;            /* a child inherits the base priority (not a server's boost) */
     p->pgid = parent ? parent->pgid : pid;          /* D16 rule 7: no parent (boot, the servers): its own group */

@@ -247,6 +247,46 @@ grep -q "^lstat -> 0 .* mode 120777" $T/out && check "O_EXCL left the dangling l
 tail -3 $T/out | grep -q "^stat -> 0 ino" && check "raw messages from root are served" ok || { check "raw messages from root are served" bad; cat $T/out; }
 clean $T/perm.img && check "host e2fsck -fn clean after the permission test" ok || { check "e2fsck after the permission test" bad; cat $T/e2fsck.log; }
 
+# ---- supplementary groups (UMSG_GROUPS, 2026-10-31): every group the caller is in counts, as its gid does ----
+cp $T/plain.img $T/grp.img
+cat > $T/grp.txt <<'EOF'
+mount
+mkdir /g
+chmod /g 777
+open /g/a wc
+chown /g/a 0 10
+chmod /g/a 640
+open /g/b wc
+chown /g/b 0 20
+chmod /g/b 660
+open /g/c wc
+chown /g/c 0 30
+chmod /g/c 640
+mkdir /g/d
+chown /g/d 0 20
+chmod /g/d 770
+open /g/own wc
+chown /g/own 1000 20
+as 1000 100
+groups 10,20
+open /g/a r
+open /g/a w
+open /g/b rw
+open /g/c r
+open /g/d/new wc
+chmod /g/own 2755
+stat /g/own
+groups
+open /g/a r
+open /g/b rw
+open /g/d/new2 wc
+EOF
+fsd $T/grp.img $T/grp.txt $T/out
+o=$(grep '^open -> ' $T/out | sed -n '5,$p' | awk '{print ($3 > 0) ? "ok" : $3}' | tr '\n' ' ')
+[ "$o" = "ok -13 ok -13 ok -13 -13 -13 " ] && check "supplementary groups: read a 640 file of one group, write a 660 file of another, create in a 770 directory of one; none of it without them" ok || { check "supplementary groups ($o)" bad; cat $T/out; }
+grep -q '^stat -> 0 .* mode 102755 ' $T/out && check "chmod keeps set-group-id for a file of one of the caller's supplementary groups" ok || { check "chmod set-group-id with a supplementary group" bad; cat $T/out; }
+clean $T/grp.img && check "host e2fsck -fn clean after the groups test" ok || { check "e2fsck after the groups test" bad; cat $T/e2fsck.log; }
+
 # ---- C7: fsck.ext2 against host e2fsck ----
 # repair: fsck.ext2 -y until it says clean (at most 3 runs), then e2fsck -fn must agree
 repair() {

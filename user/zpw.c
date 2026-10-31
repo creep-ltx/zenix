@@ -103,6 +103,38 @@ static int gr_find(const char *name, int has_gid, u32 gid, struct gr *out)
     return -1;
 }
 int gr_byname(const char *name, struct gr *out) { return gr_find(name, 0, 0, out); }
+
+/* the groups of user NAME (as initgroups and getgrouplist): gid first, then every group of /etc/group whose member
+ * list names NAME, each once; at most max ids into out. The count of all of them (more than max: the list is cut) */
+int gr_list(const char *name, u32 gid, unsigned short *out, int max)
+{
+    int n = 0;
+    if (max > 0) out[0] = (unsigned short)gid;
+    n = 1;
+    char *file = slurp("/etc/group");
+    u32 nl = strlen(name);
+    for (char *l = file; l && *l; ) {
+        char *e = strchr(l, '\n'); if (e) *e = 0;
+        char *f[5];
+        u32 g;
+        if (*l && *l != '#' && fields(l, f, 4) == 4 && idnum(f[2], &g) && g != gid) {
+            for (const char *m = f[3]; *m; ) {
+                const char *c = m;
+                while (*c && *c != ',') c++;
+                if ((u32)(c - m) == nl && !memcmp(m, name, nl)) {
+                    int dup = 0;
+                    for (int i = 1; i < n && i < max; i++) if (out[i] == g) dup = 1;
+                    if (!dup) { if (n < max) out[n] = (unsigned short)g; n++; }
+                    break;
+                }
+                m = *c ? c + 1 : c;
+            }
+        }
+        if (!e) break;
+        l = e + 1;
+    }
+    return n;
+}
 int gr_bygid(u32 gid, struct gr *out) { return gr_find(0, 1, gid, out); }
 
 /* prompt and read a line without echoing it (for passwords); 0 ok, -1 on ^C or end of input */

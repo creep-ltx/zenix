@@ -15,6 +15,30 @@ const char *pw_name(u32 uid, char *buf)
     (void)buf;
     return cache[i].name;
 }
+int pw_initgroups(const char *who, const struct pw *p)
+{
+    unsigned short g[NGROUPS];
+    int n = gr_list(p->name, p->gid, g, NGROUPS);
+    if (n > NGROUPS) {
+        dprintf(2, "%s: %s is in %d groups; only the first %d count\n", who, p->name, n, NGROUPS);
+        n = NGROUPS;
+    }
+    return sys_setgroups(g, (u32)n);
+}
+int in_group(u32 gid)
+{
+    unsigned short g[NGROUPS];
+    if ((u32)sys_getgid() == gid) return 1;
+    int n = sys_getgroups(g, NGROUPS);
+    for (int i = 0; i < n; i++) if (g[i] == gid) return 1;
+    return 0;
+}
+int in_group_named(const char *name)
+{
+    struct gr g;
+    return gr_byname(name, &g) == 0 && in_group(g.gid);
+}
+
 const char *gr_name(u32 gid, char *buf)
 {
     static struct { u32 gid; char name[32]; int ok; } cache[4]; static int next;

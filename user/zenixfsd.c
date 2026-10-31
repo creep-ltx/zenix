@@ -25,6 +25,8 @@
 static struct zenixfs *fs;
 static struct zenixfs_dev zdev;
 static unsigned cuid, cgid, cumask;               /* the caller of the request being handled */
+static unsigned cng;                              /* and its supplementary groups (UMSG_GROUPS) */
+static unsigned short cgs[NGROUPS];
 static int denied, quitting, dirty;
 static u32 dirty_since;
 static char devname[16];
@@ -32,7 +34,7 @@ static char devname[16];
 /* ---- permissions (kernel/fsperm.h) ---- */
 static int access_ok(const struct zenixfs_inode *in, int want)       /* want: FSP_R, FSP_W, FSP_X */
 {
-    if (fsp_access(cuid, cgid, in->mode, in->uid, in->gid, want)) return 1;
+    if (fsp_access(cuid, cgid, cng, cgs, in->mode, in->uid, in->gid, want)) return 1;
     denied = 1;
     return 0;
 }
@@ -126,7 +128,7 @@ static int dir_may(uint32_t dir)                  /* add or remove entries: w an
 {
     struct zenixfs_inode d;
     if (zenixfs_getattr(fs, dir, &d)) return 0;
-    if (fsp_dir_modify(cuid, cgid, d.mode, d.uid, d.gid)) return 1;
+    if (fsp_dir_modify(cuid, cgid, cng, cgs, d.mode, d.uid, d.gid)) return 1;
     denied = 1;
     return 0;
 }
@@ -302,14 +304,14 @@ static int handle1(struct umsg *m)
     case FS_CHMOD: {
         if ((r = namei(m->a[1], (const char *)m->a[0], 1, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
         if (!owner_only(&in)) return -EACCES;
-        in.mode = (in.mode & ZENIXFS_S_IFMT) | fsp_chmod_mode(cuid, cgid, in.gid, m->a[2]);
+        in.mode = (in.mode & ZENIXFS_S_IFMT) | fsp_chmod_mode(cuid, cgid, cng, cgs, in.gid, m->a[2]);
         touched();
         return zenixfs_setattr(fs, ino, &in);
     }
     case FS_UTIMES: {
         if ((r = namei(m->a[1], (const char *)m->a[0], 1, 0, &ino)) || (r = zenixfs_getattr(fs, ino, &in))) return r;
         int given = m->a[2] != FS_UTIME_NOW;           /* a given time: the owner or root; "now": also anyone who may write */
-        if (!fsp_utimes_ok(cuid, in.uid, given, fsp_access(cuid, cgid, in.mode, in.uid, in.gid, FSP_W))) { denied = 1; return -EACCES; }
+        if (!fsp_utimes_ok(cuid, in.uid, given, fsp_access(cuid, cgid, cng, cgs, in.mode, in.uid, in.gid, FSP_W))) { denied = 1; return -EACCES; }
         in.mtime = given ? m->a[2] : (u32)sys_time();
         touched();
         return zenixfs_setattr(fs, ino, &in);
@@ -409,6 +411,12 @@ static int handle(struct umsg *m)
 {
     if (!(m->kflags & UMSG_KERNEL) && m->uid != 0) return -EACCES; /* raw IPC from a user: inode numbers would bypass every check */
     cuid = m->uid; cgid = m->gid; cumask = m->umask;
+    cng = 0;
+    if (m->kflags & UMSG_GROUPS) {                  /* the caller's supplementary groups follow the message */
+        const struct umsg_groups *g = UMSG_GROUPS_AT(m);
+        cng = g->n < NGROUPS ? g->n : NGROUPS;
+        for (unsigned i = 0; i < cng; i++) cgs[i] = g->g[i];
+    }
     denied = 0;
     stoplinks = (m->kflags & UMSG_LINKS) != 0;
     zenixfs_set_time(fs, sys_time());

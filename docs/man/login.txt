@@ -13,7 +13,10 @@ DESCRIPTION
     login asks for a user name (shown as it is typed, with the console's
     usual line editing) and a password (typing is not echoed), checks them
     against /etc/passwd, sets USER, LOGNAME, HOME, SHELL and PATH, goes to
-    the home directory and runs the user's shell as that user.
+    the home directory and runs the user's shell as that user, with the
+    user's groups: the main group from /etc/passwd and every group whose
+    member list in /etc/group names the user (at most 8; more are said and
+    left out).
 
     Started by init (--init), login steps aside once the shell runs: it
     ends and hands the shell to init, so a session keeps no login process

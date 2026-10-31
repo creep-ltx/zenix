@@ -43,7 +43,8 @@ NOTES
     or _. The home, shell and comment may not contain ':' or a newline and
     are at most 63, 31 and 47 characters. Without -G the new user is not added
     to any group's member list in /etc/group (the main group is in
-    /etc/passwd); gpasswd(8) changes the lists later.
+    /etc/passwd); gpasswd(8) changes the lists later. login, su and sudo
+    give a user every group whose list names them, at most 8.
     An existing home directory is left as it is. /etc/passwd is read whole,
     at most 64 KB. There is no /etc/skel: the home starts empty.
 

@@ -552,13 +552,15 @@ int ext2_readlink(const struct inode *in, char *buf, u32 max)
 /* Who is asking. The filesystem server sets these for each request and turns enforcement on; mkfs and fsck leave
  * it off. Root passes every check except "execute" on a file that has no x bit at all. */
 u32 ext2_uid, ext2_gid, ext2_umask = 022;
+u32 ext2_ngroups;                       /* and its supplementary groups (UMSG_GROUPS, fsproto.h) */
+u16 ext2_groups[NGROUPS];
 int ext2_enforce, ext2_denied;          /* ext2_denied: the last failure was a permission failure */
 
 int ext2_access(const struct inode *in, int want)       /* want: FSP_R, FSP_W, FSP_X; the rules are in fsperm.h */
 {
     if (!ext2_enforce)
         return 1;
-    int ok = fsp_access(ext2_uid, ext2_gid, in->mode, in->uid, in->gid, want);
+    int ok = fsp_access(ext2_uid, ext2_gid, ext2_ngroups, ext2_groups, in->mode, in->uid, in->gid, want);
     if (!ok)
         ext2_denied = 1;
     return ok;
