@@ -270,10 +270,26 @@ int wsb_os_spawn(const char *const *argv, int in, int out, int err)
     char prog[4200];
     struct stat s;
     snprintf(prog, sizeof prog, "%s", stat(hp(argv[0]), &s) ? argv[0] : hp(argv[0]));
+    /* A suite started in the background (nohup ... &, a script's job) ignores SIGINT and SIGQUIT, and a child inherits
+     * that until it resets them: a FREE that comes before the reset (one a moment after RUN, as wasabi-check sends it)
+     * was dropped, and the command ended by FREE's SIGKILL 3 s later (EXIT 137, not 130). So both are blocked across
+     * the fork: a signal sent meanwhile stays pending (Linux never drops a blocked signal as ignored) and is acted on
+     * when the child, its handlers back to the default, unblocks them before execve. */
+    sigset_t hold, was;
+    sigemptyset(&hold);
+    sigaddset(&hold, SIGINT);
+    sigaddset(&hold, SIGQUIT);
+    sigprocmask(SIG_BLOCK, &hold, &was);
     int pid = fork();
-    if (pid < 0)
-        return -errno;
+    if (pid < 0) {
+        int e = errno;
+        sigprocmask(SIG_SETMASK, &was, 0);
+        return -e;
+    }
     if (!pid) {
+        signal(SIGINT, SIG_DFL);           /* the commands must not inherit the suite's ignored SIGINT and SIGQUIT */
+        signal(SIGQUIT, SIG_DFL);          /* (FREE's EXIT 130 check) */
+        sigprocmask(SIG_SETMASK, &was, 0);
         setpgid(0, 0);
         dup2(in, 0);
         dup2(out, 1);
@@ -283,12 +299,11 @@ int wsb_os_spawn(const char *const *argv, int in, int out, int err)
         if (chdir(root))
             _exit(127);
         signal(SIGPIPE, SIG_DFL);
-        signal(SIGINT, SIG_DFL);           /* a suite started in the background (nohup ... &) ignores SIGINT: */
-        signal(SIGQUIT, SIG_DFL);          /* the commands must not inherit that (FREE's EXIT 130 check) */
         execve(prog, (char *const *)argv, (char *const *)env);
         _exit(127);
     }
     setpgid(pid, pid);
+    sigprocmask(SIG_SETMASK, &was, 0);
     for (int i = 0; i < NKIDS; i++)
         if (!kids[i].pid) {
             const char *b = strrchr(argv[0], '/');
