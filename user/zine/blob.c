@@ -351,6 +351,7 @@ void zb_stop(u32 how, u32 why)
 
 /* any exception reaching ZINE's vectors (9.1): the vector, the PC and the access address from the CPU's frame (its
  * format: 68020/030 A and B, 68040 7, 68060 4, address errors 2) */
+void zb_serial_hex(char tag, const u32 *v, int n);
 void zb_crash(u32 *rb) __attribute__((noreturn));
 void zb_crash(u32 *rb)
 {
@@ -363,7 +364,47 @@ void zb_crash(u32 *rb)
     b->addr = fmt == 0xA || fmt == 0xB ? *(u32 *)(fr + 16) : fmt == 7 ? *(u32 *)(fr + 20) :
               fmt == 4 || fmt == 2 ? *(u32 *)(fr + 8) : 0;
     zr_how = ZH_CRASH;
+    extern u32 zb_tracing;
+    if (zb_tracing) {                   /* the trace build: d0-d7/a0-a6, the SR, the user stack and 8 longs on it */
+        u32 usp;
+        __asm__ volatile("move.l %%usp,%0" : "=a"(usp));
+        u32 v[24];
+        for (int i = 0; i < 15; i++)
+            v[i] = rb[i];
+        v[15] = *(u16 *)fr;
+        v[16] = usp;
+        for (int i = 0; i < 7; i++)
+            v[17 + i] = usp >= 0x1000 ? ((u32 *)usp)[i] : 0;
+        zb_serial_hex('R', v, 24);
+        for (int i = 17; i < 21; i++)   /* the code before stacked addresses that may be returns */
+            if (v[i] >= 0x1000 && !(v[i] & 1) && v[i] < 0x80000000u)
+                zb_serial_hex('C', (const u32 *)(v[i] - 32), 12);
+    }
     zb_goback();
+}
+
+/* the trace build: tag and n longs in hex on the serial port */
+void zb_serial_hex(char tag, const u32 *v, int n)
+{
+    static const char hx[] = "0123456789abcdef";
+    for (int i = -1; i <= n; i++) {
+        char t[10];
+        int m = 0;
+        if (i < 0)
+            t[m++] = tag;
+        else if (i == n)
+            t[m++] = '\n';
+        else {
+            t[m++] = ' ';
+            for (int k = 0; k < 8; k++)
+                t[m++] = hx[v[i] >> (28 - 4 * k) & 15];
+        }
+        for (int k = 0; k < m; k++) {
+            while (!(CUSTOM(0x018) & 0x2000))
+                ;
+            CUSTOM(0x030) = (u16)(0x100 | (u8)t[k]);
+        }
+    }
 }
 
 /* the way back, path A (9.1 steps 1, 4-6; the sums of step 3 come with build step 5; the MMU and the 040/060 data

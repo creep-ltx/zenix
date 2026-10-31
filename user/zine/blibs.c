@@ -1585,6 +1585,10 @@ void zb_libs_init(void)
         IV(n)->code = (u32)zx_chain;
         IV(n)->node = &chainint[n].node;
     }
+    /* the blitter's vector holds GfxBase as its data, as graphics' own handler has it there: take-over code reads
+     * GfxBase from ExecBase->IntVects[INTB_BLIT].iv_Data instead of opening the library (no handler: its interrupt
+     * stays off until a program sets one) */
+    IV(6)->data = Z.lib[1];
     /* the memory lists (4.1, 4.2): one MemHeader a region, its chunks exactly what the plan gives */
     for (u32 r = 0; r < 8; r++) {
         struct zmh *h = 0;
