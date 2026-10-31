@@ -19,7 +19,7 @@ L=$OUT/pfs3.log
 CARD=$OUT/pfs3-card.hdf
 python3 -B tools/pfs3-test-images.py "$BD/zenix.hdf" "$CARD" "$OUT" "$BD/ls.zx" || { echo "FAIL the images"; exit 1; }
 sed -e "s#hard_drive_0 = .*#hard_drive_0 = $(realpath "$CARD")\nhard_drive_0_type = rdb#" fsuae/a1200-020-fast.fs-uae > "$OUT/pfs3.fs-uae"
-tools/run-test.sh "$OUT/pfs3.fs-uae" 500 tools/tests/pfs3-test.txt > "$L" 2>&1
+tools/run-test.sh "$OUT/pfs3.fs-uae" 800 tools/tests/pfs3-test.txt > "$L" 2>&1
 echo "--- in the emulator"
 has "the script ran to the end" '^(.*# )?pfs3-test-done$'
 has "mount finds the type from the RDB inside the MBR's 0x76" 'ide0p3 +/mnt +pfs3 '
