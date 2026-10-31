@@ -16,29 +16,23 @@ static const char *name, *blobpath = BLOB;
 
 static int zine_sys(u32 op, void *a, u32 b) { return sys3(93, op, (u32)a, b); }
 
-/* zine is set-user-id root (owner answer 1, 2026-10-30: root and the group zine; the kernel has one group a process,
- * so the membership is checked here, as sudo checks wheel). What it reads for the program, it reads only where the
- * user who ran it may (root may all), so it shows nobody a file through a program's output */
-static u32 ruid, rgid;
+/* zine is set-user-id root (owner answer 1, 2026-10-30: root and the group zine). The membership is the caller's
+ * groups as the kernel holds them (its gid and supplementary groups, kept across set-user-id), as sudo checks wheel.
+ * What it reads for the program, it reads only where the user who ran it may (root may all), with the same groups, so
+ * it shows nobody a file through a program's output */
+static u32 ruid;
 static int may_read(const struct ustat *st)
 {
     if (ruid == 0)
         return 1;
     if (st->uid == ruid)
         return (st->mode & 0400) != 0;
-    if (st->gid == rgid)
+    if (in_group(st->gid))
         return (st->mode & 0040) != 0;
     return (st->mode & 0004) != 0;
 }
 
-static int in_zine_group(void)
-{
-    struct pw me;
-    struct gr g;
-    if (pw_byuid(ruid, &me) || gr_byname("zine", &g))
-        return 0;
-    return me.gid == g.gid || gr_has(g.members, me.name);
-}
+static int in_zine_group(void) { return in_group_named("zine"); }
 
 static void die(const char *fmt, const char *arg)
 {
@@ -145,10 +139,6 @@ int main(int argc, char **argv)
         return 2;
     }
     ruid = (u32)sys_getuid();
-    {
-        struct pw me;
-        rgid = pw_byuid(ruid, &me) ? 0xFFFFu : me.gid;
-    }
     if (ruid != 0 && !in_zine_group())
         die("zine: not allowed: root and the members of the group zine may (root can add: gpasswd -a %s zine)",
             getenv("USER") ? getenv("USER") : "NAME");

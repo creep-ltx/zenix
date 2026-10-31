@@ -11,6 +11,8 @@
 # went from 716 to 712 KB for it (Makefile).
 # 2026-10-30 (the allocator, docs/d27-c-library.md "The allocator"): NREG 8 -> 16, proc bss 15,573 -> 17,621 (8 more
 # regions of 8 bytes in each of the 32 process slots).
+# 2026-10-31 (supplementary groups, SYS_groups): proc bss 18,100 -> 18,400 (22 bytes in each of the 32 slots: 8 group
+# ids, their count and the list's number), syscall 9,950 -> 10,150 (the call itself).
 start     3900   8192
 main      5950   1100
 serial    5950   6500
@@ -23,8 +25,8 @@ audio      560     32
 a3000     2400    100
 blk        460     16
 rtc       1550      0
-proc      9100  18100
-syscall   9950      0
+proc      9100  18400
+syscall  10150      0
 vfs      11150   1600
 tty       2960     64
 gfx       8000   2320

@@ -197,6 +197,13 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   (checked on the kernel's own copy; the old environment kept); a block of 0 bytes still empties it. An addition only:
   every caller in the tree ends its block with a 0, and before, such a block was taken and every child's `strlen` ran
   past it.
+- **Supplementary groups (owner 2026-10-31, branch groups):** `SYS_groups` 94 with `GROUPS_GET` 0 (a2 a buffer of
+  16-bit ids, a3 its room; 0 counts; a smaller room than the list -EINVAL) and `GROUPS_SET` 1 (a2 the ids, a3 the count,
+  at most `NGROUPS`; root only, -EPERM); `NGROUPS` 8 (it may only grow); the list inherited on spawn and kept by
+  setuid, setgid and set-user-id programs. `UMSG_GROUPS` 16 in `struct umsg`'s kflags, set by the kernel only, and
+  `struct umsg_groups { u16 n, g[NGROUPS]; }` right after `struct umsg` in memory (`UMSG_GROUPS_AT`); `struct umsg`
+  itself is unchanged, so a program's own `SYS_call` and older servers are as before. `id`'s `groups=` field (after
+  `euid=`), Linux's form.
 - Not on the list: the kernel's internal file kinds. libz is linked into each program, so it needs no rule of its
   own.
 

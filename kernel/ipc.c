@@ -253,6 +253,11 @@ static long call(int port, struct umsg *m, u16 kflags, int ns)
     m->uid = current->svc_depth ? 0 : current->uid; m->gid = current->svc_depth ? 0 : current->gid;
     m->umask = current->umask;
     m->kflags = kflags;                         /* a user's SYS_call can never claim to be the kernel */
+    if (kflags & UMSG_GROUPS) {                 /* the kernel's own request: the caller's groups follow m (fsproto.h) */
+        struct umsg_groups *g = (struct umsg_groups *)(m + 1);
+        g->n = current->svc_depth ? 0 : current->ngroups;
+        for (int i = 0; i < g->n; i++) g->g[i] = current->groups[i];
+    }
     if (current->killed && !current->exiting && ns != SVC_NS_CLOSE)
         m->kflags |= UMSG_CANCEL;               /* D23 5.1: a call made after the kill (O_TRUNC's open, unlink's second
                                                  * step, sync's next mount) is cancelled from the start */

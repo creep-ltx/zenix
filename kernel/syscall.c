@@ -74,6 +74,35 @@ int may_signal(const struct proc *p)
     return -EACCES;
 }
 
+/* SYS_groups (kernel.h): the caller's supplementary groups. GET: count 0 only counts, a smaller room than the list
+ * is -EINVAL (as Linux's getgroups). SET: root only, at most NGROUPS ids; a new grp_id for every set (vfs.c) */
+KCOLD static long do_groups(u32 op, u32 buf, u32 n)
+{
+    u16 *g = (u16 *)buf;
+    if (op == GROUPS_GET) {
+        if (!n)
+            return current->ngroups;
+        if (n < current->ngroups)
+            return -EINVAL;
+        if (current->ngroups && !user_ok_wr(current, buf, (u32)current->ngroups * 2))
+            return -EFAULT;
+        for (int i = 0; i < current->ngroups; i++) g[i] = current->groups[i];
+        return current->ngroups;
+    }
+    if (op != GROUPS_SET)
+        return -EINVAL;
+    if (current->uid != 0)
+        return -EPERM;
+    if (n > NGROUPS)
+        return -EINVAL;
+    if (n && !user_ok_rd(current, buf, n * 2))
+        return -EFAULT;
+    for (u32 i = 0; i < n; i++) current->groups[i] = g[i];
+    current->ngroups = (u8)n;
+    current->grp_id = n ? vfs_new_grp_id() : 0;
+    return 0;
+}
+
 /* getpriority / setpriority (DESIGN D10). PRIO_PROCESS: who is a pid, 0 the caller; PRIO_USER: every process of user
  * id who (0: the caller's real id); PRIO_PGRP: there are no process groups (-EINVAL). Changing another process needs
  * the kill rule (may_signal); raising a base priority (a lower nice) needs root: -EACCES. getpriority answers 20 - nice
@@ -455,6 +484,7 @@ void syscall_c(u32 *rb)
         if (current->uid == 0 || a1 == current->gid) { current->gid = (u16)a1; r = 0; }
         else r = -EPERM;
         break;
+    case SYS_groups: r = do_groups(a1, a2, a3); break;
     case SYS_umask: r = current->umask; current->umask = (u16)(a1 & 0777); break;
     case SYS_chown: {
         char path[64];

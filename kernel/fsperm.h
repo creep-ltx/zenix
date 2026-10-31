@@ -3,16 +3,18 @@
 /* The permission rules of Zenix, for every filesystem server (ext2 today, ZenixFS next). Header only, no
  * dependencies: everything is passed as plain values, so a server on any on-disk format can use it.
  *
- * Who is asking comes from the request message (struct umsg: uid, gid, umask), stamped by the kernel. The server
- * reads the owner (uid, gid) and mode from its own inode. "want" is a mask of FSP_R / FSP_W / FSP_X.
+ * Who is asking comes from the request message (struct umsg: uid, gid, umask, and with UMSG_GROUPS the supplementary
+ * groups after it: ng ids in g, fsproto.h), stamped by the kernel. The server reads the owner (uid, gid) and mode from
+ * its own inode. "want" is a mask of FSP_R / FSP_W / FSP_X.
  *
- *  1. Owner class if uid == owner uid, else group class if gid == owner gid, else other. Root (uid 0) passes every
+ *  1. Owner class if uid == owner uid, else group class if gid or one of the supplementary groups == owner gid
+ *     (fsp_in_group), else other. Root (uid 0) passes every
  *     check except executing a regular file that has no x bit at all.
  *  2. Walking a path needs x on every directory searched (not on the last component).
  *  3. Adding, removing, renaming or linking an entry needs w+x on the directory (fsp_dir_modify).
  *  4. Opening needs r and/or w for the access mode, and x with FSP_O_EXEC, which the kernel adds when it loads a
  *     program (fsp_open_want).
- *  5. chmod: the owner or root; a non-root owner cannot set set-group-id unless the file's group is their group (the
+ *  5. chmod: the owner or root; a non-root owner cannot set set-group-id unless the file's group is one of theirs (the
  *     bit is dropped, as Linux does: fsp_chmod_mode). utimes: an explicit time only the owner or root; "now" also
  *     anyone with w access (fsp_utimes_ok). chown/chgrp: root only (fsp_is_root).
  *  6. A sticky directory (mode 01000, like /tmp) lets only the owner of the entry, the owner of the directory or
@@ -39,12 +41,24 @@
 #define FSP_IFMT 0170000
 #define FSP_IFDIR 0040000
 
-/* may uid/gid do "want" on an object with this mode and owner? (1 yes, 0 no) */
-static inline int fsp_access(unsigned uid, unsigned gid, unsigned mode, unsigned owner_uid, unsigned owner_gid, int want)
+/* is owner_gid the caller's group: its gid, or one of its ng supplementary groups g? */
+static inline int fsp_in_group(unsigned gid, unsigned ng, const unsigned short *g, unsigned owner_gid)
+{
+    if (gid == owner_gid)
+        return 1;
+    for (unsigned i = 0; i < ng; i++)
+        if (g[i] == owner_gid)
+            return 1;
+    return 0;
+}
+
+/* may uid (gid, groups ng/g) do "want" on an object with this mode and owner? (1 yes, 0 no) */
+static inline int fsp_access(unsigned uid, unsigned gid, unsigned ng, const unsigned short *g, unsigned mode,
+                             unsigned owner_uid, unsigned owner_gid, int want)
 {
     if (uid == 0)
         return !(want & FSP_X) || (mode & FSP_IFMT) == FSP_IFDIR || (mode & 0111);
-    int sh = uid == owner_uid ? 6 : gid == owner_gid ? 3 : 0;
+    int sh = uid == owner_uid ? 6 : fsp_in_group(gid, ng, g, owner_gid) ? 3 : 0;
     return (int)(((mode >> sh) & 7) & (unsigned)want) == want;
 }
 
@@ -61,9 +75,10 @@ static inline int fsp_open_want(unsigned flags)
 }
 
 /* may uid add/remove/rename an entry in a directory with this mode and owner? */
-static inline int fsp_dir_modify(unsigned uid, unsigned gid, unsigned dir_mode, unsigned dir_uid, unsigned dir_gid)
+static inline int fsp_dir_modify(unsigned uid, unsigned gid, unsigned ng, const unsigned short *g, unsigned dir_mode,
+                                 unsigned dir_uid, unsigned dir_gid)
 {
-    return fsp_access(uid, gid, dir_mode, dir_uid, dir_gid, FSP_W | FSP_X);
+    return fsp_access(uid, gid, ng, g, dir_mode, dir_uid, dir_gid, FSP_W | FSP_X);
 }
 
 /* sticky directory rule: may uid remove/rename the entry owned by entry_uid? */
@@ -84,10 +99,11 @@ static inline unsigned fsp_new_gid(unsigned gid, unsigned dir_mode, unsigned dir
 static inline unsigned fsp_new_dir_bits(unsigned dir_mode) { return dir_mode & 02000; }
 
 /* the mode bits chmod stores: a non-root owner may not make a file set-group-id for a group that is not theirs */
-static inline unsigned fsp_chmod_mode(unsigned uid, unsigned gid, unsigned owner_gid, unsigned mode)
+static inline unsigned fsp_chmod_mode(unsigned uid, unsigned gid, unsigned ng, const unsigned short *g,
+                                      unsigned owner_gid, unsigned mode)
 {
     mode &= 07777;
-    if (uid != 0 && gid != owner_gid)
+    if (uid != 0 && !fsp_in_group(gid, ng, g, owner_gid))
         mode &= ~02000u;
     return mode;
 }

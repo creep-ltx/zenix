@@ -41,11 +41,13 @@ send zine /tests/zine/zexit; echo zgroup1=$?\r
 wait zgroup1= 30
 send exit\r
 wait zenix:/# 20
-send gpasswd -a user zine\r
+send gpasswd -a user zine; mkdir /tmp/zg; cp /tests/zine/zexit /tmp/zg/zxg; chgrp zine /tmp/zg/zxg; chmod 640 /tmp/zg/zxg; cp /tests/zine/zexit /tmp/zg/zxr; chmod 640 /tmp/zg/zxr\r
 wait zenix:/# 20
 send su user\r
 wait $ 20
-send zine /tests/zine/zexit; echo zgroup2=$?; exit\r
+send zine /tests/zine/zexit; echo zgroup2=$?; zine /tmp/zg/zxg; echo zgroup3=$?; zine /tmp/zg/zxr; echo zgroup4=$?; exit\r
 wait zenix:/# 60
+send rm -r /tmp/zg\r
+wait zenix:/# 20
 send date; echo zine-null-done\r
 wait zine-null-done 20

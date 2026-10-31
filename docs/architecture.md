@@ -694,8 +694,8 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 90 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-93, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 91 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-94, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
@@ -705,7 +705,7 @@ time (`ticks hrtime time settime`; `ticks` with 0 is the 100 Hz tick count, a 32
 2106: the base the battery clock or `settime` gave plus the whole seconds the tick counts itself, `kernel/clock.h`, so
 it does not jump back when the 32-bit tick count wraps after 497 days; audit 2026-10-26 F8), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`, and `console`, the
 display's colours: D14 note section 11), environment (`envset
-envget`), identity (`getuid getgid geteuid setuid setgid umask`, section 14), messages (`port_create port_find call
+envget`), identity (`getuid getgid geteuid setuid setgid groups umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
 ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`blk_read blk_write blk_flush blk_size blk_ram fd_info fd_rw`).
 
@@ -830,7 +830,9 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   pointer from a server is refused (-EINVAL) instead of being followed.
 - The kernel stamps every message with the caller's uid, gid and umask, and `kflags`: `UMSG_KERNEL` when the kernel
   itself sends it for a system call (`ipc_kcall`, used by vfs.c), 0 for a program's own `SYS_call` (`ipc_call`
-  always clears it). The filesystem servers answer only messages with `UMSG_KERNEL`, or from root; the disk server
+  always clears it); with it vfs.c's requests carry `UMSG_GROUPS` (the caller's supplementary groups after the
+  message, `kernel/fsproto.h`; a service's load carries none). A cached mount search answer (`mount_search`) is
+  kept per uid, gid and group list (`grp_id`, a new number for every `GROUPS_SET`). The filesystem servers answer only messages with `UMSG_KERNEL`, or from root; the disk server
   only root (and `DISK_LIST`/`DISK_INFO` for anyone). A registered service name (`disk`, `fs`) is created only by the
   process the kernel started for it: anyone else, root too, gets -EBUSY, also after a crash. The names `fs.*`
   (mounts) and `net` (the network server, DESIGN D19: the kernel sends it every socket call) not registered as
@@ -955,7 +957,8 @@ allocates only at mount (block cache, bitmaps, three scratch blocks), so a runni
 service, D11 6.4; the options as one word of codes: `s` soft, `tN` timeo, `rN` retrans, `o` read-only, `y` sync, `aN`
 actimeo, `l` lazy, which `mount -a` adds). The NFS client is the core in `net/nfs/` (no system calls; the same files
 are the PC tests', `tools/host/nfs-test.sh`): NFSv3 over one TCP connection (RFC 1813, the portmapper for mountd,
-AUTH_SYS with the request's uid, gid and the groups `/etc/group` gave at the start), the handle table (inode numbers
+AUTH_SYS with the request's uid, gid and supplementary groups: the kernel's `UMSG_GROUPS` list, or for a root
+program's own request the groups `/etc/group` gave at the start), the handle table (inode numbers
 from the fileids, the root always 2), the attribute, name and data caches, every `FS_*` request as a small state
 machine. `user/nfscd.c` is its OS layer: one `evwait` on the port (`POLLPORT | POLLPRI`, `POLLIN` while it can hold
 one more), the socket and a name lookup (`SOCK_RESOLVE`, at each connect); the messages it holds are known to the core
@@ -1774,12 +1777,21 @@ outputs (`tools/cmds-test.sh`).
 ## 14. Users and permissions (D8)
 
 - Every process has an **effective uid** (`uid`, what permission checks use), a **real uid** (`ruid`, who started
-  it), a gid and a umask; all are inherited by `spawn`. `setuid(n)`: root becomes anyone (real and effective); others
-  can only return to their real id. `setgid`: root, or the same gid. `chown`: root only.
+  it), a gid, up to 8 **supplementary groups** (`NGROUPS`, `kernel/fsproto.h`) and a umask; all are inherited by
+  `spawn`. `setuid(n)`: root becomes anyone (real and effective); others can only return to their real id. `setgid`:
+  root, or the same gid. `SYS_groups` (94): `GROUPS_GET` gives anyone their own list, `GROUPS_SET` is root's
+  (-EPERM otherwise); setuid and setgid leave the list as it is, and a set-user-id program keeps the caller's (so
+  `sudo` and `zine` check the caller's groups). `chown`: root only.
+- **The groups come from `/etc/group`:** `login`, `su` and `sudo` set them before dropping root, as `initgroups`
+  does: the main gid and every group whose member list names the user (`gr_list` in `user/zpw.c`, `pw_initgroups`
+  in `user/pw.c`); more than 8 are said and cut. A `gpasswd` change counts from the user's next login, su or sudo.
+  `id` prints them as `groups=`; libz's `in_group`/`in_group_named` (sudo's wheel, zine's group zine) and the C
+  library's `access`, `getgroups` and `setgroups` read the kernel's list.
 - A program file with the **set-user-id bit** (mode 04000) runs with its owner's effective uid (`proc_spawn`): this
   is how `su` and `passwd` work for ordinary users.
-- `ipc_call` stamps every message with the caller's uid, gid and umask (`struct umsg`), so the **filesystem server
-  decides**. The rules are in one dependency-free header, `kernel/fsperm.h`, that every filesystem server
+- `ipc_call` stamps every message with the caller's uid, gid and umask (`struct umsg`), and the kernel's own requests
+  (vfs.c) also with the supplementary groups (`UMSG_GROUPS`: a `struct umsg_groups` right after the message), so the
+  **filesystem server decides**; a group matches when it is the gid or any of those (`fsp_in_group`). The rules are in one dependency-free header, `kernel/fsperm.h`, that every filesystem server
   includes (ext2 today, ZenixFS next); `ext2_access` applies them to ext2 inodes. In words: `ext2_access` checks r/w/x (owner, then group, then other; root passes, except that executing needs
   at least one x bit); `ext2_namei` demands x on every directory searched; creating, removing, renaming and linking
   need w+x on the directory; opening needs r and/or w (and x with `O_EXEC`, which the kernel adds when it loads

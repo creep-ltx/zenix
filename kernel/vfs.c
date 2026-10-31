@@ -210,10 +210,11 @@ struct mount {
     u32 gen;                            /* D13: new on every mount and every (re)start of its server (vfs_server_started) */
     u32 ok_epoch;                       /* F13: the ids below passed mount_search at this perm_epoch (0: none) */
     u16 ok_uid, ok_gid;
+    u32 ok_grp;                         /* and the supplementary groups' list (struct proc grp_id) */
     u32 inst;                           /* D26: new on every mount only (gen also moves when its server restarts) */
     u8 net;                             /* D23 5.4: its server said type "nfs" at FS_ROOT: synced last, bounded */
 };
-static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1, 0, 0, 0, 1, 0 } };
+static struct mount mnt[NMOUNT] = { { 1, -1, 0, "/", "fs", "", "", 1, 0, 0, 0, 0, 1, 0 } };
 
 /* D23 5.4: a network filesystem, by the type its server gave in FS_ROOT's fsinfo (later network types join here) */
 static int net_type(const struct fsinfo *fi)
@@ -225,11 +226,16 @@ static u32 gen_last = 1, inst_last = 1;
  * removed), every mount, umount and server start: a cached mount_search answer older than it is asked again */
 static u32 perm_epoch = 1;
 static int nmnt = 1;                    /* mounts in use, the root included */
+/* SYS_groups' SET: a new list's number (struct proc grp_id). It is the next perm_epoch, so it is never one given before
+ * (and never 0), and every cached mount_search answer, made for some older list, is asked again */
+u32 vfs_new_grp_id(void) { return ++perm_epoch; }
 
 /* one request to mount mi's server; kfl: UMSG_LINKS when the sender takes the FS_LINKED answer (wstep), else 0 */
 static __attribute__((noinline)) long fs_call_k(int mi, u32 type, u32 a0, u32 a1, u32 a2, u32 a3, u16 kfl)
 {
-    struct umsg m;                      /* on this process's kernel stack: the server reads it in place */
+    struct { struct umsg m; struct umsg_groups g; } km;   /* on this process's kernel stack: the server reads it in
+                                         * place; the caller's supplementary groups follow the message (UMSG_GROUPS) */
+#define m km.m
     struct mount *mt = &mnt[mi];
     if (current->pid == 0 || !mt->used)
         return -EINVAL;
@@ -243,7 +249,8 @@ static __attribute__((noinline)) long fs_call_k(int mi, u32 type, u32 a0, u32 a1
      * must never load a program; FS_SYNC and FS_QUIT skip a server that is not running (it has nothing to write: an
      * ext2 one wrote through, a dead ZenixFS one's uncommitted changes are gone, a starting one wrote nothing yet) */
     int ns = type == FS_CLOSE ? SVC_NS_CLOSE : type == FS_SYNC || type == FS_QUIT ? SVC_NS_SKIP : 0;
-    long r = ipc_kcall(mt->port, &m, ns, kfl);
+    long r = ipc_kcall(mt->port, &m, ns, (u16)(kfl | UMSG_GROUPS));
+#undef m
     if (r == -ECONNRESET) {             /* the server is gone (D11), or its port closed or its slot reused (G1, A11) */
         mt->port = -1;                  /* look it up again next time */
         r = ns == SVC_NS_SKIP ? 0 : -EIO;   /* programs see an I/O error, as before; a sync or quit skipped a server
@@ -328,7 +335,8 @@ static __attribute__((noinline)) int mount_search(int mi, char *buf)
      * +38% on a stat through the mount); a success only, kept until perm_epoch rises */
     struct mount *top = &mnt[mi];
     u32 ep = perm_epoch;
-    if (top->ok_epoch == ep && top->ok_uid == current->uid && top->ok_gid == current->gid)
+    if (top->ok_epoch == ep && top->ok_uid == current->uid && top->ok_gid == current->gid &&
+        top->ok_grp == current->grp_id)
         return 0;
     while (mi > 0) {
         const char *mp = mnt[mi].path;
@@ -349,7 +357,7 @@ static __attribute__((noinline)) int mount_search(int mi, char *buf)
         mi = pm;
     }
     if (perm_epoch == ep) {             /* nothing changed while the servers were asked */
-        top->ok_epoch = ep; top->ok_uid = current->uid; top->ok_gid = current->gid;
+        top->ok_epoch = ep; top->ok_uid = current->uid; top->ok_gid = current->gid; top->ok_grp = current->grp_id;
     }
     return 0;
 }

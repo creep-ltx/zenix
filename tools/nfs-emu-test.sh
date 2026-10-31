@@ -402,7 +402,7 @@ EOS
     check "u: files made by two users (user, guest) carry their numbers on the NAS (1000, 1001)" $ok "$(grep -a '^/pub' "$t")"
     ok=0; has u-chown.txt 'operation not permitted|permission denied' && [ "$(tl /pub/u1.txt | cut -d' ' -f4)" = 1000 ] && ok=1
     check "u: chown by a user is refused (root only)" $ok "$(cat "$OUT/u-chown.txt")"
-    ok=0; has u-suid.txt '^-rwxr-xr-x .* /nas/suidid$' && has u-suid.txt '^uid=1000\(user\) gid=100\([a-z]*\)$' && ! has u-suid.txt 'euid' &&
+    ok=0; has u-suid.txt '^-rwxr-xr-x .* /nas/suidid$' && has u-suid.txt '^uid=1000\(user\) gid=100\([a-z]*\)( groups=[0-9a-z(),]*)?$' && ! has u-suid.txt 'euid' &&
         has u-local.txt 'euid=0\(root\)' && ok=1
     check "u: nosuid: a set-user-id root program on the share shows no s bit and runs as the caller (on the root: as root)" $ok "$(cat "$OUT/u-suid.txt" "$OUT/u-local.txt")"
     ok=0; [ "$(tl /pub/u3.txt | cut -d' ' -f4,5)" = "1026 100" ] && [ "$(tl /pub/u4.txt | cut -d' ' -f4,5)" = "1026 100" ] &&

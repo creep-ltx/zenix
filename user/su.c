@@ -16,6 +16,7 @@ int main(int argc, char **argv)
         if (read_secret("Password: ", pass, sizeof pass) || !pw_check(pass, p.hash)) { sys_sleep(100); dprintf(2, "su: wrong password\n"); return 1; }
     }
     sys_setgid(p.gid);
+    pw_initgroups("su", &p);            /* the target's groups, not the caller's */
     if (sys_setuid(p.uid) < 0) { dprintf(2, "su: not permitted\n"); return 1; }
     /* the target's environment, not the caller's: a PATH, HOME or IFS the caller set must not steer a shell that runs
      * as someone else (as root: the caller's ~/.shrc or their own programs first in PATH) */

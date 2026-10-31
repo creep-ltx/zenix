@@ -265,11 +265,17 @@ static void give(struct held *h)
     r.type = m->type;
     for (int i = 0; i < 4; i++) r.a[i] = m->a[i];
     r.uid = m->uid; r.gid = m->gid; r.umask = m->umask; r.kflags = m->kflags;
-    for (int k = 0; k < nug; k++)
-        if (ug[k].uid == m->uid) {
-            r.ngroups = ug[k].n;
-            for (int i = 0; i < ug[k].n; i++) r.groups[i] = ug[k].g[i];
-        }
+    if (m->kflags & UMSG_GROUPS) {               /* the caller's own supplementary groups, as the kernel holds them */
+        const struct umsg_groups *g = UMSG_GROUPS_AT(m);
+        r.ngroups = g->n < NGROUPS ? g->n : NGROUPS;
+        for (u32 i = 0; i < r.ngroups; i++) r.groups[i] = g->g[i];
+    } else {                                     /* a root program's own request: the user's groups from /etc/group */
+        for (int k = 0; k < nug; k++)
+            if (ug[k].uid == m->uid) {
+                r.ngroups = ug[k].n;
+                for (int i = 0; i < ug[k].n; i++) r.groups[i] = ug[k].g[i];
+            }
+    }
     h->given = 1;
     h->told = (m->kflags & UMSG_CANCEL) != 0;
     nfs_request(&r);

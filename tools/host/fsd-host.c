@@ -49,18 +49,22 @@ int sys_svc_opens(u32 *ino, u32 bytes) { (void)ino; (void)bytes; return 0; }
 #define CWD 2
 #endif
 static unsigned cur_uid, cur_gid, raw, links;
+static struct umsg_groups cur_groups;                    /* "groups g1,g2,...": the caller's supplementary groups */
 static int opened[100], nopened;
 static u32 num(const char *s) { return s && s[0] == '%' && atoi(s + 1) > 0 && atoi(s + 1) <= nopened ? (u32)opened[atoi(s + 1) - 1] : (u32)atoi(s ? s : "0"); }
 
 static int req(u32 type, u32 a0, u32 a1, u32 a2, u32 a3)
 {
-    struct umsg m;
-    memset(&m, 0, sizeof m);
+    struct { struct umsg m; struct umsg_groups g; } km; /* as the kernel's (vfs.c): the groups follow the message */
+#define m km.m
+    memset(&km, 0, sizeof km);
+    km.g = cur_groups;
     m.type = type; m.a[0] = a0; m.a[1] = a1; m.a[2] = a2; m.a[3] = a3;
     m.uid = (unsigned short)cur_uid; m.gid = (unsigned short)cur_gid; m.umask = 022;
     m.from = 7;
-    m.kflags = raw ? 0 : UMSG_KERNEL | (links ? UMSG_LINKS : 0);
+    m.kflags = raw ? 0 : UMSG_KERNEL | UMSG_GROUPS | (links ? UMSG_LINKS : 0);
     return handle(&m);
+#undef m
 }
 
 static u32 flags_of(const char *s)
@@ -110,6 +114,12 @@ int main(void)
         if (a && strlen(a) < sizeof pa) { strcpy(pa, a); a = pa; }
         if (b && strlen(b) < sizeof pb && strcmp(cmd, "chmod") && strcmp(cmd, "utimes") && strcmp(cmd, "chown") &&
             strcmp(cmd, "open") && strcmp(cmd, "write") && strcmp(cmd, "read") && strcmp(cmd, "as")) { strcpy(pb, b); b = pb; }
+        if (!strcmp(cmd, "groups")) {                 /* groups [g1,g2,...]: none without an argument */
+            cur_groups.n = 0;
+            for (char *s = a; s && *s && cur_groups.n < NGROUPS; ) { cur_groups.g[cur_groups.n++] = (unsigned short)atoi(s); s = strchr(s, ','); if (s) s++; }
+            printf("groups -> %u\n", cur_groups.n);
+            continue;
+        }
         if (!strcmp(cmd, "as")) { cur_uid = (unsigned)atoi(a); cur_gid = (unsigned)atoi(b); printf("as -> %u %u\n", cur_uid, cur_gid); continue; }
         if (!strcmp(cmd, "open")) { r = req(FS_OPEN, (u32)a, CWD, flags_of(b ? b : "r"), (u32)&st); if (r > 0 && nopened < 100) opened[nopened++] = r; }
         else if (!strcmp(cmd, "close")) r = req(FS_CLOSE, num(a), 0, 0, 0);

@@ -122,6 +122,38 @@ run $T/p.img $T/p.txt $T/out
 [ "$(grep -v '^mount\|^links\|^as' $T/out | tr '\n' '|')" = "stat -> -13|rename -> -13|stat -> -1024 a0 /d/sub|" ] &&
     check "D26 zfsd: a user cannot read a link in a directory without x (-EACCES); root gets the FS_LINKED answer" ok ||
     { check "D26 zfsd: permissions before FS_LINKED" bad; cat $T/out; }
+# supplementary groups (UMSG_GROUPS, 2026-10-31): each group the caller is in counts, as its gid does
+cp $T/base.img $T/g.img
+cat > $T/g.txt <<EOF
+mount
+mkdir /g
+chmod /g 777
+open /g/a wc
+chown /g/a 0 10
+chmod /g/a 640
+open /g/b wc
+chown /g/b 0 20
+chmod /g/b 660
+mkdir /g/d
+chown /g/d 0 20
+chmod /g/d 770
+as 1000 100
+groups 10,20
+open /g/a r
+open /g/a w
+open /g/b rw
+open /g/d/new wc
+groups
+open /g/a r
+open /g/b rw
+open /g/d/new2 wc
+sync
+EOF
+run $T/g.img $T/g.txt $T/out
+o=$(grep '^open -> ' $T/out | sed -n '3,$p' | awk '{print ($3 > 0) ? "ok" : $3}' | tr '\n' ' ')
+[ "$o" = "ok -13 ok ok -13 -13 -13 " ] && check "zfsd: supplementary groups read a 640 file, write a 660 one, create in a 770 directory; not without them" ok ||
+    { check "zfsd: supplementary groups ($o)" bad; cat $T/out; }
+"$TOOL" fsck $T/g.img > $T/fsck.log 2>&1 && check "zfsd: zenixfs-tool fsck clean after the groups test" ok || { check "zfsd: fsck after the groups test" bad; cat $T/fsck.log; }
 "$TOOL" fsck $T/z.img > $T/fsck.log 2>&1 && check "D26 zfsd: zenixfs-tool fsck clean afterwards" ok || { check "D26 zfsd: fsck afterwards" bad; cat $T/fsck.log; }
 
 echo "zfsd-test: $pass passed, $fail failed"

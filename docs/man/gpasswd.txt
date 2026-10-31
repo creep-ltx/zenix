@@ -24,6 +24,8 @@ EXIT STATUS
 NOTES
     Zenix's gpasswd only edits member lists; group passwords are not used.
     A user's main group is in /etc/passwd and is not changed here.
+    A change counts for the user's next login, su or sudo: running
+    sessions keep the groups they were given (see id(1)).
 
 SEE ALSO
     useradd(8), userdel(8), sudo(8), id(1)

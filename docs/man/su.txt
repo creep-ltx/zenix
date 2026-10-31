@@ -12,8 +12,9 @@ DESCRIPTION
     (an account with an empty password needs none, a locked one "*" cannot
     be reached). The shell gets the target user's USER, LOGNAME, HOME and
     SHELL, PATH=/bin, and no IFS, ENV or CDPATH from the caller; with "-" it
-    also starts in the target's home directory. su is installed
-    set-user-id root.
+    also starts in the target's home directory. The shell has the target's
+    groups, as after a login: the main group and every group listing the
+    target in /etc/group (see id(1)). su is installed set-user-id root.
 
 NOTES
     The new shell makes a process group of its own and the terminal's

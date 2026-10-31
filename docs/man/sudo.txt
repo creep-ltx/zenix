@@ -18,8 +18,10 @@ DESCRIPTION
     the target's shell instead; -i does the same in the target's home
     directory.
 
-    Who may use it: root, and the members of the group "wheel" (listed in
-    its member list in /etc/group, or having it as their main group). They
+    Who may use it: root, and the members of the group "wheel": wheel is
+    the caller's main group or one of the groups its session has (login
+    and su give every group whose member list in /etc/group names the
+    user; a gpasswd -a counts from the next login or su). They
     give their OWN password, not root's, with three tries; an account with
     an empty password is not asked, a locked one ("*") never passes. The
     shipped system has "user" in wheel. Others are refused.
@@ -27,7 +29,8 @@ DESCRIPTION
     The command gets the target's USER, LOGNAME, HOME and SHELL, PATH=/bin,
     and no IFS, ENV or CDPATH from the caller (as with su(1)); TERM and the
     rest of the environment stay. A command name without '/' is looked for
-    in /bin. sudo is installed set-user-id root.
+    in /bin. The command has the target's groups, as after a login. sudo is
+    installed set-user-id root.
 
 EXAMPLES
     sudo useradd -G wheel adam      add a user who may also use sudo

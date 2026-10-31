@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include "errno.h"              /* the error numbers, shared with the servers and libz */
+#include "fsproto.h"            /* NGROUPS, struct umsg_groups (the caller's supplementary groups in a request) */
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -512,7 +513,14 @@ struct proc {                   /* start.S relies on the first three: */
     u8 sig_intr;                /* the system call gave up for a signal (a restart is possible, rule 4) */
     u8 kill_sig;                /* ended by this signal's default action: wait status 128 + it */
     u8 msg_cancel;              /* audit O9: a kill may take its call back while the message is still queued (sock.c) */
+    /* supplementary groups (SYS_groups, owner 2026-10-31): inherited on spawn, kept across set-user-id; root sets them
+     * (login, su, sudo from /etc/group). Each counts as its group in the filesystem servers' checks (UMSG_GROUPS) */
+    u8 ngroups;
+    u16 groups[NGROUPS];
+    u32 grp_id;                 /* which list it holds: a new number at every set (0: none set), so that the cache
+                                 * of a mount's search check (vfs.c mount_search) is keyed by uid, gid and this */
 };
+u32 vfs_new_grp_id(void);           /* vfs.c: the number of a list SYS_groups sets */
 extern struct proc procs[NPROC];
 extern struct proc *current;
 void proc_init(void);
@@ -900,6 +908,12 @@ int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes tak
 #define SYS_netsrv      91   /* op (NETSRV_*), a, b: only the network server */
 #define SYS_drv         92   /* op (DRV_*), a, b: only the network server's children, its drivers (drv.c) */
 #define SYS_zine        93   /* op (ZINE_INFO, ZINE_GO: kernel/zine.h), a, b: DESIGN D29, an Amiga program (zine.c) */
+/* supplementary groups (2026-10-31, frozen): GROUPS_GET a2 u16 buffer, a3 its room in ids (0: only count) -> the ids
+ * held (at most NGROUPS), -EINVAL if more than the room; GROUPS_SET a2 u16 ids, a3 count (0 .. NGROUPS, else -EINVAL;
+ * root only, else -EPERM) -> 0. The primary gid is not in the list unless it was set there */
+#define SYS_groups      94   /* op, buffer, count */
+#define GROUPS_GET      0
+#define GROUPS_SET      1
 long zine_sys(u32 op, u32 a, u32 b);
 struct zine_range;
 u32 mem_ranges(const struct zine_range **r);    /* D29: mem.c's pool ranges, for ZINE's blob */

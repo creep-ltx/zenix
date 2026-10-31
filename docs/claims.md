@@ -20,7 +20,8 @@ Claim a number here **before** using it (system calls, message types, port names
 | `ticks`'s (20) argument 2 (DESIGN D21 8.3: who set the clock this boot, `CLOCK_RTC` 1, `CLOCK_NET` 2) and `settime`'s (59) second argument (0 a hand-set time, clears the bits; 1 from a checked source, sets `CLOCK_NET`; other values -EINVAL) | branch clock, merged 2026-10-28 (recorded here by audit 2026-10-29 B2-7) |
 | 89 `console`'s op 4 `CON_UFONT` (the console's Unicode font for every console: no descriptor in the op word, root; a2 ZCF1 data, a3 its size; a2 0 drops it), the rule `CONR_8BIT` 128 (`CONR_ALL` 255), and `CON_READ`'s a3 1 `CONRF_CELL4` (cells of 4 bytes: the 16-bit value big-endian, `CONA_*`, the colour) (DESIGN D28 7) | main's builder, branch utf8, 2026-10-29 |
 | 93 `zine` (DESIGN D29: op 0 `ZINE_INFO` `struct uzine_info`, op 1 `ZINE_GO` `struct uzine_go`; root at the Amiga's own console only); the kernel log's end reasons `KLOG_END_ZINE` 3 and `KLOG_END_ZINE_DAMAGED` 4 (the second for step 5) | branch zine02, 2026-10-30 (step 2 tested in FS-UAE) |
-| **next free: 94** | |
+| 94 `groups` (supplementary groups: op 0 `GROUPS_GET`, op 1 `GROUPS_SET`, root only; `NGROUPS` 8); `struct umsg`'s kflags bit 16 `UMSG_GROUPS` (a `struct umsg_groups` follows the message; only the kernel sets it) | branch groups, 2026-10-31 |
+| **next free: 95** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
 numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*` from 64 (the drivers' blocks, step 7:
@@ -31,7 +32,8 @@ zup's "needs a check" mark), `FS_SYNC`'s a0 1 "bounded" (D23 step 1, branch nfs1
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
 `struct umsg`'s `kflags` bits: 1 `UMSG_KERNEL`, 2 `UMSG_NETREPLY` (internal), 4 `UMSG_CANCEL` (D23 step 1, branch nfs12, 2026-10-28: only the kernel sets it, for a killed client), 8
 `UMSG_LINKS` (D26, branch d26, 2026-10-28: only the kernel sets it, through `ipc_kcall`'s kflags argument; `call()`
-ORs D23's `UMSG_CANCEL` in itself). Answers in `kernel/fsproto.h`: a value or -errno; -1024 .. -1279 reserved (no
+ORs D23's `UMSG_CANCEL` in itself), 16 `UMSG_GROUPS` (branch groups, 2026-10-31: the supplementary groups follow the
+message; only the kernel sets it, for vfs.c's requests). Answers in `kernel/fsproto.h`: a value or -errno; -1024 .. -1279 reserved (no
 errno goes there, `kernel/errno.h`), of which `FS_LINKED` + `FSL_*` (`FSL_A1` 1, `FSL_LAST` 2: -1024 .. -1027) for a
 sender that set `UMSG_LINKS` (D26, branch d26, 2026-10-28).
 Error numbers: `ECONNRESET` 104 (D11, "the server is gone"; main; on a socket also "reset by the peer", D19); D19's

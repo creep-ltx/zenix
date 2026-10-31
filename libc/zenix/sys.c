@@ -119,7 +119,8 @@ int mkdir(const char *p, mode_t mode)
     if ((mode & 07777) != 0777) sys_chmod(p, mode & 07777 & ~mask);
     return 0;
 }
-/* from the file's mode and the caller's ids (root may do anything but execute a file nobody may execute) */
+/* from the file's mode and the caller's ids, its supplementary groups too (root may do anything but execute a file
+ * nobody may execute) */
 int access(const char *p, int how)
 {
     struct ustat s;
@@ -127,7 +128,12 @@ int access(const char *p, int how)
     if (how == F_OK) return 0;
     u32 uid = (u32)sys_geteuid(), gid = (u32)sys_getgid(), bits;
     if (uid == 0) bits = (how & X_OK) && !(s.mode & 0111) ? 0 : 7;
-    else bits = (s.mode >> (uid == s.uid ? 6 : gid == s.gid ? 3 : 0)) & 7;
+    else {
+        unsigned short g[NGROUPS];
+        int n = sys_getgroups(g, NGROUPS), in = gid == s.gid;
+        for (int i = 0; i < n && !in; i++) in = g[i] == s.gid;
+        bits = (s.mode >> (uid == s.uid ? 6 : in ? 3 : 0)) & 7;
+    }
     if ((how & bits) != (u32)how) { errno = EACCES; return -1; }
     return 0;
 }
@@ -140,6 +146,24 @@ gid_t getgid(void) { return (gid_t)sys_getgid(); }
 gid_t getegid(void) { return (gid_t)sys_getgid(); }         /* there is no effective group id */
 int setuid(uid_t u) { return ret(sys_setuid(u)); }
 int setgid(gid_t g) { return ret(sys_setgid(g)); }
+/* the supplementary groups (SYS_groups): at most NGROUPS; size 0 only counts, a smaller room is EINVAL */
+int getgroups(int size, gid_t list[])
+{
+    unsigned short g[NGROUPS];
+    int n = sys_getgroups(g, NGROUPS);
+    if (n < 0) return -1;
+    if (size == 0) return n;
+    if (size < n) { errno = EINVAL; return -1; }
+    for (int i = 0; i < n; i++) list[i] = g[i];
+    return n;
+}
+int setgroups(int n, const gid_t *list)
+{
+    unsigned short g[NGROUPS];
+    if (n < 0 || n > NGROUPS) { errno = EINVAL; return -1; }
+    for (int i = 0; i < n; i++) g[i] = (unsigned short)list[i];
+    return ret(sys_setgroups(g, (u32)n));
+}
 void _exit(int status) { sys_exit(status); __builtin_unreachable(); }
 
 /* ---- time: the wall clock in seconds (SYS_time), the 100 Hz tick since boot (SYS_ticks: never goes back, wraps

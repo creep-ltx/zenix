@@ -11,5 +11,6 @@ int pw_byname(const char *name, struct pw *out);       /* 0 found, -1 not */
 int pw_byuid(u32 uid, struct pw *out);
 int gr_byname(const char *name, struct gr *out);
 int gr_bygid(u32 gid, struct gr *out);
+int gr_list(const char *name, u32 gid, unsigned short *out, int max);   /* NAME's groups: gid, then its member groups */
 int read_secret(const char *prompt, char *buf, int max);   /* a line read without echo (raw): 0, or -1 on ^C or the end */
 char *pw_slurp(const char *path, int *len);              /* the whole file, malloc'd (free it), NUL-terminated; 0 if unreadable */

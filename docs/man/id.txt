@@ -7,13 +7,20 @@ SYNOPSIS
     id [user]
 
 DESCRIPTION
-    Prints "uid=1000(user) gid=100(users)" for the calling process, or for
-    the named user. A process running a set-user-id program also gets
-    "euid=0(root)": uid is who is really running it, euid the identity the
-    permission checks use.
+    Prints "uid=1000(user) gid=100(users) groups=100(users),10(wheel)" for
+    the calling process, or for the named user. A process running a
+    set-user-id program also gets "euid=0(root)" (before groups): uid is
+    who is really running it, euid the identity the permission checks use.
+
+    groups= lists the main group first, then the supplementary groups: for
+    the calling process the ones the kernel holds (login, su and sudo set
+    them from /etc/group), for a named user every group whose member list
+    in /etc/group names them (what a new login would get).
 
 NOTES
-    Only one group per user (no supplementary groups yet).
+    A process has at most 8 supplementary groups. A gpasswd(8) change
+    shows in a named user's line at once, in a process's only after the
+    next login or su, as on other Unix systems.
 
 SEE ALSO
-    whoami(1), su(1)
+    whoami(1), su(1), gpasswd(8)

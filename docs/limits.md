@@ -55,7 +55,8 @@ pointers.
   terminals other than the consoles and no SIGHUP on a hang-up (with telnet's pseudo-terminals, later); SIGQUIT,
   SIGTTIN, SIGTTOU and SIGWINCH are never generated; `poll` takes at most 32 items, `select` 32 descriptors; a signal
   frame needs 84 bytes of stack and leaves 512 bytes above the stack guard, or the process is killed.
-- `/proc`; supplementary groups; a shadow password file (`/etc/passwd` is
+- `/proc`; more than 8 supplementary groups a process (`NGROUPS`; login, su and sudo say so and keep the first 8);
+  a shadow password file (`/etc/passwd` is
   world-readable; the hashes are 1000 rounds of salted SHA-256, a number chosen for a 14 MHz 68020, not measured on
   hardware); user and group ids are 16 bits.
 - Shared libraries; only static programs.
@@ -120,7 +121,8 @@ pointers.
   inode numbers from the kernel (more than the 64 open files and 32 program loads there can be).
 - NFS (DESIGN D23, architecture.md section 9 "nfscd"): 8 NFS mounts at most (nfs0 .. nfs7, within the 7 mounts);
   `HOST:/EXPORT` at most 62 characters with no options (the service text); files below 4 GB, offsets below 2 GB;
-  names up to 63 bytes listed; 16 supplementary groups a user, 32 users with groups (read at nfscd's start); the
+  names up to 63 bytes listed; the kernel's 8 supplementary groups a request (for a root program's own request: 16 a
+  user, 32 users with groups, read at nfscd's start); the
   small profile (chip RAM only, or under 2 MB of fast RAM free): 4 KB reads and writes, 64 files in the handle table,
   a 16 KB data cache, 32 KB of unsaved written data, 8 requests at once plus 8 waiting in nfscd; the large: 32 KB,
   256 files, 32 requests; a heap cap of 160 KB (small) or the cache and 1 MB (large); counts in `df` capped below

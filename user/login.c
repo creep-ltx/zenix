@@ -24,6 +24,7 @@ static int session(const struct pw *p)
     setenv("USER", p->name, 1); setenv("LOGNAME", p->name, 1); setenv("HOME", p->home, 1); setenv("SHELL", p->shell, 1);
     setenv("PATH", "/bin", 1);
     sys_setgid(p->gid);
+    pw_initgroups("login", p);          /* its gid and every group listing it in /etc/group */
     sys_setuid(p->uid);
     sys_chdir(p->home);
     char *argv[] = { (char *)p->shell, 0 };          /* spawn only reads argv */
