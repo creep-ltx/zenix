@@ -1,0 +1,177 @@
+wait zenix:/# 90
+sleep 1
+send mkdir /mnt /flop\r
+sleep 2
+send mount ide0p3 /mnt\r
+sleep 5
+send mount\r
+sleep 3
+send ls -l /mnt\r
+sleep 4
+send cat '/mnt/r\xc3\xa4ksm\xc3\xb6rg\xc3\xa5s.txt'\r
+sleep 2
+send cat '/mnt/R\xc3\x84KSM\xc3\x96RG\xc3\x85S.TXT'\r
+sleep 2
+send cat /mnt/mapp/UNDER/text.txt\r
+sleep 2
+send sha256sum /mnt/Mapp/big.bin\r
+sleep 8
+send readlink /mnt/Mapp/up\r
+sleep 2
+send cat /mnt/Mapp/up\r
+sleep 2
+send cat /mnt/Mapp/UNDER/hard\r
+sleep 2
+send stat /mnt/Mapp/UNDER/hard\r
+sleep 3
+send echo x > /mnt/refused.txt\r
+sleep 2
+send mkdir /mnt/refused\r
+sleep 2
+send df /mnt\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount -o rw ide0p3 /mnt\r
+sleep 8
+send echo hello-from-zenix > /mnt/new.txt\r
+sleep 2
+send cat /mnt/new.txt\r
+sleep 2
+send mkdir /mnt/Nya\r
+sleep 2
+send echo svenska > '/mnt/Nya/l\xc3\xa5ngt namn p\xc3\xa5 svenska.txt'\r
+sleep 3
+send ls /mnt/Nya\r
+sleep 3
+send cat '/mnt/NYA/L\xc3\x85NGT NAMN P\xc3\x85 SVENSKA.TXT'\r
+sleep 3
+send cp /bin/ls /mnt/ls.bin\r
+sleep 5
+send cmp /bin/ls /mnt/ls.bin && echo same-copy\r
+sleep 5
+send mv /mnt/new.txt /mnt/Nya/moved.txt\r
+sleep 3
+send mv /mnt/Mapp/UNDER/text.txt /mnt/Mapp/UNDER/TEXT.TXT\r
+sleep 3
+send rm /mnt/gone.txt\r
+sleep 3
+send ln -s ../ls.bin /mnt/Nya/lnk\r
+sleep 3
+send readlink /mnt/Nya/lnk\r
+sleep 2
+send ln /mnt/ls.bin /mnt/hl\r
+sleep 2
+send chmod 777 /mnt/ls.bin\r
+sleep 2
+send chmod 444 /mnt/ls.bin\r
+sleep 2
+send rm /mnt/ls.bin\r
+sleep 2
+send chmod 755 /mnt/ls.bin\r
+sleep 2
+send /mnt/ls.bin /mnt/Nya\r
+sleep 3
+send echo run-from-ffs=$?\r
+sleep 2
+send echo x > '/mnt/a:b'\r
+sleep 2
+send rm /mnt/Mapp/UNDER/hard\r
+sleep 2
+send cat /mnt/hardname\r
+sleep 2
+send sync\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount -t ffs -o nonsense ide0p3 /mnt\r
+sleep 5
+send dmesg | grep ffsd\r
+sleep 4
+send mount -o rw ide0p3 /mnt\r
+sleep 6
+send echo by-the-timer > /mnt/timer.txt\r
+sleep 6
+send kill -9 $(pgrep ffsd)\r
+sleep 3
+send cat /mnt/timer.txt\r
+sleep 4
+send echo after-kill > /mnt/uncommitted.txt\r
+sleep 1
+send kill -9 $(pgrep ffsd)\r
+sleep 3
+send ls /mnt\r
+sleep 5
+send echo after-restart > /mnt/after.txt\r
+sleep 3
+send sync\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount -o rw ide0p4 /mnt\r
+sleep 6
+send cat /mnt/ofs.txt\r
+sleep 2
+send sha256sum /mnt/big.bin\r
+sleep 8
+send echo ofs-written > /mnt/ny.txt\r
+sleep 2
+send cp /bin/ls /mnt/ls.bin\r
+sleep 5
+send cmp /bin/ls /mnt/ls.bin && echo same-ofs\r
+sleep 5
+send mv /mnt/ofs.txt /mnt/flyttad.txt\r
+sleep 3
+send rm /mnt/big.bin\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount -o rw ide0p5 /mnt\r
+sleep 6
+send cat /mnt/onek.txt\r
+sleep 2
+send sha256sum /mnt/big.bin\r
+sleep 8
+send cp /bin/ls /mnt/ls.bin\r
+sleep 5
+send cmp /bin/ls /mnt/ls.bin && echo same-1k\r
+sleep 5
+send df /mnt\r
+sleep 3
+send umount /mnt\r
+sleep 3
+send mount -o rw ide0p6 /mnt\r
+sleep 5
+send cat /mnt/invalid.txt\r
+sleep 2
+send echo x > /mnt/nope.txt\r
+sleep 2
+send umount /mnt\r
+sleep 3
+send mount -t ffs ide0p2 /mnt\r
+sleep 5
+send dmesg | grep 'not an AmigaDOS'\r
+sleep 4
+send mount -t ffs df1 /flop\r
+sleep 8
+send cat /flop/flop.txt\r
+sleep 5
+send echo x > /flop/nope.txt\r
+sleep 5
+send umount /flop\r
+sleep 8
+send mount -t ffs -o rw df1 /flop\r
+sleep 15
+send echo written-on-floppy > /flop/skriven.txt\r
+sleep 8
+send ls /flop\r
+sleep 8
+send umount /flop\r
+sleep 8
+send sync\r
+sleep 3
+send dmesg | grep ffsd\r
+sleep 4
+send echo ffs-test-done\r
+sleep 2
+stop

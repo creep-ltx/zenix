@@ -9,8 +9,8 @@
  * mount [-t TYPE] [-o OPTIONS] DEVICE DIR  serve DEVICE with the filesystem server for TYPE (a service, fs.DEVICE) and put it on DIR
  * mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR   an NFS export (DESIGN D23): the service fs.nfsN, served by /sbin/nfscd
  * mount -a                   mount everything listed in /etc/fstab (init does this at boot)
- * TYPE is ext2, zenixfs, fat or nfs; without -t it is read from the partition's type in the RDB or MBR (a HOST:/EXPORT is nfs).
- * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs, fat or auto (from the partition type), OPTIONS =
+ * TYPE is ext2, zenixfs, fat, ffs or nfs; without -t it is read from the partition's type in the RDB or MBR (a HOST:/EXPORT is nfs).
+ * /etc/fstab: one line per mount, "DEVICE DIR TYPE OPTIONS", TYPE = ext2, zenixfs, fat, ffs or auto (from the partition type), OPTIONS =
  * "defaults" or a comma list; "noauto" leaves the line out of mount -a. Lines starting with # and blank lines are ignored.
  * An ext2 volume not marked clean (a power cut while it was written, DESIGN D17) is checked first by mount -a
  * (fsck.ext2 -y, as Linux's fsck pass at boot); a plain mount only warns. */
@@ -49,6 +49,8 @@ static int fat_part(u32 dt)
 {
     return (dt & 0xFFFFFF00u) == 0x4D425200u && ((dt & 0xFF) == 0xEF || ((dt & 0xE0) == 0 && (0x58525852u >> (dt & 0x1F) & 1)));
 }
+/* an RDB partition of AmigaDOS's own types, DOS\\0 .. DOS\\7 (D31) */
+static int ffs_part(u32 dt) { return (dt & 0xFFFFFFF8u) == 0x444F5300u; }
 static int mount_one(const char *dev, const char *dir, const char *type, const char *opts, int fsck)
 {
     struct diskinfo di;
@@ -58,12 +60,12 @@ static int mount_one(const char *dev, const char *dir, const char *type, const c
     if (disk_info(dev, &di) < 0) { dprintf(1, "mount: no such device: %s\n", dev); return 1; }
     if (di.mounted) { dprintf(1, "mount: %s is already in use\n", dev); return 1; }
     if (!type) {
-        type = di.dostype == DT_EXT2 ? "ext2" : di.dostype == DT_ZENIXFS ? "zenixfs" : fat_part(di.dostype) ? "fat" : 0;
-        if (!type) { dprintf(1, "mount: cannot tell the type of %s; use -t ext2, -t zenixfs or -t fat\n", dev); return 1; }
+        type = di.dostype == DT_EXT2 ? "ext2" : di.dostype == DT_ZENIXFS ? "zenixfs" : fat_part(di.dostype) ? "fat" : ffs_part(di.dostype) ? "ffs" : 0;
+        if (!type) { dprintf(1, "mount: cannot tell the type of %s; use -t ext2, -t zenixfs, -t fat or -t ffs\n", dev); return 1; }
     }
-    int z = !strcmp(type, "zenixfs"), f = !strcmp(type, "fat");
-    if (opts && !f && !fsck) { dprintf(1, "mount: -o is for FAT and NFS mounts only\n"); return 1; }
-    if (!z && !f && strcmp(type, "ext2")) { dprintf(1, "mount: unknown type %s (ext2, zenixfs, fat or nfs)\n", type); return 1; }
+    int z = !strcmp(type, "zenixfs"), a = !strcmp(type, "ffs"), f = a || !strcmp(type, "fat");   /* f: a server with options */
+    if (opts && !f && !fsck) { dprintf(1, "mount: -o is for FAT, FFS and NFS mounts only\n"); return 1; }
+    if (!z && !f && strcmp(type, "ext2")) { dprintf(1, "mount: unknown type %s (ext2, zenixfs, fat, ffs or nfs)\n", type); return 1; }
     strcpy(pname, "fs."); strncpy(pname + 3, dev, 12); pname[15] = 0;
     for (u32 i = 0; sys_mountinfo(i, &mi) == 0; i++)
         if (!strcmp(mi.port, pname)) { dprintf(1, "mount: %s is already mounted on %s\n", dev, mi.path); return 1; }
@@ -81,7 +83,8 @@ static int mount_one(const char *dev, const char *dir, const char *type, const c
      * port word (zfsd names it fs.DEVICE itself): the path and the volume id leave no room for it in SVC_TEXT */
     /* FAT (D30): the file /sbin/fatd, the id's place only (a volume serial is not read here), the options as they are:
      * fatd checks them */
-    strcpy(prog, z ? "/sbin/zfsd " : f ? "/sbin/fatd " : "@fsd ");
+    /* FFS (D31): /sbin/ffsd, the same way */
+    strcpy(prog, z ? "/sbin/zfsd " : a ? "/sbin/ffsd " : f ? "/sbin/fatd " : "@fsd ");
     strcat(prog, dev);
     if (!z && !f) { strcat(prog, " "); strcat(prog, pname); }
     if (f) id[17] = 0;
@@ -265,7 +268,7 @@ int main(int argc, char **argv)
     if (all) return mount_all();
     if (argc == 1) { list(); return 0; }
     if (!dev || !dir) {
-        dprintf(1, "usage: mount [-t ext2|zenixfs|fat] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
+        dprintf(1, "usage: mount [-t ext2|zenixfs|fat|ffs] [-o OPTIONS] DEVICE DIR     mount -t nfs [-o OPTIONS] HOST:/EXPORT DIR\n"
                "       mount -a     mount (list)\n");
         return 2;
     }
