@@ -53,9 +53,13 @@ UPDATES
     (Zenix/zenix; the boot partition of a card made for updates), the
     kernel is taken from there and zenixboot installs updates (DESIGN
     D15, zup(8)). Without one it takes "zenix" next to itself, as before,
-    and does nothing about updates. An update is a bundle copied to
-    Zenix/zenix-update.zup (always as zenix-update.zup.part first, then
-    renamed: a .part is a copy that was cut off and is renamed .bad).
+    and does nothing about updates. An update is a bundle in
+    Zenix/zenix-update.zup with its signature in zenix-update.zup.sig.
+    Zenix's zpkg -Syu writes both there itself (zpkg(8), SYSTEM UPDATES:
+    new files in AmigaOS's safe order, nothing else on the partition
+    changed), so no AmigaOS step is needed. Copied by hand from AmigaOS
+    instead, a file goes as NAME.part first, then renamed: a .part is a
+    copy that was cut off and is renamed .bad.
 
     A new bundle is read whole into memory (fast RAM first) and checked in
     this order: every count, size and offset and the SHA-256 of its table
@@ -217,8 +221,15 @@ NOTES
     (make build/zenix-card.img for an Emu68 SD card, build/zenix-boot.hdf
     for an IDE or CF disk); tools/write-card.sh writes the SD card.
 
+    zenixboot itself is never updated by a bundle (it would have no
+    copy in place between two renames): a new zenixboot is copied by
+    hand. The updates do not need one: zpkg writes the files this one
+    reads.
+
     Verified in FS-UAE (tools/zenixboot-test.sh; updates and signatures:
-    tools/update-test.sh); not yet run on a real Amiga. Not verified:
+    tools/update-test.sh; an update zpkg wrote, installed by the
+    zenixboot of the owner's card: tools/sysupdate-test.sh); not yet
+    run on a real Amiga. Not verified:
     whether an RTG card gives the monitor back to the chipset when no
     screen is shown.
 

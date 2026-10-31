@@ -28,13 +28,12 @@ DESCRIPTION
              the one here is "behind": the next server is tried.
     -Syu     -Sy, then every installed package with a newer version in
              the list. A newer system (the kernel, zup, zpkg, base) is
-             downloaded and checked, and zpkg says how it reaches the
-             boot partition: it is installed at the next restart, with
-             "Zenix (previous)" in the boot menu as the way back. Until
-             the update slot comes (D22 step 7) the owner copies it and
-             its .sig to BOOT:Zenix/ from AmigaOS. Packages that need
-             the new system are downloaded and wait: after the restart,
-             zpkg -Syu again.
+             downloaded, its signature checked, and written to the
+             AmigaDOS boot partition as Zenix/zenix-update.zup and its
+             .sig (SYSTEM UPDATES below): reboot, and zenixboot installs
+             it, with "Zenix (previous)" in the boot menu as the way
+             back. Packages that need the new system are downloaded and
+             wait: after the restart, zpkg -Syu again.
     -Syuu    as -Syu, and also down to the list's version where the
              installed one is newer (after a channel change)
     -S NAME  install packages and the dependencies they are missing,
@@ -54,7 +53,9 @@ DESCRIPTION
              kept as PATH.save).
     -U FILE  install a package file (a .zup and its .sig beside it, e.g.
              received with rz): copied into the cache first, its
-             signature checked, then installed. Give the whole path.
+             signature checked, then installed; a system bundle is
+             written to the boot partition as by -Syu. Give the whole
+             path.
              A file without its .sig, or signed by a key this build
              does not trust, is refused and nothing is kept.
     --back NAME
@@ -70,6 +71,33 @@ DESCRIPTION
 
     A running program keeps running the version it started with; zpkg
     names the ones that do.
+
+SYSTEM UPDATES
+    The system is never installed while Zenix runs. zpkg puts it where
+    zenixboot looks at every start: it finds the one AmigaDOS (FFS)
+    partition of the disk's RDB that has a Zenix folder with a kernel
+    in it (also inside the MBR partition of type 0x76 of an Emu68 SD
+    card), walks and checks that whole volume first (every header,
+    chain, checksum and the bitmap; anything odd and nothing is
+    written), then writes the .sig and the bundle as two new files in
+    AmigaOS's own safe order (the data, the bitmap, then the one block
+    that links each file into the folder, each step flushed), reads
+    both back from the disk and compares them. Nothing else on the
+    partition changes. A power cut leaves the file whole or not there
+    at all, at worst a few blocks marked in use that no file names; the
+    next write gives them back. Then:
+        reboot          zenixboot checks the signature, installs the
+                        kernel (Zenix/zenix.old is the previous one),
+                        zup installs zup, base and zpkg
+        zpkg -Syu       the packages that waited for the new system
+    While the last update is still on the partition (zenixboot retires
+    it at the start after its confirmed one, or after its third start)
+    a newer one is refused: restart, then zpkg -Syu again.
+
+    From a system whose zpkg cannot write the boot partition (Zenix
+    2026103000): zpkg -Syu brings the package zpkg-new (this zpkg as
+    /bin/zpkg-new), then zpkg-new -Syu writes the system, then reboot
+    (zpkg-new(8)).
 
 OPTIONS
     --snapshot NAME   read the dated snapshot NAME instead of the
@@ -110,14 +138,23 @@ NOTES
     test key (the channel test), a release build only the release keys
     (testing, stable). Only root changes packages; -Ss, -Si and -Q are
     for everyone. zpkg changes nothing on a ZenixFS root (a test root),
-    while a new system is on trial (not confirmed yet), or without a
-    package database. During a system update's restart nothing is new:
-    zenixboot and zup do what they always do (zenixboot(8), zup(8)).
+    without a package database, or while a new system is on trial when
+    zenixboot says so (UPD_F_TRIAL; no zenixboot sets it yet). During
+    a system update's restart nothing is new: zenixboot and zup do what
+    they always do (zenixboot(8), zup(8)).
+    The boot partition must use 512-byte blocks, 2 reserved blocks,
+    DOS\1 or DOS\3 (FFS), no bitmap extension block (under about 50
+    MB), on a disk that can flush; anything else is refused with the
+    reason. A machine started from the floppy (no zenixboot, no boot
+    partition) gets its programs, never the system: zpkg says so and
+    exits 1. Only zenixboot is never updated this way (zenixboot(8)).
     If the PC stops re-signing the list, every machine refuses it 60
     days after its last signature (a frozen repository cannot be
     passed off as current); --ignore-expiry goes on once. --back looks
     only in the cache for now (an image's first install has none).
-    Verified in FS-UAE (tools/zpkg-emu-test.sh) over the A2065 and SLIP.
+    Verified in FS-UAE (tools/zpkg-emu-test.sh) over the A2065 and SLIP;
+    the system update from the owner's 2026103000 system, twice, and on
+    the SD card's layout (tools/sysupdate-test.sh).
 
 SEE ALSO
-    zup(8), zenixboot(8), docs/d22-zpkg.md
+    zup(8), zenixboot(8), zpkg-new(8), docs/d22-zpkg.md

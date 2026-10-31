@@ -7,7 +7,8 @@
                                            installdb, the test key refused for release channels, two runs byte for
                                            byte; every list also through the C parser (CORETEST index)
   zpkg-test.py differential OUT CORETEST N the C list parser against mkrepo's Python one on N damaged lists
-  zpkg-test.py slot OUT CORETEST           the update slot's walk and write on tools/mkffs.py images (DOS\\1, DOS\\3)
+  zpkg-test.py boot OUT CORETEST           the boot partition writer (user/zpkg/bootfs.c) on tools/mkffs.py images
+                                           (DOS\\1, DOS\\3): new files, power cuts, in-place writes, refusals
   zpkg-test.py net OUT CLIENT              (inside unshare -rnm, lo up) the HTTP core and the -Sy/-Sw order against
                                            tools/host/http-test-server.py: needs OUT/repo from the repo part
 Work files in OUT. Every check prints PASS or FAIL; the exit status is the number of FAILs (capped at 100).
@@ -391,15 +392,40 @@ def part_repo(out, core):
     m = mkzup.parse_manifest(open(os.path.join(pk, "fam.manifest"), "rb").read())
     ok("repack keeps desc and takes", rc == 0 and m["desc"] == "the family" and m["takes"] == ["utils", "man"], msg)
 
-    # another dependency naming a version the repository did not give: refused, not guessed
+    # another dependency at the build's number on a package the repository keeps at an older version: rewritten to
+    # that version (choice 2 of steps 2-3, built 2026-10-31), the change rule ignoring dependency versions
     mkbuild(b + "/7", 2026103100, kernel=b"kernel two", files={"awk": b"awk 3", "base": b"init 2"},
             extra=[("tool", ["--dep", "base:VNUM", "--dep", "awk:VNUM", "f:755:0:0:@:/bin/tool"])])
     r3 = os.path.join(out, "repo3")
     shutil.rmtree(r3, ignore_errors=True)
     shutil.copytree(repo, r3)
     rc, msg = mr("add", r3, "test", b + "/7", "--date", "20271231")
-    ok("a dependency on an unchanged package at the build's number is refused (D22 3.4 is silent; said)",
-       rc != 0 and "tool needs awk 2026103100" in msg, msg)
+    ix3 = index(r3, "test") if rc == 0 else {"pkgs": {}}
+    tl, aw = ix3["pkgs"].get("tool"), ix3["pkgs"].get("awk")
+    ok("a dependency on an unchanged package at the build's number: written as that package's version in the list",
+       rc == 0 and tl and aw and dict(tl["deps"]).get("awk") == aw["vnum"] and aw["vnum"] < 2026103100, (msg, tl, aw))
+
+    # the bootstrap (D22 4.5 as built 2026-10-31): zpkg-new keeps the older base it names when the base changes, and
+    # sysutils depends on it in the repository only (never in the build: an image's database must not name it)
+    mkbuild(b + "/8", 2026103200, kernel=b"kernel three", files={"base": b"init 3"},
+            extra=[("sysutils", ["--dep", "base:VNUM", "f:755:0:0:@:/bin/reboot"]),
+                   ("zpkg-new", ["--dep", "base:2026103000", "f:755:0:0:@:/bin/zpkg-new"])])
+    r4 = os.path.join(out, "repo4")
+    shutil.rmtree(r4, ignore_errors=True)
+    shutil.copytree(repo, r4)
+    rc, msg = mr("add", r4, "test", b + "/8", "--date", "20271231")
+    ix4 = index(r4, "test") if rc == 0 else {"pkgs": {}, "system": {}}
+    zn, su = ix4["pkgs"].get("zpkg-new"), ix4["pkgs"].get("sysutils")
+    hdrmin = struct.unpack(">I", open(os.path.join(r4, "pool", zn["file"]["name"]), "rb").read()[36:40])[0] if zn else 0
+    ok("bootstrap: zpkg-new keeps depends base 2026103000 and that minimum in its header while the system moves on",
+       rc == 0 and zn and dict(zn["deps"]).get("base") == 2026103000 and hdrmin == 2026103000 and
+       ix4["system"].get("vnum") == 2026103200, (msg, zn, hdrmin))
+    ok("bootstrap: sysutils depends on zpkg-new in the list, not in the build",
+       su and dict(su["deps"]).get("zpkg-new") == zn["vnum"] and
+       b"zpkg-new" not in open(os.path.join(b, "8", "pkg", "sysutils.manifest"), "rb").read(), su)
+    rc2, msg2 = mr("add", r4, "test", b + "/8", "--date", "20271231")
+    ok("bootstrap: the same build again changes nothing (the added dependency is not a change)",
+       rc2 == 0 and "nothing changed" in msg2, msg2)
 
     # installdb: the repository's manifests for an image
     db = os.path.join(out, "installdb")
@@ -473,7 +499,7 @@ def part_differential(out, core, n):
        not bad, bad[:5])
 
 
-# ---- the slot ----
+# ---- the boot partition ----
 BS = 512
 
 
@@ -497,154 +523,295 @@ def ffs_hash(name, intl):
     return h % 72
 
 
-def part_slot(out, core):
-    d = os.path.join(out, "slot")
+class Judge:
+    """tools/ffsread.py's check: an FFS reader of its own (not bootfs.c's code). check() -> (problems, leaks, files)"""
+    def __init__(self, data, intl):
+        self.d = bytes(data)
+
+    def check(self):
+        import ffsread
+        return ffsread.check_volume(self.d)
+
+
+def xdfscan_ok(img, leaks_ok=False):
+    """amitools' validator agrees; with leaks_ok, its only complaints may be bitmap words with fewer free blocks than
+    it expects (a leak: in use, named by nothing), never one with a block free that a file holds"""
+    if not shutil.which("xdfscan"):
+        return True                                       # (amitools not installed: only the judge above)
+    h = img + ".hdf"
+    shutil.copy(img, h)
+    rc, o = run("xdfscan", "-v", h)
+    os.unlink(h)
+    if rc == 0 and " ok " in o.split("\n")[0]:
+        return True
+    errs = [ln for ln in o.split("\n")[1:] if "ERROR" in ln or "WARN" in ln]
+    if not leaks_ok or not errs:
+        return False
+    for ln in errs:
+        m = re.search(r"Invalid bitmap allocation .* got=([0-9a-f]{8}) expect=([0-9a-f]{8})", ln)
+        if not m or int(m.group(1), 16) & ~int(m.group(2), 16):
+            return False
+    return True
+
+
+def part_boot(out, core):
+    d = os.path.join(out, "boot")
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
-    rnd = random.Random(45)
-    SLOT = "zenix-update.slot"
+    BUN, SIG = "zenix-update.zup", "zenix-update.zup.sig"
+    env = dict(os.environ, SOURCE_DATE_EPOCH="1761600000")
     for intl in (False, True):
         dt = "DOS3" if intl else "DOS1"
-        h = ffs_hash(SLOT, intl)
-        # names in the slot's own hash chain, one before and one after it
-        same = []
-        i = 0
-        while len(same) < 2:
-            nm = "f%d" % i
-            if ffs_hash(nm, intl) == h:
-                same.append(nm)
-            i += 1
-        files = []
-        for nm, size in (("ss", 300), ("before", 5000)):
+        h = ffs_hash(BUN, intl)
+        same = [nm for nm in ("f%d" % i for i in range(5000)) if ffs_hash(nm, intl) == h][:2]
+        files, src = [], {}
+        for nm, size, path in (("ss", 14, "S/Startup-Sequence"), ("low", 3000, "Zenix/" + same[0]),
+                               ("filler", 60000, "Zenix/filler"), ("high", 2000, "Zenix/" + same[1]),
+                               ("kern", 30000, "Zenix/zenix")):
             p = os.path.join(d, nm)
-            open(p, "wb").write(os.urandom(size))
-            files.append("%s=%s" % (p, "S/Startup-Sequence" if nm == "ss" else "Zenix/" + same[0]))
-        slotdata = os.path.join(d, "slotdata")
-        open(slotdata, "wb").write(bytes(200 * 1024))            # 400 blocks: a header and five extension blocks
-        files.append("%s=Zenix/%s" % (slotdata, SLOT))
-        p = os.path.join(d, "after")
-        open(p, "wb").write(os.urandom(3000))
-        files.append("%s=Zenix/%s" % (p, same[1]))
+            src[path] = os.urandom(size)
+            open(p, "wb").write(src[path])
+            files.append("%s=%s" % (p, path))
         img = os.path.join(d, "boot-%s.img" % dt)
         rc, msg = run(sys.executable, os.path.join(TOOLS, "mkffs.py"), img, "2M", "BOOT", *(["--intl"] if intl else []),
-                      *files, env=dict(os.environ, SOURCE_DATE_EPOCH="1761600000"))
+                      *files, env=env)
         if rc:
             ok("mkffs.py %s" % dt, False, msg)
             continue
-        rc, o = run(core, "slot", img, "Zenix", SLOT, dt)
-        w = o.split()
-        ok("%s: the slot is found through its hash chain (a file before and after it in the chain)" % dt,
-           rc == 0 and w[0] == "ok" and int(w[1]) == 200 * 1024 and int(w[2]) == 400, o)
-        if rc:
-            continue
-        blocks = [int(x) for x in w[4:]]
-        hdrblk = int(w[3])
-        orig = open(img, "rb").read()
-        data = os.urandom(200 * 1024)
-        open(os.path.join(d, "data"), "wb").write(data)
-        rc, o = run(core, "slotwrite", img, "Zenix", SLOT, dt, "0", os.path.join(d, "data"))
-        new = open(img, "rb").read()
-        changed = {i for i in range(len(orig) // BS) if orig[i * BS:(i + 1) * BS] != new[i * BS:(i + 1) * BS]}
-        ok("%s: a write changes only the slot's data blocks, byte for byte everything else" % dt,
-           rc == 0 and changed <= set(blocks) and len(changed) > 390, (o, len(changed)))
-        ok("%s: the slot's bytes read back in file order" % dt,
-           b"".join(new[b * BS:(b + 1) * BS] for b in blocks) == data)
-        before = new
-        part = os.urandom(1000)
-        open(os.path.join(d, "part"), "wb").write(part)
-        rc, o = run(core, "slotwrite", img, "Zenix", SLOT, dt, "700", os.path.join(d, "part"))
-        new = open(img, "rb").read()
-        changed = {i for i in range(len(new) // BS) if before[i * BS:(i + 1) * BS] != new[i * BS:(i + 1) * BS]}
-        got = b"".join(new[b * BS:(b + 1) * BS] for b in blocks)
-        ok("%s: a write in the middle (700, 1000 bytes) touches blocks 1-3 of the slot only" % dt,
-           rc == 0 and changed <= {blocks[1], blocks[2], blocks[3]} and got[700:1700] == part and
-           got[:700] == data[:700] and got[1700:] == data[1700:], o)
-        rc, o = run(core, "slotwrite", img, "Zenix", SLOT, dt, str(200 * 1024 - 10), os.path.join(d, "part"))
-        ok("%s: a write past the slot's end is refused" % dt, rc != 0 and open(img, "rb").read() == new, o)
-
-        # refusals: on a damaged copy each; the image is never written by the walk
-        base = bytearray(open(img, "rb").read())
-        nb = len(base) // BS
+        # filler deleted (as AmigaOS would: unlinked, its blocks free), the bundle's chain sorted (low, high) as FFS
+        # keeps it: the new header then lands in filler's blocks, between the two
+        m = bytearray(open(img, "rb").read())
+        J = Judge(m, intl)
+        nb = len(m) // BS
         root = (2 + nb - 1) // 2
-        bm0 = lget(base, root, 79)
-        ext1 = lget(base, hdrblk, 126)
-        other = [x for x in range(nb) if lget(base, x, 0) == 2 and lget(base, x, 127) == 0xFFFFFFFD and x != hdrblk][0]
+        zdir = lget(m, root, 6 + ffs_hash("Zenix", intl))
+        while bytes(m[zdir * BS + 433:zdir * BS + 433 + m[zdir * BS + 432]]).decode() != "Zenix":
+            zdir = lget(m, zdir, 124)
+        _, _, fl = J.check()
+        fh = fl["Zenix/filler"][0]
+        lo, hi = fl["Zenix/" + same[0]][0], fl["Zenix/" + same[1]][0]
+        fchain = ffs_hash("filler", intl)
+        x, prev = lget(m, zdir, 6 + fchain), None
+        while x != fh:
+            prev, x = x, lget(m, x, 124)
+        if prev:
+            lset(m, prev, 124, lget(m, fh, 124))
+        else:
+            lset(m, zdir, 6 + fchain, lget(m, fh, 124))
+        fblocks = [fh] + [lget(m, fh, 77 - i) for i in range(lget(m, fh, 2))]
+        x = lget(m, fh, 126)
+        while x:
+            fblocks += [x] + [lget(m, x, 77 - i) for i in range(lget(m, x, 2))]
+            x = lget(m, x, 126)
+        bm0 = lget(m, root, 79)
+        for b in fblocks:
+            k = b - 2
+            lset(m, bm0, 1 + k // 32, lget(m, bm0, 1 + k // 32) | (1 << (k % 32)), fix=0)
+        lset(m, zdir, 6 + h, lo)
+        lset(m, lo, 124, hi)
+        lset(m, hi, 124, 0)
+        open(img, "wb").write(m)
+        prob, leaks, fl = Judge(m, intl).check()
+        ok("%s: the test volume is valid (filler deleted, the chain in block order)" % dt,
+           not prob and not leaks and "Zenix/filler" not in fl and xdfscan_ok(img), (prob, leaks))
+        rc, o = run(core, "boot", img, dt)
+        ok("%s: the walk accepts it (free blocks counted, no leak)" % dt, rc == 0 and o.split()[2] == "0", o)
+        orig = open(img, "rb").read()
+
+        bundle, sig = os.urandom(45000), os.urandom(80)       # 88 data blocks: a header and an extension block
+        open(os.path.join(d, "bundle"), "wb").write(bundle)
+        open(os.path.join(d, "sig"), "wb").write(sig)
+        log = os.path.join(d, "wlog")
+        if os.path.exists(log):
+            os.unlink(log)
+        rc1, o1 = run(core, "bootcreate", img, dt, SIG, os.path.join(d, "sig"), env=dict(os.environ, ZP_WLOG=log))
+        rc2, o2 = run(core, "bootcreate", img, dt, BUN, os.path.join(d, "bundle"), env=dict(os.environ, ZP_WLOG=log))
+        new = open(img, "rb").read()
+        prob, leaks, fl = Judge(new, intl).check()
+        ok("%s: the .sig and the bundle written as new files of Zenix/" % dt, rc1 == 0 and rc2 == 0, (o1, o2))
+        ok("%s: the volume after it: every check of the judge, no leak, xdfscan (amitools) ok" % dt,
+           not prob and not leaks and xdfscan_ok(img), (prob, leaks))
+        ok("%s: both read back byte for byte (the judge, tools/ffsread.py)" % dt,
+           fl.get("Zenix/" + BUN, (0, b""))[1] == bundle and fl.get("Zenix/" + SIG, (0, b""))[1] == sig and
+           run(sys.executable, os.path.join(TOOLS, "ffsread.py"), img, "get", "Zenix/" + BUN, os.path.join(d, "rb"))[0] == 0
+           and open(os.path.join(d, "rb"), "rb").read() == bundle)
+        ok("%s: every other file is as it was" % dt,
+           all(fl.get(p, (0, None))[1] == c for p, c in src.items() if p != "Zenix/filler"))
+        nh = fl["Zenix/" + BUN][0]
+        ok("%s: the new header sits in the chain in block order (between the two names of its chain)" % dt,
+           lo < nh < hi and lget(new, lo, 124) == nh and lget(new, nh, 124) == hi, (lo, nh, hi))
+        changed = {i for i in range(nb) if orig[i * BS:(i + 1) * BS] != new[i * BS:(i + 1) * BS]}
+        newblocks = set()
+        for p in ("Zenix/" + BUN, "Zenix/" + SIG):
+            b = fl[p][0]
+            newblocks.add(b)
+            x, first = b, True
+            while x:
+                if not first:
+                    newblocks.add(x)
+                newblocks.update(lget(new, x, 77 - i) for i in range(lget(new, x, 2)))
+                x, first = lget(new, x, 126), False
+        sh = fl["Zenix/" + SIG][0]
+        links = {zdir if ffs_hash(SIG, intl) != h else lo, lo}
+        ok("%s: only the new files' blocks, the bitmap and the link blocks changed" % dt,
+           changed - newblocks <= {bm0} | links and bm0 in changed, sorted(changed - newblocks))
+        w = open(log).read().split("\n")
+        seq = [ln for ln in w if ln]
+        # per file: W... (its blocks) F, W bitmap F, W link F
+        groups, cur = [], []
+        for ln in seq:
+            if ln == "F":
+                groups.append(cur)
+                cur = []
+            else:
+                cur.append(int(ln[2:]))
+        order_ok = len(groups) == 6 and not cur
+        for k in range(0, len(groups) - 2, 3) if order_ok else ():
+            order_ok &= set(groups[k]) <= newblocks and set(groups[k + 1]) == {bm0} and len(groups[k + 2]) == 1 and \
+                groups[k + 2][0] in links
+        ok("%s: the order: the file's blocks, flush; the bitmap, flush; one link write, flush (each file)" % dt, order_ok, seq[-12:])
+        # the sig overwritten in place: its one data block only
+        before = new
+        sig2 = os.urandom(80)
+        open(os.path.join(d, "sig2"), "wb").write(sig2)
+        rc, o = run(core, "bootwrite", img, dt, SIG, "0", os.path.join(d, "sig2"))
+        new = open(img, "rb").read()
+        changed = {i for i in range(nb) if before[i * BS:(i + 1) * BS] != new[i * BS:(i + 1) * BS]}
+        ok("%s: an in-place write changes only the file's data block" % dt,
+           rc == 0 and changed == {lget(new, sh, 77)} and Judge(new, intl).check()[2]["Zenix/" + SIG][1] == sig2, (o, changed))
+        rc, o = run(core, "bootcreate", img, dt, BUN, os.path.join(d, "bundle"))
+        ok("%s: a file that is there already is not made again (nothing changed)" % dt,
+           rc != 0 and "-17" in o and open(img, "rb").read() == new, o)
+        rc, o = run(core, "bootcreate", img, dt, BUN.upper(), os.path.join(d, "bundle"))
+        ok("%s: ... nor under another case (AmigaDOS names have none)" % dt, rc != 0 and open(img, "rb").read() == new, o)
+
+        # power cuts: before every block write of a create, then the next run (which makes it again, or finds it)
+        small = os.urandom(40000)                         # 79 data blocks, one extension block
+        open(os.path.join(d, "small"), "wb").write(small)
+        total = None
+        bad_cuts = []
+        for cut in range(1, 200):
+            c = os.path.join(d, "cut.img")
+            shutil.copyfile(img, c)
+            rc, o = run(core, "bootcreate", c, dt, "cutfile", os.path.join(d, "small"), str(cut))
+            if rc == 0:
+                total = cut - 1
+                break
+            prob, leaks, fl = Judge(open(c, "rb").read(), intl).check()
+            got = fl.get("Zenix/cutfile")
+            if prob or (got is not None and got[1] != small) or rc != 3:
+                bad_cuts.append((cut, prob[:2], got is not None, o))
+                continue
+            rc2, o2 = run(core, "bootcreate", c, dt, "cutfile", os.path.join(d, "small"))
+            prob, leaks2, fl = Judge(open(c, "rb").read(), intl).check()
+            if (rc2 != 0 and got is None) or prob or fl.get("Zenix/cutfile", (0, None))[1] != small or \
+                    (rc2 == 0 and leaks2):
+                bad_cuts.append((cut, "again", o2, prob[:2]))
+            if cut in (1, 40, 81, 82, 83):
+                if not xdfscan_ok(c, leaks_ok=True):
+                    bad_cuts.append((cut, "xdfscan"))
+        ok("%s: a cut before each of the %s block writes leaves a valid volume: the file whole or absent, at worst "
+           "leaked blocks; the next run finishes and gives the leaked blocks back" % (dt, total), total is not None and total > 80 and not bad_cuts,
+           bad_cuts[:4])
+
+        # refusals, each on a damaged copy; the image is never written
+        base = bytearray(open(img, "rb").read())
+        J = Judge(base, intl)
+        _, _, fl = J.check()
+        kh = fl["Zenix/zenix"][0]
+        bh = fl["Zenix/" + BUN][0]
+        ext1 = lget(base, bh, 126)
+        kblocks = [lget(base, kh, 77 - i) for i in range(lget(base, kh, 2))]
 
         def bit_free(img_, blk):
             k = blk - 2
-            li = 1 + k // 32
-            v = lget(img_, bm0, li) | (1 << (k % 32))
-            lset(img_, bm0, li, v, fix=0)
+            lset(img_, bm0, 1 + k // 32, lget(img_, bm0, 1 + k // 32) | (1 << (k % 32)), fix=0)
         cases = [
             ("a device that cannot flush", None, ["noflush"], "flush"),
             ("1024-byte blocks", None, ["1024", "2"], "512-byte"),
             ("4 reserved blocks", None, ["512", "4"], "reserved"),
-            ("the bitmap not valid", lambda m: lset(m, root, 78, 0), [], "validate"),
-            ("a bitmap extension block", lambda m: lset(m, root, 104, 7), [], "extension"),
-            ("a damaged root checksum", lambda m: lset(m, root, 20, 1, fix=None), [], "root"),
-            ("a damaged bitmap checksum", lambda m: lset(m, bm0, 5, 1, fix=None), [], "bitmap"),
-            ("a slot block marked free in the bitmap", lambda m: bit_free(m, blocks[200]), [], "free"),
-            ("the slot is a hard link (ST_LINKFILE)", lambda m: lset(m, hdrblk, 127, -4), [], "plain file"),
-            ("the slot has a hard link to it", lambda m: lset(m, hdrblk, 118, other), [], "hard link"),
-            ("a damaged file header checksum", lambda m: lset(m, hdrblk, 81, 1, fix=None), [], "damaged"),
-            ("a damaged extension block", lambda m: lset(m, ext1, 30, 1, fix=None), [], "damaged"),
-            ("an extension block with another parent", lambda m: lset(m, ext1, 125, root), [], "damaged"),
-            ("a data pointer outside the partition", lambda m: lset(m, hdrblk, 70, nb + 5), [], "outside"),
-            ("a data pointer to the root", lambda m: lset(m, hdrblk, 70, root), [], "metadata"),
-            ("a data pointer to a bitmap block", lambda m: lset(m, hdrblk, 70, bm0), [], "metadata"),
-            ("a data pointer to the slot's own header", lambda m: lset(m, hdrblk, 70, hdrblk), [], "metadata"),
-            ("a data block named twice", lambda m: lset(m, hdrblk, 70, lget(m, hdrblk, 71)), [], "twice"),
-            ("a byte size that does not match the blocks", lambda m: lset(m, hdrblk, 81, 100 * 1024), [], "count"),
-            ("a byte size not in whole blocks", lambda m: lset(m, hdrblk, 81, 200 * 1024 - 1), [], "whole blocks"),
-            ("the first data block not the first pointer", lambda m: lset(m, hdrblk, 4, blocks[5]), [], "first"),
-            ("the boot block's dostype not the partition's", lambda m: m.__setitem__(slice(0, 4), b"DOS\x07"), [], "dostype"),
+            ("the bitmap not valid", lambda q: lset(q, root, 78, 0), [], "valid"),
+            ("a bitmap extension block", lambda q: lset(q, root, 104, 7), [], "extension"),
+            ("a damaged root checksum", lambda q: lset(q, root, 20, 1, fix=None), [], "root"),
+            ("a damaged bitmap checksum", lambda q: lset(q, bm0, 5, 1, fix=None), [], "bitmap"),
+            ("a file's block marked free in the bitmap", lambda q: bit_free(q, kblocks[3]), [], "free"),
+            ("a block of two files", lambda q: lset(q, kh, 70, lget(q, bh, 77)), [], "twice"),
+            ("a damaged file header checksum", lambda q: lset(q, kh, 81, 1, fix=None), [], "damaged"),
+            ("a damaged extension block", lambda q: lset(q, ext1, 30, 1, fix=None), [], "damaged"),
+            ("an extension block with another parent", lambda q: lset(q, ext1, 125, root), [], "damaged"),
+            ("a data pointer outside the partition", lambda q: lset(q, kh, 70, nb + 5), [], "outside"),
+            ("a data pointer to the root", lambda q: lset(q, kh, 70, root), [], "twice"),
+            ("a data pointer to a bitmap block", lambda q: lset(q, kh, 70, bm0), [], "twice"),
+            ("a data pointer to a header", lambda q: lset(q, kh, 70, bh), [], "twice"),
+            ("a byte size that does not match the blocks", lambda q: lset(q, kh, 81, 100000), [], "count"),
+            ("the first data block not the first pointer", lambda q: lset(q, kh, 4, kblocks[5]), [], "first"),
+            ("the boot block's dostype not the partition's", lambda q: q.__setitem__(slice(0, 4), b"DOS\x07"), [], "dostype"),
+            ("an entry of an unknown kind", lambda q: lset(q, kh, 127, 7), [], "unknown"),
+            ("a header in the wrong directory (its parent)", lambda q: lset(q, kh, 125, root), [], "damaged"),
+            ("a hash chain that goes round", lambda q: lset(q, hi, 124, lo), [], "twice"),
         ]
         for what, fn, extra, want in cases:
-            m = bytearray(base)
+            q = bytearray(base)
             if fn:
-                fn(m)
+                fn(q)
             p = os.path.join(d, "case.img")
-            open(p, "wb").write(bytes(m))
-            rc, o = run(core, "slot", p, "Zenix", SLOT, dt, *extra)
-            ok("%s: refused: %s" % (dt, what), rc != 0 and o.startswith("refused") and want in o and
-               open(p, "rb").read() == bytes(m), o)
-        # a hash chain that goes round: the last entry of the slot's chain pointing back to its head; a name that
-        # hashes there but is not on the volume walks it
-        m = bytearray(base)
-        zdir = lget(m, root, 6 + ffs_hash("Zenix", intl))
-        while bytes(m[zdir * BS + 433:zdir * BS + 433 + m[zdir * BS + 432]]).decode() != "Zenix":
-            zdir = lget(m, zdir, 124)
-        head = last = lget(m, zdir, 6 + h)
-        while lget(m, last, 124):
-            last = lget(m, last, 124)
-        lset(m, last, 124, head)
-        absent = next("g%d" % i for i in range(100000) if ffs_hash("g%d" % i, intl) == h)
-        p = os.path.join(d, "case.img")
-        open(p, "wb").write(bytes(m))
-        rc, o = run(core, "slot", p, "Zenix", absent, dt)
-        ok("%s: refused: a hash chain that goes round" % dt, rc != 0 and "goes round" in o, o)
-        rc, o = run(core, "slot", p, "Zenix", SLOT, dt)
-        ok("%s: ... (the slot itself, before the loop, is still found)" % dt, rc == 0, o)
-        rc, o = run(core, "slot", img, "Zenix", SLOT, "DOS0")
+            open(p, "wb").write(bytes(q))
+            rc, o = run(core, "boot", p, dt, *extra)
+            rc2, o2 = run(core, "bootcreate", p, dt, "x", os.path.join(d, "sig")) if not extra else (1, "refused")
+            ok("%s: refused: %s" % (dt, what), rc != 0 and o.startswith("refused") and want in o and rc2 != 0 and
+               open(p, "rb").read() == bytes(q), o)
+        rc, o = run(core, "boot", img, "DOS0")
         ok("%s: OFS (DOS\\0) is refused" % dt, rc != 0 and "DOS" in o, o)
-        rc, o = run(core, "slot", img, "Zenix", "nothere", dt)
-        ok("%s: no slot file" % dt, rc != 0 and "no slot file" in o, o)
-        rc, o = run(core, "slot", img, "NoDir", SLOT, dt)
-        ok("%s: no slot directory" % dt, rc != 0 and "no slot directory" in o, o)
-        rc, o = run(core, "slot", img, "Zenix", same[0], dt)
-        ok("%s: a one-block file is refused as a slot (too small)" % dt, rc != 0 and "size" in o, o)
-        rc, o = run(core, "slot", img, "S", "Startup-Sequence", dt)
-        ok("%s: names are matched without case (as AmigaDOS)" % dt, rc != 0 and "size" in o, o)
-        up = SLOT.upper()
-        rc, o = run(core, "slot", img, "ZENIX", up, dt)
-        ok("%s: ZENIX/ZENIX-UPDATE.SLOT finds the slot" % dt, rc == 0 and o.startswith("ok"), o)
-    # an empty 1 KB slot (2 blocks) on a small volume
-    p = os.path.join(d, "small")
-    open(p, "wb").write(bytes(1024))
-    img = os.path.join(d, "small.img")
-    run(sys.executable, os.path.join(TOOLS, "mkffs.py"), img, "64K", "B", "%s=Zenix/%s" % (p, SLOT))
-    rc, o = run(core, "slot", img, "Zenix", SLOT, "DOS1")
-    ok("a 1 KB slot on a 64 KB volume", rc == 0 and o.split()[1:3] == ["1024", "2"], o)
+        # a leak (a block marked in use that nothing names) is not damage: counted, the walk goes on
+        q = bytearray(base)
+        free_blk = next(b for b in range(root + 30, nb) if lget(q, bm0, 1 + (b - 2) // 32) >> ((b - 2) % 32) & 1)
+        k = free_blk - 2
+        lset(q, bm0, 1 + k // 32, lget(q, bm0, 1 + k // 32) & ~(1 << (k % 32)), fix=0)
+        p = os.path.join(d, "case.img")
+        open(p, "wb").write(bytes(q))
+        rc, o = run(core, "boot", p, dt)
+        ok("%s: a leaked block is counted, not refused" % dt, rc == 0 and o.split()[2] == "1", o)
+        rc, o = run(core, "bootcreate", p, dt, "another", os.path.join(d, "sig"))
+        prob, leaks, fl = Judge(open(p, "rb").read(), intl).check()
+        ok("%s: ... and given back by the next file's bitmap write" % dt, rc == 0 and not prob and not leaks and
+           "Zenix/another" in fl and xdfscan_ok(p), (o, prob, leaks))
+        # an entry in another name's hash chain: refused (zp_boot_find looks only in the name's own chain)
+        q = bytearray(base)
+        kb = ffs_hash("zenix", intl)
+        other_h = next(x for x in range(72) if lget(q, zdir, 6 + x) == 0 and x != kb)
+        x, prev = lget(q, zdir, 6 + kb), None
+        while x != kh:
+            prev, x = x, lget(q, x, 124)
+        if prev:
+            lset(q, prev, 124, lget(q, kh, 124))
+        else:
+            lset(q, zdir, 6 + kb, lget(q, kh, 124))
+        lset(q, kh, 124, 0)
+        lset(q, zdir, 6 + other_h, kh)
+        p2 = os.path.join(d, "case2.img")
+        open(p2, "wb").write(bytes(q))
+        rc, o = run(core, "boot", p2, dt)
+        ok("%s: refused: an entry in another name's hash chain" % dt, rc != 0 and "hash chain" in o, o)
+        # a soft link and a hard link on the volume are walked (header only)
+        rc, o = run(core, "bootfind", img, dt, "zenix")
+        ok("%s: bootfind reads a file's blocks" % dt, rc == 0 and o.split()[1] == "30000", o)
+        rc, o = run(core, "bootfind", img, dt, "nothere")
+        ok("%s: a file that is not there" % dt, rc != 0 and o.startswith("absent"), o)
+    # no Zenix directory; Zenix a file; a full volume
+    p = os.path.join(d, "nodir.img")
+    run(sys.executable, os.path.join(TOOLS, "mkffs.py"), p, "64K", "B", "%s=S/x" % os.path.join(d, "sig"))
+    rc, o = run(core, "bootcreate", p, "DOS1", BUN, os.path.join(d, "sig"))
+    ok("no Zenix directory: refused", rc != 0 and "no Zenix directory" in o, o)
+    p = os.path.join(d, "zfile.img")
+    run(sys.executable, os.path.join(TOOLS, "mkffs.py"), p, "64K", "B", "%s=Zenix" % os.path.join(d, "sig"))
+    rc, o = run(core, "bootcreate", p, "DOS1", BUN, os.path.join(d, "sig"))
+    ok("Zenix a file, not a directory: refused", rc != 0 and "no Zenix directory" in o, o)
+    p = os.path.join(d, "full.img")
+    run(sys.executable, os.path.join(TOOLS, "mkffs.py"), p, "64K", "B", "%s=Zenix/zenix" % os.path.join(d, "sig"))
+    before = open(p, "rb").read()
+    open(os.path.join(d, "big"), "wb").write(os.urandom(70000))
+    rc, o = run(core, "bootcreate", p, "DOS1", BUN, os.path.join(d, "big"))
+    ok("not enough space: refused, nothing written", rc != 0 and "-28" in o and open(p, "rb").read() == before, o)
 
 
 # ---- the network part (inside a namespace) ----
@@ -915,8 +1082,8 @@ def main(a):
         part_repo(a[1], a[2])
     elif len(a) == 4 and a[0] == "differential":
         part_differential(a[1], a[2], int(a[3]))
-    elif len(a) == 3 and a[0] == "slot":
-        part_slot(a[1], a[2])
+    elif len(a) == 3 and a[0] == "boot":
+        part_boot(a[1], a[2])
     elif len(a) == 3 and a[0] == "net":
         part_net(a[1], a[2])
     else:

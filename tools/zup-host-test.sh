@@ -83,7 +83,7 @@ python3 tools/mkzup.py bundle $T/wrongv.zup --kernel $B/kernel.bin --version 202
 [ $? = 1 ] && grep -q "the kernel carries version" $T/out && check "a bundle whose kernel carries another version is refused" ok || { check "a bundle whose kernel carries another version is refused" bad; cat $T/out; }
 debugfs -R "ls /var/lib/zpkg" $B/zenix.hdf 2>/dev/null | tr -s ' ' '\n' >$T/db
 grep -qx base.manifest $T/db && grep -qx coreutils.manifest $T/db && grep -qx base-man.manifest $T/db && ! grep -qx 'utils.manifest\|man.manifest' $T/db &&
-    [ "$(grep -c '\.manifest$' $T/db)" = "$(wc -w <$B/pkg/list)" ] &&
+    [ "$(grep -c '\.manifest$' $T/db)" = "$(tr ' ' '\n' <$B/pkg/list | grep -vxc 'zpkg-new\|')" ] &&   # (zpkg-new: never on an image, D22 A2)
     check "the full root image holds the package database (/var/lib/zpkg): every package of the build, no utils or man" ok || { check "the full root image holds the package database" bad; cat $T/db; }
 # the split by family (DESIGN D22 8.4.4): every file of the build in exactly one package, each family taking utils
 # and man, base-man taking man, every manual page somewhere; the system bundle carries the base group only (3.1)
@@ -94,6 +94,8 @@ b = sys.argv[1]
 names = open(os.path.join(b, "pkg", "list")).read().split()
 owner = {}
 for n in names:
+    if n in mkzup.BOOTSTRAP:            # (D22 amendment 2: a copy of zpkg for old systems, in no split)
+        continue
     m = mkzup.parse_manifest(open(os.path.join(b, "pkg", n + ".manifest"), "rb").read())
     base = m["group"] == "base"
     assert base == (n in ("zup", "base", "zpkg")), n
@@ -617,7 +619,7 @@ for k, v in ((0, v0), (1, v1)):
     write("p%d" % k, "base", v, ents(man["base"]["entries"]), group="base", deps=[("zup", v)])
 if "zpkg" in man:                                       # zpkg joins the base group with the system update
     write("p1", "zpkg", v1, ents(man["zpkg"]["entries"]), group="base", deps=[("zup", v1)])
-fam = [n for n in names if n not in ("zup", "base", "zpkg")]
+fam = [n for n in names if n not in ("zup", "base", "zpkg") and n not in mkzup.BOOTSTRAP]
 utils, pages, seen = [], [("d", 0o755, 0, 0, None, "/usr"), ("d", 0o755, 0, 0, None, "/usr/man")], set()
 for n in fam:
     for e in ents(man[n]["entries"]):

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """A misbehaving HTTP/1.1 server for zpkg's HTTP core (DESIGN D22 8.1; tools/host/zpkg-test.sh, in unshare -rnm).
 
-  http-test-server.py ROOT PORTFILE     serves ROOT on 127.0.0.1 (a free port, written to PORTFILE)
+  http-test-server.py ROOT PORTFILE [PORT]   serves ROOT on 127.0.0.1 (PORT, else a free port; written to PORTFILE)
 
 Paths (each prefix changes how the file under ROOT is served; the rest is the file's path):
   /PATH               plain: Content-Length, Range honoured (206), keep-alive
@@ -25,6 +25,7 @@ import threading
 import time
 
 ROOT, PORTFILE = sys.argv[1], sys.argv[2]
+FIXED = int(sys.argv[3]) if len(sys.argv) > 3 else 0      # (a namespace of the test's own: a fixed port collides with nothing)
 cut_seen = set()
 lock = threading.Lock()
 
@@ -184,7 +185,7 @@ def serve(c):
 def main():
     s = socket.socket()
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("127.0.0.1", 0))
+    s.bind(("127.0.0.1", FIXED))
     s.listen(64)
     open(PORTFILE + ".part", "w").write("%d\n" % s.getsockname()[1])
     os.replace(PORTFILE + ".part", PORTFILE)

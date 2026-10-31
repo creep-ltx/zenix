@@ -247,9 +247,11 @@ files in `pool/` that are D15 bundles without a kernel, a signed package list pe
 signature, a serial against replay, an expiry against a frozen mirror) and a one-line `latest`. `zpkg` fetches,
 checks and decides; **`/sbin/zup` stays the only installer** (two new modes: a package from a file, a removal; its
 journal, prev links, three-way compare and recovery unchanged); D15's manifests stay the database. The system (the
-kernel and the base group, the only content of a system bundle) is never installed live: zpkg writes its signed bundle into an update slot file on the
-boot partition, zenixboot takes it from there at the restart and D15 runs as built ("Zenix (previous)" the way
-back). A package's way back is its previous version in the download cache. The full design:
+kernel and the base group, the only content of a system bundle) is never installed live: zpkg writes its signed bundle onto the
+boot partition as the two files zenixboot already reads (`Zenix/zenix-update.zup` and its `.sig`: new files of the
+FFS volume in AmigaOS's safe order, after a check of the whole volume; owner requirement 2026-10-31, d22 amendment
+2, which replaced the update slot), zenixboot installs it at the restart and D15 runs as built ("Zenix (previous)"
+the way back). A package's way back is its previous version in the download cache. The full design:
 [d22-zpkg.md](d22-zpkg.md).
 ## D23. The NFS client (roadmap block 2; design note revision 2 after two reviews; steps 0-4 built: reading, writing, users and nosuid)
 **Why.** Mount the owner's NAS (or a Linux PC) as a directory: `ls`, `cp`, running programs from it. **How.** NFSv3

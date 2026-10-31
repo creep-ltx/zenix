@@ -4,8 +4,10 @@
  *   -DFUZZ_INDEX    the package list, then the trust rules and every block's fields
  *   -DFUZZ_LATEST   latest
  *   -DFUZZ_HTTP     the HTTP response parser, the input cut into pieces the first bytes choose; URLs and redirects
- *   -DFUZZ_FFS      the slot walk over an image made of the input (up to 256 blocks), then a write that may touch
- *                   only the slot's data blocks
+ *   -DFUZZ_FFS      the boot partition's walk over an image made of the input (up to 256 blocks); on a volume it
+ *                   accepts, a new file: every block written must have been free (or a bitmap block, or the one
+ *                   link block), and the walk must accept the result with the file in it; then an in-place write
+ *                   that may touch only that file's data blocks
  *   -DFUZZ_RESOLVE  the resolver: a list from the input, installed packages made from its first blocks
  *   -DFUZZ_FMT      user/zpkgfmt.c (D15's frozen formats, zup's and zpkg's one parser; build with it, sha256.c and
  *                   -DZHOST): an input starting with Z is a bundle (head and table read in pieces as zup -f streams it,
@@ -52,6 +54,14 @@ static int mwr(void *u, zp_u32 b, unsigned char *buf)
         __builtin_trap();
     memcpy(m->d + 512 * (size_t)b, buf, 512);
     m->written[b] = 1;
+    return 0;
+}
+static int mflush(void *u) { (void)u; return 0; }
+static int fsrc(void *u, zp_u32 off, unsigned char *buf, zp_u32 n)
+{
+    (void)u;
+    for (zp_u32 i = 0; i < n; i++)
+        buf[i] = (unsigned char)(off + i);
     return 0;
 }
 #endif
@@ -222,8 +232,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 #elif defined(FUZZ_FFS)
     struct mem m;
     struct zp_ffs f;
-    struct zp_slot s;
+    struct zp_bootvol v;
+    struct zp_bootfile bf;
     const char *why;
+    static const zp_u32 date[3] = { 1, 2, 3 };
     zp_u32 n = (zp_u32)(size / 512);
     if (n < 8 || n > 256)
         return 0;
@@ -239,21 +251,56 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     f.canflush = 1;
     f.read = mrd;
     f.write = mwr;
+    f.flush = mflush;
     f.u = &m;
-    if (zp_slot_find(&f, "Zenix", "zenix-update.slot", &s, &why) == 0) {
-        unsigned char *buf = malloc(s.size);
-        memset(buf, 0xA5, s.size);
-        if (zp_slot_pwrite(&f, &s, 0, buf, s.size))
-            __builtin_trap();
-        for (zp_u32 b = 0; b < n; b++) {
-            int mine = 0;
-            for (zp_u32 i = 0; i < s.nblk; i++)
-                mine |= s.blk[i] == b;
-            if (m.written[b] && !mine)
-                __builtin_trap();       /* a write outside the slot's data blocks */
+    if (zp_boot_open(&f, "Zenix", &v, &why) == 0) {
+        unsigned char *before = malloc(512 * (size_t)n), *ownb = malloc(n / 8 + 1);
+        zp_u32 dir = v.dir, bm[ZP_BOOT_BMPAGES], nbm = v.nbm, k;
+        struct zp_bootvol v2;
+        memcpy(before, m.d, 512 * (size_t)n);
+        memcpy(ownb, v.own, n / 8 + 1);
+        memcpy(bm, v.bmblk, sizeof bm);
+        if (zp_boot_find(&v, "zenix-update.zup", &bf, &why) == 0)
+            zp_boot_file_free(&bf);
+        zp_u32 fsz = (zp_u32)(data[size - 1] * 300u);
+        struct fz { zp_u32 n; } fzs = { fsz };
+        if (zp_boot_create(&v, "zenix-update.zup", fsz, fsrc, &fzs, date, &why) == 0) {
+            for (zp_u32 b = 0; b < n; b++) {
+                int isbm = 0;
+                for (k = 0; k < nbm; k++)
+                    isbm |= bm[k] == b;
+                if (m.written[b] && (ownb[b >> 3] >> (b & 7) & 1) && !isbm && b != dir) {
+                    /* an owned block written: only the one chain link (a header in dir's chain) may be */
+                    if (memcmp(before + 512 * (size_t)b, m.d + 512 * (size_t)b, 512) &&
+                        (m.d[512 * (size_t)b + 3] != 2))
+                        __builtin_trap();
+                }
+            }
+            if (zp_boot_open(&f, "Zenix", &v2, &why))
+                __builtin_trap();               /* our own result must pass our own walk */
+            if (zp_boot_find(&v2, "zenix-update.zup", &bf, &why) || bf.size != fsz)
+                __builtin_trap();
+            memset(m.written, 0, n);
+            {
+                unsigned char *buf = malloc(fsz + 1);
+                memset(buf, 0xA5, fsz + 1);
+                if (zp_boot_pwrite(&v2, &bf, 0, buf, fsz))
+                    __builtin_trap();
+                for (zp_u32 b = 0; b < n; b++) {
+                    int mine = 0;
+                    for (zp_u32 i = 0; i < bf.nblk; i++)
+                        mine |= bf.blk[i] == b;
+                    if (m.written[b] && !mine)
+                        __builtin_trap();       /* an in-place write outside the file's data blocks */
+                }
+                free(buf);
+            }
+            zp_boot_file_free(&bf);
+            zp_boot_close(&v2);
         }
-        free(buf);
-        zp_slot_free(&s);
+        free(before);
+        free(ownb);
+        zp_boot_close(&v);
     }
     free(m.written);
     free(m.d);

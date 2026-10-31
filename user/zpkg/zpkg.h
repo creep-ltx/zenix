@@ -5,7 +5,7 @@
  * tests (tools/host/zpkg-test.sh) alike.
  *   index.c    the package list (3.3) and latest, and the trust rules for a list (5.1-5.3)
  *   resolve.c  the resolver: what -S, -Syu, -Syuu and -R/-Rs change and in which order (4.3)
- *   ffsslot.c  the update slot's read-only FFS walk and its in-place data write (4.5)
+ *   bootfs.c   the boot partition: the whole FFS volume checked, the update's files written in a safe order (4.5)
  * The installed database (D15's manifests) is read through user/zpkgfmt.c's manifest parser (the main session's
  * step 1); the resolver takes the installed packages as struct zp_inst, filled from it.
  * Errors are negative errno numbers (Linux's, as Zenix's), with a reason string (static text) where one helps.
@@ -23,6 +23,7 @@ typedef uint32_t zp_u32;
 #define ZP_EIO     (-5)
 #define ZP_ELOOP   (-40)
 #define ZP_ENOSPC  (-28)
+#define ZP_EEXIST  (-17)
 /* the list's own refusals (5.1-5.3), so zpkg can say which: below every errno number */
 #define ZP_ECHANNEL  (-1001)        /* not the channel asked for, or an unknown one */
 #define ZP_ECLASS    (-1002)        /* the channel's class does not fit the key that signed it */
@@ -181,9 +182,10 @@ int zp_plan_remove(const struct zp_world *w, const char *const *names, int nname
                    struct zp_plan *pl, const char **why);
 void zp_plan_free(struct zp_plan *pl);
 
-/* ---- the update slot on BOOT: (4.5): the read-only FFS walk, every time ---- */
+/* ---- the boot partition (4.5, as built 2026-10-31: user/zpkg/bootfs.c) ---- */
 #define ZP_DOS1 0x444F5301u
 #define ZP_DOS3 0x444F5303u
+#define ZP_BOOT_BMPAGES 25u             /* the root's bitmap pointers (no bitmap extension block: about 50 MB) */
 typedef int (*zp_blkio)(void *u, zp_u32 blk, unsigned char *buf);      /* one 512-byte block; 0 or <0 */
 struct zp_ffs {
     zp_u32 blocksize;               /* from the RDB partition's DosEnvec (SizeBlock x 4) */
@@ -191,17 +193,40 @@ struct zp_ffs {
     zp_u32 dostype;                 /* DosEnvec DosType */
     zp_u32 nblocks;                 /* the partition's blocks */
     int canflush;                   /* the device has DISKCAP_FLUSH */
-    zp_blkio read, write;           /* partition-relative block numbers */
+    zp_blkio read, write;           /* partition-relative block numbers; write 0: opened for reading only */
+    int (*flush)(void *u);          /* everything written so far on the medium (DISK_FLUSH); 0 or <0 */
     void *u;
 };
-struct zp_slot {
-    zp_u32 size;                    /* the file's bytes (its header's byte size) */
-    zp_u32 nblk;
-    zp_u32 *blk;                    /* the data blocks in file order (malloc'd; never kept between runs) */
-    zp_u32 header;                  /* the file header's block (for the tests) */
+struct zp_bootvol {                 /* a checked volume (zp_boot_open), never kept between runs */
+    const struct zp_ffs *f;
+    zp_u32 root, dir;               /* the root block; the directory asked for (Zenix), 0 if there is none */
+    zp_u32 nbm, bmblk[ZP_BOOT_BMPAGES];
+    unsigned char *bm;              /* the bitmap blocks as read (and as written) */
+    unsigned char *own;             /* a bit per block: metadata, or a file's data, found by the walk */
+    zp_u32 nfree;                   /* blocks free in the bitmap */
+    zp_u32 nleak;                   /* blocks marked in use that nothing names (a cut write's leftovers) */
+    zp_u32 nheaders;
+    int intl;
 };
-/* find DIR/NAME (one directory below the root) with every check of 4.5; 0, or a refusal with the reason */
-int zp_slot_find(const struct zp_ffs *f, const char *dir, const char *name, struct zp_slot *s, const char **why);
-/* write n bytes at off into the slot's data blocks only (whole blocks written, partial ones read first) */
-int zp_slot_pwrite(const struct zp_ffs *f, const struct zp_slot *s, zp_u32 off, const unsigned char *data, zp_u32 n);
-void zp_slot_free(struct zp_slot *s);
+struct zp_bootfile {
+    zp_u32 header, size, nblk;
+    zp_u32 *blk;                    /* its data blocks in file order (malloc'd) */
+};
+/* the whole volume walked and checked (bootfs.c's list); dir: the directory below the root whose files the calls
+ * below use (case as AmigaDOS: none). 0, or a refusal with the reason */
+int zp_boot_open(const struct zp_ffs *f, const char *dir, struct zp_bootvol *v, const char **why);
+void zp_boot_close(struct zp_bootvol *v);
+/* DIR/NAME, a plain file: 0, ZP_ENOENT, or a refusal */
+int zp_boot_find(struct zp_bootvol *v, const char *name, struct zp_bootfile *bf, const char **why);
+void zp_boot_file_free(struct zp_bootfile *bf);
+int zp_boot_read(const struct zp_bootvol *v, const struct zp_bootfile *bf, zp_u32 off, unsigned char *out, zp_u32 n);
+/* n bytes at off into the file's data blocks only (no metadata changes), then a flush */
+int zp_boot_pwrite(const struct zp_bootvol *v, const struct zp_bootfile *bf, zp_u32 off, const unsigned char *data,
+                   zp_u32 n);
+/* the blocks a new file of size bytes takes: its header, extension blocks and data */
+zp_u32 zp_boot_blocks(zp_u32 size);
+/* a new file DIR/NAME of size bytes, src giving them a piece at a time (off, buf, n: fill n bytes, 0 or <0), in the
+ * safe order with flushes; date: AmigaDOS days, minutes, ticks. 0, ZP_EEXIST, ZP_ENOSPC, or a refusal */
+typedef int (*zp_src)(void *u, zp_u32 off, unsigned char *buf, zp_u32 n);
+int zp_boot_create(struct zp_bootvol *v, const char *name, zp_u32 size, zp_src src, void *u, const zp_u32 date[3],
+                   const char **why);

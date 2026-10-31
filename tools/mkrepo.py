@@ -27,13 +27,13 @@ The layout (3.2): pool/NAME-VNUM.zup and .sig (a package bundle: one package, no
 CHANNEL/index-SERIAL and .sig (the list, 3.3). Every published file but latest is immutable: a pool file that exists
 with other bytes is refused, never replaced.
 
-Versions (3.4): a package is changed when its manifest differs in anything but its own version line and its
-"depends base" line (in a base-group package also its dependencies on other base-group packages, which always carry
-the group's one version); the base group is changed when the kernel differs with its ZVER record masked or any
+Versions (3.4): a package is changed when its manifest differs in anything but its own version line and the versions
+of its "depends" lines (the repository gives those); the base group is changed when the kernel differs with its ZVER record masked or any
 base-group package changed, and then the system and every base-group package get the build's version. A changed
 package gets the build's version; its "depends base" line and its bundle header's minimum become the channel's
-current base version. An unchanged package keeps its pool file. Any other dependency must name a version the new
-list has, or add refuses (the note does not say how to rewrite those).
+current base version (a bootstrap package of tools/mkzup.py BOOTSTRAP keeps the older base it names: D22 4.5 as
+built), and its other dependencies the versions the new list gives them; the change rule ignores every dependency's
+version. An unchanged package keeps its pool file. A dependency the new list does not have is refused.
 """
 import datetime
 import hashlib
@@ -328,12 +328,14 @@ def publish(repo, channel, ix, prev, opts):
 
 # ---- add (3.4) ----
 def masked_manifest(text, is_base, base_names):
+    """the manifest without what the repository gives: its own version, and every dependency's version (3.4; the
+    published versions are written in by rewrite_deps)"""
     out = []
     for ln in text.decode().split("\n"):
         w = ln.split(" ")
         if w[0] == "version":
             continue
-        if w[0] == "depends" and len(w) == 3 and (w[1] == "base" or (is_base and w[1] in base_names)):
+        if w[0] == "depends" and len(w) == 3:
             out.append("depends %s *" % w[1])
             continue
         out.append(ln)
@@ -353,12 +355,28 @@ def installed_size(m):
     return sum(e[5] for e in m["entries"] if e[0] in "fc")
 
 
-def rewrite_base_dep(text, base):
+def add_dep(text, name, vnum):
+    """a "depends NAME VNUM" line after the last depends line (or the version line)"""
+    lines = text.decode().split("\n")
+    if any(ln.split(" ")[:2] == ["depends", name] for ln in lines):
+        return text
+    at = max(i for i, ln in enumerate(lines) if ln.startswith("depends ") or ln.startswith("version ") or ln.startswith("group "))
+    return "\n".join(lines[:at + 1] + ["depends %s %d" % (name, vnum)] + lines[at + 1:]).encode()
+
+
+def rewrite_deps(text, base, vers, keep_base=False):
+    """"depends base" to the channel's base (unless keep_base: a package pinned to an older base, mkzup.BOOTSTRAP), and
+    every other "depends X" to X's version in the new list (the build's own number otherwise names a version the
+    repository may not give: choice 2 of D22's steps 2-3)"""
     out = []
     for ln in text.decode().split("\n"):
         w = ln.split(" ")
-        if w[0] == "depends" and len(w) == 3 and w[1] == "base":
-            ln = "depends base %d" % base
+        if w[0] == "depends" and len(w) == 3:
+            if w[1] == "base":
+                if not keep_base:
+                    ln = "depends base %d" % base
+            elif w[1] in vers:
+                ln = "depends %s %d" % (w[1], vers[w[1]])
         out.append(ln)
     return "\n".join(out).encode()
 
@@ -383,6 +401,8 @@ def add(repo, channel, build, opts):
     man, tgz, m = {}, {}, {}
     for n in names:
         man[n] = open(os.path.join(pkgdir, n + ".manifest"), "rb").read()
+        if n in mkzup.BOOTSTRAP_DEP and mkzup.BOOTSTRAP_DEP[n] in names:      # D22 4.5's bootstrap (mkzup.py)
+            man[n] = add_dep(man[n], mkzup.BOOTSTRAP_DEP[n], bv)
         tgz[n] = open(os.path.join(pkgdir, n + ".tgz"), "rb").read()
         m[n] = mkzup.parse_manifest(man[n])
         if m[n]["name"] != n or m[n]["vnum"] != bv:
@@ -432,7 +452,7 @@ def add(repo, channel, build, opts):
         for n in base_names:
             pkgs[n] = dict(old["pkgs"][n]) if n in old["pkgs"] else block_of(mkzup.parse_manifest(old_sys["pkg/%s.manifest" % n]))
 
-    # the other packages
+    # the other packages: first which changed (their versions), then each changed one with its dependencies' versions
     changed = []
     for n in names:
         if n in base_names:
@@ -445,15 +465,20 @@ def add(repo, channel, build, opts):
                 continue
             if bv <= ob["vnum"]:
                 die("%s changed, but the build's version %d is not above the channel's %d" % (n, bv, ob["vnum"]))
-        text = rewrite_base_dep(man[n], sysv)
+        changed.append(n)
+    vers = {n: (bv if n in changed else pkgs[n]["vnum"]) for n in names if n not in base_names}
+    for n in changed:
+        pin = mkzup.BOOTSTRAP.get(n)
+        if pin is not None and dict(m[n]["deps"]).get("base") != pin:
+            die("%s: a bootstrap package must say depends base %d (tools/mkzup.py BOOTSTRAP)" % (n, pin))
+        text = rewrite_deps(man[n], sysv, vers, keep_base=pin is not None)
         mm = mkzup.parse_manifest(text)
         parts = [(("pkg/%s.manifest" % n).encode(), text), (("pkg/%s.tgz" % n).encode(), tgz[n])]
-        blob = mkzup.bundle_bytes(parts, bv, bvstr, bv // 100, sysv, channel)
+        blob = mkzup.bundle_bytes(parts, bv, bvstr, bv // 100, sysv if pin is None else pin, channel)
         fname = "%s-%d.zup" % (n, bv)
         if write_new(os.path.join(repo, "pool", fname), blob) or not os.path.exists(os.path.join(repo, "pool", fname + ".sig")):
             sign(os.path.join(repo, "pool", fname), opts["key"], "bundle")
         pkgs[n] = block_of(mm, fname, blob)
-        changed.append(n)
 
     # every dependency must be met by the new list
     for n, p in pkgs.items():
@@ -714,7 +739,11 @@ def installdb(repo, channel, out):
             _, parts = pool_bundle(repo, p["file"]["name"])
         else:
             parts = sysparts
-        open(os.path.join(out, n + ".manifest"), "wb").write(parts["pkg/%s.manifest" % n])
+        text = parts["pkg/%s.manifest" % n]
+        if n in mkzup.BOOTSTRAP_DEP:            # (an image has no zpkg-new: its database must not name it, D22 A2)
+            text = b"".join(ln for ln in text.splitlines(True)
+                            if ln.split(b" ")[:2] != [b"depends", mkzup.BOOTSTRAP_DEP[n].encode()])
+        open(os.path.join(out, n + ".manifest"), "wb").write(text)
     print("%s: %d manifests of %s's list %d" % (out, len(ix["pkgs"]), channel, ix["serial"]))
 
 
