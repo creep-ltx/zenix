@@ -505,7 +505,7 @@ int main(int argc, char **argv)
     zenixfs_get_stats(fs, &st);
     if (st.mount_damage)
         dprintf(1, "%s: %s: %u commit record(s) or roots were unreadable; mounted from the last good commit%s\n", who, devname, st.mount_damage,
-                st.mount_back >= 2 ? " (too old to build on: read-only, fsck.zenixfs)" : "");
+                st.mount_old ? " (not to be built on: read-only, fsck.zenixfs -y)" : "");
     if (!zdisk_can_flush())
         dprintf(1, "%s: %s: the disk cannot flush its write cache: a power cut may lose the last commits, or damage the volume if the disk reorders writes\n", who, devname);
     int port = sys_port_create(pname);

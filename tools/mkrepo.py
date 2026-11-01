@@ -411,8 +411,8 @@ def add(repo, channel, build, opts):
         m[n] = mkzup.parse_manifest(man[n])
         if m[n]["name"] != n or m[n]["vnum"] != bv:
             die("%s: the manifest says %s %d, the build is %d" % (n, m[n]["name"], m[n]["vnum"], bv))
-        if n == SYSNAME:
-            die("a package may not be called %s (the system bundle's pool name)" % SYSNAME)
+        if n in (SYSNAME, SYSZNAME):
+            die("a package may not be called %s (a system bundle's pool name)" % n)
     base_names = [n for n in names if m[n]["group"] == mkzup.BASE_GROUP]
     if not base_names:
         die("the build has no base-group package")
@@ -428,6 +428,16 @@ def add(repo, channel, build, opts):
         old_base = sorted(k[4:-9] for k in old_sys if k.endswith(".manifest"))
         if oldk is None or masked_kernel(oldk) != masked_kernel(kimg) or old_base != sorted(base_names):
             base_changed = True
+        kz0 = os.path.join(build, "kernel-zfs.bin")
+        if os.path.exists(kz0):                               # DESIGN D34: a change only in the ZenixFS kernel is a new system too
+            if old.get("systemz") is None:
+                base_changed = True
+            else:
+                _, oz = pool_bundle(repo, old["systemz"]["file"])
+                if masked_kernel(oz["boot/zenix"]) != masked_kernel(open(kz0, "rb").read()):
+                    base_changed = True
+        elif old.get("systemz"):
+            die("the channel has a ZenixFS system (systemz), this build has no kernel-zfs.bin: make it first")
         else:
             for n in base_names:
                 if masked_manifest(old_sys["pkg/%s.manifest" % n], True, base_names) != \
@@ -607,7 +617,8 @@ def prune(repo):
         if mt:
             vers.setdefault(mt.group(1), []).append(int(mt.group(2)))
     for ix in current_pkgs:                             # the previous version of every package (and the system)
-        named = [(SYSNAME, ix["system"]["vnum"])] + [(n, p["vnum"]) for n, p in ix["pkgs"].items() if p["file"]]
+        named = [(SYSNAME, ix["system"]["vnum"])] + ([(SYSZNAME, ix["systemz"]["vnum"])] if ix.get("systemz") else []) + \
+            [(n, p["vnum"]) for n, p in ix["pkgs"].items() if p["file"]]
         for n, v in named:
             older = [x for x in vers.get(n, []) if x < v]
             if older:

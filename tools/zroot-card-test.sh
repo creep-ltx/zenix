@@ -200,7 +200,7 @@ if first < last:
 sys.exit(1 if bad else 0)
 PY
         check "p: cut $r: all $last synced rounds exact; later ones whole or a prefix; the renamed file one whole version" "$([ $? = 0 ] && [ -n "$last" ] && echo ok || echo bad)"
-        first=$((last + 2))
+        first=$((last + 1))        # the round the cut may have lost is done again
     done
     # the last cut's disk boots without a check, the orphan freed, and goes on
     cat >$d/k-end.txt <<'EOF'
@@ -326,7 +326,38 @@ EOF
     run $d/m5.fs-uae 800 $d/k5.txt $d/5.log
     check "r: two newest commits destroyed: boot's choices, no read-write among them" "$(grep -aq 'mounted read-only. Choose' $d/5.log && ! grep -aq 'go on read-write anyway' $d/5.log && echo ok || echo bad)"
     check "r: a write in the rescue shell is refused; a read works" "$(grep -aq 'read-only file system' $d/5.log && grep -aq '^r=0' $d/5.log && echo ok || echo bad)"
-    check "r: fsck.zenixfs -y refuses to build on this state: nothing written to the disk" "$(grep -aq 'nothing changed\|refuses' $d/5.log && cmp -s $d/c.hdf $d/c-before.hdf && echo ok || echo bad)"
+    check "r: fsck.zenixfs -y refuses to build on this state: nothing written to the disk" "$(grep -aq 'nothing changed' $d/5.log && cmp -s $d/c.hdf $d/c-before.hdf && echo ok || echo bad)"
+    # --old: on the owner's word, build on it; the shell's exit goes on read-write
+    cat >$d/k6.txt <<'EOF'
+wait Choose \(man rescue\) 600
+sleep 3
+send 3
+wait zenix:/# 120
+sleep 1
+send fsck.zenixfs --old ide0p1; echo ro=$?\r
+wait (?m)^ro= 300
+sleep 1
+send exit\r
+wait the root is clean now 300
+wait zenix:/# 300
+sleep 2
+send echo after-old > /after-old.txt; sync; cat /after-old.txt; dmesg | tail -1; echo OLD-DONE\r
+wait (?m)^OLD-DONE 60
+sleep 1
+stop
+EOF
+    cp $d/c-before.hdf $d/c2.hdf
+    conf $d/m6.fs-uae $d/c2.hdf $BD/zenix-zfs.adf
+    run $d/m6.fs-uae 800 $d/k6.txt $d/6.log
+    check "r: fsck.zenixfs --old: built on the old state with a warning, read-write after the shell, a file written" "$(grep -aq 'ro=0' $d/6.log && grep -aq '^after-old' $d/6.log && echo ok || echo bad)"
+    python3 -I -c '
+import sys
+d = open(sys.argv[1], "rb").read()
+i = d.find(b"ZNFS", 512)
+while i >= 0 and not (i % 512 == 32 and d[i - 28:i - 26] == b"ZB"):
+    i = d.find(b"ZNFS", i + 1)
+open(sys.argv[2], "wb").write(d[i - 32:])' $d/c2.hdf $d/c2.img
+    check "r: ... the PC's fsck, clean, the file there" "$($Z fsck $d/c2.img >/dev/null 2>&1 && $Z cat $d/c2.img /after-old.txt | grep -q after-old && echo ok || echo bad)"
     rm -rf $d/out2; check "r: the PC's salvage still brings the files back" "$($Z salvage $d/c.img $d/out2 >/dev/null 2>&1 && [ -f $d/out2/etc/motd ] && echo ok || echo bad)"
 }
 

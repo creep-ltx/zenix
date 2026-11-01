@@ -151,7 +151,9 @@ static int rescue(const char *dev, int zfs_)
         say(tool);
         say("-y ");
         say(dev);
-        say("   repair what it can\n  mount, cp          copy files to safety (another disk) first\n"
+        say("   repair what it can\n");
+        if (zfs) { say("  fsck.zenixfs --old "); say(dev); say("  build on the old state (older files may be wrong)\n"); }
+        say("  mount, cp          copy files to safety (another disk) first\n"
             "  exit               back to these choices\n");
         static const char env[] = "PATH=/bin\0HOME=/\0USER=root\0LOGNAME=root\0SHELL=/bin/sh\0";
         sys_envset(env, sizeof env);            /* for the shell; boot's own stays empty after it */
@@ -281,20 +283,21 @@ int main(void)
 #ifdef KERNEL_ZFSD
     else if (type == 2) {                       /* ZenixFS: a root it can only read (DESIGN D34) */
         struct umsg q;
-        q.type = FS_HEALTH;
-        if (sys_call(sys_port_find("fs"), &q) == 1) {
+        for (;;) {                              /* again after a repair: the writable server must agree */
+            q.type = FS_HEALTH;
+            if (sys_call(sys_port_find("fs"), &q) != 1) break;
             q.type = FS_QUIT;                   /* served again without taking the device: the repair tool needs it */
             sys_call(sys_port_find("fs"), &q);
             memcpy(w, "-fsck", 5);
             sys_svc_register("fs", prog, -10);
             sys_mountinfo(0, &mi);
             ro = rescue(dev, 1);
-            if (!ro) {
-                q.type = FS_QUIT;
-                sys_call(sys_port_find("fs"), &q);
-                memcpy(w, "-root", 5);
-                sys_svc_register("fs", prog, -10);
-            }
+            if (ro) break;
+            q.type = FS_QUIT;
+            sys_call(sys_port_find("fs"), &q);
+            memcpy(w, "-root", 5);
+            sys_svc_register("fs", prog, -10);
+            sys_mountinfo(0, &mi);
         }
     }
 #endif

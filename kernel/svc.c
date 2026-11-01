@@ -164,8 +164,8 @@ static int spawn(struct svc *s)
             }
         if (k == sizeof images / sizeof images[0] && eq(argv[0], "zfsd")) {
             if (s->essential)
-                kprintf("svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the test kernel "
-                        "kernel-zfs (DESIGN D19)\n");
+                kprintf("svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the kernel "
+                        "kernel-zfs (DESIGN D34)\n");
             else
                 pid = proc_spawn(zfsd_file, argv, s->nwords, 0, 0, 0);
         }

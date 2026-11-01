@@ -1302,9 +1302,10 @@ static int cmd_clean(int quietly)
         u32 v = (u32)strtoul(dash + 1, &e, 10);
         if (strncmp(e, ".zup", 4)) { if (strstr(f, ".part") || strstr(f, ".tmp")) { sys_unlink(f); gone++; } continue; }
         *dash = 0;
-        struct zf_pkg *k = strcmp(f, "zenix") ? inst_find(f) : inst_find("base");
+        int sysb = !strcmp(f, "zenix") || !strcmp(f, "zenixz");   /* the system bundles (zenixz: for a ZenixFS root, D34) */
+        struct zf_pkg *k = sysb ? inst_find("base") : inst_find(f);
         int keep = 0;
-        if (k && strcmp(f, "zenix")) {
+        if (k && !sysb) {
             if (v == k->vnum) keep = 1;
             else if (v < k->vnum) {                     /* the newest older one stays */
                 keep = 1;
@@ -1315,7 +1316,7 @@ static int cmd_clean(int quietly)
                     if (w > v && w < k->vnum) keep = 0;
                 }
             }
-        } else if (!strcmp(f, "zenix") && k) keep = v > k->vnum;   /* a system bundle only while it waits */
+        } else if (sysb && k) keep = v > k->vnum;   /* a system bundle only while it waits */
         *dash = '-';
         if (!keep) { sys_unlink(f); gone++; }
     }

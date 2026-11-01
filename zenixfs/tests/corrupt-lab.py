@@ -165,6 +165,7 @@ def build_base(path, seed, nfiles, bshift, tree=None):
         f.close()
         run(TOOL, "put", path, f.name, f"/work/n{i}.txt")
         os.unlink(f.name)
+    run(TOOL, "rm", path, "/big0.bin")                   # the last commit frees data the commit before still uses: a rollback must find it whole
 
 
 def reference(path):
@@ -215,6 +216,7 @@ def scenarios(img):
     if nodes:
         sc.append(("one inner node: garbage", lambda c: garbage(c, one(nodes))))
         sc.append(("one inner node: zeroed", lambda c: zero_block(c, one(nodes))))
+        sc.append(("an inner node and a leaf: garbage", lambda c: [garbage(c, nodes[0][0]), garbage(c, leaves[-1][0])]))
     sc.append(("the root block: garbage", lambda c: garbage(c, root)))
     sc.append(("newest commit record: bit flips", lambda c: flip_bits(c, recs[0][1], 2)))
     sc.append(("newest commit record: zeroed", lambda c: zero_block(c, recs[0][1])))
@@ -311,6 +313,7 @@ EXPECT = {
     "the root block: garbage": (-1, -1, True),
     "one inner node: garbage": (0, 0, True),                 # the leaves are all there: new nodes, nothing lost
     "one inner node: zeroed": (0, 0, True),
+    "an inner node and a leaf: garbage": (-100000, -1, False),   # must refuse, or go back one commit: nothing written first, no wrong file
     "one leaf: garbage": (-100000, -1, False),               # may refuse; never a wrong file, a refusal changes nothing, salvage keeps its files
     "one leaf: zeroed": (-100000, -1, False),
     "one leaf: 3 bit flips": (-100000, -1, False),

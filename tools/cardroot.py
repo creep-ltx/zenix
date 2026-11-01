@@ -183,14 +183,17 @@ def carry(old, new):
             for c in plan.cmds:
                 w = c.split()
                 if w[0] == "rm":
-                    ztool("rm", new, w[1])
+                    if ztool("stat", new, w[1]).returncode == 0 and ztool("rm", new, w[1]).returncode:
+                        die("%s: cannot remove it from the new root" % w[1])
                 elif w[0] == "write":
                     if ztool("put", new, w[1], w[2]).returncode:
                         die("%s: cannot write it to the new root" % w[2])
                 elif w[0] == "mkdir":
-                    ztool("mkdir", new, w[1])
+                    if ztool("mkdir", new, w[1]).returncode:
+                        die("%s: cannot make it in the new root" % w[1])
                 elif w[0] == "sif" and w[2] == "mode":
-                    ztool("chmod", new, "%o" % (int(w[3], 8) & 0o7777), w[1])
+                    if ztool("chmod", new, "%o" % (int(w[3], 8) & 0o7777), w[1]).returncode:
+                        die("%s: cannot set its mode in the new root" % w[1])
             r = ztool("fsck", new)
             if r.returncode != 0:
                 die("the new root is not clean after the changes:\n" + r.stdout.decode(errors="replace"))

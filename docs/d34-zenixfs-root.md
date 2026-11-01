@@ -46,19 +46,24 @@ present, "1 problem". A write would have overwritten live blocks.
 - `zenixfs_rebuild_bitmap` refuses a tree it could not read whole, and changes nothing.
 - `zenixfs_repair` (the policy, shared by `zenixfs-tool repair` and `fsck.zenixfs -y`): the tree whole: the map follows it. Only inner
   nodes damaged: **new inner nodes over the leaves, nothing lost**: every leaf says what it is (checksum, its own block number), and the
-  commit's map says exactly which blocks are live, so old copies of leaves are not taken for live ones. The new nodes go to free blocks;
-  only after the whole check has passed does a commit make them current. Every used block the new tree does not reach must be an old
-  node or one of the damaged ones: one more means a leaf is gone (perhaps with a file's extents, which link counts do not see), and it
-  refuses. Otherwise the commit before, if it is whole and really the one before. Otherwise it refuses and changes nothing, and `salvage`
-  still has everything it had.
+  commit's map says exactly which blocks are live, so old copies of leaves are not taken for live ones. **Everything is decided before
+  anything is written**, by walking the leaves as if they were the tree: the links check out, no block they reach is marked free, and every
+  used block they do not reach is a valid old node or one of the blocks the old tree's walk named damaged. One more means a leaf is gone
+  (perhaps with a file's extents, which link counts do not see), and it refuses, having written nothing. Otherwise the commit before, if
+  its tree is whole and it is the one before. Otherwise it refuses, changes nothing, and `salvage` still has everything it had. Only a
+  destroyed superblock is rewritten first (and only if block 0 really fails its checks, and the records' map size fits the device).
 - A destroyed leaf is not repaired in place: its contents exist nowhere else in the current state. `salvage` and `rescue` are the way.
-- Every generation is checked: a root or tree block newer than the commit that reaches it, or a block newer than its parent (`fsck`, the
-  walk), is damage. Cost: compares on a read from the disk, nothing per request.
+- Generations are checked: a root newer than its commit, a tree block read from the disk newer than the state in hand (every read), a block
+  newer than its parent (only `fsck`'s walk). Cost: compares on a read from the disk, nothing per request.
 - `mount_back` (a new statistic): how far behind the newest commit that may have existed this one is, counting unreadable slots after the
-  newest valid one, also a zeroed slot on a volume past its first turn of the ring (it used to pass silently). **0 or 1: whole** (format
-  rule 3 keeps exactly one older commit). **2 or more, or a map copy newer than the record: an ordinary mount is read-only.**
+  newest valid one, also a zeroed slot on a volume past its first turn of the ring (it used to pass silently). **The newest valid record is
+  safe** (a torn newer one is only a cut). **Past a valid record (its root or map is bad), 2 or more back, or a map copy newer than the
+  record: an ordinary mount, also a server's restart, is read-only.** The commit before is whole only until a later transaction starts
+  writing (format rule 3), and without data checksums a repair that goes back one commit cannot prove the data of older files: it says so.
 
 **Format:** nothing changes. These are rules for reading what version 1 already writes (`zenixfs-format.md` section 8).
+
+**The review (one independent read of this diff, 2026-11-01)** found the first version wrote its new nodes before deciding, so a refusal was followed by a rollback onto overwritten data; `-y` took any failed mount for a missing superblock and rewrote it; a restart mount ignored the read-only rule; `--restore` refused a broken p3; and more. All fixed but those named open in section 8. One trap from the fix: the checksum of a superblock passes at a smaller block size too, because 256 rotations of a 32-bit sum over zeros change nothing: a block size is only proven by the superblock's own field.
 
 **Test.** `--check` no longer reads the source tree: the tree comes from a seed, and it insists on a tree of three levels and one of two
 (a volume of another shape fails the check instead of quietly testing something else). Every inner node in turn; a failure prints the line
@@ -85,11 +90,12 @@ The name "test-only" goes: `kernel-zfs` is the kernel for a ZenixFS root. A mach
 ## 4. Boot, the clean mark, rescue
 - **No check at boot, no clean mark (D17 section 9 stands):** a cut leaves the last commit. `zfscut`: killed while zup installs, the host's
   fsck is clean at once, the next start needs no check, zup's journal finishes or rolls back.
-- **`zfsd -root` on a state it can only read** (`mount_back` >= 2): a new request `FS_HEALTH` (26; claims.md) says so to boot. boot stops
+- **`zfsd -root` on a state it can only read** (section 2): a new request `FS_HEALTH` (26; claims.md) says so to boot. boot stops
   that server, starts it again with `-fsck` (read-only, the device shared, the same word as fsd's), and offers man rescue's choices without
-  "read-write anyway": writing on such a state could overwrite files. In the shell `fsck.zenixfs -y`; when `fsck.zenixfs` says clean, the
-  shell's exit goes on read-write. An update is not installed on a read-only root (as for ext2).
-- **A root that cannot be mounted at all:** with a damaged superblock boot cannot tell the type and fsd says there is no filesystem; with
+  "read-write anyway": writing on such a state could overwrite files. In the shell `fsck.zenixfs -y` (one commit back at most) or `--old`
+  (the newest readable state, on the owner's word, older files may be wrong); when `fsck.zenixfs` says clean, the shell's exit starts the
+  writable server, and boot asks again. An update is not installed on a read-only root (as for ext2).
+- **A root that cannot be mounted at all:** the leftmost inner node damaged (a mount looks there for orphans), or with a damaged superblock boot cannot tell the type and fsd says there is no filesystem; with
   all records gone zfsd says what to do. Either way the service's panic stops the machine, nothing written. The floppy `zenix-mount.adf`
   (`fsck.zenixfs -y DEVICE`) or the PC's tool repairs it.
 - **`df`, `sync`:** as on any mount: 2 KB or 4 KB blocks in `df`; `sync` commits. The commit timer: at most 3 s after the first change.
@@ -102,7 +108,7 @@ Measured in FS-UAE (memory only; no speed from here):
 | | ext2 root | ZenixFS root |
 |---|---|---|
 | Kernel image | 169,312 bytes | 209,484 bytes (`bootz` and `zfsd` built in) |
-| Server's cache, chip-only | 24 KB | 96 KB of blocks, 2 map pages |
+| Server's cache, chip-only | 24 KB | 96 KB of blocks (128 KB at 4 KB blocks: the library's floor of 32), 2 map pages |
 | Server's cache, fast RAM | 48 blocks | 48 blocks, 8 map pages |
 | Free with one login, 2 MB chip alone | 1323 KB | 1135 KB (2 KB blocks), 1071 KB (4 KB blocks): 188-252 KB less: the kernel 40, zfsd's image and its running copy 80, the cache and scratch blocks the rest |
 
@@ -148,6 +154,7 @@ inside each flush), which this does not replace. No real power has been cut (sec
 **What cannot be known from here:** how the SD path behaves with this write pattern (2-4 KB transfers, each commit two flushes; ext2 writes 1 KB at a time); whether the Emu68 SD path's flush is a real one (`zfsd` prints a line if the disk says it cannot flush); speed. **A real power cut has never been tried on ZenixFS.**
 
 ## 8. Open
+- Known, documented, not fixed: after a repair by rollback, the abandoned newer records stay valid: if the first commit after it is lost too, mount takes one of them. Two faults; zeroing them would make the ring look damaged later. The commit before as "whole": see section 2; the real fix is keeping freed blocks one commit longer (Z8 says so, the code does not) or data checksums, both after measurements.
 - The trial itself, the owner's. The stock A1200 and the 060 (a DoM image with a ZenixFS root: `tools/mkdom.sh` is ext2 only).
 - `zenix-mount.adf` as the floppy for a root that cannot be mounted: it is 2 MB+ safe only by its own RAM disk; tested with fast RAM here.
 - Speed on real hardware; read-ahead, several blocks in one disk command (docs/zenixfs.md "not done"): only after the first measurements.

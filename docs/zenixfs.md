@@ -49,14 +49,14 @@ What the corruption lab (`make -C zenixfs lab`) finds, on a generated tree of 13
 |---|---|---|---|
 | newest commit record bit-flipped or zeroed | mounts from the commit before (warns); its files are gone | all but those | clean, the same |
 | the two newest destroyed | cannot mount, or read-only | **all** (carved) | refuses, changes nothing (`--rollback K` on request) |
-| root block destroyed | the commit before | the same | clean, the same |
+| root block destroyed | the commit before, read-only | the same | clean, the same (older data not provable: it says so) |
 | **an inner tree node destroyed** (each in turn: `--sweep`) | files under it unreadable | **all** (carved) | **clean, all: new nodes over the leaves** |
 | **all 8 commit records destroyed** | cannot mount | **all** | refuses |
 | **superblock destroyed** | cannot mount | **all** | **clean, all** |
 | one or both copies of a free-space map page destroyed | cannot mount / warns | all | **clean, all** |
 | one leaf destroyed (bit flips, zeros, garbage) | `fsck` finds it; `get` copies the rest and says what failed | all but what that leaf held (flagged `.partial`/`.nosize`, or the rest of its items carved) | refuses, changes nothing (or the commit before when the leaf is only the newest commit's); use salvage/rescue |
 | ten leaves destroyed | most of the tree unreadable | most, the rest flagged | same |
-Why the two rows with "refuses": `rule 3` of the format keeps exactly one older commit whole. Further back the tree may check out while its files' data was reused: a repair that guessed could leave a wrong file with no warning. Numbers and reasons: docs/d34-zenixfs-root.md section 2.
+Why the rows with "refuses": rule 3 of the format keeps one older commit whole at most. Further back the tree may check out while its files' data was reused: a repair that guessed could leave a wrong file with no warning. Numbers and reasons: docs/d34-zenixfs-root.md section 2.
 **The one silent kind of error: bits flipped inside file data.** Only metadata is checksummed (the data checksums of the plan are reserved in the format but not built), so a flipped bit in a file's data
 comes back unnoticed; every other kind of damage is either repaired or flagged. A destroyed leaf is not repaired in place: `rescue` makes a clean new image from what survives.
 The recovery commands were run under AddressSanitizer on the lab and on 40 randomly damaged images (0 reports). `make test` runs the part of the lab that must always succeed.

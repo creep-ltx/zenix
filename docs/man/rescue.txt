@@ -75,12 +75,14 @@ A ZENIXFS ROOT
     real at once or not at all, and the next start finds the last commit
     (at most a few seconds old), silently. Nothing above happens then.
 
-    Only damage from a bad disk or a bug brings this up. When the two
-    newest commit records are unreadable boot mounts what it can read-only
-    and offers the choices above without 2: writing on such an old state
-    could overwrite files. In the rescue shell "fsck.zenixfs DEVICE" checks
-    and "fsck.zenixfs -y DEVICE" repairs what it can; when it is clean, the
-    shell's exit goes on read-write.
+    Only damage from a bad disk or a bug brings this up: the newest commit
+    cannot be used. boot mounts what it can read-only and offers the
+    choices above without 2: writing on an old state could overwrite files.
+    In the rescue shell "fsck.zenixfs DEVICE" checks, "fsck.zenixfs -y
+    DEVICE" repairs what it can (one commit back at most), and "fsck.zenixfs
+    --old DEVICE" builds on the newest state that can be read, on your
+    word: older files may be wrong. When it is clean, the shell's exit goes
+    on read-write.
 
     When the root cannot be mounted at all (superblock or all commit
     records destroyed) Zenix stops with a panic that names the device.

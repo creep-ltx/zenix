@@ -63,9 +63,11 @@ OFF=$((S3 * 512)); LEN=$((N3 * 512))
 [ $((OFF + LEN)) -le "$SIZE" ] || die "$DEV: partition 3 reaches past the end of the disk"
 magic() { dd if="$1" bs=1 skip=$(($2 + 1080)) count=2 status=none | od -An -tx1 | tr -d ' \n'; }
 zmagic() { dd if="$1" bs=1 skip=$(($2 + 32)) count=4 status=none; }
-if [ "$(magic "$DEV" $OFF)" = 53ef ]; then P3=ext2
-elif [ "$(zmagic "$DEV" $OFF)" = ZNFS ]; then P3=zenixfs
-else die "$DEV: partition 3 holds neither ext2 nor ZenixFS: not the Zenix root, stopping"; fi
+if [ "$NEW" != --restore ]; then      # (the way back needs no look at p3: it may be what is broken)
+    if [ "$(magic "$DEV" $OFF)" = 53ef ]; then P3=ext2
+    elif [ "$(zmagic "$DEV" $OFF)" = ZNFS ]; then P3=zenixfs
+    else die "$DEV: partition 3 holds neither ext2 nor ZenixFS: not the Zenix root, stopping"; fi
+fi
 rd() {   # the byte range of p3 to stdout
     dd if="$DEV" bs=4M iflag=skip_bytes,count_bytes skip=$OFF count=$LEN status=none
 }

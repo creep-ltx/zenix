@@ -974,7 +974,7 @@ can be read, so it needs the kernel with zfsd built in, `kernel-zfs.bin` (behind
 `zenix-zfs.adf`), whose `boot` (`bootz.zx`, the same source) also has the choices for a root it can only read: `zfsd` says so
 through `FS_HEALTH`, boot serves it again with `-fsck` (read-only, the device shared) and offers man rescue's choices without
 read-write. No check after a cut (D17 section 9). The shipped
-kernel, booted on a ZenixFS root, says "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the test
+kernel, booted on a ZenixFS root, says "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the
 kernel kernel-zfs" and stops with the panic "cannot start an essential server" (`@zfsd` never starts the file for the
 root: that file could only be read through the server being started). zenixboot never installs a kernel without a
 ZenixFS server over one with it (section 13, the version record).
@@ -1106,7 +1106,7 @@ two states and their buffers, the normaliser's scratch, the message) is measured
 
 ### boot - the starter (`user/boot.c`)
 pid 1, the only process the kernel creates itself. It registers `disk` -> `@diskd` (nice -10), picks the root (above),
-registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10; `@zfsd` only in the test kernel kernel-zfs,
+registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10; `@zfsd` only in the kernel kernel-zfs,
 above), asks for the root inode (`SYS_mountinfo`
 0: the first call to `fs` starts the root server), checks an ext2 root that is not marked clean (DESIGN D17: `fs` first
 registered with `-fsck`, a read-only server that leaves the device to `/bin/fsck.ext2 -y DEVICE`, which boot runs

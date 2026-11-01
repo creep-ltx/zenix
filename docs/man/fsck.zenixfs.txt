@@ -4,7 +4,7 @@ NAME
     fsck.zenixfs - check a ZenixFS filesystem
 
 SYNOPSIS
-    fsck.zenixfs [-y] device
+    fsck.zenixfs [-y|--old] device
 
 DESCRIPTION
     Opens an unmounted ZenixFS volume and checks it: the checksum of every
@@ -27,13 +27,18 @@ DESCRIPTION
     changes nothing; copy out what can be read, or use zenixfs-tool salvage
     on a PC.
 
+    --old is for a volume whose newest commits cannot be read: it takes the
+    newest state that can be, on your word, and builds on it. That state's
+    older files may have been overwritten since: look at what matters.
+
 EXIT STATUS
     0 clean (or repaired), 1 problems found or not a ZenixFS volume, 2 usage.
 
 NOTES
     A repair keeps tables in memory: 28 bytes per leaf of the tree, one
     bit per block. It reads every block in use. Without enough memory it
-    says so and changes nothing.
+    says so and changes nothing. A repair that goes one commit back has no
+    way to check the data of older files (no data checksums).
 
 SEE ALSO
     mkfs.zenixfs(1), mount(8), rescue(8), docs/zenixfs.md

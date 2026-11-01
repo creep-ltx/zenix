@@ -10,7 +10,7 @@
  *   zenixfs-tool ln IMAGE TARGET LINKPATH     (symbolic link)       ln IMAGE -h EXISTING NEWPATH   (hard link)
  *   zenixfs-tool salvage IMAGE OUTDIR [--commit K] [--no-carve] [--old-copies]   copy out everything that can still be read, skipping damage
  *   zenixfs-tool rescue IMAGE NEWIMAGE SIZE_MB [--old-copies]   salvage into a temporary folder, then make a fresh clean image from it
- *   zenixfs-tool repair IMAGE [--rollback K]   rebuild a damaged superblock and free-space map; --rollback K goes back K commits
+ *   zenixfs-tool repair IMAGE [--rollback K]   rebuild a damaged superblock, map or inner nodes; --rollback K takes the state K valid commits back (0: the newest valid), on your word
  * Options always come after IMAGE.
  * Paths inside the image start with / . Block size by default: under 16 MB 1 KB, under 256 MB 2 KB, else 4 KB. */
 #include <stdio.h>
@@ -254,41 +254,32 @@ static int cmd_salvage(const char *image, const char *outdir, int skip, int carv
     return 0;
 }
 
-static int cmd_repair(const char *image, int rollback)
+static int cmd_repair(const char *image, uint32_t want)
 {
-    int bs;
-    for (bs = 10; bs <= 12; bs++) {                           /* is the superblock fine? */
+    int bs, ok = 0;
+    for (bs = 10; bs <= 12 && !ok; bs++) {                    /* a superblock at this block size? (a failed mount is not a missing superblock) */
         if (zfile_open(&img, image, (uint32_t)bs, 0) < 0) { perror(image); return 1; }
-        struct zenixfs_mount_opts mo = { 128, 0, ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH, (uint32_t)rollback };
-        if (zenixfs_mount_opts(&fs, &img.dev, &mo) == 0) break;
+        ok = zenixfs_super_ok(&img.dev);
+        if (ok) break;
         zfile_close(&img);
     }
-    if (bs > 12) {                                            /* no: rewrite it from what the volume itself says about its size */
+    if (!ok) {                                                /* none: rewrite it from what the volume itself says about its size */
         int g = zenixfs_guess_bshift(image);
         if (g < 0) { printf("repair: nothing in %s looks like ZenixFS\n", image); return 1; }
         if (zfile_open(&img, image, (uint32_t)g, 0) < 0) { perror(image); return 1; }
         int r = zenixfs_rewrite_super(&img.dev, "recovered", 0, ZENIXFS_CHARSET_LATIN1, (uint64_t)time(NULL));
-        printf("repair: superblock rewritten (block size %d bytes, label \"recovered\", reserve default)%s\n", 1 << g, r ? " FAILED" : "");
-        zfile_close(&img);
-        bs = g;
-        if (zfile_open(&img, image, (uint32_t)bs, 0) < 0) return 1;
-        struct zenixfs_mount_opts mo = { 128, 0, ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH, (uint32_t)rollback };
-        if (zenixfs_mount_opts(&fs, &img.dev, &mo) != 0) {
-            printf("repair: still cannot mount: no usable commit record or root block. Use: zenixfs-tool salvage %s OUTDIR\n", image);
-            return 1;
-        }
+        if (r) { printf("repair: the superblock cannot be rewritten from this size (%d): nothing was changed. Copy out what can be read: zenixfs-tool salvage %s OUTDIR\n", r, image); zfile_close(&img); return 1; }
+        printf("repair: superblock rewritten (block size %d bytes, label \"recovered\", reserve default)\n", 1 << g);
     }
-    zenixfs_unmount(fs);                                       /* zenixfs_repair mounts for itself, more than once */
     struct zenixfs_repair_report rp;
-    int n = zenixfs_repair(&img.dev, 128, (uint32_t)rollback, fsck_log, NULL, &rp);
+    int n = zenixfs_repair(&img.dev, 128, want, fsck_log, NULL, &rp);
     zfile_close(&img);
     if (n < 0) {
-        printf("repair: the tree is damaged in a way repair cannot undo: nothing was changed. Copy out what can be read: zenixfs-tool salvage %s OUTDIR (or: rescue)\n", image);
+        printf("repair: the tree is damaged in a way repair cannot undo: nothing %s changed. Copy out what can be read: zenixfs-tool salvage %s OUTDIR (or: rescue)\n", ok ? "was" : "more was", image);
         return 1;
     }
     if (rp.nodes) printf("repair: damaged inner tree nodes replaced: %u new nodes over %u leaves; nothing was lost\n", rp.nodes, rp.leaves);
-    if (rp.back == 1 && !rollback) printf("repair: went back one commit (the newest was damaged): its changes are gone\n");
-    if (rollback) printf("repair: rolled back %d commit(s)\n", rollback);
+    if (rp.back == 1) printf("repair: one commit back (the newest was damaged): its changes are gone; older file data is not checked, look at the newest files\n");
     if (rp.back >= 2) printf("repair: WARNING: %u commits back: this old state's file data may have been overwritten since; check the files, or use salvage\n", rp.back);
     printf("repair: free-space map rebuilt from the tree (%u block(s) changed)\n", rp.changed);
     printf(n ? "repair: %d problem(s) remain (use salvage to copy out what can be read)\n" : "repair: clean\n", n);
@@ -348,8 +339,8 @@ int main(int argc, char **argv)
         return r != 0;
     }
     if (!strcmp(cmd, "repair")) {
-        int rb = 0;
-        for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--rollback") && i + 1 < argc) rb = atoi(argv[++i]);
+        uint32_t rb = ZENIXFS_REPAIR_AUTO;
+        for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--rollback") && i + 1 < argc) rb = (uint32_t)atoi(argv[++i]);
         return cmd_repair(path, rb);
     }
     if (open_image(path) < 0) { fprintf(stderr, "zenixfs-tool: %s is not a ZenixFS image (or its superblock and commit records are damaged)\n", path); return 1; }
