@@ -107,7 +107,7 @@ EXIT STATUS
 
 FILES
     /etc/zinstall.set  the install floppies' list (on their RAM disk)
-    /usr/lib/zinstall/ the boot partition's programs
+    /lib/zinstall/ the boot partition's programs
 
 SEE ALSO
     fdisk(8), zpkg(8), bootmenu(8), zenixboot(8), mkfs.ext2(8),

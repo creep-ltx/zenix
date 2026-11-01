@@ -251,7 +251,7 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d"]}     # DESIGN D30, D31, D32: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume
 # (DESIGN D35: the two AmigaOS programs of a boot partition, what zinstall puts there)
 FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")],
-                "zinstall": [("bootmenu", "/usr/lib/zinstall/bootmenu"), ("zenixboot", "/usr/lib/zinstall/zenixboot")]}
+                "zinstall": [("bootmenu", "/lib/zinstall/bootmenu"), ("zenixboot", "/lib/zinstall/zenixboot")]}
 FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
                    "maki": [("ports/maki/upstream/LICENSE", "maki"), ("ports/tui/upstream/LICENSE", "maki-tui")],
                    "markdown": [("ports/markdown/upstream/LICENSE", "markdown"),

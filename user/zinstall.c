@@ -18,8 +18,8 @@ typedef unsigned char u8;
 #define ZI "/mnt/zi"                    /* the new root while it is written */
 #define ZH "/mnt/zh"                    /* its /home */
 #define BEFORE "/var/lib/zinstall/table-before"     /* in the new root: how to take its table entries out again (--undo) */
-#define KFILE "/usr/lib/zinstall/zenix" /* the kernel, in the new root until the boot partition is written */
-#define BFILES "/usr/lib/zinstall/"     /* bootmenu, zenixboot */
+#define KFILE "/lib/zinstall/zenix" /* the kernel, in the new root until the boot partition is written */
+#define BFILES "/lib/zinstall/"     /* bootmenu, zenixboot */
 #define ESKIP 1001                      /* the person said skip: optional packages never span two disks (tools/mkinstall.py), so nothing of it was written */
 #define MINKB 350                       /* free memory it wants before it writes anything (measured: docs/d35-installer.md section 10) */
 #define MINKB_ZFS 500
@@ -550,7 +550,7 @@ static int install_bundle(u32 total, const char *what)
             havepk = 0;
             if (r) return r;
         } else if (!strcmp(name, "boot/zenix")) {   /* a system bundle's kernel */
-            mkdir_p(ZI "/usr/lib/zinstall");
+            mkdir_p(ZI "/lib/zinstall");
             const char *p = in_root(KFILE);
             sys_unlink(p);
             int fd = sys_open(p, O_WRONLY | O_CREAT | O_EXCL);
@@ -585,7 +585,7 @@ static int install_bundle(u32 total, const char *what)
 static int floppy_kernel(void)
 {
     say("  the kernel\n");
-    mkdir_p(ZI "/usr/lib/zinstall");
+    mkdir_p(ZI "/lib/zinstall");
     const char *p = in_root(KFILE);
     sys_unlink(p);
     int fd = sys_open(p, O_WRONLY | O_CREAT | O_EXCL);

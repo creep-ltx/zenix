@@ -49,8 +49,8 @@ def main():
                 line = open(os.path.join(pk, "base.manifest")).read().split("\n")
                 v = [l for l in line if l.startswith("version ")][0].split()
                 subprocess.run(mkzup + ["pkg", pkdir, "kernel-zfs", v[1], v[2],
-                                        "d:755:0:0:/usr", "d:755:0:0:/usr/lib", "d:755:0:0:/usr/lib/zinstall",
-                                        "f:644:0:0:%s:/usr/lib/zinstall/zenix" % os.path.join(B, "kernel-zfs.bin")],
+                                        "d:755:0:0:/lib", "d:755:0:0:/lib/zinstall",
+                                        "f:644:0:0:%s:/lib/zinstall/zenix" % os.path.join(B, "kernel-zfs.bin")],
                                check=True, stdout=subprocess.DEVNULL)
             subprocess.run(mkzup + ["bundle", bundle, "--no-kernel", "--channel", chan, pkdir, name], check=True, stdout=subprocess.DEVNULL)
             items.append((name, tier, open(bundle, "rb").read()))

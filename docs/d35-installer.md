@@ -88,7 +88,7 @@ does not have. After a floppy install `zpkg -Syu` brings anything newer.
 Both give the same machine: every package's manifest in `/var/lib/zpkg`, so `zpkg` and updates know what is installed.
 
 **The source of the two AmigaOS programs on the boot partition** (`bootmenu`, `zenixboot`): the package `zinstall` carries them in
-`/usr/lib/zinstall/`, always installed. So an installed Zenix can also rebuild its boot partition's files, and no separate way exists to get them.
+`/lib/zinstall/`, always installed. So an installed Zenix can also rebuild its boot partition's files, and no separate way exists to get them.
 
 ## 6. Dual boot, and the way back
 The boot partition gets a boot priority one above the highest on the disk, with `bootmenu` as its only startup. **The menu's default is whatever this disk

@@ -73,7 +73,7 @@ if [ -z "$NOTESTS" ] && [ -f "$B/zine-null.blob" ] && [ -d "$B/zinetests" ]; the
 fi
 # zinstall's boot partition programs (DESIGN D35) on the full images, as its package (the RAM disk of the install floppies has them on the set)
 if [ -z "$NOMAN" ] && [ -f "$T/bin/zinstall" ] && [ -f "$B/zenixboot" ]; then
-    mkdir -p "$T/usr/lib/zinstall" && cp "$B/bootmenu" "$B/zenixboot" "$T/usr/lib/zinstall/" && chmod 644 "$T"/usr/lib/zinstall/*
+    mkdir -p "$T/lib/zinstall" && cp "$B/bootmenu" "$B/zenixboot" "$T/lib/zinstall/" && chmod 644 "$T"/lib/zinstall/*
 fi
 # the text-UI library's test program (ports/tui) and the notice of the owner's MIT code in it, which travels with it
 if [ -z "$NOTESTS" ] && [ -f "$B/tuitest.zx" ]; then
