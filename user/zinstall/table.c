@@ -97,6 +97,12 @@ static int read_rdb(struct tdisk *d, t_u32 base, t_u32 limit, int *count)
     g->locyl = rw.locyl; g->hicyl = rw.hicyl;
     g->noedit = rw.noedit;
     if (!g->noedit && rw.nused == RDB_MAXUSED) g->noedit = "its block chains are longer than this program handles";
+    if (!g->noedit && (g->heads > 0xFFFF || g->secs > 0xFFFF)) g->noedit = "the RDSK block's geometry does not add up";
+    {   /* a bad-block list maps sectors to spare blocks that no chain names: those look free and are not */
+        t_u8 rb[512];
+        if (base + rw.blk < base || hrd(base + rw.blk, rb)) return -1;
+        if (be32(rb + 6 * 4) != 0xFFFFFFFFu && !g->noedit) g->noedit = "it has a bad-block list, whose spare blocks this program cannot tell from free ones";
+    }
     for (int i = 0; i < rw.nparts; i++) {
         const struct rdb_part *q = &rw.part[i];
         ++*count;
@@ -156,6 +162,7 @@ static int is_fat(t_u8 t)
 {
     switch (t) {
     case 0x01: case 0x04: case 0x06: case 0x0B: case 0x0C: case 0x0E:
+    case 0x07: case 0x17:
     case 0x11: case 0x14: case 0x16: case 0x1B: case 0x1C: case 0x1E: case 0xEF: return 1;
     }
     return 0;
@@ -207,6 +214,7 @@ int t_read(struct tdisk *d, const struct tio *io, t_u32 sectors, const struct t_
             t_u32 st = le32(e + 8), n = le32(e + 12);
             if (e[4] == 0) continue;
             d->nslotsused++;
+            if (is_fat(e[4])) d->hasfat = 1;
             if (n == 0) continue;
             count++;
             if (d->nparts == T_MAXPART) { d->full = 1; continue; }
@@ -216,12 +224,14 @@ int t_read(struct tdisk *d, const struct tio *io, t_u32 sectors, const struct t_
             dev_name(p->dev, count);
             p->how = TP_MBR; p->mbrtype = e[4]; p->slot = (t_u8)i; p->region = -1; p->holds = -1;
             p->start = st; p->sectors = n; p->bootable = e[0] == 0x80;
-            if (is_fat(e[4])) d->hasfat = 1;
             if (e[4] == 0x76) {
                 int before = d->nregions;
                 int rc = read_rdb(d, st, n, &count);
                 if (rc < 0) return -1;
-                if (rc == 1) d->part[pi].holds = (signed char)before;
+                if (rc == 1) {
+                    d->part[pi].holds = (signed char)before;
+                    if (d->region[before].noedit && !d->noedit) d->noedit = d->region[before].noedit;   /* its real extent is not known: nothing beside it is sure free */
+                }
             }
         }
         for (int a = 0; a < d->nparts; a++)         /* the entries must not overlap each other */
@@ -233,6 +243,10 @@ int t_read(struct tdisk *d, const struct tio *io, t_u32 sectors, const struct t_
     } else {
         /* no table. What is there? */
         const t_u8 *s = d->sec0;
+        for (int i = 0; i < 4; i++) {           /* the shape of a FAT entry, whatever else is wrong with it: the erase is not for this disk */
+            const t_u8 *e = s + 446 + 16 * i;
+            if ((e[0] == 0 || e[0] == 0x80) && is_fat(e[4]) && le32(e + 12)) d->hasfat = 1;
+        }
         static t_u8 s2[512];
         if (hrd(2, s2)) return -1;
         if (be32(s) >> 8 == 0x444F53u) { d->kind = TD_BARE; d->what = "an AmigaDOS volume, no partition table"; }
@@ -242,7 +256,6 @@ int t_read(struct tdisk *d, const struct tio *io, t_u32 sectors, const struct t_
         else if (s[510] == 0x55 && s[511] == 0xAA && (s[0] == 0xEB || s[0] == 0xE9)) { d->kind = TD_BARE; d->what = "a PC volume (FAT?), no partition table"; d->hasfat = 1; }
         else if (s[510] == 0x55 && s[511] == 0xAA) {
             d->kind = TD_UNKNOWN; d->what = "a PC partition table that makes no sense (it reaches outside the disk)";
-            for (int i = 0; i < 4; i++) if (is_fat(s[446 + 16 * i + 4])) d->hasfat = 1;
         }
         else {
             /* zeros at the start and at 16 places across the disk? Otherwise: data of some kind */
@@ -269,7 +282,9 @@ int t_same(const struct tdisk *d, const struct tio *io, t_u32 sectors, const str
     static struct tdisk again;
     if (sectors != d->sectors) return 0;
     if (t_read(&again, io, sectors, busy, nbusy)) return -1;
-    return !memcmp(again.digest, d->digest, 32) && again.anybusy == d->anybusy;
+    if (memcmp(again.digest, d->digest, 32) || again.anybusy != d->anybusy || again.nparts != d->nparts) return 0;
+    for (int i = 0; i < d->nparts; i++) if (again.part[i].busy != d->part[i].busy) return 0;
+    return 1;
 }
 
 const char *t_typename(const struct t_part *p)
@@ -317,11 +332,12 @@ const char *t_part_refused(const struct tdisk *d, int i)
     if (t) return t;
     if (p->busy) return "it is in use now (mounted)";
     if (!p->sectors) return "the table does not say where it is";
+    if (d->noedit) return d->noedit;
     if (p->how == TP_MBR) {
-        if (d->noedit) return d->noedit;
         if (is_fat(p->mbrtype)) return "a FAT partition: it may hold Emu68, the Kickstart, a PC's files; never touched";
         if (p->mbrtype == 0x76) return "it holds an Amiga partition table with its own partitions; never touched as a whole";
         if (is_ext(p->mbrtype)) return "an extended partition; never touched";
+        if (p->mbrtype != 0x83) return "a PC partition of a type this program does not know; never touched";
     } else {
         const char *n = d->region[(int)p->region].noedit;
         if (n) return n;
@@ -374,7 +390,7 @@ static void largest_free(const struct t_region *g, t_u32 *best_lo, t_u32 *best_n
 static int mbr_gap(const struct tdisk *d, t_u32 *st, t_u32 *num, int *slot)
 {
     *slot = -1;
-    for (int i = 0; i < 4 && *slot < 0; i++) if (d->sec0[446 + 16 * i + 4] == 0) *slot = i;
+    for (int i = 3; i >= 0 && *slot < 0; i--) if (d->sec0[446 + 16 * i + 4] == 0) *slot = i;
     if (*slot < 0) return -1;
     t_u32 best = 0, best_st = 0;
     t_u32 at = 2048;                            /* the first MB is left alone */
@@ -403,11 +419,6 @@ int t_options(const struct tdisk *d, const struct tio *io, struct t_opt *o, int 
     int n = 0;
     if (table_refused(d)) return 0;
     if (d->kind == TD_MBR || d->kind == TD_RDB) {
-        if (d->kind == TD_MBR && !d->noedit) {
-            t_u32 st, num; int slot;
-            if (mbr_gap(d, &st, &num, &slot) == 0 && num >= T_MINSECT && n < max)
-                o[n++] = (struct t_opt){ TO_NEWCONT, -1, -1, st, num };
-        }
         for (int r = 0; r < d->nregions && n < max; r++) {
             const struct t_region *g = &d->region[r];
             if (g->noedit || d->noedit) continue;
@@ -416,6 +427,12 @@ int t_options(const struct tdisk *d, const struct tio *io, struct t_opt *o, int 
             largest_free(g, &lo, &cnt);
             if ((unsigned long long)cnt * g->cyl >= T_MINSECT)
                 o[n++] = (struct t_opt){ TO_FREE, r, -1, g->base + lo * g->cyl, cnt * g->cyl };
+        }
+        /* after the free cylinders of a table that is there: a second 0x76 has not been seen working under Emu68 */
+        if (d->kind == TD_MBR && !d->noedit) {
+            t_u32 st, num; int slot;
+            if (mbr_gap(d, &st, &num, &slot) == 0 && num >= T_MINSECT && n < max)
+                o[n++] = (struct t_opt){ TO_NEWCONT, -1, -1, st, num };
         }
     }
     for (int i = 0; i < d->nparts && n < max; i++)
@@ -551,16 +568,26 @@ static void place(struct t_plan *p, t_u32 base, t_u32 lo, t_u32 cyl, int zenixfs
     }
 }
 
+/* can bootmenu name this partition? It trims a line's ends and stops a name at a colon (boot/bootmenu.c); a name it cannot find would
+ * boot the menu again and again */
+static int menu_name_ok(const char *n)
+{
+    size_t l = strlen(n);
+    if (!l || n[l - 1] == ' ' || n[0] == ' ') return 0;
+    for (size_t i = 0; i < l; i++) if ((t_u8)n[i] < 32 || n[i] == ':' || n[i] == '=' || n[i] == '#') return 0;
+    return 1;
+}
+
 /* the boot priority, and the AmigaOS partition the menu offers */
 static void find_aos(const struct tdisk *d, struct t_plan *p)
 {
     int best = -129, maxpri = -129;
     for (int i = 0; i < d->nparts; i++) {
         const struct t_part *q = &d->part[i];
-        if (q->how != TP_RDB || !q->bootable || q->nomount || i == p->opt.part) continue;
+        if (q->how != TP_RDB || !q->bootable || q->nomount || i == p->opt.part || q->pri == -128) continue;
         if (q->pri > maxpri) maxpri = q->pri;
-        if (!strncmp(q->label, "ZB", 2) || !strncmp(q->label, "BOOT", 4)) continue;
         if (q->dostype == DT_EXT2 || q->dostype == DT_ZENIXFS) continue;
+        /* whatever this disk starts by itself today is what the menu's default goes on starting (it may be a menu of its own) */
         if (q->pri > best) { best = q->pri; strncpy(p->aos, q->label, sizeof p->aos - 1); }
     }
     if (p->opt.kind == TO_WHOLE) { p->aos[0] = 0; maxpri = -129; }
@@ -610,6 +637,8 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         }
     labels(d, p);
     find_aos(d, p);
+    if (p->aos[0] && !menu_name_ok(p->aos)) { *why = "the partition this disk starts from has a name the boot menu cannot use (a space at its end, a colon): rename it first"; return -1; }
+    if (o->kind != TO_WHOLE && d->nparts + 3 > 14) { *why = "too many partitions on this disk: Zenix looks at the first 14 when it picks its root"; return -1; }
     t_u32 blocks[3];
     switch (o->kind) {
     case TO_NEWCONT: case TO_PART:
@@ -629,7 +658,7 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             static t_u8 m[512];
             memcpy(m, d->sec0, 512);
             int slot = o->kind == TO_PART ? d->part[o->part].slot : -1;
-            if (o->kind == TO_NEWCONT) for (int i = 0; i < 4 && slot < 0; i++) if (m[446 + 16 * i + 4] == 0) slot = i;
+            if (o->kind == TO_NEWCONT) for (int i = 3; i >= 0 && slot < 0; i--) if (m[446 + 16 * i + 4] == 0) slot = i;   /* the last: the others keep their numbers, also under a driver that counts */
             if (slot < 0) { *why = "no free entry in the PC partition table"; return -1; }
             t_u8 *e = m + 446 + 16 * slot;
             if (o->kind == TO_NEWCONT) {
@@ -669,6 +698,7 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         if (ri < 0 || ri >= d->nregions) { *why = "no such table"; return -1; }
         const struct t_region *g = &d->region[ri];
         if (g->noedit) { *why = g->noedit; return -1; }
+        if (d->noedit) { *why = d->noedit; return -1; }
         if (o->kind == TO_PART && t_part_refused(d, o->part)) { *why = t_part_refused(d, o->part); return -1; }
         if (region_parse(d, io, ri)) { *why = "cannot read the table"; return -1; }
         t_u32 lo, cnt;
@@ -697,6 +727,11 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         sizes(p, cnt, g->cyl);
         if (sizes_bad(p)) { *why = sizes_bad(p); return -1; }
         place(p, g->base, lo, g->cyl, zenixfs);
+        /* Kickstart 3.1's own disk code does not reach past 4 GB; with the highest boot priority a partition there could be read at wrapped places. Under Emu68 (an RDB in a 0x76) it is the driver's */
+        if (g->base == 0 && d->kind == TD_RDB && (unsigned long long)p->nw[R_BOOT].start + p->nw[R_BOOT].sectors > 8388608ull) {
+            *why = "the free space lies past 4 GB, where Kickstart 3.1 cannot start from: leave room for the boot partition below 4 GB";
+            return -1;
+        }
         p->cyl = g->cyl;
         /* the blocks for the new PARTs: unused blocks of the RDB area */
         int need = o->kind == TO_PART ? p->nnew - 1 : p->nnew, got = 0;
@@ -705,6 +740,15 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             int used = 0;
             for (unsigned i = 0; i < rw.nused; i++) if (rw.used[i] == nb) used = 1;
             if (!used && nb < g->limit) fresh[got++] = nb;
+        }
+        /* an RDB area kept tight (tools that wrote just enough): it may grow into the rest of the cylinders before the first partition,
+         * which no table refers to and no partition holds; the RDSK block says so first, harmless alone */
+        t_u32 newhi = rw.rdbhi;
+        if (got < need) {
+            unsigned long long lim = (unsigned long long)g->locyl * g->cyl;
+            for (int i = 0; i < rw.nparts; i++) if (rw.part[i].sectors && rw.part[i].start < lim) lim = rw.part[i].start;
+            if (lim > g->limit) lim = g->limit;
+            for (t_u32 nb = rw.rdbhi + 1; nb < lim && got < need; nb++) { fresh[got++] = nb; newhi = nb; }
         }
         if (got < need) { *why = "no free block left in the RDB area for the new partitions"; return -1; }
         t_u32 oldnext = 0xFFFFFFFFu, high;
@@ -727,8 +771,9 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         }
         for (int i = 0; i < p->nnew; i++) p->nw[i].blk = g->base + blocks[i];
         int link_in_rdsk = o->kind == TO_FREE && rw.nparts == 0;
-        if (newhigh != high && !link_in_rdsk) {             /* harmless alone, and before anything needs it */
+        if ((newhigh != high || newhi != rw.rdbhi) && !link_in_rdsk) {             /* harmless alone, and before anything needs it */
             b[38] = newhigh;
+            b[33] = newhi;
             rdb_sum(b);
             if (add_write(p, g->base + rw.blk, b, 0, 1, old)) { *why = "too many writes"; return -1; }
         }
@@ -756,6 +801,7 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         } else {                                            /* an empty table: the RDSK block's list */
             b[7] = blocks[0];
             b[38] = newhigh;
+            b[33] = newhi;
             rdb_sum(b);
             if (add_write(p, g->base + rw.blk, b, 0, 1, old)) { *why = "too many writes"; return -1; }
         }

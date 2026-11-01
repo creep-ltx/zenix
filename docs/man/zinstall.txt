@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     zinstall
     zinstall --list
+    zinstall --undo [FILE]
 
 DESCRIPTION
     zinstall runs on Zenix itself: from the install floppies (make
@@ -38,7 +39,11 @@ WHERE IT CAN GO
     The whole disk: everything on it is lost. It takes typing ERASE ide0.
     Never offered on a disk with a FAT partition or a mounted partition.
 
-    A disk with a GPT table, or both an RDB and an MBR, is left alone.
+    A disk with a GPT table, or both an RDB and an MBR, is left alone. So
+    is a table that does not add up, or has a bad-block list; free space
+    past 4 GB on an Amiga table is refused (Kickstart 3.1 cannot start
+    from there); and another root marked bootable is refused, as it would
+    stay the root (fdisk boot N off).
 
 WHAT IT MAKES
     ZB0  the boot partition, AmigaDOS FFS: the boot menu, zenixboot, the
@@ -48,9 +53,10 @@ WHAT IT MAKES
          most 4 GB. The rest of the free space stays free.
     At least 28 MB. If those names are taken: ZB1 and so on.
 
-    On a disk that has AmigaOS the boot menu comes first at power-on,
-    with AmigaOS as its default after 5 seconds; change S:BootMenu.conf
-    on ZB0 for another default. Nothing about AmigaOS changes.
+    On a disk that starts something today, the boot menu comes first at
+    power-on, with that as its default after 5 seconds; change
+    S:BootMenu.conf on ZB0 for another default. A partition with a name
+    the menu cannot use (a colon, a space at its end) is refused.
 
 ZENIXFS
     A root on ZenixFS needs no check after a power cut, and costs about
@@ -68,26 +74,32 @@ SAFETY
     leaves a machine that starts as before. Right before the first write
     the tables are read again; if anything differs it stops.
 
-    The old contents of every sector of the table it changed are in
-    /var/lib/zinstall/table-before of the new root: for each, 4 bytes of
-    sector number (big-endian) and its 512 bytes. fdisk del removes the
-    new partitions; their space then holds old data.
+    A torn sector, a write the drive leaves half done, is outside what a
+    program can arrange: an RDB block then fails its checksum and is
+    refused; an RDB tool puts it back.
 
 THE WAY BACK
-    At power-on, both mouse buttons: Kickstart's boot menu. Remove the new
-    partitions with HDToolBox or fdisk del: AmigaOS was not touched.
+    zinstall --undo puts the table as it was before the install, from
+    /var/lib/zinstall/table-before of the new root (or FILE): type undo,
+    restart. It refuses if the table has changed since, and after a replaced
+    partition or an erased disk: what was there is gone. The space of the
+    new partitions then holds old data; nothing else changes.
+    At power-on, both mouse buttons: Kickstart's boot menu. HDToolBox or
+    fdisk del also remove new partitions on an Amiga table.
 
 NOTES
     A disk with a PC table starts by itself only under Emu68, whose SD
     driver reads type 0x76; on another Amiga start Zenix from the floppy
-    zenix.adf (zenix-zfs.adf for a ZenixFS root). Kickstart 3.1's own disk
-    code does not reach a boot partition past 4 GB; the plan says so.
+    zenix.adf (zenix-zfs.adf for a ZenixFS root). A second 0x76 next to
+    the first has never been tried under Emu68; the plan says so.
 
     Zenix serves one disk, ide0. A disk with a partition table it cannot
     read fully says why. No network from the floppies: the RAM disk has
     no room; after installing, zpkg -Syu brings what is newer. It does
-    not resize partitions. It needs root, and about 200 KB of free memory
-    (330 KB for ZenixFS); it says so and writes nothing if there is less.
+    not resize partitions. It needs root, and about 350 KB of free memory
+    (500 KB for ZenixFS); it says so and writes nothing if there is less.
+    The install floppy needs 2 MB of memory: on less it turns the screen
+    red at the start.
 
 EXIT STATUS
     0 done, or stopped by you with nothing written; 1 something refused or

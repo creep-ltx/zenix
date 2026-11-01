@@ -4,7 +4,7 @@
 Status: **being built on branch install (2026-11-01), the last feature of block 4 (ROADMAP "The order of work", item 4). The outline is
 the owner's ("an installer: partition, format, copy, boot menu"; a boot floppy or an existing Zenix; no PC); the details were delegated and
 are decided here. Tested on image files and in FS-UAE only: it has never run on a real disk, and nothing here touches the owner's card.**
-What was measured is in section 10.
+What was measured is in section 11.
 
 ## 1. What it is
 `zinstall` runs on Zenix itself, from the install floppy or from an existing Zenix, and puts Zenix on a hard disk, CF or SD card: pick a
@@ -37,17 +37,22 @@ and short words only (nothing behind Alt).
 | The disk | What it offers | What it changes in the table |
 |---|---|---|
 | RDB (real IDE/CF), free cylinders | new ZB0, ZR0, ZH0 in the free cylinders, in the RDSK block's geometry | new PART blocks in unused blocks of the RDB area; then one write: the last PART's `next` (or RDSK's list if empty). RDSK's HighRDSKBlock first when needed, harmless alone |
-| MBR with a free slot and free space (the Emu68 card's kind, or a plain MBR) | a new type 0x76 partition with an RDB of its own inside, holding ZB0, ZR0, ZH0 | that RDB, written in the free space where nothing refers to it; then one write: the MBR sector. No existing RDB is touched |
-| MBR whose 0x76 RDB has free cylinders | as for an RDB, inside the container | as for an RDB |
+| MBR whose 0x76 RDB has free cylinders (offered first) | as for an RDB, inside the container | as for an RDB |
+| MBR with a free slot and free space (the Emu68 card's kind, or a plain MBR) | a new type 0x76 partition, in the last free slot, with an RDB of its own inside, holding ZB0, ZR0, ZH0 | that RDB, written in the free space where nothing refers to it; then one write: the MBR sector. No existing RDB is touched |
 | A chosen RDB partition | ZB0, ZR0, ZH0 inside its sectors | new PART blocks; one write: the chosen partition's PART block becomes the first new one, linked on to the rest and to what followed it |
-| A chosen MBR partition (never FAT, never 0x76) | a 0x76 with an RDB inside, in its sectors | one write: the MBR sector, its type byte |
+| A chosen MBR partition (type 0x83 only: never FAT, 0x76 or a type it does not know) | a 0x76 with an RDB inside, in its sectors | one write: the MBR sector, its type byte |
 | Whole disk, or nothing on it | an RDB, ZB0, ZR0, ZH0 | PART blocks where the old table does not need them, RDSK last, one write (section 4) |
-| GPT, both RDB and MBR, a partition table that does not add up | nothing but the reason (a damaged RDB or MBR: only the erase of the whole disk, with its warning) | - |
+| GPT, both RDB and MBR, a partition table that does not add up (also an RDB inside a 0x76: what it claims may reach past its container), a bad-block list (its spare blocks look free) | nothing but the reason (a damaged RDB or MBR: only the erase of the whole disk, with its warning, never with a FAT partition) | - |
 
 **A disk with a PC table (MBR) only boots by itself under Emu68**, whose SD driver reads type 0x76 (knowledge base `amiga/emu68-and-pistorm.md`,
 read from the driver's strings; the owner's card boots that way, one 0x76, verified on the A1200 2026-10-24). Kickstart's own `scsi.device` reads an RDB and nothing else. So on an MBR disk the plan says: under Emu68 it
-starts by itself; on any other Amiga, start it from the boot floppy (`zenix.adf`, or `zenix-zfs.adf` for a ZenixFS root). A second 0x76
-partition next to the first has not been seen working on Emu68: not known, said so.
+starts by itself; on any other Amiga, start it from the boot floppy (`zenix.adf`, or `zenix-zfs.adf` for a ZenixFS root). **A second 0x76 next to the first has not been seen working on Emu68: not known, and the plan says so**; that is why free cylinders in the first 0x76 are offered before it, and why it takes the last free slot (a driver that counts slots keeps its count for the others).
+
+**An RDB area kept tight** (RDBBlocksHi just past the last PART, as tools/mkrdb-multi.py writes): it may grow into the rest of the cylinders before the first partition, which no table refers to and no partition holds.
+
+**Free space past 4 GB on a top-level RDB is refused**: with the highest boot priority a boot partition there could be read at wrapped places by Kickstart 3.1's disk code (read, not tried).
+
+**Another root marked bootable is refused:** Zenix takes the first (`user/rootpick.h`), so it would stay the machine's root. A disk with more than 14 partitions after the install is refused: boot and mount look at the first 16 devices.
 
 Sizes: ZB0 (FFS, DOS\1) 16 MB from 256 MB of free space up, 8 MB from 64 MB up, else 4 MB. ZR0: a third of what is left, 128 MB to 1 GB;
 under 64 MB of space the rest and no /home. ZH0 (ext2, `/home`): what is left, at most 4 GB. At least 28 MB. The person may use less than
@@ -63,7 +68,7 @@ nothing refers to. **Where it is not whole:**
   in its first sectors before it (MBR case): that partition is gone from the first write, which is why it was chosen by typing its name.
 - **One sector torn by the drive.** A 512-byte write that a power cut leaves half done is outside what software can arrange. The tests
   tear each commit sector at every 4 bytes: an RDB block then fails its checksum, or is the old or the new one; such a block is refused,
-  by zinstall, fdisk and AmigaOS; the other partitions' data is not touched. The table copy (section 7) and any RDB tool put it back.
+  by zinstall and fdisk (and, as its manuals say, by AmigaOS); the other partitions' data is not touched. If it happens, only an RDB tool or a PC can put that block back: the copy of section 7 does not exist yet at that moment.
   An MBR has no checksum; a torn entry is checked as any other, and the tests show every tear gives an old, a new, or a refused table.
 
 ## 5. Where the files come from
@@ -86,27 +91,29 @@ Both give the same machine: every package's manifest in `/var/lib/zpkg`, so `zpk
 `/usr/lib/zinstall/`, always installed. So an installed Zenix can also rebuild its boot partition's files, and no separate way exists to get them.
 
 ## 6. Dual boot, and the way back
-The boot partition gets a boot priority one above the highest on the disk, with `bootmenu` as its only startup. On a disk with AmigaOS the
-menu's default is **AmigaOS**, after 5 seconds: the machine goes on starting AmigaOS unless someone presses a key. `bootmenu` writes
-nothing to disk. Other ways back, which the program prints at the end:
+The boot partition gets a boot priority one above the highest on the disk, with `bootmenu` as its only startup. **The menu's default is whatever this disk
+started by itself until now** (the highest bootable, mounted partition, whatever its name; it may be a menu of its own), after 5 seconds: the machine goes on starting it unless someone presses a key. `bootmenu` writes
+nothing to disk. A partition whose name the menu cannot use (a space at its end, a colon) is refused: the menu would reboot for ever looking for it. With no such partition (a system on another disk is not seen) the plan says so. A boot priority above 5 also outranks the floppy; Early Startup still chooses. Ways back, which the program prints at the end:
+- **`zinstall --undo`**: every table sector as it was, the one that made the new table real first; refused if any of them is no longer what zinstall left, and after a replaced partition or an erased disk (what was there is gone). Tested from the new Zenix itself; the copy is `/var/lib/zinstall/table-before` in the new root (`zinstall --undo FILE` from elsewhere).
 - At power-on, both mouse buttons: Kickstart's Early Startup menu chooses a partition by hand.
-- From AmigaOS's HDToolBox or Zenix's `fdisk del`, remove ZB0, ZR0, ZH0: the disk is as before (the free space then holds old data).
-- `/var/lib/zinstall/table-before` in the new root holds every table sector as it was, with its number.
+- HDToolBox or `fdisk del` on an Amiga table (fdisk's own limit of 128 chain blocks can refuse an RDB with a big handler; `--undo` has no such limit).
 
 ## 7. What it writes where, in order
 1. Stage 1 of the table (section 3), each step flushed. Rescan; find the new devices by their exact start and size; refuse if not found.
 2. `mkfs.ext2` or `mkfs.zenixfs` on the root, `mkfs.ext2` on `/home`; mount; unpack (each file against its manifest's SHA-256).
-3. `/etc/fstab` gets the `/home` line, `/tmp`, `/home`, `/mnt` their places, the table copy; unmount, mount again, every file read back
-   against its SHA-256 from the disk; `fsck` read-only.
+3. Unmount, mount again, every file read back against its SHA-256 from the disk; then `/etc/fstab` gets the `/home` line, `/tmp`, `/home`, `/mnt` their places, the table copy (a failure to write it stops the install), `/home` its folders; `mkfs.ext2 -i 16384`: `fsck.ext2` needs about 12 bytes an inode, and at the default of 4 KB a 128 MB root ran it out of memory on 2 MB of chip RAM (measured).
 4. The boot partition: an FFS volume written by the program's own small writer (`user/zinstall/ffsw.c`): `S/Startup-Sequence`, `S/BootMenu.conf`, `bootmenu`,
-   `bootzenix`, `zenixboot`, `Zenix/zenix`; read back. A ZenixFS root gets kernel-zfs as `Zenix/zenix`.
+   `bootzenix`, `zenixboot`, `Zenix/zenix`; read back as a reader finds them, by the hash tables. A ZenixFS root gets kernel-zfs as `Zenix/zenix`. Then the root is unmounted and `fsck` runs read-only.
 5. Stage 2: the root's PART marked bootable (Zenix's rule for which root to take, `user/rootpick.h`), then ZB0 bootable with its priority.
 
-If a step fails, it stops and says what is done; the table has only unbootable, unmounted partitions that fdisk removes.
+If a step fails, it stops and says what is done; the table has only unbootable, unmounted partitions. Run again, they are offered by name. `/etc/fstab`'s names (`ide0pN`) follow the table's order: a later change to the table before them shifts them (known, as for any fstab of `ide0pN`).
 
 ## 8. Shared things touched
 - `tools/mkzup.py`: a family `zinstall`. `user/rdb.h`: `RDB_MAXUSED` may be raised by a program that includes it (a PFS3 handler is 121 LSEG blocks; 128 was the limit: the owner's card fits with no block to spare; diskd keeps 128). `user/zpkg.c`: `zpkg --fetch DIR [--zfs]`, growth only. Makefile: the program, its RAM disk, the floppies. No system call, message, or number claimed.
 - The floppy set's format is not frozen: disk 1's own program reads it, always of the same build.
 
-## 9. What it does not do
+## 9. The review
+One independent read aimed only at damaging a partition (2026-11-01). Found, and fixed with a test each: the skip of partitions named `BOOT...` made the menu lose the system the machine really starts; a new 0x76 was offered beside an inner RDB with a partition past its container, and landed in it; a partition inside an MBR with overlapping entries could be chosen, on the FAT; new PART blocks could land on a bad-block list's spare blocks; a boot partition past 4 GB had only a note; a menu name it cannot find would reboot for ever; the way back printed `fdisk del` where fdisk refuses (hence `--undo`); "the machine starts as before" after a replaced partition; `hasfat` missed behind a full table and on a bad signature; exFAT and unknown types could be chosen; busy flags not compared in the re-read. Known and left: a second console mounting a partition after the re-read can still see the table change before diskd stops the data writes; `fstab` names shift as above; an AmigaOS on another drive is not seen, only named in the plan.
+
+## 10. What it does not do
 No resizing of partitions; no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).

@@ -56,8 +56,7 @@ built before the halt. The phases below resume after that.
 Startup-Sequence runs `zenixboot`, an Amiga program that loads the kernel from a file and takes over like the bootblock.
 It works on any Amiga that boots from a hard disk, CF or SD card (the PiStorm's SD card through Emu68's driver).
 
-Progress: **batch A (first-boot blockers) is done** except A7 (a chip-only A1200 booting the RAM disk, left open:
-the owner's machine has fast RAM), with the approved first-boot diagnostics (A11 boot colours, A12 previous-boot
+Progress: **batch A (first-boot blockers) is done** (A7, a chip-only A1200 booting the RAM disk, fixed with the installer, 2026-11-01), with the approved first-boot diagnostics (A11 boot colours, A12 previous-boot
 log); verified in FS-UAE, not yet on the A1200.
 **Batch B (memory foundations) is done** - all seven items (B1-B7), 2026-10-23 on branch `fix-b`,
 verified in FS-UAE (`tools/memtest.sh`, keyboard, job-control and matrix tests); not yet on the A1200.

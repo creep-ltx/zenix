@@ -50,7 +50,9 @@ _start:
 
     move.l  %d7,%d0
     add.l   0x74(%a3),%d0           /* kernel + ramdisk are loaded together */
-    moveq   #2,%d1                  /* MEMF_CHIP */
+    /* MEMF_CHIP | MEMF_REVERSE: the top of chip RAM, away from the kernel's home at 0x40000 on a machine with no fast RAM.
+     * The lowest fit would lie across it, and the copy would overwrite the RAM disk behind the image (audit A7) */
+    move.l  #0x40002,%d1
     jsr     -198(%a6)               /* AllocMem */
     tst.l   %d0
     beq     fail
@@ -77,9 +79,21 @@ _start:
     jsr     -456(%a6)               /* DoIO (the result does not matter) */
 
     handoff_tables                  /* bootinfo, stage0, memory list, the kernel's home (d4) */
+    /* a RAM disk below the end of the kernel's memory at its home (a chip-only machine with too little of it): the screen goes red,
+     * never a kernel over its own root (audit A7) */
+    tst.l   0x74(%a3)
+    beq.s   ramok
+    move.l  12(%a4),%d1             /* the kernel's memory (ZEXE +12) */
+    add.l   %d4,%d1
+    cmp.l   0x70(%a3),%d1
+    bhi     ramlow
+ramok:
     handoff_kill                    /* AmigaOS off */
     handoff_jump                    /* copier to 0x500, copy, jump: never returns */
 
+ramlow:
+    cmp.l   0x70(%a3),%d4           /* (a home above the RAM disk, in fast RAM, is no overlap) */
+    bhs.s   ramok
 fail:
     move.w  #0xF00,0xDFF180         /* the whole screen red = the bootblock failed (no memory, or a floppy read error) */
     bra.s   fail

@@ -17,11 +17,12 @@ typedef unsigned char u8;
 #define SETFILE "/etc/zinstall.set"
 #define ZI "/mnt/zi"                    /* the new root while it is written */
 #define ZH "/mnt/zh"                    /* its /home */
+#define BEFORE "/var/lib/zinstall/table-before"     /* in the new root: how to take its table entries out again (--undo) */
 #define KFILE "/usr/lib/zinstall/zenix" /* the kernel, in the new root until the boot partition is written */
 #define BFILES "/usr/lib/zinstall/"     /* bootmenu, zenixboot */
 #define ESKIP 1001                      /* the person said skip: optional packages never span two disks (tools/mkinstall.py), so nothing of it was written */
-#define MINKB 200                       /* free memory it wants before it writes anything (measured: docs/d35-installer.md section 10) */
-#define MINKB_ZFS 330
+#define MINKB 350                       /* free memory it wants before it writes anything (measured: docs/d35-installer.md section 10) */
+#define MINKB_ZFS 500
 
 static int disk_port = -1;
 
@@ -659,15 +660,6 @@ static int copy_from_network(int zenixfs)
             if (r) { say("zinstall: %s: failed (%d)\n", f, r); dir_free(names, n); return r; }
         }
     dir_free(names, n);
-    /* the new machine knows the same servers */
-    struct ustat st;
-    if (sys_stat("/etc/zpkg.conf", &st) == 0 && st.size < 4096) {
-        char *t = xmalloc(st.size);
-        int fd = sys_open("/etc/zpkg.conf", O_RDONLY);
-        if (fd >= 0 && sys_read(fd, t, st.size) == (int)st.size) put_file("/etc/zpkg.conf", t, st.size, 0644);
-        if (fd >= 0) sys_close(fd);
-        free(t);
-    }
     return 0;
 }
 
@@ -830,7 +822,7 @@ static void show_disk(const struct tdisk *d)
 static void show_opt(int n, const struct tdisk *d, const struct t_opt *o)
 {
     switch (o->kind) {
-    case TO_NEWCONT: say("  %d  the free space, %s, in a new partition of the PC table (nothing changes)\n", n, mbtext(o->sectors)); break;
+    case TO_NEWCONT: say("  %d  the free space, %s, in a new partition of the PC table (nothing else changes)\n", n, mbtext(o->sectors)); break;
     case TO_FREE: say("  %d  the free space, %s, in the Amiga table%s (nothing else changes)\n", n, mbtext(o->sectors), d->region[o->region].base ? " inside the card's container" : ""); break;
     case TO_PART: {
         const struct t_part *p = &d->part[o->part];
@@ -839,6 +831,11 @@ static void show_opt(int n, const struct tdisk *d, const struct t_opt *o)
     }
     case TO_WHOLE: say("  %d  ERASE THE WHOLE DISK, %s: everything on it is LOST\n", n, mbtext(o->sectors)); break;
     }
+}
+static int has_cont(const struct tdisk *d)
+{
+    for (int i = 0; i < d->nparts; i++) if (d->part[i].how == TP_MBR && d->part[i].mbrtype == 0x76) return 1;
+    return 0;
 }
 static void show_plan(const struct tdisk *d, const struct t_plan *p)
 {
@@ -872,17 +869,22 @@ static void show_plan(const struct tdisk *d, const struct t_plan *p)
     }
     if (p->aos[0]) say("  At power-on a boot menu comes first: %s starts by itself after 5 seconds.\n", p->aos);
     if (d->kind == TD_MBR)
-        say("  A PC table: only Emu68's SD driver starts from it. On any other Amiga start\n  Zenix from a boot floppy (zenix.adf%s).\n", p->zenixfs ? " , zenix-zfs.adf" : "");
+        say("  A PC table: only Emu68's SD driver starts from it. On any other Amiga start\n  Zenix from a boot floppy (%s).\n", p->zenixfs ? "zenix-zfs.adf" : "zenix.adf");
+    if (p->opt.kind == TO_NEWCONT && has_cont(d))
+        say("  NOT KNOWN: a second 0x76 next to the first has never been tried under Emu68.\n  If it is not seen, the first goes on as before; start Zenix from a floppy.\n");
+    if (!p->aos[0] && p->opt.kind != TO_WHOLE)
+        say("  No system that starts by itself was found on this disk: the menu has no AmigaOS\n  line. A system on another disk with a lower boot priority will not start first.\n");
     if (!p->atomic)
         say("  A cut power during the table writes can damage the old table before the new\n  one is whole here: the disk then holds neither.\n");
-    if (p->nw[R_BOOT].start + p->nw[R_BOOT].sectors > 8388608u)
-        say("  Note: the boot partition lies past 4 GB. Kickstart 3.1's own disk code does not\n  reach there; Kickstart 3.2 and Emu68 do.\n");
 }
 
+static int gone;                        /* what was chosen is lost: a partition, or the disk */
 static void fail_note(int stage)
 {
-    say("\nStopped. %s\n", stage ? "The new partitions are in the table, but not bootable: the machine starts as before.\nfdisk del removes them; or run zinstall again and choose them."
-                                 : "Nothing was changed on the disk.");
+    say("\nStopped. ");
+    if (!stage) say("Nothing was changed on the disk.\n");
+    else if (gone) say("The new partitions are in the table, not bootable. What you chose to replace is\nalready lost. Run zinstall again and choose them.\n");
+    else say("The new partitions are in the table, not bootable: the machine starts as before.\nRun zinstall again and choose them, or remove them (fdisk del on an Amiga table).\n");
 }
 
 static void umount_all(void)
@@ -915,6 +917,72 @@ static int list_only(void)
     return 0;
 }
 
+/* The table as it was: the file: "ZTB1", then long: what was chosen (0 free space: undo possible), the commit's record, the records;
+ * each a long, the sector's number, and the old bytes, the bytes stage 1 wrote and the bytes after stage 2 (the same if it did not change). */
+struct tb_rec { u8 at[4]; u8 old[512], w1[512], w2[512]; };
+static struct tb_rec tbr;
+static int save_before(const struct t_plan *pl, int free_space)
+{
+    static char p[64];
+    snprintf(p, sizeof p, ZI "%s", BEFORE);
+    sys_unlink(p);
+    int fd = sys_open(p, O_WRONLY | O_CREAT | O_EXCL), r;
+    if (fd < 0) return fd;
+    u8 h[16] = { 'Z', 'T', 'B', '1', 0, 0, 0, (u8)!free_space, 0, 0, 0, (u8)pl->commit1, 0, 0, 0, (u8)pl->nw1 };
+    r = write_all(fd, h, sizeof h);
+    for (int i = 0; i < pl->nw1 && !r; i++) {
+        u32 l = pl->w1[i].lba;
+        tbr.at[0] = (u8)(l >> 24); tbr.at[1] = (u8)(l >> 16); tbr.at[2] = (u8)(l >> 8); tbr.at[3] = (u8)l;
+        memcpy(tbr.old, pl->w1[i].old, 512);
+        memcpy(tbr.w1, pl->w1[i].data, 512);
+        memcpy(tbr.w2, pl->w1[i].data, 512);
+        for (int k = 0; k < pl->nw2; k++) if (pl->w2[k].lba == l) memcpy(tbr.w2, pl->w2[k].data, 512);
+        r = write_all(fd, &tbr, sizeof tbr);
+    }
+    sys_close(fd);
+    if (!r) r = sys_chmod(p, 0600);
+    return r;
+}
+/* take the install out of the table again: every sector as it was, the one that made it real first; only if the table is still what
+ * zinstall left. The new partitions' space then holds old data; nothing else changes. */
+static int undo(const char *path)
+{
+    static u8 cur[512];
+    u8 h[16];
+    int fd = sys_open(path, O_RDONLY);
+    if (fd < 0) { say("zinstall: cannot read %s (%d)\n", path, fd); return 1; }
+    if (sys_read(fd, h, sizeof h) != (int)sizeof h || memcmp(h, "ZTB1", 4)) { say("zinstall: %s is not a table copy\n", path); sys_close(fd); return 1; }
+    u32 chosen = h[7], commit = h[11], n = h[15];
+    if (chosen) { say("zinstall: this install replaced a partition or the whole disk: what was there is gone, the old table would point at nothing. Nothing changed.\n"); sys_close(fd); return 1; }
+    if (!n || n > T_MAXW || commit >= n) { say("zinstall: %s is damaged\n", path); sys_close(fd); return 1; }
+    diskh = dopen("ide0", 0);
+    if (diskh < 0) { say("zinstall: no hard disk found\n"); sys_close(fd); return 1; }
+    static struct tb_rec *rec;
+    if (!rec) rec = xmalloc(sizeof *rec * T_MAXW);
+    for (u32 i = 0; i < n; i++) {
+        if (sys_read(fd, &rec[i], sizeof *rec) != (int)sizeof *rec) { say("zinstall: %s is cut short\n", path); sys_close(fd); return 1; }
+        u32 l = (u32)rec[i].at[0] << 24 | (u32)rec[i].at[1] << 16 | (u32)rec[i].at[2] << 8 | rec[i].at[3];
+        if (tio_rd(0, l, 1, cur) || (memcmp(cur, rec[i].w1, 512) && memcmp(cur, rec[i].w2, 512))) {
+            say("zinstall: sector %u of the table is not what zinstall left: it has changed since. Nothing changed.\n", l);
+            sys_close(fd);
+            return 1;
+        }
+    }
+    sys_close(fd);
+    say("This takes Zenix's new partitions out of the table of ide0; the rest is as before the install.\nType undo to go on. Anything else stops here.\n");
+    if (ask("> ") || strcmp(line, "undo")) { say("Nothing was changed.\n"); return 0; }
+    for (u32 pass = 0; pass < n; pass++) {          /* the one that made it real first: after it the rest is unreferenced */
+        u32 i = pass == 0 ? commit : (pass <= commit ? pass - 1 : pass);
+        u32 l = (u32)rec[i].at[0] << 24 | (u32)rec[i].at[1] << 16 | (u32)rec[i].at[2] << 8 | rec[i].at[3];
+        if (tio_wr(0, l, 1, rec[i].old)) { say("zinstall: cannot write sector %u\n", l); return 1; }
+        if (pass == 0) tio_fl(0);
+    }
+    tio_fl(0);
+    rescan();
+    say("Done: the table is as it was. Restart: the disk starts what it started before.\nThe space of the new partitions is free again and holds old data.\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     static struct tdisk d;
@@ -925,7 +993,8 @@ int main(int argc, char **argv)
     if (disk_port < 0) { say("zinstall: no disk server\n"); return 1; }
     if (sys_getuid() != 0) { say("zinstall: only root installs (log in as root)\n"); return 1; }
     if (argc > 1 && !strcmp(argv[1], "--list")) return list_only();
-    if (argc > 1) { say("usage: zinstall [--list]\n"); return 2; }
+    if (argc > 1 && !strcmp(argv[1], "--undo")) return undo(argc > 2 ? argv[2] : BEFORE);
+    if (argc > 1) { say("usage: zinstall [--list] | --undo [FILE]\n"); return 2; }
     {   /* one at a time: two would plan on the same blocks */
         struct uproc pr;
         int me = sys_getpid();
@@ -1035,8 +1104,12 @@ int main(int argc, char **argv)
         diskh = h;
     }
 
+    gone = pl.opt.kind == TO_PART || pl.opt.kind == TO_WHOLE;
     say("\nWriting the table.\n");
-    if (t_commit(&io, pl.w1, pl.nw1, &why)) { say("zinstall: %s.\n", why); say("The table was not changed further; see man zinstall.\n"); return 1; }
+    if (t_commit(&io, pl.w1, pl.nw1, &why)) {
+        say("zinstall: %s.\nStopped. Whether the new table is whole: run zinstall --list.\n", why);
+        return 1;
+    }
     rescan();
     const char *names[3];
     static char nb[3][16];
@@ -1050,10 +1123,12 @@ int main(int argc, char **argv)
     /* filesystems */
     say("\nMaking the filesystems.\n");
     sys_mkdir("/mnt"); sys_mkdir(ZI); sys_mkdir(ZH);
-    int r = zenixfs ? run("/bin/mkfs.zenixfs", (char *)names[R_ROOT], 0, 0) : run("/bin/mkfs.ext2", (char *)names[R_ROOT], 0, 0);
+    /* one inode for 16 KB: the system takes under 500 of the 8,000 on 128 MB, and fsck.ext2 needs about 12 bytes an inode: at mkfs's default of 4 KB a
+     * 128 MB root ran it out of memory on 2 MB of chip RAM (measured), here and in any later check */
+    int r = zenixfs ? run("/bin/mkfs.zenixfs", (char *)names[R_ROOT], 0, 0) : run("/bin/mkfs.ext2", "-i", "16384", (char *)names[R_ROOT]);
     if (r) { say("zinstall: mkfs failed (%d)\n", r); fail_note(1); return 1; }
     if (pl.nnew > 2) {
-        r = run("/bin/mkfs.ext2", (char *)names[R_HOME], 0, 0);
+        r = run("/bin/mkfs.ext2", "-i", "16384", (char *)names[R_HOME]);
         if (r) { say("zinstall: mkfs of /home failed (%d)\n", r); fail_note(1); return 1; }
     }
     char *margv[] = { "/bin/mount", "-t", zenixfs ? "zenixfs" : "ext2", (char *)names[R_ROOT], ZI, 0 };
@@ -1079,6 +1154,16 @@ int main(int argc, char **argv)
     if (bad) { say("zinstall: %d problem(s) on the disk: stopping.\n", bad); umount_all(); fail_note(1); return 1; }
     say("  %u files are right.\n", nfiles);
     /* the machine's own */
+    if (!floppy) {                      /* the new machine knows the same servers */
+        struct ustat cst;
+        if (sys_stat("/etc/zpkg.conf", &cst) == 0 && cst.size < 4096) {
+            char *t = xmalloc(cst.size);
+            int fd = sys_open("/etc/zpkg.conf", O_RDONLY);
+            if (fd >= 0 && sys_read(fd, t, cst.size) == (int)cst.size) put_file("/etc/zpkg.conf", t, cst.size, 0644);
+            if (fd >= 0) sys_close(fd);
+            free(t);
+        }
+    }
     static char fst[1024];
     struct ustat fs;
     if (sys_stat(ZI "/etc/fstab", &fs) == 0 && fs.size < sizeof fst - 64) {
@@ -1090,19 +1175,10 @@ int main(int argc, char **argv)
             put_file("/etc/fstab", fst, (u32)strlen(fst), 0644);
         }
     }
-    /* the table as it was: every sector stage 1 changed, its number and its old bytes (man zinstall) */
+    /* the table as it was (--undo) */
     mkdir_p(ZI "/var/lib/zinstall");
-    {
-        int fd = sys_open(ZI "/var/lib/zinstall/table-before", O_WRONLY | O_CREAT | O_TRUNC);
-        if (fd >= 0) {
-            for (int i = 0; i < pl.nw1; i++) {
-                u8 at[4] = { (u8)(pl.w1[i].lba >> 24), (u8)(pl.w1[i].lba >> 16), (u8)(pl.w1[i].lba >> 8), (u8)pl.w1[i].lba };
-                write_all(fd, at, 4);
-                write_all(fd, pl.w1[i].old, 512);
-            }
-            sys_close(fd);
-        }
-    }
+    r = save_before(&pl, pl.opt.kind == TO_FREE || pl.opt.kind == TO_NEWCONT);
+    if (r) { say("zinstall: cannot save the copy of the table (%d)\n", r); umount_all(); fail_note(1); return 1; }
     /* /home */
     if (pl.nnew > 2) {
         char *h[] = { "/bin/mount", "-t", "ext2", (char *)names[R_HOME], ZH, 0 };
@@ -1139,13 +1215,12 @@ int main(int argc, char **argv)
         say("  2. A boot menu comes first. AmigaOS (%s) starts by itself after 5 seconds; press\n"
             "     a key and choose Zenix for Zenix.\n", pl.aos);
         say("  3. Log in as root and give root a password: passwd.\n\n"
-            "The way back to only AmigaOS: at power-on hold both mouse buttons for Kickstart's\n"
-            "boot menu, or remove %s, %s%s%s with HDToolBox or Zenix's fdisk del; AmigaOS was\n"
-            "not touched.\n", pl.nw[R_BOOT].label, pl.nw[R_ROOT].label, pl.nnew > 2 ? ", " : "", pl.nnew > 2 ? pl.nw[R_HOME].label : "");
+            "The way back to only %s: in Zenix type zinstall --undo, then restart: the table is\n"
+            "as it was. Or at power-on hold both mouse buttons for Kickstart's own menu.\n", pl.aos);
     } else {
         say("  2. Log in as root and give root a password: passwd.\n");
     }
-    if (d.kind == TD_MBR) say("Under Emu68 it starts by itself; on another Amiga start it from the floppy zenix%s.adf.\n", zenixfs ? "-zfs" : "");
+    if (d.kind == TD_MBR) say("%s; on another Amiga start it from the floppy zenix%s.adf.\n", has_cont(&d) ? "Under Emu68 a second 0x76 is not known to start" : "Under Emu68 it should start by itself", zenixfs ? "-zfs" : "");
     say("Later: zpkg -Syu brings what is newer, zpkg -S NAME more programs.\n");
     return 0;
 }

@@ -214,6 +214,20 @@ static int fuzz(unsigned long rounds, int nimg, char **names)
             plans++;
             /* no plan may write outside the disk, or twice the same place with a different view */
             for (int w = 0; w < pl.nw1; w++) if (pl.w1[w].lba >= s) { printf("zinstall-fuzz: plan writes past the disk\n"); return 3; }
+            /* nothing the table claims may be overlapped by what is new, or by a table sector, but what was chosen, and the container it lies in */
+            if (opts[i].kind == TO_WHOLE) continue;
+            for (int q = 0; q < d.nparts; q++) {
+                const struct t_part *x = &d.part[q];
+                if (q == opts[i].part || !x->sectors) continue;
+                if (x->how == TP_MBR && x->mbrtype == 0x76 && opts[i].region >= 0 && x->holds == opts[i].region) continue;
+                if (opts[i].part >= 0 && d.part[opts[i].part].how == TP_RDB && x->how == TP_MBR && x->holds == d.part[opts[i].part].region) continue;
+                for (int w = 0; w < pl.nnew; w++) {
+                    unsigned long long a = pl.nw[w].start, an = pl.nw[w].sectors;
+                    if (a < (unsigned long long)x->start + x->sectors && x->start < a + an) { printf("zinstall-fuzz: a new partition over %s\n", x->dev); return 3; }
+                }
+                for (int w = 0; w < pl.nw1; w++)
+                    if (pl.w1[w].lba >= x->start && pl.w1[w].lba - x->start < x->sectors) { printf("zinstall-fuzz: a table write into %s\n", x->dev); return 3; }
+            }
         }
     }
     printf("zinstall-fuzz: %lu rounds, %lu tables read, %lu options, %lu plans made, %lu refused: no crash, no hang\n", rounds, okread, opts_tot, plans, refused);
@@ -228,7 +242,10 @@ int main(int argc, char **argv)
     fd = open(argv[2], ro ? O_RDONLY : O_RDWR);
     if (fd < 0) { perror(argv[2]); return 2; }
     t_u32 sect = size_of(argv[2]);
-    if (t_read(&d, &io, sect, 0, 0)) { printf("cannot read\n"); return 1; }
+    struct t_busy bz;
+    int nbz = 0;
+    if (getenv("ZI_BUSY") && sscanf(getenv("ZI_BUSY"), "%u:%u", &bz.start, &bz.sectors) == 2) nbz = 1;
+    if (t_read(&d, &io, sect, &bz, nbz)) { printf("cannot read\n"); return 1; }
     int n = t_options(&d, &io, opts, T_MAXOPT);
     if (!strcmp(argv[1], "list")) { show(&d); show_opts(&d, opts, n); return 0; }
     if (!strcmp(argv[1], "install") && argc >= 4) {
@@ -246,7 +263,7 @@ int main(int argc, char **argv)
             unsigned lba, off, val;
             if (sscanf(ch, "%u:%u:%u", &lba, &off, &val) == 3) { unsigned char c = (unsigned char)val; if (pwrite(fd, &c, 1, (off_t)lba * 512 + off) != 1) return 2; }
         }
-        int same = t_same(&d, &io, sect, 0, 0);
+        int same = t_same(&d, &io, sect, &bz, nbz);
         if (same != 1) { printf("changed: nothing written\n"); return 1; }
         if (getenv("ZI_CUT")) cut = atol(getenv("ZI_CUT"));
         if (t_commit(&io, pl.w1, pl.nw1, &why)) { printf("commit: %s\n", why); return 1; }

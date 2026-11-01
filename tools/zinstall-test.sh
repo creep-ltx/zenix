@@ -55,15 +55,15 @@ EOC
         case $5 in
         none) ;;
         kernel:*) echo "floppy_drive_0 = ${5#kernel:}" ;;
-        *) n=$5; [ "$n" -gt "$ND" ] && n=$ND; echo "floppy_drive_count = $n"
-           for ((i = 0; i < n; i++)); do echo "floppy_drive_$i = $F/zenix-install-$((i + 1)).adf"; done ;;
+        *) local nf=$5; [ "$nf" -gt "$ND" ] && nf=$ND; echo "floppy_drive_count = $nf"
+           for ((i = 0; i < nf; i++)); do echo "floppy_drive_$i = $F/zenix-install-$((i + 1)).adf"; done ;;
         esac
         [ -z "$6" ] || echo "$6"
     } >"$1"
 }
 run() { ZENIX_SERIAL=$SER ZENIX_BUILD=$BD tools/run-test.sh "$1" "$2" "$3" 2>&1 | clean >"$4"; }
 # the dialogue's end, shared: the install to its Done
-INSTALLED='wait Done\. Zenix is on this disk|Stopped\.|zinstall: 1500'
+INSTALLED='wait Done\. Zenix is on this disk|Stopped\. 1500'
 boot_script() {    # FILE: boot from the disk, log in, what the machine must be able to do
     cat >"$1" <<EOS
 wait (login: |zenix:/# ) 240
@@ -207,7 +207,7 @@ stop
 EOS
     run $OUT/f.fs-uae 1800 $OUT/f.txt $OUT/f1.log
     check "f: the install says it is done" "$(has $OUT/f1.log '^Done\. Zenix is on this disk')"
-    check "f: three wrong answers and a q wrote nothing" "$([ "$(grep -ac 'Nothing was changed' $OUT/f1.log)" = 4 ] && echo ok || echo bad)"
+    check "f: two wrong answers and a q wrote nothing" "$([ "$(grep -ac 'Nothing was changed' $OUT/f1.log)" = 3 ] && echo ok || echo bad)"
     check "f: it says what to do next" "$(has $OUT/f1.log 'What to do next')"
     grep -a 'Lowest free' $OUT/f1.log
     boot_vol f $d $BD/kernel.bin
@@ -249,6 +249,7 @@ part_a() {
     local d=$OUT/a.hdf
     mk_aos $d
     $CK sums $d DH0 DH1 >$OUT/a.before
+    $CK bytes $d 0 64 >$OUT/a.table
     fsconf $OUT/a.fs-uae $d 2048 8192 4
     cat >$OUT/a.txt <<EOS
 wait zenix:/# 120
@@ -330,6 +331,39 @@ EOS
     check "a: Zenix reads AmigaOS's DH0" "$(has $OUT/a3.log "^$(sha256sum $OUT/wbfile | cut -d' ' -f1)")"
     $CK sums $OUT/a3.hdf DH1 >$OUT/a3.after
     check "a: DH1 still byte-identical after the boots" "$(grep -q "$(grep '^DH1' $OUT/a.before)" $OUT/a3.after && echo ok || echo bad)"
+    # the way back: zinstall --undo in the new Zenix: the table as it was, every sector of it; AmigaOS starts directly, no menu
+    cat >$OUT/a4.txt <<'EOS'
+wait (login: |zenix:/# ) 240
+sleep 1
+send root\r
+wait zenix:/# 60
+sleep 1
+send zinstall --undo\r
+wait Type undo 30
+send no\r
+wait Nothing was changed 10
+sleep 1
+send zinstall --undo\r
+wait Type undo 30
+send undo\r
+wait the table is as it was 30
+sleep 1
+send sync\r
+sleep 3
+stop
+EOS
+    run $OUT/a3.fs-uae 400 $OUT/a4.txt $OUT/a4.log
+    check "a: zinstall --undo says it is done" "$(has $OUT/a4.log 'the table is as it was')"
+    check "a: the table is back, the first 64 sectors as before the install" "$([ "$($CK bytes $OUT/a3.hdf 0 64)" = "$(cat $OUT/a.table)" ] && echo ok || echo bad)"
+    check "a: only DH0 and DH1 in it" "$([ "$($CK parts $OUT/a3.hdf | cut -d' ' -f1 | tr '\n' ' ')" = 'DH0 DH1 ' ] && echo ok || echo bad)"
+    cat >$OUT/a5.txt <<'EOS'
+wait nosuchkernel 120
+sleep 1
+stop
+EOS
+    fsconf $OUT/a5.fs-uae $OUT/a3.hdf 2048 8192 none
+    run $OUT/a5.fs-uae 200 $OUT/a5.txt $OUT/a5.log
+    check "a: and DH0 starts by itself" "$(has $OUT/a5.log 'nosuchkernel')"
     empty $OUT/a3.hdf $d
 }
 
@@ -350,7 +384,7 @@ wait Choose .Return = 1, ext2 60
 send $2\r
 wait To erase the whole disk 60
 send ERASE ide0\r
-wait (Done\. Zenix is on this disk|Stopped\.|zinstall: .*|Put install disk [0-9]) 2400
+wait (Done\. Zenix is on this disk|Stopped\.|Put install disk [0-9]) 2400
 sleep 1
 send skip\r
 $INSTALLED
@@ -419,7 +453,7 @@ EOS
     check "c: and that the FAT partition is not touched" "$(has $OUT/c1.log 'FAT partition .* not touched')"
     $CK sums $d slot0 slot1 DH0 DH1 >$OUT/c.after
     check "c: the FAT partition, the 0x76 whole, DH0, DH1: byte-identical" "$(yes_if cmp $OUT/c.before $OUT/c.after)"
-    check "c: the MBR's new entry is a 0x76" "$($CK parts $d | grep -q '^slot2 .* 76 ' && echo ok || echo bad)"
+    check "c: the MBR's new entry is a 0x76" "$($CK parts $d | grep -q '^slot3 .* 76 ' && echo ok || echo bad)"
     boot_vol c $d $BD/kernel.bin
     host_fs c $d ZR0 ext2
     fsconf $OUT/c2.fs-uae $d 2048 8192 kernel:$BD/zenix.adf
@@ -560,7 +594,7 @@ sif /etc/network/interfaces uid 0
 sif /etc/network/interfaces gid 0
 sif /etc/network/interfaces mode 0100644
 EOS
-    python3 tools/mkrdb-multi.py $d $rootimg:ext2:ZX0:boot,nomount >/dev/null
+    python3 tools/mkrdb-multi.py $d $rootimg:ext2:ZX0:nomount >/dev/null
     grow_rdb $d 200
     fsconf $OUT/n.fs-uae $d 2048 8192 kernel:$BD/zenix.adf "network_card = a2065"
     cat >$OUT/n.txt <<EOS

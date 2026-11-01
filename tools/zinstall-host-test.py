@@ -514,6 +514,23 @@ try:
     cut_test("RDB free space", p, keep, "free")
     torn_test("RDB free space", p, "free")
 
+    # an RDB area kept as tight as tools/mkrdb-multi.py keeps it: it grows into what is free before the first partition
+    p = os.path.join(T, "tight.hdf")
+    s = 512 * MB
+    mkimg(p, s)
+    with open(p, "r+b") as f:
+        Rdb(f, 0, s // 1008, 16, 63, AOS, fs=False, rdbhi=4)
+        fill(f, 1008, 80 * 1008, "dh0")
+        fill(f, 81 * 1008, 80 * 1008, "dh1")
+    keep = [("DH0", 1008, 80 * 1008), ("DH1", 81 * 1008, 80 * 1008)]
+    full_install("a tight RDB area", p, keep, "free")
+    mkimg(p, s)
+    with open(p, "r+b") as f:
+        f.truncate(0)
+        f.truncate(s * 512)
+        Rdb(f, 0, s // 1008, 16, 63, AOS, fs=False, rdbhi=4)
+    cut_test("a tight RDB area", p, [], "free")
+
     p = os.path.join(T, "bigcyl.hdf")
     keep = img_rdb_big_cyl(p)
     full_install("RDB of big cylinders", p, keep, "free")
@@ -698,7 +715,76 @@ try:
     with open(p, "r+b") as f:
         flip(f, 200 * MB + 2048 + 3, 100)
     r = run("list", p).stdout
-    check("a damaged RDB inside 0x76: its partitions are not offered, the new 0x76 is", "newcont" in r and [l for l in r.splitlines() if l.startswith("part ide0p4")][0].split("refused=")[1] != "-", r)
+    check("a damaged RDB inside 0x76: its real extent is not known: nothing offered", "option" not in r, r)
+    # a partition running past its container: not offered, and what it claims is not free space (the reviewer's case)
+    p = os.path.join(T, "pastc.img")
+    s = 1024 * MB
+    mkimg(p, s)
+    with open(p, "r+b") as f:
+        mbr(f, [(0, 0x0C, 2048, 100 * MB), (0, 0x76, 2048 + 100 * MB, 100 * MB)])
+        Rdb(f, 2048 + 100 * MB, 100 * MB // 1008, 16, 63, [("DH0", 1, 300 * MB // 1008, FFS, 1, 0)], fs=False)
+    r = run("list", p).stdout
+    check("a partition past its 0x76: nothing beside it is offered", "newcont" not in r and "option" not in r, r)
+    # an MBR with overlapping entries: the partitions inside are not offered either
+    p = os.path.join(T, "ovl.img")
+    mkimg(p, 1024 * MB)
+    with open(p, "r+b") as f:
+        mbr(f, [(0, 0x0C, 2048, 200 * MB), (0, 0x76, 100 * MB, 200 * MB)])
+        Rdb(f, 100 * MB, 200 * MB // 1008, 16, 63, [("DH0", 1, 100, FFS, 1, 0)], fs=False)
+    r = run("list", p).stdout
+    check("an MBR with entries overlapping: nothing in it is offered", "option" not in r, r)
+    # a bad-block list: spare blocks look free
+    p = os.path.join(T, "badb.hdf")
+    s = 512 * MB
+    mkimg(p, s)
+    with open(p, "r+b") as f:
+        Rdb(f, 0, s // 1008, 16, 63, AOS, fs=False)
+        setlong(f, 0, 6, 20)
+        f.seek(20 * 512)
+        f.write(sumblock([0x42414442, 64, 0, 7, 0xFFFFFFFF, 0, 5000, 1]))
+    r = run("list", p).stdout
+    check("a bad-block list: the table is not changed", "bad-block" in r and "option 1 free" not in r, r)
+    # names and places
+    for name, why in (("Sys ", "cannot use"), ("A:B", "cannot use")):
+        p = os.path.join(T, "nam.hdf")
+        s = 512 * MB
+        mkimg(p, s)
+        with open(p, "r+b") as f:
+            f.truncate(0); f.truncate(s * 512)
+            Rdb(f, 0, s // 1008, 16, 63, [(name, 1, 40, FFS, 1, 0)], fs=False)
+        r = run("install", p, opt_for(p, "free"))
+        check("a system partition called %r: refused before anything" % name, r.returncode == 1 and why in r.stdout, r.stdout)
+    p = os.path.join(T, "boot.hdf")
+    s = 512 * MB
+    mkimg(p, s)
+    with open(p, "r+b") as f:
+        f.truncate(0); f.truncate(s * 512)
+        Rdb(f, 0, s // 1008, 16, 63, [("BOOT", 1, 40, FFS, 1, 5), ("DH0", 41, 80, FFS, 1, 0)], fs=False)
+    r = run("install", p, opt_for(p, "free"))
+    check("the partition that starts today is what the menu offers, whatever its name", "pri 6 aos BOOT" in r.stdout, r.stdout)
+    # past 4 GB: not as the highest priority on a top-level RDB
+    p = os.path.join(T, "p4g.hdf")
+    s = 8192 * MB
+    mkimg(p, s)
+    with open(p, "r+b") as f:
+        Rdb(f, 0, s // 1008, 16, 63, [("DH0", 1, 5000 * MB // 1008, FFS, 1, 0)], fs=False)
+    r = run("install", p, opt_for(p, "free"))
+    check("free space past 4 GB on an RDB: refused, says why", r.returncode == 1 and "4 GB" in r.stdout, r.stdout)
+    # a type it does not know, and a slot: the last free one
+    p = os.path.join(T, "ntfs.img")
+    mkimg(p, 1024 * MB)
+    with open(p, "r+b") as f:
+        mbr(f, [(0, 0x83, 2048, 100 * MB), (0, 0x82, 2048 + 100 * MB, 100 * MB)])
+    r = run("list", p).stdout
+    check("a PC type it does not know is not offered", [l for l in r.splitlines() if l.startswith("part ide0p2")][0].endswith("never touched"), r)
+    r = run("install", p, opt_for(p, "newcont"))
+    t = read_table(p)
+    check("a new 0x76 takes the last free slot", [x for x in t if x[0] == "slot3"] and [x for x in t if x[0] == "slot3"][0][3] == 0x76, str(t))
+    # busy
+    p = os.path.join(T, "busy.hdf")
+    keep = img_rdb_free(p)
+    r = run("list", p, ZI_BUSY="1008:%d" % (80 * 1008)).stdout
+    check("a mounted partition is not offered, nor the erase", "it is in use" in r and "whole something on this disk" in r and "option 1 free" in r, r)
 
     # ---- a disk that changes between show and write ----
     p = os.path.join(T, "chg.hdf")
@@ -719,7 +805,15 @@ try:
     s = 512 * MB
     mkimg(p, s)
     with open(p, "r+b") as f:
-        Rdb(f, 0, s // 1008, 16, 63, [("D%d" % i, 1 + i * 2, 2 + i * 2, FFS, 0, 0) for i in range(14)], fs=False)
+        f.write(sumblock(rdsk(s // 1008, 16, 63, 16, 1, high=17)))     # a handler's chain holds blocks 1-15, so every free block is past them
+        f.seek(512)
+        f.write(sumblock([0x46534844, 64, 0, 7, 0xFFFFFFFF, 0, 0, 0, 0x50465303, 0] + [0] * 8 + [2]))
+        for i in range(2, 16):
+            f.seek(i * 512)
+            f.write(sumblock([0x4C534547, 64, 0, 7, i + 1 if i < 15 else 0xFFFFFFFF]))
+        for i in range(2):
+            f.seek((16 + i) * 512)
+            f.write(sumblock(part("D%d" % i, 17 if i == 0 else 0xFFFFFFFF, 1 + i * 2, 2 + i * 2, 16, 63, FFS)))
     cp(p, b)
     r = run("install", p, opt_for(p, "free"), ZI_TABLE_ONLY=1)
     blk = new_parts(r.stdout)["ZH0"]["blk"]
@@ -728,7 +822,7 @@ try:
     r = run("install", p, opt_for(p, "free"), ZI_CHANGE="%d:5:7" % blk)
     check("a free block a new PART takes changed: the write of it stops", "has changed" in r.stdout, r.stdout + r.stderr)
     t = read_table(p)
-    check("  the table is still the old one", [x[0] for x in t] == ["D%d" % i for i in range(14)], str(t))
+    check("  the table is still the old one", [x[0] for x in t] == ["D0", "D1"], str(t))
     img_rdb_free(p)
     cp(p, b)
     cp(b, p)
@@ -746,7 +840,7 @@ try:
         Rdb(f, 0, s // 1008, 16, 63, [("ZB0", 1, 40, FFS, 1, 7), ("DH3", 41, 80, PFS3, 1, -2), ("WB", 81, 120, FFSI, 1, 3), ("OLD", 121, 140, EXT2, 2, 9)])
     r = run("install", p, opt_for(p, "free"))
     check("names already on the disk are not reused", "new ZB1" in r.stdout, r.stdout)
-    check("priority one above the highest mountable, the menu names the best AmigaOS", "pri 8 aos WB" in r.stdout, r.stdout)
+    check("priority one above the highest mountable, the menu names what starts today", "pri 8 aos ZB0" in r.stdout, r.stdout)
     t = read_table(p)
     check("  the table says so", [x for x in t if x[0] == "ZB1"][0][5] == 8, str(t))
 
