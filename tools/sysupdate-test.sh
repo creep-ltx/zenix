@@ -319,7 +319,7 @@ EOF
         "$(inorder $d/log.txt 'sh /tests/sz1.sh' 'update: signed by test key' "update: installing version $V1" "^zup: installed Zenix .*\($V1\)")"
     check "z: ... the kernel on the boot partition is the repository's systemz" \
         "$(cmp -s $d/bootx/Zenix/zenix-update.zup $W/r/pool/zenixz-$V1.zup && echo ok || echo bad)"
-    check "z: the new system runs on ZenixFS" "$([ "$(has $d/o32 "\($V1\) m68k")" = ok ] && [ "$(has $d/o35 '^ide0p[0-9]+ +/ +zenixfs ')" = ok ] && echo ok || echo bad)"
+    check "z: the new system runs on ZenixFS" "$([ "$(has $d/o32 "\($V1\) m68k")" = ok ] && [ "$(has $d/log.txt '^ide0p[0-9]+ +/ +zenixfs ')" = ok ] && echo ok || echo bad)"
     check "z: zpkg -Syu after the restart: what waited is installed live on ZenixFS" "$([ "$(has $d/o33 '^r33=0')" = ok ] && [ "$(grep -ac "^Version .*($V1)" $d/o34)" = 2 ] && echo ok || echo bad)"
     $Z fsck $d/root-after.img >$d/fsck.log 2>&1 && R "PASS z: the root: the PC's fsck clean" || R "FAIL z: the root: fsck (log $d/fsck.log)"
 }
