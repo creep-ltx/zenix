@@ -181,11 +181,12 @@ pointers.
 - Paths: the directory tools report a joined path longer than a system call takes (255 bytes) instead of cutting it, and
   one the kernel refuses once made absolute. What a path costs (measured 2026-10-31, `tools/ksize-budget`, -fstack-usage;
   all on the 2 MB stock A1200 too): 3,072 bytes of RAM for the working directories (96 in each of the 32 process slots),
-  always; kernel.bin 932 bytes smaller (the path calls share one copy-in). On the 4 KB kernel stack, only during a call:
-  a rename through a link across mounts takes 1,392 bytes up to the server's message (1,408 with the old limits), an open
-  1,364 (1,384), `umount` through a link 1,628 (1,496), a read or write 112 less than before; each nested start of a
-  server (at most two) 748 more (652). The walks use the buffer the path was copied into, so a path costs one buffer a
-  call, not three.
+  always; kernel.bin 904 bytes smaller (the path calls share one copy-in), so 2,168 bytes more in memory all told; all
+  programs together 2,812 bytes more on disk; `wasabid` 1.5 KB more of its own (paths in 4 connections), `nfscd` 96 bytes
+  more (the export) and 96 a request held. On the 4 KB kernel stack, only during a call: a rename through a link across
+  mounts takes 1,400 bytes up to the server's message (1,408 with the old limits), an open 1,372 (1,384), `umount` or
+  `mount` through a link 1,632 (1,496), a read or write 112 less than before; each nested start of a server (at most
+  two) 1,064 (1,076). The walks use the buffer the path was copied into, so a path costs one buffer a call, not three.
 - Sockets (DESIGN D19, architecture.md section 11): 32 kernel sockets for the whole machine, the last 4 only for root
   (-ENFILE beyond); each is also one of the 64 open files and one of a process's 16 fds; a buffer is checked and
   sent at most 64 KB a message (a blocking stream send loops, a datagram over 64 KB is -EMSGSIZE); an address at most
