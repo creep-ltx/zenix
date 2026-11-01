@@ -42,6 +42,7 @@ ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"
 ln -s ifconfig "$T/bin/ifup"; ln -s ifconfig "$T/bin/ifdown"
 # modes (the tool keeps the modes of the host files; everything is owned by root unless set below)
 chmod 1777 "$T/tmp"
+mkdir -p "$T/root"; chmod 700 "$T/root"
 chmod 4755 "$T/bin/su" "$T/bin/passwd"
 chmod 644 "$T/etc/passwd" "$T/etc/group"
 "$TOOL" mkfs "$IMG" "$MB" -l zenix-root >/dev/null

@@ -31,7 +31,7 @@ say() { echo "nfs-test: $*"; }
 bad() { echo "FAIL nfs-test: $*"; fails=$((fails + 1)); }
 
 build_client() {
-    [ -x "$OUT/nfs-client" ] && [ -z "$(find net/nfs tools/host/nfs-client.c -newer "$OUT/nfs-client" 2>/dev/null)" ] && return 0
+    [ -x "$OUT/nfs-client" ] && [ -z "$(find net/nfs tools/host/nfs-client.c kernel/fsproto.h kernel/errno.h -newer "$OUT/nfs-client" 2>/dev/null)" ] && return 0
     $HOSTCC $HCFLAGS $SAN -o "$OUT/nfs-client" tools/host/nfs-client.c $NFS_SRC || { bad "nfs-client does not build"; return 1; }
 }
 have_ns() { unshare -rn true 2>/dev/null || { bad "unprivileged user namespaces are off (unshare -rn)"; return 1; }; }
