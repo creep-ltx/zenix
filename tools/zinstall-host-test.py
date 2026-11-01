@@ -169,7 +169,7 @@ def img_mbr_full_slots(p):  # four slots used; room only inside the 0x76's RDB
     cb = 16 * 63
     with open(p, "r+b") as f:
         cont = (2048 + 100 * MB, 500 * MB)
-        mbr(f, [(0x80, 0x0C, 2048, 100 * MB), (0, 0x76, *cont), (0x80, 0x83, cont[0] + cont[1], 100 * MB), (0, 0x83, cont[0] + cont[1] + 100 * MB, 100 * MB)])
+        mbr(f, [(0x80, 0x0C, 2048, 100 * MB), (0, 0x76, *cont), (0, 0x83, cont[0] + cont[1], 100 * MB), (0, 0x83, cont[0] + cont[1] + 100 * MB, 100 * MB)])
         fill(f, 2048, 100 * MB, "fat")
         Rdb(f, cont[0], cont[1] // cb, 16, 63, [("BOOT", 1, 9, FFS, 1, 5), ("DH0", 10, 100, PFS3, 1, 0)])
         fill(f, cont[0] + cb, 9 * cb, "boot")
@@ -743,12 +743,33 @@ try:
     s = 512 * MB
     mkimg(p, s)
     with open(p, "r+b") as f:
-        Rdb(f, 0, s // 1008, 16, 63, [("ZB0", 1, 40, FFS, 1, 7), ("DH3", 41, 80, PFS3, 1, -2), ("WB", 81, 120, FFSI, 1, 3), ("OLD", 121, 140, EXT2, 3, 9)])
+        Rdb(f, 0, s // 1008, 16, 63, [("ZB0", 1, 40, FFS, 1, 7), ("DH3", 41, 80, PFS3, 1, -2), ("WB", 81, 120, FFSI, 1, 3), ("OLD", 121, 140, EXT2, 2, 9)])
     r = run("install", p, opt_for(p, "free"))
     check("names already on the disk are not reused", "new ZB1" in r.stdout, r.stdout)
     check("priority one above the highest mountable, the menu names the best AmigaOS", "pri 8 aos WB" in r.stdout, r.stdout)
     t = read_table(p)
     check("  the table says so", [x for x in t if x[0] == "ZB1"][0][5] == 8, str(t))
+
+    # ---- another root marked bootable would stay the root (user/rootpick.h) ----
+    p = os.path.join(T, "oldroot.hdf")
+    s = 512 * MB
+    mkimg(p, s)
+    with open(p, "r+b") as f:
+        Rdb(f, 0, s // 1008, 16, 63, [("DH0", 1, 40, FFS, 1, 0), ("OLD", 41, 80, EXT2, 3, 0)])
+    b = p + ".b"
+    cp(p, b)
+    r = run("install", p, opt_for(p, "free"))
+    check("a root already marked bootable: refused, says why", r.returncode == 1 and "would stay the root" in r.stdout, r.stdout)
+    check("  nothing written", not changed_sectors(b, p))
+    os.unlink(b)
+    p = os.path.join(T, "oldroot2.img")
+    mkimg(p, 512 * MB)
+    with open(p, "r+b") as f:
+        mbr(f, [(0, 0x0C, 2048, 20 * MB), (0x80, 0x83, 2048 + 20 * MB, 40 * MB)])
+    r = run("install", p, opt_for(p, "newcont"))
+    check("an active Linux partition in an MBR too", r.returncode == 1 and "would stay the root" in r.stdout, r.stdout)
+    r = run("install", p, opt_for(p, "part", "ide0p2"))
+    check("  not if it is the one chosen", r.returncode == 0, r.stdout)
 
     # ---- use only so much ----
     p = os.path.join(T, "lim.hdf")

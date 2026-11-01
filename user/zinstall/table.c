@@ -598,6 +598,16 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
     t_u32 space = o->sectors;
     if (maxsect && maxsect < space) space = maxsect;
     if (space < T_MINSECT) { *why = "less than 28 MB of room"; return -1; }
+    /* Zenix takes the first root marked bootable (user/rootpick.h): another one marked would stay the machine's root */
+    if (o->kind != TO_WHOLE)
+        for (int i = 0; i < d->nparts; i++) {
+            const struct t_part *q = &d->part[i];
+            int root = q->how == TP_MBR ? q->mbrtype == 0x83 : q->dostype == DT_EXT2 || q->dostype == DT_ZENIXFS;
+            if (root && q->bootable && i != o->part) {
+                *why = "another partition is marked as the root Zenix starts from, and would stay the root: take its mark off first (fdisk boot N off), or choose that partition";
+                return -1;
+            }
+        }
     labels(d, p);
     find_aos(d, p);
     t_u32 blocks[3];

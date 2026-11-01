@@ -846,6 +846,8 @@ static void show_plan(const struct tdisk *d, const struct t_plan *p)
     if (p->opt.kind == TO_PART) {
         const struct t_part *q = &d->part[p->opt.part];
         say("  Partition %s %s (%s, %s) is REPLACED: what is on it is LOST.\n", q->dev, q->label, mbtext(q->sectors), t_typename(q));
+        if (q->vol[0]) say("  Its volume is called %s.\n", q->vol);
+        if (q->bootable) say("  It is marked bootable: a system may be starting from it.\n");
     }
     if (p->opt.kind == TO_WHOLE) say("  THE WHOLE DISK IS ERASED: every partition and everything on them is LOST.\n");
     if (p->opt.kind == TO_NEWCONT) say("  A new partition of type 0x76 in the PC table, %s, holding an Amiga table with:\n", mbtext(p->opt.sectors));
@@ -924,6 +926,15 @@ int main(int argc, char **argv)
     if (sys_getuid() != 0) { say("zinstall: only root installs (log in as root)\n"); return 1; }
     if (argc > 1 && !strcmp(argv[1], "--list")) return list_only();
     if (argc > 1) { say("usage: zinstall [--list]\n"); return 2; }
+    {   /* one at a time: two would plan on the same blocks */
+        struct uproc pr;
+        int me = sys_getpid();
+        for (u32 i = 0; i < 64 && sys_procinfo(i, &pr) == 0; i++)
+            if ((int)pr.pid != me && pr.state != 0 && pr.state != 5 && !strncmp(pr.name, "zinstall", 8)) {
+                say("zinstall: another zinstall is running (pid %u): one at a time.\n", pr.pid);
+                return 1;
+            }
+    }
 
     say("\nThe Zenix installer. Nothing is written until you have seen exactly what will\nchange and said yes. Type q at any question to stop.\n");
     int floppy = read_set() == 0;

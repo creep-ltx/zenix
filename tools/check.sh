@@ -10,6 +10,7 @@
 # A test fails if it exits non-zero or prints a line starting with FAIL (matrix.sh reports per machine that way), or
 # if a `wait` in one of its serial scripts timed out or was cut short by the end of the run (ZENIX_TIMEOUTS,
 # tools/serial-tap.py; a `waitopt` may time out).
+# Needs for zinstall-test: e2fsck, sfdisk, debugfs, amitools' xdftool if installed, and part n the namespaces as zpkg-emu-test.
 # Not run, on purpose: stage0-68k-test when the Python module unicorn is missing (named as skipped), audio/klog/joystick (weak or
 # covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test, diag-test, colour-test and
 # random-test and bbs-test, ZENIX_CAGE_RIG; net-test and slip-test need libslirp (GLib) and unprivileged user namespaces (eth-test
@@ -20,8 +21,8 @@
 # machine's emulator slots (tools/run-test.sh), shared with other sessions on this PC.
 cd "$(dirname "$0")/.." || exit 1
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX)
-HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test fat-host-test ffs-host-test pfs3-host-test arc-host-test zenixfs-test mfm-test emmc-test genet-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test arc-test paths-test zroot-test zroot-card-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test"
+HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test fat-host-test ffs-host-test pfs3-host-test arc-host-test zenixfs-test mfm-test emmc-test genet-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test zinstall-host-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test arc-test paths-test zroot-test zroot-card-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test zinstall-test"
 case "$1" in
 "") LIST="$HOST $EMU" ;;
 host) LIST="$HOST" ;;
@@ -33,7 +34,7 @@ JOBS=${ZENIX_EMU_SLOTS:-6}
 # The emulator tests start longest first (from a run on 2026-10-26), so the long ones do not end up last. The two
 # longest run as several jobs at once, each with some of the test's parts (the script's arguments; | between jobs);
 # the table still shows one line per test (its time: the jobs' times added up).
-LONGEST="sysupdate-test ssh-test wget-test zpkg-emu-test remote-test nfs-emu-test update-test rootcheck-test svc-test matrix crypto68k-test diag-test colour-test bbs-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
+LONGEST="zinstall-test sysupdate-test ssh-test wget-test zpkg-emu-test remote-test nfs-emu-test update-test rootcheck-test svc-test matrix crypto68k-test diag-test colour-test bbs-test cmds2-test pure-test prio-test zenixboot-test zroot-test mounttest zenixfstest floppy-test users-test"
 declare -A SPLIT
 SPLIT[svc-test]="a z zs b n r d|o zo u l|f s h t dmg c"
 SPLIT[fat-test]="16|32"                             # the two rounds, FAT16 and FAT32
@@ -49,6 +50,7 @@ SPLIT[zpkg-emu-test]="e|s|m"                       # D22 8.2: the A2065, SLIP, 1
 SPLIT[sysupdate-test]="b|m|z"                         # D22 amendment 2: the owner's way from 2026103000; the card layout
 SPLIT[nfs-emu-test]="m|b|w|r|u"                     # D23: reading, hard, soft, killed; the lazy fstab boot; writing; reboot; users
 SPLIT[remote-test]="c|s|l|b"                        # D24: the stock A1200 (c, d, r), the screen, 1 MB of chip RAM, init's daemons
+SPLIT[zinstall-test]="f r|a|m|z|c|n"                 # D35: from the floppies, refusals; beside AmigaOS; 2 MB; ZenixFS on 2 MB; the card; the network
 SPLIT[update-test]="install bad|cold previous|panic hang|powercut slowzup|refused nozup|zfsroot|zfsreal zfscut"
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh
 m1=""; m2=""; for ((i = 0; i < ${#m[@]}; i++)); do if ((i % 2)); then m2="$m2 ${m[i]}"; else m1="$m1 ${m[i]}"; fi; done
