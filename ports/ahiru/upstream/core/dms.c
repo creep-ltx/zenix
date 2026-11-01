@@ -1,6 +1,4 @@
-/* Zenix's copy: derived from other authors' code (lha: LHa for UNIX; lzx: unlzx 1.1; dms: xDMS 1.3, public
- * domain), through the owner's BBX Go readers. Its licence is NOT settled: not for a public release of Zenix
- * until it is (docs/audit-2026-10-29-block2.md, "Licences to settle"). */
+/* Zenix's copy: derived from xDMS 1.3 (public domain), through the owner's BBX Go readers. */
 /* dms - see dms.h. A port of xDMS 1.3 (public domain) through BBX's Go
  * reader; the decoders keep xDMS's names where they help reading the
  * two side by side. Every array index is masked or checked, every loop

@@ -103,11 +103,12 @@ Found in upstream (for the owner's repository, not changed here):
   needs a paste done in slices from the main loop for it.
 - Messages and help keep AmigaOS words ("EndShell goes back", "MultiView", the keys file's ENVARC: and PROGDIR:
   names), as Sumi's do.
-- Licences, for the owner to confirm (the notice added here names him for every file, as approved): core/lha.c's
-  decoders "follow LHa for UNIX (slide.c, huf.c, dhuf.c, larc.c) and BBX's Go port", core/lzx.c is "a port of
-  unlzx.c 1.1 by way of BBX's Go reader", core/dms.c "a port of xDMS 1.3 (public domain)": written anew (their
-  own names and bounds) by way of the owner's Go readers, as their heads say; LHa for UNIX's own licence is not
-  the MIT licence. core/ptplay.c (a port of 8bitbubsy's PT2.3F replayer) is not copied (no sound here).
+- Replaced files: core/lha.c, core/lzx.c and their headers are not upstream's: they were derived from LHa for UNIX and unlzx, and
+  never come here (the owner's CFile repository still has them). Zenix's clean readers (user/arcread.h, user/arclha.c,
+  user/arclzx.c; DESIGN D33) serve the same calls, GPL-2.0-only; core/lha.h and core/lzx.h are two lines leading to them. A member
+  whose name may not be written makes the listing fail: the archive opens as damaged with what came before it.
+- Licences, for the owner to confirm (the notice added here names him for every file, as approved): core/dms.c is
+  "a port of xDMS 1.3 (public domain)". core/ptplay.c (a port of 8bitbubsy's PT2.3F replayer) is not copied (no sound here).
 
 Tests: tools/ahiru-test.sh (FS-UAE, the stock A1200; in make check): ahiru opens /tmp/a, the grid read back with
 termtest screen (CON_READ) at each step, the keys typed with CON_INPUT: a copy into a folder, a move (cut and paste),

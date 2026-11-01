@@ -1,0 +1,76 @@
+UNLHA(1)			Zenix manual
+
+NAME
+    unlha, unlzx - list, test and unpack LhA and LZX archives
+
+SYNOPSIS
+    unlha l|t|x [-f] [-q] [-d folder] [-L megabytes] archive [name...]
+    unlzx l|t|x [-f] [-q] [-d folder] [-L megabytes] archive [name...]
+
+DESCRIPTION
+    unlha reads LhA archives (.lha, .lzh), unlzx LZX archives (.lzx): the
+    same program under two names. They unpack only; neither makes archives.
+    The first argument says what to do; a leading "-" is allowed.
+
+    l    list: size, packed size, date, protection bits, method, name, and
+         a filenote on a line of its own
+    t    test: unpack to nothing, every checksum checked
+    x    unpack into the current folder or -d folder, making folders
+
+    Names after the archive pick members: a member by its whole name, or a
+    folder with all under it. A name not found says so, with exit status 1.
+
+    LhA: methods -lh0-, -lz4-, -lh1-, -lh4- to -lh7-, -lhd-, header levels
+    0, 1 and 2. LZX: stored and normal, merged groups too. Another method is
+    listed, and answers "not supported" with exit status 1.
+
+OPTIONS
+    -f     overwrite. Without it a file already there is left alone and
+           said. With it the old name is removed first, so a soft link in
+           its place is replaced, never written through.
+    -q     quiet: no line per member, errors only
+    -d D   unpack into folder D, which must exist
+    -L N   the limit on the bytes unpacked, in MB (default 512, at most 4000)
+
+EXAMPLES
+    unlha l game.lha
+    unlha t game.lha
+    mkdir game; unlha x -d game game.lha
+    unlzx x -q demo.lzx docs/readme.txt
+
+NOTES
+    An archive is not trusted. A member is refused, with a message and exit
+    status 1, if its name starts with "/", has a ".." part, is a link, or
+    does not fit 255 bytes; the others are still unpacked. No link is ever
+    made, and a soft link on the way to a target is not followed.
+
+    Before unpacking, the sizes are added up; over the limit nothing is
+    done. In an LZX group a member costs all the group's bytes before it,
+    even when only that member is asked for.
+
+    A member that fails its checksum, or is damaged, does not stay on the
+    disk. A damaged group's later members answer the same error.
+
+    Valid UTF-8 names stay; anything else is read as Latin-1, the Amiga's,
+    and becomes UTF-8. Control characters become "_".
+
+    Dates are kept, read as UTC; a folder's date is not. Modes: LhA's Unix
+    mode if it has one, without set-user-id; else from the protection bits:
+    r gives r--r--r--, w -w-------, e --x--x--x (nothing at all: rw-------).
+    h, s, p, a and filenotes have no place on Zenix: listed, not stored.
+    A filenote is shown up to 79 bytes.
+
+    LZX 1.21 without its year 2000 patch wrote wrong years after 1999, as
+    far back as 1990: such a date is shown as stored.
+
+    Memory: the largest window is 64 KB (-lh7- and LZX), about 73 KB in
+    all, enough on a 2 MB A1200. Archives of 2 GB or more cannot be read.
+    LZX block type 1 has never been seen, and answers "not supported".
+
+EXIT STATUS
+    0 all well; 1 a member failed, was refused or was not found; 2 usage, no
+    such archive, a damaged archive (members before the damage are still
+    unpacked), or over the limit.
+
+SEE ALSO
+    tar(1), gzip(1), ahiru(1)

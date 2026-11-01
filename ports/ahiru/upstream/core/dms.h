@@ -1,6 +1,4 @@
-/* Zenix's copy: derived from other authors' code (lha: LHa for UNIX; lzx: unlzx 1.1; dms: xDMS 1.3, public
- * domain), through the owner's BBX Go readers. Its licence is NOT settled: not for a public release of Zenix
- * until it is (docs/audit-2026-10-29-block2.md, "Licences to settle"). */
+/* Zenix's copy: derived from xDMS 1.3 (public domain), through the owner's BBX Go readers. */
 /* dms - DiskMasher archives: unpack to an ADF disk image.
  *
  * A port of xDMS 1.3 (Andre Rodrigues de la Rocha, public domain) by

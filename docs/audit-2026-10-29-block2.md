@@ -230,7 +230,7 @@ each fix's test as named in the table, all passing in this branch (`make check` 
 
 ## Licences to settle (before any public release of Zenix; found 2026-10-30)
 
-- **Ahiru's archive readers** in ports/ahiru/upstream/core/: `lha.c`/`.h` (decoders that follow LHa for UNIX's
+- **Fixed for LHA and LZX, 2026-11-01 (below).** **Ahiru's archive readers** in ports/ahiru/upstream/core/: `lha.c`/`.h` (decoders that follow LHa for UNIX's
   slide.c, huf.c, dhuf.c, larc.c), `lzx.c`/`.h` (a port of unlzx.c 1.1), `dms.c`/`.h` (a port of xDMS 1.3, public
   domain), all through the owner's BBX Go readers. They carry no MIT notice in Zenix's copy (tools/ahiru-vendor.sh) and
   a note saying so. To settle with the owner: the licences of LHa for UNIX and unlzx, and whether these files are
@@ -245,6 +245,7 @@ each fix's test as named in the table, all passing in this branch (`make check` 
 - **unlzx.c 1.1** (Erik Meusel, from David Tritscher's unlzx 1.0): no licence stated; packagers list it as "unknown",
   "freely available" at most. **Not safe** to ship derived code.
 - **xDMS 1.3:** public domain, as the file says. Fine.
+- **Done (2026-11-01, branch lha, DESIGN D33):** the LHA and LZX readers are gone from Zenix's tree and build, replaced by a clean rewrite (`user/arclha.c`, `user/arclzx.c`, shared by `unlha`, `unlzx` and Ahiru); docs/d33-archives.md lists every source and what cannot be proved. **Still open:** the owner's CFile repository has the old ones; `dms.c` stays, public domain. The recommendation, as it was:
 - **Recommendation:** before a public release, the LHA and LZX readers are written again from the formats' public
   descriptions (a clean rewrite, as the AmigaOS clean-room rule), not from those programs; until then a public build
   leaves them out. The DMS reader may stay.

@@ -182,7 +182,7 @@ BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console", "hosts",
 SETUID = {"su", "sudo", "passwd", "zine"}
 LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), ("chown", "/bin/chgrp"),
          ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos"), ("ifconfig", "/bin/ifup"), ("ifconfig", "/bin/ifdown"),
-         ("rz", "/bin/sz")]
+         ("rz", "/bin/sz"), ("unlha", "/bin/unlzx")]
 SBIN = {"zup"}
 OWN_PKG = {"zpkg"}                        # a base-group package of its own (DESIGN D22 step 5): /bin/zpkg, /etc/zpkg.conf
 # The bootstrap (DESIGN D22 4.5, as built 2026-10-31): a base whose zpkg cannot write the boot partition (2026103000,
@@ -203,7 +203,7 @@ FAMILIES = [
     ("coreutils", "basic file and directory commands", "ls cat cp mv rm mkdir rmdir touch ln readlink chmod chown stat "
                   "pwd basename dirname realpath mktemp du df tree"),
     ("findutils", "find files and run commands on lists of them", "find xargs"),
-    ("archive", "tar and gzip archives", "tar gzip"),
+    ("archive", "tar and gzip archives, unpacking LhA and LZX", "tar gzip unlha"),
     ("grep", "search text (POSIX extended expressions)", "grep"),
     ("sed", "the stream editor", "sed"),
     ("awk", "pattern scanning and text processing (POSIX awk)", "awk"),

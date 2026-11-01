@@ -128,6 +128,7 @@ pointers.
 - OFS and FFS (DESIGN D31, `docs/d31-ffs.md`): only DOS\0-DOS\3 with 512-byte blocks are written; files under 2 GB; 64 open files a mount, 16 removed entries waiting for a commit (more
   forces one), a cache of 24 blocks at 512 bytes (8 at 2 KB and over); a long name over 63 bytes of UTF-8 is listed by its start and block number; comments are not shown; options at
   most about 30 characters (the service text).
+- LhA and LZX (DESIGN D33, `docs/d33-archives.md`): 512 MB unpacked by default, at most 4000 MB (`-L`); archives under 2 GB; names to 255 bytes of UTF-8; 64 extended headers a member; memory at most 73 KB + 2.5 KB; filenotes shown to 79 bytes.
 - PFS3 (DESIGN D32, `docs/d32-pfs3.md`): read-only; files under 4 GB (a larger one is listed, and answers `EFBIG` at open); 64 open files a mount; a cache of 16 reserved blocks at 1 KB (8 at 2 KB and over) and one data block; a long name over 63 bytes of UTF-8 is listed by its start and anode; comments and `.deldir` are not shown; options at most about 30 characters (the service text). Real volumes have deep trees, and the system's path limit above counts here: a name deeper than 255 bytes from the root is reached only from a working directory near it, not by `cp -r` or `find`, which say "file name too long" and go on.
 - NFS (DESIGN D23, architecture.md section 9 "nfscd"): 8 NFS mounts at most (nfs0 .. nfs7, within the 7 mounts);
   `HOST:/EXPORT` at most 62 characters with no options (the service text); files below 4 GB, offsets below 2 GB;

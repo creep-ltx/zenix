@@ -40,6 +40,7 @@ for d in $MOUNTDIRS; do mkdir -p "$T/$d"; done
 ln -s less "$T/bin/more"
 ln -s gzip "$T/bin/gunzip"; ln -s gzip "$T/bin/zcat"; ln -s chown "$T/bin/chgrp"
 ln -s ifconfig "$T/bin/ifup"; ln -s ifconfig "$T/bin/ifdown"
+[ -e "$T/bin/unlha" ] && ln -s unlha "$T/bin/unlzx"
 # modes (the tool keeps the modes of the host files; everything is owned by root unless set below)
 chmod 1777 "$T/tmp"
 mkdir -p "$T/root"; chmod 700 "$T/root"
