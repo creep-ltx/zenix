@@ -4,8 +4,11 @@
 int main(int argc, char **argv)
 {
     if (argc < 2) { dprintf(2, "usage: time command [argument...]\n"); return 2; }
-    char *path = strchr(argv[1], '/') ? argv[1] : path_join("/bin", argv[1]);   /* with a slash as it is: the kernel judges its length */
-    if (!path) { dprintf(2, "time: %s: %s\n", argv[1], zwhy("cannot run")); return 127; }
+    char b[ZPATH_MAX], *path = argv[1];                     /* with a slash as it is: the kernel judges its length */
+    if (!strchr(argv[1], '/')) {
+        if (strlen(argv[1]) + 6 > sizeof b) { dprintf(2, "time: %s: file name too long\n", argv[1]); return 127; }
+        strcpy(b, "/bin/"); strcat(b, argv[1]); path = b;
+    }
     u32 t0 = sys_hrtime();
     int pid = sys_spawn(path, argv + 1, 0);
     if (pid < 0) { dprintf(2, "time: %s: %s\n", argv[1], zwhy("cannot run")); return 127; }

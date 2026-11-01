@@ -200,8 +200,6 @@ int sys_update(u32 op, u32 a, u32 b2)
     return 0;
 }
 int zerrno;
-/* the text of the last failure, as libz's: only the two numbers zup asks about */
-const char *zwhy(const char *dflt) { return zerrno == EIO ? "input/output error" : zerrno == ENOENT ? "no such file or directory" : dflt; }
 int dir_list(const char *path, char ***names)
 {
     char b[4096];

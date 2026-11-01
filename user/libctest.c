@@ -551,12 +551,20 @@ static void t_sockets(void)
     close(s);
 }
 
+static const char *lp300(void)                  /* a path too long for any system call */
+{
+    static char b[300];
+    memset(b, 'x', sizeof b - 1);
+    b[0] = '/';
+    return b;
+}
+
 static void t_helpers(void)
 {
     char *j = path_join("/tmp", "x");
     checks("path_join", j ? j : "", "/tmp/x");
     free(j);
-    check("path_join too long: ENAMETOOLONG", !path_join("/tmp", "a-name-that-makes-the-path-longer-than-sixty-three-bytes-long") &&
+    check("path_join too long: ENAMETOOLONG", !path_join(lp300(), "a-name") &&
           errno == ENAMETOOLONG, "");
     char **names;
     int n = dir_list("/tests", &names), found = 0;

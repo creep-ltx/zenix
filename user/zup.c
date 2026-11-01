@@ -134,7 +134,7 @@ static void rm_tree(const char *path)                        /* a prev set: file
     char **names, sub[PMAX];
     int n = dir_list(path, &names);
     if (n < 0) {                                             /* gone already, or not all its names known: it stays */
-        if (zerrno != ENOENT) say("%s: %s: not removed", path, zwhy("cannot read"));
+        if (zerrno != ENOENT) say("%s: cannot read it (%d): not removed", path, zerrno);
         return;
     }
     for (int i = 0; i < n; i++) {
@@ -211,7 +211,7 @@ static int lock_take(void)                                  /* 0, or -EBUSY (sai
         if (r == 0) {                                   /* lock.PID files a cut left behind go */
             char **names;
             int n = dir_list(DB, &names);
-            if (n < 0) say("%s: %s: old lock files stay", DB, zwhy("cannot read"));
+            if (n < 0) say("%s: cannot read it (%d): old lock files stay", DB, zerrno);
             for (int i = 0; i < n; i++) {
                 char lp[PMAX];
                 int pid = !strncmp(names[i], "lock.", 5) ? (int)strtoul(names[i] + 5, 0, 10) : 0;
@@ -280,7 +280,7 @@ static void installed_all(void)                             /* every installed m
     dball = 1;
     int n = dir_list(DB, &names);
     if (n < 0 && zerrno != ENOENT) {                        /* an unread list is not an empty one */
-        say("%s: %s", DB, zwhy("cannot read"));
+        say("%s: cannot read it (%d)", DB, zerrno);
         dberr = dblist = 1;
     }
     for (int i = 0; i < n; i++) {
@@ -919,7 +919,7 @@ static void post_commit(int wasclean)
     else {
         char **names;
         int n = dir_list(CACHE, &names);
-        if (n < 0 && zerrno != ENOENT) say("%s: %s: the older versions kept stay", CACHE, zwhy("cannot read"));
+        if (n < 0 && zerrno != ENOENT) say("%s: cannot read it (%d): the older versions kept stay", CACHE, zerrno);
         char me[24];
         snprintf(me, sizeof me, "prev-%u", target_v);
         for (int i = 0; i < n; i++)
@@ -1120,7 +1120,7 @@ static u32 newest_prev(void)
     char **names;
     int n = dir_list(CACHE, &names);
     u32 best = 0;
-    if (n < 0 && zerrno != ENOENT) say("%s: %s: no previous version can be found", CACHE, zwhy("cannot read"));
+    if (n < 0 && zerrno != ENOENT) say("%s: cannot read it (%d): no previous version can be found", CACHE, zerrno);
     for (int i = 0; i < n; i++)
         if (!strncmp(names[i], "prev-", 5)) { u32 v = (u32)strtoul(names[i] + 5, 0, 10); if (v > best) best = v; }
     dir_free(names, n);
@@ -1524,7 +1524,7 @@ static int list(void)
 {
     char **names;
     int n = dir_list(DB, &names);
-    if (n < 0) { dprintf(1, "zup: no package database (%s: %s)\n", DB, zwhy("cannot read")); return 1; }
+    if (n < 0) { dprintf(1, "zup: no package database (%s, %d)\n", DB, zerrno); return 1; }
     for (int i = 0; i < n; i++) {
         u32 l = strlen(names[i]);
         if (l < 10 || strcmp(names[i] + l - 9, ".manifest")) continue;

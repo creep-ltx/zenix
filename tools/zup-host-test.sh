@@ -768,10 +768,10 @@ R=$U/rl; rm -rf $R; mkdir -p $R
 zup $R $V1 $U/b1.zup >$U/out 2>&1
 snap $R >$U/sl
 zup $R $V2 $U/b2.zup ZUP_LIST_FAIL=/var/lib/zpkg >$U/out 2>&1; rc=$?
-[ $rc != 0 ] && grep -q "/var/lib/zpkg: input/output error" $U/out && grep -q "the package database cannot be read: nothing changed" $U/out && snap $R | cmp -s - $U/sl &&
+[ $rc != 0 ] && grep -q "/var/lib/zpkg: cannot read it (5)" $U/out && grep -q "the package database cannot be read: nothing changed" $U/out && snap $R | cmp -s - $U/sl &&
     check "the database's folder cannot be read: said, nothing changed (not \"nothing installed\")" ok || { check "the database's folder cannot be read" bad; cat $U/out; }
 zup $R $V2 $U/b2.zup ZUP_LIST_FAIL=prev-$V1 >$U/out 2>&1; rc=$?
-[ $rc = 0 ] && [ "$(cat $R/bin/sh)" = "sh2 contents" ] && grep -q "prev-$V1: input/output error: not removed" $U/out && [ -d $R/var/cache/zpkg/prev-$V1 ] && [ -n "$(ls $R/var/cache/zpkg/prev-$V1)" ] &&
+[ $rc = 0 ] && [ "$(cat $R/bin/sh)" = "sh2 contents" ] && grep -q "prev-$V1: cannot read it (5): not removed" $U/out && [ -d $R/var/cache/zpkg/prev-$V1 ] && [ -n "$(ls $R/var/cache/zpkg/prev-$V1)" ] &&
     check "an old previous set cannot be read: said, left whole, the update done" ok || { check "an old previous set cannot be read" bad; cat $U/out; ls -R $R/var/cache/zpkg; }
 echo "zup-host-test: $pass passed, $fail failed"
 [ $fail = 0 ]
