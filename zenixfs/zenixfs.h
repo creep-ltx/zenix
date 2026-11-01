@@ -69,6 +69,7 @@ int  zenixfs_mount_ex(struct zenixfs **out, struct zenixfs_dev *dev, uint32_t ca
 #define ZENIXFS_MNT_NOBITMAPCHECK 1
 #define ZENIXFS_MNT_READONLYISH   2
 #define ZENIXFS_MNT_READONLY      4   /* nothing is ever written (no orphan cleanup, no commit; changes fail with EROFS): for fsck */
+int  zenixfs_is_readonly(struct zenixfs *fs);
 struct zenixfs_mount_opts { uint32_t cache_blocks, bm_pages, flags, skip_commits; };
 int  zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const struct zenixfs_mount_opts *o);
 int  zenixfs_unmount(struct zenixfs *fs);                    /* commits */
@@ -112,7 +113,15 @@ int  zenixfs_set_uuid(struct zenixfs_dev *dev, const uint8_t *uuid);
 /* Recovery. zenixfs_rebuild_bitmap: recompute the free-space map from the tree (every block the tree reaches is used, the rest is free)
  * and commit it; returns the number of blocks whose state changed, or negative. zenixfs_rewrite_super: write a new superblock for a
  * volume whose block 0 was destroyed (the geometry comes from the device). */
-int  zenixfs_rebuild_bitmap(struct zenixfs *fs);
+int  zenixfs_rebuild_bitmap(struct zenixfs *fs);   /* ECORRUPT, nothing changed, if the walk could not read the whole tree */
+/* Repair a volume in place, or refuse and change nothing. rollback 0: the tree whole -> the map rebuilt; only inner nodes
+ * damaged -> new inner nodes over the leaves (nothing lost); else the commit before, if that one is whole and really the one
+ * before (report.back says it went back). rollback K > 0: exactly K commits back, on request (the older the commit, the
+ * more of its data may have been reused: its file contents are not guaranteed past K = 1).
+ * Returns 0 clean, > 0 problems that remain (links), negative: refused, the volume as it was; then use salvage. */
+struct zenixfs_repair_report { uint32_t back, leaves, nodes, changed; };
+int  zenixfs_repair(struct zenixfs_dev *dev, uint32_t cache, uint32_t rollback, void (*log)(void *, const char *), void *ctx, struct zenixfs_repair_report *rep);
+int  zenixfs_count_commits(struct zenixfs_dev *dev);
 /* number of blocks of a file that extents map (*mapped); returns 1 if the file is stored inline (no extents), 0 otherwise, or negative */
 int  zenixfs_mapped_blocks(struct zenixfs *fs, uint32_t ino, uint64_t *mapped);
 int  zenixfs_rewrite_super(struct zenixfs_dev *dev, const char *label, uint32_t reserve, uint32_t charset, uint64_t now);
@@ -123,7 +132,9 @@ int  zenixfs_fsck(struct zenixfs *fs, void (*log)(void *ctx, const char *msg), v
 /* statistics for tests and benchmarks */
 /* mount_damage: commit records or roots that failed their checks at mount. Not 0 means the volume was mounted from an
  * OLDER commit (recent changes are gone) or a record was damaged: the caller must tell the user. */
-struct zenixfs_stats { uint32_t reads, writes, flushes, commits, cache_hits, cache_misses, mount_damage; };
+/* mount_back: how many commits behind the newest that may have existed the mounted one is. 0 or 1: whole (format rule 3).
+ * 2 or more: older file data may have been overwritten; an ordinary mount is then read-only. */
+struct zenixfs_stats { uint32_t reads, writes, flushes, commits, cache_hits, cache_misses, mount_damage, mount_back; };
 void zenixfs_get_stats(struct zenixfs *fs, struct zenixfs_stats *st);
 
 #endif

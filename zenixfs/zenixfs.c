@@ -1,9 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* ZenixFS library, version 1 of the format (docs/zenixfs-format.md).
- * Status: host-tested only. Known shortcuts, to be removed before the Zenix port:
- *  - the whole free-space bitmap (and two marker bitmaps) is held in RAM (the plan says: windowed);
- *  - fsck keeps per-inode tables in RAM;
- *  - an ENOSPC in the middle of a tree change can leak a block or two until fsck (reserve makes it rare). */
+/* ZenixFS library, version 1 of the format (docs/zenixfs-format.md). The free-space map is windowed; fsck and repair keep
+ * per-inode and per-leaf tables in RAM, a mounted volume does not. */
 #ifdef ZENIXFS_FREESTANDING
 #include "zenixfs_env.h"      /* inside Zenix programs: no host headers (user/zenixfs_env.h) */
 #else
@@ -54,6 +51,8 @@ struct zenixfs {
     u32 bshift, B, nblocks, nb, bpb, reserve, dstart, maxitem, maxname;
     u32 charset;
     u32 gen;                     /* the transaction being built */
+    u64 cgen, first_gen;         /* the commit this mount read, and the first generation it writes: a tree block between the two (or above gen)
+                                  * was written after the state we read (rollback, lost records) and cannot belong to it */
     u32 root, height, free_blocks, next_ino;
     u64 now;
     u8 *bmsel;                   /* per bitmap page: which of its two copies is current */
@@ -143,7 +142,10 @@ static int cb_get(struct zenixfs *fs, u32 blk, int kind, struct cb **out)
     c->kind = kind;
     fs->st.reads++;
     if (fs->dev->read(fs->dev->ctx, blk, c->data) < 0) { c->valid = 0; cb_unhash(fs, c); c->pin = 0; return ZENIXFS_EIO; }
-    if (kind == KIND_TREE && !verify_tree(fs, c->data, blk)) { c->valid = 0; cb_unhash(fs, c); c->pin = 0; return ZENIXFS_ECORRUPT; }
+    if (kind == KIND_TREE) {
+        u64 bg = rd64(c->data + 16);
+        if (!verify_tree(fs, c->data, blk) || bg > fs->gen || (bg > fs->cgen && bg < fs->first_gen)) { c->valid = 0; cb_unhash(fs, c); c->pin = 0; return ZENIXFS_ECORRUPT; }
+    }
     *out = c;
     return 0;
 }
@@ -811,7 +813,8 @@ int zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const stru
     for (u32 i = 0; i < fs->cap; i++) { fs->cbs[i].data = ZENIXFS_MALLOC(B); if (!fs->cbs[i].data) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; } }
     for (u32 i = 0; i < fs->nbmp; i++) { fs->bmp[i].data = ZENIXFS_MALLOC(fs->bmbytes); if (!fs->bmp[i].data) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; } }
     /* commit records, newest valid first */
-    u64 gens[RING], maxg = 0; u8 *recs = ZENIXFS_MALLOC((size_t)RING * B);
+    u64 gens[RING], maxg = 0; u8 nzs[RING]; u8 *recs = ZENIXFS_MALLOC((size_t)RING * B);
+    memset(nzs, 0, sizeof nzs);
     if (!recs) { ZENIXFS_FREE(buf); fs_free(fs); return ZENIXFS_EIO; }
     for (u32 s = 0; s < RING; s++) {
         gens[s] = 0;
@@ -822,8 +825,20 @@ int zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const stru
             const u8 *q = recs + (size_t)s * B;
             u32 nz = 0;
             for (u32 i = 0; i < B; i++) nz |= q[i];
+            nzs[s] = nz != 0;
             if (nz) fs->st.mount_damage++;
         }
+    }
+    /* How far behind the newest commit that ever was can the newest valid record be? Commit g is in slot g % RING: an
+     * unreadable slot right after maxg may have held a newer commit. All zeros there is only innocent if that slot was
+     * never written (generation g <= RING), which a volume past the first turn of the ring cannot claim. */
+    u32 back = 0;
+    if (maxg) for (u32 i = 1; i < RING; i++) {
+        u64 g1 = maxg + i; u32 s = (u32)(g1 % RING);
+        if (gens[s]) break;
+        if (!nzs[s] && g1 <= RING) break;
+        if (!nzs[s]) fs->st.mount_damage++;
+        back++;
     }
     int ok = 0;
     for (int tries = 0; tries < RING && !ok; tries++) {
@@ -831,32 +846,38 @@ int zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const stru
         for (u32 s = 0; s < RING; s++) if (gens[s] && (bs < 0 || gens[s] > gens[bs])) bs = s;
         if (bs < 0) break;
         u8 *r = recs + (size_t)bs * B; u64 g = gens[bs]; gens[bs] = 0;
-        if (skip) { skip--; continue; }                           /* recovery: ignore the newest commits on request */
-        if (rd32(r + 56) != fs->nb) { fs->st.mount_damage++; continue; }
+        if (skip) { skip--; back++; continue; }                   /* recovery: ignore the newest commits on request */
+        if (rd32(r + 56) != fs->nb) { fs->st.mount_damage++; back++; continue; }
         int good = 1;
         for (u32 i = 0; i < fs->nb && good; i++) {                /* which copy of each bitmap page is current; checked now on volumes up to 4 MB of map */
             u32 sel = (r[60 + i / 8] >> (i % 8)) & 1, blk = BMBLK(i, sel);
             fs->bmsel[i] = sel;
-            if (fs->nb <= 1024 && !(mo->flags & ZENIXFS_MNT_NOBITMAPCHECK) && (dev->read(dev->ctx, blk, buf) < 0 || !verify(buf, B, T_BITMAP, blk))) { good = 0; break; }
+            /* a copy newer than the record: a later commit reused it, so this older state's map is gone */
+            if (fs->nb <= 1024 && !(mo->flags & ZENIXFS_MNT_NOBITMAPCHECK) && (dev->read(dev->ctx, blk, buf) < 0 || !verify(buf, B, T_BITMAP, blk) || rd64(buf + 16) > g)) { good = 0; break; }
         }
-        if (!good) { fs->st.mount_damage++; continue; }
+        if (!good) { fs->st.mount_damage++; back++; continue; }
         u32 root = rd32(r + 32);
         u32 height = rd32(r + 36);
         if (root < fs->dstart || root >= fs->nblocks || height == 0 || height >= MAXHEIGHT || dev->read(dev->ctx, root, buf) < 0 ||
-            !verify_tree(fs, buf, root) || buf[7] != height - 1) { fs->st.mount_damage++; continue; }
+            !verify_tree(fs, buf, root) || buf[7] != height - 1 || rd64(buf + 16) > g) { fs->st.mount_damage++; back++; continue; }
         fs->root = root; fs->height = rd32(r + 36); fs->free_blocks = rd32(r + 40); fs->next_ino = rd32(r + 44);
-        fs->now = rd64(r + 48); fs->gen = (u32)maxg + 1; (void)g; ok = 1;     /* above every valid record: after a rollback ours is the newest */
+        fs->now = rd64(r + 48); fs->gen = (u32)maxg + 1; fs->cgen = g; fs->first_gen = maxg + 1; ok = 1;     /* above every valid record: after a rollback ours is the newest */
     }
     ZENIXFS_FREE(recs); ZENIXFS_FREE(buf);
     if (!ok) { fs_free(fs); return ZENIXFS_ECORRUPT; }
     fs->meta_hint = fs->dstart; fs->data_hint = fs->dstart + fs->nblocks / 32;
     fs->readonly = (mo->flags & ZENIXFS_MNT_READONLY) != 0;
-    int e = (mo->flags & (ZENIXFS_MNT_READONLYISH | ZENIXFS_MNT_READONLY)) ? 0 : orphans_free(fs);   /* a recovery mount does not change anything by itself */
+    fs->st.mount_back = back;
+    /* two or more commits back the data of older files may have been overwritten (format rule 3 keeps exactly one older
+     * commit whole): an ordinary mount reads such a state but never builds on it. Recovery mounts decide for themselves */
+    if (back >= 2 && !(mo->flags & (ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH))) fs->readonly = 1;
+    int e = (fs->readonly || (mo->flags & ZENIXFS_MNT_READONLYISH)) ? 0 : orphans_free(fs);   /* a recovery mount does not change anything by itself */
     if (e) { fs_free(fs); return e; }
     *out = fs;
     return 0;
 }
 uint32_t zenixfs_charset(struct zenixfs *fs) { return fs->charset; }
+int zenixfs_is_readonly(struct zenixfs *fs) { return fs->readonly; }
 int zenixfs_set_charset(struct zenixfs *fs, uint32_t charset)
 {
     u8 *buf = fs->sc_c;
@@ -1560,6 +1581,8 @@ struct fctx {
     u8 *used; struct fk *tab; u32 ntab, captab; u8 prev[KEYLEN]; int have_prev;
     u32 tree_blocks; u64 counted;
     u32 prev_obj, prev_hash, prev_seq;
+    u32 bad_nodes, bad_leaves;   /* tree blocks that could not be used: what they held is out of sight */
+    struct fk sink; int oom;     /* the table could not grow: counted once as a problem, the check goes on without it */
 };
 /* message with up to two numbers: each '#' or '%' in fmt is replaced by a (first) and b (second) */
 static void fprob(struct fctx *c, const char *fmt, u32 a, u32 b)
@@ -1584,8 +1607,14 @@ static struct fk *ftab_get(struct fctx *c, u32 ino, int create)
     if (lo < c->ntab && c->tab[lo].ino == ino) return &c->tab[lo];
     if (!create) return NULL;
     if (c->ntab == c->captab) {
-        c->captab = c->captab ? c->captab * 2 : 64;
-        struct fk *n = ZENIXFS_MALLOC(sizeof(struct fk) * c->captab);
+        u32 ncap = c->captab ? c->captab * 2 : 64;
+        struct fk *n = ZENIXFS_MALLOC(sizeof(struct fk) * ncap);
+        if (!n) {
+            if (!c->oom) { c->oom = 1; fprob(c, "not enough memory for the inode table: links not checked past inode #", ino, 0); }
+            memset(&c->sink, 0, sizeof c->sink); c->sink.seen_inline = 0x100 | 0x400; c->sink.ino = 0;
+            return &c->sink;
+        }
+        c->captab = ncap;
         if (c->tab) { memcpy(n, c->tab, sizeof(struct fk) * c->ntab); ZENIXFS_FREE(c->tab); }
         c->tab = n;
     }
@@ -1600,19 +1629,34 @@ static void fuse_blk(struct fctx *c, u32 b, const char *what)
     bit_set(c->used, b);
     (void)what;
 }
-static void fwalk(struct fctx *c, u32 blk, int level)
+/* A block is never newer than its parent (copy-on-write rewrites the path to the root, all sealed with one generation) */
+static void fwalk(struct fctx *c, u32 blk, int level, u64 maxgen)
 {
     struct zenixfs *fs = c->fs; struct cb *cb;
     int e = cb_get(fs, blk, KIND_TREE, &cb);
-    if (e) { fprob(c, "tree block # unreadable or bad checksum", blk, 0); return; }
+    if (e) {
+        fprob(c, "tree block # unreadable or bad checksum", blk, 0);
+        if (level) c->bad_nodes++; else c->bad_leaves++;
+        return;
+    }
     u8 *b = cb->data;
     fuse_blk(c, blk, "tree"); c->tree_blocks++;
-    if (b[7] != level || b[6] != (level ? T_NODE : T_LEAF)) { fprob(c, "block # has the wrong level", blk, 0); cb_put(cb); return; }
+    if (b[7] != level || b[6] != (level ? T_NODE : T_LEAF)) {
+        fprob(c, "block # has the wrong level", blk, 0);
+        if (level) c->bad_nodes++; else c->bad_leaves++;
+        cb_put(cb); return;
+    }
+    u64 mygen = rd64(b + 16);
+    if (mygen > maxgen) {
+        fprob(c, "block # is newer than the block that points to it", blk, 0);
+        if (level) c->bad_nodes++; else c->bad_leaves++;
+        cb_put(cb); return;
+    }
     u32 n = NITEMS(b);
     if (level > 0) {
         for (u32 i = 0; i < n; i++) {
             if (i > 1 && kcmp(IH(b, i - 1), IH(b, i)) >= 0) fprob(c, "node # keys out of order", blk, 0);
-            fwalk(c, rd32(IH(b, i) + 12), level - 1);
+            fwalk(c, rd32(IH(b, i) + 12), level - 1, mygen);
         }
         cb_put(cb); return;
     }
@@ -1651,34 +1695,43 @@ static void fwalk(struct fctx *c, u32 blk, int level)
     }
     cb_put(cb);
 }
-int zenixfs_fsck(struct zenixfs *fs, void (*log)(void *, const char *), void *lctx)
+/* the walk and the link counts: everything but the free-space map. Reads only. 0, or EIO for want of memory */
+static int fcore(struct fctx *c)
 {
-    struct fctx c; memset(&c, 0, sizeof c);
-    c.fs = fs; c.log = log; c.lctx = lctx;
-    int e = commit(fs); if (e) { fprob(&c, "cannot commit before check", 0, 0); return c.problems; }
-    c.used = ZENIXFS_MALLOC(((size_t)fs->nb * fs->bmbytes) + 8);
-    memset(c.used, 0, ((size_t)fs->nb * fs->bmbytes) + 8);
-    for (u32 b = 0; b < fs->dstart; b++) bit_set(c.used, b);
-    fwalk(&c, fs->root, fs->height - 1);
-    for (u32 i = 0; i < c.ntab; i++) {
-        struct fk *f = &c.tab[i];
+    struct zenixfs *fs = c->fs;
+    c->used = ZENIXFS_MALLOC(((size_t)fs->nb * fs->bmbytes) + 8);
+    if (!c->used) { fprob(c, "not enough memory for the check", 0, 0); return ZENIXFS_EIO; }
+    memset(c->used, 0, ((size_t)fs->nb * fs->bmbytes) + 8);
+    for (u32 b = 0; b < fs->dstart; b++) bit_set(c->used, b);
+    fwalk(c, fs->root, fs->height - 1, fs->gen);
+    for (u32 i = 0; i < c->ntab; i++) {
+        struct fk *f = &c->tab[i];
         int has_inode = f->seen_inline & 0x100, orphan = f->seen_inline & 0x400;
-        if (!has_inode) { if (f->ino != 0) fprob(&c, "inode # referenced or has data but no inode item", f->ino, 0); continue; }
+        if (!has_inode) { if (f->ino != 0) fprob(c, "inode # referenced or has data but no inode item", f->ino, 0); continue; }
         int isdir = (f->mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFDIR;
         if (isdir && orphan) {
             /* a directory being freed: nothing to check */
         } else if (isdir) {
             u32 want = 2 + f->subdirs;
-            if (f->nlink != want) fprob(&c, "directory # has nlink % (counted differently)", f->ino, f->nlink);
-            if (f->ino != ZENIXFS_ROOT_INO && f->refs != 1) fprob(&c, "directory # is referenced % times", f->ino, f->refs);
+            if (f->nlink != want) fprob(c, "directory # has nlink % (counted differently)", f->ino, f->nlink);
+            if (f->ino != ZENIXFS_ROOT_INO && f->refs != 1) fprob(c, "directory # is referenced % times", f->ino, f->refs);
         } else {
-            if (f->nlink != f->refs && !(orphan && f->nlink == 0 && f->refs == 0)) fprob(&c, "inode # has nlink % not matching its entries", f->ino, f->nlink);
-            if ((f->flags & IFL_INLINE) && f->maxext) fprob(&c, "inode # is inline but has extents", f->ino, 0);
-            if (!(f->flags & IFL_INLINE) && (f->seen_inline & 1)) fprob(&c, "inode # has inline data but is not inline", f->ino, 0);
-            if (!(f->flags & IFL_INLINE) && f->maxext && ((u64)(f->maxext - 1) << fs->bshift) >= f->size && f->size) fprob(&c, "inode # has data beyond its size", f->ino, 0);
+            if (f->nlink != f->refs && !(orphan && f->nlink == 0 && f->refs == 0)) fprob(c, "inode # has nlink % not matching its entries", f->ino, f->nlink);
+            if ((f->flags & IFL_INLINE) && f->maxext) fprob(c, "inode # is inline but has extents", f->ino, 0);
+            if (!(f->flags & IFL_INLINE) && (f->seen_inline & 1)) fprob(c, "inode # has inline data but is not inline", f->ino, 0);
+            if (!(f->flags & IFL_INLINE) && f->maxext && ((u64)(f->maxext - 1) << fs->bshift) >= f->size && f->size) fprob(c, "inode # has data beyond its size", f->ino, 0);
         }
-        if (f->nlink == 0 && !orphan && f->ino != ZENIXFS_ROOT_INO) fprob(&c, "inode # has nlink 0 and is not an orphan", f->ino, 0);
+        if (f->nlink == 0 && !orphan && f->ino != ZENIXFS_ROOT_INO) fprob(c, "inode # has nlink 0 and is not an orphan", f->ino, 0);
     }
+    return 0;
+}
+static void fdone(struct fctx *c) { ZENIXFS_FREE(c->used); ZENIXFS_FREE(c->tab); c->used = 0; c->tab = 0; c->ntab = c->captab = 0; }
+int zenixfs_fsck(struct zenixfs *fs, void (*log)(void *, const char *), void *lctx)
+{
+    struct fctx c; memset(&c, 0, sizeof c);
+    c.fs = fs; c.log = log; c.lctx = lctx;
+    int e = commit(fs); if (e) { fprob(&c, "cannot commit before check", 0, 0); return c.problems; }
+    if (fcore(&c)) return c.problems;
     /* bitmap against what the tree uses, page by page */
     u32 freecnt = 0;
     for (u32 i = 0; i < fs->nb; i++) {
@@ -1694,7 +1747,7 @@ int zenixfs_fsck(struct zenixfs *fs, void (*log)(void *, const char *), void *lc
         }
     }
     if (freecnt != fs->free_blocks) fprob(&c, "free block count is % but bitmap says #", freecnt, fs->free_blocks);
-    ZENIXFS_FREE(c.used); ZENIXFS_FREE(c.tab);
+    fdone(&c);
     return c.problems;
 }
 
@@ -1714,21 +1767,21 @@ static struct bmpage *bm_blank(struct zenixfs *fs, u32 i)
     v->idx = i; v->valid = 1; v->dirty = 1; v->lru = ++fs->bmclock;
     return v;
 }
+/* The map from a walk that was complete. Refuses a tree it could not read whole: every block under a damaged node would
+ * be marked free, the next write would overwrite what salvage could still have brought back. */
 int zenixfs_rebuild_bitmap(struct zenixfs *fs)
 {
     struct fctx c; memset(&c, 0, sizeof c);
     c.fs = fs;
-    c.used = ZENIXFS_MALLOC(((size_t)fs->nb * fs->bmbytes) + 8);
-    if (!c.used) return ZENIXFS_EIO;
-    memset(c.used, 0, ((size_t)fs->nb * fs->bmbytes) + 8);
-    for (u32 b = 0; b < fs->dstart; b++) bit_set(c.used, b);
-    fwalk(&c, fs->root, fs->height - 1);                       /* every block the tree reaches */
+    int e = fcore(&c);
+    if (e) { fdone(&c); return e; }
+    if (c.bad_nodes || c.bad_leaves) { fdone(&c); return ZENIXFS_ECORRUPT; }
     int changed = 0; u32 freecnt = 0;
     fs->npend = 0; fs->pend_blocks = 0;                         /* whatever was waiting to be freed is decided by the tree now */
     for (u32 i = 0; i < fs->nb; i++) {
         struct bmpage *pg = bm_get(fs, i);
         int fresh = 0;
-        if (!pg) { pg = bm_blank(fs, i); fresh = 1; if (!pg) { ZENIXFS_FREE(c.used); ZENIXFS_FREE(c.tab); return ZENIXFS_EIO; } }
+        if (!pg) { pg = bm_blank(fs, i); fresh = 1; if (!pg) { fdone(&c); return ZENIXFS_EIO; } }
         for (u32 j = 0; j < fs->bpb; j++) {
             u32 b = i * fs->bpb + j;
             int want = b >= fs->nblocks ? 1 : bit_get(c.used, b);
@@ -1740,9 +1793,168 @@ int zenixfs_rebuild_bitmap(struct zenixfs *fs)
     }
     fs->free_blocks = freecnt;
     fs->txn_dirty = 1;
-    ZENIXFS_FREE(c.used); ZENIXFS_FREE(c.tab);
-    int e = commit(fs);
+    fdone(&c);
+    e = commit(fs);
     return e ? e : changed;
+}
+
+/* A new set of inner nodes over the leaves the volume still has. Every leaf says what it is (checksum, its own block
+ * number), and the current free-space map says exactly which blocks the current commit uses, so old copies of leaves are
+ * not mistaken for live ones. Nothing the commit uses is written: the nodes go to free blocks, and only after the new tree
+ * has passed the whole check does the commit make it current. "bad_nodes" is how many nodes the walk found damaged: every
+ * used block that the new tree does not reach and that is not an old node must be one of those. One more means a leaf is
+ * gone with its contents (and with it perhaps a file's extents, which no link count would notice): then this refuses. */
+struct lfent { u32 blk; u8 lo[KEYLEN], hi[KEYLEN]; };
+static void lf_sort(struct lfent *a, u32 n)              /* shell sort: no qsort in the freestanding build, n is small */
+{
+    for (u32 gap = n / 2; gap; gap = gap == 2 ? 1 : gap * 5 / 11)
+        for (u32 i = gap; i < n; i++) {
+            struct lfent t = a[i]; u32 j = i;
+            for (; j >= gap && kcmp(a[j - gap].lo, t.lo) > 0; j -= gap) a[j] = a[j - gap];
+            a[j] = t;
+        }
+}
+static int rebuild_tree(struct zenixfs *fs, u32 bad_nodes, struct zenixfs_repair_report *rep)
+{
+    u32 cap = 256, n = 0; int e = 0;
+    struct lfent *lf = ZENIXFS_MALLOC(sizeof(struct lfent) * cap);
+    u8 *buf = fs->sc_r, *ub = 0;
+    struct fctx c; memset(&c, 0, sizeof c);
+    c.fs = fs;
+    if (!lf) return ZENIXFS_EIO;
+    for (u32 i = 0; i < fs->nb; i++) {
+        struct bmpage *pg = bm_get(fs, i);
+        if (!pg) { e = ZENIXFS_ECORRUPT; goto out; }             /* no trustworthy map: old copies could not be told apart */
+        for (u32 j = 0; j < fs->bpb; j++) {
+            u32 b = i * fs->bpb + j;
+            if (b >= fs->nblocks) break;
+            if (b < fs->dstart || !bit_get(pg->data, j)) continue;
+            if (fs->dev->read(fs->dev->ctx, b, buf) < 0) continue;
+            fs->st.reads++;
+            if (!verify_tree(fs, buf, b) || buf[6] != T_LEAF || !NITEMS(buf) || rd64(buf + 16) > fs->cgen) continue;
+            if (n == cap) {
+                struct lfent *m = ZENIXFS_MALLOC(sizeof(struct lfent) * cap * 2);
+                if (!m) { e = ZENIXFS_EIO; goto out; }
+                memcpy(m, lf, sizeof(struct lfent) * n); ZENIXFS_FREE(lf); lf = m; cap *= 2;
+            }
+            lf[n].blk = b; memcpy(lf[n].lo, IH(buf, 0), KEYLEN); memcpy(lf[n].hi, IH(buf, NITEMS(buf) - 1), KEYLEN); n++;
+        }
+    }
+    if (!n) { e = ZENIXFS_ECORRUPT; goto out; }
+    lf_sort(lf, n);
+    for (u32 i = 1; i < n; i++) if (kcmp(lf[i - 1].hi, lf[i].lo) >= 0) { e = ZENIXFS_ECORRUPT; goto out; }   /* two live leaves share keys */
+    u32 count = n, height = 1, fan = (fs->B - HDR) / 16 * 3 / 4, nodes = 0;
+    int saved = fs->in_reserve; fs->in_reserve = 1;
+    while (count > 1) {
+        u32 out = 0;
+        for (u32 i = 0; i < count; ) {
+            u32 take = count - i < fan ? count - i : fan;
+            if (count - i - take == 1) take--;                   /* never a node of one child at the end */
+            u32 nb = alloc_block(fs, 0, &e);
+            if (!nb) { fs->in_reserve = saved; goto out; }
+            memset(buf, 0, fs->B);
+            hdr_set(buf, T_NODE, (u8)height, nb);
+            for (u32 k = 0; k < take; k++) { memcpy(IH(buf, k), lf[i + k].lo, KEYLEN); wr32(IH(buf, k) + 12, lf[i + k].blk); }
+            SETN(buf, take);
+            seal(buf, fs->B, fs->gen);
+            if (dev_write(fs, nb, buf) < 0) { e = ZENIXFS_EIO; fs->in_reserve = saved; goto out; }
+            lf[out].blk = nb; memcpy(lf[out].lo, lf[i].lo, KEYLEN); out++; nodes++;
+            i += take;
+        }
+        count = out; height++;
+        if (height >= MAXHEIGHT) { e = ZENIXFS_ECORRUPT; fs->in_reserve = saved; goto out; }
+    }
+    fs->in_reserve = saved;
+    u32 oldroot = fs->root, oldheight = fs->height;
+    fs->root = lf[0].blk; fs->height = height;
+    if ((e = fcore(&c))) goto back;
+    if (c.problems) { e = ZENIXFS_ECORRUPT; goto back; }
+    /* what does the commit's map hold that the new tree does not reach? */
+    u32 stray = 0;
+    ub = c.used;
+    for (u32 i = 0; i < fs->nb && !e; i++) {
+        struct bmpage *pg = bm_get(fs, i);
+        if (!pg) { e = ZENIXFS_ECORRUPT; break; }
+        for (u32 j = 0; j < fs->bpb; j++) {
+            u32 b = i * fs->bpb + j;
+            if (b >= fs->nblocks) break;
+            if (b < fs->dstart || !bit_get(pg->data, j) || bit_get(ub, b)) continue;
+            /* the new nodes are in the map and reached; an old node is valid and may go; the rest was something else */
+            if (fs->dev->read(fs->dev->ctx, b, buf) < 0 || !verify_tree(fs, buf, b) || buf[6] != T_NODE) stray++;
+        }
+    }
+    if (!e && stray != bad_nodes) e = ZENIXFS_ECORRUPT;
+back:
+    fdone(&c);
+    if (e) { fs->root = oldroot; fs->height = oldheight; goto out; }
+    if (rep) { rep->leaves = n; rep->nodes = nodes; }
+out:
+    ZENIXFS_FREE(lf);
+    if (e) fs->failed = 1;                                       /* nothing is committed: the unmount leaves the volume as it was */
+    return e;
+}
+
+static int repair_mount(struct zenixfs **fs, struct zenixfs_dev *dev, u32 cache, u32 skip)
+{
+    struct zenixfs_mount_opts mo = { cache, 0, ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH, skip };
+    return zenixfs_mount_opts(fs, dev, &mo);
+}
+/* the walk only: how many tree blocks are damaged, and the problems the walk found */
+static int repair_look(struct zenixfs *fs, u32 *nodes, u32 *leaves, void (*log)(void *, const char *), void *ctx)
+{
+    struct fctx c; memset(&c, 0, sizeof c);
+    c.fs = fs; c.log = log; c.lctx = ctx;
+    int e = fcore(&c);
+    *nodes = c.bad_nodes; *leaves = c.bad_leaves;
+    int p = c.problems;
+    fdone(&c);
+    return e ? e : p;
+}
+static int repair_finish(struct zenixfs *fs, void (*log)(void *, const char *), void *ctx, struct zenixfs_repair_report *rep)
+{
+    int ch = zenixfs_rebuild_bitmap(fs);
+    if (ch < 0) { zenixfs_unmount(fs); return ch; }
+    if (rep) rep->changed = (u32)ch;
+    int p = zenixfs_fsck(fs, log, ctx);
+    int e = zenixfs_unmount(fs);
+    return e ? e : p;
+}
+int zenixfs_repair(struct zenixfs_dev *dev, uint32_t cache, uint32_t rollback, void (*log)(void *, const char *), void *ctx, struct zenixfs_repair_report *rep)
+{
+    struct zenixfs *fs = 0; struct zenixfs_stats st; u32 nodes, leaves;
+    if (rep) memset(rep, 0, sizeof *rep);
+    int e = repair_mount(&fs, dev, cache, rollback);
+    if (e) return e;
+    zenixfs_get_stats(fs, &st);
+    if (rep) rep->back = st.mount_back;
+    int p = repair_look(fs, &nodes, &leaves, log, ctx);
+    if (p < 0) { fs->failed = 1; zenixfs_unmount(fs); return p; }
+    if (!nodes && !leaves) return repair_finish(fs, log, ctx, rep);     /* the tree is whole: the map follows it */
+    if (rollback) { fs->failed = 1; zenixfs_unmount(fs); return ZENIXFS_ECORRUPT; }   /* asked for this state, and it is damaged */
+    if (!leaves && !rebuild_tree(fs, nodes, rep)) {             /* only inner nodes: nothing is lost */
+        fs->txn_dirty = 1;
+        return repair_finish(fs, log, ctx, rep);
+    }
+    fs->failed = 1;
+    zenixfs_unmount(fs);
+    /* the commit before: whole by format rule 3, as long as it is really the one before */
+    if (st.mount_back) return ZENIXFS_ECORRUPT;
+    if ((e = repair_mount(&fs, dev, cache, 1))) return ZENIXFS_ECORRUPT;
+    zenixfs_get_stats(fs, &st);
+    p = repair_look(fs, &nodes, &leaves, 0, 0);
+    if (st.mount_back != 1 || p) { fs->failed = 1; zenixfs_unmount(fs); return ZENIXFS_ECORRUPT; }
+    if (rep) rep->back = 1;
+    return repair_finish(fs, log, ctx, rep);
+}
+/* how many valid commit records the device has at its block size: finds the block size when the superblock is gone */
+int zenixfs_count_commits(struct zenixfs_dev *dev)
+{
+    u32 B = 1u << dev->bshift; int n = 0;
+    u8 *buf = ZENIXFS_MALLOC(B);
+    if (!buf) return 0;
+    for (u32 s = 1; s <= RING; s++) if (dev->read(dev->ctx, s, buf) == 0 && verify(buf, B, T_COMMIT, s)) n++;
+    ZENIXFS_FREE(buf);
+    return n;
 }
 
 int zenixfs_rewrite_super(struct zenixfs_dev *dev, const char *label, uint32_t reserve, uint32_t charset, uint64_t now)
