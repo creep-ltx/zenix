@@ -43,7 +43,7 @@ cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-$(mktemp -d /tmp/zenix-update.XXXXXX)}; mkdir -p "$OUT"
 SER=${ZENIX_SERIAL:-/tmp/zenix-update-serial}
-SETUPS="${*:-install cold panic hang previous powercut bad refused nozup slowzup zfsroot sig}"
+SETUPS="${*:-install cold panic hang previous powercut bad refused nozup slowzup zfsroot zfsreal zfscut sig}"
 BG=; [ $# = 0 ] && BG=1                 # all of them: side by side (each takes an emulator slot); named ones: in turn
 V1=$(sed -n 's/^#define ZENIX_VNUM \([0-9]*\)u$/\1/p' kernel/version.h); V2=$((V1 + 101))
 make -s BUILD=$BD $BD/zenixboot $BD/kernel.bin $BD/kernel-zfs.bin $BD/zenix.hdf $BD/pkg/list >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL build"; exit 1; }
@@ -92,6 +92,13 @@ disk() {
     cp $B/zenixboot $d/boot/zenixboot; cp ${KERNEL1:-$B/kernel.bin} $d/boot/Zenix/zenix
     if [ -n "$2" ]; then cp $2 $d/boot/Zenix/zenix-update.zup; [ -f $2.sig ] && cp $2.sig $d/boot/Zenix/zenix-update.zup.sig; fi
     ffs_put $1 || return 1
+}
+# the root on ZenixFS (DESIGN D34, the setups zfsreal and zfscut): the same files as $OUT/root.img would hold
+zroot_img() {
+    [ -f $OUT/zroot.img ] && return 0
+    PKGDB=1 RAWIMG=1 tools/mkroot-zenixfs.sh $OUT/zroot.img $BD "$(make -s BUILD=$BD -f Makefile --eval 'pa:;@echo $(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)' pa 2>/dev/null)" 48 >/dev/null || return 1
+    zenixfs/build/zenixfs-tool rm $OUT/zroot.img /etc/passwd && zenixfs/build/zenixfs-tool put $OUT/zroot.img $OUT/passwd1 /etc/passwd &&
+        zenixfs/build/zenixfs-tool fsck $OUT/zroot.img >/dev/null
 }
 # ffs_put NAME: the boot partition made again from $OUT/NAME/boot (the files; what the owner would copy in AmigaOS)
 ffs_put() {
@@ -366,6 +373,71 @@ setup_zfsroot() {
         "$(grep -aq 'update: installing version '$V2 $OUT/$n/2.txt && grep -aq "^Zenix 0\\.2 ($V2) m68k" $OUT/$n/2.txt && [ "$(same $b/zenix $OUT/b2/kernel-zfs.bin)" = ok ] && [ "$(same $b/zenix.old $k)" = ok ] && echo ok || echo bad)"
     check $n "the root: e2fsck -fn clean" "$(rootok $n 2)"
 }
+ztool() { zenixfs/build/zenixfs-tool "$@"; }
+zfsok() { ztool fsck $OUT/$1/root-$2.img >$OUT/$1/zfsck-$2.log 2>&1 && echo ok || echo bad; }
+# zfsreal: a real ZenixFS root behind zenixboot (zfsroot's machine has an ext2 root): the bundle with the ZenixFS kernel is
+# installed, both halves, on that root: zup's journal, rename-over and "kept" rules; confirmed at login; retired at the next
+# start; "Zenix (previous)" takes kernel and root back. A bundle with the shipped kernel is refused, nothing replaced.
+setup_zfsreal() {
+    local n=zfsreal b=$OUT/zfsreal/boot/Zenix
+    zroot_img || { check $n "the ZenixFS root image" bad; return; }
+    ROOTIMG=$OUT/zroot.img KERNEL1=$B/kernel-zfs.bin disk $n $OUT/b2.zup || { check $n "the disk" bad; return; }
+    printf '%s\nsleep 2\nsend mount; uname; echo zb\\x6fk\\r\nsleep 3\nstop\n' "$S_PROMPT" >$OUT/$n/s1.txt
+    run $n 1 900 $OUT/$n/s1.txt
+    check $n "the root is ZenixFS, started through zenixboot" "$(has $n 1 '^ide0p[0-9]+ +/ +zenixfs ')"
+    check $n "a bundle with the shipped kernel: refused, renamed .bad, the installed kernel starts" \
+        "$(grep -aq 'zenix-update.zup is not used: its kernel has no ZenixFS server' $OUT/$n/1.txt && [ "$(same $b/zenix $B/kernel-zfs.bin)" = ok ] && [ -f $b/zenix-update.bad ] && grep -aq "^Zenix 0\\.2 ($V1) m68k" $OUT/$n/1.txt && echo ok || echo bad)"
+    rm -f $b/zenix-update.bad $b/zenix-update.bad.sig; cp $OUT/b2z.zup $b/zenix-update.zup; cp $OUT/b2z.zup.sig $b/zenix-update.zup.sig; ffs_put $n
+    cat >$OUT/$n/s2.txt <<EOF
+$S_PROMPT
+sleep 2
+send uname; mount; grep -c owner /etc/passwd; grep -c news /etc/passwd.new; hello | head -1; /sbin/zup -l | head -3; df; echo zb\x6fk\r
+wait (?m)^zbok 60
+sleep 1
+send sync; reboot\r
+wait (?m)^klog: boot [0-9]+, 300
+$S_PROMPT
+sleep 2
+send uname; ls /var/lib/zpkg/journal; echo zb\x6fk2\r
+wait (?m)^zbok2 60
+sleep 1
+stop
+EOF
+    run $n 2 1200 $OUT/$n/s2.txt
+    check $n "the bundle with the ZenixFS kernel: installed, the new kernel runs on the ZenixFS root" \
+        "$(grep -aq 'update: installing version '$V2 $OUT/$n/2.txt && grep -aq "^Zenix 0\\.2 ($V2) m68k" $OUT/$n/2.txt && grep -aqE '^ide0p[0-9]+ +/ +zenixfs ' $OUT/$n/2.txt && [ "$(same $b/zenix $OUT/b2/kernel-zfs.bin)" = ok ] && [ "$(same $b/zenix.old $B/kernel-zfs.bin)" = ok ] && echo ok || echo bad)"
+    check $n "zup's root half on ZenixFS: the owner's passwd kept, passwd.new, hello replaced, the result line" \
+        "$(grep -aq 'HELLO from pid' $OUT/$n/2.txt && grep -aq "^zup: installed Zenix .*($V2).*kept your /etc/passwd" $OUT/$n/2.txt && echo ok || echo bad)"
+    check $n "df on the ZenixFS root" "$(has $n 2 '^ide0p[0-9]+ +[0-9]+ +[0-9]+ +[0-9]+ +[0-9]+% .*/$')"
+    check $n "the host: fsck of the root after the update, clean" "$(zfsok $n 2)"
+    check $n "... no journal, no .zup-new left" "$(! ztool stat $OUT/$n/root-2.img /var/lib/zpkg/journal >/dev/null 2>&1 && ! ztool ls $OUT/$n/root-2.img /bin 2>/dev/null | grep -q zup-new && echo ok || echo bad)"
+    printf 'SYS:zenixboot PREVIOUS\n' >$OUT/$n/boot/S/Startup-Sequence; ffs_put $n
+    printf '%s\nsleep 2\nsend uname; ls /etc/passwd.new; hello | head -1; mount; echo zb\\x6fk\\r\nsleep 4\nstop\n' "$S_PROMPT" >$OUT/$n/s3.txt
+    run $n 3 900 $OUT/$n/s3.txt
+    check $n "PREVIOUS: the old kernel and the root rolled back, on ZenixFS" \
+        "$(grep -aq "^Zenix 0\\.2 ($V1) m68k" $OUT/$n/3.txt && grep -aq 'passwd.new: not found' $OUT/$n/3.txt && grep -aq '^hello from pid' $OUT/$n/3.txt && grep -aqE '^ide0p[0-9]+ +/ +zenixfs ' $OUT/$n/3.txt && echo ok || echo bad)"
+    check $n "the host: fsck after the way back, clean" "$(zfsok $n 3)"
+}
+# zfscut: the emulator killed while zup installs on a ZenixFS root: the next start finishes or rolls back, no fsck at boot
+setup_zfscut() {
+    local n=zfscut d
+    zroot_img || { check $n "the ZenixFS root image" bad; return; }
+    for d in 0 2 5 9 15; do
+        ROOTIMG=$OUT/zroot.img KERNEL1=$B/kernel-zfs.bin disk $n $OUT/b2z.zup || { check $n "the disk" bad; return; }
+        printf 'wait (?m)^zup: installing %s \\(0\\.2\\) 900\nsleep %s\nstop\n' $V2 $d >$OUT/$n/s1.txt
+        run $n 1 900 $OUT/$n/s1.txt
+        ztool stat $OUT/$n/root-1.img /var/lib/zpkg/journal >/dev/null 2>&1 && break
+    done
+    check $n "the emulator killed while zup installs (a journal left; cut ${d}s into it)" "$(ztool stat $OUT/$n/root-1.img /var/lib/zpkg/journal >/dev/null 2>&1 && echo ok || echo bad)"
+    check $n "the host: fsck right after the cut, clean (no check needed: atomic commits)" "$(zfsok $n 1)"
+    printf '%s\nsleep 2\nsend uname; grep -c owner /etc/passwd; ls /etc/passwd.new; hello | head -1; echo zb\\x6fk\\r\nsleep 4\nstop\n' "$S_PROMPT" >$OUT/$n/s2.txt
+    run $n 2 900 $OUT/$n/s2.txt
+    check $n "the next start: the journal finished, rolled back or found cut short, then installed" \
+        "$(inorder $n 2 'a journal from an install that did not end' '(finished the install of|rolled the unfinished install of) '$V2'|the journal was cut short: nothing had been changed' "update: the bundle's [0-9]+ bytes are free again")"
+    check $n "... the root is the new version" "$(grep -aqx 1 $OUT/$n/2.txt && grep -aq '^/etc/passwd.new' $OUT/$n/2.txt && grep -aq 'HELLO from pid' $OUT/$n/2.txt && echo ok || echo bad)"
+    check $n "boot ran no filesystem check" "$(grep -aq 'fsck' $OUT/$n/2.txt && echo bad || echo ok)"
+    check $n "the host: fsck after it, clean, no journal" "$([ "$(zfsok $n 2)" = ok ] && ! ztool stat $OUT/$n/root-2.img /var/lib/zpkg/journal >/dev/null 2>&1 && echo ok || echo bad)"
+}
 # sig: one boot partition with a zenixboot (and its Zenix/) per case; the refused cases have a file that is not a
 # kernel as Zenix/zenix, so zenixboot goes back to AmigaOS after refusing and the Startup-Sequence runs the next one
 setup_sig() {
@@ -436,6 +508,8 @@ one() {
     refused) setup_rootfail refused $OUT/b2min.zup 'zup: the bundle needs base 4000000000 or newer' ;;
     slowzup) setup_slowzup ;;
     zfsroot) setup_zfsroot ;;
+    zfsreal) setup_zfsreal ;;
+    zfscut) setup_zfscut ;;
     nozup) ROOTIMG=$OUT/root-nozup.img setup_rootfail nozup $OUT/b2.zup 'boot: no /sbin/zup: the update is not installed' ;;
     sig) setup_sig ;;
     *) echo "FAIL unknown setup $1" >$OUT/$1.res ;;

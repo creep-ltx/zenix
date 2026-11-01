@@ -35,10 +35,25 @@ def dbg(img, cmd, write=False):
     return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
 
+ZTOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "zenixfs", "build", "zenixfs-tool")
+
+
+def is_zenixfs(img):
+    with open(img, "rb") as f:
+        return f.read(36)[32:36] == b"ZNFS"
+
+
+def ztool(*a):
+    return subprocess.run([ZTOOL, *a], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+
+
 def dump_etc(img, dest):
     """the image's /etc into dest/etc (debugfs rdump: contents and modes)"""
     os.makedirs(dest, exist_ok=True)
-    r = dbg(img, "rdump /etc " + dest)
+    if is_zenixfs(img):                                  # the owner's trial of a ZenixFS root (DESIGN D34)
+        r = ztool("get", img, "-r", "/etc", os.path.join(dest, "etc"))
+    else:
+        r = dbg(img, "rdump /etc " + dest)
     if not os.path.isdir(os.path.join(dest, "etc")):
         die("cannot read /etc of %s: %s" % (img, r.stderr.decode(errors="replace").strip()))
     return os.path.join(dest, "etc")
@@ -157,11 +172,36 @@ def carry(old, new):
                 elif d != open(dst, "rb").read() and not os.path.exists(dst + ".old"):
                     plan.put("/etc/" + r + ".old", d, mode, "the card's version kept next to the new one")
         seed = os.path.join(tmp, "seed")
+        znew = is_zenixfs(new)
+        have = (lambda p: ztool("stat", new, p).returncode == 0) if znew else (lambda p: dbg(new, "stat " + p).stdout.startswith(b"Inode:"))
         if dbg(old, "dump /var/lib/random-seed " + seed).returncode == 0 and os.path.exists(seed) and \
-                os.path.getsize(seed) > 0 and not dbg(new, "stat /var/lib/random-seed").stdout.startswith(b"Inode:"):
-            if not dbg(new, "stat /var/lib").stdout.startswith(b"Inode:"):
+                os.path.getsize(seed) > 0 and not have("/var/lib/random-seed"):
+            if not have("/var/lib"):
                 plan.mkdir("/var/lib")
             plan.put("/var/lib/random-seed", open(seed, "rb").read(), 0o600, "the machine's own seed kept")
+        if znew:
+            for c in plan.cmds:
+                w = c.split()
+                if w[0] == "rm":
+                    ztool("rm", new, w[1])
+                elif w[0] == "write":
+                    if ztool("put", new, w[1], w[2]).returncode:
+                        die("%s: cannot write it to the new root" % w[2])
+                elif w[0] == "mkdir":
+                    ztool("mkdir", new, w[1])
+                elif w[0] == "sif" and w[2] == "mode":
+                    ztool("chmod", new, "%o" % (int(w[3], 8) & 0o7777), w[1])
+            r = ztool("fsck", new)
+            if r.returncode != 0:
+                die("the new root is not clean after the changes:\n" + r.stdout.decode(errors="replace"))
+            for s in plan.said or ["nothing to carry: the old root has the shipped settings"]:
+                print("cardroot: " + s)
+            for c in plan.cmds:
+                if c.startswith("write "):
+                    _, src, path = c.split()
+                    if ztool("cat", new, path).stdout != open(src, "rb").read():
+                        die("%s did not arrive in the new root" % path)
+            return
         if plan.cmds:
             script = os.path.join(tmp, "debugfs.cmd")
             with open(script, "w") as f:

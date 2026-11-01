@@ -372,6 +372,8 @@ class Lab:
                     self.fail(name, block, f"repair left {rok} of {s['total']} readable, clean={rfs}")
                 if rc == 0 and rok < s["total"] + rneed:
                     self.fail(name, block, f"repair said clean, but only {rok} of {s['total']} files are there")
+                if name.startswith("two newest") and rc == 0:
+                    self.fail(name, block, "repair built on a state two commits back without being asked")
                 if why:
                     self.fail(name, block, why)
             if check and rwrong:

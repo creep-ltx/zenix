@@ -70,6 +70,26 @@ WHAT TO DO, STEP BY STEP
     named by their inode number (#1234): look at them with less(1) and
     give them their names back with mv(1).
 
+A ZENIXFS ROOT
+    A ZenixFS root needs no check after a power cut: a change becomes
+    real at once or not at all, and the next start finds the last commit
+    (at most a few seconds old), silently. Nothing above happens then.
+
+    Only damage from a bad disk or a bug brings this up. When the two
+    newest commit records are unreadable boot mounts what it can read-only
+    and offers the choices above without 2: writing on such an old state
+    could overwrite files. In the rescue shell "fsck.zenixfs DEVICE" checks
+    and "fsck.zenixfs -y DEVICE" repairs what it can; when it is clean, the
+    shell's exit goes on read-write.
+
+    When the root cannot be mounted at all (superblock or all commit
+    records destroyed) Zenix stops with a panic that names the device.
+    Start Zenix from a floppy (zenix-mount.adf) and run fsck.zenixfs -y on
+    the device, or take the disk to a PC: "zenixfs-tool repair" for the same
+    repairs, "zenixfs-tool salvage" to copy out everything readable, also
+    when repair refuses, and "zenixfs-tool rescue" for a new clean volume
+    (docs/zenixfs.md). Never run them on the AmigaOS partitions of a card.
+
 NOTES
     The root is mounted read-only by the same server that served it for
     the check (fsd -fsck): programs see a read-only filesystem, and
@@ -81,4 +101,4 @@ NOTES
     marked (mount(8)).
 
 SEE ALSO
-    fsck.ext2(1), boot(8), mount(8), reboot(8), zenixboot(8)
+    fsck.ext2(1), fsck.zenixfs(1), boot(8), mount(8), reboot(8), zenixboot(8)

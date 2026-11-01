@@ -50,6 +50,7 @@ import zsign  # noqa: E402
 CHANNELS = ("test", "testing", "stable")
 RELEASE = ("testing", "stable")
 SYSNAME = "zenix"
+SYSZNAME = "zenixz"
 INDEX_MAX = 256 * 1024                    # zpkg refuses a bigger list (3.3)
 LATEST_MAX = 64
 SIG_SIZE = 80
@@ -134,7 +135,7 @@ def parse_index(data):
             ix["order"].append(a[0])
             continue
         if cur is None:
-            if k in ("channel", "snapshot", "serial", "date", "expires", "system") and k in ix:
+            if k in ("channel", "snapshot", "serial", "date", "expires", "system", "systemz") and k in ix:
                 raise Bad("%s: twice" % where)
             if k == "channel":
                 if len(a) != 1:
@@ -150,15 +151,15 @@ def parse_index(data):
                 ix[k] = num(a[0], where)
                 if k != "serial":
                     ymd(ix[k])
-            elif k == "system":
+            elif k in ("system", "systemz"):           # systemz: the same system with the kernel for a ZenixFS root (DESIGN D34)
                 if len(a) != 7 or a[5] != "min":
-                    raise Bad("%s: system VNUM VSTR FILE SIZE SHA256 min MIN" % where)
+                    raise Bad("%s: %s VNUM VSTR FILE SIZE SHA256 min MIN" % (where, k))
                 v = num(a[0], where)
-                if not VSTR_RE.match(a[1]) or a[2] != "%s-%d.zup" % (SYSNAME, v) or not SHA_RE.match(a[4]):
+                if not VSTR_RE.match(a[1]) or a[2] != "%s-%d.zup" % (SYSNAME if k == "system" else SYSZNAME, v) or not SHA_RE.match(a[4]):
                     raise Bad(where)
-                ix["system"] = {"vnum": v, "vstr": a[1], "file": a[2], "fsize": num(a[3], where), "sha": a[4],
-                                "min": num(a[6], where)}
-                if not 96 < ix["system"]["fsize"] <= mkzup.MAXSIZE:
+                ix[k] = {"vnum": v, "vstr": a[1], "file": a[2], "fsize": num(a[3], where), "sha": a[4],
+                         "min": num(a[6], where)}
+                if not 96 < ix[k]["fsize"] <= mkzup.MAXSIZE:
                     raise Bad("%s: a bad size" % where)
             continue                                   # other header words: a later list's (growth), ignored
         if k == "version":
@@ -214,6 +215,9 @@ def index_text(ix):
         (["snapshot %s" % ix["snapshot"]] if ix.get("snapshot") else []) + \
         ["serial %d" % ix["serial"], "date %d" % ix["date"], "expires %d" % ix["expires"],
            "system %d %s %s %d %s min %d" % (s["vnum"], s["vstr"], s["file"], s["fsize"], s["sha"], s["min"])]
+    if ix.get("systemz"):
+        s = ix["systemz"]
+        out.append("systemz %d %s %s %d %s min %d" % (s["vnum"], s["vstr"], s["file"], s["fsize"], s["sha"], s["min"]))
     for n in sorted(ix["pkgs"]):
         p = ix["pkgs"][n]
         out.append("pkg %s" % n)
@@ -446,7 +450,20 @@ def add(repo, channel, build, opts):
                   "sha": hashlib.sha256(blob).hexdigest(), "min": 0}
         for n in base_names:
             pkgs[n] = block_of(m[n])
+        systemz = None
+        kz = os.path.join(build, "kernel-zfs.bin")
+        if os.path.exists(kz):                                # DESIGN D34: the same bundle with the kernel for a ZenixFS root
+            zimg = open(kz, "rb").read()
+            if mkzup.kernel_version(zimg)[0] != bv:
+                die("kernel-zfs.bin is not version %d" % bv)
+            blobz = mkzup.bundle_bytes([(b"boot/zenix", zimg)] + parts[1:], bv, bvstr, bv // 100, 0, channel)
+            fz = "%s-%d.zup" % (SYSZNAME, bv)
+            if write_new(os.path.join(repo, "pool", fz), blobz) or not os.path.exists(os.path.join(repo, "pool", fz + ".sig")):
+                sign(os.path.join(repo, "pool", fz), opts["key"], "bundle")
+            systemz = {"vnum": bv, "vstr": bvstr, "file": fz, "fsize": len(blobz),
+                       "sha": hashlib.sha256(blobz).hexdigest(), "min": 0}
     else:
+        systemz = old.get("systemz")
         system = dict(old["system"])
         sysv = system["vnum"]
         for n in base_names:
@@ -493,7 +510,7 @@ def add(repo, channel, build, opts):
         return
     print("%s: system %s%s; changed: %s%s" % (channel, sysv, " (new)" if base_changed else "",
                                              " ".join(changed) or "none", "; gone: " + " ".join(gone) if gone else ""))
-    publish(repo, channel, {"channel": channel, "system": system, "pkgs": pkgs}, old, opts)
+    publish(repo, channel, {"channel": channel, "system": system, "systemz": systemz, "pkgs": pkgs}, old, opts)
 
 
 def promote(repo, src, dst, opts):
@@ -504,7 +521,7 @@ def promote(repo, src, dst, opts):
     if ix is None:
         die("%s has no list" % src)
     _, old = current(repo, dst)
-    publish(repo, dst, {"channel": dst, "system": ix["system"], "pkgs": ix["pkgs"]}, old, opts)
+    publish(repo, dst, {"channel": dst, "system": ix["system"], "systemz": ix.get("systemz"), "pkgs": ix["pkgs"]}, old, opts)
 
 
 def resign(repo, channel, opts):
@@ -512,7 +529,7 @@ def resign(repo, channel, opts):
     _, ix = current(repo, channel)
     if ix is None:
         die("%s has no list" % channel)
-    publish(repo, channel, {"channel": channel, "system": ix["system"], "pkgs": ix["pkgs"]}, ix, opts)
+    publish(repo, channel, {"channel": channel, "system": ix["system"], "systemz": ix.get("systemz"), "pkgs": ix["pkgs"]}, ix, opts)
 
 
 def snapshot(repo, channel, name, opts):
@@ -570,6 +587,8 @@ def prune(repo):
         for s in mine:
             ix = parse_index(open(os.path.join(d, "index-%d" % s), "rb").read())
             keep.add(ix["system"]["file"])
+            if ix.get("systemz"):
+                keep.add(ix["systemz"]["file"])
             keep.update(p["file"]["name"] for p in ix["pkgs"].values() if p["file"])
             if s == cur and not snap:
                 current_pkgs.append(ix)
@@ -667,7 +686,8 @@ def check(repo, pubs, tpubs, today):
             say("%s: the serial is below a version the list names" % where)
         if not snap and today > ix["expires"]:
             say("%s: expired on %d" % (where, ix["expires"]))
-        files = [(SYSNAME, ix["system"], True)] + [(n, p, False) for n, p in ix["pkgs"].items() if p["file"]]
+        files = [(SYSNAME, ix["system"], True)] + ([(SYSZNAME, ix["systemz"], True)] if ix.get("systemz") else []) + \
+            [(n, p, False) for n, p in ix["pkgs"].items() if p["file"]]
         for n, ent, is_sys in files:
             fe = ent if is_sys else ent["file"]
             fname = fe["file"] if is_sys else fe["name"]

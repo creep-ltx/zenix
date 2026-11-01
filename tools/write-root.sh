@@ -16,6 +16,8 @@
 # system; its partition table must be the dual card's (p2 type 0x76, p3 type 0x83 holding ext2); the new root must
 # fit p3; a 5-second pause before the write (Ctrl-C stops it). Every read and write of p3 goes through the byte
 # range the card's own partition table gives p3. Needs: python3, debugfs, e2fsck, zstd, cmp.
+# ZENIX_WRITE_ROOT_ZENIXFS=1: ROOT.img may be a ZenixFS image (the owner's choice to try a ZenixFS root, DESIGN D34; never
+# by itself): the same checks, the same saved copy and way back; the old root must be ext2. --restore takes back either kind.
 # ZENIX_WRITE_ROOT_SELFTEST=1 with a regular file as DEVICE: the same steps on a card image (tools/cardpkg-test.sh),
 # without the device checks and the pause.
 set -euo pipefail
@@ -60,7 +62,10 @@ print(e[1][2], e[2][2], e[2][4], e[2][5])' "$DEV")
 OFF=$((S3 * 512)); LEN=$((N3 * 512))
 [ $((OFF + LEN)) -le "$SIZE" ] || die "$DEV: partition 3 reaches past the end of the disk"
 magic() { dd if="$1" bs=1 skip=$(($2 + 1080)) count=2 status=none | od -An -tx1 | tr -d ' \n'; }
-[ "$(magic "$DEV" $OFF)" = 53ef ] || die "$DEV: partition 3 holds no ext2 filesystem: not the Zenix root, stopping"
+zmagic() { dd if="$1" bs=1 skip=$(($2 + 32)) count=4 status=none; }
+if [ "$(magic "$DEV" $OFF)" = 53ef ]; then P3=ext2
+elif [ "$(zmagic "$DEV" $OFF)" = ZNFS ]; then P3=zenixfs
+else die "$DEV: partition 3 holds neither ext2 nor ZenixFS: not the Zenix root, stopping"; fi
 rd() {   # the byte range of p3 to stdout
     dd if="$DEV" bs=4M iflag=skip_bytes,count_bytes skip=$OFF count=$LEN status=none
 }
@@ -95,8 +100,17 @@ fi
 BKD="$ARG3"; mkdir -p "$BKD"; owner "$BKD"
 NLEN=$(stat -c %s "$NEW")
 [ "$NLEN" -le "$LEN" ] || die "the new root ($NLEN bytes) does not fit partition 3 ($LEN bytes)"
-[ "$(magic "$NEW" 0)" = 53ef ] || die "$NEW is not an ext2 image"
-e2fsck -fn "$NEW" >/dev/null 2>&1 || die "$NEW is not clean (e2fsck -fn)"
+[ "$P3" = ext2 ] || die "partition 3 holds ZenixFS: put the saved ext2 root back first (--restore)"
+if [ "$(zmagic "$NEW" 0)" = ZNFS ]; then
+    [ "${ZENIX_WRITE_ROOT_ZENIXFS:-}" = 1 ] || die "$NEW is a ZenixFS image: only with ZENIX_WRITE_ROOT_ZENIXFS=1, the owner's choice (docs/d34-zenixfs-root.md)"
+    Z="$HERE/../zenixfs/build/zenixfs-tool"; [ -x "$Z" ] || die "needs $Z (make -C zenixfs build/zenixfs-tool)"
+    "$Z" fsck "$NEW" >/dev/null 2>&1 || die "$NEW is not clean (zenixfs-tool fsck)"
+    NEWFS=zenixfs
+else
+    [ "$(magic "$NEW" 0)" = 53ef ] || die "$NEW is not an ext2 image"
+    e2fsck -fn "$NEW" >/dev/null 2>&1 || die "$NEW is not clean (e2fsck -fn)"
+    NEWFS=ext2
+fi
 umount_p3
 
 # 2. the root now on the card, saved and checked
@@ -124,7 +138,7 @@ fi
 wr <"$WORK/new.img"
 say "checking what was written"
 cmp -n "$NLEN" "$WORK/new.img" <(rd) || die "partition 3 differs from the new root: put the old one back with --restore $BK"
-e2fsck -fn "$WORK/new.img" | tail -1
+if [ "$NEWFS" = zenixfs ]; then "$Z" fsck "$WORK/new.img" | tail -1; else e2fsck -fn "$WORK/new.img" | tail -1; fi
 sync
 [ "$NLEN" -lt "$LEN" ] && say "note: the new root is $((NLEN / 1048576)) MB, partition 3 $((LEN / 1048576)) MB: the rest stays unused"
 say "done. The old root is saved in $BK (the way back: sudo bash tools/write-root.sh $DEV --restore $BK)"

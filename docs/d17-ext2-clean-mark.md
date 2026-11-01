@@ -223,7 +223,7 @@ up (said on the console), the same as today.
 Nothing applies. ZenixFS is copy-on-write with commit records (Z1): a cut leaves the last commit, whose block map does
 not hold the blocks of later, uncommitted changes, so there are no leaks to repair and no clean mark to keep. Orphans
 are listed in the volume and freed at the next mount. zfsd keeps answering `FS_MARK` with -ENOSYS; boot never checks
-a ZenixFS root (`fsck.zenixfs` stays a tool for damage).
+a ZenixFS root (`fsck.zenixfs` stays a tool for damage; a root that can only be read gets boot's choices, DESIGN D34).
 
 ## 10. Interfaces (checked against CLAUDE.md "Frozen interfaces")
 

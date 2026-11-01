@@ -367,3 +367,6 @@ changed headers leaves at worst lost blocks after a cut. Details: `docs/d31-ffs.
 `/sbin/pfs3d`, a file service per mount: PFS3 volumes, read-only, with no write code at all and `-o rw` refused. Written from the
 on-disk format's facts, no PFS3 code (its licence does not mix with GPL). What the root block names is the state read; nothing is
 replayed or finished. A damaged volume answers errors. Details: `docs/d32-pfs3.md`.
+
+## D34. ZenixFS as the root on a real machine (roadmap block 4; the owner delegated the details 2026-10-31; built on branch zroot)
+A machine's own choice, never a default: the kernel `kernel-zfs.bin`, as a second system bundle (`zenixz-VNUM.zup`, the list's `systemz` line), the same tree as an ext2 root. No check after a cut; a root only readable gets boot's choices; `fsck.zenixfs -y`. Repair never frees what it could not read, and rebuilds inner nodes from the leaves. Details, the trial's steps and risks: `docs/d34-zenixfs-root.md`.

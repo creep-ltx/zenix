@@ -73,6 +73,7 @@ struct zp_index {
     const char *snapshot;           /* "snapshot NAME" (D22 amendment 1): the snapshot this list is; 0 a channel's list */
     zp_u32 serial, date, expires;
     struct zp_system sys;
+    struct zp_system sysz;          /* "systemz" (DESIGN D34): the same system with the kernel for a ZenixFS root; file 0 if the list has none */
     int npkg;
     struct zp_pkg *pkg;             /* sorted by name (zp_index_find is a binary search) */
     struct zp_dep *dep;             /* every block's dependencies, each block's in a row */

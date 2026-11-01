@@ -23,9 +23,11 @@ DESCRIPTION
                 looks for its volume by place, the uuid confirming it
                 (user/volid.h, the same code mount(8) uses for the
                 filesystems it mounts). Asking for the root inode starts
-                it. @zfsd (a ZenixFS root) is only in the test-only kernel
-                kernel-zfs (DESIGN D19): the shipped kernel has no ZenixFS
-                server built in, says so and stops with a panic.
+                it. @zfsd (a ZenixFS root) is only in the kernel kernel-zfs
+                (DESIGN D34): the shipped kernel has no ZenixFS server built
+                in, says so and stops with a panic. A ZenixFS root needs no
+                check after a power cut; one that can only be read gets the
+                choices of rescue(8).
     An ext2 root (not the RAM disk) whose superblock does not say
     "cleanly unmounted" (a power cut within a second of writing, or
     during an install) is checked first (DESIGN D17): fs is registered

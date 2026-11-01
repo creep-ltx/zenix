@@ -221,9 +221,17 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh
 # and the shipped kernel no longer carries one. Too big for a RAM floppy: on a kernel-only floppy, zenix-zfs.adf.
 # Updates never install it over a ZenixFS root's kernel by mistake: zenixboot reads the kernel's root list (ZSRV).
 KZOBJS := $(subst $(BUILD)/embed.o,$(BUILD)/zfs-embed.o,$(subst $(BUILD)/svc.o,$(BUILD)/zfs-svc.o,$(subst $(BUILD)/syscall.o,$(BUILD)/zfs-syscall.o,$(KOBJS))))
+# boot, built again for it with the choices for a damaged ZenixFS root (DESIGN D34): no bytes for every other machine
+$(BUILD)/bootz.uo: user/boot.c user/rootpick.h user/volid.h user/rdb.h user/randseed.h kernel/diskproto.h kernel/fsproto.h user/libz.h | $(BUILD)
+	$(CC) $(UCFLAGS) -DKERNEL_ZFSD -c $< -o $@
+$(BUILD)/bootz.uelf: $(BUILD)/bootz.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/bootz.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/bootz.zx: $(BUILD)/bootz.uelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(STACK_boot)
 $(BUILD)/zfs-%.o: kernel/%.c $(wildcard kernel/*.h) | $(BUILD)
 	$(CC) $(CFLAGS) $(KOPT_$*) -DKERNEL_ZFSD -c $< -o $@
-$(BUILD)/zfs-embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx $(BUILD)/zfsd.zx | $(BUILD)
+$(BUILD)/zfs-embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/bootz.zx $(BUILD)/diskd.zx $(BUILD)/zfsd.zx | $(BUILD)
 	$(CC) $(ASFLAGS) -DKERNEL_ZFSD -Wa,-I$(BUILD) $< -o $@
 $(BUILD)/kernel-zfs.elf: $(KZOBJS) link/kernel.ld
 	$(CC) $(CFLAGS) -nostartfiles -T link/kernel.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \

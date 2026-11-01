@@ -296,7 +296,7 @@ rewrite leaves the package counted as explicit, the safe side.
   sets in the bootinfo flags when it hands over during a trial (growth of a frozen field; the main session claims the
   bit); an older zenixboot leaves it 0, and zpkg then only warns.
 - **Where zpkg changes nothing:** a RAM-disk root (`RAM=`, live installs would vanish at power-off: refused unless
-  `--ram`), a ZenixFS root (test-only until block 4; zenixboot would refuse a system bundle there, `roots_check`), a
+  `--ram`), a ZenixFS root until D34 (block 4: programs install live there, and its system is the list's `systemz` line), a
   machine booted from the bootblock floppy (no zenixboot, no slot: system updates refused with a message; programs
   install).
 

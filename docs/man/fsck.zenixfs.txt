@@ -4,7 +4,7 @@ NAME
     fsck.zenixfs - check a ZenixFS filesystem
 
 SYNOPSIS
-    fsck.zenixfs device
+    fsck.zenixfs [-y] device
 
 DESCRIPTION
     Opens an unmounted ZenixFS volume and checks it: the checksum of every
@@ -15,12 +15,25 @@ DESCRIPTION
     ZenixFS never needs a check after a crash (changes are committed
     atomically); this is for finding damage from a bad disk or a bug. If a
     newer commit record was unreadable, it says so and checks the last good
-    commit. It only reports; nothing is repaired, and nothing is written:
-    the volume is mounted read-only (not even the cleanup of files that were
-    deleted while open, which a normal mount does, is written).
+    commit. Without -y nothing is written: the volume is mounted read-only
+    (not even the cleanup of files that were deleted while open, which a
+    normal mount does, is written).
+
+    -y repairs what can be repaired without guessing: a destroyed
+    superblock, the free-space map, damaged inner nodes of the tree (every
+    leaf says what it holds, so nothing is lost) and a damaged newest commit
+    (back to the one before it: the last few seconds of changes are gone).
+    A destroyed leaf of the tree cannot be repaired here: it says so and
+    changes nothing; copy out what can be read, or use zenixfs-tool salvage
+    on a PC.
 
 EXIT STATUS
-    0 clean, 1 problems found or not a ZenixFS volume, 2 usage.
+    0 clean (or repaired), 1 problems found or not a ZenixFS volume, 2 usage.
+
+NOTES
+    A repair keeps tables in memory: 28 bytes per leaf of the tree, one
+    bit per block. It reads every block in use. Without enough memory it
+    says so and changes nothing.
 
 SEE ALSO
-    mkfs.zenixfs(1), mount(8), docs/zenixfs.md
+    mkfs.zenixfs(1), mount(8), rescue(8), docs/zenixfs.md

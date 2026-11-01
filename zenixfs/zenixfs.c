@@ -840,8 +840,9 @@ int zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const stru
         if (!nzs[s]) fs->st.mount_damage++;
         back++;
     }
-    int ok = 0;
+    int ok = 0, stale_map = 0;
     for (int tries = 0; tries < RING && !ok; tries++) {
+        stale_map = 0;
         int bs = -1;
         for (u32 s = 0; s < RING; s++) if (gens[s] && (bs < 0 || gens[s] > gens[bs])) bs = s;
         if (bs < 0) break;
@@ -852,8 +853,10 @@ int zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const stru
         for (u32 i = 0; i < fs->nb && good; i++) {                /* which copy of each bitmap page is current; checked now on volumes up to 4 MB of map */
             u32 sel = (r[60 + i / 8] >> (i % 8)) & 1, blk = BMBLK(i, sel);
             fs->bmsel[i] = sel;
-            /* a copy newer than the record: a later commit reused it, so this older state's map is gone */
-            if (fs->nb <= 1024 && !(mo->flags & ZENIXFS_MNT_NOBITMAPCHECK) && (dev->read(dev->ctx, blk, buf) < 0 || !verify(buf, B, T_BITMAP, blk) || rd64(buf + 16) > g)) { good = 0; break; }
+            if (fs->nb <= 1024 && !(mo->flags & ZENIXFS_MNT_NOBITMAPCHECK)) {
+                if (dev->read(dev->ctx, blk, buf) < 0 || !verify(buf, B, T_BITMAP, blk)) { good = 0; break; }
+                if (rd64(buf + 16) > g) stale_map = 1;       /* a later commit reused this copy: this state's map is gone, it can only be read */
+            }
         }
         if (!good) { fs->st.mount_damage++; back++; continue; }
         u32 root = rd32(r + 32);
@@ -870,7 +873,7 @@ int zenixfs_mount_opts(struct zenixfs **out, struct zenixfs_dev *dev, const stru
     fs->st.mount_back = back;
     /* two or more commits back the data of older files may have been overwritten (format rule 3 keeps exactly one older
      * commit whole): an ordinary mount reads such a state but never builds on it. Recovery mounts decide for themselves */
-    if (back >= 2 && !(mo->flags & (ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH))) fs->readonly = 1;
+    if ((back >= 2 || stale_map) && !(mo->flags & (ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH))) fs->readonly = 1;
     int e = (fs->readonly || (mo->flags & ZENIXFS_MNT_READONLYISH)) ? 0 : orphans_free(fs);   /* a recovery mount does not change anything by itself */
     if (e) { fs_free(fs); return e; }
     *out = fs;
@@ -1927,6 +1930,8 @@ int zenixfs_repair(struct zenixfs_dev *dev, uint32_t cache, uint32_t rollback, v
     if (e) return e;
     zenixfs_get_stats(fs, &st);
     if (rep) rep->back = st.mount_back;
+    /* past the commit before, the tree may check out while its files' data has been overwritten: only on request */
+    if (st.mount_back >= 2 && !rollback) { fs->failed = 1; zenixfs_unmount(fs); return ZENIXFS_ECORRUPT; }
     int p = repair_look(fs, &nodes, &leaves, log, ctx);
     if (p < 0) { fs->failed = 1; zenixfs_unmount(fs); return p; }
     if (!nodes && !leaves) return repair_finish(fs, log, ctx, rep);     /* the tree is whole: the map follows it */
