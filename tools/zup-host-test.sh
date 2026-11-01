@@ -13,6 +13,7 @@
 # usage: tools/zup-host-test.sh
 cd "$(dirname "$0")/.." || exit 1
 T=$(mktemp -d /tmp/zup-host.XXXXXX)
+export ZUP_TEST_RUN=$T                      # zup's "another zup is running" sees only this run's programs (zup-host.c)
 [ -n "$ZUP_KEEP" ] || trap 'rm -rf $T' EXIT
 pass=0; fail=0
 check() { if [ "$2" = ok ]; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }

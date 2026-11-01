@@ -135,6 +135,19 @@ int sys_procinfo(u32 i, struct uproc *p)
     buf[n] = 0;
     char *a = strchr(buf, '('), *b = strrchr(buf, ')');
     if (!a || !b || b - a - 1 > 15) return 0;
+    /* a program of another test run on this PC is not this run's "other zup" (2026-11-01: two runs at once failed) */
+    const char *run = getenv("ZUP_TEST_RUN");
+    if (run) {
+        static char env[65536];
+        snprintf(path, sizeof path, "/proc/%d/environ", pids[i - 1]);
+        f = fopen(path, "r");
+        if (!f) return 0;
+        size_t m = fread(env, 1, sizeof env - 1, f), rl = strlen(run), found = 0;
+        fclose(f);
+        for (size_t k = 0; k + 13 + rl <= m && !found; k += strlen(env + k) + 1)
+            found = !strncmp(env + k, "ZUP_TEST_RUN=", 13) && !strcmp(env + k + 13, run);
+        if (!found) return 0;
+    }
     memcpy(p->name, a + 1, (size_t)(b - a - 1));
     char st = b[2];
     p->pid = (u32)pids[i - 1];
