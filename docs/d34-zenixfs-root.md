@@ -81,6 +81,7 @@ repository, on the PC's side only. kernel-zfs serves ext2 too, so a machine can 
 - `tools/mkrepo.py add`: with `BUILD/kernel-zfs.bin` it also writes `pool/zenixz-VNUM.zup` (the same base group, that kernel) and the
   list's line `systemz VNUM VSTR FILE SIZE SHA256 min MIN`, signed with the list. An older zpkg ignores it (D22: other header words are
   growth). `zenixz` may not be a package's name.
+- A change only in kernel-zfs is a new system too. A build without `kernel-zfs.bin` publishes a list without the line, with a printed note; those machines are told, nothing installed.
 - `zpkg` on a ZenixFS root (`SYS_mountinfo` says `zenixfs`) takes that line for the system; a list without it: "no system for a ZenixFS
   root", nothing installed. Programs install live as on ext2 (D22 4.3's refusal is gone; zup's journal and rename work the same).
 - `boot` is built twice (`bootz.zx`): the code for a damaged ZenixFS root is only in that kernel: the shipped one grew by 56 bytes.

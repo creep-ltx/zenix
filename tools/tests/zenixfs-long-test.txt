@@ -8,7 +8,7 @@ send cat /ext/aaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb /mnt/aaabbbbbbbbb
 sleep 3
 send readlink /ext/long /mnt/long\r
 sleep 3
-send ls -l /ext/long; tree /ext; realpath /ext/long; tar cf /tmp/t.tar /ext/long; echo t15=$?\r
+send ls -l /ext/long; /mnt/t/tree /ext; /mnt/t/realpath /ext/long; /mnt/t/tar cf /tmp/t.tar /ext/long; echo t15=$?\r
 sleep 5
 send umount /mnt; umount /ext; sync; echo f15-$(echo done)\r
 wait f15-done 30

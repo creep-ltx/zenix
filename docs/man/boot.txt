@@ -27,7 +27,8 @@ DESCRIPTION
                 (DESIGN D34): the shipped kernel has no ZenixFS server built
                 in, says so and stops with a panic. A ZenixFS root needs no
                 check after a power cut; one that can only be read gets the
-                choices of rescue(8).
+                choices of rescue(8) without "read-write", and is asked
+                again after a repair.
     An ext2 root (not the RAM disk) whose superblock does not say
     "cleanly unmounted" (a power cut within a second of writing, or
     during an install) is checked first (DESIGN D17): fs is registered

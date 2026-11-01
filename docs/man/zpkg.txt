@@ -139,6 +139,7 @@ NOTES
     (testing, stable). Only root changes packages; -Ss, -Si and -Q are
     for everyone. On a ZenixFS root the system is the list's bundle with
     the ZenixFS kernel; a list without one: said, nothing installed.
+    Its bundles in the cache are cleaned like the others (zpkg -Sc).
     zpkg changes nothing without a package database, or while a new
     system is on trial when zenixboot says so (UPD_F_TRIAL; no zenixboot
     sets it yet). During a system update's restart nothing is new:

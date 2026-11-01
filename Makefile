@@ -203,7 +203,8 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 # scripts (NOTESTS=1: the mount tests run none of /tests); that made room for D20 step 1's 8 KB (3 blocks were free).
 RAMDISK_K := 640
 # 712 since DESIGN D28 step 2 (2026-10-29): the console's UTF-8 took about 9 KB of kernel; 33 blocks stay free there.
-# Not less: at 708 (12 blocks free) mounttest's links part runs out of space in /tmp (2026-10-31)
+# Not less: at 708 (12 blocks free) mounttest's links part runs out of space in /tmp (2026-10-31). tar, tree and realpath left it
+# when fsck.zenixfs grew by its repairs (DESIGN D34): zenixfstest carries them on its own disk.
 RAMDISK_MOUNT_K := 712
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
@@ -256,7 +257,7 @@ RAMAPPS := init login sh ls cat echo pwd ps free wc hello crash uname df fdisk m
 # had taken the room the tests write into; 25 KB stay free, as before)
 MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount \
              mkfs_zenixfs fsck_zenixfs su id chmod wc head tail ps stat sleep true false env \
-             kill pgrep grep dmesg svctest zfsd readlink realpath tar tree
+             kill pgrep grep dmesg svctest zfsd readlink
 
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.

@@ -437,7 +437,7 @@ def add(repo, channel, build, opts):
                 if masked_kernel(oz["boot/zenix"]) != masked_kernel(open(kz0, "rb").read()):
                     base_changed = True
         elif old.get("systemz"):
-            die("the channel has a ZenixFS system (systemz), this build has no kernel-zfs.bin: make it first")
+            print("mkrepo: NOTE: the channel had a ZenixFS system (systemz), this build has no kernel-zfs.bin: the new list has none; ZenixFS roots are told so")
         else:
             for n in base_names:
                 if masked_manifest(old_sys["pkg/%s.manifest" % n], True, base_names) != \
