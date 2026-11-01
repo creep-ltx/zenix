@@ -1,0 +1,46 @@
+wait zenix:/# 90
+sleep 1
+send cd /arc; ls | wc -l; free | head -2\r
+sleep 3
+send unlha t lh1-1.lzh; echo "t-lh1=$?"\r
+wait t-lh1= 60
+send unlha t lh5-1.lzh; echo "t-lh5=$?"\r
+wait t-lh5= 60
+send unlha t lh6-2.lzh; echo "t-lh6=$?"\r
+wait t-lh6= 60
+send unlha t lh7-0.lzh; echo "t-lh7=$?"\r
+wait t-lh7= 60
+send unlha t lh4-1.lzh; echo "t-lh4=$?"\r
+wait t-lh4= 120
+send unlha l amiga-1.lha; echo "l-amiga=$?"\r
+wait l-amiga= 30
+send mkdir /tmp/u; unlha x -d /tmp/u lh5-1.lzh; echo "x-lh5=$?"\r
+wait x-lh5= 60
+send sha256sum /tmp/u/text.txt /tmp/u/sub/noise.bin; ls -l /tmp/u/sub; echo sha-a-done\r
+wait sha-a-done 60
+send cat '/tmp/u/n\xc3\xa4me.txt'; echo "swedish=$?"\r
+wait swedish= 20
+send unlzx l all.lzx; echo "l-lzx=$?"\r
+wait l-lzx= 30
+send mkdir /tmp/z; unlzx x -q -d /tmp/z all.lzx; echo "x-lzx=$?"\r
+wait x-lzx= 200
+send sha256sum /tmp/z/normal.txt /tmp/z/aligned.bin /tmp/z/merged/b.bin /tmp/z/second/z.bin; echo sha-b-done\r
+wait sha-b-done 120
+send cat '/tmp/z/r\xc3\xa4ksm\xc3\xb6rg\xc3\xa5s.txt'; ls -ld /tmp/z/empty; echo "zswedish=$?"\r
+wait zswedish= 20
+send ls -l /tmp/z/note.txt; echo ls-note\r
+wait ls-note 10
+send unlzx x -d /tmp/z all.lzx note.txt; echo "again=$?"\r
+wait again= 60
+send unlzx x -f -q -d /tmp/z all.lzx note.txt; echo "force=$?"\r
+wait force= 60
+send cd /tmp; mkdir e; unlzx x -d /tmp/e /arc/dotdot.lzx; echo "dd-lzx=$?"; unlha x -d /tmp/e /arc/dotdot.lzh; echo "dd-lha=$?"; unlha x -d /tmp/e /arc/link.lzh; echo "link=$?"; ls /tmp/*.txt; ls /tmp/e; echo evil-done\r
+wait evil-done 60
+send unlha t /arc/badcrc.lzh; echo "crc-lha=$?"; unlzx t /arc/badcrc.lzx; echo "crc-lzx=$?"\r
+wait crc-lzx= 30
+send unlzx t /arc/bomb.lzx; echo "bomb=$?"; unlha t /arc/nolha.lzh; echo "not=$?"\r
+wait not= 30
+send cd /; unlzx; echo "usage=$?"\r
+wait usage= 10
+send echo arc-test-done\r
+wait arc-test-done 10
