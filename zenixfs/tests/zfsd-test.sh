@@ -18,7 +18,7 @@ check() { if [ "$2" = ok ]; then echo "PASS $1"; pass=$((pass+1)); else echo "FA
 run() { HOSTDISK=$1 $T/zfsd < $2 > $3 2>&1; }
 
 "$TOOL" mkfs $T/z.img 8 > /dev/null || { echo "FAIL mkfs"; exit 1; }
-L150=$(printf 'p%.0s' $(seq 1 150)); L158=$(printf 'q%.0s' $(seq 1 158)); L256=$(printf 'r%.0s' $(seq 1 255))
+L150=$(printf 'p%.0s' $(seq 1 150)); L254=$(printf 'q%.0s' $(seq 1 254)); L256=$(printf 'r%.0s' $(seq 1 255))
 "$TOOL" ln $T/z.img "/$L256" /l256 > /dev/null 2>&1 || { echo "FAIL a 256-byte target"; exit 1; }
 cat > $T/s.txt <<EOF
 mount
@@ -30,7 +30,7 @@ symlink /etc/motd /d/abs
 symlink ../x/y /d/rel
 symlink sub /d/s2
 symlink /$L150 /d/l150
-symlink /$L158 /d/l158
+symlink /$L254 /d/l254
 mkdir /nox
 symlink /d /nox/in
 chmod /nox 700
@@ -65,7 +65,7 @@ chown /d/abs 5 5
 utimes /d/abs 1000
 stat /d/l150
 stat /d/l150/x
-stat /d/l158/x
+stat /d/l254/x
 stat /l256/x
 stat d/abs/x
 dirty

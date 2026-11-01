@@ -115,7 +115,8 @@ int main(int argc, char **argv)
     for (; i < argc; i++) {
         const char *f = argv[i]; int in = sys_open(f, O_RDONLY);
         if (in < 0) { dprintf(2, "gzip: %s: %s\n", f, zwhy("cannot open")); rc = 1; continue; }
-        char outname[160]; u32 fl = strlen(f), have_gz = fl > 3 && !strcmp(f + fl - 3, ".gz");
+        char outname[ZPATH_MAX]; u32 fl = strlen(f), have_gz = fl > 3 && !strcmp(f + fl - 3, ".gz");
+        if (!decomp && !to_stdout && fl + 3 >= sizeof outname) { dprintf(2, "gzip: %s.gz: file name too long\n", f); sys_close(in); rc = 1; continue; }
         if (decomp) { if (have_gz) { strcpy(outname, f); outname[fl - 3] = 0; } else if (fl > 4 && !strcmp(f + fl - 4, ".tgz")) { strcpy(outname, f); strcpy(outname + fl - 4, ".tar"); } else { dprintf(2, "gzip: %s: unknown suffix\n", f); sys_close(in); rc = 1; continue; } }
         else { if (have_gz) { dprintf(2, "gzip: %s already has .gz suffix\n", f); sys_close(in); rc = 1; continue; } snprintf(outname, sizeof outname, "%s.gz", f); }
         out_fd = to_stdout ? 1 : sys_open(outname, O_WRONLY | O_CREAT | O_TRUNC);

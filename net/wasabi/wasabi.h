@@ -99,7 +99,7 @@
 #define WSB_CONNS     4                 /* client connections; the fifth: ERR "busy", closed */
 #define WSB_SLOTS     2                 /* run slots; a third: ERR "all run slots are busy" */
 #define WSB_XFERS     1                 /* file transfers (PUT/GET/SPEED through a file); another: ERR "busy" */
-#define WSB_PATHMAX   63                /* the system calls' limit (5.3) */
+#define WSB_PATHMAX   255               /* the system calls' limit (5.3) */
 #define WSB_STALL_MS  10000             /* no progress in either direction: the connection is dropped (3.2) */
 #define WSB_HELLO_MS  30000             /* no WELCOME this long after accept: dropped, however bytes come (B2-1, B2-15);
                                          * before it, WSB_STALL_MS counts from the last byte received, as after it */

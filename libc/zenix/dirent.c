@@ -2,17 +2,18 @@
 /* opendir, readdir, rewinddir, closedir, dirfd over SYS_readdir (DESIGN D27 section 5). The DIR and its entry come
  * from malloc (no buffers on the stack); rewinddir opens the directory again. */
 #include <dirent.h>
+#include <zenix.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include "usys.h"
 
-struct _zenix_dir { int fd; struct dirent ent; char path[64]; };
+struct _zenix_dir { int fd; struct dirent ent; char path[ZPATH_MAX]; };
 
 DIR *opendir(const char *path)
 {
     struct ustat st;
-    if (strlen(path) > 63) { errno = ENAMETOOLONG; return 0; }
+    if (strlen(path) >= ZPATH_MAX) { errno = ENAMETOOLONG; return 0; }
     if (sys_stat(path, &st) < 0) return 0;
     if ((st.mode & S_IFMT) != S_IFDIR) { errno = ENOTDIR; return 0; }
     DIR *d = malloc(sizeof *d);

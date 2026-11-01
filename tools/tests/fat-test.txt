@@ -52,6 +52,8 @@ send df /mnt\r
 sleep 3
 send sync\r
 sleep 3
+send D=Mapp-aaaaaaaaaaaaaaaaaaaaaaaaa; Q=/mnt/deep/$D/$D/$D/$D/$D/$D/$D; mkdir -p $Q; echo fd1=$?; echo deep-file > $Q/fil.txt; cp -r /mnt/deep /tmp/fdeep; echo fd2=$?; echo fd3=$(find /mnt/deep | wc -l); rm -r /mnt/deep; echo fd4=$?; echo fd5=$(find /tmp/fdeep | wc -l); echo fdeep-$(echo done)\r
+wait fdeep-done 90
 send umount /mnt\r
 sleep 3
 send mount\r

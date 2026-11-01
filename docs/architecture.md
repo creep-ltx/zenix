@@ -785,6 +785,46 @@ inside a call to a server is never stopped until the reply arrives (the server h
 the process asks for itself (a SIGTSTP handler raising SIGTSTP) is acted on at the end of that system call.
 `sleep` loops until its time, so a stop and continue does not cut it short (a handler does: -EINTR).
 
+### Paths (`kernel/fsproto.h` `FS_PATHMAX`, `kernel/syscall.c`, `kernel/vfs.c`)
+
+**One limit.** A path given to a system call, a path made absolute (working directory + relative path, or a link's
+target + the rest of the path) and the working directory's text are each at most `FS_PATHMAX - 1`, 255 bytes.
+Longer is -ENAMETOOLONG, never cut. With only the root mounted a relative path goes to its server as it is, so there
+the working directory does not count; with anything mounted it does.
+
+**Why it was two limits.** Until 2026-10-31 a system call copied its path into `char path[64]` on the kernel stack,
+and the absolute limit was 160 (`cwd[160]` in each process slot). Nothing but those arrays made it 63: the walks,
+messages and servers already took whatever fitted in `FS_PATHMAX`. Real AmigaOS volumes are deeper (of the owner's card
+57,102 names, 34,855 were over 63 bytes from `/mnt`, 5 over 159), so `cp -r` and `find` stopped halfway.
+
+**Design.**
+- `FS_PATHMAX` 256. The copy-in takes `FS_PATHMAX` bytes. Each path's buffer lives in a small function of its own
+  (`sys_path1`, `sys_path2`, `sys_mount_copy`, `do_spawn`), not in `syscall_c`, whose frame every system call carries.
+- The kernel stack (4 KB): the walks write in the very buffer the path was copied into (`walk_start`'s BUF, `vfs_*`
+  take `char *`), the scratch text of `walk_norm` is off the stack before a server is asked, and `mount_search` needs
+  only a mount point's 48 bytes. So a path costs one buffer a call and the deepest chains stay about where they were
+  (-fstack-usage, the numbers in `docs/limits.md`). No path buffer on a user stack in a recursive function (the
+  directory tools already keep theirs on the heap).
+- `struct proc.cwd` is `FS_PATHMAX` bytes: 96 more in each of the 32 slots. That is the cost in RAM of the raise to 255
+  (the rest is stack, used only during a call).
+- **Frozen interfaces only grow** (docs/frozen-interfaces.md): no message or struct changes. `FS_PATHMAX` is not in a
+  message, only in the two sides' buffers. An older program passes paths of at most 63 bytes, which still work; its
+  `getcwd` with a small buffer is -ERANGE, never an overrun, when someone has gone deeper. An older server has 160-byte
+  buffers: it refuses (-ENAMETOOLONG) a longer path where it copies one, and its continuation text (D26) is at most 160
+  bytes, inside the kernel's 256. A newer server's text could be 256 bytes, which is why it needs a kernel at least as
+  new: the D15 rule (the kernel is never older than the root) and its package's `depends base` give that, with one
+  narrow exception: booting "Zenix (previous)" with zup then failing leaves a newer root under an older kernel, and a
+  mount server started there could overrun that kernel's 160-byte buffer on a link whose text passes 159 bytes.
+  Accepted (a failed rollback and a long link together); it cannot be fixed from the new side.
+- User side: `ZPATH_MAX` (libz) and `PATH_MAX` (the C library) 256; `path_join` says -ENAMETOOLONG past 255, and a
+  tool whose relative path is short enough but too long once absolute hears it from the kernel: every tool reports that
+  and goes on. Fixed buffers that cut a name silently are gone (`nice`, `time`, `env`, `edit`, `mktemp`, `gzip`).
+
+**What stays limited** (the numbers: `docs/limits.md`): a name in a directory 63 bytes (`struct udirent`, frozen, a
+longer one needs a new message type; FFS and PFS3 list a longer one by its start and a number, which opens it); a mount
+point 47 (`umountinfo`, frozen); a package's paths 55 (zup's manifest, older zups); a service's text 79 (`SVC_TEXT`);
+tar's names 255 with a `/` in the right place and link targets 100 (ustar); an AmigaOS name over 107 bytes as ever.
+
 ## 8. Ports and messages (`kernel/ipc.c`)
 
 The central mechanism (DESIGN D1). A **port** is a named queue owned by one process. A client calls

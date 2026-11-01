@@ -197,13 +197,13 @@ is there today.** The port's parts (numbers checked against `usys.h` by the firs
 **Limits the port states** (limits.md, and `libctest` checks each): `fcntl`'s `O_NONBLOCK` works on sockets only
 (`pipe2(fds, O_NONBLOCK)` for pipes; files and terminals answer `EINVAL`, as libz's does), `F_GETFL` reports only the
 access mode on other files; `mkdir`'s mode is applied by a `chmod` after `SYS_mkdir` (which takes none), so it is
-not atomic; `utimes` sets one time (no separate access time); 16 descriptors per process; paths at most 63 bytes.
+not atomic; `utimes` sets one time (no separate access time); 16 descriptors per process; paths at most 255 bytes.
 
 **The constants are Zenix's, from one source.** picolibc's headers carry newlib's numbers, and some differ from
 Zenix's frozen ones: `ENOTSOCK` is 108 there (Zenix 88, Linux's), `SIGUSR1` 30 (Zenix 10), and in `fcntl.h`
 **`O_EXCL` is 0x800, which is Zenix's `O_NONBLOCK`** (Zenix's `O_EXCL` is 0x80; picolibc's `O_NONBLOCK` 0x4000): a
 silent wrong meaning if picolibc's header were used (`O_CREAT` 0x40, `O_TRUNC` and `O_APPEND` agree). The port puts its
-own `errno.h` (`sys/errno.h`), `sys/_default_fcntl.h`, `signal.h`, `limits.h` additions (`PATH_MAX` 64) and the
+own `errno.h` (`sys/errno.h`), `sys/_default_fcntl.h`, `signal.h`, `limits.h` additions (`PATH_MAX` 256 since 2026-10-31, 64 before) and the
 `sys/stat.h` bits ahead of picolibc's in the include path, each generated from or including `kernel/errno.h` and
 `kernel/kernel.h`, never typed twice; the port's `errno.h` keeps picolibc's `extern int errno` declaration. A host test
 checks every constant against the kernel's headers.
@@ -407,7 +407,7 @@ program already share everything (D13 stage 1, section 7).
    program that uses floating point (section 7) or sends raw messages (D13 section 5: such programs stay ZEXE until
    servers check pointers).
 5. **Stacks:** the program's measured need in its Makefile line (`STACK_name`, `-fstack-usage`), never AmigaOS's
-   `StackSwap`. Paths at most 63 bytes (`PATH_MAX` 64); 16 descriptors per process.
+   `StackSwap`. Paths at most 255 bytes (`PATH_MAX` 256); 16 descriptors per process.
 6. **Sizes on the stock A1200 said in each port's commit** (file, shared/data parts, memory with it running).
 
 **AmigaOS to Zenix** (what replaces what):

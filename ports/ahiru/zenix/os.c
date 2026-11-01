@@ -78,7 +78,7 @@ int ds_next(struct dscan *d, struct dent *e)
         struct stat st;
         int n = (int)strlen(de->d_name);
         if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..")) continue;
-        if (n > 107 || strlen(d->path) + 1 + (size_t)n >= 64) continue;    /* a name no call could open (PATH_MAX) */
+        if (n > 107 || strlen(d->path) + 1 + (size_t)n >= 256) continue;    /* a name no call could open (PATH_MAX) */
         sfmt(p, sizeof(p), strcmp(d->path, "/") ? "%s/%s" : "%s%s", d->path, de->d_name);
         memset(e, 0, sizeof(*e));
         memcpy(e->name, de->d_name, (size_t)n + 1);

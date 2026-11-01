@@ -20,7 +20,7 @@ static const struct { char magic[4]; u32 vnum; char vstr[16]; char smagic[4]; u3
 
 /* copy a NUL-terminated string from user memory, bounds-checked: 0, -EFAULT (outside what the caller may read: its
  * own memory or its shared code, D13) or -ENAMETOOLONG (longer than max - 1: a path given to a system call is at most
- * 63 bytes) */
+ * FS_PATHMAX - 1 bytes, fsproto.h) */
 static __attribute__((noinline)) int copy_str(char *dst, u32 uptr, u32 max)
 {
     u32 ok = user_rd_extent(current, uptr);     /* readable bytes from uptr on, in the one area it lies in */
@@ -157,9 +157,9 @@ KCOLD static long do_priority(int set, u32 which, u32 who, s32 nice)
 #define SPAWN_ARGC     256
 #define SPAWN_ARGBYTES 8192
 
-static long do_spawn(u32 upath, u32 uargv, u32 ustdio)
+static __attribute__((noinline)) long do_spawn(u32 upath, u32 uargv, u32 ustdio)
 {
-    char path[64];
+    char path[FS_PATHMAX];
     int argc = 0, fds[3], *stdio = 0;
     u32 used = 0;
     int c0 = copy_str(path, upath, sizeof path);
@@ -212,6 +212,63 @@ out:
 
 /* TRAP #0 handler. rb[0..7] = d0-d7, rb[8..14] = a0-a6. d0 = number,
  * d1-d3 = arguments; the result goes back into rb[0]. */
+/* The system calls that take paths (docs/architecture.md section 7, "Paths"). Each path comes in as FS_PATHMAX bytes on
+ * the kernel stack, in these functions and not in syscall_c: its frame is on the stack of every system call, read and
+ * write too, and a server's reply and an interrupt come on top of it. */
+static __attribute__((noinline)) s32 sys_path1(u32 nr, u32 a1, u32 a2, u32 a3)
+{
+    char path[FS_PATHMAX];
+    int e = copy_str(path, a1, sizeof path);
+    if (e)
+        return e;
+    switch (nr) {
+    case SYS_open:   return (s32)vfs_open(path, (int)a2);
+    case SYS_mkdir:  return (s32)vfs_mkdir(path);
+    case SYS_unlink: return (s32)vfs_unlink(path);
+    case SYS_rmdir:  return (s32)vfs_rmdir(path);
+    case SYS_umount: return (s32)vfs_umount(path);
+    case SYS_chdir:  return (s32)vfs_chdir(path);
+    case SYS_chmod:  return (s32)vfs_path1(FS_CHMOD, path, a2, 0);
+    case SYS_utimes: return (s32)vfs_path1(FS_UTIMES, path, a2, 0);
+    case SYS_chown:  return (s32)vfs_path1(FS_CHOWN, path, a2, a3);
+    case SYS_readlink:
+        return user_ok_wr(current, a2, a3) ? (s32)vfs_path1(FS_READLINK, path, a2, a3) : -EFAULT;
+    case SYS_stat: case SYS_lstat: {                /* the buffer checked after the path, as always */
+        s32 n = usize(a2, a3, USTAT_FIRST << 16 | sizeof(struct ustat));
+        if (n <= 0)
+            return n;
+        return (s32)(nr == SYS_stat ? vfs_stat(path, (struct ustat *)a2) : vfs_path1(FS_LSTAT, path, a2, 0));
+    }
+    }
+    return -ENOSYS;
+}
+
+/* rename, link, symlink (a symlink's first argument is its target's text: at most 255 bytes, as a path) */
+static __attribute__((noinline)) s32 sys_path2(u32 nr, u32 a1, u32 a2)
+{
+    char p1[FS_PATHMAX], p2[FS_PATHMAX];
+    int e = copy_str(p1, a1, sizeof p1);
+    if (!e)
+        e = copy_str(p2, a2, sizeof p2);
+    if (e)
+        return e;
+    return (s32)(nr == SYS_rename ? vfs_rename(p1, p2) : vfs_link(nr == SYS_link ? FS_LINK : FS_SYMLINK, p1, p2));
+}
+
+/* mount's request: the strings copied in; 0 or -errno */
+static __attribute__((noinline)) s32 sys_mount_copy(u32 a1)
+{
+    struct umountreq rq;
+    char path[FS_PATHMAX], port[16], dev[16], type[8];
+    int e;
+    rq = *(const struct umountreq *)a1;
+    if ((e = copy_str(path, (u32)rq.path, sizeof path)) || (e = copy_str(port, (u32)rq.port, sizeof port)) ||
+        (e = copy_str(dev, (u32)rq.dev, sizeof dev)) || (e = copy_str(type, (u32)rq.type, sizeof type)))
+        return e;
+    rq.path = path; rq.port = port; rq.dev = dev; rq.type = type;
+    return (s32)vfs_mount(&rq);
+}
+
 void syscall_c(u32 *rb)
 {
     u32 nr = rb[0], a1 = rb[1], a2 = rb[2], a3 = rb[3];
@@ -280,25 +337,19 @@ void syscall_c(u32 *rb)
             ;
         break;
     }
-    case SYS_open: {
-        char path[64];
-        if (CSTR(path, a1))
-            r = (s32)vfs_open(path, (int)a2);
+    case SYS_open: case SYS_mkdir: case SYS_unlink: case SYS_rmdir: case SYS_chdir: case SYS_chmod: case SYS_utimes:
+    case SYS_stat: case SYS_lstat: case SYS_readlink:
+        r = sys_path1(nr, a1, a2, a3);
         break;
-    }
-    case SYS_mkdir: case SYS_unlink: case SYS_rmdir: {
-        char path[64];
-        if (CSTR(path, a1))
-            r = (s32)(nr == SYS_mkdir ? vfs_mkdir(path) :
-                      nr == SYS_unlink ? vfs_unlink(path) : vfs_rmdir(path));
+    case SYS_rename: case SYS_link: case SYS_symlink:
+        r = sys_path2(nr, a1, a2);
         break;
-    }
-    case SYS_rename: {
-        char from[64], to[64];
-        if (CSTR(from, a1) && CSTR(to, a2))
-            r = (s32)vfs_rename(from, to);
+    case SYS_umount: case SYS_chown:                /* root only */
+        r = current->uid != 0 ? -EACCES : sys_path1(nr, a1, a2, a3);
         break;
-    }
+    case SYS_mount:                                 /* root only */
+        r = current->uid != 0 ? -EACCES : !user_ok_rd(current, a1, sizeof(struct umountreq)) ? -EFAULT : sys_mount_copy(a1);
+        break;
     case SYS_port_create: {
         char name[16];
         if (CSTR(name, a1))
@@ -328,27 +379,6 @@ void syscall_c(u32 *rb)
         if (UOKS(n, a1, a3, USTATFS_FIRST, 20))      /* the server writes struct ustatfs (frozen in fsproto.h) */
             r = (s32)vfs_statfs((void *)a1, a2);       /* a2 = the n-th mount, as SYS_mountinfo counts (0 = the root) */
         break;
-    case SYS_mount: {                   /* root only */
-        struct umountreq rq;
-        char path[64], port[16], dev[16], type[8];
-        if (current->uid != 0) { r = -EACCES; break; }
-        if (UOKR(a1, sizeof rq)) {
-            rq = *(const struct umountreq *)a1;
-            if (CSTR(path, (u32)rq.path) && CSTR(port, (u32)rq.port) &&
-                CSTR(dev, (u32)rq.dev) && CSTR(type, (u32)rq.type)) {
-                rq.path = path; rq.port = port; rq.dev = dev; rq.type = type;
-                r = (s32)vfs_mount(&rq);
-            }
-        }
-        break;
-    }
-    case SYS_umount: {
-        char path[64];
-        if (current->uid != 0) { r = -EACCES; break; }
-        if (CSTR(path, a1))
-            r = (s32)vfs_umount(path);
-        break;
-    }
     case SYS_mountinfo:
         if (UOKS(n, a2, a3, UMOUNTINFO_FIRST, sizeof(struct umountinfo)))
             r = (s32)vfs_mountinfo(a1, (struct umountinfo *)a2);
@@ -435,30 +465,6 @@ void syscall_c(u32 *rb)
     case SYS_ttyintr:
         r = tty_take_intr(tty_of(current));
         break;
-    case SYS_chmod: case SYS_utimes: {
-        char path[64];
-        if (CSTR(path, a1))
-            r = (s32)vfs_path1(nr == SYS_chmod ? FS_CHMOD : FS_UTIMES, path, a2, 0);
-        break;
-    }
-    case SYS_lstat: {
-        char path[64];
-        if (CSTR(path, a1) && UOKS(n, a2, a3, USTAT_FIRST, sizeof(struct ustat)))
-            r = (s32)vfs_path1(FS_LSTAT, path, a2, 0);
-        break;
-    }
-    case SYS_readlink: {
-        char path[64];
-        if (CSTR(path, a1) && UOKW(a2, a3))
-            r = (s32)vfs_path1(FS_READLINK, path, a2, a3);
-        break;
-    }
-    case SYS_link: case SYS_symlink: {
-        char p1[64], p2[64];
-        if (CSTR(p1, a1) && CSTR(p2, a2))
-            r = (s32)vfs_link(nr == SYS_link ? FS_LINK : FS_SYMLINK, p1, p2);
-        break;
-    }
     case SYS_time:                      /* unsigned seconds since 1970, the 32 bits as they are (clock.h, audit F8) */
         r = (s32)wclock_now(&wclock);
         break;
@@ -486,12 +492,6 @@ void syscall_c(u32 *rb)
         break;
     case SYS_groups: r = do_groups(a1, a2, a3); break;
     case SYS_umask: r = current->umask; current->umask = (u16)(a1 & 0777); break;
-    case SYS_chown: {
-        char path[64];
-        if (current->uid != 0) { r = -EACCES; break; }
-        if (CSTR(path, a1)) r = (s32)vfs_path1(FS_CHOWN, path, a2, a3);
-        break;
-    }
     case SYS_isatty:
         r = GETFD(f, a1) && f->type == FT_TTY;
         break;
@@ -518,22 +518,10 @@ void syscall_c(u32 *rb)
         if (GETFD(f, a1) && UOKS(n, a2, a3, UDIRENT_FIRST, sizeof(struct udirent)))
             r = (s32)vfs_readdir(f, (struct udirent *)a2);
         break;
-    case SYS_stat: {
-        char path[64];
-        if (CSTR(path, a1) && UOKS(n, a2, a3, USTAT_FIRST, sizeof(struct ustat)))
-            r = (s32)vfs_stat(path, (struct ustat *)a2);
-        break;
-    }
     case SYS_fstat:
         if (GETFD(f, a1) && UOKS(n, a2, a3, USTAT_FIRST, sizeof(struct ustat)))
             r = (s32)vfs_fstat(f, (struct ustat *)a2);
         break;
-    case SYS_chdir: {
-        char path[64];
-        if (CSTR(path, a1))
-            r = (s32)vfs_chdir(path);
-        break;
-    }
     case SYS_blk_read: case SYS_blk_write:
         /* raw disk: only the disk server (trusted; the buffer is a client's, so
          * it is not checked against this process's own memory) */

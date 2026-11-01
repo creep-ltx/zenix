@@ -26,14 +26,14 @@ const char *zwhy(const char *dflt);   /* the text of the last failure's error nu
 const char *zstrerror(int e);         /* strerror: the text of an error number (either sign), 0 if unknown */
 
 /* directories and paths: every directory walker uses these (no name arrays or path buffers on the stack) */
-#define ZPATH_MAX 64                          /* system calls take paths of at most 63 bytes */
+#define ZPATH_MAX 256                         /* system calls take paths of at most 255 bytes (FS_PATHMAX) */
 char *path_join(const char *dir, const char *name);   /* malloc'd "dir/name"; NULL: too long (zerrno 36) or no memory (12) */
 int dir_list(const char *path, char ***names);  /* malloc'd, NULL-terminated names without . and ..; count or -1 */
 int dir_list_some(const char *path, char ***names, int *err);  /* the same, but a failure part way: the names so far, and *err */
 void dir_free(char **names, int n);
 /* the absolute name of a path with ., .. and symbolic links resolved as the kernel follows them (DESIGN D26: at most
- * 40 links; the path need not exist): 0 and out (cap bytes, at most 160 used), -1 when it cannot be resolved (a loop,
- * a link that cannot be read, a name too long). Its buffers are on the stack (under 1 KB, no recursion) */
+ * 40 links; the path need not exist): 0 and out (cap bytes, at most ZPATH_MAX used), -1 when it cannot be resolved (a loop,
+ * a link that cannot be read, a name too long). Its buffers are on the stack (about 1.5 KB, no recursion) */
 int zrealpath(const char *in, char *out, size_t cap);
 /* one line of /etc/svctab or /etc/daemons (DESIGN D11 4.4, D24 7): "NAME NICE PROGRAM [ARGUMENTS]", cut in place (tabs
  * made spaces: the kernel splits a program's words at spaces). 1: *name, *nice and *prog set; 0: blank or a # comment;

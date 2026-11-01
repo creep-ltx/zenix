@@ -4,7 +4,7 @@
  * form. Names are coloured as GNU ls colours them with LS_COLORS unset (the same bytes), by default when the output
  * is a terminal (libz color_auto; GNU's own default is never). */
 static int o_a, o_A, o_l, o_d, o_R, o_F, o_h, o_t, o_r, o_S, o_1, multi, tty, printed_any, color, color_lead;
-struct ent { char name[64]; struct ustat st; char link[64]; int islink; };
+struct ent { const char *name; struct ustat st; char link[64]; int islink; };
 static const char *const mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 static int leap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
 
@@ -109,9 +109,14 @@ static void show(struct ent *v, int n)
         oputc('\n');
     }
 }
+static int fill_bad;
 static void fill(struct ent *e, const char *path)
 {
-    if (sys_lstat(path, &e->st) < 0) memset(&e->st, 0, sizeof e->st);
+    int le = sys_lstat(path, &e->st);
+    if (le < 0) {
+        memset(&e->st, 0, sizeof e->st);
+        if (le != -ENOENT) { dprintf(2, "ls: %s: %s\n", path, zstrerror(le)); fill_bad = 1; }   /* there but out of reach (a path too long) */
+    }
     e->islink = (e->st.mode & S_IFMT) == S_IFLNK;
     e->link[0] = 0;
     if (e->islink) { int n = sys_readlink(path, e->link, 63); if (n < 0) n = 0; e->link[n] = 0;
@@ -120,11 +125,11 @@ static void fill(struct ent *e, const char *path)
 static int list(const char *path, int top)
 {
     struct ustat st;
-    if (sys_lstat(path, &st) < 0) { dprintf(2, "ls: %s: not found\n", path); return 1; }
+    { int le = sys_lstat(path, &st); if (le < 0) { dprintf(2, "ls: %s: %s\n", path, le == -ENOENT ? "not found" : zstrerror(le)); return 1; } }
     int isdir = (st.mode & S_IFMT) == S_IFDIR;
     if (!isdir && (st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(path, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) { isdir = 1; st = t; } }
     if (!isdir || o_d) {
-        struct ent *e = xmalloc(sizeof *e); strncpy(e->name, path, 63); e->name[63] = 0; fill(e, path); show(e, 1); free(e); return 0;
+        struct ent *e = xmalloc(sizeof *e); e->name = path; fill(e, path); show(e, 1); free(e); return 0;
     }
     if (multi || o_R) { if (printed_any) oputc('\n'); oprintf("%s:\n", path); }
     printed_any = 1;
@@ -138,12 +143,11 @@ static int list(const char *path, int top)
     for (int k = o_a ? -2 : 0; k < nn; k++) {          /* -a: . and .. too (dir_list leaves them out) */
         const char *nm = k == -2 ? "." : k == -1 ? ".." : names[k];
         if (k >= 0 && nm[0] == '.' && !o_a && !o_A) continue;
-        struct ent *e = &v[n++]; strncpy(e->name, nm, 63); e->name[63] = 0;
+        struct ent *e = &v[n++]; e->name = nm;              /* names lives until v goes */
         char *full = path_join(path, nm);
         if (full) fill(e, full); else { memset(&e->st, 0, sizeof e->st); e->islink = 0; e->link[0] = 0; dprintf(2, "ls: %s/%s: %s\n", path, nm, zwhy("cannot read")); }
         free(full);
     }
-    dir_free(names, nn);
     show(v, n);
     int rc = 0;
     if (rerr) {                                        /* what could be read is shown; the rest is said to be missing */
@@ -158,6 +162,7 @@ static int list(const char *path, int top)
                 if (full) rc |= list(full, 0); else { dprintf(2, "ls: %s/%s: %s\n", path, v[i].name, zwhy("cannot read")); rc = 1; }
                 free(full);
             }
+    dir_free(names, nn);
     free(v);
     return rc;
 }
@@ -182,22 +187,22 @@ int main(int argc, char **argv)
     tty = sys_isatty(1);
     color = cmode == 2 ? color_auto(1) : cmode;
     int n = argc - i; multi = n > 1;
-    if (!n) { rc = list(".", 1); oflush(); return rc; }
+    if (!n) { rc = list(".", 1); oflush(); return rc | fill_bad; }
     /* operands: everything that is not a directory is listed together first, sorted; then each directory */
     struct ent *files = xmalloc((u32)n * sizeof(struct ent)); int nf = 0;
     struct ent *dirs = xmalloc((u32)n * sizeof(struct ent)); int nd = 0;
     for (int k = 0; k < n; k++) {
         const char *a = argv[i + k];
         struct ustat st;
-        if (sys_lstat(a, &st) < 0) { dprintf(2, "ls: %s: not found\n", a); rc = 1; continue; }
+        { int le = sys_lstat(a, &st); if (le < 0) { dprintf(2, "ls: %s: %s\n", a, le == -ENOENT ? "not found" : zstrerror(le)); rc = 1; continue; } }
         int isdir = (st.mode & S_IFMT) == S_IFDIR;
         if ((st.mode & S_IFMT) == S_IFLNK && !o_l && !o_d) { struct ustat t; if (sys_stat(a, &t) == 0 && (t.mode & S_IFMT) == S_IFDIR) isdir = 1; }
         struct ent *e = (isdir && !o_d) ? &dirs[nd++] : &files[nf++];
-        strncpy(e->name, a, 63); e->name[63] = 0; fill(e, a);
+        e->name = a; fill(e, a);
     }
     if (nf) { show(files, nf); printed_any = 1; }
     qsort(dirs, (u32)nd, sizeof(struct ent), cmp);
     for (int k = 0; k < nd; k++) rc |= list(dirs[k].name, k == 0 && !nf);
     oflush();
-    return rc;
+    return rc | fill_bad;
 }

@@ -8,7 +8,7 @@
 /* realpath's resolver (realpath(1), wasabid): one pass at a time, no recursion; no printf (wasabid has none) */
 int zrealpath(const char *in, char *out, zs_size cap)
 {
-    char path[320], acc[160], tgt[160], next[320];
+    char path[512], acc[ZPATH_MAX], tgt[ZPATH_MAX + 1], next[512];  /* a target of 255 bytes plus a path of 255 */
     int links = 0;
     acc[0] = 0;
     if (in[0] != '/' && sys_getcwd(acc, sizeof acc) < 0) strcpy(acc, "/");

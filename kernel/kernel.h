@@ -471,7 +471,7 @@ struct proc {                   /* start.S relies on the first three: */
                                  * (0: none, pid 0); a guard pattern lies at each bottom */
     struct { u32 base, size; } reg[NREG];   /* memalloc'd blocks */
     u32 cwd_ino;
-    char cwd[160];              /* the working directory as text (FS_PATHMAX, fsproto.h): a longer one is refused */
+    char cwd[FS_PATHMAX];       /* the working directory as text (fsproto.h): a longer one is refused */
     struct file *fd[NFD];
     int killed;
     u8 exiting;                 /* in proc_exit: its own calls (FS_CLOSE) must not end it a second time */
@@ -713,17 +713,18 @@ int seg_busy(int m, const struct ustat *st);    /* a segment of that file exists
 int seg_any(void);                              /* a segment loaded from any mount exists (D26: name_ino) */
 void seg_stats(u32 *bytes, u32 *saved);         /* shared code in memory, and what sharing it saves */
 void seg_crash(struct proc *p, u32 pc);         /* a process running shared code faulted: is the code intact? */   /* SVC_OPENS: the inodes held open on that mount */
-long vfs_open(const char *path, int flags);
-long vfs_stat(const char *path, struct ustat *st);
+/* the paths: FS_PATHMAX-byte buffers of the kernel's, each the walk's own: their contents change */
+long vfs_open(char *path, int flags);
+long vfs_stat(char *path, struct ustat *st);
 long vfs_fstat(struct file *f, struct ustat *st);
-long vfs_chdir(const char *path);
+long vfs_chdir(char *path);
 long vfs_lseek(struct file *f, s32 off, u32 whence);
 long vfs_statfs(void *out, u32 mount);
 long vfs_mount(const struct umountreq *r);
 long vfs_umount(const char *path);
 long vfs_mountinfo(u32 index, struct umountinfo *out);
-long vfs_path1(u32 op, const char *p, u32 a2, u32 a3);   /* chmod/utimes/lstat/readlink on a path */
-long vfs_link(u32 op, const char *a, const char *b);
+long vfs_path1(u32 op, char *p, u32 a2, u32 a3);   /* chmod/utimes/lstat/readlink on a path */
+long vfs_link(u32 op, char *a, char *b);
 #include "clock.h"
 extern struct wclock wclock;        /* SYS_time, SYS_settime (main.c, clock.h) */
 extern struct proc *vfs_hold;           /* D29: zine's sync and session: other processes' filesystem requests wait */
@@ -731,10 +732,10 @@ long vfs_sync(int how);                /* VS_* bits; the network mounts last (D2
 #define VS_REBOOT  1                    /* SYS_reboot: each server at most 5 s (then the tick resets) */
 #define VS_LOCALS  4                    /* D29 ZINE: refused (-EIO) when any local mount's sync fails, not only / */
 #define VS_BOUNDED 2                    /* FS_SYNC a0 1 to the network mounts: answer within 2 s (reboot, reset warning) */
-long vfs_mkdir(const char *path);
-long vfs_unlink(const char *path);
-long vfs_rmdir(const char *path);
-long vfs_rename(const char *from, const char *to);
+long vfs_mkdir(char *path);
+long vfs_unlink(char *path);
+long vfs_rmdir(char *path);
+long vfs_rename(char *from, char *to);
 long vfs_readdir(struct file *f, struct udirent *out);
 long vfs_pipe(int fds[2], u32 flags);   /* flags: 0 or O_NONBLOCK (both ends) */
 

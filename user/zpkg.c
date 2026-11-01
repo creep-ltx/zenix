@@ -167,7 +167,7 @@ static int load_db(void)
 {
     char **names;
     int n = dir_list(DB, &names);
-    if (n < 0) return -ENOENT;
+    if (n < 0) { say("the package database %s: %s: nothing done", DB, zwhy("cannot read")); return -ENOENT; }
     inst = malloc(sizeof *inst * (u32)(n + 1));
     if (!inst) { dir_free(names, n); return -ENOMEM; }
     for (int i = 0; i < n; i++) {
@@ -1250,6 +1250,7 @@ static int cmd_back(const char *name, int yes, int ram)
     if (!zf_name_ok(name) || !k) { say("%s is not installed", name); return 1; }
     if (sys_chdir(CACHE) < 0) { say("no cache (%s): nothing to go back to", CACHE); return 1; }
     int n = dir_list(".", &names);
+    if (n < 0) { say("the cache %s: %s: nothing done", CACHE, zwhy("cannot read")); return 1; }
     u32 nl = strlen(name);
     for (int i = 0; i < n; i++) {
         u32 l = strlen(names[i]);
@@ -1277,6 +1278,7 @@ static int cmd_clean(int quietly)
     char **names;
     if (sys_chdir(CACHE) < 0) return 0;
     int n = dir_list(".", &names), gone = 0;
+    if (n < 0) { say("the cache %s: %s: nothing removed", CACHE, zwhy("cannot read")); return 1; }
     for (int i = 0; i < n; i++) {
         char *f = names[i], *dash = strrchr(f, '-'), *e;
         if (!dash) continue;
@@ -1310,6 +1312,7 @@ static void cache_cap(void)
     u32 total = 0;
     if (sys_chdir(CACHE) < 0) return;
     int n = dir_list(".", &names);
+    if (n < 0) { say("the cache %s: %s: its size not checked", CACHE, zwhy("cannot read")); return; }
     for (int i = 0; i < n; i++) { struct ustat st; if (sys_stat(names[i], &st) == 0) total += st.size; }
     dir_free(names, n);
     if (total / 1024 > cf.cache_kb) cmd_clean(1);

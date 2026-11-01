@@ -87,8 +87,11 @@ pointers.
 
 - 32 processes, 28 message ports (12 held for services, 16 ordinary), 64 open files, 16 fds per process, 16 extra memory regions per process, 8 mounts
   (the root included), 1 KB environment, argv of at most 256 arguments / 8 KB (-E2BIG beyond; `xargs` splits into runs that fit), paths of
-  at most 63 bytes in a system call and 159 bytes once made absolute (the working directory included;
-  -ENAMETOOLONG beyond, never cut; also where a link's target plus the rest of a path would be longer, DESIGN D26),
+  at most 255 bytes, in a system call and once made absolute (the working directory included when anything but the
+  root is mounted; the working directory's own text too; -ENAMETOOLONG beyond, never cut; also where a link's target
+  plus the rest of a path would be longer, DESIGN D26; architecture.md section 7, "Paths"), names in a folder of at most
+  63 bytes (`udirent`: FFS and PFS3 list a longer one by its start and a number, which opens it), a mount point of at
+  most 47,
   40 symbolic links followed in one path once anything but the root is mounted (and always by `chdir`, `mount` and
   `realpath`; -ELOOP beyond; with only the root mounted the server's own rule: 8 nested), link targets of at most 255
   bytes (-ENAMETOOLONG), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
@@ -125,7 +128,7 @@ pointers.
 - OFS and FFS (DESIGN D31, `docs/d31-ffs.md`): only DOS\0-DOS\3 with 512-byte blocks are written; files under 2 GB; 64 open files a mount, 16 removed entries waiting for a commit (more
   forces one), a cache of 24 blocks at 512 bytes (8 at 2 KB and over); a long name over 63 bytes of UTF-8 is listed by its start and block number; comments are not shown; options at
   most about 30 characters (the service text).
-- PFS3 (DESIGN D32, `docs/d32-pfs3.md`): read-only; files under 4 GB (a larger one is listed, and answers `EFBIG` at open); 64 open files a mount; a cache of 16 reserved blocks at 1 KB (8 at 2 KB and over) and one data block; a long name over 63 bytes of UTF-8 is listed by its start and anode; comments and `.deldir` are not shown; options at most about 30 characters (the service text). Real volumes have deep trees, and the system's path limits above count here: of the owner's card image's 57,102 names, 34,855 are over the 63 bytes one system call takes when written from `/mnt` (reached with `cd`, step by step; `cp -r` and `find` stop at them with "file name too long"), and 5 are over 159 (not reachable at all).
+- PFS3 (DESIGN D32, `docs/d32-pfs3.md`): read-only; files under 4 GB (a larger one is listed, and answers `EFBIG` at open); 64 open files a mount; a cache of 16 reserved blocks at 1 KB (8 at 2 KB and over) and one data block; a long name over 63 bytes of UTF-8 is listed by its start and anode; comments and `.deldir` are not shown; options at most about 30 characters (the service text). Real volumes have deep trees, and the system's path limit above counts here: a name deeper than 255 bytes from the root is reached only from a working directory near it, not by `cp -r` or `find`, which say "file name too long" and go on.
 - NFS (DESIGN D23, architecture.md section 9 "nfscd"): 8 NFS mounts at most (nfs0 .. nfs7, within the 7 mounts);
   `HOST:/EXPORT` at most 62 characters with no options (the service text); files below 4 GB, offsets below 2 GB;
   names up to 63 bytes listed; the kernel's 8 supplementary groups a request (for a root program's own request: 16 a
@@ -135,8 +138,8 @@ pointers.
   256 files, 32 requests; a heap cap of 160 KB (small) or the cache and 1 MB (large); counts in `df` capped below
   4 TB; 8 unlinked open files kept under `.nfs` names at once (more are removed at once).
 - Updates (DESIGN D15, architecture.md section 3, "Updates"): a bundle of at most 16 MB and 64 parts, 16 packages,
-  8 dependencies a package, 1024 changes in one install, paths in a package of at most 55 bytes (with `.zup-new` a
-  system call's 63), a manifest or a journal of at most 1 MB. zenixboot: the trial ends after 3 starts without a sign
+  8 dependencies a package, 1024 changes in one install, paths in a package of at most 55 bytes (with `.zup-new`
+  63, the manifest's rule for every zup), a manifest or a journal of at most 1 MB. zenixboot: the trial ends after 3 starts without a sign
   of trouble; its question waits 10 s; boot gives zup 20 minutes.
 - Priorities (DESIGN D10, architecture.md section 6): 32 levels; nice -20..19 (a value outside is taken as the nearest
   end); a 50 ms slice; the built-in servers at nice -10; priority inheritance passes along a chain of at most 8 servers.
@@ -175,7 +178,15 @@ pointers.
   holds fewer than 10; past that big blocks go into the chunks too, so a program runs out of memory, not of regions,
   first (in the PC's test 16 regions hold over 11 MB of 100-byte blocks); then `malloc` answers NULL. A program file may ask for at most 16 MB (image + BSS) and a
   stack of 4 KB to 1 MB.
-- Paths: the directory tools report a joined path longer than a system call takes (63 bytes) instead of cutting it.
+- Paths: the directory tools report a joined path longer than a system call takes (255 bytes) instead of cutting it, and
+  one the kernel refuses once made absolute. What a path costs (measured 2026-10-31, `tools/ksize-budget`, -fstack-usage;
+  all on the 2 MB stock A1200 too): 3,072 bytes of RAM for the working directories (96 in each of the 32 process slots),
+  always; kernel.bin 904 bytes smaller (the path calls share one copy-in), so 2,168 bytes more in memory all told; all
+  programs together 2,812 bytes more on disk; `wasabid` 1.5 KB more of its own (paths in 4 connections), `nfscd` 96 bytes
+  more (the export) and 96 a request held. On the 4 KB kernel stack, only during a call: a rename through a link across
+  mounts takes 1,400 bytes up to the server's message (1,408 with the old limits), an open 1,372 (1,384), `umount`
+  through a link 1,632 (1,496), `mount` 1,624 (1,320), a read or write 112 less than before; each nested start of a server (at most
+  two) 1,064 (1,076). The walks use the buffer the path was copied into, so a path costs one buffer a call, not three.
 - Sockets (DESIGN D19, architecture.md section 11): 32 kernel sockets for the whole machine, the last 4 only for root
   (-ENFILE beyond); each is also one of the 64 open files and one of a process's 16 fds; a buffer is checked and
   sent at most 64 KB a message (a blocking stream send loops, a datagram over 64 KB is -EMSGSIZE); an address at most
@@ -193,8 +204,8 @@ pointers.
   `fcntl(F_SETFL, O_NONBLOCK)` works on sockets only (pipes and terminals: -EINVAL); a pipe is non-blocking only when
   made so (`sys_pipe2(fds, O_NONBLOCK)`, both ends).
 - The C library (DESIGN D27, block 3 steps 1-4; programs built on it so far: `/tests/libctest`, `libctestpure`,
-  `/tests/tuitest`): paths at most 63 bytes
-  (`PATH_MAX` 64), names 63, 16 descriptors (`OPEN_MAX`); `open`'s and `mkdir`'s mode is set by a `chmod` after the
+  `/tests/tuitest`): paths at most 255 bytes
+  (`PATH_MAX` 256), names 63, 16 descriptors (`OPEN_MAX`); `open`'s and `mkdir`'s mode is set by a `chmod` after the
   call (the system calls take none: not atomic); `stat` gives one time (the modification's) for all three; the wall
   clock has whole seconds (`gettimeofday`'s microseconds 0), `CLOCK_MONOTONIC` and the sleeps 10 ms ticks, `clock()`
   is wall time since the start; `lseek` past 4 GB `EOVERFLOW`; `readdir`'s `d_type` always `DT_UNKNOWN`; the
@@ -221,19 +232,19 @@ pointers.
   past that); about 80 KB of memory while a terminal is open on 80 x 32 (two grids of 6-byte cells, 31 KB, which the
   allocator keeps for reuse after closing until the program ends).
 - Sumi (`ports/sumi/README`, man/sumi.txt): no mouse and no clipboard shared with other programs; settings only with
-  `HOME` set; a path of at most 63 bytes; saving through a link replaces the link; about 116 KB of its own and 87 KB of
+  `HOME` set; a path of at most 255 bytes; saving through a link replaces the link; about 116 KB of its own and 87 KB of
   shared code with one file open on 80 x 32.
 - Maki (`ports/maki/README`, man/maki.txt): no mouse; a long search not stopped by Ctrl+C (a key); settings only with
-  `HOME` set; a path of at most 63 bytes; about 202 KB of its own and 63 KB of shared code with one file open on
+  `HOME` set; a path of at most 255 bytes; about 202 KB of its own and 63 KB of shared code with one file open on
   80 x 32.
 - Markdown (`ports/markdown/README`, man/markdown.txt): no mouse, no pictures, no browser, no clipboard shared with
   other programs; containers inside containers to 24 levels (a 32 KB stack); a link going up a folder (`../x`) opens
-  the wrong file; settings only with `HOME` set; a path of at most 63 bytes; about 242 KB of its own and 136 KB of
+  the wrong file; settings only with `HOME` set; a path of at most 255 bytes; about 242 KB of its own and 136 KB of
   shared code with one file open on 80 x 32.
 - Ahiru (`ports/ahiru/README`, man/ahiru.txt): inside the terminal only (no screen or window of its own); no mouse,
   picture previews, sound, ARexx, shared clipboard, background copies or drives for disk images; lha, lzx and zip
   archives read only; AmigaOS's protection letters on the status row; g/ and dt (an AmigaOS path's root and trashcan)
-  do nothing; names compared without case; settings only with `HOME` set; a path of at most 63 bytes; folder walks to
+  do nothing; names compared without case; settings only with `HOME` set; a path of at most 255 bytes; folder walks to
   20 levels (the core's MAXDEPTH); about 392 KB of its own and 223 KB of shared code with a folder open on 80 x 32.
 - SLIP (DESIGN D19 step 5): 115,200 baud only (Zenix's serial port, D12), static addresses only (no DHCP over SLIP),
   MTU at most 1006, one serial port; while it is up the port is the network's (no `cu`, the kernel log not on the

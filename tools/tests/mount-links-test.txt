@@ -58,8 +58,8 @@ wait s9-done 30
 # 10: a link on the mount to the kernel's /dev/null
 send ln -s /dev/null /mnt/w/nul; echo hi > /mnt/w/nul; echo c10a=$?; echo c10b=[$(cat /mnt/w/nul)]\r
 sleep 3
-# 11: a continuation over 159 bytes, a 256-byte target, an empty target (made on the PC)
-send cat /ro/long150/abcdefghij; echo c11a=$?; cat /ro/l256; echo c11b=$?; cat /ro/empty/x; echo c11c=$?\r
+# 11: a continuation over 255 bytes, a 256-byte target, an empty target (made on the PC)
+send cat /ro/long250/abcdefghij; echo c11a=$?; cat /ro/l256; echo c11b=$?; cat /ro/empty/x; echo c11c=$?\r
 sleep 3
 # 12: mount through links: resolved and recorded so; umount by both names; / and an existing mount point; 47 bytes
 send mkdir /tmp/mp /tmp/real /tmp/real/mp2 /tmp/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; ln -s /tmp/mp /tmp/lmp; ln -s /tmp/real /tmp/ldir; mount ide0p2 /tmp/lmp; mount; umount /tmp/mp; echo c12a=$?\r

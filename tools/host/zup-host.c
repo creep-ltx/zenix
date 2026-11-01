@@ -199,12 +199,15 @@ int sys_update(u32 op, u32 a, u32 b2)
     }
     return 0;
 }
+int zerrno;
 int dir_list(const char *path, char ***names)
 {
     char b[4096];
+    const char *bad = getenv("ZUP_LIST_FAIL");         /* a directory that cannot be read, as a damaged disk's */
     *names = 0;
+    if (bad && strstr(path, bad)) { zerrno = EIO; return -1; }
     DIR *d = opendir(P(path, b));
-    if (!d) return -1;
+    if (!d) { zerrno = errno; return -1; }
     int n = 0, cap = 16;
     char **v = malloc(sizeof *v * (size_t)cap);
     struct dirent *e;

@@ -36,7 +36,7 @@ static int remove_tree(const char *p)
     struct ustat st; if (sys_lstat(p, &st) < 0) return -1;
     if ((st.mode & S_IFMT) != S_IFDIR) return sys_unlink(p);
     char **names; int n = dir_list(p, &names);                /* heap, not stack: one level per directory */
-    if (n < 0) return -1;
+    if (n < 0) { dprintf(2, "mv: %s: %s\n", p, zwhy("cannot read")); return -1; }   /* the copy is made; this stays too */
     for (int i = 0; i < n; i++) {
         char *c = path_join(p, names[i]);
         if (c) remove_tree(c); else dprintf(2, "mv: %s/%s: %s\n", p, names[i], zwhy("cannot remove"));

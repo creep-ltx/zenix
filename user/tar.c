@@ -19,7 +19,7 @@ static int write_header(const char *name, const struct ustat *st, char type, con
 {
     unsigned char h[512]; memset(h, 0, 512);
     u32 nl = strlen(name);
-    if (nl > 100) { u32 cut = nl - 100; while (cut < nl && name[cut] != '/') cut++; if (cut >= nl || cut > 155) { dprintf(2, "tar: %s: name too long\n", name); add_rc = 1; return -1; }
+    if (nl > 100) { u32 cut = nl - 101; while (cut < nl && name[cut] != '/') cut++; if (cut >= nl || cut > 155) { dprintf(2, "tar: %s: name too long\n", name); add_rc = 1; return -1; }
                     memcpy(h + 345, name, cut); memcpy(h, name + cut + 1, nl - cut - 1); }
     else memcpy(h, name, nl);
     if (link && strlen(link) > 100) { dprintf(2, "tar: %s: link target too long\n", name); add_rc = 1; return -1; }
@@ -62,7 +62,7 @@ static void __attribute__((noinline)) add_file(const char *path, const struct us
 static void add(const char *path)
 {
     struct ustat st;
-    if (sys_lstat(path, &st) < 0) { dprintf(2, "tar: %s: cannot stat\n", path); add_rc = 1; return; }
+    if (sys_lstat(path, &st) < 0) { dprintf(2, "tar: %s: %s\n", path, zwhy("cannot stat")); add_rc = 1; return; }
     u32 t = st.mode & S_IFMT;
     if (verbose) dprintf(2, "%s\n", path);
     if (t == S_IFDIR) {

@@ -23,7 +23,8 @@ EXAMPLES
     ln data data.old
 
 NOTES
-    A link name longer than 63 bytes is reported, never cut short.
+    A link name or target longer than 255 bytes is reported, never cut
+    short.
     A symbolic link may lead into another mounted filesystem and out of
     one: the kernel follows it (an absolute target from /, a relative one
     from the link's directory, also past a mount point), at most 40 links

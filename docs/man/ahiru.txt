@@ -96,7 +96,7 @@ NOTES
     /tmp/T-UID, your own folder there; the others are not there); g/ and
     dt (the trashcan) need an
     AmigaOS path and do nothing; names compare without case. A path is
-    at most 63 bytes (PATH_MAX): a name with a longer path is listed as
+    at most 255 bytes (PATH_MAX): a name with a longer path is listed as
     an empty file nobody may read, and copying or moving it fails. A
     rename onto a name that exists is refused (as on AmigaOS). A file's
     NAME.info is not taken along with it (on AmigaOS it is its icon; on

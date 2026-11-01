@@ -1787,7 +1787,7 @@ static int find_program(const char *name, char *out, u32 max)
 
 static int start_program(char **argv)
 {
-    char path[160];
+    char path[ZPATH_MAX];
     if (!find_program(argv[0], path, sizeof path)) { errm(argv[0], "command not found"); return -127; }
     if (env_dirty) { env_sync(); env_dirty = 0; }
     int pid = sys_spawn(path, argv, 0);
@@ -2388,7 +2388,7 @@ static const char *const bnames[] = {
 static int is_builtin(const char *n) { for (int i = 0; bnames[i]; i++) if (!strcmp(bnames[i], n)) return 1; return 0; }
 static int builtin_names(const char **out, int max) { int n = 0; while (bnames[n] && n < max) { out[n] = bnames[n]; n++; } return n; }
 
-static const char *cwd_now(void) { static char b[160];   /* FS_PATHMAX: a resolved working directory (D26) */ if (sys_getcwd(b, sizeof b) < 0) strcpy(b, "/"); return b; }
+static const char *cwd_now(void) { static char b[ZPATH_MAX];   /* a resolved working directory (D26) */ if (sys_getcwd(b, sizeof b) < 0) strcpy(b, "/"); return b; }
 
 static void set_pwd(const char *old)
 {
@@ -2499,7 +2499,7 @@ static int do_read(char **argv, int argc)
 
 static int do_type(const char *n)
 {
-    char path[160];
+    char path[ZPATH_MAX];
     if (alias_find(n)) { outs(n); outs(" is an alias\n"); return 0; }
     if (func_find(n)) { outs(n); outs(" is a function\n"); return 0; }
     if (is_builtin(n)) { outs(n); outs(" is a shell builtin\n"); return 0; }
@@ -2589,7 +2589,7 @@ static int run_builtin(char **argv, int argc)
     if (!strcmp(n, "read")) return do_read(argv, argc);
     if (!strcmp(n, "cd")) {
         const char *d = argc > 1 ? argv[1] : var_get("HOME");
-        char old[160]; strcpy(old, cwd_now());
+        char old[ZPATH_MAX]; strcpy(old, cwd_now());
         if (d && !strcmp(d, "-")) { d = var_get("OLDPWD"); if (d) { outs(d); outs("\n"); } }
         if (!d) { errm("cd", "no directory"); return 1; }
         if (sys_chdir(d) < 0) { errm(d, zwhy("no such directory")); return 1; }
@@ -2734,13 +2734,13 @@ static int run_builtin(char **argv, int argc)
 /* ================================================================ prompt and main */
 static char *expand_prompt(const char *ps, int *vislen)
 {
-    char out[256]; int o = 0, vis = 0, hidden = 0;            /* D28: vis in columns (a UTF-8 letter one) */
+    char out[400]; int o = 0, vis = 0, hidden = 0;            /* D28: vis in columns (a UTF-8 letter one) */
     const char *home = var_get("HOME");
-    for (const char *p = ps; *p && o < 240; p++) {
+    for (const char *p = ps; *p && o < 384; p++) {
         if (*p != '\\') { out[o++] = *p; if (!hidden) vis += (*p & 0xC0) != 0x80; continue; }
         p++;
         if (!*p) break;
-        const char *add = 0; char tmp[162];   /* "~" + a working directory of up to 159 bytes (D26) */
+        const char *add = 0; char tmp[ZPATH_MAX + 2];   /* "~" + a working directory of up to 255 bytes (D26) */
         switch (*p) {
         case 'w': case 'W': {
             const char *c = cwd_now();
@@ -2759,7 +2759,7 @@ static char *expand_prompt(const char *ps, int *vislen)
         case '\\': out[o++] = '\\'; if (!hidden) vis++; continue;
         default: out[o++] = '\\'; out[o++] = *p; if (!hidden) vis += 2; continue;
         }
-        if (add) { int a0 = o; for (; *add && o < 240; add++) out[o++] = *add; if (!hidden) vis += zu8cols(out + a0, (u32)(o - a0)); }
+        if (add) { int a0 = o; for (; *add && o < 384; add++) out[o++] = *add; if (!hidden) vis += zu8cols(out + a0, (u32)(o - a0)); }
     }
     out[o] = 0; *vislen = vis;
     return adup(out);
@@ -2797,8 +2797,8 @@ static void init_vars(void)
 
 static char *hist_path(void)
 {
-    static char p[160];
-    const char *h = var_get("HOME"); if (!h) h = "/";
+    static char p[ZPATH_MAX];
+    const char *h = var_get("HOME"); if (!h || strlen(h) + 13 > sizeof p) h = "/";      /* a HOME that cannot hold it: as none */
     strcpy(p, h); u32 l = strlen(p); if (l && p[l - 1] != '/') p[l++] = '/'; strcpy(p + l, ".sh_history");
     return p;
 }
@@ -2914,7 +2914,7 @@ static int shell_main(int argc, char **argv)
     sh_catch(SIGTSTP, on_tstp);
     sys_setfgpg(my_pgid);
     run_startup_file("/etc/profile");
-    { char p[160]; const char *h = var_get("HOME"); strncpy(p, h ? h : "/", 150); p[150] = 0; u32 l = strlen(p); if (l && p[l - 1] != '/') p[l++] = '/'; strcpy(p + l, ".shrc");
+    { char p[ZPATH_MAX]; const char *h = var_get("HOME"); if (!h || strlen(h) + 7 > sizeof p) h = "/"; strcpy(p, h); u32 l = strlen(p); if (l && p[l - 1] != '/') p[l++] = '/'; strcpy(p + l, ".shrc");
       struct ustat st;                    /* only a ~/.shrc of the effective user (or root): never another user's commands as root */
       if (sys_stat(p, &st) == 0 && (st.uid == (u32)sys_geteuid() || st.uid == 0)) run_startup_file(p); }
     arena_idle();

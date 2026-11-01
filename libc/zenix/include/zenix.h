@@ -13,7 +13,7 @@ void oflush(void);
 const char *zstrerror(int e);           /* an error number's text (either sign), 0 if none */
 const char *zwhy(const char *dflt);     /* the text of errno (the last failure), else dflt */
 /* paths and directories: no name arrays or path buffers on a 16 KB stack */
-#define ZPATH_MAX 64                    /* system calls take paths of at most 63 bytes */
+#define ZPATH_MAX 256                   /* system calls take paths of at most 255 bytes */
 char *path_join(const char *dir, const char *name);  /* malloc'd "dir/name"; 0: too long (ENAMETOOLONG) or ENOMEM */
 int dir_list(const char *path, char ***names);  /* malloc'd, 0-terminated names without . and ..: their count or -1 */
 void dir_free(char **names, int n);

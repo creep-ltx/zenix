@@ -27,7 +27,7 @@ static void run(char **items, int from, int count)
     if (repl) for (int q = 0; q < nc; q++) av[n++] = subst(cmd[q], repl, items[from]);
     else { for (int q = 0; q < nc; q++) av[n++] = cmd[q]; for (int q = 0; q < count; q++) av[n++] = items[from + q]; }
     av[n] = 0;
-    char prog[160];
+    char prog[ZPATH_MAX];
     oflush();
     if (!path_find(av[0], prog, sizeof prog)) { dprintf(2, "xargs: %s: command not found\n", av[0]); rc = 127; }
     else {

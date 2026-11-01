@@ -86,7 +86,7 @@ NOTES
     IP addresses in certificates (use the name), the extended master
     secret (servers in FIPS mode refuse). No FTP, no proxies, no
     cookies, no passwords, no recursion, no time stamps. A file name
-    longer than 63 bytes cannot be opened (the system call limit).
+    longer than 63 bytes cannot be made (a folder's names).
 
 SEE ALSO
     sntp(8), ssh(1), host(1)

@@ -9,7 +9,7 @@ int main(int argc, char **argv)
     if (i < argc && !strcmp(argv[i], "-e")) { must = 1; i++; }
     if (i >= argc) { dprintf(2, "usage: realpath [-e] path...\n"); return 2; }
     for (; i < argc; i++) {
-        static char out[160]; struct ustat st;
+        static char out[ZPATH_MAX]; struct ustat st;
         if (zrealpath(argv[i], out, sizeof out) < 0) { dprintf(2, "realpath: %s: cannot resolve\n", argv[i]); rc = 1; continue; }
         if (must && sys_stat(out, &st) < 0) { dprintf(2, "realpath: %s: not found\n", argv[i]); rc = 1; continue; }
         dprintf(1, "%s\n", out);

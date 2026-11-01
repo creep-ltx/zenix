@@ -26,7 +26,7 @@ volume** (`ext2_namei_ex`, `kernel/ext2.c` 567-617; zfsd's `namei`, `user/zenixf
    - **Only the root is mounted** (`nmnt <= 1`): the path goes to the root's server **untouched**, in that 64-byte
      buffer. It may be relative, and the working directory's inode goes with it.
    - **Something else is mounted:** `path_abs` makes the path absolute and normalised as text. It joins the working
-     directory's text and the path and removes `.` and `..`. The result is at most `FS_PATHMAX - 1` (159) bytes;
+     directory's text and the path and removes `.` and `..`. The result is at most `FS_PATHMAX - 1` (159 bytes then, 255 since 2026-10-31, architecture.md section 7) bytes;
      longer is -ENAMETOOLONG. The longest mount point that prefixes the text wins. Its server gets the rest, which
      always starts with `/` and never holds a `..`, in the caller's `FS_PATHMAX` buffer, with that volume's root
      inode as the working directory.

@@ -380,7 +380,7 @@ static void t_errors(void)
           !strcmp(strerror(ENOTSOCK), zstrerror(ENOTSOCK)), "");
     checks("strerror of an unknown number", strerror(999), "unknown error 999");
     check("the C library's numbers are Zenix's", ENOTSOCK == 88 && EDOM == 33 && EOVERFLOW == 75 && EILSEQ == 84 &&
-          ENOTSUP == EOPNOTSUPP && EOPNOTSUPP == 95 && SIGUSR1 == 10 && SIGCHLD == 17 && PATH_MAX == 64, "");
+          ENOTSUP == EOPNOTSUPP && EOPNOTSUPP == 95 && SIGUSR1 == 10 && SIGCHLD == 17 && PATH_MAX == 256, "");
     check("getenv of PATH", getenv("PATH") != 0, "");
     setenv("LIBCTEST", "yes", 1);
     checks("setenv then getenv", getenv("LIBCTEST") ? getenv("LIBCTEST") : "", "yes");
@@ -418,6 +418,19 @@ static void t_errors(void)
     check("unsetenv", getenv("LIBCTEST") == 0, "");
     char cwd[64];
     check("getcwd", getcwd(cwd, sizeof cwd) && cwd[0] == '/', "");
+    {   /* an older program's small buffer, and the limit to the byte (docs/architecture.md section 7, "Paths") */
+        static char lp[PATH_MAX + 2], big[PATH_MAX];
+        char small[16];
+        memset(lp, 'x', sizeof lp - 1);
+        lp[0] = '/'; lp[sizeof lp - 1] = 0;             /* 257 bytes */
+        check("a path of 257 bytes: ENAMETOOLONG", open(lp, O_RDONLY) < 0 && errno == ENAMETOOLONG, "");
+        lp[PATH_MAX] = 0;                               /* 256 bytes */
+        check("a path of 256 bytes: ENAMETOOLONG", open(lp, O_RDONLY) < 0 && errno == ENAMETOOLONG, "");
+        lp[PATH_MAX - 1] = 0;                           /* 255 bytes: taken, and not there (its one name is over 63) */
+        check("a path of 255 bytes: asked for", open(lp, O_RDONLY) < 0 && errno != EFAULT, "");
+        check("getcwd with too small a buffer: ERANGE, nothing past it",
+              chdir("/tests") == 0 && getcwd(small, 3) == 0 && errno == ERANGE && getcwd(big, sizeof big) && !strcmp(big, "/tests") && chdir("/") == 0, "");
+    }
     check("getpid", getpid() > 1, "");
 }
 
@@ -538,12 +551,20 @@ static void t_sockets(void)
     close(s);
 }
 
+static const char *lp300(void)                  /* a path too long for any system call */
+{
+    static char b[300];
+    memset(b, 'x', sizeof b - 1);
+    b[0] = '/';
+    return b;
+}
+
 static void t_helpers(void)
 {
     char *j = path_join("/tmp", "x");
     checks("path_join", j ? j : "", "/tmp/x");
     free(j);
-    check("path_join too long: ENAMETOOLONG", !path_join("/tmp", "a-name-that-makes-the-path-longer-than-sixty-three-bytes-long") &&
+    check("path_join too long: ENAMETOOLONG", !path_join(lp300(), "a-name") &&
           errno == ENAMETOOLONG, "");
     char **names;
     int n = dir_list("/tests", &names), found = 0;

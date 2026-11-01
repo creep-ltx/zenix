@@ -16,6 +16,8 @@
 # 2026-10-31 (D29 12.1, an AmigaOS program run by its name through /bin/zine): proc 9,100 -> 9,300; (the review of
 # ZINE's kernel part: the hold on filesystem requests, the battery clock, Gayle, the mouse, the cache order) zine
 # 1,200 -> 1,500, rtc bss 0 -> 4 (rtc_ok); ROOM 1,024 -> 800 (the mount tests' RAM disk cannot shrink: its /tmp fills).
+# 2026-10-31 (paths, docs/architecture.md section 7): proc bss 18,400 -> 21,500 (cwd 160 -> 256 bytes in each of the 32
+# slots: 3,072 bytes).
 start     3900   8192
 main      5950   1100
 serial    5950   6500
@@ -28,7 +30,7 @@ audio      560     32
 a3000     2400    100
 blk        460     16
 rtc       1550      4
-proc      9300  18400
+proc      9300  21500
 syscall  10150      0
 vfs      11150   1600
 tty       2960     64

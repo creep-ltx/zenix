@@ -38,7 +38,7 @@ typedef unsigned short u16;
 #define CACHE    "/var/cache/zpkg"
 #define MAXPKG   ZF_MAXPKG
 #define MAXOPS   1024
-#define PMAX     ZF_PMAX        /* every path given to a system call is at most 63 bytes */
+#define PMAX     ZF_PMAX        /* a package's paths (zpkgfmt.h) */
 
 static int failed;              /* an error was reported: the exit status */
 static char result[200];        /* the one-line result for init and login (RESULT) */
@@ -133,6 +133,10 @@ static void rm_tree(const char *path)                        /* a prev set: file
 {
     char **names, sub[PMAX];
     int n = dir_list(path, &names);
+    if (n < 0) {                                             /* gone already, or not all its names known: it stays */
+        if (zerrno != ENOENT) say("%s: cannot read it (%d): not removed", path, zerrno);
+        return;
+    }
     for (int i = 0; i < n; i++) {
         struct ustat st;
         if (pjoin(sub, path, "/") || pjoin(sub, sub, names[i]) || sys_lstat(sub, &st) < 0) continue;
@@ -207,6 +211,7 @@ static int lock_take(void)                                  /* 0, or -EBUSY (sai
         if (r == 0) {                                   /* lock.PID files a cut left behind go */
             char **names;
             int n = dir_list(DB, &names);
+            if (n < 0) say("%s: cannot read it (%d): old lock files stay", DB, zerrno);
             for (int i = 0; i < n; i++) {
                 char lp[PMAX];
                 int pid = !strncmp(names[i], "lock.", 5) ? (int)strtoul(names[i] + 5, 0, 10) : 0;
@@ -243,7 +248,7 @@ static void lock_drop(void)
 /* the installed manifests (/var/lib/zpkg/NAME.manifest): a table that grows as needed. A damaged manifest or no
  * memory sets dberr: live transactions refuse then (a package wrongly taken as "not installed" could lose files) */
 static struct zf_pkg **db;
-static int ndb, dbcap, dberr, dball;
+static int ndb, dbcap, dberr, dball, dblist;      /* dblist: the folder itself could not be listed */
 static struct zf_pkg *installed(const char *name)
 {
     for (int i = 0; i < ndb; i++)
@@ -274,6 +279,10 @@ static void installed_all(void)                             /* every installed m
     if (dball) return;
     dball = 1;
     int n = dir_list(DB, &names);
+    if (n < 0 && zerrno != ENOENT) {                        /* an unread list is not an empty one */
+        say("%s: cannot read it (%d)", DB, zerrno);
+        dberr = dblist = 1;
+    }
     for (int i = 0; i < n; i++) {
         u32 l = strlen(names[i]);
         if (l < 10 || strcmp(names[i] + l - 9, ".manifest")) continue;
@@ -286,7 +295,7 @@ static u32 base_version(void) { struct zf_pkg *b = installed("base"); return b ?
 static void db_reset(void)                                  /* the table emptied: the manifests are read again */
 {
     for (int i = 0; i < ndb; i++) { zf_pkg_free(db[i]); free(db[i]); }
-    ndb = dball = dberr = 0;
+    ndb = dball = dberr = dblist = 0;
 }
 static u32 peek_base(void)                                  /* the base manifest's version, not kept in the table */
 {
@@ -910,6 +919,7 @@ static void post_commit(int wasclean)
     else {
         char **names;
         int n = dir_list(CACHE, &names);
+        if (n < 0 && zerrno != ENOENT) say("%s: cannot read it (%d): the older versions kept stay", CACHE, zerrno);
         char me[24];
         snprintf(me, sizeof me, "prev-%u", target_v);
         for (int i = 0; i < n; i++)
@@ -1110,6 +1120,7 @@ static u32 newest_prev(void)
     char **names;
     int n = dir_list(CACHE, &names);
     u32 best = 0;
+    if (n < 0 && zerrno != ENOENT) say("%s: cannot read it (%d): no previous version can be found", CACHE, zerrno);
     for (int i = 0; i < n; i++)
         if (!strncmp(names[i], "prev-", 5)) { u32 v = (u32)strtoul(names[i] + 5, 0, 10); if (v > best) best = v; }
     dir_free(names, n);
@@ -1197,6 +1208,7 @@ static int install(struct zf_bundle *b, u32 kvnum, int stage2)
     }
     if (!ntodo) { say("version %u is installed already: nothing to do", b->vnum); return 1; }
     installed_all();                                    /* a path another installed package owns is not taken (review) */
+    if (dblist) { say("the package database cannot be read: nothing changed"); return -EIO; }   /* a list it never saw */
     for (int i = 0; i < ntodo; i++)
         for (int e = 0; e < todo[i]->nent; e++) {
             struct zf_ent *x, *me = &todo[i]->ent[e];
@@ -1512,7 +1524,7 @@ static int list(void)
 {
     char **names;
     int n = dir_list(DB, &names);
-    if (n < 0) { dprintf(1, "zup: no package database (%s)\n", DB); return 1; }
+    if (n < 0) { dprintf(1, "zup: no package database (%s, %d)\n", DB, zerrno); return 1; }
     for (int i = 0; i < n; i++) {
         u32 l = strlen(names[i]);
         if (l < 10 || strcmp(names[i] + l - 9, ".manifest")) continue;

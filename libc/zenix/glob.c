@@ -4,7 +4,7 @@
  * starts with a dot is matched only by a pattern part that starts with one. Flags: GLOB_APPEND, GLOB_DOOFFS, GLOB_ERR,
  * GLOB_MARK, GLOB_NOCHECK, GLOB_NOSORT, GLOB_NOMAGIC, GLOB_QUOTE (backslashes are always taken); the others (braces,
  * ~, other directory functions, a limit) answer GLOB_ABEND with errno EINVAL. No path buffer on the stack: every
- * path is malloc'd (at most PATH_MAX, 64 bytes, as every system call takes; a longer one cannot name a file). */
+ * path is malloc'd (at most PATH_MAX, 256 bytes with its end, as every system call takes; a longer one cannot name a file). */
 #include <dirent.h>
 #include <errno.h>
 #include <fnmatch.h>

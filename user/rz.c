@@ -196,8 +196,9 @@ static void f_say(void *u, int what, const char *name, const char *other)
 static const struct rz_fs fs = { 0, f_look, f_open, f_read, f_write, f_close, f_rename, f_remove, f_say };
 static struct rz_dl dl;
 
-/* paths are at most 63 bytes (ZPATH_MAX): a long name is shortened in front of its extension, so NAME.999.part fits */
-#define NAMEFIT (ZPATH_MAX - 1 - 9)
+/* a name in a folder is at most 63 bytes (udirent): a long one is shortened in front of its extension, so NAME.999.part
+ * fits (it was the same 63 as a path once; the name's limit is what counts) */
+#define NAMEFIT (63 - 9)
 static const char *fit(const char *name, char *buf)
 {
     u32 n = strlen(name);

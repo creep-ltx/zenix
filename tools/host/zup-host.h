@@ -93,6 +93,7 @@ int sys_wait(int pid);
 int sys_port_find(const char *n);
 int sys_call(int port, struct umsg *m);
 int sys_update(u32 op, u32 a, u32 b);
+extern int zerrno;
 int dir_list(const char *path, char ***names);
 void dir_free(char **names, int n);
 #include "../../user/sha256.h"

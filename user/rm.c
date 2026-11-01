@@ -5,11 +5,13 @@ static int o_f, o_r, o_v, rc;
 static void rmtree(const char *path, int top)
 {
     struct ustat st;
-    if (sys_lstat(path, &st) < 0) { if (!o_f) { dprintf(2, "rm: %s: not found\n", path); rc = 1; } return; }
+    int le = sys_lstat(path, &st);
+    if (le == -ENOENT) { if (!o_f) { dprintf(2, "rm: %s: not found\n", path); rc = 1; } return; }
+    if (le < 0) { dprintf(2, "rm: %s: %s\n", path, zstrerror(le)); rc = 1; return; }  /* there but out of reach: -f hides only "not there" */
     if ((st.mode & S_IFMT) == S_IFDIR) {
         if (!o_r) { dprintf(2, "rm: %s: is a directory (use -r)\n", path); rc = 1; return; }
         char **names; int n = dir_list(path, &names);         /* heap, not stack: one level per directory */
-        if (n < 0 && zerrno == 12) { dprintf(2, "rm: %s: out of memory\n", path); rc = 1; return; }
+        if (n < 0) { dprintf(2, "rm: %s: %s\n", path, zwhy("cannot read")); rc = 1; return; }   /* not all its names known: it stays, and says why */
         for (int i = 0; i < n; i++) {
             char *c = path_join(path, names[i]);
             if (c) rmtree(c, 0); else { dprintf(2, "rm: %s/%s: %s\n", path, names[i], zwhy("cannot remove")); rc = 1; }

@@ -12,11 +12,10 @@ DESCRIPTION
     With -e the path must exist.
 
 NOTES
-    A symbolic link whose target is 159 bytes or longer cannot be resolved
-    (the longest path Zenix takes is 159 bytes): "cannot resolve", never a
-    prefix of the target. More than 40 links in one path (a loop), a path
-    over 319 bytes or a result over 159 cannot be resolved either (never
-    cut). The resolver is libz's zrealpath, which wasabid(8) uses too.
+    More than 40 links in one path (a loop), a path over 511 bytes or a
+    result over 255 (the longest path Zenix takes) cannot be resolved:
+    "cannot resolve", never cut. The resolver is libz's zrealpath, which
+    wasabid(8) uses too.
 
 EXIT STATUS
     0, 1 if a path cannot be resolved (or with -e does not exist).

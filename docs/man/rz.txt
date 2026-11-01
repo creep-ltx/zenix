@@ -18,7 +18,7 @@ DESCRIPTION
     Where a download goes: the current directory (or DIR with -d). The
     name the other side gives is cleaned: a name that begins with a dot
     (.profile) or is empty is refused, control characters become _, a
-    long name is shortened in front of its extension (paths are at most
+    long name is shortened in front of its extension (a name is at most
     63 bytes). A file is written as NAME.part and renamed to NAME when
     it is whole. An existing NAME is never overwritten: the same size is
     the same file and is skipped; another file is saved as NAME.1,

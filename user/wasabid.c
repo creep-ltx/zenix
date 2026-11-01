@@ -106,9 +106,9 @@ void wsb_os_close(int fd)
 /* ---- files ---- */
 int wsb_os_open(const char *path, int flags, uint32_t mode)
 {
-    char r[160];
+    char r[ZPATH_MAX];
     /* the serial port is taken by opening it (D12: one owner; SLIP's line): never for a file command, under any name */
-    if (zrealpath(path, r, sizeof r))   /* not resolved (a link text or a path past zrealpath's 159 bytes): refused, */
+    if (zrealpath(path, r, sizeof r))   /* not resolved (a link text or a path past zrealpath's 255 bytes): refused, */
         return -ENAMETOOLONG;           /* never let through unchecked (audit 2026-10-29 B2-3) */
     if (!strcmp(r, "/dev/ttyS0"))
         return -EBUSY;
