@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -447,6 +447,21 @@ STACK_ffsd := 8192
 $(BUILD)/pfs3d.uo: user/pfs3d.c user/amigatext.h user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 STACK_pfs3d := 8192
+# unlha, unlzx (DESIGN D33, docs/d33-archives.md): one program, two names (/bin/unlzx is a link). The readers are shared with Ahiru.
+# The program's own part is cold (-Os); the two decoders are where the time goes (UCFLAGS' -O2). core/arc.c gives the CRCs and dates.
+ARC_FLAGS := -Iports/ahiru/upstream/core
+ARC_HDRS := user/arcread.h ports/ahiru/upstream/core/arc.h
+$(BUILD)/unlha.uo: user/unlha.c $(ARC_HDRS) user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) $(ARC_FLAGS) -Os -c $< -o $@
+$(BUILD)/arcread.uo: user/arcread.c $(ARC_HDRS) | $(BUILD)
+	$(CC) $(UCFLAGS) $(ARC_FLAGS) -Os -c $< -o $@
+$(BUILD)/arclha.uo $(BUILD)/arclzx.uo: $(BUILD)/%.uo: user/%.c $(ARC_HDRS) | $(BUILD)
+	$(CC) $(UCFLAGS) $(ARC_FLAGS) -c $< -o $@
+$(BUILD)/arc-core.uo: ports/ahiru/upstream/core/arc.c $(ARC_HDRS) | $(BUILD)
+	$(CC) $(UCFLAGS) $(ARC_FLAGS) -Os -c $< -o $@
+$(BUILD)/unlha.uelf: $(BUILD)/unlha.uo $(BUILD)/arcread.uo $(BUILD)/arclha.uo $(BUILD)/arclzx.uo $(BUILD)/arc-core.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/unlha.uo $(BUILD)/arcread.uo $(BUILD)/arclha.uo $(BUILD)/arclzx.uo \
+	    $(BUILD)/arc-core.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # the crypto library (DESIGN D21 3.5, docs/d21-crypto-ssh-https.md): BearSSL and Monocypher (only the files used,
 # crypto/*/README) and Zenix's crypto/zc/, as one archive linked with --gc-sections into the programs that use it
 # (cryptotest, ssh, ssh-keygen). Cold code at -Os; the files a handshake waits on at -O2 (D21 3.6 step 1: the curve25519
@@ -774,17 +789,21 @@ $(foreach p,$(TEXTTOOLS),$(eval $(call TEXTTOOL_RULES,$(p))))
 # program with shared code (ZEX2). /bin/ahiru (UAPPS). Each directory's objects in a folder of their own (fs/ops.c and
 # ahiru/src/ops.c, core/sums.c and fs/sums.c share names). ----
 AHIRU_UP := main ui preview ops fe keys more more2 filecol
-AHIRU_CORE := core util arc lha lzx zip adf adfw iso dms version rename sums
+AHIRU_CORE := core util arc zip adf adfw iso dms version rename sums
+AHIRU_ARC := arcread arclha arclzx       # Zenix's clean readers (DESIGN D33), the commands' own files
 AHIRU_FS := find place ops icon kind arcfs arcw keymap sync renames usercmd sums
 AHIRU_ZX := os none term list
 AHIRU_OBJS := $(AHIRU_UP:%=$(BUILD)/ahiru/ahiru/%.o) $(AHIRU_CORE:%=$(BUILD)/ahiru/core/%.o) \
-              $(AHIRU_FS:%=$(BUILD)/ahiru/fs/%.o) $(AHIRU_ZX:%=$(BUILD)/ahiru/zenix/%.o) \
+              $(AHIRU_FS:%=$(BUILD)/ahiru/fs/%.o) $(AHIRU_ZX:%=$(BUILD)/ahiru/zenix/%.o) $(AHIRU_ARC:%=$(BUILD)/ahiru/arc/%.o) \
               $(BUILD)/ahiru/zenix-dos.o $(BUILD)/ahiru/zenix-gui.o
-AHIRU_CFLAGS := $(TT_CFLAGS) -Iports/ahiru/upstream -Iports/ahiru/upstream/src -Iports/ahiru/upstream/ahiru/src \
+AHIRU_CFLAGS := $(TT_CFLAGS) -Iports/ahiru/upstream -Iports/ahiru/upstream/core -Iports/ahiru/upstream/src -Iports/ahiru/upstream/ahiru/src \
                 -Wno-sign-compare -Wno-unused-parameter -Wno-unused-but-set-variable -Wno-pointer-sign \
                 -Wno-missing-field-initializers
 AHIRU_HDRS := $(TT_HDRS) $(wildcard ports/ahiru/upstream/*/*.h ports/ahiru/upstream/ahiru/src/*.h)
 $(BUILD)/ahiru/ahiru/%.o: ports/ahiru/upstream/ahiru/src/%.c $(AHIRU_HDRS) tools/purecc.sh
+	@mkdir -p $(dir $@)
+	tools/purecc.sh $(CC) $(AHIRU_CFLAGS) -c $< -o $@
+$(BUILD)/ahiru/arc/%.o: user/%.c user/arcread.h ports/ahiru/upstream/core/arc.h tools/purecc.sh
 	@mkdir -p $(dir $@)
 	tools/purecc.sh $(CC) $(AHIRU_CFLAGS) -c $< -o $@
 $(BUILD)/ahiru/core/%.o: ports/ahiru/upstream/core/%.c $(AHIRU_HDRS) tools/purecc.sh

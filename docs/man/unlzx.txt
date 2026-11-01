@@ -1,0 +1,14 @@
+UNLZX(1)			Zenix manual
+
+NAME
+    unlzx - list, test and unpack LZX archives
+
+SYNOPSIS
+    unlzx l|t|x [-f] [-q] [-d folder] [-L megabytes] archive [name...]
+
+DESCRIPTION
+    Another name for the same program as unlha, reading LZX archives. See
+    unlha(1).
+
+SEE ALSO
+    unlha(1)
