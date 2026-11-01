@@ -121,9 +121,9 @@ counts; at 0x8000 at the root the leaves' counts halve (rounded up) and the inne
 1, 3, 8, 12, 24, 16 codes), the low 6 raw.
 
 ## Where the facts came from
-**Never opened:** Zenix's old `core/lha.c`, `lha.h`, `lzx.c`, `lzx.h`, the owner's CFile copies, LHa for UNIX's source, unlzx's source, lhasa, libmspack, 7-Zip,
+**Never opened:** Zenix's old `core/lha.c`, `lha.h`, `lzx.c`, `lzx.h` (removed unread), the owner's CFile copies, LHa for UNIX's source, unlzx's source, lhasa, libmspack, 7-Zip,
 the owner's BBX Go readers, and the leaked AmigaOS sources.
-**Run as programs only:** LHa for UNIX 1.14i (to make test archives), unlzx (to list archives while learning the layout), LZX 1.21 and LhA 2.15 on a private FS-UAE test Amiga
+**Run as programs only:** LHa for UNIX 1.14i (to make test archives, and as a second opinion on archives that failed), unlzx (to list archives while learning the layout, and as a second opinion), LZX 1.21 and LhA 2.15 on a private FS-UAE test Amiga
 (to make archives from designed files); their output was read as data. None was disassembled.
 **Public descriptions read:**
 - [LHA.TXT, P. Schepers](https://ist.uwaterloo.ca/~schepers/formats/LHA.TXT): header layout, method table.
@@ -133,9 +133,11 @@ the owner's BBX Go readers, and the leaked AmigaOS sources.
 - Microsoft [MS-PATCH](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-patch/cc78752a-b4af-4eee-88cb-01f4d8a4c2bf) (a relative of the Amiga's LZX): the pretree of 20, mod 17 changes,
   the two halves of the main tree, the aligned table of 8: these gave the first hypotheses. Amiga's LZX then differs (the second half's runs, the 16 by 32 symbols, the type numbers), each found above.
 - A forum thread saying entries start `0f 00` then sizes (it had no more, and pointed at a source that was not opened).
+- Search result summaries, seen in passing and not opened further: [ReverseEngineering.wiki's Format:LZX](https://reverseengineering.wiki/index.php/Format:LZX) for Microsoft's LZX, described there as drawn from wimlib's decoder (the summary said a pretree of 20 with 4-bit lengths, an aligned tree of 8, codes up to 16 bits, three block kinds: the same facts as MS-PATCH), Archiveteam's LHA and LZX pages (the fetches failed), a Grokipedia page and a `lha` man page on window sizes (they disagreed with the rest and were not used). These pages came to me as a tool's summaries, not as text I read whole.
 **Knowledge base notes:** `amiga/lzx-format.md` was **not opened** (its layout was read from unlzx.c). `amiga/archive-file-listings.md` and `amiga/pc-archive-formats.md` were checked by a search for their
 origin lines only and not used; the search showed a few lines, among them "a merged group is one stream" from a section derived from a port of unlzx: that fact was
 established again above from an archive of known contents.
+**Read for the interface only:** `core/arc.h`, about 25 lines of `core/core.c` (its own small `lha_header`, for previews, stays there, the owner's); `core/arc.c` was run, not read, by me. The read-only reviewer of the decoders kept to the same list and read `arc.c`.
 **What cannot be proved:** my own general knowledge. I know of these formats in general from what I have read over time, including possibly descriptions drawn from those programs; for `-lh1-`, the LhA block
 layout and the first LZX hypotheses (LSB-first words, a length-and-slot split, a table of bases) that knowledge suggested what to try. Facts are not protected as expression, every fact above was tested
 against real output, and the code was written anew here, in its own shape: but this is a clean rewrite by experiment and public description, not a two-team clean room. The owner should decide with that said plainly.
