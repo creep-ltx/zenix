@@ -164,4 +164,6 @@ failed=0
 for t in $LIST; do row "$t" || failed=$((failed + 1)); done
 # every test passed: its working folders go (2 GB or more a run fill the shared /tmp); the .log/.res files stay
 [ $failed = 0 ] && { find "$RUN" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +; echo "check: all passed"; exit 0; }
+# many failed (often the full /tmp itself, 2026-11-01: 45 at once): their images go too, the logs stay
+[ $failed -le 2 ] || find "$RUN" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +
 echo "check: $failed FAILED"; exit 1
