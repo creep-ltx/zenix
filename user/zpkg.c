@@ -694,6 +694,7 @@ static int read_head(const char *file, struct zf_bundle *b, char pname[25], int 
     }
     return 0;
 }
+static int fetching;                    /* zpkg --fetch (DESIGN D35): the files are for another machine's root, not this one's base */
 /* the file of a list's block (p, or the system bundle with p 0) into the cache: 0, or < 0 (said) */
 static int download(const struct zp_pkg *p)
 {
@@ -728,7 +729,7 @@ static int download(const struct zp_pkg *p)
         sys_unlink(file);
         return -EINVAL;
     }
-    if (!p && b.minv > effbase) { say("%s: it needs base %u, %u is installed: refused", file, b.minv, effbase); return -EINVAL; }
+    if (!p && b.minv > effbase && !fetching) { say("%s: it needs base %u, %u is installed: refused", file, b.minv, effbase); return -EINVAL; }
     snprintf(sigf, sizeof sigf, "%s.sig", file);        /* beside it for -U and --back (not verified now: 5.1) */
     struct ustat st;
     if (sys_stat(sigf, &st) == 0 && st.size == ZC_SIG_SIZE) return 0;
@@ -1141,6 +1142,33 @@ static int cmd_sync(char **names, int n, int y, int u, int down_only, int ram)
     return failed || sysfail;
 }
 
+/* ---- --fetch DIR [--zfs] (DESIGN D35): the list's system bundle and every package a new machine gets, into DIR, checked as
+ * always; zinstall installs from there. Nothing here is installed. Test programs and the bootstrap package stay out. ---- */
+static int cmd_fetch(const char *dir, int zfs)
+{
+    int rc = sync_list();
+    if (rc) return 1;
+    if (use_stored()) return 1;
+    if (zfs) {
+        if (!ix.sysz.file) { say("the list has no system for a ZenixFS root: nothing fetched"); return 1; }
+        ix.sys = ix.sysz;
+    }
+    if (!ix.sys.file) { say("the list has no system: nothing fetched"); return 1; }
+    if (sys_chdir(dir) < 0) { say("cannot use %s", dir); return 1; }
+    fetching = 1;
+    int bad = 0;
+    say("%s", ix.sys.file);
+    if (download(0)) bad++;
+    for (int i = 0; i < ix.npkg; i++) {
+        const struct zp_pkg *p = &ix.pkg[i];
+        if (p->base || !p->file || !strcmp(p->name, "zenix-tests") || !strcmp(p->name, "zpkg-new")) continue;
+        say("%s", p->file);
+        if (download(p)) bad++;
+    }
+    if (bad) { say("%d file(s) could not be fetched", bad); return 1; }
+    return 0;
+}
+
 /* ---- -R, -Rs, -Rn, -Rns ---- */
 static int cmd_remove(char **names, int n, int s, int nosave, int ram)
 {
@@ -1432,6 +1460,7 @@ static int usage(void)
     dprintf(1, "usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sc\n"
            "       zpkg -Q [NAME...] | -Qi NAME... | -Ql NAME... | -Qo PATH... | -Qu\n"
            "       zpkg -R[s][n] NAME... | -U FILE... | --back NAME\n"
+           "       zpkg --fetch DIR [--zfs]\n"
            "  options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL  --ram  --yes   (man zpkg)\n");
     return 2;
 }
@@ -1440,13 +1469,16 @@ int main(int argc, char **argv)
 {
     char *args[64];
     int na = 0, ignore = 0, ram = 0, yes = 0;
-    const char *op = 0, *back = 0, *reset = 0;
+    const char *op = 0, *back = 0, *reset = 0, *fetchdir = 0;
+    int fetchz = 0;
     signal(SIGPIPE, SIG_IGN);
     cn.fd = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--snapshot") && i + 1 < argc) snapshot = argv[++i];
         else if (!strcmp(argv[i], "--back") && i + 1 < argc) back = argv[++i];
         else if (!strcmp(argv[i], "--reset-serial") && i + 1 < argc) reset = argv[++i];
+        else if (!strcmp(argv[i], "--fetch") && i + 1 < argc) fetchdir = argv[++i];
+        else if (!strcmp(argv[i], "--zfs")) fetchz = 1;
         else if (!strcmp(argv[i], "--ignore-expiry")) ignore = 1;
         else if (!strcmp(argv[i], "--ram")) ram = 1;
         else if (!strcmp(argv[i], "--yes")) yes = 1;
@@ -1456,7 +1488,7 @@ int main(int argc, char **argv)
         else if (na < 64) args[na++] = argv[i];
         else { say("more than 64 names"); return 2; }
     }
-    if (!op && !back && !reset) return usage();
+    if (!op && !back && !reset && !fetchdir) return usage();
     char kind = op ? op[0] : 0;
     int y = 0, u = 0, w = 0, s = 0, inf = 0, c = 0, l = 0, o = 0, nn = 0, qu = 0;
     for (const char *p = op ? op + 1 : ""; *p; p++)
@@ -1482,7 +1514,7 @@ int main(int argc, char **argv)
     if (ignore) tr.flags |= ZP_T_IGNORE_EXPIRY;
     struct ustat st;
     if (sys_stat(DB, &st) < 0) { say("no package database here (%s): zpkg changes nothing", DB); return 1; }
-    int changing = back || reset || kind == 'R' || kind == 'U' || (kind == 'S' && !s && !inf);
+    int changing = back || reset || fetchdir || kind == 'R' || kind == 'U' || (kind == 'S' && !s && !inf);
     if (changing && sys_getuid() != 0) { say("only root changes packages (try sudo)"); return 1; }
     if (changing) {
         u32 m[4];
@@ -1501,7 +1533,8 @@ int main(int argc, char **argv)
         snprintf(p, sizeof p, SYNC "/%s.index", reset);
         if (!zf_name_ok(reset) && strncmp(reset, "snapshot-", 9)) { say("%s: not a channel", reset); rc = 2; }
         else { sys_unlink(p); say("THE STORED LIST OF %s IS GONE: the next zpkg -Sy takes any list signed for it, also an older one", reset); }
-    } else if (back) rc = cmd_back(back, yes, ram);
+    } else if (fetchdir) rc = cmd_fetch(fetchdir, fetchz);
+    else if (back) rc = cmd_back(back, yes, ram);
     else if (kind == 'S' && s) rc = cmd_search(args, na);
     else if (kind == 'S' && inf) rc = cmd_info_list(args, na);
     else if (kind == 'S' && c) rc = cmd_clean(0);

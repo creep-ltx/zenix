@@ -71,6 +71,10 @@ if [ -z "$NOTESTS" ] && [ -f "$B/zine-null.blob" ] && [ -d "$B/zinetests" ]; the
     cp "$(dirname "$0")/tests/zine/null20" "$T/tests/zine/"
     cp "$B/zinetests/zexit" "$T/tests/zine/zexit-with-a-name-longer-than-31-bytes"   # the name in full (2026-10-31)
 fi
+# zinstall's boot partition programs (DESIGN D35) on the full images, as its package (the RAM disk of the install floppies has them on the set)
+if [ -z "$NOMAN" ] && [ -f "$T/bin/zinstall" ] && [ -f "$B/zenixboot" ]; then
+    mkdir -p "$T/usr/lib/zinstall" && cp "$B/bootmenu" "$B/zenixboot" "$T/usr/lib/zinstall/" && chmod 644 "$T"/usr/lib/zinstall/*
+fi
 # the text-UI library's test program (ports/tui) and the notice of the owner's MIT code in it, which travels with it
 if [ -z "$NOTESTS" ] && [ -f "$B/tuitest.zx" ]; then
     cp "$B/tuitest.zx" "$T/tests/tuitest" && chmod 755 "$T/tests/tuitest" && lic ports/tui/upstream/LICENSE tui

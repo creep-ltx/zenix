@@ -234,6 +234,7 @@ FAMILIES = [
     ("wget", "fetch files over HTTP and HTTPS", "wget"),
     ("sntp", "set the clock from the network", "sntp"),
     ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
+    ("zinstall", "the installer: put Zenix on a disk; the boot partition's programs", "zinstall"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
                     "socktestd socktest bench termtest priotest svctest sigtest nettest cryptotest boot diskd"),
 ]
@@ -248,7 +249,9 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 # packages may not own one file, zpkg 4.3)
 # files beside a family's programs, from the build directory (DESIGN D29: ZINE's blob, the small AmigaOS zine loads)
 FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d"]}     # DESIGN D30, D31, D32: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume
-FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")]}
+# (DESIGN D35: the two AmigaOS programs of a boot partition, what zinstall puts there)
+FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")],
+                "zinstall": [("bootmenu", "/usr/lib/zinstall/bootmenu"), ("zenixboot", "/usr/lib/zinstall/zenixboot")]}
 FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
                    "maki": [("ports/maki/upstream/LICENSE", "maki"), ("ports/tui/upstream/LICENSE", "maki-tui")],
                    "markdown": [("ports/markdown/upstream/LICENSE", "markdown"),

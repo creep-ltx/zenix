@@ -1,0 +1,102 @@
+ZINSTALL(8)			Zenix manual
+
+NAME
+    zinstall - put Zenix on a hard disk, CF card or SD card
+
+SYNOPSIS
+    zinstall
+    zinstall --list
+
+DESCRIPTION
+    zinstall runs on Zenix itself: from the install floppies (make
+    install-floppies; disk 1 boots to a prompt, no PC needed) or from an
+    existing Zenix with zpkg and a network. It asks, one question at a
+    time: where on the disk, how much of it, which filesystem for the
+    root. Then it shows exactly what will change, and writes nothing until
+    you answer.
+
+    With --list it only shows the disk and what could be done with it.
+
+    Run from the floppies, the files come from the set on the floppies:
+    disk 2 and on, in any drive, or swapped in one drive when it asks. The
+    optional programs are on the last disks: type skip at a disk it asks
+    for, and zpkg -S brings them later. On an existing Zenix they come
+    from the package server (zpkg --fetch, zpkg(8)), signed and checked.
+
+WHERE IT CAN GO
+    Free space is the default, and never touches another partition:
+    on an Amiga table (RDB), new partitions in the free cylinders; on a
+    PC table (MBR, an Emu68 card), a new type 0x76 partition holding an
+    Amiga table of its own, if a table entry and space are free, or new
+    partitions in the free cylinders of the 0x76 that is there.
+
+    A partition you choose: it is replaced, and what is on it is lost. It
+    takes typing its name. A FAT partition (Emu68, the Kickstart), a whole
+    0x76 container, a mounted partition, or one in a damaged table is
+    never offered.
+
+    The whole disk: everything on it is lost. It takes typing ERASE ide0.
+    Never offered on a disk with a FAT partition or a mounted partition.
+
+    A disk with a GPT table, or both an RDB and an MBR, is left alone.
+
+WHAT IT MAKES
+    ZB0  the boot partition, AmigaDOS FFS: the boot menu, zenixboot, the
+         kernel. 4 to 16 MB.
+    ZR0  the root, ext2 by default, or ZenixFS (see below).
+    ZH0  /home, ext2, when there is room (over 64 MB). What is left, at
+         most 4 GB. The rest of the free space stays free.
+    At least 28 MB. If those names are taken: ZB1 and so on.
+
+    On a disk that has AmigaOS the boot menu comes first at power-on,
+    with AmigaOS as its default after 5 seconds; change S:BootMenu.conf
+    on ZB0 for another default. Nothing about AmigaOS changes.
+
+ZENIXFS
+    A root on ZenixFS needs no check after a power cut, and costs about
+    188-252 KB more memory on a 2 MB machine (docs/d34-zenixfs-root.md).
+    It has not run on real hardware yet. From the floppies its kernel
+    comes from the set.
+
+SAFETY
+    Every change to a table is one sector write, with the new blocks
+    written first in places nothing refers to, so a power cut leaves the
+    old table or the new one whole. Where that cannot be (a whole disk
+    with a bare filesystem on it) the plan says so before you confirm. The
+    new partitions are "do not mount" and not bootable until everything
+    has been written and read back: until the very last write a cut
+    leaves a machine that starts as before. Right before the first write
+    the tables are read again; if anything differs it stops.
+
+    The old contents of every sector of the table it changed are in
+    /var/lib/zinstall/table-before of the new root: for each, 4 bytes of
+    sector number (big-endian) and its 512 bytes. fdisk del removes the
+    new partitions; their space then holds old data.
+
+THE WAY BACK
+    At power-on, both mouse buttons: Kickstart's boot menu. Remove the new
+    partitions with HDToolBox or fdisk del: AmigaOS was not touched.
+
+NOTES
+    A disk with a PC table starts by itself only under Emu68, whose SD
+    driver reads type 0x76; on another Amiga start Zenix from the floppy
+    zenix.adf (zenix-zfs.adf for a ZenixFS root). Kickstart 3.1's own disk
+    code does not reach a boot partition past 4 GB; the plan says so.
+
+    Zenix serves one disk, ide0. A disk with a partition table it cannot
+    read fully says why. No network from the floppies: the RAM disk has
+    no room; after installing, zpkg -Syu brings what is newer. It does
+    not resize partitions. It needs root, and about 200 KB of free memory
+    (330 KB for ZenixFS); it says so and writes nothing if there is less.
+
+EXIT STATUS
+    0 done, or stopped by you with nothing written; 1 something refused or
+    failed (the message says what, and whether anything was written).
+
+FILES
+    /etc/zinstall.set  the install floppies' list (on their RAM disk)
+    /usr/lib/zinstall/ the boot partition's programs
+
+SEE ALSO
+    fdisk(8), zpkg(8), bootmenu(8), zenixboot(8), mkfs.ext2(8),
+    mkfs.zenixfs(8)

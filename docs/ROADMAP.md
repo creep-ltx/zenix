@@ -107,7 +107,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    to Workbench. Demos on the bare hardware first; demos that need AmigaOS's libraries later. Starts when block 3's
    audit is done. The idea's notes: docs/future-ideas.md "Amiga demos on Zenix".
 4. **The Amiga world:** FAT (built 2026-10-31 in FS-UAE: docs/d30-fat.md, `/sbin/fatd`), FFS/OFS (built 2026-10-31 on branch ffs, FS-UAE: docs/d31-ffs.md, `/sbin/ffsd`), PFS3 read-only (built 2026-10-31 on branch pfs3, FS-UAE and against AmigaOS's own volumes: docs/d32-pfs3.md, `/sbin/pfs3d`); LhA/LZX unpacking (built 2026-11-01 on branch lha, FS-UAE: docs/d33-archives.md, `unlha`, `unlzx`, the clean rewrite that settles the public-release blocker); ZenixFS as the root on real hardware (built 2026-11-01 on branch zroot, FS-UAE and the host: docs/d34-zenixfs-root.md; the real A1200's trial is the owner's decision, its steps in the note); the
-   installer. Audit, with the filesystems fuzzed against damaged disks.
+   installer (being built on branch install: docs/d35-installer.md). Audit, with the filesystems fuzzed against damaged disks.
 5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
    viewers, preferences; TrueType fonts (owner 2026-10-26; rendered once per size into bitmap fonts and cached, so a
    68020 without an FPU pays only once; also usable by the console); the demo floppy's desktop edition. Audit.

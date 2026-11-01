@@ -7,7 +7,10 @@
  * the bad-block list, the drive-init code) and tells whether the table can be edited without changing anything it
  * does not understand (fdisk refuses to write otherwise). */
 #define RDB_MAXPART 32              /* partitions read (a longer chain is "not editable") */
-#define RDB_MAXUSED 128             /* blocks of the RDB area that belong to a chain */
+#ifndef RDB_MAXUSED
+#define RDB_MAXUSED 128             /* blocks of the RDB area that belong to a chain (zinstall asks for more before it includes this: a
+                                     * disk with a big filesystem handler in its RDB; a PFS3 handler is 121 LSEG blocks) */
+#endif
 #define RDB_HEADS 16                /* geometry of a NEW table (fdisk init): 16 heads x 63 sectors */
 #define RDB_SECS  63
 #define RDB_CYL   (RDB_HEADS * RDB_SECS)
