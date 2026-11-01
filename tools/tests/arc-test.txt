@@ -44,3 +44,4 @@ send cd /; unlzx; echo "usage=$?"\r
 wait usage= 10
 send echo arc-test-done\r
 wait arc-test-done 10
+stop
