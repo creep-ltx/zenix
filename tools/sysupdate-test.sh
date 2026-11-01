@@ -20,6 +20,9 @@
 #   m   the owner's card layout (tools/mkcard.py sd: an MBR, the RDB inside its partition of type 0x76, the root a PC
 #       partition), Zenix started from the floppy: zpkg -Syu finds the boot partition inside the MBR's RDB and writes
 #       the update there; then a disk without a boot partition: zpkg says what it cannot do, writes nothing
+#   z   a ZenixFS root (DESIGN D34; the disk made by mkcard.py ide, kernel-zfs behind zenixboot, version $VZ): zpkg -Syu takes the
+#       list's systemz line: a program installed live, zenixz-$V1 written to the boot partition; reboot: zenixboot installs it,
+#       zup the root half; then zpkg -Syu installs what waited; the root's fsck on the PC clean
 # usage: tools/sysupdate-test.sh [PART...]     (ZENIX_SERIAL, ZENIX_OUT, ZENIX_BUILD as the other tests)
 # Needs git (the old commit), debugfs, e2fsck, resize2fs, openssl, unprivileged user namespaces (as zpkg-emu-test);
 # amitools' xdfscan where installed.
@@ -57,7 +60,7 @@ if [ ! -f "$O/build/zenix.hdf" ] || [ "$(cat "$O/commit" 2>/dev/null)" != "$(git
 fi
 OV=$(python3 -I -c 'import sys; sys.path.insert(0, "tools"); import mkzup; print(mkzup.kernel_version(open(sys.argv[1], "rb").read())[0])' "$O/build/kernel.bin")
 [ "$OV" = $V0 ] || { echo "FAIL the old build says version $OV, not $V0"; exit 1; }
-make -s BUILD=$OUT/b1 ZVNUM=$V1 $OUT/b1/kernel.bin $OUT/b1/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V1"; exit 1; }
+make -s BUILD=$OUT/b1 ZVNUM=$V1 $OUT/b1/kernel.bin $OUT/b1/kernel-zfs.bin $OUT/b1/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V1"; exit 1; }
 make -s BUILD=$OUT/b2 ZVNUM=$V2 $OUT/b2/kernel.bin $OUT/b2/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V2"; exit 1; }
 echo ' Zenix updated twice (sysupdate-test)' >$OUT/motd2
 python3 tools/mkzup.py repack $OUT/b2/pkg base /etc/motd=$OUT/motd2 >/dev/null || { echo "FAIL repack"; exit 1; }
@@ -273,8 +276,56 @@ part_m() {
         "$([ "$(has $d/o21b 'no AmigaDOS boot partition with a Zenix folder')" = ok ] && [ "$(has $d/o21b '^r21=1')" = ok ] && echo ok || echo bad)"
 }
 
-[ $# = 0 ] && set -- b m
+part_z() {
+    local n=z d=$OUT/z; rm -rf $d; mkdir -p $d/boot/S $d/boot/Zenix
+    local VZ=$V0 BZ=$OUT/bz P Z=zenixfs/build/zenixfs-tool
+    conf_files 8097
+    make -s -j8 BUILD=$BZ ZVNUM=$VZ all $BZ/kernel-zfs.bin $BZ/zenixboot $BZ/pkg/list >>"$OUT/make.log" 2>&1 || { R "FAIL z: build"; return; }
+    P=$(make -s BUILD=$BZ -f Makefile --eval 'pa:;@echo $(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)' pa 2>/dev/null)
+    PKGDB=1 RAWIMG=1 tools/mkroot-zenixfs.sh $d/root.img $BZ "$P" 48 >/dev/null || { R "FAIL z: the root"; return; }
+    $Z mkdir $d/root.img /etc/network
+    printf 'auto eth0\niface eth0 inet dhcp\n    driver a2065\n' >$OUT/interfaces
+    $Z put $d/root.img $OUT/interfaces /etc/network/interfaces
+    { cat $OUT/net.sh; echo 'cp /tests/conf.r /etc/zpkg.conf; zpkg -Qi base > /tests/o30 2>&1'; step 31 'zpkg -Syu'; echo 'echo z1-d""one'; } >$OUT/sz1.sh
+    { cat $OUT/net.sh; step 32 'uname -a'; step 33 'zpkg -Syu'; step 34 'zpkg -Qi base sysutils'; step 35 mount; echo 'sync; echo z2-d""one'; } >$OUT/sz2.sh
+    $Z put $d/root.img $OUT/sz1.sh /tests/sz1.sh; $Z put $d/root.img $OUT/sz2.sh /tests/sz2.sh; $Z put $d/root.img $OUT/conf.r /tests/conf.r
+    printf 'SYS:zenixboot\n' >$d/boot/S/Startup-Sequence
+    python3 tools/mkffs.py $d/ffs.img 16632K ZenixBoot $d/boot/S/Startup-Sequence=S/Startup-Sequence \
+        $BZ/zenixboot=zenixboot $BZ/kernel-zfs.bin=Zenix/zenix >/dev/null &&
+        python3 tools/mkcard.py ide $d/disk.hdf $d/ffs.img $d/root.img >/dev/null || { R "FAIL z: the disk"; return; }
+    FAST=8192 fsconf $d/z.fs-uae $d/disk.hdf
+    cat >$d/keys.txt <<EOF
+wait zenix:/# 900
+sleep 2
+send sh /tests/sz1.sh\r
+wait (?m)^z1-done 3000
+send reboot\r
+wait (?m)^klog: boot [0-9]+, 300
+wait zenix:/# 1500
+sleep 2
+send sh /tests/sz2.sh\r
+wait (?m)^z2-done 3000
+stop
+EOF
+    inner z $d/z.fs-uae 6000 $d/keys.txt 8097
+    unshare --map-root-user --map-auto -nm $OUT/inner-z.sh >$d/run.log 2>&1 || R "FAIL z: the run ($(grep -a 'FAIL\|timed out' $d/run.log | head -2 | tr '\n' ' '))"
+    tr -d '\r' <$d/run.log | sed 's/\x1b\[[0-9;:]*[mK]//g' >$d/log.txt
+    python3 tools/ffsread.py $d/disk.hdf --part ZR0 dump $d/root-after.img
+    for i in 30 31 32 33 34 35; do $Z cat $d/root-after.img /tests/o$i >$d/o$i 2>/dev/null; done
+    check "z: zpkg -Syu on a ZenixFS root: the system with the ZenixFS kernel is written to the boot partition" \
+        "$([ "$(has $d/o31 "Zenix .*\($V1\) is ready on the boot partition")" = ok ] && [ "$(has $d/o31 '^r31=0')" = ok ] && echo ok || echo bad)"
+    rm -rf $d/bootx; mkdir -p $d/bootx; python3 tools/ffsread.py $d/disk.hdf --part ZB0 extract $d/bootx
+    check "z: reboot: zenixboot takes it, the kernel has the ZenixFS server, zup installs the root half" \
+        "$(inorder $d/log.txt 'sh /tests/sz1.sh' 'update: signed by test key' "update: installing version $V1" "^zup: installed Zenix .*\($V1\)")"
+    check "z: ... the kernel on the boot partition is the repository's systemz" \
+        "$(cmp -s $d/bootx/Zenix/zenix-update.zup $W/r/pool/zenixz-$V1.zup && echo ok || echo bad)"
+    check "z: the new system runs on ZenixFS" "$([ "$(has $d/o32 "\($V1\) m68k")" = ok ] && [ "$(has $d/log.txt '^ide0p[0-9]+ +/ +zenixfs ')" = ok ] && echo ok || echo bad)"
+    check "z: zpkg -Syu after the restart: what waited is installed live on ZenixFS" "$([ "$(has $d/o33 '^r33=0')" = ok ] && [ "$(grep -ac "^Version .*($V1)" $d/o34)" = 2 ] && echo ok || echo bad)"
+    $Z fsck $d/root-after.img >$d/fsck.log 2>&1 && R "PASS z: the root: the PC's fsck clean" || R "FAIL z: the root: fsck (log $d/fsck.log)"
+}
+
+[ $# = 0 ] && set -- b m z
 for p in "$@"; do
-    case $p in b|m) "part_$p" ;; *) echo "sysupdate-test: unknown part $p"; exit 2 ;; esac
+    case $p in b|m|z) "part_$p" ;; *) echo "sysupdate-test: unknown part $p"; exit 2 ;; esac
 done
 exit $((1 - pass))

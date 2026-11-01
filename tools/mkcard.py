@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Make a disk image that boots Zenix with no floppy: Kickstart boots a small AmigaDOS FFS partition whose
-S:Startup-Sequence runs zenixboot, which starts the kernel; Zenix then mounts the ext2 root partition.
+S:Startup-Sequence runs zenixboot, which starts the kernel; Zenix then mounts the root partition. The root image may be
+ext2 or ZenixFS (DESIGN D34, told from the image itself): the same layout, with the partition type "zenixfs" in an RDB
+(in an MBR it stays 0x83: Zenix reads the superblock to choose the server).
 
 usage: mkcard.py sd  out.img boot-ffs.img root-ext2.img     the SD card of an Emu68 Amiga (PiStorm):
          MBR  p1  type 0x0c FAT32, 512 MB at sector 8192: left EMPTY here (tools/write-card.sh puts Emu68's files
@@ -45,9 +47,19 @@ def write_sparse(f, offset, data):
 SEED = "/var/lib/random-seed"
 
 
+def is_zenixfs(root):
+    with open(root, "rb") as f:
+        return f.read(36)[32:36] == b"ZNFS"
+
+
+ZTOOL = os.path.join(HERE, "..", "zenixfs", "build", "zenixfs-tool")
+
+
 def has_seed(root):
     """the root holds a random seed (DESIGN D19 9.3): an emulator booted it in place (fsuae/*.fs-uae boot
     build/zenix.hdf) and wrote its seed there; a card made from it would credit that seed on every machine"""
+    if is_zenixfs(root):
+        return subprocess.run([ZTOOL, "stat", root, SEED], capture_output=True, text=True).returncode == 0
     r = subprocess.run(["debugfs", "-R", f"stat {SEED}", root], capture_output=True, text=True)
     if r.returncode != 0 and "Inode:" not in r.stdout:
         sys.exit(f"mkcard.py: debugfs cannot read {root}: {r.stderr.strip()}")
@@ -62,7 +74,8 @@ def main():
         if has_seed(root):      # audit 2026-10-28 S10: the seed is removed from a copy, never put on the card
             copy = os.path.join(t, "root.img")
             subprocess.run(["cp", "--sparse=always", root, copy], check=True)
-            subprocess.run(["debugfs", "-w", "-R", f"rm {SEED}", copy], check=True, capture_output=True)
+            subprocess.run([ZTOOL, "rm", copy, SEED] if is_zenixfs(root) else ["debugfs", "-w", "-R", f"rm {SEED}", copy],
+                           check=True, capture_output=True)
             if has_seed(copy):
                 sys.exit(f"mkcard.py: could not remove {SEED} from the copy of {root}")
             print(f"mkcard.py: {root} holds {SEED} (an emulator booted it): left off the card")
@@ -72,8 +85,9 @@ def main():
 
 def build(kind, out, boot, root):
     if kind == "ide":
-        rdb(out, f"{boot}:ffs:ZB0:boot", f"{root}:ext2:ZR0:nomount")
-        print(f"{out}: RDB: ZB0 = FFS boot partition (zenixboot), ZR0 = ext2 root, {os.path.getsize(out) // 1024} KB")
+        ty = "zenixfs" if is_zenixfs(root) else "ext2"
+        rdb(out, f"{boot}:ffs:ZB0:boot", f"{root}:{ty}:ZR0:nomount")
+        print(f"{out}: RDB: ZB0 = FFS boot partition (zenixboot), ZR0 = {ty} root, {os.path.getsize(out) // 1024} KB")
         return
     with tempfile.TemporaryDirectory() as t:
         r = os.path.join(t, "rdb.img")

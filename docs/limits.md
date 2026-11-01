@@ -67,9 +67,8 @@ pointers.
   index server for `locate`/`fzf`.
 - ext2: a journal (an ext3 volume mounts read-only, ext4 is refused), moving a directory to another parent (`mv`
   copies it; ZenixFS moves it), triple-indirect blocks, files over 4 GB. ZenixFS: what zenixfs.md lists as not done.
-- ZenixFS as the root on a real machine (DESIGN D19 step 1: the shipped kernel has no ZenixFS server built in; a
-  ZenixFS root runs only with the test kernel `kernel-zfs.bin`, in the emulator tests, until roadmap block 4). A
-  ZenixFS mount needs `/sbin/zfsd` on the root, and its restart reads that file from the root.
+- ZenixFS as the root: verified in FS-UAE only (DESIGN D34), not on real hardware, and only with the kernel `kernel-zfs.bin`
+  (the shipped one has no ZenixFS server built in). A ZenixFS mount needs `/sbin/zfsd` on the root, and its restart reads that file from the root.
 - Kernel is single-CPU by design. Priorities have no ageing and no CPU-time share (DESIGN D10, "Not taken").
 - 68000 support (not a target).
 - Booting without a floppy (`zenixboot`): Kickstart 1.3 is not a target (it refuses; 1.3 also cannot boot an RDB

@@ -27,7 +27,7 @@ Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, D
 numbers 1-18 and `NET_CLOSE` 19; 1-63 are the kernel's to the server), `NETDRV_*` from 64 (the drivers' blocks, step 7:
 `NETDRV_ATTACH` 64, `NETDRV_XFER` 65, branch n678 2026-10-27);
 `FS_*` 1-24 (24 `FS_CLOSE`: fix-c, batch C5), `FS_*` 25 `FS_MARK` (D15 step 2, 2026-10-26:
-zup's "needs a check" mark), `FS_SYNC`'s a0 1 "bounded" (D23 step 1, branch nfs12, 2026-10-28; recorded by audit
+zup's "needs a check" mark), `FS_*` 26 `FS_HEALTH` (D34, branch zroot, 2026-11-01: boot asks whether a ZenixFS root could only be mounted read-only), `FS_SYNC`'s a0 1 "bounded" (D23 step 1, branch nfs12, 2026-10-28; recorded by audit
 2026-10-29 B2-7), `DISK_*` 1-8, `DISK_*` 9 `DISK_INFOSZ` and
 10 `DISK_LISTSZ` (D15 step 0, fix3, 2026-10-26: `DISK_INFO`/`DISK_LIST` with the caller's buffer size).
 `struct umsg`'s `kflags` bits: 1 `UMSG_KERNEL`, 2 `UMSG_NETREPLY` (internal), 4 `UMSG_CANCEL` (D23 step 1, branch nfs12, 2026-10-28: only the kernel sets it, for a killed client), 8

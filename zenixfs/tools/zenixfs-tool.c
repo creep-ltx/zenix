@@ -10,7 +10,7 @@
  *   zenixfs-tool ln IMAGE TARGET LINKPATH     (symbolic link)       ln IMAGE -h EXISTING NEWPATH   (hard link)
  *   zenixfs-tool salvage IMAGE OUTDIR [--commit K] [--no-carve] [--old-copies]   copy out everything that can still be read, skipping damage
  *   zenixfs-tool rescue IMAGE NEWIMAGE SIZE_MB [--old-copies]   salvage into a temporary folder, then make a fresh clean image from it
- *   zenixfs-tool repair IMAGE [--rollback K]   rebuild a damaged superblock and free-space map; --rollback K goes back K commits
+ *   zenixfs-tool repair IMAGE [--rollback K]   rebuild a damaged superblock, map or inner nodes; --rollback K takes the state K valid commits back (0: the newest valid), on your word
  * Options always come after IMAGE.
  * Paths inside the image start with / . Block size by default: under 16 MB 1 KB, under 256 MB 2 KB, else 4 KB. */
 #include <stdio.h>
@@ -125,26 +125,47 @@ static void put_tree(const char *host, const char *dest)
         r = zenixfs_symlink(fs, dir, nm, nl, tg, 0, 0, &ino); if (r) die(dest, r);
     } else if (S_ISREG(st.st_mode)) put_file(host, dest);
 }
-static void get_file(uint32_t ino, FILE *out)
+/* a read error is reported and counted (get goes on with the rest, and fails at the end); a file that could not be read
+ * whole is never left under its name: nobody could tell it from the real one */
+static int get_errors;
+static void get_note(const char *what, const char *path, int r)
 {
-    struct zenixfs_inode in; int r = zenixfs_getattr(fs, ino, &in); if (r) die("stat", r);
+    fprintf(stderr, "zenixfs-tool: %s: %s: error %d%s\n", what, path, r, r == ZENIXFS_ECORRUPT ? " (damaged)" : "");
+    get_errors++;
+}
+static int get_file(uint32_t ino, FILE *out, const char *path)
+{
+    struct zenixfs_inode in; int r = zenixfs_getattr(fs, ino, &in); if (r) { get_note("stat", path, r); return r; }
     uint8_t *buf = malloc(1 << 17); uint64_t off = 0;
-    while (off < in.size) { int n = zenixfs_read(fs, ino, off, buf, 1 << 17); if (n < 0) die("read", n); if (!n) break; fwrite(buf, 1, n, out); off += n; }
+    while (off < in.size) {
+        int n = zenixfs_read(fs, ino, off, buf, 1 << 17);
+        if (n < 0) { get_note("read", path, n); free(buf); return n; }
+        if (!n) break;
+        fwrite(buf, 1, n, out); off += n;
+    }
     free(buf);
+    return 0;
 }
 static void get_tree(uint32_t ino, const char *host)
 {
-    struct zenixfs_inode in; zenixfs_getattr(fs, ino, &in);
+    struct zenixfs_inode in; int e = zenixfs_getattr(fs, ino, &in);
+    if (e) { get_note("stat", host, e); return; }
     if ((in.mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFDIR) {
         mkdir(host, 0755);
-        uint64_t cookie = 0; char name[300]; uint32_t c; uint8_t type;
-        while (zenixfs_readdir(fs, ino, &cookie, name, &c, &type) > 0) {
+        uint64_t cookie = 0; char name[300]; uint32_t c; uint8_t type; int r;
+        while ((r = zenixfs_readdir(fs, ino, &cookie, name, &c, &type)) > 0) {
             if (!strcmp(name, ".") || !strcmp(name, "..")) continue;
             char h[4096]; snprintf(h, sizeof h, "%s/%s", host, name); get_tree(c, h);
         }
+        if (r < 0) get_note("directory cut short", host, r);
     } else if ((in.mode & ZENIXFS_S_IFMT) == ZENIXFS_S_IFLNK) {
-        char tg[4096]; int l = zenixfs_readlink(fs, ino, tg, sizeof tg - 1); if (l >= 0) { tg[l] = 0; symlink(tg, host); }
-    } else { FILE *f = fopen(host, "wb"); if (!f) { perror(host); return; } get_file(ino, f); fclose(f); }
+        char tg[4096]; int l = zenixfs_readlink(fs, ino, tg, sizeof tg - 1);
+        if (l >= 0) { tg[l] = 0; symlink(tg, host); } else get_note("link", host, l);
+    } else {
+        FILE *f = fopen(host, "wb"); if (!f) { perror(host); get_errors++; return; }
+        int r = get_file(ino, f, host); fclose(f);
+        if (r) unlink(host);
+    }
 }
 
 
@@ -233,39 +254,35 @@ static int cmd_salvage(const char *image, const char *outdir, int skip, int carv
     return 0;
 }
 
-static int cmd_repair(const char *image, int rollback)
+static int cmd_repair(const char *image, uint32_t want)
 {
-    int bs;
-    for (bs = 10; bs <= 12; bs++) {                           /* is the superblock fine? */
+    int bs, ok = 0;
+    for (bs = 10; bs <= 12 && !ok; bs++) {                    /* a superblock at this block size? (a failed mount is not a missing superblock) */
         if (zfile_open(&img, image, (uint32_t)bs, 0) < 0) { perror(image); return 1; }
-        struct zenixfs_mount_opts mo = { 128, 0, ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH, (uint32_t)rollback };
-        if (zenixfs_mount_opts(&fs, &img.dev, &mo) == 0) break;
+        ok = zenixfs_super_ok(&img.dev);
+        if (ok) break;
         zfile_close(&img);
     }
-    if (bs > 12) {                                            /* no: rewrite it from what the volume itself says about its size */
+    if (!ok) {                                                /* none: rewrite it from what the volume itself says about its size */
         int g = zenixfs_guess_bshift(image);
         if (g < 0) { printf("repair: nothing in %s looks like ZenixFS\n", image); return 1; }
         if (zfile_open(&img, image, (uint32_t)g, 0) < 0) { perror(image); return 1; }
         int r = zenixfs_rewrite_super(&img.dev, "recovered", 0, ZENIXFS_CHARSET_LATIN1, (uint64_t)time(NULL));
-        printf("repair: superblock rewritten (block size %d bytes, label \"recovered\", reserve default)%s\n", 1 << g, r ? " FAILED" : "");
-        zfile_close(&img);
-        bs = g;
-        if (zfile_open(&img, image, (uint32_t)bs, 0) < 0) return 1;
-        struct zenixfs_mount_opts mo = { 128, 0, ZENIXFS_MNT_NOBITMAPCHECK | ZENIXFS_MNT_READONLYISH, (uint32_t)rollback };
-        if (zenixfs_mount_opts(&fs, &img.dev, &mo) != 0) {
-            printf("repair: still cannot mount: no usable commit record or root block. Use: zenixfs-tool salvage %s OUTDIR\n", image);
-            return 1;
-        }
+        if (r) { printf("repair: the superblock cannot be rewritten from this size (%d): nothing was changed. Copy out what can be read: zenixfs-tool salvage %s OUTDIR\n", r, image); zfile_close(&img); return 1; }
+        printf("repair: superblock rewritten (block size %d bytes, label \"recovered\", reserve default)\n", 1 << g);
     }
-    struct zenixfs_stats ms; zenixfs_get_stats(fs, &ms);
-    if (ms.mount_damage) printf("repair: %u commit record(s) or root(s) were unreadable; working from the last good commit\n", ms.mount_damage);
-    if (rollback) printf("repair: rolled back %d commit(s)\n", rollback);
-    int changed = zenixfs_rebuild_bitmap(fs);
-    if (changed < 0) { printf("repair: rebuilding the free-space map failed (%d)\n", changed); return 1; }
-    printf("repair: free-space map rebuilt from the tree (%d block(s) changed)\n", changed);
-    int n = zenixfs_fsck(fs, fsck_log, NULL);
-    zenixfs_unmount(fs); zfile_close(&img);
-    printf(n ? "repair: %d problem(s) remain (the tree itself is damaged; use salvage to copy out what can be read)\n" : "repair: clean\n", n);
+    struct zenixfs_repair_report rp;
+    int n = zenixfs_repair(&img.dev, 128, want, fsck_log, NULL, &rp);
+    zfile_close(&img);
+    if (n < 0) {
+        printf("repair: the tree is damaged in a way repair cannot undo: nothing %s changed. Copy out what can be read: zenixfs-tool salvage %s OUTDIR (or: rescue)\n", ok ? "was" : "more was", image);
+        return 1;
+    }
+    if (rp.nodes) printf("repair: damaged inner tree nodes replaced: %u new nodes over %u leaves; nothing was lost\n", rp.nodes, rp.leaves);
+    if (rp.back == 1) printf("repair: one commit back (the newest was damaged): its changes are gone; older file data is not checked, look at the newest files\n");
+    if (rp.back >= 2) printf("repair: WARNING: %u commits back: this old state's file data may have been overwritten since; check the files, or use salvage\n", rp.back);
+    printf("repair: free-space map rebuilt from the tree (%u block(s) changed)\n", rp.changed);
+    printf(n ? "repair: %d problem(s) remain (use salvage to copy out what can be read)\n" : "repair: clean\n", n);
     return n ? 1 : 0;
 }
 
@@ -322,8 +339,8 @@ int main(int argc, char **argv)
         return r != 0;
     }
     if (!strcmp(cmd, "repair")) {
-        int rb = 0;
-        for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--rollback") && i + 1 < argc) rb = atoi(argv[++i]);
+        uint32_t rb = ZENIXFS_REPAIR_AUTO;
+        for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--rollback") && i + 1 < argc) rb = (uint32_t)atoi(argv[++i]);
         return cmd_repair(path, rb);
     }
     if (open_image(path) < 0) { fprintf(stderr, "zenixfs-tool: %s is not a ZenixFS image (or its superblock and commit records are damaged)\n", path); return 1; }
@@ -347,7 +364,7 @@ int main(int argc, char **argv)
         uint32_t ino; must_resolve(argv[3], &ino); struct zenixfs_inode in; zenixfs_getattr(fs, ino, &in); char ms2[11]; mode_str(in.mode, ms2);
         printf("inode %u  %s (%o)  links %u  uid %u gid %u  size %llu  mtime %llu  flags %x  %s\n", ino, ms2, in.mode, in.nlink, in.uid, in.gid, (unsigned long long)in.size, (unsigned long long)in.mtime, in.flags, (in.flags & 1) ? "stored inside the tree" : "in extents");
     } else if (!strcmp(cmd, "cat") && argc > 3) {
-        uint32_t ino; must_resolve(argv[3], &ino); get_file(ino, stdout);
+        uint32_t ino; must_resolve(argv[3], &ino); get_file(ino, stdout, argv[3]);
     } else if (!strcmp(cmd, "put") && argc > 4) {
         int a = 3, rec = 0; if (!strcmp(argv[a], "-r")) { rec = 1; a++; }
         if (argc <= a + 1) usage();
@@ -357,8 +374,8 @@ int main(int argc, char **argv)
         if (argc <= a) usage();
         uint32_t ino; must_resolve(argv[a], &ino);
         if (rec) { if (argc <= a + 1) usage(); get_tree(ino, argv[a + 1]); }
-        else if (argc > a + 1) { FILE *f = fopen(argv[a + 1], "wb"); if (!f) { perror(argv[a + 1]); return 1; } get_file(ino, f); fclose(f); }
-        else get_file(ino, stdout);
+        else if (argc > a + 1) { FILE *f = fopen(argv[a + 1], "wb"); if (!f) { perror(argv[a + 1]); return 1; } int gr = get_file(ino, f, argv[a]); fclose(f); if (gr) unlink(argv[a + 1]); }
+        else get_file(ino, stdout, argv[a]);
     } else if ((!strcmp(cmd, "mkdir") || !strcmp(cmd, "rm") || !strcmp(cmd, "rmdir")) && argc > 3) {
         uint32_t dir, ino; const char *nm; int nl; int r = resolve(argv[3], 1, &dir, &nm, &nl); if (r) die(argv[3], r);
         if (!strcmp(cmd, "mkdir")) r = zenixfs_mkdir(fs, dir, nm, nl, 0755, 0, 0, &ino);
@@ -388,5 +405,5 @@ int main(int argc, char **argv)
     } else usage();
     int e = zenixfs_unmount(fs); zfile_close(&img);
     if (e) die("commit", e);
-    return rc;
+    return rc ? rc : get_errors ? 1 : 0;
 }

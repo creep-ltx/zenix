@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Programs built into the kernel image (ZEXE blobs with their own relocations), found through -I$(BUILD).
  * The ZenixFS server is not built in (DESIGN D19 step 1): mount starts /sbin/zfsd as a file service. Only the
- * test-only kernel kernel-zfs.bin (KERNEL_ZFSD, a ZenixFS root in the emulator tests) carries it. */
+ * kernel for a ZenixFS root, kernel-zfs.bin (KERNEL_ZFSD, DESIGN D34), carries it. */
     .section .rodata
     .balign 4
     .globl  fsd_blob, fsd_blob_end, boot_blob, boot_blob_end, diskd_blob, diskd_blob_end
@@ -10,7 +10,11 @@ fsd_blob:
 fsd_blob_end:
     .balign 4
 boot_blob:
+#ifdef KERNEL_ZFSD
+    .incbin "bootz.zx"               /* boot with the choices for a damaged ZenixFS root (DESIGN D34) */
+#else
     .incbin "boot.zx"
+#endif
 boot_blob_end:
     .balign 4
 diskd_blob:

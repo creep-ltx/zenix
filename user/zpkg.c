@@ -540,6 +540,17 @@ static void say_expired(void)
     say("the package list expired on %u, and the clock says %u%s", ix.expires, zp_today(&tr),
         tr.clock > ix.expires ? ": check the date (zpkg --ignore-expiry goes on once)" : "");
 }
+/* A ZenixFS root runs the kernel with the ZenixFS server (DESIGN D34): its system is the list's "systemz" line. zenixboot
+ * would refuse the other bundle on such a machine (DESIGN D19 step 1), so zpkg never fetches it there. */
+static int root_zenixfs(void)
+{
+    struct umountinfo mi;
+    return sys_mountinfo(0, &mi) == 0 && !strcmp(mi.type, "zenixfs");
+}
+static void sys_for_root(struct zp_index *x)
+{
+    if (x->sysz.file && root_zenixfs()) x->sys = x->sysz;
+}
 static int load_stored(void)
 {
     u32 n;
@@ -549,6 +560,7 @@ static int load_stored(void)
     const char *why;
     if (!t) return 0;
     if (zp_index_parse(&ix, t, n, &why)) { say("the stored package list is damaged (%s): fetched again", why); free(t); return 0; }
+    sys_for_root(&ix);
     if (snapshot && zp_index_usable(&ix, &tr, 0, &why) == ZP_ESNAPSHOT) { zp_index_free(&ix); free(t); return 0; }
     ixtext = t;
     have_ix = 1;
@@ -613,6 +625,7 @@ static int sync_list(void)
         if (!copy) { free(list); free(sig); say("out of memory"); return -ENOMEM; }
         memcpy(copy, list, n + 1);
         if (zp_index_parse(&nx, copy, n, &why)) { say("%s: the list is refused: %s", base, why); free(copy); free(list); free(sig); continue; }
+        sys_for_root(&nx);
         if (nx.serial != serial) { say("%s: the list's serial is not latest's", base); zp_index_free(&nx); free(copy); free(list); free(sig); continue; }
         rc = zp_index_check(&nx, &tr, &warn, &why);
         if (rc) {
@@ -1000,7 +1013,6 @@ static int changes_allowed(int ram)
         return 0;
     }
     if (sys_mountinfo(0, &mi) == 0) {
-        if (!strcmp(mi.type, "zenixfs")) { say("the root is ZenixFS (a test root until block 4): zpkg changes nothing here"); return 0; }
         if (!strcmp(mi.dev, "ram0") && !ram) {
             say("the root is a RAM disk: what zpkg installs would be gone at the next start (--ram to go on anyway)");
             return 0;
@@ -1033,6 +1045,11 @@ static int cmd_sync(char **names, int n, int y, int u, int down_only, int ram)
     }
     if (!todo && !waits && !pl.system) { say("nothing to do"); zp_plan_free(&pl); return 0; }
     if ((todo || waits || pl.system) && !changes_allowed(ram)) { zp_plan_free(&pl); return 1; }
+    if (pl.system && root_zenixfs() && !ix.sysz.file) {
+        say("the list has no system for a ZenixFS root (a kernel with the ZenixFS server): nothing installed");
+        zp_plan_free(&pl);
+        return 1;
+    }
     if (sys_chdir(CACHE) < 0) { sys_mkdir("/var/cache/zpkg"); sys_mkdir(CACHE); if (sys_chdir(CACHE) < 0) { say("cannot use %s", CACHE); return 1; } }
     /* everything downloaded and verified first, the connection closed, then the manifests checked (4.3) */
     int bad = 0;
@@ -1285,9 +1302,10 @@ static int cmd_clean(int quietly)
         u32 v = (u32)strtoul(dash + 1, &e, 10);
         if (strncmp(e, ".zup", 4)) { if (strstr(f, ".part") || strstr(f, ".tmp")) { sys_unlink(f); gone++; } continue; }
         *dash = 0;
-        struct zf_pkg *k = strcmp(f, "zenix") ? inst_find(f) : inst_find("base");
+        int sysb = !strcmp(f, "zenix") || !strcmp(f, "zenixz");   /* the system bundles (zenixz: for a ZenixFS root, D34) */
+        struct zf_pkg *k = sysb ? inst_find("base") : inst_find(f);
         int keep = 0;
-        if (k && strcmp(f, "zenix")) {
+        if (k && !sysb) {
             if (v == k->vnum) keep = 1;
             else if (v < k->vnum) {                     /* the newest older one stays */
                 keep = 1;
@@ -1298,7 +1316,7 @@ static int cmd_clean(int quietly)
                     if (w > v && w < k->vnum) keep = 0;
                 }
             }
-        } else if (!strcmp(f, "zenix") && k) keep = v > k->vnum;   /* a system bundle only while it waits */
+        } else if (sysb && k) keep = v > k->vnum;   /* a system bundle only while it waits */
         *dash = '-';
         if (!keep) { sys_unlink(f); gone++; }
     }

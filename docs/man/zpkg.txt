@@ -137,10 +137,13 @@ NOTES
     The keys zpkg trusts are built in: a test build trusts only the
     test key (the channel test), a release build only the release keys
     (testing, stable). Only root changes packages; -Ss, -Si and -Q are
-    for everyone. zpkg changes nothing on a ZenixFS root (a test root),
-    without a package database, or while a new system is on trial when
-    zenixboot says so (UPD_F_TRIAL; no zenixboot sets it yet). During
-    a system update's restart nothing is new: zenixboot and zup do what
+    for everyone. On a ZenixFS root the system is the list's bundle with
+    the ZenixFS kernel; a list without one: said, nothing installed.
+    Its bundles in the cache are cleaned like the others (zpkg -Sc).
+    zpkg changes nothing without a package database, or while a new
+    system is on trial when zenixboot says so (UPD_F_TRIAL; no zenixboot
+    sets it yet). During a system update's restart nothing is new:
+    zenixboot and zup do what
     they always do (zenixboot(8), zup(8)).
     The boot partition must use 512-byte blocks, 2 reserved blocks,
     DOS\1 or DOS\3 (FFS), no bitmap extension block (under about 50

@@ -276,6 +276,18 @@ int zp_index_parse(struct zp_index *ix, char *text, size_t len, const char **why
                 s->file = w[3];
                 s->sha = w[5];
                 have |= H_SYSTEM;
+            } else if (!strcmp(w[0], "systemz")) {   /* (a list before it has no such line; an older zpkg ignores it: growth) */
+                struct zp_system *s = &ix->sysz;
+                if (nw != 8 || s->file || num(w[1], &s->vnum) || !vstr_ok(w[2]) || num(w[4], &s->fsize) ||
+                    !sha_ok(w[5]) || strcmp(w[6], "min") || num(w[7], &s->min))
+                    BAD("a bad systemz line");
+                if (!file_is(w[3], "zenixz", s->vnum))
+                    BAD("the ZenixFS system bundle is not zenixz-VNUM.zup");
+                if (s->fsize <= 96 || s->fsize > ZP_BUNDLE_MAX)
+                    BAD("the ZenixFS system bundle's size is out of range");
+                s->vstr = w[2];
+                s->file = w[3];
+                s->sha = w[5];
             }
             continue;                   /* other header words: growth */
         }

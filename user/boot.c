@@ -12,7 +12,8 @@
  * calls start them: rootpick's DISK_LIST starts diskd, the root inode (SYS_mountinfo) starts the root server. An ext2
  * root not marked clean is checked first (DESIGN D17): served read-only, /bin/fsck.ext2 -y on it, then the writable
  * server; a root the check could not repair stays read-only unless the owner chooses otherwise (rescue(), man
- * rescue). Then it runs /sbin/zup (DESIGN D15: an update's root half, or what a power cut left), gives the update bundle's memory back,
+ * rescue). A ZenixFS root needs no check after a cut (its commits are atomic, D17 section 9); only a root that could not be
+ * mounted from a state to build on (DESIGN D34: the two newest commits unreadable) gets the same choices. Then it runs /sbin/zup (DESIGN D15: an update's root half, or what a power cut left), gives the update bundle's memory back,
  * takes the random seed (DESIGN D19 9.3, randseed.h), registers the services listed in /etc/svctab and starts /bin/init
  * on console 1 and waits for it; should init ever end, it says so and starts it again. */
 
@@ -113,13 +114,20 @@ static int wait_limited(int pid)
  * the check server, and the console offers what AmigaOS offers for a disk it cannot validate; a key, or 1 after 30 s
  * (an unattended machine still comes up). 1 if the root stays read-only, 0 for the writable server (choice 2, or a root
  * the rescue shell left marked clean). man rescue explains the steps. */
-static int rescue(const char *dev)
+#ifdef KERNEL_ZFSD                      /* built twice: the kernel for a ZenixFS root has these few hundred bytes more */
+#define ZFS_ARG(z) (z)
+#else
+#define ZFS_ARG(z) 0
+#endif
+static int rescue(const char *dev, int zfs_)
 {
+    const int zfs = ZFS_ARG(zfs_);
+    const char *tool = zfs ? "fsck.zenixfs " : "fsck.ext2 ";
     for (;;) {
         say("boot: the root could not be repaired and is mounted read-only. Choose (man rescue):\n"
-            "  1  go on read-only (the default in 30 seconds)\n"
-            "  2  go on read-write anyway (risky: the damage can grow)\n"
-            "  3  a rescue shell as root\n"
+            "  1  go on read-only (the default in 30 seconds)\n");
+        if (!zfs) say("  2  go on read-write anyway (risky: the damage can grow)\n");   /* ZenixFS: no state to write on */
+        say("  3  a rescue shell as root\n"
             "  4  reboot\n");
         sys_ttymode(TTY_RAW);                   /* one key, no Return */
         char k = '1';
@@ -127,7 +135,7 @@ static int rescue(const char *dev)
             int left = (int)(end - sys_ticks());
             struct pollfd pf = { 0, POLLIN, 0 };
             if (left <= 0) break;
-            if (sys_evwait(&pf, 1, left) > 0 && sys_read(0, &k, 1) == 1 && k >= '1' && k <= '4') break;
+            if (sys_evwait(&pf, 1, left) > 0 && sys_read(0, &k, 1) == 1 && k >= '1' && k <= '4' && !(zfs && k == '2')) break;
             k = '1';
         }
         sys_ttymode(0);
@@ -136,11 +144,16 @@ static int rescue(const char *dev)
         if (k == '1') { say("boot: going on with the root read-only\n"); return 1; }
         if (k == '2') { say("boot: going on with the root read-write\n"); return 0; }
         if (k == '4') { sys_reboot(0); continue; }
-        say("boot: a shell as root; the root stays read-only. Repair commands:\n  fsck.ext2 ");
+        say("boot: a shell as root; the root stays read-only. Repair commands:\n  ");
+        say(tool);
         say(dev);
-        say("      check again, changing nothing\n  fsck.ext2 -y ");
+        say("      check again, changing nothing\n  ");
+        say(tool);
+        say("-y ");
         say(dev);
-        say("   repair what it can\n  mount, cp          copy files to safety (another disk) first\n"
+        say("   repair what it can\n");
+        if (zfs) { say("  fsck.zenixfs --old "); say(dev); say("  build on the old state (older files may be wrong)\n"); }
+        say("  mount, cp          copy files to safety (another disk) first\n"
             "  exit               back to these choices\n");
         static const char env[] = "PATH=/bin\0HOME=/\0USER=root\0LOGNAME=root\0SHELL=/bin/sh\0";
         sys_envset(env, sizeof env);            /* for the shell; boot's own stays empty after it */
@@ -150,7 +163,14 @@ static int rescue(const char *dev)
         if (pid < 0) say("boot: cannot start /bin/sh\n");
         else sys_wait(pid);
         char id[64];
-        if (vol_id(dport, dev, id) == 1 && (vol_state & 1)) {   /* repaired in the shell: no question */
+        if (zfs) {                              /* repaired in the shell: its check says so */
+            char *fa[] = { "/bin/fsck.zenixfs", (char *)dev, 0 };
+            int cp = sys_spawn(fa[0], fa, 0);
+            if (cp >= 0 && sys_wait(cp) == 0) {
+                say("boot: the root is clean now: going on read-write\n");
+                return 0;
+            }
+        } else if (vol_id(dport, dev, id) == 1 && (vol_state & 1)) {   /* repaired in the shell: no question */
             say("boot: the root is marked clean now: going on read-write\n");
             return 0;
         }
@@ -251,7 +271,7 @@ int main(void)
             say("\n");
         }
         if (st < 0 || st > 1)
-            ro = rescue(dev);
+            ro = rescue(dev, 0);
         if (!ro) {
             struct umsg q;
             q.type = FS_QUIT;                   /* the check server lets the device go and ends (a stop, not a crash) */
@@ -260,6 +280,27 @@ int main(void)
             sys_svc_register("fs", prog, -10);
         }
     }
+#ifdef KERNEL_ZFSD
+    else if (type == 2) {                       /* ZenixFS: a root it can only read (DESIGN D34) */
+        struct umsg q;
+        for (;;) {                              /* again after a repair: the writable server must agree */
+            q.type = FS_HEALTH;
+            if (sys_call(sys_port_find("fs"), &q) != 1) break;
+            q.type = FS_QUIT;                   /* served again without taking the device: the repair tool needs it */
+            sys_call(sys_port_find("fs"), &q);
+            memcpy(w, "-fsck", 5);
+            sys_svc_register("fs", prog, -10);
+            sys_mountinfo(0, &mi);
+            ro = rescue(dev, 1);
+            if (ro) break;
+            q.type = FS_QUIT;
+            sys_call(sys_port_find("fs"), &q);
+            memcpy(w, "-root", 5);
+            sys_svc_register("fs", prog, -10);
+            sys_mountinfo(0, &mi);
+        }
+    }
+#endif
     update(ro);                                 /* an update's root half (D15), before the root is used */
     int persistent = !rp.have_ram && !ro;
     seed_start(persistent);

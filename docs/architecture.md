@@ -146,7 +146,7 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    caches, display, clock and disk, then creates one process from its image: `boot` (pid 1). `boot` registers the
    disk server and the root filesystem server as services (section 9, "The service manager"): its first call to
    `disk` starts `diskd` (pid 2), it picks the root device and its server from the superblock, and its first call to
-   `fs` starts `fsd` (or `zfsd`, in the test-only kernel kernel-zfs: section 9) (pid 3); it runs `/sbin/zup` (D15: an update's root half, a journal a power cut left, or the way back; boot waits, says so after a
+   `fs` starts `fsd` (or `zfsd`, in the kernel for a ZenixFS root, kernel-zfs: section 9) (pid 3); it runs `/sbin/zup` (D15: an update's root half, a journal a power cut left, or the way back; boot waits, says so after a
 minute and stops it after 20 - every process named zup, also the second one a new zup runs, audit3 B4 -, then, when
 none runs any more, gives the bundle's memory back with `SYS_update RELEASE`); it registers the services of `/etc/svctab` (started when first called); then it starts `/bin/init`, which prints `/etc/motd`, runs `mount -a` and
    starts `login` on console 1 (section 11).
@@ -476,7 +476,7 @@ in the shared part, a PC-relative reference between the two parts (shared code r
 `text_size` (it could be either part), an undefined weak or an absolute symbol, a table slot no relocation names, a
 writable section in the shared part. `tools/mkzexe-test.sh` (host) checks this. The new magic means a kernel that
 does not know ZEX2 refuses such a file as "not a Zenix program" instead of starting it wrongly. The programs built
-into the kernel (diskd, fsd, boot; zfsd in the test kernel kernel-zfs) and `/sbin/zfsd` stay ZEXE; a ZEX2 file is loaded only from a filesystem.
+into the kernel (diskd, fsd, boot; zfsd in the kernel for a ZenixFS root, kernel-zfs) and `/sbin/zfsd` stay ZEXE; a ZEX2 file is loaded only from a filesystem.
 
 **Loading a ZEX2 program** (`proc_load`, `fill_v2` in `kernel/proc.c`; the segments in `kernel/seg.c`). The header is
 checked as a ZEXE one is (`zex2_bad`: the shared part 16-aligned, holding the header and inside the file; the data
@@ -964,15 +964,17 @@ ZenixFS commits atomically.
 A mounted filesystem's server is registered by `mount` (the mount table, below). It answers
 `FS_ROOT` (root inode, device and type names) and `FS_QUIT` (umount: sync, release the device, exit). `fsd` (ext2) is
 built into the kernel image, and so is no other filesystem server: **`zfsd` (ZenixFS) is the file `/sbin/zfsd`** (DESIGN
-D19 step 1), on every full root image and in the base package; only the test-only kernel `kernel-zfs.bin` (below)
+D19 step 1), on every full root image and in the base package; only the kernel for a ZenixFS root, `kernel-zfs.bin` (below),
 carries a second copy inside. **Which one serves the root** is boot's choice
 (`user/rootpick.h`): a RAM disk is the root; else the bootable ext2/zenixfs partition; else the first one of those;
 else the bare disk; boot reads the device's superblock (ext2 magic at byte 1080, ZenixFS `ZNFS` at byte 32) and
 registers `fs` with that server and device, so only one root server is ever started. `init` runs `mount -a` (from
-`/etc/fstab`) before login. **A ZenixFS root is test-only** (until roadmap block 4): its server must run before any file
-can be read, so it needs the kernel with zfsd built in, `kernel-zfs.bin` on the kernel-only floppy `zenix-zfs.adf`
-(the emulator tests `zroot-test`, `svc-test` z and zo; they test that kernel, not the shipped one). The shipped
-kernel, booted on a ZenixFS root, says "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the test
+`/etc/fstab`) before login. **A ZenixFS root is a machine's own choice (DESIGN D34):** its server must run before any file
+can be read, so it needs the kernel with zfsd built in, `kernel-zfs.bin` (behind zenixboot, or on the kernel-only floppy
+`zenix-zfs.adf`), whose `boot` (`bootz.zx`, the same source) also has the choices for a root it can only read: `zfsd` says so
+through `FS_HEALTH`, boot serves it again with `-fsck` (read-only, the device shared) and offers man rescue's choices without
+read-write. No check after a cut (D17 section 9). The shipped
+kernel, booted on a ZenixFS root, says "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the
 kernel kernel-zfs" and stops with the panic "cannot start an essential server" (`@zfsd` never starts the file for the
 root: that file could only be read through the server being started). zenixboot never installs a kernel without a
 ZenixFS server over one with it (section 13, the version record).
@@ -1104,7 +1106,7 @@ two states and their buffers, the normaliser's scratch, the message) is measured
 
 ### boot - the starter (`user/boot.c`)
 pid 1, the only process the kernel creates itself. It registers `disk` -> `@diskd` (nice -10), picks the root (above),
-registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10; `@zfsd` only in the test kernel kernel-zfs,
+registers `fs` -> `@fsd DEVICE fs -root -id ID` or `@zfsd ...` (nice -10; `@zfsd` only in the kernel kernel-zfs,
 above), asks for the root inode (`SYS_mountinfo`
 0: the first call to `fs` starts the root server), checks an ext2 root that is not marked clean (DESIGN D17: `fs` first
 registered with `-fsck`, a read-only server that leaves the device to `/bin/fsck.ext2 -y DEVICE`, which boot runs

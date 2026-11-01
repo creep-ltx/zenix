@@ -111,7 +111,7 @@ fi
 if want_part zs; then
 conf zs ../build/zenix-zroot.hdf
 run zs "$OUT/zs.fs-uae" 40 ""
-line zs "the kernel says it has no ZenixFS server for the root" "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the test kernel kernel-zfs (DESIGN D19)"
+line zs "the kernel says it has no ZenixFS server for the root" "svc: this kernel has no ZenixFS server built in: a ZenixFS root needs the kernel kernel-zfs (DESIGN D34)"
 line zs "... and stops at once with the panic (no deadlock on /sbin/zfsd)" "*** kernel panic: svc: cannot start an essential server"
 fi
 

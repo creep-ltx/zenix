@@ -54,6 +54,9 @@
                         * IPC); zup marks the root while it installs (DESIGN D15). fsd's own short mark while it writes
                         * (D17) is not "a need for a check", and 0 never clears a real one (a crash in a request, a failed
                         * write). ZenixFS commits atomically: its server does not know it (-ENOSYS), and zup goes on */
+#define FS_HEALTH  26  /* -> bit 0: the server can only read: it was asked to (-fsck), or the volume could only be mounted
+                        * from a state too old to build on (ZenixFS, more than one commit back: its older files' data may have been
+                        * overwritten). Root only (raw IPC), for boot (DESIGN D34). A server without it says -ENOSYS */
 struct fsinfo { char dev[16]; char type[8]; };
 
 /* DESIGN D26 (symbolic links across mounts, docs/d26-links-across-mounts.md 4; append-only, frozen):

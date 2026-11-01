@@ -1,7 +1,7 @@
 # ZenixFS - the native Zenix filesystem (design 2026-10-22; built; status last checked 2026-10-23)
 
 **Status (2026-10-23):** the format is final for version 1 (`zenixfs-format.md`). The library in `zenixfs/` runs on the host and **inside Zenix**
-(the `zfsd` server that `mount` starts, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the mount table); ZenixFS can be the root filesystem (*verified* in FS-UAE: `tools/zroot-test.sh`), **test-only** since DESIGN D19 step 1: only the test kernel `kernel-zfs.bin` carries zfsd built in, the shipped system has it as the file `/sbin/zfsd` for mounts. *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
+(the `zfsd` server that `mount` starts, `mkfs.zenixfs`, `fsck.zenixfs`, on top of the mount table); ZenixFS can be the root filesystem (*verified* in FS-UAE, not on real hardware: `tools/zroot-test.sh`, `tools/zroot-card-test.sh`, DESIGN D34): only the kernel `kernel-zfs.bin` carries zfsd built in, the shipped system has it as the file `/sbin/zfsd` for mounts. *Verified* on the host (60+ random seeds, AddressSanitizer and UBSan): ~3000 random operations against a model,
 `fsck` clean, remount; power-cut replay (every prefix of the recorded writes plus random subsets inside each flush epoch) always mounts, passes `fsck`, equals a committed state and is never
 older than a durable commit - also on a volume of several map pages with one page in RAM; 600 random bit flips in metadata are detected or harmless; directory hash chains; full volume; orphans.
 The tests were checked by mutation (no flush before the commit record, reuse of blocks freed in the same transaction: both make the power-cut test fail).
@@ -33,8 +33,9 @@ on image files and on a partition copied out to a file. Nothing here has been ru
 zenixfs-tool fsck IMAGE                  find the damage (reports only)
 zenixfs-tool salvage IMAGE OUTDIR        copy out everything that can still be read; if the tree is damaged it then carves the raw blocks
                                          (--old-copies also reads blocks the filesystem had replaced but not yet reused; --commit K reads K commits back)
-zenixfs-tool repair IMAGE                rewrite a destroyed superblock, rebuild the free-space map from the tree, then fsck
-zenixfs-tool repair IMAGE --rollback K   go back K commits (the newest K commit records are ignored, the older state becomes the newest)
+zenixfs-tool repair IMAGE                rewrite a destroyed superblock, rebuild the free-space map, new inner tree nodes over the leaves, or the commit
+                                         before if the newest is damaged; refuses what would guess, and then changes nothing
+zenixfs-tool repair IMAGE --rollback K   go back K commits on request (past K = 1 its files' data may have been overwritten since: it warns)
 zenixfs-tool rescue IMAGE NEW SIZE_MB    salvage + make a fresh clean image NEW from it (the way out when the tree itself is damaged)
 ```
 How it works: *salvage* mounts without insisting on a good free-space map and walks the tree, skipping what cannot be read; a file whose data is not whole is
@@ -43,21 +44,21 @@ block on the volume that is a valid leaf (right magic, own block number, correct
 lost go to `lost+found/dir<N>` and `lost+found/file<N>`; a file whose inode is lost is saved as `name.nosize` (its length is unknown, the last block may have extra zeros).
 Names that already exist in the output are never overwritten, so the carved files only fill the gaps of the walk.
 
-What the corruption lab (`make -C zenixfs lab`) found, on a 160 MB volume with 380 files and 8 commits in the ring (*verified* 2026-10-22; "at its place/anywhere" counts files whose content came back intact):
+What the corruption lab (`make -C zenixfs lab`) finds, on a generated tree of 1335 files, 3 levels (*verified* 2026-11-01; numbers from `corrupt-lab.py --recover`, seed 2026; "at its place" counts files whose content came back intact):
 | damage to a copy of the volume | plain tools | after salvage | after repair |
 |---|---|---|---|
-| newest commit record bit-flipped or zeroed, or the two newest destroyed | mounts from the older commit (warns); loses the files of the last commits | all but the last commit's files | clean, same |
-| root block or an inner tree node destroyed | falls back to the older commit | same | clean |
-| **all 8 commit records destroyed** | cannot mount | **all 380 files** (carved) | needs salvage |
-| **superblock destroyed** | cannot mount | **all 380** | **clean, all 380 readable** |
-| one or both copies of a free-space map page destroyed | cannot mount / warns | all 380 | **clean, all 380** |
-| 1 MB of garbage in the middle, or the last quarter of the volume lost | usually unaffected | all 380 | clean / needs salvage |
-| one leaf of the tree destroyed (bit flips, zeros, garbage) | `fsck` finds it; a plain copy stops at the first error | 339-372 of 380; the rest were in that leaf | tree damage: not repairable, use salvage/rescue |
-| ten leaves destroyed | most of the tree unreadable | 225 intact, 65 more saved but flagged `.partial`/`.nosize` | same |
-| 200 random bit flips anywhere | 4 files readable | 370; 8 flagged; **2 files with wrong content, not flagged** | |
-| 64 KB of garbage at the start (superblock, commit ring, first map pages) | cannot mount | 270 intact + 10 flagged | needs salvage |
+| newest commit record bit-flipped or zeroed | mounts from the commit before (warns); its files are gone | all but those | clean, the same |
+| the two newest destroyed | cannot mount, or read-only | **all** (carved) | refuses, changes nothing (`--rollback K` on request) |
+| root block destroyed | the commit before, read-only | the same | clean, the same (older data not provable: it says so) |
+| **an inner tree node destroyed** (each in turn: `--sweep`) | files under it unreadable | **all** (carved) | **clean, all: new nodes over the leaves** |
+| **all 8 commit records destroyed** | cannot mount | **all** | refuses |
+| **superblock destroyed** | cannot mount | **all** | **clean, all** |
+| one or both copies of a free-space map page destroyed | cannot mount / warns | all | **clean, all** |
+| one leaf destroyed (bit flips, zeros, garbage) | `fsck` finds it; `get` copies the rest and says what failed | all but what that leaf held (flagged `.partial`/`.nosize`, or the rest of its items carved) | refuses, changes nothing (or the commit before when the leaf is only the newest commit's); use salvage/rescue |
+| ten leaves destroyed | most of the tree unreadable | most, the rest flagged | same |
+Why the rows with "refuses": rule 3 of the format keeps one older commit whole at most. Further back the tree may check out while its files' data was reused: a repair that guessed could leave a wrong file with no warning. Numbers and reasons: docs/d34-zenixfs-root.md section 2.
 **The one silent kind of error: bits flipped inside file data.** Only metadata is checksummed (the data checksums of the plan are reserved in the format but not built), so a flipped bit in a file's data
-comes back unnoticed; every other kind of damage is either repaired or flagged. The library never repairs the tree itself: if a leaf of the tree is destroyed, `rescue` makes a clean new image from what survives.
+comes back unnoticed; every other kind of damage is either repaired or flagged. A destroyed leaf is not repaired in place: `rescue` makes a clean new image from what survives.
 The recovery commands were run under AddressSanitizer on the lab and on 40 randomly damaged images (0 reports). `make test` runs the part of the lab that must always succeed.
 
 ## 1. Goal and the machine it is for

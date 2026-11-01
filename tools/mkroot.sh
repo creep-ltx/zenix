@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Build the ext2 root disk: rootfs/ plus the programs from build/*.zx as /bin/<name> (zup, zfsd, netd and wasabid
 # as /sbin/<name>), and the licence notices of the code from other projects in /usr/share/licenses.
-# usage: mkroot.sh out.hdf builddir "prog prog ..."
+# usage: mkroot.sh out.hdf builddir "prog prog ..." [SIZE] [INODES]
+# optional environment: ROOTFS=zenixfs  the same tree on a ZenixFS image (SIZE as 96M; INODES unused; DESIGN D34);
+#                       FSTAB_FILE=file  installed as /etc/fstab;  MOUNTDIRS="dir dir"  created in the root (mount points)
 set -e
 OUT="$1"; B="$2"; PROGS="$3"; SIZE="${4:-8M}"; INODES="${5:-512}"
 T=$(mktemp -d)
@@ -116,7 +118,27 @@ fi
 # no image ever ships a random seed (DESIGN D19 9.3): every copy of it (a card, the demo floppy) would start with the
 # same one. Boot writes the machine's own at its first start.
 if [ -e "$T/var/lib/random-seed" ]; then echo "mkroot.sh: refusing to put a random seed (var/lib/random-seed) on an image" >&2; exit 1; fi
+[ -z "$FSTAB_FILE" ] || cp "$FSTAB_FILE" "$T/etc/fstab"
+for d in $MOUNTDIRS; do mkdir -p "$T/$d"; done
 rm -f "$TMPOUT"
+if [ "$ROOTFS" = zenixfs ]; then                # the same tree and modes on ZenixFS; the tool writes everything as uid 0
+    Z="$(cd "$(dirname "$0")/.." && pwd)/zenixfs/build/zenixfs-tool"
+    [ -x "$Z" ] || make -s -C "$(dirname "$0")/../zenixfs" build/zenixfs-tool
+    mkdir -p "$T/home/user" "$T/home/guest"
+    chmod 1777 "$T/tmp"
+    [ ! -d "$T/root" ] || chmod 700 "$T/root"
+    chmod 4755 "$T/bin/su" "$T/bin/sudo" "$T/bin/passwd"
+    [ ! -f "$T/bin/zine" ] || chmod 4755 "$T/bin/zine"
+    chmod 644 "$T/etc/passwd" "$T/etc/group" "$T/etc/svctab" "$T/etc/daemons"
+    "$Z" mkfs "$TMPOUT" "${SIZE%M}" -l zenix-root >/dev/null
+    "$Z" put "$TMPOUT" -r "$T" /
+    "$Z" chown "$TMPOUT" 1000 100 /home/user
+    "$Z" chown "$TMPOUT" 1001 100 /home/guest
+    "$Z" fsck "$TMPOUT" >/dev/null
+    mv -f "$TMPOUT" "$OUT"
+    echo "$OUT: ZenixFS root, $(echo $PROGS | wc -w) programs"
+    exit 0
+fi
 # revision 0: the original ext2, 128-byte inodes, no optional features
 # ownership and modes under fakeroot, so the image holds uid 0 (not whoever runs the build): root owns everything,
 # /tmp is sticky and open to all, a normal user has a home, su and passwd are set-user-id root

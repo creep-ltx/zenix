@@ -203,7 +203,8 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 # scripts (NOTESTS=1: the mount tests run none of /tests); that made room for D20 step 1's 8 KB (3 blocks were free).
 RAMDISK_K := 640
 # 712 since DESIGN D28 step 2 (2026-10-29): the console's UTF-8 took about 9 KB of kernel; 33 blocks stay free there.
-# Not less: at 708 (12 blocks free) mounttest's links part runs out of space in /tmp (2026-10-31)
+# Not less: at 708 (12 blocks free) mounttest's links part runs out of space in /tmp (2026-10-31). tar, tree and realpath left it
+# when fsck.zenixfs grew by its repairs (DESIGN D34): zenixfstest carries them on its own disk.
 RAMDISK_MOUNT_K := 712
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
@@ -221,9 +222,17 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh
 # and the shipped kernel no longer carries one. Too big for a RAM floppy: on a kernel-only floppy, zenix-zfs.adf.
 # Updates never install it over a ZenixFS root's kernel by mistake: zenixboot reads the kernel's root list (ZSRV).
 KZOBJS := $(subst $(BUILD)/embed.o,$(BUILD)/zfs-embed.o,$(subst $(BUILD)/svc.o,$(BUILD)/zfs-svc.o,$(subst $(BUILD)/syscall.o,$(BUILD)/zfs-syscall.o,$(KOBJS))))
+# boot, built again for it with the choices for a damaged ZenixFS root (DESIGN D34): no bytes for every other machine
+$(BUILD)/bootz.uo: user/boot.c user/rootpick.h user/volid.h user/rdb.h user/randseed.h kernel/diskproto.h kernel/fsproto.h user/libz.h | $(BUILD)
+	$(CC) $(UCFLAGS) -DKERNEL_ZFSD -c $< -o $@
+$(BUILD)/bootz.uelf: $(BUILD)/bootz.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/bootz.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+$(BUILD)/bootz.zx: $(BUILD)/bootz.uelf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@ $(STACK_boot)
 $(BUILD)/zfs-%.o: kernel/%.c $(wildcard kernel/*.h) | $(BUILD)
 	$(CC) $(CFLAGS) $(KOPT_$*) -DKERNEL_ZFSD -c $< -o $@
-$(BUILD)/zfs-embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/boot.zx $(BUILD)/diskd.zx $(BUILD)/zfsd.zx | $(BUILD)
+$(BUILD)/zfs-embed.o: kernel/embed.S $(BUILD)/fsd.zx $(BUILD)/bootz.zx $(BUILD)/diskd.zx $(BUILD)/zfsd.zx | $(BUILD)
 	$(CC) $(ASFLAGS) -DKERNEL_ZFSD -Wa,-I$(BUILD) $< -o $@
 $(BUILD)/kernel-zfs.elf: $(KZOBJS) link/kernel.ld
 	$(CC) $(CFLAGS) -nostartfiles -T link/kernel.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections \
@@ -248,7 +257,7 @@ RAMAPPS := init login sh ls cat echo pwd ps free wc hello crash uname df fdisk m
 # had taken the room the tests write into; 25 KB stay free, as before)
 MOUNTAPPS := init login sh ls ln cmp seq cat echo pwd mkdir rm rmdir cp mv df sync fdisk mkfs_ext2 fsck_ext2 mount umount \
              mkfs_zenixfs fsck_zenixfs su id chmod wc head tail ps stat sleep true false env \
-             kill pgrep grep dmesg svctest zfsd readlink realpath tar tree
+             kill pgrep grep dmesg svctest zfsd readlink
 
 # development/test image: the same, plus a small root filesystem that the bootblock loads into RAM.
 # For machines without an IDE disk (a Gotek boot) and for testing. Not part of the standard build.

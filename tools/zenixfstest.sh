@@ -73,6 +73,10 @@ if [ -s $OUT/offset.txt ]; then
   p1=$(( 1008 * 512 )); p1n=$(( 4 * 1008 ))      # ide0p1: cylinder 1, 4 cylinders of 1008 sectors
   dd if=$BD/scratch.hdf of=$OUT/p1.img bs=512 skip=1008 count=$p1n status=none
   for c in "write $OUT/w.txt aaa" "write $OUT/r.txt $R" "symlink long $T"; do debugfs -w -R "$c" $OUT/p1.img >/dev/null 2>&1; done
+  # tree, realpath and tar: on this disk, the floppy's RAM disk has no room for them
+  make -s BUILD=$BD $BD/tree.zx $BD/realpath.zx $BD/tar.zx >/dev/null 2>&1
+  zenixfs/build/zenixfs-tool mkdir $OUT/p2.img /t
+  for p in tree realpath tar; do cp $BD/$p.zx $OUT/$p; chmod 755 $OUT/$p; zenixfs/build/zenixfs-tool put $OUT/p2.img $OUT/$p /t/$p || check "F15: $p on the test's disk" bad; done
   zenixfs/build/zenixfs-tool put $OUT/p2.img $OUT/w.txt /aaa && zenixfs/build/zenixfs-tool put $OUT/p2.img $OUT/r.txt /$R && \
     zenixfs/build/zenixfs-tool ln $OUT/p2.img "$T" /long || check "F15: the PC wrote the long links" bad
   dd if=$OUT/p1.img of=$BD/scratch.hdf bs=512 seek=1008 conv=notrunc status=none

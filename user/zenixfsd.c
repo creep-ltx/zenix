@@ -11,10 +11,11 @@
 #include "zenixfs_disk.h"
 #include "volid.h"
 
-/* zfsd DEVICE PORTNAME [-root] [-id ID]: the ZenixFS filesystem server (docs/zenixfs.md), built into the kernel and
- * started as a service (DESIGN D11): the root's ("fs") registered by boot, a mount's ("fs.DEVICE") by mount(8);
- * built into the kernel as zfsd, which boot registers as the root's service ("fs") when the root is ZenixFS (DESIGN
- * D11). Speaks the same protocol as the ext2 server (kernel/fsproto.h) on port PORTNAME. Files are named by ZenixFS inode number.
+/* zfsd DEVICE [PORTNAME] [-root|-fsck] [-id ID]: the ZenixFS filesystem server (docs/zenixfs.md), started as a service
+ * (DESIGN D11): the root's ("fs", built into the ZenixFS kernel, DESIGN D34) registered by boot, a mount's ("fs.DEVICE",
+ * the file /sbin/zfsd) by mount(8). -fsck: served read-only without taking the device, while the repair tool works on it
+ * (the same word as fsd's, D17). Speaks the same protocol as the ext2 server (kernel/fsproto.h) on port PORTNAME. Files are
+ * named by ZenixFS inode number.
  * The library keeps changes in memory and commits them atomically: here every 3 seconds after the first change, on
  * sync(8), and at umount. A power cut loses at most the last few seconds and never leaves a damaged volume.
  * The permission rules are the shared ones of kernel/fsperm.h, the same as in the ext2 server. */
@@ -347,6 +348,8 @@ static int handle1(struct umsg *m)
         strcpy(fi->type, "zenixfs");
         return (int)ROOT;
     }
+    case FS_HEALTH:
+        return zenixfs_is_readonly(fs) ? 1 : 0;
     case FS_QUIT:
         quitting = 1;
         return 0;
@@ -425,12 +428,17 @@ static int handle(struct umsg *m)
     return r < 0 && denied ? -EACCES : r;
 }
 
-/* restart: keep the orphans at mount (the kernel may still hold some of them open: D11 5.4) */
-static int try_mount(const char *name, int restart)
+/* restart: keep the orphans at mount (the kernel may still hold some of them open: D11 5.4). share: read-only on the
+ * plain handle. The cache by the machine (the 2 MB diet, DESIGN D18): no fast RAM, 96 KB of blocks and two map pages; with
+ * fast RAM 48 blocks and 8 pages. A commit comes when half of the cache is dirty, so a small cache means more commits */
+static int try_mount(const char *name, int restart, int share)
 {
-    struct zenixfs_mount_opts o = { 48, 0, restart ? ZENIXFS_MNT_READONLYISH : 0, 0 };
-    if (zdisk_open(name, DISK_MOUNT) < 0) return -1;
+    u32 mi[4];
+    int chiponly = sys_meminfo(mi) == 0 && mi[1] == 0;
+    struct zenixfs_mount_opts o = { 48, chiponly ? 2u : 0u, share ? ZENIXFS_MNT_READONLY : restart ? ZENIXFS_MNT_READONLYISH : 0, 0 };
+    if (zdisk_open(name, share ? 0 : DISK_MOUNT) < 0) return -1;
     for (unsigned bs = 10; bs <= 12; bs++) {
+        if (chiponly) o.cache_blocks = (96u << 10) >> bs;       /* (the library's floor is 32) */
         zdisk_dev(&zdev, bs);
         if (zenixfs_mount_opts(&fs, &zdev, &o) == 0) { strncpy(devname, name, sizeof devname - 1); return 0; }
         fs = 0;
@@ -478,21 +486,31 @@ int main(int argc, char **argv)
     }
     const char *who = pname[2] ? pname : "zfsd";
     char name[16];
-    int restart = (sys_svc_self() & 0xFFFF) > 1;
+    int restart = (sys_svc_self() & 0xFFFF) > 1, share = 0, isroot = 0;
+    for (int i = 2; i < argc; i++) {
+        if (!strcmp(argv[i], "-fsck")) share = isroot = 1;
+        if (!strcmp(argv[i], "-root")) isroot = 1;
+    }
     if (argc >= 4 && !strcmp(argv[argc - 2], "-id")) {     /* the volume by its place and uuid (volid.h) */
         if (vol_find(sys_port_find("disk"), dev, argv[argc - 1], name, who, restart)) return 1;
         dev = name;
     }
-    if (try_mount(dev, restart)) { dprintf(1, "%s: %s is not a ZenixFS volume, or is in use\n", who, dev); return 1; }
+    if (try_mount(dev, restart, share)) {
+        dprintf(1, "%s: %s is not a ZenixFS volume, or is in use\n", who, dev);
+        if (isroot)
+            dprintf(1, "%s: the root cannot be mounted. Start Zenix from a floppy and run fsck.zenixfs -y %s, or repair it on a PC (man rescue)\n", who, dev);
+        return 1;
+    }
     struct zenixfs_stats st;
     zenixfs_get_stats(fs, &st);
     if (st.mount_damage)
-        dprintf(1, "%s: %s: %u commit record(s) were unreadable; mounted from the last good commit\n", who, devname, st.mount_damage);
+        dprintf(1, "%s: %s: %u commit record(s) or roots were unreadable; mounted from the last good commit%s\n", who, devname, st.mount_damage,
+                st.mount_old ? " (not to be built on: read-only, fsck.zenixfs -y)" : "");
     if (!zdisk_can_flush())
         dprintf(1, "%s: %s: the disk cannot flush its write cache: a power cut may lose the last commits, or damage the volume if the disk reorders writes\n", who, devname);
     int port = sys_port_create(pname);
     if (port < 0) { dprintf(1, "%s: cannot create the port %s\n", who, pname); return 1; }
-    if (restart)
+    if (restart && !zenixfs_is_readonly(fs))
         restart_opens(who);
     struct umsg *m = sys_recv(port, 1);
     while ((int)m != -1) {

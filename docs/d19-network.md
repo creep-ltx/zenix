@@ -794,7 +794,7 @@ The rest as the note says:
   zfsroot (a machine with kernel-zfs: a bundle with the shipped kernel refused and renamed `.bad`, the installed kernel
   starts; a bundle with a kernel-zfs of the new version installed); `zup-host-test` (base now holds `/sbin/zfsd`);
   the matrix (free memory above); the full `make check`.
-- **What changes for a ZenixFS root** (owner question 5 still open): it is test-only. The shipped kernel no longer
+- **What changes for a ZenixFS root** (block 4 decided it: the variant in the bundle, docs/d34-zenixfs-root.md section 3): it is test-only. The shipped kernel no longer
   boots one; only `kernel-zfs.bin` does. A ZenixFS **mount** on an ext2 root works as before, its server read from
   `/sbin/zfsd`. When block 4 makes a ZenixFS root real, its decision picks the bundle variant or a boot module (3.3
   item 4).
