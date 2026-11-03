@@ -280,8 +280,13 @@ INSTALLAPPS := init login sh ls cat echo ps free df sync mount umount mkdir mkfs
 RAMDISK_INSTALL_K := 560
 $(BUILD)/root-install.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOPURE=1 NOTESTS=1 MOUNTDIRS="mnt" tools/mkroot.sh $@ $(BUILD) "$(INSTALLAPPS)" $(RAMDISK_INSTALL_K)K 96
+# and, for a start from AmigaOS with no floppy (install/from-amigaos/: zenixboot, the kernel, zinstall-ram.img), the same programs with
+# the whole set as files: RAMDISK_INSTALL_HD_K, for a machine with fast RAM (zenixboot loads it whole)
+RAMDISK_INSTALL_HD_K := 3400
+$(BUILD)/root-install-hd.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh
+	NOMAN=1 NOPURE=1 NOTESTS=1 MOUNTDIRS="mnt" tools/mkroot.sh $@ $(BUILD) "$(INSTALLAPPS)" $(RAMDISK_INSTALL_HD_K)K 128
 install-floppies: $(BUILD)/install/zenix-install-1.adf
-$(BUILD)/install/zenix-install-1.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/kernel-zfs.bin $(BUILD)/root-install.img $(BUILD)/pkg/list tools/mkinstall.py tools/mkadf.py tools/mkzup.py
+$(BUILD)/install/zenix-install-1.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/kernel-zfs.bin $(BUILD)/root-install.img $(BUILD)/root-install-hd.img $(BUILD)/zenixboot $(BUILD)/pkg/list tools/mkinstall.py tools/mkadf.py tools/mkzup.py
 	python3 tools/mkinstall.py $(BUILD) $(BUILD)/install
 
 # ---- servers built into the kernel image ----
