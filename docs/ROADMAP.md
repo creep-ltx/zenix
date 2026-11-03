@@ -56,8 +56,7 @@ built before the halt. The phases below resume after that.
 Startup-Sequence runs `zenixboot`, an Amiga program that loads the kernel from a file and takes over like the bootblock.
 It works on any Amiga that boots from a hard disk, CF or SD card (the PiStorm's SD card through Emu68's driver).
 
-Progress: **batch A (first-boot blockers) is done** except A7 (a chip-only A1200 booting the RAM disk, left open:
-the owner's machine has fast RAM), with the approved first-boot diagnostics (A11 boot colours, A12 previous-boot
+Progress: **batch A (first-boot blockers) is done** (A7, a chip-only A1200 booting the RAM disk, fixed with the installer, 2026-11-01), with the approved first-boot diagnostics (A11 boot colours, A12 previous-boot
 log); verified in FS-UAE, not yet on the A1200.
 **Batch B (memory foundations) is done** - all seven items (B1-B7), 2026-10-23 on branch `fix-b`,
 verified in FS-UAE (`tools/memtest.sh`, keyboard, job-control and matrix tests); not yet on the A1200.
@@ -107,7 +106,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    to Workbench. Demos on the bare hardware first; demos that need AmigaOS's libraries later. Starts when block 3's
    audit is done. The idea's notes: docs/future-ideas.md "Amiga demos on Zenix".
 4. **The Amiga world:** FAT (built 2026-10-31 in FS-UAE: docs/d30-fat.md, `/sbin/fatd`), FFS/OFS (built 2026-10-31 on branch ffs, FS-UAE: docs/d31-ffs.md, `/sbin/ffsd`), PFS3 read-only (built 2026-10-31 on branch pfs3, FS-UAE and against AmigaOS's own volumes: docs/d32-pfs3.md, `/sbin/pfs3d`); LhA/LZX unpacking (built 2026-11-01 on branch lha, FS-UAE: docs/d33-archives.md, `unlha`, `unlzx`, the clean rewrite that settles the public-release blocker); ZenixFS as the root on real hardware (built 2026-11-01 on branch zroot, FS-UAE and the host: docs/d34-zenixfs-root.md; the real A1200's trial is the owner's decision, its steps in the note); the
-   installer; (owner 2026-11-03: "do the FA411 driver after the installer") a PCMCIA NE2000 network driver for the
+   installer (built 2026-11-03 on branch install, FS-UAE and the host: docs/d35-installer.md; never run on real hardware yet); (owner 2026-11-03: "do the FA411 driver after the installer") a PCMCIA NE2000 network driver for the
    owner's Netgear FA411 in the A1200's side slot (`/sbin/net/ne2000`, D19's driver protocol), so the A1200 with the 1260
    reaches the network. Audit, with the filesystems fuzzed against damaged disks.
 5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,

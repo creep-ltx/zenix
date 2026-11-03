@@ -11,6 +11,7 @@ SYNOPSIS
     zpkg -R[s][n] NAME...
     zpkg -U FILE...
     zpkg --back NAME [--yes]
+    zpkg --fetch DIR [--zfs]
     options: --snapshot NAME  --ignore-expiry  --reset-serial CHANNEL
              --ram  -q
 
@@ -71,6 +72,12 @@ DESCRIPTION
 
     A running program keeps running the version it started with; zpkg
     names the ones that do.
+
+INSTALLING ANOTHER MACHINE
+    --fetch DIR  fetch the list, then its system bundle and every package
+             a new machine gets (not the test programs) into DIR, with
+             the usual checks, installing nothing. For zinstall(8).
+             --zfs: the system for a ZenixFS root.
 
 SYSTEM UPDATES
     The system is never installed while Zenix runs. zpkg puts it where
@@ -160,4 +167,4 @@ NOTES
     the SD card's layout (tools/sysupdate-test.sh).
 
 SEE ALSO
-    zup(8), zenixboot(8), zpkg-new(8), docs/d22-zpkg.md
+    zinstall(8), zup(8), zenixboot(8), zpkg-new(8), docs/d22-zpkg.md

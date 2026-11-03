@@ -8,6 +8,16 @@ int pw_replace(const char *who, const char *path, const char *data, u32 len, u32
 int gr_has(const char *list, const char *name);         /* NAME in a comma-separated member list */
 void gr_drop(char *list, const char *name);             /* take NAME out of such a list, in place */
 int gr_edit(const char *who, const char *group, const char *name, int add);   /* /etc/group: member in/out; 0 or -1 (said) */
+int gr_edit_at(const char *who, const char *path, const char *group, const char *name, int add);   /* the same in a group file at PATH */
+/* the one way /etc/passwd's lines are made and changed (passwd, useradd, zinstall's accounts for a new root: PATH names the file) */
+int pw_name_ok(const char *n);          /* a login name: [a-z_][a-z0-9_-]*, 1-31 characters */
+int pw_field_ok(const char *s);         /* no ':' and no newline */
+void pw_new_hash(const char *password, char out[100]);      /* a fresh salt and pw_hash; "" for an empty password */
+int pw_set_hash_at(const char *who, const char *path, const char *name, const char *hash);   /* NAME's hash field; 0, -1 (said) */
+struct pw_add { const char *name, *group, *home, *shell, *comment, *extra, *hash; long uid; };   /* uid -1: the lowest free from 1000 */
+/* a new line in the passwd file at PATH, its group from the group file at GPATH (a name or a number), -G's groups (EXTRA, a comma
+ * list) checked before anything is written and joined after; *uid the number given. 0, 1 a refusal, 2 a bad argument (said) */
+int pw_add_at(const char *who, const char *path, const char *gpath, const struct pw_add *a, u32 *uid, u32 *gid);
 /* supplementary groups (SYS_groups): set the process's from /etc/group for user P (as initgroups: its gid and every
  * group listing it; more than NGROUPS: said, the first ones kept), before setuid; 0 or the kernel's -errno */
 int pw_initgroups(const char *who, const struct pw *p);

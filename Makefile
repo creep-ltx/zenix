@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -273,6 +273,22 @@ $(BUILD)/zenix-mount.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/ro
 $(BUILD)/zenix-ram.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root-ram.img tools/mkadf.py
 	python3 tools/mkadf.py $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $@ $(BUILD)/root-ram.img
 
+# The install floppies (DESIGN D35, tools/mkinstall.py): disk 1 boots a RAM disk with zinstall and what it runs; the rest of disk 1
+# and the other disks hold the set, package bundles one after another. RAMDISK_INSTALL_K: enough for those programs and /tmp;
+# what it takes from disk 1 is what the set does not get there (the build says how much is left).
+INSTALLAPPS := init login sh ls cat echo ps free df sync mount umount mkdir mkfs_ext2 mkfs_zenixfs fsck_ext2 fsck_zenixfs fdisk reboot zfsd dmesg zinstall
+RAMDISK_INSTALL_K := 560
+$(BUILD)/root-install.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh
+	NOMAN=1 NOPURE=1 NOTESTS=1 MOUNTDIRS="mnt" tools/mkroot.sh $@ $(BUILD) "$(INSTALLAPPS)" $(RAMDISK_INSTALL_K)K 96
+# and, for a start from AmigaOS with no floppy (install/from-amigaos/: zenixboot, the kernel, zinstall-ram.img), the same programs with
+# the whole set as files: RAMDISK_INSTALL_HD_K, for a machine with fast RAM (zenixboot loads it whole)
+RAMDISK_INSTALL_HD_K := 3400
+$(BUILD)/root-install-hd.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh
+	NOMAN=1 NOPURE=1 NOTESTS=1 MOUNTDIRS="mnt" tools/mkroot.sh $@ $(BUILD) "$(INSTALLAPPS)" $(RAMDISK_INSTALL_HD_K)K 128
+install-floppies: $(BUILD)/install/zenix-install-1.adf
+$(BUILD)/install/zenix-install-1.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/kernel-zfs.bin $(BUILD)/root-install.img $(BUILD)/root-install-hd.img $(BUILD)/zenixboot $(BUILD)/pkg/list tools/mkinstall.py tools/mkadf.py tools/mkzup.py
+	python3 tools/mkinstall.py $(BUILD) $(BUILD)/install
+
 # ---- servers built into the kernel image ----
 $(BUILD)/ext2_fsd.uo: kernel/ext2.c kernel/ext2.h kernel/fsperm.h user/fsenv.h user/libz.h | $(BUILD)
 	$(CC) $(UCFLAGS) -DFSD -c $< -o $@
@@ -311,6 +327,19 @@ $(BUILD)/zup.uo: user/zup.c user/zpkgfmt.h user/libz.h user/usys.h user/sha256.h
 $(BUILD)/zup.uelf: $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) \
 	    $(BUILD)/crt0.o $(BUILD)/zup.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
+
+# zinstall (DESIGN D35, docs/man/zinstall.txt): the tables and the boot partition's writer in files of their own (the PC's tests
+# build the same files, tools/zinstall-host-test.py), inflate, SHA-256 and the package formats as zup has them
+ZINSTALLOBJS := $(BUILD)/zinstall-table.uo $(BUILD)/zinstall-ffsw.uo $(BUILD)/zpkgfmt.uo $(BUILD)/miniz_tinfl.uo $(BUILD)/sha256.uo \
+                $(BUILD)/pw.uo $(BUILD)/sha.uo
+$(BUILD)/zinstall-table.uo: user/zinstall/table.c user/zinstall/table.h user/rdb.h user/sha256.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/zinstall-ffsw.uo: user/zinstall/ffsw.c user/zinstall/ffsw.h user/sha256.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -c $< -o $@
+$(BUILD)/zinstall.uo: user/zinstall.c user/pw.h user/zpw.h user/zinstall/table.h user/zinstall/ffsw.h user/zpkgfmt.h user/sha256.h user/libz.h user/usys.h kernel/diskproto.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os $(MINIZ_CFLAGS) -c $< -o $@
+$(BUILD)/zinstall.uelf: $(BUILD)/zinstall.uo $(ZINSTALLOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/zinstall.uo $(ZINSTALLOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
 
 # programs that look up users and groups (/etc/passwd, /etc/group), and those that also check passwords
 PWAPPS := ls id whoami chown renice useradd userdel gpasswd netstat
@@ -988,7 +1017,7 @@ $(BUILD)/cp437-8x8.psf: tools/font_8x8.c tools/mkpsf.py | $(BUILD)
 UFONT_SRC := tools/font_8x8.c tools/mkconfont.py $(wildcard tools/consolefont/*)
 $(BUILD)/zenix-8x8.zcf: $(UFONT_SRC) | $(BUILD)
 	python3 tools/mkconfont.py font $@
-$(BUILD)/pkg/list: $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
+$(BUILD)/pkg/list: $(BUILD)/bootmenu $(BUILD)/zenixboot $(BUILD)/cp437-8x8.psf $(BUILD)/zine.blob $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(shell find rootfs/etc -type f) $(wildcard docs/man/*.txt) tools/mkzup.py tools/mkman.py kernel/version.h
 	NETDRVS="$(NETDRVS)" python3 tools/mkzup.py packages $(BUILD) "$(UAPPS)"
 # the system bundle: the kernel and the base group only (DESIGN D22 3.1 and 4.4: everything else is installed live,
 # zup -f; copied to BOOT:Zenix/zenix-update.zup, docs/man/zenixboot.txt)
@@ -1055,4 +1084,4 @@ clean:
 
 .SECONDARY:
 .DELETE_ON_ERROR:           # a recipe that fails leaves no half-written target behind for the next make to trust
-.PHONY: all run test check clean packages bundle FORCE
+.PHONY: all run test check clean packages bundle install-floppies FORCE

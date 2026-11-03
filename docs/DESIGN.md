@@ -370,3 +370,6 @@ replayed or finished. A damaged volume answers errors. Details: `docs/d32-pfs3.m
 
 ## D34. ZenixFS as the root on a real machine (roadmap block 4; the owner delegated the details 2026-10-31; built on branch zroot)
 A machine's own choice, never a default: the kernel `kernel-zfs.bin`, as a second system bundle (`zenixz-VNUM.zup`, the list's `systemz` line), the same tree as an ext2 root. No check after a cut; a root only readable gets boot's choices; `fsck.zenixfs -y`. Repair never frees what it could not read, and rebuilds inner nodes from the leaves. Details, the trial's steps and risks: `docs/d34-zenixfs-root.md`.
+
+## D35. The installer (roadmap block 4; the outline the owner's, the details delegated; built on branch install)
+`zinstall`, a text dialogue on Zenix itself: from the install floppies, or an existing Zenix through `zpkg --fetch`. Free space by default on an RDB, or a new type 0x76 on an MBR; an existing partition by typing its name; a whole disk by typing `ERASE ide0`, never with a FAT partition on it. One sector write turns each table old to new, new partitions unbootable and unmounted until everything is written and read back. Details: `docs/d35-installer.md`.

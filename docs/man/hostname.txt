@@ -7,8 +7,12 @@ SYNOPSIS
     hostname
 
 DESCRIPTION
-    Prints $HOSTNAME, or "zenix" if it is not set. The name cannot be changed
-    with this command.
+    Prints $HOSTNAME (login sets it from /etc/hostname), else the first line
+    of /etc/hostname, else "zenix". The name cannot be changed with this
+    command: edit /etc/hostname (zinstall writes it), then log in again.
+
+FILES
+    /etc/hostname   the machine's name: 1-63 of a-z 0-9 -, one line
 
 SEE ALSO
     uname(1)

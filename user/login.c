@@ -18,9 +18,26 @@ static void update_result(void)
     sys_unlink("/var/lib/zpkg/result");
 }
 
+/* the machine's name (DESIGN D35): the first line of /etc/hostname, "zenix" without one */
+static char host[64] = "zenix";
+static void read_hostname(void)
+{
+    int fd = sys_open("/etc/hostname", O_RDONLY);
+    if (fd < 0) return;
+    char b[64];
+    int n = sys_read(fd, b, sizeof b - 1);
+    sys_close(fd);
+    if (n <= 0) return;
+    b[n] = 0;
+    int k = 0;
+    while (k < n && ((b[k] >= 'a' && b[k] <= 'z') || (b[k] >= '0' && b[k] <= '9') || b[k] == '-')) k++;
+    if (k && (b[k] == 0 || b[k] == '\n')) { memcpy(host, b, (u32)k); host[k] = 0; }
+}
+
 static int session(const struct pw *p)
 {
     update_result();
+    setenv("HOSTNAME", host, 1);
     setenv("USER", p->name, 1); setenv("LOGNAME", p->name, 1); setenv("HOME", p->home, 1); setenv("SHELL", p->shell, 1);
     setenv("PATH", "/bin", 1);
     sys_setgid(p->gid);
@@ -41,6 +58,7 @@ int main(int argc, char **argv)
     int force = 0, autologin = 0, i = 1;
     char name[32] = "", pass[100];
     struct pw p;
+    read_hostname();
     setpgid(0, 0);                      /* a group of its own (DESIGN D16 rule 7): `kill 0` in a session never reaches init */
     if (i < argc && !strcmp(argv[i], "--init")) { handover = 1; i++; }
     if (i < argc && !strcmp(argv[i], "-f")) { force = 1; i++; }
@@ -57,7 +75,7 @@ int main(int argc, char **argv)
     }
     for (int tries = 0; tries < 5; ) {
         if (!name[0]) {
-            pw_fputs("zenix login: ", 1);
+            pw_fputs(host, 1); pw_fputs(" login: ", 1);
             /* the tty is in cooked mode here: it echoes the name, edits the line (Backspace, ^U) and echoes the
              * Return, so login only takes the characters (echoing them too printed the name twice) */
             int n = 0; char c;
