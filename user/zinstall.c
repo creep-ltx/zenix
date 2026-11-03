@@ -5,6 +5,7 @@
  * writes a disk but through those two and the programs mkfs.ext2, mkfs.zenixfs and the filesystem servers, on the
  * partitions found by their exact place after the table was changed. */
 #include "libz.h"
+#include "pw.h"
 #include "../kernel/diskproto.h"
 #include "zpkgfmt.h"
 #include "sha256.h"
@@ -807,6 +808,141 @@ bad:
     return -1;
 }
 
+/* ---- the machine's name and its accounts (after the copy and the check; DESIGN D35 section 7) ---- */
+static const char *opt_host, *opt_rootpw, *opt_user, *opt_userpw, *opt_username;
+static int opt_nouser;
+static char hostname[64] = "zenix", username[32];
+
+static int host_ok(const char *h)       /* 1-63 of a-z 0-9 -, not starting or ending with - */
+{
+    size_t l = strlen(h);
+    if (!l || l > 63 || h[0] == '-' || h[l - 1] == '-') return 0;
+    for (size_t i = 0; i < l; i++) if (!((h[i] >= 'a' && h[i] <= 'z') || (h[i] >= '0' && h[i] <= '9') || h[i] == '-')) return 0;
+    return 1;
+}
+/* a password: the first line of FILE, or typed twice with no echo (read_secret, as passwd); 0, -1 stop */
+static int get_password(const char *what, const char *file, char out[100])
+{
+    if (file) {
+        int fd = sys_open(file, O_RDONLY), n = fd >= 0 ? sys_read(fd, out, 99) : -1;
+        if (fd >= 0) sys_close(fd);
+        if (n <= 0) { say("zinstall: cannot read the password file %s\n", file); return -1; }
+        out[n] = 0;
+        char *e = strchr(out, '\n'); if (e) *e = 0;
+        if (!out[0]) { say("zinstall: %s is empty\n", file); return -1; }
+        return 0;
+    }
+    static char again[100], prompt[80];
+    for (;;) {
+        snprintf(prompt, sizeof prompt, "%s (nothing shows as you type): ", what);
+        sys_ttymode(TTY_RAW | TTY_NOSIG);   /* before the prompt shows: a key typed at once is not echoed by the cooked line (seen) */
+        if (read_secret(prompt, out, 100)) return -1;
+        if (!out[0]) { say("A password is needed here.\n"); continue; }
+        sys_ttymode(TTY_RAW | TTY_NOSIG);
+        if (read_secret("Again: ", again, sizeof again)) return -1;
+        if (!strcmp(out, again)) return 0;
+        say("The two were not the same. Once more.\n");
+    }
+}
+static u32 hu_uid, hu_gid;              /* has_user's find: its numbers */
+static int has_user(const char *path, const char *name)
+{
+    int n = 0;
+    char *t = pw_slurp(path, &n);
+    if (!t) return 0;
+    u32 nl = strlen(name);
+    int found = 0;
+    for (char *l = t; *l && !found; ) {
+        if (!strncmp(l, name, nl) && l[nl] == ':') {
+            found = 1;
+            char *f = l + nl + 1;                        /* name:hash:uid:gid */
+            f = strchr(f, ':');
+            hu_uid = f ? (u32)strtoul(f + 1, &f, 10) : 0;
+            hu_gid = f && *f == ':' ? (u32)strtoul(f + 1, 0, 10) : 100;
+        }
+        char *e = strchr(l, '\n');
+        if (!e) break;
+        l = e + 1;
+    }
+    free(t);
+    return found;
+}
+/* the questions; homedir: where the new /home is now (ZH, or the root's /home) */
+static int accounts(const char *homedir)
+{
+    static char pw1[100], hash[100], comment[48];
+    say("\nThe machine and its accounts.\n");
+    if (opt_host) {
+        if (!host_ok(opt_host)) { say("zinstall: %s: a name is 1-63 of a-z 0-9 -\n", opt_host); return -1; }
+        strcpy(hostname, opt_host);
+    } else for (;;) {
+        if (ask("The machine's name (Return = zenix): ")) return -1;
+        if (!line[0]) break;
+        if (host_ok(line)) { strcpy(hostname, line); break; }
+        say("1-63 of a-z, 0-9 and -, please (not starting or ending with -).\n");
+    }
+    static char hl[80];
+    snprintf(hl, sizeof hl, "%s\n", hostname);
+    if (put_file("/etc/hostname", hl, (u32)strlen(hl), 0644)) { say("zinstall: cannot write /etc/hostname\n"); return -1; }
+    if (get_password("root's password", opt_rootpw, pw1)) return -1;
+    pw_new_hash(pw1, hash);
+    memset(pw1, 0, sizeof pw1);
+    if (pw_set_hash_at("zinstall", ZI "/etc/passwd", "root", hash)) return -1;
+    say("  root's password is set.\n");
+    /* the first user */
+    username[0] = 0;
+    if (opt_user) {
+        if (!pw_name_ok(opt_user)) { say("zinstall: %s: a name is 1-31 of a-z 0-9 _ - and starts with a letter or _\n", opt_user); return -1; }
+        strcpy(username, opt_user);
+    } else if (!opt_nouser) for (;;) {
+        if (ask("Your own login name (Return = none now; useradd later): ")) return -1;
+        if (!line[0]) break;
+        if (pw_name_ok(line) && strcmp(line, "root")) { strcpy(username, line); break; }
+        say("1-31 of a-z, 0-9, _ and -, starting with a letter or _, please.\n");
+    }
+    comment[0] = 0;
+    if (username[0]) {
+        if (opt_username) { strncpy(comment, opt_username, sizeof comment - 1); }
+        else if (!opt_user) {
+            for (;;) {
+                if (ask("Your full name (Return = none): ")) return -1;
+                if (pw_field_ok(line) && strlen(line) < sizeof comment) { strcpy(comment, line); break; }
+                say("At most 47 characters, and no colon.\n");
+            }
+        }
+        if (!pw_field_ok(comment)) { say("zinstall: a full name may not hold a colon\n"); return -1; }
+        if (get_password(username, opt_userpw, pw1)) return -1;
+        pw_new_hash(pw1, hash);
+        memset(pw1, 0, sizeof pw1);
+        static char home[64];
+        snprintf(home, sizeof home, "/home/%s", username);
+        u32 uid, gid;
+        if (has_user(ZI "/etc/passwd", username)) {          /* one of the shipped accounts: it becomes yours */
+            if (pw_set_hash_at("zinstall", ZI "/etc/passwd", username, hash)) return -1;
+            uid = hu_uid; gid = hu_gid;
+            static char hp[96];
+            snprintf(hp, sizeof hp, "%s/%s", homedir, username);
+            if (mkdir_p(hp) || sys_chown(hp, uid, gid) || sys_chmod(hp, 0700)) { say("zinstall: cannot make %s's home\n", username); return -1; }
+            say("  %s was there already: its password is set, its home made.\n", username);
+        } else {
+            struct pw_add na = { username, "users", home, "/bin/sh", comment, "wheel,zine", hash, -1 };
+            if (pw_add_at("zinstall", ZI "/etc/passwd", ZI "/etc/group", &na, &uid, &gid)) return -1;
+            static char hp[96];
+            snprintf(hp, sizeof hp, "%s/%s", homedir, username);
+            if (mkdir_p(hp) || sys_chown(hp, uid, gid) || sys_chmod(hp, 0700)) { say("zinstall: cannot make %s's home\n", username); return -1; }
+            say("  %s added: groups users, wheel (sudo) and zine (demos), home %s.\n", username, home);
+        }
+    }
+    /* the shipped accounts without a password (user, guest) are locked, not left open to anyone at the console */
+    static const char *const shipped[] = { "user", "guest" };
+    for (int i = 0; i < 2; i++)
+        if (strcmp(shipped[i], username) && has_user(ZI "/etc/passwd", shipped[i])) {
+            if (pw_set_hash_at("zinstall", ZI "/etc/passwd", shipped[i], "*")) return -1;
+            say("  the shipped account %s is locked (passwd %s opens it again).\n", shipped[i], shipped[i]);
+        }
+    return 0;
+}
+
 /* ---- the dialogue ---- */
 static void show_disk(const struct tdisk *d)
 {
@@ -994,7 +1130,24 @@ int main(int argc, char **argv)
     if (sys_getuid() != 0) { say("zinstall: only root installs (log in as root)\n"); return 1; }
     if (argc > 1 && !strcmp(argv[1], "--list")) return list_only();
     if (argc > 1 && !strcmp(argv[1], "--undo")) return undo(argc > 2 ? argv[2] : BEFORE);
-    if (argc > 1) { say("usage: zinstall [--list] | --undo [FILE]\n"); return 2; }
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : 0;
+        if (!strcmp(a, "--no-user")) { opt_nouser = 1; continue; }
+        if (!v) goto usage;
+        if (!strcmp(a, "--hostname")) opt_host = v;
+        else if (!strcmp(a, "--root-password-file")) opt_rootpw = v;
+        else if (!strcmp(a, "--user")) opt_user = v;
+        else if (!strcmp(a, "--user-password-file")) opt_userpw = v;
+        else if (!strcmp(a, "--user-name")) opt_username = v;
+        else goto usage;
+        i++;
+    }
+    if (0) {
+usage:
+        say("usage: zinstall [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
+            "       [--user-password-file FILE] | --no-user]     zinstall --list     zinstall --undo [FILE]\n");
+        return 2;
+    }
     {   /* one at a time: two would plan on the same blocks */
         struct uproc pr;
         int me = sys_getpid();
@@ -1179,20 +1332,16 @@ int main(int argc, char **argv)
     mkdir_p(ZI "/var/lib/zinstall");
     r = save_before(&pl, pl.opt.kind == TO_FREE || pl.opt.kind == TO_NEWCONT);
     if (r) { say("zinstall: cannot save the copy of the table (%d)\n", r); umount_all(); fail_note(1); return 1; }
-    /* /home */
+    /* /home, then the machine's name and its accounts */
     if (pl.nnew > 2) {
         char *h[] = { "/bin/mount", "-t", "ext2", (char *)names[R_HOME], ZH, 0 };
         pid = sys_spawn(h[0], h, 0);
         r = pid < 0 ? pid : sys_wait(pid);
         if (r) { say("zinstall: cannot mount the new /home (%d)\n", r); umount_all(); fail_note(1); return 1; }
-        mkdir_p(ZH "/user"); sys_chown(ZH "/user", 1000, 100);
-        mkdir_p(ZH "/guest"); sys_chown(ZH "/guest", 1001, 100);
-        sys_sync();
-        sys_umount(ZH);
-    } else {
-        mkdir_p(ZI "/home/user"); sys_chown(ZI "/home/user", 1000, 100);
-        mkdir_p(ZI "/home/guest"); sys_chown(ZI "/home/guest", 1001, 100);
     }
+    if (accounts(pl.nnew > 2 ? ZH : ZI "/home")) { umount_all(); fail_note(1); return 1; }
+    sys_sync();
+    if (pl.nnew > 2) sys_umount(ZH);
     /* the boot partition */
     say("\nWriting the boot partition (%s).\n", names[R_BOOT]);
     if (write_boot(&pl, names[R_BOOT])) { umount_all(); fail_note(1); return 1; }
@@ -1214,11 +1363,13 @@ int main(int argc, char **argv)
     if (pl.aos[0]) {
         say("  2. A boot menu comes first. AmigaOS (%s) starts by itself after 5 seconds; press\n"
             "     a key and choose Zenix for Zenix.\n", pl.aos);
-        say("  3. Log in as root and give root a password: passwd.\n\n"
-            "The way back to only %s: in Zenix type zinstall --undo, then restart: the table is\n"
+        if (username[0]) say("  3. Log in as %s on %s; sudo for root's work.\n\n", username, hostname);
+        else say("  3. Log in as root on %s; useradd NAME and passwd NAME make your account.\n\n", hostname);
+        say("The way back to only %s: in Zenix type zinstall --undo, then restart: the table is\n"
             "as it was. Or at power-on hold both mouse buttons for Kickstart's own menu.\n", pl.aos);
     } else {
-        say("  2. Log in as root and give root a password: passwd.\n");
+        if (username[0]) say("  2. Log in as %s on %s; sudo for root's work.\n", username, hostname);
+        else say("  2. Log in as root on %s; useradd NAME and passwd NAME make your account.\n", hostname);
     }
     if (d.kind == TD_MBR) say("%s; on another Amiga start it from the floppy zenix%s.adf.\n", has_cont(&d) ? "Under Emu68 a second 0x76 is not known to start" : "Under Emu68 it should start by itself", zenixfs ? "-zfs" : "");
     say("Later: zpkg -Syu brings what is newer, zpkg -S NAME more programs.\n");

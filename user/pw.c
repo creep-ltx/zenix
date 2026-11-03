@@ -101,11 +101,12 @@ void gr_drop(char *list, const char *name)
 
 /* add NAME to (ADD) or take it out of GROUP's member list in /etc/group, replacing the file safely. The caller checks
  * first whether NAME is a member already. 0, or -1 after a message naming WHO. */
-int gr_edit(const char *who, const char *group, const char *name, int add)
+int gr_edit(const char *who, const char *group, const char *name, int add) { return gr_edit_at(who, "/etc/group", group, name, add); }
+int gr_edit_at(const char *who, const char *path, const char *group, const char *name, int add)
 {
     int n = 0;
-    char *old = pw_slurp("/etc/group", &n);
-    if (!old) { dprintf(2, "%s: cannot read /etc/group\n", who); return -1; }
+    char *old = pw_slurp(path, &n);
+    if (!old) { dprintf(2, "%s: cannot read %s\n", who, path); return -1; }
     u32 nl = strlen(name), gl = strlen(group), o = 0;
     char *nf = malloc((u32)n + nl + 4);
     if (!nf) { dprintf(2, "%s: out of memory\n", who); free(old); return -1; }
@@ -129,8 +130,164 @@ int gr_edit(const char *who, const char *group, const char *name, int add)
         l = e + 1;
     }
     free(old);
-    if (!done) { dprintf(2, "%s: %s: no such group in /etc/group\n", who, group); free(nf); return -1; }
-    int rc = pw_replace(who, "/etc/group", nf, o, 0644);
+    if (!done) { dprintf(2, "%s: %s: no such group in %s\n", who, group, path); free(nf); return -1; }
+    int rc = pw_replace(who, path, nf, o, 0644);
     free(nf);
     return rc;
 }
+
+/* ---- making and changing /etc/passwd lines: passwd, useradd and zinstall (a new root's files) share these ---- */
+int pw_name_ok(const char *n)
+{
+    if (!*n || strlen(n) > 31 || !((*n >= 'a' && *n <= 'z') || *n == '_')) return 0;
+    for (const char *p = n; *p; p++)
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) return 0;
+    return 1;
+}
+int pw_field_ok(const char *s) { for (; *s; s++) if (*s == ':' || *s == '\n') return 0; return 1; }
+
+void pw_new_hash(const char *password, char out[100])
+{
+    out[0] = 0;
+    if (!password[0]) return;
+    char salt[12]; u32 t = sys_hrtime() ^ ((u32)sys_time() << 7);
+    for (int i = 0; i < 8; i++) { salt[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[t % 36]; t = t * 1103515245u + 12345u; }
+    salt[8] = 0;
+    pw_hash(password, salt, out);
+}
+
+/* the field number K (0-based) of a line of LEN bytes: its start and length, or -1 */
+static int field_of(const char *l, u32 len, int k, const char **f, u32 *fl)
+{
+    const char *p = l, *end = l + len;
+    for (int i = 0; i < k; i++) { const char *c = memchr(p, ':', (u32)(end - p)); if (!c) return -1; p = c + 1; }
+    const char *c = memchr(p, ':', (u32)(end - p));
+    *f = p; *fl = c ? (u32)(c - p) : (u32)(end - p);
+    return 0;
+}
+static int field_num(const char *f, u32 fl, u32 *out)
+{
+    u32 v = 0;
+    if (!fl || fl > 5) return -1;
+    for (u32 i = 0; i < fl; i++) { if (f[i] < '0' || f[i] > '9') return -1; v = v * 10 + (u32)(f[i] - '0'); }
+    if (v > 65535) return -1;
+    *out = v;
+    return 0;
+}
+
+int pw_set_hash_at(const char *who, const char *path, const char *name, const char *hash)
+{
+    int n = 0;
+    char *old_file = pw_slurp(path, &n);                 /* the whole file: no user past some size may be lost */
+    if (!old_file) { dprintf(2, "%s: cannot read %s\n", who, path); return -1; }
+    u32 lines = 1;
+    for (int k = 0; k < n; k++) if (old_file[k] == '\n') lines++;
+    u32 cap = (u32)n + lines * (strlen(hash) + 2);      /* each line may get the new hash and a newline */
+    char *new_file = malloc(cap);
+    if (!new_file) { dprintf(2, "%s: out of memory\n", who); free(old_file); return -1; }
+    u32 o = 0, nl = strlen(name), found = 0;
+    for (char *l = old_file; *l; ) {
+        char *e = strchr(l, '\n'); u32 len = e ? (u32)(e - l) : strlen(l);
+        char *c1 = memchr(l, ':', len);
+        if (c1 && (u32)(c1 - l) == nl && !strncmp(l, name, nl)) {
+            char *c2 = memchr(c1 + 1, ':', len - (u32)(c1 + 1 - l));
+            if (c2) {                                      /* name: new hash, then the rest of the line from the next colon */
+                u32 hl = strlen(hash), rest = len - (u32)(c2 - l);
+                memcpy(new_file + o, name, nl); o += nl; new_file[o++] = ':';
+                memcpy(new_file + o, hash, hl); o += hl;
+                memcpy(new_file + o, c2, rest); o += rest; new_file[o++] = '\n';
+                found = 1;
+            }
+        } else { memcpy(new_file + o, l, len); o += len; new_file[o++] = '\n'; }
+        if (!e) break;
+        l = e + 1;
+    }
+    free(old_file);
+    int rc = found ? pw_replace(who, path, new_file, o, 0644) : -1;
+    if (!found) dprintf(2, "%s: %s: no such user\n", who, name);
+    free(new_file);
+    return rc;
+}
+
+int pw_add_at(const char *who, const char *path, const char *gpath, const struct pw_add *a, u32 *uidp, u32 *gidp)
+{
+    int n = 0, gn = 0;
+    if (!pw_name_ok(a->name)) { dprintf(2, "%s: %s: a name is 1-31 of a-z 0-9 _ - and starts with a letter or _\n", who, a->name); return 2; }
+    if (!pw_field_ok(a->home) || !pw_field_ok(a->shell) || !pw_field_ok(a->comment) || strlen(a->home) > 63 || strlen(a->shell) > 31 ||
+        strlen(a->comment) > 47 || a->home[0] != '/') {
+        dprintf(2, "%s: the home (absolute, at most 63), shell (31) and comment (47) may not hold ':' or a newline\n", who); return 2;
+    }
+    char *old = pw_slurp(path, &n), *grp = pw_slurp(gpath, &gn);
+    if (!old || !grp) { dprintf(2, "%s: cannot read %s\n", who, old ? gpath : path); free(old); free(grp); return 1; }
+    int rc = 1;
+    char *nf = 0;
+    static unsigned char used[65536 / 8];
+    memset(used, 0, sizeof used);
+    u32 nl = strlen(a->name);
+    for (char *l = old; *l; ) {                          /* the names and numbers in use */
+        char *e = strchr(l, '\n'); u32 len = e ? (u32)(e - l) : strlen(l);
+        const char *f; u32 fl, v;
+        if (field_of(l, len, 0, &f, &fl) == 0 && fl == nl && !strncmp(f, a->name, nl)) { dprintf(2, "%s: %s exists already\n", who, a->name); goto out; }
+        if (field_of(l, len, 2, &f, &fl) == 0 && field_num(f, fl, &v) == 0) used[v / 8] |= (unsigned char)(1u << (v % 8));
+        if (!e) break;
+        l = e + 1;
+    }
+    /* the group: by name, or by number */
+    long gid = -1;
+    u32 gl = strlen(a->group), want = 0;
+    int bynum = field_num(a->group, gl, &want) == 0;
+    for (char *l = grp; *l && gid < 0; ) {
+        char *e = strchr(l, '\n'); u32 len = e ? (u32)(e - l) : strlen(l);
+        const char *f, *g; u32 fl, gfl, v;
+        if (field_of(l, len, 0, &f, &fl) == 0 && field_of(l, len, 2, &g, &gfl) == 0 && field_num(g, gfl, &v) == 0)
+            if (bynum ? v == want : (fl == gl && !strncmp(f, a->group, gl))) gid = (long)v;
+        if (!e) break;
+        l = e + 1;
+    }
+    if (gid < 0) { dprintf(2, "%s: %s: no such group\n", who, a->group); goto out; }
+    if (a->extra) {                                      /* every extra group must exist before anything is written */
+        char gl2[128];
+        if (strlen(a->extra) >= sizeof gl2) { dprintf(2, "%s: -G: too long\n", who); rc = 2; goto out; }
+        strcpy(gl2, a->extra);
+        for (char *t = gl2, *c; t; t = c) {
+            c = strchr(t, ','); if (c) *c++ = 0;
+            int ok = 0;
+            u32 tl = strlen(t);
+            for (char *l = grp; *l && !ok && tl; ) {
+                char *e = strchr(l, '\n'); u32 len = e ? (u32)(e - l) : strlen(l);
+                const char *f; u32 fl;
+                if (field_of(l, len, 0, &f, &fl) == 0 && fl == tl && !strncmp(f, t, tl)) ok = 1;
+                if (!e) break;
+                l = e + 1;
+            }
+            if (!ok) { dprintf(2, "%s: %s: no such group\n", who, t); goto out; }
+        }
+    }
+    long uid = a->uid;
+    if (uid < 0) {                                       /* the lowest free number from 1000 */
+        for (uid = 1000; uid <= 65535 && (used[uid / 8] & (1u << (uid % 8))); uid++) ;
+        if (uid > 65535) { dprintf(2, "%s: no free user number\n", who); goto out; }
+    } else if (used[uid / 8] & (1u << (uid % 8))) { dprintf(2, "%s: user number %ld is taken\n", who, uid); goto out; }
+    u32 cap = (u32)n + 256;
+    nf = malloc(cap);
+    if (!nf) { dprintf(2, "%s: out of memory\n", who); goto out; }
+    memcpy(nf, old, (u32)n);
+    u32 o = (u32)n;
+    if (o && nf[o - 1] != '\n') nf[o++] = '\n';
+    o += (u32)snprintf(nf + o, cap - o, "%s:%s:%ld:%ld:%s:%s:%s\n", a->name, a->hash ? a->hash : "", uid, gid, a->comment, a->home, a->shell);
+    if (o > 65535) { dprintf(2, "%s: %s would pass 64 KB\n", who, path); goto out; }
+    if (pw_replace(who, path, nf, o, 0644)) goto out;
+    if (a->extra) {
+        char gl2[128]; strcpy(gl2, a->extra);
+        for (char *t = gl2, *c; t; t = c) {
+            c = strchr(t, ','); if (c) *c++ = 0;
+            if (gr_edit_at(who, gpath, t, a->name, 1)) goto out;
+        }
+    }
+    *uidp = (u32)uid; *gidp = (u32)gid;
+    rc = 0;
+out:
+    free(old); free(grp); free(nf);
+    return rc;
+}
+

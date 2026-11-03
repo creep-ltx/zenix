@@ -104,6 +104,15 @@ nothing to disk. A partition whose name the menu cannot use (a space at its end,
 3. Unmount, mount again, every file read back against its SHA-256 from the disk; then `/etc/fstab` gets the `/home` line, `/tmp`, `/home`, `/mnt` their places, the table copy (a failure to write it stops the install), `/home` its folders; `mkfs.ext2 -i 16384`: `fsck.ext2` needs about 12 bytes an inode, and at the default of 4 KB a 128 MB root ran it out of memory on 2 MB of chip RAM (measured).
 4. The boot partition: an FFS volume written by the program's own small writer (`user/zinstall/ffsw.c`): `S/Startup-Sequence`, `S/BootMenu.conf`, `bootmenu`,
    `bootzenix`, `zenixboot`, `Zenix/zenix`; read back as a reader finds them, by the hash tables. A ZenixFS root gets kernel-zfs as `Zenix/zenix`. Then the root is unmounted and `fsck` runs read-only.
+4b. **The machine and its accounts** (the owner, 2026-11-03: set up, not left for later), after the check, with `/home` mounted: the machine's name
+   (default `zenix`, 1-63 of `a-z 0-9 -`) into `/etc/hostname`, which login shows in its prompt and gives the shell as `$HOSTNAME`
+   (nothing read a name from a file before; `hostname` printed `$HOSTNAME` or `zenix`); root's password, typed twice with no echo
+   (`read_secret`, as passwd); a first user (skippable): the login name checked as useradd checks it, a full name, a password typed twice,
+   the groups `users`, `wheel` (sudo) and `zine` (demos), home `/home/NAME` mode 700 its own. The shipped accounts `user` and `guest`, which
+   have no password, are locked (`*`) unless chosen as the first user's name: an installed machine has no account open to anyone at the
+   console. **One way of writing `/etc/passwd`:** `pw_set_hash_at` and `pw_add_at` in `user/pw.c`, which passwd and useradd now call too, on
+   a file named by path (the new root's). As options, for a run with no questions: `--hostname`, `--root-password-file`, `--user`,
+   `--user-name`, `--user-password-file`, `--no-user`.
 5. Stage 2: the root's PART marked bootable (Zenix's rule for which root to take, `user/rootpick.h`), then ZB0 bootable with its priority.
 
 If a step fails, it stops and says what is done; the table has only unbootable, unmounted partitions. Run again, they are offered by name. `/etc/fstab`'s names (`ide0pN`) follow the table's order: a later change to the table before them shifts them (known, as for any fstab of `ide0pN`).
@@ -116,7 +125,7 @@ If a step fails, it stops and says what is done; the table has only unbootable, 
 One independent read aimed only at damaging a partition (2026-11-01). Found, and fixed with a test each: the skip of partitions named `BOOT...` made the menu lose the system the machine really starts; a new 0x76 was offered beside an inner RDB with a partition past its container, and landed in it; a partition inside an MBR with overlapping entries could be chosen, on the FAT; new PART blocks could land on a bad-block list's spare blocks; a boot partition past 4 GB had only a note; a menu name it cannot find would reboot for ever; the way back printed `fdisk del` where fdisk refuses (hence `--undo`); "the machine starts as before" after a replaced partition; `hasfat` missed behind a full table and on a bad signature; exFAT and unknown types could be chosen; busy flags not compared in the re-read. Known and left: a second console mounting a partition after the re-read can still see the table change before diskd stops the data writes; `fstab` names shift as above; an AmigaOS on another drive is not seen, only named in the plan.
 
 ## 10. What it does not do
-No resizing of partitions; no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).
+No shrinking of existing partitions (the owner's decision, 2026-11-03: free space, or a partition the person chooses to replace); no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).
 
 ## 11. Measured (FS-UAE and the PC, 2026-11-01; no speed figures: emulator time is not hardware time)
 | | |

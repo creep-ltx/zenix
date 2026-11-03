@@ -61,6 +61,7 @@ FILES
     /etc/passwd   name:hash:uid:gid:comment:home:shell
     /etc/group    name::gid:members
     /etc/autologin
+    /etc/hostname  the name the prompt shows and $HOSTNAME (else zenix)
     /var/lib/zpkg/result
 
 NOTES

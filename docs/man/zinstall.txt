@@ -4,7 +4,9 @@ NAME
     zinstall - put Zenix on a hard disk, CF card or SD card
 
 SYNOPSIS
-    zinstall
+    zinstall [--hostname NAME] [--root-password-file FILE]
+             [--user NAME [--user-name TEXT] --user-password-file FILE |
+              --no-user]
     zinstall --list
     zinstall --undo [FILE]
 
@@ -44,6 +46,16 @@ WHERE IT CAN GO
     past 4 GB on an Amiga table is refused (Kickstart 3.1 cannot start
     from there); and another root marked bootable is refused, as it would
     stay the root (fdisk boot N off).
+
+THE MACHINE AND ITS ACCOUNTS
+    After the files are copied and checked it asks the machine's name
+    (Return: zenix; written to /etc/hostname), root's password and a first
+    user: a login name (Return: none now), a full name, a password. The
+    passwords are typed twice and not shown. The user gets the groups
+    users, wheel (sudo) and zine (demos) and a home of its own in /home.
+    The shipped accounts user and guest, which have no password, are
+    locked, unless one is your name. The options answer these questions
+    instead (a password from the first line of a file).
 
 WHAT IT MAKES
     ZB0  the boot partition, AmigaDOS FFS: the boot menu, zenixboot, the

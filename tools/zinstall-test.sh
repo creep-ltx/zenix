@@ -64,14 +64,30 @@ EOC
 run() { ZENIX_SERIAL=$SER ZENIX_BUILD=$BD tools/run-test.sh "$1" "$2" "$3" 2>&1 | clean >"$4"; }
 # the dialogue's end, shared: the install to its Done
 INSTALLED='wait Done\. Zenix is on this disk|Stopped\. 1500'
-boot_script() {    # FILE: boot from the disk, log in, what the machine must be able to do
+boot_script() {    # FILE HOST USER USERPW ROOTPW: boot from the disk; the new user with a wrong password, then its own; root with its password
     cat >"$1" <<EOS
-wait (login: |zenix:/# ) 240
+wait $2 login: 240
 sleep 1
+send $3\r
+wait Password: 30
+send wrong-one\r
+wait Login incorrect 30
+wait $2 login: 30
+send $3\r
+wait Password: 30
+send $4\r
+wait $2: 60
+sleep 1
+send id; hostname; echo zi-us""er-in\r
+wait zi-user-in 30
+send echo was-here > /home/$3/note; exit\r
+wait $2 login: 60
 send root\r
-wait zenix:/# 60
+wait Password: 30
+send $5\r
+wait $2:/ 60
 sleep 1
-send uname -a\r
+send echo zi-root-ok; uname -a\r
 sleep 2
 send mount\r
 sleep 3
@@ -89,19 +105,21 @@ send zpkg -Q base zinstall\r
 sleep 6
 send man zinstall | head -3\r
 sleep 5
-send ls -ld /tmp /home/user /home/guest\r
+send ls -ld /tmp /home/$3; grep -c '^[a-z]*:\*:' /etc/passwd\r
 sleep 3
 send ls -l /bin/su\r
 sleep 2
-send echo was-here > /home/user/note; echo on-root > /note; sync; echo zi-w""rote\r
+send echo on-root > /note; sync; echo zi-w""rote\r
 wait zi-wrote 30
 send reboot\r
-wait (login: |zenix:/# ) 240
+wait $2 login: 240
 sleep 1
 send root\r
-wait zenix:/# 60
+wait Password: 30
+send $5\r
+wait $2:/ 60
 sleep 1
-send cat /home/user/note /note\r
+send cat /home/$3/note /note\r
 sleep 3
 send echo zi-se""cond\r
 wait zi-second 30
@@ -138,18 +156,26 @@ boot_vol() {   # NAME IMG KERNEL: amitools on the boot partition
     fi
     empty $OUT/$n-boot.hdf
 }
-booted() {    # NAME LOG ROOTTYPE
+booted() {    # NAME LOG ROOTTYPE HOST USER
     local n=$1 l=$2
-    check "$n: the disk boots with no floppy to a login" "$(has $l 'zenix:/#')"
+    check "$n: the disk boots with no floppy to its login, with its name ($4)" "$(has $l "^$4 login:")"
+    check "$n: a wrong password is refused" "$(has $l 'Login incorrect')"
+    check "$n: the new user logs in with its password, is in users, wheel and zine" "$(grep -aqE "^uid=[0-9]+\\($5\\) gid=100\\(users\\) groups=.*wheel.*zine|^uid=[0-9]+\\($5\\) gid=100\\(users\\) groups=.*zine.*wheel" $l && echo ok || echo bad)"
+    check "$n: hostname says $4" "$(has $l "^$4\$")"
+    check "$n: root logs in with root's password" "$(has $l '^zi-root-ok')"
+    check "$n: the shipped accounts are locked" "$(has $l '^2$')"
     check "$n: / is the new root ($3)" "$(has $l "^ide0p[0-9]+ +/ +$3")"
     check "$n: uname" "$(has $l '^Zenix ')"
     check "$n: man zinstall" "$(has $l 'ZINSTALL\(8\)')"
     check "$n: zpkg knows the packages" "$(has $l '^(base|zinstall) +[0-9]')"
     check "$n: set-user-id survived" "$(has $l '^-rwsr-xr-x')"
-    check "$n: a file on / and one in /home survive a restart" "$(grep -aq '^was-here$' $l && grep -aq '^on-root$' $l && echo ok || echo bad)"
+    check "$n: the user's home is its own, mode 700" "$(has $l "^drwx------ .* $5 +users .* /home/$5")"
+    check "$n: a file on / and one in the user's home survive a restart" "$(grep -aq '^was-here$' $l && grep -aq '^on-root$' $l && echo ok || echo bad)"
     check "$n: no panic" "$(hasnt $l 'panic')"
 }
-
+# the accounts as options (unattended): the password files are made on the RAM disk first
+ACC_PREP='echo rootpw2 > /tmp/rp; echo beapw2 > /tmp/up; echo zi-pr""ep'
+ACC_OPTS='--hostname amiga2 --root-password-file /tmp/rp --user bea --user-password-file /tmp/up'
 # ---- f: an empty disk ----
 part_f() {
     local d=$OUT/f.hdf
@@ -197,6 +223,29 @@ wait Choose .Return = 1, ext2 30
 send \r
 wait To erase the whole disk 30
 send ERASE ide0\r
+wait The machine's name 1500
+send Bad_Name\r
+wait 1-63 of 30
+send amiga1\r
+wait root's password 30
+send rootpw1\r
+wait Again: 30
+send rootpw1\r
+wait Your own login name 30
+send Anna\r
+wait 1-31 of 30
+send anna\r
+wait Your full name 30
+send Anna Andersson\r
+wait anna .nothing shows 30
+send annapw1\r
+wait Again: 30
+send annapwX\r
+wait were not the same 30
+wait anna .nothing shows 30
+send annapw1\r
+wait Again: 30
+send annapw1\r
 $INSTALLED
 sleep 2
 send free\r
@@ -206,6 +255,8 @@ wait zi-end 30
 stop
 EOS
     run $OUT/f.fs-uae 1800 $OUT/f.txt $OUT/f1.log
+    check "f: the passwords were not shown as they were typed" "$(hasnt $OUT/f1.log 'annapw|rootpw|password .nothing shows as you type.: .')"
+    check "f: a bad name and two passwords not the same are asked again" "$(has $OUT/f1.log 'were not the same')"
     check "f: the install says it is done" "$(has $OUT/f1.log '^Done\. Zenix is on this disk')"
     check "f: two wrong answers and a q wrote nothing" "$([ "$(grep -ac 'Nothing was changed' $OUT/f1.log)" = 3 ] && echo ok || echo bad)"
     check "f: it says what to do next" "$(has $OUT/f1.log 'What to do next')"
@@ -213,9 +264,10 @@ EOS
     boot_vol f $d $BD/kernel.bin
     host_fs f $d ZR0 ext2
     fsconf $OUT/f2.fs-uae $d 2048 8192 none
-    boot_script $OUT/f2.txt
+    boot_script $OUT/f2.txt amiga1 anna annapw1 rootpw1
     run $OUT/f2.fs-uae 900 $OUT/f2.txt $OUT/f2.log
-    booted f $OUT/f2.log ext2
+    booted f $OUT/f2.log ext2 amiga1 anna
+    check "f: the full name is in /etc/passwd" "$($CK cut $d ZR0 $OUT/f-root.bin; debugfs -R 'cat /etc/passwd' $OUT/f-root.bin 2>/dev/null | grep -q '^anna:[^:][^:]*:[0-9]*:100:Anna Andersson:/home/anna:/bin/sh$' && echo ok || echo bad; truncate -s 0 $OUT/f-root.bin)"
     check "f: /home is the new partition" "$(has $OUT/f2.log '^ide0p3 +/home +ext2')"
     host_fs f $d ZR0 ext2
     empty $d
@@ -254,7 +306,9 @@ part_a() {
     cat >$OUT/a.txt <<EOS
 wait zenix:/# 120
 sleep 1
-send zinstall\r
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS\r
 wait Choose a number 30
 send \r
 wait MB .Return 30
@@ -265,7 +319,7 @@ wait Type yes to go on 30
 send no\r
 wait Nothing was changed 10
 sleep 1
-send sync; zinstall\r
+send sync; zinstall $ACC_OPTS\r
 wait Choose a number 30
 send \r
 wait MB .Return 30
@@ -310,10 +364,12 @@ f.seek(i + 18); f.write(b"2")
 PY
     fsconf $OUT/a3.fs-uae $OUT/a3.hdf 2048 8192 none
     cat >$OUT/a3.txt <<'EOS'
-wait (login: |zenix:/# ) 240
+wait amiga2 login: 240
 sleep 1
 send root\r
-wait zenix:/# 60
+wait Password: 30
+send rootpw2\r
+wait amiga2:/ 60
 sleep 1
 send fdisk list\r
 sleep 3
@@ -333,10 +389,12 @@ EOS
     check "a: DH1 still byte-identical after the boots" "$(grep -q "$(grep '^DH1' $OUT/a.before)" $OUT/a3.after && echo ok || echo bad)"
     # the way back: zinstall --undo in the new Zenix: the table as it was, every sector of it; AmigaOS starts directly, no menu
     cat >$OUT/a4.txt <<'EOS'
-wait (login: |zenix:/# ) 240
+wait amiga2 login: 240
 sleep 1
 send root\r
-wait zenix:/# 60
+wait Password: 30
+send rootpw2\r
+wait amiga2:/ 60
 sleep 1
 send zinstall --undo\r
 wait Type undo 30
@@ -377,7 +435,9 @@ wait zenix:/# 180
 sleep 1
 send free\r
 sleep 2
-send zinstall\r
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS\r
 wait Choose a number 60
 send 1\r
 wait Choose .Return = 1, ext2 60
@@ -403,9 +463,9 @@ EOS
     check "$n: the lowest free memory is at least $4 KB" "$([ "${low:-0}" -ge "$4" ] && echo ok || echo bad)"
     host_fs $n $d ZR0 $3
     fsconf $OUT/$n-2.fs-uae $d 2048 0 none
-    boot_script $OUT/$n-2.txt
+    boot_script $OUT/$n-2.txt amiga2 bea beapw2 rootpw2
     run $OUT/$n-2.fs-uae 900 $OUT/$n-2.txt $OUT/$n-2.log
-    booted $n $OUT/$n-2.log $3
+    booted $n $OUT/$n-2.log $3 amiga2 bea
     grep -a -A1 'chip RAM free' $OUT/$n-2.log | head -2
     host_fs $n $d ZR0 $3
     empty $d
@@ -432,7 +492,9 @@ EOS
     cat >$OUT/c.txt <<EOS
 wait zenix:/# 120
 sleep 1
-send zinstall\r
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS\r
 wait Choose a number 30
 send \r
 wait MB .Return 30
@@ -457,9 +519,9 @@ EOS
     boot_vol c $d $BD/kernel.bin
     host_fs c $d ZR0 ext2
     fsconf $OUT/c2.fs-uae $d 2048 8192 kernel:$BD/zenix.adf
-    boot_script $OUT/c2.txt
+    boot_script $OUT/c2.txt amiga2 bea beapw2 rootpw2
     run $OUT/c2.fs-uae 900 $OUT/c2.txt $OUT/c2.log
-    booted c $OUT/c2.log ext2
+    booted c $OUT/c2.log ext2 amiga2 bea
     $CK sums $d slot0 slot1 DH0 DH1 >$OUT/c.after2
     check "c: unchanged after running on it" "$(yes_if cmp $OUT/c.before $OUT/c.after2)"
     empty $d
@@ -604,7 +666,9 @@ send for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do ifconfig 2>
 wait zi-net 60
 send zinstall --list\r
 sleep 4
-send zinstall\r
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS\r
 wait Files come from: the package server 30
 wait Choose a number 30
 send \r
@@ -648,9 +712,9 @@ EOS
     host_fs n $d ZR0 ext2
     # the new one boots by itself, from its own boot partition, and is the one that comes up
     fsconf $OUT/n2.fs-uae $d 2048 8192 none
-    boot_script $OUT/n2.txt
+    boot_script $OUT/n2.txt amiga2 bea beapw2 rootpw2
     run $OUT/n2.fs-uae 900 $OUT/n2.txt $OUT/n2.log
-    booted n $OUT/n2.log ext2
+    booted n $OUT/n2.log ext2 amiga2 bea
     check "n: the root is the new one, not the old" "$(has $OUT/n2.log '^ide0p3 +/ +ext2')"
     empty $rootimg $d
 }
