@@ -373,3 +373,6 @@ A machine's own choice, never a default: the kernel `kernel-zfs.bin`, as a secon
 
 ## D35. The installer (roadmap block 4; the outline the owner's, the details delegated; built on branch install)
 `zinstall`, a text dialogue on Zenix itself: from the install floppies, or an existing Zenix through `zpkg --fetch`. Free space by default on an RDB, or a new type 0x76 on an MBR; an existing partition by typing its name; a whole disk by typing `ERASE ide0`, never with a FAT partition on it. One sector write turns each table old to new, new partitions unbootable and unmounted until everything is written and read back. Details: `docs/d35-installer.md`.
+
+## D36. An NE2000 PC Card in the A1200's slot (roadmap block 4; approved 2026-11-03, the details decided in the note; built on branch ne2000)
+`/sbin/net/ne2000`, a D19 driver, polled: the Netgear FA411 (an ASIX AX88x90) and DP8390 cards in the A600/A1200's slot. The kernel's only part is one more base `DRV_CLAIM` takes, `DRV_PCMCIA` (the slot), granted only on an A600/A1200 Gayle with no memory in 0x600000-0xA4FFFF (-EADDRINUSE: refused, said). Gayle's PC Card interrupt stays off; the card is found by its CIS, taken only if it is a network card, configured as Linux's drivers do; taken out and put back while running. Details, the tests and the first steps on the A1200: `docs/d36-pcmcia-ne2000.md`.

@@ -236,6 +236,8 @@ static int gayle_id(void)
 }
 
 static u32 stray_irqs;
+static int gayle_found;                 /* the Gayle ID read $D: an A600/A1200, which has the PC Card slot (D36) */
+int ide_gayle(void) { return gayle_found; }
 
 /* called by irq2_c when a level-2 interrupt had no CIA cause: the IDE interrupt latch. The drive's status is read
  * first (it drops its line, and on the A4000 that read is what clears the latch), then the Gayle latch. Counts them
@@ -273,6 +275,7 @@ int ide_init(void)
             return -1;
         }
         gayle_quiet();
+        gayle_found = 1;
         ide_data = GAYLE_A1200_DATA;
         port_name = "A1200/A600";
     }

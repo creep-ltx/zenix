@@ -169,8 +169,8 @@ struct uroute {
 #define DRV_HWINFO   1          /* a: buffer, b: its size (0 = HWINFO_FIRST) -> bytes copied of the hardware table
                                  * (kernel/hwinfo.h); -ENODEV without one */
 #define DRV_CLAIM    2          /* a: a device's register base the hardware table names (genet, or a board's address;
-                                 * never a RAM board) -> the claim (1..): the caller is its only owner; -EBUSY when
-                                 * someone holds it */
+                                 * never a RAM board), or DRV_PCMCIA -> the claim (1..): the caller is its only owner;
+                                 * -EBUSY when someone holds it */
 #define DRV_DMAMEM   3          /* a: claim, b: bytes -> the address of the claim's DMA region (64-byte aligned, whole
                                  * 64-byte lines, cleared, fast RAM when there is any); one region a claim. It
                                  * belongs to the claim, not to a process: freed only when the claim ends */
@@ -182,6 +182,13 @@ struct uroute {
                                  * (Zenix keeps the data cache off); on Emu68 the ARM's cache */
 #define DRV_ATTACH   6          /* a: struct udrvattach *, b: its size -> the interface number; netd fills the block */
 #define DRV_XFER     7          /* a: struct udrvxfer *, b: its size -> 0; netd reads and writes the block */
+/* DRV_CLAIM's base for the PC Card slot of an A600/A1200 (DESIGN D36): Gayle's attribute memory, I/O space and the
+ * card's reset byte, 0xA00000-0xA4FFFF (the window the quiesce steps may write). -ENODEV on a machine without an
+ * A600/A1200 Gayle; -EADDRINUSE when memory lies in the slot's addresses 0x600000-0xA4FFFF (an accelerator's or a
+ * Zorro II board's RAM there clashes with the card: the slot is never claimed then) */
+#define DRV_PCMCIA      0xA00000u
+#define DRV_PCMCIA_SIZE 0x50000u
+#define DRV_PCMCIA_LOW  0x600000u       /* the slot's common memory starts here: no RAM may lie from here to the end */
 #define DRVC_CLEAN   1          /* frames the device will read: written back */
 #define DRVC_INVAL   2          /* buffers the device wrote: written back and dropped (never dropped unwritten) */
 

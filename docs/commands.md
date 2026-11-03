@@ -87,6 +87,7 @@ spot-checked against the code that day.
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
 | [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 | [genet](man/genet.txt) | not a command: the Ethernet driver of a Raspberry Pi CM4 or Pi 4 under Emu68 (`/sbin/net/genet`), started by netd |
+| [ne2000](man/ne2000.txt) | not a command: the driver of an NE2000 PC Card (the Netgear FA411) in the A600/A1200's slot (`/sbin/net/ne2000`), started by netd |
 | [nfscd](man/nfscd.txt) | not a command: an NFS mount's server (`/sbin/nfscd`, DESIGN D23), started by the kernel for `mount -t nfs`; its manual is mount's |
 | [wasabid](man/wasabid.txt) | not a command: the remote control daemon (`/sbin/wasabid`, DESIGN D24), the owner's Wasabi protocol on TCP 1236; off until root writes `/etc/wasabid.conf`, kept running by init through `/etc/daemons` |
 

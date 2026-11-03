@@ -97,6 +97,9 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   (the warm start, branch t12) `hwinfo.genet_stop` (the next reserved word) and its `GSTOP_*` bits 1-32, and
   `HWINFO_DRYRUN` ("ZHWD") in the hwinfo magic from a caller that may return to AmigaOS (zenixboot CHECK): stage0
   writes no hardware then.
+  Since D36 (branch ne2000, 2026-11-03): `DRV_CLAIM`'s base `DRV_PCMCIA` 0xA00000 (the PC Card slot, its window
+  `DRV_PCMCIA_SIZE` 0x50000) and its answers -ENODEV (no A600/A1200 Gayle) and -EADDRINUSE (memory in 0x600000-0xA4FFFF);
+  `/sbin/net/ne2000` in `NETDRVS` (its driver line takes no words).
 - **D20 (telnet's console, step 1, 2026-10-27):** `SYS_console`'s op word `op | (fd + 1) << 8` (0 above the op: no
   descriptor, only `CON_COLOURS` and D28's `CON_UFONT`; ops are 1-255; D24's ops 5-7 take a descriptor too); `CON_FONT` 2 (a2 PSF1 data, a3 its size; a2 0 drops it; PSF1 mode 0, height 8,
   2,052 bytes; meaning "8-bit mode: each byte one glyph of this font, no UTF-8 while loaded"), `CON_RULES` 3 (a2 bits,

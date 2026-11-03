@@ -108,7 +108,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 4. **The Amiga world:** FAT (built 2026-10-31 in FS-UAE: docs/d30-fat.md, `/sbin/fatd`), FFS/OFS (built 2026-10-31 on branch ffs, FS-UAE: docs/d31-ffs.md, `/sbin/ffsd`), PFS3 read-only (built 2026-10-31 on branch pfs3, FS-UAE and against AmigaOS's own volumes: docs/d32-pfs3.md, `/sbin/pfs3d`); LhA/LZX unpacking (built 2026-11-01 on branch lha, FS-UAE: docs/d33-archives.md, `unlha`, `unlzx`, the clean rewrite that settles the public-release blocker); ZenixFS as the root on real hardware (built 2026-11-01 on branch zroot, FS-UAE and the host: docs/d34-zenixfs-root.md; the real A1200's trial is the owner's decision, its steps in the note); the
    installer (built 2026-11-03 on branch install, FS-UAE and the host: docs/d35-installer.md; never run on real hardware yet); (owner 2026-11-03: "do the FA411 driver after the installer") a PCMCIA NE2000 network driver for the
    owner's Netgear FA411 in the A1200's side slot (`/sbin/net/ne2000`, D19's driver protocol), so the A1200 with the 1260
-   reaches the network. Audit, with the filesystems fuzzed against damaged disks.
+   reaches the network (built 2026-11-03 on branch ne2000, the PC against a model and FS-UAE's refusals: docs/d36-pcmcia-ne2000.md; never run on a real card yet). Audit, with the filesystems fuzzed against damaged disks.
 5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
    viewers, preferences; TrueType fonts (owner 2026-10-26; rendered once per size into bitmap fonts and cached, so a
    68020 without an FPU pays only once; also usable by the console); the demo floppy's desktop edition. Audit.
