@@ -829,6 +829,7 @@ bad:
 }
 
 /* ---- the machine's name and its accounts (after the copy and the check; DESIGN D35 section 7) ---- */
+static const char *opt_layout, *opt_rootsize, *opt_homesize, *opt_rootfs, *opt_homefs;
 static const char *opt_zsize, *opt_host, *opt_rootpw, *opt_user, *opt_userpw, *opt_username;
 static int opt_nouser;
 static char hostname[64] = "zenix", username[32];
@@ -1022,10 +1023,16 @@ static void show_plan(const struct tdisk *d, const struct t_plan *p)
     }
     if (p->opt.kind == TO_WHOLE) say("  THE WHOLE DISK IS ERASED: every partition and everything on them is LOST.\n");
     if (p->opt.kind == TO_NEWCONT) say("  A new partition of type 0x76 in the PC table, %s, holding an Amiga table with:\n", mbtext(p->opt.sectors));
-    static const char *const what[3] = { "the boot menu and the kernel (AmigaDOS FFS)", 0, "/home (ext2)" };
+    static const char *const what[3] = { "the boot menu and the kernel (AmigaDOS FFS)", 0, 0 };
     for (int i = 0; i < p->nnew; i++)
         say("  New %-4s %8s  %s\n", p->nw[i].label, mbtext(p->nw[i].sectors),
-            i == R_ROOT ? (p->zenixfs ? "the Zenix root (ZenixFS)" : "the Zenix root (ext2)") : what[i]);
+            i == R_ROOT ? (p->zenixfs ? "the Zenix root (ZenixFS)" : "the Zenix root (ext2)") : i == R_HOME ? (p->homefs ? "/home (ZenixFS)" : "/home (ext2)") : what[i]);
+    if (p->nnew == 2) say("  /home is a folder on the root.\n");
+    if (p->opt.kind == TO_FREE || p->opt.kind == TO_NEWCONT) {
+        u32 used = 0;
+        for (int i = 0; i < p->nnew; i++) used += p->nw[i].sectors;
+        if (p->opt.sectors > used + 2048) say("  %s of the free space stays free.\n", mbtext(p->opt.sectors - used));
+    }
     say("  Sectors of the table written: ");
     for (int i = 0; i < p->nw1; i++) say("%u ", p->w1[i].lba);
     say("(then %u %u when all is checked)\n", p->w2[0].lba, p->w2[1].lba);
@@ -1175,6 +1182,11 @@ int main(int argc, char **argv)
         if (!v) goto usage;
         if (!strcmp(a, "--hostname")) opt_host = v;
         else if (!strcmp(a, "--zenix-size")) opt_zsize = v;
+        else if (!strcmp(a, "--layout")) opt_layout = v;
+        else if (!strcmp(a, "--root-size")) opt_rootsize = v;
+        else if (!strcmp(a, "--home-size")) opt_homesize = v;
+        else if (!strcmp(a, "--root-fs")) opt_rootfs = v;
+        else if (!strcmp(a, "--home-fs")) opt_homefs = v;
         else if (!strcmp(a, "--root-password-file")) opt_rootpw = v;
         else if (!strcmp(a, "--user")) opt_user = v;
         else if (!strcmp(a, "--user-password-file")) opt_userpw = v;
@@ -1184,7 +1196,8 @@ int main(int argc, char **argv)
     }
     if (0) {
 usage:
-        say("usage: zinstall [--zenix-size MB] [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
+        say("usage: zinstall [--zenix-size MB] [--layout recommended|one|custom] [--root-size MB] [--home-size MB]\n"
+            "       [--root-fs ext2|zenixfs] [--home-fs ext2|zenixfs] [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
             "       [--user-password-file FILE] | --no-user]     zinstall --list     zinstall --undo [FILE]\n");
         return 2;
     }
@@ -1268,22 +1281,95 @@ usage:
             say("Between 28 and %u, please.\n", o->sectors / 2048);
         }
     }
-    /* the root's filesystem */
-    say("\nThe root's filesystem:\n"
-        "  1  ext2: proven on real hardware (the owner's PiStorm A1200). The default.\n"
+    /* the layout: Zenix's share as the rules say, one partition, or the person's own sizes (D35 section 3); the boot partition is always the rule's */
+    static struct t_want want;
+    want.layout = -1;
+    if (opt_layout) {
+        want.layout = !strcmp(opt_layout, "recommended") ? TL_RECOMMENDED : !strcmp(opt_layout, "one") ? TL_ONE : !strcmp(opt_layout, "custom") ? TL_CUSTOM : -2;
+        if (want.layout == -2) { say("zinstall: --layout: recommended, one or custom\n"); return 2; }
+        if (want.layout == TL_CUSTOM) {
+            if (!opt_rootsize) { say("zinstall: --layout custom needs --root-size MB (and --home-size MB, 0 for none)\n"); return 2; }
+            want.root = (u32)strtoul(opt_rootsize, 0, 10) * 2048;
+            want.home = opt_homesize ? (u32)strtoul(opt_homesize, 0, 10) * 2048 : 0;
+        }
+    } else {
+        static struct t_plan trial;
+        u32 room = maxsect ? maxsect : o->sectors;
+        say("\nHow Zenix's %s are laid out:\n", mbtext(room));
+        for (int l = TL_RECOMMENDED; l <= TL_ONE; l++) {
+            struct t_want tw = { l, 0, 0, 0, 0 };
+            if (t_plan_make(&d, &io, o, maxsect, &tw, &trial, &why)) { say("  %d  (%s)\n", l + 1, why); continue; }
+            if (trial.nnew > 2)
+                say("  %d  recommended: boot %s, root %s, /home %s\n", l + 1, mbtext(trial.nw[R_BOOT].sectors), mbtext(trial.nw[R_ROOT].sectors), mbtext(trial.nw[R_HOME].sectors));
+            else
+                say("  %d  %s: boot %s, root %s, /home a folder on the root\n", l + 1, l == TL_ONE ? "one partition" : "recommended", mbtext(trial.nw[R_BOOT].sectors), mbtext(trial.nw[R_ROOT].sectors));
+        }
+        say("  3  your own sizes for the root and /home\n");
+        while (want.layout < 0) {
+            if (ask("Choose (Return = 1): ")) return 1;
+            if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+            if (!line[0] || !strcmp(line, "1")) want.layout = TL_RECOMMENDED;
+            else if (!strcmp(line, "2")) want.layout = TL_ONE;
+            else if (!strcmp(line, "3")) want.layout = TL_CUSTOM;
+        }
+        if (want.layout == TL_CUSTOM) {
+            u32 boot = room >= 256 * 2048 ? 16 : room >= 64 * 2048 ? 8 : 4, left = room / 2048 - boot;
+            const char *rest = o->kind == TO_PART && d.part[o->part].how == TP_RDB ? "stays a partition of the old name, for AmigaOS" : "stays free";
+            say("The boot partition takes %u MB; %u MB are left for the root and /home.\n", boot, left);
+            for (;;) {
+                if (ask("Root in MB (at least 32): ")) return 1;
+                if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                u32 mb = (u32)strtoul(line, 0, 10);
+                if (mb >= 32 && mb <= left) { want.root = mb * 2048; left -= mb; break; }
+                say("Between 32 and %u, please.\n", left);
+            }
+            say("%u MB are left.\n", left);
+            for (;;) {
+                if (ask("/home in MB (Return = all of that, 0 = none: a folder on the root): ")) return 1;
+                if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                u32 mb = line[0] ? (u32)strtoul(line, 0, 10) : left;
+                if (line[0] && !isdigit((unsigned char)line[0])) mb = left + 1;
+                if (mb == 0 || (mb >= 4 && mb <= left)) { want.home = mb * 2048; left -= mb; break; }
+                say("0, or between 4 and %u, please.\n", left);
+            }
+            if (left) say("%u MB %s.\n", left, rest);
+        }
+    }
+    /* the filesystems */
+    static const char *const fsnotes =
+        "  1  ext2: proven on real hardware. The default.\n"
         "  2  ZenixFS: survives a power cut with no check at the next start, but costs\n"
         "     about 188-252 KB more memory on a 2 MB machine, and it has NOT yet run on\n"
-        "     real hardware, only in an emulator.\n");
-    int zenixfs = -1;
-    while (zenixfs < 0) {
-        if (ask("Choose (Return = 1, ext2): ")) return 1;
-        if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
-        if (!line[0] || !strcmp(line, "1")) zenixfs = 0;
-        else if (!strcmp(line, "2")) zenixfs = 1;
+        "     real hardware, only in an emulator.\n";
+    if (opt_rootfs) want.rootfs = !strcmp(opt_rootfs, "zenixfs");
+    else {
+        say("\nThe root's filesystem:\n%s", fsnotes);
+        for (int c = -1; c < 0;) {
+            if (ask("Choose (Return = 1, ext2): ")) return 1;
+            if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+            if (!line[0] || !strcmp(line, "1")) c = 0;
+            else if (!strcmp(line, "2")) c = 1;
+            want.rootfs = c > 0;
+        }
     }
-    if (t_plan_make(&d, &io, o, maxsect, zenixfs, &pl, &why)) { say("zinstall: this cannot be done: %s.\nNothing was changed.\n", why); return 1; }
+    int zenixfs = want.rootfs;
+    if (t_plan_make(&d, &io, o, maxsect, &want, &pl, &why)) { say("zinstall: this cannot be done: %s.\nNothing was changed.\n", why); return 1; }
+    if (pl.nnew > 2) {
+        if (opt_homefs) want.homefs = !strcmp(opt_homefs, "zenixfs");
+        else {
+            say("\n/home's filesystem:\n%s", fsnotes);
+            for (int c = -1; c < 0;) {
+                if (ask("Choose (Return = 1, ext2): ")) return 1;
+                if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                if (!line[0] || !strcmp(line, "1")) c = 0;
+                else if (!strcmp(line, "2")) c = 1;
+                want.homefs = c > 0;
+            }
+        }
+        if (want.homefs && t_plan_make(&d, &io, o, maxsect, &want, &pl, &why)) { say("zinstall: this cannot be done: %s.\nNothing was changed.\n", why); return 1; }
+    }
     /* memory, before anything is written */
-    u32 need = (zenixfs ? MINKB_ZFS : MINKB) * 1024;
+    u32 need = (zenixfs || pl.homefs ? MINKB_ZFS : MINKB) * 1024;
     if (free0 < need) {
         say("zinstall: only %u KB of memory are free; installing needs about %u KB.\nNothing was changed.\n", free0 / 1024, need / 1024);
         return 1;
@@ -1336,7 +1422,7 @@ usage:
     int r = zenixfs ? run("/bin/mkfs.zenixfs", (char *)names[R_ROOT], 0, 0) : run("/bin/mkfs.ext2", "-i", "16384", (char *)names[R_ROOT]);
     if (r) { say("zinstall: mkfs failed (%d)\n", r); fail_note(1); return 1; }
     if (pl.nnew > 2) {
-        r = run("/bin/mkfs.ext2", "-i", "16384", (char *)names[R_HOME]);
+        r = pl.homefs ? run("/bin/mkfs.zenixfs", (char *)names[R_HOME], 0, 0) : run("/bin/mkfs.ext2", "-i", "16384", (char *)names[R_HOME]);
         if (r) { say("zinstall: mkfs of /home failed (%d)\n", r); fail_note(1); return 1; }
     }
     char *margv[] = { "/bin/mount", "-t", zenixfs ? "zenixfs" : "ext2", (char *)names[R_ROOT], ZI, 0 };
@@ -1379,7 +1465,7 @@ usage:
         int n = fd >= 0 ? sys_read(fd, fst, fs.size) : -1;
         if (fd >= 0) sys_close(fd);
         if (n == (int)fs.size) {
-            if (pl.nnew > 2) snprintf(fst + n, sizeof fst - (u32)n, "%s    /home   ext2     defaults\n", names[R_HOME]);
+            if (pl.nnew > 2) snprintf(fst + n, sizeof fst - (u32)n, "%s    /home   %-8s defaults\n", names[R_HOME], pl.homefs ? "zenixfs" : "ext2");
             put_file("/etc/fstab", fst, (u32)strlen(fst), 0644);
         }
     }
@@ -1389,7 +1475,7 @@ usage:
     if (r) { say("zinstall: cannot save the copy of the table (%d)\n", r); umount_all(); fail_note(1); return 1; }
     /* /home, then the machine's name and its accounts */
     if (pl.nnew > 2) {
-        char *h[] = { "/bin/mount", "-t", "ext2", (char *)names[R_HOME], ZH, 0 };
+        char *h[] = { "/bin/mount", "-t", pl.homefs ? "zenixfs" : "ext2", (char *)names[R_HOME], ZH, 0 };
         pid = sys_spawn(h[0], h, 0);
         r = pid < 0 ? pid : sys_wait(pid);
         if (r) { say("zinstall: cannot mount the new /home (%d)\n", r); umount_all(); fail_note(1); return 1; }

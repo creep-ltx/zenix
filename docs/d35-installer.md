@@ -55,9 +55,20 @@ starts by itself; on any other Amiga, start it from the boot floppy (`zenix.adf`
 
 **Another root marked bootable is refused:** Zenix takes the first (`user/rootpick.h`), so it would stay the machine's root. A disk with more than 14 partitions after the install is refused: boot and mount look at the first 16 devices.
 
-Sizes: ZB0 (FFS, DOS\1) 16 MB from 256 MB of free space up, 8 MB from 64 MB up, else 4 MB. ZR0: a third of what is left, 128 MB to 1 GB;
-under 64 MB of space the rest and no /home. ZH0 (ext2, `/home`): what is left, at most 4 GB. At least 28 MB. The person may use less than
-all the free space. New labels avoid names already on the disk (ZB1, ZR1...).
+Sizes (the owner's live test on the real A1200, 2026-11-03: /home's filesystem asked too, layouts to choose, full control). First, for free
+space or a chosen Amiga partition, how many MB Zenix gets (the rest stays free, or a partition of the old name: the split). Then the
+layout of that share, each shown in MB before it is chosen:
+- **recommended:** ZB0, then a root of 1 GB from 3 GB of space up, else a third of it (at least 128 MB; at most two thirds of a space under
+  192 MB), /home the rest (none under 4 MB); under 64 MB of space the root only.
+- **one partition:** ZB0 and a root of all the rest; /home a folder on it.
+- **custom:** the person types the root (at least 32 MB) and /home (Return: all that is left; 0: none; at least 4 MB), the MB left shown after
+  each; what they leave stays free, or stays the split partition for AmigaOS.
+ZB0 is always the rule's: 16 MB from 256 MB of space up, 8 MB from 64 MB, else 4 MB. The root's and /home's filesystems are asked apart
+(ext2 or ZenixFS, the same notes for both). A /home of ZenixFS is served by `/sbin/zfsd` like any ZenixFS mount, whichever the root is.
+**Memory note:** `fsck.ext2` needs about 12 bytes an inode (one inode per 16 KB here): a 4 GB ext2 /home needs about 3 MB to be checked, more
+than a 2 MB machine has; such a machine is better served by a smaller /home or one partition. New labels avoid names already on the disk
+(ZB1, ZR1...). Unattended: `--zenix-size MB`, `--layout recommended|one|custom`, `--root-size MB`, `--home-size MB` (0: none),
+`--root-fs` and `--home-fs` `ext2|zenixfs`.
 
 ## 4. A cut at any moment
 Every table change is arranged so that one sector write turns the old table into the new one; the new blocks before it are in places

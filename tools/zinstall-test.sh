@@ -140,7 +140,8 @@ host_fs() {    # NAME IMG ROOTNAME ext2|zenixfs
     empty $OUT/$n-root.bin
     if [ -n "$($CK parts $i | grep '^ZH')" ]; then
         $CK cut $i "$($CK parts $i | grep '^ZH' | head -1 | cut -d' ' -f1)" $OUT/$n-home.bin
-        check "$n: the host's e2fsck finds /home clean" "$(yes_if e2fsck -fn $OUT/$n-home.bin)"
+        if [ "$($CK parts $i | grep '^ZH' | head -1 | cut -d' ' -f4)" = 5a4e4601 ]; then check "$n: the host's fsck finds /home (ZenixFS) clean" "$(yes_if $Z fsck $OUT/$n-home.bin)"
+        else check "$n: the host's e2fsck finds /home clean" "$(yes_if e2fsck -fn $OUT/$n-home.bin)"; fi
         empty $OUT/$n-home.bin
     fi
 }
@@ -178,7 +179,7 @@ booted() {    # NAME LOG ROOTTYPE HOST USER
 }
 # the accounts as options (unattended): the password files are made on the RAM disk first
 ACC_PREP='echo rootpw2 > /tmp/rp; echo beapw2 > /tmp/up; echo zi-pr""ep'
-ACC_OPTS='--hostname amiga2 --root-password-file /tmp/rp --user bea --user-password-file /tmp/up'
+ACC_OPTS='--layout recommended --home-fs ext2 --hostname amiga2 --root-password-file /tmp/rp --user bea --user-password-file /tmp/up'
 # ---- f: an empty disk ----
 part_f() {
     local d=$OUT/f.hdf
@@ -204,6 +205,10 @@ sleep 1
 send \r
 sleep 1
 send 1\r
+wait Choose .Return = 1.: 30
+send \r
+wait Choose .Return = 1, ext2 30
+send \r
 wait Choose .Return = 1, ext2 30
 send \r
 wait To erase the whole disk 30
@@ -213,6 +218,8 @@ sleep 1
 send zinstall\r
 wait Choose a number 30
 send 1\r
+wait Choose .Return = 1.: 30
+send 2\r
 wait Choose .Return = 1, ext2 30
 send \r
 wait To erase the whole disk 30
@@ -222,8 +229,19 @@ sleep 1
 send sync; zinstall\r
 wait Choose a number 30
 send 1\r
+wait Choose .Return = 1.: 30
+send 3\r
+wait Root in MB 30
+send 10\r
+wait Between 32 and 30
+send 200\r
+wait /home in MB 30
+send \r
 wait Choose .Return = 1, ext2 30
 send \r
+wait /home's filesystem 30
+wait Choose .Return = 1, ext2 30
+send 2\r
 wait To erase the whole disk 30
 send ERASE ide0\r
 wait The machine's name 1500
@@ -271,7 +289,8 @@ EOS
     run $OUT/f2.fs-uae 900 $OUT/f2.txt $OUT/f2.log
     booted f $OUT/f2.log ext2 amiga1 anna
     check "f: the full name is in /etc/passwd" "$($CK cut $d ZR0 $OUT/f-root.bin; debugfs -R 'cat /etc/passwd' $OUT/f-root.bin 2>/dev/null | grep -q '^anna:[^:][^:]*:[0-9]*:100:Anna Andersson:/home/anna:/bin/sh$' && echo ok || echo bad; truncate -s 0 $OUT/f-root.bin)"
-    check "f: /home is the new partition" "$(has $OUT/f2.log '^ide0p3 +/home +ext2')"
+    check "f: the plan showed the layout's sizes: root 200 MB, /home on ZenixFS" "$(grep -aq 'New ZR0 *200 MB' $OUT/f1.log && grep -aq '/home (ZenixFS)' $OUT/f1.log && echo ok || echo bad)"
+    check "f: /home is the new partition, ZenixFS" "$(has $OUT/f2.log '^ide0p3 +/home +zenixfs')"
     host_fs f $d ZR0 ext2
     empty $d
 }
@@ -429,7 +448,7 @@ EOS
 }
 
 # ---- m, z: 2 MB of chip RAM alone ----
-small() {   # NAME 1|2 ROOTTYPE MINKB
+small() {   # NAME 1|2 ROOTTYPE MINKB [MORE OPTIONS]
     local n=$1 d=$OUT/$1.hdf
     truncate -s 0 $d; truncate -s 300M $d
     fsconf $OUT/$n.fs-uae $d 2048 0 3
@@ -440,7 +459,7 @@ send free\r
 sleep 2
 send $ACC_PREP\r
 wait zi-prep 10
-send zinstall $ACC_OPTS\r
+send zinstall $ACC_OPTS $5\r
 wait Choose a number 60
 send 1\r
 wait Choose .Return = 1, ext2 60
@@ -473,7 +492,10 @@ EOS
     host_fs $n $d ZR0 $3
     empty $d
 }
-part_m() { small m "" ext2 150; }
+part_m() {    # one partition: the root only, /home a folder on it
+    small m "" ext2 150 "--layout one"
+    check "m: one partition: no /home partition, the plan says /home is a folder" "$(grep -aq '/home is a folder on the root' $OUT/m-1.log && ! grep -aqE '^ide0p[0-9]+ +/home ' $OUT/m-2.log && echo ok || echo bad)"
+}
 part_z() { small z 2 zenixfs 100; }
 
 # ---- c: the card's layout ----
@@ -564,6 +586,10 @@ wait Choose a number 30
 send \r
 sleep 1
 send 1\r
+wait MB .Return 30
+send \r
+wait Choose .Return = 1.: 30
+send 2\r
 wait Choose .Return = 1, ext2 30
 send \r
 wait type its name exactly 30

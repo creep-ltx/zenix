@@ -81,6 +81,15 @@ struct t_write {
 };
 
 enum { R_BOOT, R_ROOT, R_HOME };
+/* how Zenix's share is laid out (DESIGN D35 section 3): the boot partition is always the rule's */
+enum { TL_RECOMMENDED, TL_ONE, TL_CUSTOM };
+struct t_want {
+    int layout;                         /* TL_*: recommended (a root sized for the space, /home the rest), one (the root only), custom */
+    t_u32 root, home;                   /* TL_CUSTOM: sectors; home 0: no /home partition */
+    int rootfs, homefs;                 /* 1: ZenixFS, 0: ext2 */
+};
+#define T_MINROOT (32u * 2048)          /* a custom root's least */
+#define T_MINHOME (4u * 2048)
 struct t_newp {
     char label[8];
     t_u32 lo, hi;                       /* cylinders of its RDB */
@@ -89,7 +98,7 @@ struct t_newp {
 };
 struct t_plan {
     struct t_opt opt;
-    int nnew, zenixfs;
+    int nnew, zenixfs, homefs;
     struct t_newp nw[3];                /* R_BOOT, R_ROOT, and R_HOME if nnew is 3 */
     int atomic;                         /* 0: the plan's text says the old table can be damaged before the new one is whole */
     int pri;                            /* the boot partition's boot priority */
@@ -112,7 +121,7 @@ int t_options(const struct tdisk *d, const struct tio *io, struct t_opt *o, int 
 const char *t_whole_refused(const struct tdisk *d);
 /* Make the plan: 0, or -1 with *why. maxsect: use at most this many sectors (0: as many as the rules say). For a chosen RDB partition
  * less than all of it splits it: Zenix first, the rest one partition with the old name, dostype and environment, empty for its system */
-int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt *o, t_u32 maxsect, int zenixfs,
+int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt *o, t_u32 maxsect, const struct t_want *w,
                 struct t_plan *p, const char **why);
 /* The tables read again: 1 exactly as in d (the digest, the size), 0 changed, -1 cannot read */
 int t_same(const struct tdisk *d, const struct tio *io, t_u32 sectors, const struct t_busy *busy, int nbusy);

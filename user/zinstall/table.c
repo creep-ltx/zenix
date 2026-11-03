@@ -458,34 +458,43 @@ static void labels(const struct tdisk *d, struct t_plan *p)
     }
 }
 
-/* sizes in cylinders: the note's rules, section 3 */
-static void sizes(struct t_plan *p, t_u32 avail, t_u32 cyl)
+/* sizes in cylinders, the note's rules (section 3): the boot partition by the space; then the layout asked for. Returns the cylinders
+ * used (all of avail but for a custom layout), 0 with *why when it does not fit */
+static const struct t_want *want;
+static t_u32 sizes(struct t_plan *p, t_u32 avail, t_u32 cyl, const char **why)
 {
     unsigned long long tot = (unsigned long long)avail * cyl;
     t_u32 mb = (t_u32)(tot / 2048);
     t_u32 bootmb = mb >= 256 ? 16 : mb >= 64 ? 8 : 4;
     t_u32 bootc = (t_u32)(((unsigned long long)bootmb * 2048 + cyl - 1) / cyl);
     if (bootc == 0) bootc = 1;
+    if (bootc >= avail) { *why = "less than 28 MB of room"; return 0; }
     t_u32 rest = avail - bootc;
     t_u32 rootc, homec = 0;
-    if (mb < 64) rootc = rest;
-    else {
-        t_u32 restmb = (t_u32)((unsigned long long)rest * cyl / 2048);
-        t_u32 want = restmb / 3;
-        if (want < 128) want = 128;
-        if (want > 1024) want = 1024;
-        if (want > restmb * 2 / 3 && restmb < 192) want = restmb * 2 / 3;
-        rootc = (t_u32)(((unsigned long long)want * 2048 + cyl - 1) / cyl);
+    t_u32 restmb = (t_u32)((unsigned long long)rest * cyl / 2048);
+    if (want->layout == TL_CUSTOM) {
+        rootc = (t_u32)(((unsigned long long)want->root + cyl - 1) / cyl);
+        homec = want->home ? (t_u32)(((unsigned long long)want->home + cyl - 1) / cyl) : 0;
+        if (want->root < T_MINROOT || (want->home && want->home < T_MINHOME)) { *why = "a root of at least 32 MB, and a /home of at least 4 MB or none"; return 0; }
+        if ((unsigned long long)rootc + homec > rest) { *why = "the sizes asked for do not fit the space"; return 0; }
+    } else if (want->layout == TL_ONE || mb < 64) {
+        rootc = rest;
+    } else {
+        /* recommended: a 1 GB root from 3 GB of space up, else a third of it (at least 128 MB, two thirds of a small space at
+         * most); /home the rest (none under 4 MB) */
+        t_u32 rmb = restmb >= 3072 ? 1024 : restmb / 3;
+        if (rmb < 128) rmb = 128;
+        if (rmb > restmb * 2 / 3 && restmb < 192) rmb = restmb * 2 / 3;
+        rootc = (t_u32)(((unsigned long long)rmb * 2048 + cyl - 1) / cyl);
         if (rootc > rest) rootc = rest;
         homec = rest - rootc;
-        t_u32 maxhome = (t_u32)((4096ull * 2048) / cyl);
-        if (homec > maxhome) homec = maxhome;
-        if ((unsigned long long)homec * cyl < 2048u * 4) homec = 0;      /* under 4 MB is no /home */
+        if ((unsigned long long)homec * cyl < T_MINHOME) { homec = 0; rootc = rest; }
     }
     p->nw[R_BOOT].sectors = bootc * cyl;
     p->nw[R_ROOT].sectors = rootc * cyl;
     p->nw[R_HOME].sectors = homec * cyl;
     p->nnew = homec ? 3 : 2;
+    return bootc + rootc + homec;
 }
 /* the sizes make a Zenix: a table's cylinders may be so big that they do not */
 static const char *sizes_bad(const struct t_plan *p)
@@ -557,14 +566,14 @@ static int fresh_rdb(struct t_plan *p, const struct tio *io, t_u32 base, t_u32 l
     return plan_write(p, io, base + rdsk, b, 0, 1);
 }
 
-static void place(struct t_plan *p, t_u32 base, t_u32 lo, t_u32 cyl, int zenixfs)
+static void place(struct t_plan *p, t_u32 base, t_u32 lo, t_u32 cyl, int zenixfs, int homefs)
 {
     t_u32 c = lo;
     for (int i = 0; i < p->nnew; i++) {
         struct t_newp *n = &p->nw[i];
         t_u32 cnt = n->sectors / cyl;
         n->lo = c; n->hi = c + cnt - 1; n->start = base + c * cyl;
-        n->dostype = i == R_BOOT ? 0x444F5301u : (i == R_ROOT && zenixfs) ? DT_ZENIXFS : DT_EXT2;
+        n->dostype = i == R_BOOT ? 0x444F5301u : ((i == R_ROOT && zenixfs) || (i == R_HOME && homefs)) ? DT_ZENIXFS : DT_EXT2;
         c += cnt;
     }
 }
@@ -612,14 +621,16 @@ static int whole_blocks(const struct tdisk *d, const struct tio *io, int want, t
     return n == want;
 }
 
-int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt *o, t_u32 maxsect, int zenixfs,
+int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt *o, t_u32 maxsect, const struct t_want *w,
                 struct t_plan *p, const char **why)
 {
     static t_u32 b[128];
     static t_u8 old[512];
     memset(p, 0, sizeof *p);
     p->opt = *o;
-    p->zenixfs = zenixfs;
+    int zenixfs = w->rootfs, homefs = w->homefs;
+    want = w;
+    p->zenixfs = zenixfs; p->homefs = homefs;
     p->atomic = 1;
     *why = 0;
     if (table_refused(d)) { *why = table_refused(d); return -1; }
@@ -649,9 +660,15 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             if (o->kind == TO_PART && t_part_refused(d, o->part)) { *why = t_part_refused(d, o->part); return -1; }
             t_u32 base = o->start, len = o->kind == TO_NEWCONT ? space - space % 2048 : o->sectors;
             t_u32 avail = (space < len ? space : len) / RDB_CYL - BOOTNEW;
-            sizes(p, avail, RDB_CYL);
+            t_u32 used = sizes(p, avail, RDB_CYL, why);
+            if (!used) return -1;
             if (sizes_bad(p)) { *why = sizes_bad(p); return -1; }
-            place(p, base, BOOTNEW, RDB_CYL, zenixfs);
+            if (o->kind == TO_NEWCONT && used < avail) {        /* a custom layout: the container as big as what it holds, the rest stays free */
+                unsigned long long l = ((unsigned long long)used + BOOTNEW) * RDB_CYL;
+                l = (l + 2047) / 2048 * 2048;
+                if (l < len) len = (t_u32)l;
+            }
+            place(p, base, BOOTNEW, RDB_CYL, zenixfs, homefs);
             p->cyl = RDB_CYL;
             for (int i = 0; i < p->nnew; i++) { p->nw[i].blk = base + 1 + (t_u32)i; blocks[i] = 1 + (t_u32)i; }
             if (fresh_rdb(p, io, base, len, blocks, 0)) { *why = "cannot read the disk"; return -1; }
@@ -677,9 +694,9 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         {
             t_u32 len = space - space % RDB_CYL;
             t_u32 avail = len / RDB_CYL - BOOTNEW;
-            sizes(p, avail, RDB_CYL);
+            if (!sizes(p, avail, RDB_CYL, why)) return -1;
             if (sizes_bad(p)) { *why = sizes_bad(p); return -1; }
-            place(p, 0, BOOTNEW, RDB_CYL, zenixfs);
+            place(p, 0, BOOTNEW, RDB_CYL, zenixfs, homefs);
             p->cyl = RDB_CYL;
             if (!whole_blocks(d, io, p->nnew, blocks)) {
                 p->atomic = 0;
@@ -723,15 +740,17 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             cnt = hi - lo;
         }
         unsigned long long sp = (unsigned long long)cnt * g->cyl;
-        t_u32 pend = 0;                                     /* a split: the chosen partition's end, in sectors of the region */
-        if (sp > space) {
-            cnt = space / g->cyl;
-            if (o->kind == TO_PART) { p->keep = 1; pend = d->part[o->part].start - g->base + d->part[o->part].sectors; }
-        }
+        t_u32 pend = 0, full = cnt;                         /* a split: the chosen partition's end, in sectors of the region */
+        if (sp > space) cnt = space / g->cyl;
         if ((unsigned long long)cnt * g->cyl < T_MINSECT) { *why = "less than 28 MB of room"; return -1; }
-        sizes(p, cnt, g->cyl);
+        t_u32 used = sizes(p, cnt, g->cyl, why);
+        if (!used) return -1;
         if (sizes_bad(p)) { *why = sizes_bad(p); return -1; }
-        place(p, g->base, lo, g->cyl, zenixfs);
+        if (o->kind == TO_PART && used < full) {            /* Zenix takes less than all of it: the rest stays a partition of the old name */
+            p->keep = 1; pend = d->part[o->part].start - g->base + d->part[o->part].sectors;
+        }
+        cnt = used;
+        place(p, g->base, lo, g->cyl, zenixfs, homefs);
         /* Kickstart 3.1's own disk code does not reach past 4 GB; with the highest boot priority a partition there could be read at wrapped places. Under Emu68 (an RDB in a 0x76) it is the driver's */
         if (g->base == 0 && d->kind == TD_RDB && (unsigned long long)p->nw[R_BOOT].start + p->nw[R_BOOT].sectors > 8388608ull) {
             *why = "the free space lies past 4 GB, where Kickstart 3.1 cannot start from: leave room for the boot partition below 4 GB";

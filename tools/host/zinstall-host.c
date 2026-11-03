@@ -210,7 +210,8 @@ static int fuzz(unsigned long rounds, int nimg, char **names)
         opts_tot += (unsigned long)n;
         for (int i = 0; i < n; i++) {
             const char *why;
-            if (t_plan_make(&d, &mio, &opts[i], 0, (int)(frnd() & 1), &pl, &why)) { refused++; continue; }
+            struct t_want fw = { (int)(frnd() % 3), (t_u32)(frnd() % 400000), (t_u32)(frnd() % 3 ? frnd() % 400000 : 0), (int)(frnd() & 1), (int)(frnd() & 1) };
+            if (t_plan_make(&d, &mio, &opts[i], frnd() % 4 ? 0 : (t_u32)(frnd() % (opts[i].sectors + 1)), &fw, &pl, &why)) { refused++; continue; }
             plans++;
             /* no plan may write outside the disk, or twice the same place with a different view */
             for (int w = 0; w < pl.nw1; w++) if (pl.w1[w].lba >= s) { printf("zinstall-fuzz: plan writes past the disk\n"); return 3; }
@@ -253,10 +254,18 @@ int main(int argc, char **argv)
         int k = atoi(argv[3]);
         if (k < 1 || k > n) { printf("no option %d\n", k); return 1; }
         t_u32 maxs = argc > 4 ? (t_u32)strtoul(argv[4], 0, 10) * 2048 : 0;
-        int zfs = argc > 5 && !strcmp(argv[5], "zfs");
-        if (t_plan_make(&d, &io, &opts[k - 1], maxs, zfs, &pl, &why)) { printf("refused: %s\n", why); return 1; }
+        struct t_want w = { TL_RECOMMENDED, 0, 0, argc > 5 && !strcmp(argv[5], "zfs"), 0 };
+        const char *lay = getenv("ZI_LAYOUT");
+        if (lay && !strcmp(lay, "one")) w.layout = TL_ONE;
+        if (lay && !strcmp(lay, "custom")) {
+            w.layout = TL_CUSTOM;
+            w.root = (t_u32)strtoul(getenv("ZI_ROOT") ? getenv("ZI_ROOT") : "0", 0, 10) * 2048;
+            w.home = (t_u32)strtoul(getenv("ZI_HOME") ? getenv("ZI_HOME") : "0", 0, 10) * 2048;
+        }
+        if (getenv("ZI_HOMEFS") && !strcmp(getenv("ZI_HOMEFS"), "zenixfs")) w.homefs = 1;
+        if (t_plan_make(&d, &io, &opts[k - 1], maxs, &w, &pl, &why)) { printf("refused: %s\n", why); return 1; }
         for (int i = 0; i < pl.nnew; i++)
-            printf("new %s start=%u sectors=%u blk=%u lo=%u hi=%u\n", pl.nw[i].label, pl.nw[i].start, pl.nw[i].sectors, pl.nw[i].blk, pl.nw[i].lo, pl.nw[i].hi);
+            printf("new %s start=%u sectors=%u blk=%u lo=%u hi=%u dostype=%08x\n", pl.nw[i].label, pl.nw[i].start, pl.nw[i].sectors, pl.nw[i].blk, pl.nw[i].lo, pl.nw[i].hi, pl.nw[i].dostype);
         printf("atomic %d pri %d aos %s nw1 %d commit1 %d nw2 %d\n", pl.atomic, pl.pri, pl.aos[0] ? pl.aos : "-", pl.nw1, pl.commit1, pl.nw2);
         const char *ch = getenv("ZI_CHANGE");
         if (ch) {

@@ -42,9 +42,11 @@ if r.returncode:
 
 MB = 2048
 env = dict(os.environ, ASAN_OPTIONS="detect_leaks=0")
+CUT_ENV = {}
 
 
 def run(*args, **e):
+    e = dict(CUT_ENV, **e)
     return subprocess.run([BIN] + [str(a) for a in args], capture_output=True, text=True, env=dict(env, **{k: str(v) for k, v in e.items()}))
 
 
@@ -290,7 +292,7 @@ def new_parts(out):
     for l in out.splitlines():
         if l.startswith("new "):
             w = l.split()
-            res[w[1]] = {k: int(v) for k, v in (x.split("=") for x in w[2:])}
+            res[w[1]] = {k: int(v, 16 if k == "dostype" else 10) for k, v in (x.split("=") for x in w[2:])}
     return res
 
 
@@ -652,6 +654,51 @@ try:
     cb, cyls = img_card16(p2)
     cut_test("the owner's card, DH2 split", p2, [("DH0", 2 * cb, 256 * cb), ("DH1", 258 * cb, 512 * cb)], "part", "ide0p3", 5000)
     torn_test("the owner's card, DH2 split", p2, "part", "ide0p3", 5000)
+
+    # ---- layouts (the owner's live test, 2026-11-03): recommended, one partition, custom; /home's filesystem ----
+    p = os.path.join(T, "lay.hdf")
+    img_rdb_free(p)
+    b0 = p + ".b"
+    cp(p, b0)
+    k = opt_for(p, "free")
+    r = run("install", p, k, ZI_TABLE_ONLY=1)
+    nw = new_parts(r.stdout)
+    check("layout recommended on 350 MB: boot 16, root a third (at least 128), /home the rest", nw["ZB0"]["sectors"] // 2048 == 16 and 110 <= nw["ZR0"]["sectors"] // 2048 <= 140 and "ZH0" in nw, r.stdout)
+    cp(b0, p)
+    r = run("install", p, k, ZI_TABLE_ONLY=1, ZI_LAYOUT="one")
+    nw = new_parts(r.stdout)
+    check("layout one partition: boot and root only, the root all the rest", "ZH0" not in nw and nw["ZR0"]["sectors"] > 300 * MB, r.stdout)
+    cp(b0, p)
+    r = run("install", p, k, ZI_LAYOUT="one")
+    t = read_table(p)
+    check("  it installs, two new partitions", r.returncode == 0 and sorted(x[0] for x in t if x[0].startswith("Z")) == ["ZB0", "ZR0"], str(t))
+    cp(b0, p)
+    r = run("install", p, k, ZI_TABLE_ONLY=1, ZI_LAYOUT="custom", ZI_ROOT=100, ZI_HOME=50, ZI_HOMEFS="zenixfs")
+    nw = new_parts(r.stdout)
+    check("layout custom: root 100 MB, /home 50 MB as typed (whole cylinders), the rest left free", 100 * MB <= nw["ZR0"]["sectors"] < 101 * MB and 50 * MB <= nw["ZH0"]["sectors"] < 51 * MB, r.stdout)
+    check("  /home on ZenixFS: its dostype", nw["ZH0"]["dostype"] == 0x5A4E4601, r.stdout)
+    cp(b0, p)
+    r = run("install", p, k, ZI_LAYOUT="custom", ZI_ROOT=100, ZI_HOME=0)
+    t = read_table(p)
+    check("  custom with no /home", r.returncode == 0 and "ZH0" not in [x[0] for x in t], str(t))
+    for root, home, why in ((20, 50, "at least 32"), (100, 2, "at least 4"), (300, 300, "do not fit")):
+        cp(b0, p)
+        r = run("install", p, k, ZI_LAYOUT="custom", ZI_ROOT=root, ZI_HOME=home)
+        check("  custom %d + %d MB refused (%s), nothing written" % (root, home, why), r.returncode == 1 and why in r.stdout and not changed_sectors(b0, p), r.stdout)
+    os.unlink(b0)
+    # the owner's card: custom sizes in DH2 decide the split; what is left stays DH2
+    p = os.path.join(T, "card16c.hdf")
+    cb, cyls = img_card16(p)
+    k = opt_for(p, "part", "ide0p3")
+    r = run("install", p, k, ZI_LAYOUT="custom", ZI_ROOT=1024, ZI_HOME=3000)
+    t = read_table(p)
+    rest = [x for x in t if x[0] == "DH2"]
+    check("the card, custom 1 GB root and 3 GB /home in DH2: the rest stays DH2", r.returncode == 0 and rest and 9 * 1024 * MB < rest[0][2] < 10 * 1024 * MB, str(t))
+    p = os.path.join(T, "card16d.hdf")
+    cb, cyls = img_card16(p)
+    CUT_ENV.update(ZI_LAYOUT="custom", ZI_ROOT="1024", ZI_HOME="3000")
+    cut_test("the card, custom layout in DH2", p, [("DH0", 2 * cb, 256 * cb), ("DH1", 258 * cb, 512 * cb)], "part", "ide0p3")
+    CUT_ENV.clear()
 
     # ---- a whole disk ----
     p = os.path.join(T, "blank.hdf")
