@@ -11,8 +11,10 @@
 #   c  the Emu68 card's layout (an MBR, FAT, 0x76 with an RDB, a free slot): FAT and the RDB's partitions unchanged; started from
 #      the kernel floppy as the note says, the new root is found in the new 0x76
 #   r  the refusals as a person meets them: a disk with no room, a table with a bad checksum, wrong words: nothing written
-#   o  the owner's kind of card (16 GB, PFS3 in the RDB): DH2 split into Zenix and a new empty DH2 of the old name and type; DH0, DH1, the
-#      LSEG chain the same; then zinstall --undo from the floppy gives the old table back, every sector
+#   o  a card of the owner's kind (16 GB, PFS3 in the RDB): DH2 deleted in the partition step, Zenix in its place; DH0, DH1, the LSEG
+#      chain the same; it boots and the user logs in; then zinstall --undo from the floppy gives the old table back, every sector
+#   k  a disk with Zenix already: reinstall keeping /home and the users (the user's file is still there, the user logs in), then
+#      reinstall erasing /home (the users kept, the file gone)
 #   h  no floppy: from AmigaOS on a 68060 (zenixboot, the kernel and the RAM disk with the set, as files on DH0); --list, the install
 #   n  from an existing Zenix: its root stays mounted on the same disk; the files through zpkg --fetch from a test server over
 #      FS-UAE's A2065 into the free space; the new system boots, the old root unchanged
@@ -22,7 +24,7 @@ cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-/tmp/zenix-zinstall}; mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 SER=${ZENIX_SERIAL:-/tmp/zenix-zinstall-serial}
-PARTS="${*:-f a m z c r n o h}"
+PARTS="${*:-f a m z c r n o h k}"
 make -s BUILD=$BD all install-floppies $BD/zenix.adf $BD/zenix-zfs.adf >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL the build"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "FAIL the host tool"; exit 1; }
 BD=$(cd "$BD" && pwd)
@@ -191,7 +193,7 @@ sleep 1
 send cat /etc/motd\r
 sleep 1
 send zinstall --list\r
-wait What could be done 30
+wait What zinstall could do here 30
 sleep 2
 send zinstall\r
 wait Choose a number 30
@@ -788,13 +790,13 @@ wait zenix:/# 120
 sleep 1
 send $ACC_PREP\r
 wait zi-prep 10
-send zinstall --zenix-size 5000 $ACC_OPTS\r
+send zinstall --delete DH2 $ACC_OPTS --layout custom --root-size 200 --home-size 300\r
 wait Choose a number 30
-send 3\r
+send \r
 wait Choose .Return = 1, ext2 30
 send \r
-wait type its name exactly 30
-send DH2\r
+wait Type yes to go on 30
+send yes\r
 $INSTALLED
 sleep 2
 send echo zi-e""nd\r
@@ -803,13 +805,17 @@ stop
 EOS
     run $OUT/o.fs-uae 1800 $OUT/o.txt $OUT/o1.log
     check "o: the install says it is done" "$(has $OUT/o1.log '^Done\. Zenix is on this disk')"
-    check "o: the plan says the rest stays DH2, empty, to format from AmigaOS" "$(has $OUT/o1.log 'stays a partition called DH2')"
+    check "o: the plan says DH2 is deleted, what is on it lost" "$(has $OUT/o1.log 'Partition DH2 .* is DELETED')"
     $CK sums $d DH0 DH1 >$OUT/o.after
     check "o: DH0 and DH1 byte-identical" "$(yes_if cmp $OUT/o.before $OUT/o.after)"
     check "o: the FileSysHeader, its 121 LSEG blocks, DH0's and DH1's PART blocks: byte-identical" "$([ "$($CK bytes $d 1 124)" = "$(cat $OUT/o.rdb)" ] && echo ok || echo bad)"
     $CK parts $d >$OUT/o.parts
-    check "o: the chain: DH0, DH1, ZB0, ZR0, ZH0, DH2" "$([ "$(cut -d' ' -f1 $OUT/o.parts | tr '\n' ' ')" = 'DH0 DH1 ZB0 ZR0 ZH0 DH2 ' ] && echo ok || echo bad)"
-    check "o: the new DH2: PFS3, mountable, not bootable, about 8 GB" "$(awk '$1 == "DH2" && $4 == "50465303" && $5 == 0 && $3 > 14000000 && $3 < 20000000 { ok = 1 } END { print ok ? "ok" : "bad" }' $OUT/o.parts)"
+    check "o: the table: DH0, DH1, then Zenix's three where DH2 was" "$([ "$(cut -d' ' -f1 $OUT/o.parts | tr '\n' ' ')" = 'DH0 DH1 ZB0 ZR0 ZH0 ' ] && echo ok || echo bad)"
+    # it starts, and the new user logs in
+    fsconf $OUT/o3.fs-uae $d 2048 8192 none
+    boot_script $OUT/o3.txt amiga2 bea beapw2 rootpw2
+    run $OUT/o3.fs-uae 900 $OUT/o3.txt $OUT/o3.log
+    booted o $OUT/o3.log ext2 amiga2 bea
     host_fs o $d ZR0 ext2
     # the way back, from the floppy: the copy of the table in the new root
     cat >$OUT/o2.txt <<'EOS'
@@ -825,7 +831,7 @@ wait zi-end 30
 stop
 EOS
     run $OUT/o.fs-uae 600 $OUT/o2.txt $OUT/o2.log
-    check "o: --undo says the split partition comes back, to be formatted" "$(has $OUT/o2.log 'split a partition')"
+    check "o: --undo says the deleted partition comes back, to be formatted" "$(has $OUT/o2.log 'split or deleted partitions')"
     check "o: --undo: the first 256 sectors exactly as before the install" "$([ "$($CK bytes $d 0 256)" = "$(cat $OUT/o.table)" ] && echo ok || echo bad)"
     check "o: and DH0, DH1 still the same" "$($CK sums $d DH0 DH1 | cmp -s - $OUT/o.before && echo ok || echo bad)"
     empty $d
@@ -851,7 +857,7 @@ sleep 1
 send cat /etc/motd; free\r
 sleep 2
 send zinstall --list\r
-wait What could be done 30
+wait What zinstall could do here 30
 sleep 2
 send $ACC_PREP\r
 wait zi-prep 10
@@ -882,6 +888,108 @@ EOS
     host_fs h $d ZR0 ext2
     boot_vol h $d $BD/kernel.bin
     empty $d $OUT/h-dh0.img
+}
+
+part_k() {
+    local d=$OUT/k.hdf
+    truncate -s 0 $d; truncate -s 300M $d
+    fsconf $OUT/k.fs-uae $d 2048 8192 4
+    cat >$OUT/k.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS\r
+wait Choose a number 30
+send 1\r
+wait Choose .Return = 1, ext2 30
+send \r
+wait To erase the whole disk 30
+send ERASE ide0\r
+$INSTALLED
+sleep 1
+stop
+EOS
+    run $OUT/k.fs-uae 1800 $OUT/k.txt $OUT/k1.log
+    check "k: the first install is done" "$(has $OUT/k1.log '^Done\. Zenix is on this disk')"
+    fsconf $OUT/k2.fs-uae $d 2048 8192 none
+    boot_script $OUT/k2.txt amiga2 bea beapw2 rootpw2          # bea writes /home/bea/note
+    run $OUT/k2.fs-uae 900 $OUT/k2.txt $OUT/k2.log
+    check "k: the first system boots, bea's file written" "$(has $OUT/k2.log '^was-here$')"
+    $CK sums $d ZH0 >/dev/null
+    # reinstall, keeping /home and the users: the zpkg advice, the plan says what is kept
+    cat >$OUT/k3.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send zinstall --list\r
+sleep 3
+send zinstall\r
+wait This disk has Zenix already 30
+wait Choose a number .Return = 1 30
+send \r
+wait Keep the users 30
+send \r
+wait Choose .Return = 1, ext2 30
+send \r
+wait Type yes to go on 30
+send yes\r
+$INSTALLED
+sleep 1
+stop
+EOS
+    run $OUT/k.fs-uae 1800 $OUT/k3.txt $OUT/k3.log
+    check "k: the reinstall offers itself, with zpkg -Syu named for updates" "$(grep -aq 'zpkg -Syu in Zenix instead' $OUT/k3.log && echo ok || echo bad)"
+    check "k: the plan: ZR0 formatted, ZH0 kept" "$(grep -aq 'ZR0 (the system part) is formatted again' $OUT/k3.log && grep -aq 'ZH0 (your files, /home) is KEPT' $OUT/k3.log && echo ok || echo bad)"
+    check "k: the reinstall is done, the users kept" "$(grep -aq '^Done\. Zenix is on this disk' $OUT/k3.log && grep -aq 'users and the computer.s name of the old Zenix are kept' $OUT/k3.log && echo ok || echo bad)"
+    cat >$OUT/k4.txt <<'EOS'
+wait amiga2 login: 240
+sleep 1
+send bea\r
+wait Password: 30
+send beapw2\r
+wait amiga2: 60
+sleep 1
+send cat /home/bea/note; echo zi-k""4\r
+wait zi-k4 30
+send exit\r
+sleep 2
+stop
+EOS
+    run $OUT/k2.fs-uae 600 $OUT/k4.txt $OUT/k4.log
+    check "k: after the reinstall bea logs in with her old password, her file is still there" "$(has $OUT/k4.log '^was-here$')"
+    host_fs k $d ZR0 ext2
+    # reinstall erasing /home: the users kept, the file gone
+    cat >$OUT/k5.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send zinstall --reinstall --erase-home --keep-users --root-fs ext2 --home-fs ext2\r
+wait Type yes to go on 30
+send yes\r
+$INSTALLED
+sleep 1
+stop
+EOS
+    run $OUT/k.fs-uae 1800 $OUT/k5.txt $OUT/k5.log
+    check "k: the plan says /home is erased" "$(has $OUT/k5.log 'ZH0 (your files, /home) is ERASED')"
+    check "k: the second reinstall is done" "$(has $OUT/k5.log '^Done\. Zenix is on this disk')"
+    cat >$OUT/k6.txt <<'EOS'
+wait amiga2 login: 240
+sleep 1
+send bea\r
+wait Password: 30
+send beapw2\r
+wait amiga2: 60
+sleep 1
+send ls -a /home/bea; cat /home/bea/note; echo zi-k""6\r
+wait zi-k6 30
+send exit\r
+sleep 2
+stop
+EOS
+    run $OUT/k2.fs-uae 600 $OUT/k6.txt $OUT/k6.log
+    check "k: after erasing /home bea still logs in; her file is gone" "$(grep -aq '^zi-k6' $OUT/k6.log && ! grep -aq '^was-here$' $OUT/k6.log && echo ok || echo bad)"
+    host_fs k $d ZR0 ext2
+    empty $d
 }
 
 for p in $PARTS; do "part_$p"; done

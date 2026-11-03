@@ -206,6 +206,8 @@ static int fuzz(unsigned long rounds, int nimg, char **names)
         okread++;
         for (int i = 0; i < d.nparts; i++) (void)t_part_refused(&d, i);
         (void)t_whole_refused(&d);
+        if (frnd() % 3 == 0)                    /* the partition step: some marked to delete */
+            for (int i = 0; i < d.nparts; i++) if (frnd() % 2 && !t_del_refused(&d, i)) d.part[i].del = 1;
         int n = t_options(&d, &mio, opts, T_MAXOPT);
         opts_tot += (unsigned long)n;
         for (int i = 0; i < n; i++) {
@@ -219,7 +221,7 @@ static int fuzz(unsigned long rounds, int nimg, char **names)
             if (opts[i].kind == TO_WHOLE) continue;
             for (int q = 0; q < d.nparts; q++) {
                 const struct t_part *x = &d.part[q];
-                if (q == opts[i].part || !x->sectors) continue;
+                if (q == opts[i].part || !x->sectors || x->del) continue;
                 if (x->how == TP_MBR && x->mbrtype == 0x76 && opts[i].region >= 0 && x->holds == opts[i].region) continue;
                 if (opts[i].part >= 0 && d.part[opts[i].part].how == TP_RDB && x->how == TP_MBR && x->holds == d.part[opts[i].part].region) continue;
                 for (int w = 0; w < pl.nnew; w++) {
@@ -247,8 +249,37 @@ int main(int argc, char **argv)
     int nbz = 0;
     if (getenv("ZI_BUSY") && sscanf(getenv("ZI_BUSY"), "%u:%u", &bz.start, &bz.sectors) == 2) nbz = 1;
     if (t_read(&d, &io, sect, &bz, nbz)) { printf("cannot read\n"); return 1; }
+    if (getenv("ZI_DELETE")) {                  /* the partition step: names (labels or devices) marked to delete */
+        static char dl[256];
+        strncpy(dl, getenv("ZI_DELETE"), sizeof dl - 1);
+        for (char *t = strtok(dl, ","); t; t = strtok(0, ",")) {
+            int k = -1;
+            for (int i = 0; i < d.nparts; i++) if (!strcmp(d.part[i].label, t) || !strcmp(d.part[i].dev, t)) k = i;
+            const char *w = k < 0 ? "no such partition" : t_del_refused(&d, k);
+            if (w) { printf("delete refused: %s: %s\n", t, w); return 1; }
+            d.part[k].del = 1;
+        }
+    }
     int n = t_options(&d, &io, opts, T_MAXOPT);
     if (!strcmp(argv[1], "list")) { show(&d); show_opts(&d, opts, n); return 0; }
+    if (!strcmp(argv[1], "reinstall") || !strcmp(argv[1], "remove")) {      /* the Zenix already there: made again, or taken out */
+        const char *why;
+        struct t_want w = { TL_RECOMMENDED, 0, 0, argc > 3 && !strcmp(argv[3], "zfs"), 0 };
+        int erase = getenv("ZI_ERASE_HOME") != 0;
+        printf("zset zb=%d zr=%d zh=%d\n", d.zb, d.zr, d.zh);
+        if (!strcmp(argv[1], "remove") ? t_plan_remove(&d, &io, &pl, &why) : t_plan_reinstall(&d, &io, &w, erase, &pl, &why)) { printf("refused: %s\n", why); return 1; }
+        if (getenv("ZI_CUT")) cut = atol(getenv("ZI_CUT"));
+        if (t_commit(&io, pl.w1, pl.nw1, &why)) { printf("commit: %s\n", why); return 1; }
+        printf("stage1 %ld\n", written);
+        if (!strcmp(argv[1], "reinstall")) {
+            if (fake_fs(&pl.nw[R_ROOT], 0xC3)) return 1;
+            if (pl.erase_home && fake_fs(&pl.nw[R_HOME], 0x3C)) return 1;
+            if (write_boot(&pl)) return 1;
+            if (t_commit(&io, pl.w2, pl.nw2, &why)) { printf("commit2: %s\n", why); return 1; }
+        }
+        printf("done %ld\n", written);
+        return 0;
+    }
     if (!strcmp(argv[1], "install") && argc >= 4) {
         const char *why;
         int k = atoi(argv[3]);
