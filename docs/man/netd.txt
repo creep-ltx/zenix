@@ -76,7 +76,7 @@ FILES
                              an address and its names a line
     /etc/resolv.conf         name servers: "nameserver 10.0.2.3" lines
     /etc/network/interfaces  the interfaces (ifconfig(8))
-    /sbin/net/NAME           the drivers (a2065(4), genet(4))
+    /sbin/net/NAME           the drivers (a2065(4), genet(4), ne2000(4))
     /usr/share/licenses/lwIP lwIP's licence
 
 NOTES

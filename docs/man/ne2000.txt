@@ -1,0 +1,77 @@
+NE2000(4)		Zenix manual
+
+NAME
+    ne2000 - an NE2000 PC Card (such as the Netgear FA411) in the
+    A600/A1200's PC Card slot
+
+SYNOPSIS
+    /sbin/net/ne2000 IFACE    (started by netd(8), never by hand)
+
+    In /etc/network/interfaces:
+        auto eth0
+        iface eth0 inet dhcp
+            driver ne2000
+
+DESCRIPTION
+    The driver of an Ethernet PC Card in the side slot of an A1200 (or
+    an A600): the Netgear FA411 (10/100 Mbit/s, an ASIX AX88x90 chip)
+    and other NE2000 cards (a DP8390 chip or a clone). netd starts it
+    for a stanza whose driver is ne2000 and restarts it when it ends.
+
+    It claims the slot (no other driver may touch it), resets the
+    card, reads the card's own description (its CIS) and takes it only
+    if it says it is a network card, configures it, finds the chip,
+    reads the card's MAC address and, on an AX88x90, its PHY (the link
+    and its speed, 10 or 100 Mbit/s, half or full duplex, looked at
+    every second). It gives the kernel a program that stops the chip
+    and switches the card off: the kernel runs it when the driver or
+    netd ends.
+
+    Frames are copied between the card's 16 KB of memory and netd's
+    buffers through the card's data port, 16 bits at a time. It is
+    polled (no interrupts): it looks at the card again at once while
+    frames move, then after 10 ms, and every 20 ms when idle; netd's
+    doorbell wakes it when there is a frame to send.
+
+    Taking the card out: the driver sees it, says so, and the link is
+    down; frames to send are dropped (TCP sends them again). Putting
+    the same card back: once it has stayed in for half a second, the
+    driver sets it up again and carries on. A different card: the
+    driver ends, and netd starts it for the new one.
+
+DIAGNOSTICS
+    In the kernel log (dmesg), as "ne2000: IFACE: ...":
+    "no PC Card slot (this is not an A600 or A1200)";
+    "memory lies in the PC Card slot's addresses (0x600000-0xa4ffff):
+    a card cannot be used on this machine" (the kernel's line before
+    it, "drv: memory at A-B ...", says where the memory is); "no card
+    in the PC Card slot"; "card: "MAKER" "PRODUCT", manufacturer M card
+    C, function F" (what the card says of itself); "not a network card
+    (function F): left alone"; "AX88790 at port 300 (configuration N,
+    registers at R)"; "link up, 100 Mbit/s full duplex"; "the card left
+    the slot"; "the card is back"; "starting the chip again".
+
+NOTES
+    No interrupts, no multicast, no promiscuous mode. 8-bit NE1000
+    cards are refused. Cards with their MAC address elsewhere than the
+    chip's PROM (some old cards keep it in their attribute memory) are
+    refused when the address read is not a usable one.
+
+    A machine with memory between 0x600000 and 0x9FFFFF (8 MB of
+    Zorro II or some accelerators' memory there) cannot use a PC Card:
+    the card and the memory answer at the same addresses. The kernel
+    then refuses the slot; the card must not be put in while such a
+    machine runs.
+
+    Some A1200s with an accelerator do not start with a card in the
+    slot: put the card in after power-on.
+
+    Not yet tried on a real card: FS-UAE emulates no PC Card network
+    card, so the chip is tested on the PC against a model, and in
+    FS-UAE only what the driver does with an empty slot, a PC Card IDE
+    disk and memory in the slot's addresses (tools/eth-test.sh p i m).
+    DESIGN D36 (docs/d36-pcmcia-ne2000.md) has the first steps on the
+    A1200.
+
+SEE ALSO
+    netd(8), ifconfig(8), a2065(4), genet(4)

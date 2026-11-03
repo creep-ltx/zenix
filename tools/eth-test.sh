@@ -12,7 +12,8 @@
 # Part g (DESIGN D19 step 9): the CM4's Ethernet driver /sbin/net/genet where there is no GENET (the normal case in
 # the emulator: no Emu68, so the hardware table names none): it says so and ends without touching anything (no
 # claim), netd starts it again and gives it up after 5 ends, the rest of the network (the loopback) keeps working.
-#   tools/eth-test.sh [PART...]      e: the A2065 (all of the above), g: genet without a GENET
+#   tools/eth-test.sh [PART...]      e: the A2065 (all of the above), g: genet without a GENET, p i m: the PC Card
+#                                    NE2000 driver with an empty slot, an IDE card, memory in the slot's addresses
 # Needs unprivileged user namespaces (unshare -rn), as slip-test.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -152,8 +153,83 @@ EOS
     e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-g.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (g)" || { echo "FAIL e2fsck (g)"; pass=0; }
 }
 
-[ $# = 0 ] && set -- e g
+# Parts p, i, m (DESIGN D36): the PC Card NE2000 driver /sbin/net/ne2000. FS-UAE 3.2 emulates no PC Card network
+# card (only memory and IDE cards in Gayle's slot), so these are its refusals, each a clean end that netd gives up
+# after 5 tries while the rest of the network keeps working: p an empty slot (the slot claimed, then "no card", the
+# claim released with no quiesce step, no stray interrupt); i FS-UAE's PC Card IDE disk in the slot (its CIS read
+# through the emulated Gayle: function 4, "not a network card", left alone); m 8 MB of Zorro II RAM (0x200000-0x9fffff,
+# in the slot's addresses: the kernel refuses the claim and says where the memory is). The chip and the frames are
+# tested on the PC against a model (tools/ne2000-test.sh).
+part_pc() {     # part_pc NAME CONFIG: the driver's five tries and their kernel log
+    local nm=$1 conf=$2
+    rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
+    printf 'auto eth0\niface eth0 inet dhcp\n    driver ne2000\n' > $OUT/interfaces-$nm
+    put $OUT/interfaces-$nm /etc/network/interfaces 644
+    cat > $OUT/pc-$nm.sh <<EOS
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    dmesg | grep -q 'ne2000 given up' && break
+    sleep 1
+done
+ifconfig > /tmp/$nm-ifc.txt 2>&1; echo st=\$? >> /tmp/$nm-ifc.txt
+ping -c 2 127.0.0.1 > /tmp/$nm-ping.txt 2>&1; echo st=\$? >> /tmp/$nm-ping.txt
+dmesg > /tmp/$nm-k.txt
+sync
+EOS
+    put $OUT/pc-$nm.sh /tests/pc.sh 755
+    cat > $OUT/$nm.txt <<EOS
+wait zenix:/# 90
+sleep 1
+send sh /tests/pc.sh > /tmp/pc.out 2>&1; echo pc-do""ne\r
+wait pc-done 120
+stop
+EOS
+    ZENIX_BUILD=$BD tools/run-test.sh "$conf" 200 "$OUT/$nm.txt" > $OUT/$nm.log 2>&1
+    local rc=$? f
+    [ $rc = 0 ] || { echo "FAIL $nm: the run (exit $rc)"; tail -3 $OUT/$nm.log; pass=0; }
+    for f in ifc ping k; do get /tmp/$nm-$f.txt > $OUT/$nm-$f.txt; done
+}
+pc_common() {   # pc_common NAME LINE: LINE five times, status 1 five times, given up; no fault, no eth0, ping works
+    local nm=$1 line=$2 k=$OUT/$1-k.txt ok n
+    n=$(grep -acF "ne2000: eth0: $line" $k)
+    ok=0; [ "$n" = 5 ] && [ "$(grep -acE 'net: eth0: /sbin/net/ne2000 \(pid [0-9]+\) ended, status 1$' $k)" = 5 ] &&
+        grep -aq 'net: eth0: /sbin/net/ne2000 given up after 5 ends in 60 s (ifup eth0 starts it again)' $k && ok=1
+    check "$nm: \"$line\" and status 1, five times, then given up ($n lines)" $ok "$(grep -a 'ne2000\|eth0\|drv:' $k | tail -12)"
+    ok=0; ! grep -aq '\[kernel\]\|stray\|panic' $k && ! grep -aq '^eth0' $OUT/$nm-ifc.txt && grep -aqx 'st=0' $OUT/$nm-ifc.txt &&
+        grep -aq '2 packets transmitted, 2 received, 0% packet loss' $OUT/$nm-ping.txt && ok=1
+    check "$nm: no fault, no stray interrupt, no eth0; netd still serves (ping 127.0.0.1)" $ok "$(grep -a 'kernel\|stray\|panic' $k | tail -5; cat $OUT/$nm-ifc.txt $OUT/$nm-ping.txt)"
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-$nm.log 2>&1 && echo "PASS the host's e2fsck finds the root clean ($nm)" || { echo "FAIL e2fsck ($nm)"; pass=0; }
+}
+part_p() {
+    part_pc p fsuae/a1200-020.fs-uae
+    pc_common p "no card in the PC Card slot"
+    local k=$OUT/p-k.txt ok
+    ok=0; [ "$(grep -acE 'drv: pid [0-9]+ \(ne2000\) claims the device at 0x?a00000 \(320 KB\)' $k)" = 5 ] &&
+        [ "$(grep -acE 'drv: claim of 0x?a00000 \(pid [0-9]+\) released \(the driver ended\): 0 quiesce steps run' $k)" = 5 ] && ok=1
+    check "p: the slot claimed (320 KB at 0xa00000) and released with no quiesce step, each time" $ok "$(grep -a 'drv:' $k | tail -6)"
+}
+part_i() {
+    dd if=/dev/zero of=$OUT/card.hdf bs=1k count=2048 2>/dev/null
+    sed "/^\[fs-uae\]/a hard_drive_1 = $OUT/card.hdf\nhard_drive_1_controller = scide" fsuae/a1200-020.fs-uae > "$OUT/a1200-pcide.fs-uae"
+    part_pc i "$OUT/a1200-pcide.fs-uae"
+    pc_common i "not a network card (function 4): left alone"
+    local k=$OUT/i-k.txt ok
+    ok=0; [ "$(grep -acE 'ne2000: eth0: card: .*function 4$' $k)" = 5 ] && ok=1
+    check "i: FS-UAE's PC Card IDE disk: its CIS read through Gayle ($(grep -a 'ne2000: eth0: card:' $k | head -1 | sed 's/.*card: //'))" $ok "$(grep -a 'ne2000' $k | tail -6)"
+}
+part_m() {
+    sed 's/^fast_memory = 0/fast_memory = 8192/' fsuae/a1200-020.fs-uae > "$OUT/a1200-z2ram8.fs-uae"
+    part_pc m "$OUT/a1200-z2ram8.fs-uae"
+    pc_common m "memory lies in the PC Card slot's addresses (0x600000-0xa4ffff): a card cannot be used on this machine"
+    local k=$OUT/m-k.txt ok
+    ok=0; [ "$(grep -acE "drv: memory at 0x?[0-9a-f]+-0x?9fffff is in the PC Card slot's addresses: the slot is not claimed" $k)" = 5 ] &&
+        ! grep -aq 'claims the device at 0x\?a00000' $k && ok=1
+    check "m: 8 MB of Zorro II RAM: the kernel refuses the slot and says where the memory is, nothing claimed" $ok "$(grep -a 'drv:\|ne2000' $k | tail -6)"
+}
+
+[ $# = 0 ] && set -- e g p i m
 for p in "$@"; do
-    case $p in e|g) "part_$p" ;; *) echo "eth-test: unknown part $p"; exit 2 ;; esac
+    case $p in e|g|p|i|m) "part_$p" ;; *) echo "eth-test: unknown part $p"; exit 2 ;; esac
 done
 exit $((1 - pass))

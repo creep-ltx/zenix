@@ -14,9 +14,9 @@ DESCRIPTION
     The network server, netd(8), has the loopback lo (127.0.0.1) and the
     interfaces /etc/network/interfaces describes: SLIP on the serial
     port (the cable to a PC: docs/network-serial.md) and Ethernet cards,
-    each run by its driver in /sbin/net (a2065(4)). ifconfig shows them;
-    root changes them. ifup and ifdown are other names of the same
-    program.
+    each run by its driver in /sbin/net (a2065(4), genet(4),
+    ne2000(4)). ifconfig shows them; root changes them. ifup and
+    ifdown are other names of the same program.
 
     ifconfig            every interface: its flags (UP, RUNNING, LOOPBACK,
                         POINTOPOINT or BROADCAST (Ethernet), DEFAULT when
