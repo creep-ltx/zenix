@@ -13,6 +13,7 @@
 #include "kernel.h"
 #include "netproto.h"
 #include "hwinfo.h"
+#include "zine.h"
 
 _Static_assert(sizeof(struct udrvattach) == UDRVATTACH_FIRST, "udrvattach's first size is frozen");
 _Static_assert(sizeof(struct udrvxfer) == UDRVXFER_FIRST, "udrvxfer's first size is frozen");
@@ -36,10 +37,39 @@ static const struct hwinfo *hw(void)
     return h->magic == HWINFO_MAGIC ? h : 0;
 }
 
-/* the register window of the device at base: GENET's, or a Zorro board's (never a RAM board) */
+/* DESIGN D36: memory in the PC Card slot's addresses (0x600000-0xA4FFFF)? Zenix's pools, and any RAM board the boot
+ * listed (one Zenix did not take still answers there); the first clash is said */
+static int slot_clash(const struct hwinfo *h)
+{
+    const struct zine_range *r;
+    u32 n = mem_ranges(&r), lo = 0, hi = 0;
+    for (u32 i = 0; i < n + (h ? h->nboards : 0) && i < n + HW_MAXBOARDS; i++) {
+        if (i < n) { lo = r[i].lo; hi = r[i].hi; }
+        else {
+            const struct hwboard *b = &h->board[i - n];
+            if (!(b->type & 0x20)) continue;
+            lo = b->addr; hi = b->addr + b->size;
+        }
+        if (lo < DRV_PCMCIA + DRV_PCMCIA_SIZE && DRV_PCMCIA_LOW < hi) {
+            kprintf("drv: memory at %p-%p is in the PC Card slot's addresses: the slot is not claimed\n", lo, hi - 1);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* the register window of the device at base: GENET's, a Zorro board's (never a RAM board), or the PC Card slot */
 static long window(u32 base, u32 *size)
 {
     const struct hwinfo *h = hw();
+    if (base == DRV_PCMCIA) {
+        if (!ide_gayle())
+            return -ENODEV;
+        if (slot_clash(h))
+            return -EADDRINUSE;
+        *size = DRV_PCMCIA_SIZE;
+        return 0;
+    }
     if (!h || !base)
         return -ENODEV;
     if (h->genet && base == h->genet) {

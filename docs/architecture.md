@@ -1374,7 +1374,9 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   driver's last transfer; netd ignores SIGPIPE; POLLHUP tells the driver netd is gone). **`SYS_drv` (92)** is only for
   a child of the running `net` server (-EPERM otherwise, root included; -ECONNRESET when none runs): `DRV_HWINFO` (a
   copy of the hardware table, first size `HWINFO_FIRST` 408: user-visible now, it grows at its end), `DRV_CLAIM` (a
-  device the table names, GENET's base or a Zorro board's, never a RAM board: the only owner, a second claim -EBUSY;
+  device the table names, GENET's base or a Zorro board's, never a RAM board, or `DRV_PCMCIA` 0xA00000, the A600/A1200's
+  PC Card slot (its window 0xA00000-0xA4FFFF; -ENODEV without an A600/A1200 Gayle, `ide_gayle()`; -EADDRINUSE when a
+  memory pool or a RAM board lies in 0x600000-0xA4FFFF, logged with its range; DESIGN D36): the only owner, a second claim -EBUSY;
   4 claims), `DRV_DMAMEM` (one region a claim, 64-byte aligned, whole lines, at most 4 MB, owned by the claim: neither
   netd's nor the driver's end frees it before the driver is reaped), `DRV_QUIESCE` (at most 8 register writes or read-modify-writes inside the
   claimed window, aligned), `DRV_CACHE` (write back, or write back and drop, whole 64-byte lines of the caller's DMA
