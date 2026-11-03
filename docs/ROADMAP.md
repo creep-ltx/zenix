@@ -97,7 +97,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 3. **A terminal you can live in** (done in FS-UAE 2026-10-30, closing audit docs/audit-2026-10-30-block3.md; the public pre-release waits for the owner; the LHA/LZX rewrite is built, docs/d33-archives.md): a fuller C library (picolibc, newlib's descendant: D27; steps 0-4 built 2026-10-29); D13 stage 2 (shared libraries) decided; the text-UI
    library (ported 2026-10-29: ports/tui), then Sumi, Maki and Markdown (ported 2026-10-29: ports/sumi, ports/maki, ports/markdown) and `zc`; UTF-8 in the console (D28 steps 1-6 built 2026-10-29, branch utf8); PC (CP437) and other bitmap fonts for the console
    (the PC set comes earlier, with telnet); (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported (ported 2026-10-30: ports/ahiru, ports/ctop). (Postponed by the owner 2026-10-29, "can wait":
-   the tracker music player, the IRC client and the e-mail client; later, unscheduled.) Audit; then a first public pre-release (0.1),
+   the tracker music player, the IRC client and the e-mail client; later, unscheduled.) Audit; then a first public pre-release (0.1) (owner 2026-11-03: not before a desktop, see block 5),
    with the owner's yes.
 3½. **Amiga demos on Zenix: ZINE** (steps 1-3 merged 2026-10-31: four demos run in FS-UAE, d29 16.3; on the real PiStorm A1200 demos run with their sound, reported 2026-11-03) (`zine PROGRAM`, or the program's name) (approved by the owner 2026-10-29: "I would like to be able to watch an Amiga demo in
    Zenix. That would be amazing. So yes, please move it up"): a design note first (reviewed twice: it hands the whole
@@ -109,7 +109,10 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    installer (built 2026-11-03 on branch install, FS-UAE and the host: docs/d35-installer.md; never run on real hardware yet); (owner 2026-11-03: "do the FA411 driver after the installer") a PCMCIA NE2000 network driver for the
    owner's Netgear FA411 in the A1200's side slot (`/sbin/net/ne2000`, D19's driver protocol), so the A1200 with the 1260
    reaches the network (built 2026-11-03 on branch ne2000, the PC against a model and FS-UAE's refusals: docs/d36-pcmcia-ne2000.md; never run on a real card yet). Audit, with the filesystems fuzzed against damaged disks.
-5. **The desktop:** the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
+5. **The desktop** (owner 2026-11-03: "I want a desktop before a public release ... starting with a small minimal desktop
+   with floating windows. Something classic but modern."): first a design note with a few looks to choose from (pictures,
+   the owner picks), then **a minimal desktop with floating windows** as the first step, and the first public pre-release
+   after it. Then the rest: the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
    viewers, preferences; TrueType fonts (owner 2026-10-26; rendered once per size into bitmap fonts and cached, so a
    68020 without an FPU pays only once; also usable by the console); the demo floppy's desktop edition. Audit.
 6. **Sound and hardware:** a Paula server, `play`, a MOD player; optional memory protection on CPUs with an MMU; USB,
