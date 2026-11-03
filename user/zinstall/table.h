@@ -37,6 +37,7 @@ struct t_part {
     t_u32 start, sectors;               /* on the whole disk; sectors 0: its geometry could not be understood */
     t_u32 dostype;                      /* RDB */
     t_u32 blk;                          /* its PART block, on the whole disk */
+    t_u32 lowcyl, highcyl;              /* RDB: its own cylinders, as HDToolBox shows them */
     t_u8 how, mbrtype, slot;            /* TP_*; MBR: type byte, slot 0-3 */
     t_u8 bootable, nomount, busy;       /* busy: something mounted overlaps it */
     signed char pri;                    /* RDB: boot priority */
@@ -94,6 +95,8 @@ struct t_plan {
     int pri;                            /* the boot partition's boot priority */
     char aos[32];                       /* the AmigaOS partition for the boot menu; "" when none */
     t_u32 cyl;
+    int keep;                           /* a chosen RDB partition split: what Zenix does not take stays a partition of the old name */
+    struct t_newp rest;                 /* (label: the old name; lo, hi in the old partition's own cylinders; dostype the old one) */
     int nw1, nw2, commit1;              /* writes of stage 1 (nw1, the one that makes the new table real: commit1), of stage 2 */
     struct t_write w1[T_MAXW], w2[3];
 };
@@ -107,7 +110,8 @@ const char *t_part_refused(const struct tdisk *d, int i);
 int t_options(const struct tdisk *d, const struct tio *io, struct t_opt *o, int max);
 /* Why the whole disk may not be erased; 0 if it may */
 const char *t_whole_refused(const struct tdisk *d);
-/* Make the plan: 0, or -1 with *why. maxsect: use at most this many sectors (0: as many as the rules say). */
+/* Make the plan: 0, or -1 with *why. maxsect: use at most this many sectors (0: as many as the rules say). For a chosen RDB partition
+ * less than all of it splits it: Zenix first, the rest one partition with the old name, dostype and environment, empty for its system */
 int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt *o, t_u32 maxsect, int zenixfs,
                 struct t_plan *p, const char **why);
 /* The tables read again: 1 exactly as in d (the digest, the size), 0 changed, -1 cannot read */

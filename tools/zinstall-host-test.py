@@ -400,16 +400,17 @@ def table_state(path):
     return t if isinstance(t, str) else tuple(sorted(t))
 
 
-def cut_test(name, img, keep, kind, device=None):
+def cut_test(name, img, keep, kind, device=None, mb=None):
     """a power cut before every sector write of stage 1 and stage 2: the table is the old one or the new one, whole"""
     base = img + ".cut"
     cp(img, base)
     k = opt_for(base, kind, device)
+    ex = [mb] if mb else []
     old = table_state(base)
     # how many writes in all, where the stages end
     probe = base + ".p"
     cp(base, probe)
-    r = run("install", probe, k)
+    r = run("install", probe, k, *ex)
     st1 = int([l for l in r.stdout.splitlines() if l.startswith("stage1")][0].split()[1])
     files = int([l for l in r.stdout.splitlines() if l.startswith("files")][0].split()[1])
     done = int([l for l in r.stdout.splitlines() if l.startswith("done")][0].split()[1])
@@ -417,14 +418,14 @@ def cut_test(name, img, keep, kind, device=None):
     # the new table before stage 2: flags differ: compare with stage 1's own end
     probe2 = base + ".p2"
     cp(base, probe2)
-    r2 = run("install", probe2, k, ZI_TABLE_ONLY=1)
+    r2 = run("install", probe2, k, *ex, ZI_TABLE_ONLY=1)
     new1 = table_state(probe2)
     nbad = 0
     cuts = list(range(0, st1 + 1)) + [files, files + 1, done]
     for n in cuts:
         w = base + ".w"
         cp(base, w)
-        rr = run("install", w, k, ZI_CUT=n)
+        rr = run("install", w, k, *ex, ZI_CUT=n)
         t = table_state(w)
         if t not in (old, new1, newt):
             # stage 2 half done: root marked, boot not yet
@@ -445,7 +446,7 @@ def cut_test(name, img, keep, kind, device=None):
         os.unlink(f)
 
 
-def torn_test(name, img, kind, device=None):
+def torn_test(name, img, kind, device=None, mb=None):
     """the sector that makes the table real, torn at every 4 bytes: the old table, the new one, or a refusal; never a crash"""
     base = img + ".torn"
     cp(img, base)
@@ -453,7 +454,7 @@ def torn_test(name, img, kind, device=None):
     old = table_state(base)
     new = base + ".n"
     cp(base, new)
-    run("install", new, k, ZI_TABLE_ONLY=1)
+    run("install", new, k, *([mb] if mb else []), ZI_TABLE_ONLY=1)
     new1 = table_state(new)
     ch = changed_sectors(base, new)
     # the commit sector: the one sector of the old table's chain that changed: RDSK/PART that was there before, or the MBR
@@ -579,6 +580,78 @@ try:
     r = run("list", p).stdout
     check("the 0x76 container is not offered as a whole", [l for l in r.splitlines() if l.startswith("part ide0p2")][0].endswith("never touched as a whole"), r)
     check("a partition in the card's RDB may be chosen", "part ide0p4" in r and [l for l in r.splitlines() if l.startswith("part ide0p4")][0].endswith("refused=-"), r)
+
+    # ---- the owner's case: a 16 GB card, PFS3 in the RDB, DH2 split into Zenix and a new empty DH2 ----
+    def img_card16(p):
+        s = 16 * 1024 * MB
+        cb = 128 * 64
+        cyls = s // cb
+        mkimg(p, s)
+        with open(p, "r+b") as f:
+            L = rdsk(cyls, 64, 128, 123, 1, rdbhi=16383, high=125, locyl=2)
+            f.seek(0); f.write(sumblock(L))
+            f.seek(512); f.write(sumblock([0x46534844, 64, 0, 7, 0xFFFFFFFF, 0, 0, 0, PFS3, 0x13002] + [0] * 8 + [2]))
+            for i in range(2, 123):
+                f.seek(i * 512)
+                f.write(sumblock([0x4C534547, 64, 0, 7, i + 1 if i < 122 else 0xFFFFFFFF] + [(i * 2654435761) & 0xFFFFFFFF] * 100))
+            parts = [("DH0", 2, 257, 1, 0), ("DH1", 258, 769, 0, 0), ("DH2", 770, cyls - 1, 0, 0)]     # 1 GB, 2 GB, the rest
+            for k, (nm, lo, hi, fl, pri) in enumerate(parts):
+                P = part(nm, 124 + k if k < 2 else 0xFFFFFFFF, lo, hi, 128, 64, PFS3, fl, pri)
+                P[32 + 13] = 0xFFFFFF; P[32 + 11] = 80     # HDToolBox's MaxTransfer and buffers, as the owner's card has
+                f.seek((123 + k) * 512); f.write(sumblock(P))
+            fill(f, 2 * cb, 256 * cb, "dh0")
+            fill(f, 258 * cb, 512 * cb, "dh1")
+            fill(f, 770 * cb, (cyls - 770) * cb, "dh2")
+        return cb, cyls
+    p = os.path.join(T, "card16.hdf")
+    cb, cyls = img_card16(p)
+    b16 = p + ".b"
+    cp(p, b16)
+    k = opt_for(p, "part", "ide0p3")
+    r = run("install", p, k, 5000)
+    check("the owner's card: DH2 split, 5 GB for Zenix", r.returncode == 0 and "done" in r.stdout, r.stdout + r.stderr)
+    t = read_table(p)
+    names = [x[0] for x in t]
+    check("  the chain: DH0, DH1, Zenix's three, then DH2", names == ["DH0", "DH1", "ZB0", "ZR0", "ZH0", "DH2"], str(names))
+    rest = [x for x in t if x[0] == "DH2"][0]
+    zh = [x for x in t if x[0] == "ZH0"][0]
+    zb = [x for x in t if x[0] == "ZB0"][0]
+    check("  Zenix first, at the old DH2's start; ZB0 under 4 GB", zb[1] == 770 * cb and zb[1] + zb[2] <= 8388608, str(zb))
+    check("  the new DH2 takes the rest to the old end, about 8 GB, after ZH0", rest[1] >= zh[1] + zh[2] and rest[1] + rest[2] == cyls * cb and 7 * 1024 * MB < rest[2] < 9 * 1024 * MB, str((zh, rest)))
+    check("  it is PFS3, mountable, not bootable", rest[3] == PFS3 and rest[4] == 0, str(rest))
+    with open(b16, "rb") as a, open(p, "rb") as c:
+        def blk(f, n):
+            f.seek(n * 512); return f.read(512)
+        same = all(blk(a, i) == blk(c, i) for i in list(range(1, 123)) + [123, 124])
+        check("  DH0's and DH1's PART blocks, the FileSysHeader and its 121 LSEG blocks: byte-identical", same)
+        old0, new0 = struct.unpack(">128I", blk(a, 0)), struct.unpack(">128I", blk(c, 0))
+        diff = [i for i in range(128) if old0[i] != new0[i]]
+        check("  RDSK: only HighRDSKBlock and its checksum changed", set(diff) <= {2, 38}, str(diff))
+        oldp = struct.unpack(">128I", blk(a, 125))
+        nb = [i for i in range(126, 200) if blk(c, i)[:4] == b"PART" and blk(c, i)[37:40] == b"DH2"]
+        newp = struct.unpack(">128I", blk(c, nb[0])) if nb else None
+        d2 = [i for i in range(128) if newp and oldp[i] != newp[i]]
+        check("  the new DH2's PART: the old one but next, flags, LowCyl and the checksum (name, DosEnvec, dostype, buffers, MaxTransfer kept)",
+              newp is not None and set(d2) <= {2, 4, 5, 32 + 9} and newp[32 + 9] > oldp[32 + 9] and newp[32 + 10] == oldp[32 + 10], str(d2))
+    ch = changed_sectors(b16, p)
+    hit = [s_ for s_ in ch if 2 * cb <= s_ < 770 * cb]
+    check("  DH0 and DH1 byte-identical", not hit, str(hit[:5]))
+    r = run("list", p).stdout
+    check("  the table reads back whole (rdb.h): nothing called damaged", "noedit -" in r and "region 0" in r and "noedit=-" in r, r)
+    # the way back: the old bytes of every written sector, the commit first (what zinstall --undo does), give the old table exactly
+    cp(b16, p)
+    r = run("install", p, k, 5000, ZI_UNDO_AFTER=1)
+    check("  undone: the first 256 sectors exactly as before", r.returncode == 0 and not [x for x in changed_sectors(b16, p) if x < 256], r.stdout[-300:])
+    r = run("install", p, k, 10)
+    check("  less than 28 MB for Zenix is refused", r.returncode != 0, r.stdout)
+    cp(b16, p)
+    r = run("install", p, k, (cyls - 770) * cb // 2048 - 8)
+    check("  a rest under 16 MB is refused, says why", r.returncode == 1 and "under 16 MB" in r.stdout, r.stdout)
+    os.unlink(b16)
+    p2 = os.path.join(T, "card16b.hdf")
+    cb, cyls = img_card16(p2)
+    cut_test("the owner's card, DH2 split", p2, [("DH0", 2 * cb, 256 * cb), ("DH1", 258 * cb, 512 * cb)], "part", "ide0p3", 5000)
+    torn_test("the owner's card, DH2 split", p2, "part", "ide0p3", 5000)
 
     # ---- a whole disk ----
     p = os.path.join(T, "blank.hdf")

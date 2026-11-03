@@ -50,7 +50,7 @@ SPLIT[zpkg-emu-test]="e|s|m"                       # D22 8.2: the A2065, SLIP, 1
 SPLIT[sysupdate-test]="b|m|z"                         # D22 amendment 2: the owner's way from 2026103000; the card layout
 SPLIT[nfs-emu-test]="m|b|w|r|u"                     # D23: reading, hard, soft, killed; the lazy fstab boot; writing; reboot; users
 SPLIT[remote-test]="c|s|l|b"                        # D24: the stock A1200 (c, d, r), the screen, 1 MB of chip RAM, init's daemons
-SPLIT[zinstall-test]="f r|a|m|z|c|n"                 # D35: from the floppies, refusals; beside AmigaOS; 2 MB; ZenixFS on 2 MB; the card; the network
+SPLIT[zinstall-test]="f r|a|m|z|c|n|o h"                 # D35: from the floppies, refusals; beside AmigaOS; 2 MB; ZenixFS on 2 MB; the card; the network
 SPLIT[update-test]="install bad|cold previous|panic hang|powercut slowzup|refused nozup|zfsroot|zfsreal zfscut"
 m=($(ls fsuae/*.fs-uae fsuae/matrix/*.fs-uae | sed 's#.*/##; s#\.fs-uae##' | grep -vx 'mounts\|zroot'))   # as matrix.sh
 m1=""; m2=""; for ((i = 0; i < ${#m[@]}; i++)); do if ((i % 2)); then m2="$m2 ${m[i]}"; else m1="$m1 ${m[i]}"; fi; done

@@ -5,6 +5,9 @@ behind the RAM disk, and on the other disks, lies the set: one stream of package
 Each disk's part starts after a header sector: "ZSET", the set's id, the disk's number, how many disks (big-endian longs).
 The RAM disk's /etc/zinstall.set says what is where, with SHA-256s, and the kernel on disk 1 is the one the set installs.
 usage: mkinstall.py BUILD OUTDIR     (ZENIX_INSTALL_CHANNEL: the bundles' channel, default test; a release build: testing)
+Also OUTDIR/from-amigaos/: no floppy at all: zenixboot, the kernel and zinstall-ram.img (BUILD/root-install-hd.img with the whole set as files
+in /install), to copy to an AmigaOS disk and start with
+    zenixboot DIR/zenix RAM=DIR/zinstall-ram.img        (docs/d35-installer.md section 5)
 Not a frozen format: the program that reads it comes from the same build, on disk 1."""
 import hashlib
 import os
@@ -115,6 +118,37 @@ def main():
             pos += cap
             img = bytearray(header(n) + part).ljust(FLOPPY, b"\0")
             open(os.path.join(out, "zenix-install-%d.adf" % n), "wb").write(img)
+    # the same set as files, for a start from AmigaOS with no floppy
+    hd = os.path.join(out, "from-amigaos")
+    os.makedirs(hd, exist_ok=True)
+    with tempfile.TemporaryDirectory() as t:
+        img = os.path.join(t, "ram.img")
+        shutil.copy(os.path.join(B, "root-install-hd.img"), img)
+        cmds = "mkdir /install\n"
+        text = "zset 1\nfiles 1\nkernelfile /install/zenix %d %s\n" % (len(kernel), hashlib.sha256(kernel).hexdigest())
+        kf = os.path.join(t, "zenix")
+        open(kf, "wb").write(kernel)
+        cmds += "write %s /install/zenix\n" % kf
+        for name, tier, data in items:
+            f = os.path.join(t, name + ".zup")
+            open(f, "wb").write(data)
+            cmds += "write %s /install/%s.zup\n" % (f, name)
+            text += "fitem %s /install/%s.zup %d %s %s\n" % (name, name, len(data), hashlib.sha256(data).hexdigest(), tier)
+        setf, motd = os.path.join(t, "set"), os.path.join(t, "motd")
+        open(setf, "w").write(text)
+        open(motd, "w").write("\n Zenix - the installer, started from AmigaOS\n Type zinstall --list to see the disk, zinstall to install.\n\n")
+        cmds += "rm /etc/motd\nwrite %s /etc/motd\nsif /etc/motd mode 0100644\nwrite %s /etc/zinstall.set\nsif /etc/zinstall.set mode 0100644\n" % (motd, setf)
+        r = subprocess.run(["debugfs", "-w", "-f", "-", img], input=cmds, text=True, capture_output=True)
+        chk = subprocess.run(["debugfs", "-R", "cat /etc/zinstall.set", img], capture_output=True, text=True)
+        if r.returncode or text not in chk.stdout or "Could not allocate" in r.stderr:
+            sys.exit("mkinstall: the AmigaOS start's RAM disk is too small or did not take the set: " + r.stderr[-300:])
+        fs = subprocess.run(["e2fsck", "-fn", img], capture_output=True, text=True)
+        if fs.returncode:
+            sys.exit("mkinstall: the AmigaOS start's RAM disk is not clean: " + fs.stdout)
+        shutil.copy(img, os.path.join(hd, "zinstall-ram.img"))
+        shutil.copy(os.path.join(B, "kernel.bin"), os.path.join(hd, "zenix"))
+        shutil.copy(os.path.join(B, "zenixboot"), os.path.join(hd, "zenixboot"))
+    print("%s: no floppy: zenixboot, zenix and zinstall-ram.img (%d KB)" % (hd, os.path.getsize(os.path.join(hd, "zinstall-ram.img")) // 1024))
     print("%s: %d disks, %d KB of bundles (%d on disk 1), RAM disk %d KB" % (out, ndisks, len(stream) // 1024, cap1 // 1024, rsize // 1024))
 
 

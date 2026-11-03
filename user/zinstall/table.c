@@ -113,6 +113,7 @@ static int read_rdb(struct tdisk *d, t_u32 base, t_u32 limit, int *count)
         strncpy(p->label, q->label, sizeof p->label - 1);
         p->how = TP_RDB; p->region = (signed char)ri; p->holds = -1;
         p->dostype = q->dostype; p->blk = base + q->blk;
+        p->lowcyl = q->lowcyl; p->highcyl = q->highcyl;
         if (q->sectors) {
             unsigned long long end = (unsigned long long)q->start + q->sectors;
             if (end > limit) { if (!g->noedit) g->noedit = "a partition reaches past the end of the disk"; }
@@ -451,7 +452,7 @@ static void labels(const struct tdisk *d, struct t_plan *p)
         int clash = 0;
         for (int r = 0; r < 3; r++) {
             p->nw[r].label[0] = 'Z'; p->nw[r].label[1] = c[r]; p->nw[r].label[2] = (char)('0' + k); p->nw[r].label[3] = 0;
-            for (int i = 0; i < d->nparts; i++) if (!strcmp(d->part[i].label, p->nw[r].label) && i != p->opt.part) clash = 1;
+            for (int i = 0; i < d->nparts; i++) if (!strcmp(d->part[i].label, p->nw[r].label)) clash = 1;   /* the chosen one too: its name may stay */
         }
         if (!clash) return;
     }
@@ -722,7 +723,11 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             cnt = hi - lo;
         }
         unsigned long long sp = (unsigned long long)cnt * g->cyl;
-        if (sp > space) cnt = space / g->cyl;
+        t_u32 pend = 0;                                     /* a split: the chosen partition's end, in sectors of the region */
+        if (sp > space) {
+            cnt = space / g->cyl;
+            if (o->kind == TO_PART) { p->keep = 1; pend = d->part[o->part].start - g->base + d->part[o->part].sectors; }
+        }
         if ((unsigned long long)cnt * g->cyl < T_MINSECT) { *why = "less than 28 MB of room"; return -1; }
         sizes(p, cnt, g->cyl);
         if (sizes_bad(p)) { *why = sizes_bad(p); return -1; }
@@ -734,8 +739,8 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         }
         p->cyl = g->cyl;
         /* the blocks for the new PARTs: unused blocks of the RDB area */
-        int need = o->kind == TO_PART ? p->nnew - 1 : p->nnew, got = 0;
-        t_u32 fresh[3];
+        int need = (o->kind == TO_PART ? p->nnew - 1 : p->nnew) + p->keep, got = 0;
+        t_u32 fresh[4];
         for (t_u32 nb = rw.blk + 1; nb <= rw.rdbhi && got < need; nb++) {
             int used = 0;
             for (unsigned i = 0; i < rw.nused; i++) if (rw.used[i] == nb) used = 1;
@@ -758,11 +763,29 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         high = b[38];
         t_u32 newhigh = high;
         for (int i = 0; i < got; i++) if (fresh[i] > newhigh) newhigh = fresh[i];
+        static t_u32 keepb[128];
         if (o->kind == TO_PART) {
             const struct t_part *q = &d->part[o->part];
             t_u8 pb[512];
             if (io->rd(io->ctx, q->blk, 1, pb)) { *why = "cannot read the table"; return -1; }
             oldnext = be32(pb + 16);
+            if (p->keep) {          /* the rest: the old PART block as it is (name, dostype, environment, its filesystem's chain untouched), its own cylinders */
+                to_longs(keepb, pb);
+                if (keepb[0] != RDB_ID_PART || !rdb_sum_ok(keepb)) { *why = "the chosen partition's block does not add up"; return -1; }
+                t_u32 *env = &keepb[32];
+                unsigned long long pcyl = (unsigned long long)env[3] * env[5] * (env[1] / 128);
+                t_u32 zend = (lo + cnt) * g->cyl;
+                if (!pcyl || env[1] % 128) { *why = "the chosen partition's geometry cannot be split"; return -1; }
+                t_u32 rlo = (t_u32)((zend + pcyl - 1) / pcyl), rhi = env[10];
+                if ((unsigned long long)rlo * pcyl + 16 * 2048 > pend || rhi < rlo) { *why = "what would be left of the partition is under 16 MB: give Zenix all of it, or less"; return -1; }
+                keepb[5] &= ~(FLG_BOOT | FLG_NOMOUNT);   /* mountable, not bootable */
+                env[9] = rlo;
+                strncpy(p->rest.label, q->label, sizeof p->rest.label - 1);
+                p->rest.lo = rlo; p->rest.hi = rhi;
+                p->rest.start = g->base + (t_u32)(rlo * pcyl);
+                p->rest.sectors = (t_u32)(((unsigned long long)rhi - rlo + 1) * pcyl);
+                p->rest.dostype = env[16];
+            }
             t_u32 ours = q->blk - g->base;
             blocks[0] = ours;
             for (int i = 1; i < p->nnew; i++) blocks[i] = fresh[i - 1];
@@ -770,6 +793,14 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             for (int i = 0; i < p->nnew; i++) blocks[i] = fresh[i];
         }
         for (int i = 0; i < p->nnew; i++) p->nw[i].blk = g->base + blocks[i];
+        t_u32 keepblk = p->keep ? fresh[got - 1] : 0;
+        if (p->keep) {
+            p->rest.blk = g->base + keepblk;
+            keepb[4] = oldnext;                 /* the chain: Zenix's, then the rest, then what followed the chosen one */
+            oldnext = keepblk;
+            rdb_sum(keepb);
+            if (plan_write(p, io, g->base + keepblk, keepb, 0, 0)) { *why = "cannot read the table"; return -1; }
+        }
         int link_in_rdsk = o->kind == TO_FREE && rw.nparts == 0;
         if ((newhigh != high || newhi != rw.rdbhi) && !link_in_rdsk) {             /* harmless alone, and before anything needs it */
             b[38] = newhigh;

@@ -11,6 +11,9 @@
 #   c  the Emu68 card's layout (an MBR, FAT, 0x76 with an RDB, a free slot): FAT and the RDB's partitions unchanged; started from
 #      the kernel floppy as the note says, the new root is found in the new 0x76
 #   r  the refusals as a person meets them: a disk with no room, a table with a bad checksum, wrong words: nothing written
+#   o  the owner's kind of card (16 GB, PFS3 in the RDB): DH2 split into Zenix and a new empty DH2 of the old name and type; DH0, DH1, the
+#      LSEG chain the same; then zinstall --undo from the floppy gives the old table back, every sector
+#   h  no floppy: from AmigaOS on a 68060 (zenixboot, the kernel and the RAM disk with the set, as files on DH0); --list, the install
 #   n  from an existing Zenix: its root stays mounted on the same disk; the files through zpkg --fetch from a test server over
 #      FS-UAE's A2065 into the free space; the new system boots, the old root unchanged
 # usage: tools/zinstall-test.sh [PART...]   (ZENIX_SERIAL, ZENIX_OUT, ZENIX_BUILD as the other tests)
@@ -19,7 +22,7 @@ cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-/tmp/zenix-zinstall}; mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 SER=${ZENIX_SERIAL:-/tmp/zenix-zinstall-serial}
-PARTS="${*:-f a m z c r n}"
+PARTS="${*:-f a m z c r n o h}"
 make -s BUILD=$BD all install-floppies $BD/zenix.adf $BD/zenix-zfs.adf >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL the build"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "FAIL the host tool"; exit 1; }
 BD=$(cd "$BD" && pwd)
@@ -717,6 +720,142 @@ EOS
     booted n $OUT/n2.log ext2 amiga2 bea
     check "n: the root is the new one, not the old" "$(has $OUT/n2.log '^ide0p3 +/ +ext2')"
     empty $rootimg $d
+}
+
+# ---- o: the owner's kind of card: 16 GB, PFS3 in the RDB, DH2 split into Zenix and a new empty DH2; then --undo ----
+part_o() {
+    local d=$OUT/o.hdf
+    truncate -s 0 $d
+    python3 -I - $d <<'PY'
+import hashlib, struct, sys
+p = sys.argv[1]
+MB = 2048
+s = 16 * 1024 * MB; cb = 128 * 64; cyls = s // cb
+def blk(L):
+    L = list(L) + [0] * (128 - len(L)); L[2] = 0; L[2] = (-sum(L[:L[1]])) & 0xFFFFFFFF
+    return struct.pack(">128I", *L)
+f = open(p, "wb"); f.truncate(s * 512)
+R = [0x5244534B, 64, 0, 7, 512, 0x12, 0xFFFFFFFF, 123, 1, 0xFFFFFFFF] + [0xFFFFFFFF] * 6
+R += [cyls, 64, 128, 0, cyls, 0, 0, 0, cyls, cyls, cyls, 0, 0, 0, 0, 0, 0, 16383, 2, cyls - 1, cb, 0, 125]
+f.seek(0); f.write(blk(R))
+# a filesystem in the RDB whose dostype no partition has: Kickstart loads nothing of it (the data is no program)
+f.seek(512); f.write(blk([0x46534844, 64, 0, 7, 0xFFFFFFFF, 0, 0, 0, 0x50465309, 0x13002] + [0] * 8 + [2]))
+for i in range(2, 123):
+    f.seek(i * 512); f.write(blk([0x4C534547, 64, 0, 7, i + 1 if i < 122 else 0xFFFFFFFF] + [i] * 100))
+def part(name, nxt, lo, hi, flags):
+    nm = bytes([len(name)]) + name.encode() + b"\0" * (31 - len(name))
+    L = [0x50415254, 64, 0, 7, nxt, flags, 0, 0, 0] + list(struct.unpack(">8I", nm)) + [0] * 15
+    L += [16, 128, 0, 128, 1, 64, 2, 0, 0, lo, hi, 80, 0, 0xFFFFFF, 0xFFFFFFFE, 0, 0x50465303]
+    return blk(L)
+# PFS3 partitions with no PFS3 here: no mount (flags 2), as the test machine has no handler for them
+for k, (nm, lo, hi) in enumerate([("DH0", 2, 257), ("DH1", 258, 769), ("DH2", 770, cyls - 1)]):     # 1 GB, 2 GB, the rest
+    f.seek((123 + k) * 512); f.write(part(nm, 124 + k if k < 2 else 0xFFFFFFFF, lo, hi, 2))
+for nm, lo, n in (("dh0", 2, 256), ("dh1", 258, 512)):
+    f.seek(lo * cb * 512); f.write(hashlib.sha256(nm.encode()).digest() * 2048)
+PY
+    $CK sums $d DH0 DH1 >$OUT/o.before
+    $CK bytes $d 1 124 >$OUT/o.rdb
+    $CK bytes $d 0 256 >$OUT/o.table
+    fsconf $OUT/o.fs-uae $d 2048 8192 4
+    cat >$OUT/o.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall --zenix-size 5000 $ACC_OPTS\r
+wait Choose a number 30
+send 3\r
+wait Choose .Return = 1, ext2 30
+send \r
+wait type its name exactly 30
+send DH2\r
+$INSTALLED
+sleep 2
+send echo zi-e""nd\r
+wait zi-end 30
+stop
+EOS
+    run $OUT/o.fs-uae 1800 $OUT/o.txt $OUT/o1.log
+    check "o: the install says it is done" "$(has $OUT/o1.log '^Done\. Zenix is on this disk')"
+    check "o: the plan says the rest stays DH2, empty, to format from AmigaOS" "$(has $OUT/o1.log 'stays a partition called DH2')"
+    $CK sums $d DH0 DH1 >$OUT/o.after
+    check "o: DH0 and DH1 byte-identical" "$(yes_if cmp $OUT/o.before $OUT/o.after)"
+    check "o: the FileSysHeader, its 121 LSEG blocks, DH0's and DH1's PART blocks: byte-identical" "$([ "$($CK bytes $d 1 124)" = "$(cat $OUT/o.rdb)" ] && echo ok || echo bad)"
+    $CK parts $d >$OUT/o.parts
+    check "o: the chain: DH0, DH1, ZB0, ZR0, ZH0, DH2" "$([ "$(cut -d' ' -f1 $OUT/o.parts | tr '\n' ' ')" = 'DH0 DH1 ZB0 ZR0 ZH0 DH2 ' ] && echo ok || echo bad)"
+    check "o: the new DH2: PFS3, mountable, not bootable, about 8 GB" "$(awk '$1 == "DH2" && $4 == "50465303" && $5 == 0 && $3 > 14000000 && $3 < 20000000 { ok = 1 } END { print ok ? "ok" : "bad" }' $OUT/o.parts)"
+    host_fs o $d ZR0 ext2
+    # the way back, from the floppy: the copy of the table in the new root
+    cat >$OUT/o2.txt <<'EOS'
+wait zenix:/# 120
+sleep 1
+send mkdir -p /mnt/x; mount -t ext2 ide0p4 /mnt/x; zinstall --undo /mnt/x/var/lib/zinstall/table-before\r
+wait Type undo 30
+send undo\r
+wait the table is as it was 30
+sleep 1
+send umount /mnt/x; sync; echo zi-e""nd\r
+wait zi-end 30
+stop
+EOS
+    run $OUT/o.fs-uae 600 $OUT/o2.txt $OUT/o2.log
+    check "o: --undo says the split partition comes back, to be formatted" "$(has $OUT/o2.log 'split a partition')"
+    check "o: --undo: the first 256 sectors exactly as before the install" "$([ "$($CK bytes $d 0 256)" = "$(cat $OUT/o.table)" ] && echo ok || echo bad)"
+    check "o: and DH0, DH1 still the same" "$($CK sums $d DH0 DH1 | cmp -s - $OUT/o.before && echo ok || echo bad)"
+    empty $d
+}
+
+# ---- h: no floppy at all: from AmigaOS on an A1200 with a 68060, as the owner's Apollo 1260 has it: zenixboot loads the kernel and the
+#      installer's RAM disk (install/from-amigaos/, the whole set inside) from files on DH0; zinstall --list, then the install into free
+#      space; DH0 (which the files came from) and DH1 byte-identical ----
+part_h() {
+    local d=$OUT/h.hdf A=$F/from-amigaos
+    printf 'SYS:Zenix-Install/zenixboot SYS:Zenix-Install/zenix RAM=SYS:Zenix-Install/zinstall-ram.img\n' >$OUT/h-ss
+    python3 tools/mkffs.py $OUT/h-dh0.img 32256K Workbench --intl $OUT/h-ss=S/Startup-Sequence $A/zenixboot=Zenix-Install/zenixboot \
+        $A/zenix=Zenix-Install/zenix $A/zinstall-ram.img=Zenix-Install/zinstall-ram.img >/dev/null || { echo "FAIL h: the AmigaOS disk"; pass=0; return; }
+    head -c 300000 /dev/urandom >$OUT/h-work
+    python3 tools/mkffs.py $OUT/h-dh1.img 8064K Work --intl $OUT/h-work=Data/work >/dev/null
+    python3 tools/mkrdb-multi.py $d $OUT/h-dh0.img:ffs3:DH0:boot $OUT/h-dh1.img:ffs3:DH1:- >/dev/null
+    grow_rdb $d 300
+    $CK sums $d DH0 DH1 >$OUT/h.before
+    fsconf $OUT/h.fs-uae $d 2048 8192 none "uae_cpu_model = 68060"
+    cat >$OUT/h.txt <<EOS
+wait zenix:/# 240
+sleep 1
+send cat /etc/motd; free\r
+sleep 2
+send zinstall --list\r
+wait What could be done 30
+sleep 2
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS\r
+wait Choose a number 30
+send \r
+wait MB .Return 30
+send \r
+wait Choose .Return = 1, ext2 30
+send \r
+wait Type yes to go on 30
+send yes\r
+$INSTALLED
+sleep 2
+send echo zi-e""nd\r
+wait zi-end 30
+stop
+EOS
+    run $OUT/h.fs-uae 1800 $OUT/h.txt $OUT/h1.log
+    check "h: Kickstart ran zenixboot from DH0, which loaded the kernel and the RAM disk from files" "$(has $OUT/h1.log 'zenixboot [0-9.b]*: loading')"
+    # FS-UAE's 68060 with Kickstart 3.1 and no 68060.library: exec sets the 68040 flags (a real 1260 loads its library first)
+    check "h: the CPU is FS-UAE's 68060 (exec's flags say 68040 without 68060.library)" "$(has $OUT/h1.log '^cpu: 680[46]0')"
+    check "h: no floppy: the files come from the RAM disk" "$(has $OUT/h1.log "Files come from: the installer's own RAM disk")"
+    check "h: --list shows the table with cylinders and dostypes" "$(grep -aqE '^  ide0p1 +DH0 .* DOS.3 +1-' $OUT/h1.log && echo ok || echo bad)"
+    check "h: the install says it is done" "$(has $OUT/h1.log '^Done\. Zenix is on this disk')"
+    $CK sums $d DH0 DH1 >$OUT/h.after
+    check "h: DH0 (where the installer came from) and DH1 byte-identical" "$(yes_if cmp $OUT/h.before $OUT/h.after)"
+    host_fs h $d ZR0 ext2
+    boot_vol h $d $BD/kernel.bin
+    empty $d $OUT/h-dh0.img
 }
 
 for p in $PARTS; do "part_$p"; done

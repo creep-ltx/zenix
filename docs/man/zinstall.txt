@@ -4,7 +4,7 @@ NAME
     zinstall - put Zenix on a hard disk, CF card or SD card
 
 SYNOPSIS
-    zinstall [--hostname NAME] [--root-password-file FILE]
+    zinstall [--zenix-size MB] [--hostname NAME] [--root-password-file FILE]
              [--user NAME [--user-name TEXT] --user-password-file FILE |
               --no-user]
     zinstall --list
@@ -18,7 +18,14 @@ DESCRIPTION
     root. Then it shows exactly what will change, and writes nothing until
     you answer.
 
-    With --list it only shows the disk and what could be done with it.
+    With --list it only reads: the disk's table as Zenix reads it (each
+    partition's name, size, type, dostype, cylinders) and what could be
+    done. On a machine Zenix has not run on before, compare it with
+    HDToolBox before installing.
+
+    No floppy is needed on a machine with fast RAM: from AmigaOS, copy
+    install/from-amigaos/ (zenixboot, zenix, zinstall-ram.img) to a folder
+    and run there: zenixboot zenix RAM=zinstall-ram.img
 
     Run from the floppies, the files come from the set on the floppies:
     disk 2 and on, in any drive, or swapped in one drive when it asks. The
@@ -37,6 +44,11 @@ WHERE IT CAN GO
     takes typing its name. A FAT partition (Emu68, the Kickstart), a whole
     0x76 container, a mounted partition, or one in a damaged table is
     never offered.
+
+    A partition of an Amiga table may also be split: asked how many MB
+    Zenix gets (--zenix-size MB), Zenix takes the first part and the rest
+    stays a partition with the old name and type, empty: format it from
+    AmigaOS. Nothing else about it changes, and no other partition.
 
     The whole disk: everything on it is lost. It takes typing ERASE ide0.
     Never offered on a disk with a FAT partition or a mounted partition.

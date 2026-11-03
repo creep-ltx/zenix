@@ -146,10 +146,11 @@ static int run(const char *path, char *a1, char *a2, char *a3)
 
 /* ---- the source: a stream of bytes ---- */
 #define MAXITEM 64
-struct item { char *name; u32 off, size; u8 sha[32]; int extra; };
+struct item { char *name, *path; u32 off, size; u8 sha[32]; int extra; };   /* path: a file of the RAM disk (the set from AmigaOS, no floppy) */
 static struct item items[MAXITEM];
 static int nitems, ndisks;
 static u32 setid, data1, kern_off, kern_size;
+static char *kern_path;                 /* the set as files on the RAM disk: the kernel's file */
 static u8 kern_sha[32];
 static char *settext;
 
@@ -174,7 +175,16 @@ static int read_set(void)
             while (*p && *p != ' ') p++;
             if (*p) *p++ = 0;
         }
-        if (n == 2 && !strcmp(w[0], "id")) setid = (u32)strtoul(w[1], 0, 16);
+        if (n == 4 && !strcmp(w[0], "kernelfile")) {
+            kern_path = w[1]; kern_size = (u32)strtoul(w[2], 0, 10);
+            if (zf_parse_sha(w[3], kern_sha)) return -1;
+        } else if (n == 6 && !strcmp(w[0], "fitem")) {
+            if (nitems == MAXITEM) { say("zinstall: more than %d items on the set\n", MAXITEM); return -1; }
+            struct item *it = &items[nitems++];
+            it->name = w[1]; it->path = w[2]; it->off = 0; it->size = (u32)strtoul(w[3], 0, 10);
+            if (zf_parse_sha(w[4], it->sha)) return -1;
+            it->extra = !strcmp(w[5], "extra");
+        } else if (n == 2 && !strcmp(w[0], "id")) setid = (u32)strtoul(w[1], 0, 16);
         else if (n == 2 && !strcmp(w[0], "disks")) ndisks = atoi(w[1]);
         else if (n == 2 && !strcmp(w[0], "data1")) data1 = (u32)strtoul(w[1], 0, 10);
         else if (n == 4 && !strcmp(w[0], "kernel")) {
@@ -188,10 +198,11 @@ static int read_set(void)
             it->extra = !strcmp(w[5], "extra");
         }
     }
-    if (!ndisks || !data1 || !kern_size || !nitems) { say("zinstall: %s is not whole\n", SETFILE); return -1; }
+    if (!kern_size || !nitems || (!kern_path && (!ndisks || !data1))) { say("zinstall: %s is not whole\n", SETFILE); return -1; }
     return 0;
 }
 
+static int sha_file(const char *path, u8 out[32], u32 *size);
 /* the floppies: the stream's bytes on each disk; disk 1's start at data1 (after its header sector) */
 #define FLOPPY 901120u
 #define HDR_OFF(n) ((n) == 1 ? data1 - 512 : 0u)
@@ -594,15 +605,17 @@ static int floppy_kernel(void)
     struct sha256 c;
     sha256_init(&c);
     u32 left = kern_size, off = kern_off;
-    int r = 0;
+    int r = 0, kfd = -1;
+    if (kern_path && (kfd = sys_open(kern_path, O_RDONLY)) < 0) { sys_close(fd); say("zinstall: cannot read %s\n", kern_path); return kfd; }
     while (left && !r) {
         u32 k = left < sizeof inbuf ? left : sizeof inbuf;
-        if (fl_read_at(1, off, inbuf, k, 0)) { r = -EIO; break; }
+        if (kfd >= 0 ? sys_read(kfd, inbuf, k) != (int)k : fl_read_at(1, off, inbuf, k, 0)) { r = -EIO; break; }
         sha256_update(&c, inbuf, k);
         r = write_all(fd, inbuf, k);
         off += k; left -= k;
     }
     sys_close(fd);
+    if (kfd >= 0) sys_close(kfd);
     if (r) { say("zinstall: cannot copy the kernel (%d)\n", r); return r; }
     u8 h[32];
     sha256_final(&c, h);
@@ -620,8 +633,15 @@ static int copy_from_floppies(int zenixfs)
         if (zk && !zenixfs) continue;
         if (it->extra && skip_extras) { notes++; continue; }
         src_fd = -1; src_pos = it->off; src_left = it->size; src_optional = it->extra;
+        if (it->path) {                         /* from a file of the RAM disk: its SHA-256 first, as the list says */
+            u8 h[32]; u32 sz;
+            if (sha_file(it->path, h, &sz) || sz != it->size || memcmp(h, it->sha, 32)) { say("zinstall: %s is not what the set says\n", it->path); return -EINVAL; }
+            src_fd = sys_open(it->path, O_RDONLY);
+            if (src_fd < 0) { say("zinstall: cannot read %s\n", it->path); return src_fd; }
+        }
         /* the item's whole checksum needs its bytes once more; each part of a bundle has its own: those are checked */
         int r = install_bundle(it->size, it->name);
+        if (src_fd >= 0) { sys_close(src_fd); src_fd = -1; }
         if (r == ESKIP) { notes++; continue; }
         if (r) { say("zinstall: %s: failed (%d)\n", it->name, r); return r; }
     }
@@ -809,7 +829,7 @@ bad:
 }
 
 /* ---- the machine's name and its accounts (after the copy and the check; DESIGN D35 section 7) ---- */
-static const char *opt_host, *opt_rootpw, *opt_user, *opt_userpw, *opt_username;
+static const char *opt_zsize, *opt_host, *opt_rootpw, *opt_user, *opt_userpw, *opt_username;
 static int opt_nouser;
 static char hostname[64] = "zenix", username[32];
 
@@ -944,15 +964,31 @@ static int accounts(const char *homedir)
 }
 
 /* ---- the dialogue ---- */
+static const char *dtext(const struct t_part *p)       /* a dostype as HDToolBox writes it: PFS\3, DOS\1; a PC type in hex */
+{
+    static char b[12];
+    if (p->how == TP_MBR) { snprintf(b, sizeof b, "0x%02x", p->mbrtype); return b; }
+    t_u32 t = p->dostype;
+    for (int i = 0; i < 3; i++) { char c = (char)(t >> (24 - 8 * i)); b[i] = c >= 32 && c < 127 ? c : '?'; }
+    snprintf(b + 3, sizeof b - 3, "\\%u", t & 0xFF);
+    return b;
+}
 static void show_disk(const struct tdisk *d)
 {
-    say("\nThe disk ide0: %s. It holds %s.\n", mbtext(d->sectors), d->what);
+    say("\nThe disk ide0: %s (%u sectors). It holds %s.\n", mbtext(d->sectors), d->sectors, d->what);
     if (d->noedit) say("Its table cannot be changed: %s.\n", d->noedit);
-    if (d->nparts) say("  %-8s %-11s %9s  %-18s %s\n", "DEVICE", "NAME", "SIZE", "TYPE", "");
+    for (int r = 0; r < d->nregions; r++)
+        say("  Amiga table%s: cylinders of %u sectors (%u heads x %u), partitions from %u to %u\n", d->region[r].base ? " in a 0x76" : "",
+            d->region[r].cyl, d->region[r].heads, d->region[r].secs, d->region[r].locyl, d->region[r].hicyl);
+    if (d->nparts) say("  %-7s %-10s %8s  %-17s %-7s %s\n", "DEVICE", "NAME", "SIZE", "TYPE", "DOSTYPE", "CYLINDERS / SECTORS");
     for (int i = 0; i < d->nparts; i++) {
         const struct t_part *p = &d->part[i];
-        say("  %-8s %-11s %9s  %-18s %s%s%s%s\n", p->dev, p->label[0] ? p->label : "-", mbtext(p->sectors), t_typename(p),
-            p->vol[0] ? p->vol : "", p->bootable ? " boot" : "", p->busy ? " IN USE" : "", p->how == TP_RDB && p->nomount ? " nomount" : "");
+        static char where[32];
+        if (p->how == TP_RDB) snprintf(where, sizeof where, "%u-%u", p->lowcyl, p->highcyl);
+        else snprintf(where, sizeof where, "s %u-%u", p->start, p->sectors ? p->start + p->sectors - 1 : p->start);
+        say("  %-7s %-10.10s %8s  %-17.17s %-7s %s%s%s%s\n", p->dev, p->label[0] ? p->label : "-", mbtext(p->sectors), t_typename(p), dtext(p),
+            where, p->bootable ? " boot" : "", p->busy ? " IN USE" : "", p->how == TP_RDB && p->nomount ? " nomount" : "");
+        if (p->vol[0]) say("          its volume: %s\n", p->vol);
     }
 }
 static void show_opt(int n, const struct tdisk *d, const struct t_opt *o)
@@ -981,6 +1017,8 @@ static void show_plan(const struct tdisk *d, const struct t_plan *p)
         say("  Partition %s %s (%s, %s) is REPLACED: what is on it is LOST.\n", q->dev, q->label, mbtext(q->sectors), t_typename(q));
         if (q->vol[0]) say("  Its volume is called %s.\n", q->vol);
         if (q->bootable) say("  It is marked bootable: a system may be starting from it.\n");
+        if (p->keep)
+            say("  Zenix takes its first part. The rest, %s, stays a partition called %s,\n  of the same type: EMPTY, its old contents LOST; format it from AmigaOS.\n", mbtext(p->rest.sectors), p->rest.label);
     }
     if (p->opt.kind == TO_WHOLE) say("  THE WHOLE DISK IS ERASED: every partition and everything on them is LOST.\n");
     if (p->opt.kind == TO_NEWCONT) say("  A new partition of type 0x76 in the PC table, %s, holding an Amiga table with:\n", mbtext(p->opt.sectors));
@@ -1064,7 +1102,7 @@ static int save_before(const struct t_plan *pl, int free_space)
     sys_unlink(p);
     int fd = sys_open(p, O_WRONLY | O_CREAT | O_EXCL), r;
     if (fd < 0) return fd;
-    u8 h[16] = { 'Z', 'T', 'B', '1', 0, 0, 0, (u8)!free_space, 0, 0, 0, (u8)pl->commit1, 0, 0, 0, (u8)pl->nw1 };
+    u8 h[16] = { 'Z', 'T', 'B', '1', 0, 0, 0, (u8)(free_space ? 0 : pl->keep ? 2 : 1), 0, 0, 0, (u8)pl->commit1, 0, 0, 0, (u8)pl->nw1 };
     r = write_all(fd, h, sizeof h);
     for (int i = 0; i < pl->nw1 && !r; i++) {
         u32 l = pl->w1[i].lba;
@@ -1089,7 +1127,8 @@ static int undo(const char *path)
     if (fd < 0) { say("zinstall: cannot read %s (%d)\n", path, fd); return 1; }
     if (sys_read(fd, h, sizeof h) != (int)sizeof h || memcmp(h, "ZTB1", 4)) { say("zinstall: %s is not a table copy\n", path); sys_close(fd); return 1; }
     u32 chosen = h[7], commit = h[11], n = h[15];
-    if (chosen) { say("zinstall: this install replaced a partition or the whole disk: what was there is gone, the old table would point at nothing. Nothing changed.\n"); sys_close(fd); return 1; }
+    if (chosen == 2) say("This install split a partition: undone, the partition comes back whole, in its old place, with its\nold name, but what was on it is gone: it needs formatting.\n");
+    else if (chosen) { say("zinstall: this install replaced a partition or the whole disk: what was there is gone, the old table would point at nothing. Nothing changed.\n"); sys_close(fd); return 1; }
     if (!n || n > T_MAXW || commit >= n) { say("zinstall: %s is damaged\n", path); sys_close(fd); return 1; }
     diskh = dopen("ide0", 0);
     if (diskh < 0) { say("zinstall: no hard disk found\n"); sys_close(fd); return 1; }
@@ -1128,13 +1167,14 @@ int main(int argc, char **argv)
     disk_port = sys_port_find("disk");
     if (disk_port < 0) { say("zinstall: no disk server\n"); return 1; }
     if (sys_getuid() != 0) { say("zinstall: only root installs (log in as root)\n"); return 1; }
-    if (argc > 1 && !strcmp(argv[1], "--list")) return list_only();
+    if (argc > 1 && !strcmp(argv[1], "--list")) return list_only();     /* reads only: the first time on a new machine (D35 section 5) */
     if (argc > 1 && !strcmp(argv[1], "--undo")) return undo(argc > 2 ? argv[2] : BEFORE);
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : 0;
         if (!strcmp(a, "--no-user")) { opt_nouser = 1; continue; }
         if (!v) goto usage;
         if (!strcmp(a, "--hostname")) opt_host = v;
+        else if (!strcmp(a, "--zenix-size")) opt_zsize = v;
         else if (!strcmp(a, "--root-password-file")) opt_rootpw = v;
         else if (!strcmp(a, "--user")) opt_user = v;
         else if (!strcmp(a, "--user-password-file")) opt_userpw = v;
@@ -1144,7 +1184,7 @@ int main(int argc, char **argv)
     }
     if (0) {
 usage:
-        say("usage: zinstall [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
+        say("usage: zinstall [--zenix-size MB] [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
             "       [--user-password-file FILE] | --no-user]     zinstall --list     zinstall --undo [FILE]\n");
         return 2;
     }
@@ -1165,7 +1205,7 @@ usage:
         say("zinstall: this is neither the install floppy (no %s) nor a Zenix with zpkg:\nthere is nothing to install from.\n", SETFILE);
         return 1;
     }
-    say("Files come from: %s.\n", floppy ? "the install floppies" : "the package server, with zpkg");
+    say("Files come from: %s.\n", !floppy ? "the package server, with zpkg" : kern_path ? "the installer's own RAM disk (started from AmigaOS)" : "the install floppies");
 
     u32 free0 = mem_now();
     struct diskinfo di;
@@ -1202,7 +1242,22 @@ usage:
 
     /* how much */
     u32 maxsect = 0;
-    if (o->kind != TO_WHOLE && o->kind != TO_PART) {
+    if (opt_zsize) {
+        u32 mb = (u32)strtoul(opt_zsize, 0, 10);
+        if (mb < 28 || mb > o->sectors / 2048) { say("zinstall: --zenix-size: between 28 and %u\n", o->sectors / 2048); return 2; }
+        if (mb < o->sectors / 2048) maxsect = mb * 2048;
+    } else if (o->kind == TO_PART && d.part[o->part].how == TP_RDB) {
+        const struct t_part *q = &d.part[o->part];
+        for (;;) {
+            say("\nPartition %s has %s. How many MB of it may Zenix have? The rest stays a\npartition called %s, empty, for AmigaOS to format.\n", q->label, mbtext(q->sectors), q->label);
+            if (ask("MB (Return = all of it): ")) return 1;
+            if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+            if (!line[0]) break;
+            u32 mb = (u32)strtoul(line, 0, 10);
+            if (mb >= 28 && mb <= q->sectors / 2048) { if (mb < q->sectors / 2048) maxsect = mb * 2048; break; }
+            say("Between 28 and %u, please.\n", q->sectors / 2048);
+        }
+    } else if (o->kind != TO_WHOLE && o->kind != TO_PART) {
         for (;;) {
             say("\nThere are %s here. How many MB may Zenix use?\n", mbtext(o->sectors));
             if (ask("MB (Return = what it decides: boot, root, /home, some left free): ")) return 1;

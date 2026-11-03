@@ -40,6 +40,7 @@ and short words only (nothing behind Alt).
 | MBR whose 0x76 RDB has free cylinders (offered first) | as for an RDB, inside the container | as for an RDB |
 | MBR with a free slot and free space (the Emu68 card's kind, or a plain MBR) | a new type 0x76 partition, in the last free slot, with an RDB of its own inside, holding ZB0, ZR0, ZH0 | that RDB, written in the free space where nothing refers to it; then one write: the MBR sector. No existing RDB is touched |
 | A chosen RDB partition | ZB0, ZR0, ZH0 inside its sectors | new PART blocks; one write: the chosen partition's PART block becomes the first new one, linked on to the rest and to what followed it |
+| A chosen RDB partition, split (asked: how much of it Zenix gets; `--zenix-size MB`) | ZB0, ZR0, ZH0 first in its range (ZB0 as low as it can be; the 4 GB rule stands), then one more partition to its old end: **the old name** (assigns still point at it), the old DosType and DosEnvec (buffers, MaxTransfer, mask; its filesystem's FSHD/LSEG chain in the RDB untouched), its own LowCyl, mountable, not bootable, boot priority as it was. Its contents are not touched: AmigaOS shows it unformatted; the plan says so | the same one write as a chosen partition; the rest's PART block is one more new block in the chain before what followed |
 | A chosen MBR partition (type 0x83 only: never FAT, 0x76 or a type it does not know) | a 0x76 with an RDB inside, in its sectors | one write: the MBR sector, its type byte |
 | Whole disk, or nothing on it | an RDB, ZB0, ZR0, ZH0 | PART blocks where the old table does not need them, RDSK last, one write (section 4) |
 | GPT, both RDB and MBR, a partition table that does not add up (also an RDB inside a 0x76: what it claims may reach past its container), a bad-block list (its spare blocks look free) | nothing but the reason (a damaged RDB or MBR: only the erase of the whole disk, with its warning, never with a FAT partition) | - |
@@ -80,6 +81,21 @@ drives are looked at too, so with several drives (or a Gotek) nothing needs swap
 programs come first, optional ones on the last disk; the person may skip those (then `zpkg -S` later). **A ZenixFS root needs the second
 disk for its kernel** (kernel-zfs).
 
+**No floppy at all: from AmigaOS** (for a machine with fast RAM, such as the A1200 with the Apollo 1260). `make install-floppies` also makes
+`install/from-amigaos/`: `zenixboot`, the kernel `zenix`, and `zinstall-ram.img` (3.4 MB: the installer's RAM disk with the whole set inside
+as files, each checked against `/etc/zinstall.set`). Steps, from AmigaOS:
+1. Copy the three files to a folder, e.g. `Work:Zenix-Install/` (they are written nowhere else).
+2. In a Shell: `Work:Zenix-Install/zenixboot Work:Zenix-Install/zenix RAM=Work:Zenix-Install/zinstall-ram.img`
+   (zenixboot's own `RAM=`, docs/man/zenixboot.txt). AmigaOS stops; Zenix starts with the installer's RAM disk as its root.
+3. At the prompt: `zinstall --list` first (below), then `zinstall`.
+Verified in FS-UAE on an A1200 with a 68060 and 8 MB of fast RAM (`zinstall-test` h, the files on an FFS DH0 started by Kickstart's
+own shell). The partition the files are on is only read.
+
+**The first time on a new machine** (real hardware Zenix has not met): **Zenix's Gayle IDE driver with a real drive and Zenix on a real
+68060 have never run** (the owner's A1200 runs Zenix from the PiStorm's SD card, Emu68; everything here is FS-UAE). So: start the installer,
+`zinstall --list` (it only reads: the table as Zenix reads it, each partition's name, size, type, dostype, start and end cylinder, the
+cylinder size), compare it with HDToolBox, `reboot` back to AmigaOS; only if it agrees, start again and install.
+
 **The network, from an existing Zenix.** If `/etc/zinstall.set` is not there (an existing Zenix) and zpkg has a server configured, `zinstall` asks `zpkg
 --fetch DIR` (new, section 8) to bring the signed list's system bundle and packages into the new root's `/var/cache/zpkg/pkg`, checked as
 always; then it installs from them the same way. There is no network on the RAM disk: `netd`, its driver and `zpkg` take about 200 KB it
@@ -94,7 +110,7 @@ Both give the same machine: every package's manifest in `/var/lib/zpkg`, so `zpk
 The boot partition gets a boot priority one above the highest on the disk, with `bootmenu` as its only startup. **The menu's default is whatever this disk
 started by itself until now** (the highest bootable, mounted partition, whatever its name; it may be a menu of its own), after 5 seconds: the machine goes on starting it unless someone presses a key. `bootmenu` writes
 nothing to disk. A partition whose name the menu cannot use (a space at its end, a colon) is refused: the menu would reboot for ever looking for it. With no such partition (a system on another disk is not seen) the plan says so. A boot priority above 5 also outranks the floppy; Early Startup still chooses. Ways back, which the program prints at the end:
-- **`zinstall --undo`**: every table sector as it was, the one that made the new table real first; refused if any of them is no longer what zinstall left, and after a replaced partition or an erased disk (what was there is gone). Tested from the new Zenix itself; the copy is `/var/lib/zinstall/table-before` in the new root (`zinstall --undo FILE` from elsewhere).
+- **`zinstall --undo`**: every table sector as it was, the one that made the new table real first; refused if any of them is no longer what zinstall left, and after a replaced partition or an erased disk (what was there is gone). After a split it puts the old table back too (the partition whole, its old name), and says that its contents are gone and it needs formatting. Tested from the new Zenix itself; the copy is `/var/lib/zinstall/table-before` in the new root (`zinstall --undo FILE` from elsewhere).
 - At power-on, both mouse buttons: Kickstart's Early Startup menu chooses a partition by hand.
 - HDToolBox or `fdisk del` on an Amiga table (fdisk's own limit of 128 chain blocks can refuse an RDB with a big handler; `--undo` has no such limit).
 
@@ -125,7 +141,7 @@ If a step fails, it stops and says what is done; the table has only unbootable, 
 One independent read aimed only at damaging a partition (2026-11-01). Found, and fixed with a test each: the skip of partitions named `BOOT...` made the menu lose the system the machine really starts; a new 0x76 was offered beside an inner RDB with a partition past its container, and landed in it; a partition inside an MBR with overlapping entries could be chosen, on the FAT; new PART blocks could land on a bad-block list's spare blocks; a boot partition past 4 GB had only a note; a menu name it cannot find would reboot for ever; the way back printed `fdisk del` where fdisk refuses (hence `--undo`); "the machine starts as before" after a replaced partition; `hasfat` missed behind a full table and on a bad signature; exFAT and unknown types could be chosen; busy flags not compared in the re-read. Known and left: a second console mounting a partition after the re-read can still see the table change before diskd stops the data writes; `fstab` names shift as above; an AmigaOS on another drive is not seen, only named in the plan.
 
 ## 10. What it does not do
-No shrinking of existing partitions (the owner's decision, 2026-11-03: free space, or a partition the person chooses to replace); no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).
+No shrinking of an existing filesystem in place (the owner's decision, 2026-11-03: free space, or a partition the person chooses to replace, which may be split into Zenix and a new empty partition of its old name and type); no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).
 
 ## 11. Measured (FS-UAE and the PC, 2026-11-01; no speed figures: emulator time is not hardware time)
 | | |

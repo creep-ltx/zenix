@@ -275,6 +275,13 @@ int main(int argc, char **argv)
         printf("files %ld\n", written);
         if (t_commit(&io, pl.w2, pl.nw2, &why)) { printf("commit2: %s\n", why); return 1; }
         printf("done %ld\n", written);
+        if (getenv("ZI_UNDO_AFTER")) {          /* what zinstall --undo does: every stage-1 sector's old bytes, the commit first */
+            for (int pass = 0; pass < pl.nw1; pass++) {
+                int i = pass == 0 ? pl.commit1 : (pass <= pl.commit1 ? pass - 1 : pass);
+                if (wr(0, pl.w1[i].lba, 1, pl.w1[i].old)) return 1;
+            }
+            printf("undone\n");
+        }
         return 0;
     }
     return 2;
