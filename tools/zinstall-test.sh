@@ -231,41 +231,41 @@ wait Choose a number 30
 send 1\r
 wait Choose .Return = 1.: 30
 send 3\r
-wait Root in MB 30
+wait Size of the system part 30
 send 10\r
 wait Between 32 and 30
 send 200\r
-wait /home in MB 30
+wait Size for your files 30
 send \r
 wait Choose .Return = 1, ext2 30
 send \r
-wait /home's filesystem 30
+wait filesystem for your files 30
 wait Choose .Return = 1, ext2 30
 send 2\r
 wait To erase the whole disk 30
 send ERASE ide0\r
-wait The machine's name 1500
+wait The computer's name 1500
 send Bad_Name\r
-wait 1-63 of 30
+wait Use only a-z, 0-9 and -, at most 63 30
 send amiga1\r
-wait root's password 30
+wait A password for root 30
 send rootpw1\r
-wait Again: 30
+wait Type it again to check: 30
 send rootpw1\r
-wait Your own login name 30
+wait Your user name for logging in 30
 send Anna\r
-wait 1-31 of 30
+wait Use only a-z, 0-9, _ and -, at most 31 30
 send anna\r
 wait Your full name 30
 send Anna Andersson\r
-wait anna .nothing shows 30
+wait A password for anna 30
 send annapw1\r
-wait Again: 30
+wait Type it again to check: 30
 send annapwX\r
-wait were not the same 30
-wait anna .nothing shows 30
+wait did not match 30
+wait A password for anna 30
 send annapw1\r
-wait Again: 30
+wait Type it again to check: 30
 send annapw1\r
 $INSTALLED
 sleep 2
@@ -276,8 +276,8 @@ wait zi-end 30
 stop
 EOS
     run $OUT/f.fs-uae 1800 $OUT/f.txt $OUT/f1.log
-    check "f: the passwords were not shown as they were typed" "$(hasnt $OUT/f1.log 'annapw|rootpw|password .nothing shows as you type.: .')"
-    check "f: a bad name and two passwords not the same are asked again" "$(has $OUT/f1.log 'were not the same')"
+    check "f: the passwords were not shown as they were typed" "$(hasnt $OUT/f1.log 'annapw|rootpw|shows as you type.: .')"
+    check "f: a bad name and two passwords not the same are asked again" "$(has $OUT/f1.log 'did not match')"
     check "f: the install says it is done" "$(has $OUT/f1.log '^Done\. Zenix is on this disk')"
     check "f: two wrong answers and a q wrote nothing" "$([ "$(grep -ac 'Nothing was changed' $OUT/f1.log)" = 3 ] && echo ok || echo bad)"
     check "f: it says what to do next" "$(has $OUT/f1.log 'What to do next')"
@@ -479,7 +479,7 @@ stop
 EOS
     run $OUT/$n.fs-uae 3000 $OUT/$n.txt $OUT/$n-1.log
     check "$n: the install says it is done" "$(has $OUT/$n-1.log '^Done\. Zenix is on this disk')"
-    check "$n: optional packages left out, and said" "$(has $OUT/$n-1.log 'optional packages left out')"
+    check "$n: optional packages left out, and said" "$(has $OUT/$n-1.log 'extra packages were left out')"
     local low; low=$(grep -a 'Lowest free' $OUT/$n-1.log | sed 's/[^0-9]*\([0-9]*\) KB.*/\1/')
     echo "$n: lowest free memory while installing: ${low:-?} KB (chip RAM alone, 2 MB)"
     check "$n: the lowest free memory is at least $4 KB" "$([ "${low:-0}" -ge "$4" ] && echo ok || echo bad)"
@@ -698,7 +698,7 @@ sleep 4
 send $ACC_PREP\r
 wait zi-prep 10
 send zinstall $ACC_OPTS\r
-wait Files come from: the package server 30
+wait Zenix will be copied from the package server 30
 wait Choose a number 30
 send \r
 wait MB .Return 30
@@ -731,7 +731,7 @@ EOS
     chmod +x $OUT/inner-n.sh; : >$OUT/port-n
     $CK sums $d ZX0 >$OUT/n.before
     unshare --map-root-user --map-auto -nm $OUT/inner-n.sh 2>&1 | clean >$OUT/n1.log
-    check "n: the existing Zenix: files from the server" "$(has $OUT/n1.log 'Files come from: the package server')"
+    check "n: the existing Zenix: files from the server" "$(has $OUT/n1.log 'Zenix will be copied from the package server')"
     check "n: the running root is listed in use and not offered" "$(has $OUT/n1.log 'ide0p1 is not offered: it is in use')"
     check "n: the erase is not offered while running from the disk" "$(has $OUT/n1.log 'erasing the disk is not offered: something on this disk is in use')"
     check "n: the install says it is done" "$(has $OUT/n1.log '^Done\. Zenix is on this disk')"
@@ -874,7 +874,7 @@ EOS
     check "h: Kickstart ran zenixboot from DH0, which loaded the kernel and the RAM disk from files" "$(has $OUT/h1.log 'zenixboot [0-9.b]*: loading')"
     # FS-UAE's 68060 with Kickstart 3.1 and no 68060.library: exec sets the 68040 flags (a real 1260 loads its library first)
     check "h: the CPU is FS-UAE's 68060 (exec's flags say 68040 without 68060.library)" "$(has $OUT/h1.log '^cpu: 680[46]0')"
-    check "h: no floppy: the files come from the RAM disk" "$(has $OUT/h1.log "Files come from: the installer's own RAM disk")"
+    check "h: no floppy: the files come from the RAM disk" "$(has $OUT/h1.log "Zenix will be copied from the installer's own files")"
     check "h: --list shows the table with cylinders and dostypes" "$(grep -aqE '^  ide0p1 +DH0 .* DOS.3 +1-' $OUT/h1.log && echo ok || echo bad)"
     check "h: the install says it is done" "$(has $OUT/h1.log '^Done\. Zenix is on this disk')"
     $CK sums $d DH0 DH1 >$OUT/h.after

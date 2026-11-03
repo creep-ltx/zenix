@@ -15,6 +15,10 @@ and short words only (nothing behind Alt).
 
 **The worst bug this project could ship is an installer that destroys an AmigaOS partition.** Everything below is shaped by that.
 
+**Words (the owner's live test, 2026-11-03):** every prompt and message in short, plain words a newcomer reads at once: "the system part
+(root)", "your files (/home)", "the start-up partition" for ZB0, "A password for root, the administrator", "Type it again to check". Nothing
+it prints names a person or a machine of the project's.
+
 ## 2. The rules that keep other partitions safe
 1. **A write gate.** Table sectors are only written through one function, from a list made in advance (`struct t_plan`): the sector's
    number, its new bytes, and the bytes it must hold now. It re-reads the sector and refuses if it differs; it reads back what it wrote.
