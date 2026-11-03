@@ -41,6 +41,8 @@ DESCRIPTION
              dependencies first; -Sw only downloads and checks them
     -Ss      search the stored list's names and descriptions
     -Si      a package of the stored list, in words
+    -Sl      every package of the stored list, one a line, the installed
+             ones marked; -Sln only those not installed
     -Sc      empty the download cache down to the installed version and
              the one before of each package
     -Q       the installed packages (-Qi in words, -Ql their files,

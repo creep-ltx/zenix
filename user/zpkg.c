@@ -1388,6 +1388,17 @@ static int cmd_search(char **words, int n)
     }
     return 0;
 }
+static int cmd_list(int notinst)
+{
+    if (use_stored()) return 1;
+    for (int i = 0; i < ix.npkg; i++) {
+        const struct zp_pkg *p = &ix.pkg[i];
+        struct zf_pkg *k = inst_find(p->name);
+        if (notinst && k) continue;
+        dprintf(1, "%-16s %s%s%s\n", p->name, p->vstr, k ? " [installed" : "", k ? (k->vnum == p->vnum ? "]" : ", another version]") : "");
+    }
+    return 0;
+}
 static int cmd_info_list(char **names, int n)
 {
     if (use_stored()) return 1;
@@ -1457,7 +1468,7 @@ static int cmd_query(char **names, int n, char what)
 
 static int usage(void)
 {
-    dprintf(1, "usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sc\n"
+    dprintf(1, "usage: zpkg -Sy | -Syu | -Syuu | -S NAME... | -Sw NAME... | -Ss WORD... | -Si NAME... | -Sl[n] | -Sc\n"
            "       zpkg -Q [NAME...] | -Qi NAME... | -Ql NAME... | -Qo PATH... | -Qu\n"
            "       zpkg -R[s][n] NAME... | -U FILE... | --back NAME\n"
            "       zpkg --fetch DIR [--zfs]\n"
@@ -1514,7 +1525,7 @@ int main(int argc, char **argv)
     if (ignore) tr.flags |= ZP_T_IGNORE_EXPIRY;
     struct ustat st;
     if (sys_stat(DB, &st) < 0) { say("no package database here (%s): zpkg changes nothing", DB); return 1; }
-    int changing = back || reset || fetchdir || kind == 'R' || kind == 'U' || (kind == 'S' && !s && !inf);
+    int changing = back || reset || fetchdir || kind == 'R' || kind == 'U' || (kind == 'S' && !s && !inf && !l);
     if (changing && sys_getuid() != 0) { say("only root changes packages (try sudo)"); return 1; }
     if (changing) {
         u32 m[4];
@@ -1538,6 +1549,7 @@ int main(int argc, char **argv)
     else if (kind == 'S' && s) rc = cmd_search(args, na);
     else if (kind == 'S' && inf) rc = cmd_info_list(args, na);
     else if (kind == 'S' && c) rc = cmd_clean(0);
+    else if (kind == 'S' && l) rc = cmd_list(nn);
     else if (kind == 'S') { rc = cmd_sync(args, na, y, u, w, ram); cache_cap(); }
     else if (kind == 'R') rc = cmd_remove(args, na, s, nn, ram);
     else if (kind == 'U') rc = cmd_upgrade(args, na, 0, ram);

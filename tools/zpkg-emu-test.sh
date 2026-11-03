@@ -110,6 +110,8 @@ echo ==sy2; zpkg -Sy; echo sy2=$?
 echo ==qu; zpkg -Qu; echo qu=$?
 echo ==ss; zpkg -Ss extra; echo ss=$?
 echo ==si; zpkg -Si extra; echo si=$?
+echo ==sl; zpkg -Sl; echo sl=$?
+echo ==sln; zpkg -Sln; echo sln=$?
 echo ==s1; zpkg -S extra; echo s1=$?; zpkg -Q extra extralib; cat /var/lib/zpkg/deps; cat /usr/share/extra/readme
 echo ==qo; zpkg -Qo /usr/share/extra/readme /bin/ls /nothing; echo qo=$?
 echo ==ql; zpkg -Ql extra; echo ql=$?
@@ -170,6 +172,8 @@ if full:
     w = sec("sy2"); check(st("sy2") == 0 and "up to date" in w, "-Sy again: latest only, the stored list used", w)
     w = sec("qu"); check(st("qu") == 0 and "zenix-tests" in w, "-Qu: zenix-tests has a newer version", w)
     w = sec("ss"); check(st("ss") == 0 and "extralib" in w and "a test program for zpkg-test" in w, "-Ss: names and descriptions", w)
+    w = sec("sl"); check(st("sl") == 0 and re.search(r"^extra +\S+$", w, re.M) and re.search(r"^coreutils +\S+ \[installed", w, re.M), "-Sl: every package, the installed marked", w)
+    w = sec("sln"); check(st("sln") == 0 and re.search(r"^extra ", w, re.M) and not re.search(r"^coreutils ", w, re.M), "-Sln: only those not installed", w)
     w = sec("si"); check(st("si") == 0 and "Depends on  : base>=" in w and "extralib>=" in w, "-Si: the block in words", w)
 w = sec("s1")
 check(st("s1") == 0 and re.search(r"^extra ", w, re.M) and re.search(r"^extralib ", w, re.M) and "extra: a test package" in w and
