@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-2.0-only -->
 # D35: the installer (design note)
 
-Status: **being built on branch install (2026-11-01), the last feature of block 4 (ROADMAP "The order of work", item 4). The outline is
+Status: **built on branch install (2026-11-01 to 11-03), the last feature of block 4 (ROADMAP "The order of work", item 4). The outline is
 the owner's ("an installer: partition, format, copy, boot menu"; a boot floppy or an existing Zenix; no PC); the details were delegated and
 are decided here. Tested on image files and in FS-UAE only: it has never run on a real disk, and nothing here touches the owner's card.**
 What was measured is in section 11.
@@ -117,3 +117,17 @@ One independent read aimed only at damaging a partition (2026-11-01). Found, and
 
 ## 10. What it does not do
 No resizing of partitions; no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).
+
+## 11. Measured (FS-UAE and the PC, 2026-11-01; no speed figures: emulator time is not hardware time)
+| | |
+|---|---|
+| `zinstall` | 77,732 bytes (ZEXE), -Os |
+| The install floppies | 4 disks: disk 1 the bootblock, the kernel (169 KB), a RAM disk of 540 KB (7 KB free) and 173 KB of the set; 1,948 KB of bundles in all, core first, the optional ones on disks 3-4 |
+| Free memory, 2 MB of chip RAM alone, booted from disk 1 | 809 KB at the prompt (before audit A7's fix that floppy did not start at all on such a machine) |
+| Lowest free memory seen while installing (sampled at each file and program end; a child's peak in between is not seen) | 2 MB chip alone: 450 KB with ext2, 303 KB with ZenixFS; with 8 MB of fast RAM 8,544 KB |
+| What zinstall wants free before it writes anything | 350 KB (ext2), 500 KB (ZenixFS): measured use plus a margin; less, and it says so and writes nothing |
+| The installed machine, 2 MB chip alone, one login | 1,211 KB free on ext2, 1,023 KB on ZenixFS |
+| Files checked against their SHA-256 after the copy | 310 (core) to 312 (everything) |
+
+Tests: `tools/zinstall-host-test.sh` (261 checks, the fuzzer 300,000 rounds, ASAN and UBSAN), `tools/zinstall-test.sh` f r a m z c n (119 checks).
+
