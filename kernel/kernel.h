@@ -242,6 +242,7 @@ int ide_read(u32 lba, u32 count, void *buf);
 int ide_write(u32 lba, u32 count, const void *buf);
 int ide_flush(void);                     /* ATA FLUSH CACHE: the drive's write cache is on the platter */
 void ide_stray_irq(void);                /* level 2 without a CIA cause: clear Gayle's IDE interrupt latch */
+int ide_gayle(void);                     /* 1: an A600/A1200 Gayle answered its ID (it has the PC Card slot; D36) */
 
 /* blk.c: the one raw disk (IDE or SD card) behind the disk server */
 int blk_init(void);
