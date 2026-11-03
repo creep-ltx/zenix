@@ -177,6 +177,11 @@ static int zreadsome(Priv *p)
         p->ended = 1;
         return 0;
     }
+    /* Zenix's Backspace key sends DEL (127) in raw mode, as every Unix terminal does, and Del sends ESC [ 3 ~;
+       upstream reads 127 as the Amiga's Del key, so it becomes the Amiga's Backspace (8) here */
+    if (!p->inpaste)
+        for (int i = p->ilen; i < p->ilen + (int)n; i++)
+            if (p->ibuf[i] == 127) p->ibuf[i] = 8;
     p->ilen += (int)n;
     return 1;
 }

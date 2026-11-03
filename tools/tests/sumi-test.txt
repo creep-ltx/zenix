@@ -1,7 +1,7 @@
 wait zenix:/# 120
 send printf 'first line\\nsecond\\n' > /tmp/s.txt; chmod 640 /tmp/s.txt; free > /tmp/f0.txt; echo ==s""set\r
 wait ==sset 30
-send (termtest screen /dev/tty1 'line 1/''2' 60 '\\x09Hello Zenix \\xe5\\k60\\k42\\kc2\\ke0\\r\\x13' > /tmp/scr0.txt; free > /tmp/f1.txt; ps > /tmp/ps1.txt; termtest screen /dev/tty1 'saved s.txt' 60 '\\x17' > /tmp/scr1.txt) & sumi /tmp/s.txt; echo st=$?\r
+send (termtest screen /dev/tty1 'line 1/''2' 60 '\\x09Hello Zenixx\\k41\\kc1 \\xe5\\k60\\k42\\kc2\\ke0\\r\\x13' > /tmp/scr0.txt; free > /tmp/f1.txt; ps > /tmp/ps1.txt; termtest screen /dev/tty1 'saved s.txt' 60 '\\x17' > /tmp/scr1.txt) & sumi /tmp/s.txt; echo st=$?\r
 waitecho st=0 90
 send termtest screen /dev/tty1 'line 2/''3' 60 '\\x17' > /tmp/scr2.txt & sumi /tmp/s.txt; echo st2=$?\r
 waitecho st2=0 60

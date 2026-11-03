@@ -39,7 +39,7 @@ check(a0.get(2, "")[:4] == "8888" and a0.get(1, "")[:4] == "88.8" and a0.get(2, 
       "status line inverse", (a0.get(1), a0.get(2), a0.get(30)))
 check(r1.get(1) == "  1 Hello Zenix \xe5" and r1.get(2) == "  2 first line" and r1.get(3) == "  3 second" and
       r1.get(31) == "saved s.txt" and r1.get(30, "").endswith("line 2/3  col 1   Latin-1   text") and
-      "[changed]" not in r1.get(30, ""), "Tab, typed text, a Latin-1 letter, Shift+Tab (unindent), Enter and Ctrl+S: shown and saved", r1)
+      "[changed]" not in r1.get(30, ""), "Tab, typed text, the Backspace key (a typo taken back), a Latin-1 letter, Shift+Tab (unindent), Enter and Ctrl+S: shown and saved", r1)
 check(cursor(s1) == (2, 4, True), "the cursor after Enter: line 2, column 1", cursor(s1))
 fu, fs = (re.split(r"^[0-9a-f]{8}$", f, maxsplit=1, flags=re.M) + [""])[:2]   # hexdump of u.txt, then of s.txt
 hx = re.findall(r"^[0-9a-f]{8}  ((?:[0-9a-f]{2} {1,2})+)", fs, re.M)
