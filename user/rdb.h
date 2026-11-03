@@ -8,8 +8,9 @@
  * does not understand (fdisk refuses to write otherwise). */
 #define RDB_MAXPART 32              /* partitions read (a longer chain is "not editable") */
 #ifndef RDB_MAXUSED
-#define RDB_MAXUSED 128             /* blocks of the RDB area that belong to a chain (zinstall asks for more before it includes this: a
-                                     * disk with a big filesystem handler in its RDB; a PFS3 handler is 121 LSEG blocks) */
+#define RDB_MAXUSED 512             /* blocks of the RDB area that belong to a chain (zinstall asks for more before it includes this). 128
+                                     * was too few (found on the real A1200, 2026-11-04): a PFS3 handler is 121 LSEG blocks, so RDSK, FSHD
+                                     * and 6 PART blocks pass it, and the table was called "leaves the RDB area or loops". 2 KB here. */
 #endif
 #define RDB_HEADS 16                /* geometry of a NEW table (fdisk init): 16 heads x 63 sectors */
 #define RDB_SECS  63
@@ -74,10 +75,10 @@ static __attribute__((unused)) void rdb_sum(unsigned *b)
     b[2] = -s;
 }
 
-static __attribute__((unused)) int rdb_own(struct rdb *r, unsigned blk)   /* 0, or -1: a loop or too many blocks */
+static __attribute__((unused)) int rdb_own(struct rdb *r, unsigned blk)   /* 0, -1 a loop (a block twice), -2 more blocks than kept here */
 {
     for (unsigned i = 0; i < r->nused; i++) if (r->used[i] == blk) return -1;
-    if (r->nused == RDB_MAXUSED) return -1;
+    if (r->nused == RDB_MAXUSED) return -2;
     r->used[r->nused++] = blk;
     return 0;
 }
@@ -86,7 +87,9 @@ static __attribute__((unused)) int rdb_own(struct rdb *r, unsigned blk)   /* 0, 
 static __attribute__((unused)) int rdb_chain(rdb_io rd, struct rdb *r, unsigned first, unsigned id, unsigned *sec)
 {
     for (unsigned b = first; b != 0xFFFFFFFFu;) {
-        if (b > r->rdbhi || rdb_own(r, b)) { r->noedit = "a block chain leaves the RDB area or loops"; return 0; }
+        int o = b > r->rdbhi ? -1 : rdb_own(r, b);
+        if (o == -2) { r->noedit = "its block chains are longer than this program keeps track of"; return 0; }
+        if (o) { r->noedit = "a block chain leaves the RDB area or loops"; return 0; }
         if (rd(b, sec)) return -1;
         if (sec[0] != id || !rdb_sum_ok(sec)) { r->noedit = "a block of the RDB has a bad ID or checksum"; return 0; }
         b = sec[4];
@@ -118,7 +121,8 @@ static __attribute__((unused)) int rdb_read(rdb_io rd, struct rdb *r)
         unsigned guard = 0;
         for (unsigned next = plist; next != 0xFFFFFFFFu; guard++) {
             if (r->nparts == RDB_MAXPART || guard > RDB_MAXPART) { if (!r->noedit) r->noedit = "more partitions than fdisk handles"; break; }
-            if (rdb_own(r, next)) { if (!r->noedit) r->noedit = "the partition chain loops"; break; }
+            int o = rdb_own(r, next);
+            if (o) { if (!r->noedit) r->noedit = o == -2 ? "its block chains are longer than this program keeps track of" : "the partition chain loops"; break; }
             if (next > r->rdbhi) {               /* outside the RDB area: still read (AmigaOS follows it), never edited */
                 if (!r->noedit) r->noedit = "the partition chain leaves the RDB area";
                 if (next > r->rdbhi + 4096) break;
@@ -152,7 +156,8 @@ static __attribute__((unused)) int rdb_read(rdb_io rd, struct rdb *r)
         if (rdb_chain(rd, r, badlist, RDB_ID_BADB, sec)) return -1;
         if (rdb_chain(rd, r, init, RDB_ID_LSEG, sec)) return -1;
         for (unsigned b = fslist, g = 0; b != 0xFFFFFFFFu; g++) {
-            if (g > 64 || b > r->rdbhi || rdb_own(r, b)) { if (!r->noedit) r->noedit = "the filesystem chain leaves the RDB area or loops"; break; }
+            int o = g > 64 || b > r->rdbhi ? -1 : rdb_own(r, b);
+            if (o) { if (!r->noedit) r->noedit = o == -2 ? "its block chains are longer than this program keeps track of" : "the filesystem chain leaves the RDB area or loops"; break; }
             if (rd(b, sec)) return -1;
             if (sec[0] != RDB_ID_FSHD || !rdb_sum_ok(sec)) { if (!r->noedit) r->noedit = "a FileSysHeader block has a bad ID or checksum"; break; }
             unsigned nextfs = sec[4], seg = sec[18];

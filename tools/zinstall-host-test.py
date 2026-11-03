@@ -767,6 +767,53 @@ try:
     check("  one sector written, DH0 and DH1 untouched", len(ch) == 1 and not [x for x in ch if 2 * cb <= x < 770 * cb], str(ch))
     os.unlink(b1)
 
+    # ---- what diskd and AmigaOS read of what zinstall wrote (real A1200, 2026-11-04: "a block chain leaves the RDB area or loops" at
+    #      every boot, on a card of this kind after a split install and a reinstall / a delete and install) ----
+    RB = os.path.join(T, "rdbread-host")
+    rr = subprocess.run(["gcc", "-O1", "-g", "-Wall", "-fsanitize=address,undefined", "-o", RB, "tools/host/rdbread-host.c"], cwd=ROOT, capture_output=True, text=True)
+    check("the disk server's reader builds for the PC", rr.returncode == 0, rr.stderr)
+
+    def amiga_view(path):
+        """an RDB as AmigaOS and HDToolBox read it: every block of every chain within RDBBlocksHi and at most HighRDSKBlock,
+        checksums right, no block twice"""
+        with open(path, "rb") as f:
+            def blk(n):
+                f.seek(n * 512); return f.read(512)
+            L = struct.unpack(">128I", blk(0))
+            hi, high = L[33], L[38]
+            seen, bad = set(), []
+            def walk(first, tag):
+                n, k = first, 0
+                while n != 0xFFFFFFFF and k < 5000:
+                    if n in seen: bad.append("%s %d twice" % (tag, n)); return
+                    seen.add(n)
+                    if n > hi: bad.append("%s %d past RDBBlocksHi %d" % (tag, n, hi))
+                    if n > high: bad.append("%s %d past HighRDSKBlock %d" % (tag, n, high))
+                    b = struct.unpack(">128I", blk(n))
+                    if sum(b[:b[1]]) & 0xFFFFFFFF: bad.append("%s %d checksum" % (tag, n))
+                    yield n, b
+                    n = b[4]; k += 1
+            for n, b in walk(L[7], "PART"): pass
+            for n, b in walk(L[8], "FSHD"):
+                for m, c in walk(b[18], "LSEG"): pass
+            return bad, len(seen)
+    for name, steps in (("split", [(5000, {})]), ("split, then a reinstall", [(5000, {}), ("re", {})]),
+                        ("split, then DH2 and Zenix deleted and a fresh install", [(5000, {}), (None, {"ZI_DELETE": "ZB0,ZR0,ZH0,DH2", "ZI_LAYOUT": "one"})])):
+        p = os.path.join(T, "card16v.hdf")
+        cb, cyls = img_card16(p)
+        for st, envx in steps:
+            if st == "re":
+                r = run("reinstall", p)
+            elif st is None:
+                r = run("install", p, 1, **envx)
+            else:
+                r = run("install", p, opt_for(p, "part", "ide0p3"), st)
+        rd = subprocess.run([RB, p], capture_output=True, text=True, env=env)
+        bad, n = amiga_view(p)
+        check("the card, %s: diskd's reader reads the table whole (%s)" % (name, rd.stdout.splitlines()[0] if rd.stdout else rd.stderr[-200:]),
+              rd.returncode == 0 and rd.stdout.startswith("noedit -"), rd.stdout + rd.stderr)
+        check("the card, %s: as AmigaOS reads it, every chain block within RDBBlocksHi and HighRDSKBlock (%d blocks)" % (name, n), not bad, str(bad))
+
     # ---- the partition step: delete, then install in the freed space; one write; undo ----
     p = os.path.join(T, "card16x.hdf")
     cb, cyls = img_card16(p)

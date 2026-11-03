@@ -151,7 +151,7 @@ started by itself until now** (the highest bootable, mounted partition, whatever
 nothing to disk. A partition whose name the menu cannot use (a space at its end, a colon) is refused: the menu would reboot for ever looking for it. With no such partition (a system on another disk is not seen) the plan says so. A boot priority above 5 also outranks the floppy; Early Startup still chooses. Ways back, which the program prints at the end:
 - **`zinstall --undo`**: every table sector as it was, the one that made the new table real first; refused if any of them is no longer what zinstall left, and after a replaced partition or an erased disk (what was there is gone). After a split it puts the old table back too (the partition whole, its old name), and says that its contents are gone and it needs formatting. Tested from the new Zenix itself; the copy is `/var/lib/zinstall/table-before` in the new root (`zinstall --undo FILE` from elsewhere).
 - At power-on, both mouse buttons: Kickstart's Early Startup menu chooses a partition by hand.
-- HDToolBox or `fdisk del` on an Amiga table (fdisk's own limit of 128 chain blocks can refuse an RDB with a big handler; `--undo` has no such limit).
+- HDToolBox or `fdisk del` on an Amiga table.
 
 ## 7. What it writes where, in order
 1. Stage 1 of the table (section 3), each step flushed. Rescan; find the new devices by their exact start and size; refuse if not found.
@@ -173,11 +173,16 @@ nothing to disk. A partition whose name the menu cannot use (a space at its end,
 If a step fails, it stops and says what is done; the table has only unbootable, unmounted partitions. Run again, they are offered by name. `/etc/fstab`'s names (`ide0pN`) follow the table's order: a later change to the table before them shifts them (known, as for any fstab of `ide0pN`).
 
 ## 8. Shared things touched
-- `tools/mkzup.py`: a family `zinstall`. `user/rdb.h`: `RDB_MAXUSED` may be raised by a program that includes it (a PFS3 handler is 121 LSEG blocks; 128 was the limit: the owner's card fits with no block to spare; diskd keeps 128). `user/zpkg.c`: `zpkg --fetch DIR [--zfs]`, growth only. Makefile: the program, its RAM disk, the floppies. No system call, message, or number claimed.
+- `tools/mkzup.py`: a family `zinstall`. `user/rdb.h`: `RDB_MAXUSED` may be raised by a program that includes it, and is 512 by default (it was 128: with a PFS3 handler of 121 LSEG blocks, RDSK, FSHD and 6 PART blocks passed it, and after a split install the disk server said at every boot "a block chain leaves the RDB area or loops" about a table that was right; found on the real A1200 2026-11-04, reproduced on the host by `tools/host/rdbread-host.c`, which reads with rdb.h's own default; AmigaOS was not affected: every chain block lay within RDBBlocksHi and HighRDSKBlock). The message for a full table is now its own. `user/zpkg.c`: `zpkg --fetch DIR [--zfs]`, growth only. Makefile: the program, its RAM disk, the floppies. No system call, message, or number claimed.
 - The floppy set's format is not frozen: disk 1's own program reads it, always of the same build.
 
 ## 9. The review
 One independent read aimed only at damaging a partition (2026-11-01). Found, and fixed with a test each: the skip of partitions named `BOOT...` made the menu lose the system the machine really starts; a new 0x76 was offered beside an inner RDB with a partition past its container, and landed in it; a partition inside an MBR with overlapping entries could be chosen, on the FAT; new PART blocks could land on a bad-block list's spare blocks; a boot partition past 4 GB had only a note; a menu name it cannot find would reboot for ever; the way back printed `fdisk del` where fdisk refuses (hence `--undo`); "the machine starts as before" after a replaced partition; `hasfat` missed behind a full table and on a bad signature; exFAT and unknown types could be chosen; busy flags not compared in the re-read. Known and left: a second console mounting a partition after the re-read can still see the table change before diskd stops the data writes; `fstab` names shift as above; an AmigaOS on another drive is not seen, only named in the plan.
+
+**What it shows.** `--list` and the first screen show the RDB's own fields (RDBBlocksLo/Hi, HighRDSKBlock, how many blocks its chains own
+and their range, the filesystems' range) and each partition's PART block, to compare with HDToolBox. On a disk whose Zenix is running,
+`--list` and `zinstall` say so and offer nothing: it cannot install over itself (zpkg -Syu updates it). Every printed line fits 79
+columns: a longer one is broken at a space (a line of exactly 80 wrapped on the console, found on the real A1200).
 
 ## 10. What it does not do
 No shrinking of an existing filesystem in place (the owner's decision, 2026-11-03: free space, or a partition the person chooses to replace, which may be split into Zenix and a new empty partition of its old name and type); no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).

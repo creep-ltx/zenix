@@ -92,6 +92,8 @@ wait Password: 30
 send $5\r
 wait $2:/ 60
 sleep 1
+send zinstall --list; echo zi-li""st\r
+wait zi-list 60
 send echo zi-root-ok; uname -a\r
 sleep 2
 send mount\r
@@ -178,6 +180,9 @@ booted() {    # NAME LOG ROOTTYPE HOST USER
     check "$n: the user's home is its own, mode 700" "$(has $l "^drwx------ .* $5 +users .* /home/$5")"
     check "$n: a file on / and one in the user's home survive a restart" "$(grep -aq '^was-here$' $l && grep -aq '^on-root$' $l && echo ok || echo bad)"
     check "$n: no panic" "$(hasnt $l 'panic')"
+    check "$n: the disk server reads the table whole (no note about it)" "$(hasnt $l 'diskd: note: the partition table')"
+    check "$n: --list on the running Zenix says so and offers nothing" "$(has $l 'Zenix is installed here .* and running from it now')"
+    check "$n: --list's lines all fit 79 columns" "$(sed -n '/^The disk ide0/,/running from it now/p' $l | awk 'length($0) > 79 { bad = 1 } END { print bad ? "bad" : "ok" }')"
 }
 # the accounts as options (unattended): the password files are made on the RAM disk first
 ACC_PREP='echo rootpw2 > /tmp/rp; echo beapw2 > /tmp/up; echo zi-pr""ep'
