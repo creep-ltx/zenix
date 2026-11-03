@@ -112,7 +112,10 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 5. **The desktop** (owner 2026-11-03: "I want a desktop before a public release ... starting with a small minimal desktop
    with floating windows. Something classic but modern."): first a design note with a few looks to choose from (pictures,
    the owner picks), then **a minimal desktop with floating windows** as the first step, and the first public pre-release
-   after it. Then the rest: the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
+   after it. (Owner 2026-11-03: "it's a Unix-like system. Several desktop choices are expected.") So the display
+   server and the desktop are separate programs, as X11 and Wayland's compositors keep them: a documented protocol, and the
+   window manager / desktop a program of its own that can be swapped; the floating desktop is the first, an i3-style
+   tiling one a second choice, others possible. Then the rest: the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
    viewers, preferences; TrueType fonts (owner 2026-10-26; rendered once per size into bitmap fonts and cached, so a
    68020 without an FPU pays only once; also usable by the console); the demo floppy's desktop edition. Audit.
 6. **Sound and hardware:** a Paula server, `play`, a MOD player; optional memory protection on CPUs with an MMU; USB,
