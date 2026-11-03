@@ -288,7 +288,7 @@ open(sys.argv[2], "wb").write(d[i - 32:])' $d/n.hdf $d/n2.img
     cp $d/root.img $d/s.img; smash $d/s.img 0 $blk
     python3 tools/mkrdb.py $d/s.img $d/s.hdf zenixfs >/dev/null
     conf $d/m3.fs-uae $d/s.hdf $BD/zenix-zfs.adf
-    printf 'wait fsck.zenixfs -y 240\nsleep 3\nstop\n' >$d/k3.txt
+    printf 'waitopt fsck.zenixfs -y 240\nsleep 3\nstop\n' >$d/k3.txt
     run $d/m3.fs-uae 300 $d/k3.txt $d/3.log
     # (with no ZenixFS superblock boot cannot tell the type: then fsd says there is no filesystem)
     check "r: a destroyed superblock: boot stops with a message, it does not write" "$(grep -aq 'no writable ext2 filesystem\|cannot be mounted' $d/3.log && echo ok || echo bad)"
