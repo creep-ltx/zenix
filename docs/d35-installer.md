@@ -74,6 +74,30 @@ than a 2 MB machine has; such a machine is better served by a smaller /home or o
 (ZB1, ZR1...). Unattended: `--zenix-size MB`, `--layout recommended|one|custom`, `--root-size MB`, `--home-size MB` (0: none),
 `--root-fs` and `--home-fs` `ext2|zenixfs`.
 
+**The partition step (the owner's live test, 2026-11-03: "as any OS installer does it").** On "Where should Zenix go?" the choice `d`
+lists every partition (name, size, type, dostype, and whether it holds Zenix or AmigaOS) and lets the person mark partitions to delete,
+one at a time, each by typing its name (with a plain warning when it is not Zenix's), the list shown again each time, Return when done.
+Never deletable: a FAT entry of an MBR, a 0x76 container as a whole, a mounted partition, anything in a damaged table, and partitions
+of two tables at once. The space of the marked ones joins the free space next to it; then the usual layouts, filesystems, plan and one
+confirmation. **The write:** every kept PART block of that RDB is copied as it is (only `next` changes) and the new ones written, into
+blocks of the RDB area nothing uses; one write of the RDSK block (its list, HighRDSKBlock, RDBBlocksHi) names the new chain; the old
+blocks stay as they were and unused. On an MBR the deleted entry and the new 0x76 are the same one MBR write. `--undo` restores the old
+table (and says the deleted partitions' contents are gone where Zenix was written). Unattended: `--delete NAME`, repeatable.
+A torn RDSK write here loses the whole RDB, where the plain install risks one PART block: the same "refused, an RDB tool puts it back".
+
+**A disk with Zenix already** (a ZBn, ZRn and perhaps ZHn of the same n in one Amiga table): the first question, with the advice that
+`zpkg -Syu` is the way to update and reinstalling is for a broken or unwanted system:
+1. **Reinstall in the same partitions, keep /home** (the default): the users, groups, passwords and the computer's name read from the old
+   root first (or new ones asked; the old root not readable: new ones), the root formatted again (its filesystem asked), Zenix copied,
+   checked, the start-up partition's files written anew, /home and its fstab line kept, the old table copy kept (so `--undo` still means
+   "the table before the first install"). For the time it takes, the start-up and root partitions are unbootable and unmounted (their own
+   PART blocks only), as in an install.
+2. **Reinstall and erase /home** (its filesystem asked); the users kept or not, their home folders made again.
+3. **Remove Zenix and start over:** the partition step with Zenix's partitions already marked.
+4. **Install somewhere else:** the usual choice; at the very end the old root's and old start-up partition's bootable marks are cleared
+   (their own blocks), so the new one is taken.
+Unattended: `--reinstall [--erase-home] [--keep-users|--new-users]`, `--remove-zenix`, `--elsewhere`.
+
 ## 4. A cut at any moment
 Every table change is arranged so that one sector write turns the old table into the new one; the new blocks before it are in places
 nothing refers to. **Where it is not whole:**

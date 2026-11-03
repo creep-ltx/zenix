@@ -793,6 +793,8 @@ wait zi-prep 10
 send zinstall --delete DH2 $ACC_OPTS --layout custom --root-size 200 --home-size 300\r
 wait Choose a number 30
 send \r
+wait MB .Return 30
+send \r
 wait Choose .Return = 1, ext2 30
 send \r
 wait Type yes to go on 30
@@ -970,7 +972,7 @@ sleep 1
 stop
 EOS
     run $OUT/k.fs-uae 1800 $OUT/k5.txt $OUT/k5.log
-    check "k: the plan says /home is erased" "$(has $OUT/k5.log 'ZH0 (your files, /home) is ERASED')"
+    check "k: the plan says /home is erased" "$(has $OUT/k5.log 'ZH0 .your files, /home. is ERASED')"
     check "k: the second reinstall is done" "$(has $OUT/k5.log '^Done\. Zenix is on this disk')"
     cat >$OUT/k6.txt <<'EOS'
 wait amiga2 login: 240

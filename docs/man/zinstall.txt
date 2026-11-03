@@ -7,7 +7,9 @@ SYNOPSIS
     zinstall [--zenix-size MB] [--layout recommended|one|custom]
              [--root-size MB] [--home-size MB] [--root-fs ext2|zenixfs]
              [--home-fs ext2|zenixfs] [--hostname NAME]
-             [--root-password-file FILE]
+             [--root-password-file FILE] [--delete NAME]...
+             [--reinstall [--erase-home] [--keep-users|--new-users]]
+             [--remove-zenix] [--elsewhere]
              [--user NAME [--user-name TEXT] --user-password-file FILE |
               --no-user]
     zinstall --list
@@ -71,6 +73,20 @@ THE MACHINE AND ITS ACCOUNTS
     The shipped accounts user and guest, which have no password, are
     locked, unless one is your name. The options answer these questions
     instead (a password from the first line of a file).
+
+DELETING PARTITIONS
+    At "Where should Zenix go?", d lists the partitions and lets you mark
+    some to delete, each by typing its name; their space joins the free
+    space, and Zenix goes there. Never: a FAT partition, a 0x76 container
+    as a whole, a mounted one. Nothing is written before the plan's one
+    confirmation (--delete NAME, more than once, does the same).
+
+A DISK WITH ZENIX ALREADY
+    To update Zenix use zpkg -Syu. To install it again: 1 reinstall in
+    the same partitions, keeping your files (/home) and, if you like, the
+    users and passwords (--reinstall, --keep-users); 2 the same, erasing
+    /home (--erase-home); 3 remove Zenix and start over (--remove-zenix);
+    4 install somewhere else; the old one stops starting (--elsewhere).
 
 LAYOUTS
     After where and how much, it shows three layouts in MB and asks:
