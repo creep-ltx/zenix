@@ -174,6 +174,15 @@ the card may be put in after power-on.
   of the driver's loop around `ne_watch` (the quiesce program swapped, the driver's end), read but not run; DHCP, ping
   and a TCP transfer through the card.
 
+**Run on the real hardware (2026-11-04, the A1200 with the Apollo 1260, the FA411, over the serial console):** it
+works: the card's CIS read ("NETGEAR" "FA411", manufacturer 0x149 card 0x411), an AX88790 at port 0x300
+(configuration 7, registers at 0x3c0), its internal PHY at MII address 0x10, link up at 100 Mbit/s full duplex, DHCP
+gave an address, `ping google.se` answered (24-29 ms). Three things the PC's model had wrong, all fixed with the model
+changed to match: the chip's ISR never shows the reset bit after the reset (Linux only logs it: so does Zenix now); a
+byte read through Gayle's odd window returned the even port next to it on this machine, while byte writes there and
+word reads were right (odd ports are now read by a word of the pair, its low byte); the command register reads 23
+when stopped, the start bit still set (no longer looked at).
+
 **The first run on the A1200 with the 1260** (the owner's machine, when it is home):
 1. Boot Zenix; put the FA411 in after power-on if the machine does not start with it in.
 2. As root, `/etc/network/interfaces` with `auto eth0`, `iface eth0 inet dhcp`, `driver ne2000`; then `ifup eth0`.

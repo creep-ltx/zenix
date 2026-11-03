@@ -355,8 +355,12 @@ static unsigned short ne_rw(u32 a)
     if (!M.present) { M.late_access++; return 0xFFFF; }
     if (m_io_ok(a) <= 0) return 0xFFFF;
     int odd, r = m_io_reg(a, &odd);
-    if (odd || r != NE_DATA) { FAULT("a word read at %x", a); return 0xFFFF; }
-    return (unsigned short)m_data(1, 0, 0);
+    if (odd) { FAULT("a word read at %x", a); return 0xFFFF; }
+    if (r == NE_DATA) return (unsigned short)m_data(1, 0, 0);
+    /* a register pair by a word, the even port high, the odd one low: how the driver reads odd ports, since a byte
+     * read through the odd window gave the even port on the real FA411 in the A1200 (2026-11-04) */
+    unsigned char hi = m_reg_rd((unsigned)r);
+    return (unsigned short)(hi << 8 | m_reg_rd((unsigned)r + 1));
 }
 static void ne_ww(u32 a, unsigned short v)
 {

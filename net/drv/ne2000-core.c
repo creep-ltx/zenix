@@ -13,8 +13,23 @@ static u32 port(const struct ne *n, unsigned r)
     u32 p = n->io + r;
     return p & 1 ? PC_IO_ODD + p - 1 : PC_IO + p;
 }
-static unsigned char rd(const struct ne *n, unsigned r) { return ne_rb(port(n, r)); }
+/* reads of odd ports by a word of the pair, its low byte: on the real FA411 in the A1200 with the 1260 (2026-11-04) a
+ * byte read through the odd window returned the even port next to it, while byte writes there and word reads were
+ * right (the station address written by bytes read back whole by words) */
+static unsigned char rd(const struct ne *n, unsigned r)
+{
+    u32 p = n->io + r;
+    if (!(p & 1)) return ne_rb(PC_IO + p);
+    return (unsigned char)ne_rw(PC_IO + p - 1);
+}
 static void wr(const struct ne *n, unsigned r, unsigned char v) { ne_wb(port(n, r), v); }
+/* an odd port through a word read of the pair (its low byte): a second way in, for the diagnostics below */
+static unsigned char rd_w(const struct ne *n, unsigned r)
+{
+    u32 p = n->io + r;
+    unsigned short w = ne_rw(PC_IO + (p & ~1u));
+    return p & 1 ? (unsigned char)w : (unsigned char)(w >> 8);
+}
 static unsigned char cis_byte(u32 k) { return ne_rb(PC_ATTR + 2 * k); }
 
 /* ISR bits written as 1 are cleared; the AX88x90 sometimes keeps them: written again, up to 10 times (axnet_cs) */
@@ -292,7 +307,10 @@ void ne_card_off(struct ne *n)
 }
 
 /* ---- the chip ---- */
-/* the chip's own reset (its reset port read, written back) and the stopped state; -> 0, or -ETIMEDOUT */
+/* the chip's own reset (its reset port read, written back) and the stopped state; -> 0. A chip whose ISR never
+ * shows the reset bit is used anyway, as Linux's axnet_cs and ne.c do (they only log it): the real FA411 reads
+ * ISR 4c after its reset (2026-11-04, the A1200 with the 1260), and the command register check and the frame memory
+ * test that follow are what decide whether a chip is there */
 static int chip_reset(struct ne *n)
 {
     wr(n, E_CR, CR_STP | CR_NODMA);
@@ -300,8 +318,8 @@ static int chip_reset(struct ne *n)
     u32 t0 = ne_ticks();
     while (!(rd(n, E_ISR) & ISR_RST)) {
         if (ne_ticks() - t0 > 3) {
-            ne_log(n, "the chip did not finish its reset in 30 ms (ISR %x)", rd(n, E_ISR));
-            return -ETIMEDOUT;
+            ne_log(n, "the chip's reset bit did not come in 30 ms (ISR %x): going on, as Linux does", rd(n, E_ISR));
+            break;
         }
         ne_sleep(1);
     }
@@ -367,7 +385,9 @@ static int probe_as(struct ne *n, int quiet)
     unsigned char back[32];
     if (chip_reset(n)) return -ENODEV;
     unsigned char cr = rd(n, E_CR);
-    if ((cr & (CR_STP | CR_STA | CR_TXP | CR_NODMA)) != (CR_STP | CR_NODMA)) {
+    /* the start bit is not looked at: the real FA411 (an AX88790) reads 23 here, stopped with the start bit still set,
+       as the DP8390's datasheet allows (2026-11-04) */
+    if ((cr & (CR_STP | CR_TXP | CR_NODMA)) != (CR_STP | CR_NODMA)) {
         if (!quiet) ne_log(n, "no DP8390 at port %x (its command register reads %x)", n->io, cr);
         return -ENODEV;
     }
@@ -445,7 +465,19 @@ int ne_start(struct ne *n)
         wr(n, E_CR, CR_STP | CR_NODMA | CR_PAGE1);
         unsigned char v = rd(n, E1_PAR0 + i);
         wr(n, E_CR, CR_STP | CR_NODMA);
-        if (v != n->mac[i]) { ne_log(n, "the chip does not keep its station address (byte %d reads %x)", i, v); return -EIO; }
+        if (v != n->mac[i]) {
+            ne_log(n, "the chip does not keep its station address (byte %d reads %x)", i, v);
+            wr(n, E_CR, CR_STP | CR_NODMA | CR_PAGE1);
+            ne_log(n, "diag: MAC %x:%x:%x:%x:%x:%x; page 1 by bytes %x %x %x %x %x %x %x %x, by words %x %x %x %x %x %x %x %x",
+                   n->mac[0], n->mac[1], n->mac[2], n->mac[3], n->mac[4], n->mac[5],
+                   rd(n, 0), rd(n, 1), rd(n, 2), rd(n, 3), rd(n, 4), rd(n, 5), rd(n, 6), rd(n, 7),
+                   rd_w(n, 0), rd_w(n, 1), rd_w(n, 2), rd_w(n, 3), rd_w(n, 4), rd_w(n, 5), rd_w(n, 6), rd_w(n, 7));
+            wr(n, E_CR, CR_STP | CR_NODMA);
+            ne_log(n, "diag: page 0 by bytes %x %x %x %x %x %x %x %x, by words %x %x %x %x %x %x %x %x; io %x ax %d",
+                   rd(n, 0), rd(n, 1), rd(n, 2), rd(n, 3), rd(n, 4), rd(n, 5), rd(n, 6), rd(n, 7),
+                   rd_w(n, 0), rd_w(n, 1), rd_w(n, 2), rd_w(n, 3), rd_w(n, 4), rd_w(n, 5), rd_w(n, 6), rd_w(n, 7), n->io, n->ax);
+            return -EIO;
+        }
     }
     n->next = NE_RXSTART;
     n->tx_len[0] = n->tx_len[1] = 0;
