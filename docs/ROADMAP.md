@@ -80,6 +80,13 @@ The phases below say *what*; this says *in which order*. When one item is done, 
 fixed next, ahead of everything here ("fix things when we find them"). A focused audit closes every block; its findings
 are fixed at once. Two independent design reviews for deep core changes, one for features.
 
+**Real-hardware findings waiting (the A1200 with the 1260, 2026-11-04), fixed next:** the 040/060 data cache on for fast
+RAM through the transparent translation registers, chip RAM uncached (boot log: "data cache off"; `ls -laR /` of 506
+lines took 4.26 s, 9.64 s on the screen with the serial cable in: measured); the serial console drops input on long
+lines and Zmodem through it stalls at 3 KB; netd should start a card it finds with DHCP without /etc/network/interfaces;
+the installer asks for a package server; `zpkg -Sl` lines within 80 columns, "newer/older installed", zenix-tests and
+zpkg-new kept out of a user's list; diskd's note about the RDB chain on the installed card (with the installer helper).
+
 1. **Foundations finished (the week of 2026-10-26):** D13 shared code; the shell's memory fix; the colour console;
    the self-updates. Audit.
 2. **Zenix reaches the world** (done in FS-UAE 2026-10-29, closing audit docs/audit-2026-10-29-block2.md; the real A1200 checks are the owner's weekend; reported 2026-11-03: telnet to a BBS with downloads works on the real A1200): signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
