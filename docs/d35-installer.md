@@ -143,16 +143,16 @@ One independent read aimed only at damaging a partition (2026-11-01). Found, and
 ## 10. What it does not do
 No shrinking of an existing filesystem in place (the owner's decision, 2026-11-03: free space, or a partition the person chooses to replace, which may be split into Zenix and a new empty partition of its old name and type); no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).
 
-## 11. Measured (FS-UAE and the PC, 2026-11-01; no speed figures: emulator time is not hardware time)
+## 11. Measured (FS-UAE and the PC, 2026-11-01 to 11-03; no speed figures: emulator time is not hardware time)
 | | |
 |---|---|
-| `zinstall` | 77,732 bytes (ZEXE), -Os |
-| The install floppies | 4 disks: disk 1 the bootblock, the kernel (169 KB), a RAM disk of 540 KB (7 KB free) and 173 KB of the set; 1,948 KB of bundles in all, core first, the optional ones on disks 3-4 |
-| Free memory, 2 MB of chip RAM alone, booted from disk 1 | 809 KB at the prompt (before audit A7's fix that floppy did not start at all on such a machine) |
-| Lowest free memory seen while installing (sampled at each file and program end; a child's peak in between is not seen) | 2 MB chip alone: 450 KB with ext2, 303 KB with ZenixFS; with 8 MB of fast RAM 8,544 KB |
+| `zinstall` | 95,412 bytes (ZEXE), -Os, with the password code it shares with passwd and useradd |
+| The install floppies | 4 disks: disk 1 the bootblock, the kernel (169 KB), a RAM disk of 560 KB and 153 KB of the set; 1,966 KB of bundles in all, core first, the optional ones on disks 3-4 |
+| No floppy (`install/from-amigaos/`) | zenixboot 53 KB, the kernel 169 KB, `zinstall-ram.img` 3,400 KB (needs fast RAM) |
+| Free memory, 2 MB of chip RAM alone, booted from disk 1 | 789 KB at the prompt (before audit A7's fix that floppy did not start at all on such a machine) |
+| Lowest free memory seen while installing (sampled at each file and program end; a child's peak in between is not seen) | 2 MB chip alone: 404 KB with ext2, 257 KB with ZenixFS; with 8 MB of fast RAM about 8,500 KB |
 | What zinstall wants free before it writes anything | 350 KB (ext2), 500 KB (ZenixFS): measured use plus a margin; less, and it says so and writes nothing |
 | The installed machine, 2 MB chip alone, one login | 1,211 KB free on ext2, 1,023 KB on ZenixFS |
-| Files checked against their SHA-256 after the copy | 310 (core) to 312 (everything) |
+| Files checked against their SHA-256 after the copy | 307 (core) to 312 (everything) |
 
-Tests: `tools/zinstall-host-test.sh` (261 checks, the fuzzer 300,000 rounds, ASAN and UBSAN), `tools/zinstall-test.sh` f r a m z c n (119 checks).
-
+Tests: `tools/zinstall-host-test.sh` (273 checks, the fuzzer 300,000 rounds, ASAN and UBSAN), `tools/zinstall-test.sh` f r a m z c n o h (174 checks, 2026-11-03), `useradd-test` (63) and `users-test` (61) after the shared password code.
