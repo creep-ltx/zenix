@@ -42,9 +42,11 @@ if r.returncode:
 
 MB = 2048
 env = dict(os.environ, ASAN_OPTIONS="detect_leaks=0")
+CUT_ENV = {}
 
 
 def run(*args, **e):
+    e = dict(CUT_ENV, **e)
     return subprocess.run([BIN] + [str(a) for a in args], capture_output=True, text=True, env=dict(env, **{k: str(v) for k, v in e.items()}))
 
 
@@ -290,7 +292,7 @@ def new_parts(out):
     for l in out.splitlines():
         if l.startswith("new "):
             w = l.split()
-            res[w[1]] = {k: int(v) for k, v in (x.split("=") for x in w[2:])}
+            res[w[1]] = {k: int(v, 16 if k == "dostype" else 10) for k, v in (x.split("=") for x in w[2:])}
     return res
 
 
@@ -652,6 +654,171 @@ try:
     cb, cyls = img_card16(p2)
     cut_test("the owner's card, DH2 split", p2, [("DH0", 2 * cb, 256 * cb), ("DH1", 258 * cb, 512 * cb)], "part", "ide0p3", 5000)
     torn_test("the owner's card, DH2 split", p2, "part", "ide0p3", 5000)
+
+    # ---- layouts (the owner's live test, 2026-11-03): recommended, one partition, custom; /home's filesystem ----
+    p = os.path.join(T, "lay.hdf")
+    img_rdb_free(p)
+    b0 = p + ".b"
+    cp(p, b0)
+    k = opt_for(p, "free")
+    r = run("install", p, k, ZI_TABLE_ONLY=1)
+    nw = new_parts(r.stdout)
+    check("layout recommended on 350 MB: boot 16, root a third (at least 128), /home the rest", nw["ZB0"]["sectors"] // 2048 == 16 and 110 <= nw["ZR0"]["sectors"] // 2048 <= 140 and "ZH0" in nw, r.stdout)
+    cp(b0, p)
+    r = run("install", p, k, ZI_TABLE_ONLY=1, ZI_LAYOUT="one")
+    nw = new_parts(r.stdout)
+    check("layout one partition: boot and root only, the root all the rest", "ZH0" not in nw and nw["ZR0"]["sectors"] > 300 * MB, r.stdout)
+    cp(b0, p)
+    r = run("install", p, k, ZI_LAYOUT="one")
+    t = read_table(p)
+    check("  it installs, two new partitions", r.returncode == 0 and sorted(x[0] for x in t if x[0].startswith("Z")) == ["ZB0", "ZR0"], str(t))
+    cp(b0, p)
+    r = run("install", p, k, ZI_TABLE_ONLY=1, ZI_LAYOUT="custom", ZI_ROOT=100, ZI_HOME=50, ZI_HOMEFS="zenixfs")
+    nw = new_parts(r.stdout)
+    check("layout custom: root 100 MB, /home 50 MB as typed (whole cylinders), the rest left free", 100 * MB <= nw["ZR0"]["sectors"] < 101 * MB and 50 * MB <= nw["ZH0"]["sectors"] < 51 * MB, r.stdout)
+    check("  /home on ZenixFS: its dostype", nw["ZH0"]["dostype"] == 0x5A4E4601, r.stdout)
+    cp(b0, p)
+    r = run("install", p, k, ZI_LAYOUT="custom", ZI_ROOT=100, ZI_HOME=0)
+    t = read_table(p)
+    check("  custom with no /home", r.returncode == 0 and "ZH0" not in [x[0] for x in t], str(t))
+    for root, home, why in ((20, 50, "at least 32"), (100, 2, "at least 4"), (300, 300, "do not fit")):
+        cp(b0, p)
+        r = run("install", p, k, ZI_LAYOUT="custom", ZI_ROOT=root, ZI_HOME=home)
+        check("  custom %d + %d MB refused (%s), nothing written" % (root, home, why), r.returncode == 1 and why in r.stdout and not changed_sectors(b0, p), r.stdout)
+    os.unlink(b0)
+    # the owner's card: custom sizes in DH2 decide the split; what is left stays DH2
+    p = os.path.join(T, "card16c.hdf")
+    cb, cyls = img_card16(p)
+    k = opt_for(p, "part", "ide0p3")
+    r = run("install", p, k, ZI_LAYOUT="custom", ZI_ROOT=1024, ZI_HOME=3000)
+    t = read_table(p)
+    rest = [x for x in t if x[0] == "DH2"]
+    check("the card, custom 1 GB root and 3 GB /home in DH2: the rest stays DH2", r.returncode == 0 and rest and 9 * 1024 * MB < rest[0][2] < 10 * 1024 * MB, str(t))
+    p = os.path.join(T, "card16d.hdf")
+    cb, cyls = img_card16(p)
+    CUT_ENV.update(ZI_LAYOUT="custom", ZI_ROOT="1024", ZI_HOME="3000")
+    cut_test("the card, custom layout in DH2", p, [("DH0", 2 * cb, 256 * cb), ("DH1", 258 * cb, 512 * cb)], "part", "ide0p3")
+    CUT_ENV.clear()
+
+    # ---- a disk with a Zenix already: reinstall (keep /home, erase it), remove, install elsewhere ----
+    p = os.path.join(T, "re.hdf")
+    keep = img_rdb_free(p)
+    run("install", p, opt_for(p, "free"), 150)        # room left for an install elsewhere
+    after1 = p + ".1"
+    cp(p, after1)
+    t1 = read_table(p)
+    zh = [x for x in t1 if x[0] == "ZH0"][0]
+    r = run("reinstall", p)
+    t2 = read_table(p)
+    ch = changed_sectors(after1, p)
+    check("reinstall, /home kept: the same partitions, root and boot marked as before", r.returncode == 0 and t2 == t1, r.stdout + str(t2))
+    check("  /home not written", not [x for x in ch if zh[1] <= x < zh[1] + zh[2]], str(ch[:5]))
+    for nm, st, n in keep:
+        check("  %s byte-identical" % nm, not [x for x in ch if st <= x < st + n])
+    cp(after1, p)
+    r = run("reinstall", p, ZI_ERASE_HOME=1)
+    ch = changed_sectors(after1, p)
+    check("reinstall erasing /home: /home written, the rest as kept", r.returncode == 0 and [x for x in ch if zh[1] <= x < zh[1] + zh[2]] and
+          not [x for x in ch for nm, st, n in keep if st <= x < st + n], r.stdout)
+    # a cut at each write of a reinstall: the old Zenix is never left bootable with a half-written root
+    nbad = 0
+    probe = after1 + ".p"
+    cp(after1, probe)
+    total = int([l for l in run("reinstall", probe).stdout.splitlines() if l.startswith("done")][0].split()[1])
+    for n in range(0, total + 1, max(1, total // 40)):
+        cp(after1, probe)
+        run("reinstall", probe, ZI_CUT=n)
+        t = read_table(probe)
+        zr = [x for x in t if x[0] == "ZR0"][0]
+        zb = [x for x in t if x[0] == "ZB0"][0]
+        if 0 < n < total and n >= 2 and (zb[4] & 1) and not (zr[4] & 1):
+            nbad += 1
+        if [x for x in changed_sectors(after1, probe) for nm, st, c in keep if st <= x < st + c]:
+            nbad += 1
+    check("  a cut during a reinstall: the boot partition is not bootable while the root is being made; others untouched", nbad == 0)
+    os.unlink(probe)
+    cp(after1, p)
+    r = run("remove", p)
+    t3 = read_table(p)
+    ch = changed_sectors(after1, p)
+    check("remove: only DH0 and DH1 left in the table, one sector written", r.returncode == 0 and [x[0] for x in t3] == ["DH0", "DH1"] and len(ch) == 1, r.stdout + str(ch))
+    r = run("list", p)
+    check("  the space is free again", "option 1 free" in r.stdout, r.stdout)
+    cp(after1, p)
+    r = run("install", p, opt_for(p, "free"))
+    t4 = read_table(p)
+    zr0 = [x for x in t4 if x[0] == "ZR0"][0]
+    zr1 = [x for x in t4 if x[0] == "ZR1"]
+    zb0 = [x for x in t4 if x[0] == "ZB0"][0]
+    check("elsewhere beside the old Zenix: allowed; the old root and boot partition unmarked at the end, the new ones marked",
+          r.returncode == 0 and zr1 and not (zr0[4] & 1) and not (zb0[4] & 1) and (zr1[0][4] & 1), r.stdout + str(t4))
+    for f in (after1,):
+        os.unlink(f)
+    # the card's kind: Zenix in DH2's place, removed: DH0 and DH1 byte-identical
+    p = os.path.join(T, "card16r.hdf")
+    cb, cyls = img_card16(p)
+    run("install", p, opt_for(p, "part", "ide0p3"), 5000)
+    b1 = p + ".b"
+    cp(p, b1)
+    r = run("remove", p)
+    t = read_table(p)
+    check("the card: remove after a split: DH0, DH1, DH2 left", r.returncode == 0 and [x[0] for x in t] == ["DH0", "DH1", "DH2"], r.stdout + str(t))
+    ch = changed_sectors(b1, p)
+    check("  one sector written, DH0 and DH1 untouched", len(ch) == 1 and not [x for x in ch if 2 * cb <= x < 770 * cb], str(ch))
+    os.unlink(b1)
+
+    # ---- the partition step: delete, then install in the freed space; one write; undo ----
+    p = os.path.join(T, "card16x.hdf")
+    cb, cyls = img_card16(p)
+    bx = p + ".b"
+    cp(p, bx)
+    r = run("list", p, ZI_DELETE="DH2")
+    check("delete DH2: its space offered as one free area", "option 1 free" in r.stdout and "part" not in [l.split()[2] for l in r.stdout.splitlines() if l.startswith("option ")], r.stdout)
+    r = run("install", p, 1, ZI_DELETE="DH2", ZI_LAYOUT="custom", ZI_ROOT=200, ZI_HOME=300)
+    t = read_table(p)
+    check("  installed: DH0, DH1 and Zenix's three; DH2 gone", r.returncode == 0 and [x[0] for x in t] == ["DH0", "DH1", "ZB0", "ZR0", "ZH0"], r.stdout + str(t))
+    zb = [x for x in t if x[0] == "ZB0"]
+    check("  Zenix where DH2 was", zb and zb[0][1] == 770 * cb, str(zb))
+    ch = changed_sectors(bx, p)
+    check("  DH0, DH1 and their old PART blocks, the FileSysHeader and LSEG: byte-identical", not [x for x in ch if 0 < x < 126 or 2 * cb <= x < 770 * cb], str([x for x in ch if x < 200]))
+    m = re_last = [l for l in r.stdout.splitlines() if l.startswith("atomic")]
+    cp(bx, p)
+    r = run("install", p, 1, ZI_DELETE="DH2", ZI_LAYOUT="custom", ZI_ROOT=200, ZI_HOME=300, ZI_UNDO_AFTER=1)
+    check("  undone: the first 256 sectors exactly as before", r.returncode == 0 and not [x for x in changed_sectors(bx, p) if x < 256], r.stdout[-200:])
+    cp(bx, p)
+    CUT_ENV.update(ZI_DELETE="DH2", ZI_LAYOUT="custom", ZI_ROOT="200", ZI_HOME="300")
+    cut_test("the partition step on the card", p, [("DH0", 2 * cb, 256 * cb), ("DH1", 258 * cb, 512 * cb)], "free")
+    CUT_ENV.clear()
+    os.unlink(bx)
+    # delete two, keep one between them: the space of each joins its free neighbours
+    p = os.path.join(T, "del2.hdf")
+    keep = img_rdb_free(p)
+    r = run("list", p, ZI_DELETE="DH1")
+    o1 = [l for l in r.stdout.splitlines() if l.startswith("option 1 free")]
+    check("deleting DH1: its 80 cylinders join the free ones after it", o1 and int(o1[0].split("sectors=")[1]) > 400 * MB, r.stdout)
+    # refusals
+    p = os.path.join(T, "delf.img")
+    img_mbr_card(p)
+    r = run("list", p, ZI_DELETE="ide0p1")
+    check("deleting the FAT partition is refused", r.returncode == 1 and "FAT" in r.stdout, r.stdout)
+    r = run("list", p, ZI_DELETE="ide0p2")
+    check("deleting the 0x76 container as a whole is refused", r.returncode == 1 and "delete those instead" in r.stdout, r.stdout)
+    p = os.path.join(T, "delb.hdf")
+    img_rdb_free(p)
+    r = run("list", p, ZI_DELETE="DH0", ZI_BUSY="1008:%d" % (80 * 1008))
+    check("deleting a mounted partition is refused", r.returncode == 1 and "in use" in r.stdout, r.stdout)
+    # after an install: Zenix's partitions deleted, a fresh install in their place
+    p = os.path.join(T, "delz.hdf")
+    keep = img_rdb_free(p)
+    run("install", p, opt_for(p, "free"))
+    bz = p + ".b"
+    cp(p, bz)
+    r = run("install", p, 1, ZI_DELETE="ZB0,ZR0,ZH0", ZI_LAYOUT="one")
+    t = read_table(p)
+    check("Zenix's partitions deleted, a fresh one-partition install in their place", r.returncode == 0 and [x[0] for x in t] == ["DH0", "DH1", "ZB0", "ZR0"], r.stdout + str(t))
+    ch = changed_sectors(bz, p)
+    check("  DH0 and DH1 byte-identical", not [x for x in ch for nm, st, n in keep if st <= x < st + n])
+    os.unlink(bz)
 
     # ---- a whole disk ----
     p = os.path.join(T, "blank.hdf")

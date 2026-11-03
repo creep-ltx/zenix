@@ -104,7 +104,7 @@ static int tio_fl(void *c)
     (void)c;
     int r = dcall(DISK_FLUSH, (u32)diskh, 0, 0, 0);
     if (r == -EOPNOTSUPP || r == -95) {
-        if (!noflush) say("Note: this disk cannot promise that a write has reached it; a power cut now could lose the last writes.\n");
+        if (!noflush) say("Note: this disk cannot confirm that what is written is stored. Do not switch off\nuntil zinstall is finished.\n");
         noflush = 1;
         return 0;
     }
@@ -236,7 +236,7 @@ static int need_disk(int want, int optional)
             int h = probe_drive(d, want);
             if (h >= 0) { fl_h = h; fl_disk = want; return 0; }
         }
-        say("\nPut install disk %d in a drive and press Return.%s\n", want, optional ? " Type skip to leave the rest out:\n(the rest can come later with zpkg -S)" : " Type stop to stop.");
+        say("\nPut install disk %d in a drive and press Return.\n%s\n", want, optional ? "(Or type skip to leave out the extra programs on it; zpkg -S adds them later.)" : "(Or type stop to stop.)");
         if (ask("> ")) return -1;
         if (optional && !strcmp(line, "skip")) { skip_extras = 1; return -1; }
         if (!optional && !strcmp(line, "stop")) return -1;
@@ -253,7 +253,7 @@ static int fl_read_at(int disk, u32 off, u8 *buf, u32 n, int optional)
             for (;;) {
                 if (dcall(DISK_READ, (u32)fl_h, t / 512, TRACKB / 512, (u32)trk) == 0) break;
                 if (++tries < 3) continue;
-                say("\nDisk %d cannot be read there (byte %u). Try the disk again and press Return, or type stop:\n", disk, off);
+                say("\nDisk %d could not be read (at byte %u). Check that it is in properly and press\nReturn, or type stop:\n", disk, off);
                 if (ask("> ") || !strcmp(line, "stop")) return -1;
                 fl_disk = 0; fl_h = -1;
                 if (need_disk(disk, optional)) return -1;
@@ -645,7 +645,7 @@ static int copy_from_floppies(int zenixfs)
         if (r == ESKIP) { notes++; continue; }
         if (r) { say("zinstall: %s: failed (%d)\n", it->name, r); return r; }
     }
-    if (notes) say("%d optional packages left out: zpkg -S brings them later.\n", notes);
+    if (notes) say("%d extra packages were left out; zpkg -S adds them later.\n", notes);
     return 0;
 }
 
@@ -655,7 +655,7 @@ static int copy_from_network(int zenixfs)
     snprintf(dir, sizeof dir, ZI "/var/cache/zpkg/pkg");
     int r = mkdir_p(dir);
     if (r) { say("zinstall: cannot make %s (%d)\n", dir, r); return r; }
-    say("Fetching the system and packages with zpkg...\n");
+    say("Downloading Zenix with zpkg...\n");
     r = run("/bin/zpkg", "--fetch", dir, zenixfs ? "--zfs" : 0);
     if (r) { say("zinstall: zpkg could not fetch them (%d)\n", r); return -EIO; }
     char **names;
@@ -829,6 +829,10 @@ bad:
 }
 
 /* ---- the machine's name and its accounts (after the copy and the check; DESIGN D35 section 7) ---- */
+static const char *opt_layout, *opt_rootsize, *opt_homesize, *opt_rootfs, *opt_homefs;
+static int opt_reinstall, opt_erasehome, opt_keepusers = -1, opt_remove, opt_elsewhere;
+static const char *opt_delete[16];
+static int nopt_delete;
 static const char *opt_zsize, *opt_host, *opt_rootpw, *opt_user, *opt_userpw, *opt_username;
 static int opt_nouser;
 static char hostname[64] = "zenix", username[32];
@@ -854,14 +858,14 @@ static int get_password(const char *what, const char *file, char out[100])
     }
     static char again[100], prompt[80];
     for (;;) {
-        snprintf(prompt, sizeof prompt, "%s (nothing shows as you type): ", what);
+        snprintf(prompt, sizeof prompt, "A password for %s (nothing shows as you type): ", what);
         sys_ttymode(TTY_RAW | TTY_NOSIG);   /* before the prompt shows: a key typed at once is not echoed by the cooked line (seen) */
         if (read_secret(prompt, out, 100)) return -1;
-        if (!out[0]) { say("A password is needed here.\n"); continue; }
+        if (!out[0]) { say("A password is needed. Try again.\n"); continue; }
         sys_ttymode(TTY_RAW | TTY_NOSIG);
-        if (read_secret("Again: ", again, sizeof again)) return -1;
+        if (read_secret("Type it again to check: ", again, sizeof again)) return -1;
         if (!strcmp(out, again)) return 0;
-        say("The two were not the same. Once more.\n");
+        say("The two did not match. Try again.\n");
     }
 }
 static u32 hu_uid, hu_gid;              /* has_user's find: its numbers */
@@ -891,43 +895,43 @@ static int has_user(const char *path, const char *name)
 static int accounts(const char *homedir)
 {
     static char pw1[100], hash[100], comment[48];
-    say("\nThe machine and its accounts.\n");
+    say("\nThe computer's name and its users.\n");
     if (opt_host) {
         if (!host_ok(opt_host)) { say("zinstall: %s: a name is 1-63 of a-z 0-9 -\n", opt_host); return -1; }
         strcpy(hostname, opt_host);
     } else for (;;) {
-        if (ask("The machine's name (Return = zenix): ")) return -1;
+        if (ask("The computer's name (Return for zenix): ")) return -1;
         if (!line[0]) break;
         if (host_ok(line)) { strcpy(hostname, line); break; }
-        say("1-63 of a-z, 0-9 and -, please (not starting or ending with -).\n");
+        say("Use only a-z, 0-9 and -, at most 63, not starting or ending with -.\n");
     }
     static char hl[80];
     snprintf(hl, sizeof hl, "%s\n", hostname);
     if (put_file("/etc/hostname", hl, (u32)strlen(hl), 0644)) { say("zinstall: cannot write /etc/hostname\n"); return -1; }
-    if (get_password("root's password", opt_rootpw, pw1)) return -1;
+    if (get_password("root, the administrator", opt_rootpw, pw1)) return -1;
     pw_new_hash(pw1, hash);
     memset(pw1, 0, sizeof pw1);
     if (pw_set_hash_at("zinstall", ZI "/etc/passwd", "root", hash)) return -1;
-    say("  root's password is set.\n");
+    say("  The password for root is set.\n");
     /* the first user */
     username[0] = 0;
     if (opt_user) {
         if (!pw_name_ok(opt_user)) { say("zinstall: %s: a name is 1-31 of a-z 0-9 _ - and starts with a letter or _\n", opt_user); return -1; }
         strcpy(username, opt_user);
     } else if (!opt_nouser) for (;;) {
-        if (ask("Your own login name (Return = none now; useradd later): ")) return -1;
+        if (ask("Your user name for logging in (Return to skip; add one later with useradd): ")) return -1;
         if (!line[0]) break;
         if (pw_name_ok(line) && strcmp(line, "root")) { strcpy(username, line); break; }
-        say("1-31 of a-z, 0-9, _ and -, starting with a letter or _, please.\n");
+        say("Use only a-z, 0-9, _ and -, at most 31, starting with a letter.\n");
     }
     comment[0] = 0;
     if (username[0]) {
         if (opt_username) { strncpy(comment, opt_username, sizeof comment - 1); }
         else if (!opt_user) {
             for (;;) {
-                if (ask("Your full name (Return = none): ")) return -1;
+                if (ask("Your full name (Return to skip): ")) return -1;
                 if (pw_field_ok(line) && strlen(line) < sizeof comment) { strcpy(comment, line); break; }
-                say("At most 47 characters, and no colon.\n");
+                say("At most 47 characters, and no colon (:).\n");
             }
         }
         if (!pw_field_ok(comment)) { say("zinstall: a full name may not hold a colon\n"); return -1; }
@@ -943,14 +947,14 @@ static int accounts(const char *homedir)
             static char hp[96];
             snprintf(hp, sizeof hp, "%s/%s", homedir, username);
             if (mkdir_p(hp) || sys_chown(hp, uid, gid) || sys_chmod(hp, 0700)) { say("zinstall: cannot make %s's home\n", username); return -1; }
-            say("  %s was there already: its password is set, its home made.\n", username);
+            say("  %s already existed: its password is set and its home folder made.\n", username);
         } else {
             struct pw_add na = { username, "users", home, "/bin/sh", comment, "wheel,zine", hash, -1 };
             if (pw_add_at("zinstall", ZI "/etc/passwd", ZI "/etc/group", &na, &uid, &gid)) return -1;
             static char hp[96];
             snprintf(hp, sizeof hp, "%s/%s", homedir, username);
             if (mkdir_p(hp) || sys_chown(hp, uid, gid) || sys_chmod(hp, 0700)) { say("zinstall: cannot make %s's home\n", username); return -1; }
-            say("  %s added: groups users, wheel (sudo) and zine (demos), home %s.\n", username, home);
+            say("  %s is added. They can use sudo and run Amiga demos; their files go in %s.\n", username, home);
         }
     }
     /* the shipped accounts without a password (user, guest) are locked, not left open to anyone at the console */
@@ -958,8 +962,114 @@ static int accounts(const char *homedir)
     for (int i = 0; i < 2; i++)
         if (strcmp(shipped[i], username) && has_user(ZI "/etc/passwd", shipped[i])) {
             if (pw_set_hash_at("zinstall", ZI "/etc/passwd", shipped[i], "*")) return -1;
-            say("  the shipped account %s is locked (passwd %s opens it again).\n", shipped[i], shipped[i]);
+            say("  The built-in account %s had no password and is now locked (passwd %s opens it).\n", shipped[i], shipped[i]);
         }
+    return 0;
+}
+
+/* ---- a reinstall: what is kept from the old root (read before it is formatted) ---- */
+#define ZO "/mnt/zo"
+struct kept { const char *path; char *data; int len; };
+static struct kept kept[4] = { { "/etc/passwd", 0, 0 }, { "/etc/group", 0, 0 }, { "/etc/hostname", 0, 0 }, { "/var/lib/zinstall/table-before", 0, 0 } };
+static int read_old_root(const char *dev, int zfs)
+{
+    sys_mkdir("/mnt"); sys_mkdir(ZO);
+    char *m[] = { "/bin/mount", "-t", zfs ? "zenixfs" : "ext2", (char *)dev, ZO, 0 };
+    int pid = sys_spawn(m[0], m, 0), r = pid < 0 ? pid : sys_wait(pid);
+    if (r) return -1;
+    int got = 0;
+    for (int i = 0; i < 4; i++) {
+        static char pth[96];
+        snprintf(pth, sizeof pth, ZO "%s", kept[i].path);
+        kept[i].data = pw_slurp(pth, &kept[i].len);
+        if (kept[i].data && i < 2) got++;
+    }
+    sys_umount(ZO);
+    return got == 2 ? 0 : -1;
+}
+static int put_kept(const char *homedir)
+{
+    for (int i = 0; i < 3; i++)
+        if (kept[i].data && put_file(kept[i].path, kept[i].data, (u32)kept[i].len, 0644)) { say("zinstall: cannot write %s\n", kept[i].path); return -1; }
+    if (kept[2].data) {                          /* the name, for the words at the end */
+        int n = kept[2].len < 63 ? kept[2].len : 63;
+        memcpy(hostname, kept[2].data, (u32)n); hostname[n] = 0;
+        char *e = strchr(hostname, '\n'); if (e) *e = 0;
+    }
+    /* every user's home folder (uid 1000 and up), where /home was made anew */
+    for (char *l = kept[0].data; l && *l; ) {
+        char *e = strchr(l, '\n');
+        char *f[7]; int k = 0;
+        static char ln[200];
+        u32 len = e ? (u32)(e - l) : strlen(l);
+        if (len < sizeof ln) {
+            memcpy(ln, l, len); ln[len] = 0;
+            for (char *q = ln; k < 7; k++) { f[k] = q; q = strchr(q, ':'); if (!q) { k++; break; } *q++ = 0; }
+            if (k >= 6) {
+                u32 uid = (u32)strtoul(f[2], 0, 10), gid = (u32)strtoul(f[3], 0, 10);
+                if (uid >= 1000 && !strncmp(f[5], "/home/", 6) && strchr(f[5] + 6, '/') == 0 && f[1][0] != '*') {
+                    static char hp[96];
+                    struct ustat st;
+                    snprintf(hp, sizeof hp, "%s/%s", homedir, f[5] + 6);
+                    if (sys_stat(hp, &st) < 0 && (mkdir_p(hp) || sys_chown(hp, uid, gid) || sys_chmod(hp, 0700))) { say("zinstall: cannot make %s\n", hp); return -1; }
+                    if (!username[0]) strncpy(username, f[0], sizeof username - 1);
+                }
+            }
+        }
+        if (!e) break;
+        l = e + 1;
+    }
+    say("  The users and the computer's name of the old Zenix are kept.\n");
+    return 0;
+}
+
+static const char *dtext(const struct t_part *p);
+/* ---- the partition step: mark partitions to delete; their space joins the free space around it ---- */
+static const char *kind_of(const struct tdisk *d, int i)
+{
+    const struct t_part *p = &d->part[i];
+    if (i == d->zb || i == d->zr || i == d->zh) return "Zenix";
+    if (p->how == TP_RDB && p->bootable && !p->nomount && (p->dostype >> 8) != 0x4C4E58u && p->dostype != 0x5A4E4601u) return "AmigaOS (starts the machine)";
+    if (p->how == TP_RDB && ((p->dostype >> 8) == 0x444F53u || (p->dostype >> 8) == 0x504653u || (p->dostype >> 8) == 0x534653u)) return "AmigaOS";
+    return "";
+}
+static int partition_step(struct tdisk *d)
+{
+    for (;;) {
+        say("\nPartitions on ide0 (marked ones are deleted when you confirm the plan at the end):\n");
+        for (int i = 0; i < d->nparts; i++) {
+            const struct t_part *p = &d->part[i];
+            const char *w = t_del_refused(d, i);
+            say("  %2d  %-10.10s %8s  %-17.17s %-7s %-10s%s\n", i + 1, p->label[0] ? p->label : p->dev, mbtext(p->sectors), t_typename(p), dtext(p),
+                kind_of(d, i), p->del ? " DELETE" : w ? " (kept)" : "");
+        }
+        if (ask("Type a number to mark or unmark it, or Return when done: ")) return -1;
+        if (!strcmp(line, "q")) return 1;
+        if (!line[0] || !strcmp(line, "done")) return 0;
+        int k = atoi(line) - 1;
+        if (k < 0 || k >= d->nparts) continue;
+        struct t_part *p = &d->part[k];
+        if (p->del) { p->del = 0; continue; }
+        const char *w = t_del_refused(d, k);
+        if (w) { say("%s cannot be deleted: %s.\n", p->label[0] ? p->label : p->dev, w); continue; }
+        const char *name = p->label[0] ? p->label : p->dev;
+        if (strcmp(kind_of(d, k), "Zenix"))
+            say("Everything on %s (%s, %s) will be LOST.\n", name, mbtext(p->sectors), t_typename(p));
+        say("To mark %s for deleting, type its name: %s\n", name, name);
+        if (ask("> ")) return -1;
+        if (!strcmp(line, name)) p->del = 1;
+        else say("Not marked.\n");
+    }
+}
+static int mark_deletes(struct tdisk *d)       /* --delete NAME: 0, or -1 with the reason said */
+{
+    for (int j = 0; j < nopt_delete; j++) {
+        int k = -1;
+        for (int i = 0; i < d->nparts; i++) if (!strcmp(d->part[i].label, opt_delete[j]) || !strcmp(d->part[i].dev, opt_delete[j])) k = i;
+        const char *w = k < 0 ? "no such partition" : t_del_refused(d, k);
+        if (w) { say("zinstall: --delete %s: %s\n", opt_delete[j], w); return -1; }
+        d->part[k].del = 1;
+    }
     return 0;
 }
 
@@ -976,7 +1086,7 @@ static const char *dtext(const struct t_part *p)       /* a dostype as HDToolBox
 static void show_disk(const struct tdisk *d)
 {
     say("\nThe disk ide0: %s (%u sectors). It holds %s.\n", mbtext(d->sectors), d->sectors, d->what);
-    if (d->noedit) say("Its table cannot be changed: %s.\n", d->noedit);
+    if (d->noedit) say("Zenix will not change this disk's partition table: %s.\n", d->noedit);
     for (int r = 0; r < d->nregions; r++)
         say("  Amiga table%s: cylinders of %u sectors (%u heads x %u), partitions from %u to %u\n", d->region[r].base ? " in a 0x76" : "",
             d->region[r].cyl, d->region[r].heads, d->region[r].secs, d->region[r].locyl, d->region[r].hicyl);
@@ -995,13 +1105,15 @@ static void show_opt(int n, const struct tdisk *d, const struct t_opt *o)
 {
     switch (o->kind) {
     case TO_NEWCONT: say("  %d  the free space, %s, in a new partition of the PC table (nothing else changes)\n", n, mbtext(o->sectors)); break;
-    case TO_FREE: say("  %d  the free space, %s, in the Amiga table%s (nothing else changes)\n", n, mbtext(o->sectors), d->region[o->region].base ? " inside the card's container" : ""); break;
+    case TO_FREE: say("  %d  the free space, %s, in the Amiga table%s (%s)\n", n, mbtext(o->sectors), d->region[o->region].base ? " inside the card's container" : "",
+                      t_ndel(d) ? "with what the deleted partitions leave" : "nothing else changes"); break;
     case TO_PART: {
         const struct t_part *p = &d->part[o->part];
         say("  %d  REPLACE partition %s %s, %s, %s: what is on it is LOST\n", n, p->dev, p->label, mbtext(p->sectors), t_typename(p));
         break;
     }
     case TO_WHOLE: say("  %d  ERASE THE WHOLE DISK, %s: everything on it is LOST\n", n, mbtext(o->sectors)); break;
+    default: break;
     }
 }
 static int has_cont(const struct tdisk *d)
@@ -1011,6 +1123,25 @@ static int has_cont(const struct tdisk *d)
 }
 static void show_plan(const struct tdisk *d, const struct t_plan *p)
 {
+    if (p->opt.kind == TO_REINSTALL || p->opt.kind == TO_REMOVE) {
+        say("\nWhat will change on ide0:\n");
+        if (p->opt.kind == TO_REMOVE) {
+            say("  Zenix's partitions are taken out of the table: %s, %s%s%s. Everything on them is\n  LOST, your files (/home) too. Their space is free again for a new install.\n",
+                d->part[d->zb].label, d->part[d->zr].label, d->zh >= 0 ? ", " : "", d->zh >= 0 ? d->part[d->zh].label : "");
+        } else {
+            say("  %s (the system part) is formatted again (%s) and Zenix copied anew: what is\n  on it is LOST.\n", p->nw[R_ROOT].label, p->zenixfs ? "ZenixFS" : "ext2");
+            say("  %s (start-up) gets new files.\n", p->nw[R_BOOT].label);
+            if (p->nnew > 2) {
+                if (p->erase_home) say("  %s (your files, /home) is ERASED and made anew (%s).\n", p->nw[R_HOME].label, p->homefs ? "ZenixFS" : "ext2");
+                else say("  %s (your files, /home) is KEPT as it is.\n", p->nw[R_HOME].label);
+            }
+        }
+        int any = 0;
+        for (int i = 0; i < d->nparts; i++)
+            if (i != d->zb && i != d->zr && i != d->zh) { say(any ? ", " : "  Not touched: "); say("%s", d->part[i].label[0] ? d->part[i].label : d->part[i].dev); any = 1; }
+        if (any) say("\n");
+        return;
+    }
     say("\nWhat will change on ide0:\n");
     if (p->opt.kind == TO_PART) {
         const struct t_part *q = &d->part[p->opt.part];
@@ -1021,18 +1152,27 @@ static void show_plan(const struct tdisk *d, const struct t_plan *p)
             say("  Zenix takes its first part. The rest, %s, stays a partition called %s,\n  of the same type: EMPTY, its old contents LOST; format it from AmigaOS.\n", mbtext(p->rest.sectors), p->rest.label);
     }
     if (p->opt.kind == TO_WHOLE) say("  THE WHOLE DISK IS ERASED: every partition and everything on them is LOST.\n");
+    for (int i = 0; i < d->nparts; i++)
+        if (d->part[i].del) say("  Partition %s (%s, %s) is DELETED: what is on it is LOST.\n", d->part[i].label[0] ? d->part[i].label : d->part[i].dev,
+                                mbtext(d->part[i].sectors), t_typename(&d->part[i]));
     if (p->opt.kind == TO_NEWCONT) say("  A new partition of type 0x76 in the PC table, %s, holding an Amiga table with:\n", mbtext(p->opt.sectors));
-    static const char *const what[3] = { "the boot menu and the kernel (AmigaDOS FFS)", 0, "/home (ext2)" };
+    static const char *const what[3] = { "the boot menu and the kernel (AmigaDOS FFS)", 0, 0 };
     for (int i = 0; i < p->nnew; i++)
         say("  New %-4s %8s  %s\n", p->nw[i].label, mbtext(p->nw[i].sectors),
-            i == R_ROOT ? (p->zenixfs ? "the Zenix root (ZenixFS)" : "the Zenix root (ext2)") : what[i]);
-    say("  Sectors of the table written: ");
+            i == R_ROOT ? (p->zenixfs ? "the Zenix root (ZenixFS)" : "the Zenix root (ext2)") : i == R_HOME ? (p->homefs ? "/home (ZenixFS)" : "/home (ext2)") : what[i]);
+    if (p->nnew == 2) say("  /home is a folder on the root.\n");
+    if (p->opt.kind == TO_FREE || p->opt.kind == TO_NEWCONT) {
+        u32 used = 0;
+        for (int i = 0; i < p->nnew; i++) used += p->nw[i].sectors;
+        if (p->opt.sectors > used + 2048) say("  %s of the free space stays free.\n", mbtext(p->opt.sectors - used));
+    }
+    say("  Partition table blocks written: ");
     for (int i = 0; i < p->nw1; i++) say("%u ", p->w1[i].lba);
     say("(then %u %u when all is checked)\n", p->w2[0].lba, p->w2[1].lba);
     if (p->opt.kind != TO_WHOLE) {
         int any = 0;
         for (int i = 0; i < d->nparts; i++)
-            if (i != p->opt.part) {
+            if (i != p->opt.part && !d->part[i].del) {
                 if (!any) say("  Not touched: ");
                 else say(", ");
                 say("%s", d->part[i].label[0] ? d->part[i].label : d->part[i].dev);
@@ -1049,7 +1189,7 @@ static void show_plan(const struct tdisk *d, const struct t_plan *p)
     if (!p->aos[0] && p->opt.kind != TO_WHOLE)
         say("  No system that starts by itself was found on this disk: the menu has no AmigaOS\n  line. A system on another disk with a lower boot priority will not start first.\n");
     if (!p->atomic)
-        say("  A cut power during the table writes can damage the old table before the new\n  one is whole here: the disk then holds neither.\n");
+        say("  If the power fails while the table is written, the old table may be damaged\n  before the new one is complete.\n");
 }
 
 static int gone;                        /* what was chosen is lost: a partition, or the disk */
@@ -1080,7 +1220,7 @@ static int list_only(void)
     if (t_read(&d, &io, di.sectors, busy, nbusy)) { say("zinstall: cannot read the disk\n"); return 1; }
     show_disk(&d);
     int n = t_options(&d, &io, o, T_MAXOPT);
-    say("\nWhat could be done:\n");
+    say("\nWhat zinstall could do here:\n");
     for (int i = 0; i < n; i++) show_opt(i + 1, &d, &o[i]);
     if (!n) say("  nothing\n");
     for (int i = 0; i < d.nparts; i++) {
@@ -1102,7 +1242,7 @@ static int save_before(const struct t_plan *pl, int free_space)
     sys_unlink(p);
     int fd = sys_open(p, O_WRONLY | O_CREAT | O_EXCL), r;
     if (fd < 0) return fd;
-    u8 h[16] = { 'Z', 'T', 'B', '1', 0, 0, 0, (u8)(free_space ? 0 : pl->keep ? 2 : 1), 0, 0, 0, (u8)pl->commit1, 0, 0, 0, (u8)pl->nw1 };
+    u8 h[16] = { 'Z', 'T', 'B', '1', 0, 0, 0, (u8)(free_space ? 0 : (pl->keep || pl->opt.kind == TO_FREE || pl->opt.kind == TO_NEWCONT) ? 2 : 1), 0, 0, 0, (u8)pl->commit1, 0, 0, 0, (u8)pl->nw1 };
     r = write_all(fd, h, sizeof h);
     for (int i = 0; i < pl->nw1 && !r; i++) {
         u32 l = pl->w1[i].lba;
@@ -1127,7 +1267,7 @@ static int undo(const char *path)
     if (fd < 0) { say("zinstall: cannot read %s (%d)\n", path, fd); return 1; }
     if (sys_read(fd, h, sizeof h) != (int)sizeof h || memcmp(h, "ZTB1", 4)) { say("zinstall: %s is not a table copy\n", path); sys_close(fd); return 1; }
     u32 chosen = h[7], commit = h[11], n = h[15];
-    if (chosen == 2) say("This install split a partition: undone, the partition comes back whole, in its old place, with its\nold name, but what was on it is gone: it needs formatting.\n");
+    if (chosen == 2) say("This install split or deleted partitions: undone, they come back in the table, in\ntheir old places, with their old names, but what was on them is gone: format them.\n");
     else if (chosen) { say("zinstall: this install replaced a partition or the whole disk: what was there is gone, the old table would point at nothing. Nothing changed.\n"); sys_close(fd); return 1; }
     if (!n || n > T_MAXW || commit >= n) { say("zinstall: %s is damaged\n", path); sys_close(fd); return 1; }
     diskh = dopen("ide0", 0);
@@ -1172,9 +1312,21 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i], *v = i + 1 < argc ? argv[i + 1] : 0;
         if (!strcmp(a, "--no-user")) { opt_nouser = 1; continue; }
+        if (!strcmp(a, "--reinstall")) { opt_reinstall = 1; continue; }
+        if (!strcmp(a, "--erase-home")) { opt_erasehome = 1; continue; }
+        if (!strcmp(a, "--keep-users")) { opt_keepusers = 1; continue; }
+        if (!strcmp(a, "--new-users")) { opt_keepusers = 0; continue; }
+        if (!strcmp(a, "--remove-zenix")) { opt_remove = 1; continue; }
+        if (!strcmp(a, "--elsewhere")) { opt_elsewhere = 1; continue; }
         if (!v) goto usage;
         if (!strcmp(a, "--hostname")) opt_host = v;
         else if (!strcmp(a, "--zenix-size")) opt_zsize = v;
+        else if (!strcmp(a, "--layout")) opt_layout = v;
+        else if (!strcmp(a, "--delete") && nopt_delete < 16) opt_delete[nopt_delete++] = v;
+        else if (!strcmp(a, "--root-size")) opt_rootsize = v;
+        else if (!strcmp(a, "--home-size")) opt_homesize = v;
+        else if (!strcmp(a, "--root-fs")) opt_rootfs = v;
+        else if (!strcmp(a, "--home-fs")) opt_homefs = v;
         else if (!strcmp(a, "--root-password-file")) opt_rootpw = v;
         else if (!strcmp(a, "--user")) opt_user = v;
         else if (!strcmp(a, "--user-password-file")) opt_userpw = v;
@@ -1184,7 +1336,9 @@ int main(int argc, char **argv)
     }
     if (0) {
 usage:
-        say("usage: zinstall [--zenix-size MB] [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
+        say("usage: zinstall [--zenix-size MB] [--layout recommended|one|custom] [--root-size MB] [--home-size MB]\n"
+            "       [--root-fs ext2|zenixfs] [--home-fs ext2|zenixfs] [--reinstall [--erase-home] [--keep-users|--new-users]]\n"
+            "       [--remove-zenix] [--elsewhere] [--delete NAME]... [--hostname NAME] [--root-password-file FILE] [--user NAME [--user-name TEXT]\n"
             "       [--user-password-file FILE] | --no-user]     zinstall --list     zinstall --undo [FILE]\n");
         return 2;
     }
@@ -1205,7 +1359,7 @@ usage:
         say("zinstall: this is neither the install floppy (no %s) nor a Zenix with zpkg:\nthere is nothing to install from.\n", SETFILE);
         return 1;
     }
-    say("Files come from: %s.\n", !floppy ? "the package server, with zpkg" : kern_path ? "the installer's own RAM disk (started from AmigaOS)" : "the install floppies");
+    say("Zenix will be copied from %s.\n", !floppy ? "the package server, with zpkg" : kern_path ? "the installer's own files (started from AmigaOS)" : "the install floppies");
 
     u32 free0 = mem_now();
     struct diskinfo di;
@@ -1214,6 +1368,88 @@ usage:
     find_busy();
     if (t_read(&d, &io, di.sectors, busy, nbusy)) { say("zinstall: cannot read the disk\n"); return 1; }
     show_disk(&d);
+    int reinst = 0, zenixfs = 0;
+    static struct t_want want;
+    if (d.zr >= 0 && !opt_elsewhere) {
+        int c = opt_remove ? 3 : opt_reinstall ? (opt_erasehome ? 2 : 1) : 0;
+        if (!c) {
+            say("\nThis disk has Zenix already: %s (start-up), %s (system)%s%s.\n"
+                "To bring it up to date, use zpkg -Syu in Zenix instead; reinstalling is for a\n"
+                "Zenix that is broken or unwanted.\n"
+                "  1  reinstall Zenix in the same partitions, keep your files (/home)\n", d.part[d.zb].label, d.part[d.zr].label,
+                d.zh >= 0 ? ", " : "", d.zh >= 0 ? d.part[d.zh].label : "");
+            if (d.zh >= 0) say("  2  reinstall Zenix, and erase your files too\n");
+            say("  3  remove Zenix's partitions, then install again in the space they leave\n"
+                "  4  install somewhere else (the old Zenix stops starting at the end)\n");
+            while (!c) {
+                if (ask("Choose a number (Return = 1): ")) return 1;
+                if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                if (!line[0] || !strcmp(line, "1")) c = 1;
+                else if (!strcmp(line, "2") && d.zh >= 0) c = 2;
+                else if (!strcmp(line, "3")) c = 3;
+                else if (!strcmp(line, "4")) c = 4;
+            }
+        }
+        if (c == 3) {                           /* the partition step with Zenix's partitions marked; the install follows in their space */
+            d.part[d.zb].del = d.part[d.zr].del = 1;
+            if (d.zh >= 0) d.part[d.zh].del = 1;
+            if (!opt_remove && !nopt_delete) {
+                int r = partition_step(&d);
+                if (r) { if (r > 0) say("Nothing was changed.\n"); return r < 0; }
+            }
+        } else if (c == 1 || c == 2) {
+            reinst = c;
+            int keep = opt_keepusers;
+            if (keep != 0) {
+                if (read_old_root(d.part[d.zr].dev, d.part[d.zr].dostype == 0x5A4E4601u)) {
+                    say("The old system part cannot be read: its users cannot be kept; new ones are asked.\n");
+                    keep = 0;
+                } else if (keep < 0) {
+                    for (;;) {
+                        if (ask("Keep the users and passwords of the old Zenix? (Return = yes, or no): ")) return 1;
+                        if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                        if (!line[0] || !strcmp(line, "yes")) { keep = 1; break; }
+                        if (!strcmp(line, "no")) { keep = 0; break; }
+                    }
+                }
+            }
+            if (!keep) for (int i = 0; i < 3; i++) { free(kept[i].data); kept[i].data = 0; }
+        }
+    }
+    if (reinst) {
+        static const char *const notes =
+            "  1  ext2: proven on real hardware. The default.\n"
+            "  2  ZenixFS: survives a power cut with no check at the next start, but costs\n"
+            "     about 188-252 KB more memory on a 2 MB machine, and it has NOT yet run on\n"
+            "     real hardware, only in an emulator.\n";
+        if (opt_rootfs) want.rootfs = !strcmp(opt_rootfs, "zenixfs");
+        else {
+            say("\nThe filesystem for the system part (root):\n%s", notes);
+            for (int c = -1; c < 0;) {
+                if (ask("Choose (Return = 1, ext2): ")) return 1;
+                if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                if (!line[0] || !strcmp(line, "1")) c = 0; else if (!strcmp(line, "2")) c = 1;
+                want.rootfs = c > 0;
+            }
+        }
+        if (reinst == 2) {
+            if (opt_homefs) want.homefs = !strcmp(opt_homefs, "zenixfs");
+            else {
+                say("\nThe filesystem for your files (/home):\n%s", notes);
+                for (int c = -1; c < 0;) {
+                    if (ask("Choose (Return = 1, ext2): ")) return 1;
+                    if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                    if (!line[0] || !strcmp(line, "1")) c = 0; else if (!strcmp(line, "2")) c = 1;
+                    want.homefs = c > 0;
+                }
+            }
+        }
+        zenixfs = want.rootfs;
+        if (t_plan_reinstall(&d, &io, &want, reinst == 2, &pl, &why)) { say("zinstall: this cannot be done: %s.\nNothing was changed.\n", why); return 1; }
+        goto planned;
+    }
+    if (nopt_delete && mark_deletes(&d)) return 2;
+again_options:;
     int nopt = t_options(&d, &io, opts, T_MAXOPT);
     if (!nopt) {
         say("\nThere is nowhere on this disk to put Zenix:\n");
@@ -1228,6 +1464,9 @@ usage:
     }
     say("\nWhere should Zenix go?\n");
     for (int i = 0; i < nopt; i++) show_opt(i + 1, &d, &opts[i]);
+    int candel = 0;
+    for (int i = 0; i < d.nparts; i++) if (!t_del_refused(&d, i)) candel = 1;
+    if (candel) say("  d  delete partitions first, then choose again\n");
     if (d.noedit && d.kind == TD_RDB)
         say("\nThis disk's table looks damaged. The partitions may still be recoverable with a\ntool that repairs tables; erasing the disk ends that.\n");
     int dflt = opts[0].kind == TO_FREE || opts[0].kind == TO_NEWCONT;
@@ -1235,6 +1474,11 @@ usage:
     while (!o) {
         if (ask(dflt ? "Choose a number (Return = 1, the free space): " : "Choose a number (there is no default here): ")) return 1;
         if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+        if (candel && !strcmp(line, "d")) {
+            int r = partition_step(&d);
+            if (r) { if (r > 0) say("Nothing was changed.\n"); return r < 0; }
+            goto again_options;
+        }
         if (!line[0]) { if (dflt) o = &opts[0]; continue; }
         int k = atoi(line);
         if (k >= 1 && k <= nopt) o = &opts[k - 1];
@@ -1260,7 +1504,7 @@ usage:
     } else if (o->kind != TO_WHOLE && o->kind != TO_PART) {
         for (;;) {
             say("\nThere are %s here. How many MB may Zenix use?\n", mbtext(o->sectors));
-            if (ask("MB (Return = what it decides: boot, root, /home, some left free): ")) return 1;
+            if (ask("MB (Return for all of it): ")) return 1;
             if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
             if (!line[0]) break;
             u32 mb = (u32)strtoul(line, 0, 10);
@@ -1268,22 +1512,96 @@ usage:
             say("Between 28 and %u, please.\n", o->sectors / 2048);
         }
     }
-    /* the root's filesystem */
-    say("\nThe root's filesystem:\n"
-        "  1  ext2: proven on real hardware (the owner's PiStorm A1200). The default.\n"
+    /* the layout: Zenix's share as the rules say, one partition, or the person's own sizes (D35 section 3); the boot partition is always the rule's */
+    want.layout = -1;
+    if (opt_layout) {
+        want.layout = !strcmp(opt_layout, "recommended") ? TL_RECOMMENDED : !strcmp(opt_layout, "one") ? TL_ONE : !strcmp(opt_layout, "custom") ? TL_CUSTOM : -2;
+        if (want.layout == -2) { say("zinstall: --layout: recommended, one or custom\n"); return 2; }
+        if (want.layout == TL_CUSTOM) {
+            if (!opt_rootsize) { say("zinstall: --layout custom needs --root-size MB (and --home-size MB, 0 for none)\n"); return 2; }
+            want.root = (u32)strtoul(opt_rootsize, 0, 10) * 2048;
+            want.home = opt_homesize ? (u32)strtoul(opt_homesize, 0, 10) * 2048 : 0;
+        }
+    } else {
+        static struct t_plan trial;
+        u32 room = maxsect ? maxsect : o->sectors;
+        say("\nHow to divide Zenix's %s:\n", mbtext(room));
+        for (int l = TL_RECOMMENDED; l <= TL_ONE; l++) {
+            struct t_want tw = { l, 0, 0, 0, 0 };
+            if (t_plan_make(&d, &io, o, maxsect, &tw, &trial, &why)) { say("  %d  (%s)\n", l + 1, why); continue; }
+            if (trial.nnew > 2)
+                say("  %d  recommended: start-up %s, system (root) %s, your files (/home) %s\n", l + 1, mbtext(trial.nw[R_BOOT].sectors), mbtext(trial.nw[R_ROOT].sectors), mbtext(trial.nw[R_HOME].sectors));
+            else
+                say("  %d  %s: start-up %s, system and your files together %s\n", l + 1, l == TL_ONE ? "all in one" : "recommended", mbtext(trial.nw[R_BOOT].sectors), mbtext(trial.nw[R_ROOT].sectors));
+        }
+        say("  3  choose the sizes yourself\n");
+        while (want.layout < 0) {
+            if (ask("Choose (Return = 1): ")) return 1;
+            if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+            if (!line[0] || !strcmp(line, "1")) want.layout = TL_RECOMMENDED;
+            else if (!strcmp(line, "2")) want.layout = TL_ONE;
+            else if (!strcmp(line, "3")) want.layout = TL_CUSTOM;
+        }
+        if (want.layout == TL_CUSTOM) {
+            u32 boot = room >= 256 * 2048 ? 16 : room >= 64 * 2048 ? 8 : 4, left = room / 2048 - boot;
+            const char *rest = o->kind == TO_PART && d.part[o->part].how == TP_RDB ? "stays a partition of the old name, for AmigaOS" : "stays free";
+            say("The start-up partition takes %u MB; %u MB are left.\n", boot, left);
+            for (;;) {
+                if (ask("Size of the system part (root) in MB, at least 32: ")) return 1;
+                if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                u32 mb = (u32)strtoul(line, 0, 10);
+                if (mb >= 32 && mb <= left) { want.root = mb * 2048; left -= mb; break; }
+                say("Between 32 and %u, please.\n", left);
+            }
+            say("%u MB are left.\n", left);
+            for (;;) {
+                if (ask("Size for your files (/home) in MB (Return for all that is left,\n0 to keep them on the system part): ")) return 1;
+                if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                u32 mb = line[0] ? (u32)strtoul(line, 0, 10) : left;
+                if (line[0] && !isdigit((unsigned char)line[0])) mb = left + 1;
+                if (!line[0]) { want.home = T_HOME_REST; left = 0; break; }
+                if (mb == 0 || (mb >= 4 && mb <= left)) { want.home = mb * 2048; left -= mb; break; }
+                say("0, or between 4 and %u, please.\n", left);
+            }
+            if (left) say("%u MB %s.\n", left, rest);
+        }
+    }
+    /* the filesystems */
+    static const char *const fsnotes =
+        "  1  ext2: proven on real hardware. The default.\n"
         "  2  ZenixFS: survives a power cut with no check at the next start, but costs\n"
         "     about 188-252 KB more memory on a 2 MB machine, and it has NOT yet run on\n"
-        "     real hardware, only in an emulator.\n");
-    int zenixfs = -1;
-    while (zenixfs < 0) {
-        if (ask("Choose (Return = 1, ext2): ")) return 1;
-        if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
-        if (!line[0] || !strcmp(line, "1")) zenixfs = 0;
-        else if (!strcmp(line, "2")) zenixfs = 1;
+        "     real hardware, only in an emulator.\n";
+    if (opt_rootfs) want.rootfs = !strcmp(opt_rootfs, "zenixfs");
+    else {
+        say("\nThe filesystem for the system part (root):\n%s", fsnotes);
+        for (int c = -1; c < 0;) {
+            if (ask("Choose (Return = 1, ext2): ")) return 1;
+            if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+            if (!line[0] || !strcmp(line, "1")) c = 0;
+            else if (!strcmp(line, "2")) c = 1;
+            want.rootfs = c > 0;
+        }
     }
-    if (t_plan_make(&d, &io, o, maxsect, zenixfs, &pl, &why)) { say("zinstall: this cannot be done: %s.\nNothing was changed.\n", why); return 1; }
+    zenixfs = want.rootfs;
+    if (t_plan_make(&d, &io, o, maxsect, &want, &pl, &why)) { say("zinstall: this cannot be done: %s.\nNothing was changed.\n", why); return 1; }
+    if (pl.nnew > 2) {
+        if (opt_homefs) want.homefs = !strcmp(opt_homefs, "zenixfs");
+        else {
+            say("\nThe filesystem for your files (/home):\n%s", fsnotes);
+            for (int c = -1; c < 0;) {
+                if (ask("Choose (Return = 1, ext2): ")) return 1;
+                if (!strcmp(line, "q")) { say("Nothing was changed.\n"); return 0; }
+                if (!line[0] || !strcmp(line, "1")) c = 0;
+                else if (!strcmp(line, "2")) c = 1;
+                want.homefs = c > 0;
+            }
+        }
+        if (want.homefs && t_plan_make(&d, &io, o, maxsect, &want, &pl, &why)) { say("zinstall: this cannot be done: %s.\nNothing was changed.\n", why); return 1; }
+    }
+planned:
     /* memory, before anything is written */
-    u32 need = (zenixfs ? MINKB_ZFS : MINKB) * 1024;
+    u32 need = (zenixfs || pl.homefs ? MINKB_ZFS : MINKB) * 1024;
     if (free0 < need) {
         say("zinstall: only %u KB of memory are free; installing needs about %u KB.\nNothing was changed.\n", free0 / 1024, need / 1024);
         return 1;
@@ -1312,8 +1630,8 @@ usage:
         diskh = h;
     }
 
-    gone = pl.opt.kind == TO_PART || pl.opt.kind == TO_WHOLE;
-    say("\nWriting the table.\n");
+    gone = pl.opt.kind == TO_PART || pl.opt.kind == TO_WHOLE || pl.opt.kind == TO_REINSTALL;
+    say("\nWriting the partition table.\n");
     if (t_commit(&io, pl.w1, pl.nw1, &why)) {
         say("zinstall: %s.\nStopped. Whether the new table is whole: run zinstall --list.\n", why);
         return 1;
@@ -1329,14 +1647,14 @@ usage:
         say("  %s is %s\n", pl.nw[i].label, names[i]);
     }
     /* filesystems */
-    say("\nMaking the filesystems.\n");
+    say("\nPreparing the new partitions.\n");
     sys_mkdir("/mnt"); sys_mkdir(ZI); sys_mkdir(ZH);
     /* one inode for 16 KB: the system takes under 500 of the 8,000 on 128 MB, and fsck.ext2 needs about 12 bytes an inode: at mkfs's default of 4 KB a
      * 128 MB root ran it out of memory on 2 MB of chip RAM (measured), here and in any later check */
     int r = zenixfs ? run("/bin/mkfs.zenixfs", (char *)names[R_ROOT], 0, 0) : run("/bin/mkfs.ext2", "-i", "16384", (char *)names[R_ROOT]);
     if (r) { say("zinstall: mkfs failed (%d)\n", r); fail_note(1); return 1; }
-    if (pl.nnew > 2) {
-        r = run("/bin/mkfs.ext2", "-i", "16384", (char *)names[R_HOME]);
+    if (pl.nnew > 2 && (!reinst || pl.erase_home)) {
+        r = pl.homefs ? run("/bin/mkfs.zenixfs", (char *)names[R_HOME], 0, 0) : run("/bin/mkfs.ext2", "-i", "16384", (char *)names[R_HOME]);
         if (r) { say("zinstall: mkfs of /home failed (%d)\n", r); fail_note(1); return 1; }
     }
     char *margv[] = { "/bin/mount", "-t", zenixfs ? "zenixfs" : "ext2", (char *)names[R_ROOT], ZI, 0 };
@@ -1352,7 +1670,7 @@ usage:
     sys_mkdir(ZI "/home"); sys_mkdir(ZI "/mnt"); sys_mkdir(ZI "/bin");
     sys_sync();
     /* read everything back from the disk, the server's cache gone with its unmount */
-    say("\nChecking every file on the disk against its checksum.\n");
+    say("\nChecking that every file was copied correctly.\n");
     sys_umount(ZI);
     pid = sys_spawn(margv[0], margv, 0);
     r = pid < 0 ? pid : sys_wait(pid);
@@ -1360,7 +1678,7 @@ usage:
     u32 nfiles = 0;
     int bad = verify_root(&nfiles);
     if (bad) { say("zinstall: %d problem(s) on the disk: stopping.\n", bad); umount_all(); fail_note(1); return 1; }
-    say("  %u files are right.\n", nfiles);
+    say("  %u files checked, all correct.\n", nfiles);
     /* the machine's own */
     if (!floppy) {                      /* the new machine knows the same servers */
         struct ustat cst;
@@ -1379,26 +1697,29 @@ usage:
         int n = fd >= 0 ? sys_read(fd, fst, fs.size) : -1;
         if (fd >= 0) sys_close(fd);
         if (n == (int)fs.size) {
-            if (pl.nnew > 2) snprintf(fst + n, sizeof fst - (u32)n, "%s    /home   ext2     defaults\n", names[R_HOME]);
+            if (pl.nnew > 2) snprintf(fst + n, sizeof fst - (u32)n, "%s    /home   %-8s defaults\n", names[R_HOME], pl.homefs ? "zenixfs" : "ext2");
             put_file("/etc/fstab", fst, (u32)strlen(fst), 0644);
         }
     }
     /* the table as it was (--undo) */
     mkdir_p(ZI "/var/lib/zinstall");
-    r = save_before(&pl, pl.opt.kind == TO_FREE || pl.opt.kind == TO_NEWCONT);
+    if (reinst) {
+        r = 0;
+        if (kept[3].data) r = put_file(kept[3].path, kept[3].data, (u32)kept[3].len, 0600);
+    } else r = save_before(&pl, (pl.opt.kind == TO_FREE || pl.opt.kind == TO_NEWCONT) && !t_ndel(&d));
     if (r) { say("zinstall: cannot save the copy of the table (%d)\n", r); umount_all(); fail_note(1); return 1; }
     /* /home, then the machine's name and its accounts */
     if (pl.nnew > 2) {
-        char *h[] = { "/bin/mount", "-t", "ext2", (char *)names[R_HOME], ZH, 0 };
+        char *h[] = { "/bin/mount", "-t", pl.homefs ? "zenixfs" : "ext2", (char *)names[R_HOME], ZH, 0 };
         pid = sys_spawn(h[0], h, 0);
         r = pid < 0 ? pid : sys_wait(pid);
         if (r) { say("zinstall: cannot mount the new /home (%d)\n", r); umount_all(); fail_note(1); return 1; }
     }
-    if (accounts(pl.nnew > 2 ? ZH : ZI "/home")) { umount_all(); fail_note(1); return 1; }
+    if (kept[0].data ? put_kept(pl.nnew > 2 ? ZH : ZI "/home") : accounts(pl.nnew > 2 ? ZH : ZI "/home")) { umount_all(); fail_note(1); return 1; }
     sys_sync();
     if (pl.nnew > 2) sys_umount(ZH);
     /* the boot partition */
-    say("\nWriting the boot partition (%s).\n", names[R_BOOT]);
+    say("\nWriting the start-up partition (%s).\n", names[R_BOOT]);
     if (write_boot(&pl, names[R_BOOT])) { umount_all(); fail_note(1); return 1; }
     sys_unlink(ZI KFILE);
     sys_sync();
@@ -1418,15 +1739,15 @@ usage:
     if (pl.aos[0]) {
         say("  2. A boot menu comes first. AmigaOS (%s) starts by itself after 5 seconds; press\n"
             "     a key and choose Zenix for Zenix.\n", pl.aos);
-        if (username[0]) say("  3. Log in as %s on %s; sudo for root's work.\n\n", username, hostname);
-        else say("  3. Log in as root on %s; useradd NAME and passwd NAME make your account.\n\n", hostname);
+        if (username[0]) say("  3. Log in as %s. For administrator tasks put sudo before the command.\n\n", username);
+        else say("  3. Log in as root. To add your own user: useradd NAME, then passwd NAME.\n\n");
         say("The way back to only %s: in Zenix type zinstall --undo, then restart: the table is\n"
             "as it was. Or at power-on hold both mouse buttons for Kickstart's own menu.\n", pl.aos);
     } else {
-        if (username[0]) say("  2. Log in as %s on %s; sudo for root's work.\n", username, hostname);
-        else say("  2. Log in as root on %s; useradd NAME and passwd NAME make your account.\n", hostname);
+        if (username[0]) say("  2. Log in as %s. For administrator tasks put sudo before the command.\n", username);
+        else say("  2. Log in as root. To add your own user: useradd NAME, then passwd NAME.\n");
     }
     if (d.kind == TD_MBR) say("%s; on another Amiga start it from the floppy zenix%s.adf.\n", has_cont(&d) ? "Under Emu68 a second 0x76 is not known to start" : "Under Emu68 it should start by itself", zenixfs ? "-zfs" : "");
-    say("Later: zpkg -Syu brings what is newer, zpkg -S NAME more programs.\n");
+    say("Later: zpkg -Syu updates Zenix, zpkg -S NAME adds a program.\n");
     return 0;
 }

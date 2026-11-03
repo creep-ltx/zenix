@@ -11,8 +11,10 @@
 #   c  the Emu68 card's layout (an MBR, FAT, 0x76 with an RDB, a free slot): FAT and the RDB's partitions unchanged; started from
 #      the kernel floppy as the note says, the new root is found in the new 0x76
 #   r  the refusals as a person meets them: a disk with no room, a table with a bad checksum, wrong words: nothing written
-#   o  the owner's kind of card (16 GB, PFS3 in the RDB): DH2 split into Zenix and a new empty DH2 of the old name and type; DH0, DH1, the
-#      LSEG chain the same; then zinstall --undo from the floppy gives the old table back, every sector
+#   o  a card of the owner's kind (16 GB, PFS3 in the RDB): DH2 deleted in the partition step, Zenix in its place; DH0, DH1, the LSEG
+#      chain the same; it boots and the user logs in; then zinstall --undo from the floppy gives the old table back, every sector
+#   k  a disk with Zenix already: reinstall keeping /home and the users (the user's file is still there, the user logs in), then
+#      reinstall erasing /home (the users kept, the file gone)
 #   h  no floppy: from AmigaOS on a 68060 (zenixboot, the kernel and the RAM disk with the set, as files on DH0); --list, the install
 #   n  from an existing Zenix: its root stays mounted on the same disk; the files through zpkg --fetch from a test server over
 #      FS-UAE's A2065 into the free space; the new system boots, the old root unchanged
@@ -22,7 +24,7 @@ cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-/tmp/zenix-zinstall}; mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 SER=${ZENIX_SERIAL:-/tmp/zenix-zinstall-serial}
-PARTS="${*:-f a m z c r n o h}"
+PARTS="${*:-f a m z c r n o h k}"
 make -s BUILD=$BD all install-floppies $BD/zenix.adf $BD/zenix-zfs.adf >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL the build"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "FAIL the host tool"; exit 1; }
 BD=$(cd "$BD" && pwd)
@@ -140,7 +142,8 @@ host_fs() {    # NAME IMG ROOTNAME ext2|zenixfs
     empty $OUT/$n-root.bin
     if [ -n "$($CK parts $i | grep '^ZH')" ]; then
         $CK cut $i "$($CK parts $i | grep '^ZH' | head -1 | cut -d' ' -f1)" $OUT/$n-home.bin
-        check "$n: the host's e2fsck finds /home clean" "$(yes_if e2fsck -fn $OUT/$n-home.bin)"
+        if [ "$($CK parts $i | grep '^ZH' | head -1 | cut -d' ' -f4)" = 5a4e4601 ]; then check "$n: the host's fsck finds /home (ZenixFS) clean" "$(yes_if $Z fsck $OUT/$n-home.bin)"
+        else check "$n: the host's e2fsck finds /home clean" "$(yes_if e2fsck -fn $OUT/$n-home.bin)"; fi
         empty $OUT/$n-home.bin
     fi
 }
@@ -178,7 +181,7 @@ booted() {    # NAME LOG ROOTTYPE HOST USER
 }
 # the accounts as options (unattended): the password files are made on the RAM disk first
 ACC_PREP='echo rootpw2 > /tmp/rp; echo beapw2 > /tmp/up; echo zi-pr""ep'
-ACC_OPTS='--hostname amiga2 --root-password-file /tmp/rp --user bea --user-password-file /tmp/up'
+ACC_OPTS='--layout recommended --home-fs ext2 --hostname amiga2 --root-password-file /tmp/rp --user bea --user-password-file /tmp/up'
 # ---- f: an empty disk ----
 part_f() {
     local d=$OUT/f.hdf
@@ -190,7 +193,7 @@ sleep 1
 send cat /etc/motd\r
 sleep 1
 send zinstall --list\r
-wait What could be done 30
+wait What zinstall could do here 30
 sleep 2
 send zinstall\r
 wait Choose a number 30
@@ -204,6 +207,10 @@ sleep 1
 send \r
 sleep 1
 send 1\r
+wait Choose .Return = 1.: 30
+send \r
+wait Choose .Return = 1, ext2 30
+send \r
 wait Choose .Return = 1, ext2 30
 send \r
 wait To erase the whole disk 30
@@ -213,6 +220,8 @@ sleep 1
 send zinstall\r
 wait Choose a number 30
 send 1\r
+wait Choose .Return = 1.: 30
+send 2\r
 wait Choose .Return = 1, ext2 30
 send \r
 wait To erase the whole disk 30
@@ -222,32 +231,43 @@ sleep 1
 send sync; zinstall\r
 wait Choose a number 30
 send 1\r
+wait Choose .Return = 1.: 30
+send 3\r
+wait Size of the system part 30
+send 10\r
+wait Between 32 and 30
+send 200\r
+wait Size for your files 30
+send \r
 wait Choose .Return = 1, ext2 30
 send \r
+wait filesystem for your files 30
+wait Choose .Return = 1, ext2 30
+send 2\r
 wait To erase the whole disk 30
 send ERASE ide0\r
-wait The machine's name 1500
+wait The computer's name 1500
 send Bad_Name\r
-wait 1-63 of 30
+wait Use only a-z, 0-9 and -, at most 63 30
 send amiga1\r
-wait root's password 30
+wait A password for root 30
 send rootpw1\r
-wait Again: 30
+wait Type it again to check: 30
 send rootpw1\r
-wait Your own login name 30
+wait Your user name for logging in 30
 send Anna\r
-wait 1-31 of 30
+wait Use only a-z, 0-9, _ and -, at most 31 30
 send anna\r
 wait Your full name 30
 send Anna Andersson\r
-wait anna .nothing shows 30
+wait A password for anna 30
 send annapw1\r
-wait Again: 30
+wait Type it again to check: 30
 send annapwX\r
-wait were not the same 30
-wait anna .nothing shows 30
+wait did not match 30
+wait A password for anna 30
 send annapw1\r
-wait Again: 30
+wait Type it again to check: 30
 send annapw1\r
 $INSTALLED
 sleep 2
@@ -258,8 +278,8 @@ wait zi-end 30
 stop
 EOS
     run $OUT/f.fs-uae 1800 $OUT/f.txt $OUT/f1.log
-    check "f: the passwords were not shown as they were typed" "$(hasnt $OUT/f1.log 'annapw|rootpw|password .nothing shows as you type.: .')"
-    check "f: a bad name and two passwords not the same are asked again" "$(has $OUT/f1.log 'were not the same')"
+    check "f: the passwords were not shown as they were typed" "$(hasnt $OUT/f1.log 'annapw|rootpw|shows as you type.: .')"
+    check "f: a bad name and two passwords not the same are asked again" "$(has $OUT/f1.log 'did not match')"
     check "f: the install says it is done" "$(has $OUT/f1.log '^Done\. Zenix is on this disk')"
     check "f: two wrong answers and a q wrote nothing" "$([ "$(grep -ac 'Nothing was changed' $OUT/f1.log)" = 3 ] && echo ok || echo bad)"
     check "f: it says what to do next" "$(has $OUT/f1.log 'What to do next')"
@@ -271,7 +291,8 @@ EOS
     run $OUT/f2.fs-uae 900 $OUT/f2.txt $OUT/f2.log
     booted f $OUT/f2.log ext2 amiga1 anna
     check "f: the full name is in /etc/passwd" "$($CK cut $d ZR0 $OUT/f-root.bin; debugfs -R 'cat /etc/passwd' $OUT/f-root.bin 2>/dev/null | grep -q '^anna:[^:][^:]*:[0-9]*:100:Anna Andersson:/home/anna:/bin/sh$' && echo ok || echo bad; truncate -s 0 $OUT/f-root.bin)"
-    check "f: /home is the new partition" "$(has $OUT/f2.log '^ide0p3 +/home +ext2')"
+    check "f: the plan showed the layout's sizes: root 200 MB, /home on ZenixFS" "$(grep -aq 'New ZR0 *200 MB' $OUT/f1.log && grep -aq '/home (ZenixFS)' $OUT/f1.log && echo ok || echo bad)"
+    check "f: /home is the new partition, ZenixFS" "$(has $OUT/f2.log '^ide0p3 +/home +zenixfs')"
     host_fs f $d ZR0 ext2
     empty $d
 }
@@ -429,7 +450,7 @@ EOS
 }
 
 # ---- m, z: 2 MB of chip RAM alone ----
-small() {   # NAME 1|2 ROOTTYPE MINKB
+small() {   # NAME 1|2 ROOTTYPE MINKB [MORE OPTIONS]
     local n=$1 d=$OUT/$1.hdf
     truncate -s 0 $d; truncate -s 300M $d
     fsconf $OUT/$n.fs-uae $d 2048 0 3
@@ -440,7 +461,7 @@ send free\r
 sleep 2
 send $ACC_PREP\r
 wait zi-prep 10
-send zinstall $ACC_OPTS\r
+send zinstall $ACC_OPTS $5\r
 wait Choose a number 60
 send 1\r
 wait Choose .Return = 1, ext2 60
@@ -460,7 +481,7 @@ stop
 EOS
     run $OUT/$n.fs-uae 3000 $OUT/$n.txt $OUT/$n-1.log
     check "$n: the install says it is done" "$(has $OUT/$n-1.log '^Done\. Zenix is on this disk')"
-    check "$n: optional packages left out, and said" "$(has $OUT/$n-1.log 'optional packages left out')"
+    check "$n: optional packages left out, and said" "$(has $OUT/$n-1.log 'extra packages were left out')"
     local low; low=$(grep -a 'Lowest free' $OUT/$n-1.log | sed 's/[^0-9]*\([0-9]*\) KB.*/\1/')
     echo "$n: lowest free memory while installing: ${low:-?} KB (chip RAM alone, 2 MB)"
     check "$n: the lowest free memory is at least $4 KB" "$([ "${low:-0}" -ge "$4" ] && echo ok || echo bad)"
@@ -473,7 +494,10 @@ EOS
     host_fs $n $d ZR0 $3
     empty $d
 }
-part_m() { small m "" ext2 150; }
+part_m() {    # one partition: the root only, /home a folder on it
+    small m "" ext2 150 "--layout one"
+    check "m: one partition: no /home partition, the plan says /home is a folder" "$(grep -aq '/home is a folder on the root' $OUT/m-1.log && ! grep -aqE '^ide0p[0-9]+ +/home ' $OUT/m-2.log && echo ok || echo bad)"
+}
 part_z() { small z 2 zenixfs 100; }
 
 # ---- c: the card's layout ----
@@ -564,6 +588,10 @@ wait Choose a number 30
 send \r
 sleep 1
 send 1\r
+wait MB .Return 30
+send \r
+wait Choose .Return = 1.: 30
+send 2\r
 wait Choose .Return = 1, ext2 30
 send \r
 wait type its name exactly 30
@@ -672,7 +700,7 @@ sleep 4
 send $ACC_PREP\r
 wait zi-prep 10
 send zinstall $ACC_OPTS\r
-wait Files come from: the package server 30
+wait Zenix will be copied from the package server 30
 wait Choose a number 30
 send \r
 wait MB .Return 30
@@ -705,7 +733,7 @@ EOS
     chmod +x $OUT/inner-n.sh; : >$OUT/port-n
     $CK sums $d ZX0 >$OUT/n.before
     unshare --map-root-user --map-auto -nm $OUT/inner-n.sh 2>&1 | clean >$OUT/n1.log
-    check "n: the existing Zenix: files from the server" "$(has $OUT/n1.log 'Files come from: the package server')"
+    check "n: the existing Zenix: files from the server" "$(has $OUT/n1.log 'Zenix will be copied from the package server')"
     check "n: the running root is listed in use and not offered" "$(has $OUT/n1.log 'ide0p1 is not offered: it is in use')"
     check "n: the erase is not offered while running from the disk" "$(has $OUT/n1.log 'erasing the disk is not offered: something on this disk is in use')"
     check "n: the install says it is done" "$(has $OUT/n1.log '^Done\. Zenix is on this disk')"
@@ -762,13 +790,15 @@ wait zenix:/# 120
 sleep 1
 send $ACC_PREP\r
 wait zi-prep 10
-send zinstall --zenix-size 5000 $ACC_OPTS\r
+send zinstall --delete DH2 $ACC_OPTS --layout custom --root-size 200 --home-size 300\r
 wait Choose a number 30
-send 3\r
+send \r
+wait MB .Return 30
+send \r
 wait Choose .Return = 1, ext2 30
 send \r
-wait type its name exactly 30
-send DH2\r
+wait Type yes to go on 30
+send yes\r
 $INSTALLED
 sleep 2
 send echo zi-e""nd\r
@@ -777,13 +807,17 @@ stop
 EOS
     run $OUT/o.fs-uae 1800 $OUT/o.txt $OUT/o1.log
     check "o: the install says it is done" "$(has $OUT/o1.log '^Done\. Zenix is on this disk')"
-    check "o: the plan says the rest stays DH2, empty, to format from AmigaOS" "$(has $OUT/o1.log 'stays a partition called DH2')"
+    check "o: the plan says DH2 is deleted, what is on it lost" "$(has $OUT/o1.log 'Partition DH2 .* is DELETED')"
     $CK sums $d DH0 DH1 >$OUT/o.after
     check "o: DH0 and DH1 byte-identical" "$(yes_if cmp $OUT/o.before $OUT/o.after)"
     check "o: the FileSysHeader, its 121 LSEG blocks, DH0's and DH1's PART blocks: byte-identical" "$([ "$($CK bytes $d 1 124)" = "$(cat $OUT/o.rdb)" ] && echo ok || echo bad)"
     $CK parts $d >$OUT/o.parts
-    check "o: the chain: DH0, DH1, ZB0, ZR0, ZH0, DH2" "$([ "$(cut -d' ' -f1 $OUT/o.parts | tr '\n' ' ')" = 'DH0 DH1 ZB0 ZR0 ZH0 DH2 ' ] && echo ok || echo bad)"
-    check "o: the new DH2: PFS3, mountable, not bootable, about 8 GB" "$(awk '$1 == "DH2" && $4 == "50465303" && $5 == 0 && $3 > 14000000 && $3 < 20000000 { ok = 1 } END { print ok ? "ok" : "bad" }' $OUT/o.parts)"
+    check "o: the table: DH0, DH1, then Zenix's three where DH2 was" "$([ "$(cut -d' ' -f1 $OUT/o.parts | tr '\n' ' ')" = 'DH0 DH1 ZB0 ZR0 ZH0 ' ] && echo ok || echo bad)"
+    # it starts, and the new user logs in
+    fsconf $OUT/o3.fs-uae $d 2048 8192 none
+    boot_script $OUT/o3.txt amiga2 bea beapw2 rootpw2
+    run $OUT/o3.fs-uae 900 $OUT/o3.txt $OUT/o3.log
+    booted o $OUT/o3.log ext2 amiga2 bea
     host_fs o $d ZR0 ext2
     # the way back, from the floppy: the copy of the table in the new root
     cat >$OUT/o2.txt <<'EOS'
@@ -799,7 +833,7 @@ wait zi-end 30
 stop
 EOS
     run $OUT/o.fs-uae 600 $OUT/o2.txt $OUT/o2.log
-    check "o: --undo says the split partition comes back, to be formatted" "$(has $OUT/o2.log 'split a partition')"
+    check "o: --undo says the deleted partition comes back, to be formatted" "$(has $OUT/o2.log 'split or deleted partitions')"
     check "o: --undo: the first 256 sectors exactly as before the install" "$([ "$($CK bytes $d 0 256)" = "$(cat $OUT/o.table)" ] && echo ok || echo bad)"
     check "o: and DH0, DH1 still the same" "$($CK sums $d DH0 DH1 | cmp -s - $OUT/o.before && echo ok || echo bad)"
     empty $d
@@ -825,7 +859,7 @@ sleep 1
 send cat /etc/motd; free\r
 sleep 2
 send zinstall --list\r
-wait What could be done 30
+wait What zinstall could do here 30
 sleep 2
 send $ACC_PREP\r
 wait zi-prep 10
@@ -848,7 +882,7 @@ EOS
     check "h: Kickstart ran zenixboot from DH0, which loaded the kernel and the RAM disk from files" "$(has $OUT/h1.log 'zenixboot [0-9.b]*: loading')"
     # FS-UAE's 68060 with Kickstart 3.1 and no 68060.library: exec sets the 68040 flags (a real 1260 loads its library first)
     check "h: the CPU is FS-UAE's 68060 (exec's flags say 68040 without 68060.library)" "$(has $OUT/h1.log '^cpu: 680[46]0')"
-    check "h: no floppy: the files come from the RAM disk" "$(has $OUT/h1.log "Files come from: the installer's own RAM disk")"
+    check "h: no floppy: the files come from the RAM disk" "$(has $OUT/h1.log "Zenix will be copied from the installer's own files")"
     check "h: --list shows the table with cylinders and dostypes" "$(grep -aqE '^  ide0p1 +DH0 .* DOS.3 +1-' $OUT/h1.log && echo ok || echo bad)"
     check "h: the install says it is done" "$(has $OUT/h1.log '^Done\. Zenix is on this disk')"
     $CK sums $d DH0 DH1 >$OUT/h.after
@@ -856,6 +890,108 @@ EOS
     host_fs h $d ZR0 ext2
     boot_vol h $d $BD/kernel.bin
     empty $d $OUT/h-dh0.img
+}
+
+part_k() {
+    local d=$OUT/k.hdf
+    truncate -s 0 $d; truncate -s 300M $d
+    fsconf $OUT/k.fs-uae $d 2048 8192 4
+    cat >$OUT/k.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send $ACC_PREP\r
+wait zi-prep 10
+send zinstall $ACC_OPTS\r
+wait Choose a number 30
+send 1\r
+wait Choose .Return = 1, ext2 30
+send \r
+wait To erase the whole disk 30
+send ERASE ide0\r
+$INSTALLED
+sleep 1
+stop
+EOS
+    run $OUT/k.fs-uae 1800 $OUT/k.txt $OUT/k1.log
+    check "k: the first install is done" "$(has $OUT/k1.log '^Done\. Zenix is on this disk')"
+    fsconf $OUT/k2.fs-uae $d 2048 8192 none
+    boot_script $OUT/k2.txt amiga2 bea beapw2 rootpw2          # bea writes /home/bea/note
+    run $OUT/k2.fs-uae 900 $OUT/k2.txt $OUT/k2.log
+    check "k: the first system boots, bea's file written" "$(has $OUT/k2.log '^was-here$')"
+    $CK sums $d ZH0 >/dev/null
+    # reinstall, keeping /home and the users: the zpkg advice, the plan says what is kept
+    cat >$OUT/k3.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send zinstall --list\r
+sleep 3
+send zinstall\r
+wait This disk has Zenix already 30
+wait Choose a number .Return = 1 30
+send \r
+wait Keep the users 30
+send \r
+wait Choose .Return = 1, ext2 30
+send \r
+wait Type yes to go on 30
+send yes\r
+$INSTALLED
+sleep 1
+stop
+EOS
+    run $OUT/k.fs-uae 1800 $OUT/k3.txt $OUT/k3.log
+    check "k: the reinstall offers itself, with zpkg -Syu named for updates" "$(grep -aq 'zpkg -Syu in Zenix instead' $OUT/k3.log && echo ok || echo bad)"
+    check "k: the plan: ZR0 formatted, ZH0 kept" "$(grep -aq 'ZR0 (the system part) is formatted again' $OUT/k3.log && grep -aq 'ZH0 (your files, /home) is KEPT' $OUT/k3.log && echo ok || echo bad)"
+    check "k: the reinstall is done, the users kept" "$(grep -aq '^Done\. Zenix is on this disk' $OUT/k3.log && grep -aq 'users and the computer.s name of the old Zenix are kept' $OUT/k3.log && echo ok || echo bad)"
+    cat >$OUT/k4.txt <<'EOS'
+wait amiga2 login: 240
+sleep 1
+send bea\r
+wait Password: 30
+send beapw2\r
+wait amiga2: 60
+sleep 1
+send cat /home/bea/note; echo zi-k""4\r
+wait zi-k4 30
+send exit\r
+sleep 2
+stop
+EOS
+    run $OUT/k2.fs-uae 600 $OUT/k4.txt $OUT/k4.log
+    check "k: after the reinstall bea logs in with her old password, her file is still there" "$(has $OUT/k4.log '^was-here$')"
+    host_fs k $d ZR0 ext2
+    # reinstall erasing /home: the users kept, the file gone
+    cat >$OUT/k5.txt <<EOS
+wait zenix:/# 120
+sleep 1
+send zinstall --reinstall --erase-home --keep-users --root-fs ext2 --home-fs ext2\r
+wait Type yes to go on 30
+send yes\r
+$INSTALLED
+sleep 1
+stop
+EOS
+    run $OUT/k.fs-uae 1800 $OUT/k5.txt $OUT/k5.log
+    check "k: the plan says /home is erased" "$(has $OUT/k5.log 'ZH0 .your files, /home. is ERASED')"
+    check "k: the second reinstall is done" "$(has $OUT/k5.log '^Done\. Zenix is on this disk')"
+    cat >$OUT/k6.txt <<'EOS'
+wait amiga2 login: 240
+sleep 1
+send bea\r
+wait Password: 30
+send beapw2\r
+wait amiga2: 60
+sleep 1
+send ls -a /home/bea; cat /home/bea/note; echo zi-k""6\r
+wait zi-k6 30
+send exit\r
+sleep 2
+stop
+EOS
+    run $OUT/k2.fs-uae 600 $OUT/k6.txt $OUT/k6.log
+    check "k: after erasing /home bea still logs in; her file is gone" "$(grep -aq '^zi-k6' $OUT/k6.log && ! grep -aq '^was-here$' $OUT/k6.log && echo ok || echo bad)"
+    host_fs k $d ZR0 ext2
+    empty $d
 }
 
 for p in $PARTS; do "part_$p"; done

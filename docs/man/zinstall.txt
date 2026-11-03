@@ -4,7 +4,12 @@ NAME
     zinstall - put Zenix on a hard disk, CF card or SD card
 
 SYNOPSIS
-    zinstall [--zenix-size MB] [--hostname NAME] [--root-password-file FILE]
+    zinstall [--zenix-size MB] [--layout recommended|one|custom]
+             [--root-size MB] [--home-size MB] [--root-fs ext2|zenixfs]
+             [--home-fs ext2|zenixfs] [--hostname NAME]
+             [--root-password-file FILE] [--delete NAME]...
+             [--reinstall [--erase-home] [--keep-users|--new-users]]
+             [--remove-zenix] [--elsewhere]
              [--user NAME [--user-name TEXT] --user-password-file FILE |
               --no-user]
     zinstall --list
@@ -69,12 +74,32 @@ THE MACHINE AND ITS ACCOUNTS
     locked, unless one is your name. The options answer these questions
     instead (a password from the first line of a file).
 
+DELETING PARTITIONS
+    At "Where should Zenix go?", d lists the partitions and lets you mark
+    some to delete, each by typing its name; their space joins the free
+    space, and Zenix goes there. Never: a FAT partition, a 0x76 container
+    as a whole, a mounted one. Nothing is written before the plan's one
+    confirmation (--delete NAME, more than once, does the same).
+
+A DISK WITH ZENIX ALREADY
+    To update Zenix use zpkg -Syu. To install it again: 1 reinstall in
+    the same partitions, keeping your files (/home) and, if you like, the
+    users and passwords (--reinstall, --keep-users); 2 the same, erasing
+    /home (--erase-home); 3 remove Zenix and start over (--remove-zenix);
+    4 install somewhere else; the old one stops starting (--elsewhere).
+
+LAYOUTS
+    After where and how much, it shows three layouts in MB and asks:
+    recommended (a root of about 1 GB on a big disk, a third of a small
+    one, /home the rest), one partition (the root only, /home a folder on
+    it), or your own sizes for the root (at least 32 MB) and /home (0 for
+    none). It asks the root's filesystem and /home's apart.
+
 WHAT IT MAKES
     ZB0  the boot partition, AmigaDOS FFS: the boot menu, zenixboot, the
          kernel. 4 to 16 MB.
     ZR0  the root, ext2 by default, or ZenixFS (see below).
-    ZH0  /home, ext2, when there is room (over 64 MB). What is left, at
-         most 4 GB. The rest of the free space stays free.
+    ZH0  /home, ext2 or ZenixFS, when the layout has one.
     At least 28 MB. If those names are taken: ZB1 and so on.
 
     On a disk that starts something today, the boot menu comes first at

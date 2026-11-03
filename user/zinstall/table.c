@@ -269,6 +269,20 @@ int t_read(struct tdisk *d, const struct tio *io, t_u32 sectors, const struct t_
     }
     sha256_final(&hctx, d->digest);
     for (int i = 0; i < d->nparts; i++) read_vol(io, &d->part[i]);
+    /* a Zenix an earlier zinstall made: ZBn (FFS), ZRn (ext2 or ZenixFS), perhaps ZHn, the same n, in one Amiga table */
+    d->zb = d->zr = d->zh = -1;
+    for (int i = 0; i < d->nparts && d->zr < 0; i++) {
+        const struct t_part *r = &d->part[i];
+        if (r->how != TP_RDB || strncmp(r->label, "ZR", 2) || !r->label[2] || r->label[3] || (r->dostype != DT_EXT2 && r->dostype != DT_ZENIXFS)) continue;
+        int b = -1, h = -1;
+        for (int k = 0; k < d->nparts; k++) {
+            const struct t_part *q = &d->part[k];
+            if (q->how != TP_RDB || q->region != r->region || q->label[2] != r->label[2] || q->label[3]) continue;
+            if (!strncmp(q->label, "ZB", 2) && q->dostype == 0x444F5301u) b = k;
+            if (!strncmp(q->label, "ZH", 2) && (q->dostype == DT_EXT2 || q->dostype == DT_ZENIXFS)) h = k;
+        }
+        if (b >= 0) { d->zb = b; d->zr = i; d->zh = h; }
+    }
     for (int i = 0; i < nbusy; i++) {
         if (!busy[i].sectors) continue;
         d->anybusy = 1;
@@ -366,6 +380,42 @@ static int region_parse(const struct tdisk *d, const struct tio *io, int ri)
     rd_base = g->base; rd_limit = g->limit;
     return rdb_read(rdb_rd, &rw) == 1 ? 0 : -1;
 }
+/* ---- the partition step: partitions marked to delete count as free space, and are left out of the table the plan writes ---- */
+static const struct tdisk *cur;
+static int deleted_blk(t_u32 absblk)
+{
+    if (!cur) return 0;
+    for (int k = 0; k < cur->nparts; k++) if (cur->part[k].how == TP_RDB && cur->part[k].blk == absblk && cur->part[k].del) return 1;
+    return 0;
+}
+int t_ndel(const struct tdisk *d)
+{
+    int n = 0;
+    for (int i = 0; i < d->nparts; i++) n += d->part[i].del != 0;
+    return n;
+}
+const char *t_del_refused(const struct tdisk *d, int i)
+{
+    const struct t_part *p = &d->part[i];
+    const char *t = table_refused(d);
+    if (t) return t;
+    if (d->noedit) return d->noedit;
+    if (p->busy) return "it is in use now (mounted)";
+    if (p->how == TP_MBR) {
+        if (is_fat(p->mbrtype)) return "a FAT partition (it may hold Emu68, the Kickstart, a PC's files): never deleted here";
+        if (p->mbrtype == 0x76) return "it holds an Amiga partition table with its own partitions: delete those instead";
+        if (is_ext(p->mbrtype)) return "an extended partition: never deleted here";
+    } else {
+        const char *n = d->region[(int)p->region].noedit;
+        if (n) return n;
+    }
+    /* one table at a time: the deletions and the new partitions go into it with one write */
+    for (int k = 0; k < d->nparts; k++)
+        if (d->part[k].del && k != i && (d->part[k].how != p->how || d->part[k].region != p->region))
+            return "partitions in another table are marked: one table at a time";
+    return 0;
+}
+
 static void largest_free(const struct t_region *g, t_u32 *best_lo, t_u32 *best_n)
 {
     t_u32 cyl = g->cyl;
@@ -377,7 +427,7 @@ static void largest_free(const struct t_region *g, t_u32 *best_lo, t_u32 *best_n
         int hit = 0;
         for (int i = 0; i < rw.nparts; i++) {
             const struct rdb_part *p = &rw.part[i];
-            if (!p->sectors) continue;
+            if (!p->sectors || deleted_blk(g->base + p->blk)) continue;
             if (p->start <= s && s - p->start < p->sectors) { hit = 1; next = p->start + p->sectors; break; }
             if (p->start > s && p->start < next) next = p->start;
         }
@@ -391,7 +441,11 @@ static void largest_free(const struct t_region *g, t_u32 *best_lo, t_u32 *best_n
 static int mbr_gap(const struct tdisk *d, t_u32 *st, t_u32 *num, int *slot)
 {
     *slot = -1;
-    for (int i = 3; i >= 0 && *slot < 0; i--) if (d->sec0[446 + 16 * i + 4] == 0) *slot = i;
+    for (int i = 3; i >= 0 && *slot < 0; i--) {
+        int gone = 0;
+        for (int k = 0; k < d->nparts; k++) if (d->part[k].how == TP_MBR && d->part[k].slot == i && d->part[k].del) gone = 1;
+        if (d->sec0[446 + 16 * i + 4] == 0 || gone) *slot = i;
+    }
     if (*slot < 0) return -1;
     t_u32 best = 0, best_st = 0;
     t_u32 at = 2048;                            /* the first MB is left alone */
@@ -400,7 +454,7 @@ static int mbr_gap(const struct tdisk *d, t_u32 *st, t_u32 *num, int *slot)
         t_u32 next = d->sectors, jump = 0;
         for (int i = 0; i < d->nparts; i++) {
             const struct t_part *p = &d->part[i];
-            if (p->how != TP_MBR || !p->sectors) continue;
+            if (p->how != TP_MBR || !p->sectors || p->del) continue;
             if (p->start <= at && at - p->start < p->sectors) jump = p->start + p->sectors;
             else if (p->start > at && p->start < next) next = p->start;
         }
@@ -417,12 +471,15 @@ static int mbr_gap(const struct tdisk *d, t_u32 *st, t_u32 *num, int *slot)
 
 int t_options(const struct tdisk *d, const struct tio *io, struct t_opt *o, int max)
 {
-    int n = 0;
+    int n = 0, nd = t_ndel(d), delreg = -2;
     if (table_refused(d)) return 0;
+    cur = d;
+    for (int i = 0; i < d->nparts; i++) if (d->part[i].del) delreg = d->part[i].how == TP_MBR ? -1 : d->part[i].region;
     if (d->kind == TD_MBR || d->kind == TD_RDB) {
         for (int r = 0; r < d->nregions && n < max; r++) {
             const struct t_region *g = &d->region[r];
             if (g->noedit || d->noedit) continue;
+            if (nd && delreg != r) continue;
             if (region_parse(d, io, r)) continue;
             t_u32 lo, cnt;
             largest_free(g, &lo, &cnt);
@@ -430,16 +487,16 @@ int t_options(const struct tdisk *d, const struct tio *io, struct t_opt *o, int 
                 o[n++] = (struct t_opt){ TO_FREE, r, -1, g->base + lo * g->cyl, cnt * g->cyl };
         }
         /* after the free cylinders of a table that is there: a second 0x76 has not been seen working under Emu68 */
-        if (d->kind == TD_MBR && !d->noedit) {
+        if (d->kind == TD_MBR && !d->noedit && (!nd || delreg == -1)) {
             t_u32 st, num; int slot;
             if (mbr_gap(d, &st, &num, &slot) == 0 && num >= T_MINSECT && n < max)
                 o[n++] = (struct t_opt){ TO_NEWCONT, -1, -1, st, num };
         }
     }
-    for (int i = 0; i < d->nparts && n < max; i++)
+    for (int i = 0; i < d->nparts && n < max && !nd; i++)
         if (!t_part_refused(d, i))
             o[n++] = (struct t_opt){ TO_PART, d->part[i].region, i, d->part[i].start, d->part[i].sectors };
-    if (!t_whole_refused(d) && n < max)
+    if (!nd && !t_whole_refused(d) && n < max)
         o[n++] = (struct t_opt){ TO_WHOLE, -1, -1, 0, d->sectors };
     return n;
 }
@@ -452,40 +509,52 @@ static void labels(const struct tdisk *d, struct t_plan *p)
         int clash = 0;
         for (int r = 0; r < 3; r++) {
             p->nw[r].label[0] = 'Z'; p->nw[r].label[1] = c[r]; p->nw[r].label[2] = (char)('0' + k); p->nw[r].label[3] = 0;
-            for (int i = 0; i < d->nparts; i++) if (!strcmp(d->part[i].label, p->nw[r].label)) clash = 1;   /* the chosen one too: its name may stay */
+            for (int i = 0; i < d->nparts; i++) if (!d->part[i].del && !strcmp(d->part[i].label, p->nw[r].label)) clash = 1;   /* the chosen one too: its name may stay */
         }
         if (!clash) return;
     }
 }
 
-/* sizes in cylinders: the note's rules, section 3 */
-static void sizes(struct t_plan *p, t_u32 avail, t_u32 cyl)
+/* sizes in cylinders, the note's rules (section 3): the boot partition by the space; then the layout asked for. Returns the cylinders
+ * used (all of avail but for a custom layout), 0 with *why when it does not fit */
+static const struct t_want *want;
+static t_u32 sizes(struct t_plan *p, t_u32 avail, t_u32 cyl, const char **why)
 {
     unsigned long long tot = (unsigned long long)avail * cyl;
     t_u32 mb = (t_u32)(tot / 2048);
     t_u32 bootmb = mb >= 256 ? 16 : mb >= 64 ? 8 : 4;
     t_u32 bootc = (t_u32)(((unsigned long long)bootmb * 2048 + cyl - 1) / cyl);
     if (bootc == 0) bootc = 1;
+    if (bootc >= avail) { *why = "less than 28 MB of room"; return 0; }
     t_u32 rest = avail - bootc;
     t_u32 rootc, homec = 0;
-    if (mb < 64) rootc = rest;
-    else {
-        t_u32 restmb = (t_u32)((unsigned long long)rest * cyl / 2048);
-        t_u32 want = restmb / 3;
-        if (want < 128) want = 128;
-        if (want > 1024) want = 1024;
-        if (want > restmb * 2 / 3 && restmb < 192) want = restmb * 2 / 3;
-        rootc = (t_u32)(((unsigned long long)want * 2048 + cyl - 1) / cyl);
+    t_u32 restmb = (t_u32)((unsigned long long)rest * cyl / 2048);
+    if (want->layout == TL_CUSTOM) {
+        rootc = (t_u32)(((unsigned long long)want->root + cyl - 1) / cyl);
+        int all = want->home == T_HOME_REST;
+        homec = all ? 0 : want->home ? (t_u32)(((unsigned long long)want->home + cyl - 1) / cyl) : 0;
+        if (want->root < T_MINROOT || (want->home && !all && want->home < T_MINHOME)) { *why = "a root of at least 32 MB, and a /home of at least 4 MB or none"; return 0; }
+        if (rootc < rest && (all || (homec && rootc + homec == rest + 1))) homec = rest - rootc;    /* the rest, or a cylinder's rounding */
+        if ((unsigned long long)homec * cyl < T_MINHOME) homec = 0;
+        if ((unsigned long long)rootc + homec > rest) { *why = "the sizes asked for do not fit the space"; return 0; }
+    } else if (want->layout == TL_ONE || mb < 64) {
+        rootc = rest;
+    } else {
+        /* recommended: a 1 GB root from 3 GB of space up, else a third of it (at least 128 MB, two thirds of a small space at
+         * most); /home the rest (none under 4 MB) */
+        t_u32 rmb = restmb >= 3072 ? 1024 : restmb / 3;
+        if (rmb < 128) rmb = 128;
+        if (rmb > restmb * 2 / 3 && restmb < 192) rmb = restmb * 2 / 3;
+        rootc = (t_u32)(((unsigned long long)rmb * 2048 + cyl - 1) / cyl);
         if (rootc > rest) rootc = rest;
         homec = rest - rootc;
-        t_u32 maxhome = (t_u32)((4096ull * 2048) / cyl);
-        if (homec > maxhome) homec = maxhome;
-        if ((unsigned long long)homec * cyl < 2048u * 4) homec = 0;      /* under 4 MB is no /home */
+        if ((unsigned long long)homec * cyl < T_MINHOME) { homec = 0; rootc = rest; }
     }
     p->nw[R_BOOT].sectors = bootc * cyl;
     p->nw[R_ROOT].sectors = rootc * cyl;
     p->nw[R_HOME].sectors = homec * cyl;
     p->nnew = homec ? 3 : 2;
+    return bootc + rootc + homec;
 }
 /* the sizes make a Zenix: a table's cylinders may be so big that they do not */
 static const char *sizes_bad(const struct t_plan *p)
@@ -557,14 +626,14 @@ static int fresh_rdb(struct t_plan *p, const struct tio *io, t_u32 base, t_u32 l
     return plan_write(p, io, base + rdsk, b, 0, 1);
 }
 
-static void place(struct t_plan *p, t_u32 base, t_u32 lo, t_u32 cyl, int zenixfs)
+static void place(struct t_plan *p, t_u32 base, t_u32 lo, t_u32 cyl, int zenixfs, int homefs)
 {
     t_u32 c = lo;
     for (int i = 0; i < p->nnew; i++) {
         struct t_newp *n = &p->nw[i];
         t_u32 cnt = n->sectors / cyl;
         n->lo = c; n->hi = c + cnt - 1; n->start = base + c * cyl;
-        n->dostype = i == R_BOOT ? 0x444F5301u : (i == R_ROOT && zenixfs) ? DT_ZENIXFS : DT_EXT2;
+        n->dostype = i == R_BOOT ? 0x444F5301u : ((i == R_ROOT && zenixfs) || (i == R_HOME && homefs)) ? DT_ZENIXFS : DT_EXT2;
         c += cnt;
     }
 }
@@ -586,6 +655,7 @@ static void find_aos(const struct tdisk *d, struct t_plan *p)
     for (int i = 0; i < d->nparts; i++) {
         const struct t_part *q = &d->part[i];
         if (q->how != TP_RDB || !q->bootable || q->nomount || i == p->opt.part || q->pri == -128) continue;
+        if (i == d->zb || i == d->zr || i == d->zh || q->del) continue;     /* an earlier Zenix, or going: not what this disk "starts by itself" */
         if (q->pri > maxpri) maxpri = q->pri;
         if (q->dostype == DT_EXT2 || q->dostype == DT_ZENIXFS) continue;
         /* whatever this disk starts by itself today is what the menu's default goes on starting (it may be a menu of its own) */
@@ -612,14 +682,71 @@ static int whole_blocks(const struct tdisk *d, const struct tio *io, int want, t
     return n == want;
 }
 
-int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt *o, t_u32 maxsect, int zenixfs,
+/* Partitions deleted and Zenix's added in one table: every kept PART block copied as it is (only its next changes) and the new ones,
+ * into blocks of the RDB area nothing uses; then one write, the RDSK block's list (and HighRDSKBlock, RDBBlocksHi) names the new chain.
+ * Before it the old chain is whole and untouched; after it the old blocks are unused. rw holds the region (parsed by the caller). */
+static int rewrite_chain(const struct tdisk *d, const struct tio *io, const struct t_region *g, struct t_plan *p, const char **why)
+{
+    static t_u32 q[128], b[128];
+    static t_u8 old[512];
+    int keep[RDB_MAXPART], nk = 0;
+    for (int i = 0; i < rw.nparts; i++) if (!deleted_blk(g->base + rw.part[i].blk)) keep[nk++] = i;
+    int need = nk + p->nnew, got = 0;
+    static t_u32 fresh[RDB_MAXPART + 3];
+    if (need > RDB_MAXPART + 3 || need + 1 > T_MAXW) { *why = "too many partitions in this table to write it anew here"; return -1; }
+    for (t_u32 nb = rw.blk + 1; nb <= rw.rdbhi && got < need; nb++) {
+        int used = 0;
+        for (unsigned i = 0; i < rw.nused; i++) if (rw.used[i] == nb) used = 1;
+        if (!used && nb < g->limit) fresh[got++] = nb;
+    }
+    t_u32 newhi = rw.rdbhi;
+    if (got < need) {
+        unsigned long long lim = (unsigned long long)g->locyl * g->cyl;
+        for (int i = 0; i < rw.nparts; i++) if (rw.part[i].sectors && rw.part[i].start < lim) lim = rw.part[i].start;
+        if (lim > g->limit) lim = g->limit;
+        for (t_u32 nb = rw.rdbhi + 1; nb < lim && got < need; nb++) { fresh[got++] = nb; newhi = nb; }
+    }
+    if (got < need) { *why = "no free blocks left in the RDB area for the new table"; return -1; }
+    t_u32 high = 0;
+    for (int i = 0; i < need; i++) if (fresh[i] > high) high = fresh[i];
+    for (int i = 0; i < need; i++) {
+        t_u32 next = i + 1 < need ? fresh[i + 1] : 0xFFFFFFFFu;
+        if (i < nk) {                                   /* a kept partition: its block as it is, but where the chain goes on */
+            t_u8 pb[512];
+            if (io->rd(io->ctx, g->base + rw.part[keep[i]].blk, 1, pb)) { *why = "cannot read the table"; return -1; }
+            to_longs(q, pb);
+            if (q[0] != RDB_ID_PART || !rdb_sum_ok(q)) { *why = "a block of the table does not add up"; return -1; }
+            q[4] = next;
+            rdb_sum(q);
+        } else {
+            int k = i - nk;
+            part_block(q, &p->nw[k], g->heads, g->secs, next, FLG_NOMOUNT, 0);
+            p->nw[k].blk = g->base + fresh[i];
+        }
+        if (plan_write(p, io, g->base + fresh[i], q, 0, i + 1 == need)) { *why = "cannot read the table"; return -1; }
+    }
+    if (io->rd(io->ctx, g->base + rw.blk, 1, old)) { *why = "cannot read the table"; return -1; }
+    to_longs(b, old);
+    b[7] = need ? g->base * 0 + fresh[0] : 0xFFFFFFFFu;
+    if (high > b[38]) b[38] = high;
+    b[33] = newhi;
+    rdb_sum(b);
+    p->commit1 = p->nw1;
+    if (add_write(p, g->base + rw.blk, b, 0, 1, old)) { *why = "too many writes"; return -1; }
+    return 0;
+}
+
+int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt *o, t_u32 maxsect, const struct t_want *w,
                 struct t_plan *p, const char **why)
 {
     static t_u32 b[128];
     static t_u8 old[512];
     memset(p, 0, sizeof *p);
     p->opt = *o;
-    p->zenixfs = zenixfs;
+    int zenixfs = w->rootfs, homefs = w->homefs;
+    want = w;
+    cur = d;
+    p->zenixfs = zenixfs; p->homefs = homefs;
     p->atomic = 1;
     *why = 0;
     if (table_refused(d)) { *why = table_refused(d); return -1; }
@@ -631,7 +758,7 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         for (int i = 0; i < d->nparts; i++) {
             const struct t_part *q = &d->part[i];
             int root = q->how == TP_MBR ? q->mbrtype == 0x83 : q->dostype == DT_EXT2 || q->dostype == DT_ZENIXFS;
-            if (root && q->bootable && i != o->part) {
+            if (root && q->bootable && i != o->part && i != d->zr && !q->del) {      /* (the old Zenix's root: its mark is taken off at the end) */
                 *why = "another partition is marked as the root Zenix starts from, and would stay the root: take its mark off first (fdisk boot N off), or choose that partition";
                 return -1;
             }
@@ -649,15 +776,22 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             if (o->kind == TO_PART && t_part_refused(d, o->part)) { *why = t_part_refused(d, o->part); return -1; }
             t_u32 base = o->start, len = o->kind == TO_NEWCONT ? space - space % 2048 : o->sectors;
             t_u32 avail = (space < len ? space : len) / RDB_CYL - BOOTNEW;
-            sizes(p, avail, RDB_CYL);
+            t_u32 used = sizes(p, avail, RDB_CYL, why);
+            if (!used) return -1;
             if (sizes_bad(p)) { *why = sizes_bad(p); return -1; }
-            place(p, base, BOOTNEW, RDB_CYL, zenixfs);
+            if (o->kind == TO_NEWCONT && used < avail) {        /* a custom layout: the container as big as what it holds, the rest stays free */
+                unsigned long long l = ((unsigned long long)used + BOOTNEW) * RDB_CYL;
+                l = (l + 2047) / 2048 * 2048;
+                if (l < len) len = (t_u32)l;
+            }
+            place(p, base, BOOTNEW, RDB_CYL, zenixfs, homefs);
             p->cyl = RDB_CYL;
             for (int i = 0; i < p->nnew; i++) { p->nw[i].blk = base + 1 + (t_u32)i; blocks[i] = 1 + (t_u32)i; }
             if (fresh_rdb(p, io, base, len, blocks, 0)) { *why = "cannot read the disk"; return -1; }
             /* the one write: the MBR sector */
             static t_u8 m[512];
             memcpy(m, d->sec0, 512);
+            for (int k = 0; k < d->nparts; k++) if (d->part[k].how == TP_MBR && d->part[k].del) memset(m + 446 + 16 * d->part[k].slot, 0, 16);
             int slot = o->kind == TO_PART ? d->part[o->part].slot : -1;
             if (o->kind == TO_NEWCONT) for (int i = 3; i >= 0 && slot < 0; i--) if (m[446 + 16 * i + 4] == 0) slot = i;   /* the last: the others keep their numbers, also under a driver that counts */
             if (slot < 0) { *why = "no free entry in the PC partition table"; return -1; }
@@ -677,9 +811,9 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         {
             t_u32 len = space - space % RDB_CYL;
             t_u32 avail = len / RDB_CYL - BOOTNEW;
-            sizes(p, avail, RDB_CYL);
+            if (!sizes(p, avail, RDB_CYL, why)) return -1;
             if (sizes_bad(p)) { *why = sizes_bad(p); return -1; }
-            place(p, 0, BOOTNEW, RDB_CYL, zenixfs);
+            place(p, 0, BOOTNEW, RDB_CYL, zenixfs, homefs);
             p->cyl = RDB_CYL;
             if (!whole_blocks(d, io, p->nnew, blocks)) {
                 p->atomic = 0;
@@ -692,6 +826,9 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
         goto stage2;
     case TO_FREE:
         break;
+    default:
+        *why = "not a kind of place this plans";
+        return -1;
     }
     /* an existing RDB: free cylinders, or a chosen partition in it */
     {
@@ -709,7 +846,7 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             cnt = o->sectors / g->cyl;
             /* still free? */
             for (int i = 0; i < rw.nparts; i++)
-                if (rw.part[i].sectors && overlap(rw.part[i].start, rw.part[i].sectors, lo * g->cyl, cnt * g->cyl)) {
+                if (rw.part[i].sectors && !deleted_blk(g->base + rw.part[i].blk) && overlap(rw.part[i].start, rw.part[i].sectors, lo * g->cyl, cnt * g->cyl)) {
                     *why = "the free space is not free any more"; return -1;
                 }
         } else {
@@ -723,21 +860,27 @@ int t_plan_make(const struct tdisk *d, const struct tio *io, const struct t_opt 
             cnt = hi - lo;
         }
         unsigned long long sp = (unsigned long long)cnt * g->cyl;
-        t_u32 pend = 0;                                     /* a split: the chosen partition's end, in sectors of the region */
-        if (sp > space) {
-            cnt = space / g->cyl;
-            if (o->kind == TO_PART) { p->keep = 1; pend = d->part[o->part].start - g->base + d->part[o->part].sectors; }
-        }
+        t_u32 pend = 0, full = cnt;                         /* a split: the chosen partition's end, in sectors of the region */
+        if (sp > space) cnt = space / g->cyl;
         if ((unsigned long long)cnt * g->cyl < T_MINSECT) { *why = "less than 28 MB of room"; return -1; }
-        sizes(p, cnt, g->cyl);
+        t_u32 used = sizes(p, cnt, g->cyl, why);
+        if (!used) return -1;
         if (sizes_bad(p)) { *why = sizes_bad(p); return -1; }
-        place(p, g->base, lo, g->cyl, zenixfs);
+        if (o->kind == TO_PART && used < full) {            /* Zenix takes less than all of it: the rest stays a partition of the old name */
+            p->keep = 1; pend = d->part[o->part].start - g->base + d->part[o->part].sectors;
+        }
+        cnt = used;
+        place(p, g->base, lo, g->cyl, zenixfs, homefs);
         /* Kickstart 3.1's own disk code does not reach past 4 GB; with the highest boot priority a partition there could be read at wrapped places. Under Emu68 (an RDB in a 0x76) it is the driver's */
         if (g->base == 0 && d->kind == TD_RDB && (unsigned long long)p->nw[R_BOOT].start + p->nw[R_BOOT].sectors > 8388608ull) {
             *why = "the free space lies past 4 GB, where Kickstart 3.1 cannot start from: leave room for the boot partition below 4 GB";
             return -1;
         }
         p->cyl = g->cyl;
+        if (t_ndel(d)) {                                    /* the partition step: the whole chain anew, one write names it */
+            if (rewrite_chain(d, io, g, p, why)) return -1;
+            goto stage2;
+        }
         /* the blocks for the new PARTs: unused blocks of the RDB area */
         int need = (o->kind == TO_PART ? p->nnew - 1 : p->nnew) + p->keep, got = 0;
         t_u32 fresh[4];
@@ -844,6 +987,19 @@ stage2:
         /* the new blocks as stage 1 wrote them are in w1 */
         for (int r = 0; r < 2; r++) {
             int who = r == 0 ? R_ROOT : R_BOOT;
+            if (r == 1 && d->zr >= 0 && p->opt.kind != TO_REINSTALL)     /* elsewhere: the old Zenix's marks off, so the new one is taken */
+                for (int k = 0; k < 2; k++) {
+                    int i = k == 0 ? d->zr : d->zb;
+                    if (i < 0 || i == p->opt.part || !d->part[i].bootable) continue;
+                    struct t_write *w = &p->w2[p->nw2++];
+                    w->lba = d->part[i].blk; w->flush = 1;
+                    if (io->rd(io->ctx, w->lba, 1, w->old)) { *why = "cannot read the table"; return -1; }
+                    to_longs(q, w->old);
+                    if (q[0] != RDB_ID_PART || !rdb_sum_ok(q)) { *why = "the old Zenix's table block does not add up"; return -1; }
+                    q[5] &= ~FLG_BOOT;
+                    rdb_sum(q);
+                    to_bytes(w->data, q);
+                }
             struct t_write *w = &p->w2[p->nw2++];
             w->lba = p->nw[who].blk; w->flush = 1;
             const struct t_write *src = 0;
@@ -872,3 +1028,126 @@ int t_commit(const struct tio *io, struct t_write *w, int n, const char **why)
     }
     return 0;
 }
+
+/* ---- a Zenix that is there already ---- */
+static int zset_ok(const struct tdisk *d, const char **why)
+{
+    if (d->zr < 0 || d->zb < 0) { *why = "no Zenix of zinstall's found on this disk"; return 0; }
+    const struct t_region *g = &d->region[(int)d->part[d->zr].region];
+    if (g->noedit) { *why = g->noedit; return 0; }
+    if (d->noedit) { *why = d->noedit; return 0; }
+    for (int i = 0; i < 3; i++) {
+        int k = i == 0 ? d->zb : i == 1 ? d->zr : d->zh;
+        if (k >= 0 && d->part[k].busy) { *why = "the Zenix on this disk is in use now (mounted): start the installer from the floppy or from AmigaOS"; return 0; }
+    }
+    return 1;
+}
+
+int t_plan_reinstall(const struct tdisk *d, const struct tio *io, const struct t_want *w, int erase_home, struct t_plan *p, const char **why)
+{
+    static t_u32 q[128];
+    memset(p, 0, sizeof *p);
+    p->opt = (struct t_opt){ TO_REINSTALL, d->zr >= 0 ? d->part[d->zr].region : -1, d->zr, 0, 0 };
+    *why = 0;
+    if (!zset_ok(d, why)) return -1;
+    cio = io;
+    p->atomic = 1;
+    p->zenixfs = w->rootfs;
+    p->erase_home = erase_home && d->zh >= 0;
+    p->homefs = d->zh >= 0 ? (p->erase_home ? w->homefs : d->part[d->zh].dostype == DT_ZENIXFS) : 0;
+    int idx[3] = { d->zb, d->zr, d->zh };
+    p->nnew = d->zh >= 0 ? 3 : 2;
+    find_aos(d, p);
+    p->pri = d->part[d->zb].pri;
+    if (p->aos[0] && !menu_name_ok(p->aos)) { *why = "the partition this disk starts from has a name the boot menu cannot use (a space at its end, a colon): rename it first"; return -1; }
+    for (int i = 0; i < p->nnew; i++) {
+        const struct t_part *x = &d->part[idx[i]];
+        struct t_newp *n = &p->nw[i];
+        strncpy(n->label, x->label, sizeof n->label - 1);
+        n->start = x->start; n->sectors = x->sectors; n->blk = x->blk;
+        n->lo = x->lowcyl; n->hi = x->highcyl;
+        n->dostype = i == R_BOOT ? 0x444F5301u : i == R_ROOT ? (p->zenixfs ? DT_ZENIXFS : DT_EXT2) : (p->homefs ? DT_ZENIXFS : DT_EXT2);
+    }
+    p->cyl = d->region[(int)d->part[d->zr].region].cyl;
+    /* stage 1: the boot partition unbootable first, then the root, and /home if its type changes; their own blocks only */
+    for (int i = 0; i < p->nnew; i++) {
+        t_u8 old[512];
+        if (io->rd(io->ctx, p->nw[i].blk, 1, old)) { *why = "cannot read the table"; return -1; }
+        to_longs(q, old);
+        if (q[0] != RDB_ID_PART || !rdb_sum_ok(q)) { *why = "a block of the Zenix's table does not add up"; return -1; }
+        if (i == R_HOME && q[32 + 16] == p->nw[i].dostype) continue;            /* /home as it is */
+        if (i != R_HOME) q[5] = FLG_NOMOUNT; else q[5] |= FLG_NOMOUNT;
+        q[32 + 16] = p->nw[i].dostype;
+        rdb_sum(q);
+        if (add_write(p, p->nw[i].blk, q, 0, 1, old)) { *why = "too many writes"; return -1; }
+    }
+    p->commit1 = 0;
+    /* stage 2: the same rule as an install's (root marked, the boot partition last) */
+    for (int r = 0; r < 2; r++) {
+        int who = r == 0 ? R_ROOT : R_BOOT;
+        struct t_write *wr2 = &p->w2[p->nw2++];
+        wr2->lba = p->nw[who].blk; wr2->flush = 1;
+        const struct t_write *src = 0;
+        for (int i = p->nw1 - 1; i >= 0; i--) if (p->w1[i].lba == wr2->lba) { src = &p->w1[i]; break; }
+        if (!src) { *why = "internal: a block is not in the plan"; return -1; }
+        memcpy(wr2->old, src->data, 512);
+        to_longs(q, src->data);
+        if (r == 0) q[5] = FLG_BOOT | FLG_NOMOUNT;
+        else { q[5] = FLG_BOOT; q[32 + 15] = (t_u32)p->pri; }
+        rdb_sum(q);
+        to_bytes(wr2->data, q);
+    }
+    return 0;
+}
+
+int t_plan_remove(const struct tdisk *d, const struct tio *io, struct t_plan *p, const char **why)
+{
+    static t_u32 q[128], b[128];
+    static t_u8 old[512];
+    memset(p, 0, sizeof *p);
+    p->opt = (struct t_opt){ TO_REMOVE, d->zr >= 0 ? d->part[d->zr].region : -1, d->zr, 0, 0 };
+    *why = 0;
+    if (!zset_ok(d, why)) return -1;
+    int ri = d->part[d->zr].region;
+    const struct t_region *g = &d->region[ri];
+    if (region_parse(d, io, ri)) { *why = "cannot read the table"; return -1; }
+    /* the Zenix's partitions must be one run of the chain */
+    int first = -1, last = -1, n = d->zh >= 0 ? 3 : 2;
+    for (int i = 0; i < rw.nparts; i++) {
+        t_u32 blk = g->base + rw.part[i].blk;
+        int z = blk == d->part[d->zb].blk || blk == d->part[d->zr].blk || (d->zh >= 0 && blk == d->part[d->zh].blk);
+        if (z) { if (first < 0) first = i; last = i; }
+    }
+    if (first < 0 || last - first + 1 != n) { *why = "Zenix's partitions are not next to each other in the table: remove them with fdisk del or HDToolBox"; return -1; }
+    p->atomic = 1;
+    /* an RDB inside a 0x76 that holds nothing else: the MBR's entry goes, the space is free on the disk */
+    if (g->base && rw.nparts == n) {
+        int slot = -1;
+        for (int i = 0; i < d->nparts; i++) if (d->part[i].how == TP_MBR && d->part[i].holds == ri) slot = d->part[i].slot;
+        if (slot < 0 || d->noedit) { *why = "cannot find the PC table's entry for it"; return -1; }
+        static t_u8 m[512];
+        memcpy(m, d->sec0, 512);
+        memset(m + 446 + 16 * slot, 0, 16);
+        if (plan_write(p, io, 0, 0, m, 1)) { *why = "cannot read the disk"; return -1; }
+        return 0;
+    }
+    t_u8 pb[512];
+    if (io->rd(io->ctx, g->base + rw.part[last].blk, 1, pb)) { *why = "cannot read the table"; return -1; }
+    t_u32 after = be32(pb + 16);
+    if (first == 0) {
+        if (io->rd(io->ctx, g->base + rw.blk, 1, old)) { *why = "cannot read the table"; return -1; }
+        to_longs(b, old);
+        b[7] = after;
+        rdb_sum(b);
+        if (add_write(p, g->base + rw.blk, b, 0, 1, old)) { *why = "too many writes"; return -1; }
+    } else {
+        if (io->rd(io->ctx, g->base + rw.part[first - 1].blk, 1, old)) { *why = "cannot read the table"; return -1; }
+        to_longs(q, old);
+        if (q[0] != RDB_ID_PART || !rdb_sum_ok(q)) { *why = "the table's block before Zenix's does not add up"; return -1; }
+        q[4] = after;
+        rdb_sum(q);
+        if (add_write(p, g->base + rw.part[first - 1].blk, q, 0, 1, old)) { *why = "too many writes"; return -1; }
+    }
+    return 0;
+}
+

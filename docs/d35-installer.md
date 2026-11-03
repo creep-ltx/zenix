@@ -15,6 +15,10 @@ and short words only (nothing behind Alt).
 
 **The worst bug this project could ship is an installer that destroys an AmigaOS partition.** Everything below is shaped by that.
 
+**Words (the owner's live test, 2026-11-03):** every prompt and message in short, plain words a newcomer reads at once: "the system part
+(root)", "your files (/home)", "the start-up partition" for ZB0, "A password for root, the administrator", "Type it again to check". Nothing
+it prints names a person or a machine of the project's.
+
 ## 2. The rules that keep other partitions safe
 1. **A write gate.** Table sectors are only written through one function, from a list made in advance (`struct t_plan`): the sector's
    number, its new bytes, and the bytes it must hold now. It re-reads the sector and refuses if it differs; it reads back what it wrote.
@@ -55,9 +59,44 @@ starts by itself; on any other Amiga, start it from the boot floppy (`zenix.adf`
 
 **Another root marked bootable is refused:** Zenix takes the first (`user/rootpick.h`), so it would stay the machine's root. A disk with more than 14 partitions after the install is refused: boot and mount look at the first 16 devices.
 
-Sizes: ZB0 (FFS, DOS\1) 16 MB from 256 MB of free space up, 8 MB from 64 MB up, else 4 MB. ZR0: a third of what is left, 128 MB to 1 GB;
-under 64 MB of space the rest and no /home. ZH0 (ext2, `/home`): what is left, at most 4 GB. At least 28 MB. The person may use less than
-all the free space. New labels avoid names already on the disk (ZB1, ZR1...).
+Sizes (the owner's live test on the real A1200, 2026-11-03: /home's filesystem asked too, layouts to choose, full control). First, for free
+space or a chosen Amiga partition, how many MB Zenix gets (the rest stays free, or a partition of the old name: the split). Then the
+layout of that share, each shown in MB before it is chosen:
+- **recommended:** ZB0, then a root of 1 GB from 3 GB of space up, else a third of it (at least 128 MB; at most two thirds of a space under
+  192 MB), /home the rest (none under 4 MB); under 64 MB of space the root only.
+- **one partition:** ZB0 and a root of all the rest; /home a folder on it.
+- **custom:** the person types the root (at least 32 MB) and /home (Return: all that is left; 0: none; at least 4 MB), the MB left shown after
+  each; what they leave stays free, or stays the split partition for AmigaOS.
+ZB0 is always the rule's: 16 MB from 256 MB of space up, 8 MB from 64 MB, else 4 MB. The root's and /home's filesystems are asked apart
+(ext2 or ZenixFS, the same notes for both). A /home of ZenixFS is served by `/sbin/zfsd` like any ZenixFS mount, whichever the root is.
+**Memory note:** `fsck.ext2` needs about 12 bytes an inode (one inode per 16 KB here): a 4 GB ext2 /home needs about 3 MB to be checked, more
+than a 2 MB machine has; such a machine is better served by a smaller /home or one partition. New labels avoid names already on the disk
+(ZB1, ZR1...). Unattended: `--zenix-size MB`, `--layout recommended|one|custom`, `--root-size MB`, `--home-size MB` (0: none),
+`--root-fs` and `--home-fs` `ext2|zenixfs`.
+
+**The partition step (the owner's live test, 2026-11-03: "as any OS installer does it").** On "Where should Zenix go?" the choice `d`
+lists every partition (name, size, type, dostype, and whether it holds Zenix or AmigaOS) and lets the person mark partitions to delete,
+one at a time, each by typing its name (with a plain warning when it is not Zenix's), the list shown again each time, Return when done.
+Never deletable: a FAT entry of an MBR, a 0x76 container as a whole, a mounted partition, anything in a damaged table, and partitions
+of two tables at once. The space of the marked ones joins the free space next to it; then the usual layouts, filesystems, plan and one
+confirmation. **The write:** every kept PART block of that RDB is copied as it is (only `next` changes) and the new ones written, into
+blocks of the RDB area nothing uses; one write of the RDSK block (its list, HighRDSKBlock, RDBBlocksHi) names the new chain; the old
+blocks stay as they were and unused. On an MBR the deleted entry and the new 0x76 are the same one MBR write. `--undo` restores the old
+table (and says the deleted partitions' contents are gone where Zenix was written). Unattended: `--delete NAME`, repeatable.
+A torn RDSK write here loses the whole RDB, where the plain install risks one PART block: the same "refused, an RDB tool puts it back".
+
+**A disk with Zenix already** (a ZBn, ZRn and perhaps ZHn of the same n in one Amiga table): the first question, with the advice that
+`zpkg -Syu` is the way to update and reinstalling is for a broken or unwanted system:
+1. **Reinstall in the same partitions, keep /home** (the default): the users, groups, passwords and the computer's name read from the old
+   root first (or new ones asked; the old root not readable: new ones), the root formatted again (its filesystem asked), Zenix copied,
+   checked, the start-up partition's files written anew, /home and its fstab line kept, the old table copy kept (so `--undo` still means
+   "the table before the first install"). For the time it takes, the start-up and root partitions are unbootable and unmounted (their own
+   PART blocks only), as in an install.
+2. **Reinstall and erase /home** (its filesystem asked); the users kept or not, their home folders made again.
+3. **Remove Zenix and start over:** the partition step with Zenix's partitions already marked.
+4. **Install somewhere else:** the usual choice; at the very end the old root's and old start-up partition's bootable marks are cleared
+   (their own blocks), so the new one is taken.
+Unattended: `--reinstall [--erase-home] [--keep-users|--new-users]`, `--remove-zenix`, `--elsewhere`.
 
 ## 4. A cut at any moment
 Every table change is arranged so that one sector write turns the old table into the new one; the new blocks before it are in places

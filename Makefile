@@ -277,7 +277,7 @@ $(BUILD)/zenix-ram.adf: $(BUILD)/bootblock.bin $(BUILD)/kernel.bin $(BUILD)/root
 # and the other disks hold the set, package bundles one after another. RAMDISK_INSTALL_K: enough for those programs and /tmp;
 # what it takes from disk 1 is what the set does not get there (the build says how much is left).
 INSTALLAPPS := init login sh ls cat echo ps free df sync mount umount mkdir mkfs_ext2 mkfs_zenixfs fsck_ext2 fsck_zenixfs fdisk reboot zfsd dmesg zinstall
-RAMDISK_INSTALL_K := 560
+RAMDISK_INSTALL_K := 600
 $(BUILD)/root-install.img: $(USERZX) $(SBINZX) $(shell find rootfs -type f) tools/mkroot.sh
 	NOMAN=1 NOPURE=1 NOTESTS=1 MOUNTDIRS="mnt" tools/mkroot.sh $@ $(BUILD) "$(INSTALLAPPS)" $(RAMDISK_INSTALL_K)K 96
 # and, for a start from AmigaOS with no floppy (install/from-amigaos/: zenixboot, the kernel, zinstall-ram.img), the same programs with
