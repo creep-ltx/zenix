@@ -82,7 +82,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 
 1. **Foundations finished (the week of 2026-10-26):** D13 shared code; the shell's memory fix; the colour console;
    the self-updates. Audit.
-2. **Zenix reaches the world** (done in FS-UAE 2026-10-29, closing audit docs/audit-2026-10-29-block2.md; the real A1200 checks are the owner's weekend): signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
+2. **Zenix reaches the world** (done in FS-UAE 2026-10-29, closing audit docs/audit-2026-10-29-block2.md; the real A1200 checks are the owner's weekend; reported 2026-11-03: telnet to a BBS with downloads works on the real A1200): signals and `select`/`poll`; the network (the CM4's Ethernet driver, TCP/IP as a
    server, DHCP, DNS); `ping`, `telnet` (made for BBSes, the owner's daily use: ANSI colours, the PC character set and Amiga
    fonts, the BBS window size, downloads), `wget`, an NFS client; a Wasabi-like remote control (early: it lets the A1200
    be tested remotely); **one small crypto library** (owner 2026-10-26: "I need to be able to SSH into my Linux machine,
@@ -99,7 +99,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
    (the PC set comes earlier, with telnet); (owner 2026-10-26) the owner's Ahiru file manager and `ctop` ported (ported 2026-10-30: ports/ahiru, ports/ctop). (Postponed by the owner 2026-10-29, "can wait":
    the tracker music player, the IRC client and the e-mail client; later, unscheduled.) Audit; then a first public pre-release (0.1),
    with the owner's yes.
-3½. **Amiga demos on Zenix: ZINE** (steps 1-3 merged 2026-10-31: four demos run in FS-UAE, d29 16.3; next: the review's findings, sound, the owner's PiStorm) (`zine PROGRAM`, or the program's name) (approved by the owner 2026-10-29: "I would like to be able to watch an Amiga demo in
+3½. **Amiga demos on Zenix: ZINE** (steps 1-3 merged 2026-10-31: four demos run in FS-UAE, d29 16.3; on the real PiStorm A1200 demos run with their sound, reported 2026-11-03) (`zine PROGRAM`, or the program's name) (approved by the owner 2026-10-29: "I would like to be able to watch an Amiga demo in
    Zenix. That would be amazing. So yes, please move it up"): a design note first (reviewed twice: it hands the whole
    machine over and takes it back), then built: run an AmigaOS executable with `zine PROGRAM` or by its name (no disk images for now: owner 2026-10-30), Zenix saves its
    state and steps aside, the demo has the hardware and chip RAM, and Zenix comes back when it ends, as demos return
