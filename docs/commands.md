@@ -86,6 +86,7 @@ spot-checked against the code that day.
 | [wget](man/wget.txt) | fetch files over HTTP and HTTPS: certificates checked, redirects, -c resume (DESIGN D21) |
 | [sntp](man/sntp.txt) | set the clock from the network, the certificate time's floor (root; DESIGN D21) |
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
+| [dlogin](man/dlogin.txt) | not a command: the graphical login (`/sbin/dlogin`, DESIGN D38 revision 3), started by init on console 1 with /etc/console's `login graphical` |
 | [displayd](man/displayd.txt) | not a command: the display server of Zenix Desktop (`/sbin/displayd`, DESIGN D38), started by the desktop's first program |
 | [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 | [genet](man/genet.txt) | not a command: the Ethernet driver of a Raspberry Pi CM4 or Pi 4 under Emu68 (`/sbin/net/genet`), started by netd |

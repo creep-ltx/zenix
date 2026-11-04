@@ -18,7 +18,8 @@ DESCRIPTION
     virtual consoles (/dev/tty1 .. /dev/tty10, Amiga+F1 .. Amiga+F10), like
     a Unix init with a getty on each terminal:
 
-    - console 1 gets a login(1) at once;
+    - console 1 gets a login(1) at once (dlogin(8) with /etc/console's
+      "login graphical");
     - another console gets one the first time it is shown with nobody on
       it (the kernel tells init, as Linux's autovt does), so an unused
       console costs no memory;
@@ -107,6 +108,17 @@ THE CONSOLE'S COLOURS AND FONT
     font" (an older kernel); auto with no file (the RAM floppy) says
     nothing. Latin-1 is always the ROM's Topaz.
 
+    login text  console 1 asks for the name and password as text (the
+                default; also with no line).
+    login graphical
+                console 1 gets dlogin(8), the graphical login, instead of
+                login (if /sbin/dlogin is there; else login): its login
+                screen, then the user's desktop (DESIGN D38 revision 3).
+                The other consoles keep their text logins. If dlogin
+                cannot be started, or ends three times within 30 s of
+                starting, console 1 gets its text login until the next
+                boot (said on console 1).
+
 NOTES
     init waits for both kinds of event in one call (wait with the
     console flag, root only); a daemon's delayed start is an alarm that
@@ -120,4 +132,4 @@ FILES
     /etc/console, /etc/motd, /etc/fstab, /etc/daemons
 
 SEE ALSO
-    boot(8), login(1), mount(8), ifconfig(8), wasabid(8)
+    boot(8), login(1), dlogin(8), mount(8), ifconfig(8), wasabid(8)

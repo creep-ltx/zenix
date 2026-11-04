@@ -10,6 +10,9 @@
  * /etc/daemons are started after `ifup -a` and started again when they end, with D11's numbers. */
 #define NCON 10
 static int pid[NCON + 1];               /* the session on console n, its login and then its shell; 0 = none */
+static int graphical;                   /* /etc/console "login graphical": console 1's login is dlogin (D38 rev. 3) */
+static int dl_pid, dl_quick;            /* dlogin's pid; how many times it ended within 30 s of its start */
+static u32 dl_start;
 
 static void start(int n, int again)
 {
@@ -19,13 +22,21 @@ static void start(int n, int again)
     int fd = sys_open(dev, O_RDWR);
     if (fd < 0) { dprintf(1, "init: cannot open %s\n", dev); oflush(); return; }
     if (again) dprintf(fd, "init: session ended, starting another\n");
-    char *argv[] = { "/bin/login", "--init", 0 };
+    struct ustat st;
+    const char *prog = n == 1 && graphical && sys_stat("/sbin/dlogin", &st) == 0 ? "/sbin/dlogin" : "/bin/login";
+    char *argv[] = { (char *)prog, "--init", 0 };
     int io[3] = { fd, fd, fd };
-    pid[n] = sys_spawn("/bin/login", argv, io);
+    pid[n] = sys_spawn(prog, argv, io);
+    if (pid[n] < 0 && prog[1] == 's') { /* dlogin would not start: the text login, at once */
+        dprintf(1, "init: cannot start /sbin/dlogin: %s: the text login on console 1\n", zstrerror(pid[n]));
+        prog = argv[0] = "/bin/login";
+        pid[n] = sys_spawn(prog, argv, io);
+    }
+    if (prog[1] == 's') { dl_pid = pid[n]; dl_start = sys_ticks(); }
     if (pid[n] < 0) {                   /* said on that console and on init's own output (flushed: init never ends) */
         const char *why = zstrerror(pid[n]); if (!why) why = "failed";
-        dprintf(fd, "init: cannot start /bin/login: %s\n", why);
-        dprintf(1, "init: cannot start /bin/login on %s: %s\n", dev, why);
+        dprintf(fd, "init: cannot start %s: %s\n", prog, why);
+        dprintf(1, "init: cannot start %s on %s: %s\n", prog, dev, why);
         oflush();
         pid[n] = 0;
     }
@@ -40,10 +51,12 @@ static char ufont[24] = "auto";
 
 static void console_setup(void)
 {
-    char b[512];
+    char b[1024];                       /* the whole file (its comments too: 757 bytes in 2026-11) */
     int fd = sys_open("/etc/console", O_RDONLY), n = fd < 0 ? 0 : sys_read(fd, b, sizeof b - 1);
     if (fd >= 0) sys_close(fd);
     if (n <= 0) return;
+    if (n == (int)sizeof b - 1)
+        dprintf(1, "init: /etc/console: only its first %d bytes are read\n", n);
     b[n] = 0;
     for (char *l = b, *e; *l; l = e) {
         for (e = l; *e && *e != '\n'; e++)
@@ -64,6 +77,11 @@ static void console_setup(void)
                 dprintf(1, "init: /etc/console: font %s: auto, none or a font's name (at most 23 letters)\n", v);
             else
                 strcpy(ufont, v);
+            continue;
+        }
+        if (!strcmp(w, "login")) {                      /* D38 revision 3: text (the default) or graphical */
+            if (!strncmp(v, "graphical", 9)) graphical = 1;
+            else if (strncmp(v, "text", 4)) dprintf(1, "init: /etc/console: login %s: text or graphical\n", v);
             continue;
         }
         if (strcmp(w, "colours") && strcmp(w, "colors")) { dprintf(1, "init: /etc/console: unknown setting %s\n", w); continue; }
@@ -360,6 +378,11 @@ int main(void)
                 int sh = st & ~ST_HANDED;
                 if (sys_waitnb(sh) == -2) { pid[n] = sh; continue; }
             }                                           /* else (or the shell already ended): the session is over */
+            if (n == 1 && pid[1] == dl_pid && (u32)(sys_ticks() - dl_start) < 3000 && ++dl_quick >= 3) {
+                graphical = 0;                          /* dlogin keeps ending at once: text until the next boot */
+                dprintf(1, "init: dlogin ended 3 times within 30 s of starting: the text login on console 1\n");
+                oflush();
+            }
             pid[n] = 0;
             if (n > 1) { sys_sleep(50); start(n, 1); }  /* console 1: the loop above */
         }

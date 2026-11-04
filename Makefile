@@ -80,7 +80,7 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
 # Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
 # the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount.
-SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d displayd
+SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d displayd dlogin
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -511,6 +511,12 @@ $(BUILD)/zd-%.no: display/zdesk/%.c display/zdesk/zdesk.h display/display.h disp
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/zdesk.uelf: $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# dlogin (DESIGN D38 revision 3): the graphical login; zdesk's theme reader (conf.c) and login's password test
+# (pw_auth in sha.c) linked in, not copied
+$(BUILD)/dlogin.uo: display/dlogin/dlogin.c display/zdesk/zdesk.h display/display.h display/proto.h user/pw.h user/zpw.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/dlogin.uelf: $(BUILD)/dlogin.uo $(BUILD)/zd-conf.no $(BUILD)/libdisplay.no $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/sha256.uo $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/dlogin.uo $(BUILD)/zd-conf.no $(BUILD)/libdisplay.no $(BUILD)/pw.uo $(BUILD)/sha.uo $(BUILD)/sha256.uo $(BUILD)/libz.uo $(LIBGCC) -o $@
 # term (DESIGN D38 step 6): the terminal window; its cell model is the console's kernel/term.c and confont.c built
 # into it unchanged (display/term/model.c: D38 5, one parser for two users), -O2 as the console's
 $(BUILD)/term-model.no: display/term/model.c display/term/model.h kernel/term.c kernel/confont.c $(wildcard kernel/*.h) $(BUILD)/conwidth.h | $(BUILD)

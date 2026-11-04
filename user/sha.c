@@ -64,3 +64,12 @@ int pw_check(const char *password, const char *stored)
     put_hex(h, x);
     return !strcmp(h, d1 + 1);
 }
+
+int pw_auth(const char *name, const char *password, struct pw *p)
+{
+    if (pw_byname(name, p) == 0)
+        return pw_check(password, p->hash);
+    unsigned char x[32];                /* an unknown name costs the same rounds: its answer comes no sooner */
+    hash_rounds(password, "unknown", PW_ROUNDS, x);
+    return 0;
+}

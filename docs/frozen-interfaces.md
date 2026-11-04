@@ -117,6 +117,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   screen; a[1] bit 0 resets), a `WK_BAR` window of a width asked (0: the screen's, as before); `/etc/zdesk/mouse`
   (`acceleration none|low|high`); `struct uzine_info`'s `machine` at offset 28 (`UZINE_INFO_MACHINE` 32 bytes or
   more; `UZI_EMU68` 1: the 68k is Emu68's) and its attn's 68060 bit (0x80) set by the kernel on a CPU with a PCR.
+- **D38 revision 3 (dlogin, branch desk, 2026-11-04):** `DPY_SESSION` 13 (root's client and root's caller only, on the
+  grabbed console, else -EBUSY; a[0] the uid, at most 65535: clients of other non-root uids are dropped), `DPY_WM_BYE` 46 (the manager leaves the role);
+  `/etc/console`'s `login text|graphical`; `/etc/dlogin` (`session LABEL = PROGRAM`, PROGRAM an absolute path or
+  `text`, at most 4; `theme NAME`); `login -s PROGRAM` (root only, after `-f`).
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).

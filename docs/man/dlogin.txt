@@ -1,0 +1,68 @@
+DLOGIN(8)		Zenix manual
+
+NAME
+    dlogin - the graphical login of Zenix Desktop
+
+SYNOPSIS
+    /sbin/dlogin [--init]
+
+DESCRIPTION
+    A login screen, as GDM or LightDM (DESIGN D38 revision 3). With the
+    line "login graphical" in /etc/console, init(8) starts dlogin on
+    console 1 instead of login(1); the other consoles keep their text
+    logins (Amiga+F2 .. Amiga+F10).
+
+    dlogin starts the display server on its console (displayd(8)) and
+    shows, in zdesk's theme: the computer's name (/etc/hostname), the
+    clock, Name, Password (nothing of it is shown, not even its length)
+    and Session. Tab, Up and Down move between the fields, Left and Right
+    (or a click) choose the session, Return goes to the password and then
+    logs in, Backspace and Ctrl+U edit, Esc starts again.
+
+    The password is checked by the code login uses: an unknown name takes as
+    long as a wrong password, and a wrong one is followed by a second's wait
+    ("Login incorrect"). root cannot log in here, whatever password is typed:
+    a text console is root's. A session that cannot start (its program
+    missing) says so on the login screen. A right one starts the session as
+    that user through "login -f -s PROGRAM NAME" (the Desktop: zdesk(1)), so
+    the session is set up exactly as login's (environment, groups, uid, home)
+    and never runs as root. While it runs, dlogin stays connected to displayd
+    (so it keeps the screen) and has told it which user's programs may use it
+    (others, and the last session's, are refused). When the session's program
+    ends (Log out), the login screen comes back. The Text console session
+    gives the console back as text and runs the user's shell there; its exit
+    brings the login screen back.
+
+    Without a display (no displayd, too little chip RAM, or a desktop
+    already running on another console) dlogin started by init (--init)
+    hands console 1 to the text login; and if dlogin cannot be started, or
+    ends three times within 30 seconds of starting, init gives console 1
+    its text login until the next boot.
+
+OPTIONS
+    --init    init's: what it says goes into the kernel log (dmesg), and
+              without a display the text login takes the console
+
+FILES
+    /etc/console    "login graphical" starts it at boot (init(8))
+    /etc/dlogin     its sessions: "session LABEL = PROGRAM" (an absolute
+                    path, or text: the user's shell on the console), at
+                    most 4, the first chosen at first; "theme NAME" (else
+                    zdesk's theme); without the file Desktop and Text
+                    console
+    /etc/zdesk/     the theme's files
+
+NOTES
+    It says "dlogin: GUEST (uid N) logged in: SESSION", "...'s session
+    ended", "login incorrect" (never the name or password typed) and
+    "root refused" in the kernel log. The clock is UTC. A user's programs
+    still running after the session ends (with no window) are not ended:
+    they can no longer use the screen while the greeter or another user's
+    session has it (they can again when the same user logs in again), and
+    without an MMU any program can read any memory, the greeter's too.
+    A Text console session on a display that does not end (another root
+    client, displayd -persist) runs unseen behind it. No autologin, no
+    user list, no shutdown button yet.
+
+SEE ALSO
+    init(8), login(1), zdesk(1), displayd(8), passwd(1)

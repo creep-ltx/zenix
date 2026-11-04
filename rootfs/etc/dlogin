@@ -1,0 +1,5 @@
+# dlogin's sessions, the login screen's choice (man dlogin): "session LABEL = PROGRAM", PROGRAM a path or text (the
+# user's shell on the text console); at most 4, the first chosen at first. "theme NAME": zdesk's theme for the
+# screen (otherwise /etc/zdesk/theme's, else flat).
+session Desktop = /bin/zdesk
+session Text console = text
