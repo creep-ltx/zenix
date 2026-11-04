@@ -484,6 +484,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
         if (c != 9) tabs = 0;
         switch (c) {
         case 13: case 10:
+            if (pos < len) { pos = len; redraw(prompt, plen, buf, len, pos, &scroll); }  /* the line stays whole on the screen (bash's) */
             outs("\033[K\r\n"); sys_ttymode(0); buf[len] = 0;  /* the grey suggestion off the finished line */
             if (over) {
                 char n[12]; utoa((u32)max - 2, n);
@@ -492,6 +493,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             }
             return len;
         case 3:                                                 /* Ctrl-C: cancel the line */
+            if (pos < len) { pos = len; redraw(prompt, plen, buf, len, pos, &scroll); }
             outs("\033[K^C\r\n"); sys_ttymode(0); buf[0] = 0; return -2;
         case 4:                                                 /* Ctrl-D: end of input, or delete */
             if (len == 0) { outs("\r\n"); sys_ttymode(0); return -1; }

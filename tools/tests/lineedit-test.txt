@@ -1,0 +1,6 @@
+wait zenix:/# 120
+send (termtest screen /dev/tty1 'mid-line-ma''rk' 30 'echo one two three\\k4f\\kcf\\k4f\\kcf\\k4f\\kcf\\k4f\\kcf\\k4f\\kcf\\r' > /dev/null; termtest screen /dev/tty1 '^one two three' 30 '' > /tmp/le.txt; echo le-""done) & echo mid-line-mark\r
+wait le-done 90
+send cat /tmp/le.txt; echo le-""shown\r
+wait le-shown 30
+stop
