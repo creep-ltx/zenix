@@ -56,10 +56,11 @@ cd $T; mkdir tt; echo data > tt/a; tar cf $T/t.tar tt; tar tf $T/t.tar; echo "ta
 echo X > $T/x1; dd if=$T/x1 of=$T/t.tar bs=1 seek=100 count=1 > /dev/null 2>&1; tar tf $T/t.tar; echo "tar-bad=$?"
 tar cf $T/t2.tar tt; head -c 700 $T/t2.tar > $T/short.tar; mkdir $T/tx; tar xf $T/short.tar -C $T/tx; echo "tar-short=$?"; cd /
 expr file.txt : '.*\.\(.*\)'; expr abc : 'a.'; expr abc : 'x'; echo "expr-st=$?"
-mkdir $T/pb; cp /bin/echo $T/pb/myecho; chmod 755 $T/pb/myecho
-PATH=$T/pb:/bin find $T/pb -name myecho -exec myecho found {} ';'
-PATH=$T/pb:/bin timeout 5 myecho timeout-found
-echo x | PATH=$T/pb:/bin xargs myecho xargs-found
+# (a copy of printenv, a program of its own: a copy of a box command under another name is no command, DESIGN D25)
+mkdir $T/pb; cp /bin/printenv $T/pb/myprint; chmod 755 $T/pb/myprint
+X=found PATH=$T/pb:/bin find $T/pb -name myprint -exec myprint X ';'
+X=timeout-found PATH=$T/pb:/bin timeout 5 myprint X
+echo x | X=xargs-found PATH=$T/pb:/bin xargs myprint X
 printf 'b\na\n' | sort -; printf 'd\nc\n' | sort -- -
 echo hello | grep -H hell -
 grep x /nonexistent; echo "grep-st=$?"
