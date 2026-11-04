@@ -148,7 +148,10 @@ NOTES
     not resize partitions. It needs root, and about 350 KB of free memory
     (500 KB for ZenixFS); it says so and writes nothing if there is less.
     The install floppy needs 2 MB of memory: on less it turns the screen
-    red at the start.
+    red at the start. Zenix is made for an A1200 with 4 MB of fast RAM;
+    on 2 MB of chip RAM alone ZenixFS does not fit, and the check of an
+    ext2 root after the copy may not: it is then left for later and the
+    line to run (fsck.ext2 -n) is printed.
 
 EXIT STATUS
     0 done, or stopped by you with nothing written; 1 something refused or
