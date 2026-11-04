@@ -98,6 +98,11 @@ def wait_start(echo):
     return None if lf < 0 else lf + 1
 
 
+# A typed character every 20 ms, as a person types. In fast mode (ZENIX_FAST=1, FS-UAE's warp mode, tools/fsuae_conf.py)
+# the emulated time runs about 6-13 times ahead of the PC's, so the tap types every 2 ms: about as fast as at stock speed
+# in the Amiga's own time (a line typed ahead while a command runs, a program that must outlive the typing of a line).
+CHAR_S = 0.002 if os.environ.get("ZENIX_FAST", "") not in ("", "0") else 0.02
+
 TRACE = os.environ.get("ZENIX_TAP_TRACE")      # a file: each wait's time and where its search started go there
 
 
@@ -211,10 +216,19 @@ def run_script(path):
                         with cond:
                             eol_at = len(received)   # its echo's line feed comes after this
                     os.write(master, bytes([ch]))
-                    time.sleep(0.02)
+                    time.sleep(CHAR_S)
     if SHOT_REQ:
         with open(SHOT_REQ, "a") as f:
             f.write("END\n")                # the script is done: shot.py may end the run
+
+
+def drop_link():
+    """The serial port's link goes with the tap (no /tmp leftovers), unless a newer tap has put its own there."""
+    try:
+        if os.readlink(link) == os.ttyname(slave):
+            os.unlink(link)
+    except OSError:
+        pass
 
 
 def on_term(signum, frame):
@@ -225,10 +239,12 @@ def on_term(signum, frame):
             print(f"serial-tap: the run ended during an optional wait (allowed): {p[0]}", flush=True)
         else:
             fail_wait(f"the run ended during a wait: {p[0]}")
+    drop_link()
     os._exit(0)
 
 
-signal.signal(signal.SIGTERM, on_term)
+for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(sig, on_term)
 threading.Thread(target=greet, daemon=True).start()
 if script:
     threading.Thread(target=run_script, args=(script,), daemon=True).start()

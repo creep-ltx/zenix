@@ -120,6 +120,10 @@ Disks and data:
   `ZENIX_SERIAL=/tmp/<name> ZENIX_BUILD=/tmp/<name>-build ZENIX_OUT=/tmp/<name>-out tools/<test>.sh` (a copy of
   `build/`), or `make BUILD=/tmp/<name>`. `make check` runs its tests that way by itself. No new emulator while the
   machine's 1-minute load is above 16.
+- `tools/check.sh NAME...` runs in fast mode (FS-UAE's warp mode: the same cycle-exact machine, its time ahead of
+  the PC's); the full `tools/check.sh` stays at stock speed. A test that pairs the Amiga with the PC's clock is listed
+  in `STOCK` in `tools/check.sh` with its reason (docs/README.md "Fast mode"). Scratch goes in check.sh's run folder
+  and `TMPDIR`, never loose in `/tmp` (a 16 GB RAM disk all sessions share).
 - Before committing: `make` (all images, including `build/zenix-ram.adf`), the tests for what you touched, and
   `tools/docs-check.sh --staged` (must say `docs-check: ok`). Before a merge or a hardware build: `make check` (every
   strong test, a table, about 26 minutes with 6 at once; docs/README.md "Testing"). Do not edit the tree while it

@@ -108,6 +108,45 @@ image file), and prints a table in the order of the list (test, PASS/FAIL, time,
 `tools/check.sh host` runs only the host tests, `tools/check.sh NAME...` only the named ones (e.g. `matrix users-test`).
 Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (shown as skipped).
 
+**Fast mode** (2026-11-04). Most emulator tests check logic, not the stock A1200's speed, so `tools/check.sh NAME...`
+runs them in fast mode by default; the full `tools/check.sh` (the nightly run, before a merge) stays at stock speed;
+`--fast` and `--stock` (or `ZENIX_FAST=1`/`0`) choose either way. In fast mode every FS-UAE run made through
+`tools/fsuae_conf.py` (`run-test.sh` and the cage rig) gets `warp_mode = 1`: the same machine, still cycle-exact, run as
+fast as the PC can, its emulated time running ahead of the clock on the wall (6 to 13 times here). The kernel sees exactly
+the stock machine; only the PC's clock is out of step with it. A faster CPU instead was tried and refused: with
+`accuracy` 0 or -1 and `uae_cpu_speed = max`, with or without the JIT, FS-UAE's IDE hung for good (BSY after a READ
+SECTORS of 2) in 5 of 8 boots, and a cycle-exact 68020 ignores `uae_cpu_frequency` (knowledge base
+`amiga/fs-uae-speed-settings.md`). The tests that pair the Amiga with the PC's clock stay at stock speed in fast mode
+too: keys typed and screenshots taken by the cage rig, the BBS simulator and SLIP's noise, the clock tests, power cuts
+timed in the PC's seconds, downloads from a server on the PC (the Amiga's time-outs run in emulated seconds), and the
+stock machines whose memory floors are checked. The one list of them, each with its reason, is `STOCK` in
+`tools/check.sh`; a job holding one of them runs at stock speed as a whole, and says so. A script's host-side `sleep`
+does not get faster in warp mode (it only lasts longer in the Amiga's time): wait for the output instead, and
+let a time the Amiga must see run on the Amiga (`cmd & sleep 3; kill ...` in one typed line). The serial tap types a
+character every 2 ms instead of 20 in fast mode, about the same speed in the Amiga's time.
+Measured on 2026-11-04 (the times of a test's jobs added up, as check.sh's table shows them; other sessions'
+emulators ran beside, so take them as rough):
+
+| Test | stock | fast |
+|---|---|---|
+| zinstall-test f (alone) | 586 s | 134 s |
+| sumi-test | 78 s | 7 s |
+| update-test (7 jobs; in fast mode the one with the two cuts at stock speed) | 3,856 s | 1,907 s |
+| matrix (2 jobs; 4 machines stay at stock speed; with `stop` and waits instead of sleeps in its script) | 1,292 s | 130 s |
+| zpkg-emu-test | 1,252 s | the same: all three parts are in STOCK (downloads, 1 MB of chip RAM) |
+
+**Scratch and /tmp.** `/tmp` is a RAM disk shared by every session (it filled up on 2026-11-03 and spoiled many runs).
+Everything of a check run is in its folder `/tmp/zenix-check.XXXXXX`: each job's output folder (`ZENIX_OUT`), its copy
+of the build, its serial port (`ZENIX_SERIAL`, and the ports the tests name after it) and its `TMPDIR` (so `mktemp`,
+`run-test.sh`'s run folders and Python's temporary files land there too). A job that passes frees its folders at once;
+a failed one keeps them for a look, of its build copy only the disk images and `kernel*.elf` (with more than 2
+failures their images go at the end). A run that passes leaves
+only `check.log` (every job's log) and `summary.txt`. A run stopped by a signal ends its jobs (each runs in its own
+process group) and frees their images, keeping the logs. `run-test.sh` removes its folder and ends its tap and FS-UAE
+also when it is killed, and the serial tap removes its port's link. A job starts only while `/tmp` has
+`ZENIX_MIN_TMP_MB` (default 2048) MB free; else check.sh waits up to 5 minutes, saying why, and then marks the job
+"not started" (a FAIL in the table, with the reason) rather than letting it fail on "No space left".
+
 | Test | What it checks |
 |---|---|
 | docs-check | the documentation rules above |

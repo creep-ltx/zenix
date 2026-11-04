@@ -8,7 +8,9 @@
 # quotes, so a name holding $(...) or ` runs nothing (B3-2); T: is the user's own folder, mode 700, and one planted
 # by someone else (here: a soft link) is refused (B3-7).
 cd "$(dirname "$0")/.." || exit 1
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+# in /tmp itself, not TMPDIR (check.sh's is long): tools/dos-host.c keeps the scratch path in 40 bytes, as Zenix's mount
+# table keeps 48
+T=$(mktemp -d /tmp/zdos.XXXXXX); trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/ports/common" "$T/ports/tui/upstream/src" "$T/user" "$T/inc"
 cp ports/common/dos.c "$T/ports/common/"
 cp ports/tui/upstream/src/version.h "$T/ports/tui/upstream/src/"
