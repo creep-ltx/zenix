@@ -1,0 +1,6 @@
+# The demo floppy's sessions (DESIGN D25 revision 3, 7.3; man dlogin). At the first start of a boot dlogin starts
+# the Desktop session for guest by itself (autologin); after Log out the login screen shows as usual (guest has no
+# password here).
+session Desktop = /bin/sh /usr/lib/demo/session
+session Text console = text
+autologin guest Desktop

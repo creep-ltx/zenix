@@ -1,0 +1,6 @@
+# The demo floppy's console settings (DESIGN D25 revision 3, 7.2; man init): the colours as the machine decides, and
+# console 1 starts the graphical login (dlogin), which logs guest in by itself (/etc/dlogin's autologin).
+# Amiga+F2..F10 are text consoles with a login prompt, as on every Zenix.
+colours auto
+font auto
+login graphical

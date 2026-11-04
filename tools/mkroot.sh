@@ -43,6 +43,16 @@ for p in $PROGS; do
     cp "$B/$p.zx" "$T/$dir/$name"
     chmod 755 "$T/$dir/$name"
 done
+# the box (DESIGN D25 revision 3, 2.2; BOX="NAME ..." in the environment): those commands become hard links to one
+# copy of build/box.zx, in /bin (the demo floppy; `make BOX=1` for the test image of tools/box-test.sh)
+if [ -n "$BOX" ]; then
+    first=""
+    for n in $BOX; do
+        rm -f "$T/bin/$n"
+        if [ -z "$first" ]; then first=$n; cp "$B/box.zx" "$T/bin/$n"; chmod 755 "$T/bin/$n"
+        else ln "$T/bin/$first" "$T/bin/$n"; fi
+    done
+fi
 # the notices the licences of lwIP (BSD-3, in netd) and miniz (MIT, in gzip and zup) ask to travel with the programs
 # (owner decision, DESIGN D19 2026-10-27): on every image that carries one of those programs; the base package
 # carries them too (tools/mkzup.py)
@@ -119,6 +129,22 @@ if [ -n "$PKGDB" ] && [ -f "$B/pkg/list" ]; then
     mkdir -p "$T/var/lib/zpkg" "$T/var/cache/zpkg"
     python3 "$(dirname "$0")/mkzup.py" installdb "$T" "$B/pkg" "$T/var/lib/zpkg"
 fi
+# the demo floppy's root (DESIGN D25 revision 3, 4.1 and 7.2; DEMO=dd or DEMO=hd, from tools/mkdemo.sh): no test
+# files, the demo's own files over the tree (tools/demo/: /etc's differences, the session, the welcome), the manual
+# pages of what is on this disk only, and on the DD disk no root certificates (no wget there)
+if [ -n "$DEMO" ]; then
+    rm -rf "$T/home/t" "$T/home/readme.txt" "$T/etc/autologin" "$T/root"
+    cp -r "$(dirname "$0")/demo/." "$T/"
+    mkdir -p "$T/root"
+    if [ -d "$T/usr/man" ]; then
+        for f in "$T"/usr/man/*.txt; do
+            n=$(basename "$f" .txt)
+            case " demo boot random " in *" $n "*) continue;; esac
+            [ -e "$T/bin/$n" ] || [ -e "$T/sbin/$n" ] || [ -e "$T/sbin/net/$n" ] || rm -f "$f"
+        done
+    fi
+    [ -e "$T/bin/wget" ] || rm -rf "$T/etc/ssl" "$T/usr/share/licenses/certdata"
+fi
 # no image ever ships a random seed (DESIGN D19 9.3): every copy of it (a card, the demo floppy) would start with the
 # same one. Boot writes the machine's own at its first start.
 if [ -e "$T/var/lib/random-seed" ]; then echo "mkroot.sh: refusing to put a random seed (var/lib/random-seed) on an image" >&2; exit 1; fi
@@ -143,6 +169,16 @@ if [ "$ROOTFS" = zenixfs ]; then                # the same tree and modes on Zen
     echo "$OUT: ZenixFS root, $(echo $PROGS | wc -w) programs"
     exit 0
 fi
+# SIZE=auto (the demo floppy's RAM disk): what the tree takes in 1 KB blocks (each file's blocks once, hard links
+# counted once, an indirect block past 12 KB and one more each 256 KB, a block a directory, the inode table), and
+# FREE_K more (the visitor's room, default 256); INODES=auto: the tree's files and directories and 64 more
+if [ "$SIZE" = auto ]; then
+    used=$(find "$T" -type f -printf '%i %s\n' | sort -u | awk '{ b += int(($2 + 1023) / 1024); if ($2 > 12288) b += 1 + int($2 / 262144) } END { print b + 0 }')
+    ndirs=$(find "$T" -type d | wc -l)
+    nfiles=$(find "$T" | wc -l)
+    [ "$INODES" != auto ] || INODES=$((nfiles + 64))
+    SIZE=$(( (used + ndirs + INODES / 8 + 64 + ${FREE_K:-256} + 3) & ~3 ))K
+fi
 # revision 0: the original ext2, 128-byte inodes, no optional features
 # ownership and modes under fakeroot, so the image holds uid 0 (not whoever runs the build): root owns everything,
 # /tmp is sticky and open to all, a normal user has a home, su and passwd are set-user-id root
@@ -153,11 +189,11 @@ fakeroot sh -c '
     chown 1001:100 "$1/home/guest"
     chmod 1777 "$1/tmp"
     [ ! -d "$1/root" ] || chmod 700 "$1/root"
-    chmod 4755 "$1/bin/su" "$1/bin/sudo" "$1/bin/passwd"
+    for f in su sudo passwd; do [ ! -f "$1/bin/$f" ] || chmod 4755 "$1/bin/$f"; done   # (a small image may lack them)
     [ ! -f "$1/bin/zine" ] || chmod 4755 "$1/bin/zine"     # root and the group zine (zine checks it)
     chmod 644 "$1/etc/passwd" "$1/etc/group" "$1/etc/svctab" "$1/etc/daemons"
     mke2fs -q -t ext2 -E revision=0 -b 1024 -N "$2" -d "$1" -F "$3" "$4"
 ' sh "$T" "$INODES" "$TMPOUT" "$SIZE"
 e2fsck -fn "$TMPOUT" >/dev/null
 mv -f "$TMPOUT" "$OUT"
-echo "$OUT: ext2 root, $(echo $PROGS | wc -w) programs"
+echo "$OUT: ext2 root, $(echo $PROGS | wc -w) programs, $(dumpe2fs -h "$OUT" 2>/dev/null | awk -F: '/^Free blocks/ { f = $2 } /^Block count/ { n = $2 } END { printf "%d of %d blocks free", f, n }')"

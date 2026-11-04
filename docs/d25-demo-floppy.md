@@ -1,6 +1,6 @@
 # D25: the Zenix demo floppy (design note, revision 3: the desktop edition first)
 
-Status: **revision 3, written 2026-11-04 after the owner's request; measured, not reviewed, nothing built.** The owner
+Status: **revision 3, written 2026-11-04 after the owner's request; steps 1-4 built 2026-11-05 (section 10), the loader reviewed once.** The owner
 (2026-11-04): "We have a desktop. Now can we have a demo disk that boots into the desktop? ONE adf. With ahiru, Sumi,
 ctop, preferably." That approves **the desktop edition** (docs/decisions.md), which revision 2 foresaw as "a second
 edition with the desktop in block 5" in the KolibriOS model (owner 2026-10-26: "the programs are packed on the disk and
@@ -199,32 +199,44 @@ a few percent with the same decoder: not measured.
 
 ### 6.1 The disk
 
+As built (step 2, 2026-11-05; `boot/demounpack.h` is the one description of the layout, not frozen: only this loader
+reads it):
+
 ```
-byte 0        the bootblock ('DOS\0', checksum): reads the stage 2 and jumps to it
-byte 1024     the stage 2 loader (position independent, about 10 KB), then its table: the stream's offset and packed
-              size, the kernel's and the image's unpacked sizes, a CRC-32 of each, the image's RAM-disk size
-after it      the packed stream (raw deflate): kernel.bin, then the RAM image, to near the end of the disk
+byte 0        the bootblock (boot/demoboot.S, 'DOS\0', checksum): +8 the stage 2's size on the disk, +1020 its memory;
+              reads the stage 2, relocates it (a ZEXE), clears its BSS, jumps to it
+byte 1024     the stage 2 loader (boot/demoload*.c, 16 KB with tinfl at -O2), padded to 512
+then          the table, one sector: 'ZDM1', version 1, the stream's offset and length, the kernel's part (kernel.bin
+              padded to 512) and its memory, the RAM disk's size, the disk's size, a track's bytes (5632 DD, 11264
+              HD), a checksum over the sector
+then          the stream: zlib (deflate with an Adler-32 of everything unpacked), kernel then RAM image, to near the
+              end of the disk
 ```
 
 No filesystem on the floppy itself: nothing on it is read after the boot, so it needs none (Linux would see a blank
 disk; `man demo` says where the ADF and the source come from).
 
-### 6.2 The stage 2 (in C, -mpcrel like `boot/stage0.c`, with `tinfl` from `user/miniz`)
+### 6.2 The stage 2 (in C, a ZEXE the bootblock relocates, with `tinfl` from `user/miniz`)
 
-1. **The memory check:** the biggest fast-RAM block must hold the RAM image plus the kernel (2.2 MB at today's sizes;
-   the table gives the numbers). Not there: a plain screen says **"This Zenix demo disk needs 4 MB of fast RAM (a
-   68020 or better). Switch off to start something else."**, and nothing is touched.
-2. **Buffers where they stay:** the RAM image is unpacked straight into the block that will be the RAM disk, in fast
-   RAM, the kernel into its own buffer; placed by zenixboot's rule (Part 2, T7.2: never over the kernel's future home,
-   the klog area, low memory or the copier at 0x500). No packed copy is kept: a track is read, unpacked and its buffer
-   used again.
-3. **Untrusted input** (CLAUDE.md): `tinfl` with the output buffer's end, the stream's end, and the exact sizes from the
-   table: a stream that ends early, runs past, or whose CRC-32 differs is refused (the screen red, a line saying
-   which part), never a boot into a damaged root. A read error is retried by trackdisk, then refused the same way.
-4. **The bar:** one bitplane, the Zenix name, a bar that grows by a step a track (the bootblock's diagnostic colours,
-   A11, stay as they are for the failures).
-5. **The hand-over** is today's `boot/handoff.S` unchanged: bootinfo (the RAM disk's address and size), stage0, the
-   memory list, AmigaOS off, the kernel copied home, the jump. The kernel and boot see an ordinary RAM-floppy boot.
+1. **The memory check:** the biggest fast-RAM block must hold the kernel and the RAM image (2.2 MB at today's sizes;
+   the table gives the numbers), away from the kernel's home. Not there: a red screen says **"This Zenix demo disk
+   needs 4 MB of fast RAM (a 68020 or better)."**, and nothing is touched. A 68000 or Kickstart before 2.04 is told so
+   by the same screen (its code is built for the 68000).
+2. **Buffers where they stay:** the kernel and the RAM image are unpacked straight into one fast-RAM block from the top
+   (the layout `boot/handoff.S` wants: the RAM disk right behind the kernel), placed by zenixboot's rule
+   (`boot/bootmem.h`, shared: never over the kernel's future home, the klog area, low memory or the copier at 0x500).
+   No packed copy is kept: a track is read, unpacked and its buffer used again.
+3. **Untrusted input** (CLAUDE.md): the table is range-checked before anything is allocated; `tinfl` gets the output
+   buffer's exact end; the stream must end exactly at its length with exactly the unpacked size and its Adler-32
+   right (one checksum over both parts instead of a CRC-32 of each: `tinfl` checks it itself); the kernel's header
+   is checked as zenixboot's (`kernel_ok`) and the image must be ext2 within its size. Any failure: the screen red,
+   the reason in a line, never a boot into a damaged root. A read error is retried by trackdisk, then refused the same
+   way.
+4. **The bar:** one hires bitplane through Intuition's `OpenScreen`, the Zenix name, a bar that grows a step a track
+   (the bootblock's diagnostic colours, A11, stay for its own failures and the cyan stage before the hand-over).
+5. **The hand-over** is today's `boot/handoff.S` through zenixboot's helpers (`boot/handoff-c.S`, shared): bootinfo
+   (the RAM disk's address and size), stage0, the memory list, AmigaOS off, the kernel copied home, the jump. The
+   kernel and boot see an ordinary RAM-floppy boot.
 
 **What it costs the kernel: nothing.** The decoder runs before the kernel, under AmigaOS; `kernel.bin` is byte for
 byte the one of every image. (Revision 2's LZ4 program loader inside the kernel would cost about 1 KB: the checked LZ4
@@ -324,6 +336,16 @@ stays postponed); this ADF is for the minimum.
   only by Kickstart's `trackdisk.device`).
 
 ## 10. The build, in order (each step merged with its tests; the full suite before each merge)
+
+**Built (2026-11-05, branch `demo`): steps 1-4 and both editions** (the owner 2026-11-04: `make demo` makes the DD disk
+and an HD disk, 1,802,240 bytes, with what the DD one leaves out: wget and its certificates, ssh, Maki, Markdown,
+ZINE, plipbox, the disk tools; the same loader, the table's track size telling 11 or 22 sectors). *Measured* at the
+build: the DD disk 34 KB free (stream 848 KB: kernel 183,508 + RAM disk 1,996 blocks unpacked), the HD disk 378 KB
+free (RAM disk 2,964 blocks, 3.2 MB unpacked with the kernel); each RAM disk keeps about 300 blocks free. The box is
+171,596 bytes, a ZEXE with gzip's 32 KB stack, so every box command takes about 217 KB while it runs (the whole box,
+not shared): step 8 judges it. In FS-UAE (`tools/demo-test.sh`): both disks boot to the desktop's login on the A1200
+with 4 MB of fast RAM; 1,885 KB of fast RAM were free after the DD boot (the kernel's count). The HD disk needs about
+3.4 MB of one fast-RAM block (it fitted the 4 MB A1200 in FS-UAE, leaving about 0.6 MB of fast RAM to Zenix).
 
 Efforts are rough, in this session's own hours.
 
