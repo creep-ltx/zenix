@@ -48,15 +48,36 @@ _start:
     move.l  %d0,%a3                 /* a3 = table, kept across every OS call (a2-a6 are preserved) */
     move.l  _start+1008(%pc),0x74(%a3)  /* ramdisk size (last long of the block, offset 1020; 0 = none) */
 
-    move.l  %d7,%d0
-    add.l   0x74(%a3),%d0           /* kernel + ramdisk are loaded together */
-    /* MEMF_CHIP | MEMF_REVERSE: the top of chip RAM, away from the kernel's home at 0x40000 on a machine with no fast RAM.
-     * The lowest fit would lie across it, and the copy would overwrite the RAM disk behind the image (audit A7) */
+    move.l  %d7,%d6
+    add.l   0x74(%a3),%d6           /* kernel + ramdisk are loaded together: d6 their size */
+    /* With a RAM disk: MEMF_CHIP | MEMF_REVERSE, the top of chip RAM, away from the kernel's home at 0x40000 on a machine with no fast
+     * RAM; the lowest fit would lie across it, and the copy would overwrite the RAM disk behind the image (audit A7). But never over
+     * the kernel log and the boot note at the very top (KLOG_AREA_SIZE below MaxLocMem, kept across a reset for dmesg -p): where the
+     * AllocAbs above did not get that area and the buffer reaches into it, it is given back and taken low, as without a RAM disk. */
+    tst.l   0x74(%a3)
+    beq.s   lowbuf
+    move.l  %d6,%d0
     move.l  #0x40002,%d1
+    jsr     -198(%a6)               /* AllocMem */
+    tst.l   %d0
+    beq.s   lowbuf
+    move.l  %d0,%a4
+    add.l   %d6,%d0                 /* its end */
+    move.l  62(%a6),%d1             /* MaxLocMem */
+    sub.l   #KLOG_AREA_SIZE,%d1
+    cmp.l   %d1,%d0
+    bls.s   havebuf
+    move.l  %a4,%a1
+    move.l  %d6,%d0
+    jsr     -210(%a6)               /* FreeMem */
+lowbuf:
+    move.l  %d6,%d0
+    moveq   #2,%d1                  /* MEMF_CHIP */
     jsr     -198(%a6)               /* AllocMem */
     tst.l   %d0
     beq     fail
     move.l  %d0,%a4                 /* load buffer */
+havebuf:
 
     move.w  #2,28(%a5)              /* io_Command = CMD_READ */
     move.l  %d7,%d0
