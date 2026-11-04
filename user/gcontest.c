@@ -11,7 +11,8 @@ typedef unsigned short u16;
  * deadline: the answer that lets the kernel use the blitter again), with noack never. It also tries to free the
  * grab's memory (refused, EBUSY).
  * It ends after SECONDS (default 60) or at the q key, giving the console back. `gcontest keys CODE...` types raw key
- * codes (hex) through CON_INPUT on descriptor 0, as the keyboard would (root). tools/gcon-test.sh runs it. */
+ * codes (hex) through CON_INPUT on descriptor 0, as the keyboard would (root); `gcontest mouse DX,DY,B ...` moves the
+ * mouse and sets its buttons the same way (CONI_MOUSE). tools/gcon-test.sh runs it. */
 
 static void say(const char *fmt, ...)
 {
@@ -25,14 +26,44 @@ static void say(const char *fmt, ...)
 
 static int keys(int argc, char **argv)
 {
-    u8 c[64];
+    u8 c[256];
     int n = 0;
-    for (int i = 2; i < argc && n < 64; i++)
+    for (int i = 2; i < argc && n < 256; i++)
         c[n++] = (u8)strtoul(argv[i], 0, 16);
-    int r = sys_coninput(0, CONI_RAW, c, (u32)n);
-    if (r != n) {
-        dprintf(2, "gcontest: keys: %d of %d taken (%s)\n", r, n, zwhy("refused"));
-        return 1;
+    for (int at = 0; at < n;) {         /* a call may stop early (a terminal write's bound): the rest again */
+        int r = sys_coninput(0, CONI_RAW, c + at, (u32)(n - at));
+        if (r <= 0) {
+            dprintf(2, "gcontest: keys: %d of %d taken (%s)\n", at, n, zwhy("refused"));
+            return 1;
+        }
+        at += r;
+    }
+    return 0;
+}
+
+/* gcontest mouse DX,DY,BUTTONS ...: each record through CON_INPUT's mouse (D38), 3 ticks apart so the 100 Hz tick
+ * sees every button change */
+static int mouse(int argc, char **argv)
+{
+    for (int i = 2; i < argc; i++) {
+        char *s = argv[i];
+        u8 r[3];
+        long vx = strtol(s, &s, 10);
+        if (*s == ',') s++;
+        long vy = strtol(s, &s, 10);
+        if (vx < -128 || vx > 127 || vy < -128 || vy > 127) {
+            dprintf(2, "gcontest: mouse: %s: a move is -128..127 counts\n", argv[i]);
+            return 2;
+        }
+        r[0] = (u8)vx;
+        r[1] = (u8)vy;
+        if (*s == ',') s++;
+        r[2] = (u8)strtol(s, &s, 10);
+        if (sys_coninput(0, CONI_MOUSE, r, 3) != 3) {
+            dprintf(2, "gcontest: mouse: %s\n", zwhy("refused"));
+            return 1;
+        }
+        sys_sleep(3);
     }
     return 0;
 }
@@ -41,6 +72,8 @@ int main(int argc, char **argv)
 {
     if (argc > 1 && !strcmp(argv[1], "keys"))
         return keys(argc, argv);
+    if (argc > 1 && !strcmp(argv[1], "mouse"))
+        return mouse(argc, argv);
     if (argc < 2 || (strcmp(argv[1], "ack") && strcmp(argv[1], "noack") && strcmp(argv[1], "late"))) {
         dprintf(2, "usage: gcontest ack|late|noack [SECONDS] | gcontest keys CODE...\n");
         return 2;

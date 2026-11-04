@@ -428,6 +428,8 @@ void win_close(int s)
     if (dragging == s + 1)
         dragging = 0;
     bm_free(&w->back);
+    free(w->menu);
+    w->menu = 0;
     w->id = 0;
     w->state = 0;
     order_rm(s);
@@ -494,8 +496,8 @@ void win_show(int s, int show, int why)
     struct rect d;
     if (!w->placed && show) {           /* nobody placed it: below the last one (the fallback without a manager) */
         static int casc;
-        int x = w->kind == WK_BAR ? 0 : w->fx >= 0 ? w->fx : 24 + 16 * (casc % 8);
-        int y = w->kind == WK_BAR ? 0 : w->fy >= 0 ? w->fy : 16 + 12 * (casc % 8);
+        int x = w->fx >= 0 ? w->fx : w->kind == WK_BAR ? 0 : 24 + 16 * (casc % 8);
+        int y = w->fy >= 0 ? w->fy : w->kind == WK_BAR ? 0 : 16 + 12 * (casc % 8);
         casc++;
         win_place(s, x, y, w->iw, w->ih);
     }

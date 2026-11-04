@@ -31,6 +31,9 @@
 #define DPY_BYE         9   /* the client leaves: its windows go */
 #define DPY_WIN_INFO    10  /* a[0] id, a[1] struct dpyinfo * -> 0: the window's place, size, state, title */
 #define DPY_IMAGE_FREE  11  /* a[0] id */
+#define DPY_MENU        12  /* a[0] id, a[1] the window's menus (the client's memory), a[2] their bytes (at most
+                             * DPY_MENUMAX; 0: none): "Title\tItem\tItem\nTitle\tItem..." - the bar draws them (D38
+                             * revision 2), a pick comes back as EV_MENU */
 /* the window manager's (only after DPY_WM_HELLO; one window manager at a time) */
 #define DPY_WM_HELLO    32  /* become the window manager -> 0, -EBUSY (another one), -EPERM (not the session's user) */
 #define DPY_WM_STYLE    33  /* a[0] struct dpystyle *: frames from now on (and the screen's palette) */
@@ -44,6 +47,10 @@
 #define DPY_WM_DRAG     40  /* a[0] id, a[1] DRAG_* : the server follows the mouse until the button is released */
 #define DPY_WM_CLOSE    41  /* a[0] id: ask the window's program to close it (EV_CLOSE) */
 #define DPY_WM_KILL     42  /* a[0] id: the window goes now (a program that does not answer EV_CLOSE) */
+#define DPY_WM_MENUGET  43  /* a[0] id, a[1] a buffer, a[2] its size -> the menus' bytes copied (DPY_MENU's text) */
+#define DPY_WM_MENUPICK 44  /* a[0] id, a[1] the menu (0..), a[2] the item (0..): EV_MENU to the window's program */
+#define DPY_WM_PGRAB    45  /* a[0] one of the manager's windows: every pointer event goes to it until the buttons are
+                             * all up (a menu held with the right button); -EINVAL if none is held */
 
 /* DPY_WIN_SET's what */
 #define WS_TITLE        1   /* a[2] the title (the client's memory, at most DPY_TITLE - 1 bytes) */
@@ -61,6 +68,7 @@
 #define DPY_TITLE       40
 #define DPY_NAME        16
 #define DPY_MAXGRAB     64
+#define DPY_MENUMAX     512
 
 struct dpyhello {
     unsigned size;           /* sizeof (the first size: DPYHELLO_FIRST) */
@@ -184,6 +192,7 @@ struct dpyev {
 #define EV_FOCUS        6
 #define EV_CLOSE        7   /* the close gadget was used: the program decides */
 #define EV_MINIMISED    8
+#define EV_MENU         9   /* a menu item was picked: code the menu, arg the item */
 /* to the window manager */
 #define EV_WM_NEW       32  /* a window wants to appear: win, w, h its wanted inside, x, y its wanted place, arg kind */
 #define EV_WM_FRAME     33  /* a click on a frame: code the part (FP_*), qual the buttons, x, y */
@@ -193,6 +202,7 @@ struct dpyev {
 #define EV_WM_TITLE     37  /* a window's title changed */
 #define EV_WM_CLICK     38  /* a click on a window's inside (focus follows the manager): win, qual, x, y */
 #define EV_WM_SIZE      39  /* a program asks for a new size (WS_SIZE): win, w, h; the manager decides (DPY_WM_PLACE) */
+#define EV_WM_MENU      40  /* a window's menus changed (DPY_MENU) */
 #define FP_TITLE        1
 #define FP_CLOSE        2
 #define FP_MIN          3

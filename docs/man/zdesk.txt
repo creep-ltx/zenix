@@ -1,0 +1,85 @@
+ZDESK(1)		Zenix manual
+
+NAME
+    zdesk - Zenix Desktop, the floating window manager
+
+SYNOPSIS
+    zdesk [-v] [-theme NAME]
+
+DESCRIPTION
+    Log in on a console and type zdesk, as startx: it starts the display
+    server on that console (displayd(8)) and runs the desktop on it: a bar
+    at the top, the desktop's icons, and floating windows. The other
+    consoles stay on Amiga+F1..F10. Leaving it (the Zenix menu's Log out,
+    or SIGINT or SIGTERM) asks every program on the desktop to end, and the
+    console is text again.
+
+    Windows: a new one is placed below the bar, raised and focused. A
+    click raises and focuses; the title bar drags it, the bottom right
+    corner resizes it (an outline on a 68020 or 68030, the whole window on
+    a 68040, 68060 or the PiStorm, as the theme or the CPU says); the
+    close gadget asks the program to close it, the minimise gadget hides
+    it (it stays in the bar's window list, dimmed), the zoom gadget fills
+    the screen below the bar and back.
+
+    Workspaces: nine. Left Amiga+1..9 shows one, Left Amiga+Shift+1..9
+    sends the active window to one.
+
+    The bar, in three zones of modules (FILES): left the Zenix menu (its
+    programs, About Zenix, Log out) and the active program's menus; the
+    middle the window list or the workspaces' numbers; the right the
+    clock, memory, the network, the CPU, or a command's first line of
+    output, run every N seconds (10 when not given; never under 1). Menus
+    open with a click on their title (it stays open; a click picks), by
+    holding the right mouse button anywhere, the Workbench way, or from
+    the keyboard (Amiga+Space, the arrows, Return, Esc), as the theme
+    says. The desktop's icons start their command on a double click.
+
+OPTIONS
+    -theme NAME  /etc/zdesk/themes/NAME.theme instead of the chosen one
+    -v           say on standard output what the bar shows and each event
+
+KEYS
+    The defaults (/etc/zdesk/keys): Amiga+Return a terminal, Amiga+Q close,
+    Amiga+M minimise, Amiga+Z zoom, Amiga+Tab the next window, Amiga+Space
+    the menu, Amiga+arrows move the active window, Amiga+Shift+arrows
+    resize it, Amiga+1..9 and Amiga+Shift+1..9 the workspaces. A line is
+    KEYS ACTION [ARGUMENTS]: KEYS is modifiers (lamiga, ramiga, shift,
+    ctrl, alt) and a key (return, tab, space, esc, del, backspace, help,
+    up, down, left, right, 0-9, a-z) joined by +; ACTION is terminal,
+    run COMMAND..., close, minimise, zoom, next, menu, move DX DY,
+    resize DW DH, workspace N, sendto N, about or logout. Amiga+F1..F10
+    stay the consoles' and cannot be bound.
+
+FILES
+    For each, the user's ~/.config/zdesk/NAME replaces /etc/zdesk/NAME.
+    theme       the theme's name (flat when there is none)
+    keys        the keys, above
+    bar         the bar's zones: lines "left|middle|right MODULE...", the
+                modules zenix, menus, windows, workspaces, clock, memory,
+                network, cpu and "cmd N COMMAND..." (to a ";" or the
+                line's end); a zone the file names replaces the theme's
+    menu        the Zenix menu's programs: LABEL = COMMAND
+    icons       the desktop's icons: PICTURE LABEL = COMMAND (term,
+                folder, gear, disk)
+    themes/NAME.theme
+                a theme (THEMES)
+
+THEMES
+    flat (the default, look (a)), workbench (b) and platinum (e), in
+    /etc/zdesk/themes. A theme file has these lines: palette with 16
+    12-bit colours; map8 (the pen each of the 16 becomes with 8 colours);
+    frame LEFT RIGHT TOP BOTTOM TITLE BEVEL SHADOW CENTRE; pens BORDER
+    BORDER-ACTIVE BAR BAR-ACTIVE TEXT TEXT-ACTIVE LIGHT DARK SHADOW
+    STRIPES; role NAME PEN (desk, bar, barline, barfg, logo, barcur,
+    barcurbg, bardim, clock, iconfg, labelbg, ik, if, ia, iw, id, winbg,
+    winfg, btn, btnfg, menubg, menufg, selbg, selfg); gadget close|min|zoom
+    left|right OFFSET followed by its picture, rows starting with | (. no
+    pixel, 0-9 a-f a pen); menus click|hold|both; drag outline|whole|auto;
+    bar left|middle|right MODULE....
+
+NOTES
+    The clock is UTC (Zenix has no time zones yet). Files on the desktop
+    and a preferences program are not there yet; icons only start
+    commands. The bar's command blocks run through /bin/sh -c and are
+    ended when they take longer than their interval (at least 10 s).

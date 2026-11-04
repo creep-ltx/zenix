@@ -1220,12 +1220,14 @@ long term_conop(u32 op, u32 a2, u32 a3)
     if (d24) {
         if (op == CON_INPUT) {
             u32 n = a3 & 0xFFFF, kind = a3 >> 16;
-            if (kind > CONI_TEXT || n > CONI_MAX)
+            if (kind > CONI_MOUSE || n > CONI_MAX)
                 return -EINVAL;
             if (n && !user_ok_rd(current, a2, n))
                 return -EFAULT;
             if (kind == CONI_RAW)                       /* the keyboard: the shown console's (any console names it) */
                 return kbd_inject((const u8 *)a2, (int)n);
+            if (kind == CONI_MOUSE)                     /* D38: the mouse, as the port's counters would move */
+                return input_inject((const u8 *)a2, (int)n);
             return wsp[con] ? tty_type(con, (const u8 *)a2, (int)n) : -ENXIO;
         }
         if (op == CON_LINE && !gfx_up())

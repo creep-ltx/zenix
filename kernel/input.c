@@ -22,6 +22,7 @@
 static u16 last0, last1;
 static s32 dx, dy;                       /* mouse in port 1 (JOY0DAT) accumulated since the last read */
 static u32 buttons, joy;
+static u32 ibtn;                         /* CON_INPUT's buttons (D38's tests): held until the next record */
 static int inited;
 
 void input_init(void)
@@ -50,7 +51,7 @@ void input_poll(void)
     if (!(pra & 0x40)) b |= 1;           /* left button, port 1 */
     if (!(pot & 0x0400)) b |= 2;         /* right button, port 1 */
     if (!(pot & 0x0100)) b |= 4;         /* middle button, port 1 */
-    buttons = b;
+    buttons = b | ibtn;
     u32 j = 0;                           /* joystick in port 2 */
     if ((j1 >> 9 ^ j1 >> 8) & 1) j |= 1;         /* up */
     if ((j1 >> 1 ^ j1) & 1) j |= 2;              /* down */
@@ -77,4 +78,20 @@ void input_take(s32 *mx, s32 *my, u32 *b)
 {
     *mx = dx; *my = dy; *b = buttons;
     dx = dy = 0;
+}
+
+/* SYS_console CON_INPUT's mouse (DESIGN D38: the desktop's tests, root only): records of dx, dy, buttons, added as the
+ * counters would move; the buttons stand until the next record (a record with 0 lets them go) */
+int input_inject(const u8 *r, int n)
+{
+    if (n % 3)
+        return -EINVAL;
+    for (int i = 0; i < n; i += 3) {
+        u16 sv = irq_save2();
+        dx += (signed char)r[i];
+        dy += (signed char)r[i + 1];
+        ibtn = r[i + 2] & 7;
+        irq_restore(sv);
+    }
+    return n;
 }

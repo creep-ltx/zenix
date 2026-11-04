@@ -67,7 +67,10 @@ zenix/
 - **`display/`, Zenix Desktop (DESIGN D38):** `proto.h` (the display protocol, frozen), `display.h` (libdisplay's
   calls), `server/` (displayd: `displayd.c` the clients, the requests and the input, `win.c` the windows, regions,
   frames and kept copies, `draw.c` the blitter's and the CPU's drawing, `font.c` Topaz and the Unicode supplement),
-  `lib/libdisplay.c` (the client library, linked into each client), `test/dpytest.c` (the test client).
+  `lib/libdisplay.c` (the client library, linked into each client), `test/dpytest.c` (the test client), `zdesk/`
+  (the window manager: `zdesk.c` the windows, workspaces and keys, `bar.c` the bar, menus and blocks, `desk.c` the
+  icons and About, `conf.c` the settings and themes), `term/` (the terminal window: `term.c`, and `model.c`, which
+  builds the console's `kernel/term.c` into it unchanged). Its settings and themes: `rootfs/etc/zdesk/`.
 - **`libc/`, the standard C library (DESIGN D27, docs/d27-c-library.md):** `picolibc/` picolibc 1.8.10, only the files
   built (`sources.mk`, `picolibc.h`, its licences, README); `zenix/` Zenix's port (the system layer, the streams,
   the start and exit, `strerror`, `dprintf`, directories, the 64-bit division, termios, `posix_spawn` and the

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* dpytest: a test client of the display server (DESIGN D38 steps 3-4, docs/man/dpytest.txt), driven by commands on
- * its standard input, one a line, so a test script types them (tools/dpy-test.sh); each answers one line
+ * its standard input (or, with -f FILE, from FILE as it grows), one a line, so a test script types them
+ * (tools/dpy-test.sh, tools/zdesk-test.sh); each answers one line
  * "dpytest: ..." on its standard output:
  *   win NAME W H PEN   a window of W x H pixels, filled with PEN, its name in the top left in pen 7 on PEN
  *   text NAME X Y S    the text S at X, Y (pen 1 on 2)
@@ -187,8 +188,14 @@ static void command(char *line)
     say("dpytest: %s %s %d\n", w[0], w[1], r);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    /* -f FILE: the commands from FILE, read as it grows (the shell stays free for the test's other commands) */
+    int in = 0, file = argc > 2 && !strcmp(argv[1], "-f");
+    if (file && (in = sys_open(argv[2], O_RDONLY)) < 0) {
+        dprintf(2, "dpytest: %s: %s\n", argv[2], zwhy("cannot open"));
+        return 1;
+    }
     int r = dpy_open("dpytest");
     say("dpytest: open %d screen %ux%u depth %u\n", r, dpy_w, dpy_h, dpy_depth);
     if (r < 0)
@@ -196,13 +203,16 @@ int main(void)
     char line[128];
     u32 len = 0;
     for (;;) {
-        struct pollfd p[2] = { { 0, POLLIN, 0 }, { dpy_port(), POLLPORT | POLLRDBAND, 0 } };
-        sys_evwait(p, 2, -1);
+        struct pollfd p[2] = { { in, POLLIN, 0 }, { dpy_port(), POLLPORT | POLLRDBAND, 0 } };
+        if (file)
+            sys_evwait(&p[1], 1, 20);
+        else
+            sys_evwait(p, 2, -1);
         events();
-        if (p[0].revents & POLLIN) {
+        if (file || (p[0].revents & POLLIN)) {
             char c[64];
-            int k = sys_read(0, c, sizeof c);
-            if (k <= 0) { dpy_close(); return 0; }
+            int k = sys_read(in, c, sizeof c);
+            if (k < 0 || (k == 0 && !file)) { dpy_close(); return 0; }
             for (int j = 0; j < k; j++) {
                 if (c[j] == '\n' || c[j] == '\r') {
                     line[len] = 0;

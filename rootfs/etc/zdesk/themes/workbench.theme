@@ -1,0 +1,56 @@
+# Zenix Desktop's look (b), "Workbench, cleaner" (DESIGN D38 section 8, docs/desktop-looks/b-workbench.png): the grey
+# and blue, raised edges, the close gadget on the left; menus on the right button, as Workbench.
+palette 999 000 FFF 68B AAA 555 CB9 777 B32 283 970 239 838 177 E94 333
+map8    0 1 2 3 4 5 6 7 1 5 7 3 3 5 6 1
+frame   2 2 12 2 11 1 0 0
+pens    1 1 7 3 2 1 2 5 5 0
+role desk 0
+role bar 2
+role barline 1
+role barfg 1
+role logo 3
+role barcur 2
+role barcurbg 3
+role bardim 7
+role clock 1
+role iconfg 1
+role labelbg none
+role ik 1
+role if 6
+role ia 14
+role iw 2
+role id 5
+role winbg 4
+role winfg 1
+role btn 4
+role btnfg 1
+role menubg 2
+role menufg 1
+role selbg 3
+role selfg 2
+gadget close left 3
+|11111111
+|1......1
+|1..22..1
+|1..22..1
+|1......1
+|11111111
+gadget zoom right 13
+|111111111
+|1.......1
+|1.11111.1
+|1.1...1.1
+|1.11111.1
+|111111111
+gadget min right 25
+|111111111
+|1.......1
+|1.......1
+|1.111...1
+|1.111...1
+|111111111
+menus hold
+drag auto
+bar left zenix menus
+bar middle windows
+bar right memory clock

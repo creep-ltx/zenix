@@ -90,6 +90,7 @@ int dpy_window(int kind, const char *title, int x, int y, int w, int h, int flag
 }
 int dpy_title(int win, const char *t) { return dpy_call(DPY_WIN_SET, (u32)win, WS_TITLE, (u32)t, 0); }
 int dpy_resize(int win, int w, int h) { return dpy_call(DPY_WIN_SET, (u32)win, WS_SIZE, (u32)w << 16 | (u32)h, 0); }
+int dpy_menu(int win, const char *t, int n) { return dpy_call(DPY_MENU, (u32)win, (u32)t, (u32)n, 0); }
 int dpy_destroy(int win)
 {
     if (win == qwin)

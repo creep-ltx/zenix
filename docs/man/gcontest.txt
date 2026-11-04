@@ -6,6 +6,7 @@ NAME
 SYNOPSIS
     gcontest ack|late|noack [SECONDS]
     gcontest keys CODE...
+    gcontest mouse DX,DY,BUTTONS...
 
 DESCRIPTION
     A test program for DESIGN D38 step 2 (SYS_console CON_GRAB and
@@ -36,6 +37,11 @@ DESCRIPTION
     keys types the raw key codes (hexadecimal; bit 7 set for a key going
     up) through CON_INPUT on descriptor 0, as the keyboard would: 66 51 d1
     e6 is Amiga+F2.
+
+    mouse moves the mouse by DX, DY counts (-128..127; a count is two
+    hires pixels across, a line down) and sets its buttons (bit 0 left, 1
+    right, 2 middle; held until the next record) through CON_INPUT's
+    CONI_MOUSE, a record every 3 ticks. The desktop's tests drive it.
 
 NOTES
     Root only. A second gcontest while one has the console is refused

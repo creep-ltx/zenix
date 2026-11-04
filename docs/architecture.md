@@ -1483,7 +1483,23 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   console is text again. **libdisplay** (`display/lib/libdisplay.c`, `display/display.h`, linked into each client:
   about 2 KB of code and 3 KB of data): the connection (its own port `dpy.PID` with a 1 KB ring), windows, a 2 KB queue of orders sent as one
   message, `dpy_next` for events (or the program's own `poll` on `dpy_port()`). Verified in FS-UAE by
-  `tools/dpy-test.sh` (`dpytest`, docs/man/dpytest.txt; screenshots compared pixel by pixel). **A
+  `tools/dpy-test.sh` (`dpytest`, docs/man/dpytest.txt; screenshots compared pixel by pixel).
+- **The window manager and the terminal** (DESIGN D38 steps 5-6): `zdesk` (`display/zdesk/`, docs/man/zdesk.txt)
+  is an ordinary program, the display server's window manager (`DPY_WM_HELLO`): it gives the server its theme's
+  frame style and palette, places and shows new windows, answers clicks on frames (drags run in the server: an
+  outline on 68020/030, the whole window on 68040/060 by exec's AttnFlags through `ZINE_INFO`), keeps nine workspaces
+  (`DPY_WM_HIDE` with `HIDE_WORKSPACE`), grabs its keys (`DPY_WM_GRAB`, `/etc/zdesk/keys`), and runs the bar (a
+  frameless `WK_BAR` window), the desktop (`WK_DESKTOP`) and the About window. A program's menus reach the bar through
+  the server (`DPY_MENU`, `DPY_WM_MENUGET`, a pick back as `EV_MENU`); a menu held with the right button takes the
+  pointer (`DPY_WM_PGRAB`). A frame press that the manager answers after the button is up still drags: the server
+  keeps the last press on a frame and runs the drag from it. Leaving zdesk sends SIGTERM to the desktop's programs;
+  the server ends with its last client (a client that ended, also a zombie its parent has not reaped, is found by
+  `procinfo` once a second). `term` (`display/term/`, docs/man/term.txt) opens a pty (`openpty`), starts the shell
+  on its slave, and builds the console's own `kernel/term.c` and `confont.c` into itself unchanged (D38 5: one parser
+  for two users), its `gfx_*` calls becoming drawing orders (a run of cells in one colour one text order): 80
+  columns, the console's model, rows from 4 to 29. The desktop's tests drive the mouse through `CON_INPUT`'s
+  `CONI_MOUSE` (root; records dx, dy, buttons, as the port's counters would move). Verified in FS-UAE by
+  `tools/zdesk-test.sh`. **A
   login steps aside** (the 2 MB diet, DESIGN D18): Zenix has no `exec`, so the shell is a new process, and only a
   process that has become the user can start it as the user; init's login (`login --init`) spawns the shell and then
   ends through `SYS_exit` with its second argument naming the shell, which `proc_handover` makes init's child first
