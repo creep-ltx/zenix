@@ -3,7 +3,8 @@
  * model of the box (tools/plipbox-test.c, tools/plipbox-model.h). Included after the includer has defined:
  *   unsigned char pb_rd(u32 a); void pb_wr(u32 a, unsigned char v);   a CIA register, one access each
  *   void pb_bset(u32 a, int bit); void pb_bclr(u32 a, int bit);        one bit, read-modify-write in one instruction
- *   u32 pb_now(void);                  the E-clock (SYS_hrtime)
+ *   void pb_clrbits(u32 a, unsigned mask);                            bits cleared in one instruction
+ *   u32 pb_ticks(void);                the kernel's 100 Hz tick (its CIA timer: PAL and NTSC alike)
  *   long pb_acks(void);                the ACK line's edges since boot (DRV_PARACK), or -errno
  *   void pb_sleep(u32 ticks);
  *   void pb_log(struct pb *b, const char *fmt, ...);
@@ -23,7 +24,7 @@
 
 static void pb_begin(struct pb *b, u32 limit)
 {
-    b->t0 = pb_now();
+    b->t0 = pb_ticks();
     b->limit = limit;
 }
 
@@ -35,7 +36,7 @@ static int pb_wait(struct pb *b, int want, const char *stage)
     for (unsigned n = 1;; n++) {
         if ((pb_rd(PB_CTRL) & 1) == want)
             return 0;
-        if (!(n % PB_POLLCHECK) && (u32)(pb_now() - b->t0) > b->limit) {
+        if (!(n % PB_POLLCHECK) && (u32)(pb_ticks() - b->t0) > b->limit) {
             if ((pb_rd(PB_CTRL) & 1) == want)
                 return 0;
             b->stage = stage;
@@ -44,12 +45,11 @@ static int pb_wait(struct pb *b, int want, const char *stage)
     }
 }
 
-/* every transfer's end: the data lines the box's again, SEL down (the box ends its side), POUT down */
+/* every transfer's end: the data lines the box's again, SEL and POUT down in one write (as the quiesce program) */
 static void pb_end(void)
 {
     pb_wr(PB_DDATA, 0x00);
-    pb_bclr(PB_CTRL, PB_SEL);
-    pb_bclr(PB_CTRL, PB_POUT);
+    pb_clrbits(PB_CTRL, (1u << PB_SEL) | (1u << PB_POUT));
 }
 
 /* the port set up for the box: SEL and POUT low, then driven; BUSY read; the data lines not driven */
@@ -67,10 +67,8 @@ void pb_lines_on(void)
 void pb_lines_off(void)
 {
     pb_wr(PB_DDATA, 0x00);
-    pb_bclr(PB_CTRL, PB_SEL);
-    pb_bclr(PB_CTRL, PB_POUT);
-    pb_bclr(PB_DCTRL, PB_POUT);
-    pb_bclr(PB_DCTRL, PB_SEL);
+    pb_clrbits(PB_CTRL, (1u << PB_SEL) | (1u << PB_POUT));
+    pb_clrbits(PB_DCTRL, (1u << PB_SEL) | (1u << PB_POUT));
 }
 
 /* the same as the kernel's quiesce program: SEL first (it ends a burst the box is in), then the directions; CIA-B's
@@ -93,30 +91,36 @@ void pb_quiesce(struct udrvquiesce *q)
 
 /* A box held in a burst's end. plipbox 0.6's burst loops end only when SEL drops, and their way out (pb_proto.c,
  * cmd_send_burst's send_burst_exit) loops back to itself for as long as SEL stays low: a burst cut off (a deadline
- * passed, the driver killed: its quiesce drops SEL) leaves the box there, BUSY high, deaf to every command. SEL up
- * with the data lines not driven, POUT up and down, each edge answered by BUSY, takes it out: the burst ends as
- * "timeout", the box waits for SEL low and drops BUSY. A box that was not held sees SEL with POUT high (ignored), then
- * low: a command it reads from the undriven lines (0xFF, not one: it answers BUSY high and waits for SEL low). */
+ * passed, the driver killed: its quiesce drops SEL) leaves the box there, deaf to every command, BUSY high or low
+ * (the loop tests POUT before SEL: with POUT high it has dropped BUSY). SEL up, POUT up, then down, each edge
+ * answered by BUSY, takes it out: the burst ends as "timeout", the box waits for SEL low and drops BUSY. The data
+ * lines carry 0x00 meanwhile: a box that was not held reads that as a command, not one of its four (it answers BUSY
+ * high and waits for SEL low), whatever the lines' pull-ups would have given. Done at every start and every look for
+ * a lost box (microseconds for a box that was not held), and after a burst that failed. The stage of the failure
+ * that led here is kept for the log. */
 static void pb_unstick(struct pb *b)
 {
+    const char *stage = b->stage;
     pb_begin(b, PB_PROBE);
-    pb_wr(PB_DDATA, 0x00);
     pb_bset(PB_CTRL, PB_POUT);
+    pb_wr(PB_DATA, 0x00);
+    pb_wr(PB_DDATA, 0xFF);
     pb_bset(PB_CTRL, PB_SEL);
     if (!pb_wait(b, 0, "freeing a held box")) {
         pb_bclr(PB_CTRL, PB_POUT);
         (void)pb_wait(b, 1, "freeing a held box");
     }
-    pb_bclr(PB_CTRL, PB_SEL);
-    pb_bclr(PB_CTRL, PB_POUT);
+    pb_end();
     pb_begin(b, PB_PROBE);
     (void)pb_wait(b, 0, "freeing a held box");
+    b->stage = stage;
 }
 
 /* a transfer failed (r) or went through (0): the count of failures in a row and the link */
 static void pb_result(struct pb *b, int r, const char *what)
 {
     if (!r) {
+        b->last_ok = pb_ticks();
         if (b->down)
             pb_log(b, "the plipbox answers again: link up");
         b->down = 0;
@@ -124,8 +128,13 @@ static void pb_result(struct pb *b, int r, const char *what)
         return;
     }
     if (b->nlog < 8 || !(b->nlog % 256))
-        pb_log(b, "%s: %s at %s (%d)", what, r == -ETIMEDOUT ? "no answer in 500 ms" : "refused",
+        pb_log(b, "%s: %s at %s (%d)", what, r == -ETIMEDOUT ? "no answer in time" : "refused",
                b->stage ? b->stage : "?", r);
+    if (b->wedged) {
+        b->wedged = 0;
+        pb_log(b, "a receive was cut between its size bytes: plipbox 0.6 then keeps driving the data lines until "
+               "its next receive ends; if nothing moves any more, switch the box off and on");
+    }
     b->nlog++;
     if (++b->fails >= PB_DOWNAFTER && !b->down) {
         b->down = 1;
@@ -219,8 +228,10 @@ int pb_recv(struct pb *b, unsigned char *buf, unsigned max, unsigned *len)
         goto out;
     n = (unsigned)pb_rd(PB_DATA) << 8;
     pb_bclr(PB_CTRL, PB_POUT);
-    if ((r = pb_wait(b, 1, "the size")))
+    if ((r = pb_wait(b, 1, "the size's low byte"))) {
+        b->wedged = 1;                  /* the box may have given up between the two: it keeps the lines (D39 5) */
         goto out;
+    }
     n |= pb_rd(PB_DATA);
     pb_bset(PB_CTRL, PB_POUT);
     if (n > PB_MAXFRAME || n + (n & 1) > max) {
@@ -302,8 +313,7 @@ int pb_hello(struct pb *b, int adopt)
 int pb_start(struct pb *b, int adopt)
 {
     pb_lines_on();
-    if (pb_rd(PB_CTRL) & 1)
-        pb_unstick(b);                  /* BUSY high: a box held since a burst was cut off (or none at all) */
+    pb_unstick(b);                      /* a box held since a burst was cut off */
     int r = pb_hello(b, adopt);
     if (r) {
         if (r == -ETIMEDOUT && b->stage && !strcmp(b->stage, "BUSY before the command"))
@@ -317,7 +327,16 @@ int pb_start(struct pb *b, int adopt)
     }
     b->fails = 0;
     b->down = 0;
+    b->last_ok = pb_ticks();
     return 0;
+}
+
+/* idle for PB_KEEPALIVE ticks: an online frame (one short transfer), so a box restarted meanwhile is online again
+ * and one that went away is seen (the link down after PB_DOWNAFTER of them) */
+void pb_keepalive(struct pb *b)
+{
+    if (!b->down && (u32)(pb_ticks() - b->last_ok) >= PB_KEEPALIVE)
+        pb_result(b, pb_magic(b, PB_MAGIC_ONLINE), "the keepalive");
 }
 
 /* the end: the box told (best effort: it drops the network's frames until the next online frame), the port left */

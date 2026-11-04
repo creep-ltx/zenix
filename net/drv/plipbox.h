@@ -37,10 +37,11 @@
 #define PB_HDR          14
 #define PB_MAXFRAME     1514            /* the box's buffer (avr/src/pkt_buf.h) */
 #define PB_BUF          1518            /* the size word, a frame, the odd byte's pad, rounded */
-#define PB_ECLOCK       709379u         /* E-clock ticks a second (PAL; NTSC's 715909 makes a wait 1% shorter) */
-#define PB_WAIT         (PB_ECLOCK / 2) /* a transfer's deadline: 500 ms, as plipbox.device and the box's own */
-#define PB_PROBE        (PB_ECLOCK / 20)        /* 50 ms: a look for a box that stopped answering */
+#define PB_WAIT         50              /* ticks (the kernel's 100 Hz, on PAL and NTSC): a transfer's deadline,
+                                         * 500 ms, as plipbox.device's and the box's own */
+#define PB_PROBE        5               /* ticks: 50 ms, a look for a box that stopped answering */
 #define PB_POLLCHECK    32              /* line reads between two looks at the clock (each read is an E-clock cycle) */
+#define PB_KEEPALIVE    500             /* ticks (5 s) without a transfer before an online frame is sent anyway */
 #define PB_DOWNAFTER    3               /* transfers failed in a row before the link is down */
 #define PB_RETRY        200             /* ticks (2 s) between looks for a box that stopped answering */
 
@@ -54,7 +55,9 @@ struct pb {
     int down;                           /* the box stopped answering: looked for every PB_RETRY ticks */
     unsigned fails;                     /* transfers failed in a row */
     u32 acks;                           /* the ACK count served (DRV_PARACK's value when the last request was taken) */
-    u32 t0, limit;                      /* the transfer's start (E-clock) and its deadline */
+    u32 t0, limit;                      /* the transfer's start and its deadline (ticks) */
+    u32 last_ok;                        /* the tick of the last transfer that went through */
+    int wedged;                         /* a receive was cut between its size bytes (section 5 of D39) */
     const char *stage;                  /* where the last transfer failed */
     unsigned nlog;                      /* error lines logged (the first 8, then every 256th) */
     u32 tx_ok, tx_err, rx_ok, rx_bad, rx_drop, rx_empty, online_asks, loops;

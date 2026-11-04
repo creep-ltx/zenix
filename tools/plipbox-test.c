@@ -21,7 +21,8 @@ static unsigned char pb_rd(u32 a) { return m_rd(a); }
 static void pb_wr(u32 a, unsigned char v) { m_wr(a, v); }
 static void pb_bset(u32 a, int bit) { m_wr(a, (unsigned char)(m_rd(a) | 1u << bit)); }     /* two accesses, as bset */
 static void pb_bclr(u32 a, int bit) { m_wr(a, (unsigned char)(m_rd(a) & ~(1u << bit))); }
-static u32 pb_now(void) { return (u32)(M.t * 709379ull / 1000000000ull); }
+static void pb_clrbits(u32 a, unsigned m) { m_wr(a, (unsigned char)(m_rd(a) & ~m)); }     /* one and.b */
+static u32 pb_ticks(void) { return (u32)(M.t / 10000000ull); }
 static long pb_acks(void) { return (long)(M.acks & 0x7FFFFFFFu); }
 static void pb_sleep(u32 t) { m_idle(t * 10000000ull); }
 struct pb;
@@ -135,6 +136,14 @@ static struct mframe txf[2000], rxf[2000];
 /* n frames each way, (both: at once); -> frames that arrived wrong (not lost: wrong) */
 static unsigned traffic(unsigned ntx, unsigned nrx, unsigned *lost_tx, unsigned *lost_rx)
 {
+    for (int i = 0; i < 1000 && (M.nin || M.req_pending || (M.acks & 0x7FFFFFFFu) != b.acks); i++) {
+        if (b.down) {                   /* the driver's look for the box (every 2 s there) */
+            pb_unstick(&b);
+            if (!pb_hello(&b, 0)) pb_result(&b, 0, "looking");
+        }
+        turn(0, 0);                     /* what an earlier round left in the box: not this round's */
+        m_idle(20000);
+    }
     unsigned sent = 0, queued = 0, out0 = (unsigned)M.out_total, wrong = 0;
     unsigned got0 = ngot;
     for (unsigned i = 0; i < ntx; i++) mkframe(&txf[i], rlen());
@@ -162,8 +171,13 @@ static unsigned traffic(unsigned ntx, unsigned nrx, unsigned *lost_tx, unsigned 
     *lost_tx = ntx - (nout < ntx ? nout : ntx);
     j = 0;
     for (unsigned i = got0; i < ngot; i++) {
+        unsigned j0 = j;
         while (j < nrx && !same(&got[i], &rxf[j])) j++;
-        if (j == nrx) wrong++; else j++;
+        if (j == nrx) {
+            wrong++;
+            if (m_trace && wrong < 4) printf("      wrong rx %u: len %u type %02x%02x (expected around %u: len %u)\n", i - got0, got[i].len, got[i].d[12], got[i].d[13], j0, rxf[j0 < nrx ? j0 : 0].len);
+            j = j0;
+        } else j++;
     }
     *lost_rx = nrx - (ngot - got0);
     return wrong;
@@ -221,6 +235,7 @@ int main(void)
     CHECK(M.online && M.magic_online == 1 && M.magic_loop == 1 && !M.eeprom_writes,
           "start: loopback, the box's answer, online; its EEPROM not written (%d %lu %lu %u)", M.online, M.magic_online, M.magic_loop, M.eeprom_writes);
     CHECK(!M.garbage_reads && lines_clean() && b.acks == M.acks, "start: no request taken that the box did not make; the port clean");
+    CHECK(M.bad_cmd <= 1, "start: the freeing of a held box costs an idle box one unknown command (0x00), no more (%lu)", M.bad_cmd);
 
     /* ---- 2. a MAC given (mac=): the box takes it (one EEPROM write) ---- */
     machine(1, 2, 0);
@@ -260,9 +275,17 @@ int main(void)
         M.gap_p = 0.0005; M.gap_min = 400000000; M.gap_max = 700000000;
         w = traffic(100, 100, &lt, &lr);
         M.gap_p = 0;
+        int wedged = M.drive && logged("cut between its size bytes");
+        if (wedged) {                           /* the box's firmware state: the owner switches it off and on */
+            m_box_restart();
+            b.down = 0;
+            pb_hello(&b, 0);
+            m_idle(1000000);
+        }
         unsigned lt2, lr2, w2 = traffic(100, 100, &lt2, &lr2);
-        CHECK(!w && !w2 && !lt2 && !lr2 && !M.garbage_reads, "gaps of 0.4-0.7 s (%s): %u+%u lost, none wrong; afterwards 100 each way again, none lost",
-              burst ? "burst" : "handshaked", lt, lr);
+        if (m_trace) printf("      after gaps: w2 %u lt2 %u lr2 %u down %d drive %d held %d rak %d pc %d cmd %x\n", w2, lt2, lr2, b.down, M.drive, M.held, M.rak, M.pc, M.cmd);
+        CHECK(!w && !w2 && !lt2 && !lr2 && !M.garbage_reads, "gaps of 0.4-0.7 s (%s): %u+%u lost, none wrong%s; afterwards 100 each way again, none lost",
+              burst ? "burst" : "handshaked", lt, lr, wedged ? " (a receive cut between its size bytes: the box switched off and on)" : "");
     }
 
     /* ---- 5. the frame times on the model's clock (E-clock bound; the box's ENC28J60 time included) ---- */
@@ -343,6 +366,87 @@ int main(void)
     w = traffic(50, 50, &lt, &lr);
     CHECK(r == 0 && !M.held && !w && !lt && !lr && !M.garbage_reads, "the next start frees the box, then 50 frames each way (%u wrong)", w);
 
+    /* ---- 9b. SEL dropped in a burst with POUT high: the box held with BUSY low; the next start frees it ---- */
+    {
+        int heldlow = 0, freed = 0;
+        for (int k = 0; k < 8; k++) {
+            machine(1, 95 + (uint64_t)k, 0);
+            start(1);
+            unsigned char *p = b.tx; p[0] = 1514 >> 8; p[1] = 1514 & 255;
+            pb_begin(&b, PB_WAIT);
+            pb_wait(&b, 0, "x");
+            pb_wr(PB_DDATA, 0xFF); pb_wr(PB_DATA, PB_CMD_SENDB); pb_bset(PB_CTRL, PB_SEL);
+            pb_wait(&b, 1, "x"); pb_wr(PB_DATA, p[0]); pb_bset(PB_CTRL, PB_POUT);
+            pb_wait(&b, 0, "x"); pb_wr(PB_DATA, p[1]); pb_bclr(PB_CTRL, PB_POUT);
+            pb_wait(&b, 1, "x");
+            for (int i = 0; i < 41; i++) { pb_wr(PB_DATA, (unsigned char)i); if (i & 1) pb_bclr(PB_CTRL, PB_POUT); else pb_bset(PB_CTRL, PB_POUT); }
+            pb_bclr(PB_CTRL, PB_SEL);           /* SEL alone, POUT left high */
+            m_idle(1000000);
+            pb_bclr(PB_CTRL, PB_POUT);          /* and now POUT: held or out, as the firmware's loops fall */
+            m_idle(1000000);
+            if (M.held && !m_busy()) heldlow++;
+            memset(&b, 0, sizeof b); b.ifn = "eth0"; b.burst = 1;
+            if (!start(1) && !M.held) freed++;
+        }
+        w = traffic(30, 30, &lt, &lr);
+        CHECK(heldlow > 0 && freed == 8 && !w && !lt && !lr, "SEL dropped with POUT high: held with BUSY low %d times of 8; every next start frees it, frames go", heldlow);
+    }
+
+    /* ---- 9c. a receive cut between its size bytes: the box keeps driving the data lines (its firmware) ---- */
+    {
+        machine(1, 98, 0);
+        start(1);
+        struct mframe f;
+        mkframe(&f, 300);
+        m_net_in(f.d, 300);
+        m_idle(1000000);
+        M.gap_p = 0;
+        pb_begin(&b, PB_WAIT);
+        pb_wait(&b, 0, "x");
+        pb_wr(PB_DDATA, 0xFF); pb_wr(PB_DATA, PB_CMD_RECV); pb_bset(PB_CTRL, PB_SEL);
+        pb_wait(&b, 1, "x");
+        b.acks = M.acks;
+        pb_wr(PB_DDATA, 0); pb_bset(PB_CTRL, PB_POUT);
+        pb_wait(&b, 0, "x"); (void)pb_rd(PB_DATA);
+        m_idle(600000000ull);                   /* the process away for 0.6 s: the box gives up waiting for POUT */
+        pb_bclr(PB_CTRL, PB_POUT);
+        b.stage = 0;
+        r = pb_wait(&b, 1, "the size's low byte");
+        if (r) b.wedged = 1;
+        pb_end();
+        pb_result(&b, r, "receiving");
+        unsigned long c0 = M.contention;
+        mkframe(&f, 100);
+        memcpy(b.tx + 2, f.d, 100);
+        int e = pb_send(&b, 100);
+        CHECK(r == -ETIMEDOUT && M.drive && logged("cut between its size bytes") && M.contention > c0 && e,
+              "a receive cut between its size bytes: the box keeps the lines (both drive: %lu), the driver says to switch it off and on", M.contention - c0);
+        m_box_restart();
+        M.contention = 0;
+        memset(&b, 0, sizeof b); b.ifn = "eth0"; b.burst = 1;
+        r = start(1);
+        w = traffic(30, 30, &lt, &lr);
+        CHECK(!r && !w && !lt && !lr && !M.contention, "switched off and on: frames go again, nobody drives twice");
+    }
+
+    /* ---- 9d. the keepalive: a box restarted on an idle link is online again; a box gone is seen ---- */
+    {
+        machine(1, 99, 0);
+        start(1);
+        m_box_restart();                        /* offline: it would drop every frame from the network */
+        m_idle(5100000000ull);
+        pb_keepalive(&b);
+        struct mframe f;
+        mkframe(&f, 200);
+        m_net_in(f.d, 200);
+        m_idle(1000000);
+        pb_poll(&b, &sink, NB);
+        int back = M.online && ngot == 1 && same(&got[0], &f);
+        M.present = 0;
+        for (int i = 0; i < PB_DOWNAFTER; i++) { m_idle(5100000000ull); pb_keepalive(&b); }
+        CHECK(back && b.down && logged("link down"), "keepalive: a box restarted on an idle link is online again; one gone, link down after %d", PB_DOWNAFTER);
+    }
+
     /* ---- 10. a burst in which the box missed an edge: the end is not answered; the box freed, the next frames go ---- */
     machine(1, 100, 0);
     start(1);
@@ -383,7 +487,7 @@ int main(void)
         CHECK(r == -ETIMEDOUT && b.down && logged("link down") && lines_clean(), "the box gone in a frame (%s): timed out, link down after %d failures",
               dir ? "a burst send" : "a receive", PB_DOWNAFTER);
         m_box_restart();
-        if (pb_rd(PB_CTRL) & 1) pb_unstick(&b);
+        pb_unstick(&b);
         r = pb_hello(&b, 0);
         if (!r) pb_result(&b, 0, "looking");
         w = traffic(50, 50, &lt, &lr);

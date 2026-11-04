@@ -84,8 +84,8 @@ static int m_req(void) { return (M.ddra & 2) ? (M.pra >> 1) & 1 : 1; }
 static int m_busy(void) { return M.present ? M.rak : 1; }
 static uint8_t m_bus(void)                  /* the data lines */
 {
+    if (M.present && M.drive) return M.bdata;   /* both driving (counted): the AVR's pins are the stronger */
     if (M.ddrb == 0xFF) return M.prb;
-    if (M.present && M.drive) return M.bdata;
     return 0xFF;                        /* pulled up */
 }
 
@@ -185,24 +185,24 @@ static void m_box(uint64_t now)
                         BYIELD(M_NB_ACT);
                         M.bdata = (uint8_t)(M.size >> 8); M.rak = 0;
                         BWAIT(!m_req() || !m_sel(), M_NB_POLL, M_TMO);
-                        if (M.timedout || !m_sel()) goto fail;
+                        if (M.timedout || !m_sel()) goto fail;      /* returns: the lines stay driven (as the firmware) */
                         BYIELD(M_NB_ACT);
                         M.bdata = (uint8_t)M.size; M.rak = 1;
                         M.words = (M.size + 1) / 2;
                         for (M.i = 0; M.i < M.words; M.i++) {
                             BWAIT(m_req() || !m_sel(), M_NB_POLL, M_TMO);
-                            if (M.timedout || !m_sel()) goto fail;
+                            if (M.timedout || !m_sel()) { M.drive = 0; goto fail; }   /* break; set_input */
                             if (m_dying()) return;
                             BYIELD(M_NB_ACT);
                             M.bdata = M.buf[2 * M.i]; M.rak = 0;
                             BWAIT(!m_req() || !m_sel(), M_NB_POLL, M_TMO);
-                            if (M.timedout || !m_sel()) goto fail;
+                            if (M.timedout || !m_sel()) { M.drive = 0; goto fail; }
                             BYIELD(M_NB_ACT);
                             M.bdata = M.buf[2 * M.i + 1]; M.rak = 1;
                         }
                         BWAIT(m_req() || !m_sel(), M_NB_POLL, M_TMO);
-                        if (M.timedout || !m_sel()) goto fail;
                         M.drive = 0;
+                        if (M.timedout || !m_sel()) goto fail;
                     } else if (M.cmd == 0x11 || M.cmd == 0x33) {            /* cmd_send, cmd_send_burst */
                         BWAIT(m_req() || !m_sel(), M_NB_POLL, M_TMO);
                         if (M.timedout || !m_sel()) goto fail;
@@ -249,14 +249,24 @@ static void m_box(uint64_t now)
                                 M.buf[M.got++] = m_bus();
                             }
                         burst_exit:
-                            for (;;) {                                      /* sei(); and the firmware's own way out */
+                            /* sei(); then the firmware's way out, as written: while (!REQ) { if (!SEL) goto
+                             * exit; } CLR_RAK; while (REQ) { if (!SEL) goto exit; }. With SEL low it never leaves:
+                             * POUT low, it waits in the first loop (BUSY as it was); POUT high, it drops BUSY and
+                             * goes round both; POUT falling then is seen in the first loop (held) or the second
+                             * (out), whichever it is in */
+                            for (;;) {
                                 M.held = !m_sel();
-                                BWAIT(m_req() || !m_sel(), M_B_POLL, 0);
-                                if (!m_sel()) { BWAIT(m_sel(), M_B_POLL, 0); continue; }   /* send_burst_exit again */
+                                BWAIT(m_req(), M_B_POLL, 0);                /* the first loop: POUT up */
                                 M.rak = 0;
-                                BWAIT(!m_req() || !m_sel(), M_B_POLL, 0);
-                                if (!m_sel()) { BWAIT(m_sel(), M_B_POLL, 0); continue; }
-                                break;
+                                if (m_sel()) {
+                                    BWAIT(!m_req() || !m_sel(), M_B_POLL, 0);
+                                    if (!m_req()) break;
+                                    continue;                               /* SEL dropped in the second loop */
+                                }
+                                M.held = 1;
+                                BWAIT(!m_req() || m_sel(), M_B_POLL, 0);    /* going round both, SEL low */
+                                if (m_sel()) { if (!m_req()) break; continue; }
+                                if (m_rnd(2)) break;                        /* POUT fell in the second loop: out */
                             }
                             M.held = 0;
                             if (M.i < M.words) M.status = 2;
@@ -290,7 +300,7 @@ static void m_box(uint64_t now)
                         M.rak = 1;
                         BWAIT(m_req() || !m_sel(), M_B_POLL, 0);
                         M.rak = 0;
-                        M.drive = 0;
+                        M.drive = 0;                                        /* set_input (its early returns: not) */
                     } else {
                         M.bad_cmd++;
                         M.status = 4;
@@ -298,11 +308,9 @@ static void m_box(uint64_t now)
                     goto end;
                 fail:
                     if (!M.status) M.status = 2;
-                    M.drive = 0;
                 end:
                     BWAIT(!m_sel(), M_NB_POLL, M_TMO);                      /* wait_sel(0) */
                     M.rak = 0;
-                    M.drive = 0;
                     if (M.status) M.status_err++; else M.status_ok++;
                     if (!M.status && (M.cmd == 0x11 || M.cmd == 0x33)) {
                         BYIELD(30000 + (uint64_t)M.got * M_ENC_BYTE);       /* the frame to the ENC28J60 */
