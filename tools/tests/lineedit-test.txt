@@ -3,4 +3,6 @@ send (termtest screen /dev/tty1 'mid-line-ma''rk' 30 'echo one two three\\k4f\\k
 wait le-done 90
 send cat /tmp/le.txt; echo le-""shown\r
 wait le-shown 30
+send printf 'qz-%s\\n' ok\r
+wait qz-ok 30
 stop

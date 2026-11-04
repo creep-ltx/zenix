@@ -215,7 +215,7 @@ FAMILIES = [
                    "sleep date cal clear time timeout watch"),
     ("sysinfo", "who and what: uname, id, hostname, uptime", "uname whoami id hostname uptime"),
     ("procps", "processes and memory: ps, kill, nice", "ps free kill pgrep nice renice"),
-    ("sysutils", "the console, the kernel log, the disks' sync, restart", "dmesg input beep sync reboot"),
+    ("sysutils", "the console, the kernel log, the disks' sync, restart", "dmesg input beep sync reboot conmirror"),
     ("pager", "less and man, the pager and the manual reader", "less man"),
     ("edit", "the text editor", "edit"),
     ("sumi", "Sumi, a text editor: tabs, colours for code, undo, find and replace", "sumi"),

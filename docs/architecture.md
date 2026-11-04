@@ -1601,10 +1601,20 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   **Copper list** writes FMODE, `BPLCON3` = `$0C00` and `BPLCON4` = `$0011` (AGA only: a previous program's
   colour-index XOR survives a warm reset), `BPLCON0`-`2`, the modulos, the fetch window and the 2/4/8/16 colours (12
   bits) every frame, then WAITs for line `$20` (before the picture on the `$2C` and `$38` builds, PAL and NTSC) and
-  moves the plane pointers. Scrolling moves those pointers at vertical blank, written only while the beam is before
-  line `$1C` (else at the next vertical blank), so all planes move together; when the 2-screen buffer wraps, the
-  **blitter** copies the visible rows back to the top (identical pixels, so there is no visible switch; every wait
-  for the blitter gives up after 500 ms and says so once on the log). A glyph line is drawn by the CPU, one byte per
+  moves the plane pointers. **The buffer is a ring of text rows** (DESIGN D28 20): the screen's rows and as many
+  spare ones with fast RAM, half as many without; display row r is ring row (base + r) mod the ring's size. The
+  Copper list has two sets of plane pointers: the first at the ring's row `base`, the second at its row 0 after a
+  WAIT for the line where the ring wraps on the screen (lines from 256 on: line 255's end `$FFDF` first). A
+  full-screen scroll is base + 1 and one **blitter** fill of the row that comes in (filled before the display may
+  show it), never a copy; the pointers and WAITs are written at vertical blank, only while the beam is before line
+  `$1C` (else at the next one), so all planes move together. The spare rows keep what is drawn out of sight while
+  the display still shows an older base; a scroll that would reach the rows on show waits for the vertical blank
+  (not with interrupts masked; 100 ms timeout, said once on the log). Region scrolls and fills are a blit per run of
+  rows that lie in one piece of the ring. Every wait for the blitter gives up after 500 ms and says so once on the
+  log. **A cell stored again unchanged** (character, attributes and colour) is not drawn again, nor an erased cell
+  already blank in the erase colour (ESC[K, ESC[2K): a program that redraws a line rewrites only what changed on
+  the screen (owner 2026-11-04: flicker while typing). The cursor is hidden at the start of each write and drawn
+  where the write ends. A glyph line is drawn by the CPU, one byte per
   plane: `(glyph & m1) ^ m2` (m1 set where the foreground and background bits differ, m2 where the background bit is
   set); with more than one plane the glyphs are kept a second time with each line repeated in all four bytes of a
   long (7 KB), so a line is one read. Glyphs come from the ROM Topaz 8 font, grabbed from `GfxBase` by the bootblock
@@ -1777,12 +1787,14 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   Amiga+F1..F10) and u d U D (scroll back a line or a page); 0x1D with any other byte does nothing.
   Sending is a 4 KB ring drained by polling Paula (about 11.5 KB/s), far slower than the screen. **The kernel's
   own output** (`kprintf`: the boot log, panics) always waits for room, so it is complete. **The console's copy**
-  waits only once the port has received a byte since boot (someone listens: a terminal, or the test harness, which
-  sends 0x1D '.' half a second after each boot's `tick latch` line); until then a byte that does not fit the ring
-  is dropped and counted, so with no cable the screen is never held to the serial speed. The kernel log says
-  `serial: nothing received on the serial port yet: ...` at the first drop, the running count at each doubling,
-  and the total when input is first seen. Root can also switch the copy off (`SYS_ttymirror`; bench measures its
-  screen line both ways). Verified on the host (`tools/serial-test.sh`, a model of Paula's port); FS-UAE sends
+  waits only while the port has received a byte in the last 10 s (someone listens: a terminal, or the test
+  harness, which sends 0x1D '.' half a second after each boot's `tick latch` line); otherwise a byte that does not
+  fit the ring is dropped and counted, so with no cable, or a cable whose far end stopped talking, the screen is
+  held to the serial speed for at most 10 s. A terminal that listens without typing for longer loses what does not
+  fit (DESIGN D28 20). The kernel log says `serial: nothing received on the serial port lately: ...` at the first
+  drop, the running count at each doubling, `serial: nothing received for 10 s: ...` when the waiting stops, and the
+  total when input is seen again. Root can switch the copy off and on (`SYS_ttymirror`, the command `conmirror`;
+  bench measures its screen line both ways). Verified on the host (`tools/serial-test.sh`, a model of Paula's port); FS-UAE sends
   serial bytes without the baud-rate delay, so its ring never fills and it cannot show the drops. Drawing text is
   slow too: a 79-character line takes about 11 ms on an A1200's chip RAM (FS-UAE 68020, and bench on the PiStorm
   with the copy off), longer than its 7 ms on the wire - the copy limits output that is cheap to draw (escape

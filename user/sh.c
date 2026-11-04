@@ -203,10 +203,60 @@ static char *file_slurp(const char *path, u32 *len)
 static char *expand_prompt(const char *ps, int *vislen);
 static int builtin_names(const char **out, int max);
 
-static void put_n(const char *s, int n) { sys_write(1, s, (u32)n); }
+/* The line on the screen, as the last redraw left it (owner 2026-11-04: typing made the first characters flicker when
+ * every key redrew the whole line, prompt included): the bytes after the prompt (ed_b, ed_n of them: the text shown,
+ * then from ed_tl on the grey suggestion), the cursor's column and the line's end column, counted from the text's
+ * start. ed_n -1: not known (a new line, or the screen changed under it: Ctrl-L, a Tab list, Ctrl-R's line), so the
+ * next redraw draws the whole line. Everything a redraw writes goes out in one write, so the console never shows the
+ * cursor at a place between (it is drawn where each write ends). */
+static char ed_b[320];                  /* 77 columns of 4-byte characters; more: drawn whole each time */
+static int ed_n = -1, ed_tl, ed_cur, ed_end;
+static char ed_sgr[64];                 /* the prompt's colour codes when it leaves a colour on for the text */
+static int ed_sgrn;
+static void ed_reset(void) { ed_n = -1; }
+static char ob[512];                    /* a redraw's bytes: one write (more is written in pieces) */
+static int obn;
+static void ob_flush(void) { if (obn) sys_write(1, ob, (u32)obn); obn = 0; }
+static void ob_put(const char *s, int n)
+{
+    while (n > 0) {
+        if (obn == (int)sizeof ob) ob_flush();
+        int k = (int)sizeof ob - obn < n ? (int)sizeof ob - obn : n;
+        memcpy(ob + obn, s, (u32)k); obn += k; s += k; n -= k;
+    }
+}
+static void ob_puts(const char *s) { ob_put(s, (int)strlen(s)); }
+static void ob_move(int from, int to)   /* the cursor along the line: CSI n D or CSI n C */
+{
+    if (from == to) return;
+    char e[16]; e[0] = 27; e[1] = '['; utoa((u32)(from > to ? from - to : to - from), e + 2);
+    u32 l = strlen(e); e[l] = from > to ? 'D' : 'C'; e[l + 1] = 0; ob_puts(e);
+}
+/* a new prompt: its colour codes kept if the last one leaves a colour on (so the text drawn later without the
+ * prompt has the colour it has after the prompt) */
+static void ed_prompt(const char *p)
+{
+    ed_reset();
+    ed_sgrn = 0;
+    int last_reset = 1, room = 1;
+    for (const char *q = p; *q; q++) {
+        if (q[0] != 27 || q[1] != '[') continue;
+        const char *e = q + 2;
+        while (*e && ((*e >= '0' && *e <= '9') || *e == ';')) e++;
+        if (*e != 'm') continue;
+        int n = (int)(e + 1 - q);
+        last_reset = n == 3 || (n == 4 && q[2] == '0');
+        if (ed_sgrn + n <= (int)sizeof ed_sgr) { memcpy(ed_sgr + ed_sgrn, q, (u32)n); ed_sgrn += n; } else room = 0;
+        q = e;
+    }
+    if (last_reset) ed_sgrn = 0;
+    else if (!room) ed_sgrn = -1;       /* too many to keep: every redraw draws the whole line */
+}
 
 /* redraw the line: prompt, the visible part of the text, cursor in place. DESIGN D28: by characters and columns (the
- * console's widths, libz's zu8*): scroll is the first shown byte, always at a character's start */
+ * console's widths, libz's zu8*): scroll is the first shown byte, always at a character's start. Only what changed
+ * is drawn: from the first byte that differs from the line on the screen (a key typed at the end writes that
+ * character alone), the end erased only if the line got shorter, then the cursor moved back. */
 static void redraw(const char *prompt, int plen, const char *buf, int len, int pos, int *scroll)
 {
     int avail = 77 - plen, w;
@@ -215,28 +265,54 @@ static void redraw(const char *prompt, int plen, const char *buf, int len, int p
     while (zu8cols(buf + *scroll, (u32)(pos - *scroll)) > avail - 1)
         *scroll += zu8next(buf + *scroll, (u32)(len - *scroll), &w);
     if (zu8cols(buf, (u32)len) <= avail) *scroll = 0;
-    int shown = (int)zu8fit(buf + *scroll, (u32)(len - *scroll), avail);
-    outs("\r"); outs(prompt);
-    put_n(buf + *scroll, shown);
-    outs("\033[K");
-    int back = zu8cols(buf + *scroll, (u32)shown) - zu8cols(buf + *scroll, (u32)(pos - *scroll));
+    const char *t = buf + *scroll;
+    int tl = (int)zu8fit(t, (u32)(len - *scroll), avail);
     /* fish's autosuggestion (owner 2026-10-31): with the cursor at the end, the rest of the newest history line that
      * starts with what is typed, in grey after the cursor; Right or End takes it, Ctrl/Alt+Right one word */
+    const char *rest = "";
+    int fit = 0;
     suggest = 0;
     if (pos == len && len > 0 && *scroll == 0)
         for (int i = nhist - 1; i >= 0; i--)
             if (!strncmp(hist[i], buf, (u32)len) && hist[i][len]) {
-                const char *rest = hist[i] + len;
+                const char *r = hist[i] + len;
                 int room = avail - zu8cols(buf, (u32)len) - 1;
-                int fit = room > 0 ? (int)zu8fit(rest, (u32)strlen(rest), room) : 0;
-                if (fit > 0) {
-                    suggest = rest;
-                    outs("\033[90m"); put_n(rest, fit); outs("\033[0m");
-                    back += zu8cols(rest, (u32)fit);
-                }
+                fit = room > 0 ? (int)zu8fit(r, (u32)strlen(r), room) : 0;
+                if (fit > 0) { suggest = r; rest = r; } else fit = 0;
                 break;
             }
-    if (back > 0) { char e[16]; e[0] = 27; e[1] = '['; utoa((u32)back, e + 2); u32 l = strlen(e); e[l] = 'D'; e[l + 1] = 0; outs(e); }
+    int nl = tl + fit, tcols = zu8cols(t, (u32)tl), end = tcols + zu8cols(rest, (u32)fit);
+    int cur = zu8cols(t, (u32)(pos - *scroll));
+#define NB(i) ((i) < tl ? t[i] : rest[(i) - tl])
+    int d = 0;                          /* the first byte to draw */
+    if (ed_n < 0 || ed_sgrn < 0) {
+        ob_puts("\r"); ob_puts(prompt);
+    } else {
+        while (d < nl && d < ed_n && NB(d) == ed_b[d] && (d < tl) == (d < ed_tl)) d++;
+        while (d > 0 && d < nl && (NB(d) & 0xC0) == 0x80) d--;      /* a character's first byte */
+        if (d == nl && ed_end <= end) {                 /* nothing to draw or erase: the cursor only */
+            ob_move(ed_cur, cur);
+            goto done;
+        }
+        ob_move(ed_cur, d <= tl ? zu8cols(t, (u32)d) : tcols + zu8cols(rest, (u32)(d - tl)));
+        if (d < tl && ed_sgrn) ob_put(ed_sgr, ed_sgrn);
+    }
+    if (d < tl) ob_put(t + d, tl - d);
+    if (d < nl && fit) {
+        int s0 = d > tl ? d - tl : 0;
+        ob_puts("\033[90m"); ob_put(rest + s0, fit - s0); ob_puts("\033[0m");
+    }
+    if (ed_n < 0 || ed_sgrn < 0 || ed_end > end) ob_puts("\033[K");
+    ob_move(end, cur);                  /* the drawing ends at the line's end */
+done:
+#undef NB
+    if (nl <= (int)sizeof ed_b) {
+        for (int i = 0; i < nl; i++) ed_b[i] = i < tl ? t[i] : rest[i - tl];
+        ed_n = nl;
+    } else
+        ed_n = -1;
+    ed_tl = tl; ed_cur = cur; ed_end = end;
+    ob_flush();
 }
 
 /* take the suggestion into the line: all of it, or (word) up to the end of its next word */
@@ -442,6 +518,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
     static char saved[LMAX];
     buf[0] = 0;
     sys_ttymode(TTY_RAW | TTY_NOSIG);
+    ed_prompt(prompt);
     redraw(prompt, plen, buf, len, pos, &scroll);
     for (;;) {
         unsigned char ch;
@@ -512,7 +589,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
         case 21: memmove(buf, buf + pos, (u32)(len - pos + 1)); len -= pos; pos = 0; break;   /* Ctrl-U */
         case 23: { int s = pos; while (s > 0 && is_space(buf[s - 1])) s--; while (s > 0 && !is_space(buf[s - 1])) s--;
                    memmove(buf + s, buf + pos, (u32)(len - pos + 1)); len -= pos - s; pos = s; break; }   /* Ctrl-W */
-        case 12: outs("\033[2J\033[H"); break;                  /* Ctrl-L */
+        case 12: outs("\033[2J\033[H"); ed_reset(); break;      /* Ctrl-L */
         case 20:                                                /* Ctrl-T: the two characters around the cursor */
             if (pos > 0 && len > 1) {
                 int w;
@@ -527,6 +604,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
             break;
         case 18:                                                /* Ctrl-R: search the history */
             if (isearch(buf, max, &len, &pos)) { outs("\r\n"); sys_ttymode(0); buf[len] = 0; return len; }
+            ed_reset();                                         /* its own line is on the screen */
             break;
         case 16:                                                /* history: previous */
             if (hidx > 0) {
@@ -558,7 +636,7 @@ static int readline(const char *prompt, int plen, char *buf, int max)
                     memmove(buf + pos + 1, buf + pos, (u32)(len - pos + 1)); buf[pos] = ' '; pos++; len++;
                 }
             } else if (n > 1) {
-                if (tabs) { list_matches(m, n); }
+                if (tabs) { list_matches(m, n); ed_reset(); }
                 else again_tab = 1;
             } else if (n == 1 && first[common - 1] != '/' && len < max - 2) {
                 memmove(buf + pos + 1, buf + pos, (u32)(len - pos + 1)); buf[pos] = ' '; pos++; len++;

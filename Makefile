@@ -48,7 +48,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
           nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest netstat nettest ifconfig route ping host telnet \
-          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall
+          rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
 UCFLAGS += $(UDIAG)
@@ -208,8 +208,9 @@ RAMDISK_K := 640
 # when fsck.zenixfs grew by its repairs (DESIGN D34): zenixfstest carries them on its own disk. 710 since DESIGN D37
 # (2026-11-04, the 040/060 data cache: 2 KB of kernel): 41 blocks free there (43 at 712). 704 since DESIGN D38 step 1
 # (2026-11-04, pseudo-terminals: 3.6 KB of kernel): 35 blocks free, mounttest passes. 700 since DESIGN D38 step 2
-# (2026-11-04, the console handed to the display server: 4 KB of kernel).
-RAMDISK_MOUNT_K := 700
+# (2026-11-04, the console handed to the display server: 4 KB of kernel). 699 since DESIGN D28 20 (2026-11-04, the
+# console's ring of rows: 1.3 KB of kernel).
+RAMDISK_MOUNT_K := 699
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
