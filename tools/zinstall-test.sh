@@ -633,7 +633,7 @@ stop
 EOS
     fsconf $OUT/r3.fs-uae $d 2048 8192 1
     run $OUT/r3.fs-uae 300 $OUT/r3.txt $OUT/r3.log
-    check "r: a bad checksum: the table is called damaged" "$(has $OUT/r3.log 'cannot be changed: .*checksum')"
+    check "r: a bad checksum: the table is called damaged" "$(has $OUT/r3.log 'will not change this disk.s partition table: .*checksum')"
     check "r: the partition is not offered" "$(hasnt $OUT/r3.log 'REPLACE partition')"
     check "r: the image is unchanged" "$(yes_if cmp $d $OUT/r3.orig)"
     # the Pi's card with nothing free: FAT never, 0x76 never

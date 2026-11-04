@@ -4,7 +4,6 @@ send echo ==base; free; hello 1\r
 wait (?m)^hello from pid 20
 send /tests/crashpure sleep 12 & sleep 1; echo ==one; free; /tests/crashpure sleep 30 & sleep 1; echo ==two; free; /tests/crashpure sleep 25 & /tests/crashpure sleep 25 & sleep 1; echo ==four; free; ps\r
 wait crash: slept 12 s 30
-sleep 1
 send echo ==after-first; free\r
 wait crash: slept 30 s 40
 sleep 2

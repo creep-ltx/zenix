@@ -1,6 +1,6 @@
 wait zenix:/# 90
 sleep 1
-send sleep 300\r
+send sleep 3000\r
 sleep 2
 send \x1a
 sleep 2
@@ -18,7 +18,7 @@ send \x03
 sleep 2
 send echo status=$?\r
 sleep 2
-send sleep 300 &\r
+send sleep 3000 &\r
 sleep 2
 send jobs\r
 sleep 2

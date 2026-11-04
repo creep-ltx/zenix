@@ -7,7 +7,20 @@ set -e
 CONF="$1"
 SECS="${2:-25}"
 SCRIPT="$3"
+# Its folder (the config copy, the serial log, FS-UAE's save states) goes when the run ends, also when the run is
+# stopped by a signal: the tap and FS-UAE are ended first. mktemp puts it in TMPDIR (tools/check.sh gives every job
+# one in its own run folder).
 DIR="$(mktemp -d)"
+TAP=; EMU=
+cleanup() {
+    [ -n "$EMU" ] && kill -TERM $EMU 2>/dev/null && wait $EMU 2>/dev/null
+    [ -n "$TAP" ] && kill -TERM $TAP 2>/dev/null && wait $TAP 2>/dev/null
+    rm -rf "$DIR"
+    EMU=; TAP=
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 LOG="$DIR/serial.log"
 # Several sessions may test at once: ZENIX_SERIAL=/tmp/other-name gives this run its own serial port. The config is
 # always copied (tools/fsuae_conf.py): the Kickstart directory (ZENIX_KICKSTART_DIR), the build directory and the
@@ -38,7 +51,6 @@ while awk '{ exit !($1 > 16) }' /proc/loadavg; do sleep 30; done       # the mac
 
 # ZENIX_NOTAP=1: the caller has put something else on the serial port already (tools/slip-test.sh: zenix-slirp, whose
 # log holds the console's bytes); the run ends at the timeout or when the caller leaves <serial port>.stop
-TAP=
 if [ -z "$ZENIX_NOTAP" ]; then
     python3 "$(dirname "$0")/serial-tap.py" "$SERIAL" "$LOG" $SCRIPT >"$DIR/tap.out" 2>&1 9>&- &
     TAP=$!
@@ -57,8 +69,9 @@ while kill -0 $EMU 2>/dev/null; do
     sleep 0.2
 done
 wait $EMU 2>/dev/null || true
+EMU=
 rm -f "$SERIAL.stop"
-if [ -n "$TAP" ]; then kill $TAP 2>/dev/null || true; wait $TAP 2>/dev/null || true; fi   # the tap says whether the run ended during a wait
+if [ -n "$TAP" ]; then kill $TAP 2>/dev/null || true; wait $TAP 2>/dev/null || true; TAP=; fi   # the tap says whether the run ended during a wait
 echo "=== serial output ($CONF, ${SECS}s):"
 if [ -f "$LOG" ]; then tr -d '\r' < "$LOG" | sed 's/\x1b\[[0-9;:]*m//g'; fi   # colour codes (DESIGN D14) are not text
 # A script's `wait` that timed out, or that was still waiting when the run ended, is a failure (audit 2026-10-26 F7):
@@ -69,5 +82,4 @@ rc=0
 grep -q '^serial-tap: \(optional\|the run ended during an optional\)\|^FAIL: serial-tap: ' "$DIR/tap.out" 2>/dev/null && echo   # own lines
 grep -h '^serial-tap: \(optional\|the run ended during an optional\)' "$DIR/tap.out" 2>/dev/null || true
 if grep -q '^FAIL: serial-tap: ' "$DIR/tap.out" 2>/dev/null; then grep -h '^FAIL: serial-tap: ' "$DIR/tap.out"; rc=3; fi
-rm -rf "$DIR"                                                         # the config copy, the log, FS-UAE's save states
-exit $rc
+exit $rc                                                              # cleanup: the config copy, the log, the save states
