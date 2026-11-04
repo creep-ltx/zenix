@@ -1399,7 +1399,8 @@ static int cmd_list(int notinst)
         const struct zp_pkg *p = &ix.pkg[i];
         struct zf_pkg *k = inst_find(p->name);
         if (notinst && k) continue;
-        dprintf(1, "%-16s %s%s%s\n", p->name, p->vstr, k ? " [installed" : "", k ? (k->vnum == p->vnum ? "]" : ", another version]") : "");
+        if (quiet) dprintf(1, "%s\n", p->name);                     /* -Slq: names only (pacman's), for Tab */
+        else dprintf(1, "%-16s %s%s%s\n", p->name, p->vstr, k ? " [installed" : "", k ? (k->vnum == p->vnum ? "]" : ", another version]") : "");
     }
     return 0;
 }
@@ -1464,7 +1465,8 @@ static int cmd_query(char **names, int n, char what)
             for (int d = 0; d < k->ndep; d++) dprintf(1, " %s>=%u", k->dep[d], k->depv[d]);
             dprintf(1, "%s\nFiles       : %d\nInstalled as: %s\n\n", k->ndep ? "" : " nothing", nf,
                    winst[j].asdep ? "a dependency" : "asked for");
-        } else dprintf(1, "%s %s%s\n", k->name, k->vstr, mark);
+        } else if (quiet) dprintf(1, "%s\n", k->name);            /* -Qq: names only (pacman's) */
+        else dprintf(1, "%s %s%s\n", k->name, k->vstr, mark);
     }
     for (int i = 0; i < n; i++) if (!inst_find(names[i])) { say("%s is not installed", names[i]); rc = 1; }
     return rc;
@@ -1517,6 +1519,7 @@ int main(int argc, char **argv)
         case 'l': l = 1; break;
         case 'o': o = 1; break;
         case 'n': nn = 1; break;
+        case 'q': quiet = 1; break;     /* -Slq, -Qq: names only (pacman's) */
         default: return usage();
         }
     if (kind && !strchr("SQRU", kind)) return usage();

@@ -390,6 +390,57 @@ static int complete_dir(char **m, int n, int max, const char *dir, const char *b
     return n;
 }
 
+/* A command's own words, as bash-completion gives them: the words a command prints for the word being typed. A small
+ * table: the command, the option that must stand before the word (its first letters), the command that prints the
+ * candidates, one a line. zpkg: package names from the stored list for -S, -Si, -Ss, -Sw; installed ones for -R and
+ * -Q (pacman's). The line's words before the current one are looked at for the command and its last option. */
+static int complete_args(const char *buf, int ws, const char *pre, char **m, int n, int max)
+{
+    static const struct { const char *cmd, *opt, *prog, *arg; } tab[] = {
+        { "zpkg", "-S", "/bin/zpkg", "-Slq" },
+        { "zpkg", "-R", "/bin/zpkg", "-Qq" },
+        { "zpkg", "-Q", "/bin/zpkg", "-Qq" },
+        { 0, 0, 0, 0 } };
+    char cmd[16] = "", opt[16] = "";
+    int i = 0, first = 1;
+    while (i < ws) {                                                /* the words before the current one */
+        while (i < ws && is_space(buf[i])) i++;
+        int b = i; while (i < ws && !is_space(buf[i])) i++;
+        int l = i - b; if (!l) break;
+        if (strchr("|;&(", buf[b])) { first = 1; continue; }
+        if (first) { if (l < 16) { memcpy(cmd, buf + b, (u32)l); cmd[l] = 0; } else cmd[0] = 0; opt[0] = 0; first = 0; }
+        else if (buf[b] == '-' && l < 16) { memcpy(opt, buf + b, (u32)l); opt[l] = 0; }
+    }
+    if (pre[0] == '-') return n;                                    /* an option is being typed: not a name */
+    for (int k = 0; tab[k].cmd; k++) {
+        if (strcmp(cmd, tab[k].cmd) || strncmp(opt, tab[k].opt, strlen(tab[k].opt))) continue;
+        if (!strcmp(opt, "-Sy") || !strncmp(opt, "-Syu", 4) || !strcmp(opt, "-Sc") || !strcmp(opt, "-Sl") || !strcmp(opt, "-Qo")) continue;
+        /* the program run straight (no shell between), its output read through a pipe into the arena */
+        int pp[2];
+        if (sys_pipe(pp) < 0) break;
+        int keep = sys_dup(1);
+        sys_dup2(pp[1], 1); sys_close(pp[1]);
+        char *argv[3] = { (char *)tab[k].cmd, (char *)tab[k].arg, 0 };
+        int pid = sys_spawn(tab[k].prog, argv, 0);
+        if (keep >= 0) { sys_dup2(keep, 1); sys_close(keep); }
+        if (pid < 0) { sys_close(pp[0]); break; }
+        u32 cap = 4096, len = 0; char *out = aalloc(cap);
+        for (;;) { int r = sys_read(pp[0], out + len, cap - 1 - len); if (r <= 0) break; len += (u32)r; if (len >= cap - 1) break; }
+        sys_close(pp[0]);
+        sys_wait(pid);
+        out[len] = 0;
+        u32 pl = strlen(pre);
+        for (char *p = out; p && *p;) {
+            char *e = strchr(p, '\n'); if (e) *e = 0;
+            if (!strncmp(p, pre, pl) && strlen(p) < 98) n = add_match(m, n, max, p);
+            if (!e) break;
+            p = e + 1;
+        }
+        break;
+    }
+    return n;
+}
+
 /* returns the number of matches; the matches are strings in the arena */
 static int find_completions(const char *buf, int pos, char **m, int max, int *wstart)
 {
@@ -437,7 +488,8 @@ static int find_completions(const char *buf, int pos, char **m, int max, int *ws
             p = *e ? e + 1 : e;
         }
     } else {
-        n = complete_dir(m, n, max, "", pre, 1, 0);
+        n = complete_args(buf, ws, pre, m, n, max);                 /* a command's own words (zpkg's package names) */
+        if (!n) n = complete_dir(m, n, max, "", pre, 1, 0);
     }
     sort_strs(m, n);
     return n;

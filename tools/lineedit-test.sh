@@ -17,9 +17,11 @@ bad() { echo "FAIL $1"; pass=0; }
 grep -q '^FAIL' $OUT/run.log && bad "the script: $(grep '^FAIL' $OUT/run.log | head -1)"
 grep -q '^row [0-9]*|zenix:/# echo one two three|' $OUT/run.log && ok "the typed line stays whole on the screen after Enter mid-line" || bad "the line on the screen was cut at the cursor"
 grep -q '^one two three' $OUT/run.log && ok "the whole line ran" || bad "the line did not run whole"
+grep -q '^row [0-9]*|zenix:/# zpkg -Qq coreutils *|' $OUT/run.log && ok "Tab after zpkg -Qq completes an installed package's name (coreutils)" || bad "Tab did not complete the package name"
+sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -q '^ahiru$' && ok "... and zpkg -Qq prints names only" || bad "zpkg -Qq did not print the name alone"
 # typed at the end of the line, each key writes that character alone (DESIGN D28 20): the prompt is drawn once, not
 # once a key (it was "\r", the prompt and the whole line for every key)
-n=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -o "# printf" | wc -l)
+n=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -v "^row [0-9]*|" | grep -o "# printf" | wc -l)
 [ "$n" = 1 ] && grep -q '^qz-ok' $OUT/run.log && ok "typing at the end of the line writes only the new characters (the prompt drawn once)" ||
     bad "typing redrew the line: the prompt and 'printf' $n times on the serial copy"
 [ $pass = 1 ] && echo "lineedit-test: all passed" || { echo "lineedit-test: FAILED (log $OUT/run.log)"; exit 1; }

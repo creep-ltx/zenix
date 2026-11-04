@@ -3,6 +3,14 @@ send (termtest screen /dev/tty1 'mid-line-ma''rk' 30 'echo one two three\\k4f\\k
 wait le-done 90
 send cat /tmp/le.txt; echo le-""shown\r
 wait le-shown 30
+send wait; echo w-""ok\r
+wait w-ok 30
 send printf 'qz-%s\\n' ok\r
 wait qz-ok 30
+send zpkg -Qq | head -3; echo qq-""rc=$?\r
+wait qq-rc 60
+send (termtest screen /dev/tty1 'tab-ma''rk' 30 'zpkg -Qq core\\x09\\r' > /dev/null; termtest screen /dev/tty1 'Qq coreu''tils' 60 '' > /tmp/tab.txt; echo tab-""done) & echo tab-mark\r
+wait tab-done 90
+send cat /tmp/tab.txt; echo tab-""shown\r
+wait tab-shown 30
 stop
