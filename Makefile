@@ -124,9 +124,9 @@ $(BUILD)/stage0.bin: $(BUILD)/stage0.elf tools/check-68020-60.sh
 # so it needs no Amiga toolchain. It shares the hand-over code with the bootblock (boot/handoff.S). It checks a bundle's
 # signature (DESIGN D21 6.4) with the crypto library's zc_sig_verify against the build's keys ($(BUILD)/zpkgkeys.h,
 # below: the TEST key, or with RELEASE=1 the release keys).
-$(BUILD)/zenixboot-start.o: boot/zenixboot-start.S boot/handoff.S | $(BUILD)
+$(BUILD)/zenixboot-start.o: boot/zenixboot-start.S boot/handoff.S boot/handoff-c.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
-$(BUILD)/zenixboot.bo: boot/zenixboot.c $(BUILD)/zpkgkeys.h crypto/zc/zc.h | $(BUILD)
+$(BUILD)/zenixboot.bo: boot/zenixboot.c boot/bootmem.h $(BUILD)/zpkgkeys.h crypto/zc/zc.h | $(BUILD)
 	$(CC) $(CFLAGS) -Os -I$(BUILD) -c $< -o $@
 $(BUILD)/zenixboot.bo: user/sha256.h
 $(BUILD)/sha256.bo: user/sha256.c user/sha256.h | $(BUILD)
@@ -139,6 +139,37 @@ $(BUILD)/zenixboot.zx: $(BUILD)/zenixboot.elf tools/mkzexe.py tools/check-68020-
 	tools/mkzexe.py $< $@
 $(BUILD)/zenixboot: $(BUILD)/zenixboot.zx tools/mkhunk.py
 	python3 tools/mkhunk.py $< $@
+
+# The demo floppy (DESIGN D25 revision 3, section 6; make demo): its bootblock reads and relocates the stage 2, the
+# stage 2 shows the bar, unpacks the kernel and the RAM disk with miniz's tinfl (the same source as gzip's and zup's,
+# at -O2: it must keep pace with the floppy) and hands over through boot/handoff.S as zenixboot does. The screen's
+# code (demoscreen.c) is built for the 68000: it is what a 68000 Amiga runs to say why it cannot start the disk.
+$(BUILD)/demoboot.o: boot/demoboot.S | $(BUILD)
+	$(CC) $(filter-out -m68020-60,$(ASFLAGS)) -m68000 $< -o $@
+$(BUILD)/demoboot.elf: $(BUILD)/demoboot.o
+	$(CC) $(CFLAGS) -nostartfiles -Wl,-Ttext=0 -Wl,--build-id=none $< -o $@
+$(BUILD)/demoboot.bin: $(BUILD)/demoboot.elf
+	$(OBJCOPY) -O binary $< $@
+$(BUILD)/demoload-start.o: boot/demoload-start.S boot/handoff.S boot/handoff-c.S | $(BUILD)
+	$(CC) $(ASFLAGS) $< -o $@
+	@e=$$($(TOOLPREFIX)nm $@ | awk '$$3 == "msg_kick" { print "0x" $$1 }'); \
+	    test -n "$$e" && test -z "$$($(TOOLPREFIX)objdump -d -m m68k:68000 -j .text.start --stop-address=$$e $@ | grep '\.short\|(bad)')" || \
+	    { echo "demoload-start.S: the entry up to msg_kick must be 68000 code (a 68000 Amiga runs it)"; rm -f $@; exit 1; }
+$(BUILD)/demoload.bo: boot/demoload.c boot/demounpack.h boot/bootmem.h | $(BUILD)
+	$(CC) $(CFLAGS) -Os -c $< -o $@
+$(BUILD)/demoscreen.bo: boot/demoscreen.c | $(BUILD)
+	$(CC) $(filter-out -m68020-60,$(CFLAGS)) -Os -m68000 -c $< -o $@
+	@test -z "$$($(TOOLPREFIX)nm -u $@ | grep -v zb_os | grep -v SysBase)" || { echo "demoscreen must call nothing but zb_os (it runs on a 68000)"; exit 1; }
+$(BUILD)/demounpack.bo: boot/demounpack.c boot/demounpack.h | $(BUILD)
+	$(CC) $(CFLAGS) $(MINIZ_CFLAGS) -DMINIZ_NO_MALLOC -c $< -o $@
+$(BUILD)/demo-tinfl.bo: user/miniz/miniz_tinfl.c | $(BUILD)
+	$(CC) $(CFLAGS) $(MINIZ_CFLAGS) -DMINIZ_NO_MALLOC -c $< -o $@
+DEMOLOADOBJS := $(BUILD)/demoload-start.o $(BUILD)/demoload.bo $(BUILD)/demoscreen.bo $(BUILD)/demounpack.bo $(BUILD)/demo-tinfl.bo
+$(BUILD)/demoload.elf: $(DEMOLOADOBJS) link/user.ld
+	$(CC) $(CFLAGS) -nostartfiles -T link/user.ld -Wl,--build-id=none -Wl,-q -Wl,--gc-sections $(DEMOLOADOBJS) $(LIBGCC) -o $@
+$(BUILD)/demoload.zx: $(BUILD)/demoload.elf tools/mkzexe.py tools/check-68020-60.sh
+	TOOLPREFIX=$(TOOLPREFIX) tools/check-68020-60.sh $<
+	tools/mkzexe.py $< $@
 
 # bootmenu: the boot menu of a disk with several systems (docs/man/bootmenu.txt), built the same way as zenixboot
 $(BUILD)/bootmenu-start.o: boot/bootmenu-start.S | $(BUILD)
@@ -1057,6 +1088,48 @@ PUREAPPS := sh login ssh
 $(PUREAPPS:%=$(BUILD)/%.zx): $(BUILD)/%.zx: $(BUILD)/%.pzx
 	cp $< $@
 
+# ---- the box (DESIGN D25 revision 3, 2.2 and 10 step 1): the demo floppy's everyday commands linked into one ZEXE,
+# each from its own unchanged object (tools/mkbox.sh renames its main), user/box.c picking one by argv[0]. Only the demo
+# floppy installs it (its names as hard links, tools/mkroot.sh BOX=); `make BOX=1 BUILD/zenix.hdf` builds the full test
+# image with the box in place of these commands (tools/box-test.sh). Its stack is the largest member's (gzip's 32 KB). ----
+BOXAPPS := ls cat cp mv rm mkdir rmdir ln echo pwd ps free uname uptime date clear kill dmesg sleep true false env \
+           hostname id whoami touch umount reboot head tail wc ifconfig route ping host netstat \
+           df chmod stat du find xargs sed tr cut uniq seq which printf basename dirname tee cmp sort grep less man gzip \
+           tar readlink expr pgrep tree cal time
+BOXALIASES := more:less gunzip:gzip zcat:gzip pkill:pgrep bootamigaos:reboot halt:reboot poweroff:reboot shutdown:reboot \
+              ifup:ifconfig ifdown:ifconfig
+# the parts some members link besides libz, once for all of them
+BOXEXTRA := $(BUILD)/regex.uo $(BUILD)/pw.uo $(BUILD)/miniz_tdef.uo $(BUILD)/miniz_tinfl.uo $(CLOCKOBJS)
+STACK_box := 32768
+$(BUILD)/box/stamp: $(BOXAPPS:%=$(BUILD)/%.uo) tools/mkbox.sh Makefile
+	TOOLPREFIX=$(TOOLPREFIX) tools/mkbox.sh $(BUILD) "$(BOXAPPS)" "$(BOXALIASES)"
+	touch $@
+$(BUILD)/boxtab.h: $(BUILD)/box/stamp
+$(BUILD)/box.uo: user/box.c $(BUILD)/boxtab.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Os -I$(BUILD) -c $< -o $@
+$(BUILD)/box.uelf: $(BUILD)/box.uo $(BUILD)/box/stamp $(BOXEXTRA) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/box.uo $(BOXAPPS:%=$(BUILD)/box/%.o) $(BOXEXTRA) \
+	    $(BUILD)/libz.uo $(LIBGCC) -o $@
+box: $(BUILD)/box.zx
+
+# ---- the demo floppy (DESIGN D25 revision 3, 4.1 and 10 step 3; tools/mkdemo.sh): `make demo` builds the DD disk
+# (zenix-demo.adf, 880 KB) and the HD one (zenix-demo-hd.adf, 1.76 MB: also what the DD one has no room for). Each
+# is refused when it does not fit, saying by how much; every build says the space left. The commands in the box are
+# its links (BOXAPPS); DEMOAPPS the separate programs. ----
+DEMOAPPS := sh login init mount zdesk term ahiru sumi ctop telnet rz sntp displayd dlogin netd drv-a2065 drv-genet drv-ne2000
+DEMOAPPS_HD := $(DEMOAPPS) wget ssh maki markdown zine drv-plipbox fdisk mkfs_ext2 fsck_ext2 mkfs_zenixfs fsck_zenixfs \
+               dd sync zfsd fatd ffsd pfs3d
+DEMODEPS := $(BUILD)/demoboot.bin $(BUILD)/demoload.zx $(BUILD)/kernel.bin $(BUILD)/box.zx $(USERZX) $(SBINZX) $(NETDRVZX) \
+            $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(BUILD)/zine.blob $(shell find rootfs tools/demo -type f) \
+            tools/mkroot.sh tools/mkdemo.sh tools/mkdemo.py tools/mkman.py
+$(BUILD)/zenix-demo.adf: $(DEMODEPS)
+	tools/mkdemo.sh $(BUILD) dd $@ "$(filter-out $(BOXAPPS),$(DEMOAPPS))" "$(BOXAPPS)"
+$(BUILD)/zenix-demo-hd.adf: $(DEMODEPS)
+	tools/mkdemo.sh $(BUILD) hd $@ "$(filter-out $(BOXAPPS),$(DEMOAPPS_HD))" "$(BOXAPPS)"
+demo: demo-dd demo-hd
+demo-dd: $(BUILD)/zenix-demo.adf
+demo-hd: $(BUILD)/zenix-demo-hd.adf
+
 # ---- updates (DESIGN D15, docs/d15-self-updates.md): the packages of a build and the bundle zenixboot installs ----
 # build/pkg/NAME.manifest + NAME.tgz for the standard packages (tools/mkzup.py says which files each holds: the base
 # group, the families and base-man, DESIGN D22 8.4.4); the full
@@ -1095,8 +1168,8 @@ $(BUILD)/zenix-update.zup: $(BUILD)/kernel.bin $(BUILD)/pkg/list tools/mkzup.py 
 
 # root filesystem: ext2 (old revision 0 format), built from rootfs/ + the programs; 1,024 inodes (512 ran out with the
 # network's files in D19 step 8: cmds2-test makes 150 files)
-$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list
-	PKGDB=1 tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 8M 1024
+$(BUILD)/zenix.hdf: $(BUILD)/cp437-8x8.psf $(BUILD)/zenix-8x8.zcf $(BUILD)/anchors $(USERZX) $(SBINZX) $(NETDRVZX) $(TESTPZX) $(TESTLIBC) $(shell find rootfs -type f) tools/mkroot.sh tools/mkman.py $(BUILD)/pkg/list $(if $(BOX),$(BUILD)/box.zx)
+	PKGDB=1 $(if $(BOX),BOX="$(BOXAPPS)") tools/mkroot.sh $@ $(BUILD) "$(UAPPS) $(SBINAPPS) $(NETDRVS:%=drv-%)" 8M 1024
 
 # the same disk wrapped in an RDB, as a real hard disk or CF card has it
 $(BUILD)/zenix-rdb.hdf: $(BUILD)/zenix.hdf tools/mkrdb.py
