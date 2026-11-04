@@ -32,8 +32,12 @@ static const char *menu_title(int m)            /* the m-th title (its length up
     return s && *s ? s : 0;
 }
 static int seglen(const char *s) { int n = 0; while (s[n] && s[n] != '\t' && s[n] != '\n') n++; return n; }
+void menu_close(void);
+static int mopen_q(void);
 static void app_menus(void)
 {
+    if (mopen_q() >= 0)
+        menu_close();                   /* the program's menus change under an open one of them: it closes */
     amenu[0] = 0;
     amenu_win = focus_id;
     if (focus_id > 0) {
@@ -271,10 +275,13 @@ void bar_tick(void)
 
 /* ---- menus ---- */
 static int mopen = -2;                  /* -2 none, -1 the Zenix menu, else the active program's menu m */
+static int mopen_q(void) { return mopen; }
+static int mfor;                        /* the window whose menu is open (a pick goes to it, not to a newer focus) */
 static int mwin, mx, mw, mh, sel = -1, nitems, held, sticky, kbd;
 static int mtitle_x;
 static const char *item_text(int i, int *len)  /* the i-th item of the open menu */
 {
+    *len = 0;
     if (mopen == -1) {
         if (i < nmenu_items) { *len = (int)strlen(menu_items[i].label); return menu_items[i].label; }
         if (i > nmenu_items + 1)
@@ -303,10 +310,13 @@ static void menu_paint(void)
     for (int i = 0; i < nitems; i++) {
         int n;
         const char *t = item_text(i, &n);
+        if (!t)
+            break;
         int on = i == sel;
         if (on)
             dpy_fill(mwin, 1, 2 + 10 * i, mw - 2, 10, pen(R_SELBG));
-        dpy_text(mwin, 8, 3 + 10 * i, on ? pen(R_SELFG) : pen(R_MENUFG), on ? pen(R_SELBG) : pen(R_MENUBG), 0, t, n);
+        dpy_text(mwin, 8, 3 + 10 * i, on ? pen(R_SELFG) : pen(R_MENUFG), on ? pen(R_SELBG) : pen(R_MENUBG), 0, t,
+                 n > 60 ? 60 : n);
     }
     dpy_flush();
 }
@@ -337,10 +347,13 @@ static void menu_show(int which, int x)
     sel = -1;
     nitems = 0;
     int maxl = 4, n;
+    mfor = focus_id;
     while (nitems < 32 && item_text(nitems, &n)) {
         if (n > maxl) maxl = n;
         nitems++;
     }
+    if (maxl > 60)
+        maxl = 60;                      /* a long item is cut at 60 characters: the menu stays on the screen */
     mw = 8 * maxl + 16;
     mh = 10 * nitems + 4;
     mx = (x + mw > 640 ? 640 - mw : x) & ~7;   /* the server puts an inside on an 8-pixel column */
@@ -360,8 +373,8 @@ static void pick(void)
         if (i < nmenu_items) run(menu_items[i].cmd);
         else if (i == nmenu_items) about();
         else logout();
-    } else if (focus_id > 0)
-        dpy_call(DPY_WM_MENUPICK, (u32)focus_id, (u32)m, (u32)i, 0);
+    } else if (mfor > 0)
+        dpy_call(DPY_WM_MENUPICK, (u32)mfor, (u32)m, (u32)i, 0);
 }
 static int title_at(int x, int *which, int *tx)
 {

@@ -49,6 +49,8 @@ static char *slurp(const char *path)
     sys_close(fd);
     if (b)
         b[n] = 0;
+    if (b && n == 16383)
+        dprintf(2, "zdesk: %s: longer than 16 KB: the rest is not read\n", path);
     return b;
 }
 static char *next_line(char **p)
@@ -180,8 +182,10 @@ static const struct { const char *n; u8 a; } actions[] = {
 };
 static void add_key(u8 code, u16 mask, u16 qual, u8 action, short a, short b, char *cmd)
 {
-    if (nkeys >= NKEY)
+    if (nkeys >= NKEY) {
+        dprintf(2, "zdesk: more than %d keys: the rest are not used\n", NKEY);
         return;
+    }
     keys[nkeys++] = (struct key){ code, mask, qual, action, a, b, cmd };
 }
 static int key_line(char **w, int n)
@@ -220,7 +224,8 @@ static int key_line(char **w, int n)
             if (i > 2) strcat(l, " ");
             strcat(l, w[i]);
         }
-        cmd = strdup(l);
+        if (!(cmd = strdup(l)))
+            return -1;
     }
     if (shift) {                        /* either shift: one grab for each */
         add_key((u8)code, mask, qual | GQ_LSHIFT, (u8)act, a, b, cmd);
@@ -258,8 +263,16 @@ static void item_file(const char *name, struct item *it, int *n, int art)
         }
         t->label = strdup(l);
         t->cmd = dup_rest(eq + 3);
+        if (!t->label || !t->cmd) {
+            free(t->label);
+            free(t->cmd);
+            dprintf(2, "zdesk: %s: out of memory\n", path);
+            break;
+        }
         (*n)++;
     }
+    if (l && *n >= NITEM)
+        dprintf(2, "zdesk: %s: more than %d entries: the rest are not used\n", path, NITEM);
     free(b);
 }
 
@@ -321,13 +334,18 @@ static void bar_file(void)
                     if (l[0]) strcat(l, " ");
                     strcat(l, w[i]);
                 }
-                k->cmd = strdup(l);
+                if (!(k->cmd = strdup(l))) {
+                    dprintf(2, "zdesk: the bar: out of memory\n");
+                    continue;
+                }
             } else {
                 dprintf(2, "zdesk: the bar: %s: no such module\n", w[i]);
                 continue;
             }
             nblocks++;
         }
+        if (nblocks >= NBLOCK)
+            dprintf(2, "zdesk: the bar: more than %d modules: the rest are not shown\n", NBLOCK);
     }
 }
 

@@ -119,7 +119,7 @@ static void about_draw(void)
     if (sys_update(UPD_INFO, (u32)&u, sizeof u) < 0) strcpy(u.kver, "?");
     u.kver[15] = 0;
     sprintf(l[0], "Zenix %s", u.kver);
-    u32 zi[7], mi[4];
+    u32 zi[7], mi[4] = { 0, 0, 0, 0 };
     u32 a = sys3(93, 0, (u32)zi, sizeof zi) == 0 ? zi[2] : 0;
     sprintf(l[1], "%s, %s", a & 0x80 ? "68060" : a & 0x08 ? "68040" : a & 0x04 ? "68030" : "68020",
             depth >= 4 ? "AGA" : "OCS/ECS");

@@ -38,10 +38,10 @@ def grabbed(shot, geom, X, Y):
     bx, by, bw, bh = min(xs), min(ys), max(xs) - min(xs) + 2, max(ys) - min(ys) + 1
     print(f"grabbed: the pointer at {bx},{by}, {bw} x {bh} (wanted {X},{Y}, 32 x 16)")
     bad = 0
-    if abs(bx - X) > 2 or abs(by - Y) > 1 or abs(bw - 32) > 2 or bh != 16:
+    if abs(bx - X) > 2 or abs(by - Y) > 1 or abs(bw - 32) > 2 or abs(bh - 16) > 1:   # the scaled screenshot blurs an edge line
         bad = 1
     other = [(x, y) for y in range(0, 256, 4) for x in range(0, 640, 8)
-             if not (bx <= x < bx + bw and by <= y < by + bh) and not near(sample(px, g, x, y), GREEN)]
+             if not (bx - 2 <= x < bx + bw + 2 and by - 1 <= y <= by + bh + 1) and not near(sample(px, g, x, y), GREEN)]
     if other:
         print(f"grabbed: {len(other)} samples are not green, e.g. {other[:3]} {sample(px, g, *other[0])}")
         bad = 1

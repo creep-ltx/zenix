@@ -47,6 +47,7 @@ int user_ok_rd(const struct proc *p, u32 ptr, u32 len) { (void)p; (void)ptr; (vo
 int user_ok_wr(const struct proc *p, u32 ptr, u32 len) { (void)p; (void)ptr; (void)len; return 0; }
 int kbd_inject(const u8 *c, int n) { (void)c; (void)n; return -EINVAL; }
 int tty_type(int con, const u8 *b, int n) { (void)con; (void)b; (void)n; return -ENXIO; }
+int input_inject(const u8 *r, int n) { (void)r; (void)n; return -EINVAL; }
 int gcon_away(int to) { (void)to; return 0; }
 int gcon_shown(int con) { (void)con; return 0; }
 long gcon_grab(int con, u32 a2) { (void)con; (void)a2; return -EPERM; }

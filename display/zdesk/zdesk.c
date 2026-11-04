@@ -33,6 +33,8 @@ static struct zw *zw_add(int id)
             zws[i].ws = cur_ws;
             return &zws[i];
         }
+    dprintf(2, "zdesk: more than %d windows: window %d is shown where the server puts it\n", NZW, id);
+    dpy_call(DPY_WM_SHOW, (u32)id, 0, 0, 0);
     return 0;
 }
 static void title_of(struct zw *w)
@@ -351,6 +353,10 @@ static void end_session(void)
         reap();
         sys_sleep(5);
     }
+    for (int i = 0; i < NZW; i++)       /* one that ignored SIGTERM: ended, so the console is given back */
+        if (zws[i].id && !own(zws[i].id) && zws[i].pid > 0 && zws[i].pid != sys_getpid())
+            sys_killsig(zws[i].pid, SIGKILL);
+    reap();
 }
 static void on_signal(int sig) { (void)sig; quit = 1; }
 
@@ -416,7 +422,8 @@ int main(int argc, char **argv)
     ndrag = st.drag;
     if (depth < 4)
         for (int i = 8; i < 16; i++) st.palette[i] = st.palette[th.map8[i]];
-    dpy_call(DPY_WM_STYLE, (u32)&st, 0, 0, 0);
+    if ((r = dpy_call(DPY_WM_STYLE, (u32)&st, 0, 0, 0)) < 0)
+        dprintf(2, "zdesk: the theme %s's frame was refused (%d): the server's own is used\n", th.name, r);
     desk_init();
     bar_id = dpy_window(WK_BAR, "", 0, 0, 640, bar_h, 0);
     grabs_set(0);

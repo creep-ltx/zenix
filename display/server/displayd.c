@@ -32,7 +32,7 @@ static struct { int win, x, y, up, ux, uy; } fpress;
 #define NCL 16
 #define NPEND 32
 struct client {
-    int used, pid, port, uid;
+    int used, pid, port, uid, dead;     /* dead: a post failed; dropped from the main loop, never mid-paint */
     u32 ring, nrec, head;               /* the ring in the client's memory; the next record we write */
     char name[DPY_NAME];
     u32 imgbytes;                       /* its images' chip RAM (at most IMG_BUDGET) */
@@ -78,7 +78,7 @@ void ev_to(int cl, struct dpyev *e)
         return;
     if (c->npend >= NPEND) {
         flush(cl);                      /* a burst (keys typed fast): into the ring now; only a full ring loses any */
-        if (!c->used || c->npend >= NPEND) {
+        if (!c->used || c->dead || c->npend >= NPEND) {
             c->lost = 1;
             return;
         }
@@ -124,7 +124,7 @@ static int post(struct client *c, u32 off, const void *src, u32 len)
 static void flush(int cl)
 {
     struct client *c = &cls[cl];
-    if (!c->used || (!c->npend && !c->lost))
+    if (!c->used || c->dead || (!c->npend && !c->lost))
         return;
     volatile const struct dpyring *r = (const struct dpyring *)c->ring;
     u32 tail = r->tail, used = c->head - tail;
@@ -154,7 +154,7 @@ static void flush(int cl)
     if (rc >= 0)
         rc = post(c, 0, &c->head, 4);
     if (rc < 0)
-        drop(cl);                       /* its port or its ring is gone: so is the client */
+        c->dead = 1;                    /* its port or its ring is gone: so is the client (dropped in the loop) */
 }
 
 /* ---- the screen ---- */
@@ -904,8 +904,11 @@ int main(int argc, char **argv)
                 if (cls[i].used && !live[i])
                     drop(i);
         }
-        for (int i = 0; i < NCL; i++)
+        for (int i = 0; i < NCL; i++) {
             flush(i);
+            if (cls[i].used && cls[i].dead)
+                drop(i);
+        }
         if (has_clients())
             had = 1;
         else if (had && !persist)

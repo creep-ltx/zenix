@@ -9,14 +9,38 @@
 #include "../display.h"
 #include "model.h"
 
-static int win, m = -1, rows = 24, pen_of[16], focused = 1, bell_due;
+static int win, m = -1, rows = 24, pen_of[16], bell_due;
+/* the keys for the program: the master does not wait (a program that does not read its input never stops this
+ * window); what does not fit waits here, and past it keys are dropped and the bell says so */
+static char pend[512];
+static int npend;
+static void to_pty(const char *s, int n)
+{
+    if (npend + n > (int)sizeof pend) {
+        bell_due = 1;
+        return;
+    }
+    memcpy(pend + npend, s, (u32)n);
+    npend += n;
+}
+static void pend_flush(void)
+{
+    if (!npend || m < 0)
+        return;
+    int r = sys_write(m, pend, (u32)npend);
+    if (r > 0) {
+        memmove(pend, pend + r, (u32)(npend - r));
+        npend -= r;
+    }
+}
 static u32 pal[16];
 
 /* ---- the model's calls ---- */
 void *m_alloc(unsigned n) { return malloc(n); }
 void m_free(void *p) { free(p); }
 void m_bell(void) { bell_due = 1; }
-void m_answer(const char *s) { if (m >= 0) sys_write(m, s, strlen(s)); }
+static void to_pty(const char *s, int n);
+void m_answer(const char *s) { to_pty(s, (int)strlen(s)); }
 
 static struct { int row, col, n, attr, colour, len; char b[256]; } run = { -1, 0, 0, 0, 0, 0, "" };
 static void run_flush(void)
@@ -68,6 +92,7 @@ static const unsigned short ansi[16] = { 0x000, 0xC22, 0x2B2, 0xBB2, 0x45E, 0xB3
 static void colours(void)
 {
     unsigned short p[16];
+    memset(p, 0, sizeof p);
     int depth = dpy_palette(p, 16), n = depth > 0 && depth <= 4 ? 1 << depth : 8;
     for (int i = 0; i < 16; i++) {
         int best = 0;
@@ -113,8 +138,8 @@ static void key(const struct dpyev *e)
     else
         for (int i = 0; i < 4 && e->ch[i]; i++)
             s[n++] = (char)e->ch[i];
-    if (n && m >= 0)
-        sys_write(m, s, (u32)n);
+    if (n)
+        to_pty(s, n);
 }
 
 static void resize(int h)
@@ -153,13 +178,16 @@ int main(int argc, char **argv)
         dprintf(2, "term: the display: %s\n", zstrerror(r) ? zstrerror(r) : "not reachable");
         return 1;
     }
-    int s;
-    char name[16];
+    int s = -1;
     struct winsize ws = { (unsigned short)rows, 80, 0, 0 };
-    if (openpty(&m, &s, name, 0, &ws) < 0) {
+    m = posix_openpt(O_RDWR | O_NONBLOCK);
+    if (m >= 0 && ptsname(m))
+        s = sys_open(ptsname(m), O_RDWR);
+    if (m < 0 || s < 0) {
         dprintf(2, "term: no pseudo-terminal: %s\n", zwhy("all in use"));
         return 1;
     }
+    ioctl(m, TIOCSWINSZ, &ws);
     char path[ZPATH_MAX];
     const char *sh = getenv("SHELL");
     char *shv[2] = { (char *)(sh && *sh ? sh : "/bin/sh"), 0 };
@@ -201,23 +229,27 @@ int main(int argc, char **argv)
     dpy_flush();
     char buf[512];
     for (;;) {
-        struct pollfd p[2] = { { dpy_port(), POLLPORT | POLLRDBAND, 0 }, { m, POLLIN, 0 } };
-        if (sys_evwait(p, 2, -1) < 0)
+        struct pollfd p[2] = { { dpy_port(), POLLPORT | POLLRDBAND, 0 }, { m, (short)(POLLIN | (npend ? POLLOUT : 0)), 0 } };
+        if (sys_evwait(p, 2, npend ? 10 : -1) < 0)
             continue;
         if (p[1].revents & (POLLIN | POLLHUP)) {
             int n = sys_read(m, buf, sizeof buf);
-            if (n <= 0)
+            if (n <= 0 && n != -EAGAIN)
                 break;                  /* the program ended: the window goes */
-            m_write(buf, (unsigned)n);
-            run_flush();
+            if (n > 0) {
+                m_write(buf, (unsigned)n);
+                run_flush();
+            }
         }
+        pend_flush();
+        while (sys_waitnb(-1) >= 0)     /* the terminals "New terminal" started that ended */
+            ;
         struct dpyev e;
         int got, gone = 0;
         while ((got = dpy_next(&e, 0)) > 0) {
             if (e.type == EV_KEY) key(&e);
             else if (e.type == EV_EXPOSE) { m_redraw(); run_flush(); }
             else if (e.type == EV_RESIZE) { resize(e.h); m_redraw(); run_flush(); }
-            else if (e.type == EV_FOCUS) focused = e.arg;
             else if (e.type == EV_CLOSE) gone = 1;
             else if (e.type == EV_MENU) menu(&e);
         }
@@ -235,6 +267,7 @@ int main(int argc, char **argv)
     }
     sys_close(m);                       /* the pty hangs up: SIGHUP to the program */
     dpy_close();
-    sys_wait(pid);
+    for (int t = 0; t < 100 && sys_waitnb(pid) == -2; t++)   /* a second for it to end, then left to init */
+        sys_sleep(1);
     return 0;
 }
