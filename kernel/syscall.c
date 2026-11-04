@@ -369,6 +369,12 @@ void syscall_c(u32 *rb)
     case SYS_recv:
         r = (s32)ipc_recv((int)a1, (int)a2);
         break;
+    case SYS_peer:
+        r = (s32)ipc_peer(a1, a2, a3);
+        break;
+    case SYS_post:
+        r = (s32)ipc_post(a1, a2, a3);
+        break;
     case SYS_reply:
         r = (s32)ipc_reply((struct umsg *)a1, (s32)a2);
         break;

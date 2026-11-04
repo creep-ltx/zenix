@@ -33,6 +33,9 @@
 # 175,732 -> 179,700, TOTAL 176,000 -> 180,000; the mount tests' RAM disk 704 -> 700 KB. After the two reviews
 # (the grab ends with its server, the CPU draws after a forced switch, the hardware state restored, clicks latched, the
 # pty fixes): gcon 2,900 -> 3,400, gfx 8,200 -> 8,400, tty 5,800 -> 5,900; kernel.bin 180,720, TOTAL 181,000.
+# 2026-11-04 (DESIGN D38 step 3: serving clients that are not the kernel): ipc 3,400 -> 3,950 and bss 1,600 -> 2,150
+# (SYS_peer, SYS_post and the ports' post windows, 20 bytes in each of the 28 slots), gcon + 30 (Topaz for the server);
+# kernel.bin 180,720 -> 181,520, TOTAL 181,000 -> 181,600.
 start     4300   8200
 main      5950   1100
 serial    5950   6500
@@ -53,7 +56,7 @@ gfx       8400   2320
 term     12800     64
 confont   3100     32
 kbd       4300    180
-ipc       3400   1600
+ipc       3950   2150
 svc       5600   1420
 seg       1250    256
 event      700      0
@@ -65,5 +68,5 @@ zine      1500     16
 cache     1700     32
 gcon      3400     16
 embed    47500      0
-TOTAL   181000
+TOTAL   181600
 ROOM       800

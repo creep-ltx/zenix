@@ -1,0 +1,216 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* dpytest: a test client of the display server (DESIGN D38 steps 3-4, docs/man/dpytest.txt), driven by commands on
+ * its standard input, one a line, so a test script types them (tools/dpy-test.sh); each answers one line
+ * "dpytest: ..." on its standard output:
+ *   win NAME W H PEN   a window of W x H pixels, filled with PEN, its name in the top left in pen 7 on PEN
+ *   text NAME X Y S    the text S at X, Y (pen 1 on 2)
+ *   move NAME X Y      (the window manager's) the frame's top left at X, Y
+ *   size NAME W H      (the window manager's) the inside W x H
+ *   raise NAME | lower NAME | focus NAME | hide NAME | show NAME | close NAME
+ *   scroll NAME N      the inside's contents up N lines (O_COPY), the freed lines filled with pen 2
+ *   wm                 become the window manager (DPY_WM_HELLO)
+ *   info NAME          where the window is: "dpytest: info NAME x y w h ix iy state"
+ *   bad NAME           a batch with a broken order: refused, with its offset
+ *   time NAME N        N raises of NAME (and of the window under it in turn), then N moves: the mean in microseconds
+ *                      (E-clock), the server's whole round trip
+ *   events             the events received so far, a line each
+ *   mem                chip and fast RAM free, and the memory of displayd and dpytest (procinfo)
+ *   quit               the end (DPY_BYE)
+ * EV_EXPOSE is answered by drawing the window again (its fill and name); every event is kept for "events". */
+#include "libz.h"
+#include "../display.h"
+typedef unsigned short u16;
+
+#define NW 8
+static struct { char name[16]; int id, pen, w, h; } ws[NW];
+static char evlog[2048];
+static u32 nev;
+
+static void say(const char *fmt, ...)
+{
+    char b[160];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(b, sizeof b, fmt, ap);
+    va_end(ap);
+    sys_write(1, b, (u32)n);
+}
+static int find(const char *n)
+{
+    for (int i = 0; i < NW; i++)
+        if (ws[i].id && !strcmp(ws[i].name, n))
+            return i;
+    return -1;
+}
+static void paint(int i, int x, int y, int w, int h)
+{
+    dpy_clip(ws[i].id, x, y, w, h);
+    dpy_fill(ws[i].id, 0, 0, ws[i].w, ws[i].h, ws[i].pen);
+    dpy_text(ws[i].id, 0, 0, 7, ws[i].pen, 0, ws[i].name, (int)strlen(ws[i].name));
+    dpy_clip(ws[i].id, 0, 0, 0, 0);
+    dpy_flush();
+}
+static void events(void)
+{
+    struct dpyev e;
+    while (dpy_next(&e, 0) > 0) {
+        int i = -1;
+        for (int k = 0; k < NW; k++)
+            if (ws[k].id == e.win)
+                i = k;
+        if (e.type == EV_EXPOSE && i >= 0)
+            paint(i, e.x, e.y, e.w, e.h);
+        if (e.type == EV_RESIZE && i >= 0) {
+            ws[i].w = e.w;
+            ws[i].h = e.h;
+        }
+        char l[64];
+        int n = snprintf(l, sizeof l, "ev %d %s %d %d %d %d %d\n", e.type, i >= 0 ? ws[i].name : "?", e.code, e.x, e.y,
+                         e.w, e.h);
+        if (nev + (u32)n < sizeof evlog) {
+            memcpy(evlog + nev, l, (u32)n);
+            nev += (u32)n;
+        }
+    }
+}
+
+static int words(char *l, char **w, int max)
+{
+    int n = 0;
+    while (*l && n < max) {
+        while (*l == ' ') *l++ = 0;
+        if (!*l) break;
+        w[n++] = l;
+        while (*l && *l != ' ') l++;
+    }
+    return n;
+}
+
+static void command(char *line)
+{
+    char *w[6];
+    int n = words(line, w, 6), i = n > 1 ? find(w[1]) : -1, r = 0;
+    if (!n)
+        return;
+    if (!strcmp(w[0], "win") && n >= 5) {
+        int k = -1;
+        for (int j = 0; j < NW; j++)
+            if (!ws[j].id) { k = j; break; }
+        if (k < 0) { say("dpytest: no room\n"); return; }
+        int id = dpy_window(WK_NORMAL, w[1], -1, -1, atoi(w[2]), atoi(w[3]), 0);
+        if (id < 0) { say("dpytest: win %s: %d\n", w[1], id); return; }
+        strncpy(ws[k].name, w[1], 15);
+        ws[k].id = id;
+        ws[k].pen = atoi(w[4]);
+        ws[k].w = atoi(w[2]);
+        ws[k].h = atoi(w[3]);
+        paint(k, 0, 0, ws[k].w, ws[k].h);
+        say("dpytest: win %s id %d\n", w[1], id);
+        return;
+    }
+    if (!strcmp(w[0], "wm")) { say("dpytest: wm %d\n", dpy_call(DPY_WM_HELLO, 0, 0, 0, 0)); return; }
+    if (!strcmp(w[0], "events")) { events(); sys_write(1, evlog, nev); nev = 0; say("dpytest: events end\n"); return; }
+    if (!strcmp(w[0], "mem")) {
+        u32 mi[4];
+        sys_meminfo(mi);
+        say("dpytest: mem chip %u KB fast %u KB free\n", mi[0] >> 10, mi[1] >> 10);
+        struct uproc pr;
+        for (u32 k = 0; k < 64; k++)
+            if (sys_procinfo(k, &pr) == 0 && pr.state && pr.state != 5 &&
+                (!strcmp(pr.name, "displayd") || !strcmp(pr.name, "dpytest")))
+                say("dpytest: mem %s %u KB\n", pr.name, pr.mem >> 10);
+        return;
+    }
+    if (!strcmp(w[0], "quit")) { dpy_close(); say("dpytest: quit\n"); sys_exit(0); }
+    if (i < 0) { say("dpytest: no window %s\n", n > 1 ? w[1] : ""); return; }
+    int id = ws[i].id;
+    if (!strcmp(w[0], "text") && n >= 5) {
+        dpy_text(id, atoi(w[2]), atoi(w[3]), 1, 2, 0, w[4], (int)strlen(w[4]));
+        r = dpy_flush();
+    } else if (!strcmp(w[0], "move") && n >= 4) {
+        struct dpyinfo in;
+        dpy_info(id, &in);
+        r = dpy_call(DPY_WM_PLACE, (u32)id, (u32)atoi(w[2]) << 16 | (u16)atoi(w[3]), (u32)in.w << 16 | in.h, 0);
+    } else if (!strcmp(w[0], "size") && n >= 4) {
+        struct dpyinfo in;
+        dpy_info(id, &in);
+        r = dpy_call(DPY_WM_PLACE, (u32)id, (u32)(u16)in.x << 16 | (u16)in.y, (u32)atoi(w[2]) << 16 | (u16)atoi(w[3]), 0);
+    } else if (!strcmp(w[0], "raise")) r = dpy_call(DPY_WM_STACK, (u32)id, 0, 0, 0);
+    else if (!strcmp(w[0], "lower")) r = dpy_call(DPY_WM_STACK, (u32)id, 1, 0, 0);
+    else if (!strcmp(w[0], "focus")) r = dpy_call(DPY_WM_FOCUS, (u32)id, 0, 0, 0);
+    else if (!strcmp(w[0], "hide")) r = dpy_call(DPY_WM_HIDE, (u32)id, HIDE_MINIMISE, 0, 0);
+    else if (!strcmp(w[0], "show")) r = dpy_call(DPY_WM_SHOW, (u32)id, 0, 0, 0);
+    else if (!strcmp(w[0], "close")) { r = dpy_destroy(id); ws[i].id = 0; }
+    else if (!strcmp(w[0], "scroll") && n >= 3) {
+        int k = atoi(w[2]);
+        dpy_copy(id, 0, k, ws[i].w, ws[i].h - k, 0, 0);
+        dpy_fill(id, 0, ws[i].h - k, ws[i].w, k, 2);
+        r = dpy_flush();
+    } else if (!strcmp(w[0], "info")) {
+        struct dpyinfo in;
+        r = dpy_info(id, &in);
+        if (!r) {
+            say("dpytest: info %s %d %d %d %d %d %d %d\n", w[1], in.x, in.y, in.w, in.h, in.ix, in.iy, in.state);
+            return;
+        }
+    } else if (!strcmp(w[0], "bad")) {
+        static unsigned short o[] = { O_FILL << 8 | 6, 0, 0, 8, 8, 1, O_TEXT << 8 | 7, 0, 0, 0, 7, 0, 300 };
+        struct umsg m;
+        memset(&m, 0, sizeof m);
+        m.type = DPY_DRAW; m.a[0] = (u32)id; m.a[1] = (u32)o; m.a[2] = sizeof o;
+        int sp = sys_port_find(DPY_PORTNAME);
+        r = sys_call(sp, &m);
+        say("dpytest: bad %d at %d\n", r, (int)m.a[3]);
+        return;
+    } else if (!strcmp(w[0], "time") && n >= 3) {
+        int k = atoi(w[2]), other = -1;
+        for (int j = 0; j < NW; j++)
+            if (ws[j].id && j != i) other = j;
+        u32 t0 = sys_hrtime();
+        for (int j = 0; j < k; j++) {
+            dpy_call(DPY_WM_STACK, (u32)(j & 1 && other >= 0 ? ws[other].id : id), 0, 0, 0);
+            events();
+        }
+        u32 t1 = sys_hrtime();
+        struct dpyinfo in;
+        dpy_info(id, &in);
+        for (int j = 0; j < k; j++) {
+            dpy_call(DPY_WM_PLACE, (u32)id, (u32)(u16)(in.x + (j & 1 ? 0 : 16)) << 16 | (u16)in.y, (u32)in.w << 16 | in.h, 0);
+            events();
+        }
+        u32 t2 = sys_hrtime();
+        /* E-clock ticks (709,379 Hz on PAL) to microseconds */
+        say("dpytest: time %s raise %u us move %u us (%d each, an emulator's figure)\n", w[1],
+            (u32)((u32)(t1 - t0) / (u32)k * 1000u / 709u), (u32)((u32)(t2 - t1) / (u32)k * 1000u / 709u), k);
+        return;
+    } else { say("dpytest: what is %s?\n", w[0]); return; }
+    say("dpytest: %s %s %d\n", w[0], w[1], r);
+}
+
+int main(void)
+{
+    int r = dpy_open("dpytest");
+    say("dpytest: open %d screen %ux%u depth %u\n", r, dpy_w, dpy_h, dpy_depth);
+    if (r < 0)
+        return 1;
+    char line[128];
+    u32 len = 0;
+    for (;;) {
+        struct pollfd p[2] = { { 0, POLLIN, 0 }, { dpy_port(), POLLPORT | POLLRDBAND, 0 } };
+        sys_evwait(p, 2, -1);
+        events();
+        if (p[0].revents & POLLIN) {
+            char c[64];
+            int k = sys_read(0, c, sizeof c);
+            if (k <= 0) { dpy_close(); return 0; }
+            for (int j = 0; j < k; j++) {
+                if (c[j] == '\n' || c[j] == '\r') {
+                    line[len] = 0;
+                    command(line);
+                    len = 0;
+                } else if (len < sizeof line - 1)
+                    line[len++] = c[j];
+            }
+        }
+    }
+}

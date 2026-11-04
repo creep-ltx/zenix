@@ -186,6 +186,9 @@ long gcon_grab(int con, u32 a2)
     u32 sbytes = 4u * (u->sprh + 2u);
     if (!user_ok_wr(current, u->sprite, sbytes) || !chip_ok(u->sprite, sbytes))
         return -EFAULT;
+    int topaz = u->size >= UCONGRAB_TOPAZ && u->topaz;
+    if (topaz && !user_ok_wr(current, u->topaz, 224 * 8))
+        return -EFAULT;
     /* the Copper list: the caller's chip RAM up to its end (0xFFFF 0xFFFE), at most 4,096 instructions */
     u32 n = 0;
     for (;; n++) {
@@ -225,6 +228,8 @@ long gcon_grab(int con, u32 a2)
     u->height = g->h;
     u->depth = (u16)gfx_depth;
     u->chips = gfx_aga() ? GCHIP_AGA : 0;
+    if (topaz)
+        gfx_topaz((u8 *)u->topaz);      /* step 3: the server draws the console's font, never shipped (D38 5) */
     f->flags = O_RDWR;
     u16 s = irq_save();
     gc = g;

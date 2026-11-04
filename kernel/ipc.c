@@ -163,7 +163,74 @@ u16 port_poll(int port, u16 ev)
         p->nseen = p->ncancel;
         r |= POLLPRI;
     }
+    if ((ev & POLLRDBAND) && p->npost != p->nseenpost) {     /* D38: taken as seen when reported, as POLLPRI */
+        p->nseenpost = p->npost;
+        r |= POLLRDBAND;
+    }
     return r;
+}
+
+/* ---- DESIGN D38 step 3: serving clients that are not the kernel, without an MMU ----
+ * SYS_peer: a server asks about the client of a request it is serving (ipc_client: really in flight, to it): its
+ * controlling tty, or whether a range is the client's own memory before it reads or writes it in place. */
+KCOLD long ipc_peer(u32 msg, u32 op, u32 arg)
+{
+    struct proc *c = ipc_client((struct umsg *)msg);
+    if (!c)
+        return -EINVAL;
+    if (op == PEER_CTTY)
+        return c->ctty;
+    if (op != PEER_RD && op != PEER_WR)
+        return -EINVAL;
+    if (!user_ok_rd(current, arg, sizeof(struct upeermem)))
+        return -EFAULT;
+    const struct upeermem *m = (const struct upeermem *)arg;
+    if (!m->len)
+        return 0;
+    return (op == PEER_RD ? user_ok_rd(c, m->addr, m->len) : user_ok_wr(c, m->addr, m->len)) ? 0 : -EFAULT;
+}
+
+/* SYS_post: a port's owner opens a window in its memory that the owner of one other port may write into (the display
+ * server's events into a client's ring, D38 4.1); a post copies into it and wakes the owner (POLLRDBAND). The window
+ * is checked against its owner's memory at every post (the kernel is not preempted: the copy is whole), so a client
+ * that freed it or ended is never written into. */
+KCOLD long ipc_post(u32 op, u32 port, u32 arg)
+{
+    struct port *p = port_of((int)port);
+    if (!p)
+        return -ECONNRESET;
+    if (op == POST_BUF) {
+        if (p->owner != current->pid)
+            return -EPERM;
+        if (!user_ok_rd(current, arg, sizeof(struct upostbuf)))
+            return -EFAULT;
+        const struct upostbuf *b = (const struct upostbuf *)arg;
+        if (b->size && !user_ok_wr(current, b->addr, b->size))
+            return -EFAULT;
+        p->pbuf = b->size ? b->addr : 0;
+        p->psize = b->size;
+        p->pfrom = b->from;
+        return 0;
+    }
+    if (op != POST_WRITE)
+        return -EINVAL;
+    struct port *f = port_of(p->pfrom);
+    if (!p->pbuf || !f || f->owner != current->pid)
+        return -EPERM;
+    if (!user_ok_rd(current, arg, sizeof(struct upost)))
+        return -EFAULT;
+    const struct upost *w = (const struct upost *)arg;
+    struct proc *o = p->op;
+    if (w->len) {
+        if (w->off > p->psize || w->len > p->psize - w->off)
+            return -EINVAL;
+        if (!o || !user_ok_wr(o, p->pbuf + w->off, w->len) || !user_ok_rd(current, w->src, w->len))
+            return -EFAULT;
+        memcpy((void *)(p->pbuf + w->off), (const void *)w->src, w->len);
+    }
+    p->npost++;
+    ev_wake(&p->evw);
+    return 0;
 }
 
 void ipc_unqueue(struct port *p, struct umsg *m)

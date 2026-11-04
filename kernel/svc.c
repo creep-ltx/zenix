@@ -340,6 +340,8 @@ int svc_handover(int i)
     p->owner = current->pid;
     p->op = current;
     p->nseen = p->ncancel;                      /* D23: the queued cancelled messages it will receive marked */
+    p->pbuf = p->psize = 0;                     /* D38: no post window of the server before it */
+    p->pfrom = 0;
     s->state = SV_RUNNING;
     s->served = 1;
     vfs_server_started(p->name);                /* D13: its mounts' code segments are not reused */

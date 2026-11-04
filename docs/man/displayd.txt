@@ -1,0 +1,51 @@
+DISPLAYD(8)		Zenix manual
+
+NAME
+    displayd - the display server of Zenix Desktop
+
+SYNOPSIS
+    /sbin/displayd [-persist]
+
+DESCRIPTION
+    The display server (DESIGN D38, docs/d38-desktop.md). It is the
+    service "display" in /etc/svctab: the first program of the desktop
+    that calls it starts it (zdesk, or any program using libdisplay). It
+    takes the text console of that first program from the kernel
+    (SYS_console CON_GRAB) and owns the screen, the blitter, the keyboard
+    and the mouse while that console is shown. Amiga+F1..F10 still show
+    the other consoles; it lets go of the screen when asked and takes it
+    back when its console is shown again.
+
+    It draws everything: the windows' frames from the window manager's
+    style (without one, a plain built-in style), the programs' drawing
+    orders, sent in batches and checked one by one, and the pointer (the
+    hardware's sprite 0, moved by the kernel). The screen is 640 x 256
+    (640 x 200 on NTSC) in 16 colours on AGA, 8 on OCS and ECS.
+
+    Smart refresh: a window that is partly covered keeps a copy of its
+    inside in chip RAM, so raising, uncovering and moving it never ask its
+    program to draw again. Those copies have a budget of 256 KB; past it a
+    window is simple refresh: what is uncovered is cleared and its program
+    asked to draw it (EV_EXPOSE).
+
+    Without a window manager new windows are placed one below the other, a
+    click raises and focuses a window, its title bar drags its outline and
+    its close gadget asks the program to close it.
+
+    It ends when its last client has gone, and the console is text again.
+
+OPTIONS
+    -persist  stay when the last client has gone (a login manager's)
+
+FILES
+    /etc/svctab                       its service line
+    /usr/share/consolefonts/zenix-8x8.zcf   the characters beyond Latin-1
+
+NOTES
+    Only the first client's user (and root) may use the desktop. Only the
+    console of the first client is taken: a program on a pseudo-terminal
+    or a service cannot start the desktop. One font: the console's (Topaz
+    8 from the kernel, the Unicode supplement); a wide character draws as
+    one cell. At most 32 windows, 16 client programs and 48 images; a window's
+    visible part is at most 24 rectangles (more: the rest is not drawn
+    until the windows change). The protocol is display/proto.h.

@@ -708,8 +708,8 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 92 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-95, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 94 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-97, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
@@ -720,7 +720,7 @@ time (`ticks hrtime time settime`; `ticks` with 0 is the 100 Hz tick count, a 32
 it does not jump back when the 32-bit tick count wraps after 497 days; audit 2026-10-26 F8), terminal (`ttymode ttyinfo ttyctl ttyintr setfg ttymirror`, and `console`, the
 display's colours: D14 note section 11), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid groups umask`, section 14), messages (`port_create port_find call
-recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
+recv reply replyrecv peer post`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
 ones, refused (-EPERM) to all but privileged processes, i.e. the disk server (`blk_read blk_write blk_flush blk_size blk_ram fd_info fd_rw`).
 
 **Every user pointer is validated** against the process's own span and its `memalloc` regions. A bad
@@ -894,6 +894,17 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
   dead server's name cannot be taken over by a normal user. Audit D, D11.
 - 28 port slots: the first 12 are the held ports of the services (one per entry, never given to another port), the
   other 16 ordinary ones, so creating ports until the ordinary ones run out cannot stop a service.
+- **Serving clients that are not the kernel** (DESIGN D38 step 3, `ipc.c`): a server that takes requests straight from
+  programs (the display server) must not trust their pointers, and must never wait for a client. `SYS_peer` (msg, op,
+  arg) answers about the client of a request the caller is serving (looked up as `ipc_reply` does): `PEER_CTTY` its
+  controlling tty, `PEER_RD`/`PEER_WR` (`struct upeermem`) whether a range is the client's own memory to read or to
+  write (0, else -EFAULT), so the server reads a batch or writes an answer in place only there. `SYS_post` (op,
+  port, arg) lets a port's owner open a window in its memory (`POST_BUF`, `struct upostbuf`: the place, the size,
+  and the one port whose owner may post) and that poster copy bytes into it (`POST_WRITE`, `struct upost`: the
+  window's offset, the bytes, the length; 0 only wakes): the kernel checks the window against its owner's memory at
+  every post and copies it whole (it is not preempted), so a client that freed the window or ended is never written
+  into; then the owner is woken, and its `poll` on the port with `POLLRDBAND` (Linux's value) reports it once. The
+  display server's events reach a client's ring this way. Verified in FS-UAE by `tools/dpy-test.sh`.
 - **Priority inheritance** (DESIGN D10, after QNX). A server runs at least at the level of every client it holds:
   `call()` raises the port owner to the caller's effective level when the message is queued (so a server with several
   queued clients serves at the best waiting one's level), and `ipc_reply()` (also the reply half of `replyrecv`)
@@ -1445,7 +1456,30 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   frame), the text drawn again (from kwork when it came with interrupts off). A panic takes the screen back first. One console at a time (-EBUSY);
   while one is grabbed `CON_COLOURS` and `ZINE_GO` answer -EBUSY. A switch between the modes stops a key's repeat. In FS-UAE no
   sprite shows unless the server's list fetches at least one bitplane (found with `gcontest`). Verified in FS-UAE by
-  `tools/gcon-test.sh` (screenshots, `gcontest`, docs/man/gcontest.txt). **A
+  `tools/gcon-test.sh` (screenshots, `gcontest`, docs/man/gcontest.txt). A grab whose struct is 28 bytes or more
+  (`UCONGRAB_TOPAZ`) also gets the console's Topaz 8 (1,792 bytes) for the server to draw text with.
+- **The display server** (`/sbin/displayd`, `display/server/`, DESIGN D38 step 3, docs/man/displayd.txt): the
+  service `display` (`/etc/svctab`, nice -5), started by the desktop's first program, whose console (`PEER_CTTY`; a
+  console, never a pty) it grabs. Its screen: 640 x 256 (200 on NTSC), 4 interleaved planes at FMODE 3 on AGA, 3
+  on OCS/ECS, in its own chip RAM; its Copper list sets the palette, the sprites (BPLCON2 puts them in front) and
+  the planes. The protocol, version 1, is `display/proto.h` (frozen): synchronous requests on port `display`, each
+  answered at once; every pointer checked with `SYS_peer`; drawing orders in batches (one `DPY_DRAW` per window
+  and buffer: fill, invert, text, copy, image, clip), each order's length and places checked, an unknown one
+  skipped by its length; events into the client's ring through `SYS_post`. Windows: frames drawn from the window
+  manager's style (`DPY_WM_STYLE`; a plain built-in one without), the inside's left edge on an 8-pixel column, a
+  visible region of at most 24 rectangles per window worked out again at every change. **Smart refresh:** a
+  partly covered window keeps a copy of its inside (taken from the screen when it starts to be covered, freed when
+  it is whole again) and its drawing goes to the screen where visible and to the copy; raising, uncovering, moving
+  and showing it are copies; the copies' budget is 256 KB, past it a window is simple refresh (cleared, EV_EXPOSE).
+  Every change paints only its damage, back to front, each pixel once. The blitter fills, inverts and copies while
+  the console is shown; while it is not (GEV_RELEASE) the CPU does, and text is always the CPU's, a byte a plane as
+  the console's. Drags run in the server: an outline (XOR) or the whole window, until the button is let go.
+  Without a window manager windows are placed one below the other, a click raises and focuses, the title bar drags
+  the outline, the close gadget sends EV_CLOSE. It ends when its last client has gone (`-persist`: never), and the
+  console is text again. **libdisplay** (`display/lib/libdisplay.c`, `display/display.h`, linked into each client:
+  about 2 KB of code and 3 KB of data): the connection (its own port `dpy.PID` with a 1 KB ring), windows, a 2 KB queue of orders sent as one
+  message, `dpy_next` for events (or the program's own `poll` on `dpy_port()`). Verified in FS-UAE by
+  `tools/dpy-test.sh` (`dpytest`, docs/man/dpytest.txt; screenshots compared pixel by pixel). **A
   login steps aside** (the 2 MB diet, DESIGN D18): Zenix has no `exec`, so the shell is a new process, and only a
   process that has become the user can start it as the user; init's login (`login --init`) spawns the shell and then
   ends through `SYS_exit` with its second argument naming the shell, which `proc_handover` makes init's child first
