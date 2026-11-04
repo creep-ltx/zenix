@@ -279,21 +279,21 @@ network first, encryption a later step. Five small root-only kernel interfaces (
 `KLOG_TOTAL`, replaced by the existing `KLOG_OLDEST`; `/dev/kmsg`). **A D11 decision:** servers nobody calls (network listeners) are kept alive by init, the
 lines of `/etc/daemons` with D11's numbers (amends D11 1 and 4.4, D19 2.3; closes D20 7.2's open point). The full
 design: [d24-remote.md](d24-remote.md).
-## D25. The demo floppy, network edition (roadmap block 2's end; design note revision 2 after two reviews, nothing built)
-**Why.** One 880 KB floppy that boots any 68020+ Amiga with 2 MB (the stock A1200 included) into Zenix with the
-network, `telnet`, `ssh` and `wget`, to hand to anyone (owner 2026-10-25; KolibriOS's packed programs the model).
-**How.** Every program is packed with LZ4 in a new wrapper, `ZPAK` (the inner header plain, code and data as two
-streams), and unpacked by the kernel's loader in place in the program's own memory (no RAM disk holds programs); LZ4
-because on a 14 MHz 68020 reading a floppy only it starts programs faster than unpacked ones (*modelled* and
-*estimated*; deflate breaks even, Shrinkler doubles the time). The light commands are linked into one pure multi-call
-program (a "box": one libz on the disk instead of 36; *measured* 54 KB of shared code against 294 KB of separate
-files), kept in memory after use by D13's planned rule (unused segments dropped only when memory runs short). The
-floppy is one ext2 filesystem marked read-only and mounted on `/usr`, the Amiga bootblock in its boot area and the
-packed kernel and a 160 KB RAM-disk root (`/etc`, `/home`, `/tmp`) after its end, both unpacked by the bootblock;
-links from the root into `/usr` need **the kernel to follow symbolic links across mounts** (today a link into another
-mount answers ENOENT: a limit fixed for every Zenix). A setup script asks the keyboard (`CON_KEYMAP`, root only) and
-finds the network card. *Prototype*: everything fits with about 50 KB free. The owner's approval of the note approves
-its features (note section 12). The full design: [d25-demo-floppy.md](d25-demo-floppy.md).
+## D25. The demo floppy (design note revision 3, 2026-11-04: the desktop edition first; measured, nothing built)
+**Why.** The owner (2026-11-04): "We have a desktop. Now can we have a demo disk that boots into the desktop? ONE adf.
+With ahiru, Sumi, ctop, preferably." One DD floppy (880 KB ADF) that boots an Amiga with a 68020+ and 4 MB of fast RAM
+(the minimum) straight into Zenix Desktop, logged in as `guest`, with Ahiru, Sumi, ctop, 65 small tools in one
+multi-call program, the manual pages and, when a card is found, the network by DHCP with `telnet` and Zmodem.
+**How.** The KolibriOS model on the minimum's memory: the whole disk is unpacked into memory once, at boot. A stage 2
+loader, read by the bootblock and run while AmigaOS still lives, reads the disk track by track with `trackdisk.device`
+and unpacks each track while the next is read (deflate, miniz's `tinfl`, already Zenix's) into the kernel and a 1.95 MB
+RAM disk that becomes the root; then the ordinary hand-over. The kernel is unchanged. *Measured:* the kernel and image
+as one stream pack to 855,705 bytes deflate (994,348 LZ4: does not fit), about 34 KB free; in FS-UAE the desktop with
+Ahiru, Sumi and ctop open leaves about 2 MB free with the RAM root (arithmetic from the measurement). *Estimated:*
+40-50 s to the desktop, then every program starts from memory. `wget`, `ssh`, Maki and Markdown do not fit DD. A 2 MB
+machine is refused with a message; revision 2's network edition for it (`ZPAK` packed programs unpacked by the kernel's
+loader, a read-only `/usr`, the segment cache) is kept as the note's Part 2, postponed. The full design and the build
+steps: [d25-demo-floppy.md](d25-demo-floppy.md).
 ## D26. Symbolic links across mounts (audit 2026-10-26 F12; design note revision 2 after four reviews; built on branch d26, 2026-10-28)
 **Why.** A symbolic link is followed only inside its own filesystem, so a link into another mount answers ENOENT (and
 an absolute target on any mount but the root is resolved from that volume's root); Linux follows it, and D25's links

@@ -51,7 +51,8 @@ must **take little**: disk, RAM, floppy. Where the two pull apart, take the midd
   prompt; never desktop features in the text console.
 - **The owner's own goal** (Claude in a terminal on Zenix on the A1200) sets the order of work but is not Zenix's
   purpose: never present it as Zenix's main goal in the docs.
-- **The demo floppy (D25) is postponed** (owner 2026-10-28): nothing of it is built until the owner says.
+- **The demo floppy (D25):** the desktop edition is approved (owner 2026-11-04, D25 revision 3 Part 1, built in its
+  section 10's order); the text edition (Part 2) stays postponed (owner 2026-10-28).
 
 ## Sessions: one main session, at most one side session
 Parallel sessions collided before (two programs claimed system call 75; the Makefile conflicted; the floppy filled up

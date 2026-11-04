@@ -1,27 +1,389 @@
-# D25: the Zenix demo floppy, network edition (design note, revision 2)
+# D25: the Zenix demo floppy (design note, revision 3: the desktop edition first)
 
-Status: **design, revision 2 after two independent reviews (section 15); nothing built.** Roadmap block 2 ends with
-**the Zenix demo floppy** (owner 2026-10-25, in the spirit of the 1999 QNX demo disk): "one 880 KB Amiga floppy that
-boots into Zenix with the network, `telnet` and a web-page fetcher, to hand to anyone"; a second edition with the
-desktop in block 5. The model (owner 2026-10-26) is KolibriOS: "the programs are packed on the disk and unpacked when
-they start, which is what makes a desktop edition fit 880 KB". D19 7.4 and D21 7.1 left the floppy's sizes to this
-note. The short version is DESIGN.md D25.
+Status: **revision 3, written 2026-11-04 after the owner's request; measured, not reviewed, nothing built.** The owner
+(2026-11-04): "We have a desktop. Now can we have a demo disk that boots into the desktop? ONE adf. With ahiru, Sumi,
+ctop, preferably." That approves **the desktop edition** (docs/decisions.md), which revision 2 foresaw as "a second
+edition with the desktop in block 5" in the KolibriOS model (owner 2026-10-26: "the programs are packed on the disk and
+unpacked when they start"). It is now the first edition to build. **Part 1** is the desktop edition; **Part 2** is
+revision 2 (the network edition, for a 2 MB chip-only machine) kept as it was designed, still postponed; inside Part 2 a
+section number ("section 6") means Part 2's own (T6). The short version is DESIGN.md D25.
 
-Facts about today's code are *read* from main at 7738665 (2026-10-28). Sizes marked *measured* come from building
-that tree on the PC (`make`, the programs at -O2 as shipped) and packing its files with the packers named; a
-*prototype* number comes from laying out the floppy's filesystem on the PC with those packed files (section 4.3).
-Times are *modelled* (the CPU emulator Musashi's 68020 timing tables: no cache misses, no wait states) or *estimates*;
-nothing in this note is timed on a real Amiga.
-
-**Approval and the feature halt.** This note proposes new features (section 12 lists them: a packed program format in
-the loader, keeping unused shared code, symbolic links across mounts, the box, `CON_KEYMAP` and `loadkeys`, sh's
-`read -t`, a driver "no hardware" status, the demo's build). As with D21, **the owner's approval of this note is the
-approval of those features**; none is built before it. **Prerequisites:** the security audit that the roadmap puts
-before the demo floppy; D21 step 7 (`wget`, `sntp`); D13 step 4's decision on which programs become pure (the box
-makes 36 small programs pure); two design reviews of the code of each kernel step (5.4, 6.2, 7.3) as for every deep
-core change.
+How the numbers are known: sizes *measured* by building main at 99b1101 (2026-11-04, the programs as shipped) and
+packing the files on the PC (`lz4 -12` as one block, its 15-byte frame taken off; `gzip -9` as raw deflate, its 18-byte
+frame taken off; `zstd -19`; `xz -9e`; Shrinkler 4.7 `-d -9`); a *prototype* is a floppy's filesystem laid out on the
+PC from those files; memory *measured* in FS-UAE where said; unpacking speeds are revision 2's *model* (T5.2, Musashi
+as a 68020); floppy times and everything else *estimates*. Nothing here is timed on a real Amiga.
 
 ## 1. What the owner gets, in plain words
+
+- **One DD floppy (an 880 KB ADF, for a Gotek, an emulator or a real drive) that boots straight into Zenix Desktop.**
+  For any Amiga with a 68020 or better and **4 MB of fast RAM** (the stock A1200 with a trapdoor card is the
+  smallest); on a 2 MB A1200 without fast RAM it says so on the screen and stops.
+- **What the visitor sees:** a dark screen with the Zenix name and a bar that fills while the disk loads (*estimate:*
+  **about 40-50 seconds**, the same time today's RAM floppy takes to read), then the desktop in the flat look, already
+  logged in as `guest`, with a welcome window that says what Zenix is and which keys to try. Icons and the menu start
+  **a shell, Ahiru (Files), Sumi (Editor) and ctop (Monitor)**, each in a terminal window; Amiga+F1..F10 still give the
+  text consoles. The menu also switches the keyboard (USA or Svenska).
+- **Everything runs from memory.** The whole disk is unpacked into memory while it loads, so after the bar every
+  program starts at once (under a second, *estimate*; from the floppy Ahiru alone would take about 10 seconds a start),
+  the floppy can be taken out, and **nothing is ever written to it**. The visitor's own files live in memory (about
+  250 KB of room) until the machine is switched off.
+- **The network, if there is a card:** the CM4's Ethernet on a PiStorm, an A2065, or the FA411 (or another NE2000 PC
+  Card) in the A1200's side slot is found and set up by DHCP by itself; then `telnet` to a BBS with Zmodem downloads,
+  `ping` and `host` work. No card: no question, no wait.
+- **On it:** the desktop (the display server, the window manager with its three themes, the terminal, the login
+  screen), the shell, Ahiru, Sumi, ctop, 65 everyday small tools linked into one program (BusyBox's idea), the manual
+  pages, the network with telnet. **Not on it** (no room on DD, measured): `wget`, `ssh`, Maki, Markdown, the disk
+  tools, ZINE. An HD disk (1.76 MB) would carry all of them; HD drives are rare in A1200s, so DD is the choice.
+- **How it fits** (measured): the kernel and the disk's whole filesystem (2.19 MB) are one packed stream of 856 KB in
+  the deflate format (the one `gzip` and Zenix's own `gzip` and `zup` already use), which leaves about **34 KB free**
+  on the floppy. LZ4, revision 2's packer, would need 994 KB: too much. The kernel is not changed at all.
+
+## 2. Today (measured and read, 2026-11-04)
+
+### 2.1 Sizes (bytes, *measured*)
+
+| File | Plain | LZ4 | deflate | zstd | xz | Shrinkler |
+|---|---|---|---|---|---|---|
+| `kernel.bin` | 183,508 | 125,130 | 106,783 | 100,678 | 91,356 | 93,873 |
+| `displayd` | 43,812 | 33,385 | 27,309 | 25,587 | 23,185 | 23,355 |
+| `zdesk` | 39,648 | 29,561 | 23,634 | 21,600 | 19,277 | 19,462 |
+| `term` | 36,248 | 27,113 | 22,074 | 20,904 | 18,402 | 18,809 |
+| `dlogin` | 27,084 | 20,582 | 16,505 | 15,429 | 13,918 | 13,933 |
+| `sh` (ZEX2) | 94,536 | 64,808 | 54,194 | 51,021 | 46,392 | 47,343 |
+| `login` (ZEX2) | 17,624 | 13,349 | 10,862 | 10,565 | 9,881 | 9,672 |
+| `ahiru` (ZEX2) | 245,796 | 175,101 | 148,763 | 138,227 | 126,242 | 129,887 |
+| `sumi` (ZEX2) | 105,552 | 78,560 | 63,886 | 58,349 | 52,880 | 54,376 |
+| `ctop` (ZEX2) | 63,292 | 49,109 | 40,145 | 37,686 | 34,045 | 34,627 |
+| `maki` (ZEX2) | 75,252 | 58,087 | 47,471 | 44,522 | 41,101 | 41,748 |
+| `markdown` (ZEX2) | 159,640 | 117,629 | 97,315 | 89,348 | 81,164 | 83,619 |
+| `netd` | 94,108 | 67,505 | 55,386 | 50,620 | 46,033 | 47,001 |
+| `wget` | 122,588 | 86,917 | 72,905 | 67,035 | 59,960 | 61,138 |
+| `telnet` | 33,964 | 25,525 | 20,586 | 19,407 | 17,640 | 17,616 |
+
+Plain only: `ssh` 109,028, `rz` 25,952, `sntp` 18,220, `mount` 17,964, `init` 14,792, `ping` 16,084, `host` 13,952;
+drivers `a2065` 8,596, `genet` 17,716, `ne2000` 18,400, `plipbox` 12,520; `zenix-8x8.zcf` 10,424, `cp437-8x8.psf`
+2,052, `/etc/ssl/anchors` 52,231, `/etc/zdesk` 5,624 (the three themes 3,040); the manual pages of the commands on the
+disk 172,703; the licence notices 273,834, of which picolibc's `COPYING.picolibc` is 237,194 (it packs to about a
+fifth).
+
+Since revision 2 the programs grew: `kernel.bin` 155,944 -> 183,508 (pseudo-terminals, the console handed to the
+display server, the data cache, UTF-8), `ls` 20,676 -> 25,796 (the C library's allocator); the TUI programs carry
+picolibc and the text-UI library each.
+
+### 2.2 Duplicates, and the box (*measured*)
+
+- **The box** (revision 2's T6.1 rebuilt on today's tree the same way: each command's globals renamed with `objcopy`,
+  one libz, a dispatcher by `argv[0]`; a ZEXE): revision 2's 36 names: 72,172 bytes (LZ4 48,281) against 312,484 as
+  separate files. **The desktop edition's 65 names** (revision 2's list plus `df chmod stat du find xargs sed tr cut
+  uniq seq which printf basename dirname tee cmp sort grep less man gzip tar readlink expr pgrep tree cal time`):
+  **171,196 bytes** (LZ4 110,301, deflate 91,703, xz 73,250) against 680,960 as separate files (each packed: LZ4
+  495,596, deflate 394,645). In the packed floppy image the box saves 132 KB of deflate (prototype with and without).
+- **The big programs share their C library, but no fast packer sees it:** Ahiru, Sumi and ctop packed one by one
+  302,770 (LZ4) / 252,794 (deflate) / 213,167 (xz) bytes, as one stream 300,764 / 253,907 / 175,685: LZ4's 64 KB and
+  deflate's 32 KB windows are shorter than one program, so only zstd and xz find the 38 KB they share. The four
+  desktop programs as one stream: deflate 84,615 against 89,522 one by one.
+
+### 2.3 What exists for the boot (*read*)
+
+- **The RAM floppy** (`zenix-ram.adf`, `boot/bootblock.S`): the bootblock reads the kernel and a RAM-disk image with
+  `trackdisk.device` while AmigaOS lives, into one chip-RAM buffer, then hands over (`boot/handoff.S`: bootinfo,
+  stage0, the memory list, AmigaOS off, the kernel copied home, the jump). The RAM disk stays in memory as the root
+  `ram0`: no fsck, no random seed written (Part 2, T7.5). `kernel.bin` leaves 61,228 bytes on that floppy.
+- **zenixboot** (`boot/`, the start from AmigaOS) already places a big RAM disk in fast RAM (the installer's
+  `RAMDISK_INSTALL_HD_K`, 3,400 KB) with the same hand-over code.
+- **The desktop** (D38): `login graphical` in `/etc/console` makes init start `/sbin/dlogin` on console 1; dlogin's
+  sessions come from `/etc/dlogin`; it refuses root and starts a session with `login -f -s PROGRAM NAME`; autologin is
+  "not yet". zdesk's menu and icons are command lines in `/etc/zdesk/menu` and `/etc/zdesk/icons`.
+- **The keymap:** `sv` and `us` in the kernel, one setting for all consoles; `kbd_set_keymap` exists, nothing calls
+  it.
+- **The network:** netd brings an interface up only from `/etc/network/interfaces` (ROADMAP's real-hardware findings:
+  "netd should start a card it finds with DHCP without /etc/network/interfaces", not built).
+- **Kernel room:** `kernel.bin` leaves 812 bytes on the mount tests' floppy, whose rule (`tools/ksize-budget` ROOM)
+  wants 800; that floppy's RAM disk (`root-mount.img`, 699 KB) had **3 free blocks** at 99b1101 (`dumpe2fs`; the
+  Makefile's comment says 35: a finding for the main session).
+
+## 3. The choices in short
+
+| Question | Choice | Why (section) |
+|---|---|---|
+| Where programs are unpacked | **all at once, at boot, into a RAM disk that is the root** (the RAM floppy's way, made bigger) | the minimum has 4 MB of fast RAM; every start is then from memory; no kernel change; the floppy may leave the drive (5) |
+| Packer | **deflate** (miniz's `tinfl`, already Zenix's), kernel and image as one stream, made on the PC at level 9 | LZ4 does not fit with the network (994 KB); deflate does (856 KB) and keeps pace with the floppy (5.2) |
+| Who unpacks | **a stage 2 loader** read by the bootblock, running while AmigaOS still lives; the kernel unchanged | no kernel bytes (the kernel has none to spare, 2.3); Kickstart's own `trackdisk.device` reads the disk (6) |
+| Small commands | **the box**, 65 names in one program | 132 KB of the floppy (2.2) |
+| Format | **DD** | every drive and Gotek; HD only by the owner's choice (12) |
+| Minimum | **4 MB of fast RAM** (the owner's minimum); less is refused with a message | the unpacked root alone is 1.95 MB (8) |
+| Session | **dlogin logs `guest` in by itself** (a new `autologin` word), a welcome window, then the desktop | the desktop never runs as root (D38); Log out shows the login screen (7.3) |
+| Network | **netd finds a card and asks DHCP**, no file to write, no question | the owner's own finding, fixed for every Zenix (7.5) |
+| Keyboard | **USA by default, Svenska from the menu** (`loadkeys`, a new console op) | no question that holds up the boot (7.4) |
+
+## 4. The floppy
+
+### 4.1 Contents (the prototype)
+
+- **Outside the filesystem:** the bootblock (1 KB), the stage 2 loader (about 10 KB), the packed stream.
+- **The packed stream:** `kernel.bin` (the same as every image), then the RAM-disk image: one ext2 filesystem (revision
+  0, 1 KB blocks), **1,955 blocks, 1,700 used**, 255 left for the visitor's files (*prototype*), mounted as `/`:
+  - `/bin`: `sh`, `login`, `init`, `mount`, `zdesk`, `term`, `ahiru`, `sumi`, `ctop`, `telnet`, `rz` (`sz`), `sntp`,
+    and the box with the 65 names of 2.2 as hard links (`ls`, `cat`, ..., `ping`, `host`, `ifconfig` with `ifup` and
+    `ifdown`, `netstat`, `route`, `less` with `more`, `gzip` with `gunzip` and `zcat`, `reboot` with `halt`).
+  - `/sbin`: `displayd`, `dlogin`, `netd`; `/sbin/net`: `a2065`, `genet`, `ne2000`. (Not `plipbox`: a box on the
+    parallel port cannot be found without asking, and nobody would be asked.)
+  - `/etc`: today's `rootfs/etc` with the demo's changes (7), `/etc/zdesk` (the themes, bar, menu, icons, keys).
+  - `/usr/man`: the pages of everything on the disk and `demo` (what this disk is, where the source is);
+    `/usr/share/consolefonts` (the Unicode supplement, the PC font); `/usr/share/licenses` (Zenix's GPL text and every
+    notice of the code inside: lwIP, miniz, the Zmodem code, picolibc, the owner's MIT programs and tui, the font).
+  - `/home/guest`, `/root`, `/tmp`.
+- **Left out** (each its cost in the packed stream, *measured* from prototypes with and without): `wget` with the root
+  certificates **120 KB**; `ssh` **112 KB**; Maki and Markdown **152 KB**; ZINE, `zpkg`, the disk tools, `awk`, `edit`
+  (Sumi is the editor), `su`/`sudo`/`passwd`, the test programs.
+
+### 4.2 The budget (DD, 901,120 bytes)
+
+| Part | Bytes | How known |
+|---|---|---|
+| Bootblock | 1,024 | layout |
+| Stage 2 loader (`tinfl` 7,779 at -O2, the rest of the loader about 2 KB) | ~10,000 | `tinfl` *measured* (-Os: 5,131), the rest *estimate* |
+| `kernel.bin` and the RAM image, one deflate stream | 855,705 | *prototype* (2,185,428 bytes unpacked) |
+| **Free** | **~34,000** (3.8%) | |
+
+The same stream in the other packers: LZ4 994,348 (**93 KB over**), zstd 665,953, xz 602,290. Without the network the
+image packs to 622,209 (deflate) or 727,615 (LZ4): LZ4 would fit then, with about 45 KB free.
+
+**The rule for the build** (as `tools/mkadf.py`): the ADF is refused when over, saying by how much; every build prints
+the parts and the free space. **If a later version is over, drop in this order:** the manual pages of commands anyone
+knows (all pages together are 67 KB of the stream); `sntp` and the `genet` driver (a PiStorm has its own way to
+Zenix); `tar`, `cal`, `tree` from the box. **If room is wanted** (for `wget`, say): the TUI programs linked as one
+multi-call program, as the box (zstd and xz see 38 KB shared between Ahiru, Sumi and ctop; deflate sees none of it,
+2.2), and the desktop programs likewise.
+
+## 5. Why unpack everything at boot, and why deflate
+
+### 5.1 Against revision 2's way (every program packed, unpacked when it starts)
+
+Revision 2 was made for a 2 MB chip-only A1200: no room to hold the programs in memory, so each start read its packed
+file from the floppy (T5). The desktop edition's minimum has 4 MB of fast RAM, and its programs are big:
+
+| | Revision 2's way (LZ4 per file, `/usr` on the floppy) | Revision 3 (all unpacked at boot) |
+|---|---|---|
+| Ahiru's start | about 9-10 s every time (175 KB at 20 KB/s and the spin-up, *estimate*) | under a second (from memory, *estimate*) |
+| To the desktop | about 15-20 s (*estimate*), then every program's first start from the floppy | about 40-50 s (*estimate*), then nothing waits for the disk |
+| Fits DD with the network | no: the files packed one by one are 1.3 MB (LZ4) | yes, 34 KB free |
+| Kernel change | the packed-program loader, the segment cache, links across mounts (T5.4, T6.2) | none |
+| The floppy | must stay in DF0 | may be taken out after the bar |
+
+A packer that sees the whole disk at once also does the box's work across files for free, which is why the stream is
+smaller than any per-file packing.
+
+### 5.2 Which packer (*modelled* speeds from T5.2, *estimated* floppy rate)
+
+The stage 2 reads the disk with `trackdisk.device` one track at a time (about 20-26 KB/s, T5.3) and unpacks each track
+while the next one is read (`SendIO`, then unpacking, then `WaitIO`). Unpacking hides under the reading when it makes
+at least (read rate x 2.55, the stream's expansion) about **51-66 KB/s** of output:
+
+| Packer | Stream | Unpacking on a 14 MHz 68020 in fast RAM | Reading | To the end of loading |
+|---|---|---|---|---|
+| LZ4 | 994 KB: **does not fit** | ~360-430 KB/s (33-39 cycles a byte) | - | - |
+| **deflate** (`tinfl`) | **856 KB** | **~85-118 KB/s** (120-167 cycles a byte; ~65-118 with fast RAM's waits) | **33-43 s** | **33-43 s**, at worst ~50 s |
+| Shrinkler (~ xz) | ~600 KB | ~20-25 KB/s (560-695 cycles a byte) | 23-30 s | **88-110 s** (unpacking 2.2 MB) |
+| zstd / xz | 666 / 602 KB | not modelled; no decoder in Zenix | 26-33 s | unknown |
+
+**Deflate:** it fits, its decoder is already in Zenix (`user/miniz`, MIT, used by `gzip` and `zup`: one source for
+the same code), and it about keeps up with the floppy, so it costs little or no boot time against an LZ4 that would
+have fitted. Shrinkler and xz would leave 250 KB free but double the wait. zstd's and LZMA's speed on a 68020 is not
+known; a stronger method is the way to the HD edition's contents on DD later, measured first. (ZX0, revision 2's other
+candidate, was not measured: its packer is not on this PC.) A deflate encoder that searches harder (zopfli) would gain
+a few percent with the same decoder: not measured.
+
+## 6. The loader
+
+### 6.1 The disk
+
+```
+byte 0        the bootblock ('DOS\0', checksum): reads the stage 2 and jumps to it
+byte 1024     the stage 2 loader (position independent, about 10 KB), then its table: the stream's offset and packed
+              size, the kernel's and the image's unpacked sizes, a CRC-32 of each, the image's RAM-disk size
+after it      the packed stream (raw deflate): kernel.bin, then the RAM image, to near the end of the disk
+```
+
+No filesystem on the floppy itself: nothing on it is read after the boot, so it needs none (Linux would see a blank
+disk; `man demo` says where the ADF and the source come from).
+
+### 6.2 The stage 2 (in C, -mpcrel like `boot/stage0.c`, with `tinfl` from `user/miniz`)
+
+1. **The memory check:** the biggest fast-RAM block must hold the RAM image plus the kernel (2.2 MB at today's sizes;
+   the table gives the numbers). Not there: a plain screen says **"This Zenix demo disk needs 4 MB of fast RAM (a
+   68020 or better). Switch off to start something else."**, and nothing is touched.
+2. **Buffers where they stay:** the RAM image is unpacked straight into the block that will be the RAM disk, in fast
+   RAM, the kernel into its own buffer; placed by zenixboot's rule (Part 2, T7.2: never over the kernel's future home,
+   the klog area, low memory or the copier at 0x500). No packed copy is kept: a track is read, unpacked and its buffer
+   used again.
+3. **Untrusted input** (CLAUDE.md): `tinfl` with the output buffer's end, the stream's end, and the exact sizes from the
+   table: a stream that ends early, runs past, or whose CRC-32 differs is refused (the screen red, a line saying
+   which part), never a boot into a damaged root. A read error is retried by trackdisk, then refused the same way.
+4. **The bar:** one bitplane, the Zenix name, a bar that grows by a step a track (the bootblock's diagnostic colours,
+   A11, stay as they are for the failures).
+5. **The hand-over** is today's `boot/handoff.S` unchanged: bootinfo (the RAM disk's address and size), stage0, the
+   memory list, AmigaOS off, the kernel copied home, the jump. The kernel and boot see an ordinary RAM-floppy boot.
+
+**What it costs the kernel: nothing.** The decoder runs before the kernel, under AmigaOS; `kernel.bin` is byte for
+byte the one of every image. (Revision 2's LZ4 program loader inside the kernel would cost about 1 KB: the checked LZ4
+decoder alone is 238 bytes at -Os and 282 at -O2, *measured*; the `ZPAK` header, the memory source for ZEX2 and the
+16 KB slices about 0.6-0.9 KB more, *estimate*. It has no place today: 812 bytes are left on the mount tests' floppy
+against a rule of 800, and that floppy's RAM disk has 3 free blocks, so it cannot give up the room. Part 2 would need
+the main session to make room first, by moving a program out of `MOUNTAPPS` or giving the mount tests a disk image.)
+
+**Peak memory while loading** (*estimate*): AmigaOS (about 150 KB), the unpacked kernel 184 KB and image 1,955 KB,
+`tinfl`'s state 11 KB, two track buffers 11 KB: about 2.3 MB, in 6 MB.
+
+## 7. The boot, and what the visitor sees
+
+### 7.1 The timeline (*estimates*)
+
+| Step | Time |
+|---|---|
+| Power-on, Kickstart to the bootblock | 1-2 s |
+| The bar: 856 KB read, unpacked track by track | 33-43 s (at worst ~50 s if the unpacking cannot keep pace) |
+| The kernel, boot, init (a RAM root: no fsck, no seed) | 1-2 s |
+| dlogin, displayd, the guest session, zdesk, the welcome window (all from memory) | 2-3 s |
+| **The desktop** | **about 40-50 s** |
+| Later: a program from the menu or an icon (Ahiru 246 KB, the biggest) | under a second |
+
+### 7.2 The root's `/etc` (the demo's differences from `rootfs/etc`)
+
+`console`: `login graphical`, `colours auto`. `dlogin`: `session Desktop = /usr/lib/demo/session`, `session Text
+console = text`, `autologin guest Desktop` (7.3). No `autologin` file (root is not logged in on console 1; the text
+consoles Amiga+F2..F10 ask for a login as on every image). `fstab`: none of the disks (`/` is `ram0`). `svctab`: today's. `motd`: one line for the text consoles. The
+guest's home has the welcome text.
+
+### 7.3 The session
+
+**`autologin NAME SESSION` in `/etc/dlogin`** (new, small, D38's "not yet: autologin"): at dlogin's first start of a
+boot only, it starts that session for that user without the login screen; after Log out the login screen shows as
+usual, so the visitor can choose the Text console session or log in again (`guest` has no password on this disk).
+Never for root (dlogin refuses root already). The demo's session is `/usr/lib/demo/session`, a short shell script:
+`term -e less /home/guest/WELCOME &`, then `exec zdesk` (zdesk takes over the window already open, D38 3.3).
+The welcome says, in under 20 lines: what Zenix is; the icons; Amiga+Return a terminal, Amiga+Tab, the menu;
+Amiga+F1..F10 the text consoles; `man demo`; the keyboard in the menu; nothing is written to the floppy and the files
+live in memory until switch-off; the network's state (from `ifconfig`, or "no network card found").
+
+### 7.4 The keyboard
+
+USA by default (open question 1); the Zenix menu gets two lines, **Keyboard: USA** and **Keyboard: Svenska**, which
+run `loadkeys us` and `loadkeys sv` (`/etc/zdesk/menu`: no zdesk change). `loadkeys NAME` calls **a new console op,
+`CON_KEYMAP`**, as revision 2 planned (T9.1), with Linux's rule for who may: root, or a process whose controlling
+terminal is a console (the person at the machine; displayd's session's programs are). The kernel already has the two
+maps and `kbd_set_keymap`; the op is the only kernel growth of this edition (*estimate* under 100 bytes, which the main
+session must find room for, 2.3). `/etc/console`'s `keymap NAME` word (init applies it at boot) comes with it, for
+every Zenix. No question at boot: it would hold the visitor up for its time limit.
+
+### 7.5 The network
+
+**netd starts a card it finds, with DHCP, when `/etc/network/interfaces` names none** (the owner's real-hardware
+finding of 2026-11-04 in ROADMAP, fixed for every Zenix): at its start (a line in the demo's `svctab`, as revision 2
+planned, T7.2) it runs each driver of `/sbin/net` once; a driver that finds no hardware ends at once with status 69
+(`EX_UNAVAILABLE`, revision 2's T9.2) and is not restarted; the first that finds its card gets `eth0` and DHCP. So a
+machine without a card pays a fraction of a second; whether netd then ends (it also serves the loopback) is decided
+in the step's review. Then `sntp` sets the clock (the stock A1200 has no battery clock; the bar shows the time).
+
+## 8. Memory on the minimum machine
+
+**Measured** in FS-UAE (the stock A1200 configuration with 4 MB of fast RAM, `fsuae/a1200-020-fast.fs-uae`; main at
+99b1101 from its hard-disk image; free memory by `free`):
+
+| | Chip KB | Fast KB | Free in all |
+|---|---|---|---|
+| After boot, one shell | 1,855 | 3,481 | 5,336 |
+| zdesk and displayd started | 1,773 | 3,273 | 5,046 (-290) |
+| and Ahiru, Sumi and ctop open, each in a term window | 1,653 | 2,307 | **3,960** (-1,086) |
+
+`ps` then: displayd 301 KB, zdesk 68, each term 68-111, Ahiru 140 + 225 shared code, Sumi 67 + 92, ctop 94 + 57.
+The screen showed all three windows, ctop's figures right.
+
+**On the demo disk** (*arithmetic* from the measurement): the RAM root costs its 1,955 KB, where the hard-disk root
+cost nothing; so **about 2.0 MB stay free with the desktop, Ahiru, Sumi and ctop open**, about 1.8 MB with a network
+card in use (netd, a driver and DHCP took 227 KB in revision 2's measurement, T2). Measured on the disk itself at step 7 of the build (10).
+
+**A 2 MB A1200 without fast RAM** (1,132 KB free with one login, CLAUDE.md) cannot hold the 1.95 MB root: the stage 2
+refuses (6.2). It would get the text edition of Part 2 on a floppy of its own, if the owner ever wants one (Part 2
+stays postponed); this ADF is for the minimum.
+
+## 9. From revision 2: built since, still needed, no longer needed
+
+- **Built since revision 2:** links across mounts (D26, 2026-10-28); `wget` and `sntp` (D21 step 7); the PC font
+  (D20); Zenix Desktop (D38: pseudo-terminals, the console handed to the display server, `displayd`, `zdesk` with
+  three themes, `term`, `dlogin`); the NE2000 PC Card and plipbox drivers (D36, D39); picolibc and the TUI programs
+  (D27, Sumi, Maki, Markdown, Ahiru, ctop); the installer's floppy builder (`tools/mkinstall.py`) and zenixboot's big
+  RAM disk in fast RAM.
+- **Still to build, for this edition:** the box; the stage 2 loader and the demo bootblock; `make demo`; dlogin's
+  `autologin`; `CON_KEYMAP`, `loadkeys`, `/etc/console`'s `keymap`; netd finding a card by itself and the drivers'
+  status 69; `demo-test.sh`.
+- **No longer needed for this edition** (they stay in Part 2 for the text edition): the `ZPAK` format and LZ4 in the
+  kernel and libz, the kernel's segment cache (T6.2), the read-only `/usr`, diskd opening a drive again (T7.6), sh's
+  `read -t` (no text questions), and revision 2's step 0 (Zenix's floppy driver on real hardware: this disk is read
+  only by Kickstart's `trackdisk.device`).
+
+## 10. The build, in order (each step merged with its tests; the full suite before each merge)
+
+Efforts are rough, in this session's own hours.
+
+1. **The box** (`tools/mkbox.sh`, `make box`): the rename and the dispatcher as prototyped, a ZEXE; an unknown name
+   lists the names and exits 2. *Test:* the command tests (`cmds-test.sh`, `cmds2-test.sh`) run against an image whose
+   commands are the box's links; a host check that every name dispatches. *About 4 h.*
+2. **The stage 2 loader and the demo bootblock** (`boot/demoboot.S`, `boot/demoload.c`, 6). *Tests:* on the PC, the
+   loader's unpacking code built for the host unpacks the ADF's stream to the kernel and image byte for byte, and
+   damaged streams (cut, flipped bytes, wrong CRC, sizes past the buffer; a fuzzer) are refused cleanly, also under the
+   address sanitizer; in FS-UAE, the boot to a shell. Boot code: two reviews, as every deep change of the boot path.
+   *About 1-1.5 days.*
+3. **`make demo`** (`tools/mkdemo.sh`): the RAM image by `tools/mkroot.sh` with the demo's list and `/etc`, the stream
+   packed by Python's zlib at level 9 (raw deflate), the table, the ADF; the budget of 4.2 printed every build, over
+   880 KB an error saying by how much. *Test:* the build's size check, e2fsck clean. *About 3 h.*
+4. **The session:** dlogin's `autologin`, `/usr/lib/demo/session`, the welcome, `man demo`, the menu's lines. *Test:*
+   `dlogin-test.sh` gains autologin (once a boot, never root, Log out shows the greeter). *About 3 h.*
+5. **The keyboard:** `CON_KEYMAP` (its number claimed in `docs/claims.md`, frozen), `loadkeys` with its page,
+   `/etc/console`'s `keymap`. *Test:* `kbd-test.sh` types after `loadkeys sv` and `loadkeys us`, a non-console process
+   refused. One review (kernel code). *About 3 h, after the main session has made kernel room (2.3).*
+6. **The network by itself:** netd's search, the drivers' status 69, `ifup`'s answer at once. *Tests:* `eth-test.sh`
+   with no interfaces file gets DHCP on the A2065; `drv-test.sh`: a driver ending with 69 is not restarted. *About
+   5 h.*
+7. **`tools/demo-test.sh`** (part of `make check`, its own emulator slot): boots `zenix-demo.adf` on the A1200 with
+   4 MB fast: the desktop's screenshot compared, the welcome, Ahiru, Sumi and ctop started from the menu, `free`
+   against section 8, every box name once, the A2065's DHCP and a `telnet` to the PC; on 2 MB chip-only: the refusal
+   on the screen; the ADF's SHA-256 unchanged afterwards. *About 4 h.*
+8. **The owner's A1200:** from the Gotek (and a real drive if one is at hand): the time to the desktop, `free`, a box
+   command's start, Ahiru's start. If box commands feel slow to start (each copies the whole 171 KB box), the box is
+   split in two (everyday commands and the text tools) before anything deeper. Then the owner's yes to hand it out.
+
+About five working days in all, steps 2 and 6 the largest.
+
+## 11. For the main session (interfaces to claim)
+
+- `SYS_console` op `CON_KEYMAP` (Linux's permission rule, 7.4); `/etc/console`'s `keymap` word; `loadkeys`.
+- `/etc/dlogin`'s `autologin` word.
+- The drivers' exit status 69 and netd's search without `/etc/network/interfaces` (D19's driver contract appended).
+- Kernel room: 812 bytes left on the mount tests' floppy (rule 800) and 3 free blocks in its RAM disk at 99b1101.
+- Not frozen (only the demo reads it): the stage 2's table and the disk's layout.
+
+## 12. Open questions for the owner (one line each, the recommendation in brackets)
+
+1. The default keyboard: USA (for anyone) or Svenska? [USA; Svenska one click in the menu]
+2. Before the first hand-out the floppy is GPL software given away, and the repository is private: [make it public,
+   with the source's address in `man demo`]
+3. DD as decided (telnet, but no `wget`, `ssh`, Maki, Markdown), or HD (1.76 MB: everything, but only Goteks,
+   emulators and the rare HD drive)? [DD]
+4. A phone book of public BBSes for `telnet` (Part 2, T14 question 4)? [yes, 5-10 boards you pick; about 1 KB]
+
+---
+Revision 3, 2026-11-04: Part 1 written after the owner's request; sizes and FS-UAE memory measured, speeds from
+revision 2's model, times estimated; not yet reviewed (the stage 2 gets two reviews with its code, step 2).
+
+# Part 2: the text edition (revision 2, kept as designed; postponed)
+
+Revision 2's status line, kept: "design, revision 2 after two independent reviews (section 15); nothing built." It
+was the network edition for any 68020 Amiga with 2 MB, the stock chip-only A1200 included. Its facts were read at
+7738665 (2026-10-28); Part 1, section 2 has today's sizes. Its prerequisites and approval paragraph applied to it.
+
+## T1. What the owner gets, in plain words
 
 - **One DD floppy (880 KB, an ADF for emulators and Goteks) that boots any Amiga with a 68020 or better and 2 MB of
   memory**, the stock A1200 included. *Estimates* for the stock A1200: about **12 seconds from power-on to the
@@ -41,7 +403,7 @@ core change.
   start *faster* than unpacked ones (section 5.3); the box stays in memory after its first use, so `ls`, `cat`, `ps`
   start in a fraction of a second after the first command.
 
-## 2. Today (read and measured)
+## T2. Today (read and measured)
 
 - **The RAM floppy** `zenix-ram.adf` (Makefile): the bootblock (1 KB; header and code 566 bytes, 458 free,
   *measured*), `kernel.bin` from byte 1024, then a 704 KB ext2 RAM-disk image (`RAMDISK_K`) that the bootblock loads
@@ -90,7 +452,7 @@ core change.
 - **Memory on the stock A1200** (2 MB chip, no fast RAM; FS-UAE, D19 *measured*): 1,347 KB free with one login on a
   disk root, 1,159 KB with SLIP up (netd 116 KB), 1,120 KB with the A2065 and DHCP; the 1 MB chip-only machine 410 KB.
 
-## 3. The choices in short
+## T3. The choices in short
 
 | Question | Choice | Why (section) |
 |---|---|---|
@@ -104,9 +466,9 @@ core change.
 | Keyboard | asked at every boot, a 10-second default | the floppy is for anyone (9) |
 | Network | tried in order: the CM4's Ethernet, an A2065, else the visitor picks SLIP or none | no card needs configuring by hand (9) |
 
-## 4. What goes on the floppy, and the budget
+## T4. What goes on the floppy, and the budget
 
-### 4.1 Contents
+### T4.1 Contents
 
 - **Booted by the bootblock** (outside the filesystem): the kernel (the same `kernel.bin` as every image, with `fsd`,
   `diskd` and `boot` inside, packed by the build) and the RAM-disk root image (packed).
@@ -136,7 +498,7 @@ core change.
   (`fdisk`, `mkfs.*`, `fsck.*`: a demo never offers to format the visitor's disk), `awk` (100 KB), the test programs,
   `su`/`sudo`/`passwd`/`useradd` (one user session; 9.4).
 
-### 4.2 The packers measured on today's files
+### T4.2 The packers measured on today's files
 
 Bytes, *measured* (`lz4 -12`, `gzip -9`, `zstd -19`, `xz -9e`, Shrinkler 4.7 `-d -9`; the programs as built at -O2; the
 LZ4 figures include its 15-19-byte frame, a ZPAK file carries 16 bytes instead):
@@ -158,7 +520,7 @@ Two findings decide most of the note: **code packs only to about 70% with LZ4 an
 the duplicate is libz, 2-4.5 KB in every program (`hello` is 4,652 bytes, `true` 220). A packer cannot see across
 files; linking them into one program removes the copies at the source (section 6).
 
-### 4.3 The budget (DD, 901,120 bytes)
+### T4.3 The budget (DD, 901,120 bytes)
 
 The *prototype* (`mke2fs -t ext2 -E revision=0 -b 1024 -N 144 -d` on a tree of the packed files, `wget` stood in by
 73,000 incompressible bytes, D21's anchors file by 52,231): **695 of 763 blocks used, 68 free**, e2fsck clean; 3 of
@@ -179,9 +541,9 @@ build prints each part and the free space. **If a later version is over, drop in
 tail (the ~25 roots that sign most of the web, about 12 KB instead of 51: frees ~40 KB); the manual pages of the
 commands anyone knows (`ls`, `cat`, ...: ~20 KB); `tar`, `cu` (~17 KB); then the second box (6.3).
 
-## 5. The packer
+## T5. The packer
 
-### 5.1 The candidates
+### T5.1 The candidates
 
 - **LZ4** (block format): bytes and copies, no entropy coding; a small decoder, no tables.
 - **Deflate** (miniz's `tinfl`, already in Zenix): Huffman plus LZ77; 7,752 bytes of code and an 11 KB state: too big
@@ -193,7 +555,7 @@ commands anyone knows (`ls`, `cat`, ...: ~20 KB); `tar`, `cu` (~17 KB); then the
   here** (its packer is not on this PC); expected between LZ4 and deflate in size and speed. The candidate for a
   second, stronger method if the desktop edition needs one (section 10).
 
-### 5.2 Unpacking speed (*modelled*)
+### T5.2 Unpacking speed (*modelled*)
 
 Each decoder was run in Musashi as a 68EC020 on the files above, its output compared byte for byte; cycles per
 **unpacked** byte:
@@ -212,7 +574,7 @@ fits the 68020's 256-byte instruction cache (Shrinkler's; LZ4 only when hand-wri
 bytes) and **2-3x** otherwise - *estimates*, timed on the A1200 in step 1. At 14.18 MHz the checked LZ4 is then about
 **200 KB/s** unpacked, deflate **35-50 KB/s**, Shrinkler **14-16 KB/s**.
 
-### 5.3 What the visitor feels: start times from the floppy (*estimates*)
+### T5.3 What the visitor feels: start times from the floppy (*estimates*)
 
 Assumed: the floppy delivers **20 KB/s** to a program load (one 5.5 KB track per about 250 ms: 9 ms to the sync word,
 6,656 words of DMA at 32 us, the decode, a step every second track: about 22 KB/s at best, less with the filesystem's
@@ -240,7 +602,7 @@ even and Shrinkler doubles every start. On the 68060 and on the PiStorm every pa
 reads, so the smallest file would win there; but the floor sets the choice (CLAUDE.md, the stock A1200), and LZ4 fits
 with room (4.3). **One method for everything** (bootblock, kernel, manual pages) keeps one decoder.
 
-### 5.4 The packed program: `ZPAK` (a new format, frozen once shipped)
+### T5.4 The packed program: `ZPAK` (a new format, frozen once shipped)
 
 ```
 +0  u32 inner size         bytes of the original file's header that follow, plain (40 or 48)
@@ -287,9 +649,9 @@ with room (4.3). **One method for everything** (bootblock, kernel, manual pages)
   libz helper built **from the same decoder source** as the kernel's (one source for the same code, D13).
 - **Not in packages:** zpkg packages and D15 bundles carry plain files; ZPAK is made only by the demo floppy's build.
 
-## 6. The box, and keeping shared code in memory
+## T6. The box, and keeping shared code in memory
 
-### 6.1 The box (a multi-call program, BusyBox's idea)
+### T6.1 The box (a multi-call program, BusyBox's idea)
 
 **Measured:** the light commands of 4.1 linked into one program (each one's global names renamed with `objcopy`, a
 short `main` that picks the command by the name it was started as): as a ZEXE 65,732 bytes plain and 43,300 LZ4,
@@ -312,7 +674,7 @@ separate files). Rules:
 - **Tests:** every member runs from the box in the demo test (section 11), and the commands test script
   (`rootfs/tests/cmds.sh`) runs once against a box build.
 
-### 6.2 Unused shared code stays in memory (D13's later rule, built now)
+### T6.2 Unused shared code stays in memory (D13's later rule, built now)
 
 Without it every `ls` would read and unpack the whole box again (2.4 s); with it, a later command reads only the box's
 data stream. **The rule (D13 7, as that note planned it):** when the last process using a segment ends, the segment
@@ -326,15 +688,15 @@ reclaimable (a new word at the end of `SYS_meminfo`, main's to claim). This help
 `sh` starts again at once too) and is a deep core change with its own tests (`tools/memtest.sh`: fill memory past
 the cache, the segments dropped, the allocation succeeds; a changed file never runs old code; `umount` succeeds).
 
-### 6.3 A second box?
+### T6.3 A second box?
 
 The text tools (`less edit man grep sort`, sharing `regex.c`) as one program are 41,562 LZ4 against 77,664 separate
 (*measured*), but they are not pure today, so every start would read the whole box. **Not in the first version**;
 taken only if D13 step 4 makes them pure, or the budget needs 36 KB.
 
-## 7. Layout, boot and the root
+## T7. Layout, boot and the root
 
-### 7.1 The floppy
+### T7.1 The floppy
 
 ```
 byte 0       the bootblock (1 KB, 'DOS\0', checksum)  = ext2's boot area (ext2 starts its superblock at 1024)
@@ -352,7 +714,7 @@ nothing to it, not even the clean mark. `/etc/fstab` has `df0 /usr ext2 defaults
 at its end (the two images' offsets, packed and unpacked sizes, the method), assembled in a demo build of
 `boot/bootblock.S` (`handoff.S` unchanged; the plain bootblock stays byte for byte what it is).
 
-### 7.2 The boot
+### T7.2 The boot
 
 1. Kickstart loads the bootblock from **DF0**. A bootblock started from another drive (its I/O request names the
    unit) refuses and returns to Kickstart, which asks for a disk: `/usr` is always `df0`. It reads the two packed
@@ -371,7 +733,7 @@ at its end (the two images' offsets, packed and unpacked sizes, the method), ass
    `/etc/network/interfaces` has no `auto` line, so init starts no `ifup -a`: every boot is a first boot (the RAM root
    starts fresh), and the setup writes the file and brings the network up itself (9.2). Then the logins.
 
-### 7.3 Links across mounts (a limit fixed for every Zenix)
+### T7.3 Links across mounts (a limit fixed for every Zenix)
 
 **Superseded by DESIGN D26** ([d26-links-across-mounts.md](d26-links-across-mounts.md), built 2026-10-28): the kernel
 follows every link, not only those leaving a volume, through the servers' `FS_LINKED` answer; the sketch below is kept
@@ -390,20 +752,20 @@ fix what is found). The other ways were weighed: copying every program the paths
 `login`, `less`, `rz`, `cu`, netd: over 200 KB of memory for the session), or rewriting the paths in the programs (a
 copy of every program for the demo, against D13's one-copy rule).
 
-### 7.4 netd's driver
+### T7.4 netd's driver
 
 netd starts `/sbin/net/NAME`, and D19 6.5 keeps netd off every mount but the root's. **The setup copies the one driver
 it found** (a2065 8.7 KB, genet 17.9 KB plain) **into the RAM root's `/sbin/net`**, so no rule changes, only a machine
 with a card pays, and the network keeps running if the floppy is taken out.
 
-### 7.5 Why a RAM root (and not the floppy as the root)
+### T7.5 Why a RAM root (and not the floppy as the root)
 
 A root that is not a RAM disk is a persistent disk root to boot: `fsck.ext2 -y` when it is not clean and the random
 seed rewritten at every start (`boot.c` 246, 276-277) would write to the floppy, and a volume marked read-only is never
 taken as the root at all (architecture.md section 10). A RAM root keeps every rule as it is; `/etc` is writable for
 the setup; the visitor's files have a place.
 
-### 7.6 When the floppy is taken out
+### T7.6 When the floppy is taken out
 
 Every request on `df0` fails after a disk change until diskd opens the drive again; fsd keeps it open, and `umount` is
 on the floppy itself. **diskd opens the drive again by itself when a disk with the same volume id is put back**
@@ -412,7 +774,7 @@ on the floppy itself. **diskd opens the drive again by itself when a disk with t
 "init: cannot start /bin/login ..." every 5 s; the demo's `/etc/motd`, printed just before, says what that means ("if
 login cannot start, the Zenix floppy is not in DF0"), so init stays unchanged.
 
-## 8. Memory on the stock A1200 (*estimates*, measured in FS-UAE at step 4 and on the A1200 at step 7)
+## T8. Memory on the stock A1200 (*estimates*, measured in FS-UAE at step 4 and on the A1200 at step 7)
 
 | | KB |
 |---|---|
@@ -431,12 +793,12 @@ beyond its own memory (5.4). **The 1 MB chip-only machine** (410 KB with one log
 demo's own costs: a shell and the box's commands, **no network** (netd alone takes 116 KB); the setup says so and
 skips it.
 
-## 9. First boot: what the visitor sees
+## T9. First boot: what the visitor sees
 
 Every boot is a first boot (the RAM root starts from the image). Console 1 logs in as root without asking (as every
 Zenix image does, `/etc/autologin`; 9.4); root's profile runs `/usr/lib/demo/setup`, a shell script, once per boot.
 
-### 9.1 The keyboard
+### T9.1 The keyboard
 
 ```
 Keyboard:  1 USA   2 Svenska   (Enter, or 10 seconds: USA)
@@ -450,7 +812,7 @@ and already reports unknown words), which init then applies at every start on ev
 British, French, ...) are 264 bytes each in the kernel's table for every Zenix user, generated from xkeyboard-config as
 `sv` was. **`read -t SECONDS`** (bash's meaning) is added to sh for the time limits.
 
-### 9.2 The network
+### T9.2 The network
 
 The script tries, in order, **the CM4's Ethernet** (`genet`), then **an A2065** (FS-UAE's and WinUAE's network card).
 For the first one that comes up it copies the driver into `/sbin/net` (7.4), writes `/etc/network/interfaces`
@@ -473,7 +835,7 @@ so the first `ssh` or HTTPS fetch may say "waiting for the random pool (type on 
 ask for keys anyway, and the welcome says so; whether the floppy should credit more (each sector's timing) is a
 question for D19's main session, not decided here.
 
-### 9.3 The welcome
+### T9.3 The welcome
 
 `/etc/motd` before the setup, and the setup's last lines after it (no host names or addresses written in; ADDRESS is
 filled in from `ifconfig`, or "waiting for DHCP"; the phone book is an owner question):
@@ -493,14 +855,14 @@ filled in from `ifconfig`, or "waiting for DHCP"; the phone book is an owner que
  memory (about 90 KB) until you switch off.  Network: eth0, ADDRESS (DHCP).
 ```
 
-### 9.4 Who is logged in
+### T9.4 Who is logged in
 
 Root, as on every Zenix image; login stays as it is (its warning about a root without a password shows), and the
 welcome adds that the system lives in memory and nothing listens on the network (no telnet server, no `/etc/daemons`).
 The multi-user side is shown by the files' owners and `ls -l`. A `guest` login with `sudo` is the alternative (owner
 question).
 
-## 10. DD and HD, the two editions
+## T10. DD and HD, the two editions
 
 - **DD 880 KB, the network edition:** about 50 KB free (4.3). Works in every Amiga drive, every Gotek, every emulator.
 - **HD 1.76 MB** (80 cylinders x 2 x 22 sectors): Kickstart's `trackdisk.device` reads it for the bootblock, but
@@ -512,7 +874,7 @@ question).
   file view, sizes unknown until they exist. On DD it would trade the network's heavy parts (`ssh`, `wget`, the
   anchors: ~200 KB) or need a stronger method 2 for cold files (ZX0, measured then); the `method` byte leaves room.
 
-## 11. Building and testing
+## T11. Building and testing
 
 - **`make demo`** builds `build/zenix-demo.adf` with `tools/mkdemo.sh`: the box (`tools/mkbox.sh`: the rename and the
   dispatcher of 6.1, a pure link), `tools/zpak` on every program and page, the RAM root image (`tools/mkroot.sh` with
@@ -535,7 +897,7 @@ question).
 - **On the real A1200** (the owner, step 7): a real drive and the Gotek; the times of 5.3, `free`; those are the numbers
   the docs may then state.
 
-## 12. For the main session (interfaces to claim; the owner approves them with the note)
+## T12. For the main session (interfaces to claim; the owner approves them with the note)
 
 - The `ZPAK` format and method 1 (frozen once shipped; methods append-only); the loader's refusal messages.
 - The reply kind for a link that leaves its volume (`fsproto.h`), in the kernel, fsd and zfsd.
@@ -548,7 +910,7 @@ question).
 - For D19: whether the floppy should credit more randomness (9.2).
 - The demo bootblock's table and the demo's own `/etc/svctab` line (not on the frozen list: only the demo reads them).
 
-## 13. Build order (each step small, merged with its tests; the full suite before each merge)
+## T13. Build order (each step small, merged with its tests; the full suite before each merge)
 
 0. **The floppy driver on real hardware** (the owner's A1200 with the Gotek; a real drive if one is at hand): a
    whole-disk read compared with the ADF. Nothing else is worth building before this passes.
@@ -565,7 +927,7 @@ question).
    on the disk.
 8. **The owner's A1200:** the times and memory; then the owner's yes to hand it out.
 
-## 14. Open questions for the owner (one line each, the recommendation in brackets)
+## T14. Open questions for the owner (one line each, the recommendation in brackets)
 
 1. The default keyboard, USA (for anyone) or Svenska (yours)? [USA, Svenska one key away]
 2. More layouts than USA and Svenska (each 264 bytes in every Zenix)? [German and British]
@@ -578,7 +940,7 @@ question).
    source link in `man demo`, before the first hand-out]
 9. Hand-out: [a GitHub pre-release ADF after the A1200 test, with `zenix-slirp` for the PC; Aminet later]
 
-## 15. Reviews
+## T15. Reviews
 
 Two independent reviewers read revision 1 (2026-10-28), told not to edit: one on correctness, size and speed (it
 rebuilt, re-measured, built the box pure and benchmarked a checked decoder), one on architecture fit, frozen
@@ -642,7 +1004,7 @@ interfaces and the stock A1200. What they found and what revision 2 did:
 17. Missing owner questions: the source for a GPL hand-out, the default keyboard; each keymap costs every user. ->
     questions 1, 2 and 8; two questions that were technical (2.06 MB, a bigger `/tmp`) decided instead (10; not taken).
 
-## Owner decision (2026-10-28)
+## T16. Owner decision (2026-10-28)
 
 Postponed: "skip demo floppy for now". The design stays as revision 2; nothing is built and its questions stay open
 until the owner takes it up again.

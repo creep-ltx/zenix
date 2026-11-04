@@ -105,7 +105,7 @@ zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04
    properly"): modern, small and constant-time, e.g. BearSSL (MIT) for TLS and Dropbear's client (MIT) for SSH, with
    Ed25519/X25519/ChaCha20 (fast without an FPU or AES hardware) and a real random source; it also signs `zpkg`'s
    packages; then `ssh` (a proper client, keys, known hosts) and HTTPS for `wget`; `zpkg` with its repository on the
-   owner's NAS. A security audit. Then (postponed by the owner on 2026-10-28, design D25 ready) **the Zenix demo floppy**
+   owner's NAS. A security audit. Then (postponed by the owner on 2026-10-28; its desktop edition approved 2026-11-04, block 5) **the Zenix demo floppy**
    (owner 2026-10-25, in the spirit of the 1999 QNX demo disk): one 880 KB Amiga floppy that boots into Zenix with the
    network, `telnet` and a web-page fetcher, to hand to anyone; a second edition with the desktop in block 5. The model (owner 2026-10-26): KolibriOS, a
    desktop, network and programs on one 1.44 MB floppy; as there, the programs are packed on the disk and unpacked
@@ -133,7 +133,12 @@ zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04
    window manager / desktop a program of its own that can be swapped; the floating desktop is the first, an i3-style
    tiling one a second choice, others possible. Then the rest: the display server; a terminal window, workspaces with the i3-style bar, the mouse; the file view,
    viewers, preferences; TrueType fonts (owner 2026-10-26; rendered once per size into bitmap fonts and cached, so a
-   68020 without an FPU pays only once; also usable by the console); the demo floppy's desktop edition. Audit.
+   68020 without an FPU pays only once; also usable by the console). **The demo floppy's desktop edition** (owner
+   2026-11-04: "We have a desktop. Now can we have a demo disk that boots into the desktop? ONE adf. With ahiru, Sumi,
+   ctop, preferably."; docs/d25-demo-floppy.md revision 3, Part 1: one DD ADF, the whole disk unpacked into memory at
+   boot, for the minimum's 4 MB of fast RAM) comes **next in block 5, after the desktop's real-hardware findings**,
+   ahead of the file view, viewers, preferences and TrueType, in its section 10's order (the box, the stage 2 loader,
+   `make demo`, the session, the keyboard, the network found by itself, `demo-test.sh`, the owner's A1200). Audit.
 6. **Sound and hardware:** a Paula server, `play`, a MOD player; optional memory protection on CPUs with an MMU; USB,
    RTG, faster IDE, CD. Audit.
 7. **Zenix builds itself, and fun:** assembler, C compiler, `make`, debugger, Lua; games and demos on Zenix. A full

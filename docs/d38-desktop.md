@@ -294,7 +294,7 @@ write outside the screen). Speed only on the real A1200 (the stock one and the 1
 **Later, not in the first step:** workspaces and the i3-style tiling desktop; a graphical file view (Ahiru-style);
 viewers (pictures, text); a preferences program (looks, keys, screen mode); TrueType fonts; the clipboard and drag and
 drop; menus of each program in the bar; a type-to-search launcher (FuzzyFind); 640x512 and RTG screens; sound events;
-the demo floppy's desktop edition (D25, postponed). Each its own approval.
+the demo floppy's desktop edition (approved 2026-11-04: D25 revision 3, Part 1). Each its own approval.
 
 ## 8. The looks to choose from
 
