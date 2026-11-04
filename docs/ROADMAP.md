@@ -75,6 +75,9 @@ IDE machine detection and timing, floppy write tail, gap, settle times, retries 
 timeouts); the floppy test is back in `make check`; verified in FS-UAE and on the host as the audit says per item; not
 yet on the A1200.
 
+**The minimum (owner 2026-11-04):** Zenix is made for a stock A1200 with 4 MB of fast RAM; a 2 MB chip-only A1200 is
+best effort, not a target (not a hard limit; as lean as possible stays the rule).
+
 ## The order of work (approved by the owner 2026-10-25)
 The phases below say *what*; this says *in which order*. When one item is done, the next starts at once. Real-hardware findings and problems found along the way are
 fixed next, ahead of everything here ("fix things when we find them"). A focused audit closes every block; its findings
