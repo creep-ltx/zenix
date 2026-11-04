@@ -8,12 +8,15 @@
  *     ends, before anything of either is freed; then the claim's DMA memory is freed and the claim ends;
  *   - cache maintenance over its DMA memory (Emu68's ARM cache; a real 68040/68060's data cache, D37);
  *   - its blocks (DRV_ATTACH, DRV_XFER) carried to "net" as kernel messages that never start a server.
+ *   - the parallel port (DESIGN D39): a claim of CIA-A's port B and CIA-B's bits 0-2, the ACK line's interrupt on
+ *     while it is held, and the count of its edges (DRV_PARACK);
  * Every op is for a child of the running network server only (not merely root: no sudo session claims a device);
  * the claim's ops for its holder only. Cold code: -Os in its own file. */
 #include "kernel.h"
 #include "netproto.h"
 #include "hwinfo.h"
 #include "zine.h"
+#include "hw.h"
 
 _Static_assert(sizeof(struct udrvattach) == UDRVATTACH_FIRST, "udrvattach's first size is frozen");
 _Static_assert(sizeof(struct udrvxfer) == UDRVXFER_FIRST, "udrvxfer's first size is frozen");
@@ -70,6 +73,10 @@ static long window(u32 base, u32 *size)
         *size = DRV_PCMCIA_SIZE;
         return 0;
     }
+    if (base == DRV_PARPORT) {
+        *size = 1;                      /* not a window: its quiesce steps are checked one by one (par_step_ok) */
+        return 0;
+    }
     if (!h || !base)
         return -ENODEV;
     if (h->genet && base == h->genet) {
@@ -84,6 +91,26 @@ static long window(u32 base, u32 *size)
         }
     }
     return -ENODEV;
+}
+
+/* DESIGN D39: a quiesce step of the parallel port's claim writes one byte of the data port or its direction, or
+ * changes bits 0-2 (BUSY, POUT, SEL) of CIA-B's port A or its direction and leaves bits 3-7 (the serial port's) */
+static int par_step_ok(const struct udrvstep *s)
+{
+    if (s->size != 1)
+        return 0;
+    if (s->addr == DRV_PARPORT || s->addr == DRV_PAR_DDRB)
+        return 1;
+    if (s->addr == DRV_PAR_PRA || s->addr == DRV_PAR_DDRA)
+        return s->op == DRVS_RMW && !(s->mask & ~7u) && !(s->value & ~s->mask);
+    return 0;
+}
+
+/* the ACK line's interrupt (CIA-A's FLG): on while the parallel port is claimed. An ICR write changes only the bits
+ * written as 1 (bit 7: set, else clear), so the timer's and the keyboard's stay as they are */
+static void par_flag(int on)
+{
+    CIAA(CIA_ICR) = on ? 0x90 : 0x10;
 }
 
 static void quiesce(const struct claim *c)
@@ -111,6 +138,8 @@ static void quiesce(const struct claim *c)
 static void release(struct claim *c, const char *why)
 {
     quiesce(c);
+    if (c->base == DRV_PARPORT)
+        par_flag(0);
     if (c->blk)
         mem_set_owner(c->blk, (u32)c->pid);
     kprintf("drv: claim of %p (pid %d) released (%s): %u quiesce steps run%s\n", c->base, c->pid, why, c->nq,
@@ -136,6 +165,8 @@ void drv_zine(void)
     for (int i = 0; i < NCLAIM; i++)
         if (claims[i].pid) {
             quiesce(&claims[i]);
+            if (claims[i].base == DRV_PARPORT)
+                par_flag(0);
             struct proc *p = proc_by_pid(claims[i].pid);
             if (p)
                 proc_kill(p);
@@ -250,7 +281,11 @@ long drv_sys(u32 opw, u32 a, u32 b)
         claims[f].pid = current->pid;
         claims[f].base = a;
         claims[f].size = size;
-        kprintf("drv: pid %d (%s) claims the device at %p (%u KB)\n", current->pid, current->name, a, size / 1024);
+        if (a == DRV_PARPORT) {
+            par_flag(1);
+            kprintf("drv: pid %d (%s) claims the parallel port\n", current->pid, current->name);
+        } else
+            kprintf("drv: pid %d (%s) claims the device at %p (%u KB)\n", current->pid, current->name, a, size / 1024);
         return f + 1;
     }
     case DRV_DMAMEM: {
@@ -284,7 +319,9 @@ long drv_sys(u32 opw, u32 a, u32 b)
         for (u32 k = 0; k < q.n; k++) {
             const struct udrvstep *s = &q.step[k];
             if ((s->op != DRVS_WRITE && s->op != DRVS_RMW) || (s->size != 1 && s->size != 2 && s->size != 4) ||
-                (s->addr & (s->size - 1)) || s->addr < c->base || s->addr - c->base > c->size - s->size)
+                (s->addr & (s->size - 1)))
+                return -EINVAL;
+            if (c->base == DRV_PARPORT ? !par_step_ok(s) : s->addr < c->base || s->addr - c->base > c->size - s->size)
                 return -EINVAL;         /* a bus error here would be a kernel crash: only the claimed window */
         }
         memcpy(c->q, q.step, sizeof c->q);
@@ -293,6 +330,12 @@ long drv_sys(u32 opw, u32 a, u32 b)
     }
     case DRV_CACHE:
         return cache(opw >> 8, a, b);
+    case DRV_PARACK: {
+        struct claim *c = mine(a);
+        if (!c || c->base != DRV_PARPORT)
+            return -EPERM;
+        return (long)(par_acks & 0x7FFFFFFFu);
+    }
     case DRV_ATTACH:
         return forward(NETDRV_ATTACH, a, b, UDRVATTACH_FIRST);
     case DRV_XFER:

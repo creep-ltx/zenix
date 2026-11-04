@@ -99,6 +99,8 @@ void *memmove(void *d, const void *s, unsigned long n);
 extern volatile u32 ticks;
 u32 hr_time(void);          /* E-clock ticks (eclock_hz), CIA-B timers A+B; wraps after ~1.7 h; never early */
 extern u32 eclock_hz;       /* 709379 (PAL) or 715909 (NTSC), read at boot */
+extern volatile u32 par_acks;   /* DESIGN D39: falling edges on the parallel port's ACK line (CIA-A's FLG) since boot,
+                                 * counted by the level-2 handler at every read of CIA-A's ICR; DRV_PARACK reads it */
 u32 rtc_read(void);
 extern u8 rtc_ok;                       /* rtc_read found a ticking battery clock */
 extern int tty_mirror;      /* 100 Hz, CIA-A timer A */
