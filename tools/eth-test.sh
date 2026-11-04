@@ -13,7 +13,8 @@
 # the emulator: no Emu68, so the hardware table names none): it says so and ends without touching anything (no
 # claim), netd starts it again and gives it up after 5 ends, the rest of the network (the loopback) keeps working.
 #   tools/eth-test.sh [PART...]      e: the A2065 (all of the above), g: genet without a GENET, p i m: the PC Card
-#                                    NE2000 driver with an empty slot, an IDE card, memory in the slot's addresses
+#                                    NE2000 driver with an empty slot, an IDE card, memory in the slot's addresses,
+#                                    l: the plipbox driver with nothing on the parallel port
 # Needs unprivileged user namespaces (unshare -rn), as slip-test.
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
@@ -228,8 +229,58 @@ part_m() {
     check "m: 8 MB of Zorro II RAM: the kernel refuses the slot and says where the memory is, nothing claimed" $ok "$(grep -a 'drv:\|ne2000' $k | tail -6)"
 }
 
-[ $# = 0 ] && set -- e g p i m
+# Part l (DESIGN D39): the plipbox driver /sbin/net/plipbox with nothing on the parallel port (FS-UAE has no plipbox):
+# it claims the port, says that nothing answers, lets the port go (its three quiesce steps), five times, then netd
+# gives it up; nothing else is disturbed: no fault, the boot floppy reads back as the host's image (the floppy's CIA
+# lines share CIA-B with the port), netd still serves. The line protocol is tested on the PC against a model of the
+# box (tools/plipbox-test.sh); the keyboard with the driver running: KBD_PLIPBOX=1 tools/kbd-test.sh.
+part_l() {
+    rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
+    printf 'auto eth0\niface eth0 inet dhcp\n    driver plipbox\n' > $OUT/interfaces-l
+    put $OUT/interfaces-l /etc/network/interfaces 644
+    cat > $OUT/l.sh <<'EOS'
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    dmesg | grep -q 'plipbox given up' && break
+    sleep 1
+done
+ifconfig > /tmp/l-ifc.txt 2>&1; echo st=$? >> /tmp/l-ifc.txt
+ping -c 2 127.0.0.1 > /tmp/l-ping.txt 2>&1; echo st=$? >> /tmp/l-ping.txt
+dd if=df0 of=/tmp/l-fd count=200 > /tmp/l-dd.txt 2>&1; sha256sum /tmp/l-fd > /tmp/l-fd.txt 2>&1
+dmesg > /tmp/l-k.txt
+sync
+EOS
+    put $OUT/l.sh /tests/l.sh 755
+    cat > $OUT/l.txt <<'EOS'
+wait zenix:/# 90
+sleep 1
+send sh /tests/l.sh > /tmp/l.out 2>&1; echo l-do""ne\r
+wait l-done 150
+stop
+EOS
+    ZENIX_BUILD=$BD tools/run-test.sh fsuae/a1200-020.fs-uae 230 "$OUT/l.txt" > $OUT/l.log 2>&1
+    local rc=$? f k=$OUT/l-k.txt ok n want
+    [ $rc = 0 ] || { echo "FAIL l: the run (exit $rc)"; tail -3 $OUT/l.log; pass=0; }
+    for f in ifc ping fd k; do get /tmp/l-$f.txt > $OUT/l-$f.txt; done
+    n=$(grep -acF 'plipbox: eth0: nothing answers on the parallel port: BUSY stays high (no plipbox, or it is off)' $k)
+    ok=0; [ "$n" = 5 ] && [ "$(grep -acE 'net: eth0: /sbin/net/plipbox \(pid [0-9]+\) ended, status 1$' $k)" = 5 ] &&
+        grep -aq 'net: eth0: /sbin/net/plipbox given up after 5 ends in 60 s (ifup eth0 starts it again)' $k && ok=1
+    check "l: no plipbox: \"nothing answers ... BUSY stays high\" and status 1, five times, then given up ($n lines)" $ok "$(grep -a 'plipbox\|eth0\|drv:' $k | tail -12)"
+    ok=0; [ "$(grep -acE 'drv: pid [0-9]+ \(plipbox\) claims the parallel port$' $k)" = 5 ] &&
+        [ "$(grep -acE 'drv: claim of 0x?bfe101 \(pid [0-9]+\) released \(the driver ended\): 3 quiesce steps run' $k)" = 5 ] && ok=1
+    check "l: the port claimed and let go with its 3 quiesce steps, each time" $ok "$(grep -a 'drv:' $k | tail -6)"
+    ok=0; ! grep -aq '\[kernel\]\|stray\|panic' $k && ! grep -aq '^eth0' $OUT/l-ifc.txt && grep -aqx 'st=0' $OUT/l-ifc.txt &&
+        grep -aq '2 packets transmitted, 2 received, 0% packet loss' $OUT/l-ping.txt && ok=1
+    check "l: no fault, no stray interrupt, no eth0; netd still serves (ping 127.0.0.1)" $ok "$(grep -a 'kernel\|stray\|panic' $k | tail -5; cat $OUT/l-ifc.txt $OUT/l-ping.txt)"
+    want=$(head -c 102400 $BD/zenix.adf | sha256sum | cut -c1-64)
+    ok=0; grep -aq "^$want " $OUT/l-fd.txt && ok=1
+    check "l: the boot floppy still reads: 200 sectors of df0 as the host's image" $ok "$(cat $OUT/l-fd.txt)"
+    e2fsck -fn $BD/zenix.hdf > $OUT/e2fsck-l.log 2>&1 && echo "PASS the host's e2fsck finds the root clean (l)" || { echo "FAIL e2fsck (l)"; pass=0; }
+}
+
+[ $# = 0 ] && set -- e g p i m l
 for p in "$@"; do
-    case $p in e|g|p|i|m) "part_$p" ;; *) echo "eth-test: unknown part $p"; exit 2 ;; esac
+    case $p in e|g|p|i|m|l) "part_$p" ;; *) echo "eth-test: unknown part $p"; exit 2 ;; esac
 done
 exit $((1 - pass))

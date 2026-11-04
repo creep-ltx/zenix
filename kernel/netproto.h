@@ -182,6 +182,9 @@ struct uroute {
                                  * with its data cache on (D37) by cpushl, on a 020/030 nothing; on Emu68 the ARM's */
 #define DRV_ATTACH   6          /* a: struct udrvattach *, b: its size -> the interface number; netd fills the block */
 #define DRV_XFER     7          /* a: struct udrvxfer *, b: its size -> 0; netd reads and writes the block */
+#define DRV_PARACK   8          /* a: the claim of DRV_PARPORT -> the falling edges on the parallel port's ACK line
+                                 * since boot (CIA-A's FLG, counted by the kernel's level-2 handler), bit 31 clear;
+                                 * -EPERM for any other claim (DESIGN D39) */
 /* DRV_CLAIM's base for the PC Card slot of an A600/A1200 (DESIGN D36): Gayle's attribute memory, I/O space and the
  * card's reset byte, 0xA00000-0xA4FFFF (the window the quiesce steps may write). -ENODEV on a machine without an
  * A600/A1200 Gayle; -EADDRINUSE when memory lies in the slot's addresses 0x600000-0xA4FFFF (an accelerator's or a
@@ -189,6 +192,15 @@ struct uroute {
 #define DRV_PCMCIA      0xA00000u
 #define DRV_PCMCIA_SIZE 0x50000u
 #define DRV_PCMCIA_LOW  0x600000u       /* the slot's common memory starts here: no RAM may lie from here to the end */
+/* DRV_CLAIM's base for the parallel port (DESIGN D39): CIA-A's port B (the data lines, 0xBFE101; its direction
+ * 0xBFE301) and bits 0-2 of CIA-B's port A (BUSY, POUT, SEL, 0xBFD000; its direction 0xBFD200). Its quiesce steps may
+ * write only those four bytes, one byte each, and the two of CIA-B only as DRVS_RMW of bits 0-2 (bits 3-7 are the
+ * serial port's lines). While it is claimed, CIA-A's FLG interrupt (the ACK line) is on. Every Amiga has the port:
+ * no -ENODEV */
+#define DRV_PARPORT     0xBFE101u
+#define DRV_PAR_DDRB    0xBFE301u
+#define DRV_PAR_PRA     0xBFD000u
+#define DRV_PAR_DDRA    0xBFD200u
 #define DRVC_CLEAN   1          /* frames the device will read: written back */
 #define DRVC_INVAL   2          /* buffers the device wrote: written back and dropped (never dropped unwritten) */
 

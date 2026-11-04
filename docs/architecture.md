@@ -1401,12 +1401,16 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   copy of the hardware table, first size `HWINFO_FIRST` 408: user-visible now, it grows at its end), `DRV_CLAIM` (a
   device the table names, GENET's base or a Zorro board's, never a RAM board, or `DRV_PCMCIA` 0xA00000, the A600/A1200's
   PC Card slot (its window 0xA00000-0xA4FFFF; -ENODEV without an A600/A1200 Gayle, `ide_gayle()`; -EADDRINUSE when a
-  memory pool or a RAM board lies in 0x600000-0xA4FFFF, logged with its range; DESIGN D36): the only owner, a second claim -EBUSY;
+  memory pool or a RAM board lies in 0x600000-0xA4FFFF, logged with its range; DESIGN D36), or `DRV_PARPORT` 0xBFE101,
+  the parallel port (CIA-A's port B and bits 0-2 of CIA-B's port A; its quiesce steps may write only the data port, its
+  direction and those three bits of CIA-B's port A and direction, by read-modify-write; CIA-A's FLG interrupt, the ACK
+  line, is on while it is held and its edges are counted by the level-2 handler at every read of the ICR, `par_acks`;
+  DESIGN D39): the only owner, a second claim -EBUSY;
   4 claims), `DRV_DMAMEM` (one region a claim, 64-byte aligned, whole lines, at most 4 MB, owned by the claim: neither
   netd's nor the driver's end frees it before the driver is reaped), `DRV_QUIESCE` (at most 8 register writes or read-modify-writes inside the
   claimed window, aligned), `DRV_CACHE` (write back, or write back and drop, whole 64-byte lines of the caller's DMA
   region: nothing on a 68k, whose data cache Zenix keeps off; Emu68's range opcodes with `HW_RANGEOPS`, else `cpushl`
-  per line; never a bare invalidate), and `DRV_ATTACH`/`DRV_XFER`, which the kernel checks (the block in the driver's
+  per line; never a bare invalidate), `DRV_PARACK` (the parallel port's claim: the ACK edges since boot, D39), and `DRV_ATTACH`/`DRV_XFER`, which the kernel checks (the block in the driver's
   memory, its size at least the first size and saying so) and sends to `net` as `NETDRV_ATTACH` (64) and
   `NETDRV_XFER` (65), kernel messages that never start a server (a[0] the driver's pid). **When a driver ends, and
   when netd ends**, `proc_exit` first runs the claim's quiesce program, then ends the claim ("drv: claim of ...

@@ -85,7 +85,7 @@ SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
 # TESTDRVS only built: the driver protocol's test driver, which tools/drv-test.sh puts on its own image
-NETDRVS := a2065 genet ne2000
+NETDRVS := a2065 genet ne2000 plipbox
 TESTDRVS := fake
 NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 # programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
@@ -647,9 +647,11 @@ STACK_drv-fake := 8192
 STACK_drv-a2065 := 8192
 STACK_drv-genet := 8192
 STACK_drv-ne2000 := 8192
+STACK_drv-plipbox := 8192
 # genet's chip and PHY code is genet-core.c, included by genet.c (and by the host test against the model)
 $(BUILD)/drv-genet.uo: net/drv/genet-core.c net/drv/genet.h
 $(BUILD)/drv-ne2000.uo: net/drv/ne2000-core.c net/drv/ne2000.h
+$(BUILD)/drv-plipbox.uo: net/drv/plipbox-core.c net/drv/plipbox.h
 # netd's stack: lwIP's deepest chain (a segment in, its answer out) and the log's formatting (D19 7.3: 8 KB)
 STACK_netd := 8192
 
