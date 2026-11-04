@@ -234,6 +234,7 @@ void kwork(void)
         serial_work();
         kbd_work();
         rnd_work();                     /* the entropy samples into the pool (D19) */
+        gcon_work();                    /* D38: the pointer's records, a release's deadline */
         irq_other_report();
     }
     busy = 0;
@@ -257,6 +258,7 @@ void irq2_c(u32 *rb)
         kbd_tick();
         audio_tick();
         input_poll();
+        gcon_tick();                    /* D38: the pointer of a console in graphics mode */
         fd_tick();
         rnd_tick();
         if (ntimer && (s32)(ticks - wake_min) >= 0)
