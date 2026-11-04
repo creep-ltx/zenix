@@ -24,6 +24,15 @@
 # self-test), cache new 1,643 and bss 17 (the choice, the set-up, the log lines, the test line), zine + 32, kbd + 12,
 # drv + 16; kernel.bin 169,640 -> 171,660, TOTAL 172,000 -> 172,400; the mount tests' RAM disk 712 -> 710 KB for it
 # (Makefile: 41 blocks stay free).
+# 2026-11-04 (DESIGN D20 7.2, D38 step 1: pseudo-terminals): tty 2,960 -> 5,800 and bss + 36 (the output ring, the
+# master's read, write and poll, hang-up, SYS_ttyctl, the session leader), vfs 11,150 -> 11,450 (/dev/ptmx, /dev/pts/N,
+# the master's file); kernel.bin 172,084 -> 175,732, TOTAL 172,400 -> 176,000; the mount tests' RAM disk 710 -> 704 KB.
+# 2026-11-04 (DESIGN D38 step 2: a console handed to the display server): gcon new 2,813 and bss 5 (the grab, the
+# ring, the switch's answer and its 1 s deadline, the pointer), gfx 8,000 -> 8,200 (the hand-over of the Copper
+# list), kbd 3,800 -> 4,300 (the qualifiers left and right, the keys to the ring with their characters); kernel.bin
+# 175,732 -> 179,700, TOTAL 176,000 -> 180,000; the mount tests' RAM disk 704 -> 700 KB. After the two reviews
+# (the grab ends with its server, the CPU draws after a forced switch, the hardware state restored, clicks latched, the
+# pty fixes): gcon 2,900 -> 3,400, gfx 8,200 -> 8,400, tty 5,800 -> 5,900; kernel.bin 180,720, TOTAL 181,000.
 start     4300   8200
 main      5950   1100
 serial    5950   6500
@@ -38,12 +47,12 @@ blk        460     16
 rtc       1550      4
 proc      9300  21500
 syscall  10150      0
-vfs      11150   1600
-tty       2960     64
-gfx       8000   2320
+vfs      11450   1600
+tty       5900    100
+gfx       8400   2320
 term     12800     64
 confont   3100     32
-kbd       3800    180
+kbd       4300    180
 ipc       3400   1600
 svc       5600   1420
 seg       1250    256
@@ -54,6 +63,7 @@ sock      4700   1060
 drv       2200    640
 zine      1500     16
 cache     1700     32
+gcon      3400     16
 embed    47500      0
-TOTAL   172400
+TOTAL   181000
 ROOM       800

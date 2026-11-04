@@ -410,8 +410,12 @@ void syscall_c(u32 *rb)
         tty_setmode(tty_of(current), (int)a1, current->pid);
         r = 0;
         break;
-    case SYS_ttyinfo:
-        r = term_size();
+    case SYS_ttyinfo:                   /* this process's tty's size: a console's screen, or its pty's (D20 7.2) */
+        r = tty_size(tty_of(current));
+        break;
+    case SYS_ttyctl:
+        if (GETFD(f, a1))
+            r = (s32)tty_ctl(f, a2, a3);
         break;
     case SYS_envset:                    /* a new block of the caller's (proc.c), then the old one goes */
         r = -E2BIG;
@@ -493,7 +497,7 @@ void syscall_c(u32 *rb)
     case SYS_groups: r = do_groups(a1, a2, a3); break;
     case SYS_umask: r = current->umask; current->umask = (u16)(a1 & 0777); break;
     case SYS_isatty:
-        r = GETFD(f, a1) && f->type == FT_TTY;
+        r = GETFD(f, a1) && (f->type == FT_TTY || f->type == FT_PTM);   /* a pty's master too (Linux) */
         break;
     case SYS_hrtime:
         r = (s32)hr_time();
@@ -562,10 +566,10 @@ void syscall_c(u32 *rb)
     case SYS_memalloc:                  /* the region's address, or 0 (NULL) when it cannot be given: never -1 */
         r = 0;
         if (a1 == 0 || a1 > MEMALLOC_MAX)
-            break;
+            break;                      /* a2: MEMA_CHIP chip RAM (D38); its other bits are ignored, as all of a2 was */
         for (int i = 0; i < NREG; i++)
             if (!current->reg[i].base) {
-                void *m = mem_alloc(a1, 0, (u32)current->pid);
+                void *m = mem_alloc(a1, a2 & MEMA_CHIP ? MEM_CHIP : 0, (u32)current->pid);
                 if (m) {
                     current->reg[i].base = (u32)m;
                     current->reg[i].size = a1;
@@ -578,6 +582,10 @@ void syscall_c(u32 *rb)
         r = -EINVAL;                    /* not a region memalloc gave this process */
         for (int i = 0; i < NREG; i++)
             if (current->reg[i].base == a1 && a1) {
+                if (gcon_uses(a1, current->reg[i].size)) {
+                    r = -EBUSY;         /* D38: the grab's Copper list or sprite lies there */
+                    break;
+                }
                 mem_free((void *)a1);
                 current->reg[i].base = 0;
                 r = 0;

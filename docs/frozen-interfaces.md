@@ -64,6 +64,35 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   console's UTF-8 rules as documented behaviour (D28 section 4: nothing decoded inside an escape sequence, a byte that
   is not part of a character one cell of its Latin-1 glyph or the box, C1 controls written as UTF-8 ignored, U+FFFE
   and U+FFFF stored as U+FFFD) and its widths (picolibc's `wcwidth` in a non-CJK locale, section 9).
+- **D20 7.2 (pseudo-terminals, D38 step 1, branch desk, 2026-11-04):** `SYS_ttyctl` 95 (fd, op, arg; -ENOTTY for a
+  descriptor that is no terminal, -EBADF, -EINVAL for another op) and its ops: `TTYC_GWINSZ` 1 (arg `struct
+  uwinsize *`, written: rows, columns, 0, 0; a console's is the screen's), `TTYC_SWINSZ` 2 (a pty's, on either end,
+  rows and columns 1..32767 else -EINVAL, a console -EINVAL; a change sends SIGWINCH to the slave's foreground),
+  `TTYC_OWNER` 3 (root, else -EPERM; a pty, a console -ENOTTY; arg a uid up to 65535), `TTYC_SCTTY` 4 (arg 0, a
+  console (root only, else -EPERM) or a pty's slave; -EPERM when another living process leads it, -EIO when hung up;
+  the old pty is freed if nobody names it any more); `struct uwinsize`
+  (Linux's `struct winsize`, 8 bytes); `SYS_ttyinfo`'s meaning, "this process's tty's size", now a pty's for a process
+  on one; the names `/dev/ptmx` and `/dev/pts/N`; a slave's `st_ino` its tty number `NCONS + 1 + N` (11 and up,
+  never 1..10) and a master's `0x100 + N`; `isatty` true on both ends; a master's read -EIO when no slave is open and
+  nothing is left, its `poll` POLLHUP then (also before the first slave open: unlike Linux, decided 2026-11-04 after
+  the reviews, `openpty` opens both first), its write -EIO when no slave is open and no living process names the pty
+  (no wait for a reader that will not come), its `poll` POLLOUT only when a printable byte fits; the hang-up's SIGHUP then SIGCONT, a hung-up slave's read 0 and write -EIO;
+  LF written to a slave reaching the master as CR LF; libz's and the C library's `ioctl` numbers (Linux's).
+- **D38 step 2 (a console in graphics mode, branch desk, 2026-11-04):** `SYS_console` ops 8 `CON_GRAB` (root, else
+  -EPERM; the op word's descriptor a console; a2 `struct ucongrab`, first size `UCONGRAB_FIRST` 24: size, the Copper
+  list and sprite 0 (the caller's chip RAM, even; the list ends 0xFFFF 0xFFFE within 4,096 moves, else -EINVAL;
+  outside: -EFAULT), the sprite's height 1..255 and hot spot, back the screen's width and height, the text console's
+  depth and `GCHIP_*`; -EBUSY when a console is grabbed, -ENODEV without a display; answers a new descriptor) and 9
+  `CON_GACK` (the grab's descriptor; a2 the release's number; -EINVAL for none or an older one, -EBADF); the
+  descriptor's reads (whole 16-byte records, -EINVAL for less room; waits unless `O_NONBLOCK`), its `poll` (POLLIN),
+  its last close giving the console back; `struct ugevent` (type, code, qual, x, y, ch[4], time) and its record types
+  1-5 with their fields' meanings; the `GQ_*` values (AmigaOS's `IEQUALIFIER`); the switch's contract (the release
+  asked on Amiga+F*n*, the 1 s deadline, after which the kernel draws with the CPU until the release is answered or
+  the server ends, a late `CON_GACK` of that number answering 0; `GEV_ACQUIRE` on return, every key then counting as
+  up; the kernel writing sprite 0's two control words in the vertical blank with HSTART 0x80 at the first pixel, so
+  the server's list keeps FMODE's sprite bits 0); the grab ending with the descriptor's last close or the server's
+  end; `SYS_memfree` -EBUSY for a region holding the grab's list or sprite; `SYS_memalloc`'s second argument
+  `MEMA_CHIP` 1 (its other bits ignored, as all of it was before).
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).

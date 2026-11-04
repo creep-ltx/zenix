@@ -290,7 +290,9 @@ checked without hearing it).
 Polled from the 100 Hz tick: JOY0DAT's two 8-bit counters give mouse movement (accumulated until read, so nothing is
 lost between reads), CIA-A port A bits 6 and 7 the left button and the joystick fire button, POTGOR the right and
 middle buttons; a joystick in port 2 is decoded from JOY1DAT. `SYS_input` (74) copies out
-{dx, dy, buttons, joystick} and clears the movement; `input` prints it. No pointer, no events yet.
+{dx, dy, buttons, joystick} and clears the movement; `input` prints it. While a console is in graphics mode and shown
+(section 11, "Graphics mode") the tick takes the movement for the pointer instead (`input_take`): `SYS_input` then
+sees none.
 
 ### Floppy driver (`kernel/floppy.c`, `kernel/mfm.h`) - experimental
 
@@ -530,7 +532,8 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
   crashed or killed process is cleaned up without any cooperation from it.
 - Free-byte counters are O(1), so `free` and `SYS_meminfo` read them cheaply.
 - `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 16 at a time,
-  each at most `MEMALLOC_MAX` = 64 MB). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
+  each at most `MEMALLOC_MAX` = 64 MB; its second argument `MEMA_CHIP` asks for chip RAM, DESIGN D38: the display
+  server's screen; other bits are ignored, as all of it was). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
   refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
 - Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
   at least one header, a multiple of 16 and inside the range. A header that fails means something overwrote the heap:
@@ -687,8 +690,9 @@ pattern (section 6).
   descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file). At most 256 arguments
   and 8 KB of argument text (`SPAWN_ARGC`, `SPAWN_ARGBYTES`, syscall.c; copied through the kernel heap, not the
   4 KB kernel stack); more is refused with -E2BIG.
-- **Controlling tty** (`struct proc` `ctty`, audit E): a process's terminal is the console of its fd 0 at spawn
-  when that is a console (init starting `login` on `/dev/ttyN`), else its parent's. `/dev/tty`, `SYS_ttymode`,
+- **Controlling tty** (`struct proc` `ctty`, audit E): a process's terminal is the tty of its fd 0 at spawn
+  when that is a tty (a console: init starting `login` on `/dev/ttyN`; a pty's slave: `term` starting the shell,
+  DESIGN D20 7.2), else its parent's. `/dev/tty`, `SYS_ttymode`,
   `SYS_setfg` and `SYS_ttyintr` use it, so the second stage of `ls | less` on console 2 reads console 2's keys
   (before, a process whose fd 0 was a pipe fell back to console 1).
 - Process exit closes fds, releases the tty, closes the process's ports (clients get an error), frees all
@@ -704,8 +708,8 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 91 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-94, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 92 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-95, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
@@ -713,7 +717,7 @@ events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), 
 `update`), services (`svc`), memory (`memalloc memfree meminfo`),
 time (`ticks hrtime time settime`; `ticks` with 0 is the 100 Hz tick count, a 32-bit number that wraps after 497 days, and with 1 the whole seconds since boot, the clock's own count that wraps after 136 years (`uptime`; audit 2026-10-26 F9); `time` is the seconds since 1970 as an **unsigned** 32-bit number, good until
 2106: the base the battery clock or `settime` gave plus the whole seconds the tick counts itself, `kernel/clock.h`, so
-it does not jump back when the 32-bit tick count wraps after 497 days; audit 2026-10-26 F8), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`, and `console`, the
+it does not jump back when the 32-bit tick count wraps after 497 days; audit 2026-10-26 F8), terminal (`ttymode ttyinfo ttyctl ttyintr setfg ttymirror`, and `console`, the
 display's colours: D14 note section 11), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid groups umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
@@ -1305,7 +1309,7 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   readers sends the writer SIGPIPE, which by default ends it with status 141 (ignored: the write gives -EPIPE; DESIGN
   D16). A blocked reader or writer waits on the pipe's slot mask (section 6). Special files `/dev/tty` (the process's controlling
   tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
-  (console 1, the same rule), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
+  (console 1, the same rule), `/dev/ptmx` and `/dev/pts/N` (pseudo-terminals, below), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
   is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
   receive ring for its reader - a ring of its own, allocated at the open and freed at the close: 4 KB, or 32 KB with
   2 MB of free fast RAM (netd's large profile), so it holds all that TCP's window lets the far side send while netd
@@ -1414,7 +1418,34 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   desktop features, ROADMAP phase 5). `init` keeps a `login` on every console that has been shown, like a getty:
   console 1 at boot, console N the first time it is shown (`con_switch` sees nobody whose controlling tty it is,
   sets a bit in `con_want` and readies init, which waits in `SYS_wait` with `WAIT_CONSOLE` - Linux's autovt does the
-  same), and a session that ends is followed by a new login. So a console costs memory only once it is used. **A
+  same), and a session that ends is followed by a new login. So a console costs memory only once it is used.
+  **Graphics mode** (`gcon.c`, DESIGN D38 step 2, Linux's `KD_GRAPHICS` with `VT_PROCESS`): `SYS_console` `CON_GRAB`
+  (root; the console named by a descriptor; `struct ucongrab`: the server's Copper list and sprite 0 in its chip RAM,
+  the list checked to end within 4,096 moves) hands one console to a display server and gives it a new descriptor.
+  While that console is shown the Copper runs the server's list (the kernel's own blit ends first; sprite DMA on),
+  `gfx_up()` is 0 so the kernel draws nothing (output to the console's tty still goes into its grid, and to the
+  serial port), and every key but Amiga+F1..F10 is a 16-byte record (`struct ugevent`: the raw code, the qualifiers
+  left and right apart with AmigaOS's `IEQUALIFIER` values, the keymap's character as UTF-8, the pointer, the tick)
+  in a 64-record ring the descriptor reads (`poll`: POLLIN); repeats are marked `GQ_REPEAT`. The keymap stays in the
+  kernel. **The pointer** is hardware sprite 0, the server's image: the 100 Hz tick takes the mouse's movement (two
+  hires pixels a count across, one line down, clamped to the screen) and latches the buttons' changes, the
+  vertical-blank interrupt writes the sprite's two control words, so the pointer never freezes while the server or a
+  disk is busy; kwork then puts `GEV_POINTER` records in the ring (a press and a release between two runs both told;
+  merged into an unread one while the qualifiers are the same). **Switching away** (Amiga+F*n* or the serial hook)
+  puts `GEV_RELEASE` with a number in the ring; the server ends its blit, stops using the blitter and answers
+  `CON_GACK` with that number; then the kernel shows the text console. No answer within 1 s: kwork switches anyway
+  and logs "display: pid N did not let go of console C within 1 s: switched anyway, the kernel draws with the CPU
+  until it answers" (the server may be half-way through a blit's set-up: the kernel leaves the blitter alone until the
+  late answer, which still counts, or the server's end). **Back again:** `GEV_ACQUIRE` (every key counts as up); the
+  server's bitplanes were never touched. Two slots of the ring are kept for these two; a full ring drops input
+  and says how much with `GEV_LOST`. **The descriptor's last close or the server's end** (whoever else holds the
+  descriptor: the list and the sprite are the server's memory, and `SYS_memfree` refuses those regions with -EBUSY
+  while the grab lasts) gives the console back: the kernel's Copper list at once (COPJMP1), the console's DMA on,
+  sprite DMA off and the eight sprites switched off, the display window (also in the kernel's Copper list every
+  frame), the text drawn again (from kwork when it came with interrupts off). A panic takes the screen back first. One console at a time (-EBUSY);
+  while one is grabbed `CON_COLOURS` and `ZINE_GO` answer -EBUSY. A switch between the modes stops a key's repeat. In FS-UAE no
+  sprite shows unless the server's list fetches at least one bitplane (found with `gcontest`). Verified in FS-UAE by
+  `tools/gcon-test.sh` (screenshots, `gcontest`, docs/man/gcontest.txt). **A
   login steps aside** (the 2 MB diet, DESIGN D18): Zenix has no `exec`, so the shell is a new process, and only a
   process that has become the user can start it as the user; init's login (`login --init`) spawns the shell and then
   ends through `SYS_exit` with its second argument naming the shell, which `proc_handover` makes init's child first
@@ -1444,6 +1475,33 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   kept**: when a program switches the tty to raw mode (the shell's line editor after a command), what was typed
   meanwhile as a half line goes into the queue as it is (before, `tty_setmode` dropped it: `rm /etc/motd` typed
   during a slow command arrived as `c/motd`).
+- **Pseudo-terminals** (`tty.c`, DESIGN D20 7.2, D38 step 1): `/dev/ptmx` opens the master of the lowest free pty
+  (anyone; -EAGAIN when all `NPTY` 8 are in use), `/dev/pts/N` its slave (root and the pty's owner uid, first the
+  master's opener, set by root's `TTYC_OWNER`: `login` gives it to the user; -ENOENT for a pty that does not exist,
+  -EIO once hung up). The slave is a tty like a console's (ttys `PTY_FIRST` 11 .. 18 after the consoles 1 .. 10), with
+  the same line discipline: what the master writes is typed into it (echo, editing, `^C`/`^Z` to the foreground,
+  cooked and raw), waiting while the input queue has no room for the next byte; what the slave writes, and the
+  echo, goes into a 2 KB output ring the master reads, LF as CR LF as the console draws it (an echo that finds the
+  ring full is dropped and counted in the log). `st_ino`: a slave's is its tty number (11 and up, never a console's,
+  so `login`'s autologin test never matches), a master's `PTY_MINO` 0x100 + N (`ptsname` reads N from it). A pty is
+  allocated at the master's open (about 3.6 KB with its rings) and freed only when the master, every slave descriptor
+  and every living process naming it as its controlling tty are gone, so a number is never reused while a
+  lingering process of an old session could read the next one's input. **Hang-up:** the master's last close sends
+  SIGHUP then SIGCONT to every process whose controlling tty it is (the members of a group on another terminal are
+  not hung up); then slave reads give 0 and writes -EIO. The interactive shell, on SIGHUP, sends SIGHUP and SIGCONT to
+  its jobs and ends (bash's rule). With no slave open, a master read gives -EIO (after what is left in the ring) and
+  `poll` POLLHUP; a master write then (and no living process on the pty) -EIO rather than a wait; `poll` says POLLOUT
+  only when a printable byte fits (a cooked line needs room for itself). **Size:** each pty has one (24 x 80 at first); `SYS_ttyinfo` answers the caller's tty's; `SYS_ttyctl`
+  (`fd`, `TTYC_*`, arg) gets it (`TTYC_GWINSZ`, a console's is the screen's), sets a pty's on either end
+  (`TTYC_SWINSZ`, 1..32767 each; a change sends SIGWINCH to the slave's foreground), sets the owner (`TTYC_OWNER`,
+  root) and makes the terminal the caller's controlling tty with the caller its session leader when nobody living
+  leads it (`TTYC_SCTTY`: a pty for anyone holding its slave, a console for root; the old pty freed when nobody
+  names it any more). The **session leader** is the first process spawned onto a tty from another one (`login`
+  on a pty), after D18's step-aside the shell `login` hands to; libz's `setsid` makes the caller its own group and,
+  through `TTYC_SCTTY`, the leader of its fd 0's terminal if nobody leads it (no POSIX session ids). libz and the C
+  library (`user/zpty.c`): `posix_openpt`, `grantpt` and `unlockpt` (nothing to do), `ptsname`, `ptsname_r`,
+  `openpty`, `setsid`, and `ioctl`'s `TIOCGWINSZ`, `TIOCSWINSZ`, `TIOCSCTTY`. Verified in FS-UAE by
+  `tools/pty-test.sh` (`ptytest`, docs/man/ptytest.txt).
 - **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
   NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100/xterm: cursor motion, erase, insert/delete, scroll regions,
   bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position, as input on the console of the

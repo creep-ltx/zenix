@@ -1,0 +1,5 @@
+wait zenix:/# 90
+sleep 1
+send ptytest; echo pty-end-$((40+2))\r
+wait pty-end-42 240
+sleep 1

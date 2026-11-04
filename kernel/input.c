@@ -70,3 +70,11 @@ void input_read(s32 *out)
     dx = dy = 0;
     irq_restore(sv);
 }
+
+/* DESIGN D38 step 2 (gcon.c): while a console is in graphics mode the tick takes the mouse for the pointer (the
+ * movement since, cleared, as SYS_input's; SYS_input then sees none) */
+void input_take(s32 *mx, s32 *my, u32 *b)
+{
+    *mx = dx; *my = dy; *b = buttons;
+    dx = dy = 0;
+}

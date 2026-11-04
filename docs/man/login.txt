@@ -65,6 +65,10 @@ FILES
     /var/lib/zpkg/result
 
 NOTES
+    On a pseudo-terminal (a terminal window, DESIGN D20 7.2) login gives
+    the pty to the user who logged in (SYS_ttyctl TTYC_OWNER), so that
+    user's programs may open /dev/tty and its /dev/pts/N again; on a
+    console there is nothing to give.
     login is a process group of its own (DESIGN D16), so kill 0 in a
     session never reaches init; the shell it starts makes its own group
     the terminal's foreground. The hand-over is SYS_exit's second argument

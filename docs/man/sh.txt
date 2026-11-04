@@ -150,7 +150,10 @@ JOBS
     the foreground (both send SIGCONT; the job is %n from jobs; without a
     number the most recent one). A program may catch these signals (less
     and edit leave the screen tidy and draw it again when continued). The
-    shell itself is its own group and is never stopped by Ctrl+Z.
+    shell itself is its own group and is never stopped by Ctrl+Z. When its
+    terminal hangs up (SIGHUP: the program holding a pseudo-terminal's
+    master closed it), an interactive shell sends SIGHUP and SIGCONT to
+    every job and ends with status 129, as bash does.
 
 SIGNALS
     trap 'commands' SIGNAL... runs the commands when the signal arrives,

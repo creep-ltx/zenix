@@ -69,6 +69,8 @@ static inline int sys_getcwd(char *b, u32 n) { return sys3(16, (u32)b, n, 0); }
 static inline int sys_pipe(int fds[2]) { return sys3(17, (u32)fds, 0, 0); }
 static inline int sys_pipe2(int fds[2], int flags) { return sys3(17, (u32)fds, (u32)flags, 0); }   /* flags: O_NONBLOCK (both ends) */
 static inline void *sys_memalloc(u32 n) { return (void *)sys3(18, n, 0, 0); }   /* 0 (NULL) on failure */
+#define MEMA_CHIP 1             /* DESIGN D38: chip RAM (the blitter, the Copper and the sprites reach only that) */
+static inline void *sys_memalloc_chip(u32 n) { return (void *)sys3(18, n, MEMA_CHIP, 0); }
 static inline int sys_memfree(void *p) { return sys3(19, (u32)p, 0, 0); }
 static inline u32 sys_ticks(void) { return (u32)sys3(20, 0, 0, 0); }
 static inline u32 sys_uptime(void) { return (u32)sys3(20, 1, 0, 0); }   /* whole seconds since boot (F9) */
@@ -119,6 +121,12 @@ static inline int sys_sync(void) { return sys3(44, 0, 0, 0); }
 #define TTY_NOSIG 2
 static inline int sys_ttymode(int flags) { return sys3(45, (u32)flags, 0, 0); }
 static inline int sys_ttyinfo(void) { return sys3(46, 0, 0, 0); }   /* rows << 16 | columns */
+/* DESIGN D20 7.2: a terminal's settings, named by a descriptor (a console, a pty's slave or master) */
+#define TTYC_GWINSZ 1           /* arg struct winsize *: its size (a console's: the screen's) */
+#define TTYC_SWINSZ 2           /* arg struct winsize *: a pty's new size (SIGWINCH to its foreground on a change) */
+#define TTYC_OWNER  3           /* arg a uid: root only, a pty: who may open its slave */
+#define TTYC_SCTTY  4           /* arg 0: this tty becomes the caller's controlling tty, the caller its session leader */
+static inline int sys_ttyctl(int fd, int op, u32 arg) { return sys3(95, (u32)fd, (u32)op, arg); }
 static inline int sys_envset(const char *block, u32 len) { return sys3(47, (u32)block, len, 0); }
 static inline int sys_envget(char *block, u32 max) { return sys3(48, (u32)block, max, 0); }
 static inline int sys_dup(int fd) { return sys3(49, (u32)fd, 0, 0); }
@@ -279,6 +287,47 @@ static inline int sys_conread(int fd, struct uconread *r) { return sys3(89, CON_
 static inline int sys_conread4(int fd, struct uconread *r) { return sys3(89, CON_READ | (u32)(fd + 1) << 8, (u32)r, CONRF_CELL4); }
 static inline int sys_conline(int fd, int line, struct uconline *d) { return sys3(89, CON_LINE | (u32)(fd + 1) << 8, (u32)line, (u32)d); }
 static inline int sys_coninput(int fd, int kind, const void *b, u32 n) { return sys3(89, CON_INPUT | (u32)(fd + 1) << 8, (u32)b, n | (u32)kind << 16); }
+/* DESIGN D38 step 2: a console in graphics mode for the display server (root; kernel/kernel.h has the whole contract).
+ * CON_GRAB on a console's descriptor -> a descriptor that reads struct ugevent records; CON_GACK on that one answers a
+ * GEV_RELEASE. The structs are frozen (the first sizes below). */
+#define CON_GRAB 8
+#define CON_GACK 9
+struct ucongrab {
+    u32 size, cop, sprite;      /* the Copper list and sprite 0 (the pointer), both the caller's chip RAM */
+    unsigned short sprh;        /* the sprite's height in lines */
+    signed char hotx, hoty;     /* its hot spot */
+    unsigned short width, height, depth, chips;     /* back: the screen, the text console's planes, GCHIP_* */
+};
+#define UCONGRAB_FIRST 24
+#define GCHIP_AGA 1
+_Static_assert(sizeof(struct ucongrab) == UCONGRAB_FIRST, "ucongrab's first size");
+struct ugevent {
+    unsigned char type, code;   /* GEV_*; a key's raw code, bit 7 up */
+    unsigned short qual;        /* GQ_* */
+    short x, y;                 /* the pointer; GEV_RELEASE: its number, GEV_LOST: how many */
+    unsigned char ch[4];        /* a key's character, UTF-8 */
+    u32 time;                   /* the 100 Hz tick */
+};
+_Static_assert(sizeof(struct ugevent) == 16, "ugevent is 16 bytes");
+#define GEV_KEY 1
+#define GEV_POINTER 2
+#define GEV_RELEASE 3
+#define GEV_ACQUIRE 4
+#define GEV_LOST 5
+#define GQ_LSHIFT 0x0001
+#define GQ_RSHIFT 0x0002
+#define GQ_CAPS 0x0004
+#define GQ_CTRL 0x0008
+#define GQ_LALT 0x0010
+#define GQ_RALT 0x0020
+#define GQ_LAMIGA 0x0040
+#define GQ_RAMIGA 0x0080
+#define GQ_REPEAT 0x0200
+#define GQ_MBUTTON 0x1000
+#define GQ_RBUTTON 0x2000
+#define GQ_LBUTTON 0x4000
+static inline int sys_congrab(int fd, struct ucongrab *g) { return sys3(89, CON_GRAB | (u32)(fd + 1) << 8, (u32)g, 0); }
+static inline int sys_congack(int gfd, u32 seq) { return sys3(89, CON_GACK | (u32)(gfd + 1) << 8, seq, 0); }
 #ifndef ZENIX_LIBC                       /* the C library: its own headers have them (libc/zenix/include) */
 #define SIGHUP   1
 #define SIGINT   2

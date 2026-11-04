@@ -166,10 +166,20 @@ void kfree(void *p);
 #define COLS  80
 #define TROWS_MAX 32                    /* text rows on a PAL display; NTSC shows 25 (trows, measured at boot) */
 #define NCONS 10                        /* virtual consoles /dev/tty1 .. /dev/tty10 (Amiga+F1..F10) */
+/* DESIGN D20 7.2, D38 step 1: pseudo-terminals. /dev/ptmx opens the master of a free one, /dev/pts/N (N 0..NPTY-1) is
+ * its slave; ttys 1..NCONS are the consoles, PTY_FIRST + N the ptys (a slave's st_ino is its tty number, a master's
+ * PTY_MINO + N: never 1..NCONS). Allocated at the master's open, freed when the master, every slave descriptor and
+ * every process naming it as its controlling tty are gone */
+#define NPTY 8
+#define PTY_FIRST (NCONS + 1)
+#define NTTYS (NCONS + 1 + NPTY)        /* tty numbers 1 .. NTTYS - 1 (0: none) */
+#define PTY_MINO 0x100
+#define PTY_ROWS 24                     /* a new pty's size until its master sets one */
+#define PTY_COLS 80
 extern int trows;
 int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
-int gfx_up(void);
+int gfx_up(void);                /* the kernel may draw: the display is up and no console is handed over (D38) */
 void gfx_panic(void);            /* panic with the display up: dark red background, white text, the text stays */
 extern int gfx_depth;            /* bitplanes: 1 to 4 (DESIGN D14; 0: no display) */
 extern const u16 gfx_palette[16];       /* the 16 ANSI colours, 12 bits */
@@ -220,6 +230,7 @@ void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
 int term_ckm(void);                     /* the console on the screen wants ESC O A arrows (DECCKM) */
 int term_size(void);                    /* rows << 16 | columns */
 void con_switch(int con);               /* show console con (1..NCONS); an unused one asks init for a login */
+void con_show(int con);                 /* show it now (con_switch's end; gcon.c once the display server let go) */
 int con_in_use(int con);                /* is a live process's controlling tty this console? */
 extern int con_cur;                     /* the console on the screen (keyboard and serial input go to it) */
 extern u16 con_want;                    /* bit n: console n was shown with nobody on it (init's WAIT_CONSOLE) */
@@ -318,7 +329,8 @@ union zhdr { struct zexe v1; struct zex2 v2; };
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16
 #define NFILE 64
-enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM, FT_SOCK };   /* FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19; FT_SOCK: a socket (ino: its ksock), D19 */
+enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM, FT_SOCK, FT_PTM, FT_GCON };   /* FT_PTM: a pty's master (off: its tty number), D20 7.2; FT_GCON: a console
+                                         * in graphics mode's input ring (D38 step 2, gcon.c); FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19; FT_SOCK: a socket (ino: its ksock), D19 */
 struct pipe {
     u8 buf[2048];
     u16 rd, wr, count;
@@ -503,7 +515,7 @@ struct proc {                   /* start.S relies on the first three: */
     u8 blevel;                  /* NICE_LEVEL(nice), kept so that no path divides */
     u8 prio;                    /* effective level (0 highest): blevel, or a better client's while serving it */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
-    u8 ctty;                    /* controlling tty (console 1..NCONS): the console of fd 0 at spawn, else the parent's */
+    u8 ctty;                    /* controlling tty (1..NTTYS-1: a console or a pty): the tty of fd 0 at spawn, else the parent's */
     u8 wait_con;                /* in wait with WAIT_CONSOLE: a console switch posts it EV_CON */
     int wait_port;              /* P_MSG: as a server the port being listened on, as a client the port called */
     char name[16];
@@ -770,6 +782,20 @@ int tty_fgpid(int tty);                 /* the foreground's pid when it is a sin
 int tty_in_fg(int tty, const struct proc *p);   /* p is the tty's foreground (its group, or it), or nobody is set */
 u16 tty_poll(int tty);                  /* D16: POLLIN when a read would not wait (registers the caller); POLLOUT */
 int tty_of(const struct proc *p);
+/* DESIGN D20 7.2: pseudo-terminals (tty.c) */
+long pty_alloc(void);                   /* /dev/ptmx: a free pty, owned by the caller -> its tty number, or -EAGAIN/-ENOMEM */
+long pty_slave_ok(int n);               /* /dev/pts/n may be opened by the caller -> its tty number, or -errno */
+void tty_opened(int type, int tty);     /* a new file of type FT_TTY or FT_PTM names this tty: counted */
+void tty_closed(int type, int tty);     /* its last close (the master's hangs the slave up) */
+void tty_gc(int tty);                   /* a pty nobody names any more is freed */
+long ptm_read(int tty, void *buf, u32 n, int nonblock);
+long ptm_write(int tty, const void *buf, u32 n, int nonblock);
+u16 ptm_poll(int tty);
+int tty_size(int tty);                  /* rows << 16 | columns: a console's screen, or a pty's size */
+long tty_ctl(struct file *f, u32 op, u32 arg);   /* SYS_ttyctl */
+void tty_spawned(struct proc *p, int parent_ctty);   /* the session leader rule (D20 7.2) */
+void tty_lead_move(int from_pid, int to_pid);  /* D18's step-aside: the leader's role moves with the child */
+void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, an unused pty is freed */
 
 /* syscalls: TRAP #0, number in d0, args d1-d3, result in d0 */
 #define SYS_exit    1    /* status; a2 (DESIGN D18): a child's pid, made the parent's child first (0: none) */
@@ -789,7 +815,8 @@ int tty_of(const struct proc *p);
 #define SYS_chdir   15
 #define SYS_getcwd  16
 #define SYS_pipe    17   /* int fds[2], flags (0, or O_NONBLOCK for both ends: Linux's pipe2; D20 step 4) */
-#define SYS_memalloc 18
+#define SYS_memalloc 18   /* size, flags (MEMA_CHIP chip RAM, DESIGN D38: the display server's screen; other bits ignored) */
+#define MEMA_CHIP    1
 #define SYS_memfree  19
 #define SYS_ticks   20   /* 0 -> the 100 Hz tick count (wraps); 1 -> whole seconds since boot (unsigned, F9); 2 -> CLOCK_* bits */
 #define CLOCK_RTC   1    /* SYS_ticks 2: the battery clock set the time at boot (D21 8.3) */
@@ -918,6 +945,81 @@ struct uconline {            /* CON_LINE: the caller fills size, pens, npens; th
     u16 palette[16];         /* pens 0 .. 2^depth - 1 as the next frame shows them, 12 bits 0x0RGB; the rest 0 */
 };
 #define UCONLINE_FIRST  56
+/* DESIGN D38 step 2 (gcon.c; frozen): a console in graphics mode for a display server. CON_GRAB: root, the console
+ * named by the op word's descriptor; a2 struct ucongrab -> a new descriptor whose reads give struct ugevent records
+ * (whole ones; waits unless O_NONBLOCK) and whose poll gives POLLIN; its last close gives the console back. -EBUSY: a
+ * console is grabbed already; -ENODEV: no display. CON_GACK: the grab's descriptor in the op word; a2 the number of
+ * the GEV_RELEASE being answered: the server has let go of the screen and the blitter (-EINVAL: none asked, or an
+ * older one). No answer within 1 s: the kernel switches anyway and logs it. */
+#define CON_GRAB        8
+#define CON_GACK        9
+struct ucongrab {            /* CON_GRAB: the caller fills size .. hoty; the kernel the rest */
+    u32 size;                /* UCONGRAB_FIRST or more */
+    u32 cop;                 /* the Copper list: the caller's chip RAM, ending 0xFFFF 0xFFFE (at most 4,096 moves);
+                              * it sets all eight sprite pointers every frame, sprite 0 at `sprite`, keeps FMODE's
+                              * sprite bits 0 (16-pixel sprites), and fetches at least one bitplane (in FS-UAE no
+                              * sprite shows without); FMODE, BPLCON3/4, the modulos and DDF carry over from the
+                              * kernel's list unless it sets them; it leaves BEAMCON0 alone */
+    u32 sprite;              /* sprite 0, the pointer: its two control words (the kernel writes them), sprh line pairs,
+                              * two zero words; the caller's chip RAM */
+    u16 sprh;                /* its height in lines, 1..255 */
+    s8 hotx, hoty;           /* the hot spot in the sprite: hires pixels, lines */
+    u16 width, height;       /* back: the screen in hires pixels and lines (640 x 256 PAL, 640 x 200 NTSC) */
+    u16 depth;               /* back: the planes the text console uses (D14's choice for this machine) */
+    u16 chips;               /* back: GCHIP_* */
+};
+#define UCONGRAB_FIRST  24
+#define GCHIP_AGA       1
+struct ugevent {             /* a record of the grab's ring (16 bytes, frozen) */
+    u8 type;                 /* GEV_* */
+    u8 code;                 /* GEV_KEY: the raw key code, bit 7 set when it goes up */
+    u16 qual;                /* GQ_* bits: the qualifiers and the mouse buttons when it happened */
+    short x, y;              /* the pointer (hires pixels, lines); GEV_RELEASE: x its number; GEV_LOST: x how many */
+    u8 ch[4];                /* GEV_KEY going down: the keymap's character as UTF-8 (0-filled), none for other keys */
+    u32 time;                /* the 100 Hz tick */
+};
+#define GEV_KEY         1
+#define GEV_POINTER     2    /* moved, or a button changed (merged while unread) */
+#define GEV_RELEASE     3    /* let go of the screen and the blitter, then CON_GACK x */
+#define GEV_ACQUIRE     4    /* the console is shown: the screen and the blitter are the server's */
+#define GEV_LOST        5    /* the ring was full: x records were dropped */
+#define GQ_LSHIFT       0x0001          /* AmigaOS's IEQUALIFIER values */
+#define GQ_RSHIFT       0x0002
+#define GQ_CAPS         0x0004
+#define GQ_CTRL         0x0008
+#define GQ_LALT         0x0010
+#define GQ_RALT         0x0020
+#define GQ_LAMIGA       0x0040
+#define GQ_RAMIGA       0x0080
+#define GQ_REPEAT       0x0200
+#define GQ_MBUTTON      0x1000
+#define GQ_RBUTTON      0x2000
+#define GQ_LBUTTON      0x4000
+long gcon_grab(int con, u32 a2);
+long gcon_ack(struct file *f, u32 seq);
+long gcon_read(struct file *f, void *buf, u32 n);
+u16 gcon_poll(struct file *f);
+void gcon_close(struct file *f);
+int gcon_active(void);                  /* the grabbed console is shown: keys and the mouse go to its ring */
+int gcon_grabbed(void);                 /* a console is in graphics mode (ZINE refuses then) */
+int gcon_away(int to);                  /* con_switch: ask the server to let go -> 1, the switch waits */
+int gcon_shown(int con);                /* con_show: con is the grabbed console -> 1, the server's screen */
+void gcon_key(u8 code, u16 qual, const u8 *ch);
+void gcon_tick(void);                   /* the 100 Hz tick: the pointer */
+void gcon_work(void);                   /* kwork: the pointer's records, the release's deadline */
+void gcon_vblank(void);                 /* the vertical-blank interrupt: the pointer's control words */
+void gcon_proc_exit(int pid);           /* the server ends: the grab with it */
+int gcon_uses(u32 base, u32 size);      /* SYS_memfree: the grab's Copper list or sprite lies in this region */
+void gfx_blit_cpu(int on);              /* the kernel copies and fills with the CPU (a forced switch) */
+int gfx_present(void);                  /* the display is up (also while a server has it: a panic takes it back) */
+void gfx_reclaim(void);                 /* a panic: the kernel's display back at once */
+void kbd_forget(void);                  /* no key repeats on (a switch between text and graphics mode) */
+void gfx_hand(u32 cop);                 /* the Copper list shown: a server's (sprites on), or 0 the kernel's */
+int gfx_diwv(void);                     /* the display window's first line */
+void gfx_geom(u16 *w, u16 *h);          /* the screen in hires pixels and lines */
+int gfx_aga(void);
+u16 kbd_qual(void);                     /* the qualifiers held now (GQ_* bits, no buttons) */
+void input_take(s32 *dx, s32 *dy, u32 *buttons);   /* the tick: the mouse's movement since, cleared, and its buttons */
 long gfx_conline(u32 line, struct uconline *d);  /* CON_LINE's display part, console and struct checked (term_conop) */
 int kbd_inject(const u8 *codes, int n);  /* CON_INPUT's raw keys -> n, or -EINVAL (a refused code: nothing taken) */
 int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes taken, -ENXIO: no tty yet */
@@ -932,6 +1034,14 @@ int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes tak
 #define SYS_groups      94   /* op, buffer, count */
 #define GROUPS_GET      0
 #define GROUPS_SET      1
+/* DESIGN D20 7.2 (frozen): a terminal's settings, named by a descriptor (a console, a pty's slave or master) */
+#define SYS_ttyctl      95   /* fd, op (TTYC_*), arg -> 0 or -errno (-ENOTTY: not a terminal) */
+#define TTYC_GWINSZ     1    /* arg struct uwinsize *: its size (a console's: the screen's) */
+#define TTYC_SWINSZ     2    /* arg struct uwinsize *: a pty's new size; a change sends SIGWINCH to its foreground */
+#define TTYC_OWNER      3    /* arg a uid: root only, a pty: who may open its slave (login sets the user) */
+#define TTYC_SCTTY      4    /* arg 0: the caller's controlling tty becomes this one and the caller its session leader,
+                              * if nobody (else) living leads it (-EPERM); TIOCSCTTY's subset, used by libz's setsid */
+struct uwinsize { u16 row, col, xpixel, ypixel; };   /* Linux's struct winsize (frozen) */
 long zine_sys(u32 op, u32 a, u32 b);
 struct zine_range;
 u32 mem_ranges(const struct zine_range **r);    /* D29: mem.c's pool ranges, for ZINE's blob */

@@ -44,7 +44,7 @@ zenix/
 | The network's kernel part (DESIGN D19) | `sock.c` (sockets: the calls to netd and the waiting), `drv.c` (the network's drivers: claims, DMA memory, quiesce, their blocks to netd), `netproto.h` (the protocol), `random.c` (the entropy pool) |
 | System calls | `syscall.c` (the TRAP #0 table, every pointer checked), `errno.h` |
 | Files | `vfs.c` (open files, pipes, the mount table, devices), `ext2.c` (the ext2 code the `fsd` server runs) |
-| Terminal and screen | `tty.c` (line discipline, consoles), `term.c` (the ANSI/VT100 parser), `gfx.c` (Copper and blitter drawing) |
+| Terminal and screen | `tty.c` (line discipline, consoles, pseudo-terminals), `term.c` (the ANSI/VT100 parser), `gfx.c` (Copper and blitter drawing), `gcon.c` (a console handed to the display server, DESIGN D38) |
 | Input | `kbd.c` (keyboard, keymaps, console keys), `input.c` (mouse and joystick) |
 | Disks | `blk.c` (picks the disk), `ide.c` (Gayle and A4000 IDE), `emmc.c` (the Pi's SD card), `a3000.c` (A3000 SCSI), `floppy.c` |
 | Other hardware | `serial.c` (serial port, kernel log, `/dev/ttyS0`), `rtc.c` (battery clock), `audio.c` (the bell) |
@@ -59,14 +59,16 @@ zenix/
   own small library, which every program built so far uses; the files it shares with the standard C library (DESIGN
   D27): `zshare.h`, `zmalloc.c` (the allocator), `zenv.c` (the environment), `zout.c` (the buffered output),
   `zerrtab.c` (the error texts), `zsig.c` (signals), `zpoll.c` (`poll`, `select`), `zsock.c` (sockets), `zhelp.c`
-  (paths, directories, colours), `zpw.c` and `zpw.h` (the passwd and group parser; `pw.c` keeps the editing);
+  (paths, directories, colours), `zpw.c` and `zpw.h` (the passwd and group parser; `pw.c` keeps the editing),
+  `zpty.c` (pseudo-terminals: `posix_openpt`, `ptsname`, `openpty`, `setsid`; DESIGN D20 7.2);
   `socket.h` is the sockets' one header for both. `libctest.c`: the standard C library's test program
   (`/tests/libctest`, and its ZEX2 build `/tests/libctestpure`); `tuitest.c`: the text-UI library's (`ports/tui`,
   `/tests/tuitest`).
 - **`libc/`, the standard C library (DESIGN D27, docs/d27-c-library.md):** `picolibc/` picolibc 1.8.10, only the files
   built (`sources.mk`, `picolibc.h`, its licences, README); `zenix/` Zenix's port (the system layer, the streams,
   the start and exit, `strerror`, `dprintf`, directories, the 64-bit division, termios, `posix_spawn` and the
-  waits, users, `glob`, `regcomp`) and `zenix/include/` the headers with Zenix's numbers.
+  waits, users, `glob`, `regcomp`) and `zenix/include/` the headers with Zenix's numbers (also `pty.h` and the
+  pseudo-terminal calls `stdlib.h` adds to picolibc's).
   Built into `build/libc.a` and `build/libc-pure.a`.
 - **ZINE's cores (DESIGN D29, docs/d29-zine.md 16.1):** `zine/`: `hunk.c` (the hunk check and loader), `zvol.c` (the
   in-memory volume), `zplan.c` (the memory planner), `lvo.c`/`lvo.h` (the library offset names, made by

@@ -264,7 +264,7 @@ static int conops(void)
     ck(conline(t9, 0, &d, pens, 640) == -ENXIO && sys_coninput(t9, CONI_TEXT, "x", 1) == -ENXIO,
        "CON_LINE, CON_INPUT text of a console never used: ENXIO", 0);
     sys_close(t9);
-    ck(sys3(89, 8 | 2u << 8, 0, 0) == -EINVAL && sys3(89, 4 | 2u << 8, 0, 0) == -EINVAL, "ops 4 and 8: EINVAL", 0);
+    ck(sys3(89, 10 | 2u << 8, 0, 0) == -EINVAL && sys3(89, 4 | 2u << 8, 0, 0) == -EINVAL, "ops 4 and 10: EINVAL (8 and 9 are D38's)", 0);
     /* CON_LINE */
     r = conline(1, 0, &d, 0, 0);
     ck(r == 0 && d.width == 640 && d.height == rows * 8 && d.depth == depth, "CON_LINE: the display's facts", d.depth);

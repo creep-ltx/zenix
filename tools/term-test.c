@@ -162,6 +162,11 @@ int user_ok_wr(const struct proc *p, u32 ptr, u32 len) { (void)p; (void)ptr; (vo
 static int raw_n, text_con, text_n, line_n;
 int kbd_inject(const u8 *c, int n) { (void)c; raw_n = n; return n; }
 int tty_type(int con, const u8 *b, int n) { (void)b; text_con = con; text_n = n; return n; }
+/* DESIGN D38 step 2 (gcon.c): no console is ever grabbed here */
+int gcon_away(int to) { (void)to; return 0; }
+int gcon_shown(int con) { (void)con; return 0; }
+long gcon_grab(int con, u32 a2) { (void)con; (void)a2; return -EPERM; }
+long gcon_ack(struct file *f, u32 seq) { (void)f; (void)seq; return -EBADF; }
 long gfx_conline(u32 line, struct uconline *d) { (void)d; line_n = (int)line; return 640; }
 
 static int bad;
@@ -958,7 +963,8 @@ int main(void)
         me.uid = 1000;
         EXPECT_TRUE(term_conop(OP(CON_READ, 1), (u32)(unsigned long)r, 0) == -EPERM && term_conop(OP(CON_INPUT, 9), 0, 0) == -EPERM &&
                     term_conop(OP(CON_LINE, 1), 0, 0) == -EPERM, "not root: -EPERM, before the descriptor's checks");
-        EXPECT_TRUE(term_conop(OP(8, 1), 0, 0) == -EINVAL, "op 8: -EINVAL");
+        EXPECT_TRUE(term_conop(OP(10, 1), 0, 0) == -EINVAL, "op 10: -EINVAL (8 and 9 are D38's)");
+        EXPECT_TRUE(term_conop(OP(CON_GRAB, 1), 0, 0) == -EPERM, "CON_GRAB, not root: -EPERM");
     }
 
     /* ---- DESIGN D28: UTF-8, the cells, wide characters, the 8-bit mode, CON_UFONT ---- */

@@ -364,6 +364,8 @@ void term_scroll_view(int delta)
 
 void term_redraw(void)
 {
+    if (!gfx_up())
+        return;                                         /* no display, or a display server has it (D38) */
     struct term *t = get(con_cur);
     t->changes++;                                       /* what the display shows of it changed (CON_READ) */
     gfx_show(t->font, t->rules & CONR_CGAPAL, eight(t));    /* its font, palette (D20), 8-bit mode (D28) */
@@ -1090,9 +1092,22 @@ void con_switch(int w)
     }
     if (w == con_cur)
         return;
+    if (gcon_away(w))
+        return;                                         /* D38: the display server is asked to let go first */
+    con_show(w);
+}
+
+/* show console w now: con_switch's end, or (gcon.c) once the display server has let go. The console in graphics
+ * mode is its server's to draw (D38 step 2) */
+void con_show(int w)
+{
+    if (w < 1 || w > NCONS)
+        return;
     if (wsp[con_cur])
         wsp[con_cur]->changes++;                        /* no longer shown (CON_READ's flag) */
     con_cur = w;
+    if (gcon_shown(w))
+        return;
     if (gfx_up())
         term_redraw();
 }
@@ -1185,8 +1200,12 @@ long term_conop(u32 op, u32 a2, u32 a3)
 {
     u32 fd = (op >> CON_FD_SHIFT) - 1;
     op &= (1u << CON_FD_SHIFT) - 1;
-    if (op != CON_FONT && op != CON_RULES && (op < CON_READ || op > CON_INPUT))
+    if (op != CON_FONT && op != CON_RULES && (op < CON_READ || op > CON_GACK))
         return -EINVAL;
+    if (op == CON_GACK) {                               /* D38: the grab's own descriptor */
+        struct file *g = fd < NFD ? current->fd[fd] : 0;
+        return g ? gcon_ack(g, a2) : -EBADF;
+    }
     int d24 = op >= CON_READ;
     if (d24 && current->uid != 0)
         return -EPERM;
@@ -1196,6 +1215,8 @@ long term_conop(u32 op, u32 a2, u32 a3)
     if (f->type != FT_TTY || f->off < 1 || f->off > NCONS)
         return -ENOTTY;
     int con = (int)f->off, own = con == tty_of(current);
+    if (op == CON_GRAB)
+        return gcon_grab(con, a2);                      /* D38 step 2: root (gcon.c checks) */
     if (d24) {
         if (op == CON_INPUT) {
             u32 n = a3 & 0xFFFF, kind = a3 >> 16;

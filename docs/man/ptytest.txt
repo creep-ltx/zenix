@@ -1,0 +1,50 @@
+PTYTEST(1)		Zenix manual
+
+NAME
+    ptytest - test the pseudo-terminals
+
+SYNOPSIS
+    ptytest
+
+DESCRIPTION
+    A test program for the pseudo-terminals (DESIGN D20 7.2, D38 step 1),
+    run as root by tools/pty-test.sh. It opens ptys, starts children on
+    their slaves (ptytest itself, with an argument that begins with _, and
+    /bin/sh) and talks to them through the masters. Each check prints one
+    line, "ptytest CHECK: PASS (...)" or "ptytest CHECK: FAIL (...)":
+
+    open, ptsname, master-ino, slave-ino, isatty, default-size
+             /dev/ptmx gives /dev/pts/0; the master's st_ino is 0x100, the
+             slave's 11 (never a console's); both are terminals; 24 x 80
+    second, freed, no-such-slave
+             a second pty is pts/1, free again after its close; a pty that
+             does not exist is ENOENT
+    master-eio, master-write-eio, hung-up-slave
+             with the slave closed the master's read is EIO and poll says
+             POLLHUP, and a write is EIO (never a wait for a reader that
+             will not come); after both close the pty is gone
+    onlcr, echo, cooked, erase
+             the child's LF arrives as CR LF; a line typed into the master
+             is echoed and read whole; backspace edits it
+    size, winch
+             ttyinfo answers the pty's size; TIOCSWINSZ on the master sends
+             SIGWINCH and the child sees the new size
+    raw, intr, hangup
+             raw mode: bytes without a newline, no echo; ^C is SIGINT to
+             the foreground; the master's close ends the child by SIGHUP
+    owner-refused, owner-set, owner-user, console-size
+             another user cannot open root's pty until TTYC_OWNER gives it;
+             a user may open a pty of its own but not set its owner; a
+             console's size cannot be set
+    no-reuse, reuse
+             a hung-up pty that a living process still names is not given
+             out again; it is once that process has ended
+    sh-echo, sh-ls, sh-hup
+             an interactive shell on a pty runs echo and ls; at the hang-up
+             it ends with status 129 and its background job ends too
+
+    The last line is "ptytest: N failed"; the exit status is N.
+
+NOTES
+    It must run as root (the owner checks change user ids). It needs
+    /bin/sh and a free pty: it fails when all 8 are in use.

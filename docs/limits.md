@@ -51,9 +51,9 @@ pointers.
   Partition tables: an RDB or a PC MBR (primary entries; verified in FS-UAE with disk images). The Emu68 boot card
   holds Emu68 and the Kickstart ROM in its FAT partition: `mount -t fat` can write there, so never do without a plan. Not done: extended
   partitions, GPT, the 50 MHz high-speed mode, eMMC. Until then: RAM-disk root from the floppy.
-- Signals (DESIGN D16) have no SIGSEGV/SIGBUS handlers (a fault ends the program, 139), no sessions, no controlling
-  terminals other than the consoles and no SIGHUP on a hang-up (with telnet's pseudo-terminals, later); SIGQUIT,
-  SIGTTIN, SIGTTOU and SIGWINCH are never generated; `poll` takes at most 32 items, `select` 32 descriptors; a signal
+- Signals (DESIGN D16) have no SIGSEGV/SIGBUS handlers (a fault ends the program, 139), no POSIX session ids (a
+  tty's session leader only, DESIGN D20 7.2); SIGQUIT, SIGTTIN and SIGTTOU are never generated (SIGHUP at a pty's
+  hang-up and SIGWINCH at its size change are); `poll` takes at most 32 items, `select` 32 descriptors; a signal
   frame needs 84 bytes of stack and leaves 512 bytes above the stack guard, or the process is killed.
 - `/proc`; more than 8 supplementary groups a process (`NGROUPS`; login, su and sudo say so and keep the first 8);
   a shadow password file (`/etc/passwd` is
@@ -93,7 +93,8 @@ pointers.
   most 47,
   40 symbolic links followed in one path once anything but the root is mounted (and always by `chdir`, `mount` and
   `realpath`; -ELOOP beyond; with only the root mounted the server's own rule: 8 nested), link targets of at most 255
-  bytes (-ENAMETOOLONG), pipes of 2 KB, 10 virtual consoles, 80 columns x 32 text rows on PAL (25 on
+  bytes (-ENAMETOOLONG), pipes of 2 KB, 10 virtual consoles, 8 pseudo-terminals (`NPTY`; -EAGAIN when all are in
+  use; a 2 KB output ring each, a window size of at most 32767 x 32767), 80 columns x 32 text rows on PAL (25 on
   NTSC), 200 scrollback lines per console (32 KB each: a character and a colour byte per cell, allocated when the
   console first scrolls), a cooked tty line of 511 characters (bytes: a Swedish letter is two, DESIGN D28; a key past that rings the bell, and at its end the whole line is refused with
   "tty: the line was too long": nothing of it is handed on, also when the shell's editor took over halfway).

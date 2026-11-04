@@ -93,7 +93,8 @@ static void panic_begin(void)
     if (panic_printing) {
         klog_mirror_off();
         panic_noscreen = 1;
-    } else if (gfx_up() && !panic_noscreen) {
+    } else if (gfx_present() && !panic_noscreen) {
+        gfx_reclaim();                  /* D38: a display server had the screen: the kernel's, to show the panic */
         term_panic();                   /* D20: Topaz and no console rules before the text is drawn */
         klog_mirror_on();
     }
@@ -110,7 +111,7 @@ void panic(const char *why)
 #ifdef DIAG_TRIAL
     machine_reset();            /* test builds (tools/update-test.sh): the warm reset an owner would do */
 #endif
-    if (gfx_up() && !panic_noscreen)
+    if (gfx_present() && !panic_noscreen)
         gfx_panic();            /* the background turns dark red, the text stays */
     else
         diag_halt(diag_colour); /* no display: the stage colour over red */
@@ -234,6 +235,7 @@ void kwork(void)
         serial_work();
         kbd_work();
         rnd_work();                     /* the entropy samples into the pool (D19) */
+        gcon_work();                    /* D38: the pointer's records, a release's deadline */
         irq_other_report();
     }
     busy = 0;
@@ -257,6 +259,7 @@ void irq2_c(u32 *rb)
         kbd_tick();
         audio_tick();
         input_poll();
+        gcon_tick();                    /* D38: the pointer of a console in graphics mode */
         fd_tick();
         rnd_tick();
         if (ntimer && (s32)(ticks - wake_min) >= 0)
