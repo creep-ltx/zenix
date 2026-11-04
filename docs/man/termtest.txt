@@ -40,8 +40,9 @@ DESCRIPTION
     The console operations of the remote control (root; tools/con-test.sh,
     DESIGN D24 6.1-6.3): termtest conops draws a page and checks it
     through CON_READ (the grid, the cursor, the change counter, short
-    buffers, the errors) and CON_LINE (pens and palette), and that a
-    console never used answers ENXIO; termtest rawkeys types raw key codes
+    buffers, the errors, an unknown op 10: EINVAL; 8 and 9 are DESIGN
+    D38's CON_GRAB and CON_GACK) and CON_LINE (pens and palette), and that
+    a console never used answers ENXIO; termtest rawkeys types raw key codes
     through CON_INPUT and checks the bytes (the Swedish layers, Caps
     Lock, Ctrl, an arrow, what a call leaves held released, Amiga+F2 and
     back); termtest text types through CON_INPUT in raw and cooked mode
