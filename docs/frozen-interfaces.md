@@ -93,6 +93,17 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   the server's list keeps FMODE's sprite bits 0); the grab ending with the descriptor's last close or the server's
   end; `SYS_memfree` -EBUSY for a region holding the grab's list or sprite; `SYS_memalloc`'s second argument
   `MEMA_CHIP` 1 (its other bits ignored, as all of it was before).
+- **D38 step 3 (the display server, branch desk, 2026-11-04):** `SYS_peer` 96 (msg a request the caller serves, else
+  -EINVAL; `PEER_CTTY` 1 the client's controlling tty; `PEER_RD` 2 and `PEER_WR` 3 with `struct upeermem` {addr,
+  len}: 0 or -EFAULT; `PEER_PORT` 4, arg a port: 0 if the client owns it, else -EPERM); `SYS_post` 97 (`POST_BUF` 1: the port's owner, else -EPERM; `struct upostbuf` {addr, size,
+  from}, size 0 none; `POST_WRITE` 2: only the owner of the window's `from` port, else -EPERM; `struct upost` {off,
+  src, len}, -EINVAL past the window, -EFAULT when the window is no longer its owner's memory, len 0 only wakes;
+  -ECONNRESET for a port that is gone); `POLLRDBAND` 0x80 on a port (reported once a post); `struct ucongrab`'s
+  `topaz` at offset 24 (`UCONGRAB_TOPAZ` 28: 1,792 bytes, Latin-1 32-255); the `/etc/svctab` line of `display`; the
+  display protocol `display/proto.h` version 1 whole: the port name `display`, the request and event numbers and
+  their arguments, `struct dpyhello` (first size 44), `dpyring`, `dpywin` (68), `dpyinfo` (64), `dpyimage` (16),
+  `dpykey` (8), `dpystyle` (64), `dpyev` (16 bytes), the drawing orders' words (op << 8 | length, unknown ones
+  skipped by length), `DPYR_LOST`, `WK_*`, `WF_*`, `WST_*`, `WS_*`, `HIDE_*`, `DRAG_*`, `FP_*`, `TA_*`, `IMG_MASK`.
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).

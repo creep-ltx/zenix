@@ -220,6 +220,7 @@ struct pollfd { int fd; short events, revents; };
 #define POLLHUP  0x0010
 #define POLLNVAL 0x0020
 #define POLLPORT 0x4000         /* Zenix: fd is a port this process owns; POLLIN when a message is queued */
+#define POLLRDBAND 0x0080       /* on a port (D38): something was posted into its window (SYS_post) since the last look */
 #endif
 static inline int sys_evwait(struct pollfd *f, u32 n, int ticks) { return sys3(83, (u32)f, n, (u32)ticks); }   /* ticks -1: no limit */
 struct usigaction { u32 size, handler, mask, flags, entry; };   /* handler 0 default, 1 ignore, else caught */
@@ -297,10 +298,12 @@ struct ucongrab {
     unsigned short sprh;        /* the sprite's height in lines */
     signed char hotx, hoty;     /* its hot spot */
     unsigned short width, height, depth, chips;     /* back: the screen, the text console's planes, GCHIP_* */
+    u32 topaz;                  /* (size 28 or more) a 1,792-byte buffer for the console's Topaz 8, Latin-1 32-255 */
 };
 #define UCONGRAB_FIRST 24
+#define UCONGRAB_TOPAZ 28
 #define GCHIP_AGA 1
-_Static_assert(sizeof(struct ucongrab) == UCONGRAB_FIRST, "ucongrab's first size");
+_Static_assert(__builtin_offsetof(struct ucongrab, topaz) == UCONGRAB_FIRST, "ucongrab's first size");
 struct ugevent {
     unsigned char type, code;   /* GEV_*; a key's raw code, bit 7 up */
     unsigned short qual;        /* GQ_* */
@@ -328,6 +331,18 @@ _Static_assert(sizeof(struct ugevent) == 16, "ugevent is 16 bytes");
 #define GQ_LBUTTON 0x4000
 static inline int sys_congrab(int fd, struct ucongrab *g) { return sys3(89, CON_GRAB | (u32)(fd + 1) << 8, (u32)g, 0); }
 static inline int sys_congack(int gfd, u32 seq) { return sys3(89, CON_GACK | (u32)(gfd + 1) << 8, seq, 0); }
+/* DESIGN D38 step 3: serving clients that are not the kernel (kernel/kernel.h has the contract) */
+#define PEER_CTTY 1             /* the client's controlling tty */
+#define PEER_RD 2               /* struct upeermem: those bytes are the client's to read -> 0, else -EFAULT */
+#define PEER_WR 3
+#define PEER_PORT 4             /* arg a port: 0 if the client owns it */
+struct upeermem { u32 addr, len; };
+static inline int sys_peer(void *msg, int op, void *arg) { return sys3(96, (u32)msg, (u32)op, (u32)arg); }
+#define POST_BUF 1              /* the port's owner: its window and who may post into it */
+#define POST_WRITE 2            /* the poster: bytes into the window, the owner woken (POLLRDBAND) */
+struct upostbuf { u32 addr, size; int from; };
+struct upost { u32 off, src, len; };
+static inline int sys_post(int op, int port, void *arg) { return sys3(97, (u32)op, (u32)port, (u32)arg); }
 #ifndef ZENIX_LIBC                       /* the C library: its own headers have them (libc/zenix/include) */
 #define SIGHUP   1
 #define SIGINT   2

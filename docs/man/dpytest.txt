@@ -1,0 +1,33 @@
+DPYTEST(1)		Zenix manual
+
+NAME
+    dpytest - test the display server
+
+SYNOPSIS
+    dpytest
+
+DESCRIPTION
+    A test client of displayd and libdisplay (DESIGN D38 steps 3-4), run
+    by tools/dpy-test.sh. It starts the display server on its console and
+    reads commands from its standard input, a line each, answering a line
+    "dpytest: ..." for each:
+
+        win NAME W H PEN   a window W x H filled with PEN, its name in it
+        text NAME X Y S    text at X, Y
+        wm                 become the window manager
+        move NAME X Y      place the frame's top left (the manager's)
+        size NAME W H      the inside's size (the manager's)
+        raise, lower, focus, hide, show, close NAME
+        scroll NAME N      the inside up N lines, the freed ones filled
+        info NAME          its place, size and state
+        bad NAME           a batch with a broken order (refused)
+        time NAME N        N raises and N moves: the mean round trip
+        mem                free RAM, the memory of displayd and dpytest
+        events             the events received so far, a line each
+        quit               the end
+
+    EV_EXPOSE is answered by drawing the window again.
+
+NOTES
+    The times are those of the machine it runs on; in an emulator they are
+    the emulator's.

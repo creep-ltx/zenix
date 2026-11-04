@@ -5,3 +5,5 @@
 # 6 words in 80 bytes.
 # A bad line is reported by boot and skipped. Example (the test message server; msgping(1) calls it):
 #ping      0     /bin/msgpingd
+# the display server (DESIGN D38): started by the first program of the desktop (zdesk), on that program's console
+display   -5    /sbin/displayd

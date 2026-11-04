@@ -38,7 +38,7 @@ fi
 mkdir -p "$T/bin" "$T/tmp"
 for p in $PROGS; do
     name=$(echo "$p" | sed 's/^mkfs_/mkfs./; s/^fsck_/fsck./')    # mkfs_ext2 -> mkfs.ext2
-    dir=bin; case $p in zup|zfsd|netd|wasabid|nfscd|fatd|ffsd|pfs3d) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15), the servers (D19)
+    dir=bin; case $p in zup|zfsd|netd|wasabid|nfscd|fatd|ffsd|pfs3d|displayd) dir=sbin; mkdir -p "$T/sbin";; esac  # the updater (D15), the servers (D19)
     case $p in drv-*) dir=sbin/net; name=${p#drv-}; mkdir -p "$T/sbin/net";; esac   # the network's drivers (D19 step 7)
     cp "$B/$p.zx" "$T/$dir/$name"
     chmod 755 "$T/$dir/$name"
