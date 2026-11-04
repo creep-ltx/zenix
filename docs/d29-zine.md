@@ -316,7 +316,8 @@ the output ring (C start-up code opens `*` for errors), `Open("NIL:")` a sink. L
 a BPTR to the volume's DosList entry). Names are found by ZINE itself in the volume;
 there is no handler process (a program that sends packets to `pr_FileSystemTask` or `pr_ConsoleTask` finds 0 there and
 fails as under a missing handler); a packet sent to a file handle's own `fh_Type` is answered by ZINE (16.7). `Execute`
-runs nothing and answers done (16.7).
+runs nothing and answers done (16.7), but an `Assign` ZINE does itself; `DeleteFile` deletes files of ZINE's `RAM:`
+(16.8).
 
 ### 5.5 intuition.library and the resources
 
@@ -342,9 +343,9 @@ free (the keyboard's SP bit included: a program that takes it gets the keyboard)
 answer is a copy of `io_Error`); they come when a test program or a demo the owner names needs one. Review 1's guess at
 what will make the stop fire most, to be checked against the owner's demos (the log of 9.1): `OpenFont`/
 `CloseFont`, graphics-built views (`InitView`, `MakeVPort`, `MrgCop`), `input.device` handlers, `trackdisk.device`'s
-`TD_MOTOR`, `disk.resource` (track loaders), math and `lowlevel.library` from C programs. A cheap later step:
-`OpenLibrary` loading a library from the program's own `LIBS:` with ZINE's `LoadSeg` and `InitResident`, as it already
-does for the 060's library.
+`TD_MOTOR`, `disk.resource` (track loaders), math and `lowlevel.library` from C programs. `OpenLibrary` loads a
+library ZINE has not from `LIBS:` with ZINE's `LoadSeg` and `InitResident` (built 2026-11-04, 16.8), and `audio.device`
+gives out its channels (16.8).
 
 ### 5.6 The program's files: the in-memory volume
 
@@ -362,9 +363,10 @@ revision 2's FFS image and device: AmigaOS's own filesystem is not running, so Z
 - **Limits:** if the directory holds more than 16 MB, more than half the free fast RAM, or more than 500 files, only the
   program goes in, with a warning ("only NAME was copied: its directory holds 23 MB; a program that loads files may not
   find them: give it a directory of its own").
-- **Writes** (owner answer 3): a new file, or a write to an existing one (copied first), lives in the program's own
-  memory and is gone afterwards. The volume block itself is never written, so it is in the checksums. `DeleteFile`,
-  `Rename` and the rest are the "not supported" stop in the first version.
+- **Writes** (owner answer 3): as built, a file written to `RAM:` lives in the program's own memory for the session
+  (it can be read, loaded and deleted: 16.8) and is gone afterwards; a write anywhere else takes the bytes and keeps
+  none. The volume block itself is never written, so it is in the checksums. `Rename` and the rest are the "not
+  supported" stop.
 - The reader is a shared C file of `zine` with a host test.
 
 ## 6. Loading the program
@@ -1288,6 +1290,80 @@ state, its pointer), a D38 change with its own review; and the kernel has 12 byt
 
 Sizes (the 68020-60 build): the blob 31,020 -> 32,312 bytes (memory 34,796 -> 36,304), `/bin/zine` 31,632 -> 31,796
 bytes; the kernel unchanged.
+
+### 16.8 Libraries a program carries, RAM:, Assign, DeleteFile, audio.device (2026-11-04, branch zine06)
+
+Found on the owner's PiStorm A1200 (release 2026110405): Latex's Ltx-Snigelsaft runs without its music and stops at
+its end. Its output: Execute "Ram:Assign LIBS: Ram:" (not run), "no library playsid.library" twice, Execute "Ram:Assign
+LIBS: SYS:LIBS/", then dos `DeleteFile("ram:playsid.library")`, which ZINE lacked. So the demo writes the SID player
+library it carries (and an Assign command) to RAM:, assigns LIBS: there, opens the library, plays, puts LIBS: back and
+deletes the file. ZINE kept nothing a program wrote, did no Assign and loaded no library from a file.
+
+**Built** (the blob; *read* from the RKRM Includes and Autodocs' exec pages for InitResident, InitStruct, MakeLibrary,
+MakeFunctions and the semaphores, the RKRM Devices manual for audio.device, the NDK 3.2's includes for the numbers):
+- **RAM:** (`blibs.c`): a file opened for writing on `RAM:` (or `Ram Disk:`) lives in the program's own memory
+  (AllocMem, grown as written, up to 32 files, names without case as AmigaDOS's) and can be read back, sought, loaded
+  with `LoadSeg`, opened as a library and deleted; it is gone with the session (owner answer 3). A write anywhere else
+  still keeps nothing; the program's own files stay read-only.
+- **Assigns** (`user/zine/zpath.c`, plain C with a host test): up to 8 names of up to 3 directories each, followed by
+  `Open`, `LoadSeg`, `DeleteFile` and `OpenLibrary` (each directory in turn when looking a file up; the first when
+  creating one; an assign through another followed up to 4 times). At the start `LIBS:` is `SYS:LIBS` (the program's
+  volume's `LIBS` directory), `PROGDIR:` and `RAM:`. **Execute of an Assign** ("Assign NAME: DIR...", with or without
+  a path to the command: "Ram:Assign", "C:Assign"; `ADD`; `REMOVE` or no directory removes the name; `DEFER` and `PATH`
+  as a plain assign) is done by ZINE, answers DOSTRUE and says "ZINE: NAME asked dos Execute to run "Ram:Assign LIBS:
+  Ram:": done by ZINE itself (LIBS: is now Ram:)". A listing or an option ZINE does not know: "an Assign ZINE does not
+  do ..., answered as done". Every other command stays "not run".
+- **DeleteFile** (dos -72): a `RAM:` file goes (while open: `ERROR_OBJECT_IN_USE`); one of the program's own files is
+  refused (`ERROR_DISK_WRITE_PROTECTED`, said in the output); a path on another disk (`DH0:`) is refused
+  (`ERROR_DEVICE_NOT_MOUNTED`, said); a missing file `ERROR_OBJECT_NOT_FOUND`. Nothing ever reaches a real disk.
+- **Libraries from files** (`user/zine/blibload.c`): `OpenLibrary` of a name ZINE has not built in first looks in the
+  library list (one loaded before, or added by the program), else loads `LIBS:NAME` (a name with `:` or `/`: that
+  path) with ZINE's `LoadSeg`, finds the first RomTag in its hunks (`$4AFC` and a pointer to itself), and initialises
+  it as `InitResident` does: with `RTF_AUTOINIT` `MakeLibrary` from the four longwords (the vectors, absolute or word
+  displacements; the base cleared and longword aligned; the `InitStruct` table; the init code with d0 the base, a0 the
+  segment list, a6 ExecBase) and `AddLibrary`; without it the init code is called (d0 0, a0 the segment list). Then the
+  version is checked ("ZINE: NAME is version 3, the program asks for version 4") and its Open vector called. The output
+  says "ZINE: NAME (version V) loaded from PATH". `CloseLibrary` calls its Close vector and unloads the segment list
+  that answer gives (a library that expunged itself). Unused libraries stay loaded, as on AmigaOS; when `AllocMem`
+  finds no room, every unused library not built in is asked to expunge (its Expunge vector) and the allocation tried
+  again, as AmigaOS's low-memory flush does.
+- **exec** gains `InitStruct`, `MakeLibrary`, `MakeFunctions` (the caches cleared after), `FindResident` (0: no
+  resident modules), `InitResident`, `AddLibrary`, `RemLibrary` (the library's Expunge), `SumLibrary` (nothing),
+  `AddResource` (`OpenResource` finds it), and the signal semaphores `InitSemaphore`, `ObtainSemaphore`,
+  `ReleaseSemaphore`, `AttemptSemaphore` and the shared forms (one task: they never wait; `Obtain` and `Release` keep
+  every register, as the autodocs say). `zbadcall` now calls `AddSemaphore`, which ZINE still lacks.
+- **audio.device**: `OpenDevice` with an allocation (`ioa_Length`) gives the first wanted mask whose channels are free
+  (io_Unit, an `ioa_AllocKey`), `ADCMD_ALLOCATE`, `ADCMD_FREE`, `ADCMD_LOCK` (in progress until the channels are
+  freed), `ADCMD_PERVOL`, `CMD_STOP`/`CMD_RESET`/`CMD_FLUSH` (the channels' DMA off) and the others done at once;
+  `CloseDevice` frees the channels. **It plays nothing:** `CMD_WRITE` answers `IOERR_NOCMD` and the output says so
+  once. A player that asks for channels and then writes Paula's registers itself, with its own level 4 handlers
+  (`SetIntVector`) or a CIA timer (`ciaa/ciab.resource`), plays.
+- Fixed on the way: a request completed with an error lost it (the reply cleared `io_Error`): the timer's "no room"
+  and an unknown device's `SendIO` answered 0.
+
+**What a SID player library typically needs** (*read*: PlaySID 3's own Developer.doc and Library.doc, which say
+`StartSong` allocates "the audio device, timers and interrupts" and `AllocEmulResource` memory; nothing was
+disassembled, the library is not in the repository): `OpenDevice("audio.device")` with an allocation, Paula's
+interrupts through `SetIntVector` (or `AddIntServer`), a CIA timer through `ciab.resource`/`ciaa.resource`
+`AddICRVector`, `AllocMem` of chip RAM, signals. ZINE has all of these. **Not there**, and a stop that names the call
+if a player uses one: `AddTask`/`CreateTask` (ZINE runs one task: a player that plays from a task of its own stops
+there), `Signal` to another task (ignored), `audio.device`'s `CMD_WRITE` (answered with an error: a player that plays
+through the device is silent), `timer.device`'s `UNIT_MICROHZ` precision (ZINE's timer counts frames).
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`, A1200 68020 4 MB fast): `zlibs` (`tools/tests/zine/zlibs.S`) carries
+`zt.library` (`ztlib.S`, written by `tools/mkhunktest.py -r` with `HUNK_RELOC32` for its RomTag and tables): writes it
+to `RAM:` and reads it back; Executes "Assign LIBS: SYS:LIBS" (OpenLibrary fails: no such file), "Ram:Assign LIBS:
+Ram:" (OpenLibrary loads it from RAM:: version 3.7 from InitStruct, its init given the segment list and ExecBase, its
+Open counted, its functions answer, InitStruct's three extra forms right), a newer version refused; CloseLibrary;
+"C:Assign LIBS: SYS:LIBS/"; DeleteFile("ram:zt.library") (then not found, a second delete `ERROR_OBJECT_NOT_FOUND`);
+the library still opens (loaded), `RemLibrary` gives its segment list back, then it is gone; semaphores nested with
+the registers kept; audio.device's four channels, a second allocation and `CMD_WRITE` refused; Paula's channel 0
+interrupt through `SetIntVector` and CIA-B timer A through `ciab.resource` counted; `AvailMem` at the end as at the
+start, return code 0. On the PC (`tools/host/zine-test.sh`): the assigns and the Assign parser (forms, quotes, ADD,
+REMOVE, the limits, chains, every prefix of a command). Not yet: Ltx-Snigelsaft itself, on the owner's A1200.
+
+Sizes (the 68020-60 build): the blob 32,312 -> 40,728 bytes (memory 36,304 -> 45,864; the assigns' table is 2.6 KB of it); the assigns core 1,863
+bytes at -Os; `/bin/zine` and the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

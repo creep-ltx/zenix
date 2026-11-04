@@ -697,7 +697,23 @@ _Static_assert(sizeof(struct zint) == ZO_Interrupt_SIZEOF, "Interrupt");
 
 void c_Alert(u32 code);
 
+static u32 alloc(u32 size, u32 attrs);
+static u8 flushing;
+/* AllocMem: when nothing fits, unused libraries loaded from files are expunged first and it is tried again, as
+ * AmigaOS's low-memory flush does (blibload.c, d29 16.8) */
 u32 zx_AllocMem(u32 size, u32 attrs)
+{
+    u32 r = alloc(size, attrs);
+    if (!r && size && !flushing) {
+        flushing = 1;
+        if (zb_lib_flush())
+            r = alloc(size, attrs);
+        flushing = 0;
+    }
+    return r;
+}
+
+static u32 alloc(u32 size, u32 attrs)
 {
     u32 n = (size + 7) & ~7u, req = attrs & MEMF_REQ;
     if (!size || n < size)

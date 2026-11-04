@@ -17,7 +17,7 @@ OUT=${ZINE_TEST_OUT:-build/zine-host}
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 HOSTCC=${HOSTCC:-cc}
-SRCS="user/zine/hunk.c user/zine/zvol.c user/zine/zplan.c user/zine/lvo.c"
+SRCS="user/zine/hunk.c user/zine/zvol.c user/zine/zplan.c user/zine/lvo.c user/zine/zpath.c"
 if [ -z "$TOOLPREFIX" ]; then
     if command -v m68k-elf-gcc >/dev/null; then TOOLPREFIX=m68k-elf-; else TOOLPREFIX=$HOME/opt/m68k-elf/bin/m68k-elf-; fi
 fi

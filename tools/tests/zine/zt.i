@@ -20,6 +20,7 @@
 #define MEMF_CHIP       2
 #define LVO_PutMsg      -366
 #define LVO_ObtainSemaphore -564
+#define LVO_AddSemaphore -600
 #define LVO_AvailMem    -216
 #define MEMF_FAST       4
 #define LVO_OpenScreenTagList -612

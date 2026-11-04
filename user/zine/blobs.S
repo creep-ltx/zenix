@@ -385,9 +385,12 @@ zb_putch:
 /* ---- the register-to-C stubs of the other functions ----
  * CF name, cfunc, n, r1..r4: the arguments pushed as C wants them (r1 first), the C function called; d2-d7/a2-a6 are
  * kept by C as exec's functions must keep them, d0 is the answer. */
-.macro CF name, fn, n, r1=%d0, r2=%d0, r3=%d0, r4=%d0
+.macro CF name, fn, n, r1=%d0, r2=%d0, r3=%d0, r4=%d0, r5=%d0
     .globl  \name
 \name:
+    .if \n >= 5
+    move.l  \r5,-(%sp)
+    .endif
     .if \n >= 4
     move.l  \r4,-(%sp)
     .endif
@@ -545,6 +548,47 @@ zs_AllocBitMap:
     CF  zs_IoErr, c_IoErr, 0
     CF  zs_SetIoErr, c_SetIoErr, 1, %d1
     CF  zs_Delay, c_Delay, 1, %d1
+    /* libraries from files and what builds them (blibload.c, d29 16.8) */
+    CF  zs_InitStruct, c_InitStruct, 3, %a1, %a2, %d0
+    CF  zs_MakeLibrary, c_MakeLibrary, 5, %a0, %a1, %a2, %d0, %d1
+    CF  zs_MakeFunctions, c_MakeFunctions, 3, %a0, %a1, %a2
+    CF  zs_FindResident, c_FindResident, 1, %a1
+    CF  zs_InitResident, c_InitResident, 2, %a1, %d1
+    CF  zs_AddLibrary, c_AddLibrary, 1, %a1
+    CF  zs_RemLibrary, c_RemLibrary, 1, %a1
+    CF  zs_SumLibrary, c_SumLibrary, 1, %a1
+    CF  zs_AddResource, c_AddResource, 1, %a1
+    CF  zs_InitSemaphore, c_InitSemaphore, 1, %a0
+    CF  zs_AttemptSemaphore, c_AttemptSemaphore, 1, %a0
+    CF  zs_DeleteFile, c_DeleteFile, 1, %d1
+    CF  zs_AudioBeginIO, zb_audio_beginio, 1, %a1
+    CF  zs_AudioAbortIO, zb_audio_abort, 1, %a1
+/* ObtainSemaphore, ReleaseSemaphore and ObtainSemaphoreShared keep every register (the autodocs) */
+.macro CFALL name, fn, r1
+    .globl  \name
+\name:
+    movem.l %d0-%d1/%a0-%a1,-(%sp)
+    move.l  \r1,-(%sp)
+    jsr     \fn
+    addq.l  #4,%sp
+    movem.l (%sp)+,%d0-%d1/%a0-%a1
+    rts
+.endm
+    CFALL   zs_ObtainSemaphore, c_ObtainSemaphore, %a0
+    CFALL   zs_ReleaseSemaphore, c_ReleaseSemaphore, %a0
+/* zb_libcall(fn, a6, d0, a0, d1, a1): a library's vector or init code called as exec calls it; d2-d7/a2-a6 kept */
+    .globl  zb_libcall
+zb_libcall:
+    movem.l %d2-%d7/%a2-%a6,-(%sp)
+    move.l  48(%sp),%a5
+    move.l  52(%sp),%a6
+    move.l  56(%sp),%d0
+    move.l  60(%sp),%a0
+    move.l  64(%sp),%d1
+    move.l  68(%sp),%a1
+    jsr     (%a5)
+    movem.l (%sp)+,%d2-%d7/%a2-%a6
+    rts
     /* intuition */
     CF  zs_CloseWorkBench, c_CloseWorkBench, 0
     CF  zs_OpenWorkBench, c_OpenWorkBench, 0

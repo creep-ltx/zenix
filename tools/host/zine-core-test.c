@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* ZINE's step-1 cores on the PC (docs/d29-zine.md section 15, "Host tests"; tools/host/zine-test.sh): the hunk check
- * and loader, the in-memory volume, the memory planner and the library offset table, each with the sanitizers.
+ * and loader, the in-memory volume, the memory planner, the library offset table and the assigns (zpath, 16.8), each with the sanitizers.
  * Prints PASS/FAIL lines; exits non-zero on a failure. `zine-core-test seeds DIR` writes the test programs (fuzz seeds). */
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +9,7 @@
 #include "../../user/zine/zvol.h"
 #include "../../user/zine/zplan.h"
 #include "../../user/zine/lvo.h"
+#include "../../user/zine/zpath.h"
 #include "../../kernel/errno.h"
 
 _Static_assert(ZE_NOENT == ENOENT && ZE_NOEXEC == ENOEXEC && ZE_NOMEM == ENOMEM && ZE_NODEV == ENODEV &&
@@ -549,6 +550,75 @@ static void test_lvo(void)
     CHECK(ZL_exec_OpenLibrary == 552 && ZL_graphics_WaitTOF == 270 && ZL_dos_Output == 60, "lvo: the defines");
 }
 
+/* the assigns and Execute's Assign command (zpath.h; docs/d29-zine.md 16.8) */
+static void test_path(void)
+{
+    static struct za_table t;
+    char o[200];
+    za_init(&t);
+    CHECK(za_expand(&t, "LIBS:x.library", 0, o, sizeof o) && !strcmp(o, "SYS:LIBS/x.library"), "path: LIBS: 0 (%s)", o);
+    CHECK(za_expand(&t, "libs:x.library", 1, o, sizeof o) && !strcmp(o, "PROGDIR:x.library"), "path: LIBS: 1 (%s)", o);
+    CHECK(za_expand(&t, "LIBS:x.library", 2, o, sizeof o) && !strcmp(o, "RAM:x.library"), "path: LIBS: 2 (%s)", o);
+    CHECK(!za_expand(&t, "LIBS:x.library", 3, o, sizeof o), "path: LIBS: has three");
+    CHECK(za_expand(&t, "data/pic", 0, o, sizeof o) && !strcmp(o, "data/pic") && !za_expand(&t, "data/pic", 1, o, sizeof o),
+          "path: an unassigned path stands for itself only");
+    CHECK(za_ram("RAM:a") && !strcmp(za_ram("ram:a"), "a") && za_ram("Ram Disk:b/c") && !za_ram("RAMX:a") &&
+          !za_ram("ram") && !strcmp(za_ram("RAM:"), ""), "path: RAM: and Ram Disk:");
+    struct za_cmd c;
+    const char *cmd = "Ram:Assign LIBS: Ram:";
+    CHECK(za_parse(cmd, strlen(cmd), &c) == 1 && !strcmp(c.name, "LIBS") && c.n == 1 && !strcmp(c.dir[0], "Ram:") &&
+          !c.add && !c.remove, "path: \"%s\" parsed", cmd);
+    CHECK(za_apply(&t, &c) == 0 && za_expand(&t, "LIBS:p.library", 0, o, sizeof o) && !strcmp(o, "Ram:p.library") &&
+          !za_expand(&t, "LIBS:p.library", 1, o, sizeof o), "path: LIBS: is Ram: alone");
+    cmd = "C:Assign LIBS: SYS:LIBS/\n";
+    CHECK(za_parse(cmd, strlen(cmd), &c) == 1 && za_apply(&t, &c) == 0 && za_expand(&t, "LIBS:p", 0, o, sizeof o) &&
+          !strcmp(o, "SYS:LIBS/p"), "path: back to SYS:LIBS/ (%s)", o);
+    cmd = "assign DATA: \"Ram Disk:my dir\" ADD";
+    CHECK(za_parse(cmd, strlen(cmd), &c) == 1 && c.add && c.n == 1 && !strcmp(c.dir[0], "Ram Disk:my dir") &&
+          za_apply(&t, &c) == 0 && za_expand(&t, "DATA:f", 0, o, sizeof o) && !strcmp(o, "Ram Disk:my dir/f"),
+          "path: a quoted directory, ADD to a new name (%s)", o);
+    cmd = "Assign X: DATA:sub";         /* an assign through another */
+    CHECK(za_parse(cmd, strlen(cmd), &c) == 1 && za_apply(&t, &c) == 0 && za_expand(&t, "X:f", 0, o, sizeof o) &&
+          !strcmp(o, "Ram Disk:my dir/sub/f"), "path: an assign through another (%s)", o);
+    cmd = "Assign X:";
+    CHECK(za_parse(cmd, strlen(cmd), &c) == 1 && za_apply(&t, &c) == 0 && za_expand(&t, "X:f", 0, o, sizeof o) &&
+          !strcmp(o, "X:f"), "path: an assign removed");
+    cmd = "Assign A: B: C: D: E:";
+    CHECK(za_parse(cmd, strlen(cmd), &c) == -1, "path: four directories refused");
+    CHECK(za_parse("Assign", 6, &c) == -1 && za_parse("assign LIST", 11, &c) == -1 && za_parse("Assign X: DISMOUNT", 18, &c) == -1,
+          "path: a listing and options ZINE does not do");
+    CHECK(za_parse("run >nil: assign", 16, &c) == 0 && za_parse("setpatch", 8, &c) == 0 && za_parse("", 0, &c) == 0 &&
+          za_parse("Assigner X: Y", 13, &c) == 0, "path: other commands are not Assign");
+    cmd = "Assign LIBS: Ram:; echo hi";
+    CHECK(za_parse(cmd, strlen(cmd), &c) == 1 && c.n == 1 && !strcmp(c.dir[0], "Ram:"), "path: the command ends at ';'");
+    cmd = "Assign LIBS: Ram:";
+    CHECK(za_parse(cmd, 13, &c) == 1 && c.n == 0, "path: the command ends at its length");
+    /* the table: 8 names, then refused; a long path refused */
+    za_init(&t);
+    char nm[16];
+    int e = 0;
+    const char *d[1] = { "RAM:" };
+    for (int i = 0; i < 7; i++) {
+        snprintf(nm, sizeof nm, "N%d", i);
+        e |= za_set(&t, nm, strlen(nm), d, 1, 0);
+    }
+    CHECK(e == 0 && za_set(&t, "N9", 2, d, 1, 0) == -ZE_NOSPC, "path: 8 assigns, the ninth refused");
+    CHECK(za_set(&t, "N0", 2, d, 1, 1) == 0 && za_set(&t, "N0", 2, d, 1, 1) == 0 && za_set(&t, "N0", 2, d, 1, 1) == -ZE_NOSPC,
+          "path: 3 directories, the fourth refused");
+    char lp[300];
+    memset(lp, 'a', 299);
+    lp[299] = 0;
+    CHECK(za_parse(lp, 299, &c) == 0, "path: a long word that is no Assign");
+    memcpy(lp, "Assign Q: ", 10);
+    CHECK(za_parse(lp, 299, &c) == -1, "path: a directory longer than 95 bytes refused");
+    CHECK(!za_expand(&t, "LIBS:x", 0, o, 8), "path: a result longer than the room is none");
+    /* every prefix and byte of a command: no crash (the sanitizers) */
+    cmd = "Ram:Assign \"LIBS:\" \"Ram Disk:x\" ADD DEFER";
+    for (size_t n = 0; n <= strlen(cmd); n++)
+        za_parse(cmd, (zu32)n, &c);
+    passes++;
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 3 && !strcmp(argv[1], "seeds")) {      /* the test programs, as the hunk fuzzer's seeds */
@@ -575,6 +645,7 @@ int main(int argc, char **argv)
     test_vol();
     test_plan();
     test_lvo();
+    test_path();
     printf("%s: %d checks passed, %d failed\n", fails ? "FAIL zine-core" : "PASS zine-core", passes, fails);
     return fails != 0;
 }

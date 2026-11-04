@@ -6,7 +6,7 @@
  * waiting on a reply port of its own: ACTION_SEEK from the end back to the data, ACTION_READ of it, ACTION_FLUSH,
  * an action no handler knows (DOSFALSE, ERROR_ACTION_NOT_KNOWN), and ACTION_WRITE through Output()'s handle. Then
  * Execute("run >nil: setpatch") (DOSTRUE: not run, the output names it). Exit 0 when everything held; else the
- * return code names the step. With an argument starting with u it calls dos DeleteFile("RAM:zpkt-gone") first,
+ * return code names the step. With an argument starting with u it calls dos Rename("RAM:zpkt-gone", ...) first,
  * which ZINE lacks: the stop line names the call and the output its first argument. Position-independent code, one hunk. */
 #include "zt.i"
 #define LVO_FindTask    -294
@@ -16,7 +16,7 @@
 #define LVO_GetMsg      -372
 #define LVO_WaitPort    -384
 #define LVO_Execute     -222
-#define LVO_DeleteFile  -72
+#define LVO_Rename      -78
 #define ACTION_FLUSH    27
 #define ACTION_READ     82
 #define ACTION_WRITE    87
@@ -59,7 +59,8 @@ main:
     bne.s   1f
     lea     gone(%pc),%a0
     move.l  %a0,%d1
-    jsr     LVO_DeleteFile(%a6)
+    move.l  %d1,%d2
+    jsr     LVO_Rename(%a6)
     moveq   #30,%d0             /* not reached under ZINE: the call stops the program */
     bra     done
 1:  move.l  4.w,%a6
