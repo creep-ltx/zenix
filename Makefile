@@ -981,7 +981,7 @@ $(BUILD)/zine.uo: user/zine.c $(ZINEH) user/pw.h user/libz.h user/usys.h | $(BUI
 ZINECMD := $(BUILD)/zine.uo $(BUILD)/pw.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-lvo.uo
 $(BUILD)/zine.uelf: $(ZINECMD) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZINECMD) $(BUILD)/libz.uo $(LIBGCC) -o $@
-ZBLOBOBJS := $(BUILD)/zb-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+ZBLOBOBJS := $(BUILD)/zb-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
 $(BUILD)/zb-blobs.o: user/zine/blobs.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
 # the blob writes low memory (the vectors at 0, ExecBase at 0x800): addresses near 0 are not null pointers to it
@@ -995,7 +995,7 @@ $(BUILD)/zine.blob: $(BUILD)/zine-blob.elf tools/mkzexe.py tools/mkzblob.py tool
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
 # the trace build (tests only, /tests/zine/trace.blob): every library call named on the serial port
-ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
+ZTBLOBOBJS := $(BUILD)/zt-blobs.o $(BUILD)/zb-blob.o $(BUILD)/zb-blibs.o $(BUILD)/zb-blibload.o $(BUILD)/zc-zpath.uo $(BUILD)/zc-hunk.uo $(BUILD)/zc-zvol.uo $(BUILD)/zc-zplan.uo
 $(BUILD)/zt-blobs.o: user/zine/blobs.S | $(BUILD)
 	$(CC) $(ASFLAGS) -DZINE_TRACE $< -o $@
 $(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
@@ -1003,7 +1003,7 @@ $(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
 $(BUILD)/zine-trace.blob: $(BUILD)/zine-trace.elf tools/mkzexe.py tools/mkzblob.py
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
-ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zovl zpkt
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zovl zpkt zlibs
 # the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
 $(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
@@ -1021,6 +1021,14 @@ $(BUILD)/zinetests/zovl: tools/tests/zine/zovl.S tools/tests/zine/zt.i tools/mko
 	@mkdir -p $(BUILD)/zinetests
 	$(CC) $(ASFLAGS) -Itools/tests/zine $< -o $(BUILD)/zinetests/zovl.o
 	python3 tools/mkovltest.py $(BUILD)/zinetests/zovl.o $@
+# zlibs carries zt.library (ztlib.S, with HUNK_RELOC32: mkhunktest.py -r) and writes it to RAM: (d29 16.8)
+$(BUILD)/zinetests/ztlib.hunk: tools/tests/zine/ztlib.S tools/mkhunktest.py | $(BUILD)
+	@mkdir -p $(BUILD)/zinetests
+	$(CC) $(ASFLAGS) $< -o $(BUILD)/zinetests/ztlib.o
+	TOOLPREFIX=$(TOOLPREFIX) python3 tools/mkhunktest.py -r $(BUILD)/zinetests/ztlib.o $@
+$(BUILD)/zinetests/zlibs: tools/tests/zine/zlibs.S tools/tests/zine/zt.i tools/mkhunktest.py $(BUILD)/zinetests/ztlib.hunk | $(BUILD)
+	$(CC) $(ASFLAGS) -Itools/tests/zine -Wa,-I$(BUILD)/zinetests $< -o $(BUILD)/zinetests/zlibs.o
+	python3 tools/mkhunktest.py $(BUILD)/zinetests/zlibs.o $@
 zine-tests: $(ZINETESTS:%=$(BUILD)/zinetests/%)
 $(BUILD)/zenix.hdf $(BUILD)/root-card.img: $(BUILD)/zine.blob $(BUILD)/zine-null.blob $(BUILD)/zine-trace.blob $(ZINETESTS:%=$(BUILD)/zinetests/%)
 
