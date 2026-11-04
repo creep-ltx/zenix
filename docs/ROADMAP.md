@@ -87,7 +87,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 RAM through the transparent translation registers, chip RAM uncached (done 2026-11-04, D37: 4.23 s -> 0.95 s on the 1260; boot log was: "data cache off"; `ls -laR /` of 506
 lines took 4.26 s, 9.64 s on the screen with the serial cable in: measured; built on branch cache 2026-11-04, DESIGN
 D37, docs/d37-data-cache.md: not yet on the 1260); the serial console drops input on long
-lines and Zmodem through it stalls at 3 KB; netd should start a card it finds with DHCP without /etc/network/interfaces;
+lines and Zmodem through it stalls at 3 KB; once anything was typed over serial the console's serial copy waits for the 115200-baud port and caps the screen at about 11.5 KB/s (`ls -laR /` on the screen 3.2 s, 0.95 s to /dev/null, the 1260): a cable that stops listening must not slow the screen, and root needs a command to switch the copy off; netd should start a card it finds with DHCP without /etc/network/interfaces;
 the installer asks for a package server; `zpkg -Sl` lines within 80 columns, "newer/older installed", zenix-tests and
 zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04); diskd's note about the RDB chain on the installed card (with the installer helper).
 
