@@ -251,6 +251,9 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 # files beside a family's programs, from the build directory (DESIGN D29: ZINE's blob, the small AmigaOS zine loads)
 FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d"], "desktop": ["displayd"]}     # DESIGN D30, D31, D32: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume
 # (DESIGN D35: the two AmigaOS programs of a boot partition, what zinstall puts there)
+# a family's own configuration files, from rootfs/ (kind "c": zup keeps a copy the owner changed, as for base's)
+FAMILY_CONFIG = {"desktop": ["etc/zdesk/keys", "etc/zdesk/menu", "etc/zdesk/icons", "etc/zdesk/themes/flat.theme",
+                             "etc/zdesk/themes/workbench.theme", "etc/zdesk/themes/platinum.theme"]}
 FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")],
                 "zinstall": [("bootmenu", "/lib/zinstall/bootmenu"), ("zenixboot", "/lib/zinstall/zenixboot")]}
 FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
@@ -358,6 +361,12 @@ def std_packages(build, uapps):
                 ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
                          if d not in have]
                 ents += [("f", 0o644, 0, 0, os.path.join(build, f), dst)]
+            for f in FAMILY_CONFIG.get(fam, []):
+                have = {e[5] for e in ents}
+                parts = f.split("/")[:-1]
+                ents += [("d", 0o755, 0, 0, None, d) for d in ("/" + "/".join(parts[:i + 1]) for i in range(len(parts)))
+                         if d not in have]
+                ents += [("c", 0o644, 0, 0, os.path.join(ROOT, "rootfs", f), "/" + f)]
             make_package(out, fam, vnum, vstr, ents, deps=[("base", vnum)], desc=desc, takes=("utils", "man"))
             names.append(fam)
         if "zpkg" in progs:                 # the bootstrap package (BOOTSTRAP above): this build's zpkg, under its own name
