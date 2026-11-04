@@ -13,9 +13,9 @@ Several desktop choices are expected."
 
 **What this note proposes:**
 - **Two programs, as on Linux.** A *display server* (`displayd`) owns the screen, the blitter, the pointer and the
-  keyboard while the desktop is shown, and draws everything. A *desktop* (`desk`) is an ordinary program that decides
+  keyboard while the desktop is shown, and draws everything. A *desktop* (`zdesk`) is an ordinary program that decides
   where windows go, which one has the keyboard, what the frames look like, and runs the top bar. A tiling desktop
-  later is just another program in `desk`'s place; the windows and the programs in them do not change.
+  later is just another program in `zdesk`'s place; the windows and the programs in them do not change.
 - **Drawing is done by the server, on the screen itself, the Amiga way.** Programs send drawing orders in batches; the
   server draws them with the blitter, clipped to what is visible, and keeps the hidden parts of windows in spare chip
   RAM, so moving or raising a window is a few blitter copies and never makes a program draw again. This is what
@@ -28,7 +28,7 @@ Several desktop choices are expected."
   keys, an About window. Everything else (workspaces, the tiling desktop, a graphical file view, TrueType fonts,
   preferences, the clipboard) comes after, on the same protocol.
 - **The text consoles stay** exactly as they are: Amiga+F1..F10 still shows them, each with its login. The desktop
-  lives on one of the consoles, like X on Linux: you log in and type `desk`.
+  lives on one of the consoles, like X on Linux: you log in and type `zdesk`.
 - **Four looks to choose from**, drawn as real Amiga pixels (section 8). The favourite so far is (a), flat with a hint
   of depth.
 
@@ -64,7 +64,7 @@ Several desktop choices are expected."
 
 ### 3.2 The choice
 
-**X11's split, Intuition's drawing.** `displayd` owns the hardware and draws; `desk` is the window manager.
+**X11's split, Intuition's drawing.** `displayd` owns the hardware and draws; `zdesk` is the window manager.
 
 - **Not Wayland's composition.** Composition means every window draws into its own picture and the server copies the
   visible parts to the screen: every change is drawn twice, and every window needs a whole picture in chip RAM (the
@@ -92,21 +92,21 @@ Several desktop choices are expected."
 
 ### 3.3 Who draws frames, who decides
 
-- **`desk` decides; `displayd` draws.** `desk` gives the server a *frame style* once (border widths, title-bar height,
+- **`zdesk` decides; `displayd` draws.** `zdesk` gives the server a *frame style* once (border widths, title-bar height,
   the colours of an active and an inactive window, the gadget pictures, the title font, the shadow). The server draws
-  every frame from it, so a frame is redrawn during a drag without a message to `desk`. A tiling desktop sets a style
+  every frame from it, so a frame is redrawn during a drag without a message to `zdesk`. A tiling desktop sets a style
   with a one-pixel border and no title bar.
-- **Placement, stacking, focus, minimise, the meaning of every gadget: `desk`.** A new window is a *request* the server
-  passes to `desk`; `desk` answers where it goes and how big. A click on a frame goes to `desk`, which may answer
+- **Placement, stacking, focus, minimise, the meaning of every gadget: `zdesk`.** A new window is a *request* the server
+  passes to `zdesk`; `zdesk` answers where it goes and how big. A click on a frame goes to `zdesk`, which may answer
   "move it", "resize it", "close it" (the program gets a close request; it decides), "minimise it" (the server hides
-  it; `desk` lists it in the bar).
+  it; `zdesk` lists it in the bar).
 - **Drags run in the server.** On "move it", the server follows the mouse itself until the button is released and tells
-  `desk` the end: no message per mouse step. Outline or whole window (section 6.3), as the frame style says.
-- **Keys:** `desk` names the key combinations it wants (its shortcuts, from its configuration file); the server sends
-  those to `desk` and every other key to the window with the focus. Amiga+F1..F10 stay with the kernel (console
+  `zdesk` the end: no message per mouse step. Outline or whole window (section 6.3), as the frame style says.
+- **Keys:** `zdesk` names the key combinations it wants (its shortcuts, from its configuration file); the server sends
+  those to `zdesk` and every other key to the window with the focus. Amiga+F1..F10 stay with the kernel (console
   switches) and never reach the desktop.
 - **Without a desktop running** (not started yet, or crashed) the server still works: new windows are placed one below
-  the other, a click raises and focuses, frames use a built-in plain style. Starting `desk` again takes the windows
+  the other, a click raises and focuses, frames use a built-in plain style. Starting `zdesk` again takes the windows
   over, as an X window manager does.
 - **A second desktop** (the i3-style tiling one) is another program speaking the same window-manager messages: it
   places windows in a grid, sets the thin style, hides the windows of other workspaces, runs its own bar. Programs
@@ -137,7 +137,7 @@ The kernel keeps the text consoles and gives one console's screen to `displayd`,
 
 ### 4.1 Shape
 
-- **One port, `display`**, created by `displayd` (a service, D11, started on demand by the first `desk` or program).
+- **One port, `display`**, created by `displayd` (a service, D11, started on demand by the first `zdesk` or program).
 - **Client to server:** synchronous calls (the existing `sys_call`), each answering at once; the server never waits
   for a client.
 - **Server to client:** events go into a ring in the client's own memory (registered at hello) and set an event bit
@@ -157,7 +157,7 @@ The kernel keeps the text consoles and gives one console's screen to `displayd`,
 | `DRAW` | one batch of drawing orders in the program's memory (below), for one window |
 | `FONT` | open a font by name and size: answers its cell size and an id |
 | `IMAGE` | register a picture in the program's memory (planar or 4-bit chunky) to be drawn by id |
-| `PALETTE` | the screen's colours (read only; a look sets them through `desk`) |
+| `PALETTE` | the screen's colours (read only; a look sets them through `zdesk`) |
 
 **Drawing orders** inside a `DRAW` batch, each a few words: fill a rectangle; a line across or down; text (a font, two
 colours, UTF-8 at a pixel or a cell; bold, underline and inverse as the console does them); copy a rectangle inside
@@ -174,14 +174,14 @@ disk block).
 | `FOCUS` | in or out (a terminal draws its cursor hollow) |
 | `CLOSE` / `MINIMISED` | the close gadget was used (the program decides); shown or hidden |
 
-| Window manager (only `desk`) | What |
+| Window manager (only `zdesk`) | What |
 |---|---|
 | `WM_HELLO` | become the window manager (one at a time; the session's user or root) |
 | `WM_STYLE` | the frame style (3.3) |
 | `WM_PLACE`, `WM_STACK`, `WM_FOCUS`, `WM_SHOW`/`WM_HIDE` | answer a new window's request, raise or lower, give the keyboard, minimise or a workspace |
-| `WM_GRAB` | the key combinations `desk` handles |
+| `WM_GRAB` | the key combinations `zdesk` handles |
 | `WM_DRAG` | start a move or resize run by the server (outline or whole), reports the end |
-| events to `desk` | a window wants to appear, a click on a frame, a grabbed key, a window ended |
+| events to `zdesk` | a window wants to appear, a click on a frame, a grabbed key, a window ended |
 
 **Later, on the same port:** the clipboard (text first), drag and drop, an icon for a minimised window, more screen
 modes. None is in version 1.
@@ -236,7 +236,7 @@ every layout (the desk places windows by the screen's real height).
 | `displayd`: data (windows, clip lists, fonts' tables) | 10-20 KB | - |
 | the screen (4 planes), Copper list, sprite | - | 81 KB |
 | hidden pieces of windows (smart refresh), a budget | - | up to 256 KB (then simple refresh) |
-| `desk` (window manager, bar, menu, icons, config) | 25-35 KB | icons' images: 2-4 KB |
+| `zdesk` (window manager, bar, menu, icons, config) | 25-35 KB | icons' images: 2-4 KB |
 | `term`, one window (code shared by D13 when two run) | 18-24 KB code, 8 KB grid, 32 KB scrollback once used | - |
 | a pseudo-terminal | 3.5 KB (D20 7.2) | - |
 | `libdisplay` in each program | 4-6 KB | - |
@@ -275,16 +275,16 @@ hidden-pieces budget.
 3. **`displayd`:** the screen, windows with clipping, smart and simple refresh, drawing orders, fonts (Topaz from the
    ROM and the ZCF supplement), frames from a style, drags, the fallback without a window manager, protocol version 1.
 4. **`libdisplay`.**
-5. **`desk`:** move, resize, raise, close, minimise; click to focus; the **top bar** (a menu under the Zenix name with
+5. **`zdesk`:** move, resize, raise, close, minimise; click to focus; the **top bar** (a menu under the Zenix name with
    the programs and About/Log out, a list of the windows with the minimised ones dimmed, memory and a clock); a few
    **desktop icons** that start programs (Shell, Files, Prefs as listed in its config; Files starts Ahiru in a terminal
    until a graphical file view exists); the **About window**; **keyboard shortcuts**, all configurable in
-   `/etc/desk/keys` (a user's own file overrides it): Amiga+Return a terminal, Amiga+Q close, Amiga+M minimise,
+   `/etc/zdesk/keys` (a user's own file overrides it): Amiga+Return a terminal, Amiga+Q close, Amiga+M minimise,
    Amiga+Tab next window, Amiga+Space the menu, Amiga+arrows move the focused window, Amiga+Shift+arrows resize it
    (Amiga+F1..F10 remain the consoles). The look chosen from section 8, with its 16- and 8-colour palettes.
 6. **`term`:** the terminal window (section 5).
 
-**Starting it:** log in on a console and type `desk` (it starts `displayd` if needed). Leaving `desk` (the menu's Log
+**Starting it:** log in on a console and type `zdesk` (it starts `displayd` if needed). Leaving `zdesk` (the menu's Log
 out, or Ctrl-C at its console) closes the desktop and gives the console back.
 
 **Tests:** the clipping, the hidden pieces and the protocol's checks on the host (as `term-test.sh` tests the console);
@@ -315,12 +315,12 @@ The pictures at the real 640x256 size (pixel for pixel what the Amiga shows) are
 made by `tools/desktop-mockups.py` (Pillow), which reads a free re-creation of the Topaz font (TrueSchool's
 `Topaz_a1200`, GPL with the font exception) given on its command line, never the Kickstart ROM's Topaz and never a
 copy in the repository; without it the PC font in `tools/font_8x8.c` is used. Every look is a frame style and a
-palette for `desk`, so the ones not chosen stay cheap to offer later as themes.
+palette for `zdesk`, so the ones not chosen stay cheap to offer later as themes.
 
 ## 9. Questions for the owner (each with my default)
 
 1. **Which look?** Answered 2026-11-04: **(a) the default, (b) and (e) as themes** ("A as default, B and E as themes").
-2. **How does the desktop start?** Default: typed `desk` after logging in on a console (like `startx`); starting it at
+2. **How does the desktop start?** Default: typed `zdesk` after logging in on a console (like `startx`); starting it at
    boot is a later setting.
 3. **Dragging on the stock A1200: the outline or the whole window?** Default: the outline on 68020/030, the whole window
    on 68040/060 and the PiStorm; a setting changes it.
@@ -333,7 +333,7 @@ palette for `desk`, so the ones not chosen stay cheap to offer later as themes.
    bar, as in the pictures.
 8. **Desktop icons: a few fixed starters, as in the pictures?** Default: yes, listed in a config file; no file icons
    (`.info`) on the desktop for now.
-9. **Names:** `displayd` (the server), `desk` (the floating desktop), `term` (the terminal window). Default: these.
+9. **Names:** `displayd` (the server), `zdesk` (the floating desktop), `term` (the terminal window). Default: these.
 10. **OCS/ECS and chip-only machines:** default: the chosen look in 8 colours; look (c) as the choice for the slowest.
 
 ---
@@ -343,8 +343,8 @@ computed from the Hardware Reference Manual (3rd edition, "Blitter Speed"), the 
 ## Decided 2026-11-04 (revision 2): the bar and workspaces
 
 **The bar** (owner: "Will it work as a workbench bar, a macOS bar, i3 bar? How would we design it?"; the design below
-put to the owner and approved with "go ahead and start building"): one bar, drawn by `desk`, in three zones, each
-made of modules named in `/etc/desk/bar` (a user's `~/.config/desk/bar` wins):
+put to the owner and approved with "go ahead and start building"): one bar, drawn by `zdesk`, in three zones, each
+made of modules named in `/etc/zdesk/bar` (a user's `~/.config/zdesk/bar` wins):
 - **left, menus:** the Zenix menu, then the active program's menus. Programs send their menus to `displayd` (a menu
   message in the protocol); the bar draws them. Opened by a click (the Mac's way), by holding the right mouse button
   (Workbench's way), or both (the default). Theme (b) defaults to the right button and Workbench's look of the screen
@@ -356,8 +356,8 @@ made of modules named in `/etc/desk/bar` (a user's `~/.config/desk/bar` wins):
 A theme ships its own default bar file; the modules and the ways of opening menus are the same in every theme.
 
 **Workspaces** (owner: "Why can't the floating desktop have workspaces?"): the floating desktop has them from the
-first step. They belong to `desk`, not to a layout, so the tiling desktop later uses the same. Nine workspaces, Left
-Amiga + 1..9 to switch, Left Amiga + Shift + 1..9 to move the active window there (all in `/etc/desk/keys`, Amiga +
+first step. They belong to `zdesk`, not to a layout, so the tiling desktop later uses the same. Nine workspaces, Left
+Amiga + 1..9 to switch, Left Amiga + Shift + 1..9 to move the active window there (all in `/etc/zdesk/keys`, Amiga +
 F1..F10 stay the console switches). A window on a hidden workspace gives up its kept off-screen copy (chip RAM) and is
 redrawn when shown again (about 0.1 s a window on a 14 MHz 68020, an estimate). Later, not in the first step: a
 workspace as an Amiga-style screen of its own (its own mode and palette, dragged down to see the one behind).
@@ -368,7 +368,7 @@ Owner: "It would be nice to have the ability to let Zenix boot and present the u
 and when entering the password the user is put into the desktop, just like a modern Linux machine. Just because the
 hardware is from the 90's the design or functionality of zenix doesn't have to be."
 
-So, after `desk` works (stage 7 of the first step): a login manager, `dlogin` (as GDM, LightDM or SDDM), a D11
+So, after `zdesk` works (stage 7 of the first step): a login manager, `dlogin` (as GDM, LightDM or SDDM), a D11
 service that starts `displayd` on one console at boot and shows a login screen in the chosen theme: the computer's
 name, the user's name, the password (never echoed), the clock, and a choice of session (the floating desktop now,
 the tiling one later, or a text console). It checks the password the way `login` does (one code, the shadow file's
@@ -377,4 +377,11 @@ brings the login screen back. The text consoles stay on Amiga + F1..F10 as now. 
 graphical login or to the text login is one line in `/etc` (the default: text until the desktop is proven on real
 hardware, then graphical; the installer asks). Details, as for the rest of D38, are decided in the code's review: who
 owns `displayd` between sessions, the greeter's own user, how the hand-over is guarded.
+
+## Decided 2026-11-04 (revision 4): the name
+
+Owner: "Zenix Desktop is a good and clear name. zdesk/ztile are good commands. It's decided." The desktop is
+**Zenix Desktop**; the floating window manager's program is `zdesk` (it was `desk` above), the tiling one later
+`ztile`; their settings live in `/etc/zdesk/` (and `~/.config/zdesk/`), the tiling one's in `/etc/ztile/`.
+`displayd`, `term` and `dlogin` keep their names.
 
