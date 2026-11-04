@@ -209,3 +209,18 @@ superscalar bit and the branch cache): `time ls -laR / > /dev/null` 1.885 / 1.88
   error before anything is loaded.
 - No system call, message or file format changes. The kernel grew 2,000 bytes (`tools/ksize-budget`); the mount
   tests' RAM disk gave 2 KB for it (712 -> 710 KB, 41 blocks still free).
+
+## Measured on the real hardware (2026-11-04)
+
+The A1200 with the Apollo 1260 (68060 at 50 MHz, 64 MB fast at 0x01000000), ZenixFS root on a CF card on the Gayle
+IDE port, release 2026110401 installed by `zpkg -Syu`. The boot log: "cache: 68060 (superscalar, branch cache, store
+buffer), data cache copyback for 0x1000000-0x7ffffff, the rest uncached", "cache: self-test: chip RAM uncached, fast
+RAM copyback". `time ls -laR / > /dev/null` (506 lines), five runs each:
+
+| | runs (s) |
+|---|---|
+| before (2026110304: instruction cache only) | 4.352, 4.226, 4.226, 4.227, 4.228 |
+| after (copyback, superscalar, branch cache, store buffer) | 1.007, 0.947, 0.949, 0.946, 0.943 |
+
+4.5 times faster; measured by the owner, read from photos of the screen.
+
