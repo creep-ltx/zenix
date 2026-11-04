@@ -385,3 +385,11 @@ Owner: "Zenix Desktop is a good and clear name. zdesk/ztile are good commands. I
 `ztile`; their settings live in `/etc/zdesk/` (and `~/.config/zdesk/`), the tiling one's in `/etc/ztile/`.
 `displayd`, `term` and `dlogin` keep their names.
 
+## The bar it must clear (owner 2026-11-04)
+
+"Remember that Workbench 1.3 didn't have artifacts and felt snappy on an A500. Just saying. I have a 060/50." So:
+no visible artifact ever (no clear-then-draw, no flash, nothing drawn twice, nothing left behind), only what changed is
+drawn, and every interaction (the pointer, a menu, a raise, a drag, typing in term) answers within the frame on a
+68060 and feels as quick as Workbench 1.3 on an A500 on the stock A1200. Measured on the real machine; a finding of
+either kind is a bug, fixed before new desktop features.
+

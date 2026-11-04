@@ -83,6 +83,11 @@ The phases below say *what*; this says *in which order*. When one item is done, 
 fixed next, ahead of everything here ("fix things when we find them"). A focused audit closes every block; its findings
 are fixed at once. Two independent design reviews for deep core changes, one for features.
 
+**The real-world benchmark (owner 2026-11-04: "having the mounted Amiga partitions give a better real world value"):**
+`time ls -laR /` on the A1200 with the 1260, the owner's AmigaOS partitions mounted (/mnt/dh0 PFS3 1 GB, /mnt/dh2
+PFS3 8 GB), to /dev/null and on the screen, in the text console and in zdesk's term. First figures (release
+2026110403, measured): /dev/null 4.36 s; text console 12.8 s; term 2 min 51.8 s.
+
 **Real-hardware findings waiting (the A1200 with the 1260, 2026-11-04), fixed next:** the 040/060 data cache on for fast
 RAM through the transparent translation registers, chip RAM uncached (done 2026-11-04, D37: 4.23 s -> 0.95 s on the 1260; boot log was: "data cache off"; `ls -laR /` of 506
 lines took 4.26 s, 9.64 s on the screen with the serial cable in: measured; built on branch cache 2026-11-04, DESIGN
