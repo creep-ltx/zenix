@@ -204,8 +204,9 @@ $(BUILD)/kernel.elf: $(KOBJS) link/kernel.ld
 RAMDISK_K := 640
 # 712 since DESIGN D28 step 2 (2026-10-29): the console's UTF-8 took about 9 KB of kernel; 33 blocks stay free there.
 # Not less: at 708 (12 blocks free) mounttest's links part runs out of space in /tmp (2026-10-31). tar, tree and realpath left it
-# when fsck.zenixfs grew by its repairs (DESIGN D34): zenixfstest carries them on its own disk.
-RAMDISK_MOUNT_K := 712
+# when fsck.zenixfs grew by its repairs (DESIGN D34): zenixfstest carries them on its own disk. 710 since DESIGN D37
+# (2026-11-04, the 040/060 data cache: 2 KB of kernel): 41 blocks free there (43 at 712).
+RAMDISK_MOUNT_K := 710
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
