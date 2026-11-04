@@ -1,9 +1,7 @@
 wait zenix:/# 90
 send cat /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/keep; sync; echo f1=$(df | grep ' /$' | tr -s ' ' | cut -d' ' -f4)\r
 sleep 8
-send svctest keep /tmp/keep 10 &\r
-sleep 3
-send kill 3; sleep 1; echo n=$(ls / | wc -l)\r
+send svctest keep /tmp/keep 10 & sleep 3; kill 3; sleep 1; echo n=$(ls / | wc -l)\r
 wait svctest keep /tmp/keep: 40
 send sleep 1; sync; echo f2=$(df | grep ' /$' | tr -s ' ' | cut -d' ' -f4)\r
 sleep 4

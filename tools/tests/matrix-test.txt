@@ -1,40 +1,39 @@
 wait zenix:/# 90
-sleep 1
 send free\r
-sleep 1
+wait zenix:\S*[#$]  30
 send cat /etc/motd | wc\r
-sleep 1
+wait zenix:\S*[#$]  30
 send echo ok > /tmp/m\r
-sleep 1
+wait zenix:\S*[#$]  30
 send cat /tmp/m\r
-sleep 1
+wait zenix:\S*[#$]  30
 send hello 1\r
-sleep 3
+wait zenix:\S*[#$]  30
 send crash\r
-sleep 2
+wait zenix:\S*[#$]  30
 send crash stack\r
-sleep 3
+wait zenix:\S*[#$]  30
 send uname\r
-sleep 2
+wait zenix:\S*[#$]  30
 send df\r
-sleep 2
+wait zenix:\S*[#$]  30
 send \x1d2
 wait zenix login: 30
 send root\r
-sleep 6
+wait zenix:\S*[#$]  30
 send echo con2ok\r
-sleep 2
+wait zenix:\S*[#$]  30
 send \x1d3
 wait zenix login: 30
 send root\r
-sleep 6
+wait zenix:\S*[#$]  30
 send echo con3ok\r
-sleep 2
+wait zenix:\S*[#$]  30
 send \x1d4
 wait zenix login: 30
 send root\r
-sleep 6
+wait zenix:\S*[#$]  30
 send echo con4ok\r
-sleep 2
+wait zenix:\S*[#$]  30
 send \x1d1
 sleep 2

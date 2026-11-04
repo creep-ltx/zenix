@@ -131,6 +131,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   -(1024 + bits), `FSL_A1` 1, `FSL_LAST` 2, the reserved -1024 .. -1279; TEXT's form (absolute T + rest, or the link's
   directory without its leading `/` + T + rest; NUL-terminated, at most `FS_PATHMAX`); the table of which argument
   each request may rewrite (`fsl_ok`, `kernel/fsproto.h`). A server without the bit follows links as before.
+- **D37 (the 040/060 data cache, branch `cache`, 2026-11-04):** bootinfo `+0x84` `kopts`, `KOPT_DCACHE_OFF` 1 and
+  `KOPT_DCACHE_WT` 2 (zenixboot `DCACHE=OFF|WT|CB`); 0, what every older loader leaves, means the defaults.
 - **D22 (zpkg, 2026-10-28):** `UPD_F_TRIAL` 2 in the bootinfo and `uupdate` flags; the manifest line `takes OTHER`;
   zup's journal line `live 1 NAME` and the live-only operations `S`, `M`, `X`; `/var/cache/zpkg/live/` and
   `/var/lib/zpkg/lock` (a pid and a newline, linked whole from `lock.PID`); zpkg's `/etc/zpkg.conf` (the words

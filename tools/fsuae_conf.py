@@ -8,6 +8,7 @@ The configs in the repository name no path of the machine they were written on. 
                          Kickstarts directory (Documents/FS-UAE/Kickstarts in the home directory).
   ../build/              the build directory: ZENIX_BUILD if set, else build/ of this source tree.
   /tmp/zenix-serial      the serial port: ZENIX_SERIAL if set (each test run its own port).
+With ZENIX_FAST=1 the machine also runs in FS-UAE's warp mode (make_fast; tools/check.sh's fast mode).
 
 usage: tools/fsuae_conf.py SRC.fs-uae DST.fs-uae     (tools/run-test.sh, tools/kbd-test.sh and make run use it)
 From Python: import fsuae_conf; text = fsuae_conf.resolve(open(src).read())
@@ -31,7 +32,30 @@ def kickstart_dir():
     return os.path.expanduser(os.environ.get("ZENIX_KICKSTART_DIR") or DEFAULT_KICKSTART_DIR)
 
 
-def resolve(text, serial=None, build=None, states=None):
+def fast_mode():
+    """ZENIX_FAST=1: the fast mode of the tests (tools/check.sh sets it; docs/README.md "Fast mode")."""
+    return os.environ.get("ZENIX_FAST", "") not in ("", "0")
+
+
+def make_fast(text):
+    """The same machine, run as fast as the PC can: FS-UAE's warp mode (the emulated time runs ahead of the clock on
+    the wall, 6-13 times as measured; the chipset and the CPU stay cycle-exact, so the kernel sees exactly the machine
+    it sees at stock speed), and the fast floppy drive where the config does not choose a speed itself.
+    Measured 2026-11-04 (docs/README.md "Fast mode"): a faster CPU instead (accuracy 0 or -1 with uae_cpu_speed =
+    max, with or without the JIT) let FS-UAE's IDE emulation hang for good (BSY after a READ SECTORS of 2) in 5 of 8
+    boots, and a cycle-exact 68020 ignores uae_cpu_frequency."""
+    if not re.search(r"^warp_mode *=", text, re.M):
+        text = text.rstrip("\n") + "\nwarp_mode = 1\n"
+    if not re.search(r"^floppy_drive_speed *=", text, re.M):
+        text = text.rstrip("\n") + "\nfloppy_drive_speed = 0\n"
+    return text
+
+
+def resolve(text, serial=None, build=None, states=None, fast=None):
+    if fast is None:
+        fast = fast_mode()
+    if fast:
+        text = make_fast(text)
     kdir = kickstart_dir()
     text = text.replace("$ZENIX_KICKSTART_DIR", kdir)
     serial = serial or os.environ.get("ZENIX_SERIAL")

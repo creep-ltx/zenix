@@ -27,6 +27,9 @@ static int busy;
 /* zine_enter(entry, args): d2-d7/a2-a6, USP, VBR and CACR onto the kernel stack, its pointer in zine_ksp, then the
  * blob's entry with args. The blob comes back through zine_resume (d0 the answer, d1 the seconds; supervisor mode,
  * interrupts masked, any stack), or by its own rts when it refused before taking anything (then d1 is 0). The
+ * blob is flushed in first (it is code the caller just wrote: CACR's CI on 020/030; on 040/060 the data cache off and
+ * cpusha bc, so the program runs with the data cache off as 8.1 says and none of Zenix's lines stay valid behind it;
+ * DESIGN D37 section 6). The
  * resume puts VBR back first, then CACR with both caches cleared (Zenix's code and data are where a program's may
  * have been cached, the 030's data cache may hold lines from before the session that the program's writes with the
  * cache off did not update, and Emu68 would run stale translations: CI and CD on 020/030, cpusha bc on 040/060),
@@ -43,7 +46,16 @@ __asm__(
     "    move.l  %a0,-(%sp)\n"
     "    movec   %cacr,%d0\n"
     "    move.l  %d0,-(%sp)\n"
-    "    move.l  %sp,zine_ksp\n"
+    "    move.w  0x1000,%d1\n"           /* D37 6: the blob is code /bin/zine just wrote; the program runs with */
+    "    and.w   #0x0088,%d1\n"          /* the data cache off (8.1) */
+    "    bne.s   3f\n"
+    "    or.w    #0x0008,%d0\n"          /* 020/030: CI, the enable bits kept */
+    "    movec   %d0,%cacr\n"
+    "    bra.s   4f\n"
+    "3:  and.l   #0x7FFFFFFF,%d0\n"      /* 040 DE, 060 EDC off, then at once everything pushed and invalid */
+    "    movec   %d0,%cacr\n"
+    "    .word   0xF4F8\n"               /* cpusha bc (never cinva: CLAUDE.md) */
+    "4:  move.l  %sp,zine_ksp\n"
     "    move.l  60(%sp),%a0\n"            /* entry: 11 registers + 3 longs + the return address = 60 */
     "    move.l  64(%sp),-(%sp)\n"
     "    moveq   #0,%d1\n"

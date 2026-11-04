@@ -30,7 +30,10 @@ struct bootinfo {
     u32 ram_pa, ram_size;       /* ramdisk loaded by the bootblock, 0 if none */
     u32 upd_pa, upd_size;       /* +0x78, +0x7C: an update bundle zenixboot left in memory for zup (DESIGN D15), 0 if none */
     u32 upd_flags;              /* +0x80: UPD_F_*; an older loader leaves all three 0 (the table is cleared) */
+    u32 kopts;                  /* +0x84: KOPT_* boot options (DESIGN D37, zenixboot DCACHE=); 0 from an older loader */
 };
+#define KOPT_DCACHE_OFF 1u              /* the 040/060 data cache stays off (and its store buffer, branch cache, PCR) */
+#define KOPT_DCACHE_WT  2u              /* the 040/060 data cache write-through instead of copyback */
 
 /* serial.c */
 void serial_init(void);
@@ -111,13 +114,22 @@ void cpu_idle(void);
 u32 get_usp(void);                   /* the user stack pointer register (the running process's, in the kernel) */
 void set_usp(u32 usp);               /* D16: the live user stack pointer (a signal frame, sigreturn) */
 extern u32 kstack_bottom[];          /* the boot stack (pid 0, idle): 8 KB below kstack_top */
-void cache_enable(int is040plus);
+void cache_enable(int is040plus);    /* the instruction cache only (cache.c's fallback, 020/030, Emu68) */
 void cache_flush_code(void);         /* after writing code that will run: I-cache (and Emu68 JIT) flush */
 void exc_common(void);
 void irq2_entry(void);
 void irq2_c(u32 *rb);                /* D16: the level-2 entry saves all registers (d0-d7, a0-a6, then the CPU frame) */
 void irq_other_entry(void);         /* vectors 24-31 without a handler of their own */
 void irq_other_c(u32 fv);
+
+/* cache.c (DESIGN D37): the caches at boot; the data cache on a real 68040/68060 */
+void cache_setup(const struct bootinfo *bi);   /* after mem_init, interrupts masked; logs what is cached */
+void cache_before_reset(void);       /* machine_reset: pushed, the registers as after a hardware reset */
+void cache_push_range(u32 lo, u32 hi);  /* DRV_CACHE: [lo, hi)'s data cache lines pushed and invalidated */
+#define CACHE_D_OFF 0
+#define CACHE_D_WT  1
+#define CACHE_D_CB  2
+extern u8 cache_dmode;               /* CACHE_D_*: what the data cache does (Emu68, 020/030: OFF) */
 
 /* mem.c */
 #define MEM_CHIP     1u         /* must be chip RAM (DMA: graphics, audio, disk) */

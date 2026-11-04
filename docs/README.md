@@ -33,6 +33,7 @@
 | [d30-fat.md](d30-fat.md) | DESIGN D30's design note: FAT, `/sbin/fatd`: names, inode numbers, Unix meaning, the crash order, the dirty mark, damage |
 | [d35-installer.md](d35-installer.md) | DESIGN D35's design note: `zinstall`, the installer: the rules that keep other partitions safe, the layouts, a cut at any moment, where the files come from, dual boot and the way back, measurements. |
 | [d36-pcmcia-ne2000.md](d36-pcmcia-ne2000.md) | DESIGN D36's design note: `/sbin/net/ne2000`, an NE2000 PC Card (the Netgear FA411) in the A600/A1200's slot: Gayle's slot, the CIS, the AX88x90 and DP8390 chips, the claim of the slot and the memory clash, the tests, what has not run and the first steps on the A1200 |
+| [d37-data-cache.md](d37-data-cache.md) | DESIGN D37's design note: the 68040/68060 data cache without an MMU: the transparent translation registers and the 060's TCR default, copyback or write-through, the self-test, every place a push matters (the loader, ZINE, the reset, DMA), what FS-UAE cannot show, and the first run on the Apollo 1260 |
 | [d34-zenixfs-root.md](d34-zenixfs-root.md) | DESIGN D34's design note: ZenixFS as the root on a real machine: the repair failure and its fix, which kernel, boot and rescue, memory, the trial's steps and risks. |
 | [d33-archives.md](d33-archives.md) | DESIGN D33's design note: LhA and LZX unpacking, `unlha` and `unlzx`, the clean rewrite: both formats in words, how each fact was established, every source, memory |
 | [d32-pfs3.md](d32-pfs3.md) | DESIGN D32's design note: PFS3, `/sbin/pfs3d`, read-only: the format in words, where its facts came from, a volume with pending changes, damage |
@@ -108,6 +109,45 @@ image file), and prints a table in the order of the list (test, PASS/FAIL, time,
 `tools/check.sh host` runs only the host tests, `tools/check.sh NAME...` only the named ones (e.g. `matrix users-test`).
 Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (shown as skipped).
 
+**Fast mode** (2026-11-04). Most emulator tests check logic, not the stock A1200's speed, so `tools/check.sh NAME...`
+runs them in fast mode by default; the full `tools/check.sh` (the nightly run, before a merge) stays at stock speed;
+`--fast` and `--stock` (or `ZENIX_FAST=1`/`0`) choose either way. In fast mode every FS-UAE run made through
+`tools/fsuae_conf.py` (`run-test.sh` and the cage rig) gets `warp_mode = 1`: the same machine, still cycle-exact, run as
+fast as the PC can, its emulated time running ahead of the clock on the wall (6 to 13 times here). The kernel sees exactly
+the stock machine; only the PC's clock is out of step with it. A faster CPU instead was tried and refused: with
+`accuracy` 0 or -1 and `uae_cpu_speed = max`, with or without the JIT, FS-UAE's IDE hung for good (BSY after a READ
+SECTORS of 2) in 5 of 8 boots, and a cycle-exact 68020 ignores `uae_cpu_frequency` (knowledge base
+`amiga/fs-uae-speed-settings.md`). The tests that pair the Amiga with the PC's clock stay at stock speed in fast mode
+too: keys typed and screenshots taken by the cage rig, the BBS simulator and SLIP's noise, the clock tests, power cuts
+timed in the PC's seconds, downloads from a server on the PC (the Amiga's time-outs run in emulated seconds), and the
+stock machines whose memory floors are checked. The one list of them, each with its reason, is `STOCK` in
+`tools/check.sh`; a job holding one of them runs at stock speed as a whole, and says so. A script's host-side `sleep`
+does not get faster in warp mode (it only lasts longer in the Amiga's time): wait for the output instead, and
+let a time the Amiga must see run on the Amiga (`cmd & sleep 3; kill ...` in one typed line). The serial tap types a
+character every 2 ms instead of 20 in fast mode, about the same speed in the Amiga's time.
+Measured on 2026-11-04 (the times of a test's jobs added up, as check.sh's table shows them; other sessions'
+emulators ran beside, so take them as rough):
+
+| Test | stock | fast |
+|---|---|---|
+| zinstall-test f (alone) | 586 s | 134 s |
+| sumi-test | 78 s | 7 s |
+| update-test (7 jobs; in fast mode the one with the two cuts at stock speed) | 3,856 s | 1,907 s |
+| matrix (2 jobs; 4 machines stay at stock speed; with `stop` and waits instead of sleeps in its script) | 1,292 s | 130 s |
+| zpkg-emu-test | 1,252 s | the same: all three parts are in STOCK (downloads, 1 MB of chip RAM) |
+
+**Scratch and /tmp.** `/tmp` is a RAM disk shared by every session (it filled up on 2026-11-03 and spoiled many runs).
+Everything of a check run is in its folder `/tmp/zenix-check.XXXXXX`: each job's output folder (`ZENIX_OUT`), its copy
+of the build, its serial port (`ZENIX_SERIAL`, and the ports the tests name after it) and its `TMPDIR` (so `mktemp`,
+`run-test.sh`'s run folders and Python's temporary files land there too). A job that passes frees its folders at once;
+a failed one keeps them for a look, of its build copy only the disk images and `kernel*.elf` (with more than 2
+failures their images go at the end). A run that passes leaves
+only `check.log` (every job's log) and `summary.txt`. A run stopped by a signal ends its jobs (each runs in its own
+process group) and frees their images, keeping the logs. `run-test.sh` removes its folder and ends its tap and FS-UAE
+also when it is killed, and the serial tap removes its port's link. A job starts only while `/tmp` has
+`ZENIX_MIN_TMP_MB` (default 2048) MB free; else check.sh waits up to 5 minutes, saying why, and then marks the job
+"not started" (a FAIL in the table, with the reason) rather than letting it fail on "No space left".
+
 | Test | What it checks |
 |---|---|
 | docs-check | the documentation rules above |
@@ -118,10 +158,11 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | mfm-test, emmc-test, genet-test, serial-test, term-test, mem-test, a3000-test, stage0-test, stage0-68k-test | the floppy track coding, the SD card, the serial copy of the console and `/dev/ttyS0`, the terminal's escape parser and colours (`kernel/term.c` against a model of the display), the kernel allocator around 1 GB (`MEM_LOW1G`), A3000 SCSI and Pi device-tree code against models; genet-test: the CM4's Ethernet driver's chip code (`net/drv/genet-core.c`) against a model of GENET v5, its rings and DMA, the BCM54213PE and the cache (`tools/genet-model.h`): bring-up, link changes, 3,000 frames with the indexes wrapping, a slow netd, bad frames, a stuck DMA, the quiesce program, the self-test with working and broken cache calls |
 | ne2000-test | the PC Card NE2000 driver's slot, CIS and chip code (`net/drv/ne2000-core.c`, DESIGN D36) against a strict model of Gayle's slot, the cards and the chips (`tools/ne2000-model.h`): an FA411-like AX88790 configured as Linux does, its link, 3,000 frames each way with the ring wrapping, a slow netd, an overrun, a damaged header, a stuck send, the quiesce program, the card out and back; an AX88190 with its PHY powered down, a DP8390 card, an FA411 with a DP8390 inside, refusals, 20,000 damaged CISes |
 | clock-host-test | the wall clock (`kernel/clock.h`, audit 2026-10-26 F8) across the tick count's wrap and past 2038, the old formula beside it jumping back |
+| cache-host-test | DESIGN D37's block chooser (`kernel/cache_plan.h`): the 1260's fast RAM, FS-UAE's 32-bit RAM, A4000 layouts, Zorro II only, boards that are not RAM inside and outside the block; no board's unit ever cached |
 | tap-test | the serial tap's `wait` (`tools/serial-tap.py`, against a fake shell that redraws its prompt with each key): after a typed line it waits for the next prompt, not the one in the echo; `waitecho` and a half-typed line still match the echo; a `wait` that times out or is cut short by the end of the run is a FAIL line (and in `ZENIX_TIMEOUTS`), a `waitopt` that times out is not |
 | usize-test | the frozen first sizes of the structs the kernel writes into a program (a size-0 caller gets each one's first size, also when the struct grows; every system call passes its frozen constant) |
 | mkzexe-test | the ZEX2 program format of shared code (DESIGN D13): `tools/mkzexe.py` classifies each relocation by its target (a `.data` pointer into constants to code, a table slot of a BSS array to data) and refuses a reference from the shared code into data, a value equal to `text_size`, an undefined weak and an absolute symbol; an undefined weak symbol in a ZEXE too |
-| matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch) |
+| matrix | boots every emulated machine (architecture.md section 13), a short session on each (including a stack overflow the guard must catch); the cache line of each (the 040 and 060 with 32-bit RAM: the data cache on, D37) |
 | cmds-test, cmds2-test | the commands and the shell, output compared with GNU bash and tools; `e2fsck` after the run |
 | users-test, zroot-test | users and permissions, the consoles; zroot-test the same on a ZenixFS root (with the kernel kernel-zfs, DESIGN D34) |
 | zroot-card-test | ZenixFS as a real root (D34): the card's layout, power cuts during writes with fsck and a compare, damage and `fsck.zenixfs -y`, read-only and boot's choices, 2 MB of chip RAM, `write-root.sh`'s ZenixFS mode on a card image |
@@ -149,7 +190,7 @@ Not run by it: `stage0-68k-test` when the Python module `unicorn` is missing (sh
 | mounttest, zenixfstest | mounting ext2 and ZenixFS, `fsck`, nested mounts; zfsd started from `/sbin/zfsd`, again after a kill, and through the old name `@zfsd` |
 | edit-regress, disktools, mbr-test | the editor; `fdisk`/`mkfs`/`fsck` on scratch disks; PC partition tables |
 | zinstall-host-test, zinstall-test | D35, the installer: on the PC, every other partition byte-identical, a cut at every table write, torn sectors, damaged tables, a fuzz run; in FS-UAE, from the floppies to an empty disk, beside AmigaOS, on 2 MB of chip RAM with ext2 and ZenixFS, the card's layout, the refusals, from an existing Zenix by zpkg |
-| zenixboot-test | booting with no floppy: Kickstart boots the FFS partition, zenixboot starts Zenix on its IDE root; zenixboot's error paths; Kickstart 3.2 and 2.05 only when `ZENIX_KICK32` / `ZENIX_KICK205` name those ROMs (else SKIP) |
+| zenixboot-test | booting with no floppy: Kickstart boots the FFS partition, zenixboot starts Zenix on its IDE root; zenixboot's error paths; `DCACHE=` (D37: WT, OFF, a bad word) on a 68060; Kickstart 3.2 and 2.05 only when `ZENIX_KICK32` / `ZENIX_KICK205` name those ROMs (else SKIP) |
 | update-test | Zenix updating itself (DESIGN D15) in FS-UAE: zenixboot installs a bundle's kernel (the FFS steps in their order, flushed), zup the root half (the owner's passwd kept), the memory given back, shells working; the confirmation and `.done`; the bundle offered again; a cold start in the trial; a panic and a hang then the question and both halves back; PREVIOUS after a cut; a power cut during zup; damaged bundles |
 | sysupdate-test | the system update from Zenix itself (DESIGN D22 amendment 2) in FS-UAE: from an image of the owner's 2026103000 system, `zpkg -Syu` (zpkg-new), `zpkg-new -Syu` (the bundle written to the boot partition), `reboot` (zenixboot installs it), `zpkg -Syu`; a second update refused while the first is on the partition, then written and installed; the boot partition checked on the PC (`ffsread.py check`, xdfscan); the SD card's MBR layout from the floppy; a disk without a boot partition |
 | cardpkg-test | the owner's card package (`tools/mkcardpkg.sh`, card-package.md): `write-root.sh` on an image of the dual card (partitions 1, 2 and 4 untouched, the owner's settings carried from a root of 2026-10-24, the saved copy and `--restore`, refusals); in FS-UAE the README's AmigaDOS steps on the old boot partition, the new Zenix up, the trial update and "Zenix (previous)"; the DoM on a stock A1200 and a 68060. Not in `make check` (run by hand before the package goes out) |

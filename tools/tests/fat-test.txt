@@ -82,9 +82,7 @@ send echo still-writable > /mnt/after-clean.txt && echo wrote-after-clean\r
 sleep 4
 send sync\r
 sleep 3
-send echo after-kill > /mnt/uncommitted.txt\r
-sleep 1
-send kill -9 $(pgrep fatd)\r
+send echo after-kill > /mnt/uncommitted.txt; kill -9 $(pgrep fatd)\r
 sleep 3
 send ls /mnt\r
 sleep 5

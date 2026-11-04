@@ -322,8 +322,9 @@ u32 c_SetFunction(u8 *lib, s32 off, u32 fn)
 /* the instruction cache stays as Zenix had it, the data cache off (10.1): the answer says so; changes are not made */
 /* CacheControl (exec): the old bits; the instruction cache switched as asked (old programs that change their own code
  * switch it off; the 68040's 4 KB one and Emu68's translations would run the old code). The 020/030's CACR has
- * exec's layout (EnableI 0, FreezeI 1, IBE 4); the 040/060's IE is bit 15. The data cache stays off as Zenix runs
- * it: without an MMU chip RAM is not marked uncached, so DMA would not be seen. Both caches are cleared after
+ * exec's layout (EnableI 0, FreezeI 1, IBE 4); the 040/060's IE is bit 15. The data cache stays off as the kernel
+ * hands the machine over (zine_enter; kernel/zine.c, DESIGN D37): only Zenix's own fast RAM is set up to be cached,
+ * the program's chip RAM DMA would not be seen if its writes stayed in the cache. Both caches are cleared after
  * (CACRF_ClearI/ClearD always). Supervisor mode (zs_CacheControl, blobs.S). */
 u32 zb_cachectl(u32 bits, u32 mask);
 u32 zb_cachectl(u32 bits, u32 mask)

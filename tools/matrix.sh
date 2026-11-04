@@ -26,6 +26,8 @@ for n in $CONFS; do
                 printf 'send \\x1d1\nsleep 2\n'; } >$OUT/$n.txt ;;
     *) cp tools/tests/matrix-test.txt $OUT/$n.txt ;;
     esac
+    # the checks below read only the serial log: the run ends when the script is done (not at the 95 s limit)
+    grep -qx stop $OUT/$n.txt || echo stop >>$OUT/$n.txt
     tools/run-test.sh "$f" 95 $OUT/$n.txt > $OUT/$n.log 2>&1
     if [ "$n" = a600-68000 ]; then
         grep -q 'needs a 68020' $OUT/$n.log && echo "PASS $n (refuses cleanly)" || echo "FAIL $n"
@@ -59,6 +61,13 @@ for n in $CONFS; do
         # (sh: no memory: since programs that never buffer lost libz's 4 KB output buffer, audit O12, sh may load where
         # it did not and then find no room for its arena; it says so and ends, init starts another login)
     fi
+    # DESIGN D37: the data cache on the 040 and 060 for their 32-bit RAM, chip RAM uncached by the self-test; off elsewhere
+    case $n in
+    a1200-040) grep -q '^cache: 68040, data cache copyback for 0x8000000-0xbffffff, the first 16 MB uncached' $OUT/$n.log || ok=0 ;;
+    a1200-060) grep -q '^cache: 68060 (superscalar, branch cache, store buffer), data cache copyback for 0x8000000-0xbffffff, the rest uncached' $OUT/$n.log || ok=0 ;;
+    *) grep -q '^cache: instruction cache on, data cache off: 68020/68030$' $OUT/$n.log || ok=0 ;;
+    esac
+    case $n in a1200-0[46]0) grep -q '^cache: self-test: chip RAM uncached, fast RAM ' $OUT/$n.log || ok=0 ;; esac
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"
 done
