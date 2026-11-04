@@ -179,7 +179,7 @@ void kfree(void *p);
 extern int trows;
 int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
-int gfx_up(void);
+int gfx_up(void);                /* the kernel may draw: the display is up and no console is handed over (D38) */
 void gfx_panic(void);            /* panic with the display up: dark red background, white text, the text stays */
 extern int gfx_depth;            /* bitplanes: 1 to 4 (DESIGN D14; 0: no display) */
 extern const u16 gfx_palette[16];       /* the 16 ANSI colours, 12 bits */
@@ -230,6 +230,7 @@ void term_scroll_view(int delta);       /* Shift+Up/Down: scrollback */
 int term_ckm(void);                     /* the console on the screen wants ESC O A arrows (DECCKM) */
 int term_size(void);                    /* rows << 16 | columns */
 void con_switch(int con);               /* show console con (1..NCONS); an unused one asks init for a login */
+void con_show(int con);                 /* show it now (con_switch's end; gcon.c once the display server let go) */
 int con_in_use(int con);                /* is a live process's controlling tty this console? */
 extern int con_cur;                     /* the console on the screen (keyboard and serial input go to it) */
 extern u16 con_want;                    /* bit n: console n was shown with nobody on it (init's WAIT_CONSOLE) */
@@ -328,7 +329,8 @@ union zhdr { struct zexe v1; struct zex2 v2; };
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16
 #define NFILE 64
-enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM, FT_SOCK, FT_PTM };   /* FT_PTM: a pty's master (off: its tty number), D20 7.2; FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19; FT_SOCK: a socket (ino: its ksock), D19 */
+enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM, FT_SOCK, FT_PTM, FT_GCON };   /* FT_PTM: a pty's master (off: its tty number), D20 7.2; FT_GCON: a console
+                                         * in graphics mode's input ring (D38 step 2, gcon.c); FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19; FT_SOCK: a socket (ino: its ksock), D19 */
 struct pipe {
     u8 buf[2048];
     u16 rd, wr, count;
@@ -813,7 +815,8 @@ void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, a
 #define SYS_chdir   15
 #define SYS_getcwd  16
 #define SYS_pipe    17   /* int fds[2], flags (0, or O_NONBLOCK for both ends: Linux's pipe2; D20 step 4) */
-#define SYS_memalloc 18
+#define SYS_memalloc 18   /* size, flags (0 any memory; MEMA_CHIP chip RAM, DESIGN D38: the display server's screen) */
+#define MEMA_CHIP    1
 #define SYS_memfree  19
 #define SYS_ticks   20   /* 0 -> the 100 Hz tick count (wraps); 1 -> whole seconds since boot (unsigned, F9); 2 -> CLOCK_* bits */
 #define CLOCK_RTC   1    /* SYS_ticks 2: the battery clock set the time at boot (D21 8.3) */
@@ -942,6 +945,72 @@ struct uconline {            /* CON_LINE: the caller fills size, pens, npens; th
     u16 palette[16];         /* pens 0 .. 2^depth - 1 as the next frame shows them, 12 bits 0x0RGB; the rest 0 */
 };
 #define UCONLINE_FIRST  56
+/* DESIGN D38 step 2 (gcon.c; frozen): a console in graphics mode for a display server. CON_GRAB: root, the console
+ * named by the op word's descriptor; a2 struct ucongrab -> a new descriptor whose reads give struct ugevent records
+ * (whole ones; waits unless O_NONBLOCK) and whose poll gives POLLIN; its last close gives the console back. -EBUSY: a
+ * console is grabbed already; -ENODEV: no display. CON_GACK: the grab's descriptor in the op word; a2 the number of
+ * the GEV_RELEASE being answered: the server has let go of the screen and the blitter (-EINVAL: none asked, or an
+ * older one). No answer within 1 s: the kernel switches anyway and logs it. */
+#define CON_GRAB        8
+#define CON_GACK        9
+struct ucongrab {            /* CON_GRAB: the caller fills size .. hoty; the kernel the rest */
+    u32 size;                /* UCONGRAB_FIRST or more */
+    u32 cop;                 /* the Copper list: the caller's chip RAM, ending 0xFFFF 0xFFFE (at most 4,096 moves);
+                              * it sets all eight sprite pointers every frame, sprite 0 at `sprite`, and fetches at
+                              * least one bitplane (in FS-UAE no sprite shows without) */
+    u32 sprite;              /* sprite 0, the pointer: its two control words (the kernel writes them), sprh line pairs,
+                              * two zero words; the caller's chip RAM */
+    u16 sprh;                /* its height in lines, 1..255 */
+    s8 hotx, hoty;           /* the hot spot in the sprite: hires pixels, lines */
+    u16 width, height;       /* back: the screen in hires pixels and lines (640 x 256 PAL, 640 x 200 NTSC) */
+    u16 depth;               /* back: the planes the text console uses (D14's choice for this machine) */
+    u16 chips;               /* back: GCHIP_* */
+};
+#define UCONGRAB_FIRST  24
+#define GCHIP_AGA       1
+struct ugevent {             /* a record of the grab's ring (16 bytes, frozen) */
+    u8 type;                 /* GEV_* */
+    u8 code;                 /* GEV_KEY: the raw key code, bit 7 set when it goes up */
+    u16 qual;                /* GQ_* bits: the qualifiers and the mouse buttons when it happened */
+    short x, y;              /* the pointer (hires pixels, lines); GEV_RELEASE: x its number; GEV_LOST: x how many */
+    u8 ch[4];                /* GEV_KEY going down: the keymap's character as UTF-8 (0-filled), none for other keys */
+    u32 time;                /* the 100 Hz tick */
+};
+#define GEV_KEY         1
+#define GEV_POINTER     2    /* moved, or a button changed (merged while unread) */
+#define GEV_RELEASE     3    /* let go of the screen and the blitter, then CON_GACK x */
+#define GEV_ACQUIRE     4    /* the console is shown: the screen and the blitter are the server's */
+#define GEV_LOST        5    /* the ring was full: x records were dropped */
+#define GQ_LSHIFT       0x0001          /* AmigaOS's IEQUALIFIER values */
+#define GQ_RSHIFT       0x0002
+#define GQ_CAPS         0x0004
+#define GQ_CTRL         0x0008
+#define GQ_LALT         0x0010
+#define GQ_RALT         0x0020
+#define GQ_LAMIGA       0x0040
+#define GQ_RAMIGA       0x0080
+#define GQ_REPEAT       0x0200
+#define GQ_MBUTTON      0x1000
+#define GQ_RBUTTON      0x2000
+#define GQ_LBUTTON      0x4000
+long gcon_grab(int con, u32 a2);
+long gcon_ack(struct file *f, u32 seq);
+long gcon_read(struct file *f, void *buf, u32 n);
+u16 gcon_poll(struct file *f);
+void gcon_close(struct file *f);
+int gcon_active(void);                  /* the grabbed console is shown: keys and the mouse go to its ring */
+int gcon_grabbed(void);                 /* a console is in graphics mode (ZINE refuses then) */
+int gcon_away(int to);                  /* con_switch: ask the server to let go -> 1, the switch waits */
+int gcon_shown(int con);                /* con_show: con is the grabbed console -> 1, the server's screen */
+void gcon_key(u8 code, u16 qual, const u8 *ch);
+void gcon_tick(void);                   /* the 100 Hz tick: the pointer */
+void gcon_work(void);                   /* kwork: the pointer's records, the release's deadline */
+void gfx_hand(u32 cop);                 /* the Copper list shown: a server's (sprites on), or 0 the kernel's */
+int gfx_diwv(void);                     /* the display window's first line */
+void gfx_geom(u16 *w, u16 *h);          /* the screen in hires pixels and lines */
+int gfx_aga(void);
+u16 kbd_qual(void);                     /* the qualifiers held now (GQ_* bits, no buttons) */
+void input_take(s32 *dx, s32 *dy, u32 *buttons);   /* the tick: the mouse's movement since, cleared, and its buttons */
 long gfx_conline(u32 line, struct uconline *d);  /* CON_LINE's display part, console and struct checked (term_conop) */
 int kbd_inject(const u8 *codes, int n);  /* CON_INPUT's raw keys -> n, or -EINVAL (a refused code: nothing taken) */
 int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes taken, -ENXIO: no tty yet */
