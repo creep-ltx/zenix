@@ -172,6 +172,15 @@ the first 16 MB on a full 68030 (whether the TTs act with translation off is to 
   every push site (section 6) was checked by reading, and the real check is the self-test and section 9 on the 1260.
   The registers themselves are emulated (the TTRs, `TCR`, `PCR` and `CACR` are written and the boot goes on, on an
   emulated 040 and 060), and the chip-RAM half of the self-test runs.
+- **FS-UAE needs its MMU model for this** (found 2026-11-04, measured): without `uae_mmu_model`, with `CACR`'s data
+  bit set, the tick (CIA-A timer A, level 2) was lost now and then: `sleep` never returned, `uptime` stood still, in
+  about half of the runs on the 060 and once in two on the 040 (`hello`/`sleep` loops, 4-6 runs each). It happened
+  with the data bit alone and no TTRs, and with every TTR inhibited too; never with the data bit off (the old kernel,
+  4 of 4, also at `uae_cpu_speed = max`; this kernel with only the data bit cleared, 4 of 4); never with
+  `uae_mmu_model = 68060` (4 of 4). So, inferred, FS-UAE without its MMU model does not apply the TTRs' cache modes and
+  treats the CIA's registers as cacheable once the data cache is on, which is just what a real CPU would do with no
+  TTRs: the reason chip RAM and I/O must be inhibited. The matrix's 040 and 060 and zenixboot-test's dcache setups
+  therefore set `uae_mmu_model` (Zenix leaves the MMU's translation off; only the TTRs act).
 
 **Emulator figures** (FS-UAE 3.2.35, A1200 with a 68060 and 64 MB at 0x08000000, the matrix's setup, 2026-11-04; not
 hardware speeds: FS-UAE has no data cache, so the change it shows comes from the rest of the set-up, likely the

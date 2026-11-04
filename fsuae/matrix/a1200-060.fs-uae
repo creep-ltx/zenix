@@ -16,6 +16,9 @@ fast_memory = 8192
 # DESIGN D37: 64 MB of 32-bit fast RAM at 0x08000000 too (processor-slot RAM, as on an accelerator): the data cache
 # is on for it; the Zorro II 8 MB in the first 16 MB stays uncached
 uae_mbresmem_size = 64
+# FS-UAE seems to honour the transparent translation registers' cache modes only with its MMU model on:
+# without it, with the data cache bit set, the CIA-A tick was lost now and then (D37 section 8)
+uae_mmu_model = 68060
 uae_cpu_model = 68060
 joystick_port_0 = none
 joystick_port_1 = none

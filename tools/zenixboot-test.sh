@@ -153,7 +153,8 @@ for s in $SETUPS; do
         check "$s: dmesg -p has boot 1's whole log (its kernel line)" "$(grep -aq '^prevkernel=1$' "$OUT/$s.txt" && echo ok || echo bad)"
         check "$s: a shell prompt" "$(has $s '^zbok$')" ;;
     dcache|dcache-off)
-        HDTYPE="uae_mbresmem_size = 64" conf $s A1200 '$ZENIX_KICKSTART_DIR/kicka1200.rom' 68060 0 "$OUT/$s.hdf"
+        HDTYPE="uae_mbresmem_size = 64
+uae_mmu_model = 68060" conf $s A1200 '$ZENIX_KICKSTART_DIR/kicka1200.rom' 68060 0 "$OUT/$s.hdf"
         run $s 150 tools/tests/zenixboot-test.txt
         if [ $s = dcache ]; then
             check "$s: an unknown DCACHE word is refused before anything is loaded" "$(has $s 'zenixboot: DCACHE=maybe: say OFF, WT')"
