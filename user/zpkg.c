@@ -1131,13 +1131,17 @@ static int cmd_sync(char **names, int n, int y, int u, int down_only, int ram)
         if (in && in->asdep) deps_set(names[k], 0);
     }
     if (waits) {
-        say("%d package%s wait%s for the system update (downloaded): after the restart, zpkg -Syu again", waits,
-            waits > 1 ? "s" : "", waits > 1 ? "" : "s");
+        say("%d package%s wait%s for the system update (downloaded):", waits, waits > 1 ? "s" : "", waits > 1 ? "" : "s");
         for (int i = 0; i < pl.n; i++) if (pl.step[i].kind == ZP_STEP_WAIT) say("  %s %s", pl.step[i].pkg->name, pl.step[i].pkg->vstr);
     }
     if (failed) say("stopped: %d of %d installed (zup said why); zpkg -Syu again goes on", done, todo);
     else if (todo) say("%d package%s installed", done, done == 1 ? "" : "s");
     int sysfail = pl.system && !failed && system_put(ix.sys.file, 0);     /* the system last: the boot partition */
+    /* the last line says what is left (D22 4.4 step 3: by design a package built with the new system needs it, so it
+     * waits for the restart; the line used to come before the list and the boot partition's lines and scrolled away) */
+    if (waits && !failed && !sysfail)
+        say("to finish: reboot, then zpkg -Syu again (%d package%s wait%s for the new system)", waits,
+            waits > 1 ? "s" : "", waits > 1 ? "" : "s");
     zp_plan_free(&pl);
     return failed || sysfail;
 }

@@ -56,9 +56,14 @@ DESCRIPTION
 
     Config files (marked in a package's manifest: /etc/passwd, group,
     fstab, svctab, motd) are compared three ways: one the owner never
-    changed is replaced; one the owner changed stays, and the new version
-    is written next to it as PATH.new; one the owner deleted is not
-    brought back.
+    changed is replaced; one the owner changed stays, and when the
+    update brings a different version it is written next to it as
+    PATH.new ("kept your /etc/passwd (the new one: /etc/passwd.new)"):
+    nothing to do unless you want what is new in it (compare the two
+    with diff, copy over the lines you want, then delete the .new; your
+    users and passwords are in your own file and stay). When the update
+    brings the same version as before, nothing is written or said. One
+    the owner deleted is not brought back.
 
     One package at a time (zpkg(8) runs these; DESIGN D22): zup -f
     installs one package file (a bundle holding one package and no

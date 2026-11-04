@@ -404,10 +404,16 @@ zl $L -f $(pf utils-$V3) >$U/out 2>&1; rc=$?
     grep -q "^name utils" $L/var/lib/zpkg/utils.manifest &&
     check "zup -f refuses a package the newest prev set's undo logs hold (utils, from the D15 bundles): the way back stays whole" ok ||
     { check "zup -f refuses a package in the prev set" bad; cat $U/out; }
+rm $L/etc/passwd.new        # (the owner read it after the last update and deleted it)
 env ZUP_ROOT=$L ZUP_KVNUM=$V3 ZUP_BUNDLE=$U/b3.zup $U/zup >$U/out 2>&1; rc=$?
 [ $rc = 0 ] && [ "$(cat $L/bin/sh)" = "sh3 contents" ] && [ "$(ls $L/var/cache/zpkg | grep prev-)" = "prev-$V3" ] &&
     ! grep -q "utils.manifest" $L/var/cache/zpkg/prev-$V3/log.* && [ "$(cat $L/bin/ls)" = "ls2 contents" ] &&
     check "a base-only system update (zup and base, D22 3.1): its prev set holds no utils, utils stays as it was" ok || { check "a base-only system update" bad; cat $U/out; }
+# (2026-11-04, the owner's partner's machine: a passwd the installer changed) V3 ships the same passwd as V2: the
+# owner's stays, and nothing is said or written about it (no passwd.new, no "kept your")
+grep -q '^owner:' $L/etc/passwd && [ ! -e $L/etc/passwd.new ] && ! grep -q "kept your" $L/var/lib/zpkg/result $U/out &&
+    check "a config file the owner changed and the update does not: theirs stays, no .new, nothing said" ok ||
+    { check "a config file the owner changed and the update does not: no .new" bad; cat $U/out $L/var/lib/zpkg/result; }
 cp -a $L $U/S0; snap $L >$U/sS0; pvsnap $L >$U/pS0; cp $U/fsclean $U/fsclean3
 lockfree() { [ ! -e $1/var/lib/zpkg/lock ] && [ ! -e $1/var/lib/zpkg/journal ] && [ -z "$(find $1 -name '*.zup-new')" ]; }
 rm -f $U/trace

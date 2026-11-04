@@ -413,6 +413,8 @@ static int plan_pkg(struct zf_pkg *k)
             if (!memcmp(cur, e->sha, 32)) continue;     /* already the new one */
             struct zf_ent *was = was_ent(k, old, e->path);
             if (!was || memcmp(cur, was->sha, 32)) {    /* the owner changed it (or we cannot know): theirs stays */
+                if (was && !memcmp(was->sha, e->sha, 32)) continue;   /* and the package's copy is the one it had: */
+                                                        /* nothing new to offer, no .new, nothing said (2026-11-04) */
                 if (pjoin(tmp, e->path, ".new") || !zf_path_ok(tmp)) { say("%s.new: the name is too long", e->path); return -ENAMETOOLONG; }
                 dest = tmp;
                 if (nkept < 2) strcpy(kept[nkept], e->path);

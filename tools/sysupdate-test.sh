@@ -60,8 +60,13 @@ if [ ! -f "$O/build/zenix.hdf" ] || [ "$(cat "$O/commit" 2>/dev/null)" != "$(git
 fi
 OV=$(python3 -I -c 'import sys; sys.path.insert(0, "tools"); import mkzup; print(mkzup.kernel_version(open(sys.argv[1], "rb").read())[0])' "$O/build/kernel.bin")
 [ "$OV" = $V0 ] || { echo "FAIL the old build says version $OV, not $V0"; exit 1; }
-make -s BUILD=$OUT/b1 ZVNUM=$V1 $OUT/b1/kernel.bin $OUT/b1/kernel-zfs.bin $OUT/b1/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V1"; exit 1; }
-make -s BUILD=$OUT/b2 ZVNUM=$V2 $OUT/b2/kernel.bin $OUT/b2/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V2"; exit 1; }
+# One build date for V1 and V2 (2026-11-04): the Makefile takes it from the tree's last commit, and wget, sntp, reboot
+# (sysutils) and zpkg carry it; a commit in the main tree between the two builds made those three packages "changed"
+# in V2, so they waited for V2 and the last zpkg -Syu installed them (seen once in a fast-mode run, read as a timing
+# question). The repository check below says so at once if V2 ever changes more than the base group again.
+SDE=$(git log -1 --format=%ct)
+SOURCE_DATE_EPOCH=$SDE make -s BUILD=$OUT/b1 ZVNUM=$V1 $OUT/b1/kernel.bin $OUT/b1/kernel-zfs.bin $OUT/b1/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V1"; exit 1; }
+SOURCE_DATE_EPOCH=$SDE make -s BUILD=$OUT/b2 ZVNUM=$V2 $OUT/b2/kernel.bin $OUT/b2/pkg/list >>"$OUT/make.log" 2>&1 || { echo "FAIL build V2"; exit 1; }
 echo ' Zenix updated twice (sysupdate-test)' >$OUT/motd2
 python3 tools/mkzup.py repack $OUT/b2/pkg base /etc/motd=$OUT/motd2 >/dev/null || { echo "FAIL repack"; exit 1; }
 
@@ -73,6 +78,10 @@ W=$OUT/www; rm -rf $W; mkdir -p $W
   python3 tools/mkrepo.py check $W/r2 --test-pub $ZSIGN_TEST_DIR/zenix-test.pub; } >$OUT/repo.log 2>&1 ||
     { cat $OUT/repo.log; echo "FAIL the repository"; exit 1; }
 SYS1=$W/r/pool/zenix-$V1.zup; SYS2=$W/r2/pool/zenix-$V2.zup
+# V2 differs from V1 only in base (its motd): any other package mkrepo calls changed would wait for V2 and make the
+# last "nothing to do" fail for a reason that is not the update path's
+grep -q "^test: system $V2 (new); changed: none$" $OUT/repo.log ||
+    { grep "changed:" $OUT/repo.log | tail -1; echo "FAIL the repository: V2 changes more than the base group (the builds differ)"; exit 1; }
 grep -q "^pkg zpkg-new" $W/r/test/index-* && grep -A8 "^pkg sysutils" $(ls $W/r/test/index-* | grep -v sig | sort | tail -1) | grep -q "^depends zpkg-new" ||
     { echo "FAIL the repository has no zpkg-new, or sysutils does not depend on it"; exit 1; }
 echo "sysupdate-test: the repository: system $V0 -> $V1 -> $V2; $(grep -c '^pkg ' $(ls $W/r/test/index-* | grep -v sig | sort | tail -1)) packages"
@@ -210,17 +219,20 @@ EOF
     check "b: 2. zpkg-new -Syu writes Zenix $V1 to the boot partition (read back and checked)" \
         "$([ "$(inorder $d/o2 "writing Zenix .*\($V1\) to the boot partition \(ide0p1, Zenix/zenix-update.zup" "Zenix .*\($V1\) is ready on the boot partition")" = ok ] &&
             [ "$(has $d/o2 '^r2=0')" = ok ] && echo ok || echo bad)"
+    local nw; nw=$(grep -ac '^zpkg:   ' $d/o2)
+    check "b: ... its last line says what is left: reboot, then zpkg -Syu again ($nw packages wait)" \
+        "$([ "$nw" -gt 0 ] && [ "$(grep -a '^zpkg: ' $d/o2 | tail -1)" = "zpkg: to finish: reboot, then zpkg -Syu again ($nw packages wait for the new system)" ] && echo ok || echo bad)"
     check "b: 3. reboot: the owner's zenixboot checks the signature, installs the kernel, zup the root half" \
         "$(inorder $L 'sh /tests/s1.sh' 'update: signed by test key' "update: installing version $V1" 'renamed zenix.new to zenix' "^zup: installed Zenix .*\($V1\)")"
     check "b: ... the new system runs (uname $V1)" "$(has $d/o4 "\($V1\) m68k")"
     check "b: 4. zpkg -Syu after the restart: what waited is installed (sysutils $V1), zpkg and base are $V1" \
-        "$([ "$(has $d/o5 '^r5=0')" = ok ] && [ "$(has $d/o5 'installed')" = ok ] && [ "$(grep -ac "^Version .*($V1)" $d/o6)" = 3 ] && echo ok || echo bad)"
+        "$([ "$(has $d/o5 '^r5=0')" = ok ] && [ "$(has $d/o5 "^zpkg: $nw packages installed")" = ok ] && [ "$(grep -ac "^Version .*($V1)" $d/o6)" = 3 ] && echo ok || echo bad)"
     check "b: 5. a second update while the first is still on the partition: refused (restart first), nothing written" \
         "$([ "$(has $d/o7 "holds Zenix $V1, which zenixboot has not finished with")" = ok ] && [ "$(has $d/o7 '^r7=1')" = ok ] && echo ok || echo bad)"
     check "b: ... the next start retires the first one (came up, renamed .done)" \
         "$(inorder $L 'sh /tests/s2.sh' "version $V1 came up" 'renamed zenix-update.zup to zenix-update.done')"
-    check "b: 6. zpkg -Syu (the new /bin/zpkg) writes Zenix $V2 onto the volume AmigaOS has written to since" \
-        "$([ "$(has $d/o8 "Zenix .*\($V2\) is ready on the boot partition")" = ok ] && [ "$(has $d/o8 '^r8=0')" = ok ] && echo ok || echo bad)"
+    check "b: 6. zpkg -Syu (the new /bin/zpkg) writes Zenix $V2 onto the volume AmigaOS has written to since (nothing waits for it)" \
+        "$([ "$(has $d/o8 "Zenix .*\($V2\) is ready on the boot partition")" = ok ] && [ "$(has $d/o8 '^r8=0')" = ok ] && [ "$(has $d/o8 'wait|to finish')" = bad ] && echo ok || echo bad)"
     check "b: 7. reboot: Zenix $V2 installed and running, base $V2 with the new motd" \
         "$([ "$(inorder $L 'sh /tests/s3.sh' "update: installing version $V2" "^zup: installed Zenix .*\($V2\)")" = ok ] &&
             [ "$(has $d/o9 "\($V2\) m68k")" = ok ] && [ "$(has $d/o10 'Zenix updated twice')" = ok ] && [ "$(grep -ac "^Version .*($V2)" $d/o11)" = 2 ] && echo ok || echo bad)"
