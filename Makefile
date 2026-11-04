@@ -997,7 +997,7 @@ $(BUILD)/zine-trace.elf: $(ZTBLOBOBJS) link/user.ld
 $(BUILD)/zine-trace.blob: $(BUILD)/zine-trace.elf tools/mkzexe.py tools/mkzblob.py
 	tools/mkzexe.py $< $@.zx
 	python3 tools/mkzblob.py $@.zx $@
-ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu
+ZINETESTS := zexit zhello ztake zcrash zbadcall zalloc zscreen zmmu zfpu zovl
 # the null blob (step 2's tests): the pause and the resume with nothing in between (user/zine/nullblob.S)
 $(BUILD)/zb-nullblob.o: user/zine/nullblob.S | $(BUILD)
 	$(CC) $(ASFLAGS) $< -o $@
@@ -1010,6 +1010,11 @@ $(BUILD)/zinetests/%: tools/tests/zine/%.S tools/tests/zine/zt.i tools/mkhunktes
 	@mkdir -p $(BUILD)/zinetests
 	$(CC) $(ASFLAGS) -Itools/tests/zine $< -o $(BUILD)/zinetests/$*.o
 	python3 tools/mkhunktest.py $(BUILD)/zinetests/$*.o $@
+# zovl, the overlaid one (d29 16.6): a root and two overlay nodes, laid out by tools/mkovltest.py
+$(BUILD)/zinetests/zovl: tools/tests/zine/zovl.S tools/tests/zine/zt.i tools/mkovltest.py | $(BUILD)
+	@mkdir -p $(BUILD)/zinetests
+	$(CC) $(ASFLAGS) -Itools/tests/zine $< -o $(BUILD)/zinetests/zovl.o
+	python3 tools/mkovltest.py $(BUILD)/zinetests/zovl.o $@
 zine-tests: $(ZINETESTS:%=$(BUILD)/zinetests/%)
 $(BUILD)/zenix.hdf $(BUILD)/root-card.img: $(BUILD)/zine.blob $(BUILD)/zine-null.blob $(BUILD)/zine-trace.blob $(ZINETESTS:%=$(BUILD)/zinetests/%)
 

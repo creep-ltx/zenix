@@ -10,12 +10,20 @@
  * executables; the AmigaDOS Manual's HUNK_DRELOC32 of the same number is an object-module block the linker resolves);
  * its padding word is optional (both forms are read); HUNK_SYMBOL, HUNK_DEBUG, HUNK_NAME skipped; HUNK_END (a hunk
  * whose HUNK_END is missing before the next hunk or the end of the file ends there).
- * Refused, each with its own message: overlays (HUNK_OVERLAY, HUNK_BREAK), external references (HUNK_EXT),
- * HUNK_RELRELOC32, the 16- and 8-bit relocations, resident library names, anything else. */
+ * Overlays (docs/d29-zine.md 16.6; the AmigaDOS Manual's "hunk_overlay", the Guru Book ch. 22.2.10): the root node,
+ * then one HUNK_OVERLAY block (its length longword is the upper bound: length + 1 longwords follow, copied as they
+ * are), then overlay nodes, each a HUNK_HEADER whose first hunk is after the root's and whose last is inside the
+ * root's table size, its hunks, HUNK_BREAK. Bytes after the table that are not a node (data a program reads through
+ * its overlay file handle) are left alone. A node's relocations may name the hunks before its first (its ancestors,
+ * found in the hunk table).
+ * Refused, each with its own message: an overlay table inside a node (nested overlays), a HUNK_BREAK without an
+ * overlay table, external references (HUNK_EXT), HUNK_RELRELOC32, the 16- and 8-bit relocations, resident library
+ * names, anything else. */
 #include "zcore.h"
 
 #define ZH_MAXHUNKS 1024u               /* hunks in one program */
 #define ZH_MAXBYTES 0x10000000u         /* all hunks together, 256 MB: sums of sizes cannot wrap */
+#define ZH_MAXTAB   16384u              /* hunk slots of an overlaid program's whole tree ((n + 1) * 4 cannot wrap) */
 
 #define HUNK_CODE         0x3E9u
 #define HUNK_DATA         0x3EAu
@@ -35,10 +43,16 @@
 #define HUNK_RELRELOC32   0x3FDu
 #define HUNK_NAME         0x3E8u
 
-struct zh_info {
+struct zh_info {                        /* one node: the root (zh_check) or an overlay node (zh_node) */
     zu32 nhunks;                        /* hunks to load */
     zu32 sizes;                         /* the byte offset of the header's size table in the file */
     zu32 bytes[3];                      /* memory the hunks take (their sizes + 8 each): any, chip, fast */
+    zu32 start;                         /* the node's first byte (its HUNK_HEADER; the root: 0) */
+    zu32 first, last, tabsize;          /* the header's first and last hunk slots and its table size */
+    zu32 end;                           /* the byte after the node (the root: after its overlay table, if any) */
+    zu32 ovl, ovl_words;                /* the root's overlay table: its first byte after the length, longwords; 0 */
+    zu32 nodes, node_max, node_all;     /* zh_check of an overlaid root: the nodes after the table, the largest one's
+                                         * bytes and all of them together (saturated at ZH_MAXBYTES) */
 };
 
 /* One hunk's memory: what alloc gave. p: where the loader writes (on the PC a buffer, on the Amiga the memory itself);
@@ -69,3 +83,18 @@ zu32 zh_hunk_size(const zu8 *f, const struct zh_info *inf, zu32 i, zu32 *memf);
  * caller flushes the caches before it runs anything (CLAUDE.md). */
 int zh_load(const zu8 *f, zu32 len, const struct zh_info *inf, const struct zh_ops *ops, struct zh_seg *work,
             zu32 *seglist);
+
+/* Checks one overlay node at byte start (where the overlay supervisor's Seek put the file): 0 and *inf, or
+ * -ZE_NOEXEC and the message. inf->end is the byte after its HUNK_BREAK. */
+int zh_node(const zu8 *f, zu32 len, zu32 start, const char *name, struct zh_info *inf, char *msg, zu32 cap);
+
+/* Loads a node zh_node checked, as zh_load does, its relocations to earlier hunks taken from tab, the hunk table
+ * (tabn longwords, big-endian BPTRs as the program sees them; the last one is always 0). On success the node's
+ * hunks are written into tab[first..last] and every entry after them is cleared (they were the hunks the overlay
+ * supervisor freed before the load). -ZE_NOEXEC: the node lies outside the table or names a hunk not loaded. */
+int zh_load_node(const zu8 *f, zu32 len, const struct zh_info *inf, const struct zh_ops *ops, struct zh_seg *work,
+                 zu8 *tab, zu32 tabn, zu32 *seglist);
+
+/* The hunk table entries of a loaded node (the root's after zh_load): tab[first + i] = segment i's BPTR, every
+ * entry after them 0 */
+void zh_table(const struct zh_info *inf, const struct zh_seg *work, zu8 *tab, zu32 tabn);

@@ -46,6 +46,26 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     next = 0x1000;
     if (zh_load(data, (zu32)size, &inf, &ops, seg, &sl))
         __builtin_trap();               /* the check took a file the loader refuses */
+    if (inf.ovl) {                                  /* an overlaid one: every node the check took loads too */
+        static zu8 tab[(ZH_MAXTAB + 1) * 4];
+        static struct zh_seg ns[ZH_MAXHUNKS];
+        struct zh_info ni;
+        zh_table(&inf, seg, tab, inf.tabsize + 1);
+        for (zu32 p = inf.end; size - p >= 4 && zbe32(data + p) == HUNK_HEADER; p = ni.end) {
+            zu32 nsl;
+            if (zh_node(data, (zu32)size, p, "f", &ni, msg, sizeof msg))
+                __builtin_trap();
+            if (ni.bytes[0] + ni.bytes[1] + ni.bytes[2] > (64u << 20))
+                break;
+            for (zu32 h = 0; h < ni.first; h++)      /* its ancestors as if loaded (the supervisor's order) */
+                if (!zbe32(tab + 4 * h))
+                    zput32(tab + 4 * h, 0x4000u + h);
+            if (zh_load_node(data, (zu32)size, &ni, &ops, ns, tab, inf.tabsize + 1, &nsl))
+                __builtin_trap();
+            for (zu32 i = 0; i < ni.nhunks; i++)
+                free(ns[i].p);
+        }
+    }
     for (zu32 i = 0; i < inf.nhunks; i++)
         free(seg[i].p);
 #endif

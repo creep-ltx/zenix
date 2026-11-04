@@ -183,6 +183,20 @@ int main(int argc, char **argv)
         die("ZINE needs fast RAM (this machine has only chip RAM)%s", "");
     if (info.layout != ZINE_LAYOUT)
         die("zine: ZINE's files and the kernel are from different versions: %s", "finish the update first");
+    /* memory (d29 16.6): during the session the whole file is in ZINE's volume (an overlaid program loads its
+     * later parts from there) and its hunks are loaded beside it: the root's, and for an overlaid program at
+     * least its largest part. Less than that free in all of Zenix's pools can never run. */
+    u32 hunks = inf.bytes[0] + inf.bytes[1] + inf.bytes[2] + inf.node_max +
+                (inf.ovl ? inf.ovl_words * 4 + (inf.tabsize + 1) * 4 : 0);
+    u32 avail = info.chip_free + info.fast_free;
+    if (len > avail || hunks > avail - len) {
+        dprintf(2, "zine: %s does not fit in memory: its file (%u KB, all in memory during the session) and its "
+                "hunks (%u KB) need more than the %u KB free\n", name, len >> 10, hunks >> 10, avail >> 10);
+        return 1;
+    }
+    if (inf.ovl)
+        dprintf(1, "ZINE: %s is overlaid: %u later parts (%u KB together, the largest %u KB), loaded from memory "
+                "when it asks for them\n", name, inf.nodes, (inf.node_all + 1023) >> 10, (inf.node_max + 1023) >> 10);
     /* the volume (5.6): the program's directory, its plain files (not its subdirectories yet), when they fit (at
      * most 500 files, 16 MB and half the free fast RAM); else the program alone */
     char dir[256];
@@ -335,7 +349,8 @@ int main(int argc, char **argv)
             dprintf(1, "ZINE: %s crashed: exception %u at %08x\n", name, b->vec, b->pc);
         break;
     case ZH_ALERT:
-        dprintf(1, "ZINE: %s crashed (alert %08x)\n", name, b->addr);
+        dprintf(1, "ZINE: %s crashed (alert %08x%s)\n", name, b->addr,
+                (b->addr & 0x7FFFFFFFu) == 0x0700000Cu ? ": its overlay supervisor could not load a part" : "");
         break;
     case ZH_STOP:
         dprintf(1, b->why == ZS_WAIT ? "ZINE: %s waits for a signal nothing can send: stopped\n" :

@@ -41,6 +41,13 @@ DESCRIPTION
     emulated: the crash line names the instruction. CacheControl
     switches the instruction cache; the data cache stays off.
 
+    Overlaid programs (a root that loads its other parts from its own
+    file while it runs, as many demos of the 1990s do) run: the whole
+    file is in memory during the session, and the program's overlay
+    supervisor loads each part from there. zine says so first
+    ("NAME is overlaid: N later parts ..."). zine refuses a program
+    when its file and its hunks together need more memory than is free.
+
     ZINE is being built (DESIGN D29): real demos run in FS-UAE.
 
     Ctrl-Amiga-Amiga while the program runs restarts the machine into
