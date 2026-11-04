@@ -1,0 +1,16 @@
+# The Zenix demo floppy (DESIGN D25 revision 3, tools/demo-test.sh): an A1200 (68EC020) with 4 MB of fast RAM, the machine the demo is made for, booting the DD disk from DF0. No hard disk.
+[fs-uae]
+accuracy = 1
+amiga_model = A1200
+kickstart_file = $ZENIX_KICKSTART_DIR/kicka1200.rom
+chip_memory = 2048
+fast_memory = 4096
+floppy_drive_0 = ../../build/zenix-demo.adf
+floppy_drive_speed = 100
+serial_port = /tmp/zenix-serial
+uae_serial_direct = true
+window_width = 960
+window_height = 768
+zoom = full
+joystick_port_0 = none
+joystick_port_1 = none
