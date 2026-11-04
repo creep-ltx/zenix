@@ -32,6 +32,8 @@ sleep 5
 shot columns
 send q
 sleep 2
+send echo acceleration none > /etc/zdesk/mouse\r
+sleep 1
 send echo 'right memory clock ; cmd 0 echo hello-bar' > /etc/zdesk/bar\r
 send : > /tmp/c; zdesk -v > /tmp/z.log 2>&1 &\r
 sleep 8

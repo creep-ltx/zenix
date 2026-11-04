@@ -51,6 +51,8 @@
 #define DPY_WM_MENUPICK 44  /* a[0] id, a[1] the menu (0..), a[2] the item (0..): EV_MENU to the window's program */
 #define DPY_WM_PGRAB    45  /* a[0] one of the manager's windows: every pointer event goes to it until the buttons are
                              * all up (a menu held with the right button); -EINVAL if none is held */
+#define DPY_WM_MOUSE    47  /* a[0] the mouse's acceleration: THRESHOLD | MULTIPLIER << 8 (the kernel's CON_MOUSE: in a
+                             * frame, the counts beyond THRESHOLD count MULTIPLIER times; 0x100 none) */
 
 /* DPY_WIN_SET's what */
 #define WS_TITLE        1   /* a[2] the title (the client's memory, at most DPY_TITLE - 1 bytes) */

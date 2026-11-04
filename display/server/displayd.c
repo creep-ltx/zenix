@@ -773,6 +773,8 @@ static int req(struct umsg *m)
     }
     if (cl != wm_cl)
         return m->type >= DPY_WM_HELLO ? -EPERM : -ENOSYS;
+    if (m->type == DPY_WM_MOUSE)
+        return sys_conmouse(gfd, a[0]);
     int s = (w = win_get((int)a[0])) ? (int)(w - wins) : -1;
     switch (m->type) {
     case DPY_WM_STYLE: {

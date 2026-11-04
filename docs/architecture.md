@@ -1494,7 +1494,8 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   (`DPY_WM_HIDE` with `HIDE_WORKSPACE`), grabs its keys (`DPY_WM_GRAB`, `/etc/zdesk/keys`), and runs the bar (a
   frameless `WK_BAR` window), the desktop (`WK_DESKTOP`) and the About window. A program's menus reach the bar through
   the server (`DPY_MENU`, `DPY_WM_MENUGET`, a pick back as `EV_MENU`); a menu held with the right button takes the
-  pointer (`DPY_WM_PGRAB`). A frame press that the manager answers after the button is up still drags: the server
+  pointer (`DPY_WM_PGRAB`); `DPY_WM_MOUSE` passes zdesk's mouse acceleration (its file `mouse`) to the kernel's
+  `CON_MOUSE`. A frame press that the manager answers after the button is up still drags: the server
   keeps the last press on a frame and runs the drag from it. Leaving zdesk sends SIGTERM to the desktop's programs;
   the server ends with its last client (a client that ended, also a zombie its parent has not reaped, is found by
   `procinfo` once a second). `term` (`display/term/`, docs/man/term.txt) opens a pty (`openpty`), starts the shell
