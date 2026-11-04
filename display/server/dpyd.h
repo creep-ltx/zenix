@@ -28,6 +28,8 @@ extern struct bm scr;           /* the screen */
 extern int use_blit;            /* the blitter is ours (the console is shown): else the CPU draws */
 extern int aga;
 extern u32 chip_used, chip_budget;      /* the kept copies' chip RAM (D38 6.2: 256 KB, then simple refresh) */
+extern u32 nblits, npix, nglyphs, ncopies;  /* DPY_STAT's counters (draw.c) */
+extern u32 ndraws, npaints;             /* DPY_DRAW batches (displayd.c), damage painted (win.c) */
 
 /* draw.c */
 void blit_idle(void);           /* the blitter's last blit ended (before letting go of it) */

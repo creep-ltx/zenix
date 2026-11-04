@@ -262,7 +262,6 @@ void irq2_c(u32 *rb)
         kbd_tick();
         audio_tick();
         input_poll();
-        gcon_tick();                    /* D38: the pointer of a console in graphics mode */
         fd_tick();
         rnd_tick();
         if (ntimer && (s32)(ticks - wake_min) >= 0)

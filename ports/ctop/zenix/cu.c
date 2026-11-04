@@ -177,7 +177,11 @@ ULONG cu_cpuclock(void) { return (ULONG)sys_ticks(); }  /* the 100 Hz tick */
 int cu_cpurate(void) { return 100; }
 int cu_cpuexact(void) { return 0; }
 ULONG cu_cpufreq(void) { return 0; }                     /* no CPU time: TIME+ shows "-" */
-int cu_emu68(void) { return 0; }
+int cu_emu68(void)                      /* the kernel knows (ZINE_INFO's machine, UZI_EMU68) */
+{
+    unsigned long zi[8] = { 0 };
+    return sys3(93, 0, (unsigned long)zi, sizeof zi) == 0 && zi[0] >= 32 && (zi[7] & 1);
+}
 ULONG cu_emu68mips(void) { return (ULONG)-1; }
 int cu_pi(CuPi *p) { memset(p, 0, sizeof *p); return 0; }
 int cu_isemu68(void) { return 0; }

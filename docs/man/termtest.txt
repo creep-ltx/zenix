@@ -38,31 +38,29 @@ DESCRIPTION
     display to /tmp/grab.zg (as grab below).
 
     The console operations of the remote control (root; tools/con-test.sh,
-    DESIGN D24 6.1-6.3): termtest conops draws a page and checks it
-    through CON_READ (the grid, the cursor, the change counter, short
-    buffers, the errors, an unknown op 10: EINVAL; 8 and 9 are DESIGN
-    D38's CON_GRAB and CON_GACK) and CON_LINE (pens and palette), and that
-    a console never used answers ENXIO; termtest rawkeys types raw key codes
-    through CON_INPUT and checks the bytes (the Swedish layers, Caps
-    Lock, Ctrl, an arrow, what a call leaves held released, Amiga+F2 and
-    back); termtest text types through CON_INPUT in raw and cooked mode
-    and prints the bytes read as "raw:HEX" and "line:HEX", as termtest
-    readline (one cooked line) and readraw N (N raw bytes) print what was
-    typed on the console, so the two paths compare. Each prints PASS and
-    FAIL lines and "NAME: N failed", exit status 1 on a failure.
-    termtest grab FILE writes the shown display through CON_LINE: ZGRB,
-    the width, height and depth (16 bits each), 16 palette words
-    (0x0RGB), then a pen a pixel. termtest depth N switches the display
-    to N colours (2, 4, 8, 16; CON_COLOURS). termtest screen TTY TEXT
-    SECS waits (at most SECS seconds) until TEXT is on the grid of the
-    console TTY, such as /dev/tty1, and has not changed for 200 ms, then
-    prints it through CON_READ:
-    "row NN|...|" per row, "attr NN|...|" for a row with colours or
-    attributes ('.' a plain cell, else the hex digit of its foreground
-    colour), and the cursor; exit status 1 if TEXT never came; then it
-    types TYPE into that console (\xHH and \r for control keys, \kHH
-    for a raw key code: 60 42 c2 e0 is Shift+Tab), so a test goes on
-    only once the grid was read (tools/sumi-test.sh).
+    DESIGN D24 6.1-6.3): termtest conops draws a page and checks it through
+    CON_READ (the grid, the cursor, the change counter, short buffers, the
+    errors, an unknown op 11: EINVAL; 8 to 10 are DESIGN D38's CON_GRAB,
+    CON_GACK and CON_MOUSE) and CON_LINE (pens and palette), and that a
+    console never used answers ENXIO; termtest rawkeys types raw key codes
+    through CON_INPUT and checks the bytes (the Swedish layers, Caps Lock,
+    Ctrl, an arrow, what a call leaves held released, Amiga+F2 and back);
+    termtest text types through CON_INPUT in raw and cooked mode and prints
+    the bytes read as "raw:HEX" and "line:HEX", as termtest readline (one
+    cooked line) and readraw N (N raw bytes) print what was typed on the
+    console, so the two paths compare. Each prints PASS and FAIL lines and
+    "NAME: N failed", exit status 1 on a failure. termtest grab FILE writes
+    the shown display through CON_LINE: ZGRB, the width, height and depth (16
+    bits each), 16 palette words (0x0RGB), then a pen a pixel. termtest depth
+    N switches the display to N colours (2, 4, 8, 16; CON_COLOURS). termtest
+    screen TTY TEXT SECS waits (at most SECS seconds) until TEXT is on the
+    grid of the console TTY, such as /dev/tty1, and has not changed for 200
+    ms, then prints it through CON_READ: "row NN|...|" per row, "attr NN|...|"
+    for a row with colours or attributes ('.' a plain cell, else the hex digit
+    of its foreground colour), and the cursor; exit status 1 if TEXT never
+    came; then it types TYPE into that console (\xHH and \r for control keys,
+    \kHH for a raw key code: 60 42 c2 e0 is Shift+Tab), so a test goes on only
+    once the grid was read (tools/sumi-test.sh).
 
 SEE ALSO
     clear(1), edit(1)

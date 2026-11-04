@@ -38,7 +38,10 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   aligned block over the fast RAM copyback (write-through with zenixboot `DCACHE=WT`), the 060's `TCR` default
   inhibited for everything else (a 040 caches the rest write-through by its fixed default, so it keeps its data cache
   off when a board that is not RAM lies above 16 MB); a 060 gets its store buffer, branch cache and superscalar
-  dispatch (`PCR` `ESS`). A boot self-test switches it off again if chip RAM reads back cached. Off, as before, on
+  dispatch (`PCR` `ESS`); a CPU with a `PCR` (not under Emu68) is a 68060, so the kernel sets AttnFlags' 68060 bit
+  (0x80) that AmigaOS leaves clear without its 68060.library (`ZINE_INFO`'s attn, the desktop's CPU name; the boot
+  log's first `cpu:` line, printed before, still says what the loader passed), and `ZINE_INFO`'s `machine` says
+  `UZI_EMU68` under Emu68. A boot self-test switches it off again if chip RAM reads back cached. Off, as before, on
   68020/68030 (no MMU to keep chip RAM out), under Emu68 (coherent with the chips by itself), with `DCACHE=OFF`
   (bootinfo `+0x84` `kopts`) or the left mouse button held at boot; the boot log says which. `zine_enter` turns the
   data cache off and pushes before the hand-over; `machine_reset` pushes and clears the cache registers before
@@ -1442,10 +1445,11 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   serial port), and every key but Amiga+F1..F10 is a 16-byte record (`struct ugevent`: the raw code, the qualifiers
   left and right apart with AmigaOS's `IEQUALIFIER` values, the keymap's character as UTF-8, the pointer, the tick)
   in a 64-record ring the descriptor reads (`poll`: POLLIN); repeats are marked `GQ_REPEAT`. The keymap stays in the
-  kernel. **The pointer** is hardware sprite 0, the server's image: the 100 Hz tick takes the mouse's movement (two
-  hires pixels a count across, one line down, clamped to the screen) and latches the buttons' changes, the
-  vertical-blank interrupt writes the sprite's two control words, so the pointer never freezes while the server or a
-  disk is busy; kwork then puts `GEV_POINTER` records in the ring (a press and a release between two runs both told;
+  kernel. **The pointer** is hardware sprite 0, the server's image: the vertical-blank interrupt reads the mouse's
+  counters and buttons itself, moves the pointer (two hires pixels a count across, one line down, clamped to the
+  screen; `CON_MOUSE` on the grab's descriptor sets an acceleration: in a frame, the counts beyond a threshold count a
+  multiplier times, none at the grab) and writes the sprite's two control words before sprite DMA reads them (on AGA
+  to the hires pixel, SPRxCTL's SH1), so the pointer never waits for the tick, the server or a busy disk; kwork then puts `GEV_POINTER` records in the ring (a press and a release between two runs both told;
   merged into an unread one while the qualifiers are the same). **Switching away** (Amiga+F*n* or the serial hook)
   puts `GEV_RELEASE` with a number in the ring; the server ends its blit, stops using the blitter and answers
   `CON_GACK` with that number; then the kernel shows the text console. No answer within 1 s: kwork switches anyway
@@ -1491,7 +1495,8 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   (`DPY_WM_HIDE` with `HIDE_WORKSPACE`), grabs its keys (`DPY_WM_GRAB`, `/etc/zdesk/keys`), and runs the bar (a
   frameless `WK_BAR` window), the desktop (`WK_DESKTOP`) and the About window. A program's menus reach the bar through
   the server (`DPY_MENU`, `DPY_WM_MENUGET`, a pick back as `EV_MENU`); a menu held with the right button takes the
-  pointer (`DPY_WM_PGRAB`). A frame press that the manager answers after the button is up still drags: the server
+  pointer (`DPY_WM_PGRAB`); `DPY_WM_MOUSE` passes zdesk's mouse acceleration (its file `mouse`) to the kernel's
+  `CON_MOUSE`. A frame press that the manager answers after the button is up still drags: the server
   keeps the last press on a frame and runs the drag from it. Leaving zdesk sends SIGTERM to the desktop's programs;
   the server ends with its last client (a client that ended, also a zombie its parent has not reaped, is found by
   `procinfo` once a second). `term` (`display/term/`, docs/man/term.txt) opens a pty (`openpty`), starts the shell

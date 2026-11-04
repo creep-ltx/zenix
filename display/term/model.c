@@ -4,6 +4,8 @@
  * gfx_* calls; here they become drawing orders (term.c's other file, display/term/term.c, sends them through
  * libdisplay), and the few kernel calls it makes are answered by the stand-ins below. This file sees only the
  * kernel's headers; term.c (the program) only libz's: the two meet through model.h. */
+int m_cols = 80;                        /* the window's columns: the model's width in use (its rows stay 80 long) */
+#define WCOLS m_cols
 #include "../../kernel/term.c"
 #include "../../kernel/confont.c"
 #include "model.h"
@@ -51,7 +53,7 @@ int input_inject(const u8 *r, int n) { (void)r; (void)n; return -EINVAL; }
 int gcon_away(int to) { (void)to; return 0; }
 int gcon_shown(int con) { (void)con; return 0; }
 long gcon_grab(int con, u32 a2) { (void)con; (void)a2; return -EPERM; }
-long gcon_ack(struct file *f, u32 seq) { (void)f; (void)seq; return -EBADF; }
+long gcon_ack(struct file *f, u32 op, u32 seq) { (void)f; (void)op; (void)seq; return -EBADF; }
 
 /* the program's side */
 void m_write(const char *s, unsigned n) { term_write(1, s, n); }
@@ -69,5 +71,30 @@ void m_rows(int rows)
         if (t->sy >= rows) t->sy = rows - 1;
     }
 }
+void m_setcols(int cols)
+{
+    if (cols < 8) cols = 8;
+    if (cols > COLS) cols = COLS;
+    m_cols = cols;
+    struct term *t = wsp[1];
+    if (t && t->cx >= cols) { t->cx = cols - 1; t->wrap = 0; }
+    if (t && t->sx >= cols) t->sx = cols - 1;   /* the saved cursor too (ESC 8, CSI u would put it past the row) */
+}
+/* the cells x0..x1-1 of display row y as the model has them now (the scrollback view: its rows), the cursor in
+ * them inverted: term's presenting (term.c) */
+void m_draw_cells(int y, int x0, int x1)
+{
+    struct term *t = wsp[1];
+    if (!t || y < 0 || y >= trows)
+        return;
+    if (x1 > m_cols) x1 = m_cols;
+    if (t->back) {                      /* the scrollback is shown: its own redraw (all of it, rarely) */
+        if (y == 0 && x0 == 0) show_back(t);
+        return;
+    }
+    for (int x = x0; x < x1; x++)
+        drawx(t, y, x, t->curvis && y == t->cy && x == t->cx ? A_INV : 0);
+}
+int m_back(void) { return wsp[1] && wsp[1]->back; }
 int m_ckm(void) { return term_ckm(); }
 void m_scrollback(int d) { term_scroll_view(d); }

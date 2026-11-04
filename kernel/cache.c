@@ -50,6 +50,9 @@ void cache_setup(const struct bootinfo *bi)
         return off("no hardware table", 1);
     if (hw->flags & HW_DT)
         return off("Emu68 (its own)", 1);       /* exactly as before: Emu68 keeps memory coherent with the chips */
+    long pcr = cpu_pcr();               /* -1: no PCR, a 68040 (AttnFlags say 040 on a 060 without 68060.library) */
+    if (pcr != -1)
+        ((struct bootinfo *)bi)->attn |= 0x80;      /* AFF_68060 from here on (zinfo, the desktop's CPU name) */
     if (bi->kopts & KOPT_DCACHE_OFF)
         return off("DCACHE=OFF", 1);
     if (!(CIAA(0) & 0x40))              /* CIA-A PRA bit 6 low: the left mouse button is held */
@@ -63,7 +66,6 @@ void cache_setup(const struct bootinfo *bi)
         if (!(b->type & 0x20) && b->addr && !(b->cd_flags & 1))      /* not RAM, configured */
             mark(io, b->addr, b->addr + b->size);
     }
-    long pcr = cpu_pcr();               /* -1: no PCR, a 68040 (AttnFlags say 040 on a 060 without 68060.library) */
     int is060 = pcr != -1, wt = (bi->kopts & KOPT_DCACHE_WT) != 0;
     int k = cache_plan(fast, io, is060, &base, &mask, &bad);
     if (k)

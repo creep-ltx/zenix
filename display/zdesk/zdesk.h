@@ -56,6 +56,7 @@ struct block {
 extern struct block blocks[NBLOCK];
 extern int nblocks;
 int conf_load(const char *theme);   /* 0, or -1 (said on standard error) */
+extern unsigned mouse_acc;          /* the file mouse: DPY_WM_MOUSE's argument */
 const char *conf_file(const char *name, char *buf);  /* ~/.config/zdesk/NAME if there, else /etc/zdesk/NAME */
 
 /* ---- windows (zdesk.c) ---- */
@@ -80,6 +81,7 @@ void about(void);
 
 /* bar.c */
 void bar_init(void);
+const char *cpu_name(void);     /* "68060", "Emu68 68040" ...: the kernel's (ZINE_INFO) */
 void bar_draw(void);
 void bar_tick(void);            /* the blocks' times */
 void bar_poll(struct pollfd *p, int *n);    /* the blocks' pipes into a poll list */

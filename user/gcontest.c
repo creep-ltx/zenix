@@ -10,7 +10,9 @@ typedef unsigned short u16;
  * release 1", ...); with ack it answers every GEV_RELEASE (CON_GACK), with late 2 s later (after the kernel's 1 s
  * deadline: the answer that lets the kernel use the blitter again), with noack never. It also tries to free the
  * grab's memory (refused, EBUSY).
- * It ends after SECONDS (default 60) or at the q key, giving the console back. `gcontest keys CODE...` types raw key
+ * With ACCEL (hex, after SECONDS) it sets the mouse's acceleration (CON_MOUSE: THRESHOLD | MULTIPLIER << 8), after
+ * trying a wrong one (0x900: refused, EINVAL). It ends after SECONDS (default 60) or at the q key, giving the console
+ * back. `gcontest keys CODE...` types raw key
  * codes (hex) through CON_INPUT on descriptor 0, as the keyboard would (root); `gcontest mouse DX,DY,B ...` moves the
  * mouse and sets its buttons the same way (CONI_MOUSE). tools/gcon-test.sh runs it. */
 
@@ -75,7 +77,7 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "mouse"))
         return mouse(argc, argv);
     if (argc < 2 || (strcmp(argv[1], "ack") && strcmp(argv[1], "noack") && strcmp(argv[1], "late"))) {
-        dprintf(2, "usage: gcontest ack|late|noack [SECONDS] | gcontest keys CODE...\n");
+        dprintf(2, "usage: gcontest ack|late|noack [SECONDS [ACCEL]] | gcontest keys CODE... | gcontest mouse DX,DY,B...\n");
         return 2;
     }
     int ack = !strcmp(argv[1], "ack"), late = !strcmp(argv[1], "late");
@@ -131,6 +133,11 @@ int main(int argc, char **argv)
     }
     say("gcontest: grabbed fd %d %ux%u depth %u chips %u\n", gfd, g.width, g.height, g.depth, g.chips);
     say("gcontest: memfree of the grab's memory -> %d\n", sys_memfree(mem));
+    if (argc > 3) {                     /* the mouse's acceleration (CON_MOUSE): a wrong one first, then ACCEL */
+        u32 acc = (u32)strtoul(argv[3], 0, 16);
+        say("gcontest: accel 0x900 -> %d\n", sys_conmouse(gfd, 0x900));
+        say("gcontest: accel 0x%x -> %d\n", acc, sys_conmouse(gfd, acc));
+    }
     u32 end = sys_ticks() + secs * 100;
     int quit = 0;
     while (!quit && (int)(sys_ticks() - end) < 0) {

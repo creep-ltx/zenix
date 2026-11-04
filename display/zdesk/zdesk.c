@@ -422,6 +422,7 @@ int main(int argc, char **argv)
     ndrag = st.drag;
     if (depth < 4)
         for (int i = 8; i < 16; i++) st.palette[i] = st.palette[th.map8[i]];
+    dpy_call(DPY_WM_MOUSE, mouse_acc, 0, 0, 0);
     if ((r = dpy_call(DPY_WM_STYLE, (u32)&st, 0, 0, 0)) < 0)
         dprintf(2, "zdesk: the theme %s's frame was refused (%d): the server's own is used\n", th.name, r);
     desk_init();

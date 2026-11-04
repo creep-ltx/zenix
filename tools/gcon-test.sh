@@ -43,11 +43,19 @@ shot console2
 send \x1d1
 sleep 3
 shot back
+send gcontest mouse 127,127,0 127,127,0 127,127,0 0,-5,0\r
+sleep 2
+shot corner
+send gcontest mouse -4,0,0\r
+sleep 2
+shot odd
 send kill $(pgrep gcontest)\r
 sleep 3
 shot givenback
-send gcontest late 300 > /tmp/g2.log &\r
+send gcontest late 300 302 > /tmp/g2.log &\r
 sleep 4
+send gcontest mouse 10,5,0\r
+sleep 2
 send gcontest keys 66 51 d1 e6\r
 sleep 5
 shot noack
@@ -65,7 +73,7 @@ make -s -j8 BUILD="$B" DIWV=0x38 "$B/zenix.adf" "$B/zenix.hdf" >"$OUT/build.log"
 ZENIX_BUILD="$B" python3 tools/fsuae_conf.py fsuae/a1200-020-fast.fs-uae "$OUT/run.fs-uae" || exit 1
 ZOOMOUT=0 SHOT_LIMIT=300 timeout -k 20 600 python3 tools/shot.py "$OUT/run.fs-uae" "$OUT/script.txt" "$OUT/g" >/dev/null 2>&1
 L=$OUT/serial.txt; tr -d '\r' < "$OUT/g.serial.log" > "$L"
-for s in columns grabbed mouse console2 back givenback noack noackback; do
+for s in columns grabbed mouse console2 back corner odd givenback noack noackback; do
     [ -f "$OUT/g-$s.png" ] || { echo "FAIL no screenshot $s (see $OUT/g.serial.log)"; exit 1; }
 done
 python3 tools/colour-test.py columns "$OUT/g-columns.png" > "$OUT/geom"; check "the text console's geometry ($(head -1 "$OUT/geom"))" $?
@@ -85,6 +93,13 @@ grep -q "^gcontest: release 1" "$L" && grep -q "^gcontest: ack 1 -> 0" "$L"; che
 gt text "$OUT/g-console2.png" "$OUT/geom"; check "... then console 2 is shown as text" $?
 [ "$(grep -c '^gcontest: acquire' "$L")" -ge 3 ]; check "GEV_ACQUIRE at the grab and at each return (3 or more)" $?
 gt grabbed "$OUT/g-back.png" "$OUT/geom" 340 133; check "back on console 1: gcontest's screen and the pointer again, untouched" $?
+gt corner "$OUT/g-corner.png" "$OUT/geom" 639; check "the pointer reaches the last column (639, shown at line 250: the test build's line 255 is past FS-UAE's picture)" $?
+grep -q "^gcontest: pointer 639 255 qual 0x0" "$L"; check "... and the ring says 639, 255 (clamped there)" $?
+gt corner "$OUT/g-odd.png" "$OUT/geom" 631; check "an odd column (631): the sprite starts there, not at 630 (AGA's hires place, SPRxCTL SH1)" $?
+grep -q "^gcontest: accel 0x900 -> -22" "$L" && grep -q "^gcontest: accel 0x302 -> 0" "$L"
+check "CON_MOUSE: a multiplier of 9 refused (EINVAL), 2 counts and 3 times beyond taken" $?
+grep -q "^gcontest: pointer 372 139 qual 0x0" "$L"
+check "... a move of 10, 5 counts in a frame then goes 2 + 8 x 3 counts across, 2 + 3 x 3 down (372, 139)" $?
 gt text "$OUT/g-givenback.png" "$OUT/geom"; check "gcontest ended: console 1 is text again, no sprite left" $?
 grep -q "display: console 1 given back by pid" "$L"; check "the kernel log says console 1 was given back" $?
 grep -q "display: pid [0-9]* did not let go of console 1 within 1 s: switched anyway" "$L"
@@ -92,6 +107,6 @@ check "a server that answers late: the kernel switches after 1 s and says so" $?
 [ "$(grep -c '^gcontest: ack 1 -> 0' "$L")" = 2 ]; check "... the late answer is taken (0), as the prompt one was" $?
 [ "$(grep -c '^gcontest: memfree of the grab.s memory -> -16' "$L")" = 2 ]; check "the grab's memory cannot be freed while the grab lasts (EBUSY)" $?
 gt text "$OUT/g-noack.png" "$OUT/geom"; check "... console 2 is shown as text" $?
-gt grabbed "$OUT/g-noackback.png" "$OUT/geom" 320 128; check "... and back on console 1 the server has its screen again" $?
+gt grabbed "$OUT/g-noackback.png" "$OUT/geom" 372 139; check "... and back on console 1 the server has its screen again (the pointer where the accelerated move left it)" $?
 grep -q "^letgo=1$" "$L"; check "the answered switch did not time out (one such line, the noack one)" $?
 exit $((1 - pass))

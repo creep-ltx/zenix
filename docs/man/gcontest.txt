@@ -4,7 +4,7 @@ NAME
     gcontest - test a console handed to a display server
 
 SYNOPSIS
-    gcontest ack|late|noack [SECONDS]
+    gcontest ack|late|noack [SECONDS [ACCEL]]
     gcontest keys CODE...
     gcontest mouse DX,DY,BUTTONS...
 
@@ -30,18 +30,21 @@ DESCRIPTION
     the kernel switches after its 1 s deadline, says so in the log and
     draws with the CPU until the program ends. Right after the grab it
     tries to free the grab's memory ("gcontest: memfree ... -> -16":
-    refused while the grab lasts). It
-    ends after SECONDS (default 60) or at the q key, giving the console
-    back.
+    refused while the grab lasts). With ACCEL (hexadecimal, THRESHOLD |
+    MULTIPLIER << 8) it then sets the mouse's acceleration (CON_MOUSE),
+    after trying a wrong one: "gcontest: accel 0x900 -> -22", then
+    "gcontest: accel 0xACCEL -> 0". It ends after SECONDS (default 60) or
+    at the q key, giving the console back.
 
     keys types the raw key codes (hexadecimal; bit 7 set for a key going
     up) through CON_INPUT on descriptor 0, as the keyboard would: 66 51 d1
     e6 is Amiga+F2.
 
     mouse moves the mouse by DX, DY counts (-128..127; a count is two
-    hires pixels across, a line down) and sets its buttons (bit 0 left, 1
-    right, 2 middle; held until the next record) through CON_INPUT's
-    CONI_MOUSE, a record every 3 ticks. The desktop's tests drive it.
+    hires pixels across, a line down, before the grab's acceleration) and
+    sets its buttons (bit 0 left, 1 right, 2 middle; held until the next
+    record) through CON_INPUT's CONI_MOUSE, a record every 3 ticks. The
+    desktop's tests drive it.
 
 NOTES
     Root only. A second gcontest while one has the console is refused

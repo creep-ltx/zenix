@@ -9,7 +9,7 @@
 #include "../display.h"
 #include "model.h"
 
-static int win, m = -1, rows = 24, pen_of[16], bell_due;
+static int win, m = -1, rows = 24, cols = 80, pen_of[16], bell_due;
 /* the keys for the program: the master does not wait (a program that does not read its input never stops this
  * window); what does not fit waits here, and past it keys are dropped and the bell says so */
 static char pend[512];
@@ -48,13 +48,89 @@ static void run_flush(void)
     if (run.n) {
         int at = run.attr, fg = pen_of[run.colour & 15], bg = pen_of[run.colour >> 4 & 15];
         int ta = (at & 4 ? TA_BOLD : 0) | (at & 2 ? TA_UNDER : 0) | (at & 1 ? TA_INV : 0);
-        dpy_text(win, run.col * 8, run.row * 8, fg, bg, ta, run.b, run.len);
+        int y = run.row * 8, sb = 0, sc = 0, cell = 0;     /* the text so far: its first byte and cell */
+        for (int i = 0; i <= run.len; ) {
+            int k = i;                  /* a run of 6 or more blanks (no underline) is a fill, not 6 glyphs */
+            while (k < run.len && run.b[k] == ' ') k++;
+            if (!(ta & TA_UNDER) && k - i >= 6) {
+                if (i > sb)
+                    dpy_text(win, (run.col + sc) * 8, y, fg, bg, ta, run.b + sb, i - sb);
+                dpy_fill(win, (run.col + cell) * 8, y, (k - i) * 8, 8, ta & TA_INV ? fg : bg);
+                cell += k - i;
+                i = sb = k;
+                sc = cell;
+                continue;
+            }
+            if (i == run.len)
+                break;
+            for (i = k > i ? k : i + 1; i < run.len && ((unsigned char)run.b[i] & 0xC0) == 0x80; i++)
+                ;                       /* the cell's other bytes */
+            cell = sc;                  /* cells from sb to i */
+            for (int j = sb; j < i; j++)
+                if (((unsigned char)run.b[j] & 0xC0) != 0x80) cell++;
+        }
+        if (run.len > sb)
+            dpy_text(win, (run.col + sc) * 8, y, fg, bg, ta, run.b + sb, run.len - sb);
     }
     run.n = run.len = 0;
     run.row = -1;
 }
+/* What the model changes is not drawn at once: each row keeps the columns that changed (d0..d1) and a scroll of the
+ * whole screen is counted (pscroll), so a burst of output is shown as one copy and the rows it left, at most every
+ * PRESENT ticks while it streams (xterm's jump scroll), and a key's echo as the cells it changed. */
+#define PRESENT 4
+static unsigned char d0[32], d1[32];
+static int pscroll, live, nshown, cost;
+static unsigned last_shown;
+static int gap(void)                    /* a quarter of the time drawing at most, never still for 0.4 s */
+{
+    return PRESENT > 3 * cost ? PRESENT : 3 * cost > 40 ? 40 : 3 * cost;
+}
+static void dirty(int row, int x0, int x1)
+{
+    if (row < 0 || row >= rows) return;
+    if (d1[row] == 0) { d0[row] = (unsigned char)x0; d1[row] = (unsigned char)x1; return; }
+    if (x0 < d0[row]) d0[row] = (unsigned char)x0;
+    if (x1 > d1[row]) d1[row] = (unsigned char)x1;
+}
+static int any_dirty(void)
+{
+    for (int r = 0; r < rows; r++)
+        if (d1[r]) return 1;
+    return pscroll != 0;
+}
+static void present(void)
+{
+    unsigned t0 = sys_ticks();
+    last_shown = t0;
+    if (!any_dirty())
+        return;
+    nshown++;
+    live = 1;
+    if (m_back()) {                     /* the scrollback is shown: all of it again */
+        m_draw_cells(0, 0, cols);
+        pscroll = 0;
+        memset(d1, 0, sizeof d1);
+    }
+    if (pscroll)                        /* the scroll: one copy of what stays */
+        dpy_copy(win, 0, pscroll * 8, cols * 8, (rows - pscroll) * 8, 0, 0);
+    pscroll = 0;
+    for (int r = 0; r < rows; r++)
+        if (d1[r]) {
+            m_draw_cells(r, d0[r], d1[r]);
+            d1[r] = 0;
+        }
+    run_flush();
+    live = 0;
+    dpy_flush();
+    cost = (int)(sys_ticks() - t0);     /* the server's answer comes when it has drawn (the copy's blit started) */
+}
 void m_cell(int row, int col, unsigned v, int attr, int colour)
 {
+    if (!live) {
+        dirty(row, col, col + 1);
+        return;
+    }
     if (row != run.row || col != run.col + run.n || attr != run.attr || colour != run.colour || run.len > 240)
         run_flush();
     if (!run.n) {
@@ -77,13 +153,33 @@ void m_cell(int row, int col, unsigned v, int attr, int colour)
 }
 void m_fill(int row, int n, int colour)
 {
-    run_flush();
-    dpy_fill(win, 0, row * 8, 640, n * 8, pen_of[colour >> 4 & 15]);
+    if (live) {                         /* the scrollback's redraw */
+        run_flush();
+        dpy_fill(win, 0, row * 8, cols * 8, n * 8, pen_of[colour >> 4 & 15]);
+        return;
+    }
+    for (int r = row; r < row + n; r++)
+        dirty(r, 0, cols);
 }
 void m_move(int dst, int src, int n)
 {
-    run_flush();
-    dpy_copy(win, 0, src * 8, 640, n * 8, 0, dst * 8);
+    if (dst == 0 && src == 1 && n == rows - 1) {    /* the whole screen up a line: counted, the rows' marks with it */
+        if (++pscroll >= rows) {
+            pscroll = 0;
+            for (int r = 0; r < rows; r++) dirty(r, 0, cols);
+            return;
+        }
+        memmove(d0, d0 + 1, (u32)(rows - 1));
+        memmove(d1, d1 + 1, (u32)(rows - 1));
+        d1[rows - 1] = 0;
+        return;
+    }
+    if (!any_dirty()) {                 /* a region's move on a screen that is up to date: one copy now */
+        dpy_copy(win, 0, src * 8, cols * 8, n * 8, 0, dst * 8);
+        return;
+    }
+    for (int r = dst; r < dst + n; r++) /* else its rows drawn from the model at the next showing */
+        dirty(r, 0, cols);
 }
 
 /* the console's 16 colours (kernel/gfx.c) as the screen's nearest pens (D38 5) */
@@ -142,15 +238,20 @@ static void key(const struct dpyev *e)
         to_pty(s, n);
 }
 
-static void resize(int h)
+static void resize(int w, int h)
 {
-    int r = h / 8;
-    if (r == rows || r < 4)
+    int r = h / 8, c = w / 8;
+    if (r < 4 || c < 20 || (r == rows && c == cols))
         return;
+    present();
     rows = r;
+    cols = c > 80 ? 80 : c;
     m_rows(rows);
-    struct winsize ws = { (unsigned short)rows, 80, 0, 0 };
+    m_setcols(cols);
+    struct winsize ws = { (unsigned short)rows, (unsigned short)cols, 0, 0 };
     ioctl(m, TIOCSWINSZ, &ws);          /* the program on the pty gets SIGWINCH */
+    for (int k = 0; k < rows; k++)
+        dirty(k, 0, cols);
 }
 
 static int quit_menu_new;
@@ -210,9 +311,11 @@ int main(int argc, char **argv)
     d.x = d.y = -1;
     d.w = 640;
     d.h = (unsigned short)(rows * 8);
-    d.minw = d.maxw = 640;              /* the console's model: 80 columns */
+    d.minw = 20 * 8;                    /* 20 to 80 columns (the console's model: rows of 80), 4 to 29 rows */
+    d.maxw = 640;
     d.minh = 4 * 8;
     d.maxh = 29 * 8;
+    d.stepw = 8;
     d.steph = 8;
     const char *b = strrchr(av[0], '/');
     strncpy(d.title, b ? b + 1 : av[0], DPY_TITLE - 1);
@@ -226,21 +329,37 @@ int main(int argc, char **argv)
     colours();
     m_rows(rows);
     m_write("\033[H\033[2J", 7);
-    dpy_flush();
-    char buf[512];
+    present();
+    static char buf[2048];              /* a pty's whole output ring at once */
+    unsigned last_read = 0;
     for (;;) {
         struct pollfd p[2] = { { dpy_port(), POLLPORT | POLLRDBAND, 0 }, { m, (short)(POLLIN | (npend ? POLLOUT : 0)), 0 } };
-        if (sys_evwait(p, 2, npend ? 10 : -1) < 0)
+        int wait = npend ? 10 : -1;
+        if (any_dirty()) {              /* the next showing: PRESENT ticks after the last, sooner if the output pauses */
+            int left = gap() - (int)(sys_ticks() - last_shown);
+            wait = left < 1 ? 1 : left;
+        }
+        if (sys_evwait(p, 2, wait) < 0)
             continue;
         if (p[1].revents & (POLLIN | POLLHUP)) {
             int n = sys_read(m, buf, sizeof buf);
             if (n <= 0 && n != -EAGAIN)
                 break;                  /* the program ended: the window goes */
             if (n > 0) {
-                m_write(buf, (unsigned)n);
-                run_flush();
+                for (int at = 0; at < n; at += 256) {   /* the cells' work in pieces: a showing between them */
+                    m_write(buf + at, (unsigned)(n - at < 256 ? n - at : 256));
+                    if ((int)(sys_ticks() - last_shown) >= gap())
+                        present();
+                }
+                /* output streaming in pieces (a line a write): a tick for the program to write more, so the
+                 * window takes it in big reads, not a wake-up a line; a key's echo alone is never held */
+                if (n < (int)sizeof buf && (unsigned)(sys_ticks() - last_read) <= 1)
+                    sys_sleep(1);
+                last_read = sys_ticks();
             }
         }
+        if (!(p[1].revents & POLLIN) || (int)(sys_ticks() - last_shown) >= gap())
+            present();                  /* the output paused, or streams on: what it left */
         pend_flush();
         while (sys_waitnb(-1) >= 0)     /* the terminals "New terminal" started that ended */
             ;
@@ -248,8 +367,10 @@ int main(int argc, char **argv)
         int got, gone = 0;
         while ((got = dpy_next(&e, 0)) > 0) {
             if (e.type == EV_KEY) key(&e);
-            else if (e.type == EV_EXPOSE) { m_redraw(); run_flush(); }
-            else if (e.type == EV_RESIZE) { resize(e.h); m_redraw(); run_flush(); }
+            else if (e.type == EV_EXPOSE) { /* the rows it names (scrolls still pending shown first: screen rows) */
+                present();
+                for (int r = e.y / 8; r <= (e.y + e.h - 1) / 8; r++) dirty(r, e.x / 8, (e.x + e.w + 7) / 8);
+            } else if (e.type == EV_RESIZE) resize(e.w, e.h);
             else if (e.type == EV_CLOSE) gone = 1;
             else if (e.type == EV_MENU) menu(&e);
         }
@@ -261,6 +382,8 @@ int main(int argc, char **argv)
             gone = 1;
         if (bell_due)
             bell_due = 0;               /* the bell: no sound on the desktop yet */
+        if (any_dirty() && !(p[1].revents & POLLIN))
+            present();                  /* an expose, a resize, a scrollback key */
         dpy_flush();
         if (gone || got < 0)
             break;

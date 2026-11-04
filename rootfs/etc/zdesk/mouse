@@ -1,0 +1,4 @@
+# zdesk's mouse (docs/man/zdesk.txt "FILES"). A user's ~/.config/zdesk/mouse replaces this file.
+# acceleration none|low|high: a fast move goes further. low doubles the counts beyond 4 in a frame (a fiftieth of a
+# second on PAL), high triples those beyond 2; none moves 2 pixels across and 1 line down a count, always.
+acceleration low

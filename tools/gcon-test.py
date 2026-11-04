@@ -6,6 +6,9 @@ tools/colour-test.py columns found ("x0 x1 yc h": an Amiga pixel is (x1 - x0 + 1
   gcon-test.py grabbed SHOT GEOM X Y   gcontest's screen: green everywhere but its 16 x 16 red pointer (32 hires pixels
                                        by 16 lines), whose top left corner is at hires pixel X, line Y (within one
                                        lores pixel and one line); prints where it is
+  gcon-test.py corner SHOT GEOM X      the pointer's left edge at hires column X (line 252, inside it): more red
+                                       than green there, more green than red at X - 1 (the screenshot's blur; at 639,
+                                       the last column, only red in it)
   gcon-test.py text SHOT GEOM          the text console: no green and no red anywhere in the display window
 Each prints what it found and exits 1 on a failure."""
 import sys
@@ -48,6 +51,16 @@ def grabbed(shot, geom, X, Y):
     return bad
 
 
+def corner(shot, geom, X):
+    im = Image.open(shot).convert("RGB")
+    px, g = im.load(), geometry(geom)
+    at, left = sample(px, g, X, 252), sample(px, g, X - 1, 252)
+    print(f"corner: {X},252 {at}, {X - 1},252 {left}")
+    if X == 639:                        # the picture's last column is half blurred into the border: red in it
+        return 0 if at[0] >= 100 else 1
+    return 0 if at[0] > at[1] and left[1] > left[0] else 1     # more red than green at X, the other way left of it
+
+
 def text(shot, geom):
     im = Image.open(shot).convert("RGB")
     px, g = im.load(), geometry(geom)
@@ -63,6 +76,8 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     if a[0] == "grabbed":
         sys.exit(grabbed(a[1], a[2], int(a[3]), int(a[4])))
+    if a[0] == "corner":
+        sys.exit(corner(a[1], a[2], int(a[3])))
     if a[0] == "text":
         sys.exit(text(a[1], a[2]))
     sys.exit(__doc__)

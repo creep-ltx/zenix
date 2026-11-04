@@ -13,10 +13,11 @@
 #include "kernel.h"
 #include "hw.h"
 #include "zine.h"
+#include "hwinfo.h"
 
 #define ADKCONR REG16(0xDFF010)
 
-_Static_assert(sizeof(struct uzine_info) == UZINE_INFO_FIRST, "uzine_info's first size is frozen");
+_Static_assert(sizeof(struct uzine_info) == UZINE_INFO_MACHINE, "uzine_info: its first size is frozen, then machine");
 _Static_assert(sizeof(struct uzine_go) == UZINE_GO_FIRST, "uzine_go's first size is frozen");
 
 long zine_enter(u32 entry, struct zine_args *a);       /* below: saves the CPU's state, calls the blob */
@@ -209,6 +210,8 @@ long zine_sys(u32 op, u32 a, u32 b)
         i.attn = ((const struct bootinfo *)0x1000)->attn;
         mem_totals(&i.chip_total, &i.fast_total);
         mem_stats(&i.chip_free, &i.fast_free);
+        const struct hwinfo *hw = (const struct hwinfo *)HWINFO_ADDR;
+        i.machine = hw->magic == HWINFO_MAGIC && (hw->flags & HW_DT) ? UZI_EMU68 : 0;
         memcpy((void *)a, &i, n);
         return 0;
     }

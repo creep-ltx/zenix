@@ -168,22 +168,53 @@ static void frame_paint(struct win *w, const struct rect *c)
         int tx0 = f.x0 + 1, tx1 = f.x1 - 1, ty0 = f.y0 + 1, ty1 = f.y0 + 1 + style.title - 1;
         t = (struct rect){ (s16)tx0, (s16)ty0, (s16)tx1, (s16)ty1 };
         if (r_and(&k, &t, c)) {
-            bm_fill(&scr, &k, style.bar[act]);
-            if (act && style.stripes)
-                for (int y = ty0 + 1; y < ty1; y += 2) {
-                    struct rect s = { (s16)tx0, (s16)y, (s16)tx1, (s16)(y + 1) }, ks;
-                    if (r_and(&ks, &s, &k))
-                        bm_fill(&scr, &ks, style.stripes);
-                }
-            int cols = title_cols(w), tw = cols * 8;
-            int x = style.centre ? (tx0 + tx1 - tw) / 2 : tx0 + 5;
-            int y = ty0 + (style.title - 1 - 8) / 2;
-            if (style.centre || (act && style.stripes)) {  /* the title on a plain patch over the stripes */
-                struct rect p = { (s16)(x - 4), (s16)ty0, (s16)(x + tw + 4), (s16)ty1 }, kp;
-                if (r_and(&kp, &p, &k))
-                    bm_fill(&scr, &kp, style.bar[0] == style.bar[1] || !style.stripes ? style.bar[act] : style.bar[0]);
+            /* the title between the gadgets: after the left ones and a gap, before the right ones (a long one cut) */
+            int lx = tx0 + 5, rx = tx1 - 4;
+            for (int i = 0; i < 3; i++) {
+                if (!style.gadx[i])
+                    continue;
+                struct bm *gi = 0;
+                if (style.gad[i])
+                    dpy_image(style.gad[i], -1, &gi);
+                int gx = gad_x(i, &f), gw = gi ? gi->w : 8;
+                if (style.gadx[i] < 128 && gx + gw + 6 > lx) lx = gx + gw + 6;
+                if (style.gadx[i] >= 128 && gx - 4 < rx) rx = gx - 4;
             }
-            text_at(x, y, w->title, style.text[act], style.bar[act], act ? TA_BOLD : 0, &k);
+            int cols = title_cols(w), tw = cols * 8;
+            if (tw > rx - lx) tw = rx - lx > 0 ? (rx - lx) & ~7 : 0;
+            int x = style.centre ? (tx0 + tx1 - tw) / 2 : lx;
+            if (x < lx) x = lx;
+            if (x + tw > rx) x = rx - tw;
+            int y = ty0 + (style.title - 1 - 8) / 2;
+            int patch = style.centre || (act && style.stripes);    /* the title on a plain patch over the stripes */
+            int ppen = style.bar[0] == style.bar[1] || !style.stripes ? style.bar[act] : style.bar[0];
+            /* every pixel once: the bar (and its stripes) beside the title, the patch around it, then the text */
+            int px0 = patch ? x - 4 : x, px1 = patch ? x + tw + 4 : x + tw;
+            for (int side = 0; side < 2; side++) {
+                int a0 = side ? px1 : tx0, a1 = side ? tx1 : px0;
+                if (a0 >= a1)
+                    continue;
+                struct rect s = { (s16)a0, (s16)ty0, (s16)a1, (s16)ty1 }, ks;
+                if (!(act && style.stripes)) {
+                    if (r_and(&ks, &s, &k)) bm_fill(&scr, &ks, style.bar[act]);
+                    continue;
+                }
+                for (int yy = ty0; yy < ty1; yy++) {
+                    struct rect l = { (s16)a0, (s16)yy, (s16)a1, (s16)(yy + 1) };
+                    if (r_and(&ks, &l, &k))
+                        bm_fill(&scr, &ks, (yy - ty0) & 1 ? style.stripes : style.bar[act]);
+                }
+            }
+            struct rect pl = { (s16)px0, (s16)ty0, (s16)x, (s16)ty1 }, pr = { (s16)(x + tw), (s16)ty0, (s16)px1, (s16)ty1 },
+                        tt = { (s16)x, (s16)ty0, (s16)(x + tw), (s16)y }, tb = { (s16)x, (s16)(y + 8), (s16)(x + tw), (s16)ty1 },
+                        kp;
+            if (r_and(&kp, &pl, &k)) bm_fill(&scr, &kp, ppen);
+            if (r_and(&kp, &pr, &k)) bm_fill(&scr, &kp, ppen);
+            if (r_and(&kp, &tt, &k)) bm_fill(&scr, &kp, patch ? ppen : style.bar[act]);
+            if (r_and(&kp, &tb, &k)) bm_fill(&scr, &kp, patch ? ppen : style.bar[act]);
+            struct rect tc = { (s16)x, (s16)ty0, (s16)(x + tw), (s16)ty1 };
+            if (r_and(&kp, &tc, &k))
+                text_at(x, y, w->title, style.text[act], patch ? ppen : style.bar[act], act ? TA_BOLD : 0, &kp);
             for (int i = 0; i < 3; i++) {
                 if (!style.gadx[i])
                     continue;                   /* no such gadget in this style */
@@ -219,8 +250,10 @@ static void expose(struct win *w, const struct rect *r)        /* r: on the scre
 /* paint the damage d back to front; fresh[slot]: the parts of a window's inside that are newly visible (painted from
  * the copy, or cleared and exposed) - a part not fresh is on the screen already */
 static struct region fresh[NWIN];
+u32 npaints;
 static void paint(const struct rect *d)
 {
+    npaints++;
     struct region bg;
     rg_set(&bg, d);
     for (int k = 0; k < norder; k++) {
@@ -407,7 +440,7 @@ int win_new(int cl, const struct dpywin *d)
     w->title[DPY_TITLE - 1] = 0;
     int iw = d->w ? d->w : 160, ih = d->h ? d->h : 80;
     if (w->kind == WK_DESKTOP) { iw = scr.w; ih = scr.h; }
-    if (w->kind == WK_BAR) iw = scr.w;
+    if (w->kind == WK_BAR && !d->w) iw = scr.w;    /* a bar: the screen's width unless asked (a menu: its own) */
     w->iw = (u16)clampsz(iw > scr.w ? scr.w : iw, w->minw, w->maxw, 0, 0);
     w->ih = (u16)clampsz(ih > scr.h ? scr.h : ih, w->minh, w->maxh, 0, 0);
     w->fx = d->x;

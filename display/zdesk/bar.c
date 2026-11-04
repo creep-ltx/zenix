@@ -46,13 +46,46 @@ static void app_menus(void)
     }
 }
 
-/* ---- drawing ---- */
-static int text(int x, const char *s, int n, int fg, int bg, int bold)
+/* ---- drawing: every pixel of the bar once, left to right (no clearing first: nothing flickers) ---- */
+static int painted, bgpen;
+static void upto(int x)                 /* the background from where the last piece ended to x */
 {
-    dpy_text(bar_id, x, 2, fg, bg, bold ? TA_BOLD : 0, s, n);
-    return x + 8 * n;
+    if (x > painted) {
+        dpy_fill(bar_id, painted, 0, x - painted, bar_h - 1, bgpen);
+        painted = x;
+    }
 }
+/* text at x (line 2) in fg on hb, with pad pixels of hb on each side (a highlight: lines 1 to 9), the rest of its
+ * column the bar's background */
+static int seg(int x, const char *s, int n, int fg, int hb, int bold, int pad)
+{
+    int a = x - pad, x1 = x + 8 * n, b = x1 + pad;
+    upto(a);
+    dpy_fill(bar_id, a, 0, b - a, 1, bgpen);
+    dpy_fill(bar_id, a, 1, b - a, 1, hb);
+    if (pad) {
+        dpy_fill(bar_id, a, 2, pad, 8, hb);
+        dpy_fill(bar_id, x1, 2, pad, 8, hb);
+    }
+    dpy_text(bar_id, x, 2, fg, hb, bold ? TA_BOLD : 0, s, n);
+    if (bar_h - 1 > 10)
+        dpy_fill(bar_id, a, 10, b - a, bar_h - 11, bgpen);
+    if (b > painted)
+        painted = b;
+    return x1;
+}
+static int text(int x, const char *s, int n, int fg, int bg, int bold) { return seg(x, s, n, fg, bg, bold, 0); }
 static char right_text[160];
+static int right_x;                     /* where the right zone's text was drawn (bar_tick redraws it there) */
+static void right_compose(char *r)      /* the right zone's blocks as one text (sizeof right_text) */
+{
+    r[0] = 0;
+    for (int i = 0; i < nblocks; i++)
+        if (blocks[i].zone == 2 && blocks[i].text[0]) {
+            if (r[0] && strlen(r) + 2 < sizeof right_text) strcat(r, "  ");
+            if (strlen(r) + strlen(blocks[i].text) < sizeof right_text) strcat(r, blocks[i].text);
+        }
+}
 void bar_draw(void)
 {
     if (bar_id <= 0)
@@ -61,16 +94,12 @@ void bar_draw(void)
         app_menus();
     nhits = 0;
     int bg = pen(R_BAR), fg = pen(R_BARFG);
-    dpy_fill(bar_id, 0, 0, 640, bar_h - 1, bg);
+    painted = 0;
+    bgpen = bg;
     dpy_fill(bar_id, 0, bar_h - 1, 640, 1, pen(R_BARLINE));
     int x = 8;
     /* the right zone first: the middle's list gets what is left */
-    right_text[0] = 0;
-    for (int i = 0; i < nblocks; i++)
-        if (blocks[i].zone == 2 && blocks[i].text[0]) {
-            if (right_text[0] && strlen(right_text) + 2 < sizeof right_text) strcat(right_text, "  ");
-            if (strlen(right_text) + strlen(blocks[i].text) < sizeof right_text) strcat(right_text, blocks[i].text);
-        }
+    right_compose(right_text);
     int rw = 8 * (int)strlen(right_text), rx = 640 - 8 - rw;
     for (int z = 0; z < 2; z++) {
         if (z == 1)
@@ -103,11 +132,9 @@ void bar_draw(void)
                     if (x + 8 * n + 8 > rx)
                         break;
                     int cur = w->id == focus_id;
-                    if (cur)
-                        dpy_fill(bar_id, x - 4, 1, 8 * n + 8, bar_h - 3, pen(R_BARCURBG));
                     int x0 = x;
-                    x = text(x, w->title[0] ? w->title : "?", n, cur ? pen(R_BARCUR) : w->min ? pen(R_BARDIM) : fg,
-                             cur ? pen(R_BARCURBG) : bg, cur);
+                    x = seg(x, w->title[0] ? w->title : "?", n, cur ? pen(R_BARCUR) : w->min ? pen(R_BARDIM) : fg,
+                            cur ? pen(R_BARCURBG) : bg, cur, cur ? 4 : 0);
                     hit(x0 - 4, x + 4, H_WIN, w->id);
                     x += 16;
                 }
@@ -118,9 +145,8 @@ void bar_draw(void)
                         if (zws[j].id && !zws[j].own && zws[j].ws == n) used = 1;
                     char c = (char)('0' + n);
                     int cur = n == cur_ws;
-                    if (cur)
-                        dpy_fill(bar_id, x - 4, 1, 16, bar_h - 3, pen(R_BARCURBG));
-                    text(x, &c, 1, cur ? pen(R_BARCUR) : used ? fg : pen(R_BARDIM), cur ? pen(R_BARCURBG) : bg, cur);
+                    seg(x, &c, 1, cur ? pen(R_BARCUR) : used ? fg : pen(R_BARDIM), cur ? pen(R_BARCURBG) : bg, cur,
+                        cur ? 4 : 0);
                     hit(x - 4, x + 12, H_WS, n);
                     x += 16;
                 }
@@ -129,23 +155,43 @@ void bar_draw(void)
     }
     if (rw)
         text(rx, right_text, (int)strlen(right_text), pen(R_CLOCK), bg, 0);
+    right_x = rx;
+    upto(640);
     dpy_flush();
     if (verbose)
         dprintf(1, "zdesk: bar right: %s\n", right_text);
 }
 
 /* ---- the blocks ---- */
-static u32 attn(void)
+/* the CPU as the kernel knows it (ZINE_INFO): AttnFlags with the 68060 bit the kernel sets from the PCR, and Emu68 */
+const char *cpu_name(void)
 {
-    u32 zi[7];
-    return sys3(93, 0, (u32)zi, sizeof zi) == 0 ? zi[2] : 0;
+    u32 zi[8] = { 0 };
+    if (sys3(93, 0, (u32)zi, sizeof zi) < 0)
+        return "68020";
+    u32 a = zi[2];
+    const char *c = a & 0x80 ? "68060" : a & 0x08 ? "68040" : a & 0x04 ? "68030" : "68020";
+    if (zi[0] >= 32 && (zi[7] & 1)) {   /* UZI_EMU68: the 68k is Emu68's (a PiStorm) */
+        static char e[20];
+        sprintf(e, "Emu68 %s", c);
+        return e;
+    }
+    return c;
 }
-static void kb(char *o, u32 k, const char *name)
+static void kb(char *o, u32 k, const char *name)  /* as free -h: K, M or G, one decimal below 10 */
 {
-    if (k >= 1024)
-        sprintf(o, "%s %u.%uM", name, k / 1024, k % 1024 * 10 / 1024);
+    static const char unit[] = "KMG";
+    int u = 0;
+    u32 whole = k, tenth = 0;
+    while (whole >= 1024 && u < 2) {
+        tenth = whole % 1024 * 10 / 1024;
+        whole /= 1024;
+        u++;
+    }
+    if (whole < 10 && u)
+        sprintf(o, "%s %u.%u%c", name, whole, tenth, unit[u]);
     else
-        sprintf(o, "%s %uK", name, k);
+        sprintf(o, "%s %u%c", name, whole, unit[u]);
 }
 static void cmd_start(struct block *k)
 {
@@ -212,7 +258,7 @@ void bar_tick(void)
                 for (int j = 0; j < k->nout; j++) nl |= k->out[j] == '\n';
                 if (r <= 0 || nl || k->nout >= (int)sizeof k->out - 1) {
                     cmd_end(k, 1);
-                    changed = 1;
+                    changed |= k->zone == 2 ? 1 : 2;
                 }
             } else if ((u32)(now - k->started) > (u32)(k->every < 10 ? 10 : k->every) * 100) {
                 cmd_end(k, 0);                  /* a command that does not answer in time: ended, its text kept */
@@ -237,8 +283,7 @@ void bar_tick(void)
                     strcpy(t, c);
             }
         } else if (k->kind == B_CPU) {
-            u32 a = attn();
-            strcpy(t, a & 0x80 ? "68060" : a & 0x08 ? "68040" : a & 0x04 ? "68030" : "68020");
+            strcpy(t, cpu_name());
         } else if (k->kind == B_NETWORK) {
             int s = socket(AF_INET, SOCK_DGRAM, 0);
             strcpy(t, "net off");
@@ -266,10 +311,21 @@ void bar_tick(void)
             continue;
         if (strcmp(t, k->text)) {
             strcpy(k->text, t);
-            changed = 1;
+            changed |= k->zone == 2 ? 1 : 2;
         }
     }
-    if (changed)
+    if (!changed)
+        return;
+    char r[sizeof right_text];
+    right_compose(r);
+    if (changed == 1 && bar_id > 0 && strlen(r) == strlen(right_text)) {    /* the status alone, as long as before: */
+        int n = (int)strlen(r);                                             /* its letters, over the old ones */
+        dpy_text(bar_id, right_x, 2, pen(R_CLOCK), pen(R_BAR), 0, r, n);
+        strcpy(right_text, r);
+        dpy_flush();
+        if (verbose)
+            dprintf(1, "zdesk: bar right: %s\n", right_text);
+    } else
         bar_draw();
 }
 
@@ -301,24 +357,57 @@ static const char *item_text(int i, int *len)  /* the i-th item of the open menu
         *len = seglen(s);
     return s;
 }
-static void menu_paint(void)
+/* item i (10 lines from line 2): every pixel drawn once, in its final colour - the text's cells with their
+ * background, the margins around them filled - so a changed highlight never shows a cleared item */
+static void menu_item(int i)
+{
+    int n;
+    const char *t = item_text(i, &n);
+    if (!t)
+        return;
+    if (n > 60)
+        n = 60;
+    int on = i == sel, bg = pen(on ? R_SELBG : R_MENUBG), y = 2 + 10 * i;
+    dpy_fill(mwin, 1, y, mw - 2, 1, bg);
+    dpy_fill(mwin, 1, y + 1, 7, 8, bg);
+    dpy_text(mwin, 8, y + 1, pen(on ? R_SELFG : R_MENUFG), bg, 0, t, n);
+    dpy_fill(mwin, 8 + 8 * n, y + 1, mw - 9 - 8 * n, 8, bg);
+    dpy_fill(mwin, 1, y + 9, mw - 2, 1, bg);
+}
+static void menu_paint(void)            /* the whole menu: when it opens, and on EV_EXPOSE */
 {
     if (!mwin)
         return;
-    dpy_fill(mwin, 0, 0, mw, mh, pen(R_MENUFG));
-    dpy_fill(mwin, 1, 1, mw - 2, mh - 2, pen(R_MENUBG));
-    for (int i = 0; i < nitems; i++) {
-        int n;
-        const char *t = item_text(i, &n);
-        if (!t)
-            break;
-        int on = i == sel;
-        if (on)
-            dpy_fill(mwin, 1, 2 + 10 * i, mw - 2, 10, pen(R_SELBG));
-        dpy_text(mwin, 8, 3 + 10 * i, on ? pen(R_SELFG) : pen(R_MENUFG), on ? pen(R_SELBG) : pen(R_MENUBG), 0, t,
-                 n > 60 ? 60 : n);
-    }
+    u32 t0 = sys_hrtime();
+    int fg = pen(R_MENUFG), bg = pen(R_MENUBG);
+    dpy_fill(mwin, 0, 0, mw, 1, fg);
+    dpy_fill(mwin, 0, mh - 1, mw, 1, fg);
+    dpy_fill(mwin, 0, 1, 1, mh - 2, fg);
+    dpy_fill(mwin, mw - 1, 1, 1, mh - 2, fg);
+    dpy_fill(mwin, 1, 1, mw - 2, 1, bg);
+    dpy_fill(mwin, 1, mh - 2, mw - 2, 1, bg);
+    for (int i = 0; i < nitems; i++)
+        menu_item(i);
     dpy_flush();
+    if (verbose)                        /* the E-clock (709,379 Hz on PAL): the server's drawing included */
+        dprintf(1, "zdesk: menu drawn in %u us\n", (u32)(sys_hrtime() - t0) * 1000u / 709u);
+}
+static void menu_select(int s)          /* the highlight moves: the two items that change, nothing else */
+{
+    if (s == sel)
+        return;
+    int old = sel;
+    sel = s;
+    if (!mwin)
+        return;
+    u32 t0 = sys_hrtime();
+    if (old >= 0)
+        menu_item(old);
+    if (s >= 0)
+        menu_item(s);
+    dpy_flush();
+    if (verbose)
+        dprintf(1, "zdesk: highlight moved in %u us\n", (u32)(sys_hrtime() - t0) * 1000u / 709u);
 }
 int menu_open(void) { return mopen != -2; }
 int menu_win(int id) { return id && id == mwin; }
@@ -360,8 +449,9 @@ static void menu_show(int which, int x)
     mtitle_x = x;
     mwin = dpy_window(WK_BAR, "", mx, bar_h, mw, mh, WF_MOTION);
     if (mwin < 0)
-        mwin = 0;
-    menu_paint();
+        mwin = 0;                       /* drawn once, at its EV_EXPOSE */
+    if (verbose)
+        dprintf(1, "zdesk: menu at %d %d %d %d\n", mx, bar_h, mw, mh);
 }
 static void pick(void)
 {
@@ -395,10 +485,7 @@ static void track(int x, int y)
     int s = -1;
     if (mwin && x >= mx && x < mx + mw && y >= bar_h + 2 && y < bar_h + 2 + 10 * nitems)
         s = (y - bar_h - 2) / 10;
-    if (s != sel) {
-        sel = s;
-        menu_paint();
-    }
+    menu_select(s);
 }
 void menu_hold(int button)
 {
@@ -418,7 +505,6 @@ void menu_keyboard(void)
     }
     menu_show(-1, 4);
     sel = 0;
-    menu_paint();
     kbd = 1;
     grabs_set(1);
 }
@@ -428,8 +514,7 @@ void menu_key(int code)
     if (code == 0x45) { menu_close(); return; }                 /* Esc */
     if (code == 0x44 || code == 0x43) { pick(); return; }       /* Return */
     if (code == 0x4C || code == 0x4D) {                         /* Up, Down */
-        sel = (sel + (code == 0x4D ? 1 : nitems - 1)) % (nitems ? nitems : 1);
-        menu_paint();
+        menu_select((sel + (code == 0x4D ? 1 : nitems - 1)) % (nitems ? nitems : 1));
         return;
     }
     if (code == 0x4E || code == 0x4F) {                         /* Right, Left: the next or previous menu */
@@ -444,7 +529,6 @@ void menu_key(int code)
         if (k >= 0 && title_at(hits[k].x0 + 4, &w, &tx)) {
             menu_show(w, tx);
             sel = 0;
-            menu_paint();
         }
     }
 }

@@ -38,11 +38,29 @@ void *memcpy(void *d, const void *s, size_t n)
     while (n--) *p++ = *q++;
     return d;
 }
+/* both ends 4-aligned: long words (a quarter of the bus accesses; term's cell model moves its grid on every scroll,
+ * as the kernel's console does with its own memmove) */
 void *memmove(void *d, const void *s, size_t n)
 {
     char *p = d; const char *q = s;
-    if (p < q) while (n--) *p++ = *q++;
-    else { p += n; q += n; while (n--) *--p = *--q; }
+    int lw = n >= 8 && !(((unsigned long)p | (unsigned long)q) & 3);
+    if (p < q) {
+        if (lw) {
+            u32 *pl = (u32 *)p; const u32 *ql = (const u32 *)q;
+            for (unsigned long k = n >> 2; k; k--) *pl++ = *ql++;
+            p = (char *)pl; q = (const char *)ql; n &= 3;
+        }
+        while (n--) *p++ = *q++;
+    } else if (p != q) {
+        p += n; q += n;
+        if (lw) {
+            for (unsigned long k = n & 3; k; k--) *--p = *--q;   /* the tail first: the same offset in a long */
+            u32 *pl = (u32 *)p; const u32 *ql = (const u32 *)q;
+            for (unsigned long k = n >> 2; k; k--) *--pl = *--ql;
+            p = (char *)pl; q = (const char *)ql;
+        } else
+            while (n--) *--p = *--q;
+    }
     return d;
 }
 void *memset(void *d, int c, size_t n)

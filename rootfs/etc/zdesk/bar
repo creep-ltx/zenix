@@ -1,0 +1,8 @@
+# zdesk's bar (DESIGN D38 step 5; docs/man/zdesk.txt "FILES"). A user's ~/.config/zdesk/bar replaces this file.
+# ZONE MODULE...: ZONE is left, middle or right; the modules are zenix, menus, windows, workspaces, clock, memory,
+# network, cpu and "cmd N COMMAND..." (its output every N seconds, to a ";" or the line's end).
+# A zone named here replaces the theme's; a zone not named keeps the theme's. The lines below are what the three
+# themes show, left as comments so that a theme's own bar still counts: remove the "#" to fix a zone for every theme.
+#left    zenix menus
+#middle  windows
+#right   memory clock

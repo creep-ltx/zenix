@@ -13,5 +13,8 @@ void m_answer(const char *s);           /* the terminal answers the program (ESC
 void m_write(const char *s, unsigned n);
 void m_redraw(void);
 void m_rows(int rows);
+void m_setcols(int cols);
+void m_draw_cells(int y, int x0, int x1);   /* draw those cells now, from the model (the cursor inverted) */
+int m_back(void);                       /* the scrollback is shown */               /* the window's columns (8..80): wraps, erases and the cursor stay inside */
 int m_ckm(void);
 void m_scrollback(int delta);

@@ -33,17 +33,20 @@ void input_init(void)
     inited = 1;
 }
 
-/* called from the 100 Hz tick */
+/* called from the 100 Hz tick, and from gcon's vertical blank while a console is in graphics mode */
 void input_poll(void)
 {
     if (!inited)
         return;
+    u16 sv = irq_save();                 /* the tick and gcon's vertical blank both read: one at a time */
     u16 j0 = JOY0DAT, j1 = JOY1DAT;
-    if (j0 != last0)
-        rnd_isr(j0, 0);                  /* mouse movement: mixed, never credited (D19 9.3) */
     dx += (signed char)((j0 & 0xFF) - (last0 & 0xFF));
     dy += (signed char)((j0 >> 8) - (last0 >> 8));
+    u16 l0 = last0;
     last0 = j0;
+    irq_restore(sv);
+    if (j0 != l0)
+        rnd_isr(j0, 0);                  /* mouse movement: mixed, never credited (D19 9.3) */
     last1 = j1;
     u8 pra = CIAA_PRA;
     u16 pot = POTGOR;
@@ -66,7 +69,7 @@ void input_poll(void)
  * 2 left, 3 right, 4 fire) */
 void input_read(s32 *out)
 {
-    u16 sv = irq_save2();
+    u16 sv = irq_save();                 /* gcon's vertical blank (level 3) takes them too */
     out[0] = dx; out[1] = dy; out[2] = (s32)buttons; out[3] = (s32)joy;
     dx = dy = 0;
     irq_restore(sv);
@@ -87,7 +90,7 @@ int input_inject(const u8 *r, int n)
     if (n % 3)
         return -EINVAL;
     for (int i = 0; i < n; i += 3) {
-        u16 sv = irq_save2();
+        u16 sv = irq_save();                 /* gcon's vertical blank (level 3) takes them too */
         dx += (signed char)r[i];
         dy += (signed char)r[i + 1];
         ibtn = r[i + 2] & 7;

@@ -15,6 +15,8 @@
  *   time NAME N        N raises of NAME (and of the window under it in turn), then N moves: the mean in microseconds
  *                      (E-clock), the server's whole round trip
  *   events             the events received so far, a line each
+ *   stat [LABEL]       the server's counters since the last stat (DPY_STAT), then from 0: "dpytest: stat LABEL blits
+ *                      B pixels P glyphs G draws D paints N copies C (0)"
  *   mem                chip and fast RAM free, and the memory of displayd and dpytest (procinfo)
  *   quit               the end (DPY_BYE)
  * EV_EXPOSE is answered by drawing the window again (its fill and name); every event is kept for "events". */
@@ -107,6 +109,13 @@ static void command(char *line)
         ws[k].h = atoi(w[3]);
         paint(k, 0, 0, ws[k].w, ws[k].h);
         say("dpytest: win %s id %d\n", w[1], id);
+        return;
+    }
+    if (!strcmp(w[0], "stat")) {       /* the server's counters since the last stat, then from 0 */
+        u32 st[6] = { 0, 0, 0, 0, 0, 0 };
+        int r = dpy_call(DPY_STAT, (u32)st, 1, 0, 0);
+        say("dpytest: stat %s blits %u pixels %u glyphs %u draws %u paints %u copies %u (%d)\n", n > 1 ? w[1] : "-",
+            st[0], st[1], st[2], st[3], st[4], st[5], r);
         return;
     }
     if (!strcmp(w[0], "wm")) { say("dpytest: wm %d\n", dpy_call(DPY_WM_HELLO, 0, 0, 0, 0)); return; }

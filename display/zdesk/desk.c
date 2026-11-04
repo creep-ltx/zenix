@@ -47,6 +47,20 @@ void icon_image(u8 *planes, const char *const *rows, int nrows, const u8 *pens, 
 
 static int icon_y(int i) { return bar_h + 16 + 40 * i; }
 
+/* an icon's label (lx - 2 .. lx + 8n + 2, iy + 15 .. iy + 25): every pixel once - the selection's (or the label's)
+ * background around the text, the text's cells in it */
+static void label_draw(int i)
+{
+    const char *l = icons[i].label;
+    int n = (int)strlen(l), lx = 40 - n * 4, iy = icon_y(i);
+    int bg = i == sel_icon ? pen(R_SELBG) : pen(R_LABELBG) == 255 ? pen(R_DESK) : pen(R_LABELBG);
+    dpy_fill(desk_id, lx - 2, iy + 15, n * 8 + 4, 1, bg);
+    dpy_fill(desk_id, lx - 2, iy + 16, 2, 8, bg);
+    dpy_fill(desk_id, lx + n * 8, iy + 16, 2, 8, bg);
+    dpy_fill(desk_id, lx - 2, iy + 24, n * 8 + 4, 1, bg);
+    dpy_text(desk_id, lx, iy + 16, i == sel_icon ? pen(R_SELFG) : pen(R_ICONFG), bg, 0, l, n);
+}
+
 void desk_draw(int x, int y, int w, int h)
 {
     dpy_clip(desk_id, x, y, w, h);
@@ -58,15 +72,7 @@ void desk_draw(int x, int y, int w, int h)
         int iy = icon_y(i), cx = 40;
         if (a >= 0 && art_img[a] > 0)
             dpy_image(desk_id, art_img[a], 0, 0, 24, 12, cx - 12, iy);
-        const char *l = icons[i].label;
-        int n = (int)strlen(l), lx = cx - n * 4;
-        int bg = pen(R_LABELBG) == 255 ? pen(R_DESK) : pen(R_LABELBG);
-        if (i == sel_icon)
-            dpy_fill(desk_id, lx - 2, iy + 15, n * 8 + 4, 10, pen(R_SELBG));
-        else if (pen(R_LABELBG) != 255)
-            dpy_fill(desk_id, lx - 2, iy + 15, n * 8 + 4, 10, bg);
-        dpy_text(desk_id, lx, iy + 16, i == sel_icon ? pen(R_SELFG) : pen(R_ICONFG), i == sel_icon ? pen(R_SELBG) : bg,
-                 0, l, n);
+        label_draw(i);
     }
     dpy_clip(desk_id, 0, 0, 0, 0);
     dpy_flush();
@@ -103,9 +109,12 @@ void desk_event(const struct dpyev *e)
     } else
         last_icon = hitn;
     last_click = now;
-    if (sel_icon != hitn) {
+    if (sel_icon != hitn) {             /* the two labels that change, nothing else */
+        int old = sel_icon;
         sel_icon = hitn;
-        desk_draw(0, 0, 640, 256);
+        if (old >= 0) label_draw(old);
+        if (hitn >= 0) label_draw(hitn);
+        dpy_flush();
     }
 }
 
@@ -119,10 +128,8 @@ static void about_draw(void)
     if (sys_update(UPD_INFO, (u32)&u, sizeof u) < 0) strcpy(u.kver, "?");
     u.kver[15] = 0;
     sprintf(l[0], "Zenix %s", u.kver);
-    u32 zi[7], mi[4] = { 0, 0, 0, 0 };
-    u32 a = sys3(93, 0, (u32)zi, sizeof zi) == 0 ? zi[2] : 0;
-    sprintf(l[1], "%s, %s", a & 0x80 ? "68060" : a & 0x08 ? "68040" : a & 0x04 ? "68030" : "68020",
-            depth >= 4 ? "AGA" : "OCS/ECS");
+    u32 mi[4] = { 0, 0, 0, 0 };
+    sprintf(l[1], "%s, %s", cpu_name(), depth >= 4 ? "AGA" : "OCS/ECS");
     sys_meminfo(mi);
     sprintf(l[2], "Chip %uK free", mi[0] >> 10);
     sprintf(l[3], "Fast %uK free", mi[1] >> 10);

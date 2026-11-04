@@ -22,6 +22,8 @@
 
 struct bm scr;
 int use_blit;
+u32 nblits, npix, nglyphs, ncopies;              /* DPY_STAT's counters: blits started, pixels drawn (a rectangle once, every
+                                         * plane), glyphs drawn */
 u32 chip_used, chip_budget = 256u << 10;
 
 /* the blitter's busy bit, read twice (the first read may come before the blit starts); a blit of a screen takes tens
@@ -171,6 +173,7 @@ static void blit_rect(struct bm *b, const struct rect *r, int plane, u8 mt)
         bptr(0x048, p);
         bptr(0x054, p);
         BLTSIZE = (u16)((k & 1023) << 6 | W);
+        nblits++;
         p += (u32)k * b->stride;
         h -= k;
     }
@@ -193,6 +196,7 @@ void bm_fill(struct bm *b, const struct rect *rr, int pen)
     struct rect r = *rr;
     if (!b->p || !clip_bm(b, &r))
         return;
+    npix += (u32)(r.x1 - r.x0) * (u32)(r.y1 - r.y0);
     for (int k = 0; k < b->depth; k++) {
         int on = pen >> k & 1;
         if (use_blit)
@@ -262,6 +266,51 @@ static void blit_copy(struct bm *s, int sx, int sy, struct bm *d, const struct r
     bptr(0x048, dp);
     bptr(0x054, dp);
     BLTSIZE = (u16)((h & 1023) << 6 | W);
+    nblits++;
+}
+/* every plane at once, unshifted: an interleaved bitmap's lines of all planes follow each other bpr apart, so the
+ * rectangle is one block of h x depth lines. On whole words B to D only (half the bus slots of A, B, C, D); with
+ * edges inside a word the edges masked (A from BLTADAT through the first and last word masks) and C kept there */
+static void blit_block(struct bm *s, int sx, int sy, struct bm *d, const struct rect *r, int desc);
+static void blit_whole(struct bm *s, int sx, int sy, struct bm *d, const struct rect *r, int desc)
+{
+    int m0 = (r->x0 + 15) & ~15, m1 = r->x1 & ~15;
+    if (((r->x0 & 15) || (r->x1 & 15)) && m1 - m0 >= 32 && (s != d || sx == r->x0)) {
+        /* the whole words B to D, the two edge words masked (three blits: only where none reads what another wrote -
+         * another bitmap, or a move straight up or down) */
+        struct rect mid = { (s16)m0, r->y0, (s16)m1, r->y1 }, le = { r->x0, r->y0, (s16)m0, r->y1 },
+                    re = { (s16)m1, r->y0, r->x1, r->y1 };
+        blit_block(s, sx + (m0 - r->x0), sy, d, &mid, desc);
+        if (le.x1 > le.x0) blit_block(s, sx, sy, d, &le, desc);
+        if (re.x1 > re.x0) blit_block(s, sx + (m1 - r->x0), sy, d, &re, desc);
+        return;
+    }
+    blit_block(s, sx, sy, d, r, desc);
+}
+static void blit_block(struct bm *s, int sx, int sy, struct bm *d, const struct rect *r, int desc)
+{
+    int w0 = r->x0 >> 4, w1 = (r->x1 - 1) >> 4, W = w1 - w0 + 1, n = (r->y1 - r->y0) * d->depth;
+    int edges = (r->x0 & 15) || (r->x1 & 15);
+    u16 fw = W == 1 ? (u16)(fmask(r->x0) & lmask(r->x1)) : fmask(r->x0), lw = W == 1 ? fw : lmask(r->x1);
+    const u8 *sp = s->p + (u32)sy * s->stride + (u32)(sx >> 4) * 2;
+    u8 *dp = d->p + (u32)r->y0 * d->stride + (u32)w0 * 2;
+    if (desc) {
+        sp += (u32)(n - 1) * s->bpr + (u32)(W - 1) * 2;
+        dp += (u32)(n - 1) * d->bpr + (u32)(W - 1) * 2;
+    }
+    blit_idle();
+    BLTCON0 = edges ? 0x07CA : 0x05CC;  /* D = AB + ~AC, or D = B */
+    BLTCON1 = (u16)(desc ? 2 : 0);
+    BLTAFWM = edges ? (desc ? lw : fw) : 0xFFFF;
+    BLTALWM = edges ? (desc ? fw : lw) : 0xFFFF;
+    BLTADAT = 0xFFFF;
+    BLTBMOD = (u16)(s->bpr - (u32)W * 2);
+    BLTCMOD = BLTDMOD = (u16)(d->bpr - (u32)W * 2);
+    bptr(0x04C, sp);
+    bptr(0x048, dp);
+    bptr(0x054, dp);
+    BLTSIZE = (u16)((n & 1023) << 6 | W);
+    nblits++;
 }
 void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr)
 {
@@ -274,10 +323,18 @@ void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr)
     sy += r.y0 - dr->y0;
     if (sx < 0 || sy < 0 || sx + (r.x1 - r.x0) > s->w || sy + (r.y1 - r.y0) > s->h)
         return;                         /* never read outside the source */
+    npix += (u32)(r.x1 - r.x0) * (u32)(r.y1 - r.y0);
+    if (d == &scr)
+        ncopies++;
     int depth = s->depth < d->depth ? s->depth : d->depth;
     int same = s == d, after = same && (r.y0 > sy || (r.y0 == sy && r.x0 > sx));
     int sh = (r.x0 & 15) - (sx & 15);
     int bl = use_blit && r.y1 - r.y0 <= 1024 && ((!after && sh >= 0) || (after && sh == 0));
+    if (bl && sh == 0 && depth == s->depth && depth == d->depth && s->bpr == d->bpr && s->stride == d->stride &&
+        (r.y1 - r.y0) * depth <= 1024) {
+        blit_whole(s, sx, sy, d, &r, after);    /* every plane in one blit */
+        return;
+    }
     for (int k = 0; k < depth; k++) {
         if (bl)
             blit_copy(s, sx, sy, d, &r, k, after);
@@ -335,17 +392,39 @@ void bm_text(struct bm *b, int x, int y, const u8 *glyph, int fg, int bg, int at
     if (attr & TA_INV) { int t = fg; fg = bg; bg = t; }
     if (use_blit)
         blit_idle();
+    nglyphs++;
+    npix += (u32)(c.x1 - c.x0) * (u32)(c.y1 - c.y0);
     int sh = x & 7, bx = x >> 3;
+    if (!sh && c.x0 == x && c.x1 == x + 8) {    /* a whole cell on an 8-pixel column (a terminal's): a byte a plane */
+        u8 m1[4], m2[4];
+        for (int k = 0; k < b->depth && k < 4; k++) {
+            int f = fg >> k & 1, bk = bg >> k & 1;
+            m1[k] = f != bk ? 0xFF : 0;
+            m2[k] = bk ? 0xFF : 0;
+        }
+        u8 *l = b->p + (u32)c.y0 * b->stride + (u32)bx;
+        for (int row = c.y0 - y; row < c.y1 - y; row++, l += b->stride) {
+            u8 g = glyph[row];
+            if (attr & TA_BOLD)
+                g = (u8)(g | g >> 1);
+            if ((attr & TA_UNDER) && row == 7)
+                g = 0xFF;
+            u8 *q = l;
+            for (int k = 0; k < b->depth; k++, q += b->bpr)
+                *q = (u8)((g & m1[k]) ^ m2[k]);
+        }
+        return;
+    }
+    u16 cm = 0;                         /* the bits of the cell inside the clip, over the two bytes: the same each row */
+    for (int px = c.x0; px < c.x1; px++)
+        cm |= (u16)(0x8000 >> (px - (bx << 3)));
     for (int row = c.y0 - y; row < c.y1 - y; row++) {
         u8 g = glyph[row];
         if (attr & TA_BOLD)
             g = (u8)(g | g >> 1);
         if ((attr & TA_UNDER) && row == 7)
             g = 0xFF;
-        /* the bits of the cell inside the clip: a 16-bit window over the two bytes */
-        u16 gw = (u16)(g << (8 - sh)), cm = 0;
-        for (int px = c.x0; px < c.x1; px++)
-            cm |= (u16)(0x8000 >> (px - (bx << 3)));
+        u16 gw = (u16)(g << (8 - sh));
         u8 *l = b->p + (u32)(y + row) * b->stride;
         for (int k = 0; k < b->depth; k++, l += b->bpr) {
             int f = fg >> k & 1, bk = bg >> k & 1;
