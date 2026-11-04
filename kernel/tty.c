@@ -651,14 +651,12 @@ long ptm_write(int i, const void *buf, u32 n, int nonblock)
     const u8 *s = buf;
     u32 done = 0;
     for (;;) {
-        if (t == dead)
-            return -EIO;
+        if (t == dead || (!t->sopen && !ctty_users(i)))
+            return done ? (long)done : -EIO;    /* nobody on the slave: nobody will read (Linux's master write) */
         while (done < n && q_room(t) >= need_of(t, s[done]))
             input(i, s[done++]);
         if (done == n)
             return (long)n;
-        if (!t->sopen && !ctty_users(i))
-            return done ? (long)done : -EIO;    /* the session ended: nobody will read (Linux's master write) */
         if (nonblock)
             return done ? (long)done : -EAGAIN;
         if (current->killed)
