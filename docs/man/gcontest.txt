@@ -1,0 +1,38 @@
+GCONTEST(1)		Zenix manual
+
+NAME
+    gcontest - test a console handed to a display server
+
+SYNOPSIS
+    gcontest ack|noack [SECONDS]
+    gcontest keys CODE...
+
+DESCRIPTION
+    A test program for DESIGN D38 step 2 (SYS_console CON_GRAB and
+    CON_GACK), run as root by tools/gcon-test.sh. It does what the display
+    server does with the console it is started on (its descriptor 0): it
+    hands the kernel a Copper list of its own (one blank bitplane: the
+    whole screen green; with no bitplane at all FS-UAE shows no sprite)
+    and a pointer (sprite 0, a 16 x 16 red square, its hot spot at the
+    top left), then writes every record of the ring as a line:
+
+        gcontest: grabbed fd N WIDTHxHEIGHT depth D chips C
+        gcontest: key 0xCODE qual 0xQUAL ch B0 B1
+        gcontest: pointer X Y qual 0xQUAL
+        gcontest: release N        (and with ack: gcontest: ack N -> 0)
+        gcontest: acquire
+        gcontest: lost N
+
+    ack answers every request to let go (CON_GACK); noack never does, so
+    the kernel switches after its 1 s deadline and says so in the log. It
+    ends after SECONDS (default 60) or at the q key, giving the console
+    back.
+
+    keys types the raw key codes (hexadecimal; bit 7 set for a key going
+    up) through CON_INPUT on descriptor 0, as the keyboard would: 66 51 d1
+    e6 is Amiga+F2.
+
+NOTES
+    Root only. A second gcontest while one has the console is refused
+    (EBUSY). Its output is meant for a file: the console it writes to is in
+    graphics mode while it runs.

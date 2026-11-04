@@ -44,7 +44,7 @@ zenix/
 | The network's kernel part (DESIGN D19) | `sock.c` (sockets: the calls to netd and the waiting), `drv.c` (the network's drivers: claims, DMA memory, quiesce, their blocks to netd), `netproto.h` (the protocol), `random.c` (the entropy pool) |
 | System calls | `syscall.c` (the TRAP #0 table, every pointer checked), `errno.h` |
 | Files | `vfs.c` (open files, pipes, the mount table, devices), `ext2.c` (the ext2 code the `fsd` server runs) |
-| Terminal and screen | `tty.c` (line discipline, consoles), `term.c` (the ANSI/VT100 parser), `gfx.c` (Copper and blitter drawing) |
+| Terminal and screen | `tty.c` (line discipline, consoles, pseudo-terminals), `term.c` (the ANSI/VT100 parser), `gfx.c` (Copper and blitter drawing), `gcon.c` (a console handed to the display server, DESIGN D38) |
 | Input | `kbd.c` (keyboard, keymaps, console keys), `input.c` (mouse and joystick) |
 | Disks | `blk.c` (picks the disk), `ide.c` (Gayle and A4000 IDE), `emmc.c` (the Pi's SD card), `a3000.c` (A3000 SCSI), `floppy.c` |
 | Other hardware | `serial.c` (serial port, kernel log, `/dev/ttyS0`), `rtc.c` (battery clock), `audio.c` (the bell) |

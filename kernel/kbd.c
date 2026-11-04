@@ -32,6 +32,7 @@
  * comes from the same generator. */
 
 static u8 shift_down, ctrl_down, amiga_down, alt_down, caps_lock;
+static u16 gmods;                       /* D38: the modifiers held, left and right apart (GQ_* bits) */
 
 struct keymap {
     char name[4];
@@ -179,15 +180,39 @@ static int special_key(u8 code)
     return 0;
 }
 
-/* a key going down (also again from kbd_work while it is held): translate and hand it to the tty */
-static void key_down(u8 code)
+u16 kbd_qual(void) { return (u16)(gmods | (caps_lock ? GQ_CAPS : 0)); }
+
+/* DESIGN D38 step 2: the character a key gives by the keymap (Shift, Caps Lock, Alt, Ctrl as for a tty) as UTF-8 into
+ * ch[4] (0-filled), for the display server's ring; cursor and function keys give none (the server has the raw code) */
+static u8 key_char(u8 code);
+static void key_chars(u8 code, u8 *ch)
 {
-    if (special_key(code))
-        return;
+    u8 c = key_char(code);
+    ch[0] = ch[1] = ch[2] = ch[3] = 0;
+    if (c >= 0xA0) {
+        ch[0] = (u8)(0xC0 | c >> 6);
+        ch[1] = (u8)(0x80 | (c & 0x3F));
+    } else if (c < 0x80)
+        ch[0] = c;
+}
+
+/* a key for the display server's ring (going down with its character, or up) */
+static void gkey(u8 code, u16 rep)
+{
+    u8 ch[4];
+    if (code & 0x80)
+        ch[0] = ch[1] = ch[2] = ch[3] = 0;
+    else
+        key_chars(code, ch);
+    gcon_key(code, (u16)(kbd_qual() | rep), ch);
+}
+
+/* a key going down (also again from kbd_work while it is held): translate and hand it to the tty */
+/* the keymap's byte for a key with the modifiers held (Latin-1; Ctrl-letter a control byte), 0 for none */
+static u8 key_char(u8 code)
+{
     u8 c = 0;
-    if (code == 0x41 && (tty_getmode(con_cur) & TTY_RAW))
-        c = 127;                                    /* Backspace is DEL for raw-mode programs */
-    else if (code < 0x40) {
+    if (code < 0x40) {
         int shift = shift_down;
         if (caps_lock && (kmap->caps[code >> 3] >> (code & 7) & 1))
             shift = !shift;                         /* Caps Lock: Shift on the letters only */
@@ -195,10 +220,19 @@ static void key_down(u8 code)
                      : (shift ? kmap->shifted[code] : kmap->normal[code]);
     } else if (code < 0x68)
         c = (u8)keyspecial[code - 0x40];
-    if (!c)
-        return;
     if (ctrl_down && (c & 0x40) && c < 0x80)
         c &= 0x1F;                      /* Ctrl-letter, incl. Ctrl-C */
+    return c;
+}
+
+static void key_down(u8 code)
+{
+    if (special_key(code))
+        return;
+    u8 c = code == 0x41 && (tty_getmode(con_cur) & TTY_RAW) ? 127 : key_char(code);    /* Backspace is DEL for
+                                                                                        * raw-mode programs */
+    if (!c)
+        return;
     if (c >= 0x80 && !term_eight(con_cur)) {    /* DESIGN D28 10: the keymaps' Latin-1 letters typed as UTF-8 */
         if (c < 0xA0)
             return;                     /* 0x80-0x9F would be a C1 control: no keymap has one, dropped */
@@ -341,6 +375,7 @@ void kbd_zine(void)
 {
     rep_code = 0;
     shift_down = ctrl_down = alt_down = amiga_down = 0;
+    gmods = 0;
     rw_count = 0;
     kq_tail = kq_head;
     kbd_init();
@@ -391,6 +426,7 @@ static void key_code(u8 code)
         if (code == 0xF9 || code == 0xFA) {     /* lost sync / its buffer overflowed: key-up codes may be lost */
             rep_code = 0;
             shift_down = ctrl_down = alt_down = amiga_down = 0;
+            gmods = 0;
             kprintf("kbd: the keyboard reports %s; held keys forgotten\n",
                     code == 0xF9 ? "a lost sync" : "its buffer overflowed (keys lost)");
         } else if (code == 0xFC)
@@ -399,21 +435,48 @@ static void key_code(u8 code)
     }
     int up = code & 0x80;
     code &= 0x7F;
+    if (code >= 0x60 && code <= 0x67 && code != 0x62) {         /* D38: left and right apart, for the display server */
+        static const u16 gq[8] = { GQ_LSHIFT, GQ_RSHIFT, 0, GQ_CTRL, GQ_LALT, GQ_RALT, GQ_LAMIGA, GQ_RAMIGA };
+        gmods = (u16)(up ? gmods & ~gq[code - 0x60] : gmods | gq[code - 0x60]);
+    }
     switch (code) {
     case 0x60: case 0x61:               /* shift */
         shift_down = (u8)!up;
-        return;
+        break;
     case 0x62:                          /* Caps Lock: the keyboard sends "down" when its LED goes on, "up" when off */
         caps_lock = (u8)!up;
-        return;
+        break;
     case 0x63:                          /* control */
         ctrl_down = (u8)!up;
-        return;
+        break;
     case 0x64: case 0x65:               /* left / right Alt */
         alt_down = (u8)!up;
-        return;
+        break;
     case 0x66: case 0x67:               /* left / right Amiga */
         amiga_down = (u8)!up;
+        break;
+    default:
+        goto key;
+    }
+    if (gcon_active())
+        gkey((u8)(code | up), 0);       /* D38: the server sees the modifiers' own codes too */
+    return;
+key:
+    if (gcon_active()) {                /* D38 step 2: a console in graphics mode: every key but the console switches
+                                         * to the display server's ring; the keymap's character with it */
+        if (!up && amiga_down && code >= 0x50 && code <= 0x59) {
+            rep_code = 0;
+            con_switch(code - 0x50 + 1);
+            return;
+        }
+        if (up) {
+            if (code == rep_code)
+                rep_code = 0;
+        } else {
+            rep_code = code;
+            rep_at = ticks + KBD_REPEAT_DELAY;
+        }
+        gkey((u8)(code | up), 0);
         return;
     }
     if (up) {
@@ -481,7 +544,10 @@ void kbd_work(void)
     }
     if (rep_code && (s32)(ticks - rep_at) >= 0) {
         rep_at = ticks + KBD_REPEAT_RATE;
-        key_down(rep_code);
+        if (gcon_active())
+            gkey(rep_code, GQ_REPEAT);  /* D38: a repeat is a key going down again, marked */
+        else
+            key_down(rep_code);
     }
     if (kbd_reset_state == KRS_HELD && !rw_told) {
         rw_told = 1;
@@ -496,5 +562,6 @@ void kbd_work(void)
         kq_lost_told = lost;
         rep_code = 0;                   /* a lost "key up" must not leave a key repeating or a modifier held */
         shift_down = ctrl_down = alt_down = amiga_down = 0;
+        gmods = 0;
     }
 }

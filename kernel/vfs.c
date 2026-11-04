@@ -50,6 +50,8 @@ __attribute__((noinline)) void file_close(struct file *f)
         serdev_close();
     if (f->type == FT_SOCK)
         sock_release(f->ino);               /* NET_CLOSE while its epoch lives (D19 rule 11) */
+    if (f->type == FT_GCON)
+        gcon_close(f);                      /* D38: the console is the kernel's again */
     if (f->type == FT_TTY || f->type == FT_PTM) {
         int t = f->type;
         f->type = FT_NONE;                  /* first: a hang-up's signals see the file gone (D20 7.2) */
@@ -152,6 +154,8 @@ u16 vfs_poll(struct file *f)
         return tty_poll((int)f->off);
     case FT_PTM:
         return ptm_poll((int)f->off);
+    case FT_GCON:
+        return gcon_poll(f);
     case FT_SERIAL:
         return serdev_poll();
     case FT_PIPE_R:
@@ -1006,6 +1010,8 @@ long vfs_read(struct file *f, void *buf, u32 n)
         return tty_read((int)f->off, buf, n);
     case FT_PTM:
         return ptm_read((int)f->off, buf, n, (f->flags & O_NONBLOCK) != 0);
+    case FT_GCON:
+        return gcon_read(f, buf, n);
     case FT_PIPE_R:
         return pipe_read(f, buf, n);
     case FT_SERIAL:                         /* waits for at least one byte, then returns what has arrived */

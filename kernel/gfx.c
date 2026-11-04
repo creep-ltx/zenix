@@ -82,6 +82,9 @@ static const u8 boxes[3][8] = {
     { 0x00, 0xFE, 0x02, 0x02, 0x02, 0x02, 0xFE, 0x00 },
 };
 static int up;
+static int held;                        /* D38: a console is shown in graphics mode: its server's Copper list runs */
+#define DMAF_SPREN 0x0020               /* sprite DMA: on only while a server's Copper list (and its pointer) is shown */
+#define SPRCTL(i) REG16(0xDFF142 + 8 * (i))
 
 /* The 16 ANSI colours, 12 bits (on AGA with LOCT 0 each value fills the low nibbles too). Grey on black stays the
  * default text (colour 7 on 0); blue is lighter than VGA's so that it reads on black in Topaz. */
@@ -822,6 +825,8 @@ int gfx_set_colours(int colours)
         return colours ? -EINVAL : 1 << gfx_depth;
     if (!up)
         return -ENODEV;
+    if (held)
+        return -EBUSY;                  /* D38: a display server has the screen; its Copper list stays */
     if (d == 4 && !aga)
         d = 3;
     if (d == gfx_depth)
@@ -887,7 +892,39 @@ int gfx_set_colours(int colours)
     return 1 << d;
 }
 
-int gfx_up(void) { return up; }
+int gfx_up(void) { return up && !held; }
+int gfx_diwv(void) { return DIW_V; }
+int gfx_aga(void) { return aga; }
+void gfx_geom(u16 *w, u16 *h) { *w = 8 * STRIDE; *h = (u16)dlines; }
+
+/* DESIGN D38 step 2 (gcon.c): show a display server's Copper list (cop), or the kernel's again (0). The kernel's own
+ * blit ends first (the server may use the blitter from here); the Copper takes the new list at the next vertical
+ * blank (COP1LC is where it starts each frame). Back to the kernel: sprite DMA off and the eight sprites switched off
+ * (a sprite keeps showing its last data words otherwise), the display window as gfx_init set it, the plane pointers
+ * and colours written again at the next vertical blank; the caller draws the text again. */
+void gfx_hand(u32 c)
+{
+    if (!up)
+        return;
+    blit_wait();
+    u16 s = irq_save();
+    u32 l = c ? c : (u32)cop;
+    held = c != 0;
+    COP1LCH = (u16)(l >> 16);
+    COP1LCL = (u16)l;
+    if (c)
+        DMACON = DMAF_SETCLR | DMAF_SPREN;
+    else {
+        DMACON = DMAF_SPREN;
+        for (int i = 0; i < 8; i++)
+            SPRCTL(i) = 0;
+        DIWSTRT = (u16)((DIW_V << 8) | 0x81);
+        DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
+        hw_off = -1;
+        pal_dirty = 1;
+    }
+    irq_restore(s);
+}
 
 /* SYS_console CON_LINE (DESIGN D24 6.2), for the shown console (term_conop checked it): display line `line` of the
  * drawing window as one pen a pixel, and the display's facts, into the caller's struct uconline. Only "a line of
@@ -927,6 +964,14 @@ void gfx_panic(void)
 {
     if (!up)
         return;
+    if (held) {                         /* D38: a display server had the screen: the kernel's list, sprites off */
+        held = 0;
+        COP1LCH = (u16)((u32)cop >> 16);
+        COP1LCL = (u16)(u32)cop;
+        DMACON = DMAF_SPREN;
+        DIWSTRT = (u16)((DIW_V << 8) | 0x81);
+        DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
+    }
     sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable); no table work here */
     top = line_at(off);                 /* a fault inside set_off may have left top behind off */
     cop_point(off);

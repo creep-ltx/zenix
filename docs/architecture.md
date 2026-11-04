@@ -290,7 +290,9 @@ checked without hearing it).
 Polled from the 100 Hz tick: JOY0DAT's two 8-bit counters give mouse movement (accumulated until read, so nothing is
 lost between reads), CIA-A port A bits 6 and 7 the left button and the joystick fire button, POTGOR the right and
 middle buttons; a joystick in port 2 is decoded from JOY1DAT. `SYS_input` (74) copies out
-{dx, dy, buttons, joystick} and clears the movement; `input` prints it. No pointer, no events yet.
+{dx, dy, buttons, joystick} and clears the movement; `input` prints it. While a console is in graphics mode and shown
+(section 11, "Graphics mode") the tick takes the movement for the pointer instead (`input_take`): `SYS_input` then
+sees none.
 
 ### Floppy driver (`kernel/floppy.c`, `kernel/mfm.h`) - experimental
 
@@ -530,7 +532,8 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
   crashed or killed process is cleaned up without any cooperation from it.
 - Free-byte counters are O(1), so `free` and `SYS_meminfo` read them cheaply.
 - `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 16 at a time,
-  each at most `MEMALLOC_MAX` = 64 MB). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
+  each at most `MEMALLOC_MAX` = 64 MB; its second argument `MEMA_CHIP` asks for chip RAM, DESIGN D38: the display
+  server's screen; other bits answer 0). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
   refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
 - Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
   at least one header, a multiple of 16 and inside the range. A header that fails means something overwrote the heap:
@@ -1415,7 +1418,29 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   desktop features, ROADMAP phase 5). `init` keeps a `login` on every console that has been shown, like a getty:
   console 1 at boot, console N the first time it is shown (`con_switch` sees nobody whose controlling tty it is,
   sets a bit in `con_want` and readies init, which waits in `SYS_wait` with `WAIT_CONSOLE` - Linux's autovt does the
-  same), and a session that ends is followed by a new login. So a console costs memory only once it is used. **A
+  same), and a session that ends is followed by a new login. So a console costs memory only once it is used.
+  **Graphics mode** (`gcon.c`, DESIGN D38 step 2, Linux's `KD_GRAPHICS` with `VT_PROCESS`): `SYS_console` `CON_GRAB`
+  (root; the console named by a descriptor; `struct ucongrab`: the server's Copper list and sprite 0 in its chip RAM,
+  the list checked to end within 4,096 moves) hands one console to a display server and gives it a new descriptor.
+  While that console is shown the Copper runs the server's list (the kernel's own blit ends first; sprite DMA on),
+  `gfx_up()` is 0 so the kernel draws nothing (output to the console's tty still goes into its grid, and to the
+  serial port), and every key but Amiga+F1..F10 is a 16-byte record (`struct ugevent`: the raw code, the qualifiers
+  left and right apart with AmigaOS's `IEQUALIFIER` values, the keymap's character as UTF-8, the pointer, the tick)
+  in a 64-record ring the descriptor reads (`poll`: POLLIN); repeats are marked `GQ_REPEAT`. The keymap stays in the
+  kernel. **The pointer** is hardware sprite 0, the server's image: the 100 Hz tick takes the mouse's movement (two
+  hires pixels a count across, one line down, clamped to the screen) and writes the sprite's two control words, so
+  the pointer never freezes while the server or a disk is busy; kwork then puts a `GEV_POINTER` record in the ring
+  (merged into an unread one while the qualifiers are the same). **Switching away** (Amiga+F*n* or the serial hook)
+  puts `GEV_RELEASE` with a number in the ring; the server ends its blit, stops using the blitter and answers
+  `CON_GACK` with that number; then the kernel shows the text console. No answer within 1 s: kwork switches anyway
+  and logs "display: pid N did not let go of console C within 1 s: switched anyway". **Back again:** `GEV_ACQUIRE`;
+  the server's bitplanes were never touched. Two slots of the ring are kept for these two; a full ring drops input
+  and says how much with `GEV_LOST`. **The descriptor's last close** (also the server's end, or a kill) gives the
+  console back: the kernel's Copper list, sprite DMA off and the eight sprites switched off, the display window as at
+  boot, the text drawn again (from kwork when the close came with interrupts off). One console at a time (-EBUSY);
+  while one is grabbed `CON_COLOURS` and `ZINE_GO` answer -EBUSY, and a panic takes the screen back. In FS-UAE no
+  sprite shows unless the server's list fetches at least one bitplane (found with `gcontest`). Verified in FS-UAE by
+  `tools/gcon-test.sh` (screenshots, `gcontest`, docs/man/gcontest.txt). **A
   login steps aside** (the 2 MB diet, DESIGN D18): Zenix has no `exec`, so the shell is a new process, and only a
   process that has become the user can start it as the user; init's login (`login --init`) spawns the shell and then
   ends through `SYS_exit` with its second argument naming the shell, which `proc_handover` makes init's child first

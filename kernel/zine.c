@@ -115,8 +115,9 @@ static long go(const struct uzine_go *g)
 {
     if (!allowed())
         return -EPERM;
-    if (busy || upd_pa || (upd_flags & UPD_F_TRIAL))
-        return -EBUSY;                  /* a second session, or an update not yet confirmed (D15, D22 4.3) */
+    if (busy || upd_pa || (upd_flags & UPD_F_TRIAL) || gcon_grabbed())
+        return -EBUSY;                  /* a second session, an update not yet confirmed (D15, D22 4.3), or a console
+                                         * in graphics mode (D38: its server has the Copper) */
     if (!user_ok_wr(current, g->blob, g->blob_size) || !user_ok_wr(current, g->vol, g->vol_size) ||
         !user_ok_wr(current, g->blk, g->blk_size) || g->blob_size < ZINB_OFF + 12 || (g->blob & 3) || (g->blk & 3))
         return -EFAULT;
