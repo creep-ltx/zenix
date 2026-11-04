@@ -56,19 +56,23 @@ _start:
      * AllocAbs above did not get that area and the buffer reaches into it, it is given back and taken low, as without a RAM disk. */
     tst.l   0x74(%a3)
     beq.s   lowbuf
+    /* KLOG_AREA_SIZE more than needed: exec may hold part of the log's area (then the AllocAbs failed) and leave the rest free; the
+     * buffer is the block's lower part, so it ends at least that far below the top. Not given back: the OS dies */
     move.l  %d6,%d0
+    add.l   #KLOG_AREA_SIZE,%d0
     move.l  #0x40002,%d1
     jsr     -198(%a6)               /* AllocMem */
     tst.l   %d0
     beq.s   lowbuf
     move.l  %d0,%a4
-    add.l   %d6,%d0                 /* its end */
+    add.l   %d6,%d0                 /* the buffer's end */
     move.l  62(%a6),%d1             /* MaxLocMem */
     sub.l   #KLOG_AREA_SIZE,%d1
     cmp.l   %d1,%d0
     bls.s   havebuf
     move.l  %a4,%a1
     move.l  %d6,%d0
+    add.l   #KLOG_AREA_SIZE,%d0
     jsr     -210(%a6)               /* FreeMem */
 lowbuf:
     move.l  %d6,%d0
