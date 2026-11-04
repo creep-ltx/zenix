@@ -119,6 +119,12 @@ static inline int sys_sync(void) { return sys3(44, 0, 0, 0); }
 #define TTY_NOSIG 2
 static inline int sys_ttymode(int flags) { return sys3(45, (u32)flags, 0, 0); }
 static inline int sys_ttyinfo(void) { return sys3(46, 0, 0, 0); }   /* rows << 16 | columns */
+/* DESIGN D20 7.2: a terminal's settings, named by a descriptor (a console, a pty's slave or master) */
+#define TTYC_GWINSZ 1           /* arg struct winsize *: its size (a console's: the screen's) */
+#define TTYC_SWINSZ 2           /* arg struct winsize *: a pty's new size (SIGWINCH to its foreground on a change) */
+#define TTYC_OWNER  3           /* arg a uid: root only, a pty: who may open its slave */
+#define TTYC_SCTTY  4           /* arg 0: this tty becomes the caller's controlling tty, the caller its session leader */
+static inline int sys_ttyctl(int fd, int op, u32 arg) { return sys3(95, (u32)fd, (u32)op, arg); }
 static inline int sys_envset(const char *block, u32 len) { return sys3(47, (u32)block, len, 0); }
 static inline int sys_envget(char *block, u32 max) { return sys3(48, (u32)block, max, 0); }
 static inline int sys_dup(int fd) { return sys3(49, (u32)fd, 0, 0); }

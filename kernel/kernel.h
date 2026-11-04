@@ -166,6 +166,16 @@ void kfree(void *p);
 #define COLS  80
 #define TROWS_MAX 32                    /* text rows on a PAL display; NTSC shows 25 (trows, measured at boot) */
 #define NCONS 10                        /* virtual consoles /dev/tty1 .. /dev/tty10 (Amiga+F1..F10) */
+/* DESIGN D20 7.2, D38 step 1: pseudo-terminals. /dev/ptmx opens the master of a free one, /dev/pts/N (N 0..NPTY-1) is
+ * its slave; ttys 1..NCONS are the consoles, PTY_FIRST + N the ptys (a slave's st_ino is its tty number, a master's
+ * PTY_MINO + N: never 1..NCONS). Allocated at the master's open, freed when the master, every slave descriptor and
+ * every process naming it as its controlling tty are gone */
+#define NPTY 8
+#define PTY_FIRST (NCONS + 1)
+#define NTTYS (NCONS + 1 + NPTY)        /* tty numbers 1 .. NTTYS - 1 (0: none) */
+#define PTY_MINO 0x100
+#define PTY_ROWS 24                     /* a new pty's size until its master sets one */
+#define PTY_COLS 80
 extern int trows;
 int gfx_font_init(u32 gfxbase);
 int gfx_init(void);
@@ -318,7 +328,7 @@ union zhdr { struct zexe v1; struct zex2 v2; };
 /* files, pipes, tty (vfs.c, tty.c) */
 #define NFD   16
 #define NFILE 64
-enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM, FT_SOCK };   /* FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19; FT_SOCK: a socket (ino: its ksock), D19 */
+enum { FT_NONE = 0, FT_INODE, FT_TTY, FT_PIPE_R, FT_PIPE_W, FT_NULL, FT_ZERO, FT_SERIAL, FT_KLOG, FT_RANDOM, FT_SOCK, FT_PTM };   /* FT_PTM: a pty's master (off: its tty number), D20 7.2; FT_KLOG: a service's output, into the kernel log (D11); FT_RANDOM: /dev/urandom (off 0) and /dev/random (off 1), D19; FT_SOCK: a socket (ino: its ksock), D19 */
 struct pipe {
     u8 buf[2048];
     u16 rd, wr, count;
@@ -503,7 +513,7 @@ struct proc {                   /* start.S relies on the first three: */
     u8 blevel;                  /* NICE_LEVEL(nice), kept so that no path divides */
     u8 prio;                    /* effective level (0 highest): blevel, or a better client's while serving it */
     struct umsg *wait_msg;      /* P_MSG as a client: the request in flight */
-    u8 ctty;                    /* controlling tty (console 1..NCONS): the console of fd 0 at spawn, else the parent's */
+    u8 ctty;                    /* controlling tty (1..NTTYS-1: a console or a pty): the tty of fd 0 at spawn, else the parent's */
     u8 wait_con;                /* in wait with WAIT_CONSOLE: a console switch posts it EV_CON */
     int wait_port;              /* P_MSG: as a server the port being listened on, as a client the port called */
     char name[16];
@@ -770,6 +780,20 @@ int tty_fgpid(int tty);                 /* the foreground's pid when it is a sin
 int tty_in_fg(int tty, const struct proc *p);   /* p is the tty's foreground (its group, or it), or nobody is set */
 u16 tty_poll(int tty);                  /* D16: POLLIN when a read would not wait (registers the caller); POLLOUT */
 int tty_of(const struct proc *p);
+/* DESIGN D20 7.2: pseudo-terminals (tty.c) */
+long pty_alloc(void);                   /* /dev/ptmx: a free pty, owned by the caller -> its tty number, or -EAGAIN/-ENOMEM */
+long pty_slave_ok(int n);               /* /dev/pts/n may be opened by the caller -> its tty number, or -errno */
+void tty_opened(int type, int tty);     /* a new file of type FT_TTY or FT_PTM names this tty: counted */
+void tty_closed(int type, int tty);     /* its last close (the master's hangs the slave up) */
+void tty_gc(int tty);                   /* a pty nobody names any more is freed */
+long ptm_read(int tty, void *buf, u32 n, int nonblock);
+long ptm_write(int tty, const void *buf, u32 n, int nonblock);
+u16 ptm_poll(int tty);
+int tty_size(int tty);                  /* rows << 16 | columns: a console's screen, or a pty's size */
+long tty_ctl(struct file *f, u32 op, u32 arg);   /* SYS_ttyctl */
+void tty_spawned(struct proc *p, int parent_ctty);   /* the session leader rule (D20 7.2) */
+void tty_lead_move(int from_pid, int to_pid);  /* D18's step-aside: the leader's role moves with the child */
+void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, an unused pty is freed */
 
 /* syscalls: TRAP #0, number in d0, args d1-d3, result in d0 */
 #define SYS_exit    1    /* status; a2 (DESIGN D18): a child's pid, made the parent's child first (0: none) */
@@ -932,6 +956,14 @@ int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes tak
 #define SYS_groups      94   /* op, buffer, count */
 #define GROUPS_GET      0
 #define GROUPS_SET      1
+/* DESIGN D20 7.2 (frozen): a terminal's settings, named by a descriptor (a console, a pty's slave or master) */
+#define SYS_ttyctl      95   /* fd, op (TTYC_*), arg -> 0 or -errno (-ENOTTY: not a terminal) */
+#define TTYC_GWINSZ     1    /* arg struct uwinsize *: its size (a console's: the screen's) */
+#define TTYC_SWINSZ     2    /* arg struct uwinsize *: a pty's new size; a change sends SIGWINCH to its foreground */
+#define TTYC_OWNER      3    /* arg a uid: root only, a pty: who may open its slave (login sets the user) */
+#define TTYC_SCTTY      4    /* arg 0: the caller's controlling tty becomes this one and the caller its session leader,
+                              * if nobody (else) living leads it (-EPERM); TIOCSCTTY's subset, used by libz's setsid */
+struct uwinsize { u16 row, col, xpixel, ypixel; };   /* Linux's struct winsize (frozen) */
 long zine_sys(u32 op, u32 a, u32 b);
 struct zine_range;
 u32 mem_ranges(const struct zine_range **r);    /* D29: mem.c's pool ranges, for ZINE's blob */

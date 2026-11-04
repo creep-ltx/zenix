@@ -127,3 +127,19 @@ u32 zu8prev(const char *s, u32 pos);            /* where the character before po
 int zu8width(u32 c);                            /* a code point's columns: -1, 0, 1 or 2 */
 int zu8cols(const char *s, u32 n);              /* the columns of n bytes */
 u32 zu8fit(const char *s, u32 n, int cols);     /* the bytes of whole characters that fit in cols columns */
+
+/* pseudo-terminals (DESIGN D20 7.2, user/zpty.c): /dev/ptmx and /dev/pts/N; the window size through ioctl (zsock.c) */
+#ifndef TIOCGWINSZ
+struct winsize { unsigned short ws_row, ws_col, ws_xpixel, ws_ypixel; };   /* Linux's, the kernel's struct uwinsize */
+#define TIOCSCTTY  0x540E               /* Linux's numbers (libz's own, not a system call's) */
+#define TIOCGWINSZ 0x5413
+#define TIOCSWINSZ 0x5414
+#endif
+int ioctl(int fd, unsigned long req, ...);      /* TIOCGWINSZ, TIOCSWINSZ, TIOCSCTTY; FIONREAD, FIONBIO on a socket */
+int posix_openpt(int flags);                    /* a new pty's master (O_RDWR, O_NONBLOCK) */
+int grantpt(int fd);                            /* nothing to do: 0 on a master */
+int unlockpt(int fd);
+char *ptsname(int fd);                          /* "/dev/pts/N" (a static buffer), 0 if fd is no master */
+int ptsname_r(int fd, char *buf, size_t len);   /* 0, or the error number */
+int openpty(int *amaster, int *aslave, char *name, const void *termp, const struct winsize *winp);
+int setsid(void);                               /* own group; leader of fd 0's terminal if nobody leads it */
