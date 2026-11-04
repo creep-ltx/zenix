@@ -32,8 +32,17 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
   (`-msoft-float`).
 - Memory: **chip** RAM (reachable by the custom chips: display, audio, disk DMA) and **fast** RAM are separate
   pools. Fast is preferred; chip is used when asked for (`MEM_CHIP`) or when there is nothing else.
-- Caches: instruction cache on. The data cache stays off, because without an MMU chip RAM cannot be marked
-  cache-inhibited and the cache would disagree with DMA. 68040/060 get a `cpusha bc` (0xF4F8: push and invalidate
+- Caches (`kernel/cache.c`, DESIGN D37, docs/d37-data-cache.md): instruction cache on. **The data cache is on only
+  on a real 68040/68060 with fast RAM above the first 16 MB**: with the MMU off, `DTT0` makes the first 16 MB (chip
+  RAM, every chip and I/O of the classic Amiga, Zorro II) inhibited and serialized/precise, `DTT1` the smallest
+  aligned block over the fast RAM copyback (write-through with zenixboot `DCACHE=WT`), the 060's `TCR` default
+  inhibited for everything else (a 040 caches the rest write-through by its fixed default, so it keeps its data cache
+  off when a board that is not RAM lies above 16 MB); a 060 gets its store buffer, branch cache and superscalar
+  dispatch (`PCR` `ESS`). A boot self-test switches it off again if chip RAM reads back cached. Off, as before, on
+  68020/68030 (no MMU to keep chip RAM out), under Emu68 (coherent with the chips by itself), with `DCACHE=OFF`
+  (bootinfo `+0x84` `kopts`) or the left mouse button held at boot; the boot log says which. `zine_enter` turns the
+  data cache off and pushes before the hand-over; `machine_reset` pushes and clears the cache registers before
+  `RESET`; `DRV_CACHE` pushes a DMA region's lines. 68040/060 get a `cpusha bc` (0xF4F8: push and invalidate
   both caches) before the cache is enabled - never `cinva`, which on Emu68 and on a copyback 040/060 throws away
   unwritten data. **Every place that writes code the CPU will run flushes the instruction cache first**
   (`cache_flush_code` in `start.S`: CACR bit 3 on 020/030 with the enable bits kept, `cpusha bc` on 040/060 and
@@ -137,7 +146,8 @@ it. Only the filesystems and the disk are servers (DESIGN.md, "Where the decisio
    the start rule (`zenix`, a `zenix.new` with the state's SHA-256, `zenix.old`), installs a bundle's kernel in the
    careful FFS order (each step followed by `ACTION_FLUSH`, DoPkt to `GetDeviceProc("PROGDIR:")`'s port, which FFS
    answers once its buffers are written), keeps `Zenix/state`, puts the bundle (loaded fast RAM first, 16-aligned with
-   16 bytes free before it) into bootinfo `+0x78`/`+0x7C` and the rollback flag into `+0x80`, and follows the trial
+   16 bytes free before it) into bootinfo `+0x78`/`+0x7C` and the rollback flag into `+0x80` (and `DCACHE=` into
+   `+0x84`, D37, whatever the layout), and follows the trial
    through the update note and the previous boot's klog header (evidence: reason PANIC, or RUNNING without
    confirmation, in a boot after its last handover; a cold start is none).
 3. The kernel image is a **ZEXE** file (see below). It relocates itself, clears its BSS, checks the CPU and calls

@@ -283,9 +283,9 @@ cpu_idle:
     stop    #0x2000
     rts
 
-/* void cache_enable(int is040plus): instruction cache only. There is no
- * MMU to mark chip RAM cache-inhibited, so the data cache stays off
- * (DMA and copy-back would disagree).
+/* void cache_enable(int is040plus): instruction cache only, the data cache
+ * off: the 020/030 always (no MMU to keep chip RAM out of it), Emu68, and a
+ * 040/060 where kernel/cache.c does not turn its data cache on (D37).
  * 020/030: CACR bit 0 = enable I-cache, bit 3 = clear it.
  * 040/060: push and invalidate both caches with CPUSHA BC (0xF4F8), then
  * CACR bit 15 = enable I-cache. Never CINVA (0xF4D8) on the data cache: on
@@ -300,6 +300,171 @@ cache_enable:
 1:  .word   0xF4F8                  /* cpusha bc */
     move.l  #0x00008000,%d0
     movec   %d0,%cacr
+    rts
+
+/* DESIGN D37 (docs/d37-data-cache.md section 5): the 68040/68060's cache registers, for kernel/cache.c. Every one runs
+ * in supervisor mode with interrupts masked. The control registers are written by their MOVEC encodings (as zenixboot
+ * and ZINE's blob do), with the illegal-instruction and line-F vectors caught: an EC/LC part may lack one. */
+
+/* long cpu_pcr(void): the 68060's PCR, or -1 where MOVEC PCR does not exist (a 68040) */
+    .globl  cpu_pcr
+cpu_pcr:
+    moveq   #-1,%d0
+    lea     1f(%pc),%a0
+    bsr.s   ctrap_on
+    .long   0x4E7A0808              /* movec pcr,d0 */
+1:  bra.s   ctrap_off
+
+/* ctrap_on: the illegal (4) and line-F (11) vectors to a0 until ctrap_off; a trap goes on at a0 with the stack as at
+ * the call of the routine that called ctrap_on (its own return address on top). Uses a1, a5 (saved), d1. */
+ctrap_on:
+    move.l  (%sp)+,%d1              /* our return address */
+    move.l  %a5,-(%sp)
+    movec   %vbr,%a1
+    move.l  0x10(%a1),-(%sp)
+    move.l  0x2C(%a1),-(%sp)
+    move.l  %a0,ctrap_pc
+    lea     ctrap(%pc),%a0
+    move.l  %a0,0x10(%a1)
+    move.l  %a0,0x2C(%a1)
+    move.l  %sp,%a5                 /* the stack to go back to */
+    move.l  %d1,-(%sp)
+    rts
+ctrap:
+    move.l  %a5,%sp                 /* the exception's frame dropped */
+    move.l  ctrap_pc,-(%sp)
+    rts
+/* ctrap_off: the two vectors back; returns from the routine that called ctrap_on */
+ctrap_off:
+    movec   %vbr,%a1
+    move.l  (%sp)+,0x2C(%a1)
+    move.l  (%sp)+,0x10(%a1)
+    move.l  (%sp)+,%a5
+    rts
+
+/* int cache_apply(const u32 *r): r[0] DTT0, r[1] DTT1, r[2] TCR, r[3] CACR, r[4] PCR (-1: not written). Both caches
+ * pushed and invalidated first (cpusha bc; never cinva), the instruction TTRs cleared. 0 when every register took
+ * its value; -1 when one does not exist here (then CACR was not written: the caches stay as they were). */
+    .globl  cache_apply
+cache_apply:
+    move.l  4(%sp),%a0
+    move.l  %a2,-(%sp)
+    move.l  %a0,%a2
+    lea     9f(%pc),%a0
+    bsr.s   ctrap_on
+    nop
+    .word   0xF4F8                  /* cpusha bc */
+    nop
+    move.l  16(%a2),%d0
+    cmp.l   #-1,%d0
+    beq.s   1f
+    .long   0x4E7B0808              /* movec d0,pcr */
+1:  move.l  8(%a2),%d0
+    .long   0x4E7B0003              /* movec d0,tc */
+    moveq   #0,%d0
+    .long   0x4E7B0004              /* movec d0,itt0 */
+    .long   0x4E7B0005              /* movec d0,itt1 */
+    move.l  (%a2),%d0
+    .long   0x4E7B0006              /* movec d0,dtt0 */
+    move.l  4(%a2),%d0
+    .long   0x4E7B0007              /* movec d0,dtt1 */
+    move.l  12(%a2),%d0
+    movec   %d0,%cacr
+    nop
+    moveq   #0,%d0
+    bsr.s   ctrap_off2
+    move.l  (%sp)+,%a2
+    rts
+9:  moveq   #-1,%d0
+    bsr.s   ctrap_off2
+    move.l  (%sp)+,%a2
+    rts
+ctrap_off2:                         /* ctrap_off for a caller that keeps going: d0 kept */
+    move.l  (%sp)+,%d1
+    movec   %vbr,%a1
+    move.l  (%sp)+,0x2C(%a1)
+    move.l  (%sp)+,0x10(%a1)
+    move.l  (%sp)+,%a5
+    move.l  %d1,-(%sp)
+    rts
+
+/* u32 cache_probe(u32 *p, u32 on, u32 off): the self-test (D37 5.5) on the 16-byte line at p, with CACR "on" (the
+ * data cache enabled) and "off" (the same without it). Between the steps nothing but p is touched. Bit 0: a read was
+ * served from the cache (a line loaded, memory changed behind it, the old value read); bit 1: a write that hit the
+ * line stayed in the cache (memory still old: copyback). The long at p is put back; the data cache is left on, pushed
+ * and invalidated. */
+    .globl  cache_probe
+cache_probe:
+    move.l  4(%sp),%a0
+    move.l  8(%sp),%d0
+    move.l  12(%sp),%d1
+    movem.l %d2-%d5,-(%sp)
+    movec   %d1,%cacr
+    nop
+    .word   0xF478                  /* cpusha dc: the stack's lines out, everything invalid */
+    nop
+    move.l  (%a0),%d4               /* the long as it was (memory) */
+    move.l  #0x5A5A0001,(%a0)       /* B in memory */
+    nop
+    movec   %d0,%cacr
+    nop
+    move.l  (%a0),%d2               /* B, a line loaded if cacheable */
+    movec   %d1,%cacr
+    nop
+    move.l  #0x5A5A0002,(%a0)       /* A in memory, behind the line */
+    nop
+    movec   %d0,%cacr
+    nop
+    move.l  (%a0),%d3               /* B from the cache, A from memory */
+    move.l  #0x5A5A0003,(%a0)       /* C: a hit; copyback keeps it in the line */
+    nop
+    movec   %d1,%cacr
+    nop
+    move.l  (%a0),%d5               /* memory: C written through, A held back */
+    .word   0xF478                  /* cpusha dc: C pushed, the line invalid */
+    nop
+    move.l  %d4,(%a0)               /* the old long back, into memory */
+    nop
+    movec   %d0,%cacr
+    nop
+    moveq   #0,%d0
+    cmp.l   #0x5A5A0001,%d3
+    bne.s   1f
+    or.b    #1,%d0
+1:  cmp.l   #0x5A5A0003,%d5
+    beq.s   2f
+    or.b    #2,%d0
+2:  movem.l (%sp)+,%d2-%d5
+    rts
+
+/* void cache_reset_state(void): before a software reset, after cache_apply took (cache.c), interrupts masked: CACR 0
+ * and at once everything pushed (nothing can dirty a line in between), then TCR and the four TTRs 0, as a hardware
+ * reset leaves them (the ROM starts with no cache set-up of Zenix's; the 060's PCR keeps ESS) */
+    .globl  cache_reset_state
+cache_reset_state:
+    moveq   #0,%d0
+    movec   %d0,%cacr
+    .word   0xF4F8                  /* cpusha bc */
+    nop
+    .long   0x4E7B0003              /* movec d0,tc */
+    .long   0x4E7B0004              /* itt0 */
+    .long   0x4E7B0005              /* itt1 */
+    .long   0x4E7B0006              /* dtt0 */
+    .long   0x4E7B0007              /* dtt1 */
+    rts
+
+/* void cache_push_lines(u32 lo, u32 hi): every 16-byte data cache line in [lo, hi) pushed and invalidated (cpushl dc;
+ * lo and hi multiples of 16) */
+    .globl  cache_push_lines
+cache_push_lines:
+    move.l  4(%sp),%a0
+    move.l  8(%sp),%d0
+    bra.s   2f
+1:  .word   0xF468                  /* cpushl dc,(a0) */
+    lea     16(%a0),%a0
+2:  cmp.l   %d0,%a0
+    bcs.s   1b
+    nop
     rts
 
 /* void cache_flush_code(void): call after writing code that will run
@@ -321,6 +486,9 @@ cache_flush_code:
     rts
 
     .section .bss
+    .balign 4
+ctrap_pc:                           /* ctrap_on's resume address */
+    .space  4
     .balign 8
     .globl  kstack_bottom
 kstack_bottom:                      /* pid 0's stack guard lies here (proc.c) */

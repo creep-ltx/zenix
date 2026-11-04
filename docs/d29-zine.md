@@ -746,9 +746,10 @@ during the session are lost.
   the instruction cache and burst bits; **the data cache stays off** in the first version (Zenix keeps it off; whether a
   given 030 board keeps chip RAM out of it is board-specific), and the answer says it is off. A program that turns the
   030's MMU on with `pmove` gets it turned off on the way back (9.1).
-- **68040/68060:** the flush is `cpusha bc`, never `cinva` (CLAUDE.md). The data cache stays off as on the 030 (with no
-  MMU tables, chip RAM would be cached and the blitter and Copper would read stale data; a later option, *proposed*:
-the data cache on with DTT0/DTT1 marking the low 16 MB cache-inhibited and fast RAM copyback, measured first). A real
+- **68040/68060:** the flush is `cpusha bc`, never `cinva` (CLAUDE.md). The program runs with the data cache off, as on
+  the 030: Zenix's own copyback set-up (DESIGN D37: DTT0/DTT1, the 060's TCR) stays in the registers, but
+  `zine_enter` switches the data cache off and `cpusha bc` before the blob runs (the blob is code `zine` just wrote),
+  and the resume puts `CACR` back after `zb_mmu_back` has put the TTRs back. A real
 **68040** lacks some FPU instructions (`68040.library` emulates them: FS-UAE's 040 setup will meet this; ZINE has the
 same answer as for the 060 below, the crash line naming the 040). A real 68060 lacks 64-bit
   `mulu.l`/`divu.l`, `movep`, `cas2`, `chk2`/`cmp2` and some FPU instructions, which AmigaOS's `68060.library` emulates.

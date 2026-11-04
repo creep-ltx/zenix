@@ -465,8 +465,7 @@ void kmain(struct bootinfo *bi)
     mem_init(bi, bi->kernel_pa, *(u32 *)(bi->kernel_pa + 12));
     mem_selftest();
     diag_stage(8, DIAG_PINK);
-    cache_enable((bi->attn & 0x88) != 0);       /* 68040 or 68060 */
-    kprintf("cache: instruction cache on (data cache off: no MMU to keep DMA coherent)\n");
+    cache_setup(bi);                            /* D37: the data cache on a real 68040/68060, the line says what */
     diag_stage(9, DIAG_WHITE);
     eclock_init();                              /* hr_time() from here on (gfx_init measures the frame with it) */
     rnd_init(bi);                               /* the entropy pool (D19): chip RAM is still as the cold start left it */

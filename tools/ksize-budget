@@ -20,7 +20,11 @@
 # slots: 3,072 bytes).
 # 2026-11-03 (D36, the PC Card slot's claim): drv 1,900 -> 2,200 (DRV_PCMCIA: Gayle asked, the memory clash looked for
 # and said).
-start     3900   8192
+# 2026-11-04 (D37, the 68040/68060 data cache): start 3,758 -> 4,136 and bss + 8 (the cache registers' routines, the
+# self-test), cache new 1,643 and bss 17 (the choice, the set-up, the log lines, the test line), zine + 32, kbd + 12,
+# drv + 16; kernel.bin 169,640 -> 171,660, TOTAL 172,000 -> 172,400; the mount tests' RAM disk 712 -> 710 KB for it
+# (Makefile: 41 blocks stay free).
+start     4300   8200
 main      5950   1100
 serial    5950   6500
 mem       2900    240
@@ -49,6 +53,7 @@ random    3800    280
 sock      4700   1060
 drv       2200    640
 zine      1500     16
+cache     1700     32
 embed    47500      0
-TOTAL   172000
+TOTAL   172400
 ROOM       800

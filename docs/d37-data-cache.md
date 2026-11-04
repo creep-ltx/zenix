@@ -83,14 +83,16 @@ variables and to buffers they copy in and out of (the block cache, messages), wh
 Copyback needs a push wherever something other than the CPU's data side reads memory the CPU wrote. Each such place in
 Zenix, checked (section 6), is either uncached memory or already pushes. So the default is **copyback**; the boot
 option `DCACHE=WT` gives write-through and `DCACHE=OFF` the old state, so the owner can compare both on the 1260 in
-minutes (section 9). The emulator cannot decide this (FS-UAE's cache has no real bus timing); its figures in section 8
-are labelled as such. If the 1260 shows write-through as fast or copyback misbehaving, the default changes to
+minutes (section 9). The emulator cannot decide this (FS-UAE has no 68040/68060 data cache at all, section 8); its
+figures there are labelled as such. If the 1260 shows write-through as fast or copyback misbehaving, the default changes to
 write-through in one line (`cache.c`).
 
 ## 5. The CPU registers Zenix writes (`kernel/cache.c`, `cache_setup`, after `mem_init`, interrupts masked)
 
-In this order, with `cpusha bc` first (push and invalidate both caches: the manuals ask for clean caches before they
-are enabled; never `cinva`, CLAUDE.md):
+In this order, with `cpusha bc` first (push and invalidate both caches; never `cinva`, CLAUDE.md). The manuals say
+"the CINV instruction must clear the caches before enabling them" (MC68040UM 4.5, MC68060UM 5.3): `cpusha` does the
+same only when the tags are sane, which holds because the ROM's boot (and 68040/68060.library) invalidated them after
+power-on and everything since pushed; the old `cache_enable` relied on the same:
 0. Not at all, and the data cache stays off as before, with `DCACHE=OFF` (bootinfo `kopts`) or **the left mouse
    button held** while Zenix starts (CIA-A's port bit 6, read once here): the way out that needs no new zenixboot and
    works from the floppy too.
@@ -113,7 +115,7 @@ are enabled; never `cinva`, CLAUDE.md):
    `cache: self-test: chip RAM uncached, fast RAM copyback`
    `cache: instruction cache on, data cache off: DCACHE=OFF` (or `mouse button held`, `68020/68030`, `Emu68 (its own)`,
    `no fast RAM above 16 MB`, `a board in fast RAM's block`, `68040, a board above 16 MB`, `a register missing`,
-   `the self-test found chip RAM cached`)
+   `the self-test found chip RAM cached`, `no hardware table` (an old loader: Emu68 and the boards unknown))
    The "for" range starts at 0x1000000 when the block also covers the first 16 MB (which `DTT0` keeps uncached).
 
 ## 6. Every place a push matters, checked
@@ -129,8 +131,10 @@ are enabled; never `cinva`, CLAUDE.md):
   program then runs with the data cache off and Zenix's TTRs in place, as D29 8.1 says; the blob saves and restores
   the TTRs, `TCR` and `PCR` (`zb_mmu_save`, `zb_mmu_back`) and `zine_resume` puts `CACR` back and `cpusha bc`, so no
   line from before the session survives into it (`DPI` is 0).
-- **A software reset** (`machine_reset`, used by `reboot` and the reset warning): `cpusha bc`, then `CACR`, the TTRs and
-  `TCR` cleared, as a hardware reset leaves them, before `RESET`: the ROM must not start with Zenix's cache set-up, and
+- **A software reset** (`machine_reset`, used by `reboot` and the reset warning): interrupts masked, `CACR` 0 and at once
+  `cpusha bc` (no line can be dirtied in between: the review found an interrupt could have done so between a push
+  first and `CACR` after), then the TTRs and `TCR` cleared as a hardware reset leaves them (the 060's `PCR` keeps
+  `ESS`), before `RESET` (which leaves the CPU's own registers as they are, MC68060UM 8): the ROM must not start with Zenix's cache set-up, and
   no dirty line may be lost. A hardware reset (Ctrl-Amiga-Amiga without a warning) loses unwritten lines; nothing Zenix
   keeps in fast RAM is used after a reset (the disks are written by the reset warning's sync; the klog and the boot
   note are in chip RAM, uncached).
@@ -169,13 +173,19 @@ the first 16 MB on a full 68030 (whether the TTs act with translation off is to 
   The registers themselves are emulated (the TTRs, `TCR`, `PCR` and `CACR` are written and the boot goes on, on an
   emulated 040 and 060), and the chip-RAM half of the self-test runs.
 
+**Emulator figures** (FS-UAE 3.2.35, A1200 with a 68060 and 64 MB at 0x08000000, the matrix's setup, 2026-11-04; not
+hardware speeds: FS-UAE has no data cache, so the change it shows comes from the rest of the set-up, likely the
+superscalar bit and the branch cache): `time ls -laR / > /dev/null` 1.885 / 1.887 / 1.885 s before, 1.250 / 1.237 /
+1.234 s after; `cp` of a 246 KB program 4.15 -> 2.71 s (`cmp` the same both times); `sha256sum` of three programs
+(528 KB) 4.98 -> 3.84 s; `seq 1 20000 > /dev/null` 1.29 -> 0.78 s.
+
 ## 9. The first run on the Apollo 1260
 
 0. The option needs the new zenixboot on the card (zenixboot is never updated by a bundle: copy it by hand, as
    zenixboot(8) says). Without it, holding the left mouse button while Zenix starts does the same as `DCACHE=OFF`.
 1. With today's kernel (before this change): `time ls -laR / > /dev/null` three times; note the figures.
 2. Install the new kernel; boot as usual. The boot log (`dmesg | grep cache`) must show the 060 line and
-   `cache: self-test: chip RAM uncached, fast RAM cached copyback`.
+   `cache: self-test: chip RAM uncached, fast RAM copyback`.
 3. `time ls -laR / > /dev/null` three times; then a copy of a big file and `cmp`; a few programs; the network
    (FA411) with a `wget` of a file and its checksum; the screen scrolling a long listing.
 4. Boot with write-through: in the boot menu's `S:BootMenu.conf` a line

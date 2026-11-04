@@ -6,7 +6,7 @@
  *     into memory the kernel gave someone else;
  *   - a quiesce program (register writes that stop the device), run when the driver ends and when the network server
  *     ends, before anything of either is freed; then the claim's DMA memory is freed and the claim ends;
- *   - cache maintenance over its DMA memory (Emu68's ARM cache; a 68k runs with the data cache off);
+ *   - cache maintenance over its DMA memory (Emu68's ARM cache; a real 68040/68060's data cache, D37);
  *   - its blocks (DRV_ATTACH, DRV_XFER) carried to "net" as kernel messages that never start a server.
  * Every op is for a child of the running network server only (not merely root: no sudo session claims a device);
  * the claim's ops for its holder only. Cold code: -Os in its own file. */
@@ -167,9 +167,11 @@ static long cache(u32 how, u32 a, u32 n)
         return -EINVAL;
     if (!dma_of(a, n))
         return -EFAULT;
-    if (!h || !(h->flags & HW_DT))
-        return 0;                       /* a real 68k: Zenix keeps the data cache off (start.S) */
     u32 lo = a & ~63u, hi = (a + n + 63) & ~63u;    /* whole lines, inside the 64-byte aligned region */
+    if (!h || !(h->flags & HW_DT)) {
+        cache_push_range(lo, hi);       /* a real 68040/68060 with its data cache on (D37): cpushl; else nothing */
+        return 0;
+    }
     if (h->flags & HW_RANGEOPS) {
         /* Emu68's range opcodes (base A0, length D1): clean, or clean and invalidate; never a bare invalidate */
         if (how == DRVC_CLEAN)
