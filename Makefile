@@ -47,7 +47,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest netstat nettest ifconfig route ping host telnet \
+          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
@@ -205,8 +205,9 @@ RAMDISK_K := 640
 # 712 since DESIGN D28 step 2 (2026-10-29): the console's UTF-8 took about 9 KB of kernel; 33 blocks stay free there.
 # Not less: at 708 (12 blocks free) mounttest's links part runs out of space in /tmp (2026-10-31). tar, tree and realpath left it
 # when fsck.zenixfs grew by its repairs (DESIGN D34): zenixfstest carries them on its own disk. 710 since DESIGN D37
-# (2026-11-04, the 040/060 data cache: 2 KB of kernel): 41 blocks free there (43 at 712).
-RAMDISK_MOUNT_K := 710
+# (2026-11-04, the 040/060 data cache: 2 KB of kernel): 41 blocks free there (43 at 712). 704 since DESIGN D38 step 1
+# (2026-11-04, pseudo-terminals: 3.6 KB of kernel): 35 blocks free, mounttest passes.
+RAMDISK_MOUNT_K := 704
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
@@ -644,8 +645,9 @@ STACK_netd := 8192
 # $(LIBGCC), with the long long printf (LIBC_LDFLAGS). ----
 include libc/picolibc/sources.mk
 # libz's files the C library builds too (user/zshare.h; libz.uo below): the allocator, the environment, the buffered
-# output, the error texts, the signals, poll and select, the sockets, the helpers (paths, colours) and the passwd parser
-LIBZ_SHARED := zmalloc zenv zout zerrtab zsig zpoll zsock zhelp zpw
+# output, the error texts, the signals, poll and select, the sockets, the helpers (paths, colours), the passwd parser
+# and the pseudo-terminals (DESIGN D20 7.2)
+LIBZ_SHARED := zmalloc zenv zout zerrtab zsig zpoll zsock zhelp zpw zpty
 # the port: the system layer, the start and the end, the streams, strerror, dprintf, directories, the 64-bit division
 # (section 7: libgcc's is not pure), the terminal, processes, users, glob, regcomp (over user/regex.c, the one engine)
 LIBC_PORT = libc/zenix/sys.c libc/zenix/start.c libc/zenix/stdio.c libc/zenix/strerror.c libc/zenix/dprintf.c libc/zenix/dirent.c \
