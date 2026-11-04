@@ -339,3 +339,26 @@ palette for `desk`, so the ones not chosen stay cheap to offer later as themes.
 ---
 Revision 1, 2026-11-04: written for the owner's choice; proposed, nothing built, not reviewed. The blitter times are
 computed from the Hardware Reference Manual (3rd edition, "Blitter Speed"), the other figures are estimates.
+
+## Decided 2026-11-04 (revision 2): the bar and workspaces
+
+**The bar** (owner: "Will it work as a workbench bar, a macOS bar, i3 bar? How would we design it?"; the design below
+put to the owner and approved with "go ahead and start building"): one bar, drawn by `desk`, in three zones, each
+made of modules named in `/etc/desk/bar` (a user's `~/.config/desk/bar` wins):
+- **left, menus:** the Zenix menu, then the active program's menus. Programs send their menus to `displayd` (a menu
+  message in the protocol); the bar draws them. Opened by a click (the Mac's way), by holding the right mouse button
+  (Workbench's way), or both (the default). Theme (b) defaults to the right button and Workbench's look of the screen
+  title bar, theme (e) to the click.
+- **middle:** a window list (the default; minimised windows dimmed) or the workspaces' numbers (i3's way).
+- **right, status blocks:** clock, memory, network, CPU built in; any block may instead be a command whose one line of
+  output is shown, run every N seconds (i3blocks' idea), N 10 s by default and never under 1 s, so a 68020 is not
+  kept busy.
+A theme ships its own default bar file; the modules and the ways of opening menus are the same in every theme.
+
+**Workspaces** (owner: "Why can't the floating desktop have workspaces?"): the floating desktop has them from the
+first step. They belong to `desk`, not to a layout, so the tiling desktop later uses the same. Nine workspaces, Left
+Amiga + 1..9 to switch, Left Amiga + Shift + 1..9 to move the active window there (all in `/etc/desk/keys`, Amiga +
+F1..F10 stay the console switches). A window on a hidden workspace gives up its kept off-screen copy (chip RAM) and is
+redrawn when shown again (about 0.1 s a window on a 14 MHz 68020, an estimate). Later, not in the first step: a
+workspace as an Amiga-style screen of its own (its own mode and palette, dragged down to see the one behind).
+
