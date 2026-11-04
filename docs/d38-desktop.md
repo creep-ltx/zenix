@@ -319,7 +319,7 @@ palette for `desk`, so the ones not chosen stay cheap to offer later as themes.
 
 ## 9. Questions for the owner (each with my default)
 
-1. **Which look?** Default: **(a)**, with (b), (c) and (d) as themes later.
+1. **Which look?** Answered 2026-11-04: **(a) the default, (b) and (e) as themes** ("A as default, B and E as themes").
 2. **How does the desktop start?** Default: typed `desk` after logging in on a console (like `startx`); starting it at
    boot is a later setting.
 3. **Dragging on the stock A1200: the outline or the whole window?** Default: the outline on 68020/030, the whole window
