@@ -362,3 +362,19 @@ F1..F10 stay the console switches). A window on a hidden workspace gives up its 
 redrawn when shown again (about 0.1 s a window on a 14 MHz 68020, an estimate). Later, not in the first step: a
 workspace as an Amiga-style screen of its own (its own mode and palette, dragged down to see the one behind).
 
+## Decided 2026-11-04 (revision 3): a graphical login
+
+Owner: "It would be nice to have the ability to let Zenix boot and present the user with a graphical login screen,
+and when entering the password the user is put into the desktop, just like a modern Linux machine. Just because the
+hardware is from the 90's the design or functionality of zenix doesn't have to be."
+
+So, after `desk` works (stage 7 of the first step): a login manager, `dlogin` (as GDM, LightDM or SDDM), a D11
+service that starts `displayd` on one console at boot and shows a login screen in the chosen theme: the computer's
+name, the user's name, the password (never echoed), the clock, and a choice of session (the floating desktop now,
+the tiling one later, or a text console). It checks the password the way `login` does (one code, the shadow file's
+rules, the same delays after a wrong password) and then starts the session as that user, never as root; logging out
+brings the login screen back. The text consoles stay on Amiga + F1..F10 as now. Whether a machine boots to the
+graphical login or to the text login is one line in `/etc` (the default: text until the desktop is proven on real
+hardware, then graphical; the installer asks). Details, as for the rest of D38, are decided in the code's review: who
+owns `displayd` between sessions, the greeter's own user, how the hand-over is guarded.
+
