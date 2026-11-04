@@ -275,7 +275,9 @@ static void blit_block(struct bm *s, int sx, int sy, struct bm *d, const struct 
 static void blit_whole(struct bm *s, int sx, int sy, struct bm *d, const struct rect *r, int desc)
 {
     int m0 = (r->x0 + 15) & ~15, m1 = r->x1 & ~15;
-    if (((r->x0 & 15) || (r->x1 & 15)) && m1 - m0 >= 32) {   /* the whole words B to D, the two edge words masked */
+    if (((r->x0 & 15) || (r->x1 & 15)) && m1 - m0 >= 32 && (s != d || sx == r->x0)) {
+        /* the whole words B to D, the two edge words masked (three blits: only where none reads what another wrote -
+         * another bitmap, or a move straight up or down) */
         struct rect mid = { (s16)m0, r->y0, (s16)m1, r->y1 }, le = { r->x0, r->y0, (s16)m0, r->y1 },
                     re = { (s16)m1, r->y0, r->x1, r->y1 };
         blit_block(s, sx + (m0 - r->x0), sy, d, &mid, desc);

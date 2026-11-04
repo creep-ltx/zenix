@@ -78,6 +78,7 @@ void m_setcols(int cols)
     m_cols = cols;
     struct term *t = wsp[1];
     if (t && t->cx >= cols) { t->cx = cols - 1; t->wrap = 0; }
+    if (t && t->sx >= cols) t->sx = cols - 1;   /* the saved cursor too (ESC 8, CSI u would put it past the row) */
 }
 /* the cells x0..x1-1 of display row y as the model has them now (the scrollback view: its rows), the cursor in
  * them inverted: term's presenting (term.c) */

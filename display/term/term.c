@@ -367,9 +367,10 @@ int main(int argc, char **argv)
         int got, gone = 0;
         while ((got = dpy_next(&e, 0)) > 0) {
             if (e.type == EV_KEY) key(&e);
-            else if (e.type == EV_EXPOSE)   /* the rows it names, drawn at once below */
+            else if (e.type == EV_EXPOSE) { /* the rows it names (scrolls still pending shown first: screen rows) */
+                present();
                 for (int r = e.y / 8; r <= (e.y + e.h - 1) / 8; r++) dirty(r, e.x / 8, (e.x + e.w + 7) / 8);
-            else if (e.type == EV_RESIZE) resize(e.w, e.h);
+            } else if (e.type == EV_RESIZE) resize(e.w, e.h);
             else if (e.type == EV_CLOSE) gone = 1;
             else if (e.type == EV_MENU) menu(&e);
         }

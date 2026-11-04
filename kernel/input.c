@@ -69,7 +69,7 @@ void input_poll(void)
  * 2 left, 3 right, 4 fire) */
 void input_read(s32 *out)
 {
-    u16 sv = irq_save2();
+    u16 sv = irq_save();                 /* gcon's vertical blank (level 3) takes them too */
     out[0] = dx; out[1] = dy; out[2] = (s32)buttons; out[3] = (s32)joy;
     dx = dy = 0;
     irq_restore(sv);
@@ -90,7 +90,7 @@ int input_inject(const u8 *r, int n)
     if (n % 3)
         return -EINVAL;
     for (int i = 0; i < n; i += 3) {
-        u16 sv = irq_save2();
+        u16 sv = irq_save();                 /* gcon's vertical blank (level 3) takes them too */
         dx += (signed char)r[i];
         dy += (signed char)r[i + 1];
         ibtn = r[i + 2] & 7;
