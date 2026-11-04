@@ -108,11 +108,15 @@ static void put_or_drop(u8 c)
 }
 
 static int serdev;                      /* /dev/ttyS0 is open: the port belongs to that program (D12) */
+static u8 con_midline;                  /* the console copy stopped mid-line: the quiet notice waits */
 
 void serial_putc(char c)
 {
     if (serdev)
         return;                         /* the console copy is off while a program owns the port */
+    con_midline = c != '\n';
+    if (!con_midline && rx_quiet_say)
+        kwork_pending = 1;              /* the line is done: serial_work can say it now */
     if (rx_heard) {
         if ((u32)(ticks - rx_last) < RX_QUIET) {
             serial_putc_wait(c);
@@ -235,21 +239,19 @@ void serial_work(void)
         if (!rx_heard) {
             rx_heard = 1;
             if (tx_dropped)
-                kprintf("serial: input seen: the console copy now waits for the port (%u bytes were dropped before)\n",
+                kprintf("serial: input seen: the console copy now waits for the port (%u dropped)\n",
                         tx_dropped);
             tx_dropped_told = tx_dropped;
         }
     }
-    if (rx_quiet_say) {
+    if (rx_quiet_say && !con_midline) { /* not in the middle of a program's line */
         rx_quiet_say = 0;
-        kprintf("serial: nothing received for 10 s: the console copy no longer waits for the port (it does again when a "
-                "byte arrives)\n");
+        kprintf("serial: nothing received for 10 s: the console copy no longer waits\n");
     }
     u32 dr = tx_dropped;
     if (!rx_heard && dr && (tx_dropped_told == 0 || dr >= 2 * tx_dropped_told)) {   /* the first, then each doubling */
         if (!tx_dropped_told)
-            kprintf("serial: nothing received on the serial port lately: console output that does not fit its send "
-                    "ring is dropped there, not waited for (the copy waits once a byte arrives)\n");
+            kprintf("serial: nothing received on the serial port lately: overflow is dropped\n");
         kprintf("serial: %u console bytes not sent so far\n", dr);
         tx_dropped_told = dr;
     }

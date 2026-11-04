@@ -110,6 +110,12 @@ int main(void)
     EXPECT_TRUE(tx_dropped > d2 + 10000 && kwork_pending, "10 s without a received byte: the copy drops again");
     serial_work();
     drain_all();
+    EXPECT_TRUE(!sent_has("serial: nothing received for 10 s"), "... not said in the middle of a program's line");
+    kwork_pending = 0;
+    serial_putc('\n');
+    EXPECT_TRUE(kwork_pending, "... the line's end asks serial_work to say it");
+    serial_work();
+    drain_all();
     EXPECT_TRUE(sent_has("serial: nothing received for 10 s: the console copy no longer waits"), "... and the log says so");
     fake_rx = '.';
     serial_rx_isr();

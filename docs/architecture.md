@@ -1813,7 +1813,7 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   fit the ring is dropped and counted, so with no cable, or a cable whose far end stopped talking, the screen is
   held to the serial speed for at most 10 s. A terminal that listens without typing for longer loses what does not
   fit (DESIGN D28 20). The kernel log says `serial: nothing received on the serial port lately: ...` at the first
-  drop, the running count at each doubling, `serial: nothing received for 10 s: ...` when the waiting stops, and the
+  drop, the running count at each doubling, `serial: nothing received for 10 s: ...` when the waiting stops (held until the console's current line ends, so it never splits a program's line), and the
   total when input is seen again. Root can switch the copy off and on (`SYS_ttymirror`, the command `conmirror`;
   bench measures its screen line both ways). Verified on the host (`tools/serial-test.sh`, a model of Paula's port); FS-UAE sends
   serial bytes without the baud-rate delay, so its ring never fills and it cannot show the drops. Drawing text is
