@@ -252,8 +252,9 @@ LICENSES = [("net/lwip/COPYING", "lwIP"), ("user/miniz/LICENSE", "miniz"), ("too
 FAMILY_SBIN = {"disktools": ["fatd", "ffsd", "pfs3d"], "desktop": ["displayd"]}     # DESIGN D30, D31, D32: mount's servers for a FAT volume, an OFS or FFS volume, a PFS3 volume
 # (DESIGN D35: the two AmigaOS programs of a boot partition, what zinstall puts there)
 # a family's own configuration files, from rootfs/ (kind "c": zup keeps a copy the owner changed, as for base's)
-FAMILY_CONFIG = {"desktop": ["etc/zdesk/keys", "etc/zdesk/menu", "etc/zdesk/icons", "etc/zdesk/themes/flat.theme",
-                             "etc/zdesk/themes/workbench.theme", "etc/zdesk/themes/platinum.theme"]}
+FAMILY_CONFIG = {"desktop": ["etc/zdesk/keys", "etc/zdesk/menu", "etc/zdesk/icons", "etc/zdesk/bar",
+                             "etc/zdesk/themes/flat.theme", "etc/zdesk/themes/workbench.theme",
+                             "etc/zdesk/themes/platinum.theme"]}
 FAMILY_FILES = {"zine": [("zine.blob", "/lib/zine/zine.blob")],
                 "zinstall": [("bootmenu", "/lib/zinstall/bootmenu"), ("zenixboot", "/lib/zinstall/zenixboot")]}
 FAMILY_LICENSES = {"sumi": [("ports/sumi/upstream/LICENSE", "sumi"), ("ports/tui/upstream/LICENSE", "tui")],
