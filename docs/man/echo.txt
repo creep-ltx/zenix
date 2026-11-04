@@ -20,7 +20,9 @@ EXAMPLES
     echo $HOME > where
 
 EXIT STATUS
-    Always 0.
+    0, or 1 when a write fails (a full disk): "echo: write error" and the
+    reason are printed on the standard error. Into a closed pipe it ends
+    by SIGPIPE (status 141), as any writer does.
 
 SEE ALSO
     sh(1), printenv(1)

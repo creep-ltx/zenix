@@ -109,6 +109,8 @@ BUILTINS
     fg [%n]  bg [%n]  wait [pid|%n]  kill [-SIGNAL] pid|%n|-pgid  kill -l
     type name
     test expr (or [ expr ])  true false :  echo [-ne]  pwd  eval
+    (echo: a write that fails, a full disk, says "sh: echo: write error"
+    and the reason, status 1)
     local NAME[=value] (in a function only: the old value comes back when
     the function returns, as in bash)
     help  umask [mask]  trap ['commands' | '' | -] SIGNAL...  trap [-p]

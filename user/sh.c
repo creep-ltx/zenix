@@ -18,7 +18,8 @@
 typedef unsigned char u8;
 
 /* ---------------------------------------------------------------- output */
-static void outs(const char *s) { sys_write(1, s, strlen(s)); }
+static int outfail;                     /* a write of outs failed (a full disk): its error number, -1 for a short write */
+static void outs(const char *s) { u32 n = strlen(s); int r = sys_write(1, s, n); if (r != (int)n && !outfail) outfail = r < 0 ? -r : -1; }
 static void errs(const char *s) { sys_write(2, s, strlen(s)); }
 static void errm(const char *a, const char *b) { errs("sh: "); errs(a); if (b) { errs(": "); errs(b); } errs("\n"); }
 
@@ -2590,9 +2591,18 @@ static int do_test(char **argv, int argc)
 
 static int strspn_ok(const char *s) { for (; *s; s++) if (!strchr("neE", *s)) return 0; return 1; }
 
+static int echo_done(void)
+{
+    if (!outfail) return 0;
+    const char *t = outfail > 0 ? zstrerror(outfail) : 0;
+    errm("echo: write error", t ? t : "short write");
+    return 1;
+}
+
 static int do_echo(char **argv, int argc)
 {
     int nl = 1, esc = 0, i = 1;
+    outfail = 0;
     for (; i < argc && argv[i][0] == '-' && argv[i][1] && strspn_ok(argv[i] + 1); i++) {
         if (strchr(argv[i], 'n')) nl = 0;
         if (strchr(argv[i], 'e')) esc = 1;
@@ -2604,13 +2614,13 @@ static int do_echo(char **argv, int argc)
             if (*p == '\\' && p[1]) {
                 p++;
                 if (*p == 'n') outs("\n"); else if (*p == 't') outs("\t"); else if (*p == 'e' || *p == 'E') outs("\033");
-                else if (*p == 'r') outs("\r"); else if (*p == 'a') outs("\a"); else if (*p == 'c') return 0;
+                else if (*p == 'r') outs("\r"); else if (*p == 'a') outs("\a"); else if (*p == 'c') return echo_done();
                 else if (*p == '\\') outs("\\"); else { char b[3] = { '\\', *p, 0 }; outs(b); }
             } else { char b[2] = { *p, 0 }; outs(b); }
         }
     }
     if (nl) outs("\n");
-    return 0;
+    return echo_done();
 }
 
 static int do_read(char **argv, int argc)

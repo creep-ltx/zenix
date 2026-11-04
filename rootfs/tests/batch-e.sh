@@ -66,8 +66,9 @@ grep x /nonexistent; echo "grep-st=$?"
 mkdir -p $T/m1/d $T/m2; echo moved > $T/m1/d/f; mv $T/m1/d $T/m2/; cat $T/m2/d/f; ls $T/m1 | wc -l
 ln $T/m2 $T/hard; echo "ln-dir=$?"       # a hard link to a directory: refused, with the reason
 # audit G3: a process killed while it reads closes its file once (a nested exit closed it twice and leaked one of the
-# 64 file slots per kill: about 60 kills ran the system out of files)
-dd if=/dev/zero of=$T/big bs=1024 count=3000 > /dev/null 2>&1
+# 64 file slots per kill: about 60 kills ran the system out of files). 1000 KB keeps cat reading for about 3.5 s in
+# FS-UAE, well past the kill at 1 s; the 3000 KB of before no longer fitted on the grown 8 MB root (2026-11-04)
+dd if=/dev/zero of=$T/big bs=1024 count=1000 > /dev/null 2>&1 || echo "dd: the reader's file does not fit on the disk"
 for i in $(seq 1 70); do cat $T/big > /dev/null & sleep 1; kill $!; wait; done
 echo after-kills > $T/g3; cat $T/g3
 # a single command too big for memory says so and ends that shell (status 2), never a silent cut (the shell's arena

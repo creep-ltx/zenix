@@ -236,6 +236,9 @@ asks and libz lacks: `posix_memalign`/`aligned_alloc`, `malloc_usable_size`, `re
   `ls`, `grep`, `ps` make one system call per screen, not one per line. A program uses either these or `stdout`'s
   `FILE` functions, never both (two buffers would mix their order); the size tool warns when one program links both.
 - A write that fails with `EPIPE` ends the program with status 141, in both (as libz's `oflush` does today).
+  Any other failure of libz's buffered output (a full disk) prints "write error on standard output" and the
+  reason on standard error and ends the program with status 1, never a silent cut (2026-11-04; an interrupted write is
+  tried again, a short one is finished).
 
 ### 5.3 The start and the end
 
