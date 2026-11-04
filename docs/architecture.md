@@ -1842,7 +1842,7 @@ outputs (`tools/cmds-test.sh`).
   `tools/mkrdb-multi.py` and `tools/mkcard.py`.
   `tools/matrix.sh` boots 14 emulated setups, every config in `fsuae/` and `fsuae/matrix/` but the mount and
   ZenixFS-root ones: A1200 stock (68EC020, 2 MB chip), with 4 or 8 MB fast RAM, 1 MB chip only, NTSC, with a
-  68030, 68040 or 68060, an RDB disk, a RAM-disk boot with no disk, an A3000 (SCSI), two 68030 development setups
+  68030, 68040 or 68060 (the 040 and 060 also with 64 MB of 32-bit fast RAM at 0x08000000: the data cache on, D37), an RDB disk, a RAM-disk boot with no disk, an A3000 (SCSI), two 68030 development setups
   (A1200- and A4000-class), and a 68000 that must be refused cleanly. Each boots, runs a short session and logs in
   on consoles 2, 3 and 4 (the 1 MB chip-only one goes on to 5 and 6, where memory runs out: init or login must say
   so). Filesystem work is checked with the host's `e2fsck`. `make check` runs all the strong tests in one go

@@ -20,6 +20,9 @@
 #   errors       A1200 3.1, a Startup-Sequence that runs zenixboot five times: a missing kernel, two bad RAM disks
 #                (each an error, back to AmigaOS), CHECK (loads, checks, returns), then RAM=ramdisk (Zenix with its
 #                root in RAM)
+#   dcache       A1200 3.1 with a 68060 and 64 MB of 32-bit fast RAM (DESIGN D37): zenixboot DCACHE=maybe is refused,
+#                then DCACHE=WT boots with the data cache write-through (the root in RAM)
+#   dcache-off   the same with DCACHE=OFF: the data cache stays off, and says why
 # usage: tools/zenixboot-test.sh [setup...]     (ZENIX_SERIAL, ZENIX_OUT as the other tests)
 cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every test a copy of its own)
@@ -29,7 +32,7 @@ export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-zenixboot-serial}
 KDIR=$(python3 -c 'import sys; sys.path.insert(0, "tools"); import fsuae_conf; print(fsuae_conf.kickstart_dir())')
 K32=${ZENIX_KICK32:-$KDIR/kick32-a1200.rom}
 K205=${ZENIX_KICK205:-$KDIR/kick205-a600.rom}
-SETUPS="${*:-a1200-31 a1200-040 a1200-32 a600-205 a600-68000 card-root errors bootmenu}"
+SETUPS="${*:-a1200-31 a1200-040 a1200-32 a600-205 a600-68000 card-root errors bootmenu dcache dcache-off}"
 B=$(cd "$BD" && pwd)
 pass=1
 check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
@@ -51,6 +54,15 @@ if command -v xdftool >/dev/null; then       # a second opinion on the FFS write
     xdftool "$B/zenix-boot.hdf" open part=ZB0 + read zenix "$OUT/zenix.back" >/dev/null 2>&1 && cmp -s "$OUT/zenix.back" "$B/kernel.bin" \
         && check "xdftool reads the kernel back from the FFS boot partition" ok || check "xdftool reads the kernel back from the FFS boot partition" bad
 fi
+
+# the disks of the "dcache" setups (DESIGN D37): the boot option, from AmigaOS
+printf 'FailAt 21\nSYS:zenixboot DCACHE=maybe\nSYS:zenixboot RAM=ramdisk DCACHE=WT\n' >"$OUT/dcache-ss"
+printf 'SYS:zenixboot RAM=ramdisk DCACHE=OFF\n' >"$OUT/dcache-off-ss"
+for d in dcache dcache-off; do
+    python3 tools/mkffs.py "$OUT/$d-ffs.img" 16632K ZenixBoot "$OUT/$d-ss=S/Startup-Sequence" "$B/zenixboot=zenixboot" \
+        "$B/kernel.bin=zenix" "$B/root-ram.img=ramdisk" >/dev/null || { echo "FAIL mkffs ($d)"; exit 1; }
+    python3 tools/mkrdb-multi.py "$OUT/$d.hdf" "$OUT/$d-ffs.img:ffs:ZB0:boot" >/dev/null || { echo "FAIL mkrdb ($d)"; exit 1; }
+done
 
 # the disk of the "bootmenu" setup: the menu, its configuration (Zenix first, after 1 s), zenixboot, the kernel, the root
 printf 'SYS:bootmenu\n' >"$OUT/bm-ss"
@@ -140,6 +152,19 @@ for s in $SETUPS; do
         check "$s: no damaged log reported" "$(grep -aq 'damaged' "$OUT/$s.txt" && echo bad || echo ok)"
         check "$s: dmesg -p has boot 1's whole log (its kernel line)" "$(grep -aq '^prevkernel=1$' "$OUT/$s.txt" && echo ok || echo bad)"
         check "$s: a shell prompt" "$(has $s '^zbok$')" ;;
+    dcache|dcache-off)
+        HDTYPE="uae_mbresmem_size = 64" conf $s A1200 '$ZENIX_KICKSTART_DIR/kicka1200.rom' 68060 0 "$OUT/$s.hdf"
+        run $s 150 tools/tests/zenixboot-test.txt
+        if [ $s = dcache ]; then
+            check "$s: an unknown DCACHE word is refused before anything is loaded" "$(has $s 'zenixboot: DCACHE=maybe: say OFF, WT')"
+            check "$s: DCACHE=WT: the data cache write-through for the 32-bit RAM" \
+                "$(has $s '^cache: 68060 (superscalar, branch cache, store buffer), data cache write-through for 0x8000000-0xbffffff, the rest uncached')"
+        else
+            check "$s: DCACHE=OFF: the data cache stays off" "$(has $s '^cache: instruction cache on, data cache off: DCACHE=OFF')"
+        fi
+        check "$s: the self-test or nothing, never chip RAM cached" "$(grep -aq 'chip RAM cached' "$OUT/$s.log" && echo bad || echo ok)"
+        check "$s: a shell prompt" "$(has $s '^zbok$')"
+        check "$s: no panic" "$(grep -aq 'panic' "$OUT/$s.log" && echo bad || echo ok)" ;;
     *) echo "FAIL unknown setup $s" ; pass=0 ;;
     esac
 done
