@@ -395,6 +395,7 @@ struct upollfd { s32 fd; u16 events, revents; };    /* SYS_evwait's items: Linux
 #define POLLERR  0x0008
 #define POLLHUP  0x0010
 #define POLLNVAL 0x0020
+#define POLLRDBAND 0x0080               /* on a port (D38): something was posted into its window since its owner looked */
 #define POLLPORT 0x4000                 /* Zenix: fd is a port the caller owns; POLLIN = a message is queued */
 #define EV_MAXITEMS 32
 struct proc;
@@ -629,6 +630,9 @@ struct port {
     struct proc *waiter;        /* server blocked in recv */
     u32 evw;                    /* D16: the slots polling it (SYS_evwait with POLLPORT) */
     u32 ncancel, nseen;         /* D23 5.2: cancels of messages sent to it; how many its owner saw (POLLPRI) */
+    u32 pbuf, psize;            /* D38: the owner's post window (SYS_post POST_BUF), 0: none */
+    int pfrom;                  /* the port whose owner alone may post into it */
+    u32 npost, nseenpost;       /* posts into it; how many its owner saw (POLLRDBAND) */
 };
 extern struct port ports[NPORT];
 #define PORT_ID(i) ((int)((ports[i].gen << 8) | (u32)(i)))     /* a port number: (generation << 8) | slot */
@@ -967,8 +971,11 @@ struct ucongrab {            /* CON_GRAB: the caller fills size .. hoty; the ker
     u16 width, height;       /* back: the screen in hires pixels and lines (640 x 256 PAL, 640 x 200 NTSC) */
     u16 depth;               /* back: the planes the text console uses (D14's choice for this machine) */
     u16 chips;               /* back: GCHIP_* */
+    u32 topaz;               /* (UCONGRAB_TOPAZ) where the Topaz glyphs go: the caller's memory, 1,792 bytes; 0 none */
 };
 #define UCONGRAB_FIRST  24
+#define UCONGRAB_TOPAZ  28           /* D38 step 3: a size of 28 or more adds `topaz`, a buffer of 1,792 bytes the kernel
+                                      * fills with the console's Topaz 8 (Latin-1 32-255, 8 bytes each, bit 7 left) */
 #define GCHIP_AGA       1
 struct ugevent {             /* a record of the grab's ring (16 bytes, frozen) */
     u8 type;                 /* GEV_* */
@@ -1018,6 +1025,7 @@ void gfx_hand(u32 cop);                 /* the Copper list shown: a server's (sp
 int gfx_diwv(void);                     /* the display window's first line */
 void gfx_geom(u16 *w, u16 *h);          /* the screen in hires pixels and lines */
 int gfx_aga(void);
+void gfx_topaz(u8 *dst);                /* the console's Topaz 8: 224 glyphs (Latin-1 32-255) of 8 bytes */
 u16 kbd_qual(void);                     /* the qualifiers held now (GQ_* bits, no buttons) */
 void input_take(s32 *dx, s32 *dy, u32 *buttons);   /* the tick: the mouse's movement since, cleared, and its buttons */
 long gfx_conline(u32 line, struct uconline *d);  /* CON_LINE's display part, console and struct checked (term_conop) */
@@ -1042,6 +1050,20 @@ int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes tak
 #define TTYC_SCTTY      4    /* arg 0: the caller's controlling tty becomes this one and the caller its session leader,
                               * if nobody (else) living leads it (-EPERM); TIOCSCTTY's subset, used by libz's setsid */
 struct uwinsize { u16 row, col, xpixel, ypixel; };   /* Linux's struct winsize (frozen) */
+/* DESIGN D38 step 3 (frozen; ipc.c): what a server needs to serve clients that are not the kernel without an MMU. */
+#define SYS_peer        96   /* msg (a request the caller is serving), op (PEER_*), arg */
+#define PEER_CTTY       1    /* -> the client's controlling tty (1..NTTYS-1) */
+#define PEER_RD         2    /* arg struct upeermem *: 0 if those bytes are the client's own memory to read, else -EFAULT */
+#define PEER_WR         3    /* ... to write */
+struct upeermem { u32 addr, len; };
+#define SYS_post        97   /* op (POST_*), port, arg: a window in a port owner's memory others may write into */
+#define POST_BUF        1    /* the caller owns port; arg struct upostbuf *: its window (0 size: none) and who may post */
+#define POST_WRITE      2    /* the caller owns the window's `from` port; arg struct upost *: bytes copied into the
+                              * window at off, then the port's owner woken (POLLRDBAND); len 0 only wakes */
+struct upostbuf { u32 addr, size; s32 from; };
+struct upost { u32 off, src, len; };
+long ipc_peer(u32 msg, u32 op, u32 arg);
+long ipc_post(u32 op, u32 port, u32 arg);
 long zine_sys(u32 op, u32 a, u32 b);
 struct zine_range;
 u32 mem_ranges(const struct zine_range **r);    /* D29: mem.c's pool ranges, for ZINE's blob */
