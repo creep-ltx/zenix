@@ -81,6 +81,7 @@ void about(void);
 
 /* bar.c */
 void bar_init(void);
+const char *cpu_name(void);     /* "68060", "Emu68 68040" ...: the kernel's (ZINE_INFO) */
 void bar_draw(void);
 void bar_tick(void);            /* the blocks' times */
 void bar_poll(struct pollfd *p, int *n);    /* the blocks' pipes into a poll list */

@@ -331,6 +331,12 @@ int main(int argc, char **argv)
         if (!strcmp(argv[1], "_own")) return child_own();
         return 99;
     }
+    if (argc > 1 && !strcmp(argv[1], "size")) {    /* the terminal's size (TIOCGWINSZ), as stty size prints it */
+        struct winsize w;
+        if (ioctl(0, TIOCGWINSZ, &w) < 0) { dprintf(2, "ptytest: size: not a terminal\n"); return 1; }
+        dprintf(1, "%d %d\n", w.ws_row, w.ws_col);
+        return 0;
+    }
     if (self[0] != '/')
         strcpy(self, "/bin/ptytest");
     names();

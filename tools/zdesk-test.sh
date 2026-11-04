@@ -140,7 +140,7 @@ python3 tools/colour-test.py columns "$OUT/z-columns.png" > "$OUT/geom"; check "
 px() { s=$1; shift; python3 tools/dpy-test.py px "$OUT/z-$s.png" "$OUT/geom" "$@"; }
 grep -q "^zdesk: running, theme flat, [0-9]* keys, 2 icons, drag outline" "$L"; check "zdesk runs: the flat theme, the keys, two icons, the outline drag on a 68020" $?
 px wins 300,5,112 400,200,344 100,25,BBC 150,37,47B 120,72,D54; check "the bar, the desktop, A and B placed below the bar, B active" $?
-grep -q "^zdesk: bar right: chip [0-9.]*M fast [0-9.]*M  [0-9][0-9]:[0-9][0-9]  hello-bar" "$L"
+grep -q "^zdesk: bar right: chip [0-9.]*[KMG] fast [0-9.]*[KMG]  [0-9][0-9]:[0-9][0-9]  hello-bar" "$L"
 check "the bar's right zone: memory, the clock, a command block's line" $?
 grep -q "zdesk: the bar: a command every 0 s: every 1 s, the least" "$L"; check "... a command block's interval raised to the 1 s floor" $?
 px dragged 200,150,47B 40,100,344; check "A's title dragged by the mouse: A moved 100 right and 60 down, its old place the desktop" $?

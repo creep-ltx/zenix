@@ -5,13 +5,17 @@ NAME
 
 SYNOPSIS
     ptytest
+    ptytest size
 
 DESCRIPTION
     A test program for the pseudo-terminals (DESIGN D20 7.2, D38 step 1),
     run as root by tools/pty-test.sh. It opens ptys, starts children on
     their slaves (ptytest itself, with an argument that begins with _, and
     /bin/sh) and talks to them through the masters. Each check prints one
-    line, "ptytest CHECK: PASS (...)" or "ptytest CHECK: FAIL (...)":
+    line, "ptytest CHECK: PASS (...)" or "ptytest CHECK: FAIL (...)".
+    ptytest size prints the size of its standard input's terminal as
+    stty size does ("ROWS COLUMNS", TIOCGWINSZ): tools/zdesk-draw-test.sh
+    reads term's size with it. The checks:
 
     open, ptsname, master-ino, slave-ino, isatty, default-size
              /dev/ptmx gives /dev/pts/0; the master's st_ino is 0x100, the

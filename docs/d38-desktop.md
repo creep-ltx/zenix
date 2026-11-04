@@ -393,3 +393,49 @@ drawn, and every interaction (the pointer, a menu, a raise, a drag, typing in te
 68060 and feels as quick as Workbench 1.3 on an A500 on the stock A1200. Measured on the real machine; a finding of
 either kind is a bug, fixed before new desktop features.
 
+
+## The A1200's first findings (2026-11-04, release 2026110403)
+
+Zenix Desktop ran on the owner's A1200 with the Apollo 1260 (68060 at 50 MHz, the data cache on, AGA, PAL). The
+owner's partner: "this is amazing". What they found, and what was done (branch desk; verified in FS-UAE, not yet on
+the A1200 again):
+
+- **The pointer lagged and the bottom right was hard to reach.** The kernel now reads the mouse's counters in the
+  vertical blank and moves sprite 0 there, before sprite DMA reads it (it waited for the 100 Hz tick before), places
+  it to the hires pixel on AGA (SPRxCTL SH1: the hot spot reaches column 639), and accelerates as AmigaOS's Input
+  prefs do (`CON_MOUSE`; zdesk's `/etc/zdesk/mouse`: none, low (the default: the counts beyond 4 in a frame doubled),
+  high (beyond 2, tripled)).
+- **term could not be made narrower.** The console's cell model takes its width in use at run time (`WCOLS`, the
+  console's own stays 80): term is 20 to 80 columns, and the program gets SIGWINCH with the new width.
+- **term was slow:** `time ls -laR /` (about 5,000 lines, the owner's AmigaOS partitions mounted) took 12.8 s on the
+  text console (4.36 s to /dev/null) and 2 min 51.8 s in term (4.38 s to /dev/null): term's drawing cost about 167 s
+  against the console's 8.4 s. Every line scrolled the window with a copy of the whole inside, and every glyph was
+  drawn by a per-pixel loop. Now term shows output as xterm's jump scroll does (the cells change at once, the window
+  shows them at most every 30 ms while the output streams: one copy for all the lines scrolled, then the cells that
+  changed), a copy of whole words is one blit of every plane (B to D, half the bus slots), and a glyph on an 8-pixel
+  column is a byte a plane a line, and a run of blanks is a fill. The PiStorm (a far faster CPU) gave the same
+  minutes (2 min 43 s; console 10.3 s, /dev/null 1.46 s): about 33 ms a line, the whole window's blitter copy. And the
+  CPU's part: term's cell model moved its grid on every scroll with libz's byte-by-byte memmove (now long words, as
+  the kernel's). term now reads the pty in big pieces (a tick's nap after a small read while output streams, so a
+  writer of a line a write does not wake it a line at a time) and works through them 256 bytes at a time, showing
+  what changed between pieces at most a quarter of the time (never still for more than 0.4 s). The target: within
+  about 1.5 times the console. `tools/zdesk-draw-test.sh`, FS-UAE's stock A1200 with 4 MB fast (emulator figures):
+  `time seq 1 2000` 8.8 s on the console, in term 20.9 s before, 6.6 s now (21 showings).
+- **A menu hid the windows beside it** (the whole band from the bar to the menu's bottom, across the screen): a
+  `WK_BAR` window was always made the screen's width. A bar window now has the width asked (0: the screen's).
+- **The menu flickered** when the highlight moved: it was cleared and drawn whole. Now the two items that change are
+  drawn, every pixel once, and the menu is drawn whole once, when it opens.
+- **The workbench theme's close gadget covered the title's first letter**: titles now start after the left gadgets
+  and a gap and end before the right ones (a centred one too).
+- **The About window's body showed as a pink and green checker in the flat theme** (plain grey in workbench). Not
+  found in FS-UAE; open (see the hand-back).
+- The bar said 68040 on the 68060 (ctop and About "68040+FPU" on the PiStorm): AttnFlags' 68060 bit is set only by
+  AmigaOS's 68060.library. The kernel now sets it on a CPU with a PCR, and `ZINE_INFO` says Emu68 (`machine`): zdesk
+  shows "68060" or "Emu68 68040". The bar's memory reads as `free -h` does ("fast 1.7G", not "fast 1801.7M").
+- ctop showed 0.0% for every process: the kernel does not count CPU time per process yet (noted; not the desktop's).
+
+And the owner's bar above: so a pass over displayd and zdesk for drawing that is not minimal - the bar is drawn
+left to right with every pixel once (no clearing first) and a changed status block only redraws its letters; an
+icon's selection redraws its two labels, not the desktop; a frame's title bar is drawn beside the title, not under
+it. The server counts what it draws (`DPY_STAT`: blits, pixels, glyphs, batches, damage painted, copies onto the
+screen) and the tests hold those numbers small.

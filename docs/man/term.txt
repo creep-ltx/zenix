@@ -14,9 +14,16 @@ DESCRIPTION
     source; its 16 colours are the screen's nearest. TERM is
     xterm-16color.
 
-    The window is 80 columns wide and ROWS rows high (24 at first, 4 to
-    29); a resize changes the rows, and the program gets SIGWINCH. Its
-    menu (in the bar): Window, New terminal and Close. Closing the window
+    The window is 80 columns wide and ROWS rows high at first (24; 4 to
+    29); a resize gives it 20 to 80 columns and 4 to 29 rows, in whole
+    cells, and the program gets SIGWINCH (lines wrap at the new width;
+    what lay beyond it comes back when the window widens). Output is
+    shown as xterm's jump scroll does: what the program writes goes into
+    the cells at once, but the window shows it at most every 30 ms while
+    the output streams (one copy for all the lines it scrolled, then only
+    the cells that changed) and at once when it pauses, so a long listing
+    costs a few redraws a second, never one a line. Its menu (in the
+    bar): Window, New terminal and Close. Closing the window
     hangs the pty up (SIGHUP to the program); the window goes when the
     program ends.
 
@@ -26,6 +33,6 @@ OPTIONS
                 its arguments)
 
 NOTES
-    80 columns only: the console's cell model is 80 wide. A wide
+    At most 80 columns: the console's cell model keeps rows of 80. A wide
     character draws in one cell. No mouse selection and no clipboard yet;
     the bell is silent.

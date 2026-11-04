@@ -28,6 +28,13 @@ DESCRIPTION
     window is simple refresh: what is uncovered is cleared and its program
     asked to draw it (EV_EXPOSE).
 
+    It draws only what changed, each pixel once where it can (a frame's
+    title bar beside its title, the title's cells, the gadgets after;
+    a copy of whole 16-pixel words is one blit of every plane, the
+    blitter's B to D). Its counters of blits, pixels, glyphs, batches,
+    damage painted and copies onto the screen (DPY_STAT; dpytest's stat)
+    are how the tests check what an action costs.
+
     Without a window manager new windows are placed one below the other, a
     click raises and focuses a window, its title bar drags its outline and
     its close gadget asks the program to close it.

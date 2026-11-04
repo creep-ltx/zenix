@@ -15,6 +15,7 @@
 int aga;
 int wm_cl = -1;
 static int port, gfd = -1, confd = -1, persist, grabbed;
+u32 ndraws;
 static u16 *copl;                       /* the Copper list (chip RAM) */
 static int cop_col;                     /* the index of COLOR00's value in it */
 static u16 *spr;                        /* the pointer: sprite 0 */
@@ -649,6 +650,7 @@ static int req(struct umsg *m)
     case DPY_DRAW: {
         if (!(w = win_get((int)a[0])) || w->cl != cl)
             return -ENOENT;
+        ndraws++;
         if ((a[1] & 1) || (a[2] & 1) || a[2] > 65536 || peer(m, PEER_RD, a[1], a[2]) < 0)
             return -EFAULT;
         u32 bad = ~0u;
@@ -741,6 +743,15 @@ static int req(struct umsg *m)
         w->menu = t;
         w->nmenu = (u16)a[2];
         ev_wm(EV_WM_MENU, w->id, 0, 0, 0, 0, 0, 0);
+        return 0;
+    }
+    case DPY_STAT: {
+        if (peer(m, PEER_WR, a[0], 24) < 0)
+            return -EFAULT;
+        u32 *o = (u32 *)a[0];
+        o[0] = nblits; o[1] = npix; o[2] = nglyphs; o[3] = ndraws; o[4] = npaints; o[5] = ncopies;
+        if (a[1] & 1)
+            nblits = npix = nglyphs = ndraws = npaints = ncopies = 0;
         return 0;
     }
     case DPY_WIN_INFO: {
