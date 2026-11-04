@@ -82,11 +82,15 @@ static void serial_putc_wait(char c)
 
 /* The console's copy (tty.c): every byte drawn on the screen is also sent here. Paula sends about 11.5 KB/s at
  * 115200 baud, far slower than the screen, so a copy that always waited capped the screen at that speed even with no
- * cable. So: until the first byte has been RECEIVED since boot (a terminal or the test harness typed something), a
- * byte that does not fit the 4 KB ring is dropped and counted (the kernel log says so, see serial_work); once
- * something has been received, someone is listening and the copy waits, so a terminal and the tests see all of it. */
-static int rx_heard;                    /* a byte has been received since boot */
-static volatile u32 tx_dropped;         /* console bytes dropped before that */
+ * cable. So: while nothing has been RECEIVED (since boot, or for RX_QUIET: 10 s), a byte that does not fit the 4 KB
+ * ring is dropped and counted (the kernel log says so, see serial_work); while something has been received lately,
+ * someone is listening and the copy waits, so a terminal and the tests see all of it. A cable that stopped talking
+ * (a terminal closed, the cable left in) holds the screen to the serial speed for at most those 10 s. */
+#define RX_QUIET 1000                   /* ticks (100 a second) without a received byte: nobody listens any more */
+static int rx_heard;                    /* a byte has been received, the last one at rx_last */
+static volatile u32 rx_last;
+static volatile u8 rx_quiet_say;        /* rx_heard went back to 0: serial_work says so */
+static volatile u32 tx_dropped;         /* console bytes dropped while nobody listened */
 static u32 tx_dropped_told;
 
 static void put_or_drop(u8 c)
@@ -110,8 +114,13 @@ void serial_putc(char c)
     if (serdev)
         return;                         /* the console copy is off while a program owns the port */
     if (rx_heard) {
-        serial_putc_wait(c);
-        return;
+        if ((u32)(ticks - rx_last) < RX_QUIET) {
+            serial_putc_wait(c);
+            return;
+        }
+        rx_heard = 0;                   /* quiet for 10 s: dropping again (serial_work says so) */
+        rx_quiet_say = 1;
+        kwork_pending = 1;
     }
     if (c == '\n')
         put_or_drop('\r');
@@ -221,18 +230,26 @@ void serial_work(void)
         }
         tty_input(c);
     }
-    if (!rx_heard && rxq_took) {
-        rx_heard = 1;
-        if (tx_dropped)
-            kprintf("serial: input seen: the console copy now waits for the port (%u bytes were dropped before)\n",
-                    tx_dropped);
-        tx_dropped_told = tx_dropped;
+    if (rxq_took) {
+        rx_last = ticks;
+        if (!rx_heard) {
+            rx_heard = 1;
+            if (tx_dropped)
+                kprintf("serial: input seen: the console copy now waits for the port (%u bytes were dropped before)\n",
+                        tx_dropped);
+            tx_dropped_told = tx_dropped;
+        }
+    }
+    if (rx_quiet_say) {
+        rx_quiet_say = 0;
+        kprintf("serial: nothing received for 10 s: the console copy no longer waits for the port (it does again when a "
+                "byte arrives)\n");
     }
     u32 dr = tx_dropped;
     if (!rx_heard && dr && (tx_dropped_told == 0 || dr >= 2 * tx_dropped_told)) {   /* the first, then each doubling */
         if (!tx_dropped_told)
-            kprintf("serial: nothing received on the serial port yet: console output that does not fit its send ring is "
-                    "dropped there, not waited for (the copy waits once a byte arrives)\n");
+            kprintf("serial: nothing received on the serial port lately: console output that does not fit its send "
+                    "ring is dropped there, not waited for (the copy waits once a byte arrives)\n");
         kprintf("serial: %u console bytes not sent so far\n", dr);
         tx_dropped_told = dr;
     }

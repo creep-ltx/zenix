@@ -630,6 +630,20 @@ int main(void)
     EXPECT_TRUE(!injected[0], "... ESC[?6n (private) does not");
 
 
+    /* ---- a cell stored again as it is is not drawn again (owner 2026-11-04: flicker while typing) ---- */
+    reset(); out("\033[32mzenix\033[0m:/# ls -l");
+    { long c0 = cells, b0 = blits;
+      out("\r\033[32mzenix\033[0m:/# ls -l\033[K");
+      EXPECT_TRUE(cells - c0 == 2 && blits == b0, "a line written again as it is, ESC[K over blank cells: only the cursor drawn (off, on)");
+      c0 = cells; out("\r\033[32mzenix\033[0m:/# ls -x\033[K");
+      EXPECT_TRUE(cells - c0 == 3 && strstr(row(0), "ls -x"), "... one character changed: that cell and the cursor");
+      c0 = cells; out("\r\033[31mzenix");
+      EXPECT_TRUE(cells - c0 == 7 && co_at(0, 0) == 0x01, "... the same characters in another colour: drawn");
+      out("\033[m\033[3;1H"); b0 = blits; out("\033[2K\033[2K");
+      EXPECT_TRUE(blits == b0, "ESC[2K on a row already blank in that colour: no fill");
+      out("\033[44m\033[2K");
+      EXPECT_TRUE(blits == b0 + 1 && co_at(2, 5) == 0x47, "... in another background colour: filled"); }
+
     /* ---- colours (DESIGN D14 step 2) ---- */
     reset(); out("\033[31mA\033[42mB\033[91mC\033[104mD\033[39mE\033[49mF\033[0mG");
     EXPECT_TRUE(co_at(0, 0) == 0x01 && co_at(0, 1) == 0x21 && co_at(0, 2) == 0x29 && co_at(0, 3) == 0xC9 &&

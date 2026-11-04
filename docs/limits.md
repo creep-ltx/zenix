@@ -115,8 +115,10 @@ pointers.
   The font: at most 4,096 glyphs in 255 half-pages, 98,848 bytes, 8 x 8 only, Latin-1 always Topaz's; one for every
   console. A console that shows a character above U+00FF takes 2,560 bytes more, and 80 bytes for each of its
   scrollback lines with such characters (at most 16,200); with no memory for them such characters show as `?`.
-- The screen (DESIGN D14, architecture.md section 11): twice the screen's height in chip RAM, 40 KB at 1 bitplane,
-  80 KB at 2, 120 KB at 3, 160 KB at 4, and 7 KB more for the glyphs with more than one plane; by default 4 planes
+- The screen (DESIGN D14, D28 20, architecture.md section 11): a ring of twice the screen's rows in chip RAM with
+  fast RAM (PAL: 40 KB at 1 bitplane, 80 KB at 2, 120 KB at 3, 160 KB at 4), one and a half times without (PAL: 30,
+  60, 90, 120 KB), NTSC's 25 rows less; 7 KB more for the glyphs with more than one plane; up to 32 scrolls (16
+  without fast RAM) within one frame before a scroll waits for the vertical blank; by default 4 planes
   only on AGA with fast RAM, 3 on OCS/ECS with fast RAM and on every machine with 2 MB of chip RAM and no fast RAM,
   else 1; `/etc/console` chooses 2, 4, 8 or 16 colours (4 planes only on AGA), at init's start, if the chip RAM is
   there. A console's loaded font (DESIGN D20, `CON_FONT`): one per console, PSF1 of exactly 256 glyphs of 8 x 8 (no

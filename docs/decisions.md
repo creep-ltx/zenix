@@ -99,4 +99,5 @@ root, then the desktop (ROADMAP phases).
 **The desktop's look (owner 2026-11-04: "A as default, B and E as themes"):** (a) flat with a hint of depth is the default; (b) Workbench-cleaner and (e) Platinum (Mac OS 8-9) are themes, D38. (c) and (d) are not planned.
 **A graphical login (owner 2026-11-04: "let Zenix boot and present the user with a graphical login screen ... just like a modern Linux machine"):** `dlogin`, after the first desktop works, D38 revision 3. Text or graphical boot is one line in `/etc`.
 **The desktop's name (owner 2026-11-04: "Zenix Desktop is a good and clear name. zdesk/ztile are good commands. It's decided."):** Zenix Desktop; `zdesk` (floating), `ztile` (tiling, later). D38 revision 4.
+**`conmirror` (2026-11-04, a fix from the owner's real-hardware findings, "root needs a command to switch the copy off" in ROADMAP's list):** `conmirror off|on`, root only, switches the console's copy to the serial port; the copy also stops waiting for the port when nothing was received for 10 s. D28 section 20.
 

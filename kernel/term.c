@@ -476,14 +476,20 @@ static void clear_cells(struct term *t, int vis, int y, int x0, int x1)       /*
         cut(t, vis, y, x0);
         cut(t, vis, y, x1);
     }
+    u8 c = bce(t);
     if (x0 == 0 && x1 == COLS) {
+        int same = !panicked;                           /* a blank row erased again: no fill */
+        for (int x = 0; x < COLS && same; x++)
+            same = t->ch[y][x] == ' ' && !t->at[y][x] && t->co[y][x] == c;
         blank_rows(t, y, 1);
-        if (vis)
-            gfx_fill_rows(y, 1, bce(t));
+        if (vis && !same)
+            gfx_fill_rows(y, 1, c);
         return;
     }
-    u8 c = bce(t);
     for (int x = x0; x < x1; x++) {
+        if (t->ch[y][x] == ' ' && !t->at[y][x] && t->co[y][x] == c && !panicked)
+            continue;                                   /* already blank in that colour (ESC[K after a line editor's
+                                                         * redraw): nothing stored or drawn again */
         t->ch[y][x] = ' ';
         t->at[y][x] = 0;
         t->co[y][x] = c;
@@ -747,11 +753,12 @@ static __attribute__((noinline)) void cell8(struct term *t, int vis, u8 ch)
     u32 o = rowx[t->cy] + (u32)t->cx;
     if (((u8 *)t->at)[o] & A_HI)
         unhalf(t, vis, 1);
+    u8 co = t->colour | t->cor;
+    if (vis && (((u8 *)t->ch)[o] != ch || ((u8 *)t->at)[o] != t->attr || ((u8 *)t->co)[o] != co || panicked))
+        gfx_cell(t->cy, t->cx, ch, t->attr, co);        /* unchanged: not drawn again (as put1) */
     ((u8 *)t->ch)[o] = ch;
     ((u8 *)t->at)[o] = t->attr;
-    ((u8 *)t->co)[o] = t->colour | t->cor;
-    if (vis)
-        gfx_cell(t->cy, t->cx, ch, t->attr, ((u8 *)t->co)[o]);
+    ((u8 *)t->co)[o] = co;
     advance(t, vis, 1);
 }
 
@@ -989,12 +996,12 @@ static __attribute__((optimize("O2"))) void put1(struct term *t, int vis, u8 ch)
         cell8(t, vis, ch);
         return;
     }
+    u8 co = t->colour | t->cor, a = t->attr;
+    if (vis && (c[0] != ch || c[sizeof t->ch] != a || c[2 * sizeof t->ch] != co || panicked))
+        gfx_cell(t->cy, t->cx, ch, a, co);              /* a cell stored again as it is is not drawn again */
     c[0] = ch;
-    c[sizeof t->ch] = t->attr;
-    u8 co = t->colour | t->cor;
+    c[sizeof t->ch] = a;
     c[2 * sizeof t->ch] = co;
-    if (vis)
-        gfx_cell(t->cy, t->cx, ch, t->attr, co);
     if (t->cx != COLS - 1)
         t->cx++;
     else

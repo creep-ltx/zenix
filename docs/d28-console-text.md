@@ -969,3 +969,60 @@ above, and the choices the note left open, taken conservatively (the builder's, 
 - **con-test** runs `termtest utf8` at 8 colours (the stock A1200's default) and 16 (AGA) only; `conops` still runs at
   all four depths. The suite's time goes back down (the four-depth glyph page took about 12 minutes).
 - The helper's other decisions (section 19) are accepted as built.
+
+## 20. Faster and without flicker (2026-11-04, branch con)
+
+From the owner's partner's A1200 with the Apollo 1260 (68060 at 50 MHz, data cache on, release 2026110401):
+`time seq 1 2000` took 4.503 s on the screen and 0.044 s to /dev/null; `time ls -laR /` (506 lines) 3.2 s and 0.94
+s. And typing at the prompt made the `z` of `zenix` and the first character of the prompt flash.
+
+- **The ring of rows (gfx.c).** The buffer was twice the screen's height: a scroll moved the Copper's pointers one
+  row down, and every 32 scrolls the blitter copied the whole screen back to the top (80 KB at 4 planes; a stall of
+  tens of ms, about 0.7 ms a line). Now the buffer is a ring of text rows (`nring`: the screen's rows plus as many
+  spare ones with fast RAM, half as many without) and display row r is ring row (base + r) mod nring (`rowoff[]`, so
+  `gfx_cell` stays one table read and an add). The Copper list has a second set of plane pointers (the ring's row 0)
+  after a WAIT for the line where the ring wraps on the screen; a line from 256 on is two WAITs (`$FFDF`, then its
+  low 8 bits), and when the ring does not wrap on the screen the WAIT is the picture's end. A full-screen scroll is
+  base + 1 and one blitter fill of the incoming row, filled before `base` moves (the vertical blank cannot show it
+  half done); nothing is ever copied. Region scrolls (CSI S/T/L/M, a scroll region) and fills are one blit per run
+  of rows that lie in one piece of the ring (upwards from the first row, downwards from the last).
+- **Never drawing where the display looks.** The display shows the ring from `hw_base` (the vertical blank applies
+  `base`); with k scrolls in one frame the drawing is k rows ahead. The incoming row is out of sight exactly while
+  1 <= k <= nring - trows, so a scroll beyond that waits for the vertical blank (`vb_room`: not with interrupts
+  masked, 100 ms timeout said once, then no more waits). With fast RAM that is 32 scrolls a frame (1,600 lines a
+  second on PAL) before anything waits; without, 16 (800 lines a second, far more than a stock 68020 draws). `ESC[2J`
+  and redraws fill the screen's rows only (and those the display still shows, if it shows an older base).
+- **Chip RAM:** unchanged with fast RAM (2 x trows rows: 160 KB at 4 planes, PAL); 25% less without (1.5 x trows:
+  90 KB at 3 planes instead of 120 KB, PAL). The Copper list grows from 160 to 200 bytes.
+- **Unchanged cells are not drawn (term.c).** A cell stored again with the same character, attributes and colour (not
+  above U+00FF) is not drawn again; an erase (`ESC[K`, `ESC[X`, `ESC[2K`) skips cells already blank in its colour,
+  and a whole row already blank is not filled. This rests on the rule that the shown console's planes equal its grid
+  between writes (the cursor is hidden at a write's start): every change of font, 8-bit mode, depth or palette, the
+  scrollback view, a console switch and the hand-over to a display server redraw from the grid; during a panic
+  every cell is drawn. Glyphs were already written in one pass per plane (the final byte, never a clear first), so
+  a cell drawn again never shows a blank; the flash came from the shell: it wrote `\r`, the prompt, the line and
+  `ESC[K` as separate writes, and the cursor was drawn at the end of each, so at column 0 (the `z`) for a moment.
+- **The shell's line editor (sh.c redraw)** keeps the line it drew (the text and the grey suggestion, the cursor's
+  column) and writes only from the first byte that differs, `ESC[K` only when the line got shorter, then moves the
+  cursor back, all in one write. A key typed at the end of the line writes that character alone. A prompt that leaves
+  a colour on has its colour codes written again before such text. After Ctrl-L, a Tab list or Ctrl-R's line the
+  whole line is drawn again. Output from another program onto the line is no longer repaired by the next key (as in
+  bash; Ctrl-L redraws). sh: +864 bytes of code (shared), +952 bytes of memory per shell (the line kept, the output buffer).
+- **The serial copy (serial.c)** waits for the port only while a byte was received in the last 10 s; after that it
+  drops what does not fit its 4 KB ring and counts it, as before the first byte. A terminal that listens without
+  typing for longer than 10 s loses output that does not fit (the request: a cable left in after its terminal closed
+  must not hold the screen to 11.5 KB/s). FS-UAE sends without the baud delay, so the tests never see a drop.
+  `conmirror off|on` (root, `SYS_ttymirror`) switches the copy off and on.
+- **Tests:** `tools/scroll-test.sh` (screenshots, 4 planes with fast RAM and 3 without, DIWV=0x38, which also
+  reaches the exactly-256 WAIT): after `seq 1 2000` the screen is CON_LINE's picture of the ring pixel by pixel and
+  the grid holds 1970..2000; a page of scrollback after it is the same lines printed afresh; `termtest scroll`
+  (region scrolls, inserted and deleted lines) from three places in the ring equals a redraw and CON_LINE's picture.
+  `tools/term-test.sh`: unchanged cells and blank erases draw nothing, changes are drawn. `tools/serial-test.sh`: the
+  10 s rule both ways. `tools/lineedit-test.sh`: typing at the end sends only the character. Not run: NTSC and the
+  default DIW_V `$2C` build by screenshot (the same code; the WAIT pair for lines 256-300 there).
+- **Sizes:** kernel.bin 180,720 -> 182,036 bytes (gfx +842, term +248, serial +201; tools/ksize-budget); sh +864
+  bytes of shared code; conmirror 556 bytes.
+- **Emulator figures** (FS-UAE, `time` inside Zenix; not hardware, and FS-UAE's serial port has no baud delay, so
+  the serial copy's cost does not show): the stock A1200 (68020, 3 planes): `seq 1 2000` on the screen 13.14 ->
+  12.01 s (to /dev/null 0.67 s), `ls -laR /` 19.48 -> 18.71 s (8.21 s); the 68060 matrix config (4 planes): `seq 1
+  2000` 7.60 -> 6.04 s (0.20 s), `ls -laR /` 7.13 -> 6.58 s (2.74 s). The hardware "after" is the owner's partner's.

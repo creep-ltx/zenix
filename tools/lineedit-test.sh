@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # The shell's line editor: Enter pressed with the cursor inside the line runs the whole line and leaves the whole
 # line on the screen (as bash does), not only the part before the cursor. termtest types "echo one two three", five
-# left-arrow key codes and Return, then reads the console's grid back once the output is there.
+# left-arrow key codes and Return, then reads the console's grid back once the output is there. Then a line typed on
+# the serial port: its echo on the serial copy holds the prompt once (only what changed is drawn).
 cd "$(dirname "$0")/.." || exit 1
 OUT=${ZENIX_OUT:-/tmp/zenix-lineedit}; mkdir -p $OUT
 BD=${ZENIX_BUILD:-build}
@@ -16,4 +17,9 @@ bad() { echo "FAIL $1"; pass=0; }
 grep -q '^FAIL' $OUT/run.log && bad "the script: $(grep '^FAIL' $OUT/run.log | head -1)"
 grep -q '^row [0-9]*|zenix:/# echo one two three|' $OUT/run.log && ok "the typed line stays whole on the screen after Enter mid-line" || bad "the line on the screen was cut at the cursor"
 grep -q '^one two three' $OUT/run.log && ok "the whole line ran" || bad "the line did not run whole"
+# typed at the end of the line, each key writes that character alone (DESIGN D28 20): the prompt is drawn once, not
+# once a key (it was "\r", the prompt and the whole line for every key)
+n=$(sed 's/\x1b\[[0-9;]*[A-Za-z]//g' $OUT/run.log | grep -o "# printf" | wc -l)
+[ "$n" = 1 ] && grep -q '^qz-ok' $OUT/run.log && ok "typing at the end of the line writes only the new characters (the prompt drawn once)" ||
+    bad "typing redrew the line: the prompt and 'printf' $n times on the serial copy"
 [ $pass = 1 ] && echo "lineedit-test: all passed" || { echo "lineedit-test: FAILED (log $OUT/run.log)"; exit 1; }

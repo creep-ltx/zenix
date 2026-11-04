@@ -38,11 +38,16 @@
 # kernel.bin 180,720 -> 181,520, TOTAL 181,000 -> 181,600; with D39 merged in 181,836, TOTAL 181,900.
 # 2026-11-04 (D39, the parallel port's claim for the plipbox): drv 2,200 -> 2,500 (DRV_PARPORT, its quiesce steps checked
 # one by one, the ACK line's interrupt on while claimed, DRV_PARACK), main bss + 4 (the ACK count).
+# 2026-11-04 (DESIGN D28 20, the console faster and without flicker): gfx 8,316 -> 9,158 (the ring of rows: two sets of
+# plane pointers and the WAITs for the wrap, copies and fills per piece of the ring, the wait for the vertical blank),
+# term 12,662 -> 12,910 (a cell stored as it is is not drawn again, nor a blank cell erased again), serial 5,824 ->
+# 6,025 (the copy waits only while something was received in the last 10 s); kernel.bin + 1,316 (with D38 step 3 and
+# D39: TOTAL 181,900 -> 183,200).
 # 2026-11-04 (DESIGN D38 step 5: the desktop's tests move the mouse): CON_INPUT's CONI_MOUSE, input 400 -> 550,
-# kernel.bin 181,836 -> 181,980, TOTAL 181,900 -> 182,000.
+# kernel.bin 181,836 -> 181,980; with D28 20 merged in 183,304, TOTAL 183,400.
 start     4300   8200
 main      5950   1100
-serial    5950   6500
+serial    6100   6500
 mem       2900    240
 ide       3400    560
 emmc      4900    640
@@ -56,8 +61,8 @@ proc      9300  21500
 syscall  10150      0
 vfs      11450   1600
 tty       5900    100
-gfx       8400   2320
-term     12800     64
+gfx       9200   2320
+term     13000     64
 confont   3100     32
 kbd       4300    180
 ipc       3950   2150
@@ -72,5 +77,5 @@ zine      1500     16
 cache     1700     32
 gcon      3450     16
 embed    47500      0
-TOTAL   182000
+TOTAL   183400
 ROOM       800
