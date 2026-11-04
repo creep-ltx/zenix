@@ -47,7 +47,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest netstat nettest ifconfig route ping host telnet \
+          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
@@ -80,7 +80,7 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
 # Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
 # the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount.
-SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d
+SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d displayd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
@@ -489,6 +489,21 @@ STACK_ffsd := 8192
 $(BUILD)/pfs3d.uo: user/pfs3d.c user/amigatext.h user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 STACK_pfs3d := 8192
+# ---- Zenix Desktop (DESIGN D38, docs/d38-desktop.md): the display server /sbin/displayd (display/server/: the
+# protocol and the input cold, -Os; the drawing and the font -O2: the golden path, input to screen), the client
+# library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
+DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font)
+$(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser $(if $(filter displayd win,$*),-Os) -c $< -o $@
+$(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+STACK_displayd := 8192
+$(BUILD)/libdisplay.no: display/lib/libdisplay.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/dpytest.uo: display/test/dpytest.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/dpytest.uelf: $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 # unlha, unlzx (DESIGN D33, docs/d33-archives.md): one program, two names (/bin/unlzx is a link). The readers are shared with Ahiru.
 # The program's own part is cold (-Os); the two decoders are where the time goes (UCFLAGS' -O2). core/arc.c gives the CRCs and dates.
 ARC_FLAGS := -Iports/ahiru/upstream/core
