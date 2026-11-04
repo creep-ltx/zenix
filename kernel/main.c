@@ -7,6 +7,7 @@
 
 static u32 vector_table[256] __attribute__((aligned(4)));
 volatile u32 ticks;
+volatile u32 par_acks;
 struct wclock wclock;           /* the wall clock (clock.h): the battery clock at boot, date -s; counted by the tick */
 
 void *memset(void *d, int c, unsigned long n)
@@ -253,6 +254,8 @@ void irq2_c(u32 *rb)
         ide_stray_irq();                /* not the CIA: Gayle's IDE latch (it shares level 2) */
     if (icr & 8)
         kbd_isr();                      /* only queues the code */
+    if (icr & 0x10)
+        par_acks++;                     /* the parallel port's ACK (D39): only counted; the plipbox driver reads it */
     if (icr & 1) {
         ticks++;
         wclock_tick(&wclock);
