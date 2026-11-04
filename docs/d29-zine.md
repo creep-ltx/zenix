@@ -1219,7 +1219,7 @@ the overlaid file checked, the root, both nodes, B then A loaded into one table 
 relocation to a slot not loaded and a node outside the table refused, eight damaged forms each with its message, a
 last node ending with the file taken,
 every prefix and one-byte change of the file (whatever the check takes loads, root and nodes); the fuzzer loads every
-node the check takes. On hardware (2026-11-04, the owner's photos): Peek plays on the PiStorm A1200 under Zenix 2026110405 (the 3D glasses part, red/blue tunnels), with the packet fix of 16.7. It later filled the screen with character-like garbage; the owner has seen the same under AmigaOS on the Apollo 1260 (the demo on a fast CPU, not ZINE).
+node the check takes. On hardware (2026-11-04, the owner's photos): Peek plays on the PiStorm A1200 under Zenix 2026110405 (the 3D glasses part, red/blue tunnels), with the packet fix of 16.7. A screen of character patterns in the middle is the demo's own part (its credits: "Pattern char sets courtesy of Ray Manta"); a mouse click ended it: "ended (return code 0) after 185 s; Zenix is back".
 
 **Review** (one, independent, 2026-11-04, the loader and the blob): two bugs fixed: a hostile table size wrapped
 `(tabsize + 1) * 4` (a 4-byte table, then writes 4 GB past it: now `ZH_MAXTAB`, and the host tests' skips that hid it
