@@ -410,7 +410,9 @@ All fit 5.1. plipbox (knowledge base `zenix-hardware-driver-survey.md`) needs th
 the CIA register bits it shares with the serial lines; NE2000 on PCMCIA needs Gayle's PCMCIA I/O window; CS8900A is PIO
 on the clockport; A2065 and Ariadne are Zorro II boards in the hardware table's board list (FS-UAE's A2065 appears there
 as manufacturer 0x202, product 112, *verified 2026-10-26*, 8.2). A polled A2065 driver needs no interrupt design. The PCMCIA NE2000 is built, polled too: DESIGN D36,
-`docs/d36-pcmcia-ne2000.md` (the slot is a claim of `DRV_PCMCIA`).
+`docs/d36-pcmcia-ne2000.md` (the slot is a claim of `DRV_PCMCIA`). The plipbox is built, polled: DESIGN D39,
+`docs/d39-plipbox.md` (the port is a claim of `DRV_PARPORT`; the kernel counts the FLAG edges, `DRV_PARACK`; the rule
+for CIA-B's shared port A is in its section 4).
 
 ## 6. Configuration, DHCP, DNS, commands
 
