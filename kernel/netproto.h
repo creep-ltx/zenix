@@ -178,8 +178,8 @@ struct uroute {
                                  * run by the kernel when the driver ends and when the network server ends, before
                                  * anything of either is freed (then the DMA region is freed and the claim ends) */
 #define DRV_CACHE    5          /* op | DRVC_* << 8, a: address, b: length, inside the caller's DMA region: the data
-                                 * cache written back (and dropped) over whole 64-byte lines. Nothing to do on a 68k
-                                 * (Zenix keeps the data cache off); on Emu68 the ARM's cache */
+                                 * cache written back (and dropped) over whole 64-byte lines: on a real 68040/68060
+                                 * with its data cache on (D37) by cpushl, on a 020/030 nothing; on Emu68 the ARM's */
 #define DRV_ATTACH   6          /* a: struct udrvattach *, b: its size -> the interface number; netd fills the block */
 #define DRV_XFER     7          /* a: struct udrvxfer *, b: its size -> 0; netd reads and writes the block */
 /* DRV_CLAIM's base for the PC Card slot of an A600/A1200 (DESIGN D36): Gayle's attribute memory, I/O space and the

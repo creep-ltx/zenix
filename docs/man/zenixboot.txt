@@ -5,6 +5,7 @@ NAME
 
 SYNOPSIS
     zenixboot [KERNEL] [RAM=FILE] [CHECK] [PREVIOUS] [UNSIGNED_OK]
+              [DCACHE=OFF|WT|CB]
 
 DESCRIPTION
     zenixboot is an AmigaOS program, not a Zenix one. It boots Zenix on an
@@ -178,6 +179,14 @@ ARGUMENTS
     UNSIGNED_OK a test build takes a bundle without a .sig (it says so;
                 a .sig that is there must still verify). A release build
                 says it ignores it and refuses unsigned bundles
+    DCACHE=OFF  on a 68040/68060: Zenix leaves the data cache off, as
+                before DESIGN D37 (to rule the cache out when something
+                looks wrong). WT: write-through instead of copyback. CB:
+                copyback, the default. Any other word is an error before
+                anything is loaded. Nothing changes on a 68020/68030 or
+                under Emu68. The kernel finds it in bootinfo +0x84; the
+                floppy has no options (hold the left mouse button while
+                Zenix starts for the same as OFF)
 
 EXAMPLES
     SYS:zenixboot
@@ -186,6 +195,8 @@ EXAMPLES
         From a shell: another kernel, with a RAM disk as the root.
     zenixboot CHECK
         Try it without leaving AmigaOS.
+    Zenix (no data cache) = run SYS:zenixboot DCACHE=OFF
+        A line for S:BootMenu.conf (bootmenu(8)).
 
 EXIT STATUS
     0 after CHECK (or when started from Workbench, which it does not
@@ -226,9 +237,10 @@ NOTES
     hand. The updates do not need one: zpkg writes the files this one
     reads.
 
-    Verified in FS-UAE (tools/zenixboot-test.sh; updates and signatures:
-    tools/update-test.sh; an update zpkg wrote, installed by the
-    zenixboot of the owner's card: tools/sysupdate-test.sh); not yet
+    Verified in FS-UAE (tools/zenixboot-test.sh, DCACHE= in its setups
+    dcache and dcache-off; updates and signatures: tools/update-test.sh;
+    an update zpkg wrote, installed by the zenixboot of the owner's card:
+    tools/sysupdate-test.sh); not yet
     run on a real Amiga. Not verified:
     whether an RTG card gives the monitor back to the chipset when no
     screen is shown.

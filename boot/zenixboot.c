@@ -48,6 +48,9 @@ static const char version[] __attribute__((used, section(".text.start"))) = "$VE
 #define UPDNOTE_ROOTFAILED 4u   /* it came up, but its root half failed (audit3 B1): the bundle is kept */
 #define UPD_F_ROLLBACK  1u
 #define BI_UPD          0x78            /* bootinfo: bundle address, size, flags */
+#define BI_KOPTS        0x84            /* bootinfo: KOPT_* (D37) */
+#define KOPT_DCACHE_OFF 1u
+#define KOPT_DCACHE_WT  2u
 #define HWINFO_DRYRUN   0x5A485744u     /* kernel/hwinfo.h: "ZHWD" in the hwinfo magic, stage0 writes no hardware */
 #define ZUP_HDR 96
 #define ZUP_TOCE 80
@@ -820,8 +823,8 @@ static int kernel_ok(long fh, long ksize, u8 *hdr)
 
 int zb_main(void)
 {
-    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S";
-    long args[5] = { 0, 0, 0, 0, 0 };
+    static const char tmpl[] = "KERNEL,RAM/K,CHECK/S,PREVIOUS/S,UNSIGNED_OK/S,DCACHE/K";
+    long args[6] = { 0, 0, 0, 0, 0, 0 };
     long rda, kfh = 0, rfh = 0, ksize = 0, rsize = 0;
     u8 *table = 0, *buf = 0, hdr[32];
     u32 k512, r512, total = 0, home;
@@ -836,6 +839,20 @@ int zb_main(void)
     const char *kname = args[0] ? (const char *)args[0] : "zenix";
     const char *rname = (const char *)args[1];
     int check = args[2] != 0, prev = args[3] != 0;
+    u32 kopts = 0;                      /* DESIGN D37: bootinfo +0x84, the 040/060 data cache's mode */
+    if (args[5]) {
+        const char *d = (const char *)args[5];
+        char w[4] = { 0, 0, 0, 0 };
+        for (int i = 0; i < 3 && d[i]; i++)
+            w[i] = (char)(d[i] >= 'a' && d[i] <= 'z' ? d[i] - 32 : d[i]);
+        if (d[0] && d[1] && d[2] && d[3]) w[0] = 0;     /* longer than three letters: none of the words */
+        if (streq(w, "OFF")) kopts = KOPT_DCACHE_OFF;
+        else if (streq(w, "WT")) kopts = KOPT_DCACHE_WT;
+        else if (!streq(w, "CB")) {
+            say("zenixboot: DCACHE=%s: say OFF, WT (write-through) or CB (copyback, the default)\n", args[5], 0, 0);
+            goto out;                   /* rc 20; nothing allocated yet */
+        }
+    }
     if (args[4]) {                      /* DESIGN D21 6.4: unsigned bundles only in test builds, and only when asked */
         if (KEY_RELEASE) say("zenixboot: UNSIGNED_OK is for test builds: ignored (unsigned bundles are refused)\n", 0, 0, 0);
         else unsigned_ok = 1;
@@ -939,6 +956,7 @@ int zb_main(void)
         goto out;
     }
     *(u32 *)(table + 0x74) = r512;      /* bootinfo: the RAM disk's size (0 = none); handoff_tables adds its address */
+    *(u32 *)(table + BI_KOPTS) = kopts;  /* bootinfo +0x84: the boot options (D37) */
     if (zdir && !check && !rname) {     /* bootinfo +0x78: the bundle for zup, and the flags (D15) */
         *(u32 *)(table + BI_UPD) = (u32)bun;
         *(u32 *)(table + BI_UPD + 4) = bun ? bunsize : 0;

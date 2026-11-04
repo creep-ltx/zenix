@@ -46,7 +46,8 @@ branch nfs12, 2026-10-28); the C library's (D27 section 5, Linux's numbers, bloc
 75, `EILSEQ` 84, and `ENOTSUP` the same number as `EOPNOTSUPP` (95, a second name, no new number). Update note kinds (D15, frozen, append-only):
 1 done, 2 failed, 3 confirmed; 4 "confirmed, but the root half failed" (audit3 B1, 2026-10-26). `struct uupdate`'s (and
 the bootinfo's) flags bits: 1 `UPD_F_ROLLBACK` (D15), 2 `UPD_F_TRIAL` (D22 4.3, claimed 2026-10-28: an unconfirmed trial;
-the kernel keeps it after `UPD_RELEASE`; zenixboot sets it from D22 step 7). Poll bits on a port (D23 step 1, branch nfs12, 2026-10-28; recorded by audit 2026-10-29 B2-7): `POLLPRI` 2 (Linux's
+the kernel keeps it after `UPD_RELEASE`; zenixboot sets it from D22 step 7). The bootinfo's boot options at `+0x84` (`kopts`, D37, branch cache,
+2026-11-04): 1 `KOPT_DCACHE_OFF`, 2 `KOPT_DCACHE_WT`. Poll bits on a port (D23 step 1, branch nfs12, 2026-10-28; recorded by audit 2026-10-29 B2-7): `POLLPRI` 2 (Linux's
 value) on a port: a message sent to it was cancelled (`UMSG_CANCEL`) since its owner last saw one. Socket options: `SO_LINGER` 13 (Linux's, D23 steps 3-4, branch nfs34,
 2026-10-28; recorded by the same audit). Port names
 registered as services (D11):

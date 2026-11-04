@@ -349,16 +349,19 @@ void kbd_zine(void)
 /* In init's process context (proc_wait, WAIT_CONSOLE), once kbd_work has seen the held reset warning and woken it. */
 /* A software reset, as exec's ColdReboot does it (ROM Kernel Manual, exec.library/ColdReboot): the ROM's start
  * address from its header, then RESET and JMP in one long word, so the JMP is already fetched when RESET takes the
- * ROM overlay and the chips back to their start state. */
+ * ROM overlay and the chips back to their start state. RESET does not reset the CPU itself, so a 68040/68060's cache
+ * registers are put back first (DESIGN D37 section 6). */
 void machine_reset(void)
 {
+    ints_off();                         /* nothing may dirty a line between the push and the reset (review D37) */
+    cache_before_reset();               /* D37: dirty lines pushed, the caches and TTRs as the ROM expects them */
     __asm__ volatile(
         "move.w #0x2700,%%sr\n\t"
         "lea 0x01000000,%%a0\n\t"
         "sub.l -0x14(%%a0),%%a0\n\t"          /* the ROM's size is in its last bytes: its start */
         "move.l 4(%%a0),%%a0\n\t"             /* the initial PC */
         "subq.l #2,%%a0\n\t"
-        "bra.s 1f\n\t"
+        "bra.w 1f\n\t"           /* .w: the padding below may be none (a .s of 0 is no branch) */
         ".balign 4\n"
         "1:\treset\n\t"
         "jmp (%%a0)\n" ::: "a0", "memory");

@@ -59,6 +59,13 @@ for n in $CONFS; do
         # (sh: no memory: since programs that never buffer lost libz's 4 KB output buffer, audit O12, sh may load where
         # it did not and then find no room for its arena; it says so and ends, init starts another login)
     fi
+    # DESIGN D37: the data cache on the 040 and 060 for their 32-bit RAM, chip RAM uncached by the self-test; off elsewhere
+    case $n in
+    a1200-040) grep -q '^cache: 68040, data cache copyback for 0x8000000-0xbffffff, the first 16 MB uncached' $OUT/$n.log || ok=0 ;;
+    a1200-060) grep -q '^cache: 68060 (superscalar, branch cache, store buffer), data cache copyback for 0x8000000-0xbffffff, the rest uncached' $OUT/$n.log || ok=0 ;;
+    *) grep -q '^cache: instruction cache on, data cache off: 68020/68030$' $OUT/$n.log || ok=0 ;;
+    esac
+    case $n in a1200-0[46]0) grep -q '^cache: self-test: chip RAM uncached, fast RAM ' $OUT/$n.log || ok=0 ;; esac
     cpu=$(grep -m1 '^cpu:' $OUT/$n.log)
     [ $ok = 1 ] && echo "PASS $n  ($cpu)" || echo "FAIL $n  ($cpu)  see $OUT/$n.log"
 done
