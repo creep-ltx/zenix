@@ -122,7 +122,7 @@ zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04
    reaches the network (built 2026-11-03 on branch ne2000, the PC against a model and FS-UAE's refusals: docs/d36-pcmcia-ne2000.md; never run on a real card yet). Audit, with the filesystems fuzzed against damaged disks.
 5. **The desktop** (owner 2026-11-03: "I want a desktop before a public release ... starting with a small minimal desktop
    with floating windows. Something classic but modern."): first a design note with a few looks to choose from (pictures,
-   the owner picks), then **a minimal desktop with floating windows** as the first step, and the first public pre-release
+   the owner picks; written 2026-11-04: docs/d38-desktop.md, four looks in docs/desktop-looks/), then **a minimal desktop with floating windows** as the first step, and the first public pre-release
    after it. (Owner 2026-11-03: "it's a Unix-like system. Several desktop choices are expected.") So the display
    server and the desktop are separate programs, as X11 and Wayland's compositors keep them: a documented protocol, and the
    window manager / desktop a program of its own that can be swapped; the floating desktop is the first, an i3-style
