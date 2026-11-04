@@ -1,0 +1,34 @@
+CONMIRROR(8)			Zenix manual
+
+NAME
+    conmirror - switch the serial copy of the console off or on
+
+SYNOPSIS
+    conmirror off|on
+
+DESCRIPTION
+    Everything drawn on the console on the screen is also sent to the
+    serial port (115200 baud), so a terminal or the test rig on the other
+    end of a cable sees it. The port sends about 11.5 KB a second, far
+    slower than the screen draws. While something has been received on
+    the port in the last 10 seconds, the copy waits for the port, so the
+    other end loses nothing - and the screen is held to the port's speed.
+    With nothing received since boot or for 10 seconds, what does not fit
+    the 4 KB send buffer is dropped and counted (the kernel log says so).
+
+    conmirror off stops the copy: the screen never waits for the port.
+    conmirror on starts it again (from the next byte; nothing missed is
+    sent). The kernel's own log (boot messages, panics) still goes to the
+    port either way. Only root may switch it.
+
+EXIT STATUS
+    0 done, 1 refused (not root), 2 a wrong argument.
+
+NOTES
+    Not done: asking whether the copy is on, a per-console setting (the
+    copy always follows the console on the screen). The setting is lost at
+    a restart: the copy starts on. The test rig depends on the copy: a
+    script that switches it off sees nothing more on the serial port.
+
+SEE ALSO
+    cu(1), dmesg(1), docs/architecture.md (Serial)
