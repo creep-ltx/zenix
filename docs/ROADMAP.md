@@ -86,7 +86,7 @@ are fixed at once. Two independent design reviews for deep core changes, one for
 **The real-world benchmark (owner 2026-11-04: "having the mounted Amiga partitions give a better real world value"):**
 `time ls -laR /` on the A1200 with the 1260, the owner's AmigaOS partitions mounted (/mnt/dh0 PFS3 1 GB, /mnt/dh2
 PFS3 8 GB), to /dev/null and on the screen, in the text console and in zdesk's term. First figures (release
-2026110403, measured): /dev/null 4.36 s; text console 12.8 s; term 2 min 51.8 s.
+2026110403, measured): /dev/null 4.36 s; text console 12.8 s; term 2 min 51.8 s. PiStorm (Emu68, not a real-Amiga speed), the fresh ZenixFS SD root without Amiga partitions, release 2026110404 (owner's photos 2026-11-04): /dev/null 0.08-0.12 s, text console 1.37 s, term 0.32 s (release 2026110403 on the old SD card: console 1.95 s, term 44.8 s).
 
 **Real-hardware findings waiting (the A1200 with the 1260, 2026-11-04), fixed next:** the 040/060 data cache on for fast
 RAM through the transparent translation registers, chip RAM uncached (done 2026-11-04, D37: 4.23 s -> 0.95 s on the 1260; boot log was: "data cache off"; `ls -laR /` of 506
