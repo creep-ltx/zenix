@@ -26,6 +26,8 @@ for n in $CONFS; do
                 printf 'send \\x1d1\nsleep 2\n'; } >$OUT/$n.txt ;;
     *) cp tools/tests/matrix-test.txt $OUT/$n.txt ;;
     esac
+    # the checks below read only the serial log: the run ends when the script is done (not at the 95 s limit)
+    grep -qx stop $OUT/$n.txt || echo stop >>$OUT/$n.txt
     tools/run-test.sh "$f" 95 $OUT/$n.txt > $OUT/$n.log 2>&1
     if [ "$n" = a600-68000 ]; then
         grep -q 'needs a 68020' $OUT/$n.log && echo "PASS $n (refuses cleanly)" || echo "FAIL $n"

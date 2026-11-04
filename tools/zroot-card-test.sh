@@ -309,7 +309,7 @@ print(r[0][1], r[1][1])' $d/root.img)
     conf $d/m5.fs-uae $d/c.hdf $BD/zenix-zfs.adf
     cat >$d/k5.txt <<'EOF'
 wait Choose \(man rescue\) 600
-sleep 3
+sleep 0.5
 send 2
 sleep 2
 send 3
@@ -330,7 +330,7 @@ EOF
     # --old: on the owner's word, build on it; the shell's exit goes on read-write
     cat >$d/k6.txt <<'EOF'
 wait Choose \(man rescue\) 600
-sleep 3
+sleep 0.5
 send 3
 wait zenix:/# 120
 sleep 1

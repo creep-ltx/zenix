@@ -13,7 +13,7 @@ send abc\r
 wait sigtest ttyread: 30
 send sigtest select\r
 wait sigtest: type for select 30
-sleep 1
+sleep 0.2
 send xyz\r
 wait sigtest select: 30
 sleep 1

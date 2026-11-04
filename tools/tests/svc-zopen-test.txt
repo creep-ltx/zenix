@@ -1,15 +1,11 @@
 wait zenix:/# 90
 send cat /bin/sh /bin/edit /bin/gzip /bin/less > /tmp/keep; sync; echo f1=$(df | grep ' /$' | tr -s ' ' | cut -d' ' -f4)\r
 sleep 8
-send svctest keep /tmp/keep 10 &\r
-sleep 3
-send kill 3; sleep 1; echo n=$(ls / | wc -l)\r
+send svctest keep /tmp/keep 10 & sleep 3; kill 3; sleep 1; echo n=$(ls / | wc -l)\r
 wait svctest keep /tmp/keep: 40
 send sleep 4; sync; echo f2=$(df | grep ' /$' | tr -s ' ' | cut -d' ' -f4)\r
 sleep 8
-send svctest lost /tmp/lw 8 $(pgrep zfsd) &\r
-sleep 3
-send echo BBBB > /tmp/lw2; cat /tmp/lw2\r
+send svctest lost /tmp/lw 8 $(pgrep zfsd) & sleep 3; echo BBBB > /tmp/lw2; cat /tmp/lw2\r
 wait svctest lost /tmp/lw: 40
 send dmesg | grep 'svc:'; sync; echo svc-zo-done\r
 sleep 4

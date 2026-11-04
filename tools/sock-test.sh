@@ -22,14 +22,14 @@ send socktest basic ptr block poll restart partial connect sigpipe down > /tmp/s
 wait checks-done 300
 send socktest hang\r
 wait (?m)^hang: waiting 30
-sleep 2
+sleep 0.3
 send \x03
 sleep 2
 send echo hang-st=$? > /tmp/st-h.txt; socktest stuck > /tmp/st-o9.out 2>&1; echo stuck-do""ne\r
 wait stuck-done 60
 send socktest _netcall\r
 wait (?m)^netcall: calling 30
-sleep 2
+sleep 0.3
 send \x03
 sleep 2
 send echo nc-st=$? > /tmp/st-n.txt; socktest watchdog >> /tmp/st-o9.out 2>&1; echo wd-do""ne\r

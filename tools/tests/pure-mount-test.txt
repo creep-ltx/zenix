@@ -1,10 +1,10 @@
 wait zenix:/# 90
 sleep 1
-send mkdir -p /mnt; mount -t ext2 df1 /mnt; /mnt/hp 80 > /dev/null & sleep 1; echo ==m1; free\r
+send mkdir -p /mnt; mount -t ext2 df1 /mnt; /mnt/hp 800 > /dev/null & h1=$!; sleep 1; echo ==m1; free\r
 wait (?m)^==m1 30
-sleep 2
 send umount /mnt; echo umount=$?; mount -t ext2 df1 /mnt; /mnt/hp 30 > /dev/null & sleep 1; echo ==m2; free; ps\r
 wait (?m)^==m2 30
-sleep 16
-send echo pure-m-done\r
+sleep 2
+send kill $h1; wait; echo pure-m-done\r
+wait pure-m-done 60
 sleep 2
