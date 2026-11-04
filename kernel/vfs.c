@@ -50,6 +50,12 @@ __attribute__((noinline)) void file_close(struct file *f)
         serdev_close();
     if (f->type == FT_SOCK)
         sock_release(f->ino);               /* NET_CLOSE while its epoch lives (D19 rule 11) */
+    if (f->type == FT_TTY || f->type == FT_PTM) {
+        int t = f->type;
+        f->type = FT_NONE;                  /* first: a hang-up's signals see the file gone (D20 7.2) */
+        tty_closed(t, (int)f->off);
+        return;
+    }
     struct pipe *pp = (f->type == FT_PIPE_R || f->type == FT_PIPE_W) ? f->pipe : 0;
     if (pp) {
         if (f->type == FT_PIPE_R)
@@ -144,6 +150,8 @@ u16 vfs_poll(struct file *f)
     switch (f->type) {
     case FT_TTY:
         return tty_poll((int)f->off);
+    case FT_PTM:
+        return ptm_poll((int)f->off);
     case FT_SERIAL:
         return serdev_poll();
     case FT_PIPE_R:
@@ -666,12 +674,28 @@ long fs_exec_read(const struct exec_src *x, u32 off, void *dst, u32 n)
 
 /* the few device files: /dev/tty (this process's controlling tty), /dev/console (console 1), /dev/tty1 .. /dev/tty10
  * (the virtual consoles: root, or a process whose controlling tty it is - nobody reads another user's keys),
+ * /dev/ptmx (a new pty's master) and /dev/pts/0 .. /dev/pts/7 (its slave: root and its owner, DESIGN D20 7.2),
  * /dev/ttyS0 (the serial port, DESIGN D12), /dev/kmsg (root, write only: the kernel log, D24 6.5), /dev/null,
  * /dev/zero, /dev/urandom and /dev/random (DESIGN D19 9.3, random.c: off 1 waits until the pool is seeded) */
 static long open_device(const char *path, int flags)
 {
     int type = 0, con = 0;
     if (!strcmp_(path, "/dev/tty")) { type = FT_TTY; con = tty_of(current); }
+    else if (!strcmp_(path, "/dev/ptmx")) {
+        long i = pty_alloc();
+        if (i < 0)
+            return i;
+        type = FT_PTM;
+        con = (int)i;
+    }
+    else if (path[5] == 'p' && path[6] == 't' && path[7] == 's' && path[8] == '/' && path[9] >= '0' && path[9] <= '9' &&
+             !path[10]) {
+        long i = pty_slave_ok(path[9] - '0');
+        if (i < 0)
+            return i;
+        type = FT_TTY;
+        con = (int)i;
+    }
     else if (!strcmp_(path, "/dev/ttyS0")) {        /* the serial port (DESIGN D12): root, one owner at a time */
         if (current->uid != 0)
             return -EACCES;
@@ -708,11 +732,15 @@ static long open_device(const char *path, int flags)
     if (!f) {
         if (type == FT_SERIAL)
             serdev_close();
+        if (type == FT_PTM)
+            tty_gc(con);                    /* the new pty goes again */
         return -ENFILE;
     }
     f->off = (u32)con;
     f->flags = (u16)flags;
     f->mode = 020666;                       /* a character device */
+    if (type == FT_TTY || type == FT_PTM)
+        tty_opened(type, con);              /* a pty's open ends are counted (D20 7.2) */
     int fd = fd_install(current, f);
     if (fd < 0)
         file_close(f);
@@ -807,12 +835,15 @@ long vfs_stat(char *path, struct ustat *st)
 long vfs_fstat(struct file *f, struct ustat *st)
 {
     if (f->type == FT_TTY || f->type == FT_NULL || f->type == FT_ZERO || f->type == FT_SERIAL || f->type == FT_KLOG ||
-        f->type == FT_RANDOM) {
+        f->type == FT_RANDOM || f->type == FT_PTM) {
         memset(st, 0, sizeof *st);
         st->mode = 020666;
         st->links = 1;
         if (f->type == FT_TTY)
-            st->ino = f->off;               /* a console's number (1..NCONS): the ustat has no device field */
+            st->ino = f->off;               /* a console's number (1..NCONS), a pty slave's tty number (PTY_FIRST + N,
+                                             * D20 7.2): the ustat has no device field */
+        if (f->type == FT_PTM)
+            st->ino = PTY_MINO + f->off - PTY_FIRST;    /* a master's: ptsname reads N from it */
         return 0;
     }
     if (f->type == FT_SOCK) {               /* DESIGN D19: S_IFSOCK, as Linux shows a socket */
@@ -973,6 +1004,8 @@ long vfs_read(struct file *f, void *buf, u32 n)
     switch (f->type) {
     case FT_TTY:
         return tty_read((int)f->off, buf, n);
+    case FT_PTM:
+        return ptm_read((int)f->off, buf, n, (f->flags & O_NONBLOCK) != 0);
     case FT_PIPE_R:
         return pipe_read(f, buf, n);
     case FT_SERIAL:                         /* waits for at least one byte, then returns what has arrived */
@@ -1019,6 +1052,8 @@ long vfs_write(struct file *f, const void *buf, u32 n)
     switch (f->type) {
     case FT_TTY:
         return tty_write((int)f->off, buf, n);
+    case FT_PTM:
+        return ptm_write((int)f->off, buf, n, (f->flags & O_NONBLOCK) != 0);
     case FT_PIPE_W:
         return pipe_write(f, buf, n);
     case FT_SERIAL:

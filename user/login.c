@@ -40,6 +40,8 @@ static int session(const struct pw *p)
     setenv("HOSTNAME", host, 1);
     setenv("USER", p->name, 1); setenv("LOGNAME", p->name, 1); setenv("HOME", p->home, 1); setenv("SHELL", p->shell, 1);
     setenv("PATH", "/bin", 1);
+    sys_ttyctl(0, TTYC_OWNER, p->uid);  /* a pty (DESIGN D20 7.2): the user may open its terminal again (/dev/tty,
+                                         * sudo's prompt); a console answers -ENOTTY, nothing to do */
     sys_setgid(p->gid);
     pw_initgroups("login", p);          /* its gid and every group listing it in /etc/group */
     sys_setuid(p->uid);

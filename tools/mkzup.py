@@ -236,7 +236,7 @@ FAMILIES = [
     ("zine", "ZINE: AmigaOS programs on Zenix (zine PROGRAM)", "zine"),
     ("zinstall", "the installer: put Zenix on a disk; the boot partition's programs", "zinstall"),
     ("zenix-tests", "Zenix's test programs and the start-up programs' copies", "hello spin crash badptr msgpingd msgping "
-                    "socktestd socktest bench termtest priotest svctest sigtest nettest cryptotest boot diskd"),
+                    "socktestd socktest bench termtest priotest svctest sigtest ptytest nettest cryptotest boot diskd"),
 ]
 BASE_SBIN = ["zfsd", "netd", "nfscd"]              # not in UAPPS (not commands): build/NAME.zx, installed as /sbin/NAME
 # the licence notices of the code from other projects (owner decision, DESIGN D19 2026-10-27), as tools/mkroot.sh

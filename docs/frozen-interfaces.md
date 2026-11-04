@@ -64,6 +64,17 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   console's UTF-8 rules as documented behaviour (D28 section 4: nothing decoded inside an escape sequence, a byte that
   is not part of a character one cell of its Latin-1 glyph or the box, C1 controls written as UTF-8 ignored, U+FFFE
   and U+FFFF stored as U+FFFD) and its widths (picolibc's `wcwidth` in a non-CJK locale, section 9).
+- **D20 7.2 (pseudo-terminals, D38 step 1, branch desk, 2026-11-04):** `SYS_ttyctl` 95 (fd, op, arg; -ENOTTY for a
+  descriptor that is no terminal, -EBADF, -EINVAL for another op) and its ops: `TTYC_GWINSZ` 1 (arg `struct
+  uwinsize *`, written: rows, columns, 0, 0; a console's is the screen's), `TTYC_SWINSZ` 2 (a pty's, on either end,
+  rows and columns 1..32767 else -EINVAL, a console -EINVAL; a change sends SIGWINCH to the slave's foreground),
+  `TTYC_OWNER` 3 (root, else -EPERM; a pty, a console -ENOTTY; arg a uid up to 65535), `TTYC_SCTTY` 4 (arg 0, a
+  console or a pty's slave; -EPERM when another living process leads it, -EIO when hung up); `struct uwinsize`
+  (Linux's `struct winsize`, 8 bytes); `SYS_ttyinfo`'s meaning, "this process's tty's size", now a pty's for a process
+  on one; the names `/dev/ptmx` and `/dev/pts/N`; a slave's `st_ino` its tty number `NCONS + 1 + N` (11 and up,
+  never 1..10) and a master's `0x100 + N`; `isatty` true on both ends; a master's read -EIO when no slave is open and
+  nothing is left, its `poll` POLLHUP then; the hang-up's SIGHUP then SIGCONT, a hung-up slave's read 0 and write -EIO;
+  LF written to a slave reaching the master as CR LF; libz's and the C library's `ioctl` numbers (Linux's).
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).

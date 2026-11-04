@@ -1670,6 +1670,18 @@ static void job_join(int pid, int pg)   /* pid joins group pg (its own when pg i
 
 #define MAXJOBS 16
 static struct job { int pid, pgid; char *cmd; u8 used, done, stopped; int status; int pids[8], np; } jobs[MAXJOBS];
+/* SIGHUP (the terminal hung up: a pty's master closed, DESIGN D20 7.2): SIGHUP and SIGCONT to every job, then the end
+ * (bash's rule), so no job is left stopped for ever. Only system calls here: safe in a handler */
+static void on_hup(int sig)
+{
+    for (int i = 0; i < MAXJOBS; i++)
+        if (jobs[i].used && !jobs[i].done) {
+            int t = jobs[i].pgid ? -jobs[i].pgid : jobs[i].pid;
+            kill(t, SIGHUP);
+            kill(t, SIGCONT);
+        }
+    sys_exit(128 + sig);
+}
 static int add_job(int pid, const char *cmd)
 {
     for (int i = 0; i < MAXJOBS; i++) if (!jobs[i].used) { jobs[i].used = 1; jobs[i].done = 0; jobs[i].stopped = 0; jobs[i].pid = pid; jobs[i].pgid = interactive ? last_pg : 0; jobs[i].pids[0] = pid; jobs[i].np = 1; jobs[i].cmd = pdup(cmd); return i + 1; }
@@ -2912,6 +2924,7 @@ static int shell_main(int argc, char **argv)
     my_pgid = shell_pid;
     sh_catch(SIGINT, on_signal);
     sh_catch(SIGTSTP, on_tstp);
+    sh_catch(SIGHUP, on_hup);
     sys_setfgpg(my_pgid);
     run_startup_file("/etc/profile");
     { char p[ZPATH_MAX]; const char *h = var_get("HOME"); if (!h || strlen(h) + 7 > sizeof p) h = "/"; strcpy(p, h); u32 l = strlen(p); if (l && p[l - 1] != '/') p[l++] = '/'; strcpy(p + l, ".shrc");

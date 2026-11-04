@@ -410,8 +410,12 @@ void syscall_c(u32 *rb)
         tty_setmode(tty_of(current), (int)a1, current->pid);
         r = 0;
         break;
-    case SYS_ttyinfo:
-        r = term_size();
+    case SYS_ttyinfo:                   /* this process's tty's size: a console's screen, or its pty's (D20 7.2) */
+        r = tty_size(tty_of(current));
+        break;
+    case SYS_ttyctl:
+        if (GETFD(f, a1))
+            r = (s32)tty_ctl(f, a2, a3);
         break;
     case SYS_envset:                    /* a new block of the caller's (proc.c), then the old one goes */
         r = -E2BIG;
@@ -493,7 +497,7 @@ void syscall_c(u32 *rb)
     case SYS_groups: r = do_groups(a1, a2, a3); break;
     case SYS_umask: r = current->umask; current->umask = (u16)(a1 & 0777); break;
     case SYS_isatty:
-        r = GETFD(f, a1) && f->type == FT_TTY;
+        r = GETFD(f, a1) && (f->type == FT_TTY || f->type == FT_PTM);   /* a pty's master too (Linux) */
         break;
     case SYS_hrtime:
         r = (s32)hr_time();

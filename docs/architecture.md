@@ -687,8 +687,9 @@ pattern (section 6).
   descriptors 0-2 (so a pipe's write end can't leak into a reader and prevent end-of-file). At most 256 arguments
   and 8 KB of argument text (`SPAWN_ARGC`, `SPAWN_ARGBYTES`, syscall.c; copied through the kernel heap, not the
   4 KB kernel stack); more is refused with -E2BIG.
-- **Controlling tty** (`struct proc` `ctty`, audit E): a process's terminal is the console of its fd 0 at spawn
-  when that is a console (init starting `login` on `/dev/ttyN`), else its parent's. `/dev/tty`, `SYS_ttymode`,
+- **Controlling tty** (`struct proc` `ctty`, audit E): a process's terminal is the tty of its fd 0 at spawn
+  when that is a tty (a console: init starting `login` on `/dev/ttyN`; a pty's slave: `term` starting the shell,
+  DESIGN D20 7.2), else its parent's. `/dev/tty`, `SYS_ttymode`,
   `SYS_setfg` and `SYS_ttyintr` use it, so the second stage of `ls | less` on console 2 reads console 2's keys
   (before, a process whose fd 0 was a pipe fell back to console 1).
 - Process exit closes fds, releases the tty, closes the process's ports (clients get an error), frees all
@@ -704,8 +705,8 @@ pattern (section 6).
 
 ## 7. System calls (`kernel/syscall.c`)
 
-`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 91 system calls (the numbers and
-a line on each are in `kernel/kernel.h`; numbers 1-94, of which 39, 40 and 68 are unused; the next free number is
+`TRAP #0`, call number in `d0`, arguments in `d1-d3`, result in `d0`. There are 92 system calls (the numbers and
+a line on each are in `kernel/kernel.h`; numbers 1-95, of which 39, 40 and 68 are unused; the next free number is
 claimed in CLAUDE.md first): the network (`sock`, `netsrv`, `drv`: section 11, "Sockets" and "The network's drivers"), files (`open close read write lseek readdir stat fstat lstat chdir getcwd mkdir unlink
 rmdir rename link symlink readlink chmod chown utimes dup dup2 pipe sync isatty`, and `statfs`, which takes a mount
 index), processes (`spawn wait exit yield sleep getpid kill jobctl procinfo getpriority setpriority setpgid`),
@@ -713,7 +714,7 @@ events and signals (`evwait sigaction sigprocmask sigreturn alarm`, section 6), 
 `update`), services (`svc`), memory (`memalloc memfree meminfo`),
 time (`ticks hrtime time settime`; `ticks` with 0 is the 100 Hz tick count, a 32-bit number that wraps after 497 days, and with 1 the whole seconds since boot, the clock's own count that wraps after 136 years (`uptime`; audit 2026-10-26 F9); `time` is the seconds since 1970 as an **unsigned** 32-bit number, good until
 2106: the base the battery clock or `settime` gave plus the whole seconds the tick counts itself, `kernel/clock.h`, so
-it does not jump back when the 32-bit tick count wraps after 497 days; audit 2026-10-26 F8), terminal (`ttymode ttyinfo ttyintr setfg ttymirror`, and `console`, the
+it does not jump back when the 32-bit tick count wraps after 497 days; audit 2026-10-26 F8), terminal (`ttymode ttyinfo ttyctl ttyintr setfg ttymirror`, and `console`, the
 display's colours: D14 note section 11), environment (`envset
 envget`), identity (`getuid getgid geteuid setuid setgid groups umask`, section 14), messages (`port_create port_find call
 recv reply replyrecv`), mounts (`mount umount mountinfo`), the kernel log and input (`klog input`), and privileged
@@ -1305,7 +1306,7 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   readers sends the writer SIGPIPE, which by default ends it with status 141 (ignored: the write gives -EPIPE; DESIGN
   D16). A blocked reader or writer waits on the pipe's slot mask (section 6). Special files `/dev/tty` (the process's controlling
   tty), `/dev/tty1` .. `/dev/tty10` (the consoles; another console than one's own: root only, -EACCES), `/dev/console`
-  (console 1, the same rule), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
+  (console 1, the same rule), `/dev/ptmx` and `/dev/pts/N` (pseudo-terminals, below), `/dev/ttyS0` (the serial port, DESIGN D12: root, one owner at a time (-EBUSY); while it
   is open the console's copy, the kernel log's copy and the 0x1D hook stay off the wire and received bytes wait in the
   receive ring for its reader - a ring of its own, allocated at the open and freed at the close: 4 KB, or 32 KB with
   2 MB of free fast RAM (netd's large profile), so it holds all that TCP's window lets the far side send while netd
@@ -1444,6 +1445,31 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   kept**: when a program switches the tty to raw mode (the shell's line editor after a command), what was typed
   meanwhile as a half line goes into the queue as it is (before, `tty_setmode` dropped it: `rm /etc/motd` typed
   during a slow command arrived as `c/motd`).
+- **Pseudo-terminals** (`tty.c`, DESIGN D20 7.2, D38 step 1): `/dev/ptmx` opens the master of the lowest free pty
+  (anyone; -EAGAIN when all `NPTY` 8 are in use), `/dev/pts/N` its slave (root and the pty's owner uid, first the
+  master's opener, set by root's `TTYC_OWNER`: `login` gives it to the user; -ENOENT for a pty that does not exist,
+  -EIO once hung up). The slave is a tty like a console's (ttys `PTY_FIRST` 11 .. 18 after the consoles 1 .. 10), with
+  the same line discipline: what the master writes is typed into it (echo, editing, `^C`/`^Z` to the foreground,
+  cooked and raw), waiting while the input queue has no room for the next byte; what the slave writes, and the
+  echo, goes into a 2 KB output ring the master reads, LF as CR LF as the console draws it (an echo that finds the
+  ring full is dropped and counted in the log). `st_ino`: a slave's is its tty number (11 and up, never a console's,
+  so `login`'s autologin test never matches), a master's `PTY_MINO` 0x100 + N (`ptsname` reads N from it). A pty is
+  allocated at the master's open (about 3.6 KB with its rings) and freed only when the master, every slave descriptor
+  and every living process naming it as its controlling tty are gone, so a number is never reused while a
+  lingering process of an old session could read the next one's input. **Hang-up:** the master's last close sends
+  SIGHUP then SIGCONT to every process whose controlling tty it is (the members of a group on another terminal are
+  not hung up); then slave reads give 0 and writes -EIO. The interactive shell, on SIGHUP, sends SIGHUP and SIGCONT to
+  its jobs and ends (bash's rule). With no slave open, a master read gives -EIO (after what is left in the ring) and
+  `poll` POLLHUP. **Size:** each pty has one (24 x 80 at first); `SYS_ttyinfo` answers the caller's tty's; `SYS_ttyctl`
+  (`fd`, `TTYC_*`, arg) gets it (`TTYC_GWINSZ`, a console's is the screen's), sets a pty's on either end
+  (`TTYC_SWINSZ`, 1..32767 each; a change sends SIGWINCH to the slave's foreground), sets the owner (`TTYC_OWNER`,
+  root) and makes the terminal the caller's controlling tty with the caller its session leader when nobody living
+  leads it (`TTYC_SCTTY`). The **session leader** is the first process spawned onto a tty from another one (`login`
+  on a pty), after D18's step-aside the shell `login` hands to; libz's `setsid` makes the caller its own group and,
+  through `TTYC_SCTTY`, the leader of its fd 0's terminal if nobody leads it (no POSIX session ids). libz and the C
+  library (`user/zpty.c`): `posix_openpt`, `grantpt` and `unlockpt` (nothing to do), `ptsname`, `ptsname_r`,
+  `openpty`, `setsid`, and `ioctl`'s `TIOCGWINSZ`, `TIOCSWINSZ`, `TIOCSCTTY`. Verified in FS-UAE by
+  `tools/pty-test.sh` (`ptytest`, docs/man/ptytest.txt).
 - **Terminal** (`term.c`): an 80-column text grid per console, as many rows as the display has (32 on PAL, 25 on
   NTSC: `trows`), plus 200 lines of scrollback, ANSI/VT100/xterm: cursor motion, erase, insert/delete, scroll regions,
   bold (pixel smear), underline, inverse; `ESC[6n` answers with the cursor position, as input on the console of the

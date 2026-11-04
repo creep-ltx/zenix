@@ -647,8 +647,10 @@ static int proc_load(const union zhdr *hu, u32 fsize, fillfn fill, const void *f
             p->fd[i] = i == 0 ? t : file_dup(t);
         p->ctty = (u8)tty;
     }
-    if (p->ctty < 1 || p->ctty > NCONS)
+    if (p->ctty < 1 || p->ctty >= NTTYS)
         p->ctty = 1;
+    if (parent)
+        tty_spawned(p, parent->ctty);   /* the session leader rule (D20 7.2) */
     p->priv = priv;
     p->state = P_READY;
     {
@@ -907,6 +909,7 @@ void proc_exit(int code)
         sig_send(par, SIGCHLD);
     }
     tty_release(p->pid);
+    tty_proc_gone(p);                   /* D20 7.2: its leadership ends; a pty nobody names any more is freed */
     term_release(p->pid);               /* D20: the console fonts and rules it set */
     ipc_proc_exit(p->pid);
     proc_reap_orphans();                /* its zombie children have nobody to wait for them now */
@@ -924,6 +927,8 @@ void proc_handover(int pid)
     if (!c || c == current || c->ppid != current->pid || !par || par->state == P_ZOMBIE)
         return;
     c->ppid = par->pid;
+    if (c->ctty == current->ctty)
+        tty_lead_move(current->pid, c->pid);    /* D20 7.2: the session's leader is the shell login hands to */
     if (c->state == P_ZOMBIE || c->state == P_STOP) {
         ev_post(par, EV_CHILD);
         sig_send(par, SIGCHLD);

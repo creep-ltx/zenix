@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* BSD sockets (DESIGN D19 4.4, user/socket.h): each call fills a struct usockreq and makes one SYS_sock; the kernel
- * checks every pointer and waits (D19 4.3). Also fcntl and ioctl (the C library's ioctl adds TIOCGWINSZ, DESIGN D27
+ * checks every pointer and waits (D19 4.3). Also fcntl and ioctl (TIOCGWINSZ, TIOCSWINSZ, TIOCSCTTY: DESIGN D27
  * 5.4), the addresses as text and the names (netd's lookups). One source for libz and the C library (user/zshare.h). */
 #include "zshare.h"
 #include <stdarg.h>
@@ -105,16 +105,12 @@ int ioctl(int fd, unsigned long req, ...)
     va_start(ap, req);
     void *p = va_arg(ap, void *);
     va_end(ap);
-#ifdef ZENIX_LIBC
-    if (req == TIOCGWINSZ) {            /* the console's size (DESIGN D27 5.4): SYS_ttyinfo, rows << 16 | columns */
-        struct winsize *w = p;
-        if (!isatty(fd)) return -1;     /* ENOTTY, or EBADF */
-        if (!w) { zerrno = EFAULT; return -1; }
-        int rc = sys_ttyinfo();
-        w->ws_row = (unsigned short)(rc >> 16); w->ws_col = (unsigned short)rc; w->ws_xpixel = w->ws_ypixel = 0;
-        return 0;
-    }
-#endif
+    /* a terminal's size and the controlling tty (DESIGN D27 5.4, D20 7.2): SYS_ttyctl on that descriptor (ENOTTY when
+     * it is not a terminal) */
+    if (req == TIOCGWINSZ || req == TIOCSWINSZ)
+        return sys_ttyctl(fd, req == TIOCGWINSZ ? TTYC_GWINSZ : TTYC_SWINSZ, (u32)p) < 0 ? -1 : 0;
+    if (req == TIOCSCTTY)
+        return sys_ttyctl(fd, TTYC_SCTTY, (u32)p) < 0 ? -1 : 0;   /* the argument is an int, 0 (Linux) */
     if (req != FIONREAD && req != FIONBIO) { zerrno = ENOTTY; return -1; }
     if (!p) { zerrno = EFAULT; return -1; }
     return sk_ioctl(fd, (u32)req, p);

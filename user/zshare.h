@@ -2,7 +2,7 @@
 /* The files libz and the C library share (DESIGN D27 section 6 step 1: one source each, compiled into both): the
  * allocator (zmalloc.c), the error texts (zerrtab.c), the buffered output (zout.c), the environment (zenv.c), the
  * signals (zsig.c), waiting for several things (zpoll.c), the sockets (zsock.c), the helpers for paths, directories
- * and colours (zhelp.c) and the user and group parser (zpw.c). Built into libz (user/libz.h's world) or, with
+ * and colours (zhelp.c), the user and group parser (zpw.c) and the pseudo-terminals (zpty.c). Built into libz (user/libz.h's world) or, with
  * ZENIX_LIBC, into the C library (picolibc's headers, libc/zenix; the helpers' prototypes are libzenix's, zenix.h). */
 #pragma once
 #ifdef ZENIX_LIBC
