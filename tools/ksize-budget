@@ -33,9 +33,14 @@
 # 175,732 -> 179,700, TOTAL 176,000 -> 180,000; the mount tests' RAM disk 704 -> 700 KB. After the two reviews
 # (the grab ends with its server, the CPU draws after a forced switch, the hardware state restored, clicks latched, the
 # pty fixes): gcon 2,900 -> 3,400, gfx 8,200 -> 8,400, tty 5,800 -> 5,900; kernel.bin 180,720, TOTAL 181,000.
+# 2026-11-04 (DESIGN D28 20, the console faster and without flicker): gfx 8,316 -> 9,158 (the ring of rows: two sets of
+# plane pointers and the WAITs for the wrap, copies and fills per piece of the ring, the wait for the vertical blank),
+# term 12,662 -> 12,910 (a cell stored as it is is not drawn again, nor a blank cell erased again), serial 5,824 ->
+# 6,025 (the copy waits only while something was received in the last 10 s); kernel.bin 180,720 -> 182,036, TOTAL
+# 181,000 -> 182,100.
 start     4300   8200
 main      5950   1100
-serial    5950   6500
+serial    6100   6500
 mem       2900    240
 ide       3400    560
 emmc      4900    640
@@ -49,8 +54,8 @@ proc      9300  21500
 syscall  10150      0
 vfs      11450   1600
 tty       5900    100
-gfx       8400   2320
-term     12800     64
+gfx       9200   2320
+term     13000     64
 confont   3100     32
 kbd       4300    180
 ipc       3400   1600
@@ -65,5 +70,5 @@ zine      1500     16
 cache     1700     32
 gcon      3400     16
 embed    47500      0
-TOTAL   181000
+TOTAL   182100
 ROOM       800

@@ -48,6 +48,10 @@ LINE EDITING
     Ctrl+L   clear the screen            Ctrl+C   cancel the line
     What is typed while a command runs is kept and appears at the next
     prompt (as on a Unix tty).
+    Each key redraws only what changed on the line, in one write (a key
+    typed at the end writes that character alone). Text another program
+    writes onto the line while you edit stays until Ctrl+L redraws it (as
+    in bash).
     Every byte from 0x80 to 0xFF typed or pasted is text (part of a UTF-8
     character, for instance); only the Del key itself deletes.
     A line holds 478 characters. A key typed past that rings the bell and

@@ -17,11 +17,16 @@
  * One plane is always fetched 16 bits at a time (as verified on the A1200); 2 to 4 on AGA at FMODE 3.
  * make GFXDEPTH=1|2|3|4 builds a kernel that uses that depth wherever it can (the screenshot tests).
  * The planes are interleaved: the planes of a line lie one after another (80 bytes each), so one base pointer serves
- * all planes and a clear or copy of whole lines is one blit. Scrolling the text is a pointer bump in the Copper list,
- * applied at vertical blank; only when the window reaches the end of the buffer (twice the screen's height) does the
- * blitter copy the visible rows back to the top (the copy leaves identical pixels, so the switch cannot be seen).
- * Region scrolls (CSI S/T/L/M, a scroll region) are one blitter copy too, and erased rows a blitter fill with the
- * background colour. A glyph is drawn by the CPU, one byte per plane per glyph line: (glyph & m1) ^ m2 per plane, m1
+ * all planes and a clear or copy of whole lines is one blit. The buffer is a ring of text rows (the screen's rows
+ * and some spare ones, below): display row r is the ring's row (base + r) mod nring, so scrolling the whole screen
+ * is base + 1 and one blitter fill of the row that comes in, never a copy. The Copper list shows it with two sets of
+ * plane pointers: the first at the top (the ring's row base), the second where the ring wraps (its row 0), after a
+ * WAIT for that line (PAL's lines from 256 on through the usual WAIT for line 255's end first), both written at
+ * vertical blank. The spare rows keep the text the CPU and blitter draw out of sight while the display still shows
+ * an older base (several scrolls within one frame); a scroll that would reach the rows on show waits for the
+ * vertical blank (DESIGN D28 20). Region scrolls (CSI S/T/L/M, a scroll region) are blitter copies too, a copy per run
+ * of rows that lie in one piece of the ring, and erased rows blitter fills with the background colour. A glyph is
+ * drawn by the CPU, one byte per plane per glyph line: (glyph & m1) ^ m2 per plane, m1
  * set where the foreground and background bits differ, m2 where the background bit is set. Glyphs come from the
  * Kickstart ROM's Topaz 8, found through GfxBase before the OS memory is reused.
  * DESIGN D28: a cell above U+00FF (gfx_ucell) takes its glyph from the Unicode font (confont.c: the half-page index,
@@ -60,18 +65,20 @@
 #define DENISEID REG16(0xDFF07C)        /* Lisa (AGA) reads 0xF8 in the low byte; OCS has no such register */
 #define COP_WAIT_LINE 0x20              /* the Copper waits for this line before it moves the plane pointers */
 #define STRIDE  80                      /* bytes per plane per line */
-#define BUFL    (2 * TROWS_MAX * 8)
+#define NRING_MAX (2 * TROWS_MAX)       /* the ring's rows at most: the screen's and as many spare */
 
 int trows = TROWS_MAX;                  /* text rows on this display: 32 (PAL) or 25 (NTSC) */
 int gfx_depth;                          /* bitplanes: 1 to 4 (0: no display) */
 static int dlines = 256;                /* display lines: 8 * trows */
 static u32 lstride;                     /* bytes per display line: 80 per plane */
+static u32 rstride;                     /* bytes per text row: 8 lines */
 static int aga;
-static u8 *tbuf;                        /* chip RAM */
+static u8 *tbuf;                        /* chip RAM: nring rows */
+static int nring;                       /* the ring's rows: trows + spare (gfx_init) */
 static volatile u16 *cop;
-static int cop_col, cop_ptr;            /* where the colours and the plane pointers are in the Copper list (words) */
-static int off;                         /* drawing window top (lines) */
-static volatile int hw_off = -1;        /* what the Copper list shows */
+static int cop_col, cop_ptr, cop_ptr2;  /* where the colours and the two sets of plane pointers are (words) */
+static int base;                        /* the ring's row shown as display row 0 (the drawing's) */
+static volatile int hw_base = -1;       /* what the Copper list shows (-1: not known yet) */
 static u8 glyphs[224][8] __attribute__((aligned(4)));  /* Latin-1 32..255 */
 static u8 c1alt[32][8];                 /* D28: the glyphs of 0x80-0x9F not in glyphs[] now (Topaz's, or the boxes) */
 static int c1topaz;                     /* glyphs[] holds Topaz's own 0x80-0x9F (8-bit mode shown) */
@@ -414,21 +421,39 @@ static inline __attribute__((always_inline)) HOT void put_glyph(u8 *p, u8 ch, u3
         draw2(p, g, expand[fg ^ bg], expand[bg]);
 }
 
-static u8 *line_at(int l) { return tbuf + (u32)l * lstride; }
 /* gfx_cell's addresses without a multiply (the 68020's muls.l costs up to 44 cycles, and gcc turns shift-and-add back
- * into one): `top` is the drawing window's first line, `rowoff` each text row's byte offset from it (DESIGN D28 15) */
+ * into one): `top` is the ring's first byte, `rowoff` each display row's byte offset in the ring (DESIGN D28 15, 20) */
 static u8 *top;
 static u32 rowoff[TROWS_MAX];
-static void set_off(int o)              /* the drawing window moves (off), or tbuf/lstride changed */
+static void set_base(int b)             /* the ring's row b is display row 0 now, or tbuf/lstride changed */
 {
-    off = o;
-    top = line_at(o);
-}
-static void set_rows(void)              /* lstride changed: each text row is 8 lines */
-{
-    u32 a = 0;
-    for (int r = 0; r < TROWS_MAX; r++, a += 8 * lstride)
+    base = b;
+    top = tbuf;
+    u32 a = (u32)b * rstride, end = (u32)nring * rstride;
+    for (int r = 0; r < TROWS_MAX; r++, a += rstride) {
+        if (a >= end)
+            a -= end;
         rowoff[r] = a;
+    }
+}
+static u8 *row_at(int r) { return tbuf + rowoff[r]; }
+static u8 *line_at(int l) { return row_at(l >> 3) + (u32)(l & 7) * lstride; }     /* display line l */
+
+/* how many of the display rows a.., and b.. (n at most) lie in one piece of the ring each */
+static int run_up(int a, int b, int n)
+{
+    int k = 1;
+    while (k < n && rowoff[a + k] == rowoff[a + k - 1] + rstride && rowoff[b + k] == rowoff[b + k - 1] + rstride)
+        k++;
+    return k;
+}
+/* the same, the rows ..a and ..b counted backwards (a and b the last ones) */
+static int run_down(int a, int b, int n)
+{
+    int k = 1;
+    while (k < n && rowoff[a - k] + rstride == rowoff[a - k + 1] && rowoff[b - k] + rstride == rowoff[b - k + 1])
+        k++;
+    return k;
 }
 
 HOT __attribute__((noipa)) void gfx_cell(int row, int col, u8 ch, u8 attr, u8 colour)
@@ -528,27 +553,55 @@ void gfx_fill_rows(int row, int n, u8 colour)
 {
     if (!up || n <= 0)
         return;
-    blit_fill(line_at(off + row * 8), (u32)n * 8, bg_of(colour));
+    u32 bg = bg_of(colour);
+    for (int k; n > 0; row += k, n -= k) {     /* a fill per piece of the ring */
+        k = run_up(row, row, n);
+        blit_fill(row_at(row), (u32)k * 8, bg);
+    }
     blit_wait();
 }
 
-/* n text rows from row src to row dst (they may overlap), by the blitter */
+/* n text rows from row src to row dst (they may overlap), by the blitter: a copy per run of rows that lie in one piece
+ * of the ring at both ends, upwards from the first row (dst above src) or downwards from the last, so a row is read
+ * before it is written over (a run itself copies as memmove does) */
 void gfx_move_rows(int dst, int src, int n)
 {
     if (!up || n <= 0 || dst == src)
         return;
-    blit_copy(line_at(off + src * 8), line_at(off + dst * 8), (u32)n * 8 * (u32)gfx_depth);
+    u32 pl = 8 * (u32)gfx_depth;
+    if (dst < src)
+        for (int i = 0, k; i < n; i += k) {
+            k = run_up(dst + i, src + i, n - i);
+            blit_copy(row_at(src + i), row_at(dst + i), (u32)k * pl);
+        }
+    else
+        for (int i = n, k; i > 0; i -= k) {
+            k = run_down(dst + i - 1, src + i - 1, i);
+            blit_copy(row_at(src + i - k), row_at(dst + i - k), (u32)k * pl);
+        }
     blit_wait();
 }
 
-/* point the Copper list's plane pointers at display line o of the buffer */
-static void cop_point(int o)
+/* the Copper list shows the ring from its row b: the first pointers at row b, a WAIT for the line where the ring
+ * wraps (after the picture when it does not wrap on the screen), the second pointers at its row 0. A line from 256
+ * on is waited for in two steps: line 255's end, then the line's low 8 bits (the Copper compares 8 bits of the line).
+ * Written at vertical blank, or with the interrupts off (a panic). */
+static void cop_point(int b)
 {
-    const u8 *p = line_at(o);
+    const u8 *p = tbuf + (u32)b * rstride;
+    int s = (nring - b) * 8;            /* the display line where the ring wraps */
+    if (s > dlines)
+        s = dlines;
+    u32 l = (u32)(DIW_V + s);
     for (int k = 0; k < gfx_depth; k++, p += STRIDE) {
         cop[cop_ptr + 4 * k + 1] = (u16)((u32)p >> 16);
         cop[cop_ptr + 4 * k + 3] = (u16)(u32)p;
+        const u8 *q = tbuf + (u32)k * STRIDE;
+        cop[cop_ptr2 + 4 * k + 1] = (u16)((u32)q >> 16);
+        cop[cop_ptr2 + 4 * k + 3] = (u16)(u32)q;
     }
+    cop[cop_ptr2 - 4] = l >= 256 ? 0xFFDF : (u16)(l << 8 | 1);
+    cop[cop_ptr2 - 2] = (u16)((l & 0xFF) << 8 | 1);
 }
 
 /* vertical-blank interrupt: apply a scroll. The Copper moves the pointers after its WAIT for line COP_WAIT_LINE, so
@@ -563,10 +616,10 @@ static u16 colour_of(int i, int depth)
 
 void gfx_vblank(void)
 {
-    int o = off;
-    if (up && (o != hw_off || pal_dirty) && (int)((VPOSL >> 8) & 0x1FF) < COP_WAIT_LINE - 4) {
+    int o = base;
+    if (up && (o != hw_base || pal_dirty) && (int)((VPOSL >> 8) & 0x1FF) < COP_WAIT_LINE - 4) {
         cop_point(o);
-        hw_off = o;
+        hw_base = o;
         if (pal_dirty) {
             pal_dirty = 0;
             for (int i = 0; i < (1 << gfx_depth); i++)
@@ -576,27 +629,62 @@ void gfx_vblank(void)
     gcon_vblank();                      /* D38: the pointer's new place, before sprite DMA reads it */
 }
 
+/* DESIGN D28 20: the row a scroll brings in must not be on show. The display shows the ring from hw_base (set at
+ * vertical blank); the drawing may run ahead of it by up to the spare rows (nring - trows) - more scrolls than that
+ * within one frame wait for the vertical blank. Not with the interrupts masked (a panic, a kprintf inside a masked
+ * part: no vertical blank comes), and every wait has a timeout: 100 ms, said once on the log, then no more waits. */
+static int vb_dead;
+static void vb_room(int nb)
+{
+    int h = hw_base;
+    if (h < 0 || vb_dead)
+        return;
+    int ahead = nb - h;
+    if (ahead < 0)
+        ahead += nring;
+    if (ahead <= nring - trows)
+        return;
+    u16 sr;
+    __asm__ volatile("move.w %%sr,%0" : "=d"(sr));
+    if ((sr & 0x0700) >= 0x0300)
+        return;                         /* the vertical-blank interrupt (level 3) cannot come */
+    u32 t0 = hr_time(), n = 0;
+    while (hw_base == h)
+        if ((++n & 63) == 0 && (u32)(hr_time() - t0) > eclock_hz / 10) {
+            vb_dead = 1;
+            kprintf("gfx: no vertical blank in 100 ms: scrolling goes on without waiting for it\n");
+            return;
+        }
+}
+
 void gfx_scroll(u8 colour)
 {
     if (!up)
         return;
-    if (off + 8 + dlines <= BUFL) {
-        set_off(off + 8);
-    } else {                            /* end of buffer: copy rows 1.. back to the top */
-        blit_copy(line_at(off + 8), tbuf, (u32)(trows - 1) * 8 * (u32)gfx_depth);
-        set_off(0);
-    }
-    blit_fill(line_at(off + (trows - 1) * 8), 8, bg_of(colour));
+    vb_room(base + 1 == nring ? 0 : base + 1);
+    int nb = base + 1 == nring ? 0 : base + 1;     /* read again: vb_room's log line may have scrolled (the boot log) */
+    int nr = nb + trows - 1;                        /* the row that comes in, filled before the display may show it */
+    if (nr >= nring)
+        nr -= nring;
+    blit_fill(tbuf + (u32)nr * rstride, 8, bg_of(colour));
+    set_base(nb);
     blit_wait();
 }
 
+/* the whole screen takes the background of `colour`; the ring keeps its place. The display may still show an older
+ * base until the vertical blank: its rows are cleared too when they are others */
 void gfx_clear_text(u8 colour)
 {
     if (!up)
         return;
-    set_off(0);
-    blit_fill(tbuf, (u32)dlines, bg_of(colour));
-    blit_wait();
+    int h = hw_base;
+    if (h >= 0 && h != base) {
+        int b = base;
+        set_base(h);
+        gfx_fill_rows(0, trows, colour);
+        set_base(b);
+    }
+    gfx_fill_rows(0, trows, colour);
 }
 
 /* The beam's last line over three frames (about 60 ms, timed with the E-clock counter, which main.c starts before
@@ -625,12 +713,18 @@ static int lisa(void)
     return v == 0xF8;
 }
 
+/* DESIGN D28 20: the ring's chip RAM at ls bytes a line. Its spare rows (gfx_init): as many as the screen's with fast
+ * RAM (up to 32 scrolls within a frame before one waits: about 1,600 lines a second on PAL), half as many on a machine
+ * with chip RAM only (whose CPU draws far fewer lines than 800 a second) */
+static u32 ring_bytes(u32 ls) { return (u32)nring * 8 * ls; }
+
 /* the depth for this machine (D14's default, section 11): AGA with fast RAM: 4; fast RAM on OCS/ECS, or 2 MB of chip
  * RAM and no fast RAM: 3; otherwise 1. GFX_DEPTH (make GFXDEPTH=n) asks for one: 4 only on AGA (else 3). */
+static int fast;                        /* the machine has fast RAM (pick_depth) */
 static int pick_depth(void)
 {
     const struct bootinfo *bi = (const struct bootinfo *)0x1000;
-    int fast = 0, chip2m = 0;
+    int chip2m = 0;
     for (int i = 0; i < bi->nregions && i < 8; i++) {
         if (bi->r[i].attrs & MEMF_CHIP) {
             if (bi->r[i].upper >= 0x200000u)
@@ -647,9 +741,10 @@ static int pick_depth(void)
     return chip2m ? 3 : 1;
 }
 
-/* the Copper list for `depth` planes into l (COP_BYTES of chip RAM); the indices of its colours and pointers */
-#define COP_BYTES 160
-static void build_cop(volatile u16 *l, int depth, int *col, int *ptr)
+/* the Copper list for `depth` planes into l (COP_BYTES of chip RAM); the indices of its colours and the two sets of
+ * pointers (cop_point fills them and the WAITs before the second) */
+#define COP_BYTES 200
+static void build_cop(volatile u16 *l, int depth, int *col, int *ptr, int *ptr2)
 {
     int f3 = aga && depth > 1;          /* more than one plane on AGA: always at FMODE 3 */
     u16 mod = (u16)((u32)STRIDE * (u32)depth - STRIDE + (f3 ? F3_MODADJ : 0));
@@ -677,8 +772,17 @@ static void build_cop(volatile u16 *l, int depth, int *col, int *ptr)
     *ptr = (int)(c - l);
     for (int k = 0; k < depth; k++)
         MOVE(0x0E0 + 4 * k, 0), MOVE(0x0E2 + 4 * k, 0);
+    *c++ = 0xFFDF;                      /* the ring's wrap: two WAITs (cop_point sets their lines), the pointers */
+    *c++ = 0xFFFE;
+    *c++ = 0xFFDF;
+    *c++ = 0xFFFE;
+    *ptr2 = (int)(c - l);
+    for (int k = 0; k < depth; k++)
+        MOVE(0x0E0 + 4 * k, 0), MOVE(0x0E2 + 4 * k, 0);
     *c++ = 0xFFFF;
     *c++ = 0xFFFE;
+    if ((u32)(c - l) * 2 > COP_BYTES)
+        panic("gfx: the Copper list is longer than COP_BYTES");
 #undef MOVE
 }
 
@@ -783,9 +887,11 @@ int gfx_init(void)
     cop = mem_alloc(COP_BYTES, MEM_CHIP, 0);
     if (!cop)
         return -1;
-    for (gfx_depth = pick_depth(); ; gfx_depth = gfx_depth == 4 ? 3 : 1) {      /* too little chip RAM: fewer planes */
+    int d = pick_depth();
+    nring = trows + (fast ? trows : trows / 2);         /* D28 20: the spare rows */
+    for (gfx_depth = d; ; gfx_depth = gfx_depth == 4 ? 3 : 1) {      /* too little chip RAM: fewer planes */
         lstride = (u32)STRIDE * (u32)gfx_depth;
-        tbuf = mem_alloc((u32)BUFL * lstride, MEM_CHIP, 0);     /* 16-byte aligned: FMODE 3 needs 8 */
+        tbuf = mem_alloc(ring_bytes(lstride), MEM_CHIP, 0);     /* 16-byte aligned: FMODE 3 needs 8 */
         if (tbuf || gfx_depth == 1)
             break;
     }
@@ -795,17 +901,17 @@ int gfx_init(void)
         mem_free(tbuf);
         gfx_depth = 1;
         lstride = STRIDE;
-        tbuf = mem_alloc((u32)BUFL * lstride, MEM_CHIP, 0);
+        tbuf = mem_alloc(ring_bytes(lstride), MEM_CHIP, 0);
         if (!tbuf)
             return -1;
     }
     say_depth();
-    build_cop(cop, gfx_depth, &cop_col, &cop_ptr);
-    set_rows();
-    set_off(0);
+    build_cop(cop, gfx_depth, &cop_col, &cop_ptr, &cop_ptr2);
+    rstride = 8 * lstride;
+    set_base(0);
     cop_point(0);
-    hw_off = 0;
-    memset(tbuf, 0, (u32)BUFL * lstride);
+    hw_base = 0;
+    memset(tbuf, 0, ring_bytes(lstride));
 
     BPLCON0 = 0x0200;                   /* no planes until the Copper sets them */
     DIWSTRT = (u16)((DIW_V << 8) | 0x81);
@@ -850,7 +956,7 @@ int gfx_set_colours(int colours)
     u32 *rg = rglyph;
     u32 ls = (u32)STRIDE * (u32)d;
     volatile u16 *nc = mem_alloc(COP_BYTES, MEM_CHIP, 0);
-    u8 *nb = mem_alloc((u32)BUFL * ls, MEM_CHIP, 0);
+    u8 *nb = mem_alloc(ring_bytes(ls), MEM_CHIP, 0);
     if (d > 1 && !rg)
         rg = make_rglyph();
     int fok = 1;                        /* a loaded font's table too (D20), built before anything changes */
@@ -866,9 +972,9 @@ int gfx_set_colours(int colours)
             fonts_flat();               /* the tables just built: one plane keeps none */
         return -ENOMEM;
     }
-    int col, ptr;
-    build_cop(nc, d, &col, &ptr);
-    memset(nb, 0, (u32)BUFL * ls);
+    int col, ptr, ptr2;
+    build_cop(nc, d, &col, &ptr, &ptr2);
+    memset(nb, 0, ring_bytes(ls));
     blit_wait();
     volatile u16 *oc = cop;
     u8 *ob = tbuf;
@@ -880,10 +986,11 @@ int gfx_set_colours(int colours)
     rglyph = rg;
     cop_col = col;
     cop_ptr = ptr;
-    set_rows();
-    set_off(0);
+    cop_ptr2 = ptr2;
+    rstride = 8 * ls;
+    set_base(0);
     cop_point(0);
-    hw_off = 0;
+    hw_base = 0;
     COP1LCH = (u16)((u32)nc >> 16);
     COP1LCL = (u16)(u32)nc;
     irq_restore(s);
@@ -926,7 +1033,7 @@ static void reclaim(void)
         SPRCTL(i) = 0;
     DIWSTRT = (u16)((DIW_V << 8) | 0x81);
     DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
-    hw_off = -1;
+    hw_base = -1;
     pal_dirty = 1;
 }
 void gfx_reclaim(void) { if (up && held) reclaim(); }
@@ -966,7 +1073,7 @@ long gfx_conline(u32 line, struct uconline *d)
     u32 k = d->npens < 8 * STRIDE ? d->npens & ~7u : 8 * STRIDE;
     if (k && !user_ok_wr(current, d->pens, k))
         return -EFAULT;
-    const u8 *p = line_at(off + (int)line);
+    const u8 *p = line_at((int)line);
     u8 *o = (u8 *)d->pens;
     for (u32 x = 0; x < k / 8; x++, p++)
         for (int b = 7; b >= 0; b--) {
@@ -997,8 +1104,8 @@ void gfx_panic(void)
     if (held)
         reclaim();                      /* D38: a display server had the screen (panic_begin did it already) */
     sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable); no table work here */
-    top = line_at(off);                 /* a fault inside set_off may have left top behind off */
-    cop_point(off);
+    set_base(base);                     /* a fault inside set_base may have left rowoff half done */
+    cop_point(base);
     cop[cop_col + 1] = 0x800;
     for (int i = 1; i < (1 << gfx_depth); i++)
         cop[cop_col + 2 * i + 1] = 0xFFF;

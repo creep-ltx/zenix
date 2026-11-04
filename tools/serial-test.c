@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Host test of the serial copy of the console (kernel/serial.c) against a model of Paula's port (serial-fake.h):
  * with nothing received since boot a full send ring drops console bytes (counted, logged) instead of waiting; the
- * kernel's own output always waits; after the first received byte the console copy waits and loses nothing. And
+ * kernel's own output always waits; after a received byte the console copy waits and loses nothing, until nothing
+ * has been received for 10 s (then it drops again, and waits again from the next received byte). And
  * /dev/ttyS0 (DESIGN D12): one owner; while open the console copy and the log stay off the wire and received bytes
  * wait for the reader.
  * Build and run: tools/serial-test.sh */
@@ -69,7 +70,7 @@ int main(void)
     unsigned long before = fake_nsent;
     serial_work();
     drain_all();
-    EXPECT_TRUE(sent_has("serial: nothing received on the serial port yet"), "... the first drop is logged");
+    EXPECT_TRUE(sent_has("serial: nothing received on the serial port lately"), "... the first drop is logged");
     EXPECT_TRUE(sent_has("console bytes not sent so far"), "... with the count");
     EXPECT_TRUE(fake_nsent > before, "the kernel's own log lines are sent whole");
     u32 d0 = tx_dropped;
@@ -93,6 +94,32 @@ int main(void)
     int order = fake_nsent - start == 20000;
     for (unsigned long i = 0; order && i < 20000; i++) order = fake_sent[start + i] == 'A' + i % 26;
     EXPECT_TRUE(tx_dropped == d1 && order, "after input: 20000 console bytes all sent, in order, none dropped");
+
+    /* 3b. nothing received for 10 s (the terminal closed, the cable left in): the copy drops again, says so, and waits
+     * again from the next received byte */
+    fake_wire_period = 50;
+    ticks += 999;
+    u32 d2 = tx_dropped;
+    for (int i = 0; i < 5000; i++) serial_putc('w');
+    drain_all();
+    EXPECT_TRUE(tx_dropped == d2, "9.99 s after the last received byte the copy still waits (none dropped)");
+    ticks += 1;
+    kwork_pending = 0;
+    fake_wire_period = 50;
+    for (int i = 0; i < 20000; i++) serial_putc('q');     /* returns: no waiting */
+    EXPECT_TRUE(tx_dropped > d2 + 10000 && kwork_pending, "10 s without a received byte: the copy drops again");
+    serial_work();
+    drain_all();
+    EXPECT_TRUE(sent_has("serial: nothing received for 10 s: the console copy no longer waits"), "... and the log says so");
+    fake_rx = '.';
+    serial_rx_isr();
+    serial_work();
+    drain_all();
+    fake_wire_period = 7;
+    u32 d3 = tx_dropped;
+    for (int i = 0; i < 20000; i++) serial_putc('r');
+    drain_all();
+    EXPECT_TRUE(tx_dropped == d3, "a byte received again: the copy waits again (none dropped)");
 
     /* 4. /dev/ttyS0 (D12): the port belongs to one program */
     fake_wire_period = 1;
