@@ -258,3 +258,11 @@ longer overwrites the failed stage that the log names; the model freed the data 
 firmware does not (section 5: the box kept driving after a receive cut between its size bytes, now modelled, counted,
 logged); the deadlines are in the kernel's ticks, not a hard-coded PAL E-clock rate; an idle link sends a keepalive every
 5 s; the notes on false ACK edges, the 2023 firmware build fixes and the kernel's C read-modify-write corrected.
+
+## 13. On the real hardware (2026-11-04)
+
+The owner's plipbox (an Arduino Nano with an ENC28J60) on the parallel port of the A1200 with the Apollo 1260, release
+2026110402, `driver plipbox` as eth1 with the FA411's eth0 taken down: it worked at the first start. The box's own MAC
+(1a:11:af:a0:47:11, plipbox's default), DHCP gave an address, `ping google.se` 8 of 8 answered, 33-48 ms (the FA411:
+24-29 ms). Throughput not yet measured. Read from a photo of the screen.
+
