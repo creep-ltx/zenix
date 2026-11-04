@@ -565,8 +565,8 @@ void syscall_c(u32 *rb)
         break;
     case SYS_memalloc:                  /* the region's address, or 0 (NULL) when it cannot be given: never -1 */
         r = 0;
-        if (a1 == 0 || a1 > MEMALLOC_MAX || (a2 & ~MEMA_CHIP))
-            break;                      /* a2: 0 (every older caller) any memory, MEMA_CHIP chip RAM (D38) */
+        if (a1 == 0 || a1 > MEMALLOC_MAX)
+            break;                      /* a2: MEMA_CHIP chip RAM (D38); its other bits are ignored, as all of a2 was */
         for (int i = 0; i < NREG; i++)
             if (!current->reg[i].base) {
                 void *m = mem_alloc(a1, a2 & MEMA_CHIP ? MEM_CHIP : 0, (u32)current->pid);
@@ -582,6 +582,10 @@ void syscall_c(u32 *rb)
         r = -EINVAL;                    /* not a region memalloc gave this process */
         for (int i = 0; i < NREG; i++)
             if (current->reg[i].base == a1 && a1) {
+                if (gcon_uses(a1, current->reg[i].size)) {
+                    r = -EBUSY;         /* D38: the grab's Copper list or sprite lies there */
+                    break;
+                }
                 mem_free((void *)a1);
                 current->reg[i].base = 0;
                 r = 0;

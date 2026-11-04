@@ -19,9 +19,10 @@ DESCRIPTION
     second, freed, no-such-slave
              a second pty is pts/1, free again after its close; a pty that
              does not exist is ENOENT
-    master-eio, hung-up-slave
+    master-eio, master-write-eio, hung-up-slave
              with the slave closed the master's read is EIO and poll says
-             POLLHUP; after both close the pty is gone
+             POLLHUP, and a write is EIO (never a wait for a reader that
+             will not come); after both close the pty is gone
     onlcr, echo, cooked, erase
              the child's LF arrives as CR LF; a line typed into the master
              is echoed and read whole; backspace edits it

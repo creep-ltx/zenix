@@ -30,7 +30,9 @@
 # 2026-11-04 (DESIGN D38 step 2: a console handed to the display server): gcon new 2,813 and bss 5 (the grab, the
 # ring, the switch's answer and its 1 s deadline, the pointer), gfx 8,000 -> 8,200 (the hand-over of the Copper
 # list), kbd 3,800 -> 4,300 (the qualifiers left and right, the keys to the ring with their characters); kernel.bin
-# 175,732 -> 179,700, TOTAL 176,000 -> 180,000; the mount tests' RAM disk 704 -> 700 KB.
+# 175,732 -> 179,700, TOTAL 176,000 -> 180,000; the mount tests' RAM disk 704 -> 700 KB. After the two reviews
+# (the grab ends with its server, the CPU draws after a forced switch, the hardware state restored, clicks latched, the
+# pty fixes): gcon 2,900 -> 3,400, gfx 8,200 -> 8,400, tty 5,800 -> 5,900; kernel.bin 180,720, TOTAL 181,000.
 start     4300   8200
 main      5950   1100
 serial    5950   6500
@@ -46,8 +48,8 @@ rtc       1550      4
 proc      9300  21500
 syscall  10150      0
 vfs      11450   1600
-tty       5800    100
-gfx       8200   2320
+tty       5900    100
+gfx       8400   2320
 term     12800     64
 confont   3100     32
 kbd       4300    180
@@ -61,7 +63,7 @@ sock      4700   1060
 drv       2200    640
 zine      1500     16
 cache     1700     32
-gcon      2900     16
+gcon      3400     16
 embed    47500      0
-TOTAL   180000
+TOTAL   181000
 ROOM       800

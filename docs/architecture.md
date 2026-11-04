@@ -533,7 +533,7 @@ Nothing can be moved once handed out (no MMU, no paging), so fragmentation is th
 - Free-byte counters are O(1), so `free` and `SYS_meminfo` read them cheaply.
 - `kmalloc`/`kfree` for kernel objects; `SYS_memalloc` gives processes extra regions (at most `NREG` = 16 at a time,
   each at most `MEMALLOC_MAX` = 64 MB; its second argument `MEMA_CHIP` asks for chip RAM, DESIGN D38: the display
-  server's screen; other bits answer 0). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
+  server's screen; other bits are ignored, as all of it was). **Every memory call answers 0 (NULL) on failure, never -1.** `mem_alloc`
   refuses 0 and sizes above `MEM_ALLOC_MAX` before rounding, so no size near 4 GB can wrap into a tiny block.
 - Every walk over the blocks (`alloc_in`, `mem_free`, `mem_free_owner`) checks each header: the magic value, a size of
   at least one header, a multiple of 16 and inside the range. A header that fails means something overwrote the heap:
@@ -1428,17 +1428,22 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   left and right apart with AmigaOS's `IEQUALIFIER` values, the keymap's character as UTF-8, the pointer, the tick)
   in a 64-record ring the descriptor reads (`poll`: POLLIN); repeats are marked `GQ_REPEAT`. The keymap stays in the
   kernel. **The pointer** is hardware sprite 0, the server's image: the 100 Hz tick takes the mouse's movement (two
-  hires pixels a count across, one line down, clamped to the screen) and writes the sprite's two control words, so
-  the pointer never freezes while the server or a disk is busy; kwork then puts a `GEV_POINTER` record in the ring
-  (merged into an unread one while the qualifiers are the same). **Switching away** (Amiga+F*n* or the serial hook)
+  hires pixels a count across, one line down, clamped to the screen) and latches the buttons' changes, the
+  vertical-blank interrupt writes the sprite's two control words, so the pointer never freezes while the server or a
+  disk is busy; kwork then puts `GEV_POINTER` records in the ring (a press and a release between two runs both told;
+  merged into an unread one while the qualifiers are the same). **Switching away** (Amiga+F*n* or the serial hook)
   puts `GEV_RELEASE` with a number in the ring; the server ends its blit, stops using the blitter and answers
   `CON_GACK` with that number; then the kernel shows the text console. No answer within 1 s: kwork switches anyway
-  and logs "display: pid N did not let go of console C within 1 s: switched anyway". **Back again:** `GEV_ACQUIRE`;
-  the server's bitplanes were never touched. Two slots of the ring are kept for these two; a full ring drops input
-  and says how much with `GEV_LOST`. **The descriptor's last close** (also the server's end, or a kill) gives the
-  console back: the kernel's Copper list, sprite DMA off and the eight sprites switched off, the display window as at
-  boot, the text drawn again (from kwork when the close came with interrupts off). One console at a time (-EBUSY);
-  while one is grabbed `CON_COLOURS` and `ZINE_GO` answer -EBUSY, and a panic takes the screen back. In FS-UAE no
+  and logs "display: pid N did not let go of console C within 1 s: switched anyway, the kernel draws with the CPU
+  until it answers" (the server may be half-way through a blit's set-up: the kernel leaves the blitter alone until the
+  late answer, which still counts, or the server's end). **Back again:** `GEV_ACQUIRE` (every key counts as up); the
+  server's bitplanes were never touched. Two slots of the ring are kept for these two; a full ring drops input
+  and says how much with `GEV_LOST`. **The descriptor's last close or the server's end** (whoever else holds the
+  descriptor: the list and the sprite are the server's memory, and `SYS_memfree` refuses those regions with -EBUSY
+  while the grab lasts) gives the console back: the kernel's Copper list at once (COPJMP1), the console's DMA on,
+  sprite DMA off and the eight sprites switched off, the display window (also in the kernel's Copper list every
+  frame), the text drawn again (from kwork when it came with interrupts off). A panic takes the screen back first. One console at a time (-EBUSY);
+  while one is grabbed `CON_COLOURS` and `ZINE_GO` answer -EBUSY. A switch between the modes stops a key's repeat. In FS-UAE no
   sprite shows unless the server's list fetches at least one bitplane (found with `gcontest`). Verified in FS-UAE by
   `tools/gcon-test.sh` (screenshots, `gcontest`, docs/man/gcontest.txt). **A
   login steps aside** (the 2 MB diet, DESIGN D18): Zenix has no `exec`, so the shell is a new process, and only a
@@ -1485,11 +1490,13 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   SIGHUP then SIGCONT to every process whose controlling tty it is (the members of a group on another terminal are
   not hung up); then slave reads give 0 and writes -EIO. The interactive shell, on SIGHUP, sends SIGHUP and SIGCONT to
   its jobs and ends (bash's rule). With no slave open, a master read gives -EIO (after what is left in the ring) and
-  `poll` POLLHUP. **Size:** each pty has one (24 x 80 at first); `SYS_ttyinfo` answers the caller's tty's; `SYS_ttyctl`
+  `poll` POLLHUP; a master write then (and no living process on the pty) -EIO rather than a wait; `poll` says POLLOUT
+  only when a printable byte fits (a cooked line needs room for itself). **Size:** each pty has one (24 x 80 at first); `SYS_ttyinfo` answers the caller's tty's; `SYS_ttyctl`
   (`fd`, `TTYC_*`, arg) gets it (`TTYC_GWINSZ`, a console's is the screen's), sets a pty's on either end
   (`TTYC_SWINSZ`, 1..32767 each; a change sends SIGWINCH to the slave's foreground), sets the owner (`TTYC_OWNER`,
   root) and makes the terminal the caller's controlling tty with the caller its session leader when nobody living
-  leads it (`TTYC_SCTTY`). The **session leader** is the first process spawned onto a tty from another one (`login`
+  leads it (`TTYC_SCTTY`: a pty for anyone holding its slave, a console for root; the old pty freed when nobody
+  names it any more). The **session leader** is the first process spawned onto a tty from another one (`login`
   on a pty), after D18's step-aside the shell `login` hands to; libz's `setsid` makes the caller its own group and,
   through `TTYC_SCTTY`, the leader of its fd 0's terminal if nobody leads it (no POSIX session ids). libz and the C
   library (`user/zpty.c`): `posix_openpt`, `grantpt` and `unlockpt` (nothing to do), `ptsname`, `ptsname_r`,

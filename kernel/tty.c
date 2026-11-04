@@ -657,6 +657,8 @@ long ptm_write(int i, const void *buf, u32 n, int nonblock)
             input(i, s[done++]);
         if (done == n)
             return (long)n;
+        if (!t->sopen && !ctty_users(i))
+            return done ? (long)done : -EIO;    /* the session ended: nobody will read (Linux's master write) */
         if (nonblock)
             return done ? (long)done : -EAGAIN;
         if (current->killed)
@@ -681,8 +683,8 @@ u16 ptm_poll(int i)
         r |= POLLIN;
     if (!t->sopen)
         r |= POLLHUP;
-    if (q_room(t))
-        r |= POLLOUT;
+    if (q_room(t) >= need_of(t, 'a'))
+        r |= POLLOUT;                       /* room for a printable byte, the most a byte needs: a write would not wait */
     return r;
 }
 
@@ -741,13 +743,20 @@ long tty_ctl(struct file *f, u32 op, u32 arg)
     case TTYC_SCTTY: {
         if (arg || f->type != FT_TTY)
             return -EINVAL;
+        if (!is_pty(i) && current->uid != 0)
+            return -EPERM;                  /* a console: root's (a descriptor inherited is not a session) */
         if (t == dead || t->hup)
             return -EIO;
         struct proc *l = t->leader ? proc_by_pid(t->leader) : 0;
         if (l && l != current && l->state != P_ZOMBIE)
             return -EPERM;
+        int old = current->ctty;
+        if (old != i && tt[old] && tt[old]->leader == current->pid)
+            tt[old]->leader = 0;            /* it leads its old terminal no longer */
         current->ctty = (u8)i;
         t->leader = current->pid;
+        if (old != i)
+            tty_gc(old);                    /* a pty nobody names any more is freed */
         return 0;
     }
     }

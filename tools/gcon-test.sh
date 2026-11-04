@@ -9,7 +9,8 @@
 #  - Amiga+F2 (raw codes through CON_INPUT, the keyboard's path): GEV_RELEASE, gcontest answers (CON_GACK), console 2
 #    is shown as text; back to console 1 (the serial hook): GEV_ACQUIRE, the green screen and the pointer again
 #  - gcontest ends: console 1 is text again (no green, no sprite left)
-#  - a server that never answers (gcontest noack): the switch happens anyway after 1 s, the kernel log says so
+#  - a server that answers late (gcontest late, 2 s): the switch happens anyway after 1 s, the kernel log says so,
+#    and the late answer is taken (the kernel uses the blitter again); the grab's memory cannot be freed meanwhile
 #  - the console, kbd, colour and tui tests run separately (tools/check.sh)
 cd "$(dirname "$0")/.." || exit 1
 export ZENIX_SERIAL=${ZENIX_SERIAL:-/tmp/zenix-gcon-serial}
@@ -42,7 +43,7 @@ shot back
 send kill $(pgrep gcontest)\r
 sleep 3
 shot givenback
-send gcontest noack 300 > /tmp/g2.log &\r
+send gcontest late 300 > /tmp/g2.log &\r
 sleep 4
 send gcontest keys 66 51 d1 e6\r
 sleep 5
@@ -81,7 +82,9 @@ gt grabbed "$OUT/g-back.png" "$OUT/geom" 320 128; check "back on console 1: gcon
 gt text "$OUT/g-givenback.png" "$OUT/geom"; check "gcontest ended: console 1 is text again, no sprite left" $?
 grep -q "display: console 1 given back by pid" "$L"; check "the kernel log says console 1 was given back" $?
 grep -q "display: pid [0-9]* did not let go of console 1 within 1 s: switched anyway" "$L"
-check "a server that never answers: the kernel switches after 1 s and says so" $?
+check "a server that answers late: the kernel switches after 1 s and says so" $?
+[ "$(grep -c '^gcontest: ack 1 -> 0' "$L")" = 2 ]; check "... the late answer is taken (0), as the prompt one was" $?
+[ "$(grep -c '^gcontest: memfree of the grab.s memory -> -16' "$L")" = 2 ]; check "the grab's memory cannot be freed while the grab lasts (EBUSY)" $?
 gt text "$OUT/g-noack.png" "$OUT/geom"; check "... console 2 is shown as text" $?
 gt grabbed "$OUT/g-noackback.png" "$OUT/geom" 320 128; check "... and back on console 1 the server has its screen again" $?
 grep -q "^letgo=1$" "$L"; check "the answered switch did not time out (one such line, the noack one)" $?

@@ -10,7 +10,7 @@ rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-pty}; mkdir -p $OUT
 tools/run-test.sh fsuae/a1200-020-fast.fs-uae 150 tools/tests/pty-test.txt 2>&1 | sed 's/\x1b\[[0-9;:]*[mK]//g' | tr -d '\r' > $OUT/run.log
 pass=1
-for t in open ptsname master-ino slave-ino isatty default-size second freed no-such-slave master-eio hung-up-slave \
+for t in open ptsname master-ino slave-ino isatty default-size second freed no-such-slave master-eio master-write-eio hung-up-slave \
          onlcr echo cooked erase size winch raw intr hangup owner-refused owner-set owner-user console-size no-reuse reuse \
          sh-echo sh-ls sh-hup; do
     l=$(grep -a "^ptytest $t: " $OUT/run.log | head -1)

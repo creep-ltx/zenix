@@ -250,6 +250,7 @@ static void key_down(u8 code)
 #define KBD_REPEAT_RATE  3              /* about 33 per second */
 static volatile u8 rep_code;            /* 0: nothing held; written by key_code's callers (kbd_work, CON_INPUT), read by the tick */
 static u32 rep_at;                      /* tick of the next repeat */
+void kbd_forget(void) { rep_code = 0; }   /* D38: a switch between text and graphics mode: no key repeats on */
 
 /* Raw key codes from the interrupt to kbd_work: a ring with one producer (kbd_isr, level 2) and one consumer
  * (kbd_work, process context, never re-entered), so it needs no lock: the producer writes the slot and then moves

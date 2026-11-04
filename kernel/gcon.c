@@ -15,14 +15,23 @@
  * blitter again; its bitplanes were never touched.
  *
  * The pointer is hardware sprite 0, the server's image in its chip RAM (its Copper list points SPR0PT at it each
- * frame); the 100 Hz tick moves it by writing the image's two control words, so the pointer never freezes while the
- * server or a disk transfer is busy (two words of position, no drawing: D38 3.4 asks the reviews for this). Moves and
- * buttons become GEV_POINTER records in kwork (gcon_work), merged while unread. The descriptor's last close (also the
- * server's end) gives the console back: the kernel's Copper list, sprites off, the text drawn again.
+ * frame). The 100 Hz tick adds the mouse's movement to the pointer's place and latches the buttons' changes; the
+ * vertical-blank interrupt writes the image's two control words when the place changed (before sprite DMA reads
+ * them, once a frame), so the pointer never freezes while the server or a disk transfer is busy: two words of
+ * position, no drawing (the two reviews of 2026-11-04 accepted this in an interrupt, in the vertical blank). Moves
+ * and buttons become GEV_POINTER records in kwork (gcon_work), merged while unread; a press and a release between
+ * two runs of kwork are both told. The grab ends at the descriptor's last close and when the server ends (its chip
+ * RAM goes with it; SYS_memfree refuses the regions the grab uses): the kernel's Copper list, sprites off, the text
+ * drawn again.
  *
- * Everything but gcon_tick runs in process context: the key path (kbd_work through kwork, CON_INPUT), gcon_work
- * (kwork), con_switch and the system calls. The kernel is not preempted, so the ring has one writer at a time; the
- * tick only writes the pointer's position (px, py, btn) and the sprite's control words. */
+ * A server that does not answer within 1 s may still be writing the blitter's registers (a user process can be
+ * preempted half-way through a blit's set-up), so after a forced switch the kernel draws with the CPU only until the
+ * server answers that release (late, CON_GACK still takes it) or ends.
+ *
+ * Process context: the key path (kbd_work through kwork, CON_INPUT), gcon_work (kwork), con_switch and the system
+ * calls; the kernel is not preempted, so the ring has one writer at a time. Interrupts: the tick writes px, py and
+ * the button bits, the vertical blank the sprite's control words; process context writes those words only with
+ * interrupts masked. */
 
 #define GQN 64                  /* records in the ring (1 KB) */
 #define GQ_CTL 2                /* slots kept for GEV_RELEASE and GEV_ACQUIRE: input never takes them */
@@ -44,6 +53,9 @@ struct gcon {
     u16 w, h;
     volatile short px, py;        /* the pointer (the tick) */
     volatile u16 btn;           /* its buttons, as GQ_*BUTTON bits (the tick) */
+    volatile u16 bdown, bup;    /* buttons pressed, released since kwork last looked (the tick latches them) */
+    volatile u8 moved;          /* the place changed: the vertical blank writes the control words */
+    u8 forced;                  /* switched away without the server's answer: the kernel draws with the CPU */
     short lx, ly;                 /* what the ring was last told */
     u16 lbtn;
     u16 lost;                   /* input records dropped (a full ring): GEV_LOST says how many */
@@ -71,6 +83,7 @@ static void sprite_pos(struct gcon *g)
     s32 x = (g->px - g->hx) / 2 + 0x80, y = g->py - g->hy + gfx_diwv(), e = y + g->sprh;
     if (x < 0) x = 0;
     if (y < 0) y = 0;
+    if (e > 511) e = 511;               /* VSTOP has 9 bits: never wrapped above the image */
     g->spr[0] = (u16)((y & 0xFF) << 8 | (x >> 1 & 0xFF));
     g->spr[1] = (u16)((e & 0xFF) << 8 | (y >> 8 & 1) << 2 | (e >> 8 & 1) << 1 | (x & 1));
 }
@@ -121,7 +134,10 @@ int gcon_shown(int con)
     if (!g || g->con != con)
         return 0;
     g->state = G_SHOWN;
+    u16 s = irq_save();
     sprite_pos(g);
+    irq_restore(s);
+    kbd_forget();                       /* no key held in text mode repeats into the ring */
     gfx_hand(g->cop);
     push(g, GEV_ACQUIRE, 0, kbd_qual() | g->btn, g->px, g->py, 0, 1);
     return 1;
@@ -148,6 +164,7 @@ int gcon_away(int to)
 static void let_go(struct gcon *g)
 {
     g->state = G_AWAY;
+    kbd_forget();                       /* no key held in the desktop repeats into a text console */
     gfx_hand(0);
     con_show(g->target);
 }
@@ -222,32 +239,62 @@ long gcon_grab(int con, u32 a2)
 long gcon_ack(struct file *f, u32 seq)
 {
     struct gcon *g = gc;
-    if (f->type != FT_GCON || !g || g->file != f)
+    if (f->type != FT_GCON || !g || g->file != f || g->pid != current->pid)
         return -EBADF;
-    if (g->state != G_RELEASING || seq != g->seq)
-        return -EINVAL;                 /* nothing asked, or an answer to an older request (it timed out) */
-    let_go(g);
-    return 0;
+    if ((u16)seq != g->seq)
+        return -EINVAL;                 /* an answer to an older request */
+    if (g->state == G_RELEASING) {
+        let_go(g);
+        return 0;
+    }
+    if (g->forced) {                    /* the late answer to a forced switch: the blitter is the kernel's again */
+        g->forced = 0;
+        gfx_blit_cpu(0);
+        return 0;
+    }
+    return -EINVAL;                     /* nothing asked */
 }
 
 /* the last close of the grab's descriptor (the server's end too, then with interrupts off: proc_exit): the console
  * is the kernel's again; drawing it waits for kwork */
-void gcon_close(struct file *f)
+static void end_grab(struct gcon *g)
 {
-    struct gcon *g = gc;
-    if (!g || g->file != f)
-        return;
     u16 s = irq_save();
     gc = 0;
     irq_restore(s);
     if (g->state != G_AWAY) {
+        kbd_forget();
         gfx_hand(0);
         redraw_to = g->state == G_RELEASING ? g->target : g->con;
         kwork_pending = 1;
     }
+    if (g->forced)
+        gfx_blit_cpu(0);                /* the server is gone: nobody else writes the blitter */
     ev_wake(&g->wait);
     kprintf("display: console %d given back by pid %d\n", g->con, g->pid);
     kfree(g);
+}
+
+void gcon_close(struct file *f)
+{
+    if (gc && gc->file == f)
+        end_grab(gc);
+}
+
+/* the server ends (proc_exit, interrupts off): the grab with it, whoever else holds the descriptor (a child given it
+ * as 0-2), since the Copper list and the sprite are its memory */
+void gcon_proc_exit(int pid)
+{
+    if (gc && gc->pid == pid)
+        end_grab(gc);
+}
+
+/* SYS_memfree: a region holding the grab's Copper list or sprite is not given back while the grab lasts */
+int gcon_uses(u32 base, u32 size)
+{
+    struct gcon *g = gc;
+    return g && g->pid == current->pid &&
+           ((g->cop >= base && g->cop < base + size) || ((u32)g->spr >= base && (u32)g->spr < base + size));
 }
 
 /* read: whole records (a buffer under one record: -EINVAL); waits for one unless O_NONBLOCK */
@@ -257,7 +304,7 @@ long gcon_read(struct file *f, void *buf, u32 n)
         return -EINVAL;
     for (;;) {
         struct gcon *g = gc;
-        if (!g || g->file != f)
+        if (!g || g->file != f || g->pid != current->pid)
             return -EBADF;
         if (current->killed)
             return -EINTR;
@@ -309,11 +356,23 @@ void gcon_tick(void)
         s32 x = g->px + 2 * dx, y = g->py + dy;     /* a hires pixel is half as wide as a line is tall */
         g->px = (short)(x < 0 ? 0 : x >= g->w ? g->w - 1 : x);
         g->py = (short)(y < 0 ? 0 : y >= g->h ? g->h - 1 : y);
-        sprite_pos(g);
+        g->moved = 1;
     }
+    g->bdown |= (u16)(bq & ~g->btn);
+    g->bup |= (u16)(g->btn & ~bq);
     if (dx || dy || bq != g->btn || (g->state == G_RELEASING && (s32)(ticks - g->deadline) >= 0)) {
         g->btn = bq;
         kwork_pending = 1;
+    }
+}
+
+/* the vertical-blank interrupt: the pointer's new place into the sprite's control words */
+void gcon_vblank(void)
+{
+    struct gcon *g = gc;
+    if (g && g->moved && g->state != G_AWAY) {
+        g->moved = 0;
+        sprite_pos(g);
     }
 }
 
@@ -332,12 +391,27 @@ void gcon_work(void)
     if (!g || g->state == G_AWAY)
         return;
     if (g->state == G_RELEASING && (s32)(ticks - g->deadline) >= 0) {
-        kprintf("display: pid %d did not let go of console %d within 1 s: switched anyway\n", g->pid, g->con);
+        kprintf("display: pid %d did not let go of console %d within 1 s: switched anyway, the kernel draws with "
+                "the CPU until it answers\n", g->pid, g->con);
+        g->forced = 1;
+        gfx_blit_cpu(1);
         let_go(g);
         return;
     }
+    u16 s = irq_save();
     short x = g->px, y = g->py;
-    u16 b = g->btn;
+    u16 b = g->btn, dn = g->bdown, up = g->bup;
+    g->bdown = g->bup = 0;
+    irq_restore(s);
+    u16 b1 = (u16)(g->lbtn | dn), b2 = (u16)(b1 & ~up);    /* a press and a release since: both told */
+    if (b1 != g->lbtn && b1 != b) {
+        push(g, GEV_POINTER, 0, kbd_qual() | b1, x, y, 0, 0);
+        g->lbtn = b1;
+    }
+    if (b2 != g->lbtn && b2 != b) {
+        push(g, GEV_POINTER, 0, kbd_qual() | b2, x, y, 0, 0);
+        g->lbtn = b2;
+    }
     if (x == g->lx && y == g->ly && b == g->lbtn)
         return;
     u16 q = kbd_qual() | b;
@@ -349,6 +423,7 @@ void gcon_work(void)
             e->time = ticks;
             g->lx = x;
             g->ly = y;
+            g->lbtn = b;
             return;
         }
     }

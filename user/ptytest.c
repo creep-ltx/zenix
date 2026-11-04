@@ -192,6 +192,8 @@ static void names(void)
     struct pollfd p = { m, POLLIN, 0 };
     poll(&p, 1, 0);
     result("master-eio", r == -EIO && (p.revents & POLLHUP), "read %d, revents %x", r, p.revents);
+    r = sys_write(m, "x\n", 2);
+    result("master-write-eio", r == -EIO, "the session ended: a write to the master is EIO, never a wait: %d", r);
     sys_close(m);
     result("hung-up-slave", sys_open("/dev/pts/0", O_RDWR) == -ENOENT, "pts/0 freed with its master");
 }

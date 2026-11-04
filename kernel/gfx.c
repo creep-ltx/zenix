@@ -214,8 +214,15 @@ static void blit_ptr(volatile u16 *hi, const void *p)
 
 /* copy `rows` rows of 80 bytes, chip to chip; overlapping is fine (downwards it runs descending). A blit is at most
  * 1024 rows high (BLTSIZE's 10 bits, 0 meaning 1024). */
+static int blit_cpu;                    /* D38: a display server was switched away from without its answer: it may still be
+                                         * writing the blitter's registers, so the kernel copies and fills with the CPU
+                                         * until it answers or ends (gfx_blit_cpu) */
 static void blit_copy(const u8 *src, u8 *dst, u32 rows)
 {
+    if (blit_cpu) {
+        memmove(dst, src, rows * STRIDE);
+        return;
+    }
     int desc = dst > src;
     while (rows) {
         u32 h = rows > 1024 ? 1024 : rows;
@@ -241,6 +248,12 @@ static void blit_copy(const u8 *src, u8 *dst, u32 rows)
 /* `lines` display lines from dst on: each plane filled with its bit of colour bg (all ones or all zeros) */
 static void blit_fill(u8 *dst, u32 lines, u32 bg)
 {
+    if (blit_cpu) {
+        for (u32 l = 0; l < lines; l++)
+            for (int k = 0; k < gfx_depth; k++)
+                memset(dst + l * lstride + (u32)k * STRIDE, (bg >> k & 1) ? 0xFF : 0, STRIDE);
+        return;
+    }
     for (int k = 0; k < gfx_depth; k++) {
         u8 *d = dst + k * STRIDE;
         for (u32 left = lines; left;) {
@@ -560,6 +573,7 @@ void gfx_vblank(void)
                 cop[cop_col + 2 * i + 1] = colour_of(i, gfx_depth);
         }
     }
+    gcon_vblank();                      /* D38: the pointer's new place, before sprite DMA reads it */
 }
 
 void gfx_scroll(u8 colour)
@@ -646,6 +660,8 @@ static void build_cop(volatile u16 *l, int depth, int *col, int *ptr)
         MOVE(0x106, 0x0C00);            /* BPLCON3: colour bank 0, LOCT 0 */
         MOVE(0x10C, 0x0011);            /* BPLCON4: no BPLAM colour-index XOR, sprite palettes as after reset */
     }
+    MOVE(0x08E, (DIW_V << 8) | 0x81);           /* DIWSTRT, DIWSTOP: every frame, so a display server's (D38) */
+    MOVE(0x090, (((DIW_V + dlines) & 0xFF) << 8) | 0xC1);       /* window never outlives it */
     MOVE(0x100, 0x8200 | (depth << 12));        /* BPLCON0: hires, N planes, colour burst */
     MOVE(0x102, f3 ? F3_BPLCON1 : 0);
     MOVE(0x104, 0);
@@ -893,6 +909,27 @@ int gfx_set_colours(int colours)
 }
 
 int gfx_up(void) { return up && !held; }
+int gfx_present(void) { return up; }
+void gfx_blit_cpu(int on) { blit_wait(); blit_cpu = on; }
+
+/* the kernel's display back from a display server at once (gfx_hand(0), a panic): its Copper list from now on
+ * (COPJMP1: the server's list stops mid-frame, its memory may be going), sprites off, the DMA the console needs */
+static void reclaim(void)
+{
+    held = 0;
+    COP1LCH = (u16)((u32)cop >> 16);
+    COP1LCL = (u16)(u32)cop;
+    COPJMP1 = 0;
+    DMACON = DMAF_SPREN;
+    DMACON = DMAF_SETCLR | DMAF_MASTER | DMAF_BPLEN | DMAF_COPEN | DMAF_BLTEN;
+    for (int i = 0; i < 8; i++)
+        SPRCTL(i) = 0;
+    DIWSTRT = (u16)((DIW_V << 8) | 0x81);
+    DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
+    hw_off = -1;
+    pal_dirty = 1;
+}
+void gfx_reclaim(void) { if (up && held) reclaim(); }
 int gfx_diwv(void) { return DIW_V; }
 int gfx_aga(void) { return aga; }
 void gfx_geom(u16 *w, u16 *h) { *w = 8 * STRIDE; *h = (u16)dlines; }
@@ -900,29 +937,22 @@ void gfx_geom(u16 *w, u16 *h) { *w = 8 * STRIDE; *h = (u16)dlines; }
 /* DESIGN D38 step 2 (gcon.c): show a display server's Copper list (cop), or the kernel's again (0). The kernel's own
  * blit ends first (the server may use the blitter from here); the Copper takes the new list at the next vertical
  * blank (COP1LC is where it starts each frame). Back to the kernel: sprite DMA off and the eight sprites switched off
- * (a sprite keeps showing its last data words otherwise), the display window as gfx_init set it, the plane pointers
- * and colours written again at the next vertical blank; the caller draws the text again. */
+ * (a sprite keeps showing its last data words otherwise), the console's DMA on again, the Copper restarted on the
+ * kernel's list at once, the display window as gfx_init set it (the kernel's list sets it every frame too), the
+ * plane pointers and colours written again at the next vertical blank; the caller draws the text again. */
 void gfx_hand(u32 c)
 {
     if (!up)
         return;
     blit_wait();
     u16 s = irq_save();
-    u32 l = c ? c : (u32)cop;
-    held = c != 0;
-    COP1LCH = (u16)(l >> 16);
-    COP1LCL = (u16)l;
-    if (c)
+    if (c) {
+        held = 1;
+        COP1LCH = (u16)(c >> 16);
+        COP1LCL = (u16)c;
         DMACON = DMAF_SETCLR | DMAF_SPREN;
-    else {
-        DMACON = DMAF_SPREN;
-        for (int i = 0; i < 8; i++)
-            SPRCTL(i) = 0;
-        DIWSTRT = (u16)((DIW_V << 8) | 0x81);
-        DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
-        hw_off = -1;
-        pal_dirty = 1;
-    }
+    } else
+        reclaim();
     irq_restore(s);
 }
 
@@ -964,14 +994,8 @@ void gfx_panic(void)
 {
     if (!up)
         return;
-    if (held) {                         /* D38: a display server had the screen: the kernel's list, sprites off */
-        held = 0;
-        COP1LCH = (u16)((u32)cop >> 16);
-        COP1LCL = (u16)(u32)cop;
-        DMACON = DMAF_SPREN;
-        DIWSTRT = (u16)((DIW_V << 8) | 0x81);
-        DIWSTOP = (u16)((((DIW_V + dlines) & 0xFF) << 8) | 0xC1);
-    }
+    if (held)
+        reclaim();                      /* D38: a display server had the screen (panic_begin did it already) */
     sfont = 0;                          /* Topaz (D20 4.2: a panic is always readable); no table work here */
     top = line_at(off);                 /* a fault inside set_off may have left top behind off */
     cop_point(off);

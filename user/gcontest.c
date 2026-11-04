@@ -7,7 +7,9 @@ typedef unsigned short u16;
  * list of its own (one blank plane: the whole screen green; with no plane at all FS-UAE shows no sprite, found
  * 2026-11-04) and a 16 x 16 red pointer (sprite 0, hot spot at
  * its top left), then writes every record of the ring as a line ("gcontest: key 0x20 qual 0x0 ch 61", "gcontest:
- * release 1", ...); with ack it answers every GEV_RELEASE (CON_GACK), with noack never (the kernel's 1 s deadline).
+ * release 1", ...); with ack it answers every GEV_RELEASE (CON_GACK), with late 2 s later (after the kernel's 1 s
+ * deadline: the answer that lets the kernel use the blitter again), with noack never. It also tries to free the
+ * grab's memory (refused, EBUSY).
  * It ends after SECONDS (default 60) or at the q key, giving the console back. `gcontest keys CODE...` types raw key
  * codes (hex) through CON_INPUT on descriptor 0, as the keyboard would (root). tools/gcon-test.sh runs it. */
 
@@ -39,11 +41,11 @@ int main(int argc, char **argv)
 {
     if (argc > 1 && !strcmp(argv[1], "keys"))
         return keys(argc, argv);
-    if (argc < 2 || (strcmp(argv[1], "ack") && strcmp(argv[1], "noack"))) {
-        dprintf(2, "usage: gcontest ack|noack [SECONDS] | gcontest keys CODE...\n");
+    if (argc < 2 || (strcmp(argv[1], "ack") && strcmp(argv[1], "noack") && strcmp(argv[1], "late"))) {
+        dprintf(2, "usage: gcontest ack|late|noack [SECONDS] | gcontest keys CODE...\n");
         return 2;
     }
-    int ack = !strcmp(argv[1], "ack");
+    int ack = !strcmp(argv[1], "ack"), late = !strcmp(argv[1], "late");
     u32 secs = argc > 2 ? (u32)atoi(argv[2]) : 60;
     u16 *mem = sys_memalloc_chip(512 + 80);
     if (!mem) {
@@ -95,6 +97,7 @@ int main(int argc, char **argv)
         return 1;
     }
     say("gcontest: grabbed fd %d %ux%u depth %u chips %u\n", gfd, g.width, g.height, g.depth, g.chips);
+    say("gcontest: memfree of the grab's memory -> %d\n", sys_memfree(mem));
     u32 end = sys_ticks() + secs * 100;
     int quit = 0;
     while (!quit && (int)(sys_ticks() - end) < 0) {
@@ -116,7 +119,9 @@ int main(int argc, char **argv)
                 break;
             case GEV_RELEASE:
                 say("gcontest: release %d\n", e->x);
-                if (ack) {
+                if (late)
+                    sys_sleep(200);             /* 2 s: past the kernel's deadline; the answer still counts */
+                if (ack || late) {
                     int r = sys_congack(gfd, (unsigned short)e->x);
                     say("gcontest: ack %d -> %d\n", e->x, r);
                 }

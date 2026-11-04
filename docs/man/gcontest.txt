@@ -4,7 +4,7 @@ NAME
     gcontest - test a console handed to a display server
 
 SYNOPSIS
-    gcontest ack|noack [SECONDS]
+    gcontest ack|late|noack [SECONDS]
     gcontest keys CODE...
 
 DESCRIPTION
@@ -23,8 +23,13 @@ DESCRIPTION
         gcontest: acquire
         gcontest: lost N
 
-    ack answers every request to let go (CON_GACK); noack never does, so
-    the kernel switches after its 1 s deadline and says so in the log. It
+    ack answers every request to let go (CON_GACK); late answers 2 s later
+    (after the kernel's 1 s deadline, the switch has happened; the answer
+    still counts: the kernel uses the blitter again); noack never does, so
+    the kernel switches after its 1 s deadline, says so in the log and
+    draws with the CPU until the program ends. Right after the grab it
+    tries to free the grab's memory ("gcontest: memfree ... -> -16":
+    refused while the grab lasts). It
     ends after SECONDS (default 60) or at the q key, giving the console
     back.
 
