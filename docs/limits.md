@@ -56,7 +56,8 @@ pointers.
   hang-up and SIGWINCH at its size change are); `poll` takes at most 32 items, `select` 32 descriptors; a signal
   frame needs 84 bytes of stack and leaves 512 bytes above the stack guard, or the process is killed.
 - The display server (DESIGN D38, man/displayd.txt): one desktop, on one console; 32 windows, 16 client programs, 48 images;
-  a window's visible part at most 24 rectangles; kept copies of covered windows 256 KB of chip RAM; one font (8 x 8);
+  a window's visible part at most 24 rectangles (more: the change is painted whole and its windows asked to draw);
+  kept copies of covered windows 256 KB of chip RAM; a program's images 64 KB of chip RAM; one font (8 x 8);
   a program's event ring 64 records, its order queue 2 KB.
 - `/proc`; more than 8 supplementary groups a process (`NGROUPS`; login, su and sudo say so and keep the first 8);
   a shadow password file (`/etc/passwd` is

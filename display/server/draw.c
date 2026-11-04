@@ -58,6 +58,7 @@ static int r_empty(const struct rect *r) { return r->x0 >= r->x1 || r->y0 >= r->
 void rg_set(struct region *g, const struct rect *r)
 {
     g->n = 0;
+    g->over = 0;
     if (!r_empty(r))
         g->r[g->n++] = *r;
 }
@@ -67,6 +68,7 @@ static void put(struct region *g, s16 x0, s16 y0, s16 x1, s16 y1)
     if (x0 >= x1 || y0 >= y1)
         return;
     if (g->n >= RMAX) {                 /* too many pieces: this one is not drawn (never more than is visible) */
+        g->over = 1;                    /* and the region says so: whole() is false, a paint draws all again */
         if (!lost_said++)
             dprintf(2, "displayd: a window's visible region has more than %d pieces: some are not drawn\n", RMAX);
         return;
@@ -79,6 +81,7 @@ void rg_sub(struct region *g, const struct rect *r)
 {
     struct region o;
     o.n = 0;
+    o.over = g->over;
     for (int i = 0; i < g->n; i++) {
         struct rect a = g->r[i], c;
         if (!r_and(&c, &a, r)) {
@@ -104,12 +107,13 @@ void rg_and(struct region *g, const struct rect *r)
 }
 void rg_add(struct region *g, const struct rect *r)
 {
-    struct region o = { 0, { { 0, 0, 0, 0 } } };
+    struct region o = { 0, 0, { { 0, 0, 0, 0 } } };
     rg_set(&o, r);
     for (int i = 0; i < g->n; i++)      /* the new rectangle's own pieces, so no pixel is in two */
         rg_sub(&o, &g->r[i]);
     for (int i = 0; i < o.n; i++)
         put(g, o.r[i].x0, o.r[i].y0, o.r[i].x1, o.r[i].y1);
+    g->over |= o.over;
 }
 
 /* ---- bitmaps ---- */
@@ -125,6 +129,7 @@ int bm_alloc(struct bm *b, int w, int h, int depth)
     if (!b->p)
         return -ENOMEM;
     memset(b->p, 0, n);
+    b->kept = 1;
     chip_used += n;
     return 0;
 }
@@ -133,7 +138,8 @@ void bm_free(struct bm *b)
     if (!b->p)
         return;
     blit_idle();
-    chip_used -= b->stride * b->h;
+    if (b->kept)
+        chip_used -= b->stride * b->h;
     sys_memfree(b->p);
     b->p = 0;
 }

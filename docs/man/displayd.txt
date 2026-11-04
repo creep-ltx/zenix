@@ -46,6 +46,8 @@ NOTES
     console of the first client is taken: a program on a pseudo-terminal
     or a service cannot start the desktop. One font: the console's (Topaz
     8 from the kernel, the Unicode supplement); a wide character draws as
-    one cell. At most 32 windows, 16 client programs and 48 images; a window's
-    visible part is at most 24 rectangles (more: the rest is not drawn
-    until the windows change). The protocol is display/proto.h.
+    one cell. At most 32 windows, 16 client programs and 48 images (64 KB
+    of chip RAM a program); a window's visible part is at most 24
+    rectangles (more: the change is painted whole and the programs asked
+    to draw). A program's events go only into its own ring (the port it
+    names must be its own). The protocol is display/proto.h.

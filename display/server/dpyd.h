@@ -17,11 +17,12 @@ struct bm {
     u16 bpr;                    /* bytes a plane's line: (w + 15) / 16 * 2 */
     u16 depth;
     u32 stride;                 /* bytes a line: bpr * depth */
+    u8 kept;                    /* a kept copy: counted in chip_used */
 };
 struct rect { s16 x0, y0, x1, y1; };    /* x1, y1 exclusive */
 #define RMAX 24                 /* rectangles a region holds; more: the rest is not drawn (too little, never over
                                  * another window: the painter draws what it holds back to front) */
-struct region { u16 n; struct rect r[RMAX]; };
+struct region { u16 n; u8 over; struct rect r[RMAX]; };    /* over: pieces were dropped */
 
 extern struct bm scr;           /* the screen */
 extern int use_blit;            /* the blitter is ours (the console is shown): else the CPU draws */
@@ -35,7 +36,7 @@ void bm_xor(struct bm *b, const struct rect *r, int pen);            /* invert t
 void bm_copy(struct bm *s, int sx, int sy, struct bm *d, const struct rect *dr);   /* dr's size from (sx, sy) */
 void bm_text(struct bm *b, int x, int y, const u8 *glyph, int fg, int bg, int attr, const struct rect *clip);
 void bm_image(const struct bm *img, const u8 *mask, int sx, int sy, struct bm *d, const struct rect *dr);
-int bm_alloc(struct bm *b, int w, int h, int depth);   /* chip RAM, counted in chip_used; 0 or -ENOMEM */
+int bm_alloc(struct bm *b, int w, int h, int depth);   /* chip RAM, 0 or -ENOMEM; a kept copy (b->kept) counted */
 void bm_free(struct bm *b);
 
 /* rectangles and regions */
@@ -96,5 +97,5 @@ void ev_to(int cl, struct dpyev *e);                        /* an event for a cl
 void ev_win(int slot, int type, int code, int arg, int x, int y, int w, int h);
 void ev_wm(int type, int win, int code, int arg, int x, int y, int w, int h);
 extern int wm_cl;               /* the window manager's client slot, -1 none */
-const u8 *dpy_image(int id, struct bm **img);                 /* an image and its mask (0: none) */
+const u8 *dpy_image(int id, int cl, struct bm **img);         /* an image (cl's, or any: -1) and its mask (0: none) */
 void kick(void);                /* drain the kernel's ring now (a drag's loop) */

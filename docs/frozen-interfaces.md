@@ -95,7 +95,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `MEMA_CHIP` 1 (its other bits ignored, as all of it was before).
 - **D38 step 3 (the display server, branch desk, 2026-11-04):** `SYS_peer` 96 (msg a request the caller serves, else
   -EINVAL; `PEER_CTTY` 1 the client's controlling tty; `PEER_RD` 2 and `PEER_WR` 3 with `struct upeermem` {addr,
-  len}: 0 or -EFAULT); `SYS_post` 97 (`POST_BUF` 1: the port's owner, else -EPERM; `struct upostbuf` {addr, size,
+  len}: 0 or -EFAULT; `PEER_PORT` 4, arg a port: 0 if the client owns it, else -EPERM); `SYS_post` 97 (`POST_BUF` 1: the port's owner, else -EPERM; `struct upostbuf` {addr, size,
   from}, size 0 none; `POST_WRITE` 2: only the owner of the window's `from` port, else -EPERM; `struct upost` {off,
   src, len}, -EINVAL past the window, -EFAULT when the window is no longer its owner's memory, len 0 only wakes;
   -ECONNRESET for a port that is gone); `POLLRDBAND` 0x80 on a port (reported once a post); `struct ucongrab`'s

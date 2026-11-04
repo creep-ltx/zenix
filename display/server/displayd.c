@@ -21,6 +21,7 @@ static u16 *spr;                        /* the pointer: sprite 0 */
 static int ptx, pty;                    /* the pointer, from the kernel */
 static u16 btns;                        /* its buttons (GQ_*BUTTON) */
 static int grab_w = -1;                 /* the window a held button belongs to */
+static int grab_id;                     /* its id: a window closed or replaced meanwhile is not it */
 static int session_uid = -1;
 
 /* ---- clients ---- */
@@ -30,6 +31,7 @@ struct client {
     int used, pid, port, uid;
     u32 ring, nrec, head;               /* the ring in the client's memory; the next record we write */
     char name[DPY_NAME];
+    u32 imgbytes;                       /* its images' chip RAM (at most IMG_BUDGET) */
     struct dpyev pend[NPEND];
     int npend, lost;
 };
@@ -37,19 +39,30 @@ static struct client cls[NCL];
 
 /* ---- images ---- */
 #define NIMG 48
+#define IMG_BUDGET (64u << 10)          /* a program's images in chip RAM: icons and gadgets, never a screenful */
 struct image { u16 id; u8 cl; struct bm bm; u8 *mask; };
 static struct image imgs[NIMG];
 static u16 next_img = 1;
 
-const u8 *dpy_image(int id, struct bm **img)
+const u8 *dpy_image(int id, int cl, struct bm **img)
 {
     for (int i = 0; i < NIMG; i++)
-        if (imgs[i].id && imgs[i].id == id) {
+        if (imgs[i].id && imgs[i].id == id && (cl < 0 || imgs[i].cl == cl)) {
             *img = &imgs[i].bm;
             return imgs[i].mask;
         }
     *img = 0;
     return 0;
+}
+
+static void img_free(int i)
+{
+    if (imgs[i].cl < NCL)
+        cls[imgs[i].cl].imgbytes -= imgs[i].bm.stride * imgs[i].bm.h;
+    bm_free(&imgs[i].bm);
+    free(imgs[i].mask);
+    imgs[i].mask = 0;
+    imgs[i].id = 0;
 }
 
 /* ---- events ---- */
@@ -155,7 +168,10 @@ static void default_style(void)
     style.text[0] = 6; style.text[1] = 7;
     style.shadowc = 3;
     style.gadx[0] = 128 + 10;           /* the close gadget at the right, an x (no manager: the built-in style) */
-    style.drag = DRAG_OUTLINE;
+    /* drags: the outline on a 68020/68030, the whole window on a 68040/68060 (and Emu68, which says 68040): D38
+     * question 3's default, from the CPU AmigaOS found (exec's AttnFlags, through ZINE_INFO) */
+    u32 zi[7];
+    style.drag = sys3(93, 0, (u32)zi, sizeof zi) == 0 && (zi[2] & 0x88) ? 0 : DRAG_OUTLINE;
 }
 static void set_palette(void)
 {
@@ -208,14 +224,23 @@ static int screen_up(int con)
      * (the Copper reads it from the next frame) */
     copl[0] = 0xFFFF; copl[1] = 0xFFFE;
     gfd = sys_congrab(confd, &g);
-    if (gfd < 0)
+    if (gfd < 0) {
+        sys_close(confd);
+        sys_memfree(mem);
         return gfd;
-    grabbed = 1;
+    }
     aga = g.chips & GCHIP_AGA;
     int depth = aga ? 4 : 3;
-    if (bm_alloc(&scr, g.width, g.height, depth) < 0)
+    if (bm_alloc(&scr, g.width, g.height, depth) < 0) {    /* no chip RAM: the console given back, nothing kept */
+        sys_close(gfd);
+        gfd = -1;
+        sys_close(confd);
+        sys_memfree(mem);
         return -ENOMEM;
+    }
+    scr.kept = 0;
     chip_used = 0;                      /* the screen is not a kept copy */
+    grabbed = 1;
     font_init(topaz);
     u16 *c = copl;
     int f3 = aga;
@@ -286,8 +311,14 @@ static void key(const struct ugevent *e)
     memcpy(v.ch, e->ch, 4);
     ev_to(wins[focus].cl, &v);
 }
+static void grab_check(void)
+{
+    if (grab_w >= 0 && (wins[grab_w].id != grab_id || !(wins[grab_w].state & WST_SHOWN)))
+        grab_w = -1;
+}
 static void button(int which, int down, u16 qual)
 {
+    grab_check();
     int part, s = grab_w >= 0 && !down ? grab_w : win_at(ptx, pty, &part);
     if (grab_w >= 0 && !down)
         part = 0;
@@ -318,6 +349,7 @@ static void button(int which, int down, u16 qual)
         return;
     if (down) {
         grab_w = s;
+        grab_id = w->id;
         if (wm_cl >= 0)
             ev_wm(EV_WM_CLICK, w->id, which, 0, ptx, pty, 0, 0);
         else if (w->kind != WK_DESKTOP && w->kind != WK_BAR) {
@@ -345,6 +377,7 @@ static void pointer(const struct ugevent *e)
     btns = now;
     static const u16 bit[3] = { GQ_LBUTTON, GQ_RBUTTON, GQ_MBUTTON };
     if (moved) {
+        grab_check();
         if (dragging)
             win_drag_event(ptx, pty, 0);
         else {
@@ -429,8 +462,12 @@ static void drop(int cl)
     if (!c->used)
         return;
     c->used = 0;
-    if (wm_cl == cl)
+    if (wm_cl == cl) {                  /* the manager gone: the server places and shows by itself (D38 3.3) */
         wm_cl = -1;
+        for (int k = 0; k < NWIN; k++)
+            if (wins[k].id && wins[k].cl != cl && !(wins[k].state & WST_SHOWN))
+                win_show(k, 1, 0);
+    }
     for (int i = 0; i < NWIN; i++)
         if (wins[i].id && wins[i].cl == cl) {
             int id = wins[i].id;
@@ -438,11 +475,8 @@ static void drop(int cl)
             ev_wm(EV_WM_GONE, id, 0, 0, 0, 0, 0, 0);
         }
     for (int i = 0; i < NIMG; i++)
-        if (imgs[i].id && imgs[i].cl == cl) {
-            bm_free(&imgs[i].bm);
-            free(imgs[i].mask);
-            imgs[i].id = 0;
-        }
+        if (imgs[i].id && imgs[i].cl == cl)
+            img_free(i);
 }
 static int hello(struct umsg *m)
 {
@@ -456,8 +490,10 @@ static int hello(struct umsg *m)
     if (session_uid >= 0 && m->uid != session_uid && m->uid != 0)
         return -EACCES;                 /* another user's program on this desktop: no */
     u32 nrec = h->ringsize > sizeof(struct dpyring) ? (h->ringsize - sizeof(struct dpyring)) / sizeof(struct dpyev) : 0;
-    if (nrec < 8 || peer(m, PEER_RD, h->ring, h->ringsize) < 0)
+    if (nrec < 8 || peer(m, PEER_WR, h->ring, h->ringsize) < 0)
         return -EINVAL;
+    if (sys_peer(m, PEER_PORT, (void *)h->port) < 0)
+        return -EPERM;                  /* events go only into the asking program's own ring */
     int cl = -1;
     for (int i = 0; i < NCL; i++)
         if (!cls[i].used) { cl = i; break; }
@@ -550,7 +586,10 @@ static int req(struct umsg *m)
             return 0;
         }
         if (a[1] == WS_SIZE) {
-            win_place((int)(w - wins), w->fx, w->fy, (int)(a[2] >> 16), (int)(a[2] & 0xFFFF));
+            if (wm_cl >= 0 && cl != wm_cl)
+                ev_wm(EV_WM_SIZE, w->id, 0, 0, w->fx, w->fy, (int)(a[2] >> 16), (int)(a[2] & 0xFFFF));
+            else
+                win_place((int)(w - wins), w->fx, w->fy, (int)(a[2] >> 16), (int)(a[2] & 0xFFFF));
             return 0;
         }
         return -EINVAL;
@@ -594,11 +633,15 @@ static int req(struct umsg *m)
             if (!imgs[i].id) { k = i; break; }
         if (k < 0)
             return -ENOSPC;
+        u32 bytes = wpr * d->h * d->depth;
+        if (cls[cl].imgbytes + bytes > IMG_BUDGET)
+            return -ENOSPC;             /* past its images' budget */
         struct image *im = &imgs[k];
-        u32 cu = chip_used;
         if (bm_alloc(&im->bm, d->w, d->h, d->depth) < 0)
             return -ENOMEM;
-        chip_used = cu;                 /* the images are not the kept copies' budget */
+        im->bm.kept = 0;                /* not the kept copies' budget: its own */
+        chip_used -= bytes;
+        cls[cl].imgbytes += bytes;
         const u8 *src = (const u8 *)d->data;
         for (int p = 0; p < d->depth; p++)
             for (int y = 0; y < d->h; y++)
@@ -612,17 +655,19 @@ static int req(struct umsg *m)
             }
             memcpy(im->mask, src + (u32)d->depth * d->h * wpr, wpr * d->h);
         }
-        im->id = next_img++;
-        if (!next_img) next_img = 1;
+        struct bm *dummy;
+        do {                            /* a number no image has now */
+            im->id = next_img++;
+            if (!next_img) next_img = 1;
+            dpy_image(im->id, -1, &dummy);
+        } while (dummy && dummy != &im->bm);
         im->cl = (u8)cl;
         return im->id;
     }
     case DPY_IMAGE_FREE:
-        for (int i = 0; i < NIMG; i++)
+        for (int i = 0; a[0] && i < NIMG; i++)
             if (imgs[i].id == a[0] && imgs[i].cl == cl) {
-                bm_free(&imgs[i].bm);
-                free(imgs[i].mask);
-                imgs[i].id = 0;
+                img_free(i);
                 return 0;
             }
         return -ENOENT;

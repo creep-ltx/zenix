@@ -107,7 +107,7 @@ static int whole(const struct win *w, const struct region *vis)
     rg_set(&g, &in);
     for (int i = 0; i < vis->n; i++)
         rg_sub(&g, &vis->r[i]);
-    return g.n == 0;
+    return g.n == 0 && !g.over;         /* pieces dropped: not known to be whole */
 }
 
 /* ---- painting ---- */
@@ -189,7 +189,7 @@ static void frame_paint(struct win *w, const struct rect *c)
                     continue;                   /* no such gadget in this style */
                 int gx = gad_x(i, &f);
                 struct bm *img;
-                const u8 *m = style.gad[i] ? dpy_image(style.gad[i], &img) : 0;
+                const u8 *m = style.gad[i] ? dpy_image(style.gad[i], -1, &img) : 0;
                 if (style.gad[i] && img) {
                     struct rect d = { (s16)gx, (s16)(ty0 + (style.title - 1 - img->h) / 2), 0, 0 };
                     d.x1 = (s16)(d.x0 + img->w);
@@ -232,8 +232,12 @@ static void paint(const struct rect *d)
         for (int i = 0; i < n; i++)
             rg_sub(&bg, &o[i]);
     }
-    for (int i = 0; i < bg.n; i++)
-        bm_fill(&scr, &bg.r[i], 0);
+    int full = bg.over;                 /* too many pieces: the whole damage cleared, every window drawn in it again */
+    if (full)
+        bm_fill(&scr, d, 0);
+    else
+        for (int i = 0; i < bg.n; i++)
+            bm_fill(&scr, &bg.r[i], 0);
     for (int k = 0; k < norder; k++) {
         int s = order[k];
         struct win *w = &wins[s];
@@ -251,7 +255,7 @@ static void paint(const struct rect *d)
         }
         if (w->back.p)
             continue;
-        struct region f = fresh[s];
+        struct region f = full || fresh[s].over ? w->vis : fresh[s];
         rg_and(&f, d);
         struct region v = w->vis;       /* fresh and visible: cleared, then the program draws it */
         for (int i = 0; i < f.n; i++)
@@ -271,6 +275,7 @@ static struct rect oin[NWIN];
 static u8 owhole[NWIN], oshown[NWIN];
 static void before(void)
 {
+    drag_hide();                        /* no outline in what is copied or painted over */
     for (int i = 0; i < NWIN; i++) {
         struct win *w = &wins[i];
         fresh[i].n = 0;
@@ -322,6 +327,7 @@ static void after(const struct rect *d)
         }
     }
     paint(d);
+    drag_show();
     for (int i = 0; i < NWIN; i++) {    /* whole on the screen again: the copy goes */
         struct win *w = &wins[i];
         if (w->id && w->back.p && shown(w) && whole(w, &w->vis))
@@ -388,8 +394,10 @@ int win_new(int cl, const struct dpywin *d)
         return -EINVAL;
     struct win *w = &wins[s];
     memset(w, 0, sizeof *w);
-    w->id = next_id++;
-    if (!next_id) next_id = 1;
+    do {                                /* a number no window has now (the 16 bits wrap) */
+        w->id = next_id++;
+        if (!next_id) next_id = 1;
+    } while (win_get(w->id) != w);
     w->cl = (u8)cl;
     w->kind = (u8)d->kind;
     w->flags = d->flags;
@@ -425,8 +433,10 @@ void win_close(int s)
     order_rm(s);
     if (was)
         after(&d);
-    else
+    else {
         calc_vis();
+        drag_show();
+    }
 }
 
 /* the frame's top left at x, y and the inside w x h; the inside's left edge on an 8-pixel column (D38 3.2) */
@@ -435,8 +445,8 @@ void win_place(int s, int x, int y, int iw, int ih)
     struct win *w = &wins[s];
     struct rect d;
     if (w->kind == WK_DESKTOP) { x = 0; y = 0; iw = scr.w; ih = scr.h; }
-    iw = clampsz(iw, w->minw, w->maxw, w->stepw, w->stepw ? iw % w->stepw : 0);
-    ih = clampsz(ih, w->minh, w->maxh, w->steph, w->steph ? ih % w->steph : 0);
+    iw = clampsz(iw, w->minw, w->maxw, w->stepw, w->stepw ? w->iw % w->stepw : 0);    /* steps from the size it has */
+    ih = clampsz(ih, w->minh, w->maxh, w->steph, w->steph ? w->ih % w->steph : 0);
     if (iw > scr.w) iw = scr.w;
     if (ih > scr.h) ih = scr.h;
     x = ((x + bl(w)) & ~7) - bl(w);
@@ -458,8 +468,10 @@ void win_place(int s, int x, int y, int iw, int ih)
     }
     if (shown(w) || oshown[s])
         after(&d);
-    else
+    else {
         calc_vis();
+        drag_show();
+    }
 }
 
 void win_stack(int s, int back)
@@ -470,8 +482,10 @@ void win_stack(int s, int back)
     order_put(s, back);
     if (shown(&wins[s]))
         after(&d);
-    else
+    else {
         calc_vis();
+        drag_show();
+    }
 }
 
 void win_show(int s, int show, int why)
@@ -506,6 +520,7 @@ void win_focus(int s)
     if (s == old)
         return;
     focus = s;
+    drag_hide();
     for (int k = 0; k < 2; k++) {
         int t = k ? s : old;
         if (t < 0 || !shown(&wins[t]))
@@ -520,6 +535,7 @@ void win_focus(int s)
         }
         ev_win(t, EV_FOCUS, 0, k, 0, 0, 0, 0);
     }
+    drag_show();
 }
 
 void win_title(int s)
@@ -527,8 +543,10 @@ void win_title(int s)
     struct win *w = &wins[s];
     if (!shown(w))
         return;
+    drag_hide();
     for (int i = 0; i < w->vis.n; i++)
         frame_paint(w, &w->vis.r[i]);
+    drag_show();
 }
 
 void win_style(const struct dpystyle *st)
@@ -579,7 +597,7 @@ int win_at(int x, int y, int *part)
                     continue;
                 int gx = gad_x(i, &f), gw = 8;
                 struct bm *img;
-                if (style.gad[i] && dpy_image(style.gad[i], &img) && img)
+                if (style.gad[i] && (dpy_image(style.gad[i], -1, &img), img))
                     gw = img->w;
                 if (x >= gx && x < gx + gw)
                     *part = i == 0 ? FP_CLOSE : i == 1 ? FP_MIN : FP_ZOOM;
@@ -688,7 +706,7 @@ void win_draw(int s, const u16 *o, u32 nw, u32 *bad)
             if (op == O_FILL)
                 each(&r, d_fill, a[4] & 15, 0);
             else
-                each(&r, d_xor, 15, 0);
+                each(&r, d_xor, na >= 5 ? a[4] & 15 : 15, 0);   /* the pen's planes (all, in the first form) */
             break;
         }
         case O_TEXT: {
@@ -736,7 +754,7 @@ void win_draw(int s, const u16 *o, u32 nw, u32 *bad)
         case O_IMAGE: {
             if (na < 7) goto bad;
             struct bm *img;
-            const u8 *m = dpy_image(a[0], &img);
+            const u8 *m = dpy_image((u16)a[0], w->cl, &img);   /* the program's own images */
             if (!img) goto bad;
             int sx = a[1], sy = a[2], iw = a[3], ih = a[4];
             if (sx < 0 || sy < 0 || iw <= 0 || ih <= 0 || sx + iw > img->w || sy + ih > img->h) goto bad;

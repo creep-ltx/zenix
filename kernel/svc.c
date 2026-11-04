@@ -341,6 +341,7 @@ int svc_handover(int i)
     p->op = current;
     p->nseen = p->ncancel;                      /* D23: the queued cancelled messages it will receive marked */
     p->pbuf = p->psize = 0;                     /* D38: no post window of the server before it */
+    p->nseenpost = p->npost;
     p->pfrom = 0;
     s->state = SV_RUNNING;
     s->served = 1;

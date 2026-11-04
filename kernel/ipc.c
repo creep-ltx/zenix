@@ -180,6 +180,10 @@ KCOLD long ipc_peer(u32 msg, u32 op, u32 arg)
         return -EINVAL;
     if (op == PEER_CTTY)
         return c->ctty;
+    if (op == PEER_PORT) {
+        struct port *p = port_of((int)arg);
+        return p && p->owner == c->pid ? 0 : -EPERM;
+    }
     if (op != PEER_RD && op != PEER_WR)
         return -EINVAL;
     if (!user_ok_rd(current, arg, sizeof(struct upeermem)))

@@ -186,7 +186,7 @@ long gcon_grab(int con, u32 a2)
     u32 sbytes = 4u * (u->sprh + 2u);
     if (!user_ok_wr(current, u->sprite, sbytes) || !chip_ok(u->sprite, sbytes))
         return -EFAULT;
-    int topaz = u->size >= UCONGRAB_TOPAZ && u->topaz;
+    int topaz = u->size >= UCONGRAB_TOPAZ && user_ok_rd(current, a2, UCONGRAB_TOPAZ) && u->topaz;
     if (topaz && !user_ok_wr(current, u->topaz, 224 * 8))
         return -EFAULT;
     /* the Copper list: the caller's chip RAM up to its end (0xFFFF 0xFFFE), at most 4,096 instructions */

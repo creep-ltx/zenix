@@ -34,7 +34,8 @@ int dpy_open(const char *name)
     do { d[k++] = (char)('0' + pid % 10); pid /= 10; } while (pid && k < 10);
     while (k && n < 15) pn[n++] = d[--k];
     pn[n] = 0;
-    myport = sys_port_create(pn);
+    if (myport < 0)                     /* a second try after a failure keeps the port it made */
+        myport = sys_port_create(pn);
     if (myport < 0)
         return myport;
     sport = sys_port_find(DPY_PORTNAME);

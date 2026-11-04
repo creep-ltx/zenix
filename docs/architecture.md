@@ -897,7 +897,7 @@ sys_call(port, &msg)   -> blocks until the server replies, returns msg.result
 - **Serving clients that are not the kernel** (DESIGN D38 step 3, `ipc.c`): a server that takes requests straight from
   programs (the display server) must not trust their pointers, and must never wait for a client. `SYS_peer` (msg, op,
   arg) answers about the client of a request the caller is serving (looked up as `ipc_reply` does): `PEER_CTTY` its
-  controlling tty, `PEER_RD`/`PEER_WR` (`struct upeermem`) whether a range is the client's own memory to read or to
+  controlling tty, `PEER_PORT` whether a port is its own, `PEER_RD`/`PEER_WR` (`struct upeermem`) whether a range is the client's own memory to read or to
   write (0, else -EFAULT), so the server reads a batch or writes an answer in place only there. `SYS_post` (op,
   port, arg) lets a port's owner open a window in its memory (`POST_BUF`, `struct upostbuf`: the place, the size,
   and the one port whose owner may post) and that poster copy bytes into it (`POST_WRITE`, `struct upost`: the

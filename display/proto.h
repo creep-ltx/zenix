@@ -47,7 +47,7 @@
 
 /* DPY_WIN_SET's what */
 #define WS_TITLE        1   /* a[2] the title (the client's memory, at most DPY_TITLE - 1 bytes) */
-#define WS_SIZE         2   /* a[2] w << 16 | h: the inside's wanted size (the manager decides) */
+#define WS_SIZE         2   /* a[2] w << 16 | h: the inside's wanted size (with a manager: EV_WM_SIZE, it decides) */
 
 /* DPY_WM_HIDE's why */
 #define HIDE_MINIMISE   1
@@ -157,7 +157,7 @@ struct dpystyle {
 #define O_TEXT          3   /* x, y, font, fg | bg << 8, attr (TA_*), nbytes, then the UTF-8 bytes, padded to a word */
 #define O_COPY          4   /* sx, sy, w, h, dx, dy: inside the window (scrolling) */
 #define O_IMAGE         5   /* id, sx, sy, w, h, dx, dy */
-#define O_XLINE         6   /* x, y, w, h: invert (one pen's bits) - a cursor or an outline */
+#define O_XLINE         6   /* x, y, w, h [, pen]: invert the pen's planes (all without one) - a cursor, an outline */
 #define TA_BOLD         1
 #define TA_UNDER        2
 #define TA_INV          4
@@ -192,6 +192,7 @@ struct dpyev {
 #define EV_WM_DRAGEND   36  /* the drag ended: x, y the place, w, h the size */
 #define EV_WM_TITLE     37  /* a window's title changed */
 #define EV_WM_CLICK     38  /* a click on a window's inside (focus follows the manager): win, qual, x, y */
+#define EV_WM_SIZE      39  /* a program asks for a new size (WS_SIZE): win, w, h; the manager decides (DPY_WM_PLACE) */
 #define FP_TITLE        1
 #define FP_CLOSE        2
 #define FP_MIN          3
