@@ -1,0 +1,47 @@
+DEMO(8)		Zenix manual
+
+NAME
+    demo - the Zenix demo floppy
+
+DESCRIPTION
+    This Zenix started from the demo floppy: one disk that boots any Amiga
+    with a 68020 or better and 4 MB of fast RAM straight into Zenix
+    Desktop. There are two: the DD disk (880 KB, every drive and Gotek)
+    and the HD disk (1.76 MB, HD drives, Goteks and emulators), which also
+    has wget(1) with its root certificates, ssh(1), maki(1), markdown(1),
+    zine(1), the plipbox(8) driver and the disk tools (fdisk(8),
+    mkfs.ext2(8), fsck.ext2(8), mount(8) for FAT, OFS/FFS and PFS3 disks).
+
+    While the bar fills, the loader on the floppy reads the whole disk
+    and unpacks it into memory: the kernel, and a RAM disk that is the
+    root (/). Then Zenix starts from there. So every program starts from
+    memory, the floppy may be taken out, and nothing is ever written to
+    it. Files you make live in memory until the Amiga is switched off
+    (df / says how much room is left).
+
+    guest is logged in on the desktop by itself (dlogin(8) "autologin");
+    Log out shows the login screen, where guest (no password) can choose
+    the Text console session too. Amiga+F2 .. Amiga+F10 are text consoles
+    with a login prompt each; Amiga+F1 is the desktop.
+
+    The everyday commands (ls, cat, grep, less, man, gzip, ...) are one
+    program on this disk, a "box" (as BusyBox): each name is a link to it,
+    and it runs the command its name says, as the separate program would.
+
+    A network card (an A2065, the PiStorm's Ethernet, an NE2000 PC Card) is
+    set up by DHCP; then telnet(1) reaches BBSes, with Zmodem downloads
+    (rz(1)), and ping(8) and host(1) work.
+
+FILES
+    /usr/lib/demo/session  the desktop session: the welcome, then zdesk
+    /home/guest/WELCOME    the welcome text
+
+NOTES
+    The loader refuses a machine without 4 MB of fast RAM, a 68000 and a
+    damaged disk, saying why on the screen; nothing is changed then. The
+    floppy carries no filesystem (Linux sees an empty disk). Zenix is free
+    software (GPL-2.0); the notices of the code from other projects are in
+    /usr/share/licenses. The source: https://github.com/creep-ltx/zenix
+
+SEE ALSO
+    dlogin(8), zdesk(1), init(8), boot(8)

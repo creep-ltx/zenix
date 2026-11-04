@@ -48,7 +48,22 @@ static int session(const struct pw *p)
     sys_setuid(p->uid);
     sys_chdir(p->home);
     const char *prog = program ? program : p->shell;
-    char *argv[] = { (char *)prog, 0 };             /* spawn only reads argv */
+    /* -s PROGRAM may carry arguments, words split at spaces (dlogin's "/bin/sh /usr/lib/demo/session": the demo
+     * floppy's session, DESIGN D25 revision 3, 7.3); at most 7 */
+    char pbuf[128], *argv[8] = { (char *)prog, 0 };  /* spawn only reads argv */
+    if (program && strchr(program, ' ') && strlen(program) < sizeof pbuf) {
+        strcpy(pbuf, program);
+        int n = 0;
+        for (char *w = pbuf; *w && n < 7; ) {
+            while (*w == ' ') *w++ = 0;
+            if (!*w) break;
+            argv[n++] = w;
+            while (*w && *w != ' ') w++;
+        }
+        argv[n] = 0;
+        if (!n) argv[0] = (char *)program;   /* nothing but spaces: as given (spawn says it is not found) */
+        prog = argv[0];
+    }
     int pid = sys_spawn(prog, argv, 0);
     if (pid < 0) { dprintf(2, "login: cannot start %s: %s\n", prog, zwhy("failed")); return 1; }
     if (handover)                       /* init's login: the shell becomes init's child, login ends (DESIGN D18) */

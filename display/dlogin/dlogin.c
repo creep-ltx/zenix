@@ -21,6 +21,10 @@ static char host[64] = "zenix", name[32], pass[100], msg[48];
 /* prog "text": the user's shell on the console; a label (21 at most) fits the field's 25 cells with "< " and " >" */
 static struct { char label[22], prog[64]; } sessions[NSESS];
 static char theme[16];
+/* "autologin NAME SESSION" (DESIGN D25 revision 3, 7.3: the demo floppy): that user's session starts without the
+ * greeter, once (the marker file below says it happened); never root */
+static char auto_name[32], auto_sess[22];
+#define AUTO_MARK "/tmp/.dlogin-autologin"
 #define F_NAME 0
 #define F_PASS 1
 #define F_SESS 2
@@ -62,6 +66,20 @@ static void read_conf(void)
             *--t = 0;                   /* nor at the end */
         if (!*l || *l == '#') continue;
         if (!strncmp(l, "theme ", 6) && strlen(l + 6) < sizeof theme) { strcpy(theme, l + 6); continue; }
+        if (!strncmp(l, "autologin ", 10)) {
+            char *u = l + 10, *sp;
+            while (*u == ' ') u++;
+            sp = strchr(u, ' ');
+            if (sp && sp - u < (int)sizeof auto_name && strlen(sp + 1) < sizeof auto_sess) {
+                memcpy(auto_name, u, (u32)(sp - u)); auto_name[sp - u] = 0;
+                for (sp++; *sp == ' '; sp++)
+                    ;
+                strcpy(auto_sess, sp);
+                continue;
+            }
+            dprintf(logfd, "dlogin: /etc/dlogin: line %d skipped\n", ln);
+            continue;
+        }
         char *eq = strstr(l, " = ");
         if (strncmp(l, "session ", 8) || !eq || nsess == NSESS) {
             dprintf(logfd, "dlogin: /etc/dlogin: line %d skipped\n", ln);
@@ -231,6 +249,7 @@ static void session(const struct pw *p)
     }
 }
 
+static void run_session(const struct pw *p);
 static void submit(void)
 {
     struct pw p;
@@ -260,15 +279,43 @@ static void submit(void)
         dpy_flush();
         return;
     }
+    run_session(&p);
+}
+
+/* the user is known (a right password, or autologin): the session, then the greeter again */
+static void run_session(const struct pw *p)
+{
     msg[0] = 0;                         /* (session() may set it: shown on the greeter that comes back) */
-    dprintf(logfd, "dlogin: %s (uid %u) logged in: %s\n", name, (unsigned)p.uid, sessions[sess].label);
-    session(&p);
+    dprintf(logfd, "dlogin: %s (uid %u) logged in: %s\n", name, (unsigned)p->uid, sessions[sess].label);
+    session(p);
     dprintf(logfd, "dlogin: %s's session ended\n", name);
     name[0] = 0;
     if (greeter_up() < 0) {             /* the display is gone: init starts the text login */
         dprintf(logfd, "dlogin: the display could not be opened again\n");
         sys_exit(1);
     }
+}
+
+/* /etc/dlogin's autologin, at the first start of dlogin while the marker does not exist (on a RAM root, as the demo
+ * floppy's, that is once a boot); the marker is made first, so a session that fails or a dlogin started again by init
+ * shows the greeter. Never root, never an unknown user or session (said in the log). */
+static void autologin(void)
+{
+    if (!auto_name[0] || !handover) return;
+    int fd = sys_open(AUTO_MARK, O_WRONLY | O_CREAT | O_EXCL);
+    if (fd < 0) return;                 /* it happened already (or /tmp is not writable: no autologin) */
+    sys_close(fd);
+    struct pw p;
+    int i;
+    for (i = 0; i < nsess && strcmp(sessions[i].label, auto_sess); i++)
+        ;
+    if (i == nsess) { dprintf(logfd, "dlogin: autologin: no session '%s'\n", auto_sess); return; }
+    if (pw_byname(auto_name, &p) != 0) { dprintf(logfd, "dlogin: autologin: no user '%s'\n", auto_name); return; }
+    if (p.uid == 0) { dprintf(logfd, "dlogin: autologin: never root\n"); return; }
+    strcpy(name, auto_name);
+    sess = i;
+    dprintf(logfd, "dlogin: autologin\n");
+    run_session(&p);
 }
 
 static void edit(char *s, u32 room, const struct dpyev *e)
@@ -356,6 +403,7 @@ int main(int argc, char **argv)
         if (pid < 0) return 1;
         sys_exit_handing(ST_HANDED | pid, pid);  /* init waits for it and its shell, as for its own login */
     }
+    autologin();
     for (;;) {
         struct dpyev e;
         u32 s = sys_time() % 60;

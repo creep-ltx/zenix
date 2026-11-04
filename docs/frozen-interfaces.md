@@ -121,6 +121,10 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   grabbed console, else -EBUSY; a[0] the uid, at most 65535: clients of other non-root uids are dropped), `DPY_WM_BYE` 46 (the manager leaves the role);
   `/etc/console`'s `login text|graphical`; `/etc/dlogin` (`session LABEL = PROGRAM`, PROGRAM an absolute path or
   `text`, at most 4; `theme NAME`); `login -s PROGRAM` (root only, after `-f`).
+- **D25 revision 3 (the demo floppy, branch demo, 2026-11-05):** `/etc/dlogin`'s `autologin NAME SESSION` (SESSION a
+  label of its `session` lines; never root; once while `/tmp/.dlogin-autologin` does not exist); `login -s PROGRAM`'s
+  PROGRAM may carry arguments split at spaces (at most 7 words in 127 bytes). Not frozen: the demo disk's layout and
+  table (`boot/demounpack.h`, only its own loader reads it).
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).
