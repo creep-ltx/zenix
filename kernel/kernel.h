@@ -815,7 +815,7 @@ void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, a
 #define SYS_chdir   15
 #define SYS_getcwd  16
 #define SYS_pipe    17   /* int fds[2], flags (0, or O_NONBLOCK for both ends: Linux's pipe2; D20 step 4) */
-#define SYS_memalloc 18   /* size, flags (0 any memory; MEMA_CHIP chip RAM, DESIGN D38: the display server's screen) */
+#define SYS_memalloc 18   /* size, flags (MEMA_CHIP chip RAM, DESIGN D38: the display server's screen; other bits ignored) */
 #define MEMA_CHIP    1
 #define SYS_memfree  19
 #define SYS_ticks   20   /* 0 -> the 100 Hz tick count (wraps); 1 -> whole seconds since boot (unsigned, F9); 2 -> CLOCK_* bits */
@@ -956,8 +956,10 @@ struct uconline {            /* CON_LINE: the caller fills size, pens, npens; th
 struct ucongrab {            /* CON_GRAB: the caller fills size .. hoty; the kernel the rest */
     u32 size;                /* UCONGRAB_FIRST or more */
     u32 cop;                 /* the Copper list: the caller's chip RAM, ending 0xFFFF 0xFFFE (at most 4,096 moves);
-                              * it sets all eight sprite pointers every frame, sprite 0 at `sprite`, and fetches at
-                              * least one bitplane (in FS-UAE no sprite shows without) */
+                              * it sets all eight sprite pointers every frame, sprite 0 at `sprite`, keeps FMODE's
+                              * sprite bits 0 (16-pixel sprites), and fetches at least one bitplane (in FS-UAE no
+                              * sprite shows without); FMODE, BPLCON3/4, the modulos and DDF carry over from the
+                              * kernel's list unless it sets them; it leaves BEAMCON0 alone */
     u32 sprite;              /* sprite 0, the pointer: its two control words (the kernel writes them), sprh line pairs,
                               * two zero words; the caller's chip RAM */
     u16 sprh;                /* its height in lines, 1..255 */
@@ -1005,6 +1007,13 @@ int gcon_shown(int con);                /* con_show: con is the grabbed console 
 void gcon_key(u8 code, u16 qual, const u8 *ch);
 void gcon_tick(void);                   /* the 100 Hz tick: the pointer */
 void gcon_work(void);                   /* kwork: the pointer's records, the release's deadline */
+void gcon_vblank(void);                 /* the vertical-blank interrupt: the pointer's control words */
+void gcon_proc_exit(int pid);           /* the server ends: the grab with it */
+int gcon_uses(u32 base, u32 size);      /* SYS_memfree: the grab's Copper list or sprite lies in this region */
+void gfx_blit_cpu(int on);              /* the kernel copies and fills with the CPU (a forced switch) */
+int gfx_present(void);                  /* the display is up (also while a server has it: a panic takes it back) */
+void gfx_reclaim(void);                 /* a panic: the kernel's display back at once */
+void kbd_forget(void);                  /* no key repeats on (a switch between text and graphics mode) */
 void gfx_hand(u32 cop);                 /* the Copper list shown: a server's (sprites on), or 0 the kernel's */
 int gfx_diwv(void);                     /* the display window's first line */
 void gfx_geom(u16 *w, u16 *h);          /* the screen in hires pixels and lines */

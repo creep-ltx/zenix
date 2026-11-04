@@ -93,7 +93,8 @@ static void panic_begin(void)
     if (panic_printing) {
         klog_mirror_off();
         panic_noscreen = 1;
-    } else if (gfx_up() && !panic_noscreen) {
+    } else if (gfx_present() && !panic_noscreen) {
+        gfx_reclaim();                  /* D38: a display server had the screen: the kernel's, to show the panic */
         term_panic();                   /* D20: Topaz and no console rules before the text is drawn */
         klog_mirror_on();
     }
@@ -110,7 +111,7 @@ void panic(const char *why)
 #ifdef DIAG_TRIAL
     machine_reset();            /* test builds (tools/update-test.sh): the warm reset an owner would do */
 #endif
-    if (gfx_up() && !panic_noscreen)
+    if (gfx_present() && !panic_noscreen)
         gfx_panic();            /* the background turns dark red, the text stays */
     else
         diag_halt(diag_colour); /* no display: the stage colour over red */
