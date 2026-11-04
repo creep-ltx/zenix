@@ -567,7 +567,88 @@ class Cyber(Look):
         cv.hline(0, self.bar_h - 1, W, 3)
 
 
-LOOKS = [Flat, Workbench, Mono, Cyber]
+class Platinum(Look):
+    """(e) Mac OS 8-9's Platinum, Amiga-pixelled: light grey bevelled windows, a pinstriped active title with the
+    close box on the left and the zoom and collapse boxes on the right, the title centred, a blue desktop."""
+    name = "e-platinum"
+    logo = "Zenix"
+    pal = [0x6676a8,   # 0 desktop blue (OS 8's)
+           0x000000,   # 1 black
+           0xffffff,   # 2 white (bevel shine, lists)
+           0xdddddd,   # 3 platinum: window body, menu bar
+           0xa8a8a8,   # 4 stripes, inactive edges
+           0x777777,   # 5 bevel shadow, dim text
+           0x3355aa,   # 6 selection blue (OS 9 highlight)
+           0x8a99c6,   # 7 desktop pattern's light dots
+           0xbb2211,   # 8 red
+           0x117722,   # 9 green
+           0x886600,   # 10 dark yellow
+           0x223399,   # 11 dark blue
+           0x882288,   # 12 magenta
+           0x116677,   # 13 cyan
+           0xeec06a,   # 14 folder yellow
+           0xbbbbbb]   # 15 inactive title bar
+    roles = dict(desk=0, bar=3, barline=1, barfg=1, logo=1, barcur=2, barcurbg=6, bardim=5, clock=1,
+                 iconfg=2, ik=1, ia=14, iw=2, id=5,
+                 winbg=3, winfg=1, border=1, border_a=1, title=15, titlefg=5, title_a=3, titlefg_a=1,
+                 shadow=5, tbg=2, tfg=1, tred=8, tgreen=9, tyellow=10, tblue=11, tmagenta=12, tcyan=13,
+                 cursor=1, dim=5, rule=4, dir=11, selbg=6, selfg=2, btn=3, btnfg=1, ptr_o=2, ptr_i=1)
+    roles["if"] = 14
+    label_bg = "desk"
+
+    def desktop(self, cv):
+        cv.fill(0, 0, W, H, self.c("desk"))
+        for y in range(0, H, 4):            # a fine dotted pattern, as OS 8's default desktop
+            for x in range((y // 4) % 2 * 4, W, 8):
+                cv.put(x, y, 7)
+
+    def frame(self, cv, w, active):
+        x, y, ww, hh, cx, cy, cw, ch = win_box(w)
+        # a black outline, a one-pixel drop shadow, a bevelled platinum body
+        cv.hline(x + 1, y + hh, ww, self.c("shadow")); cv.vline(x + ww, y + 1, hh, self.c("shadow"))
+        cv.fill(x, y, ww, hh, self.c("winbg"))
+        cv.box(x, y, ww, hh, self.c("border") if active else self.c("shadow"))
+        if active:
+            cv.hline(x + 1, y + 1, ww - 2, self.c("iw")); cv.vline(x + 1, y + 1, hh - 2, self.c("iw"))
+            cv.hline(x + 1, y + hh - 2, ww - 2, self.c("shadow")); cv.vline(x + ww - 2, y + 1, hh - 2, self.c("shadow"))
+            for ry in range(y + 2, y + 10, 2):   # the pinstripes (every other line: Amiga pixels are tall)
+                cv.hline(x + 4, ry, ww - 8, 4)
+            # the close box on the left; the zoom and collapse boxes on the right: bevelled squares
+            for bx in (x + 6, x + ww - 26, x + ww - 15):
+                cv.fill(bx - 1, y + 2, 11, 7, self.c("winbg"))
+                cv.box(bx, y + 2, 9, 7, self.c("border"))
+                cv.hline(bx + 1, y + 3, 7, self.c("iw")); cv.vline(bx + 1, y + 3, 5, self.c("iw"))
+            cv.box(x + ww - 24, y + 4, 4, 3, self.c("border"))              # zoom: a small box inside
+            cv.hline(x + ww - 13, y + 5, 5, self.c("border"))               # collapse: a bar
+            cv.hline(x + ww - 13, y + 6, 5, self.c("border"))
+        else:
+            cv.fill(x + 1, y + 1, ww - 2, 9, self.c("title"))
+        cv.hline(x + 1, y + 10, ww - 2, self.c("shadow"))
+        t = w["title"]
+        tx = x + (ww - len(t) * 8) // 2
+        cv.fill(tx - 6, y + 1, len(t) * 8 + 12, 9, self.c("winbg") if active else self.c("title"))
+        cv.text(tx, y + 2, t, self.c("titlefg_a" if active else "titlefg"), bold=active)
+        # the content: white with a recessed edge
+        cv.fill(cx - 1, cy - 1, cw + 2, ch + 2, self.c("iw"))
+        cv.hline(cx - 2, cy - 2, cw + 4, self.c("shadow")); cv.vline(cx - 2, cy - 2, ch + 4, self.c("shadow"))
+        # the grow box bottom right
+        sx, sy = x + ww - 11, y + hh - 7
+        cv.box(sx, sy, 9, 5, self.c("shadow")); cv.box(sx + 2, sy + 1, 5, 3, self.c("shadow"))
+
+    def button(self, cv, x, y, label):
+        bw = len(label) * 8 + 8
+        cv.box(x - 6, y - 3, bw + 4, 14, self.c("border"))          # the default button's heavy ring
+        cv.fill(x - 4, y - 2, bw, 12, self.c("btn"))
+        cv.box(x - 4, y - 2, bw, 12, self.c("border"))
+        cv.hline(x - 3, y - 1, bw - 2, self.c("iw")); cv.vline(x - 3, y - 1, 10, self.c("iw"))
+        cv.text(x, y, label, self.c("btnfg"), bold=True)
+
+    def bar(self, cv):
+        Look.bar(self, cv)
+        cv.hline(0, self.bar_h - 1, W, self.c("border"))
+
+
+LOOKS = [Flat, Workbench, Mono, Cyber, Platinum]
 
 
 def main(argv):

@@ -309,6 +309,7 @@ with the menu, the window list (`sumi` dimmed: minimised) and the clock; four de
 | **(b) Workbench, cleaner** | [b-workbench.png](desktop-looks/b-workbench.png) | Workbench 3's grey and blue with raised edges, the close gadget on the left and the depth gadget on the right, without the stripes and clutter. |
 | **(c) Two-tone** | [c-mono.png](desktop-looks/c-mono.png) | Black and white like the first Macintosh and the Atari ST: a dithered desktop, a striped active title, a drop shadow; runs at one bitplane, so four times less drawing work. |
 | **(d) Dark neon** | [d-cyber.png](desktop-looks/d-cyber.png) | Near-black with a faint grid, a neon magenta title and a cyan border with a glow on the active window, the text still plain and readable. |
+| **(e) Platinum** (asked for 2026-11-04: "What about a OS7-8-9 look?") | [e-platinum.png](desktop-looks/e-platinum.png) | Mac OS 8-9's Platinum in Amiga pixels: light grey bevelled windows, a pinstriped active title centred, the close box left, zoom and collapse right, a dotted blue desktop, the default button ringed. |
 
 The pictures at the real 640x256 size (pixel for pixel what the Amiga shows) are next to them, `*-native.png`. They are
 made by `tools/desktop-mockups.py` (Pillow), which reads a free re-creation of the Topaz font (TrueSchool's
