@@ -286,6 +286,7 @@ void fd_tick(void);                     /* from the 100 Hz tick: motors off when
 void input_init(void);
 void input_poll(void);
 void input_read(s32 *out);
+int input_inject(const u8 *rec, int n); /* CON_INPUT's mouse records -> n (a part record: -EINVAL) */
 
 /* audio.c: Paula beep (the terminal bell) */
 void beep(u32 hz, u32 ms);
@@ -923,6 +924,8 @@ void tty_proc_gone(struct proc *p);     /* p is a zombie: its leadership ends, a
 #define CON_INPUT       7    /* a2 the bytes, a3 count | kind << 16 (CONI_*; count at most 256) -> how many taken */
 #define CONI_RAW        0    /* raw Amiga key codes into the keyboard path (the shown console) */
 #define CONI_TEXT       1    /* text into that console's tty, as the serial line's bytes */
+#define CONI_MOUSE      2    /* DESIGN D38: the mouse: records of 3 bytes, dx and dy (signed counts), the buttons (bit
+                              * 0 left, 1 right, 2 middle; held until the next record) -> the bytes taken */
 #define CONI_MAX        256
 struct uconread {            /* CON_READ: the caller fills size, cells, ncells; the kernel the rest */
     u32 size;                /* the caller's size of this struct (0: the first size); back: the bytes filled */

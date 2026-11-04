@@ -43,6 +43,8 @@
 # term 12,662 -> 12,910 (a cell stored as it is is not drawn again, nor a blank cell erased again), serial 5,824 ->
 # 6,025 (the copy waits only while something was received in the last 10 s); kernel.bin + 1,316 (with D38 step 3 and
 # D39: TOTAL 181,900 -> 183,200).
+# 2026-11-04 (DESIGN D38 step 5: the desktop's tests move the mouse): CON_INPUT's CONI_MOUSE, input 400 -> 550,
+# kernel.bin 181,836 -> 181,980; with D28 20 merged in 183,304, TOTAL 183,400.
 start     4300   8200
 main      5950   1100
 serial    6100   6500
@@ -50,7 +52,7 @@ mem       2900    240
 ide       3400    560
 emmc      4900    640
 floppy    4500    160
-input      400     32
+input      550     32
 audio      560     32
 a3000     2400    100
 blk        460     16
@@ -75,5 +77,5 @@ zine      1500     16
 cache     1700     32
 gcon      3450     16
 embed    47500      0
-TOTAL   183200
+TOTAL   183400
 ROOM       800

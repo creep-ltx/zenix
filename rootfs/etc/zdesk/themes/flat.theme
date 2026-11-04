@@ -1,0 +1,51 @@
+# Zenix Desktop's look (a), "flat with a hint of depth" (DESIGN D38 section 8, docs/desktop-looks/a-flat.png): the
+# default. The format is in docs/man/zdesk.txt ("THEMES").
+palette 344 112 EEE 223 47B BBC 455 FFF CCD D54 7C5 EB4 69E B7C 5BC 567
+map8    0 1 2 3 4 5 6 7 5 4 4 5 4 4 4 6
+frame   1 1 12 1 11 0 1 0
+pens    1 1 5 4 6 7 7 1 3 0
+role desk 0
+role bar 1
+role barline 1
+role barfg 8
+role logo 7
+role barcur 7
+role barcurbg 4
+role bardim 6
+role clock 7
+role iconfg 7
+role labelbg none
+role ik 1
+role if 15
+role ia 4
+role iw 7
+role id 1
+role winbg 2
+role winfg 1
+role btn 5
+role btnfg 1
+role menubg 2
+role menufg 1
+role selbg 4
+role selfg 7
+gadget close right 10
+|1...1
+|.1.1.
+|..1..
+|.1.1.
+|1...1
+gadget zoom right 22
+|1111111
+|1.....1
+|1.....1
+|1111111
+gadget min right 34
+|.......
+|.......
+|.......
+|1111111
+menus both
+drag auto
+bar left zenix menus
+bar middle windows
+bar right memory clock

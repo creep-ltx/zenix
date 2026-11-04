@@ -47,7 +47,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest netstat nettest ifconfig route ping host telnet \
+          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest zdesk term netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
@@ -505,6 +505,20 @@ $(BUILD)/dpytest.uo: display/test/dpytest.c display/display.h display/proto.h us
 	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
 $(BUILD)/dpytest.uelf: $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
 	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# zdesk (DESIGN D38 step 5): the floating window manager, its bar, desktop and settings (display/zdesk/), cold: -Os
+ZDESKOBJS := $(patsubst %,$(BUILD)/zd-%.no,zdesk conf bar desk)
+$(BUILD)/zd-%.no: display/zdesk/%.c display/zdesk/zdesk.h display/display.h display/proto.h user/libz.h user/usys.h user/socket.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/zdesk.uelf: $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(ZDESKOBJS) $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
+# term (DESIGN D38 step 6): the terminal window; its cell model is the console's kernel/term.c and confont.c built
+# into it unchanged (display/term/model.c: D38 5, one parser for two users), -O2 as the console's
+$(BUILD)/term-model.no: display/term/model.c display/term/model.h kernel/term.c kernel/confont.c $(wildcard kernel/*.h) $(BUILD)/conwidth.h | $(BUILD)
+	$(CC) $(UCFLAGS) -I$(BUILD) -c $< -o $@
+$(BUILD)/term-main.no: display/term/term.c display/term/model.h display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/term.uelf: $(BUILD)/term-main.no $(BUILD)/term-model.no $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/term-main.no $(BUILD)/term-model.no $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 # unlha, unlzx (DESIGN D33, docs/d33-archives.md): one program, two names (/bin/unlzx is a link). The readers are shared with Ahiru.
 # The program's own part is cold (-Os); the two decoders are where the time goes (UCFLAGS' -O2). core/arc.c gives the CRCs and dates.
 ARC_FLAGS := -Iports/ahiru/upstream/core

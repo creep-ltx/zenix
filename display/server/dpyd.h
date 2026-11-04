@@ -66,6 +66,8 @@ struct win {
     u8 placed;                  /* the manager placed it (or the fallback did) */
     struct region vis;          /* what of the whole window (frame, shadow) is on the screen */
     struct rect clip;           /* the client's O_CLIP, inside-relative (x1 0: none) */
+    char *menu;                 /* DPY_MENU's text (malloc'd), 0 none */
+    u16 nmenu;
 };
 extern struct win wins[NWIN];
 extern u16 order[NWIN];         /* slots, back to front */

@@ -1,0 +1,31 @@
+TERM(1)			Zenix manual
+
+NAME
+    term - the terminal window of Zenix Desktop
+
+SYNOPSIS
+    term [-r ROWS] [-e COMMAND [ARGUMENTS]]
+
+DESCRIPTION
+    A window on the desktop (zdesk(1)) with the user's shell ($SHELL, else
+    /bin/sh), or COMMAND, on a pseudo-terminal. It is the console's own
+    terminal: the same escape codes, colours, UTF-8 and scrollback (200
+    lines; Shift+Up and Shift+Down move through it), built from the same
+    source; its 16 colours are the screen's nearest. TERM is
+    xterm-16color.
+
+    The window is 80 columns wide and ROWS rows high (24 at first, 4 to
+    29); a resize changes the rows, and the program gets SIGWINCH. Its
+    menu (in the bar): Window, New terminal and Close. Closing the window
+    hangs the pty up (SIGHUP to the program); the window goes when the
+    program ends.
+
+OPTIONS
+    -r ROWS     the rows at first
+    -e COMMAND  run COMMAND instead of a shell (the rest of the line are
+                its arguments)
+
+NOTES
+    80 columns only: the console's cell model is 80 wide. A wide
+    character draws in one cell. No mouse selection and no clipboard yet;
+    the bell is silent.

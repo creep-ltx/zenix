@@ -162,6 +162,7 @@ int user_ok_wr(const struct proc *p, u32 ptr, u32 len) { (void)p; (void)ptr; (vo
 static int raw_n, text_con, text_n, line_n;
 int kbd_inject(const u8 *c, int n) { (void)c; raw_n = n; return n; }
 int tty_type(int con, const u8 *b, int n) { (void)b; text_con = con; text_n = n; return n; }
+int input_inject(const u8 *r, int n) { (void)r; (void)n; return -EINVAL; }   /* D38: the mouse (CONI_MOUSE) */
 /* DESIGN D38 step 2 (gcon.c): no console is ever grabbed here */
 int gcon_away(int to) { (void)to; return 0; }
 int gcon_shown(int con) { (void)con; return 0; }

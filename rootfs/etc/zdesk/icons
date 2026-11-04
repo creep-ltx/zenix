@@ -1,0 +1,4 @@
+# The desktop's icons (DESIGN D38 step 5): PICTURE LABEL = COMMAND; the pictures are term, folder, gear, disk.
+# A double click starts the command.
+term Shell = term
+folder Files = term -e ahiru

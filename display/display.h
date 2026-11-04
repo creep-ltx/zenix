@@ -18,6 +18,7 @@ int dpy_title(int win, const char *title);
 int dpy_resize(int win, int w, int h);
 int dpy_destroy(int win);
 int dpy_info(int win, struct dpyinfo *i);
+int dpy_menu(int win, const char *menus, int n);   /* "Title\tItem\tItem\nTitle..." (n bytes): picks come as EV_MENU */
 
 /* drawing (queued) */
 void dpy_clip(int win, int x, int y, int w, int h);

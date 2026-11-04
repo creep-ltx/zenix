@@ -104,6 +104,12 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   their arguments, `struct dpyhello` (first size 44), `dpyring`, `dpywin` (68), `dpyinfo` (64), `dpyimage` (16),
   `dpykey` (8), `dpystyle` (64), `dpyev` (16 bytes), the drawing orders' words (op << 8 | length, unknown ones
   skipped by length), `DPYR_LOST`, `WK_*`, `WF_*`, `WST_*`, `WS_*`, `HIDE_*`, `DRAG_*`, `FP_*`, `TA_*`, `IMG_MASK`.
+- **D38 steps 5-6 (zdesk and term, branch desk, 2026-11-04):** the protocol's `DPY_MENU` 12 (a window's menus,
+  "Title\tItem...\nTitle...", at most `DPY_MENUMAX` 512 bytes), `DPY_WM_MENUGET` 43, `DPY_WM_MENUPICK` 44,
+  `DPY_WM_PGRAB` 45, `EV_MENU` 9, `EV_WM_MENU` 40, and O_XLINE's fifth word, the pen; `CON_INPUT`'s kind `CONI_MOUSE`
+  2 (records of 3 bytes: dx, dy as signed counts, the buttons held until the next record; a part record -EINVAL);
+  the `/etc/zdesk/` formats (`theme`, `keys`, `bar`, `menu`, `icons`, `themes/NAME.theme`, docs/man/zdesk.txt) and
+  their key and action names.
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).

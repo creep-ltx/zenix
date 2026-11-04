@@ -23,12 +23,16 @@ static u16 btns;                        /* its buttons (GQ_*BUTTON) */
 static int grab_w = -1;                 /* the window a held button belongs to */
 static int grab_id;                     /* its id: a window closed or replaced meanwhile is not it */
 static int session_uid = -1;
+static int pgrab_w = -1, pgrab_id;      /* DPY_WM_PGRAB: the manager's window that gets the pointer */
+/* the last press on a frame (EV_WM_FRAME): a manager's DPY_WM_DRAG may come after the button is let go (a slow
+ * manager, a quick drag): the drag then runs from the press to where it was let go */
+static struct { int win, x, y, up, ux, uy; } fpress;
 
 /* ---- clients ---- */
 #define NCL 16
 #define NPEND 32
 struct client {
-    int used, pid, port, uid;
+    int used, pid, port, uid, dead;     /* dead: a post failed; dropped from the main loop, never mid-paint */
     u32 ring, nrec, head;               /* the ring in the client's memory; the next record we write */
     char name[DPY_NAME];
     u32 imgbytes;                       /* its images' chip RAM (at most IMG_BUDGET) */
@@ -66,14 +70,18 @@ static void img_free(int i)
 }
 
 /* ---- events ---- */
+static void flush(int cl);
 void ev_to(int cl, struct dpyev *e)
 {
     struct client *c = &cls[cl];
     if (!c->used)
         return;
     if (c->npend >= NPEND) {
-        c->lost = 1;
-        return;
+        flush(cl);                      /* a burst (keys typed fast): into the ring now; only a full ring loses any */
+        if (!c->used || c->dead || c->npend >= NPEND) {
+            c->lost = 1;
+            return;
+        }
     }
     if (e->type == EV_MOTION && c->npend) {     /* motion merged first (D38 4.1) */
         struct dpyev *l = &c->pend[c->npend - 1];
@@ -116,7 +124,7 @@ static int post(struct client *c, u32 off, const void *src, u32 len)
 static void flush(int cl)
 {
     struct client *c = &cls[cl];
-    if (!c->used || (!c->npend && !c->lost))
+    if (!c->used || c->dead || (!c->npend && !c->lost))
         return;
     volatile const struct dpyring *r = (const struct dpyring *)c->ring;
     u32 tail = r->tail, used = c->head - tail;
@@ -146,7 +154,7 @@ static void flush(int cl)
     if (rc >= 0)
         rc = post(c, 0, &c->head, 4);
     if (rc < 0)
-        drop(cl);                       /* its port or its ring is gone: so is the client */
+        c->dead = 1;                    /* its port or its ring is gone: so is the client (dropped in the loop) */
 }
 
 /* ---- the screen ---- */
@@ -322,6 +330,11 @@ static void button(int which, int down, u16 qual)
     int part, s = grab_w >= 0 && !down ? grab_w : win_at(ptx, pty, &part);
     if (grab_w >= 0 && !down)
         part = 0;
+    if (!down && which == 1 && fpress.win && !fpress.up) {
+        fpress.up = 1;
+        fpress.ux = ptx;
+        fpress.uy = pty;
+    }
     if (dragging) {
         if (!down && which == 1)
             win_drag_event(ptx, pty, 1);
@@ -334,6 +347,8 @@ static void button(int which, int down, u16 qual)
     win_inside(w, &in);
     if (down && part) {                 /* a frame: the manager's, or the built-in rules */
         if (wm_cl >= 0) {
+            if (which == 1)
+                fpress = (typeof(fpress)){ w->id, ptx, pty, 0, 0, 0 };
             ev_wm(EV_WM_FRAME, w->id, part, which, ptx, pty, 0, 0);
             return;
         }
@@ -368,6 +383,31 @@ static void button(int which, int down, u16 qual)
     v.y = (s16)(pty - in.y0);
     ev_to(w->cl, &v);
 }
+static const u16 bit[3] = { GQ_LBUTTON, GQ_RBUTTON, GQ_MBUTTON };
+static void pgrab_event(u16 old, u16 now, u16 qual, int moved)
+{
+    struct win *w = &wins[pgrab_w];
+    struct rect in;
+    win_inside(w, &in);
+    struct dpyev v;
+    memset(&v, 0, sizeof v);
+    v.win = w->id;
+    v.qual = qual;
+    v.x = (s16)(ptx - in.x0);
+    v.y = (s16)(pty - in.y0);
+    if (moved) {
+        v.type = EV_MOTION;
+        ev_to(w->cl, &v);
+    }
+    for (int i = 0; i < 3; i++)
+        if ((old ^ now) & bit[i]) {
+            v.type = EV_BUTTON;
+            v.code = (u8)((i + 1) | (now & bit[i] ? 0 : 0x80));
+            ev_to(w->cl, &v);
+        }
+    if (!now)
+        pgrab_w = -1;
+}
 static void pointer(const struct ugevent *e)
 {
     u16 old = btns, now = e->qual & (GQ_LBUTTON | GQ_RBUTTON | GQ_MBUTTON);
@@ -375,7 +415,12 @@ static void pointer(const struct ugevent *e)
     ptx = e->x;
     pty = e->y;
     btns = now;
-    static const u16 bit[3] = { GQ_LBUTTON, GQ_RBUTTON, GQ_MBUTTON };
+    if (pgrab_w >= 0 && (wins[pgrab_w].id != pgrab_id || !(wins[pgrab_w].state & WST_SHOWN)))
+        pgrab_w = -1;
+    if (pgrab_w >= 0) {                 /* the manager's menu has the pointer until the buttons are up */
+        pgrab_event(old, now, e->qual, moved);
+        return;
+    }
     if (moved) {
         grab_check();
         if (dragging)
@@ -682,6 +727,22 @@ static int req(struct umsg *m)
     case DPY_BYE:
         drop(cl);
         return 0;
+    case DPY_MENU: {
+        if (!(w = mine(cl, a[0])) || w->cl != cl)
+            return -ENOENT;
+        if (a[2] > DPY_MENUMAX || (a[2] && peer(m, PEER_RD, a[1], a[2]) < 0))
+            return a[2] > DPY_MENUMAX ? -EINVAL : -EFAULT;
+        char *t = a[2] ? malloc(a[2]) : 0;
+        if (a[2] && !t)
+            return -ENOMEM;
+        if (t)
+            memcpy(t, (const void *)a[1], a[2]);
+        free(w->menu);
+        w->menu = t;
+        w->nmenu = (u16)a[2];
+        ev_wm(EV_WM_MENU, w->id, 0, 0, 0, 0, 0, 0);
+        return 0;
+    }
     case DPY_WIN_INFO: {
         if (!(w = mine(cl, a[0])))
             return -ENOENT;
@@ -755,12 +816,48 @@ static int req(struct umsg *m)
         win_show(s, 0, (int)a[1]);
         return 0;
     case DPY_WM_DRAG:
-        if (!btns || dragging)
-            return -EINVAL;             /* the button is up already: nothing to follow */
-        win_drag(s, (int)a[1], ptx, pty);
+        if (dragging || fpress.win != wins[s].id)
+            return -EINVAL;             /* a drag runs, or no press on this window's frame to follow */
+        win_drag(s, (int)a[1], fpress.x, fpress.y);
+        if (fpress.up)                  /* let go already: the whole drag at once */
+            win_drag_event(fpress.ux, fpress.uy, 1);
+        else if (ptx != fpress.x || pty != fpress.y)
+            win_drag_event(ptx, pty, 0);
+        fpress.win = 0;
         return 0;
     case DPY_WM_CLOSE:
         ev_win(s, EV_CLOSE, 0, 0, 0, 0, 0, 0);
+        return 0;
+    case DPY_WM_MENUGET: {
+        u32 n = wins[s].nmenu < a[2] ? wins[s].nmenu : a[2];
+        if (n && peer(m, PEER_WR, a[1], n) < 0)
+            return -EFAULT;
+        if (n)
+            memcpy((void *)a[1], wins[s].menu, n);
+        return (int)n;
+    }
+    case DPY_WM_MENUPICK:
+        if (a[1] > 255 || a[2] > 0xFFFF)
+            return -EINVAL;
+        ev_win(s, EV_MENU, (int)a[1], (int)a[2], 0, 0, 0, 0);
+        return 0;
+    case DPY_WM_PGRAB:
+        if (!btns || wins[s].cl != cl)
+            return -EINVAL;
+        if (grab_w >= 0 && grab_w != s) {       /* the window the button went to sees it let go */
+            struct dpyev v;
+            memset(&v, 0, sizeof v);
+            v.type = EV_BUTTON;
+            v.win = wins[grab_w].id;
+            for (int i = 0; i < 3; i++)
+                if (btns & bit[i]) {
+                    v.code = (u8)((i + 1) | 0x80);
+                    ev_to(wins[grab_w].cl, &v);
+                }
+            grab_w = -1;
+        }
+        pgrab_w = s;
+        pgrab_id = wins[s].id;
         return 0;
     case DPY_WM_KILL: {
         int id = wins[s].id;
@@ -796,12 +893,22 @@ int main(int argc, char **argv)
         }
         if ((u32)(sys_ticks() - alive_at) >= 100) {     /* once a second: a client that ended without DPY_BYE */
             alive_at = sys_ticks();
+            u8 live[NCL] = { 0 };       /* a client that ended (a zombie whose parent has not waited counts as ended) */
+            struct uproc pr;
+            for (u32 k = 0; k < 64; k++)
+                if (sys_procinfo(k, &pr) == 0 && pr.state && pr.state != 5)
+                    for (int i = 0; i < NCL; i++)
+                        if (cls[i].used && cls[i].pid == (int)pr.pid)
+                            live[i] = 1;
             for (int i = 0; i < NCL; i++)
-                if (cls[i].used && sys_killsig(cls[i].pid, 0) == -ESRCH)
+                if (cls[i].used && !live[i])
                     drop(i);
         }
-        for (int i = 0; i < NCL; i++)
+        for (int i = 0; i < NCL; i++) {
             flush(i);
+            if (cls[i].used && cls[i].dead)
+                drop(i);
+        }
         if (has_clients())
             had = 1;
         else if (had && !persist)

@@ -1,0 +1,57 @@
+# Zenix Desktop's look (e), Platinum (Mac OS 8-9 in Amiga pixels; DESIGN D38 section 8, docs/desktop-looks/
+# e-platinum.png): light grey bevelled windows, the active title pinstriped and centred, the close box on the left,
+# the zoom and collapse boxes on the right; menus on a click, as the Mac.
+palette 67A 000 FFF DDD AAA 777 35A 89C B21 172 860 239 828 167 EC6 BBB
+map8    0 1 2 3 4 5 6 7 1 6 5 6 1 6 4 4
+frame   1 1 12 1 11 1 1 1
+pens    5 1 15 3 5 1 2 5 5 4
+role desk 0
+role bar 3
+role barline 1
+role barfg 1
+role logo 1
+role barcur 2
+role barcurbg 6
+role bardim 5
+role clock 1
+role iconfg 2
+role labelbg 0
+role ik 1
+role if 14
+role ia 14
+role iw 2
+role id 5
+role winbg 3
+role winfg 1
+role btn 3
+role btnfg 1
+role menubg 3
+role menufg 1
+role selbg 6
+role selfg 2
+gadget close left 6
+|111111111
+|122222221
+|12.....51
+|12.....51
+|12.....51
+|111111111
+gadget zoom right 26
+|111111111
+|122222221
+|12.111.51
+|12.111.51
+|12.....51
+|111111111
+gadget min right 15
+|111111111
+|122222221
+|12.....51
+|121111151
+|12.....51
+|111111111
+menus click
+drag auto
+bar left zenix menus
+bar middle windows
+bar right memory clock

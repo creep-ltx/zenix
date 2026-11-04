@@ -256,6 +256,7 @@ static inline int sys_conrules(int fd, u32 bits, u32 mask) { return sys3(89, CON
 #define CON_INPUT 7             /* kind CONI_RAW raw key codes (the keyboard), CONI_TEXT text (that console's tty) */
 #define CONI_RAW 0
 #define CONI_TEXT 1
+#define CONI_MOUSE 2            /* D38: mouse records of 3 bytes: dx, dy (signed counts), the buttons (held until the next) */
 #define CONI_MAX 256            /* bytes a call -> how many were taken */
 struct uconread {            /* cells: rows x cols of 3 bytes, row by row */
     u32 size, cells, ncells;

@@ -4,7 +4,7 @@ NAME
     dpytest - test the display server
 
 SYNOPSIS
-    dpytest
+    dpytest [-f FILE]
 
 DESCRIPTION
     A test client of displayd and libdisplay (DESIGN D38 steps 3-4), run
