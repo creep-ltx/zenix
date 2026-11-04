@@ -34,7 +34,9 @@ DESCRIPTION
              .sig (SYSTEM UPDATES below): reboot, and zenixboot installs
              it, with "Zenix (previous)" in the boot menu as the way
              back. Packages that need the new system are downloaded and
-             wait: after the restart, zpkg -Syu again.
+             wait (a package built with the new system needs it):
+             the last line says "to finish: reboot, then zpkg -Syu
+             again", and that second -Syu installs them.
     -Syuu    as -Syu, and also down to the list's version where the
              installed one is newer (after a channel change)
     -S NAME  install packages and the dependencies they are missing,

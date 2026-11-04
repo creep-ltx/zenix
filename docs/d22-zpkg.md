@@ -1092,3 +1092,32 @@ partitions, and the approved D22 decision said "nothing else there ever written"
 session's call (update changes get two). Before
 the first real write: a read-only check of the real BOOT: image on the PC (`tools/ffsread.py check`, and zpkg's own
 walk), which shows whether the owner's FFS writes its volumes as the walk expects. Not verified on the real A1200.
+
+## Found on the 060, 2026-11-04: the second `zpkg -Syu` and the `.new` config files
+
+**The second `-Syu` is by design (4.4 step 3), and now said last.** From 2026110304 to 2026110401 the A1200 with the
+060 installed six packages at the `zpkg -Syu` after the restart (wget, sysutils, disktools, sntp, base-man,
+zinstall): exactly the packages that changed in that release (the testing list gives them version 2026110401). A
+package that changed in a build with a new base gets `depends base` of the new system (3.4), so it waits for the
+restart; that is the owner's answer to question 5. The message saying so came before the list of waiting packages
+and the boot partition's lines, so it scrolled away. zpkg now ends such a run with
+`to finish: reboot, then zpkg -Syu again (N packages wait for the new system)`; sysupdate-test b checks the line
+and that the run after the restart installs that many.
+
+**The fast-mode failure of sysupdate-test b was the test's builds, not the update path.** The Makefile takes the
+build date (D21 8.3) from the tree's last commit, and wget, sntp, reboot (in sysutils) and zpkg carry it. The test
+builds V1 and V2 from the working tree one after the other; a commit in the main tree between the two made wget,
+sntp and sysutils "changed" in V2, so they waited for V2 and the last `-Syu` installed them (reproduced on the PC:
+V2 built with another `SOURCE_DATE_EPOCH`, mkrepo says "changed: sysutils wget sntp zpkg-new"). Warp mode had
+nothing to do with it; the passing stock runs simply had no commit in between. The test now builds both with one
+`SOURCE_DATE_EPOCH` and stops at once if V2 changes more than the base group; `STOCK[sysupdate-test:b]` is gone.
+
+**`kept your /etc/passwd (the new one: /etc/passwd.new)` is information, and was mostly noise.** A config file
+the owner changed (the installer writes the owner's user and root's password into `/etc/passwd`) always stays as
+it is; zup put the release's copy beside it as `.new` even when the release's copy was the same as before (base's
+`/etc/passwd` has not changed since the first multi-user build), so every update said it. zup now writes a `.new`
+and says "kept" only when the update brings a different version of the file (zup-host-test: "a config file the owner
+changed and the update does not"). Nothing breaks either way: the owner's users and passwords are in their own
+file. In 2026110401 none of base's config files changed (the newest change is `/etc/group`'s `zine::11:` line,
+2026-10-31), so that message was noise only. A real `.new` matters only for what is new in it (an `/etc/group` from
+before 2026-10-31 lacks the `zine` group: without it only root may run zine).
