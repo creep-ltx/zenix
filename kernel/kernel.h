@@ -1055,6 +1055,7 @@ struct uwinsize { u16 row, col, xpixel, ypixel; };   /* Linux's struct winsize (
 #define PEER_CTTY       1    /* -> the client's controlling tty (1..NTTYS-1) */
 #define PEER_RD         2    /* arg struct upeermem *: 0 if those bytes are the client's own memory to read, else -EFAULT */
 #define PEER_WR         3    /* ... to write */
+#define PEER_PORT       4    /* arg a port number: 0 if the client owns it, else -EPERM */
 struct upeermem { u32 addr, len; };
 #define SYS_post        97   /* op (POST_*), port, arg: a window in a port owner's memory others may write into */
 #define POST_BUF        1    /* the caller owns port; arg struct upostbuf *: its window (0 size: none) and who may post */

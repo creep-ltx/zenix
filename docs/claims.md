@@ -23,7 +23,7 @@ Claim a number here **before** using it (system calls, message types, port names
 | 94 `groups` (supplementary groups: op 0 `GROUPS_GET`, op 1 `GROUPS_SET`, root only; `NGROUPS` 8); `struct umsg`'s kflags bit 16 `UMSG_GROUPS` (a `struct umsg_groups` follows the message; only the kernel sets it) | branch groups, 2026-10-31 |
 | 95 `ttyctl` (DESIGN D20 7.2, D38 step 1: a terminal named by a descriptor; ops `TTYC_GWINSZ` 1, `TTYC_SWINSZ` 2, `TTYC_OWNER` 3, `TTYC_SCTTY` 4; `struct uwinsize`, Linux's `winsize`); the device names `/dev/ptmx` and `/dev/pts/0`-`/dev/pts/7`, the slaves' `st_ino` 11-18 and the masters' `0x100`-`0x107` (`PTY_MINO`); libz's and the C library's `ioctl` numbers `TIOCSCTTY` 0x540E and `TIOCSWINSZ` 0x5414 (Linux's, beside `TIOCGWINSZ` 0x5413) | branch desk, 2026-11-04 |
 | 89 `console`'s ops 8 `CON_GRAB` (root, a console's descriptor; `struct ucongrab`, first size 24: a new descriptor reading `struct ugevent` records of 16 bytes) and 9 `CON_GACK` (the grab's descriptor; the `GEV_RELEASE` number answered); record types `GEV_KEY` 1, `GEV_POINTER` 2, `GEV_RELEASE` 3, `GEV_ACQUIRE` 4, `GEV_LOST` 5; qualifier bits `GQ_*` (AmigaOS's `IEQUALIFIER` values: 0x1 0x2 0x4 0x8 0x10 0x20 0x40 0x80, `GQ_REPEAT` 0x200, buttons 0x1000 0x2000 0x4000); `GCHIP_AGA` 1; `memalloc`'s (18) second argument `MEMA_CHIP` 1 (chip RAM; other bits refused) (DESIGN D38 step 2) | branch desk, 2026-11-04 |
-| 96 `peer` (`PEER_CTTY` 1, `PEER_RD` 2, `PEER_WR` 3; `struct upeermem`), 97 `post` (`POST_BUF` 1, `POST_WRITE` 2; `struct upostbuf`, `struct upost`), the port poll bit `POLLRDBAND` 0x80 (Linux's value: something posted into the port's window), `struct ucongrab`'s field `topaz` (size 28, `UCONGRAB_TOPAZ`) (DESIGN D38 step 3) | branch desk, 2026-11-04 |
+| 96 `peer` (`PEER_CTTY` 1, `PEER_RD` 2, `PEER_WR` 3, `PEER_PORT` 4; `struct upeermem`), 97 `post` (`POST_BUF` 1, `POST_WRITE` 2; `struct upostbuf`, `struct upost`), the port poll bit `POLLRDBAND` 0x80 (Linux's value: something posted into the port's window), `struct ucongrab`'s field `topaz` (size 28, `UCONGRAB_TOPAZ`) (DESIGN D38 step 3) | branch desk, 2026-11-04 |
 | **next free: 98** | |
 Same rule for message types in `kernel/fsproto.h` / `kernel/diskproto.h` and for port names: claim here first.
 Message types claimed so far: `NET_*` 1-19 on port `net` (`kernel/netproto.h`, DESIGN D19 step 3: the `SOCK_*` op
@@ -55,7 +55,7 @@ value) on a port: a message sent to it was cancelled (`UMSG_CANCEL`) since its o
 2026-10-28; recorded by the same audit). The display protocol (DESIGN D38 step 3, `display/proto.h`, version 1): port `display` (the D11 service of
 `/sbin/displayd`; a client's own ports `dpy.PID`), requests `DPY_HELLO` 1 .. `DPY_IMAGE_FREE` 11 and the window
 manager's `DPY_WM_HELLO` 32 .. `DPY_WM_KILL` 42, events `EV_KEY` 1 .. `EV_MINIMISED` 8 and `EV_WM_NEW` 32 ..
-`EV_WM_CLICK` 38, drawing orders `O_CLIP` 1 .. `O_XLINE` 6, and the flags and structs named there (branch desk,
+`EV_WM_SIZE` 39, drawing orders `O_CLIP` 1 .. `O_XLINE` 6, and the flags and structs named there (branch desk,
 2026-11-04). Port names
 registered as services (D11):
 `disk`, `fs`, `fs.*`; `ping` (the test service, served by `msgpingd` since D19 step 0); `net` (D19, the network server:

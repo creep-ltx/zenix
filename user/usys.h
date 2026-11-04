@@ -335,6 +335,7 @@ static inline int sys_congack(int gfd, u32 seq) { return sys3(89, CON_GACK | (u3
 #define PEER_CTTY 1             /* the client's controlling tty */
 #define PEER_RD 2               /* struct upeermem: those bytes are the client's to read -> 0, else -EFAULT */
 #define PEER_WR 3
+#define PEER_PORT 4             /* arg a port: 0 if the client owns it */
 struct upeermem { u32 addr, len; };
 static inline int sys_peer(void *msg, int op, void *arg) { return sys3(96, (u32)msg, (u32)op, (u32)arg); }
 #define POST_BUF 1              /* the port's owner: its window and who may post into it */
