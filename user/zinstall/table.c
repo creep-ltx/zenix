@@ -96,6 +96,21 @@ static int read_rdb(struct tdisk *d, t_u32 base, t_u32 limit, int *count)
     g->blk = rw.blk; g->cyl = rw.cylblocks; g->heads = rw.heads; g->secs = rw.secs;
     g->locyl = rw.locyl; g->hicyl = rw.hicyl;
     g->noedit = rw.noedit;
+    g->rdbhi = rw.rdbhi;
+    g->nused = rw.nused;
+    g->uselo = 0xFFFFFFFFu; g->usehi = 0; g->lseglo = 0xFFFFFFFFu; g->lseghi = 0; g->nlseg = 0;
+    for (unsigned i = 0; i < rw.nused; i++) {
+        t_u32 b = rw.used[i];
+        if (b < g->uselo) g->uselo = b;
+        if (b > g->usehi) g->usehi = b;
+        int part = b == rw.blk;
+        for (int k = 0; k < rw.nparts; k++) if (rw.part[k].blk == b) part = 1;
+        if (!part) { g->nlseg++; if (b < g->lseglo) g->lseglo = b; if (b > g->lseghi) g->lseghi = b; }
+    }
+    {
+        t_u8 rb[512];
+        if (hrd(base + rw.blk, rb) == 0) { g->rdblo = be32(rb + 32 * 4); g->high = be32(rb + 38 * 4); }
+    }
     if (!g->noedit && rw.nused == RDB_MAXUSED) g->noedit = "its block chains are longer than this program handles";
     if (!g->noedit && (g->heads > 0xFFFF || g->secs > 0xFFFF)) g->noedit = "the RDSK block's geometry does not add up";
     {   /* a bad-block list maps sectors to spare blocks that no chain names: those look free and are not */
@@ -687,6 +702,7 @@ static int whole_blocks(const struct tdisk *d, const struct tio *io, int want, t
  * Before it the old chain is whole and untouched; after it the old blocks are unused. rw holds the region (parsed by the caller). */
 static int rewrite_chain(const struct tdisk *d, const struct tio *io, const struct t_region *g, struct t_plan *p, const char **why)
 {
+    (void)d;
     static t_u32 q[128], b[128];
     static t_u8 old[512];
     int keep[RDB_MAXPART], nk = 0;

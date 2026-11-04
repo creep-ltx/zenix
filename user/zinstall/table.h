@@ -50,6 +50,9 @@ struct t_region {                       /* one RDB */
     t_u32 base, limit;                  /* where it starts on the disk, how many sectors it may use */
     t_u32 blk, cyl, heads, secs, locyl, hicyl;      /* (blk relative to base, as in rdb.h) */
     const char *noedit;                 /* 0, or why this table must not be changed */
+    t_u32 rdblo, rdbhi, high;           /* the RDSK's RDBBlocksLo/Hi and HighRDSKBlock, as it says them */
+    t_u32 nused, uselo, usehi;          /* the blocks its chains own (RDSK, PART, FSHD, LSEG, BADB, init): how many, the lowest, the highest */
+    t_u32 nlseg, lseglo, lseghi;        /* of those, the filesystems' (FSHD and LSEG) */
 };
 
 struct t_busy { t_u32 start, sectors; };

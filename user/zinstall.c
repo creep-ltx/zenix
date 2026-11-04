@@ -28,12 +28,41 @@ typedef unsigned char u8;
 static int disk_port = -1;
 
 /* ---- words ---- */
+/* every line under 80 columns, so none wraps on the console: a longer one is broken at a space, the rest indented as it began, plus 2 */
+#define COLS 79
+static int col;                         /* where the cursor is on the line now */
 static void say(const char *fmt, ...)
 {
+    static char b[2048];
     va_list ap;
     va_start(ap, fmt);
-    vdprintf(1, fmt, ap);
+    vsnprintf(b, sizeof b, fmt, ap);
     va_end(ap);
+    for (char *l = b; *l; ) {
+        char *e = strchr(l, '\n');
+        int len = e ? (int)(e - l) : (int)strlen(l), ind = 0;
+        while (ind < len && l[ind] == ' ') ind++;
+        if (col) ind = 0;
+        while (col + len > COLS) {
+            int cut = COLS - col;
+            while (cut > ind && l[cut] != ' ') cut--;
+            if (cut <= ind) cut = COLS - col;           /* a word longer than the line: cut it */
+            sys_write(1, l, (u32)cut);
+            sys_write(1, "\n", 1);
+            l += cut;
+            len -= cut;
+            while (len && *l == ' ') { l++; len--; }
+            col = 0;
+            if (ind + 2 < 40) for (int k = 0; k < ind + 2; k++) sys_write(1, " ", 1);
+            col = ind + 2 < 40 ? ind + 2 : 0;
+        }
+        sys_write(1, l, (u32)len);
+        col += len;
+        if (!e) break;
+        sys_write(1, "\n", 1);
+        col = 0;
+        l = e + 1;
+    }
 }
 void zf_say(const char *fmt, ...)       /* user/zpkgfmt.c's reasons */
 {
@@ -57,6 +86,7 @@ static int ask(const char *prompt)      /* a line into line[], without its end; 
         if (n + 1 < sizeof line) line[n++] = c;
     }
     line[n] = 0;
+    col = 0;                            /* the console echoed the Return */
     while (n && line[n - 1] == ' ') line[--n] = 0;
     char *s = line;
     while (*s == ' ') s++;
@@ -140,6 +170,7 @@ static int run(const char *path, char *a1, char *a2, char *a3)
     int pid = sys_spawn(path, argv, 0);
     if (pid < 0) { say("zinstall: cannot start %s (%d)\n", path, pid); return -1; }
     int st = sys_wait(pid);
+    col = 0;
     mem_now();
     return st;
 }
@@ -860,6 +891,7 @@ static int get_password(const char *what, const char *file, char out[100])
     for (;;) {
         snprintf(prompt, sizeof prompt, "A password for %s (nothing shows as you type): ", what);
         sys_ttymode(TTY_RAW | TTY_NOSIG);   /* before the prompt shows: a key typed at once is not echoed by the cooked line (seen) */
+        col = 0;
         if (read_secret(prompt, out, 100)) return -1;
         if (!out[0]) { say("A password is needed. Try again.\n"); continue; }
         sys_ttymode(TTY_RAW | TTY_NOSIG);
@@ -1085,20 +1117,29 @@ static const char *dtext(const struct t_part *p)       /* a dostype as HDToolBox
 }
 static void show_disk(const struct tdisk *d)
 {
-    say("\nThe disk ide0: %s (%u sectors). It holds %s.\n", mbtext(d->sectors), d->sectors, d->what);
-    if (d->noedit) say("Zenix will not change this disk's partition table: %s.\n", d->noedit);
-    for (int r = 0; r < d->nregions; r++)
-        say("  Amiga table%s: cylinders of %u sectors (%u heads x %u), partitions from %u to %u\n", d->region[r].base ? " in a 0x76" : "",
-            d->region[r].cyl, d->region[r].heads, d->region[r].secs, d->region[r].locyl, d->region[r].hicyl);
-    if (d->nparts) say("  %-7s %-10s %8s  %-17s %-7s %s\n", "DEVICE", "NAME", "SIZE", "TYPE", "DOSTYPE", "CYLINDERS / SECTORS");
+    say("\nThe disk ide0: %s (%u sectors).\nIt holds %s.\n", mbtext(d->sectors), d->sectors, d->what);
+    if (d->noedit) say("Zenix will not change this disk's partition table:\n  %s.\n", d->noedit);
+    for (int r = 0; r < d->nregions; r++) {
+        const struct t_region *g = &d->region[r];
+        say("  Amiga table%s: cylinders of %u sectors (%u x %u), partitions %u-%u\n", g->base ? " in a 0x76" : "",
+            g->cyl, g->heads, g->secs, g->locyl, g->hicyl);
+        say("  RDB blocks %u-%u, HighRDSKBlock %u; its chains own %u blocks (%u-%u);\n", g->rdblo, g->rdbhi, g->high, g->nused,
+            g->nused ? g->uselo : 0, g->usehi);
+        if (g->nlseg) say("  filesystems and other chains: %u blocks (%u-%u)\n", g->nlseg, g->lseglo, g->lseghi);
+    }
+    if (d->nparts) say("  %-7s %-9s %8s  %-13s %-7s %s\n", "DEVICE", "NAME", "SIZE", "TYPE", "DOSTYPE", "CYLINDERS");
     for (int i = 0; i < d->nparts; i++) {
         const struct t_part *p = &d->part[i];
-        static char where[32];
+        static char where[40], flags[40], ln[120];
         if (p->how == TP_RDB) snprintf(where, sizeof where, "%u-%u", p->lowcyl, p->highcyl);
-        else snprintf(where, sizeof where, "s %u-%u", p->start, p->sectors ? p->start + p->sectors - 1 : p->start);
-        say("  %-7s %-10.10s %8s  %-17.17s %-7s %s%s%s%s\n", p->dev, p->label[0] ? p->label : "-", mbtext(p->sectors), t_typename(p), dtext(p),
-            where, p->bootable ? " boot" : "", p->busy ? " IN USE" : "", p->how == TP_RDB && p->nomount ? " nomount" : "");
-        if (p->vol[0]) say("          its volume: %s\n", p->vol);
+        else snprintf(where, sizeof where, "s%u+%u", p->start, p->sectors);
+        snprintf(flags, sizeof flags, "%s%s%s%s", p->bootable ? " boot" : "", p->busy ? " in-use" : "", p->how == TP_RDB && p->nomount ? " nomount" : "",
+                 p->how == TP_RDB ? "" : "");
+        snprintf(ln, sizeof ln, "  %-7s %-9.9s %8s  %-13.13s %-7s %s", p->dev, p->label[0] ? p->label : "-", mbtext(p->sectors), t_typename(p), dtext(p), where);
+        if (strlen(ln) + strlen(flags) <= 79) say("%s%s\n", ln, flags);
+        else say("%s\n           %s\n", ln, flags + 1);
+        if (p->how == TP_RDB) say("          PART block %u%s%s\n", p->blk, p->vol[0] ? ", its volume: " : "", p->vol);
+        else if (p->vol[0]) say("          its volume: %s\n", p->vol);
     }
 }
 static void show_opt(int n, const struct tdisk *d, const struct t_opt *o)
@@ -1219,6 +1260,12 @@ static int list_only(void)
     find_busy();
     if (t_read(&d, &io, di.sectors, busy, nbusy)) { say("zinstall: cannot read the disk\n"); return 1; }
     show_disk(&d);
+    if (d.zr >= 0 && (d.part[d.zr].busy || (d.zh >= 0 && d.part[d.zh].busy))) {
+        say("\nZenix is installed here (%s, %s%s%s) and running from it now.\n"
+            "To install or reinstall, start the installer from its floppy or from AmigaOS.\n",
+            d.part[d.zb].label, d.part[d.zr].label, d.zh >= 0 ? ", " : "", d.zh >= 0 ? d.part[d.zh].label : "");
+        return 0;
+    }
     int n = t_options(&d, &io, o, T_MAXOPT);
     say("\nWhat zinstall could do here:\n");
     for (int i = 0; i < n; i++) show_opt(i + 1, &d, &o[i]);
@@ -1370,6 +1417,13 @@ usage:
     show_disk(&d);
     int reinst = 0, zenixfs = 0;
     static struct t_want want;
+    if (d.zr >= 0 && (d.part[d.zr].busy || (d.zh >= 0 && d.part[d.zh].busy))) {
+        say("\nZenix is installed here (%s, %s%s%s) and running from it now: it cannot be\n"
+            "installed over itself. To update it: zpkg -Syu. To reinstall, start the installer\n"
+            "from its floppy or from AmigaOS. Nothing was changed.\n",
+            d.part[d.zb].label, d.part[d.zr].label, d.zh >= 0 ? ", " : "", d.zh >= 0 ? d.part[d.zh].label : "");
+        return 0;
+    }
     if (d.zr >= 0 && !opt_elsewhere) {
         int c = opt_remove ? 3 : opt_reinstall ? (opt_erasehome ? 2 : 1) : 0;
         if (!c) {
