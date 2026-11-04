@@ -93,6 +93,17 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   the server's list keeps FMODE's sprite bits 0); the grab ending with the descriptor's last close or the server's
   end; `SYS_memfree` -EBUSY for a region holding the grab's list or sprite; `SYS_memalloc`'s second argument
   `MEMA_CHIP` 1 (its other bits ignored, as all of it was before).
+- **D38 step 3 (the display server, branch desk, 2026-11-04):** `SYS_peer` 96 (msg a request the caller serves, else
+  -EINVAL; `PEER_CTTY` 1 the client's controlling tty; `PEER_RD` 2 and `PEER_WR` 3 with `struct upeermem` {addr,
+  len}: 0 or -EFAULT; `PEER_PORT` 4, arg a port: 0 if the client owns it, else -EPERM); `SYS_post` 97 (`POST_BUF` 1: the port's owner, else -EPERM; `struct upostbuf` {addr, size,
+  from}, size 0 none; `POST_WRITE` 2: only the owner of the window's `from` port, else -EPERM; `struct upost` {off,
+  src, len}, -EINVAL past the window, -EFAULT when the window is no longer its owner's memory, len 0 only wakes;
+  -ECONNRESET for a port that is gone); `POLLRDBAND` 0x80 on a port (reported once a post); `struct ucongrab`'s
+  `topaz` at offset 24 (`UCONGRAB_TOPAZ` 28: 1,792 bytes, Latin-1 32-255); the `/etc/svctab` line of `display`; the
+  display protocol `display/proto.h` version 1 whole: the port name `display`, the request and event numbers and
+  their arguments, `struct dpyhello` (first size 44), `dpyring`, `dpywin` (68), `dpyinfo` (64), `dpyimage` (16),
+  `dpykey` (8), `dpystyle` (64), `dpyev` (16 bytes), the drawing orders' words (op << 8 | length, unknown ones
+  skipped by length), `DPYR_LOST`, `WK_*`, `WF_*`, `WST_*`, `WS_*`, `HIDE_*`, `DRAG_*`, `FP_*`, `TA_*`, `IMG_MASK`.
 - **D27 steps 0-1 (the C library, block 3, 2026-10-29):** the error numbers `EDOM` 33, `EOVERFLOW` 75, `EILSEQ` 84 (and
   `ENOTSUP` as a second name of `EOPNOTSUPP` 95); the C library bakes the system-call, error and signal numbers and
   `O_*` flags into every program built on it (DESIGN D27 section 6: already frozen, nothing new beyond the three).
@@ -129,6 +140,11 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   Since D36 (branch ne2000, 2026-11-03): `DRV_CLAIM`'s base `DRV_PCMCIA` 0xA00000 (the PC Card slot, its window
   `DRV_PCMCIA_SIZE` 0x50000) and its answers -ENODEV (no A600/A1200 Gayle) and -EADDRINUSE (memory in 0x600000-0xA4FFFF);
   `/sbin/net/ne2000` in `NETDRVS` (its driver line takes no words).
+  Since D39 (branch plip, 2026-11-04): `DRV_PARACK` 8 (the parallel port's claim: the ACK line's falling edges since
+  boot, bit 31 clear; -EPERM for another claim) and `DRV_CLAIM`'s base `DRV_PARPORT` 0xBFE101 (the parallel port: its
+  quiesce steps only bytes at 0xBFE101, 0xBFE301, and `DRVS_RMW` of bits 0-2 at 0xBFD000, 0xBFD200; CIA-A's FLG
+  interrupt on while claimed); `/sbin/net/plipbox` in `NETDRVS` and its driver line words `mac=XX:XX:XX:XX:XX:XX` and
+  `noburst`.
 - **D20 (telnet's console, step 1, 2026-10-27):** `SYS_console`'s op word `op | (fd + 1) << 8` (0 above the op: no
   descriptor, only `CON_COLOURS` and D28's `CON_UFONT`; ops are 1-255; D24's ops 5-7 take a descriptor too); `CON_FONT` 2 (a2 PSF1 data, a3 its size; a2 0 drops it; PSF1 mode 0, height 8,
   2,052 bytes; meaning "8-bit mode: each byte one glyph of this font, no UTF-8 while loaded"), `CON_RULES` 3 (a2 bits,

@@ -47,7 +47,7 @@ UAPPS := diskd init sh ls cat echo pwd ps free wc grep uname hello spin crash ba
           whoami hostname id uptime cmp hexdump stat expr find xargs du \
           sed diff chmod ln readlink date less edit man gzip tar input beep dmesg dd login su passwd chown sha256sum printf \
           tac rev nl fold paste comm expand mktemp realpath base64 md5sum cal time timeout kill pgrep watch tree mount umount mkfs_zenixfs fsck_zenixfs \
-          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest netstat nettest ifconfig route ping host telnet \
+          nice renice priotest reboot cu awk svctest useradd userdel gpasswd sudo zup sigtest ptytest gcontest dpytest netstat nettest ifconfig route ping host telnet \
           rz cryptotest ssh ssh-keygen wget sntp zpkg sumi maki markdown ahiru ctop zine unlha zinstall conmirror
 UCFLAGS := -m68020-60 -msoft-float -ffreestanding -fno-builtin -nostdlib \
            -O2 -g -Wall -Wextra -fno-strict-aliasing -fno-common -ffunction-sections -fdata-sections
@@ -80,12 +80,12 @@ USERZX := $(UAPPS:%=$(BUILD)/%.zx)
 # the base package: the ZenixFS server, which mount registers as a file service (D11 6.4), and the network server.
 # Not commands: no page; wasabid (D24), the remote control daemon root starts, has docs/man/wasabid.txt; nfscd (D23),
 # the server of an NFS mount, is described in docs/man/mount.txt, as are fatd (D30), the server of a FAT mount, ffsd (D31), of an OFS or FFS mount, and pfs3d (D32), of a PFS3 mount.
-SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d
+SBINAPPS := zfsd netd wasabid nfscd fatd ffsd pfs3d displayd
 SBINZX := $(SBINAPPS:%=$(BUILD)/%.zx)
 # the network's drivers (DESIGN D19 steps 7-8): user processes netd starts as /sbin/net/NAME IFACE [ARGS], from
 # net/drv/NAME.c, built as drv-NAME. NETDRVS are shipped (/sbin/net on every full root image and in the base package);
 # TESTDRVS only built: the driver protocol's test driver, which tools/drv-test.sh puts on its own image
-NETDRVS := a2065 genet ne2000
+NETDRVS := a2065 genet ne2000 plipbox
 TESTDRVS := fake
 NETDRVZX := $(NETDRVS:%=$(BUILD)/drv-%.zx)
 # programs with shared code (ZEX2, below) in the test images' /tests only, not commands (tools/mkroot.sh, DESIGN D13)
@@ -208,8 +208,9 @@ RAMDISK_K := 640
 # when fsck.zenixfs grew by its repairs (DESIGN D34): zenixfstest carries them on its own disk. 710 since DESIGN D37
 # (2026-11-04, the 040/060 data cache: 2 KB of kernel): 41 blocks free there (43 at 712). 704 since DESIGN D38 step 1
 # (2026-11-04, pseudo-terminals: 3.6 KB of kernel): 35 blocks free, mounttest passes. 700 since DESIGN D38 step 2
-# (2026-11-04, the console handed to the display server: 4 KB of kernel).
-RAMDISK_MOUNT_K := 700
+# (2026-11-04, the console handed to the display server: 4 KB of kernel). 699 since DESIGN D28 20 (2026-11-04, the
+# console's ring of rows: 1.3 KB of kernel).
+RAMDISK_MOUNT_K := 699
 KERNEL_MAX := $(shell echo $$((901120 - 1024 - $(RAMDISK_K) * 1024)))
 KERNEL_MAX_MOUNT := $(shell echo $$((901120 - 1024 - $(RAMDISK_MOUNT_K) * 1024)))
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf tools/mkzexe.py tools/check-68020-60.sh tools/ksize-check.sh tools/ksize-budget
@@ -489,6 +490,21 @@ STACK_ffsd := 8192
 $(BUILD)/pfs3d.uo: user/pfs3d.c user/amigatext.h user/volid.h user/diskcall.h kernel/fsperm.h kernel/fsproto.h kernel/diskproto.h user/libz.h user/usys.h | $(BUILD)
 	$(CC) $(UCFLAGS) -Os -c $< -o $@
 STACK_pfs3d := 8192
+# ---- Zenix Desktop (DESIGN D38, docs/d38-desktop.md): the display server /sbin/displayd (display/server/: the
+# protocol and the input cold, -Os; the drawing and the font -O2: the golden path, input to screen), the client
+# library display/lib/libdisplay.c linked into each client (static, D38 5), the test client dpytest ----
+DPYDOBJS := $(patsubst %,$(BUILD)/dpyd-%.no,displayd win draw font)
+$(BUILD)/dpyd-%.no: display/server/%.c display/server/dpyd.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser $(if $(filter displayd win,$*),-Os) -c $< -o $@
+$(BUILD)/displayd.uelf: $(DPYDOBJS) $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(DPYDOBJS) $(BUILD)/libz.uo $(LIBGCC) -o $@
+STACK_displayd := 8192
+$(BUILD)/libdisplay.no: display/lib/libdisplay.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/dpytest.uo: display/test/dpytest.c display/display.h display/proto.h user/libz.h user/usys.h | $(BUILD)
+	$(CC) $(UCFLAGS) -Iuser -Os -c $< -o $@
+$(BUILD)/dpytest.uelf: $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/crt0.o $(BUILD)/libz.uo link/user.ld
+	$(CC) $(UCFLAGS) $(ULDFLAGS) $(BUILD)/crt0.o $(BUILD)/dpytest.uo $(BUILD)/libdisplay.no $(BUILD)/libz.uo $(LIBGCC) -o $@
 # unlha, unlzx (DESIGN D33, docs/d33-archives.md): one program, two names (/bin/unlzx is a link). The readers are shared with Ahiru.
 # The program's own part is cold (-Os); the two decoders are where the time goes (UCFLAGS' -O2). core/arc.c gives the CRCs and dates.
 ARC_FLAGS := -Iports/ahiru/upstream/core
@@ -632,9 +648,11 @@ STACK_drv-fake := 8192
 STACK_drv-a2065 := 8192
 STACK_drv-genet := 8192
 STACK_drv-ne2000 := 8192
+STACK_drv-plipbox := 8192
 # genet's chip and PHY code is genet-core.c, included by genet.c (and by the host test against the model)
 $(BUILD)/drv-genet.uo: net/drv/genet-core.c net/drv/genet.h
 $(BUILD)/drv-ne2000.uo: net/drv/ne2000-core.c net/drv/ne2000.h
+$(BUILD)/drv-plipbox.uo: net/drv/plipbox-core.c net/drv/plipbox.h
 # netd's stack: lwIP's deepest chain (a segment in, its answer out) and the log's formatting (D19 7.3: 8 KB)
 STACK_netd := 8192
 

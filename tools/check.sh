@@ -24,7 +24,7 @@
 # tools/serial-tap.py; a `waitopt` may time out).
 # Needs for zinstall-test: e2fsck, sfdisk, debugfs, amitools' xdftool if installed, and part n the namespaces as zpkg-emu-test.
 # Not run, on purpose: stage0-68k-test when the Python module unicorn is missing (named as skipped), audio/klog/joystick (weak or
-# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test, diag-test, colour-test, gcon-test and
+# covered by diag-test). Needs ZENIX_KICKSTART_DIR (tools/fsuae_conf.py) and, for kbd-test, cu-test, diag-test, colour-test, gcon-test, dpy-test and
 # random-test and bbs-test, ZENIX_CAGE_RIG; net-test and slip-test need libslirp (GLib) and unprivileged user namespaces (eth-test
 # the namespaces too, and ctop-test's part n; ssh-test also OpenSSH's sshd and ssh-keygen, openssl, and unshare --map-auto; wget-test openssl and the namespaces;
 # zine-test's tables part ZENIX_MANUALS (the manuals as text; SKIPPED without it); zpkg-emu-test and remote-test the namespaces and libslirp; remote-test also runs the owner's Wasabi client when
@@ -35,8 +35,8 @@ cd "$(dirname "$0")/.." || exit 1
 MODE=""
 while :; do case "$1" in --fast) MODE=fast; shift ;; --stock) MODE=stock; shift ;; *) break ;; esac; done
 RUN=$(mktemp -d /tmp/zenix-check.XXXXXX) || exit 1
-HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test fat-host-test ffs-host-test pfs3-host-test arc-host-test zenixfs-test mfm-test emmc-test genet-test ne2000-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test zinstall-host-test cache-host-test"
-EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test pty-test gcon-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test arc-test paths-test zroot-test zroot-card-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test zinstall-test halt-test lineedit-test scroll-test"
+HOST="docs-check tap-test usize-test signal-host-test mkzexe-test zup-host-test ext2-host-test disk-host-test fat-host-test ffs-host-test pfs3-host-test arc-host-test zenixfs-test mfm-test emmc-test genet-test ne2000-test plipbox-test serial-test term-test confont-test mem-test a3000-test stage0-test stage0-68k-test net-test random-host-test sock-host-test telnet-test crypto-test clock-host-test zpkg-test tls-test nfs-test wasabi-test libc-host-test libc-size zmalloc-test dos-host-test zine-test zinstall-host-test cache-host-test"
+EMU="matrix cmds-test cmds2-test users-test jobs-test signal-test pty-test gcon-test dpy-test prio-test kbd-test con-test cu-test diag-test colour-test memtest mounttest zenixfstest fat-test ffs-test pfs3-test arc-test paths-test zroot-test zroot-card-test edit-regress disktools mbr-test floppy-test zenixboot-test svc-test pure-test update-test useradd-test rootcheck-test random-test sock-test netd-test slip-test drv-test eth-test bbs-test time-test crypto68k-test ssh-test wget-test zpkg-emu-test sysupdate-test remote-test nfs-emu-test libc-test tui-test sumi-test maki-test markdown-test ahiru-test ctop-test zine-emu-test zinstall-test halt-test lineedit-test scroll-test"
 DEFMODE=fast
 case "$1" in
 "") LIST="$HOST $EMU"; DEFMODE=stock ;;          # the full run (the nightly, before a merge): stock speed
@@ -55,6 +55,7 @@ STOCK[diag-test]="screenshots by the cage rig at times on the PC's clock"
 STOCK[colour-test]="screenshots by the cage rig (shot.py) at times on the PC's clock"
 STOCK[scroll-test]="screenshots by the cage rig (shot.py) at times on the PC's clock"
 STOCK[gcon-test]="screenshots by the cage rig (shot.py) at times on the PC's clock; the 1 s deadline against the script's pace"
+STOCK[dpy-test]="screenshots by the cage rig (shot.py) at times on the PC's clock"
 STOCK[random-test]="keys typed by the cage rig seed the pool: their timing in the PC's time is the input"
 STOCK[bbs-test]="the BBS simulator on the PC paces its bytes in the PC's time (serial noise, a flood, pause codes)"
 STOCK[slip-test]="SLIP over the serial port to zenix-slirp on the PC: noise and a flood in the PC's time, lost bytes counted"
@@ -75,7 +76,6 @@ STOCK[update-test:zfscut]="the same cut on a ZenixFS root"
 STOCK[zpkg-emu-test:e]="downloads from a server on the PC: in warp mode zpkg's time-outs (emulated seconds) end before the PC's server answers"
 STOCK[zpkg-emu-test:s]="the same over SLIP"
 STOCK[sysupdate-test:z]="the same downloads (zpkg -Syu over the A2065)"
-STOCK[sysupdate-test:b]="in fast mode the second zpkg -Syu still finds sntp, sysutils and wget to install (2026-11-04; passes at stock): a timing question in the update path not yet explained, kept at stock until it is"
 STOCK[eth-test:e]="UDP echo and DNS from servers on the PC over the A2065: the Amiga's time-outs run in emulated seconds"
 STOCK[wget-test]="HTTPS and sntp against servers on the PC: wget's and sntp's time-outs run in emulated seconds"
 STOCK[ssh-test]="ssh against sshd on the PC: the same time-outs"
@@ -103,7 +103,7 @@ SPLIT[bbs-test]="e s|b|b16|z"                       # the Unix mode and SLIP; th
 SPLIT[crypto68k-test]="fsuae/a1200-020.fs-uae|fsuae/matrix/a1200-030.fs-uae fsuae/matrix/a1200-040.fs-uae fsuae/matrix/a1200-060.fs-uae"   # the 020 with the times
 SPLIT[slip-test]="s|m|n"                            # 2 MB and 1 MB of chip RAM; noise and a flood
 SPLIT[ctop-test]="c|n"                              # the boxes and keys; the net box with traffic (the A2065)
-SPLIT[eth-test]="e|g p|i m"                         # the A2065; genet where there is no GENET; ne2000 without a card (D36)
+SPLIT[eth-test]="e|g p|i m|l"                       # the A2065; genet where there is no GENET; ne2000 without a card (D36); plipbox without a box (D39)
 SPLIT[zpkg-emu-test]="e|s|m"                       # D22 8.2: the A2065, SLIP, 1 MB of chip RAM
 SPLIT[sysupdate-test]="b|m|z"                         # D22 amendment 2: the owner's way from 2026103000; the card layout
 SPLIT[nfs-emu-test]="m|b|w|r|u"                     # D23: reading, hard, soft, killed; the lazy fstab boot; writing; reboot; users

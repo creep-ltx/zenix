@@ -9,6 +9,15 @@ BD=${ZENIX_BUILD:-build}       # the build directory (make check gives every tes
 make -s BUILD=$BD all >/dev/null 2>&1 || { echo "build failed"; exit 1; }
 rm -f $BD/zenix.hdf; make -s BUILD=$BD $BD/zenix.hdf >/dev/null 2>&1
 OUT=${ZENIX_OUT:-/tmp/zenix-kbd}; mkdir -p $OUT
+# KBD_PLIPBOX=1: the plipbox driver (DESIGN D39) runs from the boot on, with nothing on the parallel port (its claim
+# turns CIA-A's FLG interrupt on and off, and it shares CIA-A's ICR with the keyboard): the keys must arrive all the same
+if [ -n "$KBD_PLIPBOX" ]; then
+    printf 'auto eth0\niface eth0 inet dhcp\n    driver plipbox\n' > $OUT/interfaces
+    debugfs -w -R "mkdir /etc/network" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /etc/network uid 0" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "write $OUT/interfaces /etc/network/interfaces" $BD/zenix.hdf >/dev/null 2>&1
+    debugfs -w -R "sif /etc/network/interfaces uid 0" $BD/zenix.hdf >/dev/null 2>&1
+fi
 SERIAL=${ZENIX_SERIAL:-/tmp/zenix-serial}
 ZENIX_SERIAL=$SERIAL python3 tools/fsuae_conf.py fsuae/a1200-020-fast.fs-uae $OUT/kbd.fs-uae || exit 1
 python3 tools/kbd-test.py $OUT/kbd.fs-uae "$SERIAL" > $OUT/run.log 2>&1
@@ -25,6 +34,10 @@ if [ "$(get /tmp/k6.txt | grep -c .)" = "1" ]; then echo "PASS Amiga+F2: console
 if debugfs -R "stat /tmp/k7.txt" $BD/zenix.hdf 2>/dev/null | grep -q 'Size: 0$'; then echo "PASS Amiga+F1: back on console 1 (its shell has no jobs; console 2's has one)"; else echo "FAIL Amiga+F1: jobs '$(get /tmp/k7.txt)' (or no file)"; pass=0; fi
 if get /tmp/k5.txt | grep -q 'lost\|queue full'; then echo "FAIL the kernel log reports lost input: $(get /tmp/k5.txt | grep 'lost\|queue full')"; pass=0
 elif get /tmp/k5.txt | grep -q 'Zenix'; then echo "PASS no input lost (kernel log)"; else echo "FAIL no kernel log in k5.txt"; pass=0; fi
+if [ -n "$KBD_PLIPBOX" ]; then
+    n=$(get /tmp/k5.txt | grep -c 'plipbox: eth0: nothing answers on the parallel port')
+    if [ "$n" -ge 1 ]; then echo "PASS the plipbox driver ran during the test ($n tries, nothing on the port)"; else echo "FAIL the plipbox driver did not run"; pass=0; fi
+fi
 # 4b: the screen after Amiga+Up differs from before (older lines; digits cover only about 1% of the screen, so a
 # whole screenful of other numbers changes about 1% of the pixels), after Amiga+Down it is the same again
 d=$(python3 - "$OUT" <<'PY'

@@ -64,6 +64,10 @@ zenix/
   `socket.h` is the sockets' one header for both. `libctest.c`: the standard C library's test program
   (`/tests/libctest`, and its ZEX2 build `/tests/libctestpure`); `tuitest.c`: the text-UI library's (`ports/tui`,
   `/tests/tuitest`).
+- **`display/`, Zenix Desktop (DESIGN D38):** `proto.h` (the display protocol, frozen), `display.h` (libdisplay's
+  calls), `server/` (displayd: `displayd.c` the clients, the requests and the input, `win.c` the windows, regions,
+  frames and kept copies, `draw.c` the blitter's and the CPU's drawing, `font.c` Topaz and the Unicode supplement),
+  `lib/libdisplay.c` (the client library, linked into each client), `test/dpytest.c` (the test client).
 - **`libc/`, the standard C library (DESIGN D27, docs/d27-c-library.md):** `picolibc/` picolibc 1.8.10, only the files
   built (`sources.mk`, `picolibc.h`, its licences, README); `zenix/` Zenix's port (the system layer, the streams,
   the start and exit, `strerror`, `dprintf`, directories, the 64-bit division, termios, `posix_spawn` and the
@@ -87,7 +91,7 @@ zenix/
 |---|---|
 | `lwip/` | lwIP 2.2.1 (BSD-3, `COPYING`): only the files netd builds or tests, unchanged but for the local patches in `lwip/patches/`; `lwip/README` names the version, the files and the patches |
 | `port/` | Zenix's port of lwIP: `lwipopts.h` (the configuration), `arch/cc.h`, the counted heap and the limits set by the machine (`port.c`), ChaCha20 and the SipHash ISNs (`rand.c`), the checksum and the copy in 68020 assembler (`m68k.S`), stand-in C headers for the Zenix build (`shim/`) |
-| `drv/` | the network's drivers, user processes netd starts as `/sbin/net/NAME` (`drv.h`: what they share): `a2065.c` (the Commodore A2065, polled), `genet.c` (the CM4's Ethernet under Emu68, polled; the chip and its PHY in `genet-core.c` and `genet.h`, shared with the PC test against a model of the chip, `tools/genet-model.h`), `ne2000.c` (an NE2000 PC Card in the A600/A1200's slot, polled; the slot, the CIS and the chips in `ne2000-core.c` and `ne2000.h`, shared with the PC test against a model, `tools/ne2000-model.h`), `fake.c` (the driver protocol's test driver, test images only) |
+| `drv/` | the network's drivers, user processes netd starts as `/sbin/net/NAME` (`drv.h`: what they share): `a2065.c` (the Commodore A2065, polled), `genet.c` (the CM4's Ethernet under Emu68, polled; the chip and its PHY in `genet-core.c` and `genet.h`, shared with the PC test against a model of the chip, `tools/genet-model.h`), `ne2000.c` (an NE2000 PC Card in the A600/A1200's slot, polled; the slot, the CIS and the chips in `ne2000-core.c` and `ne2000.h`, shared with the PC test against a model, `tools/ne2000-model.h`), `plipbox.c` (a plipbox on the parallel port, polled; the line protocol in `plipbox-core.c` and `plipbox.h`, shared with the PC test against a model of the box, `tools/plipbox-model.h`), `fake.c` (the driver protocol's test driver, test images only) |
 | `zinstall/` | the installer's cores (DESIGN D35): `table.c` (what a disk holds, what may be done, the writes, no system calls, fuzzed on the PC), `ffsw.c` (a fresh FFS boot volume); `user/zinstall.c` is the dialogue |
 | `telnet/` | telnet's core (DESIGN D20): the protocol with RFC 1143's options (`proto.c`), the BBS and Unix stream filter (`filter.c`), the key translation (`keys.c`), the CP437 tables (`cp437.c`); `telnet.h` is its interface; plain C with no system call, shared by `user/telnet.c` and the PC tests (`tools/host/telnet-test.sh`) |
 | `ssh/` | ssh's core (DESIGN D21 4): the transport with strict key exchange, the packets, the logins, the session channel, OpenSSH's key files, known_hosts, the config subset and the text cleaner; `ssh.h` is its interface; no system calls, shared by `user/ssh.c`, `user/ssh-keygen.c` and the PC tests |

@@ -1,0 +1,78 @@
+PLIPBOX(4)		Zenix manual
+
+NAME
+    plipbox - Ethernet through a plipbox on the parallel port
+
+SYNOPSIS
+    /sbin/net/plipbox IFACE [mac=XX:XX:XX:XX:XX:XX] [noburst]
+                              (started by netd(8), never by hand)
+
+    In /etc/network/interfaces:
+        auto eth0
+        iface eth0 inet dhcp
+            driver plipbox
+
+DESCRIPTION
+    The driver of a plipbox: Christian Vogelgsang's small Ethernet
+    bridge (an Arduino with an ENC28J60 chip) in the parallel port of
+    any Amiga. netd starts it for a stanza whose driver is plipbox
+    and restarts it when it ends. It speaks the plipbox 0.6 firmware's
+    protocol (the box must be in its bridge mode, the default).
+
+    It claims the parallel port (no other driver may touch it), asks
+    the box for the MAC address it keeps and uses that one, so the box
+    writes nothing into its memory and the router gives the same
+    address as under AmigaOS. It gives the kernel a program that lets
+    go of the port: the kernel runs it when the driver or netd ends.
+
+    Frames to the network go in bursts; frames from the network come
+    byte by byte, each byte answered (the safe way for a program that
+    can be interrupted). The box says when it has a frame by a pulse
+    the kernel counts; the driver looks at that count at once while
+    frames move, after 10 ms, and every 20 ms when idle.
+
+    On an idle link it sends the box a short online frame every 5
+    seconds, so a box restarted meanwhile is online again and one that
+    went away is noticed. If the box stops answering (unplugged, its
+    power gone), the link goes down after three failed transfers (about
+    15 seconds on an idle link) and the driver looks for it every 2
+    seconds; when it answers again the link comes back with the same
+    address.
+
+OPTIONS
+    mac=XX:XX:XX:XX:XX:XX
+            Use this MAC address instead of the box's own. The box
+            stores it (one write into its EEPROM when it differs).
+    noburst
+            Send every byte answered (command 0x11), as plipbox.device's
+            NOBURST: slower, for a box that does not take bursts.
+
+DIAGNOSTICS
+    In the kernel log (dmesg), as "plipbox: IFACE: ...":
+    "nothing answers on the parallel port: BUSY stays high (no plipbox,
+    or it is off)"; "the plipbox does not answer (STAGE): is it in its
+    bridge mode, firmware 0.6?"; "plipbox found (burst sends), MAC ...
+    (the box's own)"; "the plipbox stopped answering: link down";
+    "the plipbox answers again: link up"; "a receive was cut between
+    its size bytes: ... switch the box off and on" (the box's firmware
+    then keeps driving the data lines); "the parallel port is
+    another driver's"; "the doorbell closed ...: the box told, the port
+    let go". The kernel's own lines: "drv: pid N (plipbox) claims the
+    parallel port", "drv: claim of 0xbfe101 ... released".
+
+NOTES
+    No multicast, no promiscuous mode (the box has neither). The line
+    has no checksum of its own: a byte damaged on the cable is caught
+    by IP's and TCP's checksums only.
+
+    The box's own serial console (its USB port on a PC) shows what it
+    does and has its settings; Zenix does not need it.
+
+    Not yet tried on a real plipbox: FS-UAE has none, so the protocol
+    is tested on the PC against a model of the box's firmware, and in
+    FS-UAE only what the driver does with nothing on the port
+    (tools/eth-test.sh l). DESIGN D39 (docs/d39-plipbox.md) has the
+    first steps on the A1200.
+
+SEE ALSO
+    netd(8), ifconfig(8), ne2000(4), a2065(4), genet(4)

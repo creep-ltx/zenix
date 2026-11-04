@@ -1039,6 +1039,7 @@ static void reclaim(void)
 void gfx_reclaim(void) { if (up && held) reclaim(); }
 int gfx_diwv(void) { return DIW_V; }
 int gfx_aga(void) { return aga; }
+void gfx_topaz(u8 *dst) { memcpy(dst, glyphs, sizeof glyphs); }
 void gfx_geom(u16 *w, u16 *h) { *w = 8 * STRIDE; *h = (u16)dlines; }
 
 /* DESIGN D38 step 2 (gcon.c): show a display server's Copper list (cop), or the kernel's again (0). The kernel's own

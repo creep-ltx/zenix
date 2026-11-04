@@ -369,6 +369,12 @@ void syscall_c(u32 *rb)
     case SYS_recv:
         r = (s32)ipc_recv((int)a1, (int)a2);
         break;
+    case SYS_peer:
+        r = (s32)ipc_peer(a1, a2, a3);
+        break;
+    case SYS_post:
+        r = (s32)ipc_post(a1, a2, a3);
+        break;
     case SYS_reply:
         r = (s32)ipc_reply((struct umsg *)a1, (s32)a2);
         break;
@@ -694,6 +700,11 @@ void syscall_c(u32 *rb)
             disk_frozen = 1;
             klog_set_reason(KLOG_END_REBOOT);
             if (a1 == REBOOT_HALT) {    /* halt(8): an Amiga cannot switch itself off; it stops and says so */
+                if (gfx_present()) {    /* on the screen too (the boot log's copy there ended with the boot), and a
+                                           display server's screen given back first, as a panic does */
+                    gfx_reclaim();
+                    klog_mirror_on();
+                }
                 kprintf("halt: filesystems synced%s, disk writes stopped\n", e < 0 ? " (with an error)" : "");
                 kprintf("\nThe system is halted. You can switch the Amiga off now (or press Ctrl-Amiga-Amiga to restart).\n");
                 for (;;)

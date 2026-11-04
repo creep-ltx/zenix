@@ -85,9 +85,11 @@ spot-checked against the code that day.
 | [wget](man/wget.txt) | fetch files over HTTP and HTTPS: certificates checked, redirects, -c resume (DESIGN D21) |
 | [sntp](man/sntp.txt) | set the clock from the network, the certificate time's floor (root; DESIGN D21) |
 | [netd](man/netd.txt) | not a command: the network server (`/sbin/netd`, DESIGN D19), started at the first socket call |
+| [displayd](man/displayd.txt) | not a command: the display server of Zenix Desktop (`/sbin/displayd`, DESIGN D38), started by the desktop's first program |
 | [a2065](man/a2065.txt) | not a command: the Commodore A2065 Ethernet board's driver (`/sbin/net/a2065`), started by netd |
 | [genet](man/genet.txt) | not a command: the Ethernet driver of a Raspberry Pi CM4 or Pi 4 under Emu68 (`/sbin/net/genet`), started by netd |
 | [ne2000](man/ne2000.txt) | not a command: the driver of an NE2000 PC Card (the Netgear FA411) in the A600/A1200's slot (`/sbin/net/ne2000`), started by netd |
+| [plipbox](man/plipbox.txt) | not a command: the driver of a plipbox, Ethernet through the parallel port (`/sbin/net/plipbox`), started by netd |
 | [nfscd](man/nfscd.txt) | not a command: an NFS mount's server (`/sbin/nfscd`, DESIGN D23), started by the kernel for `mount -t nfs`; its manual is mount's |
 | [wasabid](man/wasabid.txt) | not a command: the remote control daemon (`/sbin/wasabid`, DESIGN D24), the owner's Wasabi protocol on TCP 1236; off until root writes `/etc/wasabid.conf`, kept running by init through `/etc/daemons` |
 
@@ -95,7 +97,7 @@ spot-checked against the code that day.
 [init](man/init.txt), [boot](man/boot.txt), [diskd](man/diskd.txt) (the built-in start-up programs);
 [hello](man/hello.txt), [spin](man/spin.txt), [crash](man/crash.txt), [badptr](man/badptr.txt),
 [msgping](man/msgping.txt), [msgpingd](man/msgpingd.txt), [bench](man/bench.txt), [termtest](man/termtest.txt),
-[priotest](man/priotest.txt), [svctest](man/svctest.txt), [sigtest](man/sigtest.txt), [ptytest](man/ptytest.txt), [gcontest](man/gcontest.txt),
+[priotest](man/priotest.txt), [svctest](man/svctest.txt), [sigtest](man/sigtest.txt), [ptytest](man/ptytest.txt), [gcontest](man/gcontest.txt), [dpytest](man/dpytest.txt),
 [socktest](man/socktest.txt), [socktestd](man/socktestd.txt) (the socket layer and its test server, DESIGN D19),
 [nettest](man/nettest.txt) (the network over the loopback, D19), [cryptotest](man/cryptotest.txt) (the crypto library's known answers and times, D21).
 
