@@ -47,6 +47,12 @@ DESCRIPTION
     supervisor loads each part from there. zine says so first
     ("NAME is overlaid: N later parts ..."). zine refuses a program
     when its file and its hunks together need more memory than is free.
+    A program may also send packets to its file's handler itself (as
+    crunchers do through the overlay file): ZINE answers reading,
+    writing, seeking, closing and flushing.
+
+    dos.library's Execute runs nothing (ZINE has no shell): it answers
+    "done" and the output names the command.
 
     ZINE is being built (DESIGN D29): real demos run in FS-UAE.
 

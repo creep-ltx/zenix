@@ -8,7 +8,7 @@
 #include "zvol.h"
 
 struct zstate Z;
-u32 zr_how, zr_code, zr_ret6, zr_callpc;
+u32 zr_how, zr_code, zr_ret6, zr_callpc, zr_d1;
 u32 zb_stack_top;
 
 void *zmemset(void *d, int c, u32 n)
@@ -559,6 +559,11 @@ void zb_back(void)
                 b->lvo = (u32)l - slot;
             }
         }
+        /* a dos call's first argument (d1) is a name or a command in most of them: shown when it reads as text, so
+         * the report says what the program wanted (16.7) */
+        if (b->lib == 2 && zr_d1 >= 0x1000 && c_TypeOfMem(zr_d1) &&
+            *(const u8 *)zr_d1 >= 32 && *(const u8 *)zr_d1 < 127)
+            zb_say_text("ZINE: the call's first argument (d1) reads \"", zr_d1, "\"\n");
     }
     all_off();
     COPCON = 0;

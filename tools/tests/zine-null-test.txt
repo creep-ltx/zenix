@@ -39,6 +39,10 @@ send zine /tests/zine/zovl; echo zovl-rc=$?\r
 wait zovl-rc= 60
 send zine /tests/zine/zovl bad; echo zovlbad-rc=$?\r
 wait zovlbad-rc= 60
+send zine /tests/zine/zpkt; echo zpkt-rc=$?\r
+wait zpkt-rc= 60
+send zine /tests/zine/zpkt u; echo zpktu-rc=$?\r
+wait zpktu-rc= 60
 send rm -f /home/zbg; sh -c 'i=0; while [ $i -lt 400 ]; do echo $i >> /home/zbg; i=$((i+1)); done' & zine /tests/zine/ztake; wait; echo zbg=$(grep -c . /home/zbg) last=$(tail -1 /home/zbg)\r
 wait (?s)zbg=\d+.*?last=\d+\D 90
 send zine /tests/zine/zmmu; echo zmmu-rc=$?; zine /tests/zine/zfpu; echo zfpu-rc=$?\r

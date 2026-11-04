@@ -219,6 +219,7 @@ zx_ColdReboot:
     bra.s   zs_catch
 /* a vector ZINE does not have: its slot is "jsr zx_unsup", so the return address is the slot + 6 */
 zx_unsup:
+    move.l  %d1,zr_d1               /* dos's first argument: a text, often (zb_back shows it) */
     move.l  (%sp),zr_ret6
     move.l  4(%sp),zr_callpc
     move.l  #4,zr_how               /* ZH_UNSUP */
@@ -469,6 +470,7 @@ zb_putch:
     CF  zs_Open, c_Open, 2, %d1, %d2
     CF  zs_Close, c_Close, 1, %d1
     CF  zs_Seek, c_Seek, 3, %d1, %d2, %d3
+    CF  zs_Execute, c_Execute, 3, %d1, %d2, %d3
     CF  zs_UnLoadSeg, c_UnLoadSeg, 1, %d1
 /* dos LoadSeg (-150): d1 the name; for an overlay node d1 0, d2 the hunk table, d3 the file (the Guru Book
  * 22.2.10.6). The answer in d0 and in d1, which the original overlay supervisor reads (17.1.76) */

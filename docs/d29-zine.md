@@ -314,8 +314,9 @@ way), `LoadSeg`, `UnLoadSeg` (6), `Exit` (ends the program: 9.1), `PutStr`, `VPr
 `VFPrintf`, `FPuts`, `FPutC`, `Cli`, `GetProgramDir`, `GetProgramName`. `Open("*")` and `Open("CONSOLE:")` give
 the output ring (C start-up code opens `*` for errors), `Open("NIL:")` a sink. Locks are real `FileLock`s (`fl_Volume`
 a BPTR to the volume's DosList entry). Names are found by ZINE itself in the volume;
-there is no handler process and no packets (a program that sends packets to `pr_FileSystemTask` or `pr_ConsoleTask`
-finds 0 there and fails as under a missing handler).
+there is no handler process (a program that sends packets to `pr_FileSystemTask` or `pr_ConsoleTask` finds 0 there and
+fails as under a missing handler); a packet sent to a file handle's own `fh_Type` is answered by ZINE (16.7). `Execute`
+runs nothing and answers done (16.7).
 
 ### 5.5 intuition.library and the resources
 
@@ -1230,6 +1231,63 @@ emulator test no longer names a byte offset.
 
 Sizes (the 68020-60 build): the blob 27,048 -> 31,020 bytes (memory 30,372 -> 34,796), `/bin/zine` 27,888 -> 29,656
 bytes; the hunk core 3,623 -> 5,149 bytes at -Os (in both). The kernel unchanged.
+
+### 16.7 Packets to a file's handler, Execute, and the desktop's terminal (2026-11-04, branch zine05)
+
+Found on the owner's PiStorm A1200 (release 2026110404): Spaceballs' Peek "waits for a signal nothing can send", Latex's
+Ltx-Snigelsaft stopped at dos `Execute`, and `zine` from a terminal on the desktop is refused.
+
+**Peek** (*read* from its code; Spaceballs, Datastorm 2018) is a cruncher's container, not an overlaid program in the
+linker's sense: a root of one code hunk and six BSS hunks (two of them chip RAM), `HUNK_OVERLAY` with a table of two
+longwords (the packed data's length and the length - 1; no overlay symbols), `HUNK_BREAK`, then 249 KB of packed data.
+Its decruncher reads the overlay header LoadSeg wrote (16.6) and then talks to the file's handler itself: it builds a
+reply port and a `StandardPacket` on its stack, puts the packet on the handle's `fh_Type` with exec's `PutMsg`
+(`dp_Arg1` the handle's `fh_Arg1`), and waits with `WaitPort`: `ACTION_SEEK` (-length, `OFFSET_END`: the data's start
+whatever the handle's position), `ACTION_READ` in pieces of 1,960 bytes, `ACTION_FLUSH` at the end, then it clears the
+caches and jumps into the unpacked code. ZINE's handles had `fh_Type` 0 and `PutMsg(0)` did nothing, so the first
+`WaitPort` waited forever.
+
+**Built:**
+- **The handler port:** one `MsgPort` of ZINE's (`PA_IGNORE`, no task) is the `fh_Type` of every file handle ZINE
+  gives (the volume's files, the overlay handle, `NIL:`, `Input()`, `Output()`; their `fh_Arg1` names them).
+  `PutMsg` to it answers the packet at once, as the handler would (`dos/dosextens.h`'s `DosPacket`, NDK 3.2):
+  `ACTION_READ` (82), `ACTION_WRITE` (87), `ACTION_SEEK` (1008), `ACTION_END` (1007) and `ACTION_FLUSH` (27) are
+  ZINE's own `Read`, `Write`, `Seek`, `Close` and true; `dp_Res1` and `dp_Res2` set (`dp_Res2` the `IoErr` on a
+  failure), `dp_Port` made the handler's port and the message put on the reply port the packet named, as
+  `NT_REPLYMSG`, with its signal. Any other action answers `DOSFALSE` and `ERROR_ACTION_NOT_KNOWN` (209) and the
+  program's output names its type (the first 4). A packet whose pointer is outside the program's memory is dropped.
+- **PutMsg** to any other port now signals the port's task (`PA_SIGNAL`), as exec does; before it only queued.
+- **`zine`'s line** for an overlay table with no parts after it: "ZINE: NAME keeps N KB of data after its overlay table
+  and reads it itself through its overlay file, from memory" (it said "0 later parts").
+- **dos `Execute`** (-222): ZINE has no shell, so no command runs. Demos `Execute` side jobs ("run >nil: a player",
+  `assign`, `setpatch`, `stack`) and most go on whatever happens, while some quit when it fails; so it answers
+  `DOSTRUE` and the program's output says "ZINE: NAME asked dos Execute to run "COMMAND": not run (ZINE has no shell),
+  answered as done" (at most 100 bytes of the command). A demo that needed the command's work (a part started by
+  `run`) shows it on the screen, and the line says which command it was.
+- **A dos call ZINE lacks** now also shows its first argument when it reads as text (most dos calls take a name or a
+  command in d1): "ZINE: the call's first argument (d1) reads "NAME"" before the stop line.
+
+*Verified* in FS-UAE (`tools/zine-emu-test.sh`): `zpkt` (`tools/tests/zine/zpkt.S`; `tools/mkhunktest.py` writes a
+section `.ovldata` after the root as Peek's table, `HUNK_BREAK` and data) sends `ACTION_SEEK` from the end,
+`ACTION_READ` (the 16 bytes compared), `ACTION_FLUSH` and an unknown action to its overlay handle's `fh_Type`, and
+`ACTION_WRITE` to `Output()`'s, waiting on its own port each time; then `Execute("run >nil: setpatch")`: return code
+0 and each line checked. `zpkt u` calls `DeleteFile("RAM:zpkt-gone")`: stopped, the call and its text named. On the PC
+(`tools/host/zine-test.sh`): Peek's form (a chip BSS hunk larger in the header than in its block, the two-longword
+table, `HUNK_BREAK`, data) checked with no parts. Peek itself (not in the repository: a third-party production) in
+FS-UAE: see the hand-back of 2026-11-04 and the knowledge base's `amiga/amigaos-hunk-overlays.md`.
+
+**The desktop's terminal (not changed):** the rule stays (17, question 1: only the Amiga's own console). A shell in
+`term` on the desktop has a pseudo-terminal, which the kernel's check (`allowed()` in `kernel/zine.c`: descriptors
+0-2 a console in its foreground) refuses. Counting such a pty as local is a small check (the pty's master held by a
+process whose own terminal is the console the display server has grabbed, that console shown), but it is not
+enough: `ZINE_GO` also refuses while any console is grabbed (`gcon_grabbed()`, D38: the display server has the
+Copper, the sprite and the blitter), and the way back puts the kernel's text Copper list up, not the server's. Doing
+it properly means the resume giving the grabbed console's list and sprite back and telling the server (its blitter
+state, its pointer), a D38 change with its own review; and the kernel has 12 bytes left over the mount tests' 800
+(`tools/ksize-budget`). Until then: Amiga+F1..F10 to a text console and `zine` there.
+
+Sizes (the 68020-60 build): the blob 31,020 -> 32,312 bytes (memory 34,796 -> 36,304), `/bin/zine` 31,632 -> 31,796
+bytes; the kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

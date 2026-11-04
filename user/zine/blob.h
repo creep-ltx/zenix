@@ -119,13 +119,14 @@ struct zstate {
     u32 lib[4];                         /* exec, graphics, dos, intuition bases (ZINE_LIB_*) */
     u32 proc, seglist;
     u32 out_fh, in_fh;                  /* the file handles (BPTRs) */
+    u32 hport;                          /* every file handle's fh_Type: the handler port that answers packets */
     u32 ioerr;
     u8 blitter;
     u32 mmu[9];                         /* 040/060 (zb_mmu_save): which were read (bit 0 TC, ITT0/1, DTT0/1, URP, SRP;
                                          * bit 1 the 060's PCR), then their values in that order */
 };
 extern struct zstate Z;
-extern u32 zr_how, zr_code, zr_ret6, zr_callpc;   /* set by the stubs in blobs.S on the way out */
+extern u32 zr_how, zr_code, zr_ret6, zr_callpc, zr_d1;   /* set by the stubs in blobs.S on the way out */
 
 /* blobs.S */
 void zb_setvbr(u32 v);
@@ -146,6 +147,8 @@ void zb_back(void) __attribute__((noreturn));
 void zb_stop(u32 how, u32 why) __attribute__((noreturn));
 void zb_libs_init(void);
 u32 zb_out(const char *s, u32 n);
+int zb_say_text(const char *pre, u32 p, const char *post);
+u32 c_TypeOfMem(u32 a);                 /* blob.c: the memory attributes of a, 0 outside the program's memory */
 u32 zb_cia_irq(int c, u32 icr);
 void zb_screen_frame(void);
 void zb_screen_report(void);

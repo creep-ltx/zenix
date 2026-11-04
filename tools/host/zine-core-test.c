@@ -287,6 +287,19 @@ static void test_overlay(void)
     FL = ov_tail - 8;                                   /* node B ends with the file: no HUNK_END, no HUNK_BREAK */
     CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == 0 && inf.nodes == 2, "ovl: a last node ending with the file taken (%s)", msg);
     CHECK(zh_node(F, FL, ov_b, "prog", &nb, msg, sizeof msg) == 0 && nb.end == FL, "ovl: its end is the file's end (%u)", nb.end);
+    /* a cruncher's data container (Spaceballs' Peek, d29 16.7): a code hunk and two BSS hunks of which the header's
+     * sizes are larger (one chip), HUNK_OVERLAY of two longwords (the data's length and length - 1, no symbols),
+     * HUNK_BREAK, then data: taken, no nodes, the data left to the program; its end before the data */
+    FL = 0;
+    L(HUNK_HEADER); L(0); L(3); L(0); L(2); L(2); L(0x40000040u); L(0x30);
+    L(HUNK_CODE); L(2); L(0x4e754e75); L(0); L(HUNK_END);
+    L(HUNK_BSS); L(1); L(HUNK_END);
+    L(HUNK_BSS); L(1); L(HUNK_END);
+    L(HUNK_OVERLAY); L(1); L(24); L(23); L(HUNK_BREAK);
+    unsigned pk_data = FL;
+    for (int i = 0; i < 6; i++) L(0x5A5A0000u + (unsigned)i);
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == 0 && inf.ovl && inf.ovl_words == 2 && inf.nodes == 0 &&
+          inf.end <= pk_data && inf.bytes[1] == 0x100 + 8, "ovl: Peek's form taken, no nodes, chip BSS from the header (%s)", msg);
     build_ovl(0, 0);
     CHECK(zh_node(F, FL, ov_tail, "prog", &na, msg, sizeof msg) == -ZE_NOEXEC && zh_node(F, FL, FL + 4, "prog", &na, msg, sizeof msg) == -ZE_NOEXEC,
           "ovl: zh_node where no node is, or past the end, refused");

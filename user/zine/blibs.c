@@ -522,8 +522,9 @@ static u32 fh_new(u32 ent, int sink)
             if (!fh)
                 break;
             files[i].used = 1, files[i].sink = (u8)sink, files[i].ent = ent, files[i].pos = 0, files[i].fh = fh;
-            *(u32 *)(fh + 36) = (u32)i; /* fh_Args */
+            *(u32 *)(fh + 36) = (u32)i; /* fh_Args: what a packet's dp_Arg1 names (packet() below) */
             *(u32 *)(fh + 24) = (u32)-1;
+            *(u32 *)(fh + 8) = Z.hport; /* fh_Type: the port a program may send its packets to */
             return fh >> 2;
         }
     Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
@@ -784,6 +785,40 @@ u32 c_Write(u32 fh, const char *buf, s32 n)
 }
 
 
+
+/* a program's text (a command, a name) in the output: at most 100 bytes, up to its 0, from the program's own memory
+ * only; a byte outside the printable ones as '?'. 0 when p is no text ZINE can read (outside the program's memory) */
+int zb_say_text(const char *pre, u32 p, const char *post)
+{
+    if (!p || !c_TypeOfMem(p))
+        return 0;
+    zb_out(pre, slen(pre));
+    const u8 *t = (const u8 *)p;
+    u32 n = 0;
+    for (; n < 100 && t[n] && c_TypeOfMem(p + n); n++) {
+        char c = t[n] >= 32 && t[n] < 127 ? (char)t[n] : t[n] >= 160 ? (char)t[n] : '?';
+        zb_out(&c, 1);
+    }
+    if (n == 100 && t[n])
+        zb_out("...", 3);
+    zb_out(post, slen(post));
+    return 1;
+}
+
+/* dos Execute (-222; docs/d29-zine.md 16.7): ZINE has no shell, so no command runs. Demos Execute side jobs
+ * ("run >nil: player", "assign", "setpatch", "stack") and go on whatever happens, or quit when Execute fails, so it
+ * answers DOSTRUE (done) and the program's output names the command */
+u32 c_Execute(u32 cmd, u32 in, u32 out)
+{
+    (void)out;
+    say3("ZINE: ", Z.blk->name, " asked dos Execute to run ");
+    if (!zb_say_text("\"", cmd, "\""))
+        say3("no text it could read", "", "");
+    if (in && (!cmd || !*(const u8 *)cmd))
+        say3(" (its commands from a file)", "", "");
+    say3(": not run (ZINE has no shell), answered as done\n", "", "");
+    return (u32)-1;
+}
 
 u32 c_PutStr(const char *s)
 {
@@ -1230,8 +1265,8 @@ void zb_screen_frame(void)
 }
 
 /* ---- exec's message ports (the RKRM autodocs; offsets: MsgPort 34 bytes, mp_SigBit 15, mp_SigTask 16, mp_MsgList
- * 20): nothing in ZINE sends a program a message, so GetMsg finds none, and WaitPort on an empty port waits for a
- * signal nothing can send (stopped, as Wait) ---- */
+ * 20, mp_Flags 14): PutMsg puts the message on the port and signals its task (PA_SIGNAL); WaitPort on an empty port
+ * waits for a signal nothing can send (stopped, as Wait). The one port ZINE answers is its handler port (below). ---- */
 #define MP_SigBit 15
 #define MP_SigTask 16
 #define MP_MsgList 20
@@ -1245,7 +1280,87 @@ static void initport(u8 *mp)
 }
 
 u32 c_GetMsg(u8 *mp) { return mp ? c_RemHead((struct zlist *)(mp + MP_MsgList)) : 0; }
-void c_PutMsg(u8 *mp, struct znode *m) { if (mp && m) c_AddTail((struct zlist *)(mp + MP_MsgList), m); }
+static void port_put(u8 *mp, struct znode *m, u8 type)
+{
+    ((u8 *)m)[8] = type;                /* ln_Type */
+    c_AddTail((struct zlist *)(mp + MP_MsgList), m);
+    if (*(u32 *)(mp + MP_SigTask) == Z.proc && !(mp[14] & 3) && mp[MP_SigBit] < 32)    /* PA_SIGNAL */
+        TASK(tc_SigRecvd, u32) |= 1u << mp[MP_SigBit];
+}
+
+/* ---- the handler port (docs/d29-zine.md 16.7): every file handle's fh_Type. ZINE has no handler process, but a
+ * program may talk to "its file's handler" itself, as dos does: a StandardPacket (its message's ln_Name the
+ * DosPacket: dp_Link 0, dp_Port 4, dp_Type 8, dp_Res1 12, dp_Res2 16, dp_Arg1.. 20; dos/dosextens.h, NDK 3.2) put
+ * on fh_Type, dp_Arg1 the handle's fh_Arg1 (fh_Args). Spaceballs' Peek reads its packed data that way through its
+ * overlay handle. PutMsg to this port answers at once, as the handler would: the action done by the dos call that
+ * does it (Read, Write, Seek, Close), dp_Res1 and dp_Res2 set, dp_Port made this port and the message put on the
+ * reply port the packet named (with its signal). An action ZINE does not know answers DOSFALSE and
+ * ERROR_ACTION_NOT_KNOWN, named in the output (the first 4 times). ---- */
+#define ACTION_FLUSH 27
+#define ACTION_READ 82
+#define ACTION_WRITE 87
+#define ACTION_END 1007
+#define ACTION_SEEK 1008
+#define FH_IN 0x100u                    /* the fh_Args of Input() and Output() (files[] are 0-15) */
+#define FH_OUT 0x101u
+static u8 unknown_actions;
+
+static u32 fh_of_arg(u32 a)
+{
+    return a == FH_IN ? Z.in_fh : a == FH_OUT ? Z.out_fh : a < NFILES && files[a].used ? files[a].fh >> 2 : 0;
+}
+
+static void packet(struct znode *m)
+{
+    u32 *p = *(u32 **)((u8 *)m + 10);   /* ln_Name: the DosPacket */
+    if (c_TypeOfMem((u32)p) == 0 || ((u32)p & 1))
+        return;                         /* not a packet: nothing to answer, nowhere to reply */
+    u32 fh = fh_of_arg(p[5]), r1, r2 = 0;
+    Z.ioerr = 0;
+    switch ((s32)p[2]) {
+    case ACTION_READ:
+        r1 = c_Read(fh, (char *)p[6], (s32)p[7]);
+        break;
+    case ACTION_WRITE:
+        r1 = c_Write(fh, (const char *)p[6], (s32)p[7]);
+        break;
+    case ACTION_SEEK:
+        r1 = (u32)c_Seek(fh, (s32)p[6], (s32)p[7]);
+        break;
+    case ACTION_END:
+        r1 = c_Close(fh) ? (u32)-1 : 0;
+        break;
+    case ACTION_FLUSH:
+        r1 = (u32)-1;                   /* DOSTRUE: nothing is buffered */
+        break;
+    default:
+        r1 = 0;
+        Z.ioerr = 209;                  /* ERROR_ACTION_NOT_KNOWN */
+        if (unknown_actions < 4) {
+            unknown_actions++;
+            say_at("ZINE: a packet of type ", p[2], " sent to a file's handler, which ZINE does not know: answered "
+                   "with an error\n");
+        }
+    }
+    if (r1 == (u32)-1 || !r1)
+        r2 = Z.ioerr;
+    p[3] = r1;
+    p[4] = r2;
+    u8 *rp = (u8 *)p[1];
+    p[1] = Z.hport;
+    if (rp && c_TypeOfMem((u32)rp))
+        port_put(rp, m, 7);             /* NT_REPLYMSG */
+}
+
+void c_PutMsg(u8 *mp, struct znode *m)
+{
+    if (!mp || !m)
+        return;
+    if ((u32)mp == Z.hport)
+        packet(m);
+    else
+        port_put(mp, m, 5);             /* NT_MESSAGE */
+}
 void c_ReplyMsg(u32 m) { (void)m; }
 u32 c_WaitPort(u8 *mp)
 {
@@ -1347,7 +1462,7 @@ F(OpenWindowTagList); F(OpenWindow); F(CloseWindow); F(ModifyIDCMP); F(SetPointe
 F(LoadRGB32); F(SetRGB32); F(OpenScreenTagList); F(OpenScreen); F(CloseScreen); F(ScreenToFront);
 F(LoadView); F(WaitTOF); F(WaitBlit); F(OwnBlitter); F(DisownBlitter); F(VBeamPos); F(SetRGB4); F(LoadRGB4);
 F(Output); F(Input); F(Write); F(Read); F(PutStr); F(VPrintf); F(VFPrintf); F(FPuts); F(FPutC); F(Flush); F(IoErr);
-F(SetIoErr); F(Delay); F(CloseWorkBench); F(OpenWorkBench); F(rts);
+F(SetIoErr); F(Delay); F(Execute); F(CloseWorkBench); F(OpenWorkBench); F(rts);
 X(Supervisor); X(Disable); X(Enable); X(Forbid); X(Permit); X(SetSR); X(GetCC); X(CacheClearU); X(ColdReboot); X(Exit);
 
 /* the offsets: the RKRM's Function Offset Reference (V37), the pools and ColdReboot from the NDK 3.2's exec_lib.fd */
@@ -1370,10 +1485,10 @@ static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, z
     zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
     zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort };
 static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
-    156 };
+    156, 222 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
     zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
-    zs_LoadSeg, zs_UnLoadSeg };
+    zs_LoadSeg, zs_UnLoadSeg, zs_Execute };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300 };
 static void (*const int_fn[])(void) = { zs_CloseWorkBench, zs_OpenWorkBench, zs_OpenScreenTagList, zs_OpenScreen,
     zs_CloseScreen, zs_ScreenToFront, zs_SetPointer, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,
@@ -1829,6 +1944,13 @@ void zb_libs_init(void)
     *(u32 *)(pr + ZO_Process_pr_WindowPtr) = 0xFFFFFFFFu;
     u32 out = take(ZO_FileHandle_SIZEOF), in = take(ZO_FileHandle_SIZEOF);
     Z.out_fh = out >> 2, Z.in_fh = in >> 2;
+    u8 *hp = (u8 *)take(MP_SIZEOF);     /* the handler port (16.7): no task to signal, PA_IGNORE */
+    newlist((struct zlist *)(hp + MP_MsgList), NT_MESSAGE);
+    hp[8] = NT_MSGPORT;
+    hp[14] = 2;
+    Z.hport = (u32)hp;
+    *(u32 *)(out + ZO_FileHandle_fh_Type) = Z.hport, *(u32 *)(out + ZO_FileHandle_fh_Args) = FH_OUT;
+    *(u32 *)(in + ZO_FileHandle_fh_Type) = Z.hport, *(u32 *)(in + ZO_FileHandle_fh_Args) = FH_IN;
     *(u32 *)(pr + ZO_Process_pr_COS) = Z.out_fh;
     *(u32 *)(pr + ZO_Process_pr_CIS) = Z.in_fh;
     u32 cli = take(64);
