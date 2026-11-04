@@ -187,16 +187,26 @@ columns: a longer one is broken at a space (a line of exactly 80 wrapped on the 
 ## 10. What it does not do
 No shrinking of an existing filesystem in place (the owner's decision, 2026-11-03: free space, or a partition the person chooses to replace, which may be split into Zenix and a new empty partition of its old name and type); no GPT; no install from a folder; no network from the floppy; never changes an MBR's active flag; one disk at a time (Zenix serves one IDE disk).
 
-## 11. Measured (FS-UAE and the PC, 2026-11-01 to 11-03; no speed figures: emulator time is not hardware time)
+## 11. Measured (FS-UAE and the PC, 2026-11-01 to 11-04; no speed figures: emulator time is not hardware time)
+The machine Zenix is made for (CLAUDE.md, 2026-11-04) is a stock A1200 (68EC020) with 2 MB of chip and 4 MB of fast RAM: the
+install must pass there (`zinstall-test` m, z). 2 MB of chip RAM alone is best effort (part b reports, never fails).
 | | |
 |---|---|
-| `zinstall` | 95,412 bytes (ZEXE), -Os, with the password code it shares with passwd and useradd |
-| The install floppies | 4 disks: disk 1 the bootblock, the kernel (169 KB), a RAM disk of 560 KB and 153 KB of the set; 1,966 KB of bundles in all, core first, the optional ones on disks 3-4 |
-| No floppy (`install/from-amigaos/`) | zenixboot 53 KB, the kernel 169 KB, `zinstall-ram.img` 3,400 KB (needs fast RAM) |
-| Free memory, 2 MB of chip RAM alone, booted from disk 1 | 789 KB at the prompt (before audit A7's fix that floppy did not start at all on such a machine) |
-| Lowest free memory seen while installing (sampled at each file and program end; a child's peak in between is not seen) | 2 MB chip alone: 404 KB with ext2, 257 KB with ZenixFS; with 8 MB of fast RAM about 8,500 KB |
+| `zinstall` | 113,900 bytes (ZEXE), -Os, with the password code it shares with passwd and useradd |
+| The install floppies | 4 disks: disk 1 the bootblock, the kernel (172 KB), a RAM disk of 600 KB and part of the set, core first, the optional ones on disks 3-4 |
+| No floppy (`install/from-amigaos/`) | zenixboot 53 KB, the kernel 172 KB, `zinstall-ram.img` 3,400 KB (needs fast RAM) |
+| Free at the prompt, booted from disk 1 | 2 + 4 MB: 1,255 KB chip and 3,505 KB fast; 2 MB chip alone: 729 KB |
+| Lowest free memory seen while installing (sampled at each file and program end; a child's peak in between is not seen) | 2 + 4 MB: 4,285 KB with ext2, 4,162 KB with ZenixFS; 2 MB chip alone: 277 KB with ext2 (one partition), ZenixFS refused |
 | What zinstall wants free before it writes anything | 350 KB (ext2), 500 KB (ZenixFS): measured use plus a margin; less, and it says so and writes nothing |
-| The installed machine, 2 MB chip alone, one login | 1,211 KB free on ext2, 1,023 KB on ZenixFS |
+| The check after the copy | fsck.ext2 -n needs about 12 bytes per inode, two block bitmaps and 96 KB (zinstall gives the copy's 32 KB window and track buffer back first); where that is more than is free it is skipped and said (every file was already checked against its SHA-256), and the line to run later is printed |
+| The installed machine, one login | 2 + 4 MB: 1,855 KB chip free and 3,464 KB fast (ext2) or 3,196 KB fast (ZenixFS); 2 MB chip alone: 1,287 KB on ext2 |
 | Files checked against their SHA-256 after the copy | 307 (core) to 312 (everything) |
 
-Tests: `tools/zinstall-host-test.sh` (273 checks, the fuzzer 300,000 rounds, ASAN and UBSAN), `tools/zinstall-test.sh` f r a m z c n o h (174 checks, 2026-11-03), `useradd-test` (63) and `users-test` (61) after the shared password code.
+**2 MB of chip RAM alone (best effort), measured 2026-11-04.** With ext2 on one partition the install finishes (277 KB lowest)
+but fsck.ext2 does not fit beside zinstall for a 283 MB root (it needs about 379 KB, 317 KB were free): it is left for later,
+as said above. ZenixFS does not start: 460 KB free against the 500 KB it wants. What it would take: a smaller RAM disk on
+disk 1 (each KB is a KB free; the shared code there is 87 KB), zinstall itself smaller or run as two programs (the copy, then
+the check after zinstall has exited), and fsck.ext2 reading the inode table in groups instead of keeping 12 bytes per inode.
+None of it is done: the floor that must pass is 2 + 4 MB.
+
+Tests: `tools/zinstall-host-test.sh` (314 checks, the fuzzer 300,000 rounds, ASAN and UBSAN), `tools/zinstall-test.sh` f r a m z b c n o h k (m z b: 71 checks, 2026-11-04), `useradd-test` (63) and `users-test` (61) after the shared password code.

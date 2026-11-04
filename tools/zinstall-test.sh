@@ -6,8 +6,10 @@
 #      survives a restart; the host's e2fsck and amitools on what was written
 #   a  beside an AmigaOS-style layout (an RDB with bootable DH0 and DH1, free cylinders): DH0 and DH1 byte-identical; the first boot
 #      with no floppy: the menu's default starts DH0; with the menu's default changed on the image: Zenix, which reads DH0 by ffsd
-#   m  a stock A1200, 2 MB of chip RAM alone: ext2, the optional disk skipped, the lowest free memory held to a floor; it boots
+#   m  the machine Zenix is made for (CLAUDE.md, 2026-11-04): a stock A1200 (68EC020) with 2 MB chip and 4 MB fast RAM: ext2,
+#      the optional disk skipped, the lowest free memory held to a floor; it boots
 #   z  the same with a ZenixFS root: it boots with its kernel; the host's fsck
+#   b  best effort: 2 MB of chip RAM alone, ext2 on one partition: what it finds is said (NOTE lines), never a FAIL
 #   c  the Emu68 card's layout (an MBR, FAT, 0x76 with an RDB, a free slot): FAT and the RDB's partitions unchanged; started from
 #      the kernel floppy as the note says, the new root is found in the new 0x76
 #   r  the refusals as a person meets them: a disk with no room, a table with a bad checksum, wrong words: nothing written
@@ -24,7 +26,7 @@ cd "$(dirname "$0")/.." || exit 1
 BD=${ZENIX_BUILD:-build}
 OUT=${ZENIX_OUT:-/tmp/zenix-zinstall}; mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 SER=${ZENIX_SERIAL:-/tmp/zenix-zinstall-serial}
-PARTS="${*:-f a m z c r n o h k}"
+PARTS="${*:-f a m z b c r n o h k}"
 make -s BUILD=$BD all install-floppies $BD/zenix.adf $BD/zenix-zfs.adf >"$OUT/make.log" 2>&1 || { tail "$OUT/make.log"; echo "FAIL the build"; exit 1; }
 make -s -C zenixfs build/zenixfs-tool >/dev/null 2>&1 || { echo "FAIL the host tool"; exit 1; }
 BD=$(cd "$BD" && pwd)
@@ -33,7 +35,10 @@ ND=$(ls $F/zenix-install-*.adf | wc -l)
 Z=zenixfs/build/zenixfs-tool
 CK="python3 -B tools/zinstall-check.py"
 pass=1
-check() { if [ "$2" = ok ]; then echo "PASS $1"; else echo "FAIL $1"; pass=0; fi; }
+BEST=
+check() { if [ "$2" = ok ]; then echo "PASS $1"
+          elif [ -n "$BEST" ]; then echo "NOTE (best effort, not a failure) $1"
+          else echo "FAIL $1"; pass=0; fi; }
 yes_if() { if "$@" >/dev/null 2>&1; then echo ok; else echo bad; fi; }
 clean() { tr -d '\r' | sed 's/\x1b\[[0-9;:]*[mK]//g'; }
 has() { grep -aqE -- "$2" "$1" && echo ok || echo bad; }
@@ -454,11 +459,11 @@ EOS
     empty $OUT/a3.hdf $d
 }
 
-# ---- m, z: 2 MB of chip RAM alone ----
-small() {   # NAME 1|2 ROOTTYPE MINKB [MORE OPTIONS]
+# ---- m, z: the stock A1200 with 4 MB of fast RAM; b: 2 MB of chip RAM alone (best effort) ----
+small() {   # NAME 1|2 ROOTTYPE MINKB FASTKB [MORE OPTIONS]
     local n=$1 d=$OUT/$1.hdf
     truncate -s 0 $d; truncate -s 300M $d
-    fsconf $OUT/$n.fs-uae $d 2048 0 3
+    fsconf $OUT/$n.fs-uae $d 2048 $5 3
     cat >$OUT/$n.txt <<EOS
 wait zenix:/# 180
 sleep 1
@@ -466,7 +471,7 @@ send free\r
 sleep 2
 send $ACC_PREP\r
 wait zi-prep 10
-send zinstall $ACC_OPTS $5\r
+send zinstall $ACC_OPTS $6\r
 wait Choose a number 60
 send 1\r
 wait Choose .Return = 1, ext2 60
@@ -488,22 +493,30 @@ EOS
     check "$n: the install says it is done" "$(has $OUT/$n-1.log '^Done\. Zenix is on this disk')"
     check "$n: optional packages left out, and said" "$(has $OUT/$n-1.log 'extra packages were left out')"
     local low; low=$(grep -a 'Lowest free' $OUT/$n-1.log | sed 's/[^0-9]*\([0-9]*\) KB.*/\1/')
-    echo "$n: lowest free memory while installing: ${low:-?} KB (chip RAM alone, 2 MB)"
+    echo "$n: lowest free memory while installing: ${low:-?} KB (2 MB chip, $5 KB fast)"
     check "$n: the lowest free memory is at least $4 KB" "$([ "${low:-0}" -ge "$4" ] && echo ok || echo bad)"
     host_fs $n $d ZR0 $3
-    fsconf $OUT/$n-2.fs-uae $d 2048 0 none
+    fsconf $OUT/$n-2.fs-uae $d 2048 $5 none
     boot_script $OUT/$n-2.txt amiga2 bea beapw2 rootpw2
     run $OUT/$n-2.fs-uae 900 $OUT/$n-2.txt $OUT/$n-2.log
     booted $n $OUT/$n-2.log $3 amiga2 bea
     grep -a -A1 'chip RAM free' $OUT/$n-2.log | head -2
+    grep -a 'Not enough memory here' $OUT/$n-1.log | head -1
     host_fs $n $d ZR0 $3
     empty $d
 }
 part_m() {    # one partition: the root only, /home a folder on it
-    small m "" ext2 150 "--layout one"
+    small m "" ext2 2000 4096 "--layout one"
+    check "m: the filesystem was checked after the copy" "$(hasnt $OUT/m-1.log 'Not enough memory here')"
     check "m: one partition: no /home partition, the plan says /home is a folder" "$(grep -aq '/home is a folder on the root' $OUT/m-1.log && ! grep -aqE '^ide0p[0-9]+ +/home ' $OUT/m-2.log && echo ok || echo bad)"
 }
-part_z() { small z 2 zenixfs 100; }
+part_z() { small z 2 zenixfs 2000 4096; }
+part_b() {    # best effort (CLAUDE.md 2026-11-04): 2 MB of chip RAM alone; fsck.ext2 does not fit beside zinstall there and is left for later
+    BEST=1
+    small b "" ext2 150 0 "--layout one"
+    check "b: the check left for later is said" "$(has $OUT/b-1.log 'Not enough memory here to check')"
+    BEST=
+}
 
 # ---- c: the card's layout ----
 part_c() {

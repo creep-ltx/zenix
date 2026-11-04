@@ -505,7 +505,9 @@ static int run(void)
             if (!in) return 8;
             if ((L16(in) & 0170000) == 0100000 && !L32(in + 4) && !L32(in + 28) && !L32(in + 104)) {   /* an empty file: cleared */
                 problem("  inode %u is in use but not reachable from any directory, and empty: cleared", ino);
-                if (fix) { S16(in + 26, 0); S32(in + 20, now ? now : 1); put_inode_dirty(); fixed++; }
+                /* a dtime below the inode count is an orphan-list link to e2fsck: a clock never set (1970) must not write one,
+                 * as the ext2 server's rule (kernel/ext2.c) */
+                if (fix) { S16(in + 26, 0); S32(in + 20, now > ninodes ? now : ninodes + 1); put_inode_dirty(); fixed++; }
                 cb_(usedi, ino);                         /* the inode first, its bitmap bit in pass 5 (the F5 order) */
                 nfiles--;
                 continue;

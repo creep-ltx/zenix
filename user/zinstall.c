@@ -444,13 +444,15 @@ static int tar_feed(struct tarst *t, const u8 *p, u32 n)
     }
     return t->err;
 }
+static u8 *unpack_dict;                 /* inflate's 32 KB window and state: given back before the check (fsck needs the room) */
+static tinfl_decompressor *unpack_dec;
 /* the tgz part (len bytes from the source) into the new root; its SHA-256 checked against want */
 static int unpack(struct zf_pkg *k, u32 len, const u8 *want)
 {
-    static u8 *dict;
-    static tinfl_decompressor *dec;
-    if (!dict) dict = malloc(TINFL_LZ_DICT_SIZE);
-    if (!dec) dec = malloc(sizeof *dec);
+    u8 *dict = unpack_dict;
+    tinfl_decompressor *dec = unpack_dec;
+    if (!dict) dict = unpack_dict = malloc(TINFL_LZ_DICT_SIZE);
+    if (!dec) dec = unpack_dec = malloc(sizeof *dec);
     if (!dict || !dec) { say("zinstall: not enough memory to unpack\n"); return -ENOMEM; }
     struct sha256 hs;
     sha256_init(&hs);
@@ -1779,9 +1781,23 @@ planned:
     sys_sync();
     r = sys_umount(ZI);
     if (r) { say("zinstall: cannot unmount the new root (%d)\n", r); fail_note(1); return 1; }
-    /* a read-only check of the filesystems */
+    /* a read-only check of the filesystems, with the memory the copy took given back first */
+    free(unpack_dict); unpack_dict = 0;
+    free(unpack_dec); unpack_dec = 0;
+    free(trk); trk = 0; trk_at = 0xFFFFFFFFu;
     say("\nChecking the filesystems.\n");
+    /* fsck.ext2 needs about 12 bytes an inode and two bitmaps of the blocks (its manual): one inode per 16 KB of the root, as mkfs made
+     * it. Where that is more than is free beside zinstall (a big root on 2 MB of chip RAM alone) the check is left for later, and said */
+    u32 fneed = (pl.nw[R_ROOT].sectors / 32) * 12 + pl.nw[R_ROOT].sectors / 8 + 96 * 1024;
+    if (!zenixfs && mem_now() < fneed) {
+        say("  Not enough memory here to check the filesystem as well (it needs about %u KB, %u KB are free); every file was checked against its checksum. Check it later from the new system: fsck.ext2 -n %s.\n", fneed / 1024, mem_now() / 1024, names[R_ROOT]);
+        r = 0;
+    } else
     r = zenixfs ? run("/bin/fsck.zenixfs", (char *)names[R_ROOT], 0, 0) : run("/bin/fsck.ext2", "-n", (char *)names[R_ROOT], 0);
+    if (r == -1 && mem_now() < 300u * 1024) {           /* fsck could not even start: not enough memory (said); the files were checked already */
+        say("  Not enough memory here to check the filesystem as well (every file was checked against its checksum). Check it later from the new system: fsck.ext2 -n.\n");
+        r = 0;
+    }
     if (r) { say("zinstall: the check of the new root found a problem (%d): stopping.\n", r); fail_note(1); return 1; }
     /* last of all: bootable */
     if (t_commit(&io, pl.w2, pl.nw2, &why)) { say("zinstall: %s\n", why); fail_note(1); return 1; }
