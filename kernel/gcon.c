@@ -54,7 +54,7 @@ struct gcon {
     volatile short px, py;        /* the pointer (the tick) */
     volatile u16 btn;           /* its buttons, as GQ_*BUTTON bits (the tick) */
     volatile u16 bdown, bup;    /* buttons pressed, released since kwork last looked (the tick latches them) */
-    volatile u8 moved;          /* the place changed: the vertical blank writes the control words */
+    u16 acc;                    /* CON_MOUSE: counts beyond its low byte in a frame count its high byte times */
     u8 forced;                  /* switched away without the server's answer: the kernel draws with the CPU */
     short lx, ly;                 /* what the ring was last told */
     u16 lbtn;
@@ -80,12 +80,14 @@ static int chip_ok(u32 a, u32 n)
  * Sprites are placed in lores pixels: HSTART 0x80 is the first playfield pixel's column (DIWSTRT's 0x81) */
 static void sprite_pos(struct gcon *g)
 {
-    s32 x = (g->px - g->hx) / 2 + 0x80, y = g->py - g->hy + gfx_diwv(), e = y + g->sprh;
-    if (x < 0) x = 0;
+    s32 h = g->px - g->hx + 0x100, y = g->py - g->hy + gfx_diwv(), e = y + g->sprh, x;
+    if (h < 0) h = 0;
+    x = h >> 1;                         /* lores; AGA places it to the hires pixel too (SPRxCTL bit 4, SH1: 70 ns) */
     if (y < 0) y = 0;
     if (e > 511) e = 511;               /* VSTOP has 9 bits: never wrapped above the image */
     g->spr[0] = (u16)((y & 0xFF) << 8 | (x >> 1 & 0xFF));
-    g->spr[1] = (u16)((e & 0xFF) << 8 | (y >> 8 & 1) << 2 | (e >> 8 & 1) << 1 | (x & 1));
+    g->spr[1] = (u16)((e & 0xFF) << 8 | (gfx_aga() ? (h & 1) << 4 : 0) | (y >> 8 & 1) << 2 | (e >> 8 & 1) << 1 |
+                      (x & 1));
 }
 
 static u32 used(const struct gcon *g) { return (u32)((g->head - g->tail + GQN) % GQN); }
@@ -206,6 +208,7 @@ long gcon_grab(int con, u32 a2)
         return g ? -ENFILE : -ENOMEM;
     }
     memset(g, 0, sizeof *g);
+    g->acc = 0x100;                     /* no acceleration until CON_MOUSE */
     int fd = fd_install(current, f);
     if (fd < 0) {
         f->type = FT_NONE;
@@ -241,11 +244,18 @@ long gcon_grab(int con, u32 a2)
 }
 
 /* SYS_console CON_GACK on the grab's descriptor: the server let go of GEV_RELEASE number seq */
-long gcon_ack(struct file *f, u32 seq)
+/* CON_GACK (SEQ the release's number) and CON_MOUSE (SEQ the acceleration) on the grab's descriptor */
+long gcon_ack(struct file *f, u32 op, u32 seq)
 {
     struct gcon *g = gc;
     if (f->type != FT_GCON || !g || g->file != f || g->pid != current->pid)
         return -EBADF;
+    if (op == CON_MOUSE) {
+        if ((seq & 0x80) || seq - 0x100 > 0x7FF)
+            return -EINVAL;             /* a threshold over 127, a multiplier not 1..8 */
+        g->acc = (u16)seq;              /* one store: the vertical blank sees the old or the new */
+        return 0;
+    }
     if ((u16)seq != g->seq)
         return -EINVAL;                 /* an answer to an older request */
     if (g->state == G_RELEASING) {
@@ -347,37 +357,49 @@ void gcon_key(u8 code, u16 qual, const u8 *ch)
         push(g, GEV_KEY, code, qual | g->btn, g->px, g->py, ch, 0);
 }
 
-/* the 100 Hz tick (interrupt): the mouse moves the pointer (two control words); kwork tells the ring */
+/* one axis: D counts, accelerated (ACC as CON_MOUSE's), SCALE pixels a count, kept in 0..LIM-1 */
+static __attribute__((noinline)) short step(s32 p, s32 d, u32 acc, int scale, s32 lim)
+{
+    s32 a = d < 0 ? -d : d, t = (s32)(acc & 0xFF);
+    if (a > t)
+        a = t + (a - t) * (s32)(acc >> 8);
+    p += (d < 0 ? -a : a) * scale;
+    return (short)(p < 0 ? 0 : p >= lim ? lim - 1 : p);
+}
+
+/* the 100 Hz tick (interrupt): a release's deadline for kwork */
 void gcon_tick(void)
+{
+    struct gcon *g = gc;
+    if (g && g->state == G_RELEASING && (s32)(ticks - g->deadline) >= 0)
+        kwork_pending = 1;
+}
+
+/* the vertical-blank interrupt: the mouse read now (its counters and buttons), the pointer moved and its control
+ * words written before sprite DMA reads them - so the picture never waits for the tick, a server or a window
+ * manager; kwork tells the ring */
+void gcon_vblank(void)
 {
     struct gcon *g = gc;
     if (!g || g->state == G_AWAY)
         return;
     s32 dx, dy;
     u32 b;
+    u16 s = irq_save();                 /* the tick (a higher level) reads the same counters */
+    input_poll();
     input_take(&dx, &dy, &b);
+    irq_restore(s);
     u16 bq = (u16)((b & 1 ? GQ_LBUTTON : 0) | (b & 2 ? GQ_RBUTTON : 0) | (b & 4 ? GQ_MBUTTON : 0));
     if (dx || dy) {
-        s32 x = g->px + 2 * dx, y = g->py + dy;     /* a hires pixel is half as wide as a line is tall */
-        g->px = (short)(x < 0 ? 0 : x >= g->w ? g->w - 1 : x);
-        g->py = (short)(y < 0 ? 0 : y >= g->h ? g->h - 1 : y);
-        g->moved = 1;
+        g->px = step(g->px, dx, g->acc, 2, g->w);      /* a hires pixel is half a line's width */
+        g->py = step(g->py, dy, g->acc, 1, g->h);
+        sprite_pos(g);
     }
     g->bdown |= (u16)(bq & ~g->btn);
     g->bup |= (u16)(g->btn & ~bq);
-    if (dx || dy || bq != g->btn || (g->state == G_RELEASING && (s32)(ticks - g->deadline) >= 0)) {
+    if (dx || dy || bq != g->btn) {
         g->btn = bq;
         kwork_pending = 1;
-    }
-}
-
-/* the vertical-blank interrupt: the pointer's new place into the sprite's control words */
-void gcon_vblank(void)
-{
-    struct gcon *g = gc;
-    if (g && g->moved && g->state != G_AWAY) {
-        g->moved = 0;
-        sprite_pos(g);
     }
 }
 

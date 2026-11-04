@@ -332,6 +332,8 @@ _Static_assert(sizeof(struct ugevent) == 16, "ugevent is 16 bytes");
 #define GQ_LBUTTON 0x4000
 static inline int sys_congrab(int fd, struct ucongrab *g) { return sys3(89, CON_GRAB | (u32)(fd + 1) << 8, (u32)g, 0); }
 static inline int sys_congack(int gfd, u32 seq) { return sys3(89, CON_GACK | (u32)(gfd + 1) << 8, seq, 0); }
+#define CON_MOUSE 10            /* the grab's descriptor: the mouse's acceleration, THRESHOLD | MULTIPLIER << 8 */
+static inline int sys_conmouse(int gfd, u32 acc) { return sys3(89, CON_MOUSE | (u32)(gfd + 1) << 8, acc, 0); }
 /* DESIGN D38 step 3: serving clients that are not the kernel (kernel/kernel.h has the contract) */
 #define PEER_CTTY 1             /* the client's controlling tty */
 #define PEER_RD 2               /* struct upeermem: those bytes are the client's to read -> 0, else -EFAULT */

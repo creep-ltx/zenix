@@ -962,6 +962,10 @@ struct uconline {            /* CON_LINE: the caller fills size, pens, npens; th
  * older one). No answer within 1 s: the kernel switches anyway and logs it. */
 #define CON_GRAB        8
 #define CON_GACK        9
+/* D38 (zdesk's mouse setting): CON_MOUSE on the grab's descriptor, a2 THRESHOLD | MULTIPLIER << 8: in each frame, the
+ * mouse's counts beyond THRESHOLD (0..127) along an axis count MULTIPLIER (1..8) times; 1 is none. A grab starts
+ * without. -EINVAL out of range, -EBADF not the grab's descriptor */
+#define CON_MOUSE       10
 struct ucongrab {            /* CON_GRAB: the caller fills size .. hoty; the kernel the rest */
     u32 size;                /* UCONGRAB_FIRST or more */
     u32 cop;                 /* the Copper list: the caller's chip RAM, ending 0xFFFF 0xFFFE (at most 4,096 moves);
@@ -1008,7 +1012,7 @@ struct ugevent {             /* a record of the grab's ring (16 bytes, frozen) *
 #define GQ_RBUTTON      0x2000
 #define GQ_LBUTTON      0x4000
 long gcon_grab(int con, u32 a2);
-long gcon_ack(struct file *f, u32 seq);
+long gcon_ack(struct file *f, u32 op, u32 a);   /* CON_GACK, CON_MOUSE */
 long gcon_read(struct file *f, void *buf, u32 n);
 u16 gcon_poll(struct file *f);
 void gcon_close(struct file *f);
@@ -1032,7 +1036,7 @@ void gfx_geom(u16 *w, u16 *h);          /* the screen in hires pixels and lines 
 int gfx_aga(void);
 void gfx_topaz(u8 *dst);                /* the console's Topaz 8: 224 glyphs (Latin-1 32-255) of 8 bytes */
 u16 kbd_qual(void);                     /* the qualifiers held now (GQ_* bits, no buttons) */
-void input_take(s32 *dx, s32 *dy, u32 *buttons);   /* the tick: the mouse's movement since, cleared, and its buttons */
+void input_take(s32 *dx, s32 *dy, u32 *buttons);   /* the mouse's movement since, cleared, and its buttons */
 long gfx_conline(u32 line, struct uconline *d);  /* CON_LINE's display part, console and struct checked (term_conop) */
 int kbd_inject(const u8 *codes, int n);  /* CON_INPUT's raw keys -> n, or -EINVAL (a refused code: nothing taken) */
 int tty_type(int con, const u8 *b, int n);      /* CON_INPUT's text -> bytes taken, -ENXIO: no tty yet */

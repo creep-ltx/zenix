@@ -1207,11 +1207,11 @@ long term_conop(u32 op, u32 a2, u32 a3)
 {
     u32 fd = (op >> CON_FD_SHIFT) - 1;
     op &= (1u << CON_FD_SHIFT) - 1;
-    if (op != CON_FONT && op != CON_RULES && (op < CON_READ || op > CON_GACK))
+    if (op != CON_FONT && op != CON_RULES && (op < CON_READ || op > CON_MOUSE))
         return -EINVAL;
-    if (op == CON_GACK) {                               /* D38: the grab's own descriptor */
+    if (op == CON_GACK || op == CON_MOUSE) {            /* D38: the grab's own descriptor */
         struct file *g = fd < NFD ? current->fd[fd] : 0;
-        return g ? gcon_ack(g, a2) : -EBADF;
+        return g ? gcon_ack(g, op, a2) : -EBADF;
     }
     int d24 = op >= CON_READ;
     if (d24 && current->uid != 0)

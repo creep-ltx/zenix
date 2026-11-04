@@ -45,6 +45,10 @@
 # D39: TOTAL 181,900 -> 183,200).
 # 2026-11-04 (DESIGN D38 step 5: the desktop's tests move the mouse): CON_INPUT's CONI_MOUSE, input 400 -> 550,
 # kernel.bin 181,836 -> 181,980; with D28 20 merged in 183,304, TOTAL 183,400.
+# 2026-11-04 (DESIGN D38, the A1200's first findings): the pointer moved in the vertical blank from the counters read
+# there (no tick's wait), CON_MOUSE's acceleration, the hires pixel's place on AGA (SH1); the AttnFlags' 68060 bit from
+# the PCR: gcon 3,421 -> 3,589 (budget 3,450 -> 3,600), cache + 18; kernel.bin 183,304 -> 183,508, TOTAL 183,400 ->
+# 183,600; the mount tests' floppy keeps 812 bytes.
 start     4300   8200
 main      5950   1100
 serial    6100   6500
@@ -75,7 +79,7 @@ sock      4700   1060
 drv       2500    640
 zine      1500     16
 cache     1700     32
-gcon      3450     16
+gcon      3600     16
 embed    47500      0
-TOTAL   183400
+TOTAL   183600
 ROOM       800

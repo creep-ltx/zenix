@@ -93,6 +93,8 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   the server's list keeps FMODE's sprite bits 0); the grab ending with the descriptor's last close or the server's
   end; `SYS_memfree` -EBUSY for a region holding the grab's list or sprite; `SYS_memalloc`'s second argument
   `MEMA_CHIP` 1 (its other bits ignored, as all of it was before).
+  `CON_MOUSE` 10 on the grab's descriptor (a2 THRESHOLD 0..127 | MULTIPLIER 1..8 << 8: in a frame the counts beyond
+  THRESHOLD count MULTIPLIER times; 0x100 none, the grab's start; -EINVAL out of range, -EBADF not the grab's).
 - **D38 step 3 (the display server, branch desk, 2026-11-04):** `SYS_peer` 96 (msg a request the caller serves, else
   -EINVAL; `PEER_CTTY` 1 the client's controlling tty; `PEER_RD` 2 and `PEER_WR` 3 with `struct upeermem` {addr,
   len}: 0 or -EFAULT; `PEER_PORT` 4, arg a port: 0 if the client owns it, else -EPERM); `SYS_post` 97 (`POST_BUF` 1: the port's owner, else -EPERM; `struct upostbuf` {addr, size,
