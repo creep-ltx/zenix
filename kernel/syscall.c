@@ -676,15 +676,21 @@ void syscall_c(u32 *rb)
     case SYS_reboot:                    /* like the reset warning: sync, stop disk writes, then the reset */
         if (current->uid != 0)
             r = -EPERM;
-        else if (a1 > BOOTNOTE_ZENIX)
+        else if (a1 > BOOTNOTE_ZENIX && a1 != REBOOT_HALT)
             r = -EINVAL;
-        else if (a1 && (r = (s32)bootnote_set(a1)) < 0)
+        else if (a1 && a1 != REBOOT_HALT && (r = (s32)bootnote_set(a1)) < 0)
             ;
         else {
             svc_hurry();                /* loaders in a back-off start at once (D11 6.3) */
             long e = vfs_sync(VS_REBOOT | VS_BOUNDED);   /* each server has 5 s (A7); a network one 2 s (D23) */
             disk_frozen = 1;
             klog_set_reason(KLOG_END_REBOOT);
+            if (a1 == REBOOT_HALT) {    /* halt(8): an Amiga cannot switch itself off; it stops and says so */
+                kprintf("halt: filesystems synced%s, disk writes stopped\n", e < 0 ? " (with an error)" : "");
+                kprintf("\nThe system is halted. You can switch the Amiga off now (or press Ctrl-Amiga-Amiga to restart).\n");
+                for (;;)
+                    __asm__ volatile("stop #0x2700");
+            }
             kprintf("reboot: filesystems synced%s, disk writes stopped; resetting%s\n", e < 0 ? " (with an error)" : "",
                     a1 == BOOTNOTE_AMIGAOS ? " into AmigaOS" : a1 == BOOTNOTE_ZENIX ? " into Zenix" : "");
             machine_reset();

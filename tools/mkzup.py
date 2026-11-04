@@ -181,7 +181,7 @@ BASE_PROGS = ["init", "login", "sh", "mount"]
 BASE_CONFIG = ["svctab", "passwd", "group", "fstab", "motd", "console", "hosts", "daemons"]   # /etc/autologin is the test images' own: never shipped
 SETUID = {"su", "sudo", "passwd", "zine"}
 LINKS = [("less", "/bin/more"), ("gzip", "/bin/gunzip"), ("gzip", "/bin/zcat"), ("chown", "/bin/chgrp"),
-         ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos"), ("ifconfig", "/bin/ifup"), ("ifconfig", "/bin/ifdown"),
+         ("pgrep", "/bin/pkill"), ("reboot", "/bin/bootamigaos"), ("reboot", "/bin/halt"), ("reboot", "/bin/poweroff"), ("reboot", "/bin/shutdown"), ("ifconfig", "/bin/ifup"), ("ifconfig", "/bin/ifdown"),
          ("rz", "/bin/sz"), ("unlha", "/bin/unlzx")]
 SBIN = {"zup"}
 OWN_PKG = {"zpkg"}                        # a base-group package of its own (DESIGN D22 step 5): /bin/zpkg, /etc/zpkg.conf

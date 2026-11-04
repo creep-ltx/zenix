@@ -1,0 +1,6 @@
+wait zenix:/# 120
+send echo written-before-halt > /halt.txt; halt now; echo usage=$?\r
+waitecho usage=2 30
+send shutdown now\r
+wait The system is halted. You can switch the Amiga off now 60
+stop

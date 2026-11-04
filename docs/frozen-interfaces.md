@@ -23,7 +23,7 @@ a newer kernel and newer servers. So these never change meaning; they only grow,
   `SVC_*` numbers and limits (`SVC_TEXT` 80, `SVC_SAVED` 512, `SVC_MIDREQ`, exit status 86 for a damaged table), the
   port names (`disk`, `fs`, `fs.*`) and the built-in `@name` programs (`@zfsd` is an alias to `/sbin/zfsd` since D19 step 1); the tty mode bits (`TTY_RAW`, `TTY_NOSIG`),
   `O_*` flags and mode bits (`O_NONBLOCK` 0x800 and `S_IFSOCK` 0140000 since D19), the spawn limits (argument count and bytes), exit and wait status conventions (139 for a
-  fault, `waitcon`'s console status, login's `ST_HANDED` (bit 30) plus the handed shell's pid, D18); the boot note's kinds and `SYS_reboot`'s arguments; D15's own formats (the
+  fault, `waitcon`'s console status, login's `ST_HANDED` (bit 30) plus the handed shell's pid, D18); the boot note's kinds and `SYS_reboot`'s arguments (REBOOT_HALT 0x100 since 2026-11-04); D15's own formats (the
   bootinfo bundle fields, the update note, the state file, the bundle header and manifest, zup's journal and undo logs).
 - **One accepted change of meaning (audit3 B7, 2026-10-26):** `uproc.mem` counts a process's memory regions
   (`memalloc`) and a private code copy since D13; before, only its load block (image, data, stack). Accepted once,

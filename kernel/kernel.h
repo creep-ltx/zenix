@@ -79,6 +79,7 @@ void klog_write(const char *s, u32 n);        /* a service's output (FT_KLOG): i
 #define BOOTNOTE_MAGIC   0x5A4E5854u          /* "ZNXT" */
 #define BOOTNOTE_AMIGAOS 1u
 #define BOOTNOTE_ZENIX   2u
+#define REBOOT_HALT      0x100u               /* SYS_reboot: sync and stop disk writes as for a reset, then halt (halt(8)) */
 long bootnote_set(u32 kind);                  /* -ENODEV when the log area is not in chip RAM (a small machine) */
 void machine_reset(void) __attribute__((noreturn));
 void klog_init(const struct bootinfo *bi);    /* first thing in kmain: read the previous log, start this one */
@@ -838,7 +839,7 @@ int tty_of(const struct proc *p);
 #define SYS_ttymirror   37   /* 0 = stop copying screen output to the serial port */
 #define SYS_getpriority 78   /* which (PRIO_*), who -> 20 - nice (1 .. 40, never a negative errno's range), or -errno */
 #define SYS_setpriority 79   /* which, who, nice: anyone lowers their own processes, only root raises */
-#define SYS_reboot      80   /* note (0, BOOTNOTE_AMIGAOS, BOOTNOTE_ZENIX): root only; sync, stop disk writes, reset */
+#define SYS_reboot      80   /* note (0, BOOTNOTE_AMIGAOS, BOOTNOTE_ZENIX, REBOOT_HALT): root only; sync, stop disk writes, reset (or halt) */
 #define SYS_svc         81   /* op (SVC_*), arg, buffer: the service manager (D11, svc.c) */
 #define SYS_update      82   /* op (UPD_*), a, b: the update bundle, the kernel's version, the update note (D15) */
 /* DESIGN D16, events and signals (docs/d16-events-and-signals.md). SYS_kill's third argument 1: the new form (pid, sig;

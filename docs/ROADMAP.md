@@ -85,7 +85,7 @@ RAM through the transparent translation registers, chip RAM uncached (boot log: 
 lines took 4.26 s, 9.64 s on the screen with the serial cable in: measured); the serial console drops input on long
 lines and Zmodem through it stalls at 3 KB; netd should start a card it finds with DHCP without /etc/network/interfaces;
 the installer asks for a package server; `zpkg -Sl` lines within 80 columns, "newer/older installed", zenix-tests and
-zpkg-new kept out of a user's list; diskd's note about the RDB chain on the installed card (with the installer helper).
+zpkg-new kept out of a user's list; halt, poweroff and shutdown (done 2026-11-04); diskd's note about the RDB chain on the installed card (with the installer helper).
 
 1. **Foundations finished (the week of 2026-10-26):** D13 shared code; the shell's memory fix; the colour console;
    the self-updates. Audit.

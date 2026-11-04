@@ -1,11 +1,15 @@
 REBOOT(8)			Zenix manual
 
 NAME
-    reboot, bootamigaos - save the disks and restart the Amiga
+    reboot, bootamigaos, halt, poweroff, shutdown - save the disks and
+    restart or halt the Amiga
 
 SYNOPSIS
     reboot [amigaos | zenix]
     bootamigaos
+    halt
+    poweroff
+    shutdown [-h | -r] [now]
 
 DESCRIPTION
     reboot first writes a new random seed into /var/lib/random-seed
@@ -25,6 +29,14 @@ DESCRIPTION
     answer within 5 s is given up: the log says "reboot: NAME did not
     sync in 5 s" and the machine resets anyway. No server is started
     once disk writes are stopped.
+
+    halt and poweroff save the disks exactly as reboot does, then halt
+    the machine instead of resetting it and print "The system is
+    halted. You can switch the Amiga off now". An Amiga cannot switch
+    itself off, so poweroff is the same as halt. Ctrl-Amiga-Amiga
+    restarts a halted machine. shutdown halts (-h, the default) or
+    reboots (-r) at once; "now" is accepted as on Linux, and there is no
+    delay or message to other users.
 
     With a system named, the boot menu (bootmenu(8), on a disk that has
     one) starts that system at once instead of showing the menu:

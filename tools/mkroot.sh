@@ -108,7 +108,7 @@ fi
 # a second name for a program, only where the program is on this image (a small image leaves some out: no dead links)
 alias_of() { [ -e "$T/bin/$1" ] && ln -s "$1" "$T/bin/$2"; true; }
 alias_of less more                                                 # more is less
-alias_of gzip gunzip; alias_of gzip zcat; alias_of chown chgrp; alias_of pgrep pkill; alias_of reboot bootamigaos
+alias_of gzip gunzip; alias_of gzip zcat; alias_of chown chgrp; alias_of pgrep pkill; alias_of reboot bootamigaos; alias_of reboot halt; alias_of reboot poweroff; alias_of reboot shutdown
 alias_of ifconfig ifup; alias_of ifconfig ifdown                   # ifup and ifdown are ifconfig (DESIGN D19 6.4)
 alias_of rz sz                                                     # sz is rz (DESIGN D20 5)
 alias_of unlha unlzx                                               # one program, by its name (DESIGN D33)

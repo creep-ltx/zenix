@@ -4,7 +4,9 @@
 #include "clockfile.h"
 #include "builddate.h"
 #include "../crypto/zc/zc_clock.h"
-/* reboot [amigaos|zenix]: save the disks and reset the Amiga (root only). With a system named - or started as
+/* reboot [amigaos|zenix]: save the disks and reset the Amiga (root only). As halt, poweroff or shutdown it saves the
+ * disks the same way and then halts with a line saying the Amiga may be switched off (an Amiga cannot switch itself
+ * off, so poweroff is halt); shutdown takes -h (the default), -r (reboot) and "now" as Linux's does, no delay. With a system named - or started as
  * "bootamigaos" - the boot menu (boot/bootmenu.c) starts that system at once instead of showing the menu. First a
  * new random seed goes into /var/lib/random-seed (DESIGN D19 9.3, randseed.h): what this session gathered is in the
  * next start's pool; and a trusted clock (the battery clock or sntp's guarded answer this boot) raises the
@@ -16,6 +18,24 @@ int main(int argc, char **argv)
         if (*p == '/')
             me = p + 1;
     u32 note = 0;
+    if (!strcmp(me, "halt") || !strcmp(me, "poweroff"))
+        note = REBOOT_HALT;
+    if (!strcmp(me, "shutdown")) {
+        note = REBOOT_HALT;
+        for (int i = 1; i < argc; i++) {
+            if (!strcmp(argv[i], "-r"))
+                note = 0;
+            else if (strcmp(argv[i], "-h") && strcmp(argv[i], "-P") && strcmp(argv[i], "now")) {
+                dprintf(2, "usage: shutdown [-h | -r] [now]   (no delay: it happens at once)\n");
+                return 2;
+            }
+        }
+        argc = 1;
+    }
+    if (note == REBOOT_HALT && argc > 1) {
+        dprintf(2, "usage: %s   (saves the disks, then halts: switch the Amiga off)\n", me);
+        return 2;
+    }
     if (!strcmp(me, "bootamigaos"))
         note = BOOTNOTE_AMIGAOS;
     if (argc > 2 || (argc == 2 && note)) {
@@ -42,6 +62,6 @@ int main(int argc, char **argv)
     }
     int r = sys_reboot(note);
     const char *t = zstrerror(r);
-    dprintf(2, "reboot: %s\n", r == -EPERM ? "only root may reboot" : t ? t : "failed");
+    dprintf(2, "%s: %s\n", me, r == -EPERM ? "only root may do this (try sudo)" : t ? t : "failed");
     return 1;
 }

@@ -58,7 +58,7 @@ spot-checked against the code that day.
 | [login](man/login.txt), [su](man/su.txt), [passwd](man/passwd.txt), [sha256sum](man/sha256sum.txt) | users: logging in on a console, switching user, passwords, checksums |
 | [useradd](man/useradd.txt), [userdel](man/userdel.txt), [gpasswd](man/gpasswd.txt) | add and remove users, group members (root) |
 | [sudo](man/sudo.txt) | run one command as root: members of the group wheel, with their own password |
-| [dd](man/dd.txt), [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [mkfs.zenixfs](man/mkfs.zenixfs.txt), [fsck.zenixfs](man/fsck.zenixfs.txt), [sync](man/sync.txt), [reboot](man/reboot.txt) | disks |
+| [dd](man/dd.txt), [fdisk](man/fdisk.txt), [mkfs.ext2](man/mkfs.ext2.txt), [fsck.ext2](man/fsck.ext2.txt), [mkfs.zenixfs](man/mkfs.zenixfs.txt), [fsck.zenixfs](man/fsck.zenixfs.txt), [sync](man/sync.txt), [reboot](man/reboot.txt) (bootamigaos, halt, poweroff, shutdown) | disks |
 | [zinstall](man/zinstall.txt) | put Zenix on a hard disk, CF or SD card, from the install floppies or an existing Zenix (DESIGN D35) |
 | [zup](man/zup.txt) | install the root half of an update (`/sbin/zup`, DESIGN D15); one package at a time for zpkg (`-f`, `-r`, D22) |
 | [zpkg](man/zpkg.txt) | the package manager: `-Syu`, `-S`, `-R`, `-Q`, `-U`, signed lists and packages over HTTP; writes a system update onto the boot partition itself (DESIGN D22) |

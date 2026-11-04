@@ -166,6 +166,7 @@ static inline int sys_getpriority(int which, int who) { return sys3(78, (u32)whi
 static inline int sys_setpriority(int which, int who, int nice) { return sys3(79, (u32)which, (u32)who, (u32)nice); }
 #define BOOTNOTE_AMIGAOS 1u                     /* SYS_reboot: the boot menu starts this system at once (kernel.h) */
 #define BOOTNOTE_ZENIX   2u
+#define REBOOT_HALT      0x100u    /* SYS_reboot: halt instead of the reset (halt, poweroff, shutdown) */
 static inline int sys_reboot(u32 note) { return sys3(80, note, 0, 0); }
 /* the service manager (DESIGN D11): register a port name with a program ("@image args" or "/path args", at most 80
  * bytes, 6 words) and its nice (root); remove it (root); how many times the caller's service was started (0: none) */
