@@ -17,7 +17,8 @@ static void pb_wr(u32 a, unsigned char v) { *(volatile unsigned char *)a = v; }
  * serial port's) */
 static void pb_bset(u32 a, int bit) { __asm__ volatile("bset %1,(%0)" :: "a"(a), "d"(bit) : "memory", "cc"); }
 static void pb_bclr(u32 a, int bit) { __asm__ volatile("bclr %1,(%0)" :: "a"(a), "d"(bit) : "memory", "cc"); }
-static u32 pb_now(void) { return sys_hrtime(); }
+static void pb_clrbits(u32 a, unsigned m) { __asm__ volatile("and.b %1,(%0)" :: "a"(a), "d"(~m) : "memory", "cc"); }
+static u32 pb_ticks(void) { return sys_ticks(); }
 static long pb_acks(void) { return sys_drv(DRV_PARACK, (u32)claim, 0); }
 static void pb_sleep(u32 t) { sys_sleep(t); }
 struct pb;
@@ -136,8 +137,7 @@ int main(int argc, char **argv)
         int moved = 0;
         if (b.down && (u32)(sys_ticks() - lastlook) >= PB_RETRY) {
             lastlook = sys_ticks();
-            if (pb_rd(PB_CTRL) & 1)
-                pb_unstick(&b);
+            pb_unstick(&b);
             if (!pb_hello(&b, 0)) {             /* the same MAC: netd's interface keeps its address */
                 pb_result(&b, 0, "looking for the box");
                 moved = 1;
@@ -149,6 +149,7 @@ int main(int argc, char **argv)
         }
         moved |= r > 0;
         moved |= send_pending();
+        pb_keepalive(&b);
         q.x.rx_drop = b.rx_drop; q.x.rx_bad = b.rx_bad; q.x.tx_err = b.tx_err;
         b.rx_drop = b.rx_bad = b.tx_err = 0;
         int nrx = (int)q.x.nrx;

@@ -31,10 +31,13 @@ DESCRIPTION
     the kernel counts; the driver looks at that count at once while
     frames move, after 10 ms, and every 20 ms when idle.
 
-    If the box stops answering (unplugged, its power gone), the link
-    goes down after three failed transfers and the driver looks for it
-    every 2 seconds; when it answers again the link comes back with the
-    same address.
+    On an idle link it sends the box a short online frame every 5
+    seconds, so a box restarted meanwhile is online again and one that
+    went away is noticed. If the box stops answering (unplugged, its
+    power gone), the link goes down after three failed transfers (about
+    15 seconds on an idle link) and the driver looks for it every 2
+    seconds; when it answers again the link comes back with the same
+    address.
 
 OPTIONS
     mac=XX:XX:XX:XX:XX:XX
@@ -50,7 +53,9 @@ DIAGNOSTICS
     or it is off)"; "the plipbox does not answer (STAGE): is it in its
     bridge mode, firmware 0.6?"; "plipbox found (burst sends), MAC ...
     (the box's own)"; "the plipbox stopped answering: link down";
-    "the plipbox answers again: link up"; "the parallel port is
+    "the plipbox answers again: link up"; "a receive was cut between
+    its size bytes: ... switch the box off and on" (the box's firmware
+    then keeps driving the data lines); "the parallel port is
     another driver's"; "the doorbell closed ...: the box told, the port
     let go". The kernel's own lines: "drv: pid N (plipbox) claims the
     parallel port", "drv: claim of 0xbfe101 ... released".

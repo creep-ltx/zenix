@@ -10,7 +10,10 @@ An A1200 (any Amiga) with a plipbox in its parallel port reaches the network wit
 `/etc/network/interfaces` stanza as any card (`driver plipbox`): DHCP, ping, telnet, ssh, wget, at the plipbox's
 speed (about 100 KB/s through the box on AmigaOS, its author's own measurement; section 7). The box keeps the MAC
 address it had under AmigaOS, so the router hands out the same address. With no box, or the box off, the driver says
-so in one line and lets the port go. Unplugging the box (or resetting it) puts the link down; it comes back by itself.
+so in one line and lets the port go. A box that goes away (unplugged, its power off) is noticed at the next transfer,
+or by the online frame the driver sends every 5 s on an idle link: the link goes down after three failures (about 15 s
+when idle) and comes back by itself when the box answers again; a box restarted on an idle link is back online within
+5 s (section 6).
 
 ## 2. The plipbox (facts read from its source)
 
@@ -18,8 +21,9 @@ Christian Vogelgsang's open hardware and firmware, `github.com/cnvogelg/plipbox`
 headers: "either version 2 of the License, or (at your option) any later version"), so it may be read and used in
 Zenix (GPL-2.0-only); Zenix's code is its own, written from what the sources do. An AVR (an Arduino Nano, ATmega328 at
 16 MHz) with an ENC28J60 Ethernet chip, a bridge: what the Amiga sends goes onto the Ethernet unchanged, and what comes
-for the Amiga's MAC (and broadcasts) comes back. **Version assumed: 0.6** (17 January 2015, the last release; the
-firmware on `master` has not changed since, only the Amiga driver's build). The branches `dev` (2015) and `proto`
+for the Amiga's MAC (and broadcasts) comes back. **Version assumed: 0.6** (17 January 2015, the last release; on
+`master` since then only build fixes: two 2023 commits in `avr/`, 5d29c88 "fixed inlining" and fa1c5ea's Makefile line,
+no change in behaviour; the rest is the Amiga driver's build). The branches `dev` (2015) and `proto`
 (2024-2025, a reworked protocol) were never released. The owner's box: an Arduino Nano on an ENC28J60 board.
 
 **The wiring as the Amiga sees it** (`amiga/src/plipbox/hwpar.asm`, `hw.c`): the eight data lines are CIA-A's port B
@@ -42,7 +46,11 @@ the cable is seen only by IP's and TCP's checksums.
 **Who starts a transfer:** always the Amiga. The box pulses ACK when it has a frame (or a magic frame) for the Amiga and
 keeps that one request until the Amiga takes it with a receive; it pulses again only after that (`bridge.c`
 `trigger_request`, `req_is_pending`). A receive with no request behind it makes the box read its ENC28J60's memory where
-no frame is (`fill_pkt` calls `pio_util_recv_packet` unconditionally): never done by Zenix.
+no frame is (`fill_pkt` calls `pio_util_recv_packet` unconditionally): the driver makes none on its own, but it cannot
+tell a real ACK edge from a false one. A false edge (noise on the cable, the box losing or gaining power) counts as a
+request: with the box off, that receive times out and nothing happens; with a running box and no request, the box
+reads its chip where no frame is: the driver gets a wrong or empty frame (dropped by netd's checks or IP's checksum) and
+the chip's receive pointer may be disturbed until the box is switched off and on. plipbox.device has the same exposure.
 
 **The magic frames** (`bridge.c`, `hw.c`): a 14-byte Ethernet header whose type is 0xFFFF (online: the source is the
 Amiga's MAC; the box keeps it in its EEPROM and writes it there only when it differs), 0xFFFE (offline: the box drops the
@@ -87,14 +95,16 @@ gives out only what is the port's:
   look at FLG itself.
 - **`DRV_PARACK` (op 8)** gives the claim's holder the count since boot (bit 31 clear).
 
-Kernel growth: `drv` 2,187 -> 2,444 bytes, `main` 4 bytes of bss; `kernel.bin` 180,752 -> 180,992 bytes (its budget
+Kernel growth (unchanged by the review's fixes): `drv` 2,187 -> 2,444 bytes, `main` 4 bytes of bss; `kernel.bin` 180,752 -> 180,992 bytes (its budget
 line `drv` 2,200 -> 2,500; `TOTAL` 181,000 leaves 8 bytes). Claimed in `docs/claims.md`, frozen in
 `docs/frozen-interfaces.md`.
 
 **The rule for CIA-B's port A** (D19 5.5 asked for one): its bits 3-7 are the serial port's and bits 0-2 the driver's;
-everyone changes them with a single `bset`/`bclr` (an interrupt cannot fall between its read and its write) or with
-interrupts masked. The kernel touches neither port A nor its direction today; the quiesce program's read-modify-write
-runs in the kernel, where no interrupt handler writes that register.
+everyone changes them with a single `bset`/`bclr`/`and.b` (an interrupt cannot fall between its read and its write) or
+with interrupts masked. The kernel touches neither port A nor its direction today. The quiesce program's
+read-modify-write is C in `kernel/drv.c`'s `quiesce()` (a read, then a write): it is safe only while no interrupt
+handler writes CIA-B's port A or its direction; a handler that ever does (hardware handshake on the serial lines, say)
+must come with interrupts masked around that step.
 
 **Which ACK pulses are served.** The box cannot pulse during a transfer, and the level-2 interrupt is taken at once while
 the driver runs (user mode, interrupts open). So the count the driver reads after the box has answered its receive
@@ -115,10 +125,13 @@ value and makes a receive only when the count differs (as plipbox.device clears 
   way back if a box disagrees. 0x33 is 0.6's; a 0.5 box knows only 0x11 and 0x22 (`noburst`), *read* from its tag, its
   magic frames not checked.
 - **Timing:** every wait reads CIA-B's port A in a loop: each read is a CIA access, one E-clock cycle (1.41 us) on every
-  CPU, so the loop is paced by the hardware, never an empty loop; every 32 reads it looks at the E-clock (`SYS_hrtime`)
-  and gives up past the transfer's deadline (500 ms, plipbox.device's default, also the box's), looking at BUSY once more
-  first (the process may not have run while the clock did). After three failed transfers in a row the link is down and
-  the box is looked for every 2 s with a 50 ms deadline.
+  CPU, so the loop is paced by the hardware, never an empty loop; every 32 reads it looks at the kernel's tick (100 Hz
+  from a CIA timer whose latch the kernel sets for PAL or NTSC: no rate is assumed here) and gives up past the
+  transfer's deadline (50 ticks, 500 ms, plipbox.device's default, also the box's), looking at BUSY once more first (the
+  process may not have run while the clock did). After three failed transfers in a row the link is down and the box is
+  looked for every 2 s with a 5-tick deadline. On an idle link an online frame goes every 5 s (the keepalive: one
+  14-byte transfer, the same MAC, so the box writes nothing): a box restarted meanwhile is online again, one gone is
+  seen.
 - **Is polling fast enough?** Inside a transfer the driver is never slower than the box: it answers each BUSY edge at
   its next CIA read. Between transfers only the ACK count is polled, by the driver's turn: a frame from the network waits
   at most 20 ms on an idle link (as `ne2000`), none while frames move. An interrupt that wakes the driver (D19 5.4) would
@@ -131,26 +144,41 @@ value and makes a receive only when the count differs (as plipbox.device clears 
   more until that request is taken. The start's receive after the loopback takes it: the loopback's answer is a magic
   frame, never a read of the chip, whether or not a pulse came (the driver waits 50 ms for one).
 - **A box held in a burst** (found reading `cmd_send_burst`): when SEL drops inside the box's burst, its way out
-  (`send_burst_exit`) loops back to itself for as long as SEL stays low; BUSY stays high and the box takes no command
-  again until SEL rises. That happens when a burst is cut off: the end not answered, or the driver killed in it (the
-  quiesce program drops SEL). `pb_unstick` frees it: SEL up with the data lines not driven, POUT up and down, each edge
-  answered, SEL down. A box that was not held takes that as an unknown command (0xFF) and ignores it. Done after a burst
-  send fails at its start or end, and at every start that finds BUSY high.
+  (`send_burst_exit`: `while (!REQ) { if (!SEL) goto exit; } CLR_RAK; while (REQ) { if (!SEL) goto exit; }`) loops
+  back to itself for as long as SEL stays low, and the box takes no command until SEL rises. It tests POUT before SEL,
+  so a held box's BUSY can be high (POUT low) or low (POUT high: it has gone through `CLR_RAK`): BUSY says nothing. That
+  happens when a burst is cut off: the end not answered, or the driver killed in it (the quiesce program drops SEL).
+  `pb_unstick` frees it: POUT up, the data lines driven with 0x00, SEL up, wait for BUSY low, POUT down, wait for BUSY
+  high, then SEL and POUT down. A box that was not held reads that as the command 0x00, not one of its four: it answers
+  BUSY high and waits for SEL low, once (the test checks one unknown command per start). The lines are driven so this
+  does not depend on the port's pull-ups (undriven lines read 0xFF only if pulled up; a floating 0x22 would be a
+  receive without a request). Done at every start and every look for a lost box, whatever BUSY says (a few
+  microseconds for a box that was not held), and after a burst send that failed at its start or end. Every transfer
+  ends with SEL and POUT dropped in one write (`and.b`), as the quiesce program does.
 - **The end:** an offline frame (50 ms deadline), then the port as the machine starts it (SEL and POUT low, then all
   three lines and the data lines inputs), as plipbox.device leaves it. The quiesce program does the same in three steps.
   Lines left as inputs are pulled high, which the box reads as SEL up: harmless (it acts on SEL only with POUT low), and
   the next start frees a box left in a burst.
+- **A receive cut between its size bytes** (found by the review in `cmd_recv`): when the box gives up waiting for POUT
+  after its size's high byte (the driver away for more than 500 ms just there), it returns without switching its data
+  pins back to inputs (`par_low_data_set_input` is only on the later paths; `cmd_recv_burst` has the same early
+  returns). It then keeps driving the data lines until a receive of its own ends, and reads its own byte as every
+  command after: in practice it is stuck until switched off and on, and both sides drive the lines while the Amiga sends
+  (the model counts it). The window is a few instructions long, so it needs a process kept away for half a second
+  exactly there; the driver logs "a receive was cut between its size bytes: ... switch the box off and on" when its
+  wait for the size's low byte fails, and the link goes down. A box switched off and on is found again (section 6).
 - **Frames from the box:** a size above 1,514 (or above the buffer) is refused before its bytes (the box ends its side
   when SEL drops); shorter than a header: dropped; a size of 0: an empty answer, counted; an online request: the online
   frame sent; a loopback frame (the box's test modes): sent back; everything counted (netd's `rx_bad`, `tx_err`).
 
 ## 6. The box going and coming
 
-Gone in the middle of a frame: that transfer times out (the frame is lost; TCP sends it again). Three in a row: "the
-plipbox stopped answering: link down", frames to send are dropped. Every 2 s the driver frees a held box and sends the
-loopback frame again (the same MAC: netd's interface keeps its address); an answer: "the plipbox answers again: link
-up". A box restarted without the driver seeing it (its reset button, USB power) is offline: the next frame the driver
-sends makes it ask for the online frame, which the driver sends.
+Gone in the middle of a frame: that transfer times out (the frame is lost; TCP sends it again). Gone on an idle link:
+the next keepalive (within 5 s) or frame out times out. Three failures in a row: "the plipbox stopped answering: link
+down", frames to send are dropped. Every 2 s the driver frees a held box and sends the loopback frame again (the same
+MAC: netd's interface keeps its address); an answer: "the plipbox answers again: link up". A box restarted without the
+driver seeing it (its reset button, USB power) is offline and drops what the network sends: the next frame out, or the
+keepalive within 5 s, puts it online again (a frame out also makes it ask for the online frame).
 
 ## 7. Speed (the model's clock, not measured)
 
@@ -168,9 +196,13 @@ model's burst figure matches. Real numbers come from the A1200 (section 9).
   touched). Checked: the start (the box's own MAC adopted with nothing written to its EEPROM; `mac=` written once);
   1,500 frames each way and 800 each way at once, byte for byte, for burst and handshaked sends, with a 68060's and a
   14 MHz 68020's instruction times; 600 each way with gaps of 5 us to 30 ms before one access in 200 (none wrong, none
-  lost); gaps of 0.4-0.7 s (frames lost, none wrong, the line fine afterwards); the frame times above; no box ("nothing
+  lost); gaps of 0.4-0.7 s (frames lost, none wrong, the line fine afterwards, the box switched off and on if a receive
+  was cut between its size bytes); the frame times above; no box ("nothing
   answers ... BUSY stays high" within 0.7 s, the port left as found); a deaf box; a box whose last request was never
-  taken; a driver killed in a burst (the quiesce program; the next start frees the box); a burst short of an edge (no
+  taken; a driver killed in a burst (the quiesce program; the next start frees the box); SEL dropped in a burst with
+  POUT high (held with BUSY low in 5 of 8 runs; every next start frees it); a receive cut between its size bytes (the box
+  keeps the lines, both drive, the driver says to switch it off and on; afterwards frames go); the keepalive (a box
+  restarted on an idle link online again, one gone: link down after 3); one unknown command per start; a burst short of an edge (no
   answer at its end, the box freed at once); a size of 3,000 and a 9-byte frame from the box; the box gone in a receive
   and in a burst send (link down after 3, back restarted: link up, the same MAC); a box restarted unseen; no free
   buffer (the request waits); the loopback frame; the end and the quiesce program as the kernel checks it; the box's
@@ -196,7 +228,7 @@ model's burst figure matches. Real numbers come from the A1200 (section 9).
 4. `ifconfig eth0` (a lease), `ping -c 3` the router, then `wget` a file of a few hundred KB (its KB/s) and a telnet to
    a BBS.
 5. Pull the box's USB (power) for a few seconds while pinging: "link down", then "answers again: link up" within 2 s of
-   power coming back, and pings again.
+   power coming back, and pings again. The same once with no traffic: the link goes down within about 15 s.
 6. `ifdown eth0` ("the doorbell closed ... the port let go"). If the box's serial console is open on a PC: its log shows
    `[MAGIC] online` at step 2 and `[MAGIC] offline` here.
 7. If anything fails: the same with `driver plipbox noburst`.
@@ -206,10 +238,23 @@ comes: the FLG interrupt), frames wrong (the burst's timing on the 060: `noburst
 
 ## 10. Sizes (*measured* 2026-11-04, `-m68020-60 -Os`)
 
-`/sbin/net/plipbox` 12,004 bytes on the disk (code 6,503, bss 3,324; in memory 14,092 bytes, with its 8 KB stack about 22 KB; `ne2000` is 18,188). The kernel
+`/sbin/net/plipbox` 12,308 bytes on the disk (code 6,775, bss 3,332; in memory 14,372 bytes, with its 8 KB stack about
+22 KB; `ne2000` is 18,188). The kernel
 +240 bytes (section 4). A machine whose `/etc/network/interfaces` does not name it pays the kernel's 240 bytes only.
 
 ## 11. Open questions for the owner (a safe default in place)
 
 None that blocks the first run. Later: an interrupt that wakes the driver at the ACK edge (D19 5.4) would remove the
 up-to-20 ms wait on an idle link.
+
+## 12. The review (one independent read-only pass, 2026-11-04)
+
+It found no bug that breaks normal use, and confirmed the handshakes, word counts, magic frames, the ACK accounting,
+the kernel's checks and the driver's buffer and tag handling against plipbox 0.6's source. Fixed after it: the model's
+burst exit tested SEL before POUT (the firmware tests POUT first, so a held box can show BUSY low): modelled as written,
+and the box is now freed at every start and every look for it, not only when BUSY is high, with SEL and POUT dropped in
+one write at every transfer's end; the freeing drives 0x00 on the data lines instead of relying on the pull-ups; it no
+longer overwrites the failed stage that the log names; the model freed the data lines on a failed receive where the
+firmware does not (section 5: the box kept driving after a receive cut between its size bytes, now modelled, counted,
+logged); the deadlines are in the kernel's ticks, not a hard-coded PAL E-clock rate; an idle link sends a keepalive every
+5 s; the notes on false ACK edges, the 2023 firmware build fixes and the kernel's C read-modify-write corrected.
