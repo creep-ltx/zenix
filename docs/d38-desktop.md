@@ -439,3 +439,29 @@ left to right with every pixel once (no clearing first) and a changed status blo
 icon's selection redraws its two labels, not the desktop; a frame's title bar is drawn beside the title, not under
 it. The server counts what it draws (`DPY_STAT`: blits, pixels, glyphs, batches, damage painted, copies onto the
 screen) and the tests hold those numbers small.
+
+## As built: dlogin (revision 3, 2026-11-04)
+
+The details revision 3 left to the review, as built (branch desk, verified in FS-UAE by `tools/dlogin-test.sh`):
+
+- **How it starts:** not a D11 service (a service has no console, and a port's first call is not a boot) but
+  console 1's login: `/etc/console`'s `login graphical` makes init start `/sbin/dlogin --init` there instead of
+  `login --init` (text stays the default; no line, or no `/sbin/dlogin`, is the text login). dlogin is then console
+  1's session leader, so the display server takes that console; without a display (or with a desktop already up on
+  another console: `DPY_SESSION` answers -EBUSY to another console's caller) it hands the console to the text login
+  (`login --init`, handed to init as login hands its shell). init starts the text login itself when dlogin cannot be
+  started or ends three times within 30 s of starting (until the next boot).
+- **Who owns displayd between sessions:** dlogin. It stays connected during a session (displayd ends only with its
+  last client), so the screen never goes back to text between the greeter and the desktop.
+- **The greeter's user:** root (it must start other users' sessions). It shows only its own window, reads only the
+  keys of its own window, and starts nothing but login.
+- **The hand-over's guard:** `DPY_SESSION` (root only) names the uid whose programs may connect; on every change
+  the clients of any other non-root uid are dropped, so a program left from the last session cannot draw a fake
+  greeter. dlogin leaves the manager's role (`DPY_WM_BYE`) and closes its window before the session's zdesk starts,
+  so zdesk's Log out never touches dlogin.
+- **The session:** `login -f -s PROGRAM NAME` (root only), so login's code sets it up; root cannot log in on the
+  greeter, whatever the password (a text console is root's). The password check is login's (`pw_auth`: an unknown
+  name takes as long as a wrong password of a new hash, a second's wait after a wrong one). The last session's
+  programs are cut off from the screen, not ended (and without an MMU memory is readable by any program). The Text console session closes the display and runs the
+  user's shell on console 1; its end brings the greeter back.
+- Not yet: autologin, a user list, shutdown and reboot buttons, a session chosen per user; the clock is UTC.

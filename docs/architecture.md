@@ -1504,7 +1504,17 @@ its own volume as before (an old kernel, a root program's raw request). Verified
   for two users), its `gfx_*` calls becoming drawing orders (a run of cells in one colour one text order): 80
   columns, the console's model, rows from 4 to 29. The desktop's tests drive the mouse through `CON_INPUT`'s
   `CONI_MOUSE` (root; records dx, dy, buttons, as the port's counters would move). Verified in FS-UAE by
-  `tools/zdesk-test.sh`. **A
+  `tools/zdesk-test.sh`.
+- **The graphical login** (`/sbin/dlogin`, `display/dlogin/`, DESIGN D38 revision 3, docs/man/dlogin.txt): with
+  `/etc/console`'s `login graphical`, init starts it on console 1 instead of login. It is console 1's session leader,
+  so the display server grabs that console; it stays connected while a session runs, so displayd stays up between
+  sessions. It is the window manager while it shows its greeter (a `WK_DESKTOP` window); the password is checked by
+  `pw_auth` (user/sha.c, shared with login: an unknown name hashes as long as a wrong password). For a session it
+  closes its window, leaves the manager's role (`DPY_WM_BYE` 46), names the user to displayd (`DPY_SESSION` 13, root's
+  only, from the grabbed console: from then on only that uid's programs and root's may connect, and those of any other uid are dropped), and
+  runs `login -f -s PROGRAM NAME` (login's own set-up, `-s` root's only) and waits for it; then `DPY_SESSION` back to
+  root drops what is left of the user's and the greeter returns. root cannot log in there. Verified in FS-UAE by
+  `tools/dlogin-test.sh` (a boot with `login graphical`, a daemon typing through `CON_INPUT`). **A
   login steps aside** (the 2 MB diet, DESIGN D18): Zenix has no `exec`, so the shell is a new process, and only a
   process that has become the user can start it as the user; init's login (`login --init`) spawns the shell and then
   ends through `SYS_exit` with its second argument naming the shell, which `proc_handover` makes init's child first

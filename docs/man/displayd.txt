@@ -49,7 +49,9 @@ FILES
     /usr/share/consolefonts/zenix-8x8.zcf   the characters beyond Latin-1
 
 NOTES
-    Only the first client's user (and root) may use the desktop. Only the
+    Only the first client's user (and root) may use the desktop, or the
+    user a login manager (root's, dlogin(8)) names with DPY_SESSION; a
+    change drops the clients of every other user. Only the
     console of the first client is taken: a program on a pseudo-terminal
     or a service cannot start the desktop. One font: the console's (Topaz
     8 from the kernel, the Unicode supplement); a wide character draws as

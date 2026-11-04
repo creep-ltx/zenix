@@ -34,6 +34,8 @@
 #define DPY_MENU        12  /* a[0] id, a[1] the window's menus (the client's memory), a[2] their bytes (at most
                              * DPY_MENUMAX; 0: none): "Title\tItem\tItem\nTitle\tItem..." - the bar draws them (D38
                              * revision 2), a pick comes back as EV_MENU */
+#define DPY_SESSION     13  /* root only: a[0] the uid whose programs may use the desktop from now on (dlogin's, D38
+                             * revision 3: the greeter's root, then the user's session, then root again) */
 #define DPY_STAT        14  /* a[0] u32[6] (the client's memory): blits started, pixels drawn (a rectangle once for all
                              * its planes), glyphs drawn, DPY_DRAW batches, damage painted (a change of the windows),
                              * copies onto the screen; a[1] 1: then counted from 0 again. The tests' measure of what
@@ -55,6 +57,7 @@
 #define DPY_WM_MENUPICK 44  /* a[0] id, a[1] the menu (0..), a[2] the item (0..): EV_MENU to the window's program */
 #define DPY_WM_PGRAB    45  /* a[0] one of the manager's windows: every pointer event goes to it until the buttons are
                              * all up (a menu held with the right button); -EINVAL if none is held */
+#define DPY_WM_BYE      46  /* the window manager leaves the role (dlogin before the user's session starts its own) */
 #define DPY_WM_MOUSE    47  /* a[0] the mouse's acceleration: THRESHOLD | MULTIPLIER << 8 (the kernel's CON_MOUSE: in a
                              * frame, the counts beyond THRESHOLD count MULTIPLIER times; 0x100 none) */
 

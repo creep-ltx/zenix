@@ -29,3 +29,9 @@ static inline void *memchr(const void *s, int c, u32 n) { const unsigned char *p
 #include "sha256.h"
 void pw_hash(const char *password, const char *salt, char *out);      /* out: "ROUNDS$salt$hex" (at least 100 bytes) */
 int pw_check(const char *password, const char *stored);                /* 1 = right password (or none needed) */
+/* the one test of a login (login, dlogin: DESIGN D38 revision 3): NAME is a user and PASSWORD is theirs (or none is
+ * needed) -> 1, their entry in *P. An unknown name takes as long as a wrong password of a new hash (PW_ROUNDS; a
+ * locked, empty or older one answers sooner - /etc/passwd is readable anyway); after a failure the caller waits
+ * PW_FAIL_DELAY ticks (the same in both) */
+int pw_auth(const char *name, const char *password, struct pw *p);
+#define PW_FAIL_DELAY 100

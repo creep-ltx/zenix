@@ -14,7 +14,7 @@
 
 int aga;
 int wm_cl = -1;
-static int port, gfd = -1, confd = -1, persist, grabbed;
+static int port, gfd = -1, confd = -1, persist, grabbed, grabbed_con;
 u32 ndraws;
 static u16 *copl;                       /* the Copper list (chip RAM) */
 static int cop_col;                     /* the index of COLOR00's value in it */
@@ -502,18 +502,22 @@ static int has_clients(void)
             return 1;
     return 0;
 }
+static void wm_gone(void)              /* the manager gone: the server places and shows by itself (D38 3.3) */
+{
+    int cl = wm_cl;
+    wm_cl = -1;
+    for (int k = 0; k < NWIN; k++)
+        if (wins[k].id && wins[k].cl != cl && !(wins[k].state & WST_SHOWN))
+            win_show(k, 1, 0);
+}
 static void drop(int cl)
 {
     struct client *c = &cls[cl];
     if (!c->used)
         return;
     c->used = 0;
-    if (wm_cl == cl) {                  /* the manager gone: the server places and shows by itself (D38 3.3) */
-        wm_cl = -1;
-        for (int k = 0; k < NWIN; k++)
-            if (wins[k].id && wins[k].cl != cl && !(wins[k].state & WST_SHOWN))
-                win_show(k, 1, 0);
-    }
+    if (wm_cl == cl)
+        wm_gone();
     for (int i = 0; i < NWIN; i++)
         if (wins[i].id && wins[i].cl == cl) {
             int id = wins[i].id;
@@ -550,6 +554,7 @@ static int hello(struct umsg *m)
         if (con < 1 || con > 10)
             return -ENOTTY;             /* a pseudo-terminal, a service: not a console */
         int e = screen_up(con);
+        grabbed_con = con;
         if (e < 0) {
             dprintf(2, "displayd: the console %d could not be taken: %d\n", con, e);
             return e;
@@ -754,6 +759,18 @@ static int req(struct umsg *m)
             nblits = npix = nglyphs = ndraws = npaints = ncopies = 0;
         return 0;
     }
+    case DPY_SESSION:
+        if (m->uid != 0 || cls[cl].uid != 0)
+            return -EPERM;
+        if (sys_peer(m, PEER_CTTY, 0) != grabbed_con)
+            return -EBUSY;              /* a login manager of another console: this desktop is not its */
+        if (a[0] > 0xFFFF)
+            return -EINVAL;
+        session_uid = (int)a[0];
+        for (int i = 0; i < NCL; i++)   /* the last session's programs leave with it (no fake greeter over dlogin's) */
+            if (cls[i].used && cls[i].uid != 0 && cls[i].uid != session_uid)
+                drop(i);
+        return 0;
     case DPY_WIN_INFO: {
         if (!(w = mine(cl, a[0])))
             return -ENOENT;
@@ -786,6 +803,10 @@ static int req(struct umsg *m)
         return m->type >= DPY_WM_HELLO ? -EPERM : -ENOSYS;
     if (m->type == DPY_WM_MOUSE)
         return sys_conmouse(gfd, a[0]);
+    if (m->type == DPY_WM_BYE) {
+        wm_gone();
+        return 0;
+    }
     int s = (w = win_get((int)a[0])) ? (int)(w - wins) : -1;
     switch (m->type) {
     case DPY_WM_STYLE: {

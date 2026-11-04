@@ -7,3 +7,7 @@ colours auto
 # font auto (or no line): the console's Unicode font for box lines, symbols
 # and Western letters (11 KB); none: every character above U+00FF a box.
 font auto
+# login text (or no line): console 1 asks for the name and password as
+# text; login graphical: dlogin's login screen there, into the desktop
+# (man dlogin; when the desktop cannot start, the text login).
+login text

@@ -370,7 +370,7 @@ static void bar_file(void)
     }
 }
 
-int conf_load(const char *theme)
+int conf_theme(const char *theme)
 {
     char path[ZPATH_MAX], name[16] = "flat";
     if (theme)
@@ -394,6 +394,14 @@ int conf_load(const char *theme)
     strcpy(th.bar[1], "windows");
     strcpy(th.bar[2], "memory clock");
     if (theme_load(name) < 0 && (!strcmp(name, "flat") || theme_load("flat") < 0))
+        return -1;
+    return 0;
+}
+
+int conf_load(const char *theme)
+{
+    char path[ZPATH_MAX];
+    if (conf_theme(theme) < 0)
         return -1;
     /* keys */
     char *b = slurp(conf_file("keys", path)), *p = b, *l;
