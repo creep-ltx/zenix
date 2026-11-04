@@ -4,6 +4,7 @@
  * (blob.c). Every vector not listed here is "jsr zx_unsup": the program stops cleanly and `zine` names the call. */
 #include "blob.h"
 #include "zvol.h"
+#include "hunk.h"
 
 /* ---- lists (exec/lists.h) ---- */
 static u32 cia_base[2];                 /* ZINE's ciaa.resource and ciab.resource (below) */
@@ -199,9 +200,12 @@ void c_RemIntServer(u32 n, struct zint *is)
 }
 
 /* ---- the rest of exec ---- */
+#define AN_BadOverlay 0x0700000Cu       /* exec/alerts.h (NDK 3.2): only the overlay supervisor raises it */
 void c_Alert(u32 code)
 {
-    if (code & AT_DeadEnd) {
+    /* AN_BadOverlay as a dead end too: the supervisor that raises it retries the load it cannot do (the Guru Book's
+     * sketch, 22.2.10.7), so going on would loop; LoadSeg has put why in the output */
+    if ((code & AT_DeadEnd) || (code & ~AT_DeadEnd) == AN_BadOverlay) {
         Z.blk->addr = code;
         zb_stop(ZH_ALERT, 0);
     }
@@ -509,6 +513,23 @@ static int slot_of(u32 fh)
     return -1;
 }
 
+/* a FileHandle on volume entry ent (or a sink): its BPTR, or 0 and IoErr */
+static u32 fh_new(u32 ent, int sink)
+{
+    for (int i = 0; i < NFILES; i++)
+        if (!files[i].used) {
+            u32 fh = zx_AllocMem(44, 1 << 16);
+            if (!fh)
+                break;
+            files[i].used = 1, files[i].sink = (u8)sink, files[i].ent = ent, files[i].pos = 0, files[i].fh = fh;
+            *(u32 *)(fh + 36) = (u32)i; /* fh_Args */
+            *(u32 *)(fh + 24) = (u32)-1;
+            return fh >> 2;
+        }
+    Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
+    return 0;
+}
+
 u32 c_Open(const char *name, s32 mode)
 {
     const void *vol = (const void *)Z.a.vol;
@@ -533,18 +554,7 @@ u32 c_Open(const char *name, s32 mode)
         Z.ioerr = e ? 205 : 212;        /* ERROR_OBJECT_NOT_FOUND, ERROR_OBJECT_WRONG_TYPE */
         return 0;
     }
-    for (int i = 0; i < NFILES; i++)
-        if (!files[i].used) {
-            u32 fh = zx_AllocMem(44, 1 << 16);
-            if (!fh)
-                break;
-            files[i].used = 1, files[i].sink = (u8)sink, files[i].ent = ent, files[i].pos = 0, files[i].fh = fh;
-            *(u32 *)(fh + 36) = (u32)i; /* fh_Args */
-            *(u32 *)(fh + 24) = (u32)-1;
-            return fh >> 2;
-        }
-    Z.ioerr = 103;                      /* ERROR_NO_FREE_STORE */
-    return 0;
+    return fh_new(ent, sink);
 }
 
 u32 c_Close(u32 fh)
@@ -592,6 +602,173 @@ s32 c_Seek(u32 fh, s32 pos, s32 mode)
     }
     files[i].pos = (u32)np;
     return old;
+}
+
+/* ---- LoadSeg and overlays (docs/d29-zine.md 16.6; the Guru Book 17.1.76, 19.3.2.2, 22.2.10; the AmigaDOS Manual's
+ * "hunk_overlay"). LoadSeg(name) loads a program of the volume. An overlaid one (its root, then HUNK_OVERLAY) is
+ * loaded as AmigaOS leaves it for its overlay supervisor: the root's hunks, a hunk table (its header's table size +
+ * 1 longwords, the root's segments in it, the rest 0), a copy of the overlay block from its third longword, and the
+ * file kept open at the first byte after the block (where AmigaOS 1.x's loader, reading in order, stopped). With the
+ * overlay mark $0000ABCD at the first hunk's offset 4, offsets 8, 12, 16 and 20 of its data get the handle (BPTR), the
+ * table copy (APTR), the hunk table (BPTR) and the process's global vector. LoadSeg(NULL, table, handle) loads the
+ * node at the handle's position into the table (zh_load_node) and leaves the handle after its HUNK_BREAK. The file
+ * is the volume's copy (the whole program is in memory), so a node loads from memory. ---- */
+#define NOVL 4                          /* overlaid programs at once (the program, and what it loads itself) */
+static struct { u32 root, tab, tabn, ovl, ovlsize, fh, slot, ent, rootlast; } ovls[NOVL];
+#define ERROR_FILE_NOT_OBJECT 121       /* dos/dos.h (NDK 3.2) */
+#define ERROR_BAD_HUNK 235
+
+static void say3(const char *a, const char *b, const char *c)
+{
+    zb_out(a, slen(a));
+    zb_out(b, slen(b));
+    zb_out(c, slen(c));
+}
+
+static void say_at(const char *a, u32 v, const char *c)
+{
+    char n[11];
+    int i = 10;
+    n[10] = 0;
+    do
+        n[--i] = (char)('0' + v % 10), v /= 10;
+    while (v && i);
+    say3(a, n + i, c);
+}
+
+static u32 unload(u32 seg)
+{
+    for (int k = 0; k < NOVL; k++)
+        if (seg && ovls[k].root == seg) {
+            u32 sl = ovls[k].slot;      /* closed only if the program has not closed it (the slot reused) */
+            if (files[sl].used && files[sl].fh == ovls[k].fh << 2 && files[sl].ent == ovls[k].ent)
+                c_Close(ovls[k].fh);
+            zx_FreeMem(ovls[k].tab, ovls[k].tabn * 4);
+            zx_FreeMem(ovls[k].ovl, ovls[k].ovlsize);
+            ovls[k].root = 0;
+        }
+    for (u32 n = 0; seg && n < 65536; n++) {   /* bounded: a looped list ends here */
+        u32 a = (seg << 2) - 4, next = *(u32 *)(a + 4);
+        zx_FreeMem(a, *(u32 *)a);
+        seg = next;
+    }
+    return 1;
+}
+
+int zb_ovl_root(u32 ent, const u8 *f, const struct zh_info *inf, const struct zh_seg *work, u32 seg,
+                const char *name)
+{
+    int k = 0;
+    while (k < NOVL && ovls[k].root)
+        k++;
+    if (k == NOVL) {
+        say3("ZINE: ", name, " is a fifth overlaid program loaded at once: ZINE keeps 4\n");
+        return -ZE_NOMEM;
+    }
+    u32 tabn = inf->tabsize + 1, osz = inf->ovl_words * 4;     /* tabsize <= ZH_MAXTAB: no wrap */
+    u32 tab = zx_AllocMem(tabn * 4, MEMF_PUBLIC | MEMF_CLEAR);
+    u32 ov = tab ? zx_AllocMem(osz, MEMF_PUBLIC) : 0;
+    u32 fh = ov ? fh_new(ent, 0) : 0;
+    if (!fh) {
+        if (ov)
+            zx_FreeMem(ov, osz);
+        if (tab)
+            zx_FreeMem(tab, tabn * 4);
+        say3("ZINE: ", name, ov ? "'s overlay file: no free file handle (ZINE has 16)\n"
+                                : "'s overlay tables: not enough memory\n");
+        return -ZE_NOMEM;
+    }
+    zh_table(inf, work, (zu8 *)tab, tabn);
+    zmemcpy((void *)ov, f + inf->ovl, osz);
+    files[*(u32 *)((fh << 2) + 36)].pos = inf->end;
+    ovls[k].root = seg, ovls[k].tab = tab, ovls[k].tabn = tabn, ovls[k].ovl = ov, ovls[k].ovlsize = osz;
+    ovls[k].fh = fh, ovls[k].slot = *(u32 *)((fh << 2) + 36), ovls[k].ent = ent, ovls[k].rootlast = inf->last;
+    u32 code = work[0].addr + 8;
+    if (work[0].size >= 8 + 24 && *(u32 *)(code + 4) == 0xABCDu) {
+        *(u32 *)(code + 8) = fh;
+        *(u32 *)(code + 12) = ov;
+        *(u32 *)(code + 16) = tab >> 2;
+        *(u32 *)(code + 20) = *(u32 *)((u32)Z.proc + ZO_Process_pr_GlobVec);
+    } else
+        say3("ZINE: ", name, " has overlays but no overlay header ($0000ABCD at its start + 4): its overlay "
+             "handle and tables were not written into it\n");
+    return 0;
+}
+
+u32 c_LoadSeg(const char *name, u32 tab, u32 fh)
+{
+    const void *vol = (const void *)Z.a.vol;
+    u32 ent = 0, start = 0;
+    int i = -1, k = 0;
+    if (name) {
+        if (zv_find(vol, 0, name, &ent) || zv_ent(vol, ent)->dir) {
+            say3("ZINE: no file ", name, "\n");
+            Z.ioerr = 205;              /* ERROR_OBJECT_NOT_FOUND */
+            return 0;
+        }
+    } else {
+        while (k < NOVL && !(ovls[k].root && ovls[k].tab >> 2 == tab))
+            k++;
+        i = slot_of(fh);
+        if (k == NOVL || i < 0 || files[i].sink) {
+            say3("ZINE: ", Z.blk->name, " loads an overlay part with a hunk table or file ZINE did not give it\n");
+            Z.ioerr = ERROR_BAD_HUNK;
+            return 0;
+        }
+        ent = files[i].ent, start = files[i].pos;
+    }
+    const char *who = name ? name : Z.blk->name;
+    const struct zv_ent *e = zv_ent(vol, ent);
+    const zu8 *f = (const zu8 *)vol + e->off;
+    struct zh_info inf;
+    char msg[160];
+    if (name ? zh_check(f, e->size, who, &inf, msg, sizeof msg) : zh_node(f, e->size, start, who, &inf, msg, sizeof msg)) {
+        say3("ZINE: ", msg, "");
+        if (!name)
+            say_at(" (the overlay part at byte ", start, ")");
+        say3("\n", "", "");
+        Z.ioerr = name ? ERROR_FILE_NOT_OBJECT : ERROR_BAD_HUNK;
+        return 0;
+    }
+    u32 wsize = inf.nhunks * sizeof(struct zh_seg) + 8, seg = 0;
+    struct zh_seg *work = (struct zh_seg *)zx_AllocMem(wsize, MEMF_PUBLIC);
+    struct zh_ops ops = { zb_hunk_alloc, zb_hunk_free, 0 };
+    int r = !work ? -ZE_NOMEM : name ? zh_load(f, e->size, &inf, &ops, work, &seg)
+          : inf.first <= ovls[k].rootlast ? -ZE_NOEXEC       /* never over the root's own slots */
+          : zh_load_node(f, e->size, &inf, &ops, work, (zu8 *)ovls[k].tab, ovls[k].tabn, &seg);
+    if (!r && name && inf.ovl && zb_ovl_root(ent, f, &inf, work, seg, name)) {
+        unload(seg);
+        if (work)
+            zx_FreeMem((u32)work, wsize);
+        Z.ioerr = 103;
+        return 0;                       /* zb_ovl_root said why */
+    }
+    if (work)
+        zx_FreeMem((u32)work, wsize);
+    if (r) {
+        u32 need = inf.bytes[0] + inf.bytes[1] + inf.bytes[2];
+        if (r == -ZE_NOMEM)
+            say_at("ZINE: not enough memory to load ", need, " bytes of ");
+        else
+            say3("ZINE: cannot load ", "", "");
+        say3(who, name ? "" : "'s overlay part", "");
+        if (!name)
+            say_at(" at byte ", start, "");
+        say3(r == -ZE_NOMEM ? "\n" : " (it relocates to a hunk not loaded, or lies outside its hunk table or over "
+             "the root's hunks)\n", "", "");
+        Z.ioerr = r == -ZE_NOMEM ? 103 : ERROR_BAD_HUNK;
+        return 0;
+    }
+    if (!name)
+        files[i].pos = inf.end;
+    extern void zx_CacheClearU(void);
+    zx_CacheClearU();                   /* code was written (CLAUDE.md) */
+    return seg;
+}
+
+u32 c_UnLoadSeg(u32 seg)
+{
+    return seg ? unload(seg) : 0;
 }
 
 u32 c_Write(u32 fh, const char *buf, s32 n)
@@ -1162,7 +1339,7 @@ F(CloseLibrary); F(TaggedOpenLibrary); F(StackSwap); F(OpenResource); F(OpenDevi
 F(CacheControl); F(AllocVec); F(FreeVec); F(CreatePool); F(DeletePool); F(AllocPooled); F(FreePooled);
 F(InitRastPort); F(InitBitMap); F(AllocRaster); F(FreeRaster); F(AllocBitMap); F(FreeBitMap);
 F(Cause); F(AddICRVector); F(RemICRVector); F(AbleICR); F(SetICR);
-F(Open); F(Close); F(Seek);
+F(Open); F(Close); F(Seek); F(LoadSeg); F(UnLoadSeg);
 F(DoIO); F(SendIO); F(CheckIO); F(WaitIO); F(AbortIO);
 F(TimerBeginIO); F(TimerAbortIO); F(AddTime); F(SubTime); F(CmpTime); F(ReadEClock); F(GetSysTime);
 F(GetMsg); F(PutMsg); F(ReplyMsg); F(WaitPort); F(CreateMsgPort); F(DeleteMsgPort);
@@ -1192,9 +1369,11 @@ static const u16 gfx_lvo[] = { 192, 222, 228, 270, 288, 384, 456, 462, 390, 492,
 static void (*const gfx_fn[])(void) = { zs_LoadRGB4, zs_LoadView, zs_WaitBlit, zs_WaitTOF, zs_SetRGB4, zs_VBeamPos,
     zs_OwnBlitter, zs_DisownBlitter, zs_InitBitMap, zs_AllocRaster, zs_FreeRaster, zs_AllocBitMap, zs_FreeBitMap,
     zs_LoadRGB32, zs_SetRGB32, zs_InitRastPort };
-static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66 };
+static const u16 dos_lvo[] = { 42, 48, 54, 60, 132, 144, 198, 312, 342, 354, 360, 462, 948, 954, 30, 36, 66, 150,
+    156 };
 static void (*const dos_fn[])(void) = { zs_Read, zs_Write, zs_Input, zs_Output, zs_IoErr, zx_Exit, zs_Delay,
-    zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek };
+    zs_FPutC, zs_FPuts, zs_VFPrintf, zs_Flush, zs_SetIoErr, zs_PutStr, zs_VPrintf, zs_Open, zs_Close, zs_Seek,
+    zs_LoadSeg, zs_UnLoadSeg };
 static const u16 int_lvo[] = { 78, 210, 612, 198, 66, 252, 246, 606, 204, 72, 150, 270, 60, 300 };
 static void (*const int_fn[])(void) = { zs_CloseWorkBench, zs_OpenWorkBench, zs_OpenScreenTagList, zs_OpenScreen,
     zs_CloseScreen, zs_ScreenToFront, zs_SetPointer, zs_OpenWindowTagList, zs_OpenWindow, zs_CloseWindow,

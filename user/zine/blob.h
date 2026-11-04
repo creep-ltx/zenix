@@ -153,6 +153,15 @@ void zb_wait_lines(u32 n);
 void zb_waitblit(void);
 void zb_blank_view(void);
 u32 zx_AllocMem(u32 size, u32 attrs);
+/* the loader's memory (struct zh_ops of hunk.h): AllocMem and FreeMem from the program's lists */
+struct zh_seg;
+int zb_hunk_alloc(void *u, u32 size, u32 memf, struct zh_seg *out);
+void zb_hunk_free(void *u, const struct zh_seg *s);
+struct zh_info;
+/* an overlaid program's root was loaded (d29 16.6): its hunk table, the overlay table's copy, the open file handle,
+ * the first hunk's overlay fields; 0, or -ZE_NOMEM with nothing kept */
+int zb_ovl_root(u32 ent, const u8 *f, const struct zh_info *inf, const struct zh_seg *work, u32 seg,
+                const char *name);
 void zx_FreeMem(u32 p, u32 size);
 void *zmemset(void *d, int c, u32 n);
 void *zmemcpy(void *d, const void *s, u32 n);

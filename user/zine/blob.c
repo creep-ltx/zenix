@@ -249,7 +249,7 @@ void zb_blank_view(void)
         SPRCTL(i) = 0;
 }
 
-static int hunk_alloc(void *u, zu32 size, zu32 memf, struct zh_seg *out)
+int zb_hunk_alloc(void *u, zu32 size, zu32 memf, struct zh_seg *out)
 {
     (void)u;
     u32 m = zx_AllocMem(size, (memf & (MEMF_CHIP | MEMF_FAST)) | MEMF_PUBLIC);
@@ -261,7 +261,7 @@ static int hunk_alloc(void *u, zu32 size, zu32 memf, struct zh_seg *out)
     return 0;
 }
 
-static void hunk_free(void *u, const struct zh_seg *s)
+void zb_hunk_free(void *u, const struct zh_seg *s)
 {
     (void)u;
     zx_FreeMem(s->addr, s->size);
@@ -311,9 +311,11 @@ void zb_run(void)
     if (zh_check(f, e->size, b->name, &inf, msg, sizeof msg))
         zb_stop(ZH_LOAD, ZS_BADFILE);
     struct zh_seg *work = (struct zh_seg *)zx_AllocMem(inf.nhunks * sizeof *work + 8, MEMF_PUBLIC);
-    struct zh_ops ops = { hunk_alloc, hunk_free, 0 };
+    struct zh_ops ops = { zb_hunk_alloc, zb_hunk_free, 0 };
     u32 seg;
     if (!work || zh_load(f, e->size, &inf, &ops, work, &seg))
+        zb_stop(ZH_LOAD, ZS_NOMEM);
+    if (inf.ovl && zb_ovl_root(idx, f, &inf, work, seg, b->name))     /* an overlaid program (16.6) */
         zb_stop(ZH_LOAD, ZS_NOMEM);
     zx_FreeMem((u32)work, inf.nhunks * sizeof *work + 8);
     Z.seglist = seg;

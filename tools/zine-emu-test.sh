@@ -16,7 +16,7 @@ ok() { echo "PASS $1"; }
 no() { echo "FAIL $1"; pass=0; }
 log=$(tr -d '\r' < $L)
 n=$(echo "$log" | grep -ac '^zine: back after [0-9]* s (0)')
-[ "$n" = 37 ] && ok "every session came back (the kernel's 'back' line 37 times)" || no "the kernel's 'back' line $n times, not 37 (21 null sessions; zexit, the long name, zhello, ztake, zcrash, zbadcall, zalloc, zscreen, zmmu, zfpu; ztake with the background writer; three by name; the group member twice)"
+[ "$n" = 39 ] && ok "every session came back (the kernel's 'back' line 39 times)" || no "the kernel's 'back' line $n times, not 39 (21 null sessions; zexit, the long name, zhello, ztake, zcrash, zbadcall, zalloc, zscreen, zovl twice, zmmu, zfpu; ztake with the background writer; three by name; the group member twice)"
 echo "$log" | grep -aq '^count=20 ok=20' && ok "the console's shell ran zine twenty times and went on" || no "the console's loop: $(echo "$log" | grep -a '^count=')"
 f1=$(echo "$log" | grep -a -m1 '^fast RAM free' | tr -dc 0-9); f2=$(echo "$log" | grep -a '^fast RAM free' | sed -n 2p | tr -dc 0-9)
 c1=$(echo "$log" | grep -a -m1 '^chip RAM free' | tr -dc 0-9); c2=$(echo "$log" | grep -a '^chip RAM free' | sed -n 2p | tr -dc 0-9)
@@ -33,7 +33,18 @@ echo "$log" | grep -aq 'zcrash crashed: illegal instruction at' && echo "$log" |
 echo "$log" | grep -aq 'zbadcall called exec.library ObtainSemaphore (offset -564, from' && ok "zbadcall: a call ZINE lacks is named, the program stopped" || no "zbadcall: $(echo "$log" | grep -a 'zbadcall' | tail -2)"
 echo "$log" | grep -aq '^zalloc-rc=0' && ok "zalloc: 1 MB fast and 256 KB chip from AllocMem, written and read back, freed, AvailMem as before" || no "zalloc: $(echo "$log" | grep -a 'zalloc' | tail -2)"
 echo "$log" | grep -aq '^zscreen-rc=0' && ok "zscreen: an 8-plane screen from intuition, LoadRGB32's colours, CloseScreen" || no "zscreen: $(echo "$log" | grep -a 'zscreen' | tail -2)"
-echo "$log" | grep -aq '^zbg=400 last=399' && ok "a background job writing a file during a session: its requests held at the sync and done afterwards, none lost" || no "the held writes: $(echo "$log" | grep -a '^zbg=' | tail -1)"
+# 16.6: an overlaid program: its root loaded with the overlay handle and tables, two nodes through its own overlay
+# supervisor (Seek, LoadSeg(NULL, table, handle)), one replacing the other, the data after the nodes read through the
+# handle; then an overlay entry with no node behind it: LoadSeg's refusal named and the supervisor's alert
+echo "$log" | grep -aq '^ZINE: zovl is overlaid: 2 later parts' && ok "zovl: zine sees an overlaid program (2 later parts)" || no "zovl: zine's overlay line: $(echo "$log" | grep -a 'zovl is' | tail -1)"
+echo "$log" | grep -aq '^zovl: LoadSeg wrote the overlay handle, the overlay table and the hunk table into the root' && ok "zovl: LoadSeg wrote the overlay handle and both tables into the root's overlay header" || no "zovl: the overlay header: $(echo "$log" | grep -a '^zovl' | head -2)"
+na=$(echo "$log" | grep -ac "^zovl: node A ran; the root's data says: hello from the root's data hunk$")
+[ "$na" = 2 ] && ok "zovl: node A ran twice (loaded, replaced by B, loaded again), relocated to itself and to the root's data hunk" || no "zovl: node A's line $na times, not 2"
+echo "$log" | grep -aq '^zovl: node B ran; its BSS hunk was clear$' && echo "$log" | grep -aq "^zovl: node B's BSS slot cleared when A came back" && ok "zovl: node B ran in A's place (its code and chip BSS), its slot cleared after" || no "zovl: node B: $(echo "$log" | grep -a 'node B' | tail -2)"
+echo "$log" | grep -aq '^zovl: the data after the last node read through the overlay handle' && echo "$log" | grep -aq '^zovl: memory as before' && echo "$log" | grep -aq '^zovl-rc=0' && ok "zovl: the data after the nodes read through the overlay handle, memory as before, return code 0" || no "zovl: the end: $(echo "$log" | grep -a 'zovl' | tail -3)"
+echo "$log" | grep -aq '^ZINE: zovl is damaged (no overlay part where its overlay table points) (the overlay part at byte [0-9]*)' && echo "$log" | grep -aq 'zovl crashed (alert 0700000c: its overlay supervisor could not load a part)' && echo "$log" | grep -aq '^zovlbad-rc=1' && ok "zovl bad: LoadSeg's refusal named, the supervisor's AN_BadOverlay ends it, Zenix back" || no "zovl bad: $(echo "$log" | grep -a 'zovl' | tail -3)"
+# (a kernel log line may land inside the zbg line: the count and the last line are checked apart)
+echo "$log" | grep -aq '^zbg=400' && echo "$log" | grep -aq 'last=399$' && ok "a background job writing a file during a session: its requests held at the sync and done afterwards, none lost" || no "the held writes: $(echo "$log" | grep -a '^zbg=' | tail -1)"
 # 16.5: a 68030 MMU instruction on a CPU without that MMU (the 68020 here) is a no-op; an FPU instruction this machine
 # lacks (no FPU here) is named in the crash line
 echo "$log" | grep -aq '^zmmu-rc=0' && echo "$log" | grep -aq 'ZINE: an MMU instruction (PMOVE, PFLUSH, PTEST) taken as a no-op' && ok "zmmu: PMOVE to and from TC, TT0, CRP, SRP (memory, (An)+, -(sp), d16(An), #imm), PFLUSHA, and in supervisor mode the 68040's PFLUSHA and PMOVE TC, as no-ops on a 68020" || no "zmmu: $(echo "$log" | grep -a 'zmmu\|MMU instruction' | tail -2)"

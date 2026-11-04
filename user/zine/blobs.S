@@ -469,6 +469,18 @@ zb_putch:
     CF  zs_Open, c_Open, 2, %d1, %d2
     CF  zs_Close, c_Close, 1, %d1
     CF  zs_Seek, c_Seek, 3, %d1, %d2, %d3
+    CF  zs_UnLoadSeg, c_UnLoadSeg, 1, %d1
+/* dos LoadSeg (-150): d1 the name; for an overlay node d1 0, d2 the hunk table, d3 the file (the Guru Book
+ * 22.2.10.6). The answer in d0 and in d1, which the original overlay supervisor reads (17.1.76) */
+    .globl  zs_LoadSeg
+zs_LoadSeg:
+    move.l  %d3,-(%sp)
+    move.l  %d2,-(%sp)
+    move.l  %d1,-(%sp)
+    jsr     c_LoadSeg
+    lea     12(%sp),%sp
+    move.l  %d0,%d1
+    rts
     CF  zs_Cause, c_Cause, 1, %a1
     CF  zs_AddICRVector, c_AddICRVector, 3, %a6, %d0, %a1
     CF  zs_RemICRVector, c_RemICRVector, 3, %a6, %d0, %a1

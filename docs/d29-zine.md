@@ -384,7 +384,9 @@ one C source, compiled into both, so a file the loader would refuse is refused w
   relocation names a hunk that exists and an offset with offset + 4 within its size.
 - `0x3F7` (`HUNK_DREL32` in the AmigaDOS Manual, the short form in the Guru Book): decided at step 1, it is
   `HUNK_RELOC32SHORT` (16.1).
-- Refused, each with its own message: `HUNK_OVERLAY`/`BREAK` ("NAME uses overlays: not supported yet"),
+- **Overlays** (`HUNK_OVERLAY`, `HUNK_BREAK`): loaded since 2026-11-04 as 16.6 says: the root at the start, the other
+  parts by the program's own overlay supervisor through dos's `LoadSeg`, from the file in the volume.
+- Refused, each with its own message: nested overlays and a `HUNK_BREAK` without an overlay table (16.6),
   `HUNK_RELRELOC32` (`0x3FD`), external references, anything else ("not an AmigaOS program
   (unknown hunk 0x3F9 at byte 1234)").
 - **Loading** (from the volume): each hunk from the program's memory list with its memory type and `MEMF_CLEAR` (BSS and
@@ -1132,6 +1134,102 @@ Hope is 68000 code, so the line F is *proposed* to be an MMU instruction: Emu68 
   on the 68040; on the 68040 `ztake` and `zcrash` with Zenix back each time and free memory as before
   (16.4's MMU registers saved and put back). Not yet on the PiStorm: Bacon of Hope there is the owner's test.
 - Blob 25,988 -> 27,032 bytes; the kernel unchanged.
+
+### 16.6 Overlaid programs (2026-11-04, branch ovl)
+
+Found on the owner's partner's A1200 with the Apollo 1260 (2026-11-04): `zine SpbPeek.exe` (Spaceballs' Peek) said
+"uses overlays: not supported yet". Many demos of the era are overlaid; fixed next (CLAUDE.md "fix things when
+found").
+
+**What AmigaOS does** (*read*: the Guru Book 17.1.71, 17.1.76, 19.3.2.2 and 22.2.10; the AmigaDOS Manual's
+"hunk_overlay", "Hunk Overlay Table-Overview" and InternalLoadSeg; numbers from the NDK 3.2's includes; the knowledge
+base's amiga/amigaos-hunk-overlays.md has the layout in full):
+- The file: the root node (a `HUNK_HEADER` whose table size counts every hunk slot of the tree), one `HUNK_OVERLAY`
+  block (its length longword is the upper bound: length + 1 longwords follow: the offset to the entries, the ordinate
+  table and its 0, eight longwords per overlay symbol: seek offset, 0, 0, level, ordinate, initial hunk, symbol hunk,
+  symbol offset + 4), then the nodes, each a `HUNK_HEADER` (its first slot after its ancestors'), its hunks and
+  `HUNK_BREAK`. A node's relocations may name its ancestors' hunks.
+- LoadSeg of the file loads the root, copies the block from its third longword, allocates the hunk table (table size
+  + 1 BPTRs, the last 0), keeps the file open and notes them in the first segment: after the linker's mark
+  `$0000ABCD` at segment offset 8 come the handle (BPTR, 12), the table copy (APTR, 16), the hunk table (BPTR, 20)
+  and the global vector (APTR, 24).
+- The overlay supervisor is the program's own code (the linker puts it in): it frees the hunks from the entry's
+  initial hunk on, `Seek`s the kept handle to the node, calls `LoadSeg(D1 0, D2 hunk table, D3 handle)`, which loads
+  the node into the table and answers in D0 **and D1** (the original supervisor reads D1), and links the node to
+  the hunk before it. A failed load raises `AN_BadOverlay` (`$0700000C`). The block's format "is not really enforced
+  by LoadSeg(), but rather by the overlay supervisor; some third-party programs use the overlay block differently":
+  the loader copies it and does not interpret it.
+
+**What ZINE had:** dos `Open`, `Read`, `Seek`, `Close` on the volume (5.6, 16.3), no `LoadSeg`; the program's whole
+file is always in the volume (when its folder is too big, the program alone).
+
+**Decided: option A, with nothing extra to preload.** The file is already in memory in the volume, so the overlay
+handle is an ordinary ZINE file handle on it and a node "loads from disk" by copying from memory; no new handle type,
+no new interface:
+- **The loader** (`user/zine/hunk.c`): `zh_check` takes an overlaid file: the root, the block (its length checked
+  against the file), then every node that follows (each a full walk: hunks inside the root's table and after the
+  root's slots, relocations to its own hunks or to slots below its first, `HUNK_BREAK` or the file's end); bytes
+  after the block that are not a `HUNK_HEADER` are left alone (data the program reads through its handle). `zh_node`
+  and `zh_load_node` check and load one node at a byte offset into the hunk table (an ancestor's slot that is 0 is
+  refused, not followed); `zh_table` writes the node's segments and **clears every slot after it** (the supervisor
+  frees up to the first 0 but does not clear: a longer sibling's stale slot would be freed twice).
+- **The blob:** dos `LoadSeg` (-150) both ways and `UnLoadSeg` (-156). After the program's root is loaded,
+  `zb_ovl_root` allocates the hunk table and the block's copy from the program's memory, opens the handle on the
+  program's volume entry **at the first byte after the block** (where AmigaOS 1.x's in-order loader stopped; 2.0+ says
+  only "any point after the last hunk loaded") and, when the mark `$0000ABCD` is there, writes the four fields; the
+  global vector field is the process's `pr_GlobVec` (0: ZINE has no BCPL). Without the mark nothing is written into
+  the program and its output says so. `LoadSeg(0, table, handle)` accepts only a table and a handle ZINE gave, loads
+  the node at the handle's position, leaves the handle after its `HUNK_BREAK` and answers in d0 and d1;
+  `LoadSeg(name)` loads a file of the volume the same way (an overlaid one gets its own handle and tables, up to 4 at
+  once); a refusal or a lack of memory is named in the program's output (with the node's byte offset) and answers 0
+  with `IoErr` (`ERROR_FILE_NOT_OBJECT` 121, `ERROR_BAD_HUNK` 235, `ERROR_NO_FREE_STORE` 103). `AN_BadOverlay` is a
+  dead end (the Guru Book's supervisor retries forever): "NAME crashed (alert 0700000c: its overlay supervisor could
+  not load a part)".
+- **`zine`** prints "ZINE: NAME is overlaid: N later parts (X KB together, the largest Y KB), loaded from memory when
+  it asks for them", and refuses with a plain line when the file (all in memory during the session) and its hunks
+  (the root's, the largest node's, the tables) need more than all of Zenix's free chip and fast RAM: "zine: NAME does
+  not fit in memory: its file (A KB, ...) and its hunks (B KB) need more than the C KB free". That is a floor, for
+  every program: a program can still run out later (the volume, the ZINE block and Zenix's own memory come off the
+  same RAM; `LoadSeg` then says "not enough memory to load N bytes of NAME's overlay part at byte M").
+
+**Limits that are refused with their own message before the hand-over:** nested overlays (an overlay table inside a
+node), a `HUNK_BREAK` without a table, an overlaid root that does not start at hunk 0, a hunk table of more than
+16,384 slots (`ZH_MAXTAB`, so its size in bytes cannot wrap). At run time `LoadSeg` refuses a node over the root's
+own slots (only nodes after each other in the file are checked before), and says when ZINE's 4 overlaid programs or
+16 file handles are all in use.
+
+**What overlaid programs still cannot do under ZINE:** a supervisor that calls BCPL
+through the global vector, or a dos function ZINE lacks (`ErrorReport` on a read error, `InternalLoadSeg`,
+`NewLoadSeg`), is stopped with the function named; one that reads its handle without a `Seek` first and expects
+another position than the first node; resident library names in a node's header (refused, as in a root). The whole file
+stays in memory for the session, so its size comes off what the program gets (the "had N KB chip and M KB fast"
+line already counts it out).
+
+*Verified* in FS-UAE (A1200, 68020, 4 MB fast; `tools/zine-emu-test.sh`): `zovl` (`tools/tests/zine/zovl.S`,
+written as an overlaid hunk file by `tools/mkovltest.py`: vlink is not in the toolchain and the amigaos binutils
+make no overlays): a root of a code and a data hunk with the overlay header and its own supervisor (written from the
+Guru Book's description), two sibling nodes at level 1 (A: one code hunk relocated to itself and to the root's data;
+B: code with short relocations and a chip BSS hunk), 16 bytes after them. LoadSeg wrote the header; A, B and A again
+ran through the supervisor (`Seek`, `LoadSeg(0, table, handle)` read in d1), B's slot was cleared by A's load, the
+data after the nodes was read through the handle, `AvailMem` after unloading as before, return code 0. `zovl bad`
+(an entry whose seek offset is that data): "ZINE: zovl is damaged (no overlay part where its overlay table points)
+(the overlay part at byte 1552)", then the supervisor's alert, Zenix back. On the PC (`tools/host/zine-test.sh`):
+the overlaid file checked, the root, both nodes, B then A loaded into one table (relocations, the slots cleared), a
+relocation to a slot not loaded and a node outside the table refused, eight damaged forms each with its message, a
+last node ending with the file taken,
+every prefix and one-byte change of the file (whatever the check takes loads, root and nodes); the fuzzer loads every
+node the check takes. Not yet on hardware: Peek is the owner's partner's test.
+
+**Review** (one, independent, 2026-11-04, the loader and the blob): two bugs fixed: a hostile table size wrapped
+`(tabsize + 1) * 4` (a 4-byte table, then writes 4 GB past it: now `ZH_MAXTAB`, and the host tests' skips that hid it
+removed, both sizes tested), and a last node ending with the file without `HUNK_END` got end 0 (the check then walked
+the root again as a node: now its end is the file's end, and a node that does not move on is refused). Also worked in:
+nodes over the root's slots refused at run time, `UnLoadSeg` closes the overlay handle only while it is still ZINE's,
+each limit says its own name, the messages name the program loaded, an overlaid root must start at hunk 0, the
+emulator test no longer names a byte offset.
+
+Sizes (the 68020-60 build): the blob 27,048 -> 31,020 bytes (memory 30,372 -> 34,796), `/bin/zine` 27,888 -> 29,656
+bytes; the hunk core 3,623 -> 5,149 bytes at -Os (in both). The kernel unchanged.
 
 ## 17. Questions for the owner (what ZINE should be)
 

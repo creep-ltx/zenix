@@ -140,8 +140,9 @@ static void test_hunk(void)
         int rr = zh_check(F, FL, "prog", &inf, msg, sizeof msg); \
         CHECK(rr == -ZE_NOEXEC && strstr(msg, want), "hunk refusal %s: got \"%s\"", desc, msg); } while (0)
     unsigned end = good - 12;                    /* the BSS block: HUNK_BSS, size, HUNK_END */
-    REF("overlay", (FL = good, L(HUNK_OVERLAY), L(0)), "prog uses overlays: not supported yet");
-    REF("break", (FL = end, L(HUNK_BREAK)), "prog uses overlays: not supported yet");
+    REF("overlay table cut", (FL = good, L(HUNK_OVERLAY), L(0)), "prog is damaged (its overlay table ends early)");
+    REF("overlay before the last hunk", (FL = end, L(HUNK_OVERLAY), L(0), L(0)), "ends before its last hunk");
+    REF("break without a table", (FL = good, L(HUNK_BREAK)), "HUNK_BREAK without an overlay table");
     REF("ext", (FL = end, L(HUNK_EXT), L(0)), "prog has external references");
     REF("relreloc", (FL = end, L(HUNK_RELRELOC32), L(0)), "relative relocations");
     REF("unknown", (FL = end, L(0x3F9)), "prog is not an AmigaOS program (unknown hunk 0x3F9 at byte ");
@@ -177,6 +178,156 @@ static void test_hunk(void)
         }
     CHECK(mismatch == 0, "hunk: %d changed files the check took did not load", mismatch);
     printf("hunk: %d damaged files refused, %d still valid and loaded\n", refused, accepted);
+}
+
+/* ---- overlays (d29 16.6): a root of two hunks (code with the overlay header, data), the overlay table, node A (one
+ * code hunk in slot 2, relocated to the root's data and to itself), node B (code in slot 2 relocated to its BSS in
+ * slot 3), then bytes that are no node (data the program reads itself). The hunk table has 4 slots + its 0. */
+static unsigned ov_a, ov_b, ov_tail, ov_tab;
+static void build_ovl(int nest, int nobreak)
+{
+    FL = 0;
+    L(HUNK_HEADER); L(0); L(4); L(0); L(1); L(8); L(2);
+    L(HUNK_CODE); L(8); L(0x60160000); L(0xABCD); L(0); L(0); L(0); L(0); L(0x4e754e75); L(0);
+    L(HUNK_END);
+    L(HUNK_DATA); L(2); L(0x5a4f564c); L(0);
+    L(HUNK_END);
+    L(HUNK_OVERLAY); L(18); ov_tab = FL;
+    L(3); L(0); L(0);                                   /* the offset to the entries, the ordinate (1 level), its 0 */
+    for (int e = 0; e < 2; e++) {                       /* entries A and B: seek offsets filled below */
+        L(0); L(0); L(0); L(1); L(e + 1); L(2); L(2); L(4);
+    }
+    ov_a = FL;
+    L(HUNK_HEADER); L(0); L(4); L(2); L(2); L(2);
+    L(HUNK_CODE); L(2); L(0x10); L(0x20);
+    L(HUNK_RELOC32); L(1); L(1); L(0); L(1); L(2); L(4); L(0);
+    L(HUNK_END);
+    if (nest) { L(HUNK_OVERLAY); L(0); L(0); }
+    else if (!nobreak) L(HUNK_BREAK);
+    else L(HUNK_CODE);
+    ov_b = FL;
+    L(HUNK_HEADER); L(0); L(4); L(2); L(3); L(1); L(2 | 2u << 30);
+    L(HUNK_CODE); L(1); L(0x8);
+    L(HUNK_RELOC32SHORT); W(1); W(3); W(0); W(0);
+    L(HUNK_END);
+    L(HUNK_BSS); L(2); L(HUNK_END);
+    L(HUNK_BREAK);
+    ov_tail = FL;
+    L(0x44415441);                                      /* "DATA" */
+    F[ov_tab + 12 + 3] = (unsigned char)ov_a; F[ov_tab + 12 + 2] = (unsigned char)(ov_a >> 8);
+    F[ov_tab + 44 + 3] = (unsigned char)ov_b; F[ov_tab + 44 + 2] = (unsigned char)(ov_b >> 8);
+}
+
+static void test_overlay(void)
+{
+    char msg[160];
+    struct zh_info inf, na, nb;
+    build_ovl(0, 0);
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == 0, "ovl: an overlaid program checked (%s)", msg);
+    CHECK(inf.nhunks == 2 && inf.tabsize == 4 && inf.ovl == ov_tab && inf.ovl_words == 19 && inf.end == ov_a,
+          "ovl: the root, its table (%u %u %u %u)", inf.nhunks, inf.tabsize, inf.ovl, inf.ovl_words);
+    CHECK(inf.nodes == 2 && inf.node_max == 12 + 16 && inf.node_all == 16 + 12 + 16, "ovl: two nodes, their memory (%u %u %u)",
+          inf.nodes, inf.node_max, inf.node_all);
+    struct halloc a = { 0, -1, 0, {0}, 0x00200000 };
+    struct zh_ops ops = { h_alloc, h_free, &a };
+    struct zh_seg r[2], sa[1], sb[2];
+    zu32 sl, sla, slb;
+    unsigned char tab[5 * 4];
+    memset(tab, 0x55, sizeof tab);
+    CHECK(zh_load(F, FL, &inf, &ops, r, &sl) == 0 && a.live == 2, "ovl: the root loaded");
+    zh_table(&inf, r, tab, 5);
+    CHECK(zbe32(tab) == (r[0].addr + 4) >> 2 && zbe32(tab + 4) == (r[1].addr + 4) >> 2 && zbe32(tab + 8) == 0 &&
+          zbe32(tab + 12) == 0 && zbe32(tab + 16) == 0, "ovl: the hunk table after the root");
+    CHECK(zh_node(F, FL, ov_a, "prog", &na, msg, sizeof msg) == 0 && na.first == 2 && na.last == 2 && na.end == ov_b,
+          "ovl: node A checked (%s)", msg);
+    CHECK(zh_load_node(F, FL, &na, &ops, sa, tab, 5, &sla) == 0 && a.live == 3, "ovl: node A loaded");
+    CHECK(sla == (sa[0].addr + 4) >> 2 && zbe32(tab + 8) == sla && zbe32(tab + 12) == 0 &&
+          zbe32(sa[0].p + 8) == 0x10 + r[1].addr + 8 && zbe32(sa[0].p + 12) == 0x20 + sa[0].addr + 8,
+          "ovl: node A relocated to the root's data and to itself, in the table");
+    CHECK(zh_node(F, FL, ov_b, "prog", &nb, msg, sizeof msg) == 0 && nb.first == 2 && nb.last == 3 && nb.end == ov_tail,
+          "ovl: node B checked (%s)", msg);
+    free_all(sa, 1, &a);                                /* the supervisor frees A, loads B */
+    CHECK(zh_load_node(F, FL, &nb, &ops, sb, tab, 5, &slb) == 0 && a.live == 4, "ovl: node B loaded");
+    CHECK(zbe32(tab + 8) == slb && zbe32(tab + 12) == (sb[1].addr + 4) >> 2 && zbe32(tab + 16) == 0 &&
+          zbe32(sb[0].p + 8) == 0x8 + sb[1].addr + 8 && a.memf[(a.n - 1) & 7] == ZMEMF_FAST, "ovl: node B, its BSS in slot 3");
+    free_all(sb, 2, &a);                                /* and A again: slot 3 cleared */
+    CHECK(zh_load_node(F, FL, &na, &ops, sa, tab, 5, &sla) == 0 && zbe32(tab + 12) == 0, "ovl: node A again, B's slot 3 cleared");
+    free_all(sa, 1, &a);
+    zput32(tab + 4, 0);                                 /* an ancestor not loaded */
+    CHECK(zh_load_node(F, FL, &na, &ops, sa, tab, 5, &sla) == -ZE_NOEXEC && a.live == 2, "ovl: a relocation to a hunk not loaded refused, freed");
+    CHECK(zh_load_node(F, FL, &na, &ops, sa, tab, 3, &sla) == -ZE_NOEXEC && a.live == 2, "ovl: a node outside the table refused");
+    free_all(r, 2, &a);
+    /* the refusals */
+    build_ovl(1, 0);
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "nested overlays"), "ovl: nested overlays refused (%s)", msg);
+    build_ovl(0, 1);
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "does not end with HUNK_BREAK"), "ovl: a node without HUNK_BREAK refused (%s)", msg);
+    build_ovl(0, 0);
+    F[ov_a + 15] = 0;                                   /* node A's first slot 0 */
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "lists hunks it cannot have"), "ovl: a node in slot 0 refused (%s)", msg);
+    build_ovl(0, 0);
+    F[ov_a + 15] = 1; F[ov_a + 19] = 1; F[ov_a + 63] = 1;  /* node A in the root's slot 1 */
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "outside its hunk table"), "ovl: a node over the root's slots refused (%s)", msg);
+    build_ovl(0, 0);
+    F[11] = 3;                                          /* the root's table 3 slots: node B's slot 3 beyond */
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "outside its hunk table"), "ovl: a node beyond the table refused (%s)", msg);
+    build_ovl(0, 0);
+    F[ov_tab - 1] = 200;                                /* the table's length beyond the file */
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "overlay table ends early"), "ovl: a table longer than the file refused (%s)", msg);
+    build_ovl(0, 0);
+    F[8] = 0x40; F[9] = F[10] = F[11] = 0;             /* the root's table size 0x40000000: (n + 1) * 4 would wrap */
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "more than 16384 slots"), "ovl: a table size of 0x40000000 refused (%s)", msg);
+    build_ovl(0, 0);
+    F[8] = F[9] = F[10] = F[11] = 0xFF;
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "more than 16384 slots"), "ovl: a table size of 0xFFFFFFFF refused (%s)", msg);
+    build_ovl(0, 0);
+    F[15] = 1; F[19] = 2;                               /* the root in slots 1-2 */
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == -ZE_NOEXEC && strstr(msg, "does not start at hunk 0"), "ovl: a root not at slot 0 refused (%s)", msg);
+    build_ovl(0, 0);
+    FL = ov_tail - 8;                                   /* node B ends with the file: no HUNK_END, no HUNK_BREAK */
+    CHECK(zh_check(F, FL, "prog", &inf, msg, sizeof msg) == 0 && inf.nodes == 2, "ovl: a last node ending with the file taken (%s)", msg);
+    CHECK(zh_node(F, FL, ov_b, "prog", &nb, msg, sizeof msg) == 0 && nb.end == FL, "ovl: its end is the file's end (%u)", nb.end);
+    build_ovl(0, 0);
+    CHECK(zh_node(F, FL, ov_tail, "prog", &na, msg, sizeof msg) == -ZE_NOEXEC && zh_node(F, FL, FL + 4, "prog", &na, msg, sizeof msg) == -ZE_NOEXEC,
+          "ovl: zh_node where no node is, or past the end, refused");
+    /* every prefix and one-byte change: whatever the check takes, the root and every node load */
+    build_ovl(0, 0);
+    unsigned good = FL, nodes_loaded = 0, mismatch = 0, ok = 0;
+    unsigned char keep[8192];
+    memcpy(keep, F, FL);
+    for (unsigned n = 0; n <= good; n++)
+        for (unsigned i = 0; i < good + 1; i++)
+            for (int v = 0; v < (i < good && n == good ? 3 : 1); v++) {
+                memcpy(F, keep, good);
+                if (i < good && n == good)
+                    F[i] = v == 0 ? 0 : v == 1 ? 0xFF : F[i] ^ 0x01;
+                else if (i)
+                    break;
+                if (zh_check(F, n, "p", &inf, msg, sizeof msg))
+                    continue;
+                ok++;
+                struct halloc b = { 0, -1, 0, {0}, 0x00200000 };
+                struct zh_ops o2 = { h_alloc, h_free, &b };
+                static struct zh_seg s[ZH_MAXHUNKS], s2[ZH_MAXHUNKS];
+                if (zh_load(F, n, &inf, &o2, s, &sl)) { mismatch++; continue; }
+                if (inf.ovl) {
+                    static unsigned char t2[(ZH_MAXTAB + 1) * 4];
+                    zu32 tn = inf.tabsize + 1;
+                    CHECK(tn <= sizeof t2 / 4, "ovl: the table size within ZH_MAXTAB");
+                    zh_table(&inf, s, t2, tn);
+                    for (zu32 p = inf.end; n - p >= 4 && zbe32(F + p) == HUNK_HEADER;) {
+                        if (zh_node(F, n, p, "p", &na, msg, sizeof msg)) { mismatch++; break; }
+                        if (zh_load_node(F, n, &na, &o2, s2, t2, tn, &sla)) { mismatch++; break; }
+                        nodes_loaded++;
+                        free_all(s2, na.nhunks, &b);
+                        p = na.end;
+                    }
+                }
+                free_all(s, inf.nhunks, &b);
+                CHECK(b.live == 0, "ovl: everything freed");
+            }
+    CHECK(mismatch == 0, "ovl: %u changed files the check took did not load", mismatch);
+    printf("ovl: %u prefixes and changes taken, %u nodes loaded from them\n", ok, nodes_loaded);
 }
 
 /* ---- the volume */
@@ -397,9 +548,17 @@ int main(int argc, char **argv)
                 return 1;
             fclose(f);
         }
+        char p[512];
+        build_ovl(0, 0);                                /* and the overlaid one */
+        snprintf(p, sizeof p, "%s/overlay", argv[2]);
+        FILE *f = fopen(p, "wb");
+        if (!f || fwrite(F, 1, FL, f) != FL)
+            return 1;
+        fclose(f);
         return 0;
     }
     test_hunk();
+    test_overlay();
     test_vol();
     test_plan();
     test_lvo();
